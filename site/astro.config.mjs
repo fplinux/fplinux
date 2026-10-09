@@ -4,18 +4,22 @@ import starlight from "@astrojs/starlight";
 import starlightLinksValidator from "starlight-links-validator";
 import starlightImageZoom from "starlight-image-zoom";
 import { pluginCollapsibleSections } from "@expressive-code/plugin-collapsible-sections";
+import { base, site } from "./config/site.mjs";
+
+const offline = process.env.FPLINUX_SITE_OFFLINE === "1";
 
 // oxlint-disable-next-line no-inline-comments -- The rest parameter needs its JSDoc type.
 const pages = (/** @type {string[]} */ ...slugs) =>
 	slugs.map((slug) => ({ slug }));
 
 export default defineConfig({
-	base: "/fplinux",
+	base,
 	integrations: [
 		starlight({
 			components: {
 				Hero: "./src/components/Hero.astro",
 				PageTitle: "./src/components/PageTitle.astro",
+				...(offline ? { Search: "./src/components/OfflineSearch.astro" } : {}),
 			},
 			customCss: ["./src/styles/custom.css"],
 			description: "Linux for feature phones built on the Unisoc UMS9117.",
@@ -26,7 +30,7 @@ export default defineConfig({
 			favicon: "/favicon.svg",
 			head: [
 				{
-					attrs: { href: "/fplinux/favicon.ico", rel: "icon", sizes: "48x48" },
+					attrs: { href: `${base}/favicon.ico`, rel: "icon", sizes: "48x48" },
 					tag: "link",
 				},
 			],
@@ -35,6 +39,7 @@ export default defineConfig({
 				light: "./src/assets/brand/fplinux-lockup.svg",
 				replacesTitle: true,
 			},
+			pagefind: !offline,
 			plugins: [starlightLinksValidator(), starlightImageZoom()],
 			sidebar: [
 				{ items: pages("start/build", "start/run"), label: "Get started" },
@@ -143,5 +148,6 @@ export default defineConfig({
 			title: "FPLinux",
 		}),
 	],
-	site: "https://fplinux.github.io",
+	prefetch: offline ? false : undefined,
+	site,
 });

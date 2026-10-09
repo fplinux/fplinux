@@ -1,0 +1,120 @@
+---
+import { Icon } from "@astrojs/starlight/components";
+---
+
+<offline-site-search>
+	<button
+		aria-keyshortcuts="Control+K"
+		aria-label="Search"
+		data-open-search
+		disabled
+	>
+		<Icon name="magnifier" />
+		<span class="sl-hidden md:sl-block">Search</span>
+		<kbd class="sl-hidden md:sl-flex">Ctrl K</kbd>
+	</button>
+	<dialog aria-label="Search documentation">
+		<form method="dialog">
+			<label for="offline-search-input">Search documentation</label>
+			<button aria-label="Close search" type="submit">
+				<Icon name="close" />
+			</button>
+		</form>
+		<input
+			aria-label="Search documentation"
+			autocomplete="off"
+			id="offline-search-input"
+			placeholder="Search"
+			type="search"
+		/>
+		<p aria-live="polite" class="status"></p>
+		<ul class="results"></ul>
+	</dialog>
+</offline-site-search>
+
+<script src="../scripts/offline-search.ts"></script>
+
+<style>
+	offline-site-search {
+		display: contents;
+	}
+
+	button[data-open-search] {
+		display: flex;
+		gap: 0.5rem;
+		align-items: center;
+		border: 0;
+		background: transparent;
+		color: var(--sl-color-gray-1);
+		font: inherit;
+		cursor: pointer;
+	}
+
+	kbd {
+		padding: 0.15rem 0.3rem;
+		border: 1px solid var(--sl-color-gray-5);
+		border-radius: 0.25rem;
+		font-size: 0.75rem;
+	}
+
+	dialog {
+		width: min(40rem, calc(100% - 2rem));
+		max-height: 80vh;
+		margin: auto;
+		padding: 1.25rem;
+		border: 1px solid var(--sl-color-gray-5);
+		border-radius: 0.75rem;
+		background: var(--sl-color-bg);
+		color: var(--sl-color-text);
+	}
+
+	dialog::backdrop {
+		background: rgb(0 0 0 / 55%);
+	}
+
+	form {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 1rem;
+	}
+
+	form button {
+		border: 0;
+		background: transparent;
+		color: inherit;
+		cursor: pointer;
+	}
+
+	input {
+		width: 100%;
+		padding: 0.75rem;
+		border: 1px solid var(--sl-color-gray-5);
+		border-radius: 0.25rem;
+		background: var(--sl-color-bg);
+		color: inherit;
+		font: inherit;
+	}
+
+	.status {
+		font-size: var(--sl-text-sm);
+	}
+
+	.results {
+		display: grid;
+		gap: 1rem;
+		padding: 0;
+		list-style: none;
+	}
+
+	.results :global(p) {
+		margin-block: 0.25rem;
+		color: var(--sl-color-gray-2);
+		font-size: var(--sl-text-sm);
+	}
+
+	.results :global(a) {
+		color: var(--sl-color-text-accent);
+		font-weight: 600;
+	}
+</style>

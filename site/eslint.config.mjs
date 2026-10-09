@@ -10,7 +10,6 @@ export default [
 			".astro/**",
 			"dist/**",
 			"public/**",
-			"scripts/**",
 			"src/assets/**",
 			"src/fonts/**",
 		],

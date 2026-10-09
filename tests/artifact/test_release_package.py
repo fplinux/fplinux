@@ -27,6 +27,7 @@ from fplinux_cli.workspace.capture import WorkspaceSnapshot
 
 from tests.bundle_support import file_record
 from tests.process import run_process
+from tests.small.cli.package_docs_fixtures import write_offline_export
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -55,8 +56,9 @@ class ReleaseArchiveArtifactTests:
 
     @pytest.fixture(autouse=True)
     def _prepare_inputs(self, tmp_path: Path) -> None:
-        """Create a synthetic bundle, legal notices and checkout-only documentation."""
+        """Create a synthetic bundle, notices, offline export and checkout-only documents."""
         self.root = tmp_path
+        self.documentation = write_offline_export(self.root)
         self.event_helper = (common.ROOT / "common/loader_events.py").read_bytes()
         self.cache = self.root / ".cache"
         self.target = "nokia-ta1618"
@@ -295,7 +297,7 @@ class ReleaseArchiveArtifactTests:
             assert (archive.read(f"{root}/image/ramboot.bin")) == (b"ramboot\n")
 
     def test_candidate_keeps_runtime_and_notices_without_checkout_documentation(self) -> None:
-        """Runtime files and legal notices retain bytes, modes and complete checksums."""
+        """Generated docs join runtime and notices; checkout-only documents stay outside."""
         with contextlib.ExitStack() as stack:
             for patch in self.package_patches():
                 stack.enter_context(patch)
@@ -334,6 +336,7 @@ class ReleaseArchiveArtifactTests:
             "runtime-manifest.json": b"{}\n",
             "apks/demo.apk": b"application version one\n",
             "assets.lock.toml": b"asset provenance version one\n",
+            **self.documentation,
         }
         for relative, expected in expected_files.items():
             assert (payloads[relative]) == (expected)

@@ -10,6 +10,7 @@ from typing import Any
 
 from fplinux_cli import common
 from fplinux_cli.cli import bundles as cli_bundles
+from fplinux_cli.cli.package_docs import offline_documentation
 from fplinux_cli.common import ZIP_TIMESTAMP, fail, payload_digest, sha256_bytes, sha256_file
 from fplinux_cli.environment import image_state as image_states
 from fplinux_cli.environment import images
@@ -159,6 +160,7 @@ def package_target(
         fail("non-default boot contexts can only be packaged with --candidate")
     config = targets.load_target(target, selected_profile, build_type=build_type)
     release = load_release_manifest(target, config)
+    documentation = offline_documentation()
     bundle, manifest = runtime_bundle_session.resolve_target_bundle(
         target, selected_profile, build_type=build_type
     )
@@ -225,6 +227,10 @@ def package_target(
     add_target_files(files, target, release["documents"])
     if candidate:
         files["CANDIDATE-NOTICE.txt"] = CANDIDATE_NOTICE
+    collisions = set(files) & set(documentation)
+    if collisions:
+        fail(f"duplicate documentation archive path: {min(collisions)}")
+    files.update(documentation)
     for archive_name, relative in SHARED_PACKAGE_FILES.items():
         source = common.ROOT / relative
         if source.is_symlink() or not source.is_file():
