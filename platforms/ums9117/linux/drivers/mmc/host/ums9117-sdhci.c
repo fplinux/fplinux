@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * SDHCI platform glue for the UMS9117 SDIO0 microSD slot.
+ * SDHCI platform glue for the UMS9117 memory-card and SDIO controllers.
  *
  * The controller implements the SDHCI 4.10 register layout in v4 mode, but
  * its register interface is 32-bit only.  Board resources are owned by their
@@ -24,6 +24,7 @@
 #include <linux/mmc/slot-gpio.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/reset.h>
 #include <linux/sizes.h>
 #include <linux/spinlock.h>
@@ -64,6 +65,7 @@ struct ums9117_sdhci_host {
 	bool operational_clock_deferred;
 	bool physical_width4;
 	bool transition_failed;
+	bool sdio;
 };
 
 static struct ums9117_sdhci_host *ums9117_sdhci_priv(struct sdhci_host *host)
@@ -117,7 +119,8 @@ static void ums9117_sdhci_writew(struct sdhci_host *host, u16 value, int reg)
 	if (reg == SDHCI_TRANSFER_MODE) {
 		if (host->cmd && !host->cmd->data)
 			value = 0;
-		else if ((value & SDHCI_TRNS_AUTO_SEL) == SDHCI_TRNS_AUTO_SEL) {
+		else if (!ums_host->sdio &&
+			 (value & SDHCI_TRNS_AUTO_SEL) == SDHCI_TRNS_AUTO_SEL) {
 			/* Use explicit Auto CMD12 for the SD memory-card path. */
 			value = (value & ~SDHCI_TRNS_AUTO_SEL) |
 				SDHCI_TRNS_AUTO_CMD12;
@@ -217,6 +220,7 @@ static void ums9117_sdhci_apply_clock(struct sdhci_host *host,
 {
 	ktime_t deadline;
 	u16 control;
+	u16 observed;
 
 	host->mmc->actual_clock = 0;
 	sdhci_writew(host, 0, SDHCI_CLOCK_CONTROL);
@@ -246,9 +250,11 @@ static void ums9117_sdhci_apply_clock(struct sdhci_host *host,
 
 	control |= SDHCI_CLOCK_CARD_EN;
 	sdhci_writew(host, control, SDHCI_CLOCK_CONTROL);
-	if (sdhci_readw(host, SDHCI_CLOCK_CONTROL) != control) {
+	observed = sdhci_readw(host, SDHCI_CLOCK_CONTROL);
+	if (observed != control) {
 		dev_err(mmc_dev(host->mmc),
-			"failed to enable the card clock\n");
+			"failed to enable the card clock: requested=%u expected=%04x observed=%04x timing=%u\n",
+			clock, control, observed, host->mmc->ios.timing);
 		host->mmc->actual_clock = 0;
 		sdhci_writew(host, 0, SDHCI_CLOCK_CONTROL);
 		return;
@@ -565,6 +571,52 @@ static const struct sdhci_pltfm_data ums9117_sdhci_pdata = {
 		   SDHCI_QUIRK2_USE_32BIT_BLK_CNT,
 };
 
+#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
+	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
+static void ums9117_sdio_set_power(struct sdhci_host *host, unsigned char mode,
+				   unsigned short vdd)
+{
+	/* The parent owns the radio supplies and reset sequence. */
+}
+
+static void ums9117_sdio_reset(struct sdhci_host *host, u8 mask)
+{
+	if (mask & SDHCI_RESET_ALL)
+		sdhci_writeb(host,
+			     sdhci_readb(host, SDHCI_SOFTWARE_RESET) |
+				     UMS9117_SDHCI_HW_RESET_CARD,
+			     SDHCI_SOFTWARE_RESET);
+	sdhci_reset(host, mask);
+}
+
+static const struct sdhci_ops ums9117_sdio_ops = {
+	.read_l = ums9117_sdhci_readl,
+	.read_w = ums9117_sdhci_readw,
+	.read_b = ums9117_sdhci_readb,
+	.write_l = ums9117_sdhci_writel,
+	.write_w = ums9117_sdhci_writew,
+	.write_b = ums9117_sdhci_writeb,
+	.set_clock = ums9117_sdhci_apply_clock,
+	.set_power = ums9117_sdio_set_power,
+	.get_max_clock = ums9117_sdhci_get_max_clock,
+	.get_max_timeout_count = ums9117_sdhci_get_max_timeout_count,
+	.set_bus_width = sdhci_set_bus_width,
+	.reset = ums9117_sdio_reset,
+	.set_uhs_signaling = sdhci_set_uhs_signaling,
+};
+
+static const struct sdhci_pltfm_data ums9117_sdio_pdata = {
+	.ops = &ums9117_sdio_ops,
+	.quirks = SDHCI_QUIRK_BROKEN_CARD_DETECTION |
+		  SDHCI_QUIRK_DATA_TIMEOUT_USES_SDCLK |
+		  SDHCI_QUIRK_CAP_CLOCK_BASE_BROKEN |
+		  SDHCI_QUIRK_NO_ENDATTR_IN_NOPDESC | SDHCI_QUIRK_NO_HISPD_BIT |
+		  SDHCI_QUIRK_NO_LED,
+	.quirks2 = SDHCI_QUIRK2_NO_1_8_V | SDHCI_QUIRK2_BROKEN_64_BIT_DMA |
+		   SDHCI_QUIRK2_USE_32BIT_BLK_CNT,
+};
+#endif
+
 static bool ums9117_sdhci_forbidden_command(const struct mmc_command *command)
 {
 	switch (command->opcode) {
@@ -740,32 +792,38 @@ static int ums9117_sdhci_enable_resources(struct platform_device *pdev,
 					  struct sdhci_host *host)
 {
 	struct ums9117_sdhci_host *ums_host = ums9117_sdhci_priv(host);
+	const char *controller = ums_host->sdio ? "SDIO1" : "SDIO0";
 	unsigned long rate;
 	int ret;
 
 	ums_host->enable_clk = devm_clk_get_enabled(&pdev->dev, "enable");
 	if (IS_ERR(ums_host->enable_clk))
 		return dev_err_probe(&pdev->dev, PTR_ERR(ums_host->enable_clk),
-				     "failed to enable the SDIO0 gate\n");
+				     "failed to enable the %s gate\n",
+				     controller);
 	ums_host->reset = devm_reset_control_get_exclusive(&pdev->dev, "sdio");
 	if (IS_ERR(ums_host->reset))
 		return dev_err_probe(&pdev->dev, PTR_ERR(ums_host->reset),
-				     "failed to get the SDIO0 reset\n");
+				     "failed to get the %s reset\n",
+				     controller);
 	ret = reset_control_reset(ums_host->reset);
 	if (ret)
-		return dev_err_probe(&pdev->dev, ret,
-				     "failed to reset SDIO0\n");
+		return dev_err_probe(&pdev->dev, ret, "failed to reset %s\n",
+				     controller);
 	ums_host->sdio_clk = devm_clk_get_enabled(&pdev->dev, "sdio");
 	if (IS_ERR(ums_host->sdio_clk))
 		return dev_err_probe(
 			&pdev->dev, PTR_ERR(ums_host->sdio_clk),
 			"failed to enable the SDIO source clock\n");
 	rate = clk_get_rate(ums_host->sdio_clk);
-	if (rate != UMS9117_SDHCI_BASE_CLOCK_HZ)
+	if (!ums_host->sdio && rate != UMS9117_SDHCI_BASE_CLOCK_HZ)
 		return dev_err_probe(
 			&pdev->dev, -EINVAL,
 			"SDIO source clock must be %u Hz, got %lu Hz\n",
 			UMS9117_SDHCI_BASE_CLOCK_HZ, rate);
+	if (!rate)
+		return dev_err_probe(&pdev->dev, -EINVAL,
+				     "SDIO source clock has no rate\n");
 	return 0;
 }
 
@@ -818,6 +876,7 @@ static void ums9117_sdhci_apply_limits(struct sdhci_host *host)
 
 static int ums9117_sdhci_probe(struct platform_device *pdev)
 {
+	const struct sdhci_pltfm_data *pdata;
 	struct sdhci_pltfm_host *pltfm_host;
 	struct ums9117_sdhci_host *ums_host;
 	struct sdhci_host *host;
@@ -827,11 +886,13 @@ static int ums9117_sdhci_probe(struct platform_device *pdev)
 	ret = ums9117_sdhci_validate_host_resource(pdev);
 	if (ret)
 		return ret;
-	host = sdhci_pltfm_init(pdev, &ums9117_sdhci_pdata, sizeof(*ums_host));
+	pdata = device_get_match_data(&pdev->dev);
+	host = sdhci_pltfm_init(pdev, pdata, sizeof(*ums_host));
 	if (IS_ERR(host))
 		return PTR_ERR(host);
 	pltfm_host = sdhci_priv(host);
 	ums_host = sdhci_pltfm_priv(pltfm_host);
+	ums_host->sdio = pdata != &ums9117_sdhci_pdata;
 	spin_lock_init(&ums_host->policy_lock);
 
 	sdhci_get_property(pdev);
@@ -847,9 +908,11 @@ static int ums9117_sdhci_probe(struct platform_device *pdev)
 		usleep_range(UMS9117_SDHCI_CD_SETTLE_MIN_US,
 			     UMS9117_SDHCI_CD_SETTLE_MAX_US);
 	}
-	ret = ums9117_sdhci_get_supplies(host);
-	if (ret)
-		return ret;
+	if (!ums_host->sdio) {
+		ret = ums9117_sdhci_get_supplies(host);
+		if (ret)
+			return ret;
+	}
 	ret = ums9117_sdhci_enable_resources(pdev, host);
 	if (ret)
 		return ret;
@@ -860,34 +923,44 @@ static int ums9117_sdhci_probe(struct platform_device *pdev)
 		return dev_err_probe(
 			&pdev->dev, -EPROTONOSUPPORT,
 			"expected SDHCI 4.10, got version 0x%04x\n", version);
-	if (!(sdhci_readb(host, SDHCI_SOFTWARE_RESET) &
-	      UMS9117_SDHCI_HW_RESET_CARD))
+	if (!ums_host->sdio && !(sdhci_readb(host, SDHCI_SOFTWARE_RESET) &
+				 UMS9117_SDHCI_HW_RESET_CARD))
 		return dev_err_probe(
 			&pdev->dev, -EPROTONOSUPPORT,
 			"SDIO card hardware-reset state is not ready\n");
 	ums_host->transfer_mode = 0;
 	sdhci_enable_v4_mode(host);
-	host->sdma_boundary = 0;
-	host->adma_table_cnt = UMS9117_SDHCI_ADMA_TABLE_COUNT;
-	host->mmc->caps2 |= MMC_CAP2_NO_SDIO | MMC_CAP2_NO_MMC |
-			    MMC_CAP2_NO_WRITE_PROTECT;
-	host->mmc_host_ops.request = ums9117_sdhci_request;
+	if (!ums_host->sdio) {
+		host->sdma_boundary = 0;
+		host->adma_table_cnt = UMS9117_SDHCI_ADMA_TABLE_COUNT;
+		host->mmc->caps2 |= MMC_CAP2_NO_SDIO | MMC_CAP2_NO_MMC |
+				    MMC_CAP2_NO_WRITE_PROTECT;
+		host->mmc_host_ops.request = ums9117_sdhci_request;
+	}
 
 	ret = sdhci_setup_host(host);
 	if (ret)
 		return ret;
 	if (host->version != SDHCI_SPEC_410 ||
-	    host->max_clk != UMS9117_SDHCI_BASE_CLOCK_HZ ||
+	    (!ums_host->sdio && host->max_clk != UMS9117_SDHCI_BASE_CLOCK_HZ) ||
 	    !(host->flags & SDHCI_USE_ADMA) ||
 	    host->flags & SDHCI_USE_64_BIT_DMA ||
 	    host->mmc->max_blk_size < 512U) {
 		ret = -EPROTONOSUPPORT;
 		dev_err(&pdev->dev,
-			"SDHCI 4.10, 195 MHz and 32-bit ADMA2 are required\n");
+			ums_host->sdio ?
+				"SDHCI 4.10 and 32-bit ADMA2 are required\n" :
+				"SDHCI 4.10, 195 MHz and 32-bit ADMA2 are required\n");
 		goto out_cleanup;
 	}
-	dma_set_max_seg_size(&pdev->dev, PAGE_SIZE);
-	ums9117_sdhci_apply_limits(host);
+	if (ums_host->sdio) {
+		/* Function interrupts are outside this host's supported role. */
+		host->mmc->caps &= ~MMC_CAP_SDIO_IRQ;
+		host->mmc->caps2 &= ~MMC_CAP2_SDIO_IRQ_NOTHREAD;
+	} else {
+		dma_set_max_seg_size(&pdev->dev, PAGE_SIZE);
+		ums9117_sdhci_apply_limits(host);
+	}
 
 	ret = __sdhci_add_host(host);
 	if (ret)
@@ -919,7 +992,11 @@ static void ums9117_sdhci_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id ums9117_sdhci_of_match[] = {
-	{ .compatible = "sprd,ums9117-sdhci" },
+	{ .compatible = "sprd,ums9117-sdhci", .data = &ums9117_sdhci_pdata },
+#if IS_ENABLED(CONFIG_MMC_SDHCI_UMS9117_BQ_RADIO) && \
+	IS_ENABLED(CONFIG_MACH_BQ_2830L_TANK_CONNECT_MAX)
+	{ .compatible = "sprd,ums9117-sdio", .data = &ums9117_sdio_pdata },
+#endif
 	{}
 };
 MODULE_DEVICE_TABLE(of, ums9117_sdhci_of_match);

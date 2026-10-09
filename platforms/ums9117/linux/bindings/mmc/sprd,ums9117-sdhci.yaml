@@ -9,19 +9,56 @@ title: Unisoc UMS9117 SDHCI controller
 maintainers:
   - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
 
-description:
-  The UMS9117 SDIO0 controller implements the SDHCI 4.10 register layout in
-  version 4 mode. Its register interface requires 32-bit accesses. The
-  slot uses two fixed-voltage supplies. Removable slots require GPIO
-  card-detect interrupts owned by the EIC provider. A card kept installed
+description: The UMS9117 controllers implement the SDHCI 4.10 register layout in
+  version 4 mode. Their register interface requires 32-bit accesses. The
+  SDIO0 memory-card slot uses two fixed-voltage supplies. Removable slots
+  require GPIO card-detect interrupts owned by the EIC provider. A card kept installed
   throughout the powered session may instead be probed at host startup.
+  The SDIO1 role serves a fixed device whose power and control signals are
+  owned by its parent. It uses a 13 MHz functional source and does not support
+  SDIO function interrupts.
 
 allOf:
   - $ref: sdhci-common.yaml#
+  - if:
+      properties:
+        compatible:
+          const: sprd,ums9117-sdhci
+    then:
+      properties:
+        bus-width:
+          const: 4
+        max-frequency:
+          const: 48750000
+      required:
+        - pinctrl-0
+        - pinctrl-names
+        - vmmc-supply
+        - vqmmc-supply
+        - no-sdio
+        - disable-wp
+      oneOf:
+        - required:
+            - cd-gpios
+        - required:
+            - non-removable
+    else:
+      properties:
+        max-frequency:
+          maximum: 13000000
+        vmmc-supply: false
+        vqmmc-supply: false
+        no-sdio: false
+        cd-gpios: false
+      required:
+        - non-removable
+        - no-sd
 
 properties:
   compatible:
-    const: sprd,ums9117-sdhci
+    enum:
+      - sprd,ums9117-sdhci
+      - sprd,ums9117-sdio
 
   reg:
     items:
@@ -36,8 +73,8 @@ properties:
 
   clocks:
     items:
-      - description: 195 MHz SDIO functional source clock
-      - description: AP AHB SDIO0 gate clock
+      - description: SDIO functional source clock
+      - description: AP AHB controller gate clock
 
   clock-names:
     items:
@@ -56,13 +93,11 @@ properties:
     const: default
 
   bus-width:
-    const: 4
-
-  max-frequency:
-    const: 48750000
+    enum: [1, 4]
 
   no-1-8-v: true
   no-sdio: true
+  no-sd: true
   no-mmc: true
   disable-wp: true
 
@@ -84,16 +119,10 @@ required:
   - clock-names
   - resets
   - reset-names
-  - pinctrl-0
-  - pinctrl-names
-  - vmmc-supply
-  - vqmmc-supply
   - bus-width
   - max-frequency
   - no-1-8-v
-  - no-sdio
   - no-mmc
-  - disable-wp
 
 unevaluatedProperties: false
 
@@ -126,10 +155,4 @@ examples:
         disable-wp;
         cd-gpios = <&eic2 0 GPIO_ACTIVE_LOW>;
     };
-
-oneOf:
-  - required:
-      - cd-gpios
-  - required:
-      - non-removable
 ...
