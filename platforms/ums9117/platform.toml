@@ -905,7 +905,7 @@ source_directory = "fphelper_t117"
 binary = "fphelper_t117"
 link = "static-libusb"
 copies = []
-patches = []
+patches = ["platforms/ums9117/host/0002-fphelper-extended-keymap.patch"]
 self_test = false
 
 [[host.tools.members]]

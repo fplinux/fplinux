@@ -1,0 +1,12 @@
+--- a/main.c
++++ b/main.c
+@@ -440,7 +440,7 @@
+ 		a = s[i];
+ 		if (a == 0xffff) { empty++; empty2 += (i & 7) >= 6; continue; }
+-		// exception: Inoi 284 Flip
+-		if (a == 0x68) continue;
++		// Additional stock key codes.
++		if (a == 0x68 || a == 0x6a) continue;
+ 		if (a - 1 >= 0x39) break;
+ 	}
+ 	// printf("!!! check_keymap: %d, %d, %d\n", i, empty, empty2);
