@@ -28,7 +28,7 @@ def load_image(*, table: int = 0xE0, base: int = 0x18000000) -> bytes:
     return bytes(image)
 
 
-def cm4_firmware(*, routine: int = 0x100) -> bytes:
+def cm4_firmware(*, routine: int = 0x100, initial_retention: bool = True) -> bytes:
     """Build a short initialization program with relocated literal pools and calls."""
     table = (routine + 0x1FF) & ~3
     image = bytearray(load_image(table=table))
@@ -54,14 +54,20 @@ def cm4_firmware(*, routine: int = 0x100) -> bytes:
     literal(routine + 2, 1, 0x20000000)
     emit(routine + 4, 0x2000, 0x9000, 0x6088, 0x60C8, 0x61C8, 0x6108, 0x6148, 0x6188)
     first = routine + 20
-    literal(first, 4, 0xA12B0000)
-    emit(first + 2, 0xF8D4, 0x0230, 0x2301, 0x461A, 0x210A)
-    call(first + 12, setter)
-    emit(first + 16, 0xF8C4, 0x0230)
-    literal(first + 20, 1, 0x20000020)
-    emit(first + 22, 0x2001)
-    call(first + 24, callback)
-    second = routine + 48
+    if initial_retention:
+        literal(first, 4, 0xA12B0000)
+        emit(first + 2, 0xF8D4, 0x0230, 0x2301, 0x461A, 0x210A)
+        call(first + 12, setter)
+        emit(first + 16, 0xF8C4, 0x0230)
+        literal(first + 20, 1, 0x20000020)
+        emit(first + 22, 0x2001)
+        call(first + 24, callback)
+        second = routine + 48
+    else:
+        emit(first, 0x3124, 0x2001)
+        call(first + 4, callback)
+        literal(first + 8, 4, 0xA12B0000)
+        second = routine + 30
     emit(second, 0x6DE0)
     literal(second + 2, 3, 0x00010101)
     emit(second + 4, 0x2218, 0x2100)

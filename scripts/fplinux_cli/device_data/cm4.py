@@ -191,8 +191,8 @@ def _bitfield_insert(image: bytes, offset: int) -> bool:
     )
 
 
-def _policy_offsets(image: bytes, start: int) -> tuple[int, int] | None:
-    """Recognize the initialization frame and the two shared-register write spans."""
+def _policy_offsets(image: bytes, start: int) -> tuple[tuple[int, int], ...] | None:
+    """Recognize the initialization frame and each shared-register write span."""
     if (
         _halfwords(image, start, 1) != (0xB538,)  # PUSH {r3, r4, r5, lr}
         or _literal_word(image, start + 2, 1) is None
@@ -202,21 +202,33 @@ def _policy_offsets(image: bytes, start: int) -> tuple[int, int] | None:
     ):
         return None
     first = start + 20
+    if _halfwords(image, first, 2) == (0x3124, 0x2001):
+        # Setup may precede the first PUB base load without an initial retention write.
+        if (
+            _call_target(image, first + 4) is None
+            or _literal_word(image, first + 8, 4) != _PUB_REGISTERS
+        ):
+            return None
+        second = first + 10
+        setter = _call_target(image, second + 8)
+        branches: tuple[tuple[int, int], ...] = ((first + 8, second + 90),)
+    else:
+        if (
+            _literal_word(image, first, 4) != _PUB_REGISTERS
+            or _halfwords(image, first + 2, 5) != (0xF8D4, 0x0230, 0x2301, 0x461A, 0x210A)
+            or _halfwords(image, first + 16, 2) != (0xF8C4, 0x0230)
+            or _literal_word(image, first + 20, 1) is None
+            or _halfwords(image, first + 22, 1) != (0x2001,)
+            or _call_target(image, first + 24) is None
+        ):
+            return None
+        second = first + 28
+        setter = _call_target(image, first + 12)
+        branches = ((first, first + 20), (second, second + 90))
     if (
-        _literal_word(image, first, 4) != _PUB_REGISTERS
-        or _halfwords(image, first + 2, 5) != (0xF8D4, 0x0230, 0x2301, 0x461A, 0x210A)
-        or _halfwords(image, first + 16, 2) != (0xF8C4, 0x0230)
-        or _literal_word(image, first + 20, 1) is None
-        or _halfwords(image, first + 22, 1) != (0x2001,)
-        or _call_target(image, first + 24) is None
-    ):
-        return None
-    setter = _call_target(image, first + 12)
-    if setter is None or not _bitfield_insert(image, setter):
-        return None
-    second = first + 28
-    if (
-        _halfwords(image, second, 1) != (0x6DE0,)  # LDR r0, [r4, #0x5c]
+        setter is None
+        or not _bitfield_insert(image, setter)
+        or _halfwords(image, second, 1) != (0x6DE0,)  # LDR r0, [r4, #0x5c]
         or _literal_word(image, second + 2, 3) != 0x00010101
         or _halfwords(image, second + 4, 2) != (0x2218, 0x2100)
         or _call_target(image, second + 8) != setter
@@ -262,11 +274,11 @@ def _policy_offsets(image: bytes, start: int) -> tuple[int, int] | None:
         or _call_target(image, second + 94) is None
     ):
         return None
-    return first, second
+    return branches
 
 
 def omit_initial_pub_policy(original: bytes) -> bytes:
-    """Change only two verified branches in one compatible DDR initialization routine."""
+    """Branch over verified policy writes in one compatible DDR initialization routine."""
     matches = []
     cursor = 0
     while (start := original.find(b"\x38\xb5", cursor)) != -1:
@@ -277,9 +289,8 @@ def omit_initial_pub_policy(original: bytes) -> bytes:
         raise ValueError(
             f"expected one supported CM4 DDR initialization routine, found {len(matches)}"
         )
-    first, second = matches[0]
     prepared = bytearray(original)
-    # Skip the first write span and the later policy span; retain both setup calls.
-    struct.pack_into("<H", prepared, first, 0xE000 | (20 - 4) // 2)
-    struct.pack_into("<H", prepared, second, 0xE000 | (90 - 4) // 2)
+    # Retain the setup calls surrounding the shared-register write spans.
+    for source, destination in matches[0]:
+        struct.pack_into("<H", prepared, source, 0xE000 | (destination - source - 4) // 2)
     return bytes(prepared)

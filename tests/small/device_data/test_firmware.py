@@ -78,6 +78,43 @@ class Cm4CompatibilityOperationTests:
 
         assert omit_initial_pub_policy(original) == expected
 
+    @pytest.mark.parametrize("routine", [0x100, 0x182])
+    def test_routine_without_initial_retention_write_keeps_both_setup_calls(
+        self, routine: int
+    ) -> None:
+        """One branch skips the shared writes and retains the complete surrounding setup."""
+        original = cm4_firmware(routine=routine, initial_retention=False)
+        branch = routine + 28
+        expected = original[:branch] + b"\x2c\xe0" + original[branch + 2 :]
+
+        assert omit_initial_pub_policy(original) == expected
+
+    @pytest.mark.parametrize(
+        ("offset", "replacement"),
+        [
+            (0x114, b"\x20\x31"),  # Setup would save to another destination.
+            (0x128, b"\x00\xf0\x00\xf8"),  # The write uses an unsupported field operation.
+            (0x13A, b"\x00\xbf"),  # A required policy store is missing.
+        ],
+    )
+    def test_changed_single_span_setup_or_write_is_rejected(
+        self, offset: int, replacement: bytes
+    ) -> None:
+        """The shorter form still requires the complete supported setup and write effects."""
+        original = bytearray(cm4_firmware(initial_retention=False))
+        original[offset : offset + len(replacement)] = replacement
+
+        with pytest.raises(ValueError, match="initialization routine, found 0"):
+            omit_initial_pub_policy(bytes(original))
+
+    def test_single_span_without_retained_setup_is_rejected(self) -> None:
+        """A policy block without its retained setup is rejected before patching."""
+        original = bytearray(cm4_firmware(initial_retention=False))
+        struct.pack_into("<H", original, 0x178, 0xBF00)
+
+        with pytest.raises(ValueError, match="initialization routine, found 0"):
+            omit_initial_pub_policy(bytes(original))
+
     def test_unrelated_valid_image_change_is_preserved(self) -> None:
         """A changed initial branch does not need a newly approved image digest."""
         original = bytearray(cm4_firmware())
@@ -117,3 +154,11 @@ class Cm4CompatibilityOperationTests:
 
         with pytest.raises(ValueError, match="initialization routine, found 2"):
             omit_initial_pub_policy(duplicate)
+
+    def test_different_compatible_forms_are_also_ambiguous(self) -> None:
+        """Distinct supported layouts cannot select which initialization routine to patch."""
+        first = cm4_firmware()
+        second = cm4_firmware(initial_retention=False)
+
+        with pytest.raises(ValueError, match="initialization routine, found 2"):
+            omit_initial_pub_policy(first + second)
