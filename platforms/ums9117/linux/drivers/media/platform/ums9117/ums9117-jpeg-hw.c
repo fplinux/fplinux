@@ -215,19 +215,8 @@ struct ums9117_jpeg_encode_timeout_stats {
 };
 
 struct ums9117_jpeg_hw_stats {
-	u64 requests;
-	u64 completed;
 	u64 slices;
-	u64 irqs;
-	u64 done_irqs;
 	u64 bsm_irqs;
-	u64 error_irqs;
-	u64 timeouts;
-	u64 cancellations;
-	u64 resets;
-	u64 guard_failures;
-	u64 input_failures;
-	u64 idle_failures;
 	u32 last_status;
 	u32 last_raw;
 	u32 last_mbio;
@@ -424,15 +413,8 @@ static irqreturn_t jpeg_irq(int irq, void *data)
 		if (status & jpeg_operation_errors(operation))
 			stats->error_irqs++;
 	}
-	if (operation == JPEG_OPERATION_DECODE) {
-		hw->stats.irqs++;
-		if (status & JPEG_IRQ_DONE)
-			hw->stats.done_irqs++;
-		if (status & JPEG_IRQ_BSM)
-			hw->stats.bsm_irqs++;
-		if (status & JPEG_DECODE_IRQ_ERRORS)
-			hw->stats.error_irqs++;
-	}
+	if (operation == JPEG_OPERATION_DECODE && (status & JPEG_IRQ_BSM))
+		hw->stats.bsm_irqs++;
 	spin_unlock_irqrestore(&hw->lock, flags);
 	capture_irq = READ_ONCE(hw->capture_irq);
 	capture_data = READ_ONCE(hw->capture_irq_data);
@@ -1162,16 +1144,12 @@ static int jpeg_stop(struct ums9117_jpeg_hw *hw)
 	spin_lock_irqsave(&hw->lock, flags);
 	if (operation > JPEG_OPERATION_NONE && operation < JPEG_OPERATION_COUNT)
 		hw->stats.operation[operation].resets++;
-	if (operation == JPEG_OPERATION_DECODE) {
-		hw->stats.resets++;
+	if (operation == JPEG_OPERATION_DECODE)
 		hw->stats.recovery_ahb = status;
-	}
 	if (ret) {
 		if (operation > JPEG_OPERATION_NONE &&
 		    operation < JPEG_OPERATION_COUNT)
 			hw->stats.operation[operation].idle_failures++;
-		if (operation == JPEG_OPERATION_DECODE)
-			hw->stats.idle_failures++;
 		WRITE_ONCE(hw->failed, true);
 	}
 	spin_unlock_irqrestore(&hw->lock, flags);
@@ -1400,9 +1378,6 @@ int ums9117_jpeg_hw_decode(struct ums9117_jpeg_hw *hw,
 
 	started_ns = ktime_get_ns();
 	jpeg_operation_request(hw, JPEG_OPERATION_DECODE);
-	spin_lock_irqsave(&hw->lock, flags);
-	hw->stats.requests++;
-	spin_unlock_irqrestore(&hw->lock, flags);
 	buffer_sizes[0] = frame->entropy_length + JPEG_STREAM_TAIL_BYTES;
 	buffer_sizes[1] = slice_y_size;
 	buffer_sizes[2] = slice_uv_size;
@@ -1473,7 +1448,6 @@ stop:
 		ret = -EILSEQ;
 	if (!jpeg_guards_ok(hw)) {
 		spin_lock_irqsave(&hw->lock, flags);
-		hw->stats.guard_failures++;
 		hw->stats.operation[JPEG_OPERATION_DECODE].guard_failures++;
 		WRITE_ONCE(hw->failed, true);
 		spin_unlock_irqrestore(&hw->lock, flags);
@@ -1482,7 +1456,6 @@ stop:
 	if (memcmp(jpeg_buffer_data(&hw->buffers[0]), entropy,
 		   frame->entropy_length)) {
 		spin_lock_irqsave(&hw->lock, flags);
-		hw->stats.input_failures++;
 		hw->stats.operation[JPEG_OPERATION_DECODE].input_failures++;
 		WRITE_ONCE(hw->failed, true);
 		spin_unlock_irqrestore(&hw->lock, flags);
@@ -1497,12 +1470,6 @@ record_result:
 	jpeg_clear_operation(hw);
 	spin_lock_irqsave(&hw->lock, flags);
 	hw->stats.last_result = ret;
-	if (!ret)
-		hw->stats.completed++;
-	if (ret == -ETIMEDOUT)
-		hw->stats.timeouts++;
-	if (ret == -ECANCELED)
-		hw->stats.cancellations++;
 	spin_unlock_irqrestore(&hw->lock, flags);
 	jpeg_operation_result(hw, JPEG_OPERATION_DECODE, ret, completed_slices,
 			      y_size + uv_size, started_ns);
@@ -2227,6 +2194,8 @@ static int jpeg_stats_show(struct seq_file *seq, void *unused)
 	};
 	struct ums9117_jpeg_hw *hw = seq->private;
 	struct ums9117_jpeg_hw_stats stats;
+	const struct ums9117_jpeg_hw_operation_stats *decode =
+		&stats.operation[JPEG_OPERATION_DECODE];
 	unsigned long flags;
 	unsigned int operation;
 
@@ -2235,20 +2204,20 @@ static int jpeg_stats_show(struct seq_file *seq, void *unused)
 	spin_unlock_irqrestore(&hw->lock, flags);
 	seq_printf(seq,
 		   "failed=%u requests=%llu completed=%llu last_result=%d\n",
-		   ums9117_jpeg_hw_failed(hw), stats.requests, stats.completed,
-		   stats.last_result);
+		   ums9117_jpeg_hw_failed(hw), decode->requests,
+		   decode->completed, stats.last_result);
 	seq_printf(seq,
 		   "irqs=%llu done_irqs=%llu bsm_irqs=%llu error_irqs=%llu\n",
-		   stats.irqs, stats.done_irqs, stats.bsm_irqs,
-		   stats.error_irqs);
+		   decode->irqs, decode->completion_irqs, stats.bsm_irqs,
+		   decode->error_irqs);
 	seq_printf(seq, "slices=%llu slice_rows=%u\n", stats.slices,
 		   JPEG_SLICE_ROWS);
 	seq_printf(
 		seq,
 		"timeouts=%llu cancellations=%llu resets=%llu guard_failures=%llu input_failures=%llu idle_failures=%llu\n",
-		stats.timeouts, stats.cancellations, stats.resets,
-		stats.guard_failures, stats.input_failures,
-		stats.idle_failures);
+		decode->timeouts, decode->cancellations, decode->resets,
+		decode->guard_failures, decode->input_failures,
+		decode->idle_failures);
 	seq_printf(
 		seq,
 		"status=%08x raw=%08x mbio=%08x progress=%08x ahb=%08x recovery_ahb=%08x\n",

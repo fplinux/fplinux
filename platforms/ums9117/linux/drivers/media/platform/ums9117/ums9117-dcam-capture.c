@@ -44,9 +44,7 @@ struct dcam_buffer {
 
 struct ums9117_dcam_capture {
 	struct device *dev;
-	struct v4l2_device *v4l2;
 	struct ums9117_jpeg_hw *hw;
-	struct mutex *lock;
 	struct v4l2_async_notifier notifier;
 	struct v4l2_subdev *sensor;
 	struct video_device video;
@@ -690,9 +688,7 @@ ums9117_dcam_capture_create(struct device *dev, struct v4l2_device *v4l2,
 		goto put_node;
 	}
 	capture->dev = dev;
-	capture->v4l2 = v4l2;
 	capture->hw = hw;
-	capture->lock = lock;
 	capture->serial_g0 = serial_g0;
 	capture->serial_data_width = serial_data_width;
 	spin_lock_init(&capture->qlock);
