@@ -265,28 +265,36 @@ void ums9117_sd_stage0_main(const struct ums9117_sd_stage0_board *board)
 	uint32_t ram_bytes = ums9117_bootstrap_ram_bytes();
 	size_t uboot_bytes = uboot_payload_size();
 	char note[48];
+	int has_display = board->display_width != 0 ||
+			  board->display_height != 0;
 
-	memset((void *)(uintptr_t)FPLINUX_BOOT_LAYOUT_FRAMEBUFFER_PHYS, 0,
-	       FPLINUX_BOOT_LAYOUT_FRAMEBUFFER_BYTES);
-	boot_canvas.pixels =
-		(uint16_t *)(uintptr_t)FPLINUX_BOOT_LAYOUT_FRAMEBUFFER_PHYS;
 	boot_canvas.width = sys_data.display.w1;
 	boot_canvas.height = sys_data.display.h1;
 	boot_canvas.stride = sys_data.display.w1;
-	if (!ums9117_boot_canvas_valid(&boot_canvas))
-		stage0_fail(UMS9117_SD_STAGE0_FAILURE_DISPLAY_MEMORY, 0U);
-	canvas.width = boot_canvas.width;
-	canvas.height = boot_canvas.height;
-	canvas.context = &boot_canvas;
-	canvas.fill_rect = ums9117_boot_canvas_fill_rect;
-	canvas.present = ums9117_boot_canvas_present;
+	if (has_display) {
+		memset((void *)(uintptr_t)FPLINUX_BOOT_LAYOUT_FRAMEBUFFER_PHYS,
+		       0, FPLINUX_BOOT_LAYOUT_FRAMEBUFFER_BYTES);
+		boot_canvas.pixels = (uint16_t *)(uintptr_t)
+			FPLINUX_BOOT_LAYOUT_FRAMEBUFFER_PHYS;
+		if (!ums9117_boot_canvas_valid(&boot_canvas))
+			stage0_fail(UMS9117_SD_STAGE0_FAILURE_DISPLAY_MEMORY,
+				    0U);
+		canvas.width = boot_canvas.width;
+		canvas.height = boot_canvas.height;
+		canvas.context = &boot_canvas;
+		canvas.fill_rect = ums9117_boot_canvas_fill_rect;
+		canvas.present = ums9117_boot_canvas_present;
+	}
 
 	scan_firmware(0);
-	sys_start();
-	sys_framebuffer(boot_canvas.pixels);
-	if (fplinux_boot_screen_init(&boot_screen, &canvas, &boot_identity,
-				     stage_labels, SD_STAGE_COUNT) != 0)
-		stage0_fail(UMS9117_SD_STAGE0_FAILURE_BOOT_SCREEN, 0U);
+	if (has_display) {
+		sys_start();
+		sys_framebuffer(boot_canvas.pixels);
+		if (fplinux_boot_screen_init(&boot_screen, &canvas,
+					     &boot_identity, stage_labels,
+					     SD_STAGE_COUNT) != 0)
+			stage0_fail(UMS9117_SD_STAGE0_FAILURE_BOOT_SCREEN, 0U);
+	}
 	(void)fplinux_boot_screen_set_stage(&boot_screen, SD_STAGE_PINMAP,
 					    FPLINUX_BOOT_SCREEN_DONE);
 	if (boot_canvas.width != board->display_width ||

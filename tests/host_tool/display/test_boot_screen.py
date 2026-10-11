@@ -50,6 +50,17 @@ class BootScreenFontTests:
                 )
             yield
 
+    @pytest.mark.parametrize("font", [6, 7])
+    def test_uninitialized_screen_updates_leave_state_unchanged(self, font: int) -> None:
+        """A caller without a display can report boot stages without initializing a canvas."""
+        result = run_process(
+            [str(self.executables[font]), "--uninitialized"],
+            name="update uninitialized boot screen",
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout == ""
+
     @pytest.mark.parametrize(
         ("font", "glyph"),
         [
