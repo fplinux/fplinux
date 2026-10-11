@@ -1,9 +1,15 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Select supported quality scopes and their analyzer caches."""
+"""Select quality scopes, common C inputs and required analyzer caches."""
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+from fplinux_cli.alpine import registration
 from fplinux_cli.common import fail
+
+if TYPE_CHECKING:
+    from pathlib import PurePath
 
 CHECK_SCOPES = (
     "repository",
@@ -23,6 +29,20 @@ CHECK_SCOPES = (
 
 
 SOURCE_CHECK_SCOPES = CHECK_SCOPES[1:-1]
+
+
+def is_project_c_source(path: PurePath) -> bool:
+    """Recognize C/H shared by formatting discovery and check input selection."""
+    return path.suffix in {".c", ".h"} and (
+        path.parts[:2] == ("alpine", "aports")
+        or path.as_posix() in registration.SHARED_APORT_SOURCE_PATHS
+        or path.parts[:1] == ("tests",)
+        or (
+            len(path.parts) >= 4
+            and path.parts[0] in {"platforms", "targets"}
+            and path.parts[2] in {"common", "uboot"}
+        )
+    )
 
 
 def resolve_check_scopes(scopes: list[str]) -> tuple[str, ...]:

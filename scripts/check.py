@@ -29,6 +29,8 @@ from fplinux_cli.quality.formatting.canonical import (
     noncanonical_paths,
 )
 from fplinux_cli.quality.formatting.source_formats import classify_source_formats
+from fplinux_cli.quality.scopes import SOURCE_CHECK_SCOPES, is_project_c_source
+from fplinux_cli.quality.source_gate import containerfile_uses_locked_base
 from fplinux_cli.reporting.run import RunReporter, current_stage, run_entrypoint
 from fplinux_cli.workspace.capture import workspace_snapshot
 
@@ -46,20 +48,6 @@ MARKDOWN_HEADING = re.compile(r"^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$")
 PACKAGE_EMBEDDED_C_MARKER = "fplinux-check: package-embedded"
 APORT_ROOT = ("alpine", "aports")
 APORT_C_SUFFIXES = frozenset({".c"})
-APORT_C_FORMAT_SUFFIXES = frozenset({".c", ".h"})
-SOURCE_SCOPES = (
-    "source",
-    "container",
-    "metadata",
-    "docs",
-    "spelling",
-    "secrets",
-    "licenses",
-    "python",
-    "shell",
-    "alpine",
-    "c",
-)
 _CHECK_COMMAND_TIMEOUT = 15 * 60
 _PACKAGE_CONFIG_TIMEOUT = 30
 
@@ -343,13 +331,7 @@ def check_container_policy(files: list[Path]) -> None:
         fail("source must contain exactly one root Containerfile")
     if [path.relative_to(ROOT).as_posix() for path in context_ignores] != [".kernignore"]:
         fail("source must contain exactly one root .kernignore")
-    instructions = [
-        line.strip()
-        for line in containerfiles[0].read_text().splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    ]
-    from_instructions = [line for line in instructions if line.upper().startswith("FROM ")]
-    if from_instructions != ["FROM ${BASE_IMAGE}"] or instructions[0] != "ARG BASE_IMAGE":
+    if not containerfile_uses_locked_base(containerfiles[0].read_text()):
         fail("the Containerfile must use one lock-provided FROM ${BASE_IMAGE}")
 
 
@@ -449,20 +431,7 @@ def project_c_format_sources(files: list[Path]) -> list[str]:
     sources = {
         path.relative_to(ROOT).as_posix()
         for path in files
-        if (
-            is_aport_source(path, APORT_C_FORMAT_SUFFIXES)
-            or is_shared_aport_source(path, APORT_C_FORMAT_SUFFIXES)
-            or (
-                path.relative_to(ROOT).parts[0] == "tests"
-                and path.suffix in APORT_C_FORMAT_SUFFIXES
-            )
-            or (
-                len(path.relative_to(ROOT).parts) >= 4
-                and path.relative_to(ROOT).parts[0] in {"platforms", "targets"}
-                and path.relative_to(ROOT).parts[2] in {"common", "uboot"}
-                and path.suffix in APORT_C_FORMAT_SUFFIXES
-            )
-        )
+        if is_project_c_source(path.relative_to(ROOT))
     }
     sources.update(
         source for source, _requires_libusb in userspace_c_sources(files, include_embedded=True)
@@ -631,9 +600,9 @@ def check_shell_sources(formats: SourceFormats) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("scopes", nargs="*", choices=SOURCE_SCOPES)
+    parser.add_argument("scopes", nargs="*", choices=SOURCE_CHECK_SCOPES)
     args = parser.parse_args()
-    selected = tuple(dict.fromkeys(args.scopes)) if args.scopes else SOURCE_SCOPES
+    selected = tuple(dict.fromkeys(args.scopes)) if args.scopes else SOURCE_CHECK_SCOPES
     reporter = RunReporter.from_environment("check", "quality")
 
     with report_stage(reporter, "source-inventory"):

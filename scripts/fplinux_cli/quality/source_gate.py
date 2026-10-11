@@ -10,6 +10,17 @@ from fplinux_cli import common
 from fplinux_cli.common import fail
 
 
+def containerfile_uses_locked_base(contents: str) -> bool:
+    """Require an initial BASE_IMAGE argument and one exact lock-provided FROM."""
+    instructions = [
+        line.strip()
+        for line in contents.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    from_instructions = [line for line in instructions if line.upper().startswith("FROM ")]
+    return from_instructions == ["FROM ${BASE_IMAGE}"] and instructions[0] == "ARG BASE_IMAGE"
+
+
 def validate_source_policy() -> None:
     """Enforce the single-image source policy."""
     ignored = {".cache", ".git", "node_modules"}
@@ -28,11 +39,5 @@ def validate_source_policy() -> None:
     containerfiles.sort()
     if containerfiles != [Path("Containerfile")]:
         fail("source must contain exactly one root Containerfile")
-    instructions = [
-        line.strip()
-        for line in (common.ROOT / containerfiles[0]).read_text().splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    ]
-    from_instructions = [line for line in instructions if line.upper().startswith("FROM ")]
-    if from_instructions != ["FROM ${BASE_IMAGE}"] or instructions[0] != "ARG BASE_IMAGE":
+    if not containerfile_uses_locked_base((common.ROOT / containerfiles[0]).read_text()):
         fail("Containerfile must use one lock-provided FROM ${BASE_IMAGE}")

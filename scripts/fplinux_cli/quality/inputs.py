@@ -8,7 +8,6 @@ import tomllib
 from pathlib import Path, PurePath
 from typing import TYPE_CHECKING
 
-from fplinux_cli.alpine import registration
 from fplinux_cli.common import fail
 from fplinux_cli.manifests.paths import normalize_profile
 from fplinux_cli.quality.formatting.source_formats import (
@@ -18,7 +17,7 @@ from fplinux_cli.quality.formatting.source_formats import (
 )
 
 from .receipts import check_closure_entries_digest
-from .scopes import SOURCE_CHECK_SCOPES
+from .scopes import SOURCE_CHECK_SCOPES, is_project_c_source
 
 if TYPE_CHECKING:
     from fplinux_cli.workspace.capture import WorkspaceFile, WorkspaceSnapshot
@@ -220,16 +219,7 @@ def _c_scope_paths(snapshot: WorkspaceSnapshot) -> set[str]:
     selected = {file.path for file in snapshot.files if _source_scope_uses_file("c", file)}
     for file in snapshot.files:
         path = PurePath(file.path)
-        if path.suffix in {".c", ".h"} and (
-            path.parts[:2] == ("alpine", "aports")
-            or file.path in registration.SHARED_APORT_SOURCE_PATHS
-            or path.parts[0] == "tests"
-            or (
-                len(path.parts) >= 4
-                and path.parts[0] in {"platforms", "targets"}
-                and path.parts[2] in {"common", "uboot"}
-            )
-        ):
+        if is_project_c_source(path):
             selected.add(file.path)
         if path.suffix in {".c", ".h"} and "bootstrap" in path.parts:
             selected.add(file.path)
