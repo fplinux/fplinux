@@ -110,7 +110,12 @@ def native_process_transport(directory: Path) -> WindowsTransport:
         destination.chmod(0o755)
     bundle = WindowsBundle(
         directory,
-        {"target": "test-phone"},
+        {
+            "target": "test-phone",
+            "usb": {
+                "linux_gadget": {"vendor_id": 0x0525, "product_id": 0xA4A6, "wait_seconds": 3}
+            },
+        },
         {"ssh": tools / "ssh", "keyscan": tools / "keyscan"},
         ModuleType("unused_adapter"),
         ssh_transport,
@@ -118,6 +123,27 @@ def native_process_transport(directory: Path) -> WindowsTransport:
         "12" * 32,
     )
     return WindowsTransport(StubWindowsHost(endpoint_snapshot()), bundle)
+
+
+def saved_connection(transport: WindowsTransport) -> dict[str, Any]:
+    """Persist an independently constructed ready session with an exact live USB snapshot."""
+    session_id = bytes.fromhex("ab" * 32)
+    serial = hashlib.sha256(session_id).hexdigest()[:32]
+    directory = transport.bundle.root / "data/session" / serial
+    session = endpoint_session(directory)
+    session.update(
+        {
+            "usb_serial": serial,
+            "generation": transport.bundle.generation,
+            "device_identity": transport.bundle.device_identity,
+            "image": str(directory / "image.bin"),
+        }
+    )
+    (directory / "session.json").write_text(json.dumps(session), encoding="utf-8")
+    snapshot = endpoint_snapshot()
+    snapshot["adapters"][0]["lineage"][-1] = f"USB\\VID_0525&PID_A4A6\\{serial}"
+    transport.host = StubWindowsHost(snapshot)
+    return session
 
 
 def session_preparation_bundle(directory: Path) -> WindowsBundle:

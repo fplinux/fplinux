@@ -24,7 +24,9 @@ from tests.windows_host_support import (
     StubWindowsHost,
     archive_files,
     endpoint_session,
+    endpoint_snapshot,
     native_process_transport,
+    saved_connection,
     session_preparation_bundle,
 )
 
@@ -314,6 +316,37 @@ def test_authenticated_handoff_requires_ram_and_kernel_identity(
         assert session["status"] == "prepared"
 
 
+@pytest.mark.parametrize("identity", ["correct", "wrong-session", "wrong-kernel"])
+def test_saved_connection_reuses_the_pinned_key_and_requires_live_identities(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, identity: str
+) -> None:
+    """Reconnect through real SSH children while replacing native USB and peer boundaries."""
+    transport = native_process_transport(tmp_path)
+    saved = saved_connection(transport)
+    known_hosts = Path(saved["known_hosts"])
+    pinned = known_hosts.read_bytes()
+    monkeypatch.setenv("FPLINUX_TEST_FORBID_KEYSCAN", "1")
+    monkeypatch.setenv(
+        "FPLINUX_TEST_SESSION_ID", "ab" * 32 if identity != "wrong-session" else "ef" * 32
+    )
+    monkeypatch.setenv(
+        "FPLINUX_TEST_KERNEL",
+        "6.12.0-fplinux-1212121212121212" if identity != "wrong-kernel" else "6.12.0-other",
+    )
+
+    if identity == "correct":
+        current = transport.load_current_session("test-phone")
+        assert current == saved
+    else:
+        with pytest.raises(
+            SystemExit, match=r"another RAM session identity|another kernel build identity"
+        ):
+            transport.load_current_session("test-phone")
+
+    assert known_hosts.read_bytes() == pinned
+    assert not Path(saved["image"]).exists()
+
+
 def test_session_network_avoids_host_routes_and_saved_sessions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -323,7 +356,7 @@ def test_session_network_avoids_host_routes_and_saved_sessions(
     bundle = session_preparation_bundle(archive)
     original_image = (archive / bundle.runtime["image"]).read_bytes()
     local_data = tmp_path / "local-data"
-    previous = archive / ".cache/sessions/previous"
+    previous = archive / "data/session/previous"
     previous.mkdir(parents=True)
     (previous / "session.json").write_text(json.dumps({"network": "172.16.0.0/30"}))
     old_session = local_data / "FPLinux/demo/previous/session.json"
@@ -368,7 +401,7 @@ def test_session_network_avoids_host_routes_and_saved_sessions(
     assert session["phone_address"] == "192.168.0.2"
     assert session["status"] == "prepared"
     directory = Path(session["directory"])
-    assert directory.parent == archive / ".cache/sessions"
+    assert directory.parent == archive / "data/session"
     assert old_session.read_text() == "unrelated old local data\n"
     assert json.loads((directory / "session.json").read_text()) == session
     personalized = Path(session["image"]).read_bytes()
@@ -380,8 +413,29 @@ def test_session_network_avoids_host_routes_and_saved_sessions(
     assert b"phone_address=192.168.0.2\n" in personalized[1204:1460]
 
 
-def test_selected_winusb_snapshot_reaches_native_loader_and_one_archive_log(
+def test_failed_key_generation_discards_only_the_new_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real key-generator stand-in leaves partial keys before returning an error."""
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    bundle = session_preparation_bundle(archive)
+    previous = archive / "data/session/previous/session.json"
+    previous.parent.mkdir(parents=True)
+    previous.write_text('{"network": "172.16.0.0/30"}\n')
+    monkeypatch.setenv("FPLINUX_TEST_KEYGEN_STATUS", "7")
+    host = StubWindowsHost({"routes": []})
+
+    with pytest.raises(SystemExit, match="SSH key generation failed"):
+        windows_host._prepare_session(host, bundle)  # noqa: SLF001 -- real session consumer.
+
+    assert previous.read_text() == '{"network": "172.16.0.0/30"}\n'
+    assert list((archive / "data/session").iterdir()) == [previous.parent]
+
+
+@pytest.mark.parametrize("loader_status", [0, 7])
+def test_selected_winusb_snapshot_reaches_native_loader_and_one_archive_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, loader_status: int
 ) -> None:
     """Use native-process stand-ins; PnP and SSH remain controlled Windows boundaries."""
     archive = tmp_path / "archive"
@@ -396,16 +450,18 @@ def test_selected_winusb_snapshot_reaches_native_loader_and_one_archive_log(
         )
         manifest["sha256"][relative] = hashlib.sha256(destination.read_bytes()).hexdigest()
     manifest_path.write_text(json.dumps(manifest))
-    log = root / ".cache/run.log"
+    log = root / "logs/20261011T123456Z.log"
     log.parent.mkdir()
     log.write_text("earlier run diagnostics\n")
-    session = endpoint_session(root / ".cache/sessions/prepared")
+    session = endpoint_session(root / "data/session/prepared")
     image = Path(session["directory"]) / "image.bin"
     image.write_bytes(b"prepared image")
     session["image"] = str(image)
-    capsule = root / ".cache/device-data.cpio"
+    capsule = root / "data/phone/device-data.cpio"
+    capsule.parent.mkdir(parents=True)
     capsule.write_bytes(b"controlled capsule")
     events: list[str] = []
+    monkeypatch.setenv("FPLINUX_TEST_LOADER_STATUS", str(loader_status))
 
     class SelectedWindowsHost(StubWindowsHost):
         """Return the selected WinUSB record once; later PnP responses omit it."""
@@ -444,7 +500,17 @@ def test_selected_winusb_snapshot_reaches_native_loader_and_one_archive_log(
     monkeypatch.setattr(windows_host, "_prepare_session", prepared_session)
     monkeypatch.setattr(windows_host.WindowsTransport, "authenticate", authenticated)
 
-    _transport, ready = windows_host.boot_archive(root, capsule, events=events.append)
+    if loader_status:
+        with pytest.raises(SystemExit, match="failed with status 7"):
+            windows_host.boot_archive(root, capsule, events=events.append, log=log)
+        assert log.read_text() == (
+            "earlier run diagnostics\ncontrolled loader output\ncontrolled loader diagnostic\n"
+        )
+        assert not Path(session["directory"]).exists()
+        assert capsule.read_bytes() == b"controlled capsule"
+        return
+
+    _transport, ready = windows_host.boot_archive(root, capsule, events=events.append, log=log)
 
     assert ready["status"] == "ready"
     assert log.read_text() == (
@@ -454,6 +520,127 @@ def test_selected_winusb_snapshot_reaches_native_loader_and_one_archive_log(
     )
     assert not list(Path(session["directory"]).rglob("*.log"))
     assert not image.exists()
+    assert not (Path(session["directory"]) / "fdl1.bin").exists()
+    assert not (Path(session["directory"]) / "maps").exists()
+    assert Path(session["private_key"]).exists()
+
+
+def test_two_boots_retain_one_ready_session_and_failed_next_boot_preserves_its_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Execute real session, loader and SSH processes with controlled native USB/ACL state."""
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    bundle = session_preparation_bundle(archive)
+    for role, source in {
+        "loader": "tests/fixtures/processes/windows_loader_output.py",
+        "bridge": "tests/fixtures/processes/windows_loader_output.py",
+        "ssh": "tests/fixtures/ssh_transport/windows_peer.py",
+        "keyscan": "tests/fixtures/ssh_transport/windows_peer.py",
+    }.items():
+        install_python_script(ROOT / source, bundle.tools[role])
+    runtime = bundle.runtime
+    for relative in runtime["sha256"]:
+        runtime["sha256"][relative] = hashlib.sha256((archive / relative).read_bytes()).hexdigest()
+    runtime_path = archive / "runtime-manifest.json"
+    runtime_path.write_text(json.dumps(runtime))
+    windows_path = archive / "windows-host.json"
+    windows = json.loads(windows_path.read_text())
+    for relative in windows["sha256"]:
+        windows["sha256"][relative] = hashlib.sha256((archive / relative).read_bytes()).hexdigest()
+    windows_path.write_text(json.dumps(windows))
+    build_path = archive / "build-manifest.json"
+    build = json.loads(build_path.read_text())
+    for relative, record in build["files"].items():
+        contents = (archive / relative).read_bytes()
+        record["sha256"] = hashlib.sha256(contents).hexdigest()
+        record["size"] = len(contents)
+    del build["generation"]
+    canonical = (json.dumps(build, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    build["generation"] = hashlib.sha256(canonical).hexdigest()
+    build_path.write_text(json.dumps(build))
+    active = tmp_path / "active-session-path"
+    monkeypatch.setenv("FPLINUX_TEST_ACTIVE_SESSION", str(active))
+    monkeypatch.setenv("FPLINUX_TEST_KERNEL", "6.12.0-fplinux-1212121212121212")
+
+    class ArchiveWindowsHost(StubWindowsHost):
+        """Expose the handset after invitation, then its selected generated DHCP session."""
+
+        def __init__(self) -> None:
+            super().__init__({})
+            self.bootrom = False
+
+        def ps(self, script: str, *arguments: str, timeout: float = 20) -> dict[str, Any]:
+            del arguments, timeout
+            if script == "routes.ps1":
+                return {"routes": []}
+            if script == "devices.ps1":
+                devices = (
+                    [{"id": "USB\\VID_1782&PID_4D00\\selected", "service": "WinUSB"}]
+                    if self.bootrom
+                    else []
+                )
+                return {"devices": devices}
+            assert script == "network.ps1"
+            session = json.loads(Path(active.read_text()).read_text())
+            snapshot = endpoint_snapshot()
+            adapter = snapshot["adapters"][0]
+            adapter["mac"] = session["host_mac"]
+            adapter["lineage"][-1] = (
+                f"USB\\VID_{session['vendor_id']:04X}&PID_{session['product_id']:04X}\\"
+                f"{session['usb_serial']}"
+            )
+            adapter["addresses"][0]["address"] = session["host_address"]
+            snapshot["routes"][0]["prefix"] = session["network"]
+            return snapshot
+
+        def progress(self, stage: str) -> None:
+            if stage == "waiting-for-device":
+                self.bootrom = True
+            elif stage == "ram-loader-complete":
+                self.bootrom = False
+
+    host = ArchiveWindowsHost()
+    monkeypatch.setattr(windows_host, "WindowsHost", lambda: host)
+    capsule = archive / "data/phone/device-data.cpio"
+    capsule.parent.mkdir(parents=True)
+    capsule.write_bytes(b"controlled capsule")
+    unrelated = archive / "data/session/notes/keep.txt"
+    unrelated.parent.mkdir(parents=True)
+    unrelated.write_text("unrelated user data\n")
+
+    _transport, first = windows_host.boot_archive(
+        archive, capsule, events=host.progress, log=archive / "logs/first.log"
+    )
+    first_directory = Path(first["directory"])
+    _transport, second = windows_host.boot_archive(
+        archive, capsule, events=host.progress, log=archive / "logs/second.log"
+    )
+
+    assert first["usb_serial"] != second["usb_serial"]
+    assert not first_directory.exists()
+    second_directory = Path(second["directory"])
+    assert list((archive / "data/session").glob("*/session.json")) == [
+        second_directory / "session.json"
+    ]
+    assert not (second_directory / "image.bin").exists()
+    assert not (second_directory / "maps").exists()
+    private_key = Path(second["private_key"]).read_bytes()
+    known_hosts = Path(second["known_hosts"]).read_bytes()
+    monkeypatch.setenv("FPLINUX_TEST_LOADER_STATUS", "7")
+
+    with pytest.raises(SystemExit, match="failed with status 7"):
+        windows_host.boot_archive(
+            archive, capsule, events=host.progress, log=archive / "logs/failed.log"
+        )
+
+    assert Path(second["private_key"]).read_bytes() == private_key
+    assert Path(second["known_hosts"]).read_bytes() == known_hosts
+    assert list((archive / "data/session").glob("*/session.json")) == [
+        second_directory / "session.json"
+    ]
+    assert unrelated.read_text() == "unrelated user data\n"
+    assert capsule.read_bytes() == b"controlled capsule"
 
 
 def test_powershell_discovery_timeout_reaps_the_owned_process(

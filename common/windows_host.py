@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
@@ -265,14 +266,20 @@ class WindowsHost:
         result = self.ps("driver-consent.ps1", "-LicensePath", str(license_path), timeout=300)
         return result["accepted"] is True
 
-    def install_bootrom_driver(self, helper: Path, directory: Path) -> None:
+    def install_bootrom_driver(
+        self, helper: Path, directory: Path, *, log: Path | None = None
+    ) -> None:
         """Elevate before driver preparation and keep the fixed installer output locally."""
         self.require_private(directory)
-        log = directory / "driver.log"
+        if log is None:
+            log = directory / "driver.log"
         request = directory / "driver-request.json"
         try:
             with request.open("x", encoding="utf-8") as stream:
-                json.dump({"installer": str(helper), "directory": str(directory)}, stream)
+                json.dump(
+                    {"installer": str(helper), "directory": str(directory), "log": str(log)},
+                    stream,
+                )
                 stream.write("\n")
             self.secure_new(request)
             result = self.ps("driver-elevate.ps1", "-RequestPath", str(request), timeout=300)
@@ -338,8 +345,8 @@ class WindowsHost:
         self.require_private(path)
 
     def runtime_root(self, archive: Path) -> Path:
-        """Open private session storage beside this archive's runtime cache."""
-        root = archive / ".cache/sessions"
+        """Open this archive's private reconnect and temporary loading storage."""
+        root = archive / "data/session"
         if not root.exists():
             root.mkdir(parents=True)
             self.secure_new(root, directory=True)
@@ -424,7 +431,27 @@ def _prepare_session(
     serial = hashlib.sha256(session_id).hexdigest()[:32]
     directory = root / serial
     directory.mkdir()
+    try:
+        return _prepare_session_directory(
+            host, bundle, directory, network=network, session_id=session_id, events=events
+        )
+    except BaseException:
+        with suppress(OSError):
+            shutil.rmtree(directory)
+        raise
+
+
+def _prepare_session_directory(  # noqa: PLR0913 -- owned session inputs stay explicit.
+    host: WindowsHost,
+    bundle: WindowsBundle,
+    directory: Path,
+    *,
+    network: ipaddress.IPv4Network,
+    session_id: bytes,
+    events: Callable[[str], None] | None,
+) -> dict[str, Any]:
     host.secure_new(directory, directory=True)
+    serial = directory.name
     macs: list[str] = []
     while len(macs) < 2:
         octets = bytearray(secrets.token_bytes(6))
@@ -748,6 +775,155 @@ class WindowsTransport:
             "did not become ready before the deadline"
         )
 
+    def _validate_saved_session(self, value: object, directory: Path) -> dict[str, Any]:
+        required = {
+            "target",
+            "session_id",
+            "usb_serial",
+            "network",
+            "host_address",
+            "phone_address",
+            "host_mac",
+            "device_mac",
+            "private_key",
+            "known_hosts",
+            "image",
+            "directory",
+            "vendor_id",
+            "product_id",
+            "generation",
+            "device_identity",
+            "status",
+        }
+        if not isinstance(value, dict) or set(value) != required or value.get("status") != "ready":
+            fail("Saved phone connection is not ready")
+        session_id = value["session_id"]
+        if (
+            value["target"] != self.bundle.runtime["target"]
+            or value["generation"] != self.bundle.generation
+            or value["device_identity"] != self.bundle.device_identity
+            or not isinstance(session_id, str)
+            or self.bundle.ssh.SHA256.fullmatch(session_id) is None
+            or value["usb_serial"] != hashlib.sha256(bytes.fromhex(session_id)).hexdigest()[:32]
+        ):
+            fail("Saved phone connection belongs to another archive or RAM session")
+        try:
+            network = ipaddress.IPv4Network(value["network"], strict=True)
+        except TypeError, ValueError:
+            fail("Saved phone connection has an invalid network")
+        if network.prefixlen != 30 or not self.bundle.ssh._is_rfc1918(network):  # noqa: SLF001
+            fail("Saved phone connection does not use a private /30 network")
+        addresses = tuple(str(address) for address in network.hosts())
+        if (value["host_address"], value["phone_address"]) != addresses:
+            fail("Saved phone connection addresses do not match its network")
+        macs = (value["host_mac"], value["device_mac"])
+        if (
+            any(
+                not isinstance(mac, str)
+                or re.fullmatch(r"(?:[0-9a-f]{2}:){5}[0-9a-f]{2}", mac) is None
+                or int(mac[:2], 16) & 3 != 2
+                for mac in macs
+            )
+            or macs[0] == macs[1]
+        ):
+            fail("Saved phone connection has invalid private USB addresses")
+        usb = self.bundle.runtime["usb"]["linux_gadget"]
+        if (value["vendor_id"], value["product_id"]) != (usb["vendor_id"], usb["product_id"]):
+            fail("Saved phone connection has another USB identity")
+        if directory.name != value["usb_serial"] or value["directory"] != str(directory):
+            fail("Saved phone connection directory does not match its RAM identity")
+        for field, name in (
+            ("private_key", "id_ed25519"),
+            ("known_hosts", "known_hosts"),
+            ("image", "image.bin"),
+        ):
+            if value[field] != str(directory / name):
+                fail("Saved phone connection contains a path outside its directory")
+        for path in (
+            directory,
+            directory / "session.json",
+            Path(value["private_key"]),
+            Path(value["known_hosts"]),
+        ):
+            self.host.require_private(path)
+        return value
+
+    def load_current_session(self, target: str) -> dict[str, Any]:
+        """Reconnect with the saved key only after finding this archive's exact live phone."""
+        if target != self.bundle.runtime["target"]:
+            fail("The requested connection belongs to another target")
+        root = self.host.runtime_root(self.bundle.root)
+        candidates: list[dict[str, Any]] = []
+        for state_path in root.glob("*/session.json"):
+            try:
+                value = json.loads(state_path.read_text(encoding="utf-8"))
+                session = self._validate_saved_session(value, state_path.parent)
+            except OSError, ValueError, SystemExit:
+                continue
+            candidates.append(session)
+        deadline = time.monotonic() + self.bundle.runtime["usb"]["linux_gadget"]["wait_seconds"]
+        while candidates and time.monotonic() < deadline:
+            live: list[dict[str, Any]] = []
+            discovery_complete = True
+            for session in candidates:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    discovery_complete = False
+                    break
+                try:
+                    snapshot = self.host.network_snapshot(session, timeout=min(20, remaining))
+                except subprocess.TimeoutExpired:
+                    discovery_complete = False
+                    continue
+                if bound_interface(snapshot, session) is not None:
+                    live.append(session)
+            if len(live) > 1:
+                break
+            if len(live) == 1 and discovery_complete:
+                session = live[0]
+                self.authenticate(
+                    session, timeout=max(0, deadline - time.monotonic()), scan_host_key=False
+                )
+                return session
+            time.sleep(min(0.5, max(0, deadline - time.monotonic())))
+        fail("No unique ready connection to this archive's live phone was found")
+
+    def retire_previous_sessions(self, current: dict[str, Any]) -> None:
+        """Retain one ready connection while leaving unrecognized files and records intact."""
+        root = self.host.runtime_root(self.bundle.root)
+        for state_path in root.glob("*/session.json"):
+            directory = state_path.parent
+            if directory == Path(current["directory"]):
+                continue
+            try:
+                value = json.loads(state_path.read_text(encoding="utf-8"))
+                self._validate_saved_session(value, directory)
+            except OSError, ValueError, SystemExit:
+                continue
+            files = [
+                directory / name
+                for name in (
+                    "id_ed25519",
+                    "id_ed25519.pub",
+                    "known_hosts",
+                    "session.json",
+                )
+            ]
+            for path in files:
+                if path.exists():
+                    self.host.require_private(path)
+            for path in files:
+                path.unlink(missing_ok=True)
+            if not any(directory.iterdir()):
+                directory.rmdir()
+
+
+def load_current_session(root: Path, target: str) -> tuple[WindowsTransport, dict[str, Any]]:
+    """Admit the selected archive and authenticate its saved live RAM connection."""
+    bundle = validate_archive(root)
+    transport = WindowsTransport(WindowsHost(), bundle)
+    return transport, transport.load_current_session(target)
+
 
 def _wait_bootrom(host: WindowsHost, usb: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     deadline = time.monotonic() + usb["wait_seconds"]
@@ -777,6 +953,7 @@ def _ensure_bootrom_driver(  # noqa: PLR0913 -- selected snapshot and driver set
     *,
     snapshot: dict[str, Any],
     events: Callable[[str], None] | None,
+    log: Path | None = None,
 ) -> None:
     if _bootrom_uses_winusb(snapshot, instance):
         return
@@ -791,7 +968,7 @@ def _ensure_bootrom_driver(  # noqa: PLR0913 -- selected snapshot and driver set
         fail("USB driver setup was declined; disconnect the phone and restart Run.cmd")
     if events is not None:
         events("driver-setup")
-    host.install_bootrom_driver(bundle.tools["driver"], directory)
+    host.install_bootrom_driver(bundle.tools["driver"], directory, log=log)
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
         snapshot = host.ps("devices.ps1")
@@ -814,6 +991,7 @@ def boot_archive(
     device_data: Path,
     *,
     events: Callable[[str], None] | None = None,
+    log: Path | None = None,
 ) -> tuple[WindowsTransport, dict[str, Any]]:
     """Boot one selected archive with its external data capsule and return authenticated SSH."""
     if events is not None:
@@ -828,11 +1006,16 @@ def boot_archive(
             "Disconnect the powered-off phone and restart Run.cmd; "
             "connect only after its invitation"
         )
+    adapter = bundle.adapter
+    config = adapter.adapter_config(bundle.runtime["adapter"])
+    if log is None:
+        timestamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
+        log = root / "logs" / f"{timestamp}.{time.time_ns() % 1_000_000_000:09d}Z.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
     session = _prepare_session(host, bundle, events=events)
     directory = Path(session["directory"])
     image = Path(session["image"])
-    adapter = bundle.adapter
-    config = adapter.adapter_config(bundle.runtime["adapter"])
+    ready = False
     try:
         print(adapter.runtime_target_display_name(bundle.runtime), flush=True)
         print(config["boot_instructions"], flush=True)
@@ -841,7 +1024,9 @@ def boot_archive(
         bootrom, snapshot = _wait_bootrom(host, usb)
         if events is not None:
             events("device-found")
-        _ensure_bootrom_driver(host, bundle, bootrom, directory, snapshot=snapshot, events=events)
+        _ensure_bootrom_driver(
+            host, bundle, bootrom, directory, snapshot=snapshot, events=events, log=log
+        )
         fdl = directory / "fdl1.bin"
         shutil.copyfile(root / bundle.runtime["assets"]["fdl1"], fdl)
         print("Loading the phone into RAM...", flush=True)
@@ -858,7 +1043,7 @@ def boot_archive(
             [loader_arguments[0], "--verbose", "1", *loader_arguments[1:]],
             timeout=300,
             cwd=directory,
-            log=root / ".cache/run.log",
+            log=log,
             environment={"LIBUSB_DEBUG": "4"},
         )
         if events is not None:
@@ -896,7 +1081,7 @@ def boot_archive(
             ],
             timeout=config["handoff_wait_seconds"],
             cwd=maps,
-            log=root / ".cache/run.log",
+            log=log,
         )
         deadline = time.monotonic() + config["usb_release_wait_seconds"]
         while bootrom in exact_usb_devices(
@@ -911,8 +1096,21 @@ def boot_archive(
         transport.authenticate(
             session, timeout=bundle.runtime["usb"]["linux_gadget"]["wait_seconds"]
         )
+        ready = True
+        transport.retire_previous_sessions(session)
         if events is not None:
             events("ssh-ready")
         return transport, session
     finally:
-        image.unlink(missing_ok=True)
+        original_error = sys.exception()
+        try:
+            for temporary in (image, directory / "fdl1.bin"):
+                temporary.unlink(missing_ok=True)
+            for stage in (directory / "maps", directory / "driver"):
+                if stage.exists():
+                    shutil.rmtree(stage)
+            if not ready:
+                shutil.rmtree(directory)
+        except OSError:
+            if original_error is None:
+                raise

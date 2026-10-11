@@ -23,7 +23,7 @@ $Arguments = @(
 )
 try {
     $Process = Start-Process -FilePath $PowerShell -ArgumentList $Arguments `
-        -WorkingDirectory $Request.directory -Verb RunAs -Wait -PassThru
+        -WorkingDirectory $Request.directory -Verb RunAs -WindowStyle Hidden -Wait -PassThru
     $Result = @{ cancelled = $false; status = $Process.ExitCode }
 } catch {
     $Failure = $_.Exception

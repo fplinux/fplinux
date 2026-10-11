@@ -2,6 +2,7 @@
 """Replace the unavailable native key generator with a fixed valid SSH key blob."""
 
 import base64
+import os
 import sys
 from pathlib import Path
 
@@ -12,3 +13,4 @@ destination.with_suffix(".pub").write_text(
     "ssh-ed25519 " + base64.b64encode(public_blob).decode("ascii") + " fixture\n",
     encoding="ascii",
 )
+raise SystemExit(int(os.environ.get("FPLINUX_TEST_KEYGEN_STATUS", "0")))

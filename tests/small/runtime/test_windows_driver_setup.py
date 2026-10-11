@@ -42,8 +42,11 @@ class DriverHost(StubWindowsHost):
         self.effects.append(("consent", license_path.read_bytes()))
         return self.consent
 
-    def install_bootrom_driver(self, helper: Path, directory: Path) -> None:
+    def install_bootrom_driver(
+        self, helper: Path, directory: Path, *, log: Path | None = None
+    ) -> None:
         """Model a completed elevated setup or a cancelled/failed native boundary."""
+        del log
         self.effects.append(("installer", (helper, directory)))
         if self.setup_error is not None:
             windows_host.fail(self.setup_error)
@@ -156,6 +159,7 @@ def test_driver_request_preserves_literal_paths_and_cleans_up_after_result(
         assert json.loads(request.read_text(encoding="utf-8")) == {
             "installer": str(helper),
             "directory": str(directory),
+            "log": str(directory / "driver.log"),
         }
         request_paths.append(request)
         return result
