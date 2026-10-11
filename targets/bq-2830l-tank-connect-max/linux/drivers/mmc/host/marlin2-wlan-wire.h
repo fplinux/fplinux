@@ -8,7 +8,6 @@
 #define MARLIN2_WLAN_COMMAND_BYTES 12U
 #define MARLIN2_WLAN_DATA_BYTES 8U
 #define MARLIN2_WLAN_TX_MAX_BYTES 4096U
-#define MARLIN2_WLAN_RX_MAX_BYTES 10240U
 #define MARLIN2_WLAN_MODE_STA 1U
 #define MARLIN2_WLAN_MODE_AP 2U
 #define MARLIN2_WLAN_SCAN_COLOCATED_6GHZ_FLAG 0x4000U
@@ -34,15 +33,6 @@ struct marlin2_wlan_ssid {
 	const u8 *data;
 	size_t bytes;
 };
-
-struct marlin2_wlan_message {
-	const u8 *data;
-	size_t length;
-	u8 subtype;
-};
-
-typedef int (*marlin2_wlan_receive_fn)(
-	void *context, const struct marlin2_wlan_message *message);
 
 extern const u8 marlin2_wlan_extended_capabilities[11];
 extern const u8 marlin2_wlan_extended_capabilities_mask[11];

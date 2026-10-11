@@ -280,12 +280,9 @@ static void receive_station(struct marlin2_wlan *wlan, const u8 *payload,
 	cfg80211_new_sta(&wlan->wdev, event.mac, &info, GFP_KERNEL);
 }
 
-static int receive_message(void *context,
-			   const struct marlin2_wlan_message *message)
+static int receive_message(struct marlin2_wlan *wlan, const u8 *data,
+			   size_t bytes)
 {
-	struct marlin2_wlan *wlan = context;
-	const u8 *data = message->data;
-	size_t bytes = message->length;
 	const u8 *payload;
 	size_t payload_bytes;
 	u8 type;
@@ -387,16 +384,11 @@ static void receive_channel(void *context, u8 subtype, const u8 *data,
 			    size_t bytes)
 {
 	struct marlin2_wlan *wlan = context;
-	struct marlin2_wlan_message message = {
-		.data = data,
-		.length = bytes,
-		.subtype = subtype,
-	};
 	int ret;
 
 	if (!READ_ONCE(wlan->running) || READ_ONCE(wlan->io_error))
 		return;
-	ret = receive_message(wlan, &message);
+	ret = receive_message(wlan, data, bytes);
 	if (ret) {
 		fail_io(wlan, ret);
 		dev_err(wlan->dev, "wireless receive failed: %pe\n",
@@ -502,6 +494,21 @@ static int set_ie(struct marlin2_wlan *wlan, u8 type, const u8 *ie,
 	ret = command(wlan, 0x19, payload, 3 + bytes, NULL, NULL);
 	kfree(payload);
 	return ret;
+}
+
+static int set_beacon_ies(struct marlin2_wlan *wlan,
+			  const struct cfg80211_beacon_data *beacon)
+{
+	int ret;
+
+	ret = set_ie(wlan, 0, beacon->beacon_ies, beacon->beacon_ies_len);
+	if (ret)
+		return ret;
+	ret = set_ie(wlan, 2, beacon->proberesp_ies, beacon->proberesp_ies_len);
+	if (ret)
+		return ret;
+	return set_ie(wlan, 4, beacon->assocresp_ies,
+		      beacon->assocresp_ies_len);
 }
 
 static int set_regdomain(struct marlin2_wlan *wlan)
@@ -827,6 +834,17 @@ static int scan(struct wiphy *wiphy, struct cfg80211_scan_request *request)
 	return 0;
 }
 
+static bool is_crypto_supported(const struct cfg80211_crypto_settings *crypto)
+{
+	return !crypto->wpa_versions ||
+	       (crypto->wpa_versions == NL80211_WPA_VERSION_2 &&
+		crypto->n_ciphers_pairwise == 1 &&
+		crypto->ciphers_pairwise[0] == WLAN_CIPHER_SUITE_CCMP &&
+		crypto->cipher_group == WLAN_CIPHER_SUITE_CCMP &&
+		crypto->n_akm_suites == 1 &&
+		crypto->akm_suites[0] == WLAN_AKM_SUITE_PSK);
+}
+
 static int connect(struct wiphy *wiphy, struct net_device *netdev,
 		   struct cfg80211_connect_params *params)
 {
@@ -845,16 +863,8 @@ static int connect(struct wiphy *wiphy, struct net_device *netdev,
 	     params->auth_type != NL80211_AUTHTYPE_AUTOMATIC) ||
 	    params->mfp != NL80211_MFP_NO)
 		return -EOPNOTSUPP;
-	if (params->crypto.wpa_versions) {
-		if (params->crypto.wpa_versions != NL80211_WPA_VERSION_2 ||
-		    params->crypto.n_ciphers_pairwise != 1 ||
-		    params->crypto.ciphers_pairwise[0] !=
-			    WLAN_CIPHER_SUITE_CCMP ||
-		    params->crypto.cipher_group != WLAN_CIPHER_SUITE_CCMP ||
-		    params->crypto.n_akm_suites != 1 ||
-		    params->crypto.akm_suites[0] != WLAN_AKM_SUITE_PSK)
-			return -EOPNOTSUPP;
-	}
+	if (!is_crypto_supported(&params->crypto))
+		return -EOPNOTSUPP;
 	if (channel) {
 		if (channel->hw_value < 1 || channel->hw_value > 11 ||
 		    channel->flags & IEEE80211_CHAN_DISABLED)
@@ -987,13 +997,7 @@ static int start_ap(struct wiphy *wiphy, struct net_device *netdev,
 	    settings->hidden_ssid > NL80211_HIDDEN_SSID_ZERO_CONTENTS ||
 	    beacon->head_len < 38 || beacon->head[36] != WLAN_EID_SSID)
 		return -EOPNOTSUPP;
-	if (settings->crypto.wpa_versions &&
-	    (settings->crypto.wpa_versions != NL80211_WPA_VERSION_2 ||
-	     settings->crypto.n_ciphers_pairwise != 1 ||
-	     settings->crypto.ciphers_pairwise[0] != WLAN_CIPHER_SUITE_CCMP ||
-	     settings->crypto.cipher_group != WLAN_CIPHER_SUITE_CCMP ||
-	     settings->crypto.n_akm_suites != 1 ||
-	     settings->crypto.akm_suites[0] != WLAN_AKM_SUITE_PSK))
+	if (!is_crypto_supported(&settings->crypto))
 		return -EOPNOTSUPP;
 	payload = kmalloc(MARLIN2_WLAN_BEACON_MAX_BYTES + 2, GFP_KERNEL);
 	if (!payload)
@@ -1006,13 +1010,7 @@ static int start_ap(struct wiphy *wiphy, struct net_device *netdev,
 		kfree(payload);
 		return -EINVAL;
 	}
-	ret = set_ie(wlan, 0, beacon->beacon_ies, beacon->beacon_ies_len);
-	if (!ret)
-		ret = set_ie(wlan, 2, beacon->proberesp_ies,
-			     beacon->proberesp_ies_len);
-	if (!ret)
-		ret = set_ie(wlan, 4, beacon->assocresp_ies,
-			     beacon->assocresp_ies_len);
+	ret = set_beacon_ies(wlan, beacon);
 	if (!ret)
 		ret = command(wlan, 0x11, payload, bytes, NULL, NULL);
 	kfree(payload);
@@ -1052,18 +1050,10 @@ static int change_beacon(struct wiphy *wiphy, struct net_device *netdev,
 {
 	struct marlin2_wlan *wlan = wlan_from_wiphy(wiphy);
 	struct cfg80211_beacon_data *beacon = &update->beacon;
-	int ret;
 
 	if (!READ_ONCE(wlan->ap_started))
 		return -ENETDOWN;
-	ret = set_ie(wlan, 0, beacon->beacon_ies, beacon->beacon_ies_len);
-	if (!ret)
-		ret = set_ie(wlan, 2, beacon->proberesp_ies,
-			     beacon->proberesp_ies_len);
-	if (!ret)
-		ret = set_ie(wlan, 4, beacon->assocresp_ies,
-			     beacon->assocresp_ies_len);
-	return ret;
+	return set_beacon_ies(wlan, beacon);
 }
 
 static const struct cfg80211_ops marlin2_wlan_cfg_ops = {
