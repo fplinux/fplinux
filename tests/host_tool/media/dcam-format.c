@@ -31,6 +31,12 @@ static void check_selected_formats(unsigned int expected_support)
 		  2,
 		  2,
 		  { 304640, 0x01dc0280, 2, 0x01db0501, 0x409 } },
+		{ 640,
+		  480,
+		  MEDIA_BUS_FMT_YUYV8_2X8,
+		  2,
+		  2,
+		  { 307200, 0x01e00280, 0, 0x01df04ff, 0x401 } },
 		{ 800,
 		  600,
 		  MEDIA_BUS_FMT_YUYV8_2X8,
@@ -71,7 +77,8 @@ static void check_selected_formats(unsigned int expected_support)
 static void check_unsupported_formats(void)
 {
 	static const struct dcam_case cases[] = {
-		{ 640, 480, MEDIA_BUS_FMT_YUYV8_2X8, 2, 0, {} },
+		{ 640, 478, MEDIA_BUS_FMT_YUYV8_2X8, 2, 0, {} },
+		{ 640, 480, MEDIA_BUS_FMT_YVYU8_2X8, 2, 0, {} },
 		{ 640, 476, MEDIA_BUS_FMT_YVYU8_2X8, 2, 0, {} },
 		{ 640, 476, MEDIA_BUS_FMT_YVYU8_2X8, 1, 0, {} },
 		{ 240, 320, MEDIA_BUS_FMT_YVYU8_2X8, 1, 0, {} },

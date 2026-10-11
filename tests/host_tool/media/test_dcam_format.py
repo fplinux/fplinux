@@ -35,10 +35,10 @@ PARALLEL = "CONFIG_VIDEO_UMS9117_DCAM_PARALLEL"
         pytest.param((SERIAL, ONE_BIT, TWO_BIT, PARALLEL), 7, id="all-inputs"),
     ],
 )
-def test_capture_geometry_and_serial_data_order(
+def test_capture_geometry_and_transport_fields(
     tmp_path: Path, enabled: tuple[str, ...], expected_support: int
 ) -> None:
-    """Check native transport fields with literal geometry and ordering examples."""
+    """Check capture fields against literal geometry and transport examples."""
     executable = tmp_path / "dcam-format"
     compile_c(
         executable,

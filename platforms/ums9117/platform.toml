@@ -231,6 +231,14 @@ source = "platforms/ums9117/linux/drivers/media/i2c/bf30a2.c"
 destination = "drivers/media/i2c/bf30a2.c"
 
 [[linux.copies]]
+source = "platforms/ums9117/linux/drivers/media/i2c/bf20a6.c"
+destination = "drivers/media/i2c/bf20a6.c"
+
+[[linux.copies]]
+source = "platforms/ums9117/linux/bindings/media/i2c/byd,bf20a6.yaml"
+destination = "Documentation/devicetree/bindings/media/i2c/byd,bf20a6.yaml"
+
+[[linux.copies]]
 source = "platforms/ums9117/linux/drivers/media/platform/ums9117/ums9117-jpeg-codec.c"
 destination = "drivers/media/platform/ums9117/ums9117-jpeg-codec.c"
 
@@ -580,6 +588,14 @@ destination = "drivers/media/i2c/Kconfig"
 
 [[linux.appends]]
 source = "platforms/ums9117/linux/drivers/media/i2c/bf30a2.Makefile"
+destination = "drivers/media/i2c/Makefile"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/media/i2c/bf20a6.Kconfig"
+destination = "drivers/media/i2c/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/drivers/media/i2c/bf20a6.Makefile"
 destination = "drivers/media/i2c/Makefile"
 
 [[linux.appends]]

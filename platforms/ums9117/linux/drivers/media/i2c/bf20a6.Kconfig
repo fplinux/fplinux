@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config VIDEO_BF20A6
+	tristate "BF20A6 camera sensor"
+	depends on I2C && VIDEO_DEV && PM
+	select V4L2_FWNODE
+	help
+	  Enable support for the BF20A6 640x480 YUV422 sensor. The device
+	  is controlled over I2C and exposes a V4L2 subdevice for capture
+	  controllers. The board describes the sensor clock, analog and IO
+	  supplies, and powerdown GPIOs.

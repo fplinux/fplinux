@@ -10,6 +10,10 @@
 #define DCAM_CAP_HSYNC_HIGH (1U << 3)
 #define DCAM_CAP_TWO_BIT (2U << 9)
 #define DCAM_CAP_ONE_BIT (3U << 9)
+#define DCAM_G0_YUYV_WIDTH 640U
+#define DCAM_G0_COUNTED_HEIGHT 476U
+#define DCAM_G0_FULL_FRAME_HEIGHT 480U
+#define DCAM_G0_LINE_COUNT_BYTES 2U
 
 int ums9117_dcam_format_configure(u32 width, u32 height,
 				  u32 mbus_code __maybe_unused,
@@ -39,13 +43,18 @@ int ums9117_dcam_format_configure(u32 width, u32 height,
 #endif
 #if IS_ENABLED(CONFIG_VIDEO_UMS9117_DCAM_SERIAL_G0_TWO_BIT)
 	case 2:
-		if (mbus_code != MEDIA_BUS_FMT_YUYV8_2X8 || width != 640 ||
-		    height != 476)
+		if (mbus_code != MEDIA_BUS_FMT_YUYV8_2X8 ||
+		    width != DCAM_G0_YUYV_WIDTH)
 			return -EINVAL;
-		control = DCAM_CAP_CCIR656 | DCAM_CAP_TWO_BIT |
-			  DCAM_CAP_HSYNC_HIGH;
-		/* Exclude the serial line count from the pixel window. */
-		capture_start = 2;
+		control = DCAM_CAP_CCIR656 | DCAM_CAP_TWO_BIT;
+		/* The fixed frame sizes select distinct serial line encodings. */
+		if (height == DCAM_G0_COUNTED_HEIGHT) {
+			control |= DCAM_CAP_HSYNC_HIGH;
+			/* Exclude the serial line count from the pixel window. */
+			capture_start = DCAM_G0_LINE_COUNT_BYTES;
+		} else if (height != DCAM_G0_FULL_FRAME_HEIGHT) {
+			return -EINVAL;
+		}
 		break;
 #endif
 	default:

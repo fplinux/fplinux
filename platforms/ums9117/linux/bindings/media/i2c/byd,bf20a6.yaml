@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/media/i2c/byd,bf20a6.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: BF20A6 CMOS image sensor
+
+maintainers:
+  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+
+allOf:
+  - $ref: /schemas/media/video-interface-devices.yaml#
+
+properties:
+  compatible:
+    const: byd,bf20a6
+
+  reg:
+    const: 0x6e
+
+  clocks:
+    maxItems: 1
+
+  clock-names:
+    const: xclk
+
+  avdd-supply: true
+  iovdd-supply: true
+
+  powerdown-gpios:
+    maxItems: 1
+
+  front-powerdown-gpios:
+    maxItems: 1
+    description: Powerdown line held active for the companion camera route.
+
+  pinctrl-names:
+    const: default
+
+  pinctrl-0: true
+
+  rotation: true
+
+  port:
+    $ref: /schemas/graph.yaml#/$defs/port-base
+    additionalProperties: false
+    properties:
+      endpoint:
+        $ref: /schemas/graph.yaml#/$defs/endpoint-base
+        unevaluatedProperties: false
+        properties:
+          sprd,serial-g0-data-width:
+            $ref: /schemas/types.yaml#/definitions/uint32
+            const: 2
+            description: Selects the two-bit UMS9117 serial G0 input configuration.
+        required:
+          - remote-endpoint
+          - sprd,serial-g0-data-width
+    required:
+      - endpoint
+
+required:
+  - compatible
+  - reg
+  - clocks
+  - clock-names
+  - avdd-supply
+  - iovdd-supply
+  - powerdown-gpios
+  - front-powerdown-gpios
+  - port
+
+additionalProperties: false
