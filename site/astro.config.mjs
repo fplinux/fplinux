@@ -66,7 +66,8 @@ export default defineConfig({
 						"phones/inoi-240-modern-4g",
 						"phones/inoi-244-modern-4g",
 						"phones/maxvi-k15n-4g",
-						"phones/bq-2830l-tank-connect-max"
+						"phones/bq-2830l-tank-connect-max",
+						"phones/uniwa-v1000-4g"
 					),
 					label: "Phones",
 				},

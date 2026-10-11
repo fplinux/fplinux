@@ -71,8 +71,12 @@ const status = (feature: string, phone: string) =>
 					)}
 					{!screen?.image && (
 						<p class="screen-note">
-							240×320 display
-							<br />
+							{screen?.size && (
+								<>
+									{screen.size} display
+									<br />
+								</>
+							)}
 							Control over USB
 							<br />
 							<small>See the phone checklist for input support.</small>
@@ -81,7 +85,9 @@ const status = (feature: string, phone: string) =>
 				</div>
 				<h3>{phone.name}</h3>
 				<p class="meta">
-					{[phone.code, `${screen?.size} display`].filter(Boolean).join(" · ")}
+					{[phone.code, screen?.size && `${screen.size} display`]
+						.filter(Boolean)
+						.join(" · ")}
 				</p>
 				<ul class="chips">
 					{highlights.map((item): astroHTML.JSX.Children => {

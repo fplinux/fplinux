@@ -90,7 +90,6 @@ def prepare_bluetooth_from_records(
 ) -> PreparedGroup:
     """Prepare Bluetooth from already parsed fixed NV records and the shared NAND."""
     cm4 = cm4_image(nand.partition_bytes(partitions[CM4_PARTITION_ID]))
-    prepared_cm4 = omit_initial_pub_policy(cm4)
     fixed = {identifier: downloaded[identifier] for identifier in NV_FILES}
     protected_bluetooth = {identifier: protected[identifier] for identifier in NV_FILES}
     if fixed != protected_bluetooth:
@@ -99,10 +98,22 @@ def prepare_bluetooth_from_records(
     running = nand.partition_bytes(partitions[RUNNING_NV_PARTITION_ID])
     verify_running_nv(running, fixed)
 
+    return prepare_bluetooth_from_settings(cm4, fixed, prefix=prefix)
+
+
+def prepare_bluetooth_from_settings(
+    cm4: bytes,
+    settings: Mapping[int, bytes],
+    *,
+    prefix: str,
+) -> PreparedGroup:
+    """Prepare an admitted CM4 image and the caller's verified radio records."""
+    prepared_cm4 = omit_initial_pub_policy(cm4)
+
     cm4_filename = f"{prefix}-cm4.bin"
     originals = {cm4_filename: cm4}
     for identifier, (filename, _size) in NV_FILES.items():
-        originals[f"{prefix}-{filename}"] = fixed[identifier]
+        originals[f"{prefix}-{filename}"] = settings[identifier]
     prepared = dict(originals)
     prepared[cm4_filename] = prepared_cm4
     return PreparedGroup(originals=originals, prepared=prepared)

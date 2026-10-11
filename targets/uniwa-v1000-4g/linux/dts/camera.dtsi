@@ -1,0 +1,114 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/ {
+	soc {
+		uniwa_camera_mux: pinctrl@402a01e8 {
+			compatible = "pinctrl-single";
+			reg = <0x402a01e8 0xc>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,function-mask = <0x30>;
+			pinctrl-single,register-width = <32>;
+
+			uniwa_camera_mux_pins: camera-pins {
+				pinctrl-single,pins = <0x0 0x0 0x4 0x30 0x8 0x30>;
+			};
+		};
+
+		uniwa_camera_pads: pinctrl@402a05e8 {
+			compatible = "pinctrl-single";
+			reg = <0x402a05e8 0xc>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,function-mask = <0xffffffff>;
+			pinctrl-single,register-width = <32>;
+
+			uniwa_camera_pad_pins: camera-pins {
+				pinctrl-single,pins = <
+					0x0 0x00082001 0x4 0x00082001 0x8 0x00082001
+				>;
+			};
+		};
+
+		uniwa_camera_serial_mux: pinctrl@402a01f4 {
+			compatible = "pinctrl-single";
+			reg = <0x402a01f4 0x18>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,function-mask = <0x30>;
+			pinctrl-single,register-width = <32>;
+
+			uniwa_camera_serial_mux_pins: camera-pins {
+				pinctrl-single,pins = <
+					0x0 0x20 0x4 0x20 0x8 0x20 0xc 0x20
+					0x10 0x20 0x14 0x20
+				>;
+			};
+		};
+
+		uniwa_camera_serial_pads: pinctrl@402a05f4 {
+			compatible = "pinctrl-single";
+			reg = <0x402a05f4 0x18>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,function-mask = <0xffffffff>;
+			pinctrl-single,register-width = <32>;
+
+			uniwa_camera_serial_pad_pins: camera-pins {
+				pinctrl-single,pins = <
+					0x0 0x00082006 0x4 0x00082046
+					0x8 0x00082000 0xc 0x00082000
+					0x10 0x00082000 0x14 0x00082000
+				>;
+			};
+		};
+	};
+};
+
+&ap_gpio {
+	status = "okay";
+};
+
+&ap_i2c0_clk {
+	status = "okay";
+};
+
+&aon_sensor_clk {
+	status = "okay";
+};
+
+&i2c0 {
+	status = "okay";
+
+	uniwa_camera: camera@6e {
+		compatible = "byd,bf20a6";
+		reg = <0x6e>;
+		avdd-supply = <&vddcama>;
+		clock-names = "xclk";
+		clocks = <&aon_sensor_clk CLK_SENSOR0>;
+		front-powerdown-gpios = <&ap_gpio 69 GPIO_ACTIVE_HIGH>;
+		iovdd-supply = <&vddcamio>;
+		pinctrl-0 = <&uniwa_camera_mux_pins &uniwa_camera_pad_pins
+			     &uniwa_camera_serial_mux_pins &uniwa_camera_serial_pad_pins>;
+		pinctrl-names = "default";
+		powerdown-gpios = <&ap_gpio 16 GPIO_ACTIVE_HIGH>;
+		rotation = <0>;
+
+		port {
+			uniwa_camera_out: endpoint {
+				remote-endpoint = <&uniwa_camera_sink>;
+				sprd,serial-g0-data-width = <2>;
+			};
+		};
+	};
+};
+
+&i2c0_pad_pins {
+	pinctrl-single,pins = <0x0 0x00083088 0x4 0x00083088>;
+};
+
+&jpeg {
+	status = "okay";
+
+	port {
+		uniwa_camera_sink: endpoint {
+			remote-endpoint = <&uniwa_camera_out>;
+			sprd,serial-g0-data-width = <2>;
+		};
+	};
+};

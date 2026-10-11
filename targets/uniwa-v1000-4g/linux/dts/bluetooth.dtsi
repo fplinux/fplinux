@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-only
+#include "ums9117-bluetooth.dtsi"
+
+&bluetooth {
+	firmware-name = "ums9117/uniwa-v1000-4g-cm4.bin",
+			"ums9117/uniwa-v1000-4g-bt-config.bin",
+			"ums9117/uniwa-v1000-4g-bt-sprd.bin",
+			"ums9117/uniwa-v1000-4g-bt-rf-config.bin";
+	fplinux,fm-config-name = "fplinux/uniwa-v1000-4g-fm-config.bin";
+};

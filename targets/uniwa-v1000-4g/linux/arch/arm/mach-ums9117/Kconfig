@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-only
+if ARCH_UMS9117
+
+config MACH_UNIWA_V1000_4G
+	bool "UNIWA V1000 4G"
+	select GPIOLIB
+	select GPIO_PMIC_EIC_SPRD
+	select MFD_SYSCON
+	help
+	  Board support for the UMS9117-based UNIWA V1000 4G.
+	  The USB loader starts Linux with a RAM or microSD system root.
+	  Control the phone through the authenticated USB connection.
+	  Internal NAND is available through a read-only backup interface.
+
+endif

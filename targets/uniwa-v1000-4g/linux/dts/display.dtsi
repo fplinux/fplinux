@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+/ {
+	soc {
+		display@20800000 {
+			compatible = "fplinux,ums9117-uniwa-v1000-spi-fb";
+			reg = <0x20800000 0x00001000>,
+			      <0x20a00000 0x00001000>,
+			      <0x70b00000 0x00001000>,
+			      <0x21500054 0x00000004>,
+			      <0x71301004 0x00000004>,
+			      <0x71302004 0x00000004>,
+			      <0x20e01000 0x00000004>,
+			      <0x20e01004 0x00000004>,
+			      <0x20e02004 0x00000004>,
+			      <0x402a00b0 0x0000001c>,
+			      <0x402a04b0 0x0000001c>;
+			interrupt-names = "lcdc-done";
+			interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;
+			memory-region = <&codec_dma>;
+			reg-names = "lcdc", "lcm", "spi", "spi-clock-selector",
+				    "spi-reset-set", "spi-reset-clear", "ap-ahb-gate-set",
+				    "ap-ahb-reset-set", "ap-ahb-reset-clear", "pinmux",
+				    "pinconf";
+			sprd,aon-apb = <&aon_apb>;
+			sprd,pinconf-offsets = <0 4 8 12 16 20 24>;
+			sprd,pinconf-values = <
+				0x00182001 0x00082046 0x00082001 0x00102004
+				0x00082004 0x00102004 0x00082004
+			>;
+			sprd,pinmux-offsets = <0 4 8 12 16 20 24>;
+			sprd,pinmux-values = <0 0 0 0 0 0 0>;
+			sprd,pmic = <&sc2720_pmic>;
+			sprd,wled-current-levels = <0 0 0 34>;
+			sprd,wled-default-level = <34>;
+		};
+	};
+};

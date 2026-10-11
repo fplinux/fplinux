@@ -1,0 +1,134 @@
+# SPDX-License-Identifier: GPL-2.0-only
+platform = "ums9117"
+
+[identity]
+brand = "UNIWA"
+product = "V1000 4G"
+hardware_codes = []
+compatible = "uniwa,v1000-4g"
+
+[nand]
+raw_device = "/dev/ums9117-nand-raw"
+id = 0x61cd
+raw_page_bytes = 2112
+
+[display_brightness]
+backlight = "uniwa-v1000-backlight"
+levels = [0, 3, 7, 10, 14, 17, 20, 24, 27, 31, 34]
+
+[rootfs]
+packages = ["fplinux-audio", "fplinux-font-terminus-8x16", "fplinux-jack"]
+
+[bundle]
+packages = []
+
+[linux]
+config_fragment = "linux/config.fragment"
+memory = { base = 0x80200000, size = 0x03c00000 }
+dtb = "unisoc/ums9117-uniwa-v1000-4g.dtb"
+debug_dtb = "ums9117-uniwa-v1000-4g.dtb"
+patches = []
+forbidden_dtb_markers = ["spi-nand", "mtd", "ubi", "emmc"]
+forbidden_config = [
+  "CONFIG_MTD=y",
+  "CONFIG_UBI=y",
+  "CONFIG_SCSI=y",
+  "CONFIG_ATA=y",
+  "CONFIG_NVME_CORE=y",
+]
+
+[[linux.copies]]
+source = "linux/dts/ums9117-uniwa-v1000-4g.dts"
+destination = "arch/arm/boot/dts/unisoc/ums9117-uniwa-v1000-4g.dts"
+
+[[linux.copies]]
+source = "linux/dts/camera.dtsi"
+destination = "arch/arm/boot/dts/unisoc/uniwa-v1000-4g-camera.dtsi"
+
+[[linux.copies]]
+source = "linux/dts/bluetooth.dtsi"
+destination = "arch/arm/boot/dts/unisoc/uniwa-v1000-4g-bluetooth.dtsi"
+
+[[linux.copies]]
+source = "linux/dts/display.dtsi"
+destination = "arch/arm/boot/dts/unisoc/uniwa-v1000-4g-display.dtsi"
+
+[[linux.copies]]
+source = "linux/drivers/gpu/drm/ums9117/uniwa-v1000-drm.c"
+destination = "drivers/gpu/drm/ums9117/uniwa-v1000-drm.c"
+
+[[linux.appends]]
+source = "linux/arch/arm/mach-ums9117/Kconfig"
+destination = "arch/arm/mach-ums9117/Kconfig"
+
+[[linux.appends]]
+source = "linux/dts/unisoc.Makefile"
+destination = "arch/arm/boot/dts/unisoc/Makefile"
+
+[[linux.appends]]
+source = "linux/drivers/gpu/drm/ums9117/drm.Kconfig"
+destination = "drivers/gpu/drm/Kconfig"
+
+[[linux.appends]]
+source = "linux/drivers/gpu/drm/ums9117/drm.Makefile"
+destination = "drivers/gpu/drm/ums9117/Makefile"
+
+[bootstrap]
+lcd_config = "bootstrap/lcd_config.h"
+image = "uniwa_v1000_4g_linux_bootstrap.bin"
+map = "obj/uniwa_v1000_4g_linux_bootstrap_map.txt"
+dtb_destination = "uniwa_v1000_4g.dtb"
+record_prefix = "UNIWA_V1000_4G"
+
+[adapter]
+spi_mode = 3
+lcd_id = 0x9342
+backlight_channels = "w"
+backlight_level = 0x22
+exec_distance = 0
+session_name = "uniwa-v1000-4g-linux"
+boot_instructions = "Power the phone off, hold D-pad Up, then connect USB while keeping the key pressed."
+
+[device_data]
+parser = "uniwa_device_data.py"
+
+# Extracted from the stock firmware in a NAND backup together with a board report.
+[board_maps]
+firmware = [
+  { source = "pinmap.bin", destination = "pinmap.bin" },
+  { source = "keymap.bin", destination = "keymap.bin" },
+]
+
+[bluetooth]
+firmware = [
+  { source = "uniwa-v1000-4g-cm4.bin", destination = "ums9117/uniwa-v1000-4g-cm4.bin" },
+  { source = "uniwa-v1000-4g-bt-config.bin", destination = "ums9117/uniwa-v1000-4g-bt-config.bin", size = 8 },
+  { source = "uniwa-v1000-4g-bt-sprd.bin", destination = "ums9117/uniwa-v1000-4g-bt-sprd.bin", size = 176 },
+  { source = "uniwa-v1000-4g-bt-rf-config.bin", destination = "ums9117/uniwa-v1000-4g-bt-rf-config.bin", size = 252 },
+]
+
+[audio_profile]
+firmware = [
+  { source = "uniwa-v1000-4g-audio-profile.bin", destination = "fplinux/uniwa-v1000-4g-audio-profile.bin", size = 788 },
+]
+
+[fm_radio]
+firmware = [
+  { source = "uniwa-v1000-4g-fm-config.bin", destination = "fplinux/uniwa-v1000-4g-fm-config.bin", size = 128 },
+]
+
+[microsd]
+linux_patches = []
+
+[microsd.bootstrap]
+source = "bootstrap-microsd"
+image = "uniwa_v1000_sd_stage0.bin"
+map = "obj/uniwa_v1000_sd_stage0_map.txt"
+
+[microsd.uboot]
+defconfig = "uboot/uniwa_v1000_defconfig"
+patches = []
+
+[[microsd.uboot.copies]]
+source = "targets/uniwa-v1000-4g/uboot/ums9117-uniwa-v1000-u-boot.dts"
+destination = "arch/arm/dts/ums9117-uniwa-v1000-u-boot.dts"

@@ -39,6 +39,12 @@
       "name": "BQ 2830L Tank Connect Max",
       "code": null,
       "slug": "phones/bq-2830l-tank-connect-max"
+    },
+    {
+      "id": "uniwa-v1000-4g",
+      "name": "UNIWA V1000 4G",
+      "code": null,
+      "slug": "phones/uniwa-v1000-4g"
     }
   ],
   "features": [
@@ -71,6 +77,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Supported",
           "note": "RAM boot through the green call key and USB loader."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Supported",
+          "note": "RAM boot through D-pad Up and the USB loader, with a readable 320×240 landscape terminal."
         }
       }
     },
@@ -101,6 +111,10 @@
           "note": "Load the RAM bootstrap over USB for every Linux boot."
         },
         "bq-2830l-tank-connect-max": {
+          "status": "Not supported",
+          "note": ""
+        },
+        "uniwa-v1000-4g": {
           "status": "Not supported",
           "note": ""
         }
@@ -139,6 +153,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Supported",
           "note": "Readable 240×320 terminal, physical keypad typing, modifiers, Help and diagnostic-console return."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Partial",
+          "note": "Readable 320×240 landscape terminal in RAM and microSD profiles. The terminal returns after five-second idle RTC wake with a read-only microSD root. Full keypad input and exact color accuracy are unqualified."
         }
       }
     },
@@ -176,6 +194,11 @@
           "hardware": "Present",
           "status": "Supported",
           "note": "System levels 0–10, initially 7; level 0 turns off the light, and brightness increases without visible flicker."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Logical levels 0, 5 and 10 control raw backlight levels 0, 17 and 34 in RAM. Idle RTC sleep darkens the display and restores it with a read-only microSD root. Brightness calibration, physical keypad control and other panel variants are unqualified."
         }
       }
     },
@@ -213,6 +236,11 @@
           "hardware": "Present",
           "status": "Supported",
           "note": "The keypad light turns on with physical key presses and goes out after inactivity."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Keypad illumination is present. Its supply can be switched in software; physical on/off transitions are unqualified."
         }
       }
     },
@@ -249,6 +277,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Supported",
           "note": "USB-NCM with a local IPv4 DHCP connection to the PC."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Supported",
+          "note": "USB-NCM in RAM and microSD profiles."
         }
       }
     },
@@ -281,6 +313,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Supported",
           "note": "Authenticated SSH over the local USB connection."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Supported",
+          "note": "Authenticated SSH over the local USB connection in RAM and microSD profiles."
         }
       }
     },
@@ -313,6 +349,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Supported",
           "note": "Upload and download to RAM; FAT32 and ext4 data-card reads and writes work."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Supported",
+          "note": "USB file transfer to RAM, a microSD data card and the writable microSD system root."
         }
       }
     },
@@ -345,6 +385,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Unknown",
           "note": ""
+        },
+        "uniwa-v1000-4g": {
+          "status": "Unknown",
+          "note": "USB host keyboard input is registered; its use on this target is unqualified."
         }
       }
     },
@@ -377,6 +421,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Supported",
           "note": "The CPU clock tool reports a lower-bound timing estimate."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Supported",
+          "note": "Lower-bound clock estimates in the microSD profile."
         }
       }
     },
@@ -409,6 +457,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Supported",
           "note": "Manual selection of 1 GHz and 768 MHz; 1 GHz is the default."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Supported",
+          "note": "Selection between 768 MHz and 1 GHz in the microSD profile; voltage and sustained-load behavior are unqualified."
         }
       }
     },
@@ -446,6 +498,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "The fixed ROTA peripheral request works; general memory-copy use is unqualified."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Unknown",
+          "status": "Unknown",
+          "note": ""
         }
       }
     },
@@ -483,6 +540,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "RGB565 and NV16 90-degree rotation, including native 640×476 camera frames. Capture with one buffer can overlap rotation of a separately saved native frame; other formats, rotations and sustained concurrency are unqualified."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "NV16 quarter-turn rotation in the microSD profile, with output matching the CPU reference."
         }
       }
     },
@@ -520,6 +582,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "320×240 NV16 encoding and full-size horizontal 4:2:2 decoding. Other geometries, scaled decoding and scaling are unqualified."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Hardware JPEG encoding and decoding at 640×480 and scaling to 320×240 in the microSD profile."
         }
       }
     },
@@ -557,6 +624,11 @@
           "hardware": "Present",
           "status": "Supported",
           "note": "RGB565 and NV16 image presentation on the 240×320 display."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Unknown",
+          "status": "Unknown",
+          "note": "On-phone image presentation is unqualified."
         }
       }
     },
@@ -589,6 +661,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Partial",
           "note": "CPU RGB565 rotation and hardware RGB565/NV16 90-degree rotation. Native capture with one buffer can stay active while hardware rotation processes a separately saved native frame."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Supported",
+          "note": "Hardware NV16 quarter-turn rotation matches the CPU reference in the microSD profile. On-phone preview is unqualified."
         }
       }
     },
@@ -621,6 +697,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Partial",
           "note": "Hardware 320×240 encode, horizontal 4:2:2 decode and 320×240→160×120 NV16 scaling. CPU JPEG also encodes native 640×476 frames; other scaling geometries are unqualified."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Supported",
+          "note": "Hardware JPEG encoding and decoding at 640×480 and scaling to 320×240 in the microSD profile. On-phone presentation is unqualified."
         }
       }
     },
@@ -653,6 +733,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Supported",
           "note": "Native RGB565 and NV16 presentation; display appearance after sleep is unqualified."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Unknown",
+          "note": "On-phone image presentation is unqualified."
         }
       }
     },
@@ -687,6 +771,11 @@
           "note": ""
         },
         "bq-2830l-tank-connect-max": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": ""
+        },
+        "uniwa-v1000-4g": {
           "hardware": "Unknown",
           "status": "Not supported",
           "note": ""
@@ -727,6 +816,11 @@
           "hardware": "Present",
           "status": "Supported",
           "note": "FAT32 and ext4 data-card reads and writes in the RAM profile. Keep the card installed while powered; no hot-swap."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "Data-card reads and writes in the RAM profile; files persist after power is removed. Insert before boot and keep installed while powered; no hot-swap."
         }
       }
     },
@@ -763,6 +857,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Not supported",
           "note": "Only the RAM root is supported on this target."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Supported",
+          "note": "ext4 root grows to fill the card; installed packages and files persist after a cold start. Each start requires the USB loader; keep the card installed while powered."
         }
       }
     },
@@ -800,6 +898,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "Read-only physical NAND backup and fitted-data preparation. No mounting, writing or restoration."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Read-only raw NAND backup and device-data preparation. No mounting, writing or restoration."
         }
       }
     },
@@ -837,6 +940,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "24 and 48 kHz PCM with fitted EQ/ALC; four-contact headphones provide separate left/right speech and silence at volume 0. Jack insertion/removal is detected; other headset compatibility is unqualified."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "An inserted 3.5 mm plug is detected. Stereo playback works with the tested three-contact headphones in the microSD profile. The tested four-contact headset plays each channel through both earpieces. Headset recording, other accessories, plug insertion/removal and automatic switching are unqualified."
         }
       }
     },
@@ -874,6 +982,11 @@
           "hardware": "Present",
           "status": "Supported",
           "note": "PCM speaker output with fitted EQ/ALC. Calibrated gain and speaker-only headphone mute are unqualified."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Audible tone playback through the built-in speaker in the microSD profile. Speech and music quality are unqualified."
         }
       }
     },
@@ -911,6 +1024,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "Built-in mono 48 kHz capture and recognizable speech replay, including simultaneous 48 kHz playback; wired-headset capture is unqualified."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Built-in mono 48 kHz recording captures external tones in RAM and external tones and synthesized speech in the microSD profile. Speech quality and wired-headset recording are unqualified."
         }
       }
     },
@@ -948,6 +1066,11 @@
           "hardware": "Present",
           "status": "Supported",
           "note": "Recognizable station audio through wired headphones with fitted EQ/ALC; playback stops at the selected duration."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Unknown",
+          "status": "Partial",
+          "note": "Band scan and timed headphone playback work in the RAM profile. Recognizable station reception and speaker output are unqualified."
         }
       }
     },
@@ -982,6 +1105,11 @@
           "note": ""
         },
         "bq-2830l-tank-connect-max": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": ""
+        },
+        "uniwa-v1000-4g": {
           "hardware": "Unknown",
           "status": "Not supported",
           "note": ""
@@ -1022,6 +1150,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "RAM pairing, bidirectional OPP, PAN data and Internet ping, and short SBC A2DP playback to a Linux PC. Physical Bluetooth peripherals and sustained operation are unqualified."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Classic pairing with a Linux PC in RAM and microSD profiles; bidirectional OPP in RAM. PAN Internet, short stereo A2DP playback and LE input from a software peer on a Linux PC work in the microSD profile. Physical peripherals, operation after sleep and range are unqualified."
         }
       }
     },
@@ -1059,6 +1192,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "RAM station and access-point modes work with WPA2-PSK/CCMP, DHCP and file transfer in both directions. Station DNS and HTTP Internet access work through a shared PC connection; sustained throughput is unqualified."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": "No supported FPLinux path has been established; physical hardware presence is unknown."
         }
       }
     },
@@ -1096,6 +1234,11 @@
           "hardware": "Present",
           "status": "Supported",
           "note": "Native GC032A 640×476 NV16, rotation 0°, unrotated pixels and capture after RTC wake. CPU JPEG and hardware rotation accept saved native frames. JPEG may process a separate compatible input during capture; one-buffer capture can overlap rotation of a separately saved native frame. Live pipelines, sustained concurrency and absolute color accuracy are unqualified."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Present",
+          "status": "Supported",
+          "note": "BF20A6 native 640×480 NV16 in RAM and microSD profiles, with unrotated pixels. Continuous capture works in RAM; stream stop works in both profiles. Absolute color accuracy, exposure and other sensor controls are unqualified; no preview or photo application."
         }
       }
     },
@@ -1133,6 +1276,11 @@
           "hardware": "Present",
           "status": "Supported",
           "note": "Input presence and USB source classification respond without a battery. Charging is unqualified."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Connected USB power and CDP source classification respond without a battery. Disconnection detection and actual battery charging are unqualified."
         }
       }
     },
@@ -1170,6 +1318,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "Voltage, current and charge counter respond on USB without a battery. Measurements with a battery are unqualified; battery percentage is unavailable."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Voltage, current and charge counter respond on USB without a battery. Battery measurements and calibrated accuracy are unqualified; battery percentage is unavailable."
         }
       }
     },
@@ -1207,6 +1360,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "SoC temperature readings respond; physical accuracy is unqualified."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Temperature readings respond in the microSD profile; accuracy is unqualified."
         }
       }
     },
@@ -1241,6 +1399,11 @@
           "note": "Raw readings are available; channel calibration is unqualified."
         },
         "bq-2830l-tank-connect-max": {
+          "hardware": "Unknown",
+          "status": "Unknown",
+          "note": ""
+        },
+        "uniwa-v1000-4g": {
           "hardware": "Unknown",
           "status": "Unknown",
           "note": ""
@@ -1281,6 +1444,11 @@
           "hardware": "Present",
           "status": "Supported",
           "note": "Clock readback and RTC-alarm wake in USB-powered RAM sessions."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "RTC reads and five-second alarm wake work in an idle microSD session with a read-only system root. Accuracy and retention without USB power are unqualified."
         }
       }
     },
@@ -1315,6 +1483,11 @@
           "note": "No battery level, battery temperature or charge-control interface is provided."
         },
         "bq-2830l-tank-connect-max": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": ""
+        },
+        "uniwa-v1000-4g": {
           "hardware": "Unknown",
           "status": "Not supported",
           "note": ""
@@ -1355,6 +1528,11 @@
           "hardware": "Present",
           "status": "Supported",
           "note": "Separate motor with binary FF_RUMBLE effects; short pulses and stopping are supported."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "The motor responds to bounded FF_RUMBLE pulses in the microSD profile. Haptic strength and operation with a battery are unqualified."
         }
       }
     },
@@ -1392,6 +1570,11 @@
           "hardware": "Unknown",
           "status": "Not supported",
           "note": ""
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": ""
         }
       }
     },
@@ -1424,6 +1607,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Unknown",
           "note": "Battery-only power-off and powerbank output are unqualified."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Unknown",
+          "note": ""
         }
       }
     },
@@ -1456,6 +1643,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Partial",
           "note": "USB-powered s2idle with RTC and red-call-key wake, readable display restoration, mounted ext4 storage and idle Bluetooth retaining its bond and post-wake transfer. Active-radio sleep is unqualified."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Partial",
+          "note": "Five-second idle s2idle with RTC wake returns to the same SSH session in the microSD profile with the system root read-only. Writable-root sleep, active peripherals, keypad wake and battery operation are unqualified."
         }
       }
     },
@@ -1486,6 +1677,10 @@
           "note": ""
         },
         "bq-2830l-tank-connect-max": {
+          "status": "Not supported",
+          "note": ""
+        },
+        "uniwa-v1000-4g": {
           "status": "Not supported",
           "note": ""
         }
@@ -1520,6 +1715,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Not supported",
           "note": "No force-feedback device is enabled for this target."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Unknown",
+          "note": "Application use on this phone is unqualified."
         }
       }
     },
@@ -1552,6 +1751,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Unknown",
           "note": ""
+        },
+        "uniwa-v1000-4g": {
+          "status": "Partial",
+          "note": "Command-line brightness control at logical levels 0, 5 and 10 in RAM. The brightness application displays and changes the logical level; physical keypad control and brightness calibration are unqualified."
         }
       }
     },
@@ -1584,6 +1787,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Unknown",
           "note": ""
+        },
+        "uniwa-v1000-4g": {
+          "status": "Partial",
+          "note": "Native 320×240 landscape demo playback with a microSD system card. Physical game controls and full gameplay are unqualified; there is no game sound."
         }
       }
     },
@@ -1621,6 +1828,11 @@
           "hardware": "Present",
           "status": "Supported",
           "note": "Built-in mono 48 kHz capture with simultaneous 48 kHz playback."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Mono 48 kHz recording captures external tones in RAM and external tones and synthesized speech in the microSD profile; speech quality is unqualified."
         }
       }
     },
@@ -1658,6 +1870,11 @@
           "hardware": "Unknown",
           "status": "Unknown",
           "note": "Wired-headset recording is unqualified."
+        },
+        "uniwa-v1000-4g": {
+          "hardware": "Unknown",
+          "status": "Unknown",
+          "note": "Wired-headset recording is unqualified."
         }
       }
     },
@@ -1690,6 +1907,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Not supported",
           "note": "Output selection is explicit. Jack insertion/removal is detected; output switching remains manual."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Not supported",
+          "note": "An inserted plug is detected. Plug insertion/removal and automatic output switching are unqualified; select outputs explicitly."
         }
       }
     },
@@ -1722,6 +1943,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Supported",
           "note": "Classic pairing in the RAM profile with a Linux PC."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Supported",
+          "note": "Classic pairing with a Linux PC in RAM and microSD profiles."
         }
       }
     },
@@ -1754,6 +1979,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Supported",
           "note": "Bidirectional OPP in the RAM profile; a transfer also works after RTC-woken idle Bluetooth sleep."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Supported",
+          "note": "Bidirectional OPP with a Linux PC in the RAM profile."
         }
       }
     },
@@ -1786,6 +2015,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Partial",
           "note": "RAM PAN DHCP, bidirectional TCP transfer and external IPv4 ping work; DNS, HTTP and sustained operation over PAN are unqualified."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Supported",
+          "note": "PAN DHCP, bidirectional TCP transfer, external IPv4 ping, DNS and HTTPS with a Linux PC in the microSD profile; sustained operation and use after sleep are unqualified."
         }
       }
     },
@@ -1818,6 +2051,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Partial",
           "note": "Short 48 kHz stereo SBC playback to a Linux PC in the RAM profile; long playback, reconnect and suspend are unqualified."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Supported",
+          "note": "Short 48 kHz stereo SBC playback and a repeated connection to a Linux PC in the microSD profile. Long playback and use after sleep are unqualified."
         }
       }
     },
@@ -1850,6 +2087,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Unknown",
           "note": "Physical Bluetooth headsets have not been tested."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Unknown",
+          "note": "Physical Bluetooth headsets are unqualified."
         }
       }
     },
@@ -1882,6 +2123,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Unknown",
           "note": "Physical Bluetooth keyboard input has not been tested."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Partial",
+          "note": "LE keyboard events from a software peer on a Linux PC reach Linux in the microSD profile. Physical keyboards and application input are unqualified."
         }
       }
     },
@@ -1914,6 +2159,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Unknown",
           "note": "Physical Bluetooth mouse input has not been tested."
+        },
+        "uniwa-v1000-4g": {
+          "status": "Partial",
+          "note": "LE pointer movement and button events from a software peer on a Linux PC reach Linux in the microSD profile. Physical mice and application input are unqualified."
         }
       }
     },
@@ -1944,6 +2193,10 @@
           "note": "Calls have no supported FPLinux path."
         },
         "bq-2830l-tank-connect-max": {
+          "status": "Not supported",
+          "note": ""
+        },
+        "uniwa-v1000-4g": {
           "status": "Not supported",
           "note": ""
         }
@@ -1978,6 +2231,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Not supported",
           "note": ""
+        },
+        "uniwa-v1000-4g": {
+          "status": "Not supported",
+          "note": ""
         }
       }
     },
@@ -2010,6 +2267,10 @@
         "bq-2830l-tank-connect-max": {
           "status": "Not supported",
           "note": ""
+        },
+        "uniwa-v1000-4g": {
+          "status": "Not supported",
+          "note": ""
         }
       }
     },
@@ -2040,6 +2301,10 @@
           "note": "Optional CPU MPEG-4 Part 2, H.263 and H.264 decoding; device use is untested."
         },
         "bq-2830l-tank-connect-max": {
+          "status": "Unknown",
+          "note": ""
+        },
+        "uniwa-v1000-4g": {
           "status": "Unknown",
           "note": ""
         }
