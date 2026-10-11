@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 
 from fplinux_cli.common import sha256_bytes
 from fplinux_cli.device_data.audio_profile import AUDIO_RECORD_SIZES, prepare_headset_gain_profile
-from fplinux_cli.device_data.bq2830l_radio_nv import read_running_nv_record
 from fplinux_cli.device_data.formats import (
     DeviceDataPreparation,
     PhysicalNand,
@@ -19,6 +18,7 @@ from fplinux_cli.device_data.formats import (
     nv_checksum,
     redundant_vbm_partitions,
 )
+from fplinux_cli.device_data.running_nv import read_running_nv_record
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 from fplinux_cli.common import ROOT
-from fplinux_cli.device_data.bq2830l_radio_nv import read_running_nv_record
 from fplinux_cli.device_data.formats import PhysicalNand
+from fplinux_cli.device_data.running_nv import read_running_nv_record
 
 if TYPE_CHECKING:
     from types import ModuleType

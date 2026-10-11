@@ -54,8 +54,8 @@ def runtime_python_files(config: dict[str, Any]) -> tuple[str, ...]:
     groups = config["device_data"]["groups"]
     if "bluetooth" in groups or "fm-radio" in groups:
         selected.extend(_CM4_PYTHON)
-    if "wcn-firmware" in groups:
-        selected.append("device_data/bq2830l_radio_nv.py")
+    if "wcn-firmware" in groups or "bluetooth" in groups:
+        selected.append("device_data/running_nv.py")
     return tuple(f"scripts/fplinux_cli/{name}" for name in selected)
 
 

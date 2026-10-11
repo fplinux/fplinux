@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Read current short NV records through the BQ external-radio storage format."""
+"""Read current short NV records through indexed physical NAND storage."""
 
 from __future__ import annotations
 
