@@ -13,6 +13,7 @@ from typing import NoReturn
 
 from fplinux_cli.common import (
     canonical_json_bytes,
+    is_sha256,
     read_json_object,
     replace_file_atomically,
     sha256_file,
@@ -41,16 +42,8 @@ class KbuildPlan:
     outputs: tuple[str, ...]
 
 
-def _is_sha256(value: object) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 64
-        and all(character in "0123456789abcdef" for character in value)
-    )
-
-
 def _require_digest(value: object, field: str) -> str:
-    if not _is_sha256(value):
+    if not is_sha256(value):
         _error(f"{field} must be a lowercase SHA-256 digest")
     return str(value)
 

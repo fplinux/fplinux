@@ -8,7 +8,7 @@ import tomllib
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from fplinux_cli.common import ROOT, fail
+from fplinux_cli.common import ROOT, fail, is_sha256
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -16,16 +16,8 @@ if TYPE_CHECKING:
 PACKAGE_ID = re.compile(r"[a-z0-9][a-z0-9+._-]*")
 
 
-def _is_sha256(value: object) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 64
-        and all(character in "0123456789abcdef" for character in value)
-    )
-
-
 def _sha256(value: object, name: str) -> str:
-    if not _is_sha256(value):
+    if not is_sha256(value):
         fail(f"{name} must be a lowercase SHA-256 digest")
     return str(value)
 

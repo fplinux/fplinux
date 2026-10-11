@@ -6,9 +6,9 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from fplinux_cli.common import fail, replace_file_atomically, sha256_file
+from fplinux_cli.common import fail, is_sha256, replace_file_atomically, sha256_file
 
-from .lock import _is_sha256, _sha256
+from .lock import _sha256
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -47,13 +47,13 @@ def _read_receipt(output: Path) -> dict[str, object] | None:
         return None
     if not isinstance(raw, dict) or set(raw) != {"recipe", "rootfs", "initramfs"}:
         return None
-    if not _is_sha256(raw.get("recipe")):
+    if not is_sha256(raw.get("recipe")):
         return None
     rootfs = raw.get("rootfs")
     if (
         not isinstance(rootfs, dict)
         or set(rootfs) != {"sha256", "size"}
-        or not _is_sha256(rootfs.get("sha256"))
+        or not is_sha256(rootfs.get("sha256"))
         or not isinstance(rootfs.get("size"), int)
         or isinstance(rootfs.get("size"), bool)
         or int(rootfs["size"]) < 0
@@ -63,7 +63,7 @@ def _read_receipt(output: Path) -> dict[str, object] | None:
     if initramfs is not None and (
         not isinstance(initramfs, dict)
         or set(initramfs) != {"sha256", "size"}
-        or not _is_sha256(initramfs.get("sha256"))
+        or not is_sha256(initramfs.get("sha256"))
         or not isinstance(initramfs.get("size"), int)
         or isinstance(initramfs.get("size"), bool)
         or int(initramfs["size"]) < 0

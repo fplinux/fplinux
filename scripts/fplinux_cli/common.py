@@ -57,6 +57,15 @@ def sha256_file(path: Path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def is_sha256(value: object) -> bool:
+    """Recognize a canonical lowercase SHA-256 digest without choosing an error policy."""
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
 def canonical_json_bytes(value: object) -> bytes:
     """Encode deterministic JSON receipts and causal manifests."""
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)

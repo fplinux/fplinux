@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from fplinux_cli.artifacts.records import regular_file_record
-from fplinux_cli.common import canonical_json_bytes, sha256_file
+from fplinux_cli.common import canonical_json_bytes, is_sha256, sha256_file
 from fplinux_cli.manifests.identity import BUILD_TYPES
 
 BUILD_MANIFEST_NAME = "build-manifest.json"
@@ -157,7 +157,7 @@ def publish_bundle_generation(  # noqa: PLR0913 -- generation and selected slot 
     build_type: str = "release",
 ) -> Path:
     """Rename a complete private staging directory to its immutable identity."""
-    if not _is_sha256(generation):
+    if not is_sha256(generation):
         message = "bundle generation is not a SHA-256 digest"
         raise BundleStateError(message)
     generations = _bundle_generations_directory(
@@ -205,7 +205,7 @@ def publish_bundle_generation(  # noqa: PLR0913 -- generation and selected slot 
 
 def pointer_bytes(generation: str, manifest_sha256: str) -> bytes:
     """Encode one current-pointer payload."""
-    if not _is_sha256(generation) or not _is_sha256(manifest_sha256):
+    if not is_sha256(generation) or not is_sha256(manifest_sha256):
         message = "current bundle pointer contains an invalid digest"
         raise BundleStateError(message)
     return canonical_json_bytes({"generation": generation, "manifest_sha256": manifest_sha256})
@@ -225,7 +225,7 @@ def publish_current_bundle(
     )
     if (
         generation_path.parent != generations
-        or not _is_sha256(generation_path.name)
+        or not is_sha256(generation_path.name)
         or generation_path.is_symlink()
         or not generation_path.is_dir()
     ):
@@ -278,7 +278,7 @@ def discard_superseded_bundle_generations(
     selected = generations / current.generation
     if (
         current.path != selected
-        or not _is_sha256(current.generation)
+        or not is_sha256(current.generation)
         or selected.is_symlink()
         or not selected.is_dir()
     ):
@@ -310,7 +310,7 @@ def resolve_current_bundle(
     except (OSError, UnicodeDecodeError, ValueError, KeyError, TypeError) as error:
         message = "current bundle pointer is missing or invalid"
         raise BundleStateError(message) from error
-    if not _is_sha256(generation) or not _is_sha256(expected_manifest):
+    if not is_sha256(generation) or not is_sha256(expected_manifest):
         message = "current bundle pointer contains an invalid digest"
         raise BundleStateError(message)
     path = bundle_generations(output, target, profile, build_type=build_type) / generation
@@ -416,11 +416,3 @@ def _validate_manifest(
         message = "current bundle manifest has the wrong slot identity"
         raise BundleStateError(message)
     return manifest
-
-
-def _is_sha256(value: object) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 64
-        and all(character in "0123456789abcdef" for character in value)
-    )
