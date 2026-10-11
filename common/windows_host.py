@@ -506,7 +506,7 @@ class WindowsTransport:
         self.bundle = bundle
 
     def _ssh_arguments(
-        self, session: dict[str, Any], command: str, *, connect_timeout: int = 5
+        self, session: dict[str, Any], command: str | None = None, *, connect_timeout: int = 5
     ) -> list[str]:
         options = {
             "BatchMode": "yes",
@@ -542,7 +542,10 @@ class WindowsTransport:
             if name in {"IdentityAgent", "ProxyCommand", "ProxyJump"}:
                 rendered = "none"
             argv.extend(["-o", f"{name}={rendered}"])
-        return [*argv, f"root@{session['phone_address']}", command]
+        argv.append(f"root@{session['phone_address']}")
+        if command is not None:
+            argv.append(command)
+        return argv
 
     def _require_bound(self, session: dict[str, Any]) -> None:
         directory = Path(session["directory"])
@@ -574,6 +577,21 @@ class WindowsTransport:
             creationflags=_console_creation_flags(),
         )
 
+    def open_shell(self, session: dict[str, Any]) -> int:
+        """Keep SSH on the current terminal and reap it when the caller is cancelled."""
+        self._require_bound(session)
+        if not os.isatty(0):
+            fail("Interactive SSH requires a terminal")
+        argv = self._ssh_arguments(session)
+        argv[1:1] = ["-tt"]
+        process = subprocess.Popen(argv, creationflags=0)
+        try:
+            return process.wait()
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+
     def stream_remote(
         self,
         session: dict[str, Any],
@@ -581,12 +599,18 @@ class WindowsTransport:
         destination: BinaryIO,
         *,
         timeout: float,
+        progress: Callable[[int], None] | None = None,
     ) -> None:
         """Keep binary stdout separate from diagnostics and terminate a timed-out reader."""
         if timeout <= 0:
             message = "SSH stream timeout must be positive"
             raise ValueError(message)
         self._require_bound(session)
+        start = 0
+        if progress is not None:
+            destination.flush()
+            start = os.lseek(destination.fileno(), 0, os.SEEK_CUR)
+        deadline = time.monotonic() + timeout
         with tempfile.TemporaryFile(mode="w+b") as stderr:
             process = subprocess.Popen(
                 self._ssh_arguments(session, command),
@@ -596,14 +620,26 @@ class WindowsTransport:
                 creationflags=_console_creation_flags(),
             )
             try:
-                try:
-                    status = process.wait(timeout=timeout)
-                except subprocess.TimeoutExpired:
-                    fail(f"SSH remote command timed out after {timeout:g}s")
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        fail(f"SSH remote command timed out after {timeout:g}s")
+                    try:
+                        status = process.wait(
+                            timeout=remaining if progress is None else min(0.1, remaining)
+                        )
+                        break
+                    except subprocess.TimeoutExpired:
+                        if progress is not None:
+                            progress(
+                                max(0, os.lseek(destination.fileno(), 0, os.SEEK_CUR) - start)
+                            )
             finally:
                 if process.poll() is None:
                     process.kill()
                     process.wait()
+                if progress is not None:
+                    progress(max(0, os.lseek(destination.fileno(), 0, os.SEEK_CUR) - start))
             if status:
                 detail = self.bundle.ssh._stream_stderr_detail(stderr)  # noqa: SLF001
                 fail(

@@ -7,7 +7,10 @@ import hashlib
 import json
 import os
 import secrets
+import signal
 import subprocess
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -36,7 +39,8 @@ def windows_console_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
         *arguments: Any,  # noqa: ANN401 -- transparent subprocess forwarding.
         **options: Any,  # noqa: ANN401 -- transparent subprocess forwarding.
     ) -> subprocess.Popen[Any]:
-        assert options.pop("creationflags", 0) == 0x08000000
+        expected = 0 if "-tt" in arguments[0] else 0x08000000
+        assert options.pop("creationflags", 0) == expected
         return native_popen(*arguments, **options, creationflags=0)
 
     monkeypatch.setattr(subprocess, "Popen", launch)
@@ -129,6 +133,88 @@ def test_binary_stream_preserves_bytes_and_excludes_stderr(tmp_path: Path) -> No
     with output.open("w+b") as destination:
         transport.stream_remote(session, "binary", destination, timeout=3)
     assert output.read_bytes() == b"\x00\r\n\xff\x80"
+
+
+def test_binary_stream_progress_reports_written_bytes(tmp_path: Path) -> None:
+    transport = native_process_transport(tmp_path)
+    session = endpoint_session(tmp_path / "session")
+    observed: list[int] = []
+    output = tmp_path / "nand.bin"
+
+    with output.open("w+b") as destination:
+        transport.stream_remote(
+            session, "binary", destination, timeout=3, progress=observed.append
+        )
+
+    assert observed[-1] == 5
+    assert output.read_bytes() == b"\x00\r\n\xff\x80"
+
+
+def test_binary_stream_progress_counts_overwrites_without_counting_the_existing_tail(
+    tmp_path: Path,
+) -> None:
+    transport = native_process_transport(tmp_path)
+    session = endpoint_session(tmp_path / "session")
+    observed: list[int] = []
+    output = tmp_path / "existing.bin"
+    output.write_bytes(b"keepabcdefgh")
+
+    with output.open("r+b") as destination:
+        destination.seek(4)
+        transport.stream_remote(
+            session, "binary", destination, timeout=3, progress=observed.append
+        )
+
+    assert observed[-1] == 5
+    assert output.read_bytes() == b"keep\x00\r\n\xff\x80fgh"
+
+
+@pytest.mark.parametrize("status", [0, 7, 130])
+def test_interactive_shell_inherits_terminal_output_and_preserves_exit_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], status: int
+) -> None:
+    """The SSH process is real; its remote peer and terminal admission are controlled."""
+    transport = native_process_transport(tmp_path)
+    session = endpoint_session(tmp_path / "session")
+    monkeypatch.setattr(os, "isatty", lambda _descriptor: True)
+    monkeypatch.setenv("FPLINUX_TEST_SHELL_STATUS", str(status))
+
+    assert transport.open_shell(session) == status
+
+    captured = capfd.readouterr()
+    assert captured.out == "controlled shell output\n"
+    assert captured.err == "controlled shell diagnostic\n"
+
+
+def test_interactive_shell_cancellation_reaps_the_owned_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Interrupt the Python owner while its real SSH stand-in waits on the terminal."""
+    transport = native_process_transport(tmp_path)
+    session = endpoint_session(tmp_path / "session")
+    pid_file = tmp_path / "shell.pid"
+    monkeypatch.setattr(os, "isatty", lambda _descriptor: True)
+    monkeypatch.setenv("FPLINUX_TEST_SHELL_PID", str(pid_file))
+    cancelled = threading.Event()
+
+    def cancel_after_launch() -> None:
+        deadline = time.monotonic() + 3
+        while not cancelled.is_set() and time.monotonic() < deadline:
+            if pid_file.exists():
+                os.kill(os.getpid(), signal.SIGINT)
+                return
+            cancelled.wait(0.01)
+
+    trigger = threading.Thread(target=cancel_after_launch)
+    trigger.start()
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            transport.open_shell(session)
+    finally:
+        cancelled.set()
+        trigger.join()
+
+    assert not (Path("/proc") / pid_file.read_text()).exists()
 
 
 def test_remote_command_keeps_captured_output_without_a_console(tmp_path: Path) -> None:
