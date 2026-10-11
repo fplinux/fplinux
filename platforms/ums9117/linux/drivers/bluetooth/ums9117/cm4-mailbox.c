@@ -69,7 +69,6 @@ struct sbuf_snapshot {
 
 struct sbuf_stream {
 	bool enabled;
-	bool attached;
 	/* One delivery in flight; pending DATA/SPACE notifications per ring. */
 	u32 pending;
 	u32 active_event;
@@ -548,7 +547,6 @@ int ums9117_cm4_mailbox_h4_begin(void)
 		ret = -EINPROGRESS;
 		goto out;
 	}
-	mailbox.stream.attached = true;
 	mailbox.stream.enabled = true;
 out:
 	local_irq_restore(flags);
@@ -571,7 +569,7 @@ int ums9117_cm4_mailbox_h4_continue(void)
 		goto out;
 	}
 	if (!mailbox.prepared || mailbox.stopped || !mailbox.done.delivered ||
-	    !mailbox.stream.enabled || !mailbox.stream.attached) {
+	    !mailbox.stream.enabled) {
 		ret = -EINVAL;
 		goto out;
 	}

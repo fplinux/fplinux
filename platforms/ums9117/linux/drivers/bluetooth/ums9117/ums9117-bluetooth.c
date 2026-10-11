@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* UMS9117 CM4 Bluetooth controller. */
 
-#include <crypto/sha2.h>
 #include <linux/bitops.h>
 #include <linux/cpu.h>
 #include <linux/delay.h>
@@ -369,8 +368,6 @@ static int missing_firmware_group(struct ums9117_bluetooth *bt)
 static int load_firmware(struct ums9117_bluetooth *bt)
 {
 	const struct firmware *firmware;
-	u8 digest[SHA256_DIGEST_SIZE];
-	u8 readback_digest[SHA256_DIGEST_SIZE];
 	void *copy;
 	int ret;
 
@@ -385,7 +382,6 @@ static int load_firmware(struct ums9117_bluetooth *bt)
 		ret = -EBADMSG;
 		goto out;
 	}
-	sha256(firmware->data, firmware->size, digest);
 	ret = ums9117_cm4_setup_prepare(bt->dev, bt->firmware_names + 1);
 	if (ret == -ENOENT)
 		ret = -EINVAL;
@@ -400,8 +396,7 @@ static int load_firmware(struct ums9117_bluetooth *bt)
 		    firmware->size);
 	cm4_barrier();
 	memcpy_fromio(copy, bt->low + UMS9117_CM4_IMAGE_OFFSET, firmware->size);
-	sha256(copy, firmware->size, readback_digest);
-	if (memcmp(digest, readback_digest, sizeof(digest)))
+	if (memcmp(firmware->data, copy, firmware->size))
 		ret = -EIO;
 	kvfree(copy);
 out:
