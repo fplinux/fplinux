@@ -105,6 +105,8 @@ class HeadsetGainProfileTests:
         parsers that choose these values for a phone are not executed here.
         """
         downloaded, protected = record_factory()
+        original_downloaded = downloaded.copy()
+        original_protected = protected.copy()
 
         result = audio_profile.prepare_headset_gain_profile(
             downloaded,
@@ -116,9 +118,13 @@ class HeadsetGainProfileTests:
 
         assert result.prepared == {f"{prefix}-audio-profile.bin": expected}
         assert len(expected) == size
-        assert result.originals[f"{prefix}-nv425.bin"] == downloaded[425]
-        assert result.originals[f"{prefix}-nv426.bin"] == downloaded[426]
-        assert result.originals[f"{prefix}-nv440.bin"] == downloaded[440]
+        assert result.originals == {
+            f"{prefix}-nv425.bin": original_downloaded[425],
+            f"{prefix}-nv426.bin": original_downloaded[426],
+            f"{prefix}-nv440.bin": original_downloaded[440],
+        }
+        assert downloaded == original_downloaded
+        assert protected == original_protected
 
     def test_speaker_profiles_select_handsfree_and_headfree_by_name_after_reordering(
         self,
@@ -133,6 +139,8 @@ class HeadsetGainProfileTests:
             arm[1072 : 2 * 1072] = handsfree
             arm[3 * 1072 : 4 * 1072] = headfree
             records[426] = bytes(arm)
+        original_downloaded = downloaded.copy()
+        original_protected = protected.copy()
 
         result = audio_profile.prepare_headset_gain_profile(
             downloaded,
@@ -145,6 +153,57 @@ class HeadsetGainProfileTests:
             b"\x1a\x00\x38\x34\x30\x2c\x28\x24\x20\x1c\x1b"
             b"\x06\x00\x07\x4e\x47\x3b\x35\x2f\x2a\x24\x1f\x1a" + FITTED_NOKIA_PROCESSING_SECTION
         )
+        assert downloaded == original_downloaded
+        assert protected == original_protected
+
+    @pytest.mark.parametrize(
+        ("mode_offset", "analog", "all_levels", "error"),
+        [
+            pytest.param(
+                0, 6, False, "Headset PGA levels 1..9 differ", id="headset-differing-pga-first"
+            ),
+            pytest.param(
+                0,
+                8,
+                True,
+                "Headset PGA level is outside supported range 2..7",
+                id="headset-out-of-range-pga-first",
+            ),
+            pytest.param(
+                3 * 1072,
+                1,
+                False,
+                "Handsfree digital gain exceeds 127",
+                id="handsfree-digital-first",
+            ),
+            pytest.param(
+                1072,
+                0x71,
+                True,
+                "Headfree digital gain exceeds 127",
+                id="headfree-digital-first",
+            ),
+        ],
+    )
+    def test_modes_keep_the_first_gain_error_when_analog_and_digital_are_invalid(
+        self, mode_offset: int, analog: int, *, all_levels: bool, error: str
+    ) -> None:
+        """Headset validates its PGA first; speaker modes validate their digital gain first."""
+        downloaded, protected = inoi_audio_records()
+        for records in (downloaded, protected):
+            arm = bytearray(records[426])
+            for level in range(9 if all_levels else 1):
+                struct.pack_into("<H", arm, mode_offset + 68 + 4 * level, analog)
+            struct.pack_into("<H", arm, mode_offset + 70, 128)
+            records[426] = bytes(arm)
+
+        with pytest.raises(ValueError, match=error):
+            audio_profile.prepare_headset_gain_profile(
+                downloaded,
+                protected,
+                prefix="phone",
+                machine_compatible=b"example,phone",
+            )
 
     @pytest.mark.parametrize(
         ("offset", "replacement", "change_both", "error"),

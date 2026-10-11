@@ -15,7 +15,6 @@ from fplinux_cli.device_data.formats import (
     PhysicalNand,
     PreparedGroup,
     RequiredPartition,
-    fixed_nv_records,
     nv_checksum,
 )
 
@@ -39,14 +38,6 @@ REQUIRED_BLUETOOTH_PARTITIONS = {
     CM4_PARTITION_ID: RequiredPartition("CM4", 0x100),
     RUNNING_NV_PARTITION_ID: RequiredPartition("RunningNV", 0x001),
 }
-
-
-def fixed_nv(partition: bytes) -> dict[int, bytes]:
-    """Read the three Bluetooth records from a complete sorted NV1 stream."""
-    return fixed_nv_records(
-        partition,
-        {identifier: size for identifier, (_filename, size) in NV_FILES.items()},
-    )
 
 
 def verify_running_nv(partition: bytes, fixed: dict[int, bytes]) -> None:
@@ -117,21 +108,3 @@ def prepare_bluetooth_from_settings(
     prepared = dict(originals)
     prepared[cm4_filename] = prepared_cm4
     return PreparedGroup(originals=originals, prepared=prepared)
-
-
-def prepare_bluetooth_from_partitions(
-    nand: PhysicalNand,
-    partitions: dict[int, tuple[int, int]],
-    *,
-    prefix: str,
-) -> PreparedGroup:
-    """Extract the common CM4/NV set from a target's admitted physical partitions."""
-    downloaded = fixed_nv(nand.partition_bytes(partitions[DOWNLOADED_NV_PARTITION_ID]))
-    protected = fixed_nv(nand.partition_bytes(partitions[PROTECT_NV_PARTITION_ID]))
-    return prepare_bluetooth_from_records(
-        nand,
-        partitions,
-        prefix=prefix,
-        downloaded=downloaded,
-        protected=protected,
-    )

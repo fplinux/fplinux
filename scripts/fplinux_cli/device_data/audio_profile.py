@@ -167,12 +167,16 @@ def _app0_volume_levels(mode: bytes, name: str) -> tuple[list[int], list[int]]:
         raise ValueError(f"audio-profile {name} app 0 has {level_count} levels; expected 9")
     levels = struct.unpack_from("<9I", mode, _MODE_LEVELS_OFFSET)
     digital_gain = [level >> 16 for level in levels]
+    analog_levels = [level & 0xFFFF for level in levels]
+    return digital_gain, analog_levels
+
+
+def _validate_digital_gains(digital_gain: Sequence[int], name: str) -> None:
+    """Require bounded, non-increasing digital gains from volume level 1 to level 9."""
     if any(gain > 127 for gain in digital_gain):
         raise ValueError(f"audio-profile {name} digital gain exceeds 127")
     if any(first < second for first, second in pairwise(digital_gain)):
         raise ValueError(f"audio-profile {name} digital gain is not monotonically decreasing")
-    analog_levels = [level & 0xFFFF for level in levels]
-    return digital_gain, analog_levels
 
 
 def _handsfree_speaker_fields(mode: bytes) -> bytes:
@@ -182,6 +186,7 @@ def _handsfree_speaker_fields(mode: bytes) -> bytes:
         message = "audio-profile Handsfree does not select speaker-only playback"
         raise ValueError(message)
     digital_gain, analog_levels = _app0_volume_levels(mode, "Handsfree")
+    _validate_digital_gains(digital_gain, "Handsfree")
     if any(analog_levels):
         message = "audio-profile Handsfree PA gain is not the supported zero setting"
         raise ValueError(message)
@@ -205,6 +210,7 @@ def _headfree_playback_fields(mode: bytes, *, headphones_only: bool) -> bytes:
         message = "audio-profile Headfree does not select headphone-and-speaker playback"
         raise ValueError(message)
     digital_gain, analog_levels = _app0_volume_levels(mode, "Headfree")
+    _validate_digital_gains(digital_gain, "Headfree")
     if len(set(analog_levels)) != 1:
         message = "audio-profile Headfree analog levels 1..9 differ"
         raise ValueError(message)
@@ -240,6 +246,7 @@ def _headphone_fed_speaker_fields(
         if play_dev_set & _PLAY_ROUTE_MASK != _PLAY_HEADPHONES_ONLY:
             raise ValueError(f"audio-profile {name} does not select headphone-only codec playback")
         digital_gain, analog_levels = _app0_volume_levels(mode, name)
+        _validate_digital_gains(digital_gain, name)
         if any(level != headphone_pga for level in analog_levels):
             raise ValueError(f"audio-profile {name} does not share the Headset headphone PGA")
         if name == "Handsfree":
@@ -661,29 +668,15 @@ def prepare_headset_gain_profile(  # noqa: PLR0913 -- target identity and topolo
         message = "audio-profile Headset NV426 differs between DownloadedNV and ProtectNV"
         raise ValueError(message)
 
-    valid_app_count = struct.unpack_from("<H", arm_modes, 36)[0]
-    if valid_app_count < 1:
-        message = "audio-profile Headset has no app 0"
-        raise ValueError(message)
-    app0 = 44
-    level_count = struct.unpack_from("<H", arm_modes, app0 + 18)[0]
-    if level_count != 9:
-        raise ValueError(f"audio-profile Headset app 0 has {level_count} levels; expected 9")
-    levels = struct.unpack_from("<9I", arm_modes, app0 + 24)
-    headphone_pga = [value & 0xFFFF for value in levels]
+    headset = arm_modes[:_ARM_MODE_SIZE]
+    digital_gain, headphone_pga = _app0_volume_levels(headset, "Headset")
     if len(set(headphone_pga)) != 1:
         message = "audio-profile Headset PGA levels 1..9 differ"
         raise ValueError(message)
     if not 2 <= headphone_pga[0] <= 7:
         message = "audio-profile Headset PGA level is outside supported range 2..7"
         raise ValueError(message)
-    digital_gain = [value >> 16 for value in levels]
-    if any(level > 127 for level in digital_gain):
-        message = "audio-profile Headset digital gain exceeds 127"
-        raise ValueError(message)
-    if any(first < second for first, second in pairwise(digital_gain)):
-        message = "audio-profile Headset digital gain is not monotonically decreasing"
-        raise ValueError(message)
+    _validate_digital_gains(digital_gain, "Headset")
 
     profile = struct.pack(
         "<8s24sB9B",
@@ -692,7 +685,6 @@ def prepare_headset_gain_profile(  # noqa: PLR0913 -- target identity and topolo
         headphone_pga[0],
         *digital_gain,
     )
-    headset = arm_modes[:_ARM_MODE_SIZE]
     handsfree = _admitted_mode(arm_modes, protected_arm_modes, "Handsfree")
     headfree = _admitted_mode(arm_modes, protected_arm_modes, "Headfree")
     if speaker_from_headphones:
