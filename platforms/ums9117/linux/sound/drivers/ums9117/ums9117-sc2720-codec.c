@@ -752,7 +752,7 @@ static int ums9117_sc2720_codec_restore(struct ums9117_sc2720_codec *codec)
 }
 
 static int ums9117_sc2720_codec_pulse(struct ums9117_sc2720_codec *codec,
-				      u32 offset, u16 mask, u16 inactive)
+				      u32 offset, u16 mask)
 {
 	int ret;
 
@@ -760,7 +760,7 @@ static int ums9117_sc2720_codec_pulse(struct ums9117_sc2720_codec *codec,
 	if (ret)
 		return ret;
 	udelay(1);
-	return regmap_update_bits(codec->regmap, offset, mask, inactive);
+	return regmap_update_bits(codec->regmap, offset, mask, 0);
 }
 
 static int ums9117_sc2720_codec_power_up(struct ums9117_sc2720_codec *codec)
@@ -773,7 +773,7 @@ static int ums9117_sc2720_codec_power_up(struct ums9117_sc2720_codec *codec)
 		return ret;
 	if (!codec->capture_dirty) {
 		ret = ums9117_sc2720_codec_pulse(codec, SC2720_SOFT_RST0,
-						 SC2720_AUD_RESETS, 0);
+						 SC2720_AUD_RESETS);
 		if (ret)
 			return ret;
 	}
@@ -818,7 +818,7 @@ static int ums9117_sc2720_codec_power_up(struct ums9117_sc2720_codec *codec)
 		return ret;
 	if (!codec->capture_dirty) {
 		ret = ums9117_sc2720_codec_pulse(codec, SC2720_ANA_CLK0,
-						 SC2720_AD_CLK_RST, 0);
+						 SC2720_AD_CLK_RST);
 		if (ret)
 			return ret;
 	}
@@ -827,12 +827,12 @@ static int ums9117_sc2720_codec_power_up(struct ums9117_sc2720_codec *codec)
 				 SC2720_DA_CLK_EN | SC2720_DRV_CLK_EN);
 	if (ret)
 		return ret;
-	ret = ums9117_sc2720_codec_pulse(codec, SC2720_ANA_DCL0, SC2720_DCL_RST,
-					 0);
+	ret = ums9117_sc2720_codec_pulse(codec, SC2720_ANA_DCL0,
+					 SC2720_DCL_RST);
 	if (ret)
 		return ret;
 	ret = ums9117_sc2720_codec_pulse(codec, SC2720_ANA_DCL0,
-					 SC2720_DPOP_AUTO_RST, 0);
+					 SC2720_DPOP_AUTO_RST);
 	if (ret)
 		return ret;
 	if (!codec->capture_dirty) {
@@ -1383,7 +1383,7 @@ static int power_up_capture(struct ums9117_sc2720_codec *codec)
 	if (ret)
 		return ret;
 	ret = ums9117_sc2720_codec_pulse(codec, SC2720_ANA_CLK0,
-					 SC2720_AD_CLK_RST, 0);
+					 SC2720_AD_CLK_RST);
 	if (ret)
 		return ret;
 	ret = regmap_update_bits(codec->regmap, SC2720_AUD_CFGA_CLK_EN,

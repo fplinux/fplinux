@@ -505,7 +505,6 @@ static int ums9117_pcm_shutdown_capture_locked(struct ums9117_pcm *audio)
 	ret = ums9117_sc2720_codec_disable_capture(audio->codec);
 	if (ret)
 		return ret;
-	ums9117_audio_stop_capture(audio->digital);
 	ums9117_audio_release_capture(audio->digital);
 	audio->capture_prepared = false;
 	return 0;
