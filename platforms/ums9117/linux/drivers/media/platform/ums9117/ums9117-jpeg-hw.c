@@ -1987,9 +1987,16 @@ jpeg_scale_configure(struct ums9117_jpeg_hw *hw,
 		     const struct ums9117_jpeg_scale_geometry *geometry,
 		     unsigned long deadline)
 {
+	unsigned long flags;
 	int ret;
 
 	jpeg_reset_submission(hw);
+	/* Capture leaves shared DCAM state outside the JPEG reset domain. */
+	writel(JPEG_DCAM_RESET, hw->reset_set);
+	writel(JPEG_DCAM_RESET, hw->reset_clear);
+	spin_lock_irqsave(&hw->lock, flags);
+	hw->stats.operation[JPEG_OPERATION_SCALE].resets++;
+	spin_unlock_irqrestore(&hw->lock, flags);
 	ret = jpeg_scale_owner(hw, true, deadline);
 	if (ret)
 		return ret;
