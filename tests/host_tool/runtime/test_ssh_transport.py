@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import shutil
 import subprocess
 import tempfile
@@ -26,6 +27,49 @@ if TYPE_CHECKING:
 
 _SSH_CONFIG_TIMEOUT_SECONDS = 10
 _IDLE_EXPIRY_TIMEOUT_SECONDS = 5
+
+
+def test_archive_preparation_uses_its_private_directory_without_xdg_or_sftp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Real key generation and personalization stay inside the supplied archive session root."""
+    root = tmp_path / "data/session"
+    root.mkdir(parents=True, mode=0o700)
+    image = tmp_path / "ramboot.bin"
+    original = b"DHTB" + b"\0" * 1532
+    image.write_bytes(original)
+    descriptor = {
+        "offset": 1024,
+        "bytes": 512,
+        "template_sha256": hashlib.sha256(b"\0" * 512).hexdigest(),
+    }
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    monkeypatch.setattr(ssh_transport, "_host_route_networks", lambda _tool: set())
+    find_tool = shutil.which
+    monkeypatch.setattr(shutil, "which", lambda name: None if name == "sftp" else find_tool(name))
+
+    session = ssh_transport.prepare_session(
+        image,
+        descriptor,
+        "phone",
+        {"vendor_id": 0x0525, "product_id": 0xA4A6, "wait_seconds": 1},
+        runtime_root=root,
+    )
+    directory = Path(session["private_key"]).parent
+    personalized = Path(session["image"])
+    assert directory.parent.parent == root
+    assert session["runtime_root"] == str(root)
+    assert directory.stat().st_mode & 0o777 == 0o700
+    assert Path(session["private_key"]).stat().st_mode & 0o777 == 0o600
+    assert personalized.stat().st_mode & 0o777 == 0o600
+    assert personalized.read_bytes()[:1024] == original[:1024]
+    assert personalized.read_bytes()[1024:1032] == b"FPLSESS\0"
+    assert image.read_bytes() == original
+
+    ssh_transport.finish_session(session)
+
+    assert not directory.exists()
+    assert image.read_bytes() == original
 
 
 class SshTransportOpenSshConfigTests:

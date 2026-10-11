@@ -114,6 +114,25 @@ def _runtime_root() -> Path:
     return _private_directory(base / "fplinux")
 
 
+def _selected_runtime_root(path: Path | None) -> Path:
+    """Use the caller's private session directory or the CLI's volatile runtime."""
+    if path is None:
+        return _runtime_root()
+    if not path.is_absolute():
+        fail("session runtime directory must be absolute")
+    return _private_directory(path)
+
+
+def _session_runtime_root(session: dict[str, Any]) -> Path:
+    """Keep every operation bound to the directory chosen during preparation."""
+    value = session.get("runtime_root")
+    if value is None:
+        return _runtime_root()
+    if not isinstance(value, str):
+        fail("session runtime directory is invalid")
+    return _selected_runtime_root(Path(value))
+
+
 def _write_json(path: Path, value: dict[str, Any]) -> None:
     _write_private_text(path, json.dumps(value, sort_keys=True) + "\n")
 
@@ -474,9 +493,9 @@ def _session_directory(root: Path, target: str, usb_serial: str) -> Path:
     return root / "sessions" / name
 
 
-def _remove_owned_session(directory: Path, target: str, usb_serial: str) -> None:
+def _remove_owned_session(directory: Path, target: str, usb_serial: str, *, root: Path) -> None:
     """Remove only a session directory carrying our exact private owner record."""
-    expected = _session_directory(_runtime_root(), target, usb_serial)
+    expected = _session_directory(root, target, usb_serial)
     if directory != expected:
         fail("refusing to remove a session directory outside the runtime root")
     try:
@@ -555,7 +574,7 @@ def _cleanup_target_sessions(root: Path, target: str) -> None:
             and isinstance(owner.get("usb_serial"), str)
             and directory == _session_directory(root, target, owner["usb_serial"])
         ):
-            _remove_owned_session(directory, target, owner["usb_serial"])
+            _remove_owned_session(directory, target, owner["usb_serial"], root=root)
 
 
 def prepare_session(
@@ -563,13 +582,15 @@ def prepare_session(
     personalization: dict[str, Any],
     target: str,
     linux_usb: dict[str, Any],
+    *,
+    runtime_root: Path | None = None,
 ) -> dict[str, Any]:
     """Create keys, addressing and one mode-0600 personalized image copy."""
     if TARGET_NAME.fullmatch(target) is None:
         fail(f"invalid target name: {target}")
-    root = _runtime_root()
+    root = _selected_runtime_root(runtime_root)
     _cleanup_target_sessions(root, target)
-    for tool in ("ip", "ssh", "ssh-keygen", "ssh-keyscan", "sftp"):
+    for tool in ("ip", "ssh", "ssh-keygen", "ssh-keyscan"):
         _require_tool(tool)
     if set(personalization) != {"offset", "bytes", "template_sha256"}:
         fail("personalization descriptor has unexpected fields")
@@ -647,7 +668,7 @@ def prepare_session(
         )
         _copy_personalized_image(image, personalized_image, personalization, block)
     except BaseException:
-        _remove_owned_session(session_directory, target, usb_serial)
+        _remove_owned_session(session_directory, target, usb_serial, root=root)
         raise
 
     host_address, phone_address = (str(address) for address in network.hosts())
@@ -668,10 +689,12 @@ def prepare_session(
         "wait_seconds": linux_usb["wait_seconds"],
         "status": "prepared",
     }
+    if runtime_root is not None:
+        state["runtime_root"] = str(root)
     try:
         _write_json(state_path, state)
     except BaseException:
-        _remove_owned_session(session_directory, target, usb_serial)
+        _remove_owned_session(session_directory, target, usb_serial, root=root)
         raise
     return state
 
@@ -688,7 +711,9 @@ def remove_personalized_image(session: dict[str, Any]) -> None:
     ):
         fail("personalized image identity is invalid")
     path = Path(image)
-    expected = _session_directory(_runtime_root(), target, usb_serial) / "ramboot.bin"
+    expected = (
+        _session_directory(_session_runtime_root(session), target, usb_serial) / "ramboot.bin"
+    )
     if path != expected:
         fail("refusing to remove a personalized image outside its session directory")
     path.unlink(missing_ok=True)
@@ -703,7 +728,8 @@ def finish_session(session: dict[str, Any]) -> None:
     usb_serial = session.get("usb_serial")
     if not isinstance(target, str) or not isinstance(usb_serial, str):
         fail("cannot finish a session with invalid identity")
-    directory = _session_directory(_runtime_root(), target, usb_serial)
+    root = _session_runtime_root(session)
+    directory = _session_directory(root, target, usb_serial)
     state_path = directory / "session.json"
     try:
         state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -718,7 +744,7 @@ def finish_session(session: dict[str, Any]) -> None:
         else:
             ready = True
     if not ready:
-        _remove_owned_session(directory, target, usb_serial)
+        _remove_owned_session(directory, target, usb_serial, root=root)
 
 
 def _usb_devices(session: dict[str, Any]) -> list[Path]:
@@ -824,13 +850,18 @@ def _ssh_option_values(
 ) -> list[tuple[str, str]]:
     """Return the client policy shared by bundled and direct OpenSSH use."""
     alias = f"fplinux-{session['usb_serial']}"
-    directory = _session_directory(_runtime_root(), session["target"], session["usb_serial"])
+    directory = _session_directory(
+        _session_runtime_root(session), session["target"], session["usb_serial"]
+    )
+    # Archive paths can exceed the Unix control-socket limit; direct clients also
+    # leave no background connection after the archive's terminal closes.
+    archive_session = "runtime_root" in session
     return [
         ("BatchMode", "yes"),
-        ("ControlMaster", "auto"),
-        ("ControlPersist", "60"),
+        ("ControlMaster", "no" if archive_session else "auto"),
+        ("ControlPersist", "no" if archive_session else "60"),
         # OpenSSH appends a temporary suffix; keep the Unix socket path short.
-        ("ControlPath", str(directory / "mux")),
+        ("ControlPath", "none" if archive_session else str(directory / "mux")),
         ("ServerAliveInterval", "5"),
         ("ServerAliveCountMax", "3"),
         ("IdentitiesOnly", "yes"),
@@ -880,7 +911,7 @@ def _ssh_config_value(value: str) -> str:
 
 def _ssh_config_directive(name: str, value: str) -> str:
     """Render one directive, preserving OpenSSH's hard-coded ``none`` sentinels."""
-    literal_none = {"IdentityAgent", "ProxyCommand", "ProxyJump"}
+    literal_none = {"ControlPath", "IdentityAgent", "ProxyCommand", "ProxyJump"}
     rendered = "none" if name in literal_none and value == "none" else _ssh_config_value(value)
     return f"    {name} {rendered}\n"
 
@@ -969,10 +1000,11 @@ def _mark_current(session: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(target, str) or not isinstance(usb_serial, str):
         fail("cannot publish a session with invalid identity")
     directory = Path(session["private_key"]).parent
-    expected = _session_directory(_runtime_root(), target, usb_serial)
+    root = _session_runtime_root(session)
+    expected = _session_directory(root, target, usb_serial)
     if directory != expected:
         fail("cannot publish a session outside its runtime directory")
-    current = _private_directory(_runtime_root() / "current")
+    current = _private_directory(root / "current")
     config_path = current / f"{target}.ssh-config"
     try:
         _write_json(directory / "session.json", session)
@@ -982,7 +1014,7 @@ def _mark_current(session: dict[str, Any]) -> dict[str, Any]:
         with contextlib.suppress(OSError):
             (current / f"{target}.json").unlink(missing_ok=True)
             config_path.unlink(missing_ok=True)
-        _remove_owned_session(directory, target, usb_serial)
+        _remove_owned_session(directory, target, usb_serial, root=root)
         raise
     return session
 
@@ -1086,7 +1118,13 @@ def _validate_session(
         "status",
         "interface",
     }
-    if not isinstance(value, dict) or set(value) != required:
+    if not isinstance(value, dict):
+        fail("current SSH session state has unexpected fields")
+    if "runtime_root" in value:
+        required.add("runtime_root")
+        if not isinstance(value["runtime_root"], str):
+            fail("session runtime directory is invalid")
+    if set(value) != required:
         fail("current SSH session state has unexpected fields")
     if value.get("status") != "ready":
         fail("current SSH session state is not ready")
@@ -1123,7 +1161,7 @@ def _validate_session(
     usb_serial = value.get("usb_serial")
     if not isinstance(target_value, str) or not isinstance(usb_serial, str):
         fail("current SSH session path identity is invalid")
-    directory = _session_directory(_runtime_root(), target_value, usb_serial)
+    directory = _session_directory(_session_runtime_root(value), target_value, usb_serial)
     try:
         metadata = directory.lstat()
         owner = json.loads(_regular_file_bytes(directory / "owner.json", "session owner record"))
@@ -1158,18 +1196,26 @@ def _validate_session(
     return value
 
 
-def load_current_session(target: str) -> dict[str, Any]:
+def load_current_session(target: str, *, runtime_root: Path | None = None) -> dict[str, Any]:
     """Load only the session that completed USB and private identity binding."""
     if TARGET_NAME.fullmatch(target) is None:
         fail(f"invalid target name: {target}")
-    path = _runtime_root() / "current" / f"{target}.json"
+    root = _selected_runtime_root(runtime_root)
+    path = root / "current" / f"{target}.json"
     if path.is_symlink() or not path.is_file():
-        fail(f"no ready SSH session for {target}; run ./fplinux run {target} first")
+        if runtime_root is None:
+            fail(f"no ready SSH session for {target}; run ./fplinux run {target} first")
+        fail(
+            f"no ready SSH session for {target}; start the powered-off phone with sh Run.sh first"
+        )
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         fail(f"current SSH session state is invalid: {error}")
-    return _validate_session(value, target)
+    session = _validate_session(value, target)
+    if _session_runtime_root(session) != root:
+        fail("current SSH session belongs to another runtime directory")
+    return session
 
 
 def reacquire_bound_session(session: dict[str, Any]) -> dict[str, Any]:
@@ -1186,6 +1232,51 @@ def open_shell(session: dict[str, Any]) -> None:
     argv = _ssh_argv(session)
     argv[1:1] = ["-tt"]
     os.execv(argv[0], argv)
+
+
+def run_shell(session: dict[str, Any]) -> int:
+    """Run interactive SSH with inherited terminal streams and reap it on cancellation."""
+    session = _validate_session(session)
+    if not os.isatty(0):
+        fail("interactive SSH requires a terminal; use --exec for a non-interactive command")
+    argv = _ssh_argv(session, shared=False)
+    argv[1:1] = ["-tt"]
+    process = subprocess.Popen(argv)
+    interrupted: int | None = None
+
+    def forward_signal(signum: int, _frame: FrameType | None) -> None:
+        nonlocal interrupted
+        interrupted = signum
+        with contextlib.suppress(ProcessLookupError):
+            process.send_signal(signum)
+
+    previous_handlers = {
+        signum: signal.signal(signum, forward_signal)
+        for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM)
+    }
+    try:
+        while process.poll() is None and interrupted is None:
+            try:
+                process.wait(timeout=0.25)
+            except subprocess.TimeoutExpired:
+                continue
+    finally:
+        try:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+        finally:
+            for signum, handler in previous_handlers.items():
+                signal.signal(signum, handler)
+    if interrupted is not None:
+        if interrupted == signal.SIGINT:
+            raise KeyboardInterrupt
+        raise SystemExit(128 + interrupted)
+    return process.wait()
 
 
 def run_remote(
@@ -1293,6 +1384,7 @@ def stream_remote(
             # Dropbear may retain a writer after a multiplexed channel closes.
             # A dedicated transport preserves cancellation of the remote reader.
             _ssh_argv(session, command, shared=False),
+            stdin=subprocess.DEVNULL,
             stdout=destination,
             stderr=stderr,
             start_new_session=True,
@@ -1306,7 +1398,7 @@ def stream_remote(
 
         previous_handlers = {
             signum: signal.signal(signum, forward_signal)
-            for signum in (signal.SIGINT, signal.SIGTERM)
+            for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM)
         }
         timed_out = False
         try:

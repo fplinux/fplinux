@@ -376,7 +376,7 @@ def main() -> None:
         handoff = run_bundle(bundle, runtime, options, events.emit)
     if handoff is not None:
         ssh, session = handoff
-        if not os.isatty(0):
+        if not options.reconnect and not os.isatty(0):
             print("No interactive terminal is attached; the loader is complete.", flush=True)
             return
         ssh.open_shell(session)
@@ -392,6 +392,7 @@ def run_bundle(  # noqa: PLR0913 -- bundle, session actions, data and log destin
     device_data: Path | None = None,
     output: TextIO | None = None,
     setup_host: bool = False,
+    session_root: Path | None = None,
 ) -> tuple[ModuleType, dict[str, Any]] | None:
     """Enter the verified runner and keep its observable stages in one stream."""
     if not options.reconnect:
@@ -406,7 +407,7 @@ def run_bundle(  # noqa: PLR0913 -- bundle, session actions, data and log destin
         ssh = load_module(bundle / SSH_HELPER_PATH, "ssh_transport")
         ssh.bundle_identity(bundle, runtime)
         device_identity = ssh.build_manifest_device_identity(bundle)
-        session = ssh.load_current_session(runtime["target"])
+        session = ssh.load_current_session(runtime["target"], runtime_root=session_root)
         session = ssh.reacquire_bound_session(session)
         ssh.require_device_identity(session, device_identity)
         if options.exec_command is not None:
@@ -420,8 +421,7 @@ def run_bundle(  # noqa: PLR0913 -- bundle, session actions, data and log destin
         if options.pull is not None:
             ssh.pull(session, options.pull[0], options.pull[1])
             return None
-        ssh.open_shell(session)
-        fail("SSH client returned without replacing the runner")
+        return ssh, session
 
     adapter = load_adapter(bundle / ADAPTER_PATH)
     session = None
@@ -441,6 +441,7 @@ def run_bundle(  # noqa: PLR0913 -- bundle, session actions, data and log destin
             runtime["personalization"],
             runtime["target"],
             runtime["usb"]["linux_gadget"],
+            runtime_root=session_root,
         )
         ready: dict[str, Any] | None = adapter.run(
             bundle,
