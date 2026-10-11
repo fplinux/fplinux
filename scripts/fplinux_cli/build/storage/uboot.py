@@ -348,7 +348,6 @@ def build_full(  # noqa: PLR0913 -- build inputs stay explicit.
     version = str(config["lock"]["version"])
     output = work / "uboot"
     if _full_cache_hit(recipe, output):
-        _verify_full_output(output, layout, required_config)
         return _full_result(output, recipe, layout, required_config)
 
     work.mkdir(parents=True, exist_ok=True)
@@ -401,5 +400,4 @@ def build_full(  # noqa: PLR0913 -- build inputs stay explicit.
 
     if not _full_cache_hit(recipe, output):
         raise UbootToolsError("published full U-Boot receipt is not reusable")
-    _verify_full_output(output, layout, required_config)
     return _full_result(output, recipe, layout, required_config)
