@@ -97,7 +97,7 @@ static void ums9117_drm_spi_pixel_mode(struct ums9117_drm *udrm)
 }
 
 static int ums9117_drm_spi_word(struct ums9117_drm *udrm, u8 value,
-				bool command, bool restore_pixel)
+				bool command)
 {
 	ktime_t deadline =
 		ktime_add_us(ktime_get(), UMS9117_DRM_SPI_DCS_TIMEOUT_US);
@@ -141,8 +141,6 @@ out:
 		writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL0) |
 			       UMS9117_DRM_SPI_CS0,
 		       udrm->spi + UMS9117_DRM_SPI_CTL0);
-	if (restore_pixel)
-		ums9117_drm_spi_pixel_mode(udrm);
 	return ret;
 }
 
@@ -217,9 +215,9 @@ int ums9117_drm_spi_dcs(struct ums9117_drm *udrm, u8 command, const u8 *data,
 	size_t i;
 	int ret;
 
-	ret = ums9117_drm_spi_word(udrm, command, true, false);
+	ret = ums9117_drm_spi_word(udrm, command, true);
 	for (i = 0; !ret && i < length; i++)
-		ret = ums9117_drm_spi_word(udrm, data[i], false, false);
+		ret = ums9117_drm_spi_word(udrm, data[i], false);
 	ums9117_drm_spi_pixel_mode(udrm);
 	return ret;
 }
