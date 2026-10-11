@@ -21,8 +21,10 @@ from fplinux_cli.artifacts.bundles import (
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import publish as publish_build
 from fplinux_cli.build.bootstrap import verify as bootstrap_build
+from fplinux_cli.device_data.inputs import FirmwareInput
 
 from tests.fdt import binary_tree
+from tests.small.runtime.adapter_fixtures import ADAPTER
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -266,6 +268,7 @@ class BuilderPublicationTests:
         ramboot: Path | None = None,
         bundle_packages: tuple[str, ...] | None = None,
         personalization: dict[str, int | str] | None = None,
+        board_maps: tuple[FirmwareInput, ...] = (),
     ) -> Path:
         """Publish the configured fixture through the builder entry point."""
         with mock.patch.dict(os.environ, self.environment, clear=False):
@@ -307,6 +310,7 @@ class BuilderPublicationTests:
                     tuple(self.bundle_apks) if bundle_packages is None else bundle_packages
                 ),
                 bundle_apks=self.bundle_apks,
+                board_maps=board_maps,
             )
 
     def staging_directories(self) -> list[Path]:
@@ -397,6 +401,30 @@ class BuilderPublicationTests:
         assert (runtime["sha256"]["runner/loader_events.py"]) == (
             hashlib.sha256(event_source).hexdigest()
         )
+
+    @pytest.mark.parametrize("root_kind", ["initramfs", "external"])
+    def test_prepared_board_maps_reach_the_loader_from_the_published_bundle(
+        self, root_kind: str
+    ) -> None:
+        """Frozen maps reach the loader even when the root has no supplemental capsule."""
+        pinmap = b"\xb8\x04\x01\x20\x08\x00\xff\xff\xff\xff\xff\xff\xff\xff"
+        keymap = b"\x2a\x00\x31\x00"
+        board_maps = tuple(
+            FirmwareInput(name, name, contents, hashlib.sha256(contents).hexdigest())
+            for name, contents in (("pinmap.bin", pinmap), ("keymap.bin", keymap))
+        )
+        self.target_config["linux"]["root"] = {"kind": root_kind}
+
+        published = self.publish(board_maps=board_maps)
+        manifest = json.loads((published / BUILD_MANIFEST_NAME).read_text())
+        assert (published / "device-data.cpio").exists() is (root_kind == "initramfs")
+        for name, expected in (("pinmap.bin", pinmap), ("keymap.bin", keymap)):
+            assert (published / name).read_bytes() == expected
+            assert (published / name).stat().st_mode & 0o777 == 0o600
+            assert manifest["files"][name]["sha256"] == hashlib.sha256(expected).hexdigest()
+        with ADAPTER.map_directory(published, {"fdl1": "assets/fdl1.bin"}) as served:
+            assert (served / "pinmap.bin").read_bytes() == pinmap
+            assert (served / "keymap.bin").read_bytes() == keymap
 
     def test_named_profile_publishes_to_its_own_current_bundle_slot(self) -> None:
         """Publish to the named profile slot with its identity in both manifests."""

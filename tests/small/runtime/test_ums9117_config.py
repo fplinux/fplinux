@@ -41,6 +41,34 @@ class RuntimeIdentityTests:
             )
 
 
+@pytest.mark.parametrize("capsule", [False, True])
+@pytest.mark.parametrize("prepared", [False, True])
+def test_loader_uses_prepared_maps_or_declared_fallback_with_either_capsule_layout(
+    tmp_path: Path, *, capsule: bool, prepared: bool
+) -> None:
+    """Prepared maps take precedence; absence keeps the locked first-boot maps."""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "pinmap.bin").write_bytes(b"locked pins")
+    (assets / "keymap.bin").write_bytes(b"locked keys")
+    if capsule:
+        (tmp_path / "device-data.cpio").write_bytes(b"firmware capsule")
+    if prepared:
+        (tmp_path / "pinmap.bin").write_bytes(b"prepared pins")
+        (tmp_path / "keymap.bin").write_bytes(b"prepared keys")
+
+    with ADAPTER.map_directory(
+        tmp_path,
+        {"fdl1": "assets/fdl1.bin", "pinmap": "assets/pinmap.bin", "keymap": "assets/keymap.bin"},
+    ) as served:
+        assert (served / "pinmap.bin").read_bytes() == (
+            b"prepared pins" if prepared else b"locked pins"
+        )
+        assert (served / "keymap.bin").read_bytes() == (
+            b"prepared keys" if prepared else b"locked keys"
+        )
+
+
 class BacklightConfigurationTests:
     """Reject ambiguous channel spelling and out-of-range levels."""
 

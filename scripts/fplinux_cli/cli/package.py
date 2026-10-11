@@ -183,6 +183,11 @@ def package_target(  # noqa: PLR0913 -- archive host and build selectors remain 
     image_state = image_states.load_image_state(common.ROOT / ".cache", image_recipe)
     identity = cli_bundles.build_identity(snapshot, image_state, common.ROOT / ".cache")
     files_table = manifest.get("files")
+    prepared_map_files = tuple(
+        relative
+        for relative in ("pinmap.bin", "keymap.bin")
+        if isinstance(files_table, dict) and relative in files_table
+    )
     try:
         required_boot_artifacts = cli_bundles.required_boot_artifacts(manifest)
     except ValueError as error:
@@ -196,9 +201,13 @@ def package_target(  # noqa: PLR0913 -- archive host and build selectors remain 
     collision = reserved & set(required_boot_artifacts)
     if collision:
         fail(f"profile boot artifact has a reserved archive path: {min(collision)}")
-    bundle_files = list(dict.fromkeys((*release["bundle_files"], *required_boot_artifacts)))
+    bundle_files = list(
+        dict.fromkeys((*release["bundle_files"], *required_boot_artifacts, *prepared_map_files))
+    )
     qualification_files = list(
-        dict.fromkeys((*release["qualification_files"], *required_boot_artifacts))
+        dict.fromkeys(
+            (*release["qualification_files"], *required_boot_artifacts, *prepared_map_files)
+        )
     )
     if (
         not cli_bundles.manifest_matches_identity(manifest, identity)
@@ -228,10 +237,10 @@ def package_target(  # noqa: PLR0913 -- archive host and build selectors remain 
     executables = set(release["executables"])
     add_target_files(files, target, release["documents"])
     if autonomous:
-        files.pop("device-data.cpio", None)
-        qualification_files = [
-            relative for relative in qualification_files if relative != "device-data.cpio"
-        ]
+        prepared_files = {"device-data.cpio", *prepared_map_files}
+        for relative in prepared_files:
+            files.pop(relative, None)
+        qualification_files = [relative for relative in qualification_files if relative in files]
         additions = autonomous_payload(target, config, host=host, offline=offline)
         collisions = (set(additions.files) & set(files)) - {"README.txt"}
         if collisions:

@@ -216,6 +216,7 @@ def main() -> None:
             kbuild_receipt=kbuild_receipt,
             bundle_packages=selected_bundle_packages,
             bundle_apks=bundle_apk_outputs,
+            board_maps=device_data.get("board-maps", ()),
             boot_files=boot_files,
             boot_artifacts=boot_artifacts,
         )

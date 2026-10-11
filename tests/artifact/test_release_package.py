@@ -136,7 +136,13 @@ class ReleaseArchiveArtifactTests:
         )
 
     def publish_bundle(
-        self, generation: str, *, apk: bytes, metadata: bytes, build_type: str = "release"
+        self,
+        generation: str,
+        *,
+        apk: bytes,
+        metadata: bytes,
+        build_type: str = "release",
+        board_maps: dict[str, bytes] | None = None,
     ) -> None:
         """Publish one valid immutable generation with the requested APK bytes."""
         bundle = self.cache / "out" / self.target / "builds" / build_type / "bundles" / generation
@@ -152,6 +158,7 @@ class ReleaseArchiveArtifactTests:
             "runtime-manifest.json": b"{}\n",
             "apks/demo.apk": apk,
             "assets.lock.toml": metadata,
+            **(board_maps or {}),
         }
         for relative, data in payloads.items():
             path = bundle / relative
@@ -223,6 +230,31 @@ class ReleaseArchiveArtifactTests:
                 return_value=ImageState(self.image_recipe, "c" * 64, "c" * 64),
             ),
         )
+
+    def test_package_carries_frozen_board_maps_and_qualifies_their_bytes(self) -> None:
+        """Prepared maps survive standalone packaging and change its phone-test digest."""
+        with contextlib.ExitStack() as stack:
+            for patch in self.package_patches():
+                stack.enter_context(patch)
+            _archive_digest, first_digest = self.package(candidate=True)
+            self.publish_bundle(
+                "d" * 64,
+                apk=b"application version one\n",
+                metadata=b"asset provenance version one\n",
+                board_maps={"pinmap.bin": b"prepared pins\n", "keymap.bin": b"prepared keys\n"},
+            )
+            _archive_digest, second_digest = self.package(candidate=True)
+
+        assert first_digest != second_digest
+        payloads = []
+        for archive_path in (self.cache / "out/candidates").glob("*.zip"):
+            with zipfile.ZipFile(archive_path) as archive:
+                payloads.append(
+                    {name.split("/", 1)[1]: archive.read(name) for name in archive.namelist()}
+                )
+        mapped = next(payload for payload in payloads if "pinmap.bin" in payload)
+        assert mapped["pinmap.bin"] == b"prepared pins\n"
+        assert mapped["keymap.bin"] == b"prepared keys\n"
 
     def test_debug_package_requires_its_own_build_and_names_the_selected_type(self) -> None:
         """Packaging never substitutes release bytes for an absent debug build."""

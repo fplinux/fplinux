@@ -204,14 +204,18 @@ def map_directory(
     capsule = device_data if device_data is not None else bundle / "device-data.cpio"
     if device_data is not None and not capsule.is_file():
         fail(f"prepared device data is missing: {capsule}")
-    if "pinmap" in assets and not capsule.is_file():
+    if (
+        "pinmap" in assets
+        and not capsule.is_file()
+        and not (capsule.parent / "pinmap.bin").is_file()
+    ):
         yield bundle / Path(assets["pinmap"]).parent
         return
     with tempfile.TemporaryDirectory(prefix="fplinux-pinmap-") as temporary:
         directory = Path(temporary)
         for role, name in (("pinmap", "pinmap.bin"), ("keymap", "keymap.bin")):
             prepared = capsule.parent / name
-            if capsule.is_file() and prepared.is_file():
+            if prepared.is_file():
                 shutil.copyfile(prepared, directory / name)
             elif role in assets:
                 shutil.copyfile(bundle / assets[role], directory / name)

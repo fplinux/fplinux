@@ -32,7 +32,10 @@ from fplinux_cli.manifests.identity import RUNTIME_IDENTITY_PATH
 from fplinux_cli.manifests.values import relative_value, sha256_value
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
+
+    from fplinux_cli.device_data.inputs import FirmwareInput
 
 
 def runner_source() -> Path:
@@ -171,6 +174,7 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
     kbuild_receipt: dict[str, str],
     bundle_packages: tuple[str, ...],
     bundle_apks: dict[str, Path],
+    board_maps: Sequence[FirmwareInput],
     boot_files: dict[str, Path],
     boot_artifacts: dict[str, Any],
 ) -> Path:
@@ -190,6 +194,9 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
     copy_file(ramboot, release / image_name)
     if target_config["linux"]["root"]["kind"] == "initramfs":
         copy_file(work / "device-data.cpio", release / "device-data.cpio")
+    for firmware in board_maps:
+        destination = release / relative_value(firmware.destination, "board map path")
+        replace_file_atomically(destination, firmware.contents, 0o600, sync=False)
     debug_outputs = [
         (zimage, "zImage"),
         (dtb, target_config["linux"]["debug_dtb"]),
@@ -316,6 +323,7 @@ def publish_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay explicit
     kbuild_receipt: dict[str, str],
     bundle_packages: tuple[str, ...],
     bundle_apks: dict[str, Path],
+    board_maps: Sequence[FirmwareInput] = (),
     boot_files: dict[str, Path] | None = None,
     boot_artifacts: dict[str, Any] | None = None,
 ) -> Path:
@@ -353,6 +361,7 @@ def publish_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay explicit
             kbuild_receipt=kbuild_receipt,
             bundle_packages=bundle_packages,
             bundle_apks=bundle_apks,
+            board_maps=board_maps,
             boot_files=boot_files,
             boot_artifacts=boot_artifacts,
         )
