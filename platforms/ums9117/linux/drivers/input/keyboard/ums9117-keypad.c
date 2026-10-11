@@ -209,8 +209,7 @@ static irqreturn_t ums9117_keypad_matrix_irq(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-static int ums9117_keypad_sample_eic_key(struct ums9117_keypad_eic_key *key,
-					 bool report)
+static int ums9117_keypad_sample_eic_key(struct ums9117_keypad_eic_key *key)
 {
 	struct ums9117_keypad *keypad = key->keypad;
 	int value;
@@ -227,13 +226,11 @@ static int ums9117_keypad_sample_eic_key(struct ums9117_keypad_eic_key *key,
 	key->down = !!value;
 	if (key == &keypad->eic1)
 		ums9117_keypad_notify_power(keypad, key->down);
-	if (report) {
-		input_event(keypad->input, EV_MSC, MSC_SCAN, key->scancode);
-		input_report_key(keypad->input, keypad->keymap[key->scancode],
-				 key->down);
-	}
+	input_event(keypad->input, EV_MSC, MSC_SCAN, key->scancode);
+	input_report_key(keypad->input, keypad->keymap[key->scancode],
+			 key->down);
 
-	return report;
+	return 1;
 }
 
 static irqreturn_t ums9117_keypad_eic_irq_thread(int irq, void *data)
@@ -247,7 +244,7 @@ static irqreturn_t ums9117_keypad_eic_irq_thread(int irq, void *data)
 	if (key == &key->keypad->eic1 && device_may_wakeup(key->keypad->dev))
 		pm_wakeup_event(key->keypad->dev, 0);
 
-	ret = ums9117_keypad_sample_eic_key(key, true);
+	ret = ums9117_keypad_sample_eic_key(key);
 	if (ret < 0)
 		dev_warn_ratelimited(
 			key->keypad->dev,
@@ -489,7 +486,7 @@ static int ums9117_keypad_start_eic_irqs(struct ums9117_keypad *keypad)
 	int ret;
 
 	for (index = 0; index < ARRAY_SIZE(keys); ++index) {
-		ret = ums9117_keypad_sample_eic_key(keys[index], true);
+		ret = ums9117_keypad_sample_eic_key(keys[index]);
 		if (ret < 0)
 			return ret;
 		sync |= ret;
@@ -553,26 +550,35 @@ static int ums9117_keypad_suspend(struct device *dev)
 	return 0;
 }
 
+static int ums9117_keypad_disarm_eic1_wake(struct ums9117_keypad *keypad)
+{
+	int ret;
+
+	if (!keypad->eic1.wake_enabled)
+		return 0;
+
+	ret = disable_irq_wake(keypad->eic1.irq);
+	if (!ret)
+		keypad->eic1.wake_enabled = false;
+
+	return ret;
+}
+
 static int ums9117_keypad_resume(struct device *dev)
 {
 	struct ums9117_keypad *controller = dev_get_drvdata(dev);
 	int ret;
 
 	ums9117_keypad_start_matrix_irq(controller);
-	if (controller->eic1.wake_enabled) {
-		ret = disable_irq_wake(controller->eic1.irq);
-		if (ret) {
-			dev_err(dev,
-				"could not disable EIC1 power-key wake IRQ: %pe\n",
-				ERR_PTR(ret));
-			return ret;
-		}
-
-		controller->eic1.wake_enabled = false;
+	ret = ums9117_keypad_disarm_eic1_wake(controller);
+	if (ret) {
+		dev_err(dev, "could not disable EIC1 power-key wake IRQ: %pe\n",
+			ERR_PTR(ret));
+		return ret;
 	}
 #if IS_ENABLED(CONFIG_KEYBOARD_UMS9117_AUX_EIC_KEY)
 	if (controller->eic9.suspend_disabled) {
-		ret = ums9117_keypad_sample_eic_key(&controller->eic9, true);
+		ret = ums9117_keypad_sample_eic_key(&controller->eic9);
 		enable_irq(controller->eic9.irq);
 		controller->eic9.suspend_disabled = false;
 		if (ret < 0) {
@@ -586,20 +592,6 @@ static int ums9117_keypad_resume(struct device *dev)
 	}
 #endif
 	return 0;
-}
-
-static int ums9117_keypad_disarm_eic1_wake(struct ums9117_keypad *keypad)
-{
-	int ret;
-
-	if (!keypad->eic1.wake_enabled)
-		return 0;
-
-	ret = disable_irq_wake(keypad->eic1.irq);
-	if (!ret)
-		keypad->eic1.wake_enabled = false;
-
-	return ret;
 }
 
 static int ums9117_keypad_probe(struct platform_device *pdev)
