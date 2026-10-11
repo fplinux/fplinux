@@ -328,7 +328,7 @@ def test_selected_winusb_snapshot_reaches_native_loader_and_one_archive_log(
             super().__init__({})
             self.selected = False
 
-        def ps(self, script: str, *arguments: str, timeout: int = 20) -> dict[str, Any]:
+        def ps(self, script: str, *arguments: str, timeout: float = 20) -> dict[str, Any]:
             del script, arguments, timeout
             if "waiting-for-device" in events and not self.selected:
                 self.selected = True
@@ -438,6 +438,36 @@ def test_powershell_file_arguments_remain_literal_and_json_result_is_checked(
         str(private_path),
     ]
     assert (ROOT / "common/windows/acl.ps1").is_file()
+
+
+def test_network_discovery_receives_the_exact_usb_session_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The carrier process records arguments; it does not execute native PnP queries."""
+    arguments_file = tmp_path / "network-arguments.json"
+    monkeypatch.setenv("FPLINUX_TEST_POWERSHELL_ARGUMENTS", str(arguments_file))
+    monkeypatch.setenv("FPLINUX_TEST_POWERSHELL_RESULT", '{"adapters": [], "routes": []}')
+    powershell = tmp_path / "powershell.exe"
+    install_python_script(
+        ROOT / "tests/fixtures/processes/windows_powershell_boundary.py", powershell
+    )
+    host = windows_host.WindowsHost.__new__(windows_host.WindowsHost)
+    host.powershell = powershell
+    session = endpoint_session(tmp_path / "session")
+
+    assert host.network_snapshot(session, timeout=3) == {"adapters": [], "routes": []}
+
+    assert json.loads(arguments_file.read_text())[-9:] == [
+        str(ROOT / "common/windows/network.ps1"),
+        "-HostMac",
+        "02:00:00:00:00:01",
+        "-UsbSerial",
+        "0123456789abcdef0123456789abcdef",
+        "-VendorId",
+        "1317",
+        "-ProductId",
+        "42150",
+    ]
 
 
 @pytest.mark.parametrize(

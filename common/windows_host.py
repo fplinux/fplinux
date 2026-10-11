@@ -214,7 +214,7 @@ class WindowsHost:
         if not isinstance(self.sid, str) or re.fullmatch(r"S-1-5-[0-9-]+", self.sid) is None:
             fail("Cannot identify the current Windows user")
 
-    def ps(self, script: str, *arguments: str, timeout: int = 20) -> dict[str, Any]:
+    def ps(self, script: str, *arguments: str, timeout: float = 20) -> dict[str, Any]:
         """Run one packaged PowerShell file with literal arguments and JSON output."""
         source = Path(__file__).resolve().parent / "windows" / script
         if not source.is_file():
@@ -245,9 +245,20 @@ class WindowsHost:
             fail("Windows discovery returned an unexpected result")
         return value
 
-    def network_snapshot(self, session: dict[str, Any]) -> dict[str, Any]:
+    def network_snapshot(self, session: dict[str, Any], *, timeout: float = 20) -> dict[str, Any]:
         """Inspect session-MAC adapters and retain the complete IPv4 route table."""
-        return self.ps("network.ps1", "-HostMac", session["host_mac"])
+        return self.ps(
+            "network.ps1",
+            "-HostMac",
+            session["host_mac"],
+            "-UsbSerial",
+            session["usb_serial"],
+            "-VendorId",
+            str(session["vendor_id"]),
+            "-ProductId",
+            str(session["product_id"]),
+            timeout=timeout,
+        )
 
     def confirm_driver_install(self, license_path: Path) -> bool:
         """Require native consent and explicit acceptance of the bundled Microsoft terms."""
@@ -600,17 +611,33 @@ class WindowsTransport:
                     + (f": {detail}" if detail else "")
                 )
 
-    def authenticate(self, session: dict[str, Any], *, timeout: int) -> None:
+    def authenticate(
+        self, session: dict[str, Any], *, timeout: float, scan_host_key: bool = True
+    ) -> None:
         """Pin a key only after USB binding, then verify RAM and kernel identities."""
         deadline = time.monotonic() + timeout
-        pinned = False
+        pinned = not scan_host_key
+
+        def current_interface() -> int | None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            snapshot = self.host.network_snapshot(session, timeout=min(20, remaining))
+            return bound_interface(snapshot, session)
+
         while time.monotonic() < deadline:
-            index = bound_interface(self.host.network_snapshot(session), session)
+            try:
+                index = current_interface()
+            except subprocess.TimeoutExpired:
+                continue
             if index is None:
                 time.sleep(0.5)
                 continue
             try:
                 if not pinned:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        continue
                     scan = subprocess.run(
                         [
                             str(self.bundle.tools["keyscan"]),
@@ -623,7 +650,7 @@ class WindowsTransport:
                         ],
                         capture_output=True,
                         text=True,
-                        timeout=5,
+                        timeout=min(5, remaining),
                         check=False,
                         creationflags=_console_creation_flags(),
                     )
@@ -646,16 +673,19 @@ class WindowsTransport:
                     )
                     self.host.secure_new(known_hosts)
                     pinned = True
-                if bound_interface(self.host.network_snapshot(session), session) != index:
+                if current_interface() != index:
                     continue
-                remaining = max(1, min(5, int(deadline - time.monotonic())))
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    continue
+                connect_timeout = max(1, min(5, int(remaining)))
                 result = subprocess.run(
                     self._ssh_arguments(
-                        session, "fplinux-session-id; uname -r", connect_timeout=remaining
+                        session, "fplinux-session-id; uname -r", connect_timeout=connect_timeout
                     ),
                     capture_output=True,
                     text=True,
-                    timeout=remaining + 1,
+                    timeout=min(connect_timeout + 1, remaining),
                     check=False,
                     creationflags=_console_creation_flags(),
                 )
@@ -669,7 +699,10 @@ class WindowsTransport:
                 fail("The authenticated phone returned another RAM session identity")
             if not lines[1].endswith(f"-fplinux-{self.bundle.device_identity[:16]}"):
                 fail("The authenticated phone returned another kernel build identity")
-            if bound_interface(self.host.network_snapshot(session), session) != index:
+            try:
+                if current_interface() != index:
+                    continue
+            except subprocess.TimeoutExpired:
                 continue
             session["status"] = "ready"
             _write_session(self.host, Path(session["directory"]), session)

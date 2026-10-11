@@ -222,7 +222,7 @@ def test_boot_invites_connection_then_requires_driver_before_loader(
     class BootHost(DriverHost):
         """Connect the synthetic phone only after the observable invitation."""
 
-        def ps(self, script: str, *arguments: str, timeout: int = 20) -> dict[str, Any]:
+        def ps(self, script: str, *arguments: str, timeout: float = 20) -> dict[str, Any]:
             del script, arguments, timeout
             return self.snapshot if "waiting-for-device" in events else {"devices": []}
 

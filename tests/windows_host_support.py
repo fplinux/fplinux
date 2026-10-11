@@ -85,7 +85,7 @@ class StubWindowsHost(WindowsHost):
         """Keep the supplied controlled PnP response."""
         self.snapshot = snapshot
 
-    def ps(self, script: str, *arguments: str, timeout: int = 20) -> dict[str, Any]:
+    def ps(self, script: str, *arguments: str, timeout: float = 20) -> dict[str, Any]:
         """Return a synthetic snapshot rather than execute PowerShell."""
         del script, arguments, timeout
         return self.snapshot
