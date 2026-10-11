@@ -55,6 +55,10 @@ struct ums9117_drm_profile {
 	u16 sleep_in_ms;
 	u16 sleep_out_ms;
 	u16 spi_frame_clock_divider;
+	/* Zero retains the shared initialization divider. */
+	u16 spi_init_clock_divider;
+	/* Raw mode 3 sends 16-bit pixels and releases CS between DCS bytes. */
+	bool spi_native_16bit;
 	/*
 	 * NULL retains the fixed WLED recipe. A name enables a raw range whose
 	 * maximum is derived from equal non-zero board WLED current levels.

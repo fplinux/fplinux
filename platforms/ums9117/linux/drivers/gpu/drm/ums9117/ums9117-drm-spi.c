@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* UMS9117 SPI1 3-wire/9-bit panel transport. */
+/* UMS9117 SPI1 command and pixel transport. */
 #include <linux/bitops.h>
 #include <linux/delay.h>
 #include <linux/iopoll.h>
@@ -30,6 +30,7 @@
 #define UMS9117_DRM_SPI_TX_END BIT(8)
 #define UMS9117_DRM_SPI_CS0 BIT(8)
 #define UMS9117_DRM_SPI_MODE_3WIRE_9BIT BIT(3)
+#define UMS9117_DRM_SPI_MODE_RAW_16BIT (3U << 3)
 #define UMS9117_DRM_SPI_TX_HOLD BIT(7)
 #define UMS9117_DRM_SPI_RGB565 BIT(14)
 #define UMS9117_DRM_SPI_PIXEL_BITS 17
@@ -80,11 +81,19 @@ static void ums9117_drm_spi_tx_length(struct ums9117_drm *udrm, u32 words)
 
 static void ums9117_drm_spi_pixel_mode(struct ums9117_drm *udrm)
 {
+	u32 control = readl(udrm->spi + UMS9117_DRM_SPI_CTL7);
+
 	writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL8) | BIT(15),
 	       udrm->spi + UMS9117_DRM_SPI_CTL8);
-	writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL7) | UMS9117_DRM_SPI_RGB565,
-	       udrm->spi + UMS9117_DRM_SPI_CTL7);
-	ums9117_drm_spi_channel_length(udrm, UMS9117_DRM_SPI_PIXEL_BITS);
+	if (udrm->profile->spi_native_16bit) {
+		control &= ~UMS9117_DRM_SPI_RGB565;
+		ums9117_drm_spi_channel_length(udrm, 16);
+	} else {
+		control |= UMS9117_DRM_SPI_RGB565;
+		ums9117_drm_spi_channel_length(udrm,
+					       UMS9117_DRM_SPI_PIXEL_BITS);
+	}
+	writel(control, udrm->spi + UMS9117_DRM_SPI_CTL7);
 }
 
 static int ums9117_drm_spi_word(struct ums9117_drm *udrm, u8 value,
@@ -104,6 +113,9 @@ static int ums9117_drm_spi_word(struct ums9117_drm *udrm, u8 value,
 		       ~UMS9117_DRM_SPI_RGB565,
 	       udrm->spi + UMS9117_DRM_SPI_CTL7);
 	ums9117_drm_spi_channel_length(udrm, 8);
+	if (udrm->profile->spi_native_16bit)
+		writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL0) & ~0xf00U,
+		       udrm->spi + UMS9117_DRM_SPI_CTL0);
 	if (command)
 		writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL8) & ~BIT(15),
 		       udrm->spi + UMS9117_DRM_SPI_CTL8);
@@ -124,6 +136,11 @@ static int ums9117_drm_spi_word(struct ums9117_drm *udrm, u8 value,
 	writel(UMS9117_DRM_SPI_TX_END, udrm->spi + UMS9117_DRM_SPI_INT_CLR);
 	ret = ums9117_drm_spi_wait_idle(udrm->spi, deadline);
 out:
+	if (udrm->profile->spi_native_16bit &&
+	    (ret || !command || value != MIPI_DCS_WRITE_MEMORY_START))
+		writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL0) |
+			       UMS9117_DRM_SPI_CS0,
+		       udrm->spi + UMS9117_DRM_SPI_CTL0);
 	if (restore_pixel)
 		ums9117_drm_spi_pixel_mode(udrm);
 	return ret;
@@ -181,8 +198,13 @@ static int ums9117_drm_spi_enable(struct ums9117_drm *udrm)
 	       udrm->spi + UMS9117_DRM_SPI_CTL2);
 	writel(0x8000, udrm->spi + UMS9117_DRM_SPI_CTL4);
 	writel(0, udrm->spi + UMS9117_DRM_SPI_CTL5);
-	writel(UMS9117_DRM_SPI_INIT_DIVIDER, udrm->spi + UMS9117_DRM_SPI_CLKD);
-	writel(UMS9117_DRM_SPI_MODE_3WIRE_9BIT,
+	writel(udrm->profile->spi_init_clock_divider ?
+		       udrm->profile->spi_init_clock_divider :
+		       UMS9117_DRM_SPI_INIT_DIVIDER,
+	       udrm->spi + UMS9117_DRM_SPI_CLKD);
+	writel(udrm->profile->spi_native_16bit ?
+		       UMS9117_DRM_SPI_MODE_RAW_16BIT :
+		       UMS9117_DRM_SPI_MODE_3WIRE_9BIT,
 	       udrm->spi + UMS9117_DRM_SPI_CTL7);
 	writel(0, udrm->spi + UMS9117_DRM_SPI_CTL8);
 	writel(UMS9117_DRM_SPI_TX_END, udrm->spi + UMS9117_DRM_SPI_INT_CLR);

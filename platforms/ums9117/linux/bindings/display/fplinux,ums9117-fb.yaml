@@ -11,7 +11,7 @@ maintainers:
 
 description: |
   The UMS9117 LCDC reads RGB565 or NV16 DMA buffers and sends pixels through
-  a SPI1 three-wire panel transport or a LCM/DBI CS0 transport. A target
+  a SPI1 panel transport or a LCM/DBI CS0 transport. A target
   wrapper supplies the immutable panel command sequence. This node supplies
   only board-owned resources and wiring.
 
@@ -43,6 +43,7 @@ properties:
     enum:
       - fplinux,ums9117-st7789p3-spi-fb
       - fplinux,ums9117-gc9307-spi-fb
+      - fplinux,ums9117-uniwa-v1000-spi-fb
       - fplinux,ums9117-nv3030-lcm-fb
       - fplinux,ums9117-nv3023-lcm-fb
       - fplinux,ums9117-gc9307-lcm-fb

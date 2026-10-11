@@ -112,3 +112,17 @@
  }
 
  void sys_exit(void) {
+--- a/ums9117/syscode.c
++++ b/ums9117/syscode.c
+@@ -754,7 +754,11 @@
+ }
+ 
+ void sys_start(void) {
++#ifdef FPLINUX_LCD_BACKLIGHT_START
++	FPLINUX_LCD_BACKLIGHT_START();
++#else
+ 	sys_brightness(sys_data.brightness);
++#endif
+ }
+ 
+ void sys_exit(void) {

@@ -256,7 +256,10 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		"last_error_irq_status=0x%08x\n"
 		"last_error_irq_raw=0x%08x\n",
 		udrm->profile->name,
-		ums9117_drm_uses_spi(udrm) ? "spi1-3wire" : "lcm-dbi",
+		ums9117_drm_uses_spi(udrm) ?
+			(udrm->profile->spi_native_16bit ? "spi1-raw16" :
+							   "spi1-3wire") :
+			"lcm-dbi",
 		udrm->state, udrm->in_flight ? 1U : 0U,
 		!udrm->wled_known ? "unknown" :
 		udrm->wled_on	  ? "on" :
