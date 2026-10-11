@@ -50,6 +50,7 @@ const SCOPES = [
   "site",
   "storage",
   "ums9117",
+  "uniwa-v1000-4g",
   "wifi",
 ];
 
