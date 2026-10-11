@@ -287,6 +287,10 @@ source = "platforms/ums9117/linux/sound/drivers/ums9117/ums9117-pcm.c"
 destination = "sound/drivers/ums9117/ums9117-pcm.c"
 
 [[linux.copies]]
+source = "platforms/ums9117/linux/sound/drivers/ums9117/ums9117-pcm-route.h"
+destination = "sound/drivers/ums9117/ums9117-pcm-route.h"
+
+[[linux.copies]]
 source = "platforms/ums9117/linux/sound/drivers/ums9117/ums9117-sc2720-codec.c"
 destination = "sound/drivers/ums9117/ums9117-sc2720-codec.c"
 

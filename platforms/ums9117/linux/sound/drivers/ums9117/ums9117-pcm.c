@@ -30,6 +30,7 @@
 #include "ums9117-audio.h"
 #include "ums9117-audio-profile.h"
 #include "ums9117-jack.h"
+#include "ums9117-pcm-route.h"
 
 #define UMS9117_PCM_CHANNELS 2U
 #define UMS9117_PCM_BUFFER_BYTES_MAX (256U * 1024U)
@@ -57,8 +58,6 @@
 #define UMS9117_PCM_IDLE_RATE 48000U
 #define UMS9117_PCM_THREAD_NAME "ums9117-pcm"
 #define UMS9117_PCM_NAME "UMS9117 Headphones"
-#define UMS9117_PCM_OUTPUTS_BOTH \
-	(UMS9117_SC2720_OUTPUT_HEADPHONES | UMS9117_SC2720_OUTPUT_SPEAKER)
 
 #define UMS9117_VIBRATOR_NAME "UMS9117 speaker vibrator"
 #define UMS9117_VIBRATOR_PHYS "fplinux/vibrator0"
@@ -122,7 +121,7 @@ struct ums9117_pcm {
 	unsigned int volume_right;
 	unsigned int speaker_volume;
 	enum ums9117_sc2720_capture_source capture_source;
-	/* Requested UMS9117_SC2720_OUTPUT_* set; running hardware follows it. */
+	/* Requested set selects fitted data; board policy selects codec outputs. */
 	unsigned int outputs;
 	/* Fitted EQ6 and ALC switches, each controlling its own block. */
 	bool eq_enabled;
@@ -134,6 +133,7 @@ struct ums9117_pcm {
 	bool speaker_from_headphones;
 #endif
 	bool speaker_supported;
+	bool headfree_headphones_only;
 	bool capture_prepared;
 	bool speaker_vibration;
 	bool idle_silence;
@@ -568,13 +568,16 @@ static int ums9117_pcm_apply_processing_locked(struct ums9117_pcm *audio)
 		audio->eq_enabled, audio->alc_enabled);
 }
 
-/*
- * Programs the digital gain, processing, headphone level, speaker mute and
- * sample scaling of the requested outputs before the codec opens or closes
- * them.
- */
+static unsigned int effective_outputs(const struct ums9117_pcm *audio)
+{
+	return ums9117_pcm_effective_outputs(audio->outputs,
+					     audio->headfree_headphones_only);
+}
+
+/* Apply fitted data and physical output levels before the codec changes routes. */
 static int ums9117_pcm_apply_output_levels_locked(struct ums9117_pcm *audio)
 {
+	unsigned int outputs = effective_outputs(audio);
 	unsigned long flags;
 	int ret;
 
@@ -588,7 +591,7 @@ static int ums9117_pcm_apply_output_levels_locked(struct ums9117_pcm *audio)
 		if (ret < 0)
 			return ret;
 	}
-	if (audio->outputs & UMS9117_SC2720_OUTPUT_SPEAKER) {
+	if (outputs & UMS9117_SC2720_OUTPUT_SPEAKER) {
 		ret = ums9117_sc2720_codec_set_speaker_mute(
 			audio->codec, !audio->speaker_volume);
 		if (ret < 0)
@@ -596,7 +599,7 @@ static int ums9117_pcm_apply_output_levels_locked(struct ums9117_pcm *audio)
 	}
 	spin_lock_irqsave(&audio->fifo_lock, flags);
 	audio->halve_samples = !ums9117_pcm_headphone_fed_speaker(audio) &&
-			       (audio->outputs & UMS9117_SC2720_OUTPUT_SPEAKER);
+			       (outputs & UMS9117_SC2720_OUTPUT_SPEAKER);
 	spin_unlock_irqrestore(&audio->fifo_lock, flags);
 	return 0;
 }
@@ -615,7 +618,7 @@ static int ums9117_pcm_prepare_hardware_locked(struct ums9117_pcm *audio,
 		if (ret)
 			return ret;
 	}
-	if ((audio->outputs & UMS9117_SC2720_OUTPUT_SPEAKER) &&
+	if ((effective_outputs(audio) & UMS9117_SC2720_OUTPUT_SPEAKER) &&
 	    !audio->speaker_supported)
 		return -ENODEV;
 	if (fm)
@@ -632,7 +635,8 @@ static int ums9117_pcm_prepare_hardware_locked(struct ums9117_pcm *audio,
 	ret = ums9117_pcm_apply_output_levels_locked(audio);
 	if (ret)
 		goto failed;
-	ret = ums9117_sc2720_codec_prepare(audio->codec, audio->outputs,
+	ret = ums9117_sc2720_codec_prepare(audio->codec,
+					   effective_outputs(audio),
 					   ums9117_pcm_route_pa_word(audio));
 	if (ret) {
 		dev_err(audio->dev, "cannot prepare playback codec: %pe\n",
@@ -799,8 +803,9 @@ static int ums9117_pcm_start_fm_locked(struct ums9117_pcm *audio)
 static int ums9117_pcm_apply_vibration_locked(struct ums9117_pcm *audio)
 {
 	bool session = audio->vibrator.session;
-	bool shared = (audio->outputs & UMS9117_SC2720_OUTPUT_SPEAKER) &&
-		      audio->speaker_volume;
+	bool shared =
+		(effective_outputs(audio) & UMS9117_SC2720_OUTPUT_SPEAKER) &&
+		audio->speaker_volume;
 	int ret;
 
 	ums9117_audio_set_music_mute(audio->digital, session && !shared);
@@ -1075,7 +1080,8 @@ static int ums9117_pcm_route_outputs_locked(struct ums9117_pcm *audio)
 	if (ret)
 		return ret;
 	ret = ums9117_sc2720_codec_set_outputs(
-		audio->codec, audio->outputs, ums9117_pcm_route_pa_word(audio));
+		audio->codec, effective_outputs(audio),
+		ums9117_pcm_route_pa_word(audio));
 	if (ret)
 		return ret;
 	ret = ums9117_pcm_update_idle_locked(audio);
@@ -1099,7 +1105,9 @@ static int ums9117_pcm_set_outputs_locked(struct ums9117_pcm *audio,
 		return audio->removing ? -ENODEV : -ESTRPIPE;
 	if (audio->outputs == outputs)
 		return 0;
-	if ((outputs & UMS9117_SC2720_OUTPUT_SPEAKER) &&
+	if ((ums9117_pcm_effective_outputs(outputs,
+					   audio->headfree_headphones_only) &
+	     UMS9117_SC2720_OUTPUT_SPEAKER) &&
 	    !audio->speaker_supported)
 		return -ENODEV;
 	audio->outputs = outputs;
@@ -1189,6 +1197,7 @@ static int ums9117_speaker_volume_put(struct snd_kcontrol *kcontrol,
 	struct ums9117_pcm *audio = snd_kcontrol_chip(kcontrol);
 	long level = value->value.integer.value[0];
 	unsigned int old_level;
+	bool speaker;
 	int restore_ret;
 	int ret = 0;
 
@@ -1200,12 +1209,13 @@ static int ums9117_speaker_volume_put(struct snd_kcontrol *kcontrol,
 		goto out;
 	}
 	old_level = audio->speaker_volume;
+	speaker = effective_outputs(audio) & UMS9117_SC2720_OUTPUT_SPEAKER;
 	if (old_level == level)
 		goto out;
 	/* FM follows the same digital gain as PCM. */
 	if ((audio->outputs & UMS9117_SC2720_OUTPUT_SPEAKER) &&
 	    audio->digital_prepared) {
-		if (!level) {
+		if (!level && speaker) {
 			ret = ums9117_sc2720_codec_set_speaker_mute(
 				audio->codec, true);
 			if (ret < 0)
@@ -1222,7 +1232,7 @@ static int ums9117_speaker_volume_put(struct snd_kcontrol *kcontrol,
 				goto out;
 			}
 		}
-		if (level) {
+		if (level && speaker) {
 			ret = ums9117_sc2720_codec_set_speaker_mute(
 				audio->codec, false);
 			if (ret < 0) {
@@ -2279,12 +2289,18 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 		&pdev->dev, "fplinux,microphone-capture");
 	audio->speaker_vibration = device_property_read_bool(
 		&pdev->dev, "fplinux,speaker-vibration");
+	audio->headfree_headphones_only = device_property_read_bool(
+		&pdev->dev, "fplinux,headfree-headphones-only");
 #if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
 	audio->speaker_from_headphones = device_property_read_bool(
 		&pdev->dev, "fplinux,headphone-fed-speaker");
 	if (audio->speaker_from_headphones && audio->speaker_vibration)
 		return dev_err_probe(&pdev->dev, -EINVAL,
 				     "headphone-fed speaker cannot vibrate\n");
+	if (audio->speaker_from_headphones && audio->headfree_headphones_only)
+		return dev_err_probe(
+			&pdev->dev, -EINVAL,
+			"headphone-fed speaker cannot use headphone-only Headfree\n");
 #else
 	if (device_property_present(&pdev->dev,
 				    "fplinux,headphone-fed-speaker"))

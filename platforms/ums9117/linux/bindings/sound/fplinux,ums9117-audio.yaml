@@ -111,6 +111,15 @@ properties:
       playback requires fplinux,speaker-mode4-pulse-us; otherwise the external
       amplifier is held disabled.
 
+  fplinux,headfree-headphones-only:
+    type: boolean
+    description: |
+      The fitted Headfree mode selects headphones without the integrated
+      speaker amplifier. Requesting both playback outputs uses the Headfree
+      gains and processing while opening only the headphones. This routing
+      also applies without a fitted profile. Speaker-only playback retains
+      its integrated amplifier and fitted Handsfree settings.
+
   speaker-enable-gpios:
     maxItems: 1
     description: |
