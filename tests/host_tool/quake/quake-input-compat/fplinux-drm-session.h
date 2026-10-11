@@ -4,8 +4,11 @@
 #define FPLINUX_TEST_DRM_SESSION_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 struct fplinux_drm_session {
+	uint32_t width;
+	uint32_t height;
 	bool active;
 };
 typedef bool (*fplinux_drm_active_handler)(struct fplinux_drm_session *session,

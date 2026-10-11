@@ -45,10 +45,13 @@ class QuakeInputTests:
             )
             yield
 
-    def test_sources_and_shared_actions_survive_releases_and_focus_reset(self) -> None:
-        """Releasing one key cannot stop an action still held by another key."""
+    @pytest.mark.parametrize("orientation", ["portrait", "landscape"], ids=["240x320", "320x240"])
+    def test_arrows_follow_display_and_shared_actions_survive_releases_and_focus_reset(
+        self, orientation: str
+    ) -> None:
+        """D-pad arrows follow the display; a held action survives another key's release."""
         run_process(
-            [str(self.executable)],
+            [str(self.executable), orientation],
             name="observe Quake key mapping and held actions",
             timeout=5,
             check=True,

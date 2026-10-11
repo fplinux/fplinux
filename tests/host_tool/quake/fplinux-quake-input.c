@@ -20,7 +20,16 @@ static size_t queue_head, queue_tail;
 static bool down[K_LAST];
 static unsigned int key_events;
 static bool session_open, session_suspended;
-static struct fplinux_drm_session display = { .active = true };
+static struct fplinux_drm_session display = {
+	.width = 240,
+	.height = 320,
+	.active = true,
+};
+
+struct arrow_case {
+	unsigned int code;
+	knum_t key;
+};
 
 static void event(enum fplinux_input_event_type type, uint64_t device,
 		  enum fplinux_input_source source, unsigned int code,
@@ -138,9 +147,38 @@ void V_StopPitchDrift(void)
 {
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+	static const struct arrow_case portrait_arrows[] = {
+		{ 103, K_LEFTARROW },
+		{ 108, K_RIGHTARROW },
+		{ 105, K_DOWNARROW },
+		{ 106, K_UPARROW },
+	};
+	static const struct arrow_case landscape_arrows[] = {
+		{ 103, K_UPARROW },
+		{ 108, K_DOWNARROW },
+		{ 105, K_LEFTARROW },
+		{ 106, K_RIGHTARROW },
+	};
+	static const struct arrow_case keyboard_arrows[] = {
+		{ 103, K_UPARROW },
+		{ 108, K_DOWNARROW },
+		{ 105, K_LEFTARROW },
+		{ 106, K_RIGHTARROW },
+	};
+	const struct arrow_case *keypad_arrows = portrait_arrows;
 	unsigned int before;
+	size_t i;
+
+	assert(argc == 2);
+	if (!strcmp(argv[1], "landscape")) {
+		display.width = 320;
+		display.height = 240;
+		keypad_arrows = landscape_arrows;
+	} else {
+		assert(!strcmp(argv[1], "portrait"));
+	}
 
 	IN_Init();
 	assert(session_open && IN_HaveFocus());
@@ -149,13 +187,25 @@ int main(void)
 	event(FPLINUX_INPUT_EVENT_DEVICE_ADDED, 2,
 	      FPLINUX_INPUT_SOURCE_KEYBOARD, 0, false);
 	IN_Commands();
-	/* The same Linux arrow has the phone's rotated action only on a keypad. */
-	key(1, FPLINUX_INPUT_SOURCE_KEYPAD, 103, true);
-	key(2, FPLINUX_INPUT_SOURCE_KEYBOARD, 103, true);
-	assert(down[K_LEFTARROW] && down[K_UPARROW]);
-	key(1, FPLINUX_INPUT_SOURCE_KEYPAD, 103, false);
-	assert(!down[K_LEFTARROW] && down[K_UPARROW]);
-	key(2, FPLINUX_INPUT_SOURCE_KEYBOARD, 103, false);
+	/* Keyboard arrows keep their meanings in either display orientation. */
+	for (i = 0; i < sizeof(keyboard_arrows) / sizeof(keyboard_arrows[0]);
+	     ++i) {
+		key(1, FPLINUX_INPUT_SOURCE_KEYPAD, keypad_arrows[i].code,
+		    true);
+		assert(down[keypad_arrows[i].key]);
+		key(2, FPLINUX_INPUT_SOURCE_KEYBOARD, keyboard_arrows[i].code,
+		    true);
+		assert(down[keyboard_arrows[i].key]);
+		key(1, FPLINUX_INPUT_SOURCE_KEYPAD, keypad_arrows[i].code,
+		    false);
+		assert(down[keyboard_arrows[i].key]);
+		if (keypad_arrows[i].key != keyboard_arrows[i].key)
+			assert(!down[keypad_arrows[i].key]);
+		key(2, FPLINUX_INPUT_SOURCE_KEYBOARD, keyboard_arrows[i].code,
+		    false);
+		assert(!down[K_UPARROW] && !down[K_DOWNARROW] &&
+		       !down[K_LEFTARROW] && !down[K_RIGHTARROW]);
+	}
 	/* F13 is a softkey only on the phone. */
 	before = key_events;
 	key(2, FPLINUX_INPUT_SOURCE_KEYBOARD, 183, true);

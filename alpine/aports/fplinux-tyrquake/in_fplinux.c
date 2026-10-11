@@ -207,6 +207,10 @@ static knum_t translate_keyboard(unsigned int code)
 
 static knum_t translate_keypad(unsigned int code)
 {
+	const struct fplinux_drm_session *display =
+		fplinux_quake_display_session();
+	bool rotated = display->height > display->width;
+
 	switch (code) {
 	case FPLINUX_KEY_0:
 		return K_LCTRL;
@@ -234,13 +238,13 @@ static knum_t translate_keypad(unsigned int code)
 	case FPLINUX_KEY_POUND:
 		return K_KP_PERIOD;
 	case FPLINUX_KEY_UP:
-		return K_LEFTARROW;
+		return rotated ? K_LEFTARROW : K_UPARROW;
 	case FPLINUX_KEY_DOWN:
-		return K_RIGHTARROW;
+		return rotated ? K_RIGHTARROW : K_DOWNARROW;
 	case FPLINUX_KEY_LEFT:
-		return K_DOWNARROW;
+		return rotated ? K_DOWNARROW : K_LEFTARROW;
 	case FPLINUX_KEY_RIGHT:
-		return K_UPARROW;
+		return rotated ? K_UPARROW : K_RIGHTARROW;
 	case FPLINUX_KEY_OK:
 	case FPLINUX_KEY_CALL:
 		return K_ENTER;
