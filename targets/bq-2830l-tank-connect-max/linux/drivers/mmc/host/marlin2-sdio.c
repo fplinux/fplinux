@@ -67,6 +67,68 @@ struct marlin2_sdio_runtime {
 	unsigned int saved_quirks;
 };
 
+static void report_cleanup_error(struct sdio_func *func,
+				 struct marlin2_boot_result *result, int error)
+{
+	if (result) {
+		if (!result->cleanup_error)
+			result->cleanup_error = error;
+	} else {
+		bq2830l_radio_runtime_cleanup_error(func, error);
+	}
+}
+
+/* The caller retains the SDIO host claim throughout state restoration. */
+static int
+restore_function_locked(struct sdio_func *func,
+			const struct marlin2_interrupt_state *interrupts,
+			unsigned int saved_quirks,
+			struct marlin2_boot_result *result)
+{
+	int cleanup_error = 0;
+	int ret;
+
+	if (interrupts->public_saved) {
+		sdio_f0_writeb(func, interrupts->public,
+			       MARLIN2_SDIO_PUBLIC_ENABLE, &ret);
+		report_cleanup_error(func, result, ret);
+		if (ret) {
+			cleanup_error = ret;
+			dev_err(&func->dev,
+				"failed to restore public interrupts: %pe\n",
+				ERR_PTR(ret));
+		}
+	}
+	if (interrupts->direct_saved) {
+		sdio_f0_writeb(func, interrupts->direct,
+			       MARLIN2_SDIO_INTERRUPT_ENABLE, &ret);
+		report_cleanup_error(func, result, ret);
+		if (ret) {
+			if (!cleanup_error)
+				cleanup_error = ret;
+			dev_err(&func->dev,
+				"failed to restore direct interrupts: %pe\n",
+				ERR_PTR(ret));
+		}
+	}
+	ret = sdio_disable_func(func);
+	report_cleanup_error(func, result, ret);
+	if (ret) {
+		if (!cleanup_error)
+			cleanup_error = ret;
+		if (result)
+			dev_err(&func->dev,
+				"failed to disable the function: %pe\n",
+				ERR_PTR(ret));
+		else
+			dev_err(&func->dev,
+				"failed to disable radio function: %pe\n",
+				ERR_PTR(ret));
+	}
+	func->card->quirks = saved_quirks;
+	return cleanup_error;
+}
+
 static int set_address(struct sdio_func *func, u32 address)
 {
 	unsigned int index;
@@ -443,41 +505,10 @@ static int marlin2_sdio_probe(struct sdio_func *func,
 	}
 
 out_disable:
-	if (interrupts.public_saved) {
-		sdio_f0_writeb(func, interrupts.public,
-			       MARLIN2_SDIO_PUBLIC_ENABLE, &cleanup_ret);
-		if (cleanup_ret) {
-			result.cleanup_error = cleanup_ret;
-			dev_err(&func->dev,
-				"failed to restore public interrupts: %pe\n",
-				ERR_PTR(cleanup_ret));
-			if (!ret)
-				ret = cleanup_ret;
-		}
-	}
-	if (interrupts.direct_saved) {
-		sdio_f0_writeb(func, interrupts.direct,
-			       MARLIN2_SDIO_INTERRUPT_ENABLE, &cleanup_ret);
-		if (cleanup_ret) {
-			if (!result.cleanup_error)
-				result.cleanup_error = cleanup_ret;
-			dev_err(&func->dev,
-				"failed to restore direct interrupts: %pe\n",
-				ERR_PTR(cleanup_ret));
-			if (!ret)
-				ret = cleanup_ret;
-		}
-	}
-	cleanup_ret = sdio_disable_func(func);
-	if (cleanup_ret) {
-		if (!result.cleanup_error)
-			result.cleanup_error = cleanup_ret;
-		dev_err(&func->dev, "failed to disable the function: %pe\n",
-			ERR_PTR(cleanup_ret));
-		if (!ret)
-			ret = cleanup_ret;
-	}
-	func->card->quirks = saved_quirks;
+	cleanup_ret = restore_function_locked(func, &interrupts, saved_quirks,
+					      &result);
+	if (!ret)
+		ret = cleanup_ret;
 	sdio_release_host(func);
 out_report:
 	kfree(buffer);
@@ -493,36 +524,13 @@ out_report:
 static void marlin2_sdio_remove(struct sdio_func *func)
 {
 	struct marlin2_sdio_runtime *runtime = sdio_get_drvdata(func);
-	int ret;
 
 	if (!runtime)
 		return;
 	/* The board first stops the network IRQ and FIFO work, then removes us. */
 	sdio_claim_host(func);
-	if (runtime->interrupts.public_saved) {
-		sdio_f0_writeb(func, runtime->interrupts.public,
-			       MARLIN2_SDIO_PUBLIC_ENABLE, &ret);
-		bq2830l_radio_runtime_cleanup_error(func, ret);
-		if (ret)
-			dev_err(&func->dev,
-				"failed to restore public interrupts: %pe\n",
-				ERR_PTR(ret));
-	}
-	if (runtime->interrupts.direct_saved) {
-		sdio_f0_writeb(func, runtime->interrupts.direct,
-			       MARLIN2_SDIO_INTERRUPT_ENABLE, &ret);
-		bq2830l_radio_runtime_cleanup_error(func, ret);
-		if (ret)
-			dev_err(&func->dev,
-				"failed to restore direct interrupts: %pe\n",
-				ERR_PTR(ret));
-	}
-	ret = sdio_disable_func(func);
-	bq2830l_radio_runtime_cleanup_error(func, ret);
-	if (ret)
-		dev_err(&func->dev, "failed to disable radio function: %pe\n",
-			ERR_PTR(ret));
-	func->card->quirks = runtime->saved_quirks;
+	restore_function_locked(func, &runtime->interrupts,
+				runtime->saved_quirks, NULL);
 	sdio_release_host(func);
 	sdio_set_drvdata(func, NULL);
 }

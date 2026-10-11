@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Host-linked Bluetooth write owner at an explicit SDIO operation boundary."""
+"""Host-linked write and cleanup behavior at controlled SDIO boundaries."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
+import pytest
 
 from tests import ROOT
 from tests.c_harness import compile_c
@@ -16,10 +18,8 @@ KERNEL = ROOT / "targets/bq-2830l-tank-connect-max/linux/drivers/mmc/host"
 FIXTURES = ROOT / "tests/host_tool/ums9117"
 
 
-def test_bluetooth_direct_write_submits_complete_frame_through_fixed_port_operation(
-    tmp_path: Path,
-) -> None:
-    """Link the owner; SDIO APIs/device are doubles, without core/controller/HCI execution."""
+@pytest.fixture
+def sdio_executable(tmp_path: Path) -> Path:
     executable = tmp_path / "marlin2-sdio-write"
     compile_c(
         executable,
@@ -43,10 +43,30 @@ def test_bluetooth_direct_write_submits_complete_frame_through_fixed_port_operat
         name="compile Marlin2 SDIO write owner host checks",
         check=True,
     )
+    return executable
+
+
+def test_bluetooth_direct_write_submits_complete_frame_through_fixed_port_operation(
+    sdio_executable: Path,
+) -> None:
+    """Link the owner; SDIO APIs/device are doubles, without core/controller/HCI execution."""
     result = run_process(
-        [str(executable)],
+        [str(sdio_executable)],
         name="run Marlin2 SDIO write owner host checks",
         timeout=10,
         check=True,
     )
     assert result.stdout == "Marlin2 SDIO write owner host cases passed\n"
+
+
+def test_sdio_probe_and_remove_restore_state_and_preserve_first_error(
+    sdio_executable: Path,
+) -> None:
+    """Link the driver with controlled firmware, board, clock and SDIO boundaries."""
+    result = run_process(
+        [str(sdio_executable), "cleanup"],
+        name="run Marlin2 SDIO cleanup host checks",
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout == "Marlin2 SDIO cleanup host cases passed\n"
