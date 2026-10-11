@@ -273,14 +273,8 @@ sc2720_fgu_read_charge_sample(const struct sc2720_fgu *fgu,
 	return -EAGAIN;
 }
 
-static int
-sc2720_fgu_sample_to_microvolt(const struct sc2720_fgu *fgu,
-			       const struct sc2720_fgu_sample *sample,
-			       int *microvolt)
+static int sc2720_fgu_validate_sample(const struct sc2720_fgu_sample *sample)
 {
-	u16 voltage_raw;
-	u32 voltage_mv;
-
 	if (sample->chip_id_low != SC2720_EXPECTED_ID_LOW ||
 	    sample->chip_id_high != SC2720_EXPECTED_ID_HIGH)
 		return -ENODEV;
@@ -290,6 +284,22 @@ sc2720_fgu_sample_to_microvolt(const struct sc2720_fgu *fgu,
 	    sample->soft_rst0 & SC2720_SOFT_RST0_FGU ||
 	    sample->chgr_det_fgu_ctrl & SC2720_CHGR_DET_FGU_ANALOG_MASK)
 		return -ENODATA;
+
+	return 0;
+}
+
+static int
+sc2720_fgu_sample_to_microvolt(const struct sc2720_fgu *fgu,
+			       const struct sc2720_fgu_sample *sample,
+			       int *microvolt)
+{
+	u16 voltage_raw;
+	u32 voltage_mv;
+	int ret;
+
+	ret = sc2720_fgu_validate_sample(sample);
+	if (ret)
+		return ret;
 	if (sample->config & (SC2720_FGU_CONFIG_VOLT_H_VALID |
 			      SC2720_FGU_CONFIG_DISABLE) ||
 	    sample->adc_config & (SC2720_FGU_ADC_CONFIG_RESET |
@@ -318,16 +328,11 @@ static int sc2720_fgu_sample_to_microamp(const struct sc2720_fgu *fgu,
 	s32 delta;
 	s64 microamps;
 	s64 scaled_delta;
+	int ret;
 
-	if (sample->chip_id_low != SC2720_EXPECTED_ID_LOW ||
-	    sample->chip_id_high != SC2720_EXPECTED_ID_HIGH)
-		return -ENODEV;
-	if (!(sample->module_en0 & SC2720_MODULE_EN0_FGU))
-		return -EIO;
-	if (!(sample->rtc_clk_en0 & SC2720_RTC_CLK_EN0_FGU) ||
-	    sample->soft_rst0 & SC2720_SOFT_RST0_FGU ||
-	    sample->chgr_det_fgu_ctrl & SC2720_CHGR_DET_FGU_ANALOG_MASK)
-		return -ENODATA;
+	ret = sc2720_fgu_validate_sample(sample);
+	if (ret)
+		return ret;
 	if (sample->config & (SC2720_FGU_CONFIG_DISABLE |
 			      SC2720_FGU_CONFIG_SW_DIS_CURT) ||
 	    sample->adc_config & (SC2720_FGU_ADC_CONFIG_RESET |
