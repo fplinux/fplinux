@@ -927,61 +927,22 @@ static int ums9117_nandc_wait_page_ready(struct ums9117_nandc *nandc)
 	}
 }
 
-static int ums9117_nandc_read_page_x1(struct ums9117_nandc *nandc)
-{
-	static const u16 instructions[] = {
-		0x000b, 0x0000, 0x0000, 0x6000, 0x3000, 0xe000, 0xf000,
-	};
-	void __iomem *regs = nandc->regs[UMS9117_NANDC_RES_NANDC];
-	int ret;
-
-	if (upper_32_bits(nandc->page_dma) || !IS_ALIGNED(nandc->page_dma, 64U))
-		return -ERANGE;
-	memset(nandc->page_buffer, 0xa5, nandc->chip->page_main_bytes);
-	writel(0, regs + UMS9117_NANDC_MAIN_ADDR_HIGH);
-	writel(lower_32_bits(nandc->page_dma),
-	       regs + UMS9117_NANDC_MAIN_ADDR_LOW);
-	writel(UMS9117_NANDC_INVALID_DMA_ADDRESS,
-	       regs + UMS9117_NANDC_SPARE_ADDR_HIGH);
-	writel(UMS9117_NANDC_INVALID_DMA_ADDRESS,
-	       regs + UMS9117_NANDC_SPARE_ADDR_LOW);
-	writel(UMS9117_NANDC_INVALID_DMA_ADDRESS,
-	       regs + UMS9117_NANDC_STATUS_ADDR_HIGH);
-	writel(UMS9117_NANDC_INVALID_DMA_ADDRESS,
-	       regs + UMS9117_NANDC_STATUS_ADDR_LOW);
-	writel(UMS9117_NANDC_DATA_CFG0, regs + UMS9117_NANDC_CFG0);
-	writel(0, regs + UMS9117_NANDC_CFG2);
-	writel(UMS9117_NANDC_DATA_CFG1, regs + UMS9117_NANDC_CFG1);
-	writel(UMS9117_NANDC_DATA_CFG4, regs + UMS9117_NANDC_CFG4);
-	writel(0, regs + UMS9117_NANDC_START);
-	nandc->last_operation = UMS9117_NANDC_FIXED_READ_CACHE_X1;
-	nandc->last_feature_address = 0;
-	dma_wmb();
-	ret = ums9117_nandc_run_job(nandc, instructions,
-				    ARRAY_SIZE(instructions));
-	if (ret)
-		return ret;
-	dma_rmb();
-	if (nandc->last_axim_status)
-		return -EIO;
-	return 0;
-}
-
-static int ums9117_nandc_read_oob_cache(struct ums9117_nandc *nandc)
+static int
+ums9117_nandc_read_cache(struct ums9117_nandc *nandc, u16 column, size_t length,
+			 u32 cfg0, u32 cfg1,
+			 enum ums9117_nandc_fixed_operation operation)
 {
 	u16 instructions[] = {
 		0x000b, 0x0000, 0x0000, 0x6000, 0x3000, 0xe000, 0xf000,
 	};
-	const struct ums9117_nandc_chip *chip = nandc->chip;
 	void __iomem *regs = nandc->regs[UMS9117_NANDC_RES_NANDC];
 	int ret;
 
 	if (upper_32_bits(nandc->page_dma) || !IS_ALIGNED(nandc->page_dma, 64U))
 		return -ERANGE;
-	/* The OOB area starts at the column after the main area. */
-	instructions[1] = (chip->page_main_bytes >> 8) & 0xffU;
-	instructions[2] = chip->page_main_bytes & 0xffU;
-	memset(nandc->page_buffer, 0xa5, chip->oob_bytes);
+	instructions[1] = (column >> 8) & 0xffU;
+	instructions[2] = column & 0xffU;
+	memset(nandc->page_buffer, 0xa5, length);
 	writel(0, regs + UMS9117_NANDC_MAIN_ADDR_HIGH);
 	writel(lower_32_bits(nandc->page_dma),
 	       regs + UMS9117_NANDC_MAIN_ADDR_LOW);
@@ -993,14 +954,12 @@ static int ums9117_nandc_read_oob_cache(struct ums9117_nandc *nandc)
 	       regs + UMS9117_NANDC_STATUS_ADDR_HIGH);
 	writel(UMS9117_NANDC_INVALID_DMA_ADDRESS,
 	       regs + UMS9117_NANDC_STATUS_ADDR_LOW);
-	writel(UMS9117_NANDC_OOB_CFG0, regs + UMS9117_NANDC_CFG0);
+	writel(cfg0, regs + UMS9117_NANDC_CFG0);
 	writel(0, regs + UMS9117_NANDC_CFG2);
-	/* CFG1 MAIN_SIZE is the transfer length minus one. */
-	writel(UMS9117_NANDC_CFG1_SPI | (chip->oob_bytes - 1),
-	       regs + UMS9117_NANDC_CFG1);
+	writel(cfg1, regs + UMS9117_NANDC_CFG1);
 	writel(UMS9117_NANDC_DATA_CFG4, regs + UMS9117_NANDC_CFG4);
 	writel(0, regs + UMS9117_NANDC_START);
-	nandc->last_operation = UMS9117_NANDC_FIXED_READ_CACHE_OOB;
+	nandc->last_operation = operation;
 	nandc->last_feature_address = 0;
 	dma_wmb();
 	ret = ums9117_nandc_run_job(nandc, instructions,
@@ -1009,6 +968,29 @@ static int ums9117_nandc_read_oob_cache(struct ums9117_nandc *nandc)
 		return ret;
 	dma_rmb();
 	return nandc->last_axim_status ? -EIO : 0;
+}
+
+static int ums9117_nandc_read_page_x1(struct ums9117_nandc *nandc)
+{
+	return ums9117_nandc_read_cache(nandc, 0, nandc->chip->page_main_bytes,
+					UMS9117_NANDC_DATA_CFG0,
+					UMS9117_NANDC_DATA_CFG1,
+					UMS9117_NANDC_FIXED_READ_CACHE_X1);
+}
+
+static int ums9117_nandc_read_oob_cache(struct ums9117_nandc *nandc)
+{
+	const struct ums9117_nandc_chip *chip = nandc->chip;
+
+	/*
+	 * The OOB area starts after the main area. CFG1 MAIN_SIZE is the
+	 * transfer length minus one.
+	 */
+	return ums9117_nandc_read_cache(nandc, chip->page_main_bytes,
+					chip->oob_bytes, UMS9117_NANDC_OOB_CFG0,
+					UMS9117_NANDC_CFG1_SPI |
+						(chip->oob_bytes - 1),
+					UMS9117_NANDC_FIXED_READ_CACHE_OOB);
 }
 
 static int ums9117_nandc_read_raw_slice(struct ums9117_nandc *nandc, u32 page,
