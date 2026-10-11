@@ -15,9 +15,10 @@ from typing import Any
 
 from fplinux_cli import common
 from fplinux_cli.build.host import copy_host_project_files, extract_host_members
+from fplinux_cli.build.host_package import copy_mingw_licenses, publish_host_package
 from fplinux_cli.build.sources import source_lock_entry
 from fplinux_cli.build.windows_environment import WindowsBuildEnvironment
-from fplinux_cli.common import canonical_json_bytes, fail, sha256_file
+from fplinux_cli.common import canonical_json_bytes, fail
 from fplinux_cli.device_data.prepare import NAND_ECC_TOOL
 from fplinux_cli.environment.downloads import download_locked_file
 from fplinux_cli.manifests.platforms import load_platform
@@ -136,7 +137,7 @@ def _build_tools(  # noqa: PLR0913 -- compile paths and offline policy are disti
     offline: bool,
     environment: WindowsBuildEnvironment,
     nand_ecc: bool,
-) -> list[str]:
+) -> None:
     sources = common.load_toml(common.ROOT / "sources.lock.toml")
     recipes = load_platform("ums9117")["host"]["tools"]
     include = libusb / "include" / "libusb-1.0"
@@ -148,7 +149,6 @@ def _build_tools(  # noqa: PLR0913 -- compile paths and offline policy are disti
     required_tools = {"spd_dump", "libc_server", "fphelper_t117"}
     if nand_ecc:
         required_tools.add(NAND_ECC_TOOL)
-    rebuilt_tools = []
     for recipe in recipes:
         if recipe["name"] not in required_tools:
             continue
@@ -221,7 +221,6 @@ def _build_tools(  # noqa: PLR0913 -- compile paths and offline policy are disti
         subprocess.run(command, cwd=source, check=True)
         if output.read_bytes() != rebuilt.read_bytes():
             fail(f"Windows tool build is not reproducible: {recipe['name']}")
-        rebuilt_tools.append(recipe["name"])
         for path in source.iterdir():
             if path.is_file():
                 source_files[f"{recipe['name']}/{path.name}"] = path
@@ -232,18 +231,12 @@ def _build_tools(  # noqa: PLR0913 -- compile paths and offline policy are disti
             member = zipfile.ZipInfo(relative, date_time=(1980, 1, 1, 0, 0, 0))
             member.compress_type = zipfile.ZIP_DEFLATED
             source_zip.writestr(member, path.read_bytes())
-    return rebuilt_tools
 
 
 def _copy_licenses(toolchain: Path, libusb_source: Path, package: Path) -> None:
     licenses = package / "licenses/windows-host"
     licenses.mkdir(parents=True, exist_ok=True)
-    for name in ("COPYING", "COPYING.MinGW-w64-runtime.txt", "COPYING.MinGW-w64.txt"):
-        shutil.copyfile(
-            toolchain / "x86_64-w64-mingw32/share/mingw32" / name,
-            licenses / f"mingw-w64-{name}",
-        )
-    shutil.copyfile(toolchain / "LICENSE.TXT", licenses / "llvm-LICENSE.txt")
+    copy_mingw_licenses(toolchain, licenses)
     shutil.copyfile(common.ROOT / "LICENSES/Unlicense.txt", licenses / "Unlicense.txt")
     with tarfile.open(libusb_source) as archive:
         stream = archive.extractfile("libusb-1.0.29/COPYING")
@@ -290,7 +283,7 @@ def prepare_windows_host(*, cache: Path, offline: bool, nand_ecc: bool = False) 
             cwd=work,
         )
         package = work / "package"
-        rebuilt_tools = _build_tools(
+        _build_tools(
             compiler=toolchain / "bin/x86_64-w64-mingw32-gcc",
             libusb=libusb,
             downloads=cache / "downloads",
@@ -330,16 +323,5 @@ def prepare_windows_host(*, cache: Path, offline: bool, nand_ecc: bool = False) 
             for path in package.rglob("*")
             if path.is_file()
         }
-        dependencies = verify_windows_dependencies(files, environment=environment)
-        destination = root / "package"
-        if destination.exists():
-            shutil.rmtree(destination)
-        shutil.copytree(package, destination)
-        result = {relative: destination / relative for relative in files}
-        receipt = {
-            "files": {relative: sha256_file(path) for relative, path in sorted(result.items())},
-            "imports": dependencies,
-            "rebuild_identical": rebuilt_tools,
-        }
-        (root / "receipt.json").write_bytes(canonical_json_bytes(receipt))
-        return result
+        verify_windows_dependencies(files, environment=environment)
+        return publish_host_package(package, root / "package", relative_paths=files)

@@ -5,14 +5,14 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import subprocess
 import tarfile
 import tempfile
 from pathlib import Path
 
 from fplinux_cli import common
-from fplinux_cli.common import canonical_json_bytes, fail, sha256_file
+from fplinux_cli.build.host_package import publish_host_package
+from fplinux_cli.common import canonical_json_bytes, fail
 from fplinux_cli.environment.downloads import download_locked_file
 from fplinux_cli.environment.image_store import current_image_state
 from fplinux_cli.environment.images import (
@@ -109,8 +109,7 @@ def prepare_linux_host(*, cache: Path, offline: bool) -> dict[str, Path]:
     recipe = container_image_recipe_digest(lock)
     image = container_image_reference(lock, recipe)
     kern = require_kern(lock)
-    state = current_image_state(kern, image, recipe)
-    if state is None:
+    if current_image_state(kern, image, recipe) is None:
         fail(
             "Linux standalone runtime requires the current pinned image; run ./fplinux setup first"
         )
@@ -154,20 +153,9 @@ def prepare_linux_host(*, cache: Path, offline: bool) -> dict[str, Path]:
             for path in package.rglob("*")
             if path.is_file()
         }
-        imports = verify_linux_dependencies(files)
+        verify_linux_dependencies(files)
         _verify_python(package)
-        destination = root / "package"
-        if destination.exists():
-            shutil.rmtree(destination)
-        shutil.copytree(package, destination)
-        result = {relative: destination / relative for relative in files}
-        receipt = {
-            "image_content": state.image_content,
-            "files": {relative: sha256_file(path) for relative, path in sorted(result.items())},
-            "imports": imports,
-        }
-        (root / "receipt.json").write_bytes(canonical_json_bytes(receipt))
-        return result
+        return publish_host_package(package, root / "package", relative_paths=files)
 
 
 def _copy_licenses(package: Path, downloads: Path, *, offline: bool) -> None:

@@ -172,6 +172,10 @@ def prepare_windows_driver(*, cache: Path, offline: bool) -> dict[str, Path]:
     # Keep the delivered build recipe usable without the project Python package.
     from fplinux_cli import common  # noqa: PLC0415
     from fplinux_cli.build.environment import SOURCE_DATE_EPOCH  # noqa: PLC0415
+    from fplinux_cli.build.host_package import (  # noqa: PLC0415
+        copy_mingw_licenses,
+        publish_host_package,
+    )
     from fplinux_cli.build.windows import verify_windows_dependencies  # noqa: PLC0415
     from fplinux_cli.build.windows_environment import WindowsBuildEnvironment  # noqa: PLC0415
     from fplinux_cli.environment.downloads import download_locked_file  # noqa: PLC0415
@@ -229,7 +233,7 @@ def prepare_windows_driver(*, cache: Path, offline: bool) -> dict[str, Path]:
             source_date_epoch=int(SOURCE_DATE_EPOCH),
             environment=environment,
         )
-        installer_dependencies = verify_windows_dependencies(
+        verify_windows_dependencies(
             {"installer_x64.exe": installer},
             environment=environment,
         )
@@ -239,12 +243,7 @@ def prepare_windows_driver(*, cache: Path, offline: bool) -> dict[str, Path]:
             shutil.copyfile(source / name, licenses / f"libwdi-{name}.txt")
         for name in ("License.rtf", "redist.txt.x64"):
             shutil.copyfile(redist / name, licenses / name)
-        for name in ("COPYING", "COPYING.MinGW-w64-runtime.txt", "COPYING.MinGW-w64.txt"):
-            shutil.copyfile(
-                toolchain / "x86_64-w64-mingw32/share/mingw32" / name,
-                licenses / f"mingw-w64-{name}",
-            )
-        shutil.copyfile(toolchain / "LICENSE.TXT", licenses / "llvm-LICENSE.txt")
+        copy_mingw_licenses(toolchain, licenses)
         sources = package / "sources/windows-driver"
         sources.mkdir(parents=True)
         shutil.copyfile(archives["libwdi"], sources / archives["libwdi"].name)
@@ -279,21 +278,8 @@ def prepare_windows_driver(*, cache: Path, offline: bool) -> dict[str, Path]:
             for path in package.rglob("*")
             if path.is_file()
         }
-        dependencies = verify_windows_dependencies(files, environment=environment)
-        destination = root / "package"
-        if destination.exists():
-            shutil.rmtree(destination)
-        shutil.copytree(package, destination)
-        result = {relative: destination / relative for relative in files}
-        receipt = {
-            "files": {
-                relative: common.sha256_file(path) for relative, path in sorted(result.items())
-            },
-            "imports": dependencies,
-            "installer_imports": installer_dependencies,
-        }
-        (root / "receipt.json").write_bytes(common.canonical_json_bytes(receipt))
-        return result
+        verify_windows_dependencies(files, environment=environment)
+        return publish_host_package(package, root / "package", relative_paths=files)
 
 
 def _main() -> None:
