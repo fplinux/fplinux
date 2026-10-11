@@ -80,6 +80,38 @@ static void connection_and_key_payloads(void)
 	       0);
 }
 
+static void command_and_data_block_boundaries(void)
+{
+	u8 payload[497];
+	u8 packet[1024];
+
+	memset(payload, 0x5a, sizeof(payload));
+	assert(marlin2_wlan_command_build(packet, 512, 1, 3, 0x12345678,
+					  payload, 492) == 512);
+	assert(!memcmp(packet, (u8[]){ 0, 0xfc, 0, 0x20 }, 4));
+	assert(!memcmp(packet + 16, payload, 492));
+	assert(!memcmp(packet + 508, (u8[]){ 0, 0, 0x80, 0 }, 4));
+	assert(!marlin2_wlan_command_build(packet, 512, 1, 3, 0x12345678,
+					   payload, 493));
+	assert(marlin2_wlan_command_build(packet, sizeof(packet), 1, 3,
+					  0x12345678, payload, 493) == 1024);
+	assert(!memcmp(packet, (u8[]){ 0x80, 0xfc, 0, 0x20 }, 4));
+	assert(!memcmp(packet + 16, payload, 493));
+	assert(!memcmp(packet + 509, (u8[]){ 0, 0, 0, 0, 0, 0x80, 0 }, 7));
+
+	assert(marlin2_wlan_data_build(packet, 512, 1, true, payload, 496) ==
+	       512);
+	assert(!memcmp(packet, (u8[]){ 0, 0xfc, 0, 0x21 }, 4));
+	assert(!memcmp(packet + 12, payload, 496));
+	assert(!memcmp(packet + 508, (u8[]){ 0, 0, 0x80, 0 }, 4));
+	assert(!marlin2_wlan_data_build(packet, 512, 1, true, payload, 497));
+	assert(marlin2_wlan_data_build(packet, sizeof(packet), 1, true, payload,
+				       497) == 1024);
+	assert(!memcmp(packet, (u8[]){ 0x80, 0xfc, 0, 0x21 }, 4));
+	assert(!memcmp(packet + 12, payload, 497));
+	assert(!memcmp(packet + 509, (u8[]){ 0, 0, 0, 0, 0, 0x80, 0 }, 7));
+}
+
 static void data_credits_preserve_ethernet(void)
 {
 	/* Credit grants may accompany a real Ethernet frame. */
@@ -232,6 +264,7 @@ static void extended_capabilities_fit_radio_and_keep_security_ies(void)
 int main(void)
 {
 	command_and_data_packets();
+	command_and_data_block_boundaries();
 	connection_and_key_payloads();
 	data_credits_preserve_ethernet();
 	global_credits_and_wildcard_scan();

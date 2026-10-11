@@ -177,11 +177,47 @@ static void check_wlan_aggregate_drain(void)
 	assert(received.count == 1);
 }
 
+static int collect_and_stop(void *context,
+			    const struct marlin2_transport_message *message)
+{
+	collect(context, message);
+	return -EIO;
+}
+
+static void check_callback_result_and_dummy_boundary(void)
+{
+	u8 packet[512] = {
+		0x80, 0x00, 0x00,	 0x73,	    0x5a,	0,
+		0,    0,    [10] = 0x80, [504] = 2, [508] = 17,
+	};
+	struct received received = {};
+	u32 next = 0;
+
+	/* The callback result wins over a malformed following record. */
+	assert(marlin2_transport_aggregate_decode(packet, sizeof(packet),
+						  collect_and_stop, &received,
+						  &next) == -EIO);
+	assert(received.count == 1 && received.types[0] == 7);
+	assert(received.subtypes[0] == 3 && received.lengths[0] == 1);
+	assert(received.payloads[0][0] == 0x5a && next == 17);
+
+	/* A dummy occupies the whole data area without satisfying used payload. */
+	memset(packet, 0, sizeof(packet));
+	memcpy(packet, (u8[]){ 0x80, 0xf9, 0x00, 0xf0 }, 4);
+	packet[504] = 1;
+	received.count = 0;
+	assert(marlin2_transport_aggregate_decode(packet, sizeof(packet),
+						  collect, &received,
+						  &next) == -EBADMSG);
+	assert(!received.count && !next);
+}
+
 int main(void)
 {
 	check_single_records();
 	check_aggregate_dispatch();
 	check_wlan_aggregate_drain();
+	check_callback_result_and_dummy_boundary();
 	puts("Marlin2 shared wire host cases passed");
 	return 0;
 }

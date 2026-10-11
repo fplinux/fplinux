@@ -34,6 +34,7 @@ def test_get_info_reply_and_packet_boundaries(tmp_path: Path) -> None:
             f"-I{KERNEL}",
             str(FIXTURES / "marlin2-packet.c"),
             str(KERNEL / "marlin2-packet-codec.c"),
+            str(KERNEL / "marlin2-transport-wire.c"),
         ],
         name="compile Marlin2 packet codec host checks",
         check=True,

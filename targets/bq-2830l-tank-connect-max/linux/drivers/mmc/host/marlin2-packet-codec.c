@@ -6,11 +6,9 @@
 #include <linux/unaligned.h>
 
 #include "marlin2-packet.h"
+#include "marlin2-transport-wire.h"
 
-#define MARLIN2_PUH_BYTES 4U
-#define MARLIN2_PUH_EOF 0x00800000U
 #define MARLIN2_PUH_WIFI 2U
-#define MARLIN2_PUH_DUMMY 15U
 #define MARLIN2_COMMAND_BYTES 12U
 #define MARLIN2_GET_INFO_BYTES 28U
 #define MARLIN2_GET_INFO_ID 1U
@@ -18,13 +16,13 @@
 void marlin2_packet_build_get_info(u8 packet[MARLIN2_PACKET_TX_BYTES],
 				   u32 token)
 {
-	memset(packet, 0, MARLIN2_PACKET_TX_BYTES);
-	put_unaligned_le32(0x20000600U, packet);
+	marlin2_transport_record_prepare(packet, MARLIN2_PACKET_TX_BYTES,
+					 MARLIN2_PUH_WIFI, 0,
+					 MARLIN2_COMMAND_BYTES);
 	packet[4] = 0x10;
 	packet[5] = MARLIN2_GET_INFO_ID;
 	put_unaligned_le16(MARLIN2_COMMAND_BYTES, packet + 6);
 	put_unaligned_le32(token, packet + 8);
-	put_unaligned_le32(MARLIN2_PUH_EOF, packet + 16);
 }
 
 static int decode_get_info(const u8 *command, size_t bytes, u32 token,
@@ -70,58 +68,28 @@ static int decode_get_info(const u8 *command, size_t bytes, u32 token,
 int marlin2_packet_decode(const u8 *packet, size_t read_bytes, u32 token,
 			  struct marlin2_packet_result *result)
 {
-	u32 parsed_payload_bytes = 0;
-	u32 used_payload_bytes;
-	size_t offset = 0;
-	size_t record_bytes;
-	size_t payload_bytes;
-	size_t data_bytes;
-	u32 header;
-	u8 subtype;
-	u8 type;
+	struct marlin2_transport_aggregate aggregate;
+	struct marlin2_transport_message message;
 	int ret;
 
-	if (read_bytes < 8 || read_bytes > MARLIN2_PACKET_RX_MAX_BYTES ||
-	    read_bytes % 512)
-		return -EINVAL;
-	data_bytes = read_bytes - 8;
-	used_payload_bytes = get_unaligned_le32(packet + data_bytes);
-	result->used_payload_bytes = used_payload_bytes;
-	result->next_payload_bytes =
-		get_unaligned_le32(packet + data_bytes + 4);
+	ret = marlin2_transport_aggregate_init(&aggregate, packet, read_bytes);
+	if (ret)
+		return ret;
+	result->used_payload_bytes = aggregate.used_payload_bytes;
+	result->next_payload_bytes = aggregate.next_payload_bytes;
 	result->aggregates++;
-	while (parsed_payload_bytes < used_payload_bytes) {
-		if (data_bytes - offset < MARLIN2_PUH_BYTES)
-			return -EBADMSG;
-		header = get_unaligned_le32(packet + offset);
-		result->last_puh = header;
-		if (header & MARLIN2_PUH_EOF)
-			return -EBADMSG;
-		payload_bytes = (header >> 7) & 0xffff;
-		type = header >> 28;
-		subtype = (header >> 24) & 15;
-		record_bytes = MARLIN2_PUH_BYTES + ((payload_bytes + 3) & ~3U);
-		if (record_bytes > data_bytes - offset)
-			return -EBADMSG;
-		if (type != MARLIN2_PUH_DUMMY) {
-			if (!payload_bytes ||
-			    payload_bytes >
-				    used_payload_bytes - parsed_payload_bytes)
-				return -EBADMSG;
-			parsed_payload_bytes += payload_bytes;
-			result->records++;
-			if (type == MARLIN2_PUH_WIFI && !subtype) {
-				ret = decode_get_info(
-					packet + offset + MARLIN2_PUH_BYTES,
-					payload_bytes, token, result);
-				if (ret)
-					return ret;
-			}
-			result->ignored_records++;
+	while ((ret = marlin2_transport_aggregate_next(
+			&aggregate, &message, &result->last_puh)) > 0) {
+		result->records++;
+		if (message.type == MARLIN2_PUH_WIFI && !message.subtype) {
+			ret = decode_get_info(message.data, message.length,
+					      token, result);
+			if (ret)
+				return ret;
 		}
-		offset += record_bytes;
+		result->ignored_records++;
 	}
-	return 0;
+	return ret;
 }
 
 size_t marlin2_packet_next_read(u32 pending_payload_bytes)

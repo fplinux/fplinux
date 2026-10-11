@@ -5,9 +5,8 @@
 #include <linux/string.h>
 #include <linux/unaligned.h>
 
+#include "marlin2-transport-wire.h"
 #include "marlin2-wlan-wire.h"
-
-#define MARLIN2_WLAN_PUH_EOF 0x00800000U
 
 const u8 marlin2_wlan_extended_capabilities[11] = {};
 /* Keep userspace-owned prefix bits; the radio accepts at most seven bytes. */
@@ -33,11 +32,6 @@ int marlin2_wlan_ies_validate(const u8 *ies, size_t bytes)
 	return 0;
 }
 
-static size_t aggregate_bytes(size_t payload_bytes)
-{
-	return (4 + ((payload_bytes + 3) & ~3U) + 4 + 511) & ~511U;
-}
-
 size_t marlin2_wlan_command_build(u8 *packet, size_t capacity, u8 mode,
 				  u8 command, u32 token, const u8 *payload,
 				  size_t payload_bytes)
@@ -47,19 +41,16 @@ size_t marlin2_wlan_command_build(u8 *packet, size_t capacity, u8 mode,
 
 	if (mode > 7 || payload_bytes > 0xffff - MARLIN2_WLAN_COMMAND_BYTES)
 		return 0;
-	bytes = aggregate_bytes(message_bytes);
-	if (bytes > capacity)
+	bytes = marlin2_transport_record_prepare(packet, capacity, 2, 0,
+						 message_bytes);
+	if (!bytes)
 		return 0;
-	memset(packet, 0, bytes);
-	put_unaligned_le32(0x20000000U | (message_bytes << 7), packet);
 	packet[4] = (mode << 5) | 0x10;
 	packet[5] = command;
 	put_unaligned_le16(message_bytes, packet + 6);
 	put_unaligned_le32(token, packet + 8);
 	if (payload_bytes)
 		memcpy(packet + 16, payload, payload_bytes);
-	put_unaligned_le32(MARLIN2_WLAN_PUH_EOF,
-			   packet + 4 + ((message_bytes + 3) & ~3U));
 	return bytes;
 }
 
@@ -72,17 +63,14 @@ size_t marlin2_wlan_data_build(u8 *packet, size_t capacity, u8 mode,
 
 	if (mode > 7 || frame_bytes > 0xffff - MARLIN2_WLAN_DATA_BYTES)
 		return 0;
-	bytes = aggregate_bytes(message_bytes);
-	if (bytes > capacity)
+	bytes = marlin2_transport_record_prepare(packet, capacity, 2, 1,
+						 message_bytes);
+	if (!bytes)
 		return 0;
-	memset(packet, 0, bytes);
-	put_unaligned_le32(0x21000000U | (message_bytes << 7), packet);
 	packet[4] = (mode << 5) | 2;
 	put_unaligned_le16(message_bytes, packet + 6);
 	packet[11] = shared_credit ? 0 : 1;
 	memcpy(packet + 12, frame, frame_bytes);
-	put_unaligned_le32(MARLIN2_WLAN_PUH_EOF,
-			   packet + 4 + ((message_bytes + 3) & ~3U));
 	return bytes;
 }
 

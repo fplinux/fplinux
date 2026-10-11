@@ -133,16 +133,19 @@ static void check_record_boundaries(void)
 	packet[2] = 0x7f;
 	assert(marlin2_packet_decode(packet, sizeof(packet), 0x12345678,
 				     &result) == -EBADMSG);
+	assert(result.last_puh == 0x207fff80 && !result.records);
 
 	prepare_info(packet);
 	packet[2040] = 39;
 	assert(marlin2_packet_decode(packet, sizeof(packet), 0x12345678,
 				     &result) == -EBADMSG);
+	assert(result.last_puh == 0x2000147f && !result.records);
 
 	prepare_info(packet);
 	packet[2] |= 0x80;
 	assert(marlin2_packet_decode(packet, sizeof(packet), 0x12345678,
 				     &result) == -EBADMSG);
+	assert(result.last_puh == 0x2080147f && !result.records);
 }
 
 static void check_adaptive_reads(void)
@@ -154,6 +157,50 @@ static void check_adaptive_reads(void)
 	assert(marlin2_packet_next_read(0xffffffff) == 10240);
 }
 
+static void check_diagnostics_and_early_match(void)
+{
+	struct marlin2_packet_result result = {
+		.aggregates = 3,
+		.records = 4,
+		.ignored_records = 5,
+		.last_puh = 0x11223344,
+	};
+	u8 packet[2048];
+
+	prepare_info(packet);
+	/* A matching reply ends this decoder before the malformed next record. */
+	packet[44 + 2] = 0x80;
+	packet[2040] = 41;
+	packet[2044] = 1;
+	packet[2045] = 2;
+	assert(marlin2_packet_decode(packet, sizeof(packet), 0x12345678,
+				     &result) == 1);
+	assert(result.aggregates == 4 && result.records == 5);
+	assert(result.ignored_records == 5 && result.last_puh == 0x2000147f);
+	assert(result.used_payload_bytes == 41 &&
+	       result.next_payload_bytes == 513);
+
+	assert(marlin2_packet_decode(packet, sizeof(packet), 0x87654321,
+				     &result) == -EBADMSG);
+	assert(result.aggregates == 5 && result.records == 6);
+	assert(result.ignored_records == 6 && result.last_puh == 0x00800000);
+	assert(result.used_payload_bytes == 41 &&
+	       result.next_payload_bytes == 513);
+
+	memset(packet, 0, sizeof(packet));
+	packet[2044] = 17;
+	assert(!marlin2_packet_decode(packet, sizeof(packet), 0x12345678,
+				      &result));
+	assert(result.aggregates == 6 && result.records == 6);
+	assert(result.ignored_records == 6 && result.last_puh == 0x00800000);
+	assert(!result.used_payload_bytes && result.next_payload_bytes == 17);
+	assert(marlin2_packet_decode(packet, 511, 0x12345678, &result) ==
+	       -EINVAL);
+	assert(marlin2_packet_decode(packet, 10241, 0x12345678, &result) ==
+	       -EINVAL);
+	assert(result.aggregates == 6 && result.next_payload_bytes == 17);
+}
+
 int main(void)
 {
 	check_request();
@@ -162,6 +209,7 @@ int main(void)
 	check_response_errors();
 	check_record_boundaries();
 	check_adaptive_reads();
+	check_diagnostics_and_early_match();
 	puts("Marlin2 packet codec host cases passed");
 	return 0;
 }
