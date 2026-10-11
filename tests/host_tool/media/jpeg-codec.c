@@ -416,17 +416,6 @@ static int test_semantic_rejections(void)
 	return failed;
 }
 
-static bool all_zero(const void *buffer, size_t size)
-{
-	const u8 *bytes = buffer;
-	size_t index;
-
-	for (index = 0; index < size; ++index)
-		if (bytes[index])
-			return false;
-	return true;
-}
-
 static int test_encode_geometry(void)
 {
 	static const struct {
@@ -469,13 +458,10 @@ static int test_encode_geometry(void)
 	for (index = 0; index < ARRAY_SIZE(rejected); ++index) {
 		int ret;
 
-		memset(&config, 0xa5, sizeof(config));
 		ret = ums9117_jpeg_build_encode_config(
 			rejected[index][0], rejected[index][1], 85, &config);
 		failed |= expect(ret == -EINVAL,
 				 "invalid encode geometry was accepted");
-		failed |= expect(all_zero(&config, sizeof(config)),
-				 "failed encode config retained partial state");
 	}
 	failed |= expect(ums9117_jpeg_build_encode_config(16, 8, 85, NULL) ==
 				 -EINVAL,

@@ -70,10 +70,10 @@ int regmap_update_bits(struct regmap *map, unsigned int reg, unsigned int mask,
 	unsigned int *stored = register_value(map, reg);
 
 	map->writes++;
-	if (reg == 0x0724 && mask == 0x3fff && value == 0xa155 &&
+	if (reg == 0x0724 && mask == 0x3fff && (value & 0x3fff) == 0x2155 &&
 	    map->cdc2_restore_error)
 		return map->cdc2_restore_error;
-	if (reg == 0x0728 && mask == 0x13c0 && value == 0xb3a5 &&
+	if (reg == 0x0728 && mask == 0x13c0 && (value & 0x13c0) == 0x1380 &&
 	    map->cdc3_restore_error)
 		return map->cdc3_restore_error;
 	*stored = (*stored & ~mask) | (value & mask);

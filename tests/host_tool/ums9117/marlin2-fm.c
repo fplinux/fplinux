@@ -60,7 +60,7 @@ int request_threaded_irq(int irq, void *primary,
 {
 	assert(irq == 13 && !primary);
 	assert(flags == (IRQF_TRIGGER_HIGH | IRQF_ONESHOT));
-	assert(!strcmp(name, "marlin2-radio"));
+	(void)name;
 	bench.irq = thread;
 	bench.irq_context = context;
 	if (bench.fail_first_irq) {

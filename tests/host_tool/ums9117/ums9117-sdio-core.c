@@ -36,7 +36,7 @@ static u32 fake_read(void *context, enum ums9117_sdio_reg reg)
 		fake->regs[reg] = value;
 		if (fake->quiesce_after_reset)
 			fake->regs[UMS9117_SDIO_REG_PRESENT_STATE] =
-				UMS9117_SDIO_DAT0_LEVEL;
+				0x00100000U;
 	}
 	if (reg == UMS9117_SDIO_REG_CLOCK_RESET && fake->clock_auto_stable &&
 	    (value & UMS9117_SDIO_CLOCK_INT_EN) &&
@@ -320,7 +320,7 @@ static int test_abort_reset_fallback(void)
 	};
 	int failed = 0;
 
-	fake.regs[UMS9117_SDIO_REG_PRESENT_STATE] = UMS9117_SDIO_DAT_INHIBIT;
+	fake.regs[UMS9117_SDIO_REG_PRESENT_STATE] = 0x00000002U;
 	fake.regs[UMS9117_SDIO_REG_CLOCK_RESET] =
 		UMS9117_SDIO_HS_CLOCK_EXPECTED;
 	failed |= expect(!ums9117_sdio_abort(&io, &state, 20U),
@@ -333,9 +333,9 @@ static int test_abort_reset_fallback(void)
 				UMS9117_SDIO_REG_INTERRUPT_SIGNAL_ENABLE &&
 			fake.writes[0].value == 0 &&
 			fake.writes[1].reg == UMS9117_SDIO_REG_CLOCK_RESET &&
-			(fake.writes[1].value & UMS9117_SDIO_HOST_RESET) &&
+			(fake.writes[1].value & 0x01000000U) &&
 			fake.writes[2].reg == UMS9117_SDIO_REG_CLOCK_RESET &&
-			!(fake.writes[2].value & UMS9117_SDIO_CLOCK_CARD_EN),
+			!(fake.writes[2].value & 0x00000004U),
 		"abort reset-fallback write boundary changed");
 	return failed;
 }

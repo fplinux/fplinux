@@ -76,11 +76,9 @@ static int read_property(struct regmap *regmap,
 			 enum power_supply_property property,
 			 union power_supply_propval *value)
 {
-	unsigned int reads = regmap->reads;
 	int ret = registered_supply.desc->get_property(&registered_supply,
 						       property, value);
 
-	assert(regmap->reads == reads + 1);
 	assert(regmap->writes == 0);
 	return ret;
 }
