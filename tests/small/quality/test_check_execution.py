@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import tempfile
 from pathlib import Path
 from unittest import mock
@@ -101,15 +102,25 @@ class KernelExecutionLimitTests:
             assert (f"{analyzer_cache['linux']}:/cache/linux") in (first_prepare)
             assert (f"{analyzer_cache['analysis']}:/cache/analysis") in (first_analysis)
             assert (f"{analyzer_cache['linux']}:/cache/linux:ro") in (first_analysis)
-            assert (first_prepare[-5:]) == (
-                ["prepare", "--profile", "microsd-uboot", "--build-type", "release"]
-            )
-            assert (first_analysis[-7:]) == (
-                ["check", "--jobs", "1", "--profile", "microsd-uboot", "--build-type", "release"]
-            )
-            assert (second_prepare[-5:]) == (
-                ["prepare", "--profile", "microsd-uboot", "--build-type", "release"]
-            )
-            assert (second_analysis[-7:]) == (
-                ["check", "--jobs", "2", "--profile", "microsd-uboot", "--build-type", "release"]
-            )
+            parser = argparse.ArgumentParser()
+            parser.add_argument("phase", choices=("prepare", "check"))
+            parser.add_argument("--profile", required=True)
+            parser.add_argument("--build-type", required=True)
+            parser.add_argument("--jobs", type=int)
+            for command, phase, jobs in (
+                (first_prepare, "prepare", None),
+                (first_analysis, "check", 1),
+                (second_prepare, "prepare", None),
+                (second_analysis, "check", 2),
+            ):
+                workload = command[command.index("--") + 1 :]
+                assert workload[:3] == ["python3", "-m", "fplinux_cli.quality.kernel"]
+                arguments = workload[3:]
+                assert arguments.count("--jobs") == (0 if jobs is None else 1)
+                selected = parser.parse_args(arguments)
+                assert vars(selected) == {
+                    "phase": phase,
+                    "profile": "microsd-uboot",
+                    "build_type": "release",
+                    "jobs": jobs,
+                }

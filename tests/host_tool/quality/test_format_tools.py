@@ -258,7 +258,7 @@ class PinnedFormatterToolTests:
         ids=["commitlint.config.mjs-export-default-n"],
     )
     def test_metadata_checker_rejects_invalid_javascript(
-        self, relative: str, contents: str
+        self, relative: str, contents: str, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """Explicitly supported JavaScript metadata may not be silently ignored."""
         with tempfile.TemporaryDirectory() as temporary:
@@ -270,18 +270,23 @@ class PinnedFormatterToolTests:
 
             with (
                 mock.patch.object(source_check, "ROOT", root),
-                pytest.raises(subprocess.CalledProcessError) as failure,
+                pytest.raises(subprocess.CalledProcessError),
             ):
                 source_check.check_canonical_sources([path], groups, ("metadata",))
-            assert (failure.value.cmd[0]) == ("prettier")
+            captured = capfd.readouterr()
+            assert "SyntaxError" in captured.err
+            assert relative in captured.err
 
     @pytest.mark.parametrize(
-        ("relative", "contents"),
-        [("alpine/abuild.conf", "source /dev/null\n"), ("script.sh", "#!/bin/sh\nunused=1\n")],
-        ids=["alpine-abuild.conf-source-dev-null-n", "script.sh-bin-sh-nunused-1-n"],
+        ("relative", "contents", "diagnostic"),
+        [
+            ("alpine/abuild.conf", "source /dev/null\n", "SC3046"),
+            ("script.sh", "#!/bin/sh\nunused=1\n", "SC2034"),
+        ],
+        ids=["posix-fragment-bash-source", "script-unused-variable"],
     )
     def test_shell_checker_preserves_dialect_and_script_unused_variable_checks(
-        self, relative: str, contents: str
+        self, relative: str, contents: str, diagnostic: str, capfd: pytest.CaptureFixture[str]
     ) -> None:
         """Sourced settings may export assignments but may not use Bash syntax."""
         with tempfile.TemporaryDirectory() as temporary:
@@ -293,7 +298,9 @@ class PinnedFormatterToolTests:
 
             with (
                 mock.patch.object(source_check, "ROOT", root),
-                pytest.raises(subprocess.CalledProcessError) as failure,
+                pytest.raises(subprocess.CalledProcessError),
             ):
                 source_check.check_shell_sources(groups)
-            assert (failure.value.cmd[0]) == ("shellcheck")
+            captured = capfd.readouterr()
+            assert diagnostic in captured.out
+            assert relative in captured.out

@@ -291,10 +291,11 @@ class NandBackupTests:
         ("declared_id", "declared_raw_page_bytes"),
         [
             pytest.param(0xB1A1, 2176, id="different-id-and-page-size"),
+            pytest.param(0xB1A1, 2112, id="different-id-same-page-size"),
             pytest.param(0x21E5, 2176, id="different-page-size"),
         ],
     )
-    def test_chip_other_than_the_declared_one_is_refused_before_any_page_is_read(
+    def test_chip_or_page_geometry_mismatch_is_refused_before_reading_or_publication(
         self, declared_id: int, declared_raw_page_bytes: int
     ) -> None:
         """A target's declared chip is an expectation that the device must meet."""
@@ -310,6 +311,7 @@ class NandBackupTests:
             )
         assert phone.raw_reads() == []
         assert not self.destination.exists()
+        assert not self.receipt.exists()
 
     @pytest.mark.parametrize(
         "case",

@@ -123,6 +123,8 @@ class HeadphoneFedAudioTests:
     def test_separate_route_gains_and_processing_survive_unused_pa_normalization(self) -> None:
         """Keep route-specific bytes while retaining the complete original NV records."""
         downloaded, protected = headphone_fed_records()
+        original_downloaded = downloaded.copy()
+        original_protected = protected.copy()
 
         result = prepare_headset_gain_profile(
             downloaded,
@@ -135,11 +137,12 @@ class HeadphoneFedAudioTests:
         assert result.prepared == {"bq-2830l-tank-connect-max-audio-profile.bin": EXPECTED_PROFILE}
         assert len(EXPECTED_PROFILE) == 788
         assert result.originals == {
-            "bq-2830l-tank-connect-max-nv425.bin": downloaded[425],
-            "bq-2830l-tank-connect-max-nv426.bin": downloaded[426],
-            "bq-2830l-tank-connect-max-nv440.bin": downloaded[440],
+            "bq-2830l-tank-connect-max-nv425.bin": original_downloaded[425],
+            "bq-2830l-tank-connect-max-nv426.bin": original_downloaded[426],
+            "bq-2830l-tank-connect-max-nv440.bin": original_downloaded[440],
         }
-        assert downloaded == protected
+        assert downloaded == original_downloaded
+        assert protected == original_protected
 
     def test_enabled_equalizers_keep_their_distinct_route_coefficients(self) -> None:
         """A synthetic headphone-fed topology retains three nontrivial EQ examples."""
@@ -151,6 +154,8 @@ class HeadphoneFedAudioTests:
                 for level in range(9):
                     struct.pack_into("<H", arm, offset + 68 + 4 * level, 7)
             records[426] = bytes(arm)
+        original_downloaded = downloaded.copy()
+        original_protected = protected.copy()
 
         result = prepare_headset_gain_profile(
             downloaded,
@@ -166,6 +171,8 @@ class HeadphoneFedAudioTests:
             + bytes.fromhex("0000 07 4e 47 3b 35 2f 2a 24 1f 1a")
             + FITTED_NOKIA_PROCESSING_SECTION
         )
+        assert downloaded == original_downloaded
+        assert protected == original_protected
 
     @pytest.mark.parametrize(
         ("mode_offset", "mode_name"),

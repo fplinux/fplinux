@@ -24,6 +24,8 @@ EXPECTED_PROCESSING = (
 def test_headfree_raw_pga_gains_and_processing_remain_distinct_from_headset() -> None:
     """The explicit policy preserves admitted values without synthesizing a speaker route."""
     downloaded, protected = headphone_only_headfree_records()
+    original_downloaded = downloaded.copy()
+    original_protected = protected.copy()
 
     result = prepare_headset_gain_profile(
         downloaded,
@@ -42,7 +44,13 @@ def test_headfree_raw_pga_gains_and_processing_remain_distinct_from_headset() ->
         + EXPECTED_PROCESSING
     )
     assert result.prepared == {"example-audio-profile.bin": expected}
-    assert result.originals["example-nv426.bin"] == downloaded[426]
+    assert result.originals == {
+        "example-nv425.bin": original_downloaded[425],
+        "example-nv426.bin": original_downloaded[426],
+        "example-nv440.bin": original_downloaded[440],
+    }
+    assert downloaded == original_downloaded
+    assert protected == original_protected
     assert struct.unpack_from("<H", result.originals["example-nv426.bin"], 1092)[0] == 0x12
 
 

@@ -72,10 +72,10 @@ class FormatResolutionTests:
 
 
 class FormatContainerBoundaryTests:
-    """Keep each formatter projection private to its disposable container."""
+    """Prepared container arguments restrict formatter writes to private projections."""
 
-    def test_projection_is_the_only_writable_host_mount(self) -> None:
-        """Mount only the private writable projection under the pinned formatter."""
+    def test_projection_command_has_one_private_writable_mount(self) -> None:
+        """The prepared argv mounts only the projection and disables network access."""
         workspace = Path("/tmp/fplinux-format-projection")  # noqa: S108 -- synthetic path.
         command = format_module._container_command(  # noqa: SLF001 -- command boundary.
             "/usr/bin/kern",
@@ -91,8 +91,8 @@ class FormatContainerBoundaryTests:
         assert (command[network + 1]) == ("none")
         assert (command[-4:]) == (["--", "ruff", "format", "scripts/tool.py"])
 
-    def test_patch_formatter_reuses_linux_cache_without_writable_archive_access(self) -> None:
-        """Allow bounded source preparation while keeping downloaded archives read-only."""
+    def test_patch_formatter_command_keeps_downloaded_archives_read_only(self) -> None:
+        """The prepared argv allows Linux-cache writes and prohibits archive writes."""
         command = format_module._container_command(  # noqa: SLF001 -- command boundary.
             "/usr/bin/kern",
             image="localhost/fplinux-build:locked",

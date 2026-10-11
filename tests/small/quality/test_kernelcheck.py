@@ -187,8 +187,8 @@ class KernelAnalyzerWorkIsolationTests:
         self._run_check(self.target_config)
         assert not (stale.exists())
 
-    def test_initramfs_analysis_preserves_the_requested_conditional_compressor(self) -> None:
-        """The analyzer resolves compression with a controlled source, as the build does."""
+    def test_initramfs_preparation_keeps_compressor_with_modeled_kconfig(self) -> None:
+        """A temporary source lets the modeled Kconfig choice retain requested XZ."""
         self.defconfig.write_text(
             'CONFIG_TEST=y\nCONFIG_INITRAMFS_SOURCE=""\nCONFIG_INITRAMFS_COMPRESSION_XZ=y\n'
         )
@@ -208,8 +208,8 @@ class KernelAnalyzerWorkIsolationTests:
         root_include = self._cache_path("work") / "include/generated/fplinux/fplinux-root.dtsi"
         assert ("init=/init rdinit=/init") in (root_include.read_text())
 
-    def test_profile_kconfig_actions_reach_the_analyzed_configuration(self) -> None:
-        """A profile check analyzes a .config with its enable and disable actions applied."""
+    def test_profile_actions_reach_configuration_through_modeled_kconfig(self) -> None:
+        """Configuration preparation applies profile actions through a Kconfig stand-in."""
         (self.source / "scripts/config").write_text("#!/bin/sh\n")
         self.defconfig.write_text("CONFIG_TEST=y\nCONFIG_PROFILE_DISABLED=y\n")
         linux = {

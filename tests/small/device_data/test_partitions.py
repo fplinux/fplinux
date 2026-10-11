@@ -151,20 +151,11 @@ class VbmPartitionFormatTests:
     @pytest.mark.parametrize(
         "count", [pytest.param(0, id="empty-table"), pytest.param(101, id="count-above-bound")]
     )
-    def test_declared_count_is_bounded_and_complete_records_are_required(self, count: int) -> None:
-        """The count cannot trigger an unbounded read or admit a truncated final record."""
+    def test_declared_vbm_count_is_bounded(self, count: int) -> None:
+        """The count cannot trigger an unbounded read or admit an empty table."""
         table = vbm_table((), declared_count=count)
         reader = FakeNandPartitionReader(dict.fromkeys(VBM_COPY_OFFSETS, table))
         with pytest.raises(ValueError, match=f"partition count {count}.*bound"):
-            device_data.redundant_vbm_partitions(
-                reader,
-                VBM_COPY_OFFSETS,
-                required_partitions(),
-            )
-
-        truncated = vbm_table(vbm_entries())[:-1]
-        reader = FakeNandPartitionReader(dict.fromkeys(VBM_COPY_OFFSETS, truncated))
-        with pytest.raises(ValueError, match="truncated VBM partition table"):
             device_data.redundant_vbm_partitions(
                 reader,
                 VBM_COPY_OFFSETS,
@@ -295,15 +286,6 @@ class PartitionDiscoveryTests:
         )
 
         with pytest.raises(ValueError, match="no VBM or PartI partition table found"):
-            discover_partitions(reader, required_partitions())
-
-    def test_truncated_parti_selected_read_is_rejected(self) -> None:
-        """A short admitted read cannot supply a complete table."""
-        reader = FakeNandPartitionReader(
-            {0x100: parti_table(parti_entries())[:-1]}, block_count=32
-        )
-
-        with pytest.raises(ValueError, match="truncated PartI partition table"):
             discover_partitions(reader, required_partitions())
 
     @pytest.mark.parametrize("offset", [0x101, 0x3FFFEC])

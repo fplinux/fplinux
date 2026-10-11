@@ -160,25 +160,30 @@ def radio_parser() -> ModuleType:
 def test_selected_address_and_controller_fields_have_literal_wire_bytes(
     radio_parser: ModuleType,
 ) -> None:
-    configuration = bytearray(bytes(range(256)) * 3 + bytes(range(120)))
+    configuration = bytearray(
+        bytes(range(256))
+        + bytes(reversed(range(256)))
+        + bytes(value ^ 0x80 for value in range(256))
+        + bytes(value ^ 0x40 for value in range(120))
+    )
     configuration[0] = 2
     settings = bytes.fromhex("01 02 03 04 05 06 a5 5a")
     expected = bytes.fromhex(
-        "6c6d6e6f707172737475767778797a7b"
-        "7c7d7e7f808182838485868788898a8b"
-        "8c8d8e8f909192939495969798999a9b"
-        "9c9d9e9fa0a1a2a3a4a5a6a7"
-        "101112131415161718191a1b1c1d1e1f"
-        "010203040506262728292a2b2c2d2e2f"
-        "303132333435363738393a3b3c3d3e3f"
-        "404142434445464748494a4b4c4d4e4f"
-        "5051525354555657"
-        "a8a9aaabacadaeafb0b1b2b3b4b5b6b7"
-        "b8b9babbbcbdbebfc0c1c2c3c4c5c6c7"
-        "c8c9cacbcccdcecfd0d1d2d3d4d5d6d7"
-        "d8d9dadbdcdddedfe0e1e2e3e4e5e6e7"
-        "e8e9eaeb"
-        "ecedf0f1f4f5f8f9fcfd000104050809"
+        "ecedeeeff0f1f2f3f4f5f6f7f8f9fafb"
+        "fcfdfeff000102030405060708090a0b"
+        "0c0d0e0f101112131415161718191a1b"
+        "1c1d1e1f2021222324252627"
+        "505152535455565758595a5b5c5d5e5f"
+        "010203040506666768696a6b6c6d6e6f"
+        "707172737475767778797a7b7c7d7e7f"
+        "000102030405060708090a0b0c0d0e0f"
+        "1011121314151617"
+        "28292a2b2c2d2e2f3031323334353637"
+        "38393a3b3c3d3e3f4041424344454647"
+        "48494a4b4c4d4e4f5051525354555657"
+        "58595a5b5c5d5e5f6061626364656667"
+        "68696a6b"
+        "6c6d7071747578797c7d404144454849"
         "00000000"
     )
 

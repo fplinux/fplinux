@@ -49,16 +49,13 @@ class FakeNandPartitionReader:
         return bytes(output)
 
     def partition_bytes(self, extent: tuple[int, int]) -> bytes:
-        """Return the requested bytes from one declared main-area fragment."""
+        """Read the complete extent and require clean selected blocks."""
         offset, size = extent
+        contents = self.main_bytes(offset, size)
         for block in range(offset // 0x20000, (offset + size - 1) // 0x20000 + 1):
             if block in self._bad_blocks:
                 raise ValueError(f"selected NAND block {block} is marked bad")
-        for fragment_offset, fragment in self._fragments.items():
-            relative = offset - fragment_offset
-            if 0 <= relative < len(fragment):
-                return fragment[relative : relative + size]
-        raise AssertionError(f"unexpected fake NAND read at {offset:#x} for {size} bytes")
+        return contents
 
 
 def required_partitions() -> dict[int, device_data.RequiredPartition]:

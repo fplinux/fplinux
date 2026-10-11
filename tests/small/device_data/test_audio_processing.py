@@ -39,26 +39,35 @@ class PlaybackProcessingTests:
         )
         return result.prepared["phone-audio-profile.bin"]
 
-    def test_design_tables_reproduce_stock_filter_tables(self) -> None:
-        """The generated gain and cosine tables equal entries of the stock firmware tables."""
-        gain_entries = {
-            0: 1,
-            720: 64,
-            1080: 515,
-            1439: 4072,
-            1440: 4096,
-            1441: 4119,
-            1620: 11544,
-            1800: 32535,
-        }
-        cosine_entries = {0: 16384, 1: 16383, 683: 14186, 1024: 11585, 2047: 12, 2048: 0}
+    @pytest.mark.parametrize(
+        ("base_gain", "expected_scale"),
+        [(-720, 1), (-360, 64), (-180, 515), (0, 4096), (90, 11544), (180, 32535)],
+    )
+    def test_zero_boost_band_emits_literal_q12_amplitude_and_unity_coefficients(
+        self, base_gain: int, expected_scale: int
+    ) -> None:
+        """A zero-boost band's packed words apply its base gain without filtering."""
+        downloaded, protected = nokia_audio_records()
+        for records in (downloaded, protected):
+            eq = bytearray(records[440])
+            struct.pack_into("<H", eq, 20, 0xC000)
+            # Attenuate before the tested band so +18 dB remains within headroom.
+            struct.pack_into("<4h", eq, 22, 1000, 512, 0, -180)
+            struct.pack_into("<4h", eq, 30, 2000, 512, 0, base_gain)
+            records[440] = bytes(eq)
 
-        assert len(audio_profile.LINEAR_GAIN_TABLE) == 1801
-        assert len(audio_profile.COSINE_TABLE) == 2049
-        for index, value in gain_entries.items():
-            assert audio_profile.LINEAR_GAIN_TABLE[index] == value, f"gain table index {index}"
-        for index, value in cosine_entries.items():
-            assert audio_profile.COSINE_TABLE[index] == value, f"cosine table index {index}"
+        profile = self._profile((downloaded, protected))
+
+        for rate_index in range(3):
+            section_offset = PROCESSING_OFFSET + 25 + rate_index * 72 + 2 * 12
+            assert struct.unpack_from("<6h", profile, section_offset) == (
+                expected_scale,
+                16384,
+                0,
+                0,
+                0,
+                0,
+            )
 
     def test_fitted_route_words_match_independent_stock_values(self) -> None:
         """S6, ALC and coefficient words sit at their wire offsets with the stock values."""

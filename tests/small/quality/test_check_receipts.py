@@ -52,7 +52,7 @@ class CheckReceiptTests:
             )
             registration = root / "scripts/fplinux_cli/alpine/registration.py"
             cache = root / ".cache"
-            source = registration.read_text(encoding="utf-8")
+            source = 'COMMON_PACKAGES = ("runtime-a",)\n'
             with mock.patch.object(common, "ROOT", root):
                 registration.write_text(source, encoding="utf-8")
                 original = replace(
@@ -65,11 +65,7 @@ class CheckReceiptTests:
                 assert receipt_matches(cache, original)
 
                 registration.write_text(
-                    source.replace(
-                        "COMMON_PACKAGES = (\n",
-                        'COMMON_PACKAGES = (\n    "fplinux-cpuclock",\n',
-                        1,
-                    ),
+                    'COMMON_PACKAGES = ("runtime-a", "runtime-b")\n',
                     encoding="utf-8",
                 )
                 changed = replace(

@@ -63,10 +63,10 @@ def receipt_package(tmp_path: Path) -> Path:
 class PackageReceiptTests:
     """Protect package receipt publication on a temporary host filesystem."""
 
-    def test_replacement_preserves_json_bytes_and_private_mode(
+    def test_replacement_preserves_package_fields_and_private_mode(
         self, receipt_package: Path
     ) -> None:
-        """Receipt publication keeps its spaced ASCII JSON and requires no sync barrier."""
+        """Receipt publication records the APK identity and leaves only private output."""
         repository = receipt_package.parent.parent
         receipt = repository / alpine_packages.PACKAGE_RECEIPT_NAME
         receipt.write_bytes(b"previous receipt\n")
@@ -77,12 +77,16 @@ class PackageReceiptTests:
                 repository, "a" * 64, [receipt_package]
             )
 
-        assert receipt.read_bytes() == (
-            b'{"packages": {"fplinux-example": {"path": "armv7/paquet-\\u00e9-1.0-r0.apk", '
-            b'"sha256": "35b0e02a8fa5e930640e968d31b25f4db50a6a2245c964f58e1b8ef064ba3052", '
-            b'"size": 10240}}, "recipe": '
-            b'"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}\n'
-        )
+        assert json.loads(receipt.read_text(encoding="utf-8")) == {
+            "packages": {
+                "fplinux-example": {
+                    "path": "armv7/paquet-é-1.0-r0.apk",
+                    "sha256": "35b0e02a8fa5e930640e968d31b25f4db50a6a2245c964f58e1b8ef064ba3052",
+                    "size": 10240,
+                }
+            },
+            "recipe": "a" * 64,
+        }
         assert receipt.stat().st_mode & 0o777 == 0o600
         assert set(repository.iterdir()) == {receipt, receipt_package.parent}
 

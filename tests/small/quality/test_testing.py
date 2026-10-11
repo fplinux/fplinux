@@ -139,6 +139,7 @@ class SelectedTestRunTests:
             "test", tmp_path / "logs", str(tmp_path / "logs"), verbose=False
         )
         budgets: list[tuple[str, float | None]] = []
+        elapsed = 0.0
 
         def container(
             _stage: output.Stage,
@@ -150,8 +151,10 @@ class SelectedTestRunTests:
             timeout: float,
             log_name: str | None,
         ) -> None:
+            nonlocal elapsed
             del kern, image, log_name
             budgets.append(("container", timeout))
+            elapsed += 110.0
 
         def host(_command: list[str], *, timeout: float, **_kwargs: object) -> None:
             budgets.append(("host", timeout))
@@ -165,7 +168,7 @@ class SelectedTestRunTests:
             # The external subprocess boundaries consume a controlled amount of the clock.
             mock.patch.object(runtime, "run_quality_command", side_effect=container),
             mock.patch.object(output.Stage, "run", side_effect=host),
-            mock.patch.object(time, "monotonic", side_effect=[0.0, 0.0, 110.0]),
+            mock.patch.object(time, "monotonic", side_effect=lambda: elapsed),
         ):
             testing.run_test_workload(
                 reporter, tmp_path, kern="kern", image="image", names=[], tier="host_process"

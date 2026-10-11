@@ -141,18 +141,17 @@ print(json.dumps(result))
             assert seeded["packages"][name]["cache_hit"], name
         return seeded
 
-    def _edit_registration(self, before: str, after: str) -> None:
-        """Change declarations in the copied source, never generated cache files."""
+    def _declare_registration(self, declarations: str) -> None:
+        """Append fixture-owned assignments to the copied registration module."""
         source = self.registration.read_text(encoding="utf-8")
-        self.registration.write_text(source.replace(before, after, 1), encoding="utf-8")
+        self.registration.write_text(source + "\n" + declarations + "\n", encoding="utf-8")
 
     def test_unrelated_registration_preserves_apk_recipe_and_receipt_hit(self) -> None:
         """A newly declared dependency rebuilds its consumer while another APK stays reusable."""
         before = self._seed_receipts()
 
-        self._edit_registration(
-            "LOCAL_BUILD_DEPENDENCIES = {\n",
-            'LOCAL_BUILD_DEPENDENCIES = {\n    "fplinux-package-a": ("fplinux-library-c",),\n',
+        self._declare_registration(
+            'LOCAL_BUILD_DEPENDENCIES["fplinux-package-a"] = ("fplinux-library-c",)'
         )
         after = self._state()
 
@@ -169,16 +168,15 @@ print(json.dumps(result))
         self,
     ) -> None:
         """Moving a dependency edge changes the consuming APKs despite identical library bytes."""
-        direct = '    "fplinux-package-a": ("fplinux-library-c", "fplinux-library-d"),\n'
-        self._edit_registration(
-            "LOCAL_BUILD_DEPENDENCIES = {\n", "LOCAL_BUILD_DEPENDENCIES = {\n" + direct
+        self._declare_registration(
+            'LOCAL_BUILD_DEPENDENCIES["fplinux-package-a"] = '
+            '("fplinux-library-c", "fplinux-library-d")'
         )
         before = self._seed_receipts()
 
-        self._edit_registration(
-            direct,
-            '    "fplinux-package-a": ("fplinux-library-c",),\n'
-            '    "fplinux-library-c": ("fplinux-library-d",),\n',
+        self._declare_registration(
+            'LOCAL_BUILD_DEPENDENCIES["fplinux-package-a"] = ("fplinux-library-c",)\n'
+            'LOCAL_BUILD_DEPENDENCIES["fplinux-library-c"] = ("fplinux-library-d",)'
         )
         after = self._state()
 
@@ -201,16 +199,13 @@ print(json.dumps(result))
         self, source: str
     ) -> None:
         """Library edits revoke transitive consumers while an unrelated APK remains reusable."""
-        self._edit_registration(
-            "LOCAL_BUILD_DEPENDENCIES = {\n",
-            "LOCAL_BUILD_DEPENDENCIES = {\n"
-            '    "fplinux-package-a": ("fplinux-library-c",),\n'
-            '    "fplinux-library-c": ("fplinux-library-d",),\n',
+        self._declare_registration(
+            'LOCAL_BUILD_DEPENDENCIES["fplinux-package-a"] = ("fplinux-library-c",)\n'
+            'LOCAL_BUILD_DEPENDENCIES["fplinux-library-c"] = ("fplinux-library-d",)'
         )
         self._write("lib/fplinux/library-d.c", b"library shared input\n")
-        self._edit_registration(
-            "SHARED_APORT_SOURCES = {\n",
-            'SHARED_APORT_SOURCES = {\n    "fplinux-library-d": ("lib/fplinux/library-d.c",),\n',
+        self._declare_registration(
+            'SHARED_APORT_SOURCES["fplinux-library-d"] = ("lib/fplinux/library-d.c",)'
         )
         changed_source = self.root / source
 
@@ -229,39 +224,36 @@ print(json.dumps(result))
 
     def test_equivalent_producer_aliases_and_dependency_order_preserve_receipts(self) -> None:
         """Equivalent declarations of the same producer graph do not rebuild its outputs."""
-        self._edit_registration(
-            "SUBPACKAGE_APORTS = {\n",
-            'SUBPACKAGE_APORTS = {\n    "fplinux-library-c-extra": "fplinux-library-c",\n',
+        self._declare_registration(
+            'SUBPACKAGE_APORTS["fplinux-library-c-extra"] = "fplinux-library-c"'
         )
-        original = (
-            '    "fplinux-package-a": '
-            '("fplinux-library-c", "fplinux-library-c-extra", "fplinux-library-d"),\n'
-        )
-        self._edit_registration(
-            "LOCAL_BUILD_DEPENDENCIES = {\n", "LOCAL_BUILD_DEPENDENCIES = {\n" + original
+        self._declare_registration(
+            'LOCAL_BUILD_DEPENDENCIES["fplinux-package-a"] = '
+            '("fplinux-library-c", "fplinux-library-c-extra", "fplinux-library-d")'
         )
         before = self._seed_receipts()
 
-        self._edit_registration(
-            original,
-            '    "fplinux-package-a": ("fplinux-library-d", "fplinux-library-c"),\n',
+        self._declare_registration(
+            'LOCAL_BUILD_DEPENDENCIES["fplinux-package-a"] = '
+            '("fplinux-library-d", "fplinux-library-c")'
         )
         assert (before) == (self._state())
 
     def test_shared_source_owner_changes_revoke_affected_receipts(self) -> None:
         """Moving a shared input between producers changes recipes despite an unchanged union."""
-        self._edit_registration(
-            "LOCAL_BUILD_DEPENDENCIES = {\n",
-            'LOCAL_BUILD_DEPENDENCIES = {\n    "fplinux-package-a": ("fplinux-library-c",),\n',
+        self._declare_registration(
+            'LOCAL_BUILD_DEPENDENCIES["fplinux-package-a"] = ("fplinux-library-c",)'
         )
         self._write("lib/fplinux/shared.c", b"same shared source\n")
-        original = '    "fplinux-package-a": ("lib/fplinux/shared.c",),\n'
-        self._edit_registration(
-            "SHARED_APORT_SOURCES = {\n", "SHARED_APORT_SOURCES = {\n" + original
+        self._declare_registration(
+            'SHARED_APORT_SOURCES["fplinux-package-a"] = ("lib/fplinux/shared.c",)'
         )
         before = self._seed_receipts()
 
-        self._edit_registration(original, '    "fplinux-library-c": ("lib/fplinux/shared.c",),\n')
+        self._declare_registration(
+            'del SHARED_APORT_SOURCES["fplinux-package-a"]\n'
+            'SHARED_APORT_SOURCES["fplinux-library-c"] = ("lib/fplinux/shared.c",)'
+        )
         after = self._state()
 
         for name in (self.names[0], self.names[2]):

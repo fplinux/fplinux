@@ -35,16 +35,23 @@ class ImageTagProcessTests:
         unshare = shutil.which("unshare")
         if unshare is None:
             pytest.skip("subordinate namespace test requires unshare")
+        namespace = [unshare, "--map-auto", "--map-root-user", "--"]
+        available = subprocess.run(
+            [*namespace, sys.executable, "-I", "-c", "pass"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        if available.returncode:
+            pytest.skip("subordinate namespace is unavailable: " + available.stderr.strip())
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "source"
             source.mkdir()
             prepared = subprocess.run(
                 [
-                    unshare,
-                    "--map-auto",
-                    "--map-root-user",
-                    "--",
+                    *namespace,
                     sys.executable,
                     str(TAG_FIXTURES / "image_tag_prepare.py"),
                     str(source),
@@ -54,8 +61,7 @@ class ImageTagProcessTests:
                 check=False,
                 timeout=30,
             )
-            if prepared.returncode:
-                pytest.skip("subordinate namespace is unavailable: " + prepared.stderr.strip())
+            assert prepared.returncode == 0, prepared.stderr
             assert ((source / "compiler").stat().st_uid) != (os.geteuid())
             expected_directory = _metadata(source / "builder")
             expected_tool = _metadata(source / "compiler")
