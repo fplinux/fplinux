@@ -14,6 +14,8 @@
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-mediabus.h>
 
+#include "fplinux-camera-i2c.h"
+
 #define BF30A2_ID_HIGH_REG 0xfc
 #define BF30A2_ID_LOW_REG 0xfd
 #define BF30A2_ID_XCLK_HZ 12000000UL
@@ -232,32 +234,6 @@ static struct bf30a2 *to_bf30a2(struct v4l2_subdev *sd)
 	return container_of(sd, struct bf30a2, sd);
 }
 
-static int bf30a2_write(struct i2c_client *client, u8 address, u8 value)
-{
-	u8 data[] = { address, value };
-	int ret = i2c_master_send(client, data, sizeof(data));
-
-	if (ret < 0)
-		return ret;
-	return ret == sizeof(data) ? 0 : -EIO;
-}
-
-static int bf30a2_read(struct i2c_client *client, u8 address, u8 *value)
-{
-	struct i2c_msg messages[] = {
-		{ .addr = client->addr, .len = 1, .buf = &address },
-		{ .addr = client->addr,
-		  .flags = I2C_M_RD,
-		  .len = 1,
-		  .buf = value },
-	};
-	int ret = i2c_transfer(client->adapter, messages, ARRAY_SIZE(messages));
-
-	if (ret < 0)
-		return ret;
-	return ret == ARRAY_SIZE(messages) ? 0 : -EIO;
-}
-
 static int bf3a01_set_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct bf30a2 *sensor =
@@ -272,10 +248,10 @@ static int bf3a01_set_ctrl(struct v4l2_ctrl *ctrl)
 	if (ret <= 0)
 		return ret;
 
-	ret = bf30a2_write(client, 0xfe, 0x01);
+	ret = fplinux_camera_i2c_write(client, 0xfe, 0x01);
 	if (!ret)
-		ret = bf30a2_write(client, 0x04,
-				   bf3a01_brightness_levels[ctrl->val]);
+		ret = fplinux_camera_i2c_write(
+			client, 0x04, bf3a01_brightness_levels[ctrl->val]);
 	if (!ret)
 		msleep(100);
 	pm_runtime_put(&client->dev);
@@ -430,7 +406,8 @@ static int bf30a2_enable_streams(struct v4l2_subdev *sd,
 			msleep(reg->value);
 			continue;
 		}
-		ret = bf30a2_write(client, reg->address, reg->value);
+		ret = fplinux_camera_i2c_write(client, reg->address,
+					       reg->value);
 		if (ret) {
 			dev_err(&client->dev, "mode write failed at %zu: %pe\n",
 				i, ERR_PTR(ret));
@@ -546,9 +523,9 @@ static int bf30a2_probe(struct i2c_client *client)
 	ret = bf30a2_power_on(sensor);
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to power sensor\n");
-	ret = bf30a2_read(client, BF30A2_ID_HIGH_REG, &high);
+	ret = fplinux_camera_i2c_read(client, BF30A2_ID_HIGH_REG, &high);
 	if (!ret)
-		ret = bf30a2_read(client, BF30A2_ID_LOW_REG, &low);
+		ret = fplinux_camera_i2c_read(client, BF30A2_ID_LOW_REG, &low);
 	power_ret = bf30a2_power_off(sensor);
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to read sensor ID\n");

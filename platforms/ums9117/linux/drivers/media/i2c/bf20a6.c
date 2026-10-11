@@ -13,6 +13,8 @@
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-mediabus.h>
 
+#include "fplinux-camera-i2c.h"
+
 #define BF20A6_ID_HIGH_REG 0xfc
 #define BF20A6_ID_LOW_REG 0xfd
 #define BF20A6_ID_XCLK_HZ 12000000UL
@@ -76,32 +78,6 @@ static const struct bf20a6_reg bf20a6_mode_regs[] = {
 static struct bf20a6 *to_bf20a6(struct v4l2_subdev *sd)
 {
 	return container_of(sd, struct bf20a6, sd);
-}
-
-static int bf20a6_write(struct i2c_client *client, u8 address, u8 value)
-{
-	u8 data[] = { address, value };
-	int ret = i2c_master_send(client, data, sizeof(data));
-
-	if (ret < 0)
-		return ret;
-	return ret == sizeof(data) ? 0 : -EIO;
-}
-
-static int bf20a6_read(struct i2c_client *client, u8 address, u8 *value)
-{
-	struct i2c_msg messages[] = {
-		{ .addr = client->addr, .len = 1, .buf = &address },
-		{ .addr = client->addr,
-		  .flags = I2C_M_RD,
-		  .len = 1,
-		  .buf = value },
-	};
-	int ret = i2c_transfer(client->adapter, messages, ARRAY_SIZE(messages));
-
-	if (ret < 0)
-		return ret;
-	return ret == ARRAY_SIZE(messages) ? 0 : -EIO;
 }
 
 static int bf20a6_power_off(struct bf20a6 *sensor)
@@ -258,7 +234,8 @@ static int bf20a6_enable_streams(struct v4l2_subdev *sd,
 	for (i = 0; i < ARRAY_SIZE(bf20a6_mode_regs); i++) {
 		const struct bf20a6_reg *reg = &bf20a6_mode_regs[i];
 
-		ret = bf20a6_write(client, reg->address, reg->value);
+		ret = fplinux_camera_i2c_write(client, reg->address,
+					       reg->value);
 		if (ret) {
 			dev_err(&client->dev, "mode write failed at %zu: %pe\n",
 				i, ERR_PTR(ret));
@@ -351,9 +328,9 @@ static int bf20a6_probe(struct i2c_client *client)
 	ret = bf20a6_power_on(sensor);
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to power sensor\n");
-	ret = bf20a6_read(client, BF20A6_ID_HIGH_REG, &high);
+	ret = fplinux_camera_i2c_read(client, BF20A6_ID_HIGH_REG, &high);
 	if (!ret)
-		ret = bf20a6_read(client, BF20A6_ID_LOW_REG, &low);
+		ret = fplinux_camera_i2c_read(client, BF20A6_ID_LOW_REG, &low);
 	power_ret = bf20a6_power_off(sensor);
 	if (ret)
 		return dev_err_probe(dev, ret, "failed to read sensor ID\n");

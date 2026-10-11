@@ -219,6 +219,10 @@ source = "platforms/ums9117/linux/drivers/media/platform/ums9117/ums9117-dcam-fo
 destination = "drivers/media/platform/ums9117/ums9117-dcam-format.h"
 
 [[linux.copies]]
+source = "platforms/ums9117/linux/drivers/media/i2c/fplinux-camera-i2c.h"
+destination = "drivers/media/i2c/fplinux-camera-i2c.h"
+
+[[linux.copies]]
 source = "platforms/ums9117/linux/drivers/media/i2c/gc032a.c"
 destination = "drivers/media/i2c/gc032a.c"
 
