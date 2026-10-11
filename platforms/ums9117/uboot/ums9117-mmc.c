@@ -3,6 +3,7 @@
 #include <asm/io.h>
 #include <command.h>
 #include <dm.h>
+#include <dm/read.h>
 #include <hang.h>
 #include <linux/delay.h>
 #include <linux/errno.h>
@@ -51,6 +52,13 @@ struct ums9117_mmc_priv {
 };
 
 static struct ums9117_mmc_priv *ums9117_mmc_instance;
+
+static bool ums9117_mmc_is_fixed_slot(struct udevice *dev)
+{
+	struct ums9117_mmc_plat *plat = dev_get_plat(dev);
+
+	return plat->cfg.host_caps & MMC_CAP_NONREMOVABLE;
+}
 
 static u32 ums9117_controller_read(void *context, enum ums9117_sdio_reg reg)
 {
@@ -554,6 +562,8 @@ static int ums9117_mmc_get_cd(struct udevice *dev)
 	int present;
 	int ret;
 
+	if (ums9117_mmc_is_fixed_slot(dev))
+		return 1;
 	if (!priv->state.card_detect_owned) {
 		ret = ums9117_sdio_slot_enable_card_detect(&priv->io,
 							   &priv->state);
@@ -599,20 +609,24 @@ static int ums9117_mmc_reinit(struct udevice *dev)
 		if (ret)
 			return ret;
 	}
-	ret = ums9117_sdio_slot_enable_card_detect(&priv->io, &priv->state);
-	if (ret) {
-		if (priv->state.card_detect_owned ||
-		    priv->state.platform_active)
+	if (!ums9117_mmc_is_fixed_slot(dev)) {
+		ret = ums9117_sdio_slot_enable_card_detect(&priv->io,
+							   &priv->state);
+		if (ret) {
+			if (priv->state.card_detect_owned ||
+			    priv->state.platform_active)
+				ums9117_mmc_cleanup(priv);
+			return ret;
+		}
+		present =
+			ums9117_sdio_slot_card_present(&priv->io, &priv->state);
+		if (present < 0) {
 			ums9117_mmc_cleanup(priv);
-		return ret;
+			return present;
+		}
+		if (!present)
+			return -ENOMEDIUM;
 	}
-	present = ums9117_sdio_slot_card_present(&priv->io, &priv->state);
-	if (present < 0) {
-		ums9117_mmc_cleanup(priv);
-		return present;
-	}
-	if (!present)
-		return -ENOMEDIUM;
 	ret = ums9117_sdio_slot_activate(&priv->io, &priv->state);
 	if (!ret)
 		ret = ums9117_sdio_slot_enable_ident_clock(&priv->io,
@@ -653,6 +667,8 @@ static int ums9117_mmc_bind(struct udevice *dev)
 
 	cfg->name = dev->name;
 	cfg->host_caps = MMC_MODE_1BIT | MMC_MODE_4BIT | MMC_MODE_HS;
+	if (dev_read_bool(dev, "non-removable"))
+		cfg->host_caps |= MMC_CAP_NONREMOVABLE;
 	cfg->voltages = MMC_VDD_29_30 | MMC_VDD_30_31;
 	cfg->f_min = UMS9117_SDIO_IDENT_CLOCK_HZ;
 	cfg->f_max = UMS9117_SDIO_HS_CLOCK_HZ;
@@ -672,10 +688,13 @@ static int ums9117_mmc_probe(struct udevice *dev)
 	ret = ums9117_sdio_slot_snapshot(&priv->io, &priv->state);
 	if (ret)
 		return ret;
-	ret = ums9117_sdio_slot_enable_card_detect(&priv->io, &priv->state);
-	if (ret) {
-		ums9117_mmc_cleanup(priv);
-		return ret;
+	if (!ums9117_mmc_is_fixed_slot(dev)) {
+		ret = ums9117_sdio_slot_enable_card_detect(&priv->io,
+							   &priv->state);
+		if (ret) {
+			ums9117_mmc_cleanup(priv);
+			return ret;
+		}
 	}
 	plat->mmc.priv = priv;
 	upriv->mmc = &plat->mmc;
