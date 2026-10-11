@@ -289,16 +289,23 @@ def _publish_files(directory: Path, files: Mapping[str, bytes], name: str) -> No
         replace_file_atomically(destination / filename, contents, 0o600)
 
 
-def _materialize_groups(staging: Path, groups: Mapping[str, PreparedGroup]) -> None:
+def _materialize_groups(
+    staging: Path, groups: Mapping[str, PreparedGroup], *, retain_originals: bool
+) -> None:
     """Save each group's originals, prepared bytes and reports in a new generation."""
-    originals = _require_directory(staging / "originals", "device-data originals directory")
+    originals = (
+        _require_directory(staging / "originals", "device-data originals directory")
+        if retain_originals
+        else None
+    )
     prepared = _require_directory(staging / "groups", "device-data group directory")
     for group_name, group in groups.items():
-        _publish_files(
-            originals / group_name,
-            group.originals,
-            f"device-data originals for {group_name}",
-        )
+        if originals is not None:
+            _publish_files(
+                originals / group_name,
+                group.originals,
+                f"device-data originals for {group_name}",
+            )
         _publish_files(
             prepared / group_name,
             group.prepared,
@@ -315,9 +322,11 @@ def materialize_device_data(
     staging: Path,
     groups: Mapping[str, PreparedGroup],
     declarations: Mapping[str, list[dict[str, Any]]],
+    *,
+    retain_originals: bool = True,
 ) -> dict[str, tuple[FirmwareInput, ...]]:
     """Save extracted groups and admit every declared file before publication."""
-    _materialize_groups(staging, groups)
+    _materialize_groups(staging, groups, retain_originals=retain_originals)
     return capture_device_data_generation(
         declarations, staging, path_field="source", require_all=True
     )
