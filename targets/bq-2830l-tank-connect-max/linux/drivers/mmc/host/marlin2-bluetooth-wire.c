@@ -77,28 +77,6 @@ int marlin2_bluetooth_tx_build(u8 *data, size_t capacity, u8 type,
 	return 0;
 }
 
-int marlin2_bluetooth_pskey_build(u8 pskey[MARLIN2_BLUETOOTH_PSKEY_BYTES],
-				  const u8 *configuration, size_t bytes,
-				  const u8 device_address[6])
-{
-	size_t index;
-
-	if (bytes != MARLIN2_BLUETOOTH_CONFIG_BYTES)
-		return -EINVAL;
-	memset(pskey, 0, MARLIN2_BLUETOOTH_PSKEY_BYTES);
-	memcpy(pskey, configuration + 0x26c, 0x3c);
-	memcpy(pskey + 0x3c, configuration + 0x310, 0x10);
-	memcpy(pskey + 0x4c, configuration + 0x320, 0x38);
-	memcpy(pskey + 0x4c, device_address, 6);
-	memcpy(pskey + 0x84, configuration + 0x2a8, 0x20);
-	memcpy(pskey + 0xa4, configuration + 0x2c8, 0x20);
-	memcpy(pskey + 0xc4, configuration + 0x2e8, 4);
-	for (index = 0; index < 8; index++)
-		memcpy(pskey + 0xc8 + index * 2,
-		       configuration + 0x2ec + index * 4, 2);
-	return 0;
-}
-
 int marlin2_bluetooth_setup_reply(u16 opcode, u16 mode, u8 state,
 				  const u8 *event, size_t bytes)
 {

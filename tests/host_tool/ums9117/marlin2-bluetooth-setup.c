@@ -221,15 +221,10 @@ unsigned long wait_for_completion_timeout(struct completion *completion,
 
 static void setup_buffers_survive_transfer_and_failure_allows_retry(int error)
 {
-	u8 configuration[888];
-	const u8 address[] = { 0x5a, 0x5a, 0x5a, 0x5a, 0x5a, 0x5a };
-	u8 pskey[220];
+	const u8 pskey[220] = { [0 ... 215] = 0x5a };
 	struct device dev = { 0 };
 	struct marlin2_bluetooth *bt;
 
-	memset(configuration, 0x5a, sizeof(configuration));
-	assert(!marlin2_bluetooth_pskey_build(pskey, configuration,
-					      sizeof(configuration), address));
 	bt = marlin2_bluetooth_register(&dev, NULL, pskey);
 	assert(!IS_ERR(bt));
 	assert(registered_hdev && registered_hdev->setup);
