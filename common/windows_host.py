@@ -76,11 +76,13 @@ def validate_archive(root: Path) -> WindowsBundle:
     runtime = runner.load_runtime_manifest(root / "runtime-manifest.json")
     for relative, expected in runtime["sha256"].items():
         runner.require_file(root / relative)
-        if runner.digest(root / relative) != expected:
+        if relative != runtime["image"] and runner.digest(root / relative) != expected:
             fail(f"Archive file checksum differs: {relative}")
     runtime = runner.validate_runtime_identity(runtime)
     if runtime["transport"] != "usb-ncm":
         fail("This archive does not support the authenticated Linux endpoint")
+    if runtime["host_tools"] != {role: WINDOWS_TOOLS[role] for role in ("loader", "bridge")}:
+        fail("The RAM runner does not select this archive's native Windows tools")
     adapter = runner.load_adapter(root / runner.ADAPTER_PATH)
     adapter.runtime_target_display_name(runtime)
     adapter.adapter_config(runtime["adapter"])
@@ -96,7 +98,7 @@ def validate_archive(root: Path) -> WindowsBundle:
         fail("Windows host tools do not match this archive format")
     hashes = windows["sha256"]
     required_files = {*WINDOWS_TOOLS.values(), DRIVER_LICENSE}
-    if not isinstance(hashes, dict) or not required_files.issubset(hashes):
+    if not isinstance(hashes, dict) or not required_files.issubset({*runtime["sha256"], *hashes}):
         fail("Windows host manifest lacks native tool or driver license checksums")
     for relative, expected in hashes.items():
         name = runner.relative_name(relative, "Windows file")
@@ -105,7 +107,9 @@ def validate_archive(root: Path) -> WindowsBundle:
         runner.require_file(root / name)
         if runner.digest(root / name) != expected:
             fail(f"Windows file checksum differs: {name}")
-    if (root / runtime["image"]).read_bytes()[:4] != b"DHTB":
+    with (root / runtime["image"]).open("rb") as stream:
+        header = stream.read(4)
+    if header != b"DHTB":
         fail("The RAM payload does not have its required header")
     return WindowsBundle(
         root,

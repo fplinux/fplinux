@@ -11,9 +11,8 @@ Its `README.txt` names the phone, its boot key and startup commands. Check the
 phone's [support status](/fplinux/phones/#support-status) and
 [phone page](/fplinux/phones/) for feature, storage and power limits.
 
-Open the included `docs/index.html` on your computer to read the documentation
-without an Internet connection or local server. Its search matches words and
-substrings; external links still need an Internet connection.
+Autonomous archives include a short `README.txt`. Ordinary Linux runner
+archives also include `docs/index.html` for reading the site offline.
 
 :::note[No release archive is published yet]
 There are no published FPLinux release archives. You can package a phone-test
@@ -28,7 +27,7 @@ has not been qualified on native Windows.
 ## Autonomous RAM archive
 
 An autonomous archive contains the RAM image, Python, OpenSSH, the extraction
-tools, optional APKs, checksums and license notices. It contains no prepared
+tools, checksums and license notices. It contains no optional APKs or prepared
 phone data. The first run saves a read-only backup of your phone's internal
 storage and prepares its firmware, audio profile, pin map and keymap. Later
 runs load the prepared firmware and audio data separately from the RAM kernel
@@ -75,20 +74,31 @@ the administrator prompt. Run the launcher as your regular user.
 
 </Steps>
 
-The backup and prepared data stay in `.cache/` inside the extracted directory.
-Keep that directory for subsequent runs and treat it as
+The backup is `data/nand.bin`; prepared data is in `data/phone/`, and private
+connection keys are in `data/session/`. Keep the extracted directory for
+subsequent runs and treat its contents as
 [private phone data](/fplinux/guides/device-data/).
 Use it only with the same physical phone, even if another phone has the same
-model name. On Windows, the connection keys also stay here, in
-`.cache/sessions/`; `.cache/run.log` includes the launcher and USB loader output.
-If a run fails, read that log.
+model name. Each launch writes a new file in `logs/` and prints its exact path.
+The log includes launcher and USB loader diagnostics, but does not record your
+interactive SSH commands or terminal output. If preparation fails after the
+backup was saved, the next run reuses that backup.
 
 ### Subsequent runs
 
 Start `sh Run.sh` on Linux or `Run.cmd` on Windows again with the phone powered
 off and disconnected. Wait for the connection instructions, then connect it
-with its boot key held. The launcher loads FPLinux with your prepared data;
-use the phone's screen and keys when it reports that FPLinux is ready.
+with its boot key held. The launcher loads FPLinux with your prepared data and
+opens an SSH shell. Type `exit` or press Ctrl+D to close the shell; Linux keeps
+running on the phone.
+
+To open SSH again without reloading, run `sh SSH.sh` on Linux or double-click
+`SSH.cmd` on Windows. Keep the phone connected. Ctrl+C cancels loading or
+waiting, but does not power the phone off.
+
+The matching `*-sources.zip` contains source and build material separately
+from the runnable archive. Keep it available alongside the runnable ZIP;
+component licenses remain in the runnable archive.
 
 ## Linux runner archive
 

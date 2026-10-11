@@ -15,7 +15,7 @@ from pathlib import Path
 def export_runtime() -> None:
     """Write regular runtime files and their installed package identities to stdout."""
     files = {"runtime/bin/python3.14": Path("/usr/bin/python3.14")}
-    for name in ("ssh", "ssh-keygen", "ssh-keyscan", "sftp"):
+    for name in ("ssh", "ssh-keygen", "ssh-keyscan"):
         files[f"runtime/bin/{name}"] = Path("/usr/bin") / name
     standard_library = Path("/usr/lib/python3.14")
     for path in sorted(standard_library.rglob("*")):

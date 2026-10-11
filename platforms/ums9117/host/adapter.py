@@ -368,7 +368,7 @@ def run(  # noqa: PLR0913 -- runtime, session, handoff, user data and output are
         ):
             fail("platform map assets must share a directory and fixed protocol names")
     tools = runtime["host_tools"]
-    if set(tools) != {"loader", "bridge", "keyboard"}:
+    if set(tools) not in ({"loader", "bridge"}, {"loader", "bridge", "keyboard"}):
         fail("runtime host tools do not match the UMS9117 platform contract")
     config = adapter_config(runtime["adapter"])
     if setup_host and not USB_RULES_FILE.exists():
@@ -443,6 +443,9 @@ def run(  # noqa: PLR0913 -- runtime, session, handoff, user data and output are
                     time.sleep(0.01)
                     continue
                 break
+            if events is not None:
+                events("device-found")
+                events("ram-loader-start")
             result = subprocess.run(
                 loader_argv,
                 check=False,
@@ -494,6 +497,8 @@ def run(  # noqa: PLR0913 -- runtime, session, handoff, user data and output are
     with map_directory(bundle, assets, device_data=device_data) as maps:
         bridge_process: subprocess.Popen[Any] | None = None
         try:
+            if events is not None:
+                events("linux-start")
             bridge_process = subprocess.Popen(
                 bridge_argv,
                 cwd=maps,

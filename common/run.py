@@ -360,6 +360,8 @@ def main() -> None:
     bundle = Path(__file__).resolve().parent.parent
     runtime = load_runtime_manifest(bundle / "runtime-manifest.json")
     for relative, expected in runtime["sha256"].items():
+        if relative == runtime["image"]:
+            continue
         path = bundle / relative
         require_file(path, executable=relative in runtime["host_tools"].values())
         actual = digest(path)
@@ -398,7 +400,10 @@ def run_bundle(  # noqa: PLR0913 -- bundle, session actions, data and log destin
     if not options.reconnect:
         print(f"bundle build type: {runtime['build_type']}", flush=True)
     image = bundle / runtime["image"]
-    if image.read_bytes()[:4] != b"DHTB":
+    require_file(image)
+    with image.open("rb") as stream:
+        header = stream.read(4)
+    if header != b"DHTB":
         fail("RAM payload does not have a DHTB header")
     host_preflight()
     if options.reconnect:

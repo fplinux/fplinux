@@ -5,4 +5,4 @@ PATH="$fplinux_archive/tools/linux:$PATH"
 export PATH
 exec "$fplinux_archive/runtime/lib/ld-musl-x86_64.so.1" \
 	--library-path "$fplinux_archive/runtime/lib" \
-	"$fplinux_archive/runtime/bin/python3.14" -I "$fplinux_archive/Run.py" "$@"
+	"$fplinux_archive/runtime/bin/python3.14" -B -I "$fplinux_archive/Run.py" "$@"

@@ -168,6 +168,11 @@ def archive_files(directory: Path) -> Path:
     """Create a canonical synthetic archive and native file closure for its real consumer."""
     runtime = runtime_manifest()
     runtime["adapter"] = adapter_data()
+    runtime["host_tools"] = {
+        "loader": "tools/spd_dump.exe",
+        "bridge": "tools/libc_server.exe",
+    }
+    runtime["sha256"].pop("host/loader")
     sources = {
         "runner/run.py": ROOT / "common/run.py",
         "runner/identity.py": ROOT / "scripts/fplinux_cli/manifests/identity.py",
@@ -178,7 +183,8 @@ def archive_files(directory: Path) -> Path:
     files = {
         "image/ramboot.bin": b"DHTB synthetic image\n",
         "assets/fdl1.bin": b"synthetic first stage\n",
-        "host/loader": b"canonical host loader\n",
+        "tools/spd_dump.exe": b"synthetic native loader\n",
+        "tools/libc_server.exe": b"synthetic native bridge\n",
     }
     for relative, source in sources.items():
         files[relative] = source.read_bytes()
@@ -226,13 +232,15 @@ def archive_files(directory: Path) -> Path:
         destination = directory / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(payload)
-        hashes[relative] = hashlib.sha256(payload).hexdigest()
+        if relative not in runtime["sha256"]:
+            hashes[relative] = hashlib.sha256(payload).hexdigest()
     for role, relative in tools.items():
         destination = directory / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         payload = f"synthetic native {role}\n".encode()
         destination.write_bytes(payload)
-        hashes[relative] = hashlib.sha256(payload).hexdigest()
+        if relative not in runtime["sha256"]:
+            hashes[relative] = hashlib.sha256(payload).hexdigest()
     license_path = directory / "licenses/windows-driver/License.rtf"
     license_path.parent.mkdir(parents=True)
     license_payload = b"{\\rtf1 Synthetic Microsoft license terms.}"

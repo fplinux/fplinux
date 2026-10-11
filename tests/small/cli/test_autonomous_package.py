@@ -20,7 +20,7 @@ from fplinux_cli.alpine import signing
 from fplinux_cli.artifacts.bundles import publish_current_bundle
 from fplinux_cli.build import linux_host, windows_driver
 from fplinux_cli.build import windows as windows_build
-from fplinux_cli.cli import autonomous_package, bundles, package
+from fplinux_cli.cli import autonomous_package, bundles, package, package_sources
 from fplinux_cli.cli.parser import create_parser
 from fplinux_cli.common import canonical_json_bytes
 from fplinux_cli.environment import image_state, images
@@ -32,6 +32,8 @@ from fplinux_cli.workspace.capture import WorkspaceSnapshot
 from tests import ROOT
 from tests.bundle_support import file_record
 from tests.small.cli.package_docs_fixtures import write_offline_export
+from tests.small.runtime.adapter_fixtures import adapter_data
+from tests.small.runtime.test_runner_manifest import runtime_manifest
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -78,6 +80,8 @@ def archive_inputs(
         "common/windows_host.py",
         "common/Run.sh",
         "common/Run.cmd",
+        "common/SSH.sh",
+        "common/SSH.cmd",
         "platforms/ums9117/host/stock_image.py",
         "platforms/ums9117/host/nand_ecc.py",
         "platforms/ums9117/host/nand-ecc/Makefile",
@@ -109,6 +113,41 @@ def archive_inputs(
         )
         mode = 0o755 if relative in normalized["executables"] else 0o644
         _write(bundle, relative, contents, mode=mode)
+    prepared_maps = {
+        "pinmap.bin": b"BUILDER PERSONAL PINS MUST STAY PRIVATE\n",
+        "keymap.bin": b"BUILDER PERSONAL KEYS MUST STAY PRIVATE\n",
+    }
+    for relative, contents in prepared_maps.items():
+        _write(bundle, relative, contents, mode=0o600)
+    for relative, source_path in {
+        "runner/run.py": "common/run.py",
+        "runner/platform_adapter.py": "platforms/ums9117/host/adapter.py",
+        "runner/identity.py": "scripts/fplinux_cli/manifests/identity.py",
+        "runner/ssh_transport.py": "scripts/fplinux_cli/runtime/ssh_transport.py",
+        "runner/loader_events.py": "common/loader_events.py",
+    }.items():
+        _write(bundle, relative, (source / source_path).read_bytes())
+    _write(bundle, "image/ramboot.bin", b"DHTB synthetic built RAM payload\n")
+    runtime = runtime_manifest()
+    runtime["adapter"] = adapter_data()
+    runtime["assets"] = dict(config["runtime"]["assets"])
+    runtime["target"] = target
+    runtime["host_tools"] = {
+        role: f"host/{name}" for role, name in platform["host"]["runtime_tools"].items()
+    }
+    runtime["sha256"] = {
+        name: hashlib.sha256((bundle / name).read_bytes()).hexdigest()
+        for name in (
+            "image/ramboot.bin",
+            *runtime["assets"].values(),
+            "runner/platform_adapter.py",
+            "runner/identity.py",
+            "runner/ssh_transport.py",
+            "runner/loader_events.py",
+            *runtime["host_tools"].values(),
+        )
+    }
+    _write(bundle, "runtime-manifest.json", canonical_json_bytes(runtime))
     snapshot = WorkspaceSnapshot((), "a" * 64)
     manifest = canonical_json_bytes(
         {
@@ -119,7 +158,8 @@ def archive_inputs(
             "apk_signing_key": signing_digest,
             "device_identity": "f" * 64,
             "files": {
-                relative: file_record(bundle / relative) for relative in normalized["bundle_files"]
+                relative: file_record(bundle / relative)
+                for relative in (*normalized["bundle_files"], *prepared_maps)
             },
             "generation": generation,
             "kbuild_receipt": {"recipe": "0" * 64, "sha256": "1" * 64},
@@ -216,6 +256,13 @@ def archive_inputs(
     monkeypatch.setattr(windows_build, "prepare_windows_host", prepared_native)
     monkeypatch.setattr(windows_driver, "prepare_windows_driver", prepared_driver)
     monkeypatch.setattr(linux_host, "prepare_linux_host", prepared_linux)
+    monkeypatch.setattr(
+        package_sources,
+        "collect_source_files",
+        lambda *_args, **_kwargs: package_sources.SourcePayload(
+            {"project/source.c": b"controlled corresponding source\n"}, set(), {}
+        ),
+    )
     write_offline_export(tmp_path)
     return ArchiveInputs(
         tmp_path, target, bundle, manifest, {**native_files, **driver_files}, windows_scripts
@@ -257,7 +304,11 @@ def ecc_source_download(archive_inputs: ArchiveInputs) -> dict[str, bytes]:
 
 
 def _archive(root: Path) -> tuple[Path, dict[str, bytes], dict[str, int]]:
-    archive = next((root / ".cache/out/candidates").glob("*.zip"))
+    archive = next(
+        path
+        for path in (root / ".cache/out/candidates").glob("*.zip")
+        if not path.name.endswith("-sources.zip")
+    )
     with zipfile.ZipFile(archive) as source:
         prefix = source.namelist()[0].partition("/")[0] + "/"
         payload = {name.removeprefix(prefix): source.read(name) for name in source.namelist()}
@@ -276,6 +327,7 @@ def _archive(root: Path) -> tuple[Path, dict[str, bytes], dict[str, int]]:
         "inoi-244-modern-4g",
         "maxvi-k15n-4g",
         "bq-2830l-tank-connect-max",
+        "uniwa-v1000-4g",
     ],
     indirect=True,
 )
@@ -292,13 +344,28 @@ def test_autonomous_zip_preserves_receipts_omits_personal_data_and_is_determinis
     package.package_target(inputs.target, autonomous=True, host=host, candidate=True)
     archive, payload, modes = _archive(inputs.root)
     original = archive.read_bytes()
-    assert payload["build-manifest.json"] == inputs.manifest
+    build = json.loads(payload["build-manifest.json"])
+    runtime = json.loads(payload["runtime-manifest.json"])
+    assert build["device_identity"] == "f" * 64
     assert (
-        payload["runtime-manifest.json"] == (inputs.bundle / "runtime-manifest.json").read_bytes()
+        build["files"]["runtime-manifest.json"]["sha256"]
+        == hashlib.sha256(payload["runtime-manifest.json"]).hexdigest()
     )
+    assert set(runtime["host_tools"]) == {"loader", "bridge"}
+    assert all(name in payload for name in runtime["sha256"])
+    assert all(
+        hashlib.sha256(payload[name]).hexdigest() == digest
+        for name, digest in runtime["sha256"].items()
+    )
+    assert not any(name.startswith(("apks/", "docs/", "sources/")) for name in payload)
+    assert "host/fplinux-usb-keyboard" not in payload
     assert "device-data.cpio" not in payload
+    assert "pinmap.bin" not in payload
+    assert "keymap.bin" not in payload
     assert not any(name.startswith(".cache/") for name in payload)
     assert b"BUILDER PERSONAL DATA MUST STAY PRIVATE" not in b"".join(payload.values())
+    assert b"BUILDER PERSONAL PINS MUST STAY PRIVATE" not in b"".join(payload.values())
+    assert b"BUILDER PERSONAL KEYS MUST STAY PRIVATE" not in b"".join(payload.values())
     declaration = json.loads(payload["device-data-manifest.json"])
     assert declaration["target"] == inputs.target
     assert declaration["device_data"]["groups"]["board-maps"] == [
@@ -308,6 +375,7 @@ def test_autonomous_zip_preserves_receipts_omits_personal_data_and_is_determinis
     assert modes["Run.py"] == 0o100755
     launcher = "Run.sh" if host == "linux" else "Run.cmd"
     assert launcher in payload
+    assert ("SSH.sh" if host == "linux" else "SSH.cmd") in payload
     checksums = {
         relative: digest
         for digest, relative in (
@@ -329,7 +397,10 @@ def test_autonomous_zip_preserves_receipts_omits_personal_data_and_is_determinis
             == b"synthetic driver redistribution license\n"
         )
         for name in inputs.native_files:
-            assert windows["sha256"][name] == hashlib.sha256(payload[name]).hexdigest()
+            hashes = {**runtime["sha256"], **windows["sha256"]}
+            assert hashes[name] == hashlib.sha256(payload[name]).hexdigest()
+        assert not any(name.startswith("host/") for name in payload)
+        assert "60-fplinux.rules" not in payload
         assert inputs.windows_scripts
         for name, contents in inputs.windows_scripts.items():
             assert payload[name] == contents
@@ -344,6 +415,11 @@ def test_autonomous_zip_preserves_receipts_omits_personal_data_and_is_determinis
     with zipfile.ZipFile(archive) as source:
         source.extractall(extracted)  # noqa: S202 -- test-owned ZIP built from controlled inputs.
     archive_root = next(extracted.iterdir())
+    if host == "windows10":
+        from common.windows_host import validate_archive  # noqa: PLC0415
+
+        admitted = validate_archive(archive_root)
+        assert admitted.runtime["target"] == inputs.target
     help_result = subprocess.run(
         [sys.executable, "-I", str(archive_root / "Run.py"), "--help"],
         cwd=archive_root,
@@ -405,7 +481,15 @@ def test_declared_ecc_archive_delivers_its_corrector_and_sources(
             payload["licenses/host-tools/ums9117-nand-ecc-COPYING.txt"]
             == ecc_source_download["COPYING"]
         )
-        with zipfile.ZipFile(io.BytesIO(payload["sources/ums9117-nand-ecc-source.zip"])) as source:
+        companion = next((inputs.root / ".cache/out/candidates").glob("*-sources.zip"))
+        with zipfile.ZipFile(companion) as archive_source:
+            member = next(
+                name
+                for name in archive_source.namelist()
+                if name.endswith("/sources/ums9117-nand-ecc-source.zip")
+            )
+            source_bytes = archive_source.read(member)
+        with zipfile.ZipFile(io.BytesIO(source_bytes)) as source:
             assert source.read("ums9117-nand-ecc/bch.c") == b"synthetic BCH implementation\n"
             assert source.read("ums9117-nand-ecc/COPYING") == ecc_source_download["COPYING"]
             assert (
@@ -417,9 +501,14 @@ def test_declared_ecc_archive_delivers_its_corrector_and_sources(
                 == (inputs.root / "include/fplinux/fplinux-cli.h").read_bytes()
             )
     else:
-        assert (
-            payload["sources/windows-tools-source.zip"] == b"prepared compiler source projection"
-        )
+        companion = next((inputs.root / ".cache/out/candidates").glob("*-sources.zip"))
+        with zipfile.ZipFile(companion) as source:
+            member = next(
+                name
+                for name in source.namelist()
+                if name.endswith("/sources/windows-tools-source.zip")
+            )
+            assert source.read(member) == b"prepared compiler source projection"
         assert (
             payload["licenses/windows-host/ums9117-nand-ecc-COPYING.txt"]
             == b"prepared BCH license"

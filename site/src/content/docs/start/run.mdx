@@ -190,13 +190,15 @@ If the image on the phone is outdated, rebuild it and start a fresh session.
 
 The file is overwritten. Each line is one JSON object with `event`, `target`,
 `profile`, `build_type` and a UTC `time`. A successful load writes these
-events in order: `waiting-for-device`, `ram-loader-complete`, `linux-transition`, `linux-usb`,
-`ssh-ready` and `complete`. A `failure` event adds the last `stage`, a short
+events in order: `waiting-for-device`, `device-found`, `ram-loader-start`,
+`ram-loader-complete`, `linux-start`, `linux-transition`, `linux-usb`,
+`ssh-ready` and `complete`. A loader retry can repeat `device-found` and
+`ram-loader-start`. A `failure` event adds the last `stage`, a short
 `cause` and the `exit_status`. `complete` is written before the interactive
 shell opens. The events contain no SSH credentials. The loader-first sequence
 above still applies.
 
 `linux-usb` records the first observation of the exact device bound to this
 load; `ssh-ready` records session authentication. Live device-data preparation
-and fresh standalone loads accept the same option. It is incompatible with
+and fresh ordinary standalone runner loads accept the same option. It is incompatible with
 `--from-dump` and standalone `--reconnect`.

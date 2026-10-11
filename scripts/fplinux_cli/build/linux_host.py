@@ -54,9 +54,8 @@ def verify_linux_dependencies(files: dict[str, Path]) -> dict[str, list[str]]:
 def _write_launchers(package: Path) -> None:
     directory = package / "tools/linux"
     directory.mkdir(parents=True)
-    for name in ("ssh", "ssh-keygen", "ssh-keyscan", "sftp"):
+    for name in ("ssh", "ssh-keygen", "ssh-keyscan"):
         launcher = directory / name
-        client_option = ' -S "$command_root/ssh"' if name == "sftp" else ""
         launcher.write_text(
             "#!/bin/sh\n"
             "set -eu\n"
@@ -64,7 +63,7 @@ def _write_launchers(package: Path) -> None:
             'runtime_root=$(CDPATH= cd -- "$command_root/../../runtime" && pwd)\n'
             'exec "$runtime_root/lib/ld-musl-x86_64.so.1" '
             '--library-path "$runtime_root/lib" '
-            f'"$runtime_root/bin/{name}"{client_option} "$@"\n',
+            f'"$runtime_root/bin/{name}" "$@"\n',
             encoding="utf-8",
         )
         launcher.chmod(0o755)

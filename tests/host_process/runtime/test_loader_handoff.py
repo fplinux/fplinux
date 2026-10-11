@@ -69,7 +69,10 @@ class LoaderHandoffProcessTests:
         assert ([event["event"] for event in shell["events"]]) == (
             [
                 "waiting-for-device",
+                "device-found",
+                "ram-loader-start",
                 "ram-loader-complete",
+                "linux-start",
                 "linux-transition",
                 "linux-usb",
                 "ssh-ready",
@@ -100,7 +103,15 @@ class LoaderHandoffProcessTests:
         result = self.run_loader("none")
         assert (result.returncode) == (0), result.stderr
         assert ([event["event"] for event in self.events()]) == (
-            ["waiting-for-device", "ram-loader-complete", "linux-transition", "complete"]
+            [
+                "waiting-for-device",
+                "device-found",
+                "ram-loader-start",
+                "ram-loader-complete",
+                "linux-start",
+                "linux-transition",
+                "complete",
+            ]
         )
         assert (self.commands()) == ([])
         assert (list(self.root.glob("runtime/fplinux/sessions/*"))) == ([])

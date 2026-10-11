@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -12,7 +13,14 @@ from fplinux_cli import common
 from fplinux_cli.cli import bundles as cli_bundles
 from fplinux_cli.cli.autonomous_package import autonomous_payload
 from fplinux_cli.cli.package_docs import offline_documentation
-from fplinux_cli.common import ZIP_TIMESTAMP, fail, payload_digest, sha256_bytes, sha256_file
+from fplinux_cli.common import (
+    ZIP_TIMESTAMP,
+    canonical_json_bytes,
+    fail,
+    payload_digest,
+    sha256_bytes,
+    sha256_file,
+)
 from fplinux_cli.environment import image_state as image_states
 from fplinux_cli.environment import images
 from fplinux_cli.manifests import platforms, releases, targets
@@ -146,6 +154,84 @@ def add_target_files(
         files[archive_name] = source.read_bytes()
 
 
+def _project_autonomous_runtime(
+    files: dict[str, bytes], manifest: dict[str, Any], executables: set[str], *, host: str
+) -> bytes:
+    """Admit only the runtime delivered for this host, preserving its kernel identity."""
+    runtime = json.loads(files["runtime-manifest.json"])
+    runtime["host_tools"] = (
+        {"loader": "tools/spd_dump.exe", "bridge": "tools/libc_server.exe"}
+        if host == "windows10"
+        else {role: runtime["host_tools"][role] for role in ("loader", "bridge")}
+    )
+    runtime["sha256"] = {
+        relative: sha256_bytes(files[relative])
+        for relative in sorted({*runtime["sha256"], *runtime["host_tools"].values()})
+        if relative in files
+    }
+    files["runtime-manifest.json"] = canonical_json_bytes(runtime)
+    if host == "windows10":
+        windows = json.loads(files["windows-host.json"])
+        windows["sha256"] = {
+            name: digest
+            for name, digest in windows["sha256"].items()
+            if name in files and name not in runtime["sha256"] and name != "README.txt"
+        }
+        files["windows-host.json"] = canonical_json_bytes(windows)
+    projected = {key: value for key, value in manifest.items() if key != "generation"}
+    projected["files"] = {
+        name: {
+            "mode": 0o755 if name in executables else 0o644,
+            "size": len(contents),
+            "sha256": sha256_bytes(contents),
+        }
+        for name, contents in sorted(files.items())
+        if name in runtime["sha256"] or name == "runtime-manifest.json"
+    }
+    projected["generation"] = sha256_bytes(canonical_json_bytes(projected))
+    return canonical_json_bytes(projected)
+
+
+def _write_archive(
+    destination: Path,
+    stem: str,
+    files: dict[str, bytes],
+    executables: set[str],
+    *,
+    compression: int = zipfile.ZIP_STORED,
+) -> Path:
+    """Publish a deterministic ZIP without replacing an existing different archive."""
+    destination.mkdir(parents=True, exist_ok=True)
+    archive = destination / f"{stem}.zip"
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=destination, prefix=f".{stem}.", delete=False
+        ) as stream:
+            temporary = Path(stream.name)
+        with zipfile.ZipFile(temporary, "w", compression=compression) as output:
+            for relative in sorted(files):
+                info = zipfile.ZipInfo(f"{stem}/{relative}", ZIP_TIMESTAMP)
+                info.create_system = 3
+                info.external_attr = (0o100755 if relative in executables else 0o100644) << 16
+                info.compress_type = compression
+                output.writestr(info, files[relative])
+        temporary.chmod(0o644)
+        if archive.exists():
+            if sha256_file(archive) != sha256_file(temporary):
+                fail(f"package name collision with different bytes: {archive}")
+            temporary.unlink()
+            temporary = None
+            archive.chmod(0o644)
+        else:
+            temporary.replace(archive)
+            temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return archive
+
+
 def package_target(  # noqa: PLR0913 -- archive host and build selectors remain explicit.
     target: str,
     *,
@@ -172,7 +258,7 @@ def package_target(  # noqa: PLR0913 -- archive host and build selectors remain 
     if autonomous and config["linux"]["root"]["kind"] != "initramfs":
         fail("--autonomous supports only the RAM boot context")
     release = load_release_manifest(target, config)
-    documentation = offline_documentation()
+    documentation = {} if autonomous else offline_documentation()
     bundle, manifest = runtime_bundle_session.resolve_target_bundle(
         target, selected_profile, build_type=build_type
     )
@@ -236,10 +322,22 @@ def package_target(  # noqa: PLR0913 -- archive host and build selectors remain 
 
     executables = set(release["executables"])
     add_target_files(files, target, release["documents"])
+    source_files: dict[str, bytes] = {}
+    source_executables: set[str] = set()
     if autonomous:
         prepared_files = {"device-data.cpio", *prepared_map_files}
         for relative in prepared_files:
             files.pop(relative, None)
+        omitted = {
+            relative
+            for relative in files
+            if relative.startswith("apks/")
+            or relative == "host/fplinux-usb-keyboard"
+            or (host == "windows10" and relative.startswith("host/"))
+        }
+        for relative in omitted:
+            files.pop(relative)
+        executables.difference_update(omitted)
         qualification_files = [relative for relative in qualification_files if relative in files]
         additions = autonomous_payload(target, config, host=host, offline=offline)
         collisions = (set(additions.files) & set(files)) - {"README.txt"}
@@ -248,9 +346,22 @@ def package_target(  # noqa: PLR0913 -- archive host and build selectors remain 
         files.update(additions.files)
         qualification_files.extend(additions.files)
         executables.update(additions.executables)
+        from fplinux_cli.cli.package_sources import collect_source_files  # noqa: PLC0415
+
+        sources = collect_source_files(config, host=host, offline=offline)
+        source_files.update(sources.files)
+        source_executables.update(sources.executables)
+        files.update(sources.notices)
+        for relative in tuple(files):
+            if relative.startswith("sources/"):
+                source_files[relative] = files.pop(relative)
+        qualification_files = [relative for relative in qualification_files if relative in files]
+        package_manifest = _project_autonomous_runtime(files, manifest, executables, host=host)
+    else:
+        package_manifest = bundle.manifest_bytes
     qualification_payload = {relative: files[relative] for relative in qualification_files}
     qualification_digest = payload_digest(qualification_payload, executables)
-    files["build-manifest.json"] = bundle.manifest_bytes
+    files["build-manifest.json"] = package_manifest
     verified_digest = None if candidate else releases.verified_runtime_digest(target)
     if not candidate and verified_digest != qualification_digest:
         fail(
@@ -266,54 +377,65 @@ def package_target(  # noqa: PLR0913 -- archive host and build selectors remain 
         fail(f"duplicate documentation archive path: {min(collisions)}")
     files.update(documentation)
     for archive_name, relative in SHARED_PACKAGE_FILES.items():
+        if host == "windows10" and archive_name == "60-fplinux.rules":
+            continue
         source = common.ROOT / relative
         if source.is_symlink() or not source.is_file():
             fail(f"shared package file is missing or invalid: {source}")
         files[archive_name] = source.read_bytes()
-    checksums = "".join(f"{sha256_bytes(files[name])}  {name}\n" for name in sorted(files))
-    files["SHA256SUMS"] = checksums.encode()
-    content_digest = payload_digest(files, executables)
-
     qualifier = f"{build_type}-candidate" if candidate else build_type
     context = boot if boot is not None else selected_profile
     context_component = "" if context is None else f"-{context}"
     autonomous_component = "-autonomous" if autonomous else ""
-    stem = (
-        f"FPLinux-{target}{context_component}-{qualifier}{autonomous_component}"
-        f"-{host}-x86_64-{content_digest[:16]}"
+    base_stem = (
+        f"FPLinux-{target}{context_component}-{qualifier}{autonomous_component}-{host}-x86_64"
     )
+    source_stem = None
+    if autonomous:
+        pairing_digest = payload_digest(
+            {
+                **{f"runtime/{name}": value for name, value in files.items()},
+                **{f"source/{name}": value for name, value in source_files.items()},
+            },
+            {
+                *(f"runtime/{name}" for name in executables),
+                *(f"source/{name}" for name in source_executables),
+            },
+        )
+        source_stem = f"{base_stem}-{pairing_digest[:16]}-sources"
+        files["README.txt"] += (
+            "\nMatching source and build material:\n"
+            f"  {source_stem}.zip\n"
+            "Keep it available alongside this archive. Licenses remain included here.\n"
+        ).encode()
+    checksums = "".join(f"{sha256_bytes(files[name])}  {name}\n" for name in sorted(files))
+    files["SHA256SUMS"] = checksums.encode()
+    content_digest = payload_digest(files, executables)
+    stem = f"{base_stem}-{content_digest[:16]}"
     destination = common.ROOT / ".cache/out" / ("candidates" if candidate else "releases")
-    destination.mkdir(parents=True, exist_ok=True)
-    archive = destination / f"{stem}.zip"
-    temporary: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            dir=destination,
-            prefix=f".{stem}.",
-            delete=False,
-        ) as stream:
-            temporary = Path(stream.name)
-        with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_STORED) as output:
-            for relative in sorted(files):
-                info = zipfile.ZipInfo(f"{stem}/{relative}", ZIP_TIMESTAMP)
-                info.create_system = 3
-                mode = 0o100755 if relative in executables else 0o100644
-                info.external_attr = mode << 16
-                info.compress_type = zipfile.ZIP_STORED
-                output.writestr(info, files[relative])
-        temporary.chmod(0o644)
-        if archive.exists():
-            if sha256_file(archive) != sha256_file(temporary):
-                fail(f"package name collision with different bytes: {archive}")
-            temporary.unlink()
-            temporary = None
-            archive.chmod(0o644)
-        else:
-            temporary.replace(archive)
-            temporary = None
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    archive = _write_archive(
+        destination,
+        stem,
+        files,
+        executables,
+        compression=zipfile.ZIP_DEFLATED if autonomous else zipfile.ZIP_STORED,
+    )
+    if source_stem is not None:
+        source_files["DISTRIBUTION.json"] = canonical_json_bytes(
+            {"archive": archive.name, "archive_sha256": sha256_file(archive)}
+        )
+        source_checksums = "".join(
+            f"{sha256_bytes(source_files[name])}  {name}\n" for name in sorted(source_files)
+        )
+        source_files["SHA256SUMS"] = source_checksums.encode()
+        source_archive = _write_archive(
+            destination,
+            source_stem,
+            source_files,
+            source_executables,
+            compression=zipfile.ZIP_DEFLATED,
+        )
+        print(f"Matching sources: {source_archive.relative_to(common.ROOT)}")
 
     image_digest = sha256_bytes(files[release["image"]])
     print(f"FPLinux {qualifier} package: {archive.relative_to(common.ROOT)}")

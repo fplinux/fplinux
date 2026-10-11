@@ -174,14 +174,27 @@ class BridgeAcknowledgementTests(BridgeFixture):
         """A bridge acknowledgement does not claim an authenticated SSH session."""
         events: list[str] = []
         self.run_bridge(BridgeProcess(0), events=events.append)
-        assert (events) == (["waiting-for-device", "ram-loader-complete", "linux-transition"])
+        assert events == [
+            "waiting-for-device",
+            "device-found",
+            "ram-loader-start",
+            "ram-loader-complete",
+            "linux-start",
+            "linux-transition",
+        ]
 
     def test_failed_bridge_never_emits_linux_transition(self) -> None:
         """A failed bridge cannot authorize the consumer's next transport stage."""
         events: list[str] = []
         with pytest.raises(SystemExit, match="did not acknowledge"):
             self.run_bridge(BridgeProcess(1), events=events.append)
-        assert (events) == (["waiting-for-device", "ram-loader-complete"])
+        assert events == [
+            "waiting-for-device",
+            "device-found",
+            "ram-loader-start",
+            "ram-loader-complete",
+            "linux-start",
+        ]
 
     def test_exit_zero_and_bootrom_disconnect_continue_with_the_exact_session_token(self) -> None:
         """Bridge success needs no output; the original USB node must then disappear."""

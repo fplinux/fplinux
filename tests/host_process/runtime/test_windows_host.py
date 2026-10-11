@@ -448,8 +448,22 @@ def test_selected_winusb_snapshot_reaches_native_loader_and_one_archive_log(
         install_python_script(
             ROOT / "tests/fixtures/processes/windows_loader_output.py", destination
         )
-        manifest["sha256"][relative] = hashlib.sha256(destination.read_bytes()).hexdigest()
+        runtime_path = root / "runtime-manifest.json"
+        runtime = json.loads(runtime_path.read_text())
+        runtime["sha256"][relative] = hashlib.sha256(destination.read_bytes()).hexdigest()
+        runtime_path.write_text(json.dumps(runtime))
     manifest_path.write_text(json.dumps(manifest))
+    build_manifest_path = root / "build-manifest.json"
+    build_manifest = json.loads(build_manifest_path.read_text())
+    runtime_bytes = (root / "runtime-manifest.json").read_bytes()
+    build_manifest["files"]["runtime-manifest.json"]["sha256"] = hashlib.sha256(
+        runtime_bytes
+    ).hexdigest()
+    build_manifest["files"]["runtime-manifest.json"]["size"] = len(runtime_bytes)
+    del build_manifest["generation"]
+    canonical = (json.dumps(build_manifest, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    build_manifest["generation"] = hashlib.sha256(canonical).hexdigest()
+    build_manifest_path.write_text(json.dumps(build_manifest))
     log = root / "logs/20261011T123456Z.log"
     log.parent.mkdir()
     log.write_text("earlier run diagnostics\n")

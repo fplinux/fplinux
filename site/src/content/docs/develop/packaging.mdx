@@ -26,10 +26,10 @@ Packaging uses the current build and does not rebuild it. If the source has
 changed since that build, it stops and prints the `build` command to run. Pass
 the same profile and build type as the build.
 
-Packaging also requires a current offline site export. Install the pinned site
+Ordinary Linux runner packaging also requires a current offline site export. Install the pinned site
 tools as described in [Contributing](/fplinux/develop/contributing/#preview-this-site),
 then run `npm run build:offline` from `site/`. After editing the site, export it
-again before packaging. All host archives carry the generated site under `docs/`;
+again before packaging. Ordinary runner archives carry the generated site under `docs/`;
 the phone image does not include it.
 
 A candidate contains `CANDIDATE-NOTICE.txt` and is meant only for testing on
@@ -59,7 +59,11 @@ The hosts are Linux x86-64 and Windows 10 or 11 x64. Each archive contains only
 the selected phone's configuration. It bundles Python, OpenSSH and extraction
 tools, and omits the build's prepared phone data. The owner uses the same
 `Run.sh` or `Run.cmd` twice: first to save and prepare their phone's own data,
-then to load FPLinux with that data. Follow
+then to load FPLinux with that data and open SSH. `SSH.sh` or `SSH.cmd` opens
+a new shell on the already running phone. These archives contain the selected
+host's tools, a short README and licenses; optional APKs and the offline site
+are omitted. Source and build material is written to a matching separate
+`*-sources.zip`. Keep both archives together when distributing them. Follow
 [Standalone archive](/fplinux/guides/standalone-archive/) for host requirements,
 connection order and current qualification limits.
 

@@ -102,16 +102,19 @@ def _readme(config: dict[str, Any], *, host: str) -> bytes:
             "Use Windows 10 or 11 x64. Python and the host programs are bundled.\n"
             "On first use, Run can ask to install the phone's USB driver.\n"
             "Read the included driver license and approve the administrator prompt.\n"
-            "Double-click Run.cmd.\n"
-            "Connection keys are kept in .cache/sessions in this directory.\n"
+            "Double-click Run.cmd to start; use SSH.cmd to reconnect.\n"
         )
     else:
         host_instructions = (
-            "Use Linux x86-64 with coreutils, iproute2, a DHCP client and udev.\n"
+            "Use Linux x86-64 with coreutils, iproute2, udev and a network manager\n"
+            "that automatically runs IPv4 DHCP on new USB interfaces, such as\n"
+            "NetworkManager.\n"
             "Python and OpenSSH are bundled. Run asks for administrator access\n"
             "once if the included phone USB access rules are not installed.\n"
             "Open a terminal in this directory and run:\n"
             "  sh Run.sh\n"
+            "To reconnect to the running phone:\n"
+            "  sh SSH.sh\n"
         )
     text = (
         f"FPLinux - {name}\n\n"
@@ -122,9 +125,11 @@ def _readme(config: dict[str, Any], *, host: str) -> bytes:
         "The first run saves a complete backup and prepares your phone's own data.\n"
         "When it finishes, disconnect USB. If the phone stays on, briefly remove\n"
         "and reinsert its battery. Run the same script with the phone powered off\n"
-        "to start FPLinux. Use the phone's screen and keys.\n\n"
-        "Keep this extracted directory: your backup and prepared data are in .cache.\n"
-        "If a run fails, read .cache/run.log.\n"
+        "to start FPLinux and open SSH. Type exit or press Ctrl+D to close SSH.\n"
+        "Ctrl+C cancels loading or waiting; it does not power the phone off.\n\n"
+        "Keep this directory for this one phone. Your NAND backup is data/nand.bin,\n"
+        "prepared phone data is data/phone, and private connection keys are data/session.\n"
+        "Each launch writes a new log in logs and displays its exact path.\n"
     )
     return text.encode("utf-8")
 
@@ -204,7 +209,6 @@ def autonomous_payload(
     """Collect runtime code and prepared native dependencies without personal data."""
     files = {
         "Run.py": _source_bytes("common/autonomous.py"),
-        "prepare.py": _source_bytes("common/prepare.py"),
         "device-data-manifest.json": device_data_manifest(target, config),
         "README.txt": _readme(config, host=host),
     }
@@ -229,6 +233,7 @@ def autonomous_payload(
         from fplinux_cli.build.windows_driver import prepare_windows_driver  # noqa: PLC0415
 
         files["Run.cmd"] = _source_bytes("common/Run.cmd")
+        files["SSH.cmd"] = _source_bytes("common/SSH.cmd")
         files["common/__init__.py"] = _source_bytes("common/__init__.py")
         files["common/windows_host.py"] = _source_bytes("common/windows_host.py")
         for source in sorted((common.ROOT / "common/windows").rglob("*.ps1")):
@@ -258,11 +263,12 @@ def autonomous_payload(
         from fplinux_cli.build.linux_host import prepare_linux_host  # noqa: PLC0415
 
         files["Run.sh"] = _source_bytes("common/Run.sh")
+        files["SSH.sh"] = _source_bytes("common/SSH.sh")
         files["tools/fphelper_t117"] = _linux_host_tool(
             target, platform, "fphelper_t117", offline=offline
         )
         files["licenses/host-tools/Unlicense.txt"] = _source_bytes("LICENSES/Unlicense.txt")
-        executables.update({"Run.sh", "tools/fphelper_t117"})
+        executables.update({"Run.sh", "SSH.sh", "tools/fphelper_t117"})
         if has_ecc:
             relative = f"tools/{NAND_ECC_TOOL}"
             files[relative] = _linux_host_tool(target, platform, NAND_ECC_TOOL, offline=offline)

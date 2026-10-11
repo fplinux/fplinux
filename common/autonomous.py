@@ -1,6 +1,6 @@
 #!/usr/bin/env python3.14
 # SPDX-License-Identifier: GPL-2.0-only
-"""Prepare this phone on the first run and boot its personal data on later runs."""
+"""Start this phone's Linux system or open its existing SSH connection."""
 
 from __future__ import annotations
 
@@ -9,45 +9,105 @@ import importlib
 import os
 import subprocess
 import sys
+import tempfile
+import time
 import traceback
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 ROOT = Path(__file__).resolve().parent
 sys.path[:0] = [str(ROOT / "scripts"), str(ROOT)]
 
 from fplinux_cli.common import fail, read_json_object, replace_file_atomically  # noqa: E402
 from fplinux_cli.device_data.cpio import create_device_data_initramfs  # noqa: E402
-from fplinux_cli.device_data.inputs import (  # noqa: E402
-    capture_device_data_generation,
-    current_device_data_generation,
-)
+from fplinux_cli.device_data.inputs import capture_device_data_generation  # noqa: E402
 from fplinux_cli.device_data.portable import prepare_portable_device_data  # noqa: E402
 from fplinux_cli.manifests.values import basename_value, exact_table  # noqa: E402
 from fplinux_cli.runtime.nand_backup import backup_nand  # noqa: E402
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from typing import TextIO
+
     from fplinux_cli.device_data.inputs import FirmwareInput
-    from fplinux_cli.runtime.nand_backup import SshTransport
 
 
-def _validate_linux_archive(root: Path) -> dict[str, Any]:
-    """Admit the canonical runtime and its identity before any phone operation."""
-    run = importlib.import_module("runner.run")
-    runtime: dict[str, Any] = run.load_runtime_manifest(root / "runtime-manifest.json")
-    for relative, expected in runtime["sha256"].items():
-        path = root / relative
-        run.require_file(path, executable=relative in runtime["host_tools"].values())
-        if run.digest(path) != expected:
-            fail(f"Archive file checksum differs: {relative}")
-    runtime = run.validate_runtime_identity(runtime)
-    if runtime["transport"] != "usb-ncm":
-        fail("This archive does not support the authenticated Linux connection")
-    ssh = run.load_module(root / run.SSH_HELPER_PATH, "ssh_transport")
-    ssh.bundle_identity(root, runtime)
-    return runtime
+def _private_directory(path: Path) -> Path:
+    """Protect local backups and connection keys on either supported host."""
+    created = not path.exists()
+    path.mkdir(mode=0o700, exist_ok=True)
+    if path.is_symlink() or not path.is_dir():
+        fail(f"Private data directory is invalid: {path}")
+    if os.name == "nt":
+        from common.windows_host import WindowsHost  # noqa: PLC0415
+
+        host = WindowsHost()
+        if created:
+            host.secure_new(path, directory=True)
+        else:
+            host.require_private(path)
+    else:
+        path.chmod(0o700)
+    return path
+
+
+class RunLog:
+    """One launch's diagnostics, separate from interactive SSH input and output."""
+
+    def __init__(self, root: Path) -> None:
+        """Create a private log for this launch and keep its terminal stream."""
+        self.started = time.monotonic()
+        directory = _private_directory(root / "logs")
+        stamp = datetime.now(UTC).strftime("%Y-%m-%d_%H%M%S_%f")
+        self.path = directory / f"{stamp}.log"
+        descriptor = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_APPEND, 0o600)
+        self.stream = os.fdopen(descriptor, "w", encoding="utf-8", buffering=1)
+        self.visible = sys.stdout
+        self.stage_started = self.started
+        self.stage = ""
+
+    def message(self, text: str) -> None:
+        """Show one status message and retain its timestamp."""
+        print(text, file=self.visible, flush=True)
+        print(f"{datetime.now(UTC).isoformat()} {text}", file=self.stream, flush=True)
+
+    def event(self, stage: str, runtime: dict[str, Any]) -> None:
+        """Show loader stages once and record elapsed stage time."""
+        now = time.monotonic()
+        if self.stage:
+            print(f"Stage {self.stage}: {now - self.stage_started:.2f}s", file=self.stream)
+        self.stage, self.stage_started = stage, now
+        messages = {
+            "host-preparation": "Checking the computer and USB access...",
+            "network-preparation": "Choosing the private USB connection...",
+            "session-preparation": "Creating secure access for this boot...",
+            "payload-preparation": "Preparing the RAM image...",
+            "waiting-for-device": runtime["adapter"]["boot_instructions"],
+            "device-found": "Phone detected...",
+            "ram-loader-start": "Loading the phone into RAM; keep USB connected...",
+            "ram-loader-complete": "Phone loaded into RAM.",
+            "linux-start": "Starting Linux...",
+            "linux-transition": "Waiting for the phone's USB network and SSH...",
+            "ssh-ready": "Secure phone connection is ready.",
+            "driver-setup": "Follow the Windows USB driver setup window.",
+            "driver-ready": "Phone USB driver is ready.",
+            "usb-access-setup": "Setting up USB access; Linux may ask for your password once.",
+        }
+        if stage in messages:
+            self.message(messages[stage])
+
+    @contextmanager
+    def capture(self) -> Iterator[TextIO]:
+        """Retain backend diagnostics while progress uses the original terminal."""
+        with redirect_stdout(self.stream), redirect_stderr(self.stream):
+            yield self.stream
+
+    def close(self) -> None:
+        """Finish this launch's log, including errors and cancellations."""
+        print(f"Launch ended after {time.monotonic() - self.started:.2f}s", file=self.stream)
+        self.stream.close()
 
 
 def _archive_runtime(root: Path) -> dict[str, Any]:
@@ -55,11 +115,17 @@ def _archive_runtime(root: Path) -> dict[str, Any]:
     if windows_archive != (os.name == "nt"):
         command = "Run.cmd on Windows" if windows_archive else "Run.sh on Linux"
         fail(f"Open this archive with {command}")
-    if windows_archive:
-        from common.windows_host import validate_archive  # noqa: PLC0415
-
-        return validate_archive(root).runtime
-    return _validate_linux_archive(root)
+    run = importlib.import_module("runner.run")
+    runtime: dict[str, Any] = run.load_runtime_manifest(root / "runtime-manifest.json")
+    runtime = run.validate_runtime_identity(runtime)
+    if not windows_archive:
+        for relative, expected in runtime["sha256"].items():
+            path = root / relative
+            run.require_file(path, executable=relative in runtime["host_tools"].values())
+            # The transport admits the image against the build manifest once.
+            if relative != runtime["image"] and run.digest(path) != expected:
+                fail(f"Archive file checksum differs: {relative}")
+    return runtime
 
 
 def _device_data_manifest(root: Path, runtime: dict[str, Any]) -> dict[str, Any]:
@@ -78,205 +144,191 @@ def _device_data_manifest(root: Path, runtime: dict[str, Any]) -> dict[str, Any]
     return manifest
 
 
-def _boot_archive(
-    root: Path, runtime: dict[str, Any], capsule: Path
-) -> tuple[SshTransport, dict[str, Any]]:
-    visible = sys.stdout
-
-    def progress(stage: str) -> None:
-        print(f"Stage: {stage}", flush=True)
-        if stage == "host-preparation":
-            print(
-                "Preparing the Windows host and checking USB devices...", file=visible, flush=True
-            )
-        elif stage == "network-preparation":
-            print("Preparing the private USB connection...", file=visible, flush=True)
-        elif stage == "session-preparation":
-            print("Preparing secure access to the phone...", file=visible, flush=True)
-        elif stage == "payload-preparation":
-            print("Preparing the RAM image...", file=visible, flush=True)
-        elif stage == "waiting-for-device":
-            print(runtime["adapter"]["boot_instructions"], file=visible, flush=True)
-        elif stage == "device-found":
-            print("Phone detected. Checking the USB driver...", file=visible, flush=True)
-        elif stage == "ram-loader-start":
-            print(
-                "Loading the phone into RAM. Keep the USB cable connected...",
-                file=visible,
-                flush=True,
-            )
-        elif stage == "ram-loader-complete":
-            print("Phone loaded into RAM.", file=visible, flush=True)
-        elif stage == "linux-start":
-            print("Starting Linux on the phone...", file=visible, flush=True)
-        elif stage == "linux-transition":
-            print("Waiting for the Linux connection...", file=visible, flush=True)
-        elif stage == "ssh-ready":
-            print("Secure phone connection is ready.", file=visible, flush=True)
-        elif stage == "driver-setup":
-            print(
-                "Windows needs the phone USB driver. Follow the setup window.",
-                file=visible,
-                flush=True,
-            )
-        elif stage == "driver-ready":
-            print("Phone USB driver is ready.", file=visible, flush=True)
-        elif stage == "usb-access-setup":
-            print(
-                "Setting up phone USB access. Linux may ask for your password once.",
-                file=visible,
-                flush=True,
-            )
-
-    with (
-        (root / ".cache/run.log").open("a", encoding="utf-8", buffering=1) as output,
-        redirect_stdout(output),
-        redirect_stderr(output),
-    ):
-        print(f"\nRAM boot started: {datetime.now(UTC).isoformat()}", flush=True)
+def _connection(
+    root: Path,
+    runtime: dict[str, Any],
+    log: RunLog,
+    *,
+    capsule: Path | None = None,
+) -> tuple[Any, dict[str, Any]]:
+    with log.capture() as output:
         if os.name == "nt":
-            from common.windows_host import boot_archive  # noqa: PLC0415
+            from common.windows_host import boot_archive, load_current_session  # noqa: PLC0415
 
-            return boot_archive(root, capsule, events=progress)
+            if capsule is None:
+                return load_current_session(root, runtime["target"])
+            return boot_archive(
+                root, capsule, events=lambda stage: log.event(stage, runtime), log=log.path
+            )
         run = importlib.import_module("runner.run")
-        options = argparse.Namespace(reconnect=False, exec_command=None, upload=None, pull=None)
+        options = argparse.Namespace(
+            reconnect=capsule is None, exec_command=None, upload=None, pull=None
+        )
         handoff = run.run_bundle(
-            root, runtime, options, progress, device_data=capsule, output=output, setup_host=True
+            root,
+            runtime,
+            options,
+            lambda stage: log.event(stage, runtime),
+            device_data=capsule,
+            output=output,
+            setup_host=True,
+            session_root=root / "data/session",
         )
     if handoff is None:
         fail("The phone did not establish its authenticated Linux connection")
-    ssh, session = handoff
-    return cast("SshTransport", ssh), session
+    transport, session = handoff
+    return transport, session
 
 
-def _write_capsule(
-    directory: Path,
-    admitted: dict[str, tuple[FirmwareInput, ...]],
-) -> Path:
-    directory.mkdir(parents=True, exist_ok=True)
+def _write_capsule(directory: Path, admitted: dict[str, tuple[FirmwareInput, ...]]) -> Path:
     capsule = directory / "device-data.cpio"
-    contents = create_device_data_initramfs(
-        admitted, usb_transport="rndis" if os.name == "nt" else None
-    )
     for firmware in admitted.get("board-maps", ()):
         if firmware.destination in {"pinmap.bin", "keymap.bin"}:
             replace_file_atomically(directory / firmware.destination, firmware.contents, 0o600)
+    contents = create_device_data_initramfs(
+        admitted, usb_transport="rndis" if os.name == "nt" else None
+    )
     replace_file_atomically(capsule, contents, 0o600)
     return capsule
 
 
 def _selected_data(
-    root: Path, manifest: dict[str, Any]
-) -> tuple[Path, dict[str, tuple[FirmwareInput, ...]]] | None:
-    generation = current_device_data_generation(root / ".cache", manifest["target"])
-    if generation is None:
+    data: Path, manifest: dict[str, Any]
+) -> dict[str, tuple[FirmwareInput, ...]] | None:
+    phone = data / "phone"
+    if not phone.exists():
         return None
-    declarations = manifest["device_data"]["groups"]
-    admitted = capture_device_data_generation(
-        declarations, generation, path_field="source", require_all=False
+    return capture_device_data_generation(
+        manifest["device_data"]["groups"], phone, path_field="source", require_all=True
     )
-    if set(admitted) != set(declarations):
-        return None
-    return generation, admitted
 
 
-def _prepare_cache(root: Path) -> Path:
-    """Keep full phone backups and prepared data private on either host."""
-    cache = root / ".cache"
-    created = not cache.exists()
-    cache.mkdir(mode=0o700, exist_ok=True)
-    if os.name == "nt":
-        from common.windows_host import WindowsHost  # noqa: PLC0415
+def _read_backup(
+    root: Path, runtime: dict[str, Any], manifest: dict[str, Any], data: Path, log: RunLog
+) -> Path:
+    nand = manifest["nand"]
+    if not isinstance(nand, dict) or not isinstance(nand.get("raw_device"), str):
+        fail("This archive does not declare its read-only NAND reader")
+    log.message("First run: keep the phone powered off and disconnected.")
+    with tempfile.TemporaryDirectory(prefix=".initial-boot-", dir=data) as temporary:
+        connection = _connection(root, runtime, log, capsule=_write_capsule(Path(temporary), {}))
+    log.message("Reading the complete NAND backup; keep USB connected. Ctrl+C cancels.")
+    started = time.monotonic()
+    last_update = 0.0
 
-        host = WindowsHost()
-        if created:
-            host.secure_new(cache, directory=True)
+    def progress(completed: int, total: int) -> None:
+        nonlocal last_update
+        now = time.monotonic()
+        if completed not in (0, total) and now - last_update < 1:
+            return
+        last_update = now
+        elapsed = max(now - started, 0.001)
+        mib = 1024 * 1024
+        text = (
+            f"Reading NAND: {completed / total:6.1%} "
+            f"({completed / mib:.1f}/{total / mib:.1f} MiB) "
+            f"· {completed / mib / elapsed:.2f} MiB/s"
+        )
+        if log.visible.isatty():
+            print(
+                f"\r{text}", end="\n" if completed == total else "", file=log.visible, flush=True
+            )
         else:
-            host.require_private(cache)
-    else:
-        cache.chmod(0o700)
-    return cache
+            print(text, file=log.visible, flush=True)
+        print(text, file=log.stream, flush=True)
+
+    with log.capture():
+        backup = backup_nand(
+            lambda: connection,
+            data / "nand.bin",
+            target=manifest["target"],
+            raw_device=nand["raw_device"],
+            declared_id=nand.get("id"),
+            declared_raw_page_bytes=nand.get("raw_page_bytes"),
+            progress=progress,
+        )
+    log.message(f"Backup saved: {backup}")
+    return backup
 
 
-def run_archive(root: Path, *, from_dump: Path | None = None) -> None:
-    """Keep preparation and subsequent personal-data boots as separate user actions."""
+def run_archive(
+    root: Path, log: RunLog, *, from_dump: Path | None = None, reconnect: bool = False
+) -> None:
     runtime = _archive_runtime(root)
     manifest = _device_data_manifest(root, runtime)
-    cache = _prepare_cache(root)
-    print(f"FPLinux — {runtime['identity']['target']['display_name']}", flush=True)
-    print("Internal storage is read only.", flush=True)
-    selected = _selected_data(root, manifest)
-    if from_dump is None and selected is not None:
-        generation, admitted = selected
-        print("Your phone data is ready. Starting FPLinux...", flush=True)
-        capsule = _write_capsule(generation, admitted)
-        _boot_archive(root, runtime, capsule)
-        print("FPLinux is ready on the phone. Use its screen and keys.", flush=True)
-        return
-
-    log = cache / "run.log"
-    if from_dump is None:
-        print("First run: save your phone's internal storage and prepare its data.", flush=True)
-        print("Keep the phone disconnected until the connection instructions appear.", flush=True)
-        nand = manifest["nand"]
-        if not isinstance(nand, dict) or not isinstance(nand.get("raw_device"), str):
-            fail("This archive does not declare its read-only NAND reader")
-        capsule = _write_capsule(cache / "initial-boot", {})
-        connection = _boot_archive(root, runtime, capsule)
-        print("Saving a complete backup. Keep the USB cable connected...", flush=True)
-        with log.open("a", encoding="utf-8") as output, redirect_stdout(output):
-            from_dump = backup_nand(
-                lambda: connection,
-                cache / "nand.bin",
-                target=manifest["target"],
-                raw_device=nand["raw_device"],
-                declared_id=nand.get("id"),
-                declared_raw_page_bytes=nand.get("raw_page_bytes"),
-            )
-        print("Backup saved in .cache/nand.bin.", flush=True)
-
-    print("Preparing your phone data...", flush=True)
-    with log.open("a", encoding="utf-8") as output, redirect_stdout(output):
-        generation = prepare_portable_device_data(from_dump=from_dump)
-        admitted = capture_device_data_generation(
-            manifest["device_data"]["groups"],
-            generation,
-            path_field="source",
-            require_all=True,
-        )
-        _write_capsule(generation, admitted)
-    print("Your phone data is ready.", flush=True)
-    print(
-        "Disconnect USB. If the phone stays on, briefly remove and reinsert its battery.",
-        flush=True,
-    )
-    print("Run this same script again with the phone powered off.", flush=True)
+    data = _private_directory(root / "data")
+    log.message(f"FPLinux — {runtime['identity']['target']['display_name']}")
+    log.message("Internal storage is read only. Ctrl+C cancels the current operation.")
+    if reconnect:
+        log.message("Connecting to the running phone...")
+        transport, session = _connection(root, runtime, log)
+    else:
+        selected = _selected_data(data, manifest)
+        if from_dump is not None or selected is None:
+            backup = from_dump or data / "nand.bin"
+            if from_dump is None and not backup.exists():
+                backup = _read_backup(root, runtime, manifest, data, log)
+            log.message("Preparing your phone data...")
+            with log.capture():
+                phone = prepare_portable_device_data(from_dump=backup, destination=data / "phone")
+                admitted = capture_device_data_generation(
+                    manifest["device_data"]["groups"], phone, path_field="source", require_all=True
+                )
+                _write_capsule(phone, admitted)
+            log.message("Your phone data is ready in data/phone.")
+            log.message("Disconnect USB. If the phone stays on, remove and reinsert its battery.")
+            log.message("Run the same script again with the phone powered off.")
+            return
+        log.message("Starting FPLinux with your saved phone data...")
+        capsule = _write_capsule(data / "phone", selected)
+        transport, session = _connection(root, runtime, log, capsule=capsule)
+    log.message("Opening SSH. Type exit or press Ctrl+D to close the terminal.")
+    # Interactive terminal contents and commands are not copied into the launch log.
+    status = transport.open_shell(session) if os.name == "nt" else transport.run_shell(session)
+    if status:
+        fail(f"SSH exited with status {status}")
+    log.message("SSH terminal closed. Use SSH to reconnect while the phone remains on.")
 
 
 def main() -> None:
-    """Expose a fixed-phone entry point and optional existing-backup preparation."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--from-dump",
-        type=Path,
-        metavar="PATH",
-        help="prepare this phone's data from an existing complete NAND backup",
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument("--ssh", action="store_true", help="open SSH to the already running phone")
+    action.add_argument(
+        "--from-dump", type=Path, metavar="PATH", help="prepare from your saved NAND backup"
     )
     options = parser.parse_args()
+    log: RunLog | None = None
     try:
-        run_archive(ROOT, from_dump=options.from_dump)
+        print("Preparing FPLinux...", flush=True)
+        log = RunLog(ROOT)
+        log.message(f"Log: {log.path}")
+        run_archive(ROOT, log, from_dump=options.from_dump, reconnect=options.ssh)
+    except KeyboardInterrupt:
+        if log is not None:
+            log.message("Cancelled. Cancelling does not power the phone off.")
+        raise SystemExit(130) from None
     except (OSError, ValueError, SystemExit, subprocess.TimeoutExpired) as error:
-        log = ROOT / ".cache/run.log"
-        log.parent.mkdir(exist_ok=True)
-        with log.open("a", encoding="utf-8") as output:
-            traceback.print_exception(error, file=output)
+        if isinstance(error, SystemExit) and error.code in (129, 130, 143):
+            if log is not None:
+                log.message("Cancelled. Cancelling does not power the phone off.")
+            raise
+        if log is not None:
+            traceback.print_exception(error, file=log.stream)
         detail = (
             f"Computer connection setup timed out after {error.timeout:g} seconds."
             if isinstance(error, subprocess.TimeoutExpired)
-            else str(error).removeprefix("FPLinux: ")
+            else str(error)
         )
-        print(f"FPLinux: {detail}\nSee .cache/run.log for details.", file=sys.stderr, flush=True)
+        for prefix in ("FPLinux: ", "fplinux: ", "fplinux run: ", "fplinux ssh: "):
+            detail = detail.removeprefix(prefix)
+        print(f"FPLinux: {detail}", file=sys.stderr, flush=True)
+        if log is not None:
+            print(f"See {log.path} for details.", file=sys.stderr, flush=True)
         raise SystemExit(1) from None
+    finally:
+        if log is not None:
+            log.close()
 
 
 if __name__ == "__main__":

@@ -51,19 +51,13 @@ def test_offline_export_tracks_site_inputs_and_ignores_unrelated_changes(
     assert package_docs.offline_documentation() == revised
 
 
-@pytest.mark.parametrize(
-    ("autonomous", "host"), [(False, "linux"), (True, "linux"), (True, "windows10")]
-)
-def test_host_zip_contains_current_docs_without_changing_phone_qualification(
+def test_ordinary_linux_zip_contains_current_docs_without_changing_phone_qualification(
     archive_inputs: ArchiveInputs,  # noqa: F811 -- pytest injects the imported fixture.
     capsys: pytest.CaptureFixture[str],
-    *,
-    autonomous: bool,
-    host: str,
 ) -> None:
     """Synthetic builds keep their phone receipt when only generated docs change."""
     inputs = archive_inputs
-    package.package_target(inputs.target, autonomous=autonomous, host=host, candidate=True)
+    package.package_target(inputs.target, candidate=True)
     first_output = capsys.readouterr().out
     phone_digest = next(
         line.removeprefix("Phone-test payload SHA256: ")
@@ -75,14 +69,14 @@ def test_host_zip_contains_current_docs_without_changing_phone_qualification(
         f'[verified]\n{inputs.target} = "{phone_digest}"\n', encoding="utf-8"
     )
     expected = write_offline_export(inputs.root, text="Updated archive documentation")
-    package.package_target(inputs.target, autonomous=autonomous, host=host, candidate=True)
+    package.package_target(inputs.target, candidate=True)
     candidates = list((inputs.root / ".cache/out/candidates").glob("*.zip"))
     assert len(candidates) == 2
     assert (
         next(path for path in candidates if path != original).read_bytes() != original.read_bytes()
     )
     capsys.readouterr()
-    package.package_target(inputs.target, autonomous=autonomous, host=host)
+    package.package_target(inputs.target)
     assert f"Phone-test payload SHA256: {phone_digest}\n" in capsys.readouterr().out
     current = next((inputs.root / ".cache/out/releases").glob("*.zip"))
     assert current.name != original.name

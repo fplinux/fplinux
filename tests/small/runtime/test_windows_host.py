@@ -22,14 +22,17 @@ def test_archive_validation_uses_selected_runtime_and_separate_native_tools(
 ) -> None:
     bundle = validate_archive(archive_files(tmp_path))
     assert bundle.runtime["target"] == "demo"
-    assert bundle.runtime["host_tools"] == {"loader": "host/loader"}
+    assert bundle.runtime["host_tools"] == {
+        "loader": "tools/spd_dump.exe",
+        "bridge": "tools/libc_server.exe",
+    }
     assert bundle.tools["loader"] == tmp_path / "tools/spd_dump.exe"
 
 
 def test_changed_native_tool_is_rejected_before_windows_discovery(tmp_path: Path) -> None:
     root = archive_files(tmp_path)
-    (root / "tools/spd_dump.exe").write_bytes(b"different tool\n")
-    with pytest.raises(SystemExit, match=r"Windows file checksum differs: tools/spd_dump.exe"):
+    (root / "tools/openssh/ssh.exe").write_bytes(b"different tool\n")
+    with pytest.raises(SystemExit, match=r"Windows file checksum differs: tools/openssh/ssh.exe"):
         validate_archive(root)
 
 

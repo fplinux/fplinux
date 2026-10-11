@@ -27,6 +27,13 @@ sha256 = "91f42d6571dd8d92faedd1341134ce5abca0c5d0b4b352814186d33f2b11272e"
 name = "libedit-20260508-3.1.tar.gz"
 licenses = ["libedit-20260508-3.1/COPYING"]
 
+[libusb]
+version = "1.0.30-r0"
+url = "https://github.com/libusb/libusb/releases/download/v1.0.30/libusb-1.0.30.tar.bz2"
+sha256 = "fea36f34f9156400209595e300840767ab1a385ede1dc7ee893015aea9c6dbaf"
+name = "libusb-1.0.30.tar.bz2"
+licenses = ["libusb-1.0.30/COPYING"]
+
 [mpdecimal]
 version = "4.0.1-r0"
 url = "https://www.bytereef.org/software/mpdecimal/releases/mpdecimal-4.0.1.tar.gz"

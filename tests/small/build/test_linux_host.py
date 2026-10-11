@@ -62,17 +62,17 @@ def test_plain_standard_library_sources_need_no_elf_inspection(tmp_path: Path) -
         assert verify_linux_dependencies({"runtime/lib/python3.14/module.py": module}) == {}
 
 
-def test_sftp_preflight_finds_bundled_launcher_without_system_openssh(
+def test_ssh_preflight_finds_bundled_launcher_without_system_openssh(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     package = tmp_path / "extracted archive"
     _write_launchers(package)
     tools = package / "tools/linux"
     monkeypatch.setenv("PATH", str(tools))
-    assert _require_tool("sftp") == str(tools / "sftp")
+    assert _require_tool("ssh") == str(tools / "ssh")
 
 
-def test_sftp_launcher_selects_the_sibling_ssh_client(tmp_path: Path) -> None:
+def test_ssh_launcher_selects_the_relocated_runtime_with_literal_arguments(tmp_path: Path) -> None:
     """Replace the external loader with an argument recorder, without connecting to a peer."""
     package = tmp_path / "extracted archive"
     _write_launchers(package)
@@ -83,7 +83,7 @@ def test_sftp_launcher_selects_the_sibling_ssh_client(tmp_path: Path) -> None:
     loader.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n', encoding="utf-8")
     loader.chmod(0o755)
     result = subprocess.run(
-        [str(package / "tools/linux/sftp"), "-h"],
+        [str(package / "tools/linux/ssh"), "-V"],
         cwd=tmp_path,
         env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
         capture_output=True,
@@ -93,8 +93,6 @@ def test_sftp_launcher_selects_the_sibling_ssh_client(tmp_path: Path) -> None:
     assert result.stdout.splitlines() == [
         "--library-path",
         str(library),
-        str(runtime / "bin/sftp"),
-        "-S",
-        str(package / "tools/linux/ssh"),
-        "-h",
+        str(runtime / "bin/ssh"),
+        "-V",
     ]
