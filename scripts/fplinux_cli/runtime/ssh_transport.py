@@ -891,15 +891,16 @@ def _ssh_option_values(
 
 
 def _ssh_options(session: dict[str, Any], *, connect_timeout: int = 5) -> list[str]:
-    return [
-        "-F",
-        "/dev/null",
-        *(
-            option
-            for name, value in _ssh_option_values(session, connect_timeout=connect_timeout)
-            for option in ("-o", f"{name}={value}")
-        ),
-    ]
+    """Quote session paths for OpenSSH's own option parser."""
+    arguments = ["-F", "/dev/null"]
+    for name, value in _ssh_option_values(session, connect_timeout=connect_timeout):
+        rendered = value
+        if name in {"IdentityFile", "UserKnownHostsFile"} or (
+            name == "ControlPath" and value != "none"
+        ):
+            rendered = _ssh_config_value(value)
+        arguments.extend(("-o", f"{name}={rendered}"))
+    return arguments
 
 
 def _ssh_config_value(value: str) -> str:

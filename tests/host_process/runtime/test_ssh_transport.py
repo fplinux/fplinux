@@ -153,7 +153,6 @@ class SshTransportFakeToolTests:
             "ClearAllForwardings=yes",
             "ProxyCommand=none",
             f"BindAddress={state['host_address']}",
-            f"IdentityFile={state['private_key']}",
         } <= arguments
 
 

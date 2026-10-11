@@ -29,6 +29,52 @@ _SSH_CONFIG_TIMEOUT_SECONDS = 10
 _IDLE_EXPIRY_TIMEOUT_SECONDS = 5
 
 
+@pytest.mark.parametrize(
+    "path_component",
+    ["plain", "session with spaces", 'session"with"quotes', r"session\with\backslashes"],
+    ids=["plain", "spaces", "quotes", "backslashes"],
+)
+@pytest.mark.parametrize("archive_session", [False, True], ids=["checkout", "archive"])
+def test_openssh_preserves_session_paths_in_direct_arguments(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    path_component: str,
+    *,
+    archive_session: bool,
+) -> None:
+    """The real client parses literal session paths without opening an SSH connection."""
+    root = tmp_path / path_component
+    root.mkdir(mode=0o700)
+    session = create_ready_session(root)
+    if archive_session:
+        session["runtime_root"] = str(root)
+    else:
+        monkeypatch.setattr(ssh_transport, "_runtime_root", lambda: root)
+    arguments = ssh_transport._ssh_argv(session)  # noqa: SLF001
+    arguments.insert(1, "-G")
+
+    parsed = run_process(
+        arguments,
+        name="OpenSSH direct session argument parse",
+        timeout=_SSH_CONFIG_TIMEOUT_SECONDS,
+    )
+
+    assert parsed.returncode == 0, parsed.stderr
+    effective = dict(line.split(maxsplit=1) for line in parsed.stdout.splitlines())
+    assert effective["identityfile"] == session["private_key"]
+    assert effective["userknownhostsfile"] == session["known_hosts"]
+    assert effective["identityagent"] == "none"
+    assert "proxycommand" not in effective
+    if archive_session:
+        assert "controlpath" not in effective
+        assert effective["controlmaster"] == "false"
+        assert effective["controlpersist"] == "no"
+    else:
+        assert effective["controlpath"] == str(Path(session["private_key"]).parent / "mux")
+        assert effective["controlmaster"] == "auto"
+        assert effective["controlpersist"] == "60"
+
+
 def test_archive_preparation_uses_its_private_directory_without_xdg_or_sftp(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
