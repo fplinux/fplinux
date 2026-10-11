@@ -190,15 +190,18 @@ def _handsfree_speaker_fields(mode: bytes) -> bytes:
     return struct.pack("<H9B", pa_word, *digital_gain)
 
 
-def _headfree_combined_fields(mode: bytes) -> bytes:
-    """Admit headphone-and-speaker Headfree playback and pack its PA, PGA and gains.
+def _headfree_playback_fields(mode: bytes, *, headphones_only: bool) -> bytes:
+    """Pack the admitted Headfree route's PA, headphone PGA and digital gains.
 
-    The analog word of every level holds the headphone PGA level in bits 7:4
-    and the speaker PA gain level in bits 3:0. Only a fixed PGA level and the
-    zero PA gain setting are admitted, matching the Headset and Handsfree data.
+    Combined playback encodes the headphone PGA in bits 7:4 and the PA gain
+    in bits 3:0. Headphone-only playback carries the raw headphone PGA.
     """
     play_dev_set = struct.unpack_from("<H", mode, _MODE_PLAY_DEV_SET_OFFSET)[0]
-    if play_dev_set & _PLAY_ROUTE_MASK != _PLAY_HEADPHONE_AND_SPEAKER:
+    expected_route = _PLAY_HEADPHONES_ONLY if headphones_only else _PLAY_HEADPHONE_AND_SPEAKER
+    if play_dev_set & _PLAY_ROUTE_MASK != expected_route:
+        if headphones_only:
+            message = "audio-profile Headfree does not select headphone-only playback"
+            raise ValueError(message)
         message = "audio-profile Headfree does not select headphone-and-speaker playback"
         raise ValueError(message)
     digital_gain, analog_levels = _app0_volume_levels(mode, "Headfree")
@@ -206,13 +209,13 @@ def _headfree_combined_fields(mode: bytes) -> bytes:
         message = "audio-profile Headfree analog levels 1..9 differ"
         raise ValueError(message)
     analog_level = analog_levels[0]
-    if analog_level >> 8:
+    if not headphones_only and analog_level >> 8:
         message = "audio-profile Headfree analog level sets bits above the headphone PGA"
         raise ValueError(message)
-    if analog_level & 0x0F:
+    if not headphones_only and analog_level & 0x0F:
         message = "audio-profile Headfree PA gain is not the supported zero setting"
         raise ValueError(message)
-    headphone_pga = analog_level >> 4
+    headphone_pga = analog_level if headphones_only else analog_level >> 4
     if not 2 <= headphone_pga <= 7:
         message = "audio-profile Headfree headphone PGA level is outside supported range 2..7"
         raise ValueError(message)
@@ -623,6 +626,7 @@ def prepare_headset_gain_profile(  # noqa: PLR0913 -- target identity and topolo
     machine_compatible: bytes,
     speaker_vibration: bool = False,
     speaker_from_headphones: bool = False,
+    headfree_headphones_only: bool = False,
 ) -> PreparedGroup:
     """Normalize fitted playback gains and processing into the compact kernel input.
 
@@ -632,6 +636,9 @@ def prepare_headset_gain_profile(  # noqa: PLR0913 -- target identity and topolo
     """
     if speaker_from_headphones and speaker_vibration:
         message = "audio-profile headphone-fed speaker cannot use the integrated-PA vibrate tone"
+        raise ValueError(message)
+    if speaker_from_headphones and headfree_headphones_only:
+        message = "audio-profile headphone-fed speaker cannot use headphone-only Headfree policy"
         raise ValueError(message)
     mode_count_record = downloaded[425]
     protected_mode_count = protected[425]
@@ -692,7 +699,7 @@ def prepare_headset_gain_profile(  # noqa: PLR0913 -- target identity and topolo
         profile += _headphone_fed_speaker_fields(headset, handsfree, headfree, headphone_pga[0])
     else:
         profile += _handsfree_speaker_fields(handsfree)
-        profile += _headfree_combined_fields(headfree)
+        profile += _headfree_playback_fields(headfree, headphones_only=headfree_headphones_only)
     for name, mode in (("Headset", headset), ("Handsfree", handsfree), ("Headfree", headfree)):
         profile += _playback_processing_fields(mode, name, eq_sets, protected_eq_sets)
     if speaker_vibration:
