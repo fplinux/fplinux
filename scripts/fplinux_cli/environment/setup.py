@@ -29,6 +29,7 @@ from .image_store import (
     temporary_image_reference,
 )
 from .images import (
+    CONTAINER_CONTEXT_INPUTS,
     container_base_image_reference,
     container_image_build_arguments,
     container_image_recipe_digest,
@@ -98,16 +99,7 @@ def _build_base_image(
 
 def _stage_container_context(context: Path, *, offline: bool) -> None:
     """Stage the recipe and exact saved inputs without copying unrelated cache files."""
-    for relative in (
-        ".kernignore",
-        "Containerfile",
-        "environment.lock.toml",
-        "scripts/fplinux_cli/environment/image_content.py",
-        "scripts/fplinux_cli/environment/install_wheels.py",
-        "package.json",
-        "package-lock.json",
-        "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",
-    ):
+    for relative in CONTAINER_CONTEXT_INPUTS:
         source = ROOT / relative
         if source.is_symlink() or not source.is_file():
             fail(f"container image input is missing or invalid: {source}")

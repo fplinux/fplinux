@@ -10,8 +10,11 @@ from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
+from fplinux_cli.cli.dependencies import restore_dependencies
 from fplinux_cli.dependencies.site_inputs import site_dependency_selection
-from fplinux_cli.dependencies.snapshots import preserve_inputs, publish_snapshot, restore_inputs
+from fplinux_cli.dependencies.snapshots import preserve_inputs, publish_snapshot
+
+from tests.small.dependencies.snapshot_fixtures import selected_checkout
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -161,7 +164,8 @@ def test_snapshot_round_trip_restores_distinct_archives_with_the_same_filename(
     (originals / "one.tgz").write_bytes(first)
     (originals / "two.tgz").write_bytes(second)
     snapshot = tmp_path / "snapshot"
-    restored = tmp_path / "restored-cache"
+    restored_root = tmp_path / "restored-checkout"
+    restored = restored_root / ".cache"
     with patch("urllib.request.urlopen", side_effect=AssertionError("unexpected network")):
         manifest = preserve_inputs(
             inputs,
@@ -172,7 +176,8 @@ def test_snapshot_round_trip_restores_distinct_archives_with_the_same_filename(
             sources=[originals],
         )
         publish_snapshot(snapshot, manifest)
-        restore_inputs(snapshot, inputs, context, cache=restored)
+        with selected_checkout(restored_root, inputs, context):
+            restore_dependencies(snapshot, inputs_only=True)
     assert len({item.destination for item in inputs}) == 2
     by_key = {item.key: restored / item.destination for item in inputs}
     assert by_key["npm:site:node_modules/first"].read_bytes() == b"first registry archive\n"
@@ -209,7 +214,10 @@ def test_changed_registry_integrity_rejects_a_saved_snapshot(
     package["integrity"] = "sha512-" + base64.b64encode(bytes.fromhex("33" * 64)).decode()
     lock.write_text(json.dumps({"packages": {"": {}, "node_modules/example": package}}))
     updated_inputs, updated_context = site_dependency_selection(site_checkout)
-    restored = tmp_path / "restored-cache"
-    with pytest.raises(SystemExit, match="does not match this checkout"):
-        restore_inputs(snapshot, updated_inputs, updated_context, cache=restored)
-    assert not restored.exists()
+    restored_root = tmp_path / "restored-checkout"
+    with (
+        selected_checkout(restored_root, updated_inputs, updated_context),
+        pytest.raises(SystemExit, match="does not match this checkout"),
+    ):
+        restore_dependencies(snapshot, inputs_only=True)
+    assert not (restored_root / ".cache/downloads").exists()

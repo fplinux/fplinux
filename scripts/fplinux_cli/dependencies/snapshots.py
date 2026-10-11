@@ -317,20 +317,6 @@ def require_checkout(
         fail("dependency snapshot does not match this checkout's declared external inputs")
 
 
-def restore_inputs(
-    directory: Path,
-    inputs: Sequence[DependencyInput],
-    context: dict[str, Any],
-    *,
-    cache: Path,
-) -> dict[str, Any]:
-    """Restore declared cache inputs after validating the complete snapshot."""
-    manifest = read_snapshot(directory)
-    require_checkout(manifest, inputs, context)
-    restore_manifest_inputs(directory, manifest, cache)
-    return manifest
-
-
 def restore_manifest_inputs(directory: Path, manifest: dict[str, Any], cache: Path) -> None:
     """Copy inputs only after their manifest bytes and checkout selection were checked."""
     for record in manifest["inputs"]:

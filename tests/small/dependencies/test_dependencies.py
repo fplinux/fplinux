@@ -12,13 +12,15 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
+from fplinux_cli.cli.dependencies import restore_dependencies
 from fplinux_cli.dependencies.inputs import DependencyInput
 from fplinux_cli.dependencies.snapshots import (
     preserve_inputs,
     publish_snapshot,
     read_snapshot,
-    restore_inputs,
 )
+
+from tests.small.dependencies.snapshot_fixtures import selected_checkout
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -60,19 +62,25 @@ class DependencySnapshotTests:
         publish_snapshot(self.snapshot, manifest)
         return manifest
 
+    def restore(
+        self, inputs: list[DependencyInput], context: dict[str, object], cache: Path
+    ) -> None:
+        """Run input restoration with controlled declarations in a temporary checkout."""
+        with selected_checkout(cache.parent, inputs, context):
+            restore_dependencies(self.snapshot, inputs_only=True)
+
     def test_round_trip_restores_bytes_and_keeps_unrelated_files(self) -> None:
         """A fresh cache receives only inputs that its matching declaration selects."""
         context: dict[str, object] = {"providers": ["example=1"]}
-        expected = self.preserve([declared_input()], context)
+        self.preserve([declared_input()], context)
         new_cache = self.root / "new-checkout/.cache"
         unrelated = new_cache / "other/keep"
         unrelated.parent.mkdir(parents=True)
         unrelated.write_bytes(b"user data")
         with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")):
-            restored = restore_inputs(self.snapshot, [declared_input()], context, cache=new_cache)
+            self.restore([declared_input()], context, new_cache)
         assert ((new_cache / "downloads/example.tar").read_bytes()) == (b"abc")
         assert (unrelated.read_bytes()) == (b"user data")
-        assert (restored["snapshot"]) == (expected["snapshot"])
         assert not ((new_cache / "host-image-state.json").exists())
 
     def test_identical_bytes_use_one_object_for_multiple_declared_consumers(self) -> None:
@@ -83,11 +91,10 @@ class DependencySnapshotTests:
         objects = list((self.snapshot / "objects/sha256").iterdir())
         assert ([path.name for path in objects]) == ([_ABC_SHA256])
         new_cache = self.root / "restored/.cache"
-        restore_inputs(
-            self.snapshot,
+        self.restore(
             [declared_input(), declared_input("another", "downloads/another.tar")],
             {},
-            cache=new_cache,
+            new_cache,
         )
         assert ((new_cache / "downloads/another.tar").read_bytes()) == (b"abc")
 
@@ -122,7 +129,7 @@ class DependencySnapshotTests:
         inputs = [declared_input(), declared_input("another-consumer")]
         self.preserve(inputs, {})
         new_cache = self.root / "new/.cache"
-        restore_inputs(self.snapshot, inputs, {}, cache=new_cache)
+        self.restore(inputs, {}, new_cache)
         assert ((new_cache / "downloads/example.tar").read_bytes()) == (b"abc")
         assert (len(read_snapshot(self.snapshot)["inputs"])) == (2)
 
@@ -162,10 +169,8 @@ class DependencySnapshotTests:
         self.preserve([declared_input()], {"providers": ["example=1"]})
         new_cache = self.root / "new/.cache"
         with pytest.raises(SystemExit, match="does not match"):
-            restore_inputs(
-                self.snapshot, [declared_input()], {"providers": ["example=2"]}, cache=new_cache
-            )
-        assert not (new_cache.exists())
+            self.restore([declared_input()], {"providers": ["example=2"]}, new_cache)
+        assert not (new_cache / "downloads").exists()
 
     def test_object_corruption_is_reported_before_any_restored_file(self) -> None:
         """Verification detects storage damage before restoration publishes cache inputs."""
@@ -173,8 +178,8 @@ class DependencySnapshotTests:
         (self.snapshot / "objects/sha256" / _ABC_SHA256).write_bytes(b"bad")
         new_cache = self.root / "new/.cache"
         with pytest.raises(SystemExit, match="object is missing or mismatched"):
-            restore_inputs(self.snapshot, [declared_input()], {}, cache=new_cache)
-        assert not (new_cache.exists())
+            self.restore([declared_input()], {}, new_cache)
+        assert not (new_cache / "downloads").exists()
 
     def test_conflicting_cache_file_is_preserved_before_any_restoration(self) -> None:
         """Restoration leaves an existing file with different bytes available for inspection."""
@@ -184,7 +189,7 @@ class DependencySnapshotTests:
         existing.parent.mkdir(parents=True)
         existing.write_bytes(b"keep this original")
         with pytest.raises(SystemExit, match="contains different bytes"):
-            restore_inputs(self.snapshot, [declared_input()], {}, cache=new_cache)
+            self.restore([declared_input()], {}, new_cache)
         assert (existing.read_bytes()) == (b"keep this original")
 
     def test_snapshot_cannot_be_created_in_disposable_working_cache(self) -> None:
@@ -269,8 +274,8 @@ class DependencySnapshotTests:
         (self.snapshot / "objects/sha256" / digest).unlink()
         new_cache = self.root / "restored/.cache"
         with pytest.raises(SystemExit, match="metadata object is missing"):
-            restore_inputs(self.snapshot, [declared_input()], {}, cache=new_cache)
-        assert not (new_cache.exists())
+            self.restore([declared_input()], {}, new_cache)
+        assert not (new_cache / "downloads").exists()
 
     def test_image_metadata_must_match_the_declared_original_content(self) -> None:
         """Verified storage bytes alone do not authorize applying another image's owners."""

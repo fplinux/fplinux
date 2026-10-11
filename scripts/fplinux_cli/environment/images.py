@@ -16,6 +16,18 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+CONTAINER_CONTEXT_INPUTS = (
+    ".kernignore",
+    "Containerfile",
+    "scripts/fplinux_cli/environment/image_content.py",
+    "scripts/fplinux_cli/environment/install_wheels.py",
+    "package.json",
+    "package-lock.json",
+    "environment.lock.toml",
+    "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",
+)
+
+
 def load_container_lock() -> dict[str, Any]:
     """Load the pinned project-local Kern and OCI build-environment lock."""
     validate_source_policy()
@@ -135,16 +147,7 @@ def container_image_recipe_digest(lock: dict[str, Any] | None = None) -> str:
         len(argument.encode()).to_bytes(8, "big") + argument.encode() for argument in arguments
     )
     return file_recipe_digest(
-        [
-            common.ROOT / ".kernignore",
-            common.ROOT / "Containerfile",
-            common.ROOT / "scripts/fplinux_cli/environment/image_content.py",
-            common.ROOT / "scripts/fplinux_cli/environment/install_wheels.py",
-            common.ROOT / "package.json",
-            common.ROOT / "package-lock.json",
-            common.ROOT / "environment.lock.toml",
-            common.ROOT / "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",
-        ],
+        [common.ROOT / relative for relative in CONTAINER_CONTEXT_INPUTS],
         prefix=(
             b"fplinux.container-image-recipe\0"
             + encoded_arguments

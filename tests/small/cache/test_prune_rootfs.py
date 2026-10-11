@@ -94,11 +94,11 @@ class RootfsPruneTests:
 
         with (
             patch_prune_discovery("discover_targets", return_value=("first", "second")),
-            patch_prune_discovery("discover_profiles", return_value=()),
+            patch_prune_discovery("discover_profiles", return_value=("default",)),
             mock.patch.object(
                 prune_alpine,
                 "load_target",
-                side_effect=lambda target: target_configs[target],
+                side_effect=lambda target, _profile: target_configs[target],
             ),
             mock.patch.object(
                 prune_alpine,
@@ -141,7 +141,7 @@ class RootfsPruneTests:
         existing.mkdir(parents=True)
         with (
             patch_prune_discovery("discover_targets", return_value=("phone",)),
-            patch_prune_discovery("discover_profiles", return_value=()),
+            patch_prune_discovery("discover_profiles", return_value=("default",)),
             mock.patch.object(
                 prune_alpine,
                 "load_target",
@@ -202,7 +202,7 @@ class RootfsPruneTests:
 
         with (
             patch_prune_discovery("discover_targets", return_value=("phone",)),
-            patch_prune_discovery("discover_profiles", return_value=()),
+            patch_prune_discovery("discover_profiles", return_value=("default",)),
             mock.patch.object(prune_alpine, "load_target", return_value=target_config),
             mock.patch.object(prune_alpine, "load_platform", return_value={}),
             mock.patch.object(prune_alpine, "selected_packages", return_value=()),
@@ -294,7 +294,7 @@ class RootfsPruneTests:
 
         with (
             patch_prune_discovery("discover_targets", return_value=("phone",)),
-            patch_prune_discovery("discover_profiles", return_value=("host",)),
+            patch_prune_discovery("discover_profiles", return_value=("default", "host")),
             mock.patch.object(prune_alpine, "load_target", side_effect=target_config),
             mock.patch.object(prune_alpine, "load_platform", return_value={}),
             mock.patch.object(
@@ -330,7 +330,7 @@ class RootfsPruneTests:
 
         with (
             patch_prune_discovery("discover_targets", return_value=("phone",)),
-            patch_prune_discovery("discover_profiles", return_value=()),
+            patch_prune_discovery("discover_profiles", return_value=("default",)),
             mock.patch.object(
                 prune_alpine,
                 "load_target",
@@ -403,6 +403,7 @@ class RootfsPruneTests:
         bluetooth_only = recipe_for("bluetooth")
         with_audio_profile = recipe_for("bluetooth", "fm-radio", "audio-profile")
         all_recipes = {without_firmware, with_radio_firmware, bluetooth_only, with_audio_profile}
+        assert len(all_recipes) == 4
         obsolete = all_recipes - {current}
         for recipe in all_recipes:
             directory = cache / "rootfs" / recipe
@@ -411,7 +412,7 @@ class RootfsPruneTests:
 
         with (
             patch_prune_discovery("discover_targets", return_value=("phone",)),
-            patch_prune_discovery("discover_profiles", return_value=()),
+            patch_prune_discovery("discover_profiles", return_value=("default",)),
             mock.patch.object(
                 prune_alpine,
                 "load_target",
@@ -452,7 +453,7 @@ class RootfsPruneTests:
 
         with (
             patch_prune_discovery("discover_targets", return_value=("phone",)),
-            patch_prune_discovery("discover_profiles", return_value=()),
+            patch_prune_discovery("discover_profiles", return_value=("default",)),
             mock.patch.object(
                 prune_alpine,
                 "load_target",

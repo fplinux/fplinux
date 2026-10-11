@@ -172,7 +172,7 @@ class SetupLifecycleTests:
                 mock.patch.object(
                     env_setup,
                     "current_image_state",
-                    return_value=ImageState("a" * 64, "b" * 64, "b" * 64),
+                    return_value=ImageState("a" * 64, "b" * 64, "c" * 64),
                 ) as current_image,
                 mock.patch.object(image_store, "current_image_state", new=current_image),
                 mock.patch.object(env_setup, "prune_build_history"),
@@ -181,7 +181,7 @@ class SetupLifecycleTests:
                 mock.patch.object(env_setup, "install_git_hooks"),
             ):
                 state = env_setup.setup(lock=lock)
-            assert (state) == (ImageState("a" * 64, "b" * 64, "b" * 64))
+            assert (state) == (ImageState("a" * 64, "b" * 64, "c" * 64))
             assert (load_image_state(root / ".cache", "a" * 64)) == (state)
             metadata_paths = list((root / ".cache/logs/setup").glob("*/run.json"))
             assert (len(metadata_paths)) == (1)
@@ -233,7 +233,7 @@ class SetupLifecycleTests:
                 mock.patch.object(
                     env_setup,
                     "current_image_state",
-                    side_effect=(None, ImageState("a" * 64, "b" * 64, "b" * 64)),
+                    side_effect=(None, ImageState("a" * 64, "b" * 64, "c" * 64)),
                 ) as current_image,
                 mock.patch.object(image_store, "current_image_state", new=current_image),
                 mock.patch.object(env_setup, "base_image_ready", return_value=True),
@@ -243,7 +243,7 @@ class SetupLifecycleTests:
                 mock.patch.object(
                     env_setup,
                     "image_metadata",
-                    return_value=("a" * 64, "b" * 64, "b" * 64),
+                    return_value=("a" * 64, "b" * 64, "c" * 64),
                 ),
                 mock.patch.object(env_setup, "publish_staged_image"),
                 mock.patch(
@@ -293,11 +293,10 @@ class SetupLifecycleTests:
             ),
             pytest.raises(SystemExit, match="Kern image lookup timed out"),
         ):
-            image_store.image_generation("kern", "localhost/fplinux:locked")
+            image_store.current_image_state("kern", "localhost/fplinux:locked", "a" * 64)
 
-    def test_image_generation_is_read_from_the_built_image_marker(self) -> None:
-        """Use the build-published generation rather than Kern's private store layout."""
-        generation = "b" * 64
+    def test_current_image_state_keeps_the_distinct_built_image_markers(self) -> None:
+        """The live probe preserves the declared recipe, generation and checked content."""
         with (
             mock.patch.object(image_store, "kern_environment", return_value={}),
             mock.patch(
@@ -305,14 +304,16 @@ class SetupLifecycleTests:
                 return_value=subprocess.CompletedProcess(
                     ["kern", "box"],
                     0,
-                    f"{'a' * 64}\n{generation}\n{'b' * 64}\n{'b' * 64}\n",
+                    f"{'a' * 64}\n{'b' * 64}\n{'c' * 64}\n{'c' * 64}\n",
                     "",
                 ),
             ),
         ):
-            assert (image_store.image_generation("kern", "localhost/fplinux:locked")) == (
-                generation
-            )
+            state = image_store.current_image_state("kern", "localhost/fplinux:locked", "a" * 64)
+        assert state is not None
+        assert state.container_image_recipe == "a" * 64
+        assert state.image_generation == "b" * 64
+        assert state.image_content == "c" * 64
 
 
 class KernRetentionTests:

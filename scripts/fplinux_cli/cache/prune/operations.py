@@ -17,6 +17,7 @@ from .paths import managed_candidate_directory
 from .profiles import profile_cache_entries, profile_check_receipt_entries
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
 
@@ -34,10 +35,17 @@ def prune(
 def apply_prune(cache: Path) -> PruneApplyResult:
     """Delete only candidates from a fresh plan while the CLI holds its global lock."""
     plan = plan_prune(cache)
+    return _remove_candidates(cache, plan.candidates)
+
+
+def _remove_candidates(cache: Path, entries: Sequence[InventoryEntry]) -> PruneApplyResult:
+    """Remove selected managed directories and retain their planned size totals."""
     removed: list[str] = []
     logical = 0
     allocated = 0
-    for entry in plan.candidates:
+    for entry in entries:
+        if entry.action != "candidate":
+            continue
         destination = managed_candidate_directory(cache, entry.path)
         shutil.rmtree(destination)
         removed.append(entry.path)
@@ -48,26 +56,12 @@ def apply_prune(cache: Path) -> PruneApplyResult:
 
 def discard_obsolete_rootfs(cache: Path) -> tuple[str, ...]:
     """Discard only rootfs generations superseded by every current target/profile recipe."""
-    removed: list[str] = []
-    for entry in rootfs_entries(cache):
-        if entry.action != "candidate":
-            continue
-        destination = managed_candidate_directory(cache, entry.path)
-        shutil.rmtree(destination)
-        removed.append(entry.path)
-    return tuple(removed)
+    return _remove_candidates(cache, rootfs_entries(cache)).removed
 
 
 def discard_obsolete_apks(cache: Path) -> tuple[str, ...]:
     """Discard only aport cache slots absent from every current target/profile closure."""
-    removed: list[str] = []
-    for entry in apk_entries(cache):
-        if entry.action != "candidate":
-            continue
-        destination = managed_candidate_directory(cache, entry.path)
-        shutil.rmtree(destination)
-        removed.append(entry.path)
-    return tuple(removed)
+    return _remove_candidates(cache, apk_entries(cache)).removed
 
 
 def discard_superseded_profile_logs(
@@ -91,14 +85,7 @@ def discard_superseded_profile_logs(
     else:
         message = "invalid managed profile log group"
         raise PruneSafetyError(message)
-    removed: list[str] = []
-    for entry in log_entries(root, label=label, identity=identity):
-        if entry.action != "candidate":
-            continue
-        destination = managed_candidate_directory(cache, entry.path)
-        shutil.rmtree(destination)
-        removed.append(entry.path)
-    return tuple(removed)
+    return _remove_candidates(cache, log_entries(root, label=label, identity=identity)).removed
 
 
 def plan_prune(cache: Path) -> PrunePlan:

@@ -232,12 +232,6 @@ def image_metadata(kern: str, image: str) -> tuple[str, str, str] | None:
     return recipe, generation, content
 
 
-def image_generation(kern: str, image: str) -> str | None:
-    """Return the exact build generation embedded in one project-built Kern image."""
-    metadata = image_metadata(kern, image)
-    return None if metadata is None else metadata[1]
-
-
 def current_image_state(
     kern: str,
     image: str,

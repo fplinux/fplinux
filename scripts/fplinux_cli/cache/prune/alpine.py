@@ -41,10 +41,8 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
         )
         recipes: set[str] = set()
         for target in discover_targets():
-            for profile in (None, *discover_profiles(target)):
-                target_config = (
-                    load_target(target) if profile is None else load_target(target, profile)
-                )
+            for profile in discover_profiles(target):
+                target_config = load_target(target, profile)
                 device_data_groups = target_config["device_data"]["groups"]
                 device_data = firmware_inputs.capture_external_device_data(
                     target,
@@ -128,10 +126,8 @@ def _current_apk_packages() -> frozenset[str] | None:
     try:
         packages: set[str] = set()
         for target in discover_targets():
-            for profile in (None, *discover_profiles(target)):
-                target_config = (
-                    load_target(target) if profile is None else load_target(target, profile)
-                )
+            for profile in discover_profiles(target):
+                target_config = load_target(target, profile)
                 platform_config = load_platform(target_config["platform"])
                 rootfs_packages = selected_packages(
                     platform_config,

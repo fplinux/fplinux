@@ -16,11 +16,14 @@ from unittest import mock
 
 import pytest
 from fplinux_cli import common
+from fplinux_cli.cli.dependencies import restore_dependencies
 from fplinux_cli.dependencies.inputs import environment_inputs
-from fplinux_cli.dependencies.snapshots import preserve_inputs, publish_snapshot, restore_inputs
+from fplinux_cli.dependencies.snapshots import preserve_inputs, publish_snapshot
 from fplinux_cli.environment import downloads, images, kern
 from fplinux_cli.environment import setup as env_setup
 from fplinux_cli.environment.install_wheels import install_wheels
+
+from tests.small.dependencies.snapshot_fixtures import selected_checkout
 
 
 def _environment_checkout(root: Path) -> None:
@@ -202,9 +205,10 @@ class OfflineEnvironmentContextTests:
             context.mkdir()
             with (
                 mock.patch.object(env_setup, "ROOT", restored_root),
+                selected_checkout(restored_root, inputs, {}),
                 mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")),
             ):
-                restore_inputs(snapshot, inputs, {}, cache=restored_root / ".cache")
+                restore_dependencies(snapshot, inputs_only=True)
                 env_setup._stage_container_context(context, offline=True)  # noqa: SLF001
             staged = context / "inputs/sources/dtschema/dtschema-2026.9-py3-none-any.whl"
             assert (staged.read_bytes()) == (contents)
@@ -229,6 +233,8 @@ class OfflineEnvironmentContextTests:
             root.mkdir()
             context.mkdir()
             _environment_checkout(root)
+            installer = root / "scripts/fplinux_cli/environment/install_wheels.py"
+            installer.chmod(0o755)
             with mock.patch.object(env_setup, "ROOT", root):
                 env_setup._stage_container_context(context, offline=True)  # noqa: SLF001
 
@@ -237,9 +243,10 @@ class OfflineEnvironmentContextTests:
             ).read_bytes()
             assert (
                 context / "scripts/fplinux_cli/environment/install_wheels.py"
-            ).read_bytes() == (
-                root / "scripts/fplinux_cli/environment/install_wheels.py"
-            ).read_bytes()
+            ).read_bytes() == installer.read_bytes()
+            assert (
+                context / "scripts/fplinux_cli/environment/install_wheels.py"
+            ).stat().st_mode & 0o777 == 0o755
 
             assert ((context / "inputs/sources/tool/tool.tar.gz").read_bytes()) == (
                 b"tool source\n"

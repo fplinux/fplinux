@@ -67,7 +67,7 @@ class PackagePruneTests:
 
         with (
             patch_prune_discovery("discover_targets", return_value=("phone",)),
-            patch_prune_discovery("discover_profiles", return_value=("host",)),
+            patch_prune_discovery("discover_profiles", return_value=("default", "host")),
             mock.patch.object(prune_alpine, "load_target", side_effect=load_target),
             mock.patch.object(prune_alpine, "load_platform", return_value={}),
             mock.patch.object(
@@ -125,7 +125,7 @@ class PackagePruneTests:
         # Stub package declarations; execute real pruning on the isolated cache.
         with (
             patch_prune_discovery("discover_targets", return_value=("phone",)),
-            patch_prune_discovery("discover_profiles", return_value=()),
+            patch_prune_discovery("discover_profiles", return_value=("default",)),
             mock.patch.object(prune_alpine, "load_target", return_value={"platform": "platform"}),
             mock.patch.object(prune_alpine, "load_platform", return_value={}),
             mock.patch.object(
