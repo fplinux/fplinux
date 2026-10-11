@@ -8,25 +8,22 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from fplinux_cli.common import ROOT, fail, read_json_object, replace_file_atomically
+from fplinux_cli.common import ROOT, fail, read_json_object
 from fplinux_cli.device_data.formats import PhysicalNand
 from fplinux_cli.device_data.prepare import (
     BOARD_MAPS_GROUP,
     _board_maps_extractor,
-    _create_staging_generation,
     _extract_groups,
     _nand_main_decoder,
     _read_dump,
-    _require_directory,
     dump_page_bytes,
     materialize_device_data,
-    publish_device_data_generation,
 )
 from fplinux_cli.manifests.values import basename_value, exact_table
 from fplinux_cli.runtime.nand_backup import read_backup_geometry
 
 
-def prepare_portable_device_data(*, from_dump: Path, destination: Path | None = None) -> Path:
+def prepare_portable_device_data(*, from_dump: Path, destination: Path) -> Path:
     """Extract and select all groups for the single target recorded in the archive."""
     manifest = exact_table(
         read_json_object(ROOT / "device-data-manifest.json"),
@@ -40,6 +37,8 @@ def prepare_portable_device_data(*, from_dump: Path, destination: Path | None = 
     if not declarations:
         fail(f"device-data preparation is not supported for target {target}")
 
+    if destination.exists() or destination.is_symlink():
+        fail(f"prepared phone data already exists: {destination}")
     raw = _read_dump(from_dump)
     nand_declaration = manifest["nand"]
     page_bytes = dump_page_bytes(target, nand_declaration, read_backup_geometry(from_dump, raw))
@@ -58,19 +57,9 @@ def prepare_portable_device_data(*, from_dump: Path, destination: Path | None = 
         else None
     )
 
-    cache = ROOT / ".cache"
-    if destination is None:
-        _require_directory(cache, "device-data cache directory")
-        staging = _create_staging_generation(cache, target)
-    else:
-        if destination.exists() or destination.is_symlink():
-            fail(f"prepared phone data already exists: {destination}")
-        staging = Path(tempfile.mkdtemp(prefix=".phone-", dir=destination.parent))
+    staging = Path(tempfile.mkdtemp(prefix=".phone-", dir=destination.parent))
     selected = False
     try:
-        if destination is None:
-            source = _require_directory(staging / "source", "device-data source directory")
-            replace_file_atomically(source / "nand.bin", raw, 0o600)
         extracted = _extract_groups(
             target,
             device_data["parser"],
@@ -78,24 +67,10 @@ def prepare_portable_device_data(*, from_dump: Path, destination: Path | None = 
             nand,
             board_maps=board_maps,
         )
-        admitted = materialize_device_data(
-            staging, extracted, declarations, retain_originals=destination is None
-        )
-        if destination is None:
-            generation = publish_device_data_generation(
-                cache,
-                target,
-                staging,
-                source_kind="saved-dump",
-                raw=raw,
-                groups=extracted,
-                admitted=admitted,
-            )
-        else:
-            staging.replace(destination)
-            generation = destination
+        materialize_device_data(staging, extracted, declarations, retain_originals=False)
+        staging.replace(destination)
         selected = True
     finally:
         if not selected and staging.exists():
             shutil.rmtree(staging)
-    return generation
+    return destination

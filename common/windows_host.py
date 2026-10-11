@@ -348,9 +348,9 @@ class WindowsHost:
             fail("Cannot protect the local session: " + result.stderr.strip()[-1000:])
         self.require_private(path)
 
-    def runtime_root(self, archive: Path) -> Path:
+    def runtime_root(self, archive: Path, *, directory: Path | None = None) -> Path:
         """Open this archive's private reconnect and temporary loading storage."""
-        root = archive / "data/session"
+        root = directory or archive / "data/session"
         if not root.exists():
             root.mkdir(parents=True)
             self.secure_new(root, directory=True)
@@ -412,8 +412,9 @@ def _prepare_session(
     bundle: WindowsBundle,
     *,
     events: Callable[[str], None] | None = None,
+    session_root: Path | None = None,
 ) -> dict[str, Any]:
-    root = host.runtime_root(bundle.root)
+    root = host.runtime_root(bundle.root, directory=session_root)
     if events is not None:
         events("network-preparation")
     occupied = {
@@ -852,8 +853,8 @@ class WindowsTransport:
             self.host.require_private(path)
         return value
 
-    def load_current_session(self, target: str) -> dict[str, Any]:
-        """Reconnect with the saved key only after finding this archive's exact live phone."""
+    def load_live_session(self, target: str) -> dict[str, Any] | None:
+        """Distinguish an absent saved phone from a present endpoint that cannot authenticate."""
         if target != self.bundle.runtime["target"]:
             fail("The requested connection belongs to another target")
         root = self.host.runtime_root(self.bundle.root)
@@ -861,40 +862,39 @@ class WindowsTransport:
         for state_path in root.glob("*/session.json"):
             try:
                 value = json.loads(state_path.read_text(encoding="utf-8"))
-                session = self._validate_saved_session(value, state_path.parent)
-            except OSError, ValueError, SystemExit:
-                continue
-            candidates.append(session)
-        deadline = time.monotonic() + self.bundle.runtime["usb"]["linux_gadget"]["wait_seconds"]
-        while candidates and time.monotonic() < deadline:
-            live: list[dict[str, Any]] = []
-            discovery_complete = True
-            for session in candidates:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    discovery_complete = False
-                    break
-                try:
-                    snapshot = self.host.network_snapshot(session, timeout=min(20, remaining))
-                except subprocess.TimeoutExpired:
-                    discovery_complete = False
-                    continue
-                if bound_interface(snapshot, session) is not None:
-                    live.append(session)
-            if len(live) > 1:
-                break
-            if len(live) == 1 and discovery_complete:
-                session = live[0]
-                self.authenticate(
-                    session, timeout=max(0, deadline - time.monotonic()), scan_host_key=False
-                )
-                return session
-            time.sleep(min(0.5, max(0, deadline - time.monotonic())))
-        fail("No unique ready connection to this archive's live phone was found")
+            except (OSError, ValueError) as error:
+                fail(f"Saved phone connection cannot be read: {error}")
+            candidates.append(self._validate_saved_session(value, state_path.parent))
+        if not candidates:
+            return None
+        snapshot = self.host.ps("devices.ps1")
+        live: list[dict[str, Any]] = []
+        for session in candidates:
+            devices = exact_usb_devices(snapshot, session["vendor_id"], session["product_id"])
+            matching = [
+                device
+                for device in devices
+                if device.rsplit("\\", 1)[-1].lower() == session["usb_serial"].lower()
+            ]
+            if len(matching) > 1:
+                fail("Multiple USB devices match this saved RAM session")
+            if matching:
+                live.append(session)
+        if len(live) > 1:
+            fail("Multiple saved phone connections are live; keep only one phone connected")
+        if not live:
+            return None
+        session = live[0]
+        self.authenticate(
+            session,
+            timeout=self.bundle.runtime["usb"]["linux_gadget"]["wait_seconds"],
+            scan_host_key=False,
+        )
+        return session
 
     def retire_previous_sessions(self, current: dict[str, Any]) -> None:
         """Retain one ready connection while leaving unrecognized files and records intact."""
-        root = self.host.runtime_root(self.bundle.root)
+        root = Path(current["directory"]).parent
         for state_path in root.glob("*/session.json"):
             directory = state_path.parent
             if directory == Path(current["directory"]):
@@ -922,11 +922,12 @@ class WindowsTransport:
                 directory.rmdir()
 
 
-def load_current_session(root: Path, target: str) -> tuple[WindowsTransport, dict[str, Any]]:
-    """Admit the selected archive and authenticate its saved live RAM connection."""
+def load_live_session(root: Path, target: str) -> tuple[WindowsTransport, dict[str, Any]] | None:
+    """Admit the archive and reconnect, returning absence without suppressing setup failures."""
     bundle = validate_archive(root)
     transport = WindowsTransport(WindowsHost(), bundle)
-    return transport, transport.load_current_session(target)
+    session = transport.load_live_session(target)
+    return (transport, session) if session is not None else None
 
 
 def _wait_bootrom(host: WindowsHost, usb: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -996,6 +997,7 @@ def boot_archive(
     *,
     events: Callable[[str], None] | None = None,
     log: Path | None = None,
+    session_root: Path | None = None,
 ) -> tuple[WindowsTransport, dict[str, Any]]:
     """Boot one selected archive with its external data capsule and return authenticated SSH."""
     if events is not None:
@@ -1016,7 +1018,7 @@ def boot_archive(
         timestamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
         log = root / "logs" / f"{timestamp}.{time.time_ns() % 1_000_000_000:09d}Z.log"
     log.parent.mkdir(parents=True, exist_ok=True)
-    session = _prepare_session(host, bundle, events=events)
+    session = _prepare_session(host, bundle, events=events, session_root=session_root)
     directory = Path(session["directory"])
     image = Path(session["image"])
     ready = False

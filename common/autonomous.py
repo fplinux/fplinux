@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import importlib
 import os
 import subprocess
@@ -51,6 +52,30 @@ def _private_directory(path: Path) -> Path:
     else:
         path.chmod(0o700)
     return path
+
+
+@contextmanager
+def _launcher_lock(root: Path) -> Iterator[None]:
+    """Keep one launch active until preparation and its interactive SSH client finish."""
+    descriptor = os.open(root / ".launcher.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        try:
+            if sys.platform == "win32":
+                import msvcrt  # noqa: PLC0415 -- only available on Windows.
+
+                msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl  # noqa: PLC0415 -- only available on Linux.
+
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            if error.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                raise
+            fail("This archive is already running. Close its existing launcher first.")
+        yield
+    finally:
+        # Keep the file: unlinking it could let another launch lock a different inode.
+        os.close(descriptor)
 
 
 class RunLog:
@@ -149,21 +174,22 @@ def _connection(
     runtime: dict[str, Any],
     log: RunLog,
     *,
-    capsule: Path | None = None,
+    capsule: Path,
+    session_root: Path | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     with log.capture() as output:
         if os.name == "nt":
-            from common.windows_host import boot_archive, load_current_session  # noqa: PLC0415
+            from common.windows_host import boot_archive  # noqa: PLC0415
 
-            if capsule is None:
-                return load_current_session(root, runtime["target"])
             return boot_archive(
-                root, capsule, events=lambda stage: log.event(stage, runtime), log=log.path
+                root,
+                capsule,
+                events=lambda stage: log.event(stage, runtime),
+                log=log.path,
+                session_root=session_root,
             )
         run = importlib.import_module("runner.run")
-        options = argparse.Namespace(
-            reconnect=capsule is None, exec_command=None, upload=None, pull=None
-        )
+        options = argparse.Namespace(reconnect=False, exec_command=None, upload=None, pull=None)
         handoff = run.run_bundle(
             root,
             runtime,
@@ -172,12 +198,27 @@ def _connection(
             device_data=capsule,
             output=output,
             setup_host=True,
-            session_root=root / "data/session",
+            session_root=session_root or root / "data/session",
         )
     if handoff is None:
         fail("The phone did not establish its authenticated Linux connection")
     transport, session = handoff
     return transport, session
+
+
+def _live_connection(
+    root: Path, runtime: dict[str, Any], log: RunLog
+) -> tuple[Any, dict[str, Any]] | None:
+    with log.capture():
+        if os.name == "nt":
+            from common.windows_host import load_live_session  # noqa: PLC0415
+
+            return load_live_session(root, runtime["target"])
+        run = importlib.import_module("runner.run")
+        connection: tuple[Any, dict[str, Any]] | None = run.reconnect_live_bundle(
+            root, runtime, session_root=root / "data/session"
+        )
+        return connection
 
 
 def _write_capsule(directory: Path, admitted: dict[str, tuple[FirmwareInput, ...]]) -> Path:
@@ -210,9 +251,6 @@ def _read_backup(
     if not isinstance(nand, dict) or not isinstance(nand.get("raw_device"), str):
         fail("This archive does not declare its read-only NAND reader")
     log.message("First run: keep the phone powered off and disconnected.")
-    with tempfile.TemporaryDirectory(prefix=".initial-boot-", dir=data) as temporary:
-        connection = _connection(root, runtime, log, capsule=_write_capsule(Path(temporary), {}))
-    log.message("Reading the complete NAND backup; keep USB connected. Ctrl+C cancels.")
     started = time.monotonic()
     last_update = 0.0
 
@@ -237,73 +275,84 @@ def _read_backup(
             print(text, file=log.visible, flush=True)
         print(text, file=log.stream, flush=True)
 
-    with log.capture():
-        backup = backup_nand(
-            lambda: connection,
-            data / "nand.bin",
-            target=manifest["target"],
-            raw_device=nand["raw_device"],
-            declared_id=nand.get("id"),
-            declared_raw_page_bytes=nand.get("raw_page_bytes"),
-            progress=progress,
+    # This reader boot must never be reused as a boot with the prepared phone data.
+    with tempfile.TemporaryDirectory(prefix=".initial-boot-", dir=data) as temporary:
+        directory = Path(temporary)
+        connection = _connection(
+            root,
+            runtime,
+            log,
+            capsule=_write_capsule(directory, {}),
+            session_root=directory / "session",
         )
+        log.message("Reading the complete NAND backup; keep USB connected. Ctrl+C cancels.")
+        started = time.monotonic()
+        with log.capture():
+            backup = backup_nand(
+                lambda: connection,
+                data / "nand.bin",
+                target=manifest["target"],
+                raw_device=nand["raw_device"],
+                declared_id=nand.get("id"),
+                declared_raw_page_bytes=nand.get("raw_page_bytes"),
+                progress=progress,
+            )
     log.message(f"Backup saved: {backup}")
     return backup
 
 
-def run_archive(
-    root: Path, log: RunLog, *, from_dump: Path | None = None, reconnect: bool = False
-) -> None:
+def run_archive(root: Path, log: RunLog, *, from_dump: Path | None = None) -> None:
     runtime = _archive_runtime(root)
     manifest = _device_data_manifest(root, runtime)
     data = _private_directory(root / "data")
     log.message(f"FPLinux — {runtime['identity']['target']['display_name']}")
     log.message("Internal storage is read only. Ctrl+C cancels the current operation.")
-    if reconnect:
-        log.message("Connecting to the running phone...")
-        transport, session = _connection(root, runtime, log)
-    else:
-        selected = _selected_data(data, manifest)
-        if from_dump is not None or selected is None:
-            backup = from_dump or data / "nand.bin"
-            if from_dump is None and not backup.exists():
-                backup = _read_backup(root, runtime, manifest, data, log)
-            log.message("Preparing your phone data...")
-            with log.capture():
-                phone = prepare_portable_device_data(from_dump=backup, destination=data / "phone")
-                admitted = capture_device_data_generation(
-                    manifest["device_data"]["groups"], phone, path_field="source", require_all=True
-                )
-                _write_capsule(phone, admitted)
-            log.message("Your phone data is ready in data/phone.")
-            log.message("Disconnect USB. If the phone stays on, remove and reinsert its battery.")
-            log.message("Run the same script again with the phone powered off.")
-            return
+    selected = _selected_data(data, manifest)
+    if from_dump is not None or selected is None:
+        backup = from_dump or data / "nand.bin"
+        if from_dump is None and not backup.exists():
+            backup = _read_backup(root, runtime, manifest, data, log)
+        log.message("Preparing your phone data...")
+        with log.capture():
+            phone = prepare_portable_device_data(from_dump=backup, destination=data / "phone")
+            admitted = capture_device_data_generation(
+                manifest["device_data"]["groups"], phone, path_field="source", require_all=True
+            )
+            _write_capsule(phone, admitted)
+        log.message("Your phone data is ready in data/phone.")
+        log.message("Disconnect USB. If the phone stays on, remove and reinsert its battery.")
+        log.message("Run the same script again with the phone powered off.")
+        return
+    log.message("Checking the saved phone connection...")
+    connection = _live_connection(root, runtime, log)
+    if connection is None:
         log.message("Starting FPLinux with your saved phone data...")
         capsule = _write_capsule(data / "phone", selected)
         transport, session = _connection(root, runtime, log, capsule=capsule)
+    else:
+        log.message("Connecting to the running phone...")
+        transport, session = connection
     log.message("Opening SSH. Type exit or press Ctrl+D to close the terminal.")
     # Interactive terminal contents and commands are not copied into the launch log.
     status = transport.open_shell(session) if os.name == "nt" else transport.run_shell(session)
     if status:
         fail(f"SSH exited with status {status}")
-    log.message("SSH terminal closed. Use SSH to reconnect while the phone remains on.")
+    log.message("SSH terminal closed. Open the same launcher to connect again.")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    action = parser.add_mutually_exclusive_group()
-    action.add_argument("--ssh", action="store_true", help="open SSH to the already running phone")
-    action.add_argument(
+    parser.add_argument(
         "--from-dump", type=Path, metavar="PATH", help="prepare from your saved NAND backup"
     )
     options = parser.parse_args()
     log: RunLog | None = None
     try:
-        print("Preparing FPLinux...", flush=True)
-        log = RunLog(ROOT)
-        log.message(f"Log: {log.path}")
-        run_archive(ROOT, log, from_dump=options.from_dump, reconnect=options.ssh)
+        with _launcher_lock(ROOT):
+            print("Preparing FPLinux...", flush=True)
+            log = RunLog(ROOT)
+            log.message(f"Log: {log.path}")
+            run_archive(ROOT, log, from_dump=options.from_dump)
     except KeyboardInterrupt:
         if log is not None:
             log.message("Cancelled. Cancelling does not power the phone off.")

@@ -74,8 +74,8 @@ the administrator prompt. Run the launcher as your regular user.
 
 </Steps>
 
-The backup is `data/nand.bin`; prepared data is in `data/phone/`, and private
-connection keys are in `data/session/`. Keep the extracted directory for
+The backup is `data/nand.bin`; prepared data is in `data/phone/`. Later runs
+keep their private connection keys in `data/session/`. Keep the extracted directory for
 subsequent runs and treat its contents as
 [private phone data](/fplinux/guides/device-data/).
 Use it only with the same physical phone, even if another phone has the same
@@ -86,19 +86,41 @@ backup was saved, the next run reuses that backup.
 
 ### Subsequent runs
 
-Start `sh Run.sh` on Linux or `Run.cmd` on Windows again with the phone powered
-off and disconnected. Wait for the connection instructions, then connect it
-with its boot key held. The launcher loads FPLinux with your prepared data and
-opens an SSH shell. Type `exit` or press Ctrl+D to close the shell; Linux keeps
-running on the phone.
+Use the same `sh Run.sh` on Linux or `Run.cmd` on Windows for every later
+launch. If your phone is still running FPLinux and connected, the launcher
+verifies its saved connection and opens SSH again. If that phone is absent,
+keep it powered off and disconnected until the launcher displays the connection
+instructions. Then connect it with its boot key held. The launcher loads
+FPLinux with your prepared data and opens an SSH shell.
 
-To open SSH again without reloading, run `sh SSH.sh` on Linux or double-click
-`SSH.cmd` on Windows. Keep the phone connected. Ctrl+C cancels loading or
-waiting, but does not power the phone off.
+Type `exit` or press Ctrl+D to close the shell; Linux keeps running on the
+phone. Open the same launcher to connect again. Only one launcher can run from
+the same extracted directory at a time; close its active launch before opening
+another. A connection that is present but cannot be verified stops with an
+error instead of starting another load. Ctrl+C cancels loading or waiting,
+but does not power the phone off.
 
 The matching `*-sources.zip` contains source and build material separately
 from the runnable archive. Keep it available alongside the runnable ZIP;
 component licenses remain in the runnable archive.
+
+### Prepare from an existing backup
+
+You can prepare from a complete physical NAND backup of the same phone without
+connecting it. On Linux:
+
+```sh title="PC"
+sh Run.sh --from-dump /path/to/nand.bin
+```
+
+On Windows, open a terminal in the extracted directory:
+
+```bat title="PC"
+Run.cmd --from-dump "C:\path\to\nand.bin"
+```
+
+This preserves the input backup and finishes after preparing `data/phone/`.
+It refuses to replace phone data that is already prepared in this directory.
 
 ## Linux runner archive
 
@@ -184,8 +206,9 @@ see [loader events](/fplinux/start/run/#for-automation-loader-events).
 
 ## Connection order and shutdown
 
-Connect the phone only when the launcher or runner asks. If you connected it
-too early, disconnect it, power it off and start again.
+For a fresh RAM load, connect the phone only when the launcher or runner asks.
+If you connected it too early, disconnect it, power it off and start again.
+To reopen SSH to the same running phone, leave it connected.
 
 Exiting a launcher or shell leaves Linux running. To end the session without
 losing data, follow [Power](/fplinux/use/power/). Without a battery,

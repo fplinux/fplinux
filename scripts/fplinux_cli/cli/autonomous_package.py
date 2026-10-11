@@ -102,8 +102,9 @@ def _readme(config: dict[str, Any], *, host: str) -> bytes:
             "Use Windows 10 or 11 x64. Python and the host programs are bundled.\n"
             "On first use, Run can ask to install the phone's USB driver.\n"
             "Read the included driver license and approve the administrator prompt.\n"
-            "Double-click Run.cmd to start; use SSH.cmd to reconnect.\n"
+            "Double-click Run.cmd to start or reconnect.\n"
         )
+        dump_command = 'Run.cmd --from-dump "C:\\path\\to\\nand.bin"'
     else:
         host_instructions = (
             "Use Linux x86-64 with coreutils, iproute2, udev and a network manager\n"
@@ -113,20 +114,25 @@ def _readme(config: dict[str, Any], *, host: str) -> bytes:
             "once if the included phone USB access rules are not installed.\n"
             "Open a terminal in this directory and run:\n"
             "  sh Run.sh\n"
-            "To reconnect to the running phone:\n"
-            "  sh SSH.sh\n"
         )
+        dump_command = "sh Run.sh --from-dump /path/to/nand.bin"
     text = (
         f"FPLinux - {name}\n\n"
         f"This archive is only for {name}. Internal storage is read only.\n\n"
         f"{host_instructions}\n"
-        "Keep the phone disconnected until Run displays the connection instructions.\n"
+        "For a fresh load, keep the phone disconnected until Run displays\n"
+        "the connection instructions. Leave a running phone connected to reopen SSH.\n"
         f"{instructions}\n\n"
         "The first run saves a complete backup and prepares your phone's own data.\n"
         "When it finishes, disconnect USB. If the phone stays on, briefly remove\n"
         "and reinsert its battery. Run the same script with the phone powered off\n"
         "to start FPLinux and open SSH. Type exit or press Ctrl+D to close SSH.\n"
+        "Open the same launcher again to reconnect while the phone remains on.\n"
+        "Only one launcher can run from this directory at a time.\n"
         "Ctrl+C cancels loading or waiting; it does not power the phone off.\n\n"
+        "To prepare from an existing complete NAND backup without connecting the phone:\n"
+        f"  {dump_command}\n"
+        "This preparation preserves the backup and cannot replace existing data/phone.\n\n"
         "Keep this directory for this one phone. Your NAND backup is data/nand.bin,\n"
         "prepared phone data is data/phone, and private connection keys are data/session.\n"
         "Each launch writes a new log in logs and displays its exact path.\n"
@@ -233,7 +239,6 @@ def autonomous_payload(
         from fplinux_cli.build.windows_driver import prepare_windows_driver  # noqa: PLC0415
 
         files["Run.cmd"] = _source_bytes("common/Run.cmd")
-        files["SSH.cmd"] = _source_bytes("common/SSH.cmd")
         files["common/__init__.py"] = _source_bytes("common/__init__.py")
         files["common/windows_host.py"] = _source_bytes("common/windows_host.py")
         for source in sorted((common.ROOT / "common/windows").rglob("*.ps1")):
@@ -263,12 +268,11 @@ def autonomous_payload(
         from fplinux_cli.build.linux_host import prepare_linux_host  # noqa: PLC0415
 
         files["Run.sh"] = _source_bytes("common/Run.sh")
-        files["SSH.sh"] = _source_bytes("common/SSH.sh")
         files["tools/fphelper_t117"] = _linux_host_tool(
             target, platform, "fphelper_t117", offline=offline
         )
         files["licenses/host-tools/Unlicense.txt"] = _source_bytes("LICENSES/Unlicense.txt")
-        executables.update({"Run.sh", "SSH.sh", "tools/fphelper_t117"})
+        executables.update({"Run.sh", "tools/fphelper_t117"})
         if has_ecc:
             relative = f"tools/{NAND_ECC_TOOL}"
             files[relative] = _linux_host_tool(target, platform, NAND_ECC_TOOL, offline=offline)

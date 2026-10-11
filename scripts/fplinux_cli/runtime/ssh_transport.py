@@ -747,26 +747,42 @@ def finish_session(session: dict[str, Any]) -> None:
         _remove_owned_session(directory, target, usb_serial, root=root)
 
 
-def _usb_devices(session: dict[str, Any]) -> list[Path]:
+def _usb_devices(session: dict[str, Any], *, require_absence_proof: bool = False) -> list[Path]:
+    """Find the exact USB identity, distinguishing failed discovery for a live probe."""
     matches: list[Path] = []
     root = Path("/sys/bus/usb/devices")
-    for vendor_file in root.glob("*/idVendor"):
-        device = vendor_file.parent
-        try:
-            vendor = int(vendor_file.read_text(encoding="ascii").strip(), 16)
-            product = int(
-                (device / "idProduct").read_text(encoding="ascii").strip(),
-                16,
-            )
-            serial = (device / "serial").read_text(encoding="ascii").strip()
-        except FileNotFoundError, PermissionError, UnicodeDecodeError, ValueError:
-            continue
-        if (
-            vendor == session["vendor_id"]
-            and product == session["product_id"]
-            and hmac.compare_digest(serial, session["usb_serial"])
-        ):
-            matches.append(device.resolve())
+    try:
+        devices = (
+            root.iterdir()
+            if require_absence_proof
+            else (vendor_file.parent for vendor_file in root.glob("*/idVendor"))
+        )
+        for device in devices:
+            vendor_file = device / "idVendor"
+            try:
+                vendor = int(vendor_file.read_text(encoding="ascii").strip(), 16)
+                if vendor != session["vendor_id"]:
+                    continue
+                product = int((device / "idProduct").read_text(encoding="ascii").strip(), 16)
+                if product != session["product_id"]:
+                    continue
+                serial = (device / "serial").read_text(encoding="ascii").strip()
+            except FileNotFoundError as error:
+                # USB interfaces have no idVendor; a matching device with unreadable
+                # endpoint attributes cannot establish physical absence.
+                if require_absence_proof and vendor_file.exists():
+                    fail(f"cannot discover the current USB session: {error}")
+                continue
+            except (PermissionError, UnicodeDecodeError, ValueError) as error:
+                if require_absence_proof:
+                    fail(f"cannot discover the current USB session: {error}")
+                continue
+            if hmac.compare_digest(serial, session["usb_serial"]):
+                matches.append(device.resolve(strict=require_absence_proof))
+    except OSError as error:
+        if require_absence_proof:
+            fail(f"cannot discover the current USB session: {error}")
+        raise
     return matches
 
 
@@ -1197,6 +1213,18 @@ def _validate_session(
     return value
 
 
+def _read_current_session(path: Path, target: str, *, root: Path) -> dict[str, Any]:
+    """Read and validate the saved binding without deciding whether absence is allowed."""
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        fail(f"current SSH session state is invalid: {error}")
+    session = _validate_session(value, target)
+    if _session_runtime_root(session) != root:
+        fail("current SSH session belongs to another runtime directory")
+    return session
+
+
 def load_current_session(target: str, *, runtime_root: Path | None = None) -> dict[str, Any]:
     """Load only the session that completed USB and private identity binding."""
     if TARGET_NAME.fullmatch(target) is None:
@@ -1209,14 +1237,28 @@ def load_current_session(target: str, *, runtime_root: Path | None = None) -> di
         fail(
             f"no ready SSH session for {target}; start the powered-off phone with sh Run.sh first"
         )
+    return _read_current_session(path, target, root=root)
+
+
+def load_live_session(target: str, *, runtime_root: Path | None = None) -> dict[str, Any] | None:
+    """Select a saved exact USB session; absence alone permits another RAM load."""
+    if TARGET_NAME.fullmatch(target) is None:
+        fail(f"invalid target name: {target}")
+    root = _selected_runtime_root(runtime_root)
+    path = root / "current" / f"{target}.json"
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as error:
         fail(f"current SSH session state is invalid: {error}")
-    session = _validate_session(value, target)
-    if _session_runtime_root(session) != root:
-        fail("current SSH session belongs to another runtime directory")
-    return session
+    if not stat.S_ISREG(metadata.st_mode):
+        fail("current SSH session state is not a regular file")
+    session = _read_current_session(path, target, root=root)
+    devices = _usb_devices(session, require_absence_proof=True)
+    if len(devices) > 1:
+        fail("more than one USB device matches this RAM session")
+    return session if devices else None
 
 
 def reacquire_bound_session(session: dict[str, Any]) -> dict[str, Any]:

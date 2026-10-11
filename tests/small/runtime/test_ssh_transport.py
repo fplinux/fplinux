@@ -99,6 +99,131 @@ class ReadyAfterPolls:
         return self.polls > self.failed_polls
 
 
+class LiveSessionSmallTests:
+    """Observe session selection using private files and a controlled USB attribute tree."""
+
+    @pytest.fixture(autouse=True)
+    def _saved_session(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Replace the host USB tree while leaving saved-state validation and discovery real."""
+        self.root = tmp_path / "runtime"
+        self.root.mkdir(mode=0o700)
+        self.state = create_ready_session(self.root)
+        self.state["runtime_root"] = str(self.root)
+        current = self.root / "current"
+        current.mkdir(mode=0o700)
+        self.current_path = current / "phone.json"
+        self.current_path.write_text(json.dumps(self.state), encoding="utf-8")
+        self.current_path.chmod(0o600)
+        self.usb = tmp_path / "usb"
+        self.usb.mkdir()
+
+        def selected_path(value: str | Path) -> Path:
+            return self.usb if value == "/sys/bus/usb/devices" else Path(value)
+
+        monkeypatch.setattr(ssh_transport, "Path", selected_path)
+        monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+
+    def _usb_device(
+        self,
+        name: str,
+        *,
+        vendor: str = "0525",
+        product: str = "a4a6",
+        serial: str | None = None,
+    ) -> Path:
+        """Write test-owned kernel USB attributes for one controlled device."""
+        device = self.usb / name
+        device.mkdir()
+        (device / "idVendor").write_text(vendor + "\n", encoding="ascii")
+        (device / "idProduct").write_text(product + "\n", encoding="ascii")
+        (device / "serial").write_text(
+            (self.state["usb_serial"] if serial is None else serial) + "\n", encoding="ascii"
+        )
+        return device
+
+    def test_missing_saved_session_allows_a_new_load_without_weakening_current_loader(
+        self,
+    ) -> None:
+        """Only the optional live selector accepts the absence of a saved current pointer."""
+        self.current_path.unlink()
+
+        assert ssh_transport.load_live_session("phone", runtime_root=self.root) is None
+        with pytest.raises(SystemExit, match="no ready SSH session for phone"):
+            ssh_transport.load_current_session("phone", runtime_root=self.root)
+
+    def test_absent_exact_usb_allows_a_new_load_and_retains_saved_session(self) -> None:
+        """Other USB identities do not select the saved RAM session or erase its private files."""
+        self._usb_device("other-vendor", vendor="1234")
+        self._usb_device("other-product", product="a4a7")
+        self._usb_device("other-session", serial="a" * 32)
+        (self.usb / "1-1:1.0").mkdir()
+
+        assert ssh_transport.load_live_session("phone", runtime_root=self.root) is None
+        assert ssh_transport.load_current_session("phone", runtime_root=self.root) == self.state
+        assert Path(self.state["private_key"]).read_bytes() == b"private\n"
+        assert Path(self.state["known_hosts"]).read_bytes() == b"private\n"
+
+    def test_present_exact_usb_selects_the_saved_session_before_endpoint_readiness(self) -> None:
+        """A matching USB device selects reuse even before it exposes a network interface."""
+        self._usb_device("1-1")
+
+        selected = ssh_transport.load_live_session("phone", runtime_root=self.root)
+
+        assert selected == self.state
+        assert self.current_path.read_text(encoding="utf-8") == json.dumps(self.state)
+
+    @pytest.mark.parametrize("invalid_state", ["{", '{"unexpected": "value"}'])
+    def test_invalid_saved_session_fails_instead_of_allowing_a_new_load(
+        self, invalid_state: str
+    ) -> None:
+        """Malformed or incomplete saved state remains an error even with no matching USB."""
+        self.current_path.write_text(invalid_state, encoding="utf-8")
+
+        with pytest.raises(SystemExit, match="current SSH session state"):
+            ssh_transport.load_live_session("phone", runtime_root=self.root)
+
+    def test_nonregular_saved_session_fails_instead_of_allowing_a_new_load(self) -> None:
+        """An existing current path that is not a regular state file is not physical absence."""
+        self.current_path.unlink()
+        self.current_path.mkdir()
+
+        with pytest.raises(SystemExit, match="session state is not a regular file"):
+            ssh_transport.load_live_session("phone", runtime_root=self.root)
+
+    def test_ambiguous_exact_usb_fails_instead_of_allowing_a_new_load(self) -> None:
+        """Two devices carrying the saved exact identity cannot select a reload or reconnect."""
+        self._usb_device("1-1")
+        self._usb_device("1-2")
+
+        with pytest.raises(SystemExit, match="more than one USB device matches"):
+            ssh_transport.load_live_session("phone", runtime_root=self.root)
+
+    def test_unavailable_usb_discovery_fails_instead_of_allowing_a_new_load(self) -> None:
+        """An unavailable USB attribute tree cannot establish that the phone is absent."""
+        self.usb.rmdir()
+
+        with pytest.raises(SystemExit, match="cannot discover the current USB session"):
+            ssh_transport.load_live_session("phone", runtime_root=self.root)
+
+    @pytest.mark.parametrize(
+        "unreadable_attribute", ["vendor", "missing-serial", "nonascii-serial"]
+    )
+    def test_unreadable_usb_identity_fails_instead_of_allowing_a_new_load(
+        self, unreadable_attribute: str
+    ) -> None:
+        """Failed USB identity parsing cannot be treated as proof of the session's absence."""
+        device = self._usb_device("1-1")
+        if unreadable_attribute == "vendor":
+            (device / "idVendor").write_text("unreadable\n", encoding="ascii")
+        elif unreadable_attribute == "missing-serial":
+            (device / "serial").unlink()
+        else:
+            (device / "serial").write_bytes(b"\xff\n")
+
+        with pytest.raises(SystemExit, match="cannot discover the current USB session"):
+            ssh_transport.load_live_session("phone", runtime_root=self.root)
+
+
 class SshTransportSmallTests:
     """Exercise in-process session, bundle and transfer boundaries."""
 

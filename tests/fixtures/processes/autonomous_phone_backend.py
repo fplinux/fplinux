@@ -3,6 +3,7 @@
 
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -24,7 +25,7 @@ def run_bundle(  # noqa: PLR0913 -- match the delivered runner's loader boundary
     session_root: Path | None = None,
 ) -> tuple[Any, dict[str, str]]:
     """Supply controlled phone bytes, or fail at the host startup boundary."""
-    del runtime, setup_host, session_root
+    del runtime, setup_host, options
     failure = bundle / "phone-startup-failure"
     if failure.is_file():
         emit("host-preparation")
@@ -39,22 +40,23 @@ def run_bundle(  # noqa: PLR0913 -- match the delivered runner's loader boundary
         raise SystemExit(130)
     record = bundle / "data" / "loaded"
     record.mkdir(exist_ok=True)
-    reconnect = options.reconnect
     number = len(list(record.glob("*.cpio"))) + 1
-    if not reconnect:
-        assert device_data is not None
-        shutil.copyfile(device_data, record / f"{number}.cpio")
-        for name in ("pinmap.bin", "keymap.bin"):
-            source = device_data.parent / name
-            if source.is_file():
-                shutil.copyfile(source, record / f"{number}-{name}")
     emit("host-preparation")
     emit("network-preparation")
     emit("session-preparation")
     emit("payload-preparation")
     emit("waiting-for-device")
+    while (bundle / "phone-hold-loader").exists():
+        (record / "loader-waiting").touch()
+        time.sleep(0.02)
     emit("device-found")
     emit("ram-loader-start")
+    assert device_data is not None
+    shutil.copyfile(device_data, record / f"{number}.cpio")
+    for name in ("pinmap.bin", "keymap.bin"):
+        source = device_data.parent / name
+        if source.is_file():
+            shutil.copyfile(source, record / f"{number}-{name}")
     print("private backend details", file=output)
     # Native loaders append through their own file handle to the same run log.
     assert output is not None
@@ -65,7 +67,31 @@ def run_bundle(  # noqa: PLR0913 -- match the delivered runner's loader boundary
     emit("linux-start")
     emit("linux-transition")
     emit("ssh-ready")
+    assert session_root is not None
+    session_root.mkdir(parents=True, exist_ok=True)
+    (session_root / "session.json").write_text("controlled ready session\n")
+    (bundle / "phone-live").touch()
+    return _phone_connection(bundle, record, session_root)
 
+
+def reconnect_live_bundle(
+    bundle: Path, runtime: dict[str, Any], *, session_root: Path
+) -> tuple[Any, dict[str, str]] | None:
+    """Control live-phone presence and authenticated reconnect failures without USB."""
+    del runtime
+    with (bundle / "phone-probes").open("a") as probes:
+        probes.write("probe\n")
+    failure = bundle / "phone-reconnect-failure"
+    if failure.exists():
+        raise SystemExit(failure.read_text().strip())
+    if not (bundle / "phone-live").exists() or not (session_root / "session.json").exists():
+        return None
+    return _phone_connection(bundle, bundle / "data/loaded", session_root)
+
+
+def _phone_connection(
+    bundle: Path, record: Path, session_root: Path
+) -> tuple[Any, dict[str, str]]:
     class Phone:
         """Read controlled geometry and a real test-owned raw backup."""
 
@@ -73,6 +99,8 @@ def run_bundle(  # noqa: PLR0913 -- match the delivered runner's loader boundary
             """Replace only the interactive SSH executable boundary."""
             with (record / "shell-opened").open("a") as shell:
                 shell.write("opened\n")
+            while (bundle / "phone-hold-shell").exists():
+                time.sleep(0.02)
             print("interactive shell output")
             return 0
 
@@ -87,6 +115,7 @@ def run_bundle(  # noqa: PLR0913 -- match the delivered runner's loader boundary
         ) -> None:
             """Keep the requested reader command and deliver its fixture bytes."""
             del session, timeout
+            assert (session_root / "session.json").exists()
             with (record / "reader-commands").open("a") as commands:
                 commands.write(command + "\n")
             if command.startswith("cat "):

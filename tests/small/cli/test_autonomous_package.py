@@ -76,12 +76,9 @@ def archive_inputs(
         "common/60-fplinux.rules",
         "common/autonomous.py",
         "common/__init__.py",
-        "common/prepare.py",
         "common/windows_host.py",
         "common/Run.sh",
         "common/Run.cmd",
-        "common/SSH.sh",
-        "common/SSH.cmd",
         "platforms/ums9117/host/stock_image.py",
         "platforms/ums9117/host/nand_ecc.py",
         "platforms/ums9117/host/nand-ecc/Makefile",
@@ -375,7 +372,7 @@ def test_autonomous_zip_preserves_receipts_omits_personal_data_and_is_determinis
     assert modes["Run.py"] == 0o100755
     launcher = "Run.sh" if host == "linux" else "Run.cmd"
     assert launcher in payload
-    assert ("SSH.sh" if host == "linux" else "SSH.cmd") in payload
+    assert not {"SSH.sh", "SSH.cmd", "prepare.py"}.intersection(payload)
     checksums = {
         relative: digest
         for digest, relative in (
@@ -431,6 +428,7 @@ def test_autonomous_zip_preserves_receipts_omits_personal_data_and_is_determinis
     )
     assert help_result.returncode == 0, help_result.stderr
     assert "--from-dump" in help_result.stdout
+    assert "--ssh" not in help_result.stdout
     runtime_imports = subprocess.run(
         [
             sys.executable,

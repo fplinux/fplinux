@@ -2,7 +2,7 @@
 """Exercise standalone dump extraction with controlled parser and host-tool boundaries.
 
 The archive imports, complete-dump admission, board-map extraction, group
-validation and generation publication are real. A small target parser replaces
+validation and prepared-data publication are real. A small target parser replaces
 the fitted phone records, and an external fake replaces the compiled firmware
 decoder. Unused dump pages are sparse; selected stock-image and partition-table
 extents contain controlled bytes. ECC cases run the delivered Python projection
@@ -28,8 +28,10 @@ import pytest
 from fplinux_cli.cli.autonomous_package import runtime_python_files
 
 from tests import ROOT
+from tests.bundle_support import file_record
 from tests.fixtures.executables import install_python_script
 from tests.fixtures.stock_board_report import STOCK_IMAGE, agreeing_vbm, backup, signed_image
+from tests.windows_host_support import archive_files
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -45,7 +47,7 @@ class PortableArchive:
 
     def run(self, *arguments: str) -> subprocess.CompletedProcess[str]:
         """Run the delivered entry point with no checkout Python path."""
-        return self.run_entrypoint("prepare.py", *arguments)
+        return self.run_entrypoint("Run.py", *arguments)
 
     def run_entrypoint(self, filename: str, *arguments: str) -> subprocess.CompletedProcess[str]:
         """Run a delivered archive entry point with no checkout Python path."""
@@ -62,11 +64,38 @@ class PortableArchive:
             check=False,
         )
 
-    def current_generation(self) -> Path:
+    def prepared_data(self) -> Path:
         """Resolve the artifact selected by the delivered preparation command."""
-        target_root = self.root / ".cache/device-data/nokia-ta1618"
-        selected = (target_root / "current").read_text(encoding="ascii").strip()
-        return target_root / "generations" / selected
+        return self.root / "data/phone"
+
+
+def _deliver_launcher(root: Path) -> None:
+    """Add the canonical archive admission boundary to saved-dump cases."""
+    archive_files(root)
+    (root / "windows-host.json").unlink()
+    (root / "tools/spd_dump.exe").chmod(0o755)
+    (root / "tools/libc_server.exe").chmod(0o755)
+    shutil.copyfile(ROOT / "common/autonomous.py", root / "Run.py")
+    runtime_path = root / "runtime-manifest.json"
+    runtime = json.loads(runtime_path.read_text())
+    runtime["target"] = "nokia-ta1618"
+    runtime["identity"]["target"] = {
+        "brand": "Nokia",
+        "product": "105 4G",
+        "hardware_codes": ["TA-1618"],
+        "compatible": "nokia,ta1618",
+        "display_name": "Nokia 105 4G (TA-1618)",
+    }
+    runtime["adapter"]["boot_instructions"] = "Connect the powered-off phone while holding *."
+    runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
+    build_path = root / "build-manifest.json"
+    build = json.loads(build_path.read_text())
+    build.pop("generation")
+    build["target"] = "nokia-ta1618"
+    build["files"]["runtime-manifest.json"] = file_record(runtime_path)
+    payload = (json.dumps(build, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    build["generation"] = hashlib.sha256(payload).hexdigest()
+    build_path.write_text(json.dumps(build), encoding="utf-8")
 
 
 @pytest.fixture
@@ -75,12 +104,11 @@ def portable_archive(tmp_path: Path) -> Iterator[PortableArchive]:
     log_root = os.environ.get("FPLINUX_LOG_ROOT")
     parent = Path(log_root) if log_root else tmp_path
     parent.mkdir(parents=True, exist_ok=True)
-    # Keep full generation copies off the runner's memory-backed /tmp.
+    # Keep complete NAND inputs off the runner's memory-backed /tmp.
     with tempfile.TemporaryDirectory(dir=parent, prefix="portable-archive-") as temporary:
         workspace = Path(temporary)
         archive = workspace / "archive"
         archive.mkdir()
-        shutil.copyfile(ROOT / "common/prepare.py", archive / "prepare.py")
         config: dict[str, Any] = {
             "device_data": {"groups": {"bluetooth": [], "audio-profile": [], "fm-radio": []}}
         }
@@ -148,6 +176,7 @@ def portable_archive(tmp_path: Path) -> Iterator[PortableArchive]:
             stream.write(small.raw)
             stream.seek(0)
             stream.write(b"radio")
+        _deliver_launcher(archive)
         yield PortableArchive(archive, dump, manifest)
 
 
@@ -230,7 +259,7 @@ def test_standalone_dump_publishes_all_groups_and_keeps_the_input(
     result = archive.run("--from-dump", str(archive.dump))
 
     assert result.returncode == 0, result.stderr
-    generation = archive.current_generation()
+    generation = archive.prepared_data()
     assert (generation / "groups/bluetooth/radio.bin").read_bytes() == b"radio"
     assert (generation / "groups/audio-profile/audio.bin").read_bytes() == b"profile"
     assert (generation / "groups/fm-radio/fm.bin").read_bytes() == b"fm"
@@ -240,34 +269,30 @@ def test_standalone_dump_publishes_all_groups_and_keeps_the_input(
     assert (generation / "groups/board-maps/keymap.bin").read_bytes() == b"\x2a\x00\x31\x00"
     report = json.loads((generation / "reports/board-maps/board-report.json").read_text())
     assert report["keypad"]["boot_key"] == {"code": "0x2a", "key": "FPLINUX_KEY_STAR"}
-    receipt = json.loads((generation / "receipt.json").read_text())
-    assert receipt["source"] == {
-        "kind": "saved-dump",
-        "size": 138412032,
-        "sha256": original_sha256,
-    }
+    assert not (generation / "source").exists()
+    assert not (generation / "originals").exists()
     with archive.dump.open("rb") as stream:
         assert hashlib.file_digest(stream, "sha256").hexdigest() == original_sha256
-    assert "Review " in result.stdout
+    assert "Your phone data is ready in data/phone." in result.stdout
+    assert not (archive.root / ".cache").exists()
 
 
-def test_repeated_dump_preparation_selects_the_new_data(portable_archive: PortableArchive) -> None:
+def test_repeated_dump_preparation_preserves_the_selected_phone_data(
+    portable_archive: PortableArchive,
+) -> None:
     archive = portable_archive
     first = archive.run("--from-dump", str(archive.dump))
     assert first.returncode == 0, first.stderr
-    old_generation = archive.current_generation()
+    generation = archive.prepared_data()
     with archive.dump.open("r+b") as stream:
         stream.write(b"other")
 
     second = archive.run("--from-dump", str(archive.dump))
 
-    assert second.returncode == 0, second.stderr
-    generation = archive.current_generation()
-    assert generation != old_generation
-    assert (generation / "groups/bluetooth/radio.bin").read_bytes() == b"other"
-    assert (old_generation / "groups/bluetooth/radio.bin").read_bytes() == b"radio"
-    with (generation / "source/nand.bin").open("rb") as stream:
-        assert stream.read(5) == b"other"
+    assert second.returncode == 1
+    assert "prepared phone data already exists" in second.stderr
+    assert (generation / "groups/bluetooth/radio.bin").read_bytes() == b"radio"
+    assert not list((archive.root / "data").glob(".phone-*"))
 
 
 def test_archive_cli_has_no_target_selector(portable_archive: PortableArchive) -> None:
@@ -314,29 +339,19 @@ def test_declared_ecc_publishes_corrected_partition_and_preserves_raw_backup(
     result = archive.run("--from-dump", str(archive.dump))
 
     assert result.returncode == 0, result.stderr
-    generation = archive.current_generation()
+    generation = archive.prepared_data()
     assert (generation / "groups/bluetooth/radio.bin").read_bytes() == b"selected"
-    assert (generation / "originals/bluetooth/radio-original.bin").read_bytes() == b"selected"
-    receipt = json.loads((generation / "receipt.json").read_text())
-    assert receipt["source"] == {
-        "kind": "saved-dump",
-        "size": 142606336,
-        "sha256": original_sha256,
-    }
-    for path in (archive.dump, generation / "source/nand.bin"):
-        with path.open("rb") as stream:
-            assert hashlib.file_digest(stream, "sha256").hexdigest() == original_sha256
-            stream.seek(1124)
-            assert stream.read(8) == b"damaged!"
+    assert not (generation / "originals").exists()
+    with archive.dump.open("rb") as stream:
+        assert hashlib.file_digest(stream, "sha256").hexdigest() == original_sha256
+        stream.seek(1124)
+        assert stream.read(8) == b"damaged!"
 
 
-def test_uncorrectable_selected_sector_keeps_the_previous_generation(
+def test_uncorrectable_selected_sector_does_not_publish_phone_data(
     portable_ecc_archive: PortableArchive,
 ) -> None:
     archive = portable_ecc_archive
-    first = archive.run("--from-dump", str(archive.dump))
-    assert first.returncode == 0, first.stderr
-    old_generation = archive.current_generation()
     tools = archive.root / "tools"
     (tools / "exit-status.txt").write_text("1", encoding="ascii")
     (tools / "diagnostic.txt").write_text("uncorrectable codeword\n", encoding="utf-8")
@@ -345,9 +360,8 @@ def test_uncorrectable_selected_sector_keeps_the_previous_generation(
 
     assert result.returncode == 1
     assert "NAND ECC correction at main offset 0x400: uncorrectable codeword" in result.stderr
-    assert archive.current_generation() == old_generation
-    assert (old_generation / "groups/bluetooth/radio.bin").read_bytes() == b"selected"
-    assert list(old_generation.parent.iterdir()) == [old_generation]
+    assert not archive.prepared_data().exists()
+    assert not list((archive.root / "data").glob(".phone-*"))
 
 
 @pytest.mark.parametrize("marker", [2048, 4224], ids=["first-page", "second-page"])
@@ -363,9 +377,8 @@ def test_corrected_partition_with_a_raw_factory_marker_is_not_published(
 
     assert result.returncode == 1
     assert "selected NAND block 0 is marked bad" in result.stderr
-    target_root = archive.root / ".cache/device-data/nokia-ta1618"
-    assert not (target_root / "current").exists()
-    assert not list((target_root / "generations").iterdir())
+    assert not archive.prepared_data().exists()
+    assert not list((archive.root / "data").glob(".phone-*"))
     with archive.dump.open("rb") as stream:
         stream.seek(marker)
         assert stream.read(1) == b"\x00"

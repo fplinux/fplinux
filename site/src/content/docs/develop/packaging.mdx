@@ -58,9 +58,11 @@ Build the phone once, then package it for either host:
 The hosts are Linux x86-64 and Windows 10 or 11 x64. Each archive contains only
 the selected phone's configuration. It bundles Python, OpenSSH and extraction
 tools, and omits the build's prepared phone data. The owner uses the same
-`Run.sh` or `Run.cmd` twice: first to save and prepare their phone's own data,
-then to load FPLinux with that data and open SSH. `SSH.sh` or `SSH.cmd` opens
-a new shell on the already running phone. These archives contain the selected
+`Run.sh` or `Run.cmd` for preparation, loading and reconnecting: first to save
+and prepare their phone's own data, then to load FPLinux with that data and
+open SSH. Opening the same launcher again reconnects to the running phone.
+Only one launcher can run from the extracted directory at a time.
+These archives contain the selected
 host's tools, a short README and licenses; optional APKs and the offline site
 are omitted. Source and build material is written to a matching separate
 `*-sources.zip`. Keep both archives together when distributing them. Follow

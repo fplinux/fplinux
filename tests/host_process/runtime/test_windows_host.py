@@ -323,6 +323,9 @@ def test_saved_connection_reuses_the_pinned_key_and_requires_live_identities(
     """Reconnect through real SSH children while replacing native USB and peer boundaries."""
     transport = native_process_transport(tmp_path)
     saved = saved_connection(transport)
+    host = transport.host
+    assert isinstance(host, StubWindowsHost)
+    host.snapshot["devices"] = [{"id": f"USB\\VID_0525&PID_A4A6\\{saved['usb_serial']}"}]
     known_hosts = Path(saved["known_hosts"])
     pinned = known_hosts.read_bytes()
     monkeypatch.setenv("FPLINUX_TEST_FORBID_KEYSCAN", "1")
@@ -335,16 +338,82 @@ def test_saved_connection_reuses_the_pinned_key_and_requires_live_identities(
     )
 
     if identity == "correct":
-        current = transport.load_current_session("test-phone")
+        current = transport.load_live_session("test-phone")
         assert current == saved
     else:
         with pytest.raises(
             SystemExit, match=r"another RAM session identity|another kernel build identity"
         ):
-            transport.load_current_session("test-phone")
+            transport.load_live_session("test-phone")
 
     assert known_hosts.read_bytes() == pinned
     assert not Path(saved["image"]).exists()
+
+
+@pytest.mark.parametrize("present", [False, True])
+def test_saved_phone_absence_and_present_unready_endpoint_have_distinct_results(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, present: bool
+) -> None:
+    """PnP absence permits a boot; a present USB root with no DHCP fails readiness."""
+    transport = native_process_transport(tmp_path)
+    saved = saved_connection(transport)
+    host = transport.host
+    assert isinstance(host, StubWindowsHost)
+    host.snapshot["devices"] = (
+        [{"id": f"USB\\VID_0525&PID_A4A6\\{saved['usb_serial']}"}] if present else []
+    )
+    host.snapshot["adapters"][0]["status"] = "Down"
+    pinned = Path(saved["known_hosts"]).read_bytes()
+    now = 0.0
+
+    def advance_clock(delay: float) -> None:
+        nonlocal now
+        now += delay
+
+    monkeypatch.setattr("common.windows_host.time.monotonic", lambda: now)
+    monkeypatch.setattr("common.windows_host.time.sleep", advance_clock)
+
+    if present:
+        with pytest.raises(SystemExit, match="did not become ready before the deadline"):
+            transport.load_live_session("test-phone")
+        assert now >= 3
+    else:
+        assert transport.load_live_session("test-phone") is None
+        assert now == 0
+    assert Path(saved["known_hosts"]).read_bytes() == pinned
+
+
+def test_ambiguous_live_saved_phone_connections_stop_before_authentication(
+    tmp_path: Path,
+) -> None:
+    """Two valid saved identities and two present USB roots cannot select one phone."""
+    transport = native_process_transport(tmp_path)
+    saved = saved_connection(transport)
+    second_id = "ef" * 32
+    serial = hashlib.sha256(bytes.fromhex(second_id)).hexdigest()[:32]
+    directory = tmp_path / "data/session" / serial
+    directory.mkdir()
+    for name in ("id_ed25519", "known_hosts"):
+        (directory / name).write_text("another fixture private key\n")
+    second = {
+        **saved,
+        "session_id": second_id,
+        "usb_serial": serial,
+        "directory": str(directory),
+        "private_key": str(directory / "id_ed25519"),
+        "known_hosts": str(directory / "known_hosts"),
+        "image": str(directory / "image.bin"),
+    }
+    (directory / "session.json").write_text(json.dumps(second))
+    host = transport.host
+    assert isinstance(host, StubWindowsHost)
+    host.snapshot["devices"] = [
+        {"id": f"USB\\VID_0525&PID_A4A6\\{saved['usb_serial']}"},
+        {"id": f"USB\\VID_0525&PID_A4A6\\{serial}"},
+    ]
+
+    with pytest.raises(SystemExit, match="Multiple saved phone connections are live"):
+        transport.load_live_session("test-phone")
 
 
 def test_session_network_avoids_host_routes_and_saved_sessions(
@@ -501,8 +570,9 @@ def test_selected_winusb_snapshot_reaches_native_loader_and_one_archive_log(
         _bundle: windows_host.WindowsBundle,
         *,
         events: object = None,
+        session_root: Path | None = None,
     ) -> dict[str, Any]:
-        del events
+        del events, session_root
         return session
 
     def authenticated(

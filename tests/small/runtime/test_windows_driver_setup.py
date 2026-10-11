@@ -113,13 +113,19 @@ def test_success_status_without_winusb_binding_is_not_ready(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     host = DriverHost(binds=False)
-    moments = iter([0, 0, 21])
-    monkeypatch.setattr("common.windows_host.time.monotonic", lambda: next(moments))
-    monkeypatch.setattr("common.windows_host.time.sleep", lambda _delay: None)
+    now = 0.0
+
+    def advance_clock(delay: float) -> None:
+        nonlocal now
+        now += delay
+
+    monkeypatch.setattr("common.windows_host.time.monotonic", lambda: now)
+    monkeypatch.setattr("common.windows_host.time.sleep", advance_clock)
     events: list[str] = []
     with pytest.raises(SystemExit, match=r"WinUSB did not become ready.*restart Run[.]cmd"):
         ensure_driver(host, tmp_path, events)
     assert events == ["driver-setup"]
+    assert now >= 20
 
 
 @pytest.mark.parametrize(
@@ -256,8 +262,9 @@ def test_boot_invites_connection_then_requires_driver_before_loader(
         _bundle: windows_host.WindowsBundle,
         *,
         events: object = None,
+        session_root: Path | None = None,
     ) -> dict[str, str]:
-        del events
+        del events, session_root
         return {"directory": str(directory), "image": str(image)}
 
     monkeypatch.setattr(windows_host, "_prepare_session", prepared_session)

@@ -467,5 +467,23 @@ def run_bundle(  # noqa: PLR0913 -- bundle, session actions, data and log destin
     return (ssh, ready) if ready is not None else None
 
 
+def reconnect_live_bundle(
+    bundle: Path, runtime: dict[str, Any], *, session_root: Path
+) -> tuple[ModuleType, dict[str, Any]] | None:
+    """Reuse a live authenticated phone; absence alone permits a fresh archive boot."""
+    host_preflight()
+    if runtime["transport"] != "usb-ncm":
+        fail("this archive does not support authenticated reconnect")
+    ssh = load_module(bundle / SSH_HELPER_PATH, "ssh_transport")
+    ssh.bundle_identity(bundle, runtime)
+    device_identity = ssh.build_manifest_device_identity(bundle)
+    session = ssh.load_live_session(runtime["target"], runtime_root=session_root)
+    if session is None:
+        return None
+    session = ssh.reacquire_bound_session(session)
+    ssh.require_device_identity(session, device_identity)
+    return ssh, session
+
+
 if __name__ == "__main__":
     main()
