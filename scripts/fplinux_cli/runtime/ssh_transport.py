@@ -1372,12 +1372,17 @@ def stream_remote(
     destination: BinaryIO,
     *,
     timeout: float,
+    progress: Callable[[int], None] | None = None,
 ) -> None:
     """Stream one authenticated SSH command directly to an already-open local file."""
     if timeout <= 0:
         message = "SSH stream timeout must be positive"
         raise ValueError(message)
     session = _validate_session(session)
+    initial_position = 0
+    if progress is not None:
+        destination.flush()
+        initial_position = os.lseek(destination.fileno(), 0, os.SEEK_CUR)
     interrupted: int | None = None
     with tempfile.TemporaryFile(mode="w+b") as stderr:
         process = subprocess.Popen(
@@ -1404,6 +1409,8 @@ def stream_remote(
         try:
             deadline = time.monotonic() + timeout
             while process.poll() is None and interrupted is None:
+                if progress is not None:
+                    progress(os.lseek(destination.fileno(), 0, os.SEEK_CUR) - initial_position)
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     timed_out = True
@@ -1414,6 +1421,8 @@ def stream_remote(
                     continue
             if process.poll() is None:
                 _terminate_stream_process(process)
+            if progress is not None:
+                progress(os.lseek(destination.fileno(), 0, os.SEEK_CUR) - initial_position)
         except BaseException:
             _terminate_stream_process(process)
             raise

@@ -62,6 +62,7 @@ class SshTransport(Protocol):
         destination: BinaryIO,
         *,
         timeout: float,
+        progress: Callable[[int], None] | None = None,
     ) -> None:
         """Write remote stdout directly into the supplied local file."""
 
@@ -225,6 +226,7 @@ def backup_nand(  # noqa: PLR0913 -- the reader and the declared chip are distin
     raw_device: str,
     declared_id: int | None = None,
     declared_raw_page_bytes: int | None = None,
+    progress: Callable[[int, int], None] | None = None,
 ) -> Path:
     """Acquire one exact session and publish a complete physical NAND image and its receipt."""
     if output.name in {"", ".", ".."}:
@@ -248,6 +250,11 @@ def backup_nand(  # noqa: PLR0913 -- the reader and the declared chip are distin
         source="the phone's NAND",
     )
     read_batch_bytes = 30 * geometry.raw_page_bytes
+
+    def read_progress(completed: int) -> None:
+        if progress is not None and completed < geometry.raw_bytes:
+            progress(completed, geometry.raw_bytes)
+
     temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -258,12 +265,20 @@ def backup_nand(  # noqa: PLR0913 -- the reader and the declared chip are distin
         ) as stream:
             temporary = Path(stream.name)
             temporary.chmod(0o600)
-            ssh.stream_remote(
-                session,
-                f"exec dd if={shlex.quote(raw_device)} bs={read_batch_bytes}",
-                cast("BinaryIO", stream),
-                timeout=BACKUP_TIMEOUT_SECONDS,
-            )
+            command = f"exec dd if={shlex.quote(raw_device)} bs={read_batch_bytes}"
+            if progress is None:
+                ssh.stream_remote(
+                    session, command, cast("BinaryIO", stream), timeout=BACKUP_TIMEOUT_SECONDS
+                )
+            else:
+                progress(0, geometry.raw_bytes)
+                ssh.stream_remote(
+                    session,
+                    command,
+                    cast("BinaryIO", stream),
+                    timeout=BACKUP_TIMEOUT_SECONDS,
+                    progress=read_progress,
+                )
             stream.flush()
             os.fsync(stream.fileno())
 
@@ -298,6 +313,8 @@ def backup_nand(  # noqa: PLR0913 -- the reader and the declared chip are distin
         if temporary is not None:
             temporary.unlink(missing_ok=True)
 
+    if progress is not None:
+        progress(geometry.raw_bytes, geometry.raw_bytes)
     print(
         f"NAND backup saved: {output} ({geometry.raw_bytes} bytes, sha256={digest})",
         flush=True,

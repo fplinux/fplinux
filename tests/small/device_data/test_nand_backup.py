@@ -22,7 +22,7 @@ from fplinux_cli.device_data.prepare import dump_page_bytes
 from fplinux_cli.runtime import nand_backup
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 
 def _geometry_report(  # noqa: PLR0913 -- each reported value stays visible at the call site.
@@ -101,12 +101,15 @@ class FakePhone:
         destination: BinaryIO,
         *,
         timeout: float,
+        progress: Callable[[int], None] | None = None,
     ) -> None:
         """Answer a raw read with the payload and any other command with the report."""
         del session, timeout
         self.commands.append(command)
         if command.startswith("exec dd "):
             destination.write(self.payload)
+            if progress is not None:
+                progress(len(self.payload))
         else:
             destination.write(self.geometry.encode("ascii"))
 
@@ -117,6 +120,40 @@ class FakePhone:
 
 class NandBackupTests:
     """Protect the exact raw stream boundary and its local publication result."""
+
+    @pytest.mark.parametrize("complete", [True, False])
+    def test_backup_progress_completes_only_after_checked_publication(
+        self, *, complete: bool
+    ) -> None:
+        """A short stream cannot report completion or replace a usable backup."""
+        payload = b"P" * (2176 if complete else 2175)
+        phone = FakePhone(ONE_PAGE_128_OOB, payload)
+        updates: list[tuple[int, int]] = []
+
+        def progress(completed: int, total: int) -> None:
+            updates.append((completed, total))
+            if completed == total:
+                assert self.destination.read_bytes() == b"P" * 2176
+                assert json.loads(self.receipt.read_text())["raw_bytes"] == 2176
+
+        def execute() -> None:
+            nand_backup.backup_nand(
+                lambda: (phone, {"session_id": "selected"}),
+                self.destination,
+                target="demo-phone",
+                raw_device="/dev/ums9117-nand-raw",
+                progress=progress,
+            )
+
+        if complete:
+            execute()
+            assert updates[-1] == (2176, 2176)
+        else:
+            with pytest.raises(SystemExit, match="incomplete raw NAND image"):
+                execute()
+            assert all(completed < total for completed, total in updates)
+            assert not self.destination.exists()
+            assert not self.receipt.exists()
 
     @pytest.fixture(autouse=True)
     def prepared_directory(self) -> Iterator[None]:
