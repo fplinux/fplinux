@@ -598,11 +598,11 @@ class WindowsTransport:
         capture_output: bool = False,
         shared: bool = False,
     ) -> subprocess.CompletedProcess[str]:
-        """Run one command through a dedicated authenticated transport."""
-        del shared
+        """Run dedicated SSH; shared metadata operations leave caller input untouched."""
         self._require_bound(session)
         return subprocess.run(
             self._ssh_arguments(session, command),
+            stdin=subprocess.DEVNULL if shared else None,
             capture_output=capture_output,
             text=True,
             check=False,
@@ -751,6 +751,7 @@ class WindowsTransport:
                     self._ssh_arguments(
                         session, "fplinux-session-id; uname -r", connect_timeout=connect_timeout
                     ),
+                    stdin=subprocess.DEVNULL,
                     capture_output=True,
                     text=True,
                     timeout=min(connect_timeout + 1, remaining),

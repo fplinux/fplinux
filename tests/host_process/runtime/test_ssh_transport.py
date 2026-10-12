@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 import shlex
 import shutil
@@ -23,9 +24,55 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 from tests import ROOT
+from tests.process import python_environment
 from tests.ssh_transport_support import create_ready_session
 
 SSH_FIXTURES = ROOT / "tests" / "fixtures" / "ssh_transport"
+
+
+@pytest.mark.parametrize(
+    ("probe", "capture_output"),
+    [("ram-session", False), ("kernel-identity", False), ("both", True)],
+    ids=["ram-session", "kernel-identity", "combined-captured-output"],
+)
+def test_identity_probes_preserve_binary_stdin_for_remote_command(
+    tmp_path: Path, probe: str, *, capture_output: bool
+) -> None:
+    """Real children read fd0; USB/network discovery and the SSH peer are controlled."""
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(mode=0o700)
+    session = create_ready_session(runtime)
+    session["runtime_root"] = str(runtime)
+    state_path = tmp_path / "session.json"
+    state_path.write_text(json.dumps(session), encoding="utf-8")
+    output = tmp_path / "received.bin"
+    payload = bytes(range(256)) * 256
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tests.fixtures.ssh_transport.linux_stdin_consumer",
+            str(state_path),
+            probe,
+            "capture" if capture_output else "inherit",
+        ],
+        input=payload,
+        capture_output=True,
+        cwd=ROOT,
+        env={
+            **python_environment(),
+            "FPLINUX_TEST_SESSION_ID": session["session_id"],
+            "FPLINUX_TEST_KERNEL": "6.12.0-fplinux-1212121212121212",
+            "FPLINUX_TEST_STDIN_OUTPUT": str(output),
+        },
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+    assert result.stdout == b"stdin received\n"
+    assert output.read_bytes() == payload
 
 
 class SshTransportFakeToolTests:

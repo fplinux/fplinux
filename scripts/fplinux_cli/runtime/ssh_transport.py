@@ -1086,6 +1086,7 @@ def _wait_for_authenticated_endpoint(
             # ConnectTimeout cannot bound a channel opened on an existing master.
             result = subprocess.run(
                 _ssh_argv(candidate, "fplinux-session-id", connect_timeout=timeout),
+                stdin=subprocess.DEVNULL,
                 capture_output=True,
                 text=True,
                 timeout=min(5, remaining),
@@ -1329,10 +1330,11 @@ def run_remote(
     capture_output: bool = False,
     shared: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    """Share transport only for controlled identity and file operations."""
+    """Run a command; shared metadata operations leave caller input untouched."""
     session = _validate_session(session)
     return subprocess.run(
         _ssh_argv(session, command, shared=shared),
+        stdin=subprocess.DEVNULL if shared else None,
         capture_output=capture_output,
         text=True,
         check=False,

@@ -9,6 +9,7 @@ import os
 import secrets
 import signal
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ import pytest
 from common import windows_host
 from tests import ROOT
 from tests.fixtures.executables import install_python_script
+from tests.process import python_environment
 from tests.windows_host_support import (
     StubWindowsHost,
     archive_files,
@@ -29,6 +31,49 @@ from tests.windows_host_support import (
     saved_connection,
     session_preparation_bundle,
 )
+
+
+@pytest.mark.parametrize(
+    ("probe", "capture_output"),
+    [("authentication", False), ("metadata", False), ("both", True)],
+    ids=["authentication", "metadata", "combined-captured-output"],
+)
+def test_metadata_probes_preserve_binary_stdin_for_remote_command(
+    tmp_path: Path, probe: str, *, capture_output: bool
+) -> None:
+    """Real host children retain command input; native Windows discovery and ACLs are stubs."""
+    session = endpoint_session(tmp_path / "session")
+    state_path = tmp_path / "session.json"
+    state_path.write_text(json.dumps(session), encoding="utf-8")
+    output = tmp_path / "received.bin"
+    payload = bytes(range(256)) * 256
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "tests.fixtures.ssh_transport.windows_stdin_consumer",
+            str(state_path),
+            probe,
+            "capture" if capture_output else "inherit",
+        ],
+        input=payload,
+        capture_output=True,
+        cwd=ROOT,
+        env={
+            **python_environment(),
+            "FPLINUX_TEST_SESSION_ID": "ab" * 32,
+            "FPLINUX_TEST_KERNEL": "6.12.0-fplinux-1212121212121212",
+            "FPLINUX_TEST_STDIN_OUTPUT": str(output),
+        },
+        timeout=10,
+        check=False,
+        creationflags=windows_host._console_creation_flags(),  # noqa: SLF001
+    )
+
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+    assert result.stdout == b"stdin received\n"
+    assert output.read_bytes() == payload
 
 
 @pytest.fixture(autouse=True)
