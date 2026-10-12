@@ -10,6 +10,9 @@ compatible = "@COMPATIBLE@"
 [nand]
 raw_device = "/dev/ums9117-nand-raw"
 
+[display]
+boot_font = "6x8"
+
 [rootfs]
 packages = ["fplinux-font-terminus-6x12"]
 

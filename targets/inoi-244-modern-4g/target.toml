@@ -12,6 +12,10 @@ raw_device = "/dev/ums9117-nand-raw"
 id = 0x21e5
 raw_page_bytes = 2112
 
+[display]
+panel = "display/panel.toml"
+boot_font = "7x14"
+
 [display_brightness]
 backlight = "inoi244-backlight"
 levels = [0, 2, 5, 8, 10, 12, 15, 18, 20, 21, 24]
@@ -82,7 +86,6 @@ record_prefix = "INOI244"
 
 [adapter]
 spi_mode = 3
-lcd_id = 0x303001
 backlight_channels = "rgb"
 backlight_level = 0x12
 exec_distance = 0
@@ -101,6 +104,7 @@ firmware = [
 ]
 
 [audio_profile]
+speaker_vibration = true
 firmware = [
   { source = "inoi244-audio-profile.bin", destination = "fplinux/inoi244-audio-profile.bin", size = 822 },
 ]

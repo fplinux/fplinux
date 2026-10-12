@@ -13,6 +13,8 @@
 #include "uniwa-v1000-4g-bluetooth.dtsi"
 #include "uniwa-v1000-4g-display.dtsi"
 
+#include "fplinux-uniwa-v1000-4g-audio-policy.dtsi"
+
 / {
 	memory@80200000 {
 		device_type = "memory";
@@ -47,7 +49,6 @@
 	pinctrl-0 = <&audio_mux_pins &audio_pad_pins>;
 	pinctrl-names = "audio";
 	fplinux,card-longname = "UNIWA V1000 4G audio";
-	fplinux,headfree-headphones-only;
 	fplinux,microphone-capture;
 
 	status = "okay";

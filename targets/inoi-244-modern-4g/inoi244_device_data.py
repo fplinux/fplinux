@@ -11,15 +11,20 @@ from fplinux_cli.device_data.fitted import prepare_from_partitions
 from fplinux_cli.device_data.partitions import discover_partitions
 
 if TYPE_CHECKING:
-    from fplinux_cli.device_data.formats import DeviceDataPreparation, PhysicalNand
+    from fplinux_cli.device_data.formats import (
+        AudioProfileContext,
+        DeviceDataPreparation,
+        PhysicalNand,
+    )
 
 
-def prepare_device_data(nand: PhysicalNand) -> DeviceDataPreparation:
+def prepare_device_data(
+    nand: PhysicalNand, *, audio: AudioProfileContext
+) -> DeviceDataPreparation:
     """Prepare declared groups from one NAND object and one fixed-NV parse per copy."""
     return prepare_from_partitions(
         nand,
         discover_partitions(nand, REQUIRED_BLUETOOTH_PARTITIONS).extents,
         prefix="inoi244",
-        machine_compatible=b"inoi,244-modern-4g",
-        speaker_vibration=True,
+        audio=audio,
     )

@@ -14,6 +14,7 @@ from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
 from fplinux_cli.build.bootstrap import recipe as bootstrap_build
 from fplinux_cli.build.bootstrap import stage as bootstrap_stage
+from fplinux_cli.manifests.targets import load_target
 
 from tests import ROOT
 
@@ -41,6 +42,13 @@ class BootstrapRecipeTests:
             self._write(relative, (ROOT / relative).read_bytes())
         self._write("scripts/fplinux_cli/build/environment.py", b"build environment\n")
         self.target_config: dict[str, Any] = {
+            "display": {
+                "width": 0,
+                "height": 0,
+                "boot_font": "6x8",
+                "panel": None,
+                "source": None,
+            },
             "identity": {
                 "brand": "Demo",
                 "product": "Phone",
@@ -153,6 +161,11 @@ class BootstrapRecipeTests:
             "sha-validation",
             "display-name",
             "record-prefix",
+            "geometry",
+            "boot-font",
+            "image-name",
+            "map-name",
+            "dtb-name",
         ],
     )
     def test_bootstrap_source_shared_vendor_and_config_are_causal(
@@ -189,6 +202,13 @@ class BootstrapRecipeTests:
             ),
             "record-prefix": lambda: self.target_config["bootstrap"].update(
                 record_prefix="CHANGED"
+            ),
+            "geometry": lambda: self.target_config["display"].update(width=128, height=160),
+            "boot-font": lambda: self.target_config["display"].update(boot_font="7x14"),
+            "image-name": lambda: self.target_config["bootstrap"].update(image="changed.bin"),
+            "map-name": lambda: self.target_config["bootstrap"].update(map="obj/changed.map"),
+            "dtb-name": lambda: self.target_config["bootstrap"].update(
+                dtb_destination="changed.dtb"
             ),
         }
         baseline = self._digest()
@@ -233,6 +253,22 @@ class BootstrapRecipeTests:
         assert (baseline) == (self._digest())
         panel.write_bytes(b"changed selected panel\n")
         assert (baseline) != (self._digest())
+
+    @pytest.mark.parametrize("source", ["bootstrap", "bootstrap-microsd"])
+    def test_rendered_panel_data_changes_either_bootstrap_recipe(self, source: str) -> None:
+        """A selected LCD command change invalidates either stage without foreign inputs."""
+        self._write("targets/demo/bootstrap-microsd/Makefile", b"all:\n\ttrue\n")
+        self._write("targets/demo/bootstrap/lcd_config.h", b"selected panel wrapper\n")
+        self.target_config["display"] = load_target("nokia-ta1618")["display"]
+        commands: list[dict[str, Any]] = [{"command": 0x36, "data": [0x28], "delay_ms": 0}]
+        self.target_config["display"]["panel"]["commands"] = commands
+        self.target_config["bootstrap"].update(source=source, lcd_config="bootstrap/lcd_config.h")
+        baseline = self._digest()
+        self._write("targets/another/display/panel.toml", b"unselected panel\n")
+        assert baseline == self._digest()
+
+        commands[0]["data"][0] = 0x48
+        assert baseline != self._digest()
 
     @pytest.mark.parametrize("source", ["bootstrap", "bootstrap-microsd"])
     def test_linux_font_source_and_freestanding_header_are_causal(self, source: str) -> None:

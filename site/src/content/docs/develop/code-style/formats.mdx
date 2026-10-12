@@ -29,16 +29,16 @@ wrapping.
 
 Document sections use this order; absent sections are skipped:
 
-| Document         | Section order                                                                                                                                                                 |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Target           | `platform`, identity, NAND, display brightness, rootfs, bundle, Linux, bootstrap, adapter, device data, board maps, Bluetooth, audio profile, FM radio, WCN firmware, microSD |
-| Platform         | identity, rootfs, bundle, U-Boot, Linux, bootstrap, runtime, host                                                                                                             |
-| Profile          | `name`, Linux root, rootfs, bootstrap, U-Boot, FIT, layout, storage, runtime                                                                                                  |
-| Source lock      | Linux, bootstrap source, host source and files, transfer source and files                                                                                                     |
-| Alpine lock      | release/branch/architecture/triplet, repositories, minirootfs, runtime, runtime additions, sysroot, package catalogue                                                         |
-| Container lock   | Kern, OCI                                                                                                                                                                     |
-| Asset lock       | each source followed by its outputs                                                                                                                                           |
-| Release manifest | image, bundle files, runtime files, documents                                                                                                                                 |
+| Document         | Section order                                                                                                                                                                          |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Target           | `platform`, identity, NAND, display, display brightness, rootfs, bundle, Linux, bootstrap, adapter, device data, board maps, Bluetooth, audio profile, FM radio, WCN firmware, microSD |
+| Platform         | identity, rootfs, bundle, U-Boot, Linux, bootstrap, runtime, host                                                                                                                      |
+| Profile          | `name`, Linux root, rootfs, bootstrap, U-Boot, FIT, layout, storage, runtime                                                                                                           |
+| Source lock      | Linux, bootstrap source, host source and files, transfer source and files                                                                                                              |
+| Alpine lock      | release/branch/architecture/triplet, repositories, minirootfs, runtime, runtime additions, sysroot, package catalogue                                                                  |
+| Container lock   | Kern, OCI                                                                                                                                                                              |
+| Asset lock       | each source followed by its outputs                                                                                                                                                    |
+| Release manifest | image, bundle files, runtime files, documents                                                                                                                                          |
 
 Target fields follow their consumer roles:
 
@@ -46,14 +46,16 @@ Target fields follow their consumer roles:
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
 | identity           | `brand`, `product`, `hardware_codes`, `compatible`                                                                           |
 | nand               | `raw_device`, `id`, `raw_page_bytes`, `ecc_format`                                                                           |
+| display            | `panel`, `boot_font`                                                                                                         |
 | display_brightness | `backlight`, `levels`                                                                                                        |
 | rootfs, bundle     | `packages`                                                                                                                   |
 | linux              | `config_fragment`, `memory`, `dtb`, `debug_dtb`, `patches`, `forbidden_dtb_markers`, `forbidden_config`, `copies`, `appends` |
 | memory             | `base`, `size`                                                                                                               |
 | copy, append       | `source`, `destination`                                                                                                      |
 | bootstrap          | `lcd_config`, `image`, `map`, `dtb_destination`, `record_prefix`                                                             |
-| adapter            | `spi_mode`, `lcd_id`, `backlight_channels`, `backlight_level`, `exec_distance`, `session_name`, `boot_instructions`          |
+| adapter            | `spi_mode`, `backlight_channels`, `backlight_level`, `exec_distance`, `session_name`, `boot_instructions`                    |
 | device_data        | `parser`                                                                                                                     |
+| audio_profile      | `speaker_vibration`, `speaker_from_headphones`, `headfree_headphones_only`, `firmware`                                       |
 | firmware record    | `source`, `destination`, `size`, `sha256`                                                                                    |
 | microsd            | `linux_patches`, bootstrap, U-Boot                                                                                           |
 | microsd.bootstrap  | `source`, `image`, `map`                                                                                                     |

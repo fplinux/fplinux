@@ -19,6 +19,7 @@ from fplinux_cli import common
 from fplinux_cli.cli import device_data as device_data_prepare
 from fplinux_cli.device_data import prepare as device_data_prepare_prepare
 from fplinux_cli.device_data.formats import (
+    AudioProfileContext,
     DeviceDataPreparation,
     NandGeometry,
     PhysicalNand,
@@ -109,6 +110,12 @@ class DeviceDataPrepareTests:
                 7,
             )
         return {
+            "identity": {"compatible": "demo,phone"},
+            "audio_policy": {
+                "speaker_vibration": False,
+                "speaker_from_headphones": False,
+                "headfree_headphones_only": False,
+            },
             "device_data": {"parser": "device_data.py", "groups": groups},
             "nand": nand,
         }
@@ -238,7 +245,8 @@ class DeviceDataPrepareTests:
             destination.chmod(0o600)
             return destination
 
-        def extract(nand: PhysicalNand) -> DeviceDataPreparation:
+        def extract(nand: PhysicalNand, *, audio: AudioProfileContext) -> DeviceDataPreparation:
+            del audio
             events.append(("extract", nand))
             return self._preparation()
 
@@ -329,7 +337,7 @@ class DeviceDataPrepareTests:
             groups["bluetooth"] = self._group("radio.bin", "chip/radio.bin", 5)
             device_data["parser"] = "device_data.py"
         parser = SimpleNamespace(
-            prepare_device_data=lambda _nand: DeviceDataPreparation(
+            prepare_device_data=lambda _nand, **_context: DeviceDataPreparation(
                 groups={"bluetooth": BLUETOOTH}
             )
         )
@@ -339,6 +347,7 @@ class DeviceDataPrepareTests:
                 device_data_prepare,
                 "load_target",
                 return_value={
+                    **self._config(),
                     "platform": "demo-platform",
                     "device_data": device_data,
                     "nand": DECLARED_NAND,
@@ -465,6 +474,7 @@ class DeviceDataPrepareTests:
             (output / "scenario.json").write_text(json.dumps(scenario), encoding="utf-8")
 
         config = {
+            **self._config(),
             "platform": "ums9117",
             "nand": DECLARED_NAND,
             "device_data": {

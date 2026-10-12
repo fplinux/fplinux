@@ -12,6 +12,10 @@
 #include "nokia-ta1618-nand-readonly.dtsi"
 #include "nokia-ta1618-bluetooth.dtsi"
 
+#include "fplinux-nokia-ta1618-audio-policy.dtsi"
+
+#include "fplinux-nokia-ta1618-panel-addresses.h"
+
 / {
 	memory@80200000 {
 		device_type = "memory";
@@ -127,8 +131,8 @@
 			      <0x20e01000 0x00000004>,
 			      <0x20e01004 0x00000004>,
 			      <0x20e02004 0x00000004>,
-			      <0x402a00b0 0x0000001c>,
-			      <0x402a04b0 0x0000001c>;
+			      <FPLINUX_PANEL_CONTROL_MUX_PHYS 0x0000001c>,
+			      <FPLINUX_PANEL_CONTROL_CONFIG_PHYS 0x0000001c>;
 			interrupt-names = "lcdc-done";
 			interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;
 			memory-region = <&codec_dma>;
@@ -137,13 +141,7 @@
 				    "ap-ahb-reset-set", "ap-ahb-reset-clear", "pinmux",
 				    "pinconf";
 			sprd,aon-apb = <&aon_apb>;
-			sprd,pinconf-offsets = <0 4 8 12 16 20 24>;
-			sprd,pinconf-values = <
-				0x00182001 0x00082046 0x00082001 0x00102004
-				0x00082004 0x00102004 0x00082004
-			>;
-			sprd,pinmux-offsets = <0 4 8 12 16 20 24>;
-			sprd,pinmux-values = <0 0 0 0 0 0 0>;
+#include "fplinux-nokia-ta1618-panel.dtsi"
 			sprd,pmic = <&sc2720_pmic>;
 			sprd,wled-current-levels = <20 20 20 20>;
 			sprd,wled-default-level = <15>;

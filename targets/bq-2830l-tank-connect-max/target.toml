@@ -13,6 +13,10 @@ id = 0x81c8
 raw_page_bytes = 2176
 ecc_format = "ums9117-bch12"
 
+[display]
+panel = "display/panel.toml"
+boot_font = "6x8"
+
 [display_brightness]
 backlight = "bq-2830l-backlight"
 levels = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50]
@@ -195,7 +199,6 @@ record_prefix = "BQ_2830L_TANK_CONNECT_MAX"
 
 [adapter]
 spi_mode = 1
-lcd_id = 0x9307
 backlight_channels = "rgbw"
 backlight_level = 35
 exec_distance = 0
@@ -213,6 +216,7 @@ firmware = [
 ]
 
 [audio_profile]
+speaker_from_headphones = true
 firmware = [
   { source = "bq-2830l-tank-connect-max-audio-profile.bin", destination = "fplinux/bq-2830l-tank-connect-max-audio-profile.bin", size = 788 },
 ]

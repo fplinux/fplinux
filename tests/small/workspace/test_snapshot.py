@@ -248,6 +248,8 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
         host_input = write("tools/local-input.h")
         host_patch = write("tools/local.patch")
         loader_events = write("common/loader_events.py")
+        common_loader = write("platforms/demo/loader/assets.lock.toml")
+        panel = write("targets/phone/display/panel.toml")
         write("alpine/ramroot-init.sh", b"#!/bin/sh\nexit 0\n")
         unrelated = write("unselected.txt")
 
@@ -273,6 +275,7 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
         target: dict[str, Any] = {
             "build_type": "release",
             "platform": "demo",
+            "display": {"source": "display/panel.toml"},
             "device_data": {"groups": {}},
             "bundle": {"packages": ["package-b"]},
             "linux": {
@@ -376,6 +379,8 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
                 host_input,
                 host_patch,
                 loader_events,
+                common_loader,
+                panel,
             ):
                 original = causal.read_bytes()
                 causal.write_bytes(original + b"changed\n")

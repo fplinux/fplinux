@@ -31,10 +31,6 @@ dtb_destination = "%(target)s.dtb"
 record_prefix = "DEMO"
 
 [adapter]
-spi_mode = 0
-lcd_id = 0
-backlight_channels = "mono"
-backlight_level = 0
 exec_distance = 0
 session_name = "%(target)s"
 boot_instructions = "Power off and connect."

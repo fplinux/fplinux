@@ -1,11 +1,19 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """Replace fitted phone records with controlled bytes for portable extraction cases."""
 
-from fplinux_cli.device_data.formats import DeviceDataPreparation, PhysicalNand, PreparedGroup
+from fplinux_cli.device_data.formats import (
+    AudioProfileContext,
+    DeviceDataPreparation,
+    PhysicalNand,
+    PreparedGroup,
+)
 
 
-def prepare_device_data(nand: PhysicalNand) -> DeviceDataPreparation:
+def prepare_device_data(
+    nand: PhysicalNand, *, audio: AudioProfileContext
+) -> DeviceDataPreparation:
     """Return named groups with independently specified test payloads."""
+    del audio
     radio = nand.main_bytes(0, 5)
     return DeviceDataPreparation(
         groups={

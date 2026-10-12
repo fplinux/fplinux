@@ -36,6 +36,8 @@ _RUNTIME_PYTHON = (
     "device_data/portable.py",
     "device_data/prepare.py",
     "manifests/__init__.py",
+    "manifests/audio.py",
+    "manifests/identity.py",
     "manifests/values.py",
     "runtime/__init__.py",
     "runtime/nand_backup.py",
@@ -88,6 +90,8 @@ def device_data_manifest(target: str, config: dict[str, Any]) -> bytes:
         {
             "target": target,
             "platform": config["platform"],
+            "machine_compatible": config["identity"]["compatible"],
+            "audio_policy": config["audio_policy"],
             "nand": config["nand"],
             "device_data": {"parser": declarations["parser"], "groups": groups},
         }

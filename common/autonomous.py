@@ -25,6 +25,8 @@ from fplinux_cli.common import fail, read_json_object, replace_file_atomically  
 from fplinux_cli.device_data.cpio import create_device_data_initramfs  # noqa: E402
 from fplinux_cli.device_data.inputs import capture_device_data_generation  # noqa: E402
 from fplinux_cli.device_data.portable import prepare_portable_device_data  # noqa: E402
+from fplinux_cli.manifests.audio import validate_audio_policy  # noqa: E402
+from fplinux_cli.manifests.identity import validate_compatible  # noqa: E402
 from fplinux_cli.manifests.values import basename_value, exact_table  # noqa: E402
 from fplinux_cli.runtime.nand_backup import backup_nand  # noqa: E402
 
@@ -156,12 +158,19 @@ def _archive_runtime(root: Path) -> dict[str, Any]:
 def _device_data_manifest(root: Path, runtime: dict[str, Any]) -> dict[str, Any]:
     manifest = exact_table(
         read_json_object(root / "device-data-manifest.json"),
-        {"target", "platform", "nand", "device_data"},
+        {"target", "platform", "machine_compatible", "audio_policy", "nand", "device_data"},
         "archive device-data manifest",
     )
     target = basename_value(manifest["target"], "archive target")
     platform = basename_value(manifest["platform"], "archive platform")
     if target != runtime["target"] or platform != runtime["identity"]["platform"]["name"]:
+        fail("The device-data manifest describes a different phone than this archive")
+    try:
+        compatible = validate_compatible(manifest["machine_compatible"], "archive compatible")
+        validate_audio_policy(manifest["audio_policy"], "archive audio policy")
+    except ValueError as error:
+        fail(str(error))
+    if compatible != runtime["identity"]["target"]["compatible"]:
         fail("The device-data manifest describes a different phone than this archive")
     device_data = exact_table(manifest["device_data"], {"parser", "groups"}, "device_data")
     if not device_data["groups"]:

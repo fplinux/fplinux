@@ -6,6 +6,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+import pytest
 from fplinux_cli.manifests.linux import discover_linux_targets
 
 from tests.fixtures import linux_inputs
@@ -13,6 +14,28 @@ from tests.fixtures import linux_inputs
 
 class LinuxManifestTests:
     """Collect compatible source integrations without loading peer build artifacts."""
+
+    @staticmethod
+    @pytest.mark.parametrize(
+        ("declaration", "speaker_vibration"),
+        [("", False), ("speaker_vibration = true\n", True)],
+    )
+    def test_peer_audio_profile_defaults_omitted_topology_flags_to_false(
+        tmp_path: Path, declaration: str, *, speaker_vibration: bool
+    ) -> None:
+        """Peer loading preserves false defaults and an explicitly declared vibration policy."""
+        linux_inputs.platform(tmp_path, "demo", source_lock="base", arch="arm")
+        target = linux_inputs.target(tmp_path, "phone", platform_name="demo")
+        with target.open("a", encoding="utf-8") as output:
+            output.write("\n[audio_profile]\nfirmware = []\n" + declaration)
+
+        targets = discover_linux_targets(tmp_path, {"base": {"sha256": "1" * 64}}, "1" * 64)
+
+        assert targets[0].config["audio_policy"] == {
+            "headfree_headphones_only": False,
+            "speaker_from_headphones": False,
+            "speaker_vibration": speaker_vibration,
+        }
 
     @staticmethod
     def test_archive_digest_groups_distinct_platforms_and_architectures() -> None:

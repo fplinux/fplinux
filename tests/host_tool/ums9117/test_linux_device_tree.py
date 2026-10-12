@@ -1,9 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Compile and validate generated board identity and output-owned profile data.
-
-The small Makefile uses the platform's DTC flags without invoking Kbuild or
-compiling any hardware description.
-"""
+"""Compile DT projections with host tools and controlled external inputs."""
 
 from __future__ import annotations
 
@@ -23,6 +19,7 @@ from fplinux_cli.build.device_tree import (
     parse_nul_string_list,
 )
 from fplinux_cli.build.identity import (
+    linux_audio_policy_dtsi,
     linux_identity_dtsi,
     linux_identity_dtsi_name,
     linux_machine_binding,
@@ -38,6 +35,40 @@ from tests.process import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+
+@pytest.mark.parametrize(
+    ("field", "property_name"),
+    [
+        ("speaker_vibration", "fplinux,speaker-vibration"),
+        ("speaker_from_headphones", "fplinux,headphone-fed-speaker"),
+        ("headfree_headphones_only", "fplinux,headfree-headphones-only"),
+    ],
+)
+def test_compiled_audio_policy_contains_only_the_selected_topology_property(
+    tmp_path: Path, field: str, property_name: str
+) -> None:
+    """Each policy choice becomes the expected boolean property in a minimal audio node."""
+    policy = {
+        "speaker_vibration": False,
+        "speaker_from_headphones": False,
+        "headfree_headphones_only": False,
+    }
+    policy[field] = True
+    (tmp_path / "audio-policy.dtsi").write_bytes(linux_audio_policy_dtsi(policy))
+    source = tmp_path / "audio.dts"
+    source.write_text(
+        '/dts-v1/;\n/ { audio: audio {}; };\n/include/ "audio-policy.dtsi"\n',
+        encoding="ascii",
+    )
+    dtb = tmp_path / "audio.dtb"
+    run_process(
+        ["dtc", "-I", "dts", "-O", "dtb", "-i", str(tmp_path), "-o", str(dtb), str(source)],
+        name="compile generated audio topology",
+        timeout=15,
+        check=True,
+    )
+    assert exact_path_properties(dtb, "/audio")["/audio"] == {property_name: b""}
 
 
 class NewTargetDeviceTreeTests:
@@ -56,6 +87,7 @@ class NewTargetDeviceTreeTests:
             shutil.copytree(
                 ROOT / "platforms/ums9117/target-template", platform_directory / "target-template"
             )
+            shutil.copytree(ROOT / "platforms/ums9117/loader", platform_directory / "loader")
             shutil.copytree(ROOT / "profiles", root / "profiles")
             (root / "targets").mkdir()
             with (

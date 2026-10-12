@@ -7,71 +7,19 @@
 
 #include "ums9117-drm.h"
 
-/* NV3030 register setup shared by cold start and wake. */
-static const struct ums9117_drm_command inoi244_panel_init[] = {
-	/* Delay after reset and final DBI timing. */
-	{ 0x00, 0, 50, {} },
-	{ 0xfd, 2, 0, { 0x06, 0x08 } },
-	{ 0x61, 2, 0, { 0x07, 0x07 } },
-	{ 0x73, 1, 0, { 0x70 } },
-	{ 0x73, 1, 0, { 0x00 } },
-	{ 0x62, 3, 0, { 0x00, 0x44, 0x40 } },
-	{ 0x63, 4, 0, { 0x41, 0x07, 0x12, 0x12 } },
-	{ 0x65, 3, 0, { 0x09, 0x10, 0x21 } },
-	{ 0x66, 3, 0, { 0x09, 0x10, 0x21 } },
-	{ 0x67, 2, 0, { 0x21, 0x40 } },
-	{ 0x68, 4, 0, { 0xa5, 0x4c, 0x45, 0x21 } },
-	{ 0xb1, 3, 0, { 0x0f, 0x02, 0x02 } },
-	{ 0xb4, 1, 0, { 0x01 } },
-	{ 0xb5, 4, 0, { 0x02, 0x02, 0x0a, 0x14 } },
-	{ 0xb6, 5, 0, { 0x04, 0x00, 0x9f, 0x00, 0x02 } },
-	{ 0xdf, 1, 0, { 0x11 } },
-	{ 0xe2, 6, 0, { 0x1a, 0x14, 0x14, 0x1e, 0x1b, 0x3f } },
-	{ 0xe5, 6, 0, { 0x3f, 0x1c, 0x1d, 0x12, 0x13, 0x1a } },
-	{ 0xe1, 2, 0, { 0x39, 0x6c } },
-	{ 0xe4, 2, 0, { 0x69, 0x32 } },
-	{ 0xe0, 8, 0, { 0x08, 0x0d, 0x10, 0x12, 0x14, 0x10, 0x11, 0x14 } },
-	{ 0xe3, 8, 0, { 0x16, 0x13, 0x15, 0x16, 0x15, 0x12, 0x0c, 0x08 } },
-	{ 0xe6, 2, 0, { 0x00, 0xff } },
-	{ 0xe7, 6, 0, { 0x01, 0x04, 0x03, 0x03, 0x00, 0x12 } },
-	{ 0xe8, 3, 0, { 0x00, 0x70, 0x00 } },
-	{ 0xec, 1, 0, { 0x52 } },
-	{ 0xf6, 4, 0, { 0x01, 0x30, 0x00, 0x00 } },
-	{ 0xf1, 3, 0, { 0x01, 0x61, 0x62 } },
-	{ 0xfd, 2, 0, { 0xfa, 0xfc } },
-	{ 0x3a, 1, 0, { 0x55 } },
-	{ 0x35, 1, 0, { 0x00 } },
-};
-
-/* INOI 244 panel cold-start sequence. */
-static const struct ums9117_drm_command inoi244_panel_init_finish[] = {
-	{ 0x11, 0, 200, {} },
-	{ 0x29, 0, 0, {} },
-	{ 0x36, 1, 0, { 0x00 } },
-	{ 0x2a, 4, 0, { 0x00, 0x00, 0x00, 0xef } },
-	{ 0x2b, 4, 0, { 0x00, 0x00, 0x01, 0x3f } },
-};
-
-/* Reestablish panel state and the full window before the retained frame. */
-static const struct ums9117_drm_command inoi244_panel_wake_finish[] = {
-	{ 0x36, 1, 0, { 0x00 } },
-	{ 0x11, 0, 200, {} },
-	{ 0x29, 0, 20, {} },
-	{ 0x2a, 4, 0, { 0x00, 0x00, 0x00, 0xef } },
-	{ 0x2b, 4, 0, { 0x00, 0x00, 0x01, 0x3f } },
-};
+#include "fplinux-inoi-244-modern-4g-panel.h"
 
 static const struct ums9117_drm_profile inoi244_drm_profile = {
 	.name = "inoi244-rgb565",
-	.transport = UMS9117_DRM_TRANSPORT_LCM_DBI,
-	.init = inoi244_panel_init,
-	.init_count = ARRAY_SIZE(inoi244_panel_init),
-	.init_finish = inoi244_panel_init_finish,
-	.init_finish_count = ARRAY_SIZE(inoi244_panel_init_finish),
-	.wake_finish = inoi244_panel_wake_finish,
-	.wake_finish_count = ARRAY_SIZE(inoi244_panel_wake_finish),
-	.width = 240,
-	.height = 320,
+	.transport = FPLINUX_PANEL_TRANSPORT,
+	.init = fplinux_panel_init,
+	.init_count = ARRAY_SIZE(fplinux_panel_init),
+	.init_finish = fplinux_panel_cold_finish,
+	.init_finish_count = ARRAY_SIZE(fplinux_panel_cold_finish),
+	.wake_finish = fplinux_panel_wake_finish,
+	.wake_finish_count = ARRAY_SIZE(fplinux_panel_wake_finish),
+	.width = FPLINUX_PANEL_WIDTH,
+	.height = FPLINUX_PANEL_HEIGHT,
 	.reset_phase_ms = 10,
 	.reset_release_ms = 0,
 	.wake_reset_phase_ms = 16,

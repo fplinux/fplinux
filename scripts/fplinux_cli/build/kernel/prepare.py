@@ -11,7 +11,10 @@ from typing import TYPE_CHECKING, Any
 from fplinux_cli import common
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import sources as sources_build
+from fplinux_cli.build.display import render_linux_display_files
 from fplinux_cli.build.identity import (
+    linux_audio_policy_dtsi,
+    linux_audio_policy_dtsi_name,
     linux_identity_dtsi,
     linux_identity_dtsi_name,
     linux_machine_binding,
@@ -90,6 +93,10 @@ def generated_linux_files(
         f"{dts_directory}/{linux_identity_dtsi_name(target)}": linux_identity_dtsi(
             target_identity, platform_identity
         ),
+        f"{dts_directory}/{linux_audio_policy_dtsi_name(target)}": linux_audio_policy_dtsi(
+            target_config["audio_policy"]
+        ),
+        **render_linux_display_files(target, target_config["display"]),
         platform_linux["platform_identity_header"]: linux_platform_identity_header(
             platform_identity
         ),

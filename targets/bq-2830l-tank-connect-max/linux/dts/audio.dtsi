@@ -10,7 +10,6 @@
 	wakeup-source;
 	fplinux,card-longname = "BQ 2830L audio";
 	fplinux,external-fm;
-	fplinux,headphone-fed-speaker;
 	fplinux,microphone-capture;
 	fplinux,speaker-mode4-pulse-us = <2>;
 

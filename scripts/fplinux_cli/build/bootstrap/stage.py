@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
 from fplinux_cli.build import sources as sources_build
+from fplinux_cli.build.display import render_bootstrap_display
 from fplinux_cli.common import fail
 
 from .recipe import generated_bootstrap_files, uboot_build_header
@@ -115,6 +116,9 @@ def build_bootstrap(  # noqa: PLR0913 -- source selection and payload inputs sta
         shutil.copyfile(
             inputs_build.require_file(inputs_build.target_source(target, lcd_config)), destination
         )
+        panel_data = render_bootstrap_display(target_config["display"])
+        if panel_data is not None:
+            (destination.parent / "fplinux-panel-data.h").write_bytes(panel_data)
     sources_build.apply_patches(
         vendor,
         [

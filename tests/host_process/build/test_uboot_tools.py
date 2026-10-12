@@ -238,6 +238,9 @@ class UbootToolsTests:
             if not line.startswith(layout_prefixes)
         )
         receipts = []
+        platform = self.root / "platforms/ums9117"
+        platform.mkdir(parents=True)
+        shutil.copyfile(ROOT / "platforms/ums9117/platform.toml", platform / "platform.toml")
         for target, defconfig in (
             ("nokia-ta1618", "ta1618_defconfig"),
             ("inoi-240-modern-4g", "inoi240_defconfig"),
@@ -247,6 +250,11 @@ class UbootToolsTests:
             source.parent.mkdir(parents=True)
             source.write_text(base)
             target_config = {
+                "platform": "ums9117",
+                "identity": {
+                    "display_name": "Example Phone",
+                    "compatible": "example,phone",
+                },
                 "profile": "microsd-uboot",
                 "layout": {
                     **self.layout,

@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.common import fail, load_toml
+from fplinux_cli.manifests.audio import AudioPolicyError, audio_policy_from_profile
+from fplinux_cli.manifests.display import load_display
 from fplinux_cli.manifests.identity import (
     IdentityError,
     validate_platform_identity,
@@ -124,7 +126,12 @@ def discover_linux_targets(
             "identity": identity,
             "platform": platform_name,
             "linux": _projection(raw.get("linux"), f"target {target} linux"),
+            "display": load_display(target, raw.get("display"), root=root),
         }
+        try:
+            config["audio_policy"] = audio_policy_from_profile(raw.get("audio_profile"))
+        except AudioPolicyError as error:
+            fail(str(error))
         if "microsd" in raw:
             microsd = raw["microsd"]
             if not isinstance(microsd, dict):

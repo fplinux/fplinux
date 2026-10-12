@@ -74,6 +74,16 @@ def target_asset_lock_path(target: str) -> Path:
     return target_directory(target) / "loader/assets.lock.toml"
 
 
+def platform_asset_lock_path(platform: str) -> Path:
+    """Return the fixed loader asset-lock path for one platform."""
+    if TARGET_NAME.fullmatch(platform) is None:
+        fail(f"invalid platform name: {platform}")
+    path = common.ROOT / "platforms" / platform
+    if path.is_symlink() or not path.is_dir():
+        fail(f"unknown platform: {platform}")
+    return path / "loader/assets.lock.toml"
+
+
 def profiles_directory(target: str | None = None) -> Path:
     """Return the shared build-profile directory."""
     if target is not None:

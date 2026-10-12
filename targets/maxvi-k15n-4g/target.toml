@@ -10,6 +10,10 @@ compatible = "maxvi,k15n4g"
 [nand]
 raw_device = "/dev/ums9117-nand-raw"
 
+[display]
+panel = "display/panel.toml"
+boot_font = "7x14"
+
 [display_brightness]
 backlight = "maxvi-k15n-4g-backlight"
 levels = [0, 3, 6, 9, 12, 16, 19, 22, 25, 28, 31]
@@ -72,7 +76,6 @@ record_prefix = "MAXVI_K15N_4G"
 
 [adapter]
 spi_mode = 0
-lcd_id = 0x9707
 backlight_channels = "rgw"
 backlight_level = 22
 exec_distance = 0

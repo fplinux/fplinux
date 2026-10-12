@@ -63,7 +63,8 @@ def _hardware_codes(value: object, name: str) -> list[str]:
     return result
 
 
-def _compatible(value: object, name: str) -> str:
+def validate_compatible(value: object, name: str = "compatible") -> str:
+    """Require the canonical compatible used by DT and prepared firmware."""
     if not isinstance(value, str) or _COMPATIBLE.fullmatch(value) is None:
         raise IdentityError(f"{name} must be a lowercase vendor,device compatible")
     return value
@@ -94,7 +95,7 @@ def validate_target_identity(value: object, name: str = "target identity") -> di
         "brand": _human_text(table.get("brand"), f"{name} brand"),
         "product": _human_text(table.get("product"), f"{name} product"),
         "hardware_codes": _hardware_codes(table.get("hardware_codes"), f"{name} hardware_codes"),
-        "compatible": _compatible(table.get("compatible"), f"{name} compatible"),
+        "compatible": validate_compatible(table.get("compatible"), f"{name} compatible"),
     }
     result["display_name"] = target_display_name(result)
     return result
@@ -111,7 +112,7 @@ def validate_platform_identity(value: object, name: str = "platform identity") -
         "vendor": _human_text(table.get("vendor"), f"{name} vendor"),
         "soc": soc,
         "aliases": aliases,
-        "compatible": _compatible(table.get("compatible"), f"{name} compatible"),
+        "compatible": validate_compatible(table.get("compatible"), f"{name} compatible"),
     }
     result["display_name"] = platform_display_name(result)
     return result

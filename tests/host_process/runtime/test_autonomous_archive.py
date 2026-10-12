@@ -229,6 +229,22 @@ def test_target_selection_is_absent_from_the_archive_entry(
     assert not (archive.root / ".cache").exists()
 
 
+def test_device_data_identity_must_match_the_admitted_runtime(
+    autonomous_archive: AutonomousArchive,
+) -> None:
+    """The delivered entry refuses preparation for a different machine compatible."""
+    archive = autonomous_archive
+    manifest = archive.prepared.manifest
+    manifest["machine_compatible"] = "example,another-phone"
+    (archive.root / "device-data-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = archive.run("--from-dump", str(archive.prepared.dump))
+
+    assert result.returncode == 1
+    assert "different phone than this archive" in result.stderr
+    assert not (archive.root / "data").exists()
+
+
 def test_unusable_saved_dump_reports_the_owned_diagnostic_log(
     autonomous_archive: AutonomousArchive,
 ) -> None:

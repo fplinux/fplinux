@@ -1,0 +1,167 @@
+# SPDX-License-Identifier: GPL-2.0-only
+width = 240
+height = 320
+id = 0x9307
+id_mask = 0xffffff
+memory_access = 0x48
+transport = "spi"
+license = "GPL-2.0-only"
+copyright = []
+commands = [
+  { delay_ms = 120 },
+  { command = 0xfe },
+  { command = 0xef },
+  { command = 0x36, data = [
+    0x48,
+  ] },
+  { command = 0x3a, data = [
+    0x05,
+  ] },
+  { command = 0x21 },
+  { command = 0x86, data = [
+    0x98,
+  ] },
+  { command = 0x89, data = [
+    0x33,
+  ] },
+  { command = 0x8b, data = [
+    0x80,
+  ] },
+  { command = 0x8d, data = [
+    0x33,
+  ] },
+  { command = 0x8e, data = [
+    0x0f,
+  ] },
+  { command = 0xe8, data = [
+    0x13,
+    0x55,
+  ] },
+  { command = 0xec, data = [
+    0x33,
+    0x06,
+    0x00,
+  ] },
+  { command = 0xed, data = [
+    0x18,
+    0x09,
+  ] },
+  { command = 0xff, data = [
+    0x62,
+  ] },
+  { command = 0x99, data = [
+    0x3e,
+  ] },
+  { command = 0x9d, data = [
+    0x4b,
+  ] },
+  { command = 0x98, data = [
+    0x3e,
+  ] },
+  { command = 0x9c, data = [
+    0x4b,
+  ] },
+  { command = 0xc3, data = [
+    0x1a,
+  ] },
+  { command = 0xc4, data = [
+    0x10,
+  ] },
+  { command = 0xc9, data = [
+    0x18,
+  ] },
+  { command = 0xf0, data = [
+    0x82,
+    0x00,
+    0x16,
+    0x15,
+    0x0b,
+    0x3c,
+  ] },
+  { command = 0xf1, data = [
+    0x4d,
+    0x98,
+    0x98,
+    0x20,
+    0x2c,
+    0xbf,
+  ] },
+  { command = 0xf2, data = [
+    0x42,
+    0x09,
+    0x0d,
+    0x0e,
+    0x0a,
+    0x3b,
+  ] },
+  { command = 0xf3, data = [
+    0x4d,
+    0x93,
+    0x91,
+    0x20,
+    0x1a,
+    0x9f,
+  ] },
+  { command = 0x35, data = [
+    0x00,
+  ] },
+  { command = 0x44, data = [
+    0x00,
+    0x0a,
+  ] },
+]
+
+[bootstrap]
+spi_hz = 48000000
+prepare_pins = true
+reset_ms = 16
+commands_after = "cold_finish"
+
+[linux]
+commands_after = []
+cold_finish = [
+  { command = 0x11, delay_ms = 120 },
+  { command = 0x29 },
+  { command = 0x2c },
+]
+wake_finish = "cold_finish"
+
+[pins]
+control_base = 0x0b0
+control = [
+  [
+    0x00,
+    0x00000000,
+    0x00102001,
+  ],
+  [
+    0x04,
+    0x00000000,
+    0x00002046,
+  ],
+  [
+    0x08,
+    0x00000000,
+    0x00002001,
+  ],
+  [
+    0x0c,
+    0x00000000,
+    0x00102004,
+  ],
+  [
+    0x10,
+    0x00000000,
+    0x00002004,
+  ],
+  [
+    0x14,
+    0x00000000,
+    0x00102004,
+  ],
+  [
+    0x18,
+    0x00000000,
+    0x00002004,
+  ],
+]

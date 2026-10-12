@@ -2,8 +2,4 @@
 /dts-v1/;
 
 #include "ums9117-u-boot.dtsi"
-
-/ {
-	compatible = "nokia,ta-1618", "sprd,ums9117";
-	model = "Nokia 3210 4G (TA-1618) U-Boot control tree";
-};
+#include "fplinux-nokia-ta1618-uboot-identity.dtsi"

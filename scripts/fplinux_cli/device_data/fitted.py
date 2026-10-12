@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from fplinux_cli.device_data.audio_profile import AUDIO_RECORD_SIZES, prepare_headset_gain_profile
 from fplinux_cli.device_data.bluetooth_firmware import (
     DOWNLOADED_NV_PARTITION_ID,
@@ -11,7 +13,14 @@ from fplinux_cli.device_data.bluetooth_firmware import (
     prepare_bluetooth_from_records,
 )
 from fplinux_cli.device_data.fm_radio import FM_RECORD_SIZES, prepare_fm_config
-from fplinux_cli.device_data.formats import DeviceDataPreparation, PhysicalNand, fixed_nv_records
+from fplinux_cli.device_data.formats import (
+    DeviceDataPreparation,
+    PhysicalNand,
+    fixed_nv_records,
+)
+
+if TYPE_CHECKING:
+    from fplinux_cli.device_data.formats import AudioProfileContext
 
 
 def prepare_from_partitions(
@@ -19,8 +28,7 @@ def prepare_from_partitions(
     partitions: dict[int, tuple[int, int]],
     *,
     prefix: str,
-    machine_compatible: bytes,
-    speaker_vibration: bool = False,
+    audio: AudioProfileContext,
 ) -> DeviceDataPreparation:
     """Prepare shared fitted groups from one parse of each fixed-NV copy."""
     required_sizes = {
@@ -47,8 +55,10 @@ def prepare_from_partitions(
         downloaded,
         protected,
         prefix=prefix,
-        machine_compatible=machine_compatible,
-        speaker_vibration=speaker_vibration,
+        machine_compatible=audio.machine_compatible,
+        speaker_vibration=audio.speaker_vibration,
+        speaker_from_headphones=audio.speaker_from_headphones,
+        headfree_headphones_only=audio.headfree_headphones_only,
     )
     fm_radio = prepare_fm_config(downloaded, protected, prefix=prefix)
     return DeviceDataPreparation(

@@ -77,6 +77,43 @@ def linux_identity_dtsi(
     ).encode("ascii")
 
 
+def uboot_identity_dtsi_name(target: str) -> str:
+    """Keep each board's generated U-Boot root identity distinct."""
+    return f"fplinux-{target}-uboot-identity.dtsi"
+
+
+def uboot_identity_dtsi(
+    target_identity: dict[str, Any], platform_identity: dict[str, Any]
+) -> bytes:
+    """Generate the U-Boot control tree's current root identity."""
+    return (
+        f"// {_SPDX_TAG}: GPL-2.0-only\n"
+        "/ {\n"
+        f'\tmodel = "{target_identity["display_name"]} U-Boot control tree";\n'
+        f'\tcompatible = "{target_identity["compatible"]}", '
+        f'"{platform_identity["compatible"]}";\n'
+        "};\n"
+    ).encode("ascii")
+
+
+def linux_audio_policy_dtsi_name(target: str) -> str:
+    """Keep the target-owned audio policy distinct in a shared Linux tree."""
+    return f"fplinux-{target}-audio-policy.dtsi"
+
+
+def linux_audio_policy_dtsi(policy: dict[str, bool]) -> bytes:
+    """Project the three existing audio topology choices into DT properties."""
+    fields = (
+        ("headfree_headphones_only", "fplinux,headfree-headphones-only"),
+        ("speaker_from_headphones", "fplinux,headphone-fed-speaker"),
+        ("speaker_vibration", "fplinux,speaker-vibration"),
+    )
+    properties = "".join(
+        f"\t{property_name};\n" for field, property_name in fields if policy[field]
+    )
+    return (f"// {_SPDX_TAG}: GPL-2.0-only\n" + "&audio {\n" + properties + "};\n").encode("ascii")
+
+
 def linux_platform_identity_header(platform_identity: dict[str, Any]) -> bytes:
     """Generate the ARM machine descriptor's platform identity constants."""
     return (

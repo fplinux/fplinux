@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from fplinux_cli.common import ROOT, fail, read_json_object
-from fplinux_cli.device_data.formats import PhysicalNand
+from fplinux_cli.device_data.formats import AudioProfileContext, PhysicalNand
 from fplinux_cli.device_data.prepare import (
     BOARD_MAPS_GROUP,
     _board_maps_extractor,
@@ -19,6 +19,8 @@ from fplinux_cli.device_data.prepare import (
     dump_page_bytes,
     materialize_device_data,
 )
+from fplinux_cli.manifests.audio import validate_audio_policy
+from fplinux_cli.manifests.identity import validate_compatible
 from fplinux_cli.manifests.values import basename_value, exact_table
 from fplinux_cli.runtime.nand_backup import read_backup_geometry
 
@@ -27,7 +29,7 @@ def prepare_portable_device_data(*, from_dump: Path, destination: Path) -> Path:
     """Extract and select all groups for the single target recorded in the archive."""
     manifest = exact_table(
         read_json_object(ROOT / "device-data-manifest.json"),
-        {"target", "platform", "nand", "device_data"},
+        {"target", "platform", "machine_compatible", "audio_policy", "nand", "device_data"},
         "archive device-data manifest",
     )
     target = basename_value(manifest["target"], "archive target")
@@ -36,6 +38,12 @@ def prepare_portable_device_data(*, from_dump: Path, destination: Path) -> Path:
     declarations: dict[str, list[dict[str, Any]]] = device_data["groups"]
     if not declarations:
         fail(f"device-data preparation is not supported for target {target}")
+    try:
+        compatible = validate_compatible(manifest["machine_compatible"], "archive compatible")
+        policy = validate_audio_policy(manifest["audio_policy"], "archive audio policy")
+    except ValueError as error:
+        fail(str(error))
+    audio = AudioProfileContext(machine_compatible=compatible.encode("ascii"), **policy)
 
     if destination.exists() or destination.is_symlink():
         fail(f"prepared phone data already exists: {destination}")
@@ -65,6 +73,7 @@ def prepare_portable_device_data(*, from_dump: Path, destination: Path) -> Path:
             device_data["parser"],
             declarations,
             nand,
+            audio=audio,
             board_maps=board_maps,
         )
         materialize_device_data(staging, extracted, declarations, retain_originals=False)

@@ -12,6 +12,10 @@
 #include "inoi-240-modern-4g-nand-readonly.dtsi"
 #include "inoi-240-modern-4g-bluetooth.dtsi"
 
+#include "fplinux-inoi-240-modern-4g-audio-policy.dtsi"
+
+#include "fplinux-inoi-240-modern-4g-panel-addresses.h"
+
 / {
 	memory@80200000 {
 		device_type = "memory";
@@ -63,10 +67,10 @@
 			      <0x20e01000 0x00000004>,
 			      <0x20e01004 0x00000004>,
 			      <0x20e02004 0x00000004>,
-			      <0x402a00b0 0x0000001c>,
-			      <0x402a04b0 0x0000001c>,
-			      <0x402a01f8 0x00000028>,
-			      <0x402a05f8 0x00000028>;
+			      <FPLINUX_PANEL_CONTROL_MUX_PHYS 0x0000001c>,
+			      <FPLINUX_PANEL_CONTROL_CONFIG_PHYS 0x0000001c>,
+			      <FPLINUX_PANEL_DATA_MUX_PHYS 0x00000028>,
+			      <FPLINUX_PANEL_DATA_CONFIG_PHYS 0x00000028>;
 			interrupt-names = "lcdc-done";
 			interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;
 			memory-region = <&codec_dma>;
@@ -75,37 +79,7 @@
 				    "ap-ahb-reset-clear", "pinmux", "pinconf",
 				    "pinmux-data", "pinconf-data";
 			sprd,aon-apb = <&aon_apb>;
-			/* INOI 240 MCU timing at the 128 MHz AHB clock. */
-			sprd,dbi-timing-ns = <50 55 110 20 70 35>;
-			sprd,pinconf-data-offsets = <
-				0x00 0x04 0x08 0x0c 0x10 0x14 0x18 0x1c 0x20 0x24
-			>;
-			sprd,pinconf-data-values = <
-				0x00182004 0x00182004 0x00182004 0x00182004 0x00182004
-				0x00182004 0x00182004 0x00182004 0x00182004 0x00182004
-			>;
-			sprd,pinconf-offsets = <
-				0x000 0x004 0x008 0x00c 0x010 0x014 0x018
-			>;
-			sprd,pinconf-values = <
-				0x00182001 0x00182046 0x00182001
-				0x00182004 0x00182004 0x00182004 0x00182004
-			>;
-			/* Ten DBI data pins, separate from the intervening peripherals. */
-			sprd,pinmux-data-offsets = <
-				0x00 0x04 0x08 0x0c 0x10 0x14 0x18 0x1c 0x20 0x24
-			>;
-			sprd,pinmux-data-values = <
-				0x10 0x10 0x10 0x10 0x10
-				0x10 0x10 0x10 0x10 0x10
-			>;
-			/* LCM control pins. */
-			sprd,pinmux-offsets = <
-				0x000 0x004 0x008 0x00c 0x010 0x014 0x018
-			>;
-			sprd,pinmux-values = <
-				0 0 0x10 0x10 0x10 0x10 0x10
-			>;
+#include "fplinux-inoi-240-modern-4g-panel.dtsi"
 			sprd,pmic = <&sc2720_pmic>;
 			/* INOI uses RGB WLED channels only; the W channel stays dark. */
 			sprd,wled-current-levels = <31 31 31 0>;
@@ -123,7 +97,6 @@
 	pinctrl-names = "audio";
 	fplinux,card-longname = "INOI 240 Modern 4G audio";
 	fplinux,microphone-capture;
-	fplinux,speaker-vibration;
 
 	status = "okay";
 };

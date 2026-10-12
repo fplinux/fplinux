@@ -55,6 +55,65 @@ class CheckScopeTests:
         assert not receipt_matches(tmp_path, recipe(original + b"\n# changed owner\n", b"doc\n"))
 
     @pytest.mark.parametrize(
+        ("scope", "changed_input", "expected_hit"),
+        [
+            ("kernel", "declared-panel", False),
+            ("c", "declared-panel", False),
+            ("kernel", "renderer", False),
+            ("c", "renderer", True),
+            ("kernel", "unlisted-panel", True),
+            ("c", "unlisted-panel", True),
+            ("kernel", "headless-panel", True),
+            ("c", "headless-panel", True),
+            ("kernel", "documentation", True),
+            ("c", "documentation", True),
+        ],
+    )
+    def test_panel_check_receipts_track_only_their_declared_inputs(
+        self, tmp_path: Path, scope: str, changed_input: str, *, expected_hit: bool
+    ) -> None:
+        """Panel validation and Linux rendering revoke only their affected scope receipts."""
+        inputs = {
+            "targets/phone/target.toml": (
+                b'platform = "demo"\n[display]\npanel = "display/chosen.toml"\n'
+            ),
+            "targets/headless/target.toml": (b'platform = "demo"\n[display]\nboot_font = "6x8"\n'),
+            "platforms/demo/platform.toml": b"[linux]\npatches = []\ncopies = []\nappends = []\n",
+            "targets/phone/display/chosen.toml": b"width = 240\nheight = 320\n",
+            "targets/phone/display/unlisted.toml": b"width = 128\nheight = 160\n",
+            "targets/headless/display/chosen.toml": b"width = 128\nheight = 160\n",
+            "scripts/fplinux_cli/build/display.py": b"def render_panel():\n    return b'panel'\n",
+            "README.md": b"Phone documentation.\n",
+        }
+        changes = {
+            "declared-panel": ("targets/phone/display/chosen.toml", b"width = 0\nheight = 320\n"),
+            "renderer": (
+                "scripts/fplinux_cli/build/display.py",
+                b"def render_panel():\n    return b'changed panel'\n",
+            ),
+            "unlisted-panel": ("targets/phone/display/unlisted.toml", b"width = 0\n"),
+            "headless-panel": ("targets/headless/display/chosen.toml", b"width = 0\n"),
+            "documentation": ("README.md", b"Changed phone documentation.\n"),
+        }
+
+        def recipe(contents: dict[str, bytes]) -> CheckReceiptRecipe:
+            snapshot = WorkspaceSnapshot(
+                tuple(WorkspaceFile(path, data, 0o644) for path, data in contents.items()),
+                "a" * 64,
+            )
+            return check_scope_receipt_recipe(
+                scope,
+                check_scope_closure_digest(scope, snapshot),
+                image_generation="b" * 64,
+                orchestration_recipe="c" * 64,
+            )
+
+        publish_success_receipt(tmp_path, recipe(inputs))
+        assert receipt_matches(tmp_path, recipe(inputs))
+        path, changed = changes[changed_input]
+        assert receipt_matches(tmp_path, recipe({**inputs, path: changed})) is expected_hit
+
+    @pytest.mark.parametrize(
         ("scope", "original", "changed"),
         [
             (

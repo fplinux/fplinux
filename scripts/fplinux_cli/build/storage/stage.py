@@ -16,7 +16,9 @@ from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
 from fplinux_cli.build import sources as sources_build
 from fplinux_cli.build.device_tree import DeviceTreeError
+from fplinux_cli.build.identity import uboot_identity_dtsi, uboot_identity_dtsi_name
 from fplinux_cli.common import fail
+from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.values import sha256_value
 
 from . import layout as profile_layout
@@ -63,6 +65,8 @@ def build_profile_uboot(
             layout_header = generated / "fplinux-boot-layout.h"
             layout_dtsi = generated / "fplinux-uboot-layout.dtsi"
             target_header = generated / "fplinux-uboot-target.h"
+            identity_name = uboot_identity_dtsi_name(target)
+            identity_dtsi = generated / identity_name
             defconfig.write_bytes(
                 profile_layout.uboot_defconfig(
                     inputs_build.require_file(target_root / config["defconfig"]).read_bytes(),
@@ -74,9 +78,14 @@ def build_profile_uboot(
             target_header.write_text(
                 f'#define FPLINUX_UBOOT_TARGET "{target}"\n', encoding="ascii"
             )
+            platform = load_platform(target_config["platform"])
+            identity_dtsi.write_bytes(
+                uboot_identity_dtsi(target_config["identity"], platform["identity"])
+            )
             projections.append((layout_header, "include/fplinux-boot-layout.h"))
             projections.append((layout_dtsi, "arch/arm/dts/fplinux-uboot-layout.dtsi"))
             projections.append((target_header, "include/fplinux-uboot-target.h"))
+            projections.append((identity_dtsi, f"arch/arm/dts/{identity_name}"))
             uboot = uboot_tools.build_full(
                 archive,
                 config,

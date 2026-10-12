@@ -31,10 +31,15 @@ from tests import ROOT
 from tests.bundle_support import file_record
 from tests.fixtures.executables import install_python_script
 from tests.fixtures.stock_board_report import STOCK_IMAGE, agreeing_vbm, backup, signed_image
+from tests.small.device_data.audio_expected import INOI_VIBRATE_TONE_SECTION
+from tests.small.device_data.audio_fixtures import inoi_audio_records
+from tests.small.device_data.headfree_fixtures import headphone_only_headfree_records
+from tests.small.device_data.nv_fixtures import nv1
+from tests.small.device_data.test_headphone_fed_audio import headphone_fed_records
 from tests.windows_host_support import archive_files
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 
 @dataclass(frozen=True)
@@ -150,6 +155,12 @@ def portable_archive(tmp_path: Path) -> Iterator[PortableArchive]:
         manifest = {
             "target": "nokia-ta1618",
             "platform": "ums9117",
+            "machine_compatible": "nokia,ta1618",
+            "audio_policy": {
+                "speaker_vibration": False,
+                "speaker_from_headphones": False,
+                "headfree_headphones_only": False,
+            },
             "nand": {"id": 0x21E5, "raw_page_bytes": 2112},
             "device_data": {
                 "parser": "device_data.py",
@@ -293,6 +304,80 @@ def test_repeated_dump_preparation_preserves_the_selected_phone_data(
     assert "prepared phone data already exists" in second.stderr
     assert (generation / "groups/bluetooth/radio.bin").read_bytes() == b"radio"
     assert not list((archive.root / "data").glob(".phone-*"))
+
+
+@pytest.mark.parametrize(
+    ("policy_name", "record_factory", "size", "expected_gains", "expected_tone"),
+    [
+        (
+            "speaker_vibration",
+            inoi_audio_records,
+            822,
+            bytes.fromhex("07 6c 61 56 4b 41 37 2d 23 1b 1a00 39 35 31 2d 29 21 1d 19 17"),
+            INOI_VIBRATE_TONE_SECTION,
+        ),
+        (
+            "speaker_from_headphones",
+            headphone_fed_records,
+            788,
+            bytes.fromhex("07 6f 66 5d 54 4b 42 39 30 27 0000 60 58 50 48 40 38 30 28 20"),
+            b"",
+        ),
+        (
+            "headfree_headphones_only",
+            headphone_only_headfree_records,
+            788,
+            bytes.fromhex("04 5f 57 4f 47 3f 37 2f 27 1f 2b00 57 4f 47 3f 37 2f 27 1f 17"),
+            b"",
+        ),
+    ],
+)
+def test_standalone_profile_uses_the_selected_identity_and_audio_policy(  # noqa: PLR0913
+    *,
+    portable_archive: PortableArchive,
+    policy_name: str,
+    record_factory: Callable[[], tuple[dict[int, bytes], dict[int, bytes]]],
+    size: int,
+    expected_gains: bytes,
+    expected_tone: bytes,
+) -> None:
+    """The delivered parser consumes the manifest snapshot without a source target manifest."""
+    archive = portable_archive
+    shutil.copyfile(
+        ROOT / "tests/fixtures/processes/portable_audio_data_parser.py",
+        archive.root / "targets/nokia-ta1618/device_data.py",
+    )
+    downloaded, protected = record_factory()
+    with archive.dump.open("r+b") as stream:
+        for block, records in enumerate((downloaded, protected)):
+            main = nv1(tuple(sorted(records.items()))).ljust(131072, b"\xff")
+            raw = b"".join(
+                main[offset : offset + 2048] + b"\xff" * 64 for offset in range(0, len(main), 2048)
+            )
+            stream.seek(block * 135168)
+            stream.write(raw)
+    archive.manifest["audio_policy"][policy_name] = True
+    archive.manifest["device_data"]["groups"] = {
+        "audio-profile": [
+            {
+                "source": "example-audio-profile.bin",
+                "destination": "fplinux/example-audio-profile.bin",
+                "size": size,
+            }
+        ]
+    }
+    (archive.root / "device-data-manifest.json").write_text(
+        json.dumps(archive.manifest), encoding="utf-8"
+    )
+
+    result = archive.run("--from-dump", str(archive.dump))
+
+    assert result.returncode == 0, result.stderr
+    profile_path = archive.prepared_data() / "groups/audio-profile/example-audio-profile.bin"
+    profile = profile_path.read_bytes()
+    assert profile[:32] == b"FPAUDIO\0nokia,ta1618" + b"\0" * 12
+    assert profile[32:53] == expected_gains
+    assert profile[788:] == expected_tone
 
 
 def test_archive_cli_has_no_target_selector(portable_archive: PortableArchive) -> None:

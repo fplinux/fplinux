@@ -61,6 +61,8 @@ _MANIFEST_IMPLEMENTATION = frozenset(
     {
         "scripts/fplinux_cli/manifests/__init__.py",
         "scripts/fplinux_cli/manifests/assets.py",
+        "scripts/fplinux_cli/manifests/audio.py",
+        "scripts/fplinux_cli/manifests/display.py",
         "scripts/fplinux_cli/manifests/identity.py",
         "scripts/fplinux_cli/manifests/kernel.py",
         "scripts/fplinux_cli/manifests/linux.py",
@@ -114,6 +116,7 @@ _KERNEL_IMPLEMENTATION = _MANIFEST_IMPLEMENTATION | frozenset(
         "scripts/fplinux_cli/__init__.py",
         "scripts/fplinux_cli/common.py",
         "scripts/fplinux_cli/build/__init__.py",
+        "scripts/fplinux_cli/build/display.py",
         "scripts/fplinux_cli/build/environment.py",
         "scripts/fplinux_cli/build/device_tree.py",
         "scripts/fplinux_cli/build/identity.py",
@@ -213,8 +216,16 @@ def _source_scope_uses_file(  # noqa: PLR0911
     return False
 
 
+def _display_manifest_sources(display: object, *, base: PurePath) -> set[str]:
+    """Return the panel profile explicitly named by one target manifest."""
+    if not isinstance(display, dict):
+        return set()
+    panel = display.get("panel")
+    return {(base / panel).as_posix()} if isinstance(panel, str) else set()
+
+
 def _c_scope_paths(snapshot: WorkspaceSnapshot) -> set[str]:
-    """Resolve the same userspace/bootstrap C inputs and their quoted headers."""
+    """Resolve C sources, quoted headers and target panel validation inputs."""
     by_path = {file.path: file for file in snapshot.files}
     selected = {file.path for file in snapshot.files if _source_scope_uses_file("c", file)}
     for file in snapshot.files:
@@ -226,11 +237,17 @@ def _c_scope_paths(snapshot: WorkspaceSnapshot) -> set[str]:
 
     for file in snapshot.files:
         path = PurePath(file.path)
-        if len(path.parts) != 3 or path.parts[0] != "platforms" or path.name != "platform.toml":
+        if len(path.parts) != 3 or (path.parts[0], path.name) not in {
+            ("targets", "target.toml"),
+            ("platforms", "platform.toml"),
+        }:
             continue
         try:
             manifest = tomllib.loads(file.contents.decode("utf-8"))
         except UnicodeDecodeError, tomllib.TOMLDecodeError:
+            continue
+        if path.parts[0] == "targets":
+            selected.update(_display_manifest_sources(manifest.get("display"), base=path.parent))
             continue
         tools = manifest.get("host", {}).get("tools", [])
         if not isinstance(tools, list):
@@ -313,6 +330,9 @@ def _kernel_scope_paths(
             target_data = tomllib.loads(target_manifest.contents.decode("utf-8"))
         except UnicodeDecodeError, tomllib.TOMLDecodeError:
             continue
+        selected.update(
+            _display_manifest_sources(target_data.get("display"), base=target_path.parent)
+        )
         selected.update(_linux_manifest_sources(target_data.get("linux"), base=target_path.parent))
         if profile == "microsd-uboot":
             microsd = target_data.get("microsd", {})

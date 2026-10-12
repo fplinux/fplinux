@@ -40,6 +40,7 @@ class NewTargetTests:
             shutil.copytree(
                 REPOSITORY / "platforms/ums9117/target-template", platform / "target-template"
             )
+            shutil.copytree(REPOSITORY / "platforms/ums9117/loader", platform / "loader")
             shutil.copytree(REPOSITORY / "profiles", self.root / "profiles")
             self.targets = self.root / "targets"
             self.targets.mkdir()

@@ -13,7 +13,7 @@ from typing import Any
 from fplinux_cli.cli.build import build, prepare_host_tool
 from fplinux_cli.cli.nand import backup_target_nand
 from fplinux_cli.common import ROOT, fail, replace_file_atomically
-from fplinux_cli.device_data.formats import PhysicalNand
+from fplinux_cli.device_data.formats import AudioProfileContext, PhysicalNand
 from fplinux_cli.device_data.prepare import (
     BOARD_MAPS_GROUP,
     NAND_ECC_TOOL,
@@ -50,6 +50,13 @@ def prepare_device_data(
     declarations: dict[str, list[dict[str, Any]]] = device_data["groups"]
     if not declarations:
         fail(f"device-data preparation is not supported for target {target}")
+    audio_policy = target_config["audio_policy"]
+    audio = AudioProfileContext(
+        machine_compatible=target_config["identity"]["compatible"].encode("ascii"),
+        speaker_vibration=audio_policy["speaker_vibration"],
+        speaker_from_headphones=audio_policy["speaker_from_headphones"],
+        headfree_headphones_only=audio_policy["headfree_headphones_only"],
+    )
     parser_filename: str | None = device_data.get("parser")
     nand_declaration: dict[str, Any] | None = target_config.get("nand")
     has_ecc = nand_declaration is not None and "ecc_format" in nand_declaration
@@ -147,6 +154,7 @@ def prepare_device_data(
                     parser_filename,
                     declarations,
                     nand,
+                    audio=audio,
                     board_maps=board_maps,
                 )
             admitted = materialize_device_data(staging, extracted, declarations)

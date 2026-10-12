@@ -33,6 +33,37 @@ def _every_headfree_level(analog: bytes) -> dict[int, bytes]:
 class HeadsetGainProfileTests:
     """Protect the compact kernel input and admitted fitted playback gains."""
 
+    def test_compatible_fills_the_field_with_one_required_terminator(self) -> None:
+        """A 23-byte machine compatible remains complete in the compact kernel input."""
+        downloaded, protected = nokia_audio_records()
+
+        result = audio_profile.prepare_headset_gain_profile(
+            downloaded,
+            protected,
+            prefix="example",
+            machine_compatible=b"example,123456789012345",
+        )
+
+        profile = result.prepared["example-audio-profile.bin"]
+        assert profile[:32] == b"FPAUDIO\0example,123456789012345\0"
+
+    @pytest.mark.parametrize(
+        "compatible", [b"example,1234567890123456", b"example,12345678901234567"]
+    )
+    def test_compatible_cannot_be_truncated_or_omit_its_terminator(
+        self, compatible: bytes
+    ) -> None:
+        """An overlong identity cannot produce a profile rejected by the kernel reader."""
+        downloaded, protected = nokia_audio_records()
+
+        with pytest.raises(ValueError, match="24-byte terminated field"):
+            audio_profile.prepare_headset_gain_profile(
+                downloaded,
+                protected,
+                prefix="example",
+                machine_compatible=compatible,
+            )
+
     @pytest.mark.parametrize(
         ("prefix", "compatible", "record_factory", "speaker_vibration", "expected", "size"),
         [

@@ -9,13 +9,24 @@ from typing import Any
 
 from fplinux_cli.common import fail, load_toml
 from fplinux_cli.manifests.assets import asset_bundle_paths
+from fplinux_cli.manifests.audio import (
+    AUDIO_POLICY_FIELDS,
+    AudioPolicyError,
+    audio_policy_from_profile,
+)
+from fplinux_cli.manifests.display import load_display
 from fplinux_cli.manifests.identity import (
     IdentityError,
     validate_build_type,
     validate_record_prefix,
     validate_target_identity,
 )
-from fplinux_cli.manifests.paths import normalize_profile, target_asset_lock_path, target_directory
+from fplinux_cli.manifests.paths import (
+    normalize_profile,
+    platform_asset_lock_path,
+    target_asset_lock_path,
+    target_directory,
+)
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.profiles import load_profile
 from fplinux_cli.manifests.values import (
@@ -59,6 +70,7 @@ def load_target(
             *({"board_maps"} if "board_maps" in raw else set()),
             *({"nand"} if "nand" in raw else set()),
             *({"display_brightness"} if "display_brightness" in raw else set()),
+            *({"display"} if "display" in raw else set()),
             "platform",
             "rootfs",
             "bundle",
@@ -73,6 +85,7 @@ def load_target(
     except IdentityError as error:
         fail(str(error))
     config["identity"] = identity
+    config["display"] = load_display(target, config.get("display"))
     if "display_brightness" in config:
         display_brightness = exact_table(
             config["display_brightness"], {"backlight", "levels"}, "target display_brightness"
@@ -178,7 +191,7 @@ def load_target(
         fail(str(error))
 
     # Without the loader display settings the RAM loader runs headless.
-    display_keys = {"spi_mode", "lcd_id", "backlight_channels", "backlight_level"}
+    display_keys = {"spi_mode", "backlight_channels", "backlight_level"}
     raw_adapter = config.get("adapter")
     has_display = isinstance(raw_adapter, dict) and not display_keys.isdisjoint(raw_adapter)
     adapter = exact_table(
@@ -193,7 +206,10 @@ def load_target(
     )
     if has_display:
         integer_value(adapter.get("spi_mode"), "target adapter spi_mode", bounds=(0, 3))
-        integer_value(adapter.get("lcd_id"), "target adapter lcd_id", bounds=(0, 0xFFFFFFFF))
+        panel = config["display"]["panel"]
+        if panel is None:
+            fail("target adapter display settings require a panel")
+        adapter = {**adapter, "lcd_id": panel["id"]}
         nonempty_string(adapter.get("backlight_channels"), "target adapter backlight_channels")
         integer_value(
             adapter.get("backlight_level"),
@@ -238,6 +254,8 @@ def load_target(
         "root": profile_linux["root"],
     }
     device_data_groups: dict[str, list[dict[str, Any]]] = {}
+    audio_fields = AUDIO_POLICY_FIELDS
+    config["audio_policy"] = audio_policy_from_profile(None)
     if "bluetooth" in config:
         bluetooth = exact_table(config.pop("bluetooth"), {"firmware"}, "target bluetooth")
         device_data_groups["bluetooth"] = firmware_array(
@@ -246,11 +264,19 @@ def load_target(
             size_required=False,
         )
     if "audio_profile" in config:
+        raw_audio_profile = config.pop("audio_profile")
+        declared_audio_fields = (
+            set(raw_audio_profile) if isinstance(raw_audio_profile, dict) else set()
+        )
         audio_profile = exact_table(
-            config.pop("audio_profile"),
-            {"firmware"},
+            raw_audio_profile,
+            {"firmware", *(audio_fields & declared_audio_fields)},
             "target audio-profile",
         )
+        try:
+            config["audio_policy"] = audio_policy_from_profile(audio_profile)
+        except AudioPolicyError as error:
+            fail(str(error))
         device_data_groups["audio-profile"] = firmware_array(
             audio_profile["firmware"],
             "target audio-profile firmware",
@@ -342,7 +368,9 @@ def load_target(
     transport = selected_profile["runtime"]["transport"]
     config["runtime"] = {
         "fdl1_load_address": platform_runtime["fdl1_load_address"],
-        "assets": asset_bundle_paths(target_asset_lock_path(target)),
+        "assets": asset_bundle_paths(
+            (platform_asset_lock_path(platform_name), target_asset_lock_path(target))
+        ),
         "adapter": {
             **platform_runtime["adapter"],
             **adapter,

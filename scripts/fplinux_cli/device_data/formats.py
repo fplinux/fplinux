@@ -93,6 +93,16 @@ class RequiredPartition:
 
 
 @dataclass(frozen=True)
+class AudioProfileContext:
+    """Selected machine identity and playback topology for device-data preparation."""
+
+    machine_compatible: bytes
+    speaker_vibration: bool
+    speaker_from_headphones: bool
+    headfree_headphones_only: bool
+
+
+@dataclass(frozen=True)
 class _VbmPartition:
     identifier: int
     attributes: int

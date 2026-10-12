@@ -23,13 +23,15 @@ from fplinux_cli.device_data.partitions import discover_partitions
 from fplinux_cli.device_data.running_nv import read_running_nv_record
 
 if TYPE_CHECKING:
-    from fplinux_cli.device_data.formats import PhysicalNand
+    from fplinux_cli.device_data.formats import AudioProfileContext, PhysicalNand
 
 _RUNNING_NV_VIRTUAL_BLOCKS = 40
 _PREFIX = "uniwa-v1000-4g"
 
 
-def prepare_device_data(nand: PhysicalNand) -> DeviceDataPreparation:
+def prepare_device_data(
+    nand: PhysicalNand, *, audio: AudioProfileContext
+) -> DeviceDataPreparation:
     """Retain matching calibration and the indexed current Bluetooth identity."""
     partitions = discover_partitions(nand, REQUIRED_BLUETOOTH_PARTITIONS).extents
     required_sizes = {
@@ -59,14 +61,16 @@ def prepare_device_data(nand: PhysicalNand) -> DeviceDataPreparation:
     bluetooth = prepare_bluetooth_from_settings(
         cm4_image(nand.partition_bytes(partitions[CM4_PARTITION_ID])), current, prefix=_PREFIX
     )
-    audio = prepare_headset_gain_profile(
+    profile = prepare_headset_gain_profile(
         downloaded,
         protected,
         prefix=_PREFIX,
-        machine_compatible=b"uniwa,v1000-4g",
-        headfree_headphones_only=True,
+        machine_compatible=audio.machine_compatible,
+        speaker_vibration=audio.speaker_vibration,
+        speaker_from_headphones=audio.speaker_from_headphones,
+        headfree_headphones_only=audio.headfree_headphones_only,
     )
     fm = prepare_fm_config(downloaded, protected, prefix=_PREFIX)
     return DeviceDataPreparation(
-        groups={"bluetooth": bluetooth, "audio-profile": audio, "fm-radio": fm}
+        groups={"bluetooth": bluetooth, "audio-profile": profile, "fm-radio": fm}
     )

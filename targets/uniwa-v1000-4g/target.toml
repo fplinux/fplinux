@@ -12,6 +12,10 @@ raw_device = "/dev/ums9117-nand-raw"
 id = 0x61cd
 raw_page_bytes = 2112
 
+[display]
+panel = "display/panel.toml"
+boot_font = "6x8"
+
 [display_brightness]
 backlight = "uniwa-v1000-backlight"
 levels = [0, 3, 7, 10, 14, 17, 20, 24, 27, 31, 34]
@@ -82,7 +86,6 @@ record_prefix = "UNIWA_V1000_4G"
 
 [adapter]
 spi_mode = 3
-lcd_id = 0x9342
 backlight_channels = "w"
 backlight_level = 0x22
 exec_distance = 0
@@ -108,6 +111,7 @@ firmware = [
 ]
 
 [audio_profile]
+headfree_headphones_only = true
 firmware = [
   { source = "uniwa-v1000-4g-audio-profile.bin", destination = "fplinux/uniwa-v1000-4g-audio-profile.bin", size = 788 },
 ]

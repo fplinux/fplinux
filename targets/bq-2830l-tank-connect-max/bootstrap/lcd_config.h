@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
-#include <stdint.h>
 
-#define FPLINUX_LCD_SPI 1
+#include <stdint.h>
+#include "fplinux-panel-data.h"
+
 #define FPLINUX_LCD_PREPARE bq2830l_lcd_prepare
-#define FPLINUX_LCD_INIT_RESET_MS 16
 
 #define BQ2830L_DISPLAY_PADS_PHYS 0x402a0000U
 
@@ -14,118 +14,12 @@ static void bq2830l_lcd_reg_write(uint32_t address, uint32_t value)
 
 static void bq2830l_lcd_prepare(void)
 {
-	static const struct {
-		uint32_t offset;
-		uint32_t value;
-	} pads[] = {
-		{ 0x0b0, 0x00000000 }, { 0x4b0, 0x00102001 },
-		{ 0x0b4, 0x00000000 }, { 0x4b4, 0x00002046 },
-		{ 0x0b8, 0x00000000 }, { 0x4b8, 0x00002001 },
-		{ 0x0bc, 0x00000000 }, { 0x4bc, 0x00102004 },
-		{ 0x0c0, 0x00000000 }, { 0x4c0, 0x00002004 },
-		{ 0x0c4, 0x00000000 }, { 0x4c4, 0x00102004 },
-		{ 0x0c8, 0x00000000 }, { 0x4c8, 0x00002004 },
-	};
 	unsigned int index;
 
-	for (index = 0; index < sizeof(pads) / sizeof(pads[0]); index++)
+	for (index = 0;
+	     index < sizeof(fplinux_panel_pads) / sizeof(fplinux_panel_pads[0]);
+	     index++)
 		bq2830l_lcd_reg_write(BQ2830L_DISPLAY_PADS_PHYS +
-					      pads[index].offset,
-				      pads[index].value);
+					      fplinux_panel_pads[index].offset,
+				      fplinux_panel_pads[index].value);
 }
-
-static const uint8_t bq2830l_panel_init[] = {
-	LCM_DELAY(120),
-	LCM_CMD(0xfe, 0),
-	LCM_CMD(0xef, 0),
-	LCM_CMD(0x36, 1),
-	0x48,
-	LCM_CMD(0x3a, 1),
-	0x05,
-	LCM_CMD(0x21, 0),
-	LCM_CMD(0x86, 1),
-	0x98,
-	LCM_CMD(0x89, 1),
-	0x33,
-	LCM_CMD(0x8b, 1),
-	0x80,
-	LCM_CMD(0x8d, 1),
-	0x33,
-	LCM_CMD(0x8e, 1),
-	0x0f,
-	LCM_CMD(0xe8, 2),
-	0x13,
-	0x55,
-	LCM_CMD(0xec, 3),
-	0x33,
-	0x06,
-	0x00,
-	LCM_CMD(0xed, 2),
-	0x18,
-	0x09,
-	LCM_CMD(0xff, 1),
-	0x62,
-	LCM_CMD(0x99, 1),
-	0x3e,
-	LCM_CMD(0x9d, 1),
-	0x4b,
-	LCM_CMD(0x98, 1),
-	0x3e,
-	LCM_CMD(0x9c, 1),
-	0x4b,
-	LCM_CMD(0xc3, 1),
-	0x1a,
-	LCM_CMD(0xc4, 1),
-	0x10,
-	LCM_CMD(0xc9, 1),
-	0x18,
-	LCM_CMD(0xf0, 6),
-	0x82,
-	0x00,
-	0x16,
-	0x15,
-	0x0b,
-	0x3c,
-	LCM_CMD(0xf1, 6),
-	0x4d,
-	0x98,
-	0x98,
-	0x20,
-	0x2c,
-	0xbf,
-	LCM_CMD(0xf2, 6),
-	0x42,
-	0x09,
-	0x0d,
-	0x0e,
-	0x0a,
-	0x3b,
-	LCM_CMD(0xf3, 6),
-	0x4d,
-	0x93,
-	0x91,
-	0x20,
-	0x1a,
-	0x9f,
-	LCM_CMD(0x35, 1),
-	0x00,
-	LCM_CMD(0x44, 2),
-	0x00,
-	0x0a,
-	LCM_CMD(0x11, 0),
-	LCM_DELAY(120),
-	LCM_CMD(0x29, 0),
-	LCM_CMD(0x2c, 0),
-	LCM_END,
-};
-
-static const lcd_config_t lcd_config_t117[] = {
-	{ 0x009307,
-	  0xffffff,
-	  240,
-	  320,
-	  0x48,
-	  { 0, 0, 0, 0, 0, 0 },
-	  { 48000000 },
-	  bq2830l_panel_init },
-};

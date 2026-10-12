@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import sources as sources_build
+from fplinux_cli.build.display import render_bootstrap_display
 from fplinux_cli.build.identity import BOOTSTRAP_IDENTITY_HEADER, bootstrap_identity_header
 from fplinux_cli.build.storage import layout as profile_layout
 from fplinux_cli.common import canonical_json_bytes, fail, sha256_bytes, sha256_file
@@ -68,6 +69,50 @@ def effective_boot_layout(
     return layout if isinstance(layout, dict) else platform["bootstrap"]["layout"]
 
 
+def bootstrap_settings(target_config: dict[str, Any]) -> bytes:
+    """Project output names, boot mode and font into the Make consumer."""
+    bootstrap = target_config["bootstrap"]
+    mode = "uboot" if bootstrap["kind"] == "uboot-stage0" else "linux"
+    name = bootstrap["image"].removesuffix(".bin")
+    license_tag = "SPDX-License-" + "Identifier"
+    return (
+        f"# {license_tag}: GPL-2.0-only\n"
+        f"override NAME := {name}\n"
+        f"override FPLINUX_BOOTSTRAP_MAP := {bootstrap['map']}\n"
+        f"override FPLINUX_BOOTSTRAP_MODE := {mode}\n"
+        f"override FPLINUX_BOOTSTRAP_DTB := {bootstrap['dtb_destination']}\n"
+        f"override FPLINUX_BOOT_FONT := {target_config['display']['boot_font']}\n"
+    ).encode("ascii")
+
+
+def bootstrap_display_header(display: dict[str, Any]) -> bytes:
+    """Project the selected panel geometry into either target bootstrap main."""
+    license_tag = "SPDX-License-" + "Identifier"
+    return (
+        f"/* {license_tag}: GPL-2.0-only */\n"
+        "#ifndef FPLINUX_BOOTSTRAP_DISPLAY_H\n"
+        "#define FPLINUX_BOOTSTRAP_DISPLAY_H\n\n"
+        f"#define FPLINUX_BOOTSTRAP_DISPLAY_WIDTH {display['width']}\n"
+        f"#define FPLINUX_BOOTSTRAP_DISPLAY_HEIGHT {display['height']}\n\n"
+        "#endif\n"
+    ).encode("ascii")
+
+
+def bootstrap_payload(target_config: dict[str, Any], platform: dict[str, Any]) -> bytes:
+    """Select the existing assembly payload with the manifest's DTB filename."""
+    license_tag = "SPDX-License-" + "Identifier"
+    if target_config["bootstrap"]["kind"] == "uboot-stage0":
+        body = '\t.include "ums9117-bootstrap/sd-payload.s"\n'
+    else:
+        output = platform["bootstrap"]["output_destination"]
+        dtb = target_config["bootstrap"]["dtb_destination"]
+        body = (
+            '\t.include "ums9117-bootstrap/ram-payload.s"\n\n'
+            f'\tums9117_ram_payload "../{output}/{dtb}"\n'
+        )
+    return (f"\t@ {license_tag}: GPL-2.0-only\n" + body).encode("ascii")
+
+
 def generated_bootstrap_files(
     target_config: dict[str, Any], platform: dict[str, Any]
 ) -> dict[str, bytes]:
@@ -75,6 +120,11 @@ def generated_bootstrap_files(
     layout = effective_boot_layout(target_config, platform)
     return {
         BOOTSTRAP_IDENTITY_HEADER: generated_bootstrap_identity(target_config),
+        "generated/fplinux-bootstrap-settings.make": bootstrap_settings(target_config),
+        "generated/fplinux-bootstrap-display.h": bootstrap_display_header(
+            target_config["display"]
+        ),
+        "generated/fplinux-bootstrap-payload.s": bootstrap_payload(target_config, platform),
         "generated/fplinux-boot-layout.h": profile_layout.boot_layout_header(layout),
         "generated/fplinux-bootstrap-memory.ld": profile_layout.bootstrap_memory_ld(
             target_config["bootstrap"], layout
@@ -115,6 +165,7 @@ def bootstrap_recipe_digest(
         for path, contents in generated_bootstrap_files(target_config, platform).items()
     }
     lcd_config = target_bootstrap.get("lcd_config")
+    panel_data = render_bootstrap_display(target_config["display"])
     manifest = {
         "target": target,
         "target_bootstrap": target_bootstrap,
@@ -129,6 +180,7 @@ def bootstrap_recipe_digest(
                 "sha256": sha256_file(
                     inputs_build.require_file(inputs_build.target_source(target, lcd_config))
                 ),
+                "panel_sha256": sha256_bytes(panel_data) if panel_data is not None else None,
             }
             if lcd_config is not None
             else None

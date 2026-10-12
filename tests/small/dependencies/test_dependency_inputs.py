@@ -120,6 +120,10 @@ class DependencyInputTests:
                 '[rootfs]\npackages = []\n[bootstrap]\nkind = "linux"\n[uboot]\nkind = "none"\n',
             )
             self._write(
+                "platforms/test-platform/loader/assets.lock.toml",
+                "source = []\n",
+            )
+            self._write(
                 "targets/test-phone/loader/assets.lock.toml",
                 '[[source]]\nid = "loader"\nkind = "file"\n'
                 'url = "https://example.invalid/loader.bin"\n'
@@ -223,6 +227,33 @@ class DependencyInputTests:
         path.write_text("# Comment\n" + path.read_text())
         _, after = dependency_selection(self.root)
         assert (after) == (before)
+
+    def test_platform_loader_pin_changes_download_selection_without_losing_board_assets(
+        self,
+    ) -> None:
+        """Shared loader changes reach the dependency archive alongside board-owned pins."""
+        declaration = (
+            '[[source]]\nid = "shared-loader"\nkind = "file"\n'
+            'url = "https://example.invalid/shared-loader.bin"\n'
+            f'sha256 = "{"8" * 64}"\ncache_name = "shared-loader.bin"\nlicense = "MIT"\n'
+            '[[source.output]]\nrole = "shared-fdl1"\npath = "shared-loader.bin"\n'
+            f'sha256 = "{"8" * 64}"\n'
+        )
+        self._write("platforms/test-platform/loader/assets.lock.toml", declaration)
+        before_inputs, before_context = dependency_selection(self.root)
+        self._write(
+            "platforms/test-platform/loader/assets.lock.toml",
+            declaration.replace("8" * 64, "9" * 64),
+        )
+        after_inputs, after_context = dependency_selection(self.root)
+
+        before = {record.key: record for record in before_inputs}
+        after = {record.key: record for record in after_inputs}
+        assert before["asset:test-phone:shared-loader"].sha256 == "8" * 64
+        assert after["asset:test-phone:shared-loader"].sha256 == "9" * 64
+        assert after["asset:test-phone:shared-loader"].destination == "downloads/shared-loader.bin"
+        assert after["asset:test-phone:loader"] == before["asset:test-phone:loader"]
+        assert before_context != after_context
 
     def test_context_tracks_selected_providers_and_source_sequences(self) -> None:
         """Provider choice and source application order belong to archive compatibility."""

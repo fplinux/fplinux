@@ -1,0 +1,296 @@
+# SPDX-License-Identifier: GPL-2.0-only AND Unlicense
+# SPDX-FileCopyrightText: fpdoom contributors
+width = 128
+height = 160
+id = 0x333025
+id_mask = 0xffffffff
+memory_access = 0x00
+transport = "dbi"
+license = "GPL-2.0-only AND Unlicense"
+copyright = ["fpdoom contributors"]
+commands = [
+  { delay_ms = 10 },
+  { command = 0xff, data = [
+    0xa5,
+  ] },
+  { command = 0x3e, data = [
+    0x08,
+  ] },
+  { command = 0x3a, data = [
+    0x65,
+  ] },
+  { command = 0x82, data = [
+    0x00,
+  ] },
+  { command = 0x98, data = [
+    0x00,
+  ] },
+  { command = 0x63, data = [
+    0x0f,
+  ] },
+  { command = 0x64, data = [
+    0x0f,
+  ] },
+  { command = 0xb4, data = [
+    0x54,
+  ] },
+  { command = 0xb5, data = [
+    0x30,
+  ] },
+  { command = 0x83, data = [
+    0x03,
+  ] },
+  { command = 0x86, data = [
+    0x04,
+  ] },
+  { command = 0x87, data = [
+    0x16,
+  ] },
+  { command = 0x88, data = [
+    0x09,
+  ] },
+  { command = 0x89, data = [
+    0x2f,
+  ] },
+  { command = 0x93, data = [
+    0x63,
+  ] },
+  { command = 0x96, data = [
+    0x81,
+  ] },
+  { command = 0xc3, data = [
+    0x11,
+  ] },
+  { command = 0xe6, data = [
+    0x00,
+  ] },
+  { command = 0x99, data = [
+    0x01,
+  ] },
+  { command = 0x70, data = [
+    0x07,
+  ] },
+  { command = 0x71, data = [
+    0x21,
+  ] },
+  { command = 0x72, data = [
+    0x0a,
+  ] },
+  { command = 0x73, data = [
+    0x10,
+  ] },
+  { command = 0x74, data = [
+    0x17,
+  ] },
+  { command = 0x75, data = [
+    0x1a,
+  ] },
+  { command = 0x76, data = [
+    0x3f,
+  ] },
+  { command = 0x77, data = [
+    0x09,
+  ] },
+  { command = 0x78, data = [
+    0x05,
+  ] },
+  { command = 0x79, data = [
+    0x3f,
+  ] },
+  { command = 0x7a, data = [
+    0x05,
+  ] },
+  { command = 0x7b, data = [
+    0x0c,
+  ] },
+  { command = 0x7c, data = [
+    0x12,
+  ] },
+  { command = 0x7d, data = [
+    0x0a,
+  ] },
+  { command = 0x7e, data = [
+    0x0a,
+  ] },
+  { command = 0x7f, data = [
+    0x08,
+  ] },
+  { command = 0xa0, data = [
+    0x0b,
+  ] },
+  { command = 0xa1, data = [
+    0x30,
+  ] },
+  { command = 0xa2, data = [
+    0x09,
+  ] },
+  { command = 0xa3, data = [
+    0x0c,
+  ] },
+  { command = 0xa4, data = [
+    0x08,
+  ] },
+  { command = 0xa5, data = [
+    0x22,
+  ] },
+  { command = 0xa6, data = [
+    0x40,
+  ] },
+  { command = 0xa7, data = [
+    0x04,
+  ] },
+  { command = 0xa8, data = [
+    0x05,
+  ] },
+  { command = 0xa9, data = [
+    0x3f,
+  ] },
+  { command = 0xaa, data = [
+    0x0a,
+  ] },
+  { command = 0xab, data = [
+    0x11,
+  ] },
+  { command = 0xac, data = [
+    0x0d,
+  ] },
+  { command = 0xad, data = [
+    0x06,
+  ] },
+  { command = 0xae, data = [
+    0x3b,
+  ] },
+  { command = 0xaf, data = [
+    0x07,
+  ] },
+  { command = 0xff, data = [
+    0x00,
+  ] },
+  { command = 0x11, delay_ms = 200 },
+  { command = 0x35, data = [
+    0x00,
+  ] },
+  { command = 0x29 },
+]
+
+[bootstrap]
+spi_hz = 0
+prepare_pins = false
+commands_after = []
+
+[linux]
+commands_after = [
+  { command = 0x36, data = [
+    0x00,
+  ] },
+  { command = 0x2a, data = [
+    0x00,
+    0x00,
+    0x00,
+    0x7f,
+  ] },
+  { command = 0x2b, data = [
+    0x00,
+    0x00,
+    0x00,
+    0x9f,
+  ] },
+]
+cold_finish = []
+wake_finish = []
+
+[dbi]
+timing_ns = [50, 55, 110, 20, 70, 35]
+
+[pins]
+control_base = 0x0b0
+control = [
+  [
+    0x00,
+    0x00000000,
+    0x00182001,
+  ],
+  [
+    0x04,
+    0x00000000,
+    0x00182046,
+  ],
+  [
+    0x08,
+    0x00000010,
+    0x00182001,
+  ],
+  [
+    0x0c,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x10,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x14,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x18,
+    0x00000010,
+    0x00182004,
+  ],
+]
+data_base = 0x1f8
+data = [
+  [
+    0x00,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x04,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x08,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x0c,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x10,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x14,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x18,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x1c,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x20,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x24,
+    0x00000010,
+    0x00182004,
+  ],
+]

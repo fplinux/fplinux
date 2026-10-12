@@ -653,6 +653,9 @@ def prepare_headset_gain_profile(  # noqa: PLR0913 -- target identity and topolo
     Headfree order. ``speaker_vibration`` appends the Handsfree vibrate tone
     for phones whose speaker is also the vibration actuator.
     """
+    if len(machine_compatible) >= 24:
+        message = "audio-profile machine compatible must fit its 24-byte terminated field"
+        raise ValueError(message)
     if speaker_from_headphones and speaker_vibration:
         message = "audio-profile headphone-fed speaker cannot use the integrated-PA vibrate tone"
         raise ValueError(message)

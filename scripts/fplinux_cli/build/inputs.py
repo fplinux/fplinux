@@ -25,14 +25,17 @@ _CORE_IMPLEMENTATION_SOURCES = (
 )
 _BOOTSTRAP_IMPLEMENTATION_SOURCES = (
     *_CORE_IMPLEMENTATION_SOURCES,
+    "scripts/fplinux_cli/build/display.py",
     "scripts/fplinux_cli/build/identity.py",
     "scripts/fplinux_cli/build/bootstrap/recipe.py",
     "scripts/fplinux_cli/build/bootstrap/stage.py",
     "scripts/fplinux_cli/build/storage/layout.py",
     "scripts/fplinux_cli/manifests/identity.py",
+    "scripts/fplinux_cli/manifests/display.py",
 )
 _KERNEL_IMPLEMENTATION_SOURCES = (
     *_CORE_IMPLEMENTATION_SOURCES,
+    "scripts/fplinux_cli/build/display.py",
     "scripts/fplinux_cli/build/device_tree.py",
     "scripts/fplinux_cli/build/identity.py",
     "scripts/fplinux_cli/build/kernel/prepare.py",
@@ -45,6 +48,8 @@ _KERNEL_IMPLEMENTATION_SOURCES = (
     "scripts/fplinux_cli/build/storage/layout.py",
     "scripts/fplinux_cli/device_data/inputs.py",
     "scripts/fplinux_cli/manifests/identity.py",
+    "scripts/fplinux_cli/manifests/audio.py",
+    "scripts/fplinux_cli/manifests/display.py",
     "scripts/fplinux_cli/manifests/kernel.py",
     "scripts/fplinux_cli/manifests/linux.py",
 )

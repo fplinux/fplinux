@@ -10,11 +10,12 @@ from fplinux_cli.common import fail
 from fplinux_cli.manifests.values import exact_table, nonempty_string, relative_value, sha256_value
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
 
-def load_asset_lock(path: Path) -> list[dict[str, Any]]:
-    """Load the current pinned asset outputs used to construct a RAM bundle."""
+def _read_asset_sources(path: Path) -> list[Any]:
+    """Read one owner's declarations, including an empty board-owned asset set."""
     if path.is_symlink() or not path.is_file():
         fail(f"asset lock is missing or invalid: {path}")
     try:
@@ -24,9 +25,13 @@ def load_asset_lock(path: Path) -> list[dict[str, Any]]:
         fail(f"asset lock is invalid: {error}")
     root = exact_table(document, {"source"}, "asset lock")
     sources = root.get("source")
-    if not isinstance(sources, list) or not sources:
-        fail("asset lock source must be a non-empty array")
+    if not isinstance(sources, list):
+        fail("asset lock source must be an array")
+    return sources
 
+
+def _validate_asset_sources(sources: list[Any]) -> list[dict[str, Any]]:
+    """Validate the complete asset set and its unambiguous output roles and paths."""
     source_ids: set[str] = set()
     roles: set[str] = set()
     paths: set[str] = set()
@@ -83,10 +88,18 @@ def load_asset_lock(path: Path) -> list[dict[str, Any]]:
     return result
 
 
-def asset_bundle_paths(path: Path) -> dict[str, str]:
-    """Derive bundle paths solely from the selected asset-lock outputs."""
+def load_asset_locks(paths: Sequence[Path]) -> list[dict[str, Any]]:
+    """Resolve platform and board assets without allowing either owner to replace the other."""
+    sources = [source for path in paths for source in _read_asset_sources(path)]
+    if not sources:
+        fail("resolved asset lock source must be a non-empty array")
+    return _validate_asset_sources(sources)
+
+
+def asset_bundle_paths(paths: Sequence[Path]) -> dict[str, str]:
+    """Derive bundle paths solely from the resolved asset-lock outputs."""
     return {
         str(output["role"]): f"assets/{output['path']}"
-        for source in load_asset_lock(path)
+        for source in load_asset_locks(paths)
         for output in source["output"]
     }

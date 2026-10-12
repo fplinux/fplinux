@@ -23,6 +23,8 @@ from fplinux_cli.device_data.running_nv import read_running_nv_record
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from fplinux_cli.device_data.formats import AudioProfileContext
+
 _VBM_COPY_OFFSETS = (0x7FC0000, 0x7FE0000)
 _DOWNLOADED_NV = 0x10000001
 _RUNNING_NV = 0x10000003
@@ -156,7 +158,9 @@ def _prepare_radio_firmware(
     )
 
 
-def prepare_device_data(nand: PhysicalNand) -> DeviceDataPreparation:
+def prepare_device_data(
+    nand: PhysicalNand, *, audio: AudioProfileContext
+) -> DeviceDataPreparation:
     """Retain matching fixed data, saved Wi-Fi identity and current Bluetooth settings."""
     partitions = redundant_vbm_partitions(nand, _VBM_COPY_OFFSETS, _REQUIRED_PARTITIONS)
     required_sizes = {**AUDIO_RECORD_SIZES, **_RADIO_RECORD_SIZES}
@@ -173,8 +177,10 @@ def prepare_device_data(nand: PhysicalNand) -> DeviceDataPreparation:
         downloaded,
         protected,
         prefix="bq-2830l-tank-connect-max",
-        machine_compatible=b"bq,2830l",
-        speaker_from_headphones=True,
+        machine_compatible=audio.machine_compatible,
+        speaker_vibration=audio.speaker_vibration,
+        speaker_from_headphones=audio.speaker_from_headphones,
+        headfree_headphones_only=audio.headfree_headphones_only,
     )
     radio = _prepare_radio_firmware(
         nand.partition_bytes(partitions[_WCN_CODE]),

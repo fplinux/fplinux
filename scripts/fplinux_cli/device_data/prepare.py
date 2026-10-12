@@ -36,6 +36,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from types import ModuleType
 
+    from fplinux_cli.device_data.formats import AudioProfileContext
+
 # The device-data group that the target's platform extracts from the phone's
 # stock firmware, and the platform-owned module that does so.
 BOARD_MAPS_GROUP = "board-maps"
@@ -144,7 +146,7 @@ def _load_device_data_parser(target: str, filename: str) -> ModuleType:
         "device-data parser",
     )
     if not callable(getattr(module, "prepare_device_data", None)):
-        fail("device-data parser does not expose prepare_device_data(nand)")
+        fail("device-data parser does not expose prepare_device_data(nand, audio=...)")
     return module
 
 
@@ -218,12 +220,13 @@ def _canonical_files(
     return result
 
 
-def _extract_groups(
+def _extract_groups(  # noqa: PLR0913 -- parser inputs, selected policy and platform extraction.
     target: str,
     parser_filename: str | None,
     groups: Mapping[str, list[dict[str, Any]]],
     nand: PhysicalNand,
     *,
+    audio: AudioProfileContext,
     board_maps: Callable[[PhysicalNand], object] | None,
 ) -> dict[str, PreparedGroup]:
     """Run the target parser and the platform board-map extraction once each.
@@ -235,7 +238,7 @@ def _extract_groups(
     if parser_groups:
         parser = _load_device_data_parser(target, str(parser_filename))
         try:
-            result = parser.prepare_device_data(nand)
+            result = parser.prepare_device_data(nand, audio=audio)
         except ValueError as error:
             fail(f"device-data extraction failed: {error}")
         if not isinstance(result, DeviceDataPreparation) or set(result.groups) != parser_groups:

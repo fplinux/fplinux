@@ -18,7 +18,7 @@ from fplinux_cli.alpine import lock as alpine_lock
 from fplinux_cli.alpine import registration as alpine_registration
 from fplinux_cli.alpine import selection as alpine_selection
 from fplinux_cli.common import fail, load_toml, relative_name, sha256_bytes
-from fplinux_cli.manifests.assets import load_asset_lock
+from fplinux_cli.manifests.assets import load_asset_locks
 from fplinux_cli.manifests.values import sha256_value
 
 if TYPE_CHECKING:
@@ -549,8 +549,13 @@ def _inventory(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
             )
             platform_context[name]["uboot"] = lock
     asset_context = {}
-    for target in targets:
-        assets = load_asset_lock(root / "targets" / target / "loader/assets.lock.toml")
+    for target, selection in targets.items():
+        assets = load_asset_locks(
+            (
+                root / "platforms" / selection["platform"] / "loader/assets.lock.toml",
+                root / "targets" / target / "loader/assets.lock.toml",
+            )
+        )
         asset_context[target] = assets
         for asset in assets:
             inputs.append(

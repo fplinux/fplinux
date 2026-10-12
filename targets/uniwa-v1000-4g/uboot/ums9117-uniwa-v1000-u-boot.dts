@@ -2,11 +2,8 @@
 /dts-v1/;
 
 #include "ums9117-u-boot.dtsi"
+#include "fplinux-uniwa-v1000-4g-uboot-identity.dtsi"
 
-/ {
-	compatible = "uniwa,v1000-4g", "sprd,ums9117";
-	model = "UNIWA V1000 4G U-Boot control tree";
-};
 
 &{/mmc@20300000} {
 	non-removable;

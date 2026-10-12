@@ -20,6 +20,7 @@ from fplinux_cli.device_data import inputs as firmware_inputs
 from fplinux_cli.manifests.kernel import kernel_config_paths
 from fplinux_cli.manifests.linux import discover_linux_targets, is_shared_linux_operation
 from fplinux_cli.manifests.paths import (
+    platform_asset_lock_path,
     profile_manifest_path,
     target_asset_lock_path,
     target_release_manifest_path,
@@ -161,6 +162,10 @@ def target_build_source_files(
     add_source_path(files, target_root / "target.toml")
     add_source_path(files, target_release_manifest_path(target))
     add_source_path(files, target_asset_lock_path(target))
+    add_source_path(files, platform_asset_lock_path(target_config["platform"]))
+    display_source = target_config["display"]["source"]
+    if display_source is not None:
+        add_source_path(files, target_root / display_source)
     for path in kernel_config_paths(target, target_config, platform):
         add_source_path(files, path)
     selected_profile = target_config.get("profile")
@@ -234,6 +239,9 @@ def shared_linux_source_files(target_config: dict[str, Any]) -> SharedLinuxSourc
     for target in discover_linux_targets(ROOT, sources, source_sha256):
         target_root = ROOT / "targets" / target.name
         add_source_path(files, target_root / "target.toml")
+        display_source = target.config["display"]["source"]
+        if display_source is not None:
+            add_source_path(files, target_root / display_source)
         add_source_path(files, ROOT / "platforms" / target.config["platform"] / "platform.toml")
         for owner, source_root, config in (
             ("platform", ROOT, target.platform),

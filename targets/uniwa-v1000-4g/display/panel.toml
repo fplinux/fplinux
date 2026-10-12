@@ -1,0 +1,151 @@
+# SPDX-License-Identifier: GPL-2.0-only
+width = 320
+height = 240
+id = 0x9342
+id_mask = 0xffff
+memory_access = 0x08
+transport = "spi"
+license = "GPL-2.0-only"
+copyright = []
+commands = [
+  { delay_ms = 10 },
+  { command = 0xc8, data = [
+    0xff,
+    0x93,
+    0x42,
+  ] },
+  { command = 0x36, data = [
+    0x08,
+  ] },
+  { command = 0x35, data = [
+    0x00,
+  ] },
+  { command = 0x3a, data = [
+    0x55,
+  ] },
+  { command = 0xc0, data = [
+    0x13,
+    0x0e,
+  ] },
+  { command = 0xc1, data = [
+    0x02,
+  ] },
+  { command = 0xc5, data = [
+    0xd3,
+  ] },
+  { command = 0xb1, data = [
+    0x00,
+    0x1b,
+  ] },
+  { command = 0xb4, data = [
+    0x02,
+  ] },
+  { command = 0xb6, data = [
+    0x0a,
+    0xe0,
+  ] },
+  { command = 0xe0, data = [
+    0x00,
+    0x03,
+    0x08,
+    0x06,
+    0x13,
+    0x09,
+    0x39,
+    0x39,
+    0x48,
+    0x02,
+    0x0a,
+    0x08,
+    0x17,
+    0x17,
+    0x0f,
+  ] },
+  { command = 0xe1, data = [
+    0x00,
+    0x28,
+    0x29,
+    0x01,
+    0x0d,
+    0x03,
+    0x3f,
+    0x33,
+    0x52,
+    0x04,
+    0x0f,
+    0x0e,
+    0x37,
+    0x38,
+    0x0f,
+  ] },
+  { command = 0x11, delay_ms = 120 },
+  { command = 0x29, delay_ms = 20 },
+  { command = 0x2c },
+]
+
+[bootstrap]
+spi_hz = 48000000
+prepare_pins = false
+reset_ms = 16
+commands_after = []
+
+[linux]
+commands_after = [
+  { command = 0x36, data = [
+    0x08,
+  ] },
+  { command = 0x2a, data = [
+    0x00,
+    0x00,
+    0x01,
+    0x3f,
+  ] },
+  { command = 0x2b, data = [
+    0x00,
+    0x00,
+    0x00,
+    0xef,
+  ] },
+]
+cold_finish = []
+wake_finish = []
+
+[pins]
+control_base = 0x0b0
+control = [
+  [
+    0x00,
+    0x00000000,
+    0x00182001,
+  ],
+  [
+    0x04,
+    0x00000000,
+    0x00082046,
+  ],
+  [
+    0x08,
+    0x00000000,
+    0x00082001,
+  ],
+  [
+    0x0c,
+    0x00000000,
+    0x00102004,
+  ],
+  [
+    0x10,
+    0x00000000,
+    0x00082004,
+  ],
+  [
+    0x14,
+    0x00000000,
+    0x00102004,
+  ],
+  [
+    0x18,
+    0x00000000,
+    0x00082004,
+  ],
+]

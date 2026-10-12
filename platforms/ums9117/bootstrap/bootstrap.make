@@ -15,6 +15,7 @@ override FPLINUX_BOOTSTRAP_IDENTITY_HEADER := generated/fplinux-bootstrap-identi
 override FPLINUX_BOOT_LAYOUT_HEADER := generated/fplinux-boot-layout.h
 override FPLINUX_BOOTSTRAP_MEMORY_LD := generated/fplinux-bootstrap-memory.ld
 override FPLINUX_UBOOT_BUILD_HEADER := generated/fplinux-uboot-build.h
+override FPLINUX_BOOTSTRAP_DISPLAY_HEADER := generated/fplinux-bootstrap-display.h
 
 ifeq ($(FPLINUX_BOOT_FONT),6x8)
 override FPLINUX_BOOT_FONT_DEFINE := 6
@@ -47,6 +48,13 @@ override undefine LFLAGS
 
 include $(VENDOR)/build_t117.make
 
+ifneq ($(FPLINUX_BOOTSTRAP_MAP),$(OBJDIR)/$(NAME)_map.txt)
+map: $(FPLINUX_BOOTSTRAP_MAP)
+$(FPLINUX_BOOTSTRAP_MAP): $(OBJDIR)/$(NAME).elf
+	@mkdir -p $(dir $@)
+	$(NM) -n $< > $@
+endif
+
 override FPLINUX_VENDOR_CFLAGS := $(CFLAGS)
 override FPLINUX_VENDOR_APP_CFLAGS := $(APP_CFLAGS)
 override FPLINUX_VENDOR_SYS_CFLAGS := $(SYS_CFLAGS)
@@ -68,6 +76,9 @@ $(error FPLinux bootstrap identity header is not generated)
 endif
 ifeq ($(wildcard $(FPLINUX_BOOT_LAYOUT_HEADER)),)
 $(error FPLinux bootstrap layout header is not generated)
+endif
+ifeq ($(wildcard $(FPLINUX_BOOTSTRAP_DISPLAY_HEADER)),)
+$(error FPLinux bootstrap display header is not generated)
 endif
 ifeq ($(wildcard $(FPLINUX_BOOTSTRAP_MEMORY_LD)),)
 $(error FPLinux bootstrap linker memory is not generated)
@@ -110,6 +121,7 @@ $(FPLINUX_FORBIDDEN_OBJS):
 	@printf '%s\n' 'FPLinux bootstrap forbids SDIO and microfat objects' >&2; exit 2
 
 $(OBJDIR)/app/ums9117-bootstrap/boot-main.o: $(FPLINUX_BOOTSTRAP_IDENTITY_HEADER) $(FPLINUX_BOOT_LAYOUT_HEADER)
+$(OBJDIR)/app/main.o: $(FPLINUX_BOOTSTRAP_DISPLAY_HEADER)
 $(OBJDIR)/app/ums9117-bootstrap/boot-common.o: $(FPLINUX_BOOT_LAYOUT_HEADER)
 $(OBJDIR)/app/ums9117-bootstrap/sd-stage0.o: $(FPLINUX_BOOTSTRAP_IDENTITY_HEADER) $(FPLINUX_BOOT_LAYOUT_HEADER) $(FPLINUX_UBOOT_BUILD_HEADER)
 
@@ -118,9 +130,9 @@ $(OBJDIR)/app/$(FPLINUX_BOOT_FONT_SOURCE).o: $(FPLINUX_BOOT_FONT_SOURCE).c | obj
 	$(call compile_cc,$(APP_CFLAGS) -Wno-pedantic)
 
 ifeq ($(FPLINUX_BOOTSTRAP_MODE),uboot)
-$(OBJDIR)/app/payload.o: payload.s ../out/u-boot.bin | objdir
+$(OBJDIR)/app/payload.o: payload.s generated/fplinux-bootstrap-payload.s ../out/u-boot.bin | objdir
 	$(call compile_asm,)
 else
-$(OBJDIR)/app/payload.o: payload.s ums9117-bootstrap/ram-payload.s ../out/zImage ../out/$(FPLINUX_BOOTSTRAP_DTB) | objdir
+$(OBJDIR)/app/payload.o: payload.s generated/fplinux-bootstrap-payload.s ums9117-bootstrap/ram-payload.s ../out/zImage ../out/$(FPLINUX_BOOTSTRAP_DTB) | objdir
 	$(call compile_asm,)
 endif

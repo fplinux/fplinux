@@ -566,3 +566,34 @@ def test_package_parser_keeps_linux_default_and_selects_the_requested_host() -> 
         ["package", "nokia-ta1618", "--autonomous", "--host", "windows10", "--offline"]
     )
     assert (windows.autonomous, windows.host, windows.offline) == (True, "windows10", True)
+
+
+def test_device_data_manifest_records_the_selected_audio_parameters() -> None:
+    """The archive snapshot supplies identity and policy to standalone preparation."""
+    config = {
+        "platform": "ums9117",
+        "identity": {"compatible": "example,phone"},
+        "audio_policy": {
+            "speaker_vibration": False,
+            "speaker_from_headphones": True,
+            "headfree_headphones_only": False,
+        },
+        "nand": {"raw_device": "/dev/raw-nand", "id": 0xB1A1, "raw_page_bytes": 2176},
+        "device_data": {
+            "parser": "example_device_data.py",
+            "groups": {
+                "audio-profile": [
+                    {"source": "audio.bin", "destination": "fplinux/audio.bin", "size": 788}
+                ]
+            },
+        },
+    }
+
+    snapshot = json.loads(autonomous_package.device_data_manifest("example-phone", config))
+
+    assert snapshot["machine_compatible"] == "example,phone"
+    assert snapshot["audio_policy"] == {
+        "speaker_vibration": False,
+        "speaker_from_headphones": True,
+        "headfree_headphones_only": False,
+    }

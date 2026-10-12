@@ -1,0 +1,264 @@
+# SPDX-License-Identifier: GPL-2.0-only
+width = 240
+height = 320
+id = 0x9707
+id_mask = 0xffff
+memory_access = 0x48
+transport = "dbi"
+license = "GPL-2.0-only"
+copyright = []
+commands = [
+  { command = 0xfe },
+  { command = 0xef },
+  { command = 0x36, data = [
+    0x48,
+  ] },
+  { command = 0x3a, data = [
+    0x05,
+  ] },
+  { command = 0x21 },
+  { command = 0x86, data = [
+    0x98,
+  ] },
+  { command = 0x89, data = [
+    0x33,
+  ] },
+  { command = 0x8b, data = [
+    0x84,
+  ] },
+  { command = 0x8d, data = [
+    0x33,
+  ] },
+  { command = 0x8e, data = [
+    0x0f,
+  ] },
+  { command = 0xe8, data = [
+    0x12,
+    0x00,
+  ] },
+  { command = 0xec, data = [
+    0x33,
+    0x07,
+    0x01,
+  ] },
+  { command = 0xff, data = [
+    0x62,
+  ] },
+  { command = 0x99, data = [
+    0x3e,
+  ] },
+  { command = 0x9d, data = [
+    0x4b,
+  ] },
+  { command = 0x98, data = [
+    0x3e,
+  ] },
+  { command = 0x9c, data = [
+    0x4b,
+  ] },
+  { command = 0xc3, data = [
+    0x1c,
+  ] },
+  { command = 0xc4, data = [
+    0x08,
+  ] },
+  { command = 0xc9, data = [
+    0x10,
+  ] },
+  { command = 0xf0, data = [
+    0x88,
+    0x00,
+    0x1f,
+    0x16,
+    0x0b,
+    0x37,
+  ] },
+  { command = 0xf1, data = [
+    0x4c,
+    0xb7,
+    0x97,
+    0x22,
+    0x23,
+    0xbf,
+  ] },
+  { command = 0xf2, data = [
+    0x4b,
+    0x00,
+    0x00,
+    0x19,
+    0x0d,
+    0x35,
+  ] },
+  { command = 0xf3, data = [
+    0x47,
+    0xf5,
+    0xb4,
+    0x1a,
+    0x1c,
+    0xcf,
+  ] },
+  { command = 0x35, data = [
+    0x00,
+  ] },
+  { command = 0x44, data = [
+    0x00,
+    0x0a,
+  ] },
+]
+
+[bootstrap]
+spi_hz = 0
+prepare_pins = true
+reset_ms = 16
+commands_after = "cold_finish"
+
+[linux]
+commands_after = []
+cold_finish = [
+  { command = 0x11, delay_ms = 120 },
+  { command = 0x29 },
+  { command = 0x2c },
+  { command = 0x2c },
+]
+wake_finish = "cold_finish"
+
+[dbi]
+timing_ns = [50, 55, 110, 20, 70, 35]
+
+[pins]
+control_base = 0x0b0
+control = [
+  [
+    0x00,
+    0x00000000,
+    0x00182001,
+  ],
+  [
+    0x04,
+    0x00000000,
+    0x00182046,
+  ],
+  [
+    0x08,
+    0x00000010,
+    0x00182001,
+  ],
+  [
+    0x0c,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x10,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x14,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x18,
+    0x00000010,
+    0x00182004,
+  ],
+]
+data_base = 0x1f4
+data = [
+  [
+    0x00,
+    0x00000020,
+    0x00082006,
+  ],
+  [
+    0x04,
+    0x00000020,
+    0x00082046,
+  ],
+  [
+    0x08,
+    0x00000020,
+    0x00082000,
+  ],
+  [
+    0x0c,
+    0x00000020,
+    0x00082000,
+  ],
+  [
+    0x10,
+    0x00000010,
+    0x00082000,
+  ],
+  [
+    0x14,
+    0x00000010,
+    0x00082000,
+  ],
+  [
+    0x18,
+    0x00000010,
+    0x00082040,
+  ],
+  [
+    0x1c,
+    0x00000010,
+    0x00082040,
+  ],
+  [
+    0x20,
+    0x00000010,
+    0x00082040,
+  ],
+  [
+    0x24,
+    0x00000010,
+    0x00082040,
+  ],
+  [
+    0x28,
+    0x00000010,
+    0x00082000,
+  ],
+  [
+    0x2c,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x30,
+    0x00000030,
+    0x00082044,
+  ],
+  [
+    0x34,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x38,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x3c,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x40,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x44,
+    0x00000010,
+    0x00182004,
+  ],
+  [
+    0x48,
+    0x00000010,
+    0x00182004,
+  ],
+]

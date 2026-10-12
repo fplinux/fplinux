@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import importlib.util
+
 import pytest
 from fplinux_cli.device_data import (
     fitted as fitted_device_data,
@@ -11,6 +13,7 @@ from fplinux_cli.device_data import (
     formats as device_data,
 )
 
+from tests import ROOT
 from tests.small.device_data.audio_expected import (
     FITTED_HEADFREE_SECTION,
     FITTED_INOI_PROCESSING_SECTION,
@@ -19,6 +22,7 @@ from tests.small.device_data.audio_expected import (
 from tests.small.device_data.audio_fixtures import inoi_audio_records
 from tests.small.device_data.cm4_fixtures import cm4_firmware
 from tests.small.device_data.nv_fixtures import fixed_records, nv1, running_nv
+from tests.small.device_data.partition_fixtures import vbm_table
 
 
 class PartitionPreparationTests:
@@ -59,6 +63,52 @@ class PartitionPreparationTests:
         }
         return device_data.PhysicalNand(raw, 2112), partitions
 
+    @pytest.mark.parametrize(
+        ("target", "filename", "prefix"),
+        [
+            ("nokia-ta1618", "ta1618_device_data.py", "ta1618"),
+            ("inoi-240-modern-4g", "inoi240_device_data.py", "inoi240"),
+            ("inoi-244-modern-4g", "inoi244_device_data.py", "inoi244"),
+            ("maxvi-k15n-4g", "maxvi_device_data.py", "maxvi-k15n-4g"),
+        ],
+    )
+    def test_target_parser_uses_the_selected_identity_and_speaker_policy(
+        self, target: str, filename: str, prefix: str
+    ) -> None:
+        """Target partition discovery retains the selected profile identity and topology."""
+        nand, _partitions = self._inputs()
+        table = vbm_table(
+            (
+                (0x10000018, 0x100, 0, 0),
+                (0x10000001, 0x100, 1, 1),
+                (0x1000000F, 0x100, 2, 2),
+                (0x10000003, 1, 3, 3),
+            )
+        ).ljust(131072, b"\xff")
+        table_raw = b"".join(
+            table[offset : offset + 2048] + b"\xff" * 64 for offset in range(0, len(table), 2048)
+        )
+        nand = device_data.PhysicalNand(nand.raw + table_raw * 2, 2112)
+        spec = importlib.util.spec_from_file_location(
+            f"test_{target.replace('-', '_')}_data", ROOT / "targets" / target / filename
+        )
+        assert spec is not None
+        assert spec.loader is not None
+        parser = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(parser)
+        audio = device_data.AudioProfileContext(
+            machine_compatible=b"example,phone",
+            speaker_vibration=False,
+            speaker_from_headphones=False,
+            headfree_headphones_only=False,
+        )
+
+        result = parser.prepare_device_data(nand, audio=audio)
+
+        profile = result.groups["audio-profile"].prepared[f"{prefix}-audio-profile.bin"]
+        assert profile[:32] == b"FPAUDIO\0example,phone" + b"\0" * 11
+        assert profile[53:] == FITTED_HEADFREE_SECTION + FITTED_INOI_PROCESSING_SECTION
+
     def test_shared_fitted_extraction_includes_fm_and_rejects_conflicting_copies(self) -> None:
         """Every fitted target needs the same admitted FM group from matching NV419 copies."""
         nand, partitions = self._inputs()
@@ -67,7 +117,12 @@ class PartitionPreparationTests:
             nand,
             partitions,
             prefix="phone",
-            machine_compatible=b"vendor,phone",
+            audio=device_data.AudioProfileContext(
+                machine_compatible=b"vendor,phone",
+                speaker_vibration=False,
+                speaker_from_headphones=False,
+                headfree_headphones_only=False,
+            ),
         )
 
         assert (set(result.groups)) == ({"bluetooth", "audio-profile", "fm-radio"})
@@ -83,7 +138,12 @@ class PartitionPreparationTests:
                 nand,
                 partitions,
                 prefix="phone",
-                machine_compatible=b"vendor,phone",
+                audio=device_data.AudioProfileContext(
+                    machine_compatible=b"vendor,phone",
+                    speaker_vibration=False,
+                    speaker_from_headphones=False,
+                    headfree_headphones_only=False,
+                ),
             )
 
     @pytest.mark.parametrize(
@@ -103,8 +163,12 @@ class PartitionPreparationTests:
             nand,
             partitions,
             prefix="phone",
-            machine_compatible=b"vendor,phone",
-            speaker_vibration=speaker_vibration,
+            audio=device_data.AudioProfileContext(
+                machine_compatible=b"vendor,phone",
+                speaker_vibration=speaker_vibration,
+                speaker_from_headphones=False,
+                headfree_headphones_only=False,
+            ),
         )
 
         profile = result.groups["audio-profile"].prepared["phone-audio-profile.bin"]
@@ -130,7 +194,12 @@ class PartitionPreparationTests:
             nand,
             partitions,
             prefix="example",
-            machine_compatible=b"vendor,phone",
+            audio=device_data.AudioProfileContext(
+                machine_compatible=b"vendor,phone",
+                speaker_vibration=False,
+                speaker_from_headphones=False,
+                headfree_headphones_only=False,
+            ),
         ).groups["bluetooth"]
 
         assert (result.originals) == (expected_originals)
@@ -145,5 +214,10 @@ class PartitionPreparationTests:
                 nand,
                 partitions,
                 prefix="example",
-                machine_compatible=b"vendor,phone",
+                audio=device_data.AudioProfileContext(
+                    machine_compatible=b"vendor,phone",
+                    speaker_vibration=False,
+                    speaker_from_headphones=False,
+                    headfree_headphones_only=False,
+                ),
             )
