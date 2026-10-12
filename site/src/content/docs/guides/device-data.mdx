@@ -27,13 +27,6 @@ support; check the
 Prepare data from the same physical phone you will run. Do not reuse data from
 another handset, even of the same model.
 
-CM4 extraction reads the image length from its load table and locates the
-supported DDR initialization code before applying its compatibility changes.
-It does not require the entire image to match a fixed SHA-256. Changes outside
-that code can be retained; an unrecognized or ambiguous initialization routine
-stops preparation. The runtime checks the actual image size against its memory
-capacity and verifies that copying the image preserved its bytes.
-
 An autonomous RAM archive also prepares the phone's pin map and keymap. It
 keeps these maps separate from the firmware and audio data and uses them for
 subsequent loads of that phone.
@@ -42,9 +35,10 @@ subsequent loads of that phone.
 The phone backup and prepared data are private. Do not share or publish them,
 or an image or archive that contains them, unless you have the rights to do so.
 Prepared data in a checkout is stored under `.cache/device-data/`, readable
-only by you. An autonomous archive starts without prepared phone data; its
-first run saves your backup and data in the extracted directory's private
-`.cache/`. Keep that directory private after preparation.
+only by you. An autonomous archive starts without prepared phone data; see
+[Standalone archive](/fplinux/guides/standalone-archive/#first-run-prepare-your-phone)
+for its backup and data locations. Keep the extracted archive directory
+private after preparation.
 :::
 
 ## Prepare data from the phone
@@ -99,13 +93,11 @@ internal storage or NV data. Ordinary `build` and `run` commands use only data
 that is already prepared; they never read the phone's storage.
 
 If you build with `--profile microsd-uboot`, rebuild that profile too. Both
-profiles use the same prepared data. RAM builds put firmware and audio data
-in a separate `device-data.cpio`, which the loader loads alongside the kernel;
-the RAM kernel contains no prepared phone data. A microSD build embeds the
-audio profile in its kernel and other firmware in the system-card image.
-Ordinary standalone archives include the prepared data of their build;
-autonomous RAM archives omit it and prepare
-the owner's data on first use.
+profiles use the same prepared data. RAM kernels contain no prepared phone
+data; the accompanying `device-data.cpio` holds it separately. A microSD
+build stores prepared data in its kernel and system-card image. Keep those
+files and ordinary standalone archives private. Autonomous RAM archives omit
+prepared data and prepare the owner's data on first use.
 
 ## Prepare data from a saved backup
 
@@ -118,23 +110,23 @@ prepare the data without connecting the phone:
 ```
 
 Keep the `nand.bin.json` file that `nand backup` wrote beside the backup; the
-command uses it to check the backup's layout. It refuses a backup that is
-incomplete, damaged or made from a different storage chip. The backup file
-and its receipt are not changed. A target that declares its NAND chip also
-accepts a backup without a receipt; if both declarations exist, they must
-agree. Preparation supports 2048 main bytes per page, 64 pages per block
+command uses it to check the backup's layout and SHA-256. It refuses an
+incomplete backup or incompatible storage chip. The backup file and its
+receipt are not changed. A target that declares its NAND chip also accepts
+a backup without a receipt; in that case, no saved digest is available to
+check the complete backup. If both chip declarations exist, they must agree.
+Preparation supports 2048 main bytes per page, 64 pages per block
 and 65536 pages in total, with each page's main bytes followed by its OOB
 bytes. Without a chip declaration or receipt, it refuses to infer the layout
 from the file length.
 
-This form builds only the extraction tool in the pinned environment; it does
-not require an existing phone build or start a loader. Add `--offline` to use
-the environment and source archives already stored locally.
+This form builds any required extraction tools in the pinned environment; it
+does not require an existing phone build or start a loader. Add `--offline`
+to use the environment and source archives already stored locally.
 
 For a new target that declares `board-maps`, preparation also extracts its
-pin map and keymap and prints a board-report path. Builds do not consume the
-report, and the loader still takes its maps from the target's asset lock;
-see [Bring up a new phone](/fplinux/porting/bring-up/).
+pin map and keymap. See [Bring up a new phone](/fplinux/porting/bring-up/) for
+using that output to configure the target.
 
 Run `./fplinux device-data prepare --help` for the remaining options.
 
@@ -147,21 +139,11 @@ the complete physical NAND page stream:
 ./fplinux nand backup nokia-ta1618 nand.bin
 ```
 
-Pass the profile and build type of the running session. The reader identifies
-the chip before reading pages and stops if the running kernel cannot identify
-it or its chip and page size differ from the target's declaration.
-
-The command checks the complete stream's size, computes its SHA-256 and
-writes `nand.bin` and its geometry receipt `nand.bin.json`, readable only by
-you. The receipt records chip identity, page geometry, stream size, SHA-256
-and target; it contains no NAND contents and can be attached to an issue.
-Keep it beside the backup for later preparation.
-
-Saving to the same path replaces the backup. An incomplete transfer leaves
-an existing backup and receipt unchanged. If the complete backup is written
-but its new receipt cannot be saved, the new backup remains without a
-receipt. The digest identifies the saved bytes; it is not a comparison with a
-second device read. Restoring NAND is unsupported.
+Pass the profile and build type of the running session. The command writes
+`nand.bin` and its geometry receipt `nand.bin.json`, readable only by you.
+Keep them together and treat the backup as private phone data. The
+[NAND backup reference](#nand-backup-reference) describes chip checks,
+replacement behavior and the receipt format.
 
 To identify the chip without saving a backup:
 
@@ -169,19 +151,17 @@ To identify the chip without saving a backup:
 ./fplinux nand identify nokia-ta1618
 ```
 
-The report includes chip ID and name, page and block geometry, raw size and
-feature-register values. An unidentified chip reports `chip=unknown` and zero
-geometry. Treat the backup itself as private phone data.
-
 ## NAND backup reference
 
 ```sh title="PC"
-./fplinux nand identify <target> [--profile NAME]
-./fplinux nand backup <target> PATH [--profile NAME]
+./fplinux nand identify <target> [--profile NAME] [--build-type TYPE]
+./fplinux nand backup <target> PATH [--profile NAME] [--build-type TYPE]
 ```
 
 Both commands need a phone that is running a build of `<target>`. They open
-the phone's read-only NAND reader, which identifies the fitted chip.
+the phone's read-only NAND reader, which identifies the fitted chip. Select
+the profile and build type of the running session; `TYPE` is `release` or
+`debug`. Saving to the same path replaces the previous backup.
 
 `nand identify` prints the reader's report unchanged, one `key=value` line each
 for `id_bytes`, `chip`, `page_main_bytes`, `oob_bytes`, `pages_per_block`,
@@ -213,4 +193,6 @@ JSON object with these fields:
 | `target`                         | target used for the backup                            |
 
 The digest identifies the saved bytes; the command does not compare them with a
-second read from the phone. Restoring the NAND is not supported.
+second read from the phone. The receipt contains no NAND contents and can be
+attached to an issue. An incomplete transfer leaves an existing backup and
+receipt unchanged. Restoring the NAND is not supported.

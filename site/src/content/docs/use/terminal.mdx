@@ -136,13 +136,15 @@ to the terminal with your command line intact; the diagnostic console shows
 this shortcut. In a shell opened from your computer, `chvt 2` also returns
 to the terminal.
 
-## Fonts and input state
+## Fonts
 
-The system installs one Terminus size: 6×12 below 200 pixels wide, or 8×16
-on wider displays. `/usr/share/fplinux/fonts/default.psf` selects that size.
-The terminal, brightness control and showcase share it; the application bundle
-contains no font APK. `fplinux-terminal --font PATH` selects another PSF2 font
-already present on the phone. A default font with the wrong cell size is rejected.
+The terminal uses a Terminus font with 6×12 pixel cells on displays below
+200 pixels wide, or 8×16 cells on wider displays. `fplinux-terminal --font PATH`
+selects another PSF2 Unicode font already present on the phone. A custom font
+must leave room for at least 16 columns and four rows, including the status
+line. Replacing the default font requires the matching cell size.
+
+## Input state
 
 In `123` mode, a short <Key>\*</Key> returns to letters with the opposite remembered case;
 holding <Key>\*</Key> for about 650 ms changes digit/letter mode without changing that case.

@@ -9,7 +9,7 @@ FPLinux is an open-source Linux system for keypad phones built on the Unisoc
 UMS9117. It runs a Linux kernel from kernel.org with drivers for the phone's
 screen, keypad, sound, radio, Bluetooth and storage, and a small Alpine Linux
 userspace with a terminal you use on the keypad. It currently runs on
-[five phone targets](/fplinux/phones/), with support and limitations recorded
+[the listed phone targets](/fplinux/phones/), with support and limitations recorded
 separately for each phone.
 
 ## How it is put together
@@ -25,8 +25,8 @@ separately for each phone.
   add or remove on a running phone; see
   [Optional packages](/fplinux/guides/packages/).
 - **One phone, one target.** Code shared by every UMS9117 phone lives in the
-  platform; each phone model has its own target with its board data and
-  status; see [Porting](/fplinux/porting/).
+  platform; each phone model has its own target with its board data;
+  see [Porting](/fplinux/porting/).
 - **A self-contained build.** FPLinux brings its own pinned build
   environment and keeps it inside the checkout, so you need no Docker or
   Podman. Every download is pinned to an exact version and checksum.
@@ -50,8 +50,8 @@ FPLinux builds on the work of many projects, among them
 [U-Boot](https://docs.u-boot.org/), [BlueZ](https://www.bluez.org/),
 [BusyBox](https://busybox.net/) and [TyrQuake](https://disenchant.net/tyrquake/).
 The phone loader starts from the bootstrap of the
-[fpdoom](https://github.com/ilyakurdyukov/fpdoom) project. The complete list
-of components, their versions and licenses is in
+[fpdoom](https://github.com/ilyakurdyukov/fpdoom) project. Component notices and
+the locations of their version records are in
 [License and third-party notices](/fplinux/about/notices/).
 
 ## License

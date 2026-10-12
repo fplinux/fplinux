@@ -18,13 +18,8 @@ The display has a fixed native size, listed on the selected
 rows. The display does not scale or rotate images; prepare their size and
 orientation before using the [image tools](/fplinux/apps/#image-tools).
 
-RGB565 clients can update a damaged rectangle instead of transferring the
-whole screen. They must still supply a complete native-size framebuffer: the
-display may include adjacent pixels to align the transfer. The first frame
-after enable or wake, and a frame without damage information, transfers the
-whole image. Native NV16 presentation always transfers the whole image.
-
-A completed display transfer does not measure when the pixels become visible.
+Applications that present frames directly use the
+[DRM display interface](/fplinux/develop/device-interfaces/#drm-display).
 The phone pages state the limits of each phone's visible image results.
 
 ## Screen brightness
@@ -54,9 +49,8 @@ An application can change the brightness temporarily while it uses the
 screen. `fplinux-brightness get` keeps reporting your level, and a level you
 set meanwhile takes effect when the application finishes.
 
-Switching off the backlight leaves the display running. Display disable and
-sleep control the complete display lifecycle. After wake or enable, the
-requested brightness is applied only after the first completed frame.
+Switching off the backlight leaves the display running. After wake or display
+enable, the backlight stays off until the first frame is ready.
 
 :::tip[Screen is dark]
 If you set level `0`, the screen stays dark. Restore it with

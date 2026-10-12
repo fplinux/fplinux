@@ -142,9 +142,11 @@ open a new shell as described in
 <FeatureStatus feature="real-time-clock" />
 
 Each time `./fplinux run` or a standalone archive starts a new session, it
-sets the phone's clock to your computer's current time in UTC and prints the
-result. Reconnecting to a running session does not change the clock. The
-phone has no time zones; its clock and its battery-backed clock both hold UTC.
+tries to set the phone's clock to your computer's current time in UTC and
+prints the result. A clock-setting failure leaves the session usable, so
+check the result before relying on the time. Reconnecting to a running session
+does not change the clock. The phone has no time zones; its clock and its
+battery-backed clock both hold UTC.
 
 The battery-backed clock is updated only when its time cannot be read. To
 store the current time in it:
@@ -192,7 +194,7 @@ Check the [phone page](/fplinux/phones/) for battery-telemetry support and
 the power setup in which it has been tested. The charge measurement helper
 requires an enabled fuel gauge and a battery installed.
 
-### Measure the energy a command uses
+### Measure charge while a command runs
 
 On a phone with supported battery telemetry, the optional `fplinux-charge`
 package runs one command and reports how much charge entered or left the

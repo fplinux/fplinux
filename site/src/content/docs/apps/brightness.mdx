@@ -18,21 +18,24 @@ brightness scale and how to change it from the command line.
 
 <FeatureStatus feature="brightness-control" />
 
-<PhoneScreen src={brightness} alt="Brightness control at level 7 of 10 on a 240×320 screen" caption="Brightness control at level 7, drawn by the FPLinux brightness code at 240×320." />
+<PhoneScreen src={brightness} alt="Brightness control at level 7 of 10 on a 240×320 screen" caption="Brightness control at level 7 on a 240×320 screen." />
 
 ## Install and start
 
 Install `fplinux-brightness-ui.apk` as described in
-[Packages](/fplinux/guides/packages/). Then start the application in the local
-terminal or from the PC, as described in
+[Packages](/fplinux/guides/packages/). Its installed package name is
+`fplinux-brightness-ui`. Start the application in the local terminal or from the
+PC, as described in
 [Start an application](/fplinux/apps/):
 
 ```sh title="Phone"
 fplinux-brightness-ui
 ```
 
-The application works on the `128×160` and `240×320` displays. It needs the
-system brightness service, which runs by default.
+The interface uses the phone's native display size and adapts to portrait or
+landscape screens. Check [phone support status](/fplinux/phones/#support-status)
+for display and keypad limitations. The application needs the system brightness
+service, which runs by default.
 
 ## Controls
 

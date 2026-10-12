@@ -3,46 +3,20 @@ title: Contributing
 description: Format, check and test a change, and write a commit message FPLinux accepts.
 ---
 
-import { FileTree } from '@astrojs/starlight/components';
-
-Start from a working build; see [Build FPLinux](/fplinux/start/build/). The
-commands below run in the same pinned environment as the build, so you do not
-install formatters or linters yourself. Code follows the
+Prepare the pinned environment as described in
+[Build FPLinux](/fplinux/start/build/) before running source checks and tests.
+These commands do not require a completed phone build, and you do not install
+formatters or linters yourself. Code follows the
 [code style](/fplinux/develop/code-style/), and messages from the kernel, loader
 and phone programs follow the [logging contract](/fplinux/develop/logging/).
 
 ## Where the code is
 
-The source is on [GitHub](https://github.com/fplinux/fplinux). These directories
-separate shared code from platform and phone data:
-
-<FileTree>
-- platforms/
-  - ums9117/ code shared by every UMS9117 phone: kernel drivers, Devicetree and the loader flow
-- targets/
-  - nokia-ta1618/ one directory per phone model: board data, display, keypad and status
-- alpine/
-  - aports/ the phone's packages and applications, one directory each
-- bootstrap/ reusable components that run before Linux starts
-- common/ tools shared by every phone, such as the archive runner and the USB keyboard client
-- profiles/ boot modes, such as the microSD system card
-- include/
-  - fplinux/ public headers shared by host and phone components
-- lib/
-  - fplinux/ reusable C components for host and phone programs
-- scripts/
-  - fplinux_cli/ the `./fplinux` command
-    - cli/ command parsing and dispatch
-    - build/ target build stages
-    - alpine/ phone package builds and root filesystem composition
-    - runtime/ phone sessions, transfers and NAND backups
-    - quality/ formatting, source checks and test execution
-    - dependencies/ external input snapshots
-- tests/
-</FileTree>
-
-Pages that describe a phone, an application or a feature link to their source
-directory under the page title.
+The source is on [GitHub](https://github.com/fplinux/fplinux). Phone,
+application and feature pages link to their source under the page title.
+[Porting](/fplinux/porting/#layers) defines the ownership boundaries for shared
+code, SoC support, board data and phone packages. Follow those boundaries when
+adding support or choosing where a change belongs.
 
 ## Format the files you changed
 
@@ -171,9 +145,9 @@ site code, styles, MDX and JSON; it preserves code examples and asset files.
 `check` checks formatting and runs type-aware linting on JavaScript and
 TypeScript with Oxlint and on Astro components with ESLint. It also checks
 accessibility and CSS including component styles, then runs Astro's type checks.
-Unused rule-disable comments are errors. `build` renders the
-pages and checks internal links. MDX content is parsed during formatting and
-the build.
+Unused rule-disable comments are errors. `check` also runs the site's behavior
+tests. `build` renders the pages and checks internal links. MDX content is
+parsed during formatting and the build.
 
 The site tools are separate from `./fplinux format` and `./fplinux check`.
 The source gate checks maintained Markdown and repository-local links; run
@@ -181,7 +155,7 @@ The source gate checks maintained Markdown and repository-local links; run
 links. `build:offline` exports the same pages to
 `.cache/out/site-offline/` in the checkout root. Open its `index.html` directly
 without a server. The export includes local assets and a simple word search;
-it does not use the hosted Pagefind search. Standalone archives include this
+it does not use the hosted Pagefind search. Ordinary Linux runner archives include this
 generated site as `docs/` on the computer.
 [Dependency snapshots](/fplinux/guides/dependencies/) save the locked
 npm archives, but do not install Node.js, npm or `site/node_modules`.

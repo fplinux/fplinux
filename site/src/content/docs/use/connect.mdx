@@ -62,14 +62,16 @@ phone.
 </Tabs>
 
 You get a root shell. It is authenticated with a key created for the current
-session; there is no password login. Leaving the shell with `exit`, or with
-the OpenSSH escape `~.`, closes only the shell. Linux keeps running.
+session. Password login, port forwarding, agent forwarding and X11 forwarding
+are disabled. Leaving the shell with `exit`, or with the OpenSSH escape `~.`,
+closes only the shell. Linux keeps running.
 
-:::note[Phones started from a microSD system card]
-If you started the phone with `--profile microsd-uboot` or `--boot microsd`,
-add `--profile microsd-uboot` to every `./fplinux console` and
-`./fplinux verify` command. Without it, the command refuses the session
-because the running system is not the default build.
+:::note[Match the running build]
+Use the target, profile and build type that started the phone. For a microSD
+system card, add `--profile microsd-uboot` to every `./fplinux console` and
+`./fplinux verify` command. For a debug build, also add `--build-type debug`.
+The defaults select the release RAM build; a command for a different build
+refuses the session.
 :::
 
 ## Reconnect after unplugging
@@ -143,14 +145,15 @@ Upload a file from your computer to the phone, or pull one from the phone:
 Use these commands rather than a separate SFTP client when the result matters.
 They guarantee that:
 
-- the complete file is checked with SHA-256 before it appears at the
+- the complete file's size and SHA-256 are checked before it appears at the
   destination;
 - the destination file appears whole, never partially written;
 - if any step fails, the destination is left unchanged.
 
 The source must be a regular file. On the phone, give an absolute path in a
 directory that already exists and has enough free space. On your computer, the
-destination directory must already exist.
+destination directory must already exist. A pull also checks that the phone's
+source file did not change during the transfer.
 
 Limits:
 
@@ -221,15 +224,3 @@ It pins the keys of the current session. Do not copy it to a later session or
 use it as a general phone login. The `./fplinux console` and
 `./runner/run.py --reconnect` commands remain the supported way to reconnect,
 because they also check that the target and running image still match.
-
-## Connection and transfer boundaries
-
-SSH provides no password login, port forwarding, agent forwarding or X11
-forwarding. Shared authenticated channels close after 60 seconds without an
-active channel; a new RAM session replaces the previous connection. Each
-`--exec` command and raw NAND download has its own connection for independent
-cancellation.
-
-Uploads check both size and SHA-256 before publication. Pulls also confirm that
-the phone source did not change during transfer before publishing the local
-destination. Destination replacement is atomic; interrupted work is not resumed.

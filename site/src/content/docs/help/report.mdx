@@ -36,7 +36,8 @@ report** form instead.
    ```
 
    For a standalone archive, give the archive's file name. For an autonomous
-   launcher failure, include the relevant error from `.cache/run.log`.
+   launcher failure, include the relevant error from the log path printed by
+   the launcher. Each launch creates a new file under `logs/`.
 
 4. **The failed stage of a build, check or test.** If one of these commands
    failed, add the output of:

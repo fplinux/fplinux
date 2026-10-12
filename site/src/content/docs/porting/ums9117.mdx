@@ -5,7 +5,6 @@ source:
   - platforms/ums9117
 ---
 
-import { FileTree } from '@astrojs/starlight/components';
 import Figure from '../../../components/Figure.astro';
 import PlatformTarget from '../../../assets/diagrams/platform-target.svg';
 
@@ -24,26 +23,24 @@ The table describes the shared integration and target requirements. Use the
 [feature overview](/fplinux/features/) for implementation and verification
 status, and the [phone checklist](/fplinux/phones/) for exact-model support.
 
-| Capability                   | What a target supplies or must know                                                                                                |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| CPU, interrupts and timers   | Uses the shared interrupt and timer nodes.                                                                                         |
-| CPU clock                    | Manual selection between 768 MHz and 1 GHz keeps the voltage set before Linux starts. The target states whether switching works.   |
-| USB device                   | Board USB setup. USB host mode is not supported.                                                                                   |
-| AP DMAengine                 | 32 memory-copy channels and the fixed image-rotation request. Enabled clients depend on the target.                                |
-| Display (DRM/KMS)            | Panel profile, transport, initialization and backlight brightness range. The kernel diagnostic console uses the same display.      |
-| Matrix keypad                | Matrix wiring and keys on external-interrupt (EIC) lines. The [phone key codes](/fplinux/develop/input/) are shared.               |
-| Audio                        | Headphones, speaker and microphones; the phone's audio tuning comes from its device data. The target states its microphone limits. |
-| Bluetooth                    | Firmware prepared from the phone's own internal storage.                                                                           |
-| FM radio                     | Needs the phone's Bluetooth firmware and its FM settings from device data.                                                         |
-| microSD                      | Enables the slot.                                                                                                                  |
-| Camera capture (V4L2 NV16)   | Camera sensor and wiring.                                                                                                          |
-| Image rotation and JPEG      | No board data; the userspace tools are shared.                                                                                     |
-| Native image presentation    | Native-size NV16 or RGB565 through DRM/KMS; consult the exact phone's display status.                                              |
-| Power-management chip        | Charger status, battery telemetry, RTC, keypad light and power-off are shared. The vibrator is enabled per target.                 |
-| Internal NAND reader         | Read-only raw page stream for a [NAND backup](/fplinux/porting/bring-up/#nand-backup-reference); no filesystem, writes or erase.   |
-| GPIO and I2C                 | Used for the cameras; general peripheral use has not been checked.                                                                 |
-| UART, other I2C, general SPI | No supported path.                                                                                                                 |
-| Watchdog and system reset    | No supported path; Linux reboot is not supported.                                                                                  |
+| Capability                 | What a target supplies or must know                                                                                                |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| CPU, interrupts and timers | Uses the shared interrupt and timer nodes.                                                                                         |
+| CPU clock                  | Manual selection between 768 MHz and 1 GHz keeps the voltage set before Linux starts. The target states whether switching works.   |
+| USB device                 | Board USB setup. USB host mode is not supported.                                                                                   |
+| AP DMAengine               | 32 memory-copy channels and the fixed image-rotation request. Enabled clients depend on the target.                                |
+| Display (DRM/KMS)          | Panel profile, transport, initialization and backlight brightness range. The kernel diagnostic console uses the same display.      |
+| Matrix keypad              | Matrix wiring and keys on external-interrupt (EIC) lines. The [phone key codes](/fplinux/develop/input/) are shared.               |
+| Audio                      | Headphones, speaker and microphones; the phone's audio tuning comes from its device data. The target states its microphone limits. |
+| Bluetooth                  | Firmware prepared from the phone's own internal storage.                                                                           |
+| FM radio                   | Needs the phone's prepared radio data; the required groups are target-specific.                                                    |
+| microSD                    | Enables the slot.                                                                                                                  |
+| Camera capture (V4L2 NV16) | Camera sensor and wiring.                                                                                                          |
+| Image rotation and JPEG    | No board data; the userspace tools are shared.                                                                                     |
+| Native image presentation  | Native-size NV16 or RGB565 through DRM/KMS; consult the exact phone's display status.                                              |
+| Power-management chip      | Charger status, battery telemetry, RTC, keypad light and power-off are shared. The vibrator is enabled per target.                 |
+| Internal NAND reader       | Read-only raw page stream for a [NAND backup](/fplinux/porting/bring-up/#nand-backup-reference); no filesystem, writes or erase.   |
+| GPIO and I2C               | Used for the cameras; general peripheral use has not been checked.                                                                 |
 
 ## What a target supplies
 
@@ -56,57 +53,24 @@ status, and the [phone checklist](/fplinux/phones/) for exact-model support.
   the loader display settings.
 - The device-data groups that must come from the exact phone.
 
-Display targets select one target-owned panel header through
-`[bootstrap].lcd_config`. RAM and microSD bootstrap builds share that header;
-the selected SPI or LCM transport must agree with the board pin configuration.
-The bootstrap Makefile selects its boot font, and the target's rootfs package
-list selects the local terminal font.
+Display targets select one target-owned panel description through
+`[display].panel` in `target.toml`. It defines the native size, transport,
+panel ID, initialization sequence and transfer settings used by the loader,
+bootstrap and Linux display. The selected SPI or LCM transport must agree
+with the board pin configuration. Set `boot_font` to `"6x8"` or `"7x14"`
+in the same `[display]` table. Select the local terminal font with
+`fplinux-font-terminus-6x12` or
+`fplinux-font-terminus-8x16` in `[rootfs].packages`.
 
-In the Nokia 3210 4G (TA-1618) target, these are in the following files:
-
-<FileTree>
-
-- targets/nokia-ta1618/
-  - target.toml identity, Linux file copies, bootstrap, `[adapter]` loader values, device data and microSD settings
-  - ta1618_device_data.py selects the phone's device-data outputs and audio policy
-  - bootstrap/ bootstrap for RAM boot with the 240×320 display size
-    - Makefile
-    - lcd_config.h panel configuration shared by both bootstrap builds
-    - main.c
-    - payload.s
-  - bootstrap-microsd/ bootstrap for the microSD system card
-    - Makefile
-    - main.c
-    - payload.s
-  - linux/
-    - arch/arm/mach-ums9117/
-      - Kconfig the board's kernel option
-    - config.fragment
-    - drivers/gpu/drm/ums9117/ panel profile for the shared display driver
-      - drm.Kconfig
-      - drm.Makefile
-      - ta1618-drm.c
-    - dts/
-      - ums9117-nokia-ta1618.dts board Devicetree: memory, display, keypad matrix, audio and USB
-      - bluetooth.dtsi Bluetooth firmware file names
-      - nand-readonly.dtsi ID of the fitted NAND chip
-      - unisoc.Makefile
-  - loader/
-    - assets.lock.toml pinned RAM loader and board maps
-  - release/
-    - README.txt
-    - manifest.toml
-  - uboot/ U-Boot configuration for the microSD system card
-    - ta1618_defconfig
-    - ums9117-ta1618-u-boot.dts
-
-</FileTree>
+Use `targets/nokia-ta1618/` as an example of a display target with both RAM and
+microSD boot inputs. Keep the new phone's panel, keypad, board wiring and
+device-data declarations in its own target.
 
 ## Headless targets
 
 A target loads headless when it has none of the loader display settings
-(`spi_mode`, `lcd_id`, `backlight_channels` and `backlight_level` in
-`[adapter]`) and a 0×0 bootstrap display. The loader leaves the panel and
+(`spi_mode`, `backlight_channels` and `backlight_level` in
+`[adapter]`) and no panel selected in `[display]`. The loader leaves the panel and
 backlight untouched and reports boot progress only to the PC. Without pin-map
 and keymap loader assets, the loader applies no board pin settings and leaves
 the keypad uninitialized.
@@ -164,8 +128,7 @@ connection; see [Device data](/fplinux/guides/device-data/). The board report li
 - the white LED backlight level and the fuel-gauge current calibration;
 - the NAND chip configurations listed by the firmware.
 
-Each value names where in the firmware it was found. A value that cannot be
-found is listed as unresolved, never guessed. Preparation stops when the
+A value that cannot be found is listed as unresolved. Preparation stops when the
 partition table, the signed application image, the pin map or the keymap is
 missing, or when the copies of the partition table disagree.
 

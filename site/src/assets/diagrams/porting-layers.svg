@@ -23,7 +23,7 @@
 	<text x="312" y="208" class="dg-text-small" fill="#202D35" font-size="12">Board wiring and memory, panel,</text>
 	<text x="312" y="226" class="dg-text-small" fill="#202D35" font-size="12">keymap, bootstrap inputs, values</text>
 	<text x="312" y="244" class="dg-text-small" fill="#202D35" font-size="12">passed to the loader, device-data</text>
-	<text x="312" y="262" class="dg-text-small" fill="#202D35" font-size="12">declarations and the support state.</text>
+	<text x="312" y="262" class="dg-text-small" fill="#202D35" font-size="12">declarations.</text>
 	<path d="M300,212 L244,212" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#porting-layers-arrow)"/>
 	<text x="268" y="202" text-anchor="middle" class="dg-text-small" fill="#202D35" font-size="12">selects</text>
 	<path d="M122,148 L122,108" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#porting-layers-arrow)"/>

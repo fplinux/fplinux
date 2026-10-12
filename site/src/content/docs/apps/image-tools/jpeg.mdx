@@ -185,17 +185,27 @@ fplinux-jpeg-cpu --operation scale --input NV16 --output NV16 --width 640 --heig
 fplinux-jpeg-cpu --operation scale --input NV16 --output NV16 --width 320 --height 240 [--scale 2] [--repeat 1..4096]
 ```
 
-- Encode accepts any even width and produces a 4:2:2 JPEG. The default quality
+- Encode reads packed full-range BT.601 NV16 with a positive even width and a
+  positive height, and produces a 4:2:2 JPEG. The default quality
   is 75 and the default restart interval is 0. `--dqt FILE` reads 128 nonzero
   bytes: the luma and then the chroma quantization table, each in natural DCT
   order.
-- Decode accepts what its JPEG library accepts; this does not extend what
-  `fplinux-jpeg` can decode. `--decode-mode reduced`, the default, decodes
-  directly at the smaller size; `box` decodes at full size and then averages.
+- Decode requires non-progressive eight-bit YCbCr JPEG with 4:2:0 or horizontal
+  4:2:2 sampling. It writes packed NV12 or NV16 respectively. Its accepted files
+  can differ from the accelerator's; success does not extend what
+  `fplinux-jpeg` can decode. The default divisor is `1`.
+  `--decode-mode reduced`, the default, decodes directly at the smaller size;
+  `box` decodes at full size and then averages.
 - Scale supports the same two conversions as `fplinux-jpeg`. Its pixels can
   differ from the accelerator's.
 
-The software tool always prints the time spent in each stage.
+The input must be a non-empty regular file of at most 32 MiB. Raw input must
+contain exactly `width × height × 2` bytes; decoded raw buffers are also limited
+to 32 MiB. Memory needed for the codec and additional buffers comes on top of
+these sizes, so a job can run out of phone memory below those limits.
+
+`--repeat` defaults to `1`. Repeated jobs must produce identical results or the
+command fails. The software tool always prints the time spent in each stage.
 
 ## Timing reference
 

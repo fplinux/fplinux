@@ -25,11 +25,9 @@ effects available on your phone.
 ## Install and start
 
 Install `fplinux-showcase.apk` as described in
-[Packages](/fplinux/guides/packages/). In the default RAM profile, it lasts
-until shutdown; on a microSD system card, it stays installed until you remove
-it. Follow the [system-card shutdown rules](/fplinux/use/power/) before cutting
-power. Start the application in the local terminal or from the PC, as described
-in [Start an application](/fplinux/apps/):
+[Packages](/fplinux/guides/packages/). Its installed package name is
+`fplinux-showcase`. Start the application in the local terminal or from the PC,
+as described in [Start an application](/fplinux/apps/):
 
 ```sh title="Phone"
 fplinux-showcase
@@ -40,6 +38,10 @@ To stop on its own after a number of complete cycles, pass `--runs`:
 ```sh title="Phone"
 fplinux-showcase --runs 1
 ```
+
+`--runs N` requires a positive decimal count; without it, the presentation
+repeats until you exit. `--keypad-led DIR` selects the keypad light's brightness
+directory instead of discovering it automatically.
 
 The application needs a `240×320` or `128×160` display, the right soft key, the
 system brightness service, the keypad light and the vibrator. If one of them is

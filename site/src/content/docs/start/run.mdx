@@ -23,6 +23,8 @@ The instructions below use a source checkout on Linux.
 - A finished build for your phone; see [Build FPLinux](/fplinux/start/build/).
 - On the PC: GNU `stdbuf` from coreutils, `ip` from iproute2, and the OpenSSH
   client tools `ssh`, `ssh-keygen`, `ssh-keyscan` and `sftp`.
+- `XDG_RUNTIME_DIR` set to an existing absolute directory owned by your user.
+  A normal Linux login session provides it.
 - A network manager that automatically runs IPv4 DHCP on a newly attached USB
   network interface. NetworkManager does this.
 - A USB data cable that fits your phone.
@@ -100,25 +102,19 @@ step 1.
 
 ## After the phone boots
 
-`run` sets the phone's clock from the PC. From an interactive terminal, it
-then opens a shell on the phone. Without a terminal, for example in a script,
-it returns as soon as the session is ready.
+`run` sets the phone's clock from the PC and reports a warning if that fails.
+From an interactive terminal, it then opens a shell on the phone. Without a
+terminal, for example in a script, it returns as soon as the session is ready.
 
 Exiting the shell does not stop Linux. The phone keeps running while it has
 power.
 
 ## Reconnect
 
-To open another shell on a running phone, or run one command:
-
-```sh title="PC"
-./fplinux console nokia-ta1618
-./fplinux console nokia-ta1618 --exec 'uname -a'
-```
-
-Use the same profile and build type that started the session. Do not start a
-fresh load only to reopen the shell. To copy files or type with the PC
-keyboard, see [Connect from your PC](/fplinux/use/connect/).
+Use `console` with the same target, profile and build type that started the
+session. [Connect from your PC](/fplinux/use/connect/) covers opening a shell,
+running one command, copying files and typing with the PC keyboard. Do not
+start a fresh load only to reopen the shell.
 
 ## Check which build is running
 

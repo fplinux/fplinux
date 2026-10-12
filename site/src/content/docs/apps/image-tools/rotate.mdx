@@ -48,7 +48,7 @@ and whether it was verified.
 | `--width N`, `--height N`  | Source size in pixels.                                                                                           |
 | `--stride N`               | Bytes per source row, including padding. Default: packed rows. For `nv12` and `nv16`, it applies to both planes. |
 | `--crop X,Y,W,H`           | Source rectangle to rotate. Default: the whole image.                                                            |
-| `--rotate 0\|90\|180\|270` | Rotation in degrees. Default: `90`.                                                                              |
+| `--rotate 0\|90\|180\|270` | Rotation in degrees. Default: `90`; `0` requires `--hflip`.                                                      |
 | `--hflip`                  | Mirror horizontally. Requires `--rotate 0`.                                                                      |
 | `--input PATH`             | Source file. Without it, the command generates a fixed test image.                                               |
 | `--output PATH`            | Result file below `/run` or `/tmp`. Default: `/run/fplinux-rotate.raw`.                                          |
@@ -56,8 +56,8 @@ and whether it was verified.
 | `--verify`                 | Compare the result with the CPU result and fail if they differ.                                                  |
 | `--display`                | Show the result for 2000 ms.                                                                                     |
 | `--display-ms N`           | Show the result for `0` to `60000` ms.                                                                           |
-| `--iterations N`           | Repeat the selected engine `1` to `10000` times.                                                                 |
-| `--benchmark N`            | Run four batches of `N` iterations: CPU, ROTA, ROTA, CPU.                                                        |
+| `--iterations N`           | Repeat the selected engine `1` to `10000` times. Default: `1`.                                                   |
+| `--benchmark N`            | Run four batches of `1` to `10000` iterations: CPU, ROTA, ROTA, CPU. Overrides `--engine` and `--iterations`.    |
 
 The result file has packed rows in the same format as the source. Vertical
 mirroring (`--vflip`) and rotation combined with mirroring are not supported.
@@ -69,6 +69,10 @@ the time runs out; whichever of the two comes last sets the time. The result
 must be exactly the size of the display: the preview does not scale the image
 or rotate the console. For a `128×160` display, rotate a `160×128` source by
 90 degrees. The terminal returns when the preview ends.
+
+The NV12 and NV16 preview uses a limited-range BT.601 conversion. Full-range
+images may appear with changed contrast or colors; the preview is not a check
+of color fidelity. This conversion does not change the saved raw result.
 
 ## Size and alignment limits
 

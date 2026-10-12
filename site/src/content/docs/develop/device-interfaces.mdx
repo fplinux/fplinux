@@ -50,8 +50,12 @@ settings return to their defaults at boot.
 | `Capture Source`               | `Internal`, `Headset` | `Internal` | Cannot change while a capture stream is open.                                                            |
 | `FM Playback Switch`           | `on`, `off`           |            | Routes FM radio to the outputs; set by `fplinux-fm`.                                                     |
 
-All switches and volumes can change while streams or FM radio play, and the
-change applies immediately. The speaker plays the sum of both channels, so
+Headphone and speaker switches, volumes, EQ and ALC can change while streams
+or FM radio play, and the change applies immediately. `Idle Silence Playback Switch` cannot
+change while FM is routed. Changing `FM Playback Switch` requires all playback
+and capture PCM handles to be closed, including stopped streams.
+
+The speaker plays the sum of both channels, so
 PCM is scaled down whenever the speaker is on, also in the headphones.
 Turning the speaker on while no other output is on can produce a click.
 Enabling the new output before disabling the old one keeps an output active,
@@ -258,11 +262,13 @@ The decoder contract is:
   rectangle. Select a factor before allocating CAPTURE buffers.
 
 The encoder accepts two-plane `NV16M` OUTPUT and produces one-plane
-`JPEG` CAPTURE for the listed geometries. Its standard
+`JPEG` CAPTURE for the
+[supported geometries](/fplinux/apps/image-tools/jpeg/#encode-nv16-as-jpeg). Its standard
 `V4L2_CID_JPEG_COMPRESSION_QUALITY` control has range 1 through 100, step 1 and
 default 85. Each job uses the current quality when it begins encoding.
 The scaler accepts two-plane `NV16M`
-OUTPUT and produces two-plane `NV16M` CAPTURE for the two listed fixed pairs.
+OUTPUT and produces two-plane `NV16M` CAPTURE for the
+[two supported size pairs](/fplinux/apps/image-tools/jpeg/#halve-an-nv16-frame).
 Both raw interfaces use full-range BT.601 colour metadata and tight plane
 strides.
 
@@ -273,16 +279,14 @@ refuses further jobs; reopening the video node is not a recovery guarantee.
 ## Hardware rotation
 
 ROTA exposes V4L2 mem2mem OUTPUT/CAPTURE multiplanar queues, with MMAP and
-DMA-BUF buffers. The application discovers the matching device automatically;
-`--device PATH` selects it explicitly. Other V4L2 consumers may use independent
+DMA-BUF buffers. The [image-rotation application](/fplinux/apps/image-tools/rotate/)
+handles device discovery and negotiation. Other V4L2 consumers may use independent
 source-plane strides, each a multiple of four bytes. Capture rows are packed.
 
 Supported controls are rotation by 90, 180 or 270 degrees, or horizontal
 mirroring with rotation set to zero. Set rotation and HFLIP together when
-switching between these modes. In the CLI, `--rotate 90`, `180` or `270`
-selects rotation, with `90` as the default, and `--hflip` with `--rotate 0`
-selects mirroring. `--vflip` and rotation-plus-flip combinations are rejected
-by both CLI engines.
+switching between these modes. Vertical mirroring and rotation-plus-flip
+combinations are not supported.
 
 Each selected source plane's first byte must be four-byte aligned, including
 its crop offset, and every packed capture row must contain a multiple of four

@@ -70,8 +70,9 @@ An application chooses which sources it accepts. The session then guarantees:
   application that needs key repeat generates it itself, as the terminal does.
 - **Suspend.** Before an application hands the display and input to another
   terminal or application, it suspends its session: all grabs are released and
-  every pressed key is released. On resume, the current devices are grabbed
-  again and reported as new devices.
+  releases and device removals are queued. Drain `fplinux_input_session_next()`
+  before handing over ownership, so no pressed key remains in the application.
+  On resume, the current devices are grabbed again and reported as new devices.
 
 ## Keyboard layout packages
 
@@ -83,7 +84,7 @@ Each further layout is a separate optional APK that:
 
 - installs `symbols/<layout>` and an empty registration file
   `layouts/<layout>`;
-- installs no other files;
+- installs no other XKB files, while retaining its required license notices;
 - depends on `fplinux-xkb`.
 
 `fplinux-xkb-ru`, which adds Russian, is the reference example.

@@ -19,9 +19,10 @@ choose a directory outside `.cache/`:
 
 `create` selects the external inputs declared by the checkout's locks,
 package recipes and build environment configuration. It checks each download
-against its declared checksum and size, stores shared bytes once and exports
-the current build environment through Kern. Missing inputs are downloaded at
-their exact declared versions; the command does not choose replacements.
+against its declared checksum and any declared size, stores shared bytes once
+and exports the current build environment through Kern. Missing inputs are
+downloaded at their exact declared versions; the command does not choose
+replacements.
 
 To require locally stored inputs, add `--offline`. Repeat `--from PATH` to
 look for original downloads in additional local files or directories; only

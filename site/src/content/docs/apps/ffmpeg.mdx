@@ -48,8 +48,8 @@ be passed directly to the native NV16 presentation tool.
 
 - Input and output use files or pipes. There are no network protocols, camera
   input, audio decoding, audio recording or playback window.
-- Video encoding, resizing, rotation and pixel-format conversion are not
-  included. Keep the decoded native pixel format.
+- Compressed video encoding, resizing, rotation and pixel-format conversion
+  are not included. Keep the decoded native pixel format.
 - Keep raw output bounded in `/run` or `/tmp`: a complete raw video can use
   much more memory than its compressed input. Retain only needed frames or
   send them through standard output to a consumer.

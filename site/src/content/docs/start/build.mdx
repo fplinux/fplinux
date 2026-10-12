@@ -99,10 +99,6 @@ built with options, pass the same options to `run`, `console`, `verify`,
 Each combination of phone, profile and build type is kept separately. Building
 one does not replace another.
 
-The default profile uses writable RAM OverlayFS over read-only XZ-compressed
-SquashFS, with ZSTD zram. The microSD profile uses persistent ext4 and LZO-RLE
-zram. UMS9117 kernels and embedded initramfs use XZ in both build types.
-
 ## Build without network access
 
 After one online build has downloaded everything it needs, you can rebuild
@@ -121,16 +117,17 @@ or restore them into a matching checkout, use
 
 ## Free disk space
 
-FPLinux reuses earlier build results and removes outdated ones on its own.
-Interrupted commands can leave staged workspaces behind. List them, then
-remove them:
+FPLinux reuses earlier build results and removes obsolete build intermediates
+automatically. To list disposable cache entries, including workspaces left by
+interrupted commands and old logs, then remove them:
 
 ```sh title="PC"
 ./fplinux prune
 ./fplinux prune --apply
 ```
 
-Without `--apply`, `prune` only shows what it would remove.
+Without `--apply`, `prune` only shows what it would remove. Review its
+`candidate:` entries before applying it; `protected:` entries are retained.
 
 ## What a successful build proves
 

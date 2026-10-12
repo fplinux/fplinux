@@ -13,10 +13,11 @@ third-party components retain their own licenses. FPLinux is an independent proj
 
 The source tree records exact versions, URLs and hashes in `sources.lock.toml`,
 `container.lock.toml`, `environment.lock.toml`, `alpine.lock.toml`, `Containerfile`,
-package locks, host-runtime locks, target asset locks and the platform U-Boot source lock. APKBUILD recipes declare and
+package locks, host-runtime locks, platform and target asset locks and the
+platform U-Boot source lock. APKBUILD recipes declare and
 verify their upstream and local inputs.
 
-Standalone archives carry the target asset lock, a build manifest, license
+Standalone archives carry the resolved asset lock, a build manifest, license
 notices and `SHA256SUMS`.
 
 ## Third-party components
@@ -36,6 +37,11 @@ notices and `SHA256SUMS`.
 | GLib 2.88.1                              | Core library for the BlueZ daemons             | LGPL-2.1-or-later; upstream release archive built without GIO, GObject or introspection           |
 | apk-tools 3.0.8                          | Package manager for optional APKs              | GPL-2.0-only; upstream release archive built with Mbed TLS instead of OpenSSL                     |
 | Mbed TLS 3.6                             | APK signatures and HTTPS transport             | Apache-2.0 OR GPL-2.0-or-later; supplied by the pinned Alpine package set                         |
+| hostapd / wpa_supplicant 2.11            | Wi-Fi access point and station authentication  | BSD-3-Clause; supplied by the pinned Alpine package set                                           |
+| iw / wireless-regdb                      | Wi-Fi configuration and regulatory data        | ISC; supplied by the pinned Alpine package set                                                    |
+| OpenSSL 3.5.9                            | Cryptography for the Wi-Fi tools               | Apache-2.0; supplied by the pinned Alpine package set                                             |
+| libnl3                                   | Netlink interface for the Wi-Fi tools          | LGPL-2.1-or-later; supplied by the pinned Alpine package set                                      |
+| pcsc-lite libraries                      | Smart-card support in wpa_supplicant           | BSD-3-Clause AND BSD-2-Clause AND ISC; supplied by the pinned Alpine package set                  |
 | libjpeg-turbo 3.2.0                      | Software JPEG reference in `fplinux-jpeg-cpu`  | IJG, with Zlib-licensed SIMD code; upstream release archive linked statically                     |
 | ALSA utils 1.2.16                        | Playback, recording and mixer tools            | GPL-2.0-or-later; upstream aplay, arecord and amixer built by the audio aport                     |
 | ALSA library 1.2.16.1                    | PCM conversion and mixer interface             | LGPL-2.1-or-later; upstream release built by the corresponding FPLinux aport                      |
@@ -88,7 +94,12 @@ The Git tree does not contain `spreadtrum_flash` source, `spd_dump`,
 The local build downloads exact pinned inputs, verifies their hashes, and writes
 them only below `.cache/`.
 
-The `pinmap.bin` and `keymap.bin` members originate as model-specific register
-initialization data extracted from phone firmware and mirrored by fpdoom.
-FPLinux records their source and exact hashes without assigning a license to
-them.
+The `pinmap.bin` and `keymap.bin` members are model-specific register
+initialization data. Pinned maps are extracted from phone firmware and mirrored
+by fpdoom; prepared maps come from the owner's phone backup. FPLinux records
+their source and exact hashes without assigning a license to them.
+
+Marlin2 wireless protocol definitions include material Copyright (C) 2015
+Spreadtrum Communications Inc., under the GNU General Public License version 2.
+The original protocol headers credit Keguang Zhang and Jingxiang Li as authors.
+Source download: [Marlin2 wireless components](https://github.com/MotorolaMobilityLLC/kernel-modules-wcn).

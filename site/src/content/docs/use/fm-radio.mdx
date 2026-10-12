@@ -17,14 +17,15 @@ profiles before following this guide.
 
 <FeatureStatus feature="fm-radio" />
 
-FM uses receiver settings from [device data](/fplinux/guides/device-data/)
-prepared from the same phone before the image is built.
+FM needs receiver settings in [device data](/fplinux/guides/device-data/)
+prepared from the same phone before FPLinux is loaded. For a downloaded
+archive, follow the [standalone archive guide](/fplinux/guides/standalone-archive/).
 
-## Match the checked configuration
+## Equalizer settings
 
-FM shares the equalizer and limiter settings used for audio files; fitted
-audio enables both by default. Match the conditions in the phone checklist
-before starting FM. If it lists playback with EQ/ALC off, disable both:
+FM shares the equalizer and limiter settings used for audio files; device data
+enables both by default. Follow the conditions in the phone checklist before
+starting FM. If it lists playback with EQ/ALC off, disable both:
 
 ```sh title="Phone"
 amixer -c 0 cset name='EQ Playback Switch' off

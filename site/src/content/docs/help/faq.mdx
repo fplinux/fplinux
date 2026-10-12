@@ -66,13 +66,14 @@ your image. FPLinux configures no package repository on the phone.
 Building from source needs a Linux x86-64 PC with Python 3.14 and network
 access for the first build. Running your build uses the tools listed in
 [Run FPLinux](/fplinux/start/run/#before-you-start).
-A [standalone archive](/fplinux/guides/standalone-archive/) bundles its runtime
-for Linux x86-64 or Windows 10/11 x64 and lists its remaining host requirements.
+A [standalone archive](/fplinux/guides/standalone-archive/) lists its host
+requirements. Autonomous archives bundle their runtime for Linux x86-64 or
+Windows 10/11 x64.
 
 ### Do I need Docker or Podman?
 
-No. `./fplinux setup` installs the build environment inside the checkout, and
-every command uses it from there. See [Build FPLinux](/fplinux/start/build/).
+No. `./fplinux setup` installs the build environment inside the checkout.
+Builds and source checks use it from there. See [Build FPLinux](/fplinux/start/build/).
 
 ### Can I run FPLinux without building it?
 

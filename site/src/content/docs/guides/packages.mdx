@@ -3,7 +3,7 @@ title: Optional packages
 description: Install and remove optional FPLinux applications on a running phone.
 ---
 
-import { Tabs, TabItem } from '@astrojs/starlight/components';
+import { Tabs, TabItem } from "@astrojs/starlight/components";
 
 Optional applications come as APK files built together with the FPLinux
 image. Install them into a running phone; you do not need a new load. Each
@@ -86,7 +86,7 @@ libraries to the RAM system. The microSD system card already includes them.
 
 ## Package sources
 
-Install only the APKs built with your image. FPLinux configures no package
-repository, and the install command above deliberately works without network
-access. The phone also has `wget` with a certificate bundle for HTTP and HTTPS
-downloads; a download over HTTPS does not make an APK trusted.
+Install only the APKs built with your image. The install command above uses
+local APK files and disables network access. The phone also has `wget` with a
+certificate bundle for HTTP and HTTPS downloads; a download over HTTPS does not
+make an APK trusted.

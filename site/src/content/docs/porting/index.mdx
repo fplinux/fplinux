@@ -61,8 +61,8 @@ The boundaries run both ways:
 - `bootstrap/` contains no SoC loader policy and no phone addresses, register
   setup, panel sequences, keymaps or assets.
 - `common/` does not depend on a phone memory map, board register layout or
-  bootstrap protocol. Anything installed in the phone's root filesystem or run
-  as a service belongs to `alpine/`, even when it is target-neutral.
+  bootstrap protocol. Phone programs and services are maintained as Alpine
+  aports, even when they are target-neutral.
 - A target selects the shared bundle runner through its manifest instead of
   copying a runner or adding a target-specific launcher.
 
@@ -75,12 +75,8 @@ The boundaries run both ways:
   `default` profile runs from RAM and `microsd-uboot` uses the microSD system
   card. A target without microSD boot inputs offers only `default`. Feature
   profiles are not accepted.
-- Targets and platforms that use the same Linux source share one source tree,
-  so their Linux integrations must coexist. Guard board drivers with the
-  target's configuration and give board-owned files their own destinations. Add
-  new board files by copying them; change upstream files only through patches
-  or platform copies. The build rejects conflicting file ownership, patches that
-  cannot apply together and profile-specific Linux patches.
+- Follow the [Linux integration contract](/fplinux/porting/linux-integration/)
+  when adding kernel code, configuration or Devicetree inputs.
 - Name a target and its platform as described in
   [Target and platform identity](/fplinux/porting/identity/).
 
@@ -107,18 +103,10 @@ Map each consumer of shared C sources explicitly in
 Rebuild an upstream component in its own `fplinux-` aport only when the locked
 Alpine package's runtime dependencies exceed the RAM filesystem budget.
 Install only the runtime files its consumer loads and remove the replaced
-Alpine artifacts from `alpine.lock.toml`. `fplinux-bluez-glib` supplies a private
-GLib runtime for the BlueZ daemons; `fplinux-apk-tools` replaces the minirootfs
-`apk-tools` and its OpenSSL libraries.
+Alpine artifacts from `alpine.lock.toml`.
 
 Use a hardware-specific package only when its public interface is specific to
 that hardware. Shared kernel and userspace interfaces belong in shared packages.
-
-## Shared Linux integration
-
-The [Linux integration contract](/fplinux/porting/linux-integration/) owns
-shared source trees, separate compilation contexts and target-owned microSD
-card detection.
 
 ## Support status of a target
 
