@@ -24,7 +24,9 @@ static struct mmc fake_mmc;
 static jmp_buf finished;
 static uint32_t failure;
 static size_t fit_bytes;
+static size_t expected_dtb_bytes;
 static int released;
+static int padded_fdt;
 
 static void fail(uint32_t code, uint32_t detail) __attribute__((noreturn));
 static void finalize(uint32_t kernel, uint32_t kernel_size, uint32_t dtb,
@@ -52,12 +54,47 @@ static void fail(uint32_t code, uint32_t detail)
 	longjmp(finished, 1);
 }
 
+static int padded_tree_handoff_valid(uint32_t dtb_bytes)
+{
+	static const unsigned char seed[] = {
+		0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+	};
+	static const char seed_name[] = "rng-seed";
+	const unsigned char *tree = (const void *)(uintptr_t)DTB_ADDRESS;
+	const void *value;
+	size_t offset;
+	unsigned names = 0;
+	int length;
+	int chosen;
+
+	if (dtb_bytes != expected_dtb_bytes || fdt_check_header(tree) ||
+	    fdt_totalsize(tree) != dtb_bytes || dtb_bytes < sizeof(seed_name))
+		return 0;
+	chosen = fdt_path_offset(tree, "/chosen");
+	if (chosen < 0)
+		return 0;
+	value = fdt_getprop(tree, chosen, "rng-seed", &length);
+	if (!value || length != sizeof(seed) ||
+	    memcmp(value, seed, sizeof(seed)))
+		return 0;
+	for (offset = 0; offset <= dtb_bytes - sizeof(seed_name); ++offset) {
+		if (!memcmp(tree + offset, seed_name, sizeof(seed_name)))
+			++names;
+	}
+	return names == 1;
+}
+
 static void finalize(uint32_t kernel, uint32_t kernel_size, uint32_t dtb,
 		     uint32_t dtb_size)
 {
 	if (kernel != KERNEL_ADDRESS || kernel_size != 64 ||
 	    dtb != DTB_ADDRESS || !dtb_size)
 		failure = UINT32_MAX;
+	if (padded_fdt && !padded_tree_handoff_valid(dtb_size)) {
+		fputs("DTB handoff includes padding or changed the RNG property\n",
+		      stderr);
+		failure = UINT32_MAX;
+	}
 	longjmp(finished, 1);
 }
 
@@ -235,12 +272,25 @@ int bootm_run_states(struct bootm_info *bmi, int states)
 		if (fdt_check_header(selected.ft_addr))
 			return -1;
 		selected.ft_len = fdt_totalsize(selected.ft_addr);
+		expected_dtb_bytes = size;
 		selected.fit_hdr_fdt = fit;
 		selected.fit_uname_fdt = "fdt";
 		selected.fit_noffset_fdt = node;
 	} else if (states == BOOTM_STATE_LOADOS) {
 		fit_image_get_data(fit, selected.fit_noffset_os, &data, &size);
 		memcpy((void *)(uintptr_t)KERNEL_ADDRESS, data, size);
+	} else if (states == BOOTM_STATE_OS_PREP && padded_fdt) {
+		static const char stale_name[] = "rng-seed";
+		unsigned char *tree = selected.ft_addr;
+		size_t active_bytes = fdt_totalsize(tree);
+
+		/* Model unused page padding left by the external bootm runtime. */
+		if (active_bytes + 32U + sizeof(stale_name) > 0x1000U)
+			return -1;
+		memset(tree + active_bytes, 0, 0x1000U - active_bytes);
+		memcpy(tree + active_bytes + 32U, stale_name,
+		       sizeof(stale_name));
+		((uint32_t *)tree)[1] = htobe32(0x1000U);
 	}
 	return 0;
 }
@@ -253,8 +303,13 @@ int main(int argc, char **argv)
 	size_t size;
 	int expected, alignment;
 
-	if (argc != 4)
+	if (argc != 4 && argc != 5)
 		return 2;
+	if (argc == 5) {
+		if (strcmp(argv[4], "padded-fdt"))
+			return 2;
+		padded_fdt = 1;
+	}
 	alignment = atoi(argv[2]);
 	expected = atoi(argv[3]);
 	fit = mmap((void *)(uintptr_t)FIT_ADDRESS, 3 * ARENA_BYTES,

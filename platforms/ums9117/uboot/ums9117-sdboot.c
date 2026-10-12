@@ -204,9 +204,9 @@ static int validate_bootm_selection(const struct fplinux_uboot_handoff *handoff,
 	return 0;
 }
 
-static int validate_prepared_fdt(const struct fplinux_uboot_handoff *handoff,
-				 const struct bootm_headers *images,
-				 uint32_t *dtb_bytes)
+static int pack_prepared_fdt(const struct fplinux_uboot_handoff *handoff,
+			     const struct bootm_headers *images,
+			     uint32_t *dtb_bytes)
 {
 	int size;
 
@@ -217,7 +217,10 @@ static int validate_prepared_fdt(const struct fplinux_uboot_handoff *handoff,
 	size = fdt_totalsize(images->ft_addr);
 	if (size <= 0 || size > handoff->dtb_limit)
 		return -EINVAL;
-	*dtb_bytes = size;
+	/* Unused bootm padding may retain duplicate session marker names. */
+	if (fdt_pack(images->ft_addr))
+		return -EINVAL;
+	*dtb_bytes = fdt_totalsize(images->ft_addr);
 	return 0;
 }
 
@@ -269,7 +272,7 @@ static int prepare_fit(const struct fplinux_uboot_handoff *handoff,
 	ret = bootm_run_states(&bmi, BOOTM_STATE_OS_PREP);
 	if (ret)
 		return ret;
-	return validate_prepared_fdt(handoff, bmi.images, dtb_bytes);
+	return pack_prepared_fdt(handoff, bmi.images, dtb_bytes);
 }
 
 static int do_ums9117_sdboot(struct cmd_tbl *cmdtp, int flag, int argc,

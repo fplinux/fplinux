@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 int fdt_check_header(const void *fdt);
+int fdt_pack(void *fdt);
 int fdt_path_offset(const void *fdt, const char *path);
 int fdt_subnode_offset(const void *fdt, int parent, const char *name);
 const void *fdt_getprop(const void *fdt, int node, const char *name, int *len);

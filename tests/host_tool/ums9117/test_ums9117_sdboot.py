@@ -22,7 +22,7 @@ UBOOT = ROOT / "platforms/ums9117/uboot"
 
 
 class SdbootFitAdmissionTests:
-    """A valid embedded DTB may be only four-byte aligned inside its FIT."""
+    """Admit embedded DTBs and hand off their active contents after bootm preparation."""
 
     executable: ClassVar[Path]
 
@@ -84,10 +84,28 @@ class SdbootFitAdmissionTests:
             fit, alignment = self.make_fit(work, payload, "padding")
             self.check_admission(self.executable, fit, alignment, 4)
 
+    def test_prepared_dtb_padding_does_not_reach_handoff(self, tmp_path: Path) -> None:
+        """Preserve the RNG property while excluding a stale name in unused DTB padding."""
+        dtb = self.make_dtb(tmp_path)
+        kernel = bytearray(64)
+        struct.pack_into("<III", kernel, 0x24, 0x016F2818, 0, 64)
+        (tmp_path / "zImage").write_bytes(kernel)
+        (tmp_path / "kernel.sha256").write_bytes(hashlib.sha256(kernel).digest())
+        fit, alignment = self.make_fit(tmp_path, dtb, "padding")
+        result = run_process(
+            [str(self.executable), str(fit), str(alignment), "0", "padded-fdt"],
+            name="run sdboot with prepared DTB padding",
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
     def make_dtb(self, work: Path) -> bytes:
         """Compile a standalone DTB using the declared quality-runtime dtc."""
         source = work / "linux.dts"
-        source.write_text('/dts-v1/; / { compatible = "test,board"; };\n')
+        source.write_text(
+            '/dts-v1/; / { compatible = "test,board"; '
+            "chosen { rng-seed = [01 23 45 67 89 ab cd ef]; }; };\n"
+        )
         output = work / "linux.dtb"
         self.compile_tree(source, output)
         return output.read_bytes()
