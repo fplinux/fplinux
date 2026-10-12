@@ -110,10 +110,10 @@ def _checksum_container_command(  # noqa: PLR0913
     prepare_command = "\n".join(
         (
             "chmod 755 /workspace /workspace/alpine /workspace/alpine/aports",
-            f"install -d -o builder -g builder {source_cache}",
-            f"restore_stage() {{ chown -R 0:0 {stage_aport}; }}",
-            "trap restore_stage EXIT HUP INT TERM",
-            f"chown -R builder:builder {stage_aport}",
+            f"install -d {source_cache}",
+            f"restore_ownership() {{ chown -R 0:0 {stage_aport} {source_cache}; }}",
+            "trap restore_ownership EXIT HUP INT TERM",
+            f"chown -R builder:builder {stage_aport} {source_cache}",
             "su builder -s /bin/sh -c " + shlex.quote(builder_command),
         )
     )
