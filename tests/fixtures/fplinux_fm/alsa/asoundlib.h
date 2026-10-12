@@ -7,9 +7,11 @@ typedef struct snd_ctl {
 	int unused;
 } snd_ctl_t;
 typedef struct snd_ctl_elem_id {
-	int unused;
+	int interface;
+	char name[44];
 } snd_ctl_elem_id_t;
 typedef struct snd_ctl_elem_value {
+	snd_ctl_elem_id_t id;
 	int enabled;
 } snd_ctl_elem_value_t;
 

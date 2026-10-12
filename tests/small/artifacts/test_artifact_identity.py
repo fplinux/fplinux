@@ -112,8 +112,8 @@ class ArtifactIdentityTests:
         assert (load_image_state(cache, "b" * 64)) is None
 
     @staticmethod
-    def test_loaded_image_content_is_rechecked_beyond_its_embedded_marker(tmp_path: Path) -> None:
-        """A mode-changing export cannot be admitted solely by its unchanged marker."""
+    def test_image_state_rejects_mismatched_content_in_probe_response(tmp_path: Path) -> None:
+        """A controlled probe response must match observed content to its declared marker."""
         image_root = tmp_path
         compiler = installed_tree(image_root)
         declared_content = image_content_digest(image_root)

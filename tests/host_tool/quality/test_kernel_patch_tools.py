@@ -159,8 +159,8 @@ class KernelPatchToolTests:
             check_linux_changes([step], archive, source, self.root / "config.patch")
         assert (step.source.read_bytes()) == (original)
 
-    def test_append_is_checked_as_a_change_to_destination_kconfig(self) -> None:
-        """An arbitrary fragment filename cannot bypass destination-aware Kconfig checks."""
+    def test_appended_fragment_generates_destination_kconfig_diff(self) -> None:
+        """A fragment targeting Kconfig is projected into that destination's diff."""
         fragment = self.root / "feature.fragment"
         fragment.write_bytes(b'config APPENDED\n\tbool "Appended"\n')
         step = LinuxInput("platform-append", "feature.fragment", "drivers/Kconfig", fragment)

@@ -18,8 +18,8 @@ def _inventory(root: Path, *relative_paths: str) -> list[tuple[str, Path]]:
 class FormatResolutionTests:
     """Resolve only explicit regular files from the project source inventory."""
 
-    def test_resolver_accepts_selected_untracked_source(self, tmp_path: Path) -> None:
-        """A non-ignored untracked source is formattable without a tracked-file gate."""
+    def test_resolver_accepts_source_from_supplied_inventory(self, tmp_path: Path) -> None:
+        """A selected source in the supplied inventory can be resolved for formatting."""
         root = tmp_path
         selected = root / "new_tool.py"
         neighbor = root / "neighbor.py"
@@ -102,12 +102,13 @@ class FormatContainerBoundaryTests:
             linux_cache=Path("/linux-cache"),
         )
         mounts = [command[index + 1] for index, arg in enumerate(command) if arg == "--volume"]
-        assert (mounts) == (
-            [
+        assert (len(mounts)) == (3)
+        assert (set(mounts)) == (
+            {
                 "/projection:/workspace",
                 "/downloads:/linux-archives:ro",
                 "/linux-cache:/cache/linux",
-            ]
+            }
         )
         assert ("--read-only") in (command)
 

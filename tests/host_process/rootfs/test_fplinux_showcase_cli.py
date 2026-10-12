@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import shlex
 import tempfile
 from contextlib import ExitStack
@@ -20,6 +21,7 @@ from tests.process import run_process
 APORT = ROOT / "alpine/aports/fplinux-showcase"
 SHARED = ROOT / "include/fplinux"
 SOURCE = APORT / "fplinux-showcase.c"
+FAKE_DEVICES = ROOT / "tests/host_process/rootfs/fplinux-showcase-fake-devices.c"
 
 
 class FplinuxShowcaseCliTests:
@@ -161,7 +163,7 @@ class FplinuxShowcaseCliTests:
 
     @staticmethod
     def compile_with_class_roots(class_root: Path) -> Path:
-        """Compile the real application against a test-owned class tree."""
+        """Compile real class discovery with simulated input and display devices."""
         executable = class_root / "fplinux-showcase"
         leds = class_root / "cases" / "*" / "leds" / "*" / "brightness"
         drm_flags = shlex.split(
@@ -189,9 +191,16 @@ class FplinuxShowcaseCliTests:
                 str(APORT / "armada-storyboard.c"),
                 str(APORT / "armada-renderer.c"),
                 str(ROOT / "lib/fplinux/fplinux-font.c"),
-                str(ROOT / "lib/fplinux/fplinux-drm-session.c"),
                 str(ROOT / "lib/fplinux/fplinux-brightness-client.c"),
                 str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                str(FAKE_DEVICES),
+                "-Wl,--wrap=open",
+                "-Wl,--wrap=fopen",
+                "-Wl,--wrap=ioctl",
+                "-Wl,--wrap=read",
+                "-Wl,--wrap=write",
+                "-Wl,--wrap=connect",
+                "-Wl,--wrap=close",
                 *drm_flags,
                 "-o",
                 str(executable),
@@ -210,22 +219,29 @@ class FplinuxShowcaseCliTests:
         (device / "max_brightness").write_text("10\n", encoding="ascii")
         (device / "trigger").write_text("[none] input-events\n", encoding="ascii")
 
-    def test_default_class_discovery_uses_keyboard_led_function(self) -> None:
-        """A status LED does not replace the sole kbd_backlight function LED."""
+    def test_default_class_discovery_rejects_unusable_keyboard_led(self) -> None:
+        """Startup validates the keyboard LED even when another class LED is usable."""
         class_root = self.work
-        self.add_class_device(class_root / "leds", "status")
+        self.add_class_device(class_root / "leds", "aaa-status")
         self.add_class_device(class_root / "leds", "panel:kbd_backlight")
+        keyboard_led = class_root / "leds/panel:kbd_backlight"
+        (keyboard_led / "max_brightness").write_text("0\n", encoding="ascii")
+
+        environment = os.environ.copy()
+        environment["SHOWCASE_KEYPAD_LED"] = str(keyboard_led)
+        environment["SHOWCASE_BRIGHTNESS_SOCKET"] = str(class_root / "absent-brightness.sock")
         executable = self.discovery_executable
 
         result = run_process(
             [str(executable), "--runs", "1"],
-            name="select FPLinux Showcase keyboard function LED",
+            name="reject FPLinux Showcase keyboard LED with zero maximum",
             timeout=5,
+            env=environment,
         )
 
-        assert (result.returncode) != (0)
-        assert ("required keypad fplinux/keypad0") in (result.stderr)
-        assert ("required keypad LED") not in (result.stderr)
+        assert (result.returncode) == (1)
+        assert ("required keypad LED interface is unavailable") in (result.stderr)
+        assert ("display activation") not in (result.stderr)
 
     def test_default_class_discovery_rejects_ambiguous_keyboard_leds(self) -> None:
         """Multiple kbd_backlight LED functions stop before any phone input opens."""

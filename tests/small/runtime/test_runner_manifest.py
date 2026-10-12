@@ -184,8 +184,8 @@ class RuntimeManifestTests:
             with pytest.raises(SystemExit):
                 self.load(manifest)
 
-    def test_manifest_shape_does_not_execute_identity_code_before_hash_verification(self) -> None:
-        """Keep bundled Python execution behind the runner's declared-file hash loop."""
+    def test_manifest_validation_does_not_execute_identity_code(self) -> None:
+        """Manifest validation returns identity data without importing its implementation."""
         self.path.write_text(json.dumps(runtime_manifest()), encoding="utf-8")
         with mock.patch.object(
             RUNNER,

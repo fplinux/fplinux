@@ -821,7 +821,7 @@ static void failed_admission_releases_only_the_new_owner(void)
 	stop();
 }
 
-static void physical_restart_discards_the_old_partial_frame(void)
+static void transport_reopen_discards_the_old_partial_frame(void)
 {
 	const u8 event_prefix[] = { HCI_EVENT_PKT };
 	const u8 sentinel[] = { HCI_EVENT_PKT, 0xff, 0x01, 0x42 };
@@ -879,7 +879,7 @@ int main(void)
 	fm_and_bluetooth_hold_power_independently();
 	failed_start_leaves_both_users_unclaimed();
 	failed_admission_releases_only_the_new_owner();
-	physical_restart_discards_the_old_partial_frame();
+	transport_reopen_discards_the_old_partial_frame();
 	restarted_transport_discards_a_partial_prologue_event();
 	puts("HCI transport lifecycle component checks passed");
 	return 0;

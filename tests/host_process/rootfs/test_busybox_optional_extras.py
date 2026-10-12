@@ -21,8 +21,8 @@ EXTRAS_PAYLOAD = b"#!/bin/sh\nprintf 'extras help fixture\\n'\n"
 EXTRAS_CONFIG = b"start 192.0.2.20\nend 192.0.2.30\ninterface test0\n"
 
 
-def _stage_core(temporary: Path) -> Path:
-    """Run the production package function with controlled external build outputs."""
+def _stage_core(temporary: Path, *, arch: str) -> tuple[Path, ApkIdentity]:
+    """Execute recipe metadata and packaging with controlled external build outputs."""
     sources = temporary / "src"
     build = sources / "busybox-1.37.0"
     (build / "applets").mkdir(parents=True)
@@ -48,16 +48,22 @@ def _stage_core(temporary: Path) -> Path:
     ):
         (sources / name).write_text(f"controlled {name} input\n", encoding="utf-8")
     stage = temporary / "core-stage"
+    metadata = temporary / "core-metadata"
     staged = subprocess.run(
         [
             "sh",
             "-eu",
             "-c",
-            'srcdir=$2; pkgdir=$3; . "$1"; cd "$builddir"; package',
+            (
+                'srcdir=$2; pkgdir=$3; . "$1"; cd "$builddir"; package; '
+                'printf \'%s\\n\' "$pkgname" "$pkgver-r$pkgrel" '
+                '"${provides-}" "${depends-}" "${replaces-}" >"$4"'
+            ),
             "busybox-package",
             str(RECIPE),
             str(sources),
             str(stage),
+            str(metadata),
         ],
         capture_output=True,
         text=True,
@@ -66,7 +72,16 @@ def _stage_core(temporary: Path) -> Path:
     )
     if staged.returncode != 0:
         raise AssertionError(staged.stdout + staged.stderr)
-    return stage
+    name, version, provides, depends, replaces = metadata.read_text(encoding="utf-8").splitlines()
+    identity = ApkIdentity(
+        name=name,
+        arch=arch,
+        version=version,
+        provides=tuple(provides.split()),
+        depends=tuple(depends.split()),
+        replaces=tuple(replaces.split()),
+    )
+    return stage, identity
 
 
 @pytest.mark.skipif(
@@ -80,7 +95,14 @@ class BusyBoxOptionalExtrasTests:
         """Real APK add/remove transactions preserve the recipe's core payload."""
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)
-            core = _stage_core(temporary)
+            arch = subprocess.run(
+                ["apk", "--print-arch"],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=10,
+            ).stdout.strip()
+            core, core_identity = _stage_core(temporary, arch=arch)
             assert ((core / "bin/busybox").read_bytes()) == (CORE_PAYLOAD)
             assert (stat.S_IMODE((core / "bin/busybox").stat().st_mode)) == (0o755)
             extra = temporary / "extras-stage"
@@ -112,16 +134,9 @@ class BusyBoxOptionalExtrasTests:
                 check=True,
                 timeout=10,
             )
-            arch = subprocess.run(
-                ["apk", "--print-arch"],
-                capture_output=True,
-                text=True,
-                check=True,
-                timeout=10,
-            ).stdout.strip()
             core_apk = signed_apk_tree(
                 temporary,
-                ApkIdentity("fplinux-busybox", arch, "1.37.0-r0", ("busybox=1.37.0-r31",)),
+                core_identity,
                 core,
                 private_key=private_key,
             )

@@ -66,7 +66,7 @@ class DisplayBrightnessManifestTests:
             "integer in 0..63-7",
         ],
     )
-    def test_invalid_table_is_rejected_before_build(
+    def test_invalid_table_is_rejected_by_target_loader(
         self, table: dict[str, object], error: str
     ) -> None:
         """Reject unsafe names and malformed or non-ascending raw values."""

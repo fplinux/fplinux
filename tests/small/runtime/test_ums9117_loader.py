@@ -312,8 +312,8 @@ class LoaderExecutionTests(BridgeFixture):
         popen.assert_not_called()
         transport_module.remove_personalized_image.assert_called_once()
 
-    def test_adapter_preserves_runner_owned_signal_handlers(self) -> None:
-        """The adapter must not replace the outer runner's process-lifecycle owner."""
+    def test_bridge_preserves_signal_handlers_after_return(self) -> None:
+        """The bridge returns with the caller's signal handlers still installed."""
         signals = (signal.SIGINT, signal.SIGTERM)
         before = {signum: signal.getsignal(signum) for signum in signals}
         try:

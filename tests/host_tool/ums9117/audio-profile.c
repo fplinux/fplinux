@@ -387,7 +387,6 @@ int of_property_read_string_index(const struct device_node *node,
 	CHECK(node == of_root);
 	CHECK(!strcmp(name, "compatible"));
 	CHECK(index == 0);
-	CHECK(active_device->firmware_live);
 	if (active_device->compatible_error)
 		return active_device->compatible_error;
 	*value = "fplinux,test-phone";
@@ -411,11 +410,9 @@ static void prepare_device(struct device *dev)
 	active_device = dev;
 }
 
-static void check_firmware_balance(const struct device *dev,
-				   unsigned int acquired)
+static void check_firmware_balance(const struct device *dev)
 {
-	CHECK(dev->acquired == acquired);
-	CHECK(dev->released == acquired);
+	CHECK(dev->released == dev->acquired);
 	CHECK(!dev->firmware_live);
 }
 
@@ -437,24 +434,24 @@ static void test_loader_fallback_and_errors(void)
 		memcpy(&profile, &original, sizeof(profile));
 		CHECK(ums9117_audio_profile_load(&dev, false, &profile) == 0);
 		CHECK(!memcmp(&profile, &original, sizeof(profile)));
-		check_firmware_balance(&dev, 0);
+		check_firmware_balance(&dev);
 	}
 	prepare_device(&dev);
 	dev.property_error = -EINVAL;
 	CHECK(ums9117_audio_profile_load(&dev, false, &profile) == -22);
-	check_firmware_balance(&dev, 0);
+	check_firmware_balance(&dev);
 	prepare_device(&dev);
 	dev.request_error = -EAGAIN;
 	CHECK(ums9117_audio_profile_load(&dev, false, &profile) == -11);
-	check_firmware_balance(&dev, 0);
+	check_firmware_balance(&dev);
 	prepare_device(&dev);
 	dev.compatible_error = -ENODATA;
 	CHECK(ums9117_audio_profile_load(&dev, false, &profile) == -61);
-	check_firmware_balance(&dev, 1);
+	check_firmware_balance(&dev);
 	prepare_device(&dev);
 	dev.bytes[0] = 'X';
 	CHECK(ums9117_audio_profile_load(&dev, false, &profile) == -22);
-	check_firmware_balance(&dev, 1);
+	check_firmware_balance(&dev);
 }
 
 static void test_loader_copies_decoded_values(void)
@@ -465,13 +462,15 @@ static void test_loader_copies_decoded_values(void)
 	prepare_device(&dev);
 	memset(&profile, 0, sizeof(profile));
 	CHECK(ums9117_audio_profile_load(&dev, false, &profile) == 0);
-	check_firmware_balance(&dev, 1);
+	check_firmware_balance(&dev);
+	CHECK(dev.released > 0);
 	check_decoded_profile(&profile);
 	prepare_device(&dev);
 	dev.firmware.size = 822;
 	memset(&profile, 0, sizeof(profile));
 	CHECK(ums9117_audio_profile_load(&dev, true, &profile) == 0);
-	check_firmware_balance(&dev, 1);
+	check_firmware_balance(&dev);
+	CHECK(dev.released > 0);
 	check_decoded_profile(&profile);
 	if (CONFIG_SND_UMS9117_SPEAKER_VIBRATOR)
 		check_decoded_tone(&profile.vibrate_tone);

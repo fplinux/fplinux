@@ -19,6 +19,8 @@ struct fake_mmio {
 	struct fake_write writes[64];
 	u64 now_us;
 	unsigned int write_count;
+	unsigned int barrier_write_count;
+	bool barrier_seen;
 	bool reset_stuck;
 	bool status_stuck;
 	bool clock_auto_stable;
@@ -84,7 +86,10 @@ static void fake_sleep_us(void *context, u32 min, u32 max)
 
 static void fake_barrier(void *context)
 {
-	(void)context;
+	struct fake_mmio *fake = context;
+
+	fake->barrier_write_count = fake->write_count;
+	fake->barrier_seen = true;
 }
 
 static struct ums9117_sdio_io fake_io(struct fake_mmio *fake)
@@ -223,14 +228,32 @@ static int test_data_request_registers(void)
 			 "final request issue changed");
 	failed |= expect(fake.write_count == ARRAY_SIZE(expected),
 			 "data request write count changed");
+	failed |= expect(fake.barrier_seen && fake.barrier_write_count == 5U,
+			 "data setup was not ordered before ADMA addressing");
+	failed |= expect(
+		(fake.writes[3].reg == UMS9117_SDIO_REG_BLOCK_COUNT &&
+		 fake.writes[4].reg == UMS9117_SDIO_REG_BLOCK_SIZE) ||
+			(fake.writes[3].reg == UMS9117_SDIO_REG_BLOCK_SIZE &&
+			 fake.writes[4].reg == UMS9117_SDIO_REG_BLOCK_COUNT),
+		"data request did not program both shape registers");
 	for (index = 0; index < ARRAY_SIZE(expected) &&
 			fake.write_count == ARRAY_SIZE(expected);
-	     ++index)
-		failed |=
-			expect(fake.writes[index].reg == expected[index].reg &&
-				       fake.writes[index].value ==
-					       expected[index].value,
-			       "data request write order changed");
+	     ++index) {
+		unsigned int expected_index = index;
+
+		/* These separate shape registers may be set in either order. */
+		if (index == 3U || index == 4U)
+			expected_index =
+				fake.writes[index].reg ==
+						UMS9117_SDIO_REG_BLOCK_COUNT ?
+					3U :
+					4U;
+		failed |= expect(fake.writes[index].reg ==
+						 expected[expected_index].reg &&
+					 fake.writes[index].value ==
+						 expected[expected_index].value,
+				 "data request write order changed");
+	}
 	return failed;
 }
 

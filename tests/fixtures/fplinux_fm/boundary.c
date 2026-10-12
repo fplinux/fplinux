@@ -150,26 +150,31 @@ int snd_ctl_close(snd_ctl_t *result)
 
 void snd_ctl_elem_id_set_interface(snd_ctl_elem_id_t *id, int interface)
 {
-	(void)id;
-	(void)interface;
+	id->interface = interface;
 }
 
 void snd_ctl_elem_id_set_name(snd_ctl_elem_id_t *id, const char *name)
 {
-	(void)id;
-	(void)name;
+	snprintf(id->name, sizeof(id->name), "%s", name);
 }
 
 void snd_ctl_elem_value_set_id(snd_ctl_elem_value_t *value,
 			       const snd_ctl_elem_id_t *id)
 {
-	(void)value;
-	(void)id;
+	value->id = *id;
+}
+
+static int is_fm_control(const snd_ctl_elem_value_t *value)
+{
+	return value->id.interface == 2 &&
+	       !strcmp(value->id.name, "FM Playback Switch");
 }
 
 int snd_ctl_elem_read(snd_ctl_t *result, snd_ctl_elem_value_t *value)
 {
 	(void)result;
+	if (!is_fm_control(value))
+		return -ENOENT;
 	value->enabled = getenv("FM_TEST_ALREADY_ACTIVE") != NULL;
 	return 0;
 }
@@ -191,6 +196,8 @@ void snd_ctl_elem_value_set_boolean(snd_ctl_elem_value_t *value,
 int snd_ctl_elem_write(snd_ctl_t *result, snd_ctl_elem_value_t *value)
 {
 	(void)result;
+	if (!is_fm_control(value))
+		return -ENOENT;
 	fputs(value->enabled ? "FM_ON\n" : "FM_OFF\n", stderr);
 	if ((value->enabled && getenv("FM_TEST_FAIL_FM_ON")) ||
 	    (!value->enabled && getenv("FM_TEST_FAIL_FM_OFF")))

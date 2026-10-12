@@ -403,10 +403,8 @@ class BuilderPublicationTests:
         )
 
     @pytest.mark.parametrize("root_kind", ["initramfs", "external"])
-    def test_prepared_board_maps_reach_the_loader_from_the_published_bundle(
-        self, root_kind: str
-    ) -> None:
-        """Frozen maps reach the loader even when the root has no supplemental capsule."""
+    def test_published_board_maps_are_exposed_by_adapter_mapping(self, root_kind: str) -> None:
+        """Published map bytes are exposed through the adapter's serving-directory mapping."""
         pinmap = b"\xb8\x04\x01\x20\x08\x00\xff\xff\xff\xff\xff\xff\xff\xff"
         keymap = b"\x2a\x00\x31\x00"
         board_maps = tuple(

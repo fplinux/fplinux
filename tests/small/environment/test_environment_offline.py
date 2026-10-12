@@ -132,10 +132,10 @@ class OfflineRuntimeInputTests:
     @pytest.mark.parametrize(
         "cached_bytes", [None, b"previous source bytes\n"], ids=["missing", "cached-mismatch"]
     )
-    def test_missing_exact_runtime_archive_reports_its_url_without_network(
+    def test_offline_locked_file_lookup_rejects_missing_archive_without_network(
         self, cached_bytes: bytes | None
     ) -> None:
-        """An unavailable checksum match stops offline installation before downloading."""
+        """An unavailable checksum match reports its URL without opening the network."""
         with (
             tempfile.TemporaryDirectory() as temporary,
         ):

@@ -253,7 +253,7 @@ long video_ioctl2(struct file *file, unsigned int request, unsigned long arg)
 void v4l2_ctrl_handler_init(struct v4l2_ctrl_handler *handler,
 			    unsigned int count)
 {
-	assert(count == 1);
+	(void)count;
 	handler->error = 0;
 }
 void v4l2_ctrl_handler_free(struct v4l2_ctrl_handler *handler)

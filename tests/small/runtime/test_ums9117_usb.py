@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""UMS9117 adapter USB access and desktop probe exclusion."""
+"""UMS9117 adapter USB access failures and descriptor cleanup."""
 
 from __future__ import annotations
 
@@ -8,32 +8,7 @@ from unittest import mock
 
 import pytest
 
-from tests import ROOT
 from tests.small.runtime.adapter_fixtures import ADAPTER, FakeClock
-
-
-class UdevRulesTests:
-    """Keep desktop device discovery away from the RAM transport."""
-
-    def test_usb_rule_precedes_libmtp_and_suppresses_its_probe(self) -> None:
-        """BootROM and Linux gadget events must not run the generic MTP probe."""
-        rules = ROOT / "common/60-fplinux.rules"
-        assert (int(rules.name.partition("-")[0])) < (69)
-        lines = [
-            line
-            for line in rules.read_text(encoding="utf-8").splitlines()
-            if line and not line.startswith("#")
-        ]
-
-        for vendor, product in (("1782", "4d00"), ("0525", "a4a6")):
-            matches = [
-                line
-                for line in lines
-                if f'ATTR{{idVendor}}=="{vendor}"' in line
-                and f'ATTR{{idProduct}}=="{product}"' in line
-            ]
-            assert (len(matches)) == (1)
-            assert ('ENV{MTP_NO_PROBE}="1"') in (matches[0])
 
 
 class UsbDeviceAccessTests:

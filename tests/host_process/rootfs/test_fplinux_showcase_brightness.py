@@ -219,8 +219,8 @@ class FplinuxShowcaseBrightnessTests:
         assert (len([request for request in requests if request.startswith("SHOW ")])) == (1)
         assert (requests[-1]) == ("RELEASE")
 
-    def test_vt_loss_releases_and_resume_claims_before_preview(self) -> None:
-        """Losing the display releases the lease; resumed rendering reclaims it."""
+    def test_display_activity_loss_releases_and_resume_reclaims_before_preview(self) -> None:
+        """Simulated display callbacks release and reclaim the brightness lease."""
         requests = self.run_showcase(vt_cycle=True)
 
         assert (requests[0]) == ("CLAIM")
