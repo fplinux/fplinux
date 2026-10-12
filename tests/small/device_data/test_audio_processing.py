@@ -69,6 +69,46 @@ class PlaybackProcessingTests:
                 0,
             )
 
+    @pytest.mark.parametrize(
+        ("base_gain", "expected_sections"),
+        [
+            pytest.param(
+                0,
+                (
+                    (4096, 16068, -32110, 32110, 16068, -15753),
+                    (4096, 16068, -32122, 32122, 16068, -15753),
+                    (4096, 16384, 0, 0, 0, 0),
+                ),
+                id="unity-base-gain",
+            ),
+            pytest.param(
+                -180,
+                (
+                    (515, 16068, -32110, 32110, 16068, -15753),
+                    (515, 16068, -32122, 32122, 16068, -15753),
+                    (515, 16384, 0, 0, 0, 0),
+                ),
+                id="attenuated-base-gain",
+            ),
+        ],
+    )
+    def test_profile_reduces_exact_peaking_cancellation_and_preserves_base_gain(
+        self, base_gain: int, expected_sections: tuple[tuple[int, ...], ...]
+    ) -> None:
+        """Exact canceled feedback becomes a stable constant with the fitted base gain."""
+        downloaded, protected = nokia_audio_records()
+        for records in (downloaded, protected):
+            eq = bytearray(records[440])
+            struct.pack_into("<H", eq, 3 * 544 + 20, 0x8000)
+            struct.pack_into("<4h", eq, 3 * 544 + 22, 155, 7168, -570, base_gain)
+            records[440] = bytes(eq)
+
+        profile = self._profile((downloaded, protected))
+
+        for rate_index, expected in enumerate(expected_sections):
+            offset = PROCESSING_OFFSET + PROCESSING_ROUTE_SIZE + 25 + rate_index * 72 + 12
+            assert struct.unpack_from("<6h", profile, offset) == expected
+
     def test_fitted_route_words_match_independent_stock_values(self) -> None:
         """S6, ALC and coefficient words sit at their wire offsets with the stock values."""
         profiles = {
@@ -229,6 +269,14 @@ class PlaybackProcessingTests:
                 (0, 0, 0, 0),
                 "EQ_Handsfree section 0 is unstable at 24000 Hz",
                 id="zero-low-cut-corners",
+            ),
+            pytest.param(
+                440,
+                3 * 544 + 22,
+                "<4h",
+                (1, 512, -570, 0),
+                "EQ_Handsfree section 1 is unstable at 24000 Hz",
+                id="peaking-zero-angle-negation-wrap",
             ),
             pytest.param(
                 440,

@@ -359,14 +359,16 @@ def _stored_section(
 
 
 def _peaking_section(band: Sequence[int], sample_rate: int) -> _Section:
-    """Design one enabled peaking band as the stock firmware does.
+    """Design one enabled peaking band and remove exact canceled feedback.
 
     A band holds its centre frequency in Hz, Q times 512, and its boost and
     base gain in 0.1 dB. The stock integer arithmetic is kept, including
     truncating division and int16 intermediates. Every band that stock cannot
     design -- a centre frequency that is not between 0 and fs/2 or a gain
     outside -72..+18 dB -- passes through, as the stock caller substitutes a
-    pass-through section. A zero boost leaves only the base gain.
+    pass-through section. A zero boost leaves only the base gain. Exact
+    cancellation of the stored numerator and denominator also leaves only
+    the stored scale.
     """
     frequency, q, boost, base_gain = band
     if not 0 < frequency < sample_rate >> 1:
@@ -398,11 +400,21 @@ def _peaking_section(band: Sequence[int], sample_rate: int) -> _Section:
         cosine = -COSINE_TABLE[_HALF_TURN_ANGLE - centre_angle]
     b1 = _c_divide(-((cosine * root_gain) << 1), divisor)
     a2 = _c_divide((root_gain - tangent) << 14, divisor)
-    return _stored_section(
+    section = _stored_section(
         base_scale,
         numerator=(edge_term + peak_term, b1, edge_term - peak_term),
         denominator=(b1, a2),
     )
+    if (
+        section.b0 == _UNITY_COEFFICIENT
+        and section.b1 == -section.minus_a1
+        and section.b2 == -section.minus_a2
+    ):
+        # Remove canceled feedback state without changing the stored transfer gain.
+        return _stored_section(
+            section.scale, numerator=(_UNITY_COEFFICIENT, 0, 0), denominator=(0, 0)
+        )
+    return section
 
 
 def _low_cut_section(parameters: Sequence[int], sample_rate: int) -> _Section:
