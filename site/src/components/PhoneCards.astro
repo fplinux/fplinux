@@ -3,6 +3,9 @@
 import { LinkButton } from "@astrojs/starlight/components";
 import SupportBadge from "./SupportBadge.astro";
 import support from "../data/support.json";
+import { loadPhones } from "../data/phones.ts";
+
+const { phones } = loadPhones();
 
 const renders = import.meta.glob<{ default: ImageMetadata }>(
 	"../assets/screens/terminal-keypad*.png",
@@ -12,36 +15,6 @@ const renders = import.meta.glob<{ default: ImageMetadata }>(
 );
 const render = (name: string) =>
 	renders[`../assets/screens/${name}.png`]?.default;
-const screens: Record<
-	string,
-	{ image?: ImageMetadata; scale: number; size: string }
-> = {
-	"bq-2830l-tank-connect-max": {
-		image: render("terminal-keypad"),
-		scale: 1,
-		size: "240×320",
-	},
-	"inoi-240-modern-4g": {
-		image: render("terminal-keypad-128x160") ?? render("terminal-keypad"),
-		scale: render("terminal-keypad-128x160") ? 2 : 1,
-		size: "128×160",
-	},
-	"inoi-244-modern-4g": {
-		image: render("terminal-keypad"),
-		scale: 1,
-		size: "240×320",
-	},
-	"maxvi-k15n-4g": {
-		image: render("terminal-keypad"),
-		scale: 1,
-		size: "240×320",
-	},
-	"nokia-ta1618": {
-		image: render("terminal-keypad"),
-		scale: 1,
-		size: "240×320",
-	},
-};
 const highlights = [
 	{ feature: "bluetooth", label: "Bluetooth" },
 	{ feature: "fm-radio", label: "FM radio" },
@@ -55,40 +28,34 @@ const status = (feature: string, phone: string) =>
 ---
 
 <div class="fp-phone-cards not-content">
-	{support.phones.map((phone): astroHTML.JSX.Children => {
-		const screen = screens[phone.id];
+	{phones.map((phone): astroHTML.JSX.Children => {
+		const image = phone.render ? render(phone.render) : undefined;
+		const scale = phone.renderScale ?? 1;
+		const size = `${phone.display.width}×${phone.display.height}`;
 		return (
 			<article class="card">
-				<div class:list={["mini-phone", { "no-render": !screen?.image }]}>
-					{screen?.image && (
+				<div class:list={["mini-phone", { "no-render": !image }]}>
+					{image && (
 						<img
 							alt={`FPLinux terminal on the ${phone.name}`}
 							class="fp-pixel"
-							height={screen.image.height * screen.scale}
-							src={screen.image.src}
-							width={screen.image.width * screen.scale}
+							height={image.height * scale}
+							src={image.src}
+							width={image.width * scale}
 						/>
 					)}
-					{!screen?.image && (
+					{!image && (
 						<p class="screen-note">
-							{screen?.size && (
-								<>
-									{screen.size} display
-									<br />
-								</>
-							)}
-							Control over USB
+							{size} display
 							<br />
-							<small>See the phone checklist for input support.</small>
+							<small>
+								See the phone checklist for display and input support.
+							</small>
 						</p>
 					)}
 				</div>
 				<h3>{phone.name}</h3>
-				<p class="meta">
-					{[phone.code, screen?.size && `${screen.size} display`]
-						.filter(Boolean)
-						.join(" · ")}
-				</p>
+				<p class="meta">{`${phone.id} · ${size} display`}</p>
 				<ul class="chips">
 					{highlights.map((item): astroHTML.JSX.Children => {
 						const state = status(item.feature, phone.id);

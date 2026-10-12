@@ -9,44 +9,6 @@
     "Power and sensors",
     "Applications"
   ],
-  "phones": [
-    {
-      "id": "nokia-ta1618",
-      "name": "Nokia 3210 4G",
-      "code": "TA-1618",
-      "slug": "phones/nokia-3210-4g"
-    },
-    {
-      "id": "inoi-240-modern-4g",
-      "name": "INOI 240 Modern 4G",
-      "code": null,
-      "slug": "phones/inoi-240-modern-4g"
-    },
-    {
-      "id": "inoi-244-modern-4g",
-      "name": "INOI 244 Modern 4G",
-      "code": null,
-      "slug": "phones/inoi-244-modern-4g"
-    },
-    {
-      "id": "maxvi-k15n-4g",
-      "name": "Maxvi K15n4G",
-      "code": null,
-      "slug": "phones/maxvi-k15n-4g"
-    },
-    {
-      "id": "bq-2830l-tank-connect-max",
-      "name": "BQ 2830L Tank Connect Max",
-      "code": null,
-      "slug": "phones/bq-2830l-tank-connect-max"
-    },
-    {
-      "id": "uniwa-v1000-4g",
-      "name": "UNIWA V1000 4G",
-      "code": null,
-      "slug": "phones/uniwa-v1000-4g"
-    }
-  ],
   "features": [
     {
       "id": "ram-boot",
@@ -81,6 +43,10 @@
         "uniwa-v1000-4g": {
           "status": "Supported",
           "note": "RAM boot through D-pad Up and the USB loader, with a readable 320×240 landscape terminal."
+        },
+        "nokia-110-4g": {
+          "status": "Supported",
+          "note": "USB RAM loading reaches the authenticated Linux session in the default profile. Physical keypad use is unqualified."
         }
       }
     },
@@ -117,6 +83,10 @@
         "uniwa-v1000-4g": {
           "status": "Not supported",
           "note": ""
+        },
+        "nokia-110-4g": {
+          "status": "Not supported",
+          "note": "Every start requires the PC's USB loader."
         }
       }
     },
@@ -157,6 +127,10 @@
         "uniwa-v1000-4g": {
           "status": "Partial",
           "note": "Readable 320×240 landscape terminal in RAM and microSD profiles. The terminal returns after five-second idle RTC wake with a read-only microSD root. Full keypad input and exact color accuracy are unqualified."
+        },
+        "nokia-110-4g": {
+          "status": "Partial",
+          "note": "Visible terminal output in RAM. Orientation, color accuracy and physical keypad input are unqualified."
         }
       }
     },
@@ -199,6 +173,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "Logical levels 0, 5 and 10 control raw backlight levels 0, 17 and 34 in RAM. Idle RTC sleep darkens the display and restores it with a read-only microSD root. Brightness calibration, physical keypad control and other panel variants are unqualified."
+        },
+        "nokia-110-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "The display is illuminated and the brightness service responds. Visible brightness changes and calibration are unqualified."
         }
       }
     },
@@ -241,6 +220,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "Keypad illumination is present. Its supply can be switched in software; physical on/off transitions are unqualified."
+        },
+        "nokia-110-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Keypad illumination is visible. Software on/off transitions and automatic timing are unqualified."
         }
       }
     },
@@ -281,6 +265,10 @@
         "uniwa-v1000-4g": {
           "status": "Supported",
           "note": "USB-NCM in RAM and microSD profiles."
+        },
+        "nokia-110-4g": {
+          "status": "Supported",
+          "note": "USB-NCM works in the default RAM and microSD system-card profiles."
         }
       }
     },
@@ -317,6 +305,10 @@
         "uniwa-v1000-4g": {
           "status": "Supported",
           "note": "Authenticated SSH over the local USB connection in RAM and microSD profiles."
+        },
+        "nokia-110-4g": {
+          "status": "Supported",
+          "note": "Authenticated SSH works over the local USB connection in the default RAM and microSD system-card profiles."
         }
       }
     },
@@ -353,6 +345,10 @@
         "uniwa-v1000-4g": {
           "status": "Supported",
           "note": "USB file transfer to RAM, a microSD data card and the writable microSD system root."
+        },
+        "nokia-110-4g": {
+          "status": "Supported",
+          "note": "USB upload and download work with RAM, FAT32 and ext4 data-card files in the RAM profile."
         }
       }
     },
@@ -389,6 +385,10 @@
         "uniwa-v1000-4g": {
           "status": "Unknown",
           "note": "USB host keyboard input is registered; its use on this target is unqualified."
+        },
+        "nokia-110-4g": {
+          "status": "Unknown",
+          "note": ""
         }
       }
     },
@@ -425,6 +425,10 @@
         "uniwa-v1000-4g": {
           "status": "Supported",
           "note": "Lower-bound clock estimates in the microSD profile."
+        },
+        "nokia-110-4g": {
+          "status": "Supported",
+          "note": "The selected 768 MHz and 1 GHz frequencies can be read back in the microSD profile."
         }
       }
     },
@@ -461,6 +465,10 @@
         "uniwa-v1000-4g": {
           "status": "Supported",
           "note": "Selection between 768 MHz and 1 GHz in the microSD profile; voltage and sustained-load behavior are unqualified."
+        },
+        "nokia-110-4g": {
+          "status": "Supported",
+          "note": "Selection between 768 MHz and 1 GHz in the microSD profile changes the observed execution speed; 1 GHz is the default. Voltage and sustained-load behavior are unqualified."
         }
       }
     },
@@ -503,6 +511,11 @@
           "hardware": "Unknown",
           "status": "Unknown",
           "note": ""
+        },
+        "nokia-110-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "The rotation DMA route works in the microSD system-card profile. Other DMA routes are unqualified."
         }
       }
     },
@@ -545,6 +558,11 @@
           "hardware": "Present",
           "status": "Supported",
           "note": "NV16 quarter-turn rotation in the microSD profile, with output matching the CPU reference."
+        },
+        "nokia-110-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Hardware NV16 rotation by 90° works in the microSD system-card profile. Other formats and concurrent use are unqualified."
         }
       }
     },
@@ -581,12 +599,17 @@
         "bq-2830l-tank-connect-max": {
           "hardware": "Present",
           "status": "Partial",
-          "note": "320×240 NV16 encoding and full-size horizontal 4:2:2 decoding. Other geometries, scaled decoding and scaling are unqualified."
+          "note": "320×240 NV16 encoding, full-size horizontal 4:2:2 decoding and 320×240→160×120 NV16 scaling. Other geometries and scaled decoding are unqualified."
         },
         "uniwa-v1000-4g": {
           "hardware": "Present",
           "status": "Supported",
           "note": "Hardware JPEG encoding and decoding at 640×480 and scaling to 320×240 in the microSD profile."
+        },
+        "nokia-110-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Native 240×320 JPEG encode/decode work in RAM and microSD system-card profiles. Scaling a rotated 320×240 frame to 160×120 works with a microSD system root; other sizes and concurrent use are unqualified."
         }
       }
     },
@@ -629,6 +652,11 @@
           "hardware": "Unknown",
           "status": "Unknown",
           "note": "On-phone image presentation is unqualified."
+        },
+        "nokia-110-4g": {
+          "hardware": "Unknown",
+          "status": "Unknown",
+          "note": ""
         }
       }
     },
@@ -665,6 +693,10 @@
         "uniwa-v1000-4g": {
           "status": "Supported",
           "note": "Hardware NV16 quarter-turn rotation matches the CPU reference in the microSD profile. On-phone preview is unqualified."
+        },
+        "nokia-110-4g": {
+          "status": "Partial",
+          "note": "NV16 rotation from 240×320 to 320×240 matches the CPU result in the microSD system-card profile. Other formats and concurrent use are unqualified."
         }
       }
     },
@@ -701,6 +733,10 @@
         "uniwa-v1000-4g": {
           "status": "Supported",
           "note": "Hardware JPEG encoding and decoding at 640×480 and scaling to 320×240 in the microSD profile. On-phone presentation is unqualified."
+        },
+        "nokia-110-4g": {
+          "status": "Partial",
+          "note": "240×320 encode/decode work in RAM and microSD system-card profiles; scaling supports the tested rotated 320×240 input. Native 240×320 input is not accepted by the scaler."
         }
       }
     },
@@ -737,6 +773,10 @@
         "uniwa-v1000-4g": {
           "status": "Unknown",
           "note": "On-phone image presentation is unqualified."
+        },
+        "nokia-110-4g": {
+          "status": "Unknown",
+          "note": ""
         }
       }
     },
@@ -776,6 +816,11 @@
           "note": ""
         },
         "uniwa-v1000-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": ""
+        },
+        "nokia-110-4g": {
           "hardware": "Unknown",
           "status": "Not supported",
           "note": ""
@@ -821,6 +866,11 @@
           "hardware": "Present",
           "status": "Supported",
           "note": "Data-card reads and writes in the RAM profile; files persist after power is removed. Insert before boot and keep installed while powered; no hot-swap."
+        },
+        "nokia-110-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "FAT32 and ext4 file reads and writes work in the RAM profile. Insert before boot and keep installed while powered; no hot-swap."
         }
       }
     },
@@ -861,6 +911,10 @@
         "uniwa-v1000-4g": {
           "status": "Supported",
           "note": "ext4 root grows to fill the card; installed packages and files persist after a cold start. Each start requires the USB loader; keep the card installed while powered."
+        },
+        "nokia-110-4g": {
+          "status": "Supported",
+          "note": "Kernel and ext4 system root load from a prepared microSD card through the USB bootstrap. File changes persist across power cycles. Keep the card installed and remount the root read-only before removing power."
         }
       }
     },
@@ -903,6 +957,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "Read-only raw NAND backup and device-data preparation. No mounting, writing or restoration."
+        },
+        "nokia-110-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Read-only raw NAND backup and device-data preparation work. No mounting, writing or restoration."
         }
       }
     },
@@ -945,6 +1004,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "An inserted 3.5 mm plug is detected. Stereo playback works with the tested three-contact headphones in the microSD profile. The tested four-contact headset plays each channel through both earpieces. Headset recording, other accessories, plug insertion/removal and automatic switching are unqualified."
+        },
+        "nokia-110-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "An inserted plug is detected and the wired output produces playback in RAM. Channel separation, accessory compatibility and plug insertion/removal are unqualified."
         }
       }
     },
@@ -987,6 +1051,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "Audible tone playback through the built-in speaker in the microSD profile. Speech and music quality are unqualified."
+        },
+        "nokia-110-4g": {
+          "hardware": "Unknown",
+          "status": "Unknown",
+          "note": "The ALSA card is available; audible speaker playback is unqualified."
         }
       }
     },
@@ -1029,6 +1098,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "Built-in mono 48 kHz recording captures external tones in RAM and external tones and synthesized speech in the microSD profile. Speech quality and wired-headset recording are unqualified."
+        },
+        "nokia-110-4g": {
+          "hardware": "Unknown",
+          "status": "Partial",
+          "note": "Internal capture produces PCM in the RAM profile. Speech quality, sensitivity and acoustic isolation are unqualified."
         }
       }
     },
@@ -1071,6 +1145,11 @@
           "hardware": "Unknown",
           "status": "Partial",
           "note": "Band scan and timed headphone playback work in the RAM profile. Recognizable station reception and speaker output are unqualified."
+        },
+        "nokia-110-4g": {
+          "hardware": "Unknown",
+          "status": "Unknown",
+          "note": ""
         }
       }
     },
@@ -1110,6 +1189,11 @@
           "note": ""
         },
         "uniwa-v1000-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": ""
+        },
+        "nokia-110-4g": {
           "hardware": "Unknown",
           "status": "Not supported",
           "note": ""
@@ -1155,6 +1239,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "Classic pairing with a Linux PC in RAM and microSD profiles; bidirectional OPP in RAM. PAN Internet, short stereo A2DP playback and LE input from a software peer on a Linux PC work in the microSD profile. Physical peripherals, operation after sleep and range are unqualified."
+        },
+        "nokia-110-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "The CM4 controller powers on and discovers devices in the microSD system-card profile. Pairing, connections and additional profiles are unqualified."
         }
       }
     },
@@ -1162,7 +1251,7 @@
       "id": "wi-fi",
       "label": "Wi-Fi",
       "kind": "hardware",
-      "guide": "phones/bq-2830l-tank-connect-max#hardware-details-and-limits",
+      "guide": "phones/bq-2830l-tank-connect-max#wi-fi",
       "group": "Bluetooth and networks",
       "implementation": "Implemented",
       "verification": "Device-tested",
@@ -1191,9 +1280,14 @@
         "bq-2830l-tank-connect-max": {
           "hardware": "Present",
           "status": "Partial",
-          "note": "RAM station and access-point modes work with WPA2-PSK/CCMP, DHCP and file transfer in both directions. Station DNS and HTTP Internet access work through a shared PC connection; sustained throughput is unqualified."
+          "note": "RAM station and access-point modes work with WPA2-PSK/CCMP, DHCP and file transfer in both directions. Station DNS and HTTP Internet access work through a shared PC connection; sustained throughput is unqualified. Per-station signal statistics are unavailable."
         },
         "uniwa-v1000-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": "No supported FPLinux path has been established; physical hardware presence is unknown."
+        },
+        "nokia-110-4g": {
           "hardware": "Unknown",
           "status": "Not supported",
           "note": "No supported FPLinux path has been established; physical hardware presence is unknown."
@@ -1213,22 +1307,22 @@
         "nokia-ta1618": {
           "hardware": "Present",
           "status": "Supported",
-          "note": "Rear GC2145; 800×600 and 1600×1200 NV16 through V4L2 in the RAM profile. Camera with a microSD system root is unqualified."
+          "note": "Rear GC2145; 800×600 and 1600×1200 NV16 through V4L2 in the RAM profile. Camera with a microSD system root is unqualified. Sensor rotation is 270° counterclockwise; capture leaves pixels unchanged. Hardware JPEG accepts 1600×1200, but not 800×600. At 800×600, capture and JPEG queues may stay enabled and take turns; codec jobs need their own supported geometry. Capture continues through display updates, blanking and wake. Stop capture before hardware rotation."
         },
         "inoi-240-modern-4g": {
           "hardware": "Present",
           "status": "Supported",
-          "note": "BF30A2; 240×320 NV16 through V4L2 in the RAM profile. Camera with a microSD system root is unqualified."
+          "note": "BF30A2; 240×320 NV16 through V4L2 in the RAM profile. Camera with a microSD system root is unqualified. Sensor rotation is 0°; the native geometry is accepted by hardware JPEG. Capture and codec jobs may run concurrently at native size, including through display updates, blanking and wake."
         },
         "inoi-244-modern-4g": {
           "hardware": "Present",
           "status": "Supported",
-          "note": "BF30A2; 240×320 NV16 through V4L2 in the RAM profile. Camera with a microSD system root is unqualified."
+          "note": "BF30A2; 240×320 NV16 through V4L2 in the RAM profile. Camera with a microSD system root is unqualified. Sensor rotation is 0°; the native geometry is accepted by hardware JPEG. Capture and codec jobs may run concurrently at native size, including through display updates, blanking and wake."
         },
         "maxvi-k15n-4g": {
           "hardware": "Present",
           "status": "Partial",
-          "note": "BF3A01; native 240×320 NV16, sensor rotation 270° and adjustable brightness. Color accuracy is unqualified."
+          "note": "BF3A01; native 240×320 NV16, sensor rotation 270° and adjustable brightness. Brightness levels 0–6, initially 3, may change during capture and survive stream stops. Color accuracy and concurrent capture/codec use are unqualified."
         },
         "bq-2830l-tank-connect-max": {
           "hardware": "Present",
@@ -1239,6 +1333,11 @@
           "hardware": "Present",
           "status": "Supported",
           "note": "BF20A6 native 640×480 NV16 in RAM and microSD profiles, with unrotated pixels. Continuous capture works in RAM; stream stop works in both profiles. Absolute color accuracy, exposure and other sensor controls are unqualified; no preview or photo application."
+        },
+        "nokia-110-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "BF30A2; 240×320 NV16 capture through V4L2 in the RAM and microSD system-card profiles. Stop and restart work in RAM. Concurrent image jobs, controls and image quality are unqualified."
         }
       }
     },
@@ -1281,6 +1380,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "Connected USB power and CDP source classification respond without a battery. Disconnection detection and actual battery charging are unqualified."
+        },
+        "nokia-110-4g": {
+          "hardware": "Unknown",
+          "status": "Unknown",
+          "note": ""
         }
       }
     },
@@ -1323,6 +1427,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "Voltage, current and charge counter respond on USB without a battery. Battery measurements and calibrated accuracy are unqualified; battery percentage is unavailable."
+        },
+        "nokia-110-4g": {
+          "hardware": "Unknown",
+          "status": "Unknown",
+          "note": ""
         }
       }
     },
@@ -1365,6 +1474,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "Temperature readings respond in the microSD profile; accuracy is unqualified."
+        },
+        "nokia-110-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Temperature readings are available in RAM and microSD profiles and resume after RTC sleep. Physical accuracy is unqualified."
         }
       }
     },
@@ -1404,6 +1518,11 @@
           "note": ""
         },
         "uniwa-v1000-4g": {
+          "hardware": "Unknown",
+          "status": "Unknown",
+          "note": ""
+        },
+        "nokia-110-4g": {
           "hardware": "Unknown",
           "status": "Unknown",
           "note": ""
@@ -1449,6 +1568,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "RTC reads and five-second alarm wake work in an idle microSD session with a read-only system root. Accuracy and retention without USB power are unqualified."
+        },
+        "nokia-110-4g": {
+          "hardware": "Present",
+          "status": "Partial",
+          "note": "Clock initialization and a five-second alarm with s2idle resume work under USB power with a read-only microSD system root. Accuracy and battery-backed retention are unqualified."
         }
       }
     },
@@ -1488,6 +1612,11 @@
           "note": ""
         },
         "uniwa-v1000-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": ""
+        },
+        "nokia-110-4g": {
           "hardware": "Unknown",
           "status": "Not supported",
           "note": ""
@@ -1533,6 +1662,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "The motor responds to bounded FF_RUMBLE pulses in the microSD profile. Haptic strength and operation with a battery are unqualified."
+        },
+        "nokia-110-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": "No force-feedback device is enabled. Physical vibration hardware is unqualified."
         }
       }
     },
@@ -1575,6 +1709,11 @@
           "hardware": "Unknown",
           "status": "Not supported",
           "note": ""
+        },
+        "nokia-110-4g": {
+          "hardware": "Unknown",
+          "status": "Not supported",
+          "note": ""
         }
       }
     },
@@ -1611,6 +1750,10 @@
         "uniwa-v1000-4g": {
           "status": "Unknown",
           "note": ""
+        },
+        "nokia-110-4g": {
+          "status": "Unknown",
+          "note": "Battery-only power-off and the physical power-key action are unqualified."
         }
       }
     },
@@ -1647,6 +1790,10 @@
         "uniwa-v1000-4g": {
           "status": "Partial",
           "note": "Five-second idle s2idle with RTC wake returns to the same SSH session in the microSD profile with the system root read-only. Writable-root sleep, active peripherals, keypad wake and battery operation are unqualified."
+        },
+        "nokia-110-4g": {
+          "status": "Partial",
+          "note": "s2idle resumes with an RTC alarm under USB power and a read-only microSD system root. Deep suspend, battery operation and other wake sources are unqualified."
         }
       }
     },
@@ -1683,6 +1830,10 @@
         "uniwa-v1000-4g": {
           "status": "Not supported",
           "note": ""
+        },
+        "nokia-110-4g": {
+          "status": "Not supported",
+          "note": ""
         }
       }
     },
@@ -1713,12 +1864,16 @@
           "note": "No force-feedback device is enabled."
         },
         "bq-2830l-tank-connect-max": {
-          "status": "Not supported",
-          "note": "No force-feedback device is enabled for this target."
+          "status": "Unknown",
+          "note": "Application use on this phone is unqualified."
         },
         "uniwa-v1000-4g": {
           "status": "Unknown",
           "note": "Application use on this phone is unqualified."
+        },
+        "nokia-110-4g": {
+          "status": "Not supported",
+          "note": "No force-feedback device is enabled for this target."
         }
       }
     },
@@ -1755,6 +1910,10 @@
         "uniwa-v1000-4g": {
           "status": "Partial",
           "note": "Command-line brightness control at logical levels 0, 5 and 10 in RAM. The brightness application displays and changes the logical level; physical keypad control and brightness calibration are unqualified."
+        },
+        "nokia-110-4g": {
+          "status": "Unknown",
+          "note": "The brightness service responds; application use, physical keypad control and visible changes are unqualified."
         }
       }
     },
@@ -1791,6 +1950,10 @@
         "uniwa-v1000-4g": {
           "status": "Partial",
           "note": "Native 320×240 landscape demo playback with a microSD system card. Physical game controls and full gameplay are unqualified; there is no game sound."
+        },
+        "nokia-110-4g": {
+          "status": "Partial",
+          "note": "Shareware demo playback with a microSD system root; the 320×256 render is downscaled to the 128×160 display. Physical game controls and full gameplay are unqualified; there is no game sound."
         }
       }
     },
@@ -1833,6 +1996,11 @@
           "hardware": "Present",
           "status": "Partial",
           "note": "Mono 48 kHz recording captures external tones in RAM and external tones and synthesized speech in the microSD profile; speech quality is unqualified."
+        },
+        "nokia-110-4g": {
+          "hardware": "Unknown",
+          "status": "Partial",
+          "note": "Internal capture produces PCM in the RAM profile. Speech quality, sensitivity and acoustic isolation are unqualified."
         }
       }
     },
@@ -1875,6 +2043,11 @@
           "hardware": "Unknown",
           "status": "Unknown",
           "note": "Wired-headset recording is unqualified."
+        },
+        "nokia-110-4g": {
+          "hardware": "Unknown",
+          "status": "Unknown",
+          "note": ""
         }
       }
     },
@@ -1911,6 +2084,10 @@
         "uniwa-v1000-4g": {
           "status": "Not supported",
           "note": "An inserted plug is detected. Plug insertion/removal and automatic output switching are unqualified; select outputs explicitly."
+        },
+        "nokia-110-4g": {
+          "status": "Partial",
+          "note": "The jack service runs with an inserted plug. Plug insertion/removal and automatic output switching are unqualified."
         }
       }
     },
@@ -1947,6 +2124,10 @@
         "uniwa-v1000-4g": {
           "status": "Supported",
           "note": "Classic pairing with a Linux PC in RAM and microSD profiles."
+        },
+        "nokia-110-4g": {
+          "status": "Unknown",
+          "note": ""
         }
       }
     },
@@ -1983,6 +2164,10 @@
         "uniwa-v1000-4g": {
           "status": "Supported",
           "note": "Bidirectional OPP with a Linux PC in the RAM profile."
+        },
+        "nokia-110-4g": {
+          "status": "Unknown",
+          "note": ""
         }
       }
     },
@@ -2019,6 +2204,10 @@
         "uniwa-v1000-4g": {
           "status": "Supported",
           "note": "PAN DHCP, bidirectional TCP transfer, external IPv4 ping, DNS and HTTPS with a Linux PC in the microSD profile; sustained operation and use after sleep are unqualified."
+        },
+        "nokia-110-4g": {
+          "status": "Unknown",
+          "note": ""
         }
       }
     },
@@ -2055,6 +2244,10 @@
         "uniwa-v1000-4g": {
           "status": "Supported",
           "note": "Short 48 kHz stereo SBC playback and a repeated connection to a Linux PC in the microSD profile. Long playback and use after sleep are unqualified."
+        },
+        "nokia-110-4g": {
+          "status": "Unknown",
+          "note": ""
         }
       }
     },
@@ -2091,6 +2284,10 @@
         "uniwa-v1000-4g": {
           "status": "Unknown",
           "note": "Physical Bluetooth headsets are unqualified."
+        },
+        "nokia-110-4g": {
+          "status": "Unknown",
+          "note": ""
         }
       }
     },
@@ -2127,6 +2324,10 @@
         "uniwa-v1000-4g": {
           "status": "Partial",
           "note": "LE keyboard events from a software peer on a Linux PC reach Linux in the microSD profile. Physical keyboards and application input are unqualified."
+        },
+        "nokia-110-4g": {
+          "status": "Unknown",
+          "note": ""
         }
       }
     },
@@ -2163,6 +2364,10 @@
         "uniwa-v1000-4g": {
           "status": "Partial",
           "note": "LE pointer movement and button events from a software peer on a Linux PC reach Linux in the microSD profile. Physical mice and application input are unqualified."
+        },
+        "nokia-110-4g": {
+          "status": "Unknown",
+          "note": ""
         }
       }
     },
@@ -2197,6 +2402,10 @@
           "note": ""
         },
         "uniwa-v1000-4g": {
+          "status": "Not supported",
+          "note": ""
+        },
+        "nokia-110-4g": {
           "status": "Not supported",
           "note": ""
         }
@@ -2235,6 +2444,10 @@
         "uniwa-v1000-4g": {
           "status": "Not supported",
           "note": ""
+        },
+        "nokia-110-4g": {
+          "status": "Not supported",
+          "note": ""
         }
       }
     },
@@ -2271,6 +2484,10 @@
         "uniwa-v1000-4g": {
           "status": "Not supported",
           "note": ""
+        },
+        "nokia-110-4g": {
+          "status": "Not supported",
+          "note": ""
         }
       }
     },
@@ -2305,6 +2522,10 @@
           "note": ""
         },
         "uniwa-v1000-4g": {
+          "status": "Unknown",
+          "note": ""
+        },
+        "nokia-110-4g": {
           "status": "Unknown",
           "note": ""
         }

@@ -1,0 +1,15 @@
+---
+import { currentPhone } from "../data/phones.ts";
+
+const { phone: id } = Astro.locals.starlightRoute.entry.data;
+if (!id) throw new Error("Phone boot instructions require a phone page.");
+const phone = currentPhone(id);
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+---
+
+<p>
+	Start <code>./fplinux run {phone.id}</code> first and wait until the loader
+	asks for the phone. {phone.bootInstructions}
+	<a href={`${base}/start/run/`}>Run FPLinux</a> describes the complete
+	sequence.
+</p>

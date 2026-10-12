@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import json
+import tomllib
 from typing import TYPE_CHECKING, NoReturn
 
 from fplinux_cli import common
@@ -44,10 +46,31 @@ def offline_documentation() -> dict[str, bytes]:
     inputs: dict[str, bytes] = {}
     executables: set[str] = set()
     for source in _regular_files(site, excluded=frozenset({"node_modules", "dist", ".astro"})):
-        relative = source.relative_to(site).as_posix()
+        relative = source.relative_to(common.ROOT).as_posix()
         inputs[relative] = source.read_bytes()
         if source.stat().st_mode & 0o111:
             executables.add(relative)
+    try:
+        pages = json.loads((site / "src/data/phones.json").read_text(encoding="utf-8"))
+        sources: set[Path] = set()
+        for page in pages:
+            target_directory = common.ROOT / "targets" / page["id"]
+            target_path = target_directory / "target.toml"
+            target = tomllib.loads(target_path.read_text(encoding="utf-8"))
+            sources.update(
+                {
+                    target_path,
+                    common.ROOT / "platforms" / target["platform"] / "platform.toml",
+                    target_directory / target["display"]["panel"],
+                }
+            )
+        for source in sorted(sources):
+            relative = source.relative_to(common.ROOT).as_posix()
+            inputs[relative] = source.read_bytes()
+            if source.stat().st_mode & 0o111:
+                executables.add(relative)
+    except OSError, ValueError, KeyError, TypeError:
+        _export_required("has invalid phone sources")
     if receipt.get("inputs_sha256") != payload_digest(inputs, executables):
         _export_required("is stale")
     records = receipt.get("files")

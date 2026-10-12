@@ -97,3 +97,36 @@ def test_ordinary_linux_zip_contains_current_docs_without_changing_phone_qualifi
         for name, data in expected.items():
             assert checksums[name] == hashlib.sha256(data).hexdigest()
             assert archive.getinfo(prefix + name).external_attr >> 16 == 0o100644
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "targets/example/target.toml",
+        "platforms/example/platform.toml",
+        "targets/example/display/panel.toml",
+    ],
+)
+def test_offline_export_rejects_changed_phone_inputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: str
+) -> None:
+    """Identity, boot and panel sources cannot reuse HTML from their earlier bytes."""
+    monkeypatch.setattr(common, "ROOT", tmp_path)
+    phone_inputs = {
+        "site/src/data/phones.json": b'[{"id":"example","slug":"phones/example"}]\n',
+        "targets/example/target.toml": (
+            b'platform = "example"\n[display]\npanel = "display/panel.toml"\n'
+        ),
+        "platforms/example/platform.toml": b'[identity]\nsoc = "EXAMPLE"\n',
+        "targets/example/display/panel.toml": b"width = 123\nheight = 456\n",
+    }
+    expected = write_offline_export(tmp_path, phone_inputs=phone_inputs)
+    assert package_docs.offline_documentation() == expected
+    driver = tmp_path / "targets/example/linux/driver.c"
+    driver.parent.mkdir(parents=True)
+    driver.write_text("/* unrelated driver change */\n", encoding="utf-8")
+    assert package_docs.offline_documentation() == expected
+    source = tmp_path / relative
+    source.write_bytes(source.read_bytes() + b"# revised phone input\n")
+    with pytest.raises(SystemExit, match="documentation is stale"):
+        package_docs.offline_documentation()

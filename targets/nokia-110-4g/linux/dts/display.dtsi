@@ -1,0 +1,34 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+#include "fplinux-nokia-110-4g-panel-addresses.h"
+
+/ {
+	soc {
+		display@20800000 {
+			compatible = "fplinux,ums9117-nokia110-spi-fb";
+			reg = <0x20800000 0x00001000>,
+			      <0x20a00000 0x00001000>,
+			      <0x70b00000 0x00001000>,
+			      <0x21500054 0x00000004>,
+			      <0x71301004 0x00000004>,
+			      <0x71302004 0x00000004>,
+			      <0x20e01000 0x00000004>,
+			      <0x20e01004 0x00000004>,
+			      <0x20e02004 0x00000004>,
+			      <FPLINUX_PANEL_CONTROL_MUX_PHYS 0x0000001c>,
+			      <FPLINUX_PANEL_CONTROL_CONFIG_PHYS 0x0000001c>;
+			interrupt-names = "lcdc-done";
+			interrupts = <GIC_SPI 19 IRQ_TYPE_LEVEL_HIGH>;
+			memory-region = <&codec_dma>;
+			reg-names = "lcdc", "lcm", "spi", "spi-clock-selector",
+				    "spi-reset-set", "spi-reset-clear", "ap-ahb-gate-set",
+				    "ap-ahb-reset-set", "ap-ahb-reset-clear", "pinmux",
+				    "pinconf";
+			sprd,aon-apb = <&aon_apb>;
+#include "fplinux-nokia-110-4g-panel.dtsi"
+			sprd,pmic = <&sc2720_pmic>;
+			sprd,wled-current-levels = <14 14 14 0>;
+			sprd,wled-default-level = <14>;
+		};
+	};
+};

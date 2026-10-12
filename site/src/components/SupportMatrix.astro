@@ -1,11 +1,13 @@
 ---
 import SupportBadge from "./SupportBadge.astro";
 import support from "../data/support.json";
+import { loadPhones } from "../data/phones.ts";
 
 interface Props {
 	kind: "hardware" | "system" | "application";
 }
 const { kind } = Astro.props;
+const { phones } = loadPhones();
 const headings = {
 	application: "Application",
 	hardware: "Feature",
@@ -22,7 +24,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 		<thead>
 			<tr>
 				<th>{headings[kind]}</th>
-				{support.phones.map((phone): astroHTML.JSX.Children => (
+				{phones.map((phone): astroHTML.JSX.Children => (
 					<th>
 						<a href={`${base}/${phone.slug}/#support-checklist`}>
 							{phone.name}
@@ -35,7 +37,7 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 			{rows.map((row): astroHTML.JSX.Children => (
 				<tr>
 					<th scope="row">{row.label}</th>
-					{support.phones.map((phone): astroHTML.JSX.Children => {
+					{phones.map((phone): astroHTML.JSX.Children => {
 						const state = row.phones[phone.id as keyof typeof row.phones];
 						if (!state)
 							throw new Error(`Missing ${phone.id} support for ${row.id}`);

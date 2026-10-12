@@ -17,6 +17,7 @@ import { parse, parseFragment, serialize } from "parse5";
 import { base as siteBase, site as siteURL } from "../config/site.mjs";
 import { compressFont } from "./offline-font.ts";
 import { indexText } from "./offline-search-index.ts";
+import { documentationDigest } from "./documentation-inputs.ts";
 import type { OfflineIcon } from "../src/scripts/offline-icons.ts";
 import type { SearchPage } from "../src/scripts/offline-search.ts";
 
@@ -40,47 +41,6 @@ const files = async (directory: string): Promise<string[]> => {
 		})
 	);
 	return nested.flat().toSorted();
-};
-
-const sourceFiles = async (directory: string): Promise<string[]> => {
-	const entries = await readdir(directory, { withFileTypes: true });
-	const selected = await Promise.all(
-		entries
-			.filter(
-				(entry) => !["node_modules", "dist", ".astro"].includes(entry.name)
-			)
-			.map(async (entry) => {
-				const filename = path.join(directory, entry.name);
-				if (entry.isSymbolicLink()) {
-					throw new Error(`Unexpected site source symbolic link: ${filename}`);
-				}
-				return entry.isDirectory() ? await sourceFiles(filename) : [filename];
-			})
-	);
-	return selected.flat().toSorted();
-};
-
-const sourceDigest = async (): Promise<string> => {
-	const digest = createHash("sha256");
-	const filenames = await sourceFiles(site);
-	const sources = await Promise.all(
-		filenames.map(async (filename) => ({
-			contents: await readFile(filename),
-			filename,
-			info: await stat(filename),
-		}))
-	);
-	for (const { contents, filename, info } of sources) {
-		const mode = Buffer.alloc(4);
-		// oxlint-disable-next-line no-bitwise, numeric-separators-style -- POSIX file modes retain their conventional octal notation.
-		mode.writeUInt32BE(info.mode & 0o111 ? 0o100755 : 0o100644);
-		digest.update(path.relative(site, filename).split(path.sep).join("/"));
-		digest.update("\0");
-		digest.update(mode);
-		digest.update(contents);
-		digest.update("\0");
-	}
-	return digest.digest("hex");
 };
 
 const elements = (node: Node): Element[] => {
@@ -483,7 +443,7 @@ const pruneUnusedFiles = async (pages: string[]): Promise<number> => {
 	return unused.length;
 };
 
-const inputsDigest = await sourceDigest();
+const inputsDigest = await documentationDigest();
 execFileSync(
 	process.execPath,
 	[path.join(site, "node_modules/.bin/astro"), "build", "--outDir", raw],
@@ -538,7 +498,7 @@ await writeFile(
 	`window.fplinuxOfflineIndex=${JSON.stringify(index)};\n`
 );
 const pruned = await pruneUnusedFiles(pages.map((page) => page.filename));
-if ((await sourceDigest()) !== inputsDigest) {
+if ((await documentationDigest()) !== inputsDigest) {
 	throw new Error(
 		"Site sources changed during the offline export; rebuild it."
 	);

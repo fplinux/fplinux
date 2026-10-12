@@ -223,6 +223,10 @@ source = "platforms/ums9117/linux/drivers/media/i2c/fplinux-camera-i2c.h"
 destination = "drivers/media/i2c/fplinux-camera-i2c.h"
 
 [[linux.copies]]
+source = "platforms/ums9117/linux/drivers/media/i2c/bf30a2-regs.h"
+destination = "drivers/media/i2c/bf30a2-regs.h"
+
+[[linux.copies]]
 source = "platforms/ums9117/linux/drivers/media/i2c/gc032a.c"
 destination = "drivers/media/i2c/gc032a.c"
 

@@ -1,17 +1,12 @@
 ---
-title: INOI 244 Modern 4G
-description: Boot key, controls, storage, power and limitations of FPLinux on the INOI 244 Modern 4G.
-source:
-  - targets/inoi-244-modern-4g
 ---
 
 import Key from '../../../components/Key.astro';
+import PhoneIdentity from '../../../components/PhoneIdentity.astro';
+import PhoneBoot from '../../../components/PhoneBoot.astro';
 import PhoneChecklist from '../../../components/PhoneChecklist.astro';
 
-- **Target**: `inoi-244-modern-4g`
-- **Hardware code**: not established
-- **Platform**: [Unisoc UMS9117](/fplinux/porting/ums9117/)
-- **Display**: 240×320
+<PhoneIdentity />
 
 ## Support checklist
 
@@ -19,7 +14,7 @@ Each status applies to this exact phone and the conditions in its note. See
 [Support status](/fplinux/phones/#support-status) for the meaning of the labels
 and [common limitations](/fplinux/phones/#limitations-on-every-phone).
 
-<PhoneChecklist phone="inoi-244-modern-4g" />
+<PhoneChecklist />
 
 ## Before you start
 
@@ -30,10 +25,7 @@ another phone.
 
 ## Boot key
 
-Hold <Key>\*</Key>. Start `./fplinux run inoi-244-modern-4g` first; when the
-loader asks for the phone, hold <Key>\*</Key> on the powered-off phone and
-connect USB while keeping <Key>\*</Key> pressed.
-[Run FPLinux](/fplinux/start/run/) describes the complete sequence.
+<PhoneBoot />
 
 ## Controls
 
@@ -44,10 +36,8 @@ The red handset key, <Key>Red</Key>, is the power key.
 | <Key>Red</Key>, short press | Wakes the phone from suspend.             |
 | <Key>Red</Key>, held        | Power-off on battery has not been tested. |
 
-- The keypad light can be switched on and off. It also lights on a key press
-  and turns off after inactivity.
-- See the shared keypad bindings and application keys in
-  [Terminal](/fplinux/use/terminal/).
+See the shared keypad bindings and application keys in
+[Terminal](/fplinux/use/terminal/).
 
 ## Storage
 
@@ -68,22 +58,15 @@ fixed-session card initialization.
 
 ## End the session
 
-In the default RAM profile:
-
-1. Stop applications that use the microSD card, disable card-backed swap and
-   unmount the card as described in [microSD storage](/fplinux/use/microsd/).
-2. Disconnect USB.
-3. If a battery is installed, remove it and put it back before you boot the
-   phone normally.
+In the default RAM profile, [release data cards](/fplinux/use/power/#release-data-cards)
+before disconnecting USB. If a battery is installed, remove it and put it back
+before booting the phone normally.
 
 :::caution
 Do not use this battery-removal sequence with a writable microSD system card.
-Follow the USB-powered shutdown in
-[microSD system card](/fplinux/guides/microsd-system-card/) instead.
+Follow [system-card shutdown on USB power](/fplinux/use/power/#shut-down-a-system-card-on-usb-power)
+instead.
 :::
-
-Booting the phone normally returns it to the stock firmware.
-[Run FPLinux](/fplinux/start/run/) describes starting FPLinux again.
 
 ## Hardware details and limits
 
@@ -98,15 +81,3 @@ Booting the phone normally returns it to the stock firmware.
   speaker is enabled above level 0, speaker playback and FM continue with the
   tone; otherwise the speaker plays only the tone. Microphone recording
   captures it.
-- **Speaker**: a rear loudspeaker.
-- **Microphones**: the built-in microphone records; the wired-headset
-  microphone has not been tested.
-- **Camera**: the BF30A2 camera captures 240×320 NV16 frames in the default RAM
-  profile. Sensor rotation is 0°. Its native capture geometry is accepted by
-  the JPEG encoder; see [Camera](/fplinux/use/camera/).
-
-Camera capture and codec jobs can run concurrently at native 240×320. Capture
-also continues through display updates, blanking and wake.
-
-Battery telemetry has responded with no battery installed; this does not
-qualify readings with a battery fitted or battery charging.

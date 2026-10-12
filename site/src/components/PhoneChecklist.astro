@@ -1,13 +1,11 @@
 ---
 import SupportBadge from "./SupportBadge.astro";
 import support from "../data/support.json";
+import { currentPhone } from "../data/phones.ts";
 
-interface Props {
-	phone: string;
-}
-const { phone } = Astro.props;
-if (!support.phones.some((item) => item.id === phone))
-	throw new Error(`Unknown phone: ${phone}`);
+const { phone } = Astro.locals.starlightRoute.entry.data;
+if (!phone) throw new Error("Phone checklist requires a phone page.");
+currentPhone(phone);
 const rows = support.features.filter((item) => item.scope !== "overview");
 const groups = support.groups.filter((group) =>
 	rows.some((item) => item.group === group)

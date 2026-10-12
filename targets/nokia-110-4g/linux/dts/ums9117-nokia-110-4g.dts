@@ -1,0 +1,41 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/dts-v1/;
+
+#include <dt-bindings/leds/common.h>
+#include "ums9117.dtsi"
+#include "ums9117-sc2720.dtsi"
+#include "fplinux-nokia-110-4g-identity.dtsi"
+#include "ums9117-nand-readonly.dtsi"
+#include "nokia-110-4g-foundation.dtsi"
+#include "nokia-110-4g-display.dtsi"
+#include "nokia-110-4g-audio.dtsi"
+#include "nokia-110-4g-bluetooth.dtsi"
+#include "nokia-110-4g-camera.dtsi"
+
+/ {
+	memory@80200000 {
+		device_type = "memory";
+		reg = <0x80200000 0x03c00000>;
+	};
+
+	reserved-memory {
+		framebuffer@83f00000 {
+			reg = <0x83f00000 0x00100000>;
+			no-map;
+		};
+	};
+};
+
+#include "ums9117-ram-session.dtsi"
+
+&codec_dma {
+	size = <0x00400000>;
+};
+
+&ap_dma {
+	status = "okay";
+};
+
+&rota {
+	status = "okay";
+};

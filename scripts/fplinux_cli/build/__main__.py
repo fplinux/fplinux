@@ -76,9 +76,7 @@ def main() -> None:
             inputs_build.require_file(platform_asset_lock_path(target_config["platform"])),
             inputs_build.require_file(target_asset_lock_path(args.target)),
         )
-        release_manifest = load_release(
-            args.target, profile_packages=target_config["rootfs"]["packages"]
-        )
+        release_manifest = load_release(args.target, bundle_packages=selected_bundle_packages)
 
         profile = inputs_build.selected_profile(target_config)
         work = (

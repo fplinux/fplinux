@@ -50,6 +50,8 @@ class FormatCliWorkflowTests:
             checkout,
             ignore=shutil.ignore_patterns(".git", ".cache", "__pycache__"),
         )
+        source = "targets/nokia-ta1618/release/EXTRA.txt"
+        (checkout / source).write_text("Additional archive instructions.\n", encoding="utf-8")
         for command in (("git", "init", "-q"), ("git", "add", "--all")):
             prepared = run_process(
                 command,
@@ -58,10 +60,7 @@ class FormatCliWorkflowTests:
                 cwd=checkout,
             )
             assert (prepared.returncode) == (0), prepared.stderr
-        result = self.run_format(
-            "targets/nokia-ta1618/release/README.txt",
-            root=checkout,
-        )
+        result = self.run_format(source, root=checkout)
 
         assert (result.returncode) != (0)
         assert ("no project formatter is defined") in (result.stderr)

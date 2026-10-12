@@ -14,6 +14,7 @@ from unittest import mock
 
 import pytest
 from fplinux_cli import common
+from fplinux_cli.alpine import registration
 from fplinux_cli.alpine import signing as alpine_state
 from fplinux_cli.artifacts.bundles import BUILD_MANIFEST_NAME, publish_current_bundle
 from fplinux_cli.cli import package as package_commands
@@ -66,6 +67,11 @@ class ReleaseArchiveArtifactTests:
         self.image_recipe = "b" * 64
         self.target_config = {
             "platform": "demo",
+            "identity": {"brand": "ACME", "product": "Demo", "hardware_codes": ["D-1"]},
+            "adapter": {"boot_instructions": "Hold the left soft key while connecting USB."},
+            "linux": {"root": {"kind": "initramfs"}},
+            "rootfs": {"base_packages": [], "packages": [], "exclude_packages": []},
+            "bundle": {"packages": []},
             "runtime": {
                 "assets": {"pinmap": "assets/pinmap.bin"},
             },
@@ -96,12 +102,18 @@ class ReleaseArchiveArtifactTests:
                 "runner/platform_adapter.py",
                 "runtime-manifest.json",
             ],
-            "documents": ["release/README.txt"],
+            "documents": ["release/EXTRA.txt"],
         }
         self.platform = {
-            "host": {"runtime_tools": {"keyboard": "keyboard"}, "tools": [{"name": "keyboard"}]}
+            "rootfs": {"packages": ["fplinux-font-terminus-6x12"]},
+            "bundle": {"packages": ["demo"]},
+            "host": {"runtime_tools": {"keyboard": "keyboard"}, "tools": [{"name": "keyboard"}]},
         }
-        target_readme = self.root / "targets" / self.target / "release/README.txt"
+        for package in (*registration.COMMON_PACKAGES, "fplinux-font-terminus", "demo"):
+            apkbuild = self.root / "alpine/aports" / package / "APKBUILD"
+            apkbuild.parent.mkdir(parents=True)
+            apkbuild.write_text(f"pkgname={package}\n", encoding="utf-8")
+        target_readme = self.root / "targets" / self.target / "release/EXTRA.txt"
         target_readme.parent.mkdir(parents=True)
         target_readme.write_text("phone instructions\n", encoding="utf-8")
         self.target_readme = target_readme
@@ -148,6 +160,7 @@ class ReleaseArchiveArtifactTests:
         bundle = self.cache / "out" / self.target / "builds" / build_type / "bundles" / generation
         payloads = {
             "image/ramboot.bin": b"ramboot\n",
+            "device-data.cpio": b"synthetic phone capsule\n",
             "assets/pinmap.bin": b"pinmap\n",
             "host/keyboard": b"keyboard\n",
             "runner/run.py": b"#!/usr/bin/env python3\n",
@@ -354,11 +367,12 @@ class ReleaseArchiveArtifactTests:
                 b"This archive is for testing on the target phone only.\n"
                 b"Candidate packaging does not make it release-ready.\n"
             ),
-            "README.txt": b"phone instructions\n",
+            "EXTRA.txt": b"phone instructions\n",
             "60-fplinux.rules": b"SUBSYSTEM==usb\n",
             "LICENSE": b"project license\n",
             "licenses/musl/COPYRIGHT": b"musl notice\n",
             "image/ramboot.bin": b"ramboot\n",
+            "device-data.cpio": b"synthetic phone capsule\n",
             "assets/pinmap.bin": b"pinmap\n",
             "host/keyboard": b"keyboard\n",
             "runner/run.py": b"#!/usr/bin/env python3\n",
@@ -372,12 +386,15 @@ class ReleaseArchiveArtifactTests:
         }
         for relative, expected in expected_files.items():
             assert (payloads[relative]) == (expected)
+        assert payloads["README.txt"].startswith(b"FPLinux for ACME Demo (D-1)\n")
+        assert b"unmount all data-card filesystems" in payloads["README.txt"]
         assert payloads["runner/loader_events.py"] == self.event_helper
         assert set(payloads) == {
             *expected_files,
             "runner/loader_events.py",
             "build-manifest.json",
             "SHA256SUMS",
+            "README.txt",
         }
         for relative, mode in modes.items():
             expected_mode = (
@@ -541,7 +558,7 @@ class ReleaseArchiveArtifactTests:
                 root = archive.namelist()[0].partition("/")[0]
                 for relative, data in required.items():
                     assert (archive.read(f"{root}/{relative}")) == (data)
-                assert (archive.read(f"{root}/README.txt")) == (b"phone instructions\n")
+                assert (archive.read(f"{root}/EXTRA.txt")) == (b"phone instructions\n")
 
     def test_apk_bytes_but_not_archive_metadata_change_phone_test_payload(self) -> None:
         """Only a changed executable payload requires another complete phone test."""

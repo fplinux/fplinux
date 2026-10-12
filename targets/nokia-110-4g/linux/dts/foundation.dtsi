@@ -1,0 +1,100 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/input/fplinux-keypad.h>
+#include <dt-bindings/gpio/gpio.h>
+#include "ums9117-musb-cold.dtsi"
+
+&keypad_mux {
+	keypad_mux_pins: keypad-pins {
+		pinctrl-single,pins = <
+			0x00 0 0x04 0 0x08 0 0x0c 0 0x10 0
+			0x14 0 0x18 0 0x1c 0 0x20 0 0x24 0
+		>;
+	};
+};
+
+&keypad_pads {
+	keypad_pad_pins: keypad-pins {
+		pinctrl-single,pins = <
+			0x00 0x00080001 0x04 0x00080001 0x08 0x00080001
+			0x0c 0x00080001 0x10 0x00080001 0x14 0x0008008a
+			0x18 0x0008008a 0x1c 0x0008008a 0x20 0x0008008a
+			0x24 0x0008008a
+		>;
+	};
+};
+
+&keypad {
+	compatible = "sprd,ums9117-keypad";
+	eic1-gpios = <&sc2720_eic 1 GPIO_ACTIVE_LOW>;
+	eic9-gpios = <&sc2720_eic 9 GPIO_ACTIVE_HIGH>;
+	label = "Nokia 110 4G keypad";
+	pinctrl-0 = <&keypad_mux_pins &keypad_pad_pins>;
+	pinctrl-names = "matrix";
+	wakeup-source;
+	keypad,num-columns = <4>;
+	keypad,num-rows = <5>;
+	linux,keymap = <
+		MATRIX_KEY(0, 0, FPLINUX_KEY_STAR)
+		MATRIX_KEY(0, 1, FPLINUX_KEY_0)
+		MATRIX_KEY(0, 2, FPLINUX_KEY_SOFT_LEFT)
+		MATRIX_KEY(0, 3, FPLINUX_KEY_POUND)
+		MATRIX_KEY(1, 0, FPLINUX_KEY_7)
+		MATRIX_KEY(1, 1, FPLINUX_KEY_3)
+		MATRIX_KEY(1, 2, FPLINUX_KEY_LEFT)
+		MATRIX_KEY(1, 3, FPLINUX_KEY_9)
+		MATRIX_KEY(2, 0, FPLINUX_KEY_1)
+		MATRIX_KEY(2, 1, FPLINUX_KEY_2)
+		MATRIX_KEY(2, 3, FPLINUX_KEY_6)
+		MATRIX_KEY(3, 0, FPLINUX_KEY_CALL)
+		MATRIX_KEY(3, 1, FPLINUX_KEY_DOWN)
+		MATRIX_KEY(3, 2, FPLINUX_KEY_OK)
+		MATRIX_KEY(3, 3, FPLINUX_KEY_RIGHT)
+		MATRIX_KEY(4, 0, FPLINUX_KEY_4)
+		MATRIX_KEY(4, 1, FPLINUX_KEY_8)
+		MATRIX_KEY(4, 2, FPLINUX_KEY_UP)
+		MATRIX_KEY(4, 3, FPLINUX_KEY_SOFT_RIGHT)
+	>;
+	sprd,eic1-keycode = <FPLINUX_KEY_POWER>;
+	sprd,eic9-keycode = <FPLINUX_KEY_5>;
+
+	status = "okay";
+};
+
+&sdio0_mmc {
+	non-removable;
+
+	status = "okay";
+};
+
+&thm1 {
+	status = "okay";
+};
+
+&sc2720_fgu {
+	fplinux,current-calibration = <10 20>;
+
+	status = "okay";
+};
+
+&sc2720_kpled {
+	fplinux,current-code = <9>;
+
+	status = "okay";
+};
+
+&sc2720_regulators {
+	vddusb: LDO_USB33 {
+		regulator-max-microvolt = <3300000>;
+		regulator-min-microvolt = <3300000>;
+		regulator-name = "sc2720-usb33";
+	};
+};
+
+&usb {
+	dr_mode = "peripheral";
+	vddusb-supply = <&vddusb>;
+
+	status = "okay";
+};

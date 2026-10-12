@@ -1,0 +1,118 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	soc {
+		nokia110_camera_mux: pinctrl@402a01e8 {
+			compatible = "pinctrl-single";
+			reg = <0x402a01e8 0xc>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,function-mask = <0x30>;
+			pinctrl-single,register-width = <32>;
+
+			nokia110_camera_mux_pins: camera-pins {
+				pinctrl-single,pins = <0x0 0x0 0x4 0x30 0x8 0x30>;
+			};
+		};
+
+		nokia110_camera_pads: pinctrl@402a05e8 {
+			compatible = "pinctrl-single";
+			reg = <0x402a05e8 0xc>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,function-mask = <0xffffffff>;
+			pinctrl-single,register-width = <32>;
+
+			nokia110_camera_pad_pins: camera-pins {
+				pinctrl-single,pins = <
+					0x0 0x00082001 0x4 0x00082001 0x8 0x00082001
+				>;
+			};
+		};
+
+		nokia110_camera_data_mux: pinctrl@402a01f4 {
+			compatible = "pinctrl-single";
+			reg = <0x402a01f4 0x2c>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,function-mask = <0x30>;
+			pinctrl-single,register-width = <32>;
+
+			nokia110_camera_data_mux_pins: camera-data-pins {
+				pinctrl-single,pins = <
+					0x00 0x20 0x04 0x20 0x08 0x20
+					0x0c 0x20 0x10 0x20 0x14 0x20
+					0x18 0 0x1c 0 0x20 0 0x24 0 0x28 0
+				>;
+			};
+		};
+
+		nokia110_camera_data_pads: pinctrl@402a05f4 {
+			compatible = "pinctrl-single";
+			reg = <0x402a05f4 0x2c>;
+			#pinctrl-cells = <1>;
+			pinctrl-single,function-mask = <0xffffffff>;
+			pinctrl-single,register-width = <32>;
+
+			nokia110_camera_data_pad_pins: camera-data-pins {
+				pinctrl-single,pins = <
+					0x00 0x00082006 0x04 0x00082046
+					0x08 0x00082000 0x0c 0x00082000
+					0x10 0x00082000 0x14 0x00082000
+					0x18 0x00082040 0x1c 0x00082040
+					0x20 0x00082040 0x24 0x00082040
+					0x28 0x00082000
+				>;
+			};
+		};
+	};
+};
+
+&ap_gpio {
+	status = "okay";
+};
+
+&ap_i2c0_clk {
+	status = "okay";
+};
+
+&aon_sensor_clk {
+	status = "okay";
+};
+
+&i2c0 {
+	status = "okay";
+
+	nokia110_camera: camera@6e {
+		compatible = "nokia,110-4g-bf30a2";
+		reg = <0x6e>;
+		avdd-supply = <&vddcama>;
+		clock-names = "xclk";
+		clocks = <&aon_sensor_clk CLK_SENSOR0>;
+		front-powerdown-gpios = <&ap_gpio 69 GPIO_ACTIVE_HIGH>;
+		iovdd-supply = <&vddcamio>;
+		pinctrl-0 = <&nokia110_camera_mux_pins &nokia110_camera_pad_pins
+			     &nokia110_camera_data_mux_pins
+			     &nokia110_camera_data_pad_pins>;
+		pinctrl-names = "default";
+		powerdown-gpios = <&ap_gpio 101 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&ap_gpio 68 GPIO_ACTIVE_HIGH>;
+
+		port {
+			nokia110_camera_out: endpoint {
+				remote-endpoint = <&nokia110_camera_sink>;
+				sprd,serial-g0-data-width = <1>;
+			};
+		};
+	};
+};
+
+&jpeg {
+	status = "okay";
+
+	port {
+		nokia110_camera_sink: endpoint {
+			remote-endpoint = <&nokia110_camera_out>;
+			sprd,serial-g0-data-width = <1>;
+		};
+	};
+};

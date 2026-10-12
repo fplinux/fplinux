@@ -1,0 +1,175 @@
+# SPDX-License-Identifier: GPL-2.0-only
+width = 128
+height = 160
+id = 0x7735
+id_mask = 0xffffffff
+memory_access = 0xd0
+transport = "spi"
+license = "GPL-2.0-only"
+copyright = []
+commands = [
+  { command = 0xf0, data = [
+    0x11,
+  ] },
+  { command = 0xd6, data = [
+    0xcb,
+  ] },
+  { command = 0xb1, data = [
+    0x05,
+    0x4a,
+    0x4a,
+  ] },
+  { command = 0xb2, data = [
+    0x05,
+    0x3c,
+    0x3c,
+  ] },
+  { command = 0xb3, data = [
+    0x05,
+    0x3c,
+    0x3c,
+    0x05,
+    0x3c,
+    0x3c,
+  ] },
+  { command = 0xb4, data = [
+    0x03,
+    0x02,
+  ] },
+  { command = 0xc0, data = [
+    0xa1,
+    0x04,
+    0x84,
+  ] },
+  { command = 0xc1, data = [
+    0xc4,
+  ] },
+  { command = 0xc2, data = [
+    0x0d,
+    0x00,
+  ] },
+  { command = 0xc3, data = [
+    0x8d,
+    0x2a,
+  ] },
+  { command = 0xc4, data = [
+    0x8d,
+    0xee,
+  ] },
+  { command = 0xc5, data = [
+    0x27,
+  ] },
+  { command = 0xe0, data = [
+    0x07,
+    0x3f,
+    0x0d,
+    0x07,
+    0x14,
+    0x0f,
+    0x08,
+    0x0e,
+    0x0e,
+    0x0c,
+    0x18,
+    0x24,
+    0x00,
+    0x0b,
+    0x03,
+    0x1f,
+  ] },
+  { command = 0xe1, data = [
+    0x01,
+    0x3f,
+    0x01,
+    0x00,
+    0x07,
+    0x03,
+    0x04,
+    0x0c,
+    0x10,
+    0x14,
+    0x23,
+    0x2e,
+    0x00,
+    0x00,
+    0x05,
+    0x1f,
+  ] },
+  { command = 0x2a, data = [
+    0x00,
+    0x00,
+    0x00,
+    0x7f,
+  ] },
+  { command = 0x2b, data = [
+    0x00,
+    0x00,
+    0x00,
+    0x9f,
+  ] },
+  { command = 0x35, data = [
+    0x00,
+  ] },
+  { command = 0x3a, data = [
+    0x05,
+  ] },
+  { command = 0x36, data = [
+    0xd0,
+  ] },
+  { command = 0x21 },
+  { command = 0x11 },
+  { delay_ms = 120 },
+  { command = 0x29 },
+  { command = 0x2c },
+]
+
+[bootstrap]
+spi_hz = 48000000
+reset_ms = 16
+prepare_pins = false
+commands_after = []
+
+[linux]
+commands_after = []
+cold_finish = []
+wake_finish = []
+
+[pins]
+control_base = 0xb0
+control = [
+  [
+    0x00,
+    0x00000000,
+    0x00182001,
+  ],
+  [
+    0x04,
+    0x00000000,
+    0x00082046,
+  ],
+  [
+    0x08,
+    0x00000000,
+    0x00082001,
+  ],
+  [
+    0x0c,
+    0x00000000,
+    0x00102004,
+  ],
+  [
+    0x10,
+    0x00000000,
+    0x00082004,
+  ],
+  [
+    0x14,
+    0x00000000,
+    0x00102004,
+  ],
+  [
+    0x18,
+    0x00000000,
+    0x00082004,
+  ],
+]

@@ -1,0 +1,38 @@
+---
+import { currentPhone } from "../data/phones.ts";
+
+const { phone: id } = Astro.locals.starlightRoute.entry.data;
+if (!id) throw new Error("Phone identity requires a phone page.");
+const phone = currentPhone(id);
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+---
+
+<ul>
+	<li>
+		<strong>Target</strong>: <code>{phone.id}</code>
+	</li>
+	<li>
+		<strong>Hardware code</strong>:{" "}
+		{phone.hardwareCodes.join(", ") || "not established"}
+	</li>
+	<li>
+		<strong>Platform</strong>:{" "}
+		<a href={`${base}/porting/${phone.platform.id}/`}>{phone.platform.name}</a>
+	</li>
+	<li>
+		<strong>Display</strong>: {phone.display.width}×{phone.display.height}
+	</li>
+	<li>
+		<strong>Configured build profiles</strong>:{" "}
+		{phone.profiles.map((profile, index): astroHTML.JSX.Children => (
+			<>
+				{index > 0 && ", "}
+				<code>{profile}</code>
+			</>
+		))}
+	</li>
+</ul>
+<p>
+	Configured profiles describe build availability. The checklist below states
+	the qualified functions and conditions for each profile.
+</p>

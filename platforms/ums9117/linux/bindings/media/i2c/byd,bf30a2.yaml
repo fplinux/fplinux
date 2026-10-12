@@ -11,12 +11,27 @@ maintainers:
 
 allOf:
   - $ref: /schemas/media/video-interface-devices.yaml#
+  - if:
+      properties:
+        compatible:
+          const: nokia,110-4g-bf30a2
+    then:
+      properties:
+        camera-core-supply: false
+      required:
+        - front-powerdown-gpios
+    else:
+      properties:
+        front-powerdown-gpios: false
+      required:
+        - camera-core-supply
 
 properties:
   compatible:
     enum:
       - byd,bf30a2
       - byd,bf3a01
+      - nokia,110-4g-bf30a2
 
   reg:
     const: 0x6e
@@ -36,6 +51,10 @@ properties:
 
   powerdown-gpios:
     maxItems: 1
+
+  front-powerdown-gpios:
+    maxItems: 1
+    description: Additional board camera control line.
 
   pinctrl-names:
     const: default
@@ -66,7 +85,6 @@ required:
   - reg
   - clocks
   - clock-names
-  - camera-core-supply
   - avdd-supply
   - iovdd-supply
   - reset-gpios

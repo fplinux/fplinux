@@ -14,16 +14,6 @@ bundle_files = [
   "runner/platform_adapter.py",
   "runner/ssh_transport.py",
   "runtime-manifest.json",
-  "apks/fplinux-bluealsa.apk",
-  "apks/fplinux-bluez-libs.apk",
-  "apks/fplinux-sbc.apk",
-  "apks/fplinux-brightness-ui.apk",
-  "apks/fplinux-ffmpeg.apk",
-  "apks/fplinux-ncurses-curses.apk",
-  "apks/fplinux-charge.apk",
-  "apks/fplinux-showcase.apk",
-  "apks/fplinux-tyrquake.apk",
-  "apks/fplinux-xkb-ru.apk",
   "assets.lock.toml",
   "THIRD_PARTY_NOTICES.md",
 ]
@@ -42,4 +32,4 @@ runtime_files = [
   "runner/ssh_transport.py",
   "runtime-manifest.json",
 ]
-documents = ["release/README.txt"]
+documents = []

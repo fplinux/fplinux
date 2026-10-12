@@ -1,17 +1,11 @@
 ---
-title: BQ 2830L Tank Connect Max
-description: Boot key, storage, power and hardware limits of FPLinux on the BQ 2830L Tank Connect Max.
-source:
-  - targets/bq-2830l-tank-connect-max
 ---
 
-import Key from '../../../components/Key.astro';
+import PhoneIdentity from '../../../components/PhoneIdentity.astro';
+import PhoneBoot from '../../../components/PhoneBoot.astro';
 import PhoneChecklist from '../../../components/PhoneChecklist.astro';
 
-- **Target**: `bq-2830l-tank-connect-max`
-- **Hardware code**: not established
-- **Platform**: [Unisoc UMS9117](/fplinux/porting/ums9117/)
-- **Display**: 240×320
+<PhoneIdentity />
 
 ## Support checklist
 
@@ -19,7 +13,7 @@ Each status applies to this phone and the conditions in its note. See
 [Support status](/fplinux/phones/#support-status) for the meaning of the labels
 and [common limitations](/fplinux/phones/#limitations-on-every-phone).
 
-<PhoneChecklist phone="bq-2830l-tank-connect-max" />
+<PhoneChecklist />
 
 ## Before you start
 
@@ -29,93 +23,34 @@ another phone's data. A generic first RAM boot can run without these groups.
 
 ## Boot key
 
-Hold the <Key>Green call key</Key>. Start
-`./fplinux run bq-2830l-tank-connect-max` before connecting the powered-off
-phone. When the loader asks for it, connect USB while keeping the key pressed.
-[Run FPLinux](/fplinux/start/run/) describes the complete sequence.
+<PhoneBoot />
 
 ## Controls and storage
 
-- The terminal and menus are readable, and the physical keypad supports typing,
-  modifiers, Help and returning from the diagnostic console. The keypad light
-  turns on with key presses and goes out after inactivity. Shared controls are described in
-  [Terminal](/fplinux/use/terminal/).
-- FAT32 and ext4 microSD data cards support reads and writes in the RAM profile.
-  Insert the card before boot and leave it installed while the phone is powered;
-  hot-swap is not supported.
-- A microSD system card is not supported. RAM files disappear when power is
-  removed.
-- Internal storage is available only as a read-only raw backup for
-  [device data](/fplinux/guides/device-data/). It cannot be mounted, written or
-  restored through FPLinux.
+[Terminal](/fplinux/use/terminal/) describes the shared controls. Insert a
+microSD data card before boot and leave it installed while the phone is
+powered; hot-swap is not supported. RAM files disappear when power is removed.
 
 ## Power
 
-- **Sleep**: USB-powered s2idle resumes the session after an RTC alarm, including
-  an ext4 data card mounted before sleep. A short press of the red call key also
-  wakes the phone and returns the readable terminal. Idle Bluetooth retains its bond
-  and supports a file transfer after RTC wake. Stop active radio connections
-  before sleeping; active-radio sleep is unqualified.
-- **Battery telemetry**: voltage, current and charge-counter readings respond
-  on USB without a battery. Measurements with a battery and their accuracy
-  are unqualified. Battery percentage is unavailable.
-- **SoC temperature**: readings respond; physical accuracy is unqualified.
-- **Charger status**: input presence and source classification respond on USB
-  without a battery. This does not qualify battery charging.
-- **Power-off and powerbank output**: unqualified. Linux reboot is unsupported.
-
-Use the shared [Power](/fplinux/use/power/) interfaces only within these limits.
+Stop active radio connections before sleeping. Use the shared
+[Power](/fplinux/use/power/) interfaces only within the checklist conditions.
 
 ## End the RAM session
 
-Stop applications using the card, disable card-backed swap, flush writes and
-unmount card filesystems as described in [microSD storage](/fplinux/use/microsd/).
-Disconnect USB. If a battery is fitted, remove and reinsert it before booting
-normally. The next normal boot starts the stock firmware.
+[Release data cards](/fplinux/use/power/#release-data-cards) before disconnecting
+USB. If a battery is fitted, remove and reinsert it before booting normally.
 
-## Hardware details and limits
+## Hardware controls and limits
 
-- **Backlight**: system levels 0–10, initially 7; level 0 turns the light off.
-  Brightness increases through the levels without visible flicker. The target uses
-  `/sys/class/backlight/bq-2830l-backlight`.
-- **Headphones**: 24 and 48 kHz playback works with fitted EQ/ALC. Four-contact
-  headphones support separate left/right playback and silence at volume 0.
-  Plug insertion and removal are detected. Compatibility with other headsets is unqualified.
-  Automatic output routing is unavailable.
-- **Speaker**: speech is clear with fitted EQ/ALC. Speaker-only headphone mute
-  and gain calibration are unqualified.
-- **Microphones**: built-in mono 48 kHz recording works with simultaneous 48 kHz
-  playback, and recorded speech is recognizable. Wired-headset recording is unqualified.
-- **Vibration**: a separate motor supports short binary `FF_RUMBLE` effects.
-- **CPU**: 1 GHz by default, with manual 768 MHz selection through the shared
-  [CPU controls](/fplinux/use/cpu-and-temperature/).
-- **Image tools**: hardware RGB565 and NV16 rotation by 90° works, including
-  saved native camera frames. Hardware JPEG encodes 320×240 and decodes
-  horizontal 4:2:2 at full size. Hardware NV16 scaling from 320×240 to 160×120
-  works; other accelerator modes and scaling geometries are unqualified.
-  See [Image rotation](/fplinux/apps/image-tools/rotate/) and
-  [JPEG tools](/fplinux/apps/image-tools/jpeg/).
-- **Camera**: the GC032A captures native 640×476 NV16 with sensor rotation 0°.
-  Pixels are returned unrotated, and capture resumes after RTC wake. Saved
-  native frames can use CPU JPEG or hardware rotation; the hardware JPEG
-  encoder does not accept this native size. JPEG may process a separate,
-  compatible frame while capture is active. Capture with one buffer can stay
-  active while hardware rotation processes a separately saved native frame.
-  Concurrent rotation with two capture buffers is unavailable; live pipelines
-  and sustained concurrency are unqualified. Absolute color accuracy and
-  exposure control are unqualified. See
-  [Camera capture](/fplinux/use/camera/).
-- **Bluetooth**: controller initialization, LE device discovery, Classic
-  pairing and bidirectional OPP work. PAN supports DHCP, bidirectional data
-  transfer and external IPv4 ping; DNS and HTTP over PAN are unqualified.
-  Short 48 kHz stereo SBC playback to a Linux PC works. Physical Bluetooth
-  peripherals, sustained playback, reconnect and active-radio sleep are unqualified.
-- **Wi-Fi**: the RAM profile supports station and access-point modes with
-  WPA2-PSK/CCMP, DHCP and file transfer in both directions. Station DNS and
-  HTTP Internet access work through a shared PC connection. Sustained throughput
-  is unqualified; per-station signal statistics are unavailable.
-- **FM**: recognizable station audio plays through wired headphones with fitted
-  EQ/ALC and stops at the selected duration. The headphone cable is the antenna.
+The backlight is `/sys/class/backlight/bq-2830l-backlight`. Use
+[Display and lights](/fplinux/use/display-and-lights/) for its controls.
+
+:::caution
+Concurrent camera capture and hardware rotation require one capture buffer
+and a separately saved frame. Do not use rotation with two active capture
+buffers. See [Camera](/fplinux/use/camera/) for shared resource rules.
+:::
 
 Feature support does not establish release readiness. See
 [Standalone archives](/fplinux/guides/standalone-archive/).

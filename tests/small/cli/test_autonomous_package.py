@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from fplinux_cli import common
-from fplinux_cli.alpine import signing
+from fplinux_cli.alpine import selection, signing
 from fplinux_cli.artifacts.bundles import publish_current_bundle
 from fplinux_cli.build import linux_host, windows_driver
 from fplinux_cli.build import windows as windows_build
@@ -68,7 +68,9 @@ def archive_inputs(
     target = getattr(request, "param", "nokia-ta1618")
     config = targets.load_target(target)
     platform = platforms.load_platform(config["platform"])
-    release = releases.load_release(target)
+    rootfs_packages = selection.selected_packages(platform, config)
+    selected_bundle_packages = selection.bundle_packages(platform, config, rootfs_packages)
+    release = releases.load_release(target, bundle_packages=selected_bundle_packages)
     for relative in (
         "LICENSE",
         "LICENSES/Unlicense.txt",
@@ -86,10 +88,10 @@ def archive_inputs(
         "include/fplinux/fplinux-cli.h",
         "lib/fplinux/fplinux-cli.c",
         f"targets/{target}/{config['device_data']['parser']}",
-        f"targets/{target}/release/README.txt",
     ):
         _write(tmp_path, relative, (source / relative).read_bytes())
     shutil.copytree(source / "scripts/fplinux_cli", tmp_path / "scripts/fplinux_cli")
+    shutil.copytree(source / "alpine/aports", tmp_path / "alpine/aports")
     windows_scripts = {}
     for resource in sorted((source / "common/windows").rglob("*.ps1")):
         relative = resource.relative_to(source).as_posix()
@@ -355,6 +357,9 @@ def test_autonomous_zip_preserves_receipts_omits_personal_data_and_is_determinis
         for name, digest in runtime["sha256"].items()
     )
     assert not any(name.startswith(("apks/", "docs/", "sources/")) for name in payload)
+    readme = " ".join(payload["README.txt"].decode().split())
+    assert "unmount all data-card filesystems" in readme
+    assert "docs/use/power/index.html" not in readme
     assert "host/fplinux-usb-keyboard" not in payload
     assert "device-data.cpio" not in payload
     assert "pinmap.bin" not in payload

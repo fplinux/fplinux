@@ -44,6 +44,7 @@ properties:
       - fplinux,ums9117-st7789p3-spi-fb
       - fplinux,ums9117-gc9307-spi-fb
       - fplinux,ums9117-uniwa-v1000-spi-fb
+      - fplinux,ums9117-nokia110-spi-fb
       - fplinux,ums9117-nv3030-lcm-fb
       - fplinux,ums9117-nv3023-lcm-fb
       - fplinux,ums9117-gc9307-lcm-fb

@@ -14,6 +14,7 @@ from unittest import mock
 import pytest
 from fplinux_cli import common
 from fplinux_cli.cli import package, target_new
+from fplinux_cli.cli.package_readme import ordinary_readme
 from fplinux_cli.manifests import paths, platforms, targets
 
 REPOSITORY = common.ROOT
@@ -41,6 +42,7 @@ class NewTargetTests:
                 REPOSITORY / "platforms/ums9117/target-template", platform / "target-template"
             )
             shutil.copytree(REPOSITORY / "platforms/ums9117/loader", platform / "loader")
+            shutil.copytree(REPOSITORY / "alpine/aports", self.root / "alpine/aports")
             shutil.copytree(REPOSITORY / "profiles", self.root / "profiles")
             self.targets = self.root / "targets"
             self.targets.mkdir()
@@ -120,21 +122,27 @@ class NewTargetTests:
         assert (sorted(line.strip() for line in lines[1:-1])) == (created)
 
     def test_new_target_release_readme_identifies_the_phone_and_loader_sequence(self) -> None:
-        """The archive instructions identify the phone and leave its boot key unconfirmed."""
+        """Generated instructions identify the skeleton and preserve its loader sequence."""
         self.create("hammer-horizon-lte")
-        readme = (self.targets / "hammer-horizon-lte/release/README.txt").read_text(
-            encoding="utf-8"
-        )
+        routes = self.root / "site/src/data/phones.json"
+        routes.parent.mkdir(parents=True)
+        routes.write_text("[]\n", encoding="utf-8")
+        config = targets.load_target("hammer-horizon-lte")
+        readme = ordinary_readme("hammer-horizon-lte", config).decode("utf-8")
         prose = " ".join(readme.split())
 
         assert readme.startswith("FPLinux for HAMMER Horizon LTE\n")
-        assert "Power the phone off and disconnect USB" in prose
+        assert "Keep the powered-off phone disconnected" in prose
         assert "./runner/run.py\n" in readme
-        assert "Wait until the runner asks for the powered-off phone" in prose
-        assert "Then hold * (asterisk) and connect USB, keeping the key pressed" in prose
-        assert "The BootROM key for this phone has not been confirmed" in prose
-        assert "This target starts Linux in RAM" in prose
+        assert "Wait until the runner asks for the phone, then follow its instruction" in prose
+        assert "Power the phone off, hold *, then connect USB while keeping * pressed." in prose
+        assert "If connected too early, disconnect and restart this sequence." in prose
+        assert readme.index("./runner/run.py\n") < readme.index("Wait until the runner")
+        assert readme.index("Wait until the runner") < readme.index("Power the phone off, hold *")
         assert "./runner/run.py --reconnect" in readme
+        assert "Phone support, controls and limits: docs/porting/checklist/index.html" in prose
+        assert "confirm it on this phone before use" in prose
+        assert "Configuration alone does not establish support" in prose
 
     def test_new_target_release_carries_every_declared_bundle_apk(self) -> None:
         """The generated release includes exactly the platform and target bundle packages."""

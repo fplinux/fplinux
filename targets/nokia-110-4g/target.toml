@@ -1,0 +1,149 @@
+# SPDX-License-Identifier: GPL-2.0-only
+platform = "ums9117"
+
+[identity]
+brand = "Nokia"
+product = "110 4G"
+hardware_codes = []
+compatible = "nokia,110-4g"
+
+[nand]
+raw_device = "/dev/ums9117-nand-raw"
+id = 0x61cd
+raw_page_bytes = 2112
+
+[display]
+panel = "display/panel.toml"
+boot_font = "6x8"
+
+[display_brightness]
+backlight = "nokia110-backlight"
+levels = [0, 1, 3, 4, 6, 7, 8, 10, 11, 13, 14]
+
+[rootfs]
+packages = ["fplinux-audio", "fplinux-font-terminus-6x12", "fplinux-jack"]
+
+[bundle]
+packages = []
+
+[linux]
+config_fragment = "linux/config.fragment"
+memory = { base = 0x80200000, size = 0x03c00000 }
+dtb = "unisoc/ums9117-nokia-110-4g.dtb"
+debug_dtb = "ums9117-nokia-110-4g.dtb"
+patches = []
+forbidden_dtb_markers = ["spi-nand", "mtd", "ubi", "emmc"]
+forbidden_config = [
+  "CONFIG_MTD=y",
+  "CONFIG_UBI=y",
+  "CONFIG_SCSI=y",
+  "CONFIG_ATA=y",
+  "CONFIG_NVME_CORE=y",
+]
+
+[[linux.copies]]
+source = "linux/dts/ums9117-nokia-110-4g.dts"
+destination = "arch/arm/boot/dts/unisoc/ums9117-nokia-110-4g.dts"
+
+[[linux.copies]]
+source = "linux/dts/foundation.dtsi"
+destination = "arch/arm/boot/dts/unisoc/nokia-110-4g-foundation.dtsi"
+
+[[linux.copies]]
+source = "linux/dts/display.dtsi"
+destination = "arch/arm/boot/dts/unisoc/nokia-110-4g-display.dtsi"
+
+[[linux.copies]]
+source = "linux/dts/audio.dtsi"
+destination = "arch/arm/boot/dts/unisoc/nokia-110-4g-audio.dtsi"
+
+[[linux.copies]]
+source = "linux/dts/bluetooth.dtsi"
+destination = "arch/arm/boot/dts/unisoc/nokia-110-4g-bluetooth.dtsi"
+
+[[linux.copies]]
+source = "linux/dts/camera.dtsi"
+destination = "arch/arm/boot/dts/unisoc/nokia-110-4g-camera.dtsi"
+
+[[linux.copies]]
+source = "linux/drivers/media/i2c/nokia110-bf30a2-mode.h"
+destination = "drivers/media/i2c/nokia110-bf30a2-mode.h"
+
+[[linux.copies]]
+source = "linux/drivers/gpu/drm/ums9117/nokia110-drm.c"
+destination = "drivers/gpu/drm/ums9117/nokia110-drm.c"
+
+[[linux.appends]]
+source = "linux/arch/arm/mach-ums9117/Kconfig"
+destination = "arch/arm/mach-ums9117/Kconfig"
+
+[[linux.appends]]
+source = "linux/dts/unisoc.Makefile"
+destination = "arch/arm/boot/dts/unisoc/Makefile"
+
+[[linux.appends]]
+source = "linux/drivers/gpu/drm/ums9117/drm.Kconfig"
+destination = "drivers/gpu/drm/Kconfig"
+
+[[linux.appends]]
+source = "linux/drivers/gpu/drm/ums9117/drm.Makefile"
+destination = "drivers/gpu/drm/ums9117/Makefile"
+
+[bootstrap]
+lcd_config = "bootstrap/lcd_config.h"
+image = "nokia_110_4g_linux_bootstrap.bin"
+map = "obj/nokia_110_4g_linux_bootstrap_map.txt"
+dtb_destination = "nokia_110_4g.dtb"
+record_prefix = "NOKIA_110_4G"
+
+[adapter]
+spi_mode = 3
+backlight_channels = "rgb"
+backlight_level = 14
+exec_distance = 0
+session_name = "nokia-110-4g-linux"
+boot_instructions = "Power the phone off, hold *, then connect USB while keeping * pressed."
+
+[device_data]
+parser = "nokia110_device_data.py"
+
+# Extracted from the stock firmware in a NAND backup together with a board report.
+[board_maps]
+firmware = [
+  { source = "pinmap.bin", destination = "pinmap.bin" },
+  { source = "keymap.bin", destination = "keymap.bin" },
+]
+
+[bluetooth]
+firmware = [
+  { source = "nokia110-cm4.bin", destination = "ums9117/nokia110-cm4.bin" },
+  { source = "nokia110-bt-config.bin", destination = "ums9117/nokia110-bt-config.bin", size = 8 },
+  { source = "nokia110-bt-sprd.bin", destination = "ums9117/nokia110-bt-sprd.bin", size = 176 },
+  { source = "nokia110-bt-rf-config.bin", destination = "ums9117/nokia110-bt-rf-config.bin", size = 252 },
+]
+
+[audio_profile]
+firmware = [
+  { source = "nokia110-audio-profile.bin", destination = "fplinux/nokia110-audio-profile.bin", size = 788 },
+]
+
+[fm_radio]
+firmware = [
+  { source = "nokia110-fm-config.bin", destination = "fplinux/nokia110-fm-config.bin", size = 128 },
+]
+
+[microsd]
+linux_patches = []
+
+[microsd.bootstrap]
+source = "bootstrap-microsd"
+image = "nokia_110_4g_sd_stage0.bin"
+map = "obj/nokia_110_4g_sd_stage0_map.txt"
+
+[microsd.uboot]
+defconfig = "uboot/nokia110_defconfig"
+patches = []
+
+[[microsd.uboot.copies]]
+source = "targets/nokia-110-4g/uboot/ums9117-nokia110-u-boot.dts"
+destination = "arch/arm/dts/ums9117-nokia110-u-boot.dts"

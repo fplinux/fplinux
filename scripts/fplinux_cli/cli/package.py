@@ -10,9 +10,11 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from fplinux_cli import common
+from fplinux_cli.alpine.selection import bundle_packages, selected_packages
 from fplinux_cli.cli import bundles as cli_bundles
 from fplinux_cli.cli.autonomous_package import autonomous_payload
 from fplinux_cli.cli.package_docs import offline_documentation
+from fplinux_cli.cli.package_readme import ordinary_readme
 from fplinux_cli.common import (
     ZIP_TIMESTAMP,
     canonical_json_bytes,
@@ -82,9 +84,10 @@ def target_archive_file(
 
 def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]:
     """Resolve release documents and fixed platform executable roles."""
-    manifest = releases.load_release(
-        target, profile_packages=config.get("rootfs", {}).get("packages", ())
-    )
+    platform = platforms.load_platform(config["platform"])
+    rootfs_packages = selected_packages(platform, config, root=common.ROOT)
+    selected_bundle_packages = bundle_packages(platform, config, rootfs_packages, root=common.ROOT)
+    manifest = releases.load_release(target, bundle_packages=selected_bundle_packages)
     image = manifest["image"]
     bundle_files = manifest["bundle_files"]
     runtime_files = manifest["runtime_files"]
@@ -93,6 +96,9 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
         runtime_files = [*runtime_files, "device-data.cpio"]
     documents = manifest["documents"]
     archive_names = set(bundle_files)
+    if "README.txt" in archive_names:
+        fail("release bundle files must not replace the generated README.txt")
+    archive_names.add("README.txt")
     shared_collisions = archive_names & SHARED_PACKAGE_FILES.keys()
     if shared_collisions:
         fail(f"duplicate release archive path: {min(shared_collisions)}")
@@ -103,7 +109,6 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
             fail(f"duplicate release archive path: {archive_name}")
         archive_names.add(archive_name)
 
-    platform = platforms.load_platform(config["platform"])
     # Archives carry the host tools the runner uses; build-only tools stay in the checkout.
     executables = {
         "runner/run.py",
@@ -322,6 +327,8 @@ def package_target(  # noqa: PLR0913 -- archive host and build selectors remain 
 
     executables = set(release["executables"])
     add_target_files(files, target, release["documents"])
+    if not autonomous:
+        files["README.txt"] = ordinary_readme(target, config)
     source_files: dict[str, bytes] = {}
     source_executables: set[str] = set()
     if autonomous:

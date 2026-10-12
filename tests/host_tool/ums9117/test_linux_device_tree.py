@@ -17,6 +17,7 @@ from fplinux_cli.build.device_tree import (
     exact_path_properties,
     parse_nul_string,
     parse_nul_string_list,
+    verify_profile_dtb_layout,
 )
 from fplinux_cli.build.identity import (
     linux_audio_policy_dtsi,
@@ -25,7 +26,9 @@ from fplinux_cli.build.identity import (
     linux_machine_binding,
     linux_machine_binding_path,
 )
+from fplinux_cli.build.kernel.prepare import generated_linux_files, integration_inputs
 from fplinux_cli.build.kernel.state import write_profile_root
+from fplinux_cli.build.sources import copy_steps
 from fplinux_cli.cli import target_new
 from fplinux_cli.manifests import platforms, targets
 
@@ -69,6 +72,127 @@ def test_compiled_audio_policy_contains_only_the_selected_topology_property(
         check=True,
     )
     assert exact_path_properties(dtb, "/audio")["/audio"] == {property_name: b""}
+
+
+def _write_peripheral_binding_stubs(include: Path) -> None:
+    """Supply symbols for CPP and DTC without validating peripheral configuration."""
+    event_codes = [
+        *(f"KEY_NUMERIC_{digit}" for digit in range(10)),
+        "KEY_NUMERIC_STAR",
+        "KEY_NUMERIC_POUND",
+        "KEY_UP",
+        "KEY_DOWN",
+        "KEY_LEFT",
+        "KEY_RIGHT",
+        "KEY_OK",
+        "KEY_F13",
+        "KEY_F14",
+        "KEY_PICKUP_PHONE",
+        "KEY_POWER",
+    ]
+    bindings = {
+        "interrupt-controller/arm-gic.h": "#define GIC_SPI 0\n#define IRQ_TYPE_LEVEL_HIGH 4\n",
+        "gpio/gpio.h": "#define GPIO_ACTIVE_HIGH 0\n#define GPIO_ACTIVE_LOW 1\n",
+        "input/input.h": "#define MATRIX_KEY(row, col, key) (key)\n",
+        "input/linux-event-codes.h": "".join(
+            f"#define {name} {value}\n" for value, name in enumerate(event_codes)
+        ),
+        "leds/common.h": '#define LED_FUNCTION_KBD_BACKLIGHT "kbd_backlight"\n',
+    }
+    for relative, contents in bindings.items():
+        header = include / "dt-bindings" / relative
+        header.parent.mkdir(parents=True, exist_ok=True)
+        header.write_text(contents, encoding="ascii")
+
+
+@pytest.fixture
+def nokia110_microsd_dtb(tmp_path: Path) -> Path:
+    """Compile the board's DT projections; binding stubs do not validate peripherals."""
+    target = "nokia-110-4g"
+    config = targets.load_target(target, "microsd-uboot")
+    platform = platforms.load_platform(config["platform"])
+    source = tmp_path / "source"
+    dts_directory = platform["linux"]["dts_directory"]
+    projections = [
+        (path, destination)
+        for operation, _identity, destination, path in integration_inputs(target, config, platform)
+        if operation.endswith("copy")
+        and destination.startswith((f"{dts_directory}/", "include/dt-bindings/"))
+    ]
+    copy_steps(source, projections)
+    for destination, contents in generated_linux_files(target, config, platform).items():
+        if destination.startswith(f"{dts_directory}/"):
+            (source / destination).write_bytes(contents)
+    _write_peripheral_binding_stubs(source / "include")
+
+    output = tmp_path / "output"
+    write_profile_root(output, config)
+    board = source / "arch/arm/boot/dts" / Path(config["linux"]["dtb"]).with_suffix(".dts")
+    preprocessed = tmp_path / "board.dts"
+    dtb = tmp_path / "board.dtb"
+    run_process(
+        [
+            "cpp",
+            "-nostdinc",
+            "-undef",
+            "-D__DTS__",
+            "-x",
+            "assembler-with-cpp",
+            "-I",
+            str(source / "include"),
+            "-I",
+            str(source / dts_directory),
+            str(board),
+            "-o",
+            str(preprocessed),
+        ],
+        name="preprocess Nokia 110 microSD DT projections",
+        timeout=30,
+        check=True,
+    )
+    run_process(
+        [
+            "dtc",
+            "-I",
+            "dts",
+            "-O",
+            "dtb",
+            "-i",
+            str(output / "include/generated/fplinux"),
+            "-o",
+            str(dtb),
+            str(preprocessed),
+        ],
+        name="compile Nokia 110 microSD DT projections",
+        timeout=30,
+        check=True,
+    )
+    return dtb
+
+
+def test_nokia110_compiled_microsd_tree_preserves_the_boot_display_reservation(
+    nokia110_microsd_dtb: Path,
+) -> None:
+    """The board DTB keeps Linux RAM and scanout memory compatible with the SD handoff."""
+    layout = {
+        "ram_base": 0x80000000,
+        "ram_size": 0x04000000,
+        "fdt_load": 0x83E00000,
+        "fdt_size": 0x00010000,
+        "fdt_pad": 0x00003000,
+        "framebuffer": 0x83F00000,
+        "framebuffer_size": 0x00100000,
+    }
+    verify_profile_dtb_layout(
+        nokia110_microsd_dtb, layout, {"base": 0x80200000, "size": 0x03C00000}
+    )
+    nodes = exact_path_properties(
+        nokia110_microsd_dtb, ("/memory@80200000", "/reserved-memory/framebuffer@83f00000")
+    )
+    assert nodes["/memory@80200000"]["reg"] == b"\x80\x20\x00\x00\x03\xc0\x00\x00"
+    reservation = nodes["/reserved-memory/framebuffer@83f00000"]
+    assert reservation["reg"] == b"\x83\xf0\x00\x00\x00\x10\x00\x00"
+    assert reservation["no-map"] == b""
 
 
 class NewTargetDeviceTreeTests:

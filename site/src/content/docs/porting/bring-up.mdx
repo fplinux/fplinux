@@ -3,7 +3,6 @@ title: Bring up a new phone
 description: Start Linux on a UMS9117 phone that has no FPLinux target, back up its internal storage, extract a board report and report the phone.
 ---
 
-import { FileTree } from '@astrojs/starlight/components';
 import Figure from '../../../components/Figure.astro';
 import Key from '../../../components/Key.astro';
 import BringUpConnection from '../../../assets/diagrams/bring-up-connection.svg';
@@ -59,50 +58,10 @@ Choose a target name and the phone's public brand and product names:
   current platform, the command selects `ums9117` by default; when more than
   one platform exists, this option is required.
 
-The command refuses an existing target directory and leaves nothing behind when
-a name or identity field is invalid. On success it lists the files it created:
-
-```text title="Output"
-Created headless target targets/<target>:
-  bootstrap/Makefile
-  bootstrap/main.c
-  bootstrap/payload.s
-  linux/arch/arm/mach-ums9117/Kconfig
-  linux/config.fragment
-  linux/dts/ums9117-<target>.dts
-  linux/dts/unisoc.Makefile
-  loader/assets.lock.toml
-  release/README.txt
-  release/manifest.toml
-  target.toml
-Next: ./fplinux build <target> && ./fplinux run <target>
-```
-
-The created files have these roles:
-
-<FileTree>
-
-- targets/
-  - \<target>/
-    - target.toml platform, identity, Linux build and loader settings
-    - bootstrap/ bootstrap with a 0×0 display, which makes the target headless
-      - Makefile
-      - main.c
-      - payload.s embeds the Linux kernel and Devicetree
-    - linux/
-      - arch/arm/mach-ums9117/
-        - Kconfig the board's kernel option
-      - config.fragment enables the board option
-      - dts/
-        - ums9117-\<target>.dts board Devicetree: memory, inherited USB device mode and read-only NAND
-        - unisoc.Makefile adds the board Devicetree to the kernel build
-    - loader/
-      - assets.lock.toml pinned RAM loader (FDL1)
-    - release/
-      - README.txt README of the standalone archive
-      - manifest.toml files of the standalone archive
-
-</FileTree>
+The command creates the target manifest, headless bootstrap, board Devicetree,
+kernel configuration, pinned RAM-loader inputs and standalone-archive
+descriptions. It lists the files it created. It refuses an existing target
+directory and leaves nothing behind when a name or identity field is invalid.
 
 The new target uses <Key>\*</Key> as the boot key and `exec_distance = 0`,
 both in the `[adapter]` table of `targets/<target>/target.toml`. This is a
@@ -111,19 +70,9 @@ connecting it. It offers only the default RAM profile, with no microSD support.
 Creating the target does not qualify its peripherals or add the phone to the
 list of supported phones.
 
-When adding a display, create a target-owned panel header and select it with
-`[bootstrap].lcd_config`. RAM and microSD bootstrap builds use the same header.
-Its `FPLINUX_LCD_SPI` value selects SPI (`1`) or LCM (`0`); bootstrap stops when
-the board pin configuration selects the other transport. Headless targets
-retain the complete panel table for porting. The bootstrap Makefile selects
-`FPLINUX_BOOT_FONT := 6x8` or `7x14`, and `[rootfs].packages` selects
-`fplinux-font-terminus-6x12` or `fplinux-font-terminus-8x16` for the display.
-
-The headless Devicetree uses `fplinux,ums9117-musb-inherited` with
-`CONFIG_USB_MUSB_UMS9117_INHERITED` to retain the boot stage's USB state. A board
-that initializes USB in Linux instead uses `sprd,ums9117-musb` with
-`CONFIG_USB_MUSB_UMS9117_COLD`. The build rejects an enabled USB node without a
-matching built-in ownership mode.
+Keep the inherited USB setup for the first headless boot. The
+[platform requirements](/fplinux/porting/ums9117/#headless-targets) describe its
+USB ownership mode and the board inputs needed when adding peripherals.
 
 ## Boot without a screen
 
@@ -156,42 +105,25 @@ the phone's line for the report. In BootROM mode it reads
 phone, run `lsusb` while the phone is still connected with the key held and
 keep whatever line appears, or note that no new line appeared.
 
-A successful boot prints these lines, with diagnostic lines between them:
+A successful boot includes these milestones, with other output between them:
 
-```text title="Output" collapse={2-5, 12-14}
-<Brand> <Product> console RAM boot
-Operations: RAM FDL1 load, RAM payload load.
-There are no flash, erase, partition, or NV commands.
-Headless target: the phone shows no boot screen or backlight; progress is reported here.
-
-Power the phone off, hold *, then connect USB while keeping * pressed.
-Waiting up to 300 seconds for BootROM USB 1782:4d00...
+```text title="Output"
 BSL_REP_VER: "SPRD3\0"
 BSL_REP_VER: "Custom FDL1: CHIP ID = 0x98180001\0"
-<TARGET>_LINUX_BOOTSTRAP event=stage stage=0 ram=0x04000000 zimage=... dtb=... message=ENTRY
 <TARGET>_LINUX_BOOTSTRAP event=stage stage=1 message=NO DISPLAY
-<TARGET>_LINUX_BOOTSTRAP event=stage stage=2 message=SPRD TIMER OK
-<TARGET>_LINUX_BOOTSTRAP event=stage stage=3 message=COPY KERNEL
-<TARGET>_LINUX_BOOTSTRAP event=stage stage=4 message=COPY DTB
 <TARGET>_LINUX_BOOTSTRAP event=stage stage=5 message=PREPARE LINUX
-Bridge acknowledged the Linux transition; waiting up to 60 seconds for Linux USB-NCM 0525:a4a6.
-SSH host key observed; validating the private RAM session identity.
 Private USB-NCM SSH session is ready.
 ```
 
 The first `BSL_REP_VER` line comes from the phone's BootROM, the second from
 the RAM loader (FDL1) once it runs. Its `CHIP ID` identifies the SoC; the
-supported phones report `0x98180001`. The `<TARGET>_LINUX_BOOTSTRAP` lines are
-the bootstrap stages, prefixed with the target name in capitals; see
-[Logging](/fplinux/develop/logging/). `ram=0x04000000` is the 64 MB of RAM that
-FPLinux requires, and `NO DISPLAY` confirms that the target starts without a
-screen.
+supported phones report `0x98180001`. The bootstrap records use the target's
+`record_prefix`; see [Logging](/fplinux/develop/logging/). `NO DISPLAY`
+confirms headless mode. Wait for the authenticated session's final readiness
+message before using phone commands.
 
 From an interactive terminal, `run` then opens a shell on the phone. Leaving
 that shell does not stop Linux. Keep the complete `run` output for the report.
-
-A headless target created this way reaches the USB session on the INOI 244
-Modern 4G and the Nokia 3210 4G (TA-1618).
 
 ## Where the boot stopped
 
@@ -304,21 +236,19 @@ feature_c0=0x00
 ```
 
 `geometry_source=table` means that the reader recognised the chip from its list
-of known chips. FPLinux has read FM25LG01B, DS35M1GA, F35UQA001G and
-GD5F1GM7RExxG chips on supported phones; the reader also knows other chips that
-no supported phone uses. The
-[reference](#nand-backup-reference) below describes every field.
+of known chips. Raw reads on supported phones are established for FM25LG01B,
+DS35M1GA, F35UQA001G and GD5F1GM7RExxG. Identification of another chip does not
+establish its raw read path. The [NAND reference](#nand-backup-reference)
+describes every field.
 
 - **`chip=unknown`**: the reader does not know the chip. The report shows zero
   sizes and `geometry_source=unknown`, but still the chip's `id_bytes` and
   feature values. A backup is not possible. [Report the phone](#report-the-phone)
   with the complete `nand identify` output and a photo of the markings on the
   flash chip.
-- **A chip other than FM25LG01B, DS35M1GA, F35UQA001G or GD5F1GM7RExxG**: the reader identifies
-  it and the backup proceeds, but no FPLinux
-  phone has used that chip before, so its entry in the reader's list has not
-  been checked against a real chip. Save the backup and state in the report that
-  the chip is new.
+- **A recognised chip**: continue with the backup and include the complete
+  identification output in the report. For a chip outside the group above,
+  state that its reader entry has not been checked on a supported phone.
 
 ## Save a NAND backup
 
@@ -362,12 +292,8 @@ does not need to be connected, and no target build is required:
 
 The command reads `nand.bin` with its receipt `nand.bin.json`, prepares the
 host extraction tool in the pinned build environment without a target bundle,
-and prints the path of the report. Use `--offline` when the required environment
-and source archives are already available locally:
-
-```text title="Output"
-Review <checkout>/.cache/device-data/<target>/generations/<generation>/reports/board-maps/board-report.json.
-```
+and prints the location of `board-report.json`. Use `--offline` when the
+required environment and source archives are already available locally.
 
 [Board data from the stock firmware](/fplinux/porting/ums9117/#board-data-from-the-stock-firmware)
 describes what the report contains and which decisions it leaves to a person.

@@ -417,13 +417,22 @@ static int ums9117_sensor_set_rate(struct clk_hw *hw, unsigned long rate,
 				   unsigned long parent_rate)
 {
 	struct ums9117_sensor_clk *sensor = hw_to_ums9117_sensor_clk(hw);
+	u32 cfg;
+	int ret;
 
 	if (parent_rate != UMS9117_SENSOR_SOURCE_RATE_HZ ||
 	    (rate != UMS9117_SENSOR_RATE_IDENTIFY_HZ &&
 	     rate != UMS9117_SENSOR_RATE_CAPTURE_HZ))
 		return -EINVAL;
 
-	/* The register is changed only after prepare has saved its prior value. */
+	/* A prepared clock retains its original snapshot across rate changes. */
+	if (sensor->owned) {
+		cfg = UMS9117_SENSOR_SOURCE_48M |
+		      ((UMS9117_SENSOR_SOURCE_RATE_HZ / rate - 1) << 8);
+		ret = ums9117_sensor_write_cfg(sensor, cfg);
+		if (ret)
+			return ret;
+	}
 	sensor->requested_rate = rate;
 	return 0;
 }
@@ -441,7 +450,7 @@ static struct ums9117_sensor_clk sensor_clk = {
 		.reg = 0,
 		.hw.init = CLK_HW_INIT_FW_NAME("sensor0", "source",
 					    &ums9117_sensor_clk_ops,
-					    CLK_SET_RATE_GATE | CLK_GET_RATE_NOCACHE),
+					    CLK_GET_RATE_NOCACHE),
 	},
 };
 

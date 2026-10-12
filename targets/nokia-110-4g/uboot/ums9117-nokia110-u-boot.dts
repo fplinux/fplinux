@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/dts-v1/;
+
+#include "ums9117-u-boot.dtsi"
+#include "fplinux-nokia-110-4g-uboot-identity.dtsi"
+
+&{/mmc@20300000} {
+	non-removable;
+};

@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-only
+if ARCH_UMS9117
+
+config MACH_NOKIA_110_4G
+	bool "Nokia 110 4G"
+	select GPIOLIB
+	select GPIO_PMIC_EIC_SPRD
+	select MFD_SYSCON
+	help
+	  Board support for the UMS9117-based Nokia 110 4G.
+	  The board's Devicetree selects its display and keypad wiring.
+	  The USB loader starts Linux without writing internal storage.
+	  Internal NAND is available through a read-only backup interface.
+
+endif

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from fplinux_cli import common
+from fplinux_cli.cli.package_readme import shutdown_instructions
 from fplinux_cli.common import ZIP_TIMESTAMP, canonical_json_bytes, fail, sha256_bytes
 from fplinux_cli.device_data.prepare import NAND_ECC_MODULE, NAND_ECC_TOOL
 from fplinux_cli.manifests.identity import target_display_name
@@ -101,6 +102,10 @@ def device_data_manifest(target: str, config: dict[str, Any]) -> bytes:
 def _readme(config: dict[str, Any], *, host: str) -> bytes:
     name = target_display_name(config["identity"])
     instructions = config["adapter"]["boot_instructions"]
+    shutdown = shutdown_instructions(
+        external_root=config["linux"]["root"]["kind"] == "external",
+        with_offline_documentation=False,
+    )
     if host == "windows10":
         host_instructions = (
             "Use Windows 10 or 11 x64. Python and the host programs are bundled.\n"
@@ -128,7 +133,8 @@ def _readme(config: dict[str, Any], *, host: str) -> bytes:
         "the connection instructions. Leave a running phone connected to reopen SSH.\n"
         f"{instructions}\n\n"
         "The first run saves a complete backup and prepares your phone's own data.\n"
-        "When it finishes, disconnect USB. If the phone stays on, briefly remove\n"
+        "When it finishes, release cards as described below before disconnecting USB.\n"
+        "If the phone stays on, briefly remove\n"
         "and reinsert its battery. Run the same script with the phone powered off\n"
         "to start FPLinux and open SSH. Type exit or press Ctrl+D to close SSH.\n"
         "Open the same launcher again to reconnect while the phone remains on.\n"
@@ -140,6 +146,8 @@ def _readme(config: dict[str, Any], *, host: str) -> bytes:
         "Keep this directory for this one phone. Your NAND backup is data/nand.bin,\n"
         "prepared phone data is data/phone, and private connection keys are data/session.\n"
         "Each launch writes a new log in logs and displays its exact path.\n"
+        "\n"
+        f"{shutdown}"
     )
     return text.encode("utf-8")
 

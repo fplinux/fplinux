@@ -1,0 +1,40 @@
+[
+  {
+    "id": "nokia-ta1618",
+    "render": "terminal-keypad",
+    "renderScale": 1,
+    "slug": "phones/nokia-3210-4g"
+  },
+  {
+    "id": "nokia-110-4g",
+    "slug": "phones/nokia-110-4g"
+  },
+  {
+    "id": "inoi-240-modern-4g",
+    "render": "terminal-keypad-128x160",
+    "renderScale": 2,
+    "slug": "phones/inoi-240-modern-4g"
+  },
+  {
+    "id": "inoi-244-modern-4g",
+    "render": "terminal-keypad",
+    "renderScale": 1,
+    "slug": "phones/inoi-244-modern-4g"
+  },
+  {
+    "id": "maxvi-k15n-4g",
+    "render": "terminal-keypad",
+    "renderScale": 1,
+    "slug": "phones/maxvi-k15n-4g"
+  },
+  {
+    "id": "bq-2830l-tank-connect-max",
+    "render": "terminal-keypad",
+    "renderScale": 1,
+    "slug": "phones/bq-2830l-tank-connect-max"
+  },
+  {
+    "id": "uniwa-v1000-4g",
+    "slug": "phones/uniwa-v1000-4g"
+  }
+]

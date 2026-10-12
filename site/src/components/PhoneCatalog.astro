@@ -1,0 +1,19 @@
+---
+import { Card, CardGrid } from "@astrojs/starlight/components";
+import { loadPhones } from "../data/phones.ts";
+
+const { phones } = loadPhones();
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+---
+
+<CardGrid>
+	{phones.map((phone): astroHTML.JSX.Children => (
+		<Card icon="phone" title={phone.name}>
+			<p>
+				Target <code>{phone.id}</code>, {phone.display.width}×
+				{phone.display.height} display.
+				<a href={`${base}/${phone.slug}/`}>Read the phone page</a>.
+			</p>
+		</Card>
+	))}
+</CardGrid>

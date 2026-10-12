@@ -1,18 +1,12 @@
 ---
-title: UNIWA V1000 4G
-description: Boot key, storage, power and hardware limits of FPLinux on the UNIWA V1000 4G.
-source:
-  - targets/uniwa-v1000-4g
 ---
 
 import Key from '../../../components/Key.astro';
+import PhoneIdentity from '../../../components/PhoneIdentity.astro';
+import PhoneBoot from '../../../components/PhoneBoot.astro';
 import PhoneChecklist from '../../../components/PhoneChecklist.astro';
 
-- **Target**: `uniwa-v1000-4g`
-- **Hardware code**: not established
-- **Platform**: [Unisoc UMS9117 (T117)](/fplinux/porting/ums9117/)
-- **RAM**: 64 MiB
-- **Display**: 320×240 landscape; readable terminal in RAM and microSD profiles
+<PhoneIdentity />
 
 ## Support checklist
 
@@ -20,7 +14,7 @@ Each status applies to this phone and the conditions in its note. See
 [Support status](/fplinux/phones/#support-status) for the meaning of the labels
 and [common limitations](/fplinux/phones/#limitations-on-every-phone).
 
-<PhoneChecklist phone="uniwa-v1000-4g" />
+<PhoneChecklist />
 
 ## Before you start
 
@@ -28,119 +22,41 @@ Prepare [device data](/fplinux/guides/device-data/) from this same handset for
 its board configuration, Bluetooth and fitted audio. Do not substitute another
 phone's data. A generic first RAM boot can run without these groups.
 
-RAM and microSD profiles provide a readable
-[local terminal](/fplinux/use/terminal/).
 Use the authenticated SSH connection over USB-NCM described in
 [Connect from the PC](/fplinux/use/connect/) for command input while full
 keypad operation is unqualified. On-phone image presentation is unqualified.
 
 ## Boot key
 
-Hold <Key>D-pad Up</Key>. Start `./fplinux run uniwa-v1000-4g` before
-connecting the powered-off phone. When the loader asks for it, connect USB
-while keeping the key pressed. [Run FPLinux](/fplinux/start/run/) describes
-the complete sequence.
+<PhoneBoot />
 
 ## Controls
 
 The held <Key>D-pad Up</Key> key is detected by Linux. The other physical
 keys and complete keypad input are unqualified.
 
-## Storage
+## Storage and power
 
-- A microSD data card supports reads and writes in the RAM profile, with files
-  retained after power is removed. Insert the card before boot and leave it
-  installed throughout the powered session; hot-swap is not supported. See
-  [microSD storage](/fplinux/use/microsd/).
-- A [microSD system card](/fplinux/guides/microsd-system-card/) boots with
-  an ext4 system root that grows to fill the card. Installed packages and
-  files persist after a cold start. Every start still requires the PC's USB
-  loader; keep the card installed throughout the session. RAM files disappear
-  when power is removed.
-- Internal storage is available only as a read-only raw backup for
-  [device data](/fplinux/guides/device-data/). It cannot be mounted, written or
-  restored through FPLinux.
+Insert a microSD card before boot and keep it installed throughout the
+powered session; hot-swap is not supported. Every start, including a
+[microSD system card](/fplinux/guides/microsd-system-card/), requires the
+PC loader. RAM files disappear when power is removed.
 
-## Power
+Use the shared [Power](/fplinux/use/power/) interfaces within the checklist
+conditions. For sleep with a microSD system card, make the system root
+read-only and stop active peripherals first. Sleep with a writable root or
+a battery is unqualified.
 
-USB-powered RAM and microSD operation without a battery work. Voltage, current
-and charge-counter readings respond in the RAM profile. Measurements with a
-battery and their accuracy are unqualified; battery percentage is unavailable.
-The charger reports connected USB power and a CDP source; actual battery
-charging is unqualified. SoC temperature readings respond, but their accuracy
-is unqualified. The RTC can be read and can wake an idle microSD session after
-five seconds with its system root read-only, returning to the same SSH session.
-Sleep with a writable root, active peripherals, keypad wake and operation with
-a battery are unqualified. RTC accuracy and retention without USB power are
-unqualified. Power-off is unqualified; Linux reboot is unsupported.
-
-Use the shared [Power](/fplinux/use/power/) interfaces within these limits.
 Before removing power, release data cards as described in
-[microSD storage](/fplinux/use/microsd/). With a microSD system card, use
+[Release data cards](/fplinux/use/power/#release-data-cards). With a microSD system card, use
 [system-card shutdown on USB power](/fplinux/use/power/#shut-down-a-system-card-on-usb-power)
 and confirm that the system root is read-only before cutting power.
 
-## Hardware details and limits
+## Hardware controls and limits
 
-- **Display and backlight**: the tested handset shows a readable 320×240
-  landscape terminal in RAM and microSD profiles. Command-line brightness
-  control works at logical levels 0, 5 and 10 in RAM, corresponding to raw
-  backlight levels 0, 17 and 34. Level 0 turns the light off. The brightness
-  application displays and changes the logical level; physical keypad control
-  is unqualified. During five-second idle sleep with a read-only microSD
-  system root, the display goes dark and the terminal returns after RTC wake.
-  Brightness calibration, keypad wake, exact color accuracy and other panel
-  variants are unqualified. See
-  [Display and lights](/fplinux/use/display-and-lights/) and
-  [Brightness](/fplinux/apps/brightness/).
-- **Camera**: the BF20A6 captures native 640×480 NV16 in RAM and microSD
-  profiles. Pixels are returned unrotated. Continuous capture works in RAM;
-  stopping the stream works in both profiles. Absolute color accuracy,
-  exposure and other sensor controls are unqualified. There is no
-  separate camera preview or photo application. See
-  [Camera capture](/fplinux/use/camera/).
-- **Headphones**: an inserted 3.5 mm plug is detected. Stereo playback works
-  with the tested three-contact headphones in the microSD profile. The tested
-  four-contact headset plays each channel through both earpieces. Headset
-  recording, other accessories, plug insertion/removal and automatic output
-  switching are unqualified. See
-  [Audio](/fplinux/use/audio/).
-- **Speaker and microphones**: the built-in speaker plays audible tones in
-  the microSD profile. Speech and music quality are unqualified.
-  The built-in microphone captures external
-  tones as mono 48 kHz audio in RAM, and external tones and synthesized speech
-  with a microSD system card. Speech quality and wired-headset recording are
-  unqualified.
-- **Bluetooth**: controller initialization, discovery, Classic pairing and
-  bidirectional OPP with a Linux PC work in the RAM profile. With a microSD
-  system card, Classic pairing, PAN Internet and short 48 kHz stereo SBC
-  playback to a Linux PC work, including a repeated A2DP connection.
-  LE keyboard, pointer movement and button events from a software peer on a
-  Linux PC reach Linux in this profile; application input is unqualified.
-  Physical Bluetooth peripherals, long playback, operation after sleep and
-  range are unqualified. See
-  [Bluetooth](/fplinux/use/bluetooth/).
-- **Wi-Fi**: no supported FPLinux path has been established. This does not
-  establish whether Wi-Fi hardware is present.
-- **FM**: band scan and timed headphone playback work in the RAM profile.
-  Recognizable station reception and speaker output are unqualified.
-- **Keypad light**: illumination is present. Its supply can be switched in
-  software; physical on/off transitions are unqualified.
-- **Vibration**: the motor responds to bounded force-feedback pulses. Haptic
-  strength and operation with a battery are unqualified. Torch use is
-  unqualified.
-- **Image tools**: hardware JPEG encoding and decoding at 640×480, scaling
-  to 320×240 and NV16 quarter-turn rotation work in the microSD profile.
-  Rotation output matches the CPU reference. On-phone presentation is
-  unqualified. See [JPEG and scaling](/fplinux/apps/image-tools/jpeg/) and
-  [Image rotation](/fplinux/apps/image-tools/rotate/).
-- **TyrQuake**: demo playback uses the native 320×240 landscape display with
-  a microSD system card. Physical game controls and full gameplay are
-  unqualified. There is no game sound. See [TyrQuake](/fplinux/apps/tyrquake/).
-- **CPU controls**: clock reporting and manual selection between 768 MHz
-  and 1 GHz work in the microSD profile. Clock estimates are lower bounds;
-  voltage and sustained-load behavior are unqualified. See
-  [CPU and temperature](/fplinux/use/cpu-and-temperature/).
+Use [Display and lights](/fplinux/use/display-and-lights/) for brightness,
+keypad illumination and vibration, within the checklist conditions. Torch use
+is unqualified.
 
 Feature support does not establish release readiness. See
 [Standalone archives](/fplinux/guides/standalone-archive/).

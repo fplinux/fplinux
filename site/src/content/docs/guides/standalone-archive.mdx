@@ -44,7 +44,7 @@ and use your phone's own maps. The internal storage is never erased or written.
 
 Python and OpenSSH are bundled; no separate installation is needed. On Linux,
 the launcher asks for administrator access once if the included USB access
-rules need to be installed. On Windows, it can ask to install the included USB
+rules need to be installed; this step requires `sudo`. On Windows, it can ask to install the included USB
 driver: read the displayed license, select its acceptance checkbox and approve
 the administrator prompt. Run the launcher as your regular user.
 
@@ -129,7 +129,8 @@ of the build that produced it. It does not perform autonomous first-run
 preparation. You need Linux x86-64, Python 3.14, GNU `stdbuf` from coreutils,
 `ip` from iproute2, and `ssh`, `ssh-keygen`, `ssh-keyscan` and `sftp` from
 OpenSSH. A network manager must automatically run IPv4 DHCP on the phone's
-USB network interface.
+USB network interface. `XDG_RUNTIME_DIR` must name an existing absolute
+directory owned by your user; a normal Linux login session provides it.
 
 ### Prepare the PC
 

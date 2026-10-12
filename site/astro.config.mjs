@@ -60,15 +60,7 @@ export default defineConfig({
 					label: "Features",
 				},
 				{
-					items: pages(
-						"phones",
-						"phones/nokia-3210-4g",
-						"phones/inoi-240-modern-4g",
-						"phones/inoi-244-modern-4g",
-						"phones/maxvi-k15n-4g",
-						"phones/bq-2830l-tank-connect-max",
-						"phones/uniwa-v1000-4g"
-					),
+					items: [{ autogenerate: { directory: "phones" } }],
 					label: "Phones",
 				},
 				{

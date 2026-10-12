@@ -1,0 +1,31 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+#include "fplinux-nokia-110-4g-audio-policy.dtsi"
+
+&audio {
+	firmware-name = "fplinux/nokia110-audio-profile.bin";
+	hp-det-gpios = <&sc2720_eic 12 GPIO_ACTIVE_HIGH>;
+	pinctrl-0 = <&audio_mux_pins &audio_pad_pins>;
+	pinctrl-names = "audio";
+	fplinux,card-longname = "Nokia 110 4G audio";
+	fplinux,microphone-capture;
+
+	status = "okay";
+};
+
+&audio_mux {
+	audio_mux_pins: audio-pins {
+		pinctrl-single,pins = <
+			0x00 0 0x08 0 0x0c 0 0x14 0 0x18 0 0x1c 0
+		>;
+	};
+};
+
+&audio_pads {
+	audio_pad_pins: audio-pins {
+		pinctrl-single,pins = <
+			0x00 0x0008e001 0x08 0x0008e001 0x0c 0x0008e001
+			0x14 0x0008e000 0x18 0x0008e000 0x1c 0x0008e001
+		>;
+	};
+};

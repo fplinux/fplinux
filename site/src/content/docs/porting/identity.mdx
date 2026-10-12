@@ -33,10 +33,12 @@ compatible = "nokia,ta-1618"
 - `compatible` is the target's exact board-compatible string. It identifies the
   hardware and does not describe FPLinux or the RAM-boot method.
 
-Human identity fields use trimmed printable ASCII with single spaces. Hardware
-codes and aliases use uppercase letters, digits, dots, underscores and
-hyphens; compatible strings use the lowercase `vendor,device` form. Arrays keep
-their declared order and do not allow duplicates.
+Human identity fields start with a letter or digit and contain ASCII letters,
+digits, single spaces and the punctuation `.`, `&`, `(`, `)`, `+`, `/`, `'` and
+`-`. They have no leading or trailing spaces. Hardware codes and aliases start
+with an uppercase letter or digit and contain uppercase letters, digits, dots,
+underscores and hyphens. Compatible strings use the lowercase `vendor,device`
+form. Arrays keep their declared order and do not allow duplicates.
 
 The public display name is `brand + " " + product`. When `hardware_codes` is not
 empty, the codes follow in parentheses, separated by a comma and a space. The
@@ -70,8 +72,8 @@ compatible = "sprd,ums9117"
 - The `platforms/<platform>` directory name is the lowercase platform name;
   targets select it with their top-level `platform` field.
 - `vendor` and `soc` form the public platform name, here `Unisoc UMS9117`.
-- `aliases` records vendor or reference names. An alias is not a second product
-  name and is used only where provenance or an external interface requires it.
+- `aliases` records alternate SoC names. An alias does not change the platform
+  name used by targets or the public product name.
 - `compatible` is the platform fallback compatible.
 
 The `sprd` namespace stays wherever it is already the Linux and Devicetree ABI;
@@ -88,6 +90,10 @@ The build derives these values from the manifest identity:
 - the Devicetree root `model` and `compatible` properties and the exact
   root-node binding;
 - the target names that the host tools show to users.
+
+Phone pages and archive instructions use the same identity fields. Their
+display size and boot instructions come from the target's panel and adapter
+declarations.
 
 A target DTS includes `fplinux-<target>-identity.dtsi` and must not repeat its
 root `model` or `compatible`. The generated `compatible` list puts the exact

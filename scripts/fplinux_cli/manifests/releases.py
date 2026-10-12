@@ -14,8 +14,8 @@ from fplinux_cli.manifests.paths import target_release_manifest_path
 from fplinux_cli.manifests.values import exact_table, path_array, relative_value, sha256_value
 
 
-def load_release(target: str, *, profile_packages: Sequence[str] = ()) -> dict[str, Any]:
-    """Load release contents, omitting optional APKs preinstalled by the profile."""
+def load_release(target: str, *, bundle_packages: Sequence[str] = ()) -> dict[str, Any]:
+    """Load target release contents and the resolved optional APK set."""
     path = target_release_manifest_path(target)
     if path.is_symlink() or not path.is_file():
         fail(f"target release manifest is missing or invalid: {path}")
@@ -28,17 +28,19 @@ def load_release(target: str, *, profile_packages: Sequence[str] = ()) -> dict[s
     image = relative_value(manifest.get("image"), "release manifest image")
     bundle_files = path_array(manifest.get("bundle_files"), "release bundle_files")
     runtime_files = path_array(manifest.get("runtime_files"), "release runtime_files")
-    documents = path_array(manifest.get("documents"), "release documents")
+    documents = path_array(manifest.get("documents"), "release documents", allow_empty=True)
     if image not in runtime_files:
         fail("release manifest image must be a runtime file")
     if not set(runtime_files).issubset(bundle_files):
         fail("release runtime files must be bundle files")
-    preinstalled_apks = {f"apks/{package}.apk" for package in profile_packages}
-    bundle_files = [
-        relative
-        for relative in bundle_files
-        if relative not in preinstalled_apks or relative in runtime_files
-    ]
+    if any(relative.startswith("apks/") for relative in bundle_files):
+        fail("release APK files must come from the resolved bundle package set")
+    apk_files = path_array(
+        [f"apks/{package}.apk" for package in bundle_packages],
+        "release bundle APK files",
+        allow_empty=True,
+    )
+    bundle_files = [*bundle_files, *apk_files]
     return {
         "image": image,
         "bundle_files": bundle_files,
