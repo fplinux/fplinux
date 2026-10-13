@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
-from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -59,10 +58,8 @@ class LoaderHandoff:
 @pytest.fixture
 def loader_handoff() -> Iterator[LoaderHandoff]:
     """Keep every invocation's bundle and session tree private until teardown."""
-    with ExitStack() as cleanup:
-        temporary = tempfile.TemporaryDirectory()
-        cleanup.enter_context(temporary)
-        yield LoaderHandoff(Path(temporary.name))
+    with tempfile.TemporaryDirectory() as directory:
+        yield LoaderHandoff(Path(directory))
 
 
 class LoaderHandoffProcessTests:

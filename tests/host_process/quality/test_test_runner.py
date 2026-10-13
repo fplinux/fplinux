@@ -208,6 +208,54 @@ class TestSelectionProcessTests:
         assert result.returncode == 0, result.stderr
         assert selection_context.executed() == [name]
 
+    def test_unknown_marker_fails_before_executing_the_case(
+        self, selection_context: SelectionContext
+    ) -> None:
+        """A misspelled marker must not silently run as an unmarked test."""
+        shutil.copyfile(
+            ROOT / "tests/fixtures/processes/pytest_typo_marker.py",
+            selection_context.root / "tests/small/test_marker.py",
+        )
+
+        result = selection_context.run("tests.small.test_marker")
+
+        assert result.returncode == 1
+        assert "'fplinux_typo_marker' not found in `markers`" in result.stdout + result.stderr
+        assert selection_context.executed() == []
+
+    def test_unknown_configuration_fails_before_executing_the_case(
+        self, selection_context: SelectionContext
+    ) -> None:
+        """Configuration typos fail rather than leaving the intended setting inactive."""
+        configuration = selection_context.root / "pyproject.toml"
+        contents = configuration.read_text()
+        header = "[tool.pytest.ini_options]"
+        assert contents.count(header) == 1
+        configuration.write_text(contents.replace(header, header + "\nfplinux_typo_option = true"))
+
+        result = selection_context.run("tests.small.test_selection.PassingCase.test_first")
+
+        assert result.returncode == 1
+        assert "Unknown config option: fplinux_typo_option" in result.stdout + result.stderr
+        assert selection_context.executed() == []
+
+    def test_skip_reason_and_duration_summary_are_reported(
+        self, selection_context: SelectionContext
+    ) -> None:
+        """Quiet runs retain skip reasons and timings in their owned pytest log."""
+        shutil.copyfile(
+            ROOT / "tests/fixtures/processes/pytest_diagnostic_cases.py",
+            selection_context.root / "tests/small/test_diagnostics.py",
+        )
+
+        result = selection_context.run("tests.small.test_diagnostics")
+
+        assert result.returncode == 0, result.stderr
+        report = (selection_context.logs / "tests/01-selected.log").read_text()
+        assert "SKIPPED" in report
+        assert "controlled skip explanation" in report
+        assert "slowest 20 durations" in report
+
     @pytest.mark.parametrize("tier_selection", [False, True])
     def test_module_and_tier_discovery_propagate_failures(
         self, selection_context: SelectionContext, *, tier_selection: bool

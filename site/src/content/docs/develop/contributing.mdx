@@ -58,6 +58,8 @@ Tests run against a captured source snapshot. Most run with read-only sources an
 
 A selected run always executes and does not refresh a successful `check` result or replace `./fplinux check`. Exit status is `0` for success, `1` for failures or unresolved names, `2` for invalid arguments and `5` when pytest finds no tests. Ctrl+C returns `130`.
 
+Pytest rejects unknown markers and configuration options. Each run reports skipped and expected-failure cases and the 20 slowest setup, call or teardown durations. Use those measurements before changing fixture lifetimes to optimize test time.
+
 ## Update Alpine package checksums
 
 After you change a source file of an Alpine package under `alpine/aports/`, regenerate its checksums:

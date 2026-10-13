@@ -23,16 +23,15 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tests import ROOT
-from tests.small.device_data import test_portable
+from tests.fixtures.portable_archive import (
+    portable_archive as portable_archive,  # noqa: PLC0414 -- pytest fixture export.
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-    from tests.small.device_data.test_portable import PortableArchive
-
-
-saved_dump_archive = test_portable.portable_archive
+    from tests.fixtures.portable_archive import PortableArchive
 
 
 @dataclass(frozen=True)
@@ -83,9 +82,9 @@ def _wait_for_file(path: Path, process: subprocess.Popen[str]) -> None:
 
 
 @pytest.fixture
-def autonomous_archive(saved_dump_archive: PortableArchive) -> AutonomousArchive:
+def autonomous_archive(portable_archive: PortableArchive) -> AutonomousArchive:
     """Combine real portable extraction with canonical admission and a fake phone."""
-    archive = saved_dump_archive
+    archive = portable_archive
     root = archive.root
     runner = root / "runner/run.py"
     with runner.open("a", encoding="utf-8") as stream:
@@ -104,7 +103,7 @@ def autonomous_archive(saved_dump_archive: PortableArchive) -> AutonomousArchive
 def _capsule_files(capsule: Path, destination: Path) -> dict[str, bytes]:
     executable = shutil.which("cpio")
     if executable is None:
-        pytest.skip("GNU cpio is required for capsule artifact inspection")
+        pytest.fail("GNU cpio is required for capsule artifact inspection")
     destination.mkdir()
     extracted = subprocess.run(
         [executable, "--extract", "--make-directories", "--no-preserve-owner"],

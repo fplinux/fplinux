@@ -283,7 +283,7 @@ class StageProcessTests:
             ):
                 stage.run(
                     [sys.executable, str(_PROCESS_FIXTURES / "timeout_tree.py"), str(directory)],
-                    timeout=0.5,
+                    timeout=_STAGE_TIMEOUT,
                 )
 
             child_pid = int(child_pid_path.read_text())
@@ -292,7 +292,7 @@ class StageProcessTests:
             _wait_until_not_running(child_pid, deadline)
             _wait_until_not_running(descendant_pid, deadline)
             log = (root / "01-bounded-child.log").read_text()
-            assert ("fplinux: command timed out after 0.5s") in (log)
+            assert ("fplinux: command timed out after 5s") in (log)
             assert ("FAILED") in (terminal.getvalue())
             metadata = json.loads(reporter.metadata_path.read_text())
             assert (metadata["status"]) == ("failed")
