@@ -7,27 +7,19 @@ import PhoneChecklist from "../../../components/PhoneChecklist.astro";
 
 <PhoneIdentity />
 
-The tested handset is the dual-SIM model sold as SKU `1GF018MPE1C01`.
-Other Nokia 110 4G generations and hardware variants are unqualified.
+The tested handset is the dual-SIM model sold as SKU `1GF018MPE1C01`. Other Nokia 110 4G generations and hardware variants are unqualified.
 
 ## Support checklist
 
-Each status applies to this handset and the conditions in its note. See
-[Support status](/fplinux/phones/#support-status) for the meaning of the labels
-and [common limitations](/fplinux/phones/#limitations-on-every-phone).
+Each status applies to this handset and the conditions in its note. See [Support status](/fplinux/phones/#support-status) for the meaning of the labels and [common limitations](/fplinux/phones/#limitations-on-every-phone).
 
 <PhoneChecklist />
 
 ## Before you start
 
-Prepare [device data](/fplinux/guides/device-data/) from this same handset for
-its board maps, Bluetooth, FM radio and fitted audio. Do not use another
-phone's backup or prepared data.
+Prepare [device data](/fplinux/guides/device-data/) from this same handset for its board maps, Bluetooth, FM radio and fitted audio. Do not use another phone's backup or prepared data.
 
-Use the authenticated USB shell described in
-[Connect from a computer](/fplinux/use/connect/) for command input. The local
-terminal is visible; physical keypad use, orientation and color accuracy are
-unqualified.
+Use the authenticated USB shell described in [Connect from a computer](/fplinux/use/connect/) for command input. The local terminal is visible; physical keypad use, orientation and color accuracy are unqualified.
 
 ## Boot key
 
@@ -35,23 +27,12 @@ unqualified.
 
 ## Storage
 
-Insert a microSD card before boot and leave it installed throughout the
-powered session; hot-swap is not supported. FAT32 and ext4 data-card reads and
-writes work in RAM sessions. The microSD system-card profile loads the kernel
-and an ext4 system root through the USB bootstrap. System-card file changes
-persist across power cycles.
-RAM files disappear when power is removed.
+Insert a microSD card before boot and leave it installed throughout the powered session; hot-swap is not supported. FAT32 and ext4 data-card reads and writes work in RAM sessions. The microSD system-card profile loads the kernel and an ext4 system root through the USB bootstrap. System-card file changes persist across power cycles. RAM files disappear when power is removed.
 
 ## Power and recovery
 
-Under USB power with a read-only microSD system root, an RTC alarm can resume
-`s2idle`. Deep suspend, battery operation, other wake sources and the physical
-power-key action are unqualified.
+Under USB power with a read-only microSD system root, an RTC alarm can resume `s2idle`. Deep suspend, battery operation, other wake sources and the physical power-key action are unqualified.
 
-Before disconnecting USB or removing the battery,
-[release data cards](/fplinux/use/power/#release-data-cards). If the phone
-stays powered, remove and reinsert its battery before booting normally.
-Follow [Run FPLinux](/fplinux/start/run/) to start a new session.
+Before disconnecting USB or removing the battery, [release data cards](/fplinux/use/power/#release-data-cards). If the phone stays powered, remove and reinsert its battery before booting normally. Follow [Run FPLinux](/fplinux/start/run/) to start a new session.
 
-Feature support does not establish release readiness. See
-[Standalone archives](/fplinux/guides/standalone-archive/).
+Feature support does not establish release readiness. See [Standalone archives](/fplinux/guides/standalone-archive/).

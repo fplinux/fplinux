@@ -5,48 +5,27 @@ description: Run FPLinux from a packaged archive without a source checkout.
 
 import { Steps } from '@astrojs/starlight/components';
 
-A standalone archive runs FPLinux on one phone without a source checkout or
-build tools. Use an archive for your exact phone and PC operating system.
-Its `README.txt` names the phone, its boot key and startup commands. Check the
-phone's [support status](/fplinux/phones/#support-status) and
-[phone page](/fplinux/phones/) for feature, storage and power limits.
+A standalone archive runs FPLinux on one phone without a source checkout or build tools. Use an archive for your exact phone and PC operating system. Its `README.txt` names the phone, its boot key and startup commands. Check the phone's [support status](/fplinux/phones/#support-status) and [phone page](/fplinux/phones/) for feature, storage and power limits.
 
-Autonomous archives include a short `README.txt`. Ordinary Linux runner
-archives also include `docs/index.html` for reading the site offline.
+Autonomous archives include a short `README.txt`. Ordinary Linux runner archives also include `docs/index.html` for reading the site offline.
 
 :::note[No release archive is published yet]
-There are no published FPLinux release archives. You can package a phone-test
-candidate from your own build; see [Packaging](/fplinux/develop/packaging/).
-An archive with `CANDIDATE-NOTICE.txt` is such a candidate. It is for phone
-testing and must not be published as a release. Packaging it does not establish
-that it works on the phone. Autonomous first-run preparation and subsequent
-loading have not been qualified on phone hardware. The Windows host workflow
-has not been qualified on native Windows.
+
+There are no published FPLinux release archives. You can package a phone-test candidate from your own build; see [Packaging](/fplinux/develop/packaging/). An archive with `CANDIDATE-NOTICE.txt` is such a candidate. It is for phone testing and must not be published as a release. Packaging it does not establish that it works on the phone. Autonomous first-run preparation and subsequent loading have not been qualified on phone hardware. The Windows host workflow has not been qualified on native Windows.
+
 :::
 
 ## Autonomous RAM archive
 
-An autonomous archive contains the RAM image, Python, OpenSSH, the extraction
-tools, checksums and license notices. It contains no optional APKs or prepared
-phone data. The first run saves a read-only backup of your phone's internal
-storage and prepares its firmware, audio profile, pin map and keymap. Later
-runs load the prepared firmware and audio data separately from the RAM kernel
-and use your phone's own maps. The internal storage is never erased or written.
+An autonomous archive contains the RAM image, Python, OpenSSH, the extraction tools, checksums and license notices. It contains no optional APKs or prepared phone data. The first run saves a read-only backup of your phone's internal storage and prepares its firmware, audio profile, pin map and keymap. Later runs load the prepared firmware and audio data separately from the RAM kernel and use your phone's own maps. The internal storage is never erased or written.
 
 ### What you need
 
-- A Linux x86-64 PC with coreutils, iproute2, udev and a network manager that
-  automatically runs IPv4 DHCP on a new USB network interface, such as
-  NetworkManager; or a Windows 10 or 11 x64 PC with Windows PowerShell.
+- A Linux x86-64 PC with coreutils, iproute2, udev and a network manager that automatically runs IPv4 DHCP on a new USB network interface, such as NetworkManager; or a Windows 10 or 11 x64 PC with Windows PowerShell.
 - A USB data cable that fits your phone.
-- Enough free space for the full internal-storage backup in the extracted
-  archive directory.
+- Enough free space for the full internal-storage backup in the extracted archive directory.
 
-Python and OpenSSH are bundled; no separate installation is needed. On Linux,
-the launcher asks for administrator access once if the included USB access
-rules need to be installed; this step requires `sudo`. On Windows, it can ask to install the included USB
-driver: read the displayed license, select its acceptance checkbox and approve
-the administrator prompt. Run the launcher as your regular user.
+Python and OpenSSH are bundled; no separate installation is needed. On Linux, the launcher asks for administrator access once if the included USB access rules need to be installed; this step requires `sudo`. On Windows, it can ask to install the included USB driver: read the displayed license, select its acceptance checkbox and approve the administrator prompt. Run the launcher as your regular user.
 
 ### First run: prepare your phone
 
@@ -62,52 +41,27 @@ the administrator prompt. Run the launcher as your regular user.
 
    On Windows, double-click `Run.cmd`.
 
-3. Wait until the launcher displays the connection instructions. Only then
-   hold the boot key named in `README.txt` and connect the powered-off phone,
-   keeping the key pressed.
+3. Wait until the launcher displays the connection instructions. Only then hold the boot key named in `README.txt` and connect the powered-off phone, keeping the key pressed.
 
-4. Keep USB connected while the launcher saves the complete backup and prepares
-   the data. Wait until it reports that your phone data is ready.
+4. Keep USB connected while the launcher saves the complete backup and prepares the data. Wait until it reports that your phone data is ready.
 
-5. Disconnect USB. If the phone stays on, briefly remove and reinsert its
-   battery. The preparation session does not start a second load automatically.
+5. Disconnect USB. If the phone stays on, briefly remove and reinsert its battery. The preparation session does not start a second load automatically.
 
 </Steps>
 
-The backup is `data/nand.bin`; prepared data is in `data/phone/`. Later runs
-keep their private connection keys in `data/session/`. Keep the extracted directory for
-subsequent runs and treat its contents as
-[private phone data](/fplinux/guides/device-data/).
-Use it only with the same physical phone, even if another phone has the same
-model name. Each launch writes a new file in `logs/` and prints its exact path.
-The log includes launcher and USB loader diagnostics, but does not record your
-interactive SSH commands or terminal output. If preparation fails after the
-backup was saved, the next run reuses that backup.
+The backup is `data/nand.bin`; prepared data is in `data/phone/`. Later runs keep their private connection keys in `data/session/`. Keep the extracted directory for subsequent runs and treat its contents as [private phone data](/fplinux/guides/device-data/). Use it only with the same physical phone, even if another phone has the same model name. Each launch writes a new file in `logs/` and prints its exact path. The log includes launcher and USB loader diagnostics, but does not record your interactive SSH commands or terminal output. If preparation fails after the backup was saved, the next run reuses that backup.
 
 ### Subsequent runs
 
-Use the same `sh Run.sh` on Linux or `Run.cmd` on Windows for every later
-launch. If your phone is still running FPLinux and connected, the launcher
-verifies its saved connection and opens SSH again. If that phone is absent,
-keep it powered off and disconnected until the launcher displays the connection
-instructions. Then connect it with its boot key held. The launcher loads
-FPLinux with your prepared data and opens an SSH shell.
+Use the same `sh Run.sh` on Linux or `Run.cmd` on Windows for every later launch. If your phone is still running FPLinux and connected, the launcher verifies its saved connection and opens SSH again. If that phone is absent, keep it powered off and disconnected until the launcher displays the connection instructions. Then connect it with its boot key held. The launcher loads FPLinux with your prepared data and opens an SSH shell.
 
-Type `exit` or press Ctrl+D to close the shell; Linux keeps running on the
-phone. Open the same launcher to connect again. Only one launcher can run from
-the same extracted directory at a time; close its active launch before opening
-another. A connection that is present but cannot be verified stops with an
-error instead of starting another load. Ctrl+C cancels loading or waiting,
-but does not power the phone off.
+Type `exit` or press Ctrl+D to close the shell; Linux keeps running on the phone. Open the same launcher to connect again. Only one launcher can run from the same extracted directory at a time; close its active launch before opening another. A connection that is present but cannot be verified stops with an error instead of starting another load. Ctrl+C cancels loading or waiting, but does not power the phone off.
 
-The matching `*-sources.zip` contains source and build material separately
-from the runnable archive. Keep it available alongside the runnable ZIP;
-component licenses remain in the runnable archive.
+The matching `*-sources.zip` contains source and build material separately from the runnable archive. Keep it available alongside the runnable ZIP; component licenses remain in the runnable archive.
 
 ### Prepare from an existing backup
 
-You can prepare from a complete physical NAND backup of the same phone without
-connecting it. On Linux:
+You can prepare from a complete physical NAND backup of the same phone without connecting it. On Linux:
 
 ```sh title="PC"
 sh Run.sh --from-dump /path/to/nand.bin
@@ -119,25 +73,17 @@ On Windows, open a terminal in the extracted directory:
 Run.cmd --from-dump "C:\path\to\nand.bin"
 ```
 
-This preserves the input backup and finishes after preparing `data/phone/`.
-It refuses to replace phone data that is already prepared in this directory.
+This preserves the input backup and finishes after preparing `data/phone/`. It refuses to replace phone data that is already prepared in this directory.
 
 ## Linux runner archive
 
-An ordinary archive uses `runner/run.py` and includes the prepared device data
-of the build that produced it. It does not perform autonomous first-run
-preparation. You need Linux x86-64, Python 3.14, GNU `stdbuf` from coreutils,
-`ip` from iproute2, and `ssh`, `ssh-keygen`, `ssh-keyscan` and `sftp` from
-OpenSSH. A network manager must automatically run IPv4 DHCP on the phone's
-USB network interface. `XDG_RUNTIME_DIR` must name an existing absolute
-directory owned by your user; a normal Linux login session provides it.
+An ordinary archive uses `runner/run.py` and includes the prepared device data of the build that produced it. It does not perform autonomous first-run preparation. You need Linux x86-64, Python 3.14, GNU `stdbuf` from coreutils, `ip` from iproute2, and `ssh`, `ssh-keygen`, `ssh-keyscan` and `sftp` from OpenSSH. A network manager must automatically run IPv4 DHCP on the phone's USB network interface. `XDG_RUNTIME_DIR` must name an existing absolute directory owned by your user; a normal Linux login session provides it.
 
 ### Prepare the PC
 
 <Steps>
 
-1. Extract the whole archive, enter its top-level directory and check every
-   file:
+1. Extract the whole archive, enter its top-level directory and check every file:
 
    ```sh title="PC"
    cd <extracted-top-level-directory>
@@ -151,18 +97,13 @@ directory owned by your user; a normal Linux login session provides it.
    sudo udevadm control --reload-rules
    ```
 
-   Disconnect the phone if it is attached. On a headless PC, edit your
-   installed copy to use a local group with `MODE="0660"` instead of
-   `TAG+="uaccess"`. Never make the USB devices world-writable.
+   Disconnect the phone if it is attached. On a headless PC, edit your installed copy to use a local group with `MODE="0660"` instead of `TAG+="uaccess"`. Never make the USB devices world-writable.
 
 </Steps>
 
-`SHA256SUMS` checks that the extracted files are complete and unchanged. It
-does not show that the archive is authentic or that the phone works.
+`SHA256SUMS` checks that the extracted files are complete and unchanged. It does not show that the archive is authentic or that the phone works.
 
-If the archive contains `FPLINUX.img.xz`, it boots from a microSD system card.
-Prepare the card first; see
-[microSD system card](/fplinux/guides/microsd-system-card/).
+If the archive contains `FPLINUX.img.xz`, it boots from a microSD system card. Prepare the card first; see [microSD system card](/fplinux/guides/microsd-system-card/).
 
 ### Start a session
 
@@ -180,8 +121,7 @@ Run the runner as your regular user, not as root.
 
 3. Wait until it asks for the phone.
 
-4. Only then hold the boot key named in `README.txt` and connect the
-   powered-off phone, keeping the key pressed.
+4. Only then hold the boot key named in `README.txt` and connect the powered-off phone, keeping the key pressed.
 
 5. When the session is ready, the runner opens a shell on the phone.
 
@@ -189,8 +129,7 @@ Run the runner as your regular user, not as root.
 
 ### Use the running phone
 
-Exiting the shell does not stop Linux. Reconnect, run one command or copy
-files with `--reconnect`:
+Exiting the shell does not stop Linux. Reconnect, run one command or copy files with `--reconnect`:
 
 ```sh title="PC"
 ./runner/run.py --reconnect
@@ -199,18 +138,12 @@ files with `--reconnect`:
 ./runner/run.py --reconnect --pull /tmp/photo.jpg ./photo.jpg
 ```
 
-To add applications, see [Optional packages](/fplinux/guides/packages/). The
-feature pages describe how to use supported features from an archive.
+To add applications, see [Optional packages](/fplinux/guides/packages/). The feature pages describe how to use supported features from an archive.
 
-For machine-readable progress during a fresh runner load, add `--events PATH`;
-see [loader events](/fplinux/start/run/#for-automation-loader-events).
+For machine-readable progress during a fresh runner load, add `--events PATH`; see [loader events](/fplinux/start/run/#for-automation-loader-events).
 
 ## Connection order and shutdown
 
-For a fresh RAM load, connect the phone only when the launcher or runner asks.
-If you connected it too early, disconnect it, power it off and start again.
-To reopen SSH to the same running phone, leave it connected.
+For a fresh RAM load, connect the phone only when the launcher or runner asks. If you connected it too early, disconnect it, power it off and start again. To reopen SSH to the same running phone, leave it connected.
 
-Exiting a launcher or shell leaves Linux running. To end the session without
-losing data, follow [Power](/fplinux/use/power/). Without a battery,
-disconnecting USB cuts power immediately.
+Exiting a launcher or shell leaves Linux running. To end the session without losing data, follow [Power](/fplinux/use/power/). Without a battery, disconnecting USB cuts power immediately.

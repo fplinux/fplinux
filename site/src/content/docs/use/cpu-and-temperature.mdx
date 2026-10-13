@@ -11,12 +11,7 @@ import FeatureStatus from '../../../components/FeatureStatus.astro';
 
 <FeatureStatus feature="manual-cpu-frequency-selection" />
 
-The processor runs at 1 GHz by default and stays there. Where manual switching
-is supported, you can select 768 MHz. These are the only two speeds; there is
-no automatic speed scaling and no voltage reduction. Check your
-[phone's support status](/fplinux/phones/#support-status) before switching;
-the presence of both settings does not establish that switching works on the
-phone.
+The processor runs at 1 GHz by default and stays there. Where manual switching is supported, you can select 768 MHz. These are the only two speeds; there is no automatic speed scaling and no voltage reduction. Check your [phone's support status](/fplinux/phones/#support-status) before switching; the presence of both settings does not establish that switching works on the phone.
 
 Switch to 768 MHz, check the result, then return to the default:
 
@@ -29,19 +24,15 @@ echo 1000000 > scaling_setspeed
 echo performance > scaling_governor
 ```
 
-Values are in kHz. `scaling_cur_freq` reports the speed the processor is
-currently running at.
+Values are in kHz. `scaling_cur_freq` reports the speed the processor is currently running at.
 
-`fplinux-cpuclock` runs a short timing loop and prints a lower-bound estimate
-of the actual clock speed. It is a diagnostic aid, not a benchmark; run
-`fplinux-cpuclock --help` for its options.
+`fplinux-cpuclock` runs a short timing loop and prints a lower-bound estimate of the actual clock speed. It is a diagnostic aid, not a benchmark; run `fplinux-cpuclock --help` for its options.
 
 ## Temperature
 
 <FeatureStatus feature="soc-temperature" />
 
-Use this interface only when temperature reporting is available on your
-[phone](/fplinux/phones/).
+Use this interface only when temperature reporting is available on your [phone](/fplinux/phones/).
 
 Read the processor chip's temperature in thousandths of a degree Celsius:
 
@@ -51,6 +42,4 @@ for zone in /sys/class/thermal/thermal_zone*; do
 done
 ```
 
-A value of `41500` means 41.5 °C. The reading has not been checked against a
-thermometer. FPLinux only reports the temperature: it does not slow the
-processor down or take any other action when the chip gets hot.
+A value of `41500` means 41.5 °C. The reading has not been checked against a thermometer. FPLinux only reports the temperature: it does not slow the processor down or take any other action when the chip gets hot.

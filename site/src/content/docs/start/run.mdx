@@ -8,52 +8,35 @@ import Figure from '../../../components/Figure.astro';
 import RunFlow from '../../../assets/diagrams/run-flow.svg';
 import Key from '../../../components/Key.astro';
 
-`./fplinux run` loads your build into the phone's RAM over a USB cable, waits
-for Linux to start and opens a shell on the phone over a private USB network
-link.
+`./fplinux run` loads your build into the phone's RAM over a USB cable, waits for Linux to start and opens a shell on the phone over a private USB network link.
 
-For a packaged archive, including first-run device-data preparation on Linux
-or Windows, follow [Standalone archive](/fplinux/guides/standalone-archive/).
-The instructions below use a source checkout on Linux.
+For a packaged archive, including first-run device-data preparation on Linux or Windows, follow [Standalone archive](/fplinux/guides/standalone-archive/). The instructions below use a source checkout on Linux.
 
 <Figure caption="From PC to phone shell"><RunFlow /></Figure>
 
 ## Before you start
 
 - A finished build for your phone; see [Build FPLinux](/fplinux/start/build/).
-- On the PC: GNU `stdbuf` from coreutils, `ip` from iproute2, and the OpenSSH
-  client tools `ssh`, `ssh-keygen`, `ssh-keyscan` and `sftp`.
-- `XDG_RUNTIME_DIR` set to an existing absolute directory owned by your user.
-  A normal Linux login session provides it.
-- A network manager that automatically runs IPv4 DHCP on a newly attached USB
-  network interface. NetworkManager does this.
+- On the PC: GNU `stdbuf` from coreutils, `ip` from iproute2, and the OpenSSH client tools `ssh`, `ssh-keygen`, `ssh-keyscan` and `sftp`.
+- `XDG_RUNTIME_DIR` set to an existing absolute directory owned by your user. A normal Linux login session provides it.
+- A network manager that automatically runs IPv4 DHCP on a newly attached USB network interface. NetworkManager does this.
 - A USB data cable that fits your phone.
-- Your phone's exact target and boot key, from its
-  [phone page](/fplinux/phones/). Check its
-  [support status](/fplinux/phones/#support-status) and power limits before
-  starting.
+- Your phone's exact target and boot key, from its [phone page](/fplinux/phones/). Check its [support status](/fplinux/phones/#support-status) and power limits before starting.
 
 ## Allow USB access
 
-Do this once per PC. Install the USB rules from the checkout, then reload
-them:
+Do this once per PC. Install the USB rules from the checkout, then reload them:
 
 ```sh title="PC"
 sudo install -m 0644 common/60-fplinux.rules /etc/udev/rules.d/60-fplinux.rules
 sudo udevadm control --reload-rules
 ```
 
-If the phone is connected, disconnect it so the new rules apply on the next
-connection.
+If the phone is connected, disconnect it so the new rules apply on the next connection.
 
-The rules let the user logged in at the desktop open the phone's two USB
-devices: the boot ROM device `1782:4d00` during loading and the FPLinux device
-`0525:a4a6` after Linux starts. Keep the `60-` prefix: the rules must stop the
-desktop's MTP probe before the system libmtp rule runs.
+The rules let the user logged in at the desktop open the phone's two USB devices: the boot ROM device `1782:4d00` during loading and the FPLinux device `0525:a4a6` after Linux starts. Keep the `60-` prefix: the rules must stop the desktop's MTP probe before the system libmtp rule runs.
 
-On a headless PC without a desktop login, edit your installed copy to use a
-local group with `MODE="0660"` instead of `TAG+="uaccess"`. Never make either
-device world-writable.
+On a headless PC without a desktop login, edit your installed copy to use a local group with `MODE="0660"` instead of `TAG+="uaccess"`. Never make either device world-writable.
 
 Run the loader as your regular user, not as root.
 
@@ -69,8 +52,7 @@ Run the loader as your regular user, not as root.
    ./fplinux run nokia-ta1618
    ```
 
-   This example uses `nokia-ta1618`; use your phone's exact target.
-   If you built with `--profile` or `--build-type`, add the same options here.
+   This example uses `nokia-ta1618`; use your phone's exact target. If you built with `--profile` or `--build-type`, add the same options here.
 
 3. Wait until the loader asks for the phone:
 
@@ -83,8 +65,7 @@ Run the loader as your regular user, not as root.
    Waiting up to 300 seconds for BootROM USB 1782:4d00...
    ```
 
-4. Only now hold your phone's boot key and connect the USB cable to the
-   powered-off phone, keeping the key pressed. The Nokia example uses <Key>\*</Key>.
+4. Only now hold your phone's boot key and connect the USB cable to the powered-off phone, keeping the key pressed. The Nokia example uses <Key>\*</Key>.
 
 5. Wait for the session. The loader reports its progress and finishes with:
 
@@ -95,26 +76,20 @@ Run the loader as your regular user, not as root.
 </Steps>
 
 :::caution[Connect the phone only when the loader asks]
-Do not connect the phone first and then decide which target to run. If you
-connected it too early, disconnect it, power it off and start again from
-step 1.
+
+Do not connect the phone first and then decide which target to run. If you connected it too early, disconnect it, power it off and start again from step 1.
+
 :::
 
 ## After the phone boots
 
-`run` sets the phone's clock from the PC and reports a warning if that fails.
-From an interactive terminal, it then opens a shell on the phone. Without a
-terminal, for example in a script, it returns as soon as the session is ready.
+`run` sets the phone's clock from the PC and reports a warning if that fails. From an interactive terminal, it then opens a shell on the phone. Without a terminal, for example in a script, it returns as soon as the session is ready.
 
-Exiting the shell does not stop Linux. The phone keeps running while it has
-power.
+Exiting the shell does not stop Linux. The phone keeps running while it has power.
 
 ## Reconnect
 
-Use `console` with the same target, profile and build type that started the
-session. [Connect from your PC](/fplinux/use/connect/) covers opening a shell,
-running one command, copying files and typing with the PC keyboard. Do not
-start a fresh load only to reopen the shell.
+Use `console` with the same target, profile and build type that started the session. [Connect from your PC](/fplinux/use/connect/) covers opening a shell, running one command, copying files and typing with the PC keyboard. Do not start a fresh load only to reopen the shell.
 
 ## Check which build is running
 
@@ -126,55 +101,37 @@ start a fresh load only to reopen the shell.
 verify: the phone runs the current release build (…)
 ```
 
-`verify` compares the system running on the phone with your current local
-build. It refuses when the phone runs a different image or profile. Installing
-or rebuilding optional packages does not require a new load. `verify` checks
-identity only; it does not test the phone's hardware.
+`verify` compares the system running on the phone with your current local build. It refuses when the phone runs a different image or profile. Installing or rebuilding optional packages does not require a new load. `verify` checks identity only; it does not test the phone's hardware.
 
 ## End the session
 
-To end the session without losing data on a microSD card, follow
-[Power](/fplinux/use/power/). Linux reboot is
-not supported; for the next session, start again from step 1 with the phone
-powered off.
+To end the session without losing data on a microSD card, follow [Power](/fplinux/use/power/). Linux reboot is not supported; for the next session, start again from step 1 with the phone powered off.
 
 ## Troubleshooting
 
 ### The loader keeps waiting for the phone
 
-The phone did not start in boot ROM mode. After 300 seconds the loader stops
-with `fplinux run: BootROM USB was not detected`. Power the phone off,
-disconnect USB, start the loader again and hold the selected phone's boot
-key before and while you connect USB.
+The phone did not start in boot ROM mode. After 300 seconds the loader stops with `fplinux run: BootROM USB was not detected`. Power the phone off, disconnect USB, start the loader again and hold the selected phone's boot key before and while you connect USB.
 
 ### USB is visible but access is denied
 
-Install the rules from [Allow USB access](#allow-usb-access), reload them,
-then disconnect and reconnect the phone. The boot ROM device and the running
-FPLinux device need separate rules; install the whole file.
+Install the rules from [Allow USB access](#allow-usb-access), reload them, then disconnect and reconnect the phone. The boot ROM device and the running FPLinux device need separate rules; install the whole file.
 
 ### A loader attempt fails
 
-After a failed attempt, the loader asks you to disconnect the phone, power it
-off and reconnect it in boot ROM mode. After the third failed attempt it stops
-with `fplinux run: RAM loader failed after 3 attempts`.
+After a failed attempt, the loader asks you to disconnect the phone, power it off and reconnect it in boot ROM mode. After the third failed attempt it stops with `fplinux run: RAM loader failed after 3 attempts`.
 
 ### The phone is already running FPLinux
 
-[Reconnect](#reconnect) with `console`. Start a fresh load only from a
-powered-off phone.
+[Reconnect](#reconnect) with `console`. Start a fresh load only from a powered-off phone.
 
 ### Linux starts but the shell does not connect
 
-Check that the network manager gave the new USB network interface an IPv4
-address, and that the OpenSSH tools listed in
-[Before you start](#before-you-start) are installed. Keep the complete loader
-output for a [bug report](/fplinux/develop/debugging/#report-a-problem).
+Check that the network manager gave the new USB network interface an IPv4 address, and that the OpenSSH tools listed in [Before you start](#before-you-start) are installed. Keep the complete loader output for a [bug report](/fplinux/develop/debugging/#report-a-problem).
 
 ### verify reports a different build
 
-Check that you passed the same profile and build type as the running session.
-If the image on the phone is outdated, rebuild it and start a fresh session.
+Check that you passed the same profile and build type as the running session. If the image on the phone is outdated, rebuild it and start a fresh session.
 
 ## For automation: loader events
 
@@ -184,17 +141,6 @@ If the image on the phone is outdated, rebuild it and start a fresh session.
 ./fplinux run nokia-ta1618 --events loader.jsonl
 ```
 
-The file is overwritten. Each line is one JSON object with `event`, `target`,
-`profile`, `build_type` and a UTC `time`. A successful load writes these
-events in order: `waiting-for-device`, `device-found`, `ram-loader-start`,
-`ram-loader-complete`, `linux-start`, `linux-transition`, `linux-usb`,
-`ssh-ready` and `complete`. A loader retry can repeat `device-found` and
-`ram-loader-start`. A `failure` event adds the last `stage`, a short
-`cause` and the `exit_status`. `complete` is written before the interactive
-shell opens. The events contain no SSH credentials. The loader-first sequence
-above still applies.
+The file is overwritten. Each line is one JSON object with `event`, `target`, `profile`, `build_type` and a UTC `time`. A successful load writes these events in order: `waiting-for-device`, `device-found`, `ram-loader-start`, `ram-loader-complete`, `linux-start`, `linux-transition`, `linux-usb`, `ssh-ready` and `complete`. A loader retry can repeat `device-found` and `ram-loader-start`. A `failure` event adds the last `stage`, a short `cause` and the `exit_status`. `complete` is written before the interactive shell opens. The events contain no SSH credentials. The loader-first sequence above still applies.
 
-`linux-usb` records the first observation of the exact device bound to this
-load; `ssh-ready` records session authentication. Live device-data preparation
-and fresh ordinary standalone runner loads accept the same option. It is incompatible with
-`--from-dump` and standalone `--reconnect`.
+`linux-usb` records the first observation of the exact device bound to this load; `ssh-ready` records session authentication. Live device-data preparation and fresh ordinary standalone runner loads accept the same option. It is incompatible with `--from-dump` and standalone `--reconnect`.

@@ -10,11 +10,7 @@ import brightness from '../../../assets/screens/brightness.png';
 import FeatureStatus from '../../../components/FeatureStatus.astro';
 import Key from '../../../components/Key.astro';
 
-Brightness control shows the LCD brightness level as a number from `0` to `10`
-and a ten-segment bar, and lets you change it with the keypad. The number is a
-setting, not a percentage or a light measurement.
-[Display and lights](/fplinux/use/display-and-lights/) explains the system
-brightness scale and how to change it from the command line.
+Brightness control shows the LCD brightness level as a number from `0` to `10` and a ten-segment bar, and lets you change it with the keypad. The number is a setting, not a percentage or a light measurement. [Display and lights](/fplinux/use/display-and-lights/) explains the system brightness scale and how to change it from the command line.
 
 <FeatureStatus feature="brightness-control" />
 
@@ -22,37 +18,26 @@ brightness scale and how to change it from the command line.
 
 ## Install and start
 
-Install `fplinux-brightness-ui.apk` as described in
-[Packages](/fplinux/guides/packages/). Its installed package name is
-`fplinux-brightness-ui`. Start the application in the local terminal or from the
-PC, as described in
-[Start an application](/fplinux/apps/):
+Install `fplinux-brightness-ui.apk` as described in [Packages](/fplinux/guides/packages/). Its installed package name is `fplinux-brightness-ui`. Start the application in the local terminal or from the PC, as described in [Start an application](/fplinux/apps/):
 
 ```sh title="Phone"
 fplinux-brightness-ui
 ```
 
-The interface uses the phone's native display size and adapts to portrait or
-landscape screens. Check [phone support status](/fplinux/phones/#support-status)
-for display and keypad limitations. The application needs the system brightness
-service, which runs by default.
+The interface uses the phone's native display size and adapts to portrait or landscape screens. Check [phone support status](/fplinux/phones/#support-status) for display and keypad limitations. The application needs the system brightness service, which runs by default.
 
 ## Controls
 
-| Key                   | Action                 |
-| --------------------- | ---------------------- |
-| <Key>Up</Key>         | Raise the level by one |
-| <Key>Down</Key>       | Lower the level by one |
-| <Key>Right soft</Key> | Exit                   |
+| Key | Action |
+| --- | --- |
+| <Key>Up</Key> | Raise the level by one |
+| <Key>Down</Key> | Lower the level by one |
+| <Key>Right soft</Key> | Exit |
 
-The level stops at `0` and `10`. Level `0` turns the backlight off. The
-application keeps running in the dark: press <Key>Up</Key> to return to level `1`.
+The level stops at `0` and `10`. Level `0` turns the backlight off. The application keeps running in the dark: press <Key>Up</Key> to return to level `1`.
 
 ## What happens to the level
 
-Each successful change becomes the system brightness level at once and stays in
-effect after you exit. It lasts until the phone shuts down; the next boot starts
-with the default level.
+Each successful change becomes the system brightness level at once and stays in effect after you exit. It lasts until the phone shuts down; the next boot starts with the default level.
 
-If a change fails, the previous level stays in effect and the screen shows
-`SET FAILED` while the backlight is lit.
+If a change fails, the previous level stays in effect and the screen shows `SET FAILED` while the backlight is lit.

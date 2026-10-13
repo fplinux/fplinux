@@ -1,0 +1,50 @@
+---
+title: Formatting example
+---
+
+This paragraph is deliberately split
+across two source lines.
+
+The literal `{/*` stays in code while this
+paragraph also becomes one line.
+
+- This list item is deliberately split
+  across two source lines.
+
+First line\
+Second line.
+
+:::caution[Keep this warning]
+
+An important warning
+continues here.
+
+:::
+
+<Card title="Summary">
+
+Text inside a component
+stays a paragraph.
+
+</Card>
+
+| Command       | Detail                   | State |
+| :------------ | :----------------------: | ----: |
+| short command | `a  \| b` and **text**    | Ready |
+| another       | <Key>\*</Key> and [link](/guide/) | Done |
+
+> | Item | Detail |
+> | ---- | ------ |
+> | alpha | Kept in the quote |
+
+1. A nested table:
+
+   | Item | Detail |
+   | ---- | ------ |
+   | beta | Kept in the list |
+
+```sh
+printf '%s\n' 'a  | b'
+# Preserve this line and indentation.
+  printf done
+```

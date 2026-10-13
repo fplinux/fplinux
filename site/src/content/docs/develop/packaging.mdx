@@ -3,9 +3,7 @@ title: Packaging
 description: Package a build as a standalone archive, inspect artifacts and measure image size.
 ---
 
-`./fplinux package` turns an existing build into a ZIP archive for a registered
-phone, without a source checkout on the user's PC. Users of the archive follow
-[Standalone archive](/fplinux/guides/standalone-archive/).
+`./fplinux package` turns an existing build into a ZIP archive for a registered phone, without a source checkout on the user's PC. Users of the archive follow [Standalone archive](/fplinux/guides/standalone-archive/).
 
 ## Create a phone-test candidate
 
@@ -22,23 +20,13 @@ Phone-test payload SHA256: …
 ramboot.bin SHA256: …
 ```
 
-Packaging uses the current build and does not rebuild it. If the source has
-changed since that build, it stops and prints the `build` command to run. Pass
-the same profile and build type as the build.
+Packaging uses the current build and does not rebuild it. If the source has changed since that build, it stops and prints the `build` command to run. Pass the same profile and build type as the build.
 
-Ordinary Linux runner packaging also requires a current offline site export. Install the pinned site
-tools as described in [Contributing](/fplinux/develop/contributing/#preview-this-site),
-then run `npm run build:offline` from `site/`. After editing the site, export it
-again before packaging. Ordinary runner archives carry the generated site under `docs/`;
-the phone image does not include it.
+Ordinary Linux runner packaging also requires a current offline site export. Install the pinned site tools as described in [Contributing](/fplinux/develop/contributing/#preview-this-site), then run `npm run build:offline` from `site/`. After editing the site, export it again before packaging. Ordinary runner archives carry the generated site under `docs/`; the phone image does not include it.
 
-A candidate contains `CANDIDATE-NOTICE.txt` and is meant only for testing on
-the phone. Do not publish it as a release. Creating or checking a candidate
-does not show that the phone boots or that any feature works.
+A candidate contains `CANDIDATE-NOTICE.txt` and is meant only for testing on the phone. Do not publish it as a release. Creating or checking a candidate does not show that the phone boots or that any feature works.
 
-For a [microSD system card](/fplinux/guides/microsd-system-card/), build that
-profile and package it as a candidate; the archive then also contains
-`FPLINUX.img.xz`:
+For a [microSD system card](/fplinux/guides/microsd-system-card/), build that profile and package it as a candidate; the archive then also contains `FPLINUX.img.xz`:
 
 ```sh title="PC"
 ./fplinux build nokia-ta1618 --profile microsd-uboot
@@ -55,40 +43,15 @@ Build the phone once, then package it for either host:
 ./fplinux package nokia-ta1618 --autonomous --host windows10 --candidate
 ```
 
-The hosts are Linux x86-64 and Windows 10 or 11 x64. Each archive contains only
-the selected phone's configuration. It bundles Python, OpenSSH and extraction
-tools, and omits the build's prepared phone data. The owner uses the same
-`Run.sh` or `Run.cmd` for preparation, loading and reconnecting: first to save
-and prepare their phone's own data, then to load FPLinux with that data and
-open SSH. Opening the same launcher again reconnects to the running phone.
-Only one launcher can run from the extracted directory at a time.
-These archives contain the selected
-host's tools, a short README and licenses; optional APKs and the offline site
-are omitted. Source and build material is written to a matching separate
-`*-sources.zip`. Keep both archives together when distributing them. Follow
-[Standalone archive](/fplinux/guides/standalone-archive/) for host requirements,
-connection order and current qualification limits.
+The hosts are Linux x86-64 and Windows 10 or 11 x64. Each archive contains only the selected phone's configuration. It bundles Python, OpenSSH and extraction tools, and omits the build's prepared phone data. The owner uses the same `Run.sh` or `Run.cmd` for preparation, loading and reconnecting: first to save and prepare their phone's own data, then to load FPLinux with that data and open SSH. Opening the same launcher again reconnects to the running phone. Only one launcher can run from the extracted directory at a time. These archives contain the selected host's tools, a short README and licenses; optional APKs and the offline site are omitted. Source and build material is written to a matching separate `*-sources.zip`. Keep both archives together when distributing them. Follow [Standalone archive](/fplinux/guides/standalone-archive/) for host requirements, connection order and current qualification limits.
 
-Autonomous packaging supports the default RAM profile. Add `--offline` to use
-only dependencies already stored locally. Without `--autonomous`, packaging
-creates the ordinary Linux runner archive with its build's prepared data.
+Autonomous packaging supports the default RAM profile. Add `--offline` to use only dependencies already stored locally. Without `--autonomous`, packaging creates the ordinary Linux runner archive with its build's prepared data.
 
 ## Release archives
 
-A release archive needs a phone test of the exact executable payload: the
-runtime files and the bundled APKs. After a candidate passes on the phone, its
-`Phone-test payload SHA256` is recorded for that target in
-`releases.lock.toml`. Only then does `./fplinux package nokia-ta1618` (without
-`--candidate`) write a release archive below `.cache/out/releases/`; otherwise
-it refuses. Documentation, notices and checksums are outside the payload, so
-changing them does not need a new phone test, but any change to the payload
-does. No payload is recorded yet, so no release archive can be created. The
-microSD system card is packaged only as a candidate.
+A release archive needs a phone test of the exact executable payload: the runtime files and the bundled APKs. After a candidate passes on the phone, its `Phone-test payload SHA256` is recorded for that target in `releases.lock.toml`. Only then does `./fplinux package nokia-ta1618` (without `--candidate`) write a release archive below `.cache/out/releases/`; otherwise it refuses. Documentation, notices and checksums are outside the payload, so changing them does not need a new phone test, but any change to the payload does. No payload is recorded yet, so no release archive can be created. The microSD system card is packaged only as a candidate.
 
-An ordinary Linux runner archive contains the image, the host tools and runner, the optional APKs,
-the USB rules, a `README.txt` for the selected phone, license notices, the
-build manifest and `SHA256SUMS`. It contains no build trees, caches or kernel
-debug files.
+An ordinary Linux runner archive contains the image, the host tools and runner, the optional APKs, the USB rules, a `README.txt` for the selected phone, license notices, the build manifest and `SHA256SUMS`. It contains no build trees, caches or kernel debug files.
 
 ## Inspect artifacts
 
@@ -98,22 +61,15 @@ debug files.
 ./fplinux inspect apk path/to/package.apk
 ```
 
-- `bundle` lists the current build's identity, files, sizes and SHA-256
-  hashes and checks them against its build manifest. It does not check
-  whether the source has changed since that build.
-- `archive` lists a candidate or release ZIP and checks every file against its
-  `SHA256SUMS`. This shows that the archive is internally consistent, not that
-  it is authentic or works on a phone.
-- `apk` shows a package's metadata and file list. It does not install the
-  package, run its scripts or verify its signature.
+- `bundle` lists the current build's identity, files, sizes and SHA-256 hashes and checks them against its build manifest. It does not check whether the source has changed since that build.
+- `archive` lists a candidate or release ZIP and checks every file against its `SHA256SUMS`. This shows that the archive is internally consistent, not that it is authentic or works on a phone.
+- `apk` shows a package's metadata and file list. It does not install the package, run its scripts or verify its signature.
 
 None of them needs the build environment or a phone.
 
 ## Measure image size
 
-`inspect footprint` measures the current build without rebuilding it. To see
-what a change does to the image, save a report before and after rebuilding,
-then compare them:
+`inspect footprint` measures the current build without rebuilding it. To see what a change does to the image, save a report before and after rebuilding, then compare them:
 
 ```sh title="PC"
 ./fplinux inspect footprint nokia-ta1618 --json > before.json
@@ -122,9 +78,4 @@ then compare them:
 ./fplinux inspect footprint-diff before.json after.json
 ```
 
-The report lists the boot files, kernel, compressed and unpacked root
-filesystem, optional APKs and host debug files separately. These layers
-overlap, so their sum is not a meaningful total. A package's size counts the
-files it owns, not its dependencies, installed disk usage or RAM use. The diff
-also reports whether the root filesystem content is identical; a smaller
-compressed image alone does not mean less userspace or lower memory use.
+The report lists the boot files, kernel, compressed and unpacked root filesystem, optional APKs and host debug files separately. These layers overlap, so their sum is not a meaningful total. A package's size counts the files it owns, not its dependencies, installed disk usage or RAM use. The diff also reports whether the root filesystem content is identical; a smaller compressed image alone does not mean less userspace or lower memory use.

@@ -9,17 +9,13 @@ import PhoneChecklist from '../../../components/PhoneChecklist.astro';
 
 ## Support checklist
 
-Each status applies to this phone and the conditions in its note. See
-[Support status](/fplinux/phones/#support-status) for the meaning of the labels
-and [common limitations](/fplinux/phones/#limitations-on-every-phone).
+Each status applies to this phone and the conditions in its note. See [Support status](/fplinux/phones/#support-status) for the meaning of the labels and [common limitations](/fplinux/phones/#limitations-on-every-phone).
 
 <PhoneChecklist />
 
 ## Before you start
 
-Prepare [device data](/fplinux/guides/device-data/) from this same handset for
-fitted audio and the external radio's firmware and configuration. Do not use
-another phone's data. A generic first RAM boot can run without these groups.
+Prepare [device data](/fplinux/guides/device-data/) from this same handset for fitted audio and the external radio's firmware and configuration. Do not use another phone's data. A generic first RAM boot can run without these groups.
 
 ## Boot key
 
@@ -27,30 +23,24 @@ another phone's data. A generic first RAM boot can run without these groups.
 
 ## Controls and storage
 
-[Terminal](/fplinux/use/terminal/) describes the shared controls. Insert a
-microSD data card before boot and leave it installed while the phone is
-powered; hot-swap is not supported. RAM files disappear when power is removed.
+[Terminal](/fplinux/use/terminal/) describes the shared controls. Insert a microSD data card before boot and leave it installed while the phone is powered; hot-swap is not supported. RAM files disappear when power is removed.
 
 ## Power
 
-Stop active radio connections before sleeping. Use the shared
-[Power](/fplinux/use/power/) interfaces only within the checklist conditions.
+Stop active radio connections before sleeping. Use the shared [Power](/fplinux/use/power/) interfaces only within the checklist conditions.
 
 ## End the RAM session
 
-[Release data cards](/fplinux/use/power/#release-data-cards) before disconnecting
-USB. If a battery is fitted, remove and reinsert it before booting normally.
+[Release data cards](/fplinux/use/power/#release-data-cards) before disconnecting USB. If a battery is fitted, remove and reinsert it before booting normally.
 
 ## Hardware controls and limits
 
-The backlight is `/sys/class/backlight/bq-2830l-backlight`. Use
-[Display and lights](/fplinux/use/display-and-lights/) for its controls.
+The backlight is `/sys/class/backlight/bq-2830l-backlight`. Use [Display and lights](/fplinux/use/display-and-lights/) for its controls.
 
 :::caution
-Concurrent camera capture and hardware rotation require one capture buffer
-and a separately saved frame. Do not use rotation with two active capture
-buffers. See [Camera](/fplinux/use/camera/) for shared resource rules.
+
+Concurrent camera capture and hardware rotation require one capture buffer and a separately saved frame. Do not use rotation with two active capture buffers. See [Camera](/fplinux/use/camera/) for shared resource rules.
+
 :::
 
-Feature support does not establish release readiness. See
-[Standalone archives](/fplinux/guides/standalone-archive/).
+Feature support does not establish release readiness. See [Standalone archives](/fplinux/guides/standalone-archive/).

@@ -2,6 +2,7 @@
 import preset from "ultracite/prettier";
 
 const config = { ...preset };
+const plugins = ["prettier-plugin-astro"];
 // Plain CSS needs no Tailwind formatting plugin.
 delete config.tailwindFunctions;
 
@@ -16,9 +17,20 @@ export default {
 			files: ["*.md", "*.mdx"],
 			options: { embeddedLanguageFormatting: "off" },
 		},
+		{
+			files: "*.mdx",
+			options: {
+				plugins: [
+					...plugins,
+					"@tofrankie/prettier-plugin-compact-markdown-table",
+				],
+				proseWrap: "never",
+				tableLayout: "compact",
+			},
+		},
 		{ files: "*.jsonc", options: { trailingComma: "none" } },
 	],
-	plugins: ["prettier-plugin-astro"],
+	plugins,
 	proseWrap: "preserve",
 	useTabs: true,
 };

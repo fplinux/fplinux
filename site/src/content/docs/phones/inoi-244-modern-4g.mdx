@@ -10,18 +10,13 @@ import PhoneChecklist from '../../../components/PhoneChecklist.astro';
 
 ## Support checklist
 
-Each status applies to this exact phone and the conditions in its note. See
-[Support status](/fplinux/phones/#support-status) for the meaning of the labels
-and [common limitations](/fplinux/phones/#limitations-on-every-phone).
+Each status applies to this exact phone and the conditions in its note. See [Support status](/fplinux/phones/#support-status) for the meaning of the labels and [common limitations](/fplinux/phones/#limitations-on-every-phone).
 
 <PhoneChecklist />
 
 ## Before you start
 
-For Bluetooth, FM radio and fitted audio, prepare
-[device data](/fplinux/guides/device-data/) from this same handset. A first
-generic RAM boot can run without those groups. Do not substitute data from
-another phone.
+For Bluetooth, FM radio and fitted audio, prepare [device data](/fplinux/guides/device-data/) from this same handset. A first generic RAM boot can run without those groups. Do not substitute data from another phone.
 
 ## Boot key
 
@@ -31,53 +26,34 @@ another phone.
 
 The red handset key, <Key>Red</Key>, is the power key.
 
-| Key                         | Action                                    |
-| --------------------------- | ----------------------------------------- |
-| <Key>Red</Key>, short press | Wakes the phone from suspend.             |
-| <Key>Red</Key>, held        | Power-off on battery has not been tested. |
+| Key | Action |
+| --- | --- |
+| <Key>Red</Key>, short press | Wakes the phone from suspend. |
+| <Key>Red</Key>, held | Power-off on battery has not been tested. |
 
-See the shared keypad bindings and application keys in
-[Terminal](/fplinux/use/terminal/).
+See the shared keypad bindings and application keys in [Terminal](/fplinux/use/terminal/).
 
 ## Storage
 
-- The microSD slot is under the battery. Insert the card before you start
-  FPLinux and leave it installed from boot to shutdown; hot-swap is not supported.
-- Fixed-session card initialization is unqualified for data storage and the
-  [microSD system root](/fplinux/guides/microsd-system-card/).
-- File transfer from a PC works with RAM destinations. Card destinations are
-  subject to the fixed-session initialization limit above.
+- The microSD slot is under the battery. Insert the card before you start FPLinux and leave it installed from boot to shutdown; hot-swap is not supported.
+- Fixed-session card initialization is unqualified for data storage and the [microSD system root](/fplinux/guides/microsd-system-card/).
+- File transfer from a PC works with RAM destinations. Card destinations are subject to the fixed-session initialization limit above.
 
 ## Power
 
-Battery-only power-off has not been tested. Use the session-ending procedure
-below. A short press of <Key>Red</Key> or an RTC alarm wakes the phone from
-s2idle; see [Power](/fplinux/use/power/) for the shared controls.
-Sleep with a mounted card or card-backed swap is unqualified with the
-fixed-session card initialization.
+Battery-only power-off has not been tested. Use the session-ending procedure below. A short press of <Key>Red</Key> or an RTC alarm wakes the phone from s2idle; see [Power](/fplinux/use/power/) for the shared controls. Sleep with a mounted card or card-backed swap is unqualified with the fixed-session card initialization.
 
 ## End the session
 
-In the default RAM profile, [release data cards](/fplinux/use/power/#release-data-cards)
-before disconnecting USB. If a battery is installed, remove it and put it back
-before booting the phone normally.
+In the default RAM profile, [release data cards](/fplinux/use/power/#release-data-cards) before disconnecting USB. If a battery is installed, remove it and put it back before booting the phone normally.
 
 :::caution
-Do not use this battery-removal sequence with a writable microSD system card.
-Follow [system-card shutdown on USB power](/fplinux/use/power/#shut-down-a-system-card-on-usb-power)
-instead.
+
+Do not use this battery-removal sequence with a writable microSD system card. Follow [system-card shutdown on USB power](/fplinux/use/power/#shut-down-a-system-card-on-usb-power) instead.
+
 :::
 
 ## Hardware details and limits
 
-- **Backlight**: `/sys/class/backlight/inoi244-backlight` with the raw range
-  0–31, starting at 18. System levels 0–10 apply, starting at 7; level 0 turns
-  the light off. Visible spacing is not calibrated; see
-  [Display and lights](/fplinux/use/display-and-lights/).
-- **Vibration**: there is no vibration motor. FPLinux vibrates the phone through
-  the rear speaker, as the stock firmware does. Headphone audio is muted
-  meanwhile and for about one second afterwards, including headphone FM
-  audio. One continuous pulse lasts at most about three seconds. When the
-  speaker is enabled above level 0, speaker playback and FM continue with the
-  tone; otherwise the speaker plays only the tone. Microphone recording
-  captures it.
+- **Backlight**: `/sys/class/backlight/inoi244-backlight` with the raw range 0–31, starting at 18. System levels 0–10 apply, starting at 7; level 0 turns the light off. Visible spacing is not calibrated; see [Display and lights](/fplinux/use/display-and-lights/).
+- **Vibration**: there is no vibration motor. FPLinux vibrates the phone through the rear speaker, as the stock firmware does. Headphone audio is muted meanwhile and for about one second afterwards, including headphone FM audio. One continuous pulse lasts at most about three seconds. When the speaker is enabled above level 0, speaker playback and FM continue with the tone; otherwise the speaker plays only the tone. Microphone recording captures it.

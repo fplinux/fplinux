@@ -13,7 +13,8 @@
     "build:offline": "node scripts/build-offline.ts",
     "preview": "astro preview",
     "test:offline": "node --test scripts/offline-search-index.test.ts scripts/phones.test.ts",
-    "check": "astro sync && oxlint && eslint . && prettier --config config/prettier.config.mjs --check . && stylelint \"src/**/*.{astro,css}\" && astro check && npm run test:offline",
+    "test:format": "node --test scripts/mdx-format.test.ts",
+    "check": "astro sync && oxlint && eslint . && prettier --config config/prettier.config.mjs --check . && stylelint \"src/**/*.{astro,css}\" && astro check && npm run test:offline && npm run test:format",
     "format": "prettier --config config/prettier.config.mjs --write ."
   },
   "dependencies": {
@@ -26,6 +27,7 @@
   },
   "devDependencies": {
     "@astrojs/check": "0.9.10",
+    "@tofrankie/prettier-plugin-compact-markdown-table": "0.0.2",
     "@types/wawoff2": "1.0.2",
     "@typescript-eslint/eslint-plugin": "8.71.1",
     "@typescript-eslint/parser": "8.71.1",
