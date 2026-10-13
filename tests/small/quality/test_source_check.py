@@ -8,10 +8,10 @@ import tempfile
 from pathlib import Path
 from unittest import mock
 
-import check as source_check
 import pytest
 from fplinux_cli import common
 from fplinux_cli.alpine import registration
+from fplinux_cli.quality import source as source_check
 from fplinux_cli.quality.formatting.source_formats import classify_source_formats
 from fplinux_cli.quality.source_gate import validate_source_policy
 from fplinux_cli.workspace import quality_inputs as workspace_module

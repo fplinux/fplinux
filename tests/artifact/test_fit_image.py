@@ -207,7 +207,7 @@ class FitImageTests:
         prior_fit = fit.read_bytes()
         prior_receipt = (fit_inputs.output / fit_image.RECEIPT_NAME).read_bytes()
         failing = fit_inputs.root / "failing-mkimage"
-        shutil.copyfile(ROOT / "tests/fixtures/processes/failing_image_tool.sh", failing)
+        shutil.copyfile(ROOT / "tests/artifact/fixtures/fit-image/failing_image_tool.sh", failing)
         failing.chmod(0o755)
         fit_inputs.zimage.write_bytes(b"FPLinux changed zImage payload\n")
         changed = fit_inputs.plan()

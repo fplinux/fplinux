@@ -11,13 +11,13 @@ from fplinux_cli.alpine.rootfs import build_rootfs
 from fplinux_cli.alpine.selection import bundle_packages, selected_packages
 from fplinux_cli.artifacts.bundles import bundle_slot
 from fplinux_cli.build import assets as assets_build
-from fplinux_cli.build import host as host_build
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
 from fplinux_cli.build import publish as publish_build
 from fplinux_cli.build import sources as sources_build
 from fplinux_cli.build.bootstrap.recipe import bootstrap_recipe_digest
 from fplinux_cli.build.bootstrap.stage import build_bootstrap
+from fplinux_cli.build.host_tools import host as host_build
 from fplinux_cli.build.kernel.compile import build_kernel
 from fplinux_cli.build.kernel.prepare import prepare_linux
 from fplinux_cli.build.storage import stage as storage_build

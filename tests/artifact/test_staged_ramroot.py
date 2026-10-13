@@ -29,7 +29,7 @@ class StagedRamrootTests:
         with mock.patch.object(workspace_staging, "ROOT", directory):
             source = workspace_staging.stage_workspace_snapshot(snapshot)
         bootstrap = source / "alpine/ramroot-init.sh"
-        expected_init = (ROOT / "tests/fixtures/processes/successful_bootstrap.sh").read_bytes()
+        expected_init = (ROOT / "tests/fixtures/ram-tool/successful_bootstrap.sh").read_bytes()
         bootstrap.write_bytes(expected_init)
         with (
             mock.patch.object(workspace_module, "ROOT", source),
@@ -42,7 +42,7 @@ class StagedRamrootTests:
             unrelated = workspace_module.target_workspace_snapshot("nokia-ta1618")
             assert (before.recipe) == (unrelated.recipe)
             bootstrap.write_bytes(
-                (ROOT / "tests/fixtures/processes/failing_bootstrap.sh").read_bytes()
+                (ROOT / "tests/artifact/fixtures/staged-ramroot/failing_bootstrap.sh").read_bytes()
             )
             changed = workspace_module.target_workspace_snapshot("nokia-ta1618")
             assert (before.recipe) != (changed.recipe)
@@ -59,7 +59,7 @@ class StagedRamrootTests:
             [
                 sys.executable,
                 "-B",
-                str(ROOT / "tests/fixtures/processes/ramroot_producer.py"),
+                str(ROOT / "tests/artifact/fixtures/staged-ramroot/ramroot_producer.py"),
                 str(root),
                 str(output),
             ],

@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
-from fplinux_cli.build.windows import _download, _extract_zip, verify_windows_dependencies
+from fplinux_cli.build.host_tools.windows import (
+    _download,
+    _extract_zip,
+    verify_windows_dependencies,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -78,7 +82,7 @@ def test_dependency_requires_dll_beside_executable(tmp_path: Path, dll_directory
         "file format pei-x86-64\nDLL Name: KERNEL32.dll\nDLL Name: libusb-1.0.dll\n",
         "",
     )
-    with mock.patch("fplinux_cli.build.windows.subprocess.run", return_value=inspected):
+    with mock.patch("fplinux_cli.build.host_tools.windows.subprocess.run", return_value=inspected):
         if dll_directory == "tools":
             imports = verify_windows_dependencies(files)
             assert imports["tools/loader.exe"] == ["KERNEL32.dll", "libusb-1.0.dll"]
@@ -90,7 +94,7 @@ def test_dependency_requires_dll_beside_executable(tmp_path: Path, dll_directory
 def test_windows_dependency_rejects_wrong_architecture(tmp_path: Path) -> None:
     inspected = subprocess.CompletedProcess([], 0, "file format pei-i386", "")
     with (
-        mock.patch("fplinux_cli.build.windows.subprocess.run", return_value=inspected),
+        mock.patch("fplinux_cli.build.host_tools.windows.subprocess.run", return_value=inspected),
         pytest.raises(SystemExit, match=r"not an x86-64 PE: tools/loader\.exe"),
     ):
         verify_windows_dependencies({"tools/loader.exe": tmp_path / "loader.exe"})

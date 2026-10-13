@@ -1,6 +1,7 @@
 [linux]
 arch = "arm"
 patches = ["z.patch", "a.patch"]
+overlay = "platforms/demo/linux/overlay"
 
 [[linux.copies]]
 source = "in-z"
@@ -12,6 +13,10 @@ destination = "out-b"
 
 [[linux.appends]]
 source = "in-a"
+destination = "out-a"
+
+[[linux.appends]]
+source = "in-b"
 destination = "out-a"
 
 [runtime]

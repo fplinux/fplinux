@@ -6,7 +6,7 @@ from __future__ import annotations
 import shutil
 from typing import TYPE_CHECKING
 
-from fplinux_cli.build.host_package import copy_mingw_licenses, publish_host_package
+from fplinux_cli.build.host_tools.host_package import copy_mingw_licenses, publish_host_package
 
 if TYPE_CHECKING:
     from pathlib import Path

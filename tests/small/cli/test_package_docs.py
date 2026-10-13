@@ -9,15 +9,18 @@ from typing import TYPE_CHECKING
 
 import pytest
 from fplinux_cli import common
-from fplinux_cli.cli import package, package_docs
+from fplinux_cli.packaging import archive as package
+from fplinux_cli.packaging import documentation as package_docs
 
+from tests.small.cli.autonomous_package_fixtures import (
+    archive_inputs as archive_inputs,  # noqa: PLC0414 -- pytest fixture export.
+)
 from tests.small.cli.package_docs_fixtures import write_offline_export
-from tests.small.cli.test_autonomous_package import archive_inputs  # noqa: F401 -- pytest fixture.
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.small.cli.test_autonomous_package import ArchiveInputs
+    from tests.small.cli.autonomous_package_fixtures import ArchiveInputs
 
 
 def test_offline_export_requires_a_completed_build(
@@ -32,7 +35,7 @@ def test_offline_export_requires_a_completed_build(
 def test_offline_export_tracks_site_inputs_and_ignores_unrelated_changes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A content edit rejects old HTML, while unrelated checkout and build files do not."""
+    """Content and notice edits reject old HTML; unrelated files retain the export."""
     monkeypatch.setattr(common, "ROOT", tmp_path)
     expected = write_offline_export(tmp_path)
     assert package_docs.offline_documentation() == expected
@@ -41,6 +44,12 @@ def test_offline_export_tracks_site_inputs_and_ignores_unrelated_changes(
         ignored = tmp_path / "site" / directory
         ignored.mkdir()
         (ignored / "generated.txt").write_text("Build output\n", encoding="utf-8")
+    assert package_docs.offline_documentation() == expected
+    notices = tmp_path / "THIRD_PARTY_NOTICES.md"
+    notices.write_bytes(b"Revised redistribution notice\n")
+    with pytest.raises(SystemExit, match="documentation is stale"):
+        package_docs.offline_documentation()
+    expected = write_offline_export(tmp_path, notices=b"Revised redistribution notice\n")
     assert package_docs.offline_documentation() == expected
     (tmp_path / "site/src/content/docs/index.mdx").write_text(
         "# Revised documentation\n", encoding="utf-8"
@@ -52,7 +61,7 @@ def test_offline_export_tracks_site_inputs_and_ignores_unrelated_changes(
 
 
 def test_ordinary_linux_zip_contains_current_docs_without_changing_phone_qualification(
-    archive_inputs: ArchiveInputs,  # noqa: F811 -- pytest injects the imported fixture.
+    archive_inputs: ArchiveInputs,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Synthetic builds keep their phone receipt when only generated docs change."""

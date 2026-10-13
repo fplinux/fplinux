@@ -35,6 +35,7 @@ def platform_manifest() -> Iterator[PlatformManifest]:
         root = Path(temporary)
         manifest = root / "platforms/ums9117/platform.toml"
         manifest.parent.mkdir(parents=True)
+        (manifest.parent / "linux/overlay").mkdir(parents=True)
         base = REPOSITORY_MANIFEST.read_text(encoding="utf-8")
         with mock.patch.object(common, "ROOT", root):
             yield PlatformManifest(manifest=manifest, base=base)

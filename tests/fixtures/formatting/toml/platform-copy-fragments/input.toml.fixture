@@ -1,10 +1,15 @@
 [linux]
+overlay = "platforms/demo/linux/overlay"
 patches = ["z.patch", "a.patch"]
 arch = "arm"
 
 [[linux.appends]]
 destination = "out-a"
 source = "in-a"
+
+[[linux.appends]]
+destination = "out-a"
+source = "in-b"
 
 [[linux.copies]]
 destination = "out-z"

@@ -8,6 +8,7 @@ from typing import Any
 from fplinux_cli import common
 from fplinux_cli.common import fail
 from fplinux_cli.manifests.identity import BUILD_TYPES, IdentityError, validate_platform_identity
+from fplinux_cli.manifests.linux import normalize_linux_integration
 from fplinux_cli.manifests.values import (
     KCONFIG_SYMBOL,
     TARGET_NAME,
@@ -215,6 +216,7 @@ def load_platform(platform: str) -> dict[str, Any]:
             "dt_config_checks",
             "targets",
             "patches",
+            "overlay",
             "copies",
             "appends",
         },
@@ -238,9 +240,7 @@ def load_platform(platform: str) -> dict[str, Any]:
     )
     for build_type, fragment in build_types.items():
         relative_value(fragment, f"platform linux build_types {build_type}")
-    path_array(linux.get("patches"), "platform linux patches", allow_empty=True)
-    path_steps(linux.get("copies"), "platform linux copies")
-    path_steps(linux.get("appends"), "platform linux appends")
+    linux.update(normalize_linux_integration(linux, "platform linux", root=common.ROOT))
 
     uboot = exact_table(
         config.get("uboot"),

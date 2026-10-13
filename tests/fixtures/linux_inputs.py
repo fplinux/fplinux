@@ -18,7 +18,7 @@ def write(root: Path, relative: str, contents: str) -> Path:
 
 def platform(root: Path, name: str, *, source_lock: str, arch: str) -> Path:
     """Declare Linux input operations without bootstrap, userspace, or loader metadata."""
-    write(root, f"platforms/{name}/common.c", "common driver\n")
+    write(root, f"platforms/{name}/linux/overlay/drivers/{name}/common.c", "common driver\n")
     return write(
         root,
         f"platforms/{name}/platform.toml",
@@ -29,7 +29,9 @@ def platform(root: Path, name: str, *, source_lock: str, arch: str) -> Path:
 
 def target(root: Path, name: str, *, platform_name: str, arch: str = "arm") -> Path:
     """Declare board source files while leaving unrelated artifacts absent."""
-    write(root, f"targets/{name}/linux/board.c", f"{name} driver\n")
+    write(
+        root, f"targets/{name}/linux/overlay/drivers/{platform_name}/{name}.c", f"{name} driver\n"
+    )
     write(root, f"targets/{name}/linux/board.dts", f"{name} device tree\n")
     return write(
         root,

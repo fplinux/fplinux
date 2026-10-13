@@ -18,7 +18,7 @@ from fplinux_cli.environment import image_store, kern
 from tests import ROOT
 from tests.fixtures.executables import install_python_script
 
-TAG_FIXTURES = ROOT / "tests/fixtures/processes"
+TAG_FIXTURES = ROOT / "tests/host_process/cache/fixtures/image-tag"
 
 
 def _metadata(path: Path) -> tuple[int, int, int]:

@@ -40,7 +40,10 @@ class AlpinePackingProcessTests:
             tools = temporary / "tools"
             tools.mkdir()
             cpio = tools / "cpio"
-            install_python_script(ROOT / "tests/fixtures/processes/alpine_packing_cpio.py", cpio)
+            install_python_script(
+                ROOT / "tests/host_process/alpine/fixtures/build-process/alpine_packing_cpio.py",
+                cpio,
+            )
             destination = temporary / "rootfs.cpio"
             reporter = RunReporter("packing", temporary / "logs", "logs", verbose=False)
             stderr = io.StringIO()

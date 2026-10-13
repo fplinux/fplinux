@@ -17,12 +17,12 @@ from fplinux_cli import common
 from fplinux_cli.alpine import registration
 from fplinux_cli.alpine import signing as alpine_state
 from fplinux_cli.artifacts.bundles import BUILD_MANIFEST_NAME, publish_current_bundle
-from fplinux_cli.cli import package as package_commands
 from fplinux_cli.common import canonical_json_bytes
 from fplinux_cli.environment import image_state as image_states
 from fplinux_cli.environment import images
 from fplinux_cli.environment.image_state import ImageState
 from fplinux_cli.manifests import platforms, releases, targets
+from fplinux_cli.packaging import archive as package_commands
 from fplinux_cli.workspace import build_inputs as workspaces
 from fplinux_cli.workspace.capture import WorkspaceSnapshot
 
@@ -445,7 +445,7 @@ class ReleaseArchiveArtifactTests:
             [
                 sys.executable,
                 "-I",
-                str(ROOT / "tests/fixtures/processes/archived_events_consumer.py"),
+                str(ROOT / "tests/artifact/fixtures/release-package/archived_events_consumer.py"),
                 str(helper),
                 str(extracted / "events.jsonl"),
             ],

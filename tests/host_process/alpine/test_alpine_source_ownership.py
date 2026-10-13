@@ -35,7 +35,10 @@ def _build_fixture(directory: Path, *, fail_build: bool) -> None:
     key.write_bytes(b"fixture private key\n")
     public_key.write_bytes(b"fixture public key\n")
     child_script = directory / "abuild-child.py"
-    shutil.copyfile(ROOT / "tests/fixtures/processes/alpine_abuild_child.py", child_script)
+    shutil.copyfile(
+        ROOT / "tests/host_process/alpine/fixtures/source-ownership/alpine_abuild_child.py",
+        child_script,
+    )
     child_script.chmod(0o644)
     lookup = pwd.getpwnam
 

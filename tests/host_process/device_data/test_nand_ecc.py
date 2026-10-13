@@ -43,7 +43,7 @@ def correction_process(tmp_path: Path) -> Path:
     tools = tmp_path / "host-tools"
     tools.mkdir()
     install_python_script(
-        ROOT / "tests/fixtures/processes/nand_ecc_child.py", tools / "ums9117-nand-ecc"
+        ROOT / "tests/fixtures/nand-ecc/nand_ecc_child.py", tools / "ums9117-nand-ecc"
     )
     return tools
 

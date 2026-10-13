@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
-from fplinux_cli.build.linux_host import _write_launchers, verify_linux_dependencies
+from fplinux_cli.build.host_tools.linux_host import _write_launchers, verify_linux_dependencies
 from fplinux_cli.runtime.ssh_transport import _require_tool
 
 if TYPE_CHECKING:
@@ -38,7 +38,9 @@ def test_dependency_requires_library_in_the_loader_search_directory(
         "runtime/bin/python3.14": program,
         f"{library_directory}/libpython3.14.so.1.0": library,
     }
-    with mock.patch("fplinux_cli.build.linux_host.subprocess.run", return_value=inspected):
+    with mock.patch(
+        "fplinux_cli.build.host_tools.linux_host.subprocess.run", return_value=inspected
+    ):
         if library_directory == "runtime/lib":
             imports = verify_linux_dependencies(files)
             assert imports["runtime/bin/python3.14"] == ["libpython3.14.so.1.0"]
@@ -57,7 +59,8 @@ def test_plain_standard_library_sources_need_no_elf_inspection(tmp_path: Path) -
     module = tmp_path / "module.py"
     module.write_text("value = 42\n", encoding="utf-8")
     with mock.patch(
-        "fplinux_cli.build.linux_host.subprocess.run", side_effect=AssertionError("readelf")
+        "fplinux_cli.build.host_tools.linux_host.subprocess.run",
+        side_effect=AssertionError("readelf"),
     ):
         assert verify_linux_dependencies({"runtime/lib/python3.14/module.py": module}) == {}
 

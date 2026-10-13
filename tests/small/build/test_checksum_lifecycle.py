@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
-import fplinux_cli.cli.checksum as checksum_commands
+import fplinux_cli.alpine.checksum as checksum_commands
 import fplinux_cli.environment.kern as kern_env
 import fplinux_cli.reporting.run as output
 import fplinux_cli.workspace.build_inputs as workspace_inputs
@@ -44,8 +44,8 @@ class ChecksumAportContext:
         self.apkbuild.chmod(0o640)
         (self.aport / "local.c").write_bytes(b"int local_source;\n")
         shutil.copytree(
-            ROOT / "scripts/fplinux_cli/cli/checksum",
-            self.root / "scripts/fplinux_cli/cli/checksum",
+            ROOT / "scripts/fplinux_cli/alpine/checksum",
+            self.root / "scripts/fplinux_cli/alpine/checksum",
         )
 
     def run(self, container_run: Callable[..., None]) -> None:

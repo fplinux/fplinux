@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
 
-_PROCESS_FIXTURES = ROOT / "tests" / "fixtures" / "processes"
+_PROCESS_FIXTURES = ROOT / "tests/host_process/quality/fixtures/kernelcheck"
 
 
 class KernelCheckSubprocessStatusTests:

@@ -13,6 +13,14 @@ Kernel configuration, generated profile inputs and compilation output use separa
 
 Keep board drivers guarded by their target configuration and use distinct destinations for board-owned files. Target copies add new board-owned files; use patches or platform copies to change upstream files. Conflicting file ownership, patches that cannot apply together and profile-specific Linux patches are rejected. A missing integration input or invalid shared Kconfig can prevent other targets from building too. Source sharing does not establish support for another platform, architecture or userspace ABI.
 
+## Declaring Linux inputs
+
+Each platform and target declares one `linux.overlay` directory. Store complete Linux files below it using their exact destination paths, such as `linux/overlay/arch/arm/boot/dts/unisoc/board.dts` or `linux/overlay/Documentation/devicetree/bindings/example.yaml`. Every regular file in the overlay becomes a copy to the matching Linux path. Keep generated files outside the source overlay.
+
+Platform manifest paths are repository-relative; target manifest paths are relative to their target directory. Use explicit `linux.copies` for a shared file owned elsewhere, without duplicating it in the overlay. Keep `copies = []` when there are no explicit copies. Overlay and explicit destinations must be unique within their owner and must coexist with other owners of the shared source tree.
+
+Keep configuration inputs in `linux/config`, patches in `linux/patches`, and additions to existing Linux files in `linux/fragments`. Declare each fragment through `linux.appends` with its destination. Patches and fragments run in their declared order; independent copies are normalized by destination. Integration applies platform patches, platform copies, target copies, target patches, platform appends and target appends in that order.
+
 ## microSD card detection
 
 A slot that permits card replacement during a powered session declares `cd-gpios` and enables `CONFIG_MMC_REMOVABLE` and `CONFIG_MMC_GPIO`. For the UMS9117 EIC card-detect input, also enable `CONFIG_GPIO_EIC_SPRD`. These choices belong to the target configuration.

@@ -13,9 +13,9 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 from unittest import mock
 
+import fplinux_cli.build.reuse as bundles_commands
+import fplinux_cli.build.workflow as build_commands
 import fplinux_cli.cache.prune.operations as prune_operations
-import fplinux_cli.cli.build as build_commands
-import fplinux_cli.cli.bundles as bundles_commands
 import fplinux_cli.environment.kern as kern_env
 import fplinux_cli.reporting.run as output
 import fplinux_cli.workspace.build_inputs as workspace_inputs

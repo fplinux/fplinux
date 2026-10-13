@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from fplinux_cli import common
-from fplinux_cli.cli import bundles as cli_bundles
+from fplinux_cli.build import reuse as cli_bundles
 from fplinux_cli.common import fail
 from fplinux_cli.environment import image_state as image_states
 from fplinux_cli.environment import images

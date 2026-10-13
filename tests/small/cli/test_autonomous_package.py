@@ -6,267 +6,31 @@ from __future__ import annotations
 import hashlib
 import io
 import json
-import shutil
 import subprocess
 import sys
 import tarfile
 import zipfile
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytest
-from fplinux_cli import common
-from fplinux_cli.alpine import selection, signing
-from fplinux_cli.artifacts.bundles import publish_current_bundle
-from fplinux_cli.build import linux_host, windows_driver
-from fplinux_cli.build import windows as windows_build
-from fplinux_cli.cli import autonomous_package, bundles, package, package_sources
-from fplinux_cli.cli.package_readme import append_source_companion
 from fplinux_cli.cli.parser import create_parser
-from fplinux_cli.common import canonical_json_bytes
-from fplinux_cli.environment import image_state, images
-from fplinux_cli.environment.image_state import ImageState
-from fplinux_cli.manifests import platforms, releases, targets
-from fplinux_cli.workspace import build_inputs
-from fplinux_cli.workspace.capture import WorkspaceSnapshot
+from fplinux_cli.manifests import targets
+from fplinux_cli.packaging import archive as package
+from fplinux_cli.packaging import autonomous as autonomous_package
+from fplinux_cli.packaging.readme import append_source_companion
 
 from tests import ROOT
-from tests.bundle_support import file_record
-from tests.small.cli.package_docs_fixtures import write_offline_export
-from tests.small.runtime.adapter_fixtures import adapter_data
-from tests.small.runtime.test_runner_manifest import runtime_manifest
+from tests.small.cli.autonomous_package_fixtures import (
+    archive_inputs as archive_inputs,  # noqa: PLC0414 -- pytest fixture export.
+)
+from tests.small.cli.autonomous_package_fixtures import (
+    write_archive_file,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-
-@dataclass(frozen=True)
-class ArchiveInputs:
-    """Synthetic bundle and prepared tools owned by one archive case."""
-
-    root: Path
-    target: str
-    bundle: Path
-    manifest: bytes
-    native_files: dict[str, Path]
-    windows_scripts: dict[str, bytes]
-
-
-def _write(root: Path, relative: str, contents: bytes, *, mode: int = 0o644) -> Path:
-    path = root / relative
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(contents)
-    path.chmod(mode)
-    return path
-
-
-@pytest.fixture
-def archive_inputs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
-) -> ArchiveInputs:
-    """Replace compilation and host identity, retaining real collection and ZIP writing."""
-    source = common.ROOT
-    target = getattr(request, "param", "nokia-ta1618")
-    config = targets.load_target(target)
-    platform = platforms.load_platform(config["platform"])
-    rootfs_packages = selection.selected_packages(platform, config)
-    selected_bundle_packages = selection.bundle_packages(platform, config, rootfs_packages)
-    release = releases.load_release(target, bundle_packages=selected_bundle_packages)
-    for relative in (
-        "LICENSE",
-        "LICENSES/Unlicense.txt",
-        "third-party-licenses/musl/COPYRIGHT",
-        "common/60-fplinux.rules",
-        "common/autonomous.py",
-        "common/__init__.py",
-        "common/windows_host.py",
-        "common/Run.sh",
-        "common/Run.cmd",
-        "platforms/ums9117/host/stock_image.py",
-        "platforms/ums9117/host/nand_ecc.py",
-        "platforms/ums9117/host/nand-ecc/Makefile",
-        "platforms/ums9117/host/nand-ecc/ums9117-nand-ecc.c",
-        "include/fplinux/fplinux-cli.h",
-        "lib/fplinux/fplinux-cli.c",
-        f"targets/{target}/{config['device_data']['parser']}",
-    ):
-        _write(tmp_path, relative, (source / relative).read_bytes())
-    shutil.copytree(source / "scripts/fplinux_cli", tmp_path / "scripts/fplinux_cli")
-    shutil.copytree(source / "alpine/aports", tmp_path / "alpine/aports")
-    windows_scripts = {}
-    for resource in sorted((source / "common/windows").rglob("*.ps1")):
-        relative = resource.relative_to(source).as_posix()
-        contents = resource.read_bytes()
-        windows_scripts[relative] = contents
-        _write(tmp_path, relative, contents)
-    public_key = signing.signing_public_key(tmp_path / ".cache")
-    _write(tmp_path, public_key.relative_to(tmp_path).as_posix(), b"test public signing key\n")
-    signing_digest = hashlib.sha256(public_key.read_bytes()).hexdigest()
-    generation = "c" * 64
-    bundle = tmp_path / ".cache/out" / target / "builds/release/bundles" / generation
-    normalized = package.load_release_manifest(target, config)
-    for relative in normalized["bundle_files"]:
-        contents = (
-            b"BUILDER PERSONAL DATA MUST STAY PRIVATE\n"
-            if relative == "device-data.cpio"
-            else f"synthetic built file: {relative}\n".encode()
-        )
-        mode = 0o755 if relative in normalized["executables"] else 0o644
-        _write(bundle, relative, contents, mode=mode)
-    prepared_maps = {
-        "pinmap.bin": b"BUILDER PERSONAL PINS MUST STAY PRIVATE\n",
-        "keymap.bin": b"BUILDER PERSONAL KEYS MUST STAY PRIVATE\n",
-    }
-    for relative, contents in prepared_maps.items():
-        _write(bundle, relative, contents, mode=0o600)
-    for relative, source_path in {
-        "runner/run.py": "common/run.py",
-        "runner/platform_adapter.py": "platforms/ums9117/host/adapter.py",
-        "runner/identity.py": "scripts/fplinux_cli/manifests/identity.py",
-        "runner/ssh_transport.py": "scripts/fplinux_cli/runtime/ssh_transport.py",
-        "runner/loader_events.py": "common/loader_events.py",
-    }.items():
-        _write(bundle, relative, (source / source_path).read_bytes())
-    _write(bundle, "image/ramboot.bin", b"DHTB synthetic built RAM payload\n")
-    runtime = runtime_manifest()
-    runtime["adapter"] = adapter_data()
-    runtime["assets"] = dict(config["runtime"]["assets"])
-    runtime["target"] = target
-    runtime["host_tools"] = {
-        role: f"host/{name}" for role, name in platform["host"]["runtime_tools"].items()
-    }
-    runtime["sha256"] = {
-        name: hashlib.sha256((bundle / name).read_bytes()).hexdigest()
-        for name in (
-            "image/ramboot.bin",
-            *runtime["assets"].values(),
-            "runner/platform_adapter.py",
-            "runner/identity.py",
-            "runner/ssh_transport.py",
-            "runner/loader_events.py",
-            *runtime["host_tools"].values(),
-        )
-    }
-    _write(bundle, "runtime-manifest.json", canonical_json_bytes(runtime))
-    snapshot = WorkspaceSnapshot((), "a" * 64)
-    manifest = canonical_json_bytes(
-        {
-            "rootfs_receipt": {"recipe": "d" * 64, "sha256": "e" * 64},
-            "boot_artifacts": {"required": []},
-            "container_image_recipe": "b" * 64,
-            "container_image_content": "c" * 64,
-            "apk_signing_key": signing_digest,
-            "device_identity": "f" * 64,
-            "files": {
-                relative: file_record(bundle / relative)
-                for relative in (*normalized["bundle_files"], *prepared_maps)
-            },
-            "generation": generation,
-            "kbuild_receipt": {"recipe": "0" * 64, "sha256": "1" * 64},
-            "linux_recipe": "2" * 64,
-            "profile": None,
-            "build_type": "release",
-            "target": target,
-            "workspace_digest": snapshot.recipe,
-        }
-    )
-    _write(bundle, "build-manifest.json", manifest)
-    publish_current_bundle(tmp_path / ".cache/out", target, bundle)
-    native_files = {
-        relative: _write(tmp_path / "prepared-native", relative, relative.encode())
-        for relative in (
-            "tools/spd_dump.exe",
-            "tools/libc_server.exe",
-            "tools/fphelper_t117.exe",
-            "tools/libusb-1.0.dll",
-            "tools/openssh/ssh.exe",
-            "tools/openssh/ssh-keygen.exe",
-            "tools/openssh/ssh-keyscan.exe",
-            "runtime/python.exe",
-            "runtime/python314.zip",
-        )
-    }
-    driver_files = {
-        "tools/driver/wdi-simple.exe": _write(
-            tmp_path / "prepared-driver", "tools/driver/wdi-simple.exe", b"prepared driver helper"
-        ),
-        "licenses/windows-driver/License.rtf": _write(
-            tmp_path / "prepared-driver",
-            "licenses/windows-driver/License.rtf",
-            b"synthetic driver redistribution license\n",
-        ),
-    }
-    linux_files = {
-        relative: _write(
-            tmp_path / "prepared-linux", relative, b"prepared Linux runtime", mode=0o755
-        )
-        for relative in ("runtime/bin/python3.14", "runtime/lib/ld-musl-x86_64.so.1")
-    }
-
-    def prepared_native(**_options: object) -> dict[str, Path]:
-        """Stand in for the separate, expensive cross-compilation boundary."""
-        files = dict(native_files)
-        if _options.get("nand_ecc"):
-            files["tools/ums9117-nand-ecc.exe"] = _write(
-                tmp_path / "prepared-native", "tools/ums9117-nand-ecc.exe", b"prepared BCH decoder"
-            )
-            files["sources/windows-tools-source.zip"] = _write(
-                tmp_path / "prepared-native",
-                "sources/windows-tools-source.zip",
-                b"prepared compiler source projection",
-            )
-            files["licenses/windows-host/ums9117-nand-ecc-COPYING.txt"] = _write(
-                tmp_path / "prepared-native",
-                "licenses/windows-host/ums9117-nand-ecc-COPYING.txt",
-                b"prepared BCH license",
-            )
-        return files
-
-    def prepared_driver(**_options: object) -> dict[str, Path]:
-        """Stand in for the locked driver build and redistributable preparation."""
-        return dict(driver_files)
-
-    def prepared_linux(**_options: object) -> dict[str, Path]:
-        """Stand in for the exact pinned-image runtime export boundary."""
-        return dict(linux_files)
-
-    monkeypatch.setattr(common, "ROOT", tmp_path)
-    monkeypatch.setattr(targets, "load_target", lambda *_args, **_kwargs: config)
-    monkeypatch.setattr(releases, "load_release", lambda *_args, **_kwargs: release)
-    monkeypatch.setattr(platforms, "load_platform", lambda *_args: platform)
-    monkeypatch.setattr(
-        build_inputs, "target_workspace_snapshot", lambda *_args, **_kwargs: snapshot
-    )
-    monkeypatch.setattr(images, "container_image_recipe_digest", lambda: "b" * 64)
-    monkeypatch.setattr(
-        image_state, "load_image_state", lambda *_args: ImageState("b" * 64, "c" * 64, "c" * 64)
-    )
-    monkeypatch.setattr(
-        bundles,
-        "build_identity",
-        lambda *_args: bundles.BuildIdentity(snapshot.recipe, "b" * 64, "c" * 64, signing_digest),
-    )
-    monkeypatch.setattr(
-        autonomous_package,
-        "_linux_host_tool",
-        lambda _target, _platform, tool, **_kwargs: (
-            b"extractor" if tool == "fphelper_t117" else b"prepared BCH decoder"
-        ),
-    )
-    monkeypatch.setattr(windows_build, "prepare_windows_host", prepared_native)
-    monkeypatch.setattr(windows_driver, "prepare_windows_driver", prepared_driver)
-    monkeypatch.setattr(linux_host, "prepare_linux_host", prepared_linux)
-    monkeypatch.setattr(
-        package_sources,
-        "collect_source_files",
-        lambda *_args, **_kwargs: package_sources.SourcePayload(
-            {"project/source.c": b"controlled corresponding source\n"}, set(), {}
-        ),
-    )
-    write_offline_export(tmp_path)
-    return ArchiveInputs(
-        tmp_path, target, bundle, manifest, {**native_files, **driver_files}, windows_scripts
-    )
+    from tests.small.cli.autonomous_package_fixtures import ArchiveInputs
 
 
 @pytest.fixture
@@ -285,9 +49,9 @@ def ecc_source_download(archive_inputs: ArchiveInputs) -> dict[str, bytes]:
             archive.addfile(member, io.BytesIO(payload))
     raw = stream.getvalue()
     root = archive_inputs.root
-    _write(root, ".cache/downloads/bch.tar.gz", raw)
+    write_archive_file(root, ".cache/downloads/bch.tar.gz", raw)
     digests = {name: hashlib.sha256(payload).hexdigest() for name, payload in contents.items()}
-    _write(
+    write_archive_file(
         root,
         "sources.lock.toml",
         (
@@ -487,7 +251,9 @@ def test_autonomous_zip_preserves_receipts_omits_personal_data_and_is_determinis
         [
             sys.executable,
             "-I",
-            str(ROOT / "tests/fixtures/processes/autonomous_runtime_imports.py"),
+            str(
+                ROOT / "tests/small/cli/fixtures/autonomous-package/autonomous_runtime_imports.py"
+            ),
             str(archive_root),
         ],
         cwd=extracted,

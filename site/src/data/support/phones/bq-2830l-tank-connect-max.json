@@ -1,0 +1,261 @@
+{
+  "ram-boot": {
+    "status": "Supported",
+    "note": "RAM boot through the green call key and USB loader."
+  },
+  "persistent-boot": {
+    "status": "Not supported",
+    "note": ""
+  },
+  "local-console": {
+    "status": "Supported",
+    "note": "Readable 240×320 terminal, physical keypad typing, modifiers, Help and diagnostic-console return."
+  },
+  "lcd-backlight": {
+    "hardware": "Present",
+    "status": "Supported",
+    "note": "System levels 0–10, initially 7; level 0 turns off the light, and brightness increases without visible flicker."
+  },
+  "keypad-backlight": {
+    "hardware": "Present",
+    "status": "Supported",
+    "note": "The keypad light turns on with physical key presses and goes out after inactivity."
+  },
+  "usb-networking": {
+    "status": "Supported",
+    "note": "USB-NCM with a local IPv4 DHCP connection to the PC."
+  },
+  "ssh-access": {
+    "status": "Supported",
+    "note": "Authenticated SSH over the local USB connection."
+  },
+  "file-transfer": {
+    "status": "Supported",
+    "note": "Upload and download to RAM; FAT32 and ext4 data-card reads and writes work."
+  },
+  "host-keyboard-bridge": {
+    "status": "Unknown",
+    "note": ""
+  },
+  "cpu-clock-reporting": {
+    "status": "Supported",
+    "note": "The CPU clock tool reports a lower-bound timing estimate."
+  },
+  "manual-cpu-frequency-selection": {
+    "status": "Supported",
+    "note": "Manual selection of 1 GHz and 768 MHz; 1 GHz is the default."
+  },
+  "ap-dmaengine": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "The fixed ROTA peripheral request works; general memory-copy use is unqualified."
+  },
+  "image-rotation-engine": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "RGB565 and NV16 90-degree rotation, including native 640×476 camera frames. Capture with one buffer can overlap rotation of a separately saved native frame; other formats, rotations and sustained concurrency are unqualified."
+  },
+  "jpeg-engine": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "320×240 NV16 encoding, full-size horizontal 4:2:2 decoding and 320×240→160×120 NV16 scaling. Other geometries and scaled decoding are unqualified."
+  },
+  "native-image-output": {
+    "hardware": "Present",
+    "status": "Supported",
+    "note": "RGB565 and NV16 image presentation on the 240×320 display."
+  },
+  "image-rotation": {
+    "status": "Partial",
+    "note": "CPU RGB565 rotation and hardware RGB565/NV16 90-degree rotation. Native capture with one buffer can stay active while hardware rotation processes a separately saved native frame."
+  },
+  "jpeg-codec-and-scaling": {
+    "status": "Partial",
+    "note": "Hardware 320×240 encode, horizontal 4:2:2 decode and 320×240→160×120 NV16 scaling. CPU JPEG also encodes native 640×476 frames; other scaling geometries are unqualified."
+  },
+  "native-image-presentation": {
+    "status": "Supported",
+    "note": "Native RGB565 and NV16 presentation; display appearance after sleep is unqualified."
+  },
+  "usb-host-mode": {
+    "hardware": "Unknown",
+    "status": "Not supported",
+    "note": ""
+  },
+  "removable-storage": {
+    "hardware": "Present",
+    "status": "Supported",
+    "note": "FAT32 and ext4 data-card reads and writes in the RAM profile. Keep the card installed while powered; no hot-swap."
+  },
+  "removable-system-root": {
+    "status": "Not supported",
+    "note": "Only the RAM root is supported on this target."
+  },
+  "internal-phone-storage": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "Read-only physical NAND backup and fitted-data preparation. No mounting, writing or restoration."
+  },
+  "headphone-audio": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "24 and 48 kHz PCM with fitted EQ/ALC; four-contact headphones provide separate left/right speech and silence at volume 0. Jack insertion/removal is detected; other headset compatibility is unqualified."
+  },
+  "speaker-audio": {
+    "hardware": "Present",
+    "status": "Supported",
+    "note": "PCM speaker output with fitted EQ/ALC. Calibrated gain and speaker-only headphone mute are unqualified."
+  },
+  "phone-microphone": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "Built-in mono 48 kHz capture and recognizable speech replay, including simultaneous 48 kHz playback; wired-headset capture is unqualified."
+  },
+  "fm-radio": {
+    "hardware": "Present",
+    "status": "Supported",
+    "note": "Recognizable station audio through wired headphones with fitted EQ/ALC; playback stops at the selected duration."
+  },
+  "modem-and-mobile-service": {
+    "hardware": "Unknown",
+    "status": "Not supported",
+    "note": ""
+  },
+  "bluetooth": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "RAM pairing, bidirectional OPP, PAN data and Internet ping, and short SBC A2DP playback to a Linux PC. Physical Bluetooth peripherals and sustained operation are unqualified."
+  },
+  "wi-fi": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "RAM station and access-point modes work with WPA2-PSK/CCMP, DHCP and file transfer in both directions. Station DNS and HTTP Internet access work through a shared PC connection; sustained throughput is unqualified. Per-station signal statistics are unavailable."
+  },
+  "camera": {
+    "hardware": "Present",
+    "status": "Supported",
+    "note": "Native GC032A 640×476 NV16, rotation 0°, unrotated pixels and capture after RTC wake. CPU JPEG and hardware rotation accept saved native frames. JPEG may process a separate compatible input during capture; one-buffer capture can overlap rotation of a separately saved native frame. Live pipelines, sustained concurrency and absolute color accuracy are unqualified."
+  },
+  "charger-status": {
+    "hardware": "Present",
+    "status": "Supported",
+    "note": "Input presence and USB source classification respond without a battery. Charging is unqualified."
+  },
+  "battery-telemetry": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "Voltage, current and charge counter respond on USB without a battery. Measurements with a battery are unqualified; battery percentage is unavailable."
+  },
+  "soc-temperature": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "SoC temperature readings respond; physical accuracy is unqualified."
+  },
+  "auxiliary-adc": {
+    "hardware": "Unknown",
+    "status": "Unknown",
+    "note": ""
+  },
+  "real-time-clock": {
+    "hardware": "Present",
+    "status": "Supported",
+    "note": "Clock readback and RTC-alarm wake in USB-powered RAM sessions."
+  },
+  "other-battery-functions": {
+    "hardware": "Unknown",
+    "status": "Not supported",
+    "note": ""
+  },
+  "vibration": {
+    "hardware": "Present",
+    "status": "Supported",
+    "note": "Separate motor with binary FF_RUMBLE effects; short pulses and stopping are supported."
+  },
+  "indicator-leds": {
+    "hardware": "Unknown",
+    "status": "Not supported",
+    "note": ""
+  },
+  "power-off": {
+    "status": "Unknown",
+    "note": "Battery-only power-off and powerbank output are unqualified."
+  },
+  "suspend": {
+    "status": "Partial",
+    "note": "USB-powered s2idle with RTC and red-call-key wake, readable display restoration, mounted ext4 storage and idle Bluetooth retaining its bond and post-wake transfer. Active-radio sleep is unqualified."
+  },
+  "reboot": {
+    "status": "Not supported",
+    "note": ""
+  },
+  "fplinux-armada": {
+    "status": "Unknown",
+    "note": "Application use on this phone is unqualified."
+  },
+  "brightness-control": {
+    "status": "Unknown",
+    "note": ""
+  },
+  "tyrquake": {
+    "status": "Unknown",
+    "note": ""
+  },
+  "built-in-microphone": {
+    "hardware": "Present",
+    "status": "Supported",
+    "note": "Built-in mono 48 kHz capture with simultaneous 48 kHz playback."
+  },
+  "headset-microphone": {
+    "hardware": "Unknown",
+    "status": "Unknown",
+    "note": "Wired-headset recording is unqualified."
+  },
+  "automatic-audio-routing": {
+    "status": "Not supported",
+    "note": "Output selection is explicit. Jack insertion/removal is detected; output switching remains manual."
+  },
+  "bluetooth-pairing": {
+    "status": "Supported",
+    "note": "Classic pairing in the RAM profile with a Linux PC."
+  },
+  "bluetooth-file-transfer": {
+    "status": "Supported",
+    "note": "Bidirectional OPP in the RAM profile; a transfer also works after RTC-woken idle Bluetooth sleep."
+  },
+  "bluetooth-pan-internet": {
+    "status": "Partial",
+    "note": "RAM PAN DHCP, bidirectional TCP transfer and external IPv4 ping work; DNS, HTTP and sustained operation over PAN are unqualified."
+  },
+  "bluetooth-a2dp-linux-pc": {
+    "status": "Partial",
+    "note": "Short 48 kHz stereo SBC playback to a Linux PC in the RAM profile; long playback, reconnect and suspend are unqualified."
+  },
+  "bluetooth-a2dp-headsets": {
+    "status": "Unknown",
+    "note": "Physical Bluetooth headsets have not been tested."
+  },
+  "bluetooth-keyboard": {
+    "status": "Unknown",
+    "note": "Physical Bluetooth keyboard input has not been tested."
+  },
+  "bluetooth-mouse": {
+    "status": "Unknown",
+    "note": "Physical Bluetooth mouse input has not been tested."
+  },
+  "mobile-calls": {
+    "status": "Not supported",
+    "note": ""
+  },
+  "sms": {
+    "status": "Not supported",
+    "note": ""
+  },
+  "mobile-data": {
+    "status": "Not supported",
+    "note": ""
+  },
+  "ffmpeg": {
+    "status": "Unknown",
+    "note": ""
+  }
+}

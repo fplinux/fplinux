@@ -11,11 +11,13 @@ from fplinux_cli.build.device_tree import exact_path_properties
 from fplinux_cli.build.display import render_bootstrap_display, render_linux_display_files
 
 from tests import ROOT
-from tests.process import run_process
-from tests.small.build.test_display import (
-    panel_profile,  # noqa: F401 -- pytest fixture discovery.
-    panel_root,  # noqa: F401 -- pytest fixture dependency.
+from tests.fixtures.display import (
+    panel_profile as panel_profile,  # noqa: PLC0414 -- pytest fixture export.
 )
+from tests.fixtures.display import (
+    panel_root as panel_root,  # noqa: PLC0414 -- pytest fixture export.
+)
+from tests.process import run_process
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -67,9 +69,9 @@ def test_compiled_panel_data_preserves_sequences_and_projects_pin_base_changes( 
                 "-I",
                 str(tmp_path),
                 "-I",
-                str(ROOT / "platforms/ums9117/linux/drivers/gpu/drm/ums9117"),
+                str(ROOT / "platforms/ums9117/linux/overlay/drivers/gpu/drm/ums9117"),
                 "-I",
-                str(ROOT / "tests/host_tool/ums9117/lcm-compat"),
+                str(ROOT / "tests/fixtures/ums9117-kernel/lcm-compat"),
                 str(ROOT / f"tests/host_tool/build/fixtures/panel-{consumer}.c"),
                 "-o",
                 str(executable),

@@ -89,7 +89,12 @@ def autonomous_archive(portable_archive: PortableArchive) -> AutonomousArchive:
     runner = root / "runner/run.py"
     with runner.open("a", encoding="utf-8") as stream:
         stream.write(
-            "\n" + (ROOT / "tests/fixtures/processes/autonomous_phone_backend.py").read_text()
+            "\n"
+            + (
+                ROOT
+                / "tests/host_process/runtime/fixtures/autonomous-archive"
+                / "autonomous_phone_backend.py"
+            ).read_text()
         )
     (root / "phone-backup-path").write_text(str(archive.dump), encoding="utf-8")
     shutil.copyfile(

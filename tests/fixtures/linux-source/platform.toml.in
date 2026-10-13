@@ -5,6 +5,7 @@ aliases = []
 compatible = "example,%(name)s"
 
 [linux]
+overlay = "platforms/%(name)s/linux/overlay"
 arch = "arm"
 source_lock = "%(source_lock)s"
 dts_directory = "arch/%(name)s/boot/dts"

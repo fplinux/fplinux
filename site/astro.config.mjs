@@ -1,10 +1,12 @@
 // @ts-check
 import { defineConfig } from "astro/config";
+import { satteri } from "@astrojs/markdown-satteri";
 import starlight from "@astrojs/starlight";
 import starlightLinksValidator from "starlight-links-validator";
 import starlightImageZoom from "starlight-image-zoom";
 import { pluginCollapsibleSections } from "@expressive-code/plugin-collapsible-sections";
 import { base, site } from "./config/site.mjs";
+import { noticesMarkdown } from "./src/notices-markdown.ts";
 
 const offline = process.env.FPLINUX_SITE_OFFLINE === "1";
 
@@ -41,6 +43,7 @@ export default defineConfig({
 			},
 			pagefind: !offline,
 			plugins: [starlightLinksValidator(), starlightImageZoom()],
+			routeMiddleware: "./src/notices-route-data.ts",
 			sidebar: [
 				{ items: pages("start/build", "start/run"), label: "Get started" },
 				{
@@ -142,6 +145,7 @@ export default defineConfig({
 			title: "FPLinux",
 		}),
 	],
+	markdown: { processor: satteri({ mdastPlugins: [noticesMarkdown] }) },
 	prefetch: offline ? false : undefined,
 	site,
 });

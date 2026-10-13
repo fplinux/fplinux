@@ -10,5 +10,7 @@ unknown_z = "@TARGET@"
 unknown_a = "%(target)s"
 
 [linux]
+copies = []
+overlay = "linux/overlay"
 memory = { size = 0x0100, base = 0x8000 }
 config_fragment = "@CONFIG@"

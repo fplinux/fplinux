@@ -1,0 +1,25 @@
+{
+  "features": [
+    {
+      "group": "Access",
+      "guide": "use/connect#shell",
+      "id": "second-feature",
+      "implementation": "Implemented",
+      "kind": "system",
+      "label": "Connection",
+      "scope": "both",
+      "verification": "Device-tested"
+    },
+    {
+      "group": "Input",
+      "guide": "use/terminal",
+      "id": "first-feature",
+      "implementation": "Implemented",
+      "kind": "hardware",
+      "label": "Input device",
+      "scope": "detail",
+      "verification": "Not device-tested"
+    }
+  ],
+  "groups": ["Input", "Access"]
+}

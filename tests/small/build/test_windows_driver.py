@@ -11,8 +11,8 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-from fplinux_cli.build import windows_driver
-from fplinux_cli.build.windows_driver import _build_driver, _extract_redist
+from fplinux_cli.build.host_tools import windows_driver
+from fplinux_cli.build.host_tools.windows_driver import _build_driver, _extract_redist
 
 
 def test_relocated_driver_build_recipe_runs_without_the_project_package(tmp_path: Path) -> None:
@@ -46,7 +46,7 @@ def test_redist_projection_requires_both_files_to_be_redistributable(
         entries += "Redist\\wdf\\x64\\winusbcoinstaller2.dll\n"
     (extracted / "redist.txt.x64").write_text(entries, encoding="utf-8")
     with mock.patch(
-        "fplinux_cli.build.windows_driver.subprocess.run",
+        "fplinux_cli.build.host_tools.windows_driver.subprocess.run",
         return_value=subprocess.CompletedProcess([], 0),
     ):
         if not listed:
@@ -69,7 +69,7 @@ def test_native_embedder_receives_explicit_epoch_without_changing_host_environme
     source = tmp_path / "source"
     source.mkdir()
     with mock.patch(
-        "fplinux_cli.build.windows_driver.subprocess.run",
+        "fplinux_cli.build.host_tools.windows_driver.subprocess.run",
         return_value=subprocess.CompletedProcess([], 0),
     ) as processes:
         _build_driver(

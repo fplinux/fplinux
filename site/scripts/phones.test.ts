@@ -14,6 +14,7 @@ import { documentationDigest } from "./documentation-inputs.ts";
 
 const phoneCheckout = (root: string) => {
 	const contents: Record<string, string> = {
+		"THIRD_PARTY_NOTICES.md": "Synthetic redistribution notice\n",
 		"platforms/example/platform.toml":
 			'[identity]\nvendor = "Example"\nsoc = "CHIP"\naliases = ["ALIAS"]\n',
 		"site/src/data/phones.json":
@@ -106,6 +107,7 @@ void test("documentation receipts track phone sources and retain unrelated drive
 	writeFileSync(driver, "/* unrelated implementation */\n");
 	assert.equal(await documentationDigest(root), original);
 	for (const relative of [
+		"THIRD_PARTY_NOTICES.md",
 		"targets/first/target.toml",
 		"platforms/example/platform.toml",
 		"targets/first/display/panel.toml",

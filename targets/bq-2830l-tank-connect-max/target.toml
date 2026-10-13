@@ -28,7 +28,7 @@ packages = ["fplinux-audio", "fplinux-font-terminus-8x16", "fplinux-wifi"]
 packages = []
 
 [linux]
-config_fragment = "linux/config.fragment"
+config_fragment = "linux/config/config.fragment"
 memory = { base = 0x80200000, size = 0x03c00000 }
 dtb = "unisoc/ums9117-bq-2830l-tank-connect-max.dtb"
 debug_dtb = "ums9117-bq-2830l-tank-connect-max.dtb"
@@ -45,149 +45,31 @@ forbidden_config = [
   "CONFIG_ATA=y",
   "CONFIG_NVME_CORE=y",
 ]
-
-[[linux.copies]]
-source = "linux/dts/ums9117-bq-2830l-tank-connect-max.dts"
-destination = "arch/arm/boot/dts/unisoc/ums9117-bq-2830l-tank-connect-max.dts"
-
-[[linux.copies]]
-source = "linux/drivers/gpu/drm/ums9117/bq-2830l-drm.c"
-destination = "drivers/gpu/drm/ums9117/bq-2830l-drm.c"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/bq2830l-radio-power.c"
-destination = "drivers/mmc/host/bq2830l-radio-power.c"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/bq2830l-radio.h"
-destination = "drivers/mmc/host/bq2830l-radio.h"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/marlin2-sdio.c"
-destination = "drivers/mmc/host/marlin2-sdio.c"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/marlin2-packet.h"
-destination = "drivers/mmc/host/marlin2-packet.h"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/marlin2-packet-codec.c"
-destination = "drivers/mmc/host/marlin2-packet-codec.c"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/marlin2-packet-sdio.c"
-destination = "drivers/mmc/host/marlin2-packet-sdio.c"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/marlin2-transport.c"
-destination = "drivers/mmc/host/marlin2-transport.c"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/marlin2-transport.h"
-destination = "drivers/mmc/host/marlin2-transport.h"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/marlin2-transport-wire.c"
-destination = "drivers/mmc/host/marlin2-transport-wire.c"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/marlin2-transport-wire.h"
-destination = "drivers/mmc/host/marlin2-transport-wire.h"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/marlin2-bluetooth.c"
-destination = "drivers/mmc/host/marlin2-bluetooth.c"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/marlin2-bluetooth.h"
-destination = "drivers/mmc/host/marlin2-bluetooth.h"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/marlin2-bluetooth-wire.c"
-destination = "drivers/mmc/host/marlin2-bluetooth-wire.c"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/marlin2-bluetooth-wire.h"
-destination = "drivers/mmc/host/marlin2-bluetooth-wire.h"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/marlin2-fm.c"
-destination = "drivers/mmc/host/marlin2-fm.c"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/marlin2-fm.h"
-destination = "drivers/mmc/host/marlin2-fm.h"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/marlin2-fm-wire.c"
-destination = "drivers/mmc/host/marlin2-fm-wire.c"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/marlin2-fm-wire.h"
-destination = "drivers/mmc/host/marlin2-fm-wire.h"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/marlin2-wlan.h"
-destination = "drivers/mmc/host/marlin2-wlan.h"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/marlin2-wlan.c"
-destination = "drivers/mmc/host/marlin2-wlan.c"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/marlin2-wlan-wire.h"
-destination = "drivers/mmc/host/marlin2-wlan-wire.h"
-
-[[linux.copies]]
-source = "linux/drivers/mmc/host/marlin2-wlan-wire.c"
-destination = "drivers/mmc/host/marlin2-wlan-wire.c"
-
-[[linux.copies]]
-source = "linux/bindings/mfd/bq,2830l-radio-pins.yaml"
-destination = "Documentation/devicetree/bindings/mfd/bq,2830l-radio-pins.yaml"
-
-[[linux.copies]]
-source = "linux/bindings/net/wireless/bq,2830l-radio.yaml"
-destination = "Documentation/devicetree/bindings/net/wireless/bq,2830l-radio.yaml"
-
-[[linux.copies]]
-source = "linux/bindings/net/wireless/sprd,marlin2-sdio.yaml"
-destination = "Documentation/devicetree/bindings/net/wireless/sprd,marlin2-sdio.yaml"
-
-[[linux.copies]]
-source = "linux/dts/radio.dtsi"
-destination = "arch/arm/boot/dts/unisoc/radio.dtsi"
-
-[[linux.copies]]
-source = "linux/dts/camera.dtsi"
-destination = "arch/arm/boot/dts/unisoc/camera.dtsi"
-
-[[linux.copies]]
-source = "linux/dts/audio.dtsi"
-destination = "arch/arm/boot/dts/unisoc/audio.dtsi"
+overlay = "linux/overlay"
+copies = []
 
 [[linux.appends]]
-source = "linux/arch/arm/mach-ums9117/Kconfig"
+source = "linux/fragments/arch/arm/mach-ums9117/Kconfig"
 destination = "arch/arm/mach-ums9117/Kconfig"
 
 [[linux.appends]]
-source = "linux/dts/unisoc.Makefile"
+source = "linux/fragments/dts/unisoc.Makefile"
 destination = "arch/arm/boot/dts/unisoc/Makefile"
 
 [[linux.appends]]
-source = "linux/drivers/gpu/drm/ums9117/drm.Kconfig"
+source = "linux/fragments/drivers/gpu/drm/ums9117/drm.Kconfig"
 destination = "drivers/gpu/drm/Kconfig"
 
 [[linux.appends]]
-source = "linux/drivers/gpu/drm/ums9117/drm.Makefile"
+source = "linux/fragments/drivers/gpu/drm/ums9117/drm.Makefile"
 destination = "drivers/gpu/drm/ums9117/Makefile"
 
 [[linux.appends]]
-source = "linux/drivers/mmc/host/radio.Kconfig"
+source = "linux/fragments/drivers/mmc/host/radio-parent.Kconfig"
 destination = "drivers/mmc/host/Kconfig"
 
 [[linux.appends]]
-source = "linux/drivers/mmc/host/radio.Makefile"
+source = "linux/fragments/drivers/mmc/host/radio-parent.Makefile"
 destination = "drivers/mmc/host/Makefile"
 
 [bootstrap]

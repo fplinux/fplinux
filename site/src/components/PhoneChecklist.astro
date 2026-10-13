@@ -1,11 +1,12 @@
 ---
 import SupportBadge from "./SupportBadge.astro";
-import support from "../data/support.json";
+import { loadSupport } from "../data/support/index.ts";
 import { currentPhone } from "../data/phones.ts";
 
 const { phone } = Astro.locals.starlightRoute.entry.data;
 if (!phone) throw new Error("Phone checklist requires a phone page.");
 currentPhone(phone);
+const support = loadSupport();
 const rows = support.features.filter((item) => item.scope !== "overview");
 const groups = support.groups.filter((group) =>
 	rows.some((item) => item.group === group)
@@ -49,7 +50,7 @@ const defaultNote: Record<string, string> = {
 					{rows
 						.filter((item) => item.group === group)
 						.map((item): astroHTML.JSX.Children => {
-							const state = item.phones[phone as keyof typeof item.phones];
+							const state = item.phones[phone];
 							if (!state)
 								throw new Error(`Missing ${phone} support for ${item.id}`);
 							return (

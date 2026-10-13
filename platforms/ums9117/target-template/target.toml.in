@@ -20,7 +20,7 @@ packages = ["fplinux-font-terminus-6x12"]
 packages = []
 
 [linux]
-config_fragment = "linux/config.fragment"
+config_fragment = "linux/config/config.fragment"
 memory = { base = 0x80200000, size = 0x03c00000 }
 dtb = "unisoc/ums9117-@TARGET@.dtb"
 debug_dtb = "ums9117-@TARGET@.dtb"
@@ -33,17 +33,15 @@ forbidden_config = [
   "CONFIG_ATA=y",
   "CONFIG_NVME_CORE=y",
 ]
-
-[[linux.copies]]
-source = "linux/dts/ums9117-@TARGET@.dts"
-destination = "arch/arm/boot/dts/unisoc/ums9117-@TARGET@.dts"
+overlay = "linux/overlay"
+copies = []
 
 [[linux.appends]]
-source = "linux/arch/arm/mach-ums9117/Kconfig"
+source = "linux/fragments/arch/arm/mach-ums9117/Kconfig"
 destination = "arch/arm/mach-ums9117/Kconfig"
 
 [[linux.appends]]
-source = "linux/dts/unisoc.Makefile"
+source = "linux/fragments/dts/unisoc.Makefile"
 destination = "arch/arm/boot/dts/unisoc/Makefile"
 
 [bootstrap]

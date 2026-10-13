@@ -90,7 +90,7 @@ SPDX-FileCopyrightText = "2005-2020 Rich Felker, et al."
 SPDX-License-Identifier = "MIT"
 
 [[annotations]]
-path = "platforms/ums9117/bootstrap/ums9117-linux.ld"
+path = "platforms/ums9117/bootstrap/build/ums9117-linux.ld"
 precedence = "override"
 SPDX-FileCopyrightText = "fpdoom contributors"
 SPDX-License-Identifier = "Unlicense"

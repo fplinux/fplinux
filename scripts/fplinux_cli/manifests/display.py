@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import tomllib
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import common
@@ -17,6 +18,7 @@ from fplinux_cli.manifests.values import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
 
@@ -61,7 +63,13 @@ def _pins(value: object, name: str) -> list[list[int]]:
     return result
 
 
-def load_display(target: str, raw: object, *, root: Path | None = None) -> dict[str, Any]:
+def load_display(
+    target: str,
+    raw: object,
+    *,
+    root: Path | None = None,
+    captured: Mapping[str, bytes] | None = None,
+) -> dict[str, Any]:
     """Normalize a panel profile, or zero geometry for a headless target."""
     if TARGET_NAME.fullmatch(target) is None:
         fail(f"invalid target name: {target}")
@@ -79,9 +87,19 @@ def load_display(target: str, raw: object, *, root: Path | None = None) -> dict[
         return {"width": 0, "height": 0, "boot_font": boot_font, "panel": None, "source": None}
     source = relative_value(display["panel"], "target display panel")
     path = (root if root is not None else common.ROOT) / "targets" / target / source
-    if path.is_symlink() or not path.is_file():
-        fail(f"target display panel is missing or invalid: {path}")
-    panel_raw = load_toml(path)
+    if captured is None:
+        if path.is_symlink() or not path.is_file():
+            fail(f"target display panel is missing or invalid: {path}")
+        panel_raw = load_toml(path)
+    else:
+        relative = f"targets/{target}/{source}"
+        contents = captured.get(relative)
+        if contents is None:
+            fail(f"target display panel is missing from captured sources: {relative}")
+        try:
+            panel_raw = tomllib.loads(contents.decode("utf-8"))
+        except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
+            fail(f"invalid TOML in {relative}: {error}")
     panel = exact_table(
         panel_raw,
         {

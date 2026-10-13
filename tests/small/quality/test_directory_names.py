@@ -52,6 +52,44 @@ def test_package_marker_does_not_make_its_ancestor_a_package() -> None:
 
 
 @pytest.mark.parametrize(
+    "owner",
+    ["platforms/demo", "targets/demo", "platforms/demo/target-template"],
+)
+def test_linux_overlay_accepts_the_kernel_documentation_directory(owner: str) -> None:
+    """Full Linux binding paths retain the kernel's prescribed directory name."""
+    validate_directory_names(
+        [f"{owner}/linux/overlay/Documentation/devicetree/bindings/demo.yaml"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "invalid_directory"),
+    [
+        ("docs/Documentation/guide.txt", "docs/Documentation"),
+        ("platforms/demo/linux/Documentation/guide.txt", "platforms/demo/linux/Documentation"),
+        (
+            "resources/linux/overlay/Documentation/guide.txt",
+            "resources/linux/overlay/Documentation",
+        ),
+        ("targets/demo/linux/overlay/OtherCaps/input.txt", "targets/demo/linux/overlay/OtherCaps"),
+        (
+            "targets/demo/linux/overlay/Documentation/OtherCaps/input.txt",
+            "targets/demo/linux/overlay/Documentation/OtherCaps",
+        ),
+        ("targets/demo/linux/resources_bad/input.txt", "targets/demo/linux/resources_bad"),
+    ],
+    ids=["ordinary-docs", "outside-overlay", "outside-owner", "sibling", "child", "resource"],
+)
+def test_linux_documentation_exception_keeps_neighboring_directory_policy(
+    path: str, invalid_directory: str
+) -> None:
+    """The external name exempts only one directory inside its Linux owner."""
+    with pytest.raises(SystemExit) as error:
+        validate_directory_names([path])
+    assert f"must use kebab-case: {invalid_directory}" in str(error.value)
+
+
+@pytest.mark.parametrize(
     ("directory", "package", "policy"),
     [
         pytest.param("PhoneTools", False, "kebab-case", id="uppercase-resource"),

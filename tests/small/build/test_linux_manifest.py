@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from fplinux_cli.manifests.linux import discover_linux_targets
 
+from tests import ROOT
 from tests.fixtures import linux_inputs
 
 
@@ -81,7 +82,10 @@ class LinuxManifestTests:
             targets = discover_linux_targets(root, {"base": {"sha256": "1" * 64}}, "1" * 64)
 
         assert (len(targets)) == (1)
-        assert (targets[0].config["linux"]["copies"][0]["source"]) == ("linux/board.c")
+        assert {step["destination"] for step in targets[0].config["linux"]["copies"]} == {
+            "arch/arm/boot/dts/phone.dts",
+            "drivers/demo/phone.c",
+        }
 
     @staticmethod
     def test_profile_patch_inputs_are_retained_for_projection_conflict_checks() -> None:
@@ -100,3 +104,43 @@ class LinuxManifestTests:
             targets = discover_linux_targets(root, {"base": {"sha256": "1" * 64}}, "1" * 64)
 
         assert (targets[0].config["microsd"]["linux_patches"]) == (["linux/card.patch"])
+
+    @staticmethod
+    def test_captured_overlay_and_panel_discovery_uses_only_snapshot_inputs(
+        tmp_path: Path,
+    ) -> None:
+        """Later checkout changes cannot alter captured operations or generated panel inputs."""
+        linux_inputs.platform(tmp_path, "demo", source_lock="base", arch="arm")
+        manifest = linux_inputs.target(tmp_path, "phone", platform_name="demo")
+        with manifest.open("a", encoding="utf-8") as output:
+            output.write('\n[display]\npanel = "display/panel.toml"\nboot_font = "6x8"\n')
+        panel = tmp_path / "targets/phone/display/panel.toml"
+        panel.parent.mkdir()
+        panel.write_bytes((ROOT / "tests/fixtures/display/panel.toml").read_bytes())
+        overlay = tmp_path / "targets/phone/linux/overlay"
+        driver = linux_inputs.write(tmp_path, "targets/phone/linux/overlay/drivers/new.c", "old\n")
+        captured = {
+            path.relative_to(tmp_path).as_posix(): path.read_bytes()
+            for path in tmp_path.rglob("*")
+            if path.is_file()
+        }
+        driver.unlink()
+        linux_inputs.write(tmp_path, "targets/phone/linux/overlay/drivers/later.c", "later\n")
+        manifest.write_text("not TOML\n")
+        panel.write_text("not TOML\n")
+
+        discovered = discover_linux_targets(
+            tmp_path, {"base": {"sha256": "1" * 64}}, "1" * 64, captured=captured
+        )
+
+        assert discovered[0].config["display"]["width"] == 128
+        assert discovered[0].config["display"]["height"] == 160
+        assert discovered[0].config["linux"]["copies"] == [
+            {"source": "linux/board.dts", "destination": "arch/arm/boot/dts/phone.dts"},
+            {
+                "source": "linux/overlay/drivers/demo/phone.c",
+                "destination": "drivers/demo/phone.c",
+            },
+            {"source": "linux/overlay/drivers/new.c", "destination": "drivers/new.c"},
+        ]
+        assert (overlay / "drivers/later.c").is_file()

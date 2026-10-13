@@ -13,7 +13,7 @@ from unittest import mock
 
 import pytest
 from fplinux_cli import common
-from fplinux_cli.cli import probe
+from fplinux_cli.build import probe
 from fplinux_cli.environment import kern
 from fplinux_cli.reporting import run as output
 from fplinux_cli.reporting.run import RunReporter, Stage

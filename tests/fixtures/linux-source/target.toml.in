@@ -8,6 +8,7 @@ compatible = "example,%(name)s"
 
 [linux]
 patches = []
+overlay = "linux/overlay"
 
 [[linux.copies]]
 source = "driver.c"

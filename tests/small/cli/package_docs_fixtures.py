@@ -17,6 +17,7 @@ def write_offline_export(
     root: Path,
     *,
     text: str = "Current documentation",
+    notices: bytes = b"Synthetic redistribution notice\n",
     phone_inputs: dict[str, bytes] | None = None,
 ) -> dict[str, bytes]:
     """Stand in for the separate Node build, retaining real receipt and file collection."""
@@ -26,6 +27,7 @@ def write_offline_export(
     source.write_bytes(source_bytes)
     source.chmod(0o644)
     inputs = {
+        "THIRD_PARTY_NOTICES.md": notices,
         "site/src/content/docs/index.mdx": source_bytes,
         "site/src/data/phones.json": b"[]\n",
     }

@@ -75,7 +75,7 @@ class CliCacheLockTests:
         [
             (
                 ["build", "target", "--jobs", "1"],
-                "fplinux_cli.cli.build.build",
+                "fplinux_cli.build.workflow.build",
                 True,
                 "target",
                 None,
@@ -104,7 +104,7 @@ class CliCacheLockTests:
             ),
             (
                 ["checksum", "demo-aport"],
-                "fplinux_cli.cli.checksum.checksum_aport",
+                "fplinux_cli.alpine.checksum.checksum_aport",
                 True,
                 None,
                 None,
@@ -118,7 +118,7 @@ class CliCacheLockTests:
             ),
             (
                 ["probe-build", "probe.c", "--output", ".cache/tools/probe"],
-                "fplinux_cli.cli.probe.build_probe",
+                "fplinux_cli.build.probe.build_probe",
                 True,
                 None,
                 None,
@@ -127,7 +127,7 @@ class CliCacheLockTests:
             (["prune", "--apply"], "fplinux_cli.cache.prune.operations.prune", True, None, None),
             (
                 ["package", "target"],
-                "fplinux_cli.cli.package.package_target",
+                "fplinux_cli.packaging.archive.package_target",
                 False,
                 "target",
                 None,
@@ -276,7 +276,7 @@ class CliCacheLockTests:
     def test_build_forwards_offline_to_the_dispatcher(self, dispatch_root: Path) -> None:
         """The parsed build switch reaches its callback without changing lock mode."""
         events, build = run_dispatch(
-            dispatch_root, ["build", "target", "--offline"], "fplinux_cli.cli.build.build"
+            dispatch_root, ["build", "target", "--offline"], "fplinux_cli.build.workflow.build"
         )
 
         assert (events) == (
@@ -292,10 +292,10 @@ class CliCacheLockTests:
     @pytest.mark.parametrize(
         ("arguments", "callback_name"),
         [
-            (["build", "target"], "fplinux_cli.cli.build.build"),
+            (["build", "target"], "fplinux_cli.build.workflow.build"),
             (["check", "kernel"], "fplinux_cli.quality.checks.check"),
             (["inspect", "bundle", "target"], "fplinux_cli.cli.inspect.inspect_bundle"),
-            (["package", "target"], "fplinux_cli.cli.package.package_target"),
+            (["package", "target"], "fplinux_cli.packaging.archive.package_target"),
             (["run", "target"], "fplinux_cli.runtime.runner.run_target"),
             (["console", "target"], "fplinux_cli.cli.runtime.console_target"),
             (["verify", "target"], "fplinux_cli.cli.runtime.verify_booted"),
@@ -470,7 +470,7 @@ class CliCacheLockTests:
         events, build = run_dispatch(
             dispatch_root,
             ["build", "target", "--profile", "microsd-uboot"],
-            "fplinux_cli.cli.build.build",
+            "fplinux_cli.build.workflow.build",
         )
 
         assert (events) == (
@@ -494,7 +494,7 @@ class CliCacheLockTests:
         [
             (
                 ["package", "target", "--profile", "microsd-uboot", "--candidate"],
-                "fplinux_cli.cli.package.package_target",
+                "fplinux_cli.packaging.archive.package_target",
             ),
             (
                 ["run", "target", "--profile", "microsd-uboot"],
@@ -556,7 +556,7 @@ class CliCacheLockTests:
         events, package = run_dispatch(
             dispatch_root,
             ["package", "target", "--candidate", *options],
-            "fplinux_cli.cli.package.package_target",
+            "fplinux_cli.packaging.archive.package_target",
         )
 
         assert events == [
@@ -587,7 +587,7 @@ class CliCacheLockTests:
             ),
             (
                 ["package", "nokia-ta1618", "--boot", "microsd", "--candidate"],
-                "fplinux_cli.cli.package.package_target",
+                "fplinux_cli.packaging.archive.package_target",
                 mock.call(
                     "nokia-ta1618",
                     profile=None,
@@ -663,7 +663,7 @@ class CliCacheLockTests:
     @pytest.mark.parametrize(
         ("command", "callback"),
         [
-            ("build", "fplinux_cli.cli.build.build"),
+            ("build", "fplinux_cli.build.workflow.build"),
             ("console", "fplinux_cli.cli.runtime.console_target"),
             ("verify", "fplinux_cli.cli.runtime.verify_booted"),
         ],

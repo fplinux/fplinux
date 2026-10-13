@@ -79,7 +79,9 @@ class RegistrationContext:
             [
                 sys.executable,
                 "-I",
-                str(ROOT / "tests/fixtures/processes/alpine_registration_state.py"),
+                str(
+                    ROOT / "tests/small/alpine/fixtures/registration/alpine_registration_state.py"
+                ),
                 str(self.root if root is None else root),
                 json.dumps(self.names if names is None else names),
                 json.dumps(self.selected if selected is None else selected),

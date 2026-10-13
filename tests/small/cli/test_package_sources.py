@@ -7,7 +7,7 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from fplinux_cli import common
-from fplinux_cli.cli.package_sources import project_source_files
+from fplinux_cli.packaging.sources import project_source_files
 
 if TYPE_CHECKING:
     from pathlib import Path

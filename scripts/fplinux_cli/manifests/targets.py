@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import re
 from itertools import pairwise
+from pathlib import PurePosixPath
 from typing import Any
 
 from fplinux_cli.common import fail, load_toml
@@ -21,6 +22,7 @@ from fplinux_cli.manifests.identity import (
     validate_record_prefix,
     validate_target_identity,
 )
+from fplinux_cli.manifests.linux import normalize_linux_integration
 from fplinux_cli.manifests.paths import (
     normalize_profile,
     platform_asset_lock_path,
@@ -37,7 +39,6 @@ from fplinux_cli.manifests.values import (
     nonempty_string,
     package_array,
     path_array,
-    path_steps,
     relative_value,
     string_array,
 )
@@ -142,6 +143,7 @@ def load_target(
             "memory",
             "debug_dtb",
             "patches",
+            "overlay",
             "copies",
             "appends",
             "forbidden_config",
@@ -159,9 +161,14 @@ def load_target(
         fail("target linux memory range is invalid")
     relative_value(linux.get("dtb"), "target linux dtb")
     relative_value(linux.get("debug_dtb"), "target linux debug_dtb")
-    path_array(linux.get("patches"), "target linux patches", allow_empty=True)
-    path_steps(linux.get("copies"), "target linux copies")
-    path_steps(linux.get("appends"), "target linux appends")
+    linux.update(
+        normalize_linux_integration(
+            linux,
+            "target linux",
+            root=path.parents[2],
+            source_base=PurePosixPath("targets") / target,
+        )
+    )
     string_array(linux.get("forbidden_config"), "target linux forbidden_config")
     string_array(linux.get("forbidden_dtb_markers"), "target linux forbidden_dtb_markers")
 

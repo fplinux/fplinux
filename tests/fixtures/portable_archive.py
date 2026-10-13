@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from fplinux_cli.cli.autonomous_package import runtime_python_files
+from fplinux_cli.packaging.autonomous import runtime_python_files
 
 from tests import ROOT
 from tests.bundle_support import file_record
@@ -108,7 +108,7 @@ def portable_archive(tmp_path: Path) -> Iterator[PortableArchive]:
         target_root = archive / "targets/nokia-ta1618"
         target_root.mkdir(parents=True)
         shutil.copyfile(
-            ROOT / "tests/fixtures/processes/portable_device_data_parser.py",
+            ROOT / "tests/fixtures/portable-archive/portable_device_data_parser.py",
             target_root / "device_data.py",
         )
         provider = archive / "platforms/ums9117/host/stock_image.py"

@@ -11,11 +11,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
-import check as source_check
 import pytest
 from fplinux_cli.cli import target_new
 from fplinux_cli.common import ROOT
 from fplinux_cli.manifests.identity import validate_target_identity
+from fplinux_cli.quality import source as source_check
 from fplinux_cli.quality.formatting.canonical import (
     canonical_outputs,
     formatter_commands,

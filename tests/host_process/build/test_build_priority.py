@@ -24,7 +24,7 @@ class BuildPriorityTests:
     )
     def test_worker_and_child_keep_at_least_nice_ten(self, initial: int, expected: int) -> None:
         """A process at nice 0 moves to 10, one at 15 stays, and a later child inherits it."""
-        fixture = ROOT / "tests/fixtures/processes/build_priority.py"
+        fixture = ROOT / "tests/host_process/build/fixtures/build-priority/build_priority.py"
         runner_nice = os.getpriority(os.PRIO_PROCESS, 0)
         if runner_nice > initial:
             pytest.skip(f"an unprivileged process at nice {runner_nice} cannot start at {initial}")

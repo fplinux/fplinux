@@ -167,7 +167,7 @@ def command_action(
 
         action = partial(check_commit_message, args.message_file)
     elif args.command == "build":
-        from fplinux_cli.cli.build import build  # noqa: PLC0415 -- selected backend.
+        from fplinux_cli.build.workflow import build  # noqa: PLC0415 -- selected backend.
 
         action = partial(
             build,
@@ -179,15 +179,19 @@ def command_action(
             offline=args.offline,
         )
     elif args.command == "checksum":
-        from fplinux_cli.cli.checksum import checksum_aport  # noqa: PLC0415 -- selected backend.
+        from fplinux_cli.alpine.checksum import (  # noqa: PLC0415 -- selected backend.
+            checksum_aport,
+        )
 
         action = partial(checksum_aport, args.aport, offline=args.offline)
     elif args.command == "probe-build":
-        from fplinux_cli.cli.probe import build_probe  # noqa: PLC0415 -- selected backend.
+        from fplinux_cli.build.probe import build_probe  # noqa: PLC0415 -- selected backend.
 
         action = partial(build_probe, args.source, output=args.output)
     elif args.command == "package":
-        from fplinux_cli.cli.package import package_target  # noqa: PLC0415 -- selected backend.
+        from fplinux_cli.packaging.archive import (  # noqa: PLC0415 -- selected backend.
+            package_target,
+        )
 
         action = partial(
             package_target,

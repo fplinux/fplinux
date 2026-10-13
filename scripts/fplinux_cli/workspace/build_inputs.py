@@ -40,7 +40,10 @@ from .capture import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator, Mapping
     from pathlib import Path
+
+    from fplinux_cli.manifests.linux import LinuxTarget
 
 STAGED_BUILD_SOURCES = (
     "Containerfile",
@@ -89,7 +92,7 @@ _MATERIALIZED_BUILD_SOURCES = ("scripts/fplinux_cli/alpine/registration.py",)
 class SharedLinuxSources:
     """The staged Linux closure, with its causal files and ordered source operations."""
 
-    files: tuple[tuple[str, Path], ...] = ()
+    files: tuple[WorkspaceFile, ...] = ()
     causal_paths: frozenset[str] = frozenset()
     operations: tuple[tuple[str, str, str], ...] = ()
 
@@ -217,49 +220,78 @@ def target_build_source_files(
     return sorted(files.items())
 
 
+def _linux_source_operations(
+    targets: tuple[LinuxTarget, ...],
+) -> Iterator[tuple[str, str, str]]:
+    """Name the peer operations whose topology participates in a workspace recipe."""
+    for target in targets:
+        target_root = ROOT / "targets" / target.name
+        for owner, source_root, config in (
+            ("platform", ROOT, target.platform),
+            ("target", target_root, target.config),
+        ):
+            for relative in config["linux"]["patches"]:
+                yield (
+                    f"{owner}-patch",
+                    (source_root / relative).relative_to(ROOT).as_posix(),
+                    "",
+                )
+            for key in ("copies", "appends"):
+                operation = f"{owner}-{'copy' if key == 'copies' else 'append'}"
+                for step in config["linux"][key]:
+                    yield (
+                        operation,
+                        (source_root / step["source"]).relative_to(ROOT).as_posix(),
+                        step["destination"],
+                    )
+        for relative in target.config.get("microsd", {}).get("linux_patches", []):
+            yield "target-patch", f"targets/{target.name}/{relative}", ""
+
+
 def shared_linux_source_files(
-    target_config: dict[str, Any], sources: dict[str, Any]
+    target_config: dict[str, Any],
+    sources: dict[str, Any],
+    *,
+    captured_files: Mapping[str, WorkspaceFile],
 ) -> SharedLinuxSources:
-    """Separate board-owned copies from source operations shared by compatible builds."""
-    platform = load_platform(target_config["platform"])
+    """Capture peer sources once and classify operations from those exact bytes."""
+    platform_path = f"platforms/{target_config['platform']}/platform.toml"
+    platform = _captured_toml(captured_files[platform_path])
     source_lock = platform["linux"]["source_lock"]
     source = sources.get(source_lock)
     if not isinstance(source, dict):
         fail(f"unknown Linux source lock: {source_lock}")
     source_sha256 = sha256_value(source.get("sha256"), f"source {source_lock} sha256")
+    targets = discover_linux_targets(ROOT, sources, source_sha256)
     files: dict[str, Path] = {}
-    causal_paths: set[str] = set()
-    operations: list[tuple[str, str, str]] = []
-
-    def add_operation(operation: str, source: Path, destination: str) -> None:
-        relative = source.relative_to(ROOT).as_posix()
-        add_source_path(files, source)
-        operations.append((operation, relative, destination))
-        if is_shared_linux_operation(operation):
-            causal_paths.add(relative)
-
-    for target in discover_linux_targets(ROOT, sources, source_sha256):
+    for target in targets:
         target_root = ROOT / "targets" / target.name
         add_source_path(files, target_root / "target.toml")
         display_source = target.config["display"]["source"]
         if display_source is not None:
             add_source_path(files, target_root / display_source)
         add_source_path(files, ROOT / "platforms" / target.config["platform"] / "platform.toml")
-        for owner, source_root, config in (
-            ("platform", ROOT, target.platform),
-            ("target", target_root, target.config),
-        ):
-            for relative in config["linux"]["patches"]:
-                add_operation(f"{owner}-patch", source_root / relative, "")
-            for key in ("copies", "appends"):
-                operation = f"{owner}-{'copy' if key == 'copies' else 'append'}"
-                for step in config["linux"][key]:
-                    add_operation(operation, source_root / step["source"], step["destination"])
-        for relative in target.config.get("microsd", {}).get("linux_patches", []):
-            add_operation("target-patch", target_root / relative, "")
-    return SharedLinuxSources(
-        tuple(sorted(files.items())), frozenset(causal_paths), tuple(dict.fromkeys(operations))
+    for _operation, relative, _destination in _linux_source_operations(targets):
+        add_source_path(files, ROOT / relative)
+    captured = {
+        relative: captured_files[relative]
+        if relative in captured_files
+        else read_source_file(relative, source_path)
+        for relative, source_path in sorted(files.items())
+    }
+    targets = discover_linux_targets(
+        ROOT,
+        sources,
+        source_sha256,
+        captured={relative: source_file.contents for relative, source_file in captured.items()},
     )
+    operations = tuple(dict.fromkeys(_linux_source_operations(targets)))
+    causal_paths = frozenset(
+        relative
+        for operation, relative, _destination in operations
+        if is_shared_linux_operation(operation)
+    )
+    return SharedLinuxSources(tuple(captured.values()), causal_paths, operations)
 
 
 def _captured_toml(source: WorkspaceFile) -> dict[str, Any]:
@@ -321,17 +353,17 @@ def target_workspace_snapshot(
     sources, source_declarations = _captured_source_declarations(
         causal_files, target, target_config["platform"]
     )
-    linux_sources = shared_linux_source_files(target_config, sources)
+    linux_sources = shared_linux_source_files(target_config, sources, captured_files=causal_files)
     materialized_sources = (
         *_MATERIALIZED_BUILD_SOURCES,
         "sources.lock.toml",
         f"platforms/{target_config['platform']}/loader/assets.lock.toml",
     )
     auxiliary_files = [causal_files.pop(relative) for relative in materialized_sources]
-    for relative, source in linux_sources.files:
+    for captured in linux_sources.files:
+        relative = captured.path
         if relative in causal_files:
             continue
-        captured = read_source_file(relative, source)
         if relative in linux_sources.causal_paths:
             causal_files[relative] = captured
         else:

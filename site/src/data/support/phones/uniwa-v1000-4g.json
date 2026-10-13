@@ -1,0 +1,261 @@
+{
+  "ram-boot": {
+    "status": "Supported",
+    "note": "RAM boot through D-pad Up and the USB loader, with a readable 320×240 landscape terminal."
+  },
+  "persistent-boot": {
+    "status": "Not supported",
+    "note": ""
+  },
+  "local-console": {
+    "status": "Partial",
+    "note": "Readable 320×240 landscape terminal in RAM and microSD profiles. The terminal returns after five-second idle RTC wake with a read-only microSD root. Full keypad input and exact color accuracy are unqualified."
+  },
+  "lcd-backlight": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "Logical levels 0, 5 and 10 control raw backlight levels 0, 17 and 34 in RAM. Idle RTC sleep darkens the display and restores it with a read-only microSD root. Brightness calibration, physical keypad control and other panel variants are unqualified."
+  },
+  "keypad-backlight": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "Keypad illumination is present. Its supply can be switched in software; physical on/off transitions are unqualified."
+  },
+  "usb-networking": {
+    "status": "Supported",
+    "note": "USB-NCM in RAM and microSD profiles."
+  },
+  "ssh-access": {
+    "status": "Supported",
+    "note": "Authenticated SSH over the local USB connection in RAM and microSD profiles."
+  },
+  "file-transfer": {
+    "status": "Supported",
+    "note": "USB file transfer to RAM, a microSD data card and the writable microSD system root."
+  },
+  "host-keyboard-bridge": {
+    "status": "Unknown",
+    "note": "USB host keyboard input is registered; its use on this target is unqualified."
+  },
+  "cpu-clock-reporting": {
+    "status": "Supported",
+    "note": "Lower-bound clock estimates in the microSD profile."
+  },
+  "manual-cpu-frequency-selection": {
+    "status": "Supported",
+    "note": "Selection between 768 MHz and 1 GHz in the microSD profile; voltage and sustained-load behavior are unqualified."
+  },
+  "ap-dmaengine": {
+    "hardware": "Unknown",
+    "status": "Unknown",
+    "note": ""
+  },
+  "image-rotation-engine": {
+    "hardware": "Present",
+    "status": "Supported",
+    "note": "NV16 quarter-turn rotation in the microSD profile, with output matching the CPU reference."
+  },
+  "jpeg-engine": {
+    "hardware": "Present",
+    "status": "Supported",
+    "note": "Hardware JPEG encoding and decoding at 640×480 and scaling to 320×240 in the microSD profile."
+  },
+  "native-image-output": {
+    "hardware": "Unknown",
+    "status": "Unknown",
+    "note": "On-phone image presentation is unqualified."
+  },
+  "image-rotation": {
+    "status": "Supported",
+    "note": "Hardware NV16 quarter-turn rotation matches the CPU reference in the microSD profile. On-phone preview is unqualified."
+  },
+  "jpeg-codec-and-scaling": {
+    "status": "Supported",
+    "note": "Hardware JPEG encoding and decoding at 640×480 and scaling to 320×240 in the microSD profile. On-phone presentation is unqualified."
+  },
+  "native-image-presentation": {
+    "status": "Unknown",
+    "note": "On-phone image presentation is unqualified."
+  },
+  "usb-host-mode": {
+    "hardware": "Unknown",
+    "status": "Not supported",
+    "note": ""
+  },
+  "removable-storage": {
+    "hardware": "Present",
+    "status": "Supported",
+    "note": "Data-card reads and writes in the RAM profile; files persist after power is removed. Insert before boot and keep installed while powered; no hot-swap."
+  },
+  "removable-system-root": {
+    "status": "Supported",
+    "note": "ext4 root grows to fill the card; installed packages and files persist after a cold start. Each start requires the USB loader; keep the card installed while powered."
+  },
+  "internal-phone-storage": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "Read-only raw NAND backup and device-data preparation. No mounting, writing or restoration."
+  },
+  "headphone-audio": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "An inserted 3.5 mm plug is detected. Stereo playback works with the tested three-contact headphones in the microSD profile. The tested four-contact headset plays each channel through both earpieces. Headset recording, other accessories, plug insertion/removal and automatic switching are unqualified."
+  },
+  "speaker-audio": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "Audible tone playback through the built-in speaker in the microSD profile. Speech and music quality are unqualified."
+  },
+  "phone-microphone": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "Built-in mono 48 kHz recording captures external tones in RAM and external tones and synthesized speech in the microSD profile. Speech quality and wired-headset recording are unqualified."
+  },
+  "fm-radio": {
+    "hardware": "Unknown",
+    "status": "Partial",
+    "note": "Band scan and timed headphone playback work in the RAM profile. Recognizable station reception and speaker output are unqualified."
+  },
+  "modem-and-mobile-service": {
+    "hardware": "Unknown",
+    "status": "Not supported",
+    "note": ""
+  },
+  "bluetooth": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "Classic pairing with a Linux PC in RAM and microSD profiles; bidirectional OPP in RAM. PAN Internet, short stereo A2DP playback and LE input from a software peer on a Linux PC work in the microSD profile. Physical peripherals, operation after sleep and range are unqualified."
+  },
+  "wi-fi": {
+    "hardware": "Unknown",
+    "status": "Not supported",
+    "note": "No supported FPLinux path has been established; physical hardware presence is unknown."
+  },
+  "camera": {
+    "hardware": "Present",
+    "status": "Supported",
+    "note": "BF20A6 native 640×480 NV16 in RAM and microSD profiles, with unrotated pixels. Continuous capture works in RAM; stream stop works in both profiles. Absolute color accuracy, exposure and other sensor controls are unqualified; no preview or photo application."
+  },
+  "charger-status": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "Connected USB power and CDP source classification respond without a battery. Disconnection detection and actual battery charging are unqualified."
+  },
+  "battery-telemetry": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "Voltage, current and charge counter respond on USB without a battery. Battery measurements and calibrated accuracy are unqualified; battery percentage is unavailable."
+  },
+  "soc-temperature": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "Temperature readings respond in the microSD profile; accuracy is unqualified."
+  },
+  "auxiliary-adc": {
+    "hardware": "Unknown",
+    "status": "Unknown",
+    "note": ""
+  },
+  "real-time-clock": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "RTC reads and five-second alarm wake work in an idle microSD session with a read-only system root. Accuracy and retention without USB power are unqualified."
+  },
+  "other-battery-functions": {
+    "hardware": "Unknown",
+    "status": "Not supported",
+    "note": ""
+  },
+  "vibration": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "The motor responds to bounded FF_RUMBLE pulses in the microSD profile. Haptic strength and operation with a battery are unqualified."
+  },
+  "indicator-leds": {
+    "hardware": "Unknown",
+    "status": "Not supported",
+    "note": ""
+  },
+  "power-off": {
+    "status": "Unknown",
+    "note": ""
+  },
+  "suspend": {
+    "status": "Partial",
+    "note": "Five-second idle s2idle with RTC wake returns to the same SSH session in the microSD profile with the system root read-only. Writable-root sleep, active peripherals, keypad wake and battery operation are unqualified."
+  },
+  "reboot": {
+    "status": "Not supported",
+    "note": ""
+  },
+  "fplinux-armada": {
+    "status": "Unknown",
+    "note": "Application use on this phone is unqualified."
+  },
+  "brightness-control": {
+    "status": "Partial",
+    "note": "Command-line brightness control at logical levels 0, 5 and 10 in RAM. The brightness application displays and changes the logical level; physical keypad control and brightness calibration are unqualified."
+  },
+  "tyrquake": {
+    "status": "Partial",
+    "note": "Native 320×240 landscape demo playback with a microSD system card. Physical game controls and full gameplay are unqualified; there is no game sound."
+  },
+  "built-in-microphone": {
+    "hardware": "Present",
+    "status": "Partial",
+    "note": "Mono 48 kHz recording captures external tones in RAM and external tones and synthesized speech in the microSD profile; speech quality is unqualified."
+  },
+  "headset-microphone": {
+    "hardware": "Unknown",
+    "status": "Unknown",
+    "note": "Wired-headset recording is unqualified."
+  },
+  "automatic-audio-routing": {
+    "status": "Not supported",
+    "note": "An inserted plug is detected. Plug insertion/removal and automatic output switching are unqualified; select outputs explicitly."
+  },
+  "bluetooth-pairing": {
+    "status": "Supported",
+    "note": "Classic pairing with a Linux PC in RAM and microSD profiles."
+  },
+  "bluetooth-file-transfer": {
+    "status": "Supported",
+    "note": "Bidirectional OPP with a Linux PC in the RAM profile."
+  },
+  "bluetooth-pan-internet": {
+    "status": "Supported",
+    "note": "PAN DHCP, bidirectional TCP transfer, external IPv4 ping, DNS and HTTPS with a Linux PC in the microSD profile; sustained operation and use after sleep are unqualified."
+  },
+  "bluetooth-a2dp-linux-pc": {
+    "status": "Supported",
+    "note": "Short 48 kHz stereo SBC playback and a repeated connection to a Linux PC in the microSD profile. Long playback and use after sleep are unqualified."
+  },
+  "bluetooth-a2dp-headsets": {
+    "status": "Unknown",
+    "note": "Physical Bluetooth headsets are unqualified."
+  },
+  "bluetooth-keyboard": {
+    "status": "Partial",
+    "note": "LE keyboard events from a software peer on a Linux PC reach Linux in the microSD profile. Physical keyboards and application input are unqualified."
+  },
+  "bluetooth-mouse": {
+    "status": "Partial",
+    "note": "LE pointer movement and button events from a software peer on a Linux PC reach Linux in the microSD profile. Physical mice and application input are unqualified."
+  },
+  "mobile-calls": {
+    "status": "Not supported",
+    "note": ""
+  },
+  "sms": {
+    "status": "Not supported",
+    "note": ""
+  },
+  "mobile-data": {
+    "status": "Not supported",
+    "note": ""
+  },
+  "ffmpeg": {
+    "status": "Unknown",
+    "note": ""
+  }
+}

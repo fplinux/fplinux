@@ -27,6 +27,20 @@ def validate_directory_names(inventory: Iterable[str]) -> None:
     for directory in sorted(directories):
         if directory.as_posix() in {"LICENSES", ".github/ISSUE_TEMPLATE"}:
             continue
+        parts = directory.parts
+        if directory.name == "Documentation" and (
+            (
+                len(parts) == 5
+                and parts[0] in {"platforms", "targets"}
+                and parts[2:4] == ("linux", "overlay")
+            )
+            or (
+                len(parts) == 6
+                and parts[0] == "platforms"
+                and parts[2:5] == ("target-template", "linux", "overlay")
+            )
+        ):
+            continue
         if directory in packages:
             if re.fullmatch(r"[a-z_][a-z0-9_]*", directory.name) is None:
                 fail(f"Python package directory must use snake_case: {directory}")

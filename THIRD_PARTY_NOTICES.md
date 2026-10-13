@@ -1,5 +1,11 @@
 # Third-party notices
 
+## License
+
+Original FPLinux code and documentation are licensed under `GPL-2.0-only` unless an individual file carries a different SPDX identifier. Downloaded and third-party components retain their own licenses.
+
+## Where versions are recorded
+
 The corresponding source snapshot records exact versions, URLs, commits and
 hashes in `sources.lock.toml`, `container.lock.toml`, `environment.lock.toml`,
 `alpine.lock.toml`, `Containerfile`, package locks, host-runtime locks,
@@ -9,8 +15,7 @@ plus content receipts and `SHA256SUMS`. Aport `APKBUILD` files pin their own
 upstream archives or commits and verify remote and local source members with
 SHA-512 sums.
 
-Original FPLinux code and documentation are licensed under `GPL-2.0-only`
-unless an individual file carries a different SPDX identifier.
+## Third-party components
 
 | Component                                | Role                                           | Declared license / provenance                                                                     |
 | ---------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------- |

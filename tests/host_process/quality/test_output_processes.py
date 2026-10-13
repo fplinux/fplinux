@@ -23,7 +23,7 @@ from tests.process import process_state, python_environment, run_process
 
 _PROCESS_TIMEOUT = 8.0
 _STAGE_TIMEOUT = 5.0
-_PROCESS_FIXTURES = ROOT / "tests" / "fixtures" / "processes"
+_PROCESS_FIXTURES = ROOT / "tests/host_process/quality/fixtures/output-processes"
 
 
 def _wait_for_path(path: Path, deadline: float, description: str) -> None:

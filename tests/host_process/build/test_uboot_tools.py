@@ -264,7 +264,7 @@ class UbootToolsTests:
         )
         receipts = []
         platform = uboot_inputs.root / "platforms/ums9117"
-        platform.mkdir(parents=True)
+        (platform / "linux/overlay").mkdir(parents=True)
         shutil.copyfile(ROOT / "platforms/ums9117/platform.toml", platform / "platform.toml")
         for target, defconfig in (
             ("nokia-ta1618", "ta1618_defconfig"),

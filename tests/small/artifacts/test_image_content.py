@@ -10,25 +10,10 @@ from typing import TYPE_CHECKING
 import pytest
 from fplinux_cli.environment.image_content import image_content_digest
 
+from tests.small.artifacts.image_fixtures import installed_tree
+
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-def installed_tree(root: Path) -> Path:
-    """Prepare actual tool bytes, a shared library and an operational state marker."""
-    compiler = root / "usr/bin/cc"
-    compiler.parent.mkdir(parents=True)
-    compiler.write_bytes(b"compiler one\n")
-    compiler.chmod(0o755)
-    library = root / "usr/lib/libc.so"
-    library.parent.mkdir()
-    library.write_bytes(b"shared library one\n")
-    library.chmod(0o644)
-    (root / "usr/bin/compiler").symlink_to("cc")
-    state = root / "etc/fplinux-image-state"
-    state.parent.mkdir()
-    state.write_bytes(b"first recipe\nfirst generation\nfirst content\n")
-    return compiler
 
 
 class ImageContentTests:

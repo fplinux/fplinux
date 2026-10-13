@@ -6,8 +6,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from unittest import mock
 
-import check as source_check
 import pytest
+from fplinux_cli.quality import source as source_check
 
 if TYPE_CHECKING:
     from pathlib import Path

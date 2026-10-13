@@ -98,7 +98,7 @@ def autonomous_runner_archive(portable_archive: PortableArchive) -> AutonomousRu
     (root / "assets/keymap.bin").write_bytes(b"bundle fallback keymap")
     (root / "image/ramboot.bin").write_bytes(b"DHTB" + b"p" * 1020 + bytes(512) + b"suffix")
     (root / "60-fplinux.rules").write_bytes(b'SUBSYSTEM=="usb", MODE="0660"\n')
-    peer_root = ROOT / "tests/fixtures/processes"
+    peer_root = ROOT / "tests/host_process/runtime/fixtures/autonomous-runner"
     shutil.copyfile(peer_root / "autonomous_terminal.py", root / "terminal.py")
     discovery = (peer_root / "autonomous_usb_boundary.py").read_text(encoding="utf-8")
     for relative in ("runner/platform_adapter.py", "runner/ssh_transport.py"):
@@ -116,8 +116,9 @@ def autonomous_runner_archive(portable_archive: PortableArchive) -> AutonomousRu
         "bin/udevadm",
     ):
         install_python_script(peer_root / "autonomous_runner_tool.py", root / relative)
-    install_python_script(peer_root / "windows_keygen.py", tools / "ssh-keygen")
-    shutil.copyfile(peer_root / "stdbuf.sh", tools / "stdbuf")
+    runtime_tools = ROOT / "tests/fixtures/runtime-tools"
+    install_python_script(runtime_tools / "windows_keygen.py", tools / "ssh-keygen")
+    shutil.copyfile(runtime_tools / "stdbuf.sh", tools / "stdbuf")
     (tools / "stdbuf").chmod(0o755)
     _refresh_archive_closure(root)
     return AutonomousRunnerArchive(root)

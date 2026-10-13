@@ -1,11 +1,12 @@
 ---
 import { Badge } from "@astrojs/starlight/components";
-import support from "../data/support.json";
+import { loadSupport } from "../data/support/index.ts";
 
 interface Props {
 	feature: string;
 }
 const { feature } = Astro.props;
+const support = loadSupport();
 const entry = support.features.find((item) => item.id === feature);
 if (!entry) throw new Error(`Unknown feature: ${feature}`);
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");

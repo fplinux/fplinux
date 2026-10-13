@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../../../platforms/ums9117/bootstrap/fplinux-handoff-protocol.h"
+#include "../../../include/fplinux/fplinux-handoff-protocol.h"
 
 static const uint8_t session_id_vector[] = {
 	0x03, 0x0a, 0x11, 0x18, 0x1f, 0x26, 0x2d, 0x34, 0x3b, 0x42, 0x49,

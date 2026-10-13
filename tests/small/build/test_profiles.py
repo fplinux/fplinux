@@ -43,6 +43,7 @@ class ProfileContext:
         for target in ("first", "second"):
             target_root = self.root / "targets" / target
             (target_root / "kernel").mkdir(parents=True)
+            (target_root / "linux/overlay").mkdir(parents=True)
             (target_root / "kernel/config.fragment").write_text("CONFIG_BOARD=2\n")
             (target_root / "bootstrap-microsd").mkdir()
             (target_root / "uboot").mkdir()

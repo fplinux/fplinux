@@ -27,10 +27,9 @@ from tests.fixtures.portable_archive import (
 )
 from tests.fixtures.stock_board_report import STOCK_IMAGE, agreeing_vbm, backup, signed_image
 from tests.small.device_data.audio_expected import INOI_VIBRATE_TONE_SECTION
-from tests.small.device_data.audio_fixtures import inoi_audio_records
+from tests.small.device_data.audio_fixtures import headphone_fed_records, inoi_audio_records
 from tests.small.device_data.headfree_fixtures import headphone_only_headfree_records
 from tests.small.device_data.nv_fixtures import nv1
-from tests.small.device_data.test_headphone_fed_audio import headphone_fed_records
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -43,7 +42,7 @@ def portable_ecc_archive(portable_archive: PortableArchive) -> PortableArchive:
     """Deliver the real ECC projection with one selected partition and controlled BCH child."""
     archive = portable_archive
     shutil.copyfile(
-        ROOT / "tests/fixtures/processes/portable_ecc_parser.py",
+        ROOT / "tests/small/device_data/fixtures/portable/portable_ecc_parser.py",
         archive.root / "targets/nokia-ta1618/device_data.py",
     )
     shutil.copyfile(
@@ -78,7 +77,7 @@ def portable_ecc_archive(portable_archive: PortableArchive) -> PortableArchive:
         stream.write(page + b"\xff" * 2176)
     tools = archive.root / "tools"
     install_python_script(
-        ROOT / "tests/fixtures/processes/nand_ecc_child.py", tools / "ums9117-nand-ecc"
+        ROOT / "tests/fixtures/nand-ecc/nand_ecc_child.py", tools / "ums9117-nand-ecc"
     )
     (tools / "input.bin").write_bytes(selected_sector + b"2" * 21)
     (tools / "output.bin").write_bytes(b"b" * 100 + b"selected" + b"b" * 916)
@@ -191,7 +190,7 @@ def test_standalone_profile_uses_the_selected_identity_and_audio_policy(  # noqa
     """The delivered parser consumes the manifest snapshot without a source target manifest."""
     archive = portable_archive
     shutil.copyfile(
-        ROOT / "tests/fixtures/processes/portable_audio_data_parser.py",
+        ROOT / "tests/small/device_data/fixtures/portable/portable_audio_data_parser.py",
         archive.root / "targets/nokia-ta1618/device_data.py",
     )
     downloaded, protected = record_factory()

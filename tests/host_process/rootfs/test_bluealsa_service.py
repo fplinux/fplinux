@@ -11,7 +11,7 @@ from pathlib import Path
 from tests import ROOT
 
 SERVICE = ROOT / "alpine/aports/fplinux-bluealsa/bluealsa.initd"
-ENDPOINT = ROOT / "tests/fixtures/processes/dbus_reload_endpoint.py"
+ENDPOINT = ROOT / "tests/host_process/rootfs/fixtures/bluealsa-service/dbus_reload_endpoint.py"
 
 
 class BluealsaServiceHookTests:

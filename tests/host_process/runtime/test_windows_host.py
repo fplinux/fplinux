@@ -125,8 +125,14 @@ def explicit_public_key_acl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("FPLINUX_TEST_ACL_STATE", str(state))
     icacls = tmp_path / "icacls.exe"
     powershell = tmp_path / "powershell.exe"
-    install_python_script(ROOT / "tests/fixtures/processes/windows_icacls_boundary.py", icacls)
-    install_python_script(ROOT / "tests/fixtures/processes/windows_acl_boundary.py", powershell)
+    install_python_script(
+        ROOT / "tests/host_process/runtime/fixtures/windows-host/windows_icacls_boundary.py",
+        icacls,
+    )
+    install_python_script(
+        ROOT / "tests/host_process/runtime/fixtures/windows-host/windows_acl_boundary.py",
+        powershell,
+    )
     host = windows_host.WindowsHost.__new__(windows_host.WindowsHost)
     host.sid = sid
     host.icacls = icacls
@@ -277,7 +283,9 @@ def test_remote_command_keeps_captured_output_without_a_console(tmp_path: Path) 
 
 def test_loader_keeps_diagnostics_without_a_console(tmp_path: Path) -> None:
     loader = tmp_path / "loader.exe"
-    install_python_script(ROOT / "tests/fixtures/processes/windows_loader_output.py", loader)
+    install_python_script(
+        ROOT / "tests/host_process/runtime/fixtures/windows-host/windows_loader_output.py", loader
+    )
     host = StubWindowsHost({})
     log = tmp_path / "loader.log"
 
@@ -290,7 +298,9 @@ def test_loader_debug_environment_is_local_to_the_owned_child(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     loader = tmp_path / "loader.exe"
-    install_python_script(ROOT / "tests/fixtures/processes/windows_loader_output.py", loader)
+    install_python_script(
+        ROOT / "tests/host_process/runtime/fixtures/windows-host/windows_loader_output.py", loader
+    )
     captured = tmp_path / "environment.json"
     monkeypatch.setenv("FPLINUX_TEST_LOADER_ENVIRONMENT", str(captured))
     monkeypatch.delenv("LIBUSB_DEBUG", raising=False)
@@ -560,7 +570,8 @@ def test_selected_winusb_snapshot_reaches_native_loader_and_one_archive_log(
     for relative in ("tools/spd_dump.exe", "tools/libc_server.exe"):
         destination = root / relative
         install_python_script(
-            ROOT / "tests/fixtures/processes/windows_loader_output.py", destination
+            ROOT / "tests/host_process/runtime/fixtures/windows-host/windows_loader_output.py",
+            destination,
         )
         runtime_path = root / "runtime-manifest.json"
         runtime = json.loads(runtime_path.read_text())
@@ -662,8 +673,8 @@ def test_two_boots_retain_one_ready_session_and_failed_next_boot_preserves_its_k
     archive.mkdir()
     bundle = session_preparation_bundle(archive)
     for role, source in {
-        "loader": "tests/fixtures/processes/windows_loader_output.py",
-        "bridge": "tests/fixtures/processes/windows_loader_output.py",
+        "loader": "tests/host_process/runtime/fixtures/windows-host/windows_loader_output.py",
+        "bridge": "tests/host_process/runtime/fixtures/windows-host/windows_loader_output.py",
         "ssh": "tests/fixtures/ssh_transport/windows_peer.py",
         "keyscan": "tests/fixtures/ssh_transport/windows_peer.py",
     }.items():
@@ -780,7 +791,8 @@ def test_powershell_discovery_timeout_reaps_the_owned_process(
     monkeypatch.setenv("FPLINUX_TEST_DISCOVERY_PID", str(pid_file))
     powershell = tmp_path / "powershell.exe"
     install_python_script(
-        ROOT / "tests/fixtures/processes/windows_discovery_timeout.py", powershell
+        ROOT / "tests/host_process/runtime/fixtures/windows-host/windows_discovery_timeout.py",
+        powershell,
     )
     # Construction needs Windows; only the production subprocess/JSON boundary is exercised.
     host = windows_host.WindowsHost.__new__(windows_host.WindowsHost)
@@ -816,7 +828,8 @@ def test_powershell_file_arguments_remain_literal_and_json_result_is_checked(
     monkeypatch.setenv("FPLINUX_TEST_POWERSHELL_RESULT", response)
     powershell = tmp_path / "powershell.exe"
     install_python_script(
-        ROOT / "tests/fixtures/processes/windows_powershell_boundary.py", powershell
+        ROOT / "tests/host_process/runtime/fixtures/windows-host/windows_powershell_boundary.py",
+        powershell,
     )
     host = windows_host.WindowsHost.__new__(windows_host.WindowsHost)
     host.powershell = powershell
@@ -851,7 +864,8 @@ def test_network_discovery_receives_the_exact_usb_session_identity(
     monkeypatch.setenv("FPLINUX_TEST_POWERSHELL_RESULT", '{"adapters": [], "routes": []}')
     powershell = tmp_path / "powershell.exe"
     install_python_script(
-        ROOT / "tests/fixtures/processes/windows_powershell_boundary.py", powershell
+        ROOT / "tests/host_process/runtime/fixtures/windows-host/windows_powershell_boundary.py",
+        powershell,
     )
     host = windows_host.WindowsHost.__new__(windows_host.WindowsHost)
     host.powershell = powershell
@@ -888,7 +902,8 @@ def test_driver_dialog_carrier_has_no_console_and_keeps_script_arguments(
     monkeypatch.setenv("FPLINUX_TEST_POWERSHELL_RESULT", json.dumps(response))
     powershell = tmp_path / "powershell.exe"
     install_python_script(
-        ROOT / "tests/fixtures/processes/windows_powershell_boundary.py", powershell
+        ROOT / "tests/host_process/runtime/fixtures/windows-host/windows_powershell_boundary.py",
+        powershell,
     )
     host = windows_host.WindowsHost.__new__(windows_host.WindowsHost)
     host.powershell = powershell

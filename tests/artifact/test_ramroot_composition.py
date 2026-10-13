@@ -31,7 +31,7 @@ class RamrootCompositionTests:
             (root / relative).mkdir(parents=True)
         (source / "alpine").mkdir(parents=True)
         staging.mkdir()
-        expected_init = (ROOT / "tests/fixtures/processes/successful_bootstrap.sh").read_bytes()
+        expected_init = (ROOT / "tests/fixtures/ram-tool/successful_bootstrap.sh").read_bytes()
         (source / "alpine/ramroot-init.sh").write_bytes(expected_init)
         (root / "bin/busybox").write_bytes(b"controlled BusyBox runtime bytes\n")
         (root / "bin/busybox").chmod(0o755)

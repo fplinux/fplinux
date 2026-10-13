@@ -5,8 +5,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import check as source_check
 import pytest
+from fplinux_cli.quality import source as source_check
 from fplinux_cli.quality.formatting.command import resolve_format_paths
 from fplinux_cli.quality.formatting.source_formats import classify_source_formats
 from fplinux_cli.quality.source_gate import validate_source_policy

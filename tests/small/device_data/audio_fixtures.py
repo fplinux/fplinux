@@ -273,3 +273,89 @@ def nokia_audio_records() -> tuple[dict[int, bytes], dict[int, bytes]]:
         records[426] = bytes(arm)
         add_fitted_headfree_mode(records, input_gain=0x071D)
     return downloaded, protected
+
+
+def headphone_fed_records() -> tuple[dict[int, bytes], dict[int, bytes]]:
+    """Build synthetic records with separate gains, processing and unused PA words.
+
+    These values describe a controlled format example, rather than measured
+    calibration of a phone. Each route uses raw headphone PGA 7 and disabled
+    filters; the distinct output scales and ALC ratios identify its processing.
+    """
+    arm = bytearray(5360)
+    modes = (
+        (
+            0,
+            b"Headset",
+            0x0400,
+            0x0800,
+            (
+                0x006F0007,
+                0x00660007,
+                0x005D0007,
+                0x00540007,
+                0x004B0007,
+                0x00420007,
+                0x00390007,
+                0x00300007,
+                0x00270007,
+            ),
+            0xABCD,
+        ),
+        (
+            3 * 1072,
+            b"Handsfree",
+            0x1000,
+            0x1000,
+            (
+                0x00600007,
+                0x00580007,
+                0x00500007,
+                0x00480007,
+                0x00400007,
+                0x00380007,
+                0x00300007,
+                0x00280007,
+                0x00200007,
+            ),
+            0x1234,
+        ),
+        (
+            1072,
+            b"Headfree",
+            0x0800,
+            0x1800,
+            (
+                0x00500007,
+                0x00490007,
+                0x00420007,
+                0x003B0007,
+                0x00340007,
+                0x002D0007,
+                0x00260007,
+                0x001F0007,
+                0x00180007,
+            ),
+            0xFEDC,
+        ),
+    )
+    for offset, name, control, input_gain, levels, pa_word in modes:
+        arm[offset : offset + 16] = name.ljust(16, b"\0")
+        struct.pack_into("<H", arm, offset + 20, 0x0012)
+        struct.pack_into("<H", arm, offset + 36, 1)
+        struct.pack_into("<H", arm, offset + 40, control)
+        struct.pack_into("<Hh", arm, offset + 44, 0x000F, input_gain)
+        struct.pack_into("<H", arm, offset + 62, 9)
+        struct.pack_into("<9I", arm, offset + 68, *levels)
+        struct.pack_into("<H", arm, offset + 466, pa_word)
+    eq = bytearray(8160)
+    for position, name, ratio in (
+        (1, b"EQ_Headset", 26398),
+        (4, b"EQ_Handsfree", 26214),
+        (2, b"EQ_Headfree", 26000),
+    ):
+        eq[(position - 1) * 544 : position * 544] = eq_set(
+            name, band_control=0, bands=(UNUSED_BAND,) * 7, alc_ratio=ratio
+        )
+    downloaded = {425: b"\x05\x02", 426: bytes(arm), 440: bytes(eq)}
+    return downloaded, downloaded.copy()

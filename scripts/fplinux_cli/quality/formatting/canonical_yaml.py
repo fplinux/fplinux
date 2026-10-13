@@ -87,7 +87,7 @@ _ISSUE_ATTRIBUTE_FIELDS = (
 
 
 def _field_order(relative: str, path: tuple[str, ...]) -> tuple[str, ...]:  # noqa: PLR0911 - Distinct document owners.
-    if "/linux/bindings/" in relative and not path:
+    if "/linux/overlay/Documentation/devicetree/bindings/" in relative and not path:
         return _BINDING_FIELDS
     if relative.startswith(".github/workflows/"):
         if not path:

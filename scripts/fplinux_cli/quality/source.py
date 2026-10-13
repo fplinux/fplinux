@@ -1,0 +1,696 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
+"""Fast, read-only source quality gate."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import shlex
+import signal
+import subprocess
+import tempfile
+import tomllib
+from contextlib import contextmanager, suppress
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
+from urllib.parse import unquote
+
+from fplinux_cli.alpine import lock as alpine_lock
+from fplinux_cli.alpine import registration, selection
+from fplinux_cli.common import ROOT, fail
+from fplinux_cli.manifests.paths import discover_targets
+from fplinux_cli.manifests.platforms import load_platform
+from fplinux_cli.manifests.targets import load_target
+from fplinux_cli.quality.formatting.canonical import (
+    canonical_outputs,
+    formatter_commands,
+    noncanonical_paths,
+)
+from fplinux_cli.quality.formatting.source_formats import classify_source_formats
+from fplinux_cli.quality.scopes import SOURCE_CHECK_SCOPES, is_project_c_source
+from fplinux_cli.quality.source_gate import containerfile_uses_locked_base
+from fplinux_cli.reporting.run import RunReporter, current_stage, run_entrypoint
+from fplinux_cli.workspace.capture import workspace_snapshot
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from fplinux_cli.quality.formatting.source_formats import SourceFormats
+
+EXCLUDED_PARTS = {".cache", ".git", "__pycache__", "node_modules"}
+BINARY_SUFFIXES = {".bin", ".ico", ".jpg", ".png", ".pyc", ".ttf", ".zip"}
+QUAKE_DATA_NAME = re.compile(r"pak[0-9]+\.part\.[0-9]+", re.IGNORECASE)
+MARKDOWN_REFERENCE = re.compile(r"^\s*\[[^]]+\]:\s*(?:<([^>]+)>|(\S+))")
+MARKDOWN_HEADING = re.compile(r"^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$")
+PACKAGE_EMBEDDED_C_MARKER = "fplinux-check: package-embedded"
+APORT_ROOT = ("alpine", "aports")
+APORT_C_SUFFIXES = frozenset({".c"})
+_CHECK_COMMAND_TIMEOUT = 15 * 60
+_PACKAGE_CONFIG_TIMEOUT = 30
+
+
+def _run_direct(
+    command: list[str],
+    *,
+    timeout: float,
+    capture: bool,
+    env: dict[str, str] | None = None,
+    cwd: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run one standalone checker tool with a finite process-group lifetime."""
+    display = shlex.join(command)
+    print("+", display, flush=True)
+    process = subprocess.Popen(
+        command,
+        cwd=ROOT if cwd is None else cwd,
+        stdout=subprocess.PIPE if capture else None,
+        stderr=subprocess.PIPE if capture else None,
+        text=True,
+        start_new_session=True,
+        env=env,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        process.communicate()
+        fail(f"command timed out after {timeout:g}s: {display}")
+    except BaseException:
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        process.communicate()
+        raise
+    return subprocess.CompletedProcess(command, process.returncode, stdout or "", stderr or "")
+
+
+def run(
+    command: list[str],
+    *,
+    timeout: float = _CHECK_COMMAND_TIMEOUT,
+    env: dict[str, str] | None = None,
+    cwd: Path | None = None,
+) -> None:
+    """Run one checker tool, using the active stage when logging is available."""
+    stage = current_stage()
+    if stage is not None:
+        stage.run(command, cwd=ROOT if cwd is None else cwd, timeout=timeout, env=env)
+        return
+    result = _run_direct(command, timeout=timeout, capture=False, env=env, cwd=cwd)
+    if result.returncode:
+        raise subprocess.CalledProcessError(result.returncode, command)
+
+
+def capture(command: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
+    """Capture one checker tool while keeping the same timeout policy as stages."""
+    stage = current_stage()
+    if stage is None:
+        return _run_direct(command, timeout=timeout, capture=True)
+    result = stage.capture(command, cwd=ROOT, timeout=timeout)
+    return subprocess.CompletedProcess(
+        result.args,
+        result.returncode,
+        result.stdout.decode(errors="replace"),
+        result.stderr.decode(errors="replace"),
+    )
+
+
+@contextmanager
+def report_stage(reporter: RunReporter | None, name: str) -> Iterator[None]:
+    """Use a persistent stage log when the host supplied one."""
+    if reporter is None:
+        yield
+        return
+    with reporter.stage(name):
+        yield
+
+
+def source_files(*, enforce_policy: bool) -> list[Path]:
+    files: list[Path] = []
+    for path in sorted(ROOT.rglob("*")):
+        relative = path.relative_to(ROOT)
+        if any(part in EXCLUDED_PARTS for part in relative.parts):
+            continue
+        if relative.parts[:2] in {("site", ".astro"), ("site", "dist")}:
+            continue
+        if path.name == ".fplinux-workspace":
+            continue
+        if path.is_symlink():
+            if enforce_policy:
+                fail(f"source symlink is not allowed: {relative}")
+            continue
+        if not path.is_file():
+            continue
+        if is_site_asset(relative) or relative.as_posix() in {
+            "site/src/fonts/OFL.txt",
+            "site/public/fonts/OFL.txt",
+        }:
+            continue
+        if path.suffix.lower() == ".pak" or QUAKE_DATA_NAME.fullmatch(path.name):
+            if enforce_policy:
+                fail(f"Quake game data is not allowed in source: {relative}")
+            continue
+        if path.suffix in BINARY_SUFFIXES:
+            if enforce_policy:
+                fail(f"binary artifact is not allowed in source: {relative}")
+            continue
+        files.append(path)
+    return files
+
+
+def is_site_asset(relative: Path) -> bool:
+    """Recognize bundled website images and fonts outside the text-source contract."""
+    return (
+        (relative.parts[:2] == ("site", "public") and relative.suffix in {".ico", ".png"})
+        or (
+            relative.parts[:3] == ("site", "src", "assets") and relative.suffix in {".jpg", ".png"}
+        )
+        or (relative.parts[:3] == ("site", "src", "fonts") and relative.suffix == ".ttf")
+    )
+
+
+def check_text(files: list[Path]) -> None:
+    for path in files:
+        relative = path.relative_to(ROOT)
+        data = path.read_bytes()
+        if b"\0" in data:
+            fail(f"NUL byte in source file: {relative}")
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError as error:
+            fail(f"source is not UTF-8: {relative}: {error}")
+        if "\r" in text:
+            fail(f"non-LF line ending: {relative}")
+        if text and not text.endswith("\n"):
+            fail(f"missing final newline: {relative}")
+        for number, line in enumerate(text.splitlines(), 1):
+            # A single space marks an empty unified-diff context line.
+            if line.endswith((" ", "\t")) and not (path.suffix == ".patch" and line == " "):
+                fail(f"trailing whitespace: {relative}:{number}")
+            if path.suffix != ".patch" and re.search(r" +\t", line):
+                fail(f"space before tab: {relative}:{number}")
+
+
+def markdown_anchors(path: Path) -> set[str]:
+    """Return GitHub-style anchors declared by one Markdown document."""
+    anchors: set[str] = set()
+    counts: dict[str, int] = {}
+    fenced = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        match = MARKDOWN_HEADING.fullmatch(line)
+        if match is None:
+            continue
+        heading = re.sub(r"`([^`]*)`", r"\1", match.group(2)).lower()
+        base = re.sub(r"[^\w\- ]", "", heading).replace(" ", "-")
+        count = counts.get(base, 0)
+        counts[base] = count + 1
+        anchors.add(base if count == 0 else f"{base}-{count}")
+    return anchors
+
+
+def markdown_inline_destinations(line: str) -> list[str]:
+    """Extract inline GFM destinations, including balanced parentheses."""
+    destinations: list[str] = []
+    position = 0
+    while (opening := line.find("](", position)) >= 0:
+        cursor = opening + 2
+        while cursor < len(line) and line[cursor].isspace():
+            cursor += 1
+        if cursor >= len(line):
+            break
+        if line[cursor] == "<":
+            closing = line.find(">", cursor + 1)
+            if closing < 0:
+                position = cursor + 1
+                continue
+            destinations.append(line[cursor + 1 : closing])
+            position = closing + 1
+            continue
+
+        value: list[str] = []
+        depth = 0
+        while cursor < len(line):
+            character = line[cursor]
+            if character == "\\" and cursor + 1 < len(line):
+                value.append(line[cursor + 1])
+                cursor += 2
+                continue
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                if depth == 0:
+                    break
+                depth -= 1
+            elif character.isspace() and depth == 0:
+                break
+            value.append(character)
+            cursor += 1
+        if value:
+            destinations.append("".join(value))
+        position = cursor + 1
+    return destinations
+
+
+def markdown_path_uses_symlink(path: Path, root: Path) -> bool:
+    """Return whether a lexical path crosses a symlink inside the source tree."""
+    current = path
+    while current != root and root in current.parents:
+        if current.is_symlink():
+            return True
+        current = current.parent
+    return current.is_symlink()
+
+
+def check_markdown_links(files: list[Path]) -> None:
+    """Require every repository-local Markdown path and anchor to resolve."""
+    anchor_cache: dict[Path, set[str]] = {}
+    for source in files:
+        fenced = False
+        for number, raw_line in enumerate(source.read_text(encoding="utf-8").splitlines(), 1):
+            if raw_line.lstrip().startswith(("```", "~~~")):
+                fenced = not fenced
+                continue
+            if fenced:
+                continue
+            line = re.sub(r"`[^`]*`", "", raw_line)
+            destinations = markdown_inline_destinations(line)
+            reference = MARKDOWN_REFERENCE.match(line)
+            if reference is not None:
+                reference_destination = reference.group(1) or reference.group(2)
+                if reference_destination is None:
+                    fail(
+                        f"Markdown reference destination is invalid: "
+                        f"{source.relative_to(ROOT)}:{number}"
+                    )
+                destinations.append(reference_destination)
+            for raw_destination in destinations:
+                destination = raw_destination.strip("<>")
+                if re.match(r"^[a-z][a-z0-9+.-]*:", destination, re.IGNORECASE):
+                    continue
+                path_text, separator, fragment = destination.partition("#")
+                candidate = source if not path_text else source.parent / unquote(path_text)
+                root = ROOT.absolute()
+                if markdown_path_uses_symlink(candidate, root):
+                    fail(
+                        f"Markdown link target is a symlink: "
+                        f"{source.relative_to(ROOT)}:{number}: {destination}"
+                    )
+                target = candidate.resolve()
+                try:
+                    target.relative_to(ROOT.resolve())
+                except ValueError:
+                    fail(
+                        f"Markdown link escapes the source tree: "
+                        f"{source.relative_to(ROOT)}:{number}: {destination}"
+                    )
+                if not target.is_file():
+                    fail(
+                        f"Markdown link target is missing: "
+                        f"{source.relative_to(ROOT)}:{number}: {destination}"
+                    )
+                if separator and target.suffix.lower() == ".md":
+                    anchor = unquote(fragment).lower()
+                    anchors = anchor_cache.setdefault(target, markdown_anchors(target))
+                    if anchor not in anchors:
+                        fail(
+                            f"Markdown link anchor is missing: "
+                            f"{source.relative_to(ROOT)}:{number}: {destination}"
+                        )
+
+
+def check_container_policy(files: list[Path]) -> None:
+    containerfiles = [path for path in files if path.name == "Containerfile"]
+    context_ignores = [path for path in files if path.name == ".kernignore"]
+    if [path.relative_to(ROOT).as_posix() for path in containerfiles] != ["Containerfile"]:
+        fail("source must contain exactly one root Containerfile")
+    if [path.relative_to(ROOT).as_posix() for path in context_ignores] != [".kernignore"]:
+        fail("source must contain exactly one root .kernignore")
+    if not containerfile_uses_locked_base(containerfiles[0].read_text()):
+        fail("the Containerfile must use one lock-provided FROM ${BASE_IMAGE}")
+
+
+def check_release_lock() -> None:
+    """Validate the release verification lock against known targets."""
+    with (ROOT / "releases.lock.toml").open("rb") as stream:
+        lock = tomllib.load(stream)
+    if set(lock) != {"verified"} or not isinstance(lock["verified"], dict):
+        fail("releases.lock.toml must contain exactly one [verified] table")
+    targets = set(discover_targets())
+    for name, digest in lock["verified"].items():
+        if name not in targets:
+            fail(f"verified release entry is not a target: {name}")
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            fail(f"invalid recorded phone-test SHA256 for target: {name}")
+
+
+def alpine_apkbuilds(files: list[Path]) -> list[str]:
+    """Discover every regular first-party Alpine aport recipe."""
+    result = [
+        path.relative_to(ROOT).as_posix()
+        for path in files
+        if (relative := path.relative_to(ROOT)).parts[:2] == APORT_ROOT
+        and len(relative.parts) == 4
+        and relative.name == "APKBUILD"
+    ]
+    if not result:
+        fail("no Alpine APKBUILD files were discovered")
+    return result
+
+
+def validate_package_selections() -> None:
+    """Require every target's declared package set to resolve to current aports."""
+    for target in discover_targets():
+        target_config = load_target(target)
+        platform = load_platform(target_config["platform"])
+        rootfs_packages = selection.selected_packages(platform, target_config, root=ROOT)
+        selection.bundle_packages(platform, target_config, rootfs_packages, root=ROOT)
+
+
+def package_c_is_embedded(path: Path) -> bool:
+    """Return whether a package C file is compiled only inside an upstream tree."""
+    with path.open(encoding="utf-8") as stream:
+        return any(PACKAGE_EMBEDDED_C_MARKER in stream.readline() for _ in range(4))
+
+
+def is_aport_source(path: Path, suffixes: frozenset[str]) -> bool:
+    """Return whether a source belongs to any first-party Alpine aport."""
+    relative = path.relative_to(ROOT)
+    return relative.parts[:2] == APORT_ROOT and relative.suffix in suffixes
+
+
+def is_shared_aport_source(path: Path, suffixes: frozenset[str]) -> bool:
+    """Return whether a source is one canonical C/H file shared by aports."""
+    relative = path.relative_to(ROOT)
+    return (
+        relative.as_posix() in registration.SHARED_APORT_SOURCE_PATHS
+        and relative.suffix in suffixes
+    )
+
+
+def userspace_c_sources(
+    files: list[Path], *, include_embedded: bool = False
+) -> list[tuple[str, bool]]:
+    """Discover userspace C and whether each source needs libusb."""
+    result: dict[str, bool] = {}
+    for path in files:
+        if (
+            is_aport_source(path, APORT_C_SUFFIXES)
+            or is_shared_aport_source(path, APORT_C_SUFFIXES)
+        ) and (include_embedded or not package_c_is_embedded(path)):
+            result[path.relative_to(ROOT).as_posix()] = False
+
+    platform_names = {load_target(target)["platform"] for target in discover_targets()}
+    for platform_name in sorted(platform_names):
+        platform = load_platform(platform_name)
+        for recipe in platform["host"]["tools"]:
+            if recipe["type"] != "cc-libusb":
+                continue
+            source = recipe["source"]
+            path = ROOT / source
+            if path.suffix != ".c" or path.is_symlink() or not path.is_file():
+                fail(f"cc-libusb source must be a regular C file: {source}")
+            result[source] = True
+
+    if not result:
+        fail("no userspace C sources were discovered")
+    return sorted(result.items())
+
+
+def project_c_format_sources(files: list[Path]) -> list[str]:
+    """Discover formatted C/H outside the separately checked Linux tree."""
+    sources = {
+        path.relative_to(ROOT).as_posix()
+        for path in files
+        if is_project_c_source(path.relative_to(ROOT))
+    }
+    sources.update(
+        source for source, _requires_libusb in userspace_c_sources(files, include_embedded=True)
+    )
+    return sorted(sources)
+
+
+def pkg_config_cflags(package: str) -> list[str]:
+    """Resolve the installed header flags for one declared C dependency."""
+    result = capture(
+        ["pkg-config", "--cflags", package],
+        timeout=_PACKAGE_CONFIG_TIMEOUT,
+    )
+    if result.returncode:
+        fail(result.stderr.strip() or f"pkg-config could not resolve {package}")
+    return shlex.split(result.stdout)
+
+
+def userspace_c_include_flags(source: str) -> list[str]:
+    """Return compile flags needed by one source's headers."""
+    path = PurePosixPath(source)
+    flags: list[str] = []
+    if path.parts[:3] == (*APORT_ROOT, "fplinux-bluetooth"):
+        flags.extend(pkg_config_cflags("dbus-1"))
+    if source == "lib/fplinux/fplinux-input-session.c":
+        flags.extend(pkg_config_cflags("libevdev"))
+    shared = registration.SHARED_APORT_SOURCES.get(path.parent.name, ())
+    if source == "lib/fplinux/fplinux-drm-session.c" or (
+        "include/fplinux/fplinux-drm-session.h" in shared
+    ):
+        flags.extend(pkg_config_cflags("libdrm"))
+    if source == "lib/fplinux/fplinux-keyboard-text.c":
+        flags.extend(pkg_config_cflags("xkbcommon"))
+    if (
+        len(path.parts) >= 3
+        and path.parts[:2] == APORT_ROOT
+        and path.parts[2] in registration.SHARED_APORT_SOURCES
+    ):
+        directories = sorted(
+            {
+                str(PurePosixPath(shared).parent)
+                for shared in registration.SHARED_APORT_SOURCES[path.parts[2]]
+            }
+        )
+        flags.extend(flag for directory in directories for flag in ("-I", directory))
+    elif path.parts[:2] == ("lib", "fplinux") or source == "common/host/fplinux-usb-keyboard.c":
+        flags.extend(("-I", "include/fplinux"))
+    return flags
+
+
+def run_userspace_analysis(output: Path, sources: list[tuple[str, bool]]) -> None:
+    """Run Clang Static Analyzer for every discovered userspace C source."""
+    if output.is_symlink() or (output.exists() and not output.is_dir()):
+        fail(f"invalid scan-build output path: {output}")
+    output.mkdir(parents=True, exist_ok=True)
+    common_flags = [
+        "-std=c11",
+        "-O2",
+        "-g0",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-fno-ident",
+        "-c",
+    ]
+    needs_libusb = any(libusb for _source, libusb in sources)
+    libusb_flags: list[str] = []
+    if needs_libusb:
+        libusb_flags = pkg_config_cflags("libusb-1.0")
+
+    analyzer = [
+        "scan-build",
+        "--status-bugs",
+        "--use-cc=clang",
+        "-o",
+        str(output / "reports"),
+        "clang",
+    ]
+    for index, (source, requires_libusb) in enumerate(sources):
+        flags = [*common_flags, *userspace_c_include_flags(source)]
+        if requires_libusb:
+            flags.extend(libusb_flags)
+            flags.append("-pthread")
+        run(
+            [
+                *analyzer,
+                *flags,
+                source,
+                "-o",
+                str(output / f"{index:02d}-{Path(source).stem}.o"),
+            ]
+        )
+
+
+def check_userspace_c(sources: list[tuple[str, bool]]) -> None:
+    """Select persistent check output when the container provides it."""
+    persistent = os.environ.get("FPLINUX_SCAN_BUILD_DIR")
+    if persistent is not None:
+        output = Path(persistent)
+        if not output.is_absolute():
+            fail("FPLINUX_SCAN_BUILD_DIR must be absolute")
+        run_userspace_analysis(output, sources)
+        return
+    with tempfile.TemporaryDirectory(prefix="fplinux-scan-build-") as temporary:
+        run_userspace_analysis(Path(temporary), sources)
+
+
+def check_canonical_sources(
+    files: list[Path], formats: SourceFormats, scopes: tuple[str, ...]
+) -> None:
+    """Compare the formatter's expected bytes without writing the source checkout."""
+    selected: set[str] = set()
+    for scope, paths in (
+        ("source", (*formats.devicetree, *formats.text)),
+        ("metadata", (*formats.toml, *formats.json, *formats.yaml, *formats.javascript)),
+        ("docs", formats.markdown),
+        ("python", formats.python),
+        ("shell", (*formats.posix_shell, *formats.bash, *formats.posix_shell_fragments)),
+        ("alpine", tuple(path for path in formats.text if Path(path).name == "APKBUILD")),
+    ):
+        if scope in scopes:
+            selected.update(paths)
+    if "metadata" in scopes:
+        selected.update(
+            path
+            for path in formats.text
+            if Path(path).suffix == ".ini" or Path(path).name == ".editorconfig"
+        )
+    if "c" in scopes:
+        selected.update(project_c_format_sources(files))
+        selected.update(path for path in formats.c if "bootstrap" in Path(path).parts)
+    if not selected:
+        return
+    paths = tuple(sorted(selected))
+    groups = formats.select(frozenset(selected))
+    snapshot = workspace_snapshot([(path.relative_to(ROOT).as_posix(), path) for path in files])
+
+    def run_formatters(projection: Path) -> None:
+        for _name, command in formatter_commands(groups, workspace=str(projection)):
+            run(command, cwd=projection)
+
+    outputs = canonical_outputs(snapshot, paths, run_formatters=run_formatters)
+    changed = noncanonical_paths(snapshot, outputs)
+    if changed:
+        fail("source formatting differs: " + ", ".join(changed))
+
+
+def check_shell_sources(formats: SourceFormats) -> None:
+    """Check declared shell dialects, including configurations sourced by consumers."""
+    scripts = (*formats.posix_shell, *formats.bash)
+    if scripts:
+        run(["shellcheck", "--enable=all", "--severity=warning", *scripts])
+    if formats.posix_shell_fragments:
+        # These assignments are consumed by the sourcing program, not this file.
+        run(
+            [
+                "shellcheck",
+                "--enable=all",
+                "--severity=warning",
+                "--shell=sh",
+                "--exclude=SC2034",
+                *formats.posix_shell_fragments,
+            ]
+        )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("scopes", nargs="*", choices=SOURCE_CHECK_SCOPES)
+    args = parser.parse_args()
+    selected = tuple(dict.fromkeys(args.scopes)) if args.scopes else SOURCE_CHECK_SCOPES
+    reporter = RunReporter.from_environment("check", "quality")
+
+    with report_stage(reporter, "source-inventory"):
+        files = source_files(enforce_policy="source" in selected)
+        formats = classify_source_formats(files, root=ROOT)
+        python_files = list(formats.python)
+        markdown_files = list(formats.markdown)
+        toml_files = list(formats.toml)
+
+    if "source" in selected:
+        with report_stage(reporter, "source-text"):
+            check_text(files)
+    with report_stage(reporter, "canonical-sources"):
+        check_canonical_sources(files, formats, selected)
+    if "container" in selected:
+        with report_stage(reporter, "container-policy"):
+            check_container_policy(files)
+    if "metadata" in selected:
+        with report_stage(reporter, "metadata"):
+            check_release_lock()
+            run(["taplo", "check", *toml_files])
+    if "docs" in selected:
+        markdown_paths = [
+            ROOT / relative for relative in markdown_files if Path(relative).suffix == ".md"
+        ]
+        text_files = [
+            str(path.relative_to(ROOT))
+            for path in files
+            if path.suffix == ".txt" and path.relative_to(ROOT).parts[0] != "LICENSES"
+        ]
+        with report_stage(reporter, "documentation"):
+            check_markdown_links(markdown_paths)
+            run(["markdownlint-cli2"])
+            run(["vale", "--config", ".vale.ini", *markdown_files, *text_files])
+    if "spelling" in selected:
+        with report_stage(reporter, "spelling"):
+            run(["typos", "."])
+    if "secrets" in selected:
+        with report_stage(reporter, "secrets"):
+            run(
+                [
+                    "gitleaks",
+                    "detect",
+                    "--no-banner",
+                    "--no-git",
+                    "--source",
+                    ".",
+                    "--redact",
+                    "--exit-code",
+                    "1",
+                ]
+            )
+    if "licenses" in selected:
+        with report_stage(reporter, "licenses"):
+            run(["reuse", "lint"])
+    if "python" in selected:
+        with report_stage(reporter, "python"):
+            run(["ruff", "check", *python_files])
+            run(["mypy", *python_files])
+    if "shell" in selected:
+        with report_stage(reporter, "shell"):
+            check_shell_sources(formats)
+    if "container" in selected:
+        with report_stage(reporter, "container-lint"):
+            # The build recipe intentionally uses POSIX sh without pipefail (DL4006);
+            # every pipe feeds printf output into a checked sha256sum.
+            run(["hadolint", "--ignore", "DL4006", "Containerfile"])
+    if "alpine" in selected:
+        apkbuilds = alpine_apkbuilds(files)
+        with report_stage(reporter, "alpine"):
+            alpine_lock.load_alpine_lock()
+            validate_package_selections()
+            run(["sh", "-n", "alpine/abuild.conf"])
+            for apkbuild in apkbuilds:
+                run(["apkbuild-lint", apkbuild])
+    if "c" in selected:
+        c_sources = userspace_c_sources(files)
+        with report_stage(reporter, "c-analysis"):
+            check_userspace_c(c_sources)
+
+    inventory = (
+        f"{len(files)} UTF-8 source files"
+        if "source" in selected
+        else f"{len(files)} source files inventoried"
+    )
+    print(f"source checks: OK ({inventory}; scopes: {','.join(selected)})")
+
+
+if __name__ == "__main__":
+    run_entrypoint(main)

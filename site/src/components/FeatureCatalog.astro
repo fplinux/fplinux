@@ -1,6 +1,8 @@
 ---
 import { Badge } from "@astrojs/starlight/components";
-import support from "../data/support.json";
+import { loadSupport } from "../data/support/index.ts";
+
+const support = loadSupport();
 
 const rows = support.features.filter((item) => item.scope !== "detail");
 const groups = support.groups.filter((group) =>

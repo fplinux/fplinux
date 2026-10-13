@@ -4,6 +4,8 @@ platform = "demo"
 [linux]
 config_fragment = "@CONFIG@"
 memory = { base = 0x8000, size = 0x0100 }
+overlay = "linux/overlay"
+copies = []
 
 [adapter]
 spi_mode = 1

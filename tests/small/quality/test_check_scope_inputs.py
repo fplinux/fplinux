@@ -24,6 +24,51 @@ FIXTURES = ROOT / "tests/fixtures/quality/check-scope"
 class CheckScopeTests:
     """Keep scope recipes bound to the inputs checked by their consumers."""
 
+    @pytest.mark.parametrize("owner", ["platforms/demo", "targets/demo"])
+    def test_kernel_receipt_tracks_declared_overlay_contents_and_topology(
+        self, tmp_path: Path, owner: str
+    ) -> None:
+        """New, changed and removed overlay inputs miss; unrelated source resources remain hits."""
+        inputs = {
+            "targets/demo/target.toml": (
+                b'platform = "demo"\n[linux]\noverlay = "linux/overlay"\n'
+                b"patches = []\ncopies = []\nappends = []\n"
+            ),
+            "platforms/demo/platform.toml": (
+                b'[linux]\noverlay = "platforms/demo/linux/overlay"\n'
+                b"patches = []\ncopies = []\nappends = []\n"
+            ),
+            f"{owner}/linux/overlay/drivers/nested/example.c": b"int example = 1;\n",
+            f"{owner}/linux/notes.txt": b"unrelated\n",
+        }
+
+        def recipe(contents: dict[str, bytes]) -> CheckReceiptRecipe:
+            snapshot = WorkspaceSnapshot(
+                tuple(WorkspaceFile(path, data, 0o644) for path, data in contents.items()),
+                "a" * 64,
+            )
+            return check_scope_receipt_recipe(
+                "kernel",
+                check_scope_closure_digest("kernel", snapshot),
+                image_generation="b" * 64,
+                orchestration_recipe="c" * 64,
+            )
+
+        publish_success_receipt(tmp_path, recipe(inputs))
+        assert receipt_matches(tmp_path, recipe(inputs))
+        changed = {
+            **inputs,
+            f"{owner}/linux/overlay/drivers/nested/example.c": b"int example = 2;\n",
+        }
+        assert not receipt_matches(tmp_path, recipe(changed))
+        added = {**inputs, f"{owner}/linux/overlay/include/added.h": b"#define ADDED 1\n"}
+        assert not receipt_matches(tmp_path, recipe(added))
+        removed = inputs.copy()
+        del removed[f"{owner}/linux/overlay/drivers/nested/example.c"]
+        assert not receipt_matches(tmp_path, recipe(removed))
+        unrelated = {**inputs, f"{owner}/linux/notes.txt": b"changed unrelated\n"}
+        assert receipt_matches(tmp_path, recipe(unrelated))
+
     @pytest.mark.parametrize(
         "owner",
         [
@@ -176,6 +221,7 @@ class CheckScopeTests:
             WorkspaceFile("targets/phone/target.toml", b'platform = "demo"\n', 0o644),
             WorkspaceFile(
                 "platforms/demo/platform.toml",
+                b'[linux]\noverlay = "platforms/demo/linux/overlay"\n'
                 b'[linux.build_types]\nrelease = "release.config"\ndebug = "debug.config"\n',
                 0o644,
             ),
@@ -261,6 +307,7 @@ class CheckScopeTests:
                 "targets/phone/target.toml",
                 b'platform = "phone"\n'
                 b"[linux]\n"
+                b'overlay = "linux/overlay"\n'
                 b'copies = [{ source = "kernel/board.c", destination = "board.c" }]\n',
                 0o644,
             ),
@@ -394,10 +441,12 @@ class CheckScopeTests:
         """Relevant config changes miss while the other boot mode remains unrelated."""
         inputs = {
             "targets/phone/target.toml": (
-                b'platform = "demo"\n[linux]\nconfig_fragment = "kernel/config.fragment"\n'
+                b'platform = "demo"\n[linux]\noverlay = "linux/overlay"\n'
+                b'config_fragment = "kernel/config.fragment"\n'
             ),
             "platforms/demo/platform.toml": (
-                b'[linux]\ndefconfig = "platforms/demo/kernel/defconfig"\n'
+                b'[linux]\noverlay = "platforms/demo/linux/overlay"\n'
+                b'defconfig = "platforms/demo/kernel/defconfig"\n'
             ),
             "platforms/demo/kernel/defconfig": b"CONFIG_SHARED=y\n",
             "targets/phone/kernel/config.fragment": b"CONFIG_BOARD=y\n",
@@ -450,7 +499,7 @@ class CheckScopeTests:
         """Track Prettier's repository EditorConfig as metadata input."""
         first = WorkspaceSnapshot(
             (
-                WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
+                WorkspaceFile("scripts/fplinux_cli/quality/source.py", b"checker\n", 0o755),
                 WorkspaceFile(".editorconfig", b"indent_size = 4\n", 0o644),
             ),
             "a" * 64,
@@ -469,7 +518,7 @@ class CheckScopeTests:
     def test_executable_prettier_config_includes_local_helpers(self) -> None:
         """Imported local helpers are causal inputs to an executable Prettier config."""
         common = (
-            WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
+            WorkspaceFile("scripts/fplinux_cli/quality/source.py", b"checker\n", 0o755),
             WorkspaceFile("prettier.config.mjs", b'import "./helper.mjs";\n', 0o644),
         )
         first = WorkspaceSnapshot(
@@ -500,7 +549,7 @@ class CheckScopeTests:
     ) -> None:
         """Website formatting and content cannot invalidate root metadata checks."""
         contents = {
-            "scripts/check.py": b"checker\n",
+            "scripts/fplinux_cli/quality/source.py": b"checker\n",
             ".prettierrc.json": b'{"tabWidth": 2}\n',
             "data.json": b'{"title": "Original"}\n',
             "site/config/prettier.config.mjs": b"export default {};\n",
@@ -530,7 +579,7 @@ class CheckScopeTests:
         """Mirror dynamic userspace C discovery without including orphan kernel C."""
         manifest = (FIXTURES / "host-tool.toml.fixture").read_bytes()
         common = (
-            WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
+            WorkspaceFile("scripts/fplinux_cli/quality/source.py", b"checker\n", 0o755),
             WorkspaceFile("platforms/demo/platform.toml", manifest, 0o644),
             WorkspaceFile(
                 "platforms/demo/kernel/tool.c",
@@ -568,7 +617,7 @@ class CheckScopeTests:
         """Track every C/H input from an aport that may not be in the rootfs."""
         first = WorkspaceSnapshot(
             (
-                WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
+                WorkspaceFile("scripts/fplinux_cli/quality/source.py", b"checker\n", 0o755),
                 WorkspaceFile(
                     "alpine/aports/local-only/local-only.c", b"int local_only;\n", 0o644
                 ),
@@ -608,7 +657,7 @@ class CheckScopeTests:
         """Track every aport and both package-selection manifest layers."""
         first = WorkspaceSnapshot(
             (
-                WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
+                WorkspaceFile("scripts/fplinux_cli/quality/source.py", b"checker\n", 0o755),
                 WorkspaceFile("alpine.lock.toml", b"lock\n", 0o644),
                 WorkspaceFile("alpine/abuild.conf", b"abuild\n", 0o644),
                 WorkspaceFile("alpine/aports/local-only/APKBUILD", b"first\n", 0o644),
@@ -638,7 +687,7 @@ class CheckScopeTests:
         """Track shell sources matching the checker, including OpenRC init scripts."""
         base = WorkspaceSnapshot(
             (
-                WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
+                WorkspaceFile("scripts/fplinux_cli/quality/source.py", b"checker\n", 0o755),
                 WorkspaceFile("tool", b"  #!/bin/sh  \necho ok\n", 0o755),
                 WorkspaceFile("service.initd", b"#!/sbin/openrc-run\ncommand=/bin/true\n", 0o755),
                 WorkspaceFile("helper.inc", b"first\n", 0o644),

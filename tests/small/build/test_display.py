@@ -3,33 +3,21 @@
 
 from __future__ import annotations
 
-import shutil
 from typing import TYPE_CHECKING, Any
 
 import pytest
 from fplinux_cli.build.display import render_bootstrap_display, render_linux_display_files
 from fplinux_cli.manifests.display import load_display
 
-from tests import ROOT
+from tests.fixtures.display import (
+    panel_profile as panel_profile,  # noqa: PLC0414 -- pytest fixture export.
+)
+from tests.fixtures.display import (
+    panel_root as panel_root,  # noqa: PLC0414 -- pytest fixture export.
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-@pytest.fixture
-def panel_root(tmp_path: Path) -> Path:
-    """Supply owned panel data, without ambient target or build state."""
-    path = tmp_path / "targets/demo/display/panel.toml"
-    path.parent.mkdir(parents=True)
-    shutil.copyfile(ROOT / "tests/fixtures/display/panel.toml", path)
-    return tmp_path
-
-
-@pytest.fixture(name="panel_display")
-def panel_profile(panel_root: Path) -> dict[str, Any]:
-    return load_display(
-        "demo", {"panel": "display/panel.toml", "boot_font": "7x14"}, root=panel_root
-    )
 
 
 def test_panel_geometry_and_commands_use_the_supplied_checkout(

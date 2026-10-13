@@ -8,11 +8,8 @@ compatible = "example,%(name)s"
 
 [linux]
 patches = []
+overlay = "linux/overlay"
 appends = []
-
-[[linux.copies]]
-source = "linux/board.c"
-destination = "drivers/%(platform_name)s/%(name)s.c"
 
 [[linux.copies]]
 source = "linux/board.dts"

@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from fplinux_cli.cli.checksum import _checksum_container_command
+from fplinux_cli.alpine.checksum import _checksum_container_command
 from fplinux_cli.dependencies.inputs import DependencyInput
 from fplinux_cli.dependencies.snapshots import preserve_inputs, restore_manifest_inputs
 
@@ -64,7 +64,7 @@ def test_checksum_reads_private_restored_source_and_returns_cache_ownership() ->
         aport.mkdir(parents=True)
         apkbuild = aport / "APKBUILD"
         shutil.copyfile(ROOT / "tests/fixtures/checksum-sources/APKBUILD", apkbuild)
-        shutil.copytree(ROOT / "scripts/fplinux_cli/cli/checksum", stage / "checksum")
+        shutil.copytree(ROOT / "scripts/fplinux_cli/alpine/checksum", stage / "checksum")
         command = _checksum_container_command(
             "kern",
             package="fplinux-checksum-fixture",

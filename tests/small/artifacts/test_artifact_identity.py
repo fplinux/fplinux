@@ -8,14 +8,14 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
-from fplinux_cli.cli.bundles import build_identity, manifest_matches_identity
+from fplinux_cli.build.reuse import build_identity, manifest_matches_identity
 from fplinux_cli.environment import image_store as kern
 from fplinux_cli.environment.image_content import image_content_digest
 from fplinux_cli.environment.image_state import ImageState, load_image_state, publish_image_state
 from fplinux_cli.environment.images import container_artifact_recipe_digest
 from fplinux_cli.workspace.capture import WorkspaceSnapshot
 
-from tests.small.artifacts.test_image_content import installed_tree
+from tests.small.artifacts.image_fixtures import installed_tree
 
 if TYPE_CHECKING:
     from pathlib import Path

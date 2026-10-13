@@ -27,6 +27,7 @@ export const documentationDigest = async (
 	const digest = createHash("sha256");
 	const { sources: manifests } = loadPhones(root);
 	const filenames = [
+		path.join(root, "THIRD_PARTY_NOTICES.md"),
 		...(await siteFiles(path.join(root, "site"))),
 		...manifests.map((source) => path.join(root, source)),
 	].toSorted();

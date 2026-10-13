@@ -21,6 +21,7 @@ debug_dtb = "%(target)s.dtb"
 patches = []
 forbidden_dtb_markers = ["forbidden"]
 forbidden_config = ["CONFIG_FORBIDDEN=y"]
+overlay = "linux/overlay"
 copies = []
 appends = []
 

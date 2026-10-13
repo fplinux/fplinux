@@ -16,8 +16,8 @@ from common.windows_host import WindowsBundle, WindowsHost, WindowsTransport, va
 from tests import ROOT
 from tests.bundle_support import file_record
 from tests.fixtures.executables import install_python_script
+from tests.fixtures.runtime_manifest import runtime_manifest
 from tests.small.runtime.adapter_fixtures import adapter_data
-from tests.small.runtime.test_runner_manifest import runtime_manifest
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -159,7 +159,7 @@ def session_preparation_bundle(directory: Path) -> WindowsBundle:
         "template_sha256": hashlib.sha256(template).hexdigest(),
     }
     install_python_script(
-        ROOT / "tests/fixtures/processes/windows_keygen.py", bundle.tools["keygen"]
+        ROOT / "tests/fixtures/runtime-tools/windows_keygen.py", bundle.tools["keygen"]
     )
     return replace(bundle, runtime=runtime)
 

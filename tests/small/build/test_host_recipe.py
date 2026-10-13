@@ -13,9 +13,9 @@ from unittest import mock
 
 import pytest
 from fplinux_cli import common
-from fplinux_cli.build import host as host_build
 from fplinux_cli.build import process as process_build
 from fplinux_cli.build import sources as sources_build
+from fplinux_cli.build.host_tools import host as host_build
 from fplinux_cli.environment import downloads
 from fplinux_cli.manifests import platforms
 from fplinux_cli.manifests import values as manifest_values

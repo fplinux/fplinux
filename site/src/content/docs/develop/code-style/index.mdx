@@ -11,9 +11,9 @@ This is the contributor contract for project-owned source and tests. It favors c
 
 ### Directory names
 
-Use lowercase `snake_case` for Python package directories and lowercase `kebab-case` for project-owned resource, fixture and documentation directories. Target, profile and package identifiers also use `kebab-case`. A Python package has its own `__init__.py`; a directory containing standalone Python programs or data beside a Python module is not a package. For example, `package_sources.py` reads resources from `package-sources/`, while imports retain the module's underscore spelling.
+Use lowercase `snake_case` for Python package directories and lowercase `kebab-case` for project-owned resource, fixture and documentation directories. Target, profile and package identifiers also use `kebab-case`. A Python package has its own `__init__.py`; a directory containing standalone Python programs or data beside a Python module is not a package. For example, `sources.py` reads resources from `sources/`; those resources do not form an import package.
 
-Keep the leading dot in metadata directories such as `.github` and `.githooks`. Preserve the prescribed source directory names `LICENSES` for REUSE and `.github/ISSUE_TEMPLATE` for GitHub. Generated or downloaded trees and paths reproduced inside test runtime filesystems retain their owner's layout; do not rewrite those paths to match source-directory naming. File names follow their language or format rules.
+Keep the leading dot in metadata directories such as `.github` and `.githooks`. Preserve the prescribed source directory names `LICENSES` for REUSE and `.github/ISSUE_TEMPLATE` for GitHub. Platform and target `linux/overlay/Documentation` directories, including the platform target template, retain the Linux name; their children and neighboring resource directories still follow the resource policy. Generated or downloaded trees and paths reproduced inside test runtime filesystems retain their owner's layout; do not rewrite those paths to match source-directory naming. File names follow their language or format rules.
 
 `./fplinux check source` validates directory names from tracked and non-ignored source files, including resources and website assets. Rename a source directory and its consumers together; do not retain aliases or fallback lookups for the old spelling.
 

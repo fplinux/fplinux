@@ -41,6 +41,6 @@ Use the [shared feature guides](/fplinux/features/) for supported operations and
 
 Update the website's support data with the result and its practical limits. Keep detailed command output locally; a support page should tell the reader what works and how to use it safely.
 
-`site/src/data/support.json` owns the phone's support states. Those entries supply the phone checklists and comparison; shared guides describe the procedures. Add a phone page for its boot key, controls, storage and safe way to end the session.
+`site/src/data/support/catalog.json` owns the feature definitions and order; `site/src/data/support/phones/<target>.json` owns each phone's support states. Those entries supply the phone checklists and comparison; shared guides describe the procedures. Add a phone page for its boot key, controls, storage and safe way to end the session.
 
 For the initial report, follow [Report a problem](/fplinux/help/report/) and the new-phone form. Do not attach the NAND backup or prepared phone firmware. Feature checks do not establish a release: an exact executable payload needs the separate [archive qualification](/fplinux/develop/packaging/#release-archives).

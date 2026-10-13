@@ -61,7 +61,7 @@ def test_target_main_passes_selected_geometry_to_the_boot_runtime(
     )
     runtime = tmp_path / "ums9117-bootstrap"
     runtime.mkdir()
-    shutil.copy2(ROOT / "platforms/ums9117/bootstrap/boot-main.h", runtime / "boot-main.h")
+    shutil.copy2(ROOT / "platforms/ums9117/bootstrap/src/boot-main.h", runtime / "boot-main.h")
     stub = tmp_path / "runtime.c"
     shutil.copyfile(ROOT / "tests/fixtures/bootstrap-projection/runtime.c", stub)
     executable = tmp_path / "geometry"

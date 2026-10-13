@@ -1,4 +1,5 @@
 [linux]
+overlay = "linux/overlay"
 patches = []
 copies = []
 appends = []

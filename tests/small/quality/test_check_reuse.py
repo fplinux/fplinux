@@ -26,7 +26,7 @@ class MockedCheckReceiptOrchestrationTests:
     def _snapshot(*, c_source: bytes = b"int app;\n") -> WorkspaceSnapshot:
         files = (
             WorkspaceFile("README.md", b"documentation\n", 0o644),
-            WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
+            WorkspaceFile("scripts/fplinux_cli/quality/source.py", b"checker\n", 0o755),
             WorkspaceFile(
                 "alpine/aports/demo-consumer/app.c",
                 c_source,
@@ -279,7 +279,7 @@ class MockedCheckReceiptOrchestrationTests:
             self._run(root, workspace, snapshot, ["c", "docs"], commands)
             assert (
                 [
-                    command[command.index("/workspace/scripts/check.py") + 1 :]
+                    command[command.index("fplinux_cli.quality.source") + 1 :]
                     for command in commands
                 ]
             ) == ([["c"], ["docs"]])

@@ -32,7 +32,7 @@ class LoaderHandoff:
             [
                 sys.executable,
                 "-m",
-                "tests.fixtures.processes.loader_handoff",
+                "tests.host_process.runtime.loader_handoff_peer",
                 str(self.root),
                 mode,
             ],

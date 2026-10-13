@@ -19,7 +19,7 @@ class CanonicalYamlTests:
         [
             pytest.param(
                 "binding-literals",
-                "platforms/demo/linux/bindings/demo.yaml",
+                "platforms/demo/linux/overlay/Documentation/devicetree/bindings/demo.yaml",
                 id="binding-literals",
             ),
             pytest.param("workflow-order", ".github/workflows/demo.yml", id="workflow-order"),
@@ -31,7 +31,7 @@ class CanonicalYamlTests:
             ),
             pytest.param(
                 "template-chomping",
-                "platforms/demo/linux/bindings/demo.yaml.in",
+                "platforms/demo/linux/overlay/Documentation/devicetree/bindings/demo.yaml.in",
                 id="template-chomping",
             ),
         ],

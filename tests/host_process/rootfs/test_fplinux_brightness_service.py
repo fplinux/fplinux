@@ -46,7 +46,10 @@ def signal_daemon(brightness_binaries: BrightnessBinaries) -> Path:
             str(INCLUDE),
             str(APORT / "fplinux-brightnessd.c"),
             str(LIB / "fplinux-cli.c"),
-            str(ROOT / "tests/fixtures/processes/brightness_stop_wait.c"),
+            str(
+                ROOT
+                / "tests/host_process/rootfs/fixtures/brightness-service/brightness_stop_wait.c"
+            ),
             "-Wl,--wrap=poll",
             "-Wl,--wrap=ppoll",
             "-Wl,--wrap=send",

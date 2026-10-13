@@ -112,7 +112,7 @@ def _exec_with_shared_lock(cache_root: str, acquired_path: str, release_path: st
             sys.executable,
             [
                 sys.executable,
-                str(ROOT / "tests/fixtures/processes/cache_lock_exec.py"),
+                str(ROOT / "tests/host_process/cache/fixtures/cachelock/cache_lock_exec.py"),
                 acquired_path,
                 release_path,
                 _EXEC_LOCK_TIMEOUT,

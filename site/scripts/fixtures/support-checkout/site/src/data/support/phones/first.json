@@ -1,0 +1,4 @@
+{
+  "first-feature": { "hardware": "Present", "note": "", "status": "Unknown" },
+  "second-feature": { "note": "Recorded result.", "status": "Supported" }
+}

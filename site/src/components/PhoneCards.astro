@@ -2,10 +2,11 @@
 // Phone cards with available screen renders and key support status.
 import { LinkButton } from "@astrojs/starlight/components";
 import SupportBadge from "./SupportBadge.astro";
-import support from "../data/support.json";
+import { loadSupport } from "../data/support/index.ts";
 import { loadPhones } from "../data/phones.ts";
 
 const { phones } = loadPhones();
+const support = loadSupport();
 
 const renders = import.meta.glob<{ default: ImageMetadata }>(
 	"../assets/screens/terminal-keypad*.png",
@@ -22,9 +23,8 @@ const highlights = [
 ];
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 const status = (feature: string, phone: string) =>
-	support.features.find((item) => item.id === feature)?.phones[
-		phone as keyof (typeof support.features)[number]["phones"]
-	]?.status ?? "Unknown";
+	support.features.find((item) => item.id === feature)?.phones[phone]?.status ??
+	"Unknown";
 ---
 
 <div class="fp-phone-cards not-content">

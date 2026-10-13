@@ -76,7 +76,7 @@ def selection_context(tmp_path: Path) -> SelectionContext:
             package.mkdir(exist_ok=True)
             (package / "__init__.py").touch()
             shutil.copyfile(
-                ROOT / "tests/fixtures/processes/selection_cases.py",
+                ROOT / "tests/host_process/quality/fixtures/test-runner/selection_cases.py",
                 package / "test_selection.py",
             )
     return SelectionContext(tmp_path, tmp_path / "executed.txt")
@@ -213,7 +213,7 @@ class TestSelectionProcessTests:
     ) -> None:
         """A misspelled marker must not silently run as an unmarked test."""
         shutil.copyfile(
-            ROOT / "tests/fixtures/processes/pytest_typo_marker.py",
+            ROOT / "tests/host_process/quality/fixtures/test-runner/pytest_typo_marker.py",
             selection_context.root / "tests/small/test_marker.py",
         )
 
@@ -244,7 +244,7 @@ class TestSelectionProcessTests:
     ) -> None:
         """Quiet runs retain skip reasons and timings in their owned pytest log."""
         shutil.copyfile(
-            ROOT / "tests/fixtures/processes/pytest_diagnostic_cases.py",
+            ROOT / "tests/host_process/quality/fixtures/test-runner/pytest_diagnostic_cases.py",
             selection_context.root / "tests/small/test_diagnostics.py",
         )
 
@@ -317,7 +317,10 @@ class TestSelectionProcessTests:
     ) -> None:
         """A parameter ID selects only the named input of a native pytest function."""
         fixture = selection_context.root / "tests/small/test_parameters.py"
-        shutil.copyfile(ROOT / "tests/fixtures/processes/pytest_parameter_function.py", fixture)
+        shutil.copyfile(
+            ROOT / "tests/host_process/quality/fixtures/test-runner/pytest_parameter_function.py",
+            fixture,
+        )
         result = selection_context.run("tests/small/test_parameters.py::test_value[second]")
         assert result.returncode == 0, result.stderr
         assert selection_context.executed() == ["second"]
@@ -346,7 +349,10 @@ class TestSelectionProcessTests:
     ) -> None:
         """A SIGINT in pytest itself retains interruption rather than failure status."""
         fixture = selection_context.root / "tests/small/test_interrupt.py"
-        shutil.copyfile(ROOT / "tests/fixtures/processes/pytest_interrupt_case.py", fixture)
+        shutil.copyfile(
+            ROOT / "tests/host_process/quality/fixtures/test-runner/pytest_interrupt_case.py",
+            fixture,
+        )
         result = selection_context.run("tests.small.test_interrupt")
         assert result.returncode == 130, result.stderr
         status = json.loads((selection_context.logs / "tests/run.json").read_text())["status"]
@@ -358,7 +364,9 @@ class TestSelectionProcessTests:
         """SIGINT reaches a running pytest process and returns 130 after cleanup."""
         ready = selection_context.root / "ready"
         fixture = selection_context.root / "tests/small/test_wait.py"
-        shutil.copyfile(ROOT / "tests/fixtures/processes/pytest_wait_case.py", fixture)
+        shutil.copyfile(
+            ROOT / "tests/host_process/quality/fixtures/test-runner/pytest_wait_case.py", fixture
+        )
 
         def interrupt_when_ready(process: subprocess.Popen[str], deadline: float) -> None:
             while not ready.exists():
@@ -428,12 +436,18 @@ def mixed_runtime_context(tmp_path: Path) -> MixedRuntimeContext:
             if package == tmp_path:
                 break
             (package / "__init__.py").touch()
-        shutil.copyfile(ROOT / "tests/fixtures/processes/selection_cases.py", path)
+        shutil.copyfile(
+            ROOT / "tests/host_process/quality/fixtures/test-runner/selection_cases.py", path
+        )
     driver = tmp_path / "run_workload.py"
-    shutil.copyfile(ROOT / "tests/fixtures/processes/pytest_workload_driver.py", driver)
+    shutil.copyfile(
+        ROOT / "tests/host_process/quality/fixtures/test-runner/pytest_workload_driver.py", driver
+    )
     fake_kern = tmp_path / "kern-fake"
     install_python_script(
-        ROOT / "tests/fixtures/processes/pytest_kern_provider.py", fake_kern, mode=0o700
+        ROOT / "tests/host_process/quality/fixtures/test-runner/pytest_kern_provider.py",
+        fake_kern,
+        mode=0o700,
     )
     return MixedRuntimeContext(
         tmp_path, tmp_path / "executed.txt", tmp_path / "kern-launches.txt", driver
@@ -511,7 +525,9 @@ class MixedRuntimeProcessTests:
         self, mixed_runtime_context: MixedRuntimeContext
     ) -> None:
         """Parameter IDs keep punctuation intact while selecting the proper runtime."""
-        parameter_case = (ROOT / "tests/fixtures/processes/pytest_parameter_class.py").read_text()
+        parameter_case = (
+            ROOT / "tests/host_process/quality/fixtures/test-runner/pytest_parameter_class.py"
+        ).read_text()
         for module in (
             "tests/host_process/cache/test_image_tag.py",
             "tests/host_process/domain/test_selection.py",
@@ -609,7 +625,7 @@ class MixedRuntimeProcessTests:
         container = "tests/host_process/domain/test_selection.py"
         interrupted, following = (host, container) if host_interrupt else (container, host)
         shutil.copyfile(
-            ROOT / "tests/fixtures/processes/pytest_interrupt_case.py",
+            ROOT / "tests/host_process/quality/fixtures/test-runner/pytest_interrupt_case.py",
             mixed_runtime_context.root / interrupted,
         )
         result = mixed_runtime_context.run(

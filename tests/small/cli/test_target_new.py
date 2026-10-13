@@ -14,9 +14,10 @@ from unittest import mock
 
 import pytest
 from fplinux_cli import common
-from fplinux_cli.cli import package, target_new
-from fplinux_cli.cli.package_readme import ordinary_readme
+from fplinux_cli.cli import target_new
 from fplinux_cli.manifests import paths, platforms, targets
+from fplinux_cli.packaging import archive as package
+from fplinux_cli.packaging.readme import ordinary_readme
 
 REPOSITORY = common.ROOT
 DISPLAY_KEYS = {"spi_mode", "lcd_id", "backlight_channels", "backlight_level"}
@@ -40,6 +41,7 @@ def target_checkout() -> Iterator[TargetCheckout]:
         root = Path(temporary)
         platform = root / "platforms/ums9117"
         (platform / "host").mkdir(parents=True)
+        (platform / "linux/overlay").mkdir(parents=True)
         shutil.copy2(REPOSITORY / "platforms/ums9117/platform.toml", platform)
         shutil.copy2(REPOSITORY / "platforms/ums9117/host/target_skeleton.py", platform / "host")
         shutil.copytree(

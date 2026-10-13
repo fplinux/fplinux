@@ -12,8 +12,8 @@ import pytest
 from fplinux_cli import common
 from fplinux_cli.alpine import registration
 from fplinux_cli.alpine import selection as alpine_state
-from fplinux_cli.cli import package as package_commands
 from fplinux_cli.manifests import platforms, releases, targets
+from fplinux_cli.packaging import archive as package_commands
 
 if TYPE_CHECKING:
     from pathlib import Path

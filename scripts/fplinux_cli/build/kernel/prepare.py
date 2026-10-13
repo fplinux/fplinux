@@ -184,7 +184,13 @@ def shared_integration(
         "platform-append": 4,
         "target-append": 5,
     }
-    inputs.sort(key=lambda step: order[step.operation])
+    inputs.sort(
+        key=lambda step: (
+            order[step.operation],
+            step.destination if step.operation.endswith("copy") else "",
+            step.identity if step.operation.endswith("copy") else "",
+        )
+    )
     return tuple(inputs), generated
 
 

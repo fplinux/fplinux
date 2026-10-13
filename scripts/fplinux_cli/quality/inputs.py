@@ -5,10 +5,11 @@ from __future__ import annotations
 
 import re
 import tomllib
-from pathlib import Path, PurePath
+from pathlib import Path, PurePath, PurePosixPath
 from typing import TYPE_CHECKING
 
 from fplinux_cli.common import fail
+from fplinux_cli.manifests.linux import linux_copy_steps
 from fplinux_cli.manifests.paths import normalize_profile
 from fplinux_cli.quality.formatting.source_formats import (
     is_posix_shell_fragment,
@@ -21,6 +22,8 @@ from .receipts import check_closure_entries_digest
 from .scopes import SOURCE_CHECK_SCOPES, is_project_c_source
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from fplinux_cli.workspace.capture import WorkspaceFile, WorkspaceSnapshot
 
 
@@ -79,7 +82,7 @@ _MANIFEST_IMPLEMENTATION = frozenset(
 
 _CHECK_IMPLEMENTATION = _MANIFEST_IMPLEMENTATION | frozenset(
     {
-        "scripts/check.py",
+        "scripts/fplinux_cli/quality/source.py",
         "scripts/fplinux_cli/__init__.py",
         "scripts/fplinux_cli/common.py",
         "scripts/fplinux_cli/alpine/__init__.py",
@@ -284,8 +287,10 @@ def _c_scope_paths(snapshot: WorkspaceSnapshot) -> set[str]:
     return selected
 
 
-def _linux_manifest_sources(linux: object, *, base: PurePath) -> set[str]:
-    """Return the captured Linux inputs explicitly named by one manifest."""
+def _linux_manifest_sources(
+    linux: object, *, base: PurePath, captured: Mapping[str, bytes]
+) -> set[str]:
+    """Select captured Linux sources through the same overlay copy normalization."""
     if not isinstance(linux, dict):
         return set()
     selected: set[str] = set()
@@ -296,14 +301,22 @@ def _linux_manifest_sources(linux: object, *, base: PurePath) -> set[str]:
     patches = linux.get("patches")
     if isinstance(patches, list):
         selected.update((base / patch).as_posix() for patch in patches if isinstance(patch, str))
-    for key in ("copies", "appends"):
-        steps = linux.get(key)
-        if isinstance(steps, list):
-            selected.update(
-                (base / source).as_posix()
-                for step in steps
-                if isinstance(step, dict) and isinstance((source := step.get("source")), str)
-            )
+    copies = linux_copy_steps(
+        linux.get("copies", []),
+        linux.get("overlay"),
+        "captured linux",
+        root=Path(),
+        source_base=PurePosixPath(base.as_posix()),
+        captured=captured,
+    )
+    selected.update((base / step["source"]).as_posix() for step in copies)
+    appends = linux.get("appends")
+    if isinstance(appends, list):
+        selected.update(
+            (base / source).as_posix()
+            for step in appends
+            if isinstance(step, dict) and isinstance((source := step.get("source")), str)
+        )
     return selected
 
 
@@ -313,6 +326,7 @@ def _kernel_scope_paths(
     """Resolve the selected global profile and every board's Linux inputs."""
     profile = normalize_profile(profile)
     by_path = {file.path: file for file in snapshot.files}
+    captured = {relative: source.contents for relative, source in by_path.items()}
     selected = {
         file.path
         for file in snapshot.files
@@ -336,15 +350,21 @@ def _kernel_scope_paths(
         selected.update(
             _display_manifest_sources(target_data.get("display"), base=target_path.parent)
         )
-        selected.update(_linux_manifest_sources(target_data.get("linux"), base=target_path.parent))
+        selected.update(
+            _linux_manifest_sources(
+                target_data.get("linux"), base=target_path.parent, captured=captured
+            )
+        )
         if profile == "microsd-uboot":
             microsd = target_data.get("microsd", {})
             if isinstance(microsd, dict):
-                selected.update(
-                    _linux_manifest_sources(
-                        {"patches": microsd.get("linux_patches")}, base=target_path.parent
+                patches = microsd.get("linux_patches")
+                if isinstance(patches, list):
+                    selected.update(
+                        (target_path.parent / patch).as_posix()
+                        for patch in patches
+                        if isinstance(patch, str)
                     )
-                )
         platform = target_data.get("platform")
         if not isinstance(platform, str):
             continue
@@ -358,7 +378,7 @@ def _kernel_scope_paths(
         except UnicodeDecodeError, tomllib.TOMLDecodeError:
             continue
         linux = platform_data.get("linux")
-        selected.update(_linux_manifest_sources(linux, base=PurePath()))
+        selected.update(_linux_manifest_sources(linux, base=PurePath(), captured=captured))
         if isinstance(linux, dict) and isinstance(linux.get("build_types"), dict):
             fragment = linux["build_types"].get(build_type)
             if isinstance(fragment, str):

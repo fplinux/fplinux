@@ -78,7 +78,7 @@ class WorkspaceSnapshotTests:
         cache = tmp_path / "downloads"
         cache.mkdir()
         (cache / "source.tar").write_bytes(b"abc")
-        fixture = ROOT / "tests/fixtures/processes/staged_source_fetch.py"
+        fixture = ROOT / "tests/small/workspace/fixtures/snapshot/staged_source_fetch.py"
         result = subprocess.run(
             [sys.executable, "-I", "-B", str(fixture), str(staged), str(cache)],
             cwd=tmp_path,
@@ -447,7 +447,12 @@ class WorkspaceSnapshotTests:
         peer_append = linux_inputs.write(
             root, "targets/phone-b/linux/shared.Kconfig", "config BOARD_B\n\tbool\n"
         )
-        common_driver = root / "platforms/demo/common.c"
+        peer_overlay = linux_inputs.write(
+            root,
+            "targets/phone-b/linux/overlay/drivers/overlay-peer.c",
+            "int overlay_peer = 1;\n",
+        )
+        common_driver = root / "platforms/demo/linux/overlay/drivers/demo/common.c"
         causal_sources = [
             (path.relative_to(root).as_posix(), path)
             for path in (
@@ -456,7 +461,7 @@ class WorkspaceSnapshotTests:
                 platform,
                 selected,
                 common_driver,
-                root / "targets/phone-a/linux/board.c",
+                root / "targets/phone-a/linux/overlay/drivers/demo/phone-a.c",
                 root / "targets/phone-a/linux/board.dts",
             )
         ]
@@ -475,28 +480,45 @@ class WorkspaceSnapshotTests:
         ):
             before = workspace_inputs.target_workspace_snapshot("phone-a")
             before_path = workspace_staging.stage_workspace_snapshot(before)
-            peer_driver = root / "targets/phone-b/linux/board.c"
+            peer_driver = root / "targets/phone-b/linux/overlay/drivers/other/phone-b.c"
             peer_dts = root / "targets/phone-b/linux/board.dts"
             peer_driver.write_bytes(b"changed peer driver\n")
             peer_driver.chmod(0o640)
             peer_dts.write_bytes(b"changed peer device tree\n")
+            peer_overlay.write_bytes(b"int overlay_peer = 2;\n")
+            peer_overlay.chmod(0o640)
             changed = workspace_inputs.target_workspace_snapshot("phone-a")
             changed_path = workspace_staging.stage_workspace_snapshot(changed)
             assert (before.recipe) == (changed.recipe)
             assert (before_path) != (changed_path)
-            assert ((before_path / "targets/phone-b/linux/board.c").read_bytes()) == (
-                b"phone-b driver\n"
-            )
-            staged_peer = changed_path / "targets/phone-b/linux/board.c"
+            assert (
+                (
+                    before_path / "targets/phone-b/linux/overlay/drivers/other/phone-b.c"
+                ).read_bytes()
+            ) == (b"phone-b driver\n")
+            staged_peer = changed_path / "targets/phone-b/linux/overlay/drivers/other/phone-b.c"
             assert (staged_peer.read_bytes()) == (b"changed peer driver\n")
             assert (staged_peer.stat().st_mode & 0o777) == (0o640)
             assert ((changed_path / "targets/phone-b/linux/board.dts").read_bytes()) == (
                 b"changed peer device tree\n"
             )
+            staged_overlay = changed_path / "targets/phone-b/linux/overlay/drivers/overlay-peer.c"
+            assert staged_overlay.read_bytes() == b"int overlay_peer = 2;\n"
+            assert staged_overlay.stat().st_mode & 0o777 == 0o640
             staged_targets = discover_linux_targets(
                 changed_path, {"linux": {"sha256": "1" * 64}}, "1" * 64
             )
             assert ([target.name for target in staged_targets]) == (["phone-a", "phone-b"])
+
+            added_overlay = linux_inputs.write(
+                root,
+                "targets/phone-b/linux/overlay/include/new-peer.h",
+                "#define NEW_PEER 1\n",
+            )
+            topology_change = workspace_inputs.target_workspace_snapshot("phone-a")
+            assert topology_change.recipe != changed.recipe
+            added_overlay.unlink()
+            assert workspace_inputs.target_workspace_snapshot("phone-a").recipe == changed.recipe
 
             for relative in ("bootstrap/main.c", "firmware/private.bin", "rootfs/config"):
                 linux_inputs.write(root, f"targets/phone-b/{relative}", "unrelated\n")
@@ -515,7 +537,11 @@ class WorkspaceSnapshotTests:
             shared_change = workspace_inputs.target_workspace_snapshot("phone-a")
             assert (changed.recipe) != (shared_change.recipe)
             common_driver.write_bytes(b"common driver\n")
-            for shared in (peer_patch, peer_append, root / "platforms/other/common.c"):
+            for shared in (
+                peer_patch,
+                peer_append,
+                root / "platforms/other/linux/overlay/drivers/other/common.c",
+            ):
                 original = shared.read_bytes()
                 shared.write_bytes(original + b"changed\n")
                 assert (workspace_inputs.target_workspace_snapshot("phone-a").recipe) != (
@@ -530,13 +556,7 @@ class WorkspaceSnapshotTests:
             )
             redirected = workspace_inputs.target_workspace_snapshot("phone-a")
             assert (redirected.recipe) != (changed.recipe)
-            peer_manifest.write_text(
-                peer_manifest.read_text(encoding="utf-8").replace(
-                    'destination = "drivers/other/phone-b.c"',
-                    'destination = "drivers/shared.c"',
-                ),
-                encoding="utf-8",
-            )
+            peer_driver.replace(peer_driver.parent.parent / "shared.c")
             assert (workspace_inputs.target_workspace_snapshot("phone-a").recipe) != (
                 redirected.recipe
             )

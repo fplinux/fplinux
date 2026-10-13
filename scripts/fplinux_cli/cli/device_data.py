@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from fplinux_cli.cli.build import build, prepare_host_tool
+from fplinux_cli.build.workflow import build, prepare_host_tool
 from fplinux_cli.cli.nand import backup_target_nand
 from fplinux_cli.common import ROOT, fail, replace_file_atomically
 from fplinux_cli.device_data.formats import AudioProfileContext, PhysicalNand

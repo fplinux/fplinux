@@ -1,5 +1,6 @@
 platform = "demo"
 [linux]
+overlay = "linux/overlay"
 patches = ["kernel/target.patch"]
 copies = [
   { source = "kernel/target-copy.c", destination = "target-copy.c" },

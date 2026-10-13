@@ -13,7 +13,7 @@ import pytest
 from tests import ROOT
 
 POLICY = ROOT / "alpine/aports/fplinux-usb-gadget/fplinux-usb-network-policy.sh"
-ROUTE_COMMAND = ROOT / "tests/fixtures/processes/usb_route_command.sh"
+ROUTE_COMMAND = ROOT / "tests/host_process/rootfs/fixtures/usb-gadget-policy/usb_route_command.sh"
 CONNECTED_ROUTE = "192.0.2.0/30 dev usb0 scope link src 192.0.2.1\n"
 
 

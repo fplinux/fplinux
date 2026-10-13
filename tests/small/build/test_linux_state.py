@@ -23,6 +23,77 @@ if TYPE_CHECKING:
 class SharedLinuxTests:
     """Source switches reuse one tree while causal image inputs remain independent."""
 
+    def test_peer_overlay_add_edit_remove_updates_tree_and_preserves_image_independence(
+        self, linux_source: LinuxSourceContext
+    ) -> None:
+        """Peer topology is shared, while only its image depends on independent driver bytes."""
+        source, original = linux_source.prepare("alpha")
+        added_driver = linux_source.root / "targets/beta/linux/overlay/drivers/nested/extra.c"
+        added_driver.parent.mkdir(parents=True)
+        added_driver.write_text("int extra = 1;\n")
+
+        _, added = linux_source.prepare("alpha")
+        _, beta_before = linux_source.prepare("beta")
+        assert (source / "drivers/nested/extra.c").read_text() == "int extra = 1;\n"
+        assert added.linux_recipe != original.linux_recipe
+
+        added_driver.write_text("int extra = 2;\n")
+        _, edited = linux_source.prepare("alpha")
+        _, beta_after = linux_source.prepare("beta")
+        assert (source / "drivers/nested/extra.c").read_text() == "int extra = 2;\n"
+        assert edited.linux_recipe == added.linux_recipe
+        assert beta_after.linux_recipe != beta_before.linux_recipe
+        assert edited.tree_recipe != added.tree_recipe
+
+        added_driver.unlink()
+        _, removed = linux_source.prepare("alpha")
+        assert not (source / "drivers/nested/extra.c").exists()
+        assert removed.linux_recipe == original.linux_recipe
+        assert linux_source.fetch.call_count == 1
+
+    @pytest.mark.parametrize("destination", ["drivers/alpha.c", "drivers/beta.c"])
+    def test_overlay_copy_owner_conflicts_fail_before_source_publication(
+        self, linux_source: LinuxSourceContext, destination: str
+    ) -> None:
+        """Overlay files cannot replace another owner or an explicit copy from the same board."""
+        conflicting = linux_source.root / "targets/beta/linux/overlay" / destination
+        conflicting.parent.mkdir(parents=True)
+        conflicting.write_text("int conflicting = 1;\n")
+
+        with pytest.raises(SystemExit, match="multiple owners"):
+            linux_source.prepare("alpha")
+
+        assert not (linux_source.cache / "linux/sources").exists()
+
+    def test_platform_overlay_and_foreign_header_copies_both_remain_causal(
+        self, linux_source: LinuxSourceContext
+    ) -> None:
+        """One shared header owner can coexist with platform overlay files without duplication."""
+        manifest = linux_source.root / "platforms/soc/platform.toml"
+        manifest.write_text(
+            manifest.read_text().replace("copies = []\n", "")
+            + '\n[[linux.copies]]\nsource = "shared/foreign.h"\n'
+            'destination = "include/foreign.h"\n'
+        )
+        foreign = linux_source.root / "shared/foreign.h"
+        foreign.parent.mkdir()
+        foreign.write_text("#define FOREIGN 1\n")
+        owned = linux_source.root / "platforms/soc/linux/overlay/include/owned.h"
+        owned.parent.mkdir()
+        owned.write_text("#define OWNED 1\n")
+        source, before = linux_source.prepare("alpha")
+        assert (source / "include/foreign.h").read_text() == "#define FOREIGN 1\n"
+        assert (source / "include/owned.h").read_text() == "#define OWNED 1\n"
+
+        owned.write_text("#define OWNED 2\n")
+        _, after_owned = linux_source.prepare("alpha")
+        assert after_owned.linux_recipe != before.linux_recipe
+        assert (source / "include/owned.h").read_text() == "#define OWNED 2\n"
+        foreign.write_text("#define FOREIGN 2\n")
+        _, after_foreign = linux_source.prepare("alpha")
+        assert after_foreign.linux_recipe != after_owned.linux_recipe
+        assert (source / "include/foreign.h").read_text() == "#define FOREIGN 2\n"
+
     def test_board_and_profile_switches_leave_shared_source_unchanged(
         self, linux_source: LinuxSourceContext
     ) -> None:

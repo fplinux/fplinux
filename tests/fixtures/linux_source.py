@@ -41,6 +41,7 @@ class LinuxSourceContext:
         """Write the Linux-only platform manifest consumed by real discovery."""
         directory = self.root / "platforms" / name
         directory.mkdir(parents=True)
+        (directory / "linux/overlay").mkdir(parents=True)
         template = (SOURCE_FILES / "platform.toml.in").read_text(encoding="utf-8")
         (directory / "platform.toml").write_text(
             template % {"name": name, "name_upper": name.upper(), "source_lock": source_lock},
@@ -51,6 +52,7 @@ class LinuxSourceContext:
         """Add a board with one independent driver and one guarded Kconfig fragment."""
         directory = self.root / "targets" / name
         directory.mkdir(parents=True)
+        (directory / "linux/overlay").mkdir(parents=True)
         (directory / "driver.c").write_text(f"int {name} = 1;\n", encoding="utf-8")
         (directory / "fragment").write_text(
             f'config {name.upper()}\n\tbool "{name}"\n', encoding="utf-8"

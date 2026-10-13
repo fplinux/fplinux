@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-KERNEL = ROOT / "platforms/ums9117/linux/drivers/media/platform/ums9117"
+KERNEL = ROOT / "platforms/ums9117/linux/overlay/drivers/media/platform/ums9117"
 HARNESS = ROOT / "tests/host_tool/media/jpeg-codec.c"
 STANDARD_TABLES = ROOT / "tests/host_tool/media/jpeg-codec-standard-tables.c"
 COMPAT = ROOT / "tests/host_tool/media/jpeg-codec-compat"

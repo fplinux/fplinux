@@ -65,7 +65,7 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
             run_quality_command(
                 stage,
                 workspace,
-                ["python3", "/workspace/scripts/check.py", *source_scopes],
+                ["python3", "-m", "fplinux_cli.quality.source", *source_scopes],
                 kern=kern,
                 image=image,
             )

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from fplinux_cli import common
-from fplinux_cli.cli.package_readme import append_source_companion, ordinary_readme
+from fplinux_cli.packaging.readme import append_source_companion, ordinary_readme
 
 from tests import ROOT
 

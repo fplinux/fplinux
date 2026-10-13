@@ -14,7 +14,7 @@ from tests.process import run_process
 if TYPE_CHECKING:
     from pathlib import Path
 
-KERNEL = ROOT / "platforms/ums9117/linux/drivers/media/platform/ums9117"
+KERNEL = ROOT / "platforms/ums9117/linux/overlay/drivers/media/platform/ums9117"
 HARNESS = ROOT / "tests/host_tool/media/dcam-format.c"
 COMPAT = ROOT / "tests/host_tool/media/jpeg-codec-compat"
 KCONFIG_COMPAT = ROOT / "tests/host_tool/media/dcam-format-compat"

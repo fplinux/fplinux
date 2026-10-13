@@ -12,12 +12,13 @@
     "build": "astro build",
     "build:offline": "node scripts/build-offline.ts",
     "preview": "astro preview",
-    "test:offline": "node --test scripts/offline-search-index.test.ts scripts/phones.test.ts",
+    "test:offline": "node --test scripts/offline-search-index.test.ts scripts/phones.test.ts scripts/support.test.ts scripts/notices-markdown.test.ts",
     "test:format": "node --test scripts/mdx-format.test.ts",
     "check": "astro sync && oxlint && eslint . && prettier --config config/prettier.config.mjs --check . && stylelint \"src/**/*.{astro,css}\" && astro check && npm run test:offline && npm run test:format",
     "format": "prettier --config config/prettier.config.mjs --write ."
   },
   "dependencies": {
+    "@astrojs/markdown-satteri": "0.4.2",
     "@astrojs/starlight": "0.42.5",
     "@expressive-code/plugin-collapsible-sections": "0.44.2",
     "astro": "7.3.5",
@@ -41,6 +42,7 @@
     "postcss-html": "2.0.0",
     "prettier": "3.9.9",
     "prettier-plugin-astro": "1.1.0",
+    "satteri": "0.10.5",
     "stylelint": "17.16.0",
     "stylelint-config-idiomatic-order": "10.0.0",
     "stylelint-config-standard": "40.0.0",

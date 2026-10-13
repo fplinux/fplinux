@@ -7,7 +7,7 @@ Use the shared [format and check commands](/fplinux/develop/contributing/). Both
 
 Canonical order groups related fields by their role. Alphabetical order applies only to independent dictionaries identified below. Unknown and optional fields keep their values; missing fields are not added. Comments stay with their field or section, and license headers stay at the beginning. Formatting does not repair semantic errors or add hardware support.
 
-Arrays and execution sequences retain their order except for the two TOML cases below. This includes patches, copies, appends, tool recipes, object and link lists, workflow jobs and steps, issue questions and choices, navigation, plugins, extensions and palettes.
+Arrays and execution sequences retain their source order except for the two TOML cases below. This includes patches, copies, appends, tool recipes, object and link lists, workflow jobs and steps, issue questions and choices, navigation, plugins, extensions and palettes. Linux integration normalizes independent copies by destination when preparing sources; patch and append order remains significant.
 
 ## TOML
 
@@ -36,7 +36,7 @@ Target fields follow their consumer roles:
 | display | `panel`, `boot_font` |
 | display_brightness | `backlight`, `levels` |
 | rootfs, bundle | `packages` |
-| linux | `config_fragment`, `memory`, `dtb`, `debug_dtb`, `patches`, `forbidden_dtb_markers`, `forbidden_config`, `copies`, `appends` |
+| linux | `config_fragment`, `memory`, `dtb`, `debug_dtb`, `patches`, `forbidden_dtb_markers`, `forbidden_config`, `overlay`, `copies`, `appends` |
 | memory | `base`, `size` |
 | copy, append | `source`, `destination` |
 | bootstrap | `lcd_config`, `image`, `map`, `dtb_destination`, `record_prefix` |
@@ -49,7 +49,7 @@ Target fields follow their consumer roles:
 | microsd.bootstrap | `source`, `image`, `map` |
 | microsd.uboot | `defconfig`, `patches`, `copies` |
 
-Platform identity uses `vendor`, `soc`, `aliases`, `compatible`. Linux groups source and toolchain, configuration, destinations and outputs, then patches, copies, appends and configuration checks. Bootstrap groups source and destination paths, files and patches, toolchain and build settings, load limits, copies and memory layout. Runtime groups the load address, adapter and USB identities. Host runtime tools precede tool recipes; recipe members precede nonempty copy tables. Empty copy arrays remain ordinary fields.
+Platform identity uses `vendor`, `soc`, `aliases`, `compatible`. Linux groups source and toolchain, configuration, destinations and outputs, then patches, overlay, copies, appends and configuration checks. Bootstrap groups source and destination paths, files and patches, toolchain and build settings, load limits, copies and memory layout. Runtime groups the load address, adapter and USB identities. Host runtime tools precede tool recipes; recipe members precede nonempty copy tables. Empty copy arrays remain ordinary fields.
 
 Profiles group root kind/filesystem/wait, package selection, boot kinds, resident and load ranges, storage partitions, then runtime transport and runnability. Their package arrays retain their order.
 
