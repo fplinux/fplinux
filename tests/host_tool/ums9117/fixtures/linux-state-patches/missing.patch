@@ -1,0 +1,5 @@
+--- a/drivers/common.c
++++ b/drivers/common.c
+@@ -1 +1 @@
+-int nonexistent = 1;
++int common = 2;

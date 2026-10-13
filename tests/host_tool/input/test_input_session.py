@@ -24,16 +24,14 @@ if TYPE_CHECKING:
 class InputSessionTests:
     """Observe the production session's caller-visible event sequence."""
 
-    executable: Path
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def executable(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         """Link the host harness once for this test group."""
         with c_build_directory(tmp_path_factory, "input-session") as temporary:
-            cls.executable = temporary / "input-session"
+            executable = temporary / "input-session"
             compile_c(
-                cls.executable,
+                executable,
                 [
                     "-std=c11",
                     "-Wall",
@@ -48,7 +46,7 @@ class InputSessionTests:
                 name="compile input session with fake device boundaries",
                 check=True,
             )
-            yield
+            yield executable
 
     @pytest.mark.parametrize(
         "scenario",
@@ -73,10 +71,10 @@ class InputSessionTests:
             "retry",
         ],
     )
-    def test_event_translation_and_device_lifetimes(self, scenario: str) -> None:
+    def test_event_translation_and_device_lifetimes(self, executable: Path, scenario: str) -> None:
         """Literal traces preserve identity, frames, repeat and synchronized state."""
         run_process(
-            [str(self.executable), scenario],
+            [str(executable), scenario],
             name=f"run input-session {scenario} component scenario",
             timeout=5,
             check=True,

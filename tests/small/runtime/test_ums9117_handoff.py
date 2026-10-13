@@ -15,7 +15,13 @@ from unittest import mock
 import pytest
 from fplinux_cli.runtime import ssh_transport
 
-from tests.small.runtime.adapter_fixtures import ADAPTER, BridgeFixture, BridgeProcess
+from tests.small.runtime.adapter_fixtures import (
+    ADAPTER,
+    BRIDGE_SESSION_ID,
+    BridgeProcess,
+    bridge_runtime,
+    run_bridge,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -167,13 +173,13 @@ class HandoffTransportTests:
         assert (result) is (ready)
 
 
-class BridgeAcknowledgementTests(BridgeFixture):
+class BridgeAcknowledgementTests:
     """The loader result, bridge exit status and BootROM release gate the Linux transition."""
 
     def test_no_transport_events_end_at_acknowledged_linux_transition(self) -> None:
         """A bridge acknowledgement does not claim an authenticated SSH session."""
         events: list[str] = []
-        self.run_bridge(BridgeProcess(0), events=events.append)
+        run_bridge(BridgeProcess(0), events=events.append)
         assert events == [
             "waiting-for-device",
             "device-found",
@@ -187,7 +193,7 @@ class BridgeAcknowledgementTests(BridgeFixture):
         """A failed bridge cannot authorize the consumer's next transport stage."""
         events: list[str] = []
         with pytest.raises(SystemExit, match="did not acknowledge"):
-            self.run_bridge(BridgeProcess(1), events=events.append)
+            run_bridge(BridgeProcess(1), events=events.append)
         assert events == [
             "waiting-for-device",
             "device-found",
@@ -199,7 +205,7 @@ class BridgeAcknowledgementTests(BridgeFixture):
     def test_exit_zero_and_bootrom_disconnect_continue_with_the_exact_session_token(self) -> None:
         """Bridge success needs no output; the original USB node must then disappear."""
         bridge = BridgeProcess(0)
-        popen, transport_module, bundle = self.run_bridge(bridge, bootrom_release_seconds=1.0)
+        popen, transport_module, bundle = run_bridge(bridge, bootrom_release_seconds=1.0)
 
         assert (popen.call_args.args[0]) == (
             [
@@ -208,7 +214,7 @@ class BridgeAcknowledgementTests(BridgeFixture):
                 "-eL",
                 str(bundle / "host/libc_server"),
                 "--fplinux-handoff",
-                self.session_id,
+                BRIDGE_SESSION_ID,
                 "--",
                 "--bright",
                 "50",
@@ -234,7 +240,7 @@ class BridgeAcknowledgementTests(BridgeFixture):
         bridge = BridgeProcess(None, time_out=True)
 
         with pytest.raises(SystemExit, match="before the deadline"):
-            self.run_bridge(bridge)
+            run_bridge(bridge)
 
         assert bridge.terminated
 
@@ -243,11 +249,11 @@ class BridgeAcknowledgementTests(BridgeFixture):
         bridge = BridgeProcess(0)
 
         with pytest.raises(SystemExit, match="BootROM USB did not disconnect"):
-            self.run_bridge(bridge, bootrom_release_seconds=None)
+            run_bridge(bridge, bootrom_release_seconds=None)
 
     def test_none_transport_still_requires_a_prepared_session(self) -> None:
         """A host-only profile cannot bypass the per-run bridge binding token."""
         with pytest.raises(SystemExit, match="requires a prepared session"):
             ADAPTER.run(
-                Path("bundle"), self.runtime("none"), None, expected_device_identity="9" * 64
+                Path("bundle"), bridge_runtime("none"), None, expected_device_identity="9" * 64
             )

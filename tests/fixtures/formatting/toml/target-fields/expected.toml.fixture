@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0-only
+platform = "demo"
+
+[linux]
+config_fragment = "@CONFIG@"
+memory = { base = 0x8000, size = 0x0100 }
+
+[adapter]
+spi_mode = 1
+# Display level
+backlight_level = 0x0f
+exec_distance = 0x0040 # distance
+unknown_z = "@TARGET@"
+unknown_a = "%(target)s"

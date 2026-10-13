@@ -1,0 +1,11 @@
+[vendor]
+repository = "https://example.invalid/vendor"
+commit = "abc123"
+archive_url = "https://example.invalid/vendor.tar.gz"
+archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+license = "Unlicense"
+
+[linux]
+version = "1.2.3"
+url = "https://example.invalid/linux.tar.xz"
+sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"

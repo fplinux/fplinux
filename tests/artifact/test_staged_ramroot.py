@@ -13,6 +13,8 @@ from fplinux_cli import common
 from fplinux_cli.workspace import build_inputs as workspace_module
 from fplinux_cli.workspace import staging as workspace_staging
 
+from tests import ROOT
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -27,7 +29,8 @@ class StagedRamrootTests:
         with mock.patch.object(workspace_staging, "ROOT", directory):
             source = workspace_staging.stage_workspace_snapshot(snapshot)
         bootstrap = source / "alpine/ramroot-init.sh"
-        bootstrap.write_bytes(b"#!/bin/sh\nexit 0\n")
+        expected_init = (ROOT / "tests/fixtures/processes/successful_bootstrap.sh").read_bytes()
+        bootstrap.write_bytes(expected_init)
         with (
             mock.patch.object(workspace_module, "ROOT", source),
             mock.patch.object(workspace_staging, "ROOT", source),
@@ -38,7 +41,9 @@ class StagedRamrootTests:
             (source / "unrelated.txt").write_bytes(b"not a build input\n")
             unrelated = workspace_module.target_workspace_snapshot("nokia-ta1618")
             assert (before.recipe) == (unrelated.recipe)
-            bootstrap.write_bytes(b"#!/bin/sh\nexit 1\n")
+            bootstrap.write_bytes(
+                (ROOT / "tests/fixtures/processes/failing_bootstrap.sh").read_bytes()
+            )
             changed = workspace_module.target_workspace_snapshot("nokia-ta1618")
             assert (before.recipe) != (changed.recipe)
         root = directory / "root"
@@ -50,18 +55,11 @@ class StagedRamrootTests:
         (root / "lib/ld-musl-armhf.so.1").write_bytes(b"loader\n")
         (root / "lib/libc.musl-armv7.so.1").symlink_to("ld-musl-armhf.so.1")
         (root / "usr/lib/libgcc_s.so.1").write_bytes(b"gcc runtime\n")
-        command = (
-            "from pathlib import Path; import sys; "
-            "from fplinux_cli.alpine.rootfs_files import _write_ramroot_initramfs; "
-            "_write_ramroot_initramfs("
-            "Path(sys.argv[1]), Path(sys.argv[2]))"
-        )
         packed = subprocess.run(
             [
                 sys.executable,
                 "-B",
-                "-c",
-                command,
+                str(ROOT / "tests/fixtures/processes/ramroot_producer.py"),
                 str(root),
                 str(output),
             ],
@@ -85,4 +83,4 @@ class StagedRamrootTests:
                 timeout=10,
             )
         assert (extracted.returncode) == (0), extracted.stderr
-        assert ((boot / "init").read_bytes()) == (b"#!/bin/sh\nexit 0\n")
+        assert ((boot / "init").read_bytes()) == (expected_init)

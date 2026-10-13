@@ -7,9 +7,7 @@ import hashlib
 import json
 import shutil
 import struct
-import tempfile
-from contextlib import ExitStack
-from pathlib import Path
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -29,7 +27,7 @@ from tests.fixtures.stock_board_report import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from pathlib import Path
 
     from fplinux_cli.device_data.formats import PreparedGroup
 
@@ -52,33 +50,9 @@ REPORT_PINMAP = b"".join(
         (0xFFFFFFFF, 0x0000FFFF),
     )
 )
-UNPACK_OUTPUT = f"""0x0: DHTB header (size = 0x5000)
-0x800: init_table, start = 0x900, end = 0x910
-0x808: init_lzdec2
-0: src = 0x80100a00, dst = 0x{DATA:08x}, len = 0x400, fn = 0x80100809
-
-ps_addr: 0x{BASE:x}
-ps_size: 0x5000
-0x81000080 (0x81000000 + 0x80): fat_config
-guess: keymap addr = 0x80104900
-0x81000100: LCD, id = 0x003025 (0, 0, 1), addr = 0x80102000
-0x8100012c: LCD, id = 0x009106 (1, 2, 5), addr = 0x80102400
-0x1000: nand configs (size = 0x70)
-0x4800: pinmap (end = 0x4840)
-0x4c00: init_table, start = 0x4d00, end = 0x4d10
-0x81800000: LCD, id = 0x00dead (0, 0, 1), addr = 0x81800100
-pinmap: LCD pins = 0x10, 0x10, 0x10, 0x10, 0x10
-0x4900: keymap, bootkey = 0x2a (STAR), bl_update keys = 0x31 0x0d (1, CENTER)
-"""
-INIT_OUTPUT = """LCM_DELAY(10),
-LCM_CMD(0xff, 1), 0xa5,
-LCM_CMD(0x11, 0),
-LCM_DELAY(120),
-LCM_CMD(0x36, 1), 0x00,
-!!! 0x3040: unknown op 0x1c64
-LCM_CMD(0x29, 2), 0x00,0x00,
-LCM_END
-"""
+REPORT_FIXTURES = ROOT / "tests/fixtures/stock_board_report"
+UNPACK_OUTPUT = (REPORT_FIXTURES / "unpack.txt").read_text(encoding="utf-8")
+INIT_OUTPUT = (REPORT_FIXTURES / "lcd-init.txt").read_text(encoding="utf-8")
 
 
 def _report_image(*, with_fuel_gauge: bool = True) -> bytes:
@@ -135,30 +109,23 @@ def _report_data() -> bytes:
     return bytes(data)
 
 
-class BoardReportTests:
-    """Run extraction against a scripted stand-in for fphelper_t117."""
+@dataclass(frozen=True)
+class BoardReportContext:
+    """A test-owned tool and the scripted responses it reads."""
 
-    @pytest.fixture(autouse=True)
-    def _prepare_case(self) -> Iterator[None]:
-        """Install the fake tool as the only host tool of a temporary build."""
-        with ExitStack() as cleanup:
-            temporary = tempfile.TemporaryDirectory()
-            cleanup.enter_context(temporary)
-            self.host_tools = Path(temporary.name) / "host"
-            self.host_tools.mkdir()
-            self.tool = self.host_tools / "fphelper_t117"
-            shutil.copyfile(FAKE_TOOL, self.tool)
-            self.tool.chmod(0o755)
-            yield
+    host_tools: Path
+    tool: Path
 
-    def _scenario(self, image: bytes, commands: dict[str, dict[str, Any]]) -> None:
+    def scenario(self, image: bytes, commands: dict[str, dict[str, Any]]) -> None:
+        """Bind the fake process response to the selected image bytes."""
         (self.host_tools / "scenario.json").write_text(
             json.dumps({"image_sha256": hashlib.sha256(image).hexdigest(), "commands": commands}),
             encoding="utf-8",
         )
 
-    def _complete_scenario(self, image: bytes) -> None:
-        self._scenario(
+    def complete_scenario(self, image: bytes) -> None:
+        """Provide reports and extracted files for one complete stock image."""
+        self.scenario(
             image,
             {
                 "unpack": {
@@ -173,17 +140,35 @@ class BoardReportTests:
             },
         )
 
-    def _prepare(self, image: bytes) -> PreparedGroup:
+    def prepare(self, image: bytes) -> PreparedGroup:
+        """Execute production board extraction through the controlled tool process."""
         nand = backup(image, vbm=agreeing_vbm())
         group: PreparedGroup = STOCK_IMAGE.prepare_board_maps(nand, host_tools=self.host_tools)
         return group
 
-    def test_report_lists_every_value_with_its_source_and_keeps_the_maps(self) -> None:
+
+@pytest.fixture
+def board_report_case(tmp_path: Path) -> BoardReportContext:
+    """Install the fake tool as the only host tool of a temporary build."""
+    host_tools = tmp_path / "host"
+    host_tools.mkdir()
+    tool = host_tools / "fphelper_t117"
+    shutil.copyfile(FAKE_TOOL, tool)
+    tool.chmod(0o755)
+    return BoardReportContext(host_tools, tool)
+
+
+class BoardReportTests:
+    """Run extraction against a scripted stand-in for fphelper_t117."""
+
+    def test_report_lists_every_value_with_its_source_and_keeps_the_maps(
+        self, board_report_case: BoardReportContext
+    ) -> None:
         """The maps are the tool's bytes; the report reads the rest from the stock image."""
         image = _report_image()
-        self._complete_scenario(image)
+        board_report_case.complete_scenario(image)
 
-        group = self._prepare(image)
+        group = board_report_case.prepare(image)
 
         assert (group.prepared) == (
             {"pinmap.bin": REPORT_PINMAP, "keymap.bin": keymap(SPARSE_KEYMAP)}
@@ -199,7 +184,7 @@ class BoardReportTests:
                 "load_address": "0x80100000",
             }
         )
-        tool_sha256 = hashlib.sha256(self.tool.read_bytes()).hexdigest()
+        tool_sha256 = hashlib.sha256(board_report_case.tool.read_bytes()).hexdigest()
         assert (report["tool"]) == ({"name": "fphelper_t117", "sha256": tool_sha256})
         assert (report["keypad"]["matrix"]) == (SPARSE_MATRIX)
         assert (report["keypad"]["boot_key"]) == ({"code": "0x2a", "key": "FPLINUX_KEY_STAR"})
@@ -279,12 +264,14 @@ class BoardReportTests:
             ]
         )
 
-    def test_value_without_its_stock_structure_is_unresolved_not_guessed(self) -> None:
+    def test_value_without_its_stock_structure_is_unresolved_not_guessed(
+        self, board_report_case: BoardReportContext
+    ) -> None:
         """A missing fuel-gauge conversion leaves no calibration value in the report."""
         image = _report_image(with_fuel_gauge=False)
-        self._complete_scenario(image)
+        board_report_case.complete_scenario(image)
 
-        report = json.loads(self._prepare(image).reports["board-report.json"])
+        report = json.loads(board_report_case.prepare(image).reports["board-report.json"])
 
         assert (report["fgu_current_calibration"]) is None
         assert ("fgu_current_calibration") not in (report["sources"])
@@ -324,13 +311,16 @@ class BoardReportTests:
         ],
     )
     def test_missing_tool_failed_tool_or_missing_maps_stop_extraction(
-        self, commands: dict[str, dict[str, Any]] | None, message: str
+        self,
+        board_report_case: BoardReportContext,
+        commands: dict[str, dict[str, Any]] | None,
+        message: str,
     ) -> None:
         """No board-map files are produced without a successful tool run that found them."""
         image = _report_image()
         if commands is None:
-            self.tool.unlink()
+            board_report_case.tool.unlink()
         else:
-            self._scenario(image, commands)
+            board_report_case.scenario(image, commands)
         with pytest.raises(ValueError, match=message):
-            self._prepare(image)
+            board_report_case.prepare(image)

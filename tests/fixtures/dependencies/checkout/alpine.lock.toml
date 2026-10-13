@@ -1,0 +1,27 @@
+release = "3.24.2"
+branch = "v3.24"
+arch = "armv7"
+triplet = "armv7-alpine-linux-musleabihf"
+
+[repositories]
+main = "https://example.invalid/main/armv7"
+community = "https://example.invalid/community/armv7"
+
+[minirootfs]
+url = "https://example.invalid/target.tar.gz"
+sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
+bytes = 2
+
+[runtime]
+packages = ["runtime-1-r0.apk"]
+
+[runtime.additions]
+
+[sysroot]
+packages = ["runtime-1-r0.apk"]
+
+[[package]]
+repository = "main"
+file = "runtime-1-r0.apk"
+sha256 = "3333333333333333333333333333333333333333333333333333333333333333"
+bytes = 3

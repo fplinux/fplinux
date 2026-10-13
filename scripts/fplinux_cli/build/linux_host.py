@@ -21,6 +21,7 @@ from fplinux_cli.environment.images import (
     load_container_lock,
 )
 from fplinux_cli.environment.kern import kern_box_name, kern_environment, require_kern
+from fplinux_cli.templates import substitute_template
 
 
 def verify_linux_dependencies(files: dict[str, Path]) -> dict[str, list[str]]:
@@ -54,16 +55,11 @@ def verify_linux_dependencies(files: dict[str, Path]) -> dict[str, list[str]]:
 def _write_launchers(package: Path) -> None:
     directory = package / "tools/linux"
     directory.mkdir(parents=True)
+    template = Path(__file__).with_name("linux-launcher.sh.in").read_text(encoding="utf-8")
     for name in ("ssh", "ssh-keygen", "ssh-keyscan"):
         launcher = directory / name
         launcher.write_text(
-            "#!/bin/sh\n"
-            "set -eu\n"
-            'command_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
-            'runtime_root=$(CDPATH= cd -- "$command_root/../../runtime" && pwd)\n'
-            'exec "$runtime_root/lib/ld-musl-x86_64.so.1" '
-            '--library-path "$runtime_root/lib" '
-            f'"$runtime_root/bin/{name}" "$@"\n',
+            substitute_template(template, {"COMMAND": name}),
             encoding="utf-8",
         )
         launcher.chmod(0o755)
@@ -80,17 +76,7 @@ def _verify_python(package: Path) -> None:
             "-B",
             "-I",
             "-S",
-            "-c",
-            (
-                "import ctypes,math,cmath,lzma,tomllib,hashlib,json,sys; "
-                "assert sys.version_info[:2] == (3,14); "
-                "assert hashlib.sha256(b'test').hexdigest() == "
-                "'9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08'; "
-                "assert lzma.decompress(lzma.compress(b'test')) == b'test'; "
-                "assert tomllib.loads('value=42')['value'] == 42; "
-                "assert math.sqrt(81) == 9; assert cmath.sqrt(-1) == 1j; "
-                "assert ctypes.sizeof(ctypes.c_uint64) == 8"
-            ),
+            str(Path(__file__).with_name("linux_runtime_probe.py")),
         ],
         cwd=package.parent,
         env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},

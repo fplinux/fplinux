@@ -1,0 +1,18 @@
+platform = "%(platform)s"
+
+[identity]
+brand = "Example"
+product = "%(name)s"
+hardware_codes = []
+compatible = "example,%(name)s"
+
+[linux]
+patches = []
+
+[[linux.copies]]
+source = "driver.c"
+destination = "drivers/%(name)s.c"
+
+[[linux.appends]]
+source = "fragment"
+destination = "drivers/Kconfig"

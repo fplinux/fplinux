@@ -23,6 +23,7 @@ from fplinux_cli.build import device_tree
 from fplinux_cli.build import environment as build_env
 from fplinux_cli.build.device_tree import exact_path_properties, parse_nul_string
 from fplinux_cli.common import canonical_json_bytes, sha256_file
+from fplinux_cli.templates import substitute_template
 
 RECEIPT_NAME = ".fplinux-fit-receipt.json"
 _ITS_NAME = "FPLINUX.its"
@@ -54,54 +55,17 @@ def _dts_string(value: str) -> str:
 
 
 def _its_source(target: str, display_name: str, spec: dict[str, Any]) -> bytes:
-    name = _dts_string(display_name)
-    return f"""/dts-v1/;
-
-/ {{
-\tdescription = "FPLinux {name}";
-\t#address-cells = <1>;
-
-\timages {{
-\t\tkernel {{
-\t\t\tdescription = "Linux zImage";
-\t\t\tdata = /incbin/("zImage");
-\t\t\ttype = "kernel";
-\t\t\tarch = "arm";
-\t\t\tos = "linux";
-\t\t\tcompression = "none";
-\t\t\tload = <0x{spec["kernel_load"]:08x}>;
-\t\t\tentry = <0x{spec["kernel_entry"]:08x}>;
-
-\t\t\thash {{
-\t\t\t\talgo = "sha256";
-\t\t\t}};
-\t\t}};
-
-\t\tfdt {{
-\t\t\tdescription = "Linux device tree";
-\t\t\tdata = /incbin/("linux.dtb");
-\t\t\ttype = "flat_dt";
-\t\t\tarch = "arm";
-\t\t\tcompression = "none";
-\t\t\tload = <0x{spec["fdt_load"]:08x}>;
-
-\t\t\thash {{
-\t\t\t\talgo = "sha256";
-\t\t\t}};
-\t\t}};
-\t}};
-
-\tconfigurations {{
-\t\tdefault = "{target}";
-
-\t\t{target} {{
-\t\t\tdescription = "{name}";
-\t\t\tkernel = "kernel";
-\t\t\tfdt = "fdt";
-\t\t}};
-\t}};
-}};
-""".encode()
+    template = Path(__file__).with_name("linux.its.in").read_text(encoding="utf-8")
+    return substitute_template(
+        template,
+        {
+            "DISPLAY_NAME": _dts_string(display_name),
+            "TARGET": target,
+            "KERNEL_LOAD": f"{spec['kernel_load']:08x}",
+            "KERNEL_ENTRY": f"{spec['kernel_entry']:08x}",
+            "FDT_LOAD": f"{spec['fdt_load']:08x}",
+        },
+    ).encode()
 
 
 def create_plan(  # noqa: PLR0913 -- causal inputs remain separate.

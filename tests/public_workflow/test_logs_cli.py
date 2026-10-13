@@ -8,6 +8,7 @@ import os
 import selectors
 import signal
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytest
@@ -22,15 +23,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-class LogsCliTests:
-    """Use controlled reporter-format inputs, real files and the real public parser."""
+@dataclass(frozen=True)
+class LogsCli:
+    """Own the checkout and journal directory observed by the public reader."""
 
-    @pytest.fixture(autouse=True)
-    def _prepare_inputs(self, tmp_path: Path) -> None:
-        """Provide source imports but no Kern installation, cache or ambient run history."""
-        self.root = tmp_path
-        prepare_cli_checkout(self.root)
-        self.logs = self.root / ".cache/logs"
+    root: Path
+    logs: Path
 
     def run_logs(
         self,
@@ -76,35 +74,47 @@ class LogsCliTests:
         temporary.replace(directory / "run.json")
         return directory
 
-    def await_output(
-        self, process: subprocess.Popen[str], deadline: float, marker: bytes
-    ) -> bytes:
-        """Wait for observed reader output before publishing the next producer state."""
-        if process.stdout is None:
-            pytest.fail("reader stdout was not captured")
-        observed = b""
-        with selectors.DefaultSelector() as selector:
-            selector.register(process.stdout, selectors.EVENT_READ)
-            while marker not in observed:
-                assert (deadline - time.monotonic()) > (0), observed
-                if selector.select(max(0, deadline - time.monotonic())):
-                    chunk = os.read(process.stdout.fileno(), 65536)
-                    assert chunk, observed
-                    observed += chunk
-        return observed
 
-    def test_list_filters_and_latest_use_recorded_start_not_mtime(self) -> None:
+@pytest.fixture
+def logs_cli(tmp_path: Path) -> LogsCli:
+    """Provide source imports but no Kern installation, cache or ambient run history."""
+    prepare_cli_checkout(tmp_path)
+    return LogsCli(tmp_path, tmp_path / ".cache/logs")
+
+
+def await_output(process: subprocess.Popen[str], deadline: float, marker: bytes) -> bytes:
+    """Wait for observed reader output before publishing the next producer state."""
+    if process.stdout is None:
+        pytest.fail("reader stdout was not captured")
+    observed = b""
+    with selectors.DefaultSelector() as selector:
+        selector.register(process.stdout, selectors.EVENT_READ)
+        while marker not in observed:
+            assert (deadline - time.monotonic()) > (0), observed
+            if selector.select(max(0, deadline - time.monotonic())):
+                chunk = os.read(process.stdout.fileno(), 65536)
+                assert chunk, observed
+                observed += chunk
+    return observed
+
+
+class LogsCliTests:
+    """Use controlled reporter-format inputs, real files and the real public parser."""
+
+    def test_list_filters_and_latest_use_recorded_start_not_mtime(self, logs_cli: LogsCli) -> None:
         """Select invocation context and ignore child reporters and unrelated files."""
-        first = self.journal("build/example/profiles/microsd-uboot/old")
-        self.journal("check/new", started="2026-01-02T10:00:05+00:00", status="failed")
-        self.journal("build/example/profiles/microsd-uboot/old/containers/kernel", parent="old")
-        unrelated = self.logs / "notes"
+        first = logs_cli.journal("build/example/profiles/microsd-uboot/old")
+        logs_cli.journal("check/new", started="2026-01-02T10:00:05+00:00", status="failed")
+        logs_cli.journal(
+            "build/example/profiles/microsd-uboot/old/containers/kernel", parent="old"
+        )
+        unrelated = logs_cli.logs / "notes"
         unrelated.mkdir()
         (unrelated / "private.log").write_text("not a command log\n")
         (unrelated / "run.json").write_text("{}")
         os.utime(first / "run.json", None)
 
-        result = self.run_logs("list")
+        result = logs_cli.run_logs("list")
         assert (result.returncode) == (0), result.stderr
         records = result.stdout.splitlines()[1:]
         assert (records) == (
@@ -116,8 +126,8 @@ class LogsCliTests:
                 ),
             ]
         )
-        assert (str(self.root)) not in (result.stdout)
-        filtered = self.run_logs(
+        assert (str(logs_cli.root)) not in (result.stdout)
+        filtered = logs_cli.run_logs(
             "list",
             "--command",
             "build",
@@ -132,46 +142,46 @@ class LogsCliTests:
         assert ([row.split()[0] for row in filtered.stdout.splitlines()[1:]]) == (
             ["build/example/profiles/microsd-uboot/old"]
         )
-        shown = self.run_logs("show")
+        shown = logs_cli.run_logs("show")
         assert (shown.returncode) == (0), shown.stderr
         assert (shown.stdout) == ("check/new: failed\n")
 
-    def test_show_selects_nested_stage_failures_and_bounded_tail(self) -> None:
+    def test_show_selects_nested_stage_failures_and_bounded_tail(self, logs_cli: LogsCli) -> None:
         """The actual child-tool error is available even when a parent records only progress."""
-        run = self.journal(
+        run = logs_cli.journal(
             "check/example", status="failed", stages=(("source", "failed"), ("prepare", "success"))
         )
         (run / "01-source.log").write_text("parent progress\n")
         (run / "02-prepare.log").write_text("successful preparation\n")
-        child = self.journal(
+        child = logs_cli.journal(
             "check/example/containers/source/quality",
             parent="check/example",
             status="failed",
             stages=(("python", "failed"),),
         )
         (child / "01-python.log").write_text("old line\nactual error\nlast line\n")
-        result = self.run_logs("show", "example", "--stage", "python", "--tail", "2")
+        result = logs_cli.run_logs("show", "example", "--stage", "python", "--tail", "2")
         assert (result.returncode) == (0), result.stderr
         assert ("containers/source/quality/python [failed]") in (result.stdout)
         assert ("actual error\nlast line\n") in (result.stdout)
         assert ("old line") not in (result.stdout)
         assert ("parent progress") not in (result.stdout)
-        failed = self.run_logs("show", "check/example", "--failed")
+        failed = logs_cli.run_logs("show", "check/example", "--failed")
         assert (failed.returncode) == (0), failed.stderr
         assert ("actual error") in (failed.stdout)
         assert ("parent progress") in (failed.stdout)
         assert ("successful preparation") not in (failed.stdout)
 
-    def test_default_profile_is_a_filter_not_an_omitted_selection(self) -> None:
+    def test_default_profile_is_a_filter_not_an_omitted_selection(self, logs_cli: LogsCli) -> None:
         """Default selection excludes named profiles on list and on an explicit run ID."""
-        self.journal("build/example/base")
-        self.journal("build/example/profiles/microsd-uboot/card")
-        result = self.run_logs("list", "--profile", "default")
+        logs_cli.journal("build/example/base")
+        logs_cli.journal("build/example/profiles/microsd-uboot/card")
+        result = logs_cli.run_logs("list", "--profile", "default")
         assert (result.returncode) == (0), result.stderr
         assert ([row.split()[0] for row in result.stdout.splitlines()[1:]]) == (
             ["build/example/base"]
         )
-        rejected = self.run_logs(
+        rejected = logs_cli.run_logs(
             "show", "build/example/profiles/microsd-uboot/card", "--profile", "default"
         )
         assert (rejected.returncode) == (1), rejected.stderr
@@ -183,29 +193,33 @@ class LogsCliTests:
         ids=["cached-run", "successful-stages"],
     )
     def test_show_failed_explains_a_run_without_failed_stages(
-        self, stages: tuple[tuple[str, str], ...]
+        self, logs_cli: LogsCli, stages: tuple[tuple[str, str], ...]
     ) -> None:
         """An empty failure filter explains the result while keeping its successful exit."""
-        run = self.journal("build/example/run", stages=stages)
+        run = logs_cli.journal("build/example/run", stages=stages)
         if stages:
             (run / "01-source.log").write_text("successful output\n")
 
-        result = self.run_logs("show", "--command", "build", "--failed")
+        result = logs_cli.run_logs("show", "--command", "build", "--failed")
 
         assert result.returncode == 0, result.stderr
         assert "build/example/run: success\n" in result.stdout
         assert "no failed or interrupted stages in this run\n" in result.stdout
         assert "successful output" not in result.stdout
 
-    def test_reader_neither_waits_for_cache_lock_nor_creates_logs(self) -> None:
+    def test_reader_neither_waits_for_cache_lock_nor_creates_logs(self, logs_cli: LogsCli) -> None:
         """Observing a build must remain possible while a writer holds the real cache lock."""
-        self.journal("build/example/run")
-        before = sorted(path.relative_to(self.logs) for path in self.logs.rglob("*"))
-        with cache_lock(self.root / ".cache", exclusive=True, command="build", target="example"):
-            result = self.run_logs("list")
+        logs_cli.journal("build/example/run")
+        before = sorted(path.relative_to(logs_cli.logs) for path in logs_cli.logs.rglob("*"))
+        with cache_lock(
+            logs_cli.root / ".cache", exclusive=True, command="build", target="example"
+        ):
+            result = logs_cli.run_logs("list")
         assert (result.returncode) == (0), result.stderr
         assert (len(result.stdout.splitlines()[1:])) == (1)
-        assert (sorted(path.relative_to(self.logs) for path in self.logs.rglob("*"))) == (before)
+        assert (sorted(path.relative_to(logs_cli.logs) for path in logs_cli.logs.rglob("*"))) == (
+            before
+        )
 
     @pytest.mark.parametrize(
         ("arguments", "status", "error"),
@@ -222,40 +236,42 @@ class LogsCliTests:
         ],
     )
     def test_empty_unknown_ambiguous_and_invalid_requests_have_clear_outcomes(
-        self, arguments: tuple[str, ...], status: int, error: str
+        self, logs_cli: LogsCli, arguments: tuple[str, ...], status: int, error: str
     ) -> None:
         """Empty listing succeeds, missing/ambiguous selections fail and invalid flags return 2."""
-        empty = self.run_logs("list")
+        empty = logs_cli.run_logs("list")
         assert (empty.returncode) == (0), empty.stderr
         assert (empty.stdout) == ("RUN COMMAND TARGET PROFILE STATUS STARTED DURATION\n")
-        assert not (self.logs.exists())
-        self.journal("check/same")
-        self.journal("test/same")
-        result = self.run_logs(*arguments)
+        assert not (logs_cli.logs.exists())
+        logs_cli.journal("check/same")
+        logs_cli.journal("test/same")
+        result = logs_cli.run_logs(*arguments)
         assert (result.returncode) == (status), result.stderr
         assert (error) in (result.stderr)
         assert ("Traceback") not in (result.stderr)
 
-    def test_follow_delivers_appends_new_stages_and_final_bytes_once(self) -> None:
+    def test_follow_delivers_appends_new_stages_and_final_bytes_once(
+        self, logs_cli: LogsCli
+    ) -> None:
         """Follow binds one run, drains new child stages and stops on recorded completion."""
         relative = "test/live"
-        run = self.journal(relative, status="running", stages=(("first", "running"),))
+        run = logs_cli.journal(relative, status="running", stages=(("first", "running"),))
         (run / "01-first.log").write_text("hidden history\nready-marker\n")
         observed = b""
 
         def publish_after_ready(process: subprocess.Popen[str], deadline: float) -> None:
             nonlocal observed
-            observed = self.await_output(process, deadline, b"ready-marker\n")
+            observed = await_output(process, deadline, b"ready-marker\n")
             with (run / "01-first.log").open("a") as stream:
                 stream.write("appended-marker\n")
-            self.journal("check/newer", started="2026-01-03T00:00:00+00:00")
-            child = self.journal(
+            logs_cli.journal("check/newer", started="2026-01-03T00:00:00+00:00")
+            child = logs_cli.journal(
                 relative + "/containers/tool", parent=relative, stages=(("next", "success"),)
             )
             (child / "01-next.log").write_text("new-stage-first\nnew-stage-last\n")
-            self.journal(relative, stages=(("first", "success"),))
+            logs_cli.journal(relative, stages=(("first", "success"),))
 
-        result = self.run_logs("follow", "--tail", "1", while_running=publish_after_ready)
+        result = logs_cli.run_logs("follow", "--tail", "1", while_running=publish_after_ready)
         assert (result.returncode) == (0), result.stderr
         combined = observed.decode() + result.stdout
         for marker in (
@@ -269,17 +285,17 @@ class LogsCliTests:
         assert ("check/newer") not in (combined)
         assert ("run finished: success") in (combined)
 
-    def test_interrupting_follow_does_not_change_the_observed_run(self) -> None:
+    def test_interrupting_follow_does_not_change_the_observed_run(self, logs_cli: LogsCli) -> None:
         """Ctrl+C stops only the reader with status 130 and leaves the journal untouched."""
-        run = self.journal("test/live", status="running", stages=(("first", "running"),))
+        run = logs_cli.journal("test/live", status="running", stages=(("first", "running"),))
         (run / "01-first.log").write_text("ready-marker\n")
         before = (run / "run.json").read_bytes()
 
         def interrupt_after_ready(process: subprocess.Popen[str], deadline: float) -> None:
-            self.await_output(process, deadline, b"ready-marker\n")
+            await_output(process, deadline, b"ready-marker\n")
             process.send_signal(signal.SIGINT)
 
-        result = self.run_logs("follow", while_running=interrupt_after_ready)
+        result = logs_cli.run_logs("follow", while_running=interrupt_after_ready)
         assert (result.returncode) == (130), result.stderr
         assert ((run / "run.json").read_bytes()) == (before)
         assert ("Traceback") not in (result.stderr)

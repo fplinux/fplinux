@@ -1,0 +1,5 @@
+[nand]
+raw_device = "/dev/demo-raw"
+
+[adapter]
+session_name = "%(target)s"

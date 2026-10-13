@@ -47,4 +47,14 @@ testpaths = [
 ]
 pythonpath = ["scripts"]
 python_classes = ["Test*", "*Tests", "*Case"]
+norecursedirs = [
+  "*.egg",
+  ".*",
+  "_darcs",
+  "CVS",
+  "dist",
+  "node_modules",
+  "venv",
+  "{arch}",
+]
 cache_dir = ".cache/pytest"

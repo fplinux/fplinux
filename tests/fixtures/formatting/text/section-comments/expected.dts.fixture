@@ -1,0 +1,8 @@
+&device {
+	alpha = <1>;
+	zeta = <3>;
+	/* A separate group. */
+
+	beta = <2>;
+	zulu = <4>;
+};

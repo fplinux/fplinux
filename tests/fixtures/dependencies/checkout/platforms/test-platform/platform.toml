@@ -1,0 +1,20 @@
+[rootfs]
+packages = []
+
+[bundle]
+packages = []
+
+[linux]
+source_lock = "kernel"
+
+[bootstrap]
+vendor_source_lock = "support"
+vendor_cache_name = "support.tar.gz"
+
+[[host.tools]]
+type = "make-archive"
+name = "loader"
+source_lock = "host"
+cache_name = "host.tar.gz"
+archive_prefix = "host/"
+members = []

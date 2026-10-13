@@ -372,30 +372,7 @@ def collect_source_files(config: dict[str, Any], *, host: str, offline: bool) ->
 
 
 def _linux_build_instructions() -> bytes:
-    return (
-        b"Linux host tool rebuilding and library replacement\n\n"
-        b"The project directory contains the current source, tool recipes and patches.\n"
-        b"The upstream directory contains the exact source archives listed in downloads.json.\n"
-        b"Project platform recipes select tool members, project copies and ordered patches.\n\n"
-        b"Use a Linux x86-64 musl build environment, such as Alpine, and select an\n"
-        b"absolute installation directory for the replacement library:\n"
-        b"  relink_prefix=/absolute/path/to/libusb-prefix\n"
-        b"In the supplied libusb source directory, build and install it with:\n"
-        b'  ./configure --prefix="$relink_prefix" --disable-udev --enable-static\n'
-        b"  make -j1\n"
-        b"  make install\n"
-        b"Apply the declared project copies and patches to each selected tool source.\n"
-        b"Select the replacement headers and library for the tool rebuild:\n"
-        b'  export CPATH="$relink_prefix/include"\n'
-        b'  export PKG_CONFIG_PATH="$relink_prefix/lib/pkgconfig"\n'
-        b"In each make-archive tool directory, retain its declared CFLAGS and run:\n"
-        b'  make clean all LIBUSB=1 LIBS="-static -L$relink_prefix/lib -lusb-1.0"\n'
-        b"The cc-libusb compile command is in project/scripts/fplinux_cli/build/host.py.\n"
-        b"It obtains replacement library flags with pkg-config --cflags --static --libs\n"
-        b"libusb-1.0. Project recipes and source remain available for rebuilding.\n\n"
-        b"Alpine source channels identify pinned distribution recipes for prebuilt packages;\n"
-        b"those recipes and their upstream source downloads require network access.\n"
-    )
+    return (Path(__file__).with_suffix("") / "BUILD-LINUX.txt").read_bytes()
 
 
 def _windows_source_channels(files: dict[str, bytes]) -> None:

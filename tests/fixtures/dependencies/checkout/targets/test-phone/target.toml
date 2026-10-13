@@ -1,0 +1,7 @@
+platform = "test-platform"
+
+[rootfs]
+packages = []
+
+[bundle]
+packages = []

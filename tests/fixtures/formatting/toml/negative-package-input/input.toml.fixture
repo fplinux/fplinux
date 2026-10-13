@@ -1,0 +1,6 @@
+[[package]]
+bytes = -1
+file = "z.apk"
+
+[[package]]
+sha256 = "invalid"

@@ -11,6 +11,7 @@ import json
 import os
 import stat
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO
 from unittest import mock
@@ -118,12 +119,53 @@ class FakePhone:
         return [command for command in self.commands if command.startswith("exec dd ")]
 
 
+@dataclass(frozen=True)
+class NandDestination:
+    """Private local paths for one raw backup and its checked geometry receipt."""
+
+    directory: Path
+    destination: Path
+    receipt: Path
+
+    def backup(
+        self,
+        phone: FakePhone,
+        *,
+        declared_id: int | None = None,
+        declared_raw_page_bytes: int | None = None,
+    ) -> str:
+        """Publish a controlled phone stream to this case's local backup destination."""
+        with contextlib.redirect_stdout(io.StringIO()) as stdout:
+            nand_backup.backup_nand(
+                lambda: (phone, {"session_id": "selected"}),
+                self.destination,
+                target="demo-phone",
+                raw_device="/dev/ums9117-nand-raw",
+                declared_id=declared_id,
+                declared_raw_page_bytes=declared_raw_page_bytes,
+            )
+        return stdout.getvalue()
+
+
+@pytest.fixture
+def nand_destination() -> Iterator[NandDestination]:
+    """Own the destination tree and reporting root for one backup attempt."""
+    with contextlib.ExitStack() as resources:
+        temporary = tempfile.TemporaryDirectory()
+        resources.enter_context(temporary)
+        directory = Path(temporary.name)
+        resources.enter_context(mock.patch("fplinux_cli.reporting.run.ROOT", directory))
+        destination = directory / "nand.raw"
+        receipt = directory / "nand.raw.json"
+        yield NandDestination(directory, destination, receipt)
+
+
 class NandBackupTests:
     """Protect the exact raw stream boundary and its local publication result."""
 
     @pytest.mark.parametrize("complete", [True, False])
     def test_backup_progress_completes_only_after_checked_publication(
-        self, *, complete: bool
+        self, nand_destination: NandDestination, *, complete: bool
     ) -> None:
         """A short stream cannot report completion or replace a usable backup."""
         payload = b"P" * (2176 if complete else 2175)
@@ -133,13 +175,13 @@ class NandBackupTests:
         def progress(completed: int, total: int) -> None:
             updates.append((completed, total))
             if completed == total:
-                assert self.destination.read_bytes() == b"P" * 2176
-                assert json.loads(self.receipt.read_text())["raw_bytes"] == 2176
+                assert nand_destination.destination.read_bytes() == b"P" * 2176
+                assert json.loads(nand_destination.receipt.read_text())["raw_bytes"] == 2176
 
         def execute() -> None:
             nand_backup.backup_nand(
                 lambda: (phone, {"session_id": "selected"}),
-                self.destination,
+                nand_destination.destination,
                 target="demo-phone",
                 raw_device="/dev/ums9117-nand-raw",
                 progress=progress,
@@ -152,51 +194,23 @@ class NandBackupTests:
             with pytest.raises(SystemExit, match="incomplete raw NAND image"):
                 execute()
             assert all(completed < total for completed, total in updates)
-            assert not self.destination.exists()
-            assert not self.receipt.exists()
+            assert not nand_destination.destination.exists()
+            assert not nand_destination.receipt.exists()
 
-    @pytest.fixture(autouse=True)
-    def prepared_directory(self) -> Iterator[None]:
-        """Create one isolated destination for each backup attempt."""
-        with contextlib.ExitStack() as resources:
-            self.temporary = tempfile.TemporaryDirectory()
-            resources.enter_context(self.temporary)
-            self.directory = Path(self.temporary.name)
-            resources.enter_context(mock.patch("fplinux_cli.reporting.run.ROOT", self.directory))
-            self.destination = self.directory / "nand.raw"
-            self.receipt = self.directory / "nand.raw.json"
-            yield
-
-    def _backup(
-        self,
-        phone: FakePhone,
-        *,
-        declared_id: int | None = None,
-        declared_raw_page_bytes: int | None = None,
-    ) -> str:
-        with contextlib.redirect_stdout(io.StringIO()) as stdout:
-            nand_backup.backup_nand(
-                lambda: (phone, {"session_id": "selected"}),
-                self.destination,
-                target="demo-phone",
-                raw_device="/dev/ums9117-nand-raw",
-                declared_id=declared_id,
-                declared_raw_page_bytes=declared_raw_page_bytes,
-            )
-        return stdout.getvalue()
-
-    def test_complete_stream_and_geometry_receipt_are_published_with_private_mode(self) -> None:
+    def test_complete_stream_and_geometry_receipt_are_published_with_private_mode(
+        self, nand_destination: NandDestination
+    ) -> None:
         """The reported size bounds the stream, and the receipt records that exact image."""
-        self._backup(FakePhone(ONE_PAGE_128_OOB, b"P" * 2176))
+        nand_destination.backup(FakePhone(ONE_PAGE_128_OOB, b"P" * 2176))
         payload = bytes(range(256)) * 8 + b"O" * 128
         phone = FakePhone(ONE_PAGE_128_OOB, payload)
 
-        output = self._backup(phone, declared_id=0xB1A1, declared_raw_page_bytes=2176)
+        output = nand_destination.backup(phone, declared_id=0xB1A1, declared_raw_page_bytes=2176)
 
         digest = hashlib.sha256(payload).hexdigest()
-        assert (self.destination.read_bytes()) == (payload)
-        assert (self.destination.stat().st_mode & 0o777) == (0o600)
-        assert (json.loads(self.receipt.read_text(encoding="utf-8"))) == (
+        assert (nand_destination.destination.read_bytes()) == (payload)
+        assert (nand_destination.destination.stat().st_mode & 0o777) == (0o600)
+        assert (json.loads(nand_destination.receipt.read_text(encoding="utf-8"))) == (
             {
                 "id_bytes": "a1b1",
                 "chip": "demo-128",
@@ -209,43 +223,50 @@ class NandBackupTests:
                 "target": "demo-phone",
             }
         )
-        assert (self.receipt.stat().st_mode & 0o777) == (0o600)
+        assert (nand_destination.receipt.stat().st_mode & 0o777) == (0o600)
         assert (len(phone.raw_reads())) == (1)
         assert phone.raw_reads()[0].startswith("exec dd if=/dev/ums9117-nand-raw ")
         assert (digest) in (output)
         assert ("NAND backup saved:") in (output)
         assert ("verified") not in (output)
-        assert (list(self.directory.glob(".nand.raw.*"))) == ([])
+        assert (list(nand_destination.directory.glob(".nand.raw.*"))) == ([])
 
-    def test_target_without_declared_chip_takes_its_page_size_from_the_device(self) -> None:
+    def test_target_without_declared_chip_takes_its_page_size_from_the_device(
+        self, nand_destination: NandDestination
+    ) -> None:
         """A new target streams the reported 64-byte OOB page without padding it to 128."""
         payload = b"M" * 2048 + bytes(range(64))
         phone = FakePhone(ONE_PAGE_64_OOB, payload)
 
-        self._backup(phone)
+        nand_destination.backup(phone)
 
-        assert (self.destination.read_bytes()) == (payload)
+        assert (nand_destination.destination.read_bytes()) == (payload)
         assert (len(phone.raw_reads())) == (1)
-        assert (json.loads(self.receipt.read_text(encoding="utf-8"))["raw_bytes"]) == (2112)
+        assert (json.loads(nand_destination.receipt.read_text(encoding="utf-8"))["raw_bytes"]) == (
+            2112
+        )
 
-    def test_incomplete_stream_preserves_previous_output_and_receipt(self) -> None:
+    def test_incomplete_stream_preserves_previous_output_and_receipt(
+        self, nand_destination: NandDestination
+    ) -> None:
         """A truncated device read cannot replace a previous complete image or its receipt."""
         previous = b"P" * 2176
-        self._backup(FakePhone(ONE_PAGE_128_OOB, previous))
-        previous_receipt = self.receipt.read_bytes()
+        nand_destination.backup(FakePhone(ONE_PAGE_128_OOB, previous))
+        previous_receipt = nand_destination.receipt.read_bytes()
 
         with pytest.raises(SystemExit, match="expected 2176 bytes, got 5"):
-            self._backup(FakePhone(ONE_PAGE_128_OOB, b"short"))
+            nand_destination.backup(FakePhone(ONE_PAGE_128_OOB, b"short"))
 
-        assert (self.destination.read_bytes()) == (previous)
-        assert (self.receipt.read_bytes()) == (previous_receipt)
-        assert (list(self.directory.glob(".nand.raw.*"))) == ([])
+        assert (nand_destination.destination.read_bytes()) == (previous)
+        assert (nand_destination.receipt.read_bytes()) == (previous_receipt)
+        assert (list(nand_destination.directory.glob(".nand.raw.*"))) == ([])
 
     def test_receipt_write_failure_leaves_complete_replacement_without_stale_geometry(
         self,
+        nand_destination: NandDestination,
     ) -> None:
         """A local receipt I/O failure cannot bind the previous digest to the new image."""
-        self._backup(FakePhone(ONE_PAGE_128_OOB, b"P" * 2176))
+        nand_destination.backup(FakePhone(ONE_PAGE_128_OOB, b"P" * 2176))
         replacement = b"N" * 2176
         real_fsync = os.fsync
 
@@ -253,7 +274,7 @@ class NandBackupTests:
             # Inject a full-disk writeback failure after the new image is present.
             if (
                 stat.S_ISREG(os.fstat(descriptor).st_mode)
-                and self.destination.read_bytes() == replacement
+                and nand_destination.destination.read_bytes() == replacement
             ):
                 raise OSError(errno.ENOSPC, "No space left on device")
             real_fsync(descriptor)
@@ -262,30 +283,32 @@ class NandBackupTests:
             mock.patch.object(os, "fsync", side_effect=fail_receipt_sync),
             pytest.raises(OSError, match="No space left on device"),
         ):
-            self._backup(FakePhone(ONE_PAGE_128_OOB, replacement))
+            nand_destination.backup(FakePhone(ONE_PAGE_128_OOB, replacement))
 
-        assert (self.destination.read_bytes()) == (replacement)
-        assert (self.destination.stat().st_mode & 0o777) == (0o600)
-        assert not (self.receipt.exists())
-        geometry = nand_backup.read_backup_geometry(self.destination, replacement)
+        assert (nand_destination.destination.read_bytes()) == (replacement)
+        assert (nand_destination.destination.stat().st_mode & 0o777) == (0o600)
+        assert not (nand_destination.receipt.exists())
+        geometry = nand_backup.read_backup_geometry(nand_destination.destination, replacement)
         assert (geometry) is None
         assert (
             dump_page_bytes("demo-phone", {"id": 0xB1A1, "raw_page_bytes": 2176}, geometry)
         ) == (2176)
         with pytest.raises(SystemExit, match="declares no NAND chip"):
             dump_page_bytes("new-phone", {"raw_device": "/dev/ums9117-nand-raw"}, geometry)
-        assert (list(self.directory.glob(".nand.raw.*"))) == ([])
+        assert (list(nand_destination.directory.glob(".nand.raw.*"))) == ([])
 
-    def test_unidentified_chip_is_refused_before_any_page_is_read(self) -> None:
+    def test_unidentified_chip_is_refused_before_any_page_is_read(
+        self, nand_destination: NandDestination
+    ) -> None:
         """An unknown chip reports its ID bytes but never produces a guessed-size image."""
         phone = FakePhone(UNKNOWN_CHIP, b"must not be read")
 
         with pytest.raises(SystemExit, match="does not identify this NAND chip: id_bytes=c8c1"):
-            self._backup(phone)
+            nand_destination.backup(phone)
 
         assert (phone.raw_reads()) == ([])
-        assert not (self.destination.exists())
-        assert not (self.receipt.exists())
+        assert not (nand_destination.destination.exists())
+        assert not (nand_destination.receipt.exists())
 
     @pytest.mark.parametrize(
         ("declared_id", "declared_raw_page_bytes"),
@@ -296,7 +319,7 @@ class NandBackupTests:
         ],
     )
     def test_chip_or_page_geometry_mismatch_is_refused_before_reading_or_publication(
-        self, declared_id: int, declared_raw_page_bytes: int
+        self, nand_destination: NandDestination, declared_id: int, declared_raw_page_bytes: int
     ) -> None:
         """A target's declared chip is an expectation that the device must meet."""
         phone = FakePhone(ONE_PAGE_64_OOB, b"must not be read")
@@ -304,14 +327,14 @@ class NandBackupTests:
             SystemExit,
             match="reported id_bytes=e521 with 2112-byte pages; target declares",
         ):
-            self._backup(
+            nand_destination.backup(
                 phone,
                 declared_id=declared_id,
                 declared_raw_page_bytes=declared_raw_page_bytes,
             )
         assert phone.raw_reads() == []
-        assert not self.destination.exists()
-        assert not self.receipt.exists()
+        assert not nand_destination.destination.exists()
+        assert not nand_destination.receipt.exists()
 
     @pytest.mark.parametrize(
         "case",
@@ -325,7 +348,9 @@ class NandBackupTests:
         ],
         ids=["missing", "duplicate", "unexpected", "non-decimal", "inconsistent", "unknown"],
     )
-    def test_malformed_geometry_report_is_refused_before_any_page_is_read(self, case: str) -> None:
+    def test_malformed_geometry_report_is_refused_before_any_page_is_read(
+        self, nand_destination: NandDestination, case: str
+    ) -> None:
         """The stream length is taken only from a complete, self-consistent report."""
         cases = {
             "missing key": ONE_PAGE_128_OOB.replace("block_count=1\n", ""),
@@ -339,14 +364,16 @@ class NandBackupTests:
         }
         phone = FakePhone(cases[case], b"must not be read")
         with pytest.raises(SystemExit):
-            self._backup(phone)
+            nand_destination.backup(phone)
         assert phone.raw_reads() == []
-        assert not self.destination.exists()
+        assert not nand_destination.destination.exists()
 
-    def test_invalid_output_is_rejected_before_session_acquisition(self) -> None:
+    def test_invalid_output_is_rejected_before_session_acquisition(
+        self, nand_destination: NandDestination
+    ) -> None:
         """Local validation does not touch a phone when output cannot be published."""
         connect = mock.Mock()
-        missing_parent = self.directory / "missing" / "nand.raw"
+        missing_parent = nand_destination.directory / "missing" / "nand.raw"
 
         with pytest.raises(SystemExit, match="output directory is missing or invalid"):
             nand_backup.backup_nand(
@@ -358,14 +385,16 @@ class NandBackupTests:
 
         connect.assert_not_called()
 
-    def test_target_without_a_reader_is_rejected_before_connecting(self) -> None:
+    def test_target_without_a_reader_is_rejected_before_connecting(
+        self, nand_destination: NandDestination
+    ) -> None:
         """A missing board declaration cannot fall back to another board's reader."""
         with (
             mock.patch.object(nand, "load_target", return_value={}),
             mock.patch("fplinux_cli.runtime.bundle_session.current_target_ssh_session") as acquire,
             pytest.raises(SystemExit, match="not supported for target no-reader"),
         ):
-            nand.backup_target_nand("no-reader", self.destination)
+            nand.backup_target_nand("no-reader", nand_destination.destination)
 
         acquire.assert_not_called()
 
@@ -398,41 +427,58 @@ class NandIdentifyTests:
         acquire.assert_called_once_with("demo-phone", profile=None, build_type="release")
 
 
+@dataclass(frozen=True)
+class BackupReceipt:
+    """Small saved backup and a test-owned record describing its exact bytes."""
+
+    directory: Path
+    backup: Path
+    raw: bytes
+    receipt: Path
+    record: dict[str, object]
+
+    def write(self, record: dict[str, object]) -> None:
+        """Write an independently supplied geometry record beside the saved backup."""
+        self.receipt.write_text(json.dumps(record), encoding="utf-8")
+
+
+@pytest.fixture
+def backup_receipt() -> Iterator[BackupReceipt]:
+    """Own one small saved backup and its geometry receipt until teardown."""
+    with tempfile.TemporaryDirectory() as temporary:
+        directory = Path(temporary)
+        backup = directory / "saved.bin"
+        raw = b"R" * 24
+        backup.write_bytes(raw)
+        receipt = directory / "saved.bin.json"
+        record: dict[str, object] = {
+            "id_bytes": "e521",
+            "chip": "demo-64",
+            "page_main_bytes": 4,
+            "oob_bytes": 2,
+            "pages_per_block": 2,
+            "block_count": 2,
+            "raw_bytes": 24,
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "target": "demo-phone",
+        }
+        yield BackupReceipt(directory, backup, raw, receipt, record)
+
+
 class BackupReceiptTests:
     """Bind a saved geometry receipt to the exact bytes it describes."""
 
-    @pytest.fixture(autouse=True)
-    def prepared_directory(self) -> Iterator[None]:
-        """Create one small backup and a receipt describing it."""
-        self.temporary = tempfile.TemporaryDirectory()
-        with self.temporary:
-            self.backup = Path(self.temporary.name) / "saved.bin"
-            self.raw = b"R" * 24
-            self.backup.write_bytes(self.raw)
-            self.receipt = Path(self.temporary.name) / "saved.bin.json"
-            self.record: dict[str, object] = {
-                "id_bytes": "e521",
-                "chip": "demo-64",
-                "page_main_bytes": 4,
-                "oob_bytes": 2,
-                "pages_per_block": 2,
-                "block_count": 2,
-                "raw_bytes": 24,
-                "sha256": hashlib.sha256(self.raw).hexdigest(),
-                "target": "demo-phone",
-            }
-            yield
-
-    def _write(self, record: dict[str, object]) -> None:
-        self.receipt.write_text(json.dumps(record), encoding="utf-8")
-
-    def test_receipt_returns_the_recorded_geometry_or_nothing_when_absent(self) -> None:
+    def test_receipt_returns_the_recorded_geometry_or_nothing_when_absent(
+        self, backup_receipt: BackupReceipt
+    ) -> None:
         """Only a present receipt supplies geometry; its absence is not an error here."""
-        assert (nand_backup.read_backup_geometry(self.backup, self.raw)) is None
+        assert (
+            nand_backup.read_backup_geometry(backup_receipt.backup, backup_receipt.raw)
+        ) is None
 
-        self._write(self.record)
+        backup_receipt.write(backup_receipt.record)
 
-        assert (nand_backup.read_backup_geometry(self.backup, self.raw)) == (
+        assert (nand_backup.read_backup_geometry(backup_receipt.backup, backup_receipt.raw)) == (
             NandGeometry(
                 id_bytes="e521",
                 chip="demo-64",
@@ -455,44 +501,54 @@ class BackupReceiptTests:
         ],
         ids=["larger", "different-bytes", "inconsistent", "missing-field", "boolean-size"],
     )
-    def test_receipt_that_does_not_describe_these_bytes_is_refused(self, case: str) -> None:
+    def test_receipt_that_does_not_describe_these_bytes_is_refused(
+        self, backup_receipt: BackupReceipt, case: str
+    ) -> None:
         """A receipt from another backup, or a damaged one, cannot supply a page layout."""
         cases: dict[str, tuple[dict[str, object], str]] = {
             "larger backup": (
-                {**self.record, "block_count": 4, "raw_bytes": 48},
+                {**backup_receipt.record, "block_count": 4, "raw_bytes": 48},
                 "describes a 48-byte backup",
             ),
             "same size, other bytes": (
-                {**self.record, "sha256": hashlib.sha256(b"S" * 24).hexdigest()},
+                {**backup_receipt.record, "sha256": hashlib.sha256(b"S" * 24).hexdigest()},
                 "describes different backup bytes",
             ),
-            "size contradicts layout": ({**self.record, "oob_bytes": 4}, "is inconsistent"),
+            "size contradicts layout": (
+                {**backup_receipt.record, "oob_bytes": 4},
+                "is inconsistent",
+            ),
             "missing field": (
-                {key: value for key, value in self.record.items() if key != "chip"},
+                {key: value for key, value in backup_receipt.record.items() if key != "chip"},
                 "must contain exactly",
             ),
-            "boolean size": ({**self.record, "pages_per_block": True}, "must be an integer"),
+            "boolean size": (
+                {**backup_receipt.record, "pages_per_block": True},
+                "must be an integer",
+            ),
         }
         record, message = cases[case]
-        self._write(record)
+        backup_receipt.write(record)
         with pytest.raises(SystemExit, match=message):
-            nand_backup.read_backup_geometry(self.backup, self.raw)
+            nand_backup.read_backup_geometry(backup_receipt.backup, backup_receipt.raw)
 
-    def test_receipt_written_by_backup_is_accepted_for_the_same_bytes(self) -> None:
+    def test_receipt_written_by_backup_is_accepted_for_the_same_bytes(
+        self, backup_receipt: BackupReceipt
+    ) -> None:
         """The backup writer and the saved-dump reader agree on one receipt format."""
         payload = b"P" * 2112
         with (
-            mock.patch("fplinux_cli.reporting.run.ROOT", Path(self.temporary.name)),
+            mock.patch("fplinux_cli.reporting.run.ROOT", backup_receipt.directory),
             contextlib.redirect_stdout(io.StringIO()),
         ):
             nand_backup.backup_nand(
                 lambda: (FakePhone(ONE_PAGE_64_OOB, payload), {}),
-                self.backup,
+                backup_receipt.backup,
                 target="demo-phone",
                 raw_device="/dev/ums9117-nand-raw",
             )
 
-        assert (nand_backup.read_backup_geometry(self.backup, payload)) == (
+        assert (nand_backup.read_backup_geometry(backup_receipt.backup, payload)) == (
             NandGeometry(
                 id_bytes="e521",
                 chip="demo-64",

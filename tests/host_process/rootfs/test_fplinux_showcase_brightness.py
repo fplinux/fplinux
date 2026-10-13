@@ -10,8 +10,9 @@ import socket
 import tempfile
 import threading
 from contextlib import ExitStack
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -27,72 +28,12 @@ SHARED = ROOT / "include/fplinux"
 FAKE_DEVICES = ROOT / "tests/host_process/rootfs/fplinux-showcase-fake-devices.c"
 
 
-class FplinuxShowcaseBrightnessTests:
-    """Run the scene with simulated evdev, DRM, and a local brightness service."""
+@dataclass(frozen=True)
+class ShowcaseScene:
+    """One scene's mutable device paths and the immutable compiled command."""
 
-    temporary: ClassVar[tempfile.TemporaryDirectory[str]]
-    executable: ClassVar[Path]
-
-    @pytest.fixture(scope="class", autouse=True)
-    @classmethod
-    def _compiled_binaries(cls) -> Iterator[None]:
-        """Compile the real Showcase command with simulated device boundaries."""
-        with ExitStack() as cleanup:
-            cls.temporary = tempfile.TemporaryDirectory()
-            cleanup.enter_context(cls.temporary)
-            cls.executable = Path(cls.temporary.name) / "fplinux-showcase"
-            drm_flags = shlex.split(
-                run_process(
-                    ["pkg-config", "--cflags", "--libs", "libdrm"],
-                    name="read DRM compiler and linker flags",
-                    timeout=10,
-                    check=True,
-                ).stdout
-            )
-            run_process(
-                [
-                    "cc",
-                    "-O2",
-                    "-std=c11",
-                    "-Wall",
-                    "-Wextra",
-                    "-Werror",
-                    f"-I{APORT}",
-                    f"-I{SHARED}",
-                    str(APORT / "fplinux-showcase.c"),
-                    str(APORT / "showcase-hardware.c"),
-                    str(APORT / "armada-scene.c"),
-                    str(APORT / "armada-storyboard.c"),
-                    str(APORT / "armada-renderer.c"),
-                    str(ROOT / "lib/fplinux/fplinux-font.c"),
-                    str(ROOT / "lib/fplinux/fplinux-brightness-client.c"),
-                    str(ROOT / "lib/fplinux/fplinux-cli.c"),
-                    str(FAKE_DEVICES),
-                    "-Wl,--wrap=open",
-                    "-Wl,--wrap=fopen",
-                    "-Wl,--wrap=ioctl",
-                    "-Wl,--wrap=read",
-                    "-Wl,--wrap=write",
-                    "-Wl,--wrap=connect",
-                    "-Wl,--wrap=close",
-                    *drm_flags,
-                    "-o",
-                    str(cls.executable),
-                ],
-                name="compile Showcase against controlled device boundaries",
-                timeout=30,
-                check=True,
-            )
-            yield
-
-    @pytest.fixture(autouse=True)
-    def _prepare_scene(self) -> Iterator[None]:
-        """Give each scene its own LED, font and Unix socket paths."""
-        with ExitStack() as cleanup:
-            case = tempfile.TemporaryDirectory()
-            cleanup.enter_context(case)
-            self.work = Path(case.name)
-            yield
+    executable: Path
+    work: Path
 
     def run_showcase(
         self,
@@ -180,30 +121,99 @@ class FplinuxShowcaseBrightnessTests:
         assert (selected) == ([led_trigger])
         return requests
 
-    @pytest.mark.parametrize("led_trigger", ["input-events", "none"], ids=["automatic", "manual"])
-    def test_exit_restores_selected_trigger_with_led_initially_off(self, led_trigger: str) -> None:
-        """An initially dark LED retains automatic or manual ownership after the scene."""
-        self.run_showcase(led_trigger=led_trigger, led_brightness=0)
 
-    def test_font_error_restores_manual_led_trigger(self) -> None:
+@pytest.fixture(scope="class")
+def executable() -> Iterator[Path]:
+    """Compile the real Showcase command with simulated device boundaries."""
+    with ExitStack() as cleanup:
+        temporary = tempfile.TemporaryDirectory()
+        cleanup.enter_context(temporary)
+        executable = Path(temporary.name) / "fplinux-showcase"
+        drm_flags = shlex.split(
+            run_process(
+                ["pkg-config", "--cflags", "--libs", "libdrm"],
+                name="read DRM compiler and linker flags",
+                timeout=10,
+                check=True,
+            ).stdout
+        )
+        run_process(
+            [
+                "cc",
+                "-O2",
+                "-std=c11",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                f"-I{APORT}",
+                f"-I{SHARED}",
+                str(APORT / "fplinux-showcase.c"),
+                str(APORT / "showcase-hardware.c"),
+                str(APORT / "armada-scene.c"),
+                str(APORT / "armada-storyboard.c"),
+                str(APORT / "armada-renderer.c"),
+                str(ROOT / "lib/fplinux/fplinux-font.c"),
+                str(ROOT / "lib/fplinux/fplinux-brightness-client.c"),
+                str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                str(FAKE_DEVICES),
+                "-Wl,--wrap=open",
+                "-Wl,--wrap=fopen",
+                "-Wl,--wrap=ioctl",
+                "-Wl,--wrap=read",
+                "-Wl,--wrap=write",
+                "-Wl,--wrap=connect",
+                "-Wl,--wrap=close",
+                *drm_flags,
+                "-o",
+                str(executable),
+            ],
+            name="compile Showcase against controlled device boundaries",
+            timeout=30,
+            check=True,
+        )
+        yield executable
+
+
+@pytest.fixture
+def scene(executable: Path) -> Iterator[ShowcaseScene]:
+    """Give each scene its own LED, font and Unix socket paths."""
+    with ExitStack() as cleanup:
+        case = tempfile.TemporaryDirectory()
+        cleanup.enter_context(case)
+        yield ShowcaseScene(executable, Path(case.name))
+
+
+class FplinuxShowcaseBrightnessTests:
+    """Run the scene with simulated evdev, DRM, and a local brightness service."""
+
+    @pytest.mark.parametrize("led_trigger", ["input-events", "none"], ids=["automatic", "manual"])
+    def test_exit_restores_selected_trigger_with_led_initially_off(
+        self, scene: ShowcaseScene, led_trigger: str
+    ) -> None:
+        """An initially dark LED retains automatic or manual ownership after the scene."""
+        scene.run_showcase(led_trigger=led_trigger, led_brightness=0)
+
+    def test_font_error_restores_manual_led_trigger(self, scene: ShowcaseScene) -> None:
         """A handled startup error preserves an LED with no automatic trigger."""
-        self.run_showcase(font_error="missing", led_trigger="none")
+        scene.run_showcase(font_error="missing", led_trigger="none")
 
     @pytest.mark.parametrize("font_error", ["missing", "malformed"], ids=["missing", "malformed"])
     def test_missing_or_malformed_font_reports_error_and_releases_lease(
-        self, font_error: str
+        self, scene: ShowcaseScene, font_error: str
     ) -> None:
         """Font startup errors restore the LED and the acquired brightness lease."""
-        requests = self.run_showcase(font_error=font_error)
+        requests = scene.run_showcase(font_error=font_error)
         assert (requests) == (["CLAIM", "RELEASE"])
 
-    def test_wrong_default_font_size_reports_error_and_releases_lease(self) -> None:
+    def test_wrong_default_font_size_reports_error_and_releases_lease(
+        self, scene: ShowcaseScene
+    ) -> None:
         """An installed 8x16 default cannot silently render on the 128-pixel display."""
-        assert (self.run_showcase(font_error="wrong-size")) == (["CLAIM", "RELEASE"])
+        assert (scene.run_showcase(font_error="wrong-size")) == (["CLAIM", "RELEASE"])
 
-    def test_scene_previews_logical_level_and_releases_on_exit(self) -> None:
+    def test_scene_previews_logical_level_and_releases_on_exit(self, scene: ShowcaseScene) -> None:
         """An active scene previews a logical level and gives back its lease."""
-        requests = self.run_showcase()
+        requests = scene.run_showcase()
 
         assert (requests[0]) == ("CLAIM")
         assert (len(requests)) == (3)
@@ -211,17 +221,19 @@ class FplinuxShowcaseBrightnessTests:
         assert (int(requests[1].split()[1])) in (range(6, 11))
         assert (requests[2]) == ("RELEASE")
 
-    def test_unchanged_scene_level_is_not_resent_each_frame(self) -> None:
+    def test_unchanged_scene_level_is_not_resent_each_frame(self, scene: ShowcaseScene) -> None:
         """Two adjacent frames with the same level send only one preview."""
-        requests = self.run_showcase(extra_frame=True)
+        requests = scene.run_showcase(extra_frame=True)
 
         assert (requests[0]) == ("CLAIM")
         assert (len([request for request in requests if request.startswith("SHOW ")])) == (1)
         assert (requests[-1]) == ("RELEASE")
 
-    def test_display_activity_loss_releases_and_resume_reclaims_before_preview(self) -> None:
+    def test_display_activity_loss_releases_and_resume_reclaims_before_preview(
+        self, scene: ShowcaseScene
+    ) -> None:
         """Simulated display callbacks release and reclaim the brightness lease."""
-        requests = self.run_showcase(vt_cycle=True)
+        requests = scene.run_showcase(vt_cycle=True)
 
         assert (requests[0]) == ("CLAIM")
         assert requests[1].startswith("SHOW ")

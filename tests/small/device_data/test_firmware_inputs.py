@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import lzma
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
@@ -18,75 +19,87 @@ from fplinux_cli.manifests import values
 from fplinux_cli.workspace import build_inputs as workspace_module
 from fplinux_cli.workspace import staging as workspace_staging
 
-from tests.small.workspace.workspace_fixtures import WorkspaceSourceFixture, empty_package_graph
+from tests.small.workspace.workspace_fixtures import empty_package_graph, write_source_lock_files
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
-class FirmwareInputTests(WorkspaceSourceFixture):
-    """Keep optional groups, build identity, and their consumers explicit."""
+def _declaration(
+    source: str,
+    destination: str,
+    size: int,
+    sha256: str | None = None,
+) -> dict[str, object]:
+    declaration: dict[str, object] = {
+        "source": source,
+        "destination": destination,
+        "size": size,
+    }
+    if sha256 is not None:
+        declaration["sha256"] = sha256
+    return declaration
 
-    target = "demo"
 
-    @pytest.fixture(autouse=True)
-    def prepared_directory(self) -> Iterator[None]:
-        """Create one isolated selected generation for each test."""
-        self.temporary = tempfile.TemporaryDirectory()
-        with self.temporary:
-            self.root = Path(self.temporary.name)
-            self.cache = self.root / ".cache"
-            target_root = self.cache / "device-data" / self.target
-            self.generation = target_root / "generations/generation-test"
-            (self.generation / "groups").mkdir(parents=True)
-            (target_root / "current").write_text("generation-test\n", encoding="ascii")
-            self.groups: dict[str, list[dict[str, object]]] = {
-                "bluetooth": [
-                    self._declaration(
-                        "controller.bin",
-                        "chip/controller.bin",
-                        8,
-                    )
-                ],
-                "audio-profile": [
-                    self._declaration(
-                        "profile.bin",
-                        "fplinux/profile.bin",
-                        7,
-                    )
-                ],
-            }
-            yield
+@dataclass(frozen=True)
+class FirmwareInputs:
+    """Selected immutable generation and mutable declarations owned by one case."""
 
-    @staticmethod
-    def _declaration(
-        source: str,
-        destination: str,
-        size: int,
-        sha256: str | None = None,
-    ) -> dict[str, object]:
-        declaration: dict[str, object] = {
-            "source": source,
-            "destination": destination,
-            "size": size,
-        }
-        if sha256 is not None:
-            declaration["sha256"] = sha256
-        return declaration
+    root: Path
+    cache: Path
+    generation: Path
+    groups: dict[str, list[dict[str, object]]]
+    target: str
 
-    def _write_group(self, name: str, files: dict[str, bytes]) -> Path:
+    def write_group(self, name: str, files: dict[str, bytes]) -> Path:
+        """Populate one selected group's controlled input bytes."""
         directory = self.generation / "groups" / name
         directory.mkdir()
         for filename, contents in files.items():
             (directory / filename).write_bytes(contents)
         return directory
 
-    def _capture(self) -> dict[str, tuple[firmware_inputs.FirmwareInput, ...]]:
+    def capture(self) -> dict[str, tuple[firmware_inputs.FirmwareInput, ...]]:
+        """Capture admitted inputs through the production selected-generation consumer."""
         return firmware_inputs.capture_external_device_data(
             self.target,
             self.groups,
             self.cache,
         )
+
+
+@pytest.fixture
+def firmware_generation() -> Iterator[FirmwareInputs]:
+    """Own one isolated selected device-data generation until teardown."""
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        cache = root / ".cache"
+        target = "demo"
+        target_root = cache / "device-data" / target
+        generation = target_root / "generations/generation-test"
+        (generation / "groups").mkdir(parents=True)
+        (target_root / "current").write_text("generation-test\n", encoding="ascii")
+        groups: dict[str, list[dict[str, object]]] = {
+            "bluetooth": [
+                _declaration(
+                    "controller.bin",
+                    "chip/controller.bin",
+                    8,
+                )
+            ],
+            "audio-profile": [
+                _declaration(
+                    "profile.bin",
+                    "fplinux/profile.bin",
+                    7,
+                )
+            ],
+        }
+        yield FirmwareInputs(root, cache, generation, groups, target)
+
+
+class FirmwareInputTests:
+    """Keep optional groups, build identity, and their consumers explicit."""
 
     @pytest.mark.parametrize(
         "case",
@@ -98,7 +111,7 @@ class FirmwareInputTests(WorkspaceSourceFixture):
         contents = b"firmware"
         digest = hashlib.sha256(contents).hexdigest()
         normalized = values.firmware_array(
-            [self._declaration("controller.bin", "chip/controller.bin", 8, digest)],
+            [_declaration("controller.bin", "chip/controller.bin", 8, digest)],
             "target bluetooth firmware",
         )
 
@@ -114,59 +127,67 @@ class FirmwareInputTests(WorkspaceSourceFixture):
         )
         invalid_cases = {
             "source directories": [
-                self._declaration("private/controller.bin", "chip/controller.bin", 8)
+                _declaration("private/controller.bin", "chip/controller.bin", 8)
             ],
-            "escaping destinations": [self._declaration("controller.bin", "../controller.bin", 8)],
+            "escaping destinations": [_declaration("controller.bin", "../controller.bin", 8)],
             "duplicate destinations": [
-                self._declaration("controller.bin", "chip/controller.bin", 8),
-                self._declaration("other.bin", "chip/controller.bin", 8),
+                _declaration("controller.bin", "chip/controller.bin", 8),
+                _declaration("other.bin", "chip/controller.bin", 8),
             ],
-            "zero sizes": [self._declaration("controller.bin", "chip/controller.bin", 0)],
+            "zero sizes": [_declaration("controller.bin", "chip/controller.bin", 0)],
         }
         with pytest.raises(SystemExit):
             values.firmware_array(invalid_cases[case], "target bluetooth firmware")
 
-    def test_absent_groups_are_independent_and_partial_group_names_its_error(self) -> None:
+    def test_absent_groups_are_independent_and_partial_group_names_its_error(
+        self, firmware_generation: FirmwareInputs
+    ) -> None:
         """Whole optional groups may be absent, but a present group is all-or-nothing."""
-        self._write_group("bluetooth", {"controller.bin": b"firmware"})
+        firmware_generation.write_group("bluetooth", {"controller.bin": b"firmware"})
 
-        captured = self._capture()
+        captured = firmware_generation.capture()
 
         assert (tuple(captured)) == (("bluetooth",))
         assert (captured["bluetooth"][0].contents) == (b"firmware")
-        self.groups["audio-profile"] = [
-            self._declaration("profile.bin", "fplinux/profile.bin", 7),
-            self._declaration("second.bin", "fplinux/second.bin", 3),
+        firmware_generation.groups["audio-profile"] = [
+            _declaration("profile.bin", "fplinux/profile.bin", 7),
+            _declaration("second.bin", "fplinux/second.bin", 3),
         ]
-        self._write_group("audio-profile", {"profile.bin": b"profile"})
+        firmware_generation.write_group("audio-profile", {"profile.bin": b"profile"})
         with pytest.raises(SystemExit, match=r"device-data group audio-profile:.*second.bin"):
-            self._capture()
+            firmware_generation.capture()
 
-    def test_old_firmware_layout_is_a_cache_miss(self) -> None:
+    def test_old_firmware_layout_is_a_cache_miss(
+        self, firmware_generation: FirmwareInputs
+    ) -> None:
         """An obsolete direct-file cache is ignored without a compatibility reader."""
-        target_root = self.cache / "device-data" / self.target
+        target_root = firmware_generation.cache / "device-data" / firmware_generation.target
         (target_root / "current").unlink()
-        old = self.cache / "firmware" / self.target
+        old = firmware_generation.cache / "firmware" / firmware_generation.target
         old.mkdir(parents=True)
         (old / "controller.bin").write_bytes(b"firmware")
 
-        assert (self._capture()) == ({})
+        assert (firmware_generation.capture()) == ({})
 
-    def test_profile_bytes_are_causal_but_unrelated_generation_files_are_not(self) -> None:
+    def test_profile_bytes_are_causal_but_unrelated_generation_files_are_not(
+        self, firmware_generation: FirmwareInputs
+    ) -> None:
         """The workspace recipe follows declared profile bytes and ignores adjacent files."""
-        self._write_group("bluetooth", {"controller.bin": b"firmware"})
-        audio = self._write_group("audio-profile", {"profile.bin": b"profile"})
-        target_config = {"platform": "demo", "device_data": {"groups": self.groups}}
-        base = self.root / "base-source"
+        firmware_generation.write_group("bluetooth", {"controller.bin": b"firmware"})
+        audio = firmware_generation.write_group("audio-profile", {"profile.bin": b"profile"})
+        target_config = {"platform": "demo", "device_data": {"groups": firmware_generation.groups}}
+        base = firmware_generation.root / "base-source"
         base.write_bytes(b"base")
-        registration = self.root / "scripts/fplinux_cli/alpine/registration.py"
+        registration = firmware_generation.root / "scripts/fplinux_cli/alpine/registration.py"
         registration.parent.mkdir(parents=True)
         registration.write_bytes(b"# empty package declarations\n")
-        source_locks = self._source_lock_files(self.root, self.target)
+        source_locks = write_source_lock_files(
+            firmware_generation.root, firmware_generation.target
+        )
 
         with (
-            mock.patch.object(workspace_module, "ROOT", self.root),
-            mock.patch.object(workspace_staging, "ROOT", self.root),
+            mock.patch.object(workspace_module, "ROOT", firmware_generation.root),
+            mock.patch.object(workspace_staging, "ROOT", firmware_generation.root),
             mock.patch.object(workspace_module, "load_target", return_value=target_config),
             mock.patch.object(workspace_module, "load_platform", return_value={}),
             empty_package_graph(),
@@ -185,11 +206,11 @@ class FirmwareInputTests(WorkspaceSourceFixture):
                 ],
             ),
         ):
-            first = workspace_module.target_workspace_snapshot(self.target)
+            first = workspace_module.target_workspace_snapshot(firmware_generation.target)
             (audio / "unrelated.bin").write_bytes(b"ignored")
-            unrelated = workspace_module.target_workspace_snapshot(self.target)
+            unrelated = workspace_module.target_workspace_snapshot(firmware_generation.target)
             (audio / "profile.bin").write_bytes(b"changed")
-            changed = workspace_module.target_workspace_snapshot(self.target)
+            changed = workspace_module.target_workspace_snapshot(firmware_generation.target)
             staged = workspace_staging.stage_workspace_snapshot(first)
 
         assert (first.recipe) == (unrelated.recipe)
@@ -201,21 +222,25 @@ class FirmwareInputTests(WorkspaceSourceFixture):
         assert (staged_profile.stat().st_mode & 0o777) == (0o600)
         assert (".cache") not in (staged_profile.relative_to(staged).parts)
 
-    def test_rootfs_receipt_depends_on_bluetooth_not_audio_or_adjacent_files(self) -> None:
+    def test_rootfs_receipt_depends_on_bluetooth_not_audio_or_adjacent_files(
+        self, firmware_generation: FirmwareInputs
+    ) -> None:
         """Rootfs reuse follows Bluetooth bytes, independently of the kernel-only profile."""
-        bluetooth = self._write_group("bluetooth", {"controller.bin": b"firmware"})
-        audio = self._write_group("audio-profile", {"profile.bin": b"profile"})
+        bluetooth = firmware_generation.write_group("bluetooth", {"controller.bin": b"firmware"})
+        audio = firmware_generation.write_group("audio-profile", {"profile.bin": b"profile"})
 
         def rootfs_recipe() -> str:
             return alpine_recipes.alpine_rootfs_recipe(
                 "1" * 64,
                 "2" * 64,
                 ("fplinux-base",),
-                firmware_inputs=firmware_inputs.rootfs_firmware_inputs(self._capture()),
+                firmware_inputs=firmware_inputs.rootfs_firmware_inputs(
+                    firmware_generation.capture()
+                ),
             )
 
         first = rootfs_recipe()
-        output = alpine_state.rootfs_output(self.root / "state", first)
+        output = alpine_state.rootfs_output(firmware_generation.root / "state", first)
         output.mkdir(parents=True)
         (output / alpine_state.ROOTFS_NAME).write_bytes(b"rootfs")
         (output / "initramfs.cpio").write_bytes(b"boot archive")
@@ -237,11 +262,13 @@ class FirmwareInputTests(WorkspaceSourceFixture):
         assert (bluetooth_changed) != (first)
         assert not (alpine_state.receipt_matches(output, bluetooth_changed))
 
-    def test_installer_writes_exact_bytes_with_private_mode(self) -> None:
+    def test_installer_writes_exact_bytes_with_private_mode(
+        self, firmware_generation: FirmwareInputs
+    ) -> None:
         """The installer writes an admitted firmware input directly with mode 0600."""
-        self._write_group("bluetooth", {"controller.bin": b"firmware"})
-        rootfs_firmware = self._capture()["bluetooth"]
-        rootfs = self.root / "rootfs"
+        firmware_generation.write_group("bluetooth", {"controller.bin": b"firmware"})
+        rootfs_firmware = firmware_generation.capture()["bluetooth"]
+        rootfs = firmware_generation.root / "rootfs"
         (rootfs / "lib").mkdir(parents=True)
 
         firmware_inputs.install_firmware_inputs(rootfs, rootfs_firmware)
@@ -250,20 +277,22 @@ class FirmwareInputTests(WorkspaceSourceFixture):
         assert (installed.read_bytes()) == (b"firmware")
         assert (installed.stat().st_mode & 0o777) == (0o600)
 
-    def test_radio_image_and_calibration_reach_the_rootfs_and_change_its_receipt(self) -> None:
+    def test_radio_image_and_calibration_reach_the_rootfs_and_change_its_receipt(
+        self, firmware_generation: FirmwareInputs
+    ) -> None:
         """Both radio inputs are available to the firmware loader and invalidate rootfs reuse."""
-        self.groups["wcn-firmware"] = [
-            self._declaration("radio.bin", "chip/radio.bin", 5),
-            self._declaration("calibration.bin", "chip/calibration.bin", 4),
+        firmware_generation.groups["wcn-firmware"] = [
+            _declaration("radio.bin", "chip/radio.bin", 5),
+            _declaration("calibration.bin", "chip/calibration.bin", 4),
         ]
-        radio = self._write_group(
+        radio = firmware_generation.write_group(
             "wcn-firmware", {"radio.bin": b"image", "calibration.bin": b"cali"}
         )
-        captured = firmware_inputs.rootfs_firmware_inputs(self._capture())
+        captured = firmware_inputs.rootfs_firmware_inputs(firmware_generation.capture())
         first = alpine_recipes.alpine_rootfs_recipe(
             "1" * 64, "2" * 64, ("fplinux-base",), firmware_inputs=captured
         )
-        rootfs = self.root / "radio-rootfs"
+        rootfs = firmware_generation.root / "radio-rootfs"
         rootfs.mkdir()
 
         firmware_inputs.install_firmware_inputs(rootfs, captured)
@@ -275,7 +304,7 @@ class FirmwareInputTests(WorkspaceSourceFixture):
             "1" * 64,
             "2" * 64,
             ("fplinux-base",),
-            firmware_inputs=firmware_inputs.rootfs_firmware_inputs(self._capture()),
+            firmware_inputs=firmware_inputs.rootfs_firmware_inputs(firmware_generation.capture()),
         )
         assert changed != first
 
@@ -287,12 +316,12 @@ class FirmwareInputTests(WorkspaceSourceFixture):
         ],
     )
     def test_installed_firmware_verifier_rejects_changed_bytes_and_mode(
-        self, contents: bytes, mode: int, error: str
+        self, firmware_generation: FirmwareInputs, contents: bytes, mode: int, error: str
     ) -> None:
         """Verification rejects either material corruption of a controlled destination."""
-        self._write_group("bluetooth", {"controller.bin": b"firmware"})
-        rootfs_firmware = self._capture()["bluetooth"]
-        rootfs = self.root / "rootfs"
+        firmware_generation.write_group("bluetooth", {"controller.bin": b"firmware"})
+        rootfs_firmware = firmware_generation.capture()["bluetooth"]
+        rootfs = firmware_generation.root / "rootfs"
         installed = rootfs / "lib/firmware/chip/controller.bin"
         installed.parent.mkdir(parents=True)
         installed.write_bytes(contents)
@@ -301,7 +330,9 @@ class FirmwareInputTests(WorkspaceSourceFixture):
         with pytest.raises(SystemExit, match=error):
             firmware_inputs.verify_installed_firmware_inputs(rootfs, rootfs_firmware)
 
-    def test_compressed_firmware_roundtrips_with_private_mode(self) -> None:
+    def test_compressed_firmware_roundtrips_with_private_mode(
+        self, firmware_generation: FirmwareInputs
+    ) -> None:
         """The kernel XZ fallback supplies admitted bytes without a plain duplicate."""
         contents = bytes(range(256)) * 32
         firmware = firmware_inputs.FirmwareInput(
@@ -310,7 +341,7 @@ class FirmwareInputTests(WorkspaceSourceFixture):
             contents=contents,
             sha256=hashlib.sha256(contents).hexdigest(),
         )
-        rootfs = self.root / "compressed-rootfs"
+        rootfs = firmware_generation.root / "compressed-rootfs"
         rootfs.mkdir()
 
         firmware_inputs.install_firmware_inputs(rootfs, (firmware,))

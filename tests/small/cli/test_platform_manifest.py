@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import re
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
@@ -19,47 +20,59 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
+@dataclass(frozen=True)
+class PlatformManifest:
+    """An editable manifest path and its unchanged input text."""
+
+    manifest: Path
+    base: str
+
+
+@pytest.fixture
+def platform_manifest() -> Iterator[PlatformManifest]:
+    """Load edited copies of the repository manifest from an isolated project root."""
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        manifest = root / "platforms/ums9117/platform.toml"
+        manifest.parent.mkdir(parents=True)
+        base = REPOSITORY_MANIFEST.read_text(encoding="utf-8")
+        with mock.patch.object(common, "ROOT", root):
+            yield PlatformManifest(manifest=manifest, base=base)
+
+
+def with_line(platform_manifest: PlatformManifest, key: str, replacement: str) -> str:
+    """Replace the one assignment of `key`, including a multi-line array value."""
+    edited, count = re.subn(
+        rf"^{re.escape(key)} = (?:\[[^\]]*\]|[^\[\n].*)\n",
+        lambda _assignment: replacement,
+        platform_manifest.base,
+        flags=re.MULTILINE,
+    )
+    assert (count) == (1), f"{key} must be assigned once in the repository manifest"
+    return edited
+
+
+def load_manifest(platform_manifest: PlatformManifest, text: str) -> None:
+    """Validate one manifest text through the production loader."""
+    platform_manifest.manifest.write_text(text, encoding="utf-8")
+    platforms.load_platform("ums9117")
+
+
+def with_dt_checks(platform_manifest: PlatformManifest, declaration: str | None) -> str:
+    """Replace compiled-DT ownership declarations with one test-owned TOML value."""
+    text = re.sub(
+        r"^\[\[linux\.dt_config_checks\]\]\n.*?(?=^\[|\Z)",
+        "",
+        platform_manifest.base,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    if declaration is None:
+        return text
+    return text.replace("[linux]\n", f"[linux]\ndt_config_checks = {declaration}\n", 1)
+
+
 class PlatformManifestTests:
     """Refuse a platform that omits or misstates its Linux destinations or U-Boot lines."""
-
-    @pytest.fixture(autouse=True)
-    def platform_manifest(self) -> Iterator[None]:
-        """Load edited copies of the repository manifest from an isolated project root."""
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            self.manifest = root / "platforms/ums9117/platform.toml"
-            self.manifest.parent.mkdir(parents=True)
-            self.base = REPOSITORY_MANIFEST.read_text(encoding="utf-8")
-            with mock.patch.object(common, "ROOT", root):
-                yield
-
-    def with_line(self, key: str, replacement: str) -> str:
-        """Replace the one assignment of `key`, including a multi-line array value."""
-        edited, count = re.subn(
-            rf"^{re.escape(key)} = (?:\[[^\]]*\]|[^\[\n].*)\n",
-            lambda _assignment: replacement,
-            self.base,
-            flags=re.MULTILINE,
-        )
-        assert (count) == (1), f"{key} must be assigned once in the repository manifest"
-        return edited
-
-    def load(self, text: str) -> None:
-        """Validate one manifest text through the production loader."""
-        self.manifest.write_text(text, encoding="utf-8")
-        platforms.load_platform("ums9117")
-
-    def with_dt_checks(self, declaration: str | None) -> str:
-        """Replace compiled-DT ownership declarations with one test-owned TOML value."""
-        text = re.sub(
-            r"^\[\[linux\.dt_config_checks\]\]\n.*?(?=^\[|\Z)",
-            "",
-            self.base,
-            flags=re.MULTILINE | re.DOTALL,
-        )
-        if declaration is None:
-            return text
-        return text.replace("[linux]\n", f"[linux]\ndt_config_checks = {declaration}\n", 1)
 
     @pytest.mark.parametrize(
         ("declaration", "message"),
@@ -101,29 +114,35 @@ class PlatformManifestTests:
         ],
     )
     def test_dt_ownership_checks_require_unambiguous_paths_and_symbols(
-        self, declaration: str | None, message: str
+        self, platform_manifest: PlatformManifest, declaration: str | None, message: str
     ) -> None:
         """The loader refuses declarations that cannot name one built-in DT owner."""
         with (
             pytest.raises(SystemExit, match=message),
         ):
-            self.load(self.with_dt_checks(declaration))
-        self.load(self.with_dt_checks("[]"))
-        self.load(
-            self.with_dt_checks(
+            load_manifest(platform_manifest, with_dt_checks(platform_manifest, declaration))
+        load_manifest(platform_manifest, with_dt_checks(platform_manifest, "[]"))
+        load_manifest(
+            platform_manifest,
+            with_dt_checks(
+                platform_manifest,
                 '[{path="/soc/usb", compatible="example,usb-cold", config="CONFIG_COLD"},'
-                '{path="/soc/usb", compatible="example,usb-live", config="CONFIG_LIVE"}]'
-            )
+                '{path="/soc/usb", compatible="example,usb-live", config="CONFIG_LIVE"}]',
+            ),
         )
 
-    def test_property_requirement_preserves_the_unconditional_owner(self) -> None:
+    def test_property_requirement_preserves_the_unconditional_owner(
+        self, platform_manifest: PlatformManifest
+    ) -> None:
         """One DT owner may separately require built support for an optional property."""
         declaration = (
             '[{path="/soc/keypad", compatible="example,keypad", config="CONFIG_KEYBOARD"},'
             '{path="/soc/keypad", compatible="example,keypad", property="aux-gpios",'
             'config="CONFIG_AUX_KEY"}]'
         )
-        self.manifest.write_text(self.with_dt_checks(declaration), encoding="utf-8")
+        platform_manifest.manifest.write_text(
+            with_dt_checks(platform_manifest, declaration), encoding="utf-8"
+        )
         loaded = platforms.load_platform("ums9117")
         assert (loaded["linux"]["dt_config_checks"]) == (
             [
@@ -143,7 +162,7 @@ class PlatformManifestTests:
 
     @pytest.mark.parametrize("value", ['""', "1"], ids=['""', "1"])
     def test_property_requirement_refuses_empty_or_ambiguous_declarations(
-        self, value: str
+        self, platform_manifest: PlatformManifest, value: str
     ) -> None:
         """A feature requirement must name a property and have one owner per condition."""
         declaration = (
@@ -153,7 +172,7 @@ class PlatformManifestTests:
         with (
             pytest.raises(SystemExit, match="property must be a non-empty string"),
         ):
-            self.load(self.with_dt_checks(declaration))
+            load_manifest(platform_manifest, with_dt_checks(platform_manifest, declaration))
         declaration = (
             '[{path="/soc/keypad", compatible="example,keypad", property="aux-gpios",'
             'config="CONFIG_AUX_KEY"},'
@@ -161,7 +180,7 @@ class PlatformManifestTests:
             'config="CONFIG_OTHER"}]'
         )
         with pytest.raises(SystemExit, match=r"repeats ownership .*property aux-gpios"):
-            self.load(self.with_dt_checks(declaration))
+            load_manifest(platform_manifest, with_dt_checks(platform_manifest, declaration))
 
     @pytest.mark.parametrize(
         ("key", "message"),
@@ -176,14 +195,14 @@ class PlatformManifestTests:
         ids=["dts_directory", "platform_identity_header", "required_config"],
     )
     def test_missing_destination_or_uboot_requirement_is_refused(
-        self, key: str, message: str
+        self, platform_manifest: PlatformManifest, key: str, message: str
     ) -> None:
         """Omitting any new key names the incomplete table instead of falling back to a path."""
-        self.load(self.base)
+        load_manifest(platform_manifest, platform_manifest.base)
         with (
             pytest.raises(SystemExit, match=message),
         ):
-            self.load(self.with_line(key, ""))
+            load_manifest(platform_manifest, with_line(platform_manifest, key, ""))
 
     @pytest.mark.parametrize(
         ("key", "replacement", "message"),
@@ -223,18 +242,20 @@ class PlatformManifestTests:
         ],
     )
     def test_destinations_and_uboot_lines_are_validated(
-        self, key: str, replacement: str, message: str
+        self, platform_manifest: PlatformManifest, key: str, replacement: str, message: str
     ) -> None:
         """Paths stay inside the Linux tree and U-Boot requirements are whole .config lines."""
         with (
             pytest.raises(SystemExit, match=message),
         ):
-            self.load(self.with_line(key, replacement))
+            load_manifest(platform_manifest, with_line(platform_manifest, key, replacement))
 
-        self.load(
-            self.with_line(
+        load_manifest(
+            platform_manifest,
+            with_line(
+                platform_manifest,
                 "required_config",
                 "required_config = ['CONFIG_BOOTCOMMAND=\"run a; run b\"', "
                 '"# CONFIG_DEMO is not set"]\n',
-            )
+            ),
         )

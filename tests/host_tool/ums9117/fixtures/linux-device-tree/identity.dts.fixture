@@ -1,0 +1,3 @@
+/dts-v1/;
+#include "fplinux-{target}-identity.dtsi"
+#include "common.dtsi"

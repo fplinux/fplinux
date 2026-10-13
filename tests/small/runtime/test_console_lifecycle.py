@@ -9,6 +9,7 @@ import pwd
 import subprocess
 from collections import Counter
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
 
 import fplinux_cli.cli.runtime as runtime_commands
@@ -19,13 +20,20 @@ from fplinux_cli.artifacts.bundles import publish_current_bundle
 from fplinux_cli.manifests import targets
 from fplinux_cli.runtime import bundle_session, ssh_transport
 
-from tests.small.build.command_fixtures import CommandBundleFixture
+from tests.small.build.command_fixtures import (
+    command_bundle as command_bundle,  # noqa: PLC0414 -- pytest fixture export.
+)
+
+if TYPE_CHECKING:
+    from tests.small.build.command_fixtures import CommandBundleContext
 
 
-class ConsoleLifecycleTests(CommandBundleFixture):
+class ConsoleLifecycleTests:
     """Keep cache hits and readers ahead of every mutable or external action."""
 
-    def test_console_uses_ssh_for_commands_and_keyboard_tool_for_evdev(self) -> None:
+    def test_console_uses_ssh_for_commands_and_keyboard_tool_for_evdev(
+        self, command_bundle: CommandBundleContext
+    ) -> None:
         """Route commands through SSH and evdev through the keyboard client."""
         target_config = {
             "runtime": {
@@ -42,7 +50,7 @@ class ConsoleLifecycleTests(CommandBundleFixture):
         result = subprocess.CompletedProcess([], 0, stdout="", stderr="")
         ssh = mock.Mock(run_remote=mock.Mock(return_value=result))
         with (
-            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(common, "ROOT", command_bundle.root),
             mock.patch.object(targets, "load_target", return_value=target_config),
             mock.patch.object(runtime_commands, "_current_ssh_session", return_value=(ssh, {})),
             mock.patch.object(keyboard_runtime, "_current_ssh_session", return_value=(ssh, {})),
@@ -56,9 +64,9 @@ class ConsoleLifecycleTests(CommandBundleFixture):
             )
         ssh.run_remote.assert_called_once_with({}, "id")
 
-        client = self.bundle_path / "host/fplinux-usb-keyboard"
+        client = command_bundle.bundle_path / "host/fplinux-usb-keyboard"
         with (
-            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(common, "ROOT", command_bundle.root),
             mock.patch.object(targets, "load_target", return_value=target_config),
             mock.patch.object(runtime_commands, "_current_ssh_session", return_value=(ssh, {})),
             mock.patch.object(keyboard_runtime, "_current_ssh_session", return_value=(ssh, {})),
@@ -94,7 +102,7 @@ class ConsoleLifecycleTests(CommandBundleFixture):
         [pytest.param(False, id="other-kernel"), pytest.param(True, id="selected-kernel")],
     )
     def test_keyboard_forwarding_requires_the_selected_kernel_identity(
-        self, *, matches: bool
+        self, command_bundle: CommandBundleContext, *, matches: bool
     ) -> None:
         """A session reporting another kernel identity cannot receive host keyboard input."""
         target_config = {
@@ -113,7 +121,7 @@ class ConsoleLifecycleTests(CommandBundleFixture):
         ssh = mock.Mock()
         ssh.load_bundle_context.return_value = (
             {"target": "phone"},
-            {"bundle_generation": self.bundle.generation},
+            {"bundle_generation": command_bundle.bundle.generation},
         )
         ssh.load_current_session.return_value = {}
         ssh.reacquire_bound_session.return_value = {}
@@ -121,7 +129,7 @@ class ConsoleLifecycleTests(CommandBundleFixture):
         suffix = "9" * 16 if matches else "8" * 16
         response = subprocess.CompletedProcess([], 0, f"6.18.42-fplinux-{suffix}\n", "")
         with (
-            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(common, "ROOT", command_bundle.root),
             mock.patch.object(targets, "load_target", return_value=target_config),
             mock.patch("fplinux_cli.runtime.keyboard.os.geteuid", return_value=1000),
             mock.patch.object(bundle_session, "_load_bundle_ssh_helper", return_value=ssh),
@@ -139,7 +147,9 @@ class ConsoleLifecycleTests(CommandBundleFixture):
                 pull=None,
             )
         if matches:
-            assert (execute.call_args.args[0]) == (self.bundle_path / "host/fplinux-usb-keyboard")
+            assert (execute.call_args.args[0]) == (
+                command_bundle.bundle_path / "host/fplinux-usb-keyboard"
+            )
             assert (execute.call_args.args[1][-2:]) == (["--keyboard", "/dev/input/event1"])
         else:
             execute.assert_not_called()
@@ -148,12 +158,12 @@ class ConsoleLifecycleTests(CommandBundleFixture):
         "status", [pytest.param(1, id="verification-failed"), pytest.param(0, id="verified")]
     )
     def test_sudo_keyboard_verifies_as_the_invoking_user_before_privileged_forwarding(
-        self, status: int
+        self, command_bundle: CommandBundleContext, status: int
     ) -> None:
         """The documented sudo command verifies the caller's session and stops on failure."""
         profile = "microsd-uboot"
-        debug = self._create_generation("d" * 64, profile=profile, build_type="debug")
-        publish_current_bundle(self.output, "phone", debug, profile, build_type="debug")
+        debug = command_bundle.create_generation("d" * 64, profile=profile, build_type="debug")
+        publish_current_bundle(command_bundle.output, "phone", debug, profile, build_type="debug")
         target_config = {
             "runtime": {
                 "usb": {
@@ -168,10 +178,10 @@ class ConsoleLifecycleTests(CommandBundleFixture):
         }
         uid, gid = 1234, 2345
         caller_runtime = Path("/run/user/1234")
-        root_runtime = self.root / "root-runtime"
+        root_runtime = command_bundle.root / "root-runtime"
         root_runtime.mkdir()
         account = pwd.struct_passwd(
-            ("caller", "x", uid, gid, "", str(self.root / "caller-home"), "/bin/sh")
+            ("caller", "x", uid, gid, "", str(command_bundle.root / "caller-home"), "/bin/sh")
         )
         lstat = Path.lstat
 
@@ -183,7 +193,7 @@ class ConsoleLifecycleTests(CommandBundleFixture):
             return lstat(path)
 
         with (
-            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(common, "ROOT", command_bundle.root),
             mock.patch.object(targets, "load_target", return_value=target_config),
             mock.patch("fplinux_cli.runtime.keyboard.os.geteuid", return_value=0),
             mock.patch.dict(
@@ -216,7 +226,7 @@ class ConsoleLifecycleTests(CommandBundleFixture):
                 pull=None,
             )
         command = verify.call_args.args[0]
-        assert (command[:3]) == ([str(self.root / "fplinux"), "console", "phone"])
+        assert (command[:3]) == ([str(command_bundle.root / "fplinux"), "console", "phone"])
         # The public parser accepts these options in any order; compare flag/value pairs.
         assert Counter(zip(command[3::2], command[4::2], strict=True)) == Counter(
             [("--build-type", "debug"), ("--exec", "true"), ("--profile", profile)]
@@ -230,12 +240,14 @@ class ConsoleLifecycleTests(CommandBundleFixture):
         else:
             assert (execute.call_args.args[0]) == (debug / "host/fplinux-usb-keyboard")
 
-    def test_console_profile_reconnects_only_through_its_selected_generation(self) -> None:
+    def test_console_profile_reconnects_only_through_its_selected_generation(
+        self, command_bundle: CommandBundleContext
+    ) -> None:
         """A profile RAM session is never compared with the target's default bundle."""
         profile = "microsd-uboot"
-        profile_path = self._create_generation("b" * 64, profile=profile)
+        profile_path = command_bundle.create_generation("b" * 64, profile=profile)
         profile_bundle = publish_current_bundle(
-            self.output,
+            command_bundle.output,
             "phone",
             profile_path,
             profile,
@@ -255,7 +267,7 @@ class ConsoleLifecycleTests(CommandBundleFixture):
         result = subprocess.CompletedProcess([], 0, stdout="", stderr="")
         ssh = mock.Mock(run_remote=mock.Mock(return_value=result))
         with (
-            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(common, "ROOT", command_bundle.root),
             mock.patch.object(targets, "load_target", return_value=target_config) as load_target,
             mock.patch.object(
                 runtime_commands,

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytest
@@ -19,25 +20,30 @@ if TYPE_CHECKING:
 APP = ROOT / "alpine/aports/fplinux-brightness-ui"
 
 
+@dataclass(frozen=True)
+class BrightnessHarness:
+    """Linked brightness program and its two immutable fixture fonts."""
+
+    executable: Path
+    small_font: Path
+    large_font: Path
+
+
 class BrightnessUiTests:
     """Exercise real keypad decisions and rendering at both phone sizes."""
 
-    executable: Path
-    large_font: Path
-    small_font: Path
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def harness(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[BrightnessHarness]:
         """Link the host harness once for this test group."""
         with c_build_directory(tmp_path_factory, "fplinux-brightness-ui") as temporary:
-            cls.executable = temporary / "brightness-ui-host"
-            cls.small_font = temporary / "small.psf"
-            cls.large_font = temporary / "large.psf"
-            write_solid_ascii_font(cls.small_font, width=6, height=12)
-            write_solid_ascii_font(cls.large_font, width=8, height=16)
+            executable = temporary / "brightness-ui-host"
+            small_font = temporary / "small.psf"
+            large_font = temporary / "large.psf"
+            write_solid_ascii_font(small_font, width=6, height=12)
+            write_solid_ascii_font(large_font, width=8, height=16)
             compile_c(
-                cls.executable,
+                executable,
                 [
                     "-std=c11",
                     "-Wall",
@@ -54,12 +60,12 @@ class BrightnessUiTests:
                 name="compile brightness UI host behavior",
                 check=True,
             )
-            yield
+            yield BrightnessHarness(executable, small_font, large_font)
 
-    def test_key_bounds_and_two_display_sizes(self) -> None:
+    def test_key_bounds_and_two_display_sizes(self, harness: BrightnessHarness) -> None:
         """Keys clamp at 0/10; both phone dimensions show ten bar segments."""
         result = run_process(
-            [str(self.executable), str(self.small_font), str(self.large_font)],
+            [str(harness.executable), str(harness.small_font), str(harness.large_font)],
             name="run brightness UI host behavior",
             timeout=10,
             check=False,

@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 from contextlib import ExitStack
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -60,39 +61,17 @@ class KernelCheckSubprocessStatusTests:
         assert ("test-target") in (terminal.getvalue())
 
 
-class KernelContextSchedulerTests:
-    """Exercise the real child-process coordinator at its command boundary."""
+@dataclass(frozen=True)
+class KernelScheduler:
+    """Owned FIFO barriers and their selector for two controlled child processes."""
 
-    @pytest.fixture(autouse=True)
-    def _prepare_case(self) -> Iterator[None]:
-        """Create explicit FIFO barriers for two controlled worker processes."""
-        with ExitStack() as cleanup:
-            self.temporary = tempfile.TemporaryDirectory()
-            cleanup.enter_context(self.temporary)
-            self.root = Path(self.temporary.name)
-            self.ready_selector = selectors.DefaultSelector()
-            cleanup.callback(self.ready_selector.close)
-            self.ready_descriptors: dict[str, int] = {}
-            self.ready_keepalive_descriptors: dict[str, int] = {}
-            self.control_descriptors: dict[str, int] = {}
-            for target in ("first", "second"):
-                ready = self.root / f"{target}.ready"
-                control = self.root / f"{target}.control"
-                os.mkfifo(ready)
-                os.mkfifo(control)
-                ready_descriptor = os.open(ready, os.O_RDONLY | os.O_NONBLOCK)
-                cleanup.callback(os.close, ready_descriptor)
-                ready_keepalive = os.open(ready, os.O_WRONLY | os.O_NONBLOCK)
-                cleanup.callback(os.close, ready_keepalive)
-                control_descriptor = os.open(control, os.O_RDWR | os.O_NONBLOCK)
-                cleanup.callback(os.close, control_descriptor)
-                self.ready_descriptors[target] = ready_descriptor
-                self.ready_keepalive_descriptors[target] = ready_keepalive
-                self.control_descriptors[target] = control_descriptor
-                self.ready_selector.register(ready_descriptor, selectors.EVENT_READ, target)
-            yield
+    root: Path
+    ready_selector: selectors.BaseSelector
+    ready_descriptors: dict[str, int]
+    ready_keepalive_descriptors: dict[str, int]
+    control_descriptors: dict[str, int]
 
-    def _run_scheduler(
+    def run_scheduler(
         self,
         while_running: Callable[[subprocess.Popen[str], float], None],
         *,
@@ -113,7 +92,7 @@ class KernelContextSchedulerTests:
             while_running=while_running,
         )
 
-    def _accept_worker(self) -> tuple[str, int, str, str]:
+    def accept_worker(self) -> tuple[str, int, str, str]:
         """Accept one explicit readiness message from a started worker."""
         ready = self.ready_selector.select(timeout=10)
         assert ready, "kernel context worker did not reach its readiness barrier"
@@ -125,12 +104,12 @@ class KernelContextSchedulerTests:
         assert (target) == (key.data)
         return target, int(pid), home, temporary
 
-    def _release_worker(self, target: str, action: bytes) -> None:
+    def release_worker(self, target: str, action: bytes) -> None:
         """Release one worker from its explicit control barrier."""
         assert (len(action)) == (1)
         os.write(self.control_descriptors[target], action)
 
-    def _assert_process_reaped(self, process_id: int) -> None:
+    def assert_process_reaped(self, process_id: int) -> None:
         """Require a direct worker owned by the coordinator to disappear."""
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline:
@@ -139,7 +118,7 @@ class KernelContextSchedulerTests:
             time.sleep(0.01)
         pytest.fail(f"process {process_id} was not reaped; state={process_state(process_id)}")
 
-    def _assert_process_stopped(self, process_id: int) -> None:
+    def assert_process_stopped(self, process_id: int) -> None:
         """Require an adopted descendant to be absent or terminal."""
         deadline = time.monotonic() + 2
         while time.monotonic() < deadline:
@@ -151,12 +130,57 @@ class KernelContextSchedulerTests:
             time.sleep(0.01)
         pytest.fail(f"process {process_id} survived scheduler cleanup in state {state}")
 
-    def test_two_workers_overlap_with_isolated_scratch(self) -> None:
+    def fail_second_worker(
+        self, pids: dict[str, int]
+    ) -> Callable[[subprocess.Popen[str], float], None]:
+        """Record both ready workers and release the second with a failure."""
+
+        def fail_second(_process: subprocess.Popen[str], _deadline: float) -> None:
+            for _index in range(2):
+                target, pid, _home, _temporary = self.accept_worker()
+                pids[target] = pid
+            self.release_worker("second", b"F")
+
+        return fail_second
+
+
+@pytest.fixture
+def kernel_scheduler() -> Iterator[KernelScheduler]:
+    """Close every selector and FIFO descriptor before removing the private tree."""
+    with ExitStack() as cleanup:
+        temporary = tempfile.TemporaryDirectory()
+        cleanup.enter_context(temporary)
+        scheduler = KernelScheduler(Path(temporary.name), selectors.DefaultSelector(), {}, {}, {})
+        cleanup.callback(scheduler.ready_selector.close)
+        for target in ("first", "second"):
+            ready = scheduler.root / f"{target}.ready"
+            control = scheduler.root / f"{target}.control"
+            os.mkfifo(ready)
+            os.mkfifo(control)
+            ready_descriptor = os.open(ready, os.O_RDONLY | os.O_NONBLOCK)
+            cleanup.callback(os.close, ready_descriptor)
+            ready_keepalive = os.open(ready, os.O_WRONLY | os.O_NONBLOCK)
+            cleanup.callback(os.close, ready_keepalive)
+            control_descriptor = os.open(control, os.O_RDWR | os.O_NONBLOCK)
+            cleanup.callback(os.close, control_descriptor)
+            scheduler.ready_descriptors[target] = ready_descriptor
+            scheduler.ready_keepalive_descriptors[target] = ready_keepalive
+            scheduler.control_descriptors[target] = control_descriptor
+            scheduler.ready_selector.register(ready_descriptor, selectors.EVENT_READ, target)
+        yield scheduler
+
+
+class KernelContextSchedulerTests:
+    """Exercise the real child-process coordinator at its command boundary."""
+
+    def test_two_workers_overlap_with_isolated_scratch(
+        self, kernel_scheduler: KernelScheduler
+    ) -> None:
         """Two slots reach the barrier together and use distinct HOME/TMPDIR roots."""
 
         def release_workers(_process: subprocess.Popen[str], _deadline: float) -> None:
-            first = self._accept_worker()
-            second = self._accept_worker()
+            first = kernel_scheduler.accept_worker()
+            second = kernel_scheduler.accept_worker()
             assert ({first[0], second[0]}) == ({"first", "second"})
             assert (first[2]) != (second[2])
             assert (first[3]) != (second[3])
@@ -164,46 +188,41 @@ class KernelContextSchedulerTests:
             assert Path(first[3]).is_dir()
             assert Path(second[2]).is_dir()
             assert Path(second[3]).is_dir()
-            self._release_worker("first", b"S")
-            self._release_worker("second", b"S")
+            kernel_scheduler.release_worker("first", b"S")
+            kernel_scheduler.release_worker("second", b"S")
 
-        result = self._run_scheduler(release_workers)
+        result = kernel_scheduler.run_scheduler(release_workers)
         assert (result.returncode) == (0), result.stderr
 
-    def test_failure_names_context_and_reaps_blocked_sibling(self) -> None:
+    def test_failure_names_context_and_reaps_blocked_sibling(
+        self, kernel_scheduler: KernelScheduler
+    ) -> None:
         """A failing context cancels and reaps a sibling blocked at the barrier."""
         pids: dict[str, int] = {}
-        result = self._run_scheduler(self._fail_second_worker(pids))
+        result = kernel_scheduler.run_scheduler(kernel_scheduler.fail_second_worker(pids))
         assert (result.returncode) != (0)
         assert ("fplinux: kernel check failed: context second exited 23") in (result.stderr)
-        self._assert_process_reaped(pids["first"])
+        kernel_scheduler.assert_process_reaped(pids["first"])
 
-    def _fail_second_worker(
-        self, pids: dict[str, int]
-    ) -> Callable[[subprocess.Popen[str], float], None]:
-        """Record both ready workers and release the second with a failure."""
-
-        def fail_second(_process: subprocess.Popen[str], _deadline: float) -> None:
-            for _index in range(2):
-                target, pid, _home, _temporary = self._accept_worker()
-                pids[target] = pid
-            self._release_worker("second", b"F")
-
-        return fail_second
-
-    def test_failure_kills_worker_stage_tool_and_grandchild(self) -> None:
+    def test_failure_kills_worker_stage_tool_and_grandchild(
+        self, kernel_scheduler: KernelScheduler
+    ) -> None:
         """Repeated cancellation reaches the active Stage-owned command group."""
         pids: dict[str, int] = {}
-        tool_pid_path = self.root / "tool.pid"
+        tool_pid_path = kernel_scheduler.root / "tool.pid"
         try:
-            result = self._run_scheduler(self._fail_second_worker(pids), stage_first=True)
+            result = kernel_scheduler.run_scheduler(
+                kernel_scheduler.fail_second_worker(pids), stage_first=True
+            )
             assert (result.returncode) != (0)
             assert ("fplinux: kernel check failed: context second exited 23") in (result.stderr)
-            assert (self.root / "tool.term").exists()
-            assert (self.root / "grandchild.term").exists()
-            self._assert_process_reaped(pids["first"])
-            self._assert_process_reaped(int(tool_pid_path.read_text()))
-            self._assert_process_stopped(int((self.root / "grandchild.pid").read_text()))
+            assert (kernel_scheduler.root / "tool.term").exists()
+            assert (kernel_scheduler.root / "grandchild.term").exists()
+            kernel_scheduler.assert_process_reaped(pids["first"])
+            kernel_scheduler.assert_process_reaped(int(tool_pid_path.read_text()))
+            kernel_scheduler.assert_process_stopped(
+                int((kernel_scheduler.root / "grandchild.pid").read_text())
+            )
         finally:
             # Cleanup runs only after the assertions so that it cannot satisfy them.
             if tool_pid_path.exists():

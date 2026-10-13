@@ -19,16 +19,14 @@ if TYPE_CHECKING:
 class TerminalDiagnosticTests:
     """Exercise the diagnostic return owner without a phone or a live VT."""
 
-    executable: Path
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def executable(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         """Link the production owner; retain real descriptor and stream operations."""
         with c_build_directory(tmp_path_factory, "fplinux-terminal-diagnostic") as directory:
-            cls.executable = directory / "terminal-diagnostic"
+            executable = directory / "terminal-diagnostic"
             compile_c(
-                cls.executable,
+                executable,
                 [
                     "-std=c11",
                     "-Wall",
@@ -43,25 +41,29 @@ class TerminalDiagnosticTests:
                 name="compile terminal diagnostic host harness",
                 check=True,
             )
-            yield
+            yield executable
 
-    def run_scenario(self, scenario: str) -> None:
+    def run_scenario(self, executable: Path, scenario: str) -> None:
         """Run one bounded scenario with independent descriptor state."""
         run_process(
-            [str(self.executable), scenario],
+            [str(executable), scenario],
             name=f"exercise terminal diagnostic {scenario}",
             timeout=10,
             check=True,
         )
 
-    def test_right_soft_tap_returns_to_allocated_terminal_vt(self) -> None:
+    def test_right_soft_tap_returns_to_allocated_terminal_vt(self, executable: Path) -> None:
         """A complete tap survives input suspension and returns after key release."""
-        self.run_scenario("return")
+        self.run_scenario(executable, "return")
 
-    def test_each_phone_keypad_can_return_and_external_f14_is_untouched(self) -> None:
+    def test_each_phone_keypad_can_return_and_external_f14_is_untouched(
+        self, executable: Path
+    ) -> None:
         """The action belongs to phone input sources and keeps device press state."""
-        self.run_scenario("sources")
+        self.run_scenario(executable, "sources")
 
-    def test_other_vt_does_not_switch_and_closed_watch_leaves_events_unread(self) -> None:
+    def test_other_vt_does_not_switch_and_closed_watch_leaves_events_unread(
+        self, executable: Path
+    ) -> None:
         """Other VTs are not switched; closing the watch leaves reused descriptors alone."""
-        self.run_scenario("ownership")
+        self.run_scenario(executable, "ownership")

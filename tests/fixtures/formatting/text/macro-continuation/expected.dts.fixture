@@ -1,0 +1,6 @@
+#define VALUE \
+	{ 1; 2; }
+&node {
+	alpha = <1>;
+	zeta = <2>;
+};

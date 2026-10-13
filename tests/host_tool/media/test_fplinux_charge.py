@@ -7,7 +7,8 @@ import os
 import re
 import signal
 import time
-from typing import TYPE_CHECKING, ClassVar
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -23,23 +24,25 @@ if TYPE_CHECKING:
 SOURCE = ROOT / "alpine/aports/fplinux-charge/fplinux-charge.c"
 
 
+@dataclass(frozen=True)
+class ChargeTools:
+    """Linked wrapper variants for direct and discovered counter paths."""
+
+    executable: Path
+    discovery_executable: Path
+
+
 class FPLinuxChargeHostToolTests:
     """Compile and execute the production wrapper against a private counter."""
 
-    work: Path
-    counter: Path
-    discovery_executable: ClassVar[Path]
-    executable: ClassVar[Path]
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[ChargeTools]:
         """Compile one production binary with the test-owned counter path."""
         with c_build_directory(tmp_path_factory, "fplinux-charge") as directory:
-            cls.work = directory
-            cls.executable = cls.work / "fplinux-charge"
+            executable = directory / "fplinux-charge"
             compile_c(
-                cls.executable,
+                executable,
                 [
                     "-std=c11",
                     "-Wall",
@@ -54,9 +57,9 @@ class FPLinuxChargeHostToolTests:
                 name="compile fplinux-charge",
                 check=True,
             )
-            cls.discovery_executable = cls.work / "fplinux-charge-discovery"
+            discovery_executable = directory / "fplinux-charge-discovery"
             compile_c(
-                cls.discovery_executable,
+                discovery_executable,
                 [
                     "-std=c11",
                     "-Wall",
@@ -71,31 +74,28 @@ class FPLinuxChargeHostToolTests:
                 name="compile fplinux-charge discovery",
                 check=True,
             )
-            yield
+            yield ChargeTools(executable, discovery_executable)
 
-    @pytest.fixture(autouse=True)
-    def _case_resources(self, tmp_path: Path) -> None:
-        """Give each command a fresh counter and working directory."""
-        self.work = tmp_path
-        self.counter = self.work / "charge_counter"
-
-    def add_battery(self, charge_counter: int) -> Path:
+    def add_battery(self, work: Path, charge_counter: int) -> Path:
         """Create the test-owned counter and return its path."""
-        self.counter.write_text(f"{charge_counter}\n", encoding="ascii")
-        return self.counter
+        counter = work / "charge_counter"
+        counter.write_text(f"{charge_counter}\n", encoding="ascii")
+        return counter
 
     def run_charge(
         self,
+        executable: Path,
+        work: Path,
         command: list[str],
         *,
         timeout: float = 5,
     ) -> subprocess.CompletedProcess[str]:
         """Run the wrapper through the bounded test process boundary."""
         return run_process(
-            [str(self.executable), "--", *command],
+            [str(executable), "--", *command],
             name="run fplinux-charge",
             timeout=timeout,
-            cwd=self.work,
+            cwd=work,
         )
 
     def add_power_supply(
@@ -112,12 +112,16 @@ class FPLinuxChargeHostToolTests:
         (device / "charge_counter").write_text(f"{charge_counter}\n", encoding="ascii")
         return device / "charge_counter"
 
-    def test_reports_charge_delta_after_successful_command(self) -> None:
+    def test_reports_charge_delta_after_successful_command(
+        self, tools: ChargeTools, tmp_path: Path
+    ) -> None:
         """A successful command produces its real counter delta and exits zero."""
-        counter = self.add_battery(1000)
-        sentinel = self.work / "happy-command-ran"
+        counter = self.add_battery(tmp_path, 1000)
+        sentinel = tmp_path / "happy-command-ran"
 
         result = self.run_charge(
+            tools.executable,
+            tmp_path,
             [
                 "/bin/sh",
                 "-c",
@@ -125,7 +129,7 @@ class FPLinuxChargeHostToolTests:
                 "fplinux-charge-test",
                 str(counter),
                 str(sentinel),
-            ]
+            ],
         )
 
         assert (result.returncode) == (0), result.stderr
@@ -144,13 +148,15 @@ class FPLinuxChargeHostToolTests:
         [["-h"], ["--help"], ["--unknown", "--help"]],
         ids=["h", "help", "unknown-help"],
     )
-    def test_help_exits_without_reading_a_counter(self, arguments: list[str]) -> None:
+    def test_help_exits_without_reading_a_counter(
+        self, tools: ChargeTools, tmp_path: Path, arguments: list[str]
+    ) -> None:
         """Recognized help takes priority even when a command or option is invalid."""
         result = run_process(
-            [str(self.executable), *arguments],
+            [str(tools.executable), *arguments],
             name="read fplinux-charge help without a counter",
             timeout=5,
-            cwd=self.work,
+            cwd=tmp_path,
         )
 
         assert (result.returncode) == (0), result.stderr
@@ -160,14 +166,14 @@ class FPLinuxChargeHostToolTests:
         assert ("--counter") in (result.stdout)
         assert ("command") in (result.stdout)
 
-    def test_help_does_not_execute_the_child(self) -> None:
+    def test_help_does_not_execute_the_child(self, tools: ChargeTools, tmp_path: Path) -> None:
         """Help exits before a valid counter and child command can have effects."""
-        self.add_battery(1000)
-        sentinel = self.work / "help-command-ran"
+        self.add_battery(tmp_path, 1000)
+        sentinel = tmp_path / "help-command-ran"
 
         result = run_process(
             [
-                str(self.executable),
+                str(tools.executable),
                 "--help",
                 "--",
                 "/bin/sh",
@@ -178,7 +184,7 @@ class FPLinuxChargeHostToolTests:
             ],
             name="read fplinux-charge help with a child command",
             timeout=5,
-            cwd=self.work,
+            cwd=tmp_path,
         )
 
         assert (result.returncode) == (0), result.stderr
@@ -216,13 +222,15 @@ class FPLinuxChargeHostToolTests:
             "counter-counter-unexpected-separator-bin-true",
         ],
     )
-    def test_invalid_arguments_fail_before_measurement(self, arguments: list[str]) -> None:
+    def test_invalid_arguments_fail_before_measurement(
+        self, tools: ChargeTools, tmp_path: Path, arguments: list[str]
+    ) -> None:
         """Bad options or a missing command separator are syntax errors."""
         result = run_process(
-            [str(self.executable), *arguments],
+            [str(tools.executable), *arguments],
             name="reject invalid fplinux-charge arguments",
             timeout=5,
-            cwd=self.work,
+            cwd=tmp_path,
         )
 
         assert (result.returncode) == (2), result.stderr
@@ -230,11 +238,15 @@ class FPLinuxChargeHostToolTests:
         assert ("--help") in (result.stderr)
         assert ("cannot read") not in (result.stderr)
 
-    def test_child_arguments_are_preserved_after_the_separator(self) -> None:
+    def test_child_arguments_are_preserved_after_the_separator(
+        self, tools: ChargeTools, tmp_path: Path
+    ) -> None:
         """Child options, empty arguments and separators reach the child unchanged."""
-        self.add_battery(1000)
+        self.add_battery(tmp_path, 1000)
 
         result = self.run_charge(
+            tools.executable,
+            tmp_path,
             [
                 "/bin/sh",
                 "-c",
@@ -246,7 +258,7 @@ class FPLinuxChargeHostToolTests:
                 "",
                 "--",
                 "--counter=child",
-            ]
+            ],
         )
 
         assert (result.returncode) == (0), result.stderr
@@ -256,33 +268,37 @@ class FPLinuxChargeHostToolTests:
         assert ("charge_delta=+0 uAh") in (result.stderr)
 
     @pytest.mark.parametrize("name", ["--", "--help"], ids=["separator", "help"])
-    def test_counter_value_can_look_like_an_option(self, name: str) -> None:
+    def test_counter_value_can_look_like_an_option(
+        self, tools: ChargeTools, tmp_path: Path, name: str
+    ) -> None:
         """Counter values named -- or --help are paths, with a separate child delimiter."""
-        (self.work / name).write_text("1000\n", encoding="ascii")
+        (tmp_path / name).write_text("1000\n", encoding="ascii")
         result = run_process(
-            [str(self.executable), "--counter", name, "--", "/bin/true"],
+            [str(tools.executable), "--counter", name, "--", "/bin/true"],
             name="run fplinux-charge with an option-shaped counter path",
             timeout=5,
-            cwd=self.work,
+            cwd=tmp_path,
         )
 
         assert (result.returncode) == (0), result.stderr
         assert (result.stdout) == ("")
         assert ("charge_delta=+0 uAh") in (result.stderr)
 
-    def test_preserves_child_exit_status(self) -> None:
+    def test_preserves_child_exit_status(self, tools: ChargeTools, tmp_path: Path) -> None:
         """A normally exiting child keeps its nonzero status after measurement."""
-        self.add_battery(1000)
+        self.add_battery(tmp_path, 1000)
 
-        result = self.run_charge(["/bin/sh", "-c", "exit 37"])
+        result = self.run_charge(tools.executable, tmp_path, ["/bin/sh", "-c", "exit 37"])
 
         assert (result.returncode) == (37), result.stderr
         assert ("charge_delta=+0 uAh average_current=+0 uA") in (result.stderr)
 
-    def test_sigterm_is_forwarded_and_terminates_wrapper(self) -> None:
+    def test_sigterm_is_forwarded_and_terminates_wrapper(
+        self, tools: ChargeTools, tmp_path: Path
+    ) -> None:
         """SIGTERM reaches a ready child and the wrapper terminates by SIGTERM."""
-        self.add_battery(1000)
-        ready = self.work / "sigterm-child-ready"
+        self.add_battery(tmp_path, 1000)
+        ready = tmp_path / "sigterm-child-ready"
 
         def terminate_when_ready(
             process: subprocess.Popen[str],
@@ -299,7 +315,7 @@ class FPLinuxChargeHostToolTests:
 
         result = run_process(
             [
-                str(self.executable),
+                str(tools.executable),
                 "--",
                 "/bin/sh",
                 "-c",
@@ -310,47 +326,53 @@ class FPLinuxChargeHostToolTests:
             name="run fplinux-charge SIGTERM forwarding",
             timeout=5,
             while_running=terminate_when_ready,
-            cwd=self.work,
+            cwd=tmp_path,
         )
 
         assert (result.returncode) == (-signal.SIGTERM), result.stderr
         assert ("charge_delta=+0 uAh average_current=+0 uA") in (result.stderr)
 
-    def test_missing_counter_prevents_command_execution(self) -> None:
+    def test_missing_counter_prevents_command_execution(
+        self, tools: ChargeTools, tmp_path: Path
+    ) -> None:
         """The wrapper fails before executing the command without a battery counter."""
-        sentinel = self.work / "missing-counter-command-ran"
+        sentinel = tmp_path / "missing-counter-command-ran"
 
         result = self.run_charge(
+            tools.executable,
+            tmp_path,
             [
                 "/bin/sh",
                 "-c",
                 'printf ran > "$1"',
                 "fplinux-charge-test",
                 str(sentinel),
-            ]
+            ],
         )
 
         assert (result.returncode) == (125), result.stderr
         assert not (sentinel.exists())
         assert ("fplinux-charge: cannot read") in (result.stderr)
 
-    def test_missing_command_returns_127(self) -> None:
+    def test_missing_command_returns_127(self, tools: ChargeTools, tmp_path: Path) -> None:
         """An execvp ENOENT is reported as the conventional status 127."""
-        self.add_battery(1000)
+        self.add_battery(tmp_path, 1000)
         missing_command = "fplinux-charge-command-that-does-not-exist"
 
-        result = self.run_charge([missing_command])
+        result = self.run_charge(tools.executable, tmp_path, [missing_command])
 
         assert (result.returncode) == (127), result.stderr
         assert (f"cannot execute {missing_command}:") in (result.stderr)
         assert ("charge_delta=+0 uAh average_current=+0 uA") in (result.stderr)
 
-    def test_default_discovery_selects_only_the_battery_counter(self) -> None:
+    def test_default_discovery_selects_only_the_battery_counter(
+        self, tools: ChargeTools, tmp_path: Path
+    ) -> None:
         """The default class scan ignores non-Battery charge counters."""
-        power_supply = self.work / "power_supply"
+        power_supply = tmp_path / "power_supply"
         battery_counter = self.add_power_supply(power_supply, "battery", "Battery", 1000)
         self.add_power_supply(power_supply, "charger", "USB", 2000)
-        executable = self.discovery_executable
+        executable = tools.discovery_executable
 
         result = run_process(
             [
@@ -364,19 +386,21 @@ class FPLinuxChargeHostToolTests:
             ],
             name="run fplinux-charge Battery discovery",
             timeout=5,
-            cwd=self.work,
+            cwd=tmp_path,
         )
 
         assert (result.returncode) == (0), result.stderr
         assert ("charge_delta=+120 uAh") in (result.stderr)
 
-    def test_default_discovery_rejects_multiple_battery_counters(self) -> None:
+    def test_default_discovery_rejects_multiple_battery_counters(
+        self, tools: ChargeTools, tmp_path: Path
+    ) -> None:
         """Ambiguous Battery telemetry prevents the command from starting."""
-        power_supply = self.work / "power_supply"
+        power_supply = tmp_path / "power_supply"
         self.add_power_supply(power_supply, "battery0", "Battery", 1000)
         self.add_power_supply(power_supply, "battery1", "Battery", 2000)
-        executable = self.discovery_executable
-        sentinel = self.work / "ambiguous-command-ran"
+        executable = tools.discovery_executable
+        sentinel = tmp_path / "ambiguous-command-ran"
 
         result = run_process(
             [
@@ -390,7 +414,7 @@ class FPLinuxChargeHostToolTests:
             ],
             name="reject ambiguous fplinux-charge Battery counters",
             timeout=5,
-            cwd=self.work,
+            cwd=tmp_path,
         )
 
         assert (result.returncode) == (125), result.stderr
@@ -398,16 +422,18 @@ class FPLinuxChargeHostToolTests:
         assert ("multiple Battery charge counters") in (result.stderr)
 
     @pytest.mark.parametrize("attached", [False, True], ids=["False", "True"])
-    def test_explicit_counter_overrides_default_discovery(self, *, attached: bool) -> None:
+    def test_explicit_counter_overrides_default_discovery(
+        self, tools: ChargeTools, tmp_path: Path, *, attached: bool
+    ) -> None:
         """A caller can select a known counter without class discovery."""
-        counter = self.work / "explicit_counter"
+        counter = tmp_path / "explicit_counter"
         counter.write_text("1000\n", encoding="ascii")
         arguments = [f"--counter={counter}"] if attached else ["--counter", str(counter)]
         result = run_process(
-            [str(self.executable), *arguments, "--", "/bin/true"],
+            [str(tools.executable), *arguments, "--", "/bin/true"],
             name="run fplinux-charge explicit counter",
             timeout=5,
-            cwd=self.work,
+            cwd=tmp_path,
         )
         assert result.returncode == 0, result.stderr
         assert "charge_delta=+0 uAh" in result.stderr

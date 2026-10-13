@@ -1,0 +1,3 @@
+pkgname = optional
+pkgver = 1-r0
+depend = so:libshared.so.1

@@ -27,6 +27,7 @@ class SourceFormatClassificationTests:
             "driver.c": "int value;\n",
             "driver.h": "int value;\n",
             "script.sh": "#!/bin/sh\necho ok\n",
+            "script.sh.in": "#!/bin/sh\nprintf '%s\\n' '@NAME@'\n",
             "service.initd": "#!/sbin/openrc-run\n",
             "helper": "#!/usr/bin/env bash\necho ok\n",
             "terminal.bashrc": "#!/usr/bin/env bash\nbind 'set bell-style none'\n",
@@ -54,7 +55,7 @@ class SourceFormatClassificationTests:
         assert (formats.markdown) == (("README.md", "README.md.in"))
         assert (formats.json) == (("data.json", "settings.jsonc"))
         assert (formats.toml) == (("target.toml", "target.toml.in"))
-        assert (formats.posix_shell) == (("script.sh", "service.initd"))
+        assert (formats.posix_shell) == (("script.sh", "script.sh.in", "service.initd"))
         assert (formats.bash) == (("helper", "terminal.bashrc"))
         assert (formats.c) == (("driver.c", "driver.h"))
         assert ("package-lock.json") not in (formats.supported())

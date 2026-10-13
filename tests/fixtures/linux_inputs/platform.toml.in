@@ -1,0 +1,18 @@
+[identity]
+vendor = "Example"
+soc = "%(name_upper)s"
+aliases = []
+compatible = "example,%(name)s"
+
+[linux]
+source_lock = "%(source_lock)s"
+arch = "%(arch)s"
+cross_compile = "%(arch)s-linux-gnu-"
+dts_directory = "arch/%(arch)s/boot/dts"
+platform_identity_header = "arch/%(arch)s/include/%(name)s.h"
+patches = []
+appends = []
+
+[[linux.copies]]
+source = "platforms/%(name)s/common.c"
+destination = "drivers/%(name)s/common.c"

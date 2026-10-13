@@ -9,6 +9,7 @@ import io
 import json
 import shutil
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -57,35 +58,17 @@ BOARD_MAPS = PreparedGroup(
 )
 
 
-class DeviceDataPrepareTests:
-    """Exercise real staging, receipts and pointer publication under a temporary root.
+@dataclass(frozen=True)
+class DeviceDataTree:
+    """Isolated source checkout, selected generations and immutable saved dump."""
 
-    Stubbed: the target configuration (load_target); loading of the target parser and
-    platform board-map modules, replaced by in-test callables; PhysicalNand.from_dump
-    admission of the short dump; pinned host-tool preparation;
-    and the loader build, RAM load and NAND backup. One case instead runs the real
-    build up to its offline rejection with stubbed release, workspace, image and Kern
-    inputs. The cold-dump case instead runs full-size admission, the real platform
-    module and an external fake utility. Real target TOML, target parser files,
-    pinned container builds, real-tool discovery and phone transport are not exercised.
-    """
-
-    @pytest.fixture(autouse=True)
-    def prepared_directory(self) -> Iterator[None]:
-        """Create an isolated source root and immutable saved dump."""
-        with contextlib.ExitStack() as resources:
-            self.temporary = tempfile.TemporaryDirectory()
-            resources.enter_context(self.temporary)
-            self.root = Path(self.temporary.name) / "source"
-            self.cache = self.root / ".cache"
-            self.cache.mkdir(parents=True)
-            resources.enter_context(mock.patch("fplinux_cli.reporting.run.ROOT", self.root))
-            self.saved_dump = self.root / "saved-nand.bin"
-            self.saved_dump.write_bytes(RAW_DUMP)
-            yield
+    root: Path
+    cache: Path
+    saved_dump: Path
 
     @staticmethod
-    def _group(source: str, destination: str, size: int) -> list[dict[str, object]]:
+    def group(source: str, destination: str, size: int) -> list[dict[str, object]]:
+        """Declare one controlled source file and its admitted destination size."""
         return [
             {
                 "source": source,
@@ -94,17 +77,18 @@ class DeviceDataPrepareTests:
             }
         ]
 
-    def _config(
+    def config(
         self,
         group_names: tuple[str, ...] = ("bluetooth", "audio-profile"),
         *,
         nand: dict[str, object] = DECLARED_NAND,
     ) -> dict[str, object]:
+        """Declare the selected groups and geometry without loading a real target."""
         groups: dict[str, list[dict[str, object]]] = {}
         if "bluetooth" in group_names:
-            groups["bluetooth"] = self._group("radio.bin", "chip/radio.bin", 5)
+            groups["bluetooth"] = self.group("radio.bin", "chip/radio.bin", 5)
         if "audio-profile" in group_names:
-            groups["audio-profile"] = self._group(
+            groups["audio-profile"] = self.group(
                 "audio.bin",
                 "fplinux/audio.bin",
                 7,
@@ -121,11 +105,12 @@ class DeviceDataPrepareTests:
         }
 
     @staticmethod
-    def _preparation(
+    def preparation(
         group_names: tuple[str, ...] = ("bluetooth", "audio-profile"),
         *,
         audio: PreparedGroup = AUDIO_PROFILE,
     ) -> DeviceDataPreparation:
+        """Return controlled parser output for the selected independent groups."""
         groups = {}
         if "bluetooth" in group_names:
             groups["bluetooth"] = BLUETOOTH
@@ -133,13 +118,14 @@ class DeviceDataPrepareTests:
             groups["audio-profile"] = audio
         return DeviceDataPreparation(groups=groups)
 
-    def _run_from_dump(
+    def run_from_dump(
         self,
         group_names: tuple[str, ...] = ("bluetooth", "audio-profile"),
         *,
         preparation: DeviceDataPreparation | None = None,
     ) -> str:
-        parse = mock.Mock(return_value=preparation or self._preparation(group_names))
+        """Prepare this saved dump with controlled parsing and prohibited phone access."""
+        parse = mock.Mock(return_value=preparation or self.preparation(group_names))
         parser = SimpleNamespace(prepare_device_data=parse)
         admitted = PhysicalNand(RAW_DUMP, RAW_PAGE_BYTES)
         with (
@@ -147,7 +133,7 @@ class DeviceDataPrepareTests:
             mock.patch.object(
                 device_data_prepare,
                 "load_target",
-                return_value=self._config(group_names),
+                return_value=self.config(group_names),
             ),
             mock.patch.object(
                 device_data_prepare_prepare,
@@ -184,17 +170,115 @@ class DeviceDataPrepareTests:
             )
         return stdout.getvalue()
 
-    def _current_generation(self) -> Path:
+    def current_generation(self) -> Path:
+        """Resolve the generation selected by the producer's published current pointer."""
         target_root = self.cache / "device-data" / TARGET
         generation_name = (target_root / "current").read_text(encoding="ascii").strip()
         return target_root / "generations" / generation_name
 
-    def test_saved_dump_publishes_both_groups_with_one_private_source_receipt(self) -> None:
-        """One immutable input is copied once and owns provenance for both independent groups."""
-        output = self._run_from_dump()
+    def run_board_maps_from_dump(
+        self,
+        *,
+        with_bluetooth: bool,
+        extract: object,
+    ) -> str:
+        """Prepare board maps with a stub extraction and pinned host-tool preparation."""
+        groups: dict[str, list[dict[str, object]]] = {
+            "board-maps": [
+                # Board maps are declared without sizes; each phone's own maps are admitted.
+                {"source": "pinmap.bin", "destination": "pinmap.bin"},
+                {"source": "keymap.bin", "destination": "keymap.bin"},
+            ]
+        }
+        device_data: dict[str, object] = {"groups": groups}
+        if with_bluetooth:
+            groups["bluetooth"] = self.group("radio.bin", "chip/radio.bin", 5)
+            device_data["parser"] = "device_data.py"
+        parser = SimpleNamespace(
+            prepare_device_data=lambda _nand, **_context: DeviceDataPreparation(
+                groups={"bluetooth": BLUETOOTH}
+            )
+        )
+        with (
+            mock.patch.object(device_data_prepare, "ROOT", self.root),
+            mock.patch.object(
+                device_data_prepare,
+                "load_target",
+                return_value={
+                    **self.config(),
+                    "platform": "demo-platform",
+                    "device_data": device_data,
+                    "nand": DECLARED_NAND,
+                },
+            ),
+            mock.patch.object(
+                device_data_prepare_prepare,
+                "_load_device_data_parser",
+                return_value=parser,
+                side_effect=None if with_bluetooth else AssertionError("no parser group"),
+            ),
+            mock.patch.object(
+                device_data_prepare_prepare,
+                "_load_board_maps_provider",
+                return_value=SimpleNamespace(prepare_board_maps=extract),
+            ),
+            mock.patch.object(
+                device_data_prepare,
+                "prepare_host_tool",
+                return_value=None,
+            ),
+            mock.patch.object(
+                PhysicalNand,
+                "from_dump",
+                return_value=PhysicalNand(RAW_DUMP, RAW_PAGE_BYTES),
+            ),
+            contextlib.redirect_stdout(io.StringIO()) as stdout,
+        ):
+            device_data_prepare.prepare_device_data(
+                TARGET,
+                from_dump=self.saved_dump,
+                jobs=1,
+                offline=True,
+            )
+        return stdout.getvalue()
 
-        generation = self._current_generation()
-        assert (self.saved_dump.read_bytes()) == (RAW_DUMP)
+
+@pytest.fixture
+def device_data_tree() -> Iterator[DeviceDataTree]:
+    """Own an isolated source root and saved dump until case teardown."""
+    with contextlib.ExitStack() as resources:
+        temporary = tempfile.TemporaryDirectory()
+        resources.enter_context(temporary)
+        root = Path(temporary.name) / "source"
+        cache = root / ".cache"
+        cache.mkdir(parents=True)
+        resources.enter_context(mock.patch("fplinux_cli.reporting.run.ROOT", root))
+        saved_dump = root / "saved-nand.bin"
+        saved_dump.write_bytes(RAW_DUMP)
+        yield DeviceDataTree(root, cache, saved_dump)
+
+
+class DeviceDataPrepareTests:
+    """Exercise real staging, receipts and pointer publication under a temporary root.
+
+    Stubbed: the target configuration (load_target); loading of the target parser and
+    platform board-map modules, replaced by in-test callables; PhysicalNand.from_dump
+    admission of the short dump; pinned host-tool preparation;
+    and the loader build, RAM load and NAND backup. One case instead runs the real
+    build up to its offline rejection with stubbed release, workspace, image and Kern
+    inputs. The cold-dump case instead runs full-size admission, the real platform
+    module and an external fake utility. Real target TOML, target parser files,
+    pinned container builds, real-tool discovery and phone transport are not exercised.
+    """
+
+    def test_saved_dump_publishes_both_groups_with_one_private_source_receipt(
+        self, device_data_tree: DeviceDataTree
+    ) -> None:
+        """One immutable input is copied once and owns provenance for both independent groups."""
+        output = device_data_tree.run_from_dump()
+
+        generation = device_data_tree.current_generation()
+        assert (device_data_tree.saved_dump.read_bytes()) == (RAW_DUMP)
         assert ((generation / "source/nand.bin").read_bytes()) == (RAW_DUMP)
         assert ((generation / "groups/bluetooth/radio.bin").read_bytes()) == (b"radio")
         assert ((generation / "groups/audio-profile/audio.bin").read_bytes()) == (b"profile")
@@ -208,33 +292,39 @@ class DeviceDataPrepareTests:
             }
         )
         assert ([group["name"] for group in receipt["groups"]]) == (["audio-profile", "bluetooth"])
-        assert (str(self.saved_dump)) not in (json.dumps(receipt))
+        assert (str(device_data_tree.saved_dump)) not in (json.dumps(receipt))
         assert ("./fplinux build demo-phone") in (output)
 
-    def test_failed_staging_does_not_switch_the_current_generation(self) -> None:
+    def test_failed_staging_does_not_switch_the_current_generation(
+        self, device_data_tree: DeviceDataTree
+    ) -> None:
         """A partial or malformed requested group cannot expose a mixed current state."""
-        self._run_from_dump()
-        target_root = self.cache / "device-data" / TARGET
+        device_data_tree.run_from_dump()
+        target_root = device_data_tree.cache / "device-data" / TARGET
         pointer = target_root / "current"
         previous_pointer = pointer.read_bytes()
-        previous_generation = self._current_generation()
+        previous_generation = device_data_tree.current_generation()
         malformed = PreparedGroup(
             originals=AUDIO_PROFILE.originals,
             prepared={"audio.bin": b"wrong size"},
         )
 
         with pytest.raises(SystemExit, match="device-data group audio-profile"):
-            self._run_from_dump(preparation=self._preparation(audio=malformed))
+            device_data_tree.run_from_dump(
+                preparation=device_data_tree.preparation(audio=malformed)
+            )
 
         assert (pointer.read_bytes()) == (previous_pointer)
-        assert (self._current_generation()) == (previous_generation)
+        assert (device_data_tree.current_generation()) == (previous_generation)
         assert ((previous_generation / "groups/audio-profile/audio.bin").read_bytes()) == (
             b"profile"
         )
         staging = list((target_root / "generations").glob(".staging-*"))
         assert (staging) == ([])
 
-    def test_live_acquisition_runs_once_and_the_same_raw_feeds_both_groups(self) -> None:
+    def test_live_acquisition_runs_once_and_the_same_raw_feeds_both_groups(
+        self, device_data_tree: DeviceDataTree
+    ) -> None:
         """One public NAND backup is the observable safety boundary for all parser outputs."""
         events: list[object] = []
         admitted = PhysicalNand(RAW_DUMP, RAW_PAGE_BYTES)
@@ -248,18 +338,18 @@ class DeviceDataPrepareTests:
         def extract(nand: PhysicalNand, *, audio: AudioProfileContext) -> DeviceDataPreparation:
             del audio
             events.append(("extract", nand))
-            return self._preparation()
+            return device_data_tree.preparation()
 
         def admit(raw: bytes, *, page_bytes: int) -> PhysicalNand:
             events.append(("admit", raw, page_bytes))
             return admitted
 
         with (
-            mock.patch.object(device_data_prepare, "ROOT", self.root),
+            mock.patch.object(device_data_prepare, "ROOT", device_data_tree.root),
             mock.patch.object(
                 device_data_prepare,
                 "load_target",
-                return_value=self._config(),
+                return_value=device_data_tree.config(),
             ),
             mock.patch.object(
                 device_data_prepare,
@@ -300,7 +390,9 @@ class DeviceDataPrepareTests:
                 ("extract", admitted),
             ]
         )
-        assert ((self._current_generation() / "source/nand.bin").read_bytes()) == (RAW_DUMP)
+        assert ((device_data_tree.current_generation() / "source/nand.bin").read_bytes()) == (
+            RAW_DUMP
+        )
 
     @pytest.mark.parametrize(
         "group_names",
@@ -311,81 +403,16 @@ class DeviceDataPrepareTests:
         ],
     )
     def test_bluetooth_audio_and_combined_targets_publish_only_their_declared_groups(
-        self, group_names: tuple[str, ...]
+        self, device_data_tree: DeviceDataTree, group_names: tuple[str, ...]
     ) -> None:
         """Neither named group creates a dependency on the other."""
-        self._run_from_dump(group_names)
-        published = self._current_generation() / "groups"
+        device_data_tree.run_from_dump(group_names)
+        published = device_data_tree.current_generation() / "groups"
         assert {path.name for path in published.iterdir()} == set(group_names)
-
-    def _run_board_maps_from_dump(
-        self,
-        *,
-        with_bluetooth: bool,
-        extract: object,
-    ) -> str:
-        """Prepare board maps with a stub extraction and pinned host-tool preparation."""
-        groups: dict[str, list[dict[str, object]]] = {
-            "board-maps": [
-                # Board maps are declared without sizes; each phone's own maps are admitted.
-                {"source": "pinmap.bin", "destination": "pinmap.bin"},
-                {"source": "keymap.bin", "destination": "keymap.bin"},
-            ]
-        }
-        device_data: dict[str, object] = {"groups": groups}
-        if with_bluetooth:
-            groups["bluetooth"] = self._group("radio.bin", "chip/radio.bin", 5)
-            device_data["parser"] = "device_data.py"
-        parser = SimpleNamespace(
-            prepare_device_data=lambda _nand, **_context: DeviceDataPreparation(
-                groups={"bluetooth": BLUETOOTH}
-            )
-        )
-        with (
-            mock.patch.object(device_data_prepare, "ROOT", self.root),
-            mock.patch.object(
-                device_data_prepare,
-                "load_target",
-                return_value={
-                    **self._config(),
-                    "platform": "demo-platform",
-                    "device_data": device_data,
-                    "nand": DECLARED_NAND,
-                },
-            ),
-            mock.patch.object(
-                device_data_prepare_prepare,
-                "_load_device_data_parser",
-                return_value=parser,
-                side_effect=None if with_bluetooth else AssertionError("no parser group"),
-            ),
-            mock.patch.object(
-                device_data_prepare_prepare,
-                "_load_board_maps_provider",
-                return_value=SimpleNamespace(prepare_board_maps=extract),
-            ),
-            mock.patch.object(
-                device_data_prepare,
-                "prepare_host_tool",
-                return_value=None,
-            ),
-            mock.patch.object(
-                PhysicalNand,
-                "from_dump",
-                return_value=PhysicalNand(RAW_DUMP, RAW_PAGE_BYTES),
-            ),
-            contextlib.redirect_stdout(io.StringIO()) as stdout,
-        ):
-            device_data_prepare.prepare_device_data(
-                TARGET,
-                from_dump=self.saved_dump,
-                jobs=1,
-                offline=True,
-            )
-        return stdout.getvalue()
 
     def test_saved_dump_board_maps_publish_without_a_runtime_bundle(
         self,
+        device_data_tree: DeviceDataTree,
     ) -> None:
         """Platform output is published beside parser groups; its report is not a build input."""
         received: list[Path] = []
@@ -395,9 +422,9 @@ class DeviceDataPrepareTests:
             received.append(host_tools)
             return BOARD_MAPS
 
-        output = self._run_board_maps_from_dump(with_bluetooth=True, extract=extract)
+        output = device_data_tree.run_board_maps_from_dump(with_bluetooth=True, extract=extract)
 
-        generation = self._current_generation()
+        generation = device_data_tree.current_generation()
         assert (len(received)) == (1)
         assert not (received[0].exists())
         assert ((generation / "groups/board-maps/pinmap.bin").read_bytes()) == (b"pins")
@@ -424,7 +451,9 @@ class DeviceDataPrepareTests:
         assert ("reports") not in (groups["bluetooth"])
         assert (f"Review {report}.") in (output)
 
-    def test_cold_saved_dump_publishes_maps_from_a_tool_process(self) -> None:
+    def test_cold_saved_dump_publishes_maps_from_a_tool_process(
+        self, device_data_tree: DeviceDataTree
+    ) -> None:
         """A fake external utility feeds the real platform extractor without a runtime bundle.
 
         Pinned container preparation is replaced by installation of the controlled utility.
@@ -434,12 +463,12 @@ class DeviceDataPrepareTests:
         project = ROOT
         image = signed_image(bytes(0x5000))
         small = backup(image, vbm=agreeing_vbm())
-        with self.saved_dump.open("wb") as dump_writer:
+        with device_data_tree.saved_dump.open("wb") as dump_writer:
             dump_writer.write(small.raw)
             dump_writer.truncate(138412032)
-        with self.saved_dump.open("rb") as dump_reader:
+        with device_data_tree.saved_dump.open("rb") as dump_reader:
             original_digest = hashlib.file_digest(dump_reader, "sha256").hexdigest()
-        provider = self.root / "platforms/ums9117/host/stock_image.py"
+        provider = device_data_tree.root / "platforms/ums9117/host/stock_image.py"
         provider.parent.mkdir(parents=True)
         shutil.copyfile(project / "platforms/ums9117/host/stock_image.py", provider)
         pinmap = bytes.fromhex("b0002a40 10000000 ffffffff ffffffff")
@@ -448,10 +477,9 @@ class DeviceDataPrepareTests:
             "image_sha256": hashlib.sha256(image).hexdigest(),
             "commands": {
                 "unpack": {
-                    "stdout": "0x800: init_table, start = 0x900, end = 0x910\n"
-                    "ps_addr: 0x80100000\n"
-                    "0x4800: pinmap (end = 0x4810)\n"
-                    "0x4900: keymap, bootkey = 0x2a (STAR)\n",
+                    "stdout": (
+                        project / "tests/fixtures/stock_board_report/maps-only.txt"
+                    ).read_text(encoding="utf-8"),
                     "files": {"pinmap.bin": pinmap.hex(), "keymap.bin": keys.hex()},
                 }
             },
@@ -474,7 +502,7 @@ class DeviceDataPrepareTests:
             (output / "scenario.json").write_text(json.dumps(scenario), encoding="utf-8")
 
         config = {
-            **self._config(),
+            **device_data_tree.config(),
             "platform": "ums9117",
             "nand": DECLARED_NAND,
             "device_data": {
@@ -487,8 +515,8 @@ class DeviceDataPrepareTests:
             },
         }
         with (
-            mock.patch.object(common, "ROOT", self.root),
-            mock.patch.object(device_data_prepare, "ROOT", self.root),
+            mock.patch.object(common, "ROOT", device_data_tree.root),
+            mock.patch.object(device_data_prepare, "ROOT", device_data_tree.root),
             mock.patch.object(device_data_prepare, "load_target", return_value=config),
             mock.patch.object(
                 device_data_prepare, "prepare_host_tool", side_effect=install_tool, create=True
@@ -496,21 +524,23 @@ class DeviceDataPrepareTests:
             contextlib.redirect_stdout(io.StringIO()),
         ):
             device_data_prepare.prepare_device_data(
-                TARGET, from_dump=self.saved_dump, jobs=1, offline=True
+                TARGET, from_dump=device_data_tree.saved_dump, jobs=1, offline=True
             )
 
-        generation = self._current_generation()
+        generation = device_data_tree.current_generation()
         assert ((generation / "groups/board-maps/pinmap.bin").read_bytes()) == (pinmap)
         assert ((generation / "groups/board-maps/keymap.bin").read_bytes()) == (keys)
         report = json.loads((generation / "reports/board-maps/board-report.json").read_text())
         assert (report["keypad"]["boot_key"]) == ({"code": "0x2a", "key": "FPLINUX_KEY_STAR"})
         assert (report["pads"]["display"]) == ({"0x402a00b0": "0x00000010"})
         assert ((generation / "originals/board-maps/stock-image.bin").read_bytes()) == (image)
-        with self.saved_dump.open("rb") as dump_reader:
+        with device_data_tree.saved_dump.open("rb") as dump_reader:
             assert (hashlib.file_digest(dump_reader, "sha256").hexdigest()) == (original_digest)
-        assert not ((self.cache / "out").exists())
+        assert not ((device_data_tree.cache / "out").exists())
 
-    def test_failed_board_map_extraction_publishes_nothing(self) -> None:
+    def test_failed_board_map_extraction_publishes_nothing(
+        self, device_data_tree: DeviceDataTree
+    ) -> None:
         """A failed extraction leaves no selected generation."""
 
         def unavailable(_nand: PhysicalNand, *, host_tools: Path) -> PreparedGroup:
@@ -522,19 +552,21 @@ class DeviceDataPrepareTests:
             SystemExit,
             match="device-data extraction failed: board maps not found in the stock image",
         ):
-            self._run_board_maps_from_dump(with_bluetooth=False, extract=unavailable)
-        target_root = self.cache / "device-data" / TARGET
+            device_data_tree.run_board_maps_from_dump(with_bluetooth=False, extract=unavailable)
+        target_root = device_data_tree.cache / "device-data" / TARGET
         assert not ((target_root / "current").exists())
         assert (list((target_root / "generations").iterdir())) == ([])
 
-    def test_saved_dump_without_declared_chip_or_receipt_publishes_nothing(self) -> None:
+    def test_saved_dump_without_declared_chip_or_receipt_publishes_nothing(
+        self, device_data_tree: DeviceDataTree
+    ) -> None:
         """A backup's page layout is never inferred from its length."""
         with (
-            mock.patch.object(device_data_prepare, "ROOT", self.root),
+            mock.patch.object(device_data_prepare, "ROOT", device_data_tree.root),
             mock.patch.object(
                 device_data_prepare,
                 "load_target",
-                return_value=self._config(nand={"raw_device": "/dev/demo-nand-raw"}),
+                return_value=device_data_tree.config(nand={"raw_device": "/dev/demo-nand-raw"}),
             ),
             mock.patch.object(
                 PhysicalNand,
@@ -550,20 +582,22 @@ class DeviceDataPrepareTests:
         ):
             device_data_prepare.prepare_device_data(
                 TARGET,
-                from_dump=self.saved_dump,
+                from_dump=device_data_tree.saved_dump,
                 jobs=1,
                 offline=True,
             )
 
-        target_root = self.cache / "device-data" / TARGET
+        target_root = device_data_tree.cache / "device-data" / TARGET
         assert not ((target_root / "current").exists())
         assert (list((target_root / "generations").iterdir())) == ([])
-        assert (self.saved_dump.read_bytes()) == (RAW_DUMP)
+        assert (device_data_tree.saved_dump.read_bytes()) == (RAW_DUMP)
 
-    def test_target_without_declared_groups_stops_before_source_or_phone_access(self) -> None:
+    def test_target_without_declared_groups_stops_before_source_or_phone_access(
+        self, device_data_tree: DeviceDataTree
+    ) -> None:
         """Unsupported preparation cannot acquire a source or create a generation."""
         with (
-            mock.patch.object(device_data_prepare, "ROOT", self.root),
+            mock.patch.object(device_data_prepare, "ROOT", device_data_tree.root),
             mock.patch.object(
                 device_data_prepare,
                 "load_target",
@@ -579,15 +613,19 @@ class DeviceDataPrepareTests:
                 offline=True,
             )
         build.assert_not_called()
-        assert not ((self.cache / "device-data").exists())
+        assert not ((device_data_tree.cache / "device-data").exists())
 
-    def test_offline_nested_build_failure_leaves_no_running_receipt(self) -> None:
+    def test_offline_nested_build_failure_leaves_no_running_receipt(
+        self, device_data_tree: DeviceDataTree
+    ) -> None:
         """A real build rejection finishes its enclosing preparation without loading a phone."""
         terminal = io.StringIO()
         with (
-            mock.patch.object(common, "ROOT", self.root),
-            mock.patch.object(device_data_prepare, "ROOT", self.root),
-            mock.patch.object(device_data_prepare, "load_target", return_value=self._config()),
+            mock.patch.object(common, "ROOT", device_data_tree.root),
+            mock.patch.object(device_data_prepare, "ROOT", device_data_tree.root),
+            mock.patch.object(
+                device_data_prepare, "load_target", return_value=device_data_tree.config()
+            ),
             mock.patch.object(
                 releases, "load_release", return_value={"image": "image/ramboot.bin"}
             ),
@@ -618,7 +656,7 @@ class DeviceDataPrepareTests:
             )
         assert (raised.value.code) == (1)
         assert (terminal.getvalue().count("offline build requires")) == (1)
-        receipts = list((self.cache / "logs").rglob("run.json"))
+        receipts = list((device_data_tree.cache / "logs").rglob("run.json"))
         assert receipts
         for receipt in receipts:
             assert (json.loads(receipt.read_text())["status"]) == ("failed")

@@ -1,0 +1,27 @@
+{
+  "display": {
+    "width": 0,
+    "height": 0,
+    "boot_font": "6x8",
+    "panel": null,
+    "source": null
+  },
+  "identity": {
+    "brand": "Demo",
+    "product": "Phone",
+    "hardware_codes": [],
+    "compatible": "demo,phone",
+    "display_name": "Demo Phone"
+  },
+  "bootstrap": {
+    "kind": "linux",
+    "source": "bootstrap",
+    "image": "ramboot.bin",
+    "map": "obj/ramboot.map",
+    "kernel_destination": "zImage",
+    "dtb_destination": "target.dtb",
+    "record_prefix": "DEMO",
+    "load_address": 2148532224,
+    "payload_limit": 2181038080
+  }
+}

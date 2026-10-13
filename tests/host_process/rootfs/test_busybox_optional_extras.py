@@ -16,9 +16,10 @@ from tests.apk_support import ApkIdentity, signed_apk_tree
 
 RECIPE = ROOT / "alpine/aports/fplinux-busybox/APKBUILD"
 INSTALLER = ROOT / "tests/fixtures/busybox/packaging-installer.sh"
-CORE_PAYLOAD = b"#!/bin/sh\nprintf 'core payload fixture\\n'\n"
-EXTRAS_PAYLOAD = b"#!/bin/sh\nprintf 'extras help fixture\\n'\n"
-EXTRAS_CONFIG = b"start 192.0.2.20\nend 192.0.2.30\ninterface test0\n"
+FIXTURES = ROOT / "tests/fixtures/busybox"
+CORE_PAYLOAD = (FIXTURES / "core-payload.sh").read_bytes()
+EXTRAS_PAYLOAD = (FIXTURES / "extras-payload.sh").read_bytes()
+EXTRAS_CONFIG = (FIXTURES / "extras-udhcpd.conf").read_bytes()
 
 
 def _stage_core(temporary: Path, *, arch: str) -> tuple[Path, ApkIdentity]:
@@ -30,14 +31,9 @@ def _stage_core(temporary: Path, *, arch: str) -> tuple[Path, ApkIdentity]:
     (build / ".config").write_text('CONFIG_PREFIX=""\n', encoding="utf-8")
     # The prebuilt programs are external fixtures, not BusyBox runtime proof.
     (build / "busybox").write_bytes(CORE_PAYLOAD)
-    (build / "busybox.links").write_text(
-        "/bin/sh\n/sbin/ifup\n/sbin/ifdown\n/usr/bin/wget\n/usr/sbin/udhcpd\n",
-        encoding="utf-8",
-    )
+    shutil.copyfile(FIXTURES / "busybox.links", build / "busybox.links")
     (build / "examples/udhcp").mkdir(parents=True)
-    (build / "examples/udhcp/udhcpd.conf").write_bytes(
-        b"start 192.0.2.2\nend 192.0.2.10\ninterface core0\n"
-    )
+    shutil.copyfile(FIXTURES / "core-udhcpd.conf", build / "examples/udhcp/udhcpd.conf")
     for name in (
         "udhcpc.conf",
         "securetty",
@@ -53,13 +49,7 @@ def _stage_core(temporary: Path, *, arch: str) -> tuple[Path, ApkIdentity]:
         [
             "sh",
             "-eu",
-            "-c",
-            (
-                'srcdir=$2; pkgdir=$3; . "$1"; cd "$builddir"; package; '
-                'printf \'%s\\n\' "$pkgname" "$pkgver-r$pkgrel" '
-                '"${provides-}" "${depends-}" "${replaces-}" >"$4"'
-            ),
-            "busybox-package",
+            str(FIXTURES / "package-core.sh"),
             str(RECIPE),
             str(sources),
             str(stage),

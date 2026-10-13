@@ -1,0 +1,14 @@
+[identity]
+vendor = "Example"
+soc = "%(name_upper)s"
+aliases = []
+compatible = "example,%(name)s"
+
+[linux]
+arch = "arm"
+source_lock = "%(source_lock)s"
+dts_directory = "arch/%(name)s/boot/dts"
+platform_identity_header = "include/%(name)s-identity.h"
+patches = []
+copies = []
+appends = []

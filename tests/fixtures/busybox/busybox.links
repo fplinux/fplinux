@@ -1,0 +1,5 @@
+/bin/sh
+/sbin/ifup
+/sbin/ifdown
+/usr/bin/wget
+/usr/sbin/udhcpd

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -23,16 +23,14 @@ BOUNDARY = ROOT / "tests/fixtures/fplinux_fm/boundary.c"
 class FPLinuxFMHostToolTests:
     """Run the real command with test-owned V4L2 and ALSA boundaries."""
 
-    executable: ClassVar[Path]
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def executable(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         """Build the command with a narrow hardware double for this host."""
         with c_build_directory(tmp_path_factory, "fplinux-fm") as directory:
-            cls.executable = directory / "fplinux-fm"
+            executable = directory / "fplinux-fm"
             compile_c(
-                cls.executable,
+                executable,
                 [
                     "-std=c11",
                     "-Wall",
@@ -49,17 +47,17 @@ class FPLinuxFMHostToolTests:
                 name="compile fplinux-fm with hardware double",
                 check=True,
             )
-            yield
+            yield executable
 
     def run_fm(
-        self, arguments: list[str], *, scenario: str | None = None
+        self, executable: Path, arguments: list[str], *, scenario: str | None = None
     ) -> subprocess.CompletedProcess[str]:
         """Run one bounded CLI scenario."""
         environment = {"LC_ALL": "C"}
         if scenario:
             environment[scenario] = "1"
         return run_process(
-            [str(self.executable), *arguments],
+            [str(executable), *arguments],
             name="run fplinux-fm",
             timeout=5,
             env=environment,
@@ -79,17 +77,17 @@ class FPLinuxFMHostToolTests:
         ],
     )
     def test_help_and_invalid_frequency_do_not_access_radio(
-        self, arguments: list[str], status: int, message: str
+        self, executable: Path, arguments: list[str], status: int, message: str
     ) -> None:
         """Parsing resolves help and exact 100 kHz steps before opening devices."""
-        result = self.run_fm(arguments)
+        result = self.run_fm(executable, arguments)
         assert result.returncode == status
         assert message in (result.stdout if status == 0 else result.stderr)
         assert "RADIO_OPEN" not in result.stderr
 
-    def test_scan_emits_distinct_candidates_without_audio(self) -> None:
+    def test_scan_emits_distinct_candidates_without_audio(self, executable: Path) -> None:
         """Inclusive seek scans both band edges without enabling audio."""
-        result = self.run_fm(["scan"])
+        result = self.run_fm(executable, ["scan"])
         assert (result.returncode) == (0)
         assert (result.stdout.splitlines()) == (
             [
@@ -102,33 +100,35 @@ class FPLinuxFMHostToolTests:
         assert ("FM_ON") not in (result.stderr)
         assert result.stderr.endswith("RADIO_CLOSE\n")
 
-    def test_no_channel_scan_is_bounded(self) -> None:
+    def test_no_channel_scan_is_bounded(self, executable: Path) -> None:
         """The documented no-channel result ends normally without audio."""
-        result = self.run_fm(["scan"], scenario="FM_TEST_NO_CHANNEL")
+        result = self.run_fm(executable, ["scan"], scenario="FM_TEST_NO_CHANNEL")
         assert (result.returncode) == (0)
         assert (result.stdout) == ("No FM candidates found.\n")
         assert ("FM_ON") not in (result.stderr)
 
-    def test_signal_mutes_before_disabling_alsa_and_closing_radio(self) -> None:
+    def test_signal_mutes_before_disabling_alsa_and_closing_radio(self, executable: Path) -> None:
         """A signal after radio unmute takes the ordered cleanup path."""
-        result = self.run_fm(["play", "98.3"], scenario="FM_TEST_SIGNAL")
+        result = self.run_fm(executable, ["play", "98.3"], scenario="FM_TEST_SIGNAL")
         assert (result.returncode) == (143)
         assert (result.stderr.splitlines()[-5:]) == (
             ["FM_ON", "V4L2_UNMUTE", "V4L2_MUTE", "FM_OFF", "RADIO_CLOSE"]
         )
 
-    def test_decimal_frequency_and_bounded_playback(self) -> None:
+    def test_decimal_frequency_and_bounded_playback(self, executable: Path) -> None:
         """An exact decimal maps to V4L2 LOW units and stops at the deadline."""
-        result = self.run_fm(["play", "98.30", "--seconds=1"], scenario="FM_TEST_EXPECT_983")
+        result = self.run_fm(
+            executable, ["play", "98.30", "--seconds=1"], scenario="FM_TEST_EXPECT_983"
+        )
         assert (result.returncode) == (0)
         assert ("Playing 98.3 MHz") in (result.stdout)
         assert (result.stderr.splitlines()[-5:]) == (
             ["FM_ON", "V4L2_UNMUTE", "V4L2_MUTE", "FM_OFF", "RADIO_CLOSE"]
         )
 
-    def test_failed_tune_never_enables_audio(self) -> None:
+    def test_failed_tune_never_enables_audio(self, executable: Path) -> None:
         """A timed out tune closes radio without unmuting either audio path."""
-        result = self.run_fm(["play", "98.3"], scenario="FM_TEST_FAIL_TUNE")
+        result = self.run_fm(executable, ["play", "98.3"], scenario="FM_TEST_FAIL_TUNE")
         assert (result.returncode) == (1)
         assert ("VIDIOC_S_FREQUENCY") in (result.stderr)
         assert ("FM_ON") not in (result.stderr)
@@ -150,10 +150,10 @@ class FPLinuxFMHostToolTests:
         ],
     )
     def test_failed_audio_changes_identify_requested_state(
-        self, scenario: str, message: str
+        self, executable: Path, scenario: str, message: str
     ) -> None:
         """A failed route or mute operation names the state that did not apply."""
-        result = self.run_fm(["play", "98.3", "--seconds=1"], scenario=scenario)
+        result = self.run_fm(executable, ["play", "98.3", "--seconds=1"], scenario=scenario)
         assert (result.returncode) == (1)
         assert (message) in (result.stderr)
         assert result.stderr.endswith("RADIO_CLOSE\n")

@@ -16,6 +16,10 @@ from fplinux_cli.quality.formatting.source_formats import classify_source_format
 from fplinux_cli.quality.source_gate import validate_source_policy
 from fplinux_cli.workspace import quality_inputs as workspace_module
 
+from tests import ROOT
+
+FIXTURES = ROOT / "tests/fixtures/quality/source_check"
+
 
 class ContainerSourcePolicyTests:
     """The host gate and source checker enforce the same lock-provided base."""
@@ -107,17 +111,7 @@ class SourceInventoryTests:
             spaced = root / "guide (copy).md"
             guide.write_text("# Same heading\n\n## Same heading\n")
             spaced.write_text("# Section\n")
-            index.write_text(
-                "# Index\n\n"
-                "[first](guide.md#same-heading)\n"
-                "[second](guide.md#same-heading-1)\n"
-                "[angle](<guide (copy).md#section>)\n"
-                "[parentheses](guide%20(copy).md#section)\n"
-                "[reference][guide-copy]\n"
-                "[guide-copy]: <guide (copy).md#section>\n"
-                "[self](#index)\n"
-                "[external](https://example.invalid/docs)\n"
-            )
+            index.write_bytes((FIXTURES / "linked-index.md.fixture").read_bytes())
             with mock.patch.object(source_check, "ROOT", root):
                 source_check.check_markdown_links([index, guide, spaced])
 

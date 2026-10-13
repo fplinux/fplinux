@@ -1,0 +1,9 @@
+[board_maps]
+firmware = []
+
+[loader_maps]
+keymap = { sha256 = "key-sha", member = 'keys/member.bin' } # Key settings
+pinmap = { sha256 = "pin-sha", member = "pins/member.bin" }
+
+[adapter]
+exec_distance = 0x0040

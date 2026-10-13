@@ -1,0 +1,11 @@
+id_bytes=a1b1
+chip=demo-128
+page_main_bytes=2048
+oob_bytes=128
+pages_per_block=64
+block_count=1024
+raw_bytes=142606336
+geometry_source=table
+feature_a0=0x00000000
+feature_b0=0x00000000
+feature_c0=0x00000000

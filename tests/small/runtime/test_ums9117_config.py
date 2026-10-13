@@ -10,10 +10,13 @@ import pytest
 
 from tests.small.runtime.adapter_fixtures import (
     ADAPTER,
-    BridgeFixture,
+    BRIDGE_SESSION_ID,
     BridgeProcess,
     adapter_data,
+    bridge_runtime,
     headless_adapter_data,
+    prepared_session,
+    run_bridge,
     runtime_identity,
 )
 
@@ -126,21 +129,21 @@ class DisplaySettingsTests:
             ADAPTER.adapter_config({**headless_adapter_data(), "lcd_id": 0x8888B6})
 
 
-class AdapterPreflightTests(BridgeFixture):
+class AdapterPreflightTests:
     """The loader result, bridge exit status and BootROM release gate the Linux transition."""
 
     def test_invalid_preflight_never_invites_device_connection(self) -> None:
         """A controller must not power the phone for a rejected adapter contract."""
         events: list[str] = []
-        runtime = self.runtime()
+        runtime = bridge_runtime()
         runtime["assets"] = {}
         with pytest.raises(SystemExit, match="runtime assets"):
-            self.run_bridge(BridgeProcess(0), runtime=runtime, events=events.append)
+            run_bridge(BridgeProcess(0), runtime=runtime, events=events.append)
         assert (events) == ([])
 
     def test_headless_target_serves_only_a_neutral_pinmap(self) -> None:
         """Without maps or display settings, the bootstrap starts headless on an empty pin map."""
-        runtime = self.runtime()
+        runtime = bridge_runtime()
         runtime["assets"] = {"fdl1": "assets/fdl1.bin"}
         runtime["adapter"] = headless_adapter_data()
         bridge = BridgeProcess(0)
@@ -156,7 +159,7 @@ class AdapterPreflightTests(BridgeFixture):
             served.update({path.name: path.read_bytes() for path in cwd.iterdir()})
             return bridge
 
-        popen, _transport, bundle = self.run_bridge(
+        popen, _transport, bundle = run_bridge(
             bridge,
             runtime=runtime,
             start_bridge=start_bridge,
@@ -171,7 +174,7 @@ class AdapterPreflightTests(BridgeFixture):
                 "-eL",
                 str(bundle / "host/libc_server"),
                 "--fplinux-handoff",
-                self.session_id,
+                BRIDGE_SESSION_ID,
                 "--",
                 "--headless",
                 "test-linux",
@@ -198,9 +201,11 @@ class AdapterPreflightTests(BridgeFixture):
     )
     def test_incomplete_map_assets_are_rejected(self, assets: dict[str, str]) -> None:
         """Pin map and keymap are declared together, and FDL1 is always required."""
-        runtime = self.runtime()
+        runtime = bridge_runtime()
         runtime["assets"] = assets
         with (
             pytest.raises(SystemExit, match="platform contract"),
         ):
-            ADAPTER.run(Path("bundle"), runtime, self.session(), expected_device_identity="9" * 64)
+            ADAPTER.run(
+                Path("bundle"), runtime, prepared_session(), expected_device_identity="9" * 64
+            )

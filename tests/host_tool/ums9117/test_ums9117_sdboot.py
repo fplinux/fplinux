@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import struct
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -24,11 +24,9 @@ UBOOT = ROOT / "platforms/ums9117/uboot"
 class SdbootFitAdmissionTests:
     """Admit embedded DTBs and hand off their active contents after bootm preparation."""
 
-    executable: ClassVar[Path]
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_peer(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def executable(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         """Link sdboot once with the controlled host boundaries."""
         with c_build_directory(tmp_path_factory, "ums9117_sdboot") as temporary:
             executable = temporary / "sdboot"
@@ -52,12 +50,11 @@ class SdbootFitAdmissionTests:
                 check=False,
             )
             assert compilation.returncode == 0, compilation.stdout + compilation.stderr
-            cls.executable = executable
-            yield
+            yield executable
 
     @pytest.mark.parametrize("defect", ["none", "bad-magic", "bad-size"])
     def test_embedded_dtb_alignment_and_invalid_payloads(
-        self, tmp_path: Path, defect: str
+        self, executable: Path, tmp_path: Path, defect: str
     ) -> None:
         """Accept both FIT alignments; report DTB refusals as BOOTM failures with MMC released."""
         work = tmp_path
@@ -71,7 +68,7 @@ class SdbootFitAdmissionTests:
             for padding in ("pad", "padding"):
                 fit, alignment = self.make_fit(work, dtb, padding)
                 alignments.add(alignment)
-                self.check_admission(self.executable, fit, alignment, 0)
+                self.check_admission(executable, fit, alignment, 0)
             assert (alignments) == ({0, 4})
         else:
             # The stubbed FINDOTHER refuses the bad header, as the pinned U-Boot
@@ -82,9 +79,11 @@ class SdbootFitAdmissionTests:
                 else dtb[:4] + struct.pack(">I", len(dtb) + 4) + dtb[8:]
             )
             fit, alignment = self.make_fit(work, payload, "padding")
-            self.check_admission(self.executable, fit, alignment, 4)
+            self.check_admission(executable, fit, alignment, 4)
 
-    def test_prepared_dtb_padding_does_not_reach_handoff(self, tmp_path: Path) -> None:
+    def test_prepared_dtb_padding_does_not_reach_handoff(
+        self, executable: Path, tmp_path: Path
+    ) -> None:
         """Preserve the RNG property while excluding a stale name in unused DTB padding."""
         dtb = self.make_dtb(tmp_path)
         kernel = bytearray(64)
@@ -93,7 +92,7 @@ class SdbootFitAdmissionTests:
         (tmp_path / "kernel.sha256").write_bytes(hashlib.sha256(kernel).digest())
         fit, alignment = self.make_fit(tmp_path, dtb, "padding")
         result = run_process(
-            [str(self.executable), str(fit), str(alignment), "0", "padded-fdt"],
+            [str(executable), str(fit), str(alignment), "0", "padded-fdt"],
             name="run sdboot with prepared DTB padding",
             timeout=10,
         )
@@ -102,10 +101,7 @@ class SdbootFitAdmissionTests:
     def make_dtb(self, work: Path) -> bytes:
         """Compile a standalone DTB using the declared quality-runtime dtc."""
         source = work / "linux.dts"
-        source.write_text(
-            '/dts-v1/; / { compatible = "test,board"; '
-            "chosen { rng-seed = [01 23 45 67 89 ab cd ef]; }; };\n"
-        )
+        source.write_bytes((ROOT / "tests/fixtures/sdboot/linux.dts").read_bytes())
         output = work / "linux.dtb"
         self.compile_tree(source, output)
         return output.read_bytes()

@@ -26,6 +26,7 @@ from fplinux_cli.manifests import platforms, releases, targets
 from fplinux_cli.workspace import build_inputs as workspaces
 from fplinux_cli.workspace.capture import WorkspaceSnapshot
 
+from tests import ROOT
 from tests.bundle_support import file_record
 from tests.process import run_process
 from tests.small.cli.package_docs_fixtures import write_offline_export
@@ -33,32 +34,13 @@ from tests.small.cli.package_docs_fixtures import write_offline_export
 if TYPE_CHECKING:
     from pathlib import Path
 
-# Load the archived helper by path, as the standalone runner does, then report the
-# record visible before the helper's context closes.
-ARCHIVED_EVENTS_CONSUMER = """\
-import importlib.util
-import sys
-from pathlib import Path
 
-spec = importlib.util.spec_from_file_location("fplinux_loader_events", sys.argv[1])
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-output = Path(sys.argv[2])
-with module.record_events(
-    output, target="nokia-ta1618", profile=None, build_type="release"
-) as events:
-    events.emit("waiting-for-device")
-    sys.stdout.write(output.read_text(encoding="utf-8"))
-"""
+class ReleaseArchiveInputs:
+    """Own one synthetic bundle and the checkout inputs used to package it."""
 
-
-class ReleaseArchiveArtifactTests:
-    """Exercise real archive creation with host identity inputs isolated."""
-
-    @pytest.fixture(autouse=True)
-    def _prepare_inputs(self, tmp_path: Path) -> None:
+    def __init__(self, root: Path) -> None:
         """Create a synthetic bundle, notices, offline export and checkout-only documents."""
-        self.root = tmp_path
+        self.root = root
         self.documentation = write_offline_export(self.root)
         self.event_helper = (common.ROOT / "common/loader_events.py").read_bytes()
         self.cache = self.root / ".cache"
@@ -244,23 +226,35 @@ class ReleaseArchiveArtifactTests:
             ),
         )
 
-    def test_package_carries_frozen_board_maps_and_qualifies_their_bytes(self) -> None:
+
+@pytest.fixture
+def release_inputs(tmp_path: Path) -> ReleaseArchiveInputs:
+    """Keep the bundle and mutable release settings separate for every case."""
+    return ReleaseArchiveInputs(tmp_path)
+
+
+class ReleaseArchiveArtifactTests:
+    """Exercise real archive creation with host identity inputs isolated."""
+
+    def test_package_carries_frozen_board_maps_and_qualifies_their_bytes(
+        self, release_inputs: ReleaseArchiveInputs
+    ) -> None:
         """Prepared maps survive standalone packaging and change its phone-test digest."""
         with contextlib.ExitStack() as stack:
-            for patch in self.package_patches():
+            for patch in release_inputs.package_patches():
                 stack.enter_context(patch)
-            _archive_digest, first_digest = self.package(candidate=True)
-            self.publish_bundle(
+            _archive_digest, first_digest = release_inputs.package(candidate=True)
+            release_inputs.publish_bundle(
                 "d" * 64,
                 apk=b"application version one\n",
                 metadata=b"asset provenance version one\n",
                 board_maps={"pinmap.bin": b"prepared pins\n", "keymap.bin": b"prepared keys\n"},
             )
-            _archive_digest, second_digest = self.package(candidate=True)
+            _archive_digest, second_digest = release_inputs.package(candidate=True)
 
         assert first_digest != second_digest
         payloads = []
-        for archive_path in (self.cache / "out/candidates").glob("*.zip"):
+        for archive_path in (release_inputs.cache / "out/candidates").glob("*.zip"):
             with zipfile.ZipFile(archive_path) as archive:
                 payloads.append(
                     {name.split("/", 1)[1]: archive.read(name) for name in archive.namelist()}
@@ -269,20 +263,22 @@ class ReleaseArchiveArtifactTests:
         assert mapped["pinmap.bin"] == b"prepared pins\n"
         assert mapped["keymap.bin"] == b"prepared keys\n"
 
-    def test_debug_package_requires_its_own_build_and_names_the_selected_type(self) -> None:
+    def test_debug_package_requires_its_own_build_and_names_the_selected_type(
+        self, release_inputs: ReleaseArchiveInputs
+    ) -> None:
         """Packaging never substitutes release bytes for an absent debug build."""
         with contextlib.ExitStack() as stack:
-            for patch in self.package_patches():
+            for patch in release_inputs.package_patches():
                 stack.enter_context(patch)
             with pytest.raises(SystemExit, match="--build-type debug"):
-                self.package(candidate=True, build_type="debug")
-            assert not ((self.cache / "out/candidates").exists())
-            self.publish_bundle(
+                release_inputs.package(candidate=True, build_type="debug")
+            assert not ((release_inputs.cache / "out/candidates").exists())
+            release_inputs.publish_bundle(
                 "d" * 64, apk=b"debug apk\n", metadata=b"debug assets\n", build_type="debug"
             )
-            self.package(candidate=True, build_type="debug")
+            release_inputs.package(candidate=True, build_type="debug")
 
-        archives = list((self.cache / "out/candidates").glob("*.zip"))
+        archives = list((release_inputs.cache / "out/candidates").glob("*.zip"))
         assert (len(archives)) == (1)
         assert archives[0].name.startswith("FPLinux-nokia-ta1618-debug-candidate-")
         with zipfile.ZipFile(archives[0]) as archive:
@@ -291,28 +287,43 @@ class ReleaseArchiveArtifactTests:
             )
             assert (json.loads(archive.read(name))["build_type"]) == ("debug")
 
-    def test_candidate_rejects_a_release_input_with_a_mismatched_recorded_size(self) -> None:
+    def test_candidate_rejects_a_release_input_with_a_mismatched_recorded_size(
+        self, release_inputs: ReleaseArchiveInputs
+    ) -> None:
         """Even matching bytes and permissions cannot authorize a wrong size record."""
-        bundle = self.cache / "out" / self.target / "builds/release/bundles" / ("c" * 64)
+        bundle = (
+            release_inputs.cache
+            / "out"
+            / release_inputs.target
+            / "builds/release/bundles"
+            / ("c" * 64)
+        )
         manifest_path = bundle / BUILD_MANIFEST_NAME
         manifest = json.loads(manifest_path.read_bytes())
         manifest["files"]["image/ramboot.bin"]["size"] = 7
         manifest_path.write_bytes(canonical_json_bytes(manifest))
-        publish_current_bundle(self.cache / "out", self.target, bundle)
+        publish_current_bundle(release_inputs.cache / "out", release_inputs.target, bundle)
 
         with contextlib.ExitStack() as stack:
-            for patch in self.package_patches():
+            for patch in release_inputs.package_patches():
                 stack.enter_context(patch)
             with pytest.raises(SystemExit, match="release input differs"):
-                self.package(candidate=True)
+                release_inputs.package(candidate=True)
 
-        assert not ((self.cache / "out/candidates").exists())
+        assert not ((release_inputs.cache / "out/candidates").exists())
 
     def test_candidate_omits_missing_debug_payload_and_includes_required_boot_artifact(
         self,
+        release_inputs: ReleaseArchiveInputs,
     ) -> None:
         """Archive validation covers its release subset and additional required boot files."""
-        bundle = self.cache / "out" / self.target / "builds/release/bundles" / ("c" * 64)
+        bundle = (
+            release_inputs.cache
+            / "out"
+            / release_inputs.target
+            / "builds/release/bundles"
+            / ("c" * 64)
+        )
         boot_image = bundle / "FPLINUX.img.xz"
         boot_image.write_bytes(b"whole-card image\n")
         boot_image.chmod(0o644)
@@ -326,29 +337,31 @@ class ReleaseArchiveArtifactTests:
         manifest["files"]["debug/vmlinux"] = file_record(debug)
         manifest["boot_artifacts"]["required"] = ["FPLINUX.img.xz"]
         manifest_path.write_bytes(canonical_json_bytes(manifest))
-        publish_current_bundle(self.cache / "out", self.target, bundle)
+        publish_current_bundle(release_inputs.cache / "out", release_inputs.target, bundle)
         debug.unlink()
 
         with contextlib.ExitStack() as stack:
-            for patch in self.package_patches():
+            for patch in release_inputs.package_patches():
                 stack.enter_context(patch)
-            self.package(candidate=True)
+            release_inputs.package(candidate=True)
 
-        archive_path = next((self.cache / "out/candidates").glob("*.zip"))
+        archive_path = next((release_inputs.cache / "out/candidates").glob("*.zip"))
         with zipfile.ZipFile(archive_path) as archive:
             root = archive.namelist()[0].partition("/")[0]
             assert (archive.read(f"{root}/FPLINUX.img.xz")) == (b"whole-card image\n")
             assert (f"{root}/debug/vmlinux") not in (archive.namelist())
             assert (archive.read(f"{root}/image/ramboot.bin")) == (b"ramboot\n")
 
-    def test_candidate_keeps_runtime_and_notices_without_checkout_documentation(self) -> None:
+    def test_candidate_keeps_runtime_and_notices_without_checkout_documentation(
+        self, release_inputs: ReleaseArchiveInputs
+    ) -> None:
         """Generated docs join runtime and notices; checkout-only documents stay outside."""
         with contextlib.ExitStack() as stack:
-            for patch in self.package_patches():
+            for patch in release_inputs.package_patches():
                 stack.enter_context(patch)
-            self.package(candidate=True)
+            release_inputs.package(candidate=True)
 
-        archives = list((self.cache / "out/candidates").glob("*.zip"))
+        archives = list((release_inputs.cache / "out/candidates").glob("*.zip"))
         assert (len(archives)) == (1)
         with zipfile.ZipFile(archives[0]) as archive:
             members = archive.namelist()
@@ -363,10 +376,8 @@ class ReleaseArchiveArtifactTests:
 
         expected_files = {
             "CANDIDATE-NOTICE.txt": (
-                b"PHONE-TEST CANDIDATE - DO NOT PUBLISH\n\n"
-                b"This archive is for testing on the target phone only.\n"
-                b"Candidate packaging does not make it release-ready.\n"
-            ),
+                ROOT / "tests/fixtures/release_package/candidate-notice.txt"
+            ).read_bytes(),
             "EXTRA.txt": b"phone instructions\n",
             "60-fplinux.rules": b"SUBSYSTEM==usb\n",
             "LICENSE": b"project license\n",
@@ -382,13 +393,13 @@ class ReleaseArchiveArtifactTests:
             "runtime-manifest.json": b"{}\n",
             "apks/demo.apk": b"application version one\n",
             "assets.lock.toml": b"asset provenance version one\n",
-            **self.documentation,
+            **release_inputs.documentation,
         }
         for relative, expected in expected_files.items():
             assert (payloads[relative]) == (expected)
         assert payloads["README.txt"].startswith(b"FPLinux for ACME Demo (D-1)\n")
         assert b"unmount all data-card filesystems" in payloads["README.txt"]
-        assert payloads["runner/loader_events.py"] == self.event_helper
+        assert payloads["runner/loader_events.py"] == release_inputs.event_helper
         assert set(payloads) == {
             *expected_files,
             "runner/loader_events.py",
@@ -411,19 +422,21 @@ class ReleaseArchiveArtifactTests:
         for relative, digest in checksums.items():
             assert (digest) == (hashlib.sha256(payloads[relative]).hexdigest())
 
-    def test_archived_loader_events_work_without_the_source_checkout(self) -> None:
+    def test_archived_loader_events_work_without_the_source_checkout(
+        self, release_inputs: ReleaseArchiveInputs
+    ) -> None:
         """An isolated interpreter writes a flushed record with only the archived helper."""
         with contextlib.ExitStack() as stack:
-            for patch in self.package_patches():
+            for patch in release_inputs.package_patches():
                 stack.enter_context(patch)
-            self.package(candidate=True)
-        archive_path = next((self.cache / "out/candidates").glob("*.zip"))
+            release_inputs.package(candidate=True)
+        archive_path = next((release_inputs.cache / "out/candidates").glob("*.zip"))
         with zipfile.ZipFile(archive_path) as archive:
             helper_name = next(
                 name for name in archive.namelist() if name.endswith("/runner/loader_events.py")
             )
             helper_bytes = archive.read(helper_name)
-        extracted = self.root / "standalone"
+        extracted = release_inputs.root / "standalone"
         extracted.mkdir()
         helper = extracted / "loader_events.py"
         helper.write_bytes(helper_bytes)
@@ -432,8 +445,7 @@ class ReleaseArchiveArtifactTests:
             [
                 sys.executable,
                 "-I",
-                "-c",
-                ARCHIVED_EVENTS_CONSUMER,
+                str(ROOT / "tests/fixtures/processes/archived_events_consumer.py"),
                 str(helper),
                 str(extracted / "events.jsonl"),
             ],
@@ -454,17 +466,33 @@ class ReleaseArchiveArtifactTests:
             }
         )
 
-    def test_profile_and_microsd_boot_candidates_use_one_generation(self) -> None:
+    def test_profile_and_microsd_boot_candidates_use_one_generation(
+        self, release_inputs: ReleaseArchiveInputs
+    ) -> None:
         """Both selectors package the same image with distinct archive context names."""
         profile = "microsd-uboot"
-        self.target_config["profile"] = profile
+        release_inputs.target_config["profile"] = profile
         generation = "3" * 64
         profile_snapshot = WorkspaceSnapshot((), "4" * 64)
         default_bundle = next(
-            (self.cache / "out" / self.target / "builds" / "release" / "bundles").iterdir()
+            (
+                release_inputs.cache
+                / "out"
+                / release_inputs.target
+                / "builds"
+                / "release"
+                / "bundles"
+            ).iterdir()
         )
-        profile_bundle = self.cache.joinpath(
-            "out", self.target, "profiles", profile, "builds", "release", "bundles", generation
+        profile_bundle = release_inputs.cache.joinpath(
+            "out",
+            release_inputs.target,
+            "profiles",
+            profile,
+            "builds",
+            "release",
+            "bundles",
+            generation,
         )
         for source in default_bundle.rglob("*"):
             if not source.is_file() or source.name == BUILD_MANIFEST_NAME:
@@ -487,9 +515,9 @@ class ReleaseArchiveArtifactTests:
                 "required": list(required),
                 "runnable": True,
             },
-            "container_image_recipe": self.image_recipe,
+            "container_image_recipe": release_inputs.image_recipe,
             "container_image_content": "c" * 64,
-            "apk_signing_key": self.signing_key,
+            "apk_signing_key": release_inputs.signing_key,
             "device_identity": "f" * 64,
             "files": {
                 source.relative_to(profile_bundle).as_posix(): file_record(source)
@@ -501,13 +529,13 @@ class ReleaseArchiveArtifactTests:
             "linux_recipe": "2" * 64,
             "profile": profile,
             "build_type": "release",
-            "target": self.target,
+            "target": release_inputs.target,
             "workspace_digest": profile_snapshot.recipe,
         }
         (profile_bundle / BUILD_MANIFEST_NAME).write_bytes(canonical_json_bytes(manifest))
         publish_current_bundle(
-            self.cache / "out",
-            self.target,
+            release_inputs.cache / "out",
+            release_inputs.target,
             profile_bundle,
             profile,
         )
@@ -516,42 +544,43 @@ class ReleaseArchiveArtifactTests:
             target: str, selected: str | None = None, build_type: str = "release"
         ) -> WorkspaceSnapshot:
             """Match the published profile bundle only for its own release context."""
-            if (target, selected, build_type) == (self.target, profile, "release"):
+            if (target, selected, build_type) == (release_inputs.target, profile, "release"):
                 return profile_snapshot
             return WorkspaceSnapshot((), "5" * 64)
 
         with contextlib.ExitStack() as stack:
-            for patch in self.package_patches():
+            for patch in release_inputs.package_patches():
                 stack.enter_context(patch)
             stack.enter_context(
                 mock.patch.object(workspaces, "target_workspace_snapshot", profile_workspace)
             )
             with pytest.raises(SystemExit, match="only be packaged with --candidate"):
                 package_commands.package_target(
-                    self.target,
+                    release_inputs.target,
                     profile=profile,
                     candidate=False,
                 )
             package_commands.package_target(
-                self.target,
+                release_inputs.target,
                 profile=profile,
                 candidate=True,
             )
             package_commands.package_target(
-                self.target,
+                release_inputs.target,
                 boot="microsd",
                 candidate=True,
             )
 
-        archives = list((self.cache / "out/candidates").glob("*.zip"))
+        archives = list((release_inputs.cache / "out/candidates").glob("*.zip"))
         assert (len(archives)) == (2)
         names = {archive.name for archive in archives}
         assert any(
-            name.startswith(f"FPLinux-{self.target}-{profile}-release-candidate-")
+            name.startswith(f"FPLinux-{release_inputs.target}-{profile}-release-candidate-")
             for name in names
         )
         assert any(
-            name.startswith(f"FPLinux-{self.target}-microsd-release-candidate-") for name in names
+            name.startswith(f"FPLinux-{release_inputs.target}-microsd-release-candidate-")
+            for name in names
         )
         for archive_path in archives:
             with zipfile.ZipFile(archive_path) as archive:
@@ -560,37 +589,39 @@ class ReleaseArchiveArtifactTests:
                     assert (archive.read(f"{root}/{relative}")) == (data)
                 assert (archive.read(f"{root}/EXTRA.txt")) == (b"phone instructions\n")
 
-    def test_apk_bytes_but_not_archive_metadata_change_phone_test_payload(self) -> None:
+    def test_apk_bytes_but_not_archive_metadata_change_phone_test_payload(
+        self, release_inputs: ReleaseArchiveInputs
+    ) -> None:
         """Only a changed executable payload requires another complete phone test."""
         with contextlib.ExitStack() as stack:
-            for patch in self.package_patches():
+            for patch in release_inputs.package_patches():
                 stack.enter_context(patch)
 
-            candidate_archive, original = self.package(candidate=True)
-            candidate_files = list((self.cache / "out/candidates").glob("*.zip"))
+            candidate_archive, original = release_inputs.package(candidate=True)
+            candidate_files = list((release_inputs.cache / "out/candidates").glob("*.zip"))
             assert (len(candidate_files)) == (1)
             assert candidate_files[0].name.startswith("FPLinux-nokia-ta1618-release-candidate-")
-            self.record_phone_tested(original)
-            release_archive, release_payload = self.package(candidate=False)
+            release_inputs.record_phone_tested(original)
+            release_archive, release_payload = release_inputs.package(candidate=False)
             assert (release_payload) == (original)
             assert (release_archive) != (candidate_archive)
 
-            self.publish_bundle(
+            release_inputs.publish_bundle(
                 "3" * 64,
                 apk=b"application version one\n",
                 metadata=b"asset provenance version two\n",
             )
-            metadata_archive, after_metadata = self.package(candidate=True)
+            metadata_archive, after_metadata = release_inputs.package(candidate=True)
             assert (after_metadata) == (original)
             assert (metadata_archive) != (candidate_archive)
-            self.package(candidate=False)
+            release_inputs.package(candidate=False)
 
-            self.publish_bundle(
+            release_inputs.publish_bundle(
                 "4" * 64,
                 apk=b"application version two\n",
                 metadata=b"asset provenance version two\n",
             )
-            _apk_archive, after_apk = self.package(candidate=True)
+            _apk_archive, after_apk = release_inputs.package(candidate=True)
             assert (after_apk) != (original)
             with pytest.raises(SystemExit, match="not phone-tested"):
-                package_commands.package_target(self.target)
+                package_commands.package_target(release_inputs.target)

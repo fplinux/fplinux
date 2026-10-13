@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import shlex
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytest
@@ -17,21 +18,26 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-class DrmVtGuardianTests:
-    """Check process lifetime and return requests without claiming a live VT."""
+@dataclass(frozen=True)
+class GuardianHarness:
+    """Linked VT client and the guardian process it executes."""
 
     executable: Path
     guardian: Path
 
-    @pytest.fixture(scope="class", autouse=True)
+
+class DrmVtGuardianTests:
+    """Check process lifetime and return requests without claiming a live VT."""
+
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def harness(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[GuardianHarness]:
         """Link the production owner; only open and VT ioctls are substituted."""
         with c_build_directory(tmp_path_factory, "fplinux-drm-vt") as temporary:
-            cls.executable = temporary / "fplinux-vttest"
-            cls.guardian = temporary / "vt-guardian"
+            executable = temporary / "fplinux-vttest"
+            guardian = temporary / "vt-guardian"
             compile_c(
-                cls.guardian,
+                guardian,
                 [
                     "-std=gnu11",
                     "-Wall",
@@ -53,7 +59,7 @@ class DrmVtGuardianTests:
                 ).stdout
             )
             compile_c(
-                cls.executable,
+                executable,
                 [
                     "-std=gnu11",
                     "-Wall",
@@ -69,17 +75,19 @@ class DrmVtGuardianTests:
                 name="compile DRM VT guardian host harness",
                 check=True,
             )
-            yield
+            yield GuardianHarness(executable, guardian)
 
     @pytest.mark.parametrize(
         "mode",
         ["normal", "segv", "kill", "killall", "exec-fail"],
         ids=["normal", "segv", "kill", "killall", "exec-fail"],
     )
-    def test_failed_open_and_process_death_restore_previous_vt(self, mode: str) -> None:
+    def test_failed_open_and_process_death_restore_previous_vt(
+        self, harness: GuardianHarness, mode: str
+    ) -> None:
         """Cleanup, process death and name-based kill restore the previous VT."""
         run_process(
-            [str(self.executable), mode, str(self.guardian)],
+            [str(harness.executable), mode, str(harness.guardian)],
             name=f"exercise DRM guardian {mode}",
             timeout=10,
             check=True,

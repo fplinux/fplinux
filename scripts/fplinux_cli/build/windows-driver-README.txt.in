@@ -1,0 +1,18 @@
+Windows driver helper source and build material
+
+libwdi is licensed under LGPL version 3 or later. Its complete source
+and original copyright notices are in the accompanying source archive.
+The supplied patch makes embedded resource timestamps honor
+SOURCE_DATE_EPOCH. The build recipe applies it to a fresh source tree.
+Microsoft redistributable components retain the accompanying license.
+
+On Linux, install GCC and 7-Zip. Download the pinned llvm_mingw and wdf
+inputs in downloads.json and verify their SHA-256 digests. Extract the
+toolchain and libwdi archives, then run:
+
+python3 build.py --toolchain <llvm-mingw-directory> \
+  --source <libwdi-directory> --wdf <wdfcoinstaller.msi> \
+  --source-date-epoch $SOURCE_DATE_EPOCH --output <wdi-simple.exe>
+
+The build runs only the native resource embedder. It does not execute
+Windows programs or install a driver on the build host.

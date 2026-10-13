@@ -18,6 +18,8 @@ from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
 from fplinux_cli.build import sources as sources_build
 
+FIXTURES = common.ROOT / "tests/fixtures/quality/host_tool/cache-build"
+
 
 class HostToolCacheTests:
     """A selected input change recompiles; an unrelated source change does not."""
@@ -31,20 +33,9 @@ class HostToolCacheTests:
             upstream = root / "upstream"
             upstream.mkdir()
             makefile = upstream / "Makefile"
-            makefile.write_text(
-                "clean:\n\trm -f bridge\nall:\n\t$(CC) -nostdlib -static -o bridge bridge.S\n",
-                encoding="ascii",
-            )
+            makefile.write_bytes((FIXTURES / "Makefile.fixture").read_bytes())
             source = upstream / "bridge.S"
-            source.write_text(
-                '#include "local-input.h"\n.global _start\n_start:\n'
-                "    mov $1, %rax\n    mov $1, %rdi\n"
-                "    lea message(%rip), %rsi\n    mov $(message_end-message), %rdx\n"
-                "    syscall\n    mov $60, %rax\n    xor %rdi, %rdi\n    syscall\n"
-                '.section .rodata\nmessage:\n    .ascii "base:"\n'
-                "    .ascii MESSAGE\n    .byte 10\nmessage_end:\n",
-                encoding="ascii",
-            )
+            source.write_bytes((FIXTURES / "bridge.S.fixture").read_bytes())
             local_header = root / "platforms/demo/local-input.h"
             local_header.parent.mkdir(parents=True)
             local_header.write_text('#define MESSAGE "one"\n', encoding="ascii")

@@ -1,0 +1,8 @@
+[rootfs]
+packages = []
+
+[bootstrap]
+kind = "linux"
+
+[uboot]
+kind = "none"

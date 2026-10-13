@@ -1,0 +1,4 @@
+version = "v"
+tag = "t"
+commit = "c"
+license = "GPL-2.0-only"

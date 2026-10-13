@@ -10,6 +10,7 @@ import json
 import os
 from collections import Counter
 from dataclasses import replace
+from typing import TYPE_CHECKING
 from unittest import mock
 
 import fplinux_cli.cache.prune.operations as prune_operations
@@ -26,27 +27,34 @@ from fplinux_cli.environment import image_store, images, setup
 from fplinux_cli.environment.image_state import ImageState
 from fplinux_cli.manifests import releases, targets
 
-from tests.small.build.command_fixtures import CommandBundleFixture
+from tests.small.build.command_fixtures import (
+    command_bundle as command_bundle,  # noqa: PLC0414 -- pytest fixture export.
+)
+
+if TYPE_CHECKING:
+    from tests.small.build.command_fixtures import CommandBundleContext
 
 
-class BuildLifecycleTests(CommandBundleFixture):
+class BuildLifecycleTests:
     """Keep cache hits and readers ahead of every mutable or external action."""
 
-    def test_release_debug_release_hits_keep_both_types_and_ignore_jobs(self) -> None:
+    def test_release_debug_release_hits_keep_both_types_and_ignore_jobs(
+        self, command_bundle: CommandBundleContext
+    ) -> None:
         """Switching type reuses its own generation without starting build work."""
-        debug = self._create_generation("d" * 64, build_type="debug")
-        publish_current_bundle(self.output, "phone", debug, build_type="debug")
+        debug = command_bundle.create_generation("d" * 64, build_type="debug")
+        publish_current_bundle(command_bundle.output, "phone", debug, build_type="debug")
         with (
-            mock.patch.object(common, "ROOT", self.root),
-            mock.patch.object(output, "ROOT", self.root),
-            mock.patch.object(targets, "load_target", return_value=self.target_config),
-            mock.patch.object(releases, "load_release", return_value=self.release),
+            mock.patch.object(common, "ROOT", command_bundle.root),
+            mock.patch.object(output, "ROOT", command_bundle.root),
+            mock.patch.object(targets, "load_target", return_value=command_bundle.target_config),
+            mock.patch.object(releases, "load_release", return_value=command_bundle.release),
             mock.patch.object(
                 workspace_inputs,
                 "target_workspace_snapshot",
-                return_value=self.snapshot,
+                return_value=command_bundle.snapshot,
             ),
-            mock.patch.object(images, "load_container_lock", return_value=self.lock),
+            mock.patch.object(images, "load_container_lock", return_value=command_bundle.lock),
             mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
             mock.patch.object(
                 kern_env,
@@ -67,7 +75,7 @@ class BuildLifecycleTests(CommandBundleFixture):
             mock.patch.object(prune_operations, "discard_obsolete_apks") as apks_gc,
         ):
             for build_type, jobs in (("release", 1), ("debug", 8), ("release", 8)):
-                old = self._create_generation("b" * 64, build_type=build_type)
+                old = command_bundle.create_generation("b" * 64, build_type=build_type)
                 stdout = io.StringIO()
                 with contextlib.redirect_stdout(stdout):
                     output.run_entrypoint(
@@ -84,15 +92,17 @@ class BuildLifecycleTests(CommandBundleFixture):
                 assert (f"build phone --build-type {build_type}: OK (cached)") in (
                     stdout.getvalue()
                 )
-                expected = self.bundle_path if build_type == "release" else debug
-                assert (str(expected.relative_to(self.root))) in (stdout.getvalue())
+                expected = command_bundle.bundle_path if build_type == "release" else debug
+                assert (str(expected.relative_to(command_bundle.root))) in (stdout.getvalue())
                 assert not (old.exists())
-                assert self.bundle_path.is_dir()
+                assert command_bundle.bundle_path.is_dir()
                 assert debug.is_dir()
-            assert (rootfs_gc.call_args_list) == ([mock.call(self.cache)] * 3)
-            assert (apks_gc.call_args_list) == ([mock.call(self.cache)] * 3)
+            assert (rootfs_gc.call_args_list) == ([mock.call(command_bundle.cache)] * 3)
+            assert (apks_gc.call_args_list) == ([mock.call(command_bundle.cache)] * 3)
 
-    def test_build_result_ignores_closed_stdout_pipe(self) -> None:
+    def test_build_result_ignores_closed_stdout_pipe(
+        self, command_bundle: CommandBundleContext
+    ) -> None:
         """A closed output consumer must not turn a valid build result into failure."""
 
         class BrokenPipeStream(io.StringIO):
@@ -100,12 +110,12 @@ class BuildLifecycleTests(CommandBundleFixture):
                 raise BrokenPipeError
 
         with (
-            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(common, "ROOT", command_bundle.root),
             contextlib.redirect_stdout(BrokenPipeStream()),
         ):
             build_commands._print_build_result(  # noqa: SLF001
                 "phone",
-                self.bundle,
+                command_bundle.bundle,
                 {"image": "image/ramboot.bin"},
                 cached=False,
             )
@@ -121,14 +131,14 @@ class BuildLifecycleTests(CommandBundleFixture):
         ],
     )
     def test_changed_or_missing_bundle_files_are_cache_misses(
-        self, relative: str, mutation: str
+        self, command_bundle: CommandBundleContext, relative: str, mutation: str
     ) -> None:
         """Cache reuse requires every recorded payload byte and file mode to match."""
         identity = bundles_commands.BuildIdentity(
-            self.snapshot.recipe, "e" * 64, "a" * 64, self.signing_key
+            command_bundle.snapshot.recipe, "e" * 64, "a" * 64, command_bundle.signing_key
         )
-        with mock.patch.object(common, "ROOT", self.root):
-            source = self.bundle_path / relative
+        with mock.patch.object(common, "ROOT", command_bundle.root):
+            source = command_bundle.bundle_path / relative
             if mutation == "bytes":
                 original = source.read_bytes()
                 source.write_bytes(bytes([original[0] ^ 0x20]) + original[1:])
@@ -141,12 +151,14 @@ class BuildLifecycleTests(CommandBundleFixture):
                 is None
             )
 
-    def test_exact_bundle_identity_and_image_are_a_reusable_hit(self) -> None:
+    def test_exact_bundle_identity_and_image_are_a_reusable_hit(
+        self, command_bundle: CommandBundleContext
+    ) -> None:
         """Reuse a resolved generation only when its identity and image bytes match."""
         identity = bundles_commands.BuildIdentity(
-            self.snapshot.recipe, "e" * 64, "a" * 64, self.signing_key
+            command_bundle.snapshot.recipe, "e" * 64, "a" * 64, command_bundle.signing_key
         )
-        with mock.patch.object(common, "ROOT", self.root):
+        with mock.patch.object(common, "ROOT", command_bundle.root):
             matched = bundles_commands.matching_target_bundle(
                 "phone",
                 identity,
@@ -156,8 +168,8 @@ class BuildLifecycleTests(CommandBundleFixture):
         if matched is None:
             pytest.fail("an exact bundle was not reusable")
         bundle, manifest = matched
-        assert (bundle) == (self.bundle)
-        assert (manifest) == (json.loads(self.bundle.manifest_bytes))
+        assert (bundle) == (command_bundle.bundle)
+        assert (manifest) == (json.loads(command_bundle.bundle.manifest_bytes))
 
     @pytest.mark.parametrize(
         ("field", "changed"),
@@ -168,35 +180,41 @@ class BuildLifecycleTests(CommandBundleFixture):
             pytest.param("apk_signing_key", "8" * 64, id="signing-key"),
         ],
     )
-    def test_each_build_identity_mismatch_is_a_cache_miss(self, field: str, changed: str) -> None:
+    def test_each_build_identity_mismatch_is_a_cache_miss(
+        self, command_bundle: CommandBundleContext, field: str, changed: str
+    ) -> None:
         """Reject a generation when any host-visible causal identity changed."""
         identity = replace(
-            bundles_commands.BuildIdentity("c" * 64, "e" * 64, "a" * 64, self.signing_key),
+            bundles_commands.BuildIdentity(
+                "c" * 64, "e" * 64, "a" * 64, command_bundle.signing_key
+            ),
             **{field: changed},
         )
-        with mock.patch.object(common, "ROOT", self.root):
+        with mock.patch.object(common, "ROOT", command_bundle.root):
             assert (
                 bundles_commands.matching_target_bundle("phone", identity, "image/ramboot.bin")
                 is None
             )
 
-    def test_build_miss_requires_host_validation_after_container_success(self) -> None:
+    def test_build_miss_requires_host_validation_after_container_success(
+        self, command_bundle: CommandBundleContext
+    ) -> None:
         """Container exit zero is insufficient without an exact published generation."""
-        workspace = self.root / ".cache/workspaces/current"
+        workspace = command_bundle.root / ".cache/workspaces/current"
         workspace.mkdir(parents=True)
-        old = self._create_generation("b" * 64)
-        self._clear_current_bundle()
+        old = command_bundle.create_generation("b" * 64)
+        command_bundle.clear_current_bundle()
         with (
-            mock.patch.object(common, "ROOT", self.root),
-            mock.patch.object(output, "ROOT", self.root),
-            mock.patch.object(targets, "load_target", return_value=self.target_config),
-            mock.patch.object(releases, "load_release", return_value=self.release),
+            mock.patch.object(common, "ROOT", command_bundle.root),
+            mock.patch.object(output, "ROOT", command_bundle.root),
+            mock.patch.object(targets, "load_target", return_value=command_bundle.target_config),
+            mock.patch.object(releases, "load_release", return_value=command_bundle.release),
             mock.patch.object(
                 workspace_inputs,
                 "target_workspace_snapshot",
-                return_value=self.snapshot,
+                return_value=command_bundle.snapshot,
             ),
-            mock.patch.object(images, "load_container_lock", return_value=self.lock),
+            mock.patch.object(images, "load_container_lock", return_value=command_bundle.lock),
             mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
             mock.patch.object(kern_env, "kern_available", return_value=True),
             mock.patch.object(kern_env, "require_kern", return_value="kern"),
@@ -224,35 +242,37 @@ class BuildLifecycleTests(CommandBundleFixture):
         ):
             output.run_entrypoint(lambda: build_commands.build("phone", 4))
 
-        assert not (bundle_pointer(self.output, "phone").exists())
+        assert not (bundle_pointer(command_bundle.output, "phone").exists())
         assert old.exists()
-        discard.assert_called_once_with(self.snapshot, workspace)
+        discard.assert_called_once_with(command_bundle.snapshot, workspace)
         rootfs_gc.assert_not_called()
         apks_gc.assert_not_called()
-        metadata = next((self.root / ".cache/logs/build/phone").rglob("run.json"))
+        metadata = next((command_bundle.root / ".cache/logs/build/phone").rglob("run.json"))
         assert (json.loads(metadata.read_text(encoding="utf-8"))["status"]) == ("failed")
 
-    def test_successful_build_discards_superseded_after_host_validation(self) -> None:
+    def test_successful_build_discards_superseded_after_host_validation(
+        self, command_bundle: CommandBundleContext
+    ) -> None:
         """Retain old generations until the container result validates on the host."""
-        workspace = self.root / ".cache/workspaces/current"
+        workspace = command_bundle.root / ".cache/workspaces/current"
         workspace.mkdir(parents=True)
-        old = self._create_generation("b" * 64)
-        self._clear_current_bundle()
+        old = command_bundle.create_generation("b" * 64)
+        command_bundle.clear_current_bundle()
 
         def publish_result(_stage: output.Stage, _command: list[str], **_kwargs: object) -> None:
-            publish_current_bundle(self.output, "phone", self.bundle_path)
+            publish_current_bundle(command_bundle.output, "phone", command_bundle.bundle_path)
 
         with (
-            mock.patch.object(common, "ROOT", self.root),
-            mock.patch.object(output, "ROOT", self.root),
-            mock.patch.object(targets, "load_target", return_value=self.target_config),
-            mock.patch.object(releases, "load_release", return_value=self.release),
+            mock.patch.object(common, "ROOT", command_bundle.root),
+            mock.patch.object(output, "ROOT", command_bundle.root),
+            mock.patch.object(targets, "load_target", return_value=command_bundle.target_config),
+            mock.patch.object(releases, "load_release", return_value=command_bundle.release),
             mock.patch.object(
                 workspace_inputs,
                 "target_workspace_snapshot",
-                return_value=self.snapshot,
+                return_value=command_bundle.snapshot,
             ),
-            mock.patch.object(images, "load_container_lock", return_value=self.lock),
+            mock.patch.object(images, "load_container_lock", return_value=command_bundle.lock),
             mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
             mock.patch.object(kern_env, "kern_available", return_value=True),
             mock.patch.object(kern_env, "require_kern", return_value="kern"),
@@ -284,26 +304,28 @@ class BuildLifecycleTests(CommandBundleFixture):
         assert ("build phone --build-type release: OK") in (stdout.getvalue())
         assert ("build phone --build-type release: OK (cached)") not in (stdout.getvalue())
         assert not (old.exists())
-        discard.assert_called_once_with(self.snapshot, workspace)
-        rootfs_gc.assert_called_once_with(self.cache)
-        apks_gc.assert_called_once_with(self.cache)
-        metadata = next((self.root / ".cache/logs/build/phone").rglob("run.json"))
+        discard.assert_called_once_with(command_bundle.snapshot, workspace)
+        rootfs_gc.assert_called_once_with(command_bundle.cache)
+        apks_gc.assert_called_once_with(command_bundle.cache)
+        metadata = next((command_bundle.root / ".cache/logs/build/phone").rglob("run.json"))
         assert (json.loads(metadata.read_text(encoding="utf-8"))["status"]) == ("success")
 
-    def test_offline_build_miss_requires_the_current_image_without_setup(self) -> None:
+    def test_offline_build_miss_requires_the_current_image_without_setup(
+        self, command_bundle: CommandBundleContext
+    ) -> None:
         """Do not silently rebuild the OCI environment when offline was requested."""
-        self._clear_current_bundle()
+        command_bundle.clear_current_bundle()
         with (
-            mock.patch.object(common, "ROOT", self.root),
-            mock.patch.object(output, "ROOT", self.root),
-            mock.patch.object(targets, "load_target", return_value=self.target_config),
-            mock.patch.object(releases, "load_release", return_value=self.release),
+            mock.patch.object(common, "ROOT", command_bundle.root),
+            mock.patch.object(output, "ROOT", command_bundle.root),
+            mock.patch.object(targets, "load_target", return_value=command_bundle.target_config),
+            mock.patch.object(releases, "load_release", return_value=command_bundle.release),
             mock.patch.object(
                 workspace_inputs,
                 "target_workspace_snapshot",
-                return_value=self.snapshot,
+                return_value=command_bundle.snapshot,
             ),
-            mock.patch.object(images, "load_container_lock", return_value=self.lock),
+            mock.patch.object(images, "load_container_lock", return_value=command_bundle.lock),
             mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
             mock.patch.object(kern_env, "kern_available", return_value=True),
             mock.patch.object(kern_env, "require_kern", return_value="kern"),
@@ -322,21 +344,23 @@ class BuildLifecycleTests(CommandBundleFixture):
         ):
             output.run_entrypoint(lambda: build_commands.build("phone", 4, offline=True))
 
-        assert not (bundle_pointer(self.output, "phone").exists())
+        assert not (bundle_pointer(command_bundle.output, "phone").exists())
 
-    def test_build_argv_has_explicit_memory_budget_and_narrow_mounts(self) -> None:
+    def test_build_argv_has_explicit_memory_budget_and_narrow_mounts(
+        self, command_bundle: CommandBundleContext
+    ) -> None:
         """Request a 2 GiB build budget without exposing broad cache mounts."""
         roots = {
-            "workspace": self.root / "workspace",
-            "downloads": self.root / "cache/downloads",
-            "ccache": self.root / "cache/ccache",
-            "host_tools": self.root / "cache/host-tools",
-            "apk_signing": self.root / "cache/apk-signing",
-            "apks": self.root / "cache/apks",
-            "rootfs": self.root / "cache/rootfs",
-            "linux": self.root / "cache/linux",
-            "output": self.root / "cache/out",
-            "logs": self.root / "cache/logs/build/run",
+            "workspace": command_bundle.root / "workspace",
+            "downloads": command_bundle.root / "cache/downloads",
+            "ccache": command_bundle.root / "cache/ccache",
+            "host_tools": command_bundle.root / "cache/host-tools",
+            "apk_signing": command_bundle.root / "cache/apk-signing",
+            "apks": command_bundle.root / "cache/apks",
+            "rootfs": command_bundle.root / "cache/rootfs",
+            "linux": command_bundle.root / "cache/linux",
+            "output": command_bundle.root / "cache/out",
+            "logs": command_bundle.root / "cache/logs/build/run",
         }
         with mock.patch.dict(os.environ, {}, clear=True):
             command = build_commands._build_container_command(  # noqa: SLF001
@@ -345,7 +369,7 @@ class BuildLifecycleTests(CommandBundleFixture):
                 jobs=6,
                 image="localhost/fplinux-build:locked",
                 offline=False,
-                snapshot=self.snapshot,
+                snapshot=command_bundle.snapshot,
                 **roots,
                 profile=None,
                 build_type="release",
@@ -387,19 +411,21 @@ class BuildLifecycleTests(CommandBundleFixture):
         network = command.index("--network")
         assert (command[network + 1]) == ("host")
 
-    def test_offline_build_argv_disables_container_network(self) -> None:
+    def test_offline_build_argv_disables_container_network(
+        self, command_bundle: CommandBundleContext
+    ) -> None:
         """Offline mode is an execution policy, not a separate build identity."""
         roots = {
-            "workspace": self.root / "workspace",
-            "downloads": self.root / "cache/downloads",
-            "ccache": self.root / "cache/ccache",
-            "host_tools": self.root / "cache/host-tools",
-            "apk_signing": self.root / "cache/apk-signing",
-            "apks": self.root / "cache/apks",
-            "rootfs": self.root / "cache/rootfs",
-            "linux": self.root / "cache/linux",
-            "output": self.root / "cache/out",
-            "logs": self.root / "cache/logs/build/run",
+            "workspace": command_bundle.root / "workspace",
+            "downloads": command_bundle.root / "cache/downloads",
+            "ccache": command_bundle.root / "cache/ccache",
+            "host_tools": command_bundle.root / "cache/host-tools",
+            "apk_signing": command_bundle.root / "cache/apk-signing",
+            "apks": command_bundle.root / "cache/apks",
+            "rootfs": command_bundle.root / "cache/rootfs",
+            "linux": command_bundle.root / "cache/linux",
+            "output": command_bundle.root / "cache/out",
+            "logs": command_bundle.root / "cache/logs/build/run",
         }
         command = build_commands._build_container_command(  # noqa: SLF001
             "/usr/bin/kern",
@@ -407,7 +433,7 @@ class BuildLifecycleTests(CommandBundleFixture):
             jobs=6,
             image="localhost/fplinux-build:locked",
             offline=True,
-            snapshot=self.snapshot,
+            snapshot=command_bundle.snapshot,
             **roots,
             profile=None,
             build_type="release",

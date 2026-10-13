@@ -8,6 +8,7 @@ import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+from textwrap import dedent
 from typing import Any
 
 from fplinux_cli import common
@@ -107,48 +108,60 @@ def _readme(config: dict[str, Any], *, host: str) -> bytes:
         with_offline_documentation=False,
     )
     if host == "windows10":
-        host_instructions = (
-            "Use Windows 10 or 11 x64. Python and the host programs are bundled.\n"
-            "On first use, Run can ask to install the phone's USB driver.\n"
-            "Read the included driver license and approve the administrator prompt.\n"
-            "Double-click Run.cmd to start or reconnect.\n"
-        )
+        host_instructions = dedent("""\
+            Use Windows 10 or 11 x64. Python and the host programs are bundled.
+            On first use, Run can ask to install the phone's USB driver.
+            Read the included driver license and approve the administrator prompt.
+            Double-click Run.cmd to start or reconnect.
+            """).removesuffix("\n")
         dump_command = 'Run.cmd --from-dump "C:\\path\\to\\nand.bin"'
     else:
-        host_instructions = (
-            "Use Linux x86-64 with coreutils, iproute2, udev and a network manager\n"
-            "that automatically runs IPv4 DHCP on new USB interfaces, such as\n"
-            "NetworkManager.\n"
-            "Python and OpenSSH are bundled. Run asks for administrator access\n"
-            "once if the included phone USB access rules are not installed.\n"
-            "Open a terminal in this directory and run:\n"
-            "  sh Run.sh\n"
-        )
+        host_instructions = dedent("""\
+            Use Linux x86-64 with coreutils, iproute2, udev and a network manager
+            that automatically runs IPv4 DHCP on new USB interfaces, such as
+            NetworkManager.
+            Python and OpenSSH are bundled. Run asks for administrator access
+            once if the included phone USB access rules are not installed.
+            Open a terminal in this directory and run:
+              sh Run.sh
+            """).removesuffix("\n")
         dump_command = "sh Run.sh --from-dump /path/to/nand.bin"
-    text = (
-        f"FPLinux - {name}\n\n"
-        f"This archive is only for {name}. Internal storage is read only.\n\n"
-        f"{host_instructions}\n"
-        "For a fresh load, keep the phone disconnected until Run displays\n"
-        "the connection instructions. Leave a running phone connected to reopen SSH.\n"
-        f"{instructions}\n\n"
-        "The first run saves a complete backup and prepares your phone's own data.\n"
-        "When it finishes, release cards as described below before disconnecting USB.\n"
-        "If the phone stays on, briefly remove\n"
-        "and reinsert its battery. Run the same script with the phone powered off\n"
-        "to start FPLinux and open SSH. Type exit or press Ctrl+D to close SSH.\n"
-        "Open the same launcher again to reconnect while the phone remains on.\n"
-        "Only one launcher can run from this directory at a time.\n"
-        "Ctrl+C cancels loading or waiting; it does not power the phone off.\n\n"
-        "To prepare from an existing complete NAND backup without connecting the phone:\n"
-        f"  {dump_command}\n"
-        "This preparation preserves the backup and cannot replace existing data/phone.\n\n"
-        "Keep this directory for this one phone. Your NAND backup is data/nand.bin,\n"
-        "prepared phone data is data/phone, and private connection keys are data/session.\n"
-        "Each launch writes a new log in logs and displays its exact path.\n"
-        "\n"
-        f"{shutdown}"
-    )
+    sections = [
+        dedent("""\
+            FPLinux - {name}
+
+            This archive is only for {name}. Internal storage is read only.
+            """)
+        .removesuffix("\n")
+        .format(name=name),
+        host_instructions,
+        dedent("""\
+            For a fresh load, keep the phone disconnected until Run displays
+            the connection instructions. Leave a running phone connected to reopen SSH.
+            {instructions}
+
+            The first run saves a complete backup and prepares your phone's own data.
+            When it finishes, release cards as described below before disconnecting USB.
+            If the phone stays on, briefly remove
+            and reinsert its battery. Run the same script with the phone powered off
+            to start FPLinux and open SSH. Type exit or press Ctrl+D to close SSH.
+            Open the same launcher again to reconnect while the phone remains on.
+            Only one launcher can run from this directory at a time.
+            Ctrl+C cancels loading or waiting; it does not power the phone off.
+
+            To prepare from an existing complete NAND backup without connecting the phone:
+              {dump_command}
+            This preparation preserves the backup and cannot replace existing data/phone.
+
+            Keep this directory for this one phone. Your NAND backup is data/nand.bin,
+            prepared phone data is data/phone, and private connection keys are data/session.
+            Each launch writes a new log in logs and displays its exact path.
+            """)
+        .removesuffix("\n")
+        .format(instructions=instructions, dump_command=dump_command),
+        shutdown.removesuffix("\n"),
+    ]
+    text = "\n\n".join(sections) + "\n"
     return text.encode("utf-8")
 
 

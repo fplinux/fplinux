@@ -143,10 +143,9 @@ def portable_archive(tmp_path: Path) -> Iterator[PortableArchive]:
             "image_sha256": hashlib.sha256(image).hexdigest(),
             "commands": {
                 "unpack": {
-                    "stdout": "0x800: init_table, start = 0x900, end = 0x910\n"
-                    "ps_addr: 0x80100000\n"
-                    "0x4800: pinmap (end = 0x4810)\n"
-                    "0x4900: keymap, bootkey = 0x2a (STAR)\n",
+                    "stdout": (ROOT / "tests/fixtures/stock_board_report/maps-only.txt").read_text(
+                        encoding="utf-8"
+                    ),
                     "files": {"pinmap.bin": pinmap.hex(), "keymap.bin": keys.hex()},
                 }
             },

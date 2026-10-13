@@ -20,8 +20,17 @@ from fplinux_cli.environment import downloads
 from fplinux_cli.manifests import platforms
 from fplinux_cli.manifests import values as manifest_values
 
+from tests import ROOT
+
 if TYPE_CHECKING:
     from types import ModuleType
+    from typing import Any
+
+
+@pytest.fixture
+def archive_recipe() -> dict[str, Any]:
+    """Supply a fresh complete host archive recipe with a local patch closure."""
+    return common.load_toml(ROOT / "tests/fixtures/host_recipe/archive.toml")
 
 
 class HostRecipeTests:
@@ -90,28 +99,12 @@ class HostRecipeTests:
             )
             assert missed is None
 
-    @staticmethod
-    def make_archive_recipe() -> dict[str, object]:
-        """Return one complete host archive recipe with a local patch closure."""
-        return {
-            "type": "make-archive",
-            "name": "bridge",
-            "source_lock": "bridge-source",
-            "cache_name": "bridge.tar.gz",
-            "archive_prefix": "bridge-{commit}/",
-            "source_directory": "bridge",
-            "binary": "bridge",
-            "link": "static-libusb",
-            "members": [{"path": "bridge.c", "digest_key": "bridge_c_sha256"}],
-            "copies": [{"source": "platforms/demo/local-input.h", "destination": "local-input.h"}],
-            "patches": ["platforms/demo/local.patch"],
-            "self_test": True,
-        }
-
     @pytest.mark.parametrize("field", ["copies", "patches", "self_test"])
-    def test_make_archive_declares_local_copies_patches_and_self_test(self, field: str) -> None:
+    def test_make_archive_declares_local_copies_patches_and_self_test(
+        self, archive_recipe: dict[str, Any], field: str
+    ) -> None:
         """A host binary cannot silently omit a project-owned source input or self-test."""
-        recipe = self.make_archive_recipe()
+        recipe = archive_recipe
 
         assert (platforms.validate_host_tool(recipe, 0)) == (recipe)
         incomplete = dict(recipe)
@@ -146,7 +139,9 @@ class HostRecipeTests:
                     ],
                 )
 
-    def test_repeated_projection_starts_fresh_and_requests_self_test(self, tmp_path: Path) -> None:
+    def test_repeated_projection_starts_fresh_and_requests_self_test(
+        self, archive_recipe: dict[str, Any], tmp_path: Path
+    ) -> None:
         """With command stubs, each projection starts clean and requests --self-test."""
         root = tmp_path
         archive = root / "bridge.tar.gz"
@@ -160,7 +155,7 @@ class HostRecipeTests:
         work = root / "work"
         output = root / "output"
         work.mkdir()
-        recipe = self.make_archive_recipe()
+        recipe = archive_recipe
         recipe["patches"] = []
         sources = {
             "bridge-source": {

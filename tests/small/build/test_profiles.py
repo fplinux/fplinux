@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import shutil
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
@@ -26,74 +26,20 @@ REPOSITORY_PROFILES = [
 ]
 
 
-class GlobalProfileTests:
+class ProfileContext:
     """Keep target features common while changing the system root."""
 
-    @pytest.fixture(autouse=True)
-    def _profile_repository(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def __init__(self, root: Path) -> None:
         """Provide two board manifests and real global boot-policy inputs."""
-        self.root = tmp_path
+        self.root = root
         shutil.copytree(ROOT / "profiles", self.root / "profiles")
-        self.platform: dict[str, Any] = {
-            "identity": {"compatible": "demo,soc"},
-            "rootfs": {"packages": ["fplinux-ssh", "fplinux-feature"]},
-            "linux": {"defconfig": "platforms/demo/kernel/defconfig"},
-            "uboot": {
-                "source": "platforms/demo/uboot.lock.toml",
-                "archive_prefix": "u-boot-2026.07",
-                "patches": [],
-                "required_config": ["CONFIG_TARGET_DEMO=y"],
-                "copies": [],
-            },
-            "bootstrap": {
-                "kernel_destination": "zImage",
-                "load_address": 0x80100000,
-                "payload_limit": 0x82000000,
-                "layout": {
-                    "ram_base": 0x80000000,
-                    "ram_size": 0x04000000,
-                    "timer_hz": 1000,
-                    "kernel_load": 0x82000000,
-                    "kernel_entry": 0x82000000,
-                    "kernel_size": 0x01200000,
-                    "fdt_load": 0x83E00000,
-                    "fdt_size": 0x00010000,
-                    "framebuffer": 0x83F00000,
-                    "framebuffer_size": 0x00100000,
-                },
-                "toolchain": "toolchain",
-                "lto": 0,
-            },
-            "runtime": {"fdl1_load_address": 0, "adapter": {}, "usb": {}},
-        }
+        self.platform = common.load_toml(PROFILE_FIXTURES / "platform.toml")
         shared = self.root / "platforms/demo"
         (shared / "kernel").mkdir(parents=True)
         (shared / "kernel/defconfig").write_text("CONFIG_FEATURE=y\nCONFIG_BOARD=1\n")
         (shared / "loader").mkdir()
-        (shared / "loader/assets.lock.toml").write_text(
-            """[fdl1]
-url = "https://example.invalid/loader.bin"
-sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-cache_name = "loader.bin"
-license = "MIT"
-path = "loader.bin"
-
-[maps]
-url = "https://example.invalid/maps.7z"
-sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-cache_name = "maps.7z"
-license = "NOASSERTION"
-pinmap_path = "pinmap.bin"
-keymap_path = "keymap.bin"
-""",
-            encoding="utf-8",
-        )
-        (shared / "uboot.lock.toml").write_text(
-            'version = "2026.07"\nrepository = "https://example.invalid/u-boot"\n'
-            'tag = "v2026.07"\ncommit = "' + "a" * 40 + '"\n'
-            'archive_url = "https://example.invalid/u-boot.tar.bz2"\n'
-            'archive_sha256 = "' + "b" * 64 + '"\nlicense = "GPL-2.0-only"\n'
-        )
+        shutil.copyfile(PROFILE_FIXTURES / "assets.lock.toml", shared / "loader/assets.lock.toml")
+        shutil.copyfile(PROFILE_FIXTURES / "uboot.lock.toml", shared / "uboot.lock.toml")
         for target in ("first", "second"):
             target_root = self.root / "targets" / target
             (target_root / "kernel").mkdir(parents=True)
@@ -102,8 +48,6 @@ keymap_path = "keymap.bin"
             (target_root / "uboot").mkdir()
             (target_root / "uboot/defconfig").write_text("CONFIG_ARM=y\n")
             self.write_target_manifest(target)
-        monkeypatch.setattr(common, "ROOT", self.root)
-        monkeypatch.setattr(targets, "load_platform", mock.Mock(return_value=self.platform))
 
     def write_target_manifest(self, target: str, fixture: str = "target.toml") -> None:
         """Write one named board configuration with its target identity filled in."""
@@ -113,7 +57,21 @@ keymap_path = "keymap.bin"
             encoding="utf-8",
         )
 
+
+@pytest.fixture
+def profile_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ProfileContext:
+    """Bind board loading to one owned profile checkout for this scenario."""
+    context = ProfileContext(tmp_path)
+    monkeypatch.setattr(common, "ROOT", context.root)
+    monkeypatch.setattr(targets, "load_platform", mock.Mock(return_value=context.platform))
+    return context
+
+
+class GlobalProfileTests:
+    """Keep target features common while changing the system root."""
+
     @staticmethod
+    @pytest.mark.usefixtures("profile_context")
     @pytest.mark.parametrize("target", ["first", "second"])
     def test_default_alias_has_the_same_identity_and_configuration(target: str) -> None:
         """Spelling default explicitly does not create a second build context."""
@@ -125,6 +83,7 @@ keymap_path = "keymap.bin"
         assert (explicit["bootstrap"]["kind"]) == ("linux")
 
     @staticmethod
+    @pytest.mark.usefixtures("profile_context")
     @pytest.mark.parametrize("target", ["first", "second"])
     def test_both_boards_share_boot_policy_and_keep_their_own_boot_sources(target: str) -> None:
         """MicroSD changes root placement but keeps feature and firmware inputs."""
@@ -158,9 +117,11 @@ keymap_path = "keymap.bin"
         assert (card["uboot"]["defconfig"]) == ("uboot/defconfig")
         assert (card["runtime"]) == (ram["runtime"])
 
-    def test_board_local_directory_cannot_define_a_global_profile(self) -> None:
+    def test_board_local_directory_cannot_define_a_global_profile(
+        self, profile_context: ProfileContext
+    ) -> None:
         """A board-local profile directory cannot change the global selection."""
-        board_profile = self.root / "targets/first/profiles/bt-qual"
+        board_profile = profile_context.root / "targets/first/profiles/bt-qual"
         board_profile.mkdir(parents=True)
         (board_profile / "profile.toml").write_text("invalid = true\n")
         assert (paths.discover_profiles("first")) == (("default", "microsd-uboot"))
@@ -168,19 +129,21 @@ keymap_path = "keymap.bin"
             targets.load_target("first", "bt-qual")
         assert (targets.load_target("first")["linux"]["root"]) == ({"kind": "initramfs"})
 
-    def test_boot_profile_cannot_exclude_shared_features(self) -> None:
+    def test_boot_profile_cannot_exclude_shared_features(
+        self, profile_context: ProfileContext
+    ) -> None:
         """Feature-package ownership is rejected at the boot-policy boundary."""
-        path = self.root / "profiles/default/profile.toml"
+        path = profile_context.root / "profiles/default/profile.toml"
         shutil.copyfile(PROFILE_FIXTURES / "default-with-feature-package.toml", path)
         with pytest.raises(SystemExit, match="boot maintenance"):
             targets.load_target("first")
 
     @pytest.mark.parametrize("profile", ["default", "microsd-uboot"])
     def test_missing_bluetooth_declaration_does_not_require_private_inputs(
-        self, profile: str
+        self, profile_context: ProfileContext, profile: str
     ) -> None:
         """A board without a Bluetooth declaration has no firmware input group."""
-        self.write_target_manifest("first", "target-without-bluetooth.toml")
+        profile_context.write_target_manifest("first", "target-without-bluetooth.toml")
         assert (targets.load_target("first", profile)["device_data"]["groups"]) == ({})
 
     @pytest.mark.parametrize(
@@ -197,10 +160,10 @@ keymap_path = "keymap.bin"
         ],
     )
     def test_loader_adapter_rejects_partial_display_settings_and_a_direct_panel_id(
-        self, display_settings: str
+        self, profile_context: ProfileContext, display_settings: str
     ) -> None:
         """Display settings may be omitted; partial settings and an explicit lcd_id are invalid."""
-        path = self.root / "targets/first/target.toml"
+        path = profile_context.root / "targets/first/target.toml"
         manifest = path.read_text(encoding="utf-8")
         assert (targets.load_target("first")["runtime"]["adapter"]) == (
             {
@@ -219,9 +182,11 @@ keymap_path = "keymap.bin"
             targets.load_target("first")
 
     @pytest.mark.parametrize("profile", ["default", "microsd-uboot"])
-    def test_fm_declaration_adds_only_the_declared_device_data_group(self, profile: str) -> None:
+    def test_fm_declaration_adds_only_the_declared_device_data_group(
+        self, profile_context: ProfileContext, profile: str
+    ) -> None:
         """An FM firmware declaration has the same group contract in both boot profiles."""
-        path = self.root / "targets/first/target.toml"
+        path = profile_context.root / "targets/first/target.toml"
         path.write_text(
             path.read_text(encoding="utf-8") + '\n[fm_radio]\nfirmware = [{ source = "radio.bin", '
             'destination = "fplinux/radio.bin", size = 128 }]\n',
@@ -234,10 +199,12 @@ keymap_path = "keymap.bin"
         assert (set(groups)) == ({"bluetooth", "fm-radio"})
         assert ("fm-radio") not in (targets.load_target("second")["device_data"]["groups"])
 
-    def test_board_maps_declaration_alone_needs_no_target_parser_or_sizes(self) -> None:
+    def test_board_maps_declaration_alone_needs_no_target_parser_or_sizes(
+        self, profile_context: ProfileContext
+    ) -> None:
         """The target loader accepts board-map declarations without a target parser or size."""
-        self.write_target_manifest("first", "target-without-bluetooth.toml")
-        path = self.root / "targets/first/target.toml"
+        profile_context.write_target_manifest("first", "target-without-bluetooth.toml")
+        path = profile_context.root / "targets/first/target.toml"
         declaration = (
             '\n[board_maps]\nfirmware = [{ source = "pinmap.bin", destination = "pinmap.bin" }]\n'
         )
@@ -247,9 +214,11 @@ keymap_path = "keymap.bin"
         )
 
     @pytest.mark.parametrize("profile", ["default", "microsd-uboot"])
-    def test_loader_map_members_stay_board_owned_across_boot_profiles(self, profile: str) -> None:
+    def test_loader_map_members_stay_board_owned_across_boot_profiles(
+        self, profile_context: ProfileContext, profile: str
+    ) -> None:
         """The manifest supplies both runtime map paths and the selected build outputs."""
-        path = self.root / "targets/first/target.toml"
+        path = profile_context.root / "targets/first/target.toml"
         path.write_text(
             path.read_text(encoding="utf-8")
             + '\n[loader_maps]\npinmap = { member = "first/pins.bin", '
@@ -285,10 +254,12 @@ keymap_path = "keymap.bin"
     @pytest.mark.parametrize(
         ("table", "group"), [("fm_radio", "fm-radio"), ("audio_profile", "audio-profile")]
     )
-    def test_audio_and_fm_firmware_require_their_exact_size(self, table: str, group: str) -> None:
+    def test_audio_and_fm_firmware_require_their_exact_size(
+        self, profile_context: ProfileContext, table: str, group: str
+    ) -> None:
         """Audio and FM inputs cannot omit the size that device-data consumers verify."""
-        self.write_target_manifest("first", "target-without-bluetooth.toml")
-        path = self.root / "targets/first/target.toml"
+        profile_context.write_target_manifest("first", "target-without-bluetooth.toml")
+        path = profile_context.root / "targets/first/target.toml"
         base = path.read_text(encoding="utf-8")
         declaration = (
             '\n[device_data]\nparser = "radio_parser.py"\n'
@@ -303,9 +274,11 @@ keymap_path = "keymap.bin"
         with pytest.raises(SystemExit, match=r"source, destination, size and optional sha256"):
             targets.load_target("first")
 
-    def test_bluetooth_firmware_can_leave_size_to_extraction(self) -> None:
+    def test_bluetooth_firmware_can_leave_size_to_extraction(
+        self, profile_context: ProfileContext
+    ) -> None:
         """Bluetooth inputs preserve the supported optional-size declaration."""
-        path = self.root / "targets/first/target.toml"
+        path = profile_context.root / "targets/first/target.toml"
         path.write_text(
             path.read_text(encoding="utf-8").replace("size = 4\n", ""), encoding="utf-8"
         )
@@ -313,16 +286,20 @@ keymap_path = "keymap.bin"
             "bluetooth": [{"source": "radio.bin", "destination": "demo/radio.bin"}]
         }
 
-    def test_missing_board_boot_sources_fail_only_when_microsd_is_selected(self) -> None:
+    def test_missing_board_boot_sources_fail_only_when_microsd_is_selected(
+        self, profile_context: ProfileContext
+    ) -> None:
         """RAM operation does not read unused U-Boot sources or fall back to another board."""
-        (self.root / "targets/second/uboot/defconfig").unlink()
+        (profile_context.root / "targets/second/uboot/defconfig").unlink()
         assert (targets.load_target("second")["bootstrap"]["kind"]) == ("linux")
         with pytest.raises(SystemExit, match="U-Boot source is missing"):
             targets.load_target("second", "microsd-uboot")
 
-    def test_board_without_microsd_inputs_offers_only_the_ram_profile(self) -> None:
+    def test_board_without_microsd_inputs_offers_only_the_ram_profile(
+        self, profile_context: ProfileContext
+    ) -> None:
         """Omitting the microSD tables removes that profile instead of borrowing inputs."""
-        self.write_target_manifest("first", "target-without-microsd.toml")
+        profile_context.write_target_manifest("first", "target-without-microsd.toml")
 
         assert (paths.discover_profiles("first")) == (("default",))
         assert (targets.load_target("first")["bootstrap"]["kind"]) == ("linux")
@@ -333,9 +310,11 @@ keymap_path = "keymap.bin"
         assert (paths.discover_profiles("second")) == (("default", "microsd-uboot"))
 
     @pytest.mark.parametrize("profile", ["default", "microsd-uboot"])
-    def test_declared_microsd_inputs_must_stay_complete(self, profile: str) -> None:
+    def test_declared_microsd_inputs_must_stay_complete(
+        self, profile_context: ProfileContext, profile: str
+    ) -> None:
         """A partial microSD declaration is still refused, even for the RAM profile."""
-        path = self.root / "targets/first/target.toml"
+        path = profile_context.root / "targets/first/target.toml"
         manifest = path.read_text(encoding="utf-8")
         uboot = '[microsd.uboot]\ndefconfig = "uboot/defconfig"\npatches = []\ncopies = []\n'
         assert (uboot) in (manifest)
@@ -347,30 +326,32 @@ keymap_path = "keymap.bin"
             targets.load_target("first", profile)
 
     @pytest.mark.parametrize("target", ["first", "second"])
-    def test_uboot_combines_shared_sources_with_the_selected_board(self, target: str) -> None:
+    def test_uboot_combines_shared_sources_with_the_selected_board(
+        self, profile_context: ProfileContext, target: str
+    ) -> None:
         """The target loader combines shared and selected board inputs in the U-Boot config."""
-        shared = self.root / "platforms/demo"
+        shared = profile_context.root / "platforms/demo"
         (shared / "boot.c").write_text("shared boot flow\n")
         (shared / "boot.patch").write_text("shared integration patch\n")
-        self.platform["uboot"]["patches"] = ["platforms/demo/boot.patch"]
-        self.platform["uboot"]["required_config"] = [
+        profile_context.platform["uboot"]["patches"] = ["platforms/demo/boot.patch"]
+        profile_context.platform["uboot"]["required_config"] = [
             "CONFIG_TARGET_DEMO=y",
             'CONFIG_BOOTCOMMAND="demoboot"',
         ]
-        self.platform["uboot"]["copies"] = [
+        profile_context.platform["uboot"]["copies"] = [
             {"source": "platforms/demo/boot.c", "destination": "board/demo/boot.c"}
         ]
-        target_root = self.root / "targets" / target
+        target_root = profile_context.root / "targets" / target
         (target_root / "uboot/slot.c").write_text(f"{target} slot\n")
         (target_root / "uboot/board.patch").write_text(f"{target} integration patch\n")
-        self.write_target_manifest(target, "target-with-uboot-sources.toml")
+        profile_context.write_target_manifest(target, "target-with-uboot-sources.toml")
 
         uboot = targets.load_target(target, "microsd-uboot")["uboot"]
-        assert ([(self.root / path).read_text() for path in uboot["patches"]]) == (
+        assert ([(profile_context.root / path).read_text() for path in uboot["patches"]]) == (
             ["shared integration patch\n", f"{target} integration patch\n"]
         )
         projected = {
-            step["destination"]: (self.root / step["source"]).read_text()
+            step["destination"]: (profile_context.root / step["source"]).read_text()
             for step in uboot["copies"]
         }
         assert (projected) == (
@@ -384,9 +365,11 @@ keymap_path = "keymap.bin"
         )
 
     @pytest.mark.parametrize("profile", ["default", "microsd-uboot"])
-    def test_nand_reader_stays_board_owned_across_boot_profiles(self, profile: str) -> None:
+    def test_nand_reader_stays_board_owned_across_boot_profiles(
+        self, profile_context: ProfileContext, profile: str
+    ) -> None:
         """Boot policy preserves an explicit reader and supplies none to other boards."""
-        path = self.root / "targets/first/target.toml"
+        path = profile_context.root / "targets/first/target.toml"
         path.write_text(
             path.read_text()
             + '\n[nand]\nraw_device = "/dev/first-nand-raw"\nid = 0xb1a1\nraw_page_bytes = 2176\n'
@@ -412,10 +395,10 @@ keymap_path = "keymap.bin"
         ],
     )
     def test_nand_chip_declaration_is_optional_and_not_limited_to_known_chips(
-        self, table: str, expected: dict[str, str | int]
+        self, profile_context: ProfileContext, table: str, expected: dict[str, str | int]
     ) -> None:
         """A board can name only its reader, or expect a chip the host has not seen before."""
-        path = self.root / "targets/first/target.toml"
+        path = profile_context.root / "targets/first/target.toml"
         base = path.read_text()
         path.write_text(base + "\n[nand]\n" + table)
         assert (targets.load_target("first")["nand"]) == (expected)
@@ -427,9 +410,11 @@ keymap_path = "keymap.bin"
             pytest.param("raw_page_bytes = 2176\n", id="missing-chip-id"),
         ],
     )
-    def test_nand_chip_declaration_requires_both_id_and_page_size(self, declaration: str) -> None:
+    def test_nand_chip_declaration_requires_both_id_and_page_size(
+        self, profile_context: ProfileContext, declaration: str
+    ) -> None:
         """Half a chip declaration cannot silently disable the device comparison."""
-        path = self.root / "targets/first/target.toml"
+        path = profile_context.root / "targets/first/target.toml"
         base = path.read_text()
         path.write_text(base + '\n[nand]\nraw_device = "/dev/first-nand-raw"\n' + declaration)
         with (
@@ -437,9 +422,9 @@ keymap_path = "keymap.bin"
         ):
             targets.load_target("first")
 
-    def test_nand_reader_requires_a_device_path(self) -> None:
+    def test_nand_reader_requires_a_device_path(self, profile_context: ProfileContext) -> None:
         """A board cannot accidentally point a physical NAND backup at a regular file."""
-        path = self.root / "targets/first/target.toml"
+        path = profile_context.root / "targets/first/target.toml"
         path.write_text(
             path.read_text()
             + '\n[nand]\nraw_device = "/tmp/nand.raw"\nid = 0xb1a1\nraw_page_bytes = 2176\n'

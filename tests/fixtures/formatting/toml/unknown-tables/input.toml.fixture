@@ -1,0 +1,7 @@
+[custom]
+z = +1_000
+a = 1979-05-27T07:32:00Z
+text = """first
+
+[not.a.table]
+last"""

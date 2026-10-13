@@ -1,0 +1,25 @@
+Linux host tool rebuilding and library replacement
+
+The project directory contains the current source, tool recipes and patches.
+The upstream directory contains the exact source archives listed in downloads.json.
+Project platform recipes select tool members, project copies and ordered patches.
+
+Use a Linux x86-64 musl build environment, such as Alpine, and select an
+absolute installation directory for the replacement library:
+  relink_prefix=/absolute/path/to/libusb-prefix
+In the supplied libusb source directory, build and install it with:
+  ./configure --prefix="$relink_prefix" --disable-udev --enable-static
+  make -j1
+  make install
+Apply the declared project copies and patches to each selected tool source.
+Select the replacement headers and library for the tool rebuild:
+  export CPATH="$relink_prefix/include"
+  export PKG_CONFIG_PATH="$relink_prefix/lib/pkgconfig"
+In each make-archive tool directory, retain its declared CFLAGS and run:
+  make clean all LIBUSB=1 LIBS="-static -L$relink_prefix/lib -lusb-1.0"
+The cc-libusb compile command is in project/scripts/fplinux_cli/build/host.py.
+It obtains replacement library flags with pkg-config --cflags --static --libs
+libusb-1.0. Project recipes and source remain available for rebuilding.
+
+Alpine source channels identify pinned distribution recipes for prebuilt packages;
+those recipes and their upstream source downloads require network access.

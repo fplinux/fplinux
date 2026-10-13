@@ -1,0 +1,5 @@
+--- a/drivers/replaced.c
++++ b/drivers/replaced.c
+@@ -1 +1 @@
+-upstream original
++int gamma = 1;

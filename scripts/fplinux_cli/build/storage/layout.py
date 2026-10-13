@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from fplinux_cli.templates import substitute_template
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -146,44 +149,18 @@ memory@{layout["ram_base"]:x} {{
 
 def genimage_config(fit: Mapping[str, Any], storage: Mapping[str, Any]) -> bytes:
     """Return one deterministic MBR/FAT/ext4 genimage configuration."""
-    license_tag = "SPDX-License-" + "Identifier"
-    signature = storage["disk_signature"]
-    image = storage["filename"]
-    return f"""# {license_tag}: GPL-2.0-only
-image {image} {{
-\thdimage {{
-\t\talign = 1M
-\t\tpartition-table-type = "mbr"
-\t\tdisk-signature = 0x{signature:08x}
-\t}}
-
-\tpartition boot {{
-\t\tpartition-type = 0x0c
-\t\timage = "FPLINUX.vfat"
-\t\toffset = {storage["boot_offset"]}
-\t\tsize = {storage["boot_size"]}
-\t}}
-
-\tpartition root {{
-\t\tpartition-type = 0x83
-\t\timage = "{storage["root_filename"]}"
-\t\toffset = {storage["root_offset"]}
-\t\tsize = {storage["root_size"]}
-\t\tfill = true
-\t}}
-}}
-
-image FPLINUX.vfat {{
-\ttemporary = true
-\tsize = {storage["boot_size"]}
-
-\tvfat {{
-\t\tlabel = "{storage["boot_label"]}"
-\t\textraargs = "-F 32 --invariant -i {signature:08x}"
-
-\t\tfile {fit["filename"]} {{
-\t\t\timage = "{fit["filename"]}"
-\t\t}}
-\t}}
-}}
-""".encode("ascii")
+    template = Path(__file__).with_name("genimage.cfg.in").read_text(encoding="ascii")
+    return substitute_template(
+        template,
+        {
+            "IMAGE": storage["filename"],
+            "DISK_SIGNATURE": f"{storage['disk_signature']:08x}",
+            "BOOT_OFFSET": str(storage["boot_offset"]),
+            "BOOT_SIZE": str(storage["boot_size"]),
+            "BOOT_LABEL": storage["boot_label"],
+            "ROOT_FILENAME": storage["root_filename"],
+            "ROOT_OFFSET": str(storage["root_offset"]),
+            "ROOT_SIZE": str(storage["root_size"]),
+            "FIT_FILENAME": fit["filename"],
+        },
+    ).encode("ascii")

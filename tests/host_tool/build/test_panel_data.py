@@ -96,10 +96,7 @@ def test_compiled_panel_properties_keep_offsets_and_values_paired(
     for name, contents in render_linux_display_files("demo", panel_display).items():
         (tmp_path / name.rsplit("/", 1)[-1]).write_bytes(contents)
     source = tmp_path / "panel.dts"
-    source.write_text(
-        '/dts-v1/;\n/ {\n\tpanel {\n\t\t/include/ "fplinux-demo-panel.dtsi"\n\t};\n};\n',
-        encoding="utf-8",
-    )
+    source.write_bytes((ROOT / "tests/host_tool/build/fixtures/panel.dts.fixture").read_bytes())
     dtb = tmp_path / "panel.dtb"
     run_process(
         ["dtc", "-I", "dts", "-O", "dtb", "-i", str(tmp_path), "-o", str(dtb), str(source)],

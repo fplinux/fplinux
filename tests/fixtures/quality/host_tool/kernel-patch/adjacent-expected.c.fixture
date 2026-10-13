@@ -1,0 +1,2 @@
+int unrelated(void){return 4;}
+int value = 2;

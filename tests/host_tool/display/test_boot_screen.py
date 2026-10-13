@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 import pytest
@@ -12,7 +13,7 @@ from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
     from pathlib import Path
 
 SCREEN = ROOT / "bootstrap/fplinux-boot-screen"
@@ -21,18 +22,16 @@ SCREEN = ROOT / "bootstrap/fplinux-boot-screen"
 class BootScreenFontTests:
     """The same compiled glyph remains selected when the canvas width changes."""
 
-    executables: dict[int, Path]
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def executables(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Mapping[int, Path]]:
         """Build both selected-font variants once for this test group."""
         with c_build_directory(tmp_path_factory, "boot-screen") as temporary:
-            cls.executables = {}
+            executables = {}
             for font in (6, 7):
-                cls.executables[font] = temporary / f"boot-screen-{font}"
+                executables[font] = temporary / f"boot-screen-{font}"
                 compile_c(
-                    cls.executables[font],
+                    executables[font],
                     [
                         "-std=c99",
                         "-pedantic",
@@ -48,13 +47,15 @@ class BootScreenFontTests:
                     name="compile selected boot font harness",
                     check=True,
                 )
-            yield
+            yield MappingProxyType(executables)
 
     @pytest.mark.parametrize("font", [6, 7])
-    def test_uninitialized_screen_updates_leave_state_unchanged(self, font: int) -> None:
+    def test_uninitialized_screen_updates_leave_state_unchanged(
+        self, executables: Mapping[int, Path], font: int
+    ) -> None:
         """A caller without a display can report boot stages without initializing a canvas."""
         result = run_process(
-            [str(self.executables[font]), "--uninitialized"],
+            [str(executables[font]), "--uninitialized"],
             name="update uninitialized boot screen",
             timeout=10,
         )
@@ -91,11 +92,11 @@ class BootScreenFontTests:
     )
     @pytest.mark.parametrize("character", ["\x01", "\x7f"], ids=["x01", "x7f"])
     def test_selected_font_renders_its_glyph_on_both_canvas_sizes(
-        self, font: int, glyph: tuple[str, ...], character: str
+        self, executables: Mapping[int, Path], font: int, glyph: tuple[str, ...], character: str
     ) -> None:
         """Synthetic glyph pixels distinguish 6x8 and 7x14 independently of layout."""
         result = run_process(
-            [str(self.executables[font])],
+            [str(executables[font])],
             name="render selected boot glyph",
             timeout=10,
             check=True,
@@ -116,13 +117,13 @@ class BootScreenFontTests:
             )
             assert (rendered) == (glyph)
         question = run_process(
-            [str(self.executables[font]), "?"],
+            [str(executables[font]), "?"],
             name="render ASCII replacement glyph",
             timeout=10,
             check=True,
         ).stdout
         replaced = run_process(
-            [str(self.executables[font]), character],
+            [str(executables[font]), character],
             name="render character outside printable ASCII",
             timeout=10,
             check=True,

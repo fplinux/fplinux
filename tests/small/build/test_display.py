@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
+import shutil
 from typing import TYPE_CHECKING, Any
 
 import pytest
 from fplinux_cli.build.display import render_bootstrap_display, render_linux_display_files
 from fplinux_cli.manifests.display import load_display
+
+from tests import ROOT
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -18,35 +21,7 @@ def panel_root(tmp_path: Path) -> Path:
     """Supply owned panel data, without ambient target or build state."""
     path = tmp_path / "targets/demo/display/panel.toml"
     path.parent.mkdir(parents=True)
-    path.write_text(
-        """width = 128
-height = 160
-id = 0x1234
-id_mask = 0xffff
-memory_access = 0x48
-transport = "dbi"
-license = "GPL-2.0-only"
-copyright = []
-commands = [{ command = 0x3a, data = [0x55] }]
-[bootstrap]
-spi_hz = 0
-prepare_pins = true
-reset_ms = 16
-commands_after = "cold_finish"
-[linux]
-commands_after = [{ command = 0xc6, data = [0x18] }]
-cold_finish = [{ command = 0x11, delay_ms = 120 }, { command = 0x29 }]
-wake_finish = [{ command = 0x36, data = [0x48] }, { command = 0x11, delay_ms = 200 }]
-[dbi]
-timing_ns = [50, 55, 110, 20, 70, 35]
-[pins]
-control_base = 0xb0
-control = [[0, 0x10, 0x182004], [4, 0x30, 0x82046]]
-data_base = 0x1f8
-data = [[0, 0x10, 0x182004]]
-""",
-        encoding="utf-8",
-    )
+    shutil.copyfile(ROOT / "tests/fixtures/display/panel.toml", path)
     return tmp_path
 
 

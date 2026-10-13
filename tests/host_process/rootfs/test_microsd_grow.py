@@ -7,6 +7,7 @@ import os
 import shutil
 import tempfile
 from contextlib import ExitStack
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,29 +23,17 @@ if TYPE_CHECKING:
 GROW = ROOT / "alpine/aports/fplinux-microsd-root/fplinux-microsd-grow"
 
 
-class MicroSDGrowTests:
-    """Exercise the installed script with controlled external filesystem tools."""
+@dataclass(frozen=True)
+class GrowthContext:
+    """Controlled filesystem-tool peers and their recorded calls for one case."""
 
-    @pytest.fixture(autouse=True)
-    def _prepare_case(self) -> Iterator[None]:
-        """Create fake growpart and resize2fs process boundaries."""
-        with ExitStack() as cleanup:
-            self.temporary = tempfile.TemporaryDirectory()
-            cleanup.enter_context(self.temporary)
-            self.directory = Path(self.temporary.name)
-            self.calls = self.directory / "calls"
-            self._tool("growpart", "growpart.sh")
-            self._tool("resize2fs", "resize2fs.sh")
-            yield
+    directory: Path
+    calls: Path
 
-    def _tool(self, name: str, fixture: str) -> None:
-        path = self.directory / name
-        shutil.copyfile(ROOT / "tests/fixtures/rootfs" / fixture, path)
-        path.chmod(0o755)
-
-    def _run(
+    def run(
         self, growpart_status: int, resize2fs_status: int = 0
     ) -> subprocess.CompletedProcess[str]:
+        """Run the growth script with controlled external-tool exit statuses."""
         environment = os.environ.copy()
         environment.update(
             {
@@ -61,49 +50,72 @@ class MicroSDGrowTests:
             env=environment,
         )
 
-    def _calls(self) -> list[str]:
+    def recorded_calls(self) -> list[str]:
+        """Read the filesystem-tool actions observed by this case's executable peers."""
         if not self.calls.exists():
             return []
         return self.calls.read_text(encoding="utf-8").splitlines()
 
-    def test_grown_partition_is_followed_by_filesystem_growth(self) -> None:
+
+@pytest.fixture
+def growth() -> Iterator[GrowthContext]:
+    """Create fake growpart and resize2fs process boundaries."""
+    with ExitStack() as cleanup:
+        temporary = tempfile.TemporaryDirectory()
+        cleanup.enter_context(temporary)
+        directory = Path(temporary.name)
+        for name, fixture in (("growpart", "growpart.sh"), ("resize2fs", "resize2fs.sh")):
+            path = directory / name
+            shutil.copyfile(ROOT / "tests/fixtures/rootfs" / fixture, path)
+            path.chmod(0o755)
+        yield GrowthContext(directory, directory / "calls")
+
+
+class MicroSDGrowTests:
+    """Exercise the installed script with controlled external filesystem tools."""
+
+    def test_grown_partition_is_followed_by_filesystem_growth(self, growth: GrowthContext) -> None:
         """A successful partition change proceeds to filesystem growth."""
-        result = self._run(0)
+        result = growth.run(0)
 
         assert (result.returncode) == (0), result.stderr
-        assert (self._calls()) == (
+        assert (growth.recorded_calls()) == (
             [
                 "growpart:--update=on /dev/mmcblk0 2",
                 "resize2fs:/dev/mmcblk0p2",
             ]
         )
 
-    def test_nochange_is_success_and_still_repairs_filesystem_size(self) -> None:
+    def test_nochange_is_success_and_still_repairs_filesystem_size(
+        self, growth: GrowthContext
+    ) -> None:
         """Growpart NOCHANGE still lets resize2fs repair an interrupted run."""
-        result = self._run(1)
+        result = growth.run(1)
 
         assert (result.returncode) == (0), result.stderr
-        assert (self._calls()) == (
+        assert (growth.recorded_calls()) == (
             [
                 "growpart:--update=on /dev/mmcblk0 2",
                 "resize2fs:/dev/mmcblk0p2",
             ]
         )
 
-    def test_partition_error_prevents_filesystem_growth(self) -> None:
+    def test_partition_error_prevents_filesystem_growth(self, growth: GrowthContext) -> None:
         """A real partition failure is returned before resize2fs can run."""
-        result = self._run(2)
+        result = growth.run(2)
 
         assert (result.returncode) == (2)
         assert (result.stderr) == ("growpart failed\n")
-        assert (self._calls()) == (["growpart:--update=on /dev/mmcblk0 2"])
+        assert (growth.recorded_calls()) == (["growpart:--update=on /dev/mmcblk0 2"])
 
-    def test_resize_failure_is_reported_after_partition_success(self) -> None:
+    def test_resize_failure_is_reported_after_partition_success(
+        self, growth: GrowthContext
+    ) -> None:
         """A resize2fs failure is visible after successful partition handling."""
-        result = self._run(0, resize2fs_status=3)
+        result = growth.run(0, resize2fs_status=3)
 
         assert (result.returncode) == (3)
-        assert (self._calls()) == (
+        assert (growth.recorded_calls()) == (
             [
                 "growpart:--update=on /dev/mmcblk0 2",
                 "resize2fs:/dev/mmcblk0p2",

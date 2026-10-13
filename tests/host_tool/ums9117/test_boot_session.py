@@ -7,7 +7,7 @@ import base64
 import tempfile
 import zlib
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -72,20 +72,18 @@ def _tree() -> bytes:
 class BootSessionHostTests:
     """Validate bounded copies and atomic rejection without physical wrappers."""
 
-    executable: ClassVar[Path]
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_peer(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def executable(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         """Link the actual C99 operation separately from the host fixture peer."""
         with c_build_directory(tmp_path_factory, "boot_session") as temporary:
             work = temporary
             includes = work / "include"
             includes.mkdir()
             (includes / "ums9117-common").symlink_to(ROOT / "platforms/ums9117/common")
-            cls.executable = work / "boot-session"
+            executable = work / "boot-session"
             compile_c(
-                cls.executable,
+                executable,
                 [
                     "-std=c99",
                     "-pedantic",
@@ -102,10 +100,11 @@ class BootSessionHostTests:
                 name="compile bounded boot-session host peer",
                 check=True,
             )
-            yield
+            yield executable
 
-    def copy_session(
+    def copy_session(  # noqa: PLR0913 -- executable and wire extents stay explicit.
         self,
+        executable: Path,
         record: bytes,
         tree: bytes,
         *,
@@ -119,7 +118,7 @@ class BootSessionHostTests:
             (work / "record.bin").write_bytes(record)
             (work / "tree.bin").write_bytes(tree)
             result = run_process(
-                [str(self.executable), mode, str(record_bytes), str(tree_bytes)],
+                [str(executable), mode, str(record_bytes), str(tree_bytes)],
                 name="run bounded boot-session host peer",
                 cwd=work,
                 timeout=10,
@@ -131,6 +130,7 @@ class BootSessionHostTests:
 
     def assert_rejected(  # noqa: PLR0913 -- rejection inputs stay visible.
         self,
+        executable: Path,
         record: bytes,
         tree: bytes,
         status: int,
@@ -141,6 +141,7 @@ class BootSessionHostTests:
     ) -> None:
         """Leave the tree and acknowledgement untouched when a request is invalid."""
         actual = self.copy_session(
+            executable,
             record,
             tree,
             mode=mode,
@@ -150,7 +151,9 @@ class BootSessionHostTests:
         assert (actual) == ((status, tree, b"u" * 32))
 
     @pytest.mark.parametrize("tree_bytes", [896, 2048], ids=["exact-slot-extent", "whole-tree"])
-    def test_valid_record_copies_only_slots_and_session_output(self, tree_bytes: int) -> None:
+    def test_valid_record_copies_only_slots_and_session_output(
+        self, executable: Path, tree_bytes: int
+    ) -> None:
         """Copy all four values while preserving record, guards and other tree bytes."""
         tree = _tree()
         expected = bytearray(tree)
@@ -158,7 +161,7 @@ class BootSessionHostTests:
         expected[384:452] = CLIENT_KEY
         expected[512:544] = SESSION_ID
         expected[640:896] = USB_CONFIG
-        assert self.copy_session(_record(), tree, tree_bytes=tree_bytes) == (
+        assert self.copy_session(executable, _record(), tree, tree_bytes=tree_bytes) == (
             0,
             bytes(expected),
             SESSION_ID,
@@ -179,12 +182,18 @@ class BootSessionHostTests:
         ],
     )
     def test_bad_layout_output_and_truncated_tree_are_atomic(
-        self, mode: str, record_bytes: int, tree_bytes: int, status: int
+        self, executable: Path, mode: str, record_bytes: int, tree_bytes: int, status: int
     ) -> None:
         """Reject invalid extents, alignment and missing output before any copying."""
         record, tree = _record(), _tree()
         self.assert_rejected(
-            record, tree, status, mode=mode, record_bytes=record_bytes, tree_bytes=tree_bytes
+            executable,
+            record,
+            tree,
+            status,
+            mode=mode,
+            record_bytes=record_bytes,
+            tree_bytes=tree_bytes,
         )
 
     @pytest.mark.parametrize(
@@ -203,7 +212,7 @@ class BootSessionHostTests:
         ],
     )
     def test_corrupt_record_and_empty_material_are_atomic(
-        self, start: int, replacement: bytes | None, status: int
+        self, executable: Path, start: int, replacement: bytes | None, status: int
     ) -> None:
         """Reject malformed header, CRC, reserved fields and absent session material."""
         record = bytearray(_record())
@@ -213,7 +222,7 @@ class BootSessionHostTests:
         else:
             record[start : start + len(replacement)] = replacement
             malformed = _seal_record(record)
-        self.assert_rejected(malformed, _tree(), status)
+        self.assert_rejected(executable, malformed, _tree(), status)
 
     @pytest.mark.parametrize(
         ("start", "replacement", "status"),
@@ -242,12 +251,12 @@ class BootSessionHostTests:
         ],
     )
     def test_malformed_client_key_and_usb_text_are_atomic(
-        self, start: int, replacement: bytes, status: int
+        self, executable: Path, start: int, replacement: bytes, status: int
     ) -> None:
         """Invalid SSH key encodings and USB text or padding never personalize the tree."""
         record = bytearray(_record())
         record[start : start + len(replacement)] = replacement
-        self.assert_rejected(_seal_record(record), _tree(), status)
+        self.assert_rejected(executable, _seal_record(record), _tree(), status)
 
     @pytest.mark.parametrize("defect", ["absent", "duplicate", "overlapping"])
     @pytest.mark.parametrize(
@@ -256,7 +265,7 @@ class BootSessionHostTests:
         ids=["rng-seed", "client-key", "session-id", "usb-session"],
     )
     def test_absent_or_ambiguous_marker_slots_are_atomic(
-        self, offset: int, marker: int, length: int, defect: str
+        self, executable: Path, offset: int, marker: int, length: int, defect: str
     ) -> None:
         """Every marker slot must be present exactly once, including overlapping runs."""
         tree = bytearray(_tree())
@@ -266,7 +275,7 @@ class BootSessionHostTests:
             tree[1024 : 1024 + length] = bytes([marker]) * length
         else:
             tree[offset + length] = marker
-        self.assert_rejected(_record(), bytes(tree), 10)
+        self.assert_rejected(executable, _record(), bytes(tree), 10)
 
     @pytest.mark.parametrize("defect", ["absent", "duplicate", "unterminated"])
     @pytest.mark.parametrize(
@@ -280,7 +289,7 @@ class BootSessionHostTests:
         ids=["rng-seed", "client-key", "session-id", "usb-session"],
     )
     def test_absent_or_duplicate_property_names_are_atomic(
-        self, offset: int, name: bytes, defect: str
+        self, executable: Path, offset: int, name: bytes, defect: str
     ) -> None:
         """Nul-terminated names must identify each slot uniquely before values change."""
         tree = bytearray(_tree())
@@ -290,4 +299,4 @@ class BootSessionHostTests:
             tree[1400 : 1400 + len(name)] = name
         else:
             tree[offset + len(name) - 1] = ord("X")
-        self.assert_rejected(_record(), bytes(tree), 10)
+        self.assert_rejected(executable, _record(), bytes(tree), 10)

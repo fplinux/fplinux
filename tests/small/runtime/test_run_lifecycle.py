@@ -7,6 +7,7 @@ import contextlib
 import os
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
@@ -15,16 +16,23 @@ from fplinux_cli.artifacts.bundles import publish_current_bundle
 from fplinux_cli.manifests import targets
 from fplinux_cli.runtime import bundle_session, runner
 
-from tests.small.build.command_fixtures import CommandBundleFixture
+from tests.small.build.command_fixtures import (
+    command_bundle as command_bundle,  # noqa: PLC0414 -- pytest fixture export.
+)
+
+if TYPE_CHECKING:
+    from tests.small.build.command_fixtures import CommandBundleContext
 
 
-class RunLifecycleTests(CommandBundleFixture):
+class RunLifecycleTests:
     """Keep cache hits and readers ahead of every mutable or external action."""
 
-    def test_run_refuses_an_unbuilt_type_before_starting_the_loader(self) -> None:
+    def test_run_refuses_an_unbuilt_type_before_starting_the_loader(
+        self, command_bundle: CommandBundleContext
+    ) -> None:
         """A release bundle cannot satisfy an explicit debug run."""
         with (
-            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(common, "ROOT", command_bundle.root),
             mock.patch(
                 "fplinux_cli.runtime.runner.os.execv",
                 side_effect=AssertionError("missing bundle must not run"),
@@ -33,12 +41,14 @@ class RunLifecycleTests(CommandBundleFixture):
         ):
             runner.run_target("phone", build_type="debug")
 
-    def test_loader_event_path_is_resolved_from_the_invoking_directory(self) -> None:
+    def test_loader_event_path_is_resolved_from_the_invoking_directory(
+        self, command_bundle: CommandBundleContext
+    ) -> None:
         """Both runner entry points receive an absolute event destination owned by the caller."""
-        runner_path = self.bundle_path / "runner/run.py"
+        runner_path = command_bundle.bundle_path / "runner/run.py"
         with (
-            contextlib.chdir(self.root),
-            mock.patch.object(common, "ROOT", self.root),
+            contextlib.chdir(command_bundle.root),
+            mock.patch.object(common, "ROOT", command_bundle.root),
             mock.patch("fplinux_cli.runtime.runner.os.execv") as execute,
             mock.patch(
                 "fplinux_cli.runtime.runner.subprocess.run",
@@ -50,16 +60,18 @@ class RunLifecycleTests(CommandBundleFixture):
         expected = [
             os.fsencode(runner_path),
             b"--events",
-            os.fsencode(self.root / "events/load.jsonl"),
+            os.fsencode(command_bundle.root / "events/load.jsonl"),
         ]
         assert (execute.call_args.args[1]) == (expected)
         assert (child.call_args.args[0]) == (expected)
 
-    def test_run_executes_a_runner_from_the_resolved_generation(self) -> None:
+    def test_run_executes_a_runner_from_the_resolved_generation(
+        self, command_bundle: CommandBundleContext
+    ) -> None:
         """Resolve current once and preserve that immutable generation path."""
-        runner_path = self.bundle_path / "runner/run.py"
+        runner_path = command_bundle.bundle_path / "runner/run.py"
         with (
-            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(common, "ROOT", command_bundle.root),
             mock.patch.object(targets, "load_target", return_value={}),
             mock.patch("fplinux_cli.runtime.runner.os.execv") as execute,
         ):
@@ -98,14 +110,16 @@ class RunLifecycleTests(CommandBundleFixture):
                 boot="microsd",
             )
 
-    def test_microsd_context_opens_the_selected_profile_runner(self) -> None:
+    def test_microsd_context_opens_the_selected_profile_runner(
+        self, command_bundle: CommandBundleContext
+    ) -> None:
         """The microSD boot mode runs the microSD profile's generation, not the default one."""
-        profile_path = self._create_generation("b" * 64, profile="microsd-uboot")
-        publish_current_bundle(self.output, "phone", profile_path, "microsd-uboot")
+        profile_path = command_bundle.create_generation("b" * 64, profile="microsd-uboot")
+        publish_current_bundle(command_bundle.output, "phone", profile_path, "microsd-uboot")
         runner_path = profile_path / "runner/run.py"
 
         with (
-            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(common, "ROOT", command_bundle.root),
             mock.patch.object(
                 targets,
                 "load_target",
@@ -117,12 +131,14 @@ class RunLifecycleTests(CommandBundleFixture):
 
         execute.assert_called_once_with(os.fsencode(runner_path), [os.fsencode(runner_path)])
 
-    def test_run_profile_executes_only_that_profiles_current_generation(self) -> None:
+    def test_run_profile_executes_only_that_profiles_current_generation(
+        self, command_bundle: CommandBundleContext
+    ) -> None:
         """A named run does not fall back to the target's default bundle pointer."""
         profile = "microsd-uboot"
-        profile_path = self._create_generation("b" * 64, profile=profile)
+        profile_path = command_bundle.create_generation("b" * 64, profile=profile)
         profile_bundle = publish_current_bundle(
-            self.output,
+            command_bundle.output,
             "phone",
             profile_path,
             profile,
@@ -130,7 +146,7 @@ class RunLifecycleTests(CommandBundleFixture):
         runner_path = profile_bundle.path / "runner/run.py"
 
         with (
-            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(common, "ROOT", command_bundle.root),
             mock.patch.object(
                 targets,
                 "load_target",
@@ -162,13 +178,15 @@ class RunLifecycleTests(CommandBundleFixture):
 
         execute.assert_not_called()
 
-    def test_stale_build_only_profile_bundle_remains_non_runnable(self) -> None:
+    def test_stale_build_only_profile_bundle_remains_non_runnable(
+        self, command_bundle: CommandBundleContext
+    ) -> None:
         """Changing source policy cannot authorize an older build-only bundle."""
         profile = "microsd-uboot"
-        profile_path = self._create_generation("c" * 64, profile=profile, runnable=False)
-        publish_current_bundle(self.output, "phone", profile_path, profile)
+        profile_path = command_bundle.create_generation("c" * 64, profile=profile, runnable=False)
+        publish_current_bundle(command_bundle.output, "phone", profile_path, profile)
         with (
-            mock.patch.object(common, "ROOT", self.root),
+            mock.patch.object(common, "ROOT", command_bundle.root),
             mock.patch.object(
                 targets,
                 "load_target",

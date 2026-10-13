@@ -1,0 +1,5 @@
+config ORIGINAL
+	bool "Original"
+
+config NEW
+    bool "New"

@@ -20,14 +20,12 @@ if TYPE_CHECKING:
 class QuakeVtTests:
     """Observe ownership changes without drawing, running the game or opening a VT."""
 
-    executable: Path
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def executable(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         """Link the host harness once for this test group."""
         with c_build_directory(tmp_path_factory, "quake-vt") as directory:
-            cls.executable = directory / "quake-vt"
+            executable = directory / "quake-vt"
             flags = shlex.split(
                 run_process(
                     ["pkg-config", "--cflags", "--libs", "libdrm"],
@@ -37,7 +35,7 @@ class QuakeVtTests:
                 ).stdout
             )
             compile_c(
-                cls.executable,
+                executable,
                 [
                     "-std=gnu11",
                     "-Wall",
@@ -59,12 +57,14 @@ class QuakeVtTests:
                 name="compile Quake event pump with fake engine and device boundaries",
                 check=True,
             )
-            yield
+            yield executable
 
-    def test_event_pump_releases_and_reacquires_input_without_a_frame(self) -> None:
+    def test_event_pump_releases_and_reacquires_input_without_a_frame(
+        self, executable: Path
+    ) -> None:
         """A modal event loop must service display handoff before processing input."""
         run_process(
-            [str(self.executable)],
+            [str(executable)],
             name="observe Quake input ownership without rendering",
             timeout=5,
             check=True,

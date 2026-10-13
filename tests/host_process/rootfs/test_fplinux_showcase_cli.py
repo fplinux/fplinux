@@ -7,8 +7,9 @@ import os
 import shlex
 import tempfile
 from contextlib import ExitStack
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -24,75 +25,138 @@ SOURCE = APORT / "fplinux-showcase.c"
 FAKE_DEVICES = ROOT / "tests/host_process/rootfs/fplinux-showcase-fake-devices.c"
 
 
+@dataclass(frozen=True)
+class ShowcaseBinaries:
+    """Immutable executables and the root compiled into class discovery."""
+
+    executable: Path
+    discovery_root: Path
+    discovery_executable: Path
+
+
+def compile_with_class_roots(class_root: Path) -> Path:
+    """Compile real class discovery with simulated input and display devices."""
+    executable = class_root / "fplinux-showcase"
+    leds = class_root / "cases" / "*" / "leds" / "*" / "brightness"
+    drm_flags = shlex.split(
+        run_process(
+            ["pkg-config", "--cflags", "--libs", "libdrm"],
+            name="read DRM compiler and linker flags",
+            timeout=10,
+            check=True,
+        ).stdout
+    )
+    run_process(
+        [
+            "cc",
+            "-O2",
+            "-std=c11",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            f"-I{APORT}",
+            f"-I{SHARED}",
+            f'-DFPLINUX_SHOWCASE_KEYPAD_LED_GLOB="{leds}"',
+            str(SOURCE),
+            str(APORT / "showcase-hardware.c"),
+            str(APORT / "armada-scene.c"),
+            str(APORT / "armada-storyboard.c"),
+            str(APORT / "armada-renderer.c"),
+            str(ROOT / "lib/fplinux/fplinux-font.c"),
+            str(ROOT / "lib/fplinux/fplinux-brightness-client.c"),
+            str(ROOT / "lib/fplinux/fplinux-cli.c"),
+            str(FAKE_DEVICES),
+            "-Wl,--wrap=open",
+            "-Wl,--wrap=fopen",
+            "-Wl,--wrap=ioctl",
+            "-Wl,--wrap=read",
+            "-Wl,--wrap=write",
+            "-Wl,--wrap=connect",
+            "-Wl,--wrap=close",
+            *drm_flags,
+            "-o",
+            str(executable),
+        ],
+        name="compile FPLinux Showcase class discovery",
+        timeout=30,
+        check=True,
+    )
+    return executable
+
+
+def add_class_device(root: Path, name: str) -> None:
+    """Create one controlled brightness class device."""
+    device = root / name
+    device.mkdir(parents=True)
+    (device / "brightness").write_text("1\n", encoding="ascii")
+    (device / "max_brightness").write_text("10\n", encoding="ascii")
+    (device / "trigger").write_text("[none] input-events\n", encoding="ascii")
+
+
+@pytest.fixture(scope="class")
+def binaries() -> Iterator[ShowcaseBinaries]:
+    """Compile strict host binaries; no framebuffer or phone is supplied."""
+    with ExitStack() as cleanup:
+        temporary = tempfile.TemporaryDirectory()
+        cleanup.enter_context(temporary)
+        executable = Path(temporary.name) / "fplinux-showcase"
+        drm_flags = shlex.split(
+            run_process(
+                ["pkg-config", "--cflags", "--libs", "libdrm"],
+                name="read DRM compiler and linker flags",
+                timeout=10,
+                check=True,
+            ).stdout
+        )
+        run_process(
+            [
+                "cc",
+                "-O2",
+                "-std=c11",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                f"-I{APORT}",
+                f"-I{SHARED}",
+                str(SOURCE),
+                str(APORT / "showcase-hardware.c"),
+                str(APORT / "armada-scene.c"),
+                str(APORT / "armada-storyboard.c"),
+                str(APORT / "armada-renderer.c"),
+                str(ROOT / "lib/fplinux/fplinux-font.c"),
+                str(ROOT / "lib/fplinux/fplinux-drm-session.c"),
+                str(ROOT / "lib/fplinux/fplinux-brightness-client.c"),
+                str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                *drm_flags,
+                "-o",
+                str(executable),
+            ],
+            name="compile FPLinux Showcase command-line boundary",
+            timeout=30,
+            check=True,
+        )
+        discovery_root = Path(temporary.name) / "class-discovery"
+        (discovery_root / "cases").mkdir(parents=True)
+        discovery_executable = compile_with_class_roots(discovery_root)
+        yield ShowcaseBinaries(executable, discovery_root, discovery_executable)
+
+
+@pytest.fixture
+def class_tree(binaries: ShowcaseBinaries) -> Iterator[Path]:
+    """Give each invocation a fresh class tree consumed by the compiled glob."""
+    with ExitStack() as cleanup:
+        case = tempfile.TemporaryDirectory(dir=binaries.discovery_root / "cases")
+        cleanup.enter_context(case)
+        yield Path(case.name)
+
+
 class FplinuxShowcaseCliTests:
     """Run the actual binary only through its argument and early-startup boundary."""
 
-    temporary: ClassVar[tempfile.TemporaryDirectory[str]]
-    executable: ClassVar[Path]
-    discovery_root: ClassVar[Path]
-    discovery_executable: ClassVar[Path]
-
-    @pytest.fixture(scope="class", autouse=True)
-    @classmethod
-    def _compiled_binaries(cls) -> Iterator[None]:
-        """Compile strict host binaries; no framebuffer or phone is supplied."""
-        with ExitStack() as cleanup:
-            cls.temporary = tempfile.TemporaryDirectory()
-            cleanup.enter_context(cls.temporary)
-            cls.executable = Path(cls.temporary.name) / "fplinux-showcase"
-            drm_flags = shlex.split(
-                run_process(
-                    ["pkg-config", "--cflags", "--libs", "libdrm"],
-                    name="read DRM compiler and linker flags",
-                    timeout=10,
-                    check=True,
-                ).stdout
-            )
-            run_process(
-                [
-                    "cc",
-                    "-O2",
-                    "-std=c11",
-                    "-Wall",
-                    "-Wextra",
-                    "-Werror",
-                    f"-I{APORT}",
-                    f"-I{SHARED}",
-                    str(SOURCE),
-                    str(APORT / "showcase-hardware.c"),
-                    str(APORT / "armada-scene.c"),
-                    str(APORT / "armada-storyboard.c"),
-                    str(APORT / "armada-renderer.c"),
-                    str(ROOT / "lib/fplinux/fplinux-font.c"),
-                    str(ROOT / "lib/fplinux/fplinux-drm-session.c"),
-                    str(ROOT / "lib/fplinux/fplinux-brightness-client.c"),
-                    str(ROOT / "lib/fplinux/fplinux-cli.c"),
-                    *drm_flags,
-                    "-o",
-                    str(cls.executable),
-                ],
-                name="compile FPLinux Showcase command-line boundary",
-                timeout=30,
-                check=True,
-            )
-            cls.discovery_root = Path(cls.temporary.name) / "class-discovery"
-            (cls.discovery_root / "cases").mkdir(parents=True)
-            cls.discovery_executable = cls.compile_with_class_roots(cls.discovery_root)
-            yield
-
-    @pytest.fixture(autouse=True)
-    def _prepare_class_tree(self, _compiled_binaries: None) -> Iterator[None]:
-        """Give each invocation a fresh class tree consumed by the compiled glob."""
-        with ExitStack() as cleanup:
-            case = tempfile.TemporaryDirectory(dir=self.discovery_root / "cases")
-            cleanup.enter_context(case)
-            self.work = Path(case.name)
-            yield
-
-    def test_help_returns_before_keypad_lookup(self) -> None:
+    def test_help_returns_before_keypad_lookup(self, binaries: ShowcaseBinaries) -> None:
         """Help lists the Showcase options and exits before any device lookup."""
         result = run_process(
-            [str(self.executable), "--help"],
+            [str(binaries.executable), "--help"],
             name="show FPLinux Showcase help",
             timeout=5,
         )
@@ -127,11 +191,11 @@ class FplinuxShowcaseCliTests:
         ],
     )
     def test_invalid_or_repeated_options_fail_before_keypad_lookup(
-        self, arguments: tuple[str, ...]
+        self, binaries: ShowcaseBinaries, arguments: tuple[str, ...]
     ) -> None:
         """Bad run counts and repeated single-use options fail before any device lookup."""
         result = run_process(
-            [str(self.executable), *arguments],
+            [str(binaries.executable), *arguments],
             name=f"reject FPLinux Showcase arguments {arguments}",
             timeout=5,
         )
@@ -142,15 +206,17 @@ class FplinuxShowcaseCliTests:
         assert ("required keypad") not in (result.stderr)
         assert (result.stdout) == ("")
 
-    def test_valid_options_reach_keypad_lookup(self) -> None:
+    def test_valid_options_reach_keypad_lookup(
+        self, binaries: ShowcaseBinaries, class_tree: Path
+    ) -> None:
         """Valid overrides are accepted; startup then fails to find the keypad on this host."""
         result = run_process(
             [
-                str(self.executable),
+                str(binaries.executable),
                 "--runs",
                 "1",
                 "--keypad-led",
-                str(self.work / "keypad-led"),
+                str(class_tree / "keypad-led"),
             ],
             name="accept FPLinux Showcase options before keypad lookup",
             timeout=5,
@@ -161,76 +227,20 @@ class FplinuxShowcaseCliTests:
         assert ("Try '") not in (result.stderr)
         assert (result.stdout) == ("")
 
-    @staticmethod
-    def compile_with_class_roots(class_root: Path) -> Path:
-        """Compile real class discovery with simulated input and display devices."""
-        executable = class_root / "fplinux-showcase"
-        leds = class_root / "cases" / "*" / "leds" / "*" / "brightness"
-        drm_flags = shlex.split(
-            run_process(
-                ["pkg-config", "--cflags", "--libs", "libdrm"],
-                name="read DRM compiler and linker flags",
-                timeout=10,
-                check=True,
-            ).stdout
-        )
-        run_process(
-            [
-                "cc",
-                "-O2",
-                "-std=c11",
-                "-Wall",
-                "-Wextra",
-                "-Werror",
-                f"-I{APORT}",
-                f"-I{SHARED}",
-                f'-DFPLINUX_SHOWCASE_KEYPAD_LED_GLOB="{leds}"',
-                str(SOURCE),
-                str(APORT / "showcase-hardware.c"),
-                str(APORT / "armada-scene.c"),
-                str(APORT / "armada-storyboard.c"),
-                str(APORT / "armada-renderer.c"),
-                str(ROOT / "lib/fplinux/fplinux-font.c"),
-                str(ROOT / "lib/fplinux/fplinux-brightness-client.c"),
-                str(ROOT / "lib/fplinux/fplinux-cli.c"),
-                str(FAKE_DEVICES),
-                "-Wl,--wrap=open",
-                "-Wl,--wrap=fopen",
-                "-Wl,--wrap=ioctl",
-                "-Wl,--wrap=read",
-                "-Wl,--wrap=write",
-                "-Wl,--wrap=connect",
-                "-Wl,--wrap=close",
-                *drm_flags,
-                "-o",
-                str(executable),
-            ],
-            name="compile FPLinux Showcase class discovery",
-            timeout=30,
-            check=True,
-        )
-        return executable
-
-    def add_class_device(self, root: Path, name: str) -> None:
-        """Create one controlled brightness class device."""
-        device = root / name
-        device.mkdir(parents=True)
-        (device / "brightness").write_text("1\n", encoding="ascii")
-        (device / "max_brightness").write_text("10\n", encoding="ascii")
-        (device / "trigger").write_text("[none] input-events\n", encoding="ascii")
-
-    def test_default_class_discovery_rejects_unusable_keyboard_led(self) -> None:
+    def test_default_class_discovery_rejects_unusable_keyboard_led(
+        self, binaries: ShowcaseBinaries, class_tree: Path
+    ) -> None:
         """Startup validates the keyboard LED even when another class LED is usable."""
-        class_root = self.work
-        self.add_class_device(class_root / "leds", "aaa-status")
-        self.add_class_device(class_root / "leds", "panel:kbd_backlight")
+        class_root = class_tree
+        add_class_device(class_root / "leds", "aaa-status")
+        add_class_device(class_root / "leds", "panel:kbd_backlight")
         keyboard_led = class_root / "leds/panel:kbd_backlight"
         (keyboard_led / "max_brightness").write_text("0\n", encoding="ascii")
 
         environment = os.environ.copy()
         environment["SHOWCASE_KEYPAD_LED"] = str(keyboard_led)
         environment["SHOWCASE_BRIGHTNESS_SOCKET"] = str(class_root / "absent-brightness.sock")
-        executable = self.discovery_executable
+        executable = binaries.discovery_executable
 
         result = run_process(
             [str(executable), "--runs", "1"],
@@ -243,12 +253,14 @@ class FplinuxShowcaseCliTests:
         assert ("required keypad LED interface is unavailable") in (result.stderr)
         assert ("display activation") not in (result.stderr)
 
-    def test_default_class_discovery_rejects_ambiguous_keyboard_leds(self) -> None:
+    def test_default_class_discovery_rejects_ambiguous_keyboard_leds(
+        self, binaries: ShowcaseBinaries, class_tree: Path
+    ) -> None:
         """Multiple kbd_backlight LED functions stop before any phone input opens."""
-        class_root = self.work
-        self.add_class_device(class_root / "leds", "left:kbd_backlight")
-        self.add_class_device(class_root / "leds", "right:kbd_backlight")
-        executable = self.discovery_executable
+        class_root = class_tree
+        add_class_device(class_root / "leds", "left:kbd_backlight")
+        add_class_device(class_root / "leds", "right:kbd_backlight")
+        executable = binaries.discovery_executable
 
         result = run_process(
             [str(executable), "--runs", "1"],

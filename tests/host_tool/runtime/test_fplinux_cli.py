@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -21,16 +21,14 @@ SHARED = ROOT / "include/fplinux"
 class FPLinuxCliTests:
     """Use a command fixture to observe parsing, validation and borrowed argv."""
 
-    executable: ClassVar[Path]
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def cli_executable(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         """Link the production library with a resource-free command fixture."""
         with c_build_directory(tmp_path_factory, "cli-probe") as directory:
-            cls.executable = directory / "cli-probe"
+            executable = directory / "cli-probe"
             compile_c(
-                cls.executable,
+                executable,
                 [
                     "-std=c11",
                     "-O2",
@@ -44,7 +42,7 @@ class FPLinuxCliTests:
                 name="compile shared CLI fixture",
                 check=True,
             )
-            yield
+            yield executable
 
     @pytest.mark.parametrize(
         "arguments",
@@ -66,17 +64,17 @@ class FPLinuxCliTests:
         ],
     )
     def test_help_wins_without_invoking_command_validation(
-        self, arguments: tuple[str, ...]
+        self, cli_executable: Path, arguments: tuple[str, ...]
     ) -> None:
         """Recognized help is stable, stdout-only and precedes all validation."""
         expected = run_process(
-            [str(self.executable), "values", "--help"], name="read CLI help", timeout=5
+            [str(cli_executable), "values", "--help"], name="read CLI help", timeout=5
         ).stdout
         assert expected.startswith("Usage: cli-probe ")
         assert ("--input=PATH") in (expected)
         assert ("-h, --help") in (expected)
         result = run_process(
-            [str(self.executable), "values", *arguments],
+            [str(cli_executable), "values", *arguments],
             name="check help precedence",
             timeout=5,
         )
@@ -110,11 +108,11 @@ class FPLinuxCliTests:
         ],
     )
     def test_syntax_and_cardinality_errors_precede_callbacks(
-        self, arguments: tuple[str, ...]
+        self, cli_executable: Path, arguments: tuple[str, ...]
     ) -> None:
         """Malformed input never reaches the command's option callback."""
         result = run_process(
-            [str(self.executable), "values", *arguments],
+            [str(cli_executable), "values", *arguments],
             name="check syntax before callbacks",
             timeout=5,
         )
@@ -129,11 +127,11 @@ class FPLinuxCliTests:
         ids=["display-display-m-0-0", "display-ms-0-display-2000"],
     )
     def test_exact_names_prefixes_and_repeats_preserve_occurrence_order(
-        self, options: tuple[str, ...], expected_hold: int
+        self, cli_executable: Path, options: tuple[str, ...], expected_hold: int
     ) -> None:
         """Exact display and unique display-ms prefixes select the right option."""
         result = run_process(
-            [str(self.executable), "values", "--input=old", "--inp", "new", *options],
+            [str(cli_executable), "values", "--input=old", "--inp", "new", *options],
             name="check exact match and occurrence order",
             timeout=5,
         )
@@ -141,10 +139,12 @@ class FPLinuxCliTests:
         assert ("input=new\ninput_count=2\n") in (result.stdout)
         assert (f"hold_ms={expected_hold}\n") in (result.stdout)
 
-    def test_invalid_earlier_value_is_not_hidden_by_later_value(self) -> None:
+    def test_invalid_earlier_value_is_not_hidden_by_later_value(
+        self, cli_executable: Path
+    ) -> None:
         """Every supplied occurrence reaches command-owned value validation."""
         result = run_process(
-            [str(self.executable), "values", "--input=x", "--display-ms=60001", "--display-ms=0"],
+            [str(cli_executable), "values", "--input=x", "--display-ms=60001", "--display-ms=0"],
             name="check earlier invalid value",
             timeout=5,
         )
@@ -152,10 +152,12 @@ class FPLinuxCliTests:
         assert (result.stdout) == ("")
         assert ("display-ms must be in 0..60000") in (result.stderr)
 
-    def test_interspersed_options_leave_the_original_argv_unchanged(self) -> None:
+    def test_interspersed_options_leave_the_original_argv_unchanged(
+        self, cli_executable: Path
+    ) -> None:
         """The caller retains the same ordering and strings after parsing."""
         result = run_process(
-            [str(self.executable), "values", "operand", "--input", "file", "--display"],
+            [str(cli_executable), "values", "operand", "--input", "file", "--display"],
             name="check borrowed argv ordering",
             timeout=5,
         )
@@ -166,10 +168,12 @@ class FPLinuxCliTests:
         )
 
     @pytest.mark.parametrize("value", ["--help", "--"], ids=["help", "separator"])
-    def test_consumed_help_and_separator_remain_option_values(self, value: str) -> None:
+    def test_consumed_help_and_separator_remain_option_values(
+        self, cli_executable: Path, value: str
+    ) -> None:
         """Value-taking options consume option-shaped strings verbatim."""
         result = run_process(
-            [str(self.executable), "values", "--input", value, "--display"],
+            [str(cli_executable), "values", "--input", value, "--display"],
             name="check option-shaped value",
             timeout=5,
         )
@@ -178,10 +182,10 @@ class FPLinuxCliTests:
         assert ("hold_ms=2000\n") in (result.stdout)
         assert ("Usage:") not in (result.stdout)
 
-    def test_separator_stops_options_but_keeps_positionals(self) -> None:
+    def test_separator_stops_options_but_keeps_positionals(self, cli_executable: Path) -> None:
         """A help-shaped operand after -- is an operand, not a help request."""
         result = run_process(
-            [str(self.executable), "values", "--input=x", "--", "--help"],
+            [str(cli_executable), "values", "--input=x", "--", "--help"],
             name="check positional after separator",
             timeout=5,
         )
@@ -189,11 +193,13 @@ class FPLinuxCliTests:
         assert ("operand=--help\n") in (result.stdout)
         assert ("Usage:") not in (result.stdout)
 
-    def test_opaque_tail_preserves_empty_and_option_shaped_arguments(self) -> None:
+    def test_opaque_tail_preserves_empty_and_option_shaped_arguments(
+        self, cli_executable: Path
+    ) -> None:
         """Tail consumers receive the original untouched suffix after --."""
         result = run_process(
             [
-                str(self.executable),
+                str(cli_executable),
                 "tail",
                 "--input=x",
                 "--",

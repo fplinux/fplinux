@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -27,14 +28,11 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-class FootprintCliTests:
-    """Use real archives and the public resolver without a build runtime or phone."""
+@dataclass(frozen=True)
+class FootprintCli:
+    """Own the checkout and reports measured by the public footprint commands."""
 
-    @pytest.fixture(autouse=True)
-    def _prepare_inputs(self, tmp_path: Path) -> None:
-        """Keep commands and artifacts in an isolated checkout."""
-        self.root = tmp_path
-        prepare_cli_checkout(self.root)
+    root: Path
 
     def run_cli(self, *arguments: str) -> subprocess.CompletedProcess[str]:
         """Run the actual public entry point with a bounded lifetime."""
@@ -72,6 +70,41 @@ class FootprintCliTests:
         publish_current_bundle(output, "example", published, profile, build_type=build_type)
         return published
 
+    def write_reports(self) -> None:
+        """Save small independent measurements with a known kernel and package delta."""
+        before: dict[str, Any] = {
+            "identity": {"target": "example", "generation": "before"},
+            "layers": {
+                "kernel_zimage_bytes": 1024,
+                "boot_artifact_bytes": {"image/ramboot.bin": 2048},
+                "embedded_initramfs": {"compression": "gzip"},
+            },
+            "rootfs": {
+                "content_sha256": "a" * 64,
+                "cpio_bytes": 512,
+                "regular_payload_bytes": 100,
+                "symlink_payload_bytes": 0,
+                "packages": {"example": {"version": "1-r0"}},
+                "files": {"/bin/example": {"size": 100}},
+            },
+            "optional_apks": {},
+        }
+        (self.root / "before.json").write_text(json.dumps(before))
+        before["layers"]["kernel_zimage_bytes"] = 2048
+        before["rootfs"]["packages"]["example"]["version"] = "2-r0"
+        (self.root / "after.json").write_text(json.dumps(before))
+
+
+@pytest.fixture
+def footprint_cli(tmp_path: Path) -> FootprintCli:
+    """Keep commands and artifacts in an isolated checkout."""
+    prepare_cli_checkout(tmp_path)
+    return FootprintCli(tmp_path)
+
+
+class FootprintCliTests:
+    """Use real archives and the public resolver without a build runtime or phone."""
+
     @pytest.mark.parametrize(
         ("profile", "build_type"),
         [
@@ -81,16 +114,16 @@ class FootprintCliTests:
         ],
     )
     def test_footprint_selects_exact_profile_and_build_type_in_json_and_text(
-        self, profile: str | None, build_type: str
+        self, footprint_cli: FootprintCli, profile: str | None, build_type: str
     ) -> None:
         """Readable and machine reports retain the selected identity and measured bytes."""
-        self.publish_bundle()
-        self.publish_bundle(build_type="debug")
-        self.publish_bundle(profile="microsd-uboot")
+        footprint_cli.publish_bundle()
+        footprint_cli.publish_bundle(build_type="debug")
+        footprint_cli.publish_bundle(profile="microsd-uboot")
         arguments = ["inspect", "footprint", "example", "--build-type", build_type]
         if profile is not None:
             arguments.extend(["--profile", profile])
-        result = self.run_cli(*arguments, "--json")
+        result = footprint_cli.run_cli(*arguments, "--json")
         assert (result.returncode) == (0), result.stderr
         report = json.loads(result.stdout)
         assert (report["identity"]["target"]) == ("example")
@@ -111,17 +144,19 @@ class FootprintCliTests:
             assert (report["layers"]["embedded_initramfs"]) is None
         assert (report["rootfs"]["packages"]["shared"]["regular_payload_bytes"]) == (7)
         assert (report["rootfs"]["files"]["/bin/one-link"]["accounted_bytes"]) == (0)
-        text = self.run_cli(*arguments)
+        text = footprint_cli.run_cli(*arguments)
         assert (text.returncode) == (0), text.stderr
         assert ("Kernel zImage: 12 B") in (text.stdout)
         assert ("7 B  shared 1-r0") in (text.stdout)
         assert ("Nested layers overlap") in (text.stdout)
-        assert (str(self.root)) not in (text.stdout)
+        assert (str(footprint_cli.root)) not in (text.stdout)
 
-    def test_missing_build_type_fails_without_measurements(self) -> None:
+    def test_missing_build_type_fails_without_measurements(
+        self, footprint_cli: FootprintCli
+    ) -> None:
         """A release bundle cannot satisfy a request for a debug report."""
-        self.publish_bundle()
-        missing = self.run_cli(
+        footprint_cli.publish_bundle()
+        missing = footprint_cli.run_cli(
             "inspect", "footprint", "example", "--build-type", "debug", "--json"
         )
         assert (missing.returncode) == (1), missing.stderr
@@ -135,14 +170,16 @@ class FootprintCliTests:
             pytest.param("debug/initramfs.cpio", id="boot-archive"),
         ],
     )
-    def test_missing_payload_fails_without_partial_report_or_traceback(self, payload: str) -> None:
+    def test_missing_payload_fails_without_partial_report_or_traceback(
+        self, footprint_cli: FootprintCli, payload: str
+    ) -> None:
         """A selected RAM bundle must retain both composition and boot archives."""
-        published = self.publish_bundle()
+        published = footprint_cli.publish_bundle()
         path = published / payload
         original = path.read_bytes()
         path.unlink()
         try:
-            result = self.run_cli("inspect", "footprint", "example", "--json")
+            result = footprint_cli.run_cli("inspect", "footprint", "example", "--json")
             assert (result.returncode) == (1), result.stderr
             assert (result.stdout) == ("")
             assert (payload) in (result.stderr)
@@ -150,9 +187,11 @@ class FootprintCliTests:
         finally:
             path.write_bytes(original)
 
-    def test_kernel_embedding_composition_instead_of_boot_archive_is_rejected(self) -> None:
+    def test_kernel_embedding_composition_instead_of_boot_archive_is_rejected(
+        self, footprint_cli: FootprintCli
+    ) -> None:
         """Individually valid artifacts cannot report the wrong embedded boot content."""
-        output = self.root / ".cache/out"
+        output = footprint_cli.root / ".cache/out"
         output.mkdir(parents=True)
         staging = create_bundle_staging(output, "example")
         fixture = FootprintFixture(staging)
@@ -181,50 +220,30 @@ class FootprintCliTests:
         (staging / "build-manifest.json").write_text(json.dumps(manifest))
         published = publish_bundle_generation(output, "example", staging, bundle.generation)
         publish_current_bundle(output, "example", published)
-        result = self.run_cli("inspect", "footprint", "example", "--json")
+        result = footprint_cli.run_cli("inspect", "footprint", "example", "--json")
         assert (result.returncode) == (1), result.stderr
         assert (result.stdout) == ("")
         assert ("embedded initramfs differs") in (result.stderr)
         assert ("Traceback") not in (result.stderr)
 
-    def write_reports(self) -> None:
-        """Save small independent measurements with a known kernel and package delta."""
-        before: dict[str, Any] = {
-            "identity": {"target": "example", "generation": "before"},
-            "layers": {
-                "kernel_zimage_bytes": 1024,
-                "boot_artifact_bytes": {"image/ramboot.bin": 2048},
-                "embedded_initramfs": {"compression": "gzip"},
-            },
-            "rootfs": {
-                "content_sha256": "a" * 64,
-                "cpio_bytes": 512,
-                "regular_payload_bytes": 100,
-                "symlink_payload_bytes": 0,
-                "packages": {"example": {"version": "1-r0"}},
-                "files": {"/bin/example": {"size": 100}},
-            },
-            "optional_apks": {},
-        }
-        (self.root / "before.json").write_text(json.dumps(before))
-        before["layers"]["kernel_zimage_bytes"] = 2048
-        before["rootfs"]["packages"]["example"]["version"] = "2-r0"
-        (self.root / "after.json").write_text(json.dumps(before))
-
-    def test_diff_reports_saved_deltas_without_creating_cache(self) -> None:
+    def test_diff_reports_saved_deltas_without_creating_cache(
+        self, footprint_cli: FootprintCli
+    ) -> None:
         """Comparing saved measurements needs neither bundles nor build state."""
-        self.write_reports()
-        result = self.run_cli("inspect", "footprint-diff", "before.json", "after.json", "--json")
+        footprint_cli.write_reports()
+        result = footprint_cli.run_cli(
+            "inspect", "footprint-diff", "before.json", "after.json", "--json"
+        )
         assert (result.returncode) == (0), result.stderr
         report = json.loads(result.stdout)
         assert (report["kernel_zimage_byte_delta"]) == (1024)
         assert (report["packages"]["changed"]["example"]["after"]["version"]) == ("2-r0")
         assert report["same_rootfs_content"]
-        result = self.run_cli("inspect", "footprint-diff", "before.json", "after.json")
+        result = footprint_cli.run_cli("inspect", "footprint-diff", "before.json", "after.json")
         assert (result.returncode) == (0), result.stderr
         assert ("Kernel zImage delta: 1,024 B (1.0 KiB)") in (result.stdout)
         assert ("changed: example") in (result.stdout)
-        assert not ((self.root / ".cache").exists())
+        assert not ((footprint_cli.root / ".cache").exists())
 
     @pytest.mark.parametrize(
         "name",
@@ -232,21 +251,21 @@ class FootprintCliTests:
         ids=["missing", "invalid", "array", "empty"],
     )
     def test_diff_rejects_missing_invalid_and_unrelated_json_without_traceback(
-        self, name: str
+        self, footprint_cli: FootprintCli, name: str
     ) -> None:
         """Ordinary input mistakes yield CLI errors rather than partial comparisons."""
-        self.write_reports()
+        footprint_cli.write_reports()
         for fixture_name, content in (
             ("invalid.json", "broken"),
             ("array.json", "[]"),
             ("empty.json", "{}"),
         ):
-            (self.root / fixture_name).write_text(content)
-        result = self.run_cli("inspect", "footprint-diff", name, "after.json", "--json")
+            (footprint_cli.root / fixture_name).write_text(content)
+        result = footprint_cli.run_cli("inspect", "footprint-diff", name, "after.json", "--json")
         assert (result.returncode) == (1), result.stderr
         assert (result.stdout) == ("")
         assert ("Traceback") not in (result.stderr)
-        assert not ((self.root / ".cache").exists())
+        assert not ((footprint_cli.root / ".cache").exists())
 
     @pytest.mark.parametrize(
         "arguments",
@@ -256,13 +275,13 @@ class FootprintCliTests:
         ],
     )
     def test_events_help_and_saved_dump_rejection_are_available_without_phone(
-        self, arguments: tuple[str, ...]
+        self, footprint_cli: FootprintCli, arguments: tuple[str, ...]
     ) -> None:
         """Both loader commands expose event output and offline extraction rejects it."""
-        result = self.run_cli(*arguments, "--help")
+        result = footprint_cli.run_cli(*arguments, "--help")
         assert (result.returncode) == (0), result.stderr
         assert ("--events PATH") in (result.stdout)
-        result = self.run_cli(
+        result = footprint_cli.run_cli(
             "device-data",
             "prepare",
             "example",
@@ -273,4 +292,4 @@ class FootprintCliTests:
         )
         assert (result.returncode) == (1), result.stderr
         assert ("cannot be used with --from-dump") in (result.stderr)
-        assert not ((self.root / "events.jsonl").exists())
+        assert not ((footprint_cli.root / "events.jsonl").exists())

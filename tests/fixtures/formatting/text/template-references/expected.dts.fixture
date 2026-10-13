@@ -1,0 +1,5 @@
+#include "@TARGET@-identity.dtsi"
+&{/soc/device@0} {
+	alpha = "@DEVICE@";
+	zeta = <&{/soc/clock@0} 0x01>;
+};

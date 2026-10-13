@@ -75,18 +75,19 @@ def test_identity_probes_preserve_binary_stdin_for_remote_command(
     assert output.read_bytes() == payload
 
 
+@pytest.fixture
+def private_runtime() -> Iterator[Path]:
+    """Own the private runtime tree used by controlled SSH session inputs."""
+    with ExitStack() as cleanup:
+        temporary = tempfile.TemporaryDirectory()
+        cleanup.enter_context(temporary)
+        root = Path(temporary.name) / "runtime"
+        root.mkdir(mode=0o700)
+        yield root
+
+
 class SshTransportFakeToolTests:
     """Exercise external-tool boundaries with deterministic local programs."""
-
-    @pytest.fixture(autouse=True)
-    def _prepare_case(self) -> Iterator[None]:
-        """Create the private runtime root used by the controlled session inputs."""
-        with ExitStack() as cleanup:
-            self.temporary = tempfile.TemporaryDirectory()
-            cleanup.enter_context(self.temporary)
-            self.root = Path(self.temporary.name) / "runtime"
-            self.root.mkdir(mode=0o700)
-            yield
 
     @pytest.mark.parametrize(
         ("address_output", "route_output", "ready"),
@@ -110,15 +111,15 @@ class SshTransportFakeToolTests:
         ids=("connected", "route-through-another-link", "address-in-a-wider-network"),
     )
     def test_network_ready_requires_session_address_and_route_on_its_interface(
-        self, *, address_output: str, route_output: str, ready: bool
+        self, private_runtime: Path, *, address_output: str, route_output: str, ready: bool
     ) -> None:
         """Only the session's /30 host address and a route through the same link are ready."""
-        tool_directory = Path(self.temporary.name) / "bin"
+        tool_directory = private_runtime.parent / "bin"
         tool_directory.mkdir()
         ip_tool = tool_directory / "ip"
         shutil.copyfile(SSH_FIXTURES / "ip.sh", ip_tool)
         ip_tool.chmod(0o755)
-        session = create_ready_session(self.root)
+        session = create_ready_session(private_runtime)
         with mock.patch.dict(
             os.environ,
             {
@@ -131,13 +132,15 @@ class SshTransportFakeToolTests:
             readiness = ssh_transport._network_ready("usb0", session)  # noqa: SLF001
             assert readiness == ready
 
-    def test_reacquire_bounds_an_unresponsive_identity_command(self) -> None:
+    def test_reacquire_bounds_an_unresponsive_identity_command(
+        self, private_runtime: Path
+    ) -> None:
         """A stalled SSH probe cannot outlive the session reconnect deadline."""
-        session = create_ready_session(self.root)
+        session = create_ready_session(private_runtime)
         # A sleeping local process replaces an SSH channel that never replies.
         # USB discovery is controlled; the process timeout and cleanup are real.
         with (
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
+            mock.patch.object(ssh_transport, "_runtime_root", return_value=private_runtime),
             mock.patch.object(ssh_transport, "_usb_devices", return_value=[Path("/usb/phone")]),
             mock.patch.object(ssh_transport, "_ncm_interface", return_value="usb0"),
             mock.patch.object(ssh_transport, "_network_ready", return_value=True),
@@ -152,11 +155,13 @@ class SshTransportFakeToolTests:
                 ssh_transport.reacquire_bound_session(session)
             assert (time.monotonic() - started) < (3)
 
-    def test_initial_binding_retries_fake_ssh_tools_and_enforces_key_policy(self) -> None:
+    def test_initial_binding_retries_fake_ssh_tools_and_enforces_key_policy(
+        self, private_runtime: Path
+    ) -> None:
         """Retry deterministic keyscan output before accepting a matching session id."""
-        state = create_ready_session(self.root, status="prepared")
+        state = create_ready_session(private_runtime, status="prepared")
         Path(state["known_hosts"]).unlink()
-        tool_directory = Path(self.temporary.name) / "ssh-tools"
+        tool_directory = private_runtime.parent / "ssh-tools"
         tool_directory.mkdir()
         scan_count = tool_directory / "scan-count"
         ssh_arguments = tool_directory / "ssh-arguments"
@@ -170,7 +175,7 @@ class SshTransportFakeToolTests:
         ssh.chmod(0o755)
 
         with (
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
+            mock.patch.object(ssh_transport, "_runtime_root", return_value=private_runtime),
             mock.patch.object(ssh_transport, "_usb_devices", return_value=[Path("/usb/phone")]),
             mock.patch.object(ssh_transport, "_ncm_interface", return_value="usb0"),
             mock.patch.object(ssh_transport, "_network_ready", return_value=True),

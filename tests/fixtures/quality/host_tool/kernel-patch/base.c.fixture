@@ -1,0 +1,10 @@
+int untouched(void){return 41;}
+
+
+
+
+
+int answer(void)
+{
+	return 1;
+}

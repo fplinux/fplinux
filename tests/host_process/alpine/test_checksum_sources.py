@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -12,6 +13,8 @@ from pathlib import Path
 from fplinux_cli.cli.checksum import _checksum_container_command
 from fplinux_cli.dependencies.inputs import DependencyInput
 from fplinux_cli.dependencies.snapshots import preserve_inputs, restore_manifest_inputs
+
+from tests import ROOT
 
 _ABC_SHA256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
 _ABC_SHA512 = (
@@ -60,25 +63,8 @@ def test_checksum_reads_private_restored_source_and_returns_cache_ownership() ->
         aport = stage / "alpine/aports/fplinux-checksum-fixture"
         aport.mkdir(parents=True)
         apkbuild = aport / "APKBUILD"
-        apkbuild.write_text(
-            "# Maintainer: FPLinux contributors <fplinux@example.invalid>\n"
-            "pkgname=fplinux-checksum-fixture\n"
-            "pkgver=1\n"
-            "pkgrel=0\n"
-            'pkgdesc="Source checksum fixture"\n'
-            'url="https://example.invalid"\n'
-            'arch="noarch"\n'
-            'license="MIT"\n'
-            'options="!check"\n'
-            'source="fixture-$pkgver.tar.gz::https://example.invalid/fixture-$pkgver.tar.gz"\n'
-            'builddir="$srcdir"\n'
-            "\n"
-            "package() {\n"
-            '\tinstall -Dm644 "$srcdir/fixture-$pkgver.tar.gz" "$pkgdir/usr/share/fixture"\n'
-            "}\n"
-            "\n"
-            'sha512sums="\n' + "0" * 128 + '  fixture-1.tar.gz\n"\n'
-        )
+        shutil.copyfile(ROOT / "tests/fixtures/checksum_sources/APKBUILD", apkbuild)
+        shutil.copytree(ROOT / "scripts/fplinux_cli/cli/checksum", stage / "checksum")
         command = _checksum_container_command(
             "kern",
             package="fplinux-checksum-fixture",
@@ -88,10 +74,12 @@ def test_checksum_reads_private_restored_source_and_returns_cache_ownership() ->
             downloads=downloads,
         )
         # Replace the external OCI mount mapping; shell tools and user switching are real.
-        script = command[-1].replace("/cache/downloads", str(downloads))
-        script = script.replace("/workspace", str(stage))
+        invocation = [
+            argument.replace("/cache/downloads", str(downloads)).replace("/workspace", str(stage))
+            for argument in command[command.index("--") + 1 :]
+        ]
         result = subprocess.run(
-            ["sh", "-ceu", script],
+            invocation,
             cwd=aport,
             capture_output=True,
             text=True,

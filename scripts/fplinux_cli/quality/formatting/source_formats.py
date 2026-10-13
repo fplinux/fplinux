@@ -100,6 +100,11 @@ def shell_dialect(raw_first_line: bytes) -> Literal["posix", "bash"] | None:
     return None
 
 
+def is_shell_source_path(relative: str) -> bool:
+    """Admit ordinary scripts and templates whose shebang selects a shell dialect."""
+    return PurePosixPath(relative.removesuffix(".in")).suffix in {"", ".initd", ".sh", ".bashrc"}
+
+
 def is_javascript_source(relative: str) -> bool:
     """Identify the project-owned JavaScript configuration."""
     return relative in {
@@ -125,7 +130,7 @@ def classify_source_formats(files: Sequence[Path], *, root: Path) -> SourceForma
         if is_posix_shell_fragment(relative):
             groups["posix_shell_fragments"].append(relative)
             continue
-        if path.suffix not in {"", ".initd", ".sh", ".bashrc"}:
+        if not is_shell_source_path(relative):
             continue
         with path.open("rb") as stream:
             raw_first_line = stream.readline()

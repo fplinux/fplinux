@@ -18,19 +18,26 @@ from fplinux_cli.workspace.capture import WorkspaceFile, WorkspaceSnapshot
 
 from tests import ROOT
 
+FIXTURES = ROOT / "tests/fixtures/quality/check_scope"
+
 
 class CheckScopeTests:
     """Keep scope recipes bound to the inputs checked by their consumers."""
 
     @pytest.mark.parametrize(
         "owner",
-        ["environment/downloads.py", "manifests/values.py"],
-        ids=("verified-transfer", "sha-validation"),
+        [
+            "environment/downloads.py",
+            "manifests/values.py",
+            "templates.py",
+            "build/machine-binding.txt.in",
+        ],
+        ids=("verified-transfer", "sha-validation", "template-substitution", "machine-binding"),
     )
-    def test_kernel_receipt_misses_after_a_download_owner_changes(
+    def test_kernel_receipt_misses_after_a_preparation_input_changes(
         self, owner: str, tmp_path: Path
     ) -> None:
-        """Kernel preparation cannot reuse checks after a transfer or validation owner edit."""
+        """Kernel preparation checks track source validation and generated binding inputs."""
         path = f"scripts/fplinux_cli/{owner}"
         original = (ROOT / path).read_bytes()
 
@@ -78,18 +85,20 @@ class CheckScopeTests:
                 b'platform = "demo"\n[display]\npanel = "display/chosen.toml"\n'
             ),
             "targets/headless/target.toml": (b'platform = "demo"\n[display]\nboot_font = "6x8"\n'),
-            "platforms/demo/platform.toml": b"[linux]\npatches = []\ncopies = []\nappends = []\n",
+            "platforms/demo/platform.toml": (FIXTURES / "linux-empty.toml.fixture").read_bytes(),
             "targets/phone/display/chosen.toml": b"width = 240\nheight = 320\n",
             "targets/phone/display/unlisted.toml": b"width = 128\nheight = 160\n",
             "targets/headless/display/chosen.toml": b"width = 128\nheight = 160\n",
-            "scripts/fplinux_cli/build/display.py": b"def render_panel():\n    return b'panel'\n",
+            "scripts/fplinux_cli/build/display.py": (
+                FIXTURES / "render_panel.py.fixture"
+            ).read_bytes(),
             "README.md": b"Phone documentation.\n",
         }
         changes = {
             "declared-panel": ("targets/phone/display/chosen.toml", b"width = 0\nheight = 320\n"),
             "renderer": (
                 "scripts/fplinux_cli/build/display.py",
-                b"def render_panel():\n    return b'changed panel'\n",
+                (FIXTURES / "render_changed_panel.py.fixture").read_bytes(),
             ),
             "unlisted-panel": ("targets/phone/display/unlisted.toml", b"width = 0\n"),
             "headless-panel": ("targets/headless/display/chosen.toml", b"width = 0\n"),
@@ -257,7 +266,7 @@ class CheckScopeTests:
             ),
             WorkspaceFile(
                 "platforms/phone/platform.toml",
-                b"[linux]\npatches = []\ncopies = []\nappends = []\n",
+                (FIXTURES / "linux-empty.toml.fixture").read_bytes(),
                 0o644,
             ),
         )
@@ -342,29 +351,8 @@ class CheckScopeTests:
     )
     def test_kernel_scope_tracks_manifest_sources_without_whole_bootstrap(self, path: str) -> None:
         """Track every projected Linux input but ignore bootstrap-only sources."""
-        target_manifest = (
-            b'platform = "demo"\n'
-            b"[linux]\n"
-            b'patches = ["kernel/target.patch"]\n'
-            b"copies = [\n"
-            b'  { source = "kernel/target-copy.c", destination = "target-copy.c" },\n'
-            b'  { source = "bootstrap/referenced.h", destination = "referenced.h" },\n'
-            b"]\n"
-            b"appends = [\n"
-            b'  { source = "kernel/target-append", destination = "Makefile" },\n'
-            b"]\n"
-        )
-        platform_manifest = (
-            b"[linux]\n"
-            b'patches = ["platforms/demo/kernel/platform.patch"]\n'
-            b"copies = [\n"
-            b'  { source = "platforms/demo/kernel/platform-copy.c", '
-            b'destination = "platform-copy.c" },\n'
-            b"]\n"
-            b"appends = [\n"
-            b'  { source = "platforms/demo/kernel/platform-append", destination = "Makefile" },\n'
-            b"]\n"
-        )
+        target_manifest = (FIXTURES / "linux-target-inputs.toml.fixture").read_bytes()
+        platform_manifest = (FIXTURES / "linux-platform-inputs.toml.fixture").read_bytes()
         inputs = {
             "scripts/fplinux_cli/quality/kernel/analysis.py": b"checker\n",
             "targets/demo/target.toml": target_manifest,
@@ -540,15 +528,7 @@ class CheckScopeTests:
 
     def test_c_scope_tracks_manifest_source_bootstrap_and_quoted_header(self) -> None:
         """Mirror dynamic userspace C discovery without including orphan kernel C."""
-        manifest = (
-            b"[host]\n"
-            b'runtime_tools = { console = "tool" }\n'
-            b"[[host.tools]]\n"
-            b'type = "cc-libusb"\n'
-            b'name = "tool"\n'
-            b'source = "platforms/demo/kernel/tool.c"\n'
-            b"self_test = false\n"
-        )
+        manifest = (FIXTURES / "host-tool.toml.fixture").read_bytes()
         common = (
             WorkspaceFile("scripts/check.py", b"checker\n", 0o755),
             WorkspaceFile("platforms/demo/platform.toml", manifest, 0o644),
@@ -732,6 +712,7 @@ class CheckScopeTests:
             ("metadata", "other.JSON", True),
             ("metadata", "package-lock.json", True),
             ("shell", "alpine/abuild.conf", False),
+            ("shell", "launcher.sh.in", False),
             ("shell", "other.conf", True),
             ("shell", "package-lock.json", True),
         ],
@@ -744,6 +725,7 @@ class CheckScopeTests:
             "metadata-unsupported-json",
             "metadata-npm-lock",
             "shell-abuild",
+            "shell-template",
             "shell-unrelated-config",
             "shell-npm-lock",
         ),
@@ -765,6 +747,7 @@ class CheckScopeTests:
             "shell": (
                 {
                     "alpine/abuild.conf": b"CFLAGS=-Os\n",
+                    "launcher.sh.in": b"#!/bin/sh\nprintf '%s\\n' '@NAME@'\n",
                 },
                 {"other.conf": b"setting=value\n"},
             ),

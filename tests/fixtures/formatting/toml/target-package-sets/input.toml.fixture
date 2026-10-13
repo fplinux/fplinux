@@ -1,0 +1,11 @@
+[bundle]
+packages = ["z", "a", "a"]
+
+[identity]
+hardware_codes = ["Z-2", "A-1"]
+
+[rootfs]
+packages = ["z", "a"]
+
+[display_brightness]
+levels = [20, 4, 0]

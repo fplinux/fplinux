@@ -31,6 +31,8 @@ the parser rules. In shell command builders and TOML fixtures, make decisive
 inputs visible instead of burying them in positional lists or nested executable
 strings.
 
+Keep a generated document's structure and conditional sections readable together. Split text into external resources when they have a useful independent identity, such as a complete program or delivered document; line count alone is not a reason to split. The [Python text and resource rules](/fplinux/develop/code-style/python/#text-and-resources) define section boundaries and substitutions.
+
 ### Give shared behavior one owner
 
 Share behavior when current consumers have the same inputs, results, error
@@ -137,11 +139,9 @@ manifest or security allowlist.
 
 ### Make fixtures and execution readable
 
-Keep small inputs and expectations beside the case. Move substantial process,
-shell or TOML setup into a focused named fixture when inline construction hides
-the scenario. A fixture states the external boundary it replaces and exposes
-the values that matter to the assertion; it does not become a generic framework
-for hypothetical tests.
+Keep short decisive inputs and expectations beside the case. Store substantial configuration documents, expected documents and executable test peers in files owned by the relevant test domain. Test code names those files and shows the preparation, action and independent assertions; moving the same embedded document into another Python helper does not give it a separate owner.
+
+A fixture states the resource it owns or the external boundary it replaces and exposes the values that matter to the assertion. Express its consumers through explicit fixture arguments instead of hidden test-instance state or setup mixins. A fixture may depend on another fixture when that relationship represents real preparation or lifetime. Keep automatic fixtures for invariants that apply to every case in their scope, and avoid a global fixture framework.
 
 For process-heavy cases, use named preparation, execution and collection steps
 when they make resource ownership and failures easier to follow. Control paths,

@@ -6,5 +6,9 @@
 *.zip binary
 *.patch -whitespace
 
+# Raw fixtures may preserve trailing blank lines as part of their format.
+*.fixture whitespace=-blank-at-eof
+tests/fixtures/**/installed whitespace=-blank-at-eof
+
 .cache export-ignore
 out export-ignore

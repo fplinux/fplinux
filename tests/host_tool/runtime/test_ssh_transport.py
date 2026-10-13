@@ -9,7 +9,6 @@ import shutil
 import subprocess
 import tempfile
 import time
-from contextlib import ExitStack
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -27,6 +26,21 @@ if TYPE_CHECKING:
 
 _SSH_CONFIG_TIMEOUT_SECONDS = 10
 _IDLE_EXPIRY_TIMEOUT_SECONDS = 5
+
+
+@pytest.fixture
+def ssh_base() -> Iterator[Path]:
+    """Own a short path so control sockets fit the Unix socket path budget."""
+    with tempfile.TemporaryDirectory() as temporary:
+        yield Path(temporary)
+
+
+@pytest.fixture
+def ssh_runtime(ssh_base: Path) -> Path:
+    """Create a private runtime owned by the current SSH case."""
+    root = ssh_base / "runtime"
+    root.mkdir(mode=0o700)
+    return root
 
 
 @pytest.mark.parametrize(
@@ -121,23 +135,13 @@ def test_archive_preparation_uses_its_private_directory_without_xdg_or_sftp(
 class SshTransportOpenSshConfigTests:
     """Validate generated session configuration with the installed OpenSSH parser."""
 
-    @pytest.fixture(autouse=True)
-    def _case_resources(self) -> Iterator[None]:
-        """Create one complete ready session in an isolated runtime directory."""
-        with ExitStack() as cleanup:
-            self.temporary = tempfile.TemporaryDirectory()
-            cleanup.enter_context(self.temporary)
-            self.root = Path(self.temporary.name) / "runtime"
-            self.root.mkdir(mode=0o700)
-            yield
-
-    def test_openssh_interprets_generated_private_session_config(self) -> None:
+    def test_openssh_interprets_generated_private_session_config(self, ssh_runtime: Path) -> None:
         """OpenSSH receives the bound endpoint and disables ambient forwarding state."""
-        session = create_ready_session(self.root)
-        with mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root):
+        session = create_ready_session(ssh_runtime)
+        with mock.patch.object(ssh_transport, "_runtime_root", return_value=ssh_runtime):
             ssh_transport._mark_current(session)  # noqa: SLF001
 
-            path = self.root / "current" / "phone.ssh-config"
+            path = ssh_runtime / "current" / "phone.ssh-config"
             metadata = path.lstat()
             assert path.is_file()
             assert not (path.is_symlink())
@@ -168,10 +172,10 @@ class SshTransportOpenSshConfigTests:
             assert (effective["forwardagent"]) == ("no")
             assert ("proxycommand") not in (effective)
 
-            ssh_transport._cleanup_target_sessions(self.root, "phone")  # noqa: SLF001
+            ssh_transport._cleanup_target_sessions(ssh_runtime, "phone")  # noqa: SLF001
 
         assert not (path.exists())
-        assert not ((self.root / "current" / "phone.json").exists())
+        assert not ((ssh_runtime / "current" / "phone.json").exists())
 
 
 class OpenSshServerLifecycleTests:
@@ -213,15 +217,6 @@ class OpenSshServerLifecycleTests:
 
 class SshTransportOpenSshReuseTests:
     """Exercise session reuse against a real loopback OpenSSH server."""
-
-    @pytest.fixture(autouse=True)
-    def _case_resources(self) -> Iterator[None]:
-        """Create test-owned private runtime and server directories."""
-        with ExitStack() as cleanup:
-            self.temporary = tempfile.TemporaryDirectory()
-            cleanup.enter_context(self.temporary)
-            self.base = Path(self.temporary.name)
-            yield
 
     @staticmethod
     def _ssh_command(config: Path, server: OpenSshServer, command: str) -> list[str]:
@@ -384,17 +379,17 @@ class SshTransportOpenSshReuseTests:
 
     @pytest.mark.parametrize("target", ["inoi-244-modern-4g", "bq-2830l-tank-connect-max"])
     def test_generated_config_exec_and_sftp_share_connection_until_idle_expiry(
-        self, request: pytest.FixtureRequest, target: str
+        self, ssh_base: Path, request: pytest.FixtureRequest, target: str
     ) -> None:
         """Generated-config exec and SFTP share and expire one master."""
         reference_runtime = "/run/user/1000/fplinux"
-        padding = len(reference_runtime) - len(str(self.base)) - 1
+        padding = len(reference_runtime) - len(str(ssh_base)) - 1
         assert (padding) > (0)
-        root = self.base / ("r" * padding)
+        root = ssh_base / ("r" * padding)
         assert (len(str(root))) == (len(reference_runtime))
         root.mkdir(mode=0o700)
         session = create_ready_session(root, target=target)
-        server = OpenSshServer(self.base / "server", Path(session["private_key"]))
+        server = OpenSshServer(ssh_base / "server", Path(session["private_key"]))
         server.start()
         request.addfinalizer(server.stop)
         request.addfinalizer(partial(self._cleanup_session, root, target))
@@ -418,8 +413,8 @@ class SshTransportOpenSshReuseTests:
         assert (failed.returncode) == (37)
         assert (failed.stdout) == ("expected failure\n")
 
-        source = self.base / "upload-source"
-        destination = self.base / "uploaded-by-sftp"
+        source = ssh_base / "upload-source"
+        destination = ssh_base / "uploaded-by-sftp"
         source.write_bytes(b"one authenticated SFTP payload\n")
         transferred = self._run_sftp(
             config,
@@ -441,13 +436,13 @@ class SshTransportOpenSshReuseTests:
         server.wait_for_connections(2)
 
     def test_run_remote_isolates_arbitrary_commands_and_shares_internal_queries(
-        self, request: pytest.FixtureRequest
+        self, ssh_base: Path, request: pytest.FixtureRequest
     ) -> None:
         """Arbitrary commands use dedicated TCP while internal queries share one master."""
-        root = self.base / "runtime"
+        root = ssh_base / "runtime"
         root.mkdir(mode=0o700)
         session = create_ready_session(root)
-        server = OpenSshServer(self.base / "server", Path(session["private_key"]))
+        server = OpenSshServer(ssh_base / "server", Path(session["private_key"]))
         server.start()
         request.addfinalizer(server.stop)
         request.addfinalizer(partial(self._cleanup_session, root))
@@ -502,15 +497,15 @@ class SshTransportOpenSshReuseTests:
         server.wait_for_disconnections(2)
 
     def test_separate_sessions_keep_independent_masters_and_cleanup(
-        self, request: pytest.FixtureRequest
+        self, ssh_base: Path, request: pytest.FixtureRequest
     ) -> None:
         """Cleaning one session stops its master without disturbing another session."""
-        first_root = self.base / "runtime-first"
-        second_root = self.base / "runtime-second"
+        first_root = ssh_base / "runtime-first"
+        second_root = ssh_base / "runtime-second"
         first_root.mkdir(mode=0o700)
         second_root.mkdir(mode=0o700)
         initial = create_ready_session(first_root)
-        server = OpenSshServer(self.base / "server", Path(initial["private_key"]))
+        server = OpenSshServer(ssh_base / "server", Path(initial["private_key"]))
         server.start()
         request.addfinalizer(server.stop)
         request.addfinalizer(partial(self._cleanup_session, second_root))
@@ -560,13 +555,13 @@ class SshTransportOpenSshReuseTests:
         assert (server.accepted_connections()) == (2)
 
     def test_stream_timeout_stops_remote_producer_without_closing_adjacent_channel(
-        self, request: pytest.FixtureRequest
+        self, ssh_base: Path, request: pytest.FixtureRequest
     ) -> None:
         """Timing out one producer preserves a concurrent channel on the same master."""
-        root = self.base / "runtime"
+        root = ssh_base / "runtime"
         root.mkdir(mode=0o700)
         session = create_ready_session(root)
-        server = OpenSshServer(self.base / "server", Path(session["private_key"]))
+        server = OpenSshServer(ssh_base / "server", Path(session["private_key"]))
         server.start()
         request.addfinalizer(server.stop)
         request.addfinalizer(partial(self._cleanup_session, root))
@@ -580,7 +575,7 @@ class SshTransportOpenSshReuseTests:
         assert (established.returncode) == (0), established.stderr
         server.wait_for_connections(1)
         loopback_ssh_argv = self._loopback_ssh_argv(server)
-        producer_pid = self.base / "stream-producer.pid"
+        producer_pid = ssh_base / "stream-producer.pid"
 
         adjacent = subprocess.Popen(
             self._ssh_command(
@@ -627,13 +622,13 @@ class SshTransportOpenSshReuseTests:
         server.wait_for_disconnections(1)
 
     def test_persistent_master_releases_inherited_flock_and_captured_stdout(
-        self, request: pytest.FixtureRequest
+        self, ssh_base: Path, request: pytest.FixtureRequest
     ) -> None:
         """A background master does not retain its launcher's lock or output pipe."""
-        root = self.base / "runtime"
+        root = ssh_base / "runtime"
         root.mkdir(mode=0o700)
         session = create_ready_session(root)
-        server = OpenSshServer(self.base / "server", Path(session["private_key"]))
+        server = OpenSshServer(ssh_base / "server", Path(session["private_key"]))
         server.start()
         request.addfinalizer(server.stop)
         request.addfinalizer(partial(self._cleanup_session, root))
@@ -643,7 +638,7 @@ class SshTransportOpenSshReuseTests:
             persist_seconds="60",
             session=session,
         )
-        lock_path = self.base / "session.lock"
+        lock_path = ssh_base / "session.lock"
 
         with lock_path.open("w", encoding="ascii") as held_lock:
             fcntl.flock(held_lock, fcntl.LOCK_EX)

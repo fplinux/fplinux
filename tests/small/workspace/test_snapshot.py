@@ -20,9 +20,11 @@ from fplinux_cli.manifests.linux import discover_linux_targets
 from tests import ROOT
 from tests.fixtures import linux_inputs
 from tests.small.workspace.workspace_fixtures import (
-    WorkspaceSourceFixture,
     empty_package_graph,
     workspace_root,
+    write_registration_source,
+    write_source,
+    write_source_lock_files,
 )
 
 if TYPE_CHECKING:
@@ -30,7 +32,7 @@ if TYPE_CHECKING:
     from typing import Any
 
 
-class WorkspaceSnapshotTests(WorkspaceSourceFixture):
+class WorkspaceSnapshotTests:
     """Keep cache materialization causally bound to an already read snapshot."""
 
     @pytest.mark.parametrize(
@@ -92,9 +94,9 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
     ) -> None:
         """Unselected declarations keep the build recipe; selected dependency edges miss."""
         root = tmp_path
-        source = self._source(root)
-        registration_name, registration_file = self._registration_source(root)
-        lock_files = self._source_lock_files(root)
+        source = write_source(root)
+        registration_name, registration_file = write_registration_source(root)
+        lock_files = write_source_lock_files(root)
         for package in ("fplinux-selected", "fplinux-dependency", "fplinux-unrelated"):
             directory = root / "alpine/aports" / package
             directory.mkdir(parents=True)
@@ -159,8 +161,8 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
     ) -> None:
         """Even identical fragment bytes cannot give two selected types one workspace identity."""
         root = tmp_path
-        source = self._source(root)
-        lock_files = self._source_lock_files(root)
+        source = write_source(root)
+        lock_files = write_source_lock_files(root)
         with (
             workspace_root(root),
             empty_package_graph(),
@@ -173,7 +175,7 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
             mock.patch.object(
                 workspace_inputs,
                 "target_build_source_files",
-                return_value=[("source", source), self._registration_source(root), *lock_files],
+                return_value=[("source", source), write_registration_source(root), *lock_files],
             ),
             mock.patch.object(
                 workspace_inputs,
@@ -197,8 +199,8 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
     ) -> None:
         """A target recipe is available before any workspace directory is materialized."""
         root = tmp_path
-        source = self._source(root, contents=b"first", mode=0o751)
-        lock_files = self._source_lock_files(root)
+        source = write_source(root, contents=b"first", mode=0o751)
+        lock_files = write_source_lock_files(root)
         with (
             workspace_root(root),
             empty_package_graph(),
@@ -213,7 +215,7 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
                 "target_build_source_files",
                 return_value=[
                     ("nested/source", source),
-                    self._registration_source(root),
+                    write_registration_source(root),
                     *lock_files,
                 ],
             ),
@@ -237,7 +239,7 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
         """Declared package and source changes alter the recipe; unrelated files do not."""
         root = tmp_path
 
-        self._registration_source(root)
+        write_registration_source(root)
 
         def write(relative: str, contents: bytes = b"source\n") -> Path:
             path = root / relative
@@ -281,7 +283,7 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
         ):
             write(relative)
 
-        self._source_lock_files(root, "phone")
+        write_source_lock_files(root, "phone")
 
         target: dict[str, Any] = {
             "build_type": "release",
@@ -406,7 +408,7 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
 
     def test_snapshot_recipe_includes_file_mode(self, tmp_path: Path) -> None:
         """Changing only execute permissions changes the causal recipe."""
-        source = self._source(tmp_path, mode=0o644)
+        source = write_source(tmp_path, mode=0o644)
         first = workspace_capture.workspace_snapshot([("source", source)])
         source.chmod(0o755)
         second = workspace_capture.workspace_snapshot([("source", source)])
@@ -418,7 +420,7 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
     ) -> None:
         """Peer C/DTS changes stay auxiliary while a shared driver remains causal."""
         root = tmp_path
-        self._source_lock_files(root, "phone-a")
+        write_source_lock_files(root, "phone-a")
         platform = linux_inputs.platform(root, "demo", source_lock="linux", arch="arm")
         with platform.open("a", encoding="utf-8") as output:
             output.write(
@@ -458,7 +460,7 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
                 root / "targets/phone-a/linux/board.dts",
             )
         ]
-        causal_sources.append(self._registration_source(root))
+        causal_sources.append(write_registration_source(root))
         target_config = {"platform": "demo", "device_data": {"groups": {}}}
         with (
             workspace_root(root),
@@ -575,7 +577,7 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
     def test_snapshot_rejects_symlinked_input(self, tmp_path: Path) -> None:
         """A snapshot cannot turn a linked source into a regular staged file."""
         root = tmp_path
-        source = self._source(root)
+        source = write_source(root)
         linked = root / "linked"
         linked.symlink_to(source)
 

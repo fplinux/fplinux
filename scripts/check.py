@@ -58,13 +58,14 @@ def _run_direct(
     timeout: float,
     capture: bool,
     env: dict[str, str] | None = None,
+    cwd: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run one standalone checker tool with a finite process-group lifetime."""
     display = shlex.join(command)
     print("+", display, flush=True)
     process = subprocess.Popen(
         command,
-        cwd=ROOT,
+        cwd=ROOT if cwd is None else cwd,
         stdout=subprocess.PIPE if capture else None,
         stderr=subprocess.PIPE if capture else None,
         text=True,
@@ -91,13 +92,14 @@ def run(
     *,
     timeout: float = _CHECK_COMMAND_TIMEOUT,
     env: dict[str, str] | None = None,
+    cwd: Path | None = None,
 ) -> None:
     """Run one checker tool, using the active stage when logging is available."""
     stage = current_stage()
     if stage is not None:
-        stage.run(command, cwd=ROOT, timeout=timeout, env=env)
+        stage.run(command, cwd=ROOT if cwd is None else cwd, timeout=timeout, env=env)
         return
-    result = _run_direct(command, timeout=timeout, capture=False, env=env)
+    result = _run_direct(command, timeout=timeout, capture=False, env=env, cwd=cwd)
     if result.returncode:
         raise subprocess.CalledProcessError(result.returncode, command)
 
@@ -571,7 +573,7 @@ def check_canonical_sources(
 
     def run_formatters(projection: Path) -> None:
         for _name, command in formatter_commands(groups, workspace=str(projection)):
-            run(command)
+            run(command, cwd=projection)
 
     outputs = canonical_outputs(snapshot, paths, run_formatters=run_formatters)
     changed = noncanonical_paths(snapshot, outputs)

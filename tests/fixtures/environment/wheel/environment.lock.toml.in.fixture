@@ -1,0 +1,14 @@
+[[input]]
+key = "container:example"
+url = "https://example.invalid/example.whl"
+sha256 = "{sha256}"
+bytes = {size}
+destination = "downloads/environment/example/example.whl"
+purpose = "container-source"
+arch = "x86_64"
+[[input]]
+destination = "downloads/environment/package/unused.whl"
+purpose = "container-package"
+[[input]]
+destination = "downloads/environment/source/unused.tar.gz"
+purpose = "container-source"

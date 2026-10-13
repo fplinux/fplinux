@@ -3,169 +3,51 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fplinux_cli.quality.formatting.canonical_yaml import normalize_yaml
+
+FIXTURES = Path(__file__).parents[3] / "fixtures/formatting/yaml"
 
 
 class CanonicalYamlTests:
     """Preserve values and consumer order while rearranging known fields."""
 
-    def test_binding_orders_fields_without_rewriting_literal_examples(self) -> None:
-        """Keep scalar spelling, literal content and unknown fields unchanged."""
-        source = b"""# SPDX-License-Identifier: GPL-2.0-only
-%YAML 1.2
----
-examples:
-  - |
-    chip@10 {
-        reg = <0x00000010 0x10>;
-    };
-additionalProperties: false
-required: [reg, compatible]
-properties:
-  reg:
-    const: 0x00000010 # address
-  label:
-    const: "yes"
-title: Demo
-# Description stays with its field.
-description: 'on'
-$schema: https://example.test/schema
-$id: https://example.test/demo
-x-note: keep
-"""
-        expected = b"""# SPDX-License-Identifier: GPL-2.0-only
-%YAML 1.2
----
-$id: https://example.test/demo
-$schema: https://example.test/schema
-title: Demo
-# Description stays with its field.
-description: 'on'
-properties:
-  reg:
-    const: 0x00000010 # address
-  label:
-    const: "yes"
-required: [reg, compatible]
-additionalProperties: false
-examples:
-  - |
-    chip@10 {
-        reg = <0x00000010 0x10>;
-    };
-x-note: keep
-"""
-        actual = normalize_yaml("platforms/demo/linux/bindings/demo.yaml", source)
-        assert (actual) == (expected)
-        assert (normalize_yaml("platforms/demo/linux/bindings/demo.yaml", actual)) == (actual)
+    @pytest.mark.parametrize(
+        ("case_name", "logical_path"),
+        [
+            pytest.param(
+                "binding-literals",
+                "platforms/demo/linux/bindings/demo.yaml",
+                id="binding-literals",
+            ),
+            pytest.param("workflow-order", ".github/workflows/demo.yml", id="workflow-order"),
+            pytest.param(
+                "issue-form-order", ".github/ISSUE_TEMPLATE/report.yml", id="issue-form-order"
+            ),
+            pytest.param(
+                "missing-fields", ".github/ISSUE_TEMPLATE/report.yml", id="missing-fields"
+            ),
+            pytest.param(
+                "template-chomping",
+                "platforms/demo/linux/bindings/demo.yaml.in",
+                id="template-chomping",
+            ),
+        ],
+    )
+    def test_canonical_bytes_preserve_values_and_order(
+        self, case_name: str, logical_path: str
+    ) -> None:
+        """Keep exact scalar, comment and sequence bytes while ordering known fields."""
+        case = FIXTURES / case_name
+        source = (case / "input.yaml.fixture").read_bytes()
+        expected = (case / "expected.yaml.fixture").read_bytes()
 
-    def test_workflow_retains_jobs_steps_events_and_comments(self) -> None:
-        """Move fields inside each job and step without moving executions."""
-        source = b"""jobs:
-  second:
-    steps:
-      - run: echo second
-        # Caption for this step.
-        name: Second
-      - with:
-          token: "${{ secrets.TOKEN }}"
-        uses: example/action@abc # pinned
-        id: action
-    env:
-      YES: yes
-    runs-on: ubuntu-latest
-    needs: first
-  first:
-    runs-on: ubuntu-latest
-    steps: []
-on:
-  push:
-    branches: [release, main]
-name: Demo
-permissions: {}
-"""
-        expected = b"""name: Demo
-on:
-  push:
-    branches: [release, main]
-permissions: {}
-jobs:
-  second:
-    needs: first
-    runs-on: ubuntu-latest
-    env:
-      YES: yes
-    steps:
-      - # Caption for this step.
-        name: Second
-        run: echo second
-      - id: action
-        uses: example/action@abc # pinned
-        with:
-          token: "${{ secrets.TOKEN }}"
-  first:
-    runs-on: ubuntu-latest
-    steps: []
-"""
-        actual = normalize_yaml(".github/workflows/demo.yml", source)
-        assert (actual) == (expected)
-        assert (normalize_yaml(".github/workflows/demo.yml", actual)) == (actual)
+        actual = normalize_yaml(logical_path, source)
 
-    def test_issue_form_retains_question_and_option_order(self) -> None:
-        """Place item and attribute descriptions before options and validation."""
-        source = b"""body:
-  - attributes:
-      options: [second, first]
-      label: Choice
-      description: Choose one
-    validations:
-      required: true
-    id: choice
-    type: dropdown
-  - attributes:
-      value: |
-        Read this first.
-    type: markdown
-title: "Report: "
-description: Tell us
-name: Report
-"""
-        expected = b"""name: Report
-description: Tell us
-title: "Report: "
-body:
-  - type: dropdown
-    id: choice
-    attributes:
-      label: Choice
-      description: Choose one
-      options: [second, first]
-    validations:
-      required: true
-  - type: markdown
-    attributes:
-      value: |
-        Read this first.
-"""
-        actual = normalize_yaml(".github/ISSUE_TEMPLATE/report.yml", source)
-        assert (actual) == (expected)
-        assert (normalize_yaml(".github/ISSUE_TEMPLATE/report.yml", actual)) == (actual)
-
-    def test_missing_domain_fields_are_not_filled_in(self) -> None:
-        """Ordering leaves incomplete documents incomplete for their validator."""
-        source = b"body:\n  - type: input\nname: Incomplete\n"
-        assert (normalize_yaml(".github/ISSUE_TEMPLATE/report.yml", source)) == (
-            b"name: Incomplete\nbody:\n  - type: input\n"
-        )
-
-    def test_template_keeps_block_scalar_chomping_and_placeholders(self) -> None:
-        """Retain trailing literal newlines and folded scalar spelling."""
-        source = b"description: |+\n  @DESCRIPTION@\n\n\ntitle: >-\n  @TITLE@\n"
-        expected = b"title: >-\n  @TITLE@\ndescription: |+\n  @DESCRIPTION@\n\n\n"
-        actual = normalize_yaml("platforms/demo/linux/bindings/demo.yaml.in", source)
-        assert (actual) == (expected)
-        assert (normalize_yaml("platforms/demo/linux/bindings/demo.yaml.in", actual)) == (actual)
+        assert actual == expected
+        assert normalize_yaml(logical_path, actual) == actual
 
     @pytest.mark.parametrize(
         "source",

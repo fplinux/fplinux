@@ -1,0 +1,13 @@
+[tool.ruff]
+target-version = "py314"
+line-length = 99
+
+[tool.ruff.lint.per-file-ignores]
+"z/**" = ["Z", "A"]
+"a/**" = ["B"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+mypy_path = "scripts"
+cache_dir = "/tmp/mypy"

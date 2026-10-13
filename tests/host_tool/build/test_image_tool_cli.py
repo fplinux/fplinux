@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import shlex
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytest
@@ -22,18 +23,22 @@ SHARED = ROOT / "include/fplinux"
 TOOLS = ("fplinux-rotate", "fplinux-jpeg", "fplinux-jpeg-cpu", "fplinux-present")
 
 
+@dataclass(frozen=True)
+class ImageTools:
+    """Read-only compiled programs and one case's local file directory."""
+
+    executables_directory: Path
+    directory: Path
+
+
 class ImageToolCliTests:
     """Exercise argument handling without opening a phone or host device."""
 
-    directory: Path
-    executables_directory: Path
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def executables_directory(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         """Compile complete programs using the check image's libjpeg8 dependency."""
         with c_build_directory(tmp_path_factory, "image-tool-cli") as temporary:
-            cls.executables_directory = temporary
             sources = {
                 "fplinux-rotate": [
                     APORTS / "fplinux-rotate/fplinux-rotate.c",
@@ -71,7 +76,7 @@ class ImageToolCliTests:
             for tool, tool_sources in sources.items():
                 libraries = ["-ljpeg"] if tool == "fplinux-jpeg-cpu" else []
                 compile_c(
-                    cls.executables_directory / tool,
+                    temporary / tool,
                     [
                         "-O2",
                         "-std=c11",
@@ -88,31 +93,33 @@ class ImageToolCliTests:
                     name=f"compile {tool} for host argument checks",
                     check=True,
                 )
-            yield
+            yield temporary
 
-    @pytest.fixture(autouse=True)
-    def _case_directory(self, tmp_path: Path) -> None:
+    @pytest.fixture
+    def tools(self, executables_directory: Path, tmp_path: Path) -> ImageTools:
         """Give each invocation its own input and output files."""
-        self.directory = tmp_path
+        return ImageTools(executables_directory, tmp_path)
 
-    def run_tool(self, tool: str, *arguments: str) -> subprocess.CompletedProcess[str]:
+    def run_tool(
+        self, tools: ImageTools, tool: str, *arguments: str
+    ) -> subprocess.CompletedProcess[str]:
         """Run a bounded command in a private directory with a fixed locale."""
         device_paths = (
             ["--tty", "missing-tty", "--drm", "missing-drm"] if tool == "fplinux-present" else []
         )
         return run_process(
-            [str(self.executables_directory / tool), *device_paths, *arguments],
+            [str(tools.executables_directory / tool), *device_paths, *arguments],
             name=f"check {tool} arguments",
             timeout=10,
-            cwd=self.directory,
+            cwd=tools.directory,
             env={"LC_ALL": "C", "TZ": "UTC"},
         )
 
     def assert_usage(
-        self, tool: str, *arguments: str, success: bool
+        self, tools: ImageTools, tool: str, *arguments: str, success: bool
     ) -> subprocess.CompletedProcess[str]:
         """Help and syntax errors have distinct statuses and output streams."""
-        result = self.run_tool(tool, *arguments)
+        result = self.run_tool(tools, tool, *arguments)
         assert (result.returncode) == (0 if success else 2), result.stderr
         if success:
             assert result.stdout.startswith("Usage:"), result.stdout
@@ -129,11 +136,11 @@ class ImageToolCliTests:
         "arguments", [("-h",), ("--unknown", "garbage", "-h")], ids=["h", "unknown-garbage-h"]
     )
     def test_help_is_stable_and_precedes_validation(
-        self, arguments: tuple[str, ...], tool: str
+        self, tools: ImageTools, arguments: tuple[str, ...], tool: str
     ) -> None:
         """Recognized help succeeds independently of other options and their values."""
-        baseline = self.assert_usage(tool, "--help", success=True)
-        result = self.assert_usage(tool, *arguments, success=True)
+        baseline = self.assert_usage(tools, tool, "--help", success=True)
+        result = self.assert_usage(tools, tool, *arguments, success=True)
         assert (result.stdout) == (baseline.stdout)
 
     @pytest.mark.parametrize("tool", TOOLS, ids=str)
@@ -165,21 +172,21 @@ class ImageToolCliTests:
         ],
     )
     def test_malformed_options_and_positionals_are_rejected(
-        self, arguments: tuple[str, ...], tool: str
+        self, tools: ImageTools, arguments: tuple[str, ...], tool: str
     ) -> None:
         """Unknown options, missing values and unsupported positional input are errors."""
-        self.assert_usage(tool, *arguments, success=False)
+        self.assert_usage(tools, tool, *arguments, success=False)
 
     @pytest.mark.parametrize("tool", TOOLS, ids=str)
     @pytest.mark.parametrize(
         "value", ["--help", "--", "-file", ""], ids=["help", "separator", "file", "empty"]
     )
     def test_option_shaped_path_values_are_consumed_before_help(
-        self, value: str, tool: str
+        self, tools: ImageTools, value: str, tool: str
     ) -> None:
         """A required path consumes its next token, even when it looks like an option."""
-        self.assert_usage(tool, "--input", value, "--help", success=True)
-        self.assert_usage(tool, "--input", "--help", "--output", success=False)
+        self.assert_usage(tools, tool, "--input", value, "--help", success=True)
+        self.assert_usage(tools, tool, "--input", "--help", "--output", success=False)
 
     @pytest.mark.parametrize(
         ("tool", "arguments"),
@@ -200,10 +207,10 @@ class ImageToolCliTests:
         ],
     )
     def test_attached_values_and_prefixes_reach_local_file_errors(
-        self, tool: str, arguments: tuple[str, ...]
+        self, tools: ImageTools, tool: str, arguments: tuple[str, ...]
     ) -> None:
         """Native option spellings pass real validation before missing local resources."""
-        result = self.run_tool(tool, *arguments)
+        result = self.run_tool(tools, tool, *arguments)
         assert (result.returncode) == (1), result.stderr
         assert result.stderr.startswith(f"{tool}: "), result.stderr
         assert ("--help' for more information") not in (result.stderr)
@@ -230,15 +237,17 @@ class ImageToolCliTests:
         "trailing", [("extra",), ("--", "extra")], ids=["extra", "separator-extra"]
     )
     def test_complete_arguments_reject_positionals_after_a_separator(
-        self, trailing: tuple[str, ...], tool: str, arguments: tuple[str, ...]
+        self, tools: ImageTools, trailing: tuple[str, ...], tool: str, arguments: tuple[str, ...]
     ) -> None:
         """A separator ends options but does not introduce an input-file positional."""
-        plain = self.run_tool(tool, *arguments, "--input", "missing-input")
-        delimited = self.run_tool(tool, *arguments, "--input", "missing-input", "--")
+        plain = self.run_tool(tools, tool, *arguments, "--input", "missing-input")
+        delimited = self.run_tool(tools, tool, *arguments, "--input", "missing-input", "--")
         assert (plain.returncode) == (1), plain.stderr
         assert (delimited.returncode) == (plain.returncode), delimited.stderr
         assert (delimited.stderr) == (plain.stderr)
-        self.assert_usage(tool, *arguments, "--input", "missing-input", *trailing, success=False)
+        self.assert_usage(
+            tools, tool, *arguments, "--input", "missing-input", *trailing, success=False
+        )
 
     @pytest.mark.parametrize(
         ("tool", "option", "value"),
@@ -269,10 +278,10 @@ class ImageToolCliTests:
         ],
     )
     def test_help_precedes_numeric_and_final_checks(
-        self, tool: str, option: str, value: str
+        self, tools: ImageTools, tool: str, option: str, value: str
     ) -> None:
         """Domain validation cannot start work when an actual help option is present."""
-        self.assert_usage(tool, option, value, "--help", success=True)
+        self.assert_usage(tools, tool, option, value, "--help", success=True)
 
     @pytest.mark.parametrize(
         ("tool", "arguments", "error"),
@@ -307,10 +316,10 @@ class ImageToolCliTests:
         ],
     )
     def test_negative_unsigned_values_fail_before_resource_access(
-        self, tool: str, arguments: tuple[str, ...], error: str
+        self, tools: ImageTools, tool: str, arguments: tuple[str, ...], error: str
     ) -> None:
         """A minus sign cannot wrap into an accepted scalar or crop coordinate."""
-        result = self.assert_usage(tool, *arguments, success=False)
+        result = self.assert_usage(tools, tool, *arguments, success=False)
         assert (error) in (result.stderr)
 
     @pytest.mark.parametrize(
@@ -322,12 +331,14 @@ class ImageToolCliTests:
         ],
         ids=["hflip-hflip-vflip-verify-verify", "display-display-ms-0", "display-ms-0-display"],
     )
-    def test_repeated_flags_keep_help_available(self, arguments: tuple[str, ...]) -> None:
+    def test_repeated_flags_keep_help_available(
+        self, tools: ImageTools, arguments: tuple[str, ...]
+    ) -> None:
         """Repeated flags and conflicting values still allow explicit help."""
-        self.assert_usage("fplinux-jpeg", "--timing", "--timing", "--help", success=True)
-        self.assert_usage("fplinux-rotate", *arguments, "--help", success=True)
+        self.assert_usage(tools, "fplinux-jpeg", "--timing", "--timing", "--help", success=True)
+        self.assert_usage(tools, "fplinux-rotate", *arguments, "--help", success=True)
         self.assert_usage(
-            "fplinux-rotate", "--display-ms", "60001", "--display", "--help", success=True
+            tools, "fplinux-rotate", "--display-ms", "60001", "--display", "--help", success=True
         )
 
     @pytest.mark.parametrize(
@@ -365,29 +376,37 @@ class ImageToolCliTests:
             "fplinux-present-empty-mode-invalid-nv16",
         ],
     )
-    def test_invalid_earlier_values_are_not_hidden_by_later_valid_values(
-        self, tool: str, base: tuple[str, ...], option: str, invalid: str, valid: str
+    def test_invalid_earlier_values_are_not_hidden_by_later_valid_values(  # noqa: PLR0913 -- argument occurrences and fixture stay explicit.
+        self,
+        tools: ImageTools,
+        *,
+        tool: str,
+        base: tuple[str, ...],
+        option: str,
+        invalid: str,
+        valid: str,
     ) -> None:
         """Last-wins assignment still validates each supplied numeric or enum value."""
         prefix = (*base, "--input", "missing-input")
-        accepted = self.run_tool(tool, *prefix, option, valid)
+        accepted = self.run_tool(tools, tool, *prefix, option, valid)
         assert (accepted.returncode) == (1), accepted.stderr
-        self.assert_usage(tool, *prefix, option, invalid, option, valid, success=False)
+        self.assert_usage(tools, tool, *prefix, option, invalid, option, valid, success=False)
 
-    def test_rotate_last_values_control_cpu_result_and_iterations(self) -> None:
+    def test_rotate_last_values_control_cpu_result_and_iterations(self, tools: ImageTools) -> None:
         """Duplicate engine, format, dimensions, transform and output use their last value."""
-        source = self.directory / "source.grey"
-        output = self.directory / "rotated.grey"
-        unused_output = self.directory / "unused.grey"
+        source = tools.directory / "source.grey"
+        output = tools.directory / "rotated.grey"
+        unused_output = tools.directory / "unused.grey"
         source.write_bytes(bytes([1, 2, 3, 4, 5, 6]))
         result = self.run_tool(
+            tools,
             "fplinux-rotate",
             "--engine",
             "rota",
             "--engine",
             "cpu",
             "--device",
-            str(self.directory / "missing-video"),
+            str(tools.directory / "missing-video"),
             "--format",
             "rgb565",
             "--format",
@@ -407,7 +426,7 @@ class ImageToolCliTests:
             "--iterations",
             "2",
             "--input",
-            str(self.directory / "missing-input"),
+            str(tools.directory / "missing-input"),
             "--input",
             str(source),
             "--output",
@@ -437,11 +456,11 @@ class ImageToolCliTests:
         ],
     )
     def test_rotate_display_order_reaches_the_stubbed_delay_boundary(
-        self, arguments: tuple[str, ...], expected_holds: list[str]
+        self, tools: ImageTools, arguments: tuple[str, ...], expected_holds: list[str]
     ) -> None:
         """The last display option selects zero, explicit, or default preview duration."""
-        source = self.directory / "display.grey"
-        output = self.directory / "display-output.grey"
+        source = tools.directory / "display.grey"
+        output = tools.directory / "display-output.grey"
         source.write_bytes(bytes([1, 2, 3, 4, 5, 6]))
         base = (
             "--engine",
@@ -457,7 +476,7 @@ class ImageToolCliTests:
             "--output",
             str(output),
         )
-        result = self.run_tool("fplinux-rotate-display", *base, *arguments)
+        result = self.run_tool(tools, "fplinux-rotate-display", *base, *arguments)
         assert (result.returncode) == (0), result.stderr
         assert ("stub preview presented") in (result.stdout)
         holds = [line for line in result.stdout.splitlines() if "hold_us=" in line]
@@ -475,21 +494,22 @@ class ImageToolCliTests:
         ids=["fplinux-jpeg", "fplinux-jpeg-cpu"],
     )
     def test_jpeg_last_operation_and_input_reach_the_local_file_error(
-        self, tool: str, error: str
+        self, tools: ImageTools, tool: str, error: str
     ) -> None:
         """The final decode operation accepts missing geometry and uses the last input."""
         result = self.run_tool(
+            tools,
             tool,
             "--operation",
             "encode",
             "--operation",
             "decode",
             "--input",
-            str(self.directory),
+            str(tools.directory),
             "--input",
             "missing-jpeg",
             "--output",
-            str(self.directory / "unused.nv16"),
+            str(tools.directory / "unused.nv16"),
         )
         assert (result.returncode) == (1)
         assert (result.stdout) == ("")
@@ -512,7 +532,7 @@ class ImageToolCliTests:
         ],
     )
     def test_jpeg_encode_options_reject_invalid_values_before_input_access(
-        self, option: str, value: str, error: str
+        self, tools: ImageTools, option: str, value: str, error: str
     ) -> None:
         """Encode quality, width and scale are checked before reading input."""
         base = (
@@ -527,9 +547,9 @@ class ImageToolCliTests:
             "--output",
             "unused-output",
         )
-        result = self.assert_usage("fplinux-jpeg", *base, option, value, success=False)
+        result = self.assert_usage(tools, "fplinux-jpeg", *base, option, value, success=False)
         assert (error) in (result.stderr)
-        self.assert_usage("fplinux-jpeg", *base, option, value, "--help", success=True)
+        self.assert_usage(tools, "fplinux-jpeg", *base, option, value, "--help", success=True)
 
     @pytest.mark.parametrize(
         ("operation", "geometry"),
@@ -537,10 +557,11 @@ class ImageToolCliTests:
         ids=["decode-empty", "scale-width-320-height-240"],
     )
     def test_jpeg_quality_requires_the_final_encode_operation(
-        self, operation: str, geometry: tuple[str, ...]
+        self, tools: ImageTools, operation: str, geometry: tuple[str, ...]
     ) -> None:
         """Encode quality is rejected for decode and raw scaling before resources."""
         result = self.assert_usage(
+            tools,
             "fplinux-jpeg",
             "--operation",
             "encode",
@@ -558,9 +579,12 @@ class ImageToolCliTests:
         assert ("only encode accepts --quality") in (result.stderr)
 
     @pytest.mark.parametrize("divisor", ["1", "2", "4"], ids=["1", "2", "4"])
-    def test_jpeg_decode_accepts_full_half_and_quarter_divisors(self, divisor: str) -> None:
+    def test_jpeg_decode_accepts_full_half_and_quarter_divisors(
+        self, tools: ImageTools, divisor: str
+    ) -> None:
         """Each supported divisor passes argument checks before the missing input error."""
         result = self.run_tool(
+            tools,
             "fplinux-jpeg",
             "--input",
             "missing-jpeg",
@@ -579,13 +603,14 @@ class ImageToolCliTests:
         ids=["exact-16", "short-15", "long-17"],
     )
     def test_jpeg_tight_raw_length_and_repeated_options_are_checked_before_device_access(
-        self, label: str, length: int, *, accepted: bool
+        self, tools: ImageTools, label: str, length: int, *, accepted: bool
     ) -> None:
         """Tight 4x2 NV16 requires sixteen bytes; repeated options use the last value."""
-        missing_device = self.directory / "missing-jpeg-video"
-        source = self.directory / f"jpeg-{label}.raw"
+        missing_device = tools.directory / "missing-jpeg-video"
+        source = tools.directory / f"jpeg-{label}.raw"
         source.write_bytes(bytes(range(length)))
         result = self.run_tool(
+            tools,
             "fplinux-jpeg",
             "--operation",
             "decode",
@@ -618,7 +643,7 @@ class ImageToolCliTests:
             else "fplinux-jpeg: input: Invalid argument\n"
         )
 
-    def test_present_last_mode_and_missing_drm_report_local_error(self) -> None:
+    def test_present_last_mode_and_missing_drm_report_local_error(self, tools: ImageTools) -> None:
         """The last mode controls output eligibility; a missing DRM device stops execution."""
         base = (
             "--input",
@@ -626,18 +651,27 @@ class ImageToolCliTests:
             "--output",
             "unused.rgb565",
             "--tty",
-            str(self.directory),
+            str(tools.directory),
             "--tty",
             "missing-tty",
             "--drm",
             "missing-drm",
         )
-        result = self.run_tool("fplinux-present", *base, "--mode", "nv16", "--mode", "cpu-rgb565")
+        result = self.run_tool(
+            tools, "fplinux-present", *base, "--mode", "nv16", "--mode", "cpu-rgb565"
+        )
         assert (result.returncode) == (1)
         assert (result.stdout) == ("")
         assert (result.stderr) == (
             "fplinux-present: cannot open DRM display: No such file or directory\n"
         )
         self.assert_usage(
-            "fplinux-present", *base, "--mode", "cpu-rgb565", "--mode", "nv16", success=False
+            tools,
+            "fplinux-present",
+            *base,
+            "--mode",
+            "cpu-rgb565",
+            "--mode",
+            "nv16",
+            success=False,
         )

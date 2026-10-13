@@ -6,7 +6,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-from typing import TYPE_CHECKING
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -16,8 +16,7 @@ from fplinux_cli.dependencies.snapshots import preserve_inputs, publish_snapshot
 
 from tests.small.dependencies.snapshot_fixtures import selected_checkout
 
-if TYPE_CHECKING:
-    from pathlib import Path
+_FIXTURES = Path(__file__).parents[2] / "fixtures/dependencies"
 
 
 @pytest.fixture
@@ -27,18 +26,7 @@ def site_checkout(tmp_path: Path) -> Path:
     (root / "site").mkdir(parents=True)
     workflow = root / ".github/workflows/pages.yml"
     workflow.parent.mkdir(parents=True)
-    workflow.write_text(
-        "jobs:\n"
-        "  build:\n"
-        "    runs-on: ubuntu-24.04\n"
-        "    steps:\n"
-        "      - with:\n"
-        '          node-version: "24.21.0"\n'
-        "      - run: npm install --global npm@12.2.0\n"
-        "      - run: npm ci --prefix site\n"
-        "  deploy:\n"
-        "    runs-on: ubuntu-24.04\n"
-    )
+    workflow.write_bytes((_FIXTURES / "pages-site.yml.fixture").read_bytes())
     (root / "package.json").write_text('{"engines":{"node":"24.21.0","npm":"12.2.0"}}\n')
     (root / "site/package-lock.json").write_text(
         json.dumps(

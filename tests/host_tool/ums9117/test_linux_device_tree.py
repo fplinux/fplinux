@@ -8,7 +8,7 @@ import io
 import shutil
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 from unittest import mock
 
 import pytest
@@ -39,6 +39,8 @@ from tests.process import run_process
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+TREE_FIXTURES = ROOT / "tests/host_tool/ums9117/fixtures/linux-device-tree"
+
 
 @pytest.mark.parametrize(
     ("field", "property_name"),
@@ -60,10 +62,7 @@ def test_compiled_audio_policy_contains_only_the_selected_topology_property(
     policy[field] = True
     (tmp_path / "audio-policy.dtsi").write_bytes(linux_audio_policy_dtsi(policy))
     source = tmp_path / "audio.dts"
-    source.write_text(
-        '/dts-v1/;\n/ { audio: audio {}; };\n/include/ "audio-policy.dtsi"\n',
-        encoding="ascii",
-    )
+    source.write_bytes((TREE_FIXTURES / "audio.dts.fixture").read_bytes())
     dtb = tmp_path / "audio.dtb"
     run_process(
         ["dtc", "-I", "dts", "-O", "dtb", "-i", str(tmp_path), "-o", str(dtb), str(source)],
@@ -241,11 +240,8 @@ class NewTargetDeviceTreeTests:
                 "ums9117-ram-session.dtsi",
             ):
                 (source / relative).write_text("", encoding="utf-8")
-            (source / "ums9117.dtsi").write_text(
-                "/ { #address-cells = <1>; #size-cells = <1>;\n"
-                "codec_dma: codec-dma {}; sc2720_fgu: fuel-gauge {};\n"
-                "sc2720_kpled: keypad-light {}; usb: usb {}; };\n",
-                encoding="utf-8",
+            (source / "ums9117.dtsi").write_bytes(
+                (TREE_FIXTURES / "ums9117.dtsi.fixture").read_bytes()
             )
             preprocessed = root / "board.dts"
             dtb = root / "board.dtb"
@@ -283,11 +279,9 @@ class NewTargetDeviceTreeTests:
 class LinuxMachineBindingTests:
     """Validate generated board schemas together through real dtschema tools."""
 
-    processed_schema: ClassVar[Path]
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _validated_schemas(cls) -> Iterator[None]:
+    def processed_schema(cls) -> Iterator[Path]:
         """Process both board bindings once for the class's identity cases."""
         identities = (
             {"display_name": "First phone", "compatible": "test,first"},
@@ -314,8 +308,7 @@ class LinuxMachineBindingTests:
                     check=True,
                 )
                 assert result.stdout + result.stderr == ""
-            cls.processed_schema = processed
-            yield
+            yield processed
 
     @pytest.mark.parametrize(
         ("compatible", "model", "expected_model"),
@@ -327,7 +320,12 @@ class LinuxMachineBindingTests:
         ],
     )
     def test_boards_sharing_a_soc_validate_only_their_own_identity(
-        self, tmp_path: Path, compatible: str, model: str, expected_model: str | None
+        self,
+        processed_schema: Path,
+        tmp_path: Path,
+        compatible: str,
+        model: str,
+        expected_model: str | None,
     ) -> None:
         """A shared fallback produces no duplicate schema or wrong-board validation."""
         dtb = tmp_path / "board.dtb"
@@ -343,7 +341,7 @@ class LinuxMachineBindingTests:
             )
         )
         result = run_process(
-            ["dt-validate", "-s", str(self.processed_schema), str(dtb)],
+            ["dt-validate", "-s", str(processed_schema), str(dtb)],
             name="validate binary board identity",
             timeout=30,
             check=True,
@@ -385,25 +383,20 @@ class LinuxDeviceTreeProfileTests:
                 (source / linux_identity_dtsi_name(target)).write_bytes(
                     linux_identity_dtsi(identity, platform)
                 )
-            (source / "first.dts").write_text(
-                '/dts-v1/;\n#include "fplinux-first-identity.dtsi"\n#include "common.dtsi"\n'
-            )
-            (source / "second.dts").write_text(
-                '/dts-v1/;\n#include "fplinux-second-identity.dtsi"\n#include "common.dtsi"\n'
-            )
+            identity_tree = (TREE_FIXTURES / "identity.dts.fixture").read_text(encoding="ascii")
+            for target in ("first", "second"):
+                (source / f"{target}.dts").write_text(
+                    identity_tree.format(target=target), encoding="ascii"
+                )
             (source / "common.dtsi").write_text(
                 '/ { chosen { /include/ "fplinux-root.dtsi" }; };\n'
             )
             makefile = work / "Makefile"
             makefile.write_text(
-                "DTC_FLAGS := -Wno-unit_address_vs_reg\n"
-                f"include {ROOT / 'platforms/ums9117/linux/dts/unisoc.Makefile'}\n"
-                ".PHONY: all\n"
-                "all:\n"
-                "\tcpp -nostdinc -undef -D__DTS__ -x assembler-with-cpp "
-                "-I $(src) $(src)/$(board).dts -o $(objtree)/board.dts\n"
-                "\tdtc $(DTC_FLAGS) -I dts -O dtb "
-                "-o $(objtree)/board.dtb $(objtree)/board.dts\n"
+                (TREE_FIXTURES / "consumer.make.fixture")
+                .read_text(encoding="ascii")
+                .format(include=ROOT / "platforms/ums9117/linux/dts/unisoc.Makefile"),
+                encoding="ascii",
             )
             before = {path.name: path.read_bytes() for path in source.iterdir()}
             for path in source.iterdir():

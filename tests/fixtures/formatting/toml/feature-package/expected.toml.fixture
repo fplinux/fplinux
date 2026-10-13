@@ -1,0 +1,5 @@
+[linux.root]
+kind = "initramfs"
+
+[rootfs]
+packages = ["feature", "z", "a"]

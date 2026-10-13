@@ -1,0 +1,14 @@
+/ {
+	device@0 {
+		device_type = "test";
+		compatible = "example,device";
+		reg = <0x00 0x100>;
+		ranges;
+		port2 = <0x02>;
+		port12 = <0xc>;
+		example,mode2 = <2>;
+		example,mode10 = <10>;
+
+		status = "disabled";
+	};
+};

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytest
@@ -21,25 +22,30 @@ HARNESS = ROOT / "tests/host_tool/display/fplinux-showcase.c"
 SCENE = APORT / "armada-scene.c"
 
 
+@dataclass(frozen=True)
+class ShowcaseHarness:
+    """Linked scene renderer and its two immutable fixture fonts."""
+
+    executable: Path
+    small_font: Path
+    large_font: Path
+
+
 class FplinuxShowcaseHostToolTests:
     """Render real frames without claiming framebuffer or phone coverage."""
 
-    executable: Path
-    large_font: Path
-    small_font: Path
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def harness(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[ShowcaseHarness]:
         """Link the host harness once for this test group."""
         with c_build_directory(tmp_path_factory, "fplinux-showcase") as temporary:
-            cls.executable = temporary / "fplinux-showcase-test"
-            cls.small_font = temporary / "small.psf"
-            cls.large_font = temporary / "large.psf"
-            write_solid_ascii_font(cls.small_font, width=6, height=12)
-            write_solid_ascii_font(cls.large_font, width=8, height=16)
+            executable = temporary / "fplinux-showcase-test"
+            small_font = temporary / "small.psf"
+            large_font = temporary / "large.psf"
+            write_solid_ascii_font(small_font, width=6, height=12)
+            write_solid_ascii_font(large_font, width=8, height=16)
             compile_c(
-                cls.executable,
+                executable,
                 [
                     "-O2",
                     "-std=c11",
@@ -57,12 +63,12 @@ class FplinuxShowcaseHostToolTests:
                 name="compile FPLinux showcase host harness",
                 check=True,
             )
-            yield
+            yield ShowcaseHarness(executable, small_font, large_font)
 
-    def test_renderer_and_timeline_at_both_display_sizes(self) -> None:
+    def test_renderer_and_timeline_at_both_display_sizes(self, harness: ShowcaseHarness) -> None:
         """Protect bounds, frame-history independence, cues, and loop wrapping."""
         run_process(
-            [str(self.executable), str(self.small_font), str(self.large_font)],
+            [str(harness.executable), str(harness.small_font), str(harness.large_font)],
             name="run FPLinux showcase host harness",
             timeout=30,
             check=True,

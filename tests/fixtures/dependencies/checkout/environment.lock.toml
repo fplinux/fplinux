@@ -1,0 +1,12 @@
+[selection]
+arch = "x86_64"
+apk_groups = [["tool=2.0-r0"]]
+
+[[input]]
+key = "environment:tool"
+url = "https://example.invalid/tool-2.0-r0.apk"
+sha256 = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+bytes = 12
+destination = "downloads/environment/apk/main/x86_64/tool-2.0-r0.apk"
+purpose = "container-package"
+arch = "x86_64"

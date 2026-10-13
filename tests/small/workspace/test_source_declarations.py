@@ -13,9 +13,10 @@ from fplinux_cli.build.inputs import selected_build_sources
 from fplinux_cli.workspace import build_inputs, staging
 
 from tests.small.workspace.workspace_fixtures import (
-    WorkspaceSourceFixture,
     empty_package_graph,
     workspace_root,
+    write_registration_source,
+    write_source_lock_files,
 )
 
 if TYPE_CHECKING:
@@ -26,15 +27,15 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
-class SourceDeclarationCheckout(WorkspaceSourceFixture):
+class SourceDeclarationCheckout:
     """A temporary checkout with two mapped targets and one FDL-only target."""
 
     root: Path
 
     def write_source_locks(self) -> None:
         """Create the raw declarations and package metadata owned by this fixture."""
-        self._source_lock_files(self.root, "phone-a")
-        self._registration_source(self.root)
+        write_source_lock_files(self.root, "phone-a")
+        write_registration_source(self.root)
 
     def snapshot(self, target: str = "phone-a") -> WorkspaceSnapshot:
         """Capture the real target workspace with controlled configuration discovery."""

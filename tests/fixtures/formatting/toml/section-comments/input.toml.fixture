@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
+platform = "demo"
+
+# Device inputs
+[board_maps]
+firmware = []
+
+# Loader controls
+[adapter]
+session_name = "demo"
+exec_distance = 0

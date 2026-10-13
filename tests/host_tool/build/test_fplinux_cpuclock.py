@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -22,16 +22,14 @@ SHARED_INCLUDE = ROOT / "include/fplinux"
 class FplinuxCpuclockCliTests:
     """Exercise argument validation and small counts using the host fallback loop."""
 
-    executable: ClassVar[Path]
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def executable(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         """Compile the production entry point with its host implementation."""
         with c_build_directory(tmp_path_factory, "fplinux-cpuclock") as temporary:
-            cls.executable = temporary / "fplinux-cpuclock"
+            executable = temporary / "fplinux-cpuclock"
             compile_c(
-                cls.executable,
+                executable,
                 [
                     "-std=c11",
                     "-Wall",
@@ -44,17 +42,19 @@ class FplinuxCpuclockCliTests:
                 name="compile CPU clock host CLI",
                 check=True,
             )
-            yield
+            yield executable
 
     @pytest.mark.parametrize(
         "arguments",
         [("-h",), ("--help",), ("0", "--help"), ("--unknown", "--help")],
         ids=["h", "help", "0-help", "unknown-help"],
     )
-    def test_help_exits_before_measurement(self, arguments: tuple[str, ...]) -> None:
+    def test_help_exits_before_measurement(
+        self, executable: Path, arguments: tuple[str, ...]
+    ) -> None:
         """Help is available with missing or malformed counts and extra options."""
         result = run_process(
-            [str(self.executable), *arguments],
+            [str(executable), *arguments],
             name="run CPU clock help",
             timeout=5,
         )
@@ -99,11 +99,11 @@ class FplinuxCpuclockCliTests:
         ],
     )
     def test_invalid_counts_and_extra_arguments_do_not_start_measurement(
-        self, arguments: tuple[str, ...]
+        self, executable: Path, arguments: tuple[str, ...]
     ) -> None:
         """Reject partial numbers, zero and overflow before the ARM counter cast."""
         result = run_process(
-            [str(self.executable), *arguments],
+            [str(executable), *arguments],
             name="run CPU clock argument error",
             timeout=5,
         )
@@ -112,10 +112,10 @@ class FplinuxCpuclockCliTests:
         assert (result.stdout) == ("")
         assert ("--help") in (result.stderr)
 
-    def test_decimal_counts_select_the_requested_host_rounds(self) -> None:
+    def test_decimal_counts_select_the_requested_host_rounds(self, executable: Path) -> None:
         """Decimal iterations and rounds select the requested workload."""
         result = run_process(
-            [str(self.executable), "16", "2"],
+            [str(executable), "16", "2"],
             name="run CPU clock host fallback",
             timeout=5,
         )
@@ -128,10 +128,10 @@ class FplinuxCpuclockCliTests:
         assert ("round 3:") not in (result.stdout)
         assert ("best of 2 rounds:") in (result.stdout)
 
-    def test_omitted_rounds_retain_five_measurements(self) -> None:
+    def test_omitted_rounds_retain_five_measurements(self, executable: Path) -> None:
         """A positive signed iteration count leaves the round default unchanged."""
         result = run_process(
-            [str(self.executable), "+16"],
+            [str(executable), "+16"],
             name="run CPU clock default host rounds",
             timeout=5,
         )

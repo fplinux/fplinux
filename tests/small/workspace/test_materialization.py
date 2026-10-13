@@ -10,14 +10,14 @@ import fplinux_cli.workspace.capture as workspace_capture
 import fplinux_cli.workspace.staging as workspace_staging
 import pytest
 
-from tests.small.workspace.workspace_fixtures import WorkspaceSourceFixture
+from tests.small.workspace.workspace_fixtures import write_source
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
 
-class WorkspaceMaterializationTests(WorkspaceSourceFixture):
+class WorkspaceMaterializationTests:
     """Keep cache materialization causally bound to an already read snapshot."""
 
     def test_materialization_uses_precomputed_bytes_after_checkout_changes(
@@ -25,7 +25,7 @@ class WorkspaceMaterializationTests(WorkspaceSourceFixture):
     ) -> None:
         """Staging reads only the snapshot, so a later checkout edit cannot leak in."""
         root = tmp_path
-        source = self._source(root, contents=b"snapshot", mode=0o751)
+        source = write_source(root, contents=b"snapshot", mode=0o751)
         snapshot = workspace_capture.workspace_snapshot([("bin/tool", source)])
         source.write_bytes(b"new-checkout")
         source.chmod(0o644)
@@ -42,7 +42,7 @@ class WorkspaceMaterializationTests(WorkspaceSourceFixture):
     ) -> None:
         """An exact cache entry returns before tempfile creation."""
         root = tmp_path
-        snapshot = workspace_capture.workspace_snapshot([("source", self._source(root))])
+        snapshot = workspace_capture.workspace_snapshot([("source", write_source(root))])
         with mock.patch.object(workspace_staging, "ROOT", root):
             expected = workspace_staging.stage_workspace_snapshot(snapshot)
             with mock.patch(
@@ -56,7 +56,7 @@ class WorkspaceMaterializationTests(WorkspaceSourceFixture):
     def test_discard_removes_only_a_completed_exact_target_workspace(self, tmp_path: Path) -> None:
         """A target workspace is disposable immediately after its snapshot consumer exits."""
         root = tmp_path
-        snapshot = workspace_capture.workspace_snapshot([("source", self._source(root))])
+        snapshot = workspace_capture.workspace_snapshot([("source", write_source(root))])
         with mock.patch.object(workspace_staging, "ROOT", root):
             workspace = workspace_staging.stage_workspace_snapshot(snapshot)
             workspace_staging.discard_staged_workspace_snapshot(snapshot, workspace)
@@ -68,7 +68,7 @@ class WorkspaceMaterializationTests(WorkspaceSourceFixture):
     ) -> None:
         """A completed quality workspace has the same bounded retention contract."""
         root = tmp_path
-        snapshot = workspace_capture.workspace_snapshot([("source", self._source(root))])
+        snapshot = workspace_capture.workspace_snapshot([("source", write_source(root))])
         with mock.patch.object(workspace_staging, "ROOT", root):
             workspace = workspace_staging.stage_quality_workspace_snapshot(snapshot)
             workspace_staging.discard_staged_quality_workspace_snapshot(snapshot, workspace)
@@ -78,7 +78,7 @@ class WorkspaceMaterializationTests(WorkspaceSourceFixture):
     def test_discard_refuses_a_path_outside_its_snapshot_slot(self, tmp_path: Path) -> None:
         """The discard API cannot be redirected to another cache directory."""
         root = tmp_path
-        snapshot = workspace_capture.workspace_snapshot([("source", self._source(root))])
+        snapshot = workspace_capture.workspace_snapshot([("source", write_source(root))])
         wrong = root / ".cache/workspaces/not-the-snapshot"
         wrong.mkdir(parents=True)
         with (
@@ -94,7 +94,7 @@ class WorkspaceMaterializationTests(WorkspaceSourceFixture):
     ) -> None:
         """A stale link or altered marker is not recognised as disposable cache state."""
         root = tmp_path
-        snapshot = workspace_capture.workspace_snapshot([("source", self._source(root))])
+        snapshot = workspace_capture.workspace_snapshot([("source", write_source(root))])
         expected = root / ".cache/workspaces" / snapshot.recipe
         external = root / "external"
         external.mkdir()
@@ -141,7 +141,7 @@ class WorkspaceMaterializationTests(WorkspaceSourceFixture):
     ) -> None:
         """Managed cache components never redirect workspace writes or removals externally."""
         root = tmp_path
-        snapshot = workspace_capture.workspace_snapshot([("source", self._source(root))])
+        snapshot = workspace_capture.workspace_snapshot([("source", write_source(root))])
         external = root / f"external-{namespace_name}"
         sentinel = external / "sentinel"
         external.mkdir()
@@ -166,7 +166,7 @@ class WorkspaceMaterializationTests(WorkspaceSourceFixture):
     def test_stage_and_discard_refuse_a_symlinked_cache_root(self, tmp_path: Path) -> None:
         """The namespace check also refuses a redirected `.cache` component."""
         root = tmp_path
-        snapshot = workspace_capture.workspace_snapshot([("source", self._source(root))])
+        snapshot = workspace_capture.workspace_snapshot([("source", write_source(root))])
         external = root / "external-cache"
         sentinel = external / "sentinel"
         external.mkdir()
@@ -190,7 +190,7 @@ class WorkspaceMaterializationTests(WorkspaceSourceFixture):
     def test_failed_materialization_removes_its_staging_directory(self, tmp_path: Path) -> None:
         """An injected write failure removes the private staging directory."""
         root = tmp_path
-        snapshot = workspace_capture.workspace_snapshot([("source", self._source(root))])
+        snapshot = workspace_capture.workspace_snapshot([("source", write_source(root))])
         with (
             mock.patch.object(workspace_staging, "ROOT", root),
             mock.patch.object(

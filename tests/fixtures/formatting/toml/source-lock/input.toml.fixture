@@ -1,0 +1,9 @@
+[fpdoom_host.files]
+z_sha256 = "z"
+a_sha256 = "a"
+
+[linux]
+license = "GPL-2.0-only"
+sha256 = "hash"
+url = "https://example.invalid/linux"
+version = "1"

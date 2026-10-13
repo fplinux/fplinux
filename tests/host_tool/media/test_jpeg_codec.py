@@ -161,16 +161,14 @@ def _canonical_codes(counts: bytes, symbols: bytes) -> dict[int, tuple[int, int]
 class Ums9117JpegCodecHostTests:
     """Exercise production codec objects through controlled external doubles."""
 
-    executable: Path
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def executable(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         """Link one codec harness with the controlled external boundaries."""
         with c_build_directory(tmp_path_factory, "jpeg-codec") as directory:
-            cls.executable = directory / "ums9117-jpeg-codec"
+            executable = directory / "ums9117-jpeg-codec"
             compile_c(
-                cls.executable,
+                executable,
                 [
                     "-O2",
                     "-std=c11",
@@ -186,7 +184,7 @@ class Ums9117JpegCodecHostTests:
                 name="compile UMS9117 JPEG codec host oracle",
                 check=True,
             )
-            yield
+            yield executable
 
     @pytest.mark.parametrize(
         ("quality", "expected"),
@@ -196,22 +194,24 @@ class Ums9117JpegCodecHostTests:
             pytest.param(100, bytes([1]) * 128, id="maximum-quality"),
         ],
     )
-    def test_decode_contract_and_encode_config(self, quality: int, expected: bytes) -> None:
+    def test_decode_contract_and_encode_config(
+        self, executable: Path, quality: int, expected: bytes
+    ) -> None:
         """Preserve decoder behavior and validate the observable encode config."""
         run_process(
-            [str(self.executable)],
+            [str(executable)],
             name="run UMS9117 JPEG decode and encode-boundary oracle",
             timeout=30,
             check=True,
         )
         dump = run_process(
-            [str(self.executable), "--dump-encode"],
+            [str(executable), "--dump-encode"],
             name="export UMS9117 JPEG encode config",
             timeout=30,
             check=True,
         )
         quality_dump = run_process(
-            [str(self.executable), f"--dump-quality-{quality}"],
+            [str(executable), f"--dump-quality-{quality}"],
             name="export quality-dependent JPEG encode config",
             timeout=30,
             check=True,

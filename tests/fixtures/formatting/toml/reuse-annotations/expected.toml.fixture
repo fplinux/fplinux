@@ -1,0 +1,11 @@
+version = 1
+SPDX-PackageSupplier = "person"
+
+[[annotations]]
+path = ["z/**", "a/**"]
+precedence = "override"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["*.py"]
+SPDX-License-Identifier = "GPL-2.0-only"

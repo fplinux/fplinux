@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from fplinux_cli import common
-from fplinux_cli.cli.package_readme import ordinary_readme
+from fplinux_cli.cli.package_readme import append_source_companion, ordinary_readme
+
+from tests import ROOT
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -25,6 +27,46 @@ def readme_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, 
         "adapter": {"boot_instructions": "Hold the left soft key while connecting USB."},
         "linux": {"root": {"kind": "initramfs"}},
     }
+
+
+@pytest.mark.parametrize(
+    ("target", "root_kind", "document"),
+    [
+        pytest.param("demo-phone", "initramfs", "ordinary-ram.txt", id="ram"),
+        pytest.param("demo-phone", "external", "ordinary-system-card.txt", id="system-card"),
+        pytest.param("new-phone", "initramfs", "ordinary-bring-up.txt", id="bring-up"),
+    ],
+)
+def test_ordinary_readme_preserves_the_complete_archive_instructions(
+    readme_config: dict[str, Any], target: str, root_kind: str, document: str
+) -> None:
+    readme_config["linux"]["root"]["kind"] = root_kind
+    expected = ROOT / "tests/small/cli/fixtures/package_readme" / document
+
+    assert ordinary_readme(target, readme_config) == expected.read_bytes()
+
+
+def test_ordinary_readme_preserves_literal_and_multiline_boot_instructions(
+    readme_config: dict[str, Any],
+) -> None:
+    readme_config["adapter"]["boot_instructions"] = (
+        'Hold {boot} @NAME@ with $HOME, "USB", \\ and\nkeep it held.'
+    )
+
+    text = ordinary_readme("demo-phone", readme_config)
+
+    assert b'  Hold {boot} @NAME@ with $HOME, "USB", \\ and\nkeep it held.\n' in text
+
+
+def test_source_companion_footer_preserves_the_literal_archive_name() -> None:
+    text = append_source_companion(b"Archive instructions\n", "sources-{build}@$HOME")
+
+    assert text == (
+        b"Archive instructions\n\n"
+        b"Matching source and build material:\n"
+        b"  sources-{build}@$HOME.zip\n"
+        b"Keep it available alongside this archive. Licenses remain included here.\n"
+    )
 
 
 def test_readme_names_the_selected_variant_and_existing_offline_route(

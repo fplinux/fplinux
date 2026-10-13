@@ -11,6 +11,7 @@ import itertools
 import json
 import shlex
 import subprocess
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ from unittest import mock
 import pytest
 from fplinux_cli.runtime import ssh_transport
 
+from tests import ROOT
 from tests.bundle_support import file_record
 from tests.ssh_transport_support import create_ready_session
 
@@ -99,31 +101,16 @@ class ReadyAfterPolls:
         return self.polls > self.failed_polls
 
 
-class LiveSessionSmallTests:
-    """Observe session selection using private files and a controlled USB attribute tree."""
+@dataclass(frozen=True)
+class SavedSession:
+    """Ready saved state and a controlled USB attribute tree for one selector case."""
 
-    @pytest.fixture(autouse=True)
-    def _saved_session(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Replace the host USB tree while leaving saved-state validation and discovery real."""
-        self.root = tmp_path / "runtime"
-        self.root.mkdir(mode=0o700)
-        self.state = create_ready_session(self.root)
-        self.state["runtime_root"] = str(self.root)
-        current = self.root / "current"
-        current.mkdir(mode=0o700)
-        self.current_path = current / "phone.json"
-        self.current_path.write_text(json.dumps(self.state), encoding="utf-8")
-        self.current_path.chmod(0o600)
-        self.usb = tmp_path / "usb"
-        self.usb.mkdir()
+    root: Path
+    state: dict[str, Any]
+    current_path: Path
+    usb: Path
 
-        def selected_path(value: str | Path) -> Path:
-            return self.usb if value == "/sys/bus/usb/devices" else Path(value)
-
-        monkeypatch.setattr(ssh_transport, "Path", selected_path)
-        monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
-
-    def _usb_device(
+    def usb_device(
         self,
         name: str,
         *,
@@ -141,78 +128,121 @@ class LiveSessionSmallTests:
         )
         return device
 
+
+@pytest.fixture
+def saved_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SavedSession:
+    """Replace USB discovery while leaving state validation and selection real."""
+    root = tmp_path / "runtime"
+    root.mkdir(mode=0o700)
+    state = create_ready_session(root)
+    state["runtime_root"] = str(root)
+    current = root / "current"
+    current.mkdir(mode=0o700)
+    current_path = current / "phone.json"
+    current_path.write_text(json.dumps(state), encoding="utf-8")
+    current_path.chmod(0o600)
+    usb = tmp_path / "usb"
+    usb.mkdir()
+
+    def selected_path(value: str | Path) -> Path:
+        return usb if value == "/sys/bus/usb/devices" else Path(value)
+
+    monkeypatch.setattr(ssh_transport, "Path", selected_path)
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    return SavedSession(root, state, current_path, usb)
+
+
+class LiveSessionSmallTests:
+    """Observe session selection using private files and a controlled USB attribute tree."""
+
     def test_missing_saved_session_allows_a_new_load_without_weakening_current_loader(
         self,
+        saved_session: SavedSession,
     ) -> None:
         """Only the optional live selector accepts the absence of a saved current pointer."""
-        self.current_path.unlink()
+        saved_session.current_path.unlink()
 
-        assert ssh_transport.load_live_session("phone", runtime_root=self.root) is None
+        assert ssh_transport.load_live_session("phone", runtime_root=saved_session.root) is None
         with pytest.raises(SystemExit, match="no ready SSH session for phone"):
-            ssh_transport.load_current_session("phone", runtime_root=self.root)
+            ssh_transport.load_current_session("phone", runtime_root=saved_session.root)
 
-    def test_absent_exact_usb_allows_a_new_load_and_retains_saved_session(self) -> None:
+    def test_absent_exact_usb_allows_a_new_load_and_retains_saved_session(
+        self, saved_session: SavedSession
+    ) -> None:
         """Other USB identities do not select the saved RAM session or erase its private files."""
-        self._usb_device("other-vendor", vendor="1234")
-        self._usb_device("other-product", product="a4a7")
-        self._usb_device("other-session", serial="a" * 32)
-        (self.usb / "1-1:1.0").mkdir()
+        saved_session.usb_device("other-vendor", vendor="1234")
+        saved_session.usb_device("other-product", product="a4a7")
+        saved_session.usb_device("other-session", serial="a" * 32)
+        (saved_session.usb / "1-1:1.0").mkdir()
 
-        assert ssh_transport.load_live_session("phone", runtime_root=self.root) is None
-        assert ssh_transport.load_current_session("phone", runtime_root=self.root) == self.state
-        assert Path(self.state["private_key"]).read_bytes() == b"private\n"
-        assert Path(self.state["known_hosts"]).read_bytes() == b"private\n"
+        assert ssh_transport.load_live_session("phone", runtime_root=saved_session.root) is None
+        assert (
+            ssh_transport.load_current_session("phone", runtime_root=saved_session.root)
+            == saved_session.state
+        )
+        assert Path(saved_session.state["private_key"]).read_bytes() == b"private\n"
+        assert Path(saved_session.state["known_hosts"]).read_bytes() == b"private\n"
 
-    def test_present_exact_usb_selects_the_saved_session_before_endpoint_readiness(self) -> None:
+    def test_present_exact_usb_selects_the_saved_session_before_endpoint_readiness(
+        self, saved_session: SavedSession
+    ) -> None:
         """A matching USB device selects reuse even before it exposes a network interface."""
-        self._usb_device("1-1")
+        saved_session.usb_device("1-1")
 
-        selected = ssh_transport.load_live_session("phone", runtime_root=self.root)
+        selected = ssh_transport.load_live_session("phone", runtime_root=saved_session.root)
 
-        assert selected == self.state
-        assert self.current_path.read_text(encoding="utf-8") == json.dumps(self.state)
+        assert selected == saved_session.state
+        assert saved_session.current_path.read_text(encoding="utf-8") == json.dumps(
+            saved_session.state
+        )
 
     @pytest.mark.parametrize("invalid_state", ["{", '{"unexpected": "value"}'])
     def test_invalid_saved_session_fails_instead_of_allowing_a_new_load(
-        self, invalid_state: str
+        self, saved_session: SavedSession, invalid_state: str
     ) -> None:
         """Malformed or incomplete saved state remains an error even with no matching USB."""
-        self.current_path.write_text(invalid_state, encoding="utf-8")
+        saved_session.current_path.write_text(invalid_state, encoding="utf-8")
 
         with pytest.raises(SystemExit, match="current SSH session state"):
-            ssh_transport.load_live_session("phone", runtime_root=self.root)
+            ssh_transport.load_live_session("phone", runtime_root=saved_session.root)
 
-    def test_nonregular_saved_session_fails_instead_of_allowing_a_new_load(self) -> None:
+    def test_nonregular_saved_session_fails_instead_of_allowing_a_new_load(
+        self, saved_session: SavedSession
+    ) -> None:
         """An existing current path that is not a regular state file is not physical absence."""
-        self.current_path.unlink()
-        self.current_path.mkdir()
+        saved_session.current_path.unlink()
+        saved_session.current_path.mkdir()
 
         with pytest.raises(SystemExit, match="session state is not a regular file"):
-            ssh_transport.load_live_session("phone", runtime_root=self.root)
+            ssh_transport.load_live_session("phone", runtime_root=saved_session.root)
 
-    def test_ambiguous_exact_usb_fails_instead_of_allowing_a_new_load(self) -> None:
+    def test_ambiguous_exact_usb_fails_instead_of_allowing_a_new_load(
+        self, saved_session: SavedSession
+    ) -> None:
         """Two devices carrying the saved exact identity cannot select a reload or reconnect."""
-        self._usb_device("1-1")
-        self._usb_device("1-2")
+        saved_session.usb_device("1-1")
+        saved_session.usb_device("1-2")
 
         with pytest.raises(SystemExit, match="more than one USB device matches"):
-            ssh_transport.load_live_session("phone", runtime_root=self.root)
+            ssh_transport.load_live_session("phone", runtime_root=saved_session.root)
 
-    def test_unavailable_usb_discovery_fails_instead_of_allowing_a_new_load(self) -> None:
+    def test_unavailable_usb_discovery_fails_instead_of_allowing_a_new_load(
+        self, saved_session: SavedSession
+    ) -> None:
         """An unavailable USB attribute tree cannot establish that the phone is absent."""
-        self.usb.rmdir()
+        saved_session.usb.rmdir()
 
         with pytest.raises(SystemExit, match="cannot discover the current USB session"):
-            ssh_transport.load_live_session("phone", runtime_root=self.root)
+            ssh_transport.load_live_session("phone", runtime_root=saved_session.root)
 
     @pytest.mark.parametrize(
         "unreadable_attribute", ["vendor", "missing-serial", "nonascii-serial"]
     )
     def test_unreadable_usb_identity_fails_instead_of_allowing_a_new_load(
-        self, unreadable_attribute: str
+        self, saved_session: SavedSession, unreadable_attribute: str
     ) -> None:
         """Failed USB identity parsing cannot be treated as proof of the session's absence."""
-        device = self._usb_device("1-1")
+        device = saved_session.usb_device("1-1")
         if unreadable_attribute == "vendor":
             (device / "idVendor").write_text("unreadable\n", encoding="ascii")
         elif unreadable_attribute == "missing-serial":
@@ -221,27 +251,37 @@ class LiveSessionSmallTests:
             (device / "serial").write_bytes(b"\xff\n")
 
         with pytest.raises(SystemExit, match="cannot discover the current USB session"):
-            ssh_transport.load_live_session("phone", runtime_root=self.root)
+            ssh_transport.load_live_session("phone", runtime_root=saved_session.root)
+
+
+@dataclass(frozen=True)
+class SshRuntime:
+    """Private runtime path and adjacent bundle/transfer files for one case."""
+
+    directory: Path
+    root: Path
+
+    def session(self, *, status: str = "ready") -> dict[str, Any]:
+        """Create a session and private credentials beneath this case's runtime root."""
+        return create_ready_session(self.root, status=status)
+
+
+@pytest.fixture
+def ssh_runtime(tmp_path: Path) -> SshRuntime:
+    """Create one private user runtime root."""
+    root = tmp_path / "runtime"
+    root.mkdir(mode=0o700)
+    return SshRuntime(tmp_path, root)
 
 
 class SshTransportSmallTests:
     """Exercise in-process session, bundle and transfer boundaries."""
 
-    @pytest.fixture(autouse=True)
-    def _ssh_runtime_root(self, tmp_path: Path) -> None:
-        """Create an isolated user runtime root and one synthetic bundle identity."""
-        self.directory = tmp_path
-        self.root = self.directory / "runtime"
-        self.root.mkdir(mode=0o700)
-
-    def _session(self, *, status: str = "ready") -> dict[str, Any]:
-        return create_ready_session(self.root, status=status)
-
-    def test_open_shell_rejects_a_noninteractive_process(self) -> None:
+    def test_open_shell_rejects_a_noninteractive_process(self, ssh_runtime: SshRuntime) -> None:
         """Do not launch forced-PTY SSH when the host has no input terminal."""
-        session = self._session()
+        session = ssh_runtime.session()
         with (
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
+            mock.patch.object(ssh_transport, "_runtime_root", return_value=ssh_runtime.root),
             mock.patch("fplinux_cli.runtime.ssh_transport.os.isatty", return_value=False),
             mock.patch("fplinux_cli.runtime.ssh_transport.os.execv") as execute,
             pytest.raises(SystemExit, match="interactive SSH requires a terminal"),
@@ -250,11 +290,11 @@ class SshTransportSmallTests:
 
         execute.assert_not_called()
 
-    def test_open_shell_executes_for_an_input_terminal(self) -> None:
+    def test_open_shell_executes_for_an_input_terminal(self, ssh_runtime: SshRuntime) -> None:
         """Replace the runner with ssh forcing a remote PTY for the session's phone."""
-        session = self._session()
+        session = ssh_runtime.session()
         with (
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
+            mock.patch.object(ssh_transport, "_runtime_root", return_value=ssh_runtime.root),
             mock.patch("fplinux_cli.runtime.ssh_transport.os.isatty", return_value=True),
             mock.patch(
                 "fplinux_cli.runtime.ssh_transport.shutil.which", return_value="/usr/bin/ssh"
@@ -270,9 +310,11 @@ class SshTransportSmallTests:
         assert ("-tt") in (argv)
         assert (argv[-1]) == ("root@10.23.45.2")
 
-    def test_bundle_identity_rejects_a_runtime_image_outside_its_build_manifest(self) -> None:
+    def test_bundle_identity_rejects_a_runtime_image_outside_its_build_manifest(
+        self, ssh_runtime: SshRuntime
+    ) -> None:
         """Refuse reconnect state when the RAM payload no longer matches the generation."""
-        bundle = self.directory / "bundle"
+        bundle = ssh_runtime.directory / "bundle"
         runtime, generation = write_bundle(bundle)
 
         identity = ssh_transport.bundle_identity(bundle, runtime)
@@ -291,10 +333,10 @@ class SshTransportSmallTests:
         ],
     )
     def test_bundle_identity_rejects_a_runtime_from_another_profile(
-        self, changed: dict[str, str]
+        self, ssh_runtime: SshRuntime, changed: dict[str, str]
     ) -> None:
         """A named profile cannot reuse the default bundle's SSH identity."""
-        bundle = self.directory / "bundle"
+        bundle = ssh_runtime.directory / "bundle"
         runtime, _generation = write_bundle(bundle)
 
         with (
@@ -302,22 +344,24 @@ class SshTransportSmallTests:
         ):
             ssh_transport.bundle_identity(bundle, {**runtime, **changed})
 
-    def test_current_session_loads_ready_bound_session(self) -> None:
+    def test_current_session_loads_ready_bound_session(self, ssh_runtime: SshRuntime) -> None:
         """A ready RAM session remains usable through its private binding."""
-        state = self._session()
-        current = self.root / "current"
+        state = ssh_runtime.session()
+        current = ssh_runtime.root / "current"
         current.mkdir(mode=0o700)
         (current / "phone.json").write_text(json.dumps(state), encoding="utf-8")
         (current / "phone.json").chmod(0o600)
 
-        with mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root):
+        with mock.patch.object(ssh_transport, "_runtime_root", return_value=ssh_runtime.root):
             loaded = ssh_transport.load_current_session("phone")
 
         assert (loaded) == (state)
 
-    def test_device_identity_accepts_the_running_selected_kernel(self) -> None:
+    def test_device_identity_accepts_the_running_selected_kernel(
+        self, ssh_runtime: SshRuntime
+    ) -> None:
         """Accept an authenticated session when uname identifies the selected runtime."""
-        session = self._session()
+        session = ssh_runtime.session()
         device_identity = "9" * 64
         result = subprocess.CompletedProcess(
             [],
@@ -330,9 +374,11 @@ class SshTransportSmallTests:
 
         assert (release) == (f"6.12-fplinux-{device_identity[:16]}")
 
-    def test_device_identity_rejects_a_different_running_kernel(self) -> None:
+    def test_device_identity_rejects_a_different_running_kernel(
+        self, ssh_runtime: SshRuntime
+    ) -> None:
         """Reject a ready authenticated session running another device runtime."""
-        session = self._session()
+        session = ssh_runtime.session()
         result = subprocess.CompletedProcess(
             [],
             0,
@@ -345,9 +391,9 @@ class SshTransportSmallTests:
         ):
             ssh_transport.require_device_identity(session, "9" * 64)
 
-    def test_device_identity_rejects_a_failed_kernel_probe(self) -> None:
+    def test_device_identity_rejects_a_failed_kernel_probe(self, ssh_runtime: SshRuntime) -> None:
         """A matching-looking stdout cannot hide a failed authenticated probe."""
-        session = self._session()
+        session = ssh_runtime.session()
         result = subprocess.CompletedProcess(
             [],
             7,
@@ -363,9 +409,11 @@ class SshTransportSmallTests:
     @pytest.mark.parametrize(
         "rtc", [pytest.param("kept", id="kept"), pytest.param("written", id="written")]
     )
-    def test_clock_sync_sends_host_utc_seconds_and_reports_the_phone_clock(self, rtc: str) -> None:
+    def test_clock_sync_sends_host_utc_seconds_and_reports_the_phone_clock(
+        self, ssh_runtime: SshRuntime, rtc: str
+    ) -> None:
         """One phone command carries whole host UTC seconds; its RTC outcome is shown."""
-        session = self._session()
+        session = ssh_runtime.session()
         result = subprocess.CompletedProcess(
             [], 0, stdout=f"system=1788739201 rtc={rtc}\n", stderr=""
         )
@@ -410,10 +458,10 @@ class SshTransportSmallTests:
         ],
     )
     def test_clock_sync_failure_warns_and_returns(
-        self, result: subprocess.CompletedProcess[str], warning: str
+        self, ssh_runtime: SshRuntime, result: subprocess.CompletedProcess[str], warning: str
     ) -> None:
         """A clock failure is a warning, so the caller can still report a ready session."""
-        session = self._session()
+        session = ssh_runtime.session()
         output = io.StringIO()
         errors = io.StringIO()
         with (
@@ -427,16 +475,16 @@ class SshTransportSmallTests:
         assert (output.getvalue()) == ("")
         assert (errors.getvalue()) == (warning)
 
-    def test_current_session_rejects_an_unknown_field(self) -> None:
+    def test_current_session_rejects_an_unknown_field(self, ssh_runtime: SshRuntime) -> None:
         """An unrecognized host-state record is not a reconnect session."""
-        state = {**self._session(), "unexpected": "value"}
-        current = self.root / "current"
+        state = {**ssh_runtime.session(), "unexpected": "value"}
+        current = ssh_runtime.root / "current"
         current.mkdir(mode=0o700)
         (current / "phone.json").write_text(json.dumps(state), encoding="utf-8")
         (current / "phone.json").chmod(0o600)
 
         with (
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
+            mock.patch.object(ssh_transport, "_runtime_root", return_value=ssh_runtime.root),
             pytest.raises(SystemExit, match="unexpected fields"),
         ):
             ssh_transport.load_current_session("phone")
@@ -449,15 +497,7 @@ class SshTransportSmallTests:
             "02:00:00:00:00:01",
             "02:00:00:00:00:02",
         )
-        expected = (
-            "usb_serial=0123456789abcdef0123456789abcdef\n"
-            "phone_address=10.23.45.2\n"
-            "host_address=10.23.45.1\n"
-            "netmask=255.255.255.252\n"
-            "broadcast=10.23.45.3\n"
-            "device_mac=02:00:00:00:00:02\n"
-            "host_mac=02:00:00:00:00:01\n"
-        ).encode("ascii")
+        expected = (ROOT / "tests/fixtures/ssh_transport/usb-session.txt").read_bytes()
 
         assert (config) == (expected.ljust(256, b"\0"))
 
@@ -485,15 +525,17 @@ class SshTransportSmallTests:
         assert (block[180:436]) == (usb_config)
         assert (block[-4:]) == (ieee_crc32(block[:-4]).to_bytes(4, "little"))
 
-    def test_reacquire_retries_mocked_usb_ncm_and_ssh_boundaries(self) -> None:
+    def test_reacquire_retries_mocked_usb_ncm_and_ssh_boundaries(
+        self, ssh_runtime: SshRuntime
+    ) -> None:
         """Retry transient failures reported by controlled USB, NCM, and SSH boundaries."""
-        state = self._session()
+        state = ssh_runtime.session()
         failures = [
             subprocess.CompletedProcess([], 255, stdout="", stderr="not ready"),
             subprocess.CompletedProcess([], 0, stdout=f"{state['session_id']}\n", stderr=""),
         ]
         with (
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
+            mock.patch.object(ssh_transport, "_runtime_root", return_value=ssh_runtime.root),
             mock.patch.object(ssh_transport, "_usb_devices", return_value=[Path("/usb/phone")]),
             mock.patch.object(ssh_transport, "_ncm_interface", return_value="usb1"),
             mock.patch.object(ssh_transport, "_network_ready", return_value=True),
@@ -508,9 +550,11 @@ class SshTransportSmallTests:
         assert (ready["session_id"]) == (state["session_id"])
         assert Path(state["private_key"]).is_file()
 
-    def test_fresh_session_reports_usb_once_before_network_and_ssh_are_ready(self) -> None:
+    def test_fresh_session_reports_usb_once_before_network_and_ssh_are_ready(
+        self, ssh_runtime: SshRuntime
+    ) -> None:
         """A matched USB device is observable even while network and SSH retry."""
-        state = self._session()
+        state = ssh_runtime.session()
         observations: list[tuple[str, bool]] = []
         network = ReadyAfterPolls(failed_polls=1)
         # The first SSH attempt fails; every later one proves the session identity.
@@ -523,7 +567,7 @@ class SshTransportSmallTests:
         # The phone is absent on the first USB poll and present on every later one.
         usb_polls = itertools.chain([[]], itertools.repeat([Path("/usb/phone")]))
         with (
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
+            mock.patch.object(ssh_transport, "_runtime_root", return_value=ssh_runtime.root),
             mock.patch.object(ssh_transport, "_usb_devices", side_effect=usb_polls),
             mock.patch.object(ssh_transport, "_ncm_interface", return_value="usb1"),
             mock.patch.object(ssh_transport, "_network_ready", side_effect=network),
@@ -556,10 +600,10 @@ class SshTransportSmallTests:
         ],
     )
     def test_absent_or_ambiguous_session_usb_is_not_reported(
-        self, devices: list[Path], diagnostic: str
+        self, ssh_runtime: SshRuntime, devices: list[Path], diagnostic: str
     ) -> None:
         """Only one USB device matching the selected session can report arrival."""
-        state = {**self._session(), "wait_seconds": 1}
+        state = {**ssh_runtime.session(), "wait_seconds": 1}
         observations: list[str] = []
         with (
             mock.patch.object(ssh_transport, "_usb_devices", return_value=devices),
@@ -576,9 +620,11 @@ class SshTransportSmallTests:
             )
         assert (observations) == ([])
 
-    def test_failed_current_config_publication_removes_the_ready_pointer_and_session(self) -> None:
+    def test_failed_current_config_publication_removes_the_ready_pointer_and_session(
+        self, ssh_runtime: SshRuntime
+    ) -> None:
         """Never leave a direct config pointing at an incomplete ready session."""
-        session = self._session()
+        session = ssh_runtime.session()
         write_private_text = ssh_transport._write_private_text  # noqa: SLF001
 
         def fail_config(path: Path, value: str) -> None:
@@ -588,40 +634,44 @@ class SshTransportSmallTests:
             write_private_text(path, value)
 
         with (
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
+            mock.patch.object(ssh_transport, "_runtime_root", return_value=ssh_runtime.root),
             mock.patch.object(ssh_transport, "_write_private_text", side_effect=fail_config),
             pytest.raises(OSError, match="disk full"),
         ):
             ssh_transport._mark_current(session)  # noqa: SLF001
 
-        current = self.root / "current"
+        current = ssh_runtime.root / "current"
         assert not ((current / "phone.json").exists())
         assert not ((current / "phone.ssh-config").exists())
-        assert (list((self.root / "sessions").iterdir())) == ([])
+        assert (list((ssh_runtime.root / "sessions").iterdir())) == ([])
 
-    def test_cleanup_removes_only_the_selected_target_session(self) -> None:
+    def test_cleanup_removes_only_the_selected_target_session(
+        self, ssh_runtime: SshRuntime
+    ) -> None:
         """Preserve another target's keys and unrelated files during target cleanup."""
-        selected = create_ready_session(self.root)
-        other = create_ready_session(self.root, target="other-phone")
-        unrelated = self.root / "sessions" / "unrelated"
+        selected = create_ready_session(ssh_runtime.root)
+        other = create_ready_session(ssh_runtime.root, target="other-phone")
+        unrelated = ssh_runtime.root / "sessions" / "unrelated"
         unrelated.mkdir()
         unrelated_file = unrelated / "keep.txt"
         unrelated_file.write_bytes(b"unrelated contents\n")
 
-        with mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root):
-            ssh_transport._cleanup_target_sessions(self.root, "phone")  # noqa: SLF001
+        with mock.patch.object(ssh_transport, "_runtime_root", return_value=ssh_runtime.root):
+            ssh_transport._cleanup_target_sessions(ssh_runtime.root, "phone")  # noqa: SLF001
 
         assert not Path(selected["private_key"]).parent.exists()
         assert Path(other["private_key"]).read_text(encoding="ascii") == "private\n"
         assert unrelated_file.read_bytes() == b"unrelated contents\n"
 
-    def test_failed_prepare_erases_keys_and_invalidates_prior_current(self) -> None:
+    def test_failed_prepare_erases_keys_and_invalidates_prior_current(
+        self, ssh_runtime: SshRuntime
+    ) -> None:
         """A failed session preparation leaves no usable pointer or prepared key directory."""
-        prior = self._session()
-        current = self.root / "current"
+        prior = ssh_runtime.session()
+        current = ssh_runtime.root / "current"
         current.mkdir(mode=0o700)
         (current / "phone.json").write_text(json.dumps(prior), encoding="utf-8")
-        image = self.directory / "ramboot.bin"
+        image = ssh_runtime.directory / "ramboot.bin"
         image.write_bytes(b"DHTB" + b"\0" * 1532)
         descriptor = {
             "offset": 1024,
@@ -631,7 +681,7 @@ class SshTransportSmallTests:
         keygen_failure = subprocess.CompletedProcess([], 1, stdout="", stderr="keygen failed")
 
         with (
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
+            mock.patch.object(ssh_transport, "_runtime_root", return_value=ssh_runtime.root),
             mock.patch.object(ssh_transport, "_require_tool", side_effect=lambda name: name),
             mock.patch.object(
                 ssh_transport,
@@ -656,11 +706,13 @@ class SshTransportSmallTests:
             )
 
         assert not ((current / "phone.json").exists())
-        assert (list((self.root / "sessions").iterdir())) == ([])
+        assert (list((ssh_runtime.root / "sessions").iterdir())) == ([])
 
-    def test_pull_keeps_destination_when_mocked_remote_changes_during_download(self) -> None:
+    def test_pull_keeps_destination_when_mocked_remote_changes_during_download(
+        self, ssh_runtime: SshRuntime
+    ) -> None:
         """Keep the real local destination when the controlled remote boundary changes."""
-        destination = self.directory / "download.bin"
+        destination = ssh_runtime.directory / "download.bin"
         destination.write_bytes(b"old")
         expected_hash = hashlib.sha256(b"data").hexdigest()
         changed_hash = hashlib.sha256(b"next").hexdigest()

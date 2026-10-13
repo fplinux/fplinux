@@ -9,65 +9,46 @@ from unittest import mock
 
 from fplinux_cli.workspace import build_inputs, quality_inputs, staging
 
+from tests import ROOT
+
+WORKSPACE_FILES = ROOT / "tests/fixtures/workspace"
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
 
-class WorkspaceSourceFixture:
-    """Create an owned source file with explicit contents and mode."""
+def write_source(root: Path, *, contents: bytes = b"source", mode: int = 0o754) -> Path:
+    source = root / "source"
+    source.write_bytes(contents)
+    source.chmod(mode)
+    return source
 
-    @staticmethod
-    def _source(root: Path, *, contents: bytes = b"source", mode: int = 0o754) -> Path:
-        source = root / "source"
-        source.write_bytes(contents)
-        source.chmod(mode)
-        return source
 
-    @staticmethod
-    def _registration_source(root: Path) -> tuple[str, Path]:
-        """Create the package declarations materialized beside a synthetic target."""
-        relative = "scripts/fplinux_cli/alpine/registration.py"
-        source = root / relative
-        source.parent.mkdir(parents=True, exist_ok=True)
-        source.write_bytes(b"# empty package declarations\n")
-        return relative, source
+def write_registration_source(root: Path) -> tuple[str, Path]:
+    """Create the package declarations materialized beside a synthetic target."""
+    relative = "scripts/fplinux_cli/alpine/registration.py"
+    source = root / relative
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"# empty package declarations\n")
+    return relative, source
 
-    @staticmethod
-    def _source_lock_files(root: Path, target: str = "demo") -> list[tuple[str, Path]]:
-        """Supply captured lock inputs beside controlled target and package discovery."""
-        contents = {
-            "sources.lock.toml": (
-                f'[linux]\nsha256 = "{"1" * 64}"\n'
-                '[bootstrap]\narchive_url = "https://example.invalid/boot.tar.gz"\n'
-                f'archive_sha256 = "{"2" * 64}"\n'
-                '[host]\narchive_url = "https://example.invalid/host.tar.gz"\n'
-                f'archive_sha256 = "{"3" * 64}"\n'
-                '[unused]\nurl = "https://example.invalid/unused.tar.gz"\n'
-                f'sha256 = "{"4" * 64}"\n'
-            ),
-            "platforms/demo/platform.toml": (
-                '[linux]\nsource_lock = "linux"\n'
-                '[bootstrap]\nvendor_source_lock = "bootstrap"\n'
-                '[[host.tools]]\ntype = "make-archive"\nsource_lock = "host"\n'
-            ),
-            f"targets/{target}/target.toml": 'platform = "demo"\n',
-            "platforms/demo/loader/assets.lock.toml": (
-                '[fdl1]\nurl = "https://example.invalid/fdl1.bin"\n'
-                f'sha256 = "{"5" * 64}"\ncache_name = "fdl1.bin"\n'
-                'license = "MIT"\npath = "fdl1.bin"\n'
-                '[maps]\nurl = "https://example.invalid/maps.7z"\n'
-                f'sha256 = "{"6" * 64}"\ncache_name = "maps.7z"\n'
-                'license = "MIT"\npinmap_path = "pinmap.bin"\nkeymap_path = "keymap.bin"\n'
-            ),
-        }
-        result = []
-        for relative, text in contents.items():
-            path = root / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text, encoding="utf-8")
-            result.append((relative, path))
-        return result
+
+def write_source_lock_files(root: Path, target: str = "demo") -> list[tuple[str, Path]]:
+    """Supply captured lock inputs beside controlled target and package discovery."""
+    fixture_files = {
+        "sources.lock.toml": "sources.lock.toml",
+        "platforms/demo/platform.toml": "platform.toml",
+        f"targets/{target}/target.toml": "target.toml",
+        "platforms/demo/loader/assets.lock.toml": "assets.lock.toml",
+    }
+    result = []
+    for relative, fixture_name in fixture_files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes((WORKSPACE_FILES / fixture_name).read_bytes())
+        result.append((relative, path))
+    return result
 
 
 @contextmanager

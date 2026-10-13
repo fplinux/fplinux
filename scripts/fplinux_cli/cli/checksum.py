@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-import shlex
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -44,6 +44,7 @@ def _aport_checksum_snapshot(package: str) -> WorkspaceSnapshot:
     add_source_path(files, aport)
     for source in alpine_selection.shared_aport_sources(package, root=common.ROOT):
         add_source_path(files, source)
+    add_source_path(files, common.ROOT / "scripts/fplinux_cli/cli/checksum")
     return workspace_snapshot(sorted(files.items()))
 
 
@@ -90,33 +91,7 @@ def _checksum_container_command(  # noqa: PLR0913
     downloads: Path,
 ) -> list[str]:
     """Return the isolated pinned-image invocation for one checksum regeneration."""
-    source_cache = "/cache/downloads/alpine/sources"
     stage_aport = f"/workspace/alpine/aports/{package}"
-    builder_command = "\n".join(
-        (
-            "set -eu",
-            "export "
-            + " ".join(
-                shlex.quote(value)
-                for value in (
-                    f"SRCDEST={source_cache}",
-                    f"SOURCE_DATE_EPOCH={SOURCE_DATE_EPOCH}",
-                )
-            ),
-            "abuild checksum",
-            "exec apkbuild-lint APKBUILD",
-        )
-    )
-    prepare_command = "\n".join(
-        (
-            "chmod 755 /workspace /workspace/alpine /workspace/alpine/aports",
-            f"install -d {source_cache}",
-            f"restore_ownership() {{ chown -R 0:0 {stage_aport} {source_cache}; }}",
-            "trap restore_ownership EXIT HUP INT TERM",
-            f"chown -R builder:builder {stage_aport} {source_cache}",
-            "su builder -s /bin/sh -c " + shlex.quote(builder_command),
-        )
-    )
     return [
         kern,
         "box",
@@ -142,8 +117,11 @@ def _checksum_container_command(  # noqa: PLR0913
         "--quiet",
         "--",
         "sh",
-        "-ceu",
-        prepare_command,
+        "/workspace/checksum/prepare.sh",
+        "/workspace",
+        "/cache/downloads",
+        package,
+        SOURCE_DATE_EPOCH,
     ]
 
 
@@ -186,6 +164,7 @@ def checksum_aport(package: str, *, offline: bool = False) -> None:
         stage_aport = stage / "alpine/aports" / package
         stage_aport.parent.mkdir(parents=True)
         materialize_aport_sources(package, snapshot_root, stage_aport)
+        shutil.copytree(snapshot_root / "scripts/fplinux_cli/cli/checksum", stage / "checksum")
         with reporter.stage("container", passthrough=True, show_tail=False) as stage_report:
             stage_report.run(
                 _checksum_container_command(

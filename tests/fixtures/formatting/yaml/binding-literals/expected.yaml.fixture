@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0-only
+%YAML 1.2
+---
+$id: https://example.test/demo
+$schema: https://example.test/schema
+title: Demo
+# Description stays with its field.
+description: 'on'
+properties:
+  reg:
+    const: 0x00000010 # address
+  label:
+    const: "yes"
+required: [reg, compatible]
+additionalProperties: false
+examples:
+  - |
+    chip@10 {
+        reg = <0x00000010 0x10>;
+    };
+x-note: keep

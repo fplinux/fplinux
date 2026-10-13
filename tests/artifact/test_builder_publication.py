@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import struct
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 from unittest import mock
 
@@ -30,75 +31,93 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+@dataclass(frozen=True)
+class RamImage:
+    """Static image paths and the fixed session slot described by its linker map."""
+
+    ramboot: Path
+    zimage: Path
+    dtb: Path
+    map_file: Path
+    load_address: int
+    offset: int
+
+
+@pytest.fixture
+def ram_image(tmp_path: Path) -> RamImage:
+    """Create one RAM image with the exact externally defined ABI."""
+    root = tmp_path
+    load_address = 0x80100000
+    kernel = bytearray(0x28)
+    kernel[0x24:0x28] = b"\x18\x28\x6f\x01"
+    tree = binary_tree(
+        [],
+        [
+            ("chosen", [("rng-seed", bytes([0xA1]) * 64)], []),
+            (
+                "fplinux-session",
+                [
+                    ("compatible", b"fplinux,ram-session\0"),
+                    ("fplinux,ssh-client-key", bytes([0xB2]) * 68),
+                    ("fplinux,session-id", bytes([0xC3]) * 32),
+                    ("fplinux,usb-session", bytes([0xD4]) * 256),
+                ],
+                [],
+            ),
+        ],
+    )
+    zimage_offset = 0x200
+    dtb_offset = (zimage_offset + len(kernel) + 63) & ~63
+    session_offset = (dtb_offset + len(tree) + 63) & ~63
+    image = bytearray(session_offset + 512)
+    image[:4] = b"DHTB"
+    struct.pack_into("<I", image, 0x30, len(image) - 0x200)
+    image[zimage_offset : zimage_offset + len(kernel)] = kernel
+    image[dtb_offset : dtb_offset + len(tree)] = tree
+
+    ramboot = root / "ramboot.bin"
+    zimage = root / "zImage"
+    dtb = root / "target.dtb"
+    map_file = root / "ramboot.map"
+    ramboot.write_bytes(image)
+    zimage.write_bytes(kernel)
+    dtb.write_bytes(tree)
+    symbols = {
+        "__image_start": load_address,
+        "linux_zimage_start": load_address + zimage_offset,
+        "linux_zimage_end": load_address + zimage_offset + len(kernel),
+        "linux_dtb_start": load_address + dtb_offset,
+        "linux_dtb_end": load_address + dtb_offset + len(tree),
+        "fplinux_session_start": load_address + session_offset,
+        "fplinux_session_end": load_address + session_offset + 512,
+        "FPLINUX_BOOTSTRAP_STORAGE_DISABLED": 1,
+    }
+    map_file.write_text("".join(f"{value:08x} T {name}\n" for name, value in symbols.items()))
+    return RamImage(
+        ramboot,
+        zimage,
+        dtb,
+        map_file,
+        load_address,
+        session_offset,
+    )
+
+
 class RamSessionImageTests:
     """Exercise the canonical static-image personalization boundary."""
 
-    def image_fixture(self) -> tuple[Path, Path, Path, Path, int, int]:
-        """Create one RAM image with the exact externally defined ABI."""
-        root = self.root
-        load_address = 0x80100000
-        kernel = bytearray(0x28)
-        kernel[0x24:0x28] = b"\x18\x28\x6f\x01"
-        tree = binary_tree(
-            [],
-            [
-                ("chosen", [("rng-seed", bytes([0xA1]) * 64)], []),
-                (
-                    "fplinux-session",
-                    [
-                        ("compatible", b"fplinux,ram-session\0"),
-                        ("fplinux,ssh-client-key", bytes([0xB2]) * 68),
-                        ("fplinux,session-id", bytes([0xC3]) * 32),
-                        ("fplinux,usb-session", bytes([0xD4]) * 256),
-                    ],
-                    [],
-                ),
-            ],
-        )
-        zimage_offset = 0x200
-        dtb_offset = (zimage_offset + len(kernel) + 63) & ~63
-        session_offset = (dtb_offset + len(tree) + 63) & ~63
-        image = bytearray(session_offset + 512)
-        image[:4] = b"DHTB"
-        struct.pack_into("<I", image, 0x30, len(image) - 0x200)
-        image[zimage_offset : zimage_offset + len(kernel)] = kernel
-        image[dtb_offset : dtb_offset + len(tree)] = tree
-
-        ramboot = root / "ramboot.bin"
-        zimage = root / "zImage"
-        dtb = root / "target.dtb"
-        map_file = root / "ramboot.map"
-        ramboot.write_bytes(image)
-        zimage.write_bytes(kernel)
-        dtb.write_bytes(tree)
-        symbols = {
-            "__image_start": load_address,
-            "linux_zimage_start": load_address + zimage_offset,
-            "linux_zimage_end": load_address + zimage_offset + len(kernel),
-            "linux_dtb_start": load_address + dtb_offset,
-            "linux_dtb_end": load_address + dtb_offset + len(tree),
-            "fplinux_session_start": load_address + session_offset,
-            "fplinux_session_end": load_address + session_offset + 512,
-            "FPLINUX_BOOTSTRAP_STORAGE_DISABLED": 1,
-        }
-        map_file.write_text("".join(f"{value:08x} T {name}\n" for name, value in symbols.items()))
-        return (
-            ramboot,
-            zimage,
-            dtb,
-            map_file,
-            load_address,
-            session_offset,
-        )
-
-    @pytest.fixture(autouse=True)
-    def _prepare_inputs(self, tmp_path: Path) -> None:
-        """Create one private artifact directory per scenario."""
-        self.root = tmp_path
-
-    def test_session_descriptor_locates_an_immutable_zero_template(self) -> None:
+    def test_session_descriptor_locates_an_immutable_zero_template(
+        self, ram_image: RamImage
+    ) -> None:
         """Describe the exact slot without personalizing the built artifact."""
-        ramboot, zimage, dtb, map_file, load_address, offset = self.image_fixture()
+        ramboot, zimage, dtb, map_file, load_address, offset = (
+            ram_image.ramboot,
+            ram_image.zimage,
+            ram_image.dtb,
+            ram_image.map_file,
+            ram_image.load_address,
+            ram_image.offset,
+        )
 
         descriptor = bootstrap_build.verify_images(
             ramboot,
@@ -119,9 +138,16 @@ class RamSessionImageTests:
         )
         assert (ramboot.read_bytes()[offset : offset + 512]) == (bytes(512))
 
-    def test_session_descriptor_rejects_a_prepersonalized_image(self) -> None:
+    def test_session_descriptor_rejects_a_prepersonalized_image(self, ram_image: RamImage) -> None:
         """Never publish key material already embedded in the RAM image."""
-        ramboot, zimage, dtb, map_file, load_address, offset = self.image_fixture()
+        ramboot, zimage, dtb, map_file, load_address, offset = (
+            ram_image.ramboot,
+            ram_image.zimage,
+            ram_image.dtb,
+            ram_image.map_file,
+            ram_image.load_address,
+            ram_image.offset,
+        )
         image = bytearray(ramboot.read_bytes())
         image[offset] = 1
         ramboot.write_bytes(image)
@@ -138,130 +164,29 @@ class RamSessionImageTests:
             )
 
 
-class BuilderPublicationTests:
-    """Exercise builder-facing immutable bundle publication."""
+@dataclass(frozen=True)
+class PublicationInputs:
+    """Complete builder inputs and the selected immutable publication slot."""
 
-    @pytest.fixture(autouse=True)
-    def _prepare_inputs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Create a complete isolated builder input tree."""
-        self.root = tmp_path / "source"
-        self.output = tmp_path / "out"
-        self.work = tmp_path / "work"
-        self.root.mkdir()
-        self.output.mkdir()
-        self.work.mkdir()
-        self.write("common/run.py", b"#!/usr/bin/env python3\n")
-        self.write(
-            "common/loader_events.py", (common.ROOT / "common/loader_events.py").read_bytes()
-        )
-        self.write("scripts/fplinux_cli/manifests/identity.py", b"# identity contract\n")
-        self.write("scripts/fplinux_cli/runtime/ssh_transport.py", b"# bundled SSH helper\n")
-        self.write("platforms/demo/host/adapter.py", b"ADAPTER = 'demo'\n")
-        self.write("THIRD_PARTY_NOTICES.md", b"notices\n")
-        self.asset_lock = self.write("assets.lock.toml", b"[asset]\n")
-        self.write("assets/pin.bin", b"asset\n", root=self.work)
-        self.host_tool = self.write("keyboard", b"host tool\n", root=self.work)
-        self.kernel = self.work / "kernel"
-        self.kernel.mkdir()
-        self.zimage = self.write("zImage", b"zimage\n", root=self.kernel)
-        self.dtb = self.write("demo.dtb", b"dtb\n", root=self.kernel)
-        self.write("vmlinux", b"vmlinux\n", root=self.kernel)
-        self.write("System.map", b"map\n", root=self.kernel)
-        self.write(".config", b"CONFIG_TEST=y\n", root=self.kernel)
-        self.write("device-data.cpio", b"prepared device data\n", root=self.work)
-        self.ramboot = self.write("ramboot.bin", b"ramboot\n", root=self.work)
-        self.ramboot_map = self.write("ramboot.map", b"map\n", root=self.work)
-        self.rootfs_output = self.work / "rootfs"
-        self.rootfs_recipe = "d" * 64
-        self.rootfs = self.write("rootfs.cpio", b"logical composition\n", root=self.rootfs_output)
-        self.initramfs = self.write("initramfs.cpio", b"boot archive\n", root=self.rootfs_output)
-        self.bundle_apks = {
-            "fplinux-base-ui": self.write(
-                "packages/fplinux-base-ui-1-r0.apk",
-                b"base apk\n",
-                root=self.work,
-            ),
-            "fplinux-demo-ui": self.write(
-                "packages/fplinux-demo-ui-3-r1.apk",
-                b"target apk\n",
-                root=self.work,
-            ),
-        }
-        self.target_config: dict[str, Any] = {
-            "build_type": "release",
-            "identity": {
-                "brand": "Demo",
-                "product": "Phone",
-                "hardware_codes": [],
-                "compatible": "demo,phone",
-                "display_name": "Demo Phone",
-            },
-            "platform": "demo",
-            "bundle": {"packages": list(self.bundle_apks)},
-            "linux": {"debug_dtb": "demo.dtb", "root": {"kind": "initramfs"}},
-            "bootstrap": {"load_address": 2},
-            "runtime": {
-                "fdl1_load_address": 1,
-                "usb": {"kind": "test"},
-                "adapter": {"kind": "test"},
-            },
-        }
-        self.platform = {
-            "identity": {
-                "vendor": "Demo",
-                "soc": "SOC1",
-                "aliases": [],
-                "compatible": "demo,soc1",
-                "display_name": "Demo SOC1",
-            },
-            "bundle": {"packages": []},
-            "linux": {"cross_compile": "arm-"},
-            "host": {
-                "runtime_tools": {"keyboard": "keyboard"},
-            },
-        }
-        self.release_manifest = {
-            "image": "image/ramboot.bin",
-            "bundle_files": [
-                "image/ramboot.bin",
-                "assets/pin.bin",
-                "host/keyboard",
-                "runner/run.py",
-                "runner/loader_events.py",
-                "runner/identity.py",
-                "runner/ssh_transport.py",
-                "runner/platform_adapter.py",
-                "runtime-manifest.json",
-                "assets.lock.toml",
-                "THIRD_PARTY_NOTICES.md",
-                "apks/fplinux-base-ui.apk",
-                "apks/fplinux-demo-ui.apk",
-            ],
-        }
-        self.environment = {
-            "FPLINUX_WORKSPACE_DIGEST": "a" * 64,
-            "FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE": "b" * 64,
-            "FPLINUX_CONTAINER_IMAGE_CONTENT": "c" * 64,
-        }
-        monkeypatch.setattr(common, "ROOT", self.root)
-        monkeypatch.setattr(inputs_build, "OUTPUT", self.output)
-        monkeypatch.setattr(
-            publish_build,
-            "trusted_receipt_identity",
-            mock.Mock(return_value={"recipe": self.rootfs_recipe, "sha256": "8" * 64}),
-        )
-        monkeypatch.setattr(
-            publish_build, "signing_key_identity", mock.Mock(return_value="7" * 64)
-        )
-
-    def write(self, relative: str, data: bytes, *, root: Path | None = None) -> Path:
-        """Write one fixture file beneath the requested test root."""
-        if root is None:
-            root = self.root
-        path = root / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-        return path
+    root: Path
+    output: Path
+    work: Path
+    asset_lock: Path
+    host_tool: Path
+    kernel: Path
+    zimage: Path
+    dtb: Path
+    ramboot: Path
+    ramboot_map: Path
+    rootfs_output: Path
+    rootfs_recipe: str
+    rootfs: Path
+    initramfs: Path
+    bundle_apks: dict[str, Path]
+    target_config: dict[str, Any]
+    platform: dict[str, Any]
+    release_manifest: dict[str, Any]
+    environment: dict[str, str]
 
     def publish(
         self,
@@ -325,10 +250,154 @@ class BuilderPublicationTests:
         assert (resolve_current_bundle(self.output, "demo").path) == (current)
         assert (self.staging_directories()) == ([])
 
-    def test_publish_uses_staging_and_records_every_payload_file(self) -> None:
+
+@pytest.fixture
+def publication_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PublicationInputs:
+    """Create a complete isolated builder input tree."""
+    root = tmp_path / "source"
+    output = tmp_path / "out"
+    work = tmp_path / "work"
+    root.mkdir()
+    output.mkdir()
+    work.mkdir()
+
+    def write(relative: str, data: bytes, *, root: Path = root) -> Path:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return path
+
+    write("common/run.py", b"#!/usr/bin/env python3\n")
+    write("common/loader_events.py", (common.ROOT / "common/loader_events.py").read_bytes())
+    write("scripts/fplinux_cli/manifests/identity.py", b"# identity contract\n")
+    write("scripts/fplinux_cli/runtime/ssh_transport.py", b"# bundled SSH helper\n")
+    write("platforms/demo/host/adapter.py", b"ADAPTER = 'demo'\n")
+    write("THIRD_PARTY_NOTICES.md", b"notices\n")
+    asset_lock = write("assets.lock.toml", b"[asset]\n")
+    write("assets/pin.bin", b"asset\n", root=work)
+    host_tool = write("keyboard", b"host tool\n", root=work)
+    kernel = work / "kernel"
+    kernel.mkdir()
+    zimage = write("zImage", b"zimage\n", root=kernel)
+    dtb = write("demo.dtb", b"dtb\n", root=kernel)
+    write("vmlinux", b"vmlinux\n", root=kernel)
+    write("System.map", b"map\n", root=kernel)
+    write(".config", b"CONFIG_TEST=y\n", root=kernel)
+    write("device-data.cpio", b"prepared device data\n", root=work)
+    ramboot = write("ramboot.bin", b"ramboot\n", root=work)
+    ramboot_map = write("ramboot.map", b"map\n", root=work)
+    rootfs_output = work / "rootfs"
+    rootfs_recipe = "d" * 64
+    rootfs = write("rootfs.cpio", b"logical composition\n", root=rootfs_output)
+    initramfs = write("initramfs.cpio", b"boot archive\n", root=rootfs_output)
+    bundle_apks = {
+        "fplinux-base-ui": write(
+            "packages/fplinux-base-ui-1-r0.apk",
+            b"base apk\n",
+            root=work,
+        ),
+        "fplinux-demo-ui": write(
+            "packages/fplinux-demo-ui-3-r1.apk",
+            b"target apk\n",
+            root=work,
+        ),
+    }
+    target_config: dict[str, Any] = {
+        "build_type": "release",
+        "identity": {
+            "brand": "Demo",
+            "product": "Phone",
+            "hardware_codes": [],
+            "compatible": "demo,phone",
+            "display_name": "Demo Phone",
+        },
+        "platform": "demo",
+        "bundle": {"packages": list(bundle_apks)},
+        "linux": {"debug_dtb": "demo.dtb", "root": {"kind": "initramfs"}},
+        "bootstrap": {"load_address": 2},
+        "runtime": {
+            "fdl1_load_address": 1,
+            "usb": {"kind": "test"},
+            "adapter": {"kind": "test"},
+        },
+    }
+    platform = {
+        "identity": {
+            "vendor": "Demo",
+            "soc": "SOC1",
+            "aliases": [],
+            "compatible": "demo,soc1",
+            "display_name": "Demo SOC1",
+        },
+        "bundle": {"packages": []},
+        "linux": {"cross_compile": "arm-"},
+        "host": {
+            "runtime_tools": {"keyboard": "keyboard"},
+        },
+    }
+    release_manifest = {
+        "image": "image/ramboot.bin",
+        "bundle_files": [
+            "image/ramboot.bin",
+            "assets/pin.bin",
+            "host/keyboard",
+            "runner/run.py",
+            "runner/loader_events.py",
+            "runner/identity.py",
+            "runner/ssh_transport.py",
+            "runner/platform_adapter.py",
+            "runtime-manifest.json",
+            "assets.lock.toml",
+            "THIRD_PARTY_NOTICES.md",
+            "apks/fplinux-base-ui.apk",
+            "apks/fplinux-demo-ui.apk",
+        ],
+    }
+    environment = {
+        "FPLINUX_WORKSPACE_DIGEST": "a" * 64,
+        "FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE": "b" * 64,
+        "FPLINUX_CONTAINER_IMAGE_CONTENT": "c" * 64,
+    }
+    monkeypatch.setattr(common, "ROOT", root)
+    monkeypatch.setattr(inputs_build, "OUTPUT", output)
+    monkeypatch.setattr(
+        publish_build,
+        "trusted_receipt_identity",
+        mock.Mock(return_value={"recipe": rootfs_recipe, "sha256": "8" * 64}),
+    )
+    monkeypatch.setattr(publish_build, "signing_key_identity", mock.Mock(return_value="7" * 64))
+    return PublicationInputs(
+        root=root,
+        output=output,
+        work=work,
+        asset_lock=asset_lock,
+        host_tool=host_tool,
+        kernel=kernel,
+        zimage=zimage,
+        dtb=dtb,
+        ramboot=ramboot,
+        ramboot_map=ramboot_map,
+        rootfs_output=rootfs_output,
+        rootfs_recipe=rootfs_recipe,
+        rootfs=rootfs,
+        initramfs=initramfs,
+        bundle_apks=bundle_apks,
+        target_config=target_config,
+        platform=platform,
+        release_manifest=release_manifest,
+        environment=environment,
+    )
+
+
+class BuilderPublicationTests:
+    """Exercise builder-facing immutable bundle publication."""
+
+    def test_publish_uses_staging_and_records_every_payload_file(
+        self, publication_inputs: PublicationInputs
+    ) -> None:
         """Publish a complete generation through the current pointer."""
-        published = self.publish()
-        current = resolve_current_bundle(self.output, "demo")
+        published = publication_inputs.publish()
+        current = resolve_current_bundle(publication_inputs.output, "demo")
         manifest = json.loads((published / BUILD_MANIFEST_NAME).read_text())
         runtime = json.loads((published / "runtime-manifest.json").read_text())
         assert (published / "device-data.cpio").read_bytes() == b"prepared device data\n"
@@ -343,14 +412,14 @@ class BuilderPublicationTests:
         }
 
         assert (current.path) == (published)
-        assert (published.parent) == (self.output / "demo/builds/release/bundles")
+        assert (published.parent) == (publication_inputs.output / "demo/builds/release/bundles")
         assert (manifest["generation"]) == (published.name)
         assert (manifest["profile"]) is None
         assert (manifest["build_type"]) == ("release")
         assert (manifest["container_image_recipe"]) == ("b" * 64)
         assert (manifest["container_image_content"]) == ("c" * 64)
         assert (manifest["apk_signing_key"]) == ("7" * 64)
-        assert (manifest["rootfs_receipt"]["recipe"]) == (self.rootfs_recipe)
+        assert (manifest["rootfs_receipt"]["recipe"]) == (publication_inputs.rootfs_recipe)
         assert (manifest["boot_artifacts"]) == (
             {
                 "required": [],
@@ -364,7 +433,9 @@ class BuilderPublicationTests:
         assert ((published / "apks/fplinux-demo-ui.apk").read_bytes()) == (b"target apk\n")
         assert ((published / "debug/rootfs.cpio").read_bytes()) == (b"logical composition\n")
         assert ((published / "debug/initramfs.cpio").read_bytes()) == (b"boot archive\n")
-        assert (manifest["files"]["debug/rootfs.cpio"]["size"]) == (self.rootfs.stat().st_size)
+        assert (manifest["files"]["debug/rootfs.cpio"]["size"]) == (
+            publication_inputs.rootfs.stat().st_size
+        )
         assert (runtime["sha256"]["image/ramboot.bin"]) == (
             hashlib.sha256((published / "image/ramboot.bin").read_bytes()).hexdigest()
         )
@@ -396,14 +467,16 @@ class BuilderPublicationTests:
         assert (runtime["sha256"]["runner/ssh_transport.py"]) == (
             hashlib.sha256(helper.read_bytes()).hexdigest()
         )
-        event_source = (self.root / "common/loader_events.py").read_bytes()
+        event_source = (publication_inputs.root / "common/loader_events.py").read_bytes()
         assert ((published / "runner/loader_events.py").read_bytes()) == (event_source)
         assert (runtime["sha256"]["runner/loader_events.py"]) == (
             hashlib.sha256(event_source).hexdigest()
         )
 
     @pytest.mark.parametrize("root_kind", ["initramfs", "external"])
-    def test_published_board_maps_are_exposed_by_adapter_mapping(self, root_kind: str) -> None:
+    def test_published_board_maps_are_exposed_by_adapter_mapping(
+        self, publication_inputs: PublicationInputs, root_kind: str
+    ) -> None:
         """Published map bytes are exposed through the adapter's serving-directory mapping."""
         pinmap = b"\xb8\x04\x01\x20\x08\x00\xff\xff\xff\xff\xff\xff\xff\xff"
         keymap = b"\x2a\x00\x31\x00"
@@ -411,9 +484,9 @@ class BuilderPublicationTests:
             FirmwareInput(name, name, contents, hashlib.sha256(contents).hexdigest())
             for name, contents in (("pinmap.bin", pinmap), ("keymap.bin", keymap))
         )
-        self.target_config["linux"]["root"] = {"kind": root_kind}
+        publication_inputs.target_config["linux"]["root"] = {"kind": root_kind}
 
-        published = self.publish(board_maps=board_maps)
+        published = publication_inputs.publish(board_maps=board_maps)
         manifest = json.loads((published / BUILD_MANIFEST_NAME).read_text())
         assert (published / "device-data.cpio").exists() is (root_kind == "initramfs")
         for name, expected in (("pinmap.bin", pinmap), ("keymap.bin", keymap)):
@@ -424,90 +497,106 @@ class BuilderPublicationTests:
             assert (served / "pinmap.bin").read_bytes() == pinmap
             assert (served / "keymap.bin").read_bytes() == keymap
 
-    def test_named_profile_publishes_to_its_own_current_bundle_slot(self) -> None:
+    def test_named_profile_publishes_to_its_own_current_bundle_slot(
+        self, publication_inputs: PublicationInputs
+    ) -> None:
         """Publish to the named profile slot with its identity in both manifests."""
-        self.target_config["profile"] = "usb-host-lab"
-        self.target_config["runtime"]["transport"] = "none"
+        publication_inputs.target_config["profile"] = "usb-host-lab"
+        publication_inputs.target_config["runtime"]["transport"] = "none"
 
-        published = self.publish()
-        current = resolve_current_bundle(self.output, "demo", "usb-host-lab")
+        published = publication_inputs.publish()
+        current = resolve_current_bundle(publication_inputs.output, "demo", "usb-host-lab")
         manifest = json.loads((published / BUILD_MANIFEST_NAME).read_text())
         runtime = json.loads((published / "runtime-manifest.json").read_text())
 
         assert (published.parent) == (
-            self.output / "demo/profiles/usb-host-lab/builds/release/bundles"
+            publication_inputs.output / "demo/profiles/usb-host-lab/builds/release/bundles"
         )
         assert (current.path) == (published)
         assert (manifest["profile"]) == ("usb-host-lab")
         assert (runtime["profile"]) == ("usb-host-lab")
         assert (runtime["transport"]) == ("none")
 
-    def test_publishing_debug_retains_release_and_records_its_type_in_both_manifests(self) -> None:
+    def test_publishing_debug_retains_release_and_records_its_type_in_both_manifests(
+        self, publication_inputs: PublicationInputs
+    ) -> None:
         """Publication binds the new type without moving the release current pointer."""
-        release = self.publish()
-        self.target_config["build_type"] = "debug"
-        debug = self.publish()
+        release = publication_inputs.publish()
+        publication_inputs.target_config["build_type"] = "debug"
+        debug = publication_inputs.publish()
 
-        assert (resolve_current_bundle(self.output, "demo").path) == (release)
-        assert (resolve_current_bundle(self.output, "demo", build_type="debug").path) == (debug)
+        assert (resolve_current_bundle(publication_inputs.output, "demo").path) == (release)
+        assert (
+            resolve_current_bundle(publication_inputs.output, "demo", build_type="debug").path
+        ) == (debug)
         assert (release.name) != (debug.name)
         for name in ("build-manifest.json", "runtime-manifest.json"):
             manifest = json.loads((debug / name).read_text())
             assert (manifest["build_type"]) == ("debug")
 
-    def test_external_root_keeps_the_exact_composition_input_for_host_inspection(self) -> None:
+    def test_external_root_keeps_the_exact_composition_input_for_host_inspection(
+        self, publication_inputs: PublicationInputs
+    ) -> None:
         """The external root's local composition input is bound to the bundle manifest."""
-        self.target_config["profile"] = "microsd"
-        self.target_config["linux"]["root"] = {
+        publication_inputs.target_config["profile"] = "microsd"
+        publication_inputs.target_config["linux"]["root"] = {
             "kind": "external",
             "filesystem": "ext4",
             "partuuid": "46504c58-02",
             "wait_seconds": 10,
         }
 
-        self.initramfs.unlink()
-        published = self.publish()
+        publication_inputs.initramfs.unlink()
+        published = publication_inputs.publish()
 
         assert not ((published / "debug/initramfs.cpio").exists())
         assert ((published / "debug/rootfs.cpio").read_bytes()) == (b"logical composition\n")
         manifest = json.loads((published / BUILD_MANIFEST_NAME).read_text())
         assert ("debug/rootfs.cpio") in (manifest["files"])
 
-    def test_publish_rejects_apks_outside_the_declared_bundle_package_set(self) -> None:
+    def test_publish_rejects_apks_outside_the_declared_bundle_package_set(
+        self, publication_inputs: PublicationInputs
+    ) -> None:
         """A bundle cannot silently add or omit one of its declared packages."""
-        current = self.publish()
+        current = publication_inputs.publish()
 
         with pytest.raises(SystemExit, match="declared bundle package set"):
-            self.publish(bundle_packages=("fplinux-base-ui",))
+            publication_inputs.publish(bundle_packages=("fplinux-base-ui",))
 
-        self.assert_old_current_and_no_staging(current)
+        publication_inputs.assert_old_current_and_no_staging(current)
 
-    def test_publish_rejects_release_manifest_apks_outside_the_declared_set(self) -> None:
+    def test_publish_rejects_release_manifest_apks_outside_the_declared_set(
+        self, publication_inputs: PublicationInputs
+    ) -> None:
         """The release manifest cannot omit or add an independently named APK."""
-        current = self.publish()
-        bundle_files = cast("list[str]", self.release_manifest["bundle_files"])
+        current = publication_inputs.publish()
+        bundle_files = cast("list[str]", publication_inputs.release_manifest["bundle_files"])
         bundle_files.remove("apks/fplinux-demo-ui.apk")
 
         with pytest.raises(SystemExit, match="release manifest APK files"):
-            self.publish()
+            publication_inputs.publish()
 
-        self.assert_old_current_and_no_staging(current)
+        publication_inputs.assert_old_current_and_no_staging(current)
 
-    def test_copy_failure_preserves_the_current_bundle_and_cleans_staging(self) -> None:
+    def test_copy_failure_preserves_the_current_bundle_and_cleans_staging(
+        self, publication_inputs: PublicationInputs
+    ) -> None:
         """Retain the current bundle when copying a new payload fails."""
-        first = self.publish()
-        create_bundle_staging(self.output, "demo")
-        missing = self.work / "missing-ramboot.bin"
+        first = publication_inputs.publish()
+        create_bundle_staging(publication_inputs.output, "demo")
+        missing = publication_inputs.work / "missing-ramboot.bin"
 
         with pytest.raises(SystemExit):
-            self.publish(missing)
+            publication_inputs.publish(missing)
 
-        assert (resolve_current_bundle(self.output, "demo").path) == (first)
-        assert (self.staging_directories()) == ([])
+        assert (resolve_current_bundle(publication_inputs.output, "demo").path) == (first)
+        assert (publication_inputs.staging_directories()) == ([])
 
-    def test_manifest_failure_preserves_the_current_bundle_and_cleans_staging(self) -> None:
+    def test_manifest_failure_preserves_the_current_bundle_and_cleans_staging(
+        self, publication_inputs: PublicationInputs
+    ) -> None:
         """Retain the current bundle when writing its new manifest fails."""
-        first = self.publish()
+        first = publication_inputs.publish()
         real_write_json = publish_build.write_json
         message = "manifest write failed"
 
@@ -520,6 +609,6 @@ class BuilderPublicationTests:
             mock.patch.object(publish_build, "write_json", side_effect=write_json),
             pytest.raises(OSError, match=message),
         ):
-            self.publish()
+            publication_inputs.publish()
 
-        self.assert_old_current_and_no_staging(first)
+        publication_inputs.assert_old_current_and_no_staging(first)

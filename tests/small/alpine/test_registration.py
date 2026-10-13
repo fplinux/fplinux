@@ -33,69 +33,41 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
-class AlpineRegistrationTests:
-    """Registration edits preserve unrelated APK receipts in isolated source trees."""
+class RegistrationContext:
+    """Own copied host modules and independent package cache declarations."""
 
-    _STATE_COMMAND = """
-import json
-import sys
-from pathlib import Path
-sys.dont_write_bytecode = True
-root = Path(sys.argv[1])
-sys.path.insert(0, str(root / "scripts"))
-from fplinux_cli.alpine import packages, recipes
-packages.CACHE = root / ".cache"
-names = json.loads(sys.argv[2])
-selected = json.loads(sys.argv[3])
-result = {
-    "packages": {
-        name: {
-            "recipe": recipes.alpine_package_recipe(name, "1" * 64, "d" * 64),
-            "cache_hit": packages._cached_aport_packages(
-                name, "1" * 64, "d" * 64
-            ) is not None,
-        }
-        for name in names
-    },
-    "rootfs": recipes.alpine_rootfs_recipe("1" * 64, "d" * 64, selected),
-}
-print(json.dumps(result))
-"""
+    def __init__(self, directory: Path) -> None:
+        """Create a source checkout inside the scenario's temporary directory."""
+        self.directory = directory
+        self.root = directory / "source"
+        self.repository = ROOT
+        shutil.copytree(
+            self.repository / "scripts/fplinux_cli",
+            self.root / "scripts/fplinux_cli",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+        self.names = (
+            "fplinux-package-a",
+            "fplinux-package-b",
+            "fplinux-library-c",
+            "fplinux-library-d",
+        )
+        self.selected = self.names[:2]
+        for name in self.names:
+            self.write(f"alpine/aports/{name}/APKBUILD", f"pkgname={name}\n".encode())
+        self.write("alpine.lock.toml", b"fixture lock\n")
+        self.write("alpine/abuild.conf", b"fixture abuild\n")
+        self.write("alpine/ramroot-init.sh", b"#!/bin/sh\nexit 0\n")
+        self.registration = self.root / "scripts/fplinux_cli/alpine/registration.py"
 
-    @pytest.fixture(autouse=True)
-    def registered_sources(self) -> Iterator[None]:
-        """Copy host modules and replace the container cache with an owned temporary path."""
-        self.temporary = tempfile.TemporaryDirectory()
-        with self.temporary:
-            self.root = Path(self.temporary.name) / "source"
-            self.repository = ROOT
-            shutil.copytree(
-                self.repository / "scripts/fplinux_cli",
-                self.root / "scripts/fplinux_cli",
-                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
-            )
-            self.names = (
-                "fplinux-package-a",
-                "fplinux-package-b",
-                "fplinux-library-c",
-                "fplinux-library-d",
-            )
-            self.selected = self.names[:2]
-            for name in self.names:
-                self._write(f"alpine/aports/{name}/APKBUILD", f"pkgname={name}\n".encode())
-            self._write("alpine.lock.toml", b"fixture lock\n")
-            self._write("alpine/abuild.conf", b"fixture abuild\n")
-            self._write("alpine/ramroot-init.sh", b"#!/bin/sh\nexit 0\n")
-            self.registration = self.root / "scripts/fplinux_cli/alpine/registration.py"
-            yield
-
-    def _write(self, relative: str, contents: bytes) -> Path:
+    def write(self, relative: str, contents: bytes) -> Path:
+        """Write a controlled declaration or source inside the owned copied checkout."""
         path = self.root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(contents)
         return path
 
-    def _state(
+    def state(
         self,
         *,
         root: Path | None = None,
@@ -107,8 +79,7 @@ print(json.dumps(result))
             [
                 sys.executable,
                 "-I",
-                "-c",
-                self._STATE_COMMAND,
+                str(ROOT / "tests/fixtures/processes/alpine_registration_state.py"),
                 str(self.root if root is None else root),
                 json.dumps(self.names if names is None else names),
                 json.dumps(self.selected if selected is None else selected),
@@ -123,9 +94,9 @@ print(json.dumps(result))
         assert isinstance(state, dict)
         return dict(state)
 
-    def _seed_receipts(self) -> dict[str, Any]:
+    def seed_receipts(self) -> dict[str, Any]:
         """Publish ordinary output receipts for fixture APKs containing real package metadata."""
-        state = self._state()
+        state = self.state()
         for name, record in state["packages"].items():
             slot = self.root / ".cache/apks" / name
             slot.mkdir(parents=True, exist_ok=True)
@@ -136,54 +107,68 @@ print(json.dumps(result))
             with tarfile.open(apk, "w:gz") as archive:
                 archive.addfile(info, io.BytesIO(metadata))
             alpine_packages._write_package_receipt(slot, record["recipe"], [apk])  # noqa: SLF001
-        seeded = self._state()
+        seeded = self.state()
         for name in self.names:
             assert seeded["packages"][name]["cache_hit"], name
         return seeded
 
-    def _declare_registration(self, declarations: str) -> None:
+    def declare_registration(self, declarations: str) -> None:
         """Append fixture-owned assignments to the copied registration module."""
         source = self.registration.read_text(encoding="utf-8")
         self.registration.write_text(source + "\n" + declarations + "\n", encoding="utf-8")
 
-    def test_unrelated_registration_preserves_apk_recipe_and_receipt_hit(self) -> None:
-        """A newly declared dependency rebuilds its consumer while another APK stays reusable."""
-        before = self._seed_receipts()
 
-        self._declare_registration(
+@pytest.fixture
+def registered_sources(tmp_path: Path) -> Iterator[RegistrationContext]:
+    """Release the copied checkout and generated package cache after each scenario."""
+    with tempfile.TemporaryDirectory(dir=tmp_path) as temporary:
+        yield RegistrationContext(Path(temporary))
+
+
+class AlpineRegistrationTests:
+    """Registration edits preserve unrelated APK receipts in isolated source trees."""
+
+    def test_unrelated_registration_preserves_apk_recipe_and_receipt_hit(
+        self, registered_sources: RegistrationContext
+    ) -> None:
+        """A newly declared dependency rebuilds its consumer while another APK stays reusable."""
+        before = registered_sources.seed_receipts()
+
+        registered_sources.declare_registration(
             'LOCAL_BUILD_DEPENDENCIES["fplinux-package-a"] = ("fplinux-library-c",)'
         )
-        after = self._state()
+        after = registered_sources.state()
 
         assert (
-            (before["packages"][self.names[0]]["recipe"])
-            != (after["packages"][self.names[0]]["recipe"])
+            (before["packages"][registered_sources.names[0]]["recipe"])
+            != (after["packages"][registered_sources.names[0]]["recipe"])
         )
-        assert not (after["packages"][self.names[0]]["cache_hit"])
-        for name in self.names[1:]:
+        assert not (after["packages"][registered_sources.names[0]]["cache_hit"])
+        for name in registered_sources.names[1:]:
             assert (before["packages"][name]["recipe"]) == (after["packages"][name]["recipe"])
             assert after["packages"][name]["cache_hit"], name
 
     def test_dependency_edges_invalidate_even_when_transitive_library_set_is_unchanged(
         self,
+        registered_sources: RegistrationContext,
     ) -> None:
         """Moving a dependency edge changes the consuming APKs despite identical library bytes."""
-        self._declare_registration(
+        registered_sources.declare_registration(
             'LOCAL_BUILD_DEPENDENCIES["fplinux-package-a"] = '
             '("fplinux-library-c", "fplinux-library-d")'
         )
-        before = self._seed_receipts()
+        before = registered_sources.seed_receipts()
 
-        self._declare_registration(
+        registered_sources.declare_registration(
             'LOCAL_BUILD_DEPENDENCIES["fplinux-package-a"] = ("fplinux-library-c",)\n'
             'LOCAL_BUILD_DEPENDENCIES["fplinux-library-c"] = ("fplinux-library-d",)'
         )
-        after = self._state()
+        after = registered_sources.state()
 
-        for name in (self.names[0], self.names[2]):
+        for name in (registered_sources.names[0], registered_sources.names[2]):
             assert (before["packages"][name]["recipe"]) != (after["packages"][name]["recipe"])
             assert not (after["packages"][name]["cache_hit"]), name
-        for name in (self.names[1], self.names[3]):
+        for name in (registered_sources.names[1], registered_sources.names[3]):
             assert (before["packages"][name]["recipe"]) == (after["packages"][name]["recipe"])
             assert after["packages"][name]["cache_hit"], name
         assert (before["rootfs"]) != (after["rootfs"])
@@ -196,109 +181,125 @@ print(json.dumps(result))
         ],
     )
     def test_transitive_dependency_and_shared_source_edits_revoke_consumer_receipts(
-        self, source: str
+        self, registered_sources: RegistrationContext, source: str
     ) -> None:
         """Library edits revoke transitive consumers while an unrelated APK remains reusable."""
-        self._declare_registration(
+        registered_sources.declare_registration(
             'LOCAL_BUILD_DEPENDENCIES["fplinux-package-a"] = ("fplinux-library-c",)\n'
             'LOCAL_BUILD_DEPENDENCIES["fplinux-library-c"] = ("fplinux-library-d",)'
         )
-        self._write("lib/fplinux/library-d.c", b"library shared input\n")
-        self._declare_registration(
+        registered_sources.write("lib/fplinux/library-d.c", b"library shared input\n")
+        registered_sources.declare_registration(
             'SHARED_APORT_SOURCES["fplinux-library-d"] = ("lib/fplinux/library-d.c",)'
         )
-        changed_source = self.root / source
+        changed_source = registered_sources.root / source
 
-        before = self._seed_receipts()
+        before = registered_sources.seed_receipts()
         changed_source.write_bytes(changed_source.read_bytes() + b"changed input\n")
-        after = self._state()
-        for name in (self.names[0], self.names[2], self.names[3]):
+        after = registered_sources.state()
+        for name in (
+            registered_sources.names[0],
+            registered_sources.names[2],
+            registered_sources.names[3],
+        ):
             assert (before["packages"][name]["recipe"]) != (after["packages"][name]["recipe"])
             assert not (after["packages"][name]["cache_hit"]), name
-        unrelated = self.names[1]
+        unrelated = registered_sources.names[1]
         assert (
             (before["packages"][unrelated]["recipe"]) == (after["packages"][unrelated]["recipe"])
         )
         assert after["packages"][unrelated]["cache_hit"]
         assert (before["rootfs"]) != (after["rootfs"])
 
-    def test_equivalent_producer_aliases_and_dependency_order_preserve_receipts(self) -> None:
+    def test_equivalent_producer_aliases_and_dependency_order_preserve_receipts(
+        self, registered_sources: RegistrationContext
+    ) -> None:
         """Equivalent declarations of the same producer graph do not rebuild its outputs."""
-        self._declare_registration(
+        registered_sources.declare_registration(
             'SUBPACKAGE_APORTS["fplinux-library-c-extra"] = "fplinux-library-c"'
         )
-        self._declare_registration(
+        registered_sources.declare_registration(
             'LOCAL_BUILD_DEPENDENCIES["fplinux-package-a"] = '
             '("fplinux-library-c", "fplinux-library-c-extra", "fplinux-library-d")'
         )
-        before = self._seed_receipts()
+        before = registered_sources.seed_receipts()
 
-        self._declare_registration(
+        registered_sources.declare_registration(
             'LOCAL_BUILD_DEPENDENCIES["fplinux-package-a"] = '
             '("fplinux-library-d", "fplinux-library-c")'
         )
-        assert (before) == (self._state())
+        assert (before) == (registered_sources.state())
 
-    def test_shared_source_owner_changes_revoke_affected_receipts(self) -> None:
+    def test_shared_source_owner_changes_revoke_affected_receipts(
+        self, registered_sources: RegistrationContext
+    ) -> None:
         """Moving a shared input between producers changes recipes despite an unchanged union."""
-        self._declare_registration(
+        registered_sources.declare_registration(
             'LOCAL_BUILD_DEPENDENCIES["fplinux-package-a"] = ("fplinux-library-c",)'
         )
-        self._write("lib/fplinux/shared.c", b"same shared source\n")
-        self._declare_registration(
+        registered_sources.write("lib/fplinux/shared.c", b"same shared source\n")
+        registered_sources.declare_registration(
             'SHARED_APORT_SOURCES["fplinux-package-a"] = ("lib/fplinux/shared.c",)'
         )
-        before = self._seed_receipts()
+        before = registered_sources.seed_receipts()
 
-        self._declare_registration(
+        registered_sources.declare_registration(
             'del SHARED_APORT_SOURCES["fplinux-package-a"]\n'
             'SHARED_APORT_SOURCES["fplinux-library-c"] = ("lib/fplinux/shared.c",)'
         )
-        after = self._state()
+        after = registered_sources.state()
 
-        for name in (self.names[0], self.names[2]):
+        for name in (registered_sources.names[0], registered_sources.names[2]):
             assert (before["packages"][name]["recipe"]) != (after["packages"][name]["recipe"])
             assert not (after["packages"][name]["cache_hit"]), name
-        for name in (self.names[1], self.names[3]):
+        for name in (registered_sources.names[1], registered_sources.names[3]):
             assert (before["packages"][name]["recipe"]) == (after["packages"][name]["recipe"])
             assert after["packages"][name]["cache_hit"], name
         assert (before["rootfs"]) != (after["rootfs"])
 
-    def test_recipe_implementation_edit_revokes_all_apk_receipts(self) -> None:
+    def test_recipe_implementation_edit_revokes_all_apk_receipts(
+        self, registered_sources: RegistrationContext
+    ) -> None:
         """Algorithm-module changes remain a global input for every APK."""
-        before = self._seed_receipts()
-        implementation = self.root / "scripts/fplinux_cli/alpine/recipes.py"
+        before = registered_sources.seed_receipts()
+        implementation = registered_sources.root / "scripts/fplinux_cli/alpine/recipes.py"
         implementation.write_text(
             implementation.read_text(encoding="utf-8") + "\n# Fixture algorithm-module edit.\n",
             encoding="utf-8",
         )
-        after = self._state()
+        after = registered_sources.state()
 
-        for name in self.names:
+        for name in registered_sources.names:
             assert (before["packages"][name]["recipe"]) != (after["packages"][name]["recipe"])
             assert not (after["packages"][name]["cache_hit"]), name
         assert (before["rootfs"]) != (after["rootfs"])
 
-    def test_rootfs_selection_changes_composition_and_preserves_apk_receipts(self) -> None:
+    def test_rootfs_selection_changes_composition_and_preserves_apk_receipts(
+        self, registered_sources: RegistrationContext
+    ) -> None:
         """Changing only the selected composition reuses every unchanged APK."""
-        before = self._seed_receipts()
-        after = self._state(selected=self.selected[:1])
+        before = registered_sources.seed_receipts()
+        after = registered_sources.state(selected=registered_sources.selected[:1])
         assert (before["rootfs"]) != (after["rootfs"])
         assert (before["packages"]) == (after["packages"])
 
-    def test_staged_target_modules_compute_the_same_apk_recipes(self) -> None:
+    def test_staged_target_modules_compute_the_same_apk_recipes(
+        self, registered_sources: RegistrationContext
+    ) -> None:
         """A materialized target closure can import its build modules and calculate APK inputs."""
         names = ("fplinux-bluealsa", "fplinux-jpeg")
         expected = {
-            name: alpine_recipes.alpine_package_recipe(name, "1" * 64, "d" * 64, self.repository)
+            name: alpine_recipes.alpine_package_recipe(
+                name, "1" * 64, "d" * 64, registered_sources.repository
+            )
             for name in names
         }
         snapshot = workspace_capture.workspace_snapshot(
             workspace_build_inputs.target_build_source_files("nokia-ta1618")
         )
-        with mock.patch.object(workspace_staging, "ROOT", Path(self.temporary.name)):
+        with mock.patch.object(workspace_staging, "ROOT", registered_sources.directory):
             staged = workspace_staging.stage_workspace_snapshot(snapshot)
-        state = self._state(root=staged, names=names, selected=names)
+        state = registered_sources.state(root=staged, names=names, selected=names)
 
         assert ({name: record["recipe"] for name, record in state["packages"].items()}) == (
             expected

@@ -1,0 +1,10 @@
+platform = "demo"
+[linux]
+patches = ["kernel/target.patch"]
+copies = [
+  { source = "kernel/target-copy.c", destination = "target-copy.c" },
+  { source = "bootstrap/referenced.h", destination = "referenced.h" },
+]
+appends = [
+  { source = "kernel/target-append", destination = "Makefile" },
+]

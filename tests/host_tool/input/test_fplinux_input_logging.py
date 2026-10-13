@@ -19,16 +19,14 @@ if TYPE_CHECKING:
 class InputBridgeLoggingTests:
     """The executable owns retries and messages; no host keyboard is created."""
 
-    executable: Path
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def executable(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         """Link the host harness once for this test group."""
         with c_build_directory(tmp_path_factory, "fplinux-input-logging") as temporary:
-            cls.executable = temporary / "input-bridge"
+            executable = temporary / "input-bridge"
             compile_c(
-                cls.executable,
+                executable,
                 [
                     "-std=c11",
                     "-Wall",
@@ -41,11 +39,11 @@ class InputBridgeLoggingTests:
                 name="compile input bridge with controlled devices",
                 check=True,
             )
-            yield
+            yield executable
 
-    def test_repeated_failure_is_quiet_until_data_resumes(self) -> None:
+    def test_repeated_failure_is_quiet_until_data_resumes(self, executable: Path) -> None:
         """Report each distinct error once and announce both observed recoveries."""
-        result = run_process([str(self.executable)], name="run bridge I/O scenario", timeout=5)
+        result = run_process([str(executable)], name="run bridge I/O scenario", timeout=5)
         assert (result.returncode) == (0), result.stderr
         errors = result.stderr.splitlines()
         assert (len(errors)) == (3), result.stderr

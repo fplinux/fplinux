@@ -1,0 +1,7 @@
+[host]
+runtime_tools = { console = "tool" }
+[[host.tools]]
+type = "cc-libusb"
+name = "tool"
+source = "platforms/demo/kernel/tool.c"
+self_test = false

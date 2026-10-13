@@ -78,6 +78,14 @@ mixing ad hoc `print()`, exceptions and exit conversion inside domain helpers.
 Cleanup must preserve the error that belongs to the failed operation. Message
 channels and prefixes follow the [logging contract](/fplinux/develop/logging/).
 
+## Text and resources
+
+Keep compact generated instructions and their conditional sections beside the code that selects them. Write readable multiline blocks with `textwrap.dedent`, then substitute values with `str.format`. Dedent the static block before inserting multiline values so their indentation cannot change the template's common margin. Keep a shared procedure in one function instead of copying it into each document.
+
+The document renderer owns separators between sections and the final newline. Section content owns its internal line breaks and command indentation; it must not carry hidden blank lines for its neighbors. Do not strip or reflow the finished document to repair its composition.
+
+Keep complete programs, structured templates and independently delivered documents in files beside their owner. Read exact resources as bytes; use explicit substitutions for templates. Resolve resources relative to their owner and include them in the corresponding staged source, causal inputs and archive delivery. A separately delivered script must receive its required resources without importing the full project CLI. Short local settings and dynamic serialization of variable-length structures remain code; multiline syntax alone does not require another file or template engine.
+
 ## Tests
 
 Use pytest as the test backend. Write plain `assert` statements for values and
@@ -92,6 +100,10 @@ production modules normally. Use named records and fixtures when they make
 process state, shell commands or TOML inputs easier to inspect, but keep short
 decisive values literal in the case. Do not import production constants or
 algorithms to derive expected data.
+
+Store substantial test documents and executable peers in files owned by the test domain. Keep the preparation, action and independent expected result visible in the test. Preserve interpreter flags, arguments, environment and cleanup when executing a peer from a file.
+
+Read exact input and expected bytes without trimming or normalizing them. An expected document is test-owned: do not render it from the production template. Use parameterized cases with readable identifiers when they share one behavioral contract. Return fixture data directly; use `yield` when teardown owns a resource. Keep mutable trees and state isolated per case, and preserve timely cleanup of large temporary data even when using `tmp_path`.
 
 Python tests are divided by the boundary they actually exercise. Keep a unit or
 host-process result distinct from artifact, public-workflow and hardware

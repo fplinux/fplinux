@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -22,15 +22,14 @@ HARNESS = ROOT / "tests/host_tool/ums9117"
 class Ums9117MmcSlotPolicyTests:
     """Run registered driver callbacks with the linked slot and controller logic."""
 
-    executable: ClassVar[Path]
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_peer(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def executable(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+        """Link slot and controller code with controlled host hardware boundaries."""
         with c_build_directory(tmp_path_factory, "ums9117_mmc") as temporary:
-            cls.executable = temporary / "ums9117-mmc"
+            executable = temporary / "ums9117-mmc"
             compile_c(
-                cls.executable,
+                executable,
                 [
                     "-std=gnu11",
                     "-Wall",
@@ -48,7 +47,7 @@ class Ums9117MmcSlotPolicyTests:
                 ],
                 name="compile MMC-driver slot policy harness",
             )
-            yield
+            yield executable
 
     @pytest.mark.parametrize(
         "scenario",
@@ -60,10 +59,12 @@ class Ums9117MmcSlotPolicyTests:
             "removable-absent",
         ],
     )
-    def test_slot_presence_initialization_and_release(self, scenario: str) -> None:
+    def test_slot_presence_initialization_and_release(
+        self, executable: Path, scenario: str
+    ) -> None:
         """Fixed slots need no detection signal; removable slots retain detection."""
         result = run_process(
-            [str(self.executable), scenario],
+            [str(executable), scenario],
             name="run MMC-driver slot policy harness",
             timeout=30,
         )

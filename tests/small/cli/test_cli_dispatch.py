@@ -21,53 +21,54 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
+@pytest.fixture
+def dispatch_root() -> Iterator[Path]:
+    """Provide a disposable source root for each dispatch test."""
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary) / "source"
+        root.mkdir()
+        yield root
+
+
+def run_dispatch(
+    dispatch_root: Path,
+    arguments: list[str],
+    callback_name: str,
+) -> tuple[list[object], mock.Mock]:
+    """Run one command with a fake cache lock that records when it is held and released."""
+    events: list[object] = []
+
+    @contextmanager
+    def record_lock(
+        cache_root: Path,
+        *,
+        exclusive: bool,
+        command: str,
+        target: str | None,
+        profile: str | None = None,
+    ) -> Iterator[None]:
+        events.append(("lock", cache_root, exclusive, command, target, profile))
+        yield
+        events.append("unlock")
+
+    callback = mock.Mock(side_effect=lambda *_args, **_kwargs: events.append("command"))
+    with (
+        mock.patch.object(sys, "argv", ["fplinux", *arguments]),
+        mock.patch.object(lifecycle, "ROOT", dispatch_root),
+        mock.patch.object(
+            cli,
+            "discover_targets",
+            return_value=("target", "nokia-ta1618"),
+        ),
+        mock.patch.object(lifecycle, "cache_lock", side_effect=record_lock),
+        mock.patch(callback_name, callback),
+    ):
+        cli.main()
+    return events, callback
+
+
 class CliCacheLockTests:
     """Keep lock-mode selection at the in-process command dispatcher."""
-
-    @pytest.fixture(autouse=True)
-    def dispatch_checkout(self) -> Iterator[None]:
-        """Provide a disposable source root for each dispatch test."""
-        with tempfile.TemporaryDirectory() as temporary:
-            self.root = Path(temporary) / "source"
-            self.root.mkdir()
-
-            yield
-
-    def _run(
-        self,
-        arguments: list[str],
-        callback_name: str,
-    ) -> tuple[list[object], mock.Mock]:
-        """Run one command with a fake cache lock that records when it is held and released."""
-        events: list[object] = []
-
-        @contextmanager
-        def record_lock(
-            cache_root: Path,
-            *,
-            exclusive: bool,
-            command: str,
-            target: str | None,
-            profile: str | None = None,
-        ) -> Iterator[None]:
-            events.append(("lock", cache_root, exclusive, command, target, profile))
-            yield
-            events.append("unlock")
-
-        callback = mock.Mock(side_effect=lambda *_args, **_kwargs: events.append("command"))
-        with (
-            mock.patch.object(sys, "argv", ["fplinux", *arguments]),
-            mock.patch.object(lifecycle, "ROOT", self.root),
-            mock.patch.object(
-                cli,
-                "discover_targets",
-                return_value=("target", "nokia-ta1618"),
-            ),
-            mock.patch.object(lifecycle, "cache_lock", side_effect=record_lock),
-            mock.patch(callback_name, callback),
-        ):
-            cli.main()
-        return events, callback
 
     @pytest.mark.parametrize(
         ("arguments", "callback_name", "exclusive", "target", "profile"),
@@ -199,8 +200,9 @@ class CliCacheLockTests:
             "device-data-prepare-nokia-ta1618---from-dump-saved-nand.bin---jobs-2---offline",
         ],
     )
-    def test_dispatcher_chooses_the_required_lock_mode(
+    def test_dispatcher_chooses_the_required_lock_mode(  # noqa: PLR0913 -- fixture and independent dispatch expectations stay explicit.
         self,
+        dispatch_root: Path,
         *,
         arguments: list[str],
         callback_name: str,
@@ -209,10 +211,10 @@ class CliCacheLockTests:
         profile: str | None,
     ) -> None:
         """Build-side commands request exclusive mode; consumers request shared mode."""
-        events, callback = self._run(arguments, callback_name)
+        events, callback = run_dispatch(dispatch_root, arguments, callback_name)
         assert (events) == (
             [
-                ("lock", self.root / ".cache", exclusive, arguments[0], target, profile),
+                ("lock", dispatch_root / ".cache", exclusive, arguments[0], target, profile),
                 "command",
                 "unlock",
             ]
@@ -241,9 +243,10 @@ class CliCacheLockTests:
                 )
             )
 
-    def test_format_forwards_only_the_explicit_paths(self) -> None:
+    def test_format_forwards_only_the_explicit_paths(self, dispatch_root: Path) -> None:
         """Pass the ordered source selection through the exclusive command boundary."""
-        _events, formatter = self._run(
+        _events, formatter = run_dispatch(
+            dispatch_root,
             ["format", "scripts/tool.py", "README.md"],
             "fplinux_cli.quality.formatting.command.format_sources",
         )
@@ -262,21 +265,23 @@ class CliCacheLockTests:
         ids=["run-target", "device-data-prepare-target"],
     )
     def test_loader_events_path_reaches_each_live_loader_command(
-        self, arguments: list[str], callback_name: str
+        self, dispatch_root: Path, arguments: list[str], callback_name: str
     ) -> None:
         """The output destination reaches the loader boundary as a filesystem path."""
-        _events, callback = self._run(
-            [*arguments, "--events", "loader-events.jsonl"], callback_name
+        _events, callback = run_dispatch(
+            dispatch_root, [*arguments, "--events", "loader-events.jsonl"], callback_name
         )
         assert (callback.call_args.kwargs["events"]) == (Path("loader-events.jsonl"))
 
-    def test_build_forwards_offline_to_the_dispatcher(self) -> None:
+    def test_build_forwards_offline_to_the_dispatcher(self, dispatch_root: Path) -> None:
         """The parsed build switch reaches its callback without changing lock mode."""
-        events, build = self._run(["build", "target", "--offline"], "fplinux_cli.cli.build.build")
+        events, build = run_dispatch(
+            dispatch_root, ["build", "target", "--offline"], "fplinux_cli.cli.build.build"
+        )
 
         assert (events) == (
             [
-                ("lock", self.root / ".cache", True, "build", "target", None),
+                ("lock", dispatch_root / ".cache", True, "build", "target", None),
                 "command",
                 "unlock",
             ]
@@ -317,7 +322,7 @@ class CliCacheLockTests:
     )
     @pytest.mark.parametrize("build_type", ["release", "debug"], ids=("release", "debug"))
     def test_build_type_defaults_and_explicit_selection_reach_every_consumer(
-        self, arguments: list[str], callback_name: str, build_type: str
+        self, dispatch_root: Path, arguments: list[str], callback_name: str, build_type: str
     ) -> None:
         """The same enum is independent of a boot profile at every selected-bundle boundary."""
         explicit = [
@@ -327,10 +332,10 @@ class CliCacheLockTests:
             "--build-type",
             build_type,
         ]
-        _events, callback = self._run(explicit, callback_name)
+        _events, callback = run_dispatch(dispatch_root, explicit, callback_name)
         assert (callback.call_args.kwargs["build_type"]) == (build_type)
         assert (callback.call_args.kwargs["profile"]) == ("microsd-uboot")
-        _events, callback = self._run(arguments, callback_name)
+        _events, callback = run_dispatch(dispatch_root, arguments, callback_name)
         assert (callback.call_args.kwargs["build_type"]) == ("release")
 
     def test_unknown_build_type_is_rejected_before_locking(self) -> None:
@@ -357,14 +362,14 @@ class CliCacheLockTests:
         ids=["defaults", "--platform-ums9117", "--compatible-hammer,lte"],
     )
     def test_target_new_forwards_the_requested_name_platform_and_identity(
-        self, extra: list[str], platform: str | None, compatible: str | None
+        self, dispatch_root: Path, extra: list[str], platform: str | None, compatible: str | None
     ) -> None:
         """The new-target command passes the platform and identity options to target creation."""
         callback = mock.Mock()
         arguments = ["target", "new", "hammer-lte", "--brand", "HAMMER", "--product", "LTE"]
         with (
             mock.patch.object(sys, "argv", ["fplinux", *arguments, *extra]),
-            mock.patch.object(lifecycle, "ROOT", self.root),
+            mock.patch.object(lifecycle, "ROOT", dispatch_root),
             mock.patch.object(cli, "discover_targets", return_value=("nokia-ta1618",)),
             mock.patch("fplinux_cli.cli.target_new.create_target", callback),
         ):
@@ -378,7 +383,9 @@ class CliCacheLockTests:
             compatible=compatible,
         )
 
-    def test_device_data_prepare_rejects_a_nonpositive_job_limit_before_locking(self) -> None:
+    def test_device_data_prepare_rejects_a_nonpositive_job_limit_before_locking(
+        self, dispatch_root: Path
+    ) -> None:
         """Invalid worker limits cannot create cache state or start preparation."""
         with (
             mock.patch.object(
@@ -386,7 +393,7 @@ class CliCacheLockTests:
                 "argv",
                 ["fplinux", "device-data", "prepare", "nokia-ta1618", "--jobs", "0"],
             ),
-            mock.patch.object(lifecycle, "ROOT", self.root),
+            mock.patch.object(lifecycle, "ROOT", dispatch_root),
             mock.patch.object(cli, "discover_targets", return_value=("nokia-ta1618",)),
             mock.patch.object(
                 lifecycle,
@@ -400,17 +407,19 @@ class CliCacheLockTests:
 
         assert (stopped.value.code) == (2)
         lock.assert_not_called()
-        assert not ((self.root / ".cache").exists())
+        assert not ((dispatch_root / ".cache").exists())
 
-    def test_check_forwards_the_kernel_worker_limit_without_changing_its_lock(self) -> None:
+    def test_check_forwards_the_kernel_worker_limit_without_changing_its_lock(
+        self, dispatch_root: Path
+    ) -> None:
         """Pass the requested kernel limit through the existing exclusive check boundary."""
-        events, check = self._run(
-            ["check", "kernel", "--jobs", "2"], "fplinux_cli.quality.checks.check"
+        events, check = run_dispatch(
+            dispatch_root, ["check", "kernel", "--jobs", "2"], "fplinux_cli.quality.checks.check"
         )
 
         assert (events) == (
             [
-                ("lock", self.root / ".cache", True, "check", None, None),
+                ("lock", dispatch_root / ".cache", True, "check", None, None),
                 "command",
                 "unlock",
             ]
@@ -437,10 +446,16 @@ class CliCacheLockTests:
         ids=["check", "check-kernel", "check-docs", "check---verbose"],
     )
     def test_check_defaults_match_the_selected_execution_boundary(
-        self, *, arguments: list[str], scopes: list[str], verbose: bool, jobs: int
+        self,
+        dispatch_root: Path,
+        *,
+        arguments: list[str],
+        scopes: list[str],
+        verbose: bool,
+        jobs: int,
     ) -> None:
         """Use three kernel workers normally and one when no parallel work can run."""
-        _events, check = self._run(arguments, "fplinux_cli.quality.checks.check")
+        _events, check = run_dispatch(dispatch_root, arguments, "fplinux_cli.quality.checks.check")
         check.assert_called_once_with(
             scopes,
             profile=None,
@@ -450,9 +465,10 @@ class CliCacheLockTests:
             jobs=jobs,
         )
 
-    def test_profile_is_recorded_in_the_global_cache_lock_owner(self) -> None:
+    def test_profile_is_recorded_in_the_global_cache_lock_owner(self, dispatch_root: Path) -> None:
         """A blocked build identifies its profile without splitting the global lock."""
-        events, build = self._run(
+        events, build = run_dispatch(
+            dispatch_root,
             ["build", "target", "--profile", "microsd-uboot"],
             "fplinux_cli.cli.build.build",
         )
@@ -461,7 +477,7 @@ class CliCacheLockTests:
             [
                 (
                     "lock",
-                    self.root / ".cache",
+                    dispatch_root / ".cache",
                     True,
                     "build",
                     "target",
@@ -496,16 +512,16 @@ class CliCacheLockTests:
         ],
     )
     def test_profile_consumers_use_the_selected_shared_lock_identity(
-        self, arguments: list[str], callback_name: str
+        self, dispatch_root: Path, arguments: list[str], callback_name: str
     ) -> None:
         """Package, run and console retain the named bundle slot under the shared cache lock."""
-        events, callback = self._run(arguments, callback_name)
+        events, callback = run_dispatch(dispatch_root, arguments, callback_name)
 
         assert (events) == (
             [
                 (
                     "lock",
-                    self.root / ".cache",
+                    dispatch_root / ".cache",
                     False,
                     arguments[0],
                     "target",
@@ -528,16 +544,23 @@ class CliCacheLockTests:
         ids=["linux-autonomous", "windows-autonomous-offline", "windows-policy", "offline-policy"],
     )
     def test_package_host_options_reach_the_backend_under_the_required_lock(
-        self, *, options: list[str], autonomous: bool, host: str, offline: bool
+        self,
+        dispatch_root: Path,
+        *,
+        options: list[str],
+        autonomous: bool,
+        host: str,
+        offline: bool,
     ) -> None:
         """Forward host policy inputs; only autonomous preparation owns a writer lock."""
-        events, package = self._run(
+        events, package = run_dispatch(
+            dispatch_root,
             ["package", "target", "--candidate", *options],
             "fplinux_cli.cli.package.package_target",
         )
 
         assert events == [
-            ("lock", self.root / ".cache", autonomous, "package", "target", None),
+            ("lock", dispatch_root / ".cache", autonomous, "package", "target", None),
             "command",
             "unlock",
         ]
@@ -588,17 +611,17 @@ class CliCacheLockTests:
         ],
     )
     def test_microsd_boot_selector_locks_the_single_selected_context(
-        self, arguments: list[str], callback_name: str, expected_call: object
+        self, dispatch_root: Path, arguments: list[str], callback_name: str, expected_call: object
     ) -> None:
         """The boot selector keeps its target and chooses one profile cache slot."""
         command, target = arguments[:2]
-        events, callback = self._run(arguments, callback_name)
+        events, callback = run_dispatch(dispatch_root, arguments, callback_name)
 
         assert (events) == (
             [
                 (
                     "lock",
-                    self.root / ".cache",
+                    dispatch_root / ".cache",
                     False,
                     command,
                     target,
@@ -612,7 +635,7 @@ class CliCacheLockTests:
 
     @pytest.mark.parametrize("command", ["run", "package"], ids=["run", "package"])
     def test_boot_selector_and_profile_are_rejected_together_before_locking(
-        self, command: str
+        self, dispatch_root: Path, command: str
     ) -> None:
         """One run or package invocation selects either a boot mode or a profile, not both."""
         with (
@@ -621,7 +644,7 @@ class CliCacheLockTests:
                 "argv",
                 ["fplinux", command, "target", "--boot", "microsd", "--profile", "microsd-uboot"],
             ),
-            mock.patch.object(lifecycle, "ROOT", self.root),
+            mock.patch.object(lifecycle, "ROOT", dispatch_root),
             mock.patch.object(cli, "discover_targets", return_value=("target",)),
             mock.patch.object(
                 lifecycle,
@@ -635,7 +658,7 @@ class CliCacheLockTests:
 
         assert (stopped.value.code) == (2)
         lock.assert_not_called()
-        assert not ((self.root / ".cache").exists())
+        assert not ((dispatch_root / ".cache").exists())
 
     @pytest.mark.parametrize(
         ("command", "callback"),
@@ -647,19 +670,20 @@ class CliCacheLockTests:
         ids=["build", "console", "verify"],
     )
     def test_explicit_default_reuses_the_implicit_context(
-        self, command: str, callback: str
+        self, dispatch_root: Path, command: str, callback: str
     ) -> None:
         """The alias reaches each consumer with the same profile and lock identity."""
-        implicit_events, implicit = self._run([command, "target"], callback)
-        explicit_events, explicit = self._run(
-            [command, "target", "--profile", "default"], callback
+        implicit_events, implicit = run_dispatch(dispatch_root, [command, "target"], callback)
+        explicit_events, explicit = run_dispatch(
+            dispatch_root, [command, "target", "--profile", "default"], callback
         )
         assert (explicit_events) == (implicit_events)
         assert (explicit.call_args) == (implicit.call_args)
 
-    def test_named_profile_keeps_explicit_check_scopes(self) -> None:
+    def test_named_profile_keeps_explicit_check_scopes(self, dispatch_root: Path) -> None:
         """Both boot modes can run the same source checks without selecting Kbuild."""
-        _events, check = self._run(
+        _events, check = run_dispatch(
+            dispatch_root,
             ["check", "python", "source", "--profile", "microsd-uboot"],
             "fplinux_cli.quality.checks.check",
         )
@@ -672,15 +696,16 @@ class CliCacheLockTests:
             jobs=1,
         )
 
-    def test_verify_forwards_the_selected_profile(self) -> None:
+    def test_verify_forwards_the_selected_profile(self, dispatch_root: Path) -> None:
         """A microSD verification cannot silently resolve the default bundle."""
-        events, verify = self._run(
+        events, verify = run_dispatch(
+            dispatch_root,
             ["verify", "target", "--profile", "microsd-uboot"],
             "fplinux_cli.cli.runtime.verify_booted",
         )
         assert (events) == (
             [
-                ("lock", self.root / ".cache", False, "verify", "target", "microsd-uboot"),
+                ("lock", dispatch_root / ".cache", False, "verify", "target", "microsd-uboot"),
                 "command",
                 "unlock",
             ]
@@ -727,13 +752,13 @@ class CliCacheLockTests:
         ],
     )
     def test_invalid_profile_is_rejected_before_any_cache_or_retention_action(
-        self, arguments: tuple[str, ...], message: str
+        self, dispatch_root: Path, arguments: tuple[str, ...], message: str
     ) -> None:
         """Only a public profile name reaches the cache lock or deferred cleanup."""
         stderr = io.StringIO()
         with (
             mock.patch.object(sys, "argv", ["fplinux", *arguments]),
-            mock.patch.object(lifecycle, "ROOT", self.root),
+            mock.patch.object(lifecycle, "ROOT", dispatch_root),
             mock.patch.object(cli, "discover_targets", return_value=("target",)),
             mock.patch.object(
                 lifecycle,
@@ -756,7 +781,7 @@ class CliCacheLockTests:
         lock.assert_not_called()
         rootfs_gc.assert_not_called()
         logs_gc.assert_not_called()
-        assert not ((self.root / ".cache").exists())
+        assert not ((dispatch_root / ".cache").exists())
 
     @pytest.mark.parametrize(
         ("command", "target", "expected_build_cleanup"),
@@ -764,11 +789,16 @@ class CliCacheLockTests:
         ids=["build", "check"],
     )
     def test_failed_profile_commands_run_selected_cache_cleanup_in_finally(
-        self, *, command: str, target: str | None, expected_build_cleanup: bool
+        self,
+        dispatch_root: Path,
+        *,
+        command: str,
+        target: str | None,
+        expected_build_cleanup: bool,
     ) -> None:
         """A failed action still reaches the cleanup boundary with its selected context."""
         profile = "microsd-uboot"
-        cache = self.root / ".cache"
+        cache = dispatch_root / ".cache"
         arguments = argparse.Namespace(
             command=command,
             target=target,
@@ -777,7 +807,7 @@ class CliCacheLockTests:
         )
         action = mock.Mock(side_effect=SystemExit("forced profile failure"))
         with (
-            mock.patch.object(lifecycle, "ROOT", self.root),
+            mock.patch.object(lifecycle, "ROOT", dispatch_root),
             mock.patch.object(
                 lifecycle,
                 "cache_lock",
@@ -810,7 +840,7 @@ class CliCacheLockTests:
         ids=["check---list", "prune"],
     )
     def test_check_list_and_dry_prune_dispatch_without_the_cache_lock(
-        self, *, arguments: list[str], prune_arguments: bool | None
+        self, dispatch_root: Path, *, arguments: list[str], prune_arguments: bool | None
     ) -> None:
         """The dispatcher neither locks nor creates the cache for the two no-work commands.
 
@@ -820,7 +850,7 @@ class CliCacheLockTests:
         """
         with (
             mock.patch.object(sys, "argv", ["fplinux", *arguments]),
-            mock.patch.object(lifecycle, "ROOT", self.root),
+            mock.patch.object(lifecycle, "ROOT", dispatch_root),
             mock.patch.object(cli, "discover_targets", return_value=("target",)),
             mock.patch.object(
                 lifecycle,
@@ -834,4 +864,4 @@ class CliCacheLockTests:
         lock.assert_not_called()
         if prune_arguments is not None:
             prune.assert_called_once_with(apply=prune_arguments)
-        assert not ((self.root / ".cache").exists())
+        assert not ((dispatch_root / ".cache").exists())

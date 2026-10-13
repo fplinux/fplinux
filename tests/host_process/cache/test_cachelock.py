@@ -20,9 +20,11 @@ from typing import TYPE_CHECKING
 import pytest
 from fplinux_cli.cache.lock import _LOCK_FILENAME, cache_lock
 
+from tests import ROOT
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from multiprocessing.context import SpawnProcess
+    from multiprocessing.context import SpawnContext, SpawnProcess
     from multiprocessing.queues import Queue
     from multiprocessing.synchronize import Event
 
@@ -106,25 +108,11 @@ def _exec_with_shared_lock(cache_root: str, acquired_path: str, release_path: st
         command="run",
         target="demo-target",
     ):
-        program = (
-            "from pathlib import Path\n"
-            "import sys\n"
-            "import time\n"
-            "acquired = Path(sys.argv[1])\n"
-            "release = Path(sys.argv[2])\n"
-            "acquired.touch()\n"
-            "deadline = time.monotonic() + 10\n"
-            "while not release.exists():\n"
-            "    if time.monotonic() >= deadline:\n"
-            "        raise RuntimeError(sys.argv[3])\n"
-            "    time.sleep(0.01)\n"
-        )
         os.execv(
             sys.executable,
             [
                 sys.executable,
-                "-c",
-                program,
+                str(ROOT / "tests/fixtures/processes/cache_lock_exec.py"),
                 acquired_path,
                 release_path,
                 _EXEC_LOCK_TIMEOUT,
@@ -132,21 +120,15 @@ def _exec_with_shared_lock(cache_root: str, acquired_path: str, release_path: st
         )
 
 
-class CacheLockTests:
-    """Check the cache flock only through separate operating-system processes."""
+@dataclass
+class CacheLockContext:
+    """Own spawned lock holders and their cleanup for one isolated cache."""
 
-    @pytest.fixture(autouse=True)
-    def _prepare_case(self) -> Iterator[None]:
-        """Create a disposable cache directory and spawned-process context."""
-        with ExitStack() as cleanup:
-            self.cleanup = cleanup
-            self.temporary = tempfile.TemporaryDirectory()
-            cleanup.enter_context(self.temporary)
-            self.cache_root = Path(self.temporary.name) / "cache"
-            self.context = multiprocessing.get_context("spawn")
-            yield
+    cache_root: Path
+    context: SpawnContext
+    cleanup: ExitStack
 
-    def _start_holder(
+    def start_holder(
         self,
         *,
         exclusive: bool,
@@ -170,24 +152,24 @@ class CacheLockTests:
 
         def release_holder() -> None:
             release.set()
-            self._join_or_kill(process)
+            self.join_or_kill(process)
 
         self.cleanup.callback(release_holder)
         if not acquired.wait(5):
             release.set()
-            self._join_or_kill(process)
+            self.join_or_kill(process)
             pytest.fail("child did not acquire its cache lock")
         return process, acquired, release
 
-    def _stop(self, process: SpawnProcess, release: Event) -> None:
+    def stop(self, process: SpawnProcess, release: Event) -> None:
         """Release and reap a test child, including from assertion cleanup."""
         release.set()
-        self._join_or_kill(process)
+        self.join_or_kill(process)
         assert not (process.is_alive()), "child did not exit"
         assert (process.exitcode) == (0)
 
     @staticmethod
-    def _join_or_kill(process: SpawnProcess) -> None:
+    def join_or_kill(process: SpawnProcess) -> None:
         """Bound a child lifetime and reap it even when a test assertion fails."""
         process.join(10)
         if process.is_alive():
@@ -197,7 +179,7 @@ class CacheLockTests:
             process.kill()
             process.join(2)
 
-    def _exclusive_lock_available(self) -> bool:
+    def exclusive_lock_available(self) -> bool:
         """Return whether a separate descriptor can immediately take EX."""
         self.cache_root.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(
@@ -217,46 +199,64 @@ class CacheLockTests:
         finally:
             os.close(descriptor)
 
-    def test_shared_invocations_run_together(self) -> None:
+
+@pytest.fixture
+def cache_lock_case() -> Iterator[CacheLockContext]:
+    """Reap owned lock holders before removing their disposable cache directory."""
+    with ExitStack() as cleanup:
+        temporary = cleanup.enter_context(tempfile.TemporaryDirectory())
+        yield CacheLockContext(
+            Path(temporary) / "cache", multiprocessing.get_context("spawn"), cleanup
+        )
+
+
+class CacheLockTests:
+    """Check the cache flock only through separate operating-system processes."""
+
+    def test_shared_invocations_run_together(self, cache_lock_case: CacheLockContext) -> None:
         """Shared cache-lock modes do not block one another."""
-        first, _first_acquired, first_release = self._start_holder(exclusive=False, command="run")
+        first, _first_acquired, first_release = cache_lock_case.start_holder(
+            exclusive=False, command="run"
+        )
         second: SpawnProcess | None = None
         second_release: Event | None = None
         try:
-            second, _second_acquired, second_release = self._start_holder(
+            second, _second_acquired, second_release = cache_lock_case.start_holder(
                 exclusive=False,
                 command="verify",
             )
         finally:
             if second is not None and second_release is not None:
-                self._stop(second, second_release)
-            self._stop(first, first_release)
+                cache_lock_case.stop(second, second_release)
+            cache_lock_case.stop(first, first_release)
 
-    def test_blocked_invocation_reports_owner_then_continues(self) -> None:
+    def test_blocked_invocation_reports_owner_then_continues(
+        self, cache_lock_case: CacheLockContext
+    ) -> None:
         """A shared command waits for an exclusive build and resumes after it exits."""
-        owner, _owner_acquired, owner_release = self._start_holder(
+        owner, _owner_acquired, owner_release = cache_lock_case.start_holder(
             exclusive=True,
             profile="usb-host-lab",
         )
-        waiting = self.context.Event()
-        acquired = self.context.Event()
-        release = self.context.Event()
-        output = self.context.Queue()
-        waiter = self.context.Process(
+        waiting = cache_lock_case.context.Event()
+        acquired = cache_lock_case.context.Event()
+        release = cache_lock_case.context.Event()
+        output = cache_lock_case.context.Queue()
+        waiter = cache_lock_case.context.Process(
             target=_wait_for_lock,
-            args=(str(self.cache_root), waiting, acquired, release, output),
+            args=(str(cache_lock_case.cache_root), waiting, acquired, release, output),
         )
         waiter.start()
         try:
             assert waiting.wait(5), "waiter did not enter the cache-lock wait"
             assert not (acquired.is_set()), "waiter bypassed the exclusive lock"
             owner_release.set()
-            self._join_or_kill(owner)
+            cache_lock_case.join_or_kill(owner)
             assert not (owner.is_alive()), "owner did not exit"
             assert (owner.exitcode) == (0)
             assert acquired.wait(5), "waiter did not continue after release"
             release.set()
-            self._join_or_kill(waiter)
+            cache_lock_case.join_or_kill(waiter)
             assert not (waiter.is_alive()), "waiter did not exit"
             assert (waiter.exitcode) == (0)
             rendered = output.get(timeout=5)
@@ -269,8 +269,8 @@ class CacheLockTests:
         finally:
             owner_release.set()
             release.set()
-            self._join_or_kill(owner)
-            self._join_or_kill(waiter)
+            cache_lock_case.join_or_kill(owner)
+            cache_lock_case.join_or_kill(waiter)
             output.close()
             output.join_thread()
 
@@ -280,12 +280,12 @@ class CacheLockTests:
         ids=["normal-return", "runtime-error", "keyboard-interrupt"],
     )
     def test_context_releases_after_return_exception_and_interrupt(
-        self, exception_type: type[BaseException] | None
+        self, cache_lock_case: CacheLockContext, exception_type: type[BaseException] | None
     ) -> None:
         """Normal return, errors, and Ctrl-C all leave the flock available."""
         if exception_type is None:
             with cache_lock(
-                self.cache_root,
+                cache_lock_case.cache_root,
                 exclusive=True,
                 command="build",
                 target="demo-target",
@@ -295,23 +295,25 @@ class CacheLockTests:
             with (
                 pytest.raises(exception_type),
                 cache_lock(
-                    self.cache_root,
+                    cache_lock_case.cache_root,
                     exclusive=True,
                     command="build",
                     target="demo-target",
                 ),
             ):
                 raise exception_type()
-        process, _acquired, child_release = self._start_holder(exclusive=True)
-        self._stop(process, child_release)
+        process, _acquired, child_release = cache_lock_case.start_holder(exclusive=True)
+        cache_lock_case.stop(process, child_release)
 
-    def test_shared_lock_survives_exec_until_runner_exits(self) -> None:
+    def test_shared_lock_survives_exec_until_runner_exits(
+        self, cache_lock_case: CacheLockContext
+    ) -> None:
         """A runner reached through exec keeps build from taking EX too early."""
-        acquired_path = self.cache_root / "exec-acquired"
-        release_path = self.cache_root / "exec-release"
-        process = self.context.Process(
+        acquired_path = cache_lock_case.cache_root / "exec-acquired"
+        release_path = cache_lock_case.cache_root / "exec-release"
+        process = cache_lock_case.context.Process(
             target=_exec_with_shared_lock,
-            args=(str(self.cache_root), str(acquired_path), str(release_path)),
+            args=(str(cache_lock_case.cache_root), str(acquired_path), str(release_path)),
         )
         process.start()
         try:
@@ -319,12 +321,14 @@ class CacheLockTests:
             while not acquired_path.exists() and time.monotonic() < deadline:
                 time.sleep(0.01)
             assert acquired_path.exists(), "child did not reach exec"
-            assert not (self._exclusive_lock_available()), (
+            assert not (cache_lock_case.exclusive_lock_available()), (
                 "exec'd process lost its shared cache lock"
             )
         finally:
             release_path.touch()
-            self._join_or_kill(process)
+            cache_lock_case.join_or_kill(process)
         assert not (process.is_alive()), "exec'd child did not exit"
         assert (process.exitcode) == (0)
-        assert self._exclusive_lock_available(), "shared cache lock remained after runner exit"
+        assert cache_lock_case.exclusive_lock_available(), (
+            "shared cache lock remained after runner exit"
+        )

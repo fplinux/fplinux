@@ -1,0 +1,10 @@
+<main>
+	<p>Actual page content stays searchable.</p>
+	<nav><a>Next page navigation</a></nav>
+	<footer><a>Previous page navigation</a></footer>
+	<div class="callout fp-source">Source note with false hit</div>
+	<div data-pagefind-ignore>Ignored page furniture</div>
+	<script>Script false hit</script>
+	<style>.hidden { content: "style false hit"; }</style>
+	<template><p>Inert template false hit</p></template>
+</main>

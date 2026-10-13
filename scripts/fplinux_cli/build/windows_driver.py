@@ -10,26 +10,14 @@ import subprocess
 import tarfile
 import tempfile
 from pathlib import Path
+from string import Template
+from textwrap import dedent
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from fplinux_cli.build.windows_environment import WindowsBuildEnvironment
 
-_EMBEDDER_TIMESTAMP_PATCH = (
-    """--- a/libwdi/embedder.c
-+++ b/libwdi/embedder.c
-@@ -410,7 +410,9 @@
- \t\t} else {
- \t\t\tprintf("\\n");
- \t\t}
--\t\tfile_time[i] = (int64_t)stbuf.st_ctime;
-+\t\tfile_time[i] = getenv("SOURCE_DATE_EPOCH") != NULL
-+\t\t\t? strtoll(getenv("SOURCE_DATE_EPOCH"), NULL, 10)
-+\t\t\t: (int64_t)stbuf.st_ctime;
- \t\tfile_size[i] = (size_t)stbuf.st_size;
-"""
-    " \n \t\tbuffer = (unsigned char*) malloc(file_size[i]);\n"
-)
+_SOURCE_DATE_PATCH = Path(__file__).with_name("source-date-epoch.patch")
 
 
 def _extract_redist(
@@ -68,7 +56,7 @@ def _build_driver(
 ) -> Path:
     """Compile the timestamp-adjusted native embedder and static x64 helper."""
     patch = source / "source-date-epoch.patch"
-    patch.write_text(_EMBEDDER_TIMESTAMP_PATCH, encoding="utf-8")
+    shutil.copyfile(_SOURCE_DATE_PATCH, patch)
     if environment is None:
         subprocess.run(["patch", "--fuzz=0", "-p1", "-i", str(patch)], cwd=source, check=True)
     else:
@@ -87,9 +75,15 @@ def _build_driver(
         "-Wl,--no-insert-timestamp",
     ]
     (source / "config.h").write_text(
-        '#define OPT_M64\n#define WDF_VER 1011\n#define COINSTALLER_DIR "wdf"\n'
-        '#define X64_DIR "x64"\n#define WDK_DIR ".."\n'
-        "#define ENABLE_LOGGING 1\n#define _GNU_SOURCE 1\n",
+        dedent("""\
+            #define OPT_M64
+            #define WDF_VER 1011
+            #define COINSTALLER_DIR "wdf"
+            #define X64_DIR "x64"
+            #define WDK_DIR ".."
+            #define ENABLE_LOGGING 1
+            #define _GNU_SOURCE 1
+            """),
         encoding="utf-8",
     )
     library = source / "libwdi"
@@ -248,7 +242,7 @@ def prepare_windows_driver(*, cache: Path, offline: bool) -> dict[str, Path]:
         sources.mkdir(parents=True)
         shutil.copyfile(archives["libwdi"], sources / archives["libwdi"].name)
         shutil.copyfile(Path(__file__), sources / "build.py")
-        shutil.copyfile(source / "source-date-epoch.patch", sources / "source-date-epoch.patch")
+        shutil.copyfile(_SOURCE_DATE_PATCH, sources / _SOURCE_DATE_PATCH.name)
         for name in ("windows-driver.lock.toml", "windows-host.lock.toml"):
             shutil.copyfile(common.ROOT / name, sources / name)
         notice = {
@@ -256,22 +250,11 @@ def prepare_windows_driver(*, cache: Path, offline: bool) -> dict[str, Path]:
             for name, entry in {**lock, "llvm_mingw": toolchain_entry}.items()
         }
         (sources / "downloads.json").write_bytes(common.canonical_json_bytes(notice))
+        readme_template = Template(
+            Path(__file__).with_name("windows-driver-README.txt.in").read_text(encoding="utf-8")
+        )
         (sources / "README.txt").write_text(
-            "Windows driver helper source and build material\n\n"
-            "libwdi is licensed under LGPL version 3 or later. Its complete source\n"
-            "and original copyright notices are in the accompanying source archive.\n"
-            "The supplied patch makes embedded resource timestamps honor\n"
-            "SOURCE_DATE_EPOCH. The build recipe applies it to a fresh source tree.\n"
-            "Microsoft redistributable components retain the accompanying license.\n\n"
-            "On Linux, install GCC and 7-Zip. Download the pinned llvm_mingw and wdf\n"
-            "inputs in downloads.json and verify their SHA-256 digests. Extract the\n"
-            "toolchain and libwdi archives, then run:\n\n"
-            "python3 build.py --toolchain <llvm-mingw-directory> \\\n"
-            "  --source <libwdi-directory> --wdf <wdfcoinstaller.msi> \\\n"
-            f"  --source-date-epoch {SOURCE_DATE_EPOCH} --output <wdi-simple.exe>\n\n"
-            "The build runs only the native resource embedder. It does not execute\n"
-            "Windows programs or install a driver on the build host.\n",
-            encoding="utf-8",
+            readme_template.substitute(SOURCE_DATE_EPOCH=SOURCE_DATE_EPOCH), encoding="utf-8"
         )
         files = {
             path.relative_to(package).as_posix(): path

@@ -1,0 +1,6 @@
+&device {
+	/* This setting stays beside its explanation. */
+	// Its scalar value remains unchanged.
+	zeta = <0x003>;
+	alpha = <1>;
+};

@@ -1,0 +1,42 @@
+FPLinux for ACME Demo (D-1)
+
+Use an archive for this exact phone. On a Linux x86-64 PC, install Python 3.14,
+GNU coreutils, iproute2 and OpenSSH. The PC must configure a new USB network
+interface through IPv4 DHCP. Use a USB data cable.
+
+XDG_RUNTIME_DIR must name an existing absolute directory owned by your user;
+a normal Linux login session provides it.
+
+From the extracted archive directory, check its files and install USB rules:
+
+  sha256sum -c SHA256SUMS
+  sudo install -m 0644 ./60-fplinux.rules /etc/udev/rules.d/60-fplinux.rules
+  sudo udevadm control --reload-rules
+
+Keep the powered-off phone disconnected. Start the runner as your regular user:
+
+  ./runner/run.py
+
+Wait until the runner asks for the phone, then follow its instruction:
+
+  Hold the left soft key while connecting USB.
+
+If connected too early, disconnect and restart this sequence. Exit the shell
+to return to the PC; Linux keeps running. Reconnect with:
+
+  ./runner/run.py --reconnect
+
+Phone support, controls and limits: docs/porting/checklist/index.html
+Shared archive procedures: docs/guides/standalone-archive/index.html
+
+The configured BootROM key is a starting point for bring-up; confirm it
+on this phone before use. Configuration alone does not establish support.
+
+Before removing power, stop programs using data cards, disable card-backed
+swap, flush writes and unmount all data-card filesystems. Do not unplug USB
+or remove the battery while a writable card filesystem is mounted.
+
+Only after releasing the cards, disconnect USB. If the phone stays powered,
+remove and reinsert its battery before booting normally. A fresh USB load
+is required after power-off.
+Full shutdown instructions are included in docs/use/power/index.html.

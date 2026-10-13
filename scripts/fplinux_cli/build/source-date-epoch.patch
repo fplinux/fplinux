@@ -1,0 +1,13 @@
+--- a/libwdi/embedder.c
++++ b/libwdi/embedder.c
+@@ -410,7 +410,9 @@
+ 		} else {
+ 			printf("\n");
+ 		}
+-		file_time[i] = (int64_t)stbuf.st_ctime;
++		file_time[i] = getenv("SOURCE_DATE_EPOCH") != NULL
++			? strtoll(getenv("SOURCE_DATE_EPOCH"), NULL, 10)
++			: (int64_t)stbuf.st_ctime;
+ 		file_size[i] = (size_t)stbuf.st_size;
+ 
+ 		buffer = (unsigned char*) malloc(file_size[i]);

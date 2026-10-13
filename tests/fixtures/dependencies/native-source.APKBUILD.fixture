@@ -1,0 +1,6 @@
+pkgname=fplinux-libtsm
+pkgver=1.2.3
+arch=armv7
+_series=${pkgver%.*}
+source="renamed.tar.gz::https://example.invalid/$_series/source-$pkgver.tar.gz"
+sha512sums="88888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888888  renamed.tar.gz"

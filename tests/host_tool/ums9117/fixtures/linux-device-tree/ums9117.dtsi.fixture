@@ -1,0 +1,3 @@
+/ { #address-cells = <1>; #size-cells = <1>;
+codec_dma: codec-dma {}; sc2720_fgu: fuel-gauge {};
+sc2720_kpled: keypad-light {}; usb: usb {}; };

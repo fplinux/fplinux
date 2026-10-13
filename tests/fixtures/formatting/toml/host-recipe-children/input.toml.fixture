@@ -1,0 +1,23 @@
+[[host.tools]]
+self_test = false
+patches = []
+name = "first"
+type = "make-archive"
+
+[[host.tools.copies]]
+destination = "first-out"
+source = "first-in"
+
+[[host.tools.members]]
+digest_key = "first-sha"
+path = "first.c"
+
+[[host.tools]]
+self_test = true
+copies = []
+name = "second"
+type = "make-archive"
+
+[[host.tools.members]]
+digest_key = "second-sha"
+path = "second.c"

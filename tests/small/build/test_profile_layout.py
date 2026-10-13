@@ -3,35 +3,21 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
-
 import pytest
+from fplinux_cli import common
 from fplinux_cli.build.storage import layout as profile_layout
+
+from tests import ROOT
+
+
+@pytest.fixture
+def profile_layout_values() -> dict[str, int]:
+    """Load a fresh layout mapping for each rendering scenario."""
+    return common.load_toml(ROOT / "tests/fixtures/profile_config/layout.toml")
 
 
 class ProfileLayoutRenderTests:
     """Keep generated inputs consistent with their selected layout values."""
-
-    layout: ClassVar[dict[str, int]] = {
-        "ram_base": 0x80000000,
-        "ram_size": 0x04000000,
-        "timer_hz": 1000,
-        "resident_start": 0x80100000,
-        "resident_limit": 0x81000000,
-        "uboot_load": 0x81000000,
-        "uboot_size": 0x00100000,
-        "uboot_stack": 0x80F00000,
-        "kernel_load": 0x82000000,
-        "kernel_entry": 0x82000000,
-        "kernel_size": 0x01200000,
-        "fit_load": 0x83200000,
-        "fit_size": 0x00C00000,
-        "fdt_load": 0x83E00000,
-        "fdt_size": 0x00010000,
-        "fdt_pad": 0x00003000,
-        "framebuffer": 0x83F00000,
-        "framebuffer_size": 0x00100000,
-    }
 
     @staticmethod
     def _defines(contents: bytes) -> dict[str, int]:
@@ -75,9 +61,11 @@ class ProfileLayoutRenderTests:
                 sections["/".join(path)][name.strip()] = value.strip()
         return sections
 
-    def test_bootstrap_and_uboot_inputs_expose_selected_layout_values(self) -> None:
+    def test_bootstrap_and_uboot_inputs_expose_selected_layout_values(
+        self, profile_layout_values: dict[str, int]
+    ) -> None:
         """Generated C, linker and U-Boot inputs carry the declared RAM placement."""
-        header = profile_layout.boot_layout_header(self.layout)
+        header = profile_layout.boot_layout_header(profile_layout_values)
         assert (self._defines(header)) == (
             {
                 "RAM_BASE_PHYS": 0x80000000,
@@ -103,7 +91,7 @@ class ProfileLayoutRenderTests:
         assert (
             profile_layout.bootstrap_memory_ld(
                 {"load_address": 0x80100000, "payload_limit": 0x81000000},
-                self.layout,
+                profile_layout_values,
             )
             .decode("ascii")
             .splitlines()
@@ -115,7 +103,7 @@ class ProfileLayoutRenderTests:
                 "IMAGE_SIZE = 0x00f00000;",
             ]
         )
-        dtsi = profile_layout.uboot_layout_dtsi(self.layout).decode("ascii")
+        dtsi = profile_layout.uboot_layout_dtsi(profile_layout_values).decode("ascii")
         assert ("#define FPLINUX_UBOOT_TIMER_HZ 1000") in (dtsi)
         assert ("memory@80000000") in (dtsi)
         assert ("reg = <0x80000000 0x04000000>;") in (dtsi)
@@ -123,7 +111,7 @@ class ProfileLayoutRenderTests:
             self._config(
                 profile_layout.uboot_defconfig(
                     b"CONFIG_ENV_IS_NOWHERE=y\n",
-                    self.layout,
+                    profile_layout_values,
                 )
             )
         ) == (
@@ -201,10 +189,12 @@ class ProfileLayoutRenderTests:
         assert (sections[boot_image + "/vfat"]["label"]) == ('"FPLBOOT"')
         assert (sections[boot_image + "/vfat/file FPLINUX.ITB"]["image"]) == ('"FPLINUX.ITB"')
 
-    def test_base_defconfig_cannot_override_generated_profile_placement(self) -> None:
+    def test_base_defconfig_cannot_override_generated_profile_placement(
+        self, profile_layout_values: dict[str, int]
+    ) -> None:
         """Reject a second source of U-Boot text, stack or FDT placement."""
         with pytest.raises(ValueError, match="profile-owned layout values"):
             profile_layout.uboot_defconfig(
                 b"CONFIG_SYS_FDT_PAD=0x1000\n",
-                self.layout,
+                profile_layout_values,
             )

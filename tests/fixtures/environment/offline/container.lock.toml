@@ -1,0 +1,7 @@
+[kern]
+archive_url = "https://example.invalid/kern.tar.gz"
+archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+[oci]
+base_rootfs_url = "https://example.invalid/base.tar.gz"
+base_rootfs_sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"

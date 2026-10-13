@@ -1,0 +1,19 @@
+[[source]]
+kind = "file"
+id = "z"
+
+[[source.output]]
+sha256 = "z-sha"
+path = "z.bin"
+role = "z-role"
+
+# Second source
+[[source]]
+kind = "7z"
+id = "a"
+
+[[source.output]]
+sha256 = "a-sha"
+member = "a/member.bin"
+path = "a.bin"
+role = "a-role"

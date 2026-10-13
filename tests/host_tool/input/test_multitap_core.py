@@ -23,16 +23,14 @@ INCLUDE = ROOT / "include/fplinux"
 class MultiTapCoreTests:
     """Exercise the portable state machine without target hardware."""
 
-    executable: Path
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def executable(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         """Link the host harness once for this test group."""
         with c_build_directory(tmp_path_factory, "multitap-core") as temporary:
-            cls.executable = temporary / "fplinux-multitap-core"
+            executable = temporary / "fplinux-multitap-core"
             compile_c(
-                cls.executable,
+                executable,
                 [
                     "-std=c11",
                     "-Wall",
@@ -46,12 +44,12 @@ class MultiTapCoreTests:
                 name="compile multi-tap harness",
                 check=True,
             )
-            yield
+            yield executable
 
-    def test_c11_core_contract(self) -> None:
+    def test_c11_core_contract(self, executable: Path) -> None:
         """Exact groups and time boundaries remain shared behavior."""
         run_process(
-            [str(self.executable)],
+            [str(executable)],
             name="run multi-tap harness",
             timeout=10,
             check=True,

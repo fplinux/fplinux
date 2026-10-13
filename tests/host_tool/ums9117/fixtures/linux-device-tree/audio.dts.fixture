@@ -1,0 +1,3 @@
+/dts-v1/;
+/ { audio: audio {}; };
+/include/ "audio-policy.dtsi"

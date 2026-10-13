@@ -1,0 +1,33 @@
+release = "3.24.1"
+branch = "v3.24"
+arch = "armv7"
+triplet = "armv7-alpine-linux-musleabihf"
+
+[repositories]
+main = "https://example.invalid/alpine/v3.24/main"
+community = "https://example.invalid/alpine/v3.24/community"
+
+[minirootfs]
+url = "https://example.invalid/alpine-minirootfs.tar.gz"
+sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+bytes = 1
+
+[runtime]
+packages = ["openrc-1-r0.apk"]
+
+[runtime.additions]
+
+[sysroot]
+packages = ["musl-dev-1-r0.apk"]
+
+[[package]]
+repository = "main"
+file = "openrc-1-r0.apk"
+sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+bytes = 2
+
+[[package]]
+repository = "main"
+file = "musl-dev-1-r0.apk"
+sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+bytes = 3

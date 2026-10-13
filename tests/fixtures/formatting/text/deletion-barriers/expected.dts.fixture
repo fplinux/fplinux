@@ -1,0 +1,7 @@
+&device {
+	alpha = <1>;
+	zulu = <4>;
+	/delete-property/ value;
+	beta = <2>;
+	zeta = <3>;
+};

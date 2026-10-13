@@ -1,0 +1,18 @@
+[linux]
+patches = ["z.patch", "a.patch"]
+arch = "arm"
+
+[[linux.appends]]
+destination = "out-a"
+source = "in-a"
+
+[[linux.copies]]
+destination = "out-z"
+source = "in-z"
+
+[runtime]
+fdl1_load_address = 0x00006200
+
+[[linux.copies]]
+destination = "out-b"
+source = "in-b"

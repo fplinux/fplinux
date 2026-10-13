@@ -16,6 +16,9 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
+_FIXTURES = Path(__file__).parents[2] / "fixtures/environment/wheel"
+
+
 @pytest.fixture
 def wheel_inputs(tmp_path: Path) -> tuple[Path, Path, Path]:
     """Declare one synthetic wheel and two inputs outside the wheel consumer."""
@@ -23,23 +26,20 @@ def wheel_inputs(tmp_path: Path) -> tuple[Path, Path, Path]:
     archive = inputs / "sources/example/example.whl"
     archive.parent.mkdir(parents=True)
     with zipfile.ZipFile(archive, "w") as wheel:
-        wheel.writestr("quality_fixture/__init__.py", b"VALUE = 'declared'\n")
+        wheel.writestr(
+            "quality_fixture/__init__.py", (_FIXTURES / "__init__.py.fixture").read_bytes()
+        )
         wheel.writestr(
             "quality_fixture-1.0.dist-info/METADATA",
-            b"Metadata-Version: 2.1\nName: quality-fixture\nVersion: 1.0\n",
+            (_FIXTURES / "METADATA").read_bytes(),
         )
     lock = tmp_path / "environment.lock.toml"
     lock.write_text(
-        '[[input]]\nkey = "container:example"\n'
-        'url = "https://example.invalid/example.whl"\n'
-        f'sha256 = "{hashlib.sha256(archive.read_bytes()).hexdigest()}"\n'
-        f"bytes = {archive.stat().st_size}\n"
-        'destination = "downloads/environment/example/example.whl"\n'
-        'purpose = "container-source"\narch = "x86_64"\n'
-        '[[input]]\ndestination = "downloads/environment/package/unused.whl"\n'
-        'purpose = "container-package"\n'
-        '[[input]]\ndestination = "downloads/environment/source/unused.tar.gz"\n'
-        'purpose = "container-source"\n'
+        (_FIXTURES / "environment.lock.toml.in.fixture")
+        .read_text()
+        .format(
+            sha256=hashlib.sha256(archive.read_bytes()).hexdigest(), size=archive.stat().st_size
+        )
     )
     return lock, inputs, tmp_path / "python"
 

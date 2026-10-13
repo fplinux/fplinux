@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/@BINDING@#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: @DISPLAY_NAME@ on @PLATFORM_NAME@
+
+maintainers:
+  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+
+select:
+  properties:
+    compatible:
+      contains:
+        const: @COMPATIBLE@
+  required:
+    - compatible
+
+properties:
+  $nodename:
+    const: '/'
+  model:
+    const: @DISPLAY_NAME@
+  compatible:
+    items:
+      - const: @COMPATIBLE@
+      - const: @FALLBACK@
+
+required:
+  - model
+  - compatible
+
+additionalProperties: true
+
+...

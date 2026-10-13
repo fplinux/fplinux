@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -21,19 +22,25 @@ TERMINAL = ROOT / "alpine/aports/fplinux-terminal"
 SYSTEM_XKB = Path("/usr/share/X11/xkb")
 
 
+@dataclass(frozen=True)
+class LayoutKeyboardHarness:
+    """Linked keyboard engine and its immutable copied layout data."""
+
+    executable: Path
+    data_root: Path
+
+
 class TerminalKeyboardTests:
     """Exercise keyboard text and modifiers through the linked XKB library."""
 
-    executable: Path
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def executable(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         """Link the host harness once for this test group."""
         with c_build_directory(tmp_path_factory, "terminal-keyboard") as directory:
-            cls.executable = directory / "terminal-keyboard"
+            executable = directory / "terminal-keyboard"
             compile_c(
-                cls.executable,
+                executable,
                 [
                     "-std=c11",
                     "-Wall",
@@ -51,12 +58,12 @@ class TerminalKeyboardTests:
                 name="compile terminal XKB harness",
                 check=True,
             )
-            yield
+            yield executable
 
-    def test_device_modifiers_symbols_repeat_and_reset(self) -> None:
+    def test_device_modifiers_symbols_repeat_and_reset(self, executable: Path) -> None:
         """Real XKB state remains consistent across keyboard and phone sources."""
         run_process(
-            [str(self.executable), str(ROOT / "tests/host_tool/terminal/fixtures/terminal-xkb")],
+            [str(executable), str(ROOT / "tests/host_tool/terminal/fixtures/terminal-xkb")],
             name="run terminal XKB harness",
             timeout=10,
             check=True,
@@ -71,24 +78,21 @@ class TerminalLayoutKeyTests:
     the built ``fplinux-xkb`` package, and nothing here runs on a phone.
     """
 
-    data_root: Path
-    executable: Path
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def harness(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[LayoutKeyboardHarness]:
         """Link the host harness once for this test group."""
         with c_build_directory(tmp_path_factory, "terminal-layout-keys") as directory:
-            cls.data_root = directory / "xkb"
+            data_root = directory / "xkb"
             for component in ("keycodes", "types", "compat", "symbols"):
-                shutil.copytree(SYSTEM_XKB / component, cls.data_root / component)
+                shutil.copytree(SYSTEM_XKB / component, data_root / component)
             shutil.copyfile(
                 ROOT / "alpine/aports/fplinux-xkb/fplinux",
-                cls.data_root / "symbols/fplinux",
+                data_root / "symbols/fplinux",
             )
-            cls.executable = directory / "terminal-layout-keys"
+            executable = directory / "terminal-layout-keys"
             compile_c(
-                cls.executable,
+                executable,
                 [
                     "-std=c11",
                     "-Wall",
@@ -111,12 +115,14 @@ class TerminalLayoutKeyTests:
                 name="compile terminal layout key harness",
                 check=True,
             )
-            yield
+            yield LayoutKeyboardHarness(executable, data_root)
 
-    def test_function_scrollback_and_diagnostic_keys_keep_their_actions(self) -> None:
+    def test_function_scrollback_and_diagnostic_keys_keep_their_actions(
+        self, harness: LayoutKeyboardHarness
+    ) -> None:
         """F13-F24 send xterm keys; Shift+PageUp scrolls; Ctrl+Alt+F1 asks for the console."""
         run_process(
-            [str(self.executable), str(self.data_root)],
+            [str(harness.executable), str(harness.data_root)],
             name="run terminal layout key harness",
             timeout=10,
             check=True,

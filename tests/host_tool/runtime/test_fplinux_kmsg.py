@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -20,16 +20,14 @@ if TYPE_CHECKING:
 class KernelLogForwarderTests:
     """Check output records and CLI behavior, not kernel log ingestion."""
 
-    executable: ClassVar[Path]
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def kmsg_executable(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         """Link production code with a fake kernel sink at the open boundary."""
         with c_build_directory(tmp_path_factory, "fplinux-kmsg") as directory:
-            cls.executable = directory / "fplinux-kmsg"
+            executable = directory / "fplinux-kmsg"
             compile_c(
-                cls.executable,
+                executable,
                 [
                     "-std=c11",
                     "-Wall",
@@ -45,13 +43,15 @@ class KernelLogForwarderTests:
                 name="compile kernel-log forwarder",
                 check=True,
             )
-            yield
+            yield executable
 
     @pytest.mark.parametrize("level", [3, 4, 6], ids=["3", "4", "6"])
-    def test_lines_use_requested_priority_and_one_component_prefix(self, level: int) -> None:
+    def test_lines_use_requested_priority_and_one_component_prefix(
+        self, kmsg_executable: Path, level: int
+    ) -> None:
         """Preserve message content, including an unterminated last line."""
         result = subprocess.run(
-            [str(self.executable), "--level", str(level), "--tag", "fplinux-input"],
+            [str(kmsg_executable), "--level", str(level), "--tag", "fplinux-input"],
             capture_output=True,
             check=False,
             text=True,
@@ -65,11 +65,11 @@ class KernelLogForwarderTests:
             f"<{level}>fplinux-input: last\n"
         )
 
-    def test_long_line_is_preserved_across_bounded_records(self) -> None:
+    def test_long_line_is_preserved_across_bounded_records(self, kmsg_executable: Path) -> None:
         """No input bytes are lost when a daemon line exceeds the kernel record size."""
         body = "x" * 4000
         result = subprocess.run(
-            [str(self.executable), "--level", "6", "--tag", "daemon"],
+            [str(kmsg_executable), "--level", "6", "--tag", "daemon"],
             capture_output=True,
             check=False,
             text=True,
@@ -91,12 +91,12 @@ class KernelLogForwarderTests:
         ids=["help", "level-8-tag-test"],
     )
     def test_help_and_invalid_options_precede_device_access(
-        self, arguments: list[str], status: int
+        self, kmsg_executable: Path, arguments: list[str], status: int
     ) -> None:
         """Help and usage errors do not try to open the denied kernel sink."""
         environment = {**os.environ, "FPLINUX_TEST_KMSG_DENY_OPEN": "1"}
         result = subprocess.run(
-            [str(self.executable), *arguments],
+            [str(kmsg_executable), *arguments],
             capture_output=True,
             check=False,
             text=True,
@@ -106,7 +106,7 @@ class KernelLogForwarderTests:
         assert (result.returncode) == (status), result.stderr
         assert ("cannot open") not in (result.stderr)
         result = subprocess.run(
-            [str(self.executable), "--level", "3", "--tag", "test"],
+            [str(kmsg_executable), "--level", "3", "--tag", "test"],
             capture_output=True,
             check=False,
             text=True,

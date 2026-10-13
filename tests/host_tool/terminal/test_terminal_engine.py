@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import struct
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -21,18 +22,24 @@ if TYPE_CHECKING:
 TERMINAL = ROOT / "alpine/aports/fplinux-terminal"
 
 
+@dataclass(frozen=True)
+class TerminalEngineHarness:
+    """Linked terminal engine with its shell startup and immutable fixture fonts."""
+
+    executable: Path
+    bashrc: Path
+    fonts: tuple[Path, ...]
+
+
 class TerminalEngineTests:
     """Run each terminal scenario in its own harness process."""
 
-    executable: Path
-    arguments: list[str]
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def harness(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[TerminalEngineHarness]:
         """Link the production terminal sources and write the fixture fonts."""
         with c_build_directory(tmp_path_factory, "fplinux-terminal-engine") as directory:
-            cls.executable = directory / "terminal-engine"
+            executable = directory / "terminal-engine"
             fonts = []
             for width, height in ((6, 12), (8, 16), (8, 32)):
                 font = directory / f"fixture-{height}.psf"
@@ -47,9 +54,9 @@ class TerminalEngineTests:
                     bitmap.extend(b"\0" * (height - 8))
                 unicode_table = b"".join(bytes((character, 0xFF)) for character in characters)
                 font.write_bytes(header + bitmap + unicode_table)
-                fonts.append(str(font))
+                fonts.append(font)
             compile_c(
-                cls.executable,
+                executable,
                 [
                     "-std=c11",
                     "-Wall",
@@ -72,10 +79,11 @@ class TerminalEngineTests:
                 name="compile terminal engine harness",
                 check=True,
             )
-            cls.arguments = [str(TERMINAL / "fplinux-terminal.bashrc"), *fonts]
-            yield
+            yield TerminalEngineHarness(
+                executable, TERMINAL / "fplinux-terminal.bashrc", tuple(fonts)
+            )
 
-    def run_scenario(self, scenario: str) -> None:
+    def run_scenario(self, harness: TerminalEngineHarness, scenario: str) -> None:
         """Run one scenario with a fresh working directory, HOME and history file."""
         with tempfile.TemporaryDirectory() as directory:
             environment = os.environ.copy()
@@ -85,7 +93,12 @@ class TerminalEngineTests:
                 LC_ALL="C.UTF-8",
             )
             result = run_process(
-                [str(self.executable), scenario, *self.arguments],
+                [
+                    str(harness.executable),
+                    scenario,
+                    str(harness.bashrc),
+                    *(str(font) for font in harness.fonts),
+                ],
                 name=f"run terminal engine scenario {scenario}",
                 cwd=Path(directory),
                 env=environment,
@@ -121,10 +134,10 @@ class TerminalEngineTests:
         ],
     )
     def test_phone_and_keyboard_input_drive_pty_bytes_menus_and_scrollback(
-        self, scenario: str
+        self, harness: TerminalEngineHarness, scenario: str
     ) -> None:
         """Engine state and queued PTY bytes follow the documented terminal controls."""
-        self.run_scenario(scenario)
+        self.run_scenario(harness, scenario)
 
     @pytest.mark.parametrize(
         "scenario",
@@ -137,14 +150,20 @@ class TerminalEngineTests:
             "help-render",
         ],
     )
-    def test_memory_surface_shows_text_input_menus_and_help(self, scenario: str) -> None:
+    def test_memory_surface_shows_text_input_menus_and_help(
+        self, harness: TerminalEngineHarness, scenario: str
+    ) -> None:
         """Rendering with fixture fonts keeps text, menus and help inside the surface."""
-        self.run_scenario(scenario)
+        self.run_scenario(harness, scenario)
 
-    def test_output_wait_preserves_partial_and_coalesced_prompt(self) -> None:
+    def test_output_wait_preserves_partial_and_coalesced_prompt(
+        self, harness: TerminalEngineHarness
+    ) -> None:
         """Output waits retain a prompt prefix and a complete queued prompt."""
-        self.run_scenario("prompt-stream")
+        self.run_scenario(harness, "prompt-stream")
 
-    def test_host_bash_keeps_line_editing_completion_and_history(self) -> None:
+    def test_host_bash_keeps_line_editing_completion_and_history(
+        self, harness: TerminalEngineHarness
+    ) -> None:
         """The host Bash, started through the terminal PTY, honors phone editing keys."""
-        self.run_scenario("bash")
+        self.run_scenario(harness, "bash")

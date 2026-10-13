@@ -129,104 +129,100 @@ class BridgeProcess:
         self.status = -9
 
 
-class BridgeFixture:
-    """Prepare adapter inputs and control the bridge-process boundary without a phone."""
+BRIDGE_SESSION_ID = "a" * 64
 
-    session_id = "a" * 64
 
-    def runtime(
-        self,
-        transport: str = "none",
-    ) -> dict[str, Any]:
-        """Return the complete adapter input for one bridge acknowledgement case."""
-        return {
-            **runtime_identity(),
-            "transport": transport,
-            "assets": {
-                "fdl1": "assets/fdl1.bin",
-                "pinmap": "assets/pinmap.bin",
-                "keymap": "assets/keymap.bin",
+def bridge_runtime(transport: str = "none") -> dict[str, Any]:
+    """Return the complete adapter input for one bridge acknowledgement case."""
+    return {
+        **runtime_identity(),
+        "transport": transport,
+        "assets": {
+            "fdl1": "assets/fdl1.bin",
+            "pinmap": "assets/pinmap.bin",
+            "keymap": "assets/keymap.bin",
+        },
+        "host_tools": {
+            "loader": "host/spd_dump",
+            "bridge": "host/libc_server",
+            "keyboard": "host/fplinux-usb-keyboard",
+        },
+        "adapter": adapter_data(),
+        "image": "image/ramboot.bin",
+        "addresses": {"fdl1": 0x6200, "payload": 0x80100000},
+        "usb": {
+            "bootrom": {"vendor_id": 0x1782, "product_id": 0x4D00, "wait_seconds": 1},
+            "linux_gadget": {
+                "vendor_id": 0x0525,
+                "product_id": 0xA4A6,
+                "wait_seconds": 30,
             },
-            "host_tools": {
-                "loader": "host/spd_dump",
-                "bridge": "host/libc_server",
-                "keyboard": "host/fplinux-usb-keyboard",
-            },
-            "adapter": adapter_data(),
-            "image": "image/ramboot.bin",
-            "addresses": {"fdl1": 0x6200, "payload": 0x80100000},
-            "usb": {
-                "bootrom": {"vendor_id": 0x1782, "product_id": 0x4D00, "wait_seconds": 1},
-                "linux_gadget": {
-                    "vendor_id": 0x0525,
-                    "product_id": 0xA4A6,
-                    "wait_seconds": 30,
-                },
-            },
-        }
+        },
+    }
 
-    def session(self) -> dict[str, str]:
-        """Return the prepared session selected by the current runner invocation."""
-        return {"session_id": self.session_id, "image": str(ROOT / "ramboot.bin")}
 
-    def run_bridge(  # noqa: PLR0913 -- each keyword replaces one external boundary.
-        self,
-        bridge: BridgeProcess,
-        *,
-        transport: str = "none",
-        runtime: dict[str, Any] | None = None,
-        start_bridge: Callable[..., BridgeProcess] | None = None,
-        output: io.StringIO | None = None,
-        bootrom_release_seconds: float | None = 0.0,
-        events: Callable[[str], None] | None = None,
-    ) -> tuple[mock.Mock, mock.Mock, Path]:
-        """Run the adapter through its bridge-process boundary with no phone attached.
+def prepared_session() -> dict[str, str]:
+    """Return the prepared session selected by the current runner invocation."""
+    return {"session_id": BRIDGE_SESSION_ID, "image": str(ROOT / "ramboot.bin")}
 
-        The BootROM node disappears once the adapter has waited
-        ``bootrom_release_seconds``; ``None`` keeps it present.
-        """
-        clock = FakeClock()
 
-        def bootrom_present() -> bool:
-            return bootrom_release_seconds is None or clock.now < bootrom_release_seconds
+def run_bridge(  # noqa: PLR0913 -- each keyword replaces one external boundary.
+    bridge: BridgeProcess,
+    *,
+    transport: str = "none",
+    runtime: dict[str, Any] | None = None,
+    start_bridge: Callable[..., BridgeProcess] | None = None,
+    output: io.StringIO | None = None,
+    bootrom_release_seconds: float | None = 0.0,
+    events: Callable[[str], None] | None = None,
+) -> tuple[mock.Mock, mock.Mock, Path]:
+    """Run the adapter through its bridge-process boundary with no phone attached.
 
-        with tempfile.TemporaryDirectory() as temporary:
-            bundle = Path(temporary)
-            bootrom = mock.Mock(spec=Path)
-            bootrom.exists.side_effect = bootrom_present
-            transport_module = mock.Mock()
-            popen = (
-                mock.Mock(return_value=bridge)
-                if start_bridge is None
-                else mock.Mock(side_effect=start_bridge)
+    The BootROM node disappears once the adapter has waited
+    ``bootrom_release_seconds``; ``None`` keeps it present.
+    """
+    clock = FakeClock()
+
+    def bootrom_present() -> bool:
+        return bootrom_release_seconds is None or clock.now < bootrom_release_seconds
+
+    with tempfile.TemporaryDirectory() as temporary:
+        bundle = Path(temporary)
+        bootrom = mock.Mock(spec=Path)
+        bootrom.exists.side_effect = bootrom_present
+        transport_module = mock.Mock()
+        popen = (
+            mock.Mock(return_value=bridge)
+            if start_bridge is None
+            else mock.Mock(side_effect=start_bridge)
+        )
+        patches: list[contextlib.AbstractContextManager[object]] = [
+            mock.patch.object(ADAPTER, "usb_device_path", return_value=bootrom),
+            mock.patch.object(ADAPTER, "require_usb_device_access"),
+            mock.patch.object(ADAPTER.time, "monotonic", clock.monotonic),
+            mock.patch.object(ADAPTER.time, "sleep", clock.sleep),
+            mock.patch.object(
+                ADAPTER.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess([], 0),
+            ),
+            mock.patch.object(ADAPTER.subprocess, "Popen", popen),
+            mock.patch.object(ADAPTER.shutil, "which", return_value="/usr/bin/stdbuf"),
+            mock.patch.object(
+                ADAPTER.importlib,
+                "import_module",
+                return_value=transport_module,
+            ),
+        ]
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(contextlib.redirect_stdout(output or io.StringIO()))
+            for patch in patches:
+                stack.enter_context(patch)
+            ADAPTER.run(
+                bundle,
+                runtime or bridge_runtime(transport),
+                prepared_session(),
+                expected_device_identity="9" * 64,
+                events=events,
             )
-            patches: list[contextlib.AbstractContextManager[object]] = [
-                mock.patch.object(ADAPTER, "usb_device_path", return_value=bootrom),
-                mock.patch.object(ADAPTER, "require_usb_device_access"),
-                mock.patch.object(ADAPTER.time, "monotonic", clock.monotonic),
-                mock.patch.object(ADAPTER.time, "sleep", clock.sleep),
-                mock.patch.object(
-                    ADAPTER.subprocess,
-                    "run",
-                    return_value=subprocess.CompletedProcess([], 0),
-                ),
-                mock.patch.object(ADAPTER.subprocess, "Popen", popen),
-                mock.patch.object(ADAPTER.shutil, "which", return_value="/usr/bin/stdbuf"),
-                mock.patch.object(
-                    ADAPTER.importlib,
-                    "import_module",
-                    return_value=transport_module,
-                ),
-            ]
-            with contextlib.ExitStack() as stack:
-                stack.enter_context(contextlib.redirect_stdout(output or io.StringIO()))
-                for patch in patches:
-                    stack.enter_context(patch)
-                ADAPTER.run(
-                    bundle,
-                    runtime or self.runtime(transport),
-                    self.session(),
-                    expected_device_identity="9" * 64,
-                    events=events,
-                )
-        return popen, transport_module, bundle
+    return popen, transport_module, bundle

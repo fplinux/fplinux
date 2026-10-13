@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from fplinux_cli.quality.formatting.canonical_json import normalize_json
+
+FIXTURES = Path(__file__).parents[3] / "fixtures/formatting/json"
 
 
 class CanonicalJsonTests:
@@ -33,33 +36,14 @@ class CanonicalJsonTests:
 
     def test_jsonc_comments_move_with_settings(self) -> None:
         """Retain leading and inline comments when independently named keys move."""
-        source = b"""// configuration header
-{
-  "settings": {
-    // Zed setting
-    "zed": 0, // zero
-    /* Alpha setting */
-    "alpha": ["zed", "alpha"], // order matters
-    // object footer
-  },
-  "name": "demo"
-}
-"""
-        expected = b"""// configuration header
-{
-  "name": "demo",
-  "settings": {
-    /* Alpha setting */
-    "alpha": ["zed", "alpha"], // order matters
-    // Zed setting
-    "zed": 0, // zero
-    // object footer
-  }
-}
-"""
+        case = FIXTURES / "settings-comments"
+        source = (case / "input.jsonc.fixture").read_bytes()
+        expected = (case / "expected.jsonc.fixture").read_bytes()
+
         actual = normalize_json("config.jsonc", source)
-        assert (actual) == (expected)
-        assert (normalize_json("config.jsonc", actual)) == (actual)
+
+        assert actual == expected
+        assert normalize_json("config.jsonc", actual) == actual
 
     def test_compact_block_comments_and_escaped_keys_are_preserved(self) -> None:
         """Use parser spans so comments, escapes and large numbers remain exact."""

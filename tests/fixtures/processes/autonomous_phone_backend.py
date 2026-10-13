@@ -119,12 +119,7 @@ def _phone_connection(
             with (record / "reader-commands").open("a") as commands:
                 commands.write(command + "\n")
             if command.startswith("cat "):
-                destination.write(
-                    b"id_bytes=e521\nchip=controlled chip\n"
-                    b"page_main_bytes=2048\noob_bytes=64\npages_per_block=64\n"
-                    b"block_count=1024\nraw_bytes=138412032\ngeometry_source=table\n"
-                    b"feature_a0=00\nfeature_b0=00\nfeature_c0=00\n"
-                )
+                destination.write((bundle / "phone-geometry.txt").read_bytes())
             elif command.startswith("exec dd if=/dev/raw-nand "):
                 saved = Path((bundle / "phone-backup-path").read_text())
                 with saved.open("rb") as source:

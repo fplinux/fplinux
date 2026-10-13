@@ -1,0 +1,6 @@
+/dts-v1/;
+/ {
+	panel {
+		/include/ "fplinux-demo-panel.dtsi"
+	};
+};

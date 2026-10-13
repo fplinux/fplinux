@@ -3,10 +3,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
-if TYPE_CHECKING:
-    from pathlib import Path
+INPUT_FILES = Path(__file__).with_suffix("")
 
 
 def write(root: Path, relative: str, contents: str) -> Path:
@@ -23,25 +22,8 @@ def platform(root: Path, name: str, *, source_lock: str, arch: str) -> Path:
     return write(
         root,
         f"platforms/{name}/platform.toml",
-        f"""[identity]
-vendor = "Example"
-soc = "{name.upper()}"
-aliases = []
-compatible = "example,{name}"
-
-[linux]
-source_lock = "{source_lock}"
-arch = "{arch}"
-cross_compile = "{arch}-linux-gnu-"
-dts_directory = "arch/{arch}/boot/dts"
-platform_identity_header = "arch/{arch}/include/{name}.h"
-patches = []
-appends = []
-
-[[linux.copies]]
-source = "platforms/{name}/common.c"
-destination = "drivers/{name}/common.c"
-""",
+        (INPUT_FILES / "platform.toml.in").read_text(encoding="utf-8")
+        % {"name": name, "name_upper": name.upper(), "source_lock": source_lock, "arch": arch},
     )
 
 
@@ -52,27 +34,6 @@ def target(root: Path, name: str, *, platform_name: str, arch: str = "arm") -> P
     return write(
         root,
         f"targets/{name}/target.toml",
-        f"""platform = "{platform_name}"
-
-[identity]
-brand = "Example"
-product = "{name}"
-hardware_codes = []
-compatible = "example,{name}"
-
-[linux]
-patches = []
-appends = []
-
-[[linux.copies]]
-source = "linux/board.c"
-destination = "drivers/{platform_name}/{name}.c"
-
-[[linux.copies]]
-source = "linux/board.dts"
-destination = "arch/{arch}/boot/dts/{name}.dts"
-
-[microsd]
-linux_patches = []
-""",
+        (INPUT_FILES / "target.toml.in").read_text(encoding="utf-8")
+        % {"name": name, "platform_name": platform_name, "arch": arch},
     )

@@ -12,6 +12,7 @@ from fplinux_cli.common import fail
 from fplinux_cli.manifests.paths import normalize_profile
 from fplinux_cli.quality.formatting.source_formats import (
     is_posix_shell_fragment,
+    is_shell_source_path,
     shell_dialect,
     source_format_kind,
 )
@@ -115,11 +116,13 @@ _KERNEL_IMPLEMENTATION = _MANIFEST_IMPLEMENTATION | frozenset(
     {
         "scripts/fplinux_cli/__init__.py",
         "scripts/fplinux_cli/common.py",
+        "scripts/fplinux_cli/templates.py",
         "scripts/fplinux_cli/build/__init__.py",
         "scripts/fplinux_cli/build/display.py",
         "scripts/fplinux_cli/build/environment.py",
         "scripts/fplinux_cli/build/device_tree.py",
         "scripts/fplinux_cli/build/identity.py",
+        "scripts/fplinux_cli/build/machine-binding.txt.in",
         "scripts/fplinux_cli/build/inputs.py",
         "scripts/fplinux_cli/build/process.py",
         "scripts/fplinux_cli/build/sources.py",
@@ -151,7 +154,7 @@ _KERNEL_IMPLEMENTATION = _MANIFEST_IMPLEMENTATION | frozenset(
 def _is_shell_source(file: WorkspaceFile) -> bool:
     if is_posix_shell_fragment(file.path):
         return True
-    if Path(file.path).suffix not in {"", ".initd", ".sh", ".bashrc"}:
+    if not is_shell_source_path(file.path):
         return False
     first_line = file.contents.splitlines()[:1]
     if not first_line:

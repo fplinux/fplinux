@@ -1,0 +1,3 @@
+include $(objtree)/include/config/auto.conf
+real-obj-y := $(if $(filter y,$(CONFIG_CAMERA_A)),$(obj)/camera_a.o)
+real-obj-y += $(if $(filter y,$(CONFIG_CAMERA_B)),$(obj)/camera_b.o)

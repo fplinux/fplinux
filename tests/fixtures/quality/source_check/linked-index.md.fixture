@@ -1,0 +1,10 @@
+# Index
+
+[first](guide.md#same-heading)
+[second](guide.md#same-heading-1)
+[angle](<guide (copy).md#section>)
+[parentheses](guide%20(copy).md#section)
+[reference][guide-copy]
+[guide-copy]: <guide (copy).md#section>
+[self](#index)
+[external](https://example.invalid/docs)

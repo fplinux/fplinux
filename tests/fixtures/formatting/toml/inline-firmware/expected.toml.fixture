@@ -1,0 +1,5 @@
+[bluetooth]
+firmware = [
+  { source = "first", destination = 'z', size = 0x0F, sha256 = 'aBcD' }, # First record
+  { source = "second", destination = "a", size = 1_000 },
+]

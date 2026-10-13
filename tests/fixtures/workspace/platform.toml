@@ -1,0 +1,9 @@
+[linux]
+source_lock = "linux"
+
+[bootstrap]
+vendor_source_lock = "bootstrap"
+
+[[host.tools]]
+type = "make-archive"
+source_lock = "host"

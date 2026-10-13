@@ -195,7 +195,7 @@ static void write_control_config(const char *directory, const char *config,
  * comes from the engine's +mlook argument. The phone keypad is translated
  * directly by the native input backend to the same game bindings.
  */
-static void write_game_controls(const char *directory)
+void fplinux_quake_write_controls(const char *directory)
 {
 	static const char config[] = "bind \"w\" \"+forward\"\n"
 				     "bind \"s\" \"+back\"\n"
@@ -256,7 +256,7 @@ static void prepare_runtime(char *runtime, size_t runtime_size)
 	if (!found_pak0)
 		die("game data is missing: " FPLINUX_QUAKE_GAME_DATA
 		    "/pak0.pak");
-	write_game_controls(id1);
+	fplinux_quake_write_controls(id1);
 }
 
 static int remove_runtime_entry(const char *path, const struct stat *status,

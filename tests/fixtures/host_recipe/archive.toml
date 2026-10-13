@@ -1,0 +1,14 @@
+type = "make-archive"
+name = "bridge"
+source_lock = "bridge-source"
+cache_name = "bridge.tar.gz"
+archive_prefix = "bridge-{commit}/"
+source_directory = "bridge"
+binary = "bridge"
+link = "static-libusb"
+members = [{ path = "bridge.c", digest_key = "bridge_c_sha256" }]
+copies = [
+  { source = "platforms/demo/local-input.h", destination = "local-input.h" },
+]
+patches = ["platforms/demo/local.patch"]
+self_test = true

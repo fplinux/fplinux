@@ -1,0 +1,7 @@
+[rootfs]
+packages = [
+  # A package
+  "a",
+  # Z package
+  "z",
+]

@@ -96,12 +96,12 @@ def main() -> None:
     shutil.copyfile(
         ROOT / "scripts/fplinux_cli/manifests/identity.py", root / "runner/identity.py"
     )
-    (root / "ram-tool").write_text("#!/bin/sh\nexit 0\n", encoding="ascii")
+    shutil.copyfile(ROOT / "tests/fixtures/processes/successful_bootstrap.sh", root / "ram-tool")
     (root / "ram-tool").chmod(0o755)
     tools = root / "bin"
     tools.mkdir()
     # Buffering is irrelevant for the local, silent RAM-tool process double.
-    (tools / "stdbuf").write_text('#!/bin/sh\nshift 2\nexec "$@"\n', encoding="ascii")
+    shutil.copyfile(ROOT / "tests/fixtures/processes/stdbuf.sh", tools / "stdbuf")
     (tools / "stdbuf").chmod(0o755)
     ssh_fixture = (ROOT / "tests/fixtures/processes/loader_ssh.py").read_text(encoding="utf-8")
     (tools / "ssh").write_text(f"#!{sys.executable}\n{ssh_fixture}", encoding="utf-8")

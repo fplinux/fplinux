@@ -13,7 +13,14 @@ from unittest import mock
 
 import pytest
 
-from tests.small.runtime.adapter_fixtures import ADAPTER, BridgeFixture, BridgeProcess, FakeClock
+from tests.small.runtime.adapter_fixtures import (
+    ADAPTER,
+    BridgeProcess,
+    FakeClock,
+    bridge_runtime,
+    prepared_session,
+    run_bridge,
+)
 
 
 class LoaderArgumentsTests:
@@ -68,7 +75,7 @@ class LoaderArgumentsTests:
         )
 
 
-class LoaderExecutionTests(BridgeFixture):
+class LoaderExecutionTests:
     """The loader result, bridge exit status and BootROM release gate the Linux transition."""
 
     def test_transient_bootrom_node_reaches_loader_without_settle_delay(self) -> None:
@@ -107,7 +114,10 @@ class LoaderExecutionTests(BridgeFixture):
                 ),
             ):
                 ADAPTER.run(
-                    bundle, self.runtime("none"), self.session(), expected_device_identity="9" * 64
+                    bundle,
+                    bridge_runtime("none"),
+                    prepared_session(),
+                    expected_device_identity="9" * 64,
                 )
 
         transport_module.remove_personalized_image.assert_called_once()
@@ -148,7 +158,10 @@ class LoaderExecutionTests(BridgeFixture):
                 ),
             ):
                 ADAPTER.run(
-                    bundle, self.runtime("none"), self.session(), expected_device_identity="9" * 64
+                    bundle,
+                    bridge_runtime("none"),
+                    prepared_session(),
+                    expected_device_identity="9" * 64,
                 )
 
         assert (loader_runs) == (2)
@@ -187,7 +200,10 @@ class LoaderExecutionTests(BridgeFixture):
                 pytest.raises(SystemExit, match="failed after 3 attempts"),
             ):
                 ADAPTER.run(
-                    bundle, self.runtime("none"), self.session(), expected_device_identity="9" * 64
+                    bundle,
+                    bridge_runtime("none"),
+                    prepared_session(),
+                    expected_device_identity="9" * 64,
                 )
 
         assert (loader_runs) == (3)
@@ -242,7 +258,10 @@ class LoaderExecutionTests(BridgeFixture):
                 ),
             ):
                 ADAPTER.run(
-                    bundle, self.runtime("none"), self.session(), expected_device_identity="9" * 64
+                    bundle,
+                    bridge_runtime("none"),
+                    prepared_session(),
+                    expected_device_identity="9" * 64,
                 )
 
         assert (access_calls) == (2)
@@ -275,7 +294,10 @@ class LoaderExecutionTests(BridgeFixture):
                 pytest.raises(SystemExit, match="retry deadline"),
             ):
                 ADAPTER.run(
-                    bundle, self.runtime("none"), self.session(), expected_device_identity="9" * 64
+                    bundle,
+                    bridge_runtime("none"),
+                    prepared_session(),
+                    expected_device_identity="9" * 64,
                 )
 
         loader.assert_called_once()
@@ -305,7 +327,10 @@ class LoaderExecutionTests(BridgeFixture):
                 pytest.raises(SystemExit, match="cancelled"),
             ):
                 ADAPTER.run(
-                    bundle, self.runtime("none"), self.session(), expected_device_identity="9" * 64
+                    bundle,
+                    bridge_runtime("none"),
+                    prepared_session(),
+                    expected_device_identity="9" * 64,
                 )
 
         loader.assert_called_once()
@@ -317,7 +342,7 @@ class LoaderExecutionTests(BridgeFixture):
         signals = (signal.SIGINT, signal.SIGTERM)
         before = {signum: signal.getsignal(signum) for signum in signals}
         try:
-            self.run_bridge(BridgeProcess(0), bootrom_release_seconds=1.0)
+            run_bridge(BridgeProcess(0), bootrom_release_seconds=1.0)
             assert ({signum: signal.getsignal(signum) for signum in signals}) == (before)
         finally:
             for signum, handler in before.items():

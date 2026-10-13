@@ -1,0 +1,16 @@
+name: Report
+description: Tell us
+title: "Report: "
+body:
+  - type: dropdown
+    id: choice
+    attributes:
+      label: Choice
+      description: Choose one
+      options: [second, first]
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        Read this first.

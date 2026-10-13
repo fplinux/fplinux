@@ -1,0 +1,21 @@
+[selection]
+apk_groups = [["z=1", "a=2"], ["b=3"]]
+arch = "x86_64"
+
+[[input]]
+purpose = "container-wheel"
+destination = "wheels/z.whl"
+bytes = 123
+sha256 = "wheel-sha"
+url = "https://example.invalid/z.whl"
+key = "wheel:z"
+
+# APK input
+[[input]]
+arch = "x86_64"
+purpose = "container-apk"
+destination = "apks/a.apk"
+bytes = 456
+sha256 = "apk-sha"
+url = "https://example.invalid/a.apk"
+key = "apk:a"

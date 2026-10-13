@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import re
 import subprocess
-from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
@@ -20,84 +19,94 @@ from fplinux_cli.alpine import (
     rootfs_verify as alpine_rootfs_verify,
 )
 
-from tests.small.alpine import fixtures
+from tests.small.alpine.fixtures import (
+    alpine_source as alpine_source,  # noqa: PLC0414 -- pytest fixture export.
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
+
+    from tests.small.alpine.fixtures import AlpineSourceContext
 
 
-class AlpineRootfsTests(fixtures.AlpineSourceFixture):
+def verified_rootfs(alpine_source: AlpineSourceContext) -> Path:
+    """Create the smallest root tree accepted without optional packages."""
+    root = alpine_source.directory / "verified-rootfs"
+    (root / "etc/init.d").mkdir(parents=True)
+    (root / "etc/runlevels/default").mkdir(parents=True)
+    (root / "etc/runlevels/boot").mkdir(parents=True)
+    (root / "etc/network").mkdir(parents=True)
+    (root / "usr/bin").mkdir(parents=True)
+    (root / "etc/fstab").write_text(
+        "tmpfs\t/tmp\ttmpfs\trw,nosuid,nodev,mode=1777\t0 0\n",
+        encoding="utf-8",
+    )
+    (root / "etc/inittab").write_text("::sysinit:/sbin/openrc sysinit\n", encoding="utf-8")
+    (root / "etc/os-release").write_text("NAME=FPLinux\n", encoding="utf-8")
+    (root / "etc/network/interfaces").write_text(
+        "auto lo\niface lo inet loopback\n", encoding="utf-8"
+    )
+    (root / "etc/init.d/networking").write_text("#!/bin/sh\n", encoding="utf-8")
+    (root / "etc/runlevels/boot/networking").symlink_to("/etc/init.d/networking")
+    (root / "etc/init.d/fplinux-terminal").write_text("#!/bin/sh\n", encoding="utf-8")
+    (root / "etc/init.d/fplinux-brightness").write_text("#!/bin/sh\n", encoding="utf-8")
+    (root / "usr/bin/fplinux-terminal").write_text("terminal\n", encoding="utf-8")
+    (root / "usr/bin/fplinux-brightness").write_text("brightness\n", encoding="utf-8")
+    (root / "usr/libexec/fplinux").mkdir(parents=True)
+    (root / "usr/libexec/fplinux/brightnessd").write_text("brightnessd\n", encoding="utf-8")
+    (root / "etc/runlevels/default/fplinux-terminal").symlink_to("/etc/init.d/fplinux-terminal")
+    (root / "etc/runlevels/default/fplinux-brightness").symlink_to(
+        "/etc/init.d/fplinux-brightness"
+    )
+    (root / "init").symlink_to("/sbin/init")
+    return root
+
+
+def write_world(root: Path, packages: tuple[str, ...]) -> None:
+    """Select the packages installed into one prepared root tree."""
+    (root / "etc/apk").mkdir(parents=True, exist_ok=True)
+    (root / "etc/apk/world").write_text(
+        "\n".join(packages) + "\n",
+        encoding="utf-8",
+    )
+
+
+def fake_apk_owner(owners: dict[str, str]) -> Callable[[Path, str, str], None]:
+    """Fake apk file-ownership answers; paths outside ``owners`` always match."""
+
+    def fake_apk_owner(_root: Path, path: str, package: str) -> None:
+        owner = owners.get(path, package)
+        if owner != package:
+            raise SystemExit(f"unexpected Alpine package owner for {path}: {owner}")
+
+    return fake_apk_owner
+
+
+class AlpineRootfsTests:
     """Protect Alpine rootfs behavior with controlled temporary inputs."""
 
-    def _verified_rootfs(self) -> Path:
-        """Create the smallest root tree accepted without optional packages."""
-        root = Path(self.temporary.name) / "verified-rootfs"
-        (root / "etc/init.d").mkdir(parents=True)
-        (root / "etc/runlevels/default").mkdir(parents=True)
-        (root / "etc/runlevels/boot").mkdir(parents=True)
-        (root / "etc/network").mkdir(parents=True)
-        (root / "usr/bin").mkdir(parents=True)
-        (root / "etc/fstab").write_text(
-            "tmpfs\t/tmp\ttmpfs\trw,nosuid,nodev,mode=1777\t0 0\n",
-            encoding="utf-8",
-        )
-        (root / "etc/inittab").write_text("::sysinit:/sbin/openrc sysinit\n", encoding="utf-8")
-        (root / "etc/os-release").write_text("NAME=FPLinux\n", encoding="utf-8")
-        (root / "etc/network/interfaces").write_text(
-            "auto lo\niface lo inet loopback\n", encoding="utf-8"
-        )
-        (root / "etc/init.d/networking").write_text("#!/bin/sh\n", encoding="utf-8")
-        (root / "etc/runlevels/boot/networking").symlink_to("/etc/init.d/networking")
-        (root / "etc/init.d/fplinux-terminal").write_text("#!/bin/sh\n", encoding="utf-8")
-        (root / "etc/init.d/fplinux-brightness").write_text("#!/bin/sh\n", encoding="utf-8")
-        (root / "usr/bin/fplinux-terminal").write_text("terminal\n", encoding="utf-8")
-        (root / "usr/bin/fplinux-brightness").write_text("brightness\n", encoding="utf-8")
-        (root / "usr/libexec/fplinux").mkdir(parents=True)
-        (root / "usr/libexec/fplinux/brightnessd").write_text("brightnessd\n", encoding="utf-8")
-        (root / "etc/runlevels/default/fplinux-terminal").symlink_to(
-            "/etc/init.d/fplinux-terminal"
-        )
-        (root / "etc/runlevels/default/fplinux-brightness").symlink_to(
-            "/etc/init.d/fplinux-brightness"
-        )
-        (root / "init").symlink_to("/sbin/init")
-        return root
-
-    @staticmethod
-    def _write_world(root: Path, packages: tuple[str, ...]) -> None:
-        """Select the packages installed into one prepared root tree."""
-        (root / "etc/apk").mkdir(parents=True, exist_ok=True)
-        (root / "etc/apk/world").write_text(
-            "\n".join(packages) + "\n",
-            encoding="utf-8",
-        )
-
-    @staticmethod
-    def _fake_apk_owner(owners: dict[str, str]) -> Callable[[Path, str, str], None]:
-        """Fake apk file-ownership answers; paths outside ``owners`` always match."""
-
-        def fake_apk_owner(_root: Path, path: str, package: str) -> None:
-            owner = owners.get(path, package)
-            if owner != package:
-                raise SystemExit(f"unexpected Alpine package owner for {path}: {owner}")
-
-        return fake_apk_owner
-
-    def test_materializing_a_subpackage_copies_the_producer_sources(self) -> None:
+    def test_materializing_a_subpackage_copies_the_producer_sources(
+        self, alpine_source: AlpineSourceContext
+    ) -> None:
         """A child name stages its existing producer instead of requiring a new source tree."""
-        self._write("alpine/aports/fplinux-ncurses/APKBUILD", b"pkgname=fplinux-ncurses\n")
-        self._write("alpine/aports/fplinux-ncurses/adapter.c", b"producer adapter\n")
-        destination = self.root / "stage"
+        alpine_source.write("alpine/aports/fplinux-ncurses/APKBUILD", b"pkgname=fplinux-ncurses\n")
+        alpine_source.write("alpine/aports/fplinux-ncurses/adapter.c", b"producer adapter\n")
+        destination = alpine_source.root / "stage"
 
-        alpine_aports.materialize_aport_sources("fplinux-ncurses-curses", self.root, destination)
+        alpine_aports.materialize_aport_sources(
+            "fplinux-ncurses-curses", alpine_source.root, destination
+        )
 
         assert ((destination / "APKBUILD").read_bytes()) == (b"pkgname=fplinux-ncurses\n")
         assert ((destination / "adapter.c").read_bytes()) == (b"producer adapter\n")
 
-    def test_bundle_absence_check_interprets_mocked_apk_exit_codes(self) -> None:
+    def test_bundle_absence_check_interprets_mocked_apk_exit_codes(
+        self, alpine_source: AlpineSourceContext
+    ) -> None:
         """Map mocked ``apk info --exists`` results to absent and installed outcomes."""
-        root = Path(self.temporary.name) / "rootfs"
-        package = self.packages[1]
+        root = alpine_source.directory / "rootfs"
+        package = alpine_source.packages[1]
         with mock.patch.object(
             subprocess,
             "run",
@@ -123,17 +132,19 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
         ):
             alpine_rootfs_verify._require_bundle_package_absent(root, package)  # noqa: SLF001
 
-    def test_bundle_install_check_interprets_mocked_apk_simulation(self) -> None:
+    def test_bundle_install_check_interprets_mocked_apk_simulation(
+        self, alpine_source: AlpineSourceContext
+    ) -> None:
         """A mocked offline ``apk add --simulate`` result accepts or rejects the bundle APKs."""
-        root = self._verified_rootfs()
+        root = verified_rootfs(alpine_source)
         base = ("fplinux-base", "fplinux-terminal")
-        bundle_apk = self._write("built/fplinux-package-b.apk", b"bundle\n")
+        bundle_apk = alpine_source.write("built/fplinux-package-b.apk", b"bundle\n")
         unresolved = (
             "ERROR: unable to select packages:\n"
             "  so:libexample.so.1 (no such package):\n"
             "    required by: fplinux-package-b-1-r0[so:libexample.so.1]\n"
         )
-        self._write_world(root, base)
+        write_world(root, base)
 
         with (
             mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"),
@@ -156,11 +167,13 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
         assert ("cannot be installed into the rootfs offline") in (str(rejected.value))
         assert ("so:libexample.so.1 (no such package)") in (str(rejected.value))
 
-    def test_brightness_config_has_exact_runtime_bytes_and_is_verified(self) -> None:
+    def test_brightness_config_has_exact_runtime_bytes_and_is_verified(
+        self, alpine_source: AlpineSourceContext
+    ) -> None:
         """Composition writes the target table and rejects changed installed bytes."""
-        root = self._verified_rootfs()
+        root = verified_rootfs(alpine_source)
         packages = ("fplinux-base", "fplinux-terminal")
-        self._write_world(root, packages)
+        write_world(root, packages)
         table = {"backlight": "screen-backlight", "levels": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
         config = root / "etc/fplinux/brightness.conf"
 
@@ -179,11 +192,13 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
                     root, packages, display_brightness=table
                 )
 
-    def test_rootfs_without_brightness_table_has_no_brightness_config(self) -> None:
+    def test_rootfs_without_brightness_table_has_no_brightness_config(
+        self, alpine_source: AlpineSourceContext
+    ) -> None:
         """A headless target does not receive display configuration."""
-        root = self._verified_rootfs()
+        root = verified_rootfs(alpine_source)
         packages = ("fplinux-base", "fplinux-terminal")
-        self._write_world(root, packages)
+        write_world(root, packages)
         alpine_rootfs_files._install_display_brightness(root, None)  # noqa: SLF001
         config = root / "etc/fplinux/brightness.conf"
         assert not (config.exists())
@@ -194,11 +209,13 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
             with pytest.raises(SystemExit, match="without a target table"):
                 alpine_rootfs_verify._verify_alpine_rootfs(root, packages)  # noqa: SLF001
 
-    def test_rootfs_requires_brightness_command_and_startup_service(self) -> None:
+    def test_rootfs_requires_brightness_command_and_startup_service(
+        self, alpine_source: AlpineSourceContext
+    ) -> None:
         """The composed base rootfs must provide the command and its default runlevel."""
-        root = self._verified_rootfs()
+        root = verified_rootfs(alpine_source)
         packages = ("fplinux-base", "fplinux-terminal")
-        self._write_world(root, packages)
+        write_world(root, packages)
         command = root / "usr/bin/fplinux-brightness"
         daemon = root / "usr/libexec/fplinux/brightnessd"
         service = root / "etc/runlevels/default/fplinux-brightness"
@@ -216,27 +233,31 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
             with pytest.raises(SystemExit, match="fplinux-brightness"):
                 alpine_rootfs_verify._verify_alpine_rootfs(root, packages)  # noqa: SLF001
 
-    def test_rootfs_verifier_requires_input_files_only_when_selected(self) -> None:
+    def test_rootfs_verifier_requires_input_files_only_when_selected(
+        self, alpine_source: AlpineSourceContext
+    ) -> None:
         """A gadgetless root accepts no input bridge, while the selected bridge is required."""
-        root = self._verified_rootfs()
+        root = verified_rootfs(alpine_source)
         without_input = ("fplinux-base", "fplinux-terminal")
-        self._write_world(root, without_input)
+        write_world(root, without_input)
         with mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"):
             alpine_rootfs_verify._verify_alpine_rootfs(root, without_input)  # noqa: SLF001
 
         with_input = (*without_input, "fplinux-input")
-        self._write_world(root, with_input)
+        write_world(root, with_input)
         with (
             mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"),
             pytest.raises(SystemExit, match="fplinux-input"),
         ):
             alpine_rootfs_verify._verify_alpine_rootfs(root, with_input)  # noqa: SLF001
 
-    def test_rootfs_verifier_rejects_disabled_boot_networking(self) -> None:
+    def test_rootfs_verifier_rejects_disabled_boot_networking(
+        self, alpine_source: AlpineSourceContext
+    ) -> None:
         """A root lacking network startup must be rejected before publication."""
-        root = self._verified_rootfs()
+        root = verified_rootfs(alpine_source)
         packages = ("fplinux-base", "fplinux-terminal")
-        self._write_world(root, packages)
+        write_world(root, packages)
         with mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"):
             alpine_rootfs_verify._verify_alpine_rootfs(root, packages)  # noqa: SLF001
             (root / "etc/runlevels/boot/networking").unlink()
@@ -251,10 +272,10 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
         ],
     )
     def test_bluetooth_root_requires_project_daemon_and_library_owners(
-        self, path: str, alpine: str
+        self, alpine_source: AlpineSourceContext, path: str, alpine: str
     ) -> None:
         """The selected Bluetooth root rejects stock daemon and GLib replacements."""
-        root = self._verified_rootfs()
+        root = verified_rootfs(alpine_source)
         base = ("fplinux-base", "fplinux-terminal")
         with_bluetooth = (*base, "fplinux-bluetooth")
         replaced = {
@@ -263,25 +284,23 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
         }
         project_owners = {path: project for path, (_, project) in replaced.items()}
 
-        self._write_world(root, base)
+        write_world(root, base)
         alpine_owners = {path: alpine for path, (alpine, _) in replaced.items()}
         with mock.patch.object(
-            alpine_rootfs_verify, "_require_apk_owner", self._fake_apk_owner(alpine_owners)
+            alpine_rootfs_verify, "_require_apk_owner", fake_apk_owner(alpine_owners)
         ):
             alpine_rootfs_verify._verify_alpine_rootfs(root, base)  # noqa: SLF001
 
-        self._write_world(root, with_bluetooth)
+        write_world(root, with_bluetooth)
         owners = {**project_owners, path: alpine}
         with (
-            mock.patch.object(
-                alpine_rootfs_verify, "_require_apk_owner", self._fake_apk_owner(owners)
-            ),
+            mock.patch.object(alpine_rootfs_verify, "_require_apk_owner", fake_apk_owner(owners)),
             pytest.raises(SystemExit, match=f"{re.escape(path)}: {alpine}"),
         ):
             alpine_rootfs_verify._verify_alpine_rootfs(root, with_bluetooth)  # noqa: SLF001
 
         with mock.patch.object(
-            alpine_rootfs_verify, "_require_apk_owner", self._fake_apk_owner(project_owners)
+            alpine_rootfs_verify, "_require_apk_owner", fake_apk_owner(project_owners)
         ):
             alpine_rootfs_verify._verify_alpine_rootfs(root, with_bluetooth)  # noqa: SLF001
 
@@ -294,25 +313,27 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
             pytest.param("libssl3", id="libssl3"),
         ],
     )
-    def test_replaced_package_manager_root_rejects_openssl_leftovers(self, leftover: str) -> None:
+    def test_replaced_package_manager_root_rejects_openssl_leftovers(
+        self, alpine_source: AlpineSourceContext, leftover: str
+    ) -> None:
         """A root without dependent tools must replace the package manager and drop OpenSSL."""
-        root = self._verified_rootfs()
+        root = verified_rootfs(alpine_source)
         base = ("fplinux-base", "fplinux-terminal")
         with_apk_tools = (*base, "fplinux-apk-tools")
         installed: set[str] = {"apk-tools", "libapk", "libcrypto3", "libssl3", "ssl_client"}
-        minirootfs_owner = self._fake_apk_owner({"/sbin/apk": "apk-tools"})
+        minirootfs_owner = fake_apk_owner({"/sbin/apk": "apk-tools"})
 
         def fake_installed(_root: Path, package: str) -> bool:
             return package in installed
 
-        self._write_world(root, base)
+        write_world(root, base)
         with (
             mock.patch.object(alpine_rootfs_verify, "_require_apk_owner", minirootfs_owner),
             mock.patch.object(alpine_rootfs_verify, "_alpine_package_installed", fake_installed),
         ):
             alpine_rootfs_verify._verify_alpine_rootfs(root, base)  # noqa: SLF001
 
-        self._write_world(root, with_apk_tools)
+        write_world(root, with_apk_tools)
         with (
             mock.patch.object(alpine_rootfs_verify, "_require_apk_owner", minirootfs_owner),
             mock.patch.object(alpine_rootfs_verify, "_alpine_package_installed", fake_installed),
@@ -322,9 +343,7 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
 
         installed = {leftover}
         with (
-            mock.patch.object(
-                alpine_rootfs_verify, "_require_apk_owner", self._fake_apk_owner({})
-            ),
+            mock.patch.object(alpine_rootfs_verify, "_require_apk_owner", fake_apk_owner({})),
             mock.patch.object(alpine_rootfs_verify, "_alpine_package_installed", fake_installed),
             pytest.raises(SystemExit, match=f"remains in the rootfs: {leftover}"),
         ):
@@ -332,28 +351,26 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
 
         installed = set()
         with (
-            mock.patch.object(
-                alpine_rootfs_verify, "_require_apk_owner", self._fake_apk_owner({})
-            ),
+            mock.patch.object(alpine_rootfs_verify, "_require_apk_owner", fake_apk_owner({})),
             mock.patch.object(alpine_rootfs_verify, "_alpine_package_installed", fake_installed),
         ):
             alpine_rootfs_verify._verify_alpine_rootfs(root, with_apk_tools)  # noqa: SLF001
 
-    def test_rootfs_accepts_openssl_required_by_selected_wifi(self) -> None:
+    def test_rootfs_accepts_openssl_required_by_selected_wifi(
+        self, alpine_source: AlpineSourceContext
+    ) -> None:
         """An explicit Wi-Fi dependency can coexist with the Mbed TLS package manager."""
-        root = self._verified_rootfs()
+        root = verified_rootfs(alpine_source)
         packages = ("fplinux-base", "fplinux-terminal", "fplinux-apk-tools", "fplinux-wifi")
         installed = {"libcrypto3", "libssl3"}
-        self._write_world(root, packages)
+        write_world(root, packages)
 
         def fake_installed(_root: Path, package: str) -> bool:
             """Fake the APK database for the selected tools' shared libraries."""
             return package in installed
 
         with (
-            mock.patch.object(
-                alpine_rootfs_verify, "_require_apk_owner", self._fake_apk_owner({})
-            ),
+            mock.patch.object(alpine_rootfs_verify, "_require_apk_owner", fake_apk_owner({})),
             mock.patch.object(alpine_rootfs_verify, "_alpine_package_installed", fake_installed),
         ):
             alpine_rootfs_verify._verify_alpine_rootfs(  # noqa: SLF001
@@ -367,22 +384,20 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
         [pytest.param("apk-tools", id="apk-tools"), pytest.param("libapk", id="libapk")],
     )
     def test_rootfs_rejects_replaced_package_manager_with_declared_openssl(
-        self, leftover: str
+        self, alpine_source: AlpineSourceContext, leftover: str
     ) -> None:
         """Declared OpenSSL dependencies never permit the replaced package manager."""
-        root = self._verified_rootfs()
+        root = verified_rootfs(alpine_source)
         packages = ("fplinux-base", "fplinux-terminal", "fplinux-apk-tools", "fplinux-wifi")
         installed = {leftover, "libcrypto3", "libssl3"}
-        self._write_world(root, packages)
+        write_world(root, packages)
 
         def fake_installed(_root: Path, package: str) -> bool:
             """Fake the APK database containing one replaced package-manager component."""
             return package in installed
 
         with (
-            mock.patch.object(
-                alpine_rootfs_verify, "_require_apk_owner", self._fake_apk_owner({})
-            ),
+            mock.patch.object(alpine_rootfs_verify, "_require_apk_owner", fake_apk_owner({})),
             mock.patch.object(alpine_rootfs_verify, "_alpine_package_installed", fake_installed),
             pytest.raises(SystemExit, match=f"remains in the rootfs: {leftover}"),
         ):
@@ -392,21 +407,21 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
                 runtime_packages=("libcrypto3-3.5.9-r0.apk", "libssl3-3.5.9-r0.apk"),
             )
 
-    def test_rootfs_rejects_openssl_library_outside_selected_runtime(self) -> None:
+    def test_rootfs_rejects_openssl_library_outside_selected_runtime(
+        self, alpine_source: AlpineSourceContext
+    ) -> None:
         """Selecting libcrypto does not authorize an unrelated leftover libssl package."""
-        root = self._verified_rootfs()
+        root = verified_rootfs(alpine_source)
         packages = ("fplinux-base", "fplinux-terminal", "fplinux-apk-tools")
         installed = {"libcrypto3", "libssl3"}
-        self._write_world(root, packages)
+        write_world(root, packages)
 
         def fake_installed(_root: Path, package: str) -> bool:
             """Fake the APK database containing one required and one unneeded library."""
             return package in installed
 
         with (
-            mock.patch.object(
-                alpine_rootfs_verify, "_require_apk_owner", self._fake_apk_owner({})
-            ),
+            mock.patch.object(alpine_rootfs_verify, "_require_apk_owner", fake_apk_owner({})),
             mock.patch.object(alpine_rootfs_verify, "_alpine_package_installed", fake_installed),
             pytest.raises(SystemExit, match="remains in the rootfs: libssl3"),
         ):
@@ -414,12 +429,14 @@ class AlpineRootfsTests(fixtures.AlpineSourceFixture):
                 root, packages, runtime_packages=("libcrypto3-3.5.9-r0.apk",)
             )
 
-    def test_persistent_root_requires_orderly_shutdown_services(self) -> None:
+    def test_persistent_root_requires_orderly_shutdown_services(
+        self, alpine_source: AlpineSourceContext
+    ) -> None:
         """A persistent root rejects a shutdown runlevel missing data-safety services."""
-        root = self._verified_rootfs()
+        root = verified_rootfs(alpine_source)
         without_input = ("fplinux-base", "fplinux-terminal")
         microsd_root = (*without_input, "fplinux-microsd-root")
-        self._write_world(root, microsd_root)
+        write_world(root, microsd_root)
         with (
             mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"),
             pytest.raises(SystemExit, match="shutdown runlevel is missing killprocs"),

@@ -16,6 +16,7 @@ OUTPUT = Path("/out")
 
 _CORE_IMPLEMENTATION_SOURCES = (
     "scripts/fplinux_cli/common.py",
+    "scripts/fplinux_cli/templates.py",
     "scripts/fplinux_cli/build/environment.py",
     "scripts/fplinux_cli/build/inputs.py",
     "scripts/fplinux_cli/build/process.py",
@@ -38,6 +39,7 @@ _KERNEL_IMPLEMENTATION_SOURCES = (
     "scripts/fplinux_cli/build/display.py",
     "scripts/fplinux_cli/build/device_tree.py",
     "scripts/fplinux_cli/build/identity.py",
+    "scripts/fplinux_cli/build/machine-binding.txt.in",
     "scripts/fplinux_cli/build/kernel/prepare.py",
     "scripts/fplinux_cli/build/kernel/configuration.py",
     "scripts/fplinux_cli/build/kernel/compile.py",
@@ -149,6 +151,8 @@ def selected_build_sources(target_config: dict[str, Any]) -> tuple[str, ...]:
         )
         if target_config["fit"]["kind"] == "sha256":
             sources.add("scripts/fplinux_cli/build/storage/sd.py")
+            sources.add("scripts/fplinux_cli/build/storage/genimage.cfg.in")
     if target_config["fit"]["kind"] == "sha256":
         sources.add("scripts/fplinux_cli/build/storage/fit.py")
+        sources.add("scripts/fplinux_cli/build/storage/linux.its.in")
     return tuple(sorted(sources))

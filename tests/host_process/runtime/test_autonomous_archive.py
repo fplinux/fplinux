@@ -93,6 +93,9 @@ def autonomous_archive(saved_dump_archive: PortableArchive) -> AutonomousArchive
             "\n" + (ROOT / "tests/fixtures/processes/autonomous_phone_backend.py").read_text()
         )
     (root / "phone-backup-path").write_text(str(archive.dump), encoding="utf-8")
+    shutil.copyfile(
+        ROOT / "tests/fixtures/nand_geometry/autonomous.txt", root / "phone-geometry.txt"
+    )
     archive.manifest["nand"]["raw_device"] = "/dev/raw-nand"
     (root / "device-data-manifest.json").write_text(json.dumps(archive.manifest), encoding="utf-8")
     return AutonomousArchive(archive)

@@ -1,0 +1,25 @@
+release = "3.24.0"
+arch = "armv7"
+
+[runtime]
+packages = ["z.apk", "a.apk"]
+
+[runtime.additions]
+a = ["a.apk"]
+z = ["z.apk", "a.apk"]
+
+[sysroot]
+packages = ["z.apk", "a.apk"]
+
+# A record
+[[package]]
+repository = "community"
+file = "a.apk"
+sha256 = "a-sha"
+bytes = 1
+
+[[package]]
+repository = "main"
+file = "z.apk"
+sha256 = "z-sha"
+bytes = 2

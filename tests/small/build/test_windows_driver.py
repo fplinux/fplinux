@@ -7,15 +7,12 @@ import os
 import shutil
 import subprocess
 import sys
-from typing import TYPE_CHECKING
+from pathlib import Path
 from unittest import mock
 
 import pytest
 from fplinux_cli.build import windows_driver
 from fplinux_cli.build.windows_driver import _build_driver, _extract_redist
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def test_relocated_driver_build_recipe_runs_without_the_project_package(tmp_path: Path) -> None:
@@ -89,3 +86,5 @@ def test_native_embedder_receives_explicit_epoch_without_changing_host_environme
     assert len(embedded) == 1
     assert embedded[0].kwargs["env"]["SOURCE_DATE_EPOCH"] == "1234567890"
     assert os.environ["SOURCE_DATE_EPOCH"] == "987654321"
+    expected = Path(__file__).with_name("fixtures") / "windows-driver-config.h.fixture"
+    assert (source / "config.h").read_bytes() == expected.read_bytes()

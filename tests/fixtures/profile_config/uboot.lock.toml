@@ -1,0 +1,7 @@
+version = "2026.07"
+repository = "https://example.invalid/u-boot"
+tag = "v2026.07"
+commit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+archive_url = "https://example.invalid/u-boot.tar.bz2"
+archive_sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+license = "GPL-2.0-only"

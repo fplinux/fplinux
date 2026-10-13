@@ -1,0 +1,10 @@
+[kernel]
+version = "6.0"
+url = "https://example.invalid/linux.tar.xz"
+sha256 = "4444444444444444444444444444444444444444444444444444444444444444"
+[support]
+archive_url = "https://example.invalid/support.tar.gz"
+archive_sha256 = "5555555555555555555555555555555555555555555555555555555555555555"
+[host]
+archive_url = "https://example.invalid/host.tar.gz"
+archive_sha256 = "6666666666666666666666666666666666666666666666666666666666666666"

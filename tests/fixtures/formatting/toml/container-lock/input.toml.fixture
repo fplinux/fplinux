@@ -1,0 +1,9 @@
+[oci]
+platform = "linux/amd64"
+repository = "local/image"
+
+[kern]
+binary_sha256 = "binary-hash"
+version = "1"
+archive_sha256 = "archive-hash"
+archive_url = "https://example.invalid/runtime"

@@ -25,19 +25,18 @@ from fplinux_cli.environment.install_wheels import install_wheels
 
 from tests.small.dependencies.snapshot_fixtures import selected_checkout
 
+_FIXTURES = Path(__file__).parents[2] / "fixtures/environment/offline"
+
 
 def _environment_checkout(root: Path) -> None:
     """Declare small source, npm and APK inputs without installing their contents."""
     source_bytes = b"tool source\n"
     npm_bytes = b"npm package\n"
     apk_bytes = b"signed package fixture\n"
-    (root / ".kernignore").write_text("**\n!Containerfile\n!inputs/**\n")
+    (root / ".kernignore").write_bytes((_FIXTURES / ".kernignore.fixture").read_bytes())
     source_digest = hashlib.sha256(source_bytes).hexdigest()
     (root / "Containerfile").write_text(
-        f"ARG TOOL_SHA256={source_digest}\n"
-        "RUN apk add --no-cache tool=1.0-r0\n"
-        'RUN curl --output /tmp/tool "https://example.invalid/tool.tar.gz"; '
-        "printf '%s  %s\\n' \"${TOOL_SHA256}\" /tmp/tool | sha256sum -c -\n"
+        (_FIXTURES / "Containerfile.in").read_text().format(sha256=source_digest)
     )
     image_content = root / "scripts/fplinux_cli/environment/image_content.py"
     image_content.parent.mkdir(parents=True)
@@ -63,20 +62,11 @@ def _environment_checkout(root: Path) -> None:
     patch = root / "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch"
     patch.parent.mkdir(parents=True)
     patch.write_text("terminal patch fixture\n")
-    (root / "container.lock.toml").write_text(
-        '[kern]\narchive_url = "https://example.invalid/kern.tar.gz"\n'
-        f'archive_sha256 = "{"a" * 64}"\n'
-        '[oci]\nbase_rootfs_url = "https://example.invalid/base.tar.gz"\n'
-        f'base_rootfs_sha256 = "{"b" * 64}"\n'
-    )
+    (root / "container.lock.toml").write_bytes((_FIXTURES / "container.lock.toml").read_bytes())
     (root / "environment.lock.toml").write_text(
-        '[selection]\narch = "x86_64"\napk_groups = [["tool=1.0-r0"]]\n'
-        '\n[[input]]\nkey = "environment:package"\n'
-        'url = "https://example.invalid/main/x86_64/tool-1.0-r0.apk"\n'
-        f'sha256 = "{hashlib.sha256(apk_bytes).hexdigest()}"\n'
-        f"bytes = {len(apk_bytes)}\n"
-        'destination = "downloads/environment/apk/main/x86_64/tool-1.0-r0.apk"\n'
-        'purpose = "container-package"\narch = "x86_64"\n'
+        (_FIXTURES / "environment.lock.toml.in.fixture")
+        .read_text()
+        .format(sha256=hashlib.sha256(apk_bytes).hexdigest(), size=len(apk_bytes))
     )
     npm_key = hashlib.sha256(b"https://example.invalid/example-1.0.0.tgz").hexdigest()[:16]
     files = {
@@ -161,7 +151,7 @@ class OfflineEnvironmentContextTests:
             root = parent / "checkout"
             root.mkdir()
             _environment_checkout(root)
-            metadata = b"Metadata-Version: 2.1\nName: dtschema\nVersion: 2026.9\n"
+            metadata = (_FIXTURES / "METADATA").read_bytes()
             stream = io.BytesIO()
             with zipfile.ZipFile(stream, "w") as wheel:
                 wheel.writestr(zipfile.ZipInfo("dtschema-2026.9.dist-info/METADATA"), metadata)
@@ -169,13 +159,9 @@ class OfflineEnvironmentContextTests:
             lock = root / "environment.lock.toml"
             with lock.open("a") as output:
                 output.write(
-                    '\n[[input]]\nkey = "container:dtschema"\n'
-                    'url = "https://example.invalid/dtschema-2026.9-py3-none-any.whl"\n'
-                    f'sha256 = "{hashlib.sha256(contents).hexdigest()}"\n'
-                    f"bytes = {len(contents)}\n"
-                    'destination = "downloads/environment/dtschema/'
-                    'dtschema-2026.9-py3-none-any.whl"\n'
-                    'purpose = "container-source"\narch = "x86_64"\n'
+                    (_FIXTURES / "dtschema-wheel.toml.in.fixture")
+                    .read_text()
+                    .format(sha256=hashlib.sha256(contents).hexdigest(), size=len(contents))
                 )
             wheel_path = (
                 root / ".cache/downloads/environment/dtschema/dtschema-2026.9-py3-none-any.whl"

@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-2.0-only
+[maps]
+keymap_path = 'keys.bin'
+pinmap_path = "pins.bin"
+license = "NOASSERTION"
+cache_name = "maps.7z"
+sha256 = "map-sha"
+url = "https://example.invalid/maps"
+
+# RAM loader
+[fdl1]
+path = "stage.bin"
+license = "Unlicense"
+# Pinned loader
+sha256 = "loader-sha"
+cache_name = "stage.bin"
+url = "https://example.invalid/stage"

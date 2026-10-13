@@ -12,8 +12,9 @@ import sys
 import tempfile
 import time
 from contextlib import ExitStack, suppress
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest import mock
 
 import pytest
@@ -29,42 +30,22 @@ from tests.ssh_transport_support import create_ready_session
 SSH_FIXTURES = ROOT / "tests" / "fixtures" / "ssh_transport"
 
 # Reader reports for the two fitted chips, in the kernel's key=value format.
-GEOMETRY_128_OOB = (
-    "id_bytes=a1b1\nchip=demo-128\npage_main_bytes=2048\noob_bytes=128\n"
-    "pages_per_block=64\nblock_count=1024\nraw_bytes=142606336\ngeometry_source=table\n"
-    "feature_a0=0x00000000\nfeature_b0=0x00000000\nfeature_c0=0x00000000\n"
-)
-GEOMETRY_64_OOB = (
-    "id_bytes=e521\nchip=demo-64\npage_main_bytes=2048\noob_bytes=64\n"
-    "pages_per_block=64\nblock_count=1024\nraw_bytes=138412032\ngeometry_source=table\n"
-    "feature_a0=0x00000000\nfeature_b0=0x00000010\nfeature_c0=0x00000000\n"
-)
+GEOMETRY_FIXTURES = ROOT / "tests/fixtures/nand_geometry"
+GEOMETRY_128_OOB = (GEOMETRY_FIXTURES / "demo-128.txt").read_text(encoding="utf-8")
+GEOMETRY_64_OOB = (GEOMETRY_FIXTURES / "demo-64.txt").read_text(encoding="utf-8")
 
 
-class NandBackupSshStreamTests:
-    """Exercise the real SSH process boundary with a controlled local ssh executable."""
+@dataclass(frozen=True)
+class NandSshContext:
+    """A controlled session and SSH executable within one disposable directory."""
 
-    @pytest.fixture(autouse=True)
-    def _prepare_case(self) -> Iterator[None]:
-        """Create one valid session and a fake SSH executable per test."""
-        with ExitStack() as cleanup:
-            self.temporary = tempfile.TemporaryDirectory()
-            cleanup.enter_context(self.temporary)
-            reporting_root = mock.patch(
-                "fplinux_cli.reporting.run.ROOT", Path(self.temporary.name)
-            )
-            cleanup.enter_context(reporting_root)
-            self.root = Path(self.temporary.name) / "runtime"
-            self.root.mkdir(mode=0o700)
-            self.session = create_ready_session(self.root)
-            self.tools = Path(self.temporary.name) / "bin"
-            self.tools.mkdir()
-            self.ssh = self.tools / "ssh"
-            shutil.copyfile(SSH_FIXTURES / "nand_ssh.sh", self.ssh)
-            self.ssh.chmod(0o755)
-            yield
+    directory: Path
+    root: Path
+    session: dict[str, Any]
+    tools: Path
 
-    def _stream(self, mode: str, destination: Path, *, timeout: float) -> None:
+    def stream(self, mode: str, destination: Path, *, timeout: float) -> None:
+        """Execute the real stream transport with the fake SSH process."""
         with (
             destination.open("w+b") as stream,
             mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
@@ -77,33 +58,61 @@ class NandBackupSshStreamTests:
                 self.session, "exec dd if=/dev/nand", stream, timeout=timeout
             )
 
-    def test_success_stream_keeps_ssh_stderr_out_of_the_binary_destination(self) -> None:
-        """Real child stdout goes straight to the file while stderr remains diagnostic-only."""
-        destination = Path(self.temporary.name) / "nand.raw"
 
-        self._stream("success", destination, timeout=2)
+@pytest.fixture
+def nand_ssh_case() -> Iterator[NandSshContext]:
+    """Remove the runtime keys and restore the reporter root after every test."""
+    with ExitStack() as cleanup:
+        temporary = cleanup.enter_context(tempfile.TemporaryDirectory())
+        directory = Path(temporary)
+        cleanup.enter_context(mock.patch("fplinux_cli.reporting.run.ROOT", directory))
+        root = directory / "runtime"
+        root.mkdir(mode=0o700)
+        session = create_ready_session(root)
+        tools = directory / "bin"
+        tools.mkdir()
+        ssh = tools / "ssh"
+        shutil.copyfile(SSH_FIXTURES / "nand_ssh.sh", ssh)
+        ssh.chmod(0o755)
+        yield NandSshContext(directory, root, session, tools)
+
+
+class NandBackupSshStreamTests:
+    """Exercise the real SSH process boundary with a controlled local ssh executable."""
+
+    def test_success_stream_keeps_ssh_stderr_out_of_the_binary_destination(
+        self, nand_ssh_case: NandSshContext
+    ) -> None:
+        """Real child stdout goes straight to the file while stderr remains diagnostic-only."""
+        destination = nand_ssh_case.directory / "nand.raw"
+
+        nand_ssh_case.stream("success", destination, timeout=2)
 
         assert (destination.read_bytes()) == (b"raw-page-bytes")
 
-    def test_nonzero_ssh_exit_reports_the_remote_diagnostic(self) -> None:
+    def test_nonzero_ssh_exit_reports_the_remote_diagnostic(
+        self, nand_ssh_case: NandSshContext
+    ) -> None:
         """A failed remote reader gives its exit status and stderr to the caller."""
-        destination = Path(self.temporary.name) / "nand.raw"
+        destination = nand_ssh_case.directory / "nand.raw"
 
         with pytest.raises(SystemExit, match="exit status 8: NAND read failed"):
-            self._stream("nonzero", destination, timeout=2)
+            nand_ssh_case.stream("nonzero", destination, timeout=2)
 
         assert (destination.read_bytes()) == (b"partial")
 
-    def test_short_remote_stream_preserves_an_existing_backup(self) -> None:
+    def test_short_remote_stream_preserves_an_existing_backup(
+        self, nand_ssh_case: NandSshContext
+    ) -> None:
         """A real SSH short read is rejected before it can replace the previous image."""
-        destination = Path(self.temporary.name) / "nand.raw"
+        destination = nand_ssh_case.directory / "nand.raw"
         destination.write_bytes(b"previous raw image")
         with (
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
+            mock.patch.object(ssh_transport, "_runtime_root", return_value=nand_ssh_case.root),
             mock.patch.dict(
                 os.environ,
                 {
-                    "PATH": f"{self.tools}:{os.environ['PATH']}",
+                    "PATH": f"{nand_ssh_case.tools}:{os.environ['PATH']}",
                     "FPLINUX_STREAM_MODE": "short",
                     "FPLINUX_GEOMETRY": GEOMETRY_128_OOB,
                 },
@@ -111,7 +120,7 @@ class NandBackupSshStreamTests:
             pytest.raises(SystemExit, match="incomplete raw NAND image"),
         ):
             nand_backup.backup_nand(
-                lambda: (ssh_transport, self.session),
+                lambda: (ssh_transport, nand_ssh_case.session),
                 destination,
                 target="nokia-ta1618",
                 raw_device="/dev/ums9117-nand-raw",
@@ -120,20 +129,22 @@ class NandBackupSshStreamTests:
         assert (destination.read_bytes()) == (b"previous raw image")
         assert (list(destination.parent.glob(".nand.raw.*"))) == ([])
 
-    def test_target_backup_streams_only_its_declared_read_device(self) -> None:
+    def test_target_backup_streams_only_its_declared_read_device(
+        self, nand_ssh_case: NandSshContext
+    ) -> None:
         """Target selection reaches the real SSH process with one read of its declared device."""
-        destination = Path(self.temporary.name) / "nokia.raw"
-        commands = Path(self.temporary.name) / "remote-commands"
+        destination = nand_ssh_case.directory / "nokia.raw"
+        commands = nand_ssh_case.directory / "remote-commands"
         with (
             mock.patch(
                 "fplinux_cli.runtime.bundle_session.current_target_ssh_session",
-                return_value=(ssh_transport, self.session),
+                return_value=(ssh_transport, nand_ssh_case.session),
             ) as acquire,
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
+            mock.patch.object(ssh_transport, "_runtime_root", return_value=nand_ssh_case.root),
             mock.patch.dict(
                 os.environ,
                 {
-                    "PATH": f"{self.tools}:{os.environ['PATH']}",
+                    "PATH": f"{nand_ssh_case.tools}:{os.environ['PATH']}",
                     "FPLINUX_STREAM_MODE": "success",
                     "FPLINUX_REMOTE_COMMANDS": str(commands),
                     "FPLINUX_GEOMETRY": GEOMETRY_128_OOB,
@@ -155,20 +166,22 @@ class NandBackupSshStreamTests:
             is not None
         )
 
-    def test_rejected_device_read_cannot_publish_or_replace_an_image(self) -> None:
+    def test_rejected_device_read_cannot_publish_or_replace_an_image(
+        self, nand_ssh_case: NandSshContext
+    ) -> None:
         """A remote reader error leaves an existing INOI backup intact."""
-        destination = Path(self.temporary.name) / "inoi.raw"
+        destination = nand_ssh_case.directory / "inoi.raw"
         destination.write_bytes(b"previous complete image")
         with (
             mock.patch(
                 "fplinux_cli.runtime.bundle_session.current_target_ssh_session",
-                return_value=(ssh_transport, self.session),
+                return_value=(ssh_transport, nand_ssh_case.session),
             ),
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
+            mock.patch.object(ssh_transport, "_runtime_root", return_value=nand_ssh_case.root),
             mock.patch.dict(
                 os.environ,
                 {
-                    "PATH": f"{self.tools}:{os.environ['PATH']}",
+                    "PATH": f"{nand_ssh_case.tools}:{os.environ['PATH']}",
                     "FPLINUX_STREAM_MODE": "nonzero",
                     "FPLINUX_GEOMETRY": GEOMETRY_64_OOB,
                 },
@@ -180,37 +193,41 @@ class NandBackupSshStreamTests:
         assert (destination.read_bytes()) == (b"previous complete image")
         assert (list(destination.parent.glob(".inoi.raw.*"))) == ([])
 
-    def test_timeout_kills_and_reaps_the_isolated_ssh_process_group(self) -> None:
+    def test_timeout_kills_and_reaps_the_isolated_ssh_process_group(
+        self, nand_ssh_case: NandSshContext
+    ) -> None:
         """A stuck transfer terminates within its deadline without leaving its SSH child alive."""
-        destination = Path(self.temporary.name) / "nand.raw"
-        pid_file = Path(self.temporary.name) / "ssh.pid"
+        destination = nand_ssh_case.directory / "nand.raw"
+        pid_file = nand_ssh_case.directory / "ssh.pid"
         with (
             mock.patch.dict(os.environ, {"FPLINUX_STREAM_PID": str(pid_file)}),
             pytest.raises(SystemExit, match=r"timed out after 0.2s"),
         ):
-            self._stream("timeout", destination, timeout=0.2)
+            nand_ssh_case.stream("timeout", destination, timeout=0.2)
 
         process_id = int(pid_file.read_text(encoding="ascii"))
         with pytest.raises(ProcessLookupError):
             os.kill(process_id, 0)
 
-    def test_interrupt_forwards_to_an_isolated_stream_helper_and_reaps_ssh(self) -> None:
+    def test_interrupt_forwards_to_an_isolated_stream_helper_and_reaps_ssh(
+        self, nand_ssh_case: NandSshContext
+    ) -> None:
         """SIGINT stops the SSH child group without delivering a signal to this test runner."""
-        runtime_base = Path(self.temporary.name) / "xdg-runtime"
+        runtime_base = nand_ssh_case.directory / "xdg-runtime"
         runtime_base.mkdir(mode=0o700)
         runtime_root = runtime_base / "fplinux"
         runtime_root.mkdir(mode=0o700)
         session = create_ready_session(runtime_root)
         session_path = Path(session["private_key"]).parent / "session.json"
-        destination = Path(self.temporary.name) / "nand.raw"
-        child_pid = Path(self.temporary.name) / "ssh.pid"
-        helper = Path(self.temporary.name) / "stream-helper.py"
+        destination = nand_ssh_case.directory / "nand.raw"
+        child_pid = nand_ssh_case.directory / "ssh.pid"
+        helper = nand_ssh_case.directory / "stream-helper.py"
         shutil.copyfile(SSH_FIXTURES / "stream_helper.py", helper)
         environment = {
             **os.environ,
             "FPLINUX_STREAM_MODE": "timeout",
             "FPLINUX_STREAM_PID": str(child_pid),
-            "PATH": f"{self.tools}:{os.environ['PATH']}",
+            "PATH": f"{nand_ssh_case.tools}:{os.environ['PATH']}",
             "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONPATH": str(ROOT / "scripts"),
             "XDG_RUNTIME_DIR": str(runtime_base),

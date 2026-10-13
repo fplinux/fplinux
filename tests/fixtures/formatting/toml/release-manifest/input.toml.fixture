@@ -1,0 +1,4 @@
+documents = ["z.md", "a.md"]
+runtime_files = ["z.bin", "a.bin"]
+image = "linux.bin"
+bundle_files = ["z.apk", "a.apk"]

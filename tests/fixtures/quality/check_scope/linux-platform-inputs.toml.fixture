@@ -1,0 +1,8 @@
+[linux]
+patches = ["platforms/demo/kernel/platform.patch"]
+copies = [
+  { source = "platforms/demo/kernel/platform-copy.c", destination = "platform-copy.c" },
+]
+appends = [
+  { source = "platforms/demo/kernel/platform-append", destination = "Makefile" },
+]

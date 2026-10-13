@@ -1,0 +1,6 @@
+DTC_FLAGS := -Wno-unit_address_vs_reg
+include {include}
+.PHONY: all
+all:
+	cpp -nostdinc -undef -D__DTS__ -x assembler-with-cpp -I $(src) $(src)/$(board).dts -o $(objtree)/board.dts
+	dtc $(DTC_FLAGS) -I dts -O dtb -o $(objtree)/board.dtb $(objtree)/board.dts

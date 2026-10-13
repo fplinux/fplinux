@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from fplinux_cli.manifests.identity import (
@@ -11,6 +12,7 @@ from fplinux_cli.manifests.identity import (
     validate_platform_name,
     validate_record_prefix,
 )
+from fplinux_cli.templates import substitute_template
 
 BOOTSTRAP_IDENTITY_HEADER = "generated/fplinux-bootstrap-identity.h"
 BOOT_SCREEN_IDENTITY_BYTES = 32
@@ -145,34 +147,14 @@ def linux_machine_binding(
     binding = linux_machine_binding_path(target_identity, arch=arch).removeprefix(
         "Documentation/devicetree/bindings/"
     )
-    return (
-        f"# {_SPDX_TAG}: (GPL-2.0-only OR BSD-2-Clause)\n"
-        "%YAML 1.2\n"
-        "---\n"
-        f"$id: http://devicetree.org/schemas/{binding}#\n"
-        "$schema: http://devicetree.org/meta-schemas/core.yaml#\n\n"
-        f"title: {display_name} on {platform_name}\n\n"
-        "maintainers:\n"
-        "  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>\n\n"
-        "select:\n"
-        "  properties:\n"
-        "    compatible:\n"
-        "      contains:\n"
-        f"        const: {compatible}\n"
-        "  required:\n"
-        "    - compatible\n\n"
-        "properties:\n"
-        "  $nodename:\n"
-        "    const: '/'\n"
-        "  model:\n"
-        f"    const: {display_name}\n"
-        "  compatible:\n"
-        "    items:\n"
-        f"      - const: {compatible}\n"
-        f"      - const: {fallback}\n\n"
-        "required:\n"
-        "  - model\n"
-        "  - compatible\n\n"
-        "additionalProperties: true\n\n"
-        "...\n"
+    template = Path(__file__).with_name("machine-binding.txt.in").read_text(encoding="ascii")
+    return substitute_template(
+        template,
+        {
+            "BINDING": binding,
+            "DISPLAY_NAME": display_name,
+            "PLATFORM_NAME": platform_name,
+            "COMPATIBLE": compatible,
+            "FALLBACK": fallback,
+        },
     ).encode("ascii")

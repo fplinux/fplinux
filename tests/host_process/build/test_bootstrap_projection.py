@@ -32,12 +32,7 @@ def test_make_consumer_receives_selected_names_mode_and_font(
     }
     (tmp_path / "settings.make").write_bytes(bootstrap_settings(target))
     consumer = tmp_path / "consumer.make"
-    consumer.write_bytes(
-        b"include settings.make\n"
-        b"all:\n"
-        b"\t@printf '%s\\n' '$(NAME)' '$(FPLINUX_BOOTSTRAP_MAP)' "
-        b"'$(FPLINUX_BOOTSTRAP_DTB)' '$(FPLINUX_BOOTSTRAP_MODE)' '$(FPLINUX_BOOT_FONT)'\n"
-    )
+    shutil.copyfile(ROOT / "tests/fixtures/bootstrap_projection/consumer.make", consumer)
     result = run_process(
         ["make", "--no-print-directory", "-f", str(consumer)],
         cwd=tmp_path,
@@ -68,17 +63,7 @@ def test_target_main_passes_selected_geometry_to_the_boot_runtime(
     runtime.mkdir()
     shutil.copy2(ROOT / "platforms/ums9117/bootstrap/boot-main.h", runtime / "boot-main.h")
     stub = tmp_path / "runtime.c"
-    stub.write_text(
-        "#include <inttypes.h>\n#include <stdio.h>\n#include <stdlib.h>\n\n"
-        '#include "ums9117-bootstrap/boot-main.h"\n\n'
-        "void ums9117_boot_main(const struct ums9117_boot_board *board)\n"
-        "{\n"
-        '\tprintf("%" PRIu32 " %" PRIu32 "\\n", board->display_width,\n'
-        "\t       board->display_height);\n"
-        "\texit(0);\n"
-        "}\n",
-        encoding="ascii",
-    )
+    shutil.copyfile(ROOT / "tests/fixtures/bootstrap_projection/runtime.c", stub)
     executable = tmp_path / "geometry"
     run_process(
         [

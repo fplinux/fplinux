@@ -1,0 +1,22 @@
+platform = "%(platform_name)s"
+
+[identity]
+brand = "Example"
+product = "%(name)s"
+hardware_codes = []
+compatible = "example,%(name)s"
+
+[linux]
+patches = []
+appends = []
+
+[[linux.copies]]
+source = "linux/board.c"
+destination = "drivers/%(platform_name)s/%(name)s.c"
+
+[[linux.copies]]
+source = "linux/board.dts"
+destination = "arch/%(arch)s/boot/dts/%(name)s.dts"
+
+[microsd]
+linux_patches = []

@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: GPL-2.0-only
+image @IMAGE@ {
+	hdimage {
+		align = 1M
+		partition-table-type = "mbr"
+		disk-signature = 0x@DISK_SIGNATURE@
+	}
+
+	partition boot {
+		partition-type = 0x0c
+		image = "FPLINUX.vfat"
+		offset = @BOOT_OFFSET@
+		size = @BOOT_SIZE@
+	}
+
+	partition root {
+		partition-type = 0x83
+		image = "@ROOT_FILENAME@"
+		offset = @ROOT_OFFSET@
+		size = @ROOT_SIZE@
+		fill = true
+	}
+}
+
+image FPLINUX.vfat {
+	temporary = true
+	size = @BOOT_SIZE@
+
+	vfat {
+		label = "@BOOT_LABEL@"
+		extraargs = "-F 32 --invariant -i @DISK_SIGNATURE@"
+
+		file @FIT_FILENAME@ {
+			image = "@FIT_FILENAME@"
+		}
+	}
+}

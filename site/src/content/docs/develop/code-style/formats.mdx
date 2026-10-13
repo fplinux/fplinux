@@ -153,3 +153,9 @@ their original formatting.
 
 Supported `.in` templates use the same rules as their rendered format.
 Placeholder text is preserved.
+
+A complete text resource owns its internal whitespace and final newline. Separators used only to join prose sections belong to the document renderer. Do not store leading or trailing blank lines in fragments solely to control the spacing of another document, and do not trim scripts, patches or exact test data through prose-formatting helpers.
+
+Executable shell templates retain their shebang and use the same shell formatter and checker as ordinary scripts. A text template whose placeholders are not valid in the target syntax uses `.txt.in`; check its rendered document through the actual target parser or build tool.
+
+Formatter and parser corpus files may deliberately contain noncanonical input or independent expected bytes. Give those data files a `.fixture` suffix and pass the intended logical source path explicitly in the test. They remain subject to general source-text and license checks, but the source formatter must not rewrite them. Keep short invalid byte sequences inline when their missing newline, encoding or whitespace is the property under test.

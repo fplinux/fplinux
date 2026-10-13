@@ -10,12 +10,11 @@ import json
 import lzma
 import struct
 import tarfile
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from fplinux_cli.artifacts.bundles import CurrentBundle
 
-if TYPE_CHECKING:
-    from pathlib import Path
+ARTIFACT_FILES = Path(__file__).with_suffix("")
 
 
 def newc(entries: list[tuple[str, bytes, int, int, int]]) -> bytes:
@@ -43,10 +42,10 @@ def kernel_with_initramfs(cpio: bytes, compression: str) -> bytes:
     return bytes(header) + section_header + section
 
 
-def optional_apk(
-    metadata: bytes = b"pkgname = optional\npkgver = 1-r0\ndepend = so:libshared.so.1\n",
-) -> bytes:
+def optional_apk(metadata: bytes | None = None) -> bytes:
     """Include an APKv2 signature stream before its control/data tar stream."""
+    if metadata is None:
+        metadata = (ARTIFACT_FILES / "optional.pkginfo").read_bytes()
     streams = []
     for name, data in (
         (".SIGN.RSA.test.pub", b"signature"),
@@ -76,11 +75,7 @@ class FootprintFixture:
     def __init__(self, directory: Path) -> None:
         """Prepare two root packages sharing a library and one hardlinked program."""
         self.directory = directory
-        self.database = (
-            b"P:app-one\nV:1-r0\nD:so:libshared.so.1\nF:bin\nR:one\nR:one-link\n\n"
-            b"P:app-two\nV:1-r0\nD:shared>=1\nF:bin\nR:two\n\n"
-            b"P:shared\nV:1-r0\np:so:libshared.so.1=1\nF:lib\nR:shared.so\n\n"
-        )
+        self.database = (ARTIFACT_FILES / "installed").read_bytes()
 
     def bundle(
         self,

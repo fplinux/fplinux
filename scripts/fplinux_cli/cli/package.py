@@ -14,7 +14,7 @@ from fplinux_cli.alpine.selection import bundle_packages, selected_packages
 from fplinux_cli.cli import bundles as cli_bundles
 from fplinux_cli.cli.autonomous_package import autonomous_payload
 from fplinux_cli.cli.package_docs import offline_documentation
-from fplinux_cli.cli.package_readme import ordinary_readme
+from fplinux_cli.cli.package_readme import append_source_companion, ordinary_readme
 from fplinux_cli.common import (
     ZIP_TIMESTAMP,
     canonical_json_bytes,
@@ -29,13 +29,6 @@ from fplinux_cli.manifests import platforms, releases, targets
 from fplinux_cli.manifests.identity import RUNTIME_IDENTITY_PATH
 from fplinux_cli.runtime import bundle_session as runtime_bundle_session
 from fplinux_cli.workspace import build_inputs as workspaces
-
-CANDIDATE_NOTICE = b"""PHONE-TEST CANDIDATE - DO NOT PUBLISH
-
-This archive is for testing on the target phone only.
-Candidate packaging does not make it release-ready.
-"""
-
 
 SHARED_PACKAGE_FILES = {
     "60-fplinux.rules": "common/60-fplinux.rules",
@@ -378,7 +371,9 @@ def package_target(  # noqa: PLR0913 -- archive host and build selectors remain 
         )
 
     if candidate:
-        files["CANDIDATE-NOTICE.txt"] = CANDIDATE_NOTICE
+        files["CANDIDATE-NOTICE.txt"] = (
+            Path(__file__).with_suffix("") / "CANDIDATE-NOTICE.txt"
+        ).read_bytes()
     collisions = set(files) & set(documentation)
     if collisions:
         fail(f"duplicate documentation archive path: {min(collisions)}")
@@ -410,11 +405,7 @@ def package_target(  # noqa: PLR0913 -- archive host and build selectors remain 
             },
         )
         source_stem = f"{base_stem}-{pairing_digest[:16]}-sources"
-        files["README.txt"] += (
-            "\nMatching source and build material:\n"
-            f"  {source_stem}.zip\n"
-            "Keep it available alongside this archive. Licenses remain included here.\n"
-        ).encode()
+        files["README.txt"] = append_source_companion(files["README.txt"], source_stem)
     checksums = "".join(f"{sha256_bytes(files[name])}  {name}\n" for name in sorted(files))
     files["SHA256SUMS"] = checksums.encode()
     content_digest = payload_digest(files, executables)

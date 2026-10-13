@@ -19,16 +19,14 @@ if TYPE_CHECKING:
 class QuakeInputTests:
     """Observe engine key states without running the game, DRM or evdev devices."""
 
-    executable: Path
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def executable(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         """Link the host harness once for this test group."""
         with c_build_directory(tmp_path_factory, "quake-input") as directory:
-            cls.executable = directory / "quake-input"
+            executable = directory / "quake-input"
             compile_c(
-                cls.executable,
+                executable,
                 [
                     "-std=c11",
                     "-Wall",
@@ -43,15 +41,15 @@ class QuakeInputTests:
                 name="compile Quake input with fake runtime boundaries",
                 check=True,
             )
-            yield
+            yield executable
 
     @pytest.mark.parametrize("orientation", ["portrait", "landscape"], ids=["240x320", "320x240"])
     def test_arrows_follow_display_and_shared_actions_survive_releases_and_focus_reset(
-        self, orientation: str
+        self, executable: Path, orientation: str
     ) -> None:
         """D-pad arrows follow the display; a held action survives another key's release."""
         run_process(
-            [str(self.executable), orientation],
+            [str(executable), orientation],
             name="observe Quake key mapping and held actions",
             timeout=5,
             check=True,

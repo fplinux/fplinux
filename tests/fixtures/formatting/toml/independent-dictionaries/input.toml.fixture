@@ -1,0 +1,7 @@
+[default.extend-words]
+z10 = "ten"
+z2 = "two"
+Zoo = "upper"
+
+[files]
+extend-exclude = ["z*", "a*"]

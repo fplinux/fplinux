@@ -1,0 +1,4 @@
+ARG TOOL_VERSION=2.0
+ARG TOOL_SHA256=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+RUN apk add --no-cache tool=2.0-r0
+RUN curl --output "${archive}" "https://example.invalid/tool-${TOOL_VERSION}.tar.gz"; printf "%s %s" "${TOOL_SHA256}" "${archive}" | sha256sum -c -

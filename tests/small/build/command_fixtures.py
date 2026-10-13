@@ -22,13 +22,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-class CommandBundleFixture:
+class CommandBundleContext:
     """Prepare complete test-owned generations and their signing input."""
 
-    @pytest.fixture(autouse=True)
-    def _command_bundle(self, tmp_path: Path) -> None:
+    def __init__(self, root: Path) -> None:
         """Create a published generation and the signing input it claims."""
-        self.root = tmp_path
+        self.root = root
         self.cache = self.root / ".cache"
         self.output = self.cache / "out"
         self.target_config: dict[str, object] = {}
@@ -45,10 +44,10 @@ class CommandBundleFixture:
         self.signing_key = hashlib.sha256(signing_key.read_bytes()).hexdigest()
         self.snapshot = WorkspaceSnapshot((), "c" * 64)
         publish_image_state(self.cache, ImageState("e" * 64, "a" * 64, "a" * 64))
-        self.bundle_path = self._create_generation("a" * 64)
+        self.bundle_path = self.create_generation("a" * 64)
         self.bundle = publish_current_bundle(self.output, "phone", self.bundle_path)
 
-    def _manifest(
+    def manifest(
         self,
         generation: str,
         path: Path,
@@ -79,7 +78,7 @@ class CommandBundleFixture:
             "target": "phone",
         }
 
-    def _create_generation(
+    def create_generation(
         self,
         generation: str,
         image: bytes = b"ramboot\n",
@@ -111,11 +110,17 @@ class CommandBundleFixture:
         ssh_helper.chmod(0o644)
         (path / BUILD_MANIFEST_NAME).write_bytes(
             canonical_json_bytes(
-                self._manifest(generation, path, profile, runnable=runnable, build_type=build_type)
+                self.manifest(generation, path, profile, runnable=runnable, build_type=build_type)
             )
         )
         return path
 
-    def _clear_current_bundle(self) -> None:
+    def clear_current_bundle(self) -> None:
         """Leave complete generations present while making the current receipt miss."""
         bundle_pointer(self.output, "phone").unlink()
+
+
+@pytest.fixture
+def command_bundle(tmp_path: Path) -> CommandBundleContext:
+    """Supply one case's independently owned published bundle and mutable inputs."""
+    return CommandBundleContext(tmp_path)

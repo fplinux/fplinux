@@ -7,6 +7,7 @@ import contextlib
 import io
 import shutil
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
@@ -24,58 +25,68 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
+@dataclass(frozen=True)
+class TargetCheckout:
+    """A disposable checkout with a writable target directory."""
+
+    root: Path
+    targets: Path
+
+
+@pytest.fixture
+def target_checkout() -> Iterator[TargetCheckout]:
+    """Provide a checkout with the platform inputs and an empty target directory."""
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        platform = root / "platforms/ums9117"
+        (platform / "host").mkdir(parents=True)
+        shutil.copy2(REPOSITORY / "platforms/ums9117/platform.toml", platform)
+        shutil.copy2(REPOSITORY / "platforms/ums9117/host/target_skeleton.py", platform / "host")
+        shutil.copytree(
+            REPOSITORY / "platforms/ums9117/target-template", platform / "target-template"
+        )
+        shutil.copytree(REPOSITORY / "platforms/ums9117/loader", platform / "loader")
+        shutil.copytree(REPOSITORY / "alpine/aports", root / "alpine/aports")
+        shutil.copytree(REPOSITORY / "profiles", root / "profiles")
+        target_directory = root / "targets"
+        target_directory.mkdir()
+        with mock.patch.object(common, "ROOT", root):
+            yield TargetCheckout(root=root, targets=target_directory)
+
+
+def create_target(
+    name: str,
+    *,
+    platform: str | None = None,
+    brand: str = "HAMMER",
+    product: str = "Horizon LTE",
+    compatible: str | None = None,
+) -> str:
+    """Create one target and return what the command printed."""
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        target_new.create_target(
+            name, platform=platform, brand=brand, product=product, compatible=compatible
+        )
+    return output.getvalue()
+
+
+def add_platform(target_checkout: TargetCheckout, name: str) -> Path:
+    """Declare a second platform that has a manifest but no target skeleton module."""
+    platform = target_checkout.root / "platforms" / name
+    platform.mkdir()
+    shutil.copy2(REPOSITORY / "platforms/ums9117/platform.toml", platform)
+    return platform
+
+
 class NewTargetTests:
     """Create skeletons from the real platform template module, manifests and profiles."""
 
-    @pytest.fixture(autouse=True)
-    def target_checkout(self) -> Iterator[None]:
-        """Provide a checkout with the platform inputs and an empty target directory."""
-        with tempfile.TemporaryDirectory() as temporary:
-            self.root = Path(temporary)
-            platform = self.root / "platforms/ums9117"
-            (platform / "host").mkdir(parents=True)
-            shutil.copy2(REPOSITORY / "platforms/ums9117/platform.toml", platform)
-            shutil.copy2(
-                REPOSITORY / "platforms/ums9117/host/target_skeleton.py", platform / "host"
-            )
-            shutil.copytree(
-                REPOSITORY / "platforms/ums9117/target-template", platform / "target-template"
-            )
-            shutil.copytree(REPOSITORY / "platforms/ums9117/loader", platform / "loader")
-            shutil.copytree(REPOSITORY / "alpine/aports", self.root / "alpine/aports")
-            shutil.copytree(REPOSITORY / "profiles", self.root / "profiles")
-            self.targets = self.root / "targets"
-            self.targets.mkdir()
-            with mock.patch.object(common, "ROOT", self.root):
-                yield
-
-    def create(
-        self,
-        name: str,
-        *,
-        platform: str | None = None,
-        brand: str = "HAMMER",
-        product: str = "Horizon LTE",
-        compatible: str | None = None,
-    ) -> str:
-        """Create one target and return what the command printed."""
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            target_new.create_target(
-                name, platform=platform, brand=brand, product=product, compatible=compatible
-            )
-        return output.getvalue()
-
-    def add_platform(self, name: str) -> Path:
-        """Declare a second platform that has a manifest but no target skeleton module."""
-        platform = self.root / "platforms" / name
-        platform.mkdir()
-        shutil.copy2(REPOSITORY / "platforms/ums9117/platform.toml", platform)
-        return platform
-
-    def test_new_target_loads_as_a_headless_ram_only_phone(self) -> None:
+    def test_new_target_loads_as_a_headless_ram_only_phone(
+        self, target_checkout: TargetCheckout
+    ) -> None:
         """The manifest boundary accepts the skeleton with only FDL1, no display and board maps."""
-        printed = self.create("hammer-horizon-lte")
+        printed = create_target("hammer-horizon-lte")
 
         config = targets.load_target("hammer-horizon-lte")
         assert (config["identity"]) == (
@@ -89,7 +100,9 @@ class NewTargetTests:
         )
         assert (config["nand"]) == ({"raw_device": "/dev/ums9117-nand-raw"})
         assert (config["runtime"]["assets"]) == ({"fdl1": "assets/t117_fdl1.bin"})
-        assert not (self.targets / "hammer-horizon-lte/loader/assets.lock.toml").exists()
+        assert not (
+            target_checkout.targets / "hammer-horizon-lte/loader/assets.lock.toml"
+        ).exists()
         assert DISPLAY_KEYS.isdisjoint(config["runtime"]["adapter"])
         assert (config["runtime"]["adapter"]["exec_distance"]) == (0)
         # A new phone can prepare its board maps from a backup without a target parser.
@@ -108,7 +121,7 @@ class NewTargetTests:
             targets.load_target("hammer-horizon-lte", "microsd-uboot")
         release = package.load_release_manifest("hammer-horizon-lte", config)
         assert ("assets/t117_fdl1.bin") in (release["runtime_files"])
-        assert not (self.targets / "hammer-horizon-lte/README.md").exists()
+        assert not (target_checkout.targets / "hammer-horizon-lte/README.md").exists()
 
         lines = printed.splitlines()
         assert (lines[0]) == ("Created headless target targets/hammer-horizon-lte:")
@@ -116,16 +129,18 @@ class NewTargetTests:
             "Next: ./fplinux build hammer-horizon-lte && ./fplinux run hammer-horizon-lte"
         )
         created = sorted(
-            path.relative_to(self.targets / "hammer-horizon-lte").as_posix()
-            for path in (self.targets / "hammer-horizon-lte").rglob("*")
+            path.relative_to(target_checkout.targets / "hammer-horizon-lte").as_posix()
+            for path in (target_checkout.targets / "hammer-horizon-lte").rglob("*")
             if path.is_file()
         )
         assert (sorted(line.strip() for line in lines[1:-1])) == (created)
 
-    def test_new_target_release_readme_identifies_the_phone_and_loader_sequence(self) -> None:
+    def test_new_target_release_readme_identifies_the_phone_and_loader_sequence(
+        self, target_checkout: TargetCheckout
+    ) -> None:
         """Generated instructions identify the skeleton and preserve its loader sequence."""
-        self.create("hammer-horizon-lte")
-        routes = self.root / "site/src/data/phones.json"
+        create_target("hammer-horizon-lte")
+        routes = target_checkout.root / "site/src/data/phones.json"
         routes.parent.mkdir(parents=True)
         routes.write_text("[]\n", encoding="utf-8")
         config = targets.load_target("hammer-horizon-lte")
@@ -145,9 +160,10 @@ class NewTargetTests:
         assert "confirm it on this phone before use" in prose
         assert "Configuration alone does not establish support" in prose
 
+    @pytest.mark.usefixtures("target_checkout")
     def test_new_target_release_carries_every_declared_bundle_apk(self) -> None:
         """The generated release includes exactly the platform and target bundle packages."""
-        self.create("hammer-horizon-lte")
+        create_target("hammer-horizon-lte")
         config = targets.load_target("hammer-horizon-lte")
         platform = platforms.load_platform(config["platform"])
         release = package.load_release_manifest("hammer-horizon-lte", config)
@@ -163,6 +179,7 @@ class NewTargetTests:
         }
         assert (release_apks) == (declared_apks)
 
+    @pytest.mark.usefixtures("target_checkout")
     @pytest.mark.parametrize(
         ("name", "brand", "product", "compatible", "expected"),
         [
@@ -172,21 +189,28 @@ class NewTargetTests:
         ids=["derived", "explicit"],
     )
     def test_compatible_defaults_to_the_public_names_unless_given(
-        self, name: str, brand: str, product: str, compatible: str | None, expected: str
+        self,
+        name: str,
+        brand: str,
+        product: str,
+        compatible: str | None,
+        expected: str,
     ) -> None:
         """A derived compatible folds punctuation; an explicit one is kept verbatim."""
-        self.create(name, brand=brand, product=product, compatible=compatible)
+        create_target(name, brand=brand, product=product, compatible=compatible)
         identity = targets.load_target(name)["identity"]
         assert (identity["compatible"]) == (expected)
 
-    def test_existing_target_directory_is_refused_unchanged(self) -> None:
+    def test_existing_target_directory_is_refused_unchanged(
+        self, target_checkout: TargetCheckout
+    ) -> None:
         """A second creation cannot overwrite or extend an existing target."""
-        existing = self.targets / "hammer-horizon-lte"
+        existing = target_checkout.targets / "hammer-horizon-lte"
         existing.mkdir()
         (existing / "notes.txt").write_text("keep\n", encoding="utf-8")
 
         with pytest.raises(SystemExit, match=r"^fplinux: target hammer-horizon-lte already"):
-            self.create("hammer-horizon-lte")
+            create_target("hammer-horizon-lte")
 
         assert ([path.name for path in existing.iterdir()]) == (["notes.txt"])
         assert ((existing / "notes.txt").read_text(encoding="utf-8")) == ("keep\n")
@@ -216,13 +240,15 @@ class NewTargetTests:
             "hammer/lte",
         ],
     )
-    def test_malformed_target_names_are_refused_before_writing(self, name: str) -> None:
+    def test_malformed_target_names_are_refused_before_writing(
+        self, target_checkout: TargetCheckout, name: str
+    ) -> None:
         """Only lowercase hyphen-separated names reach the target directory."""
         with (
             pytest.raises(SystemExit, match="invalid target name"),
         ):
-            self.create(name)
-        assert (list(self.root.rglob("*hammer*"))) == ([])
+            create_target(name)
+        assert (list(target_checkout.root.rglob("*hammer*"))) == ([])
 
     @pytest.mark.parametrize(
         ("product", "compatible", "message"),
@@ -234,18 +260,20 @@ class NewTargetTests:
         ids=["Horizon  LTE-1", "Horizon LTE-2", "Horizon LTE-3"],
     )
     def test_invalid_identity_leaves_no_target_behind(
-        self, product: str, compatible: str | None, message: str
+        self, target_checkout: TargetCheckout, product: str, compatible: str | None, message: str
     ) -> None:
         """Identity errors are reported, including one found only by the manifest check."""
         with (
             pytest.raises(SystemExit, match=message),
         ):
-            self.create("hammer-horizon-lte", product=product, compatible=compatible)
-        assert (list(self.targets.iterdir())) == ([])
+            create_target("hammer-horizon-lte", product=product, compatible=compatible)
+        assert (list(target_checkout.targets.iterdir())) == ([])
 
-    def test_device_name_must_fit_the_boot_screen_before_writing(self) -> None:
+    def test_device_name_must_fit_the_boot_screen_before_writing(
+        self, target_checkout: TargetCheckout
+    ) -> None:
         """A 31-byte device name is created; one byte more is refused with no target left."""
-        self.create("fits", product="Horizon LTE Extra Long 2")
+        create_target("fits", product="Horizon LTE Extra Long 2")
         display_name = targets.load_target("fits")["identity"]["display_name"]
         assert (display_name) == ("HAMMER Horizon LTE Extra Long 2")
         assert (len(display_name.encode("ascii"))) == (31)
@@ -253,43 +281,51 @@ class NewTargetTests:
         with pytest.raises(
             SystemExit, match=r"^fplinux: bootstrap display name must fit in 31 bytes$"
         ):
-            self.create("too-long", product="Horizon LTE Extra Long 22")
-        assert ([path.name for path in self.targets.iterdir()]) == (["fits"])
+            create_target("too-long", product="Horizon LTE Extra Long 22")
+        assert ([path.name for path in target_checkout.targets.iterdir()]) == (["fits"])
 
-    def test_the_only_platform_is_the_default_and_is_recorded(self) -> None:
+    def test_the_only_platform_is_the_default_and_is_recorded(
+        self, target_checkout: TargetCheckout
+    ) -> None:
         """Without --platform, the one directory holding a platform manifest is selected."""
-        (self.root / "platforms/drafts").mkdir()
-        (self.root / "platforms/README.md").write_text("# Platforms\n", encoding="utf-8")
+        (target_checkout.root / "platforms/drafts").mkdir()
+        (target_checkout.root / "platforms/README.md").write_text(
+            "# Platforms\n", encoding="utf-8"
+        )
 
-        self.create("hammer-horizon-lte")
+        create_target("hammer-horizon-lte")
 
         assert (targets.load_target("hammer-horizon-lte")["platform"]) == ("ums9117")
 
-    def test_several_platforms_require_an_explicit_platform(self) -> None:
+    def test_several_platforms_require_an_explicit_platform(
+        self, target_checkout: TargetCheckout
+    ) -> None:
         """An omitted platform is refused when two exist; the named one is then recorded."""
-        self.add_platform("other")
+        add_platform(target_checkout, "other")
 
         with pytest.raises(
             SystemExit, match=r"^fplinux: choose the platform with --platform: other, ums9117$"
         ):
-            self.create("hammer-horizon-lte")
-        assert (list(self.targets.iterdir())) == ([])
+            create_target("hammer-horizon-lte")
+        assert (list(target_checkout.targets.iterdir())) == ([])
 
-        self.create("hammer-horizon-lte", platform="ums9117")
+        create_target("hammer-horizon-lte", platform="ums9117")
         assert (targets.load_target("hammer-horizon-lte")["platform"]) == ("ums9117")
 
     @pytest.mark.parametrize("platform", ["missing", "drafts"], ids=["missing", "drafts"])
-    def test_unknown_platforms_are_refused_before_writing(self, platform: str) -> None:
+    def test_unknown_platforms_are_refused_before_writing(
+        self, target_checkout: TargetCheckout, platform: str
+    ) -> None:
         """A missing platform and a directory without a platform manifest are both unknown."""
-        (self.root / "platforms/drafts").mkdir()
+        (target_checkout.root / "platforms/drafts").mkdir()
         with (
             pytest.raises(
                 SystemExit,
                 match=f"^fplinux: unknown platform: {platform}; available platforms: ums9117$",
             ),
         ):
-            self.create("hammer-horizon-lte", platform=platform)
-        assert (list(self.targets.iterdir())) == ([])
+            create_target("hammer-horizon-lte", platform=platform)
+        assert (list(target_checkout.targets.iterdir())) == ([])
 
     @pytest.mark.parametrize(
         ("module", "message"),
@@ -300,15 +336,15 @@ class NewTargetTests:
         ids=["absent", "incomplete"],
     )
     def test_platform_without_a_usable_skeleton_module_is_refused_before_writing(
-        self, module: str | None, message: str
+        self, target_checkout: TargetCheckout, module: str | None, message: str
     ) -> None:
         """A platform must supply its template through the expected module functions."""
-        platform = self.add_platform("other")
+        platform = add_platform(target_checkout, "other")
         if module is not None:
             (platform / "host").mkdir()
             (platform / "host/target_skeleton.py").write_text(module, encoding="utf-8")
         with (
             pytest.raises(SystemExit, match=message),
         ):
-            self.create("hammer-horizon-lte", platform="other")
-        assert (list(self.targets.iterdir())) == ([])
+            create_target("hammer-horizon-lte", platform="other")
+        assert (list(target_checkout.targets.iterdir())) == ([])

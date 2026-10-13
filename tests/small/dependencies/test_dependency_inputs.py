@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import base64
 import json
+import shutil
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,143 +24,80 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
-class DependencyInputTests:
-    """Keep downloads bound to their original checksum and consumer cache path."""
+@dataclass(frozen=True)
+class DependencyCheckout:
+    """Write controlled external declarations in one temporary checkout."""
 
-    @pytest.fixture(autouse=True)
-    def prepare_checkout(self) -> Iterator[None]:
-        """Prepare a synthetic checkout with literal external declarations."""
-        temporary = tempfile.TemporaryDirectory()
-        with temporary:
-            self.root = Path(temporary.name)
-            self._write(
-                "container.lock.toml",
-                '[kern]\nversion = "1.0.0"\n'
-                'archive_url = "https://example.invalid/kern.tar.gz"\n'
-                f'archive_sha256 = "{"a" * 64}"\n'
-                f'binary_sha256 = "{"b" * 64}"\n'
-                '[oci]\nbase_rootfs_url = "https://example.invalid/base.tar.gz"\n'
-                f'base_rootfs_sha256 = "{"c" * 64}"\n',
-            )
-            self._write(
-                "Containerfile",
-                "ARG TOOL_VERSION=2.0\n"
-                f"ARG TOOL_SHA256={'d' * 64}\n"
-                "RUN apk add --no-cache tool=2.0-r0\n"
-                'RUN curl --output "${archive}" '
-                '"https://example.invalid/tool-${TOOL_VERSION}.tar.gz"; '
-                'printf "%s %s" "${TOOL_SHA256}" "${archive}" | sha256sum -c -\n',
-            )
-            self._write(
-                "environment.lock.toml",
-                '[selection]\narch = "x86_64"\napk_groups = [["tool=2.0-r0"]]\n'
-                '[[input]]\nkey = "environment:tool"\n'
-                'url = "https://example.invalid/tool-2.0-r0.apk"\n'
-                f'sha256 = "{"e" * 64}"\nbytes = 12\n'
-                'destination = "downloads/environment/apk/main/x86_64/tool-2.0-r0.apk"\n'
-                'purpose = "container-package"\narch = "x86_64"\n',
-            )
-            self._write(
-                "package-lock.json",
-                json.dumps(
-                    {
-                        "packages": {
-                            "": {"devDependencies": {"tool": "3.0.0"}},
-                            "node_modules/tool": {
-                                "version": "3.0.0",
-                                "resolved": "https://example.invalid/npm/tool-3.0.0.tgz",
-                                "integrity": "sha512-"
-                                + base64.b64encode(bytes.fromhex("11" * 64)).decode(),
-                            },
-                        },
-                    }
-                ),
-            )
-            self._write(
-                "alpine.lock.toml",
-                'release = "3.24.2"\nbranch = "v3.24"\narch = "armv7"\n'
-                'triplet = "armv7-alpine-linux-musleabihf"\n'
-                '[repositories]\nmain = "https://example.invalid/main/armv7"\n'
-                'community = "https://example.invalid/community/armv7"\n'
-                '[minirootfs]\nurl = "https://example.invalid/target.tar.gz"\n'
-                f'sha256 = "{"2" * 64}"\nbytes = 2\n'
-                '[runtime]\npackages = ["runtime-1-r0.apk"]\n[runtime.additions]\n'
-                '[sysroot]\npackages = ["runtime-1-r0.apk"]\n'
-                '[[package]]\nrepository = "main"\nfile = "runtime-1-r0.apk"\n'
-                f'sha256 = "{"3" * 64}"\nbytes = 3\n',
-            )
-            self._write(
-                "sources.lock.toml",
-                '[kernel]\nversion = "6.0"\nurl = "https://example.invalid/linux.tar.xz"\n'
-                f'sha256 = "{"4" * 64}"\n'
-                '[support]\narchive_url = "https://example.invalid/support.tar.gz"\n'
-                f'archive_sha256 = "{"5" * 64}"\n'
-                '[host]\narchive_url = "https://example.invalid/host.tar.gz"\n'
-                f'archive_sha256 = "{"6" * 64}"\n',
-            )
-            self._write(
-                "platforms/test-platform/platform.toml",
-                "[rootfs]\npackages = []\n[bundle]\npackages = []\n"
-                '[linux]\nsource_lock = "kernel"\n'
-                '[bootstrap]\nvendor_source_lock = "support"\n'
-                'vendor_cache_name = "support.tar.gz"\n'
-                '[[host.tools]]\ntype = "make-archive"\nname = "loader"\n'
-                'source_lock = "host"\ncache_name = "host.tar.gz"\n'
-                'archive_prefix = "host/"\nmembers = []\n',
-            )
-            self._write(
-                "targets/test-phone/target.toml",
-                'platform = "test-platform"\n[rootfs]\npackages = []\n[bundle]\npackages = []\n',
-            )
-            self._write(
-                "profiles/default/profile.toml",
-                '[rootfs]\npackages = []\n[bootstrap]\nkind = "linux"\n[uboot]\nkind = "none"\n',
-            )
-            self._write(
-                "platforms/test-platform/loader/assets.lock.toml",
-                "[fdl1]\n"
-                'url = "https://example.invalid/loader.bin"\n'
-                f'sha256 = "{"7" * 64}"\ncache_name = "loader.bin"\nlicense = "MIT"\n'
-                'path = "loader.bin"\n'
-                '[maps]\nurl = "https://example.invalid/maps.7z"\n'
-                f'sha256 = "{"8" * 64}"\ncache_name = "maps.7z"\nlicense = "MIT"\n'
-                'pinmap_path = "pinmap.bin"\nkeymap_path = "keymap.bin"\n',
-            )
-            for package in (
-                "fplinux-base",
-                "fplinux-bash",
-                "fplinux-busybox",
-                "fplinux-ncurses",
-                "fplinux-openrc",
-                "fplinux-readline",
-                "fplinux-terminal",
-                "fplinux-input",
-                "fplinux-libdrm",
-                "fplinux-libtsm",
-                "fplinux-libudev",
-                "fplinux-libxkbcommon",
-            ):
-                self._write(
-                    f"alpine/aports/{package}/APKBUILD",
-                    f'pkgname={package}\npkgver=1.0.1\npkgrel=0\narch="armv7"\n',
-                )
-            yield
+    root: Path
 
-    def _write(self, name: str, text: str) -> None:
+    def write(self, name: str, text: str) -> None:
+        """Write a scenario declaration inside the owned checkout."""
         path = self.root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
 
-    def test_downloads_retain_native_checksums_and_consumer_destinations(self) -> None:
-        """A SHA-512 source stays exact without claiming an unmeasured SHA-256."""
-        self._write(
-            "alpine/aports/fplinux-libtsm/APKBUILD",
-            "pkgname=fplinux-libtsm\npkgver=1.2.3\narch=armv7\n"
-            "_series=${pkgver%.*}\n"
-            'source="renamed.tar.gz::https://example.invalid/$_series/source-$pkgver.tar.gz"\n'
-            f'sha512sums="{"8" * 128}  renamed.tar.gz"\n',
+
+_FIXTURES = Path(__file__).parents[2] / "fixtures/dependencies"
+
+
+@pytest.fixture
+def dependency_checkout() -> Iterator[DependencyCheckout]:
+    """Prepare a synthetic checkout with literal external declarations."""
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        shutil.copytree(_FIXTURES / "checkout", root, dirs_exist_ok=True)
+        (root / "Containerfile.fixture").rename(root / "Containerfile")
+        (root / "sources.lock.toml.fixture").rename(root / "sources.lock.toml")
+        checkout = DependencyCheckout(root)
+        checkout.write(
+            "package-lock.json",
+            json.dumps(
+                {
+                    "packages": {
+                        "": {"devDependencies": {"tool": "3.0.0"}},
+                        "node_modules/tool": {
+                            "version": "3.0.0",
+                            "resolved": "https://example.invalid/npm/tool-3.0.0.tgz",
+                            "integrity": "sha512-"
+                            + base64.b64encode(bytes.fromhex("11" * 64)).decode(),
+                        },
+                    },
+                }
+            ),
         )
-        inputs, _ = dependency_selection(self.root)
+        for package in (
+            "fplinux-base",
+            "fplinux-bash",
+            "fplinux-busybox",
+            "fplinux-ncurses",
+            "fplinux-openrc",
+            "fplinux-readline",
+            "fplinux-terminal",
+            "fplinux-input",
+            "fplinux-libdrm",
+            "fplinux-libtsm",
+            "fplinux-libudev",
+            "fplinux-libxkbcommon",
+        ):
+            checkout.write(
+                f"alpine/aports/{package}/APKBUILD",
+                f'pkgname={package}\npkgver=1.0.1\npkgrel=0\narch="armv7"\n',
+            )
+        yield checkout
+
+
+class DependencyInputTests:
+    """Keep downloads bound to their original checksum and consumer cache path."""
+
+    def test_downloads_retain_native_checksums_and_consumer_destinations(
+        self, dependency_checkout: DependencyCheckout
+    ) -> None:
+        """A SHA-512 source stays exact without claiming an unmeasured SHA-256."""
+        dependency_checkout.write(
+            "alpine/aports/fplinux-libtsm/APKBUILD",
+            (_FIXTURES / "native-source.APKBUILD.fixture").read_text(),
+        )
+        inputs, _ = dependency_selection(dependency_checkout.root)
         actual = {record.key: record for record in inputs}
         aport = actual["aport:fplinux-libtsm:renamed.tar.gz"]
         assert (aport.url) == ("https://example.invalid/1.2/source-1.2.3.tar.gz")
@@ -173,16 +112,15 @@ class DependencyInputTests:
         )
         assert (actual["asset:test-phone:fdl1"].destination) == ("downloads/loader.bin")
 
-    def test_source_loop_expands_each_pinned_patch_in_order(self) -> None:
+    def test_source_loop_expands_each_pinned_patch_in_order(
+        self, dependency_checkout: DependencyCheckout
+    ) -> None:
         """Patch declarations in a literal loop remain separate exact downloads."""
-        self._write(
+        dependency_checkout.write(
             "alpine/aports/fplinux-bash/APKBUILD",
-            'pkgname=fplinux-bash\npkgver=1.0\narch=armv7\nsource=""\n'
-            "for _patch in 001 002; do\n"
-            '  source="$source https://example.invalid/patch-$_patch"\ndone\n'
-            f'sha512sums="{"a" * 128} patch-001\n{"b" * 128} patch-002"\n',
+            (_FIXTURES / "source-loop.APKBUILD.fixture").read_text(),
         )
-        _, actual = dependency_selection(self.root)
+        _, actual = dependency_selection(dependency_checkout.root)
         apports = actual["aports"]
         assert isinstance(apports, dict), "context must contain aport declarations"
         assert (apports["fplinux-bash"]["sources"]) == (
@@ -200,10 +138,12 @@ class DependencyInputTests:
             ]
         )
 
-    def test_context_ignores_comments_key_order_and_unrelated_driver_bytes(self) -> None:
+    def test_context_ignores_comments_key_order_and_unrelated_driver_bytes(
+        self, dependency_checkout: DependencyCheckout
+    ) -> None:
         """An archive remains compatible with presentation and project source edits."""
-        _, before = dependency_selection(self.root)
-        path = self.root / "sources.lock.toml"
+        _, before = dependency_selection(dependency_checkout.root)
+        path = dependency_checkout.root / "sources.lock.toml"
         path.write_text(
             path.read_text().replace(
                 '[kernel]\nversion = "6.0"\nurl = "https://example.invalid/linux.tar.xz"',
@@ -211,34 +151,36 @@ class DependencyInputTests:
                 'version = "6.0"',
             )
         )
-        self._write("platforms/test-platform/linux/driver.c", "int changed;\n")
-        self._write(
+        dependency_checkout.write("platforms/test-platform/linux/driver.c", "int changed;\n")
+        dependency_checkout.write(
             "alpine/aports/fplinux-unused/APKBUILD",
             'source="https://example.invalid/unused-unpinned.tar.gz"\n',
         )
-        path = self.root / "alpine/aports/fplinux-base/APKBUILD"
+        path = dependency_checkout.root / "alpine/aports/fplinux-base/APKBUILD"
         path.write_text("# Comment\n" + path.read_text())
-        _, after = dependency_selection(self.root)
+        _, after = dependency_selection(dependency_checkout.root)
         assert (after) == (before)
 
     def test_platform_loader_pin_changes_download_selection_without_losing_board_assets(
-        self,
+        self, dependency_checkout: DependencyCheckout
     ) -> None:
         """Shared loader changes reach the dependency archive alongside board-owned pins."""
-        target = self.root / "targets/test-phone/target.toml"
+        target = dependency_checkout.root / "targets/test-phone/target.toml"
         with target.open("a", encoding="utf-8") as output:
             output.write(
                 "\n[loader_maps]\n"
                 f'pinmap = {{member = "phone/pinmap.bin", sha256 = "{"9" * 64}"}}\n'
                 f'keymap = {{member = "phone/keymap.bin", sha256 = "{"0" * 64}"}}\n'
             )
-        declaration = (self.root / "platforms/test-platform/loader/assets.lock.toml").read_text()
-        before_inputs, before_context = dependency_selection(self.root)
-        self._write(
+        declaration = (
+            dependency_checkout.root / "platforms/test-platform/loader/assets.lock.toml"
+        ).read_text()
+        before_inputs, before_context = dependency_selection(dependency_checkout.root)
+        dependency_checkout.write(
             "platforms/test-platform/loader/assets.lock.toml",
             declaration.replace("7" * 64, "a" * 64),
         )
-        after_inputs, after_context = dependency_selection(self.root)
+        after_inputs, after_context = dependency_selection(dependency_checkout.root)
 
         before = {record.key: record for record in before_inputs}
         after = {record.key: record for record in after_inputs}
@@ -264,45 +206,47 @@ class DependencyInputTests:
         ]
         assert before_context != after_context
 
-    def test_context_tracks_selected_providers_and_source_sequences(self) -> None:
+    def test_context_tracks_selected_providers_and_source_sequences(
+        self, dependency_checkout: DependencyCheckout
+    ) -> None:
         """Provider choice and source application order belong to archive compatibility."""
-        path = self.root / "alpine/aports/fplinux-base/APKBUILD"
+        path = dependency_checkout.root / "alpine/aports/fplinux-base/APKBUILD"
         path.write_text(
             path.read_text() + 'provides="virtual=1"\nsource="first.patch second.patch"\n'
         )
-        _, before = dependency_selection(self.root)
+        _, before = dependency_selection(dependency_checkout.root)
         path.write_text(path.read_text().replace("virtual=1", "virtual=2"))
-        _, after = dependency_selection(self.root)
+        _, after = dependency_selection(dependency_checkout.root)
         assert (after) != (before)
-        _, before = dependency_selection(self.root)
+        _, before = dependency_selection(dependency_checkout.root)
         path.write_text(
             path.read_text().replace("first.patch second.patch", "second.patch first.patch")
         )
-        _, after = dependency_selection(self.root)
+        _, after = dependency_selection(dependency_checkout.root)
         assert (after) != (before)
 
-    def test_environment_inventory_does_not_require_target_sources(self) -> None:
+    def test_environment_inventory_does_not_require_target_sources(
+        self, dependency_checkout: DependencyCheckout
+    ) -> None:
         """Environment setup can enumerate its exact closure independently of boards."""
-        (self.root / "targets/test-phone/target.toml").unlink()
-        records = {record.key: record for record in environment_inputs(self.root)}
+        (dependency_checkout.root / "targets/test-phone/target.toml").unlink()
+        records = {record.key: record for record in environment_inputs(dependency_checkout.root)}
         assert (records["environment:tool"].size) == (12)
         assert (records["container:tool"].url) == ("https://example.invalid/tool-2.0.tar.gz")
         assert (records["npm:node_modules/tool"].checksum) == ("11" * 64)
         assert (records["npm:node_modules/tool"].sha256) is None
 
-    def test_locked_wheel_keeps_its_container_key_and_cache_destination(self) -> None:
+    def test_locked_wheel_keeps_its_container_key_and_cache_destination(
+        self, dependency_checkout: DependencyCheckout
+    ) -> None:
         """Setup and host Python consumers receive the same exact wheel declaration."""
-        lock = self.root / "environment.lock.toml"
+        lock = dependency_checkout.root / "environment.lock.toml"
         with lock.open("a") as output:
-            output.write(
-                '\n[[input]]\nkey = "container:pytest"\n'
-                'url = "https://example.invalid/pytest-1.0-py3-none-any.whl"\n'
-                f'sha256 = "{"9" * 64}"\nbytes = 456\n'
-                'destination = "downloads/environment/pytest/pytest-1.0-py3-none-any.whl"\n'
-                'purpose = "container-source"\narch = "x86_64"\n'
-            )
+            output.write((_FIXTURES / "pytest-wheel.toml.fixture").read_text())
         selected = [
-            record for record in environment_inputs(self.root) if record.key == "container:pytest"
+            record
+            for record in environment_inputs(dependency_checkout.root)
+            if record.key == "container:pytest"
         ]
         assert len(selected) == 1
         wheel = selected[0]
@@ -314,17 +258,17 @@ class DependencyInputTests:
         assert wheel.arch == "x86_64"
 
     def test_site_registry_inputs_are_separate_from_the_environment_closure(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, dependency_checkout: DependencyCheckout, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Snapshots retain both locks while environment setup only selects its root packages."""
-        self._write("package.json", '{"engines":{"node":"24.21.0","npm":"12.2.0"}}\n')
-        self._write(
-            ".github/workflows/pages.yml",
-            "jobs:\n  build:\n    runs-on: ubuntu-24.04\n    steps:\n"
-            '      - with:\n          node-version: "24.21.0"\n'
-            "      - run: npm install --global npm@12.2.0\n",
+        dependency_checkout.write(
+            "package.json", '{"engines":{"node":"24.21.0","npm":"12.2.0"}}\n'
         )
-        self._write(
+        dependency_checkout.write(
+            ".github/workflows/pages.yml",
+            (_FIXTURES / "pages.yml.fixture").read_text(),
+        )
+        dependency_checkout.write(
             "site/package-lock.json",
             json.dumps(
                 {
@@ -340,7 +284,7 @@ class DependencyInputTests:
                 }
             ),
         )
-        monkeypatch.setattr(common, "ROOT", self.root)
+        monkeypatch.setattr(common, "ROOT", dependency_checkout.root)
         snapshot_inputs, context = dependency_cli._checkout_declarations()  # noqa: SLF001
         snapshot = {item.key: item for item in snapshot_inputs}
         root_input = snapshot["npm:node_modules/tool"]
@@ -354,32 +298,36 @@ class DependencyInputTests:
         assert site_input.purpose == "site-npm-package"
         assert site_input.destination.startswith("downloads/site/npm/")
         assert context["site"]["consumer"]["node"] == "24.21.0"
-        environment = environment_inputs(self.root)
+        environment = environment_inputs(dependency_checkout.root)
         assert root_input in environment
         assert site_input not in environment
 
-    def test_missing_or_dynamic_source_checksum_cannot_enter_inventory(self) -> None:
+    def test_missing_or_dynamic_source_checksum_cannot_enter_inventory(
+        self, dependency_checkout: DependencyCheckout
+    ) -> None:
         """Incomplete source declarations fail before an archive can claim completeness."""
-        path = self.root / "alpine/aports/fplinux-libtsm/APKBUILD"
-        self._write(
-            path.relative_to(self.root).as_posix(),
+        path = dependency_checkout.root / "alpine/aports/fplinux-libtsm/APKBUILD"
+        dependency_checkout.write(
+            path.relative_to(dependency_checkout.root).as_posix(),
             'pkgname=fplinux-libtsm\nsource="https://example.invalid/unpinned.tar.gz"\n',
         )
         with pytest.raises(SystemExit, match="external source has no checksum"):
-            dependency_selection(self.root)
-        self._write(
-            path.relative_to(self.root).as_posix(),
+            dependency_selection(dependency_checkout.root)
+        dependency_checkout.write(
+            path.relative_to(dependency_checkout.root).as_posix(),
             'pkgname=fplinux-libtsm\nsource="$(printf https://example.invalid/source)"\n',
         )
         with pytest.raises(SystemExit, match="unsupported command substitution"):
-            dependency_selection(self.root)
+            dependency_selection(dependency_checkout.root)
 
-    def test_changed_environment_selection_rejects_stale_closure(self) -> None:
+    def test_changed_environment_selection_rejects_stale_closure(
+        self, dependency_checkout: DependencyCheckout
+    ) -> None:
         """A changed direct package pin cannot reuse a differently selected closure."""
-        path = self.root / "Containerfile"
+        path = dependency_checkout.root / "Containerfile"
         path.write_text(path.read_text().replace("tool=2.0-r0", "tool=3.0-r0"))
         with pytest.raises(SystemExit, match="selection differs from Containerfile"):
-            environment_inputs(self.root)
+            environment_inputs(dependency_checkout.root)
 
     def test_records_reject_missing_digest_and_non_normalized_destinations(self) -> None:
         """Exact download records cannot describe unpinned bytes or escaping paths."""

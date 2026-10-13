@@ -15,6 +15,7 @@ from fplinux_cli.manifests.identity import IdentityError, validate_target_identi
 from fplinux_cli.manifests.paths import discover_platforms
 from fplinux_cli.manifests.releases import load_release
 from fplinux_cli.manifests.targets import load_target
+from fplinux_cli.templates import substitute_template
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -27,7 +28,6 @@ SKELETON_MODULE = "host/target_skeleton.py"
 NEW_TARGET_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 # A template file ending in this suffix has its placeholders substituted.
 _TEMPLATE_SUFFIX = ".in"
-_PLACEHOLDER = re.compile(r"@([A-Z][A-Z_]*)@")
 
 
 def derived_compatible(brand: str, product: str) -> str:
@@ -41,14 +41,10 @@ def derived_compatible(brand: str, product: str) -> str:
 
 def _substitute(text: str, values: Mapping[str, str]) -> str:
     """Replace every @NAME@ placeholder, refusing names the template does not define."""
-
-    def replacement(match: re.Match[str]) -> str:
-        name = match.group(1)
-        if name not in values:
-            fail(f"target template uses an unknown placeholder: @{name}@")
-        return values[name]
-
-    return _PLACEHOLDER.sub(replacement, text)
+    try:
+        return substitute_template(text, values)
+    except KeyError as error:
+        fail(f"target template uses an unknown placeholder: @{error.args[0]}@")
 
 
 def _render_template(template: Path, values: Mapping[str, str]) -> dict[str, bytes]:

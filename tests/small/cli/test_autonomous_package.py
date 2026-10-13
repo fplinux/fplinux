@@ -21,6 +21,7 @@ from fplinux_cli.artifacts.bundles import publish_current_bundle
 from fplinux_cli.build import linux_host, windows_driver
 from fplinux_cli.build import windows as windows_build
 from fplinux_cli.cli import autonomous_package, bundles, package, package_sources
+from fplinux_cli.cli.package_readme import append_source_companion
 from fplinux_cli.cli.parser import create_parser
 from fplinux_cli.common import canonical_json_bytes
 from fplinux_cli.environment import image_state, images
@@ -318,6 +319,25 @@ def _archive(root: Path) -> tuple[Path, dict[str, bytes], dict[str, int]]:
     return archive, payload, modes
 
 
+@pytest.mark.parametrize("host", ["linux", "windows10"])
+def test_autonomous_readme_preserves_complete_host_instructions_and_source_footer(
+    host: str,
+) -> None:
+    config = {
+        "identity": {"brand": "ACME", "product": "Demo", "hardware_codes": ["D-1"]},
+        "adapter": {"boot_instructions": "Hold the left soft key while connecting USB."},
+        "linux": {"root": {"kind": "initramfs"}},
+    }
+    documents = ROOT / "tests/small/cli/fixtures/package_readme"
+    readme = autonomous_package._readme(config, host=host)  # noqa: SLF001 -- compare the delivered document.
+
+    assert readme == (documents / f"autonomous-initramfs-{host}.txt").read_bytes()
+    with_sources = append_source_companion(
+        readme, "FPLinux-demo-phone-release-autonomous-1234567890abcdef-sources"
+    )
+    assert with_sources == (documents / f"autonomous-initramfs-{host}-sources.txt").read_bytes()
+
+
 @pytest.mark.parametrize(
     "archive_inputs",
     [
@@ -343,6 +363,35 @@ def test_autonomous_zip_preserves_receipts_omits_personal_data_and_is_determinis
     package.package_target(inputs.target, autonomous=True, host=host, candidate=True)
     archive, payload, modes = _archive(inputs.root)
     original = archive.read_bytes()
+    companion = next((inputs.root / ".cache/out/candidates").glob("*-sources.zip"))
+    assert payload["README.txt"].endswith(
+        (
+            "\nMatching source and build material:\n"
+            f"  {companion.name}\n"
+            "Keep it available alongside this archive. Licenses remain included here.\n"
+        ).encode()
+    )
+    with zipfile.ZipFile(companion) as source:
+        source_prefix = source.namelist()[0].partition("/")[0] + "/"
+        source_payload = {
+            name.removeprefix(source_prefix): source.read(name) for name in source.namelist()
+        }
+    assert source_payload["project/source.c"] == b"controlled corresponding source\n"
+    assert json.loads(source_payload["DISTRIBUTION.json"]) == {
+        "archive": archive.name,
+        "archive_sha256": hashlib.sha256(original).hexdigest(),
+    }
+    source_checksums = {
+        relative: digest
+        for digest, relative in (
+            line.split("  ", 1) for line in source_payload["SHA256SUMS"].decode().splitlines()
+        )
+    }
+    assert set(source_checksums) == set(source_payload) - {"SHA256SUMS"}
+    assert all(
+        hashlib.sha256(source_payload[name]).hexdigest() == digest
+        for name, digest in source_checksums.items()
+    )
     build = json.loads(payload["build-manifest.json"])
     runtime = json.loads(payload["runtime-manifest.json"])
     assert build["device_identity"] == "f" * 64

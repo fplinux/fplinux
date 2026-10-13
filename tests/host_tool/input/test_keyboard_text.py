@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -28,16 +28,14 @@ HARNESS = ROOT / "tests/host_tool/input/fplinux-keyboard-text.c"
 class KeyboardTextTests:
     """Compose layouts from temporary data roots with literal layout files."""
 
-    executable: ClassVar[Path]
-
-    @pytest.fixture(scope="class", autouse=True)
+    @pytest.fixture(scope="class")
     @classmethod
-    def _compiled_tools(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    def executable(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         """Compile the host driver once for this test class."""
         with c_build_directory(tmp_path_factory, "keyboard-text") as temporary:
-            cls.executable = temporary / "fplinux-keyboard-text"
+            executable = temporary / "fplinux-keyboard-text"
             compile_c(
-                cls.executable,
+                executable,
                 [
                     "-std=c11",
                     "-Wall",
@@ -51,26 +49,23 @@ class KeyboardTextTests:
                 name="compile shared keyboard text driver",
                 check=True,
             )
-            yield
+            yield executable
 
-    @pytest.fixture(autouse=True)
-    def _case_directory(self, tmp_path: Path) -> None:
-        """Keep each layout directory separate from the compiled driver."""
-        self.work = tmp_path
-
-    def data_root(self, layouts: tuple[str, ...] | None) -> Path:
+    def data_root(self, work: Path, layouts: tuple[str, ...] | None) -> Path:
         """Create a data root whose layouts directory holds empty named files."""
-        root = Path(tempfile.mkdtemp(dir=self.work))
+        root = Path(tempfile.mkdtemp(dir=work))
         if layouts is not None:
             (root / "layouts").mkdir()
             for layout in layouts:
                 (root / "layouts" / layout).write_bytes(b"")
         return root
 
-    def compose(self, mode: str, layouts: tuple[str, ...] | None) -> tuple[int, str, str]:
+    def compose(
+        self, executable: Path, work: Path, mode: str, layouts: tuple[str, ...] | None
+    ) -> tuple[int, str, str]:
         """Run the driver for one data root and return status, stdout and stderr."""
         result = run_process(
-            [str(self.executable), mode, str(self.data_root(layouts))],
+            [str(executable), mode, str(self.data_root(work, layouts))],
             name=f"compose keyboard {mode}",
             timeout=10,
         )
@@ -92,26 +87,30 @@ class KeyboardTextTests:
         ids=["absent", "empty", ".apk.8f2c", "ru", "ua-ru-by", "de_ch1"],
     )
     def test_optional_layouts_follow_us_in_name_order(
-        self, layouts: tuple[str, ...] | None, expected: str
+        self, executable: Path, tmp_path: Path, layouts: tuple[str, ...] | None, expected: str
     ) -> None:
         """Each registered layout takes the next group after US, sorted by name."""
-        assert (self.compose("symbols", layouts)) == ((0, expected, ""))
+        assert (self.compose(executable, tmp_path, "symbols", layouts)) == ((0, expected, ""))
 
     @pytest.mark.parametrize(
         "name",
         ["Ru", "ru(phonetic)", "ru:2", "ru+us", 'ru"', "ru ua"],
         ids=["Ru", "ru-phonetic", "ru-2", "ru+us", "ru", "ru-ua"],
     )
-    def test_layout_names_that_could_change_the_include_are_rejected(self, name: str) -> None:
+    def test_layout_names_that_could_change_the_include_are_rejected(
+        self, executable: Path, tmp_path: Path, name: str
+    ) -> None:
         """Only lowercase letters, digits and '_' reach the XKB include string."""
-        status, output, error = self.compose("symbols", ("ru", name))
+        status, output, error = self.compose(executable, tmp_path, "symbols", ("ru", name))
 
         assert ((status, output)) == ((1, ""))
         assert ("invalid keyboard layout name") in (error)
 
-    def test_a_fourth_optional_layout_is_refused(self) -> None:
+    def test_a_fourth_optional_layout_is_refused(self, executable: Path, tmp_path: Path) -> None:
         """XKB has four groups, so US plus three optional layouts is the limit."""
-        status, output, error = self.compose("symbols", ("by", "de", "ru", "ua"))
+        status, output, error = self.compose(
+            executable, tmp_path, "symbols", ("by", "de", "ru", "ua")
+        )
 
         assert ((status, output)) == ((1, ""))
         assert ("more than 3 optional keyboard layouts are installed") in (error)
@@ -153,10 +152,12 @@ class KeyboardTextTests:
             "embedded-escape",
         ],
     )
-    def test_control_characters_are_not_text(self, text: str, *, printable: bool) -> None:
+    def test_control_characters_are_not_text(
+        self, executable: Path, text: str, *, printable: bool
+    ) -> None:
         """Enter, Backspace, Tab, Escape, DEL and Ctrl combinations insert nothing."""
         result = run_process(
-            [str(self.executable), "printable", text],
+            [str(executable), "printable", text],
             name="classify keyboard text",
             timeout=10,
         )

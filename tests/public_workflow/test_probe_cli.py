@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import shutil
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytest
@@ -16,15 +17,11 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-class ProbeCliTests:
-    """Exercise the real entrypoint in an isolated checkout with no Kern state."""
+@dataclass(frozen=True)
+class ProbeCli:
+    """Own the isolated checkout used by the public probe command."""
 
-    @pytest.fixture(autouse=True)
-    def _prepare_inputs(self, tmp_path: Path) -> None:
-        """Provide one source and no ambient build image or cache."""
-        self.root = tmp_path
-        prepare_cli_checkout(self.root)
-        (self.root / "probe.c").write_text("int main(void) { return 0; }\n")
+    root: Path
 
     def run_probe(self, *arguments: str) -> subprocess.CompletedProcess[str]:
         """Invoke the public command with bounded lifetime."""
@@ -34,6 +31,18 @@ class ProbeCliTests:
             cwd=self.root,
             timeout=10,
         )
+
+
+@pytest.fixture
+def probe_cli(tmp_path: Path) -> ProbeCli:
+    """Provide one source and no ambient build image or cache."""
+    prepare_cli_checkout(tmp_path)
+    (tmp_path / "probe.c").write_text("int main(void) { return 0; }\n")
+    return ProbeCli(tmp_path)
+
+
+class ProbeCliTests:
+    """Exercise the real entrypoint in an isolated checkout with no Kern state."""
 
     @pytest.mark.parametrize(
         "arguments",
@@ -49,14 +58,14 @@ class ProbeCliTests:
         ],
     )
     def test_parser_requires_one_source_and_explicit_output(
-        self, arguments: tuple[str, ...]
+        self, probe_cli: ProbeCli, arguments: tuple[str, ...]
     ) -> None:
         """The command cannot infer output or accept arbitrary compiler flags."""
-        help_result = self.run_probe("--help")
+        help_result = probe_cli.run_probe("--help")
         assert (help_result.returncode) == (0), help_result.stderr
         assert ("SOURCE.c") in (help_result.stdout)
         assert ("--output .cache/tools/NAME") in (help_result.stdout)
-        result = self.run_probe(*arguments)
+        result = probe_cli.run_probe(*arguments)
         assert (result.returncode) == (2), result.stderr
 
     @pytest.mark.parametrize(
@@ -89,15 +98,15 @@ class ProbeCliTests:
         ],
     )
     def test_invalid_paths_are_rejected_before_environment_preparation(
-        self, source: str | None, output: str, message: str
+        self, probe_cli: ProbeCli, source: str | None, output: str, message: str
     ) -> None:
         """Reject outside, unnormalized, missing and non-C inputs without building."""
         if source is None:
-            source = str(self.root / "probe.c")
-        result = self.run_probe(source, "--output", output)
+            source = str(probe_cli.root / "probe.c")
+        result = probe_cli.run_probe(source, "--output", output)
         assert (result.returncode) == (1), result.stderr
         assert (message) in (result.stderr)
-        assert not ((self.root / output).is_file())
+        assert not ((probe_cli.root / output).is_file())
 
     @pytest.mark.parametrize(
         ("source", "output", "message"),
@@ -117,19 +126,21 @@ class ProbeCliTests:
         ],
     )
     def test_symlinks_and_nonregular_outputs_are_refused(
-        self, source: str, output: str, message: str
+        self, probe_cli: ProbeCli, source: str, output: str, message: str
     ) -> None:
         """Neither a source link nor a linked output parent can redirect the command."""
-        tools = self.root / ".cache/tools"
+        tools = probe_cli.root / ".cache/tools"
         tools.mkdir(parents=True)
-        (self.root / "link.c").symlink_to("probe.c")
-        (tools / "link").symlink_to(self.root, target_is_directory=True)
+        (probe_cli.root / "link.c").symlink_to("probe.c")
+        (tools / "link").symlink_to(probe_cli.root, target_is_directory=True)
         (tools / "directory").mkdir()
-        result = self.run_probe(source, "--output", output)
+        result = probe_cli.run_probe(source, "--output", output)
         assert (result.returncode) == (1), result.stderr
         assert (message) in (result.stderr)
 
-    def test_ignored_source_reaches_the_explicit_setup_requirement(self) -> None:
+    def test_ignored_source_reaches_the_explicit_setup_requirement(
+        self, probe_cli: ProbeCli
+    ) -> None:
         """An ignored local probe is accepted, but missing Kern never triggers setup."""
         for relative in (
             "Containerfile",
@@ -140,16 +151,16 @@ class ProbeCliTests:
             "package-lock.json",
             "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",
         ):
-            destination = self.root / relative
+            destination = probe_cli.root / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(ROOT / relative, destination)
-        tools = self.root / ".cache/tools"
+        tools = probe_cli.root / ".cache/tools"
         tools.mkdir(parents=True)
         source = tools / "local.c"
         source.write_text("int main(void) { return 0; }\n")
-        result = self.run_probe(".cache/tools/local.c", "--output", ".cache/tools/local")
+        result = probe_cli.run_probe(".cache/tools/local.c", "--output", ".cache/tools/local")
 
         assert (result.returncode) == (1), result.stderr
         assert ("./fplinux setup") in (result.stderr)
         assert not ((tools / "local").exists())
-        assert not ((self.root / ".cache/kern").exists())
+        assert not ((probe_cli.root / ".cache/kern").exists())

@@ -1,0 +1,19 @@
+#include "before.dtsi"
+&second {
+	alpha = <1>;
+	zeta = <3>;
+#if ENABLED
+	compatible = "example,second";
+	reg = <0x20 4>;
+#endif
+	/include/ "inside.dtsi"
+	child-b {
+		alpha = <1>;
+		zeta = <3>;
+	};
+	child-a { value = <2>; };
+};
+#include "after.dtsi"
+&first {
+	value = <2>;
+};

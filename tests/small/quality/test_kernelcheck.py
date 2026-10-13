@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest import mock
@@ -69,60 +70,21 @@ def run_kconfig_tool(command: list[str]) -> None:
         resolve_initramfs_compression(output / ".config")
 
 
-class KernelAnalyzerWorkIsolationTests:
-    """Check disposable analyzer work while replacing external commands with stubs."""
+@dataclass
+class AnalyzerContext:
+    """Own analyzer inputs while replacing only external command boundaries."""
 
-    target = "test-target"
+    cache: Path
+    source: Path
+    defconfig: Path
+    fragment: Path
+    projected: Path
+    prepared_linux: PreparedLinuxState
+    target_config: dict[str, Any]
+    platform: dict[str, Any]
+    target: str = "test-target"
 
-    @pytest.fixture(autouse=True)
-    def analyzer_context(self) -> Iterator[None]:
-        """Create a small projected Linux context without invoking kernel tools."""
-        with tempfile.TemporaryDirectory() as temporary:
-            self.root = Path(temporary)
-            self.cache = self.root / ".cache"
-            self.source = self.root / "linux"
-            (self.source / "scripts").mkdir(parents=True)
-            (self.source / ".clang-format").write_text("BasedOnStyle: LLVM\n")
-            (self.source / "scripts/checkpatch.pl").write_text("#!/usr/bin/env perl\n")
-            (self.source / "scripts/Makefile.build").write_text(
-                "# Replaced at the command boundary.\n"
-            )
-            self.defconfig = self.root / "defconfig"
-            self.defconfig.write_text("CONFIG_TEST=y\n")
-            self.fragment = self.root / "fragment"
-            self.fragment.write_text("CONFIG_BOARD=y\n")
-            self.projected = self.root / "driver.c"
-            self.projected.write_text("int test_driver;\n")
-            self.prepared_linux = PreparedLinuxState("a" * 64, "b" * 64)
-            self.target_config: dict[str, Any] = {
-                "identity": {
-                    "display_name": "Test target",
-                    "compatible": "test,target",
-                },
-                "linux": {
-                    "dtb": "test-target.dtb",
-                    "patches": [],
-                    "copies": [],
-                    "appends": [],
-                    "root": {"kind": "initramfs"},
-                },
-            }
-            self.platform: dict[str, Any] = {
-                "identity": {"compatible": "test,soc"},
-                "linux": {
-                    "arch": "arm",
-                    "analysis_cross_compile": "arm-linux-gnueabihf-",
-                    "config_script": "scripts/config",
-                    "dtb_output_directory": "arch/arm/boot/dts",
-                    "patches": [],
-                    "copies": [],
-                    "appends": [],
-                    "source_lock": "linux",
-                },
-            }
-            yield
-
-    def _run_check(self, target_config: dict[str, Any], profile: str | None = None) -> None:
+    def run_check(self, target_config: dict[str, Any], profile: str | None = None) -> None:
         """Run one context check with Kconfig, analyzer and validator command stand-ins."""
         with (
             mock.patch.object(kernel_analysis, "CACHE", self.cache),
@@ -173,55 +135,126 @@ class KernelAnalyzerWorkIsolationTests:
         ):
             kernel_runtime.check_contexts(None, profile)
 
-    def _cache_path(self, name: str) -> Path:
+    def cache_path(self, name: str) -> Path:
         """Return one path inside this test's fixed Sparse cache directory."""
         return self.cache / "analysis" / "sparse" / self.target / "builds" / "release" / name
 
-    def test_each_invocation_discards_stale_analyzer_work(self) -> None:
+
+@pytest.fixture
+def analyzer_context() -> Iterator[AnalyzerContext]:
+    """Create a projected Linux context and promptly discard its analyzer work."""
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        source = root / "linux"
+        (source / "scripts").mkdir(parents=True)
+        (source / ".clang-format").write_text("BasedOnStyle: LLVM\n")
+        (source / "scripts/checkpatch.pl").write_text("#!/usr/bin/env perl\n")
+        (source / "scripts/Makefile.build").write_text("# Replaced at the command boundary.\n")
+        defconfig = root / "defconfig"
+        defconfig.write_text("CONFIG_TEST=y\n")
+        fragment = root / "fragment"
+        fragment.write_text("CONFIG_BOARD=y\n")
+        projected = root / "driver.c"
+        projected.write_text("int test_driver;\n")
+        target_config: dict[str, Any] = {
+            "identity": {
+                "display_name": "Test target",
+                "compatible": "test,target",
+            },
+            "linux": {
+                "dtb": "test-target.dtb",
+                "patches": [],
+                "copies": [],
+                "appends": [],
+                "root": {"kind": "initramfs"},
+            },
+        }
+        platform: dict[str, Any] = {
+            "identity": {"compatible": "test,soc"},
+            "linux": {
+                "arch": "arm",
+                "analysis_cross_compile": "arm-linux-gnueabihf-",
+                "config_script": "scripts/config",
+                "dtb_output_directory": "arch/arm/boot/dts",
+                "patches": [],
+                "copies": [],
+                "appends": [],
+                "source_lock": "linux",
+            },
+        }
+        yield AnalyzerContext(
+            cache=root / ".cache",
+            source=source,
+            defconfig=defconfig,
+            fragment=fragment,
+            projected=projected,
+            prepared_linux=PreparedLinuxState("a" * 64, "b" * 64),
+            target_config=target_config,
+            platform=platform,
+        )
+
+
+class KernelAnalyzerWorkIsolationTests:
+    """Check disposable analyzer work while replacing external commands with stubs."""
+
+    def test_each_invocation_discards_stale_analyzer_work(
+        self, analyzer_context: AnalyzerContext
+    ) -> None:
         """A new check cannot inherit object files from an earlier analyzer run."""
-        self._run_check(self.target_config)
-        stale = self._cache_path("work") / "drivers" / "test-a.o"
+        analyzer_context.run_check(analyzer_context.target_config)
+        stale = analyzer_context.cache_path("work") / "drivers" / "test-a.o"
         stale.parent.mkdir(parents=True)
         stale.write_text("stale object\n")
 
-        self._run_check(self.target_config)
+        analyzer_context.run_check(analyzer_context.target_config)
         assert not (stale.exists())
 
-    def test_initramfs_preparation_keeps_compressor_with_modeled_kconfig(self) -> None:
+    def test_initramfs_preparation_keeps_compressor_with_modeled_kconfig(
+        self, analyzer_context: AnalyzerContext
+    ) -> None:
         """A temporary source lets the modeled Kconfig choice retain requested XZ."""
-        self.defconfig.write_text(
+        analyzer_context.defconfig.write_text(
             'CONFIG_TEST=y\nCONFIG_INITRAMFS_SOURCE=""\nCONFIG_INITRAMFS_COMPRESSION_XZ=y\n'
         )
 
-        self._run_check(self.target_config)
+        analyzer_context.run_check(analyzer_context.target_config)
 
-        config = kconfig_values((self._cache_path("work") / ".config").read_text())
+        config = kconfig_values((analyzer_context.cache_path("work") / ".config").read_text())
         assert (config["CONFIG_INITRAMFS_COMPRESSION_XZ"]) == ("y")
         source = Path(config["CONFIG_INITRAMFS_SOURCE"].strip('"'))
         assert source.is_dir()
         assert (list(source.iterdir())) == ([])
 
-    def test_initramfs_analysis_writes_bootargs_for_the_checked_tree(self) -> None:
+    def test_initramfs_analysis_writes_bootargs_for_the_checked_tree(
+        self, analyzer_context: AnalyzerContext
+    ) -> None:
         """The prepared analyzer context carries the RAM-root boot arguments."""
-        self._run_check(self.target_config)
+        analyzer_context.run_check(analyzer_context.target_config)
 
-        root_include = self._cache_path("work") / "include/generated/fplinux/fplinux-root.dtsi"
+        root_include = (
+            analyzer_context.cache_path("work") / "include/generated/fplinux/fplinux-root.dtsi"
+        )
         assert ("init=/init rdinit=/init") in (root_include.read_text())
 
-    def test_profile_actions_reach_configuration_through_modeled_kconfig(self) -> None:
+    def test_profile_actions_reach_configuration_through_modeled_kconfig(
+        self, analyzer_context: AnalyzerContext
+    ) -> None:
         """Configuration preparation applies profile actions through a Kconfig stand-in."""
-        (self.source / "scripts/config").write_text("#!/bin/sh\n")
-        self.defconfig.write_text("CONFIG_TEST=y\nCONFIG_PROFILE_DISABLED=y\n")
+        (analyzer_context.source / "scripts/config").write_text("#!/bin/sh\n")
+        analyzer_context.defconfig.write_text("CONFIG_TEST=y\nCONFIG_PROFILE_DISABLED=y\n")
         linux = {
-            **self.target_config["linux"],
+            **analyzer_context.target_config["linux"],
             "config_enable": ["CONFIG_PROFILE_ENABLED"],
             "config_disable": ["CONFIG_PROFILE_DISABLED"],
         }
 
-        self._run_check({**self.target_config, "linux": linux}, "microsd-uboot")
+        analyzer_context.run_check(
+            {**analyzer_context.target_config, "linux": linux}, "microsd-uboot"
+        )
 
         output = (
-            self.cache / "analysis/sparse/test-target/profiles/microsd-uboot/builds/release/work"
+            analyzer_context.cache
+            / "analysis/sparse/test-target/profiles/microsd-uboot/builds/release/work"
         )
         config = (output / ".config").read_text().splitlines()
         assert ("CONFIG_PROFILE_ENABLED=y") in (config)

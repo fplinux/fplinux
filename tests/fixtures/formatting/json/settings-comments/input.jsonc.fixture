@@ -1,0 +1,11 @@
+// configuration header
+{
+  "settings": {
+    // Zed setting
+    "zed": 0, // zero
+    /* Alpha setting */
+    "alpha": ["zed", "alpha"], // order matters
+    // object footer
+  },
+  "name": "demo"
+}

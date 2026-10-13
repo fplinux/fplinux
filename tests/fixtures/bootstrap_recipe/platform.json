@@ -1,0 +1,48 @@
+{
+  "linux": {
+    "source_lock": "linux"
+  },
+  "bootstrap": {
+    "vendor_source_lock": "vendor",
+    "vendor_cache_name": "vendor.tar.gz",
+    "archive_prefix": "vendor-{commit}/",
+    "source_destination": "bootstrap",
+    "vendor_destination": "vendor",
+    "output_destination": "out",
+    "pack_reloc": "pack_reloc",
+    "safety_target": "fplinux-safety-check",
+    "build_targets": ["clean", "all", "map"],
+    "patches": ["patches/vendor.patch"],
+    "files": ["pack_reloc/Makefile"],
+    "lcd_config_destination": "runtime/lcd_config.h",
+    "kernel_destination": "zImage",
+    "load_address": 2148532224,
+    "payload_limit": 2181038080,
+    "layout": {
+      "ram_base": 2147483648,
+      "ram_size": 67108864,
+      "timer_hz": 1000,
+      "kernel_load": 2181038080,
+      "kernel_entry": 2181038080,
+      "kernel_size": 18874368,
+      "fdt_load": 2212495360,
+      "fdt_size": 65536,
+      "framebuffer": 2213543936,
+      "framebuffer_size": 1048576
+    },
+    "toolchain": "arm-none-eabi",
+    "lto": 0,
+    "shared_copies": [
+      {
+        "source": "bootstrap/fplinux-boot-screen",
+        "destination": "fplinux-boot-screen"
+      }
+    ],
+    "linux_copies": [
+      {
+        "source": "lib/fonts/font_sample.c",
+        "destination": "fplinux-boot-screen/font_sample.c"
+      }
+    ]
+  }
+}

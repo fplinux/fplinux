@@ -1,0 +1,22 @@
+name: Demo
+on:
+  push:
+    branches: [release, main]
+permissions: {}
+jobs:
+  second:
+    needs: first
+    runs-on: ubuntu-latest
+    env:
+      YES: yes
+    steps:
+      - # Caption for this step.
+        name: Second
+        run: echo second
+      - id: action
+        uses: example/action@abc # pinned
+        with:
+          token: "${{ secrets.TOKEN }}"
+  first:
+    runs-on: ubuntu-latest
+    steps: []

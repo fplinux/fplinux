@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+command_root=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+runtime_root=$(CDPATH='' cd -- "$command_root/../../runtime" && pwd)
+exec "$runtime_root/lib/ld-musl-x86_64.so.1" --library-path "$runtime_root/lib" "$runtime_root/bin/@COMMAND@" "$@"

@@ -1,0 +1,11 @@
+id_bytes=e521
+chip=controlled chip
+page_main_bytes=2048
+oob_bytes=64
+pages_per_block=64
+block_count=1024
+raw_bytes=138412032
+geometry_source=table
+feature_a0=00
+feature_b0=00
+feature_c0=00

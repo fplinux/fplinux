@@ -1,0 +1,4 @@
+clean:
+	rm -f bridge
+all:
+	$(CC) -nostdlib -static -o bridge bridge.S
