@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 @pytest.fixture
 def archive_recipe() -> dict[str, Any]:
     """Supply a fresh complete host archive recipe with a local patch closure."""
-    return common.load_toml(ROOT / "tests/fixtures/host_recipe/archive.toml")
+    return common.load_toml(ROOT / "tests/fixtures/host-recipe/archive.toml")
 
 
 class HostRecipeTests:

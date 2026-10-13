@@ -3,7 +3,7 @@ extend-exclude = [
   ".git/",
   ".cache/",
   "node_modules/",
-  "THIRD_PARTY_LICENSES/",
+  "third-party-licenses/",
   "*.bin",
   "*.jpg",
   "*.png",

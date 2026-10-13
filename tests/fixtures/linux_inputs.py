@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-INPUT_FILES = Path(__file__).with_suffix("")
+INPUT_FILES = Path(__file__).with_name("linux-inputs")
 
 
 def write(root: Path, relative: str, contents: str) -> Path:

@@ -50,7 +50,7 @@ REPORT_PINMAP = b"".join(
         (0xFFFFFFFF, 0x0000FFFF),
     )
 )
-REPORT_FIXTURES = ROOT / "tests/fixtures/stock_board_report"
+REPORT_FIXTURES = ROOT / "tests/fixtures/stock-board-report"
 UNPACK_OUTPUT = (REPORT_FIXTURES / "unpack.txt").read_text(encoding="utf-8")
 INIT_OUTPUT = (REPORT_FIXTURES / "lcd-init.txt").read_text(encoding="utf-8")
 

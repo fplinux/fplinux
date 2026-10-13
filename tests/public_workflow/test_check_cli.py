@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from tests.cli_support import prepare_cli_checkout
 from tests.process import run_process
 
 if TYPE_CHECKING:
@@ -149,3 +150,28 @@ class CheckCommandTests:
         result = self.run_check("imaginary")
         assert (result.returncode) != (0)
         assert ("invalid choice: 'imaginary'") in (result.stderr)
+
+    def test_source_rejects_resource_directory_name_before_build_runtime(
+        self, tmp_path: Path
+    ) -> None:
+        """Check the source-wide naming policy through an isolated public checkout."""
+        prepare_cli_checkout(tmp_path)
+        (tmp_path / ".gitignore").write_text(".cache/\n__pycache__/\n", encoding="utf-8")
+        run_process(
+            ["git", "init", "--quiet", str(tmp_path)],
+            name="public source check Git setup",
+            timeout=10,
+        )
+        resource = tmp_path / "resource_names/icon.png"
+        resource.parent.mkdir()
+        resource.write_bytes(b"\x89PNG\x00\xff")
+
+        result = run_process(
+            [str(tmp_path / "fplinux"), "check", "source"],
+            name="public source directory check",
+            timeout=10,
+            cwd=tmp_path,
+        )
+
+        assert result.returncode == 1
+        assert "source directory must use kebab-case: resource_names" in result.stderr

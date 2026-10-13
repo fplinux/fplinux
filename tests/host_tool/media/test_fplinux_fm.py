@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 SOURCE = ROOT / "alpine/aports/fplinux-fm/fplinux-fm.c"
-BOUNDARY = ROOT / "tests/fixtures/fplinux_fm/boundary.c"
+BOUNDARY = ROOT / "tests/fixtures/fplinux-fm/boundary.c"
 
 
 class FPLinuxFMHostToolTests:
@@ -37,7 +37,7 @@ class FPLinuxFMHostToolTests:
                     "-Wextra",
                     "-Werror",
                     "-I",
-                    str(ROOT / "tests/fixtures/fplinux_fm"),
+                    str(ROOT / "tests/fixtures/fplinux-fm"),
                     "-I",
                     str(ROOT / "include/fplinux"),
                     str(SOURCE),

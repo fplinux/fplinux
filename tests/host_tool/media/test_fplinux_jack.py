@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 SOURCE = ROOT / "alpine/aports/fplinux-jack/fplinux-jack.c"
-FIXTURE = ROOT / "tests/fixtures/fplinux_jack"
+FIXTURE = ROOT / "tests/fixtures/fplinux-jack"
 
 
 class FPLinuxJackHostToolTests:

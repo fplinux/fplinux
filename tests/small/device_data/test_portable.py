@@ -143,7 +143,7 @@ def portable_archive(tmp_path: Path) -> Iterator[PortableArchive]:
             "image_sha256": hashlib.sha256(image).hexdigest(),
             "commands": {
                 "unpack": {
-                    "stdout": (ROOT / "tests/fixtures/stock_board_report/maps-only.txt").read_text(
+                    "stdout": (ROOT / "tests/fixtures/stock-board-report/maps-only.txt").read_text(
                         encoding="utf-8"
                     ),
                     "files": {"pinmap.bin": pinmap.hex(), "keymap.bin": keys.hex()},

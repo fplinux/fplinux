@@ -75,7 +75,7 @@ def archive_inputs(
     for relative in (
         "LICENSE",
         "LICENSES/Unlicense.txt",
-        "THIRD_PARTY_LICENSES/musl/COPYRIGHT",
+        "third-party-licenses/musl/COPYRIGHT",
         "common/60-fplinux.rules",
         "common/autonomous.py",
         "common/__init__.py",
@@ -328,7 +328,7 @@ def test_autonomous_readme_preserves_complete_host_instructions_and_source_foote
         "adapter": {"boot_instructions": "Hold the left soft key while connecting USB."},
         "linux": {"root": {"kind": "initramfs"}},
     }
-    documents = ROOT / "tests/small/cli/fixtures/package_readme"
+    documents = ROOT / "tests/small/cli/fixtures/package-readme"
     readme = autonomous_package._readme(config, host=host)  # noqa: SLF001 -- compare the delivered document.
 
     assert readme == (documents / f"autonomous-initramfs-{host}.txt").read_bytes()

@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
     from fplinux_cli.build.kernel import state as linux_state
 
-SOURCE_FILES = Path(__file__).with_suffix("")
+SOURCE_FILES = Path(__file__).with_name("linux-source")
 
 
 @dataclass

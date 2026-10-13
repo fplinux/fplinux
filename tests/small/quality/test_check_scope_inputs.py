@@ -18,7 +18,7 @@ from fplinux_cli.workspace.capture import WorkspaceFile, WorkspaceSnapshot
 
 from tests import ROOT
 
-FIXTURES = ROOT / "tests/fixtures/quality/check_scope"
+FIXTURES = ROOT / "tests/fixtures/quality/check-scope"
 
 
 class CheckScopeTests:

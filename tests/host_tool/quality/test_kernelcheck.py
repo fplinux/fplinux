@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from fplinux_cli.quality.kernel import analysis as kernel_analysis
 
-FIXTURES = Path(__file__).parents[2] / "fixtures/quality/host_tool/analyzer"
+FIXTURES = Path(__file__).parents[2] / "fixtures/quality/host-tool/analyzer"
 
 
 @pytest.fixture

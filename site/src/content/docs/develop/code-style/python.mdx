@@ -14,6 +14,8 @@ does not apply general lint fixes or move imports between runtime, deferred and
 
 ## Interfaces and flow
 
+Use the shared [directory naming rules](/fplinux/develop/code-style/#directory-names): import packages use `snake_case`, while adjacent resource directories use `kebab-case`. Resolve the resource directory by its explicit name when it differs from the module stem.
+
 Group modules by the operation or data they own. Keep CLI dispatch, manifest
 validation, environment setup, build stages and artifact publication distinct.
 The build entry point shows the order of stages; each stage owns its inputs,

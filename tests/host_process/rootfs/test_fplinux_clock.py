@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 CLOCK_TOOL = ROOT / "alpine/aports/fplinux-ssh/fplinux-clock"
-CLOCK_FIXTURES = ROOT / "tests/fixtures/fplinux_clock"
+CLOCK_FIXTURES = ROOT / "tests/fixtures/fplinux-clock"
 
 
 @dataclass(frozen=True)

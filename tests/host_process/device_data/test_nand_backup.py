@@ -30,7 +30,7 @@ from tests.ssh_transport_support import create_ready_session
 SSH_FIXTURES = ROOT / "tests" / "fixtures" / "ssh_transport"
 
 # Reader reports for the two fitted chips, in the kernel's key=value format.
-GEOMETRY_FIXTURES = ROOT / "tests/fixtures/nand_geometry"
+GEOMETRY_FIXTURES = ROOT / "tests/fixtures/nand-geometry"
 GEOMETRY_128_OOB = (GEOMETRY_FIXTURES / "demo-128.txt").read_text(encoding="utf-8")
 GEOMETRY_64_OOB = (GEOMETRY_FIXTURES / "demo-64.txt").read_text(encoding="utf-8")
 

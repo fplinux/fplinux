@@ -14,7 +14,7 @@ from pathlib import Path
 
 from fplinux_cli.artifacts.bundles import CurrentBundle
 
-ARTIFACT_FILES = Path(__file__).with_suffix("")
+ARTIFACT_FILES = Path(__file__).with_name("artifact-footprint")
 
 
 def newc(entries: list[tuple[str, bytes, int, int, int]]) -> bytes:

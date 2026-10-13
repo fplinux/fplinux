@@ -16,6 +16,14 @@ exercise the real language and runtime boundary of a change.
 
 ## General principles
 
+### Directory names
+
+Use lowercase `snake_case` for Python package directories and lowercase `kebab-case` for project-owned resource, fixture and documentation directories. Target, profile and package identifiers also use `kebab-case`. A Python package has its own `__init__.py`; a directory containing standalone Python programs or data beside a Python module is not a package. For example, `package_sources.py` reads resources from `package-sources/`, while imports retain the module's underscore spelling.
+
+Keep the leading dot in metadata directories such as `.github` and `.githooks`. Preserve the prescribed source directory names `LICENSES` for REUSE and `.github/ISSUE_TEMPLATE` for GitHub. Generated or downloaded trees and paths reproduced inside test runtime filesystems retain their owner's layout; do not rewrite those paths to match source-directory naming. File names follow their language or format rules.
+
+`./fplinux check source` validates directory names from tracked and non-ignored source files, including resources and website assets. Rename a source directory and its consumers together; do not retain aliases or fallback lookups for the old spelling.
+
 ### Make the main behavior obvious
 
 Use names that state the operation and domain. Prefer explicit arguments,

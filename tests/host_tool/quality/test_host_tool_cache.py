@@ -18,7 +18,7 @@ from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
 from fplinux_cli.build import sources as sources_build
 
-FIXTURES = common.ROOT / "tests/fixtures/quality/host_tool/cache-build"
+FIXTURES = common.ROOT / "tests/fixtures/quality/host-tool/cache-build"
 
 
 class HostToolCacheTests:

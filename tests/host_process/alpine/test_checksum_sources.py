@@ -63,7 +63,7 @@ def test_checksum_reads_private_restored_source_and_returns_cache_ownership() ->
         aport = stage / "alpine/aports/fplinux-checksum-fixture"
         aport.mkdir(parents=True)
         apkbuild = aport / "APKBUILD"
-        shutil.copyfile(ROOT / "tests/fixtures/checksum_sources/APKBUILD", apkbuild)
+        shutil.copyfile(ROOT / "tests/fixtures/checksum-sources/APKBUILD", apkbuild)
         shutil.copytree(ROOT / "scripts/fplinux_cli/cli/checksum", stage / "checksum")
         command = _checksum_container_command(
             "kern",

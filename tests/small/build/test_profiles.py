@@ -18,7 +18,7 @@ from fplinux_cli.manifests import kernel, paths, platforms, targets
 if TYPE_CHECKING:
     from pathlib import Path
 
-PROFILE_FIXTURES = ROOT / "tests/fixtures/profile_config"
+PROFILE_FIXTURES = ROOT / "tests/fixtures/profile-config"
 REPOSITORY_PROFILES = [
     pytest.param(target, profile, id=f"{target}-{profile}")
     for target in paths.discover_targets()

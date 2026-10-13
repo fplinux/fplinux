@@ -41,7 +41,7 @@ def test_ordinary_readme_preserves_the_complete_archive_instructions(
     readme_config: dict[str, Any], target: str, root_kind: str, document: str
 ) -> None:
     readme_config["linux"]["root"]["kind"] = root_kind
-    expected = ROOT / "tests/small/cli/fixtures/package_readme" / document
+    expected = ROOT / "tests/small/cli/fixtures/package-readme" / document
 
     assert ordinary_readme(target, readme_config) == expected.read_bytes()
 

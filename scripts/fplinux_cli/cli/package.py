@@ -33,7 +33,7 @@ from fplinux_cli.workspace import build_inputs as workspaces
 SHARED_PACKAGE_FILES = {
     "60-fplinux.rules": "common/60-fplinux.rules",
     "LICENSE": "LICENSE",
-    "licenses/musl/COPYRIGHT": "THIRD_PARTY_LICENSES/musl/COPYRIGHT",
+    "licenses/musl/COPYRIGHT": "third-party-licenses/musl/COPYRIGHT",
 }
 
 

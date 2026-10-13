@@ -32,7 +32,7 @@ def test_make_consumer_receives_selected_names_mode_and_font(
     }
     (tmp_path / "settings.make").write_bytes(bootstrap_settings(target))
     consumer = tmp_path / "consumer.make"
-    shutil.copyfile(ROOT / "tests/fixtures/bootstrap_projection/consumer.make", consumer)
+    shutil.copyfile(ROOT / "tests/fixtures/bootstrap-projection/consumer.make", consumer)
     result = run_process(
         ["make", "--no-print-directory", "-f", str(consumer)],
         cwd=tmp_path,
@@ -63,7 +63,7 @@ def test_target_main_passes_selected_geometry_to_the_boot_runtime(
     runtime.mkdir()
     shutil.copy2(ROOT / "platforms/ums9117/bootstrap/boot-main.h", runtime / "boot-main.h")
     stub = tmp_path / "runtime.c"
-    shutil.copyfile(ROOT / "tests/fixtures/bootstrap_projection/runtime.c", stub)
+    shutil.copyfile(ROOT / "tests/fixtures/bootstrap-projection/runtime.c", stub)
     executable = tmp_path / "geometry"
     run_process(
         [

@@ -10,6 +10,7 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from fplinux_cli.common import ROOT, fail
+from fplinux_cli.quality.source_gate import validate_directory_names
 
 from .capture import WorkspaceSnapshot, snapshot_from_inventory
 
@@ -72,6 +73,8 @@ def quality_files(*, enforce_source_policy: bool) -> list[tuple[str, Path]]:
                 fail(f"quality input must be a regular file: {path}")
             continue
         files.append((relative_text, path))
+    if enforce_source_policy:
+        validate_directory_names(relative for relative, _path in files)
     return files
 
 

@@ -18,7 +18,7 @@ from fplinux_cli.workspace import quality_inputs as workspace_module
 
 from tests import ROOT
 
-FIXTURES = ROOT / "tests/fixtures/quality/source_check"
+FIXTURES = ROOT / "tests/fixtures/quality/source-check"
 
 
 class ContainerSourcePolicyTests:

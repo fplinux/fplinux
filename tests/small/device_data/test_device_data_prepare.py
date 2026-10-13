@@ -478,7 +478,7 @@ class DeviceDataPrepareTests:
             "commands": {
                 "unpack": {
                     "stdout": (
-                        project / "tests/fixtures/stock_board_report/maps-only.txt"
+                        project / "tests/fixtures/stock-board-report/maps-only.txt"
                     ).read_text(encoding="utf-8"),
                     "files": {"pinmap.bin": pinmap.hex(), "keymap.bin": keys.hex()},
                 }

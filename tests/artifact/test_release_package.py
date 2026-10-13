@@ -107,7 +107,7 @@ class ReleaseArchiveInputs:
         rules_file = self.root / "common/60-fplinux.rules"
         rules_file.parent.mkdir(parents=True)
         rules_file.write_text("SUBSYSTEM==usb\n", encoding="utf-8")
-        musl_notice = self.root / "THIRD_PARTY_LICENSES/musl/COPYRIGHT"
+        musl_notice = self.root / "third-party-licenses/musl/COPYRIGHT"
         musl_notice.parent.mkdir(parents=True)
         musl_notice.write_text("musl notice\n", encoding="utf-8")
         checkout_documents = {
@@ -376,7 +376,7 @@ class ReleaseArchiveArtifactTests:
 
         expected_files = {
             "CANDIDATE-NOTICE.txt": (
-                ROOT / "tests/fixtures/release_package/candidate-notice.txt"
+                ROOT / "tests/fixtures/release-package/candidate-notice.txt"
             ).read_bytes(),
             "EXTRA.txt": b"phone instructions\n",
             "60-fplinux.rules": b"SUBSYSTEM==usb\n",

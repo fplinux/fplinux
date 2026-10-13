@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from fplinux_cli.quality.formatting.source_formats import SourceFormats
 
 
-FIXTURES = ROOT / "tests/fixtures/quality/host_tool"
+FIXTURES = ROOT / "tests/fixtures/quality/host-tool"
 
 
 class PinnedFormatterToolTests:

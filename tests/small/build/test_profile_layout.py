@@ -13,7 +13,7 @@ from tests import ROOT
 @pytest.fixture
 def profile_layout_values() -> dict[str, int]:
     """Load a fresh layout mapping for each rendering scenario."""
-    return common.load_toml(ROOT / "tests/fixtures/profile_config/layout.toml")
+    return common.load_toml(ROOT / "tests/fixtures/profile-config/layout.toml")
 
 
 class ProfileLayoutRenderTests:

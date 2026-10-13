@@ -1,13 +1,37 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Validate the repository build-image source policy."""
+"""Validate repository directory names and the build-image source policy."""
 
 from __future__ import annotations
 
 import os
-from pathlib import Path
+import re
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
 from fplinux_cli import common
 from fplinux_cli.common import fail
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+
+def validate_directory_names(inventory: Iterable[str]) -> None:
+    """Require snake_case packages and kebab-case resource directories."""
+    directories: set[PurePosixPath] = set()
+    packages: set[PurePosixPath] = set()
+    for relative in inventory:
+        path = PurePosixPath(relative)
+        directories.update(parent for parent in path.parents if parent != PurePosixPath("."))
+        if path.name == "__init__.py":
+            packages.add(path.parent)
+    for directory in sorted(directories):
+        if directory.as_posix() in {"LICENSES", ".github/ISSUE_TEMPLATE"}:
+            continue
+        if directory in packages:
+            if re.fullmatch(r"[a-z_][a-z0-9_]*", directory.name) is None:
+                fail(f"Python package directory must use snake_case: {directory}")
+        elif re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", directory.name.removeprefix(".")) is None:
+            fail(f"source directory must use kebab-case: {directory}")
 
 
 def containerfile_uses_locked_base(contents: str) -> bool:

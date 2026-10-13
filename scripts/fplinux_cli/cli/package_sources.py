@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 _PROJECT_DIRECTORIES = frozenset(
     {
         "LICENSES",
-        "THIRD_PARTY_LICENSES",
+        "third-party-licenses",
         "alpine",
         "bootstrap",
         "common",
@@ -372,7 +372,7 @@ def collect_source_files(config: dict[str, Any], *, host: str, offline: bool) ->
 
 
 def _linux_build_instructions() -> bytes:
-    return (Path(__file__).with_suffix("") / "BUILD-LINUX.txt").read_bytes()
+    return (Path(__file__).with_name("package-sources") / "BUILD-LINUX.txt").read_bytes()
 
 
 def _windows_source_channels(files: dict[str, bytes]) -> None:

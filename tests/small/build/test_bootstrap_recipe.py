@@ -19,7 +19,7 @@ from fplinux_cli.manifests.targets import load_target
 
 from tests import ROOT
 
-BOOTSTRAP_FILES = ROOT / "tests/fixtures/bootstrap_recipe"
+BOOTSTRAP_FILES = ROOT / "tests/fixtures/bootstrap-recipe"
 
 if TYPE_CHECKING:
     from collections.abc import Callable
