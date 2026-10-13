@@ -8,7 +8,7 @@ from itertools import pairwise
 from typing import Any
 
 from fplinux_cli.common import fail, load_toml
-from fplinux_cli.manifests.assets import asset_bundle_paths
+from fplinux_cli.manifests.assets import asset_bundle_paths, load_asset_sources
 from fplinux_cli.manifests.audio import (
     AUDIO_POLICY_FIELDS,
     AudioPolicyError,
@@ -24,7 +24,6 @@ from fplinux_cli.manifests.identity import (
 from fplinux_cli.manifests.paths import (
     normalize_profile,
     platform_asset_lock_path,
-    target_asset_lock_path,
     target_directory,
 )
 from fplinux_cli.manifests.platforms import load_platform
@@ -68,6 +67,7 @@ def load_target(
             *({"fm_radio"} if "fm_radio" in raw else set()),
             *({"wcn_firmware"} if "wcn_firmware" in raw else set()),
             *({"board_maps"} if "board_maps" in raw else set()),
+            *({"loader_maps"} if "loader_maps" in raw else set()),
             *({"nand"} if "nand" in raw else set()),
             *({"display_brightness"} if "display_brightness" in raw else set()),
             *({"display"} if "display" in raw else set()),
@@ -366,11 +366,12 @@ def load_target(
     for key in ("uboot", "fit", "layout", "storage", "image"):
         config[key] = selected_profile[key]
     transport = selected_profile["runtime"]["transport"]
+    config["loader_assets"] = load_asset_sources(
+        platform_asset_lock_path(platform_name), loader_maps=config.pop("loader_maps", None)
+    )
     config["runtime"] = {
         "fdl1_load_address": platform_runtime["fdl1_load_address"],
-        "assets": asset_bundle_paths(
-            (platform_asset_lock_path(platform_name), target_asset_lock_path(target))
-        ),
+        "assets": asset_bundle_paths(config["loader_assets"]),
         "adapter": {
             **platform_runtime["adapter"],
             **adapter,

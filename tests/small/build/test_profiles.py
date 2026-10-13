@@ -69,6 +69,25 @@ class GlobalProfileTests:
         shared = self.root / "platforms/demo"
         (shared / "kernel").mkdir(parents=True)
         (shared / "kernel/defconfig").write_text("CONFIG_FEATURE=y\nCONFIG_BOARD=1\n")
+        (shared / "loader").mkdir()
+        (shared / "loader/assets.lock.toml").write_text(
+            """[fdl1]
+url = "https://example.invalid/loader.bin"
+sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+cache_name = "loader.bin"
+license = "MIT"
+path = "loader.bin"
+
+[maps]
+url = "https://example.invalid/maps.7z"
+sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+cache_name = "maps.7z"
+license = "NOASSERTION"
+pinmap_path = "pinmap.bin"
+keymap_path = "keymap.bin"
+""",
+            encoding="utf-8",
+        )
         (shared / "uboot.lock.toml").write_text(
             'version = "2026.07"\nrepository = "https://example.invalid/u-boot"\n'
             'tag = "v2026.07"\ncommit = "' + "a" * 40 + '"\n'
@@ -85,7 +104,6 @@ class GlobalProfileTests:
             self.write_target_manifest(target)
         monkeypatch.setattr(common, "ROOT", self.root)
         monkeypatch.setattr(targets, "load_platform", mock.Mock(return_value=self.platform))
-        monkeypatch.setattr(targets, "asset_bundle_paths", mock.Mock(return_value={}))
 
     def write_target_manifest(self, target: str, fixture: str = "target.toml") -> None:
         """Write one named board configuration with its target identity filled in."""
@@ -166,30 +184,24 @@ class GlobalProfileTests:
         assert (targets.load_target("first", profile)["device_data"]["groups"]) == ({})
 
     @pytest.mark.parametrize(
-        "missing_setting",
+        "display_settings",
         [
-            pytest.param("spi_mode = 0\n", id="spi-mode"),
-            pytest.param("lcd_id = 0\n", id="lcd-id"),
-            pytest.param('backlight_channels = "mono"\n', id="backlight-channels"),
-            pytest.param("backlight_level = 0\n", id="backlight-level"),
+            pytest.param(
+                'backlight_channels = "mono"\nbacklight_level = 0\n', id="missing-spi-mode"
+            ),
+            pytest.param("spi_mode = 0\nbacklight_level = 0\n", id="missing-backlight-channels"),
+            pytest.param(
+                'spi_mode = 0\nbacklight_channels = "mono"\n', id="missing-backlight-level"
+            ),
+            pytest.param("lcd_id = 0\n", id="direct-panel-id"),
         ],
     )
-    def test_loader_display_settings_are_declared_together_or_omitted(
-        self, missing_setting: str
+    def test_loader_adapter_rejects_partial_display_settings_and_a_direct_panel_id(
+        self, display_settings: str
     ) -> None:
-        """A board without the LCD settings loads headless; a partial set is refused."""
+        """Display settings may be omitted; partial settings and an explicit lcd_id are invalid."""
         path = self.root / "targets/first/target.toml"
         manifest = path.read_text(encoding="utf-8")
-        display_lines = (
-            "spi_mode = 0\n",
-            "lcd_id = 0\n",
-            'backlight_channels = "mono"\n',
-            "backlight_level = 0\n",
-        )
-        headless = manifest
-        for line in display_lines:
-            headless = headless.replace(line, "")
-        path.write_text(headless, encoding="utf-8")
         assert (targets.load_target("first")["runtime"]["adapter"]) == (
             {
                 "exec_distance": 0,
@@ -198,7 +210,9 @@ class GlobalProfileTests:
             }
         )
 
-        path.write_text(manifest.replace(missing_setting, ""), encoding="utf-8")
+        path.write_text(
+            manifest.replace("[adapter]\n", "[adapter]\n" + display_settings), encoding="utf-8"
+        )
         with (
             pytest.raises(SystemExit, match="target adapter must contain exactly"),
         ):
@@ -232,16 +246,72 @@ class GlobalProfileTests:
             {"groups": {"board-maps": [{"source": "pinmap.bin", "destination": "pinmap.bin"}]}}
         )
 
-    def test_parser_firmware_must_declare_its_exact_size(self) -> None:
-        """Bluetooth, FM and audio inputs keep the exact size that builds verify."""
-        self.write_target_manifest("first")
+    @pytest.mark.parametrize("profile", ["default", "microsd-uboot"])
+    def test_loader_map_members_stay_board_owned_across_boot_profiles(self, profile: str) -> None:
+        """The manifest supplies both runtime map paths and the selected build outputs."""
         path = self.root / "targets/first/target.toml"
-        sized = 'destination = "demo/radio.bin"\nsize = 4\n'
-        text = path.read_text(encoding="utf-8")
-        assert (sized) in (text)
-        path.write_text(text.replace(sized, 'destination = "demo/radio.bin"\n'), encoding="utf-8")
+        path.write_text(
+            path.read_text(encoding="utf-8")
+            + '\n[loader_maps]\npinmap = { member = "first/pins.bin", '
+            'sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" }\n'
+            'keymap = { member = "first/keys.bin", '
+            'sha256 = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" }\n',
+            encoding="utf-8",
+        )
+        config = targets.load_target("first", profile)
+        assert config["runtime"]["assets"] == {
+            "fdl1": "assets/loader.bin",
+            "pinmap": "assets/pinmap.bin",
+            "keymap": "assets/keymap.bin",
+        }
+        assert config["loader_assets"][1]["output"] == [
+            {
+                "role": "pinmap",
+                "path": "pinmap.bin",
+                "member": "first/pins.bin",
+                "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            },
+            {
+                "role": "keymap",
+                "path": "keymap.bin",
+                "member": "first/keys.bin",
+                "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            },
+        ]
+        assert targets.load_target("second", profile)["runtime"]["assets"] == {
+            "fdl1": "assets/loader.bin"
+        }
+
+    @pytest.mark.parametrize(
+        ("table", "group"), [("fm_radio", "fm-radio"), ("audio_profile", "audio-profile")]
+    )
+    def test_audio_and_fm_firmware_require_their_exact_size(self, table: str, group: str) -> None:
+        """Audio and FM inputs cannot omit the size that device-data consumers verify."""
+        self.write_target_manifest("first", "target-without-bluetooth.toml")
+        path = self.root / "targets/first/target.toml"
+        base = path.read_text(encoding="utf-8")
+        declaration = (
+            '\n[device_data]\nparser = "radio_parser.py"\n'
+            f"\n[{table}]\n"
+            'firmware = [{ source = "radio.bin", destination = "demo/radio.bin", size = 4 }]\n'
+        )
+        path.write_text(base + declaration, encoding="utf-8")
+        assert targets.load_target("first")["device_data"]["groups"] == {
+            group: [{"source": "radio.bin", "destination": "demo/radio.bin", "size": 4}]
+        }
+        path.write_text(base + declaration.replace(", size = 4", ""), encoding="utf-8")
         with pytest.raises(SystemExit, match=r"source, destination, size and optional sha256"):
             targets.load_target("first")
+
+    def test_bluetooth_firmware_can_leave_size_to_extraction(self) -> None:
+        """Bluetooth inputs preserve the supported optional-size declaration."""
+        path = self.root / "targets/first/target.toml"
+        path.write_text(
+            path.read_text(encoding="utf-8").replace("size = 4\n", ""), encoding="utf-8"
+        )
+        assert targets.load_target("first")["device_data"]["groups"] == {
+            "bluetooth": [{"source": "radio.bin", "destination": "demo/radio.bin"}]
+        }
 
     def test_missing_board_boot_sources_fail_only_when_microsd_is_selected(self) -> None:
         """RAM operation does not read unused U-Boot sources or fall back to another board."""

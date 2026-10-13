@@ -31,7 +31,6 @@ def _environment_checkout(root: Path) -> None:
     source_bytes = b"tool source\n"
     npm_bytes = b"npm package\n"
     apk_bytes = b"signed package fixture\n"
-    index_bytes = b"repository index fixture\n"
     (root / ".kernignore").write_text("**\n!Containerfile\n!inputs/**\n")
     source_digest = hashlib.sha256(source_bytes).hexdigest()
     (root / "Containerfile").write_text(
@@ -70,28 +69,20 @@ def _environment_checkout(root: Path) -> None:
         '[oci]\nbase_rootfs_url = "https://example.invalid/base.tar.gz"\n'
         f'base_rootfs_sha256 = "{"b" * 64}"\n'
     )
-    records = [
-        ("package", "tool-1.0-r0.apk", apk_bytes, "container-package"),
-        ("index", "APKINDEX.tar.gz", index_bytes, "container-index"),
-    ]
-    lock = ['key = []\n[selection]\narch = "x86_64"\napk_groups = [["tool=1.0-r0"]]\n']
-    for key, filename, contents, purpose in records:
-        lock.append(
-            "\n[[input]]\n"
-            f'key = "environment:{key}"\n'
-            f'url = "https://example.invalid/main/x86_64/{filename}"\n'
-            f'sha256 = "{hashlib.sha256(contents).hexdigest()}"\n'
-            f"bytes = {len(contents)}\n"
-            f'destination = "downloads/environment/apk/main/x86_64/{filename}"\n'
-            f'purpose = "{purpose}"\narch = "x86_64"\n'
-        )
-    (root / "environment.lock.toml").write_text("".join(lock))
+    (root / "environment.lock.toml").write_text(
+        '[selection]\narch = "x86_64"\napk_groups = [["tool=1.0-r0"]]\n'
+        '\n[[input]]\nkey = "environment:package"\n'
+        'url = "https://example.invalid/main/x86_64/tool-1.0-r0.apk"\n'
+        f'sha256 = "{hashlib.sha256(apk_bytes).hexdigest()}"\n'
+        f"bytes = {len(apk_bytes)}\n"
+        'destination = "downloads/environment/apk/main/x86_64/tool-1.0-r0.apk"\n'
+        'purpose = "container-package"\narch = "x86_64"\n'
+    )
     npm_key = hashlib.sha256(b"https://example.invalid/example-1.0.0.tgz").hexdigest()[:16]
     files = {
         "downloads/environment/tool/tool.tar.gz": source_bytes,
         f"downloads/npm/{npm_key}-example-1.0.0.tgz": npm_bytes,
         "downloads/environment/apk/main/x86_64/tool-1.0-r0.apk": apk_bytes,
-        "downloads/environment/apk/main/x86_64/APKINDEX.tar.gz": index_bytes,
         "private/phone-state": b"private fixture\n",
     }
     for relative, contents in files.items():
@@ -226,7 +217,7 @@ class OfflineEnvironmentContextTests:
             )
 
     def test_context_contains_declared_inputs_and_excludes_private_cache(self) -> None:
-        """Source, npm, package and index consumers receive original saved bytes."""
+        """Source, npm and package consumers receive original saved bytes."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "checkout"
             context = Path(temporary) / "context"
@@ -256,9 +247,6 @@ class OfflineEnvironmentContextTests:
             assert (npm_archives[0].read_bytes()) == (b"npm package\n")
             assert ((context / "inputs/apk/main/x86_64/tool-1.0-r0.apk").read_bytes()) == (
                 b"signed package fixture\n"
-            )
-            assert ((context / "inputs/apk/main/x86_64/APKINDEX.tar.gz").read_bytes()) == (
-                b"repository index fixture\n"
             )
             assert not ((context / ".cache").exists())
             assert not ((context / "inputs/private").exists())

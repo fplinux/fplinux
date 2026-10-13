@@ -30,6 +30,7 @@ _TARGET_ORDER = {
         "linux",
         "bootstrap",
         "adapter",
+        "loader_maps",
         "device_data",
         "board_maps",
         "bluetooth",
@@ -67,6 +68,9 @@ _TARGET_ORDER = {
         "session_name",
         "boot_instructions",
     ),
+    "loader_maps": ("pinmap", "keymap"),
+    "loader_maps.pinmap": ("member", "sha256"),
+    "loader_maps.keymap": ("member", "sha256"),
     "device_data": ("parser",),
     "board_maps": ("firmware",),
     "board_maps.firmware": _FIRMWARE_FIELDS,
@@ -264,6 +268,11 @@ _ROOT_ORDERS: dict[str, dict[str, tuple[str, ...]]] = {
             "base_rootfs_sha256",
         ),
     },
+    "environment.lock.toml": {
+        "": ("selection", "input"),
+        "selection": ("arch", "apk_groups"),
+        "input": ("key", "url", "sha256", "bytes", "destination", "purpose", "arch"),
+    },
     "sources.lock.toml": {
         "": ("linux", "fpdoom_bootstrap", "fpdoom_host", "spreadtrum_flash"),
         "linux": ("version", "url", "sha256", "license"),
@@ -323,11 +332,11 @@ def _policy(relative: str) -> Mapping[str, Sequence[str]]:  # noqa: PLR0911
         or relative == "tests/fixtures/profile_config/default-with-feature-package.toml"
     ):
         return _PROFILE_ORDER
-    if relative.endswith("/loader/assets.lock.toml"):
+    if relative.startswith("platforms/") and relative.endswith("/loader/assets.lock.toml"):
         return {
-            "": ("source",),
-            "source": ("id", "kind", "url", "sha256", "cache_name", "license", "output"),
-            "source.output": ("role", "path", "member", "sha256"),
+            "": ("fdl1", "maps"),
+            "fdl1": ("url", "sha256", "cache_name", "license", "path"),
+            "maps": ("url", "sha256", "cache_name", "license", "pinmap_path", "keymap_path"),
         }
     if relative.endswith("/release/manifest.toml"):
         return {"": ("image", "bundle_files", "runtime_files", "documents")}

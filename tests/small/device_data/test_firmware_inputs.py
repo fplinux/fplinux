@@ -18,13 +18,13 @@ from fplinux_cli.manifests import values
 from fplinux_cli.workspace import build_inputs as workspace_module
 from fplinux_cli.workspace import staging as workspace_staging
 
-from tests.small.workspace.workspace_fixtures import empty_package_graph
+from tests.small.workspace.workspace_fixtures import WorkspaceSourceFixture, empty_package_graph
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
-class FirmwareInputTests:
+class FirmwareInputTests(WorkspaceSourceFixture):
     """Keep optional groups, build identity, and their consumers explicit."""
 
     target = "demo"
@@ -156,12 +156,13 @@ class FirmwareInputTests:
         """The workspace recipe follows declared profile bytes and ignores adjacent files."""
         self._write_group("bluetooth", {"controller.bin": b"firmware"})
         audio = self._write_group("audio-profile", {"profile.bin": b"profile"})
-        target_config = {"platform": "example", "device_data": {"groups": self.groups}}
+        target_config = {"platform": "demo", "device_data": {"groups": self.groups}}
         base = self.root / "base-source"
         base.write_bytes(b"base")
         registration = self.root / "scripts/fplinux_cli/alpine/registration.py"
         registration.parent.mkdir(parents=True)
         registration.write_bytes(b"# empty package declarations\n")
+        source_locks = self._source_lock_files(self.root, self.target)
 
         with (
             mock.patch.object(workspace_module, "ROOT", self.root),
@@ -180,6 +181,7 @@ class FirmwareInputTests:
                 return_value=[
                     ("base-source", base),
                     ("scripts/fplinux_cli/alpine/registration.py", registration),
+                    *source_locks,
                 ],
             ),
         ):

@@ -24,6 +24,8 @@ and exports the current build environment through Kern. Missing inputs are
 downloaded at their exact declared versions; the command does not choose
 replacements.
 
+The environment lock declares package selection and the exact APK and wheel downloads. The platform loader asset lock pins the RAM loader and shared map archive; target manifests select map members and pin their extracted hashes. Prepared [device data](/fplinux/guides/device-data/) remains separate.
+
 To require locally stored inputs, add `--offline`. Repeat `--from PATH` to
 look for original downloads in additional local files or directories; only
 bytes that match a declared checksum are accepted:

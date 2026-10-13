@@ -66,6 +66,8 @@ Use `targets/nokia-ta1618/` as an example of a display target with both RAM and
 microSD boot inputs. Keep the new phone's panel, keypad, board wiring and
 device-data declarations in its own target.
 
+The platform's `loader/assets.lock.toml` pins the common RAM loader in `[fdl1]` and the shared map archive in `[maps]`. A target using archived maps declares both `pinmap` and `keymap` in `[loader_maps]` in its `target.toml`; each contains the archive `member` and its extracted `sha256`. Targets using maps prepared from their own NAND backup declare them through `[board_maps]` instead.
+
 ## Headless targets
 
 A target loads headless when it has none of the loader display settings

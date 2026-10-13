@@ -29,16 +29,17 @@ wrapping.
 
 Document sections use this order; absent sections are skipped:
 
-| Document         | Section order                                                                                                                                                                          |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Target           | `platform`, identity, NAND, display, display brightness, rootfs, bundle, Linux, bootstrap, adapter, device data, board maps, Bluetooth, audio profile, FM radio, WCN firmware, microSD |
-| Platform         | identity, rootfs, bundle, U-Boot, Linux, bootstrap, runtime, host                                                                                                                      |
-| Profile          | `name`, Linux root, rootfs, bootstrap, U-Boot, FIT, layout, storage, runtime                                                                                                           |
-| Source lock      | Linux, bootstrap source, host source and files, transfer source and files                                                                                                              |
-| Alpine lock      | release/branch/architecture/triplet, repositories, minirootfs, runtime, runtime additions, sysroot, package catalogue                                                                  |
-| Container lock   | Kern, OCI                                                                                                                                                                              |
-| Asset lock       | each source followed by its outputs                                                                                                                                                    |
-| Release manifest | image, bundle files, runtime files, documents                                                                                                                                          |
+| Document          | Section order                                                                                                                                                                                       |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Target            | `platform`, identity, NAND, display, display brightness, rootfs, bundle, Linux, bootstrap, adapter, loader maps, device data, board maps, Bluetooth, audio profile, FM radio, WCN firmware, microSD |
+| Platform          | identity, rootfs, bundle, U-Boot, Linux, bootstrap, runtime, host                                                                                                                                   |
+| Profile           | `name`, Linux root, rootfs, bootstrap, U-Boot, FIT, layout, storage, runtime                                                                                                                        |
+| Source lock       | Linux, bootstrap source, host source and files, transfer source and files                                                                                                                           |
+| Alpine lock       | release/branch/architecture/triplet, repositories, minirootfs, runtime, runtime additions, sysroot, package catalogue                                                                               |
+| Container lock    | Kern, OCI                                                                                                                                                                                           |
+| Environment lock  | selection, ordered inputs                                                                                                                                                                           |
+| Loader asset lock | FDL1, maps                                                                                                                                                                                          |
+| Release manifest  | image, bundle files, runtime files, documents                                                                                                                                                       |
 
 Target fields follow their consumer roles:
 
@@ -54,6 +55,7 @@ Target fields follow their consumer roles:
 | copy, append       | `source`, `destination`                                                                                                      |
 | bootstrap          | `lcd_config`, `image`, `map`, `dtb_destination`, `record_prefix`                                                             |
 | adapter            | `spi_mode`, `backlight_channels`, `backlight_level`, `exec_distance`, `session_name`, `boot_instructions`                    |
+| loader_maps        | `pinmap`, `keymap`; each uses `member`, `sha256`                                                                             |
 | device_data        | `parser`                                                                                                                     |
 | audio_profile      | `speaker_vibration`, `speaker_from_headphones`, `headfree_headphones_only`, `firmware`                                       |
 | firmware record    | `source`, `destination`, `size`, `sha256`                                                                                    |
@@ -72,6 +74,10 @@ nonempty copy tables. Empty copy arrays remain ordinary fields.
 Profiles group root kind/filesystem/wait, package selection, boot kinds,
 resident and load ranges, storage partitions, then runtime transport and
 runnability. Their package arrays retain their order.
+
+The environment lock's selection uses `arch`, `apk_groups`. Each input uses `key`, `url`, `sha256`, `bytes`, `destination`, `purpose`, `arch`. Input records, package groups and packages within those groups retain their order.
+
+The platform loader asset lock's `[fdl1]` uses `url`, `sha256`, `cache_name`, `license`, `path`. Its `[maps]` uses `url`, `sha256`, `cache_name`, `license`, `pinmap_path`, `keymap_path`. Generated standalone asset locks retain their resolved source/output form.
 
 Independent source-file hash dictionaries, verified-release entries, spelling
 identifier/word dictionaries, Alpine repositories and runtime additions use

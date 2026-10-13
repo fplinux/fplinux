@@ -89,6 +89,7 @@ class NewTargetTests:
         )
         assert (config["nand"]) == ({"raw_device": "/dev/ums9117-nand-raw"})
         assert (config["runtime"]["assets"]) == ({"fdl1": "assets/t117_fdl1.bin"})
+        assert not (self.targets / "hammer-horizon-lte/loader/assets.lock.toml").exists()
         assert DISPLAY_KEYS.isdisjoint(config["runtime"]["adapter"])
         assert (config["runtime"]["adapter"]["exec_distance"]) == (0)
         # A new phone can prepare its board maps from a backup without a target parser.

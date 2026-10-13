@@ -26,7 +26,6 @@ from fplinux_cli.device_data import inputs as firmware_inputs
 from fplinux_cli.device_data.cpio import create_device_data_initramfs
 from fplinux_cli.environment.images import container_artifact_recipe_digest
 from fplinux_cli.manifests.identity import BUILD_TYPES
-from fplinux_cli.manifests.paths import platform_asset_lock_path, target_asset_lock_path
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.releases import load_release
 from fplinux_cli.manifests.targets import load_target
@@ -71,10 +70,6 @@ def main() -> None:
                 "sha256"
             ),
             "Linux source",
-        )
-        asset_lock_paths = (
-            inputs_build.require_file(platform_asset_lock_path(target_config["platform"])),
-            inputs_build.require_file(target_asset_lock_path(args.target)),
         )
         release_manifest = load_release(args.target, bundle_packages=selected_bundle_packages)
 
@@ -192,7 +187,7 @@ def main() -> None:
     with process_build.report_stage(reporter, "assets"):
         asset_lock_path = work / "assets.lock.toml"
         asset_outputs = assets_build.build_assets(
-            asset_lock_paths, work / "assets", lock_output=asset_lock_path
+            target_config["loader_assets"], work / "assets", lock_output=asset_lock_path
         )
     with process_build.report_stage(reporter, "host-tools"):
         host_tools = host_build.build_host_tools(sources, platform, work)

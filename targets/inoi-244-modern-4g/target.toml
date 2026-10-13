@@ -92,6 +92,10 @@ exec_distance = 0
 session_name = "inoi244-linux"
 boot_instructions = "Power the phone off, hold *, then connect USB while keeping * pressed."
 
+[loader_maps]
+pinmap = { member = "inoi_244/pinmap.bin", sha256 = "044e79980d5994fce3a9075e7a39b34791ba8b925911df61ea86c5665705552b" }
+keymap = { member = "inoi_244/keymap.bin", sha256 = "d7414fcc64cdc1aa1d61d6e63327a78db2d54d80b8134bf5e64b5316ff06073c" }
+
 [device_data]
 parser = "inoi244_device_data.py"
 

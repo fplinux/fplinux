@@ -272,10 +272,128 @@ digest_key = "second-sha"
 """,
         )
 
-    def test_loader_output_order_and_comments_stay_with_each_source(self) -> None:
-        """Moving fields never reassigns outputs to a neighboring source."""
+    def test_loader_declarations_keep_distinct_paths_pins_and_annotations(self) -> None:
+        """Platform loader fields move without changing either resource's declaration."""
         self.assert_normalized(
-            "targets/demo/loader/assets.lock.toml",
+            "platforms/demo/loader/assets.lock.toml",
+            """# SPDX-License-Identifier: GPL-2.0-only
+[maps]
+keymap_path = 'keys.bin'
+pinmap_path = "pins.bin"
+license = "NOASSERTION"
+cache_name = "maps.7z"
+sha256 = "map-sha"
+url = "https://example.invalid/maps"
+
+# RAM loader
+[fdl1]
+path = "stage.bin"
+license = "Unlicense"
+# Pinned loader
+sha256 = "loader-sha"
+cache_name = "stage.bin"
+url = "https://example.invalid/stage"
+""",
+            """# SPDX-License-Identifier: GPL-2.0-only
+# RAM loader
+[fdl1]
+url = "https://example.invalid/stage"
+# Pinned loader
+sha256 = "loader-sha"
+cache_name = "stage.bin"
+license = "Unlicense"
+path = "stage.bin"
+
+[maps]
+url = "https://example.invalid/maps"
+sha256 = "map-sha"
+cache_name = "maps.7z"
+license = "NOASSERTION"
+pinmap_path = "pins.bin"
+keymap_path = 'keys.bin'
+""",
+        )
+
+    def test_loader_map_members_remain_attached_to_their_roles(self) -> None:
+        """Reordering inline map fields preserves distinct member hashes and comments."""
+        self.assert_normalized(
+            "targets/demo/target.toml",
+            """[board_maps]
+firmware = []
+
+[loader_maps]
+keymap = { sha256 = "key-sha", member = 'keys/member.bin' } # Key settings
+pinmap = { sha256 = "pin-sha", member = "pins/member.bin" }
+
+[adapter]
+exec_distance = 0x0040
+""",
+            """[adapter]
+exec_distance = 0x0040
+
+[loader_maps]
+pinmap = { member = "pins/member.bin", sha256 = "pin-sha" }
+keymap = { member = 'keys/member.bin', sha256 = "key-sha" } # Key settings
+
+[board_maps]
+firmware = []
+""",
+        )
+
+    def test_environment_inputs_keep_download_and_selection_sequence(self) -> None:
+        """Input fields sort while package groups and their distinct downloads keep order."""
+        self.assert_normalized(
+            "environment.lock.toml",
+            """[selection]
+apk_groups = [["z=1", "a=2"], ["b=3"]]
+arch = "x86_64"
+
+[[input]]
+purpose = "container-wheel"
+destination = "wheels/z.whl"
+bytes = 123
+sha256 = "wheel-sha"
+url = "https://example.invalid/z.whl"
+key = "wheel:z"
+
+# APK input
+[[input]]
+arch = "x86_64"
+purpose = "container-apk"
+destination = "apks/a.apk"
+bytes = 456
+sha256 = "apk-sha"
+url = "https://example.invalid/a.apk"
+key = "apk:a"
+""",
+            """[selection]
+arch = "x86_64"
+apk_groups = [["z=1", "a=2"], ["b=3"]]
+
+[[input]]
+key = "wheel:z"
+url = "https://example.invalid/z.whl"
+sha256 = "wheel-sha"
+bytes = 123
+destination = "wheels/z.whl"
+purpose = "container-wheel"
+
+# APK input
+[[input]]
+key = "apk:a"
+url = "https://example.invalid/a.apk"
+sha256 = "apk-sha"
+bytes = 456
+destination = "apks/a.apk"
+purpose = "container-apk"
+arch = "x86_64"
+""",
+        )
+
+    def test_bundle_loader_outputs_keep_their_delivered_form(self) -> None:
+        """A generated asset lock retains source/output records and their owner sequence."""
+        self.assert_normalized(
+            "assets.lock.toml",
             """[[source]]
 kind = "file"
 id = "z"
@@ -297,24 +415,24 @@ path = "a.bin"
 role = "a-role"
 """,
             """[[source]]
-id = "z"
 kind = "file"
+id = "z"
 
 [[source.output]]
-role = "z-role"
-path = "z.bin"
 sha256 = "z-sha"
+path = "z.bin"
+role = "z-role"
 
 # Second source
 [[source]]
-id = "a"
 kind = "7z"
+id = "a"
 
 [[source.output]]
-role = "a-role"
-path = "a.bin"
-member = "a/member.bin"
 sha256 = "a-sha"
+member = "a/member.bin"
+path = "a.bin"
+role = "a-role"
 """,
         )
 

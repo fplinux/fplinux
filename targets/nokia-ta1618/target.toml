@@ -90,6 +90,10 @@ exec_distance = 0x314d
 session_name = "ta1618-linux"
 boot_instructions = "Power the phone off, hold *, then connect USB while keeping * pressed."
 
+[loader_maps]
+pinmap = { member = "nokia_ta1618/pinmap.bin", sha256 = "e01baf9e82129e58218d2d16f66a89607f93572382945137c21965a95d2e790d" }
+keymap = { member = "nokia_ta1618/keymap.bin", sha256 = "81368f19a166dcd30e4911713c0290afd34ddd65cdcea6e8485ce3d2980bbace" }
+
 [device_data]
 parser = "ta1618_device_data.py"
 

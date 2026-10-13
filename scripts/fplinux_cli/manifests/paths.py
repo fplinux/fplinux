@@ -69,11 +69,6 @@ def target_release_manifest_path(target: str) -> Path:
     return target_directory(target) / "release/manifest.toml"
 
 
-def target_asset_lock_path(target: str) -> Path:
-    """Return the fixed loader asset-lock path for one target."""
-    return target_directory(target) / "loader/assets.lock.toml"
-
-
 def platform_asset_lock_path(platform: str) -> Path:
     """Return the fixed loader asset-lock path for one platform."""
     if TARGET_NAME.fullmatch(platform) is None:

@@ -160,7 +160,11 @@ def _remove_managed_workspace(workspaces: Path, workspace: Path, name: str) -> N
 def _validate_snapshot(snapshot: WorkspaceSnapshot, marker_relative: PurePosixPath) -> None:
     """Reject forged snapshots before they can create cache paths outside the namespace."""
     expected_recipe = snapshot_recipe(
-        snapshot.files, snapshot.build_type, snapshot.linux_operations, snapshot.alpine_graph
+        snapshot.files,
+        snapshot.build_type,
+        snapshot.linux_operations,
+        snapshot.alpine_graph,
+        snapshot.source_declarations,
     )
     if snapshot.recipe != expected_recipe:
         fail("workspace snapshot recipe does not match its files")

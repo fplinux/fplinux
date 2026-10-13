@@ -14,8 +14,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _read_asset_sources(path: Path) -> list[Any]:
-    """Read one owner's declarations, including an empty board-owned asset set."""
+def load_asset_sources(path: Path, *, loader_maps: object | None) -> list[dict[str, Any]]:
+    """Read the platform declaration and resolve the target's optional map pair."""
     if path.is_symlink() or not path.is_file():
         fail(f"asset lock is missing or invalid: {path}")
     try:
@@ -23,83 +23,76 @@ def _read_asset_sources(path: Path) -> list[Any]:
             document = tomllib.load(stream)
     except (OSError, tomllib.TOMLDecodeError) as error:
         fail(f"asset lock is invalid: {error}")
-    root = exact_table(document, {"source"}, "asset lock")
-    sources = root.get("source")
-    if not isinstance(sources, list):
-        fail("asset lock source must be an array")
-    return sources
+    return resolve_asset_sources(document, loader_maps=loader_maps)
 
 
-def _validate_asset_sources(sources: list[Any]) -> list[dict[str, Any]]:
-    """Validate the complete asset set and its unambiguous output roles and paths."""
-    source_ids: set[str] = set()
-    roles: set[str] = set()
-    paths: set[str] = set()
-    result: list[dict[str, Any]] = []
-    for index, raw_source in enumerate(sources):
-        name = f"asset source[{index}]"
-        source = exact_table(
-            raw_source,
-            {"id", "kind", "url", "sha256", "cache_name", "license", "output"},
-            name,
-        )
-        source_id = nonempty_string(source.get("id"), f"{name} id")
-        if source_id in source_ids:
-            fail(f"{name} id must be unique")
-        source_ids.add(source_id)
-        kind = source.get("kind")
-        if kind not in {"file", "7z"}:
-            fail(f"{name} kind must be file or 7z")
-        url = nonempty_string(source.get("url"), f"{name} url")
-        if not url.startswith("https://"):
-            fail(f"{name} url must use HTTPS")
-        sha256_value(source.get("sha256"), f"{name} source")
-        relative_value(source.get("cache_name"), f"{name} cache_name")
-        nonempty_string(source.get("license"), f"{name} license")
-        outputs = source.get("output")
-        if not isinstance(outputs, list) or not outputs:
-            fail(f"{name} output must be a non-empty array")
-        normalized_outputs: list[dict[str, Any]] = []
-        for output_index, raw_output in enumerate(outputs):
-            output_name = f"{name} output[{output_index}]"
-            keys = (
-                {"role", "path", "sha256", "member"}
-                if kind == "7z"
-                else {
-                    "role",
-                    "path",
-                    "sha256",
+def _loader_source(value: object, *, path_fields: tuple[str, ...], name: str) -> dict[str, Any]:
+    """Validate the download pin and destination fields shared by both loader resources."""
+    source = exact_table(value, {"url", "sha256", "cache_name", "license", *path_fields}, name)
+    url = nonempty_string(source["url"], f"{name} url")
+    if not url.startswith("https://"):
+        fail(f"{name} url must use HTTPS")
+    sha256_value(source["sha256"], f"{name} source")
+    relative_value(source["cache_name"], f"{name} cache_name")
+    nonempty_string(source["license"], f"{name} license")
+    for field in path_fields:
+        relative_value(source[field], f"{name} {field}")
+    return source
+
+
+def resolve_asset_sources(
+    common_mapping: object, *, loader_maps: object | None
+) -> list[dict[str, Any]]:
+    """Resolve the common FDL1 and the target's complete, independently pinned map pair."""
+    common = exact_table(common_mapping, {"fdl1", "maps"}, "asset lock")
+    fdl1 = _loader_source(common["fdl1"], path_fields=("path",), name="asset fdl1")
+    maps = _loader_source(
+        common["maps"], path_fields=("pinmap_path", "keymap_path"), name="asset maps"
+    )
+    sources: list[dict[str, Any]] = [
+        {
+            "id": "fdl1",
+            "kind": "file",
+            **{field: fdl1[field] for field in ("url", "sha256", "cache_name", "license")},
+            "output": [{"role": "fdl1", "path": fdl1["path"], "sha256": fdl1["sha256"]}],
+        }
+    ]
+    if loader_maps is not None:
+        selected_maps = exact_table(loader_maps, {"pinmap", "keymap"}, "target loader_maps")
+        outputs: list[dict[str, Any]] = []
+        for role in ("pinmap", "keymap"):
+            name = f"target loader_maps {role}"
+            member = exact_table(selected_maps[role], {"member", "sha256"}, name)
+            outputs.append(
+                {
+                    "role": role,
+                    "path": maps[f"{role}_path"],
+                    "member": relative_value(member["member"], f"{name} member"),
+                    "sha256": sha256_value(member["sha256"], f"{name} output"),
                 }
             )
-            output = exact_table(raw_output, keys, output_name)
-            role = nonempty_string(output.get("role"), f"{output_name} role")
-            if role in roles:
-                fail(f"{output_name} role must be unique")
-            roles.add(role)
-            relative = relative_value(output.get("path"), f"{output_name} path")
+        sources.append(
+            {
+                "id": "maps",
+                "kind": "7z",
+                **{field: maps[field] for field in ("url", "sha256", "cache_name", "license")},
+                "output": outputs,
+            }
+        )
+    paths: set[str] = set()
+    for source in sources:
+        for output in source["output"]:
+            relative = output["path"]
             if relative in paths:
                 fail(f"asset output path is duplicated: {relative}")
             paths.add(relative)
-            sha256_value(output.get("sha256"), f"{output_name} output")
-            if kind == "7z":
-                relative_value(output.get("member"), f"{output_name} member")
-            normalized_outputs.append(output)
-        result.append({**source, "output": normalized_outputs})
-    return result
+    return sources
 
 
-def load_asset_locks(paths: Sequence[Path]) -> list[dict[str, Any]]:
-    """Resolve platform and board assets without allowing either owner to replace the other."""
-    sources = [source for path in paths for source in _read_asset_sources(path)]
-    if not sources:
-        fail("resolved asset lock source must be a non-empty array")
-    return _validate_asset_sources(sources)
-
-
-def asset_bundle_paths(paths: Sequence[Path]) -> dict[str, str]:
-    """Derive bundle paths solely from the resolved asset-lock outputs."""
+def asset_bundle_paths(sources: Sequence[dict[str, Any]]) -> dict[str, str]:
+    """Derive bundle paths solely from the resolved loader outputs."""
     return {
         str(output["role"]): f"assets/{output['path']}"
-        for source in load_asset_locks(paths)
+        for source in sources
         for output in source["output"]
     }

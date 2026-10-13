@@ -18,7 +18,7 @@ from fplinux_cli.alpine import lock as alpine_lock
 from fplinux_cli.alpine import registration as alpine_registration
 from fplinux_cli.alpine import selection as alpine_selection
 from fplinux_cli.common import fail, load_toml, relative_name, sha256_bytes
-from fplinux_cli.manifests.assets import load_asset_locks
+from fplinux_cli.manifests.assets import load_asset_sources
 from fplinux_cli.manifests.values import sha256_value
 
 if TYPE_CHECKING:
@@ -309,13 +309,17 @@ def npm_declarations(
     return {"packages": context}, inputs
 
 
-def _selected_declarations(root: Path) -> tuple[dict[str, Any], dict[str, Any], set[str]]:
+def _selected_declarations(
+    root: Path,
+) -> tuple[dict[str, Any], dict[str, Any], set[str], dict[str, Any]]:
     """Select the package producers reachable through current targets and profiles."""
     targets = {}
+    raw_targets = {}
     platforms = {}
     packages = set(alpine_registration.COMMON_PACKAGES)
     for path in sorted((root / "targets").glob("*/target.toml")):
         target = load_toml(path)
+        raw_targets[path.parent.name] = target
         platform_name = target["platform"]
         if platform_name not in platforms:
             platforms[platform_name] = load_toml(
@@ -343,7 +347,7 @@ def _selected_declarations(root: Path) -> tuple[dict[str, Any], dict[str, Any], 
         }
     if not targets:
         fail("dependency inventory requires at least one declared target")
-    return targets, platforms, packages
+    return targets, platforms, packages, raw_targets
 
 
 def _source_input(
@@ -367,8 +371,8 @@ def _environment_lock(
 ) -> tuple[dict[str, Any], list[DependencyInput]]:
     """Load the exact package closure selected for the build environment."""
     lock = load_toml(root / "environment.lock.toml")
-    if set(lock) != {"selection", "input", "key"}:
-        fail("environment lock must contain selection, input and key declarations")
+    if set(lock) != {"selection", "input"}:
+        fail("environment lock must contain selection and input declarations")
     selection = lock["selection"]
     if not isinstance(selection, dict) or set(selection) != {"arch", "apk_groups"}:
         fail("environment lock selection must contain arch and apk_groups")
@@ -381,10 +385,15 @@ def _environment_lock(
         fail("environment lock must declare external inputs")
     inputs = []
     for record in records:
-        if not isinstance(record, dict) or set(record) not in (
-            {"key", "url", "sha256", "bytes", "destination", "purpose", "arch"},
-            {"key", "url", "sha256", "bytes", "destination", "purpose", "arch", "package"},
-        ):
+        if not isinstance(record, dict) or set(record) != {
+            "key",
+            "url",
+            "sha256",
+            "bytes",
+            "destination",
+            "purpose",
+            "arch",
+        }:
             fail("environment lock input has unsupported fields")
         inputs.append(
             DependencyInput(
@@ -400,7 +409,6 @@ def _environment_lock(
     normalized = {
         **lock,
         "input": sorted(records, key=lambda record: record["key"]),
-        "key": sorted(lock["key"], key=lambda record: record["file"]),
     }
     return normalized, inputs
 
@@ -452,7 +460,7 @@ def environment_inputs(root: Path) -> list[DependencyInput]:
 def _inventory(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
     alpine = alpine_lock.load_alpine_lock(root)
     sources = load_toml(root / "sources.lock.toml")
-    targets, platforms, packages = _selected_declarations(root)
+    targets, platforms, packages, raw_targets = _selected_declarations(root)
     environment_context, inputs = _environment_declarations(root)
     inputs.extend(
         [
@@ -550,11 +558,9 @@ def _inventory(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
             platform_context[name]["uboot"] = lock
     asset_context = {}
     for target, selection in targets.items():
-        assets = load_asset_locks(
-            (
-                root / "platforms" / selection["platform"] / "loader/assets.lock.toml",
-                root / "targets" / target / "loader/assets.lock.toml",
-            )
+        assets = load_asset_sources(
+            root / "platforms" / selection["platform"] / "loader/assets.lock.toml",
+            loader_maps=raw_targets[target].get("loader_maps"),
         )
         asset_context[target] = assets
         for asset in assets:

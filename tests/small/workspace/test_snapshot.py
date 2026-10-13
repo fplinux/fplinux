@@ -94,6 +94,7 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
         root = tmp_path
         source = self._source(root)
         registration_name, registration_file = self._registration_source(root)
+        lock_files = self._source_lock_files(root)
         for package in ("fplinux-selected", "fplinux-dependency", "fplinux-unrelated"):
             directory = root / "alpine/aports" / package
             directory.mkdir(parents=True)
@@ -122,7 +123,11 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
             mock.patch.object(
                 workspace_inputs,
                 "target_build_source_files",
-                return_value=[("source", source), (registration_name, registration_file)],
+                return_value=[
+                    ("source", source),
+                    (registration_name, registration_file),
+                    *lock_files,
+                ],
             ),
             mock.patch.object(alpine_registration, "COMMON_PACKAGES", ()),
             mock.patch.object(alpine_registration, "SUBPACKAGE_APORTS", {}),
@@ -155,6 +160,7 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
         """Even identical fragment bytes cannot give two selected types one workspace identity."""
         root = tmp_path
         source = self._source(root)
+        lock_files = self._source_lock_files(root)
         with (
             workspace_root(root),
             empty_package_graph(),
@@ -167,7 +173,7 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
             mock.patch.object(
                 workspace_inputs,
                 "target_build_source_files",
-                return_value=[("source", source), self._registration_source(root)],
+                return_value=[("source", source), self._registration_source(root), *lock_files],
             ),
             mock.patch.object(
                 workspace_inputs,
@@ -192,6 +198,7 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
         """A target recipe is available before any workspace directory is materialized."""
         root = tmp_path
         source = self._source(root, contents=b"first", mode=0o751)
+        lock_files = self._source_lock_files(root)
         with (
             workspace_root(root),
             empty_package_graph(),
@@ -204,7 +211,11 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
             mock.patch.object(
                 workspace_inputs,
                 "target_build_source_files",
-                return_value=[("nested/source", source), self._registration_source(root)],
+                return_value=[
+                    ("nested/source", source),
+                    self._registration_source(root),
+                    *lock_files,
+                ],
             ),
             mock.patch.object(
                 workspace_inputs,
@@ -214,8 +225,8 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
         ):
             snapshot = workspace_inputs.target_workspace_snapshot("demo")
 
-        assert (snapshot.files) == (
-            (workspace_capture.WorkspaceFile("nested/source", b"first", 0o751),)
+        assert next(item for item in snapshot.files if item.path == "nested/source") == (
+            workspace_capture.WorkspaceFile("nested/source", b"first", 0o751)
         )
         assert (len(snapshot.recipe)) == (64)
         assert not ((root / ".cache").exists())
@@ -248,7 +259,6 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
         host_input = write("tools/local-input.h")
         host_patch = write("tools/local.patch")
         loader_events = write("common/loader_events.py")
-        common_loader = write("platforms/demo/loader/assets.lock.toml")
         panel = write("targets/phone/display/panel.toml")
         write("alpine/ramroot-init.sh", b"#!/bin/sh\nexit 0\n")
         unrelated = write("unselected.txt")
@@ -256,7 +266,6 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
         for relative in (
             "targets/phone/target.toml",
             "targets/phone/release/manifest.toml",
-            "targets/phone/loader/assets.lock.toml",
             "targets/phone/kernel/config.fragment",
             "platforms/demo/kernel/defconfig",
             "platforms/demo/kernel/release.config",
@@ -271,6 +280,8 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
             "platforms/demo/host/adapter.py",
         ):
             write(relative)
+
+        self._source_lock_files(root, "phone")
 
         target: dict[str, Any] = {
             "build_type": "release",
@@ -333,7 +344,9 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
                 return_value=workspace_inputs.SharedLinuxSources(),
             ),
             mock.patch.object(common, "ROOT", root),
-            mock.patch.object(workspace_inputs, "STAGED_BUILD_SOURCES", ("always.txt",)),
+            mock.patch.object(
+                workspace_inputs, "STAGED_BUILD_SOURCES", ("always.txt", "sources.lock.toml")
+            ),
             mock.patch.object(workspace_inputs, "selected_build_sources", return_value=()),
             mock.patch.object(workspace_inputs, "load_target", return_value=target),
             mock.patch.object(workspace_inputs, "load_platform", return_value=platform),
@@ -379,7 +392,6 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
                 host_input,
                 host_patch,
                 loader_events,
-                common_loader,
                 panel,
             ):
                 original = causal.read_bytes()
@@ -406,8 +418,13 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
     ) -> None:
         """Peer C/DTS changes stay auxiliary while a shared driver remains causal."""
         root = tmp_path
-        linux_inputs.write(root, "sources.lock.toml", f'[linux]\nsha256 = "{"1" * 64}"\n')
+        self._source_lock_files(root, "phone-a")
         platform = linux_inputs.platform(root, "demo", source_lock="linux", arch="arm")
+        with platform.open("a", encoding="utf-8") as output:
+            output.write(
+                '[bootstrap]\nvendor_source_lock = "bootstrap"\n'
+                '[[host.tools]]\ntype = "make-archive"\nsource_lock = "host"\n'
+            )
         linux_inputs.platform(root, "other", source_lock="linux", arch="riscv")
         selected = linux_inputs.target(root, "phone-a", platform_name="demo")
         peer_manifest = linux_inputs.target(root, "phone-b", platform_name="other", arch="riscv")
@@ -433,6 +450,7 @@ class WorkspaceSnapshotTests(WorkspaceSourceFixture):
             (path.relative_to(root).as_posix(), path)
             for path in (
                 root / "sources.lock.toml",
+                root / "platforms/demo/loader/assets.lock.toml",
                 platform,
                 selected,
                 common_driver,

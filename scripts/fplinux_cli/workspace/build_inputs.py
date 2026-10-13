@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import tomllib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -15,14 +16,15 @@ from fplinux_cli.alpine.selection import (
     shared_aport_sources,
 )
 from fplinux_cli.build.inputs import selected_build_sources
-from fplinux_cli.common import ROOT, canonical_json_bytes, fail, load_toml
+from fplinux_cli.build.sources import source_lock_entry
+from fplinux_cli.common import ROOT, canonical_json_bytes, fail
 from fplinux_cli.device_data import inputs as firmware_inputs
+from fplinux_cli.manifests.assets import resolve_asset_sources
 from fplinux_cli.manifests.kernel import kernel_config_paths
 from fplinux_cli.manifests.linux import discover_linux_targets, is_shared_linux_operation
 from fplinux_cli.manifests.paths import (
     platform_asset_lock_path,
     profile_manifest_path,
-    target_asset_lock_path,
     target_release_manifest_path,
 )
 from fplinux_cli.manifests.platforms import load_platform
@@ -161,7 +163,6 @@ def target_build_source_files(
         add_source_path(files, source)
     add_source_path(files, target_root / "target.toml")
     add_source_path(files, target_release_manifest_path(target))
-    add_source_path(files, target_asset_lock_path(target))
     add_source_path(files, platform_asset_lock_path(target_config["platform"]))
     display_source = target_config["display"]["source"]
     if display_source is not None:
@@ -216,9 +217,10 @@ def target_build_source_files(
     return sorted(files.items())
 
 
-def shared_linux_source_files(target_config: dict[str, Any]) -> SharedLinuxSources:
+def shared_linux_source_files(
+    target_config: dict[str, Any], sources: dict[str, Any]
+) -> SharedLinuxSources:
     """Separate board-owned copies from source operations shared by compatible builds."""
-    sources = load_toml(ROOT / "sources.lock.toml")
     platform = load_platform(target_config["platform"])
     source_lock = platform["linux"]["source_lock"]
     source = sources.get(source_lock)
@@ -260,6 +262,48 @@ def shared_linux_source_files(target_config: dict[str, Any]) -> SharedLinuxSourc
     )
 
 
+def _captured_toml(source: WorkspaceFile) -> dict[str, Any]:
+    """Parse an immutable TOML input while retaining its diagnostic path."""
+    try:
+        return tomllib.loads(source.contents.decode("utf-8"))
+    except tomllib.TOMLDecodeError as error:
+        fail(f"invalid TOML in {source.path}: {error}")
+
+
+def _captured_source_declarations(
+    files: dict[str, WorkspaceFile], target: str, platform_name: str
+) -> tuple[dict[str, Any], bytes]:
+    """Select source and loader records from the captured checkout bytes."""
+    source_file = files["sources.lock.toml"]
+    sources = _captured_toml(source_file)
+    platform_file = files[f"platforms/{platform_name}/platform.toml"]
+    platform = _captured_toml(platform_file)
+    source_names = {
+        platform["linux"]["source_lock"],
+        platform["bootstrap"]["vendor_source_lock"],
+        *(
+            tool["source_lock"]
+            for tool in platform["host"]["tools"]
+            if tool["type"] == "make-archive"
+        ),
+    }
+    selected = {name: source_lock_entry(sources, name) for name in sorted(source_names)}
+    target_file = files[f"targets/{target}/target.toml"]
+    target_config = _captured_toml(target_file)
+    asset_file = files[f"platforms/{platform_name}/loader/assets.lock.toml"]
+    assets = resolve_asset_sources(
+        _captured_toml(asset_file),
+        loader_maps=target_config.get("loader_maps"),
+    )
+    declarations = canonical_json_bytes(
+        {
+            "sources": {"mode": source_file.mode, "records": selected},
+            "assets": {"mode": asset_file.mode, "records": assets},
+        }
+    )
+    return sources, declarations
+
+
 def target_workspace_snapshot(
     target: str, profile: str | None = None, *, build_type: str = "release"
 ) -> WorkspaceSnapshot:
@@ -273,9 +317,17 @@ def target_workspace_snapshot(
             target_config=target_config,
         )
     )
-    linux_sources = shared_linux_source_files(target_config)
     causal_files = {source.path: source for source in source_snapshot.files}
-    auxiliary_files = [causal_files.pop(relative) for relative in _MATERIALIZED_BUILD_SOURCES]
+    sources, source_declarations = _captured_source_declarations(
+        causal_files, target, target_config["platform"]
+    )
+    linux_sources = shared_linux_source_files(target_config, sources)
+    materialized_sources = (
+        *_MATERIALIZED_BUILD_SOURCES,
+        "sources.lock.toml",
+        f"platforms/{target_config['platform']}/loader/assets.lock.toml",
+    )
+    auxiliary_files = [causal_files.pop(relative) for relative in materialized_sources]
     for relative, source in linux_sources.files:
         if relative in causal_files:
             continue
@@ -319,10 +371,17 @@ def target_workspace_snapshot(
         }
     )
     return WorkspaceSnapshot(
-        snapshot_files,
-        snapshot_recipe(snapshot_files, build_type, linux_sources.operations, alpine_graph),
-        build_type,
-        tuple(auxiliary_files),
-        linux_sources.operations,
-        alpine_graph,
+        files=snapshot_files,
+        recipe=snapshot_recipe(
+            snapshot_files,
+            build_type,
+            linux_sources.operations,
+            alpine_graph,
+            source_declarations,
+        ),
+        build_type=build_type,
+        auxiliary_files=tuple(auxiliary_files),
+        linux_operations=linux_sources.operations,
+        alpine_graph=alpine_graph,
+        source_declarations=source_declarations,
     )

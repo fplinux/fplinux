@@ -33,6 +33,42 @@ class WorkspaceSourceFixture:
         source.write_bytes(b"# empty package declarations\n")
         return relative, source
 
+    @staticmethod
+    def _source_lock_files(root: Path, target: str = "demo") -> list[tuple[str, Path]]:
+        """Supply captured lock inputs beside controlled target and package discovery."""
+        contents = {
+            "sources.lock.toml": (
+                f'[linux]\nsha256 = "{"1" * 64}"\n'
+                '[bootstrap]\narchive_url = "https://example.invalid/boot.tar.gz"\n'
+                f'archive_sha256 = "{"2" * 64}"\n'
+                '[host]\narchive_url = "https://example.invalid/host.tar.gz"\n'
+                f'archive_sha256 = "{"3" * 64}"\n'
+                '[unused]\nurl = "https://example.invalid/unused.tar.gz"\n'
+                f'sha256 = "{"4" * 64}"\n'
+            ),
+            "platforms/demo/platform.toml": (
+                '[linux]\nsource_lock = "linux"\n'
+                '[bootstrap]\nvendor_source_lock = "bootstrap"\n'
+                '[[host.tools]]\ntype = "make-archive"\nsource_lock = "host"\n'
+            ),
+            f"targets/{target}/target.toml": 'platform = "demo"\n',
+            "platforms/demo/loader/assets.lock.toml": (
+                '[fdl1]\nurl = "https://example.invalid/fdl1.bin"\n'
+                f'sha256 = "{"5" * 64}"\ncache_name = "fdl1.bin"\n'
+                'license = "MIT"\npath = "fdl1.bin"\n'
+                '[maps]\nurl = "https://example.invalid/maps.7z"\n'
+                f'sha256 = "{"6" * 64}"\ncache_name = "maps.7z"\n'
+                'license = "MIT"\npinmap_path = "pinmap.bin"\nkeymap_path = "keymap.bin"\n'
+            ),
+        }
+        result = []
+        for relative, text in contents.items():
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+            result.append((relative, path))
+        return result
+
 
 @contextmanager
 def workspace_root(root: Path) -> Iterator[None]:

@@ -59,8 +59,8 @@ Choose a target name and the phone's public brand and product names:
   one platform exists, this option is required.
 
 The command creates the target manifest, headless bootstrap, board Devicetree,
-kernel configuration, pinned RAM-loader inputs and standalone-archive
-descriptions. It lists the files it created. It refuses an existing target
+kernel configuration and standalone-archive descriptions. It uses the platform's
+pinned RAM loader. It lists the files it created. It refuses an existing target
 directory and leaves nothing behind when a name or identity field is invalid.
 
 The new target uses <Key>\*</Key> as the boot key and `exec_distance = 0`,

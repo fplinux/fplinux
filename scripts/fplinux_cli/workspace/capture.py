@@ -33,6 +33,7 @@ class WorkspaceSnapshot:
     auxiliary_files: tuple[WorkspaceFile, ...] = ()
     linux_operations: tuple[tuple[str, str, str], ...] = ()
     alpine_graph: bytes = b""
+    source_declarations: bytes = b""
 
     @property
     def materialization_recipe(self) -> str:
@@ -42,6 +43,7 @@ class WorkspaceSnapshot:
             self.build_type,
             self.linux_operations,
             self.alpine_graph,
+            self.source_declarations,
         )
 
     @property
@@ -104,6 +106,7 @@ def snapshot_recipe(
     build_type: str | None = None,
     linux_operations: tuple[tuple[str, str, str], ...] = (),
     alpine_graph: bytes = b"",
+    source_declarations: bytes = b"",
 ) -> str:
     """Hash exact source paths, bytes, and permissions from an immutable snapshot."""
     value = hashlib.sha256()
@@ -116,6 +119,10 @@ def snapshot_recipe(
     if alpine_graph:
         value.update(b"alpine_graph\0")
         value.update(alpine_graph)
+        value.update(b"\0")
+    if source_declarations:
+        value.update(b"source_declarations\0")
+        value.update(source_declarations)
         value.update(b"\0")
     for source in files:
         value.update(source.path.encode())

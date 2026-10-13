@@ -56,12 +56,7 @@ class DependencyInputTests:
                 'url = "https://example.invalid/tool-2.0-r0.apk"\n'
                 f'sha256 = "{"e" * 64}"\nbytes = 12\n'
                 'destination = "downloads/environment/apk/main/x86_64/tool-2.0-r0.apk"\n'
-                'purpose = "container-package"\narch = "x86_64"\n'
-                '[input.package]\nname = "tool"\nversion = "2.0-r0"\n'
-                'provides = ["cmd:tool=2.0-r0"]\ndepends = []\n'
-                '[[key]]\nfile = "test.rsa.pub"\n'
-                f'sha256 = "{"f" * 64}"\nbytes = 10\n'
-                'source = "container:base-rootfs"\nmember = "etc/apk/keys/test.rsa.pub"\n',
+                'purpose = "container-package"\narch = "x86_64"\n',
             )
             self._write(
                 "package-lock.json",
@@ -121,15 +116,13 @@ class DependencyInputTests:
             )
             self._write(
                 "platforms/test-platform/loader/assets.lock.toml",
-                "source = []\n",
-            )
-            self._write(
-                "targets/test-phone/loader/assets.lock.toml",
-                '[[source]]\nid = "loader"\nkind = "file"\n'
+                "[fdl1]\n"
                 'url = "https://example.invalid/loader.bin"\n'
                 f'sha256 = "{"7" * 64}"\ncache_name = "loader.bin"\nlicense = "MIT"\n'
-                '[[source.output]]\nrole = "fdl1"\npath = "loader.bin"\n'
-                f'sha256 = "{"7" * 64}"\n',
+                'path = "loader.bin"\n'
+                '[maps]\nurl = "https://example.invalid/maps.7z"\n'
+                f'sha256 = "{"8" * 64}"\ncache_name = "maps.7z"\nlicense = "MIT"\n'
+                'pinmap_path = "pinmap.bin"\nkeymap_path = "keymap.bin"\n',
             )
             for package in (
                 "fplinux-base",
@@ -178,7 +171,7 @@ class DependencyInputTests:
         assert (actual["alpine:minirootfs"].destination) == (
             "downloads/alpine/alpine-minirootfs-3.24.2-armv7.tar.gz"
         )
-        assert (actual["asset:test-phone:loader"].destination) == ("downloads/loader.bin")
+        assert (actual["asset:test-phone:fdl1"].destination) == ("downloads/loader.bin")
 
     def test_source_loop_expands_each_pinned_patch_in_order(self) -> None:
         """Patch declarations in a literal loop remain separate exact downloads."""
@@ -232,27 +225,43 @@ class DependencyInputTests:
         self,
     ) -> None:
         """Shared loader changes reach the dependency archive alongside board-owned pins."""
-        declaration = (
-            '[[source]]\nid = "shared-loader"\nkind = "file"\n'
-            'url = "https://example.invalid/shared-loader.bin"\n'
-            f'sha256 = "{"8" * 64}"\ncache_name = "shared-loader.bin"\nlicense = "MIT"\n'
-            '[[source.output]]\nrole = "shared-fdl1"\npath = "shared-loader.bin"\n'
-            f'sha256 = "{"8" * 64}"\n'
-        )
-        self._write("platforms/test-platform/loader/assets.lock.toml", declaration)
+        target = self.root / "targets/test-phone/target.toml"
+        with target.open("a", encoding="utf-8") as output:
+            output.write(
+                "\n[loader_maps]\n"
+                f'pinmap = {{member = "phone/pinmap.bin", sha256 = "{"9" * 64}"}}\n'
+                f'keymap = {{member = "phone/keymap.bin", sha256 = "{"0" * 64}"}}\n'
+            )
+        declaration = (self.root / "platforms/test-platform/loader/assets.lock.toml").read_text()
         before_inputs, before_context = dependency_selection(self.root)
         self._write(
             "platforms/test-platform/loader/assets.lock.toml",
-            declaration.replace("8" * 64, "9" * 64),
+            declaration.replace("7" * 64, "a" * 64),
         )
         after_inputs, after_context = dependency_selection(self.root)
 
         before = {record.key: record for record in before_inputs}
         after = {record.key: record for record in after_inputs}
-        assert before["asset:test-phone:shared-loader"].sha256 == "8" * 64
-        assert after["asset:test-phone:shared-loader"].sha256 == "9" * 64
-        assert after["asset:test-phone:shared-loader"].destination == "downloads/shared-loader.bin"
-        assert after["asset:test-phone:loader"] == before["asset:test-phone:loader"]
+        assert before["asset:test-phone:fdl1"].sha256 == "7" * 64
+        assert after["asset:test-phone:fdl1"].sha256 == "a" * 64
+        assert after["asset:test-phone:fdl1"].destination == "downloads/loader.bin"
+        assert after["asset:test-phone:maps"] == before["asset:test-phone:maps"]
+        assets = after_context["assets"]
+        assert isinstance(assets, dict)
+        assert assets["test-phone"][1]["output"] == [
+            {
+                "role": "pinmap",
+                "path": "pinmap.bin",
+                "member": "phone/pinmap.bin",
+                "sha256": "9" * 64,
+            },
+            {
+                "role": "keymap",
+                "path": "keymap.bin",
+                "member": "phone/keymap.bin",
+                "sha256": "0" * 64,
+            },
+        ]
         assert before_context != after_context
 
     def test_context_tracks_selected_providers_and_source_sequences(self) -> None:

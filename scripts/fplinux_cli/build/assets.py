@@ -12,7 +12,6 @@ from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
 from fplinux_cli.build import sources as sources_build
 from fplinux_cli.common import fail, replace_file_atomically, sha256_bytes
-from fplinux_cli.manifests.assets import load_asset_locks
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -44,7 +43,7 @@ def write_checked(data: bytes, destination: Path, expected: str) -> None:
     replace_file_atomically(destination, data, 0o600, sync=False)
 
 
-def _asset_lock_bytes(sources: list[dict[str, Any]]) -> bytes:
+def _asset_lock_bytes(sources: Sequence[dict[str, Any]]) -> bytes:
     """Encode a self-contained lock retaining source and output integrity pins."""
     license_tag = "SPDX-License-" + "Identifier"
     lines = [f"# {license_tag}: GPL-2.0-only"]
@@ -65,10 +64,9 @@ def _asset_lock_bytes(sources: list[dict[str, Any]]) -> bytes:
 
 
 def build_assets(
-    lock_paths: Sequence[Path], output: Path, *, lock_output: Path
+    sources: Sequence[dict[str, Any]], output: Path, *, lock_output: Path
 ) -> dict[str, tuple[str, str]]:
     """Fetch pinned assets and emit the resolved lock delivered beside them."""
-    sources = load_asset_locks(lock_paths)
     result: dict[str, tuple[str, str]] = {}
     for source in sources:
         archive = sources_build.fetch(
