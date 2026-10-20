@@ -1,0 +1,431 @@
+--- a/drivers/input/misc/sc27xx-vibra.c
++++ b/drivers/input/misc/sc27xx-vibra.c
+@@ -5,33 +5,60 @@
+ 
+ #include <linux/device.h>
+ #include <linux/input.h>
++#include <linux/jiffies.h>
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
++#include <linux/pm.h>
+ #include <linux/property.h>
+ #include <linux/regmap.h>
++#include <linux/spinlock.h>
+ #include <linux/workqueue.h>
+ 
+ #define CUR_DRV_CAL_SEL			GENMASK(13, 12)
+ #define SLP_LDOVIBR_PD_EN		BIT(9)
+ #define LDO_VIBR_PD			BIT(8)
++#define SC2720_LDO_VIBR_V GENMASK(2, 0)
++#define SC2721_LDO_VIBR_V GENMASK(7, 0)
++#define SC27XX_MAX_ON_MS 5000
+ #define SC2730_CUR_DRV_CAL_SEL		0
+ #define SC2730_SLP_LDOVIBR_PD_EN	BIT(14)
+ #define SC2730_LDO_VIBR_PD		BIT(13)
+ 
+ struct sc27xx_vibra_data {
+ 	u32 cur_drv_cal_sel;
++	u32 voltage_mask;
+ 	u32 slp_pd_en;
+ 	u32 ldo_pd;
++	u32 max_on_ms;
++	const char *phys;
+ };
+ 
+ struct vibra_info {
++	struct device *dev;
+ 	struct input_dev	*input_dev;
+ 	struct work_struct	play_work;
++	struct delayed_work stop_work;
+ 	struct regmap		*regmap;
+ 	const struct sc27xx_vibra_data *data;
++	/* Protects requested strength, deadlines and lifecycle flags. */
++	spinlock_t state_lock;
++	unsigned long stop_deadline;
+ 	u32			base;
+ 	u32			strength;
+ 	bool			enabled;
++	bool suspended;
++	bool stopping;
++	bool cutoff_latched;
++	bool off_pending;
++	bool faulted;
++};
++
++static const struct sc27xx_vibra_data sc2720_data = {
++	.voltage_mask = SC2720_LDO_VIBR_V,
++	.slp_pd_en = SLP_LDOVIBR_PD_EN,
++	.ldo_pd = LDO_VIBR_PD,
++	.max_on_ms = SC27XX_MAX_ON_MS,
++	.phys = "fplinux/vibrator0",
+ };
+ 
+ static const struct sc27xx_vibra_data sc2731_data = {
+@@ -47,68 +74,293 @@
+ };
+ 
+ static const struct sc27xx_vibra_data sc2721_data = {
+-	.cur_drv_cal_sel = CUR_DRV_CAL_SEL,
++	.voltage_mask = SC2721_LDO_VIBR_V,
+ 	.slp_pd_en = SLP_LDOVIBR_PD_EN,
+ 	.ldo_pd = LDO_VIBR_PD,
++	.max_on_ms = SC27XX_MAX_ON_MS,
++	.phys = "fplinux/vibrator0",
+ };
+ 
+-static void sc27xx_vibra_set(struct vibra_info *info, bool on)
++static int sc27xx_vibra_set(struct vibra_info *info, bool on)
+ {
+ 	const struct sc27xx_vibra_data *data = info->data;
++	int ret, stop_ret;
++
+ 	if (on) {
+-		regmap_update_bits(info->regmap, info->base, data->ldo_pd, 0);
+-		regmap_update_bits(info->regmap, info->base,
+-				   data->slp_pd_en, 0);
++		ret = regmap_update_bits(info->regmap, info->base, data->ldo_pd,
++					 0);
++		if (ret)
++			return ret;
++
++		ret = regmap_update_bits(info->regmap, info->base,
++					 data->slp_pd_en, 0);
++		if (ret) {
++			stop_ret = regmap_update_bits(info->regmap, info->base,
++						      data->ldo_pd,
++						      data->ldo_pd);
++			if (stop_ret)
++				dev_err(info->dev,
++					"failed to stop vibrator after enable error: %d\n",
++					stop_ret);
++			return ret;
++		}
+ 		info->enabled = true;
+ 	} else {
+-		regmap_update_bits(info->regmap, info->base, data->ldo_pd,
+-				   data->ldo_pd);
+-		regmap_update_bits(info->regmap, info->base,
+-				   data->slp_pd_en, data->slp_pd_en);
+-		info->enabled = false;
++		ret = regmap_update_bits(info->regmap, info->base, data->ldo_pd,
++					 data->ldo_pd);
++		stop_ret = regmap_update_bits(info->regmap, info->base,
++					      data->slp_pd_en, data->slp_pd_en);
++		if (!ret && !stop_ret)
++			info->enabled = false;
++		if (ret)
++			return ret;
++		if (stop_ret)
++			return stop_ret;
+ 	}
++
++	return 0;
+ }
+ 
+ static int sc27xx_vibra_hw_init(struct vibra_info *info)
+ {
+ 	const struct sc27xx_vibra_data *data = info->data;
++	u32 mask = data->cur_drv_cal_sel;
++	u32 val = 0;
++	int ret;
++
++	if (data->voltage_mask) {
++		ret = device_property_read_u32(info->dev, "sprd,voltage-code",
++					       &val);
++		if (ret)
++			return ret;
++		if (val > data->voltage_mask)
++			return -EINVAL;
++		mask |= data->voltage_mask;
++	}
+ 
+-	if (!data->cur_drv_cal_sel)
+-		return 0;
++	if (mask) {
++		ret = regmap_update_bits(info->regmap, info->base, mask, val);
++		if (ret)
++			return ret;
++	}
+ 
+-	return regmap_update_bits(info->regmap, info->base,
+-				  data->cur_drv_cal_sel, 0);
++	return sc27xx_vibra_set(info, false);
+ }
+ 
+ static void sc27xx_vibra_play_work(struct work_struct *work)
+ {
+ 	struct vibra_info *info = container_of(work, struct vibra_info,
+ 					       play_work);
++	unsigned long flags;
++	bool on;
++	bool force_off;
++	int ret;
++
++	spin_lock_irqsave(&info->state_lock, flags);
++	on = info->strength && !info->suspended && !info->stopping;
++	force_off = info->off_pending;
++	spin_unlock_irqrestore(&info->state_lock, flags);
++
++	if (on == info->enabled && !force_off)
++		return;
++
++	ret = sc27xx_vibra_set(info, on);
++	if (ret) {
++		spin_lock_irqsave(&info->state_lock, flags);
++		info->strength = 0;
++		info->cutoff_latched = true;
++		info->off_pending = true;
++		info->faulted = true;
++		spin_unlock_irqrestore(&info->state_lock, flags);
++		dev_err(info->dev, "failed to %s vibrator: %d\n",
++			on ? "start" : "stop", ret);
++	} else if (!on) {
++		spin_lock_irqsave(&info->state_lock, flags);
++		info->cutoff_latched = false;
++		info->off_pending = false;
++		info->faulted = false;
++		spin_unlock_irqrestore(&info->state_lock, flags);
++		cancel_delayed_work(&info->stop_work);
++	}
++}
+ 
+-	if (info->strength && !info->enabled)
+-		sc27xx_vibra_set(info, true);
+-	else if (info->strength == 0 && info->enabled)
+-		sc27xx_vibra_set(info, false);
++static void sc27xx_vibra_stop_work(struct work_struct *work)
++{
++	struct vibra_info *info = container_of(to_delayed_work(work),
++					       struct vibra_info, stop_work);
++	unsigned long flags;
++	unsigned long delay = 0;
++	bool stop = false;
++
++	spin_lock_irqsave(&info->state_lock, flags);
++	if (info->off_pending) {
++		stop = true;
++	} else if (info->strength && !info->suspended && !info->stopping) {
++		if (time_before(jiffies, info->stop_deadline)) {
++			delay = info->stop_deadline - jiffies;
++		} else {
++			info->strength = 0;
++			info->cutoff_latched = true;
++			info->off_pending = true;
++			stop = true;
++		}
++	}
++	spin_unlock_irqrestore(&info->state_lock, flags);
++
++	if (delay)
++		mod_delayed_work(system_percpu_wq, &info->stop_work, delay);
++	else if (stop)
++		schedule_work(&info->play_work);
+ }
+ 
+ static int sc27xx_vibra_play(struct input_dev *input, void *data,
+ 			     struct ff_effect *effect)
+ {
+-	struct vibra_info *info = input_get_drvdata(input);
+-
+-	info->strength = effect->u.rumble.weak_magnitude;
++	struct vibra_info *info = data;
++	unsigned long flags;
++	unsigned long delay = 0;
++	u32 strength;
++	bool force_stop = false;
++	int ret = 0;
++
++	(void)input;
++	strength = effect->u.rumble.strong_magnitude ||
++		   effect->u.rumble.weak_magnitude;
++	spin_lock_irqsave(&info->state_lock, flags);
++	if (info->suspended || info->stopping) {
++		ret = -ESHUTDOWN;
++	} else if (strength && info->faulted) {
++		ret = -EIO;
++	} else if (strength && (info->cutoff_latched || info->off_pending)) {
++		ret = -EBUSY;
++	} else {
++		if (strength && info->data->max_on_ms) {
++			if (!info->strength)
++				info->stop_deadline =
++					jiffies +
++					msecs_to_jiffies(info->data->max_on_ms);
++			if (time_before(jiffies, info->stop_deadline)) {
++				delay = info->stop_deadline - jiffies;
++			} else {
++				strength = 0;
++				info->cutoff_latched = true;
++				info->off_pending = true;
++				force_stop = true;
++				ret = -EBUSY;
++			}
++		}
++		info->strength = strength;
++		if (!strength)
++			info->off_pending = true;
++	}
++	spin_unlock_irqrestore(&info->state_lock, flags);
++	if (ret && !force_stop)
++		return ret;
++
++	if (info->data->max_on_ms) {
++		if (strength)
++			mod_delayed_work(system_percpu_wq, &info->stop_work,
++					 delay);
++	}
+ 	schedule_work(&info->play_work);
+ 
+-	return 0;
++	return ret;
++}
++
++static int sc27xx_vibra_stop(struct vibra_info *info)
++{
++	unsigned long flags;
++	int ret;
++
++	spin_lock_irqsave(&info->state_lock, flags);
++	info->strength = 0;
++	info->off_pending = true;
++	spin_unlock_irqrestore(&info->state_lock, flags);
++	cancel_delayed_work_sync(&info->stop_work);
++	cancel_work_sync(&info->play_work);
++
++	ret = sc27xx_vibra_set(info, false);
++	spin_lock_irqsave(&info->state_lock, flags);
++	if (ret) {
++		info->cutoff_latched = true;
++		info->faulted = true;
++	} else {
++		info->cutoff_latched = false;
++		info->off_pending = false;
++		info->faulted = false;
++	}
++	spin_unlock_irqrestore(&info->state_lock, flags);
++
++	return ret;
+ }
+ 
+ static void sc27xx_vibra_close(struct input_dev *input)
+ {
+ 	struct vibra_info *info = input_get_drvdata(input);
++	int ret;
+ 
+-	cancel_work_sync(&info->play_work);
+-	if (info->enabled)
+-		sc27xx_vibra_set(info, false);
++	ret = sc27xx_vibra_stop(info);
++	if (ret)
++		dev_err(info->dev, "failed to stop vibrator on close: %d\n",
++			ret);
++}
++
++static int sc27xx_vibra_suspend(struct device *dev)
++{
++	struct vibra_info *info = dev_get_drvdata(dev);
++	unsigned long flags;
++	int ret;
++
++	spin_lock_irqsave(&info->state_lock, flags);
++	info->suspended = true;
++	spin_unlock_irqrestore(&info->state_lock, flags);
++
++	ret = sc27xx_vibra_stop(info);
++	if (ret)
++		dev_err(dev, "failed to stop vibrator for suspend: %d\n", ret);
++	return ret;
++}
++
++static int sc27xx_vibra_resume(struct device *dev)
++{
++	struct vibra_info *info = dev_get_drvdata(dev);
++	unsigned long flags;
++
++	spin_lock_irqsave(&info->state_lock, flags);
++	if (!info->stopping && !info->faulted)
++		info->suspended = false;
++	spin_unlock_irqrestore(&info->state_lock, flags);
++
++	return 0;
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(sc27xx_vibra_pm_ops, sc27xx_vibra_suspend,
++				sc27xx_vibra_resume);
++
++static void sc27xx_vibra_teardown(struct platform_device *pdev)
++{
++	struct vibra_info *info = platform_get_drvdata(pdev);
++	unsigned long flags;
++	int ret;
++
++	spin_lock_irqsave(&info->state_lock, flags);
++	info->stopping = true;
++	spin_unlock_irqrestore(&info->state_lock, flags);
++
++	ret = sc27xx_vibra_stop(info);
++	if (ret)
++		dev_err(&pdev->dev,
++			"failed to stop vibrator during teardown: %d\n", ret);
++}
++
++static void sc27xx_vibra_remove(struct platform_device *pdev)
++{
++	sc27xx_vibra_teardown(pdev);
++}
++
++static void sc27xx_vibra_shutdown(struct platform_device *pdev)
++{
++	sc27xx_vibra_teardown(pdev);
+ }
+ 
+ static int sc27xx_vibra_probe(struct platform_device *pdev)
+@@ -146,14 +398,19 @@
+ 	}
+ 
+ 	info->input_dev->name = "sc27xx:vibrator";
++	info->input_dev->phys = data->phys;
+ 	info->input_dev->id.version = 0;
+ 	info->input_dev->close = sc27xx_vibra_close;
++	info->dev = &pdev->dev;
+ 	info->data = data;
+ 
+ 	input_set_drvdata(info->input_dev, info);
+ 	input_set_capability(info->input_dev, EV_FF, FF_RUMBLE);
+ 	INIT_WORK(&info->play_work, sc27xx_vibra_play_work);
++	INIT_DELAYED_WORK(&info->stop_work, sc27xx_vibra_stop_work);
++	spin_lock_init(&info->state_lock);
+ 	info->enabled = false;
++	platform_set_drvdata(pdev, info);
+ 
+ 	error = sc27xx_vibra_hw_init(info);
+ 	if (error) {
+@@ -161,7 +418,7 @@
+ 		return error;
+ 	}
+ 
+-	error = input_ff_create_memless(info->input_dev, NULL,
++	error = input_ff_create_memless(info->input_dev, info,
+ 					sc27xx_vibra_play);
+ 	if (error) {
+ 		dev_err(&pdev->dev, "failed to register vibrator to FF.\n");
+@@ -178,6 +435,7 @@
+ }
+ 
+ static const struct of_device_id sc27xx_vibra_of_match[] = {
++	{ .compatible = "sprd,sc2720-vibrator", .data = &sc2720_data },
+ 	{ .compatible = "sprd,sc2721-vibrator", .data = &sc2721_data },
+ 	{ .compatible = "sprd,sc2730-vibrator", .data = &sc2730_data },
+ 	{ .compatible = "sprd,sc2731-vibrator", .data = &sc2731_data },
+@@ -189,8 +447,11 @@
+ 	.driver = {
+ 		.name = "sc27xx-vibrator",
+ 		.of_match_table = sc27xx_vibra_of_match,
++		.pm = pm_sleep_ptr(&sc27xx_vibra_pm_ops),
+ 	},
+ 	.probe = sc27xx_vibra_probe,
++	.remove = sc27xx_vibra_remove,
++	.shutdown = sc27xx_vibra_shutdown,
+ };
+ 
+ module_platform_driver(sc27xx_vibra_driver);

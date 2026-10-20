@@ -1,0 +1,369 @@
+diff --git a/drivers/regulator/Kconfig b/drivers/regulator/Kconfig
+--- a/drivers/regulator/Kconfig
++++ b/drivers/regulator/Kconfig
+@@ -1477,12 +1477,28 @@
+ 	 via I2C bus. S5M8767A have 9 Bucks and 28 LDOs output and
+ 	 supports DVS mode with 8bits of output voltage control.
+ 
++config REGULATOR_SC27XX_CORE
++	tristate
++
+ config REGULATOR_SC2731
+-	tristate "Spreadtrum SC2731 power regulator driver"
++	tristate "Spreadtrum SC27xx power regulator driver"
+ 	depends on MFD_SC27XX_PMIC || COMPILE_TEST
++	select REGULATOR_SC27XX_CORE
+ 	help
+ 	  This driver provides support for the voltage regulators on the
+-	  SC2731 PMIC.
++	  SC2720 and SC2731 PMICs.
++
++config REGULATOR_SC2720_USB33
++	bool
++	depends on REGULATOR_SC2731
++
++config REGULATOR_SC2720_WCN
++	bool
++	depends on REGULATOR_SC2731
++
++config REGULATOR_SC2720_WIFIPA
++	bool
++	depends on REGULATOR_SC2731
+ 
+ config REGULATOR_SGM3804
+ 	tristate "SGMicro SGM3804 voltage regulator"
+diff --git a/drivers/regulator/Makefile b/drivers/regulator/Makefile
+--- a/drivers/regulator/Makefile
++++ b/drivers/regulator/Makefile
+@@ -170,6 +170,7 @@
+ obj-$(CONFIG_REGULATOR_S2MPA01) += s2mpa01.o
+ obj-$(CONFIG_REGULATOR_S2MPS11) += s2mps11.o
+ obj-$(CONFIG_REGULATOR_S5M8767) += s5m8767.o
++obj-$(CONFIG_REGULATOR_SC27XX_CORE) += sc27xx-regulator-core.o
+ obj-$(CONFIG_REGULATOR_SC2731) += sc2731-regulator.o
+ obj-$(CONFIG_REGULATOR_SGM3804) += sgm3804-regulator.o
+ obj-$(CONFIG_REGULATOR_SKY81452) += sky81452-regulator.o
+diff --git a/drivers/regulator/sc2731-regulator.c b/drivers/regulator/sc2731-regulator.c
+--- a/drivers/regulator/sc2731-regulator.c
++++ b/drivers/regulator/sc2731-regulator.c
+@@ -10,6 +10,42 @@
+ #include <linux/regulator/driver.h>
+ #include <linux/regulator/of_regulator.h>
+ 
++#include "sc27xx-regulator-core.h"
++
++/*
++ * SC2720 regulator registers
++ */
++#define SC2720_LDO_CAMIO_PD 0xc8c
++#define SC2720_LDO_CAMIO_VOL 0xc90
++#define SC2720_LDO_CAMD_PD 0xca4
++#define SC2720_LDO_CAMD_VOL 0xca8
++#define SC2720_LDO_WCN_PD 0xcac
++#define SC2720_LDO_WCN_VOL 0xcb0
++#define SC2720_LDO_CAMA_PD 0xce0
++#define SC2720_LDO_CAMA_VOL 0xce4
++#define SC2720_LDO_SDCORE_PD 0xd00
++#define SC2720_LDO_SDCORE_VOL 0xd04
++#define SC2720_LDO_SDIO_PD 0xd0c
++#define SC2720_LDO_SDIO_VOL 0xd10
++#if IS_ENABLED(CONFIG_REGULATOR_SC2720_WIFIPA)
++#define SC2720_LDO_WIFIPA_PD 0xd1c
++#endif
++#define SC2720_LDO_USB33_PD 0xd30
++#define SC2720_LDO_USB33_VOL 0xd34
++
++#define SC2720_LDO_PD_MASK BIT(0)
++#define SC2720_LDO_VOL_MASK GENMASK(6, 0)
++#define SC2720_LDO_CAMA_VOL_MASK GENMASK(6, 0)
++#define SC2720_LDO_CAMIO_VOL_MASK GENMASK(5, 0)
++#define SC2720_LDO_CAMD_VOL_MASK GENMASK(5, 0)
++#define SC2720_LDO_WCN_VOL_MASK GENMASK(5, 0)
++#define SC2720_CAM_LDO_STEP_UV 12500
++#define SC2720_LDO_SDCORE_3000MV 0x50
++#define SC2720_LDO_SDIO_3000MV 0x6f
++#define SC2720_LDO_USB33_3300MV 0x60
++/* vmmc is enabled first; wait once after the final vqmmc transition. */
++#define SC2720_SD_RAIL_ENABLE_TIME_US 300000
++
+ /*
+  * SC2731 regulator lock register
+  */
+@@ -118,20 +154,116 @@
+ 	SC2731_LDO_SRAM,
+ };
+ 
+-static const struct regulator_ops sc2731_regu_linear_ops = {
++enum sc2720_regulator_id {
++	SC2720_LDO_CAMA,
++	SC2720_LDO_CAMIO,
++	SC2720_LDO_CAMD,
++	SC2720_LDO_SDCORE,
++	SC2720_LDO_SDIO,
++	SC2720_LDO_USB33,
++	SC2720_LDO_WCN,
++#if IS_ENABLED(CONFIG_REGULATOR_SC2720_WIFIPA)
++	SC2720_LDO_WIFIPA,
++#endif
++};
++
++static int sc2720_regulator_enable(struct regulator_dev *rdev)
++{
++	const struct sc27xx_regulator_desc *regulator =
++		container_of(rdev->desc, struct sc27xx_regulator_desc, desc);
++	int ret;
++
++	ret = regmap_update_bits(rdev_get_regmap(rdev), rdev->desc->vsel_reg,
++				 rdev->desc->vsel_mask, regulator->fixed_vsel);
++	if (ret)
++		return ret;
++
++	return regulator_enable_regmap(rdev);
++}
++
++static int sc2720_regulator_is_enabled(struct regulator_dev *rdev)
++{
++	const struct sc27xx_regulator_desc *regulator =
++		container_of(rdev->desc, struct sc27xx_regulator_desc, desc);
++	u32 val;
++	int ret;
++
++	ret = regulator_is_enabled_regmap(rdev);
++	if (ret <= 0)
++		return ret;
++
++	ret = regmap_read(rdev_get_regmap(rdev), rdev->desc->vsel_reg, &val);
++	if (ret)
++		return ret;
++
++	if ((val & rdev->desc->vsel_mask) != regulator->fixed_vsel)
++		return -ERANGE;
++
++	return 1;
++}
++
++static const struct regulator_ops sc2720_regu_fixed_ops = {
++	.enable = sc2720_regulator_enable,
++	.disable = regulator_disable_regmap,
++	.is_enabled = sc2720_regulator_is_enabled,
++};
++
++#if IS_ENABLED(CONFIG_REGULATOR_SC2720_WIFIPA)
++static const struct regulator_ops sc2720_regu_wifipa_ops = {
+ 	.enable = regulator_enable_regmap,
+ 	.disable = regulator_disable_regmap,
+ 	.is_enabled = regulator_is_enabled_regmap,
+-	.list_voltage = regulator_list_voltage_linear,
+-	.get_voltage_sel = regulator_get_voltage_sel_regmap,
+-	.set_voltage_sel = regulator_set_voltage_sel_regmap,
+ };
++#endif
++
++#define SC2720_REGU_FIXED(_id, en_reg, vreg, vsel, voltage, enable_delay) \
++	{ \
++	.desc = {							\
++		.name			= #_id,				\
++		.of_match		= of_match_ptr(#_id),		\
++		.ops			= &sc2720_regu_fixed_ops,	\
++		.type			= REGULATOR_VOLTAGE,		\
++		.id			= SC2720_##_id,			\
++		.owner			= THIS_MODULE,			\
++		.n_voltages		= 1,				\
++		.fixed_uV		= voltage,			\
++		.enable_time		= enable_delay,			\
++		.enable_is_inverted	= true,				\
++		.enable_reg		= en_reg,			\
++		.enable_mask		= SC2720_LDO_PD_MASK,		\
++		.vsel_reg		= vreg,				\
++		.vsel_mask		= SC2720_LDO_VOL_MASK,		\
++	},							\
++	.fixed_vsel = vsel,						\
++}
++
++#define SC2720_REGU_LINEAR(_id, en_reg, vreg, vmask, vmin) \
++	{ \
++	.desc = {							\
++		.name			= #_id,				\
++		.of_match		= of_match_ptr(#_id),		\
++		.ops			= &sc27xx_regu_linear_ops, \
++		.type			= REGULATOR_VOLTAGE,		\
++		.id			= SC2720_##_id,			\
++		.owner			= THIS_MODULE,			\
++		.min_uV			= vmin,				\
++		.n_voltages		= (vmask) + 1,			\
++		.uV_step		= SC2720_CAM_LDO_STEP_UV,	\
++		.enable_is_inverted	= true,				\
++		.enable_reg		= en_reg,			\
++		.enable_mask		= SC2720_LDO_PD_MASK,	\
++		.vsel_reg		= vreg,				\
++		.vsel_mask		= vmask,			\
++	},							\
++}
+ 
+-#define SC2731_REGU_LINEAR(_id, en_reg, en_mask, vreg, vmask,	\
+-			  vstep, vmin, vmax) {			\
++#define SC2731_REGU_LINEAR(_id, en_reg, en_mask, vreg, vmask, vstep, vmin, \
++			   vmax)                                           \
++	{			\
++	.desc = {						\
+ 	.name			= #_id,				\
+ 	.of_match		= of_match_ptr(#_id),		\
+-	.ops			= &sc2731_regu_linear_ops,	\
++	.ops			= &sc27xx_regu_linear_ops,	\
+ 	.type			= REGULATOR_VOLTAGE,		\
+ 	.id			= SC2731_##_id,			\
+ 	.owner			= THIS_MODULE,			\
+@@ -144,9 +276,10 @@
+ 	.enable_mask		= en_mask,			\
+ 	.vsel_reg		= vreg,				\
+ 	.vsel_mask		= vmask,			\
++	},							\
+ }
+ 
+-static const struct regulator_desc regulators[] = {
++static const struct sc27xx_regulator_desc sc2731_regulators[] = {
+ 	SC2731_REGU_LINEAR(BUCK_CPU0, SC2731_POWER_PD_SW,
+ 			   SC2731_DCDC_CPU0_PD_MASK, SC2731_DCDC_CPU0_VOL,
+ 			   SC2731_DCDC_CPU0_VOL_MASK, 3125, 400000, 1996875),
+@@ -154,8 +287,8 @@
+ 			   SC2731_DCDC_CPU1_PD_MASK, SC2731_DCDC_CPU1_VOL,
+ 			   SC2731_DCDC_CPU1_VOL_MASK, 3125, 400000, 1996875),
+ 	SC2731_REGU_LINEAR(BUCK_RF, SC2731_POWER_PD_SW, SC2731_DCDC_RF_PD_MASK,
+-			   SC2731_DCDC_RF_VOL, SC2731_DCDC_RF_VOL_MASK,
+-			   3125, 600000, 2196875),
++			   SC2731_DCDC_RF_VOL, SC2731_DCDC_RF_VOL_MASK, 3125,
++			   600000, 2196875),
+ 	SC2731_REGU_LINEAR(LDO_CAMA0, SC2731_LDO_CAMA0_PD,
+ 			   SC2731_LDO_CAMA0_PD_MASK, SC2731_LDO_CAMA0_VOL,
+ 			   SC2731_LDO_CAMA0_VOL_MASK, 10000, 1200000, 3750000),
+@@ -190,9 +323,9 @@
+ 	SC2731_REGU_LINEAR(LDO_CAMD1, SC2731_LDO_CAMD1_PD,
+ 			   SC2731_LDO_CAMD1_PD_MASK, SC2731_LDO_CAMD1_VOL,
+ 			   SC2731_LDO_CAMD1_VOL_MASK, 6250, 1000000, 1793750),
+-	SC2731_REGU_LINEAR(LDO_CON, SC2731_LDO_CON_PD,
+-			   SC2731_LDO_CON_PD_MASK, SC2731_LDO_CON_VOL,
+-			   SC2731_LDO_CON_VOL_MASK, 6250, 1000000, 1793750),
++	SC2731_REGU_LINEAR(LDO_CON, SC2731_LDO_CON_PD, SC2731_LDO_CON_PD_MASK,
++			   SC2731_LDO_CON_VOL, SC2731_LDO_CON_VOL_MASK, 6250,
++			   1000000, 1793750),
+ 	SC2731_REGU_LINEAR(LDO_CAMIO, SC2731_LDO_CAMIO_PD,
+ 			   SC2731_LDO_CAMIO_PD_MASK, SC2731_LDO_CAMIO_VOL,
+ 			   SC2731_LDO_CAMIO_VOL_MASK, 6250, 1000000, 1793750),
+@@ -201,57 +334,76 @@
+ 			   SC2731_LDO_SRAM_VOL_MASK, 6250, 1000000, 1793750),
+ };
+ 
+-static int sc2731_regulator_unlock(struct regmap *regmap)
+-{
+-	return regmap_write(regmap, SC2731_PWR_WR_PROT,
+-			    SC2731_WR_UNLOCK_VALUE);
+-}
+-
+-static int sc2731_regulator_probe(struct platform_device *pdev)
+-{
+-	int i, ret;
+-	struct regmap *regmap;
+-	struct regulator_config config = { };
+-	struct regulator_dev *rdev;
+-
+-	regmap = dev_get_regmap(pdev->dev.parent, NULL);
+-	if (!regmap) {
+-		dev_err(&pdev->dev, "failed to get regmap.\n");
+-		return -ENODEV;
+-	}
+-
+-	ret = sc2731_regulator_unlock(regmap);
+-	if (ret) {
+-		dev_err(&pdev->dev, "failed to release regulator lock\n");
+-		return ret;
+-	}
++static const struct sc27xx_regulator_desc sc2720_regulators[] = {
++	SC2720_REGU_LINEAR(LDO_CAMA, SC2720_LDO_CAMA_PD, SC2720_LDO_CAMA_VOL,
++			   SC2720_LDO_CAMA_VOL_MASK, 1612500),
++	SC2720_REGU_LINEAR(LDO_CAMIO, SC2720_LDO_CAMIO_PD, SC2720_LDO_CAMIO_VOL,
++			   SC2720_LDO_CAMIO_VOL_MASK, 1400000),
++	SC2720_REGU_LINEAR(LDO_CAMD, SC2720_LDO_CAMD_PD, SC2720_LDO_CAMD_VOL,
++			   SC2720_LDO_CAMD_VOL_MASK, 800000),
++	SC2720_REGU_FIXED(LDO_SDCORE, SC2720_LDO_SDCORE_PD,
++			  SC2720_LDO_SDCORE_VOL, SC2720_LDO_SDCORE_3000MV,
++			  3000000, 0),
++	SC2720_REGU_FIXED(LDO_SDIO, SC2720_LDO_SDIO_PD, SC2720_LDO_SDIO_VOL,
++			  SC2720_LDO_SDIO_3000MV, 3000000,
++			  SC2720_SD_RAIL_ENABLE_TIME_US),
++#if IS_ENABLED(CONFIG_REGULATOR_SC2720_USB33)
++	SC2720_REGU_FIXED(LDO_USB33, SC2720_LDO_USB33_PD, SC2720_LDO_USB33_VOL,
++			  SC2720_LDO_USB33_3300MV, 3300000, 0),
++#endif
++#if IS_ENABLED(CONFIG_REGULATOR_SC2720_WCN)
++	SC2720_REGU_LINEAR(LDO_WCN, SC2720_LDO_WCN_PD, SC2720_LDO_WCN_VOL,
++			   SC2720_LDO_WCN_VOL_MASK, 800000),
++#endif
++#if IS_ENABLED(CONFIG_REGULATOR_SC2720_WIFIPA)
++	{
++		.desc = {
++			.name = "LDO_WIFIPA",
++			.of_match = of_match_ptr("LDO_WIFIPA"),
++			.ops = &sc2720_regu_wifipa_ops,
++			.type = REGULATOR_VOLTAGE,
++			.id = SC2720_LDO_WIFIPA,
++			.owner = THIS_MODULE,
++			.enable_is_inverted = true,
++			.enable_reg = SC2720_LDO_WIFIPA_PD,
++			.enable_mask = SC2720_LDO_PD_MASK,
++		},
++	},
++#endif
++};
+ 
+-	config.dev = &pdev->dev;
+-	config.regmap = regmap;
++static const struct sc27xx_regulator_data sc2720_regulator_data = {
++	.regulators = sc2720_regulators,
++	.num_regulators = ARRAY_SIZE(sc2720_regulators),
++};
+ 
+-	for (i = 0; i < ARRAY_SIZE(regulators); i++) {
+-		rdev = devm_regulator_register(&pdev->dev, &regulators[i],
+-					       &config);
+-		if (IS_ERR(rdev)) {
+-			dev_err(&pdev->dev, "failed to register regulator %s\n",
+-				regulators[i].name);
+-			return PTR_ERR(rdev);
+-		}
+-	}
++static const struct sc27xx_regulator_data sc2731_regulator_data = {
++	.regulators = sc2731_regulators,
++	.num_regulators = ARRAY_SIZE(sc2731_regulators),
++	.unlock_reg = SC2731_PWR_WR_PROT,
++	.unlock_value = SC2731_WR_UNLOCK_VALUE,
++};
+ 
+-	return 0;
+-}
++static const struct of_device_id sc27xx_regulator_of_match[] = {
++	{ .compatible = "sprd,sc2720-regulator",
++	  .data = &sc2720_regulator_data },
++	{ .compatible = "sprd,sc2731-regulator",
++	  .data = &sc2731_regulator_data },
++	{}
++};
++MODULE_DEVICE_TABLE(of, sc27xx_regulator_of_match);
+ 
+-static struct platform_driver sc2731_regulator_driver = {
++static struct platform_driver sc27xx_regulator_driver = {
+ 	.driver = {
+ 		.name = "sc27xx-regulator",
+ 		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
++		.of_match_table = sc27xx_regulator_of_match,
+ 	},
+-	.probe = sc2731_regulator_probe,
++	.probe = sc27xx_regulator_probe,
+ };
+ 
+-module_platform_driver(sc2731_regulator_driver);
++module_platform_driver(sc27xx_regulator_driver);
+ 
+ MODULE_AUTHOR("Chen Junhui <erick.chen@spreadtrum.com>");
+-MODULE_DESCRIPTION("Spreadtrum SC2731 regulator driver");
++MODULE_DESCRIPTION("Spreadtrum SC27xx regulator driver");
+ MODULE_LICENSE("GPL v2");

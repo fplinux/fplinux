@@ -1,0 +1,274 @@
+diff --git a/Documentation/devicetree/bindings/gpio/sprd,gpio-eic.yaml b/Documentation/devicetree/bindings/gpio/sprd,gpio-eic.yaml
+index 99fcf97..c4f0913 100644
+--- a/Documentation/devicetree/bindings/gpio/sprd,gpio-eic.yaml
++++ b/Documentation/devicetree/bindings/gpio/sprd,gpio-eic.yaml
+@@ -20,15 +20,17 @@ description: |
+   EIC-sync. But the PMIC EIC controller contains only one EIC-debounce sub-
+   module.
+
+-  The EIC-debounce sub-module provides up to 8 source input signal
+-  connections. A debounce mechanism is used to capture the input signals'
+-  stable status (millisecond resolution) and a single-trigger mechanism
+-  is introduced into this sub-module to enhance the input event detection
++  The EIC-debounce sub-module provides a variant-specific number of source
++  input signal connections. A debounce mechanism is used to capture the input
++  signals' stable status (millisecond resolution), and a single-trigger
++  mechanism is introduced into this sub-module to enhance input event detection
+   reliability. In addition, this sub-module's clock can be shut off
+   automatically to reduce power dissipation. Moreover the debounce range
+   is from 1ms to 4s with a step size of 1ms. The input signal will be
+   ignored if it is asserted for less than 1 ms.
+
++  The SC2721 PMIC EIC controller has one bank of 16 input signals.
++
+   The EIC-latch sub-module is used to latch some special power down signals
+   and generate interrupts, since the EIC-latch does not depend on the APB
+   clock to capture signals.
+@@ -48,9 +50,12 @@ properties:
+           - sprd,sc9860-eic-latch
+           - sprd,sc9860-eic-async
+           - sprd,sc9860-eic-sync
++          - sprd,sc2720-eic
++          - sprd,sc2721-eic
+           - sprd,sc2731-eic
+       - items:
+           - enum:
++              - sprd,ums9117-eic-debounce
+               - sprd,ums512-eic-debounce
+           - const: sprd,sc9860-eic-debounce
+       - items:
+@@ -77,6 +82,16 @@ properties:
+       EIC controller can support maximum 3 banks which has its own
+       address base.
+
++  clocks:
++    minItems: 3
++    maxItems: 3
++
++  clock-names:
++    items:
++      - const: enable
++      - const: rtc
++      - const: rtcdv5
++
+   gpio-controller: true
+
+   "#gpio-cells":
+@@ -101,6 +116,21 @@ required:
+   - "#interrupt-cells"
+   - interrupts
+
++allOf:
++  - if:
++      properties:
++        compatible:
++          contains:
++            const: sprd,ums9117-eic-debounce
++    then:
++      required:
++        - clocks
++        - clock-names
++    else:
++      properties:
++        clocks: false
++        clock-names: false
++
+ additionalProperties: false
+
+ examples:
+diff --git a/Documentation/devicetree/bindings/mfd/sprd,sc2731.yaml b/Documentation/devicetree/bindings/mfd/sprd,sc2731.yaml
+index e74ec49..522dd88 100644
+--- a/Documentation/devicetree/bindings/mfd/sprd,sc2731.yaml
++++ b/Documentation/devicetree/bindings/mfd/sprd,sc2731.yaml
+@@ -47,7 +47,7 @@ properties:
+     const: 1
+
+   '#interrupt-cells':
+-    const: 1
++    enum: [1, 2]
+
+   '#size-cells':
+     const: 0
+@@ -58,7 +58,37 @@ properties:
+       - $ref: /schemas/regulator/sprd,sc2730-regulator.yaml#
+       - $ref: /schemas/regulator/sprd,sc2731-regulator.yaml#
+
++  clock-controller:
++    type: object
++    $ref: /schemas/clock/sprd,sc2720-clk.yaml#
++
++  charger:
++    type: object
++    $ref: /schemas/power/supply/sprd,ums9117-sc2720-charger.yaml#
++
++  fuel-gauge:
++    type: object
++    $ref: /schemas/power/supply/sprd,ums9117-sc2720-fgu.yaml#
++
++  poweroff:
++    type: object
++    oneOf:
++      - $ref: /schemas/power/reset/sprd,ums9117-sc2720-poweroff.yaml#
++      - $ref: /schemas/power/reset/sprd,sc2721-poweroff.yaml#
++
++  keypad-backlight@df8:
++    type: object
++    $ref: /schemas/leds/sprd,ums9117-sc2720-kpled.yaml#
++
++  keypad-backlight@eac:
++    type: object
++    $ref: /schemas/leds/sprd,sc2721-kpled.yaml#
++
+ patternProperties:
++  "^bltc-rgb@[0-9a-f]+$":
++    type: object
++    $ref: /schemas/leds/backlight/sprd,sc2721-backlight.yaml#
++
+   "^adc@[0-9a-f]+$":
+     type: object
+     $ref: /schemas/iio/adc/sprd,sc2720-adc.yaml#
+@@ -75,10 +103,14 @@ patternProperties:
+     type: object
+     $ref: /schemas/power/supply/sc27xx-fg.yaml#
+
+-  "^gpio@[0-9a-f]+$":
++  "^gpio(-controller)?@[0-9a-f]+$":
+     type: object
+     $ref: /schemas/gpio/sprd,gpio-eic.yaml#
+
++  "^regulator@[0-9a-f]+$":
++    type: object
++    $ref: /schemas/regulator/sprd,sc2721-regulator.yaml#
++
+   "^led-controller@[0-9a-f]+$":
+     type: object
+     $ref: /schemas/leds/sprd,sc2731-bltc.yaml#
+@@ -103,6 +131,20 @@ required:
+
+ additionalProperties: false
+
++allOf:
++  - if:
++      properties:
++        compatible:
++          const: sprd,sc2721
++    then:
++      properties:
++        '#interrupt-cells':
++          const: 2
++    else:
++      properties:
++        '#interrupt-cells':
++          const: 1
++
+ examples:
+   - |
+     #include <dt-bindings/gpio/gpio.h>
+diff --git a/Documentation/devicetree/bindings/spi/sprd,spi-adi.yaml b/Documentation/devicetree/bindings/spi/sprd,spi-adi.yaml
+index 903b06f..931dab0 100644
+--- a/Documentation/devicetree/bindings/spi/sprd,spi-adi.yaml
++++ b/Documentation/devicetree/bindings/spi/sprd,spi-adi.yaml
+@@ -44,17 +44,32 @@ description: |
+
+ allOf:
+   - $ref: /schemas/spi/spi-controller.yaml#
++  - if:
++      properties:
++        compatible:
++          const: sprd,r3p0-adi
++    then:
++      required:
++        - hwlocks
+
+ properties:
+   compatible:
+     enum:
++      - sprd,r3p0-adi
+       - sprd,sc9860-adi
+       - sprd,sc9863-adi
+       - sprd,ums512-adi
++      - sprd,ums9117-adi
+
+   reg:
+     maxItems: 1
+
++  clocks:
++    maxItems: 1
++
++  clock-names:
++    const: enable
++
+   hwlocks:
+     maxItems: 1
+
+diff --git a/Documentation/devicetree/bindings/gpio/sprd,gpio.yaml b/Documentation/devicetree/bindings/gpio/sprd,gpio.yaml
+--- a/Documentation/devicetree/bindings/gpio/sprd,gpio.yaml
++++ b/Documentation/devicetree/bindings/gpio/sprd,gpio.yaml
+@@ -20,10 +20,12 @@
+ properties:
+   compatible:
+     oneOf:
++      - const: sprd,sc9820e-gpio
+       - const: sprd,sc9860-gpio
+       - items:
+           - enum:
+               - sprd,ums512-gpio
++              - sprd,ums9117-gpio
+           - const: sprd,sc9860-gpio
+ 
+   reg:
+@@ -43,6 +45,22 @@
+     maxItems: 1
+     description: The interrupt shared by all GPIO lines for this controller.
+ 
++  ngpios:
++    minimum: 1
++    maximum: 256
++
++  clocks:
++    maxItems: 1
++
++  clock-names:
++    const: enable
++
++patternProperties:
++  "^.+-hog(-[0-9]+)?$":
++    type: object
++    required:
++      - gpio-hog
++
+ required:
+   - compatible
+   - reg
+@@ -52,6 +70,31 @@
+   - "#interrupt-cells"
+   - interrupts
+ 
++allOf:
++  - if:
++      properties:
++        compatible:
++          contains:
++            const: sprd,ums9117-gpio
++    then:
++      properties:
++        ngpios:
++          const: 128
++      required:
++        - ngpios
++        - clocks
++        - clock-names
++
++  - if:
++      properties:
++        compatible:
++          contains:
++            const: sprd,sc9820e-gpio
++    then:
++      required:
++        - clocks
++        - clock-names
++
+ additionalProperties: false
+ 
+ examples:

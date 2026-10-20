@@ -1,0 +1,137 @@
+diff --git a/drivers/dma/dmatest.c b/drivers/dma/dmatest.c
+index 2ae3469..8f0820a 100644
+--- a/drivers/dma/dmatest.c
++++ b/drivers/dma/dmatest.c
+@@ -240,6 +240,7 @@ struct dmatest_thread {
+ 	struct dmatest_done test_done;
+ 	bool			done;
+ 	bool			pending;
++	bool quarantined;
+ };
+
+ struct dmatest_chan {
+@@ -702,6 +703,7 @@ static int dmatest_func(void *data)
+ 		struct dmaengine_unmap_data *um;
+ 		dma_addr_t *dsts;
+ 		unsigned int len;
++		bool submitted = false;
+
+ 		total_tests++;
+
+@@ -834,10 +836,10 @@ static int dmatest_func(void *data)
+ 			msleep(100);
+ 			goto error_unmap_continue;
+ 		}
++		submitted = true;
+
+ 		if (params->polled) {
+ 			status = dma_sync_wait(chan, cookie);
+-			dmaengine_terminate_sync(chan);
+ 			if (status == DMA_COMPLETE)
+ 				done->done = true;
+ 		} else {
+@@ -912,13 +914,28 @@ static int dmatest_func(void *data)
+ 		continue;
+
+ error_unmap_continue:
++		if (submitted) {
++			ret = dmaengine_terminate_sync(chan);
++			if (ret) {
++				result("termination error; resources retained until reboot",
++				       total_tests, src->off, dst->off, len,
++				       ret);
++				failed_tests++;
++				/* DMA still owns buffers and callback state. */
++				thread->quarantined = true;
++				goto stopped;
++			}
++		}
+ 		dmaengine_unmap_put(um);
+ 		failed_tests++;
+ 	}
++stopped:
+ 	ktime = ktime_sub(ktime_get(), ktime);
+ 	ktime = ktime_sub(ktime, comparetime);
+ 	ktime = ktime_sub(ktime, filltime);
+ 	runtime = ktime_to_us(ktime);
++	if (thread->quarantined)
++		goto err_thread_type;
+
+ 	ret = 0;
+ 	kfree(dma_pq);
+@@ -937,35 +954,45 @@ err_thread_type:
+ 		FIXPT_TO_INT(iops), FIXPT_GET_FRAC(iops),
+ 		dmatest_KBs(runtime, total_len), ret);
+
+-	/* terminate all transfers on specified channels */
+-	if (ret || failed_tests)
+-		dmaengine_terminate_sync(chan);
+-
+ 	thread->done = true;
+ 	wake_up(&thread_wait);
+
+ 	return ret;
+ }
+
+-static void dmatest_cleanup_channel(struct dmatest_chan *dtc)
++static bool dmatest_cleanup_channel(struct dmatest_chan *dtc)
+ {
+ 	struct dmatest_thread	*thread;
+ 	struct dmatest_thread	*_thread;
+ 	int			ret;
++	bool quarantined = false;
+
+-	list_for_each_entry_safe(thread, _thread, &dtc->threads, node) {
++	list_for_each_entry(thread, &dtc->threads, node) {
+ 		ret = kthread_stop(thread->task);
+ 		pr_debug("thread %s exited with status %d\n",
+ 			 thread->task->comm, ret);
++		if (thread->quarantined)
++			quarantined = true;
++	}
++	if (quarantined)
++		return false;
++
++	ret = dmaengine_terminate_sync(dtc->chan);
++	if (ret) {
++		pr_err("channel %s termination failed: %d; callback state retained until reboot\n",
++		       dma_chan_name(dtc->chan), ret);
++		list_for_each_entry(thread, &dtc->threads, node)
++			thread->quarantined = true;
++		return false;
++	}
++
++	list_for_each_entry_safe(thread, _thread, &dtc->threads, node) {
+ 		list_del(&thread->node);
+ 		put_task_struct(thread->task);
+ 		kfree(thread);
+ 	}
+
+-	/* terminate all transfers on specified channels */
+-	dmaengine_terminate_sync(dtc->chan);
+-
+-	kfree(dtc);
++	return true;
+ }
+
+ static int dmatest_add_threads(struct dmatest_info *info,
+@@ -1155,14 +1182,15 @@ static void stop_threaded_test(struct dmatest_info *info)
+ 	struct dma_chan *chan;
+
+ 	list_for_each_entry_safe(dtc, _dtc, &info->channels, node) {
+-		list_del(&dtc->node);
+ 		chan = dtc->chan;
+-		dmatest_cleanup_channel(dtc);
++		if (!dmatest_cleanup_channel(dtc))
++			continue;
++		list_del(&dtc->node);
++		kfree(dtc);
+ 		pr_debug("dropped channel %s\n", dma_chan_name(chan));
+ 		dma_release_channel(chan);
++		info->nr_channels--;
+ 	}
+-
+-	info->nr_channels = 0;
+ }
+
+ static void start_threaded_tests(struct dmatest_info *info)

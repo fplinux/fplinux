@@ -1,0 +1,698 @@
+diff --git a/drivers/rtc/rtc-sc27xx.c b/drivers/rtc/rtc-sc27xx.c
+index 2b83561..0bdc6a8 100644
+--- a/drivers/rtc/rtc-sc27xx.c
++++ b/drivers/rtc/rtc-sc27xx.c
+@@ -8,11 +8,17 @@
+ #include <linux/delay.h>
+ #include <linux/err.h>
+ #include <linux/module.h>
++#include <linux/mutex.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
+ #include <linux/regmap.h>
+ #include <linux/rtc.h>
+ 
++#define SPRD_SC27XX_MODULE_EN 0xc08
++#define SPRD_SC27XX_RTC_EN BIT(1)
++#define SPRD_SC27XX_RTC_CLK_EN 0xc10
++#define SPRD_SC27XX_RTC_CLOCK_EN BIT(1)
++
+ #define SPRD_RTC_SEC_CNT_VALUE		0x0
+ #define SPRD_RTC_MIN_CNT_VALUE		0x4
+ #define SPRD_RTC_HOUR_CNT_VALUE		0x8
+@@ -88,6 +94,7 @@
+ 
+ /* SPG values definition for SPRD_RTC_SPG_UPD register */
+ #define SPRD_RTC_POWEROFF_ALM_FLAG	BIT(8)
++#define SPRD_RTC_SPG_TIME_VALID BIT(9)
+ 
+ /* power control/status definition */
+ #define SPRD_RTC_POWER_RESET_VALUE	0x96
+@@ -99,16 +106,81 @@
+ /* timeout of synchronizing time and alarm registers (us) */
+ #define SPRD_RTC_POLL_TIMEOUT		200000
+ #define SPRD_RTC_POLL_DELAY_US		20000
++#define SPRD_RTC_READ_RETRIES 3
++
++#define SPRD_RTC_EPOCH_1980 315532800LL
++#define SPRD_RTC_EPOCH_2019 1546300800LL
++
++struct sprd_rtc_data {
++	time64_t epoch;
++	time64_t range_min;
++	timeu64_t range_max;
++	u32 alarm_enable_mask;
++	u32 alarm_clear_mask;
++	u32 alarm_spg_clear_mask;
++	u32 init_irq_mask;
++	u32 alarm_init_mask;
++	bool coherent_read;
++	bool use_aux_alarm;
++	bool poweroff_alarm;
++	bool one_shot_alarm;
++	bool preserve_alarm_lock;
++	bool enable_clocks;
++	bool spg_valid;
++	bool clear_update_acks;
++};
+ 
+ struct sprd_rtc {
+ 	struct rtc_device	*rtc;
+ 	struct regmap		*regmap;
+ 	struct device		*dev;
++	const struct sprd_rtc_data *data;
++	/* Serializes multi-register operations with the IRQ thread. */
++	struct mutex lock;
+ 	u32			base;
++	u8 initial_alarm_lock;
+ 	int			irq;
+ 	bool			valid;
+ };
+ 
++static const struct sprd_rtc_data sc2720_rtc_data = {
++	.epoch = SPRD_RTC_EPOCH_1980,
++	.range_min = SPRD_RTC_EPOCH_1980,
++	.range_max = RTC_TIMESTAMP_END_2099,
++	.alarm_enable_mask = SPRD_RTC_ALARM_EN,
++	.alarm_clear_mask = SPRD_RTC_ALARM_EN,
++	.coherent_read = true,
++	.poweroff_alarm = false,
++	.one_shot_alarm = true,
++	.preserve_alarm_lock = true,
++	.enable_clocks = true,
++};
++
++static const struct sprd_rtc_data sc2721_rtc_data = {
++	.epoch = SPRD_RTC_EPOCH_2019,
++	.range_min = SPRD_RTC_EPOCH_2019,
++	.range_max = 7208611199LL,
++	.alarm_enable_mask = SPRD_RTC_ALARM_EN,
++	.alarm_clear_mask = SPRD_RTC_ALARM_EN,
++	.alarm_spg_clear_mask = SPRD_RTC_POWEROFF_ALM_FLAG,
++	.init_irq_mask = SPRD_RTC_INT_MASK & ~SPRD_RTC_HRS_FORMAT_EN,
++	.alarm_init_mask = SPRD_RTC_ALM_INT_MASK,
++	.coherent_read = true,
++	.one_shot_alarm = true,
++	.enable_clocks = true,
++	.spg_valid = true,
++	.clear_update_acks = true,
++};
++
++static const struct sprd_rtc_data sc2731_rtc_data = {
++	.range_min = 0,
++	.range_max = 5662310399LL,
++	.alarm_enable_mask = SPRD_RTC_ALARM_EN | SPRD_RTC_AUXALM_EN,
++	.alarm_clear_mask = SPRD_RTC_ALM_INT_MASK,
++	.use_aux_alarm = true,
++	.poweroff_alarm = true,
++};
++
+ /*
+  * The Spreadtrum RTC controller has 3 groups registers, including time, normal
+  * alarm and auxiliary alarm. The time group registers are used to set RTC time,
+@@ -126,7 +198,7 @@
+ static int sprd_rtc_clear_alarm_ints(struct sprd_rtc *rtc)
+ {
+ 	return regmap_write(rtc->regmap, rtc->base + SPRD_RTC_INT_CLR,
+-			    SPRD_RTC_ALM_INT_MASK);
++			    rtc->data->alarm_clear_mask);
+ }
+ 
+ static int sprd_rtc_lock_alarm(struct sprd_rtc *rtc, bool lock)
+@@ -138,11 +210,23 @@
+ 	if (ret)
+ 		return ret;
+ 
+-	val &= ~SPRD_RTC_ALMLOCK_MASK;
+-	if (lock)
+-		val |= SPRD_RTC_ALM_LOCK;
++	val &= ~(SPRD_RTC_ALMLOCK_MASK | rtc->data->alarm_spg_clear_mask);
++	if (!lock)
++		val |= SPRD_RTC_ALM_UNLOCK;
++	else if (rtc->data->preserve_alarm_lock)
++		val |= rtc->initial_alarm_lock;
+ 	else
+-		val |= SPRD_RTC_ALM_UNLOCK | SPRD_RTC_POWEROFF_ALM_FLAG;
++		val |= SPRD_RTC_ALM_LOCK;
++
++	if (rtc->data->poweroff_alarm && !lock)
++		val |= SPRD_RTC_POWEROFF_ALM_FLAG;
++
++	if (rtc->data->clear_update_acks) {
++		ret = regmap_write(rtc->regmap, rtc->base + SPRD_RTC_INT_CLR,
++				   SPRD_RTC_SPG_UPD_EN);
++		if (ret)
++			return ret;
++	}
+ 
+ 	ret = regmap_write(rtc->regmap, rtc->base + SPRD_RTC_SPG_UPD, val);
+ 	if (ret)
+@@ -167,7 +251,8 @@
+ 			     time64_t *secs)
+ {
+ 	u32 sec_reg, min_reg, hour_reg, day_reg;
+-	u32 val, sec, min, hour, day;
++	u32 sec, sec_after, min, hour, day;
++	unsigned int attempt;
+ 	int ret;
+ 
+ 	switch (type) {
+@@ -193,30 +278,48 @@
+ 		return -EINVAL;
+ 	}
+ 
+-	ret = regmap_read(rtc->regmap, rtc->base + sec_reg, &val);
+-	if (ret)
+-		return ret;
++	for (attempt = 0; attempt < SPRD_RTC_READ_RETRIES; attempt++) {
++		ret = regmap_read(rtc->regmap, rtc->base + sec_reg, &sec);
++		if (ret)
++			return ret;
+ 
+-	sec = val & SPRD_RTC_SEC_MASK;
++		ret = regmap_read(rtc->regmap, rtc->base + min_reg, &min);
++		if (ret)
++			return ret;
+ 
+-	ret = regmap_read(rtc->regmap, rtc->base + min_reg, &val);
+-	if (ret)
+-		return ret;
++		ret = regmap_read(rtc->regmap, rtc->base + hour_reg, &hour);
++		if (ret)
++			return ret;
+ 
+-	min = val & SPRD_RTC_MIN_MASK;
++		ret = regmap_read(rtc->regmap, rtc->base + day_reg, &day);
++		if (ret)
++			return ret;
+ 
+-	ret = regmap_read(rtc->regmap, rtc->base + hour_reg, &val);
+-	if (ret)
+-		return ret;
++		sec &= SPRD_RTC_SEC_MASK;
++		min &= SPRD_RTC_MIN_MASK;
++		hour &= SPRD_RTC_HOUR_MASK;
++		day &= SPRD_RTC_DAY_MASK;
++		if (sec > 59 || min > 59 || hour > 23)
++			return -ERANGE;
+ 
+-	hour = val & SPRD_RTC_HOUR_MASK;
++		if (type != SPRD_RTC_TIME || !rtc->data->coherent_read)
++			break;
+ 
+-	ret = regmap_read(rtc->regmap, rtc->base + day_reg, &val);
+-	if (ret)
+-		return ret;
++		ret = regmap_read(rtc->regmap, rtc->base + sec_reg, &sec_after);
++		if (ret)
++			return ret;
++		if (sec == (sec_after & SPRD_RTC_SEC_MASK))
++			break;
++	}
++
++	if (attempt == SPRD_RTC_READ_RETRIES)
++		return -EAGAIN;
++
++	*secs = rtc->data->epoch +
++		(((time64_t)(day * 24) + hour) * 60 + min) * 60 + sec;
++	if (*secs < rtc->data->range_min || *secs > rtc->data->range_max)
++		return -ERANGE;
+ 
+-	day = val & SPRD_RTC_DAY_MASK;
+-	*secs = (((time64_t)(day * 24) + hour) * 60 + min) * 60 + sec;
+ 	return 0;
+ }
+ 
+@@ -227,6 +330,13 @@
+ 	u32 sec, min, hour, day, val;
+ 	int ret, rem;
+ 
++	if (secs < rtc->data->range_min || secs > rtc->data->range_max)
++		return -ERANGE;
++
++	secs -= rtc->data->epoch;
++	if (secs < 0)
++		return -ERANGE;
++
+ 	/* convert seconds to RTC time format */
+ 	day = div_s64_rem(secs, 86400, &rem);
+ 	hour = rem / 3600;
+@@ -260,6 +370,13 @@
+ 		return -EINVAL;
+ 	}
+ 
++	if (rtc->data->clear_update_acks && sts_mask) {
++		ret = regmap_write(rtc->regmap, rtc->base + SPRD_RTC_INT_CLR,
++				   sts_mask);
++		if (ret)
++			return ret;
++	}
++
+ 	ret = regmap_write(rtc->regmap, rtc->base + sec_reg, sec);
+ 	if (ret)
+ 		return ret;
+@@ -340,7 +457,9 @@
+ 		return -EINVAL;
+ 	}
+ 
++	mutex_lock(&rtc->lock);
+ 	ret = sprd_rtc_get_secs(rtc, SPRD_RTC_TIME, &secs);
++	mutex_unlock(&rtc->lock);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -348,36 +467,92 @@
+ 	return 0;
+ }
+ 
+-static int sprd_rtc_set_time(struct device *dev, struct rtc_time *tm)
++static int sprd_rtc_set_valid(struct sprd_rtc *rtc)
+ {
+-	struct sprd_rtc *rtc = dev_get_drvdata(dev);
+-	time64_t secs = rtc_tm_to_time64(tm);
++	u32 val;
+ 	int ret;
+ 
+-	ret = sprd_rtc_set_secs(rtc, SPRD_RTC_TIME, secs);
+-	if (ret)
+-		return ret;
++	if (rtc->data->spg_valid) {
++		ret = regmap_read(rtc->regmap, rtc->base + SPRD_RTC_SPG_VALUE,
++				  &val);
++		if (ret)
++			return ret;
+ 
+-	if (!rtc->valid) {
+-		/* Clear RTC power status firstly */
++		ret = regmap_write(rtc->regmap, rtc->base + SPRD_RTC_INT_CLR,
++				   SPRD_RTC_SPG_UPD_EN);
++		if (ret)
++			return ret;
++
++		ret = regmap_write(rtc->regmap, rtc->base + SPRD_RTC_SPG_UPD,
++				   val | SPRD_RTC_SPG_TIME_VALID);
++		if (ret)
++			return ret;
++
++		ret = regmap_read_poll_timeout(rtc->regmap,
++					       rtc->base + SPRD_RTC_INT_RAW_STS,
++					       val, (val & SPRD_RTC_SPG_UPD_EN),
++					       SPRD_RTC_POLL_DELAY_US,
++					       SPRD_RTC_POLL_TIMEOUT);
++		if (ret)
++			return ret;
++
++		ret = regmap_write(rtc->regmap, rtc->base + SPRD_RTC_INT_CLR,
++				   SPRD_RTC_SPG_UPD_EN);
++	} else {
+ 		ret = regmap_write(rtc->regmap, rtc->base + SPRD_RTC_PWR_CTRL,
+ 				   SPRD_RTC_POWER_STS_CLEAR);
+ 		if (ret)
+ 			return ret;
+ 
+-		/*
+-		 * Set RTC power status to indicate now RTC has valid time
+-		 * values.
+-		 */
+ 		ret = regmap_write(rtc->regmap, rtc->base + SPRD_RTC_PWR_CTRL,
+ 				   SPRD_RTC_POWER_STS_VALID);
++	}
++	if (ret)
++		return ret;
++
++	rtc->valid = true;
++	return 0;
++}
++
++static int sprd_rtc_set_time(struct device *dev, struct rtc_time *tm)
++{
++	struct sprd_rtc *rtc = dev_get_drvdata(dev);
++	time64_t secs = rtc_tm_to_time64(tm);
++	u32 alarm_enabled;
++	int ret;
++
++	mutex_lock(&rtc->lock);
++	if (rtc->data->one_shot_alarm) {
++		/* The RTC core keeps and rearms its absolute alarm deadline. */
++		ret = regmap_read(rtc->regmap, rtc->base + SPRD_RTC_INT_EN,
++				  &alarm_enabled);
+ 		if (ret)
+-			return ret;
++			goto out;
+ 
+-		rtc->valid = true;
++		if (alarm_enabled & SPRD_RTC_ALARM_EN) {
++			ret = regmap_update_bits(rtc->regmap,
++						 rtc->base + SPRD_RTC_INT_EN,
++						 SPRD_RTC_ALARM_EN, 0);
++			if (ret)
++				goto out;
++		}
++
++		ret = regmap_write(rtc->regmap, rtc->base + SPRD_RTC_INT_CLR,
++				   SPRD_RTC_ALARM_EN);
++		if (ret)
++			goto out;
+ 	}
+ 
+-	return 0;
++	ret = sprd_rtc_set_secs(rtc, SPRD_RTC_TIME, secs);
++	if (ret)
++		goto out;
++
++	if (!rtc->valid)
++		ret = sprd_rtc_set_valid(rtc);
++
++out:
++	mutex_unlock(&rtc->lock);
++	return ret;
+ }
+ 
+ static int sprd_rtc_read_alarm(struct device *dev, struct rtc_wkalrm *alrm)
+@@ -391,24 +566,27 @@
+ 	 * The RTC core checks to see if there is an alarm already set in RTC
+ 	 * hardware, and we always read the normal alarm at this time.
+ 	 */
++	mutex_lock(&rtc->lock);
+ 	ret = sprd_rtc_get_secs(rtc, SPRD_RTC_ALARM, &secs);
+ 	if (ret)
+-		return ret;
++		goto out;
+ 
+ 	rtc_time64_to_tm(secs, &alrm->time);
+ 
+ 	ret = regmap_read(rtc->regmap, rtc->base + SPRD_RTC_INT_EN, &val);
+ 	if (ret)
+-		return ret;
++		goto out;
+ 
+ 	alrm->enabled = !!(val & SPRD_RTC_ALARM_EN);
+ 
+ 	ret = regmap_read(rtc->regmap, rtc->base + SPRD_RTC_INT_RAW_STS, &val);
+ 	if (ret)
+-		return ret;
++		goto out;
+ 
+ 	alrm->pending = !!(val & SPRD_RTC_ALARM_EN);
+-	return 0;
++out:
++	mutex_unlock(&rtc->lock);
++	return ret;
+ }
+ 
+ static int sprd_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
+@@ -432,18 +610,22 @@
+ 	 * should set normal alarm, if not, we should set auxiliary alarm which
+ 	 * means it is just a wake event.
+ 	 */
+-	if (!rtc->rtc->aie_timer.enabled || rtc_tm_sub(&aie_time, &alrm->time))
+-		return sprd_rtc_set_aux_alarm(dev, alrm);
++	mutex_lock(&rtc->lock);
++	if (rtc->data->use_aux_alarm && (!rtc->rtc->aie_timer.enabled ||
++					 rtc_tm_sub(&aie_time, &alrm->time))) {
++		ret = sprd_rtc_set_aux_alarm(dev, alrm);
++		goto out;
++	}
+ 
+ 	/* clear the alarm interrupt status firstly */
+ 	ret = regmap_write(rtc->regmap, rtc->base + SPRD_RTC_INT_CLR,
+ 			   SPRD_RTC_ALARM_EN);
+ 	if (ret)
+-		return ret;
++		goto out;
+ 
+ 	ret = sprd_rtc_set_secs(rtc, SPRD_RTC_ALARM, secs);
+ 	if (ret)
+-		return ret;
++		goto out;
+ 
+ 	if (alrm->enabled) {
+ 		ret = regmap_update_bits(rtc->regmap,
+@@ -451,14 +633,16 @@
+ 					 SPRD_RTC_ALARM_EN,
+ 					 SPRD_RTC_ALARM_EN);
+ 		if (ret)
+-			return ret;
++			goto out;
+ 
+ 		/* unlock the alarm to enable the alarm function. */
+ 		ret = sprd_rtc_lock_alarm(rtc, false);
+ 	} else {
+-		regmap_update_bits(rtc->regmap,
+-				   rtc->base + SPRD_RTC_INT_EN,
+-				   SPRD_RTC_ALARM_EN, 0);
++		ret = regmap_update_bits(rtc->regmap,
++					 rtc->base + SPRD_RTC_INT_EN,
++					 SPRD_RTC_ALARM_EN, 0);
++		if (ret)
++			goto out;
+ 
+ 		/*
+ 		 * Lock the alarm function in case fake alarm event will power
+@@ -467,6 +651,8 @@
+ 		ret = sprd_rtc_lock_alarm(rtc, true);
+ 	}
+ 
++out:
++	mutex_unlock(&rtc->lock);
+ 	return ret;
+ }
+ 
+@@ -475,22 +661,28 @@
+ 	struct sprd_rtc *rtc = dev_get_drvdata(dev);
+ 	int ret;
+ 
++	mutex_lock(&rtc->lock);
+ 	if (enabled) {
+ 		ret = regmap_update_bits(rtc->regmap,
+ 					 rtc->base + SPRD_RTC_INT_EN,
+-					 SPRD_RTC_ALARM_EN | SPRD_RTC_AUXALM_EN,
+-					 SPRD_RTC_ALARM_EN | SPRD_RTC_AUXALM_EN);
++					 rtc->data->alarm_enable_mask,
++					 rtc->data->alarm_enable_mask);
+ 		if (ret)
+-			return ret;
++			goto out;
+ 
+ 		ret = sprd_rtc_lock_alarm(rtc, false);
+ 	} else {
+-		regmap_update_bits(rtc->regmap, rtc->base + SPRD_RTC_INT_EN,
+-				   SPRD_RTC_ALARM_EN | SPRD_RTC_AUXALM_EN, 0);
++		ret = regmap_update_bits(rtc->regmap,
++					 rtc->base + SPRD_RTC_INT_EN,
++					 rtc->data->alarm_enable_mask, 0);
++		if (ret)
++			goto out;
+ 
+ 		ret = sprd_rtc_lock_alarm(rtc, true);
+ 	}
+ 
++out:
++	mutex_unlock(&rtc->lock);
+ 	return ret;
+ }
+ 
+@@ -507,9 +699,22 @@
+ 	struct sprd_rtc *rtc = dev_id;
+ 	int ret;
+ 
+-	ret = sprd_rtc_clear_alarm_ints(rtc);
+-	if (ret)
+-		return IRQ_RETVAL(ret);
++	mutex_lock(&rtc->lock);
++	if (rtc->data->one_shot_alarm)
++		ret = regmap_update_bits(rtc->regmap,
++					 rtc->base + SPRD_RTC_INT_EN,
++					 SPRD_RTC_ALARM_EN, 0);
++	else
++		ret = 0;
++	if (!ret)
++		ret = sprd_rtc_clear_alarm_ints(rtc);
++	mutex_unlock(&rtc->lock);
++	if (ret) {
++		dev_err_ratelimited(rtc->dev,
++				    "failed to clear RTC alarm interrupt: %d\n",
++				    ret);
++		return IRQ_HANDLED;
++	}
+ 
+ 	rtc_update_irq(rtc->rtc, 1, RTC_AF | RTC_IRQF);
+ 	return IRQ_HANDLED;
+@@ -520,6 +725,16 @@
+ 	u32 val;
+ 	int ret;
+ 
++	if (rtc->data->spg_valid) {
++		ret = regmap_read(rtc->regmap, rtc->base + SPRD_RTC_SPG_VALUE,
++				  &val);
++		if (ret)
++			return ret;
++
++		rtc->valid = !!(val & SPRD_RTC_SPG_TIME_VALID);
++		return 0;
++	}
++
+ 	ret = regmap_read(rtc->regmap, rtc->base + SPRD_RTC_PWR_STS, &val);
+ 	if (ret)
+ 		return ret;
+@@ -533,11 +748,30 @@
+ 	return 0;
+ }
+ 
++static int sprd_rtc_snapshot_alarm_lock(struct sprd_rtc *rtc)
++{
++	u32 val;
++	int ret;
++
++	if (!rtc->data->preserve_alarm_lock)
++		return 0;
++
++	ret = regmap_read(rtc->regmap, rtc->base + SPRD_RTC_SPG_VALUE, &val);
++	if (ret)
++		return ret;
++
++	rtc->initial_alarm_lock = val & SPRD_RTC_ALMLOCK_MASK;
++	return 0;
++}
++
+ static int sprd_rtc_check_alarm_int(struct sprd_rtc *rtc)
+ {
+ 	u32 val;
+ 	int ret;
+ 
++	if (!rtc->data->poweroff_alarm)
++		return 0;
++
+ 	ret = regmap_read(rtc->regmap, rtc->base + SPRD_RTC_SPG_VALUE, &val);
+ 	if (ret)
+ 		return ret;
+@@ -559,6 +793,35 @@
+ 				  SPRD_RTC_ALARM_EN, SPRD_RTC_ALARM_EN);
+ }
+ 
++static void sprd_rtc_shutdown(struct platform_device *pdev)
++{
++	struct sprd_rtc *rtc = platform_get_drvdata(pdev);
++	int first_error = 0;
++	int ret;
++
++	if (!rtc->data->one_shot_alarm)
++		return;
++
++	mutex_lock(&rtc->lock);
++	ret = regmap_update_bits(rtc->regmap, rtc->base + SPRD_RTC_INT_EN,
++				 rtc->data->alarm_enable_mask, 0);
++	if (ret)
++		first_error = ret;
++
++	ret = sprd_rtc_clear_alarm_ints(rtc);
++	if (ret && !first_error)
++		first_error = ret;
++
++	ret = sprd_rtc_lock_alarm(rtc, true);
++	if (ret && !first_error)
++		first_error = ret;
++	mutex_unlock(&rtc->lock);
++
++	if (first_error)
++		dev_err(rtc->dev, "failed to shut down RTC alarm: %d\n",
++			first_error);
++}
++
+ static int sprd_rtc_probe(struct platform_device *pdev)
+ {
+ 	struct device_node *node = pdev->dev.of_node;
+@@ -568,10 +831,14 @@
+ 	rtc = devm_kzalloc(&pdev->dev, sizeof(*rtc), GFP_KERNEL);
+ 	if (!rtc)
+ 		return -ENOMEM;
++	rtc->data = of_device_get_match_data(&pdev->dev);
++	if (!rtc->data)
++		return -EINVAL;
+ 
+ 	rtc->regmap = dev_get_regmap(pdev->dev.parent, NULL);
+ 	if (!rtc->regmap)
+ 		return -ENODEV;
++	mutex_init(&rtc->lock);
+ 
+ 	ret = of_property_read_u32(node, "reg", &rtc->base);
+ 	if (ret) {
+@@ -589,6 +856,26 @@
+ 
+ 	rtc->dev = &pdev->dev;
+ 	platform_set_drvdata(pdev, rtc);
++	if (rtc->data->enable_clocks) {
++		ret = regmap_set_bits(rtc->regmap, SPRD_SC27XX_MODULE_EN,
++				      SPRD_SC27XX_RTC_EN);
++		if (ret)
++			return dev_err_probe(&pdev->dev, ret,
++					     "failed to enable RTC clock\n");
++
++		ret = regmap_set_bits(rtc->regmap, SPRD_SC27XX_RTC_CLK_EN,
++				      SPRD_SC27XX_RTC_CLOCK_EN);
++		if (ret)
++			return dev_err_probe(
++				&pdev->dev, ret,
++				"failed to enable RTC counter clock\n");
++	}
++
++	ret = sprd_rtc_snapshot_alarm_lock(rtc);
++	if (ret) {
++		dev_err(&pdev->dev, "failed to read RTC alarm lock\n");
++		return ret;
++	}
+ 
+ 	/* check if we need set the alarm interrupt */
+ 	ret = sprd_rtc_check_alarm_int(rtc);
+@@ -604,6 +891,19 @@
+ 		return ret;
+ 	}
+ 
++	if (rtc->data->init_irq_mask) {
++		ret = regmap_update_bits(rtc->regmap,
++					 rtc->base + SPRD_RTC_INT_EN,
++					 rtc->data->init_irq_mask, 0);
++		if (ret)
++			return ret;
++
++		ret = regmap_write(rtc->regmap, rtc->base + SPRD_RTC_INT_CLR,
++				   rtc->data->alarm_init_mask);
++		if (ret)
++			return ret;
++	}
++
+ 	ret = devm_request_threaded_irq(&pdev->dev, rtc->irq, NULL,
+ 					sprd_rtc_handler,
+ 					IRQF_ONESHOT | IRQF_EARLY_RESUME,
+@@ -616,8 +916,8 @@
+ 	device_init_wakeup(&pdev->dev, true);
+ 
+ 	rtc->rtc->ops = &sprd_rtc_ops;
+-	rtc->rtc->range_min = 0;
+-	rtc->rtc->range_max = 5662310399LL;
++	rtc->rtc->range_min = rtc->data->range_min;
++	rtc->rtc->range_max = rtc->data->range_max;
+ 	ret = devm_rtc_register_device(rtc->rtc);
+ 	if (ret) {
+ 		device_init_wakeup(&pdev->dev, false);
+@@ -628,8 +928,10 @@
+ }
+ 
+ static const struct of_device_id sprd_rtc_of_match[] = {
+-	{ .compatible = "sprd,sc2731-rtc", },
+-	{ },
++	{ .compatible = "sprd,sc2720-rtc", .data = &sc2720_rtc_data },
++	{ .compatible = "sprd,sc2721-rtc", .data = &sc2721_rtc_data },
++	{ .compatible = "sprd,sc2731-rtc", .data = &sc2731_rtc_data },
++	{},
+ };
+ MODULE_DEVICE_TABLE(of, sprd_rtc_of_match);
+ 
+@@ -639,6 +941,7 @@
+ 		.of_match_table = sprd_rtc_of_match,
+ 	},
+ 	.probe	= sprd_rtc_probe,
++	.shutdown = sprd_rtc_shutdown,
+ };
+ module_platform_driver(sprd_rtc_driver);
+

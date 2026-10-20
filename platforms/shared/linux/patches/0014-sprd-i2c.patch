@@ -1,0 +1,12 @@
+diff --git a/drivers/i2c/busses/Kconfig b/drivers/i2c/busses/Kconfig
+--- a/drivers/i2c/busses/Kconfig
++++ b/drivers/i2c/busses/Kconfig
+@@ -1153,7 +1153,7 @@
+
+ config I2C_SPRD
+ 	tristate "Spreadtrum I2C interface"
+-	depends on I2C=y && (ARCH_SPRD || COMPILE_TEST)
++	depends on I2C=y && (ARCH_SPRD || ARCH_UMS9117 || ARCH_SC9820E || COMPILE_TEST)
+ 	depends on COMMON_CLK
+ 	help
+ 	  If you say yes to this option, support will be included for the

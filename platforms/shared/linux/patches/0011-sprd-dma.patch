@@ -1,18 +1,18 @@
 diff --git a/drivers/dma/Kconfig b/drivers/dma/Kconfig
-index b8a74b1..70a8720 100644
+index ae6a682..38224ef 100644
 --- a/drivers/dma/Kconfig
 +++ b/drivers/dma/Kconfig
-@@ -604,7 +604,7 @@ config ST_FDMA
+@@ -581,7 +581,7 @@ config ST_FDMA
 
  config SPRD_DMA
  	tristate "Spreadtrum DMA support"
 -	depends on ARCH_SPRD || COMPILE_TEST
-+	depends on ARCH_SPRD || ARCH_UMS9117 || COMPILE_TEST
++	depends on ARCH_SPRD || ARCH_UMS9117 || ARCH_SC9820E || COMPILE_TEST
  	select DMA_ENGINE
  	select DMA_VIRTUAL_CHANNELS
  	help
 diff --git a/drivers/dma/sprd-dma.c b/drivers/dma/sprd-dma.c
-index 187a090..c81c3df 100644
+index 19b32a2..9f7765e 100644
 --- a/drivers/dma/sprd-dma.c
 +++ b/drivers/dma/sprd-dma.c
 @@ -11,6 +11,7 @@
@@ -23,7 +23,7 @@ index 187a090..c81c3df 100644
  #include <linux/kernel.h>
  #include <linux/module.h>
  #include <linux/of.h>
-@@ -24,6 +25,10 @@
+@@ -24,6 +25,11 @@
  #define SPRD_DMA_CHN_REG_OFFSET		0x1000
  #define SPRD_DMA_CHN_REG_LENGTH		0x40
  #define SPRD_DMA_MEMCPY_MIN_SIZE	64
@@ -31,10 +31,11 @@ index 187a090..c81c3df 100644
 +#define SPRD_DMA_UMS9117_CHANNELS 32
 +#define SPRD_DMA_UMS9117_MAX_REQUEST 1
 +#define SPRD_DMA_UMS9117_CHUNK_BYTES 65535
++#define SPRD_DMA_SC9820E_CHANNELS 28
 
  /* DMA global registers definition */
  #define SPRD_DMA_GLB_PAUSE		0x0
-@@ -85,6 +90,7 @@
+@@ -85,6 +91,7 @@
  /* SPRD_DMA_CHN_CFG register definition */
  #define SPRD_DMA_CHN_EN			BIT(0)
  #define SPRD_DMA_LINKLIST_EN		BIT(4)
@@ -42,7 +43,7 @@ index 187a090..c81c3df 100644
  #define SPRD_DMA_WAIT_BDONE_OFFSET	24
  #define SPRD_DMA_DONOT_WAIT_BDONE	1
 
-@@ -94,7 +100,6 @@
+@@ -94,7 +101,6 @@
  /* SPRD_DMA_CHN_PAUSE register definition */
  #define SPRD_DMA_PAUSE_EN		BIT(0)
  #define SPRD_DMA_PAUSE_STS		BIT(2)
@@ -50,7 +51,7 @@ index 187a090..c81c3df 100644
 
  /* DMA_CHN_WARP_* register definition */
  #define SPRD_DMA_HIGH_ADDR_MASK		GENMASK(31, 28)
-@@ -163,6 +168,12 @@ enum sprd_dma_datawidth {
+@@ -163,6 +169,12 @@ enum sprd_dma_datawidth {
  	SPRD_DMA_DATAWIDTH_8_BYTES,
  };
 
@@ -63,7 +64,7 @@ index 187a090..c81c3df 100644
  /* dma channel hardware configuration */
  struct sprd_dma_chn_hw {
  	u32 pause;
-@@ -187,7 +198,18 @@ struct sprd_dma_chn_hw {
+@@ -187,7 +199,18 @@ struct sprd_dma_chn_hw {
  struct sprd_dma_desc {
  	struct virt_dma_desc	vd;
  	struct sprd_dma_chn_hw	chn_hw;
@@ -82,7 +83,7 @@ index 187a090..c81c3df 100644
  };
 
  /* dma channel description */
-@@ -202,6 +224,16 @@ struct sprd_dma_chn {
+@@ -202,6 +225,17 @@ struct sprd_dma_chn {
  	enum sprd_dma_trg_mode	trg_mode;
  	enum sprd_dma_int_type	int_type;
  	struct sprd_dma_desc	*cur_desc;
@@ -96,10 +97,11 @@ index 187a090..c81c3df 100644
 +	u8 channel_count;
 +	u8 max_request;
 +	bool ums9117;
++	bool ap_dma_v4;
  };
 
  /* SPRD dma device */
-@@ -210,11 +242,23 @@ struct sprd_dma_dev {
+@@ -210,11 +244,29 @@ struct sprd_dma_dev {
  	void __iomem		*glb_base;
  	struct clk		*clk;
  	struct clk		*ashb_clk;
@@ -120,10 +122,16 @@ index 187a090..c81c3df 100644
 +	.ums9117 = true,
 +};
 +
++static const struct sprd_dma_config sprd_dma_sc9820e = {
++	.dma_mask_bits = 32,
++	.channel_count = SPRD_DMA_SC9820E_CHANNELS,
++	.ap_dma_v4 = true,
++};
++
  static void sprd_dma_free_desc(struct virt_dma_desc *vd);
  static bool sprd_dma_filter_fn(struct dma_chan *chan, void *param);
  static struct of_dma_filter_info sprd_dma_info = {
-@@ -258,6 +302,42 @@ static void sprd_dma_chn_update(struct sprd_dma_chn *schan, u32 reg,
+@@ -258,6 +310,42 @@ static void sprd_dma_chn_update(struct sprd_dma_chn *schan, u32 reg,
  	writel(tmp, schan->chn_base + reg);
  }
 
@@ -166,7 +174,7 @@ index 187a090..c81c3df 100644
  static int sprd_dma_enable(struct sprd_dma_dev *sdev)
  {
  	int ret;
-@@ -266,25 +346,22 @@ static int sprd_dma_enable(struct sprd_dma_dev *sdev)
+@@ -266,25 +354,22 @@ static int sprd_dma_enable(struct sprd_dma_dev *sdev)
  	if (ret)
  		return ret;
 
@@ -201,7 +209,7 @@ index 187a090..c81c3df 100644
  }
 
  static void sprd_dma_set_uid(struct sprd_dma_chn *schan)
-@@ -337,41 +414,61 @@ static void sprd_dma_soft_request(struct sprd_dma_chn *schan)
+@@ -337,41 +422,61 @@ static void sprd_dma_soft_request(struct sprd_dma_chn *schan)
  			    SPRD_DMA_REQ_EN);
  }
 
@@ -281,7 +289,16 @@ index 187a090..c81c3df 100644
  }
 
  static unsigned long sprd_dma_get_src_addr(struct sprd_dma_chn *schan)
-@@ -531,45 +628,141 @@ static void sprd_dma_set_chn_config(struct sprd_dma_chn *schan,
+@@ -491,7 +596,7 @@ static void sprd_dma_set_pending(struct sprd_dma_chn *schan, bool enable)
+ 	struct sprd_dma_dev *sdev = to_sprd_dma_dev(&schan->vc.chan);
+ 	u32 reg, val, req_id;
+
+-	if (schan->dev_id == SPRD_DMA_SOFTWARE_UID)
++	if (schan->dev_id == SPRD_DMA_SOFTWARE_UID || sdev->config->ap_dma_v4)
+ 		return;
+
+ 	/* The DMA request id always starts from 0. */
+@@ -531,45 +636,141 @@ static void sprd_dma_set_chn_config(struct sprd_dma_chn *schan,
  	writel(cfg->req, schan->chn_base + SPRD_DMA_CHN_REQ);
  }
 
@@ -397,10 +414,13 @@ index 187a090..c81c3df 100644
 +		list_del(&vd->node);
 +		sprd_dma_abort_desc_locked(schan, to_sprd_dma_desc(vd));
 +	}
-+}
-+
+ }
+
+-static void sprd_dma_stop(struct sprd_dma_chn *schan)
 +static void sprd_dma_start(struct sprd_dma_chn *schan)
-+{
+ {
+-	sprd_dma_stop_and_disable(schan);
+-	sprd_dma_set_pending(schan, false);
 +	struct virt_dma_desc *vd = vchan_next_desc(&schan->vc);
 +
 +	if (!vd)
@@ -410,13 +430,10 @@ index 187a090..c81c3df 100644
 +	schan->cur_desc = to_sprd_dma_desc(vd);
 +	if (sprd_dma_start_current(schan))
 +		sprd_dma_fail_queue_locked(schan);
- }
-
--static void sprd_dma_stop(struct sprd_dma_chn *schan)
++}
++
 +static int sprd_dma_stop(struct sprd_dma_chn *schan)
- {
--	sprd_dma_stop_and_disable(schan);
--	sprd_dma_set_pending(schan, false);
++{
 +	bool external_llist = schan->cur_desc &&
 +			      schan->cur_desc->type ==
 +				      SPRD_DMA_DESC_EXTERNAL_LLIST;
@@ -445,7 +462,7 @@ index 187a090..c81c3df 100644
  }
 
  static bool sprd_dma_check_trans_done(enum sprd_dma_int_type int_type,
-@@ -592,7 +785,8 @@ static irqreturn_t dma_irq_handle(int irq, void *dev_id)
+@@ -592,9 +793,14 @@ static irqreturn_t dma_irq_handle(int irq, void *dev_id)
  	struct sprd_dma_desc *sdesc;
  	enum sprd_dma_req_mode req_type;
  	enum sprd_dma_int_type int_type;
@@ -454,8 +471,14 @@ index 187a090..c81c3df 100644
 +	bool trans_done;
  	u32 i;
 
++	irq_status &= GENMASK(sdev->total_chns - 1, 0);
++	if (!irq_status)
++		return IRQ_NONE;
++
  	while (irq_status) {
-@@ -604,27 +798,64 @@ static irqreturn_t dma_irq_handle(int irq, void *dev_id)
+ 		i = __ffs(irq_status);
+ 		irq_status &= (irq_status - 1);
+@@ -604,27 +810,64 @@ static irqreturn_t dma_irq_handle(int irq, void *dev_id)
 
  		sdesc = schan->cur_desc;
  		if (!sdesc) {
@@ -527,7 +550,7 @@ index 187a090..c81c3df 100644
  		spin_unlock(&schan->vc.lock);
  	}
 
-@@ -633,70 +864,130 @@ static irqreturn_t dma_irq_handle(int irq, void *dev_id)
+@@ -633,70 +876,130 @@ static irqreturn_t dma_irq_handle(int irq, void *dev_id)
 
  static int sprd_dma_alloc_chan_resources(struct dma_chan *chan)
  {
@@ -682,7 +705,7 @@ index 187a090..c81c3df 100644
  	return ret;
  }
 
-@@ -706,7 +997,8 @@ static void sprd_dma_issue_pending(struct dma_chan *chan)
+@@ -706,7 +1009,8 @@ static void sprd_dma_issue_pending(struct dma_chan *chan)
  	unsigned long flags;
 
  	spin_lock_irqsave(&schan->vc.lock, flags);
@@ -692,7 +715,7 @@ index 187a090..c81c3df 100644
  		sprd_dma_start(schan);
  	spin_unlock_irqrestore(&schan->vc.lock, flags);
  }
-@@ -891,60 +1183,122 @@ static int sprd_dma_fill_linklist_desc(struct dma_chan *chan,
+@@ -891,60 +1195,123 @@ static int sprd_dma_fill_linklist_desc(struct dma_chan *chan,
  				  dir, flags, slave_cfg);
  }
 
@@ -735,13 +758,15 @@ index 187a090..c81c3df 100644
 -	struct sprd_dma_chn_hw *hw;
 -	enum sprd_dma_datawidth datawidth;
 -	u32 step, temp;
+-
 +	unsigned long irq_flags;
 +	u64 mask = dma_get_mask(sdev->dma_dev.dev);
 +	bool available;
-
++
 +	if (!len || len > U32_MAX || src > mask || dest > mask ||
 +	    len - 1 > mask - src || len - 1 > mask - dest ||
-+	    (sdev->config->ums9117 && schan->dev_id != SPRD_DMA_SOFTWARE_UID))
++	    ((sdev->config->ums9117 || sdev->config->ap_dma_v4) &&
++	     schan->dev_id != SPRD_DMA_SOFTWARE_UID))
 +		return NULL;
 +	spin_lock_irqsave(&schan->vc.lock, irq_flags);
 +	available = !schan->failed && !schan->quarantined;
@@ -776,7 +801,7 @@ index 187a090..c81c3df 100644
 +	sdesc->dst = dest;
 +	sdesc->length = len;
 +	sdesc->type = SPRD_DMA_DESC_MEMCPY;
-+	if (IS_ALIGNED(src | dest | len, 8)) {
++	if (!sdev->config->ap_dma_v4 && IS_ALIGNED(src | dest | len, 8)) {
 +		sdesc->datawidth = SPRD_DMA_DATAWIDTH_8_BYTES;
 +		sdesc->step = SPRD_DMA_DWORD_STEP;
 +	} else if (IS_ALIGNED(src | dest | len, 4)) {
@@ -852,7 +877,7 @@ index 187a090..c81c3df 100644
 
  static struct dma_async_tx_descriptor *
  sprd_dma_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
-@@ -960,7 +1314,7 @@ sprd_dma_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
+@@ -960,7 +1327,7 @@ sprd_dma_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
  	u32 len = 0;
  	int ret, i;
 
@@ -861,7 +886,7 @@ index 187a090..c81c3df 100644
  		return NULL;
 
  	if (context) {
-@@ -1031,7 +1385,8 @@ sprd_dma_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
+@@ -1031,7 +1398,8 @@ sprd_dma_prep_slave_sg(struct dma_chan *chan, struct scatterlist *sgl,
  		return NULL;
  	}
 
@@ -871,7 +896,7 @@ index 187a090..c81c3df 100644
  }
 
  static int sprd_dma_slave_config(struct dma_chan *chan,
-@@ -1048,24 +1403,35 @@ static int sprd_dma_pause(struct dma_chan *chan)
+@@ -1048,24 +1416,35 @@ static int sprd_dma_pause(struct dma_chan *chan)
  {
  	struct sprd_dma_chn *schan = to_sprd_dma_chan(chan);
  	unsigned long flags;
@@ -911,7 +936,7 @@ index 187a090..c81c3df 100644
  }
 
  static int sprd_dma_terminate_all(struct dma_chan *chan)
-@@ -1074,12 +1440,18 @@ static int sprd_dma_terminate_all(struct dma_chan *chan)
+@@ -1074,12 +1453,18 @@ static int sprd_dma_terminate_all(struct dma_chan *chan)
  	struct virt_dma_desc *cur_vd = NULL;
  	unsigned long flags;
  	LIST_HEAD(head);
@@ -931,7 +956,7 @@ index 187a090..c81c3df 100644
 
  	vchan_get_all_descriptors(&schan->vc, &head);
  	spin_unlock_irqrestore(&schan->vc.lock, flags);
-@@ -1091,18 +1463,32 @@ static int sprd_dma_terminate_all(struct dma_chan *chan)
+@@ -1091,37 +1476,94 @@ static int sprd_dma_terminate_all(struct dma_chan *chan)
  	return 0;
  }
 
@@ -965,7 +990,45 @@ index 187a090..c81c3df 100644
  	schan->dev_id = slave_id;
  	return true;
  }
-@@ -1110,18 +1496,23 @@ static bool sprd_dma_filter_fn(struct dma_chan *chan, void *param)
+
++static int sprd_dma_check_ap_v4_idle(struct sprd_dma_dev *sdev)
++{
++	u32 public_mask = GENMASK(sdev->total_chns - 1, 0);
++	u32 enabled = readl(sdev->glb_base + SPRD_DMA_GLB_CHN_EN_STS);
++	u32 requested = readl(sdev->glb_base + SPRD_DMA_GLB_REQ_STS);
++	u32 raw = readl(sdev->glb_base + SPRD_DMA_GLB_INT_RAW_STS);
++	u32 masked = readl(sdev->glb_base + SPRD_DMA_GLB_INT_MSK_STS);
++	u32 i;
++
++	if (((enabled | requested) & public_mask) || raw || masked) {
++		dev_err(sdev->dma_dev.dev,
++			"inherited DMA state: enable=%08x request=%08x raw=%08x masked=%08x; clock retained until reboot\n",
++			enabled, requested, raw, masked);
++		return -EBUSY;
++	}
++
++	for (i = 0; i < sdev->total_chns; i++) {
++		void __iomem *base = sdev->channels[i].chn_base;
++		u32 config = readl(base + SPRD_DMA_CHN_CFG);
++		u32 request = readl(base + SPRD_DMA_CHN_REQ);
++		u32 pause = readl(base + SPRD_DMA_CHN_PAUSE);
++		u32 interrupt = readl(base + SPRD_DMA_CHN_INTC);
++
++		if (!(config & SPRD_DMA_CHN_EN) &&
++		    !(request & SPRD_DMA_REQ_EN) &&
++		    !(pause & SPRD_DMA_PAUSE_EN) &&
++		    !(interrupt & SPRD_DMA_CHN_INT_STS))
++			continue;
++
++		dev_err(sdev->dma_dev.dev,
++			"inherited DMA channel %u: config=%08x request=%08x pause=%08x interrupt=%08x; clock retained until reboot\n",
++			i, config, request, pause, interrupt);
++		return -EBUSY;
++	}
++
++	return 0;
++}
++
  static int sprd_dma_probe(struct platform_device *pdev)
  {
  	struct device_node *np = pdev->dev.of_node;
@@ -995,7 +1058,7 @@ index 187a090..c81c3df 100644
  	}
 
  	/* Parse new and deprecated dma-channels properties */
-@@ -1133,12 +1524,18 @@ static int sprd_dma_probe(struct platform_device *pdev)
+@@ -1133,12 +1575,18 @@ static int sprd_dma_probe(struct platform_device *pdev)
  		dev_err(&pdev->dev, "get dma channels count failed\n");
  		return ret;
  	}
@@ -1014,7 +1077,7 @@ index 187a090..c81c3df 100644
 
  	sdev->clk = devm_clk_get(&pdev->dev, "enable");
  	if (IS_ERR(sdev->clk)) {
-@@ -1147,9 +1544,10 @@ static int sprd_dma_probe(struct platform_device *pdev)
+@@ -1147,9 +1595,10 @@ static int sprd_dma_probe(struct platform_device *pdev)
  	}
 
  	/* ashb clock is optional for AGCP DMA */
@@ -1027,24 +1090,27 @@ index 187a090..c81c3df 100644
 
  	/*
  	 * We have three DMA controllers: AP DMA, AON DMA and AGCP DMA. For AGCP
-@@ -1159,13 +1557,15 @@ static int sprd_dma_probe(struct platform_device *pdev)
+@@ -1159,16 +1608,10 @@ static int sprd_dma_probe(struct platform_device *pdev)
  	 * be optional.
  	 */
  	sdev->irq = platform_get_irq(pdev, 0);
 -	if (sdev->irq > 0) {
-+	if (sdev->irq >= 0) {
- 		ret = devm_request_irq(&pdev->dev, sdev->irq, dma_irq_handle,
- 				       0, "sprd_dma", (void *)sdev);
- 		if (ret < 0) {
- 			dev_err(&pdev->dev, "request dma irq failed\n");
- 			return ret;
- 		}
-+	} else if (config->ums9117) {
+-		ret = devm_request_irq(&pdev->dev, sdev->irq, dma_irq_handle,
+-				       0, "sprd_dma", (void *)sdev);
+-		if (ret < 0) {
+-			dev_err(&pdev->dev, "request dma irq failed\n");
+-			return ret;
+-		}
+-	} else {
++	if (sdev->irq < 0 && (config->ums9117 || config->ap_dma_v4))
 +		return sdev->irq;
- 	} else {
++	else if (sdev->irq < 0)
  		dev_warn(&pdev->dev, "no interrupts for the dma controller\n");
- 	}
-@@ -1189,11 +1589,14 @@ static int sprd_dma_probe(struct platform_device *pdev)
+-	}
+
+ 	sdev->glb_base = devm_platform_ioremap_resource(pdev, 0);
+ 	if (IS_ERR(sdev->glb_base))
+@@ -1189,11 +1633,14 @@ static int sprd_dma_probe(struct platform_device *pdev)
  	sdev->dma_dev.device_pause = sprd_dma_pause;
  	sdev->dma_dev.device_resume = sprd_dma_resume;
  	sdev->dma_dev.device_terminate_all = sprd_dma_terminate_all;
@@ -1059,7 +1125,56 @@ index 187a090..c81c3df 100644
  		/* get each channel's registers base address. */
  		dma_chn->chn_base = sdev->glb_base + SPRD_DMA_CHN_REG_OFFSET +
  				    SPRD_DMA_CHN_REG_LENGTH * i;
-@@ -1247,7 +1650,7 @@ static void sprd_dma_remove(struct platform_device *pdev)
+@@ -1205,9 +1652,27 @@ static int sprd_dma_probe(struct platform_device *pdev)
+ 	platform_set_drvdata(pdev, sdev);
+ 	ret = sprd_dma_enable(sdev);
+ 	if (ret)
+-		return ret;
++		goto err_channels;
++
++	if (config->ap_dma_v4) {
++		ret = sprd_dma_check_ap_v4_idle(sdev);
++		/* An unowned transfer must retain its clock and registers. */
++		if (ret)
++			goto err_channels;
++	}
+
+-	pm_runtime_set_active(&pdev->dev);
++	if (sdev->irq >= 0) {
++		ret = devm_request_irq(&pdev->dev, sdev->irq, dma_irq_handle, 0,
++				       "sprd_dma", sdev);
++		if (ret) {
++			dev_err(&pdev->dev, "request dma irq failed\n");
++			goto err_disable;
++		}
++	}
++
++	ret = pm_runtime_set_active(&pdev->dev);
++	if (ret)
++		goto err_irq;
+ 	pm_runtime_enable(&pdev->dev);
+
+ 	ret = pm_runtime_get_sync(&pdev->dev);
+@@ -1234,7 +1699,18 @@ err_of_register:
+ err_register:
+ 	pm_runtime_put_noidle(&pdev->dev);
+ 	pm_runtime_disable(&pdev->dev);
++err_irq:
++	if (sdev->irq >= 0)
++		devm_free_irq(&pdev->dev, sdev->irq, sdev);
++err_disable:
+ 	sprd_dma_disable(sdev);
++err_channels:
++	for (i = 0; i < chn_count; i++) {
++		dma_chn = &sdev->channels[i];
++		list_del(&dma_chn->vc.chan.device_node);
++		tasklet_kill(&dma_chn->vc.task);
++	}
++	platform_set_drvdata(pdev, NULL);
+ 	return ret;
+ }
+
+@@ -1246,7 +1722,7 @@ static void sprd_dma_remove(struct platform_device *pdev)
  	pm_runtime_get_sync(&pdev->dev);
 
  	/* explicitly free the irq */
@@ -1068,12 +1183,13 @@ index 187a090..c81c3df 100644
  		devm_free_irq(&pdev->dev, sdev->irq, sdev);
 
  	list_for_each_entry_safe(c, cn, &sdev->dma_dev.channels,
-@@ -1265,7 +1668,8 @@ static void sprd_dma_remove(struct platform_device *pdev)
+@@ -1264,7 +1740,9 @@ static void sprd_dma_remove(struct platform_device *pdev)
  }
 
  static const struct of_device_id sprd_dma_match[] = {
 -	{ .compatible = "sprd,sc9860-dma", },
 +	{ .compatible = "sprd,sc9860-dma", .data = &sprd_dma_sc9860 },
++	{ .compatible = "sprd,sc9820e-dma", .data = &sprd_dma_sc9820e },
 +	{ .compatible = "sprd,ums9117-dma", .data = &sprd_dma_ums9117 },
  	{},
  };

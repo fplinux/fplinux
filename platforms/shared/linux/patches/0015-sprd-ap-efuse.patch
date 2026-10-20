@@ -1,0 +1,283 @@
+diff --git a/drivers/nvmem/Kconfig b/drivers/nvmem/Kconfig
+--- a/drivers/nvmem/Kconfig
++++ b/drivers/nvmem/Kconfig
+@@ -366,7 +366,7 @@ config NVMEM_SPMI_SDAM
+ 
+ config NVMEM_SPRD_EFUSE
+ 	tristate "Spreadtrum SoC eFuse Support"
+-	depends on ARCH_SPRD || COMPILE_TEST
++	depends on ARCH_SPRD || ARCH_UMS9117 || ARCH_SC9820E || COMPILE_TEST
+ 	depends on HAS_IOMEM
+ 	help
+ 	  This is a simple driver to dump specified values of Spreadtrum
+diff --git a/drivers/nvmem/sprd-efuse.c b/drivers/nvmem/sprd-efuse.c
+--- a/drivers/nvmem/sprd-efuse.c
++++ b/drivers/nvmem/sprd-efuse.c
+@@ -10,6 +10,7 @@
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
+ 
++#define SPRD_EFUSE_IP_VER 0x14
+ #define SPRD_EFUSE_ENABLE		0x20
+ #define SPRD_EFUSE_ERR_FLAG		0x24
+ #define SPRD_EFUSE_ERR_CLR		0x28
+@@ -42,6 +43,15 @@
+  */
+ #define SPRD_EFUSE_NORMAL_BLOCK_NUMS	24
+ #define SPRD_EFUSE_NORMAL_BLOCK_OFFSET	72
++#define UMS9117_EFUSE_NORMAL_BLOCK_NUMS 0x48
++#define UMS9117_EFUSE_IP_VERSION 0x0800
++#define UMS9117_EFUSE_IP_TYPE_MASK GENMASK(17, 16)
++#define UMS9117_EFUSE_READ_MODE_MASK (SPRD_EFUSE_VDD_EN | SPRD_EFUSE_DOUBLE_EN)
++#define UMS9117_EFUSE_POWER_MODE_MASK \
++	(SPRD_EFUSE_ENK1_ON | SPRD_EFUSE_ENK2_ON | SPRD_EFUSE_PROG_EN)
++#define UMS9117_EFUSE_POWER_READ_MODE SPRD_EFUSE_ENK2_ON
++#define UMS9117_EFUSE_SETTLE_MIN_US 2000
++#define UMS9117_EFUSE_SETTLE_MAX_US 2500
+ 
+ /* Timeout (ms) for the trylock of hardware spinlocks */
+ #define SPRD_EFUSE_HWLOCK_TIMEOUT	5000
+@@ -58,6 +68,17 @@
+ 	u32 blk_nums;
+ 	u32 blk_offset;
+ 	bool blk_double;
++	bool clear_read_errors;
++	bool guarded_read;
++	bool read_only;
++	bool root_only;
++};
++
++struct sprd_efuse_read_state {
++	u32 enable;
++	u32 error;
++	u32 magic;
++	u32 power;
+ };
+ 
+ struct sprd_efuse {
+@@ -75,6 +96,23 @@
+ 	.blk_double = false,
+ };
+ 
++static const struct sprd_efuse_variant_data ums9117_data = {
++	.blk_nums = UMS9117_EFUSE_NORMAL_BLOCK_NUMS,
++	.blk_offset = 0,
++	.blk_double = true,
++	.guarded_read = true,
++	.read_only = true,
++	.root_only = true,
++};
++
++static const struct sprd_efuse_variant_data sc9820e_data = {
++	.blk_nums = 4,
++	.blk_offset = 41,
++	.blk_double = true,
++	.clear_read_errors = true,
++	.read_only = true,
++};
++
+ /*
+  * On Spreadtrum platform, we have multi-subsystems will access the unique
+  * efuse controller, so we need one hardware spinlock to synchronize between
+@@ -256,6 +294,10 @@
+ {
+ 	u32 status;
+ 
++	if (efuse->data->clear_read_errors)
++		writel(SPRD_EFUSE_ERR_CLR_MASK,
++		       efuse->base + SPRD_EFUSE_ERR_CLR);
++
+ 	/*
+ 	 * Need power on the efuse before reading data from efuse, and will
+ 	 * power off the efuse after reading process.
+@@ -291,12 +333,132 @@
+ 	return 0;
+ }
+ 
++static int sprd_efuse_ums9117_snapshot(struct sprd_efuse *efuse,
++				       struct sprd_efuse_read_state *state)
++{
++	u32 version;
++
++	version = readl(efuse->base + SPRD_EFUSE_IP_VER);
++	if ((version & GENMASK(15, 0)) != UMS9117_EFUSE_IP_VERSION ||
++	    (version & UMS9117_EFUSE_IP_TYPE_MASK))
++		return -ENODEV;
++
++	state->enable = readl(efuse->base + SPRD_EFUSE_ENABLE);
++	state->error = readl(efuse->base + SPRD_EFUSE_ERR_FLAG);
++	state->magic = readl(efuse->base + SPRD_EFUSE_MAGIC_NUM);
++	state->power = readl(efuse->base + SPRD_EFUSE_PW_SWT);
++
++	if (state->enable || state->magic ||
++	    (state->power & UMS9117_EFUSE_POWER_MODE_MASK) !=
++		    UMS9117_EFUSE_POWER_READ_MODE)
++		return -EBUSY;
++	if (state->error & SPRD_EFUSE_ERR_CLR_MASK)
++		return -EUCLEAN;
++
++	return 0;
++}
++
++static int sprd_efuse_ums9117_restore(struct sprd_efuse *efuse,
++				      const struct sprd_efuse_read_state *state)
++{
++	u32 enable;
++	u32 restored;
++	int ret = 0;
++
++	enable = readl(efuse->base + SPRD_EFUSE_ENABLE);
++	/* Never clear modes that this read path did not enable. */
++	restored = (enable & ~UMS9117_EFUSE_READ_MODE_MASK) |
++		   (state->enable & UMS9117_EFUSE_READ_MODE_MASK);
++	writel(restored, efuse->base + SPRD_EFUSE_ENABLE);
++	/* Complete mode restoration before its confirming register read. */
++	wmb();
++	enable = readl(efuse->base + SPRD_EFUSE_ENABLE);
++	if ((enable & UMS9117_EFUSE_READ_MODE_MASK) !=
++	    (state->enable & UMS9117_EFUSE_READ_MODE_MASK))
++		ret = -EIO;
++
++	usleep_range(UMS9117_EFUSE_SETTLE_MIN_US, UMS9117_EFUSE_SETTLE_MAX_US);
++	enable = readl(efuse->base + SPRD_EFUSE_ENABLE);
++	if ((enable & UMS9117_EFUSE_READ_MODE_MASK) !=
++	    (state->enable & UMS9117_EFUSE_READ_MODE_MASK))
++		ret = -EIO;
++	else if ((enable & ~UMS9117_EFUSE_READ_MODE_MASK) !=
++		 (state->enable & ~UMS9117_EFUSE_READ_MODE_MASK))
++		ret = -EBUSY;
++	if (readl(efuse->base + SPRD_EFUSE_MAGIC_NUM) != state->magic ||
++	    (readl(efuse->base + SPRD_EFUSE_PW_SWT) &
++	     UMS9117_EFUSE_POWER_MODE_MASK) !=
++		    (state->power & UMS9117_EFUSE_POWER_MODE_MASK)) {
++		if (!ret)
++			ret = -EBUSY;
++	}
++
++	return ret;
++}
++
++static int sprd_efuse_ums9117_raw_read(struct sprd_efuse *efuse, int blk,
++				       u32 *val, bool double_read)
++{
++	struct sprd_efuse_read_state state;
++	u32 enable;
++	u32 status;
++	int cleanup_ret;
++	int ret;
++
++	ret = sprd_efuse_ums9117_snapshot(efuse, &state);
++	if (ret)
++		return ret;
++
++	enable = (state.enable & ~UMS9117_EFUSE_READ_MODE_MASK) |
++		 SPRD_EFUSE_VDD_EN;
++	if (double_read)
++		enable |= SPRD_EFUSE_DOUBLE_EN;
++	writel(enable, efuse->base + SPRD_EFUSE_ENABLE);
++	/* Complete mode setup before reading the fuse array. */
++	wmb();
++	if (readl(efuse->base + SPRD_EFUSE_ENABLE) != enable) {
++		ret = -EIO;
++		goto restore;
++	}
++
++	usleep_range(UMS9117_EFUSE_SETTLE_MIN_US, UMS9117_EFUSE_SETTLE_MAX_US);
++	if (readl(efuse->base + SPRD_EFUSE_ENABLE) != enable) {
++		ret = -EIO;
++		goto restore;
++	}
++
++	*val = readl(efuse->base + SPRD_EFUSE_MEM(blk));
++	status = readl(efuse->base + SPRD_EFUSE_ERR_FLAG);
++	if ((status & SPRD_EFUSE_ERR_CLR_MASK) !=
++	    (state.error & SPRD_EFUSE_ERR_CLR_MASK)) {
++		/* Preserve the error flags for explicit recovery and diagnosis. */
++		dev_err(efuse->dev, "read error status %#x of block %d\n",
++			status, blk);
++		ret = -EUCLEAN;
++	} else {
++		ret = 0;
++	}
++
++restore:
++	cleanup_ret = sprd_efuse_ums9117_restore(efuse, &state);
++	if (cleanup_ret) {
++		dev_err(efuse->dev, "failed to restore read state: %d\n",
++			cleanup_ret);
++		if (!ret)
++			ret = cleanup_ret;
++	}
++
++	return ret;
++}
++
+ static int sprd_efuse_read(void *context, u32 offset, void *val, size_t bytes)
+ {
+ 	struct sprd_efuse *efuse = context;
+ 	bool blk_double = efuse->data->blk_double;
+ 	u32 index = offset / SPRD_EFUSE_BLOCK_WIDTH + efuse->data->blk_offset;
+-	u32 blk_offset = (offset % SPRD_EFUSE_BLOCK_WIDTH) * BITS_PER_BYTE;
++	u32 blk_offset = offset % SPRD_EFUSE_BLOCK_WIDTH;
++	u8 *buffer = val;
++	size_t count;
+ 	u32 data;
+ 	int ret;
+ 
+@@ -308,10 +470,24 @@
+ 	if (ret)
+ 		goto unlock;
+ 
+-	ret = sprd_efuse_raw_read(efuse, index, &data, blk_double);
+-	if (!ret) {
+-		data >>= blk_offset;
+-		memcpy(val, &data, bytes);
++	while (bytes) {
++		if (efuse->data->guarded_read)
++			ret = sprd_efuse_ums9117_raw_read(efuse, index, &data,
++							  blk_double);
++		else
++			ret = sprd_efuse_raw_read(efuse, index, &data,
++						  blk_double);
++		if (ret)
++			break;
++
++		count = min_t(size_t, bytes,
++			      SPRD_EFUSE_BLOCK_WIDTH - blk_offset);
++		data >>= blk_offset * BITS_PER_BYTE;
++		memcpy(buffer, &data, count);
++		buffer += count;
++		bytes -= count;
++		blk_offset = 0;
++		index++;
+ 	}
+ 
+ 	clk_disable_unprepare(efuse->clk);
+@@ -405,12 +581,13 @@
+ 
+ 	econfig.stride = 1;
+ 	econfig.word_size = 1;
+-	econfig.read_only = false;
++	econfig.read_only = efuse->data->read_only;
++	econfig.root_only = efuse->data->root_only;
+ 	econfig.name = "sprd-efuse";
+ 	econfig.size = efuse->data->blk_nums * SPRD_EFUSE_BLOCK_WIDTH;
+ 	econfig.add_legacy_fixed_of_cells = true;
+ 	econfig.reg_read = sprd_efuse_read;
+-	econfig.reg_write = sprd_efuse_write;
++	econfig.reg_write = efuse->data->read_only ? NULL : sprd_efuse_write;
+ 	econfig.priv = efuse;
+ 	econfig.dev = &pdev->dev;
+ 	nvmem = devm_nvmem_register(&pdev->dev, &econfig);
+@@ -423,8 +600,10 @@
+ }
+ 
+ static const struct of_device_id sprd_efuse_of_match[] = {
++	{ .compatible = "sprd,sc9820e-efuse", .data = &sc9820e_data },
++	{ .compatible = "sprd,ums9117-efuse", .data = &ums9117_data },
+ 	{ .compatible = "sprd,ums312-efuse", .data = &ums312_data },
+-	{ }
++	{}
+ };
+ MODULE_DEVICE_TABLE(of, sprd_efuse_of_match);
+ 

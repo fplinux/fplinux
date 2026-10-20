@@ -1,11 +1,10 @@
 diff --git a/drivers/iio/adc/sc27xx_adc.c b/drivers/iio/adc/sc27xx_adc.c
-index 2535c2c..7ae1f37 100644
 --- a/drivers/iio/adc/sc27xx_adc.c
 +++ b/drivers/iio/adc/sc27xx_adc.c
 @@ -1,8 +1,11 @@
  // SPDX-License-Identifier: GPL-2.0
  // Copyright (C) 2018 Spreadtrum Communications Inc.
-
+ 
 +#include <linux/clk.h>
 +#include <linux/delay.h>
  #include <linux/hwspinlock.h>
@@ -19,7 +18,7 @@ index 2535c2c..7ae1f37 100644
  #define SC27XX_CLK_ADC_EN		BIT(5)
  #define SC27XX_CLK_ADC_CLK_EN		BIT(6)
 +#define SC27XX_CLK_ADC_MASK (SC27XX_CLK_ADC_EN | SC27XX_CLK_ADC_CLK_EN)
-
+ 
  /* ADC controller registers definition */
  #define SC27XX_ADC_CTL			0x0
 @@ -30,6 +34,7 @@
@@ -27,7 +26,7 @@ index 2535c2c..7ae1f37 100644
  #define SC27XX_ADC_INT_STS		0x58
  #define SC27XX_ADC_INT_RAW		0x5c
 +#define SC27XX_ADC_DEBUG 0x60
-
+ 
  /* Bits and mask definition for SC27XX_ADC_CTL register */
  #define SC27XX_ADC_EN			BIT(0)
 @@ -37,9 +42,12 @@
@@ -36,15 +35,14 @@ index 2535c2c..7ae1f37 100644
  #define SC27XX_ADC_RUN_NUM_SHIFT	4
 +#define SC2720_ADC_AVERAGE_MASK GENMASK(10, 8)
 +#define SC2720_ADC_OFFSET_CAL BIT(12)
-
+ 
  /* Bits and mask definition for SC27XX_ADC_CH_CFG register */
  #define SC27XX_ADC_CHN_ID_MASK		GENMASK(4, 0)
 +#define SC2720_ADC_SLOW_MODE BIT(6)
  #define SC27XX_ADC_SCALE_MASK		GENMASK(10, 9)
  #define SC2721_ADC_SCALE_MASK		BIT(5)
  #define SC27XX_ADC_SCALE_SHIFT		9
-@@ -64,4 +72,14 @@
- #define SC27XX_ADC_RDY_TIMEOUT		1000000
+@@ -65,2 +73,12 @@
  #define SC27XX_ADC_POLL_RAW_STATUS	500
 +#define SC2720_ADC_RDY_TIMEOUT 10000
 +#define SC2720_ADC_SETTLE_MIN_US 100
@@ -56,25 +54,24 @@ index 2535c2c..7ae1f37 100644
 +
 +#define SC2720_ADC_DEBUG_STATE_MASK GENMASK(10, 8)
 +#define SC2720_ADC_DEBUG_COUNTER_MASK GENMASK(7, 0)
-
- /* Maximum ADC channel number */
+ 
 @@ -81,6 +99,7 @@
-
+ 
  struct sc27xx_adc_data {
  	struct device *dev;
 +	struct clk *xtal;
  	struct regulator *volref;
  	struct regmap *regmap;
  	/* lock to protect against multiple access to the device */
-@@ -93,6 +112,7 @@ struct sc27xx_adc_data {
+@@ -93,6 +112,7 @@
  	int channel_scale[SC27XX_ADC_CHANNEL_MAX];
  	u32 base;
  	int irq;
 +	bool faulted;
  	const struct sc27xx_adc_variant_data *var_data;
  };
-
-@@ -104,15 +124,40 @@ struct sc27xx_adc_data {
+ 
+@@ -104,15 +124,40 @@
  struct sc27xx_adc_variant_data {
  	u32 module_en;
  	u32 clk_en;
@@ -94,7 +91,7 @@ index 2535c2c..7ae1f37 100644
 +	bool transient_power;
  	bool set_volref;
  };
-
+ 
 +struct sc2720_adc_session {
 +	u32 control;
 +	u32 channel_config;
@@ -115,36 +112,36 @@ index 2535c2c..7ae1f37 100644
  struct sc27xx_adc_linear_graph {
  	int volt0;
  	int adc0;
-@@ -122,2 +167,7 @@ struct sc27xx_adc_linear_graph {
-
+@@ -122,2 +167,7 @@
+ 
 +static u32 sc27xx_adc_reg(struct sc27xx_adc_data *data, u32 reg)
 +{
 +	return data->base + data->var_data->register_offset + reg;
 +}
 +
  /*
-@@ -195,7 +245,7 @@ static int sc27xx_adc_scale_calibration(struct sc27xx_adc_data *data,
+@@ -195,7 +245,7 @@
  	const struct sc27xx_adc_linear_graph *calib_graph;
  	struct sc27xx_adc_linear_graph *graph;
  	const char *cell_name;
 -	u32 calib_data = 0;
 +	int calib_data;
-
+ 
  	if (big_scale) {
  		calib_graph = data->var_data->bscale_cal;
-@@ -208,6 +258,8 @@ static int sc27xx_adc_scale_calibration(struct sc27xx_adc_data *data,
+@@ -208,6 +258,8 @@
  	}
-
+ 
  	calib_data = adc_nvmem_cell_calib_data(data, cell_name);
 +	if (calib_data < 0)
 +		return calib_data;
-
+ 
  	/* Only need to calibrate the adc values in the linear graph. */
  	graph->adc0 = sc27xx_adc_get_calib_data(calib_data, calib_graph->adc0);
-@@ -481,16 +533,255 @@ static void sc2731_adc_scale_init(struct sc27xx_adc_data *data)
+@@ -481,16 +533,255 @@
  	}
  }
-
+ 
 +static void sc27xx_adc_set_cleanup_error(int *ret, int cleanup_ret)
 +{
 +	if (!*ret && cleanup_ret)
@@ -385,7 +382,7 @@ index 2535c2c..7ae1f37 100644
 +		if (ret)
 +			return ret;
 +	}
-
+ 
  	ret = hwspin_lock_timeout_raw(data->hwlock, SC27XX_ADC_HWLOCK_TIMEOUT);
  	if (ret) {
  		dev_err(data->dev, "timeout to get the hwspinlock\n");
@@ -398,12 +395,12 @@ index 2535c2c..7ae1f37 100644
 +		if (ret)
 +			goto unlock_adc;
  	}
-
+ 
  	/*
-@@ -508,12 +799,14 @@ static int sc27xx_adc_read(struct sc27xx_adc_data *data, int channel,
+@@ -508,12 +799,14 @@
  		}
  	}
-
+ 
 -	ret = regmap_set_bits(data->regmap, data->base + SC27XX_ADC_CTL,
 +	ret = regmap_set_bits(data->regmap,
 +			      sc27xx_adc_reg(data, SC27XX_ADC_CTL),
@@ -411,14 +408,14 @@ index 2535c2c..7ae1f37 100644
  	if (ret)
 -		goto regulator_restore;
 +		goto disable_adc;
-
+ 
 -	ret = regmap_set_bits(data->regmap, data->base + SC27XX_ADC_INT_CLR,
 +	ret = regmap_set_bits(data->regmap,
 +			      sc27xx_adc_reg(data, SC27XX_ADC_INT_CLR),
  			      SC27XX_ADC_IRQ_CLR);
  	if (ret)
  		goto disable_adc;
-@@ -521,47 +814,76 @@ static int sc27xx_adc_read(struct sc27xx_adc_data *data, int channel,
+@@ -521,47 +814,76 @@
  	/* Configure the channel id and scale */
  	tmp = (scale << data->var_data->scale_shift) & data->var_data->scale_mask;
  	tmp |= channel & SC27XX_ADC_CHN_ID_MASK;
@@ -434,7 +431,7 @@ index 2535c2c..7ae1f37 100644
 +				 channel_mask, tmp);
  	if (ret)
  		goto disable_adc;
-
+ 
 -	/* Select 12bit conversion mode, and only sample 1 time */
 -	tmp = SC27XX_ADC_12BIT_MODE;
 -	tmp |= (0 << SC27XX_ADC_RUN_NUM_SHIFT) & SC27XX_ADC_RUN_NUM_MASK;
@@ -453,14 +450,14 @@ index 2535c2c..7ae1f37 100644
 +				 control_mask, control_value);
  	if (ret)
  		goto disable_adc;
-
+ 
 -	ret = regmap_set_bits(data->regmap, data->base + SC27XX_ADC_CTL,
 +	ret = regmap_set_bits(data->regmap,
 +			      sc27xx_adc_reg(data, SC27XX_ADC_CTL),
  			      SC27XX_ADC_CHN_RUN);
  	if (ret)
  		goto disable_adc;
-
+ 
 -	ret = regmap_read_poll_timeout(data->regmap,
 -				       data->base + SC27XX_ADC_INT_RAW,
 -				       status, (status & SC27XX_ADC_IRQ_RAW),
@@ -486,7 +483,7 @@ index 2535c2c..7ae1f37 100644
 +				status);
 +			goto disable_adc;
 +		}
-
+ 
 -	ret = regmap_read(data->regmap, data->base + SC27XX_ADC_DATA, &value);
 -	if (ret)
 -		goto disable_adc;
@@ -496,9 +493,9 @@ index 2535c2c..7ae1f37 100644
 +		if (ret)
 +			goto disable_adc;
 +	}
-
+ 
  	value &= SC27XX_ADC_DATA_MASK;
-
+ 
  disable_adc:
 -	regmap_clear_bits(data->regmap, data->base + SC27XX_ADC_CTL,
 -			  SC27XX_ADC_EN);
@@ -521,7 +518,7 @@ index 2535c2c..7ae1f37 100644
  	if ((data->var_data->set_volref) && (channel == 30 || channel == 31)) {
  		ret_volref = regulator_set_voltage(data->volref,
  					    SC27XX_ADC_REFVOL_VDD28,
-@@ -569,11 +891,14 @@ regulator_restore:
+@@ -569,11 +891,14 @@
  		if (ret_volref) {
  			dev_err(data->dev, "failed to set the volref 2.8v,ret_volref = 0x%x\n",
  					 ret_volref);
@@ -534,13 +531,13 @@ index 2535c2c..7ae1f37 100644
 +disable_xtal:
 +	if (data->var_data->transient_power)
 +		clk_disable_unprepare(data->xtal);
-
+ 
  	if (!ret)
  		*val = value;
-@@ -718,6 +1043,26 @@ static const struct iio_info sc27xx_info = {
+@@ -718,6 +1043,26 @@
  	.write_raw = &sc27xx_adc_write_raw,
  };
-
+ 
 +static int sc2720_adc_fwnode_xlate(struct iio_dev *indio_dev,
 +				   const struct fwnode_reference_args *iiospec)
 +{
@@ -564,10 +561,10 @@ index 2535c2c..7ae1f37 100644
  #define SC27XX_ADC_CHANNEL(index, mask) {			\
  	.type = IIO_VOLTAGE,					\
  	.channel = index,					\
-@@ -726,6 +1071,20 @@ static const struct iio_info sc27xx_info = {
+@@ -726,6 +1071,20 @@
  	.indexed = 1,						\
  }
-
+ 
 +#define SC2720_ADC_CHANNEL(index)                             \
 +	{                                                     \
 +		.type = IIO_VOLTAGE,                          \
@@ -585,10 +582,10 @@ index 2535c2c..7ae1f37 100644
  static const struct iio_chan_spec sc27xx_channels[] = {
  	SC27XX_ADC_CHANNEL(0, BIT(IIO_CHAN_INFO_PROCESSED)),
  	SC27XX_ADC_CHANNEL(1, BIT(IIO_CHAN_INFO_PROCESSED)),
-@@ -761,6 +1120,17 @@ static const struct iio_chan_spec sc27xx_channels[] = {
+@@ -761,6 +1120,17 @@
  	SC27XX_ADC_CHANNEL(31, BIT(IIO_CHAN_INFO_PROCESSED)),
  };
-
+ 
 +static int sc27xx_adc_calibrate(struct sc27xx_adc_data *data)
 +{
 +	int ret;
@@ -603,15 +600,15 @@ index 2535c2c..7ae1f37 100644
  static int sc27xx_adc_enable(struct sc27xx_adc_data *data)
  {
  	int ret;
-@@ -772,16 +1142,12 @@ static int sc27xx_adc_enable(struct sc27xx_adc_data *data)
-
+@@ -772,16 +1142,12 @@
+ 
  	/* Enable ADC work clock and controller clock */
  	ret = regmap_set_bits(data->regmap, data->var_data->clk_en,
 -			      SC27XX_CLK_ADC_EN | SC27XX_CLK_ADC_CLK_EN);
 +			      SC27XX_CLK_ADC_MASK);
  	if (ret)
  		goto disable_adc;
-
+ 
  	/* ADC channel scales' calibration from nvmem device */
 -	ret = sc27xx_adc_scale_calibration(data, true);
 -	if (ret)
@@ -621,9 +618,9 @@ index 2535c2c..7ae1f37 100644
 +	ret = sc27xx_adc_calibrate(data);
  	if (ret)
  		goto disable_clk;
-
-@@ -789,7 +1155,7 @@ static int sc27xx_adc_enable(struct sc27xx_adc_data *data)
-
+ 
+@@ -789,7 +1155,7 @@
+ 
  disable_clk:
  	regmap_clear_bits(data->regmap, data->var_data->clk_en,
 -			  SC27XX_CLK_ADC_EN | SC27XX_CLK_ADC_CLK_EN);
@@ -631,16 +628,16 @@ index 2535c2c..7ae1f37 100644
  disable_adc:
  	regmap_clear_bits(data->regmap, data->var_data->module_en,
  			  SC27XX_MODULE_ADC_EN);
-@@ -803,7 +1169,7 @@ static void sc27xx_adc_disable(void *_data)
-
+@@ -803,7 +1169,7 @@
+ 
  	/* Disable ADC work clock and controller clock */
  	regmap_clear_bits(data->regmap, data->var_data->clk_en,
 -			  SC27XX_CLK_ADC_EN | SC27XX_CLK_ADC_CLK_EN);
 +			  SC27XX_CLK_ADC_MASK);
-
+ 
  	regmap_clear_bits(data->regmap, data->var_data->module_en,
  			  SC27XX_MODULE_ADC_EN);
-@@ -848,12 +1214,22 @@ static const struct sc27xx_adc_variant_data sc2721_data = {
+@@ -848,12 +1214,22 @@
  static const struct sc27xx_adc_variant_data sc2720_data = {
  	.module_en = SC2731_MODULE_EN,
  	.clk_en = SC2721_ARM_CLK_EN,
@@ -662,20 +659,20 @@ index 2535c2c..7ae1f37 100644
 +	.transient_power = true,
  	.set_volref = false,
  };
-
+ 
 @@ -875,6 +1251,8 @@
  		return -ENOMEM;
-
+ 
  	sc27xx_data = iio_priv(indio_dev);
 +	sc27xx_data->dev = dev;
 +	sc27xx_data->var_data = pdata;
-
+ 
  	sc27xx_data->regmap = dev_get_regmap(dev->parent, NULL);
  	if (!sc27xx_data->regmap)
 @@ -896,7 +1274,15 @@
  	if (!sc27xx_data->hwlock)
  		return dev_err_probe(dev, -ENXIO, "failed to request hwspinlock\n");
-
+ 
 -	sc27xx_data->dev = dev;
 +	if (pdata->transient_power) {
 +		sc27xx_data->xtal = devm_clk_get(dev, "xtal");
@@ -692,13 +689,17 @@ index 2535c2c..7ae1f37 100644
 @@ -904,22 +1290,30 @@
  					     "failed to get ADC volref\n");
  	}
-
+ 
 -	sc27xx_data->var_data = pdata;
  	sc27xx_data->var_data->init_scale(sc27xx_data);
-
+ 
 -	ret = sc27xx_adc_enable(sc27xx_data);
 -	if (ret)
 -		return dev_err_probe(dev, ret, "failed to enable ADC module\n");
+-
+-	ret = devm_add_action_or_reset(dev, sc27xx_adc_disable, sc27xx_data);
+-	if (ret)
+-		return dev_err_probe(dev, ret, "failed to add ADC disable action\n");
 +	if (!pdata->transient_power) {
 +		ret = sc27xx_adc_enable(sc27xx_data);
 +		if (ret)
@@ -710,11 +711,7 @@ index 2535c2c..7ae1f37 100644
 +			return dev_err_probe(
 +				dev, ret, "failed to add ADC disable action\n");
 +	}
-
--	ret = devm_add_action_or_reset(dev, sc27xx_adc_disable, sc27xx_data);
--	if (ret)
--		return dev_err_probe(dev, ret, "failed to add ADC disable action\n");
--
+ 
 -	indio_dev->name = dev_name(dev);
 +	indio_dev->name = pdata->name ? pdata->name : dev_name(dev);
  	indio_dev->modes = INDIO_DIRECT_MODE;
@@ -729,14 +726,22 @@ index 2535c2c..7ae1f37 100644
 +		indio_dev->channels = sc27xx_channels;
 +		indio_dev->num_channels = ARRAY_SIZE(sc27xx_channels);
 +	}
-
+ 
  	mutex_init(&sc27xx_data->lock);
-
+ 
 diff --git a/drivers/nvmem/sc27xx-efuse.c b/drivers/nvmem/sc27xx-efuse.c
-index 4e2ffef..57e4f73 100644
 --- a/drivers/nvmem/sc27xx-efuse.c
 +++ b/drivers/nvmem/sc27xx-efuse.c
-@@ -56,6 +56,16 @@
+@@ -12,6 +12,8 @@
+ #define SC27XX_MODULE_EN		0xc08
+ #define SC2730_MODULE_EN		0x1808
+ #define SC27XX_EFUSE_EN			BIT(6)
++#define SC2720_RTC_CLK_EN 0xc10
++#define SC2720_EFUSE_RTC_EN BIT(11)
+ 
+ /* Efuse controller registers definition */
+ #define SC27XX_EFUSE_GLB_CTRL		0x0
+@@ -56,6 +58,17 @@
   */
  struct sc27xx_efuse_variant_data {
  	u32 module_en;
@@ -746,17 +751,18 @@ index 4e2ffef..57e4f73 100644
 +
 +struct sc2720_efuse_session {
 +	u32 module_enable;
++	u32 rtc_clock_enable;
 +	u32 block_index;
-+	bool module_valid;
++	bool clocks_valid;
 +	bool block_valid;
 +	bool unsafe_controller;
  };
-
+ 
  struct sc27xx_efuse {
-@@ -75,6 +85,12 @@ static const struct sc27xx_efuse_variant_data sc2730_edata = {
+@@ -75,6 +88,12 @@
  	.module_en = SC2730_MODULE_EN,
  };
-
+ 
 +static const struct sc27xx_efuse_variant_data sc2720_edata = {
 +	.module_en = SC27XX_MODULE_EN,
 +	.root_only = true,
@@ -766,17 +772,17 @@ index 4e2ffef..57e4f73 100644
  /*
   * On Spreadtrum platform, we have multi-subsystems will access the unique
   * efuse controller, so we need one hardware spinlock to synchronize between
-@@ -103,16 +119,16 @@ static void sc27xx_efuse_unlock(struct sc27xx_efuse *efuse)
+@@ -103,16 +122,16 @@
  	mutex_unlock(&efuse->mutex);
  }
-
+ 
 -static int sc27xx_efuse_poll_status(struct sc27xx_efuse *efuse, u32 bits)
 +static int sc27xx_efuse_poll_status(struct sc27xx_efuse *efuse, u32 required,
 +				    u32 forbidden)
  {
  	int ret;
  	u32 val;
-
+ 
 -	ret = regmap_read_poll_timeout(efuse->regmap,
 -				       efuse->base + SC27XX_EFUSE_STATUS,
 -				       val, (val & bits),
@@ -789,10 +795,10 @@ index 4e2ffef..57e4f73 100644
  	if (ret) {
  		dev_err(efuse->dev, "timeout to update the efuse status\n");
  		return ret;
-@@ -121,12 +137,117 @@ static int sc27xx_efuse_poll_status(struct sc27xx_efuse *efuse, u32 bits)
+@@ -121,12 +140,129 @@
  	return 0;
  }
-
+ 
 +static int sc2720_efuse_guard(struct sc27xx_efuse *efuse,
 +			      struct sc2720_efuse_session *session)
 +{
@@ -844,7 +850,7 @@ index 4e2ffef..57e4f73 100644
 +static int sc2720_efuse_restore(struct sc27xx_efuse *efuse,
 +				struct sc2720_efuse_session *session)
 +{
-+	u32 block_index, module_enable;
++	u32 block_index, module_enable, rtc_clock_enable;
 +	int cleanup_ret;
 +	int ret;
 +
@@ -879,7 +885,7 @@ index 4e2ffef..57e4f73 100644
 +	if (ret)
 +		return ret;
 +
-+	if (!session->module_valid)
++	if (!session->clocks_valid)
 +		return 0;
 +	ret = regmap_update_bits(efuse->regmap, efuse->var_data->module_en,
 +				 SC27XX_EFUSE_EN, session->module_enable);
@@ -890,6 +896,18 @@ index 4e2ffef..57e4f73 100644
 +	if (cleanup_ret)
 +		return cleanup_ret;
 +	if ((module_enable ^ session->module_enable) & SC27XX_EFUSE_EN)
++		return -EIO;
++
++	ret = regmap_update_bits(efuse->regmap, SC2720_RTC_CLK_EN,
++				 SC2720_EFUSE_RTC_EN,
++				 session->rtc_clock_enable);
++	if (ret)
++		return ret;
++	ret = regmap_read(efuse->regmap, SC2720_RTC_CLK_EN, &rtc_clock_enable);
++	if (ret)
++		return ret;
++	if ((rtc_clock_enable ^ session->rtc_clock_enable) &
++	    SC2720_EFUSE_RTC_EN)
 +		return -EIO;
 +
 +	return 0;
@@ -905,13 +923,13 @@ index 4e2ffef..57e4f73 100644
 +	u32 module_en;
 +	bool module_owned = false;
 +	int cleanup_ret, ret;
-
+ 
  	if (blk_index > SC27XX_EFUSE_BLOCK_MAX ||
  	    bytes > SC27XX_EFUSE_BLOCK_WIDTH)
-@@ -136,24 +257,62 @@ static int sc27xx_efuse_read(void *context, u32 offset, void *val, size_t bytes)
+@@ -136,24 +272,71 @@
  	if (ret)
  		return ret;
-
+ 
 -	/* Enable the efuse controller. */
 -	ret = regmap_update_bits(efuse->regmap, efuse->var_data->module_en,
 -				 SC27XX_EFUSE_EN, SC27XX_EFUSE_EN);
@@ -921,9 +939,13 @@ index 4e2ffef..57e4f73 100644
  		goto unlock_efuse;
 +	if (efuse->var_data->guard_state) {
 +		session.module_enable = module_en;
-+		session.module_valid = true;
++		ret = regmap_read(efuse->regmap, SC2720_RTC_CLK_EN,
++				  &session.rtc_clock_enable);
++		if (ret)
++			goto unlock_efuse;
++		session.clocks_valid = true;
 +	}
-
+ 
 -	/*
 -	 * Before reading, we should ensure the efuse controller is in
 -	 * standby state.
@@ -941,6 +963,11 @@ index 4e2ffef..57e4f73 100644
 +	}
 +
 +	if (efuse->var_data->guard_state) {
++		ret = regmap_set_bits(efuse->regmap, SC2720_RTC_CLK_EN,
++				      SC2720_EFUSE_RTC_EN);
++		if (ret)
++			goto disable_efuse;
++
 +		ret = sc2720_efuse_guard(efuse, &session);
 +		if (ret) {
 +			if (session.unsafe_controller)
@@ -968,7 +995,7 @@ index 4e2ffef..57e4f73 100644
 +		if (ret)
 +			goto disable_efuse;
 +	}
-
+ 
  	/* Set the block address to be read. */
 -	ret = regmap_write(efuse->regmap,
 -			   efuse->base + SC27XX_EFUSE_BLOCK_INDEX,
@@ -983,8 +1010,8 @@ index 4e2ffef..57e4f73 100644
 +				   blk_index & SC27XX_EFUSE_BLOCK_MASK);
  	if (ret)
  		goto disable_efuse;
-
-@@ -169,7 +328,9 @@ static int sc27xx_efuse_read(void *context, u32 offset, void *val, size_t bytes)
+ 
+@@ -169,7 +352,9 @@
  	 * Polling the read done status to make sure the reading process
  	 * is completed, that means the data can be read out now.
  	 */
@@ -994,10 +1021,10 @@ index 4e2ffef..57e4f73 100644
 +		efuse->var_data->guard_state ? SC27XX_EFUSE_PGM_BUSY : 0);
  	if (ret)
  		goto disable_efuse;
-
-@@ -186,8 +347,25 @@ static int sc27xx_efuse_read(void *context, u32 offset, void *val, size_t bytes)
+ 
+@@ -186,8 +371,25 @@
  				 SC27XX_EFUSE_CLR_RDDONE);
-
+ 
  disable_efuse:
 -	/* Disable the efuse controller after reading. */
 -	regmap_update_bits(efuse->regmap, efuse->var_data->module_en, SC27XX_EFUSE_EN, 0);
@@ -1022,8 +1049,8 @@ index 4e2ffef..57e4f73 100644
 +		"SC2720 efuse programming state is active; gate left enabled\n");
  unlock_efuse:
  	sc27xx_efuse_unlock(efuse);
-
-@@ -242,6 +420,7 @@ static int sc27xx_efuse_probe(struct platform_device *pdev)
+ 
+@@ -242,6 +444,7 @@
  	econfig.stride = 1;
  	econfig.word_size = 1;
  	econfig.read_only = true;
@@ -1031,9 +1058,9 @@ index 4e2ffef..57e4f73 100644
  	econfig.name = "sc27xx-efuse";
  	econfig.size = SC27XX_EFUSE_BLOCK_MAX * SC27XX_EFUSE_BLOCK_WIDTH;
  	econfig.reg_read = sc27xx_efuse_read;
-@@ -258,9 +437,10 @@ static int sc27xx_efuse_probe(struct platform_device *pdev)
+@@ -258,9 +461,10 @@
  }
-
+ 
  static const struct of_device_id sc27xx_efuse_of_match[] = {
 -	{ .compatible = "sprd,sc2731-efuse", .data = &sc2731_edata},
 -	{ .compatible = "sprd,sc2730-efuse", .data = &sc2730_edata},
@@ -1044,4 +1071,4 @@ index 4e2ffef..57e4f73 100644
 +	{}
  };
  MODULE_DEVICE_TABLE(of, sc27xx_efuse_of_match);
-
+ 

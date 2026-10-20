@@ -1,0 +1,12 @@
+diff --git a/drivers/hwspinlock/Kconfig b/drivers/hwspinlock/Kconfig
+--- a/drivers/hwspinlock/Kconfig
++++ b/drivers/hwspinlock/Kconfig
+@@ -30,7 +30,7 @@
+ 
+ config HWSPINLOCK_SPRD
+ 	tristate "SPRD Hardware Spinlock device"
+-	depends on ARCH_SPRD || COMPILE_TEST
++	depends on ARCH_SPRD || ARCH_UMS9117 || ARCH_SC9820E || COMPILE_TEST
+ 	help
+ 	  Say y here to support the SPRD Hardware Spinlock device.
+ 

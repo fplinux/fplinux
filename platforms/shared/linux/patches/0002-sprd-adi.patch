@@ -1,18 +1,25 @@
 diff --git a/drivers/spi/Kconfig b/drivers/spi/Kconfig
-index 1872f9d..f486189 100644
+index 8782514..ae3a9ab 100644
 --- a/drivers/spi/Kconfig
 +++ b/drivers/spi/Kconfig
-@@ -1080,7 +1080,7 @@ config SPI_SPRD
+@@ -1096,13 +1096,13 @@ config SPI_SPACEMIT_K1
+
+ config SPI_SPRD
+ 	tristate "Spreadtrum SPI controller"
+-	depends on ARCH_SPRD || COMPILE_TEST
++	depends on ARCH_SPRD || ARCH_SC9820E || COMPILE_TEST
+ 	help
+ 	  SPI driver for Spreadtrum SoCs.
 
  config SPI_SPRD_ADI
  	tristate "Spreadtrum ADI controller"
 -	depends on ARCH_SPRD || COMPILE_TEST
-+	depends on ARCH_SPRD || ARCH_UMS9117 || COMPILE_TEST
++	depends on ARCH_SPRD || ARCH_UMS9117 || ARCH_SC9820E || COMPILE_TEST
  	depends on HWSPINLOCK || (COMPILE_TEST && !HWSPINLOCK)
  	help
  	  ADI driver based on SPI for Spreadtrum SoCs.
 diff --git a/drivers/spi/spi-sprd-adi.c b/drivers/spi/spi-sprd-adi.c
-index f25b34a..22bff74 100644
+index a6baaf0..3caa38c 100644
 --- a/drivers/spi/spi-sprd-adi.c
 +++ b/drivers/spi/spi-sprd-adi.c
 @@ -5,15 +5,18 @@
@@ -48,7 +55,11 @@ index f25b34a..22bff74 100644
 
  /* Bits definitions for register REG_ADI_GSSI_CFG0 */
  #define BIT_CLK_ALL_ON			BIT(30)
-@@ -140,6 +148,7 @@ struct sprd_adi_data {
+@@ -137,9 +145,11 @@ struct sprd_adi_wdg {
+ struct sprd_adi_data {
+ 	u32 slave_offset;
+ 	u32 slave_addr_size;
++	bool r3p0;
  	int (*read_check)(u32 val, u32 reg);
  	int (*restart)(struct sys_off_data *data);
  	void (*wdg_rst)(void *p);
@@ -56,7 +67,7 @@ index f25b34a..22bff74 100644
  };
 
  struct sprd_adi {
-@@ -150,8 +159,62 @@ struct sprd_adi {
+@@ -150,11 +160,66 @@ struct sprd_adi {
  	unsigned long		slave_vbase;
  	unsigned long		slave_pbase;
  	const struct sprd_adi_data *data;
@@ -118,8 +129,62 @@ index f25b34a..22bff74 100644
 +
  static int sprd_adi_check_addr(struct sprd_adi *sadi, u32 reg)
  {
- 	if (reg >= sadi->data->slave_addr_size) {
-@@ -335,8 +398,16 @@ static int sprd_adi_transfer_one(struct spi_controller *ctlr,
+-	if (reg >= sadi->data->slave_addr_size) {
++	if (reg >= sadi->data->slave_addr_size ||
++	    (sadi->data->r3p0 && !IS_ALIGNED(reg, sizeof(u32)))) {
+ 		dev_err(sadi->dev,
+ 			"slave address offset is incorrect, reg = 0x%x\n",
+ 			reg);
+@@ -174,7 +239,10 @@ static int sprd_adi_drain_fifo(struct sprd_adi *sadi)
+ 		if (sts & BIT_FIFO_EMPTY)
+ 			break;
+
+-		cpu_relax();
++		if (sadi->data->r3p0)
++			udelay(1);
++		else
++			cpu_relax();
+ 	} while (--timeout);
+
+ 	if (timeout == 0) {
+@@ -214,11 +282,16 @@ static int sprd_adi_read_check_r3(u32 val, u32 reg)
+ 	return sprd_adi_read_check(val, (reg & RDBACK_ADDR_MASK_R3) >> RDBACK_ADDR_SHIFT_R3);
+ }
+
++static int sprd_adi_read_check_r3p0(u32 val, u32 physical_addr)
++{
++	return sprd_adi_read_check(val, (physical_addr & 0xffff) >> 2);
++}
++
+ static int sprd_adi_read(struct sprd_adi *sadi, u32 reg, u32 *read_val)
+ {
+ 	int read_timeout = ADI_READ_TIMEOUT;
+ 	unsigned long flags;
+-	u32 val;
++	u32 val, command;
+ 	int ret = 0;
+
+ 	if (sadi->hwlock) {
+@@ -239,7 +312,8 @@ static int sprd_adi_read(struct sprd_adi *sadi, u32 reg, u32 *read_val)
+ 	 * Set the slave address offset need to read into RD_CMD register,
+ 	 * then ADI controller will start to transfer automatically.
+ 	 */
+-	writel_relaxed(reg, sadi->base + REG_ADI_RD_CMD);
++	command = sadi->data->r3p0 ? sadi->slave_pbase + reg : reg;
++	writel_relaxed(command, sadi->base + REG_ADI_RD_CMD);
+
+ 	/*
+ 	 * Wait read operation complete, the BIT_RD_CMD_BUSY will be set
+@@ -268,7 +342,7 @@ static int sprd_adi_read(struct sprd_adi *sadi, u32 reg, u32 *read_val)
+ 	 * address to validate data.
+ 	 */
+ 	if (sadi->data->read_check) {
+-		ret = sadi->data->read_check(val, reg);
++		ret = sadi->data->read_check(val, command);
+ 		if (ret < 0)
+ 			goto out;
+ 	}
+@@ -335,13 +409,22 @@ static int sprd_adi_transfer_one(struct spi_controller *ctlr,
  				 struct spi_transfer *t)
  {
  	struct sprd_adi *sadi = spi_controller_get_devdata(ctlr);
@@ -136,7 +201,14 @@ index f25b34a..22bff74 100644
 
  	if (t->rx_buf) {
  		reg = *(u32 *)t->rx_buf;
-@@ -352,9 +423,48 @@ static int sprd_adi_transfer_one(struct spi_controller *ctlr,
+ 		ret = sprd_adi_read(sadi, reg, &val);
+-		*(u32 *)t->rx_buf = val;
++		if (!ret)
++			*(u32 *)t->rx_buf = val;
+ 	} else if (t->tx_buf) {
+ 		u32 *p = (u32 *)t->tx_buf;
+ 		reg = *p++;
+@@ -352,9 +435,48 @@ static int sprd_adi_transfer_one(struct spi_controller *ctlr,
  		ret = -EINVAL;
  	}
 
@@ -185,7 +257,29 @@ index f25b34a..22bff74 100644
  static void sprd_adi_set_wdt_rst_mode(void *p)
  {
  #if IS_ENABLED(CONFIG_SPRD_WATCHDOG)
-@@ -545,6 +655,24 @@ static int sprd_adi_probe(struct platform_device *pdev)
+@@ -463,6 +585,9 @@ static void sprd_adi_hw_init(struct sprd_adi *sadi)
+ 	const __be32 *list;
+ 	u32 tmp;
+
++	if (sadi->data->r3p0 && readl_relaxed(sadi->base + REG_ADI_CTRL0))
++		writel_relaxed(0, sadi->base + REG_ADI_CTRL0);
++
+ 	/* Set all channels as default priority */
+ 	writel_relaxed(0, sadi->base + REG_ADI_CHN_PRIL);
+ 	writel_relaxed(0, sadi->base + REG_ADI_CHN_PRIH);
+@@ -539,19 +664,56 @@ static int sprd_adi_probe(struct platform_device *pdev)
+ 	if (IS_ERR(sadi->base))
+ 		return PTR_ERR(sadi->base);
+
++	if (data->r3p0 &&
++	    (resource_size(res) < data->slave_offset + data->slave_addr_size ||
++	     res->end > U32_MAX))
++		return dev_err_probe(&pdev->dev, -EINVAL,
++				     "invalid r3p0 resource\n");
++
+ 	sadi->slave_vbase = (unsigned long)sadi->base +
+ 			    data->slave_offset;
+ 	sadi->slave_pbase = res->start + data->slave_offset;
  	sadi->ctlr = ctlr;
  	sadi->dev = &pdev->dev;
  	sadi->data = data;
@@ -207,10 +301,44 @@ index f25b34a..22bff74 100644
 +		writel(value | BIT_GSSI_2WIRE_MODE,
 +		       sadi->base + REG_ADI_GSSI_CFG1);
 +	}
++	if (data->r3p0 && !IS_ENABLED(CONFIG_HWSPINLOCK))
++		return dev_err_probe(&pdev->dev, -ENODEV,
++				     "r3p0 requires a hardware spinlock\n");
++
  	ret = of_hwspin_lock_get_id(np, 0);
  	if (ret > 0 || (IS_ENABLED(CONFIG_HWSPINLOCK) && ret == 0)) {
  		sadi->hwlock =
-@@ -596,6 +724,13 @@ static struct sprd_adi_data sc9860_data = {
+ 			devm_hwspin_lock_request_specific(&pdev->dev, ret);
+ 		if (!sadi->hwlock)
+ 			return -ENXIO;
++		if (data->r3p0)
++			dev_info(&pdev->dev,
++				 "r3p0 uses hwspinlock %d, slave base 0x%lx\n",
++				 ret, sadi->slave_pbase);
+ 	} else {
++		if (data->r3p0)
++			return dev_err_probe(
++				&pdev->dev, ret,
++				"r3p0 requires a hardware spinlock\n");
++
+ 		switch (ret) {
+ 		case 0:
+ 			/*
+@@ -593,6 +755,13 @@ static int sprd_adi_probe(struct platform_device *pdev)
+ 	return 0;
+ }
+
++static struct sprd_adi_data r3p0_data = {
++	.slave_offset = ADI_10BIT_SLAVE_OFFSET,
++	.slave_addr_size = ADI_10BIT_SLAVE_ADDR_SIZE,
++	.r3p0 = true,
++	.read_check = sprd_adi_read_check_r3p0,
++};
++
+ static struct sprd_adi_data sc9860_data = {
+ 	.slave_offset = ADI_10BIT_SLAVE_OFFSET,
+ 	.slave_addr_size = ADI_10BIT_SLAVE_ADDR_SIZE,
+@@ -601,6 +770,13 @@ static struct sprd_adi_data sc9860_data = {
  	.wdg_rst = sprd_adi_set_wdt_rst_mode,
  };
 
@@ -224,7 +352,7 @@ index f25b34a..22bff74 100644
  static struct sprd_adi_data sc9863_data = {
  	.slave_offset = ADI_12BIT_SLAVE_OFFSET,
  	.slave_addr_size = ADI_12BIT_SLAVE_ADDR_SIZE,
-@@ -609,6 +744,10 @@ static struct sprd_adi_data ums512_data = {
+@@ -614,6 +790,14 @@ static struct sprd_adi_data ums512_data = {
  };
 
  static const struct of_device_id sprd_adi_of_match[] = {
@@ -232,10 +360,14 @@ index f25b34a..22bff74 100644
 +		.compatible = "sprd,ums9117-adi",
 +		.data = &ums9117_data,
 +	},
++	{
++		.compatible = "sprd,r3p0-adi",
++		.data = &r3p0_data,
++	},
  	{
  		.compatible = "sprd,sc9860-adi",
  		.data = &sc9860_data,
-@@ -621,7 +760,7 @@ static const struct of_device_id sprd_adi_of_match[] = {
+@@ -626,7 +810,7 @@ static const struct of_device_id sprd_adi_of_match[] = {
  		.compatible = "sprd,ums512-adi",
  		.data = &ums512_data,
  	},

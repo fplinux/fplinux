@@ -133,27 +133,31 @@ targets = ["zImage", "dtbs"]
 image_output = "arch/arm/boot/zImage"
 dtb_output_directory = "arch/arm/boot/dts"
 patches = [
+  "platforms/shared/linux/patches/0001-sprd-pmic.patch",
+  "platforms/shared/linux/patches/0002-sprd-adi.patch",
+  "platforms/shared/linux/patches/0003-sprd-gpio.patch",
+  "platforms/shared/linux/patches/0004-sprd-hwspinlock.patch",
+  "platforms/shared/linux/patches/0005-sprd-bindings.patch",
+  "platforms/shared/linux/patches/0006-sc27xx-regulators.patch",
+  "platforms/shared/linux/patches/0007-sc27xx-rtc.patch",
+  "platforms/shared/linux/patches/0008-sc27xx-adc-efuse.patch",
+  "platforms/shared/linux/patches/0009-sc27xx-vibrator.patch",
+  "platforms/shared/linux/patches/0010-input-events.patch",
   "platforms/ums9117/linux/patches/0001-ums9117-platform.patch",
   "platforms/ums9117/linux/patches/0002-ums9117-dt-bindings.patch",
   "platforms/ums9117/linux/patches/0003-ums9117-clock-providers.patch",
-  "platforms/ums9117/linux/patches/0004-sc2720-pmic-core.patch",
-  "platforms/ums9117/linux/patches/0005-ums9117-adi.patch",
-  "platforms/ums9117/linux/patches/0006-ums9117-dma.patch",
+  "platforms/shared/linux/patches/0011-sprd-dma.patch",
+  "platforms/shared/linux/patches/0012-dmatest-lifetime.patch",
+  "platforms/shared/linux/patches/0013-sprd-peripheral-bindings.patch",
+  "platforms/shared/linux/patches/0014-sprd-i2c.patch",
+  "platforms/shared/linux/patches/0015-sprd-ap-efuse.patch",
+  "platforms/shared/linux/patches/0016-sprd-mailbox.patch",
   "platforms/ums9117/linux/patches/0007-ums9117-native-bindings.patch",
   "platforms/ums9117/linux/patches/0008-ums9117-thermal-efuse.patch",
-  "platforms/ums9117/linux/patches/0009-sc2720-adc-efuse.patch",
-  "platforms/ums9117/linux/patches/0010-sc2720-leaf-drivers.patch",
-  "platforms/ums9117/linux/patches/0011-ums9117-mailbox.patch",
   "platforms/ums9117/linux/patches/0012-ums9117-eic.patch",
-  "platforms/ums9117/linux/patches/0013-ums9117-eic-binding.patch",
-  "platforms/ums9117/linux/patches/0014-ums9117-gpio-binding.patch",
-  "platforms/ums9117/linux/patches/0015-ums9117-i2c-gpio-drivers.patch",
   "platforms/ums9117/linux/patches/0016-gc2145-parallel-binding.patch",
   "platforms/ums9117/linux/patches/0017-gc2145-parallel-dvp.patch",
-  "platforms/ums9117/linux/patches/0018-input-passive-observers.patch",
-  "platforms/ums9117/linux/patches/0019-sc2720-clock-ownership.patch",
   "platforms/ums9117/linux/patches/0020-ums9117-eic-cold.patch",
-  "platforms/ums9117/linux/patches/0021-ums9117-eic-clock-binding.patch",
   "platforms/ums9117/linux/patches/0022-bnep-local-ethernet-address.patch",
   "platforms/ums9117/linux/patches/0023-mmc-card-detection-config.patch",
 ]
@@ -162,6 +166,30 @@ overlay = "platforms/ums9117/linux/overlay"
 [[linux.copies]]
 source = "include/fplinux/fplinux-keypad.h"
 destination = "include/dt-bindings/input/fplinux-keypad.h"
+
+[[linux.copies]]
+source = "platforms/shared/linux/overlay/include/linux/spi/sprd-adi.h"
+destination = "include/linux/spi/sprd-adi.h"
+
+[[linux.copies]]
+source = "platforms/shared/linux/overlay/drivers/regulator/sc27xx-regulator-core.c"
+destination = "drivers/regulator/sc27xx-regulator-core.c"
+
+[[linux.copies]]
+source = "platforms/shared/linux/overlay/drivers/regulator/sc27xx-regulator-core.h"
+destination = "drivers/regulator/sc27xx-regulator-core.h"
+
+[[linux.copies]]
+source = "platforms/shared/linux/overlay/include/linux/soc/sprd/vbc-fifo.h"
+destination = "include/linux/soc/sprd/vbc-fifo.h"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/fragments/lib/fm-wire.Kconfig"
+destination = "lib/Kconfig"
+
+[[linux.appends]]
+source = "platforms/ums9117/linux/fragments/lib/fm-wire.Makefile"
+destination = "lib/Makefile"
 
 [[linux.appends]]
 source = "platforms/ums9117/linux/fragments/dts/unisoc.Makefile"
