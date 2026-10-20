@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/clock/fplinux,sc9820e-hs-spi-clock.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: SC9820E high-speed SPI source mux and divider
+
+maintainers:
+  - FPLinux <fplinux@users.noreply.github.com>
+
+properties:
+  compatible:
+    const: fplinux,sc9820e-hs-spi-clock
+
+  reg:
+    maxItems: 1
+
+  "#clock-cells":
+    const: 0
+
+  clocks:
+    items:
+      - description: 26 MHz oscillator
+      - description: TWPLL divided by twelve
+      - description: TWPLL divided by ten
+      - description: TWPLL divided by eight
+
+  clock-names:
+    items:
+      - const: ext26m
+      - const: twpll128m
+      - const: twpll153m6
+      - const: twpll192m
+
+required:
+  - compatible
+  - reg
+  - "#clock-cells"
+  - clocks
+  - clock-names
+
+additionalProperties: false

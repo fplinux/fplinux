@@ -1,0 +1,33 @@
+diff --git a/drivers/input/keyboard/gpio_keys.c b/drivers/input/keyboard/gpio_keys.c
+index e196174..76eeca0 100644
+--- a/drivers/input/keyboard/gpio_keys.c
++++ b/drivers/input/keyboard/gpio_keys.c
+@@ -836,8 +836,13 @@ gpio_keys_get_devtree_pdata(struct device *dev)
+ }
+
+ static const struct of_device_id gpio_keys_of_match[] = {
+-	{ .compatible = "gpio-keys", },
+-	{ },
++	{
++		.compatible = "gpio-keys",
++	},
++	{
++		.compatible = "xiaomi,qin1s-plus-gpio-keys",
++	},
++	{},
+ };
+ MODULE_DEVICE_TABLE(of, gpio_keys_of_match);
+
+@@ -884,7 +889,11 @@ static int gpio_keys_probe(struct platform_device *pdev)
+ 	input_set_drvdata(input, ddata);
+
+ 	input->name = pdata->name ? : pdev->name;
+-	input->phys = "gpio-keys/input0";
++	if (of_device_is_compatible(dev->of_node,
++				    "xiaomi,qin1s-plus-gpio-keys"))
++		input->phys = "fplinux/keypad0";
++	else
++		input->phys = "gpio-keys/input0";
+ 	input->dev.parent = dev;
+ 	input->open = gpio_keys_open;
+ 	input->close = gpio_keys_close;

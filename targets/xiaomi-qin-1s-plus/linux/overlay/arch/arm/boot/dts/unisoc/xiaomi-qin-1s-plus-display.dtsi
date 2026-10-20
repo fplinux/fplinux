@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: GPL-2.0-only
+#include <dt-bindings/gpio/gpio.h>
+
+&lcd_backlight {
+	status = "okay";
+};
+
+&hs_spi {
+	clocks = <&aon_hs_spi_clk>, <&hs_spi_clk>, <&twpll192m>;
+	dma-names = "tx_chn";
+	dmas = <&ap_dma 14>;
+	sprd,spi-interval = <1>;
+	sprd,spi-mode = <3>;
+
+	status = "okay";
+
+	display@0 {
+		compatible = "xiaomi,qin1splus-gc9307";
+		reg = <0>;
+		backlight = <&lcd_backlight>;
+		dc-gpios = <&ap_gpio 137 GPIO_ACTIVE_HIGH>;
+		format = "r5g6b5";
+		height-mm = <0>;
+		reset-gpios = <&ap_gpio 50 GPIO_ACTIVE_LOW>;
+		spi-max-frequency = <96000000>;
+		te-gpios = <&ap_gpio 51 GPIO_ACTIVE_HIGH>;
+		/* Physical dimensions are unknown. */
+		width-mm = <0>;
+		write-only;
+
+		status = "okay";
+
+		panel-timing {
+#include "fplinux-xiaomi-qin-1s-plus-panel.dtsi"
+			/* Nominal compositor timing; panel updates follow TE. */
+			clock-frequency = <3625000>;
+			hback-porch = <0>;
+			hfront-porch = <0>;
+			hsync-len = <0>;
+			vback-porch = <0>;
+			vfront-porch = <0>;
+			vsync-len = <0>;
+		};
+	};
+};

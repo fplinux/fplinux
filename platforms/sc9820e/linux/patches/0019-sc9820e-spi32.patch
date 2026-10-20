@@ -1,0 +1,167 @@
+diff --git a/drivers/gpu/drm/drm_mipi_dbi.c b/drivers/gpu/drm/drm_mipi_dbi.c
+index ae55e0e..90428ea 100644
+--- a/drivers/gpu/drm/drm_mipi_dbi.c
++++ b/drivers/gpu/drm/drm_mipi_dbi.c
+@@ -703,6 +703,8 @@ EXPORT_SYMBOL(mipi_dbi_poweron_conditional_reset);
+
+ #if IS_ENABLED(CONFIG_SPI)
+
++#include "drm_mipi_dbi-spi.h"
++
+ /**
+  * mipi_dbi_spi_cmd_max_speed - get the maximum SPI bus speed
+  * @spi: SPI device
+@@ -1095,7 +1097,10 @@ out_command_unlock:
+ 	if (ret)
+ 		goto out_data_unlock;
+ 	speed_hz = mipi_dbi_spi_cmd_max_speed(spi, num);
+-	ret = mipi_dbi_spi_transfer(spi, speed_hz, bpw, par, num);
++	if (*cmd == MIPI_DCS_WRITE_MEMORY_START)
++		ret = mipi_dbi_spi_write_memory(spi, speed_hz, bpw, par, num);
++	else
++		ret = mipi_dbi_spi_transfer(spi, speed_hz, bpw, par, num);
+ out_data_unlock:
+ 	spi_bus_unlock(spi->controller);
+
+@@ -1125,8 +1130,10 @@ out_data_unlock:
+  *                          byteswapped before transfer.
+  *
+  * Option 3 (D/C as a gpio): If the SPI controller supports 16 bits per word the buffer can be
+- *                           sent as-is. If not the caller is responsible for swapping the bytes
+- *                           before calling mipi_dbi_command_buf() and the buffer is sent 8 bpw.
++ *                           sent as-is. Even pixel counts can use 32 bits per word through a
++ *                           temporary copy with each pair packed in wire order. If 16 bits per
++ *                           word is unavailable the caller swaps bytes before calling
++ *                           mipi_dbi_command_buf() and the buffer is sent 8 bpw.
+  *
+  * This handling is optimised for %DRM_FORMAT_RGB565 framebuffers.
+  *
+@@ -1214,12 +1221,8 @@ int mipi_dbi_spi_transfer(struct spi_device *spi, u32 speed_hz,
+ 	size_t chunk;
+ 	int ret;
+
+-	/* In __spi_validate, there's a validation that no partial transfers
+-	 * are accepted (xfer->len % w_size must be zero).
+-	 * Here we align max_chunk to multiple of 2 (16bits),
+-	 * to prevent transfers from being rejected.
+-	 */
+-	max_chunk = ALIGN_DOWN(max_chunk, 2);
++	/* Keep every chunk aligned to a complete SPI word. */
++	max_chunk = ALIGN_DOWN(max_chunk, bpw == 32 ? 4 : 2);
+
+ 	spi_message_init_with_transfers(&m, &tr, 1);
+
+diff --git a/drivers/spi/spi-sprd.c b/drivers/spi/spi-sprd.c
+index be3358c..365a86d 100644
+--- a/drivers/spi/spi-sprd.c
++++ b/drivers/spi/spi-sprd.c
+@@ -20,6 +20,7 @@
+
+ #include "spi-sprd-r4p0-clock.h"
+ #include "spi-sprd-r4p0-dma.h"
++#include "spi-sprd-word.h"
+
+ #define SPRD_SPI_TXD			0x0
+ #define SPRD_SPI_CLKD			0x4
+@@ -56,7 +57,6 @@
+ #define SPRD_SPI_SCK_REV		BIT(13)
+ #define SPRD_SPI_NG_TX			BIT(1)
+ #define SPRD_SPI_NG_RX			BIT(0)
+-#define SPRD_SPI_CHNL_LEN_MASK		GENMASK(4, 0)
+ #define SPRD_SPI_CSN_MASK		GENMASK(11, 8)
+ #define SPRD_SPI_CS0_VALID		BIT(8)
+
+@@ -134,7 +134,6 @@
+
+ #define SPRD_SPI_FIFO_SIZE		32
+ #define SPRD_SPI_CHIP_CS_NUM		0x4
+-#define SPRD_SPI_CHNL_LEN		2
+ #define SPRD_SPI_DEFAULT_SOURCE		26000000
+ #define SPRD_SPI_MAX_SPEED_HZ		48000000
+ #define SPRD_SPI_AUTOSUSPEND_DELAY	100
+@@ -268,8 +267,7 @@ static void sprd_spi_set_transfer_bits(struct sprd_spi *ss, u32 bits)
+ 	u32 val = readl_relaxed(ss->base + SPRD_SPI_CTL0);
+
+ 	/* Set the valid bits for every transaction */
+-	val &= ~(SPRD_SPI_CHNL_LEN_MASK << SPRD_SPI_CHNL_LEN);
+-	val |= bits << SPRD_SPI_CHNL_LEN;
++	val = sprd_spi_word_control(val, bits);
+ 	writel_relaxed(val, ss->base + SPRD_SPI_CTL0);
+ }
+
+@@ -845,7 +843,8 @@ static int sprd_spi_r4p0_transfer_params(struct sprd_spi *ss,
+
+ 	if (t->word_delay.value)
+ 		return -EOPNOTSUPP;
+-	if (t->bits_per_word != 8 && t->bits_per_word != 16)
++	if (t->bits_per_word != 8 && t->bits_per_word != 16 &&
++	    t->bits_per_word != 32)
+ 		return -EINVAL;
+ 	if (t->rx_buf || (t->len && !t->tx_buf))
+ 		return -EINVAL;
+@@ -858,11 +857,12 @@ static int sprd_spi_r4p0_transfer_params(struct sprd_spi *ss,
+ 	if (ret)
+ 		return ret;
+
+-	words = t->len / (t->bits_per_word / 8);
+-	chunk_words = sprd_spi_r4p0_use_dma(ss, t) ?
+-			      SPRD_SPI_R4P0_DMA_BUFFER_BYTES /
+-				      (t->bits_per_word / 8) :
+-			      SPRD_SPI_FIFO_SIZE;
++	words = sprd_spi_word_count(t->len, t->bits_per_word);
++	chunk_words =
++		sprd_spi_r4p0_use_dma(ss, t) ?
++			sprd_spi_word_count(SPRD_SPI_R4P0_DMA_BUFFER_BYTES,
++					    t->bits_per_word) :
++			SPRD_SPI_FIFO_SIZE;
+ 	chunks = max_t(u64, 1, DIV_ROUND_UP_ULL(words, chunk_words));
+ 	words = min_t(u32, words, chunk_words);
+ 	wire_time_us =
+@@ -971,7 +971,7 @@ static int sprd_spi_r4p0_prepare_message(struct spi_controller *sctlr,
+ 	}
+
+ 	/* The core asserts CS only after prepare_message returns. */
+-	val = SPRD_SPI_CSN_MASK | (t->bits_per_word << SPRD_SPI_CHNL_LEN);
++	val = sprd_spi_word_control(SPRD_SPI_CSN_MASK, t->bits_per_word);
+ 	val |= msg->spi->mode & SPI_CPHA ? SPRD_SPI_NG_RX : SPRD_SPI_NG_TX;
+ 	val |= msg->spi->mode & SPI_CPOL ? SPRD_SPI_SCK_REV : 0;
+ 	writel(val, ss->base + SPRD_SPI_CTL0);
+@@ -1069,9 +1069,13 @@ static int sprd_spi_r4p0_transfer_one(struct spi_controller *sctlr,
+ 	use_dma = sprd_spi_r4p0_use_dma(ss, t);
+
+ 	ss->tx_buf = t->tx_buf;
+-	ss->write_bufs = t->bits_per_word == 8 ? sprd_spi_write_bufs_u8 :
+-						 sprd_spi_write_bufs_u16;
+-	words = t->len / (t->bits_per_word / 8);
++	if (t->bits_per_word == 8)
++		ss->write_bufs = sprd_spi_write_bufs_u8;
++	else if (t->bits_per_word == 16)
++		ss->write_bufs = sprd_spi_write_bufs_u16;
++	else
++		ss->write_bufs = sprd_spi_write_bufs_u32;
++	words = sprd_spi_word_count(t->len, t->bits_per_word);
+ 	writel(divider, ss->base + SPRD_SPI_CLKD);
+ 	sprd_spi_set_transfer_bits(ss, t->bits_per_word);
+
+@@ -1093,8 +1097,9 @@ static int sprd_spi_r4p0_transfer_one(struct spi_controller *sctlr,
+ 			ktime_add_us(now, min_t(u64, chunk_timeout_us,
+ 						ktime_us_delta(deadline, now)));
+ 		chunk = min_t(u32, words,
+-			      use_dma ? SPRD_SPI_R4P0_DMA_BUFFER_BYTES /
+-						(t->bits_per_word / 8) :
++			      use_dma ? sprd_spi_word_count(
++						SPRD_SPI_R4P0_DMA_BUFFER_BYTES,
++						t->bits_per_word) :
+ 					SPRD_SPI_FIFO_SIZE);
+ 		if (use_dma) {
+ 			ret = sprd_spi_r4p0_dma_chunk(ss, t, chunk,
+@@ -1361,7 +1366,8 @@ static int sprd_spi_probe(struct platform_device *pdev)
+ 				"unsupported SPI hardware mode or interval\n");
+
+ 		sctlr->mode_bits = SPI_CPOL | SPI_CPHA;
+-		sctlr->bits_per_word_mask = SPI_BPW_MASK(8) | SPI_BPW_MASK(16);
++		sctlr->bits_per_word_mask = SPI_BPW_MASK(8) | SPI_BPW_MASK(16) |
++					    SPI_BPW_MASK(32);
+ 		sctlr->flags = SPI_CONTROLLER_HALF_DUPLEX |
+ 			       SPI_CONTROLLER_NO_RX;
+ 		sctlr->num_chipselect = 1;

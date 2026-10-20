@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config BT_QIN1SPLUS
+	bool "Qin 1s+ shared-buffer Bluetooth endpoint"
+	depends on ARCH_SC9820E && BT=y && OF
+	depends on QIN1SPLUS_BTWF && QIN1SPLUS_SIPC
+	select FW_LOADER
+	help
+	  Native HCI endpoint for the Qin 1s+ shared-buffer transport.
+	  The BTWF remote processor owns firmware loading and power.
+	  The board must provide its Bluetooth parameter firmware file.
+	  Enabling the matching DT node schedules native controller setup.

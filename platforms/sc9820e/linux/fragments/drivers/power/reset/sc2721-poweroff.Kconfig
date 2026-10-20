@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config POWER_RESET_SC2721
+	tristate "SC2721 power-off through SC9820E ADI"
+	depends on POWER_RESET && ARCH_SC9820E && SPI_SPRD_ADI && MFD_SC27XX_PMIC
+	help
+	  Power off an SC2721 PMIC through the SC9820E atomic ADI path.
+	  Register a final shutdown handler before the firmware fallback.
+	  Wait indefinitely if the power request fails or the CPU keeps running.
+	  This driver does not provide a reboot or restart implementation.

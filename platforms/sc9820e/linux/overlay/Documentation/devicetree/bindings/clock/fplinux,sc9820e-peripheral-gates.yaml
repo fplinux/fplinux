@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/clock/fplinux,sc9820e-peripheral-gates.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: SC9820E peripheral clock gates
+
+maintainers:
+  - FPLinux <fplinux@users.noreply.github.com>
+
+allOf:
+  - if:
+      properties:
+        compatible:
+          const: fplinux,sc9820e-ap-dma-gate
+    then:
+      properties:
+        fplinux,aon-syscon: false
+      required:
+        - fplinux,ap-ahb-syscon
+    else:
+      properties:
+        fplinux,ap-ahb-syscon: false
+      required:
+        - fplinux,aon-syscon
+
+properties:
+  compatible:
+    enum:
+      - fplinux,sc9820e-aon-gate
+      - fplinux,sc9820e-hs-spi-gate
+      - fplinux,sc9820e-gpio-gate
+      - fplinux,sc9820e-efuse-gate
+      - fplinux,sc9820e-mailbox-gate
+      - fplinux,sc9820e-ap-dma-gate
+
+  "#clock-cells":
+    const: 0
+
+  fplinux,aon-syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: Shared AON register map containing the set and clear aliases.
+
+  fplinux,ap-ahb-syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: Shared AP-AHB register map containing the set and clear aliases.
+
+required:
+  - compatible
+  - "#clock-cells"
+
+additionalProperties: false

@@ -1,0 +1,429 @@
+diff --git a/drivers/gpu/drm/tiny/panel-mipi-dbi.c b/drivers/gpu/drm/tiny/panel-mipi-dbi.c
+index 60cd65c..7b19c09 100644
+--- a/drivers/gpu/drm/tiny/panel-mipi-dbi.c
++++ b/drivers/gpu/drm/tiny/panel-mipi-dbi.c
+@@ -16,9 +16,13 @@
+ #include <linux/spi/spi.h>
+
+ #include <drm/clients/drm_client_setup.h>
++#include <drm/drm_atomic.h>
+ #include <drm/drm_atomic_helper.h>
++#include <drm/drm_damage_helper.h>
+ #include <drm/drm_drv.h>
+ #include <drm/drm_fbdev_dma.h>
++#include <drm/drm_format_helper.h>
++#include <drm/drm_framebuffer.h>
+ #include <drm/drm_gem_atomic_helper.h>
+ #include <drm/drm_gem_dma_helper.h>
+ #include <drm/drm_managed.h>
+@@ -26,6 +30,7 @@
+ #include <drm/drm_modes.h>
+ #include <drm/drm_modeset_helper.h>
+ #include <drm/drm_print.h>
++#include <drm/drm_rect.h>
+
+ #include <video/mipi_display.h>
+
+@@ -209,28 +214,34 @@ static struct panel_mipi_dbi_commands *panel_mipi_dbi_commands_from_fw(struct de
+ 	return commands;
+ }
+
+-static void panel_mipi_dbi_commands_execute(struct mipi_dbi *dbi,
+-					    struct panel_mipi_dbi_commands *commands)
++static int
++panel_mipi_dbi_commands_execute(struct mipi_dbi *dbi,
++				struct panel_mipi_dbi_commands *commands)
+ {
+ 	unsigned int i = 0;
++	int ret;
+
+ 	if (!commands)
+-		return;
++		return 0;
+
+ 	while (i < commands->len) {
+ 		u8 command = commands->buf[i++];
+ 		u8 num_parameters = commands->buf[i++];
+ 		const u8 *parameters = &commands->buf[i];
+
+-		if (command == 0x00 && num_parameters == 1)
++		if (command == 0x00 && num_parameters == 1) {
+ 			msleep(parameters[0]);
+-		else if (num_parameters)
+-			mipi_dbi_command_stackbuf(dbi, command, parameters, num_parameters);
+-		else
+-			mipi_dbi_command(dbi, command);
++		} else {
++			ret = mipi_dbi_command_stackbuf(
++				dbi, command, parameters, num_parameters);
++			if (ret)
++				return ret;
++		}
+
+ 		i += num_parameters;
+ 	}
++
++	return 0;
+ }
+
+ struct panel_mipi_dbi_device {
+@@ -240,6 +251,11 @@ struct panel_mipi_dbi_device {
+ 	struct drm_crtc crtc;
+ 	struct drm_encoder encoder;
+ 	struct drm_connector connector;
++
++	bool is_qin;
++	/* Atomic commits for the single CRTC serialize these states. */
++	bool initialized;
++	bool backlight_enabled;
+ };
+
+ static struct panel_mipi_dbi_device *to_panel_mipi_dbi_device(struct drm_device *dev)
+@@ -255,6 +271,187 @@ static const struct drm_plane_helper_funcs panel_mipi_dbi_plane_helper_funcs = {
+ 	DRM_MIPI_DBI_PLANE_HELPER_FUNCS,
+ };
+
++static int qin_panel_flush(struct panel_mipi_dbi_device *panel,
++			   struct drm_shadow_plane_state *shadow,
++			   struct drm_rect *rect)
++{
++	struct mipi_dbi_dev *dbidev = &panel->dbidev;
++	struct mipi_dbi *dbi = &dbidev->dbi;
++	struct drm_framebuffer *fb = shadow->base.fb;
++	unsigned int xs = rect->x1, xe = rect->x2 - 1;
++	unsigned int ys = rect->y1, ye = rect->y2 - 1;
++	size_t len = drm_rect_width(rect) * drm_rect_height(rect) * 2;
++	size_t row_bytes = drm_rect_width(rect) * fb->format->cpp[0];
++	int ret;
++
++	/* The format helpers cannot return a failed scratch allocation. */
++	if (!drm_format_conv_state_reserve(&shadow->fmtcnv_state, row_bytes,
++					   GFP_KERNEL))
++		return -ENOMEM;
++	ret = mipi_dbi_buf_copy(dbidev->tx_buf, &shadow->data[0], fb, rect,
++				dbi->swap_bytes, &shadow->fmtcnv_state);
++	if (ret)
++		return ret;
++
++	ret = mipi_dbi_command(dbi, MIPI_DCS_SET_COLUMN_ADDRESS, xs >> 8,
++			       xs & 0xff, xe >> 8, xe & 0xff);
++	if (ret)
++		return ret;
++	ret = mipi_dbi_command(dbi, MIPI_DCS_SET_PAGE_ADDRESS, ys >> 8,
++			       ys & 0xff, ye >> 8, ye & 0xff);
++	if (ret)
++		return ret;
++
++	return mipi_dbi_command_buf(dbi, MIPI_DCS_WRITE_MEMORY_START,
++				    (u8 *)dbidev->tx_buf, len);
++}
++
++static void qin_panel_atomic_update(struct drm_plane *plane,
++				    struct drm_atomic_commit *state)
++{
++	struct drm_device *drm = plane->dev;
++	struct panel_mipi_dbi_device *panel = to_panel_mipi_dbi_device(drm);
++	struct drm_plane_state *new_state = plane->state;
++	struct drm_plane_state *old_state =
++		drm_atomic_get_old_plane_state(state, plane);
++	struct drm_shadow_plane_state *shadow =
++		to_drm_shadow_plane_state(new_state);
++	struct drm_rect rect;
++	int ret, idx;
++
++	if (!new_state->fb || !new_state->visible || !panel->initialized)
++		return;
++	if (!drm_dev_enter(drm, &idx))
++		return;
++
++	/* A reset invalidates all display memory, regardless of damage clips. */
++	if (!panel->backlight_enabled)
++		drm_rect_init(&rect, 0, 0, new_state->fb->width,
++			      new_state->fb->height);
++	else if (!drm_atomic_helper_damage_merged(old_state, new_state, &rect))
++		goto out_exit;
++
++	ret = qin_panel_flush(panel, shadow, &rect);
++	if (ret)
++		goto out_error;
++
++	if (!panel->backlight_enabled) {
++		ret = backlight_enable(panel->dbidev.backlight);
++		if (ret)
++			goto out_error;
++		panel->backlight_enabled = true;
++	}
++	goto out_exit;
++
++out_error:
++	/* Hardware callbacks cannot fail an already accepted atomic commit. */
++	panel->initialized = false;
++	panel->backlight_enabled = false;
++	drm_err(drm, "Display update failed (%d); modeset required\n", ret);
++	ret = backlight_disable(panel->dbidev.backlight);
++	if (ret)
++		drm_err(drm, "Failed to disable backlight (%d)\n", ret);
++out_exit:
++	drm_dev_exit(idx);
++}
++
++static const struct drm_plane_helper_funcs qin_panel_plane_helper_funcs = {
++	DRM_GEM_SHADOW_PLANE_HELPER_FUNCS,
++	.atomic_check = drm_mipi_dbi_plane_helper_atomic_check,
++	.atomic_update = qin_panel_atomic_update,
++};
++
++static void qin_panel_atomic_enable(struct drm_crtc *crtc,
++				    struct drm_atomic_commit *state)
++{
++	struct drm_device *drm = crtc->dev;
++	struct panel_mipi_dbi_device *panel = to_panel_mipi_dbi_device(drm);
++	struct mipi_dbi_dev *dbidev = &panel->dbidev;
++	struct mipi_dbi *dbi = &dbidev->dbi;
++	int ret, idx;
++
++	if (!drm_dev_enter(drm, &idx))
++		return;
++
++	panel->initialized = false;
++	panel->backlight_enabled = false;
++	ret = backlight_disable(dbidev->backlight);
++	if (ret)
++		goto out_error;
++
++	/* Reset is active low: logical 0/1/0 means physical 1/0/1. */
++	ret = gpiod_set_value_cansleep(dbi->reset, 0);
++	if (ret)
++		goto out_error;
++	usleep_range(10000, 11000);
++	ret = gpiod_set_value_cansleep(dbi->reset, 1);
++	if (ret)
++		goto out_error;
++	usleep_range(10000, 11000);
++	ret = gpiod_set_value_cansleep(dbi->reset, 0);
++	if (ret)
++		goto out_error;
++	msleep(20);
++
++	ret = panel_mipi_dbi_commands_execute(dbi, dbidev->driver_private);
++	if (ret)
++		goto out_error;
++	panel->initialized = true;
++	goto out_exit;
++
++out_error:
++	drm_err(drm, "Display initialization failed (%d)\n", ret);
++out_exit:
++	drm_dev_exit(idx);
++}
++
++static void qin_panel_atomic_disable(struct drm_crtc *crtc,
++				     struct drm_atomic_commit *state)
++{
++	struct drm_device *drm = crtc->dev;
++	struct panel_mipi_dbi_device *panel = to_panel_mipi_dbi_device(drm);
++	struct mipi_dbi *dbi = &panel->dbidev.dbi;
++	bool initialized = panel->initialized;
++	int ret;
++
++	panel->initialized = false;
++	panel->backlight_enabled = false;
++	ret = backlight_disable(panel->dbidev.backlight);
++	if (ret) {
++		drm_err(drm,
++			"Failed to disable backlight (%d); panel kept on\n",
++			ret);
++		return;
++	}
++
++	if (initialized) {
++		ret = mipi_dbi_command(dbi, MIPI_DCS_SET_DISPLAY_OFF);
++		if (ret)
++			goto out_reset;
++		msleep(120);
++		ret = mipi_dbi_command(dbi, MIPI_DCS_ENTER_SLEEP_MODE);
++		if (ret)
++			goto out_reset;
++		msleep(120);
++	}
++
++out_reset:
++	if (ret)
++		drm_err(drm, "Display sleep command failed (%d)\n", ret);
++	ret = gpiod_set_value_cansleep(dbi->reset, 1);
++	if (ret)
++		drm_err(drm, "Failed to assert display reset (%d)\n", ret);
++	else
++		msleep(20);
++}
++
++static const struct drm_crtc_helper_funcs qin_panel_crtc_helper_funcs = {
++	.mode_valid = drm_mipi_dbi_crtc_helper_mode_valid,
++	.atomic_check = drm_mipi_dbi_crtc_helper_atomic_check,
++	.atomic_enable = qin_panel_atomic_enable,
++	.atomic_disable = qin_panel_atomic_disable,
++};
++
+ static const struct drm_plane_funcs panel_mipi_dbi_plane_funcs = {
+ 	DRM_MIPI_DBI_PLANE_FUNCS,
+ 	.destroy = drm_plane_cleanup,
+@@ -277,8 +474,16 @@ static void panel_mipi_dbi_crtc_helper_atomic_enable(struct drm_crtc *crtc,
+ 	ret = mipi_dbi_poweron_conditional_reset(dbidev);
+ 	if (ret < 0)
+ 		goto out_exit;
+-	if (!ret)
+-		panel_mipi_dbi_commands_execute(dbi, dbidev->driver_private);
++	if (!ret) {
++		ret = panel_mipi_dbi_commands_execute(dbi,
++						      dbidev->driver_private);
++		if (ret) {
++			drm_err(drm, "Display initialization failed (%d)\n",
++				ret);
++			drm_mipi_dbi_crtc_helper_atomic_disable(crtc, state);
++			goto out_exit;
++		}
++	}
+
+ 	backlight_enable(dbidev->backlight);
+ out_exit:
+@@ -395,33 +600,60 @@ static int panel_mipi_dbi_spi_probe(struct spi_device *spi)
+ 	dbidev = &panel_mipi_dbi->dbidev;
+ 	dbi = &dbidev->dbi;
+ 	drm = &dbidev->drm;
++	panel_mipi_dbi->is_qin = of_device_is_compatible(
++		dev->of_node, "xiaomi,qin1splus-gc9307");
+
+ 	ret = panel_mipi_dbi_get_mode(dbidev, &mode);
+ 	if (ret)
+ 		return ret;
+
+-	dbidev->regulator = devm_regulator_get(dev, "power");
+-	if (IS_ERR(dbidev->regulator))
+-		return dev_err_probe(dev, PTR_ERR(dbidev->regulator),
+-				     "Failed to get regulator 'power'\n");
+-
+-	dbidev->io_regulator = devm_regulator_get(dev, "io");
+-	if (IS_ERR(dbidev->io_regulator))
+-		return dev_err_probe(dev, PTR_ERR(dbidev->io_regulator),
+-				     "Failed to get regulator 'io'\n");
++	if (!panel_mipi_dbi->is_qin) {
++		dbidev->regulator = devm_regulator_get(dev, "power");
++		if (IS_ERR(dbidev->regulator))
++			return dev_err_probe(
++				dev, PTR_ERR(dbidev->regulator),
++				"Failed to get regulator 'power'\n");
++
++		dbidev->io_regulator = devm_regulator_get(dev, "io");
++		if (IS_ERR(dbidev->io_regulator))
++			return dev_err_probe(dev, PTR_ERR(dbidev->io_regulator),
++					     "Failed to get regulator 'io'\n");
++	}
+
+ 	dbidev->backlight = devm_of_find_backlight(dev);
+ 	if (IS_ERR(dbidev->backlight))
+ 		return dev_err_probe(dev, PTR_ERR(dbidev->backlight), "Failed to get backlight\n");
+
+-	dbi->reset = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
++	if (panel_mipi_dbi->is_qin) {
++		if (!dbidev->backlight)
++			return dev_err_probe(dev, -EINVAL,
++					     "Backlight is required\n");
++		ret = backlight_disable(dbidev->backlight);
++		if (ret)
++			return dev_err_probe(dev, ret,
++					     "Failed to disable backlight\n");
++		dbi->reset = devm_gpiod_get(dev, "reset", GPIOD_OUT_LOW);
++	} else {
++		dbi->reset =
++			devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
++	}
+ 	if (IS_ERR(dbi->reset))
+ 		return dev_err_probe(dev, PTR_ERR(dbi->reset), "Failed to get GPIO 'reset'\n");
+
+-	/* Multiple panels can share the "dc" GPIO, but only if they are on the same SPI bus! */
+-	dc = devm_gpiod_get_optional(dev, "dc", GPIOD_OUT_LOW | GPIOD_FLAGS_BIT_NONEXCLUSIVE);
++	if (panel_mipi_dbi->is_qin) {
++		dc = devm_gpiod_get(dev, "dc", GPIOD_OUT_LOW);
++	} else {
++		/* Multiple panels can share D/C only on the same SPI bus. */
++		dc = devm_gpiod_get_optional(
++			dev, "dc",
++			GPIOD_OUT_LOW | GPIOD_FLAGS_BIT_NONEXCLUSIVE);
++	}
+ 	if (IS_ERR(dc))
+ 		return dev_err_probe(dev, PTR_ERR(dc), "Failed to get GPIO 'dc'\n");
++	if (panel_mipi_dbi->is_qin &&
++	    (gpiod_is_active_low(dc) || !gpiod_is_active_low(dbi->reset)))
++		return dev_err_probe(dev, -EINVAL,
++				     "Invalid display GPIO polarity\n");
+
+ 	ret = mipi_dbi_spi_init(spi, dbi, dc);
+ 	if (ret)
+@@ -429,6 +661,8 @@ static int panel_mipi_dbi_spi_probe(struct spi_device *spi)
+
+ 	if (device_property_present(dev, "write-only"))
+ 		dbi->read_commands = NULL;
++	if (panel_mipi_dbi->is_qin)
++		dbi->read_commands = NULL;
+
+ 	dbidev->driver_private = panel_mipi_dbi_commands_from_fw(dev);
+ 	if (IS_ERR(dbidev->driver_private))
+@@ -437,6 +674,11 @@ static int panel_mipi_dbi_spi_probe(struct spi_device *spi)
+ 	ret = panel_mipi_dbi_get_format(dev, formats, &bpp);
+ 	if (ret)
+ 		return ret;
++	if (panel_mipi_dbi->is_qin &&
++	    (formats[0] != DRM_FORMAT_RGB565 || mode.hdisplay != 240 ||
++	     mode.vdisplay != 320 || dbidev->left_offset || dbidev->top_offset))
++		return dev_err_probe(dev, -EINVAL,
++				     "Invalid Qin display mode or format\n");
+
+ 	buf_size = DIV_ROUND_UP(mode.hdisplay * mode.vdisplay * bpp, 8);
+ 	ret = drm_mipi_dbi_dev_init(dbidev, &mode, formats[0], 0, buf_size);
+@@ -462,7 +704,9 @@ static int panel_mipi_dbi_spi_probe(struct spi_device *spi)
+ 				       DRM_PLANE_TYPE_PRIMARY, NULL);
+ 	if (ret)
+ 		return ret;
+-	drm_plane_helper_add(plane, &panel_mipi_dbi_plane_helper_funcs);
++	drm_plane_helper_add(plane, panel_mipi_dbi->is_qin ?
++					    &qin_panel_plane_helper_funcs :
++					    &panel_mipi_dbi_plane_helper_funcs);
+ 	drm_plane_enable_fb_damage_clips(plane);
+
+ 	crtc = &panel_mipi_dbi->crtc;
+@@ -470,7 +714,9 @@ static int panel_mipi_dbi_spi_probe(struct spi_device *spi)
+ 					NULL);
+ 	if (ret)
+ 		return ret;
+-	drm_crtc_helper_add(crtc, &panel_mipi_dbi_crtc_helper_funcs);
++	drm_crtc_helper_add(crtc, panel_mipi_dbi->is_qin ?
++					  &qin_panel_crtc_helper_funcs :
++					  &panel_mipi_dbi_crtc_helper_funcs);
+
+ 	encoder = &panel_mipi_dbi->encoder;
+ 	ret = drm_encoder_init(drm, encoder, &panel_mipi_dbi_encoder_funcs,
+@@ -536,14 +782,16 @@ static const struct dev_pm_ops panel_mipi_dbi_pm_ops = {
+ };
+
+ static const struct of_device_id panel_mipi_dbi_spi_of_match[] = {
++	{ .compatible = "xiaomi,qin1splus-gc9307" },
+ 	{ .compatible = "panel-mipi-dbi-spi" },
+ 	{},
+ };
+ MODULE_DEVICE_TABLE(of, panel_mipi_dbi_spi_of_match);
+
+ static const struct spi_device_id panel_mipi_dbi_spi_id[] = {
++	{ "qin1splus-gc9307", 0 },
+ 	{ "panel-mipi-dbi-spi", 0 },
+-	{ },
++	{},
+ };
+ MODULE_DEVICE_TABLE(spi, panel_mipi_dbi_spi_id);
+
+@@ -561,5 +809,6 @@ static struct spi_driver panel_mipi_dbi_spi_driver = {
+ module_spi_driver(panel_mipi_dbi_spi_driver);
+
+ MODULE_DESCRIPTION("MIPI DBI compatible display panel driver");
++MODULE_FIRMWARE("xiaomi,qin1splus-gc9307.bin");
+ MODULE_AUTHOR("Noralf Trønnes");
+ MODULE_LICENSE("GPL");

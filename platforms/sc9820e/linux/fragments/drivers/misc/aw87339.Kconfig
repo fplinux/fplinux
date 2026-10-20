@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config AW87339
+	tristate "AW87339 amplifier control"
+	depends on I2C && GPIOLIB && OF
+	help
+	  Identify the AW87339 through its I2C interface and keep it in reset
+	  until its consumer supplies a playback profile. Control power and
+	  reset for playback, suspend and shutdown through one device owner.
+	  The sound driver supplies the profile and owns the ALSA interface.

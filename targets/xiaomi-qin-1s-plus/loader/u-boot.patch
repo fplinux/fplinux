@@ -1,0 +1,352 @@
+diff --git a/Makefile b/Makefile
+--- a/Makefile
++++ b/Makefile
+@@ -1272,9 +1272,9 @@
+ endef
+ 
+ define filechk_timestamp.h
+-	(LC_ALL=C date +'#define U_BOOT_DATE "%b %d %C%y"'; \
+-	LC_ALL=C date +'#define U_BOOT_TIME "%T"'; \
+-	LC_ALL=C date +'#define U_BOOT_TZ "%z"')
++	(LC_ALL=C date -u -d "@$(SOURCE_DATE_EPOCH)" +'#define U_BOOT_DATE "%b %d %C%y"'; \
++	LC_ALL=C date -u -d "@$(SOURCE_DATE_EPOCH)" +'#define U_BOOT_TIME "%T"'; \
++	LC_ALL=C date -u -d "@$(SOURCE_DATE_EPOCH)" +'#define U_BOOT_TZ "%z"')
+ endef
+ 
+ $(version_h): include/config/uboot.release FORCE
+diff --git a/arch/arm/cpu/armv7/sharkle/pmu.c b/arch/arm/cpu/armv7/sharkle/pmu.c
+index ff9f018..cb0fb68 100755
+--- a/arch/arm/cpu/armv7/sharkle/pmu.c
++++ b/arch/arm/cpu/armv7/sharkle/pmu.c
+@@ -94,7 +94,7 @@ void pmu_commom_config(void)
+ 	);
+ 	CHIP_REG_SET(REG_PMU_APB_PD_AP_SYS_CFG,
+ 		//BIT_PMU_APB_PD_AP_SYS_FORCE_SHUTDOWN |
+-		BIT_PMU_APB_PD_AP_SYS_AUTO_SHUTDOWN_EN |
++		//BIT_PMU_APB_PD_AP_SYS_AUTO_SHUTDOWN_EN |
+ 		BIT_PMU_APB_PD_AP_SYS_PWR_ON_DLY(0x01) |
+ 		BIT_PMU_APB_PD_AP_SYS_PWR_ON_SEQ_DLY(0x01) |
+ 		BIT_PMU_APB_PD_AP_SYS_ISO_ON_DLY(0x06) |
+diff --git a/arch/arm/lib/board.c b/arch/arm/lib/board.c
+index 897925f..b73e66e 100644
+--- a/arch/arm/lib/board.c
++++ b/arch/arm/lib/board.c
+@@ -572,6 +572,12 @@ void board_init_r(gd_t *id, ulong dest_addr)
+ #endif
+ 	mem_malloc_init (malloc_start, TOTAL_MALLOC_LEN);
+ 
++#ifdef CONFIG_QIN_RAM_PREINIT
++	/* The caller already placed the next stage in RAM. */
++	((void (*)(void))CONFIG_QIN_RAM_ENTRY)();
++	hang();
++#endif
++
+ #ifdef CONFIG_ARCH_EARLY_INIT_R
+ 	arch_early_init_r();
+ #endif
+diff --git a/board/spreadtrum/sp9820e_1h10/ldo_sleep.c b/board/spreadtrum/sp9820e_1h10/ldo_sleep.c
+index cb308ff..2837c89 100755
+--- a/board/spreadtrum/sp9820e_1h10/ldo_sleep.c
++++ b/board/spreadtrum/sp9820e_1h10/ldo_sleep.c
+@@ -38,6 +38,7 @@ void pmic_lowpower_config(uint32_t gen_para)
+ #if defined(CONFIG_ADIE_SC2721)
+ 	/*default configuration under 32kless*/
+ 	unsigned int feature_32k_less;
++	uint32_t sleep_ldo_lp_ctrl0;
+ 	feature_32k_less = sprd_get_32k();
+ 
+ 	ANA_REG_SET(ANA_REG_GLB_PWR_WR_PROT_VALUE,0x6e7f);
+@@ -94,7 +95,7 @@ void pmic_lowpower_config(uint32_t gen_para)
+ 			0
+ 		);
+ 
+-		ANA_REG_SET(ANA_REG_GLB_SLP_LDO_LP_CTRL0,
++		sleep_ldo_lp_ctrl0 = (
+ 			//BIT_SLP_LDORF15_LP_EN |
+ 			//BIT_SLP_LDORF18_LP_EN |
+ 			//BIT_SLP_LDOEMMCCORE_LP_EN |
+@@ -132,7 +133,7 @@ void pmic_lowpower_config(uint32_t gen_para)
+ 			0
+ 		);
+ 
+-		ANA_REG_SET(ANA_REG_GLB_SLP_LDO_LP_CTRL0,
++		sleep_ldo_lp_ctrl0 = (
+ 			//BIT_SLP_LDORF15_LP_EN |
+ 			//BIT_SLP_LDORF18_LP_EN |
+ 			//BIT_SLP_LDOEMMCCORE_LP_EN |
+@@ -151,9 +152,6 @@ void pmic_lowpower_config(uint32_t gen_para)
+ 			0
+ 		);
+ 
+-		ANA_REG_OR(ANA_REG_GLB_CLK32KLESS_CTRL0,
+-			BIT_SLP_XO_LOW_CUR_EN
+-		);
+ 	}
+ 
+ 	ANA_REG_SET(ANA_REG_GLB_SLP_LDO_PD_CTRL1,
+@@ -173,6 +171,8 @@ void pmic_lowpower_config(uint32_t gen_para)
+ 		0
+ 	);
+ 
++	ANA_REG_SET(ANA_REG_GLB_SLP_LDO_LP_CTRL0, sleep_ldo_lp_ctrl0);
++
+ 	ANA_REG_SET(ANA_REG_GLB_SLP_LDO_LP_CTRL1,
+ 		//BIT_SLP_LDOCON_LP_EN |
+ 		//BIT_SLP_LDOSIM0_LP_EN |
+diff --git a/board/spreadtrum/sp9820e_1h10/pinmap-sp9820e.c b/board/spreadtrum/sp9820e_1h10/pinmap-sp9820e.c
+index 649e6d7..9fecf45 100644
+--- a/board/spreadtrum/sp9820e_1h10/pinmap-sp9820e.c
++++ b/board/spreadtrum/sp9820e_1h10/pinmap-sp9820e.c
+@@ -54,37 +54,37 @@ static pinmap_t pinmap[]={
+ {REG_PIN_T_DIG,                         BITS_PIN_AF(3)},
+ {REG_MISC_PIN_T_DIG,                    BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPD|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPD|BIT_PIN_SLP_Z},//NC
+ {REG_PIN_GNSS_LNA_EN,                   BITS_PIN_AF(0)},
+-{REG_MISC_PIN_GNSS_LNA_EN,              BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPD|BIT_PIN_SLP_AP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//GPS_LNA_EN??GPSLNA?????
++{REG_MISC_PIN_GNSS_LNA_EN,              0x00082045},//GPS_LNA_EN??GPSLNA?????
+ {REG_PIN_EXTINT0,                       BITS_PIN_AF(3)},
+-{REG_MISC_PIN_EXTINT0,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_SE|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPU|BIT_PIN_SLP_IE},//KEYIN10????
++{REG_MISC_PIN_EXTINT0,                  0x0018208a},//KEYIN10????
+ {REG_PIN_EXTINT1,                       BITS_PIN_AF(3)},
+-{REG_MISC_PIN_EXTINT1,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPU|BIT_PIN_SLP_IE},//FLAG_OUT?USB????????????
++{REG_MISC_PIN_EXTINT1,                  0x0018208a},//FLAG_OUT?USB????????????
+ {REG_PIN_SCL3,                          BITS_PIN_AF(3)},
+ {REG_MISC_PIN_SCL3,                     BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_SE|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPU|BIT_PIN_SLP_IE},//KEYIN11????
+ {REG_PIN_SDA3,                          BITS_PIN_AF(3)},
+ {REG_MISC_PIN_SDA3,                     BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_SE|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPU|BIT_PIN_SLP_IE},//KEYIN12????
+-{REG_PIN_SCL0,                          BITS_PIN_AF(0)},
+-{REG_MISC_PIN_SCL0,                     BITS_PIN_DS(1)|BIT_PIN_WPUS|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPU|BIT_PIN_SLP_Z},//I2C0_SCLI2C0????,??2M?????Dbgmode0??
+-{REG_PIN_SDA0,                          BITS_PIN_AF(0)},
+-{REG_MISC_PIN_SDA0,                     BITS_PIN_DS(1)|BIT_PIN_WPUS|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPU|BIT_PIN_SLP_Z},//I2C0_SDAI2C0????,??2M?????Dbgmode0??
+-{REG_PIN_SCL1,                          BITS_PIN_AF(0)},
++{REG_PIN_SCL0,                          0x00000030},
++{REG_MISC_PIN_SCL0,                     0x0018208a},//I2C0_SCLI2C0????,??2M?????Dbgmode0??
++{REG_PIN_SDA0,                          0x00000030},
++{REG_MISC_PIN_SDA0,                     0x0018208a},//I2C0_SDAI2C0????,??2M?????Dbgmode0??
++{REG_PIN_SCL1,                          0x00000030},
+ {REG_MISC_PIN_SCL1,                     BITS_PIN_DS(1)|BIT_PIN_WPUS|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPU|BIT_PIN_SLP_Z},//I2C1_SCLI2C1????,??CSItoLVDSLOG??
+-{REG_PIN_SDA1,                          BITS_PIN_AF(0)},
++{REG_PIN_SDA1,                          0x00000030},
+ {REG_MISC_PIN_SDA1,                     BITS_PIN_DS(1)|BIT_PIN_WPUS|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPU|BIT_PIN_SLP_Z},//I2C1_SDAI2C1????,??CSItoLVDSLOG??
+ {REG_PIN_CMPD2,                         BITS_PIN_AF(3)},
+-{REG_MISC_PIN_CMPD2,                    BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_AP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//CAM_PWDN2?CSItoLVDSLOG???Dbgmode0??
++{REG_MISC_PIN_CMPD2,                    0x0018208a},//CAM_PWDN2?CSItoLVDSLOG???Dbgmode0??
+ {REG_PIN_CMRST2,                        BITS_PIN_AF(3)},
+-{REG_MISC_PIN_CMRST2,                   BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//CAM_RST2?CSItoLVDSLOG???Dbgmode0??
++{REG_MISC_PIN_CMRST2,                   0x00082089},//CAM_RST2?CSItoLVDSLOG???Dbgmode0??
+ {REG_PIN_CMMCLK0,                       BITS_PIN_AF(0)},
+ {REG_MISC_PIN_CMMCLK0,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_AP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//CAM_MCLK0?2M???
+ {REG_PIN_CMRST0,                        BITS_PIN_AF(3)},
+-{REG_MISC_PIN_CMRST0,                   BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//CAM_RST0?2M????Dbgmode0??
++{REG_MISC_PIN_CMRST0,                   0x0018208a},//CAM_RST0?2M????Dbgmode0??
+ {REG_PIN_CMPD0,                         BITS_PIN_AF(3)},
+-{REG_MISC_PIN_CMPD0,                    BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_AP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//CAM_PWDN0?2M????Dbgmode0??
+-{REG_PIN_CMMCLK1,                       BITS_PIN_AF(0)},
+-{REG_MISC_PIN_CMMCLK1,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_AP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//CAM_MCLK1?CSItoLVDSLOG??
++{REG_MISC_PIN_CMPD0,                    0x0018208a},//CAM_PWDN0?2M????Dbgmode0??
++{REG_PIN_CMMCLK1,                       0x00000030},
++{REG_MISC_PIN_CMMCLK1,                  0x0018208a},//CAM_MCLK1?CSItoLVDSLOG??
+ {REG_PIN_CMRST1,                        BITS_PIN_AF(3)},
+-{REG_MISC_PIN_CMRST1,                   BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//CAM_RST1?2M????Dbgmode0??
++{REG_MISC_PIN_CMRST1,                   0x0008208a},//CAM_RST1?2M????Dbgmode0??
+ {REG_PIN_CMPD1,                         BITS_PIN_AF(3)},
+ {REG_MISC_PIN_CMPD1,                    BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_AP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//CAM_PWDN1?2M????Dbgmode0??
+ {REG_PIN_U0TXD,                         BITS_PIN_AF(0)},
+@@ -94,7 +94,7 @@ static pinmap_t pinmap[]={
+ {REG_PIN_U0CTS,                         BITS_PIN_AF(0)},
+ {REG_MISC_PIN_U0CTS,                    BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPU|BIT_PIN_SLP_IE},//BB_U0CTS接Dbgmode0接口
+ {REG_PIN_U0RTS,                         BITS_PIN_AF(3)},
+-{REG_MISC_PIN_U0RTS,                    BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_AP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_Z},//NFC_WKUP / BB_U0RTS接Dbgmode0接口
++{REG_MISC_PIN_U0RTS,                    0x0018208a},//NFC_WKUP / BB_U0RTS接Dbgmode0接口
+ {REG_PIN_U1TXD,                         BITS_PIN_AF(0)},
+ {REG_MISC_PIN_U1TXD,                    BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_AP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//BB_U1TXD?Test???MicroUSB?ID????TestPoint
+ {REG_PIN_U1RXD,                         BITS_PIN_AF(0)},
+@@ -104,7 +104,7 @@ static pinmap_t pinmap[]={
+ {REG_PIN_U2RXD,                         BITS_PIN_AF(0)},
+ {REG_MISC_PIN_U2RXD,                    BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPU|BIT_PIN_SLP_IE},//BB_U2RXD?Dbgmode0?Test??
+ {REG_PIN_EXTINT9,                       BITS_PIN_AF(3)},
+-{REG_MISC_PIN_EXTINT9,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPD|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPD|BIT_PIN_SLP_Z},//NC
++{REG_MISC_PIN_EXTINT9,                  0x0008208a},//NC
+ {REG_PIN_EXTINT10,                      BITS_PIN_AF(3)},
+ {REG_MISC_PIN_EXTINT10,                 BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPU|BIT_PIN_SLP_IE},//BUA_BAT_DET??PMU??,??????????????
+ {REG_PIN_EMMC_D2,                       BITS_PIN_AF(0)},
+@@ -144,9 +144,9 @@ static pinmap_t pinmap[]={
+ {REG_PIN_NF_CEN0,                       BITS_PIN_AF(3)},
+ {REG_MISC_PIN_NF_CEN0,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPD|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPD|BIT_PIN_SLP_Z},//NF_CEN0???NAND???,???NC??
+ {REG_PIN_LCM_RSTN,                      BITS_PIN_AF(3)},
+-{REG_MISC_PIN_LCM_RSTN,                 BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_AP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//LCM_RSTN?2.8??LCM,?LCD??????????
++{REG_MISC_PIN_LCM_RSTN,                 0x00182001},//LCM_RSTN?2.8??LCM,?LCD??????????
+ {REG_PIN_LCM_FMARK,                     BITS_PIN_AF(3)},
+-{REG_MISC_PIN_LCM_FMARK,                BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPD|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPD|BIT_PIN_SLP_IE},//LCM_FMARKLCD?????BB???????
++{REG_MISC_PIN_LCM_FMARK,                0x00182046},//LCM_FMARKLCD?????BB???????
+ {REG_PIN_CHIP_SLEEP,                    BITS_PIN_AF(0)},
+ {REG_MISC_PIN_CHIP_SLEEP,               BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_AP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//CHIP_SLEEP?PMU???????
+ {REG_PIN_PTEST,                         BITS_PIN_AF(0)},
+@@ -194,17 +194,17 @@ static pinmap_t pinmap[]={
+ {REG_PIN_SD0_DUMMY,                     BITS_PIN_AF(0)},
+ {REG_MISC_PIN_SD0_DUMMY,                BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPD|BIT_PIN_SLP_ALL|BIT_PIN_SLP_WPD|BIT_PIN_SLP_Z},//???Ball
+ {REG_PIN_SD2_CLK,                       BITS_PIN_AF(1)},
+-{REG_MISC_PIN_SD2_CLK,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPD|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPD|BIT_PIN_SLP_Z},//LCM_SPI_CLK?LCM?SPI????
++{REG_MISC_PIN_SD2_CLK,                  0x00182004},//LCM_SPI_CLK?LCM?SPI????
+ {REG_PIN_SD2_CMD,                       BITS_PIN_AF(1)},
+-{REG_MISC_PIN_SD2_CMD,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPD|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPD|BIT_PIN_SLP_Z},//LCM_SPI_DO??LCMSPI???
++{REG_MISC_PIN_SD2_CMD,                  0x00182004},//LCM_SPI_DO??LCMSPI???
+ {REG_PIN_SD2_D0,                        BITS_PIN_AF(1)},
+-{REG_MISC_PIN_SD2_D0,                   BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPD|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPD|BIT_PIN_SLP_Z},//LCM_SPI_DI?LCM??SPI????
++{REG_MISC_PIN_SD2_D0,                   0x00182004},//LCM_SPI_DI?LCM??SPI????
+ {REG_PIN_SD2_D1,                        BITS_PIN_AF(3)},
+-{REG_MISC_PIN_SD2_D1,                   BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPD|BIT_PIN_SLP_AP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//VDDSDCORE_ENSD??LDO?????
++{REG_MISC_PIN_SD2_D1,                   0x00182001},//VDDSDCORE_ENSD??LDO?????
+ {REG_PIN_SD2_D2,                        BITS_PIN_AF(3)},
+ {REG_MISC_PIN_SD2_D2,                   BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_AP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//LCM_SPI_RS?LCM?RS??
+ {REG_PIN_SD2_D3,                        BITS_PIN_AF(1)},
+-{REG_MISC_PIN_SD2_D3,                   BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//LCM_SPI_CSNLCMSPI?????
++{REG_MISC_PIN_SD2_D3,                   0x00182004},//LCM_SPI_CSNLCMSPI?????
+ {REG_PIN_SD2_DUMMY,                     BITS_PIN_AF(0)},
+ {REG_MISC_PIN_SD2_DUMMY,                BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPD|BIT_PIN_SLP_ALL|BIT_PIN_SLP_WPD|BIT_PIN_SLP_Z},//???Ball
+ {REG_PIN_SIMCLK0,                       BITS_PIN_AF(0)},
+@@ -226,17 +226,17 @@ static pinmap_t pinmap[]={
+ {REG_PIN_SIMRST2,                       BITS_PIN_AF(3)},
+ {REG_MISC_PIN_SIMRST2,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_SE|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPU|BIT_PIN_SLP_IE},//KEYIN15????
+ {REG_PIN_KEYOUT0,                       BITS_PIN_AF(0)},
+-{REG_MISC_PIN_KEYOUT0,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_AP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//KEYOUT0????
++{REG_MISC_PIN_KEYOUT0,                  0x00180081},//KEYOUT0????
+ {REG_PIN_KEYOUT1,                       BITS_PIN_AF(0)},
+-{REG_MISC_PIN_KEYOUT1,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_AP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//KEYOUT1????
++{REG_MISC_PIN_KEYOUT1,                  0x00180081},//KEYOUT1????
+ {REG_PIN_KEYOUT2,                       BITS_PIN_AF(0)},
+-{REG_MISC_PIN_KEYOUT2,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_AP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//KEYOUT2????
++{REG_MISC_PIN_KEYOUT2,                  0x00180081},//KEYOUT2????
+ {REG_PIN_KEYIN0,                        BITS_PIN_AF(0)},
+-{REG_MISC_PIN_KEYIN0,                   BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPU|BIT_PIN_SLP_IE},//KEYIN0?????Dbgmode0??
++{REG_MISC_PIN_KEYIN0,                   0x0018008a},//KEYIN0?????Dbgmode0??
+ {REG_PIN_KEYIN1,                        BITS_PIN_AF(0)},
+-{REG_MISC_PIN_KEYIN1,                   BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPU|BIT_PIN_SLP_IE},//KEYIN1????
++{REG_MISC_PIN_KEYIN1,                   0x0018008a},//KEYIN1????
+ {REG_PIN_KEYIN2,                        BITS_PIN_AF(0)},
+-{REG_MISC_PIN_KEYIN2,                   BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPU|BIT_PIN_SLP_IE},//KEYIN2?????Dbfmode0??
++{REG_MISC_PIN_KEYIN2,                   0x0018008a},//KEYIN2?????Dbfmode0??
+ {REG_PIN_RFFE0_SCK,                     BITS_PIN_AF(0)},
+ {REG_MISC_PIN_RFFE0_SCK,                BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_ALL_CP|BIT_PIN_SLP_WPD|BIT_PIN_SLP_Z},//RFFE_SCLK0BB??LTE/WCDMAPAM??TDDB34/B39/GSMPA+Switch???????
+ {REG_PIN_RFFE0_SDA,                     BITS_PIN_AF(0)},
+@@ -265,8 +265,8 @@ static pinmap_t pinmap[]={
+ {REG_MISC_PIN_RFCTL10,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_ALL_CP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//NC
+ {REG_PIN_RFCTL11,                       BITS_PIN_AF(0)},
+ {REG_MISC_PIN_RFCTL11,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_ALL_CP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//NC
+-{REG_PIN_GPIO31,                        BITS_PIN_AF(0)},
+-{REG_MISC_PIN_GPIO31,                   BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_ALL_CP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//NC
++{REG_PIN_GPIO31,                        0x00000010},
++{REG_MISC_PIN_GPIO31,                   0x0008008a},//NC
+ {REG_PIN_GPIO32,                        BITS_PIN_AF(3)},
+ {REG_MISC_PIN_GPIO32,                   BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_SE|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPU|BIT_PIN_SLP_IE},//KEYIN3????
+ {REG_PIN_GPIO33,                        BITS_PIN_AF(3)},
+@@ -275,8 +275,8 @@ static pinmap_t pinmap[]={
+ {REG_MISC_PIN_RFCTL16,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_AP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//NFC_DWL
+ {REG_PIN_RFCTL17,                       BITS_PIN_AF(3)},
+ {REG_MISC_PIN_RFCTL17,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPD|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPD|BIT_PIN_SLP_Z},//NFC_SVDD_PWR
+-{REG_PIN_GPIO9,                         BITS_PIN_AF(0)},
+-{REG_MISC_PIN_GPIO9,                    BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_ALL_CP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//NC
++{REG_PIN_GPIO9,                         0x00000010},
++{REG_MISC_PIN_GPIO9,                    0x0008008a},//NC
+ {REG_PIN_RFCTL19,                       BITS_PIN_AF(1)},
+ {REG_MISC_PIN_RFCTL19,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_AP|BIT_PIN_SLP_NUL|BIT_PIN_SLP_OE},//BB_U3TXDUART3?TestConn
+ {REG_PIN_RFCTL20,                       BITS_PIN_AF(1)},
+@@ -291,22 +291,22 @@ static pinmap_t pinmap[]={
+ {REG_MISC_PIN_LVDSRF0_ADCON,            BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPD|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPD|BIT_PIN_SLP_Z},//NC
+ {REG_PIN_LVDSRF0_DACON,                 BITS_PIN_AF(3)},
+ {REG_MISC_PIN_LVDSRF0_DACON,            BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPD|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPD|BIT_PIN_SLP_Z},//NC
+-{REG_PIN_SPI2_CSN,                      BITS_PIN_AF(0)},
++{REG_PIN_SPI2_CSN,                      0x00000030},
+ {REG_MISC_PIN_SPI2_CSN,                 BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPD|BIT_PIN_SLP_Z},//SPI2??????Sensor,?GPIO??????SPI,??NFC
+-{REG_PIN_SPI2_DO,                       BITS_PIN_AF(0)},
+-{REG_MISC_PIN_SPI2_DO,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPD|BIT_PIN_SLP_Z},//SPI2??????Sensor,?GPIO??????SPI,??NFC
++{REG_PIN_SPI2_DO,                       0x00000030},
++{REG_MISC_PIN_SPI2_DO,                  0x00082009},//SPI2??????Sensor,?GPIO??????SPI,??NFC
+ {REG_PIN_SPI2_DI,                       BITS_PIN_AF(0)},
+ {REG_MISC_PIN_SPI2_DI,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPD|BIT_PIN_SLP_Z},//SPI2??????Sensor,?GPIO??????SPI,??NFC
+-{REG_PIN_SPI2_CLK,                      BITS_PIN_AF(0)},
+-{REG_MISC_PIN_SPI2_CLK,                 BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_NUL|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPD|BIT_PIN_SLP_Z},//SPI2??????Sensor,?GPIO??????SPI,??NFC
++{REG_PIN_SPI2_CLK,                      0x00000030},
++{REG_MISC_PIN_SPI2_CLK,                 0x00082009},//SPI2??????Sensor,?GPIO??????SPI,??NFC
+ {REG_PIN_SPI0_CSN,                      BITS_PIN_AF(3)},
+-{REG_MISC_PIN_SPI0_CSN,                 BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_SE|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPU|BIT_PIN_SLP_IE},//KEYIN6????
+-{REG_PIN_SPI0_DO,                       BITS_PIN_AF(3)},
+-{REG_MISC_PIN_SPI0_DO,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_SE|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPU|BIT_PIN_SLP_IE},//KEYIN7????
++{REG_MISC_PIN_SPI0_CSN,                 0x0008208a},//KEYIN6????
++{REG_PIN_SPI0_DO,                       0x00000000},
++{REG_MISC_PIN_SPI0_DO,                  0x00082001},//KEYIN7????
+ {REG_PIN_SPI0_DI,                       BITS_PIN_AF(3)},
+-{REG_MISC_PIN_SPI0_DI,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_SE|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPU|BIT_PIN_SLP_IE},//KEYIN8????
++{REG_MISC_PIN_SPI0_DI,                  0x00082001},//KEYIN8????
+ {REG_PIN_SPI0_CLK,                      BITS_PIN_AF(3)},
+-{REG_MISC_PIN_SPI0_CLK,                 BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_WPD|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPD|BIT_PIN_SLP_Z},//NC
++{REG_MISC_PIN_SPI0_CLK,                 0x0008208a},//NC
+ {REG_PIN_TDO_LTE,                       BITS_PIN_AF(3)},
+ {REG_MISC_PIN_TDO_LTE,                  BITS_PIN_DS(1)|BIT_PIN_NULL|BIT_PIN_SE|BIT_PIN_WPU|BIT_PIN_SLP_AP|BIT_PIN_SLP_WPU|BIT_PIN_SLP_IE},//KEYIN4????
+ {REG_PIN_TDI_LTE,                       BITS_PIN_AF(3)},
+diff --git a/board/spreadtrum/sp9820e_1h10/u-boot.lds b/board/spreadtrum/sp9820e_1h10/u-boot.lds
+index bdbf30e..f5eb767 100644
+--- a/board/spreadtrum/sp9820e_1h10/u-boot.lds
++++ b/board/spreadtrum/sp9820e_1h10/u-boot.lds
+@@ -70,7 +70,14 @@ SECTIONS
+ 
+ 	. = ALIGN(4);
+ 	.u_boot_list : {
+-		KEEP(*(SORT(.u_boot_list*)));
++		/* Early getenv retains the shared hash lookup's empty-list bounds. */
++		KEEP(*(.u_boot_list_2_env_clbk_1));
++		KEEP(*(.u_boot_list_2_env_clbk_3));
++		KEEP(*(SORT(.u_boot_list_2_i2c*)));
++	}
++
++	/DISCARD/ : {
++		*(.u_boot_list*)
+ 	}
+ 
+ 	. = ALIGN(4);
+diff --git a/include/configs/sp9820e_1h10.h b/include/configs/sp9820e_1h10.h
+index 9f10c57..4b26b13 100644
+--- a/include/configs/sp9820e_1h10.h
++++ b/include/configs/sp9820e_1h10.h
+@@ -21,6 +21,10 @@
+ #define CONFIG_SYS_NO_FLASH
+ #define CONFIG_SPL_BAK
+ #define CONFIG_SKIP_LOWLEVEL_INIT
++#define CONFIG_QIN_RAM_PREINIT
++#define CONFIG_ARMV7_LPAE
++/* RAM startup uses a fixed 32 kHz-less power policy. */
++#define CONFIG_32K_TYPE 1
+ #define CONFIG_MISC_INIT_R                     /* call misc_init_r()	      */
+ #define CONFIG_BOARD_LATE_INIT         /* call board_late_init() */
+ //#define CONFIG_SUPPORT_RAW_INITRD
+@@ -340,7 +344,7 @@
+ #endif
+ 
+ #define CONFIG_7S_RST_SHORT_MODE	1	//0:long press then release key to trigger;1:press key some time to trigger
+-#define CONFIG_7S_RST_2KEY_MODE		1	//0:1Key--Normal mode; 1:2KEY
++#define CONFIG_7S_RST_2KEY_MODE		0	//0:1Key--Normal mode; 1:2KEY
+ #define CONFIG_7S_RST_THRESHOLD		7	//7S, hold key down for this time to trigger
+ 
+  /*SMPL config*/
+@@ -364,3 +368,6 @@
+ #define CONFIG_ETB_DUMP
+ 
+ #endif /* __TSHARK_L_H */
++
++/* The unguarded generated config header can reassert board detection. */
++#undef CONFIG_BOARD_ID
+diff --git a/include/linux/compiler-gcc.h b/include/linux/compiler-gcc.h
+index e057bd2..7323de5 100644
+--- a/include/linux/compiler-gcc.h
++++ b/include/linux/compiler-gcc.h
+@@ -111,7 +111,11 @@
+ #define __gcc_header(x) #x
+ #define _gcc_header(x) __gcc_header(linux/compiler-gcc##x.h)
+ #define gcc_header(x) _gcc_header(x)
++#if __GNUC__ >= 5
++#include <linux/compiler-gcc5.h>
++#else
+ #include gcc_header(__GNUC__)
++#endif
+ 
+ #if !defined(__noclone)
+ #define __noclone	/* not needed */

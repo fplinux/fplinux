@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/mfd/fplinux,sc9820e-audio-g6.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: SC9820E shared G6 register window
+
+maintainers:
+  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+
+description: |
+  Shared register window containing the audio sine-driver control and WCN
+  26 MHz control. Consumers access their fields through a sprd,g6-syscon
+  phandle and preserve unrelated fields.
+
+properties:
+  compatible:
+    items:
+      - const: fplinux,sc9820e-audio-g6
+      - const: syscon
+
+  reg:
+    maxItems: 1
+
+required:
+  - compatible
+  - reg
+
+additionalProperties: false

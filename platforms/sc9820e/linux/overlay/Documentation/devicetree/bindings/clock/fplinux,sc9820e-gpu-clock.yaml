@@ -1,0 +1,85 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/clock/fplinux,sc9820e-gpu-clock.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: SC9820E GPU clock and access preparation
+
+maintainers:
+  - FPLinux <fplinux@users.noreply.github.com>
+
+description: |
+  The provider prepares GPU_TOP, the AON module gate and GPU control registers
+  for the TWPLL/6, TWPLL/4 or TWPLL/3 input without changing PLL or shared
+  core-rail settings. An assigned clock rate selects one input before prepare;
+  the default is TWPLL/6. Rate changes are blocked while prepared.
+  It accepts the inherited undivided clock and checks the shared core rail
+  against the target's expected voltage before preparing GPU resources.
+  The clock rate is zero while unprepared because the gated mux is inaccessible.
+  Unprepare restores the owned fields and preserves an inherited enabled gate.
+
+properties:
+  compatible:
+    const: fplinux,sc9820e-gpu-clock
+
+  reg:
+    items:
+      - description: GPU clock control word
+      - description: GPU QoS control word
+      - description: GPU reset control word, observed without writes
+
+  reg-names:
+    items:
+      - const: clock
+      - const: qos
+      - const: reset
+
+  "#clock-cells":
+    const: 0
+
+  clocks:
+    description: Undivided TWPLL source.
+    maxItems: 1
+
+  clock-names:
+    const: source
+
+  assigned-clocks:
+    maxItems: 1
+
+  assigned-clock-rates:
+    items:
+      - enum: [256000000, 384000000, 512000000]
+    description: Nominal input rate selected before GPU resources are prepared.
+
+  core-supply:
+    description: Shared always-on core rail with read-only voltage observation.
+
+  fplinux,expected-core-microvolt:
+    minimum: 1
+    description: |
+      Required inherited core voltage for the target's selected GPU input.
+      This is an observation precondition and never requests a voltage change.
+
+  fplinux,aon-syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: Shared AON register map with atomic set and clear aliases.
+
+  fplinux,pmu-syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: Shared PMU register map containing GPU_TOP configuration.
+
+required:
+  - compatible
+  - reg
+  - reg-names
+  - "#clock-cells"
+  - clocks
+  - clock-names
+  - core-supply
+  - fplinux,expected-core-microvolt
+  - fplinux,aon-syscon
+  - fplinux,pmu-syscon
+
+additionalProperties: false

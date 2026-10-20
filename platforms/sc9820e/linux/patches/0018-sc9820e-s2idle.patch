@@ -1,0 +1,77 @@
+--- a/drivers/mmc/host/sdhci-sprd.c
++++ b/drivers/mmc/host/sdhci-sprd.c
+@@ -20,6 +20,7 @@
+ #include <linux/regulator/consumer.h>
+ #include <linux/sizes.h>
+ #include <linux/slab.h>
++#include <linux/suspend.h>
+ 
+ #include "sdhci-pltfm.h"
+ #include "mmc_hsq.h"
+@@ -874,7 +875,7 @@ static void sdhci_sprd_r10_reset(struct sdhci_host *host, u8 mask)
+ 	u16 ctrl;
+ 	int ret;
+ 
+-	if (sprd_host->dma_failed)
++	if (sprd_host->dma_failed || host->flags & SDHCI_DEVICE_DEAD)
+ 		return;
+ 	if (sprd_host->dma_active) {
+ 		/* Error status is latched before the generic IRQ acknowledgment. */
+@@ -1602,14 +1603,54 @@ static int __maybe_unused sdhci_sprd_suspend(struct device *dev)
+ 	struct sdhci_host *host = dev_get_drvdata(dev);
+ 	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
+ 
+-	if (sprd_host->is_r10)
+-		return -EOPNOTSUPP;
++	if (sprd_host->is_r10) {
++		if (pm_suspend_target_state != PM_SUSPEND_TO_IDLE)
++			return -EOPNOTSUPP;
++		if (host->flags & SDHCI_DEVICE_DEAD)
++			return -ENODEV;
++		if (sprd_host->dma_active || sprd_host->dma_failed)
++			return -EBUSY;
++		if (sprd_host->reset_error)
++			return sprd_host->reset_error;
++		if (sprd_host->clock_error)
++			return sprd_host->clock_error;
++		if (sprd_host->power_error)
++			return sprd_host->power_error;
++
++		/* Keep the registered IRQ and source/AHB clocks over s2idle. */
++		sdhci_runtime_suspend_host(host);
++		return 0;
++	}
+ 
+ 	return pm_runtime_force_suspend(dev);
+ }
+ 
++static int __maybe_unused sdhci_sprd_resume(struct device *dev)
++{
++	struct sdhci_host *host = dev_get_drvdata(dev);
++	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
++	unsigned long flags;
++	int ret;
++
++	if (!sprd_host->is_r10)
++		return pm_runtime_force_resume(dev);
++
++	sdhci_runtime_resume_host(host, 0);
++	ret = sprd_host->reset_error;
++	if (ret) {
++		/* PM resumes the child queues even when this callback fails. */
++		spin_lock_irqsave(&host->lock, flags);
++		host->flags |= SDHCI_DEVICE_DEAD;
++		host->ier = 0;
++		sdhci_writel(host, 0, SDHCI_INT_ENABLE);
++		sdhci_writel(host, 0, SDHCI_SIGNAL_ENABLE);
++		spin_unlock_irqrestore(&host->lock, flags);
++	}
++	return ret;
++}
++
+ static const struct dev_pm_ops sdhci_sprd_pm_ops = {
+-	SYSTEM_SLEEP_PM_OPS(sdhci_sprd_suspend, pm_runtime_force_resume)
++	SYSTEM_SLEEP_PM_OPS(sdhci_sprd_suspend, sdhci_sprd_resume)
+ 		RUNTIME_PM_OPS(sdhci_sprd_runtime_suspend,
+ 			       sdhci_sprd_runtime_resume, NULL)
+ };

@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0-only
+&{/cpus/cpu@0} {
+	clocks = <&cpu_clk SC9820E_CPU_CLK_CPU>;
+};
+
+&{/cpus/cpu@1} {
+	clocks = <&cpu_clk SC9820E_CPU_CLK_CPU>;
+};

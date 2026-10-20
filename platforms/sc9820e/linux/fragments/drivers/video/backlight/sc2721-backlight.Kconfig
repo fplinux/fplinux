@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config BACKLIGHT_SC2721
+	tristate "SC2721 LCD backlight"
+	depends on ARCH_SC9820E && BACKLIGHT_CLASS_DEVICE
+	depends on OF && MFD_SC27XX_PMIC
+	help
+	  This provides brightness and power control for an LCD backlight
+	  connected to the SC2721 current outputs.
+	  The driver uses the parent PMIC register map and starts powered off.
+	  A display consumer enables it after the initial image is ready.

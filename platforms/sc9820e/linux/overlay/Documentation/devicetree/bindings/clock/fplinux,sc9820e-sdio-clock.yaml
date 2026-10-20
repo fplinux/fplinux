@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/clock/fplinux,sc9820e-sdio-clock.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: SC9820E SDIO0 oscillator mux and AP-AHB gate
+
+maintainers:
+  - FPLinux <fplinux@users.noreply.github.com>
+
+description: |
+  The provider controls the SDIO0 mux register and its AP-AHB gate. Output 0
+  is the mux clock and output 1 is the AHB gate. The supported mux inputs
+  are the 1 MHz oscillator at selector 0 and the 26 MHz oscillator at
+  selector 1.
+
+properties:
+  compatible:
+    const: fplinux,sc9820e-sdio-clock
+
+  reg:
+    maxItems: 1
+
+  "#clock-cells":
+    const: 1
+
+  clocks:
+    items:
+      - description: 1 MHz oscillator, mux selector 0
+      - description: 26 MHz oscillator, mux selector 1
+
+  clock-names:
+    items:
+      - const: ext1m
+      - const: ext26m
+
+  fplinux,ap-ahb-syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: AP-AHB register map with atomic set and clear aliases
+
+required:
+  - compatible
+  - reg
+  - "#clock-cells"
+  - clocks
+  - clock-names
+  - fplinux,ap-ahb-syscon
+
+additionalProperties: false

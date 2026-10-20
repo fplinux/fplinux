@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/leds/sprd,sc2721-kpled.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: SC2721 keypad backlight in LDO mode
+
+maintainers:
+  - FPLinux <fplinux@users.noreply.github.com>
+
+allOf:
+  - $ref: common.yaml#
+
+properties:
+  compatible:
+    const: sprd,sc2721-kpled-ldo
+
+  reg:
+    maxItems: 1
+    description: KPLED_CTRL0 offset within the PMIC, followed by KPLED_CTRL1
+
+  function:
+    const: kbd_backlight
+
+required:
+  - compatible
+  - reg
+  - function
+
+unevaluatedProperties: false

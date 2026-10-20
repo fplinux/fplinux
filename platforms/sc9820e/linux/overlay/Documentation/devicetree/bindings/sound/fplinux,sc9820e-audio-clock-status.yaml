@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/sound/fplinux,sc9820e-audio-clock-status.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: SC9820E audio clock-stability status
+
+maintainers:
+  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+
+description: |
+  Read-only clock-stability status word used by microphone capture.
+  The consumer maps this resource through its sprd,clock-stable phandle.
+
+properties:
+  compatible:
+    const: fplinux,sc9820e-audio-clock-status
+
+  reg:
+    maxItems: 1
+    description: Register window containing one 32-bit status word.
+
+required:
+  - compatible
+  - reg
+
+additionalProperties: false

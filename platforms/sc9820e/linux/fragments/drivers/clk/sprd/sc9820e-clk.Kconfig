@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config SC9820E_GATE
+	tristate
+
+config SC9820E_GPU_CLOCK
+	tristate "SC9820E GPU clock and access preparation"
+	depends on ARCH_SC9820E
+	depends on COMMON_CLK && OF && MFD_SYSCON && REGULATOR
+	help
+	  Prepare the GPU domain, AON gate and clock control for TWPLL/6.
+	  Preserve the shared core voltage, PLL settings and inherited divider.
+	  Restore the owned fields when the consumer releases its clock.
+	  This clock is required by the board's Panfrost GPU device.
+
+config SC9820E_CPU_CLOCK
+	tristate "SC9820E CPU clocks and parent frequency control"
+	depends on ARCH_SC9820E
+	depends on COMMON_CLK && OF && MFD_SYSCON && CPU_FREQ
+	help
+	  Report the inherited CPU clock from its mux, divider and PLL fields.
+	  With both CPUs using this clock, allow switching between the inherited
+	  MPLL and lower TWPLL/2 parent.
+	  PLL settings, dividers and voltage programming remain unchanged.
+
+config SC9820E_SDIO_CLOCK
+	tristate "SC9820E SDIO oscillator clocks"
+	depends on ARCH_SC9820E
+	depends on COMMON_CLK && OF && MFD_SYSCON
+	select SC9820E_GATE
+	help
+	  Select the 1 MHz or 26 MHz oscillator input for SDIO0 and control
+	  its AP-AHB gate through the shared atomic set and clear registers.
+	  The SD host receives separate mux and gate clocks from this provider.
+	  Device Tree supplies the oscillator parents and AP-AHB register map.
+
+config SC9820E_PERIPHERAL_GATES
+	tristate "SC9820E peripheral clock gates"
+	depends on ARCH_SC9820E
+	depends on COMMON_CLK && OF && MFD_SYSCON
+	select SC9820E_GATE
+	help
+	  Enable the SC9820E GPIO, hardware spinlock, high-speed SPI and AP DMA
+	  clocks through the shared AON and AP-AHB atomic set and clear registers.
+	  Each Device Tree node exposes one gate to its peripheral consumer.
+	  Oscillator selection and dividers are handled by separate providers.
+
+config SC9820E_HS_SPI_CLOCK
+	tristate "SC9820E high-speed SPI source clock"
+	depends on ARCH_SC9820E
+	depends on COMMON_CLK && OF
+	help
+	  Select the oscillator or divided TWPLL input for the SC9820E high-speed
+	  SPI controller and clear its source divider.
+	  The SPI controller selects the source rate after enabling its module
+	  gate and establishing that no transfer is busy.
+
+config SC9820E_I2C2_CLOCK
+	tristate "SC9820E I2C2 inherited oscillator clock"
+	depends on ARCH_SC9820E
+	depends on COMMON_CLK && OF && MFD_SYSCON
+	select SC9820E_GATE
+	help
+	  Report the inherited I2C2 oscillator input without changing its parent
+	  or divider, and expose the I2C2 AP-APB module gate separately.
+	  The controller can enable its module without changing the source.
+	  An inherited PLL parent or divider is reported as an unknown rate.

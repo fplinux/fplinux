@@ -1,0 +1,79 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/dts-v1/;
+
+/memreserve/ 0x80002000 0x00002000;
+/memreserve/ 0x82000000 0x00001000;
+/memreserve/ 0x9eff0000 0x01010000;
+
+#include "sc9820e.dtsi"
+#include "sc9820e-i2c2.dtsi"
+#include "sc9820e-sc2721.dtsi"
+#include "fplinux-xiaomi-qin-1s-plus-identity.dtsi"
+#include "xiaomi-qin-1s-plus-foundation.dtsi"
+#include "xiaomi-qin-1s-plus-cpu.dtsi"
+#include "xiaomi-qin-1s-plus-display.dtsi"
+#include "xiaomi-qin-1s-plus-capture.dtsi"
+#include "xiaomi-qin-1s-plus-speaker.dtsi"
+#include "xiaomi-qin-1s-plus-gpu.dtsi"
+#include "xiaomi-qin-1s-plus-sensors.dtsi"
+#include "xiaomi-qin-1s-plus-radio.dtsi"
+
+/ {
+	chosen {
+		/include/ "fplinux-root.dtsi"
+	};
+
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x80000000 0x20000000>;
+	};
+
+	reserved-memory {
+		ranges;
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		cp-modem@89600000 {
+			reg = <0x89600000 0x03c80000>;
+		};
+
+		fb@8fb3e000 {
+			reg = <0x8fb3e000 0x000e1000>;
+		};
+
+		gnss-mem@88300000 {
+			reg = <0x88300000 0x0015a800>;
+		};
+
+		iq-mem@8f000000 {
+			reg = <0x8f000000 0>;
+		};
+
+		mpu0-dump@877ff000 {
+			reg = <0x877ff000 0x1000>;
+		};
+
+		sipc-mem@87800000 {
+			reg = <0x87800000 0x003d0000>;
+		};
+
+		sml-mem@8e000000 {
+			reg = <0x8e000000 0x00100000>;
+		};
+
+		sysdump-uboot@9f000000 {
+			reg = <0x9f000000 0x00fc0000>;
+		};
+
+		tos-mem@8e100000 {
+			reg = <0x8e100000 0x00100000>;
+		};
+
+		wcn-mem@88000000 {
+			reg = <0x88000000 0x00280000>;
+			no-map;
+		};
+	};
+};
+
+#include "fplinux-ram-session.dtsi"

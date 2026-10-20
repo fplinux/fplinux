@@ -1,0 +1,33 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/ {
+	aliases {
+		i2c2 = &i2c2;
+	};
+
+	ap_apb: syscon@71300000 {
+		compatible = "fplinux,sc9820e-ap-apb", "syscon";
+		reg = <0x71300000 0x3000>;
+	};
+
+	i2c2_clk: clock-controller@2150003c {
+		compatible = "fplinux,sc9820e-i2c2-clock";
+		reg = <0x2150003c 4>;
+		#clock-cells = <1>;
+		clock-names = "source";
+		clocks = <&ext26m>;
+		fplinux,ap-apb-syscon = <&ap_apb>;
+	};
+
+	i2c2: i2c@70700000 {
+		compatible = "sprd,sc9820e-i2c";
+		reg = <0x70700000 0x1000>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		clock-frequency = <400000>;
+		clock-names = "i2c", "source", "enable";
+		clocks = <&i2c2_clk 0>, <&ext26m>, <&i2c2_clk 1>;
+		interrupts = <GIC_SPI 13 IRQ_TYPE_LEVEL_HIGH>;
+
+		status = "disabled";
+	};
+};

@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config GPIO_SPRD
+	tristate "Spreadtrum GPIO support"
+	depends on ARCH_SPRD || COMPILE_TEST
+	select GPIOLIB_IRQCHIP
+	help
+	  Say yes here to support Spreadtrum GPIO device.

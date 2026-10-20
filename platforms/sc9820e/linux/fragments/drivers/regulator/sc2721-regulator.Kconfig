@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config REGULATOR_SC2721
+	tristate "Spreadtrum SC2721 voltage regulators"
+	depends on ARCH_SC9820E && REGULATOR
+	depends on MFD_SC27XX_PMIC
+	select REGULATOR_SC27XX_CORE
+	help
+	  This driver reports the shared core voltage and controls the SD core,
+	  SD I/O, WIFIPA and CON regulators on the SC2721 PMIC. The shared core
+	  regulator has no voltage or power setters.
+	  SD and connectivity consumers select their supplies in Device Tree.

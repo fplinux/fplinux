@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: GPL-2.0-only
+#include <dt-bindings/gpio/gpio.h>
+
+/* Digital PCM leaves the external amplifiers in reset. */
+&ap_gpio {
+
+	speaker-amplifier-disable {
+		gpio-hog;
+		gpios = <53 GPIO_ACTIVE_HIGH>;
+		line-name = "speaker-amplifier-reset";
+		output-low;
+	};
+
+	receiver-amplifier-disable-hog {
+		gpio-hog;
+		gpios = <55 GPIO_ACTIVE_HIGH>;
+		line-name = "receiver-amplifier-reset";
+		output-low;
+	};
+};
+
+&pmic {
+	audio-capture@700 {
+		compatible = "fplinux,qin1splus-capture";
+		reg = <0x700>;
+		interrupt-parent = <&pmic>;
+		interrupts = <6 IRQ_TYPE_LEVEL_HIGH>;
+		sprd,aon-syscon = <&aon_apb>;
+		sprd,clock-stable = <&capture_stable>;
+		sprd,digital-codec = <&capture_aud>;
+		sprd,g6-syscon = <&capture_g6>;
+		sprd,pmu-syscon = <&capture_pmu>;
+		sprd,vbc = <&capture_vbc>;
+	};
+};

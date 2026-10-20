@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: GPL-2.0-only
+#include <dt-bindings/gpio/gpio.h>
+
+&ap_gpio {
+	/delete-node/ speaker-amplifier-disable;
+};
+
+&i2c2 {
+	status = "okay";
+
+	speaker_amplifier: amplifier@59 {
+		compatible = "awinic,aw87339";
+		reg = <0x59>;
+		reset-gpios = <&ap_gpio 53 GPIO_ACTIVE_LOW>;
+	};
+};
+
+&pmic {
+	audio-capture@700 {
+		fplinux,speaker-amplifier = <&speaker_amplifier>;
+	};
+};

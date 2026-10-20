@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/mfd/fplinux,sc9820e-aon-atomic.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: SC9820E shared AON register bank
+
+maintainers:
+  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+
+description: |
+  Shared AON control registers and their atomic set and clear aliases.
+  Clock, GPIO, keypad and microphone capture consumers access this bank
+  through their AON syscon phandles.
+
+properties:
+  compatible:
+    items:
+      - const: fplinux,sc9820e-aon-atomic
+      - const: syscon
+
+  reg:
+    maxItems: 1
+
+required:
+  - compatible
+  - reg
+
+additionalProperties: false

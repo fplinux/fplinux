@@ -1,0 +1,9 @@
+/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause) */
+#ifndef FPLINUX_SC9820E_CPU_CLOCK_BINDINGS_H
+#define FPLINUX_SC9820E_CPU_CLOCK_BINDINGS_H
+
+#define SC9820E_CPU_CLK_CPU 0
+#define SC9820E_CPU_CLK_TWPLL 1
+#define SC9820E_CPU_CLK_COUNT 2
+
+#endif

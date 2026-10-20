@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config USB_MUSB_QIN1SPLUS_INHERITED
+	tristate "Qin1s+ inherited peripheral controller"
+	depends on ARCH_SC9820E && OF
+	depends on USB_MUSB_HDRC && USB_MUSB_GADGET
+	depends on MUSB_PIO_ONLY
+	help
+	  Use the Qin1s+ USB peripheral controller after a boot loader has
+	  left its clocks and PHY powered and has stopped all DMA before
+	  entering Linux. This glue uses PIO and does not initialize the PHY.
+	  Host and OTG modes are not supported by this glue.

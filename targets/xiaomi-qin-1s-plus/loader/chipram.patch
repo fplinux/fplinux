@@ -1,0 +1,41 @@
+diff --git a/common/sprd_string.c b/common/sprd_string.c
+index 8c6f023..c9a2f8e 100644
+--- a/common/sprd_string.c
++++ b/common/sprd_string.c
+@@ -24,7 +24,7 @@ void * sprd_memset(void * string,int fill,size_t cnt)
+ 		}
+ 	}
+ 	/* fill 8 bits*/
+-	st8 = (char *)fl;
++	st8 = (char *)stl;
+ 	while (cnt--)
+ 	{
+ 		*st8++ = fill;
+diff --git a/nand_fdl/fdl-1/src/fdl_command.c b/nand_fdl/fdl-1/src/fdl_command.c
+index 280c0d2..6be3211 100755
+--- a/nand_fdl/fdl-1/src/fdl_command.c
++++ b/nand_fdl/fdl-1/src/fdl_command.c
+@@ -158,6 +158,15 @@ int data_end(PACKET_T *packet, void *arg)
+ 
+ int data_exec(PACKET_T *packet, void *arg)
+ {
++#ifdef CONFIG_QIN_RAM_SML_ENTRY
++    __asm__ volatile(
++        "dsb sy\n\t"
++        "br %0"
++        :
++        : "r" ((unsigned long)CONFIG_QIN_RAM_SML_ENTRY)
++        : "memory");
++    __builtin_unreachable();
++#else
+ //    JumpToTarget(g_file.start_address);
+     typedef void(*entry)(void);
+ #if defined (CONFIG_WHALE) ||defined (CONFIG_WHALE2) || defined (CONFIG_X86)|| defined (CONFIG_SOC_SHARKLJ1) || defined (CONFIG_SOC_SHARKLE) || defined (CONFIG_SOC_SHARKL3) || defined(CONFIG_SOC_WHALEK)
+@@ -221,6 +230,7 @@ int data_exec(PACKET_T *packet, void *arg)
+     entry_func();
+ #endif
+     return 0;
++#endif
+ }
+ 
+ int set_baudrate(PACKET_T *packet, void *arg)

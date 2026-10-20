@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<!-- SPDX-License-Identifier: GPL-2.0-only -->
+<driconf>
+    <device driver="panfrost">
+        <application name="FPLinux">
+            <option name="pan_afbc" value="false" />
+        </application>
+    </device>
+</driconf>

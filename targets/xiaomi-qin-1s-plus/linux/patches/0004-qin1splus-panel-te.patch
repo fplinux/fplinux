@@ -1,0 +1,116 @@
+diff --git a/drivers/gpu/drm/tiny/panel-mipi-dbi.c b/drivers/gpu/drm/tiny/panel-mipi-dbi.c
+index c633d7e..586c59c 100644
+--- a/drivers/gpu/drm/tiny/panel-mipi-dbi.c
++++ b/drivers/gpu/drm/tiny/panel-mipi-dbi.c
+@@ -5,15 +5,19 @@
+  * Copyright 2022 Noralf Trønnes
+  */
+
++#include <linux/atomic.h>
+ #include <linux/backlight.h>
+ #include <linux/delay.h>
+ #include <linux/firmware.h>
+ #include <linux/gpio/consumer.h>
++#include <linux/interrupt.h>
++#include <linux/jiffies.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/property.h>
+ #include <linux/regulator/consumer.h>
+ #include <linux/spi/spi.h>
++#include <linux/wait.h>
+
+ #include <drm/clients/drm_client_setup.h>
+ #include <drm/drm_atomic.h>
+@@ -256,8 +260,13 @@ struct panel_mipi_dbi_device {
+ 	/* Atomic commits for the single CRTC serialize these states. */
+ 	bool initialized;
+ 	bool backlight_enabled;
++	struct gpio_desc *te;
++	atomic_t te_sequence;
++	wait_queue_head_t te_wait;
+ };
+
++#define QIN_PANEL_TE_TIMEOUT_MS 500
++
+ static struct panel_mipi_dbi_device *to_panel_mipi_dbi_device(struct drm_device *dev)
+ {
+ 	return container_of(drm_to_mipi_dbi_dev(dev), struct panel_mipi_dbi_device, dbidev);
+@@ -271,6 +280,55 @@ static const struct drm_plane_helper_funcs panel_mipi_dbi_plane_helper_funcs = {
+ 	DRM_MIPI_DBI_PLANE_HELPER_FUNCS,
+ };
+
++static irqreturn_t qin_panel_te_irq(int irq, void *data)
++{
++	struct panel_mipi_dbi_device *panel = data;
++
++	atomic_inc(&panel->te_sequence);
++	wake_up(&panel->te_wait);
++	return IRQ_HANDLED;
++}
++
++static int qin_panel_init_te(struct panel_mipi_dbi_device *panel,
++			     struct device *dev)
++{
++	int irq, ret;
++
++	panel->te = devm_gpiod_get_optional(dev, "te", GPIOD_IN);
++	if (IS_ERR(panel->te))
++		return dev_err_probe(dev, PTR_ERR(panel->te),
++				     "Failed to get display TE GPIO\n");
++	if (!panel->te)
++		return 0;
++	irq = gpiod_to_irq(panel->te);
++	if (irq < 0)
++		return dev_err_probe(dev, irq,
++				     "Failed to get display TE IRQ\n");
++	atomic_set(&panel->te_sequence, 0);
++	init_waitqueue_head(&panel->te_wait);
++	ret = devm_request_irq(dev, irq, qin_panel_te_irq, IRQF_TRIGGER_RISING,
++			       "qin-panel-te", panel);
++	if (ret)
++		return dev_err_probe(dev, ret,
++				     "Failed to request display TE IRQ\n");
++	return 0;
++}
++
++static int qin_panel_wait_te(struct panel_mipi_dbi_device *panel)
++{
++	int sequence;
++
++	if (!panel->te)
++		return 0;
++	/* Idle edges must not satisfy the next transfer's wait. */
++	sequence = atomic_read(&panel->te_sequence);
++	if (!wait_event_timeout(panel->te_wait,
++				atomic_read(&panel->te_sequence) != sequence,
++				msecs_to_jiffies(QIN_PANEL_TE_TIMEOUT_MS)))
++		return -ETIMEDOUT;
++	return 0;
++}
++
+ static int qin_panel_flush(struct panel_mipi_dbi_device *panel,
+ 			   struct drm_shadow_plane_state *shadow,
+ 			   struct drm_rect *rect)
+@@ -301,6 +359,9 @@ static int qin_panel_flush(struct panel_mipi_dbi_device *panel,
+ 			       ys & 0xff, ye >> 8, ye & 0xff);
+ 	if (ret)
+ 		return ret;
++	ret = qin_panel_wait_te(panel);
++	if (ret)
++		return ret;
+
+ 	return mipi_dbi_command_buf(dbi, MIPI_DCS_WRITE_MEMORY_START,
+ 				    (u8 *)dbidev->tx_buf, len);
+@@ -654,6 +715,11 @@ static int panel_mipi_dbi_spi_probe(struct spi_device *spi)
+ 	    (gpiod_is_active_low(dc) || !gpiod_is_active_low(dbi->reset)))
+ 		return dev_err_probe(dev, -EINVAL,
+ 				     "Invalid display GPIO polarity\n");
++	if (panel_mipi_dbi->is_qin) {
++		ret = qin_panel_init_te(panel_mipi_dbi, dev);
++		if (ret)
++			return ret;
++	}
+
+ 	ret = mipi_dbi_spi_init(spi, dbi, dc);
+ 	if (ret)

@@ -1,0 +1,2 @@
+# SPDX-License-Identifier: GPL-2.0-only
+source "arch/arm/mach-sc9820e/Kconfig"

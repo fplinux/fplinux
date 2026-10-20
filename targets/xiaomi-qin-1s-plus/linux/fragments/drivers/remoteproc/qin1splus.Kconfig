@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config QIN1SPLUS_BTWF
+	bool "Qin 1s+ manual integrated BTWF firmware boot"
+	depends on ARM && ARCH_SC9820E
+	depends on OF && REMOTEPROC && NVMEM && REGULATOR
+	depends on QIN1SPLUS_SIPC && MFD_SYSCON
+	help
+	  Provide explicit remoteproc start/stop for the Qin 1s+ integrated
+	  BTWF core. Firmware is never booted automatically.
+	  Admit board firmware and calibration before releasing the core.
+	  Manage power and transport resources for each requested run.
+
+config QIN1SPLUS_SIPC
+	bool "Qin 1s+ WCN shared-buffer transport"
+	depends on ARM && ARCH_SC9820E && OF
+	depends on MAILBOX && SPRD_MBOX
+	help
+	  Provide shared-memory byte rings and mailbox notifications for WCN.
+	  The remote processor driver prepares and quiesces the transport.
+	  Bluetooth clients borrow a single stream while the core is running.
+	  This option does not start firmware or enable Bluetooth automatically.

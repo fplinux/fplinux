@@ -1,0 +1,142 @@
+// SPDX-License-Identifier: GPL-2.0-only
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/input/fplinux-keypad.h>
+
+&keypad {
+	fplinux,debounce-count = <15>;
+	keypad,num-columns = <3>;
+	keypad,num-rows = <3>;
+	linux,keymap = <
+		MATRIX_KEY(0, 0, FPLINUX_KEY_CALL)
+		MATRIX_KEY(0, 1, FPLINUX_KEY_RIGHT)
+		MATRIX_KEY(0, 2, FPLINUX_KEY_LEFT)
+		MATRIX_KEY(1, 0, FPLINUX_KEY_UP)
+		MATRIX_KEY(1, 1, FPLINUX_KEY_OK)
+		MATRIX_KEY(1, 2, FPLINUX_KEY_DOWN)
+		MATRIX_KEY(2, 0, FPLINUX_KEY_SOFT_LEFT)
+		MATRIX_KEY(2, 1, FPLINUX_KEY_4)
+		MATRIX_KEY(2, 2, FPLINUX_KEY_6)
+	>;
+
+	status = "okay";
+};
+
+/ {
+	gpio-keys {
+		compatible = "xiaomi,qin1s-plus-gpio-keys";
+		label = "qin1splus-gpio-keys";
+
+		key-0 {
+			debounce-interval = <15>;
+			gpios = <&ap_gpio 145 GPIO_ACTIVE_LOW>;
+			linux,code = <FPLINUX_KEY_0>;
+		};
+
+		key-1 {
+			debounce-interval = <15>;
+			gpios = <&ap_gpio 45 GPIO_ACTIVE_LOW>;
+			linux,code = <FPLINUX_KEY_1>;
+		};
+
+		key-2 {
+			debounce-interval = <15>;
+			gpios = <&ap_gpio 48 GPIO_ACTIVE_LOW>;
+			linux,code = <FPLINUX_KEY_2>;
+		};
+
+		key-3 {
+			debounce-interval = <15>;
+			gpios = <&ap_gpio 144 GPIO_ACTIVE_LOW>;
+			linux,code = <FPLINUX_KEY_3>;
+		};
+
+		key-5 {
+			debounce-interval = <15>;
+			gpios = <&ap_gpio 49 GPIO_ACTIVE_LOW>;
+			linux,code = <FPLINUX_KEY_5>;
+		};
+
+		key-7 {
+			debounce-interval = <15>;
+			gpios = <&ap_gpio 44 GPIO_ACTIVE_LOW>;
+			linux,code = <FPLINUX_KEY_7>;
+		};
+
+		key-8 {
+			debounce-interval = <15>;
+			gpios = <&ap_gpio 63 GPIO_ACTIVE_LOW>;
+			linux,code = <FPLINUX_KEY_8>;
+		};
+
+		key-9 {
+			debounce-interval = <15>;
+			gpios = <&ap_gpio 46 GPIO_ACTIVE_LOW>;
+			linux,code = <FPLINUX_KEY_9>;
+		};
+
+		key-hash {
+			debounce-interval = <15>;
+			gpios = <&ap_gpio 43 GPIO_ACTIVE_LOW>;
+			linux,code = <FPLINUX_KEY_POUND>;
+		};
+
+		key-star {
+			debounce-interval = <15>;
+			gpios = <&ap_gpio 40 GPIO_ACTIVE_LOW>;
+			linux,code = <FPLINUX_KEY_STAR>;
+		};
+
+		key-back {
+			debounce-interval = <5>;
+			gpios = <&pmic_eic 10 GPIO_ACTIVE_HIGH>;
+			linux,code = <FPLINUX_KEY_SOFT_RIGHT>;
+		};
+
+		key-power {
+			debounce-interval = <5>;
+			gpios = <&pmic_eic 1 GPIO_ACTIVE_LOW>;
+			linux,code = <FPLINUX_KEY_POWER>;
+		};
+	};
+};
+
+&pmic_regulators {
+	regulators {
+		vddsdcore: ldo@11 {
+			reg = <11>;
+			regulator-max-microvolt = <3000000>;
+			regulator-min-microvolt = <3000000>;
+			regulator-name = "vddsdcore";
+		};
+
+		vddsdio: ldo@12 {
+			reg = <12>;
+			regulator-max-microvolt = <3000000>;
+			regulator-min-microvolt = <3000000>;
+			regulator-name = "vddsdio";
+		};
+	};
+};
+
+&sdio0 {
+	bus-width = <4>;
+	cd-gpios = <&ap_gpio 78 GPIO_ACTIVE_LOW>;
+	disable-wp;
+	max-frequency = <13000000>;
+	no-1-8-v;
+	no-mmc;
+	no-sdio;
+	vmmc-supply = <&vddsdcore>;
+	voltage-ranges = <3000 3000>;
+	vqmmc-supply = <&vddsdio>;
+
+	status = "okay";
+};
+
+&usb {
+	compatible = "fplinux,qin1splus-musb-inherited";
+	dr_mode = "peripheral";
+
+	status = "okay";
+};

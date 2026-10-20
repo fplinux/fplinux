@@ -1,0 +1,121 @@
+diff --git a/drivers/iio/adc/sc27xx_adc.c b/drivers/iio/adc/sc27xx_adc.c
+--- a/drivers/iio/adc/sc27xx_adc.c
++++ b/drivers/iio/adc/sc27xx_adc.c
+@@ -25,6 +25,8 @@
+ #define SC27XX_CLK_ADC_EN		BIT(5)
+ #define SC27XX_CLK_ADC_CLK_EN		BIT(6)
+ #define SC27XX_CLK_ADC_MASK (SC27XX_CLK_ADC_EN | SC27XX_CLK_ADC_CLK_EN)
++#define SC2721_XTL_WAIT_CTRL 0xe9c
++#define SC2721_XTL_EN BIT(8)
+ 
+ /* ADC controller registers definition */
+ #define SC27XX_ADC_CTL			0x0
+@@ -138,6 +140,7 @@
+ 	void (*init_scale)(struct sc27xx_adc_data *data);
+ 	int (*get_ratio)(int channel, int scale);
+ 	bool transient_power;
++	bool polling_only;
+ 	bool set_volref;
+ };
+ 
+@@ -763,6 +766,11 @@
+ 	int cleanup_ret, ret, ret_volref;
+ 	u32 tmp, value = 0, status;
+ 
++	/* DP and DM require a switched reference supply. */
++	if (data->var_data->set_volref && !data->volref &&
++	    (channel == 30 || channel == 31))
++		return -EOPNOTSUPP;
++
+ 	if (data->var_data->transient_power && data->faulted)
+ 		return -EIO;
+ 
+@@ -1135,6 +1143,20 @@
+ {
+ 	int ret;
+ 
++	if (data->var_data->polling_only) {
++		ret = regmap_clear_bits(data->regmap,
++					sc27xx_adc_reg(data, SC27XX_ADC_INT_EN),
++					SC27XX_ADC_IRQ_EN);
++		if (ret)
++			return ret;
++
++		ret = regmap_write(data->regmap,
++				   sc27xx_adc_reg(data, SC27XX_ADC_INT_CLR),
++				   SC27XX_ADC_IRQ_CLR);
++		if (ret)
++			return ret;
++	}
++
+ 	ret = regmap_set_bits(data->regmap, data->var_data->module_en,
+ 			      SC27XX_MODULE_ADC_EN);
+ 	if (ret)
+@@ -1146,6 +1168,14 @@
+ 	if (ret)
+ 		goto disable_adc;
+ 
++	if (data->var_data->polling_only) {
++		/* Other analog users share this persistent XTL request. */
++		ret = regmap_set_bits(data->regmap, SC2721_XTL_WAIT_CTRL,
++				      SC2721_XTL_EN);
++		if (ret)
++			goto disable_clk;
++	}
++
+ 	/* ADC channel scales' calibration from nvmem device */
+ 	ret = sc27xx_adc_calibrate(data);
+ 	if (ret)
+@@ -1208,6 +1238,7 @@
+ 	.sscale_cal = &sc2731_small_scale_graph_calib,
+ 	.init_scale = sc2731_adc_scale_init,
+ 	.get_ratio = sc2721_adc_get_ratio,
++	.polling_only = true,
+ 	.set_volref = true,
+ };
+ 
+@@ -1262,9 +1293,11 @@
+ 	if (ret)
+ 		return dev_err_probe(dev, ret, "failed to get ADC base address\n");
+ 
+-	sc27xx_data->irq = platform_get_irq(pdev, 0);
+-	if (sc27xx_data->irq < 0)
+-		return sc27xx_data->irq;
++	if (!pdata->polling_only) {
++		sc27xx_data->irq = platform_get_irq(pdev, 0);
++		if (sc27xx_data->irq < 0)
++			return sc27xx_data->irq;
++	}
+ 
+ 	ret = of_hwspin_lock_get_id(np, 0);
+ 	if (ret < 0)
+@@ -1284,10 +1317,14 @@
+ 	}
+ 
+ 	if (pdata->set_volref) {
+-		sc27xx_data->volref = devm_regulator_get(dev, "vref");
+-		if (IS_ERR(sc27xx_data->volref))
+-			return dev_err_probe(dev, PTR_ERR(sc27xx_data->volref),
+-					     "failed to get ADC volref\n");
++		sc27xx_data->volref = devm_regulator_get_optional(dev, "vref");
++		if (IS_ERR(sc27xx_data->volref)) {
++			ret = PTR_ERR(sc27xx_data->volref);
++			if (ret != -ENODEV)
++				return dev_err_probe(
++					dev, ret, "failed to get ADC volref\n");
++			sc27xx_data->volref = NULL;
++		}
+ 	}
+ 
+ 	sc27xx_data->var_data->init_scale(sc27xx_data);
+diff --git a/drivers/nvmem/sc27xx-efuse.c b/drivers/nvmem/sc27xx-efuse.c
+--- a/drivers/nvmem/sc27xx-efuse.c
++++ b/drivers/nvmem/sc27xx-efuse.c
+@@ -462,6 +462,7 @@
+ 
+ static const struct of_device_id sc27xx_efuse_of_match[] = {
+ 	{ .compatible = "sprd,sc2720-efuse", .data = &sc2720_edata },
++	{ .compatible = "sprd,sc2721-efuse", .data = &sc2731_edata },
+ 	{ .compatible = "sprd,sc2731-efuse", .data = &sc2731_edata },
+ 	{ .compatible = "sprd,sc2730-efuse", .data = &sc2730_edata },
+ 	{}

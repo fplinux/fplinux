@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/ {
+	gpu_clk: clock-controller@60100004 {
+		compatible = "fplinux,sc9820e-gpu-clock";
+		reg = <0x60100004 4>, <0x60100014 4>, <0x60100000 4>;
+		#clock-cells = <0>;
+		assigned-clock-rates = <512000000>;
+		assigned-clocks = <&gpu_clk>;
+		clock-names = "source";
+		clocks = <&cpu_clk SC9820E_CPU_CLK_TWPLL>;
+		core-supply = <&vddcore>;
+		reg-names = "clock", "qos", "reset";
+		fplinux,aon-syscon = <&aon_apb>;
+		fplinux,expected-core-microvolt = <900000>;
+		fplinux,pmu-syscon = <&capture_pmu>;
+	};
+
+	gpu: gpu@60000000 {
+		compatible = "sprd,sc9820e-mali", "arm,mali-t820";
+		reg = <0x60000000 0x4000>;
+		clock-names = "core";
+		clocks = <&gpu_clk>;
+		interrupt-names = "job", "mmu", "gpu";
+		interrupts = <GIC_SPI 39 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 39 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 39 IRQ_TYPE_LEVEL_HIGH>;
+		mali-supply = <&vddcore>;
+	};
+};
+
+&pmic_regulators {
+	regulators {
+		vddcore: dcdc@1 {
+			reg = <1>;
+			regulator-always-on;
+			regulator-name = "vddcore";
+		};
+	};
+};

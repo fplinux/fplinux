@@ -1,0 +1,174 @@
+diff --git a/drivers/spi/spi-sprd-adi.c b/drivers/spi/spi-sprd-adi.c
+index 3caa38c..185d085 100644
+--- a/drivers/spi/spi-sprd-adi.c
++++ b/drivers/spi/spi-sprd-adi.c
+@@ -10,6 +10,7 @@
+ #include <linux/init.h>
+ #include <linux/io.h>
+ #include <linux/iopoll.h>
++#include <linux/irqflags.h>
+ #include <linux/kernel.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+@@ -114,6 +115,16 @@
+ #define PMIC_CLK_EN			0xc18
+ #define PMIC_WDG_BASE			0x80
+
++#define SC2721_CHIP_ID_HIGH 0xc04
++#define SC2721_CHIP_ID 0x2721
++#define SC2721_PWR_WR_PROT_VALUE 0xefc
++#define SC2721_PWR_WR_PROT_KEY 0x6e7f
++#define SC2721_PWR_WR_PROT BIT(15)
++#define SC2721_POWER_PD_HW 0xc20
++#define SC2721_PWR_OFF_SEQ_EN BIT(0)
++#define SC2721_POWER_HWLOCK_TIMEOUT_MS 3
++#define SC2721_POWER_UNLOCK_TIMEOUT_US 3000
++
+ /* Definition of PMIC reset status register */
+ #define HWRST_STATUS_SECURITY		0x02
+ #define HWRST_STATUS_RECOVERY		0x20
+@@ -287,23 +298,12 @@ static int sprd_adi_read_check_r3p0(u32 val, u32 physical_addr)
+ 	return sprd_adi_read_check(val, (physical_addr & 0xffff) >> 2);
+ }
+
+-static int sprd_adi_read(struct sprd_adi *sadi, u32 reg, u32 *read_val)
++static int sprd_adi_read_locked(struct sprd_adi *sadi, u32 reg, u32 *read_val)
+ {
+ 	int read_timeout = ADI_READ_TIMEOUT;
+-	unsigned long flags;
+ 	u32 val, command;
+ 	int ret = 0;
+
+-	if (sadi->hwlock) {
+-		ret = hwspin_lock_timeout_irqsave(sadi->hwlock,
+-						  ADI_HWSPINLOCK_TIMEOUT,
+-						  &flags);
+-		if (ret) {
+-			dev_err(sadi->dev, "get the hw lock failed\n");
+-			return ret;
+-		}
+-	}
+-
+ 	ret = sprd_adi_check_addr(sadi, reg);
+ 	if (ret)
+ 		goto out;
+@@ -350,14 +350,11 @@ static int sprd_adi_read(struct sprd_adi *sadi, u32 reg, u32 *read_val)
+ 	*read_val = val & RD_VALUE_MASK;
+
+ out:
+-	if (sadi->hwlock)
+-		hwspin_unlock_irqrestore(sadi->hwlock, &flags);
+ 	return ret;
+ }
+
+-static int sprd_adi_write(struct sprd_adi *sadi, u32 reg, u32 val)
++static int sprd_adi_read(struct sprd_adi *sadi, u32 reg, u32 *read_val)
+ {
+-	u32 timeout = ADI_FIFO_DRAIN_TIMEOUT;
+ 	unsigned long flags;
+ 	int ret;
+
+@@ -371,6 +368,17 @@ static int sprd_adi_write(struct sprd_adi *sadi, u32 reg, u32 val)
+ 		}
+ 	}
+
++	ret = sprd_adi_read_locked(sadi, reg, read_val);
++	if (sadi->hwlock)
++		hwspin_unlock_irqrestore(sadi->hwlock, &flags);
++	return ret;
++}
++
++static int sprd_adi_write_locked(struct sprd_adi *sadi, u32 reg, u32 val)
++{
++	u32 timeout = ADI_FIFO_DRAIN_TIMEOUT;
++	int ret;
++
+ 	ret = sprd_adi_check_addr(sadi, reg);
+ 	if (ret)
+ 		goto out;
+@@ -399,6 +407,24 @@ static int sprd_adi_write(struct sprd_adi *sadi, u32 reg, u32 val)
+ 	}
+
+ out:
++	return ret;
++}
++
++static int sprd_adi_write(struct sprd_adi *sadi, u32 reg, u32 val)
++{
++	unsigned long flags;
++	int ret;
++
++	if (sadi->hwlock) {
++		ret = hwspin_lock_timeout_irqsave(
++			sadi->hwlock, ADI_HWSPINLOCK_TIMEOUT, &flags);
++		if (ret) {
++			dev_err(sadi->dev, "get the hw lock failed\n");
++			return ret;
++		}
++	}
++
++	ret = sprd_adi_write_locked(sadi, reg, val);
+ 	if (sadi->hwlock)
+ 		hwspin_unlock_irqrestore(sadi->hwlock, &flags);
+ 	return ret;
+@@ -477,6 +503,60 @@ int sprd_adi_sc2720_power_off(struct spi_device *spi)
+ }
+ EXPORT_SYMBOL_GPL(sprd_adi_sc2720_power_off);
+
++int sprd_adi_sc2721_power_off(struct spi_device *spi)
++{
++	struct sprd_adi *sadi;
++	u32 value;
++	int read_ret;
++	int ret;
++
++	if (spi->controller->transfer_one != sprd_adi_transfer_one ||
++	    !irqs_disabled())
++		return -EOPNOTSUPP;
++	if (!of_device_is_compatible(spi->dev.of_node, "sprd,sc2721"))
++		return -ENODEV;
++	sadi = spi_controller_get_devdata(spi->controller);
++	if (!sadi->data->r3p0 || !sadi->hwlock)
++		return -EOPNOTSUPP;
++
++	/* Timer IRQs have stopped; this lock timeout must not use jiffies. */
++	ret = hwspin_lock_timeout_in_atomic(sadi->hwlock,
++					    SC2721_POWER_HWLOCK_TIMEOUT_MS);
++	if (ret)
++		return ret;
++
++	ret = sprd_adi_read_locked(sadi, SC2721_CHIP_ID_HIGH, &value);
++	if (ret)
++		goto unlock;
++	if (value != SC2721_CHIP_ID) {
++		ret = -ENODEV;
++		goto unlock;
++	}
++	ret = sprd_adi_write_locked(sadi, SC2721_PWR_WR_PROT_VALUE,
++				    SC2721_PWR_WR_PROT_KEY);
++	if (ret)
++		goto unlock;
++
++	ret = read_poll_timeout_atomic(sprd_adi_read_locked, read_ret,
++				       read_ret || (value & SC2721_PWR_WR_PROT),
++				       1, SC2721_POWER_UNLOCK_TIMEOUT_US, false,
++				       sadi, SC2721_PWR_WR_PROT_VALUE, &value);
++	if (!ret)
++		ret = read_ret;
++	if (ret)
++		goto unlock;
++
++	ret = sprd_adi_write_locked(sadi, SC2721_POWER_PD_HW,
++				    SC2721_PWR_OFF_SEQ_EN);
++	if (!ret)
++		ret = sprd_adi_drain_fifo(sadi);
++
++unlock:
++	hwspin_unlock_in_atomic(sadi->hwlock);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(sprd_adi_sc2721_power_off);
++
+ static void sprd_adi_set_wdt_rst_mode(void *p)
+ {
+ #if IS_ENABLED(CONFIG_SPRD_WATCHDOG)

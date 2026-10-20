@@ -1,0 +1,61 @@
+// SPDX-License-Identifier: GPL-2.0-only
+#include <dt-bindings/leds/common.h>
+
+/ {
+	board_thermal: thermal-sensor {
+		compatible = "generic-adc-thermal";
+		#thermal-sensor-cells = <0>;
+		io-channel-names = "sensor-channel";
+		io-channels = <&pmic_adc 1>;
+		temperature-lookup-table = <
+			(-39700) 1131
+			(-29800) 1110
+			(-19500) 1074
+			(-4800) 983
+			10100 838
+			24800 654
+			44900 413
+			54900 316
+			64900 238
+			74900 178
+			84900 133
+			94900 100
+			104900 75
+			114900 57
+			124900 43
+		>;
+	};
+
+	thermal-zones {
+		board-thermal {
+			polling-delay = <0>;
+			polling-delay-passive = <0>;
+			thermal-sensors = <&board_thermal>;
+		};
+	};
+};
+
+&pmic_rtc {
+	status = "okay";
+};
+
+&pmic_efuse {
+	status = "okay";
+};
+
+&pmic_adc {
+	status = "okay";
+};
+
+&keypad_backlight {
+	function = LED_FUNCTION_KBD_BACKLIGHT;
+	linux,default-trigger = "input-events";
+
+	status = "okay";
+};
+
+&vibrator {
+	sprd,voltage-code = <0xb4>;
+
+	status = "okay";
+};

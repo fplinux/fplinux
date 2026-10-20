@@ -1,0 +1,59 @@
+diff --git a/drivers/i2c/busses/i2c-sprd.c b/drivers/i2c/busses/i2c-sprd.c
+index 7b321a9..df3f45b 100644
+--- a/drivers/i2c/busses/i2c-sprd.c
++++ b/drivers/i2c/busses/i2c-sprd.c
+@@ -445,9 +445,15 @@ static irqreturn_t sprd_i2c_isr(int irq, void *dev_id)
+ static int sprd_i2c_clk_init(struct sprd_i2c *i2c_dev)
+ {
+ 	struct clk *clk_i2c, *clk_parent;
++	bool oscillator_only = of_device_is_compatible(i2c_dev->dev->of_node,
++						       "sprd,sc9820e-i2c");
+
+ 	clk_i2c = devm_clk_get(i2c_dev->dev, "i2c");
+ 	if (IS_ERR(clk_i2c)) {
++		if (oscillator_only)
++			return dev_err_probe(
++				i2c_dev->dev, PTR_ERR(clk_i2c),
++				"failed to get I2C source clock\n");
+ 		dev_warn(i2c_dev->dev, "i2c%d can't get the i2c clock\n",
+ 			 i2c_dev->adap.nr);
+ 		clk_i2c = NULL;
+@@ -455,12 +461,23 @@ static int sprd_i2c_clk_init(struct sprd_i2c *i2c_dev)
+
+ 	clk_parent = devm_clk_get(i2c_dev->dev, "source");
+ 	if (IS_ERR(clk_parent)) {
++		if (oscillator_only)
++			return dev_err_probe(i2c_dev->dev, PTR_ERR(clk_parent),
++					     "failed to get I2C oscillator\n");
+ 		dev_warn(i2c_dev->dev, "i2c%d can't get the source clock\n",
+ 			 i2c_dev->adap.nr);
+ 		clk_parent = NULL;
+ 	}
+
+-	if (clk_set_parent(clk_i2c, clk_parent))
++	if (oscillator_only) {
++		/* The read-only source owner rejects inherited PLL/divider modes. */
++		if (clk_get_rate(clk_parent) != 26000000 ||
++		    clk_get_rate(clk_i2c) != 26000000)
++			return dev_err_probe(
++				i2c_dev->dev, -EINVAL,
++				"I2C requires an undivided 26 MHz oscillator\n");
++		i2c_dev->src_clk = 26000000;
++	} else if (clk_set_parent(clk_i2c, clk_parent))
+ 		i2c_dev->src_clk = clk_get_rate(clk_i2c);
+ 	else
+ 		i2c_dev->src_clk = 26000000;
+@@ -633,7 +650,12 @@ static const struct dev_pm_ops sprd_i2c_pm_ops = {
+ };
+
+ static const struct of_device_id sprd_i2c_of_match[] = {
+-	{ .compatible = "sprd,sc9860-i2c", },
++	{
++		.compatible = "sprd,sc9820e-i2c",
++	},
++	{
++		.compatible = "sprd,sc9860-i2c",
++	},
+ 	{},
+ };
+ MODULE_DEVICE_TABLE(of, sprd_i2c_of_match);

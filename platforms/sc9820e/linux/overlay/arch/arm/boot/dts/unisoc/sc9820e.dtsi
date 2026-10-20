@@ -1,0 +1,295 @@
+// SPDX-License-Identifier: GPL-2.0-only
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/clock/fplinux,sc9820e-cpu-clock.h>
+
+/ {
+	#address-cells = <1>;
+	#size-cells = <1>;
+	interrupt-parent = <&gic>;
+
+	aliases {
+		spi0 = &adi;
+		spi1 = &hs_spi;
+	};
+
+	aon_apb: syscon@402e0000 {
+		compatible = "fplinux,sc9820e-aon-atomic", "syscon";
+		reg = <0x402e0000 0x3100>;
+	};
+
+	ap_ahb: syscon@20e00000 {
+		compatible = "fplinux,sc9820e-ap-ahb", "syscon";
+		reg = <0x20e00000 0x3000>;
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		cpu@0 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a53";
+			reg = <0>;
+			enable-method = "psci";
+		};
+
+		cpu@1 {
+			device_type = "cpu";
+			compatible = "arm,cortex-a53";
+			reg = <1>;
+			enable-method = "psci";
+		};
+	};
+
+	gic: interrupt-controller@12001000 {
+		compatible = "arm,gic-400";
+		reg = <0x12001000 0x1000>,
+		      <0x12002000 0x2000>,
+		      <0x12004000 0x2000>,
+		      <0x12006000 0x2000>;
+		#address-cells = <0>;
+		#interrupt-cells = <3>;
+		interrupt-controller;
+		interrupts = <GIC_PPI 9 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_HIGH)>;
+	};
+
+	psci {
+		compatible = "arm,psci-1.0";
+		method = "smc";
+	};
+
+	timer {
+		compatible = "arm,armv7-timer";
+		clock-frequency = <26000000>;
+		interrupts = <GIC_PPI 14 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>,
+			     <GIC_PPI 10 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_LOW)>;
+	};
+
+	ext26m: clock-26000000 {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <26000000>;
+	};
+
+	ext1m: clock-1000000 {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <1000000>;
+	};
+
+	cpu_clk: clock-controller@403f0000 {
+		compatible = "fplinux,sc9820e-cpu-clock";
+		reg = <0x403f0000 8>, <0x403c000c 8>;
+		#clock-cells = <1>;
+		clock-names = "source";
+		clocks = <&ext26m>;
+		reg-names = "mpll", "twpll";
+		fplinux,ap-ahb-syscon = <&ap_ahb>;
+	};
+
+	twpll128m: clock-twpll-128m {
+		compatible = "fixed-factor-clock";
+		#clock-cells = <0>;
+		clock-div = <12>;
+		clock-mult = <1>;
+		clocks = <&cpu_clk SC9820E_CPU_CLK_TWPLL>;
+	};
+
+	twpll153m6: clock-twpll-153m6 {
+		compatible = "fixed-factor-clock";
+		#clock-cells = <0>;
+		clock-div = <10>;
+		clock-mult = <1>;
+		clocks = <&cpu_clk SC9820E_CPU_CLK_TWPLL>;
+	};
+
+	twpll192m: clock-twpll-192m {
+		compatible = "fixed-factor-clock";
+		#clock-cells = <0>;
+		clock-div = <8>;
+		clock-mult = <1>;
+		clocks = <&cpu_clk SC9820E_CPU_CLK_TWPLL>;
+	};
+
+	aon_hwspinlock_clk: clock-hwspinlock {
+		compatible = "fplinux,sc9820e-aon-gate";
+		#clock-cells = <0>;
+		fplinux,aon-syscon = <&aon_apb>;
+	};
+
+	aon_efuse_clk: clock-efuse-enable {
+		compatible = "fplinux,sc9820e-efuse-gate";
+		#clock-cells = <0>;
+		fplinux,aon-syscon = <&aon_apb>;
+	};
+
+	aon_mailbox_clk: clock-mailbox-enable {
+		compatible = "fplinux,sc9820e-mailbox-gate";
+		#clock-cells = <0>;
+		fplinux,aon-syscon = <&aon_apb>;
+	};
+
+	hwspinlock: hwspinlock@33000000 {
+		compatible = "sprd,hwspinlock-r3p0";
+		reg = <0x33000000 0x1000>;
+		#hwlock-cells = <1>;
+		clock-names = "enable";
+		clocks = <&aon_hwspinlock_clk>;
+	};
+
+	ap_efuse: efuse@40240000 {
+		compatible = "sprd,sc9820e-efuse";
+		reg = <0x40240000 0x10000>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+		clock-names = "enable";
+		clocks = <&aon_efuse_clk>;
+		hwlocks = <&hwspinlock 8>;
+		read-only;
+
+		status = "disabled";
+	};
+
+	wcn_mailbox: mailbox@400a0000 {
+		compatible = "sprd,sc9820e-mailbox";
+		reg = <0x400a0000 0x8000>, <0x400a8000 0x8000>;
+		#mbox-cells = <1>;
+		clock-names = "enable";
+		clocks = <&aon_mailbox_clk>;
+		interrupt-names = "inbox", "outbox";
+		interrupts = <GIC_SPI 68 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 69 IRQ_TYPE_LEVEL_HIGH>;
+
+		status = "disabled";
+	};
+
+	ap_dma_clk: clock-ap-dma-enable {
+		compatible = "fplinux,sc9820e-ap-dma-gate";
+		#clock-cells = <0>;
+		fplinux,ap-ahb-syscon = <&ap_ahb>;
+	};
+
+	ap_dma: dma-controller@20100000 {
+		compatible = "sprd,sc9820e-dma";
+		reg = <0x20100000 0x4000>;
+		#dma-cells = <1>;
+		clock-names = "enable";
+		clocks = <&ap_dma_clk>;
+		dma-channels = <28>;
+		interrupts = <GIC_SPI 50 IRQ_TYPE_LEVEL_HIGH>;
+	};
+
+	adi: spi@40380000 {
+		compatible = "sprd,r3p0-adi";
+		reg = <0x40380000 0x10000>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		hwlocks = <&hwspinlock 0>;
+		sprd,hw-channels = <30 0x8c20>;
+	};
+
+	aon_hs_spi_clk: clock-hs-spi-enable {
+		compatible = "fplinux,sc9820e-hs-spi-gate";
+		#clock-cells = <0>;
+		fplinux,aon-syscon = <&aon_apb>;
+	};
+
+	hs_spi_clk: clock-controller@21500050 {
+		compatible = "fplinux,sc9820e-hs-spi-clock";
+		reg = <0x21500050 4>;
+		#clock-cells = <0>;
+		clock-names = "ext26m", "twpll128m", "twpll153m6", "twpll192m";
+		clocks = <&ext26m>, <&twpll128m>, <&twpll153m6>, <&twpll192m>;
+	};
+
+	hs_spi: spi@70b00000 {
+		compatible = "sprd,spi-r4p0";
+		reg = <0x70b00000 0x1000>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		clock-names = "enable", "spi", "source";
+		clocks = <&aon_hs_spi_clk>, <&hs_spi_clk>, <&ext26m>;
+		interrupts = <GIC_SPI 8 IRQ_TYPE_LEVEL_HIGH>;
+
+		status = "disabled";
+	};
+
+	keypad: keypad@40250000 {
+		compatible = "fplinux,sc9820e-keypad";
+		reg = <0x40250000 0x1000>;
+		interrupts = <GIC_SPI 36 IRQ_TYPE_LEVEL_HIGH>;
+		fplinux,aon-syscon = <&aon_apb>;
+
+		status = "disabled";
+	};
+
+	aon_gpio_clk: clock-gpio-enable {
+		compatible = "fplinux,sc9820e-gpio-gate";
+		#clock-cells = <0>;
+		fplinux,aon-syscon = <&aon_apb>;
+	};
+
+	ap_gpio: gpio@40280000 {
+		compatible = "sprd,sc9820e-gpio";
+		reg = <0x40280000 0x1000>;
+		#gpio-cells = <2>;
+		#interrupt-cells = <2>;
+		clock-names = "enable";
+		clocks = <&aon_gpio_clk>;
+		gpio-controller;
+		interrupt-controller;
+		interrupts = <GIC_SPI 35 IRQ_TYPE_LEVEL_HIGH>;
+	};
+
+	sdio0_clk: clock-controller@21500080 {
+		compatible = "fplinux,sc9820e-sdio-clock";
+		reg = <0x21500080 4>;
+		#clock-cells = <1>;
+		clock-names = "ext1m", "ext26m";
+		clocks = <&ext1m>, <&ext26m>;
+		fplinux,ap-ahb-syscon = <&ap_ahb>;
+	};
+
+	sdio0: mmc@20300000 {
+		compatible = "sprd,sdhc-r10";
+		reg = <0x20300000 0x1000>;
+		clock-names = "sdio_clk", "sdio_clk_source", "sdio_ahb_enable";
+		clocks = <&sdio0_clk 0>, <&ext26m>, <&sdio0_clk 1>;
+		interrupts = <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>;
+
+		status = "disabled";
+	};
+
+	usb: usb@20200000 {
+		reg = <0x20200000 0x2000>;
+		interrupt-names = "mc";
+		interrupts = <GIC_SPI 55 IRQ_TYPE_LEVEL_HIGH>;
+
+		status = "disabled";
+	};
+
+	capture_pmu: syscon@402b0000 {
+		compatible = "fplinux,sc9820e-audio-pmu", "syscon";
+		reg = <0x402b0000 0x3000>;
+	};
+
+	capture_g6: syscon@40410000 {
+		compatible = "fplinux,sc9820e-audio-g6", "syscon";
+		reg = <0x40410000 0x2c>;
+	};
+
+	capture_aud: audio-codec@40000000 {
+		compatible = "sprd,sharkl2-audio-codec";
+		reg = <0x40000000 0x2000>;
+	};
+
+	capture_vbc: audio-controller@40020000 {
+		compatible = "sprd,vbc-r1p0v3";
+		reg = <0x40020000 0x10000>;
+	};
+
+	capture_stable: clock-status@402d0060 {
+		compatible = "fplinux,sc9820e-audio-clock-status";
+		reg = <0x402d0060 4>;
+	};
+};

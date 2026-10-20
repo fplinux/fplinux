@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menuconfig ARCH_SC9820E
+	bool "Unisoc SC9820E"
+	depends on ARCH_MULTI_V7
+	select ARM_AMBA
+	select ARM_GIC
+	select ARM_GIC_V3
+	select ARM_PSCI
+	select HAVE_ARM_ARCH_TIMER
+	help
+	  Enable the native Device Tree machine for SC9820E ARM systems.
+	  The target supplies peripheral resources and board wiring in Device Tree.
+	  Interrupts, PSCI and the architectural timer use generic ARM drivers.
+	  Peripherals marked inherited require state from the RAM boot path.

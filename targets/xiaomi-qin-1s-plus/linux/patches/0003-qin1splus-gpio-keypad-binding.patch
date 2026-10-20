@@ -1,0 +1,12 @@
+diff --git a/Documentation/devicetree/bindings/input/gpio-keys.yaml b/Documentation/devicetree/bindings/input/gpio-keys.yaml
+index cc78c21..50cee1c 100644
+--- a/Documentation/devicetree/bindings/input/gpio-keys.yaml
++++ b/Documentation/devicetree/bindings/input/gpio-keys.yaml
+@@ -14,6 +14,7 @@ properties:
+     enum:
+       - gpio-keys
+       - gpio-keys-polled
++      - xiaomi,qin1s-plus-gpio-keys
+
+   autorepeat: true
+

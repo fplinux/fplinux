@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config LEDS_SC2721_KPLED
+	tristate "SC2721 keypad backlight"
+	depends on ARCH_SC9820E && LEDS_CLASS
+	depends on OF && MFD_SC27XX_PMIC
+	help
+	  Control a keypad backlight connected to the SC2721 LDO output.
+	  Brightness and power use the parent PMIC register map. The output
+	  starts powered off and follows LED class suspend handling.
+	  LED triggers can drive brightness through the standard class interface.

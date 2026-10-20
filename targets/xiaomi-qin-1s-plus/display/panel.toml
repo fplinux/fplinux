@@ -1,0 +1,114 @@
+# SPDX-License-Identifier: GPL-2.0-only
+renderer = "mipi-dbi"
+firmware = "xiaomi,qin1splus-gc9307.bin"
+width = 240
+height = 320
+commands = [
+  { command = 0xfe },
+  { command = 0xef },
+  { command = 0x36, data = [
+    0x98,
+  ] },
+  { command = 0x3a, data = [
+    0x05,
+  ] },
+  { command = 0x85, data = [
+    0x80,
+  ] },
+  { command = 0x86, data = [
+    0xf8,
+  ] },
+  { command = 0x87, data = [
+    0x79,
+  ] },
+  { command = 0x89, data = [
+    0x13,
+  ] },
+  { command = 0x8b, data = [
+    0x80,
+  ] },
+  { command = 0x8d, data = [
+    0x33,
+  ] },
+  { command = 0x8e, data = [
+    0xef,
+  ] },
+  { command = 0x8f, data = [
+    0x73,
+  ] },
+  { command = 0xe8, data = [
+    0x15,
+    0x00,
+  ] },
+  { command = 0xec, data = [
+    0x13,
+    0x02,
+    0x88,
+  ] },
+  { command = 0xc3, data = [
+    0x25,
+  ] },
+  { command = 0xc4, data = [
+    0x16,
+  ] },
+  { command = 0xc9, data = [
+    0x0a,
+  ] },
+  { command = 0xff, data = [
+    0x62,
+  ] },
+  { command = 0x99, data = [
+    0x3e,
+  ] },
+  { command = 0x9d, data = [
+    0x4b,
+  ] },
+  { command = 0x98, data = [
+    0x3e,
+  ] },
+  { command = 0x9c, data = [
+    0x4b,
+  ] },
+  { command = 0xf0, data = [
+    0x48,
+    0x0e,
+    0x0a,
+    0x0a,
+    0x06,
+    0x36,
+  ] },
+  { command = 0xf2, data = [
+    0x48,
+    0x0e,
+    0x0a,
+    0x0a,
+    0x06,
+    0x36,
+  ] },
+  { command = 0xf1, data = [
+    0x50,
+    0x8f,
+    0xaf,
+    0x3b,
+    0x3f,
+    0x7f,
+  ] },
+  { command = 0xf3, data = [
+    0x50,
+    0x8f,
+    0xaf,
+    0x3b,
+    0x3f,
+    0x7f,
+  ] },
+  { command = 0x35, data = [
+    0x00,
+  ] },
+  { command = 0x44, data = [
+    0x00,
+    0x00,
+  ] },
+  { command = 0x11, delay_ms = 120 },
+  { command = 0x29 },
+  { command = 0x2c },
+]

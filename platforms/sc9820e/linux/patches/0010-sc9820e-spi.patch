@@ -1,0 +1,645 @@
+diff --git a/drivers/spi/spi-sprd.c b/drivers/spi/spi-sprd.c
+index 2938093..9aa665b 100644
+--- a/drivers/spi/spi-sprd.c
++++ b/drivers/spi/spi-sprd.c
+@@ -9,6 +9,8 @@
+ #include <linux/io.h>
+ #include <linux/iopoll.h>
+ #include <linux/kernel.h>
++#include <linux/ktime.h>
++#include <linux/math64.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/of_dma.h>
+@@ -16,6 +18,9 @@
+ #include <linux/pm_runtime.h>
+ #include <linux/spi/spi.h>
+
++#include "spi-sprd-r4p0-clock.h"
++#include "spi-sprd-r4p0-dma.h"
++
+ #define SPRD_SPI_TXD			0x0
+ #define SPRD_SPI_CLKD			0x4
+ #define SPRD_SPI_CTL0			0x8
+@@ -72,6 +76,7 @@
+ #define SPRD_SPI_MASK_TX_END		BIT(8)
+
+ /* Bits & mask definition for register STS2 */
++#define SPRD_SPI_TX_FIFO_EMPTY BIT(7)
+ #define SPRD_SPI_TX_BUSY		BIT(8)
+
+ /* Bits & mask definition for register CTL1 */
+@@ -104,6 +109,7 @@
+ #define SPRD_SPI_MODE_OFFSET		3
+ #define SPRD_SPI_3WIRE_MODE		4
+ #define SPRD_SPI_4WIRE_MODE		0
++#define SPRD_SPI_R4P0_MODE 3
+
+ /* Bits & mask definition for register CTL8 */
+ #define SPRD_SPI_TX_MAX_LEN_MASK	GENMASK(19, 0)
+@@ -132,6 +138,9 @@
+ #define SPRD_SPI_MAX_SPEED_HZ		48000000
+ #define SPRD_SPI_AUTOSUSPEND_DELAY	100
+ #define SPRD_SPI_DMA_STEP		8
++#define SPRD_SPI_R4P0_INTERVAL 1
++#define SPRD_SPI_R4P0_FIFO_THRESHOLDS 0x208
++#define SPRD_SPI_R4P0_MIN_TIMEOUT_US 500000
+
+ enum sprd_spi_dma_channel {
+ 	SPRD_SPI_RX,
+@@ -153,6 +162,7 @@ struct sprd_spi {
+ 	struct device *dev;
+ 	struct clk *clk;
+ 	int irq;
++	bool is_r4p0;
+ 	u32 src_clk;
+ 	u32 hw_mode;
+ 	u32 trans_len;
+@@ -162,6 +172,7 @@ struct sprd_spi {
+ 	u32 len;
+ 	int status;
+ 	struct sprd_spi_dma dma;
++	struct sprd_spi_r4p0_dma *r4p0_dma;
+ 	struct completion xfer_completion;
+ 	const void *tx_buf;
+ 	void *rx_buf;
+@@ -474,14 +485,17 @@ static void sprd_spi_irq_disable(struct sprd_spi *ss)
+
+ static void sprd_spi_dma_enable(struct sprd_spi *ss, bool enable)
+ {
+-	u32 val = readl_relaxed(ss->base + SPRD_SPI_CTL2);
++	u32 val = readl(ss->base + SPRD_SPI_CTL2);
+
+ 	if (enable)
+ 		val |= SPRD_SPI_DMA_EN;
+ 	else
+ 		val &= ~SPRD_SPI_DMA_EN;
+
+-	writel_relaxed(val, ss->base + SPRD_SPI_CTL2);
++	writel(val, ss->base + SPRD_SPI_CTL2);
++	/* Flush request disable before the DMA channel can be stopped. */
++	if (!enable)
++		readl(ss->base + SPRD_SPI_CTL2);
+ }
+
+ static int sprd_spi_dma_submit(struct dma_chan *dma_chan,
+@@ -811,6 +826,316 @@ setup_err:
+ 	return ret;
+ }
+
++static bool sprd_spi_r4p0_use_dma(struct sprd_spi *ss, struct spi_transfer *t)
++{
++	return ss->r4p0_dma &&
++	       t->len > SPRD_SPI_FIFO_SIZE * (t->bits_per_word / 8) &&
++	       !(t->len % SPRD_SPI_R4P0_DMA_FRAGMENT_BYTES);
++}
++
++static int sprd_spi_r4p0_transfer_params(struct sprd_spi *ss,
++					 struct spi_transfer *t, u32 *divider,
++					 u32 *effective_speed_hz,
++					 u64 *chunk_timeout_us,
++					 u64 *transfer_timeout_us)
++{
++	u64 wire_time_us, interval_time_us, chunks;
++	u32 words, chunk_words;
++	int ret;
++
++	if (t->word_delay.value)
++		return -EOPNOTSUPP;
++	if (t->bits_per_word != 8 && t->bits_per_word != 16)
++		return -EINVAL;
++	if (t->rx_buf || (t->len && !t->tx_buf))
++		return -EINVAL;
++	if (t->tx_nbits && t->tx_nbits != SPI_NBITS_SINGLE)
++		return -EOPNOTSUPP;
++	if (t->len % (t->bits_per_word / 8))
++		return -EINVAL;
++	ret = sprd_spi_r4p0_clock_params(ss->src_clk, t->speed_hz, divider,
++					 effective_speed_hz);
++	if (ret)
++		return ret;
++
++	words = t->len / (t->bits_per_word / 8);
++	chunk_words = sprd_spi_r4p0_use_dma(ss, t) ?
++			      SPRD_SPI_R4P0_DMA_BUFFER_BYTES /
++				      (t->bits_per_word / 8) :
++			      SPRD_SPI_FIFO_SIZE;
++	chunks = max_t(u64, 1, DIV_ROUND_UP_ULL(words, chunk_words));
++	words = min_t(u32, words, chunk_words);
++	wire_time_us =
++		DIV_ROUND_UP_ULL((u64)words * t->bits_per_word * USEC_PER_SEC,
++				 *effective_speed_hz);
++	interval_time_us = DIV_ROUND_UP_ULL(
++		(u64)words * SPRD_SPI_MIN_DELAY_CYCLE * USEC_PER_SEC,
++		ss->src_clk);
++	*chunk_timeout_us = max_t(u64, SPRD_SPI_R4P0_MIN_TIMEOUT_US,
++				  2 * (wire_time_us + interval_time_us));
++	if (*chunk_timeout_us > div64_u64(KTIME_MAX / NSEC_PER_USEC, chunks))
++		return -EINVAL;
++	*transfer_timeout_us = *chunk_timeout_us * chunks;
++
++	return 0;
++}
++
++static int sprd_spi_r4p0_wait(struct sprd_spi *ss, ktime_t deadline, u32 mask,
++			      u32 expected)
++{
++	s64 remaining_us = ktime_us_delta(deadline, ktime_get());
++	u32 val;
++	int ret;
++
++	if (remaining_us <= 0)
++		return -ETIMEDOUT;
++
++	ret = readl_poll_timeout(ss->base + SPRD_SPI_STS2, val,
++				 (val & mask) == expected, 10, remaining_us);
++	if (ret || !ktime_before(ktime_get(), deadline))
++		return -ETIMEDOUT;
++
++	return 0;
++}
++
++static void
++sprd_spi_r4p0_report_failure(struct sprd_spi *ss, struct spi_transfer *t,
++			     u32 effective_speed_hz, ktime_t start,
++			     ktime_t last_progress, u64 chunk_budget_us,
++			     u64 overall_budget_us, u32 remaining_words,
++			     const char *stage, int error)
++{
++	ktime_t now = ktime_get();
++	s64 elapsed_us = ktime_us_delta(now, start);
++	s64 last_progress_age_us = ktime_us_delta(now, last_progress);
++	u32 status = readl(ss->base + SPRD_SPI_STS2);
++
++	dev_err(ss->dev,
++		"r4p0 transfer failed: %d len=%u bpw=%u requested_hz=%u effective_hz=%u elapsed_us=%lld last_progress_age_us=%lld chunk_budget_us=%llu overall_budget_us=%llu remaining_words=%u stage=%s STS2=%#x\n",
++		error, t->len, t->bits_per_word, t->speed_hz,
++		effective_speed_hz, elapsed_us, last_progress_age_us,
++		chunk_budget_us, overall_budget_us, remaining_words, stage,
++		status);
++}
++
++static int sprd_spi_r4p0_prepare_message(struct spi_controller *sctlr,
++					 struct spi_message *msg)
++{
++	struct sprd_spi *ss = spi_controller_get_devdata(sctlr);
++	struct spi_transfer *t;
++	u64 chunk_timeout_us, transfer_timeout_us;
++	ktime_t now, deadline;
++	u32 divider, effective_speed_hz, val;
++	int ret;
++
++	if (sprd_spi_r4p0_dma_quarantined(ss->r4p0_dma))
++		return -EIO;
++	if (msg->spi->mode & ~(SPI_CPOL | SPI_CPHA))
++		return -EOPNOTSUPP;
++	if (spi_get_chipselect(msg->spi, 0) != 0)
++		return -EINVAL;
++	if (list_empty(&msg->transfers))
++		return -EINVAL;
++
++	list_for_each_entry(t, &msg->transfers, transfer_list) {
++		ret = sprd_spi_r4p0_transfer_params(ss, t, &divider,
++						    &effective_speed_hz,
++						    &chunk_timeout_us,
++						    &transfer_timeout_us);
++		if (ret)
++			return ret;
++		/* A new baseline cannot preserve CS across messages. */
++		if (t->cs_change &&
++		    list_is_last(&t->transfer_list, &msg->transfers))
++			return -EOPNOTSUPP;
++	}
++
++	t = list_first_entry(&msg->transfers, struct spi_transfer,
++			     transfer_list);
++	ret = sprd_spi_r4p0_transfer_params(ss, t, &divider,
++					    &effective_speed_hz,
++					    &chunk_timeout_us,
++					    &transfer_timeout_us);
++	if (ret)
++		return ret;
++	now = ktime_get();
++	deadline = ktime_add_us(now, SPRD_SPI_R4P0_MIN_TIMEOUT_US);
++	ret = sprd_spi_r4p0_wait(ss, deadline, SPRD_SPI_TX_BUSY, 0);
++	if (ret) {
++		sprd_spi_r4p0_report_failure(ss, t, effective_speed_hz, now,
++					     now, SPRD_SPI_R4P0_MIN_TIMEOUT_US,
++					     SPRD_SPI_R4P0_MIN_TIMEOUT_US,
++					     t->len / (t->bits_per_word / 8),
++					     "prepare-busy", ret);
++		return ret;
++	}
++
++	/* The core asserts CS only after prepare_message returns. */
++	val = SPRD_SPI_CSN_MASK | (t->bits_per_word << SPRD_SPI_CHNL_LEN);
++	val |= msg->spi->mode & SPI_CPHA ? SPRD_SPI_NG_RX : SPRD_SPI_NG_TX;
++	val |= msg->spi->mode & SPI_CPOL ? SPRD_SPI_SCK_REV : 0;
++	writel(val, ss->base + SPRD_SPI_CTL0);
++	writel(0, ss->base + SPRD_SPI_CTL1);
++	writel(0, ss->base + SPRD_SPI_CTL2);
++	writel(SPRD_SPI_R4P0_FIFO_THRESHOLDS, ss->base + SPRD_SPI_CTL3);
++	writel(0, ss->base + SPRD_SPI_CTL4);
++	writel(SPRD_SPI_R4P0_INTERVAL, ss->base + SPRD_SPI_CTL5);
++	writel(0, ss->base + SPRD_SPI_INT_EN);
++
++	val = readl(ss->base + SPRD_SPI_CTL7);
++	val &= ~SPRD_SPI_MODE_MASK;
++	val |= SPRD_SPI_R4P0_MODE << SPRD_SPI_MODE_OFFSET;
++	writel(val, ss->base + SPRD_SPI_CTL7);
++	writel(1, ss->base + SPRD_SPI_FIFO_RST);
++	writel(0, ss->base + SPRD_SPI_FIFO_RST);
++	writel(divider, ss->base + SPRD_SPI_CLKD);
++
++	return 0;
++}
++
++static int sprd_spi_r4p0_dma_chunk(struct sprd_spi *ss, struct spi_transfer *t,
++				   u32 words, ktime_t deadline,
++				   const char **stage)
++{
++	u32 length = words * (t->bits_per_word / 8);
++	int ret, stop_ret;
++
++	*stage = "dma-prepare";
++	ret = sprd_spi_r4p0_dma_start(ss->r4p0_dma, ss->tx_buf, length,
++				      t->bits_per_word);
++	if (ret)
++		goto stop;
++
++	sprd_spi_set_rx_length(ss, 0);
++	sprd_spi_set_tx_length(ss, words);
++	writel(SPRD_SPI_SW_TX_REQ, ss->base + SPRD_SPI_CTL12);
++	sprd_spi_dma_enable(ss, true);
++	*stage = "dma-completion";
++	ret = sprd_spi_r4p0_dma_wait(ss->r4p0_dma, deadline);
++
++stop:
++	sprd_spi_dma_enable(ss, false);
++	stop_ret = sprd_spi_r4p0_dma_stop(ss->r4p0_dma);
++	if (stop_ret) {
++		dev_err(ss->dev,
++			"DMA stop failed: %d; buffer, channel and clock retained until reboot\n",
++			stop_ret);
++		if (!ret)
++			ret = stop_ret;
++	}
++	if (ret)
++		return ret;
++
++	*stage = "fifo-empty";
++	ret = sprd_spi_r4p0_wait(ss, deadline, SPRD_SPI_TX_FIFO_EMPTY,
++				 SPRD_SPI_TX_FIFO_EMPTY);
++	if (ret)
++		return ret;
++	*stage = "tx-busy";
++	ret = sprd_spi_r4p0_wait(ss, deadline, SPRD_SPI_TX_BUSY, 0);
++	if (!ret)
++		ss->tx_buf += length;
++	return ret;
++}
++
++static int sprd_spi_r4p0_transfer_one(struct spi_controller *sctlr,
++				      struct spi_device *sdev,
++				      struct spi_transfer *t)
++{
++	struct sprd_spi *ss = spi_controller_get_devdata(sctlr);
++	const char *stage = "deadline";
++	u32 divider, effective_speed_hz, words, chunk, val;
++	u64 chunk_timeout_us, transfer_timeout_us;
++	ktime_t start, now, deadline, chunk_deadline, last_progress;
++	bool use_dma;
++	int ret;
++
++	if (sprd_spi_r4p0_dma_quarantined(ss->r4p0_dma))
++		return -EIO;
++	ret = sprd_spi_r4p0_transfer_params(ss, t, &divider,
++					    &effective_speed_hz,
++					    &chunk_timeout_us,
++					    &transfer_timeout_us);
++	if (ret)
++		return ret;
++
++	start = ktime_get();
++	last_progress = start;
++	if (transfer_timeout_us >
++	    div_s64(KTIME_MAX - ktime_to_ns(start), NSEC_PER_USEC))
++		return -EINVAL;
++	deadline = ktime_add_us(start, transfer_timeout_us);
++	t->effective_speed_hz = effective_speed_hz;
++	use_dma = sprd_spi_r4p0_use_dma(ss, t);
++
++	ss->tx_buf = t->tx_buf;
++	ss->write_bufs = t->bits_per_word == 8 ? sprd_spi_write_bufs_u8 :
++						 sprd_spi_write_bufs_u16;
++	words = t->len / (t->bits_per_word / 8);
++	writel(divider, ss->base + SPRD_SPI_CLKD);
++	sprd_spi_set_transfer_bits(ss, t->bits_per_word);
++
++	val = readl(ss->base + SPRD_SPI_CTL1);
++	val &= ~SPRD_SPI_RTX_MD_MASK;
++	writel(val | SPRD_SPI_TX_MODE, ss->base + SPRD_SPI_CTL1);
++	writel(1, ss->base + SPRD_SPI_FIFO_RST);
++	writel(0, ss->base + SPRD_SPI_FIFO_RST);
++
++	while (words) {
++		stage = "deadline";
++		now = ktime_get();
++		if (!ktime_before(now, deadline)) {
++			ret = -ETIMEDOUT;
++			break;
++		}
++		/* A new watchdog starts only after the previous chunk completes. */
++		chunk_deadline =
++			ktime_add_us(now, min_t(u64, chunk_timeout_us,
++						ktime_us_delta(deadline, now)));
++		chunk = min_t(u32, words,
++			      use_dma ? SPRD_SPI_R4P0_DMA_BUFFER_BYTES /
++						(t->bits_per_word / 8) :
++					SPRD_SPI_FIFO_SIZE);
++		if (use_dma) {
++			ret = sprd_spi_r4p0_dma_chunk(ss, t, chunk,
++						      chunk_deadline, &stage);
++			if (ret)
++				break;
++			last_progress = ktime_get();
++			words -= chunk;
++			continue;
++		}
++		sprd_spi_set_rx_length(ss, 0);
++		sprd_spi_set_tx_length(ss, chunk);
++		/* Mode 3 starts each chunk before the FIFO is filled. */
++		writel(SPRD_SPI_SW_TX_REQ, ss->base + SPRD_SPI_CTL12);
++		ss->write_bufs(ss, chunk);
++
++		stage = "fifo-empty";
++		ret = sprd_spi_r4p0_wait(ss, chunk_deadline,
++					 SPRD_SPI_TX_FIFO_EMPTY,
++					 SPRD_SPI_TX_FIFO_EMPTY);
++		if (ret)
++			break;
++		stage = "tx-busy";
++		ret = sprd_spi_r4p0_wait(ss, chunk_deadline, SPRD_SPI_TX_BUSY,
++					 0);
++		if (ret)
++			break;
++		last_progress = ktime_get();
++		words -= chunk;
++	}
++
++	if (ret)
++		sprd_spi_r4p0_report_failure(ss, t, effective_speed_hz, start,
++					     last_progress, chunk_timeout_us,
++					     transfer_timeout_us, words, stage,
++					     ret);
++
++	sprd_spi_enter_idle(ss);
++	return ret;
++}
++
+ static irqreturn_t sprd_spi_handle_irq(int irq, void *data)
+ {
+ 	struct sprd_spi *ss = (struct sprd_spi *)data;
+@@ -856,10 +1183,82 @@ static int sprd_spi_irq_init(struct platform_device *pdev, struct sprd_spi *ss)
+ 	return ret;
+ }
+
++static int sprd_spi_r4p0_clk_init(struct platform_device *pdev,
++				  struct sprd_spi *ss)
++{
++	struct clk *clk_spi, *clk_parent;
++	unsigned long rate, parent_rate;
++	int ret;
++
++	clk_spi = devm_clk_get(&pdev->dev, "spi");
++	if (IS_ERR(clk_spi))
++		return dev_err_probe(&pdev->dev, PTR_ERR(clk_spi),
++				     "failed to get SPI clock\n");
++	clk_parent = devm_clk_get(&pdev->dev, "source");
++	if (IS_ERR(clk_parent))
++		return dev_err_probe(&pdev->dev, PTR_ERR(clk_parent),
++				     "failed to get source clock\n");
++	ss->clk = devm_clk_get(&pdev->dev, "enable");
++	if (IS_ERR(ss->clk))
++		return dev_err_probe(&pdev->dev, PTR_ERR(ss->clk),
++				     "failed to get enable clock\n");
++
++	ret = clk_prepare_enable(ss->clk);
++	if (ret)
++		return dev_err_probe(&pdev->dev, ret,
++				     "failed to enable SPI clock\n");
++	/* Do not change the source clock while an inherited transfer is busy. */
++	ret = sprd_spi_r4p0_wait(
++		ss, ktime_add_us(ktime_get(), SPRD_SPI_R4P0_MIN_TIMEOUT_US),
++		SPRD_SPI_TX_BUSY, 0);
++	if (ret) {
++		dev_err(&pdev->dev, "SPI controller remains busy\n");
++		goto disable_clk;
++	}
++
++	ret = clk_set_parent(clk_spi, clk_parent);
++	if (ret) {
++		dev_err_probe(&pdev->dev, ret,
++			      "failed to select SPI source clock\n");
++		goto disable_clk;
++	}
++	parent_rate = clk_get_rate(clk_parent);
++	if (parent_rate < 2 || parent_rate > U32_MAX) {
++		ret = -ERANGE;
++		dev_err(&pdev->dev, "invalid SPI parent rate %lu\n",
++			parent_rate);
++		goto disable_clk;
++	}
++	ret = clk_set_rate(clk_spi, parent_rate);
++	if (ret) {
++		dev_err_probe(&pdev->dev, ret,
++			      "failed to set SPI source rate\n");
++		goto disable_clk;
++	}
++	rate = clk_get_rate(clk_spi);
++	if (rate != parent_rate) {
++		ret = -ERANGE;
++		dev_err(&pdev->dev,
++			"SPI source rate %lu differs from parent %lu\n", rate,
++			parent_rate);
++		goto disable_clk;
++	}
++	ss->src_clk = rate;
++
++	return 0;
++
++disable_clk:
++	clk_disable_unprepare(ss->clk);
++	return ret;
++}
++
+ static int sprd_spi_clk_init(struct platform_device *pdev, struct sprd_spi *ss)
+ {
+ 	struct clk *clk_spi, *clk_parent;
+
++	if (ss->is_r4p0)
++		return sprd_spi_r4p0_clk_init(pdev, ss);
++
+ 	clk_spi = devm_clk_get(&pdev->dev, "spi");
+ 	if (IS_ERR(clk_spi)) {
+ 		dev_warn(&pdev->dev, "can't get the spi clock\n");
+@@ -934,6 +1333,8 @@ static int sprd_spi_probe(struct platform_device *pdev)
+
+ 	ss->phy_base = res->start;
+ 	ss->dev = &pdev->dev;
++	ss->is_r4p0 =
++		of_device_is_compatible(pdev->dev.of_node, "sprd,spi-r4p0");
+ 	sctlr->mode_bits = SPI_CPOL | SPI_CPHA | SPI_3WIRE | SPI_TX_DUAL;
+ 	sctlr->bus_num = pdev->id;
+ 	sctlr->set_cs = sprd_spi_chipselect;
+@@ -942,24 +1343,68 @@ static int sprd_spi_probe(struct platform_device *pdev)
+ 	sctlr->auto_runtime_pm = true;
+ 	sctlr->max_speed_hz = min_t(u32, ss->src_clk >> 1,
+ 				    SPRD_SPI_MAX_SPEED_HZ);
++	if (ss->is_r4p0) {
++		u32 hardware_mode, interval;
++
++		ret = of_property_read_u32(pdev->dev.of_node, "sprd,spi-mode",
++					   &hardware_mode);
++		if (ret)
++			return dev_err_probe(&pdev->dev, ret,
++					     "missing SPI hardware mode\n");
++		ret = of_property_read_u32(pdev->dev.of_node,
++					   "sprd,spi-interval", &interval);
++		if (ret)
++			return dev_err_probe(&pdev->dev, ret,
++					     "missing SPI interval\n");
++		if (hardware_mode != SPRD_SPI_R4P0_MODE ||
++		    interval != SPRD_SPI_R4P0_INTERVAL)
++			return dev_err_probe(
++				&pdev->dev, -EINVAL,
++				"unsupported SPI hardware mode or interval\n");
++
++		sctlr->mode_bits = SPI_CPOL | SPI_CPHA;
++		sctlr->bits_per_word_mask = SPI_BPW_MASK(8) | SPI_BPW_MASK(16);
++		sctlr->flags = SPI_CONTROLLER_HALF_DUPLEX |
++			       SPI_CONTROLLER_NO_RX;
++		sctlr->num_chipselect = 1;
++		sctlr->prepare_message = sprd_spi_r4p0_prepare_message;
++		sctlr->transfer_one = sprd_spi_r4p0_transfer_one;
++		sctlr->can_dma = NULL;
++	}
+
+ 	init_completion(&ss->xfer_completion);
+ 	platform_set_drvdata(pdev, sctlr);
+ 	ret = sprd_spi_clk_init(pdev, ss);
+ 	if (ret)
+ 		return ret;
++	if (ss->is_r4p0)
++		sctlr->max_speed_hz = ss->src_clk / 2;
++	if (ss->is_r4p0 && of_find_property(pdev->dev.of_node, "dmas", NULL)) {
++		ss->r4p0_dma =
++			sprd_spi_r4p0_dma_create(&pdev->dev, ss->phy_base);
++		if (IS_ERR(ss->r4p0_dma)) {
++			ret = dev_err_probe(&pdev->dev, PTR_ERR(ss->r4p0_dma),
++					    "failed to initialize TX DMA\n");
++			ss->r4p0_dma = NULL;
++			goto disable_clk;
++		}
++	}
+
+-	ret = sprd_spi_irq_init(pdev, ss);
+-	if (ret)
+-		return ret;
++	if (!ss->is_r4p0) {
++		ret = sprd_spi_irq_init(pdev, ss);
++		if (ret)
++			return ret;
+
+-	ret = sprd_spi_dma_init(pdev, ss);
+-	if (ret)
+-		return ret;
++		ret = sprd_spi_dma_init(pdev, ss);
++		if (ret)
++			return ret;
++	}
+
+-	ret = clk_prepare_enable(ss->clk);
+-	if (ret)
+-		goto release_dma;
++	if (!ss->is_r4p0) {
++		ret = clk_prepare_enable(ss->clk);
++		if (ret)
++			goto release_dma;
++	}
+
+ 	ret = pm_runtime_set_active(&pdev->dev);
+ 	if (ret < 0)
+@@ -987,6 +1432,15 @@ err_rpm_put:
+ 	pm_runtime_put_noidle(&pdev->dev);
+ 	pm_runtime_disable(&pdev->dev);
+ disable_clk:
++	if (ss->r4p0_dma) {
++		sprd_spi_dma_enable(ss, false);
++		if (!sprd_spi_r4p0_dma_destroy(ss->r4p0_dma)) {
++			dev_err(ss->dev,
++				"TX DMA resources retained until reboot\n");
++			return ret;
++		}
++		ss->r4p0_dma = NULL;
++	}
+ 	clk_disable_unprepare(ss->clk);
+ release_dma:
+ 	if (ss->dma.enable)
+@@ -999,6 +1453,7 @@ static void sprd_spi_remove(struct platform_device *pdev)
+ {
+ 	struct spi_controller *sctlr = platform_get_drvdata(pdev);
+ 	struct sprd_spi *ss = spi_controller_get_devdata(sctlr);
++	bool stopped;
+ 	int ret;
+
+ 	ret = pm_runtime_get_sync(ss->dev);
+@@ -1006,8 +1461,15 @@ static void sprd_spi_remove(struct platform_device *pdev)
+ 		dev_err(ss->dev, "failed to resume SPI controller\n");
+
+ 	spi_unregister_controller(sctlr);
++	if (ret >= 0 && ss->r4p0_dma)
++		sprd_spi_dma_enable(ss, false);
++	stopped = sprd_spi_r4p0_dma_destroy(ss->r4p0_dma);
++	if (!stopped)
++		dev_err(ss->dev, "TX DMA resources retained until reboot\n");
++	else
++		ss->r4p0_dma = NULL;
+
+-	if (ret >= 0) {
++	if (ret >= 0 && stopped) {
+ 		if (ss->dma.enable)
+ 			sprd_spi_dma_release(ss);
+ 		clk_disable_unprepare(ss->clk);
+@@ -1021,6 +1483,8 @@ static int __maybe_unused sprd_spi_runtime_suspend(struct device *dev)
+ 	struct spi_controller *sctlr = dev_get_drvdata(dev);
+ 	struct sprd_spi *ss = spi_controller_get_devdata(sctlr);
+
++	if (sprd_spi_r4p0_dma_quarantined(ss->r4p0_dma))
++		return -EBUSY;
+ 	if (ss->dma.enable)
+ 		sprd_spi_dma_release(ss);
+
+@@ -1035,6 +1499,8 @@ static int __maybe_unused sprd_spi_runtime_resume(struct device *dev)
+ 	struct sprd_spi *ss = spi_controller_get_devdata(sctlr);
+ 	int ret;
+
++	if (sprd_spi_r4p0_dma_quarantined(ss->r4p0_dma))
++		return -EIO;
+ 	ret = clk_prepare_enable(ss->clk);
+ 	if (ret)
+ 		return ret;
+@@ -1055,7 +1521,12 @@ static const struct dev_pm_ops sprd_spi_pm_ops = {
+ };
+
+ static const struct of_device_id sprd_spi_of_match[] = {
+-	{ .compatible = "sprd,sc9860-spi", },
++	{
++		.compatible = "sprd,sc9860-spi",
++	},
++	{
++		.compatible = "sprd,spi-r4p0",
++	},
+ 	{ /* sentinel */ }
+ };
+ MODULE_DEVICE_TABLE(of, sprd_spi_of_match);

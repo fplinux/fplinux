@@ -1,0 +1,14 @@
+diff --git a/Documentation/devicetree/bindings/mfd/sprd,sc2731.yaml b/Documentation/devicetree/bindings/mfd/sprd,sc2731.yaml
+--- a/Documentation/devicetree/bindings/mfd/sprd,sc2731.yaml
++++ b/Documentation/devicetree/bindings/mfd/sprd,sc2731.yaml
+@@ -85,6 +85,10 @@ properties:
+     $ref: /schemas/leds/sprd,sc2721-kpled.yaml#
+ 
+ patternProperties:
++  "^audio-capture@[0-9a-f]+$":
++    type: object
++    $ref: /schemas/sound/fplinux,qin1splus-capture.yaml#
++
+   "^bltc-rgb@[0-9a-f]+$":
+     type: object
+     $ref: /schemas/leds/backlight/sprd,sc2721-backlight.yaml#

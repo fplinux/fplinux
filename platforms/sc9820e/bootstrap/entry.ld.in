@@ -1,0 +1,29 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+OUTPUT_ARCH(arm)
+ENTRY(_start)
+PHDRS
+{
+	entry PT_LOAD FLAGS(5);
+}
+SECTIONS
+{
+	. = @ENTRY_LOAD@;
+	.text : {
+		*(.text.entry)
+		*(.text.qin_prepare_kernel)
+		*(.text.sc9820e_enter_linux)
+		*(.text*)
+		*(.glue_7) *(.glue_7t) *(.vfp11_veneer) *(.v4_bx) *(.iplt)
+	} :entry
+	__entry_end = .;
+	.data : { *(.data*) *(.igot.plt) } :entry
+	.bss (NOLOAD) : { *(.bss*) *(COMMON) } :entry
+	.rel.dyn : { *(.rel*) } :entry
+	.ARM.attributes 0 : { *(.ARM.attributes) } :NONE
+	/DISCARD/ : { *(.comment) *(.note*) }
+}
+ASSERT(ADDR(.text) == @ENTRY_LOAD@, "entry load changed")
+ASSERT(__entry_end <= @ENTRY_LIMIT@, "entry reaches its load limit")
+ASSERT(SIZEOF(.data) == 0, "entry requires mutable data")
+ASSERT(SIZEOF(.bss) == 0, "entry requires BSS initialization")
+ASSERT(SIZEOF(.rel.dyn) == 0, "entry requires runtime relocations")

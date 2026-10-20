@@ -1,0 +1,70 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+&ap_efuse {
+	status = "okay";
+
+	wcn_wifi_efuse: calibration@0 {
+		reg = <0 12>;
+	};
+
+	wcn_temp_efuse: calibration@c {
+		reg = <12 4>;
+	};
+};
+
+&wcn_mailbox {
+	status = "okay";
+};
+
+&pmic_regulators {
+	regulators {
+		vddwifipa: ldo@14 {
+			reg = <14>;
+			regulator-max-microvolt = <3750000>;
+			regulator-min-microvolt = <1200000>;
+			regulator-name = "vddwifipa";
+		};
+
+		vddcon: ldo@18 {
+			reg = <18>;
+			regulator-max-microvolt = <1600000>;
+			regulator-min-microvolt = <1100000>;
+			regulator-name = "vddcon";
+		};
+	};
+};
+
+/ {
+	wcn_pub: syscon@300e0000 {
+		compatible = "fplinux,sc9820e-pub", "syscon";
+		reg = <0x300e0000 0x3100>;
+	};
+
+	wcn_sipc: wcn-transport {
+		compatible = "fplinux,qin1splus-sipc";
+		mboxes = <&wcn_mailbox 5>;
+		memory-region = <&{/reserved-memory/wcn-mem@88000000}>;
+	};
+
+	btwf: btwf {
+		compatible = "fplinux,qin1splus-btwf";
+		memory-region = <&{/reserved-memory/wcn-mem@88000000}>;
+		nvmem-cell-names = "wifi-calibration", "temperature-calibration";
+		nvmem-cells = <&wcn_wifi_efuse>, <&wcn_temp_efuse>;
+		vddcon-supply = <&vddcon>;
+		vddwifipa-supply = <&vddwifipa>;
+		fplinux,sipc = <&wcn_sipc>;
+		sprd,aon-syscon = <&aon_apb>;
+		sprd,g6-syscon = <&capture_g6>;
+		sprd,pmu-syscon = <&capture_pmu>;
+		sprd,pub-syscon = <&wcn_pub>;
+	};
+
+	bluetooth {
+		compatible = "fplinux,qin1splus-bluetooth";
+		remoteproc = <&btwf>;
+		fplinux,sipc = <&wcn_sipc>;
+
+		status = "disabled";
+	};
+};

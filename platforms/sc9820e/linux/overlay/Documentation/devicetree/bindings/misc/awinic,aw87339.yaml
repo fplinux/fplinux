@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/misc/awinic,aw87339.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Awinic AW87339 amplifier
+
+maintainers:
+  - FPLinux <fplinux@users.noreply.github.com>
+
+properties:
+  compatible:
+    const: awinic,aw87339
+
+  reg:
+    maxItems: 1
+
+  reset-gpios:
+    maxItems: 1
+    description: Active-low hardware reset input.
+
+required:
+  - compatible
+  - reg
+  - reset-gpios
+
+additionalProperties: false

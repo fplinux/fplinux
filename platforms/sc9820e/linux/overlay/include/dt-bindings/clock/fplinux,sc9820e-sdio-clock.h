@@ -1,0 +1,9 @@
+/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause) */
+#ifndef FPLINUX_SC9820E_SDIO_CLOCK_H
+#define FPLINUX_SC9820E_SDIO_CLOCK_H
+
+#define SC9820E_SDIO0_MUX 0
+#define SC9820E_SDIO0_AHB 1
+#define SC9820E_SDIO0_CLK_COUNT 2
+
+#endif

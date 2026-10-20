@@ -1,0 +1,781 @@
+diff --git a/drivers/mmc/host/Kconfig b/drivers/mmc/host/Kconfig
+index 4f060d3..33c2b4b 100644
+--- a/drivers/mmc/host/Kconfig
++++ b/drivers/mmc/host/Kconfig
+@@ -702,13 +702,14 @@ config MMC_SDRICOH_CS
+
+ config MMC_SDHCI_SPRD
+ 	tristate "Spreadtrum SDIO host Controller"
+-	depends on ARCH_SPRD || COMPILE_TEST
++	depends on ARCH_SPRD || ARM || COMPILE_TEST
++	depends on OF
+ 	depends on MMC_SDHCI_PLTFM
+ 	select MMC_SDHCI_IO_ACCESSORS
+ 	select MMC_HSQ
+ 	help
+ 	  This selects the SDIO Host Controller in Spreadtrum
+-	  SoCs, this driver supports R11(IP version: R11P0).
++	  SoCs, supporting the r10 removable SD and r11 controllers.
+
+ 	  If you have a controller with this interface, say Y or M here.
+
+diff --git a/drivers/mmc/host/sdhci-sprd.c b/drivers/mmc/host/sdhci-sprd.c
+index 3584a2b..e346c20 100644
+--- a/drivers/mmc/host/sdhci-sprd.c
++++ b/drivers/mmc/host/sdhci-sprd.c
+@@ -3,6 +3,7 @@
+ // Secure Digital Host Controller
+ //
+ // Copyright (C) 2018 Spreadtrum, Inc.
++// Copyright (C) 2017-2018 Spreadtrum corporation.
+ // Author: Chunyan Zhang <chunyan.zhang@unisoc.com>
+
+ #include <linux/delay.h>
+@@ -17,6 +18,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/pm_runtime.h>
+ #include <linux/regulator/consumer.h>
++#include <linux/sizes.h>
+ #include <linux/slab.h>
+
+ #include "sdhci-pltfm.h"
+@@ -78,9 +80,24 @@
+ #define SDHCI_SPRD_POSRD_DLY_MASK	GENMASK(23, 16)
+ #define SDHCI_SPRD_CPST_EN		GENMASK(27, 24)
+
++#define SDHCI_SPRD_R10_64BIT_EN BIT(13)
++#define SDHCI_SPRD_R10_AUTO_CMD23_EN BIT(11)
++#define SDHCI_SPRD_R10_VOLTAGE_UV 3000000
++#define SDHCI_SPRD_R10_OCR (MMC_VDD_29_30 | MMC_VDD_30_31)
++#define SDHCI_SPRD_R10_DMA_TERMINAL                                            \
++	(SDHCI_INT_TIMEOUT | SDHCI_INT_DATA_TIMEOUT | SDHCI_INT_DATA_END_BIT | \
++	 SDHCI_INT_DATA_END)
++#define SDHCI_SPRD_R10_DMA_WAIT_US 100000
++#define SDHCI_SPRD_R10_INT_MASK                                         \
++	(SDHCI_INT_RESPONSE | SDHCI_INT_DATA_END | SDHCI_INT_DMA_END |  \
++	 SDHCI_INT_ERROR | SDHCI_INT_TIMEOUT | SDHCI_INT_CRC |          \
++	 SDHCI_INT_END_BIT | SDHCI_INT_INDEX | SDHCI_INT_DATA_TIMEOUT | \
++	 SDHCI_INT_DATA_CRC | SDHCI_INT_DATA_END_BIT)
++
+ struct sdhci_sprd_host {
+ 	u32 version;
+ 	struct clk *clk_sdio;
++	struct clk *clk_source;
+ 	struct clk *clk_enable;
+ 	struct clk *clk_2x_enable;
+ 	struct pinctrl *pinctrl;
+@@ -89,6 +106,14 @@ struct sdhci_sprd_host {
+ 	u32 base_rate;
+ 	int flags; /* backup of host attribute */
+ 	u32 phy_delay[MMC_TIMING_MMC_HS400 + 2];
++	bool is_r10;
++	int clock_error;
++	int power_error;
++	int reset_error;
++	struct mmc_data *dma_data;
++	u32 dma_status;
++	bool dma_active;
++	bool dma_failed;
+ };
+
+ enum sdhci_sprd_tuning_type {
+@@ -728,6 +753,605 @@ static const struct sdhci_pltfm_data sdhci_sprd_pdata = {
+ 	.ops = &sdhci_sprd_ops,
+ };
+
++static u32 sdhci_sprd_r10_readl(struct sdhci_host *host, int reg)
++{
++	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
++	u32 val;
++
++	/* The generic SDMA address and the r10 block count share offset 0. */
++	if (reg == SDHCI_DMA_ADDRESS)
++		reg = SDHCI_ADMA_ADDRESS;
++	else if (reg == SDHCI_MAX_CURRENT)
++		return 0;
++
++	val = readl(host->ioaddr + reg);
++	if (reg == SDHCI_INT_STATUS && val != U32_MAX &&
++	    sprd_host->dma_active && !sprd_host->dma_failed) {
++		sprd_host->dma_status |= val;
++		/* A clean transfer completion releases the data engine. */
++		if ((sprd_host->dma_status & SDHCI_INT_DATA_END) &&
++		    !(sprd_host->dma_status & GENMASK(22, 16)))
++			sprd_host->dma_active = false;
++	}
++	return val;
++}
++
++static void sdhci_sprd_r10_writel(struct sdhci_host *host, u32 val, int reg)
++{
++	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
++
++	if (sprd_host->dma_failed) {
++		if (reg == SDHCI_INT_ENABLE || reg == SDHCI_SIGNAL_ENABLE)
++			val = 0;
++		else if (reg != SDHCI_INT_STATUS)
++			return;
++	}
++
++	if (reg == SDHCI_DMA_ADDRESS) {
++		reg = SDHCI_ADMA_ADDRESS;
++	} else if (reg == SDHCI_MAX_CURRENT) {
++		return;
++	} else if (reg == SDHCI_INT_ENABLE || reg == SDHCI_SIGNAL_ENABLE) {
++		val &= SDHCI_SPRD_R10_INT_MASK;
++		/* Enable the error summary with the individual error sources. */
++		if (val & GENMASK(22, 16))
++			val |= SDHCI_INT_ERROR;
++	}
++
++	writel(val, host->ioaddr + reg);
++}
++
++static void sdhci_sprd_r10_writew(struct sdhci_host *host, u16 val, int reg)
++{
++	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
++
++	if (sprd_host->dma_failed)
++		return;
++
++	if (reg == SDHCI_BLOCK_COUNT && host->version >= SDHCI_SPEC_400) {
++		/* Bypass the SDMA-address translation for the real count. */
++		writel(val, host->ioaddr + SDHCI_32BIT_BLK_CNT);
++		return;
++	}
++
++	if (reg == SDHCI_HOST_CONTROL2)
++		val &= ~(SDHCI_SPRD_R10_64BIT_EN |
++			 SDHCI_SPRD_R10_AUTO_CMD23_EN);
++	if (reg == SDHCI_COMMAND && (val & SDHCI_CMD_DATA) && host->data) {
++		sprd_host->dma_data = host->data;
++		sprd_host->dma_status = 0;
++		sprd_host->dma_active = true;
++	}
++
++	writew(val, host->ioaddr + reg);
++}
++
++static void sdhci_sprd_r10_writeb(struct sdhci_host *host, u8 val, int reg)
++{
++	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
++
++	if (sprd_host->dma_failed)
++		return;
++
++	if (reg == SDHCI_SOFTWARE_RESET)
++		val |= readb(host->ioaddr + reg);
++
++	writeb(val, host->ioaddr + reg);
++}
++
++static void sdhci_sprd_r10_fail_dma(struct sdhci_host *host, u32 status)
++{
++	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
++	struct mmc_data *data = sprd_host->dma_data;
++	int ret = data->error;
++
++	if (!ret)
++		ret = data->mrq->cmd->error;
++	if (!ret)
++		ret = -ETIMEDOUT;
++	sprd_host->reset_error = ret;
++	sprd_host->dma_active = true;
++	sprd_host->dma_failed = true;
++	host->flags |= SDHCI_DEVICE_DEAD;
++	/* Keep the mapped buffer owned by DMA, including after request done. */
++	host->flags &= ~SDHCI_REQ_USE_DMA;
++	if (data->stop) {
++		if (!data->stop->error)
++			data->stop->error = ret;
++		/* Do not send recovery commands to an engine still using DMA. */
++		data->stop = NULL;
++	}
++	writel(0, host->ioaddr + SDHCI_SIGNAL_ENABLE);
++	dev_err(mmc_dev(host->mmc),
++		"r10 DMA stop unconfirmed, status=%08x; requests blocked, buffer retained\n",
++		status);
++}
++
++static void sdhci_sprd_r10_reset(struct sdhci_host *host, u8 mask)
++{
++	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
++	u32 backup, status;
++	u16 ctrl;
++	int ret;
++
++	if (sprd_host->dma_failed)
++		return;
++	if (sprd_host->dma_active) {
++		/* Error status is latched before the generic IRQ acknowledgment. */
++		ret = read_poll_timeout_atomic(
++			sdhci_sprd_r10_readl, status,
++			sprd_host->dma_status & SDHCI_SPRD_R10_DMA_TERMINAL, 10,
++			SDHCI_SPRD_R10_DMA_WAIT_US, false, host,
++			SDHCI_INT_STATUS);
++		if (ret) {
++			sdhci_sprd_r10_fail_dma(host, status);
++			return;
++		}
++		if (status != U32_MAX)
++			writel(status & SDHCI_SPRD_R10_INT_MASK,
++			       host->ioaddr + SDHCI_INT_STATUS);
++
++		/* The terminal condition precedes the combined command/data reset. */
++		sdhci_reset(host, SDHCI_RESET_CMD | SDHCI_RESET_DATA);
++		if (readb(host->ioaddr + SDHCI_SOFTWARE_RESET) &
++		    (SDHCI_RESET_CMD | SDHCI_RESET_DATA)) {
++			sdhci_sprd_r10_fail_dma(host, status);
++			return;
++		}
++		sprd_host->dma_active = false;
++		if (!(mask & SDHCI_RESET_ALL)) {
++			sprd_host->reset_error = 0;
++			return;
++		}
++	}
++
++	sdhci_reset(host, mask);
++	sprd_host->reset_error =
++		readb(host->ioaddr + SDHCI_SOFTWARE_RESET) & mask ? -ETIMEDOUT :
++								    0;
++	if (sprd_host->reset_error || !(mask & SDHCI_RESET_ALL))
++		return;
++
++	ctrl = sdhci_readw(host, SDHCI_HOST_CONTROL2);
++	sdhci_writew(host, ctrl, SDHCI_HOST_CONTROL2);
++
++	backup = sdhci_readl(host, SDHCI_SPRD_REG_DEBOUNCE);
++	backup |= SDHCI_SPRD_BIT_DLL_BAK | SDHCI_SPRD_BIT_DLL_VAL;
++	sdhci_writel(host, backup, SDHCI_SPRD_REG_DEBOUNCE);
++}
++
++static void sdhci_sprd_r10_set_clock(struct sdhci_host *host,
++				     unsigned int clock)
++{
++	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
++	u32 div;
++	u16 ctrl;
++	int ret;
++
++	if (sprd_host->dma_failed)
++		return;
++
++	sdhci_writew(host, 0, SDHCI_CLOCK_CONTROL);
++	host->mmc->actual_clock = 0;
++	if (!clock) {
++		sprd_host->clock_error = 0;
++		return;
++	}
++
++	div = sdhci_sprd_calc_div(sprd_host->base_rate, clock);
++	ctrl = ((div & 0x300) >> 2) | ((div & 0xff) << 8);
++	ctrl |= SDHCI_CLOCK_INT_EN;
++	sdhci_writew(host, ctrl, SDHCI_CLOCK_CONTROL);
++
++	ret = readw_poll_timeout_atomic(host->ioaddr + SDHCI_CLOCK_CONTROL,
++					ctrl, ctrl & SDHCI_CLOCK_INT_STABLE, 10,
++					100000);
++	sprd_host->clock_error = ret;
++	if (ret) {
++		dev_err(mmc_dev(host->mmc), "r10 internal clock timed out\n");
++		sdhci_writew(host, 0, SDHCI_CLOCK_CONTROL);
++		return;
++	}
++
++	sdhci_sprd_set_dll_invert(
++		host, SDHCI_SPRD_BIT_CMD_DLY_INV | SDHCI_SPRD_BIT_POSRD_DLY_INV,
++		clock <= 400000);
++	if (clock <= 400000)
++		sdhci_writel(host, 0, SDHCI_SPRD_REG_32_DLL_DLY);
++
++	/* Software rate derived from the selected parent and encoded divider. */
++	host->mmc->actual_clock = sprd_host->base_rate / (div ? 4 * div : 2);
++	sdhci_sprd_sd_clk_on(host);
++}
++
++static unsigned int sdhci_sprd_r10_get_max_clock(struct sdhci_host *host)
++{
++	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
++
++	return sprd_host->base_rate / 2;
++}
++
++static unsigned int sdhci_sprd_r10_get_min_clock(struct sdhci_host *host)
++{
++	return 400000;
++}
++
++static void sdhci_sprd_r10_set_uhs_signaling(struct sdhci_host *host,
++					     unsigned int timing)
++{
++	u16 ctrl = sdhci_readw(host, SDHCI_HOST_CONTROL2);
++
++	ctrl &= ~SDHCI_CTRL_UHS_MASK;
++	if (timing == MMC_TIMING_SD_HS)
++		ctrl |= SDHCI_CTRL_UHS_SDR25;
++	sdhci_writew(host, ctrl, SDHCI_HOST_CONTROL2);
++}
++
++static void sdhci_sprd_r10_set_power(struct sdhci_host *host,
++				     unsigned char mode, unsigned short vdd)
++{
++	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
++	struct mmc_host *mmc = host->mmc;
++	int ret = 0, core_ret;
++
++	if (sprd_host->dma_failed)
++		return;
++
++	if (mode == MMC_POWER_OFF) {
++		if (mmc->vqmmc_enabled) {
++			ret = regulator_disable(mmc->supply.vqmmc);
++			if (!ret)
++				mmc->vqmmc_enabled = false;
++		}
++		core_ret = mmc_regulator_set_ocr(mmc, mmc->supply.vmmc, 0);
++		if (!ret)
++			ret = core_ret;
++	} else {
++		if (vdd >= 32 || !(BIT(vdd) & SDHCI_SPRD_R10_OCR)) {
++			ret = -EINVAL;
++			goto out;
++		}
++		ret = mmc_regulator_set_ocr(mmc, mmc->supply.vmmc, vdd);
++		if (ret)
++			goto out;
++		ret = regulator_set_voltage(mmc->supply.vqmmc,
++					    SDHCI_SPRD_R10_VOLTAGE_UV,
++					    SDHCI_SPRD_R10_VOLTAGE_UV);
++		if (!ret)
++			ret = mmc_regulator_enable_vqmmc(mmc);
++	}
++out:
++	sprd_host->power_error = ret;
++	if (ret)
++		dev_err(mmc_dev(mmc), "r10 power transition failed: %d\n", ret);
++}
++
++static int sdhci_sprd_r10_voltage_switch(struct mmc_host *mmc,
++					 struct mmc_ios *ios)
++{
++	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(mmc_priv(mmc));
++
++	if (sprd_host->dma_failed)
++		return sprd_host->reset_error;
++	if (ios->signal_voltage != MMC_SIGNAL_VOLTAGE_330)
++		return -EINVAL;
++
++	return regulator_set_voltage(mmc->supply.vqmmc,
++				     SDHCI_SPRD_R10_VOLTAGE_UV,
++				     SDHCI_SPRD_R10_VOLTAGE_UV);
++}
++
++static void sdhci_sprd_r10_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
++{
++	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(mmc_priv(mmc));
++
++	/* Neither power-off nor a clock change proves that DMA has stopped. */
++	if (sprd_host->dma_failed)
++		return;
++
++	sdhci_set_ios(mmc, ios);
++}
++
++static void sdhci_sprd_r10_request_done(struct sdhci_host *host,
++					struct mmc_request *mrq)
++{
++	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
++
++	if (sprd_host->dma_failed && mrq->data)
++		/* No SG mapping was made; keep post_req away from the bounce map. */
++		mrq->data->host_cookie = COOKIE_UNMAPPED;
++	if (sprd_host->dma_data == mrq->data)
++		sprd_host->dma_data = NULL;
++
++	mmc_request_done(host->mmc, mrq);
++}
++
++static int sdhci_sprd_r10_alloc_bounce(struct sdhci_host *host)
++{
++	struct device *dev = mmc_dev(host->mmc);
++	void *buffer;
++	dma_addr_t addr;
++
++	buffer = kmalloc(SZ_64K, GFP_KERNEL);
++	if (!buffer)
++		return -ENOMEM;
++	addr = dma_map_single(dev, buffer, SZ_64K, DMA_BIDIRECTIONAL);
++	if (dma_mapping_error(dev, addr)) {
++		kfree(buffer);
++		return -EIO;
++	}
++	dma_sync_single_for_cpu(dev, addr, SZ_64K, DMA_BIDIRECTIONAL);
++	host->bounce_buffer = buffer;
++	host->bounce_addr = addr;
++	host->bounce_buffer_size = SZ_64K;
++	return 0;
++}
++
++static void sdhci_sprd_r10_free_bounce(struct sdhci_host *host)
++{
++	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
++	struct device *dev = mmc_dev(host->mmc);
++
++	if (!host->bounce_buffer)
++		return;
++	if (sprd_host->dma_active) {
++		/* The retained mapping and allocation are never reused or freed. */
++		dev_err(dev,
++			"r10 DMA state unknown; retaining the mapped buffer\n");
++		return;
++	}
++	dma_unmap_single(dev, host->bounce_addr, host->bounce_buffer_size,
++			 DMA_BIDIRECTIONAL);
++	kfree(host->bounce_buffer);
++	host->bounce_buffer = NULL;
++	host->bounce_buffer_size = 0;
++}
++
++static void sdhci_sprd_r10_put_resources(struct sdhci_host *host)
++{
++	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
++	struct mmc_host *mmc = host->mmc;
++
++	if (sprd_host->dma_active) {
++		/* Keep the enabled providers and their consumer device alive. */
++		get_device(mmc_dev(mmc));
++		return;
++	}
++	if (!IS_ERR_OR_NULL(sprd_host->clk_enable))
++		clk_put(sprd_host->clk_enable);
++	if (!IS_ERR_OR_NULL(sprd_host->clk_sdio))
++		clk_put(sprd_host->clk_sdio);
++	if (!IS_ERR_OR_NULL(sprd_host->clk_source))
++		clk_put(sprd_host->clk_source);
++
++	/* A failed rail disable must not put an enabled regulator handle. */
++	if (mmc->regulator_enabled || mmc->vqmmc_enabled) {
++		get_device(mmc_dev(mmc));
++		return;
++	}
++	if (!IS_ERR_OR_NULL(mmc->supply.vqmmc))
++		regulator_put(mmc->supply.vqmmc);
++	if (!IS_ERR_OR_NULL(mmc->supply.vmmc))
++		regulator_put(mmc->supply.vmmc);
++}
++
++static void sdhci_sprd_r10_request(struct mmc_host *mmc,
++				   struct mmc_request *mrq)
++{
++	struct sdhci_host *host = mmc_priv(mmc);
++	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
++	int ret = sprd_host->reset_error;
++
++	if (!ret)
++		ret = sprd_host->clock_error;
++	if (!ret)
++		ret = sprd_host->power_error;
++	if (!ret && mrq->data &&
++	    (!mrq->data->blksz || mrq->data->blksz > host->bounce_buffer_size ||
++	     mrq->data->blocks > host->bounce_buffer_size / mrq->data->blksz))
++		ret = -EINVAL;
++	if (ret) {
++		mrq->cmd->error = ret;
++		if (mrq->data)
++			mrq->data->error = ret;
++		mmc_request_done(mmc, mrq);
++		return;
++	}
++
++	sdhci_request(mmc, mrq);
++}
++
++static const struct sdhci_ops sdhci_sprd_r10_ops = {
++	.read_l = sdhci_sprd_r10_readl,
++	.write_l = sdhci_sprd_r10_writel,
++	.write_w = sdhci_sprd_r10_writew,
++	.write_b = sdhci_sprd_r10_writeb,
++	.set_clock = sdhci_sprd_r10_set_clock,
++	.set_power = sdhci_sprd_r10_set_power,
++	.get_max_clock = sdhci_sprd_r10_get_max_clock,
++	.get_min_clock = sdhci_sprd_r10_get_min_clock,
++	.set_bus_width = sdhci_set_bus_width,
++	.reset = sdhci_sprd_r10_reset,
++	.set_uhs_signaling = sdhci_sprd_r10_set_uhs_signaling,
++	.get_max_timeout_count = sdhci_sprd_get_max_timeout_count,
++	.get_ro = sdhci_sprd_get_ro,
++	.request_done = sdhci_sprd_r10_request_done,
++};
++
++static const struct sdhci_pltfm_data sdhci_sprd_r10_pdata = {
++	.quirks = SDHCI_QUIRK_BROKEN_CARD_DETECTION |
++		  SDHCI_QUIRK_DATA_TIMEOUT_USES_SDCLK |
++		  SDHCI_QUIRK_CAP_CLOCK_BASE_BROKEN | SDHCI_QUIRK_FORCE_DMA |
++		  SDHCI_QUIRK_BROKEN_ADMA,
++	.quirks2 = SDHCI_QUIRK2_BROKEN_HS200 | SDHCI_QUIRK2_BROKEN_64_BIT_DMA |
++		   SDHCI_QUIRK2_NO_1_8_V | SDHCI_QUIRK2_ACMD23_BROKEN |
++		   SDHCI_QUIRK2_ISSUE_CMD_DAT_RESET_TOGETHER |
++		   SDHCI_QUIRK2_PRESET_VALUE_BROKEN,
++	.ops = &sdhci_sprd_r10_ops,
++};
++
++static int sdhci_sprd_r10_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct sdhci_sprd_host *sprd_host;
++	struct sdhci_host *host;
++	unsigned long source_rate;
++	u32 raw_caps, raw_caps1;
++	u16 raw_version;
++	int ret;
++
++	host = sdhci_pltfm_init(pdev, &sdhci_sprd_r10_pdata,
++				sizeof(*sprd_host));
++	if (IS_ERR(host))
++		return PTR_ERR(host);
++
++	sprd_host = TO_SPRD_HOST(host);
++	sprd_host->is_r10 = true;
++	host->dma_mask = DMA_BIT_MASK(32);
++	dev->dma_mask = &host->dma_mask;
++	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
++	if (ret)
++		return dev_err_probe(dev, ret, "r10 needs 32-bit DMA\n");
++
++	ret = mmc_of_parse(host->mmc);
++	if (ret)
++		return ret;
++	if (!mmc_card_is_removable(host->mmc) ||
++	    !(host->mmc->caps2 & MMC_CAP2_NO_MMC) ||
++	    !(host->mmc->caps2 & MMC_CAP2_NO_SDIO))
++		return dev_err_probe(dev, -EINVAL,
++				     "r10 supports removable SD only\n");
++
++	/* These resources can outlive the driver if DMA cannot be stopped. */
++	host->mmc->supply.vmmc = regulator_get_optional(dev, "vmmc");
++	if (IS_ERR(host->mmc->supply.vmmc)) {
++		ret = dev_err_probe(dev, PTR_ERR(host->mmc->supply.vmmc),
++				    "r10 needs vmmc\n");
++		goto put_resources;
++	}
++	host->mmc->supply.vqmmc = regulator_get_optional(dev, "vqmmc");
++	if (IS_ERR(host->mmc->supply.vqmmc)) {
++		ret = dev_err_probe(dev, PTR_ERR(host->mmc->supply.vqmmc),
++				    "r10 needs vqmmc\n");
++		goto put_resources;
++	}
++	ret = regulator_is_supported_voltage(host->mmc->supply.vmmc,
++					     SDHCI_SPRD_R10_VOLTAGE_UV,
++					     SDHCI_SPRD_R10_VOLTAGE_UV);
++	if (ret <= 0) {
++		ret = dev_err_probe(dev, ret ? ret : -EINVAL,
++				    "r10 needs 3.0V card power\n");
++		goto put_resources;
++	}
++	host->mmc->ocr_avail = SDHCI_SPRD_R10_OCR;
++
++	sprd_host->clk_sdio = clk_get(dev, "sdio_clk");
++	if (IS_ERR(sprd_host->clk_sdio)) {
++		ret = dev_err_probe(dev, PTR_ERR(sprd_host->clk_sdio),
++				    "failed to get r10 SD clock\n");
++		goto put_resources;
++	}
++	sprd_host->clk_source = clk_get(dev, "sdio_clk_source");
++	if (IS_ERR(sprd_host->clk_source)) {
++		ret = dev_err_probe(dev, PTR_ERR(sprd_host->clk_source),
++				    "failed to get r10 clock source\n");
++		goto put_resources;
++	}
++	sprd_host->clk_enable = clk_get(dev, "sdio_ahb_enable");
++	if (IS_ERR(sprd_host->clk_enable)) {
++		ret = dev_err_probe(dev, PTR_ERR(sprd_host->clk_enable),
++				    "failed to get r10 AHB gate\n");
++		goto put_resources;
++	}
++
++	ret = clk_set_parent(sprd_host->clk_sdio, sprd_host->clk_source);
++	if (ret) {
++		ret = dev_err_probe(dev, ret,
++				    "failed to select r10 clock source\n");
++		goto put_resources;
++	}
++	source_rate = clk_get_rate(sprd_host->clk_source);
++	if (source_rate != SDHCI_SPRD_CLK_DEF_RATE ||
++	    clk_get_rate(sprd_host->clk_sdio) != source_rate) {
++		ret = dev_err_probe(dev, -EINVAL,
++				    "r10 needs a 26MHz SD source\n");
++		goto put_resources;
++	}
++	sprd_host->base_rate = 2 * source_rate;
++
++	ret = clk_prepare_enable(sprd_host->clk_sdio);
++	if (ret)
++		goto put_resources;
++	ret = clk_prepare_enable(sprd_host->clk_enable);
++	if (ret)
++		goto clk_disable;
++
++	raw_version = sdhci_readw(host, SDHCI_HOST_VERSION);
++	sprd_host->version = raw_version;
++	raw_caps = sdhci_readl(host, SDHCI_CAPABILITIES);
++	raw_caps1 = sdhci_readl(host, SDHCI_CAPABILITIES_1);
++	dev_info(dev, "r10 version=%04x caps=%08x caps1=%08x source=%luHz\n",
++		 raw_version, raw_caps, raw_caps1, source_rate);
++	sdhci_read_caps(host);
++	if (sprd_host->reset_error) {
++		ret = sprd_host->reset_error;
++		goto gate_disable;
++	}
++	if (host->version < SDHCI_SPEC_300 || host->version > SDHCI_SPEC_410) {
++		ret = dev_err_probe(dev, -ENODEV,
++				    "unsupported r10 host version\n");
++		goto gate_disable;
++	}
++
++	host->caps &= ~(SDHCI_CAN_DO_ADMA2 | SDHCI_CAN_64BIT |
++			SDHCI_CAN_64BIT_V4 | SDHCI_CAN_DO_HISPD);
++	host->caps1 &= ~(SDHCI_SUPPORT_SDR50 | SDHCI_SUPPORT_SDR104 |
++			 SDHCI_SUPPORT_DDR50 | SDHCI_CLOCK_MUL_MASK);
++	host->mmc_host_ops.request = sdhci_sprd_r10_request;
++	host->mmc_host_ops.set_ios = sdhci_sprd_r10_set_ios;
++	host->mmc_host_ops.start_signal_voltage_switch =
++		sdhci_sprd_r10_voltage_switch;
++	host->always_defer_done = true;
++
++	/* Own the allocation so an unconfirmed DMA stop cannot free it. */
++	ret = sdhci_sprd_r10_alloc_bounce(host);
++	if (ret)
++		goto gate_disable;
++	ret = sdhci_setup_host(host);
++	if (ret)
++		goto free_bounce;
++	/* Neither failed DMA setup nor failed bounce allocation may select PIO. */
++	if (!(host->flags & SDHCI_USE_SDMA) ||
++	    host->flags & (SDHCI_USE_ADMA | SDHCI_USE_64_BIT_DMA) ||
++	    !host->bounce_buffer) {
++		ret = dev_err_probe(dev, -ENOMEM,
++				    "r10 needs an SDMA bounce buffer\n");
++		goto cleanup_host;
++	}
++	host->flags &= ~(SDHCI_AUTO_CMD12 | SDHCI_AUTO_CMD23);
++	host->mmc->caps &= ~(MMC_CAP_UHS | MMC_CAP_MMC_HIGHSPEED |
++			     MMC_CAP_SD_HIGHSPEED | MMC_CAP_SDIO_IRQ);
++
++	ret = __sdhci_add_host(host);
++	if (ret)
++		goto cleanup_host;
++	return 0;
++
++cleanup_host:
++	sdhci_cleanup_host(host);
++free_bounce:
++	sdhci_sprd_r10_free_bounce(host);
++gate_disable:
++	if (sprd_host->dma_active)
++		goto put_resources;
++	clk_disable_unprepare(sprd_host->clk_enable);
++clk_disable:
++	clk_disable_unprepare(sprd_host->clk_sdio);
++put_resources:
++	sdhci_sprd_r10_put_resources(host);
++	return ret;
++}
++
+ static int sdhci_sprd_probe(struct platform_device *pdev)
+ {
+ 	struct sdhci_host *host;
+@@ -736,6 +1360,9 @@ static int sdhci_sprd_probe(struct platform_device *pdev)
+ 	struct clk *clk;
+ 	int ret = 0;
+
++	if (of_device_is_compatible(pdev->dev.of_node, "sprd,sdhc-r10"))
++		return sdhci_sprd_r10_probe(pdev);
++
+ 	host = sdhci_pltfm_init(pdev, &sdhci_sprd_pdata, sizeof(*sprd_host));
+ 	if (IS_ERR(host))
+ 		return PTR_ERR(host);
+@@ -891,15 +1518,29 @@ static void sdhci_sprd_remove(struct platform_device *pdev)
+ 	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
+
+ 	sdhci_remove_host(host, 0);
++	if (sprd_host->is_r10) {
++		sdhci_sprd_r10_free_bounce(host);
++		if (sprd_host->dma_active) {
++			sdhci_sprd_r10_put_resources(host);
++			return;
++		}
++	}
+
+ 	clk_disable_unprepare(sprd_host->clk_sdio);
+ 	clk_disable_unprepare(sprd_host->clk_enable);
+ 	clk_disable_unprepare(sprd_host->clk_2x_enable);
++	if (sprd_host->is_r10)
++		sdhci_sprd_r10_put_resources(host);
+ }
+
+ static const struct of_device_id sdhci_sprd_of_match[] = {
+-	{ .compatible = "sprd,sdhci-r11", },
+-	{ }
++	{
++		.compatible = "sprd,sdhci-r11",
++	},
++	{
++		.compatible = "sprd,sdhc-r10",
++	},
++	{}
+ };
+ MODULE_DEVICE_TABLE(of, sdhci_sprd_of_match);
+
+@@ -908,6 +1549,9 @@ static int sdhci_sprd_runtime_suspend(struct device *dev)
+ 	struct sdhci_host *host = dev_get_drvdata(dev);
+ 	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
+
++	if (sprd_host->is_r10)
++		return -EOPNOTSUPP;
++
+ 	mmc_hsq_suspend(host->mmc);
+ 	sdhci_runtime_suspend_host(host);
+
+@@ -924,6 +1568,9 @@ static int sdhci_sprd_runtime_resume(struct device *dev)
+ 	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
+ 	int ret;
+
++	if (sprd_host->is_r10)
++		return -EOPNOTSUPP;
++
+ 	ret = clk_prepare_enable(sprd_host->clk_2x_enable);
+ 	if (ret)
+ 		return ret;
+@@ -950,9 +1597,21 @@ clk_2x_disable:
+ 	return ret;
+ }
+
++static int __maybe_unused sdhci_sprd_suspend(struct device *dev)
++{
++	struct sdhci_host *host = dev_get_drvdata(dev);
++	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
++
++	if (sprd_host->is_r10)
++		return -EOPNOTSUPP;
++
++	return pm_runtime_force_suspend(dev);
++}
++
+ static const struct dev_pm_ops sdhci_sprd_pm_ops = {
+-	SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend, pm_runtime_force_resume)
+-	RUNTIME_PM_OPS(sdhci_sprd_runtime_suspend, sdhci_sprd_runtime_resume, NULL)
++	SYSTEM_SLEEP_PM_OPS(sdhci_sprd_suspend, pm_runtime_force_resume)
++		RUNTIME_PM_OPS(sdhci_sprd_runtime_suspend,
++			       sdhci_sprd_runtime_resume, NULL)
+ };
+
+ static struct platform_driver sdhci_sprd_driver = {
+@@ -967,6 +1626,6 @@ static struct platform_driver sdhci_sprd_driver = {
+ };
+ module_platform_driver(sdhci_sprd_driver);
+
+-MODULE_DESCRIPTION("Spreadtrum sdio host controller r11 driver");
++MODULE_DESCRIPTION("Spreadtrum sdio host controller r10/r11 driver");
+ MODULE_LICENSE("GPL v2");
+ MODULE_ALIAS("platform:sdhci-sprd-r11");

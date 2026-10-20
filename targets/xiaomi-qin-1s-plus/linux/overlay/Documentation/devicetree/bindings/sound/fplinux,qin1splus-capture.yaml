@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: GPL-2.0-only
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/sound/fplinux,qin1splus-capture.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Qin 1s+ SC2721 and SC9820E PCM
+
+maintainers:
+  - FPLinux <fplinux@users.noreply.github.com>
+
+description: |
+  A child of the SC2721 SPI PMIC. The parent supplies the ADI regmap.
+  This PCM controller exclusively owns the digital codec and VBC banks,
+  borrows the shared AON, PMU and G6 syscons, and reads the clock status word.
+  It provides 48 kHz, signed 16-bit little endian mono MainMIC capture and
+  mutually exclusive stereo playback. Playback preparation checks the analog
+  headphone path with both channel gains muted. Playback START enables the
+  referenced speaker amplifier and applies the selected master volume.
+
+properties:
+  compatible:
+    const: fplinux,qin1splus-capture
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+  fplinux,speaker-amplifier:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: AW87339 speaker amplifier client owned by its I2C driver.
+
+  sprd,aon-syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: Shared AON APB syscon.
+
+  sprd,pmu-syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: PMU syscon covering XTLBUF1_REL_CFG at offset 0x90.
+
+  sprd,g6-syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: G6 syscon covering the sine driver register at offset 0x8.
+
+  sprd,digital-codec:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: Digital codec bank, with a single 0x2000-byte resource.
+
+  sprd,vbc:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: VBC r1p0v3 bank, with a single 0x10000-byte resource.
+
+  sprd,clock-stable:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: Single read-only 32-bit clock-stability status resource.
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - fplinux,speaker-amplifier
+  - sprd,aon-syscon
+  - sprd,pmu-syscon
+  - sprd,g6-syscon
+  - sprd,digital-codec
+  - sprd,vbc
+  - sprd,clock-stable
+
+additionalProperties: false

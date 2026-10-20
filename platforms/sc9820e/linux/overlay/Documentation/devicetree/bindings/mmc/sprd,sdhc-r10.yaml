@@ -1,0 +1,74 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/mmc/sprd,sdhc-r10.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Spreadtrum r10 removable SD controller
+
+maintainers:
+  - FPLinux <fplinux@users.noreply.github.com>
+
+allOf:
+  - $ref: sdhci-common.yaml#
+
+properties:
+  compatible:
+    const: sprd,sdhc-r10
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+  clocks:
+    items:
+      - description: SDIO source multiplexer
+      - description: 26 MHz oscillator input
+      - description: AP-AHB gate
+
+  clock-names:
+    items:
+      - const: sdio_clk
+      - const: sdio_clk_source
+      - const: sdio_ahb_enable
+
+  bus-width:
+    enum: [1, 4]
+
+  max-frequency:
+    maximum: 13000000
+
+  voltage-ranges:
+    $ref: /schemas/types.yaml#/definitions/uint32-matrix
+    maxItems: 1
+    items:
+      items:
+        - description: Minimum slot voltage in mV
+          const: 3000
+        - description: Maximum slot voltage in mV
+          const: 3000
+
+  non-removable: false
+  no-sd: false
+  no-mmc: true
+  no-sdio: true
+  no-1-8-v: true
+  vmmc-supply: true
+  vqmmc-supply: true
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - clocks
+  - clock-names
+  - max-frequency
+  - no-mmc
+  - no-sdio
+  - no-1-8-v
+  - vmmc-supply
+  - vqmmc-supply
+
+unevaluatedProperties: false

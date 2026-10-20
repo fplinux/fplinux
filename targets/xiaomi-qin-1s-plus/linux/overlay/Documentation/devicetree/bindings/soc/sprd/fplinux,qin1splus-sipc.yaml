@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/soc/sprd/fplinux,qin1splus-sipc.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Qin 1s+ WCN shared-buffer transport
+
+maintainers:
+  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+
+description: |
+  Fixed WCN mailbox and shared-buffer handshake owner. The memory-region is
+  the existing no-map 0x88000000/0x280000 reservation; only its final 1 MiB,
+  starting at 0x88180000, belongs to this transport. The BTWF boot owner
+  controls when this transport may initialize memory and release its channel.
+
+properties:
+  compatible:
+    const: fplinux,qin1splus-sipc
+
+  memory-region:
+    maxItems: 1
+
+  mboxes:
+    maxItems: 1
+    description: WCN mailbox core 5; the logical SIPC destination is 3.
+
+required:
+  - compatible
+  - memory-region
+  - mboxes
+
+additionalProperties: false

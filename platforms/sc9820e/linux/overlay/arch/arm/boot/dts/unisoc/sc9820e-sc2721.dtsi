@@ -1,0 +1,97 @@
+// SPDX-License-Identifier: GPL-2.0-only
+&adi {
+	pmic: pmic@0 {
+		compatible = "sprd,sc2721";
+		reg = <0>;
+		#address-cells = <1>;
+		#interrupt-cells = <2>;
+		#size-cells = <0>;
+		interrupt-controller;
+		interrupts = <GIC_SPI 38 IRQ_TYPE_LEVEL_HIGH>;
+		spi-max-frequency = <26000000>;
+
+		poweroff {
+			compatible = "sprd,sc2721-poweroff";
+		};
+
+		lcd_backlight: bltc-rgb@180 {
+			compatible = "sprd,sc2721-bltc-rgb";
+			reg = <0x180>;
+
+			status = "disabled";
+		};
+
+		pmic_rtc: rtc@200 {
+			compatible = "sprd,sc2721-rtc";
+			reg = <0x200>;
+			interrupt-parent = <&pmic>;
+			interrupts = <1 IRQ_TYPE_LEVEL_HIGH>;
+
+			status = "disabled";
+		};
+
+		pmic_eic: gpio-controller@280 {
+			compatible = "sprd,sc2721-eic";
+			reg = <0x280>;
+			#gpio-cells = <2>;
+			#interrupt-cells = <2>;
+			gpio-controller;
+			interrupt-controller;
+			interrupt-parent = <&pmic>;
+			interrupts = <4 IRQ_TYPE_LEVEL_HIGH>;
+		};
+
+		pmic_efuse: efuse@300 {
+			compatible = "sprd,sc2721-efuse";
+			reg = <0x300>;
+			#address-cells = <1>;
+			#size-cells = <1>;
+			hwlocks = <&hwspinlock 12>;
+
+			status = "disabled";
+
+			adc_big_scale: calibration@24 {
+				reg = <0x24 2>;
+			};
+
+			adc_small_scale: calibration@26 {
+				reg = <0x26 2>;
+			};
+		};
+
+		pmic_adc: adc@400 {
+			compatible = "sprd,sc2721-adc";
+			reg = <0x400>;
+			#io-channel-cells = <1>;
+			hwlocks = <&hwspinlock 4>;
+			nvmem-cell-names = "big_scale_calib", "small_scale_calib";
+			nvmem-cells = <&adc_big_scale>, <&adc_small_scale>;
+
+			status = "disabled";
+		};
+
+		pmic_regulators: regulator@c28 {
+			compatible = "sprd,sc2721-regulator";
+			reg = <0xc28 0xcd4 0xd00 0xd1c 0xd20 0xd3c>;
+
+			regulators {
+				#address-cells = <1>;
+				#size-cells = <0>;
+			};
+		};
+
+		keypad_backlight: keypad-backlight@eac {
+			compatible = "sprd,sc2721-kpled-ldo";
+			reg = <0xeac>;
+
+			status = "disabled";
+		};
+
+		vibrator: vibrator@eb4 {
+			compatible = "sprd,sc2721-vibrator";
+			reg = <0xeb4>;
+
+			status = "disabled";
+		};
+	};
+};

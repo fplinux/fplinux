@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
+config KEYBOARD_SC9820E
+	tristate "SC9820E v1 matrix keypad"
+	depends on ARCH_SC9820E && INPUT_KEYBOARD
+	depends on OF && HAS_IOMEM
+	select INPUT_MATRIXKMAP
+	select MFD_SYSCON
+	help
+	  Enable the SC9820E v1 hardware matrix keypad controller.
+	  The board supplies its matrix dimensions, hardware masks, debounce
+	  count and Linux keymap through the device tree. The controller uses
+	  atomic SET/CLEAR aliases for its AON reset and clock gate bits.

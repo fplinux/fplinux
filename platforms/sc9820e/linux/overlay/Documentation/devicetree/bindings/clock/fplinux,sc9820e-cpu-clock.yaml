@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/clock/fplinux,sc9820e-cpu-clock.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: SC9820E inherited CPU and TWPLL clocks
+
+maintainers:
+  - FPLinux <fplinux@users.noreply.github.com>
+
+description: |
+  Reports the inherited MCU clock using its parent selection, divider and PLL
+  configuration. Clock queries do not change hardware. When both CPUs use this
+  clock and CPU frequency support is enabled, its frequency interface switches
+  between the inherited MPLL and lower TWPLL/2 parent. PLL configuration, voltage
+  programming, dividers and other selector fields remain unchanged.
+  The second output reports the inherited TWPLL without changing its controls.
+
+properties:
+  compatible:
+    const: fplinux,sc9820e-cpu-clock
+
+  reg:
+    items:
+      - description: MPLL control registers
+      - description: TWPLL control registers
+
+  reg-names:
+    items:
+      - const: mpll
+      - const: twpll
+
+  clocks:
+    maxItems: 1
+
+  clock-names:
+    const: source
+
+  "#clock-cells":
+    const: 1
+    description: |
+      Clock 0 is the CPU clock and clock 1 is the read-only TWPLL output.
+
+  fplinux,ap-ahb-syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: Shared AP-AHB register map containing the MCU mux and divider.
+
+required:
+  - compatible
+  - reg
+  - reg-names
+  - clocks
+  - clock-names
+  - "#clock-cells"
+  - fplinux,ap-ahb-syscon
+
+additionalProperties: false
+
+examples:
+  - |
+    clock-controller@403f0000 {
+        compatible = "fplinux,sc9820e-cpu-clock";
+        reg = <0x403f0000 8>, <0x403c000c 8>;
+        reg-names = "mpll", "twpll";
+        #clock-cells = <1>;
+        clock-names = "source";
+        clocks = <&ext26m>;
+        fplinux,ap-ahb-syscon = <&ap_ahb>;
+    };

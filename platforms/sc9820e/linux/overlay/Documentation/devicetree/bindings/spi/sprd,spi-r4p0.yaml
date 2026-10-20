@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/spi/sprd,spi-r4p0.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Spreadtrum r4p0 SPI controller
+
+maintainers:
+  - FPLinux <fplinux@users.noreply.github.com>
+
+allOf:
+  - $ref: spi-controller.yaml#
+
+properties:
+  compatible:
+    const: sprd,spi-r4p0
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    maxItems: 1
+
+  clocks:
+    items:
+      - description: SPI module enable clock
+      - description: SPI serial clock
+      - description: Oscillator source clock
+
+  clock-names:
+    items:
+      - const: enable
+      - const: spi
+      - const: source
+
+  sprd,spi-mode:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    const: 3
+    description: Hardware transfer mode.
+
+  sprd,spi-interval:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    const: 1
+    description: Hardware inter-word interval encoding.
+
+  dmas:
+    maxItems: 1
+
+  dma-names:
+    const: tx_chn
+
+required:
+  - compatible
+  - reg
+  - interrupts
+  - clocks
+  - clock-names
+  - sprd,spi-mode
+  - sprd,spi-interval
+
+dependencies:
+  dmas: [dma-names]
+  dma-names: [dmas]
+
+unevaluatedProperties: false

@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: GPL-2.0-only OR BSD-2-Clause
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/power/reset/sprd,sc2721-poweroff.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: SC2721 system power-off
+
+maintainers:
+  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+
+description: Power-off control inside an SC2721 PMIC accessed through SC9820E ADI.
+
+properties:
+  compatible:
+    const: sprd,sc2721-poweroff
+
+required:
+  - compatible
+
+additionalProperties: false
+
+examples:
+  - |
+    poweroff {
+        compatible = "sprd,sc2721-poweroff";
+    };

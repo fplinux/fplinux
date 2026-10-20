@@ -1,0 +1,72 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/remoteproc/fplinux,qin1splus-btwf.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Qin 1s+ integrated BTWF remote processor
+
+maintainers:
+  - FPLinux contributors <313246064+fplinux-dev@users.noreply.github.com>
+
+description: |
+  One explicitly started BTWF core using a raw image and fixed shared-memory
+  calibration ABI and a separate shared-buffer transport. It has no GNSS owner.
+  Its reserved-memory region must be no-map and span 0x280000 bytes starting
+  at 0x88000000. This owner maps its first 0x180000 bytes; the shared-buffer
+  transport maps the remaining 1 MiB.
+
+properties:
+  compatible:
+    const: fplinux,qin1splus-btwf
+
+  memory-region:
+    maxItems: 1
+
+  fplinux,sipc:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: WCN transport prepared before CPU release and stopped after reset.
+
+  sprd,aon-syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: Shared AON registers including WCN enable and chip identity.
+
+  sprd,pmu-syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: Shared PMU registers including WCN power, sleep and reset aliases.
+
+  sprd,pub-syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: PUB registers containing the low 16 bits of DMC dummy register 0.
+
+  sprd,g6-syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description: Shared G6 registers containing the WCN 26 MHz control field.
+
+  vddcon-supply: true
+
+  vddwifipa-supply: true
+
+  nvmem-cells:
+    minItems: 2
+    maxItems: 2
+
+  nvmem-cell-names:
+    items:
+      - const: wifi-calibration
+      - const: temperature-calibration
+
+required:
+  - compatible
+  - memory-region
+  - fplinux,sipc
+  - sprd,aon-syscon
+  - sprd,pmu-syscon
+  - sprd,pub-syscon
+  - sprd,g6-syscon
+  - vddcon-supply
+  - vddwifipa-supply
+  - nvmem-cells
+  - nvmem-cell-names
+
+additionalProperties: false

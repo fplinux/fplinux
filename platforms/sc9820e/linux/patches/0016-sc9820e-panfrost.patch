@@ -1,0 +1,44 @@
+diff --git a/drivers/gpu/drm/panfrost/panfrost_gpu.c b/drivers/gpu/drm/panfrost/panfrost_gpu.c
+--- a/drivers/gpu/drm/panfrost/panfrost_gpu.c
++++ b/drivers/gpu/drm/panfrost/panfrost_gpu.c
+@@ -550,6 +550,7 @@ int panfrost_gpu_init(struct panfrost_device *pfdev)
+ 
+ void panfrost_gpu_fini(struct panfrost_device *pfdev)
+ {
++	panfrost_gpu_suspend_irq(pfdev);
+ 	panfrost_gpu_power_off(pfdev);
+ }
+ 
+diff --git a/drivers/gpu/drm/panfrost/panfrost_mmu.c b/drivers/gpu/drm/panfrost/panfrost_mmu.c
+--- a/drivers/gpu/drm/panfrost/panfrost_mmu.c
++++ b/drivers/gpu/drm/panfrost/panfrost_mmu.c
+@@ -975,7 +975,7 @@ int panfrost_mmu_init(struct panfrost_device *pfdev)
+ 
+ void panfrost_mmu_fini(struct panfrost_device *pfdev)
+ {
+-	mmu_write(pfdev, MMU_INT_MASK, 0);
++	panfrost_mmu_suspend_irq(pfdev);
+ }
+ 
+ void panfrost_mmu_suspend_irq(struct panfrost_device *pfdev)
+diff --git a/drivers/gpu/drm/panfrost/panfrost_job.c b/drivers/gpu/drm/panfrost/panfrost_job.c
+--- a/drivers/gpu/drm/panfrost/panfrost_job.c
++++ b/drivers/gpu/drm/panfrost/panfrost_job.c
+@@ -889,6 +889,8 @@ int panfrost_jm_init(struct panfrost_device *pfdev)
+ 		return ret;
+ 	}
+ 
++	panfrost_jm_suspend_irq(pfdev);
++
+ 	pfdev->reset.wq = alloc_ordered_workqueue("panfrost-reset", 0);
+ 	if (!pfdev->reset.wq)
+ 		return -ENOMEM;
+@@ -924,7 +926,7 @@ void panfrost_jm_fini(struct panfrost_device *pfdev)
+ 	struct panfrost_job_slot *js = pfdev->js;
+ 	int j;
+ 
+-	job_write(pfdev, JOB_INT_MASK, 0);
++	panfrost_jm_suspend_irq(pfdev);
+ 
+ 	for (j = 0; j < NUM_JOB_SLOTS; j++) {
+ 		drm_sched_fini(&js->queue[j].sched);
