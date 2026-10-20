@@ -1,4 +1,16 @@
 {
-  "first-feature": { "hardware": "Present", "note": "", "status": "Unknown" },
-  "second-feature": { "note": "Recorded result.", "status": "Supported" }
+  "engine-feature": {
+    "hardware": "absent",
+    "note": "This phone has no engine.",
+    "status": "unsupported"
+  },
+  "first-feature": {
+    "hardware": "present",
+    "note": "No supported input path.",
+    "status": "unsupported",
+    "stock": "available",
+    "stockNote": "Available in the original menu."
+  },
+  "second-feature": { "note": "Recorded result.", "status": "verified" },
+  "viewer": { "note": "", "status": "verified" }
 }

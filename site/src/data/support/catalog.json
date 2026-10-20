@@ -16,8 +16,6 @@
       "kind": "system",
       "guide": "start/run",
       "group": "Startup and access",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -26,8 +24,6 @@
       "kind": "system",
       "guide": "features#not-implemented",
       "group": "Startup and access",
-      "implementation": "Not implemented",
-      "verification": "Not device-tested",
       "scope": "both"
     },
     {
@@ -36,28 +32,24 @@
       "kind": "system",
       "guide": "use/terminal",
       "group": "Display and input",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
       "id": "lcd-backlight",
+      "stock": true,
       "label": "LCD backlight",
       "kind": "hardware",
       "guide": "use/display-and-lights#screen-brightness",
       "group": "Display and input",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
       "id": "keypad-backlight",
+      "stock": true,
       "label": "Keypad backlight",
       "kind": "hardware",
       "guide": "use/display-and-lights#keypad-light",
       "group": "Display and input",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -66,8 +58,6 @@
       "kind": "system",
       "guide": "use/connect#what-the-usb-link-is",
       "group": "Startup and access",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -76,8 +66,6 @@
       "kind": "system",
       "guide": "use/connect#open-a-shell",
       "group": "Startup and access",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -86,8 +74,6 @@
       "kind": "system",
       "guide": "use/connect#copy-files",
       "group": "Startup and access",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -96,8 +82,6 @@
       "kind": "system",
       "guide": "use/connect#type-with-your-computers-keyboard",
       "group": "Display and input",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -106,8 +90,6 @@
       "kind": "system",
       "guide": "use/cpu-and-temperature#cpu-speed",
       "group": "Power and sensors",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -116,38 +98,30 @@
       "kind": "system",
       "guide": "use/cpu-and-temperature#cpu-speed",
       "group": "Power and sensors",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
       "id": "ap-dmaengine",
       "label": "AP DMAengine",
       "kind": "hardware",
-      "guide": "porting/ums9117#memory-copy-dma",
+      "guide": "develop/device-interfaces",
       "group": "Camera and images",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
       "id": "image-rotation-engine",
-      "label": "Image rotation engine",
+      "label": "Hardware image rotation",
       "kind": "hardware",
       "guide": "apps/image-tools/rotate",
       "group": "Camera and images",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
       "id": "jpeg-engine",
-      "label": "JPEG codec and scaling engine",
+      "label": "Hardware JPEG engine",
       "kind": "hardware",
       "guide": "apps/image-tools/jpeg",
       "group": "Camera and images",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -156,8 +130,6 @@
       "kind": "hardware",
       "guide": "apps/image-tools/present",
       "group": "Camera and images",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -166,8 +138,6 @@
       "kind": "application",
       "guide": "apps/image-tools/rotate",
       "group": "Applications",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -176,8 +146,6 @@
       "kind": "application",
       "guide": "apps/image-tools/jpeg",
       "group": "Applications",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -186,8 +154,6 @@
       "kind": "application",
       "guide": "apps/image-tools/present",
       "group": "Applications",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -196,19 +162,34 @@
       "kind": "hardware",
       "guide": "features#not-implemented",
       "group": "Startup and access",
-      "implementation": "Not implemented",
-      "verification": "Not device-tested",
       "scope": "both"
     },
     {
       "id": "removable-storage",
+      "stock": true,
       "label": "microSD data card",
       "kind": "hardware",
       "guide": "use/microsd",
       "group": "Storage",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
+    },
+    {
+      "id": "microsd-hot-swap",
+      "label": "microSD hot swap",
+      "kind": "system",
+      "guide": "use/microsd#remove-the-card-safely",
+      "group": "Storage",
+      "scope": "both",
+      "stock": true
+    },
+    {
+      "id": "sim-hot-swap",
+      "label": "SIM hot swap",
+      "kind": "system",
+      "guide": "features#not-implemented",
+      "group": "Bluetooth and networks",
+      "scope": "both",
+      "stock": true
     },
     {
       "id": "removable-system-root",
@@ -216,8 +197,6 @@
       "kind": "system",
       "guide": "guides/microsd-system-card",
       "group": "Storage",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -226,88 +205,78 @@
       "kind": "hardware",
       "guide": "guides/device-data#save-a-nand-backup",
       "group": "Storage",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
       "id": "headphone-audio",
+      "stock": true,
       "label": "Headphone audio",
       "kind": "hardware",
       "guide": "use/audio#play-a-file",
       "group": "Audio",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
       "id": "speaker-audio",
+      "stock": true,
       "label": "Speaker audio",
       "kind": "hardware",
       "guide": "use/audio#where-the-sound-goes",
       "group": "Audio",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
       "id": "phone-microphone",
+      "stock": true,
       "label": "Phone microphone",
       "kind": "hardware",
       "guide": "use/audio#record-from-the-microphone",
       "group": "Audio",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "overview"
     },
     {
       "id": "fm-radio",
+      "stock": true,
       "label": "FM radio",
       "kind": "hardware",
       "guide": "use/fm-radio",
       "group": "Audio",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
       "id": "modem-and-mobile-service",
+      "stock": true,
       "label": "Modem and mobile service",
       "kind": "hardware",
       "guide": "features#not-implemented",
       "group": "Bluetooth and networks",
-      "implementation": "Not implemented",
-      "verification": "Not device-tested",
       "scope": "overview"
     },
     {
       "id": "bluetooth",
+      "stock": true,
       "label": "Bluetooth",
       "kind": "hardware",
       "guide": "use/bluetooth",
       "group": "Bluetooth and networks",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "overview"
     },
     {
       "id": "wi-fi",
+      "stock": true,
       "label": "Wi-Fi",
       "kind": "hardware",
       "guide": "phones/bq-2830l-tank-connect-max#wi-fi",
       "group": "Bluetooth and networks",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
       "id": "camera",
+      "stock": true,
       "label": "Camera",
       "kind": "hardware",
       "guide": "use/camera",
       "group": "Camera and images",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -316,8 +285,6 @@
       "kind": "hardware",
       "guide": "use/power#charger-and-battery",
       "group": "Power and sensors",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -326,8 +293,6 @@
       "kind": "hardware",
       "guide": "use/power#charger-and-battery",
       "group": "Power and sensors",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -336,8 +301,6 @@
       "kind": "hardware",
       "guide": "use/cpu-and-temperature#temperature",
       "group": "Power and sensors",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -346,8 +309,6 @@
       "kind": "hardware",
       "guide": "develop/device-interfaces",
       "group": "Power and sensors",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -356,8 +317,6 @@
       "kind": "hardware",
       "guide": "use/power#clock-and-alarms",
       "group": "Power and sensors",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -366,28 +325,24 @@
       "kind": "hardware",
       "guide": "features#not-implemented",
       "group": "Power and sensors",
-      "implementation": "Not implemented",
-      "verification": "Not device-tested",
       "scope": "both"
     },
     {
       "id": "vibration",
+      "stock": true,
       "label": "Vibration",
       "kind": "hardware",
       "guide": "use/display-and-lights#vibration",
       "group": "Power and sensors",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
       "id": "indicator-leds",
+      "stock": true,
       "label": "Indicator LEDs",
       "kind": "hardware",
       "guide": "features#not-implemented",
       "group": "Display and input",
-      "implementation": "Not implemented",
-      "verification": "Not device-tested",
       "scope": "both"
     },
     {
@@ -396,8 +351,6 @@
       "kind": "system",
       "guide": "use/power#power-off-with-the-red-key",
       "group": "Power and sensors",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -406,8 +359,6 @@
       "kind": "system",
       "guide": "use/power#sleep",
       "group": "Power and sensors",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -416,8 +367,6 @@
       "kind": "system",
       "guide": "features#not-implemented",
       "group": "Power and sensors",
-      "implementation": "Not implemented",
-      "verification": "Not device-tested",
       "scope": "both"
     },
     {
@@ -426,8 +375,6 @@
       "kind": "application",
       "guide": "apps/armada",
       "group": "Applications",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -436,8 +383,6 @@
       "kind": "application",
       "guide": "apps/brightness",
       "group": "Applications",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
@@ -446,58 +391,51 @@
       "kind": "application",
       "guide": "apps/tyrquake",
       "group": "Applications",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "both"
     },
     {
       "id": "built-in-microphone",
+      "stock": true,
       "label": "Built-in microphone",
       "kind": "hardware",
       "guide": "use/audio#record-from-the-microphone",
       "group": "Audio",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "detail"
     },
     {
       "id": "headset-microphone",
+      "stock": true,
       "label": "Wired-headset microphone",
       "kind": "hardware",
       "guide": "use/audio#record-from-the-microphone",
       "group": "Audio",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "detail"
     },
     {
       "id": "automatic-audio-routing",
+      "stock": true,
       "label": "Automatic audio routing",
       "kind": "system",
       "guide": "use/audio#where-the-sound-goes",
       "group": "Audio",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "detail"
     },
     {
       "id": "bluetooth-pairing",
+      "stock": true,
       "label": "Bluetooth pairing",
       "kind": "system",
       "guide": "use/bluetooth#pair-with-a-computer-or-another-phone",
       "group": "Bluetooth and networks",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "detail"
     },
     {
       "id": "bluetooth-file-transfer",
+      "stock": true,
       "label": "Bluetooth file transfer (OPP)",
       "kind": "system",
       "guide": "use/bluetooth#receive-a-file-on-the-phone",
       "group": "Bluetooth and networks",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "detail"
     },
     {
@@ -506,8 +444,6 @@
       "kind": "system",
       "guide": "use/bluetooth#internet-over-bluetooth-pan",
       "group": "Bluetooth and networks",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "detail"
     },
     {
@@ -516,18 +452,15 @@
       "kind": "system",
       "guide": "use/bluetooth#send-audio-to-an-a2dp-sink",
       "group": "Bluetooth and networks",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "detail"
     },
     {
       "id": "bluetooth-a2dp-headsets",
+      "stock": true,
       "label": "Bluetooth headset audio (A2DP)",
       "kind": "system",
       "guide": "use/bluetooth#send-audio-to-an-a2dp-sink",
       "group": "Bluetooth and networks",
-      "implementation": "Implemented",
-      "verification": "Not device-tested",
       "scope": "detail"
     },
     {
@@ -536,8 +469,6 @@
       "kind": "system",
       "guide": "use/bluetooth#keyboards-and-mice",
       "group": "Bluetooth and networks",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "detail"
     },
     {
@@ -546,38 +477,33 @@
       "kind": "system",
       "guide": "use/bluetooth#keyboards-and-mice",
       "group": "Bluetooth and networks",
-      "implementation": "Implemented",
-      "verification": "Device-tested",
       "scope": "detail"
     },
     {
       "id": "mobile-calls",
+      "stock": true,
       "label": "Mobile calls",
       "kind": "system",
       "guide": "features#not-implemented",
       "group": "Bluetooth and networks",
-      "implementation": "Not implemented",
-      "verification": "Not device-tested",
       "scope": "detail"
     },
     {
       "id": "sms",
+      "stock": true,
       "label": "SMS",
       "kind": "system",
       "guide": "features#not-implemented",
       "group": "Bluetooth and networks",
-      "implementation": "Not implemented",
-      "verification": "Not device-tested",
       "scope": "detail"
     },
     {
       "id": "mobile-data",
+      "stock": true,
       "label": "Mobile data",
       "kind": "system",
       "guide": "features#not-implemented",
       "group": "Bluetooth and networks",
-      "implementation": "Not implemented",
-      "verification": "Not device-tested",
       "scope": "detail"
     },
     {
@@ -586,8 +512,32 @@
       "kind": "application",
       "guide": "apps/ffmpeg",
       "group": "Applications",
-      "implementation": "Implemented",
-      "verification": "Not device-tested",
+      "scope": "both"
+    },
+    {
+      "id": "flashlight",
+      "label": "Flashlight",
+      "kind": "hardware",
+      "guide": "features#not-implemented",
+      "group": "Display and input",
+      "scope": "both",
+      "stock": true
+    },
+    {
+      "id": "infrared-transmitter",
+      "label": "Infrared remote control",
+      "kind": "hardware",
+      "guide": "features#not-implemented",
+      "group": "Bluetooth and networks",
+      "scope": "both",
+      "stock": true
+    },
+    {
+      "id": "gpu-rendering",
+      "label": "GPU rendering",
+      "kind": "hardware",
+      "guide": "platforms/sc9820e#gpu-rendering",
+      "group": "Display and input",
       "scope": "both"
     }
   ]

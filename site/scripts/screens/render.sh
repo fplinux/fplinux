@@ -117,19 +117,23 @@ render_brightness() {
 render_armada_and_rotation() {
 	showcase=$aports/fplinux-showcase
 	rotate=$aports/fplinux-rotate
+	# The pinned libdrm pkg-config output is a list of compiler arguments.
+	# shellcheck disable=SC2046
 	compile -O2 -I"$root/include/fplinux" -I"$showcase" -I"$screens_dir" \
+		-isystem /opt/quality/include $(pkg-config --cflags libdrm) \
 		"$screens_dir/armada-screen.c" "$screens_dir/screen-frame.c" \
 		"$showcase/armada-scene.c" "$showcase/armada-renderer.c" \
+		"$showcase/armada-geometry.c" "$showcase/armada-overlay.c" \
+		"$showcase/armada-gpu-renderer.c" "$root/lib/fplinux/fplinux-gpu.c" \
 		"$showcase/armada-storyboard.c" "$root/lib/fplinux/fplinux-font.c" \
-		-o "$work/armada-screen"
+		$(pkg-config --libs libdrm) -ldl -o "$work/armada-screen"
 	compile -O2 -I"$rotate" -I"$screens_dir" \
 		"$screens_dir/rotate-screen.c" "$screens_dir/screen-frame.c" \
 		"$rotate/fplinux-rotate-core.c" -o "$work/rotate-screen"
 	"$work/armada-screen" "$armada_frame" "$work/ter-u16n.psf" \
 		"$work/armada.rgb565"
 	png 240 320 "$work/armada.rgb565" armada.png
-	# ARMADA renders only up to 240 pixels wide, so the 320x240 source is a
-	# portrait frame turned by the same engine; turning it back is the result.
+	# Use one portrait scene for both sides of the rotation example.
 	"$work/armada-screen" "$rotate_frame" "$work/ter-u16n.psf" \
 		"$work/portrait.rgb565"
 	"$work/rotate-screen" "$work/portrait.rgb565" 240 320 270 \

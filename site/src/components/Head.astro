@@ -1,0 +1,9 @@
+---
+import Default from "@astrojs/starlight/components/Head.astro";
+import { Font } from "astro:assets";
+
+const offline = process.env.FPLINUX_SITE_OFFLINE === "1";
+---
+
+<Default />
+<Font cssVariable="--font-noto-sans" preload={!offline} />

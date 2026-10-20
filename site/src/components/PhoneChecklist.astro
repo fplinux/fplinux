@@ -5,7 +5,7 @@ import { currentPhone } from "../data/phones.ts";
 
 const { phone } = Astro.locals.starlightRoute.entry.data;
 if (!phone) throw new Error("Phone checklist requires a phone page.");
-currentPhone(phone);
+const target = currentPhone(phone);
 const support = loadSupport();
 const rows = support.features.filter((item) => item.scope !== "overview");
 const groups = support.groups.filter((group) =>
@@ -15,13 +15,25 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 const guideLink = (slug: string) =>
 	`${base}/${slug.replace("#", "/#")}${slug.includes("#") ? "" : "/"}`;
 const defaultNote: Record<string, string> = {
-	"Not supported": "No supported FPLinux path on this phone.",
-	Supported: "Verified on this phone.",
-	Unknown: "No device result is recorded for this function.",
+	unsupported: "No supported FPLinux path on this phone.",
+	untested: "No device result is recorded for this function.",
+	verified: "Verified on this phone.",
+};
+const stockLabels = {
+	available: "Available",
+	unavailable: "Unavailable",
+	unknown: "Unknown",
 };
 ---
 
 <div class="phone-checklist">
+	<p>
+		Platform:{" "}
+		<a href={`${base}/platforms/${target.platform.id}/`}>
+			{target.platform.name}
+		</a>
+		.
+	</p>
 	<nav aria-label="Support checklist groups">
 		<ul>
 			{groups.map((group): astroHTML.JSX.Children => (
@@ -42,7 +54,8 @@ const defaultNote: Record<string, string> = {
 				<thead>
 					<tr>
 						<th>Feature</th>
-						<th>Support</th>
+						<th>Stock firmware</th>
+						<th>FPLinux</th>
 						<th>Details</th>
 					</tr>
 				</thead>
@@ -61,7 +74,13 @@ const defaultNote: Record<string, string> = {
 											<small>Hardware: {state.hardware.toLowerCase()}</small>
 										)}
 									</th>
+									<td class="stock">
+										<span class="mobile-label">Stock: </span>
+										{state.stock ? stockLabels[state.stock] : "—"}
+										{state.stockNote && <small>{state.stockNote}</small>}
+									</td>
 									<td class="status">
+										<span class="mobile-label">FPLinux: </span>
 										<SupportBadge status={state.status} />
 									</td>
 									<td class="details">
@@ -96,16 +115,26 @@ const defaultNote: Record<string, string> = {
 	}
 
 	th[scope="row"] {
-		width: 31%;
+		width: 25%;
 		font-weight: 500;
 	}
 
-	th small {
+	th small,
+	.stock small {
 		display: block;
 		margin-top: 0.25rem;
 		color: var(--sl-color-gray-2);
 		font-size: var(--sl-text-xs);
 		font-weight: 400;
+	}
+
+	.stock {
+		width: 25%;
+		font-size: var(--sl-text-sm);
+	}
+
+	.mobile-label {
+		display: none;
 	}
 
 	.status {
@@ -143,6 +172,19 @@ const defaultNote: Record<string, string> = {
 			width: auto;
 			padding: 0;
 			border: 0;
+		}
+
+		th[scope="row"] {
+			grid-column: 1 / -1;
+			padding-bottom: 0.5rem;
+		}
+
+		.stock {
+			width: auto;
+		}
+
+		.mobile-label {
+			display: inline;
 		}
 
 		.status {

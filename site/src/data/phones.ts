@@ -80,6 +80,12 @@ export const loadPhones = (root = repositoryRoot) => {
 		const display = panelSchema.parse(readManifest(panelPath));
 		const { brand, hardware_codes: hardwareCodes, product } = target.identity;
 		const name = `${brand} ${product}${hardwareCodes.length ? ` (${hardwareCodes.join(", ")})` : ""}`;
+		const profiles = ["default"];
+		if (target.microsd !== undefined) {
+			profiles.push(
+				target.platform === "sc9820e" ? "microsd-root" : "microsd-uboot"
+			);
+		}
 		return {
 			...page,
 			bootInstructions: target.adapter.boot_instructions,
@@ -91,10 +97,7 @@ export const loadPhones = (root = repositoryRoot) => {
 				id: target.platform,
 				name: `${platform.identity.vendor} ${platform.identity.soc}`,
 			},
-			profiles:
-				target.microsd === undefined
-					? ["default"]
-					: ["default", "microsd-uboot"],
+			profiles,
 		};
 	});
 	return { phones, sources: [...sources].toSorted() };

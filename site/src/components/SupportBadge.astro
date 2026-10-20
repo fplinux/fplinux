@@ -1,18 +1,19 @@
 ---
 import { Badge } from "@astrojs/starlight/components";
+import type { SupportStatus } from "../data/support/index.ts";
 
 interface Props {
-	status: string;
+	status: SupportStatus;
 }
 const { status } = Astro.props;
 const states: Record<
-	string,
+	SupportStatus,
 	{ label: string; variant: "success" | "caution" | "danger" | "default" }
 > = {
-	"Not supported": { label: "Unsupported", variant: "danger" },
-	Partial: { label: "Partial", variant: "caution" },
-	Supported: { label: "Verified", variant: "success" },
-	Unknown: { label: "Not tested", variant: "default" },
+	partial: { label: "Partial", variant: "caution" },
+	unsupported: { label: "Unsupported", variant: "danger" },
+	untested: { label: "Not tested", variant: "default" },
+	verified: { label: "Verified", variant: "success" },
 };
 const state = states[status];
 if (!state) throw new Error(`Unknown support status: ${status}`);

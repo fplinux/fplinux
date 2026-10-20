@@ -38,7 +38,7 @@
 	<text x="476" y="211" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">exec_distance = 0x314d</text>
 	<rect x="8" y="244" width="208" height="52" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
 	<text x="20" y="265" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Bootstrap stages</text>
-	<text x="20" y="283" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">ENTRY … PREPARE LINUX</text>
+	<text x="20" y="283" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">BOARD INIT … LINUX</text>
 	<path d="M112,296 L112,308" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#bring-up-flow-arrow)"/>
 	<path d="M216,270 L456,270" class="dg-arrow-danger" fill="none" stroke="#BA1A1A" stroke-width="2" marker-end="url(#bring-up-flow-arrow-danger)"/>
 	<text x="340" y="246" text-anchor="middle" class="dg-text-small dg-text-danger" fill="#BA1A1A" font-size="12">failed attempts or</text>
@@ -68,7 +68,7 @@
 	<text x="268" y="511" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">nand backup</text>
 	<rect x="504" y="472" width="208" height="52" rx="10" class="dg-box" fill="#FFFFFF" stroke="#6E797D" stroke-width="1.5"/>
 	<text x="516" y="493" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">Prepare board report</text>
-	<text x="516" y="511" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">device-data prepare</text>
+	<text x="516" y="511" class="dg-text-small dg-mono" fill="#202D35" font-size="12" font-family="ui-monospace, monospace">device-data report</text>
 	<path d="M216,498 L248,498" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#bring-up-flow-arrow)"/>
 	<path d="M464,498 L496,498" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#bring-up-flow-arrow)"/>
 	<path d="M608,524 L608,548" class="dg-arrow" fill="none" stroke="#396475" stroke-width="2" marker-end="url(#bring-up-flow-arrow)"/>

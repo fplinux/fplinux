@@ -2,7 +2,7 @@
 // Phone cards with available screen renders and key support status.
 import { LinkButton } from "@astrojs/starlight/components";
 import SupportBadge from "./SupportBadge.astro";
-import { loadSupport } from "../data/support/index.ts";
+import { loadSupport, type SupportStatus } from "../data/support/index.ts";
 import { loadPhones } from "../data/phones.ts";
 
 const { phones } = loadPhones();
@@ -22,9 +22,9 @@ const highlights = [
 	{ feature: "removable-system-root", label: "microSD system" },
 ];
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
-const status = (feature: string, phone: string) =>
+const status = (feature: string, phone: string): SupportStatus =>
 	support.features.find((item) => item.id === feature)?.phones[phone]?.status ??
-	"Unknown";
+	"untested";
 ---
 
 <div class="fp-phone-cards not-content">

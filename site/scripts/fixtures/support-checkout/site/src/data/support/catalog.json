@@ -4,22 +4,35 @@
       "group": "Access",
       "guide": "use/connect#shell",
       "id": "second-feature",
-      "implementation": "Implemented",
       "kind": "system",
       "label": "Connection",
-      "scope": "both",
-      "verification": "Device-tested"
+      "scope": "both"
     },
     {
       "group": "Input",
       "guide": "use/terminal",
       "id": "first-feature",
-      "implementation": "Implemented",
       "kind": "hardware",
       "label": "Input device",
       "scope": "detail",
-      "verification": "Not device-tested"
+      "stock": true
+    },
+    {
+      "group": "Display",
+      "guide": "use/display",
+      "id": "engine-feature",
+      "kind": "hardware",
+      "label": "Platform engine",
+      "scope": "both"
+    },
+    {
+      "group": "Access",
+      "guide": "apps/viewer",
+      "id": "viewer",
+      "kind": "application",
+      "label": "Viewer",
+      "scope": "both"
     }
   ],
-  "groups": ["Input", "Access"]
+  "groups": ["Input", "Display", "Access"]
 }

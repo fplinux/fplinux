@@ -1,0 +1,18 @@
+---
+import { Badge } from "@astrojs/starlight/components";
+import type { ImplementationStatus } from "../data/support/index.ts";
+
+interface Props {
+	status: ImplementationStatus;
+}
+const { status } = Astro.props;
+const labels: Record<ImplementationStatus, string> = {
+	implemented: "Implemented",
+	unimplemented: "Not implemented",
+};
+---
+
+<Badge
+	text={labels[status]}
+	variant={status === "implemented" ? "success" : "default"}
+/>

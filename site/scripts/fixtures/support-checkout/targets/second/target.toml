@@ -1,0 +1,12 @@
+platform = "plain"
+
+[identity]
+brand = "Second"
+product = "Phone"
+hardware_codes = []
+
+[display]
+panel = "panel.toml"
+
+[adapter]
+boot_instructions = "Hold the second key."

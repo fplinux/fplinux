@@ -1,264 +1,318 @@
 {
   "ram-boot": {
-    "status": "Supported",
+    "status": "verified",
     "note": ""
   },
   "persistent-boot": {
-    "status": "Not supported",
+    "status": "unsupported",
     "note": "A USB-loaded RAM bootstrap is required for every Linux boot."
   },
   "local-console": {
-    "hardware": "Present",
-    "status": "Supported",
+    "hardware": "present",
+    "status": "verified",
     "note": "240×320 graphical terminal with phone-keypad input; RTC wake preserves the shell in USB-powered RAM sessions. Terminal use with a microSD system root, operation without USB power and physical external keyboards are untested."
   },
   "lcd-backlight": {
-    "hardware": "Present",
-    "status": "Supported",
+    "stock": "unknown",
+    "hardware": "present",
+    "status": "verified",
     "note": "System scale 0…10 works; level 0 turns the backlight off."
   },
   "keypad-backlight": {
-    "hardware": "Present",
-    "status": "Supported",
+    "stock": "unknown",
+    "hardware": "present",
+    "status": "verified",
     "note": "Binary LED control; on and off are visible."
   },
   "usb-networking": {
-    "hardware": "Present",
-    "status": "Supported",
+    "hardware": "present",
+    "status": "verified",
     "note": ""
   },
   "ssh-access": {
-    "status": "Supported",
+    "status": "verified",
     "note": ""
   },
   "file-transfer": {
-    "status": "Supported",
+    "status": "verified",
     "note": "RAM destinations are supported. Card destinations require qualified fixed-session initialization."
   },
   "host-keyboard-bridge": {
-    "status": "Supported",
+    "status": "verified",
     "note": ""
   },
   "cpu-clock-reporting": {
-    "status": "Supported",
+    "status": "verified",
     "note": ""
   },
   "manual-cpu-frequency-selection": {
-    "status": "Partial",
+    "status": "partial",
     "note": "The 768 MHz and 1 GHz settings are in the target build; switching on this phone has not been physically tested."
   },
   "ap-dmaengine": {
-    "hardware": "Present",
-    "status": "Partial",
+    "hardware": "present",
+    "status": "partial",
     "note": "Memory copies and the fixed ROTA request; see platform limits."
   },
   "image-rotation-engine": {
-    "hardware": "Present",
-    "status": "Supported",
+    "hardware": "present",
+    "status": "verified",
     "note": "RGB, grayscale and two-plane YUV through V4L2 mem2mem."
   },
   "jpeg-engine": {
-    "hardware": "Present",
-    "status": "Supported",
+    "hardware": "present",
+    "status": "verified",
     "note": "Baseline decode, fixed encode geometries and fixed NV16 scaler pairs."
   },
   "native-image-output": {
-    "hardware": "Present",
-    "status": "Partial",
+    "hardware": "present",
+    "status": "partial",
     "note": "Native 240×320 NV16 or RGB565 transfers. Returns to the same terminal and shell; visible image fidelity is untested."
   },
   "image-rotation": {
-    "status": "Supported",
+    "status": "verified",
     "note": "Explicit CPU/ROTA selection and DRM preview. Returns to the same terminal and shell; visible image fidelity is untested."
   },
   "jpeg-codec-and-scaling": {
-    "status": "Supported",
+    "status": "verified",
     "note": "Hardware decode, fixed encode and fixed half-scaling."
   },
   "native-image-presentation": {
-    "status": "Partial",
+    "status": "partial",
     "note": "Direct NV16 or CPU-converted RGB565 transfers. Returns to the same terminal and shell; visible image fidelity is untested."
   },
   "usb-host-mode": {
-    "hardware": "Unknown",
-    "status": "Not supported",
+    "hardware": "unknown",
+    "status": "unsupported",
     "note": ""
   },
   "removable-storage": {
-    "hardware": "Present",
-    "status": "Partial",
+    "stock": "unknown",
+    "hardware": "present",
+    "status": "partial",
     "note": "The card stays installed from boot to shutdown; hot-swap is not supported. Fixed-session initialization has not been qualified on this phone."
   },
   "removable-system-root": {
-    "hardware": "Present",
-    "status": "Partial",
+    "hardware": "present",
+    "status": "partial",
     "note": "FAT32 FIT plus ext4 system root; fixed-session card initialization is unqualified."
   },
   "internal-phone-storage": {
-    "hardware": "Present",
-    "status": "Partial",
+    "hardware": "present",
+    "status": "partial",
     "note": "Read-only raw NAND backup; no filesystem, writes or restore."
   },
   "headphone-audio": {
-    "hardware": "Present",
-    "status": "Supported",
+    "stock": "unknown",
+    "hardware": "present",
+    "status": "verified",
     "note": "Stereo S16_LE playback; the default device converts input to 48 kHz, and the fitted profile supplies stock-derived levels, equalizer and ALC."
   },
   "speaker-audio": {
-    "hardware": "Present",
-    "status": "Supported",
+    "stock": "unknown",
+    "hardware": "present",
+    "status": "verified",
     "note": "Rear loudspeaker with fitted gains, stock equalizer and ALC."
   },
   "phone-microphone": {
-    "hardware": "Present",
-    "status": "Partial",
+    "stock": "unknown",
+    "hardware": "present",
+    "status": "partial",
     "note": "The built-in microphone records mono 48-kHz PCM; the wired-headset microphone has not been tested on this phone."
   },
   "fm-radio": {
-    "hardware": "Present",
-    "status": "Supported",
+    "stock": "unknown",
+    "stockNote": "Published stock features describe the Plus variant; equivalence with this target is unconfirmed.",
+    "hardware": "present",
+    "status": "verified",
     "note": "RAM profile: scan and headphone/speaker playback with EQ/ALC off. EQ-on playback checked on headphones only; speaker EQ and microSD FM not tested."
   },
   "modem-and-mobile-service": {
-    "hardware": "Present",
-    "status": "Not supported",
+    "stock": "unknown",
+    "stockNote": "The identified stock product is 244 Modern Plus 4G; the non-Plus target is unconfirmed.",
+    "hardware": "present",
+    "status": "unsupported",
     "note": ""
   },
   "bluetooth": {
-    "hardware": "Present",
-    "status": "Partial",
+    "stock": "unknown",
+    "hardware": "present",
+    "status": "partial",
     "note": "Pairing, OPP and PAN in both profiles; RAM A2DP/SBC output to a Linux PC sink. Physical Bluetooth headsets, keyboards and mice remain unqualified."
   },
   "wi-fi": {
-    "hardware": "Unknown",
-    "status": "Not supported",
+    "stock": "unknown",
+    "hardware": "unknown",
+    "status": "unsupported",
     "note": ""
   },
   "camera": {
-    "hardware": "Present",
-    "status": "Supported",
+    "stock": "unknown",
+    "stockNote": "The published camera listing belongs to the unconfirmed Plus variant.",
+    "hardware": "present",
+    "status": "verified",
     "note": "BF30A2; 240×320 NV16 through V4L2 in the RAM profile. Camera with a microSD system root is unqualified. Sensor rotation is 0°; the native geometry is accepted by hardware JPEG. Capture and codec jobs may run concurrently at native size, including through display updates, blanking and wake."
   },
   "charger-status": {
-    "hardware": "Present",
-    "status": "Partial",
+    "hardware": "present",
+    "status": "partial",
     "note": "Read-only status is available; battery charging has not been tested."
   },
   "battery-telemetry": {
-    "hardware": "Present",
-    "status": "Partial",
-    "note": "Interface responds without a battery; battery voltage/current accuracy has not been checked."
+    "hardware": "present",
+    "status": "partial",
+    "note": "Voltage, current and charge-counter interfaces are available; battery measurements have not been verified."
   },
   "soc-temperature": {
-    "hardware": "Present",
-    "status": "Partial",
+    "hardware": "present",
+    "status": "partial",
     "note": "Shared temperature interface enabled; physical accuracy has not been checked."
   },
   "auxiliary-adc": {
-    "hardware": "Present",
-    "status": "Partial",
+    "hardware": "present",
+    "status": "partial",
     "note": "Shared raw-channel interface enabled; physical inputs and accuracy have not been checked."
   },
   "real-time-clock": {
-    "hardware": "Present",
-    "status": "Partial",
+    "hardware": "present",
+    "status": "partial",
     "note": "Read/set time, one-shot alarms and RTC wake work in both profiles; no update interrupts or alarm power-on."
   },
   "other-battery-functions": {
-    "hardware": "Unknown",
-    "status": "Not supported",
+    "hardware": "unknown",
+    "status": "unsupported",
     "note": "No battery level, temperature or charge control is provided."
   },
   "vibration": {
-    "hardware": "Present",
-    "status": "Partial",
+    "stock": "available",
+    "stockNote": "Stock vibration uses the rear speaker rather than a separate motor.",
+    "hardware": "present",
+    "status": "partial",
     "note": "Rear speaker vibration; headphone audio is muted meanwhile, and one continuous pulse lasts at most about three seconds."
   },
   "indicator-leds": {
-    "hardware": "Unknown",
-    "status": "Not supported",
+    "stock": "unknown",
+    "hardware": "unknown",
+    "status": "unsupported",
     "note": ""
   },
   "power-off": {
-    "status": "Partial",
+    "status": "partial",
     "note": "Establish card safety before disconnecting USB power; battery-only power-off has not been tested."
   },
   "suspend": {
-    "status": "Partial",
+    "status": "partial",
     "note": "s2idle with RTC/red-handset wake and Bluetooth; mounted-card and card-backed-swap sleep is unqualified with fixed-session card initialization."
   },
   "reboot": {
-    "status": "Not supported",
+    "status": "unsupported",
     "note": ""
   },
   "fplinux-armada": {
-    "status": "Partial",
+    "status": "partial",
     "note": "Physical light effects have not been tested."
   },
   "brightness-control": {
-    "status": "Supported",
+    "status": "verified",
     "note": "Phone-keypad control of levels 0…10; level 0 turns the backlight off."
   },
   "tyrquake": {
-    "status": "Partial",
+    "status": "partial",
     "note": "Game data can use RAM or ext4 microSD storage, including the system root; fixed-session card initialization is unqualified."
   },
   "built-in-microphone": {
-    "hardware": "Present",
-    "status": "Supported",
+    "stock": "unknown",
+    "hardware": "present",
+    "status": "verified",
     "note": "Mono 48-kHz PCM recording."
   },
   "headset-microphone": {
-    "hardware": "Unknown",
-    "status": "Unknown",
+    "stock": "unknown",
+    "hardware": "unknown",
+    "status": "untested",
     "note": "Wired-headset recording has not been tested on this phone."
   },
   "automatic-audio-routing": {
-    "status": "Supported",
+    "stock": "unknown",
+    "status": "verified",
     "note": "Insert/remove selects the playback output in USB-powered RAM sessions; switching a playing signal can click."
   },
   "bluetooth-pairing": {
-    "status": "Supported",
+    "stock": "unknown",
+    "status": "verified",
     "note": "Pairing in RAM and microSD profiles."
   },
   "bluetooth-file-transfer": {
-    "status": "Supported",
+    "stock": "unknown",
+    "status": "verified",
     "note": "Bidirectional OPP in RAM and microSD profiles."
   },
   "bluetooth-pan-internet": {
-    "status": "Supported",
+    "status": "verified",
     "note": "PAN Internet in RAM and microSD profiles."
   },
   "bluetooth-a2dp-linux-pc": {
-    "status": "Supported",
+    "status": "verified",
     "note": "SBC playback to a Linux PC sink in the RAM profile; reconnect is supported."
   },
   "bluetooth-a2dp-headsets": {
-    "status": "Unknown",
+    "stock": "unknown",
+    "status": "untested",
     "note": "Physical Bluetooth headsets have not been tested."
   },
   "bluetooth-keyboard": {
-    "status": "Unknown",
+    "status": "untested",
     "note": "Physical Bluetooth keyboard input has not been tested."
   },
   "bluetooth-mouse": {
-    "status": "Unknown",
+    "status": "untested",
     "note": "Physical Bluetooth mouse input has not been tested."
   },
   "mobile-calls": {
-    "status": "Not supported",
+    "stock": "unknown",
+    "status": "unsupported",
     "note": "Calls have no supported FPLinux path."
   },
   "sms": {
-    "status": "Not supported",
+    "stock": "unknown",
+    "status": "unsupported",
     "note": "SMS has no supported FPLinux path."
   },
   "mobile-data": {
-    "status": "Not supported",
+    "stock": "unknown",
+    "status": "unsupported",
     "note": "Mobile data has no supported FPLinux path."
   },
   "ffmpeg": {
-    "status": "Unknown",
+    "status": "untested",
     "note": "Optional CPU MPEG-4 Part 2, H.263 and H.264 decoding; device use is untested."
+  },
+  "microsd-hot-swap": {
+    "stock": "unknown",
+    "status": "unsupported",
+    "note": "Insert the card before boot and keep it installed throughout the powered session."
+  },
+  "sim-hot-swap": {
+    "stock": "unknown",
+    "status": "unsupported",
+    "note": "FPLinux has no supported cellular or SIM service path."
+  },
+  "flashlight": {
+    "stock": "unknown",
+    "stockNote": "The published flashlight listing belongs to the unconfirmed Plus variant.",
+    "hardware": "unknown",
+    "status": "unsupported",
+    "note": "FPLinux provides no flashlight control."
+  },
+  "infrared-transmitter": {
+    "stock": "unknown",
+    "hardware": "unknown",
+    "status": "unsupported",
+    "note": "FPLinux provides no infrared remote-control path."
+  },
+  "gpu-rendering": {
+    "hardware": "unknown",
+    "status": "unsupported",
+    "note": "No FPLinux GPU rendering path on this phone."
   }
 }

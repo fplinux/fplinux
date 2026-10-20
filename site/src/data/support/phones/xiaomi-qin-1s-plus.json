@@ -1,0 +1,310 @@
+{
+  "ram-boot": {
+    "status": "verified",
+    "note": "The default RAM profile reaches an authenticated Linux session from a Linux PC. Builds and Linux archives include the loaders; no separate loader files or phone backup are needed. The autonomous Linux archive starts Linux and SSH on its first run and reconnects when reopened. Native Windows execution is unsupported. Use USB power; operation with a connected battery is not qualified."
+  },
+  "persistent-boot": {
+    "status": "unsupported",
+    "note": "Every start requires the PC's USB loader."
+  },
+  "local-console": {
+    "status": "partial",
+    "note": "The direct-display terminal works at 240×320, including after blanking and unblanking. Tear-free output across all applications and complete physical keypad input are not verified."
+  },
+  "lcd-backlight": {
+    "stock": "available",
+    "hardware": "present",
+    "status": "partial",
+    "note": "The native sprd_backlight device and logical brightness get/set work. Level 1 visibly dims the display relative to the boot default 7, and restoring 7 works. Other levels and brightness calibration are not verified."
+  },
+  "keypad-backlight": {
+    "stock": "unknown",
+    "hardware": "present",
+    "status": "partial",
+    "note": "The :kbd_backlight LED supports manual levels 0–255 and the default input-events trigger with a five-second timeout, including grabbed input devices. The upper key row lights visibly; complete physical keypad input remains untested."
+  },
+  "usb-networking": {
+    "status": "verified",
+    "note": "USB-NCM works in the default RAM profile."
+  },
+  "ssh-access": {
+    "status": "verified",
+    "note": "Authenticated SSH works over the local USB connection in the default RAM profile."
+  },
+  "file-transfer": {
+    "status": "verified",
+    "note": "SSH upload and pull verify transferred file contents in the default RAM profile."
+  },
+  "host-keyboard-bridge": {
+    "status": "unsupported",
+    "note": "Use SSH for PC input; forwarding a physical PC keyboard is unavailable for this target."
+  },
+  "cpu-clock-reporting": {
+    "status": "verified",
+    "note": "Native cpufreq reports the shared CPU clock setting in kHz through cpuinfo_cur_freq. The default is 1300000 kHz."
+  },
+  "manual-cpu-frequency-selection": {
+    "status": "verified",
+    "note": "Both cores share manual 1300/768 MHz selection without voltage changes. Load, microphone capture and CPU1 offline/online work at 768 MHz; restoration to 1300 MHz works. Automatic scaling and CPU thermal protection are unavailable."
+  },
+  "ap-dmaengine": {
+    "hardware": "present",
+    "status": "partial",
+    "note": "Memory-copy DMA supports unaligned and multi-fragment transfers. Display-output DMA works after s2idle. RX DMA is not verified."
+  },
+  "native-image-output": {
+    "hardware": "present",
+    "status": "partial",
+    "note": "CPU-converted RGB565 grayscale frames display at 240×320. Native NV16 conversion in display hardware is not verified."
+  },
+  "image-rotation": {
+    "status": "unsupported",
+    "note": ""
+  },
+  "jpeg-codec-and-scaling": {
+    "status": "unsupported",
+    "note": ""
+  },
+  "native-image-presentation": {
+    "status": "partial",
+    "note": "Use --mode cpu-rgb565: a 240×320 grayscale frame displays and normal exit restores the terminal. Native NV16 output is not verified."
+  },
+  "usb-host-mode": {
+    "hardware": "unknown",
+    "status": "unsupported",
+    "note": ""
+  },
+  "removable-storage": {
+    "stock": "available",
+    "hardware": "present",
+    "status": "partial",
+    "note": "A 16 GB ext4 data card supports reads, writes and persistence across a power cycle after sync and unmount. FAT32 data-file use is not verified. Hot insertion/removal is unqualified; insert before boot and keep installed during the supported session."
+  },
+  "removable-system-root": {
+    "status": "verified",
+    "note": "microsd-root loads Linux over USB and mounts ext4 on the card as /. The root grows to fill a 16 GB card; installed packages and files persist after a cold start. Each start requires the PC loader. Keep the card installed and remount the root read-only before removing power."
+  },
+  "internal-phone-storage": {
+    "hardware": "present",
+    "status": "unsupported",
+    "note": "Internal eMMC is disabled; no read, write or backup interface is provided."
+  },
+  "headphone-audio": {
+    "stock": "unknown",
+    "hardware": "unknown",
+    "status": "unsupported",
+    "note": "Wired-headphone playback and automatic routing are unsupported."
+  },
+  "speaker-audio": {
+    "stock": "available",
+    "hardware": "present",
+    "status": "partial",
+    "note": "Stereo S16_LE playback at 48 kHz mixes both channels into the rear speaker; default playback converts other rates and channel counts. Master Playback Volume 1–7 produces audible output; the default is 1 and 0 mutes it. Stop, restart and switching to microphone capture work. Playback and capture are mutually exclusive. Loudness and playback quality are uncalibrated; stability under combined application and speaker load is not fully qualified."
+  },
+  "phone-microphone": {
+    "stock": "available",
+    "hardware": "present",
+    "status": "partial",
+    "note": "Built-in microphone capture records acoustic input as mono S16_LE at 48 kHz, including during display updates. Preparation takes about one second. Stop, restart and buffer-overrun recovery work. Playback and capture are mutually exclusive; speech quality and sensitivity are uncalibrated."
+  },
+  "fm-radio": {
+    "stock": "unknown",
+    "hardware": "unknown",
+    "status": "unsupported",
+    "note": ""
+  },
+  "modem-and-mobile-service": {
+    "stock": "available",
+    "hardware": "present",
+    "status": "unsupported",
+    "note": ""
+  },
+  "bluetooth": {
+    "stock": "available",
+    "hardware": "present",
+    "status": "unsupported",
+    "note": "Unsupported and off by default. Optional prepared radio data does not establish a working connection."
+  },
+  "wi-fi": {
+    "stock": "available",
+    "hardware": "present",
+    "status": "unsupported",
+    "note": "Unsupported and off by default. Optional prepared radio data does not establish a working connection."
+  },
+  "camera": {
+    "stock": "unavailable",
+    "hardware": "absent",
+    "status": "unsupported",
+    "note": ""
+  },
+  "charger-status": {
+    "hardware": "unknown",
+    "status": "unsupported",
+    "note": ""
+  },
+  "battery-telemetry": {
+    "hardware": "unknown",
+    "status": "unsupported",
+    "note": ""
+  },
+  "soc-temperature": {
+    "hardware": "unknown",
+    "status": "unsupported",
+    "note": ""
+  },
+  "auxiliary-adc": {
+    "hardware": "present",
+    "status": "partial",
+    "note": "Calibrated board-thermistor and supply-voltage readings are available; board temperature is exposed through the thermal interface. Absolute accuracy and battery telemetry are not verified."
+  },
+  "real-time-clock": {
+    "hardware": "present",
+    "status": "partial",
+    "note": "Time read/set, one-shot alarms while running and RTC wake from s2idle work. Long-term retention without power and alarm wake from power-off are not verified. The host tries to set system time at session startup; reconnecting does not reset it."
+  },
+  "other-battery-functions": {
+    "hardware": "unknown",
+    "status": "unsupported",
+    "note": ""
+  },
+  "vibration": {
+    "stock": "available",
+    "hardware": "present",
+    "status": "verified",
+    "note": "Binary FF_RUMBLE effects with a five-second automatic cutoff."
+  },
+  "indicator-leds": {
+    "stock": "unknown",
+    "hardware": "unknown",
+    "status": "unsupported",
+    "note": ""
+  },
+  "power-off": {
+    "status": "partial",
+    "note": "Software poweroff stops Linux and turns the display off; USB can still supply power afterwards. Power-off with a connected battery and physical power-key behavior are not verified."
+  },
+  "suspend": {
+    "status": "partial",
+    "note": "s2idle and RTC alarm wake work on USB power in default and microsd-root. Close audio streams first. Unmount data-card filesystems in the RAM profile; the ext4 system root may remain read-write in microsd-root. Direct-display output returns in both profiles; graphical-session resume is not qualified. Deep suspend is unsupported; physical-key wake, battery-powered sleep and other mounted-card filesystems are not verified."
+  },
+  "reboot": {
+    "status": "unsupported",
+    "note": ""
+  },
+  "fplinux-armada": {
+    "status": "partial",
+    "note": "Software and GPU rendering are available. Exit restores the previous display state, LCD brightness and keypad light and stops vibration. Physical soft-key operation is not verified."
+  },
+  "brightness-control": {
+    "status": "untested",
+    "note": "The brightness CLI get/set works; physical keypad use of the application is not tested."
+  },
+  "tyrquake": {
+    "status": "partial",
+    "note": "TyrQuake can use game data on an ext4 microSD card or in RAM, with software or GPU rendering. Complete physical keypad operation is not verified. There is no game sound."
+  },
+  "built-in-microphone": {
+    "stock": "available",
+    "hardware": "present",
+    "status": "partial",
+    "note": "Mono S16_LE at 48 kHz records acoustic input, including during display updates. Preparation takes about one second. Stop, restart and buffer-overrun recovery work; speech quality and sensitivity are uncalibrated."
+  },
+  "headset-microphone": {
+    "stock": "unknown",
+    "hardware": "unknown",
+    "status": "unsupported",
+    "note": ""
+  },
+  "automatic-audio-routing": {
+    "stock": "unknown",
+    "status": "unsupported",
+    "note": ""
+  },
+  "bluetooth-pairing": {
+    "stock": "unknown",
+    "status": "unsupported",
+    "note": ""
+  },
+  "bluetooth-file-transfer": {
+    "stock": "unknown",
+    "status": "unsupported",
+    "note": ""
+  },
+  "bluetooth-pan-internet": {
+    "status": "unsupported",
+    "note": ""
+  },
+  "bluetooth-a2dp-linux-pc": {
+    "status": "unsupported",
+    "note": ""
+  },
+  "bluetooth-a2dp-headsets": {
+    "stock": "unknown",
+    "status": "unsupported",
+    "note": ""
+  },
+  "bluetooth-keyboard": {
+    "status": "unsupported",
+    "note": ""
+  },
+  "bluetooth-mouse": {
+    "status": "unsupported",
+    "note": ""
+  },
+  "mobile-calls": {
+    "stock": "available",
+    "status": "unsupported",
+    "note": ""
+  },
+  "sms": {
+    "stock": "unknown",
+    "status": "unsupported",
+    "note": ""
+  },
+  "mobile-data": {
+    "stock": "unknown",
+    "status": "unsupported",
+    "note": ""
+  },
+  "gpu-rendering": {
+    "hardware": "present",
+    "status": "partial",
+    "note": "ARMADA and TyrQuake support GPU rendering on the Mali-T820 MC1 through Panfrost and Mesa. Offscreen rendering resumes after s2idle in the RAM profile. Intermittent resets to BootROM under application load remain unresolved."
+  },
+  "ffmpeg": {
+    "status": "partial",
+    "note": "CPU decoding works for tested 240×320 H.264 Constrained Baseline and MPEG-4 Simple clips and 176×144 H.263 clips. The package has no video playback window or hardware video acceleration."
+  },
+  "microsd-hot-swap": {
+    "stock": "unknown",
+    "status": "untested",
+    "note": "Card detection is present, but hot insertion/removal is unqualified. Insert before boot and keep installed during the supported session."
+  },
+  "sim-hot-swap": {
+    "stock": "unknown",
+    "status": "unsupported",
+    "note": "FPLinux has no supported cellular or SIM service path."
+  },
+  "flashlight": {
+    "stock": "unknown",
+    "hardware": "unknown",
+    "status": "unsupported",
+    "note": "FPLinux provides no flashlight control."
+  },
+  "infrared-transmitter": {
+    "stock": "available",
+    "hardware": "present",
+    "status": "unsupported",
+    "note": "FPLinux provides no infrared remote-control path."
+  },
+  "image-rotation-engine": {
+    "hardware": "unknown",
+    "status": "unsupported",
+    "note": "FPLinux provides no hardware image-rotation path on this phone."
+  },
+  "jpeg-engine": {
+    "hardware": "unknown",
+    "status": "unsupported",
+    "note": "FPLinux provides no hardware JPEG path on this phone."
+  }
+}

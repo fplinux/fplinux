@@ -1,4 +1,15 @@
 {
-  "first-feature": { "note": "Input is unqualified.", "status": "Partial" },
-  "second-feature": { "note": "", "status": "Unknown" }
+  "engine-feature": {
+    "hardware": "present",
+    "note": "This implementation is not used on this phone.",
+    "status": "unsupported"
+  },
+  "first-feature": {
+    "hardware": "unknown",
+    "note": "Input is unqualified.",
+    "status": "partial",
+    "stock": "unknown"
+  },
+  "second-feature": { "note": "", "status": "untested" },
+  "viewer": { "note": "", "status": "untested" }
 }

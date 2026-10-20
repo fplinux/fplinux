@@ -1,0 +1,15 @@
+platform = "engine"
+
+[identity]
+brand = "First"
+product = "Phone"
+hardware_codes = []
+
+[display]
+panel = "panel.toml"
+
+[rootfs]
+packages = []
+
+[adapter]
+boot_instructions = "Hold the first key."

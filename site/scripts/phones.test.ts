@@ -95,6 +95,31 @@ void test("phone consumers use manifest identity, geometry and build availabilit
 	);
 });
 
+void test("SC9820E microSD availability names the RAM-loaded external-root profile", (context) => {
+	const root = mkdtempSync(path.join(tmpdir(), "fplinux-sc-phones-"));
+	context.after(() => {
+		rmSync(root, { force: true, recursive: true });
+	});
+	phoneCheckout(root);
+	const platform = path.join(root, "platforms/sc9820e/platform.toml");
+	mkdirSync(path.dirname(platform), { recursive: true });
+	writeFileSync(
+		platform,
+		readFileSync(path.join(root, "platforms/example/platform.toml"), "utf-8")
+	);
+	const target = path.join(root, "targets/first/target.toml");
+	writeFileSync(
+		target,
+		readFileSync(target, "utf-8").replace(
+			'platform = "example"',
+			'platform = "sc9820e"'
+		)
+	);
+	const phone = loadPhones(root).phones.find((entry) => entry.id === "first");
+	assert.ok(phone);
+	assert.deepEqual(phone.profiles, ["default", "microsd-root"]);
+});
+
 void test("documentation receipts track phone sources and retain unrelated driver reuse", async (context) => {
 	const root = mkdtempSync(path.join(tmpdir(), "fplinux-doc-inputs-"));
 	context.after(() => {

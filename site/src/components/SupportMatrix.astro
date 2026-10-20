@@ -14,53 +14,88 @@ const headings = {
 	hardware: "Feature",
 	system: "Feature",
 };
-const rows = support.features.filter(
-	(item) => item.kind === kind && item.scope !== "detail"
-);
+const platforms = support.platforms.map((platform) => ({
+	...platform,
+	phones: phones.filter((phone) => phone.platform.id === platform.id),
+	rows: support.features.filter(
+		(item) => item.kind === kind && item.scope !== "detail"
+	),
+}));
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 ---
 
-<div class="support-comparison">
-	<table class="support-matrix">
-		<thead>
-			<tr>
-				<th>{headings[kind]}</th>
-				{phones.map((phone): astroHTML.JSX.Children => (
-					<th>
-						<a href={`${base}/${phone.slug}/#support-checklist`}>
-							{phone.name}
-						</a>
-					</th>
-				))}
-			</tr>
-		</thead>
-		<tbody>
-			{rows.map((row): astroHTML.JSX.Children => (
-				<tr>
-					<th scope="row">{row.label}</th>
-					{phones.map((phone): astroHTML.JSX.Children => {
-						const state = row.phones[phone.id];
-						if (!state)
-							throw new Error(`Missing ${phone.id} support for ${row.id}`);
-						return (
-							<td>
-								<SupportBadge status={state.status} />
-							</td>
-						);
-					})}
-				</tr>
-			))}
-		</tbody>
-	</table>
-</div>
+{platforms.map((platform): astroHTML.JSX.Children => (
+	<section class="platform-comparison">
+		<h3 id={`support-${kind}-${platform.id}`}>
+			<a href={`${base}/platforms/${platform.id}/`}>{platform.name}</a>
+		</h3>
+		<section
+			aria-labelledby={`support-${kind}-${platform.id}`}
+			class="support-comparison"
+			tabindex={platform.phones.length > 1 ? 0 : undefined}
+		>
+			<table
+				class:list={[
+					"support-matrix",
+					{ "multiple-phones": platform.phones.length > 1 },
+				]}
+			>
+				<thead>
+					<tr>
+						<th scope="col">{headings[kind]}</th>
+						{platform.phones.map((phone): astroHTML.JSX.Children => (
+							<th scope="col">
+								<a href={`${base}/${phone.slug}/#support-checklist`}>
+									{phone.name}
+								</a>
+							</th>
+						))}
+					</tr>
+				</thead>
+				<tbody>
+					{platform.rows.map((row): astroHTML.JSX.Children => (
+						<tr>
+							<th scope="row">{row.label}</th>
+							{platform.phones.map((phone): astroHTML.JSX.Children => {
+								const state = row.phones[phone.id];
+								if (!state)
+									throw new Error(`Missing ${phone.id} support for ${row.id}`);
+								return (
+									<td>
+										<span class="support-label">FPLinux: </span>
+										<SupportBadge status={state.status} />
+										{state.hardware && (
+											<small>Hardware: {state.hardware.toLowerCase()}</small>
+										)}
+										{state.stock && (
+											<small>Stock: {state.stock.toLowerCase()}</small>
+										)}
+									</td>
+								);
+							})}
+						</tr>
+					))}
+				</tbody>
+			</table>
+		</section>
+	</section>
+))}
 
 <style>
+	.platform-comparison {
+		margin-block: 2rem;
+	}
+
 	.support-comparison {
 		overflow-x: auto;
 	}
 
 	.support-matrix {
+		display: table;
 		width: 100%;
+	}
+
+	.multiple-phones {
 		min-width: 38rem;
 	}
 
@@ -70,5 +105,16 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 	.support-matrix td {
 		white-space: nowrap;
+	}
+
+	.support-label,
+	.support-matrix small {
+		color: var(--sl-color-gray-2);
+		font-size: var(--sl-text-xs);
+	}
+
+	.support-matrix small {
+		display: block;
+		margin-top: 0.25rem;
 	}
 </style>

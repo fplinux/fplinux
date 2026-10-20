@@ -1,13 +1,23 @@
 ---
-import { Badge } from "@astrojs/starlight/components";
+import ImplementationBadge from "./ImplementationBadge.astro";
 import { loadSupport } from "../data/support/index.ts";
 
+interface Props {
+	platform?: string;
+}
+const { platform } = Astro.props;
 const support = loadSupport();
+const selectedPlatform = support.platforms.find((item) => item.id === platform);
+if (platform !== undefined && !selectedPlatform)
+	throw new Error(`Unknown platform: ${platform}`);
+const platforms = selectedPlatform ? [selectedPlatform] : support.platforms;
 
 const rows = support.features.filter((item) => item.scope !== "detail");
 const groups = support.groups.filter((group) =>
 	rows.some((item) => item.group === group)
 );
+const groupId = (group: string) =>
+	`${selectedPlatform ? `${selectedPlatform.id}-` : ""}${group.toLowerCase().replaceAll(" ", "-")}`;
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 const guideLink = (slug: string) =>
 	`${base}/${slug.replace("#", "/#")}${slug.includes("#") ? "" : "/"}`;
@@ -17,7 +27,7 @@ const guideLink = (slug: string) =>
 	<ul>
 		{groups.map((group): astroHTML.JSX.Children => (
 			<li>
-				<a href={`#${group.toLowerCase().replaceAll(" ", "-")}`}>{group}</a>
+				<a href={`#${groupId(group)}`}>{group}</a>
 			</li>
 		))}
 	</ul>
@@ -25,13 +35,17 @@ const guideLink = (slug: string) =>
 
 {groups.map((group): astroHTML.JSX.Children => (
 	<section class="feature-group">
-		<h3 id={group.toLowerCase().replaceAll(" ", "-")}>{group}</h3>
+		<h3 id={groupId(group)}>{group}</h3>
 		<table>
+			<caption>Shared platform implementation</caption>
 			<thead>
 				<tr>
-					<th>Feature</th>
-					<th>Implementation</th>
-					<th>Device checks</th>
+					<th scope="col">Feature</th>
+					{platforms.map((item): astroHTML.JSX.Children => (
+						<th scope="col">
+							<a href={`${base}/platforms/${item.id}/`}>{item.name}</a>
+						</th>
+					))}
 				</tr>
 			</thead>
 			<tbody>
@@ -42,30 +56,19 @@ const guideLink = (slug: string) =>
 							<th scope="row">
 								<a href={guideLink(item.guide)}>{item.label}</a>
 							</th>
-							<td>
-								<Badge
-									text={item.implementation}
-									variant={
-										item.implementation === "Implemented"
-											? "success"
-											: "default"
-									}
-								/>
-							</td>
-							<td>
-								<Badge
-									text={
-										item.verification === "Device-tested"
-											? "Device-tested"
-											: "Not tested"
-									}
-									variant={
-										item.verification === "Device-tested"
-											? "success"
-											: "default"
-									}
-								/>
-							</td>
+							{platforms.map((entry): astroHTML.JSX.Children => (
+								<td>
+									<a
+										class="platform-label"
+										href={`${base}/platforms/${entry.id}/`}
+									>
+										{entry.name}
+									</a>
+									<ImplementationBadge
+										status={item.implementations[entry.id]}
+									/>
+								</td>
+							))}
 						</tr>
 					))}
 			</tbody>
@@ -94,6 +97,10 @@ const guideLink = (slug: string) =>
 
 	th[scope="row"] {
 		font-weight: 500;
+	}
+
+	.platform-label {
+		display: none;
 	}
 
 	@media (width <= 40rem) {
@@ -126,6 +133,19 @@ const guideLink = (slug: string) =>
 		td {
 			padding: 0;
 			border: 0;
+		}
+
+		td {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: 0.35rem 0.5rem;
+			flex-basis: 100%;
+			font-size: var(--sl-text-sm);
+		}
+
+		.platform-label {
+			display: inline;
 		}
 	}
 </style>

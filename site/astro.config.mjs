@@ -1,5 +1,5 @@
 // @ts-check
-import { defineConfig } from "astro/config";
+import { defineConfig, fontProviders } from "astro/config";
 import { satteri } from "@astrojs/markdown-satteri";
 import starlight from "@astrojs/starlight";
 import starlightLinksValidator from "starlight-links-validator";
@@ -16,15 +16,34 @@ const pages = (/** @type {string[]} */ ...slugs) =>
 
 export default defineConfig({
 	base,
+	fonts: [
+		{
+			cssVariable: "--font-noto-sans",
+			fallbacks: ["ui-sans-serif", "system-ui", "sans-serif"],
+			name: "Noto Sans",
+			options: {
+				variants: [
+					{
+						src: ["./src/fonts/NotoSans.ttf"],
+						style: "normal",
+						weight: "100 900",
+					},
+				],
+			},
+			provider: fontProviders.local(),
+		},
+	],
 	integrations: [
 		starlight({
 			components: {
+				Head: "./src/components/Head.astro",
 				Hero: "./src/components/Hero.astro",
 				PageTitle: "./src/components/PageTitle.astro",
 				...(offline ? { Search: "./src/components/OfflineSearch.astro" } : {}),
 			},
 			customCss: ["./src/styles/custom.css"],
-			description: "Linux for feature phones built on the Unisoc UMS9117.",
+			description:
+				"Linux for feature phones built on the Unisoc UMS9117 and SC9820E.",
 			editLink: {
 				baseUrl: "https://github.com/fplinux/fplinux/edit/main/site/",
 			},
@@ -49,6 +68,7 @@ export default defineConfig({
 				{
 					items: pages(
 						"features",
+						"use/session",
 						"use/terminal",
 						"use/connect",
 						"use/audio",
@@ -65,6 +85,10 @@ export default defineConfig({
 				{
 					items: [{ autogenerate: { directory: "phones" } }],
 					label: "Phones",
+				},
+				{
+					items: pages("platforms", "platforms/ums9117", "platforms/sc9820e"),
+					label: "Platforms",
 				},
 				{
 					items: pages(
@@ -120,6 +144,7 @@ export default defineConfig({
 						"porting/bring-up",
 						"porting/linux-integration",
 						"porting/ums9117",
+						"porting/sc9820e",
 						"porting/identity"
 					),
 					label: "Porting",
