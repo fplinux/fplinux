@@ -247,7 +247,9 @@ def check_one_context(
         linux = source_lock_entry(sources, platform["linux"]["source_lock"])
         archive = CACHE / "downloads/linux" / f"linux-{linux['version']}.tar.xz"
         config_paths = kernel_config_paths(target, target_config, platform)
-        defconfig = compose_kernel_config(*config_paths).decode()
+        defconfig = compose_kernel_config(
+            *config_paths, boot_font=target_config["display"]["boot_font"]
+        ).decode()
         objects = sparse_targets(target, target_config, platform)
         output = sparse_output(target, profile, build_type=build_type)
         initramfs = output / "initramfs"

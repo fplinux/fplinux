@@ -76,6 +76,10 @@ class KernelCommandPeer:
 
 
 @pytest.mark.parametrize(
+    ("boot_font", "font_symbol"),
+    [("6x8", "CONFIG_FONT_6x8"), ("7x14", "CONFIG_FONT_7x14")],
+)
+@pytest.mark.parametrize(
     ("target", "delivery", "make_target", "additional_forbidden"),
     [
         pytest.param("nokia-110-4g", "embedded", "zImage", (), id="ums-embedded"),
@@ -112,9 +116,12 @@ def test_ram_build_uses_declared_image_delivery_and_causal_root_identity(  # noq
     delivery: str,
     make_target: str,
     additional_forbidden: tuple[str, ...],
+    boot_font: str,
+    font_symbol: str,
 ) -> None:
     """The actual target plan preserves RAM identity while selecting its declared image format."""
     target_config = load_target(target)
+    target_config["display"]["boot_font"] = boot_font
     platform = load_platform(target_config["platform"])
     assert target_config["linux"]["root"] == {"kind": "initramfs"}
     assert target_config["bootstrap"]["initramfs_delivery"] == delivery
@@ -183,6 +190,12 @@ def test_ram_build_uses_declared_image_delivery_and_causal_root_identity(  # noq
     assert image == output / "arch/arm/boot" / make_target
     assert peer.commands[-1][-2:] == [make_target, "dtbs"]
     config = kconfig_values((output / ".config").read_text())
+    assert config["CONFIG_FONTS"] == "y"
+    assert {
+        symbol
+        for symbol, value in config.items()
+        if symbol.startswith("CONFIG_FONT_") and value == "y"
+    } == {font_symbol}
     if delivery == "embedded":
         assert config["CONFIG_INITRAMFS_SOURCE"] == f'"{tmp_path}/work/rootfs.cpio"'
         assert (tmp_path / "work/rootfs.cpio").read_bytes() == b"boot archive a"

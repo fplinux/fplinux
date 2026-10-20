@@ -38,13 +38,15 @@ def kconfig_values(contents: str) -> dict[str, str]:
     return values
 
 
-def compose_kernel_config(*paths: Path) -> bytes:
-    """Apply ordered configuration inputs for both Kbuild consumers."""
+def compose_kernel_config(*paths: Path, boot_font: str) -> bytes:
+    """Apply ordered configuration inputs and the target's console font."""
     values: dict[str, str] = {}
     for path in paths:
         if path.is_symlink() or not path.is_file():
             fail(f"kernel configuration input is missing or invalid: {path}")
         values.update(kconfig_values(path.read_text()))
+    values["CONFIG_FONTS"] = "y"
+    values[f"CONFIG_FONT_{boot_font}"] = "y"
     return "".join(
         f"# {symbol} is not set\n" if value == "n" else f"{symbol}={value}\n"
         for symbol, value in values.items()

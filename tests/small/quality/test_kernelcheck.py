@@ -171,6 +171,7 @@ def analyzer_context() -> Iterator[AnalyzerContext]:
         projected.write_text("int test_driver;\n")
         target_config: dict[str, Any] = {
             "bootstrap": {"initramfs_delivery": "embedded"},
+            "display": {"boot_font": "6x8"},
             "identity": {
                 "display_name": "Test target",
                 "compatible": "test,target",
@@ -210,6 +211,25 @@ def analyzer_context() -> Iterator[AnalyzerContext]:
 
 class KernelAnalyzerWorkIsolationTests:
     """Check disposable analyzer work while replacing external commands with stubs."""
+
+    @pytest.mark.parametrize(
+        ("boot_font", "font_symbol"),
+        [("6x8", "CONFIG_FONT_6x8"), ("7x14", "CONFIG_FONT_7x14")],
+    )
+    def test_target_boot_font_selects_the_analyzed_console_font(
+        self, analyzer_context: AnalyzerContext, boot_font: str, font_symbol: str
+    ) -> None:
+        """The analyzer receives the same target-owned font as the kernel builder."""
+        analyzer_context.target_config["display"]["boot_font"] = boot_font
+        analyzer_context.run_check(analyzer_context.target_config)
+
+        config = kconfig_values((analyzer_context.cache_path("work") / ".config").read_text())
+        assert config["CONFIG_FONTS"] == "y"
+        assert {
+            symbol
+            for symbol, value in config.items()
+            if symbol.startswith("CONFIG_FONT_") and value == "y"
+        } == {font_symbol}
 
     def test_each_invocation_discards_stale_analyzer_work(
         self, analyzer_context: AnalyzerContext
@@ -300,7 +320,13 @@ class KernelAnalyzerWorkIsolationTests:
             / "analysis/sparse/test-target/profiles/microsd-root/builds/release/work"
         )
         actual = kconfig_values((output / ".config").read_text())
-        assert actual == {"CONFIG_TEST": "y", "CONFIG_BOARD": "y", "CONFIG_BLK_DEV_INITRD": "n"}
+        assert actual == {
+            "CONFIG_TEST": "y",
+            "CONFIG_BOARD": "y",
+            "CONFIG_BLK_DEV_INITRD": "n",
+            "CONFIG_FONTS": "y",
+            "CONFIG_FONT_6x8": "y",
+        }
         assert not (output / "initramfs").exists()
 
     def test_profile_actions_reach_configuration_through_modeled_kconfig(

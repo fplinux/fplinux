@@ -444,10 +444,11 @@ class KernelConfigCompositionTests:
         policy.write_text(
             "# CONFIG_MODULES is not set\n# CONFIG_DEVMEM is not set\nCONFIG_LOG_BUF_SHIFT=16\n"
         )
-        composed = kernel.compose_kernel_config(base, board, policy)
+        composed = kernel.compose_kernel_config(base, board, policy, boot_font="6x8")
         assert (composed) == (
             b"CONFIG_KALLSYMS=y\n# CONFIG_MODULES is not set\n"
             b"# CONFIG_DEVMEM is not set\nCONFIG_LOG_BUF_SHIFT=16\n"
+            b"CONFIG_FONTS=y\nCONFIG_FONT_6x8=y\n"
         )
         actual.write_bytes(composed)
         kernel_build.assert_build_type_kconfig(actual, policy, "release")
@@ -465,8 +466,9 @@ class KernelConfigCompositionTests:
         fragment = tmp_path / "fragment"
         base.write_text("CONFIG_SHARED=y\nCONFIG_BOARD=1\nCONFIG_UNUSED=y\n")
         fragment.write_text("CONFIG_BOARD=2\n# CONFIG_UNUSED is not set\nCONFIG_DEVICE=y\n")
-        assert (kernel.compose_kernel_config(base, fragment)) == (
+        assert (kernel.compose_kernel_config(base, fragment, boot_font="7x14")) == (
             b"CONFIG_SHARED=y\nCONFIG_BOARD=2\n# CONFIG_UNUSED is not set\nCONFIG_DEVICE=y\n"
+            b"CONFIG_FONTS=y\nCONFIG_FONT_7x14=y\n"
         )
 
 

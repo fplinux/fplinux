@@ -24,7 +24,9 @@ def prepare_kernel_config(
     config_paths = kernel_config_paths(target, target_config, platform)
     work.mkdir(parents=True, exist_ok=True)
     defconfig = work / "kernel.defconfig"
-    defconfig.write_bytes(compose_kernel_config(*config_paths))
+    defconfig.write_bytes(
+        compose_kernel_config(*config_paths, boot_font=target_config["display"]["boot_font"])
+    )
     return defconfig, config_paths
 
 
