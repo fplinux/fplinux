@@ -61,10 +61,10 @@ class StageProcessTests:
 
     @pytest.mark.parametrize(
         ("mode", "status"),
-        [("io", 1), ("io-stage", 1), ("interrupt", 130)],
-        ids=["io", "io-stage", "interrupt"],
+        [("io", 1), ("io-stage", 1), ("http", 1), ("http-stage", 1), ("interrupt", 130)],
+        ids=["io", "io-stage", "http", "http-stage", "interrupt"],
     )
-    def test_entrypoint_reports_io_errors_and_sigint_without_tracebacks(
+    def test_entrypoint_reports_expected_errors_and_sigint_without_tracebacks(
         self, mode: str, status: int
     ) -> None:
         """Expected failures retain their status and diagnostics without Python stacks."""
@@ -87,10 +87,22 @@ class StageProcessTests:
             if mode.startswith("io"):
                 assert ("fplinux:") in (result.stderr)
                 assert ("missing-input") in (result.stderr)
+            if mode.startswith("http"):
+                diagnostic = (
+                    "fplinux: https://example.invalid/source.tar.gz: HTTP Error 404: Not Found"
+                )
+                assert result.stderr.count(diagnostic) == 1
+                assert result.stderr.count("https://example.invalid/source.tar.gz") == 1
             if mode == "io-stage":
                 log = (root / "run/01-read-input.log").read_text()
                 assert ("missing-input") in (log)
                 assert ("Traceback") not in (log)
+            if mode == "http-stage":
+                log = (root / "run/01-download.log").read_text()
+                assert log == (
+                    "fplinux: https://example.invalid/source.tar.gz: HTTP Error 404: Not Found\n"
+                )
+            if mode.endswith("-stage"):
                 receipt = json.loads((root / "run/run.json").read_text())
                 assert (receipt["status"]) == ("failed")
 

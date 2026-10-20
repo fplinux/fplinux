@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from fplinux_cli.cache.lock import cache_lock
+from fplinux_cli.runtime.events import RunLog
 
 from tests.cli_support import prepare_cli_checkout
 from tests.process import run_process
@@ -44,13 +45,14 @@ class LogsCli:
             while_running=while_running,
         )
 
-    def journal(
+    def journal(  # noqa: PLR0913 -- independent journal context, timing and stages stay explicit.
         self,
         relative: str,
         *,
         status: str = "success",
         started: str = "2026-01-02T10:00:00+00:00",
         parent: str | None = None,
+        build_type: str | None = None,
         stages: tuple[tuple[str, str], ...] = (),
     ) -> Path:
         """Publish independent input using the reporter's atomic replacement contract."""
@@ -62,13 +64,15 @@ class LogsCli:
             "started_at": started,
             "finished_at": None if status == "running" else "2026-01-02T10:00:12+00:00",
             "status": status,
-            "parent": parent,
-            "display_root": str(directory),
+            "parent": f".cache/logs/{parent}" if parent is not None else None,
+            "display_root": directory.relative_to(self.root).as_posix(),
             "stages": [
                 {"name": name, "log": f"{index:02d}-{name}.log", "status": state, "exit": None}
                 for index, (name, state) in enumerate(stages, 1)
             ],
         }
+        if build_type is not None:
+            payload["build_type"] = build_type
         temporary = directory / "run.next"
         temporary.write_text(json.dumps(payload))
         temporary.replace(directory / "run.json")
@@ -101,12 +105,31 @@ def await_output(process: subprocess.Popen[str], deadline: float, marker: bytes)
 class LogsCliTests:
     """Use controlled reporter-format inputs, real files and the real public parser."""
 
+    def test_runtime_writer_remains_readable_without_reporter_tree_metadata(
+        self, logs_cli: LogsCli
+    ) -> None:
+        """The public reader accepts the journal emitted by the live SSH/runtime writer."""
+        runtime_root = logs_cli.logs / "run/phone"
+        runtime_root.mkdir(parents=True)
+        log = RunLog(runtime_root, protect=lambda _path: None)
+        log.record("runtime diagnostic")
+        log.close("success")
+        before = (log.directory / "run.json").read_bytes()
+
+        shown = logs_cli.run_logs("show", "--command", "run", "--tail", "2")
+
+        assert shown.returncode == 0, shown.stderr
+        assert "runtime diagnostic" in shown.stdout
+        assert "runtime [success]" in shown.stdout
+        assert (log.directory / "run.json").read_bytes() == before
+
     def test_list_filters_and_latest_use_recorded_start_not_mtime(self, logs_cli: LogsCli) -> None:
         """Select invocation context and ignore child reporters and unrelated files."""
         first = logs_cli.journal("build/example/profiles/microsd-uboot/old")
         logs_cli.journal("check/new", started="2026-01-02T10:00:05+00:00", status="failed")
         logs_cli.journal(
-            "build/example/profiles/microsd-uboot/old/containers/kernel", parent="old"
+            "build/example/profiles/microsd-uboot/old/containers/kernel",
+            parent="build/example/profiles/microsd-uboot/old/containers",
         )
         unrelated = logs_cli.logs / "notes"
         unrelated.mkdir()
@@ -119,10 +142,10 @@ class LogsCliTests:
         records = result.stdout.splitlines()[1:]
         assert (records) == (
             [
-                "check/new check - default failed 2026-01-02T10:00:05+00:00 7.0",
+                "check/new check - default unknown failed 2026-01-02T10:00:05+00:00 7.0",
                 (
                     "build/example/profiles/microsd-uboot/old build example microsd-uboot "
-                    "success 2026-01-02T10:00:00+00:00 12.0"
+                    "unknown success 2026-01-02T10:00:00+00:00 12.0"
                 ),
             ]
         )
@@ -144,7 +167,7 @@ class LogsCliTests:
         )
         shown = logs_cli.run_logs("show")
         assert (shown.returncode) == (0), shown.stderr
-        assert (shown.stdout) == ("check/new: failed\n")
+        assert (shown.stdout) == ("check/new: failed; build type: unknown\n")
 
     def test_show_selects_nested_stage_failures_and_bounded_tail(self, logs_cli: LogsCli) -> None:
         """The actual child-tool error is available even when a parent records only progress."""
@@ -155,7 +178,7 @@ class LogsCliTests:
         (run / "02-prepare.log").write_text("successful preparation\n")
         child = logs_cli.journal(
             "check/example/containers/source/quality",
-            parent="check/example",
+            parent="check/example/containers/source",
             status="failed",
             stages=(("python", "failed"),),
         )
@@ -187,6 +210,117 @@ class LogsCliTests:
         assert (rejected.returncode) == (1), rejected.stderr
         assert ("no matching log run") in (rejected.stderr)
 
+    def test_missing_stage_lists_exact_nested_ids_and_tail_zero_discovers_them(
+        self, logs_cli: LogsCli
+    ) -> None:
+        """A rejected selection names the available IDs without printing stage contents."""
+        run = logs_cli.journal("build/example/run", stages=(("container", "success"),))
+        (run / "01-container.log").write_text("parent output\n")
+        child = logs_cli.journal(
+            "build/example/run/container/build",
+            parent="build/example/run/container",
+            stages=(("rootfs", "success"),),
+        )
+        (child / "01-rootfs.log").write_text("child output\n")
+
+        missing = logs_cli.run_logs("show", "run", "--stage", "kernel", "--tail", "0")
+        discovered = logs_cli.run_logs("show", "run", "--tail", "0")
+
+        assert missing.returncode == 1, missing.stderr
+        assert missing.stderr == (
+            "fplinux: stage not found: kernel\n"
+            "available stage IDs:\n"
+            "  container\n"
+            "  container/build/rootfs\n"
+        )
+        assert discovered.returncode == 0, discovered.stderr
+        assert "==> container [success] <==" in discovered.stdout
+        assert "==> container/build/rootfs [success] <==" in discovered.stdout
+        assert "parent output" not in missing.stdout + discovered.stdout
+        assert "child output" not in missing.stdout + discovered.stdout
+
+    @pytest.mark.parametrize("action", ["list", "show", "follow"])
+    def test_build_type_filter_selects_recorded_context_and_excludes_unknown(
+        self, logs_cli: LogsCli, action: str
+    ) -> None:
+        """Newest debug and unknown runs cannot replace a requested recorded release run."""
+        logs_cli.journal("build/example/release", build_type="release")
+        logs_cli.journal(
+            "build/example/debug", build_type="debug", started="2026-01-02T10:00:01+00:00"
+        )
+        logs_cli.journal("build/example/unknown", started="2026-01-02T10:00:02+00:00")
+
+        selected = logs_cli.run_logs(action, "--command", "build", "--build-type", "release")
+
+        assert selected.returncode == 0, selected.stderr
+        assert "build/example/release" in selected.stdout
+        assert "build/example/debug" not in selected.stdout
+        assert "build/example/unknown" not in selected.stdout
+        if action == "list":
+            assert "BUILD_TYPE" in selected.stdout.splitlines()[0]
+            assert "release success" in selected.stdout
+        else:
+            assert "build type: release" in selected.stdout
+        all_runs = logs_cli.run_logs("list", "--command", "build")
+        assert all_runs.returncode == 0, all_runs.stderr
+        assert "build/example/unknown build example default unknown success" in all_runs.stdout
+
+    @pytest.mark.parametrize("parent_status", ["failed", "interrupted", "running"])
+    def test_unfinished_child_preserves_recorded_state_and_reports_unsuccessful_parent(
+        self, logs_cli: LogsCli, parent_status: str
+    ) -> None:
+        """Diagnostic selection exposes unfinished work without asserting a child exit."""
+        run = logs_cli.journal("build/example/run", status=parent_status)
+        child = logs_cli.journal(
+            "build/example/run/container/build",
+            status="running",
+            parent="build/example/run/container",
+            stages=(("rootfs", "running"),),
+        )
+        (child / "01-rootfs.log").write_text("last child output\n")
+        before = {path: path.read_bytes() for path in logs_cli.logs.rglob("run.json")}
+
+        shown = logs_cli.run_logs("show", "run")
+        failures = logs_cli.run_logs("show", "run", "--failed")
+
+        assert shown.returncode == 0, shown.stderr
+        assert failures.returncode == 0, failures.stderr
+        if parent_status == "running":
+            assert "container/build/rootfs [running]" in shown.stdout
+            assert "unfinished" not in shown.stdout
+            assert "last child output" not in failures.stdout
+            assert "no failed or interrupted stages in this run" in failures.stdout
+        else:
+            annotation = f"container/build/rootfs [running; unfinished; parent {parent_status}]"
+            assert annotation in shown.stdout
+            assert annotation in failures.stdout
+            assert "last child output" in failures.stdout
+        assert {path: path.read_bytes() for path in before} == before
+        assert json.loads((run / "run.json").read_text())["status"] == parent_status
+        assert json.loads((child / "run.json").read_text())["status"] == "running"
+
+    def test_nested_journal_with_unrelated_recorded_parent_is_not_an_owned_child(
+        self, logs_cli: LogsCli
+    ) -> None:
+        """A directory descendant alone does not establish reporter ownership."""
+        logs_cli.journal("build/example/run", status="failed")
+        child = logs_cli.journal(
+            "build/example/run/container/build",
+            status="running",
+            parent="build/other/run/container",
+            stages=(("rootfs", "running"),),
+        )
+        (child / "01-rootfs.log").write_text("unrelated child output\n")
+        before = (child / "run.json").read_bytes()
+
+        result = logs_cli.run_logs("show", "run", "--failed")
+
+        assert result.returncode == 0, result.stderr
+        assert "unrelated child output" not in result.stdout
+        assert "unfinished" not in result.stdout
+        assert "no failed or interrupted stages in this run" in result.stdout
+        assert (child / "run.json").read_bytes() == before
+
     @pytest.mark.parametrize(
         "stages",
         [(), (("source", "success"),)],
@@ -203,7 +337,7 @@ class LogsCliTests:
         result = logs_cli.run_logs("show", "--command", "build", "--failed")
 
         assert result.returncode == 0, result.stderr
-        assert "build/example/run: success\n" in result.stdout
+        assert "build/example/run: success; build type: unknown\n" in result.stdout
         assert "no failed or interrupted stages in this run\n" in result.stdout
         assert "successful output" not in result.stdout
 
@@ -241,7 +375,9 @@ class LogsCliTests:
         """Empty listing succeeds, missing/ambiguous selections fail and invalid flags return 2."""
         empty = logs_cli.run_logs("list")
         assert (empty.returncode) == (0), empty.stderr
-        assert (empty.stdout) == ("RUN COMMAND TARGET PROFILE STATUS STARTED DURATION\n")
+        assert (empty.stdout) == (
+            "RUN COMMAND TARGET PROFILE BUILD_TYPE STATUS STARTED DURATION\n"
+        )
         assert not (logs_cli.logs.exists())
         logs_cli.journal("check/same")
         logs_cli.journal("test/same")
@@ -266,7 +402,9 @@ class LogsCliTests:
                 stream.write("appended-marker\n")
             logs_cli.journal("check/newer", started="2026-01-03T00:00:00+00:00")
             child = logs_cli.journal(
-                relative + "/containers/tool", parent=relative, stages=(("next", "success"),)
+                relative + "/containers/tool",
+                parent=relative + "/containers",
+                stages=(("next", "success"),),
             )
             (child / "01-next.log").write_text("new-stage-first\nnew-stage-last\n")
             logs_cli.journal(relative, stages=(("first", "success"),))

@@ -9,7 +9,7 @@ import os
 import sys
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 _STATUSES = ("running", "success", "failed", "interrupted")
+_BUILD_TYPES = ("release", "debug")
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,7 @@ class LogStage:
     name: str
     path: Path
     status: str
+    unfinished_parent_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,8 @@ class LogRun:
     status: str
     pid: int
     parent: str | None
+    display_root: str | None
+    build_type: str | None
     stages: tuple[LogStage, ...]
 
 
@@ -62,6 +66,7 @@ def read_run(path: Path) -> LogRun | None:
             if Path(filename).name != filename or not filename.endswith(".log"):
                 return None
             stages.append(LogStage(stage["name"], path / filename, stage["status"]))
+        build_type = data.get("build_type")
         return LogRun(
             path,
             started,
@@ -69,6 +74,8 @@ def read_run(path: Path) -> LogRun | None:
             data["status"],
             int(data["pid"]),
             data["parent"],
+            data.get("display_root"),
+            build_type if build_type in _BUILD_TYPES else None,
             tuple(stages),
         )
     except OSError, ValueError, TypeError, KeyError:
@@ -101,6 +108,7 @@ def run_details(run: LogRun, root: Path) -> dict[str, object]:
         "command": relative.parts[0],
         "target": "/".join(context) or None,
         "profile": profile,
+        "build_type": run.build_type,
         "status": run.status,
         "started_at": run.started.isoformat(),
         "duration_seconds": round(
@@ -137,6 +145,9 @@ def add_log_arguments(parser: argparse.ArgumentParser) -> None:
         child.add_argument(
             "--profile", dest="logs_profile", metavar="NAME", help="filter by build/check profile"
         )
+        child.add_argument(
+            "--build-type", choices=_BUILD_TYPES, help="filter by recorded build/check type"
+        )
         child.add_argument("--status", choices=_STATUSES, help="filter by recorded run status")
         if action != "list":
             child.add_argument(
@@ -152,21 +163,45 @@ def add_log_arguments(parser: argparse.ArgumentParser) -> None:
             )
             if action == "show":
                 child.add_argument(
-                    "--failed", action="store_true", help="show only failed or interrupted stages"
+                    "--failed",
+                    action="store_true",
+                    help="show failed, interrupted or unfinished stages of an unsuccessful run",
                 )
 
 
 def _stage_logs(run: LogRun) -> list[LogStage]:
     """Include child reporters because compact parent logs omit their full tool output."""
+    if run.display_root is None:
+        return list(run.stages)
     records = [run]
     for receipt in run.path.rglob("run.json"):
         if receipt.parent == run.path:
             continue
         child = read_run(receipt.parent)
-        if child is not None and child.parent is not None:
+        expected_display_root = Path(run.display_root) / receipt.parent.relative_to(run.path)
+        if (
+            child is not None
+            and child.display_root == expected_display_root.as_posix()
+            and child.parent == expected_display_root.parent.as_posix()
+        ):
             records.append(child)
     records.sort(key=lambda item: (item.started, str(item.path)))
-    return [stage for record in records for stage in record.stages]
+    stages = []
+    for record in records:
+        for stage in record.stages:
+            display_stage = stage
+            if (
+                record is not run
+                and stage.status == "running"
+                and run.status
+                in {
+                    "failed",
+                    "interrupted",
+                }
+            ):
+                display_stage = replace(stage, unfinished_parent_status=run.status)
+            stages.append(display_stage)
+    return stages
 
 
 def _stage_id(stage: LogStage, run: LogRun) -> str:
@@ -206,11 +241,16 @@ def _show_run(run: LogRun, args: argparse.Namespace) -> None:
         current = read_run(run.path)
         if current is None:
             fail(f"run journal is no longer available: {run.path}")
-        for stage in _stage_logs(current):
+        stages = _stage_logs(current)
+        for stage in stages:
             identity = _stage_id(stage, current)
             if args.stage is not None and args.stage not in {stage.name, identity}:
                 continue
-            if getattr(args, "failed", False) and stage.status not in {"failed", "interrupted"}:
+            if (
+                getattr(args, "failed", False)
+                and stage.status not in {"failed", "interrupted"}
+                and stage.unfinished_parent_status is None
+            ):
                 continue
             matched = True
             offset = offsets.get(stage.path)
@@ -219,12 +259,19 @@ def _show_run(run: LogRun, args: argparse.Namespace) -> None:
             size = stage.path.stat().st_size
             if offset is None or size > offset:
                 if last_path != stage.path:
-                    print(f"\n==> {identity} [{stage.status}] <==", flush=True)
+                    status = stage.status
+                    if stage.unfinished_parent_status is not None:
+                        status += f"; unfinished; parent {stage.unfinished_parent_status}"
+                    print(f"\n==> {identity} [{status}] <==", flush=True)
                     last_path = stage.path
                 offsets[stage.path] = _copy_log(stage.path, offset, args.tail)
         if args.logs_action != "follow" or current.status != "running":
             if args.stage is not None and not matched:
-                fail(f"stage not found: {args.stage}")
+                available = "\n".join(f"  {_stage_id(stage, current)}" for stage in stages)
+                fail(
+                    f"stage not found: {args.stage}\navailable stage IDs:\n"
+                    + (available or "  (none)")
+                )
             if getattr(args, "failed", False) and not matched:
                 print("no failed or interrupted stages in this run", flush=True)
             if args.logs_action == "follow":
@@ -256,6 +303,7 @@ def read_logs(args: argparse.Namespace) -> None:
                 ("command", args.logs_command),
                 ("target", args.target),
                 ("profile", args.logs_profile),
+                ("build_type", args.build_type),
                 ("status", args.status),
             )
         ):
@@ -263,22 +311,24 @@ def read_logs(args: argparse.Namespace) -> None:
     runs.sort(key=lambda item: (item[0].started, str(item[0].path)), reverse=True)
     try:
         if args.logs_action == "list":
-            print("RUN COMMAND TARGET PROFILE STATUS STARTED DURATION")
+            print("RUN COMMAND TARGET PROFILE BUILD_TYPE STATUS STARTED DURATION")
             for _run, details in runs:
-                print(
-                    " ".join(
-                        str(details[key]) if details[key] is not None else "-"
-                        for key in (
-                            "id",
-                            "command",
-                            "target",
-                            "profile",
-                            "status",
-                            "started_at",
-                            "duration_seconds",
-                        )
-                    )
-                )
+                row = []
+                for key in (
+                    "id",
+                    "command",
+                    "target",
+                    "profile",
+                    "build_type",
+                    "status",
+                    "started_at",
+                    "duration_seconds",
+                ):
+                    value = details[key]
+                    if value is None:
+                        value = "unknown" if key == "build_type" else "-"
+                    row.append(str(value))
+                print(" ".join(row))
             return
         selected = (
             runs[:1]
@@ -290,7 +340,10 @@ def read_logs(args: argparse.Namespace) -> None:
         if len(selected) > 1:
             fail(f"ambiguous run ID: {args.run}; use the full ID from logs list")
         run, details = selected[0]
-        print(f"{details['id']}: {run.status}", flush=True)
+        context = ""
+        if details["command"] in {"build", "check"}:
+            context = f"; build type: {run.build_type or 'unknown'}"
+        print(f"{details['id']}: {run.status}{context}", flush=True)
         _show_run(run, args)
     except BrokenPipeError:
         silence_broken_pipe(sys.stdout)

@@ -51,6 +51,7 @@ class RunReporterTests:
             assert (initial["stages"]) == ([])
             assert (initial["display_root"]) == (".cache/logs/test")
             assert (initial["parent"]) is None
+            assert initial["build_type"] is None
             with reporter.stage("prepare"):
                 entered = json.loads(reporter.metadata_path.read_text())
                 assert (entered["status"]) == ("running")
@@ -75,6 +76,25 @@ class RunReporterTests:
             assert (completed["finished_at"]) is not None
             assert (completed["stages"][0]["status"]) == ("success")
             assert (completed["stages"][0]["exit"]) == (0)
+
+    @pytest.mark.parametrize("build_type", [None, "release", "debug"])
+    def test_created_reporter_retains_explicit_build_type_through_completion(
+        self, tmp_path: Path, build_type: str | None
+    ) -> None:
+        """Invocation context is recorded directly rather than inferred from a log path."""
+        with mock.patch("fplinux_cli.reporting.run.ROOT", tmp_path):
+            reporter = RunReporter.create(
+                "build", target="example", verbose=False, build_type=build_type
+            )
+        initial = json.loads(reporter.metadata_path.read_text())
+        with reporter.stage("container"):
+            pass
+        reporter.finish()
+        completed = json.loads(reporter.metadata_path.read_text())
+
+        assert initial["build_type"] == build_type
+        assert completed["build_type"] == build_type
+        assert completed["status"] == "success"
 
     def test_run_metadata_marks_stage_failure_without_later_false_success(self) -> None:
         """Keep a caught failed stage failed even if a caller later invokes finish."""

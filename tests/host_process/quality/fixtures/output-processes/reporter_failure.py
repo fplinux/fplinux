@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Exercise ordinary I/O failures and SIGINT at the command entry boundary."""
+"""Exercise expected failures and SIGINT at the command entry boundary."""
 
 import os
 import signal
 import sys
+from email.message import Message
 from pathlib import Path
+from urllib.error import HTTPError
 
 from fplinux_cli.reporting.run import RunReporter, run_entrypoint
 
@@ -22,6 +24,15 @@ def main() -> None:
             missing.read_bytes()
     elif mode == "io":
         missing.read_bytes()
+    elif mode in {"http", "http-stage"}:
+        error = HTTPError(
+            "https://example.invalid/source.tar.gz", 404, "Not Found", Message(), None
+        )
+        if mode == "http-stage":
+            reporter = RunReporter("check", root / "run", "test", verbose=False)
+            with reporter.stage("download"):
+                raise error
+        raise error
     else:
         raise ValueError(mode)
 

@@ -14,8 +14,9 @@ import traceback as traceback_module
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, NoReturn, Self
+from urllib.error import HTTPError
 
-from fplinux_cli.common import ROOT, error_message, fail, replace_file_atomically
+from fplinux_cli.common import ROOT, error_message, replace_file_atomically
 
 from .process import exit_status, run_process
 
@@ -67,6 +68,8 @@ def _expected_error_text(error: BaseException | None) -> str | None:
         return error.code
     if isinstance(error, KeyboardInterrupt):
         return "interrupted"
+    if isinstance(error, HTTPError):
+        return error_message(f"{error.url}: {error}")
     if isinstance(error, (OSError, subprocess.SubprocessError)):
         return error_message(error)
     return None
@@ -96,8 +99,9 @@ def run_entrypoint(entrypoint: Callable[[], None]) -> None:
             reporter._finish_failure()  # noqa: SLF001 -- module-level lifecycle owner.
         if _REPORTED_EXCEPTION.get() is error:
             raise SystemExit(1) from None
-        if isinstance(error, (OSError, subprocess.SubprocessError)):
-            fail(str(error))
+        cause = _expected_error_text(error)
+        if cause is not None:
+            raise SystemExit(cause) from None
         raise
     else:
         reporter = _ACTIVE_REPORTER.get()
@@ -111,13 +115,14 @@ def run_entrypoint(entrypoint: Callable[[], None]) -> None:
 class RunReporter:
     """Own one command run and create ordered stage logs below it."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 -- run paths, context and output policy stay explicit.
         self,
         label: str,
         root: Path,
         display_root: str,
         *,
         verbose: bool,
+        build_type: str | None = None,
         parent_display_root: str | None = None,
     ) -> None:
         """Initialize one run rooted at an already validated directory."""
@@ -125,6 +130,7 @@ class RunReporter:
         self.root = root
         self.display_root = display_root.rstrip("/")
         self.verbose = verbose
+        self.build_type = build_type
         self._sequence = 0
         self._pid = os.getpid()
         self._started_at = _timestamp()
@@ -139,7 +145,9 @@ class RunReporter:
         _ACTIVE_REPORTER.set(self)
 
     @classmethod
-    def create(cls, command: str, *, target: str | None, verbose: bool) -> Self:
+    def create(
+        cls, command: str, *, target: str | None, verbose: bool, build_type: str | None = None
+    ) -> Self:
         """Create a collision-resistant host-side log directory."""
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         run_id = f"{timestamp}-p{os.getpid()}"
@@ -154,7 +162,13 @@ class RunReporter:
         while root.exists():
             root = ROOT / f"{relative}-{suffix}"
             suffix += 1
-        return cls(label, root, root.relative_to(ROOT).as_posix(), verbose=verbose)
+        return cls(
+            label,
+            root,
+            root.relative_to(ROOT).as_posix(),
+            verbose=verbose,
+            build_type=build_type,
+        )
 
     @classmethod
     def from_environment(cls, label: str, subdirectory: str) -> Self | None:
@@ -286,6 +300,7 @@ class RunReporter:
             "stages": self._stages,
             "display_root": self.display_root,
             "parent": self._parent_display_root,
+            "build_type": self.build_type,
         }
 
     def _write_metadata(self) -> None:
