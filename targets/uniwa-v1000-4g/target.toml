@@ -14,7 +14,7 @@ raw_page_bytes = 2112
 
 [display]
 panel = "display/panel.toml"
-boot_font = "6x8"
+boot_font = "7x14"
 
 [display_brightness]
 backlight = "uniwa-v1000-backlight"

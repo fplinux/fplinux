@@ -9,7 +9,7 @@ compatible = "xiaomi,qin1s-plus"
 
 [display]
 panel = "display/panel.toml"
-boot_font = "6x8"
+boot_font = "7x14"
 
 [display_brightness]
 backlight = "sprd_backlight"

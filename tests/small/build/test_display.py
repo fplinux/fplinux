@@ -10,6 +10,8 @@ import pytest
 import tomlkit
 from fplinux_cli.build.display import render_bootstrap_display, render_linux_display_files
 from fplinux_cli.manifests.display import load_display
+from fplinux_cli.manifests.paths import discover_targets
+from fplinux_cli.manifests.targets import load_target
 
 from tests.fixtures.display import (
     mipi_dbi_display as mipi_dbi_display,  # noqa: PLC0414 -- pytest fixture export.
@@ -26,6 +28,14 @@ from tests.fixtures.display import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+@pytest.mark.parametrize("target", discover_targets())
+def test_phone_boot_font_matches_native_display_size(target: str) -> None:
+    display = load_target(target)["display"]
+    fonts = {(128, 160): "6x8", (240, 320): "7x14", (320, 240): "7x14"}
+
+    assert display["boot_font"] == fonts[display["width"], display["height"]]
 
 
 def test_panel_geometry_and_commands_use_the_supplied_checkout(
