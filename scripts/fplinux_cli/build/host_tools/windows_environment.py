@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Run native Windows build steps in the pinned project image."""
+"""Run native Windows build steps in the pinned project environment."""
 
 from __future__ import annotations
 
@@ -7,13 +7,16 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from fplinux_cli import common
-from fplinux_cli.environment.image_store import current_image_state
-from fplinux_cli.environment.images import (
-    container_image_recipe_digest,
-    container_image_reference,
-    load_container_lock,
+from fplinux_cli.environment.definition import (
+    environment_recipe_digest,
+    load_environment_lock,
 )
 from fplinux_cli.environment.kern import kern_box_name, kern_environment, require_kern
+from fplinux_cli.environment.runtime import (
+    current_environment_state,
+    environment_arguments,
+    environment_rootfs,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -23,15 +26,18 @@ class WindowsBuildEnvironment:
     """Own one writable build directory and explicit read-only input mounts."""
 
     def __init__(self, *, work: Path, inputs: list[Path]) -> None:
-        """Require the exact project runtime and its current build image."""
+        """Require the exact project runtime and its current build environment."""
         self.work = work.resolve()
         self.inputs = [path.resolve() for path in inputs]
-        lock = load_container_lock()
+        lock = load_environment_lock()
         self.kern = require_kern(lock)
-        recipe = container_image_recipe_digest(lock)
-        self.image = container_image_reference(lock, recipe)
-        if current_image_state(self.kern, self.image, recipe) is None:
-            common.fail("Windows packaging requires the current pinned image; run ./fplinux setup")
+        recipe = environment_recipe_digest(lock)
+        state = current_environment_state(self.kern, recipe)
+        if state is None:
+            common.fail(
+                "Windows packaging requires the current pinned environment; run ./fplinux setup"
+            )
+        self.rootfs = environment_rootfs(common.ROOT / ".cache", state)
 
     def _command(
         self,
@@ -46,10 +52,7 @@ class WindowsBuildEnvironment:
             self.kern,
             "box",
             kern_box_name("windows-build-tools"),
-            "--image",
-            self.image,
-            "--pull",
-            "never",
+            *environment_arguments(self.rootfs),
             "--read-only",
             "--network",
             "none",
@@ -91,7 +94,7 @@ class WindowsBuildEnvironment:
         )
 
     def inspect(self, path: Path) -> subprocess.CompletedProcess[str]:
-        """Inspect a PE file using the image's native binutils without executing it."""
+        """Inspect a PE file using the environment's native binutils without executing it."""
         return subprocess.run(
             self._command(["objdump", "-p", str(path)], cwd=self.work),
             env=kern_environment(),

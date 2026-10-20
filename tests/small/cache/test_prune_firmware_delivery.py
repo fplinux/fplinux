@@ -12,8 +12,8 @@ from fplinux_cli.alpine import recipes, rootfs_state, signing
 from fplinux_cli.cache.prune import alpine as prune_alpine
 from fplinux_cli.cache.prune.operations import discard_obsolete_rootfs
 from fplinux_cli.device_data.inputs import capture_external_device_data
-from fplinux_cli.environment.image_state import ImageState, publish_image_state
-from fplinux_cli.environment.images import container_artifact_recipe_digest
+from fplinux_cli.environment.definition import environment_artifact_recipe_digest
+from fplinux_cli.environment.state import EnvironmentState, publish_environment_state
 
 from tests.small.alpine.fixtures import (
     alpine_source as alpine_source,  # noqa: PLC0414 -- pytest fixture export.
@@ -36,15 +36,15 @@ def test_prune_retains_both_current_qin_rootfs_variants_and_expires_changed_inpu
     public_key = signing.signing_public_key(cache)
     public_key.parent.mkdir(parents=True)
     public_key.write_bytes(b"public test key\n")
-    publish_image_state(cache, ImageState("a" * 64, "b" * 64, "b" * 64))
-    image_recipe = container_artifact_recipe_digest("a" * 64, "b" * 64)
+    publish_environment_state(cache, EnvironmentState("a" * 64, "b" * 64, "b" * 64))
+    environment_recipe = environment_artifact_recipe_digest("a" * 64, "b" * 64)
     signing_key = signing.signing_key_identity(cache)
     rootfs_recipe = partial(recipes.alpine_rootfs_recipe, root=alpine_source.root)
 
     def selected_recipe() -> str:
         selected = capture_external_device_data(qin_firmware.target, qin_firmware.groups, cache)
         return rootfs_recipe(
-            image_recipe,
+            environment_recipe,
             signing_key,
             (),
             firmware_inputs=selected["wcn-firmware"],
@@ -52,7 +52,7 @@ def test_prune_retains_both_current_qin_rootfs_variants_and_expires_changed_inpu
         )
 
     first = selected_recipe()
-    bare = rootfs_recipe(image_recipe, signing_key, (), root_kind=root_kind)
+    bare = rootfs_recipe(environment_recipe, signing_key, (), root_kind=root_kind)
     assert first != bare
     for recipe in (first, bare):
         output = rootfs_state.rootfs_output(cache, recipe)
@@ -72,7 +72,7 @@ def test_prune_retains_both_current_qin_rootfs_variants_and_expires_changed_inpu
         mock.patch.object(prune_alpine, "load_platform", return_value={}),
         mock.patch.object(prune_alpine, "selected_packages", return_value=()),
         mock.patch.object(prune_alpine, "alpine_rootfs_recipe", new=rootfs_recipe),
-        mock.patch.object(prune_alpine, "container_image_recipe_digest", return_value="a" * 64),
+        mock.patch.object(prune_alpine, "environment_recipe_digest", return_value="a" * 64),
     ):
         initial = {entry.path: entry.action for entry in prune_alpine.rootfs_entries(cache)}
         assert initial == {f"rootfs/{first}": "protected", f"rootfs/{bare}": "protected"}
@@ -108,7 +108,7 @@ def test_prune_retains_both_current_qin_rootfs_variants_and_expires_changed_inpu
         source = alpine_source.root / "scripts/fplinux_cli/build/environment.py"
         source.write_bytes(b"changed build environment\n")
         updated = selected_recipe()
-        updated_bare = rootfs_recipe(image_recipe, signing_key, (), root_kind=root_kind)
+        updated_bare = rootfs_recipe(environment_recipe, signing_key, (), root_kind=root_kind)
         assert {updated, updated_bare}.isdisjoint({bare, changed})
         for recipe in (updated, updated_bare):
             output = rootfs_state.rootfs_output(cache, recipe)

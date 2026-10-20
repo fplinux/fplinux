@@ -13,7 +13,7 @@ from fplinux_cli.artifacts.bundles import (
     publish_current_bundle,
 )
 from fplinux_cli.common import canonical_json_bytes
-from fplinux_cli.environment.image_state import ImageState, publish_image_state
+from fplinux_cli.environment.state import EnvironmentState, publish_environment_state
 from fplinux_cli.workspace.capture import WorkspaceSnapshot
 
 from tests.bundle_support import file_record
@@ -32,18 +32,13 @@ class CommandBundleContext:
         self.output = self.cache / "out"
         self.target_config: dict[str, object] = {}
         self.release = {"image": "image/ramboot.bin"}
-        self.lock = {
-            "oci": {
-                "repository": "localhost/fplinux-build",
-                "platform": "linux/amd64",
-            }
-        }
+        self.lock: dict[str, object] = {}
         signing_key = self.cache / "apk-signing/fplinux-build.rsa.pub"
         signing_key.parent.mkdir(parents=True)
         signing_key.write_bytes(b"test public signing key\n")
         self.signing_key = hashlib.sha256(signing_key.read_bytes()).hexdigest()
         self.snapshot = WorkspaceSnapshot((), "c" * 64)
-        publish_image_state(self.cache, ImageState("e" * 64, "a" * 64, "a" * 64))
+        publish_environment_state(self.cache, EnvironmentState("e" * 64, "b" * 64, "a" * 64))
         self.bundle_path = self.create_generation("a" * 64)
         self.bundle = publish_current_bundle(self.output, "phone", self.bundle_path)
 
@@ -59,8 +54,8 @@ class CommandBundleContext:
         """Describe one complete synthetic bundle independently of its resolver."""
         return {
             "workspace_digest": self.snapshot.recipe,
-            "container_image_recipe": "e" * 64,
-            "container_image_content": "a" * 64,
+            "environment_recipe": "e" * 64,
+            "environment_content": "a" * 64,
             "apk_signing_key": self.signing_key,
             "device_identity": "9" * 64,
             "rootfs_receipt": {"recipe": "f" * 64, "sha256": "0" * 64},

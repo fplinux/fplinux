@@ -42,8 +42,8 @@ BUILD_MANIFEST_FIELDS = frozenset(
     {
         "rootfs_receipt",
         "boot_artifacts",
-        "container_image_recipe",
-        "container_image_content",
+        "environment_recipe",
+        "environment_content",
         "apk_signing_key",
         "device_identity",
         "files",

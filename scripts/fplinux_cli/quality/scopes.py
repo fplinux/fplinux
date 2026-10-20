@@ -13,7 +13,6 @@ if TYPE_CHECKING:
 
 SOURCE_CHECK_SCOPES = (
     "source",
-    "container",
     "metadata",
     "docs",
     "spelling",

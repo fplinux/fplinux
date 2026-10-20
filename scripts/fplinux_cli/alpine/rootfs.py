@@ -158,10 +158,10 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
     external_output: Path | None = None,
 ) -> tuple[Path, Path, str, dict[str, Path]]:
     """Build the standard rootfs and any APKs published in its bundle."""
-    image_recipe = os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE", "")
+    environment_recipe = os.environ.get("FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE", "")
     signing_private_key, signing_public_key, signing_key_identity = _ensure_apk_signing_key()
     recipe = alpine_rootfs_recipe(
-        image_recipe,
+        environment_recipe,
         signing_key_identity,
         packages,
         firmware_inputs=firmware,
@@ -196,14 +196,14 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
                     external_image,
                     recipe,
                     rootfs_receipt,
-                    image_recipe,
+                    environment_recipe,
                 )
                 ext4_hit = ext4_root.cache_hit(external_output, ext4_plan)
             except ext4_root.Ext4RootError as error:
                 fail(str(error))
         cached_outputs: dict[str, Path] = {}
         for name in build_packages:
-            outputs = _cached_aport_packages(name, image_recipe, signing_key_identity)
+            outputs = _cached_aport_packages(name, environment_recipe, signing_key_identity)
             if outputs is None or set(cached_outputs) & set(outputs):
                 cached_outputs = {}
                 break
@@ -339,7 +339,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
                         external_image,
                         recipe,
                         rootfs_receipt,
-                        image_recipe,
+                        environment_recipe,
                     )
                     ext4_root.build(root, external_output, ext4_plan)
                 except (OSError, subprocess.SubprocessError, ext4_root.Ext4RootError) as error:

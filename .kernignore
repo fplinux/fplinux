@@ -1,9 +1,0 @@
-**
-!package.json
-!package-lock.json
-!Containerfile
-!environment.lock.toml
-!scripts/fplinux_cli/environment/install_wheels.py
-!scripts/fplinux_cli/image_content.py
-!alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch
-!inputs/**

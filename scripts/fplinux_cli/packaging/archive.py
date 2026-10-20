@@ -20,8 +20,8 @@ from fplinux_cli.common import (
     sha256_bytes,
     sha256_file,
 )
-from fplinux_cli.environment import image_state as image_states
-from fplinux_cli.environment import images
+from fplinux_cli.environment import definition
+from fplinux_cli.environment import state as environment_states
 from fplinux_cli.manifests import platforms, releases, targets
 from fplinux_cli.packaging.autonomous import autonomous_payload
 from fplinux_cli.packaging.documentation import offline_documentation
@@ -281,14 +281,18 @@ def package_target(  # noqa: PLR0913 -- archive host and build selectors remain 
         snapshot = workspaces.target_workspace_snapshot(
             target, selected_profile, build_type=build_type
         )
-    image_recipe = images.container_image_recipe_digest()
-    image_state = image_states.load_image_state(common.ROOT / ".cache", image_recipe)
-    identity = cli_bundles.build_identity(snapshot, image_state, common.ROOT / ".cache")
+    environment_recipe = definition.environment_recipe_digest()
+    environment_state = environment_states.load_environment_state(
+        common.ROOT / ".cache", environment_recipe
+    )
+    identity = cli_bundles.build_identity(snapshot, environment_state, common.ROOT / ".cache")
     if not autonomous and not cli_bundles.manifest_matches_identity(manifest, identity):
         clean_snapshot = workspaces.target_workspace_snapshot(
             target, selected_profile, build_type=build_type, include_device_data=False
         )
-        identity = cli_bundles.build_identity(clean_snapshot, image_state, common.ROOT / ".cache")
+        identity = cli_bundles.build_identity(
+            clean_snapshot, environment_state, common.ROOT / ".cache"
+        )
     files_table = manifest.get("files")
     runtime_path = bundle.path / "runtime-manifest.json"
     if runtime_path.is_symlink() or not runtime_path.is_file():

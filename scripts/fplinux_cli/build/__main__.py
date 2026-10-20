@@ -24,7 +24,7 @@ from fplinux_cli.build.storage import stage as storage_build
 from fplinux_cli.common import fail
 from fplinux_cli.device_data import inputs as firmware_inputs
 from fplinux_cli.device_data.cpio import create_device_data_initramfs
-from fplinux_cli.environment.images import container_artifact_recipe_digest
+from fplinux_cli.environment.definition import environment_artifact_recipe_digest
 from fplinux_cli.manifests.identity import BUILD_TYPES
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.releases import load_release
@@ -45,9 +45,9 @@ def main() -> None:
         fail("jobs must be positive")
     process_build.lower_build_priority()
 
-    image_recipe, image_content = inputs_build.container_image_environment()
-    os.environ["FPLINUX_CONTAINER_IMAGE_RECIPE"] = container_artifact_recipe_digest(
-        image_recipe, image_content
+    environment_recipe, environment_content = inputs_build.environment_identity()
+    os.environ["FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE"] = environment_artifact_recipe_digest(
+        environment_recipe, environment_content
     )
 
     reporter = RunReporter.from_environment(f"build {args.target}", "build")

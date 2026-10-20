@@ -8,9 +8,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fplinux_cli.common import ROOT, fail
-from fplinux_cli.environment.image_store import current_image_state
-from fplinux_cli.environment.images import container_image_reference, load_container_lock
+from fplinux_cli.environment.definition import environment_recipe_digest, load_environment_lock
 from fplinux_cli.environment.kern import kern_box_name, kern_environment, require_kern
+from fplinux_cli.environment.runtime import (
+    current_environment_state,
+    environment_arguments,
+    environment_rootfs,
+)
 
 if TYPE_CHECKING:
     from fplinux_cli.reporting.run import RunReporter
@@ -50,22 +54,20 @@ def check_commit_message(message_file: str) -> None:
     config = ROOT / "commitlint.config.mjs"
     if config.is_symlink() or not config.is_file():
         fail("commitlint configuration is missing or invalid")
-    container_lock = load_container_lock()
-    kern = require_kern(container_lock)
-    image = container_image_reference(container_lock)
-    image_state = current_image_state(kern, image)
-    if image_state is None:
-        fail("commit hook requires the current build image; run ./fplinux setup")
+    environment_lock = load_environment_lock()
+    kern = require_kern(environment_lock)
+    recipe = environment_recipe_digest(environment_lock)
+    environment_state = current_environment_state(kern, recipe)
+    if environment_state is None:
+        fail("commit hook requires the current build environment; run ./fplinux setup")
+    rootfs = environment_rootfs(ROOT / ".cache", environment_state)
     try:
         result = subprocess.run(
             [
                 kern,
                 "box",
                 kern_box_name("commitlint"),
-                "--image",
-                image,
-                "--pull",
-                "never",
+                *environment_arguments(rootfs),
                 "--read-only",
                 "--network",
                 "none",

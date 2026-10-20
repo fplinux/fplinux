@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Receipt reuse through mocked OCI and checker boundaries."""
+"""Receipt reuse through mocked Kern and checker boundaries."""
 
 from __future__ import annotations
 
@@ -10,8 +10,7 @@ from typing import Any
 from unittest import mock
 
 import pytest
-from fplinux_cli.environment import image_store
-from fplinux_cli.environment.image_state import ImageState
+from fplinux_cli.environment.state import EnvironmentState, publish_environment_state
 from fplinux_cli.quality import checks
 from fplinux_cli.quality import runtime as quality_runtime
 from fplinux_cli.workspace.capture import WorkspaceFile, WorkspaceSnapshot
@@ -20,7 +19,7 @@ from tests.small.quality.check_fixtures import _FailingReporter, _RecordingRepor
 
 
 class MockedCheckReceiptOrchestrationTests:
-    """Exercise real receipt state with mocked OCI and checker boundaries."""
+    """Exercise real receipt state with mocked Kern and checker boundaries."""
 
     @staticmethod
     def _snapshot(*, c_source: bytes = b"int app;\n") -> WorkspaceSnapshot:
@@ -60,53 +59,34 @@ class MockedCheckReceiptOrchestrationTests:
         discard_workspace: mock.Mock,
         exact_hit_guard: bool,
     ) -> tuple[Any, ...]:
-        """Describe the controlled OCI, image, and workspace boundaries for a scenario."""
+        """Describe the controlled environment and workspace boundaries for a scenario."""
+
+        def prepare_environment(**_kwargs: object) -> tuple[str, Path, EnvironmentState]:
+            if exact_hit_guard:
+                message = "exact check hit must not prepare the environment"
+                raise AssertionError(message)
+            state = EnvironmentState("b" * 64, "c" * 64, "e" * 64)
+            publish_environment_state(root / ".cache", state)
+            return "kern", root / ".cache/environment/rootfs", state
+
         return (
             mock.patch.object(checks, "ROOT", root),
-            mock.patch.object(image_store, "ROOT", root),
             mock.patch("fplinux_cli.quality.checks.RunReporter.create", return_value=reporter),
             mock.patch.object(
-                quality_runtime,
-                "kern_available",
-                new=self._guarded_boundary(
-                    "inspect Kern",
-                    normal_result=True,
-                    exact_hit_guard=exact_hit_guard,
-                ),
-            ),
-            mock.patch.object(
-                quality_runtime,
-                "require_kern",
-                new=self._guarded_boundary(
-                    "require Kern",
-                    "kern",
-                    exact_hit_guard=exact_hit_guard,
-                ),
+                checks,
+                "require_environment",
+                side_effect=prepare_environment,
             ),
             mock.patch.object(
                 checks,
-                "load_container_lock",
-                return_value={
-                    "oci": {
-                        "repository": "localhost/fplinux-build",
-                        "platform": "linux/amd64",
-                    }
-                },
-            ),
-            mock.patch.object(
-                quality_runtime,
-                "current_image_state",
-                new=self._guarded_boundary(
-                    "inspect an image",
-                    ImageState("b" * 64, "c" * 64, "c" * 64),
-                    exact_hit_guard=exact_hit_guard,
-                ),
+                "load_environment_lock",
+                return_value={},
             ),
             mock.patch.object(checks, "kern_environment", return_value={}),
             mock.patch.object(quality_runtime, "kern_environment", return_value={}),
             mock.patch.object(
                 checks,
-                "container_image_recipe_digest",
+                "environment_recipe_digest",
                 return_value="b" * 64,
             ),
             mock.patch.object(
@@ -136,15 +116,6 @@ class MockedCheckReceiptOrchestrationTests:
                 checks,
                 "discard_staged_quality_workspace_snapshot",
                 new=discard_workspace,
-            ),
-            mock.patch.object(
-                quality_runtime,
-                "setup",
-                new=self._guarded_boundary(
-                    "set up an image",
-                    None,
-                    exact_hit_guard=exact_hit_guard,
-                ),
             ),
         )
 
@@ -224,7 +195,6 @@ class MockedCheckReceiptOrchestrationTests:
             "-m",
             "fplinux_cli.quality.source",
             "source",
-            "container",
             "metadata",
             "docs",
             "spelling",

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Checksum command publication with a controlled OCI boundary."""
+"""Checksum command publication with a controlled Kern boundary."""
 
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ import fplinux_cli.reporting.run as output
 import fplinux_cli.workspace.build_inputs as workspace_inputs
 import pytest
 from fplinux_cli import common
-from fplinux_cli.environment import image_store, images
-from fplinux_cli.environment.image_state import ImageState
+from fplinux_cli.environment import runtime
+from fplinux_cli.environment.state import EnvironmentState
 from fplinux_cli.workspace import staging as workspace_staging
 
 from tests import ROOT
@@ -50,25 +50,20 @@ class ChecksumAportContext:
         )
 
     def run(self, container_run: Callable[..., None]) -> None:
-        """Invoke the checksum workflow with a controlled image and OCI execution."""
+        """Invoke the checksum workflow with a controlled environment and Kern execution."""
         with (
             mock.patch.object(common, "ROOT", self.root),
-            mock.patch.object(image_store, "ROOT", self.root),
             mock.patch.object(workspace_inputs, "ROOT", self.root),
             mock.patch.object(workspace_staging, "ROOT", self.root),
             mock.patch.object(output, "ROOT", self.root),
             mock.patch.object(
-                images,
-                "load_container_lock",
-                return_value={"oci": {"repository": "localhost/fplinux-build"}},
-            ),
-            mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
-            mock.patch.object(kern_env, "kern_available", return_value=True),
-            mock.patch.object(kern_env, "require_kern", return_value="/usr/bin/kern"),
-            mock.patch.object(
-                image_store,
-                "current_image_state",
-                return_value=ImageState("e" * 64, "a" * 64, "a" * 64),
+                runtime,
+                "require_environment",
+                return_value=(
+                    "/usr/bin/kern",
+                    self.root / ".cache/environment/rootfs",
+                    EnvironmentState("e" * 64, "a" * 64, "b" * 64),
+                ),
             ),
             mock.patch.object(kern_env, "kern_environment", return_value={}),
             mock.patch.object(output.Stage, "run", autospec=True, side_effect=container_run),
@@ -79,7 +74,7 @@ class ChecksumAportContext:
 
     @staticmethod
     def staged_apkbuild(command: list[str]) -> Path:
-        """Resolve the private aport through the OCI workspace mount boundary."""
+        """Resolve the private aport through the Kern workspace mount boundary."""
         workspace_sources: list[Path] = []
         for index, argument in enumerate(command[:-1]):
             if argument != "--volume":
@@ -102,7 +97,7 @@ def checksum_aport(tmp_path: Path) -> ChecksumAportContext:
 
 
 class ChecksumAportTests:
-    """Publish only validated checksum-block changes from an isolated OCI stage."""
+    """Publish only validated checksum-block changes from an isolated Kern stage."""
 
     @pytest.mark.parametrize("recipe", ["before.APKBUILD", "empty.APKBUILD"])
     def test_success_replaces_only_the_checksum_block_atomically(
@@ -145,6 +140,13 @@ class ChecksumAportTests:
                 }
             )
             assert command[command.index("--network") + 1] == "none"
+            assert command[command.index("--rootfs") + 1] == str(
+                checksum_aport.root / ".cache/environment/rootfs"
+            )
+            assert "--read-only" in command
+            assert "--uid-range" in command
+            assert "--image" not in command
+            assert "--pull" not in command
             generated = checksum_aport.staged_apkbuild(command)
             generated.write_bytes((APORT_FILES / "after.APKBUILD").read_bytes())
 
@@ -153,7 +155,7 @@ class ChecksumAportTests:
     def test_non_checksum_generation_failure_keeps_canonical_apkbuild(
         self, checksum_aport: ChecksumAportContext
     ) -> None:
-        """Reject OCI output that changes recipe text before atomic publication."""
+        """Reject checksum output that changes recipe text before atomic publication."""
         inode_before = checksum_aport.apkbuild.stat().st_ino
 
         def generate_invalid(_stage: output.Stage, command: list[str], **_kwargs: object) -> None:

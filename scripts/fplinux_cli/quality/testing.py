@@ -28,7 +28,7 @@ TEST_TIERS = {
 
 HOST_TEST_MODULES = (
     "tests/host_process/alpine/test_alpine_source_ownership.py",
-    "tests/host_process/cache/test_image_tag.py",
+    "tests/host_process/cache/test_dependency_environment.py",
     "tests/host_process/cache/test_prune_rootfs_ownership.py",
 )
 
@@ -224,13 +224,13 @@ def run_test_workload(  # noqa: PLR0913 -- public selection and runtime inputs s
     workspace: Path,
     *,
     kern: str,
-    image: str,
+    rootfs: Path,
     names: list[str],
     tier: str | None = None,
     verbose: bool = False,
     failfast: bool = False,
 ) -> None:
-    """Share tier budgets between the quality image and real host namespaces."""
+    """Share tier budgets between the quality rootfs and real host namespaces."""
     from .runtime import run_quality_command  # noqa: PLC0415 -- workload-only dependency.
 
     selected = [_pytest_node_id(name, workspace) for name in names]
@@ -345,7 +345,7 @@ def run_test_workload(  # noqa: PLR0913 -- public selection and runtime inputs s
                             workspace,
                             selected.command,
                             kern=kern,
-                            image=image,
+                            rootfs=rootfs,
                             timeout=remaining,
                             log_name=selected.log_name,
                         )
@@ -357,9 +357,8 @@ def run_tests(
     names: list[str], *, tier: str | None = None, verbose: bool = False, failfast: bool = False
 ) -> None:
     """Run selected tests without reading or publishing successful check receipts."""
-    from fplinux_cli.environment.images import (  # noqa: PLC0415 -- test-only dependencies.
-        container_image_recipe_digest,
-        load_container_lock,
+    from fplinux_cli.environment.runtime import (  # noqa: PLC0415 -- test-only dependency.
+        require_environment,
     )
     from fplinux_cli.workspace.quality_inputs import (  # noqa: PLC0415 -- test-only dependency.
         quality_workspace_snapshot,
@@ -369,15 +368,10 @@ def run_tests(
         stage_quality_workspace_snapshot,
     )
 
-    from .runtime import prepare_quality_image  # noqa: PLC0415 -- test-only dependency.
-
     reporter = RunReporter.create("test", target=None, verbose=verbose)
     with reporter.stage("workspace-snapshot"):
         snapshot = quality_workspace_snapshot(enforce_source_policy=False)
-    lock = load_container_lock()
-    kern, image, _state = prepare_quality_image(
-        reporter, lock, container_image_recipe_digest(lock)
-    )
+    kern, rootfs, _state = require_environment(reporter=reporter)
     with reporter.stage("workspace"):
         workspace = stage_quality_workspace_snapshot(snapshot)
     try:
@@ -385,7 +379,7 @@ def run_tests(
             reporter,
             workspace,
             kern=kern,
-            image=image,
+            rootfs=rootfs,
             names=names,
             tier=tier,
             verbose=verbose,

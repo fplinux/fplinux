@@ -80,7 +80,7 @@ class ProbeHeaderTests:
                     destination,
                     sysroot,
                     kern="stubbed-kern",
-                    image="stubbed-image",
+                    rootfs=root / "environment/rootfs",
                     reporter=reporter,
                 )
                 assert ("int probe_header_check;") in (destination.read_text())

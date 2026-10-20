@@ -11,11 +11,11 @@ from fplinux_cli.alpine.recipes import alpine_rootfs_recipe
 from fplinux_cli.alpine.selection import aport_build_order, bundle_packages, selected_packages
 from fplinux_cli.alpine.signing import signing_key_identity
 from fplinux_cli.device_data import inputs as firmware_inputs
-from fplinux_cli.environment.image_state import load_image_state
-from fplinux_cli.environment.images import (
-    container_artifact_recipe_digest,
-    container_image_recipe_digest,
+from fplinux_cli.environment.definition import (
+    environment_artifact_recipe_digest,
+    environment_recipe_digest,
 )
+from fplinux_cli.environment.state import load_environment_state
 from fplinux_cli.manifests.paths import discover_profiles, discover_targets
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.targets import load_target
@@ -31,13 +31,13 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
     """Return every currently valid rootfs recipe, or ``None`` if that is unknown."""
     try:
         signing_key = signing_key_identity(cache)
-        image_source_recipe = container_image_recipe_digest()
-        image_state = load_image_state(cache, image_source_recipe)
-        if image_state is None:
+        environment_source_recipe = environment_recipe_digest()
+        environment_state = load_environment_state(cache, environment_source_recipe)
+        if environment_state is None:
             return None
-        image_recipe = container_artifact_recipe_digest(
-            image_source_recipe,
-            image_state.image_content,
+        environment_recipe = environment_artifact_recipe_digest(
+            environment_source_recipe,
+            environment_state.content,
         )
         recipes: set[str] = set()
         for target in discover_targets():
@@ -65,7 +65,7 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
                 for selected_firmware in firmware_selections:
                     recipes.add(
                         alpine_rootfs_recipe(
-                            image_recipe,
+                            environment_recipe,
                             signing_key,
                             packages,
                             firmware_inputs=selected_firmware,

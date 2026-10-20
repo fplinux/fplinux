@@ -63,8 +63,8 @@ def stage_bundle(  # noqa: PLR0913 -- slot and independently varied manifest ide
     payload = {
         "target": "demo",
         "workspace_digest": "a" * 64,
-        "container_image_recipe": "b" * 64,
-        "container_image_content": "2" * 64,
+        "environment_recipe": "b" * 64,
+        "environment_content": "2" * 64,
         "apk_signing_key": "9" * 64,
         "linux_recipe": "c" * 64,
         "device_identity": "d" * 64,

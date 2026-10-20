@@ -9,7 +9,6 @@ import pytest
 from fplinux_cli.quality import source as source_check
 from fplinux_cli.quality.formatting.command import resolve_format_paths
 from fplinux_cli.quality.formatting.source_formats import classify_source_formats
-from fplinux_cli.quality.source_gate import validate_source_policy
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -95,25 +94,3 @@ def test_root_formatter_preserves_the_separate_site_frontend_contract(tmp_path: 
         else:
             with pytest.raises(SystemExit, match="no project formatter is defined"):
                 resolve_format_paths([relative], root=tmp_path, inventory=inventory)
-
-
-def test_installed_site_packages_and_generated_output_are_not_container_sources(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A site install cannot introduce a second first-party build-image recipe."""
-    write_files(
-        tmp_path,
-        {
-            "Containerfile": b"ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n",
-            "site/node_modules/package/Containerfile": b"FROM external\n",
-            "site/.astro/Containerfile": b"FROM generated\n",
-            "site/dist/Containerfile": b"FROM output\n",
-        },
-    )
-    monkeypatch.setattr("fplinux_cli.common.ROOT", tmp_path)
-
-    validate_source_policy()
-
-    write_files(tmp_path, {"site/Containerfile": b"FROM other\n"})
-    with pytest.raises(SystemExit, match="exactly one root Containerfile"):
-        validate_source_policy()

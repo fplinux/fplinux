@@ -101,7 +101,7 @@ class UbootInputs:
             patches=[],
             work=self.work,
             jobs=jobs,
-            container_recipe="a" * 64,
+            environment_recipe="a" * 64,
             cross_compile="arm-linux-gnueabi-",
             layout=self.layout,
             required_config=self.config["required_config"],
@@ -307,7 +307,7 @@ class UbootToolsTests:
             with (
                 mock.patch.object(common, "ROOT", uboot_inputs.root),
                 mock.patch.object(sources_build, "fetch", return_value=uboot_inputs.archive),
-                mock.patch.dict(os.environ, {"FPLINUX_CONTAINER_IMAGE_RECIPE": "a" * 64}),
+                mock.patch.dict(os.environ, {"FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE": "a" * 64}),
             ):
                 built = storage_build.build_profile_uboot(
                     target, target_config, uboot_inputs.work, 1

@@ -18,7 +18,10 @@ from fplinux_cli.alpine import lock as alpine_lock
 from fplinux_cli.alpine import registration as alpine_registration
 from fplinux_cli.alpine import selection as alpine_selection
 from fplinux_cli.common import fail, load_toml, relative_name, sha256_bytes
-from fplinux_cli.environment.images import spreadtrum_flash_image_source
+from fplinux_cli.environment.definition import (
+    load_environment_lock,
+    spreadtrum_flash_environment_source,
+)
 from fplinux_cli.manifests.assets import load_asset_sources
 from fplinux_cli.manifests.loaders import loader_sources
 from fplinux_cli.manifests.paths import declared_boot_profiles
@@ -208,51 +211,6 @@ def _apkbuild_declarations(path: Path) -> tuple[dict[str, object], list[Dependen
     return context, inputs
 
 
-def _container_declarations(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
-    """Read pinned curl downloads and ordered package-install groups."""
-    text = (root / "Containerfile").read_text(encoding="utf-8").replace("\\\n", "")
-    text = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
-    arguments = dict(re.findall(r"^ARG ([A-Za-z_][A-Za-z0-9_]*)=(\S+)\s*$", text, re.MULTILINE))
-    package_groups = [
-        sorted(shlex.split(match[1]))
-        for match in re.finditer(r"\bapk add --no-cache\s+([^;\n]+)", text)
-    ]
-    inputs = []
-    downloads = []
-    pattern = re.compile(
-        r'\bcurl\s+[^;]*?["\'](https://[^"\']+)["\']\s*;\s*(?:fi;\s*)?'
-        r'printf [^;]*?["\']\$\{([A-Za-z_][A-Za-z0-9_]*)\}["\']'
-        r"[^;]*?\| sha(256|512)sum -c -",
-    )
-    for match in pattern.finditer(text):
-        url = _expand(match[1], arguments, owner="Containerfile")
-        checksum_name = match[2]
-        checksum = arguments.get(checksum_name)
-        if checksum is None:
-            fail(f"Containerfile download has no pinned checksum: {url}")
-        algorithm = f"sha{match[3]}"
-        name = checksum_name.removesuffix(f"_SHA{match[3]}").lower().replace("_", "-")
-        filename = PurePosixPath(urlsplit(url).path).name
-        inputs.append(
-            DependencyInput(
-                key=f"container:{name}",
-                url=url,
-                sha256=checksum if algorithm == "sha256" else None,
-                size=None,
-                destination=f"downloads/environment/{name}/{filename}",
-                purpose="container-source",
-                arch="x86_64",
-                checksum=checksum,
-                algorithm=algorithm,
-            )
-        )
-        downloads.append({"url": url, "algorithm": algorithm, "checksum": checksum})
-    declared_curls = len(re.findall(r"\bcurl\s+", text))
-    if declared_curls != len(inputs):
-        fail("Containerfile contains a download without a supported exact checksum declaration")
-    return {"apk_groups": package_groups, "downloads": downloads}, inputs
-
-
 def npm_declarations(
     path: Path, *, key_prefix: str, cache_directory: str, purpose: str
 ) -> tuple[dict[str, object], list[DependencyInput]]:
@@ -382,46 +340,24 @@ def _source_input(
     )
 
 
-def _environment_lock(
-    root: Path, container_context: dict[str, object]
-) -> tuple[dict[str, Any], list[DependencyInput]]:
+def _environment_lock(root: Path) -> tuple[dict[str, Any], list[DependencyInput]]:
     """Load the exact package closure selected for the build environment."""
-    lock = load_toml(root / "environment.lock.toml")
-    if set(lock) != {"selection", "input"}:
-        fail("environment lock must contain selection and input declarations")
-    selection = lock["selection"]
-    if not isinstance(selection, dict) or set(selection) != {"arch", "apk_groups"}:
-        fail("environment lock selection must contain arch and apk_groups")
-    if selection["arch"] != "x86_64":
-        fail("environment lock must select x86_64")
-    if selection["apk_groups"] != container_context["apk_groups"]:
-        fail("environment lock APK selection differs from Containerfile")
+    lock = load_environment_lock(root)
     records = lock["input"]
-    if not isinstance(records, list) or not records:
-        fail("environment lock must declare external inputs")
-    inputs = []
-    for record in records:
-        if not isinstance(record, dict) or set(record) != {
-            "key",
-            "url",
-            "sha256",
-            "bytes",
-            "destination",
-            "purpose",
-            "arch",
-        }:
-            fail("environment lock input has unsupported fields")
-        inputs.append(
-            DependencyInput(
-                key=record["key"],
-                url=record["url"],
-                sha256=record["sha256"],
-                size=record["bytes"],
-                destination=record["destination"],
-                purpose=record["purpose"],
-                arch=record["arch"],
-            )
+    inputs = [
+        DependencyInput(
+            key=record["key"],
+            url=record["url"],
+            sha256=record.get("sha256"),
+            size=record.get("bytes"),
+            destination=record["destination"],
+            purpose=record["purpose"],
+            arch=record.get("arch"),
+            checksum=record.get("checksum"),
+            algorithm=record.get("algorithm", "sha256"),
         )
+        for record in records
+    ]
     normalized = {
         **lock,
         "input": sorted(records, key=lambda record: record["key"]),
@@ -430,49 +366,27 @@ def _environment_lock(
 
 
 def _environment_declarations(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
-    container_lock = load_toml(root / "container.lock.toml")
-    quality_source = spreadtrum_flash_image_source(root)
-    container_context, inputs = _container_declarations(root)
+    lock_context, inputs = _environment_lock(root)
+    quality_source = spreadtrum_flash_environment_source(root)
+    inputs.append(
+        DependencyInput(
+            key="environment:spreadtrum-flash",
+            url=quality_source["archive_url"],
+            sha256=quality_source["archive_sha256"],
+            size=None,
+            destination="downloads/spreadtrum_flash.tar.gz",
+            purpose="quality-source",
+            arch=lock_context["base"]["arch"],
+        )
+    )
     npm_context, npm_inputs = npm_declarations(
         root / "package-lock.json",
         key_prefix="npm",
         cache_directory="downloads/npm",
         purpose="npm-package",
     )
-    lock_context, lock_inputs = _environment_lock(root, container_context)
     inputs.extend(npm_inputs)
-    inputs.extend(lock_inputs)
-    inputs.extend(
-        [
-            DependencyInput(
-                key="container:spreadtrum-flash",
-                url=quality_source["archive_url"],
-                sha256=quality_source["archive_sha256"],
-                size=None,
-                destination="downloads/spreadtrum_flash.tar.gz",
-                purpose="quality-source",
-                arch="x86_64",
-            ),
-            _source_input(
-                "kern:archive",
-                container_lock["kern"],
-                "downloads/kern/kern.tar.gz",
-                "kern-runtime",
-            ),
-            DependencyInput(
-                key="container:base-rootfs",
-                url=container_lock["oci"]["base_rootfs_url"],
-                sha256=container_lock["oci"]["base_rootfs_sha256"],
-                size=None,
-                destination="downloads/kern/alpine-minirootfs.tar.gz",
-                purpose="container-base",
-                arch="x86_64",
-            ),
-        ]
-    )
     return {
-        "container_lock": container_lock,
-        "container": container_context,
         "npm": npm_context,
         "environment_lock": lock_context,
         "quality_sources": {"spreadtrum_flash": quality_source},

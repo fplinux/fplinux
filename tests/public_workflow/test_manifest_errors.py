@@ -38,7 +38,7 @@ class ManifestErrorWorkflowTests:
             )
         for path in ROOT.glob("*.toml"):
             shutil.copy2(path, checkout / path.name)
-        for name in ("Containerfile", "THIRD_PARTY_NOTICES.md"):
+        for name in ("THIRD_PARTY_NOTICES.md",):
             shutil.copy2(ROOT / name, checkout / name)
         target = checkout / "targets/nokia-ta1618"
         (target / "release/manifest.toml").write_text("image = [\n", encoding="utf-8")

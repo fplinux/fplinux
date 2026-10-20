@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import tarfile
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,7 +14,7 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
-from fplinux_cli.cli.dependencies import restore_dependencies
+from fplinux_cli.cli.dependencies import create_dependencies, restore_dependencies
 from fplinux_cli.dependencies import environment_archive
 from fplinux_cli.dependencies.inputs import DependencyInput
 from fplinux_cli.dependencies.snapshots import (
@@ -21,8 +22,8 @@ from fplinux_cli.dependencies.snapshots import (
     publish_snapshot,
     read_snapshot,
 )
-from fplinux_cli.environment.image_state import ImageState
-from fplinux_cli.environment.images import container_image_recipe_digest
+from fplinux_cli.environment.definition import environment_recipe_digest
+from fplinux_cli.environment.state import EnvironmentState
 from fplinux_cli.reporting.run import RunReporter
 
 from tests.small.dependencies.snapshot_fixtures import selected_checkout
@@ -75,7 +76,7 @@ class SnapshotCheckout:
         generation: str = "b" * 64,
         directory_mode: int = 493,
     ) -> dict[str, Any]:
-        """Store controlled installed metadata and a distinct export for each generation."""
+        """Store a native rootfs archive with an independently declared content identity."""
         metadata_bytes = json.dumps(
             [
                 {
@@ -89,28 +90,32 @@ class SnapshotCheckout:
             sort_keys=True,
             separators=(",", ":"),
         ).encode()
-        archive_bytes = b"native image transport " + generation.encode()
+        archive_stream = io.BytesIO()
+        with tarfile.open(fileobj=archive_stream, mode="w:gz") as archive:
+            directory = tarfile.TarInfo("usr")
+            directory.type = tarfile.DIRTYPE
+            directory.mode = directory_mode
+            directory.uid = 1000
+            directory.gid = 0
+            directory.mtime = int(generation[0], 16)
+            archive.addfile(directory)
+        archive_bytes = archive_stream.getvalue()
         objects = self.snapshot / "objects/sha256"
         metadata_digest = hashlib.sha256(metadata_bytes).hexdigest()
         archive_digest = hashlib.sha256(archive_bytes).hexdigest()
-        (objects / metadata_digest).write_bytes(metadata_bytes)
         (objects / archive_digest).write_bytes(archive_bytes)
-        reference = "localhost/fplinux-build:" + recipe
         return {
             "sha256": archive_digest,
             "bytes": len(archive_bytes),
-            "reference": reference,
-            "transport": reference + "-dependency-transport-7-" + generation[:6],
             "state": {
-                "container_image_recipe": recipe,
-                "image_generation": generation,
-                "image_content": metadata_digest,
+                "recipe": recipe,
+                "generation": generation,
+                "content": metadata_digest,
             },
-            "metadata": {"sha256": metadata_digest, "bytes": len(metadata_bytes)},
         }
 
     def saved_environment(self, *, recipe: str = "a" * 64) -> dict[str, Any]:
-        """Attach controlled installed metadata and transport bytes to the input manifest."""
+        """Attach a controlled native rootfs archive to the input manifest."""
         manifest = preserve_inputs(
             [declared_input()], {}, self.snapshot, cache=self.cache, offline=True
         )
@@ -134,6 +139,65 @@ def snapshot_checkout() -> Iterator[SnapshotCheckout]:
 class DependencySnapshotTests:
     """Restore exact declared bytes without accepting a different dependency set."""
 
+    def test_create_reports_missing_download_before_transfer_and_keeps_cache_hits_quiet(
+        self, snapshot_checkout: SnapshotCheckout, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The CLI identifies an active fetch in stderr and its stage log without cache noise."""
+        inputs = [declared_input("second", "downloads/second.tar"), declared_input()]
+        expected = "dependencies: download 2/2: second: https://example.invalid/example.tar\n"
+
+        def fetch(*_args: object, **_kwargs: object) -> io.BytesIO:
+            assert capsys.readouterr().err.endswith(expected)
+            logs = list(
+                (snapshot_checkout.cache / "logs/dependencies").glob("*/*-preserve-inputs.log")
+            )
+            assert len(logs) == 1
+            assert expected in logs[0].read_text()
+            return io.BytesIO(b"abc")
+
+        with (
+            selected_checkout(snapshot_checkout.cache.parent, inputs, {}),
+            mock.patch("urllib.request.urlopen", side_effect=fetch),
+        ):
+            create_dependencies(
+                snapshot_checkout.snapshot, offline=False, sources=(), inputs_only=True
+            )
+
+        assert (snapshot_checkout.cache / "downloads/second.tar").read_bytes() == b"abc"
+        assert len(read_snapshot(snapshot_checkout.snapshot)["inputs"]) == 2
+        capsys.readouterr()
+
+        with (
+            selected_checkout(snapshot_checkout.cache.parent, inputs, {}),
+            mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")),
+        ):
+            create_dependencies(
+                snapshot_checkout.snapshot, offline=False, sources=(), inputs_only=True
+            )
+
+        assert "dependencies: download " not in capsys.readouterr().err
+        logs = sorted(
+            (snapshot_checkout.cache / "logs/dependencies").glob("*/*-preserve-inputs.log")
+        )
+        assert len(logs) == 2
+        assert sum(expected in log.read_text() for log in logs) == 1
+
+    def test_preserve_without_progress_callback_keeps_downloads_quiet(
+        self, snapshot_checkout: SnapshotCheckout, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Library consumers can preserve missing inputs without command progress output."""
+        with mock.patch("urllib.request.urlopen", return_value=io.BytesIO(b"abc")):
+            manifest = preserve_inputs(
+                [declared_input("second", "downloads/second.tar")],
+                {},
+                snapshot_checkout.snapshot,
+                cache=snapshot_checkout.cache,
+                offline=False,
+            )
+
+        assert len(manifest["inputs"]) == 1
+        assert capsys.readouterr() == ("", "")
+
     def test_round_trip_restores_bytes_and_keeps_unrelated_files(
         self, snapshot_checkout: SnapshotCheckout
     ) -> None:
@@ -148,7 +212,7 @@ class DependencySnapshotTests:
             snapshot_checkout.restore([declared_input()], context, new_cache)
         assert ((new_cache / "downloads/example.tar").read_bytes()) == (b"abc")
         assert (unrelated.read_bytes()) == (b"user data")
-        assert not ((new_cache / "host-image-state.json").exists())
+        assert not ((new_cache / "environment/state.json").exists())
 
     def test_identical_bytes_use_one_object_for_multiple_declared_consumers(
         self, snapshot_checkout: SnapshotCheckout
@@ -338,10 +402,10 @@ class DependencySnapshotTests:
             read_snapshot(snapshot_checkout.snapshot)
         assert not ((snapshot_checkout.root / "outside").exists())
 
-    def test_environment_metadata_is_verified_with_its_measured_identity(
+    def test_environment_archive_is_verified_with_its_state(
         self, snapshot_checkout: SnapshotCheckout
     ) -> None:
-        """The reader accepts the captured ownership object bound to its content identity."""
+        """The reader accepts intact rootfs bytes and the complete environment state."""
         manifest = snapshot_checkout.saved_environment()
         assert (
             (read_snapshot(snapshot_checkout.snapshot)["environment"]) == (manifest["environment"])
@@ -350,14 +414,14 @@ class DependencySnapshotTests:
     @pytest.mark.parametrize(
         ("recipe", "directory_mode"),
         [
-            pytest.param("c" * 64, 493, id="another-image-recipe"),
+            pytest.param("c" * 64, 493, id="another-environment-recipe"),
             pytest.param("a" * 64, 448, id="another-installed-content"),
         ],
     )
     def test_another_environment_is_rejected_without_replacing_the_snapshot(
         self, snapshot_checkout: SnapshotCheckout, recipe: str, directory_mode: int
     ) -> None:
-        """An unchanged external input set cannot silently retain an incompatible image."""
+        """An unchanged external input set cannot silently retain an incompatible rootfs."""
         saved = snapshot_checkout.saved_environment()
         manifest_path = snapshot_checkout.snapshot / "manifest.json"
         before = manifest_path.read_bytes()
@@ -381,7 +445,7 @@ class DependencySnapshotTests:
     def test_compatible_environment_keeps_the_first_export_and_generation(
         self, snapshot_checkout: SnapshotCheckout
     ) -> None:
-        """A new transport for identical declared tools does not replace the saved archive."""
+        """A new generation for identical declared tools does not replace the saved archive."""
         saved = snapshot_checkout.saved_environment()
         manifest_path = snapshot_checkout.snapshot / "manifest.json"
         before = manifest_path.read_bytes()
@@ -393,7 +457,6 @@ class DependencySnapshotTests:
             offline=True,
         )
         candidate["environment"] = snapshot_checkout.environment_objects(generation="c" * 64)
-        assert candidate["environment"]["transport"] != saved["environment"]["transport"]
         assert candidate["environment"]["sha256"] != saved["environment"]["sha256"]
 
         publish_snapshot(snapshot_checkout.snapshot, candidate)
@@ -404,7 +467,7 @@ class DependencySnapshotTests:
     def test_inputs_only_repeat_keeps_the_saved_environment(
         self, snapshot_checkout: SnapshotCheckout
     ) -> None:
-        """Saving only originals cannot remove an already preserved build image."""
+        """Saving only originals cannot remove an already preserved build environment."""
         saved = snapshot_checkout.saved_environment()
         manifest_path = snapshot_checkout.snapshot / "manifest.json"
         before = manifest_path.read_bytes()
@@ -443,10 +506,10 @@ class DependencySnapshotTests:
     def test_saving_the_same_environment_reuses_verified_objects_before_export(
         self, snapshot_checkout: SnapshotCheckout
     ) -> None:
-        """A changed operational generation does not create another native image archive."""
-        recipe = container_image_recipe_digest()
+        """A changed operational generation does not create another native rootfs archive."""
+        recipe = environment_recipe_digest()
         saved = snapshot_checkout.saved_environment(recipe=recipe)
-        state = ImageState(recipe, "c" * 64, saved["environment"]["state"]["image_content"])
+        state = EnvironmentState(recipe, "c" * 64, saved["environment"]["state"]["content"])
         objects = snapshot_checkout.snapshot / "objects/sha256"
         before_objects = {path.name: path.read_bytes() for path in objects.iterdir()}
         manifest_path = snapshot_checkout.snapshot / "manifest.json"
@@ -457,16 +520,13 @@ class DependencySnapshotTests:
         try:
             with (
                 mock.patch.object(environment_archive, "require_kern", return_value="kern"),
-                mock.patch.object(environment_archive, "current_image_state", return_value=state),
                 mock.patch.object(
-                    environment_archive,
-                    "_capture_environment_metadata",
-                    side_effect=AssertionError("saved image metadata must be reused"),
+                    environment_archive, "current_environment_state", return_value=state
                 ),
                 mock.patch.object(
                     environment_archive,
-                    "tag_image",
-                    side_effect=AssertionError("saved image must not be exported again"),
+                    "environment_rootfs",
+                    side_effect=AssertionError("saved rootfs must not be exported again"),
                 ),
             ):
                 environment = environment_archive.save_environment(
@@ -479,18 +539,18 @@ class DependencySnapshotTests:
         assert manifest_path.read_bytes() == before_manifest
         assert {path.name: path.read_bytes() for path in objects.iterdir()} == before_objects
 
-    @pytest.mark.parametrize("changed_input", ["image-recipe", "installed-content"])
+    @pytest.mark.parametrize("changed_input", ["environment-recipe", "installed-content"])
     def test_saving_a_conflicting_environment_stops_before_export(
         self, snapshot_checkout: SnapshotCheckout, changed_input: str
     ) -> None:
-        """An incompatible current image is rejected without adding unused snapshot objects."""
-        recipe = container_image_recipe_digest()
-        saved_recipe = "a" * 64 if changed_input == "image-recipe" else recipe
+        """An incompatible current rootfs is rejected without adding unused snapshot objects."""
+        recipe = environment_recipe_digest()
+        saved_recipe = "a" * 64 if changed_input == "environment-recipe" else recipe
         saved = snapshot_checkout.saved_environment(recipe=saved_recipe)
-        content = saved["environment"]["state"]["image_content"]
+        content = saved["environment"]["state"]["content"]
         if changed_input == "installed-content":
             content = "d" * 64
-        state = ImageState(recipe, "c" * 64, content)
+        state = EnvironmentState(recipe, "c" * 64, content)
         objects = snapshot_checkout.snapshot / "objects/sha256"
         before_objects = {path.name: path.read_bytes() for path in objects.iterdir()}
         manifest_path = snapshot_checkout.snapshot / "manifest.json"
@@ -501,16 +561,13 @@ class DependencySnapshotTests:
         try:
             with (
                 mock.patch.object(environment_archive, "require_kern", return_value="kern"),
-                mock.patch.object(environment_archive, "current_image_state", return_value=state),
                 mock.patch.object(
-                    environment_archive,
-                    "_capture_environment_metadata",
-                    side_effect=AssertionError("conflicting image metadata must not be captured"),
+                    environment_archive, "current_environment_state", return_value=state
                 ),
                 mock.patch.object(
                     environment_archive,
-                    "tag_image",
-                    side_effect=AssertionError("conflicting image must not be exported"),
+                    "environment_rootfs",
+                    side_effect=AssertionError("conflicting rootfs must not be exported"),
                 ),
                 pytest.raises(SystemExit, match="environment"),
             ):
@@ -522,27 +579,54 @@ class DependencySnapshotTests:
         assert {path.name: path.read_bytes() for path in objects.iterdir()} == before_objects
         assert read_snapshot(snapshot_checkout.snapshot)["environment"] == saved["environment"]
 
-    def test_missing_environment_metadata_prevents_input_restoration(
+    def test_missing_environment_archive_prevents_input_restoration(
         self, snapshot_checkout: SnapshotCheckout
     ) -> None:
-        """A complete input restore cannot proceed after the image metadata object is lost."""
+        """A complete input restore cannot proceed after the saved rootfs object is lost."""
         snapshot_checkout.saved_environment()
         manifest = json.loads((snapshot_checkout.snapshot / "manifest.json").read_bytes())
-        digest = manifest["environment"]["metadata"]["sha256"]
+        digest = manifest["environment"]["sha256"]
         (snapshot_checkout.snapshot / "objects/sha256" / digest).unlink()
         new_cache = snapshot_checkout.root / "restored/.cache"
-        with pytest.raises(SystemExit, match="metadata object is missing"):
+        with pytest.raises(SystemExit, match="environment object is missing"):
             snapshot_checkout.restore([declared_input()], {}, new_cache)
         assert not (new_cache / "downloads").exists()
 
-    def test_image_metadata_must_match_the_declared_original_content(
-        self, snapshot_checkout: SnapshotCheckout
+    @pytest.mark.parametrize("path_case", ["traversal", "link-parent", "hardlink-escape"])
+    def test_environment_archive_paths_are_checked_before_input_restoration(
+        self, snapshot_checkout: SnapshotCheckout, path_case: str
     ) -> None:
-        """Verified storage bytes alone do not authorize applying another image's owners."""
+        """Verified object hashes do not authorize writing a path outside the rootfs."""
         snapshot_checkout.saved_environment()
         manifest_path = snapshot_checkout.snapshot / "manifest.json"
         manifest = json.loads(manifest_path.read_bytes())
-        manifest["environment"]["state"]["image_content"] = "c" * 64
+        stream = io.BytesIO()
+        with tarfile.open(fileobj=stream, mode="w:gz") as archive:
+            if path_case == "link-parent":
+                parent = tarfile.TarInfo("usr")
+                parent.type = tarfile.SYMTYPE
+                parent.linkname = "/outside"
+                archive.addfile(parent)
+                member = tarfile.TarInfo("usr/tool")
+            else:
+                member = tarfile.TarInfo("../outside" if path_case == "traversal" else "tool")
+            if path_case == "hardlink-escape":
+                member.type = tarfile.LNKTYPE
+                member.linkname = "../outside"
+                archive.addfile(member)
+            else:
+                member.size = 3
+                archive.addfile(member, io.BytesIO(b"bad"))
+        archive_bytes = stream.getvalue()
+        digest = hashlib.sha256(archive_bytes).hexdigest()
+        (snapshot_checkout.snapshot / "objects/sha256" / digest).write_bytes(archive_bytes)
+        manifest["environment"]["sha256"] = digest
+        manifest["environment"]["bytes"] = len(archive_bytes)
         manifest_path.write_text(json.dumps(manifest))
-        with pytest.raises(SystemExit, match="metadata does not match"):
-            read_snapshot(snapshot_checkout.snapshot)
+        new_cache = snapshot_checkout.root / "restored/.cache"
+        with pytest.raises(
+            SystemExit, match=r"archive (path is invalid|parent is not a directory)"
+        ):
+            snapshot_checkout.restore([declared_input()], {}, new_cache)
+        assert not (new_cache / "downloads").exists()
+        assert not (snapshot_checkout.root / "outside").exists()

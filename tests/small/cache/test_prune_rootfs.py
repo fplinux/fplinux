@@ -13,8 +13,8 @@ import fplinux_cli.cache.prune.operations as prune_operations
 import fplinux_cli.device_data.inputs as firmware_inputs
 import pytest
 from fplinux_cli.cache.prune.operations import apply_prune, plan_prune
-from fplinux_cli.environment.image_state import ImageState, publish_image_state
-from fplinux_cli.environment.images import container_artifact_recipe_digest
+from fplinux_cli.environment.definition import environment_artifact_recipe_digest
+from fplinux_cli.environment.state import EnvironmentState, publish_environment_state
 
 from tests.small.cache.prune_fixtures import patch_prune_discovery
 
@@ -34,7 +34,7 @@ class RootfsPruneTests:
         public_key = alpine_signing.signing_public_key(cache)
         public_key.parent.mkdir(parents=True)
         public_key.write_bytes(b"public-key\n")
-        publish_image_state(cache, ImageState("a" * 64, "b" * 64, "b" * 64))
+        publish_environment_state(cache, EnvironmentState("a" * 64, "b" * 64, "b" * 64))
         first_packages = ("package-a",)
         second_packages = ("package-a", "package-b")
         first_recipe = "1" * 64
@@ -72,7 +72,7 @@ class RootfsPruneTests:
         }
 
         def rootfs_recipe(
-            _image_recipe: str,
+            _environment_recipe: str,
             _signing_key: str,
             packages: tuple[str, ...],
             *,
@@ -117,7 +117,7 @@ class RootfsPruneTests:
             ),
             mock.patch.object(
                 prune_alpine,
-                "container_image_recipe_digest",
+                "environment_recipe_digest",
                 return_value="a" * 64,
             ),
         ):
@@ -136,7 +136,7 @@ class RootfsPruneTests:
     def test_missing_signing_key_protects_existing_rootfs(tmp_path: Path) -> None:
         """Never prune rootfs generations when their package-signing input is unknown."""
         cache = tmp_path / ".cache"
-        publish_image_state(cache, ImageState("a" * 64, "b" * 64, "b" * 64))
+        publish_environment_state(cache, EnvironmentState("a" * 64, "b" * 64, "b" * 64))
         existing = cache / "rootfs" / ("1" * 64)
         existing.mkdir(parents=True)
         with (
@@ -154,9 +154,7 @@ class RootfsPruneTests:
             mock.patch.object(prune_alpine, "load_platform", return_value={}),
             mock.patch.object(prune_alpine, "selected_packages", return_value=()),
             mock.patch.object(prune_alpine, "alpine_rootfs_recipe", return_value="0" * 64),
-            mock.patch.object(
-                prune_alpine, "container_image_recipe_digest", return_value="a" * 64
-            ),
+            mock.patch.object(prune_alpine, "environment_recipe_digest", return_value="a" * 64),
         ):
             plan = plan_prune(cache)
         assert (len(plan.entries)) == (1)
@@ -170,7 +168,7 @@ class RootfsPruneTests:
         public_key = alpine_signing.signing_public_key(cache)
         public_key.parent.mkdir(parents=True)
         public_key.write_bytes(b"public-key\n")
-        publish_image_state(cache, ImageState("a" * 64, "b" * 64, "b" * 64))
+        publish_environment_state(cache, EnvironmentState("a" * 64, "b" * 64, "b" * 64))
         existing = cache / "rootfs" / ("1" * 64)
         existing.mkdir(parents=True)
         phone = cache / "device-data/phone/phone"
@@ -207,7 +205,7 @@ class RootfsPruneTests:
             mock.patch.object(prune_alpine, "alpine_rootfs_recipe", return_value="0" * 64),
             mock.patch.object(
                 prune_alpine,
-                "container_image_recipe_digest",
+                "environment_recipe_digest",
                 return_value="a" * 64,
             ),
         ):
@@ -225,7 +223,7 @@ class RootfsPruneTests:
         public_key = alpine_signing.signing_public_key(cache)
         public_key.parent.mkdir(parents=True)
         public_key.write_bytes(b"public-key\n")
-        publish_image_state(cache, ImageState("a" * 64, "b" * 64, "b" * 64))
+        publish_environment_state(cache, EnvironmentState("a" * 64, "b" * 64, "b" * 64))
         default_recipe = "3" * 64
         profile_recipe = "4" * 64
         clean_profile_recipe = "7" * 64
@@ -305,7 +303,7 @@ class RootfsPruneTests:
             mock.patch.object(prune_alpine, "alpine_rootfs_recipe", side_effect=rootfs_recipe),
             mock.patch.object(
                 prune_alpine,
-                "container_image_recipe_digest",
+                "environment_recipe_digest",
                 return_value="a" * 64,
             ),
         ):
@@ -323,7 +321,7 @@ class RootfsPruneTests:
         public_key = alpine_signing.signing_public_key(cache)
         public_key.parent.mkdir(parents=True)
         public_key.write_bytes(b"public-key\n")
-        publish_image_state(cache, ImageState("a" * 64, "b" * 64, "b" * 64))
+        publish_environment_state(cache, EnvironmentState("a" * 64, "b" * 64, "b" * 64))
         current = "5" * 64
         stale = "6" * 64
         for recipe in (current, stale):
@@ -350,7 +348,7 @@ class RootfsPruneTests:
             mock.patch.object(prune_alpine, "alpine_rootfs_recipe", return_value=current),
             mock.patch.object(
                 prune_alpine,
-                "container_image_recipe_digest",
+                "environment_recipe_digest",
                 return_value="a" * 64,
             ),
         ):
@@ -370,7 +368,7 @@ class RootfsPruneTests:
         public_key = alpine_signing.signing_public_key(cache)
         public_key.parent.mkdir(parents=True)
         public_key.write_bytes(b"public-key\n")
-        publish_image_state(cache, ImageState("a" * 64, "b" * 64, "b" * 64))
+        publish_environment_state(cache, EnvironmentState("a" * 64, "b" * 64, "b" * 64))
         groups = {
             "bluetooth": [
                 {"source": "bluetooth.bin", "destination": "chip/bluetooth.bin", "size": 9}
@@ -388,13 +386,13 @@ class RootfsPruneTests:
             directory.mkdir(parents=True)
             (directory / filename).write_bytes(contents)
         captured = firmware_inputs.capture_external_device_data("phone", groups, cache)
-        image_recipe = container_artifact_recipe_digest("a" * 64, "b" * 64)
+        environment_recipe = environment_artifact_recipe_digest("a" * 64, "b" * 64)
         signing_key = alpine_signing.signing_key_identity(cache)
 
         def recipe_for(*selected_groups: str) -> str:
             selected = tuple(item for group in selected_groups for item in captured[group])
             return alpine_recipes.alpine_rootfs_recipe(
-                image_recipe, signing_key, (), firmware_inputs=selected, root_kind=root_kind
+                environment_recipe, signing_key, (), firmware_inputs=selected, root_kind=root_kind
             )
 
         without_firmware = recipe_for()
@@ -426,9 +424,7 @@ class RootfsPruneTests:
             ),
             mock.patch.object(prune_alpine, "load_platform", return_value={}),
             mock.patch.object(prune_alpine, "selected_packages", return_value=()),
-            mock.patch.object(
-                prune_alpine, "container_image_recipe_digest", return_value="a" * 64
-            ),
+            mock.patch.object(prune_alpine, "environment_recipe_digest", return_value="a" * 64),
         ):
             removed = prune_operations.discard_obsolete_rootfs(cache)
 
@@ -443,7 +439,7 @@ class RootfsPruneTests:
         public_key = alpine_signing.signing_public_key(cache)
         public_key.parent.mkdir(parents=True)
         public_key.write_bytes(b"public-key\n")
-        publish_image_state(cache, ImageState("a" * 64, "b" * 64, "b" * 64))
+        publish_environment_state(cache, EnvironmentState("a" * 64, "b" * 64, "b" * 64))
         stale = cache / "rootfs" / ("6" * 64)
         stale.mkdir(parents=True)
         outside = tmp_path / "outside"
@@ -468,9 +464,7 @@ class RootfsPruneTests:
             mock.patch.object(prune_alpine, "load_platform", return_value={}),
             mock.patch.object(prune_alpine, "selected_packages", return_value=()),
             mock.patch.object(prune_alpine, "alpine_rootfs_recipe", return_value="8" * 64),
-            mock.patch.object(
-                prune_alpine, "container_image_recipe_digest", return_value="a" * 64
-            ),
+            mock.patch.object(prune_alpine, "environment_recipe_digest", return_value="a" * 64),
         ):
             removed = prune_operations.discard_obsolete_rootfs(cache)
 
@@ -486,7 +480,7 @@ class RootfsPruneTests:
         public_key = alpine_signing.signing_public_key(cache)
         public_key.parent.mkdir(parents=True)
         public_key.write_bytes(b"public-key\n")
-        publish_image_state(cache, ImageState("a" * 64, "b" * 64, "b" * 64))
+        publish_environment_state(cache, EnvironmentState("a" * 64, "b" * 64, "b" * 64))
         existing = cache / "rootfs" / ("2" * 64)
         existing.mkdir(parents=True)
 
@@ -494,9 +488,7 @@ class RootfsPruneTests:
             patch_prune_discovery(
                 "discover_targets", side_effect=SystemExit("bad target manifest")
             ),
-            mock.patch.object(
-                prune_alpine, "container_image_recipe_digest", return_value="a" * 64
-            ),
+            mock.patch.object(prune_alpine, "environment_recipe_digest", return_value="a" * 64),
         ):
             plan = plan_prune(cache)
 

@@ -52,7 +52,7 @@ class CheckScopeTests:
             return check_scope_receipt_recipe(
                 "tests",
                 check_scope_closure_digest("tests", snapshot),
-                image_generation="b" * 64,
+                environment_generation="b" * 64,
                 orchestration_recipe="c" * 64,
             )
 
@@ -83,7 +83,7 @@ class CheckScopeTests:
             return check_scope_receipt_recipe(
                 "alpine",
                 check_scope_closure_digest("alpine", snapshot),
-                image_generation="b" * 64,
+                environment_generation="b" * 64,
                 orchestration_recipe="c" * 64,
             )
 
@@ -124,7 +124,7 @@ class CheckScopeTests:
             return check_scope_receipt_recipe(
                 "kernel",
                 check_scope_closure_digest("kernel", snapshot),
-                image_generation="b" * 64,
+                environment_generation="b" * 64,
                 orchestration_recipe="c" * 64,
             )
 
@@ -171,7 +171,7 @@ class CheckScopeTests:
             return check_scope_receipt_recipe(
                 "kernel",
                 check_scope_closure_digest("kernel", snapshot),
-                image_generation="b" * 64,
+                environment_generation="b" * 64,
                 orchestration_recipe="c" * 64,
             )
 
@@ -232,7 +232,7 @@ class CheckScopeTests:
             return check_scope_receipt_recipe(
                 scope,
                 check_scope_closure_digest(scope, snapshot),
-                image_generation="b" * 64,
+                environment_generation="b" * 64,
                 orchestration_recipe="c" * 64,
             )
 
@@ -279,7 +279,7 @@ class CheckScopeTests:
             return check_scope_receipt_recipe(
                 scope,
                 check_scope_closure_digest(scope, snapshot),
-                image_generation="b" * 64,
+                environment_generation="b" * 64,
                 orchestration_recipe="c" * 64,
             )
 
@@ -318,12 +318,12 @@ class CheckScopeTests:
             check_scope_closure_digest("kernel", after, build_type="debug")
         )
         release = check_scope_receipt_recipe(
-            "python", "a" * 64, image_generation="b" * 64, orchestration_recipe="c" * 64
+            "python", "a" * 64, environment_generation="b" * 64, orchestration_recipe="c" * 64
         )
         debug = check_scope_receipt_recipe(
             "python",
             "a" * 64,
-            image_generation="b" * 64,
+            environment_generation="b" * 64,
             orchestration_recipe="c" * 64,
             build_type="debug",
         )
@@ -335,13 +335,16 @@ class CheckScopeTests:
         orchestration = "b" * 64
         generation = "c" * 64
         first = check_scope_receipt_recipe(
-            "python", closure, image_generation=generation, orchestration_recipe=orchestration
+            "python",
+            closure,
+            environment_generation=generation,
+            orchestration_recipe=orchestration,
         )
         generation_changed = check_scope_receipt_recipe(
-            "python", closure, image_generation="d" * 64, orchestration_recipe=orchestration
+            "python", closure, environment_generation="d" * 64, orchestration_recipe=orchestration
         )
         orchestration_changed = check_scope_receipt_recipe(
-            "python", closure, image_generation=generation, orchestration_recipe="e" * 64
+            "python", closure, environment_generation=generation, orchestration_recipe="e" * 64
         )
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary)
@@ -355,13 +358,13 @@ class CheckScopeTests:
         default = check_scope_receipt_recipe(
             "kernel",
             "a" * 64,
-            image_generation="b" * 64,
+            environment_generation="b" * 64,
             orchestration_recipe="c" * 64,
         )
         profile = check_scope_receipt_recipe(
             "kernel",
             "a" * 64,
-            image_generation="b" * 64,
+            environment_generation="b" * 64,
             orchestration_recipe="c" * 64,
             profile="microsd-uboot",
         )
@@ -496,7 +499,7 @@ class CheckScopeTests:
             return check_scope_receipt_recipe(
                 "kernel",
                 check_scope_closure_digest("kernel", snapshot),
-                image_generation="c" * 64,
+                environment_generation="c" * 64,
                 orchestration_recipe="d" * 64,
             )
 
@@ -538,7 +541,7 @@ class CheckScopeTests:
             return check_scope_receipt_recipe(
                 "kernel",
                 check_scope_closure_digest("kernel", snapshot, profile=profile),
-                image_generation="b" * 64,
+                environment_generation="b" * 64,
                 orchestration_recipe="c" * 64,
                 profile=profile,
             )
@@ -640,7 +643,7 @@ class CheckScopeTests:
             return check_scope_receipt_recipe(
                 "metadata",
                 check_scope_closure_digest("metadata", snapshot),
-                image_generation="b" * 64,
+                environment_generation="b" * 64,
                 orchestration_recipe="c" * 64,
             )
 
@@ -788,17 +791,17 @@ class CheckScopeTests:
             ),
             "c" * 64,
         )
-        image_generation = "e" * 64
+        environment_generation = "e" * 64
         first_recipe = check_scope_receipt_recipe(
             "shell",
             check_scope_closure_digest("shell", base),
-            image_generation=image_generation,
+            environment_generation=environment_generation,
             orchestration_recipe="f" * 64,
         )
         initd_recipe = check_scope_receipt_recipe(
             "shell",
             check_scope_closure_digest("shell", changed_initd),
-            image_generation=image_generation,
+            environment_generation=environment_generation,
             orchestration_recipe="f" * 64,
         )
         with tempfile.TemporaryDirectory() as temporary:
@@ -884,7 +887,7 @@ class CheckScopeTests:
             return check_scope_receipt_recipe(
                 scope,
                 check_scope_closure_digest(scope, snapshot),
-                image_generation="b" * 64,
+                environment_generation="b" * 64,
                 orchestration_recipe="c" * 64,
             )
 

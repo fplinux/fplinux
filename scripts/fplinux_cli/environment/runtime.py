@@ -1,0 +1,191 @@
+# SPDX-License-Identifier: GPL-2.0-only
+"""Validate and publish the single prepared build-environment rootfs."""
+
+from __future__ import annotations
+
+import re
+import subprocess
+from typing import TYPE_CHECKING
+
+from fplinux_cli.common import ROOT, fail, read_json_object
+
+from .definition import environment_recipe_digest, load_environment_lock
+from .kern import KERN_PROBE_TIMEOUT, kern_available, kern_box_name, kern_environment, require_kern
+from .state import (
+    EnvironmentState,
+    EnvironmentStateError,
+    environment_state_path,
+    load_environment_state,
+    publish_environment_state,
+)
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from fplinux_cli.reporting.run import RunReporter
+
+
+def environment_arguments(rootfs: Path) -> list[str]:
+    """Supply the rootfs and the shared tool environment for every Kern invocation."""
+    arguments = ["--rootfs", str(rootfs)]
+    for setting in (
+        "LANG=C.UTF-8",
+        "LC_ALL=C.UTF-8",
+        "TZ=UTC",
+        "PYTHONDONTWRITEBYTECODE=1",
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1",
+        "NPM_CONFIG_AUDIT=false",
+        "NPM_CONFIG_FUND=false",
+        "NPM_CONFIG_UPDATE_NOTIFIER=false",
+        (
+            "PATH=/opt/quality/bin:/opt/quality/node/bin:"
+            "/opt/quality/node-tools/node_modules/.bin:/usr/local/sbin:/usr/local/bin:"
+            "/usr/sbin:/usr/bin:/sbin:/bin"
+        ),
+    ):
+        arguments.extend(("--env", setting))
+    return arguments
+
+
+def environment_rootfs(cache_root: Path, state: EnvironmentState) -> Path:
+    """Resolve the exact rootfs generation named by a validated receipt."""
+    return cache_root / "environment" / f"rootfs-{state.generation}"
+
+
+def probe_environment_state(kern: str, rootfs: Path, recipe: str) -> EnvironmentState | None:
+    """Measure logical ownership and installed content through a ranged read-only box."""
+    if rootfs.is_symlink() or not rootfs.is_dir():
+        return None
+    collector = "/tmp/fplinux-environment-content.py"  # noqa: S108 -- private read-only box mount.
+    try:
+        result = subprocess.run(
+            [
+                kern,
+                "box",
+                kern_box_name("environment-probe"),
+                *environment_arguments(rootfs),
+                "--uid-range",
+                "--read-only",
+                "--network",
+                "none",
+                "--quiet",
+                "--volume",
+                f"{ROOT / 'scripts/fplinux_cli/environment/image_content.py'}:{collector}:ro",
+                "--",
+                "sh",
+                "-ceu",
+                (f"cat /etc/fplinux-environment-state; python3 -B {collector}"),
+            ],
+            cwd=ROOT,
+            env=kern_environment(),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=KERN_PROBE_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        fail(f"Kern environment lookup timed out after {KERN_PROBE_TIMEOUT}s")
+    lines = result.stdout.splitlines()
+    if result.returncode or len(lines) != 4:
+        return None
+    declared_recipe, generation, content, measured_content = lines
+    if declared_recipe != recipe or measured_content != content:
+        return None
+    try:
+        return EnvironmentState(declared_recipe, generation, content)
+    except EnvironmentStateError:
+        return None
+
+
+def current_environment_state(kern: str, recipe: str) -> EnvironmentState | None:
+    """Require both the current receipt and a fresh exact installed-content match."""
+    cache_root = ROOT / ".cache"
+    state = load_environment_state(cache_root, recipe)
+    if state is None:
+        return None
+    observed = probe_environment_state(kern, environment_rootfs(cache_root, state), recipe)
+    return state if observed == state else None
+
+
+def remove_environment_rootfs(path: Path) -> None:
+    """Remove one known candidate or superseded rootfs using its logical owner mapping."""
+    expected_parent = ROOT / ".cache/environment"
+    if (
+        path.parent != expected_parent
+        or path.is_symlink()
+        or re.fullmatch(r"(?:candidate-[a-zA-Z0-9_-]+|rootfs-[0-9a-f]{64})", path.name) is None
+    ):
+        fail(f"refusing to remove an unrecognized environment directory: {path}")
+    if not path.exists():
+        return
+    try:
+        result = subprocess.run(
+            ["unshare", "--map-auto", "--map-root-user", "--", "rm", "-rf", "--", str(path)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=KERN_PROBE_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        fail(f"environment rootfs removal timed out after {KERN_PROBE_TIMEOUT}s: {path}")
+    if result.returncode:
+        fail(result.stderr.strip() or f"environment rootfs removal failed: {path}")
+
+
+def _previous_state(cache_root: Path) -> EnvironmentState | None:
+    payload = read_json_object(environment_state_path(cache_root))
+    if payload is None:
+        return None
+    recipe = payload.get("recipe")
+    return load_environment_state(cache_root, recipe) if isinstance(recipe, str) else None
+
+
+def publish_environment(kern: str, candidate: Path, state: EnvironmentState) -> EnvironmentState:
+    """Publish a verified candidate before discarding the previous known working tree."""
+    cache_root = ROOT / ".cache"
+    directory = cache_root / "environment"
+    if candidate.parent != directory or not candidate.name.startswith("candidate-"):
+        fail(f"environment candidate is outside its preparation directory: {candidate}")
+    if probe_environment_state(kern, candidate, state.recipe) != state:
+        fail("prepared environment failed its exact installed-content check")
+    previous = _previous_state(cache_root)
+    destination = environment_rootfs(cache_root, state)
+    if destination.exists() or destination.is_symlink():
+        if probe_environment_state(kern, destination, state.recipe) != state:
+            fail("environment generation already exists with different installed content")
+        publish_environment_state(cache_root, state)
+        remove_environment_rootfs(candidate)
+    else:
+        candidate.rename(destination)
+        try:
+            publish_environment_state(cache_root, state)
+        except BaseException:
+            destination.rename(candidate)
+            raise
+    if previous is not None and previous.generation != state.generation:
+        remove_environment_rootfs(environment_rootfs(cache_root, previous))
+    return state
+
+
+def require_environment(
+    *, offline: bool = False, reporter: RunReporter | None = None
+) -> tuple[str, Path, EnvironmentState]:
+    """Prepare the current exact environment when the calling workflow permits setup."""
+    from .setup import setup  # noqa: PLC0415 -- setup uses this module's rootfs publication.
+
+    lock = load_environment_lock()
+    recipe = environment_recipe_digest(lock)
+    if kern_available(lock):
+        kern = require_kern(lock)
+        current = current_environment_state(kern, recipe)
+        if current is not None:
+            return kern, environment_rootfs(ROOT / ".cache", current), current
+    if offline:
+        fail(
+            "offline execution requires the current pinned environment; "
+            "run ./fplinux setup online first"
+        )
+    state = setup(offline=offline, reporter=reporter, lock=lock, environment_recipe=recipe)
+    kern = require_kern(lock)
+    return kern, environment_rootfs(ROOT / ".cache", state), state

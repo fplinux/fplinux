@@ -100,7 +100,7 @@ class ProbePublicationTests:
                         destination,
                         root / "sysroot",
                         kern="stubbed-kern",
-                        image="stubbed-image",
+                        rootfs=root / "environment/rootfs",
                         reporter=run,
                     )
 

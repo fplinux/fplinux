@@ -1,121 +1,161 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Exercise image export preservation through a controlled runtime process."""
+"""Exercise rootfs snapshot archives through real mapped filesystem processes."""
 
 from __future__ import annotations
 
-import gzip
-import hashlib
 import json
 import os
 import shutil
+import subprocess
+import sys
 import tarfile
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
+import pytest
+from fplinux_cli import common
 from fplinux_cli.dependencies import environment_archive
-from fplinux_cli.environment.image_state import ImageState
-from fplinux_cli.environment.images import container_image_recipe_digest
+from fplinux_cli.dependencies.snapshots import preserve_inputs, publish_snapshot, read_snapshot
+from fplinux_cli.environment import runtime
+from fplinux_cli.environment.state import EnvironmentState, load_environment_state
 from fplinux_cli.reporting.run import RunReporter
 
 if TYPE_CHECKING:
-    import pytest
+    from collections.abc import Iterator
 
-_EXPORT_PEER = (
-    Path(__file__).resolve().parents[2]
-    / "fixtures/dependencies/environment-export/kern_export_peer.py"
+_ROOTFS_PEER = (
+    Path(__file__).resolve().parents[2] / "fixtures/dependencies/environment-export/rootfs_peer.py"
 )
+_EXPECTED = {
+    "tool": [1234, 2345, 0o6755],
+    "private": [1000, 1000, 0o700],
+    "tool_bytes": "installed executable\n",
+    "private_bytes": "builder data\n",
+    "symlink": "/usr/bin/tool",
+    "hard_link": True,
+}
 
 
-def test_saved_environment_compresses_layers_and_preserves_native_image(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.fixture
+def namespace() -> list[str]:
+    """Require the same numeric ownership mapping as prepared rootfs publication."""
+    unshare = shutil.which("unshare")
+    if unshare is None:
+        pytest.fail("rootfs archive test requires unshare")
+    command = [unshare, "--map-auto", "--map-root-user", "--"]
+    result = subprocess.run(
+        [*command, "true"], capture_output=True, text=True, check=False, timeout=30
+    )
+    if result.returncode:
+        pytest.fail("subordinate namespace is unavailable: " + result.stderr.strip())
+    return command
+
+
+@pytest.fixture
+def snapshot_root(namespace: list[str]) -> Iterator[Path]:
+    """Remove only this scenario's mapped-user files after success or failure."""
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        try:
+            yield root
+        finally:
+            subprocess.run(
+                [*namespace, "rm", "--recursive", "--force", "--", str(root)],
+                check=True,
+                timeout=30,
+            )
+
+
+def _inspect(namespace: list[str], rootfs: Path) -> dict[str, object]:
+    result = subprocess.run(
+        [*namespace, sys.executable, str(_ROOTFS_PEER), "inspect", str(rootfs)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    value: dict[str, object] = json.loads(result.stdout)
+    return value
+
+
+@pytest.mark.parametrize("content_matches", [True, False], ids=("round-trip", "content-rejected"))
+def test_environment_archive_retains_owners_links_and_modes_before_publication(
+    snapshot_root: Path, namespace: list[str], *, content_matches: bool
 ) -> None:
-    """The stored plain archive carries lossless gzip layers and unchanged image metadata."""
-    peer = tmp_path / "kern"
-    shutil.copyfile(_EXPORT_PEER, peer)
-    peer.chmod(0o755)
-    original = tmp_path / "original-export.tar"
-    monkeypatch.setenv("FPLINUX_TEST_ORIGINAL_EXPORT", str(original))
-    directory = tmp_path / "snapshot"
-    directory.mkdir()
-    metadata = [{"gid": 0, "mode": 493, "path": "usr", "type": "directory", "uid": 1000}]
-    content = hashlib.sha256(
-        json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-    recipe = container_image_recipe_digest()
-    state = ImageState(recipe, "b" * 64, content)
-    image = "localhost/fplinux-build:" + recipe
-    transport = image + "-dependency-transport-7-abcdef"
-    reporter = RunReporter("dependencies", tmp_path / "logs", "logs", verbose=False)
+    """The real archive consumer preserves metadata and rejects a failed content probe."""
+    root = snapshot_root
+    source_checkout = root / "source"
+    source = source_checkout / ".cache/environment" / ("rootfs-" + "b" * 64)
+    source.mkdir(parents=True)
+    prepared = subprocess.run(
+        [*namespace, sys.executable, str(_ROOTFS_PEER), "prepare", str(source)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert prepared.returncode == 0, prepared.stderr
+    assert (source / "usr/bin/tool").stat().st_uid != os.geteuid()
+    state = EnvironmentState("a" * 64, "b" * 64, "c" * 64)
+    directory = root / "snapshot"
+    manifest = preserve_inputs([], {}, directory, cache=source_checkout / ".cache", offline=True)
+    reporter = RunReporter("dependencies", root / "logs", "logs", verbose=False)
     try:
         with (
-            mock.patch.object(environment_archive, "require_kern", return_value=str(peer)),
-            mock.patch.object(environment_archive, "current_image_state", return_value=state),
+            mock.patch.object(common, "ROOT", source_checkout),
+            mock.patch.object(environment_archive, "require_kern", return_value="kern"),
+            mock.patch.object(environment_archive, "load_environment_lock", return_value={}),
             mock.patch.object(
-                environment_archive, "kern_environment", side_effect=os.environ.copy
+                environment_archive, "environment_recipe_digest", return_value=state.recipe
             ),
             mock.patch.object(
-                environment_archive, "temporary_image_reference", return_value=transport
+                environment_archive, "current_environment_state", return_value=state
             ),
-            mock.patch.object(environment_archive, "tag_image") as tag,
-            mock.patch.object(
-                environment_archive, "image_references", return_value=frozenset({transport})
-            ),
-            mock.patch.object(environment_archive, "remove_images") as remove,
         ):
-            environment = environment_archive.save_environment(directory, reporter)
+            manifest["environment"] = environment_archive.save_environment(directory, reporter)
+        publish_snapshot(directory, manifest)
+        environment = read_snapshot(directory)["environment"]
+        assert environment["state"] == state.payload()
+        archive = directory / "objects/sha256" / environment["sha256"]
+        with tarfile.open(archive, "r:gz") as bundle:
+            tool = bundle.getmember("./usr/bin/tool")
+            assert (tool.uid, tool.gid, tool.mode) == (1234, 2345, 0o6755)
+            assert bundle.getmember("./tool").linkname == "/usr/bin/tool"
+
+        restored_checkout = root / "restored"
+        restored_checkout.mkdir()
+
+        def probe(_kern: str, candidate: Path, _recipe: str) -> EnvironmentState | None:
+            assert _inspect(namespace, candidate) == _EXPECTED
+            return state if content_matches else None
+
+        with (
+            mock.patch.object(common, "ROOT", restored_checkout),
+            mock.patch.object(runtime, "ROOT", restored_checkout),
+            mock.patch.object(environment_archive, "install_kern", return_value="kern"),
+            mock.patch.object(environment_archive, "load_environment_lock", return_value={}),
+            mock.patch.object(
+                environment_archive, "environment_recipe_digest", return_value=state.recipe
+            ),
+            mock.patch.object(runtime, "probe_environment_state", side_effect=probe),
+        ):
+            if content_matches:
+                environment_archive.restore_environment(directory, environment, reporter)
+            else:
+                with pytest.raises(SystemExit, match="installed-content check"):
+                    environment_archive.restore_environment(directory, environment, reporter)
+        restored_cache = restored_checkout / ".cache"
+        candidates = list((restored_cache / "environment").glob("candidate-*"))
+        assert candidates == []
+        if content_matches:
+            assert load_environment_state(restored_cache, state.recipe) == state
+            restored = runtime.environment_rootfs(restored_cache, state)
+            assert _inspect(namespace, restored) == _EXPECTED
+        else:
+            assert load_environment_state(restored_cache, state.recipe) is None
+            assert not runtime.environment_rootfs(restored_cache, state).exists()
     finally:
         reporter.finish()
-
-    tag.assert_called_once_with(str(peer), image, transport)
-    remove.assert_called_once_with(str(peer), {transport})
-    archive_path = directory / "objects/sha256" / environment["sha256"]
-    assert archive_path.stat().st_size == environment["bytes"]
-    with archive_path.open("rb") as stream:
-        assert hashlib.file_digest(stream, "sha256").hexdigest() == environment["sha256"]
-    metadata_path = directory / "objects/sha256" / environment["metadata"]["sha256"]
-    assert json.loads(metadata_path.read_bytes()) == metadata
-    assert environment["state"] == state.payload()
-
-    with tarfile.open(original, "r:") as before, tarfile.open(archive_path, "r:") as after:
-        assert sorted(before.getnames()) == sorted(after.getnames())
-        manifest_source = before.extractfile("./manifest.json")
-        manifest_saved = after.extractfile("./manifest.json")
-        assert manifest_source is not None
-        assert manifest_saved is not None
-        manifest_bytes = manifest_source.read()
-        assert manifest_saved.read() == manifest_bytes
-        manifest = json.loads(manifest_bytes)[0]
-        config_name = "./" + manifest["Config"]
-        config_source = before.extractfile(config_name)
-        config_saved = after.extractfile(config_name)
-        assert config_source is not None
-        assert config_saved is not None
-        config_bytes = config_source.read()
-        assert config_saved.read() == config_bytes
-        layer_name = "./" + manifest["Layers"][0]
-        layer_source = before.extractfile(layer_name)
-        layer_saved = after.extractfile(layer_name)
-        assert layer_source is not None
-        assert layer_saved is not None
-        layer_bytes = layer_source.read()
-        compressed = layer_saved.read()
-        assert compressed[:3] == b"\x1f\x8b\x08"
-        assert compressed[3] & 8 == 0
-        assert compressed[4:8] == b"\0\0\0\0"
-        assert len(compressed) < len(layer_bytes)
-        assert gzip.decompress(compressed) == layer_bytes
-        config = json.loads(config_bytes)
-        assert config["rootfs"]["diff_ids"] == [
-            "sha256:" + hashlib.sha256(layer_bytes).hexdigest()
-        ]
-        for member in before:
-            saved_member = after.getmember(member.name)
-            actual = dict(saved_member.get_info())
-            expected = dict(member.get_info())
-            # Re-encoding tar headers recalculates their checksums.
-            del actual["chksum"]
-            del expected["chksum"]
-            if member.name == layer_name:
-                expected["size"] = len(compressed)
-            assert actual == expected

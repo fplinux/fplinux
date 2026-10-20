@@ -24,7 +24,7 @@ FIXTURES = common.ROOT / "tests/fixtures/quality/host-tool/cache-build"
 class HostToolCacheTests:
     """A selected input change recompiles; an unrelated source change does not."""
 
-    def test_selected_inputs_image_and_compiler_control_reuse(self) -> None:
+    def test_selected_inputs_environment_and_compiler_control_reuse(self) -> None:
         """Reuse a verified executable until one of its actual build inputs changes."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -116,8 +116,8 @@ class HostToolCacheTests:
                 assert (calls["make"]) == (expected_compiles)
 
             environment = {
-                "FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE": "a" * 64,
-                "FPLINUX_CONTAINER_IMAGE_CONTENT": "b" * 64,
+                "FPLINUX_ENVIRONMENT_RECIPE": "a" * 64,
+                "FPLINUX_ENVIRONMENT_CONTENT": "b" * 64,
                 "PATH": os.environ.get("PATH", os.defpath),
             }
             with (
@@ -142,9 +142,7 @@ class HostToolCacheTests:
 
                 with mock.patch.dict(os.environ, {"CC": "cc"}):
                     build("B:two", 5)
-                    with mock.patch.dict(
-                        os.environ, {"FPLINUX_CONTAINER_IMAGE_CONTENT": "c" * 64}
-                    ):
+                    with mock.patch.dict(os.environ, {"FPLINUX_ENVIRONMENT_CONTENT": "c" * 64}):
                         build("B:two", 6)
                         assert (calls["self_test"]) == (8)
                         receipt = (cache / "host-tools/bridge/receipt.json").read_bytes()

@@ -6,7 +6,6 @@ SPDX-PackageSupplier = "FPLinux contributors"
 path = [
   ".cache/.fplinux-workspace",
   ".clang-format",
-  ".kernignore",
   ".editorconfig",
   ".gitattributes",
   ".githooks/**",
@@ -17,7 +16,6 @@ path = [
   ".prettierrc.json",
   ".taplo.toml",
   ".vale.ini",
-  "Containerfile",
   "LICENSE",
   "README.md",
   "REUSE.toml",
@@ -28,7 +26,6 @@ path = [
   "bootstrap/**",
   "commitlint.config.mjs",
   "common/**",
-  "container.lock.toml",
   "environment.lock.toml",
   "fplinux",
   "include/**",

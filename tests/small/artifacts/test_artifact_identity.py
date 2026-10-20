@@ -1,18 +1,19 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Host contracts for stable content identity and operational image state."""
+"""Host contracts for stable content identity and operational environment state."""
 
 from __future__ import annotations
 
-import subprocess
 from typing import TYPE_CHECKING
-from unittest import mock
 
 import pytest
 from fplinux_cli.build.reuse import build_identity, manifest_matches_identity
-from fplinux_cli.environment import image_store as kern
+from fplinux_cli.environment.definition import environment_artifact_recipe_digest
 from fplinux_cli.environment.image_content import image_content_digest
-from fplinux_cli.environment.image_state import ImageState, load_image_state, publish_image_state
-from fplinux_cli.environment.images import container_artifact_recipe_digest
+from fplinux_cli.environment.state import (
+    EnvironmentState,
+    load_environment_state,
+    publish_environment_state,
+)
 from fplinux_cli.workspace.capture import WorkspaceSnapshot
 
 from tests.small.artifacts.image_fixtures import installed_tree
@@ -32,20 +33,20 @@ class ArtifactIdentityTests:
         keys.mkdir()
         (keys / "fplinux-build.rsa.pub").write_bytes(b"admitted public key\n")
         snapshot = WorkspaceSnapshot((), "a" * 64)
-        first = ImageState("b" * 64, "c" * 64, "d" * 64)
-        second = ImageState("b" * 64, "e" * 64, "d" * 64)
-        publish_image_state(cache, first)
-        initial = build_identity(snapshot, load_image_state(cache, "b" * 64), cache)
-        publish_image_state(cache, second)
-        replacement = build_identity(snapshot, load_image_state(cache, "b" * 64), cache)
-        assert (load_image_state(cache, "b" * 64)) == (second)
+        first = EnvironmentState("b" * 64, "c" * 64, "d" * 64)
+        second = EnvironmentState("b" * 64, "e" * 64, "d" * 64)
+        publish_environment_state(cache, first)
+        initial = build_identity(snapshot, load_environment_state(cache, "b" * 64), cache)
+        publish_environment_state(cache, second)
+        replacement = build_identity(snapshot, load_environment_state(cache, "b" * 64), cache)
+        assert (load_environment_state(cache, "b" * 64)) == (second)
         assert (initial) == (replacement)
         if initial is None:
             pytest.fail("the complete fixture must produce a build identity")
         manifest = {
             "workspace_digest": initial.workspace_digest,
-            "container_image_recipe": initial.container_image_recipe,
-            "container_image_content": initial.container_image_content,
+            "environment_recipe": initial.environment_recipe,
+            "environment_content": initial.environment_content,
             "apk_signing_key": initial.apk_signing_key,
         }
         assert manifest_matches_identity(manifest, replacement)
@@ -62,25 +63,25 @@ class ArtifactIdentityTests:
         keys.mkdir()
         (keys / "fplinux-build.rsa.pub").write_bytes(b"admitted public key\n")
         snapshot = WorkspaceSnapshot((), "a" * 64)
-        first = ImageState("b" * 64, "c" * 64, image_content_digest(image_root))
+        first = EnvironmentState("b" * 64, "c" * 64, image_content_digest(image_root))
         if change == "bytes":
             compiler.write_bytes(b"updated compiler\n")
         else:
             compiler.chmod(0o644)
-        changed = ImageState("b" * 64, "c" * 64, image_content_digest(image_root))
+        changed = EnvironmentState("b" * 64, "c" * 64, image_content_digest(image_root))
         original = build_identity(snapshot, first, cache)
         replacement = build_identity(snapshot, changed, cache)
         if original is None:
             pytest.fail("the complete fixture must produce a build identity")
         manifest = {
             "workspace_digest": original.workspace_digest,
-            "container_image_recipe": original.container_image_recipe,
-            "container_image_content": original.container_image_content,
+            "environment_recipe": original.environment_recipe,
+            "environment_content": original.environment_content,
             "apk_signing_key": original.apk_signing_key,
         }
         assert not (manifest_matches_identity(manifest, replacement))
-        assert (container_artifact_recipe_digest("b" * 64, first.image_content)) != (
-            container_artifact_recipe_digest("b" * 64, changed.image_content)
+        assert (environment_artifact_recipe_digest("b" * 64, first.content)) != (
+            environment_artifact_recipe_digest("b" * 64, changed.content)
         )
 
     @staticmethod
@@ -92,55 +93,7 @@ class ArtifactIdentityTests:
         public_key = keys / "fplinux-build.rsa.pub"
         public_key.write_bytes(b"first admitted public key\n")
         snapshot = WorkspaceSnapshot((), "a" * 64)
-        state = ImageState("b" * 64, "c" * 64, "d" * 64)
+        state = EnvironmentState("b" * 64, "c" * 64, "d" * 64)
         first = build_identity(snapshot, state, cache)
         public_key.write_bytes(b"second admitted public key\n")
         assert (first) != (build_identity(snapshot, state, cache))
-
-    @staticmethod
-    def test_previous_state_without_content_identity_is_a_cache_miss(tmp_path: Path) -> None:
-        """A state that cannot identify actual installed content grants no reuse."""
-        cache = tmp_path
-        (cache / "host-image-state.json").write_text(
-            '{"container_image_recipe":"'
-            + "b" * 64
-            + '","image_generation":"'
-            + "c" * 64
-            + '"}\n',
-            encoding="utf-8",
-        )
-        assert (load_image_state(cache, "b" * 64)) is None
-
-    @staticmethod
-    def test_image_state_rejects_mismatched_content_in_probe_response(tmp_path: Path) -> None:
-        """A controlled probe response must match observed content to its declared marker."""
-        image_root = tmp_path
-        compiler = installed_tree(image_root)
-        declared_content = image_content_digest(image_root)
-        marker = f"{'b' * 64}\n{'c' * 64}\n{declared_content}\n"
-        with (
-            mock.patch.object(kern, "kern_environment", return_value={}),
-            mock.patch.object(
-                subprocess,
-                "run",
-                return_value=subprocess.CompletedProcess(
-                    ["kern", "box"], 0, marker + declared_content + "\n", ""
-                ),
-            ),
-        ):
-            assert (kern.current_image_state("kern", "loaded-image", "b" * 64)) == (
-                ImageState("b" * 64, "c" * 64, declared_content)
-            )
-        compiler.chmod(0o644)
-        observed_content = image_content_digest(image_root)
-        with (
-            mock.patch.object(kern, "kern_environment", return_value={}),
-            mock.patch.object(
-                subprocess,
-                "run",
-                return_value=subprocess.CompletedProcess(
-                    ["kern", "box"], 0, marker + observed_content + "\n", ""
-                ),
-            ),
-        ):
-            assert (kern.current_image_state("kern", "loaded-image", "b" * 64)) is None

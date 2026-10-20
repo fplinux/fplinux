@@ -53,7 +53,7 @@ def create_plan(
     spec: dict[str, Any],
     rootfs_recipe: str,
     rootfs_receipt: dict[str, str],
-    container_recipe: str,
+    environment_recipe: str,
 ) -> Ext4Plan:
     """Create the causal recipe for one profile-owned ext4 artifact."""
     if spec.get("kind") != "ext4-root":
@@ -77,8 +77,8 @@ def create_plan(
     manifest = {
         "spec": spec,
         "rootfs_receipt": receipt,
-        "container_image_recipe": require_lowercase_sha256(
-            container_recipe, "container image recipe", Ext4RootError
+        "environment_recipe": require_lowercase_sha256(
+            environment_recipe, "environment recipe", Ext4RootError
         ),
         "source_date_epoch": build_env.SOURCE_DATE_EPOCH,
         "features": FEATURES,

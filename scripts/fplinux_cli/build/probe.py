@@ -15,13 +15,13 @@ from fplinux_cli.build import sources as sources_build
 from fplinux_cli.build.environment import SOURCE_DATE_EPOCH
 from fplinux_cli.build.workflow import ensure_build_directory
 from fplinux_cli.common import canonical_json_bytes, fail, relative_name, sha256_bytes
-from fplinux_cli.environment import image_store as environment_image_store
-from fplinux_cli.environment import images
+from fplinux_cli.environment import definition
 from fplinux_cli.environment import kern as environment_kern
+from fplinux_cli.environment import runtime as environment_runtime
 from fplinux_cli.reporting.run import RunReporter
 
 if TYPE_CHECKING:
-    from fplinux_cli.environment.image_state import ImageState
+    from fplinux_cli.environment.state import EnvironmentState
 
 
 def _require_unlinked_path(root: Path, relative: str) -> Path:
@@ -59,13 +59,13 @@ def resolve_probe_paths(source: str, output: str, *, root: Path) -> tuple[Path, 
 
 def _container_command(
     kern: str,
-    image: str,
+    rootfs: Path,
     command: list[str],
     *,
     volumes: list[tuple[Path, str]],
     prepare_sysroot: bool = False,
 ) -> list[str]:
-    """Keep probe preparation and compilation in the same offline pinned image."""
+    """Keep probe preparation and compilation in the same offline pinned environment."""
     mounts = [
         argument
         for source, destination in volumes
@@ -75,10 +75,7 @@ def _container_command(
         kern,
         "box",
         environment_kern.kern_box_name("probe-build"),
-        "--image",
-        image,
-        "--pull",
-        "never",
+        *environment_runtime.environment_arguments(rootfs),
         "--network",
         "none",
         "--read-only",
@@ -98,7 +95,9 @@ def _container_command(
     ]
 
 
-def _prepare_sysroot(kern: str, image: str, state: ImageState, reporter: RunReporter) -> Path:
+def _prepare_sysroot(
+    kern: str, rootfs: Path, state: EnvironmentState, reporter: RunReporter
+) -> Path:
     lock = alpine_lock.load_alpine_lock()
     records = alpine_lock.package_records(lock)
     identity = sha256_bytes(
@@ -107,8 +106,8 @@ def _prepare_sysroot(kern: str, image: str, state: ImageState, reporter: RunRepo
                 "arch": lock["arch"],
                 "packages": [records[name] for name in lock["sysroot"]["packages"]],
                 "minirootfs": lock["minirootfs"],
-                "image_recipe": state.container_image_recipe,
-                "image_generation": state.image_generation,
+                "environment_recipe": state.recipe,
+                "environment_generation": state.generation,
             }
         )
     )
@@ -139,7 +138,7 @@ def _prepare_sysroot(kern: str, image: str, state: ImageState, reporter: RunRepo
             stage.run(
                 _container_command(
                     kern,
-                    image,
+                    rootfs,
                     command,
                     volumes=[
                         (downloads, "/packages:ro"),
@@ -184,7 +183,7 @@ def _compile_probe(  # noqa: PLR0913 -- explicit compiler inputs and reporting b
     sysroot: Path,
     *,
     kern: str,
-    image: str,
+    rootfs: Path,
     reporter: RunReporter,
 ) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -215,7 +214,7 @@ def _compile_probe(  # noqa: PLR0913 -- explicit compiler inputs and reporting b
             stage.run(
                 _container_command(
                     kern,
-                    image,
+                    rootfs,
                     command,
                     volumes=[
                         (common.ROOT, "/workspace:ro"),
@@ -238,15 +237,15 @@ def _compile_probe(  # noqa: PLR0913 -- explicit compiler inputs and reporting b
 def build_probe(source: str, *, output: str) -> None:
     """Publish one static ARMv7 probe only after the pinned compiler succeeds."""
     source_path, output_path = resolve_probe_paths(source, output, root=common.ROOT)
-    lock = images.load_container_lock()
-    image_recipe = images.container_image_recipe_digest(lock)
-    image = images.container_image_reference(lock, image_recipe)
+    lock = definition.load_environment_lock()
+    environment_recipe = definition.environment_recipe_digest(lock)
     kern = environment_kern.require_kern(lock)
-    state = environment_image_store.current_image_state(kern, image, image_recipe)
+    state = environment_runtime.current_environment_state(kern, environment_recipe)
     if state is None:
-        fail("probe-build requires the current pinned build image; run ./fplinux setup")
+        fail("probe-build requires the current pinned build environment; run ./fplinux setup")
+    rootfs = environment_runtime.environment_rootfs(common.ROOT / ".cache", state)
     reporter = RunReporter.create("probe-build", target=None, verbose=False)
-    sysroot = _prepare_sysroot(kern, image, state, reporter)
-    _compile_probe(source_path, output_path, sysroot, kern=kern, image=image, reporter=reporter)
+    sysroot = _prepare_sysroot(kern, rootfs, state, reporter)
+    _compile_probe(source_path, output_path, sysroot, kern=kern, rootfs=rootfs, reporter=reporter)
     print(f"probe-build: {output}", flush=True)
     reporter.finish()

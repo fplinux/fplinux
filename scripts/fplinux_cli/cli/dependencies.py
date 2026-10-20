@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import common
@@ -38,7 +39,15 @@ def create_dependencies(
     reporter = RunReporter.create("dependencies", target=None, verbose=False)
     with reporter.stage("dependency-selection"):
         inputs, context = _checkout_declarations()
-    with reporter.stage("preserve-inputs"):
+    with reporter.stage("preserve-inputs") as stage:
+
+        def report_download(input_file: DependencyInput, position: int, total: int) -> None:
+            message = (
+                f"dependencies: download {position}/{total}: {input_file.key}: {input_file.url}"
+            )
+            stage.write((message + "\n").encode())
+            print(message, file=sys.stderr, flush=True)
+
         manifest = preserve_inputs(
             inputs,
             context,
@@ -46,6 +55,7 @@ def create_dependencies(
             cache=common.ROOT / ".cache",
             offline=offline,
             sources=sources,
+            on_download=report_download,
         )
     if not inputs_only:
         manifest["environment"] = save_environment(directory, reporter)

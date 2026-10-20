@@ -6,7 +6,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import shutil
 import tempfile
 from dataclasses import asdict
@@ -16,13 +15,13 @@ from typing import TYPE_CHECKING, Any
 from fplinux_cli import common
 from fplinux_cli.common import canonical_json_bytes, fail, replace_file_atomically, sha256_file
 from fplinux_cli.environment.downloads import download_locked_file
-from fplinux_cli.environment.image_content import validate_image_metadata
-from fplinux_cli.environment.image_state import ImageState
+from fplinux_cli.environment.state import EnvironmentState
 
 from .inputs import DependencyInput
+from .rootfs_archive import require_rootfs_archive
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 
 def prepare_directory(path: Path) -> None:
@@ -142,6 +141,7 @@ def preserve_inputs(  # noqa: PLR0913 -- closure, storage and acquisition polici
     cache: Path,
     offline: bool,
     sources: Sequence[Path] = (),
+    on_download: Callable[[DependencyInput, int, int], None] | None = None,
 ) -> dict[str, Any]:
     """Preserve explicitly declared files; an absent exact input stops publication."""
     directory = _snapshot_directory(directory, cache)
@@ -153,12 +153,14 @@ def preserve_inputs(  # noqa: PLR0913 -- closure, storage and acquisition polici
     source_files = _source_index(sources, inputs)
     records: list[dict[str, Any]] = []
     missing: list[str] = []
-    for input_file in sorted(inputs, key=lambda item: item.key):
+    for position, input_file in enumerate(sorted(inputs, key=lambda item: item.key), start=1):
         source = _saved_input(input_file, cache, source_files)
         if source is None:
             if offline:
                 missing.append(f"{input_file.key}: {input_file.url}")
                 continue
+            if on_download is not None:
+                on_download(input_file, position, len(inputs))
             try:
                 source = _fetch_input(input_file, cache)
             except OSError as error:
@@ -178,12 +180,9 @@ def preserve_inputs(  # noqa: PLR0913 -- closure, storage and acquisition polici
     }
 
 
-def require_matching_environment(saved: ImageState, current: ImageState) -> None:
+def require_matching_environment(saved: EnvironmentState, current: EnvironmentState) -> None:
     """Keep the first export only when its declared and installed tools still match."""
-    if (
-        saved.container_image_recipe != current.container_image_recipe
-        or saved.image_content != current.image_content
-    ):
+    if saved.recipe != current.recipe or saved.content != current.content:
         fail(
             "dependency directory already contains another build environment; "
             "choose another directory"
@@ -202,26 +201,27 @@ def publish_snapshot(directory: Path, manifest: dict[str, Any]) -> None:
         if previous["environment"] is not None:
             if manifest["environment"] is not None:
                 require_matching_environment(
-                    ImageState(**previous["environment"]["state"]),
-                    ImageState(**manifest["environment"]["state"]),
+                    EnvironmentState(**previous["environment"]["state"]),
+                    EnvironmentState(**manifest["environment"]["state"]),
                 )
             return
     replace_file_atomically(destination, canonical_json_bytes(manifest), 0o600)
 
 
 def _validate_snapshot_environment(directory: Path, environment: object) -> None:
-    """Validate the preserved image, metadata and identities before restoration."""
+    """Validate the preserved rootfs bytes and paths before restoration."""
     if not isinstance(environment, dict) or set(environment) != {
         "sha256",
         "bytes",
-        "reference",
         "state",
-        "transport",
-        "metadata",
     }:
         fail("dependency environment fields are invalid")
     digest = environment["sha256"]
-    if not isinstance(digest, str) or type(environment["bytes"]) is not int:
+    if (
+        not isinstance(digest, str)
+        or type(environment["bytes"]) is not int
+        or environment["bytes"] < 0
+    ):
         fail("dependency environment object metadata is invalid")
     object_file = object_path(directory, digest)
     if (
@@ -232,43 +232,10 @@ def _validate_snapshot_environment(directory: Path, environment: object) -> None
     ):
         fail("dependency environment object is missing or mismatched")
     try:
-        ImageState(**environment["state"])
+        EnvironmentState(**environment["state"])
     except (TypeError, ValueError) as error:
         fail(f"dependency environment state is invalid: {error}")
-    metadata = environment["metadata"]
-    if not isinstance(metadata, dict) or set(metadata) != {"sha256", "bytes"}:
-        fail("dependency image metadata object fields are invalid")
-    if (
-        not isinstance(metadata["sha256"], str)
-        or type(metadata["bytes"]) is not int
-        or metadata["bytes"] < 0
-    ):
-        fail("dependency image metadata object size or digest is invalid")
-    metadata_path = object_path(directory, metadata["sha256"])
-    if (
-        metadata_path.is_symlink()
-        or not metadata_path.is_file()
-        or metadata_path.stat().st_size != metadata["bytes"]
-        or sha256_file(metadata_path) != metadata["sha256"]
-    ):
-        fail("dependency image metadata object is missing or mismatched")
-    try:
-        records = validate_image_metadata(json.loads(metadata_path.read_bytes()))
-    except (OSError, ValueError) as error:
-        fail(f"dependency image metadata object is invalid: {error}")
-    content = json.dumps(records, sort_keys=True, separators=(",", ":")).encode()
-    if common.sha256_bytes(content) != environment["state"]["image_content"]:
-        fail("dependency image metadata does not match its installed-content identity")
-    reference, transport = environment["reference"], environment["transport"]
-    if (
-        not isinstance(reference, str)
-        or not isinstance(transport, str)
-        or re.fullmatch(
-            re.escape(reference) + r"-dependency-transport-[0-9]+-[0-9a-f]{6}", transport
-        )
-        is None
-    ):
-        fail("dependency transport image reference is invalid")
+    require_rootfs_archive(object_file)
 
 
 def read_snapshot(directory: Path) -> dict[str, Any]:

@@ -1,16 +1,16 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Report the readiness of the pinned host runtime and build image."""
+"""Report readiness of the pinned host runtime and prepared build environment."""
 
 from __future__ import annotations
 
 import platform
 import subprocess
 import sys
+from typing import TYPE_CHECKING
 
 from fplinux_cli.common import ROOT, error_message
 
-from .image_store import current_image_state
-from .images import container_image_reference, load_container_lock
+from .definition import environment_recipe_digest, load_environment_lock
 from .kern import (
     KERN_PROBE_TIMEOUT,
     kern_available,
@@ -18,20 +18,22 @@ from .kern import (
     kern_environment,
     require_kern,
 )
+from .runtime import current_environment_state, environment_arguments, environment_rootfs
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
-def _kern_build_user_ready(kern: str, image: str) -> bool:
-    """Return whether the host can map the image's unprivileged package builder."""
+def _kern_build_user_ready(kern: str, rootfs: Path) -> bool:
+    """Return whether the host can map the environment's unprivileged package builder."""
     try:
         result = subprocess.run(
             [
                 kern,
                 "box",
                 kern_box_name("doctor-build-user"),
-                "--image",
-                image,
-                "--pull",
-                "never",
+                *environment_arguments(rootfs),
+                "--uid-range",
                 "--read-only",
                 "--network",
                 "none",
@@ -65,8 +67,8 @@ def doctor() -> None:
     if platform.system() != "Linux":
         problems.append("the build interface currently supports Linux hosts only")
     if platform.machine() not in {"x86_64", "amd64"}:
-        problems.append("the pinned build image currently targets linux/amd64")
-    lock = load_container_lock()
+        problems.append("the pinned build environment currently targets linux/amd64")
+    lock = load_environment_lock()
     if not kern_available(lock):
         problems.append("Kern is not ready for this checkout; run ./fplinux setup")
     else:
@@ -108,13 +110,13 @@ def doctor() -> None:
                 )
             else:
                 print("runtime:   ready")
-        image = container_image_reference(lock)
-        ready = current_image_state(kern, image) is not None
-        state = "ready" if ready else "not built or stale"
-        print(f"image:     {state} ({image})")
-        if not ready:
-            problems.append("the pinned build image is not ready; run ./fplinux setup")
-        elif not _kern_build_user_ready(kern, image):
+        recipe = environment_recipe_digest(lock)
+        state = current_environment_state(kern, recipe)
+        readiness = "ready" if state is not None else "not prepared or stale"
+        print(f"environment: {readiness}")
+        if state is None:
+            problems.append("the pinned build environment is not ready; run ./fplinux setup")
+        elif not _kern_build_user_ready(kern, environment_rootfs(ROOT / ".cache", state)):
             problems.append(
                 "Kern cannot map the package builder; configure newuidmap/newgidmap "
                 "and subordinate UID/GID ranges"

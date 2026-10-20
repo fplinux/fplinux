@@ -1,9 +1,0 @@
-
-[[input]]
-key = "container:dtschema"
-url = "https://example.invalid/dtschema-2026.9-py3-none-any.whl"
-sha256 = "{sha256}"
-bytes = {size}
-destination = "downloads/environment/dtschema/dtschema-2026.9-py3-none-any.whl"
-purpose = "container-source"
-arch = "x86_64"

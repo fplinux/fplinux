@@ -502,7 +502,7 @@ def mixed_runtime_context(tmp_path: Path) -> MixedRuntimeContext:
     (tmp_path / "scripts").symlink_to(ROOT / "scripts", target_is_directory=True)
     modules = (
         "tests/host_process/alpine/test_alpine_source_ownership.py",
-        "tests/host_process/cache/test_image_tag.py",
+        "tests/host_process/cache/test_prune_rootfs_ownership.py",
         "tests/host_process/domain/test_selection.py",
         "tests/small/test_selection.py",
     )
@@ -570,7 +570,7 @@ class MixedRuntimeProcessTests:
                     ("host", "alpine.test_alpine_source_ownership"),
                 ]
             )
-        modules.append(("host", "cache.test_image_tag"))
+        modules.append(("host", "cache.test_prune_rootfs_ownership"))
         assert mixed_runtime_context.executed() == [
             f"{runtime}:tests.host_process.{module}.{case}.{method}"
             for runtime, module in modules
@@ -605,7 +605,7 @@ class MixedRuntimeProcessTests:
         """A repeated host method runs again after the intervening container class."""
         host = "tests.host_process.alpine.test_alpine_source_ownership.PassingCase"
         container = "tests.host_process.domain.test_selection.PassingCase"
-        other_host = "tests.host_process.cache.test_image_tag.PassingCase"
+        other_host = "tests.host_process.cache.test_prune_rootfs_ownership.PassingCase"
         result = mixed_runtime_context.run(
             host + ".test_second",
             container,
@@ -630,7 +630,7 @@ class MixedRuntimeProcessTests:
     ) -> None:
         """Host interleaving splits container execution without reordering selected cases."""
         container = "tests.host_process.domain.test_selection.PassingCase"
-        host = "tests.host_process.cache.test_image_tag.PassingCase.test_first"
+        host = "tests.host_process.cache.test_prune_rootfs_ownership.PassingCase.test_first"
         names = [container + ".test_second", container]
         expected = [
             "container:" + container + ".test_second",
@@ -652,8 +652,8 @@ class MixedRuntimeProcessTests:
         self, mixed_runtime_context: MixedRuntimeContext, *, native: bool
     ) -> None:
         """Dotted and native module selectors reach host pytest with all selected cases."""
-        module = "tests.host_process.cache.test_image_tag"
-        selection = "tests/host_process/cache/test_image_tag.py" if native else module
+        module = "tests.host_process.cache.test_prune_rootfs_ownership"
+        selection = "tests/host_process/cache/test_prune_rootfs_ownership.py" if native else module
         result = mixed_runtime_context.run(selection)
         assert result.returncode == 0, result.stderr
         assert mixed_runtime_context.executed() == [
@@ -671,18 +671,18 @@ class MixedRuntimeProcessTests:
             ROOT / "tests/host_process/quality/fixtures/test-runner/pytest_parameter_class.py"
         ).read_text()
         for module in (
-            "tests/host_process/cache/test_image_tag.py",
+            "tests/host_process/cache/test_prune_rootfs_ownership.py",
             "tests/host_process/domain/test_selection.py",
         ):
             path = mixed_runtime_context.root / module
             path.write_text(path.read_text() + "\n" + parameter_case)
         result = mixed_runtime_context.run(
-            "tests/host_process/cache/test_image_tag.py::ParameterCase::test_value[other::id]",
+            "tests/host_process/cache/test_prune_rootfs_ownership.py::ParameterCase::test_value[other::id]",
             "tests/host_process/domain/test_selection.py::ParameterCase::test_value[first]",
         )
         assert result.returncode == 0, result.stderr
         assert mixed_runtime_context.executed() == [
-            "host:tests.host_process.cache.test_image_tag.ParameterCase.test_value[other::id]",
+            "host:tests.host_process.cache.test_prune_rootfs_ownership.ParameterCase.test_value[other::id]",
             "container:tests.host_process.domain.test_selection.ParameterCase.test_value[first]",
         ]
 
@@ -697,7 +697,7 @@ class MixedRuntimeProcessTests:
             for runtime, module in (
                 ("container", "domain.test_selection"),
                 ("host", "alpine.test_alpine_source_ownership"),
-                ("host", "cache.test_image_tag"),
+                ("host", "cache.test_prune_rootfs_ownership"),
             )
             for case in ("FailureCase", "PassingCase")
             for method in ("test_first", "test_second")
@@ -709,7 +709,7 @@ class MixedRuntimeProcessTests:
         self, mixed_runtime_context: MixedRuntimeContext, *, host_first: bool, failfast: bool
     ) -> None:
         """Either runtime can fail; only failfast cancels the later selected workload."""
-        host = "tests.host_process.cache.test_image_tag"
+        host = "tests.host_process.cache.test_prune_rootfs_ownership"
         container = "tests.host_process.domain.test_selection"
         failing, passing = (host, container) if host_first else (container, host)
         failing_runtime, passing_runtime = (
@@ -744,7 +744,7 @@ class MixedRuntimeProcessTests:
     ) -> None:
         """Verbose output exposes the selected case at both execution boundaries."""
         result = mixed_runtime_context.run(
-            "tests.host_process.cache.test_image_tag.PassingCase.test_first",
+            "tests.host_process.cache.test_prune_rootfs_ownership.PassingCase.test_first",
             "tests.host_process.domain.test_selection.PassingCase.test_second",
             "--verbose",
         )
@@ -752,7 +752,7 @@ class MixedRuntimeProcessTests:
         output = result.stdout + result.stderr
         log = (mixed_runtime_context.logs / "tests/01-selected.log").read_text()
         for selection in (
-            "test_image_tag.py::PassingCase::test_first",
+            "test_prune_rootfs_ownership.py::PassingCase::test_first",
             "test_selection.py::PassingCase::test_second",
         ):
             assert selection in output
@@ -763,7 +763,7 @@ class MixedRuntimeProcessTests:
         self, mixed_runtime_context: MixedRuntimeContext, *, host_interrupt: bool
     ) -> None:
         """Child pytest SIGINT retains exit 130 and cancels the other runtime."""
-        host = "tests/host_process/cache/test_image_tag.py"
+        host = "tests/host_process/cache/test_prune_rootfs_ownership.py"
         container = "tests/host_process/domain/test_selection.py"
         interrupted, following = (host, container) if host_interrupt else (container, host)
         shutil.copyfile(

@@ -25,11 +25,11 @@ _ABC_SHA512 = (
 
 
 def _checksum_invocation(stage: Path, downloads: Path) -> list[str]:
-    """Replace only the OCI mount mapping, keeping real Alpine tools and users."""
+    """Replace only the isolated mount mapping, keeping real Alpine tools and users."""
     command = _checksum_container_command(
         "kern",
         package="fplinux-checksum-fixture",
-        image="checksum-fixture",
+        rootfs=Path("/checksum-environment"),
         offline=True,
         stage=stage,
         downloads=downloads,

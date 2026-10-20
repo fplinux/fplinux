@@ -218,8 +218,8 @@ def archive_files(directory: Path) -> Path:
         "rootfs_receipt": None,
         "kernel_artifacts": {},
         "boot_artifacts": None,
-        "container_image_recipe": None,
-        "container_image_content": None,
+        "environment_recipe": None,
+        "environment_content": None,
         "apk_signing_key": None,
         "device_identity": "12" * 32,
         "files": {

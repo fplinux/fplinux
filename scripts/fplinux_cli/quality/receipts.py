@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from fplinux_cli import common
 from fplinux_cli.common import canonical_json_bytes, fail, replace_file_atomically
-from fplinux_cli.environment.images import container_image_recipe_digest, file_recipe_digest
+from fplinux_cli.environment.definition import environment_recipe_digest, file_recipe_digest
 from fplinux_cli.manifests.values import TARGET_NAME
 
 from .scopes import SOURCE_CHECK_SCOPES
@@ -29,7 +29,7 @@ class CheckReceiptRecipe:
     scope: str
     closure_digest: str
     orchestration_recipe: str
-    image_generation: str
+    environment_generation: str
     profile: str | None = None
     build_type: str | None = None
 
@@ -40,7 +40,7 @@ class CheckReceiptRecipe:
             "scope": self.scope,
             "closure_digest": self.closure_digest,
             "orchestration_recipe": self.orchestration_recipe,
-            "image_generation": self.image_generation,
+            "environment_generation": self.environment_generation,
             "profile": self.profile,
             "build_type": self.build_type,
         }
@@ -95,7 +95,7 @@ def publish_success_receipt(cache_root: Path, recipe: CheckReceiptRecipe) -> Non
     replace_file_atomically(destination, canonical_json_bytes(recipe.payload()), 0o600)
 
 
-def check_orchestration_recipe_digest(image_recipe: str | None = None) -> str:
+def check_orchestration_recipe_digest(environment_recipe: str | None = None) -> str:
     """Hash only the implementation that can change cached check results."""
     fixed = [
         common.ROOT / "scripts/fplinux_cli/__init__.py",
@@ -104,9 +104,9 @@ def check_orchestration_recipe_digest(image_recipe: str | None = None) -> str:
         common.ROOT / "scripts/fplinux_cli/alpine/registration.py",
         common.ROOT / "scripts/fplinux_cli/environment/__init__.py",
         common.ROOT / "scripts/fplinux_cli/environment/downloads.py",
-        common.ROOT / "scripts/fplinux_cli/environment/images.py",
-        common.ROOT / "scripts/fplinux_cli/environment/image_state.py",
-        common.ROOT / "scripts/fplinux_cli/environment/image_store.py",
+        common.ROOT / "scripts/fplinux_cli/environment/definition.py",
+        common.ROOT / "scripts/fplinux_cli/environment/state.py",
+        common.ROOT / "scripts/fplinux_cli/environment/runtime.py",
         common.ROOT / "scripts/fplinux_cli/environment/kern.py",
         common.ROOT / "scripts/fplinux_cli/environment/setup.py",
         common.ROOT / "scripts/fplinux_cli/environment/git_hooks.py",
@@ -141,16 +141,16 @@ def check_orchestration_recipe_digest(image_recipe: str | None = None) -> str:
         common.ROOT / "scripts/fplinux_cli/reporting/run.py",
         common.ROOT / "scripts/fplinux_cli/reporting/process.py",
     ]
-    if image_recipe is None:
-        image_recipe = container_image_recipe_digest()
-    return file_recipe_digest(fixed, prefix=bytes.fromhex(image_recipe))
+    if environment_recipe is None:
+        environment_recipe = environment_recipe_digest()
+    return file_recipe_digest(fixed, prefix=bytes.fromhex(environment_recipe))
 
 
-def check_scope_receipt_recipe(  # noqa: PLR0913 -- source, image and kernel type stay explicit.
+def check_scope_receipt_recipe(  # noqa: PLR0913 -- source, environment and kernel type stay explicit.
     scope: str,
     closure_digest: str,
     *,
-    image_generation: str,
+    environment_generation: str,
     orchestration_recipe: str | None = None,
     profile: str | None = None,
     build_type: str = "release",
@@ -174,7 +174,7 @@ def check_scope_receipt_recipe(  # noqa: PLR0913 -- source, image and kernel typ
         scope=scope,
         closure_digest=closure_digest,
         orchestration_recipe=orchestration_recipe,
-        image_generation=image_generation,
+        environment_generation=environment_generation,
         profile=profile,
         build_type=build_type if scope == "kernel" else None,
     )

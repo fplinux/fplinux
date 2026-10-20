@@ -8,13 +8,14 @@ from typing import TYPE_CHECKING
 from fplinux_cli.build import DEFAULT_BUILD_MEMORY_MIB
 from fplinux_cli.cache.prune.operations import discard_superseded_profile_logs
 from fplinux_cli.common import ROOT, fail
-from fplinux_cli.environment.image_state import load_image_state
-from fplinux_cli.environment.images import container_image_recipe_digest, load_container_lock
+from fplinux_cli.environment.definition import environment_recipe_digest, load_environment_lock
 from fplinux_cli.environment.kern import (
     kern_box_name,
     kern_environment,
     report_kern_memory_failure,
 )
+from fplinux_cli.environment.runtime import environment_arguments, require_environment
+from fplinux_cli.environment.state import load_environment_state
 from fplinux_cli.manifests.paths import normalize_profile
 from fplinux_cli.reporting.run import RunReporter
 from fplinux_cli.workspace.quality_inputs import quality_workspace_snapshot
@@ -32,7 +33,7 @@ from .receipts import (
     publish_success_receipt,
     receipt_matches,
 )
-from .runtime import prepare_quality_image, run_quality_command
+from .runtime import run_quality_command
 from .scopes import SOURCE_CHECK_SCOPES, analyzer_cache_names, resolve_check_scopes
 from .testing import run_test_workload
 
@@ -53,7 +54,7 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
     analyzer_cache: dict[str, Path],
     workspace: Path,
     kern: str,
-    image: str,
+    rootfs: Path,
     recipes: dict[str, CheckReceiptRecipe],
     profile: str | None,
     build_type: str,
@@ -72,13 +73,13 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
                 workspace,
                 ["python3", "-m", "fplinux_cli.quality.source", *source_scopes],
                 kern=kern,
-                image=image,
+                rootfs=rootfs,
             )
         for scope in source_scopes:
             publish_success_receipt(cache, recipes[scope])
 
     if "tests" in missing:
-        run_test_workload(reporter, workspace, kern=kern, image=image, names=[])
+        run_test_workload(reporter, workspace, kern=kern, rootfs=rootfs, names=[])
         publish_success_receipt(cache, recipes["tests"])
 
     if "kernel" not in missing:
@@ -95,10 +96,7 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
         for argument in ("--env", f"{key}={value}")
     ]
     common = [
-        "--image",
-        image,
-        "--pull",
-        "never",
+        *environment_arguments(rootfs),
         "--read-only",
         "--memory",
         f"{DEFAULT_BUILD_MEMORY_MIB}m",
@@ -230,18 +228,18 @@ def check(  # noqa: PLR0913 -- public check options stay explicit.
 
     cache = ROOT / ".cache"
     cacheable_scopes = tuple(scope for scope in selected if scope != "repository")
-    container_lock = load_container_lock()
-    image_recipe = container_image_recipe_digest(container_lock)
-    orchestration_recipe = check_orchestration_recipe_digest(image_recipe)
+    environment_lock = load_environment_lock()
+    environment_recipe = environment_recipe_digest(environment_lock)
+    orchestration_recipe = check_orchestration_recipe_digest(environment_recipe)
 
-    def receipt_recipes(image_generation: str) -> dict[str, CheckReceiptRecipe]:
+    def receipt_recipes(environment_generation: str) -> dict[str, CheckReceiptRecipe]:
         return {
             scope: check_scope_receipt_recipe(
                 scope,
                 check_scope_closure_digest(
                     scope, snapshot, profile=profile, build_type=build_type
                 ),
-                image_generation=image_generation,
+                environment_generation=environment_generation,
                 orchestration_recipe=orchestration_recipe,
                 profile=profile,
                 build_type=build_type,
@@ -249,9 +247,9 @@ def check(  # noqa: PLR0913 -- public check options stay explicit.
             for scope in cacheable_scopes
         }
 
-    cached_image = load_image_state(cache, image_recipe)
-    if cached_image is not None:
-        recipes = receipt_recipes(cached_image.image_generation)
+    cached_environment = load_environment_state(cache, environment_recipe)
+    if cached_environment is not None:
+        recipes = receipt_recipes(cached_environment.generation)
         missing = tuple(
             scope
             for scope in cacheable_scopes
@@ -264,9 +262,9 @@ def check(  # noqa: PLR0913 -- public check options stay explicit.
             reporter.finish()
             return
 
-    kern, image, current_image = prepare_quality_image(reporter, container_lock, image_recipe)
+    kern, rootfs, current_environment = require_environment(reporter=reporter)
 
-    recipes = receipt_recipes(current_image.image_generation)
+    recipes = receipt_recipes(current_environment.generation)
     missing = tuple(
         scope
         for scope in cacheable_scopes
@@ -299,7 +297,7 @@ def check(  # noqa: PLR0913 -- public check options stay explicit.
             analyzer_cache=analyzer_cache,
             workspace=workspace,
             kern=kern,
-            image=image,
+            rootfs=rootfs,
             recipes=recipes,
             profile=profile,
             build_type=build_type,

@@ -30,7 +30,6 @@ from fplinux_cli.quality.formatting.canonical import (
 )
 from fplinux_cli.quality.formatting.source_formats import classify_source_formats
 from fplinux_cli.quality.scopes import SOURCE_CHECK_SCOPES, is_project_c_source
-from fplinux_cli.quality.source_gate import containerfile_uses_locked_base
 from fplinux_cli.reporting.run import RunReporter, current_stage, run_entrypoint
 from fplinux_cli.workspace.capture import workspace_snapshot
 
@@ -337,17 +336,6 @@ def check_markdown_links(files: list[Path]) -> None:
                             f"Markdown link anchor is missing: "
                             f"{source.relative_to(ROOT)}:{number}: {destination}"
                         )
-
-
-def check_container_policy(files: list[Path]) -> None:
-    containerfiles = [path for path in files if path.name == "Containerfile"]
-    context_ignores = [path for path in files if path.name == ".kernignore"]
-    if [path.relative_to(ROOT).as_posix() for path in containerfiles] != ["Containerfile"]:
-        fail("source must contain exactly one root Containerfile")
-    if [path.relative_to(ROOT).as_posix() for path in context_ignores] != [".kernignore"]:
-        fail("source must contain exactly one root .kernignore")
-    if not containerfile_uses_locked_base(containerfiles[0].read_text()):
-        fail("the Containerfile must use one lock-provided FROM ${BASE_IMAGE}")
 
 
 def check_release_lock() -> None:
@@ -678,9 +666,6 @@ def main() -> None:
             check_text(files)
     with report_stage(reporter, "canonical-sources"):
         check_canonical_sources(files, formats, selected)
-    if "container" in selected:
-        with report_stage(reporter, "container-policy"):
-            check_container_policy(files)
     if "metadata" in selected:
         with report_stage(reporter, "metadata"):
             check_release_lock()
@@ -726,11 +711,6 @@ def main() -> None:
     if "shell" in selected:
         with report_stage(reporter, "shell"):
             check_shell_sources(formats)
-    if "container" in selected:
-        with report_stage(reporter, "container-lint"):
-            # The build recipe intentionally uses POSIX sh without pipefail (DL4006);
-            # every pipe feeds printf output into a checked sha256sum.
-            run(["hadolint", "--ignore", "DL4006", "Containerfile"])
     if "alpine" in selected:
         apkbuilds = alpine_apkbuilds(files)
         with report_stage(reporter, "alpine"):

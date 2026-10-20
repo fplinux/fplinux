@@ -99,17 +99,17 @@ def require_directory(path: Path) -> Path:
     return path
 
 
-def container_image_environment() -> tuple[str, str]:
+def environment_identity() -> tuple[str, str]:
     """Validate the declared recipe and actual installed content supplied by the host."""
-    image_recipe = sha256_value(
-        os.environ.get("FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE", ""),
-        "container image recipe",
+    environment_recipe = sha256_value(
+        os.environ.get("FPLINUX_ENVIRONMENT_RECIPE", ""),
+        "environment recipe",
     )
     content = sha256_value(
-        os.environ.get("FPLINUX_CONTAINER_IMAGE_CONTENT", ""),
-        "container image content",
+        os.environ.get("FPLINUX_ENVIRONMENT_CONTENT", ""),
+        "environment content",
     )
-    return image_recipe, content
+    return environment_recipe, content
 
 
 def root_source(relative: str) -> Path:

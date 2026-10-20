@@ -92,7 +92,7 @@ _CHECK_IMPLEMENTATION = _MANIFEST_IMPLEMENTATION | frozenset(
         "scripts/fplinux_cli/workspace/__init__.py",
         "scripts/fplinux_cli/workspace/capture.py",
         "scripts/fplinux_cli/environment/__init__.py",
-        "scripts/fplinux_cli/environment/images.py",
+        "scripts/fplinux_cli/environment/definition.py",
         "scripts/fplinux_cli/quality/__init__.py",
         "scripts/fplinux_cli/quality/source_gate.py",
         "scripts/fplinux_cli/quality/scopes.py",
@@ -195,8 +195,6 @@ def _source_scope_uses_file(  # noqa: PLR0911
         "python",
     }:
         return True
-    if scope == "container":
-        return name in {".kernignore", "Containerfile"} or name.startswith(".hadolint")
     if scope == "metadata":
         return (
             source_format_kind(file.path) in {"toml", "json", "yaml", "javascript"}

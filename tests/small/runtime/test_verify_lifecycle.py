@@ -14,7 +14,7 @@ import fplinux_cli.workspace.build_inputs as workspace_inputs
 import pytest
 from fplinux_cli import common
 from fplinux_cli.artifacts.bundles import publish_current_bundle
-from fplinux_cli.environment import images
+from fplinux_cli.environment import definition
 from fplinux_cli.workspace.capture import WorkspaceSnapshot
 
 from tests.small.build.command_fixtures import (
@@ -44,7 +44,7 @@ class VerifyLifecycleTests:
                 "target_workspace_snapshot",
                 side_effect=[ordinary, command_bundle.snapshot],
             ) as snapshot,
-            mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(definition, "environment_recipe_digest", return_value="e" * 64),
             mock.patch.object(
                 subprocess, "run", return_value=subprocess.CompletedProcess([], 0)
             ) as reconnect,
@@ -77,7 +77,7 @@ class VerifyLifecycleTests:
                     WorkspaceSnapshot((), "e" * 64),
                 ],
             ),
-            mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(definition, "environment_recipe_digest", return_value="e" * 64),
             mock.patch.object(subprocess, "run") as reconnect,
             pytest.raises(SystemExit, match="build output is stale"),
         ):
@@ -98,8 +98,8 @@ class VerifyLifecycleTests:
                 return_value=command_bundle.snapshot,
             ),
             mock.patch.object(
-                images,
-                "container_image_recipe_digest",
+                definition,
+                "environment_recipe_digest",
                 return_value="e" * 64,
             ),
             mock.patch.object(
@@ -127,7 +127,7 @@ class VerifyLifecycleTests:
             mock.patch.object(
                 workspace_inputs, "target_workspace_snapshot", return_value=command_bundle.snapshot
             ) as snapshot,
-            mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(definition, "environment_recipe_digest", return_value="e" * 64),
             mock.patch.object(
                 subprocess, "run", return_value=subprocess.CompletedProcess([], 0)
             ) as session,
@@ -153,7 +153,7 @@ class VerifyLifecycleTests:
                 "target_workspace_snapshot",
                 return_value=command_bundle.snapshot,
             ),
-            mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(definition, "environment_recipe_digest", return_value="e" * 64),
             mock.patch.object(
                 subprocess,
                 "run",

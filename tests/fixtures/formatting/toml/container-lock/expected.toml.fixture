@@ -1,9 +1,0 @@
-[kern]
-version = "1"
-archive_url = "https://example.invalid/runtime"
-archive_sha256 = "archive-hash"
-binary_sha256 = "binary-hash"
-
-[oci]
-repository = "local/image"
-platform = "linux/amd64"

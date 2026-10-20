@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.common import ROOT, fail, sha256_file
 
+from .definition import load_environment_lock
 from .downloads import download_locked_file
-from .images import load_container_lock
 
 if TYPE_CHECKING:
     from fplinux_cli.reporting.run import Stage
@@ -77,7 +77,7 @@ def _kern_path() -> Path:
 def kern_available(lock: dict[str, Any] | None = None) -> bool:
     """Return whether the exact pinned Kern binary is already project-local."""
     if lock is None:
-        lock = load_container_lock()
+        lock = load_environment_lock()
     executable = _kern_path()
     return (
         not executable.is_symlink()
@@ -89,7 +89,7 @@ def kern_available(lock: dict[str, Any] | None = None) -> bool:
 def require_kern(lock: dict[str, Any] | None = None) -> str:
     """Return the exact project-local Kern binary."""
     if lock is None:
-        lock = load_container_lock()
+        lock = load_environment_lock()
     if not kern_available(lock):
         fail("Kern is not ready for this checkout; run ./fplinux setup online first")
     return str(_kern_path())

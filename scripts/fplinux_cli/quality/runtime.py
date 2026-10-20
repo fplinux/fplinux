@@ -1,45 +1,22 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Run quality commands against an immutable checkout in the pinned Kern image."""
+"""Run quality commands against an immutable checkout in the pinned Kern environment."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from fplinux_cli.environment.image_store import current_image_state, publish_current_image_state
-from fplinux_cli.environment.images import container_image_reference
 from fplinux_cli.environment.kern import (
-    kern_available,
     kern_box_name,
     kern_environment,
-    require_kern,
 )
-from fplinux_cli.environment.setup import setup
+from fplinux_cli.environment.runtime import environment_arguments
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from fplinux_cli.environment.image_state import ImageState
-    from fplinux_cli.reporting.run import RunReporter, Stage
+    from fplinux_cli.reporting.run import Stage
 
 _QUALITY_COMMAND_TIMEOUT = 2 * 60 * 60
-
-
-def prepare_quality_image(
-    reporter: RunReporter, lock: dict[str, Any], image_recipe: str
-) -> tuple[str, str, ImageState]:
-    """Reuse an inspected image generation or prepare the pinned environment."""
-    image = container_image_reference(lock, image_recipe)
-    if kern_available(lock):
-        kern = require_kern(lock)
-        inspected = current_image_state(kern, image, image_recipe)
-        if inspected is not None:
-            state = publish_current_image_state(kern, image, image_recipe, state=inspected)
-        else:
-            state = setup(reporter=reporter, lock=lock, image_recipe=image_recipe)
-    else:
-        state = setup(reporter=reporter, lock=lock, image_recipe=image_recipe)
-        kern = require_kern(lock)
-    return kern, image, state
 
 
 def run_quality_command(  # noqa: PLR0913 -- runtime, deadline and log ownership stay explicit.
@@ -48,7 +25,7 @@ def run_quality_command(  # noqa: PLR0913 -- runtime, deadline and log ownership
     command: list[str],
     *,
     kern: str,
-    image: str,
+    rootfs: Path,
     timeout: float = _QUALITY_COMMAND_TIMEOUT,
     log_name: str | None = None,
 ) -> None:
@@ -67,11 +44,9 @@ def run_quality_command(  # noqa: PLR0913 -- runtime, deadline and log ownership
             kern,
             "box",
             kern_box_name(f"{reporter.label}-{name}"),
-            "--image",
-            image,
-            "--pull",
-            "never",
+            *environment_arguments(rootfs),
             "--read-only",
+            "--uid-range",
             "--network",
             "none",
             # Kern creates private devpts for real PTY component tests with -t.

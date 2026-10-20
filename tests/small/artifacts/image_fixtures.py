@@ -20,7 +20,7 @@ def installed_tree(root: Path) -> Path:
     library.write_bytes(b"shared library one\n")
     library.chmod(0o644)
     (root / "usr/bin/compiler").symlink_to("cc")
-    state = root / "etc/fplinux-image-state"
+    state = root / "etc/fplinux-environment-state"
     state.parent.mkdir()
     state.write_bytes(b"first recipe\nfirst generation\nfirst content\n")
     return compiler

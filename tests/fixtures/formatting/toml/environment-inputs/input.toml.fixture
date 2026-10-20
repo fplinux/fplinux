@@ -1,3 +1,23 @@
+[tools.node]
+input = "source:node"
+version = "24.21.0"
+
+[tools.sparse]
+input = "source:sparse"
+commit = "source-commit"
+
+[base]
+sha256 = "base-hash"
+url = "https://example.invalid/rootfs"
+arch = "x86_64"
+release = "3.24.2"
+
+[kern]
+binary_sha256 = "binary-hash"
+version = "0.33.0"
+archive_sha256 = "archive-hash"
+archive_url = "https://example.invalid/runtime"
+
 [selection]
 apk_groups = [["z=1", "a=2"], ["b=3"]]
 arch = "x86_64"

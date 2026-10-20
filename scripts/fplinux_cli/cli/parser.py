@@ -247,7 +247,7 @@ def create_parser(
         metavar="PATH",
         help="normalized repository-relative source path or declared Linux patch",
     )
-    setup_parser = commands.add_parser("setup", help="build the pinned OCI environment")
+    setup_parser = commands.add_parser("setup", help="prepare the pinned build environment")
     setup_parser.add_argument(
         "--offline",
         action="store_true",
@@ -283,14 +283,14 @@ def create_parser(
     create_snapshot_parser.add_argument(
         "--inputs-only",
         action="store_true",
-        help="save external inputs without exporting the current Kern image",
+        help="save external inputs without archiving the current build environment",
     )
     verify_snapshot_parser = dependency_commands.add_parser(
         "verify", help="verify a snapshot's bytes and current declarations"
     )
     verify_snapshot_parser.add_argument("directory", type=Path, metavar="DIRECTORY")
     restore_snapshot_parser = dependency_commands.add_parser(
-        "restore", help="restore exact inputs and the saved Kern image without downloading"
+        "restore", help="restore exact inputs and the saved build environment without downloading"
     )
     restore_snapshot_parser.add_argument("directory", type=Path, metavar="DIRECTORY")
     restore_snapshot_parser.add_argument(
@@ -336,7 +336,7 @@ def create_parser(
     build_parser.add_argument(
         "--offline",
         action="store_true",
-        help="on a build miss, run the prepared build image without network access",
+        help="on a build miss, run the prepared build environment without network access",
     )
     probe_parser = commands.add_parser(
         "probe-build", help="build one static ARMv7 hard-float musl C probe"
@@ -352,7 +352,7 @@ def create_parser(
     )
     checksum_parser = commands.add_parser(
         "checksum",
-        help="regenerate one Alpine aport sha512sums block in the pinned build image",
+        help="regenerate one Alpine aport sha512sums block in the pinned build environment",
     )
     checksum_parser.add_argument("aport")
     checksum_parser.add_argument(

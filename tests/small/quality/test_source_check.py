@@ -9,77 +9,14 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-from fplinux_cli import common
 from fplinux_cli.alpine import registration
 from fplinux_cli.quality import source as source_check
 from fplinux_cli.quality.formatting.source_formats import classify_source_formats
-from fplinux_cli.quality.source_gate import validate_source_policy
 from fplinux_cli.workspace import quality_inputs as workspace_module
 
 from tests import ROOT
 
 FIXTURES = ROOT / "tests/fixtures/quality/source-check"
-
-
-class ContainerSourcePolicyTests:
-    """The host gate and source checker enforce the same lock-provided base."""
-
-    @pytest.mark.parametrize(
-        ("contents", "valid"),
-        [
-            ("# base\n\n ARG BASE_IMAGE \nFROM ${BASE_IMAGE}\nRUN true\n", True),
-            ("ARG OTHER\nFROM ${BASE_IMAGE}\n", False),
-            ("ARG BASE_IMAGE\nFROM alpine:latest\n", False),
-            ("ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\nFROM ${BASE_IMAGE}\n", False),
-            ("ARG BASE_IMAGE\n", False),
-            ("# no instructions\n", False),
-        ],
-        ids=[
-            "locked-base",
-            "wrong-argument",
-            "literal-base",
-            "multiple-bases",
-            "no-base",
-            "empty",
-        ],
-    )
-    def test_both_content_checks_require_one_locked_base(
-        self, tmp_path: Path, contents: str, *, valid: bool
-    ) -> None:
-        """Comments are harmless; a missing, replaced or repeated base is rejected."""
-        containerfile = tmp_path / "Containerfile"
-        containerfile.write_text(contents, encoding="utf-8")
-        context_ignore = tmp_path / ".kernignore"
-        context_ignore.touch()
-        with (
-            mock.patch.object(common, "ROOT", tmp_path),
-            mock.patch.object(source_check, "ROOT", tmp_path),
-        ):
-            if valid:
-                validate_source_policy()
-                source_check.check_container_policy([context_ignore, containerfile])
-            else:
-                with pytest.raises(
-                    SystemExit, match=r"^fplinux: Containerfile must use one lock-provided FROM"
-                ):
-                    validate_source_policy()
-                with pytest.raises(
-                    SystemExit,
-                    match=r"^fplinux: the Containerfile must use one lock-provided FROM",
-                ):
-                    source_check.check_container_policy([context_ignore, containerfile])
-
-    def test_source_checker_also_requires_one_root_context_ignore(self, tmp_path: Path) -> None:
-        """The host image gate does not replace the checker's context-ignore policy."""
-        containerfile = tmp_path / "Containerfile"
-        containerfile.write_text("ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n", encoding="utf-8")
-        with (
-            mock.patch.object(common, "ROOT", tmp_path),
-            mock.patch.object(source_check, "ROOT", tmp_path),
-        ):
-            validate_source_policy()
-            with pytest.raises(SystemExit, match=r"exactly one root \.kernignore"):
-                source_check.check_container_policy([containerfile])
 
 
 class SourceInventoryTests:

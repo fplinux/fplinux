@@ -125,7 +125,7 @@ def _full_recipe(  # noqa: PLR0913 -- causal inputs stay explicit.
     defconfig: Path,
     projections: list[tuple[Path, str]],
     patches: list[Path],
-    container_recipe: str,
+    environment_recipe: str,
     cross_compile: str,
 ) -> str:
     lock = config["lock"]
@@ -151,8 +151,8 @@ def _full_recipe(  # noqa: PLR0913 -- causal inputs stay explicit.
         "patches": [
             regular_file_record(path, "U-Boot tools file", UbootToolsError) for path in patches
         ],
-        "container_image_recipe": require_lowercase_sha256(
-            container_recipe, "container image recipe", UbootToolsError
+        "environment_recipe": require_lowercase_sha256(
+            environment_recipe, "environment recipe", UbootToolsError
         ),
         "cross_compile": cross_compile,
         "source_date_epoch": build_env.SOURCE_DATE_EPOCH,
@@ -323,7 +323,7 @@ def build_full(  # noqa: PLR0913 -- build inputs stay explicit.
     patches: list[Path],
     work: Path,
     jobs: int,
-    container_recipe: str,
+    environment_recipe: str,
     cross_compile: str,
     layout: dict[str, int],
     required_config: list[str],
@@ -342,7 +342,7 @@ def build_full(  # noqa: PLR0913 -- build inputs stay explicit.
         defconfig=defconfig,
         projections=projections,
         patches=patches,
-        container_recipe=container_recipe,
+        environment_recipe=environment_recipe,
         cross_compile=cross_compile,
     )
     version = str(config["lock"]["version"])

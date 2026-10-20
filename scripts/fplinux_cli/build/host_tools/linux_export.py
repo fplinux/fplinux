@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Export the standalone runtime from a read-only Linux build image."""
+"""Export the standalone runtime from the read-only Linux build environment."""
 
 from __future__ import annotations
 

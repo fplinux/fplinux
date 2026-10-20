@@ -17,8 +17,9 @@ from fplinux_cli.build.host_tools import windows as windows_build
 from fplinux_cli.build.identity import runtime_identity
 from fplinux_cli.build.runtime import device_data_descriptor, runtime_source_files
 from fplinux_cli.common import canonical_json_bytes
-from fplinux_cli.environment import image_state, images
-from fplinux_cli.environment.image_state import ImageState
+from fplinux_cli.environment import definition
+from fplinux_cli.environment import state as environment_states
+from fplinux_cli.environment.state import EnvironmentState
 from fplinux_cli.manifests import platforms, releases, targets
 from fplinux_cli.packaging import archive as package
 from fplinux_cli.packaging import sources as package_sources
@@ -187,8 +188,8 @@ def archive_inputs(
             "rootfs_receipt": {"recipe": "d" * 64, "sha256": "e" * 64},
             "kernel_artifacts": {},
             "boot_artifacts": {"required": []},
-            "container_image_recipe": "b" * 64,
-            "container_image_content": "c" * 64,
+            "environment_recipe": "b" * 64,
+            "environment_content": "c" * 64,
             "apk_signing_key": signing_digest,
             "device_identity": "f" * 64,
             "files": {relative: file_record(bundle / relative) for relative in bundle_files},
@@ -257,7 +258,7 @@ def archive_inputs(
         return dict(driver_files)
 
     def prepared_linux(**_options: object) -> dict[str, Path]:
-        """Stand in for the exact pinned-image runtime export boundary."""
+        """Stand in for the exact pinned-environment runtime export boundary."""
         return dict(linux_files)
 
     monkeypatch.setattr(common, "ROOT", tmp_path)
@@ -267,9 +268,11 @@ def archive_inputs(
     monkeypatch.setattr(
         build_inputs, "target_workspace_snapshot", lambda *_args, **_kwargs: snapshot
     )
-    monkeypatch.setattr(images, "container_image_recipe_digest", lambda: "b" * 64)
+    monkeypatch.setattr(definition, "environment_recipe_digest", lambda: "b" * 64)
     monkeypatch.setattr(
-        image_state, "load_image_state", lambda *_args: ImageState("b" * 64, "c" * 64, "c" * 64)
+        environment_states,
+        "load_environment_state",
+        lambda *_args: EnvironmentState("b" * 64, "d" * 64, "c" * 64),
     )
     monkeypatch.setattr(windows_build, "prepare_windows_host", prepared_native)
     monkeypatch.setattr(windows_driver, "prepare_windows_driver", prepared_driver)

@@ -364,8 +364,8 @@ def publication_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Publi
     }
     environment = {
         "FPLINUX_WORKSPACE_DIGEST": "a" * 64,
-        "FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE": "b" * 64,
-        "FPLINUX_CONTAINER_IMAGE_CONTENT": "c" * 64,
+        "FPLINUX_ENVIRONMENT_RECIPE": "b" * 64,
+        "FPLINUX_ENVIRONMENT_CONTENT": "c" * 64,
     }
     monkeypatch.setattr(common, "ROOT", root)
     monkeypatch.setattr(inputs_build, "OUTPUT", output)
@@ -476,8 +476,8 @@ class BuilderPublicationTests:
         assert (manifest["generation"]) == (published.name)
         assert (manifest["profile"]) is None
         assert (manifest["build_type"]) == ("release")
-        assert (manifest["container_image_recipe"]) == ("b" * 64)
-        assert (manifest["container_image_content"]) == ("c" * 64)
+        assert (manifest["environment_recipe"]) == ("b" * 64)
+        assert (manifest["environment_content"]) == ("c" * 64)
         assert (manifest["apk_signing_key"]) == ("7" * 64)
         assert (manifest["rootfs_receipt"]["recipe"]) == (publication_inputs.rootfs_recipe)
         assert (manifest["boot_artifacts"]) == (

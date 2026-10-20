@@ -23,8 +23,8 @@ import fplinux_cli.workspace.staging as workspace_staging
 import pytest
 from fplinux_cli import common
 from fplinux_cli.artifacts.bundles import bundle_pointer, publish_current_bundle
-from fplinux_cli.environment import image_store, images, setup
-from fplinux_cli.environment.image_state import ImageState
+from fplinux_cli.environment import definition, setup
+from fplinux_cli.environment.state import EnvironmentState
 from fplinux_cli.manifests import releases, targets
 
 from tests.small.build.command_fixtures import (
@@ -54,8 +54,10 @@ class BuildLifecycleTests:
                 "target_workspace_snapshot",
                 return_value=command_bundle.snapshot,
             ),
-            mock.patch.object(images, "load_container_lock", return_value=command_bundle.lock),
-            mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(
+                definition, "load_environment_lock", return_value=command_bundle.lock
+            ),
+            mock.patch.object(definition, "environment_recipe_digest", return_value="e" * 64),
             mock.patch.object(
                 kern_env,
                 "kern_available",
@@ -188,8 +190,8 @@ class BuildLifecycleTests:
         ("field", "changed"),
         [
             pytest.param("workspace_digest", "d" * 64, id="workspace"),
-            pytest.param("container_image_recipe", "f" * 64, id="image-recipe"),
-            pytest.param("container_image_content", "b" * 64, id="image-content"),
+            pytest.param("environment_recipe", "f" * 64, id="environment-recipe"),
+            pytest.param("environment_content", "b" * 64, id="environment-content"),
             pytest.param("apk_signing_key", "8" * 64, id="signing-key"),
         ],
     )
@@ -227,19 +229,20 @@ class BuildLifecycleTests:
                 "target_workspace_snapshot",
                 return_value=command_bundle.snapshot,
             ),
-            mock.patch.object(images, "load_container_lock", return_value=command_bundle.lock),
-            mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(
+                definition, "load_environment_lock", return_value=command_bundle.lock
+            ),
+            mock.patch.object(definition, "environment_recipe_digest", return_value="e" * 64),
             mock.patch.object(kern_env, "kern_available", return_value=True),
             mock.patch.object(kern_env, "require_kern", return_value="kern"),
             mock.patch.object(
-                image_store,
-                "current_image_state",
-                return_value=ImageState("e" * 64, "a" * 64, "a" * 64),
-            ),
-            mock.patch.object(
-                image_store,
-                "publish_current_image_state",
-                return_value=ImageState("e" * 64, "a" * 64, "a" * 64),
+                build_commands,
+                "require_environment",
+                return_value=(
+                    "kern",
+                    command_bundle.cache / "environment/rootfs",
+                    EnvironmentState("e" * 64, "b" * 64, "a" * 64),
+                ),
             ),
             mock.patch.object(kern_env, "kern_environment", return_value={}),
             mock.patch.object(
@@ -301,12 +304,18 @@ class BuildLifecycleTests:
             mock.patch.object(
                 workspace_inputs, "target_workspace_snapshot", return_value=command_bundle.snapshot
             ),
-            mock.patch.object(images, "load_container_lock", return_value=command_bundle.lock),
-            mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(
+                definition, "load_environment_lock", return_value=command_bundle.lock
+            ),
+            mock.patch.object(definition, "environment_recipe_digest", return_value="e" * 64),
             mock.patch.object(
                 build_commands,
-                "_require_build_environment",
-                return_value=("kern", "image", ImageState("e" * 64, "a" * 64, "a" * 64)),
+                "require_environment",
+                return_value=(
+                    "kern",
+                    command_bundle.cache / "environment/rootfs",
+                    EnvironmentState("e" * 64, "b" * 64, "a" * 64),
+                ),
             ),
             mock.patch.object(kern_env, "kern_environment", return_value={}),
             mock.patch.object(
@@ -367,19 +376,20 @@ class BuildLifecycleTests:
                 "target_workspace_snapshot",
                 return_value=command_bundle.snapshot,
             ),
-            mock.patch.object(images, "load_container_lock", return_value=command_bundle.lock),
-            mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(
+                definition, "load_environment_lock", return_value=command_bundle.lock
+            ),
+            mock.patch.object(definition, "environment_recipe_digest", return_value="e" * 64),
             mock.patch.object(kern_env, "kern_available", return_value=True),
             mock.patch.object(kern_env, "require_kern", return_value="kern"),
             mock.patch.object(
-                image_store,
-                "current_image_state",
-                return_value=ImageState("e" * 64, "a" * 64, "a" * 64),
-            ),
-            mock.patch.object(
-                image_store,
-                "publish_current_image_state",
-                return_value=ImageState("e" * 64, "a" * 64, "a" * 64),
+                build_commands,
+                "require_environment",
+                return_value=(
+                    "kern",
+                    command_bundle.cache / "environment/rootfs",
+                    EnvironmentState("e" * 64, "b" * 64, "a" * 64),
+                ),
             ),
             mock.patch.object(kern_env, "kern_environment", return_value={}),
             mock.patch.object(
@@ -416,10 +426,10 @@ class BuildLifecycleTests:
         assert recorded["status"] == "success"
         assert recorded["build_type"] == build_type
 
-    def test_offline_build_miss_requires_the_current_image_without_setup(
+    def test_offline_build_miss_propagates_offline_environment_policy_without_staging(
         self, command_bundle: CommandBundleContext
     ) -> None:
-        """Do not silently rebuild the OCI environment when offline was requested."""
+        """Propagate the unavailable offline environment before staging build sources."""
         command_bundle.clear_current_bundle()
         with (
             mock.patch.object(common, "ROOT", command_bundle.root),
@@ -431,26 +441,39 @@ class BuildLifecycleTests:
                 "target_workspace_snapshot",
                 return_value=command_bundle.snapshot,
             ),
-            mock.patch.object(images, "load_container_lock", return_value=command_bundle.lock),
-            mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(
+                definition, "load_environment_lock", return_value=command_bundle.lock
+            ),
+            mock.patch.object(definition, "environment_recipe_digest", return_value="e" * 64),
             mock.patch.object(kern_env, "kern_available", return_value=True),
             mock.patch.object(kern_env, "require_kern", return_value="kern"),
-            mock.patch.object(image_store, "current_image_state", return_value=None),
+            mock.patch.object(
+                build_commands,
+                "require_environment",
+                side_effect=SystemExit(
+                    "offline execution requires the current pinned environment"
+                ),
+            ) as require_environment,
             mock.patch.object(
                 setup,
                 "setup",
-                side_effect=AssertionError("offline build must not set up an image"),
+                side_effect=AssertionError("offline build must not set up an environment"),
             ),
             mock.patch.object(
                 workspace_staging,
                 "stage_workspace_snapshot",
-                side_effect=AssertionError("offline image failure must not stage a workspace"),
+                side_effect=AssertionError(
+                    "offline environment failure must not stage a workspace"
+                ),
             ),
-            pytest.raises(SystemExit, match="offline build requires the current pinned OCI image"),
+            pytest.raises(
+                SystemExit, match="offline execution requires the current pinned environment"
+            ),
         ):
             output.run_entrypoint(lambda: build_commands.build("phone", 4, offline=True))
 
         assert not (bundle_pointer(command_bundle.output, "phone").exists())
+        require_environment.assert_called_once_with(offline=True, reporter=mock.ANY)
 
     def test_build_argv_has_explicit_memory_budget_and_narrow_mounts(
         self, command_bundle: CommandBundleContext
@@ -469,20 +492,20 @@ class BuildLifecycleTests:
             "logs": command_bundle.root / "cache/logs/build/run",
         }
         with mock.patch.dict(os.environ, {}, clear=True):
-            command = build_commands._build_container_command(  # noqa: SLF001
+            command = build_commands._build_command(  # noqa: SLF001
                 "/usr/bin/kern",
                 target="phone",
                 jobs=6,
                 memory_mib=2048,
-                image="localhost/fplinux-build:locked",
+                environment_rootfs=command_bundle.cache / "environment/rootfs",
                 offline=False,
                 snapshot=command_bundle.snapshot,
                 **roots,
                 profile=None,
                 build_type="release",
                 log_environment={"FPLINUX_LOG_ROOT": "/logs"},
-                image_recipe="e" * 64,
-                image_content="a" * 64,
+                environment_recipe="e" * 64,
+                environment_content="a" * 64,
             )
 
         mounts = [command[index + 1] for index, value in enumerate(command) if value == "--volume"]
@@ -502,12 +525,23 @@ class BuildLifecycleTests:
             ]
         )
         assert ("--read-only") in (command)
+        assert command[command.index("--rootfs") + 1] == str(
+            command_bundle.cache / "environment/rootfs"
+        )
+        assert "--uid-range" in command
+        assert "--image" not in command
+        assert "--pull" not in command
+        assert (
+            "PATH=/opt/quality/bin:/opt/quality/node/bin:"
+            "/opt/quality/node-tools/node_modules/.bin:/usr/local/sbin:/usr/local/bin:"
+            "/usr/sbin:/usr/bin:/sbin:/bin"
+        ) in command
         assert ("--privileged") in (command)
         assert ("--memory") in (command)
         assert (command[command.index("--memory") + 1]) == ("2048m")
         assert not (any(mount.split(":", 2)[1] == "/cache" for mount in mounts))
-        assert ("FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE=" + "e" * 64) in (command)
-        assert ("FPLINUX_CONTAINER_IMAGE_CONTENT=" + "a" * 64) in (command)
+        assert ("FPLINUX_ENVIRONMENT_RECIPE=" + "e" * 64) in (command)
+        assert ("FPLINUX_ENVIRONMENT_CONTENT=" + "a" * 64) in (command)
         build = command[command.index("--") + 1 :]
         assert (build[:3]) == (["python3", "-m", "fplinux_cli.build"])
         # The in-container parser accepts these options in any order; compare flag/value pairs.
@@ -534,20 +568,20 @@ class BuildLifecycleTests:
             "output": command_bundle.root / "cache/out",
             "logs": command_bundle.root / "cache/logs/build/run",
         }
-        command = build_commands._build_container_command(  # noqa: SLF001
+        command = build_commands._build_command(  # noqa: SLF001
             "/usr/bin/kern",
             target="phone",
             jobs=6,
             memory_mib=2048,
-            image="localhost/fplinux-build:locked",
+            environment_rootfs=command_bundle.cache / "environment/rootfs",
             offline=True,
             snapshot=command_bundle.snapshot,
             **roots,
             profile=None,
             build_type="release",
             log_environment={"FPLINUX_LOG_ROOT": "/logs"},
-            image_recipe="e" * 64,
-            image_content="a" * 64,
+            environment_recipe="e" * 64,
+            environment_content="a" * 64,
         )
 
         network = command.index("--network")

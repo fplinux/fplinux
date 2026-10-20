@@ -46,7 +46,7 @@ def _recipe(
     selected: tuple[LoaderSource, ...], target_source: Path, target_config: dict[str, Any]
 ) -> str:
     loader = target_config["loader"]
-    image_recipe, image_content = inputs_build.container_image_environment()
+    environment_recipe, environment_content = inputs_build.environment_identity()
     implementation = {}
     for module in (
         common,
@@ -71,7 +71,7 @@ def _recipe(
             "sml": loader["sml_load"],
             "entry": target_config["bootstrap"]["layout"]["entry_load"],
         },
-        "container_image": {"source_recipe": image_recipe, "content": image_content},
+        "environment": {"source_recipe": environment_recipe, "content": environment_content},
         "source_date_epoch": build_env.SOURCE_DATE_EPOCH,
         "implementation": implementation,
         "producer": common.sha256_file(Path(__file__)),

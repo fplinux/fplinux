@@ -35,7 +35,7 @@ class ProbeCli:
 
 @pytest.fixture
 def probe_cli(tmp_path: Path) -> ProbeCli:
-    """Provide one source and no ambient build image or cache."""
+    """Provide one source and no ambient build environment or cache."""
     prepare_cli_checkout(tmp_path)
     (tmp_path / "probe.c").write_text("int main(void) { return 0; }\n")
     return ProbeCli(tmp_path)
@@ -143,11 +143,8 @@ class ProbeCliTests:
     ) -> None:
         """An ignored local probe is accepted, but missing Kern never triggers setup."""
         for relative in (
-            "Containerfile",
-            "container.lock.toml",
             "environment.lock.toml",
             "sources.lock.toml",
-            ".kernignore",
             "package.json",
             "package-lock.json",
             "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",

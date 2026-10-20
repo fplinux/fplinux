@@ -18,7 +18,7 @@ from fplinux_cli.artifacts.bundles import (
 from fplinux_cli.runtime.bundle_session import bundle_manifest
 
 if TYPE_CHECKING:
-    from fplinux_cli.environment.image_state import ImageState
+    from fplinux_cli.environment.state import EnvironmentState
     from fplinux_cli.workspace.capture import WorkspaceSnapshot
 
 
@@ -27,8 +27,8 @@ class BuildIdentity:
     """Exact host-visible inputs that authorize bundle reuse."""
 
     workspace_digest: str
-    container_image_recipe: str
-    container_image_content: str
+    environment_recipe: str
+    environment_content: str
     apk_signing_key: str
 
 
@@ -45,8 +45,8 @@ def manifest_matches_identity(manifest: dict[str, Any], identity: BuildIdentity 
         manifest.get(field) == value
         for field, value in (
             ("workspace_digest", identity.workspace_digest),
-            ("container_image_recipe", identity.container_image_recipe),
-            ("container_image_content", identity.container_image_content),
+            ("environment_recipe", identity.environment_recipe),
+            ("environment_content", identity.environment_content),
             ("apk_signing_key", identity.apk_signing_key),
         )
     )
@@ -106,10 +106,10 @@ def matching_target_bundle(
 
 
 def build_identity(
-    snapshot: WorkspaceSnapshot, image_state: ImageState | None, cache: Path
+    snapshot: WorkspaceSnapshot, environment_state: EnvironmentState | None, cache: Path
 ) -> BuildIdentity | None:
     """Read the exact host-visible inputs without creating signing state."""
-    if image_state is None:
+    if environment_state is None:
         return None
     try:
         signing_key = signing.signing_key_identity(cache)
@@ -117,7 +117,7 @@ def build_identity(
         return None
     return BuildIdentity(
         snapshot.recipe,
-        image_state.container_image_recipe,
-        image_state.image_content,
+        environment_state.recipe,
+        environment_state.content,
         signing_key,
     )

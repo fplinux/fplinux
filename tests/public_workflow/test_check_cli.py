@@ -41,7 +41,6 @@ PUBLIC_COMMANDS = (
 )
 PUBLIC_SOURCE_CHECK_SCOPES = (
     "source",
-    "container",
     "metadata",
     "docs",
     "spelling",

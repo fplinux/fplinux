@@ -6,14 +6,7 @@ Original FPLinux code and documentation are licensed under `GPL-2.0-only` unless
 
 ## Where versions are recorded
 
-The corresponding source snapshot records exact versions, URLs, commits and
-hashes in `sources.lock.toml`, `container.lock.toml`, `environment.lock.toml`,
-`alpine.lock.toml`, `Containerfile`, package locks, host-runtime locks,
-platform loader asset locks, target manifests and the platform U-Boot source lock. Binary
-archives carry the resolved asset lock as `assets.lock.toml`,
-plus content receipts and `SHA256SUMS`. Aport `APKBUILD` files pin their own
-upstream archives or commits and verify remote and local source members with
-SHA-512 sums.
+The corresponding source snapshot records exact versions, URLs, commits and hashes in `sources.lock.toml`, `environment.lock.toml`, `alpine.lock.toml`, package locks, host-runtime locks, platform loader asset locks, target manifests and the platform U-Boot source lock. Binary archives carry the resolved asset lock as `assets.lock.toml`, plus content receipts and `SHA256SUMS`. Aport `APKBUILD` files pin their own upstream archives or commits and verify remote and local source members with SHA-512 sums.
 
 ## Third-party components
 

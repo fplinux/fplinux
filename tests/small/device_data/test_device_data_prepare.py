@@ -22,7 +22,8 @@ from fplinux_cli.device_data.formats import (
     PreparedGroup,
 )
 from fplinux_cli.device_data.inputs import capture_phone_data
-from fplinux_cli.environment import images, kern
+from fplinux_cli.environment import definition
+from fplinux_cli.environment import runtime as environment_runtime
 from fplinux_cli.manifests import releases
 from fplinux_cli.reporting import run as reporting
 from fplinux_cli.workspace import build_inputs as workspace_build_inputs
@@ -347,11 +348,11 @@ def test_offline_nested_build_failure_leaves_no_running_receipt(
         "target_workspace_snapshot",
         lambda _target, _profile, **_options: workspace.WorkspaceSnapshot((), "a" * 64),
     )
-    monkeypatch.setattr(
-        images, "load_container_lock", lambda: {"oci": {"repository": "localhost/fplinux-build"}}
-    )
-    monkeypatch.setattr(images, "container_image_recipe_digest", lambda _lock: "e" * 64)
-    monkeypatch.setattr(kern, "kern_available", lambda _lock: False)
+    monkeypatch.setattr(definition, "load_environment_lock", dict)
+    monkeypatch.setattr(definition, "environment_recipe_digest", lambda _lock: "e" * 64)
+    monkeypatch.setattr(environment_runtime, "load_environment_lock", dict)
+    monkeypatch.setattr(environment_runtime, "environment_recipe_digest", lambda _lock: "e" * 64)
+    monkeypatch.setattr(environment_runtime, "kern_available", lambda _lock: False)
 
     def reject_load(*_args: object, **_kwargs: object) -> None:
         pytest.fail("a failed build must not load a phone")
@@ -364,7 +365,7 @@ def test_offline_nested_build_failure_leaves_no_running_receipt(
         )
 
     assert raised.value.code == 1
-    assert capsys.readouterr().err.count("offline build requires") == 1
+    assert capsys.readouterr().err.count("offline execution requires") == 1
     receipts = list((phone_data.root / ".cache/logs").rglob("run.json"))
     assert receipts
     assert all(json.loads(receipt.read_bytes())["status"] == "failed" for receipt in receipts)

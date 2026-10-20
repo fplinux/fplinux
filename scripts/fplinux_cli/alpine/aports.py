@@ -139,7 +139,7 @@ def _build_fplinux_apks(  # noqa: PLR0913 -- package, signing and build inputs s
     build_packages: tuple[str, ...],
 ) -> tuple[dict[str, Path], Path, Path]:
     if os.geteuid() != 0:
-        fail("Alpine package builds require container root; rebuild the current build image")
+        fail("Alpine package builds require sandbox root; rebuild the current build environment")
     libraries = local_build_dependencies(build_packages)
     build_packages = aport_build_order(build_packages)
     aports = work / "aports"
@@ -184,13 +184,13 @@ def _build_fplinux_apks(  # noqa: PLR0913 -- package, signing and build inputs s
     }
     expected_filenames: set[str] = set()
     package_outputs: dict[str, Path] = {}
-    image_recipe = os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE", "")
+    environment_recipe = os.environ.get("FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE", "")
     signing_key_identity = sha256_file(public_key)
     with ExitStack() as build_state:
         sources_borrowed = False
         for name in build_packages:
             directory = aports / name
-            recipe = alpine_package_recipe(name, image_recipe, signing_key_identity)
+            recipe = alpine_package_recipe(name, environment_recipe, signing_key_identity)
             repository = CACHE / PACKAGE_CACHE_DIRECTORY / name
             package_environment = {**environment, "REPODEST": str(repository)}
             require_file(directory / "APKBUILD")
@@ -212,7 +212,7 @@ def _build_fplinux_apks(  # noqa: PLR0913 -- package, signing and build inputs s
             if duplicate:
                 fail(f"abuild package names are duplicated: {', '.join(sorted(duplicate))}")
             expected_filenames.update(listed)
-            cached = _cached_aport_packages(name, image_recipe, signing_key_identity)
+            cached = _cached_aport_packages(name, environment_recipe, signing_key_identity)
             if cached is not None and {path.name for path in cached.values()} == listed:
                 log_message(f"Alpine package cache hit: {name} {recipe[:16]}")
                 outputs = cached
@@ -237,7 +237,9 @@ def _build_fplinux_apks(  # noqa: PLR0913 -- package, signing and build inputs s
                 if cached_files is None:
                     fail(f"cached abuild output differs from listpkg for {name}")
                 _write_package_receipt(repository, recipe, cached_files)
-                built_outputs = _cached_aport_packages(name, image_recipe, signing_key_identity)
+                built_outputs = _cached_aport_packages(
+                    name, environment_recipe, signing_key_identity
+                )
                 if (
                     built_outputs is None
                     or {path.name for path in built_outputs.values()} != listed

@@ -14,10 +14,8 @@ from fplinux_cli.alpine.aports import materialize_aport_sources
 from fplinux_cli.build import workflow as build_commands
 from fplinux_cli.build.environment import SOURCE_DATE_EPOCH
 from fplinux_cli.common import fail, replace_file_atomically
-from fplinux_cli.environment import image_store as environment_image_store
-from fplinux_cli.environment import images
 from fplinux_cli.environment import kern as environment_kern
-from fplinux_cli.environment import setup as environment_setup
+from fplinux_cli.environment import runtime as environment_runtime
 from fplinux_cli.reporting.run import RunReporter
 from fplinux_cli.workspace import staging
 from fplinux_cli.workspace.build_inputs import add_source_path
@@ -87,22 +85,20 @@ def _checksum_container_command(  # noqa: PLR0913
     kern: str,
     *,
     package: str,
-    image: str,
+    rootfs: Path,
     offline: bool,
     stage: Path,
     downloads: Path,
 ) -> list[str]:
-    """Return the isolated pinned-image invocation for one checksum regeneration."""
+    """Return the isolated build-environment invocation for one checksum regeneration."""
     stage_aport = f"/workspace/alpine/aports/{package}"
     return [
         kern,
         "box",
         environment_kern.kern_box_name("checksum"),
-        "--image",
-        image,
-        "--pull",
-        "never",
+        *environment_runtime.environment_arguments(rootfs),
         "--read-only",
+        "--uid-range",
         "--network",
         "none" if offline else "host",
         "--tmpfs",
@@ -135,25 +131,10 @@ def checksum_aport(package: str, *, offline: bool = False) -> None:
     before_snapshot = _aport_checksum_snapshot(package)
     before_apkbuild = apkbuild.read_bytes()
     mode = apkbuild.stat().st_mode & 0o777
-    container_lock = images.load_container_lock()
-    image_recipe = images.container_image_recipe_digest(container_lock)
-    image = images.container_image_reference(container_lock, image_recipe)
     reporter = RunReporter.create("checksum", target=package, verbose=False)
-    if not environment_kern.kern_available(container_lock):
-        if offline:
-            fail(
-                "offline checksum requires the current pinned OCI image; "
-                "run ./fplinux setup online first"
-            )
-        environment_setup.setup(reporter=reporter, lock=container_lock, image_recipe=image_recipe)
-    kern = environment_kern.require_kern(container_lock)
-    if environment_image_store.current_image_state(kern, image, image_recipe) is None:
-        if offline:
-            fail(
-                "offline checksum requires the current pinned OCI image; "
-                "run ./fplinux setup online first"
-            )
-        environment_setup.setup(reporter=reporter, lock=container_lock, image_recipe=image_recipe)
+    kern, rootfs, _state = environment_runtime.require_environment(
+        offline=offline, reporter=reporter
+    )
     cache = common.ROOT / ".cache"
     downloads = build_commands.ensure_build_directory(cache / "downloads")
     with reporter.stage("workspace"):
@@ -173,7 +154,7 @@ def checksum_aport(package: str, *, offline: bool = False) -> None:
                 _checksum_container_command(
                     kern,
                     package=package,
-                    image=image,
+                    rootfs=rootfs,
                     offline=offline,
                     stage=stage,
                     downloads=downloads,

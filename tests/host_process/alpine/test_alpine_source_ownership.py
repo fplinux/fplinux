@@ -78,7 +78,7 @@ def _build_fixture(directory: Path, *, fail_build: bool) -> None:
         mock.patch.object(
             alpine_builder, "_builder_output", return_value="fplinux-xkb-ru-2.48-r0.apk\n"
         ),
-        mock.patch.dict(os.environ, {"FPLINUX_CONTAINER_IMAGE_RECIPE": "a" * 64}),
+        mock.patch.dict(os.environ, {"FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE": "a" * 64}),
     ):
         for iteration in range(1 if fail_build else 2):
             work = directory / f"work-{iteration}"

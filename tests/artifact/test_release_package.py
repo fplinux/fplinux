@@ -19,9 +19,9 @@ from fplinux_cli.alpine import registration
 from fplinux_cli.alpine import signing as alpine_state
 from fplinux_cli.artifacts.bundles import BUILD_MANIFEST_NAME, publish_current_bundle
 from fplinux_cli.common import canonical_json_bytes
-from fplinux_cli.environment import image_state as image_states
-from fplinux_cli.environment import images
-from fplinux_cli.environment.image_state import ImageState
+from fplinux_cli.environment import definition
+from fplinux_cli.environment import state as environment_states
+from fplinux_cli.environment.state import EnvironmentState
 from fplinux_cli.manifests import platforms, releases, targets
 from fplinux_cli.packaging import archive as package_commands
 from fplinux_cli.workspace import build_inputs as workspaces
@@ -48,7 +48,7 @@ class ReleaseArchiveInputs:
         self.cache = self.root / ".cache"
         self.target = "nokia-ta1618"
         self.snapshot = WorkspaceSnapshot((), "a" * 64)
-        self.image_recipe = "b" * 64
+        self.environment_recipe = "b" * 64
         self.target_config: dict[str, Any] = {
             "platform": "demo",
             "identity": {"brand": "ACME", "product": "Demo", "hardware_codes": ["D-1"]},
@@ -168,8 +168,8 @@ class ReleaseArchiveInputs:
             "rootfs_receipt": {"recipe": "d" * 64, "sha256": "e" * 64},
             "kernel_artifacts": {},
             "boot_artifacts": {"required": []},
-            "container_image_recipe": self.image_recipe,
-            "container_image_content": "c" * 64,
+            "environment_recipe": self.environment_recipe,
+            "environment_content": "c" * 64,
             "apk_signing_key": self.signing_key,
             "device_identity": "f" * 64,
             "files": {relative: file_record(bundle / relative) for relative in payloads},
@@ -249,14 +249,14 @@ class ReleaseArchiveInputs:
                 return_value=self.snapshot,
             ),
             mock.patch.object(
-                images,
-                "container_image_recipe_digest",
-                return_value=self.image_recipe,
+                definition,
+                "environment_recipe_digest",
+                return_value=self.environment_recipe,
             ),
             mock.patch.object(
-                image_states,
-                "load_image_state",
-                return_value=ImageState(self.image_recipe, "c" * 64, "c" * 64),
+                environment_states,
+                "load_environment_state",
+                return_value=EnvironmentState(self.environment_recipe, "c" * 64, "c" * 64),
             ),
         )
 
@@ -711,8 +711,8 @@ class ReleaseArchiveArtifactTests:
                 "required": list(required),
                 "runnable": True,
             },
-            "container_image_recipe": release_inputs.image_recipe,
-            "container_image_content": "c" * 64,
+            "environment_recipe": release_inputs.environment_recipe,
+            "environment_content": "c" * 64,
             "apk_signing_key": release_inputs.signing_key,
             "device_identity": "f" * 64,
             "files": {

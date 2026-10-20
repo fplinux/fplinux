@@ -47,7 +47,7 @@ def test_c_receipt_misses_after_a_profile_generation_input_changes(
         return check_scope_receipt_recipe(
             "c",
             check_scope_closure_digest("c", snapshot),
-            image_generation="b" * 64,
+            environment_generation="b" * 64,
             orchestration_recipe="c" * 64,
         )
 

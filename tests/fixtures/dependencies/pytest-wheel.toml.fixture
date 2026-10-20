@@ -1,9 +1,9 @@
 
 [[input]]
-key = "container:pytest"
+key = "environment:pytest"
 url = "https://example.invalid/pytest-1.0-py3-none-any.whl"
 sha256 = "9999999999999999999999999999999999999999999999999999999999999999"
 bytes = 456
 destination = "downloads/environment/pytest/pytest-1.0-py3-none-any.whl"
-purpose = "container-source"
+purpose = "environment-source"
 arch = "x86_64"

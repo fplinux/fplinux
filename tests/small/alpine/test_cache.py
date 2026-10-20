@@ -215,7 +215,7 @@ class AlpineCacheTests:
             mock.patch.object(alpine_packages, "CACHE", cache),
             mock.patch.object(alpine_aports, "ROOT", alpine_source.root),
             mock.patch.object(os, "geteuid", return_value=0),
-            mock.patch.dict(os.environ, {"FPLINUX_CONTAINER_IMAGE_RECIPE": "1" * 64}),
+            mock.patch.dict(os.environ, {"FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE": "1" * 64}),
             # Fake builder processes do not exercise source ownership changes.
             mock.patch.object(
                 alpine_aports, "_alpine_source_cache", return_value=nullcontext(sources)
@@ -358,7 +358,7 @@ class AlpineCacheTests:
             mock.patch.object(alpine_packages, "CACHE", cache),
             mock.patch.object(alpine_aports, "ROOT", alpine_source.root),
             mock.patch.object(os, "geteuid", return_value=0),
-            mock.patch.dict(os.environ, {"FPLINUX_CONTAINER_IMAGE_RECIPE": "1" * 64}),
+            mock.patch.dict(os.environ, {"FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE": "1" * 64}),
             # Fake builder processes do not exercise source ownership changes.
             mock.patch.object(
                 alpine_aports, "_alpine_source_cache", return_value=nullcontext(sources)
@@ -445,7 +445,7 @@ class AlpineCacheTests:
         cached_outputs = {bundle_package: bundle_apk} if cached_bundle else None
         with (
             mock.patch.object(alpine_rootfs, "CACHE", cache),
-            mock.patch.dict(os.environ, {"FPLINUX_CONTAINER_IMAGE_RECIPE": "1" * 64}),
+            mock.patch.dict(os.environ, {"FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE": "1" * 64}),
             mock.patch.object(
                 alpine_rootfs,
                 "_ensure_apk_signing_key",

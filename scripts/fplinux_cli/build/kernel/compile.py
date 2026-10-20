@@ -126,7 +126,7 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
             target=target,
             linux_recipe=current_linux.linux_recipe,
             bootstrap_recipe=bootstrap_recipe,
-            environment_recipe=os.environ["FPLINUX_CONTAINER_IMAGE_RECIPE"],
+            environment_recipe=os.environ["FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE"],
             root=device_root,
             initramfs_delivery=initramfs_delivery,
             kbuild_implementation=kbuild_state.implementation_identity(implementation),
@@ -195,7 +195,7 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
                 "CCACHE_DIR": str(inputs_build.CACHE / "ccache"),
                 "CCACHE_MAXSIZE": "1GiB",
                 "CCACHE_BASEDIR": str(inputs_build.OUTPUT),
-                "CCACHE_NAMESPACE": os.environ["FPLINUX_CONTAINER_IMAGE_RECIPE"],
+                "CCACHE_NAMESPACE": os.environ["FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE"],
             }
             for command in commands[:-1]:
                 process_build.run(command, environment=ccache_environment)

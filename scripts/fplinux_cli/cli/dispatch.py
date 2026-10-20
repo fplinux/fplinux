@@ -23,7 +23,7 @@ def _list_check_scopes(check_parser: argparse.ArgumentParser, scopes: list[str])
 
 
 def _setup_action(*, force: bool, offline: bool) -> None:
-    """Prepare the OCI environment while discarding its internal state object."""
+    """Prepare the build environment while discarding its internal state object."""
     from fplinux_cli.environment.setup import setup  # noqa: PLC0415 -- setup-only backend.
 
     if offline:

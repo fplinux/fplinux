@@ -47,8 +47,8 @@ class HostRecipeTests:
         captured_owner.write_bytes(owner_path.read_bytes())
         monkeypatch.setattr(owner, "__file__", str(captured_owner))
         monkeypatch.setattr(common, "ROOT", tmp_path)
-        monkeypatch.setenv("FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE", "1" * 64)
-        monkeypatch.setenv("FPLINUX_CONTAINER_IMAGE_CONTENT", "2" * 64)
+        monkeypatch.setenv("FPLINUX_ENVIRONMENT_RECIPE", "1" * 64)
+        monkeypatch.setenv("FPLINUX_ENVIRONMENT_CONTENT", "2" * 64)
         for relative in ("loader.c", "lib/fplinux/fplinux-cli.c", "include/fplinux/fplinux-cli.h"):
             path = tmp_path / relative
             path.parent.mkdir(parents=True, exist_ok=True)

@@ -50,7 +50,7 @@ def main() -> None:
             reporter,
             Path.cwd(),
             kern=str(Path.cwd() / "kern-fake"),
-            image="controlled-image",
+            rootfs=Path.cwd() / "environment/rootfs",
             names=args.names,
             tier=args.tier,
             verbose=args.verbose,

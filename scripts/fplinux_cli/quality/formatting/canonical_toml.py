@@ -253,22 +253,22 @@ _ROOT_ORDERS: dict[str, dict[str, tuple[str, ...]]] = {
         "tool.ruff.format": ("line-ending",),
         "tool.mypy": ("python_version", "strict", "mypy_path", "cache_dir"),
     },
-    "container.lock.toml": {
-        "": ("kern", "oci"),
-        "kern": ("version", "archive_url", "archive_sha256", "binary_sha256"),
-        "oci": (
-            "repository",
-            "platform",
-            "base_repository",
-            "base_release",
-            "base_rootfs_url",
-            "base_rootfs_sha256",
-        ),
-    },
     "environment.lock.toml": {
-        "": ("selection", "input"),
+        "": ("kern", "base", "selection", "tools", "input"),
+        "kern": ("version", "archive_url", "archive_sha256", "binary_sha256"),
+        "base": ("release", "arch", "url", "sha256"),
         "selection": ("arch", "apk_groups"),
-        "input": ("key", "url", "sha256", "bytes", "destination", "purpose", "arch"),
+        "input": (
+            "key",
+            "url",
+            "sha256",
+            "checksum",
+            "algorithm",
+            "bytes",
+            "destination",
+            "purpose",
+            "arch",
+        ),
     },
     "sources.lock.toml": {
         "": ("linux", "fpdoom_bootstrap", "fpdoom_host", "spreadtrum_flash"),
@@ -549,7 +549,10 @@ def _normalize_container(
         entries[0].comments = leading + entries[0].comments
     elif leading:
         trailing = leading + trailing
-    ranks = {key: index for index, key in enumerate(order.get(path, ()))}
+    fields = order.get(path, ())
+    if relative == "environment.lock.toml" and path.startswith("tools."):
+        fields = ("version", "commit", "input")
+    ranks = {key: index for index, key in enumerate(fields)}
     lexical = path in _LEXICAL_TABLES.get(relative, set())
     entries.sort(
         key=lambda entry: (

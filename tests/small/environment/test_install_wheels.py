@@ -4,17 +4,11 @@
 from __future__ import annotations
 
 import hashlib
-import subprocess
 import zipfile
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 from fplinux_cli.environment import install_wheels as wheel_installer
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
 
 _FIXTURES = Path(__file__).parents[2] / "fixtures/environment/wheel"
 
@@ -23,7 +17,7 @@ _FIXTURES = Path(__file__).parents[2] / "fixtures/environment/wheel"
 def wheel_inputs(tmp_path: Path) -> tuple[Path, Path, Path]:
     """Declare one synthetic wheel and two inputs outside the wheel consumer."""
     inputs = tmp_path / "inputs"
-    archive = inputs / "sources/example/example.whl"
+    archive = inputs / "downloads/environment/example/example.whl"
     archive.parent.mkdir(parents=True)
     with zipfile.ZipFile(archive, "w") as wheel:
         wheel.writestr(
@@ -44,17 +38,12 @@ def wheel_inputs(tmp_path: Path) -> tuple[Path, Path, Path]:
     return lock, inputs, tmp_path / "python"
 
 
-def test_offline_install_extracts_declared_payload_without_network(
-    wheel_inputs: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch
+def test_local_install_extracts_declared_payload(
+    wheel_inputs: tuple[Path, Path, Path],
 ) -> None:
-    """A saved wheel installs package code and metadata without a download."""
-
-    def reject_network(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("offline wheel installation attempted a network subprocess")
-
-    monkeypatch.setattr(subprocess, "run", reject_network)
+    """A wheel at its declared cache path installs package code and metadata."""
     lock, inputs, destination = wheel_inputs
-    wheel_installer.install_wheels(lock, inputs, destination, offline=True)
+    wheel_installer.install_wheels(lock, inputs, destination)
     assert (destination / "quality_fixture/__init__.py").read_bytes() == b"VALUE = 'declared'\n"
     assert (destination / "quality_fixture-1.0.dist-info/METADATA").read_bytes() == (
         b"Metadata-Version: 2.1\nName: quality-fixture\nVersion: 1.0\n"
@@ -73,44 +62,17 @@ def test_mismatched_wheel_is_rejected_before_extraction(
         "\n".join(replacement if line.startswith(f"{mismatch} = ") else line for line in lines)
         + "\n"
     )
-    with pytest.raises(SystemExit, match=r"wheel (SHA-256|size) mismatch: container:example"):
-        wheel_installer.install_wheels(lock, inputs, destination, offline=True)
+    with pytest.raises(SystemExit, match=r"wheel (SHA-256|size) mismatch: environment:example"):
+        wheel_installer.install_wheels(lock, inputs, destination)
     assert not list(destination.iterdir())
 
 
-def test_online_download_keeps_retry_policy_and_extracts_verified_payload(
-    wheel_inputs: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch
+def test_missing_local_wheel_stops_before_extraction(
+    wheel_inputs: tuple[Path, Path, Path],
 ) -> None:
-    """A controlled curl boundary supplies the exact archive before extraction."""
+    """A missing declared input is an error rather than a download request."""
     lock, inputs, destination = wheel_inputs
-    contents = (inputs / "sources/example/example.whl").read_bytes()
-    downloads: list[list[str]] = []
-
-    def curl_boundary(command: Sequence[str], *, check: bool) -> None:
-        downloads.append(list(command))
-        assert check
-        Path(command[5]).write_bytes(contents)
-
-    monkeypatch.setattr(subprocess, "run", curl_boundary)
-    wheel_installer.install_wheels(lock, inputs, destination, offline=False)
-    assert len(downloads) == 1
-    assert downloads[0][:5] == ["curl", "-fsSL", "--retry", "3", "--output"]
-    assert downloads[0][-1] == "https://example.invalid/example.whl"
-    assert (destination / "quality_fixture/__init__.py").read_bytes() == b"VALUE = 'declared'\n"
-
-
-def test_online_download_failure_stops_before_extraction(
-    wheel_inputs: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A failed external download preserves its failure and installs no payload."""
-    lock, inputs, destination = wheel_inputs
-
-    def failed_download(command: Sequence[str], *, check: bool) -> None:
-        assert check
-        raise subprocess.CalledProcessError(22, command)
-
-    monkeypatch.setattr(subprocess, "run", failed_download)
-    with pytest.raises(subprocess.CalledProcessError) as failure:
-        wheel_installer.install_wheels(lock, inputs, destination, offline=False)
-    assert failure.value.returncode == 22
+    (inputs / "downloads/environment/example/example.whl").unlink()
+    with pytest.raises(FileNotFoundError):
+        wheel_installer.install_wheels(lock, inputs, destination)
     assert not list(destination.iterdir())

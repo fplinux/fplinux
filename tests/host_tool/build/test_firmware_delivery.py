@@ -139,10 +139,10 @@ def test_build_stage_delivers_snapshot_bytes_at_the_selected_loader_boundary(  #
             else {"kind": "none"}
         ),
     }
-    monkeypatch.setenv("FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE", "a" * 64)
-    monkeypatch.setenv("FPLINUX_CONTAINER_IMAGE_CONTENT", "b" * 64)
+    monkeypatch.setenv("FPLINUX_ENVIRONMENT_RECIPE", "a" * 64)
+    monkeypatch.setenv("FPLINUX_ENVIRONMENT_CONTENT", "b" * 64)
     # main() sets the combined image identity; keep that mutation within this case.
-    monkeypatch.setenv("FPLINUX_CONTAINER_IMAGE_RECIPE", "")
+    monkeypatch.setenv("FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE", "")
     monkeypatch.setattr(common, "ROOT", firmware_workspace)
     monkeypatch.setattr(build_source_inputs, "CACHE", qin_firmware.cache)
     monkeypatch.setattr(build_source_inputs, "OUTPUT", qin_firmware.root / "out")

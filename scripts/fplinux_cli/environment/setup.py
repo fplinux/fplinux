@@ -1,117 +1,58 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Prepare the pinned base image and publish the exact build environment."""
+"""Prepare and publish the exact locked Alpine build-environment rootfs."""
 
 from __future__ import annotations
 
+import os
 import secrets
 import shutil
-import tarfile
+import sys
 import tempfile
-from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from fplinux_cli.build import DEFAULT_BUILD_MEMORY_MIB
 from fplinux_cli.build.host_tools.host import extract_host_members
-from fplinux_cli.common import ROOT, alpine_tar_filter, fail
+from fplinux_cli.common import ROOT, error_message, fail
 from fplinux_cli.dependencies.inputs import environment_inputs
 from fplinux_cli.reporting.run import RunReporter
 
+from .definition import (
+    ENVIRONMENT_RECIPE_INPUTS,
+    environment_recipe_digest,
+    load_environment_lock,
+    spreadtrum_flash_environment_source,
+)
 from .downloads import download_locked_file
 from .git_hooks import install_git_hooks
-from .image_store import (
-    base_image_ready,
-    current_image_state,
-    discard_obsolete_images,
-    discard_transient_images,
-    image_metadata,
-    prune_build_history,
-    publish_current_image_state,
-    publish_staged_image,
-    temporary_image_reference,
+from .kern import ensure_project_directory, install_kern, kern_box_name, kern_environment
+from .runtime import (
+    current_environment_state,
+    environment_arguments,
+    probe_environment_state,
+    publish_environment,
+    remove_environment_rootfs,
 )
-from .images import (
-    CONTAINER_CONTEXT_INPUTS,
-    container_base_image_reference,
-    container_image_build_arguments,
-    container_image_recipe_digest,
-    container_image_reference,
-    load_container_lock,
-    spreadtrum_flash_image_source,
-)
-from .kern import ensure_project_directory, install_kern, kern_environment
 
 if TYPE_CHECKING:
-    from .image_state import ImageState
+    from .state import EnvironmentState
 
-_CONTAINER_SETUP_TIMEOUT = 2 * 60 * 60
-_alpine_tar_filter = partial(alpine_tar_filter, on_error=fail)
-
-
-def _build_base_image(
-    kern: str, reporter: RunReporter, lock: dict[str, Any], *, offline: bool = False
-) -> None:
-    """Build one local Kern base from the exact official Alpine minirootfs archive."""
-    oci = lock["oci"]
-    image = container_base_image_reference(lock)
-    staging_image = temporary_image_reference(image, "staging")
-    archive = download_locked_file(
-        oci["base_rootfs_url"],
-        oci["base_rootfs_sha256"],
-        ROOT / ".cache/downloads/kern/alpine-minirootfs.tar.gz",
-        offline=offline,
-    )
-    temporary_parent = ensure_project_directory(ROOT / ".cache/kern")
-    with tempfile.TemporaryDirectory(dir=temporary_parent, prefix="base-build-") as temporary:
-        context = Path(temporary)
-        rootfs = context / "rootfs"
-        rootfs.mkdir()
-        with tarfile.open(archive, "r:gz") as bundle:
-            bundle.extractall(  # noqa: S202 -- every member passes the data-derived filter above.
-                rootfs,
-                filter=_alpine_tar_filter,
-            )
-        marker = rootfs / "etc/fplinux-base-rootfs-sha256"
-        marker.write_text(f"{oci['base_rootfs_sha256']}\n", encoding="utf-8")
-        recipe = context / "Containerfile"
-        recipe.write_text("FROM scratch\nCOPY rootfs/ /\n", encoding="utf-8")
-        with reporter.stage("container-base") as stage:
-            stage.run(
-                [
-                    kern,
-                    "build",
-                    "-t",
-                    staging_image,
-                    "-f",
-                    str(recipe),
-                    str(context),
-                ],
-                cwd=ROOT,
-                env=kern_environment(),
-                timeout=_CONTAINER_SETUP_TIMEOUT,
-            )
-    if not base_image_ready(kern, lock, staging_image):
-        fail("Kern base build completed without publishing the exact locked rootfs")
-    publish_staged_image(
-        kern,
-        staging_image,
-        image,
-        lambda candidate: base_image_ready(kern, lock, candidate),
-    )
+_ENVIRONMENT_SETUP_TIMEOUT = 2 * 60 * 60
 
 
-def _stage_container_context(context: Path, *, offline: bool) -> None:
-    """Stage the recipe and exact saved inputs without copying unrelated cache files."""
-    for relative in CONTAINER_CONTEXT_INPUTS:
+def _stage_environment_inputs(context: Path, *, offline: bool) -> None:
+    """Capture the exact recipe and verified downloads without unrelated cache files."""
+    for relative in ENVIRONMENT_RECIPE_INPUTS:
         source = ROOT / relative
         if source.is_symlink() or not source.is_file():
-            fail(f"container image input is missing or invalid: {source}")
+            fail(f"environment recipe input is missing or invalid: {source}")
         destination = context / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
     input_directory = context / "inputs"
     input_directory.mkdir()
     for item in environment_inputs(ROOT):
-        if item.purpose in {"container-base", "kern-runtime"}:
+        if item.purpose == "kern-runtime":
             continue
         expected = item.checksum or item.sha256
         if expected is None:
@@ -125,26 +66,92 @@ def _stage_container_context(context: Path, *, offline: bool) -> None:
             size=item.size,
         )
         if item.purpose == "quality-source":
-            projection = spreadtrum_flash_image_source(ROOT)
+            projection = spreadtrum_flash_environment_source(ROOT)
             extract_host_members(
                 source,
                 f"spreadtrum_flash-{projection['commit']}/",
                 projection["members"],
                 projection["files"],
-                input_directory / "quality/spreadtrum-flash",
+                context / "quality/spreadtrum-flash",
             )
             continue
-        if item.purpose == "npm-package":
-            relative_input = Path("npm") / source.name
-        elif item.purpose == "container-source":
-            relative_input = Path("sources") / Path(item.destination).relative_to(
-                "downloads/environment"
-            )
-        else:
-            relative_input = Path(item.destination).relative_to("downloads/environment")
-        destination = input_directory / relative_input
+        destination = (
+            context / "npm" / source.name
+            if item.purpose == "npm-package"
+            else input_directory / item.destination
+        )
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, destination)
+        if not destination.exists():
+            os.link(source, destination)
+
+
+def _prepare_rootfs(  # noqa: PLR0913 -- captured inputs, receipt markers and reporting are distinct.
+    kern: str,
+    candidate: Path,
+    *,
+    context: Path,
+    lock: dict[str, Any],
+    recipe: str,
+    generation: str,
+    reporter: RunReporter,
+) -> None:
+    base = next(record for record in lock["input"] if record["purpose"] == "environment-base")
+    extraction_environment = kern_environment()
+    extraction_environment["PYTHONPATH"] = str(ROOT / "scripts")
+    with reporter.stage("environment-base") as stage:
+        stage.run(
+            [
+                "unshare",
+                "--map-auto",
+                "--map-root-user",
+                "--",
+                sys.executable,
+                "-m",
+                "fplinux_cli.environment.rootfs",
+                str(context / "inputs" / base["destination"]),
+                str(candidate),
+            ],
+            cwd=ROOT,
+            env=extraction_environment,
+            timeout=_ENVIRONMENT_SETUP_TIMEOUT,
+        )
+    packages = [
+        str(Path("/inputs") / record["destination"])
+        for record in lock["input"]
+        if record["purpose"] == "environment-package"
+    ]
+    with reporter.stage("environment-install") as stage:
+        stage.run(
+            [
+                kern,
+                "box",
+                kern_box_name("environment-install"),
+                *environment_arguments(candidate),
+                "--bind-rootfs",
+                "--uid-range",
+                "--memory",
+                f"{DEFAULT_BUILD_MEMORY_MIB}m",
+                "--network",
+                "none",
+                "--volume",
+                f"{context}:/recipe:ro",
+                "--volume",
+                f"{context / 'inputs'}:/inputs:ro",
+                "--quiet",
+                "--",
+                "sh",
+                "/recipe/scripts/fplinux_cli/environment/install/prepare.sh",
+                "/recipe/environment.lock.toml",
+                "/inputs",
+                "/recipe",
+                recipe,
+                generation,
+                *packages,
+            ],
+            cwd=ROOT,
+            env=kern_environment(),
+            timeout=_ENVIRONMENT_SETUP_TIMEOUT,
+        )
 
 
 def setup(
@@ -153,79 +160,65 @@ def setup(
     offline: bool = False,
     reporter: RunReporter | None = None,
     lock: dict[str, Any] | None = None,
-    image_recipe: str | None = None,
-) -> ImageState:
+    environment_recipe: str | None = None,
+) -> EnvironmentState:
+    """Reuse an exact environment or prepare a replacement while retaining the old tree."""
     own_reporter = reporter is None
     if reporter is None:
         reporter = RunReporter.create("setup", target=None, verbose=False)
     if lock is None:
-        lock = load_container_lock()
+        lock = load_environment_lock()
     kern = install_kern(lock, offline=offline)
-    prune_build_history(kern)
-    current_recipe = container_image_recipe_digest(lock)
-    if image_recipe is not None and image_recipe != current_recipe:
-        fail("container image inputs changed before setup")
-    image_recipe = current_recipe
-    image = container_image_reference(lock, image_recipe)
-    discard_transient_images(kern, lock)
-    current_state = current_image_state(kern, image, image_recipe)
-    if current_state is not None and not force:
-        state = publish_current_image_state(
-            kern,
-            image,
-            image_recipe,
-            state=current_state,
-        )
-        discard_obsolete_images(kern, lock, image_recipe)
+    current_recipe = environment_recipe_digest(lock)
+    if environment_recipe is not None and environment_recipe != current_recipe:
+        fail("environment inputs changed before setup")
+    environment_recipe = current_recipe
+    current = current_environment_state(kern, environment_recipe)
+    if current is not None and not force:
         install_git_hooks()
-        print(f"Build image is ready: {image}")
+        print("Build environment is ready")
         if own_reporter:
             reporter.finish()
-        return state
+        return current
 
-    if not base_image_ready(kern, lock):
-        _build_base_image(kern, reporter, lock, offline=offline)
-
+    directory = ensure_project_directory(ROOT / ".cache/environment")
+    candidate = Path(tempfile.mkdtemp(dir=directory, prefix="candidate-"))
     generation = secrets.token_hex(32)
-    staging_image = temporary_image_reference(image, "staging")
-    command = [
-        kern,
-        "build",
-        "-t",
-        staging_image,
-        *container_image_build_arguments(lock),
-        "--build-arg",
-        f"FPLINUX_IMAGE_RECIPE={image_recipe}",
-        "--build-arg",
-        f"FPLINUX_IMAGE_GENERATION={generation}",
-    ]
-    command.append(".")
-    temporary_parent = ensure_project_directory(ROOT / ".cache/kern")
-    with tempfile.TemporaryDirectory(dir=temporary_parent, prefix="image-build-") as temporary:
-        context = Path(temporary)
-        with reporter.stage("container-inputs"):
-            _stage_container_context(context, offline=offline)
-        with reporter.stage("container-setup") as stage:
-            stage.run(
-                command,
-                cwd=context,
-                env=kern_environment(),
-                timeout=_CONTAINER_SETUP_TIMEOUT,
+    failed = False
+    try:
+        with tempfile.TemporaryDirectory(dir=directory, prefix="recipe-") as temporary:
+            context = Path(temporary)
+            with reporter.stage("environment-inputs"):
+                _stage_environment_inputs(context, offline=offline)
+            _prepare_rootfs(
+                kern,
+                candidate,
+                context=context,
+                lock=lock,
+                recipe=environment_recipe,
+                generation=generation,
+                reporter=reporter,
             )
-    if container_image_recipe_digest(lock) != image_recipe:
-        fail("container image inputs changed while setup was running")
-    metadata = image_metadata(kern, staging_image)
-    if metadata is None or metadata[:2] != (image_recipe, generation):
-        fail("container setup completed without publishing the exact requested image")
-    publish_staged_image(
-        kern,
-        staging_image,
-        image,
-        lambda candidate: image_metadata(kern, candidate) == metadata,
-    )
-    state = publish_current_image_state(kern, image, image_recipe)
-    discard_obsolete_images(kern, lock, image_recipe)
-    prune_build_history(kern)
+        if environment_recipe_digest(lock) != environment_recipe:
+            fail("environment inputs changed while setup was running")
+        state = probe_environment_state(kern, candidate, environment_recipe)
+        if state is None or state.generation != generation:
+            fail("environment preparation did not publish the exact requested generation")
+        state = publish_environment(kern, candidate, state)
+    except BaseException:
+        failed = True
+        raise
+    finally:
+        if candidate.exists():
+            try:
+                remove_environment_rootfs(candidate)
+            except BaseException as error:
+                if not failed:
+                    raise
+                print(
+                    error_message(f"could not remove failed environment candidate: {error}"),
+                    file=sys.stderr,
+                )
     install_git_hooks()
     if own_reporter:
         reporter.finish()

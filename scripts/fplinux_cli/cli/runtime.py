@@ -6,8 +6,8 @@ from __future__ import annotations
 from fplinux_cli import common
 from fplinux_cli.build import reuse as cli_bundles
 from fplinux_cli.common import fail
-from fplinux_cli.environment import image_state as image_states
-from fplinux_cli.environment import images
+from fplinux_cli.environment import definition
+from fplinux_cli.environment import state as environment_states
 from fplinux_cli.manifests import targets
 from fplinux_cli.manifests.paths import normalize_profile
 from fplinux_cli.runtime import bundle_session as runtime_bundle_session
@@ -52,15 +52,17 @@ def verify_booted(target: str, *, profile: str | None = None, build_type: str = 
         target, profile, build_type=build_type
     )
     snapshot = workspaces.target_workspace_snapshot(target, profile, build_type=build_type)
-    image_recipe = images.container_image_recipe_digest()
-    image_state = image_states.load_image_state(common.ROOT / ".cache", image_recipe)
-    identity = cli_bundles.build_identity(snapshot, image_state, common.ROOT / ".cache")
+    environment_recipe = definition.environment_recipe_digest()
+    environment_state = environment_states.load_environment_state(
+        common.ROOT / ".cache", environment_recipe
+    )
+    identity = cli_bundles.build_identity(snapshot, environment_state, common.ROOT / ".cache")
     current = cli_bundles.manifest_matches_identity(manifest, identity)
     if not current:
         snapshot = workspaces.target_workspace_snapshot(
             target, profile, build_type=build_type, include_device_data=False
         )
-        identity = cli_bundles.build_identity(snapshot, image_state, common.ROOT / ".cache")
+        identity = cli_bundles.build_identity(snapshot, environment_state, common.ROOT / ".cache")
         current = cli_bundles.manifest_matches_identity(manifest, identity)
     if not current:
         fail(

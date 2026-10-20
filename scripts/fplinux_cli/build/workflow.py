@@ -12,11 +12,10 @@ from fplinux_cli.build import DEFAULT_BUILD_MEMORY_MIB
 from fplinux_cli.build import reuse as bundles_commands
 from fplinux_cli.cache.prune import operations as cache_prune
 from fplinux_cli.common import fail, sha256_file
-from fplinux_cli.environment import image_state as image_states
-from fplinux_cli.environment import image_store as environment_image_store
-from fplinux_cli.environment import images
+from fplinux_cli.environment import definition
 from fplinux_cli.environment import kern as environment_kern
-from fplinux_cli.environment import setup as environment_setup
+from fplinux_cli.environment import state as environment_states
+from fplinux_cli.environment.runtime import environment_arguments, require_environment
 from fplinux_cli.manifests import releases
 from fplinux_cli.reporting.process import silence_broken_pipe
 from fplinux_cli.reporting.run import RunReporter
@@ -27,7 +26,6 @@ from fplinux_cli.workspace import staging as workspace_staging
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from fplinux_cli.environment.image_state import ImageState
     from fplinux_cli.workspace.capture import WorkspaceSnapshot
 
 
@@ -41,43 +39,6 @@ def ensure_build_directory(path: Path) -> Path:
     return path
 
 
-def _require_build_environment(
-    container_lock: dict[str, Any],
-    image_recipe: str,
-    *,
-    offline: bool,
-    reporter: RunReporter,
-) -> tuple[str, str, ImageState]:
-    """Resolve the pinned runtime and current image for a build operation."""
-    image = images.container_image_reference(container_lock, image_recipe)
-    current_image = None
-    if not environment_kern.kern_available(container_lock):
-        if offline:
-            fail(
-                "offline build requires the current pinned OCI image; "
-                "run ./fplinux setup online first"
-            )
-        current_image = environment_setup.setup(
-            reporter=reporter, lock=container_lock, image_recipe=image_recipe
-        )
-    kern = environment_kern.require_kern(container_lock)
-    inspected_image = environment_image_store.current_image_state(kern, image, image_recipe)
-    if inspected_image is None:
-        if offline:
-            fail(
-                "offline build requires the current pinned OCI image; "
-                "run ./fplinux setup online first"
-            )
-        current_image = environment_setup.setup(
-            reporter=reporter, lock=container_lock, image_recipe=image_recipe
-        )
-    elif current_image is None:
-        current_image = environment_image_store.publish_current_image_state(
-            kern, image, image_recipe, state=inspected_image
-        )
-    return kern, image, current_image
-
-
 def prepare_host_tool(  # noqa: PLR0913 -- operation inputs and environment policy stay explicit.
     target: str,
     platform: str,
@@ -87,14 +48,12 @@ def prepare_host_tool(  # noqa: PLR0913 -- operation inputs and environment poli
     offline: bool,
     reporter: RunReporter,
 ) -> None:
-    """Build one cached host utility in the pinned image without fitted device data."""
+    """Build one cached host utility in the pinned environment without fitted device data."""
     snapshot = workspace_capture.workspace_snapshot(
         workspace_build_inputs.target_build_source_files(target)
     )
-    container_lock = images.load_container_lock()
-    image_recipe = images.container_image_recipe_digest(container_lock)
-    kern, image, image_state = _require_build_environment(
-        container_lock, image_recipe, offline=offline, reporter=reporter
+    kern, environment_rootfs, environment_state = require_environment(
+        offline=offline, reporter=reporter
     )
     cache = common.ROOT / ".cache"
     downloads = ensure_build_directory(cache / "downloads")
@@ -108,11 +67,9 @@ def prepare_host_tool(  # noqa: PLR0913 -- operation inputs and environment poli
             kern,
             "box",
             environment_kern.kern_box_name("host-tools"),
-            "--image",
-            image,
-            "--pull",
-            "never",
+            *environment_arguments(environment_rootfs),
             "--read-only",
+            "--uid-range",
             "--privileged",
             "--network",
             "none" if offline else "host",
@@ -138,9 +95,9 @@ def prepare_host_tool(  # noqa: PLR0913 -- operation inputs and environment poli
             "--env",
             "PYTHONPATH=/workspace/scripts",
             "--env",
-            f"FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE={image_recipe}",
+            f"FPLINUX_ENVIRONMENT_RECIPE={environment_state.recipe}",
             "--env",
-            f"FPLINUX_CONTAINER_IMAGE_CONTENT={image_state.image_content}",
+            f"FPLINUX_ENVIRONMENT_CONTENT={environment_state.content}",
             "--workdir",
             "/workspace",
             "--init",
@@ -158,12 +115,12 @@ def prepare_host_tool(  # noqa: PLR0913 -- operation inputs and environment poli
         workspace_staging.discard_staged_workspace_snapshot(snapshot, workspace)
 
 
-def _build_container_command(  # noqa: PLR0913
+def _build_command(  # noqa: PLR0913
     kern: str,
     *,
     target: str,
     jobs: int,
-    image: str,
+    environment_rootfs: Path,
     offline: bool,
     snapshot: WorkspaceSnapshot,
     workspace: Path,
@@ -177,8 +134,8 @@ def _build_container_command(  # noqa: PLR0913
     output: Path,
     logs: Path,
     log_environment: dict[str, str],
-    image_recipe: str,
-    image_content: str,
+    environment_recipe: str,
+    environment_content: str,
     memory_mib: int = DEFAULT_BUILD_MEMORY_MIB,
     profile: str | None = None,
     build_type: str = "release",
@@ -193,11 +150,9 @@ def _build_container_command(  # noqa: PLR0913
         kern,
         "box",
         environment_kern.kern_box_name("build"),
-        "--image",
-        image,
-        "--pull",
-        "never",
+        *environment_arguments(environment_rootfs),
         "--read-only",
+        "--uid-range",
         "--privileged",
         "--memory",
         f"{memory_mib}m",
@@ -231,9 +186,9 @@ def _build_container_command(  # noqa: PLR0913
         "--env",
         "PYTHONPATH=/workspace/scripts",
         "--env",
-        f"FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE={image_recipe}",
+        f"FPLINUX_ENVIRONMENT_RECIPE={environment_recipe}",
         "--env",
-        f"FPLINUX_CONTAINER_IMAGE_CONTENT={image_content}",
+        f"FPLINUX_ENVIRONMENT_CONTENT={environment_content}",
         "--env",
         f"FPLINUX_WORKSPACE_DIGEST={snapshot.recipe}",
         "--workdir",
@@ -298,11 +253,11 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
     snapshot = workspace_build_inputs.target_workspace_snapshot(
         target, profile, build_type=build_type, include_device_data=include_device_data
     )
-    container_lock = images.load_container_lock()
-    image_recipe = images.container_image_recipe_digest(container_lock)
+    environment_lock = definition.load_environment_lock()
+    environment_recipe = definition.environment_recipe_digest(environment_lock)
     cache = common.ROOT / ".cache"
-    image_state = image_states.load_image_state(cache, image_recipe)
-    identity = bundles_commands.build_identity(snapshot, image_state, cache)
+    environment_state = environment_states.load_environment_state(cache, environment_recipe)
+    identity = bundles_commands.build_identity(snapshot, environment_state, cache)
     current = bundles_commands.matching_target_bundle(
         target,
         identity,
@@ -349,8 +304,8 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
             verbose=verbose,
             build_type=build_type,
         )
-    kern, image, current_image = _require_build_environment(
-        container_lock, image_recipe, offline=offline, reporter=reporter
+    kern, environment_rootfs, current_environment = require_environment(
+        offline=offline, reporter=reporter
     )
     apk_signing = ensure_build_directory(cache / "apk-signing")
     downloads = ensure_build_directory(cache / "downloads")
@@ -371,14 +326,14 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
         with reporter.stage("container", passthrough=True, show_tail=False) as stage:
             try:
                 stage.run(
-                    _build_container_command(
+                    _build_command(
                         kern,
                         target=target,
                         profile=profile,
                         build_type=build_type,
                         jobs=jobs,
                         memory_mib=memory_mib,
-                        image=image,
+                        environment_rootfs=environment_rootfs,
                         offline=offline,
                         snapshot=snapshot,
                         workspace=workspace,
@@ -392,8 +347,8 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
                         output=output,
                         logs=container_logs,
                         log_environment=log_environment,
-                        image_recipe=image_recipe,
-                        image_content=current_image.image_content,
+                        environment_recipe=current_environment.recipe,
+                        environment_content=current_environment.content,
                     ),
                     env=environment_kern.kern_environment(),
                 )
@@ -407,7 +362,7 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
                         ),
                     )
                 raise
-        identity = bundles_commands.build_identity(snapshot, current_image, cache)
+        identity = bundles_commands.build_identity(snapshot, current_environment, cache)
         current = bundles_commands.matching_target_bundle(
             target,
             identity,

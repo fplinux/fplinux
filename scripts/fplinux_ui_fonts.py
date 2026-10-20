@@ -34,7 +34,7 @@ Steps for each font:
    fails the build.
 
 The output depends only on the sources, the token file, this script,
-fontTools and lv_font_conv, which the build image pins; lv_font_conv runs in
+fontTools and lv_font_conv, which the build environment pins; lv_font_conv runs in
 a scratch directory with fixed file names, so its option comment is the
 same on every host.
 """

@@ -37,7 +37,6 @@ class CheckScopeSelectionTests:
         assert resolve_check_scopes([]) == (
             "repository",
             "source",
-            "container",
             "metadata",
             "docs",
             "spelling",
@@ -87,7 +86,7 @@ class AnalyzerAndTestExecutionTests:
             scope: check_scope_receipt_recipe(
                 scope,
                 "a" * 64,
-                image_generation="b" * 64,
+                environment_generation="b" * 64,
                 orchestration_recipe="c" * 64,
             )
             for scope in selected
@@ -101,7 +100,7 @@ class AnalyzerAndTestExecutionTests:
                 analyzer_cache={},
                 workspace=workspace,
                 kern="kern",
-                image="image",
+                rootfs=Path("/environment/rootfs"),
                 recipes=recipes,
                 profile=None,
                 build_type="release",
@@ -135,7 +134,7 @@ class AnalyzerAndTestExecutionTests:
         workspace = tmp_path / "workspace"
         (workspace / "tests").mkdir(parents=True)
         python = check_scope_receipt_recipe(
-            "python", "a" * 64, image_generation="b" * 64, orchestration_recipe="c" * 64
+            "python", "a" * 64, environment_generation="b" * 64, orchestration_recipe="c" * 64
         )
         previous_tests = replace(python, scope="tests")
         changed_tests = replace(previous_tests, closure_digest="d" * 64)
@@ -167,7 +166,7 @@ class AnalyzerAndTestExecutionTests:
                 analyzer_cache={},
                 workspace=workspace,
                 kern="kern",
-                image="image",
+                rootfs=Path("/environment/rootfs"),
                 recipes={"python": python, "tests": changed_tests},
                 profile=None,
                 build_type="release",
@@ -198,8 +197,8 @@ class RepositoryFastPathTests:
             mock.patch("fplinux_cli.quality.checks.RunReporter.create", return_value=reporter),
             mock.patch.object(checks, "check_git_diff") as git_diff,
             mock.patch.object(
-                quality_runtime,
-                "kern_available",
+                checks,
+                "require_environment",
                 side_effect=AssertionError("repository check must not inspect Kern"),
             ),
             mock.patch.object(
@@ -262,7 +261,7 @@ class KernelExecutionLimitTests:
                 },
                 workspace=tmp_path / "workspace",
                 kern="kern",
-                image="image",
+                rootfs=Path("/environment/rootfs"),
                 recipes={},
                 profile="microsd-uboot",
                 build_type="debug",
@@ -292,7 +291,7 @@ class KernelExecutionLimitTests:
             recipe = check_scope_receipt_recipe(
                 "kernel",
                 "a" * 64,
-                image_generation="b" * 64,
+                environment_generation="b" * 64,
                 orchestration_recipe="c" * 64,
                 profile="microsd-uboot",
             )
@@ -308,7 +307,7 @@ class KernelExecutionLimitTests:
                         analyzer_cache=analyzer_cache,
                         workspace=workspace,
                         kern="kern",
-                        image="localhost/fplinux-build:locked",
+                        rootfs=Path("/environment/rootfs"),
                         recipes={"kernel": recipe},
                         profile="microsd-uboot",
                         build_type="release",

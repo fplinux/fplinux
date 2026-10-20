@@ -10,19 +10,11 @@ from typing import TYPE_CHECKING
 from fplinux_cli.build.kernel.state import inspect_linux_base
 from fplinux_cli.build.sources import fetch
 from fplinux_cli.common import ROOT, fail, relative_name, replace_file_atomically
-from fplinux_cli.environment.image_store import current_image_state
-from fplinux_cli.environment.images import (
-    container_image_recipe_digest,
-    container_image_reference,
-    load_container_lock,
-)
 from fplinux_cli.environment.kern import (
-    kern_available,
     kern_box_name,
     kern_environment,
-    require_kern,
 )
-from fplinux_cli.environment.setup import setup
+from fplinux_cli.environment.runtime import environment_arguments, require_environment
 from fplinux_cli.quality.kernel_patches import linux_contexts
 from fplinux_cli.reporting.run import RunReporter
 from fplinux_cli.workspace.capture import WorkspaceSnapshot, workspace_snapshot
@@ -89,7 +81,7 @@ def resolve_format_paths(
 def _container_command(  # noqa: PLR0913 -- projection and optional cache mounts stay explicit.
     kern: str,
     *,
-    image: str,
+    rootfs: Path,
     workspace: Path,
     formatter: list[str],
     archives: Path | None = None,
@@ -99,10 +91,7 @@ def _container_command(  # noqa: PLR0913 -- projection and optional cache mounts
         kern,
         "box",
         kern_box_name("format"),
-        "--image",
-        image,
-        "--pull",
-        "never",
+        *environment_arguments(rootfs),
         "--network",
         "none",
         "--read-only",
@@ -194,14 +183,7 @@ def format_sources(values: Sequence[str]) -> None:
         if linux_cache.is_symlink() or (linux_cache.exists() and not linux_cache.is_dir()):
             fail(f"invalid Linux cache directory: {linux_cache}")
         linux_cache.mkdir(parents=True, exist_ok=True)
-    container_lock = load_container_lock()
-    image_recipe = container_image_recipe_digest(container_lock)
-    image = container_image_reference(container_lock, image_recipe)
-    if not kern_available(container_lock):
-        setup(lock=container_lock, image_recipe=image_recipe)
-    kern = require_kern(container_lock)
-    if current_image_state(kern, image, image_recipe) is None:
-        setup(lock=container_lock, image_recipe=image_recipe)
+    kern, rootfs, _state = require_environment()
 
     reporter = RunReporter.create("format", target=None, verbose=False)
     if patches:
@@ -215,7 +197,7 @@ def format_sources(values: Sequence[str]) -> None:
                 stage.run(
                     _container_command(
                         kern,
-                        image=image,
+                        rootfs=rootfs,
                         workspace=projection,
                         formatter=command,
                     ),
@@ -226,7 +208,7 @@ def format_sources(values: Sequence[str]) -> None:
                 stage.run(
                     _container_command(
                         kern,
-                        image=image,
+                        rootfs=rootfs,
                         workspace=projection,
                         archives=archives,
                         linux_cache=linux_cache,

@@ -79,7 +79,7 @@ class FormatContainerBoundaryTests:
         workspace = Path("/tmp/fplinux-format-projection")  # noqa: S108 -- synthetic path.
         command = format_module._container_command(  # noqa: SLF001 -- command boundary.
             "/usr/bin/kern",
-            image="localhost/fplinux-build:locked",
+            rootfs=Path("/environment/rootfs"),
             workspace=workspace,
             formatter=["ruff", "format", "scripts/tool.py"],
         )
@@ -87,6 +87,10 @@ class FormatContainerBoundaryTests:
         mounts = [command[index + 1] for index, arg in enumerate(command) if arg == "--volume"]
         assert (mounts) == ([f"{workspace}:/workspace"])
         assert ("--read-only") in (command)
+        assert command[command.index("--rootfs") + 1] == "/environment/rootfs"
+        assert "--no-uid-range" in command
+        assert "--image" not in command
+        assert "--pull" not in command
         network = command.index("--network")
         assert (command[network + 1]) == ("none")
         assert (command[-4:]) == (["--", "ruff", "format", "scripts/tool.py"])
@@ -95,7 +99,7 @@ class FormatContainerBoundaryTests:
         """The prepared argv allows Linux-cache writes and prohibits archive writes."""
         command = format_module._container_command(  # noqa: SLF001 -- command boundary.
             "/usr/bin/kern",
-            image="localhost/fplinux-build:locked",
+            rootfs=Path("/environment/rootfs"),
             workspace=Path("/projection"),
             formatter=["python3", "-m", "fplinux_cli.quality.kernel_patches"],
             archives=Path("/downloads"),

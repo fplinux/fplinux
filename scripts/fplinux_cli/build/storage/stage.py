@@ -43,9 +43,9 @@ def build_profile_uboot(
         inputs_build.CACHE / "downloads/uboot",
         "source.tar.bz2",
     )
-    container_recipe = sha256_value(
-        os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE"),
-        "container image recipe",
+    environment_recipe = sha256_value(
+        os.environ.get("FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE"),
+        "environment recipe",
     )
     from . import uboot as uboot_tools  # noqa: PLC0415 -- profile-only source.
 
@@ -96,7 +96,7 @@ def build_profile_uboot(
                 ],
                 work=work,
                 jobs=jobs,
-                container_recipe=container_recipe,
+                environment_recipe=environment_recipe,
                 cross_compile="arm-none-eabi-",
                 layout=target_config["layout"],
                 required_config=config["required_config"],
@@ -133,8 +133,8 @@ def profile_ext4_artifact(
             rootfs_recipe,
             rootfs_receipt,
             sha256_value(
-                os.environ.get("FPLINUX_CONTAINER_IMAGE_RECIPE"),
-                "container image recipe",
+                os.environ.get("FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE"),
+                "environment recipe",
             ),
         )
         output = work / "rootfs-image"

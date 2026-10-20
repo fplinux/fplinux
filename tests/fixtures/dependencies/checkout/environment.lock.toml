@@ -1,3 +1,17 @@
+[kern]
+version = "1.0.0"
+archive_url = "https://example.invalid/kern.tar.gz"
+archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+binary_sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+[base]
+release = "3.24.2"
+arch = "x86_64"
+url = "https://example.invalid/base.tar.gz"
+sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+
+[tools]
+
 [selection]
 arch = "x86_64"
 apk_groups = [["tool=2.0-r0"]]
@@ -8,5 +22,29 @@ url = "https://example.invalid/tool-2.0-r0.apk"
 sha256 = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 bytes = 12
 destination = "downloads/environment/apk/main/x86_64/tool-2.0-r0.apk"
-purpose = "container-package"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
+key = "kern:archive"
+url = "https://example.invalid/kern.tar.gz"
+sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+destination = "downloads/kern/kern.tar.gz"
+purpose = "kern-runtime"
+arch = "x86_64"
+
+[[input]]
+key = "environment:base-rootfs"
+url = "https://example.invalid/base.tar.gz"
+sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+destination = "downloads/kern/alpine-minirootfs.tar.gz"
+purpose = "environment-base"
+arch = "x86_64"
+
+[[input]]
+key = "environment:tool-source"
+url = "https://example.invalid/tool-2.0.tar.gz"
+sha256 = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+destination = "downloads/environment/tool/tool-2.0.tar.gz"
+purpose = "environment-source"
 arch = "x86_64"

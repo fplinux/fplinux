@@ -13,14 +13,17 @@ from pathlib import Path
 from fplinux_cli import common
 from fplinux_cli.build.host_tools.host_package import publish_host_package
 from fplinux_cli.common import canonical_json_bytes, fail
-from fplinux_cli.environment.downloads import download_locked_file
-from fplinux_cli.environment.image_store import current_image_state
-from fplinux_cli.environment.images import (
-    container_image_recipe_digest,
-    container_image_reference,
-    load_container_lock,
+from fplinux_cli.environment.definition import (
+    environment_recipe_digest,
+    load_environment_lock,
 )
+from fplinux_cli.environment.downloads import download_locked_file
 from fplinux_cli.environment.kern import kern_box_name, kern_environment, require_kern
+from fplinux_cli.environment.runtime import (
+    current_environment_state,
+    environment_arguments,
+    environment_rootfs,
+)
 from fplinux_cli.templates import substitute_template
 
 
@@ -91,14 +94,16 @@ def _verify_python(package: Path) -> None:
 def prepare_linux_host(*, cache: Path, offline: bool) -> dict[str, Path]:
     """Collect runtime files while the caller owns the project cache lock."""
     cache = cache.resolve()
-    lock = load_container_lock()
-    recipe = container_image_recipe_digest(lock)
-    image = container_image_reference(lock, recipe)
+    lock = load_environment_lock()
+    recipe = environment_recipe_digest(lock)
     kern = require_kern(lock)
-    if current_image_state(kern, image, recipe) is None:
+    state = current_environment_state(kern, recipe)
+    if state is None:
         fail(
-            "Linux standalone runtime requires the current pinned image; run ./fplinux setup first"
+            "Linux standalone runtime requires the current pinned environment; "
+            "run ./fplinux setup first"
         )
+    rootfs = environment_rootfs(common.ROOT / ".cache", state)
     root = cache / "linux-host"
     root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=root, prefix=".export-") as temporary:
@@ -109,11 +114,9 @@ def prepare_linux_host(*, cache: Path, offline: bool) -> dict[str, Path]:
             kern,
             "box",
             kern_box_name("linux-host-export"),
-            "--image",
-            image,
-            "--pull",
-            "never",
+            *environment_arguments(rootfs),
             "--read-only",
+            "--uid-range",
             "--network",
             "none",
             "--volume",

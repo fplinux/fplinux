@@ -21,6 +21,7 @@ from fplinux_cli.build.runtime import runtime_source_files
 from fplinux_cli.build.sources import source_lock_entry
 from fplinux_cli.common import ROOT, canonical_json_bytes, fail
 from fplinux_cli.device_data import inputs as firmware_inputs
+from fplinux_cli.environment.definition import ENVIRONMENT_RECIPE_INPUTS
 from fplinux_cli.manifests.assets import resolve_asset_sources
 from fplinux_cli.manifests.kernel import kernel_config_paths
 from fplinux_cli.manifests.linux import (
@@ -53,10 +54,8 @@ if TYPE_CHECKING:
     from fplinux_cli.manifests.linux import LinuxTarget
 
 STAGED_BUILD_SOURCES = (
-    "Containerfile",
+    *ENVIRONMENT_RECIPE_INPUTS,
     "THIRD_PARTY_NOTICES.md",
-    "container.lock.toml",
-    "environment.lock.toml",
     "alpine.lock.toml",
     "sources.lock.toml",
     "alpine/abuild.conf",
@@ -78,7 +77,6 @@ STAGED_BUILD_SOURCES = (
     "scripts/fplinux_cli/common.py",
     "scripts/fplinux_cli/manifests",
     "scripts/fplinux_cli/environment/__init__.py",
-    "scripts/fplinux_cli/environment/images.py",
     "scripts/fplinux_cli/quality/__init__.py",
     "scripts/fplinux_cli/quality/source_gate.py",
     "scripts/fplinux_cli/device_data/__init__.py",

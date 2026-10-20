@@ -12,7 +12,7 @@ from fplinux_cli.build import process as process_build
 from fplinux_cli.build.kernel import compile as kernel_build
 from fplinux_cli.build.kernel import state as linux_state
 from fplinux_cli.build.kernel.state import PreparedLinuxState
-from fplinux_cli.environment.images import container_artifact_recipe_digest
+from fplinux_cli.environment.definition import environment_artifact_recipe_digest
 from fplinux_cli.manifests.kernel import kconfig_values
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.targets import load_target
@@ -136,7 +136,7 @@ def test_ram_build_uses_declared_image_delivery_and_causal_root_identity(  # noq
         platform["linux"]["image_output"],
         str(Path(platform["linux"]["dtb_output_directory"]) / target_config["linux"]["dtb"]),
     )
-    monkeypatch.setenv("FPLINUX_CONTAINER_IMAGE_RECIPE", "c" * 64)
+    monkeypatch.setenv("FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE", "c" * 64)
     monkeypatch.setattr(process_build, "run", peer.run)
     monkeypatch.setattr(linux_state, "require_prepared_linux", lambda *_args: prepared)
     monkeypatch.setattr(
@@ -225,7 +225,7 @@ def test_ram_build_uses_declared_image_delivery_and_causal_root_identity(  # noq
     ],
 )
 @pytest.mark.parametrize(
-    ("image_recipe", "image_content"),
+    ("environment_recipe", "environment_content"),
     [
         pytest.param("4" * 64, "3" * 64, id="changed-image-recipe"),
         pytest.param("2" * 64, "4" * 64, id="changed-installed-content"),
@@ -238,8 +238,8 @@ def test_external_root_rebuilds_for_another_environment(  # noqa: PLR0913
     target: str,
     profile: str,
     make_target: str,
-    image_recipe: str,
-    image_content: str,
+    environment_recipe: str,
+    environment_content: str,
 ) -> None:
     """Changed tools rebuild the fixed output; the same environment then reuses it."""
     target_config = load_target(target, profile)
@@ -278,10 +278,11 @@ def test_external_root_rebuilds_for_another_environment(  # noqa: PLR0913
     monkeypatch.setattr(kernel_build, "panel_firmware_kconfig_arguments", lambda *_args: [])
 
     def select_environment(recipe: str, content: str) -> None:
-        monkeypatch.setenv("FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE", recipe)
-        monkeypatch.setenv("FPLINUX_CONTAINER_IMAGE_CONTENT", content)
+        monkeypatch.setenv("FPLINUX_ENVIRONMENT_RECIPE", recipe)
+        monkeypatch.setenv("FPLINUX_ENVIRONMENT_CONTENT", content)
         monkeypatch.setenv(
-            "FPLINUX_CONTAINER_IMAGE_RECIPE", container_artifact_recipe_digest(recipe, content)
+            "FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE",
+            environment_artifact_recipe_digest(recipe, content),
         )
 
     def build() -> tuple[Path, Path, dict[str, str], str]:
@@ -308,7 +309,7 @@ def test_external_root_rebuilds_for_another_environment(  # noqa: PLR0913
     first_image = image.read_bytes()
     first_command_count = len(peer.commands)
 
-    select_environment(image_recipe, image_content)
+    select_environment(environment_recipe, environment_content)
     changed_image, _dtb, changed_receipt, changed_identity = build()
     assert changed_image == image
     assert len(peer.commands) > first_command_count

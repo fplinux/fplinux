@@ -16,8 +16,8 @@ from unittest import mock
 
 import pytest
 from fplinux_cli import common
-from fplinux_cli.environment import images
-from fplinux_cli.environment.image_state import ImageState
+from fplinux_cli.environment import runtime as environment_runtime
+from fplinux_cli.environment.state import EnvironmentState
 from fplinux_cli.quality import checks, host_testing, runtime, testing
 from fplinux_cli.quality.receipts import (
     CheckReceiptRecipe,
@@ -131,15 +131,13 @@ class SelectedTestRunTests:
                 mock.patch.object(
                     quality_inputs, "quality_workspace_snapshot", return_value=snapshot
                 ),
-                mock.patch.object(images, "load_container_lock", return_value={}),
-                mock.patch.object(images, "container_image_recipe_digest", return_value="b" * 64),
                 mock.patch.object(
-                    runtime,
-                    "prepare_quality_image",
+                    environment_runtime,
+                    "require_environment",
                     return_value=(
                         "kern",
-                        "locked-image",
-                        ImageState("b" * 64, "c" * 64, "c" * 64),
+                        root / ".cache/environment/rootfs",
+                        EnvironmentState("b" * 64, "c" * 64, "d" * 64),
                     ),
                 ),
                 # Kern itself is outside this unit boundary; selection has real process tests.
@@ -169,7 +167,7 @@ class SelectedTestRunTests:
 
     def test_host_and_container_use_one_host_process_deadline(self, tmp_path: Path) -> None:
         """A host subprocess receives only the time left by the preceding container work."""
-        module = tmp_path / "tests/host_process/cache/test_image_tag.py"
+        module = tmp_path / "tests/host_process/cache/test_prune_rootfs_ownership.py"
         module.parent.mkdir(parents=True)
         module.touch()
         reporter = output.RunReporter(
@@ -184,12 +182,12 @@ class SelectedTestRunTests:
             _command: list[str],
             *,
             kern: str,
-            image: str,
+            rootfs: Path,
             timeout: float,
             log_name: str | None,
         ) -> None:
             nonlocal elapsed
-            del kern, image, log_name
+            del kern, rootfs, log_name
             budgets.append(("container", timeout))
             elapsed += 110.0
 
@@ -208,7 +206,12 @@ class SelectedTestRunTests:
             mock.patch.object(time, "monotonic", side_effect=lambda: elapsed),
         ):
             testing.run_test_workload(
-                reporter, tmp_path, kern="kern", image="image", names=[], tier="host_process"
+                reporter,
+                tmp_path,
+                kern="kern",
+                rootfs=Path("/environment/rootfs"),
+                names=[],
+                tier="host_process",
             )
         assert budgets == [("container", 300.0), ("host", 190.0)]
 
@@ -216,7 +219,7 @@ class SelectedTestRunTests:
         self, tmp_path: Path
     ) -> None:
         """Host test failure preserves successful analyzers and the previous test receipt."""
-        module = tmp_path / "workspace/tests/host_process/cache/test_image_tag.py"
+        module = tmp_path / "workspace/tests/host_process/cache/test_prune_rootfs_ownership.py"
         module.parent.mkdir(parents=True)
         module.touch()
         cache = tmp_path / ".cache"
@@ -246,7 +249,7 @@ class SelectedTestRunTests:
                 analyzer_cache={},
                 workspace=tmp_path / "workspace",
                 kern="kern",
-                image="image",
+                rootfs=Path("/environment/rootfs"),
                 recipes={"python": python, "tests": changed},
                 profile=None,
                 build_type="release",
@@ -298,13 +301,13 @@ class SelectedTestRunTests:
     def test_host_python_change_revokes_tests_success_without_invalidating_analyzers(
         self, tmp_path: Path
     ) -> None:
-        """Host runtime identity belongs to tests; Python and C analyzers use the image."""
+        """Host runtime identity belongs to tests; Python and C analyzers use the environment."""
 
         def recipe(scope: str) -> CheckReceiptRecipe:
             return check_scope_receipt_recipe(
                 scope,
                 "a" * 64,
-                image_generation="b" * 64,
+                environment_generation="b" * 64,
                 orchestration_recipe="c" * 64,
             )
 

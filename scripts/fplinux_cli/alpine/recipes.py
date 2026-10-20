@@ -65,7 +65,7 @@ def shared_aport_source_records(
 
 
 def alpine_rootfs_recipe(  # noqa: PLR0913 -- each selected rootfs input is causal.
-    container_image_recipe: str,
+    environment_recipe: str,
     signing_key_sha256: str,
     packages: Sequence[str],
     root: Path = ROOT,
@@ -77,12 +77,12 @@ def alpine_rootfs_recipe(  # noqa: PLR0913 -- each selected rootfs input is caus
     """Hash every input that can affect one selected Alpine root filesystem."""
     if root_kind not in {"initramfs", "external"}:
         fail("Alpine root kind must be initramfs or external")
-    _sha256(container_image_recipe, "container image recipe")
+    _sha256(environment_recipe, "environment recipe")
     _sha256(signing_key_sha256, "package signing public key")
     selected = _canonical_packages(packages, root)
     build_packages = _canonical_packages(aport_build_order(selected), root)
     payload = {
-        "container_image_recipe": container_image_recipe,
+        "environment_recipe": environment_recipe,
         "package_signing_key": signing_key_sha256,
         "packages": list(selected),
         "registration": selected_aport_graph(selected),
@@ -126,7 +126,7 @@ def alpine_rootfs_recipe(  # noqa: PLR0913 -- each selected rootfs input is caus
 
 def alpine_package_recipe(
     name: str,
-    container_image_recipe: str,
+    environment_recipe: str,
     signing_key_sha256: str,
     root: Path = ROOT,
 ) -> str:
@@ -136,11 +136,11 @@ def alpine_package_recipe(
     dependencies = _canonical_packages(
         tuple(producer for producer in graph if producer != name), root
     )
-    _sha256(container_image_recipe, "container image recipe")
+    _sha256(environment_recipe, "environment recipe")
     _sha256(signing_key_sha256, "package signing public key")
     return _canonical_digest(
         {
-            "container_image_recipe": container_image_recipe,
+            "environment_recipe": environment_recipe,
             "package_signing_key": signing_key_sha256,
             "producer": name,
             "registration": graph,

@@ -7,11 +7,12 @@ import base64
 import json
 import shutil
 import tempfile
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+import tomlkit
 from fplinux_cli import common
 from fplinux_cli.alpine import registration as alpine_registration
 from fplinux_cli.cli import dependencies as dependency_cli
@@ -21,6 +22,8 @@ from fplinux_cli.dependencies.inputs import (
     environment_inputs,
     npm_declarations,
 )
+from fplinux_cli.dependencies.snapshots import require_checkout
+from tomlkit.items import Table
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -54,7 +57,6 @@ def dependency_checkout(monkeypatch: pytest.MonkeyPatch) -> Iterator[DependencyC
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         shutil.copytree(_FIXTURES / "checkout", root, dirs_exist_ok=True)
-        (root / "Containerfile.fixture").rename(root / "Containerfile")
         (root / "sources.lock.toml.fixture").rename(root / "sources.lock.toml")
         checkout = DependencyCheckout(root)
         checkout.write(
@@ -152,8 +154,8 @@ class DependencyInputTests:
         """Offline quality inputs retain the pinned uploader archive without a second lock."""
         records = {record.key: record for record in environment_inputs(dependency_checkout.root)}
 
-        assert records["container:spreadtrum-flash"] == DependencyInput(
-            key="container:spreadtrum-flash",
+        assert records["environment:spreadtrum-flash"] == DependencyInput(
+            key="environment:spreadtrum-flash",
             url="https://example.invalid/spreadtrum-flash.tar.gz",
             sha256="a" * 64,
             size=None,
@@ -161,6 +163,47 @@ class DependencyInputTests:
             purpose="quality-source",
             arch="x86_64",
         )
+
+    @pytest.mark.parametrize(
+        ("field", "value", "attribute"),
+        [
+            ("archive_url", "https://example.invalid/repacked.tar.gz", "url"),
+            ("archive_sha256", "b" * 64, "sha256"),
+        ],
+        ids=("archive-url", "archive-checksum"),
+    )
+    def test_quality_source_download_tracks_shared_archive_declarations(
+        self,
+        dependency_checkout: DependencyCheckout,
+        field: str,
+        value: str,
+        attribute: str,
+    ) -> None:
+        """The shared source lock owns the archive consumed by environment preparation."""
+        source = dependency_checkout.root / "sources.lock.toml"
+        declarations = tomlkit.parse(source.read_text(encoding="utf-8"))
+        quality_source = declarations["spreadtrum_flash"]
+        assert isinstance(quality_source, Table)
+        quality_source[field] = value
+        source.write_text(declarations.as_string(), encoding="utf-8")
+
+        records = {record.key: record for record in environment_inputs(dependency_checkout.root)}
+
+        assert getattr(records["environment:spreadtrum-flash"], attribute) == value
+
+    def test_changed_quality_source_projection_rejects_a_saved_dependency_selection(
+        self, dependency_checkout: DependencyCheckout
+    ) -> None:
+        """Member checksum declarations stay strict even when the original archive is unchanged."""
+        inputs, context = dependency_selection(dependency_checkout.root)
+        saved = {"inputs": [{"input": asdict(item)} for item in inputs], "context": context}
+        source = dependency_checkout.root / "sources.lock.toml"
+        source.write_text(source.read_text().replace("b" * 64, "e" * 64))
+        current_inputs, current_context = dependency_selection(dependency_checkout.root)
+
+        assert current_inputs == inputs
+        with pytest.raises(SystemExit, match="does not match this checkout"):
+            require_checkout(saved, current_inputs, current_context)
 
     def test_bundled_npm_dependencies_keep_context_and_use_the_exact_parent_archive(self) -> None:
         """Direct and transitive bundled files are restored by their pinned package archive."""
@@ -333,11 +376,13 @@ class DependencyInputTests:
         (dependency_checkout.root / "targets/test-phone/target.toml").unlink()
         records = {record.key: record for record in environment_inputs(dependency_checkout.root)}
         assert (records["environment:tool"].size) == (12)
-        assert (records["container:tool"].url) == ("https://example.invalid/tool-2.0.tar.gz")
+        assert (records["environment:tool-source"].url) == (
+            "https://example.invalid/tool-2.0.tar.gz"
+        )
         assert (records["npm:node_modules/tool"].checksum) == ("11" * 64)
         assert (records["npm:node_modules/tool"].sha256) is None
 
-    def test_locked_wheel_keeps_its_container_key_and_cache_destination(
+    def test_locked_wheel_keeps_its_exact_bytes_and_cache_destination(
         self, dependency_checkout: DependencyCheckout
     ) -> None:
         """Setup and host Python consumers receive the same exact wheel declaration."""
@@ -347,7 +392,7 @@ class DependencyInputTests:
         selected = [
             record
             for record in environment_inputs(dependency_checkout.root)
-            if record.key == "container:pytest"
+            if record.key == "environment:pytest"
         ]
         assert len(selected) == 1
         wheel = selected[0]
@@ -355,7 +400,7 @@ class DependencyInputTests:
         assert wheel.sha256 == "9" * 64
         assert wheel.size == 456
         assert wheel.destination == "downloads/environment/pytest/pytest-1.0-py3-none-any.whl"
-        assert wheel.purpose == "container-source"
+        assert wheel.purpose == "environment-source"
         assert wheel.arch == "x86_64"
 
     def test_site_registry_inputs_are_separate_from_the_environment_closure(
@@ -421,14 +466,20 @@ class DependencyInputTests:
         with pytest.raises(SystemExit, match="unsupported command substitution"):
             dependency_selection(dependency_checkout.root)
 
-    def test_changed_environment_selection_rejects_stale_closure(
+    def test_changed_environment_input_changes_snapshot_selection(
         self, dependency_checkout: DependencyCheckout
     ) -> None:
-        """A changed direct package pin cannot reuse a differently selected closure."""
-        path = dependency_checkout.root / "Containerfile"
-        path.write_text(path.read_text().replace("tool=2.0-r0", "tool=3.0-r0"))
-        with pytest.raises(SystemExit, match="selection differs from Containerfile"):
-            environment_inputs(dependency_checkout.root)
+        """A new locked download cannot reuse an archive containing different bytes."""
+        before_inputs, before_context = dependency_selection(dependency_checkout.root)
+        path = dependency_checkout.root / "environment.lock.toml"
+        path.write_text(path.read_text().replace("e" * 64, "f" * 64))
+        after_inputs, after_context = dependency_selection(dependency_checkout.root)
+        assert before_inputs != after_inputs
+        assert before_context != after_context
+        assert (
+            next(item for item in after_inputs if item.key == "environment:tool").sha256
+            == "f" * 64
+        )
 
     def test_records_reject_missing_digest_and_non_normalized_destinations(self) -> None:
         """Exact download records cannot describe unpinned bytes or escaping paths."""

@@ -175,10 +175,10 @@ def _cached_package_record(
 
 
 def _cached_aport_packages(
-    name: str, image_recipe: str, signing_key_identity: str
+    name: str, environment_recipe: str, signing_key_identity: str
 ) -> dict[str, Path] | None:
     """Return exact current APK outputs without invoking the cross-build sysroot."""
-    recipe = alpine_package_recipe(name, image_recipe, signing_key_identity)
+    recipe = alpine_package_recipe(name, environment_recipe, signing_key_identity)
     repository = CACHE / PACKAGE_CACHE_DIRECTORY / name
     try:
         raw = json.loads((repository / PACKAGE_RECEIPT_NAME).read_text(encoding="utf-8"))

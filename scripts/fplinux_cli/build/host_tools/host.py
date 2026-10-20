@@ -265,7 +265,7 @@ def _host_tool_recipe(sources: dict[str, Any], recipe: dict[str, Any]) -> str:
             Path(build_env.__file__),
         )
     }
-    image_recipe, image_content = inputs_build.container_image_environment()
+    environment_recipe, environment_content = inputs_build.environment_identity()
     payload = {
         "recipe": recipe,
         "upstream": upstream,
@@ -274,8 +274,8 @@ def _host_tool_recipe(sources: dict[str, Any], recipe: dict[str, Any]) -> str:
         "compiler_environment": {
             name: os.environ[name] for name in _COMPILER_ENVIRONMENT if name in os.environ
         },
-        "image_recipe": image_recipe,
-        "image_content": image_content,
+        "environment_recipe": environment_recipe,
+        "environment_content": environment_content,
     }
     return sha256_bytes(canonical_json_bytes(payload))
 

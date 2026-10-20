@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 
 def _extract_packaging(archive: Path, destination: Path) -> None:
-    """Use the pure Python files from the same locked package as the quality image."""
+    """Use the pure Python files from the same locked package as the quality environment."""
     prefix = PurePosixPath("usr/lib/python3.14/site-packages")
     with tarfile.open(archive, "r:gz") as package:
         for member in package:
@@ -69,10 +69,10 @@ def host_pytest_environment(
                 for item in environment_inputs(workspace)
                 if item.key
                 in {
-                    "container:pytest",
-                    "container:iniconfig",
-                    "container:pluggy",
-                    "container:pygments",
+                    "environment:pytest",
+                    "environment:iniconfig",
+                    "environment:pluggy",
+                    "environment:pygments",
                 }
                 or re.fullmatch(r"py3-packaging-\d.*\.apk", Path(item.destination).name)
             ]

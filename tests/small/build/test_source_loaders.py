@@ -161,8 +161,8 @@ def loader_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> LoaderCh
     monkeypatch.setattr(common, "ROOT", tmp_path)
     monkeypatch.setattr(build_inputs, "CACHE", tmp_path / "cache")
     monkeypatch.setattr(build_process, "run", checkout.run)
-    monkeypatch.setenv("FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE", "a" * 64)
-    monkeypatch.setenv("FPLINUX_CONTAINER_IMAGE_CONTENT", "b" * 64)
+    monkeypatch.setenv("FPLINUX_ENVIRONMENT_RECIPE", "a" * 64)
+    monkeypatch.setenv("FPLINUX_ENVIRONMENT_CONTENT", "b" * 64)
     return checkout
 
 

@@ -8,7 +8,7 @@ import shutil
 from typing import TYPE_CHECKING
 
 import pytest
-from fplinux_cli.environment.image_content import image_content_digest
+from fplinux_cli.environment.image_content import image_content_digest, image_content_records
 
 from tests.small.artifacts.image_fixtures import installed_tree
 
@@ -20,13 +20,47 @@ class ImageContentTests:
     """Installed file changes are causal; operational path and time are not."""
 
     @staticmethod
+    def test_actual_records_describe_files_links_owners_and_modes(tmp_path: Path) -> None:
+        """The digest input preserves actual ownership, set-id modes and link targets."""
+        root = tmp_path
+        compiler = root / "usr/bin/cc"
+        compiler.parent.mkdir(parents=True)
+        (root / "usr").chmod(0o751)
+        compiler.parent.chmod(0o2750)
+        compiler.write_bytes(b"compiler\n")
+        compiler.chmod(0o4755)
+        (compiler.parent / "compiler").symlink_to("cc")
+        (root / "etc").mkdir(mode=0o755)
+        (root / "etc").chmod(0o755)
+        owner = {"uid": os.getuid(), "gid": os.getgid()}
+        assert image_content_records(root) == [
+            {"path": "etc", "mode": 0o755, "type": "directory", **owner},
+            {"path": "usr", "mode": 0o751, "type": "directory", **owner},
+            {"path": "usr/bin", "mode": 0o2750, "type": "directory", **owner},
+            {
+                "path": "usr/bin/cc",
+                "mode": 0o4755,
+                "type": "file",
+                "sha256": "850d9371d0ce2cb083d4075d7eec49f2f6f3c2bee5b58d0226b36028ae84efe0",
+                **owner,
+            },
+            {
+                "path": "usr/bin/compiler",
+                "mode": 0o777,
+                "type": "symlink",
+                "target": "cc",
+                **owner,
+            },
+        ]
+
+    @staticmethod
     def test_same_installed_content_ignores_location_time_and_generation(tmp_path: Path) -> None:
         """Two installations have one identity despite their invocation-specific state."""
         first = tmp_path / "first"
         second = tmp_path / "other-location"
         installed_tree(first)
         shutil.copytree(first, second, symlinks=True)
-        (second / "etc/fplinux-image-state").write_bytes(b"new operational generation\n")
+        (second / "etc/fplinux-environment-state").write_bytes(b"new operational generation\n")
         for relative in ("etc/hostname", "etc/hosts", "etc/resolv.conf"):
             (second / relative).write_bytes(b"runtime host data\n")
         os.utime(second / "usr/bin/cc", (1000000000, 1000000000))

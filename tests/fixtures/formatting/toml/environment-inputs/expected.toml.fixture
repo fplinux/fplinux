@@ -1,6 +1,26 @@
+[kern]
+version = "0.33.0"
+archive_url = "https://example.invalid/runtime"
+archive_sha256 = "archive-hash"
+binary_sha256 = "binary-hash"
+
+[base]
+release = "3.24.2"
+arch = "x86_64"
+url = "https://example.invalid/rootfs"
+sha256 = "base-hash"
+
 [selection]
 arch = "x86_64"
 apk_groups = [["z=1", "a=2"], ["b=3"]]
+
+[tools.node]
+version = "24.21.0"
+input = "source:node"
+
+[tools.sparse]
+commit = "source-commit"
+input = "source:sparse"
 
 [[input]]
 key = "wheel:z"

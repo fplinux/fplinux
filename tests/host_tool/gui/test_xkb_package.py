@@ -22,7 +22,7 @@ def test_packaged_rules_compile_us_and_ru_with_layout_switching(
 ) -> None:
     """Actual package functions install a self-contained rules-based keymap.
 
-    The pinned build image supplies upstream layout inputs. This executes the
+    The pinned build environment supplies upstream layout inputs. This executes the
     package functions and libxkbcommon on the host, without building APK archives
     or starting the compositor.
     """
