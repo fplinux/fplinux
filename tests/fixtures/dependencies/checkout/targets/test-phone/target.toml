@@ -1,7 +1,7 @@
 platform = "test-platform"
 
 [rootfs]
-packages = []
+packages = ["fplinux-bash", "fplinux-libtsm"]
 
 [bundle]
 packages = []

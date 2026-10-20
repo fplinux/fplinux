@@ -20,6 +20,12 @@ ARG VALE_GOOGLE_VERSION=0.7.0
 ARG VALE_GOOGLE_SHA256=a4d6458fef518d51e5e7e84445a066ce73075ca5b8bb71f0feabb344258a4059
 ARG LIBTSM_VERSION=4.8.0
 ARG LIBTSM_SHA256=50811e9e94fc798eb5dcbaff20f81067c942ec47f329f91bbe4caeb35a61ff05
+ARG LVGL_VERSION=9.6.0
+ARG LVGL_SHA256=b20ee3acc1bba13c62d854f9ebd62e4c51e0b443b1e0225892e86442defa84df
+ARG WESTON_VERSION=16.0.0
+ARG WESTON_SHA256=dfb32e2bccabda957b94a8d0ec6075acd18c71c87ebc543ee3e618d294ca0f7f
+ARG MESA_HEADERS_VERSION=26.1.6-r0
+ARG MESA_HEADERS_SHA256=fcd8e3caf92e1945e3301e7e0c9b38655956d3bcb20add990f33d85aaff244a1
 
 ENV LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
@@ -99,12 +105,12 @@ RUN set -eux; \
     if [ "${FPLINUX_OFFLINE}" != 1 ]; then \
         apk add --no-cache \
             abuild=3.17.0-r0 \
-            atools-go=0.6.1-r5 \
+            atools-go=0.6.1-r6 \
             build-base=0.5-r4 \
             clang22=22.1.3-r2 \
             linux-headers=7.0.0-r1 \
             lld22=22.1.3-r0 \
-            llvm22=22.1.3-r0; \
+            llvm22=22.1.3-r1; \
     fi; \
     adduser -D -u 1000 builder; \
     addgroup builder abuild
@@ -118,20 +124,27 @@ RUN set -eux; \
             bc=1.08.2-r1 \
             bison=3.8.2-r3 \
             clang22-analyzer=22.1.3-r2 \
+            clang22-dev=22.1.3-r2 \
             clang22-extra-tools=22.1.3-r2 \
             dtc=1.7.2-r1 \
             elfutils-dev=0.195-r0 \
             eudev-dev=3.2.14-r6 \
+            expat-dev=2.8.5-r0 \
             flex=2.6.4-r8 \
             glib-dev=2.88.1-r1 \
+            json-c-dev=0.18-r1 \
             libffi-dev=3.5.2-r1 \
             libevdev-dev=1.13.6-r0 \
             libusb-dev=1.0.30-r0 \
+            llvm22-dev=22.1.3-r1 \
             ncurses-dev=6.6_p20260516-r0 \
             openssl-dev=3.5.9-r0 \
+            pixman-dev=0.46.4-r0 \
+            spirv-llvm-translator-dev=22.1.0-r0 \
+            spirv-tools-dev=1.4.341.0-r0 \
             swig=4.4.1-r1 \
             xz-dev=5.8.4-r0 \
-            zlib-dev=1.3.2-r0; \
+            zlib-dev=1.3.2-r1; \
     fi
 
 RUN set -eux; \
@@ -139,6 +152,8 @@ RUN set -eux; \
         apk add --no-cache \
             py3-dt-schema=2025.12-r1 \
             py3-elftools=0.32-r1 \
+            py3-fonttools=4.60.1-r1 \
+            py3-mako=1.3.12-r0 \
             py3-mypy=1.19.1-r2 \
             py3-ruamel.yaml=0.19.1-r0 \
             python3=3.14.8-r0 \
@@ -337,8 +352,63 @@ RUN set -eux; \
             libjpeg-turbo-dev=3.1.3-r0 \
             libxkbcommon-dev=1.13.1-r0 \
             meson=1.11.1-r0 \
-            samurai=1.2-r8; \
+            samurai=1.2-r8 \
+            wayland-dev=1.25.0-r0 \
+            wayland-protocols=1.48-r0; \
     fi
+
+RUN set -eux; \
+    mkdir -p /opt/quality/include /tmp/gui-headers; \
+    archive=/tmp/gui-headers/lvgl.tar.gz; \
+    if [ "${FPLINUX_OFFLINE}" = 1 ]; then \
+        cp "/opt/fplinux-inputs/sources/lvgl/v${LVGL_VERSION}.tar.gz" "${archive}"; \
+    else \
+        curl -fsSL --retry 3 \
+            --output "${archive}" \
+            "https://github.com/lvgl/lvgl/archive/refs/tags/v${LVGL_VERSION}.tar.gz"; \
+    fi; \
+    printf '%s  %s\n' "${LVGL_SHA256}" "${archive}" | sha256sum -c -; \
+    tar -xzf "${archive}" -C /tmp/gui-headers; \
+    cp -R "/tmp/gui-headers/lvgl-${LVGL_VERSION}/include/lvgl" /opt/quality/include/; \
+    install -Dm0644 "${archive}" /opt/quality/src/lvgl.tar.gz; \
+    archive=/tmp/gui-headers/weston.tar.xz; \
+    if [ "${FPLINUX_OFFLINE}" = 1 ]; then \
+        cp "/opt/fplinux-inputs/sources/weston/weston-${WESTON_VERSION}.tar.xz" "${archive}"; \
+    else \
+        curl -fsSL --retry 3 \
+            --output "${archive}" \
+            "https://gitlab.freedesktop.org/wayland/weston/-/releases/${WESTON_VERSION}/downloads/weston-${WESTON_VERSION}.tar.xz"; \
+    fi; \
+    printf '%s  %s\n' "${WESTON_SHA256}" "${archive}" | sha256sum -c -; \
+    tar -xJf "${archive}" -C /tmp/gui-headers; \
+    weston_source="/tmp/gui-headers/weston-${WESTON_VERSION}"; \
+    weston_version="${WESTON_VERSION}"; \
+    weston_major="${weston_version%%.*}"; \
+    weston_release="${weston_version#*.}"; \
+    weston_minor="${weston_release%%.*}"; \
+    weston_micro="${weston_release#*.}"; \
+    header_dir="/opt/quality/include/libweston-${weston_major}/libweston"; \
+    mkdir -p "${header_dir}"; \
+    install -m 0644 "${weston_source}"/include/libweston/*.h "${header_dir}/"; \
+    sed -e "s/@WESTON_VERSION_MAJOR@/${weston_major}/g" \
+        -e "s/@WESTON_VERSION_MINOR@/${weston_minor}/g" \
+        -e "s/@WESTON_VERSION_MICRO@/${weston_micro}/g" \
+        -e "s/@WESTON_VERSION@/${WESTON_VERSION}/g" \
+        "${weston_source}/include/libweston/version.h.in" > "${header_dir}/version.h"; \
+    install -Dm0644 "${weston_source}/frontend/weston.h" /opt/quality/include/weston/weston.h; \
+    archive=/tmp/gui-headers/mesa-headers.apk; \
+    if [ "${FPLINUX_OFFLINE}" = 1 ]; then \
+        cp "/opt/fplinux-inputs/sources/mesa-headers/mesa-dev-${MESA_HEADERS_VERSION}.apk" "${archive}"; \
+    else \
+        curl -fsSL --retry 3 \
+            --output "${archive}" \
+            "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/mesa-dev-${MESA_HEADERS_VERSION}.apk"; \
+    fi; \
+    printf '%s  %s\n' "${MESA_HEADERS_SHA256}" "${archive}" | sha256sum -c -; \
+    tar --warning=no-unknown-keyword -xzf "${archive}" \
+        -C /opt/quality/include --strip-components=2 \
+        usr/include/EGL usr/include/GL usr/include/GLES2 usr/include/GLES3 usr/include/KHR; \
+    rm -rf /tmp/gui-headers
 
 COPY alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch /tmp/libtsm/function-keys.patch
 RUN set -eux; \
@@ -373,6 +443,8 @@ RUN set -eux; \
         > /usr/lib/pkgconfig/libtsm.pc; \
     rm -rf /tmp/libtsm; \
     pkg-config --modversion libtsm
+
+COPY inputs/quality/spreadtrum-flash/ /opt/quality/src/spreadtrum-flash/
 
 RUN rm -rf /opt/fplinux-inputs /root/.npm /var/log/apk.log
 

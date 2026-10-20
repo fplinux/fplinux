@@ -8,3 +8,11 @@ archive_sha256 = "55555555555555555555555555555555555555555555555555555555555555
 [host]
 archive_url = "https://example.invalid/host.tar.gz"
 archive_sha256 = "6666666666666666666666666666666666666666666666666666666666666666"
+[spreadtrum_flash]
+commit = "1111111111111111111111111111111111111111"
+archive_url = "https://example.invalid/spreadtrum-flash.tar.gz"
+archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+[spreadtrum_flash.files]
+makefile_sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+spd_dump_c_sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+spd_cmd_h_sha256 = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"

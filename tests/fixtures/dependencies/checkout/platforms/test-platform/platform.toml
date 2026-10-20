@@ -10,6 +10,7 @@ source_lock = "kernel"
 [bootstrap]
 vendor_source_lock = "support"
 vendor_cache_name = "support.tar.gz"
+backend = "ums9117"
 
 [[host.tools]]
 type = "make-archive"

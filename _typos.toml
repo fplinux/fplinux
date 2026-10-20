@@ -18,19 +18,31 @@ extend-ignore-re = [
 ]
 
 [default.extend-identifiers]
+# Keep the spelling required by TyrQuake's C interface.
+COM_CheckParm = "COM_CheckParm"
+# This field name is part of the phone's original radio configuration.
+CoexExcutionMode = "CoexExcutionMode"
 FPLinux = "FPLinux"
 KEY_ALS_TOGGLE = "KEY_ALS_TOGGLE"
 MKE2FS = "MKE2FS"
 MMIO = "MMIO"
+MODULE_PARM_DESC = "MODULE_PARM_DESC"
+# SPDX NoDerivatives license suffix.
+ND = "ND"
+PNGs = "PNGs"
 PnP = "PnP"
 PnPDeviceID = "PnPDeviceID"
 SC2720_AUD_CLK_PN_MASK = "SC2720_AUD_CLK_PN_MASK"
 SC2720_AUD_CLK_PN_VALUE = "SC2720_AUD_CLK_PN_VALUE"
 UMS9117 = "UMS9117"
 WIPHY_FLAG_HAVE_AP_SME = "WIPHY_FLAG_HAVE_AP_SME"
+_paeth = "_paeth"
+# ARM AND instruction that updates condition flags.
+ands = "ands"
 gl_pathc = "gl_pathc"
 ki_filp = "ki_filp"
 mke2fs = "mke2fs"
+msg_controllen = "msg_controllen"
 parm = "parm"
 # This spelling is part of Linux's power_supply_desc interface.
 property_is_writeable = "property_is_writeable"
@@ -48,3 +60,45 @@ mis = "mis"
 mke = "mke"
 musl = "musl"
 thm = "thm"
+
+[type.adi-fixture]
+extend-glob = ["spi-sprd-adi.c.fixture"]
+
+[type.adi-fixture.extend-words]
+# Keep the unmodified source fixture's spelling.
+sigle = "sigle"
+
+[type.efuse-fixture]
+extend-glob = ["sprd-efuse.c.fixture"]
+
+[type.efuse-fixture.extend-identifiers]
+# Preserve identifiers in the unmodified source fixture.
+doub = "doub"
+
+[type.notice]
+extend-glob = ["NOTICE"]
+
+[type.notice.extend-words]
+# Preserve names and spelling in required third-party notices.
+Calle = "Calle"
+Collet = "Collet"
+Corpoation = "Corpoation"
+
+[type.sprd-dma-header]
+extend-glob = ["sprd-dma.h"]
+
+[type.sprd-dma-header.extend-words]
+# Preserve comments in the copied Linux header.
+tansaction = "tansaction"
+tansfer = "tansfer"
+
+[type.qin-loader-patch]
+extend-glob = ["u-boot.patch"]
+
+[type.qin-loader-patch.extend-identifiers]
+# Patch context retains the existing function name.
+pmu_commom_config = "pmu_commom_config"
+
+[type.qin-loader-patch.extend-words]
+# Pin names abbreviate external interrupt.
+EXTINT = "EXTINT"

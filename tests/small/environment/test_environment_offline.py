@@ -33,6 +33,28 @@ def _environment_checkout(root: Path) -> None:
     source_bytes = b"tool source\n"
     npm_bytes = b"npm package\n"
     apk_bytes = b"signed package fixture\n"
+    uploader_files = {
+        "Makefile": b"all:\n\t@true\n",
+        "spd_dump.c": b"int main(void) { return 0; }\n",
+        "spd_cmd.h": b"#define ACK 0x80\n",
+    }
+    source_stream = io.BytesIO()
+    with tarfile.open(fileobj=source_stream, mode="w:gz") as archive:
+        for name, contents in {**uploader_files, "unselected.txt": b"not consumed\n"}.items():
+            member = tarfile.TarInfo(f"spreadtrum_flash-{'1' * 40}/{name}")
+            member.size = len(contents)
+            archive.addfile(member, io.BytesIO(contents))
+    uploader_archive = source_stream.getvalue()
+    (root / "sources.lock.toml").write_text(
+        (_FIXTURES / "spreadtrum-source.lock.toml.in.fixture")
+        .read_text()
+        .format(
+            archive_sha256=hashlib.sha256(uploader_archive).hexdigest(),
+            makefile_sha256=hashlib.sha256(uploader_files["Makefile"]).hexdigest(),
+            spd_dump_c_sha256=hashlib.sha256(uploader_files["spd_dump.c"]).hexdigest(),
+            spd_cmd_h_sha256=hashlib.sha256(uploader_files["spd_cmd.h"]).hexdigest(),
+        )
+    )
     (root / ".kernignore").write_bytes((_FIXTURES / ".kernignore.fixture").read_bytes())
     source_digest = hashlib.sha256(source_bytes).hexdigest()
     (root / "Containerfile").write_text(
@@ -71,6 +93,7 @@ def _environment_checkout(root: Path) -> None:
     npm_key = hashlib.sha256(b"https://example.invalid/example-1.0.0.tgz").hexdigest()[:16]
     files = {
         "downloads/environment/tool/tool.tar.gz": source_bytes,
+        "downloads/spreadtrum_flash.tar.gz": uploader_archive,
         f"downloads/npm/{npm_key}-example-1.0.0.tgz": npm_bytes,
         "downloads/environment/apk/main/x86_64/tool-1.0-r0.apk": apk_bytes,
         "private/phone-state": b"private fixture\n",
@@ -234,8 +257,53 @@ class OfflineEnvironmentContextTests:
             assert ((context / "inputs/apk/main/x86_64/tool-1.0-r0.apk").read_bytes()) == (
                 b"signed package fixture\n"
             )
+            projection = context / "inputs/quality/spreadtrum-flash"
+            assert (projection / "Makefile").read_bytes() == b"all:\n\t@true\n"
+            assert (projection / "spd_dump.c").read_bytes() == b"int main(void) { return 0; }\n"
+            assert (projection / "spd_cmd.h").read_bytes() == b"#define ACK 0x80\n"
+            assert not (projection / "unselected.txt").exists()
             assert not ((context / ".cache").exists())
             assert not ((context / "inputs/private").exists())
+
+    def test_missing_uploader_source_fails_offline_without_network(self, tmp_path: Path) -> None:
+        """The source projection requires its archive even when other inputs are saved."""
+        root = tmp_path / "checkout"
+        context = tmp_path / "context"
+        root.mkdir()
+        context.mkdir()
+        _environment_checkout(root)
+        (root / ".cache/downloads/spreadtrum_flash.tar.gz").unlink()
+
+        with (
+            mock.patch.object(env_setup, "ROOT", root),
+            mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")),
+            pytest.raises(SystemExit, match=r"offline locked input.*spreadtrum_flash.tar.gz"),
+        ):
+            env_setup._stage_container_context(context, offline=True)  # noqa: SLF001
+
+        assert not (context / "inputs/quality/spreadtrum-flash").exists()
+
+    def test_uploader_member_mismatch_rejects_the_image_source_projection(
+        self, tmp_path: Path
+    ) -> None:
+        """Archive integrity does not replace the locked checksum of each consumed source file."""
+        root = tmp_path / "checkout"
+        context = tmp_path / "context"
+        root.mkdir()
+        context.mkdir()
+        _environment_checkout(root)
+        source_lock = root / "sources.lock.toml"
+        source_lock.write_text(
+            source_lock.read_text().replace(
+                hashlib.sha256(b"int main(void) { return 0; }\n").hexdigest(), "b" * 64
+            )
+        )
+
+        with (
+            mock.patch.object(env_setup, "ROOT", root),
+            pytest.raises(SystemExit, match=r"host source hash mismatch: spd_dump\.c"),
+        ):
+            env_setup._stage_container_context(context, offline=True)  # noqa: SLF001
 
     def test_missing_declared_environment_input_names_the_exact_source(self) -> None:
         """Offline staging stops with the requested URL instead of silently omitting a source."""
@@ -364,3 +432,29 @@ class OfflineEnvironmentContextTests:
                     environment_lock.read_text().replace("tool-1.0", "tool-1.1")
                 )
                 assert (images.container_image_recipe_digest(lock)) != (original)
+
+    def test_image_recipe_tracks_consumed_uploader_source_and_ignores_other_members(
+        self, tmp_path: Path
+    ) -> None:
+        """Only the selected uploader projection changes the image's source identity."""
+        lock = {
+            "kern": {"binary_sha256": "c" * 64},
+            "oci": {
+                "base_repository": "localhost/fplinux-alpine-base",
+                "base_release": "3.24.2",
+                "base_rootfs_sha256": "d" * 64,
+            },
+        }
+        _environment_checkout(tmp_path)
+        source_lock = tmp_path / "sources.lock.toml"
+
+        with mock.patch.object(common, "ROOT", tmp_path):
+            original = images.container_image_recipe_digest(lock)
+            source_lock.write_text(source_lock.read_text().replace("a" * 64, "e" * 64))
+            assert images.container_image_recipe_digest(lock) == original
+            source_lock.write_text(
+                source_lock.read_text().replace(
+                    hashlib.sha256(b"int main(void) { return 0; }\n").hexdigest(), "b" * 64
+                )
+            )
+            assert images.container_image_recipe_digest(lock) != original

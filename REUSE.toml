@@ -89,6 +89,13 @@ precedence = "override"
 SPDX-FileCopyrightText = "2005-2020 Rich Felker, et al."
 SPDX-License-Identifier = "MIT"
 
+# Embedded identifiers describe quoted upstream notices, not this collection.
+[[annotations]]
+path = "alpine/aports/fplinux-mesa/NOTICE"
+precedence = "override"
+SPDX-FileCopyrightText = "2026 FPLinux contributors"
+SPDX-License-Identifier = "GPL-2.0-only"
+
 [[annotations]]
 path = "platforms/ums9117/bootstrap/build/ums9117-linux.ld"
 precedence = "override"
@@ -100,3 +107,29 @@ path = "targets/*/bootstrap/lcd_config.h"
 precedence = "override"
 SPDX-FileCopyrightText = "fpdoom contributors"
 SPDX-License-Identifier = "Unlicense"
+
+# Preserve original fixture bytes and express their license with its current identifier.
+[[annotations]]
+path = [
+  "tests/host_tool/sc27xx/rtc-sc27xx.c.fixture",
+  "tests/host_tool/sc27xx/sc2731-regulator.c.fixture",
+  "tests/host_tool/sc9820e/poweroff/spi-sprd-adi.c.fixture",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2017 Spreadtrum Communications Inc."
+SPDX-License-Identifier = "GPL-2.0-only"
+
+[[annotations]]
+path = "tests/host_tool/sc27xx/efuse/sprd-efuse.c.fixture"
+precedence = "override"
+SPDX-FileCopyrightText = "2019 Spreadtrum Communications Inc."
+SPDX-License-Identifier = "GPL-2.0-only"
+
+[[annotations]]
+path = "tests/host_tool/sc9820e/clocks/gpio-source/gpio-sprd.c.fixture"
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "2018 Spreadtrum Communications Inc.",
+  "2018 Linaro Ltd.",
+]
+SPDX-License-Identifier = "GPL-2.0-only"

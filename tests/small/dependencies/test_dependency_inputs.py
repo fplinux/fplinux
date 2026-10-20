@@ -13,11 +13,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 from fplinux_cli import common
+from fplinux_cli.alpine import registration as alpine_registration
 from fplinux_cli.cli import dependencies as dependency_cli
 from fplinux_cli.dependencies.inputs import (
     DependencyInput,
     dependency_selection,
     environment_inputs,
+    npm_declarations,
 )
 
 if TYPE_CHECKING:
@@ -41,8 +43,14 @@ _FIXTURES = Path(__file__).parents[2] / "fixtures/dependencies"
 
 
 @pytest.fixture
-def dependency_checkout() -> Iterator[DependencyCheckout]:
-    """Prepare a synthetic checkout with literal external declarations."""
+def dependency_checkout(monkeypatch: pytest.MonkeyPatch) -> Iterator[DependencyCheckout]:
+    """Own the synthetic package graph and its literal external declarations."""
+    monkeypatch.setattr(alpine_registration, "COMMON_PACKAGES", ("fplinux-base",))
+    monkeypatch.setattr(
+        alpine_registration,
+        "LOCAL_BUILD_DEPENDENCIES",
+        {"fplinux-bash": ("fplinux-ncurses", "fplinux-readline")},
+    )
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         shutil.copytree(_FIXTURES / "checkout", root, dirs_exist_ok=True)
@@ -68,16 +76,9 @@ def dependency_checkout() -> Iterator[DependencyCheckout]:
         for package in (
             "fplinux-base",
             "fplinux-bash",
-            "fplinux-busybox",
             "fplinux-ncurses",
-            "fplinux-openrc",
             "fplinux-readline",
-            "fplinux-terminal",
-            "fplinux-input",
-            "fplinux-libdrm",
             "fplinux-libtsm",
-            "fplinux-libudev",
-            "fplinux-libxkbcommon",
         ):
             checkout.write(
                 f"alpine/aports/{package}/APKBUILD",
@@ -88,6 +89,121 @@ def dependency_checkout() -> Iterator[DependencyCheckout]:
 
 class DependencyInputTests:
     """Keep downloads bound to their original checksum and consumer cache path."""
+
+    def test_source_built_loaders_select_their_three_archives_without_ums_assets(
+        self, dependency_checkout: DependencyCheckout
+    ) -> None:
+        """Offline preparation receives the three source archives consumed by the SC builder."""
+        platform = dependency_checkout.root / "platforms/test-platform/platform.toml"
+        platform.write_text(
+            platform.read_text(encoding="utf-8")
+            .replace('backend = "ums9117"', 'backend = "sc9820e"')
+            .replace('vendor_source_lock = "support"\n', "")
+            .replace('vendor_cache_name = "support.tar.gz"\n', ""),
+            encoding="utf-8",
+        )
+        (dependency_checkout.root / "platforms/test-platform/loader/assets.lock.toml").unlink()
+        source_fixture = _FIXTURES.parent / "sc9820e-manifest"
+        target = dependency_checkout.root / "targets/test-phone/target.toml"
+        target.write_text(
+            (source_fixture / "target.toml")
+            .read_text(encoding="utf-8")
+            .replace('platform = "sc9820e"', 'platform = "test-platform"'),
+            encoding="utf-8",
+        )
+        with (dependency_checkout.root / "sources.lock.toml").open("ab") as lock:
+            lock.write(b"\n")
+            lock.write((source_fixture / "sources.lock.toml").read_bytes())
+
+        inputs, context = dependency_selection(dependency_checkout.root)
+
+        assert not any(record.purpose in {"bootstrap-source", "loader-asset"} for record in inputs)
+        actual = {record.key: record for record in inputs}
+        assert actual["source:kernel:linux"].url == "https://example.invalid/linux.tar.xz"
+        assert actual["source:host:host"].destination == "downloads/host.tar.gz"
+        loader_inputs = {
+            record.key: record for record in inputs if record.purpose == "loader-source"
+        }
+        assert set(loader_inputs) == {
+            "source:chipram:loader",
+            "source:u_boot:loader",
+            "source:trusted_firmware:loader",
+        }
+        assert (
+            loader_inputs["source:chipram:loader"].url == "https://example.invalid/chipram.tar.gz"
+        )
+        assert loader_inputs["source:u_boot:loader"].sha256 == "e" * 64
+        assert loader_inputs["source:trusted_firmware:loader"].destination == (
+            "downloads/loaders/trusted_firmware.tar.gz"
+        )
+        assets = context["assets"]
+        assert isinstance(assets, dict)
+        selected_assets = assets["test-phone"]
+        assert isinstance(selected_assets, list)
+        assert {record["role"] for record in selected_assets} == {
+            "fdl1",
+            "fdl2",
+            "sml",
+        }
+
+    def test_quality_uploader_uses_the_existing_exact_source_projection(
+        self, dependency_checkout: DependencyCheckout
+    ) -> None:
+        """Offline quality inputs retain the pinned uploader archive without a second lock."""
+        records = {record.key: record for record in environment_inputs(dependency_checkout.root)}
+
+        assert records["container:spreadtrum-flash"] == DependencyInput(
+            key="container:spreadtrum-flash",
+            url="https://example.invalid/spreadtrum-flash.tar.gz",
+            sha256="a" * 64,
+            size=None,
+            destination="downloads/spreadtrum_flash.tar.gz",
+            purpose="quality-source",
+            arch="x86_64",
+        )
+
+    def test_bundled_npm_dependencies_keep_context_and_use_the_exact_parent_archive(self) -> None:
+        """Direct and transitive bundled files are restored by their pinned package archive."""
+        context, inputs = npm_declarations(
+            _FIXTURES / "bundled-package-lock.json",
+            key_prefix="npm",
+            cache_directory="downloads/npm",
+            purpose="npm-package",
+        )
+
+        assert len(inputs) == 1
+        assert inputs[0].key == "npm:node_modules/tool"
+        assert inputs[0].url == "https://example.invalid/tool-1.0.0.tgz"
+        assert inputs[0].sha256 == "11" * 32
+        packages = context["packages"]
+        assert isinstance(packages, dict)
+        assert packages["node_modules/tool"]["bundleDependencies"] == ["parser"]
+        assert packages["node_modules/tool/node_modules/parser"] == {
+            "version": "2.0.0",
+            "inBundle": True,
+            "dependencies": {"helper": "3.0.0"},
+        }
+        assert packages["node_modules/tool/node_modules/parser/node_modules/helper"] == {
+            "version": "3.0.0",
+            "inBundle": True,
+        }
+
+    @pytest.mark.parametrize("bundled", [False, True], ids=("missing-normal-pin", "orphan-bundle"))
+    def test_unpinned_npm_package_cannot_be_admitted_without_a_pinned_owner(
+        self, tmp_path: Path, *, bundled: bool
+    ) -> None:
+        """A missing ordinary registry pin and an unowned bundle both remain errors."""
+        lock = tmp_path / "package-lock.json"
+        lock.write_text(
+            json.dumps(
+                {"packages": {"node_modules/other": {"version": "1", "inBundle": bundled}}}
+            ),
+            encoding="utf-8",
+        )
+        with pytest.raises(SystemExit, match=r"no exact .*registry input"):
+            npm_declarations(
+                lock, key_prefix="npm", cache_directory="downloads/npm", purpose="npm-package"
+            )
 
     def test_downloads_retain_native_checksums_and_consumer_destinations(
         self, dependency_checkout: DependencyCheckout
@@ -161,17 +277,10 @@ class DependencyInputTests:
         _, after = dependency_selection(dependency_checkout.root)
         assert (after) == (before)
 
-    def test_platform_loader_pin_changes_download_selection_without_losing_board_assets(
+    def test_platform_loader_pin_changes_download_selection_and_archive_context(
         self, dependency_checkout: DependencyCheckout
     ) -> None:
-        """Shared loader changes reach the dependency archive alongside board-owned pins."""
-        target = dependency_checkout.root / "targets/test-phone/target.toml"
-        with target.open("a", encoding="utf-8") as output:
-            output.write(
-                "\n[loader_maps]\n"
-                f'pinmap = {{member = "phone/pinmap.bin", sha256 = "{"9" * 64}"}}\n'
-                f'keymap = {{member = "phone/keymap.bin", sha256 = "{"0" * 64}"}}\n'
-            )
+        """Changing the loader source pin invalidates the dependency archive selection."""
         declaration = (
             dependency_checkout.root / "platforms/test-platform/loader/assets.lock.toml"
         ).read_text()
@@ -187,21 +296,13 @@ class DependencyInputTests:
         assert before["asset:test-phone:fdl1"].sha256 == "7" * 64
         assert after["asset:test-phone:fdl1"].sha256 == "a" * 64
         assert after["asset:test-phone:fdl1"].destination == "downloads/loader.bin"
-        assert after["asset:test-phone:maps"] == before["asset:test-phone:maps"]
         assets = after_context["assets"]
         assert isinstance(assets, dict)
-        assert assets["test-phone"][1]["output"] == [
+        assert assets["test-phone"][0]["output"] == [
             {
-                "role": "pinmap",
-                "path": "pinmap.bin",
-                "member": "phone/pinmap.bin",
-                "sha256": "9" * 64,
-            },
-            {
-                "role": "keymap",
-                "path": "keymap.bin",
-                "member": "phone/keymap.bin",
-                "sha256": "0" * 64,
+                "role": "fdl1",
+                "path": "loader.bin",
+                "sha256": "a" * 64,
             },
         ]
         assert before_context != after_context

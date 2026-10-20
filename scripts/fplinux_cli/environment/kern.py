@@ -7,17 +7,46 @@ import os
 import re
 import secrets
 import shutil
+import sys
 import tarfile
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.common import ROOT, fail, sha256_file
 
 from .downloads import download_locked_file
 from .images import load_container_lock
 
+if TYPE_CHECKING:
+    from fplinux_cli.reporting.run import Stage
+
 KERN_PROBE_TIMEOUT = 60
+
+_KERN_MEMORY_LIMIT_DIAGNOSTIC = (
+    b"kern: the workload was killed by the kernel's OOM killer against this box's own memory cap."
+)
+
+
+def report_kern_memory_failure(stage: Stage, *, memory_mib: int, advice: str) -> None:
+    """Explain a confirmed Kern memory-limit failure without retaining workload output."""
+    overlap = b""
+    try:
+        with stage.log_path.open("rb") as log:
+            while chunk := log.read(64 * 1024):
+                window = overlap + chunk
+                if _KERN_MEMORY_LIMIT_DIAGNOSTIC in window:
+                    break
+                overlap = window[-(len(_KERN_MEMORY_LIMIT_DIAGNOSTIC) - 1) :]
+            else:
+                return
+    except OSError:
+        return
+    message = f"fplinux: Kern memory limit reached ({memory_mib} MiB)."
+    if advice:
+        message += " " + advice
+    stage.write((message + "\n").encode())
+    print(message, file=sys.stderr, flush=True)
 
 
 def ensure_project_directory(path: Path) -> Path:

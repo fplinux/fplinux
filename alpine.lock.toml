@@ -16,8 +16,9 @@ bytes = 3180242
 packages = [
   "busybox-ifupdown-1.37.0-r31.apk",
   "libcap2-2.78-r0.apk",
+  "libgcc-15.2.0-r5.apk",
   "openssh-sftp-server-10.3_p1-r1.apk",
-  "zlib-1.3.2-r0.apk",
+  "zlib-1.3.2-r1.apk",
 ]
 
 [runtime.additions]
@@ -25,11 +26,27 @@ fplinux-bluetooth = [
   "dbus-1.16.2-r2.apk",
   "dbus-libs-1.16.2-r2.apk",
   "dbus-openrc-1.16.2-r2.apk",
-  "libexpat-2.8.4-r0.apk",
-  "libgcc-15.2.0-r5.apk",
+  "libexpat-2.9.0-r0.apk",
   "ncurses-terminfo-base-6.6_p20260516-r0.apk",
 ]
+fplinux-debug-tools = [
+  "libbz2-1.0.8-r6.apk",
+  "libdw-0.195-r0.apk",
+  "libelf-0.195-r0.apk",
+  "musl-fts-1.2.7-r7.apk",
+  "strace-6.19-r1.apk",
+  "xz-libs-5.8.4-r0.apk",
+  "zstd-libs-1.5.7-r2.apk",
+]
 fplinux-input = ["libevdev-1.13.6-r0.apk"]
+fplinux-libweston = [
+  "libdisplay-info-0.3.0-r0.apk",
+  "libevdev-1.13.6-r0.apk",
+  "libinput-libs-1.31.3-r0.apk",
+  "mtdev-1.1.7-r0.apk",
+  "pixman-0.46.4-r0.apk",
+]
+fplinux-mesa = ["libexpat-2.9.0-r0.apk", "libstdc++-15.2.0-r5.apk"]
 fplinux-microsd-root = [
   "cloud-utils-growpart-0.33-r1.apk",
   "e2fsprogs-libs-1.47.4-r0.apk",
@@ -37,7 +54,6 @@ fplinux-microsd-root = [
   "libcom_err-1.47.4-r0.apk",
   "libeconf-0.8.3-r0.apk",
   "libfdisk-2.42.3-r1.apk",
-  "libgcc-15.2.0-r5.apk",
   "libncursesw-6.6_p20260516-r0.apk",
   "libsmartcols-2.42.3-r1.apk",
   "libuuid-2.42.3-r1.apk",
@@ -45,15 +61,17 @@ fplinux-microsd-root = [
   "partx-2.42.3-r1.apk",
   "sfdisk-2.42.3-r1.apk",
 ]
-fplinux-terminal = ["ncurses-terminfo-base-6.6_p20260516-r0.apk"]
+fplinux-ncurses = ["ncurses-terminfo-base-6.6_p20260516-r0.apk"]
+fplinux-session = ["json-c-0.18-r1.apk"]
 fplinux-uclient = ["ca-certificates-bundle-20260909-r0.apk"]
+fplinux-ui = ["json-c-0.18-r1.apk"]
+fplinux-wayland = ["libffi-3.5.2-r1.apk"]
 fplinux-wifi = [
   "dbus-libs-1.16.2-r2.apk",
   "hostapd-2.11-r4.apk",
   "iw-6.17-r0.apk",
   "libcrypto3-3.5.9-r0.apk",
-  "libexpat-2.8.4-r0.apk",
-  "libgcc-15.2.0-r5.apk",
+  "libexpat-2.9.0-r0.apk",
   "libnl3-3.11.0-r0.apk",
   "libssl3-3.5.9-r0.apk",
   "pcsc-lite-libs-2.4.0-r4.apk",
@@ -64,13 +82,17 @@ fplinux-wifi = [
 [sysroot]
 packages = [
   "binutils-2.45.1-r1.apk",
+  "brotli-libs-1.2.0-r1.apk",
   "bsd-compat-headers-0.7.2-r6.apk",
   "busybox-1.37.0-r31.apk",
   "busybox-binsh-1.37.0-r31.apk",
+  "c-ares-1.34.8-r0.apk",
+  "ca-certificates-bundle-20260909-r0.apk",
   "dbus-1.16.2-r2.apk",
   "dbus-dev-1.16.2-r2.apk",
   "dbus-libs-1.16.2-r2.apk",
   "e2fsprogs-libs-1.47.4-r0.apk",
+  "elfutils-dev-0.195-r0.apk",
   "eudev-dev-3.2.14-r6.apk",
   "eudev-libs-3.2.14-r6.apk",
   "gcc-15.2.0-r5.apk",
@@ -79,15 +101,24 @@ packages = [
   "jansson-2.15.0-r0.apk",
   "json-c-0.18-r1.apk",
   "json-c-dev-0.18-r1.apk",
+  "libasm-0.195-r0.apk",
   "libatomic-15.2.0-r5.apk",
+  "libbz2-1.0.8-r6.apk",
   "libcap-dev-2.78-r0.apk",
   "libcap2-2.78-r0.apk",
   "libcom_err-1.47.4-r0.apk",
+  "libcrypto3-3.5.9-r0.apk",
+  "libcurl-8.22.0-r0.apk",
+  "libdebuginfod-0.195-r0.apk",
+  "libdisplay-info-0.3.0-r0.apk",
+  "libdisplay-info-dev-0.3.0-r0.apk",
+  "libdw-0.195-r0.apk",
   "libedit-20260508.3.1-r1.apk",
   "libedit-dev-20260508.3.1-r1.apk",
+  "libelf-0.195-r0.apk",
   "libevdev-1.13.6-r0.apk",
   "libevdev-dev-1.13.6-r0.apk",
-  "libexpat-2.8.4-r0.apk",
+  "libexpat-2.9.0-r0.apk",
   "libffi-3.5.2-r1.apk",
   "libffi-dev-3.5.2-r1.apk",
   "libformw-6.6_p20260516-r0.apk",
@@ -95,15 +126,20 @@ packages = [
   "libgcc-static-15.2.0-r5.apk",
   "libgomp-15.2.0-r5.apk",
   "libhistory-8.3.3-r1.apk",
+  "libidn2-2.3.8-r0.apk",
   "libinput-dev-1.31.3-r0.apk",
   "libinput-libs-1.31.3-r0.apk",
   "libmenuw-6.6_p20260516-r0.apk",
   "libncurses++-6.6_p20260516-r0.apk",
   "libncursesw-6.6_p20260516-r0.apk",
   "libpanelw-6.6_p20260516-r0.apk",
-  "libpcre2-16-10.48-r0.apk",
-  "libpcre2-32-10.48-r0.apk",
+  "libpcre2-16-10.49-r0.apk",
+  "libpcre2-32-10.49-r0.apk",
+  "libpsl-0.21.5-r3.apk",
+  "libssl3-3.5.9-r0.apk",
   "libstdc++-15.2.0-r5.apk",
+  "libstdc++-dev-15.2.0-r5.apk",
+  "libunistring-1.4.2-r0.apk",
   "linux-headers-7.0.0-r1.apk",
   "mbedtls3-3.6.7-r0.apk",
   "mbedtls3-dev-3.6.7-r0.apk",
@@ -113,12 +149,16 @@ packages = [
   "mtdev-dev-1.1.7-r0.apk",
   "musl-1.2.6-r2.apk",
   "musl-dev-1.2.6-r2.apk",
+  "musl-fts-1.2.7-r7.apk",
   "musl-libintl-1.2.6-r2.apk",
   "ncurses-dev-6.6_p20260516-r0.apk",
   "ncurses-terminfo-base-6.6_p20260516-r0.apk",
-  "pcre2-10.48-r0.apk",
-  "pcre2-dev-10.48-r0.apk",
-  "pcre2-static-10.48-r0.apk",
+  "nghttp2-libs-1.70.0-r0.apk",
+  "pcre2-10.49-r0.apk",
+  "pcre2-dev-10.49-r0.apk",
+  "pcre2-static-10.49-r0.apk",
+  "pixman-0.46.4-r0.apk",
+  "pixman-dev-0.46.4-r0.apk",
   "pkgconf-2.5.1-r0.apk",
   "readline-8.3.3-r1.apk",
   "readline-dev-8.3.3-r1.apk",
@@ -128,9 +168,14 @@ packages = [
   "utmps-dev-0.1.3.3-r0.apk",
   "utmps-libs-0.1.3.3-r0.apk",
   "utmps-static-0.1.3.3-r0.apk",
-  "zlib-1.3.2-r0.apk",
-  "zlib-dev-1.3.2-r0.apk",
-  "zlib-static-1.3.2-r0.apk",
+  "xz-5.8.4-r0.apk",
+  "xz-dev-5.8.4-r0.apk",
+  "xz-libs-5.8.4-r0.apk",
+  "zlib-1.3.2-r1.apk",
+  "zlib-dev-1.3.2-r1.apk",
+  "zlib-static-1.3.2-r1.apk",
+  "zstd-1.5.7-r2.apk",
+  "zstd-dev-1.5.7-r2.apk",
   "zstd-libs-1.5.7-r2.apk",
 ]
 
@@ -139,6 +184,12 @@ repository = "main"
 file = "binutils-2.45.1-r1.apk"
 sha256 = "a26ba698213c0509afb7444beaeae1f8d69dbe0d6bd336c1b8c180ae322fb284"
 bytes = 2805659
+
+[[package]]
+repository = "main"
+file = "brotli-libs-1.2.0-r1.apk"
+sha256 = "eb9af260fcb67dca8595dad7c76ff861725a0e95ee617cba1d9a701cd08b4572"
+bytes = 383502
 
 [[package]]
 repository = "main"
@@ -163,6 +214,12 @@ repository = "main"
 file = "busybox-ifupdown-1.37.0-r31.apk"
 sha256 = "d1df402b1fab015df50f6054960b29aa2da9f185cdad9b523f811c74d691948c"
 bytes = 1303
+
+[[package]]
+repository = "main"
+file = "c-ares-1.34.8-r0.apk"
+sha256 = "57cd8a73403e2da11d96183b15d54ed9f695803357614bde8239ea88d16d555e"
+bytes = 88689
 
 [[package]]
 repository = "main"
@@ -205,6 +262,12 @@ repository = "main"
 file = "e2fsprogs-libs-1.47.4-r0.apk"
 sha256 = "f010f72c1b83c3ab7abaed0dd4a195c44049a75dfe1cc42c1dec4e8748b7852d"
 bytes = 196530
+
+[[package]]
+repository = "main"
+file = "elfutils-dev-0.195-r0.apk"
+sha256 = "f953e09a9fdd41f830367b7998b810770bbd2b3304a358b961040a8d1ccf2a11"
+bytes = 456983
 
 [[package]]
 repository = "main"
@@ -268,6 +331,12 @@ bytes = 63447
 
 [[package]]
 repository = "main"
+file = "libasm-0.195-r0.apk"
+sha256 = "8534ff1acc78d6a93a0f2efea617dd3b2f2b0478272a4bf9f8fc0ced835b2fba"
+bytes = 12399
+
+[[package]]
+repository = "main"
 file = "libatomic-15.2.0-r5.apk"
 sha256 = "f4e32956cf9d353f6b6f1c1e570a896eb7934047c635c89f6a12ec599befbeeb"
 bytes = 7897
@@ -277,6 +346,12 @@ repository = "main"
 file = "libblkid-2.42.3-r1.apk"
 sha256 = "48a6d0a7415a1d0094ba136243d5b0472f815cf95193c66f00d8a521ae651eae"
 bytes = 95637
+
+[[package]]
+repository = "main"
+file = "libbz2-1.0.8-r6.apk"
+sha256 = "48fca2fa2942653900a94deeac8119bdd8c404c6f97fa03be1a6eb3dbafec244"
+bytes = 30168
 
 [[package]]
 repository = "main"
@@ -304,6 +379,36 @@ bytes = 1554077
 
 [[package]]
 repository = "main"
+file = "libcurl-8.22.0-r0.apk"
+sha256 = "8db19c9dbd2ed2efb23a782b7589988c3533aa12dbd444fad11570a487916e06"
+bytes = 317202
+
+[[package]]
+repository = "main"
+file = "libdebuginfod-0.195-r0.apk"
+sha256 = "1d32fd2a2b9e9ecbde8636de0e51141ce165a140468be67e71bb8a2a50c2752b"
+bytes = 29949
+
+[[package]]
+repository = "main"
+file = "libdisplay-info-0.3.0-r0.apk"
+sha256 = "66e04383e0e04dadc19918afd43abfa63fbbf0e6fbf5c9366e69ac9f686110d6"
+bytes = 84745
+
+[[package]]
+repository = "main"
+file = "libdisplay-info-dev-0.3.0-r0.apk"
+sha256 = "81ccf63e2b6960696a9d9723e634761d624e76a82597563d6f9e5133f01c2266"
+bytes = 26405
+
+[[package]]
+repository = "main"
+file = "libdw-0.195-r0.apk"
+sha256 = "f9ecca23d1d59d5d1050c9728abe06d6f40875b290c6014ffe39be6d489e2834"
+bytes = 220203
+
+[[package]]
+repository = "main"
 file = "libeconf-0.8.3-r0.apk"
 sha256 = "1ced9b481d9c0a6e1ce6e04650a13da1e45c9cadb655efe6c8b17c595d764bd7"
 bytes = 23664
@@ -321,6 +426,12 @@ sha256 = "f77cad3949c05230839f65cadee6baa4b06590469cfd7f4eee738a715050bb54"
 bytes = 7759
 
 [[package]]
+repository = "main"
+file = "libelf-0.195-r0.apk"
+sha256 = "2e95cdcc780c3edd5eb73be737291833ff8f58526526b0614ef71bb639ed5993"
+bytes = 39054
+
+[[package]]
 repository = "community"
 file = "libevdev-1.13.6-r0.apk"
 sha256 = "017c137a549ca1aa9b943011cf7f1d32c4efe1ef9cef4ce1e9c46bc7bb2efddf"
@@ -334,9 +445,9 @@ bytes = 23211
 
 [[package]]
 repository = "main"
-file = "libexpat-2.8.4-r0.apk"
-sha256 = "54dc11612ece68f67d98b67d0fa75c82c18bcbbd3a878493a80228ccbd7911f9"
-bytes = 52472
+file = "libexpat-2.9.0-r0.apk"
+sha256 = "8d72afa72dd7e527507410ac3cf2fa7d2adb619a9dc21faa5bd634e51f20a840"
+bytes = 53162
 
 [[package]]
 repository = "main"
@@ -387,6 +498,12 @@ sha256 = "0784268e8fcd3bd0642731562ad0b899a5a91fd33002e997c541b228705bc791"
 bytes = 17778
 
 [[package]]
+repository = "main"
+file = "libidn2-2.3.8-r0.apk"
+sha256 = "8dc90ddd918c88641fe07ead0412f4465a11aa1ca58e94a36bbecb29c4425c67"
+bytes = 100529
+
+[[package]]
 repository = "community"
 file = "libinput-dev-1.31.3-r0.apk"
 sha256 = "d7b58b1d0bd68f78d3f8ff49f4fc7e0923c0d42494c8fc0842de6a817f08add3"
@@ -430,15 +547,21 @@ bytes = 5031
 
 [[package]]
 repository = "main"
-file = "libpcre2-16-10.48-r0.apk"
-sha256 = "5c913685d48cb0f31f6241a79eed31142feda3fb3839a5770517128ed50197ee"
-bytes = 249087
+file = "libpcre2-16-10.49-r0.apk"
+sha256 = "3f1af6f75de7953d9126cc743d9b726979b9ed8494af2765db48a021c8adc427"
+bytes = 249281
 
 [[package]]
 repository = "main"
-file = "libpcre2-32-10.48-r0.apk"
-sha256 = "da39e2827a2c98118fc40d0e46047f338cdd8f12715244e76672d0bc03296b2a"
-bytes = 234501
+file = "libpcre2-32-10.49-r0.apk"
+sha256 = "355bab6dece24999dd2e9fcf36d3cb20b6a54a1ac63a786f13001e042856b5e7"
+bytes = 234672
+
+[[package]]
+repository = "main"
+file = "libpsl-0.21.5-r3.apk"
+sha256 = "739212850992304e5504705852c192a094f97b11c59d499a4a21786f05e869b3"
+bytes = 53639
 
 [[package]]
 repository = "main"
@@ -457,6 +580,18 @@ repository = "main"
 file = "libstdc++-15.2.0-r5.apk"
 sha256 = "c57f103f92812e2c6c8fb81ffa61df3dcb08a49917a2284aff64bddeade6f310"
 bytes = 842112
+
+[[package]]
+repository = "main"
+file = "libstdc++-dev-15.2.0-r5.apk"
+sha256 = "95057d417dcfe05ba78ad680d37a27d90b435e9a5cc87e1ad446c948f2a3608f"
+bytes = 4222537
+
+[[package]]
+repository = "main"
+file = "libunistring-1.4.2-r0.apk"
+sha256 = "01bf97512514e408b8c0e0341398dfd7d260949c2b614ff9b01440fb769d166f"
+bytes = 720882
 
 [[package]]
 repository = "main"
@@ -520,6 +655,12 @@ bytes = 2296118
 
 [[package]]
 repository = "main"
+file = "musl-fts-1.2.7-r7.apk"
+sha256 = "4577953e968807d6de3cc0ff0cb47a3a8b73fd39209cbb25aaf6b839653c10f2"
+bytes = 6558
+
+[[package]]
+repository = "main"
 file = "musl-libintl-1.2.6-r2.apk"
 sha256 = "79bf3e2d9fc3ea46c8b50b9d5d60241dcc5cb9d7b29e64466a905b9a358758e4"
 bytes = 1806
@@ -538,6 +679,12 @@ bytes = 22170
 
 [[package]]
 repository = "main"
+file = "nghttp2-libs-1.70.0-r0.apk"
+sha256 = "d162d69667b1334ee62b7794b6f1ccd08c79361bb745105cc5a52472eeffc2bc"
+bytes = 56920
+
+[[package]]
+repository = "main"
 file = "openssh-sftp-server-10.3_p1-r1.apk"
 sha256 = "ece9cdb6d116665a7a6e8a2c29163b4f20099dce62cbb38853b1f13cd7b9f2e2"
 bytes = 56329
@@ -550,27 +697,39 @@ bytes = 22039
 
 [[package]]
 repository = "main"
-file = "pcre2-10.48-r0.apk"
-sha256 = "b51989dfd79a40f334ad82fbabd86d146f7482e571b8905c7b8710abfd1c11ed"
-bytes = 270643
+file = "pcre2-10.49-r0.apk"
+sha256 = "e2710b8d060f05be4c4f0222aa2787713fd86dd38dbacd50f9d1ebf21e6b8700"
+bytes = 270487
 
 [[package]]
 repository = "main"
-file = "pcre2-dev-10.48-r0.apk"
-sha256 = "89589d785c0cdb0b37511f4b0b4ad0d9b585bd499d846940462c0fd69a2e9f30"
-bytes = 17157
+file = "pcre2-dev-10.49-r0.apk"
+sha256 = "b1d0fce0dd7019481bfb8ceb697cf0a8c3bdba320d8fd2c4d116d7893af016e6"
+bytes = 17153
 
 [[package]]
 repository = "main"
-file = "pcre2-static-10.48-r0.apk"
-sha256 = "442b40829a7eb5637dab50ef8119d6eeb03ed627ced670ebcde59d5604ceedc9"
-bytes = 802958
+file = "pcre2-static-10.49-r0.apk"
+sha256 = "80517dcfdf1d6d5aa902e072190c69e3f05422f7af9118ecf47d6c226ea9f0cd"
+bytes = 803204
 
 [[package]]
 repository = "main"
 file = "pcsc-lite-libs-2.4.0-r4.apk"
 sha256 = "70bdb7f779d9ce004dd03afea585a74d45ef89ca570347d83d8b9446b7b5cefb"
 bytes = 19383
+
+[[package]]
+repository = "main"
+file = "pixman-0.46.4-r0.apk"
+sha256 = "2e463593569deaf854b2487321be5ca315ae2ee4694fe8d1037fd23765122a2d"
+bytes = 167718
+
+[[package]]
+repository = "main"
+file = "pixman-dev-0.46.4-r0.apk"
+sha256 = "49a812c897fccb3def4e51d0614bb999f56a4128fb0d4eca93dd1fefb4602ab8"
+bytes = 12143
 
 [[package]]
 repository = "main"
@@ -616,6 +775,12 @@ bytes = 169246
 
 [[package]]
 repository = "main"
+file = "strace-6.19-r1.apk"
+sha256 = "3bb0b0ec565033bfd2f3c1baa9f4d16572fe51f3d341879c8e2e506b081e72dd"
+bytes = 447969
+
+[[package]]
+repository = "main"
 file = "utmps-dev-0.1.3.3-r0.apk"
 sha256 = "850396bcacec0e5d4b18e36488d7c632803c32de0cb7833ee8549d8dfff5c9aa"
 bytes = 3707
@@ -646,21 +811,51 @@ bytes = 1691066
 
 [[package]]
 repository = "main"
-file = "zlib-1.3.2-r0.apk"
-sha256 = "9ceb0ce727602c3acd7c8bf6ca02d7b019afc2b5ad81095684ecf18c2c48d8f2"
-bytes = 43949
+file = "xz-5.8.4-r0.apk"
+sha256 = "c871a124107db14baa432f73d533768aaf306a6a06736f730b76ebdbe6d391a2"
+bytes = 61410
 
 [[package]]
 repository = "main"
-file = "zlib-dev-1.3.2-r0.apk"
-sha256 = "5975381ff03d0977ba0fa702a7055c98445a761594de70c5948a02273a54e19a"
-bytes = 34424
+file = "xz-dev-5.8.4-r0.apk"
+sha256 = "783fe1819f554c356d93b45688ab8ec0b4f712438784c2a8bbc853e50bd02235"
+bytes = 56190
 
 [[package]]
 repository = "main"
-file = "zlib-static-1.3.2-r0.apk"
-sha256 = "6ffcb9c0f1247904cc8584b65e19bbfa70bab04b5a749dec8cf9541be4cd1c6a"
-bytes = 46853
+file = "xz-libs-5.8.4-r0.apk"
+sha256 = "b784e85dfcf30cfc39ae2fdcae719a12f3de3b7a0ecfc7cfa77230626ec320f9"
+bytes = 104175
+
+[[package]]
+repository = "main"
+file = "zlib-1.3.2-r1.apk"
+sha256 = "4a4077c3243a6dfd5e16df20ecbe100acd72ab24eab32c91790ec1eb32d23053"
+bytes = 43956
+
+[[package]]
+repository = "main"
+file = "zlib-dev-1.3.2-r1.apk"
+sha256 = "cd24f88dee17e03533990d1c478d30b921440e0a725dbb73e04b4707b5bbf38e"
+bytes = 34416
+
+[[package]]
+repository = "main"
+file = "zlib-static-1.3.2-r1.apk"
+sha256 = "82ccd90ce5825395eb57f3bdc06cfc307b0747e3147f2e860bfedf8bcc6c13b4"
+bytes = 46851
+
+[[package]]
+repository = "main"
+file = "zstd-1.5.7-r2.apk"
+sha256 = "44b26583537b5188dbc854462d91436b3ab81bf7c22c4400d6c1925fef9a722d"
+bytes = 124890
+
+[[package]]
+repository = "main"
+file = "zstd-dev-1.5.7-r2.apk"
+sha256 = "8dd10f5d0be52ae50827504192179f43a54d99c047fac79e6e24ef453c66be5f"
+bytes = 54932
 
 [[package]]
 repository = "main"

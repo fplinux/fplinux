@@ -14,17 +14,22 @@ from unittest import mock
 
 import pytest
 from fplinux_cli.cli.dependencies import restore_dependencies
+from fplinux_cli.dependencies import environment_archive
 from fplinux_cli.dependencies.inputs import DependencyInput
 from fplinux_cli.dependencies.snapshots import (
     preserve_inputs,
     publish_snapshot,
     read_snapshot,
 )
+from fplinux_cli.environment.image_state import ImageState
+from fplinux_cli.environment.images import container_image_recipe_digest
+from fplinux_cli.reporting.run import RunReporter
 
 from tests.small.dependencies.snapshot_fixtures import selected_checkout
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from typing import Any
 
 
 _ABC_SHA256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
@@ -63,33 +68,53 @@ class SnapshotCheckout:
         with selected_checkout(cache.parent, inputs, context):
             restore_dependencies(self.snapshot, inputs_only=True)
 
-    def saved_environment(self) -> dict[str, object]:
-        """Attach literal installed metadata and transport bytes to the input manifest."""
-        manifest = preserve_inputs(
-            [declared_input()], {}, self.snapshot, cache=self.cache, offline=True
-        )
-        metadata_bytes = b'[{"gid":0,"mode":493,"path":"usr","type":"directory","uid":1000}]'
-        archive_bytes = b"native image transport"
+    def environment_objects(
+        self,
+        *,
+        recipe: str = "a" * 64,
+        generation: str = "b" * 64,
+        directory_mode: int = 493,
+    ) -> dict[str, Any]:
+        """Store controlled installed metadata and a distinct export for each generation."""
+        metadata_bytes = json.dumps(
+            [
+                {
+                    "gid": 0,
+                    "mode": directory_mode,
+                    "path": "usr",
+                    "type": "directory",
+                    "uid": 1000,
+                }
+            ],
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        archive_bytes = b"native image transport " + generation.encode()
         objects = self.snapshot / "objects/sha256"
         metadata_digest = hashlib.sha256(metadata_bytes).hexdigest()
         archive_digest = hashlib.sha256(archive_bytes).hexdigest()
         (objects / metadata_digest).write_bytes(metadata_bytes)
         (objects / archive_digest).write_bytes(archive_bytes)
-        reference = "localhost/fplinux-build:" + "a" * 64
-        manifest["environment"] = {
+        reference = "localhost/fplinux-build:" + recipe
+        return {
             "sha256": archive_digest,
             "bytes": len(archive_bytes),
             "reference": reference,
-            "transport": reference + "-dependency-transport-7-abcdef",
+            "transport": reference + "-dependency-transport-7-" + generation[:6],
             "state": {
-                "container_image_recipe": "a" * 64,
-                "image_generation": "b" * 64,
-                "image_content": (
-                    "a60301a02c9095ccbf6f3280eb8922a0bdc62ea6dfbdcfeb08968e4decb53801"
-                ),
+                "container_image_recipe": recipe,
+                "image_generation": generation,
+                "image_content": metadata_digest,
             },
             "metadata": {"sha256": metadata_digest, "bytes": len(metadata_bytes)},
         }
+
+    def saved_environment(self, *, recipe: str = "a" * 64) -> dict[str, Any]:
+        """Attach controlled installed metadata and transport bytes to the input manifest."""
+        manifest = preserve_inputs(
+            [declared_input()], {}, self.snapshot, cache=self.cache, offline=True
+        )
+        manifest["environment"] = self.environment_objects(recipe=recipe)
         publish_snapshot(self.snapshot, manifest)
         return manifest
 
@@ -321,6 +346,181 @@ class DependencySnapshotTests:
         assert (
             (read_snapshot(snapshot_checkout.snapshot)["environment"]) == (manifest["environment"])
         )
+
+    @pytest.mark.parametrize(
+        ("recipe", "directory_mode"),
+        [
+            pytest.param("c" * 64, 493, id="another-image-recipe"),
+            pytest.param("a" * 64, 448, id="another-installed-content"),
+        ],
+    )
+    def test_another_environment_is_rejected_without_replacing_the_snapshot(
+        self, snapshot_checkout: SnapshotCheckout, recipe: str, directory_mode: int
+    ) -> None:
+        """An unchanged external input set cannot silently retain an incompatible image."""
+        saved = snapshot_checkout.saved_environment()
+        manifest_path = snapshot_checkout.snapshot / "manifest.json"
+        before = manifest_path.read_bytes()
+        candidate = preserve_inputs(
+            [declared_input()],
+            {},
+            snapshot_checkout.snapshot,
+            cache=snapshot_checkout.cache,
+            offline=True,
+        )
+        candidate["environment"] = snapshot_checkout.environment_objects(
+            recipe=recipe, directory_mode=directory_mode
+        )
+
+        with pytest.raises(SystemExit, match="environment"):
+            publish_snapshot(snapshot_checkout.snapshot, candidate)
+
+        assert manifest_path.read_bytes() == before
+        assert read_snapshot(snapshot_checkout.snapshot)["environment"] == saved["environment"]
+
+    def test_compatible_environment_keeps_the_first_export_and_generation(
+        self, snapshot_checkout: SnapshotCheckout
+    ) -> None:
+        """A new transport for identical declared tools does not replace the saved archive."""
+        saved = snapshot_checkout.saved_environment()
+        manifest_path = snapshot_checkout.snapshot / "manifest.json"
+        before = manifest_path.read_bytes()
+        candidate = preserve_inputs(
+            [declared_input()],
+            {},
+            snapshot_checkout.snapshot,
+            cache=snapshot_checkout.cache,
+            offline=True,
+        )
+        candidate["environment"] = snapshot_checkout.environment_objects(generation="c" * 64)
+        assert candidate["environment"]["transport"] != saved["environment"]["transport"]
+        assert candidate["environment"]["sha256"] != saved["environment"]["sha256"]
+
+        publish_snapshot(snapshot_checkout.snapshot, candidate)
+
+        assert manifest_path.read_bytes() == before
+        assert read_snapshot(snapshot_checkout.snapshot)["environment"] == saved["environment"]
+
+    def test_inputs_only_repeat_keeps_the_saved_environment(
+        self, snapshot_checkout: SnapshotCheckout
+    ) -> None:
+        """Saving only originals cannot remove an already preserved build image."""
+        saved = snapshot_checkout.saved_environment()
+        manifest_path = snapshot_checkout.snapshot / "manifest.json"
+        before = manifest_path.read_bytes()
+        candidate = preserve_inputs(
+            [declared_input()],
+            {},
+            snapshot_checkout.snapshot,
+            cache=snapshot_checkout.cache,
+            offline=True,
+        )
+        assert candidate["environment"] is None
+
+        publish_snapshot(snapshot_checkout.snapshot, candidate)
+
+        assert manifest_path.read_bytes() == before
+        assert read_snapshot(snapshot_checkout.snapshot)["environment"] == saved["environment"]
+
+    def test_environment_can_complete_an_inputs_only_snapshot(
+        self, snapshot_checkout: SnapshotCheckout
+    ) -> None:
+        """The same input set may acquire its first verified build environment."""
+        snapshot_checkout.preserve([declared_input()], {})
+        candidate = preserve_inputs(
+            [declared_input()],
+            {},
+            snapshot_checkout.snapshot,
+            cache=snapshot_checkout.cache,
+            offline=True,
+        )
+        candidate["environment"] = snapshot_checkout.environment_objects()
+
+        publish_snapshot(snapshot_checkout.snapshot, candidate)
+
+        assert read_snapshot(snapshot_checkout.snapshot)["environment"] == candidate["environment"]
+
+    def test_saving_the_same_environment_reuses_verified_objects_before_export(
+        self, snapshot_checkout: SnapshotCheckout
+    ) -> None:
+        """A changed operational generation does not create another native image archive."""
+        recipe = container_image_recipe_digest()
+        saved = snapshot_checkout.saved_environment(recipe=recipe)
+        state = ImageState(recipe, "c" * 64, saved["environment"]["state"]["image_content"])
+        objects = snapshot_checkout.snapshot / "objects/sha256"
+        before_objects = {path.name: path.read_bytes() for path in objects.iterdir()}
+        manifest_path = snapshot_checkout.snapshot / "manifest.json"
+        before_manifest = manifest_path.read_bytes()
+        reporter = RunReporter(
+            "dependencies", snapshot_checkout.root / "logs", "logs", verbose=False
+        )
+        try:
+            with (
+                mock.patch.object(environment_archive, "require_kern", return_value="kern"),
+                mock.patch.object(environment_archive, "current_image_state", return_value=state),
+                mock.patch.object(
+                    environment_archive,
+                    "_capture_environment_metadata",
+                    side_effect=AssertionError("saved image metadata must be reused"),
+                ),
+                mock.patch.object(
+                    environment_archive,
+                    "tag_image",
+                    side_effect=AssertionError("saved image must not be exported again"),
+                ),
+            ):
+                environment = environment_archive.save_environment(
+                    snapshot_checkout.snapshot, reporter
+                )
+        finally:
+            reporter.finish()
+
+        assert environment == saved["environment"]
+        assert manifest_path.read_bytes() == before_manifest
+        assert {path.name: path.read_bytes() for path in objects.iterdir()} == before_objects
+
+    @pytest.mark.parametrize("changed_input", ["image-recipe", "installed-content"])
+    def test_saving_a_conflicting_environment_stops_before_export(
+        self, snapshot_checkout: SnapshotCheckout, changed_input: str
+    ) -> None:
+        """An incompatible current image is rejected without adding unused snapshot objects."""
+        recipe = container_image_recipe_digest()
+        saved_recipe = "a" * 64 if changed_input == "image-recipe" else recipe
+        saved = snapshot_checkout.saved_environment(recipe=saved_recipe)
+        content = saved["environment"]["state"]["image_content"]
+        if changed_input == "installed-content":
+            content = "d" * 64
+        state = ImageState(recipe, "c" * 64, content)
+        objects = snapshot_checkout.snapshot / "objects/sha256"
+        before_objects = {path.name: path.read_bytes() for path in objects.iterdir()}
+        manifest_path = snapshot_checkout.snapshot / "manifest.json"
+        before_manifest = manifest_path.read_bytes()
+        reporter = RunReporter(
+            "dependencies", snapshot_checkout.root / "logs", "logs", verbose=False
+        )
+        try:
+            with (
+                mock.patch.object(environment_archive, "require_kern", return_value="kern"),
+                mock.patch.object(environment_archive, "current_image_state", return_value=state),
+                mock.patch.object(
+                    environment_archive,
+                    "_capture_environment_metadata",
+                    side_effect=AssertionError("conflicting image metadata must not be captured"),
+                ),
+                mock.patch.object(
+                    environment_archive,
+                    "tag_image",
+                    side_effect=AssertionError("conflicting image must not be exported"),
+                ),
+                pytest.raises(SystemExit, match="environment"),
+            ):
+                environment_archive.save_environment(snapshot_checkout.snapshot, reporter)
+        finally:
+            reporter.finish()
+
+        assert manifest_path.read_bytes() == before_manifest
+        assert {path.name: path.read_bytes() for path in objects.iterdir()} == before_objects
+        assert read_snapshot(snapshot_checkout.snapshot)["environment"] == saved["environment"]
 
     def test_missing_environment_metadata_prevents_input_restoration(
         self, snapshot_checkout: SnapshotCheckout

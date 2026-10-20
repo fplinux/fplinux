@@ -138,6 +138,41 @@ def container_image_build_arguments(lock: dict[str, Any] | None = None) -> tuple
     )
 
 
+def spreadtrum_flash_image_source(root: Path) -> dict[str, Any]:
+    """Select the pinned source files needed by the offline RAM uploader tests."""
+    source = common.load_toml(root / "sources.lock.toml").get("spreadtrum_flash")
+    if not isinstance(source, dict):
+        fail("quality image requires the spreadtrum_flash source lock")
+    commit = source.get("commit")
+    if not isinstance(commit, str) or re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+        fail("quality image spreadtrum_flash commit is invalid")
+    url = source.get("archive_url")
+    if not isinstance(url, str) or not url.startswith("https://"):
+        fail("quality image spreadtrum_flash archive URL must use HTTPS")
+    files = source.get("files")
+    if not isinstance(files, dict):
+        fail("quality image spreadtrum_flash file checksums are missing")
+    members = [
+        {"path": "Makefile", "digest_key": "makefile_sha256"},
+        {"path": "spd_dump.c", "digest_key": "spd_dump_c_sha256"},
+        {"path": "spd_cmd.h", "digest_key": "spd_cmd_h_sha256"},
+    ]
+    return {
+        "archive_url": url,
+        "archive_sha256": sha256_value(
+            source.get("archive_sha256"), "quality image spreadtrum_flash archive"
+        ),
+        "commit": commit,
+        "members": members,
+        "files": {
+            member["digest_key"]: sha256_value(
+                files.get(member["digest_key"]), f"quality image source {member['path']}"
+            )
+            for member in members
+        },
+    }
+
+
 def container_image_recipe_digest(lock: dict[str, Any] | None = None) -> str:
     """Hash the exact image context, build arguments and pinned Kern binary."""
     if lock is None:
@@ -153,6 +188,8 @@ def container_image_recipe_digest(lock: dict[str, Any] | None = None) -> str:
             + encoded_arguments
             + b"fplinux.kern-binary-sha256\0"
             + bytes.fromhex(lock["kern"]["binary_sha256"])
+            + b"fplinux.quality-source-projection\0"
+            + common.canonical_json_bytes(spreadtrum_flash_image_source(common.ROOT))
         ),
     )
 

@@ -38,6 +38,7 @@ python_version = "3.14"
 strict = true
 mypy_path = "scripts"
 cache_dir = "/tmp/mypy"
+explicit_package_bases = true
 
 [tool.pytest.ini_options]
 addopts = ["--strict-markers", "--strict-config", "-ra", "--durations=20"]

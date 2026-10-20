@@ -1,7 +1,7 @@
 {
   "name": "fplinux-quality",
   "private": true,
-  "description": "Pinned Markdown quality tools for FPLinux.",
+  "description": "Pinned build and source quality tools for FPLinux.",
   "engines": {
     "node": "24.21.0",
     "npm": "12.2.0"
@@ -11,7 +11,9 @@
   "devDependencies": {
     "@commitlint/cli": "21.2.3",
     "@commitlint/config-conventional": "21.2.3",
+    "@resvg/resvg-js": "2.6.2",
     "jsonc-parser": "3.3.1",
+    "lv_font_conv": "1.5.3",
     "markdownlint-cli2": "0.23.3",
     "prettier": "3.9.9"
   }

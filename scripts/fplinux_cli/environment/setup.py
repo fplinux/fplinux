@@ -11,6 +11,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from fplinux_cli.build.host_tools.host import extract_host_members
 from fplinux_cli.common import ROOT, alpine_tar_filter, fail
 from fplinux_cli.dependencies.inputs import environment_inputs
 from fplinux_cli.reporting.run import RunReporter
@@ -35,6 +36,7 @@ from .images import (
     container_image_recipe_digest,
     container_image_reference,
     load_container_lock,
+    spreadtrum_flash_image_source,
 )
 from .kern import ensure_project_directory, install_kern, kern_environment
 
@@ -122,6 +124,16 @@ def _stage_container_context(context: Path, *, offline: bool) -> None:
             algorithm=item.algorithm,
             size=item.size,
         )
+        if item.purpose == "quality-source":
+            projection = spreadtrum_flash_image_source(ROOT)
+            extract_host_members(
+                source,
+                f"spreadtrum_flash-{projection['commit']}/",
+                projection["members"],
+                projection["files"],
+                input_directory / "quality/spreadtrum-flash",
+            )
+            continue
         if item.purpose == "npm-package":
             relative_input = Path("npm") / source.name
         elif item.purpose == "container-source":
