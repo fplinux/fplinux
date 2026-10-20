@@ -162,14 +162,31 @@ FPLINUX_UI_INTERNAL void fplinux_ui_title_hide(lv_obj_t *label);
  * menu takes keys first, then the stack's top screen, then the application.
  */
 struct fplinux_ui_screens;
+struct fplinux_ui_screen;
+
+enum fplinux_ui_key_route {
+	FPLINUX_UI_KEY_UNHANDLED,
+	FPLINUX_UI_KEY_HANDLED,
+	FPLINUX_UI_KEY_TO_REPEAT_CANVAS,
+};
+
+/* NULL cancels every seat; a screen cancels keys owned by that Canvas. */
+FPLINUX_UI_INTERNAL void
+fplinux_ui_cancel_key_repeat(struct fplinux_ui *ui,
+			     const struct fplinux_ui_screen *canvas);
 
 /* fplinux-ui.c: where the stack lives; NULL until the first screen. */
 FPLINUX_UI_INTERNAL struct fplinux_ui_screens **
 fplinux_ui_screens_slot(struct fplinux_ui *ui);
 /* Takes every key while a screen is stacked; false when none is. */
-FPLINUX_UI_INTERNAL bool
+FPLINUX_UI_INTERNAL enum fplinux_ui_key_route
 fplinux_ui_screens_key(struct fplinux_ui_screens *screens,
 		       const struct fplinux_ui_key *key);
+/* The captured Canvas must still be the active, opted-in screen. */
+FPLINUX_UI_INTERNAL bool
+fplinux_ui_screens_repeat_key(struct fplinux_ui_screens *screens,
+			      struct fplinux_ui_screen *canvas,
+			      const struct fplinux_ui_key *key);
 /* Hidden screens run no timers. */
 FPLINUX_UI_INTERNAL void
 fplinux_ui_screens_set_visible(struct fplinux_ui_screens *screens,

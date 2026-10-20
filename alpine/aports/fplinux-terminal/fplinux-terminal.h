@@ -2,17 +2,24 @@
 #ifndef FPLINUX_TERMINAL_H
 #define FPLINUX_TERMINAL_H
 
+#include <libintl.h>
 #include <libtsm.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include "fplinux-multitap.h"
 
+/*
+ * Visible text is English and translated through the application's gettext
+ * domain; N_() marks text that is translated where it is shown.
+ */
+#define _(text) gettext(text)
+#define N_(text) text
+
 #define FPLINUX_TERMINAL_SCROLLBACK_LINES 512U
 #define FPLINUX_TERMINAL_OUTPUT_BYTES 16384U
 #define FPLINUX_TERMINAL_CLEAR_LINE "\033[99~"
-
-extern const struct fplinux_multitap_language fplinux_terminal_languages[2];
+#define FPLINUX_TERMINAL_COMPOSE_MS 700U
 
 enum fplinux_terminal_mode {
 	FPLINUX_TERMINAL_LOWER,
@@ -20,13 +27,47 @@ enum fplinux_terminal_mode {
 	FPLINUX_TERMINAL_NUMERIC,
 };
 
-enum fplinux_terminal_menu {
-	FPLINUX_TERMINAL_MENU_CLOSED,
-	FPLINUX_TERMINAL_MENU_MAIN,
-	FPLINUX_TERMINAL_MENU_SYMBOLS,
-	FPLINUX_TERMINAL_MENU_SPECIAL,
-	FPLINUX_TERMINAL_MENU_LANGUAGE,
-	FPLINUX_TERMINAL_MENU_HELP,
+/*
+ * The commands of the terminal screen. The GUI attaches them to its canvas
+ * and the runtime gives them their keys: OK is Enter, the right soft key
+ * Clear in the live view and Back in the scrollback, and the left soft key
+ * opens the options menu with the rest in this order.
+ */
+enum fplinux_terminal_command {
+	FPLINUX_TERMINAL_COMMAND_ENTER,
+	FPLINUX_TERMINAL_COMMAND_CLEAR,
+	FPLINUX_TERMINAL_COMMAND_LIVE,
+	FPLINUX_TERMINAL_COMMAND_MODIFIERS,
+	FPLINUX_TERMINAL_COMMAND_SYMBOLS,
+	FPLINUX_TERMINAL_COMMAND_SPECIAL,
+	FPLINUX_TERMINAL_COMMAND_LANGUAGE,
+	FPLINUX_TERMINAL_COMMAND_SCROLLBACK,
+	FPLINUX_TERMINAL_COMMAND_INTERRUPT,
+	FPLINUX_TERMINAL_COMMAND_END_INPUT,
+	FPLINUX_TERMINAL_COMMAND_SEARCH,
+	FPLINUX_TERMINAL_COMMAND_HELP,
+	FPLINUX_TERMINAL_COMMAND_EXIT,
+	FPLINUX_TERMINAL_COMMAND_COUNT,
+};
+
+/*
+ * The values of enum fplinux_ui_command_type that the commands use; that
+ * header needs LVGL, so the engine keeps the numbers and the GUI checks them.
+ */
+enum fplinux_terminal_command_type {
+	FPLINUX_TERMINAL_TYPE_BACK = 0,
+	FPLINUX_TERMINAL_TYPE_CANCEL = 1,
+	FPLINUX_TERMINAL_TYPE_EXIT = 2,
+	FPLINUX_TERMINAL_TYPE_OK = 4,
+	FPLINUX_TERMINAL_TYPE_SCREEN = 6,
+	FPLINUX_TERMINAL_TYPE_HELP = 7,
+};
+
+struct fplinux_terminal_command_info {
+	enum fplinux_terminal_command_type type;
+	/* Translated, or NULL for the system word of the type. */
+	const char *label;
+	int priority;
 };
 
 struct fplinux_terminal {
@@ -38,32 +79,27 @@ struct fplinux_terminal {
 	bool dirty;
 	bool history;
 	bool editing;
-	bool active;
 	bool cursor_visible;
-	bool diagnostic_requested;
 	char shell_marker[64];
+	/* Input languages from the language files, English first. */
+	struct fplinux_multitap_languages languages;
+	size_t language;
+	/* The options menu item naming the input language. */
+	char language_item[64];
 	struct fplinux_multitap compose;
 	bool pound_down;
 	bool pound_held;
 	bool pound_cancelled;
 	bool star_down;
 	bool star_held;
-	bool softleft_down;
-	bool softleft_held;
-	bool modifier_panel;
-	bool compose_resume_pending;
+	/* Hidden, or covered by another screen or the options menu. */
+	bool paused;
 	unsigned int modifier;
-	unsigned int modifier_selection;
-	unsigned int modifier_index;
-	unsigned int menu_index;
-	unsigned int help_scroll;
 	enum fplinux_terminal_mode mode;
 	enum fplinux_terminal_mode alphabetic_mode;
-	enum fplinux_terminal_menu menu;
 	uint64_t compose_ms;
 	uint64_t pound_ms;
 	uint64_t star_ms;
-	uint64_t softleft_ms;
 	uint64_t cursor_ms;
 };
 
@@ -71,6 +107,12 @@ bool fplinux_terminal_init(struct fplinux_terminal *terminal,
 			   unsigned int columns, unsigned int rows,
 			   const char *shell_token);
 void fplinux_terminal_destroy(struct fplinux_terminal *terminal);
+/*
+ * Replaces the built-in English input language with the input languages of
+ * the language files in directory and selects the first.
+ */
+void fplinux_terminal_load_languages(struct fplinux_terminal *terminal,
+				     const char *directory, const char *first);
 void fplinux_terminal_feed(struct fplinux_terminal *terminal, const char *bytes,
 			   size_t size);
 /* Remove only bytes actually accepted by the PTY; unsent input stays queued. */
@@ -78,24 +120,68 @@ void fplinux_terminal_consume(struct fplinux_terminal *terminal, size_t size);
 void fplinux_terminal_key(struct fplinux_terminal *terminal, uint32_t keysym,
 			  uint32_t ascii, unsigned int modifiers,
 			  uint32_t unicode);
+/* Phone keys that no command uses: digits, * and #, the D-pad and Dial. */
 void fplinux_terminal_phone(struct fplinux_terminal *terminal,
 			    unsigned int code, bool pressed, bool repeat,
 			    uint64_t now_ms, bool shell_foreground);
 void fplinux_terminal_tick(struct fplinux_terminal *terminal, uint64_t now_ms,
 			   bool shell_foreground);
-int fplinux_terminal_timeout(const struct fplinux_terminal *terminal,
-			     uint64_t now_ms);
-void fplinux_terminal_focus(struct fplinux_terminal *terminal, bool active,
+/*
+ * A pending letter waits while the terminal is hidden or covered by another
+ * screen or the options menu and gets a fresh timeout when it is shown and
+ * uncovered; a held * or # is abandoned, since its release may go elsewhere.
+ */
+void fplinux_terminal_pause(struct fplinux_terminal *terminal, bool paused,
 			    uint64_t now_ms);
-void fplinux_terminal_reset_input(struct fplinux_terminal *terminal);
+/* Cancel physical holds while retaining composition, modifiers and PTY bytes. */
+void fplinux_terminal_cancel_held(struct fplinux_terminal *terminal);
 uint32_t fplinux_terminal_preedit(const struct fplinux_terminal *terminal);
 unsigned int
 fplinux_terminal_history_offset(const struct fplinux_terminal *terminal);
-const char *fplinux_terminal_menu_label(const struct fplinux_terminal *terminal,
-					unsigned int index);
-unsigned int
-fplinux_terminal_menu_count(const struct fplinux_terminal *terminal);
-void fplinux_terminal_status(const struct fplinux_terminal *terminal,
-			     char *text, size_t size);
+
+/* Whether the command belongs on the screen now, and how it is shown. */
+bool fplinux_terminal_command(const struct fplinux_terminal *terminal,
+			      enum fplinux_terminal_command command,
+			      struct fplinux_terminal_command_info *info);
+/*
+ * Runs Enter, Clear, Live, Scrollback, Interrupt, End input or Search. The
+ * GUI opens the screens of the other commands.
+ */
+void fplinux_terminal_run(struct fplinux_terminal *terminal,
+			  enum fplinux_terminal_command command);
+/*
+ * Whether text fits the title band. The GUI measures it in pixels in the
+ * band's font; the engine needs no LVGL.
+ */
+typedef bool (*fplinux_terminal_title_fits)(const char *text, void *context);
+/*
+ * The title band: the input mode and armed modifiers, or the scrollback
+ * position. When the text does not fit, the name gives way first, then the
+ * modifiers; the mode is always shown.
+ */
+void fplinux_terminal_title(const struct fplinux_terminal *terminal,
+			    fplinux_terminal_title_fits fits, void *context,
+			    char *text, size_t size);
+
+/* Ctrl, Alt and Shift as TSM masks, armed for the next phone key. */
+#define FPLINUX_TERMINAL_MODIFIER_COUNT 3U
+extern const unsigned int
+	fplinux_terminal_modifier_masks[FPLINUX_TERMINAL_MODIFIER_COUNT];
+extern const char *const
+	fplinux_terminal_modifier_names[FPLINUX_TERMINAL_MODIFIER_COUNT];
+void fplinux_terminal_set_modifiers(struct fplinux_terminal *terminal,
+				    unsigned int modifiers);
+/* The symbols and special keys offered in lists, and typing one. */
+size_t fplinux_terminal_symbol_count(void);
+const char *fplinux_terminal_symbol(size_t index);
+void fplinux_terminal_type_symbol(struct fplinux_terminal *terminal,
+				  size_t index);
+size_t fplinux_terminal_special_count(void);
+const char *fplinux_terminal_special(size_t index);
+void fplinux_terminal_send_special(struct fplinux_terminal *terminal,
+				   size_t index);
+/* Commits a pending letter and selects an input language by index. */
+void fplinux_terminal_select_language(struct fplinux_terminal *terminal,
+				      size_t index);
 
 #endif

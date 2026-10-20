@@ -32,6 +32,7 @@ struct fplinux_ui_key {
 	bool control;
 	bool alt;
 	char text[16];
+	/* Runtime CLOCK_MONOTONIC milliseconds, including synthetic input. */
 	uint64_t time_ms;
 };
 
@@ -50,6 +51,8 @@ enum fplinux_ui_event_type {
 	FPLINUX_UI_EVENT_RESIZE,
 	/* Query fplinux_ui_lifecycle(); event layout is unchanged. */
 	FPLINUX_UI_EVENT_LIFECYCLE,
+	/* Held input was cancelled; key.source identifies the affected seat type. */
+	FPLINUX_UI_EVENT_INPUT_CANCEL,
 };
 
 enum fplinux_ui_lifecycle {
@@ -65,7 +68,7 @@ enum fplinux_ui_lifecycle {
  */
 struct fplinux_ui_event {
 	enum fplinux_ui_event_type type;
-	/* KEY */
+	/* KEY, or the source of INPUT_CANCEL before synthetic held-key releases. */
 	struct fplinux_ui_key key;
 	/* VISIBILITY: false when the display is off or locked. */
 	bool visible;

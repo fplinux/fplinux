@@ -505,4 +505,13 @@ void fplinux_ui_canvas_set_key_handler(struct fplinux_ui_screen *canvas,
 void fplinux_ui_canvas_set_keyboard_keys(struct fplinux_ui_screen *canvas,
 					 bool raw);
 
+/*
+ * Opt in to compositor-paced key repeat; disabled by default. Only keys
+ * delivered to this Canvas repeat: external repeatable XKB keys and the
+ * phone's four D-pad keys. Phone digits, held gestures and commands remain
+ * one-shot. Covering, leaving or disabling the Canvas cancels the hold.
+ */
+void fplinux_ui_canvas_set_key_repeat(struct fplinux_ui_screen *canvas,
+				      bool enabled);
+
 #endif

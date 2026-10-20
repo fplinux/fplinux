@@ -50,7 +50,14 @@ _CHECK_COMMAND_TIMEOUT = 15 * 60
 _PACKAGE_CONFIG_TIMEOUT = 30
 _QUALITY_INCLUDE = "/opt/quality/include"
 _LVGL_APORTS = frozenset(
-    {"fplinux-launcher", "fplinux-settings", "fplinux-snake", "fplinux-notes", "fplinux-ui"}
+    {
+        "fplinux-launcher",
+        "fplinux-settings",
+        "fplinux-snake",
+        "fplinux-notes",
+        "fplinux-terminal",
+        "fplinux-ui",
+    }
 )
 _UI_RUNTIME_SOURCE = "lib/fplinux/fplinux-ui.c"
 _LVGL_RUNTIME_SOURCES = frozenset(
@@ -496,8 +503,6 @@ def userspace_c_include_flags(source: str) -> list[str]:
         or ("include/fplinux/fplinux-drm-session.h" in shared)
     ):
         flags.extend(pkg_config_cflags("libdrm"))
-    if source == "lib/fplinux/fplinux-keyboard-text.c":
-        flags.extend(pkg_config_cflags("xkbcommon"))
     if (
         len(path.parts) >= 3
         and path.parts[:2] == APORT_ROOT

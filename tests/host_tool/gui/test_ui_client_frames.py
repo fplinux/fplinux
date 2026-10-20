@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Actual client SHM commits and acknowledgements with a minimal compositor peer."""
+"""Actual UI client frames and Canvas input through a minimal Wayland peer."""
 
 from __future__ import annotations
 
@@ -143,3 +143,63 @@ def test_acknowledgement_waits_for_complete_new_frame(
         check=True,
     )
     assert result.stdout.endswith(f"{scenario}: ok\n")
+
+
+def assert_repeat_scenario(client_frames: Path, tmp_path: Path, scenario: str) -> None:
+    result = run_process(
+        [
+            str(client_frames),
+            f"repeat-{scenario}",
+            str(tmp_path / "session.sock"),
+            str(ROOT / "tests/host_tool/gui/repeat-keymap.xkb"),
+        ],
+        name=f"exercise real Wayland Canvas repeat: {scenario}",
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout.endswith(f"repeat-{scenario}: ok\n")
+
+
+def test_canvas_repeat_requires_opt_in_and_resolves_current_xkb_state(
+    client_frames: Path, tmp_path: Path
+) -> None:
+    """Raw handling alone is quiet; enabled repeat observes fresh modifiers and layout."""
+    assert_repeat_scenario(client_frames, tmp_path, "keyboard")
+
+
+def test_phone_canvas_repeat_accepts_only_direction_keys(
+    client_frames: Path, tmp_path: Path
+) -> None:
+    """Arrows repeat while digits, star, pound, OK and both softkeys stay single presses."""
+    assert_repeat_scenario(client_frames, tmp_path, "phone")
+
+
+def test_canvas_repeat_does_not_catch_up_after_a_blocked_application_callback(
+    client_frames: Path, tmp_path: Path
+) -> None:
+    """A controlled pause leaves no burst of overdue key callbacks."""
+    assert_repeat_scenario(client_frames, tmp_path, "pause")
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "leave",
+        "visibility",
+        "options",
+        "stack",
+        "bounce",
+        "replace",
+        "disable",
+        "keymap",
+        "seat",
+        "rate-zero",
+        "home",
+        "close",
+    ],
+)
+def test_canvas_repeat_cancellation_never_revives_the_old_wayland_hold(
+    client_frames: Path, tmp_path: Path, scenario: str
+) -> None:
+    """Focus, modal, lifetime and compositor changes stop the actual held key."""
+    assert_repeat_scenario(client_frames, tmp_path, scenario)

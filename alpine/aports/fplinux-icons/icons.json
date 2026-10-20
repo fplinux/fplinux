@@ -171,6 +171,11 @@
       "tile": "notes",
       "glyph": "notes",
       "install": true
+    },
+    "org.fplinux.terminal": {
+      "tile": "terminal",
+      "glyph": "terminal-2",
+      "install": true
     }
   }
 }

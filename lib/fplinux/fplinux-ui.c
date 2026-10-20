@@ -5,6 +5,7 @@
 #include "fplinux-ui-fonts.h"
 #include "fplinux-ui-internal.h"
 #include "fplinux-ui-menu.h"
+#include "fplinux-ui-screen.h"
 #include "fplinux-ui-profile.h"
 #include "fplinux-ui-screen-model.h"
 #include "fplinux-ui-session.h"
@@ -101,6 +102,11 @@ struct input_seat {
 	bool focused;
 	/* Only presses delivered to this surface can acquire a release. */
 	unsigned char pressed[KEY_CNT / 8];
+	lv_timer_t *repeat_timer;
+	struct fplinux_ui_screen *repeat_canvas;
+	unsigned int repeat_code;
+	int32_t repeat_rate;
+	int32_t repeat_delay;
 };
 
 struct fplinux_ui {
@@ -118,6 +124,8 @@ struct fplinux_ui {
 	struct wl_compositor *compositor;
 	struct wl_shm *shm;
 	struct input_seat *seats;
+	/* A dispatch cannot arm a Canvas that its callback covered or deleted. */
+	uint64_t repeat_generation;
 	struct wl_surface *surface;
 	struct xdg_wm_base *wm;
 	struct xdg_surface *xdg_surface;
@@ -208,6 +216,24 @@ static void set_theme_kind(struct fplinux_ui *ui, const char *value);
 static void layout_done(lv_event_t *event);
 static void release_keys(struct input_seat *seat);
 
+static void stop_repeat(struct input_seat *seat)
+{
+	seat->repeat_canvas = NULL;
+	if (seat->repeat_timer)
+		lv_timer_pause(seat->repeat_timer);
+}
+
+void fplinux_ui_cancel_key_repeat(struct fplinux_ui *ui,
+				  const struct fplinux_ui_screen *canvas)
+{
+	if (!ui)
+		return;
+	++ui->repeat_generation;
+	for (struct input_seat *seat = ui->seats; seat; seat = seat->next)
+		if (!canvas || seat->repeat_canvas == canvas)
+			stop_repeat(seat);
+}
+
 _Static_assert(FPLINUX_UI_PROFILE_320X240 + 1 == FPLINUX_UI_PROFILE_COUNT,
 	       "the profile table follows enum fplinux_ui_profile");
 _Static_assert((int)FPLINUX_UI_THEME_DARK == (int)FPLINUX_UI_SESSION_THEME_DARK,
@@ -292,15 +318,21 @@ static bool route_menu_key(struct fplinux_ui *ui,
 	return true;
 }
 
-static void dispatch_event(struct fplinux_ui *ui,
-			   const struct fplinux_ui_event *event)
+static enum fplinux_ui_key_route
+dispatch_event(struct fplinux_ui *ui, const struct fplinux_ui_event *event)
 {
-	if (event->type == FPLINUX_UI_EVENT_KEY &&
-	    (route_menu_key(ui, &event->key) ||
-	     fplinux_ui_screens_key(ui->screens, &event->key)))
-		return;
+	if (event->type == FPLINUX_UI_EVENT_KEY) {
+		enum fplinux_ui_key_route route;
+
+		if (route_menu_key(ui, &event->key))
+			return FPLINUX_UI_KEY_HANDLED;
+		route = fplinux_ui_screens_key(ui->screens, &event->key);
+		if (route != FPLINUX_UI_KEY_UNHANDLED)
+			return route;
+	}
 	if (ui->callback)
 		ui->callback(ui, event, ui->context);
+	return FPLINUX_UI_KEY_UNHANDLED;
 }
 
 static void set_lifecycle(struct fplinux_ui *ui,
@@ -320,6 +352,7 @@ static void request_close(struct fplinux_ui *ui)
 
 	if (ui->quit)
 		return;
+	fplinux_ui_cancel_key_repeat(ui, NULL);
 	set_lifecycle(ui, FPLINUX_UI_CLOSING);
 	dispatch_event(ui, &event);
 	ui->quit = true;
@@ -400,11 +433,12 @@ static void set_visible(struct fplinux_ui *ui, bool visible)
 
 	if (ui->visible == visible)
 		return;
+	/* Synthetic releases must observe that held gestures are now hidden. */
+	ui->visible = visible;
 	if (!visible)
 		for (struct input_seat *seat = ui->seats; seat;
 		     seat = seat->next)
 			release_keys(seat);
-	ui->visible = visible;
 	lv_display_enable_invalidation(ui->display, visible);
 	if (visible)
 		lv_obj_invalidate(lv_display_get_screen_active(ui->display));
@@ -752,6 +786,7 @@ static void keyboard_keymap(void *data, struct wl_keyboard *keyboard,
 	char *mapping;
 
 	(void)keyboard;
+	stop_repeat(seat);
 	if (format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1 || !bytes) {
 		close(fd);
 		return;
@@ -781,6 +816,13 @@ static void keyboard_keymap(void *data, struct wl_keyboard *keyboard,
 /* Wayland leave has no key releases; consumers still have to stop held input. */
 static void release_keys(struct input_seat *seat)
 {
+	struct fplinux_ui_event cancelled = {
+		.type = FPLINUX_UI_EVENT_INPUT_CANCEL,
+		.key = { .source = seat->source },
+	};
+
+	stop_repeat(seat);
+	dispatch_event(seat->ui, &cancelled);
 	for (unsigned int code = 0; code < KEY_CNT; ++code) {
 		unsigned char bit = (unsigned char)(1U << (code % 8));
 		struct fplinux_ui_event event = {
@@ -824,6 +866,95 @@ static void keyboard_leave(void *data, struct wl_keyboard *keyboard,
 	release_keys(seat);
 }
 
+static void resolve_keyboard_key(struct input_seat *seat,
+				 struct fplinux_ui_key *key)
+{
+	const xkb_keysym_t *symbols;
+
+	if (seat->source != FPLINUX_UI_KEY_KEYBOARD || !seat->key_state)
+		return;
+	key->keysym = xkb_state_key_get_one_sym(seat->key_state, key->code + 8);
+	key->unicode = xkb_keysym_to_utf32(key->keysym);
+	if (xkb_keymap_key_get_syms_by_level(seat->keymap, key->code + 8, 0, 0,
+					     &symbols) == 1) {
+		uint32_t ascii = xkb_keysym_to_utf32(symbols[0]);
+
+		if (ascii > 0 && ascii < 128)
+			key->ascii = ascii;
+	}
+	xkb_state_key_get_utf8(seat->key_state, key->code + 8, key->text,
+			       sizeof(key->text));
+	key->shift = xkb_state_mod_name_is_active(
+		seat->key_state, XKB_MOD_NAME_SHIFT, XKB_STATE_MODS_EFFECTIVE);
+	key->control = xkb_state_mod_name_is_active(
+		seat->key_state, XKB_MOD_NAME_CTRL, XKB_STATE_MODS_EFFECTIVE);
+	key->alt = xkb_state_mod_name_is_active(
+		seat->key_state, XKB_MOD_NAME_ALT, XKB_STATE_MODS_EFFECTIVE);
+}
+
+static bool key_repeats(const struct input_seat *seat, unsigned int code)
+{
+	if (seat->source == FPLINUX_UI_KEY_PHONE)
+		return code == KEY_UP || code == KEY_DOWN || code == KEY_LEFT ||
+		       code == KEY_RIGHT;
+	return seat->keymap && xkb_keymap_key_repeats(seat->keymap, code + 8);
+}
+
+static void repeat_key(lv_timer_t *timer)
+{
+	struct input_seat *seat = lv_timer_get_user_data(timer);
+	struct fplinux_ui *ui = seat->ui;
+	struct fplinux_ui_screen *canvas = seat->repeat_canvas;
+	unsigned char bit = (unsigned char)(1U << (seat->repeat_code % 8));
+	struct fplinux_ui_key key = {
+		.source = seat->source,
+		.code = seat->repeat_code,
+		.pressed = true,
+		.time_ms = fplinux_ui_now_ms(),
+	};
+
+	if (!canvas || !seat->focused || !ui->visible || ui->quit ||
+	    !(seat->pressed[seat->repeat_code / 8] & bit) ||
+	    !key_repeats(seat, seat->repeat_code)) {
+		stop_repeat(seat);
+		return;
+	}
+	resolve_keyboard_key(seat, &key);
+	if (!fplinux_ui_screens_repeat_key(ui->screens, canvas, &key)) {
+		stop_repeat(seat);
+		return;
+	}
+	/* One event per wakeup; a delayed callback never catches up in a burst. */
+	if (seat->repeat_canvas == canvas && seat->repeat_rate > 0) {
+		uint32_t period = 1000U / (uint32_t)seat->repeat_rate;
+
+		lv_timer_set_period(timer, period ? period : 1);
+		lv_timer_reset(timer);
+	}
+}
+
+static void start_repeat(struct input_seat *seat, unsigned int code,
+			 struct fplinux_ui_screen *canvas)
+{
+	uint32_t delay;
+
+	if (seat->repeat_rate <= 0)
+		return;
+	delay = seat->repeat_delay > 0 ? (uint32_t)seat->repeat_delay : 1;
+	if (!seat->repeat_timer) {
+		seat->repeat_timer = lv_timer_create(repeat_key, delay, seat);
+		if (!seat->repeat_timer) {
+			seat->ui->failed = true;
+			return;
+		}
+	}
+	seat->repeat_canvas = canvas;
+	seat->repeat_code = code;
+	lv_timer_set_period(seat->repeat_timer, delay);
+	lv_timer_reset(seat->repeat_timer);
+	lv_timer_resume(seat->repeat_timer);
+}
+
 static void keyboard_key(void *data, struct wl_keyboard *keyboard,
 			 uint32_t serial, uint32_t time_ms, uint32_t code,
 			 uint32_t state)
@@ -831,6 +962,9 @@ static void keyboard_key(void *data, struct wl_keyboard *keyboard,
 	struct input_seat *seat = data;
 	struct fplinux_ui *ui = seat->ui;
 	bool pressed = state == WL_KEYBOARD_KEY_STATE_PRESSED;
+	bool repeats;
+	uint64_t generation;
+	enum fplinux_ui_key_route route;
 	unsigned char bit = (unsigned char)(1U << (code % 8));
 	struct fplinux_ui_event event = {
 		.type = FPLINUX_UI_EVENT_KEY,
@@ -838,46 +972,31 @@ static void keyboard_key(void *data, struct wl_keyboard *keyboard,
 			.source = seat->source,
 			.code = code,
 			.pressed = pressed,
-			.time_ms = time_ms,
+			.time_ms = fplinux_ui_now_ms(),
 		},
 	};
 
 	(void)keyboard;
 	(void)serial;
+	/* Consumers compare input deadlines with the runtime's monotonic clock. */
+	(void)time_ms;
 	if (!seat->focused || !ui->visible || code >= KEY_CNT)
 		return;
 	if (pressed == !!(seat->pressed[code / 8] & bit))
 		return;
+	repeats = key_repeats(seat, code);
+	if ((pressed && repeats) || (!pressed && seat->repeat_code == code))
+		stop_repeat(seat);
 	if (pressed)
 		seat->pressed[code / 8] |= bit;
 	else
 		seat->pressed[code / 8] &= (unsigned char)~bit;
-	if (seat->source == FPLINUX_UI_KEY_KEYBOARD && seat->key_state) {
-		event.key.keysym =
-			xkb_state_key_get_one_sym(seat->key_state, code + 8);
-		event.key.unicode = xkb_keysym_to_utf32(event.key.keysym);
-		const xkb_keysym_t *symbols;
-
-		if (xkb_keymap_key_get_syms_by_level(seat->keymap, code + 8, 0,
-						     0, &symbols) == 1) {
-			uint32_t ascii = xkb_keysym_to_utf32(symbols[0]);
-
-			if (ascii > 0 && ascii < 128)
-				event.key.ascii = ascii;
-		}
-		xkb_state_key_get_utf8(seat->key_state, code + 8,
-				       event.key.text, sizeof(event.key.text));
-		event.key.shift = xkb_state_mod_name_is_active(
-			seat->key_state, XKB_MOD_NAME_SHIFT,
-			XKB_STATE_MODS_EFFECTIVE);
-		event.key.control = xkb_state_mod_name_is_active(
-			seat->key_state, XKB_MOD_NAME_CTRL,
-			XKB_STATE_MODS_EFFECTIVE);
-		event.key.alt = xkb_state_mod_name_is_active(
-			seat->key_state, XKB_MOD_NAME_ALT,
-			XKB_STATE_MODS_EFFECTIVE);
-	}
-	dispatch_event(ui, &event);
+	resolve_keyboard_key(seat, &event.key);
+	generation = ui->repeat_generation;
+	route = dispatch_event(ui, &event);
+	if (pressed && repeats && route == FPLINUX_UI_KEY_TO_REPEAT_CANVAS &&
+	    generation == ui->repeat_generation)
+		start_repeat(seat, code, fplinux_ui_current(ui));
 }
 
 static void keyboard_modifiers(void *data, struct wl_keyboard *keyboard,
@@ -897,10 +1016,12 @@ static void keyboard_modifiers(void *data, struct wl_keyboard *keyboard,
 static void keyboard_repeat(void *data, struct wl_keyboard *keyboard,
 			    int32_t rate, int32_t delay)
 {
-	(void)data;
+	struct input_seat *seat = data;
+
 	(void)keyboard;
-	(void)rate;
-	(void)delay;
+	stop_repeat(seat);
+	seat->repeat_rate = rate > 0 && delay >= 0 ? rate : 0;
+	seat->repeat_delay = delay;
 }
 
 static const struct wl_keyboard_listener keyboard_listener = {
@@ -1003,6 +1124,8 @@ static void registry_global(void *data, struct wl_registry *registry,
 
 static void destroy_seat(struct input_seat *seat)
 {
+	if (seat->repeat_timer)
+		lv_timer_delete(seat->repeat_timer);
 	if (seat->keyboard)
 		wl_keyboard_destroy(seat->keyboard);
 	wl_seat_destroy(seat->seat);
@@ -1656,6 +1779,7 @@ void fplinux_ui_close(struct fplinux_ui *ui)
 
 void fplinux_ui_quit(struct fplinux_ui *ui)
 {
+	fplinux_ui_cancel_key_repeat(ui, NULL);
 	ui->quit = true;
 	set_lifecycle(ui, FPLINUX_UI_CLOSING);
 }
@@ -2271,6 +2395,7 @@ bool fplinux_ui_home(struct fplinux_ui *ui)
 		.type = FPLINUX_UI_SESSION_HOME,
 	};
 
+	fplinux_ui_cancel_key_repeat(ui, NULL);
 	return fplinux_ui_send(ui, &message);
 }
 
@@ -2616,6 +2741,7 @@ bool fplinux_ui_menu_open(struct fplinux_ui *ui, const char *title,
 	ui->menu = fplinux_ui_menu_view_create(ui, title, items, count);
 	if (!ui->menu)
 		return false;
+	fplinux_ui_cancel_key_repeat(ui, NULL);
 	ui->menu_callback = callback;
 	ui->menu_context = context;
 	fplinux_ui_modal_set(ui, FPLINUX_UI_MODAL_MENU, true);

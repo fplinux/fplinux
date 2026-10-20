@@ -154,8 +154,10 @@ def _verify_alpine_rootfs(  # noqa: PLR0913 -- verify each independently selecte
     if "fplinux-terminal" in packages:
         owners.update(
             {
-                "/etc/init.d/fplinux-terminal": "fplinux-terminal-openrc",
                 "/usr/bin/fplinux-terminal": "fplinux-terminal",
+                "/usr/libexec/fplinux-terminal-pty": "fplinux-terminal",
+                "/etc/fplinux/terminal.bashrc": "fplinux-terminal",
+                "/usr/share/applications/org.fplinux.terminal.desktop": "fplinux-terminal",
             }
         )
     if "fplinux-input" in packages:
@@ -221,9 +223,6 @@ def _verify_alpine_rootfs(  # noqa: PLR0913 -- verify each independently selecte
     _require_openrc_service(root, "default", "fplinux-brightness")
     if "fplinux-session" in packages:
         _require_openrc_service(root, "default", "fplinux-session")
-    terminal_startup = root / "etc/runlevels/default/fplinux-terminal"
-    if terminal_startup.exists() or terminal_startup.is_symlink():
-        fail("Alpine rootfs must leave DRM terminal startup to an explicit recovery action")
     if "fplinux-input" in packages:
         _require_openrc_service(root, "default", "fplinux-input")
     if "fplinux-usb-gadget" in packages:

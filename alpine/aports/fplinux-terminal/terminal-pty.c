@@ -1,17 +1,28 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
 #include "terminal-pty.h"
+#include "terminal-pty-supervisor.h"
 
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <termios.h>
-#include <time.h>
 #include <unistd.h>
+
+static bool read_report(int fd, struct fplinux_terminal_pty_report *report)
+{
+	ssize_t count;
+
+	do {
+		count = read(fd, report, sizeof(*report));
+	} while (count < 0 && errno == EINTR);
+	return count == sizeof(*report);
+}
 
 bool fplinux_terminal_pty_open(struct fplinux_terminal_pty *pty,
 			       unsigned int columns, unsigned int rows,
@@ -19,12 +30,20 @@ bool fplinux_terminal_pty_open(struct fplinux_terminal_pty *pty,
 			       const char *shell_token)
 {
 	struct winsize size = { 0 };
+	struct fplinux_terminal_pty_report report;
+	int owner[2] = { -1, -1 };
+	int status[2] = { -1, -1 };
 	char path[128];
 	int slave = -1;
 	int error;
 
-	pty->fd = -1;
-	pty->shell = -1;
+	*pty = (struct fplinux_terminal_pty){
+		.fd = -1,
+		.shell = -1,
+		.supervisor = -1,
+		.owner_fd = -1,
+		.status_fd = -1,
+	};
 	if (!columns || columns > USHRT_MAX || !rows || rows > USHRT_MAX) {
 		errno = EINVAL;
 		return false;
@@ -42,42 +61,71 @@ bool fplinux_terminal_pty_open(struct fplinux_terminal_pty *pty,
 		goto fail;
 	}
 	slave = open(path, O_RDWR | O_NOCTTY | O_CLOEXEC);
-	if (slave < 0 || ioctl(slave, TIOCSWINSZ, &size) < 0)
+	if (slave < 0 || ioctl(slave, TIOCSWINSZ, &size) < 0 ||
+	    pipe2(owner, O_CLOEXEC) < 0 || pipe2(status, O_CLOEXEC) < 0)
 		goto fail;
-	pty->shell = fork();
-	if (pty->shell < 0)
+	pty->supervisor = fork();
+	if (pty->supervisor < 0)
 		goto fail;
-	if (!pty->shell) {
-		sigset_t signals;
-		struct sigaction action = { .sa_handler = SIG_DFL };
-		int number;
+	if (!pty->supervisor) {
+		char owner_text[24];
+		char status_text[24];
+		char slave_text[24];
 
-		sigemptyset(&signals);
-		sigprocmask(SIG_SETMASK, &signals, NULL);
-		for (number = 1; number < NSIG; ++number)
-			sigaction(number, &action, NULL);
-		if (setsid() < 0 || ioctl(slave, TIOCSCTTY, 0) < 0 ||
-		    dup2(slave, STDIN_FILENO) < 0 ||
-		    dup2(slave, STDOUT_FILENO) < 0 ||
-		    dup2(slave, STDERR_FILENO) < 0)
+		/* The manager may SIGKILL the GUI's entire process group. */
+		if (setsid() < 0)
 			_exit(126);
-		if (slave > STDERR_FILENO)
-			close(slave);
+		close(owner[1]);
+		close(status[0]);
 		close(pty->fd);
-		if (setenv("TERM", "xterm-256color", 1) ||
-		    setenv("LANG", "C.UTF-8", 1) || setenv("SHELL", shell, 1) ||
-		    setenv("FPLINUX_TERMINAL_PROMPT_TOKEN", shell_token, 1))
+		if (fcntl(owner[0], F_SETFD, 0) < 0 ||
+		    fcntl(status[1], F_SETFD, 0) < 0 ||
+		    fcntl(slave, F_SETFD, 0) < 0)
 			_exit(126);
-		execl(shell, shell, "--noprofile", "--rcfile", startup, "-i",
-		      (char *)NULL);
+		snprintf(owner_text, sizeof(owner_text), "%d", owner[0]);
+		snprintf(status_text, sizeof(status_text), "%d", status[1]);
+		snprintf(slave_text, sizeof(slave_text), "%d", slave);
+		/* Exec discards LVGL buffers and mappings; the guardian is a tiny ELF. */
+		execl(FPLINUX_TERMINAL_PTY_HELPER_PATH,
+		      FPLINUX_TERMINAL_PTY_HELPER_PATH, owner_text, status_text,
+		      slave_text, shell, startup, shell_token, (char *)NULL);
 		_exit(127);
 	}
 	close(slave);
+	slave = -1;
+	close(owner[0]);
+	owner[0] = -1;
+	close(status[1]);
+	status[1] = -1;
+	pty->owner_fd = owner[1];
+	owner[1] = -1;
+	pty->status_fd = status[0];
+	status[0] = -1;
+	if (!read_report(pty->status_fd, &report)) {
+		errno = EIO;
+		goto fail;
+	}
+	if (report.type != FPLINUX_TERMINAL_PTY_READY || report.shell <= 0) {
+		errno = report.error ? report.error : EIO;
+		goto fail;
+	}
+	pty->shell = report.shell;
+	if (fcntl(pty->status_fd, F_SETFL, O_NONBLOCK) < 0)
+		goto fail;
 	return true;
+
 fail:
 	error = errno;
 	if (slave >= 0)
 		close(slave);
+	if (owner[0] >= 0)
+		close(owner[0]);
+	if (owner[1] >= 0)
+		close(owner[1]);
+	if (status[0] >= 0)
+		close(status[0]);
+	if (status[1] >= 0)
+		close(status[1]);
 	fplinux_terminal_pty_close(pty);
 	errno = error;
 	return false;
@@ -92,13 +140,33 @@ bool fplinux_terminal_pty_shell_foreground(
 bool fplinux_terminal_pty_finished(struct fplinux_terminal_pty *pty,
 				   int *status)
 {
+	struct fplinux_terminal_pty_report report;
 	pid_t result;
+	int supervisor_status;
 
-	if (pty->shell <= 0)
+	if (pty->supervisor <= 0) {
+		*status = pty->shell_status;
 		return true;
-	result = waitpid(pty->shell, status, WNOHANG);
-	if (result == pty->shell || (result < 0 && errno == ECHILD)) {
+	}
+	if (!pty->status_received && read_report(pty->status_fd, &report) &&
+	    report.type == FPLINUX_TERMINAL_PTY_FINISHED) {
+		pty->shell_status = report.status;
+		pty->status_received = true;
+	}
+	result = waitpid(pty->supervisor, &supervisor_status, WNOHANG);
+	if (result == pty->supervisor || (result < 0 && errno == ECHILD)) {
+		pty->supervisor = -1;
 		pty->shell = -1;
+		/* FINISHED can arrive between the first nonblocking read and waitpid. */
+		if (!pty->status_received &&
+		    read_report(pty->status_fd, &report) &&
+		    report.type == FPLINUX_TERMINAL_PTY_FINISHED) {
+			pty->shell_status = report.status;
+			pty->status_received = true;
+		}
+		if (!pty->status_received)
+			pty->shell_status = 126 << 8;
+		*status = pty->shell_status;
 		return true;
 	}
 	return false;
@@ -106,23 +174,22 @@ bool fplinux_terminal_pty_finished(struct fplinux_terminal_pty *pty,
 
 void fplinux_terminal_pty_close(struct fplinux_terminal_pty *pty)
 {
-	const struct timespec delay = { .tv_nsec = 10000000L };
-	unsigned int attempt;
 	int status;
 
 	if (pty->fd >= 0)
 		close(pty->fd);
 	pty->fd = -1;
-	if (pty->shell <= 0)
-		return;
-	kill(pty->shell, SIGHUP);
-	for (attempt = 0; attempt < 100; ++attempt) {
-		if (fplinux_terminal_pty_finished(pty, &status))
-			return;
-		nanosleep(&delay, NULL);
-	}
-	kill(pty->shell, SIGKILL);
-	while (waitpid(pty->shell, &status, 0) < 0 && errno == EINTR)
-		;
+	if (pty->owner_fd >= 0)
+		close(pty->owner_fd);
+	pty->owner_fd = -1;
+	/* The guardian exits only after the PTY session is empty and reaped. */
+	if (pty->supervisor > 0)
+		while (waitpid(pty->supervisor, &status, 0) < 0 &&
+		       errno == EINTR)
+			;
+	pty->supervisor = -1;
 	pty->shell = -1;
+	if (pty->status_fd >= 0)
+		close(pty->status_fd);
+	pty->status_fd = -1;
 }

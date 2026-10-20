@@ -17,6 +17,7 @@ global:
 	fplinux_ui_canvas_new;
 	fplinux_ui_canvas_object;
 	fplinux_ui_canvas_set_key_handler;
+	fplinux_ui_canvas_set_key_repeat;
 	fplinux_ui_canvas_set_keyboard_keys;
 	fplinux_ui_close;
 	fplinux_ui_current;

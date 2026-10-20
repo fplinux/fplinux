@@ -1,0 +1,173 @@
+# Russian translation of the FPLinux terminal (org.fplinux.terminal).
+# SPDX-License-Identifier: GPL-2.0-only
+msgid ""
+msgstr ""
+"Project-Id-Version: org.fplinux.terminal\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "Terminal error"
+msgstr "Ошибка терминала"
+
+msgid "Close"
+msgstr "Закрыть"
+
+msgid "The shell connection was lost. Open Terminal again."
+msgstr "Нет связи с оболочкой. Откройте терминал снова."
+
+msgid "The shell is not accepting input. Open Terminal again."
+msgstr "Оболочка не принимает ввод. Откройте терминал снова."
+
+msgid "The screen could not be updated. Open Terminal again."
+msgstr "Экран не обновлён. Откройте терминал снова."
+
+msgid "The terminal could not close. Open Terminal again."
+msgstr "Терминал не закрылся. Откройте его снова."
+
+msgid "Insert"
+msgstr "Вставить"
+
+msgid "Send"
+msgstr "Послать"
+
+#: fplinux-terminal.c terminal-input.c
+msgid "Terminal"
+msgstr "Терминал"
+
+#: fplinux-terminal.c terminal-input.c
+msgid "Symbols"
+msgstr "Символы"
+
+#: fplinux-terminal.c terminal-input.c
+msgid "Special keys"
+msgstr "Служебные клавиши"
+
+#: fplinux-terminal.c
+msgid "Input language"
+msgstr "Язык ввода"
+
+#: fplinux-terminal.c terminal-input.c
+msgid "Modifiers"
+msgstr "Модификаторы"
+
+#: fplinux-terminal.c
+msgid "Done"
+msgstr "Готово"
+
+#: fplinux-terminal.c
+msgid "Help"
+msgstr "Справка"
+
+#: terminal-input.c
+msgid "Enter"
+msgstr "Ввод"
+
+#: terminal-input.c
+msgid "Clear"
+msgstr "Стереть"
+
+#: terminal-input.c terminal-help.c
+msgid "Scrollback"
+msgstr "Прокрутка"
+
+#: terminal-input.c
+msgid "Interrupt Ctrl+C"
+msgstr "Прервать Ctrl+C"
+
+#: terminal-input.c
+msgid "End input Ctrl+D"
+msgstr "Конец ввода Ctrl+D"
+
+#: terminal-input.c
+msgid "Search Ctrl+R"
+msgstr "Поиск Ctrl+R"
+
+#: terminal-input.c
+#, c-format
+msgid "Language: %s"
+msgstr "Язык ввода: %s"
+
+#: terminal-input.c
+#, c-format
+msgid "%u line above"
+msgid_plural "%u lines above"
+msgstr[0] "%u строка выше"
+msgstr[1] "%u строки выше"
+msgstr[2] "%u строк выше"
+
+#: terminal-help.c
+msgid "Typing"
+msgstr "Ввод текста"
+
+#: terminal-help.c
+msgid "Options"
+msgstr "Опции"
+
+#: terminal-help.c
+msgid "Keyboard"
+msgstr "Клавиатура"
+
+#: terminal-help.c
+msgid "Exit"
+msgstr "Выход"
+
+#: terminal-help.c
+msgid ""
+"2–9: Press repeatedly to choose a letter. Pause or press another key to send it.\n"
+"1: punctuation. 0: space.\n"
+"*: switch letter case. Hold *: switch between digits and letters.\n"
+"#: cancel a pending letter, otherwise erase. Hold #: clear the line at the Bash prompt.\n"
+"OK: Enter. Dial: Tab completion.\n"
+"Clear: cancel a pending letter or the modifiers, otherwise erase.\n"
+"The title shows the input mode, such as abc or 123."
+msgstr ""
+"2–9: нажимайте несколько раз, чтобы выбрать букву. Пауза или другая клавиша отправляет её.\n"
+"1: знаки препинания. 0: пробел.\n"
+"*: смена регистра. Удерживайте *: переключение между цифрами и буквами.\n"
+"#: отменяет набираемую букву, иначе стирает. Удерживайте #: очистить строку в приглашении Bash.\n"
+"OK: Enter. Вызов: дополнение по Tab.\n"
+"«Стереть»: отменяет набираемую букву или модификаторы, иначе стирает.\n"
+"Заголовок показывает режим ввода, например абв или 123."
+
+#: terminal-help.c
+msgid ""
+"Modifiers: Mark Ctrl, Alt or Shift and choose Done. They apply to the next key or letter, and the title shows them until then.\n"
+"Symbols and Special keys: type a symbol, Esc or F1–F12.\n"
+"Language: choose the letters of multi-tap.\n"
+"Interrupt, End input and Search send Ctrl+C, Ctrl+D and Ctrl+R."
+msgstr ""
+"«Модификаторы»: отметьте Ctrl, Alt или Shift и выберите «Готово». Они действуют на следующую клавишу или букву, и до тех пор заголовок показывает их.\n"
+"«Символы» и «Служебные клавиши»: ввод символа, Esc или F1–F12.\n"
+"«Язык ввода»: буквы для набора на клавишах.\n"
+"«Прервать», «Конец ввода» и «Поиск» отправляют Ctrl+C, Ctrl+D и Ctrl+R."
+
+#: terminal-help.c
+msgid ""
+"Options > Scrollback shows earlier output. Up/Down: scroll one line. Left/Right: scroll one page. The title shows how many lines are above.\n"
+"Back or typing returns to live output.\n"
+"At the Bash prompt, Up/Down choose earlier commands, and Search finds one."
+msgstr ""
+"«Опции > Прокрутка» показывает прежний вывод. Вверх/вниз: на одну строку. Влево/вправо: на страницу. Заголовок показывает, сколько строк выше.\n"
+"«Назад» или набор текста возвращает к текущему выводу.\n"
+"В приглашении Bash вверх/вниз выбирают прежние команды, а «Поиск» находит нужную."
+
+#: terminal-help.c
+msgid ""
+"An external keyboard types directly, with its own Ctrl, Alt and Shift, Esc and Enter.\n"
+"Shift+PageUp and Shift+PageDown scroll the output.\n"
+"Ctrl+Esc returns to Home and keeps the shell running."
+msgstr ""
+"Внешняя клавиатура вводит текст сама, со своими Ctrl, Alt и Shift, Esc и Enter.\n"
+"Shift+PageUp и Shift+PageDown прокручивают вывод.\n"
+"Ctrl+Esc возвращает на главный экран, оставляя оболочку работать."
+
+#: terminal-help.c
+msgid ""
+"Options > Exit closes the terminal and its shell and returns to the app list. Save files first.\n"
+"The red key offers Minimize and Close. Minimize keeps the shell running; Close stops its programs. Tasks reopens a minimized terminal."
+msgstr ""
+"«Опции > Выход» закрывает терминал и его оболочку и возвращает к списку приложений. Сохраните файлы заранее.\n"
+"Красная клавиша предлагает «Свернуть» и «Закрыть». «Свернуть» оставляет оболочку работать, «Закрыть» останавливает её программы. Откройте свёрнутый терминал в списке задач."

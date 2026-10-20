@@ -564,6 +564,7 @@
   "tiles": {
     "settings": "#4A5D73",
     "notes": "#A56100",
-    "snake": "#9C3873"
+    "snake": "#9C3873",
+    "terminal": "#4A4D4A"
   }
 }

@@ -98,10 +98,10 @@ def fake_apk_owner(owners: dict[str, str]) -> Callable[[Path, str, str], None]:
 class AlpineRootfsTests:
     """Protect Alpine rootfs behavior with controlled temporary inputs."""
 
-    def test_graphical_rootfs_accepts_session_without_a_drm_terminal(
+    def test_graphical_rootfs_accepts_its_compositor_and_startup_service(
         self, alpine_source: AlpineSourceContext
     ) -> None:
-        """A graphical composition owns startup without requiring the recovery terminal."""
+        """The selected graphical session has its runtime and enabled service."""
         root = verified_rootfs(alpine_source)
         install_graphical_session(root)
         packages = ("fplinux-base", "fplinux-session")
@@ -146,35 +146,49 @@ class AlpineRootfsTests:
         install_graphical_session(root)
         packages = ("fplinux-base", "fplinux-session")
         write_world(root, packages)
-        owners = {"/etc/init.d/fplinux-session": "fplinux-terminal-openrc"}
+        owners = {"/etc/init.d/fplinux-session": "fplinux-base"}
 
         with (
             mock.patch.object(alpine_rootfs_verify, "_require_apk_owner", fake_apk_owner(owners)),
-            pytest.raises(SystemExit, match="fplinux-session: fplinux-terminal-openrc"),
+            pytest.raises(SystemExit, match="fplinux-session: fplinux-base"),
         ):
             alpine_rootfs_verify._verify_alpine_rootfs(root, packages)  # noqa: SLF001
 
-    @pytest.mark.parametrize("graphical", [False, True], ids=["recovery", "graphical"])
-    def test_selected_recovery_terminal_requires_explicit_startup(
-        self, alpine_source: AlpineSourceContext, *, graphical: bool
+    @pytest.mark.parametrize(
+        "missing",
+        [
+            None,
+            "usr/bin/fplinux-terminal",
+            "usr/libexec/fplinux-terminal-pty",
+            "etc/fplinux/terminal.bashrc",
+            "usr/share/applications/org.fplinux.terminal.desktop",
+        ],
+        ids=["complete", "application", "pty-helper", "shell-startup", "catalog-entry"],
+    )
+    def test_terminal_rootfs_requires_its_application_shell_and_catalog_entry(
+        self, alpine_source: AlpineSourceContext, missing: str | None
     ) -> None:
-        """Installing the recovery command must not start a second DRM owner during boot."""
+        """The selected terminal has the files used to discover and start its shell."""
         root = verified_rootfs(alpine_source)
         packages: tuple[str, ...] = ("fplinux-base", "fplinux-terminal")
-        if graphical:
-            install_graphical_session(root)
-            packages = (*packages, "fplinux-session")
         write_world(root, packages)
-        (root / "usr/bin/fplinux-terminal").write_text("terminal fixture\n", encoding="utf-8")
-        (root / "etc/init.d/fplinux-terminal").write_text("#!/bin/sh\n", encoding="utf-8")
+        for relative in (
+            "usr/bin/fplinux-terminal",
+            "usr/libexec/fplinux-terminal-pty",
+            "etc/fplinux/terminal.bashrc",
+            "usr/share/applications/org.fplinux.terminal.desktop",
+        ):
+            path = root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("terminal fixture\n", encoding="utf-8")
 
         with mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"):
-            alpine_rootfs_verify._verify_alpine_rootfs(root, packages)  # noqa: SLF001
-            (root / "etc/runlevels/default/fplinux-terminal").symlink_to(
-                "/etc/init.d/fplinux-terminal"
-            )
-            with pytest.raises(SystemExit, match="explicit recovery action"):
+            if missing is None:
                 alpine_rootfs_verify._verify_alpine_rootfs(root, packages)  # noqa: SLF001
+            else:
+                (root / missing).unlink()
+                with pytest.raises(SystemExit, match=re.escape((root / missing).name)):
+                    alpine_rootfs_verify._verify_alpine_rootfs(root, packages)  # noqa: SLF001
 
     def test_materializing_a_subpackage_copies_the_producer_sources(
         self, alpine_source: AlpineSourceContext

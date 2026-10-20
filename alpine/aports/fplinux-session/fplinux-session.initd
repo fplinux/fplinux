@@ -21,14 +21,6 @@ depend() {
 	after fplinux-input fplinux-brightness
 }
 
-start_pre() {
-	if service_started fplinux-terminal; then
-		eerror "Stop fplinux-terminal before starting the graphical session"
-		return 1
-	fi
-	return 0
-}
-
 stop_post() {
 	# The manager restores the keypad light's trigger when it ends, but not
 	# when the compositor was killed.

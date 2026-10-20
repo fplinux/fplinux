@@ -1,0 +1,33 @@
+// SPDX-License-Identifier: GPL-2.0-only
+xkb_keymap {
+    xkb_keycodes "test" {
+        minimum = 8;
+        maximum = 255;
+        <AC01> = 38;
+        <LFSH> = 50;
+        <FK24> = 202;
+    };
+    xkb_types "test" {
+        type "ONE_LEVEL" {
+            modifiers = None;
+            map[None] = Level1;
+        };
+        type "TWO_LEVEL" {
+            modifiers = Shift;
+            map[None] = Level1;
+            map[Shift] = Level2;
+        };
+    };
+    xkb_compatibility "test" {};
+    xkb_symbols "test" {
+        key <AC01> {
+            type = "TWO_LEVEL",
+            symbols[Group1] = [ a, A ],
+            symbols[Group2] = [ b, B ],
+            repeat = Yes
+        };
+        key <LFSH> { [ Shift_L ], repeat = No };
+        key <FK24> { [ F24 ], repeat = No };
+        modifier_map Shift { <LFSH> };
+    };
+};

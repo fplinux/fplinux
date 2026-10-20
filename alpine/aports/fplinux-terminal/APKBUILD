@@ -2,44 +2,35 @@
 pkgname=fplinux-terminal
 pkgver=1
 pkgrel=0
-pkgdesc="Interactive DRM terminal for FPLinux phones"
+pkgdesc="Terminal for the FPLinux graphical session"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-only"
-depends="bash fplinux-input fplinux-xkb ncurses-terminfo-base fplinux-font-terminus-data"
-makedepends_build="clang22 lld22 llvm22"
-makedepends_host="musl-dev linux-headers gcc fplinux-libdrm-dev libevdev-dev eudev-dev fplinux-libxkbcommon-dev fplinux-libxkbcommon-static fplinux-libtsm-dev"
-subpackages="$pkgname-openrc"
+depends="bash fplinux-ui fplinux-libtsm ncurses-terminfo-base"
+makedepends_build="clang22 lld22 pkgconf gettext"
+makedepends_host="musl-dev musl-libintl linux-headers fplinux-ui-dev fplinux-libtsm-dev fplinux-libxkbcommon-dev"
 options="!check"
 source="
 	fplinux-terminal.c
 	fplinux-terminal.h
-	terminal-diagnostic.c
-	terminal-diagnostic.h
 	terminal-engine.c
 	terminal-help.c
 	terminal-help.h
 	terminal-input.c
-	terminal-keyboard.c
-	terminal-keyboard.h
 	terminal-pty.c
 	terminal-pty.h
+	terminal-pty-supervisor.c
+	terminal-pty-supervisor.h
 	terminal-render.c
 	terminal-render.h
+	terminal-session.c
+	terminal-session.h
 	fplinux-terminal.bashrc
-	fplinux-terminal.initd
+	org.fplinux.terminal.desktop
+	ru.po
 	fplinux-cli.c
 	fplinux-cli.h
-	fplinux-font.c
-	fplinux-font.h
-	fplinux-drm-session.c
-	fplinux-drm-session.h
-	fplinux-input-session.c
-	fplinux-input-session.h
-	fplinux-input-device.h
 	fplinux-keypad.h
-	fplinux-keyboard-text.c
-	fplinux-keyboard-text.h
 	fplinux-multitap.c
 	fplinux-multitap.h
 	fplinux-language.c
@@ -48,64 +39,51 @@ source="
 builddir="$srcdir"
 
 build() {
-	export CFLAGS="$CFLAGS -Oz -flto=thin"
-	export CXXFLAGS="$CXXFLAGS -Oz -flto=thin"
-	export LDFLAGS="$LDFLAGS -flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe"
-	export AR=/usr/lib/llvm22/bin/llvm-ar
-	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
-	"$CC" $CPPFLAGS $CFLAGS -std=c11 -Wall -Wextra -Werror \
-		-I"$srcdir" -I"$CBUILDROOT/usr/include/libdrm" \
-		-I"$CBUILDROOT/usr/include/libevdev-1.0" \
-		fplinux-terminal.c terminal-diagnostic.c terminal-engine.c terminal-help.c \
-		terminal-input.c \
-		terminal-keyboard.c terminal-pty.c terminal-render.c \
-		fplinux-cli.c fplinux-font.c fplinux-drm-session.c fplinux-input-session.c \
-		fplinux-keyboard-text.c fplinux-multitap.c fplinux-language.c \
-		$LDFLAGS -ltsm "$CBUILDROOT/usr/lib/libxkbcommon.a" -levdev -ludev -ldrm -o fplinux-terminal
+	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
+	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		-I"$srcdir" $(pkg-config --cflags fplinux-ui) \
+		fplinux-terminal.c terminal-engine.c terminal-help.c terminal-input.c \
+		terminal-pty.c terminal-render.c terminal-session.c \
+		fplinux-cli.c fplinux-multitap.c fplinux-language.c \
+		$(pkg-config --libs fplinux-ui) -ltsm $LDFLAGS \
+		-Wl,--gc-sections -o fplinux-terminal
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror -static \
+		terminal-pty-supervisor.c $LDFLAGS -o fplinux-terminal-pty
+	msgfmt --check --output-file=ru.mo ru.po
 }
 
 package() {
 	install -Dm755 fplinux-terminal "$pkgdir/usr/bin/fplinux-terminal"
-	install -Dm755 fplinux-terminal.initd "$pkgdir/etc/init.d/fplinux-terminal"
+	install -Dm755 fplinux-terminal-pty "$pkgdir/usr/libexec/fplinux-terminal-pty"
 	install -Dm644 fplinux-terminal.bashrc "$pkgdir/etc/fplinux/terminal.bashrc"
-	install -Dm644 "$CBUILDROOT/usr/share/licenses/fplinux-libxkbcommon/LICENSE" \
-		"$pkgdir/usr/share/licenses/$pkgname/libxkbcommon-LICENSE"
-}
-
-openrc() {
-	default_openrc
-	depends="$depends fplinux-input-openrc"
+	install -Dm644 org.fplinux.terminal.desktop \
+		"$pkgdir/usr/share/applications/org.fplinux.terminal.desktop"
+	install -Dm644 ru.mo \
+		"$pkgdir/usr/share/locale/ru/LC_MESSAGES/org.fplinux.terminal.mo"
 }
 
 sha512sums="
-aa82fa7e43e6241be16beb0793bccaa2b7785619040738b8caa23f96b8d6430d43be92346e7bdfaa913204ae49b3992ebe00e5f5f5c78bb758bc2d202fa35eaf  fplinux-terminal.c
-8f10e642e649ad8d96623a6d9d36a1a2c35fde4fb5fc13b6fbd67e186fae808d3f0c0c4e7c48ab46ffebee10ed4f4dad72425958ad2d6e884c406580c0bdae80  fplinux-terminal.h
-cd4689a0fac2d7f064dab009f872c49366b617be958347276efc6d8f3dc3395c084087d3a21a5e3bcb4b37c023154e3458d26d49a0b9302d20982dfeae24e464  terminal-diagnostic.c
-369a9d33c3ed083ddeb2ed25789660a9a5727cf288545e2ec5ce657a33075ce09eb17b7c179277f4676b3707d769bd81499edaf95f12aae51c80f26527be012f  terminal-diagnostic.h
-32e6bb2f12cff2aadf882127a40f5489c41d991403706200834e4e418197d71a4539d04c74f970a3bf67c1869fd94b1d61267cd6afea4c146e3e7585b236161e  terminal-engine.c
-daf2487e8fe51ff9cf6f686bf234704cce8148a39eb34c468943720339f3d712f0e055993d7c36de5d3eebec6c48ef10f0a80e702c30e0db2146cd3a5834f388  terminal-help.c
-7c2546a082fa92025459b8b42e015ecf5c3bbcc33645c1a99044403673ce612e45744ebd8348ac78d0a644507e8e50467755630b980fcbde366a17f159a54abd  terminal-help.h
-3652bd53d50d3df308d5ea24a8873cf3efd9a713764594ae2b819945d3edf0a2c8b8ac4c7e3fa03174cb36a426185f08919233cac10bc3d85af27b80b0c76d9f  terminal-input.c
-3ae3efab9da275a69c4a5cdef8ef86cf04900f01952225e84f516db61af89e569ea9c271ed273eef1a2914b919476a2b647c831ffa59d33761b2d178dbc2739b  terminal-keyboard.c
-8d3fb0af4153da10b753fc703caa80770632d92c99472fb16cbf42d3ef3acb73c91b12b0feb94e751a5c52dbb149c719cd2df214dc95a6c8514741787685e2d3  terminal-keyboard.h
-1ada174c04151e6d35b78cc207214c0eb6a3dcc27da8d714646e97328a393fc5de25076c02fa6598bfa346d0c5ee6088841dc6d6a3e0f2b7e5ee83923a578268  terminal-pty.c
-acc8ae17548ccc0540d5a38fdc884b0bd8311df317308025deb15c717b5ca3c6a4cb062b2ad1cc184d28bfee87708b68b9e2dd5908e685c37b740227872a06ef  terminal-pty.h
-c1633c1d160a8528a553d6fb30e9f4692bf8c4b3afaf041e1632eed822c2a107d5ae19ae4bcec8bcca114c6a737491d9a4b8bcff529b9c7899774fd45736e926  terminal-render.c
-2e2be0343d3f791cea8b25280b6db271457fb73d422293aacf9b4942666ce703e16528b28c8c2a019f9845d2ea3d6e0fc88cc75b728c8329582d523eb0ca695c  terminal-render.h
-e58b4f5fff1a0303ce9c33c03159cb7a35db76654e716dfcd8538b9fed15e6894c4e93cd87dd63c2d54a2b5fa48b7c20276de70c31ce07edaaf965aec49ff4e8  fplinux-terminal.bashrc
-f77754a6f9df93852ef78083cbb7f00744fbffa7de8fcba19a3e8a0fb3e62c67c32d31bb51e11fda1ff34f82254ec2c17527089f498b4ebd97c7d842fa6588b7  fplinux-terminal.initd
+6a1c2c6c533bb83649edfd06d975853c2d949621aba0178b1ba37144a5f8e35e9e68dd2e70ed78a20d95ceed466e427bad07f62f5c1e32dba456b4fcc171b79c  fplinux-terminal.c
+a01d2007be5bdf4b9945e69311558e83d2aaf3f559ca87e07c645d882baab49b3905d460f91ae5a8d32bf15ae69554d2a040d47c4caca9f1597f750aec95f583  fplinux-terminal.h
+c8aea3039825ed00c31cc40cb6857d08820c10e9f5da076bb1ca58597507b10fe8cb77fc2edcc722873427371c83fe91d602cd2fe7a1135de80dc5d4cd88b4cb  terminal-engine.c
+4907f515d5d052dd7b900c31c181cd9f970151aba0a34d3c0c1fe28085a8ef086b8ee2b0c8468601d75b07238c6b031f45f78d362bf8b990df37d97f3849947f  terminal-help.c
+6646981df5593aa678ae31fd6f68b3eaf0835e93dc804368bc5d4988a735fb35acc2e373b995090aabbefa951d240d10ab467657fa58ebc9dc3882f512405f2e  terminal-help.h
+fc5bfec564c4c484d0bdf6a21c873eca921e2d65ac3b167d0de7d64028da2e1fa51499847f6bad1aec0b90f526b7f0bdab46c4b49c31a6caa889bd34caad2fc5  terminal-input.c
+4fa4d026e1c2597edc006c6373f944953ddbef35eb0cce1632459aaa87540c364bdb8fe98b405c3aa335db401b0971ad97ced2b4a262f477c13591c25dee4712  terminal-pty.c
+417677fbb79a79157a8517598621e2b5ff74f891502b94961dca5e570a7f1e871fc9b963431687019f57488a3bf9c1599e3f02776df1cb0182c641142add47e1  terminal-pty.h
+77a2c63237da279be7739ae6452c5fdd0871012bc3fbfcc9fb983598eed5eb1081e3c41ec676142e55ec9842497e528e92891c34e72df803035adb1cbc69a1a1  terminal-pty-supervisor.c
+f3749127d509379463b13e98c70e6b1af7580efbaa7d11e4a155ea9d30ca1d5b263473ae37783c0d1ad50c468d054d4fa7ab991cb48c052a2aec2740e1a457d8  terminal-pty-supervisor.h
+15e8e29ec3f798f231b099995f083a4ac2c96e3c017c8ad9ba7af2fad23dcf50c81ea55b70a8fc2adad8f0eefcb164a080716b0b4897f087c9f5eddd50178d09  terminal-render.c
+4065275ea747a68392f170a8407d95d9f103e63fc1789a9418056311b3f469fbb835f5603353f1b8346a086893c1c8cab980a435a64a7a2f8fca90fc8fd9240f  terminal-render.h
+950c139dbc382a619a111873cf0a29fec333560509d2d49da819845549736d4ab97de41116bd5d581e3533cd555210346fbd9d8eed8bba9ef019aee76e3e32e4  terminal-session.c
+109aa6a73084872cf1f027423a0630cc9752351dcfade1524e65a6f77b03e572b0c32f8cdac81bdf2340a4bf7c1b36aa658cae4b6732e12fde75921f803ba386  terminal-session.h
+c07f939bdb94fc7f083a1ae41aa2240efa823bb0fecd444dcad914bf58568b2f411602f7d8496619da748cb4f6600003176985e2b9bd49f613b7e06f7ba677c8  fplinux-terminal.bashrc
+36a656af0f2e4cbf88ce8ac680a0cc87b515b62e45264ed81f4bcb042771e0a5f49c5fa93b6cbc75f872dc6181d74a44ba36df45ae957ed1f00fa9ee71b8756b  org.fplinux.terminal.desktop
+78a4b0edc6bdf8adf2858f8882b0e0156762bdbb5154761109adb53b918577c4f42afcb3992562acdf7ff2a795324ae7a58df4f15b9dd5ccad9268f152675537  ru.po
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
-9348115546f586a5078627b79014fd5a59989bb84b04a22de80b4e5780200a54c7f2b532a376b160e33aec5f058f382d15b08f3545b1234389dd2f4e405422da  fplinux-font.c
-dd731108a9774c00bb1267f96c266929ee2a8d63d2c8f62a9f3c73b884996edc1cf5e83b772e058a8cbc8fa3c820721a66bd75253bf759d9a0acdf6e546962bf  fplinux-font.h
-6b253f856c2a6886801ec56fd4f607019b89c5465a9fffd78ea4196cadc90688b452b10e45d4767e2cfddd5d846dad4bba2b8452e0c79426f08a4ed057e0e104  fplinux-drm-session.c
-a71678fa063e52aa2220c2bfd391a2a3cf154c04c1cdb7e078e3942f4f24d8510c1d7bd8d5b57bd96e0d32842c319f53f52731c26e0b80bbfb32774c7ba8fc74  fplinux-drm-session.h
-03521d61420422c13c6750370dbb999c3c82b7356f9bd2163ceebb66c3ada2c75dbe608f37b256998b7488c73a0b54f3e09835fc627f0b89ce636ce2cc297877  fplinux-input-session.c
-2720eb45e6d403009c72ff8025ac28adde8320f4005917afc05e24bd0bcaffb2a90fc23f7213a0c9c9a9af7d7a3f6dcad4f4e44cf6f979a0157bae6c98117fc0  fplinux-input-session.h
-defa0078d5b788c6180813f46b42042fd401555cce70fc7ae40550b7c27b65a04972678b5beb8c65e41dbcfe36ba6b926154d94c2700e345bb8d3d2ba251e4ef  fplinux-input-device.h
 0a6d41b98223953b0b890be3041fba31e7878e6752094ed439b1e1e7e9240b2c7bf175ae671d05485ee25fa9ae74e45ddc63e9592768bd5d19e6e4ae6765a978  fplinux-keypad.h
-5122e4be8e95df244eef3673a3606aeaba278651359bbc4b4e04e35425f681decb1703df0db2f0b02bae4aa14da01cf90b5188ec61696129037939c290fe5010  fplinux-keyboard-text.c
-ee7e848c687c5a7582624269f089bd2dcaba81a582cfc9ddfd07526fe240f037feab791062f35ea699a5211a3d11dd386545f45e3f68a3ddd89d332f520dfb76  fplinux-keyboard-text.h
 445ed5909ae89e45408e9d925cc1cfe1fb85c07ad4fce76128a8f55fd4fdff7b0e7c957dcbc5bcdd4bf71759b93eb6b360cb22d4507e0e6375369fa68b311190  fplinux-multitap.c
 2cd893f9960835c0bae05ffe8f460d315ae18266973db4370b7649dab648109038b75d5724230f82ba1c3ae8fe55f76548a490cb2e815c9eebd712df0d75f0cf  fplinux-multitap.h
 0e113a3d69fa45b700c5c84b7bf10df2656cf986d594252274bb8afbaebbd952ef793d272aed728a911edc1a445eaa911aced6cb9cc0f419967e12a6c9e8d478  fplinux-language.c

@@ -1,104 +1,63 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "terminal-help.h"
+#include "fplinux-terminal.h"
 
-#include <string.h>
-
-static const struct {
+struct help_section {
 	const char *title;
 	const char *text;
-} sections[] = {
+};
+
+/* Translated when shown; the help screen wraps the lines. */
+static const struct help_section sections[] = {
 	{
-		"Typing",
-		"Use Left/Right to switch sections and Up/Down to scroll the text.\n"
-		"2-9: Tap repeatedly to choose a letter. Pause or press another digit to send it.\n"
-		"1: Choose punctuation. 0: Insert a space.\n"
-		"*: Switch letter case. Hold * to switch between numbers and letters.\n"
-		"#: Cancel a pending letter, otherwise erase. Hold # to clear the line at the Bash prompt.\n"
-		"Centre: Enter. Dial: Tab completion.\n"
-		"Menu: Choose symbols, special keys or the input language.",
+		N_("Typing"),
+		N_("2–9: Press repeatedly to choose a letter. Pause or press another key to send it.\n"
+		   "1: punctuation. 0: space.\n"
+		   "*: switch letter case. Hold *: switch between digits and letters.\n"
+		   "#: cancel a pending letter, otherwise erase. Hold #: clear the line at the Bash prompt.\n"
+		   "OK: Enter. Dial: Tab completion.\n"
+		   "Clear: cancel a pending letter or the modifiers, otherwise erase.\n"
+		   "The title shows the input mode, such as abc or 123."),
 	},
 	{
-		"Modifiers",
-		"Hold left soft or choose Menu > Modifiers to open the strip.\n"
-		"Left/Right: Select Ctrl, Alt or Shift. Centre: Toggle it.\n"
-		"1: Toggle Ctrl. 2: Toggle Alt. 3: Toggle Shift. You can combine them.\n"
-		"Left soft (Done): Arm the combination for the next phone key or completed letter.\n"
-		"Right soft (Cancel or Clear): Reset the combination outside menus.\n"
-		"Back in a menu keeps modifiers armed. Pending letters wait while menus are open.",
+		N_("Options"),
+		N_("Modifiers: Mark Ctrl, Alt or Shift and choose Done. They apply to the next key or letter, and the title shows them until then.\n"
+		   "Symbols and Special keys: type a symbol, Esc or F1–F12.\n"
+		   "Language: choose the letters of multi-tap.\n"
+		   "Interrupt, End input and Search send Ctrl+C, Ctrl+D and Ctrl+R."),
 	},
 	{
-		"History",
-		"Right soft: Open scrollback when no modifiers are armed.\n"
-		"Up/Down: Scroll one line. Left/Right: Scroll one page.\n"
-		"Right soft (Back): Return to live output. Typing also resumes live input.\n"
-		"External keyboard: Shift+PageUp and Shift+PageDown scroll output.\n"
-		"At the Bash prompt, Up/Down choose previous or next commands.\n"
-		"Menu > Search sends Ctrl+R to search command history.",
+		N_("Scrollback"),
+		N_("Options > Scrollback shows earlier output. Up/Down: scroll one line. Left/Right: scroll one page. The title shows how many lines are above.\n"
+		   "Back or typing returns to live output.\n"
+		   "At the Bash prompt, Up/Down choose earlier commands, and Search finds one."),
+	},
+	{
+		N_("Keyboard"),
+		N_("An external keyboard types directly, with its own Ctrl, Alt and Shift, Esc and Enter.\n"
+		   "Shift+PageUp and Shift+PageDown scroll the output.\n"
+		   "Ctrl+Esc returns to Home and keeps the shell running."),
+	},
+	{
+		N_("Exit"),
+		N_("Options > Exit closes the terminal and its shell and returns to the app list. Save files first.\n"
+		   "The red key offers Minimize and Close. Minimize keeps the shell running; Close stops its programs. Tasks reopens a minimized terminal."),
 	},
 };
 
-/* Help is ASCII; newlines separate controls, not prewrapped display rows. */
-static size_t next_line(const char **cursor, unsigned int columns)
+size_t fplinux_terminal_help_count(void)
 {
-	const char *text = *cursor;
-	size_t size = 0;
-	size_t last_space = 0;
-
-	while (text[size] && text[size] != '\n' && size < columns) {
-		if (text[size] == ' ')
-			last_space = size;
-		++size;
-	}
-	if (size == columns && text[size] && text[size] != '\n' &&
-	    text[size] != ' ' && last_space)
-		size = last_space;
-	*cursor = text + size;
-	while (**cursor == ' ')
-		++*cursor;
-	if (**cursor == '\n')
-		++*cursor;
-	return size;
+	return sizeof(sections) / sizeof(sections[0]);
 }
 
-void fplinux_terminal_help_open(const struct fplinux_terminal *terminal,
-				struct fplinux_terminal_help *help)
+void fplinux_terminal_help_section(size_t index, const char **title,
+				   const char **text)
 {
-	unsigned int rows = tsm_screen_get_height(terminal->screen);
-	unsigned int line;
-	const char *cursor;
-
-	memset(help, 0, sizeof(*help));
-	help->columns = tsm_screen_get_width(terminal->screen);
-	/* The native grid already excludes the toolbar; the title uses a row. */
-	if (terminal->modifier || terminal->modifier_panel)
-		--rows;
-	help->body_rows = rows > 1 ? rows - 1 : 1;
-	help->section_count = sizeof(sections) / sizeof(sections[0]);
-	help->section = terminal->menu_index % help->section_count;
-	help->title = sections[help->section].title;
-	help->cursor = sections[help->section].text;
-	cursor = help->cursor;
-	while (*cursor) {
-		next_line(&cursor, help->columns);
-		++help->line_count;
+	if (index >= fplinux_terminal_help_count()) {
+		*title = "";
+		*text = "";
+		return;
 	}
-	help->max_offset = help->line_count > help->body_rows ?
-				   help->line_count - help->body_rows :
-				   0;
-	help->offset = terminal->help_scroll < help->max_offset ?
-			       terminal->help_scroll :
-			       help->max_offset;
-	for (line = 0; line < help->offset; ++line)
-		next_line(&help->cursor, help->columns);
-	help->remaining_rows = help->body_rows;
-}
-
-size_t fplinux_terminal_help_next(struct fplinux_terminal_help *help,
-				  const char **text)
-{
-	if (!help->remaining_rows || !*help->cursor)
-		return 0;
-	--help->remaining_rows;
-	*text = help->cursor;
-	return next_line(&help->cursor, help->columns);
+	*title = _(sections[index].title);
+	*text = _(sections[index].text);
 }

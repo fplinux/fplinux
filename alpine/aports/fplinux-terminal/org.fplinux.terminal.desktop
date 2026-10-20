@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Terminal
+Name[ru]=Терминал
+Exec=/usr/bin/fplinux-terminal
+Icon=org.fplinux.terminal
+Terminal=false
+Categories=System;TerminalEmulator;
+X-FPLinux-Mode=integrated

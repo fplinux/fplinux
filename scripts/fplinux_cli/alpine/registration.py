@@ -40,10 +40,6 @@ GPU_OUTPUT_SOURCES = (
     "lib/fplinux/fplinux-gpu-output.c",
     "include/fplinux/fplinux-gpu-output.h",
 )
-KEYBOARD_TEXT_SOURCES = (
-    "lib/fplinux/fplinux-keyboard-text.c",
-    "include/fplinux/fplinux-keyboard-text.h",
-)
 CLI_SOURCES = (
     "lib/fplinux/fplinux-cli.c",
     "include/fplinux/fplinux-cli.h",
@@ -146,13 +142,8 @@ SHARED_APORT_SOURCES = {
     ),
     "fplinux-snake": CLI_SOURCES,
     "fplinux-terminal": (
-        *FONT_SOURCES,
         *CLI_SOURCES,
-        *DRM_SESSION_SOURCES,
-        *INPUT_DEVICE_SOURCES,
         *KEYPAD_CODE_SOURCES,
-        *INPUT_SESSION_SOURCES,
-        *KEYBOARD_TEXT_SOURCES,
         *MULTITAP_SOURCES,
     ),
     "fplinux-tyrquake": (
@@ -206,6 +197,7 @@ COMMON_PACKAGES = (
     "fplinux-language-en",
     "fplinux-language-ru",
     "fplinux-launcher",
+    "fplinux-libtsm",
     "fplinux-ncurses",
     "fplinux-notes",
     "fplinux-openrc",
@@ -213,6 +205,7 @@ COMMON_PACKAGES = (
     "fplinux-session",
     "fplinux-settings",
     "fplinux-snake",
+    "fplinux-terminal",
     "fplinux-ui",
     "fplinux-input",
     "fplinux-libdrm",
@@ -256,7 +249,7 @@ LOCAL_BUILD_DEPENDENCIES = {
     "fplinux-showcase": ("fplinux-libdrm", "fplinux-mesa"),
     "fplinux-snake": ("fplinux-ui",),
     "fplinux-terminal": (
-        "fplinux-libdrm",
+        "fplinux-ui",
         "fplinux-libtsm",
         "fplinux-libxkbcommon",
     ),

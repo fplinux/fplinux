@@ -1,0 +1,2 @@
+Options > Exit closes the terminal and its shell and returns to the app list. Save files first.
+The red key offers Minimize and Close. Minimize keeps the shell running; Close stops its programs. Tasks reopens a minimized terminal.

@@ -205,6 +205,8 @@ struct fplinux_ui_screen {
 	void *canvas_context;
 	/* Keyboard Escape and Enter go to canvas_key, not to the commands. */
 	bool keyboard_raw;
+	bool key_repeat;
+	bool canvas_active;
 };
 
 struct fplinux_ui_screens {
@@ -1678,8 +1680,12 @@ static void set_active(struct fplinux_ui_screen *screen, bool active)
 		fplinux_ui_listview_set_active(screen->list, active);
 	else if (screen->kind == SCREEN_ALERT)
 		run_alert_timer(screen, active && screen->layer->visible);
-	else if (screen->kind == SCREEN_CANVAS)
+	else if (screen->kind == SCREEN_CANVAS) {
+		if (screen->canvas_active && !active)
+			fplinux_ui_cancel_key_repeat(screen->ui, screen);
+		screen->canvas_active = active;
 		fplinux_ui_text_canvas_active(screen->root, active);
+	}
 }
 
 /* The top screen shows, and an alert shows the screens below it too. */
@@ -1740,6 +1746,7 @@ static void free_item(struct form_item *item)
 /* Frees a screen that is no longer in the layer's list. */
 static void destroy_screen(struct fplinux_ui_screen *screen)
 {
+	fplinux_ui_cancel_key_repeat(screen->ui, screen);
 	stop_timer(&screen->timer);
 	stop_timer(&screen->spin_timer);
 	/* The list views and text fields go with their objects. */
@@ -4099,6 +4106,16 @@ void fplinux_ui_canvas_set_keyboard_keys(struct fplinux_ui_screen *canvas,
 		canvas->keyboard_raw = raw;
 }
 
+void fplinux_ui_canvas_set_key_repeat(struct fplinux_ui_screen *canvas,
+				      bool enabled)
+{
+	if (!canvas || canvas->kind != SCREEN_CANVAS)
+		return;
+	if (!enabled)
+		fplinux_ui_cancel_key_repeat(canvas->ui, canvas);
+	canvas->key_repeat = enabled;
+}
+
 /* Keys */
 
 static void open_options(struct fplinux_ui_screen *screen,
@@ -4233,17 +4250,21 @@ static void screen_release(struct fplinux_ui_screen *screen,
 		canvas_key(screen, key);
 }
 
-bool fplinux_ui_screens_key(struct fplinux_ui_screens *layer,
-			    const struct fplinux_ui_key *key)
+enum fplinux_ui_key_route
+fplinux_ui_screens_key(struct fplinux_ui_screens *layer,
+		       const struct fplinux_ui_key *key)
 {
 	bool keyboard = key->source == FPLINUX_UI_KEY_KEYBOARD;
 	unsigned char bit = (unsigned char)(1U << (key->code % 8));
 	unsigned char *used;
+	bool repeat_canvas;
 
 	if (!layer || !layer->top)
-		return false;
+		return FPLINUX_UI_KEY_UNHANDLED;
 	if (key->code >= KEY_CNT)
-		return true;
+		return FPLINUX_UI_KEY_HANDLED;
+	repeat_canvas = layer->top->kind == SCREEN_CANVAS &&
+			layer->top->key_repeat && layer->top->canvas_key;
 	used = &layer->used[keyboard][key->code / 8];
 	if (!key->pressed) {
 		if (*used & bit)
@@ -4252,8 +4273,22 @@ bool fplinux_ui_screens_key(struct fplinux_ui_screens *layer,
 			screen_release(layer->top, key);
 	} else if (screen_press(layer->top, key)) {
 		*used |= bit;
+		repeat_canvas = false;
 	}
 	refresh(layer);
+	return key->pressed && repeat_canvas ? FPLINUX_UI_KEY_TO_REPEAT_CANVAS :
+					       FPLINUX_UI_KEY_HANDLED;
+}
+
+bool fplinux_ui_screens_repeat_key(struct fplinux_ui_screens *layer,
+				   struct fplinux_ui_screen *canvas,
+				   const struct fplinux_ui_key *key)
+{
+	if (!layer || layer->closing || layer->top != canvas ||
+	    !layer->visible || !canvas->key_repeat || !canvas->canvas_active ||
+	    !canvas->canvas_key || fplinux_ui_menu_is_open(layer->ui))
+		return false;
+	canvas_key(canvas, key);
 	return true;
 }
 

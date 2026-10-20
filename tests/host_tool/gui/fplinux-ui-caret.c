@@ -109,6 +109,13 @@ struct fplinux_ui_screens **fplinux_ui_screens_slot(struct fplinux_ui *context)
 	return &context->screens;
 }
 
+void fplinux_ui_cancel_key_repeat(struct fplinux_ui *context,
+				  const struct fplinux_ui_screen *canvas)
+{
+	(void)context;
+	(void)canvas;
+}
+
 int fplinux_ui_modal_height(const struct fplinux_ui *context)
 {
 	return fplinux_ui_height(context);

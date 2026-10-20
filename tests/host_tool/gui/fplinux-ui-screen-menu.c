@@ -443,6 +443,13 @@ struct fplinux_ui_screens **fplinux_ui_screens_slot(struct fplinux_ui *owner)
 	return &owner->screens;
 }
 
+void fplinux_ui_cancel_key_repeat(struct fplinux_ui *owner,
+				  const struct fplinux_ui_screen *canvas)
+{
+	(void)owner;
+	(void)canvas;
+}
+
 const struct fplinux_ui_theme *fplinux_ui_theme(const struct fplinux_ui *owner)
 {
 	return &theme;

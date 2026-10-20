@@ -214,7 +214,6 @@ class AlpineRecipesTests:
     @pytest.mark.parametrize(
         "consumer",
         [
-            pytest.param("fplinux-terminal", id="terminal"),
             pytest.param("fplinux-brightness-ui", id="brightness-ui"),
             pytest.param("fplinux-showcase", id="showcase"),
         ],
@@ -222,8 +221,8 @@ class AlpineRecipesTests:
     def test_font_source_changes_only_text_consumers_and_is_staged_for_each(
         self, alpine_source: AlpineSourceContext, consumer: str
     ) -> None:
-        """A font-reader edit invalidates its three consumers and reaches their aport stages."""
-        consumers = ("fplinux-terminal", "fplinux-brightness-ui", "fplinux-showcase")
+        """A font-reader edit reaches the direct-display text consumers' aport stages."""
+        consumers = ("fplinux-brightness-ui", "fplinux-showcase")
         unrelated = "fplinux-present"
         for name in (
             *consumers,
@@ -267,18 +266,27 @@ class AlpineRecipesTests:
         )
 
     @pytest.mark.parametrize(
-        ("library", "filename", "consumers"),
+        ("library", "filename", "consumers", "terminal_rootfs_changes"),
         [
             pytest.param(
                 "fplinux-libdrm",
                 "library.c",
-                ("fplinux-present", "fplinux-terminal"),
+                ("fplinux-present",),
+                False,
                 id="drm-source",
             ),
-            pytest.param("fplinux-libtsm", "APKBUILD", ("fplinux-terminal",), id="tsm-aport"),
             pytest.param(
-                "fplinux-libxkbcommon", "APKBUILD", ("fplinux-terminal",), id="xkbcommon-aport"
+                "fplinux-libtsm", "APKBUILD", ("fplinux-terminal",), True, id="tsm-aport"
             ),
+            pytest.param(
+                "fplinux-libxkbcommon",
+                "APKBUILD",
+                ("fplinux-ui", "fplinux-terminal"),
+                True,
+                id="xkbcommon-aport",
+            ),
+            pytest.param("fplinux-ui", "APKBUILD", ("fplinux-terminal",), True, id="ui-aport"),
+            pytest.param("fplinux-font-terminus", "APKBUILD", (), False, id="psf-font-aport"),
         ],
     )
     def test_library_changes_invalidate_consumer_recipes_only(
@@ -287,6 +295,8 @@ class AlpineRecipesTests:
         library: str,
         filename: str,
         consumers: tuple[str, ...],
+        *,
+        terminal_rootfs_changes: bool,
     ) -> None:
         """Library source and configuration changes invalidate linked APKs and rootfs inputs."""
         packages = (
@@ -296,6 +306,10 @@ class AlpineRecipesTests:
             "fplinux-libxkbcommon",
             "fplinux-present",
             "fplinux-terminal",
+            "fplinux-ui",
+            "fplinux-lvgl",
+            "fplinux-wayland",
+            "fplinux-icons",
         )
         for name in packages:
             alpine_source.write(f"alpine/aports/{name}/APKBUILD", f"pkgname={name}\n".encode())
@@ -320,7 +334,8 @@ class AlpineRecipesTests:
                 assert (before[name]) != (after), name
             else:
                 assert (before[name]) == (after), name
-        assert (rootfs_before) != (alpine_source.recipe(packages=("fplinux-terminal",)))
+        rootfs_after = alpine_source.recipe(packages=("fplinux-terminal",))
+        assert (rootfs_before != rootfs_after) == terminal_rootfs_changes
 
     def test_unselected_aport_is_not_causal(self, alpine_source: AlpineSourceContext) -> None:
         """Files outside the selected package set cannot invalidate its rootfs."""

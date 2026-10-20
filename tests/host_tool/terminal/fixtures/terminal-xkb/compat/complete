@@ -1,6 +1,0 @@
-// SPDX-License-Identifier: GPL-2.0-only
-default xkb_compatibility "complete" {
-    interpret Shift_L { action = SetMods(modifiers = Shift); };
-    interpret Shift_R { action = SetMods(modifiers = Shift); };
-    interpret Control_L { action = SetMods(modifiers = Control); };
-};

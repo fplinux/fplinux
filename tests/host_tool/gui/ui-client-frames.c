@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
 #include "fplinux-ui-fonts.h"
+#include "fplinux-ui-menu.h"
 #include "fplinux-ui-profile.h"
 #include "fplinux-ui-screen.h"
 #include "fplinux-ui-session.h"
@@ -10,18 +11,31 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <linux/input-event-codes.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 #include <wayland-server.h>
+#include <xkbcommon/xkbcommon.h>
+
+struct compositor;
+
+struct keyboard_peer {
+	struct compositor *compositor;
+	struct wl_global *global;
+	struct wl_resource *seat;
+	struct wl_resource *keyboard;
+	const char *name;
+};
 
 struct compositor {
 	struct wl_display *display;
@@ -35,12 +49,37 @@ struct compositor {
 	uint16_t colour;
 	bool uniform;
 	bool configured;
+	bool release_frames;
+	const char *keymap_path;
+	struct keyboard_peer keyboards[2];
 };
 
 struct application {
 	int control;
 	bool closed;
 	lv_obj_t *softkeys;
+};
+
+enum observation_type {
+	OBSERVATION_KEY,
+	OBSERVATION_COMMAND,
+	OBSERVATION_VISIBILITY,
+	OBSERVATION_CLOSE,
+	OBSERVATION_INPUT_CANCEL,
+};
+
+struct observation {
+	enum observation_type type;
+	struct fplinux_ui_key key;
+	char command;
+	bool visible;
+	bool menu_open;
+};
+
+struct repeat_application {
+	int control;
+	bool closed;
+	bool bounce_on_press;
 };
 
 /* Generated package fonts are outside the frame/transport boundary. */
@@ -124,7 +163,9 @@ static void commit_surface(struct wl_client *client,
 			compositor->uniform &= pixels[y * stride + x] ==
 					       compositor->colour;
 	wl_shm_buffer_end_access(buffer);
-	if (!compositor->held[0])
+	if (compositor->release_frames)
+		wl_buffer_send_release(compositor->pending);
+	else if (!compositor->held[0])
 		compositor->held[0] = compositor->pending;
 	else {
 		assert(!compositor->held[1]);
@@ -237,6 +278,94 @@ static void bind_shell(struct wl_client *client, void *data, uint32_t version,
 
 	assert(resource);
 	wl_resource_set_implementation(resource, &shell_interface, data, NULL);
+}
+
+static void send_keymap(struct keyboard_peer *peer)
+{
+	struct xkb_context *context =
+		xkb_context_new(XKB_CONTEXT_NO_DEFAULT_INCLUDES |
+				XKB_CONTEXT_NO_ENVIRONMENT_NAMES);
+	FILE *source = fopen(peer->compositor->keymap_path, "r");
+	struct xkb_keymap *keymap;
+	char *text;
+	size_t bytes;
+	int fd;
+
+	assert(context && source);
+	keymap = xkb_keymap_new_from_file(context, source,
+					  XKB_KEYMAP_FORMAT_TEXT_V1, 0);
+	assert(fclose(source) == 0);
+	assert(keymap);
+	assert(xkb_keymap_mod_get_index(keymap, "Shift") == 0);
+	text = xkb_keymap_get_as_string(keymap, XKB_KEYMAP_FORMAT_TEXT_V1);
+	assert(text);
+	bytes = strlen(text) + 1;
+	assert(bytes <= UINT32_MAX);
+	fd = memfd_create("ui-repeat-keymap", MFD_CLOEXEC);
+	assert(fd >= 0);
+	assert(write(fd, text, bytes) == (ssize_t)bytes);
+	wl_keyboard_send_keymap(peer->keyboard,
+				WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1, fd,
+				(uint32_t)bytes);
+	assert(close(fd) == 0);
+	free(text);
+	xkb_keymap_unref(keymap);
+	xkb_context_unref(context);
+}
+
+static const struct wl_keyboard_interface keyboard_interface = {
+	.release = destroy_resource,
+};
+
+static void get_keyboard(struct wl_client *client, struct wl_resource *resource,
+			 uint32_t id)
+{
+	struct keyboard_peer *peer = wl_resource_get_user_data(resource);
+
+	assert(!peer->keyboard);
+	peer->keyboard = wl_resource_create(client, &wl_keyboard_interface,
+					    wl_resource_get_version(resource),
+					    id);
+	assert(peer->keyboard);
+	wl_resource_set_implementation(peer->keyboard, &keyboard_interface,
+				       peer, NULL);
+	send_keymap(peer);
+	wl_keyboard_send_repeat_info(peer->keyboard, 20, 80);
+}
+
+static const struct wl_seat_interface seat_interface = {
+	.get_keyboard = get_keyboard,
+	.release = destroy_resource,
+};
+
+static void bind_seat(struct wl_client *client, void *data, uint32_t version,
+		      uint32_t id)
+{
+	struct keyboard_peer *peer = data;
+
+	assert(!peer->seat);
+	peer->seat =
+		wl_resource_create(client, &wl_seat_interface, version, id);
+	assert(peer->seat);
+	wl_resource_set_implementation(peer->seat, &seat_interface, peer, NULL);
+	wl_seat_send_name(peer->seat, peer->name);
+	wl_seat_send_capabilities(peer->seat, WL_SEAT_CAPABILITY_KEYBOARD);
+}
+
+static void add_keyboards(struct compositor *compositor)
+{
+	const char *names[] = { "external-keyboard", FPLINUX_UI_KEYPAD_SEAT };
+
+	for (unsigned int i = 0; i < 2; ++i) {
+		struct keyboard_peer *peer = &compositor->keyboards[i];
+
+		peer->compositor = compositor;
+		peer->name = names[i];
+		peer->global = wl_global_create(compositor->display,
+						&wl_seat_interface, 5, peer,
+						bind_seat);
+		assert(peer->global);
+	}
 }
 
 static void paint(struct fplinux_ui *ui, uint32_t colour)
@@ -377,6 +506,164 @@ static int run_application(int control)
 	return result;
 }
 
+static void send_observation(int control, const struct observation *observation)
+{
+	assert(write(control, observation, sizeof(*observation)) ==
+	       (ssize_t)sizeof(*observation));
+}
+
+static void repeat_canvas_key(struct fplinux_ui *ui,
+			      struct fplinux_ui_screen *canvas,
+			      const struct fplinux_ui_key *key, void *data)
+{
+	struct repeat_application *application = data;
+	struct observation observation = {
+		.type = OBSERVATION_KEY,
+		.key = *key,
+		.visible = fplinux_ui_is_visible(ui),
+	};
+
+	(void)canvas;
+	if (application->bounce_on_press && key->pressed) {
+		struct fplinux_ui_screen *cover =
+			fplinux_ui_canvas_new(ui, NULL);
+
+		assert(cover);
+		application->bounce_on_press = false;
+		fplinux_ui_push(ui, cover);
+		assert(fplinux_ui_pop(ui));
+	}
+	send_observation(application->control, &observation);
+}
+
+static struct fplinux_ui_screen *
+new_repeat_canvas(struct fplinux_ui *ui, struct repeat_application *application)
+{
+	struct fplinux_ui_screen *canvas = fplinux_ui_canvas_new(ui, NULL);
+
+	assert(canvas);
+	fplinux_ui_canvas_set_key_handler(canvas, repeat_canvas_key,
+					  application);
+	return canvas;
+}
+
+static void repeat_application_event(struct fplinux_ui *ui,
+				     const struct fplinux_ui_event *event,
+				     void *data)
+{
+	struct repeat_application *application = data;
+	struct observation observation = {
+		.type = OBSERVATION_VISIBILITY,
+		.visible = event->visible,
+	};
+
+	(void)ui;
+	if (event->type == FPLINUX_UI_EVENT_CLOSE) {
+		application->closed = true;
+		observation.type = OBSERVATION_CLOSE;
+		send_observation(application->control, &observation);
+	} else if (event->type == FPLINUX_UI_EVENT_INPUT_CANCEL) {
+		observation.type = OBSERVATION_INPUT_CANCEL;
+		observation.key.source = event->key.source;
+		send_observation(application->control, &observation);
+	} else if (event->type == FPLINUX_UI_EVENT_VISIBILITY)
+		send_observation(application->control, &observation);
+}
+
+static void repeat_application_input(struct fplinux_ui *ui, int fd,
+				     short events, void *data)
+{
+	struct repeat_application *application = data;
+	struct fplinux_ui_screen *canvas = fplinux_ui_current(ui);
+	struct observation observation = { .type = OBSERVATION_COMMAND };
+	char command;
+
+	assert(events == POLLIN);
+	assert(read(fd, &command, 1) == 1);
+	switch (command) {
+	case 'c':
+		assert(!canvas);
+		fplinux_ui_push(ui, new_repeat_canvas(ui, application));
+		break;
+	case 'e':
+		fplinux_ui_canvas_set_key_repeat(canvas, true);
+		break;
+	case 'd':
+		fplinux_ui_canvas_set_key_repeat(canvas, false);
+		break;
+	case 'w':
+		fplinux_ui_canvas_set_keyboard_keys(canvas, true);
+		break;
+	case 'p':
+	case 'v':
+		canvas = new_repeat_canvas(ui, application);
+		fplinux_ui_canvas_set_key_repeat(canvas, true);
+		if (command == 'p')
+			fplinux_ui_push(ui, canvas);
+		else
+			fplinux_ui_replace(ui, canvas);
+		break;
+	case 'b':
+		assert(fplinux_ui_pop(ui));
+		break;
+	case 'o': {
+		const struct fplinux_ui_command help = {
+			.id = 7,
+			.type = FPLINUX_UI_COMMAND_HELP,
+		};
+
+		assert(fplinux_ui_screen_add_command(canvas, &help));
+		break;
+	}
+	case 'h':
+		assert(fplinux_ui_home(ui));
+		break;
+	case 'j':
+		application->bounce_on_press = true;
+		break;
+	case 'z':
+		/* A controlled callback pause makes several deadlines elapse. */
+		observation.command = command;
+		send_observation(fd, &observation);
+		assert(read(fd, &command, 1) == 1 && command == 'Z');
+		/* Keep the next request ready when timer dispatch resumes. */
+		{
+			char next;
+
+			assert(recv(fd, &next, 1, MSG_PEEK) == 1 &&
+			       next == 'n');
+		}
+		break;
+	case 'm':
+	case 'n':
+		break;
+	default:
+		assert(false);
+	}
+	observation.command = command;
+	observation.menu_open = fplinux_ui_menu_is_open(ui);
+	send_observation(fd, &observation);
+}
+
+static int run_repeat_application(int control)
+{
+	struct repeat_application application = { .control = control };
+	struct fplinux_ui *ui = fplinux_ui_open("org.fplinux.repeat-test",
+						repeat_application_event,
+						&application);
+	int result;
+
+	assert(ui);
+	paint(ui, 0xff0000);
+	lv_refr_now(NULL);
+	fplinux_ui_watch_fd(ui, control, POLLIN, repeat_application_input,
+			    &application);
+	result = fplinux_ui_run(ui);
+	fplinux_ui_close(ui);
+	assert(application.closed);
+	return result;
+}
+
 static void pump(struct compositor *compositor)
 {
 	assert(wl_event_loop_dispatch(compositor->loop, 5) >= 0);
@@ -440,6 +727,499 @@ static void wait_input(struct compositor *compositor, int control,
 	assert(ready == 1);
 	assert(read(control, &result, 1) == 1);
 	assert(result == expected);
+}
+
+static struct observation wait_observation(struct compositor *compositor,
+					   int control)
+{
+	struct pollfd descriptor = { .fd = control, .events = POLLIN };
+	uint64_t deadline = now_ms() + 3000;
+	struct observation observation;
+	int ready;
+
+	do {
+		pump(compositor);
+		ready = poll(&descriptor, 1, 0);
+		assert(ready >= 0);
+	} while (!ready && now_ms() < deadline);
+	assert(ready == 1);
+	assert(read(control, &observation, sizeof(observation)) ==
+	       (ssize_t)sizeof(observation));
+	return observation;
+}
+
+static void assert_key(const struct observation *observation,
+		       enum fplinux_ui_key_source source, unsigned int code,
+		       bool pressed, const char *text)
+{
+	assert(observation->type == OBSERVATION_KEY);
+	assert(observation->key.source == source);
+	assert(observation->key.code == code);
+	assert(observation->key.pressed == pressed);
+	assert(!strcmp(observation->key.text, text));
+}
+
+static struct fplinux_ui_key wait_key(struct compositor *compositor,
+				      int control,
+				      enum fplinux_ui_key_source source,
+				      unsigned int code, bool pressed,
+				      const char *text)
+{
+	struct observation observation = wait_observation(compositor, control);
+
+	assert_key(&observation, source, code, pressed, text);
+	return observation.key;
+}
+
+static void assert_no_input(struct compositor *compositor, int control,
+			    unsigned int duration_ms)
+{
+	struct pollfd descriptor = { .fd = control, .events = POLLIN };
+	uint64_t deadline = now_ms() + duration_ms;
+
+	while (now_ms() < deadline) {
+		pump(compositor);
+		assert(poll(&descriptor, 1, 0) == 0);
+	}
+}
+
+static struct observation wait_command(struct compositor *compositor,
+				       int control, char command)
+{
+	uint64_t deadline = now_ms() + 3000;
+	struct observation observation;
+
+	do {
+		assert(now_ms() < deadline);
+		observation = wait_observation(compositor, control);
+		if (observation.type == OBSERVATION_COMMAND) {
+			assert(observation.command == command);
+			return observation;
+		}
+		/* A key callback delivered before the command is still valid. */
+		assert(observation.type == OBSERVATION_KEY);
+		assert(observation.key.source == FPLINUX_UI_KEY_KEYBOARD);
+		assert(observation.key.code == KEY_A);
+	} while (true);
+}
+
+static struct observation application_command(struct compositor *compositor,
+					      int control, char command)
+{
+	assert(write(control, &command, 1) == 1);
+	return wait_command(compositor, control, command);
+}
+
+static void focus_keyboard(struct keyboard_peer *peer)
+{
+	struct wl_array keys;
+
+	wl_array_init(&keys);
+	wl_keyboard_send_enter(
+		peer->keyboard,
+		wl_display_next_serial(peer->compositor->display),
+		peer->compositor->surface, &keys);
+	wl_array_release(&keys);
+	wl_keyboard_send_modifiers(peer->keyboard, 1, 0, 0, 0, 0);
+	wl_display_flush_clients(peer->compositor->display);
+}
+
+static void send_key(struct keyboard_peer *peer, unsigned int code,
+		     bool pressed)
+{
+	wl_keyboard_send_key(peer->keyboard,
+			     wl_display_next_serial(peer->compositor->display),
+			     0xf1234567, code,
+			     pressed ? WL_KEYBOARD_KEY_STATE_PRESSED :
+				       WL_KEYBOARD_KEY_STATE_RELEASED);
+	wl_display_flush_clients(peer->compositor->display);
+}
+
+static void release_key(struct compositor *compositor, int control,
+			struct keyboard_peer *peer,
+			enum fplinux_ui_key_source source, unsigned int code,
+			const char *text)
+{
+	uint64_t deadline = now_ms() + 3000;
+	struct observation observation;
+
+	send_key(peer, code, false);
+	while (true) {
+		assert(now_ms() < deadline);
+		observation = wait_observation(compositor, control);
+		assert(observation.type == OBSERVATION_KEY);
+		if (!observation.key.pressed) {
+			assert_key(&observation, source, code, false, text);
+			return;
+		}
+		assert_key(&observation, source, code, true, text);
+	}
+}
+
+static void start_keyboard_repeat(struct compositor *compositor, int control)
+{
+	uint64_t sent_at = now_ms();
+	struct fplinux_ui_key initial;
+	struct fplinux_ui_key repeated;
+
+	send_key(&compositor->keyboards[0], KEY_A, true);
+	initial = wait_key(compositor, control, FPLINUX_UI_KEY_KEYBOARD, KEY_A,
+			   true, "a");
+	repeated = wait_key(compositor, control, FPLINUX_UI_KEY_KEYBOARD, KEY_A,
+			    true, "a");
+	assert(initial.time_ms >= sent_at &&
+	       initial.time_ms <= repeated.time_ms);
+	assert(repeated.time_ms <= now_ms());
+}
+
+/* A nonrepeating key after a producer update confirms its ordered delivery. */
+static void keyboard_barrier(struct compositor *compositor, int control,
+			     struct keyboard_peer *peer,
+			     enum fplinux_ui_key_source source)
+{
+	uint64_t deadline = now_ms() + 3000;
+	struct observation observation;
+
+	send_key(peer, KEY_F24, true);
+	do {
+		assert(now_ms() < deadline);
+		observation = wait_observation(compositor, control);
+		assert(observation.type == OBSERVATION_KEY);
+		if (observation.key.source == source &&
+		    observation.key.code == KEY_F24)
+			break;
+		assert(observation.key.source == FPLINUX_UI_KEY_KEYBOARD);
+		assert(observation.key.code == KEY_A);
+	} while (true);
+	assert_key(&observation, source, KEY_F24, true, "");
+	send_key(peer, KEY_F24, false);
+	wait_key(compositor, control, source, KEY_F24, false, "");
+}
+
+static void check_keyboard_repeat(struct compositor *compositor, int control)
+{
+	struct keyboard_peer *keyboard = &compositor->keyboards[0];
+	struct fplinux_ui_key key;
+	struct observation observation;
+	uint64_t deadline;
+
+	/* Neither a default Canvas nor raw Enter/Escape handling opts into repeat. */
+	for (unsigned int raw = 0; raw < 2; ++raw) {
+		if (raw)
+			application_command(compositor, control, 'w');
+		send_key(keyboard, KEY_A, true);
+		key = wait_key(compositor, control, FPLINUX_UI_KEY_KEYBOARD,
+			       KEY_A, true, "a");
+		assert(key.keysym == 'a' && key.unicode == 'a' &&
+		       key.ascii == 'a');
+		assert_no_input(compositor, control, 240);
+		send_key(keyboard, KEY_A, false);
+		wait_key(compositor, control, FPLINUX_UI_KEY_KEYBOARD, KEY_A,
+			 false, "a");
+	}
+	application_command(compositor, control, 'e');
+	start_keyboard_repeat(compositor, control);
+
+	/* A held letter resolves fresh modifiers without losing its repeat. */
+	wl_keyboard_send_modifiers(keyboard->keyboard, 2, 1, 0, 0, 0);
+	send_key(keyboard, KEY_LEFTSHIFT, true);
+	deadline = now_ms() + 3000;
+	do {
+		assert(now_ms() < deadline);
+		observation = wait_observation(compositor, control);
+		if (observation.key.code == KEY_LEFTSHIFT)
+			break;
+		assert_key(&observation, FPLINUX_UI_KEY_KEYBOARD, KEY_A, true,
+			   "a");
+	} while (true);
+	assert_key(&observation, FPLINUX_UI_KEY_KEYBOARD, KEY_LEFTSHIFT, true,
+		   "");
+	assert(observation.key.shift);
+	key = wait_key(compositor, control, FPLINUX_UI_KEY_KEYBOARD, KEY_A,
+		       true, "A");
+	assert(key.shift && !key.control && !key.alt);
+	assert(key.keysym == 'A' && key.unicode == 'A' && key.ascii == 'a');
+
+	/* Group 2 uses a distinct literal, so cached text cannot satisfy this. */
+	wl_keyboard_send_modifiers(keyboard->keyboard, 3, 1, 0, 0, 1);
+	send_key(keyboard, KEY_LEFTSHIFT, false);
+	deadline = now_ms() + 3000;
+	do {
+		assert(now_ms() < deadline);
+		observation = wait_observation(compositor, control);
+		if (observation.key.code == KEY_LEFTSHIFT)
+			break;
+		assert_key(&observation, FPLINUX_UI_KEY_KEYBOARD, KEY_A, true,
+			   "A");
+	} while (true);
+	assert_key(&observation, FPLINUX_UI_KEY_KEYBOARD, KEY_LEFTSHIFT, false,
+		   "");
+	key = wait_key(compositor, control, FPLINUX_UI_KEY_KEYBOARD, KEY_A,
+		       true, "B");
+	assert(key.shift && key.keysym == 'B' && key.unicode == 'B');
+	release_key(compositor, control, keyboard, FPLINUX_UI_KEY_KEYBOARD,
+		    KEY_A, "B");
+	assert_no_input(compositor, control, 240);
+
+	/* The keymap marks Shift nonrepeating even on an opted-in Canvas. */
+	send_key(keyboard, KEY_LEFTSHIFT, true);
+	wait_key(compositor, control, FPLINUX_UI_KEY_KEYBOARD, KEY_LEFTSHIFT,
+		 true, "");
+	assert_no_input(compositor, control, 240);
+	send_key(keyboard, KEY_LEFTSHIFT, false);
+	wait_key(compositor, control, FPLINUX_UI_KEY_KEYBOARD, KEY_LEFTSHIFT,
+		 false, "");
+}
+
+static void check_phone_repeat(struct compositor *compositor, int control)
+{
+	struct keyboard_peer *phone = &compositor->keyboards[1];
+	const unsigned int arrows[] = { KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT };
+	const unsigned int single[] = { KEY_NUMERIC_2,	   KEY_NUMERIC_STAR,
+					KEY_NUMERIC_POUND, KEY_OK,
+					KEY_F13,	   KEY_F14 };
+
+	application_command(compositor, control, 'e');
+	for (unsigned int i = 0; i < sizeof(arrows) / sizeof(arrows[0]); ++i) {
+		send_key(phone, arrows[i], true);
+		wait_key(compositor, control, FPLINUX_UI_KEY_PHONE, arrows[i],
+			 true, "");
+		wait_key(compositor, control, FPLINUX_UI_KEY_PHONE, arrows[i],
+			 true, "");
+		release_key(compositor, control, phone, FPLINUX_UI_KEY_PHONE,
+			    arrows[i], "");
+		assert_no_input(compositor, control, 120);
+	}
+	for (unsigned int i = 0; i < sizeof(single) / sizeof(single[0]); ++i) {
+		send_key(phone, single[i], true);
+		wait_key(compositor, control, FPLINUX_UI_KEY_PHONE, single[i],
+			 true, "");
+		assert_no_input(compositor, control, 240);
+		send_key(phone, single[i], false);
+		wait_key(compositor, control, FPLINUX_UI_KEY_PHONE, single[i],
+			 false, "");
+	}
+}
+
+static void wait_menu(struct compositor *compositor, int control, bool open)
+{
+	uint64_t deadline = now_ms() + 3000;
+
+	while (application_command(compositor, control, 'm').menu_open != open)
+		assert(now_ms() < deadline);
+}
+
+static void wait_cancelled_keyboard(struct compositor *compositor, int control)
+{
+	struct observation observation;
+	uint64_t deadline = now_ms() + 3000;
+
+	for (;;) {
+		assert(now_ms() < deadline);
+		observation = wait_observation(compositor, control);
+		if (observation.type == OBSERVATION_INPUT_CANCEL) {
+			assert(observation.key.source ==
+			       FPLINUX_UI_KEY_KEYBOARD);
+			break;
+		}
+		assert_key(&observation, FPLINUX_UI_KEY_KEYBOARD, KEY_A, true,
+			   "a");
+	}
+	wait_key(compositor, control, FPLINUX_UI_KEY_KEYBOARD, KEY_A, false,
+		 "");
+}
+
+static void check_repeat_cancellation(struct compositor *compositor,
+				      int session, int control,
+				      const char *scenario)
+{
+	struct keyboard_peer *keyboard = &compositor->keyboards[0];
+	struct keyboard_peer *phone = &compositor->keyboards[1];
+	struct fplinux_ui_session_message visibility = {
+		.type = FPLINUX_UI_SESSION_VISIBILITY,
+	};
+	struct observation observation;
+	uint64_t deadline;
+	bool cancelled[2] = { false, false };
+
+	application_command(compositor, control, 'e');
+	if (!strcmp(scenario, "repeat-options"))
+		application_command(compositor, control, 'o');
+	start_keyboard_repeat(compositor, control);
+	if (!strcmp(scenario, "repeat-leave")) {
+		wl_keyboard_send_leave(keyboard->keyboard, 2,
+				       compositor->surface);
+		wait_cancelled_keyboard(compositor, control);
+		keyboard_barrier(compositor, control, phone,
+				 FPLINUX_UI_KEY_PHONE);
+		assert_no_input(compositor, control, 240);
+		focus_keyboard(keyboard);
+		keyboard_barrier(compositor, control, phone,
+				 FPLINUX_UI_KEY_PHONE);
+	} else if (!strcmp(scenario, "repeat-visibility")) {
+		assert(fplinux_ui_session_send(session, &visibility));
+		deadline = now_ms() + 3000;
+		do {
+			assert(now_ms() < deadline);
+			observation = wait_observation(compositor, control);
+			if (observation.type == OBSERVATION_VISIBILITY)
+				break;
+			if (observation.type == OBSERVATION_INPUT_CANCEL) {
+				assert(observation.key.source ==
+					       FPLINUX_UI_KEY_PHONE ||
+				       observation.key.source ==
+					       FPLINUX_UI_KEY_KEYBOARD);
+				cancelled[observation.key.source] = true;
+				continue;
+			}
+			assert(observation.type == OBSERVATION_KEY);
+			assert(observation.key.code == KEY_A);
+			if (!observation.key.pressed) {
+				assert(cancelled[FPLINUX_UI_KEY_KEYBOARD]);
+				assert(!observation.visible);
+			}
+		} while (true);
+		assert(!observation.visible);
+		assert(cancelled[FPLINUX_UI_KEY_PHONE] &&
+		       cancelled[FPLINUX_UI_KEY_KEYBOARD]);
+		assert_no_input(compositor, control, 240);
+		visibility.visible = true;
+		assert(fplinux_ui_session_send(session, &visibility));
+		observation = wait_observation(compositor, control);
+		assert(observation.type == OBSERVATION_VISIBILITY &&
+		       observation.visible);
+	} else if (!strcmp(scenario, "repeat-options")) {
+		send_key(keyboard, KEY_COMPOSE, true);
+		send_key(keyboard, KEY_COMPOSE, false);
+		wait_menu(compositor, control, true);
+		assert_no_input(compositor, control, 240);
+		send_key(keyboard, KEY_ESC, true);
+		send_key(keyboard, KEY_ESC, false);
+		wait_menu(compositor, control, false);
+	} else if (!strcmp(scenario, "repeat-stack")) {
+		application_command(compositor, control, 'p');
+		assert_no_input(compositor, control, 240);
+		application_command(compositor, control, 'b');
+	} else if (!strcmp(scenario, "repeat-replace")) {
+		application_command(compositor, control, 'v');
+	} else if (!strcmp(scenario, "repeat-disable")) {
+		application_command(compositor, control, 'd');
+		assert_no_input(compositor, control, 240);
+		application_command(compositor, control, 'e');
+	} else if (!strcmp(scenario, "repeat-keymap")) {
+		send_keymap(keyboard);
+		keyboard_barrier(compositor, control, keyboard,
+				 FPLINUX_UI_KEY_KEYBOARD);
+	} else if (!strcmp(scenario, "repeat-seat")) {
+		wl_global_destroy(keyboard->global);
+		keyboard->global = NULL;
+		wait_cancelled_keyboard(compositor, control);
+		keyboard_barrier(compositor, control, phone,
+				 FPLINUX_UI_KEY_PHONE);
+	} else if (!strcmp(scenario, "repeat-rate-zero")) {
+		wl_keyboard_send_repeat_info(keyboard->keyboard, 0, 80);
+		keyboard_barrier(compositor, control, keyboard,
+				 FPLINUX_UI_KEY_KEYBOARD);
+		assert_no_input(compositor, control, 240);
+		wl_keyboard_send_repeat_info(keyboard->keyboard, 20, 80);
+		keyboard_barrier(compositor, control, keyboard,
+				 FPLINUX_UI_KEY_KEYBOARD);
+	} else {
+		assert(!strcmp(scenario, "repeat-home"));
+		application_command(compositor, control, 'h');
+	}
+	/* Returning focus, Back or reenabling repeat cannot revive the old hold. */
+	assert_no_input(compositor, control, 240);
+}
+
+static void check_repeat_pause(struct compositor *compositor, int control)
+{
+	struct observation observation;
+	unsigned int repeats = 0;
+	uint64_t deadline;
+
+	application_command(compositor, control, 'e');
+	start_keyboard_repeat(compositor, control);
+	application_command(compositor, control, 'z');
+	assert_no_input(compositor, control, 400);
+	assert(write(control, "Z", 1) == 1);
+	assert(write(control, "n", 1) == 1);
+	wait_command(compositor, control, 'Z');
+	deadline = now_ms() + 3000;
+	do {
+		assert(now_ms() < deadline);
+		observation = wait_observation(compositor, control);
+		if (observation.type == OBSERVATION_COMMAND)
+			break;
+		assert_key(&observation, FPLINUX_UI_KEY_KEYBOARD, KEY_A, true,
+			   "a");
+		++repeats;
+	} while (true);
+	assert(observation.command == 'n');
+	/* Eight overdue intervals must not arrive as a catch-up burst. */
+	assert(repeats <= 2);
+	if (!repeats)
+		wait_key(compositor, control, FPLINUX_UI_KEY_KEYBOARD, KEY_A,
+			 true, "a");
+	release_key(compositor, control, &compositor->keyboards[0],
+		    FPLINUX_UI_KEY_KEYBOARD, KEY_A, "a");
+	assert_no_input(compositor, control, 240);
+}
+
+static void check_repeat_bounce(struct compositor *compositor, int control)
+{
+	application_command(compositor, control, 'e');
+	application_command(compositor, control, 'j');
+	send_key(&compositor->keyboards[0], KEY_A, true);
+	wait_key(compositor, control, FPLINUX_UI_KEY_KEYBOARD, KEY_A, true,
+		 "a");
+	/* The first handler returned to the same Canvas after a push and Back. */
+	assert_no_input(compositor, control, 240);
+	send_key(&compositor->keyboards[0], KEY_A, false);
+	wait_key(compositor, control, FPLINUX_UI_KEY_KEYBOARD, KEY_A, false,
+		 "a");
+}
+
+static void check_repeat_closed(struct compositor *compositor, int control,
+				const char *scenario)
+{
+	struct observation observation;
+	uint64_t deadline = now_ms() + 3000;
+
+	do {
+		assert(now_ms() < deadline);
+		observation = wait_observation(compositor, control);
+		if (observation.type == OBSERVATION_CLOSE)
+			break;
+		assert(!strcmp(scenario, "repeat-close"));
+		assert_key(&observation, FPLINUX_UI_KEY_KEYBOARD, KEY_A, true,
+			   "a");
+	} while (true);
+	assert(read(control, &observation, sizeof(observation)) == 0);
+}
+
+static void check_repeat(struct compositor *compositor, int session,
+			 int control, const char *scenario)
+{
+	assert(compositor->keyboards[0].keyboard);
+	assert(compositor->keyboards[1].keyboard);
+	focus_keyboard(&compositor->keyboards[0]);
+	focus_keyboard(&compositor->keyboards[1]);
+	application_command(compositor, control, 'c');
+	if (!strcmp(scenario, "repeat-keyboard"))
+		check_keyboard_repeat(compositor, control);
+	else if (!strcmp(scenario, "repeat-phone"))
+		check_phone_repeat(compositor, control);
+	else if (!strcmp(scenario, "repeat-pause"))
+		check_repeat_pause(compositor, control);
+	else if (!strcmp(scenario, "repeat-bounce"))
+		check_repeat_bounce(compositor, control);
+	else if (!strcmp(scenario, "repeat-close")) {
+		application_command(compositor, control, 'e');
+		start_keyboard_repeat(compositor, control);
+	} else
+		check_repeat_cancellation(compositor, session, control,
+					  scenario);
 }
 
 static void release_buffers(struct compositor *compositor)
@@ -608,11 +1388,16 @@ int main(int argc, char **argv)
 	int listener, session;
 	char descriptor[32];
 	pid_t child;
+	bool repeat;
 
-	assert(argc == 3);
+	assert(argc == 3 || argc == 4);
+	repeat = !strncmp(argv[1], "repeat-", 7);
+	assert(repeat == (argc == 4));
+	compositor.release_frames = repeat;
+	compositor.keymap_path = repeat ? argv[3] : NULL;
 	listener = listen_session(argv[2]);
 	assert(socketpair(AF_UNIX, SOCK_STREAM, 0, wayland) == 0);
-	assert(socketpair(AF_UNIX, SOCK_STREAM, 0, control) == 0);
+	assert(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, control) == 0);
 	child = fork();
 	assert(child >= 0);
 	if (!child) {
@@ -622,7 +1407,8 @@ int main(int argc, char **argv)
 		snprintf(descriptor, sizeof(descriptor), "%d", wayland[1]);
 		assert(setenv("WAYLAND_SOCKET", descriptor, 1) == 0);
 		assert(setenv("FPLINUX_UI_SESSION_SOCKET", argv[2], 1) == 0);
-		return run_application(control[1]);
+		return repeat ? run_repeat_application(control[1]) :
+				run_application(control[1]);
 	}
 	close(wayland[1]);
 	close(control[1]);
@@ -636,6 +1422,8 @@ int main(int argc, char **argv)
 				&compositor, bind_compositor));
 	assert(wl_global_create(compositor.display, &xdg_wm_base_interface, 1,
 				&compositor, bind_shell));
+	if (repeat)
+		add_keyboards(&compositor);
 	assert(wl_client_create(compositor.display, wayland[0]));
 	session = accept4(listener, NULL, NULL, SOCK_CLOEXEC | SOCK_NONBLOCK);
 	assert(session >= 0);
@@ -649,13 +1437,17 @@ int main(int argc, char **argv)
 	if (!strcmp(argv[1], "disconnect")) {
 		check_failed_exit(&compositor, session, control[0], child);
 	} else {
-		if (!strcmp(argv[1], "exit"))
+		if (repeat)
+			check_repeat(&compositor, session, control[0], argv[1]);
+		else if (!strcmp(argv[1], "exit"))
 			check_exit(&compositor, session, control[0], child);
 		else if (!strcmp(argv[1], "softkeys"))
 			check_softkeys(&compositor, session, control[0]);
 		else
 			check_ack(&compositor, session, control[0], argv[1]);
 		finish_application(&compositor, session, child);
+		if (repeat)
+			check_repeat_closed(&compositor, control[0], argv[1]);
 		close(session);
 	}
 	close(control[0]);

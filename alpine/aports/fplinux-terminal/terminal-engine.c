@@ -4,24 +4,6 @@
 #include <stdio.h>
 #include <string.h>
 
-const struct fplinux_multitap_language fplinux_terminal_languages[2] = {
-	{
-		.code = "en",
-		.name = "English (EN)",
-		.indicator = { "EN", "EN", "EN" },
-		.keys = { " 0", ".,!?@$/+-=%^_:;'*#1", "abc2", "def3", "ghi4",
-			  "jkl5", "mno6", "pqrs7", "tuv8", "wxyz9" },
-	},
-	{
-		.code = "ru",
-		.name = "Russian (RU)",
-		.indicator = { "RU", "RU", "RU" },
-		.keys = { " 0", ".,!?@$/+-=%^_:;'*#1", "абвг2", "деёжз3",
-			  "ийкл4", "мноп5", "рсту6", "фхцч7", "шщъы8",
-			  "ьэюя9" },
-	},
-};
-
 static void queue_write(struct tsm_vte *vte, const char *bytes, size_t size,
 			void *data)
 {
@@ -57,30 +39,32 @@ bool fplinux_terminal_init(struct fplinux_terminal *terminal,
 			   unsigned int columns, unsigned int rows,
 			   const char *shell_token)
 {
+	/* Shell colours stay legible on the terminal's dark background. */
 	uint8_t palette[TSM_COLOR_NUM][3] = {
-		{ 0x00, 0x00, 0x00 },
-		{ 0xcd, 0x00, 0x00 },
-		{ 0x00, 0xcd, 0x00 },
-		{ 0xcd, 0xcd, 0x00 },
-		{ 0x00, 0x00, 0xee },
-		{ 0xcd, 0x00, 0xcd },
-		{ 0x00, 0xcd, 0xcd },
-		{ 0xe5, 0xe5, 0xe5 },
-		{ 0x7f, 0x7f, 0x7f },
-		{ 0xff, 0x00, 0x00 },
-		{ 0x00, 0xff, 0x00 },
-		{ 0xff, 0xff, 0x00 },
-		{ 0x5c, 0x5c, 0xff },
-		{ 0xff, 0x00, 0xff },
-		{ 0x00, 0xff, 0xff },
-		{ 0xff, 0xff, 0xff },
-		[TSM_COLOR_FOREGROUND] = { 0xd8, 0xd8, 0xd8 },
-		[TSM_COLOR_BACKGROUND] = { 0x11, 0x11, 0x11 },
+		[TSM_COLOR_BLACK] = { 0x00, 0x00, 0x00 },
+		[TSM_COLOR_RED] = { 0xf7, 0x59, 0x5a },
+		[TSM_COLOR_GREEN] = { 0x39, 0xcb, 0x39 },
+		[TSM_COLOR_YELLOW] = { 0xd6, 0xbe, 0x00 },
+		[TSM_COLOR_BLUE] = { 0x5a, 0x86, 0xff },
+		[TSM_COLOR_MAGENTA] = { 0xd6, 0x5d, 0xd6 },
+		[TSM_COLOR_CYAN] = { 0x00, 0xc3, 0xc6 },
+		[TSM_COLOR_LIGHT_GREY] = { 0xc6, 0xc7, 0xc6 },
+		[TSM_COLOR_DARK_GREY] = { 0x84, 0x86, 0x84 },
+		[TSM_COLOR_LIGHT_RED] = { 0xff, 0x82, 0x84 },
+		[TSM_COLOR_LIGHT_GREEN] = { 0x73, 0xf3, 0x73 },
+		[TSM_COLOR_LIGHT_YELLOW] = { 0xff, 0xf3, 0x63 },
+		[TSM_COLOR_LIGHT_BLUE] = { 0x8c, 0xae, 0xff },
+		[TSM_COLOR_LIGHT_MAGENTA] = { 0xff, 0x8e, 0xff },
+		[TSM_COLOR_LIGHT_CYAN] = { 0x63, 0xff, 0xff },
+		[TSM_COLOR_WHITE] = { 0xff, 0xff, 0xff },
+		[TSM_COLOR_FOREGROUND] = { 0xde, 0xdf, 0xde },
+		[TSM_COLOR_BACKGROUND] = { 0x10, 0x10, 0x10 },
 	};
 
 	memset(terminal, 0, sizeof(*terminal));
-	fplinux_multitap_init(&terminal->compose,
-			      &fplinux_terminal_languages[0], 700);
+	fplinux_multitap_init(&terminal->compose, NULL,
+			      FPLINUX_TERMINAL_COMPOSE_MS);
+	fplinux_terminal_load_languages(terminal, NULL, NULL);
 	if (!shell_token || !*shell_token || strlen(shell_token) > 32)
 		return false;
 	snprintf(terminal->shell_marker, sizeof(terminal->shell_marker),
@@ -99,7 +83,6 @@ bool fplinux_terminal_init(struct fplinux_terminal *terminal,
 			      FPLINUX_TERMINAL_SCROLLBACK_LINES);
 	tsm_vte_set_backspace_sends_delete(terminal->vte, true);
 	tsm_vte_set_osc_cb(terminal->vte, shell_marker, terminal);
-	terminal->active = true;
 	terminal->cursor_visible = true;
 	terminal->dirty = true;
 	return true;

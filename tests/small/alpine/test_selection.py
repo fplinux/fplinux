@@ -342,7 +342,6 @@ class AlpineSelectionTests:
     @pytest.mark.parametrize(
         "consumer",
         [
-            pytest.param("fplinux-terminal", id="terminal"),
             pytest.param("fplinux-brightness-ui", id="brightness-ui"),
             pytest.param("fplinux-showcase", id="showcase"),
         ],

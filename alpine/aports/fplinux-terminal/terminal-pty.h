@@ -8,6 +8,11 @@
 struct fplinux_terminal_pty {
 	int fd;
 	pid_t shell;
+	pid_t supervisor;
+	int owner_fd;
+	int status_fd;
+	int shell_status;
+	bool status_received;
 };
 
 bool fplinux_terminal_pty_open(struct fplinux_terminal_pty *pty,
