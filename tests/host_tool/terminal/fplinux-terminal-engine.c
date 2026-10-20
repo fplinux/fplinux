@@ -121,10 +121,67 @@ static void verify_grid_and_colors(void)
 	fplinux_terminal_destroy(&terminal);
 }
 
+static void verify_language_status(void)
+{
+	struct fplinux_multitap_language language = {
+		.indicator = {
+			[FPLINUX_LANGUAGE_LOWER] =
+				"abcdefghijklmnopqrstuvwxyz"
+				"ABCDEFGHIJKLMNOPQRSTUVWXYZ012345678я",
+		},
+	};
+	struct fplinux_terminal terminal;
+	char status[81];
+
+	assert(fplinux_terminal_init(&terminal, 80, 12, "test"));
+	fplinux_multitap_set_language(&terminal.compose, &language);
+	fplinux_terminal_status(&terminal, status, sizeof(status));
+	assert(!strcmp(status, "Menu abc abcdefghijklmnopqrstuvwxyz"
+			       "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345678я History"));
+	assert(!tsm_screen_resize(terminal.screen, 21, 12));
+	fplinux_terminal_status(&terminal, status, sizeof(status));
+	assert(!strcmp(status, "Menu          History"));
+	fplinux_terminal_destroy(&terminal);
+}
+
+static void verify_composition_timeout_and_punctuation(void)
+{
+	static const char punctuation[] = ".,!?@$/+-=%^_:;'*#1";
+	struct fplinux_terminal terminal;
+
+	assert(fplinux_terminal_init(&terminal, 21, 12, "test"));
+	press(&terminal, KEY_NUMERIC_2, 10);
+	fplinux_terminal_tick(&terminal, 709, true);
+	assert(fplinux_terminal_preedit(&terminal) == 'a');
+	assert(fplinux_terminal_timeout(&terminal, 709) == 1);
+	output_is(&terminal, "", 0);
+	fplinux_terminal_tick(&terminal, 710, true);
+	output_is(&terminal, "a", 1);
+	assert(!fplinux_terminal_preedit(&terminal));
+	for (unsigned int language = 0; language < 2; ++language) {
+		uint64_t now = 1000 + language * 1000;
+
+		fplinux_multitap_set_language(
+			&terminal.compose,
+			&fplinux_terminal_languages[language]);
+		for (size_t index = 0; index < sizeof(punctuation) - 1;
+		     ++index) {
+			press(&terminal, KEY_NUMERIC_1, now + index);
+			assert(fplinux_terminal_preedit(&terminal) ==
+			       (unsigned char)punctuation[index]);
+			output_is(&terminal, "", 0);
+		}
+		press(&terminal, KEY_OK, now + sizeof(punctuation));
+		output_is(&terminal, "1\r", 2);
+	}
+	fplinux_terminal_destroy(&terminal);
+}
+
 static void verify_composition_and_key_sequences(void)
 {
 	struct fplinux_terminal terminal;
 
+	verify_composition_timeout_and_punctuation();
 	assert(fplinux_terminal_init(&terminal, 21, 12, "test"));
 	press(&terminal, KEY_NUMERIC_2, 10);
 	assert(fplinux_terminal_preedit(&terminal) == 'a');
@@ -150,7 +207,7 @@ static void verify_composition_and_key_sequences(void)
 			     TSM_VTE_INVALID);
 	output_is(&terminal, "\033OA", 3);
 	fplinux_multitap_set_language(&terminal.compose,
-				      FPLINUX_MULTITAP_RUSSIAN);
+				      &fplinux_terminal_languages[1]);
 	press(&terminal, KEY_NUMERIC_2, 1300);
 	press(&terminal, KEY_PICKUP_PHONE, 1320);
 	output_is(&terminal, "а\t", 3);
@@ -1303,6 +1360,8 @@ int main(int argc, char **argv)
 		verify_split_prompt();
 	else if (!strcmp(scenario, "grid"))
 		verify_grid_and_colors();
+	else if (!strcmp(scenario, "language-status"))
+		verify_language_status();
 	else if (!strcmp(scenario, "composition"))
 		verify_composition_and_key_sequences();
 	else if (!strcmp(scenario, "pound-focus"))

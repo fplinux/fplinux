@@ -12,6 +12,8 @@
 #define FPLINUX_TERMINAL_OUTPUT_BYTES 16384U
 #define FPLINUX_TERMINAL_CLEAR_LINE "\033[99~"
 
+extern const struct fplinux_multitap_language fplinux_terminal_languages[2];
+
 enum fplinux_terminal_mode {
 	FPLINUX_TERMINAL_LOWER,
 	FPLINUX_TERMINAL_UPPER,

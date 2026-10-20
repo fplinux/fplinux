@@ -1,0 +1,127 @@
+--- a/include/libweston/libweston.h
++++ b/include/libweston/libweston.h
+@@ -625,6 +625,10 @@
+ 
+ 	/** fifo_v1 - list of surfaces to clear next repaint */
+ 	struct wl_list fifo_barrier_surfaces;
++
++	struct wl_signal presentation_signal;
++	uint64_t submission_serial;
++	uint64_t presentation_pending_serial;
+ };
+ 
+ enum weston_pointer_motion_mask {
+--- a/libweston/compositor.c
++++ b/libweston/compositor.c
+@@ -83,7 +83,8 @@
+ #include "alpha-modifier.h"
+ #include "backend.h"
+ #include "libweston-internal.h"
+ #include "fplinux-pixman-buffer.h"
++#include "fplinux-weston-presentation.h"
+ #include "color.h"
+ #include "color-management.h"
+ #include "color-representation.h"
+@@ -3850,6 +3851,7 @@
+ WL_EXPORT void
+ weston_output_schedule_repaint_reset(struct weston_output *output)
+ {
++	output->presentation_pending_serial = 0;
+ 	weston_output_put_back_feedback_list(output);
+ 	output->repaint_status = REPAINT_NOT_SCHEDULED;
+ 	TL_POINT(output->compositor, TLP_CORE_REPAINT_EXIT_LOOP,
+@@ -3906,6 +3908,8 @@
+ 	 */
+ 	weston_compositor_apply_transactions(output->compositor);
+ 	compositor->latched = true;
++	if (!++output->submission_serial)
++		++output->submission_serial;
+ 
+ 	wl_signal_emit(&output->post_latch_signal, output);
+ 
+@@ -4013,6 +4017,7 @@
+ 	output->repaint_needed = false;
+ 	if (r == 0) {
+ 		output->repaint_status = REPAINT_AWAITING_COMPLETION;
++		output->presentation_pending_serial = output->submission_serial;
+ 		output->repainted = true;
+ 	}
+ 
+@@ -4296,6 +4301,7 @@
+ weston_output_schedule_repaint_restart(struct weston_output *output)
+ {
+ 	assert(output->repaint_status == REPAINT_AWAITING_COMPLETION);
++	output->presentation_pending_serial = 0;
+ 	/* The device was busy so try again one frame later */
+ 	timespec_add_nsec(&output->next_repaint, &output->next_repaint,
+ 			  millihz_to_nsec(output->current_mode->refresh));
+@@ -4513,6 +4519,19 @@
+ 	return target_stamp;
+ }
+ 
++WL_EXPORT void
++weston_output_add_presentation_listener(struct weston_output *output,
++					struct wl_listener *listener)
++{
++	wl_signal_add(&output->presentation_signal, listener);
++}
++
++WL_EXPORT uint64_t
++weston_output_get_submission_serial(struct weston_output *output)
++{
++	return output->submission_serial;
++}
++
+ /**
+  * \ingroup output
+  */
+@@ -4526,8 +4545,13 @@
+ 	struct timespec now;
+ 	struct timespec vblank_monotonic;
+ 	int64_t msec_rel;
++	struct fplinux_weston_presentation presentation = {
++		.output = output,
++		.serial = output->presentation_pending_serial,
++	};
+ 
+ 	assert(output->repaint_status == REPAINT_AWAITING_COMPLETION);
++	output->presentation_pending_serial = 0;
+ 
+ 	/*
+ 	 * If timestamp of latest vblank is given, it must always go forwards.
+@@ -4584,6 +4608,9 @@
+ 
+ 	output->frame_time = *stamp;
+ 	output->frame_flags = presented_flags;
++	if (presentation.serial &&
++	    !(presented_flags & WP_PRESENTATION_FEEDBACK_INVALID))
++		wl_signal_emit(&output->presentation_signal, &presentation);
+ 
+ 	/* If we're tearing just repaint right away */
+ 	if (presented_flags & WESTON_FINISH_FRAME_TEARING) {
+@@ -4657,6 +4684,7 @@
+ {
+ 	weston_log("Clearing repaint status.\n");
+ 	assert(output->repaint_status == REPAINT_AWAITING_COMPLETION);
++	output->presentation_pending_serial = 0;
+ 	output->repaint_status = REPAINT_NOT_SCHEDULED;
+ }
+ 
+@@ -8534,6 +8562,8 @@
+ 	struct weston_color_manager *cm;
+ 
+ 	output->shell_private = NULL;
++	output->submission_serial = 0;
++	output->presentation_pending_serial = 0;
+ 	output->pos.c = weston_coord(0, 0);
+ 	output->compositor = compositor;
+ 	output->destroying = 0;
+@@ -8702,6 +8732,8 @@
+ 
+ 	wl_signal_init(&output->frame_signal);
+ 	wl_signal_init(&output->post_latch_signal);
++	wl_signal_init(&output->presentation_signal);
++	output->presentation_pending_serial = 0;
+ 	wl_signal_init(&output->destroy_signal);
+ 
+ 	weston_output_transform_scale_init(output, output->transform,

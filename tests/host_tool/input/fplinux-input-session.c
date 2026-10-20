@@ -624,6 +624,46 @@ static void classification(void)
 	closed(&session);
 }
 
+static void split_phone_keypad(void)
+{
+	struct fplinux_input_session session;
+	uint64_t matrix_id, gpio_id;
+
+	devices[0].present = devices[5].present = true;
+	devices[5].phys = "fplinux/keypad0";
+	open_session(&session, 1U);
+	matrix_id =
+		next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 0, 0, false)
+			.device_id;
+	gpio_id = next(&session, FPLINUX_INPUT_EVENT_DEVICE_ADDED, 0, 0, false)
+			  .device_id;
+	assert(matrix_id != gpio_id);
+	assert(devices[0].grabbed && devices[5].grabbed);
+	empty(&session);
+	input(0, EV_KEY, 352, 1);
+	frame(0);
+	assert(next(&session, FPLINUX_INPUT_EVENT_KEY, 0, 352, true).device_id ==
+	       matrix_id);
+	empty(&session);
+	input(5, EV_KEY, 513, 1);
+	frame(5);
+	assert(next(&session, FPLINUX_INPUT_EVENT_KEY, 0, 513, true).device_id ==
+	       gpio_id);
+	empty(&session);
+	hotplug(0, false);
+	assert(next(&session, FPLINUX_INPUT_EVENT_KEY, 0, 352, false)
+		       .device_id == matrix_id);
+	assert(next(&session, FPLINUX_INPUT_EVENT_DEVICE_REMOVED, 0, 0, false)
+		       .device_id == matrix_id);
+	empty(&session);
+	input(5, EV_KEY, 513, 0);
+	frame(5);
+	assert(next(&session, FPLINUX_INPUT_EVENT_KEY, 0, 513, false)
+		       .device_id == gpio_id);
+	empty(&session);
+	closed(&session);
+}
+
 static void rejected_devices_release_resources(void)
 {
 	struct fplinux_input_session session;
@@ -910,6 +950,8 @@ int main(int argc, char **argv)
 		lifecycle();
 	else if (!strcmp(argv[1], "classification"))
 		classification();
+	else if (!strcmp(argv[1], "split-phone"))
+		split_phone_keypad();
 	else if (!strcmp(argv[1], "rejected"))
 		rejected_devices_release_resources();
 	else if (!strcmp(argv[1], "modifiers"))

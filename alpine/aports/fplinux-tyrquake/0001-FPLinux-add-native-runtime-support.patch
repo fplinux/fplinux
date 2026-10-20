@@ -10,30 +10,47 @@ The distribution supplies the native backend sources before compilation.
 
 Signed-off-by: FPLinux maintainers <fplinux@example.invalid>
 ---
- Makefile          | 10 ++++++++--
+ Makefile          | 16 ++++++++++++++--
+ common/screen.c   |  4 ++++
  common/menu.c     |  2 ++
  common/snd_dma.c  |  6 ++++++
- common/sys_unix.c | 10 ++++++++++
+ common/sys_unix.c | 16 ++++++++++++++++
  common/zone.c     |  5 +++++
- 5 files changed, 31 insertions(+), 2 deletions(-)
+ include/model.h   |  3 +++
+ 7 files changed, 50 insertions(+), 2 deletions(-)
 
 diff --git a/Makefile b/Makefile
 index 5709a79f88ff1002e496301e0fe0def2b0cee001..f337a9196d4fb4a71606b41de81eb077284a63b9 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -955,7 +955,10 @@ GL_OBJS += vid_sgl.o sdl_common.o
+@@ -917,8 +917,10 @@ endif
+ # "-framework OpenGL" instead. Otherwise, link with libGL as normal
+ # => if ($TARGET_UNIX != darwin || $VID_TARGET == x11)...
+ ifneq ($(filter-out darwin,$(TARGET_UNIX))$(filter x11,$(VID_TARGET)),)
++ifneq ($(VID_TARGET),fplinux)
+ GL_LIBS     += GL
+ endif
++endif
+ endif
+ 
+ # ----------------------------------------------------------------------------
+@@ -955,7 +957,14 @@ GL_OBJS += vid_sgl.o sdl_common.o
  CL_CPPFLAGS += $(SDL_CFLAGS)
  CL_LFLAGS += $(SDL_LFLAGS)
  endif
 -ifeq ($(VID_TARGET),null)
 +ifeq ($(VID_TARGET),fplinux)
++CL_OBJS += fplinux-quake-stats.o
 +SW_OBJS += vid_fplinux.o fplinux-drm-session.o
 +SW_LIBS += drm
++GL_OBJS += vid_fplinux_gl.o fplinux-quake-gl.o fplinux-gpu.o fplinux-gpu-output.o fplinux-drm-session.o
++GL_CPPFLAGS += -DFPLINUX_NATIVE_GL
++GL_LIBS += drm dl
 +else ifeq ($(VID_TARGET),null)
  SW_OBJS += vid_null.o
  GL_OBJS += vid_null.o
  endif
-@@ -979,7 +982,10 @@ endif
+@@ -979,7 +988,10 @@ endif
  ifeq ($(IN_TARGET),sdl)
  CL_OBJS += in_sdl.o sdl_common.o
  endif
@@ -45,6 +62,34 @@ index 5709a79f88ff1002e496301e0fe0def2b0cee001..f337a9196d4fb4a71606b41de81eb077
  CL_OBJS += in_null.o
  endif
 
+diff --git a/common/screen.c b/common/screen.c
+--- a/common/screen.c
++++ b/common/screen.c
+@@ -35,6 +35,7 @@
+ #include "sys.h"
+ #include "vid.h"
+ #include "view.h"
++#include "fplinux-quake-stats.h"
+ 
+ #ifdef GLQUAKE
+ #include "glquake.h"
+@@ -1420,6 +1421,8 @@ SCR_UpdateScreen(void)
+ 	M_Draw();
+     }
+ 
++    fplinux_quake_stats_draw();
++
+ #ifndef GLQUAKE
+     /* for adapters that can't stay mapped in for linear writes all the time */
+     D_DisableBackBufferAccess();
+@@ -1503,6 +1506,7 @@ SCR_RegisterVariables()
+     Cvar_RegisterVariable(&scr_centertime);
+     Cvar_RegisterVariable(&scr_printspeed);
+     Cvar_RegisterVariable(&show_fps);
++    fplinux_quake_stats_init();
+ #ifdef QW_HACK
+     Cvar_RegisterVariable(&scr_allowsnap);
+ #endif
 diff --git a/common/menu.c b/common/menu.c
 index 9922d03ff13113bef19bd1d6390944b167d8b1b4..1d1fbd8037a9c6d3bcbe2422c600469a85c2fe93 100644
 --- a/common/menu.c
@@ -93,7 +138,18 @@ diff --git a/common/sys_unix.c b/common/sys_unix.c
 index 36a6889511dbd9e9fa3e7b654a6fbf0f5c746ad4..55c8844e9af1833ffcd29eb32c02966e7c541e4b 100644
 --- a/common/sys_unix.c
 +++ b/common/sys_unix.c
-@@ -63,7 +63,11 @@ static cvar_t sys_extrasleep = { "sys_extrasleep", "0" };
+@@ -40,6 +40,10 @@
+ #include "sys.h"
+ #include "zone.h"
+ 
++#ifdef FPLINUX_NATIVE_GL
++#include "fplinux-quake-internal.h"
++#endif
++
+ #ifdef SERVERONLY
+ #include "cvar.h"
+ #include "net.h"
+@@ -63,7 +67,11 @@ static cvar_t sys_extrasleep = { "sys_extrasleep", "0" };
  static qboolean stdin_ready;
  static int do_stdin = 1;
  #else
@@ -105,7 +161,7 @@ index 36a6889511dbd9e9fa3e7b654a6fbf0f5c746ad4..55c8844e9af1833ffcd29eb32c02966e
  static qboolean nostdout = false;
  #endif
 
-@@ -111,8 +115,10 @@ Sys_Quit(void)
+@@ -111,11 +119,17 @@ Sys_Quit(void)
  {
  #ifndef SERVERONLY
      Host_Shutdown();
@@ -115,8 +171,15 @@ index 36a6889511dbd9e9fa3e7b654a6fbf0f5c746ad4..55c8844e9af1833ffcd29eb32c02966e
 +#endif
      fflush(stdout);
  #endif
++#ifdef FPLINUX_NATIVE_GL
++    exit(fplinux_quake_video_exit_status());
++#else
      exit(0);
-@@ -142,9 +148,11 @@ Sys_Error(const char *error, ...)
++#endif
+ }
+ 
+ void
+@@ -142,9 +156,11 @@ Sys_Error(const char *error, ...)
      char string[MAX_PRINTMSG];
 
  #ifndef SERVERONLY
@@ -146,5 +209,18 @@ index d79bfd6fbdd4d8d3f23d97e9ac005192222a44f8..21dbac7fd37cff39494ee8b03c9329ef
  }
 
  void
+diff --git a/include/model.h b/include/model.h
+--- a/include/model.h
++++ b/include/model.h
+@@ -37,6 +37,9 @@
+ #include <GL/gl.h>
+ #endif
++#ifdef FPLINUX_NATIVE_GL
++#include "fplinux-quake-gl.h"
++#endif
+ #endif
+ 
+ #include "bspfile.h"
+ #include "modelgen.h"
 --
 2.50.1

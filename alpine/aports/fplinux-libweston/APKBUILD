@@ -1,0 +1,100 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-libweston
+pkgver=16.0.0
+pkgrel=0
+pkgdesc="DRM compositor libraries for FPLinux"
+url="https://wayland.freedesktop.org"
+arch="armv7"
+license="MIT AND GPL-2.0-only"
+depends="fplinux-wayland fplinux-libdrm fplinux-libxkbcommon fplinux-mesa-gbm libinput-libs pixman libdisplay-info"
+makedepends_build="clang22 lld22 meson samurai wayland-dev"
+makedepends_host="musl-dev linux-headers fplinux-wayland-dev fplinux-libdrm-dev fplinux-libxkbcommon-dev fplinux-mesa-dev libinput-dev libevdev-dev eudev-dev pixman-dev libdisplay-info-dev"
+subpackages="$pkgname-dev $pkgname-gl:gl"
+options="!check"
+_seatver=0.9.3
+source="
+	https://gitlab.freedesktop.org/wayland/weston/-/releases/$pkgver/downloads/weston-$pkgver.tar.xz
+	seatd-$_seatver.tar.gz::https://git.sr.ht/~kennylevinsen/seatd/archive/$_seatver.tar.gz
+	minimal-cairo.patch
+	internal-pixels.patch
+	presentation-completion.patch
+	yuv-plane-color.patch
+	fplinux-pixman-buffer.h
+	fplinux-weston-presentation.h
+	LICENSE
+"
+builddir="$srcdir/weston-$pkgver"
+
+build() {
+	: "${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
+	cat >fplinux-cross.meson <<-EOF
+		[binaries]
+		ar = '$CHOST-ar'
+		[properties]
+		pkg_config_libdir = ['$CBUILDROOT/usr/lib/pkgconfig', '$CBUILDROOT/usr/share/pkgconfig']
+	EOF
+	# Build the embedded seat backend without the seatd daemon, launcher or
+	# socket client.
+	abuild-meson --cross-file fplinux-cross.meson \
+		-Dwerror=false \
+		-Dlibseat-logind=disabled -Dlibseat-builtin=enabled \
+		-Dlibseat-seatd=disabled -Dserver=disabled -Dexamples=disabled \
+		-Dman-pages=disabled seat-output "$srcdir/seatd-$_seatver"
+	meson compile -C seat-output
+	DESTDIR="$builddir/seat-root" meson install --no-rebuild -C seat-output
+	cat >>fplinux-cross.meson <<-EOF
+		[built-in options]
+		pkg_config_path = ['$builddir/seat-root/usr/lib/pkgconfig']
+	EOF
+	CFLAGS="$CFLAGS -I$builddir/seat-root/usr/include -I$srcdir" \
+		LDFLAGS="$LDFLAGS -L$builddir/seat-root/usr/lib" \
+		abuild-meson --cross-file fplinux-cross.meson \
+		-Ddefault_library=shared \
+		-Dbackend-drm=true -Dbackend-default=drm \
+		-Dbackend-headless=false -Dbackend-pipewire=false \
+		-Dbackend-rdp=false -Dbackend-vnc=false \
+		-Dbackend-wayland=false -Dbackend-x11=false \
+		-Drenderer-gl=true -Drenderer-vulkan=false \
+		-Dxwayland=false -Dsystemd=false \
+		-Dshell-desktop=false -Dshell-ivi=false -Dshell-kiosk=false \
+		-Dshell-lua=false -Dcolor-management-lcms=false \
+		-Dimage-cairo=disabled -Dimage-jpeg=false -Dimage-webp=false \
+		-Dtools= -Ddemo-clients=false -Dsimple-clients= \
+		-Dtests=false -Ddoc=false output
+	meson compile -C output
+}
+
+package() {
+	DESTDIR="$pkgdir" meson install --no-rebuild -C seat-output
+	DESTDIR="$pkgdir" meson install --no-rebuild -C output
+	rm -rf "$pkgdir/usr/share/wayland-sessions" "$pkgdir/usr/share/weston" \
+		"$pkgdir/usr/share/man"
+	install -Dm644 COPYING "$pkgdir/usr/share/licenses/$pkgname/COPYING"
+	install -Dm644 "$srcdir/LICENSE" \
+		"$pkgdir/usr/share/licenses/$pkgname/FPLinux-GPL-2.0.txt"
+	install -Dm644 "$srcdir/seatd-$_seatver/LICENSE" \
+		"$pkgdir/usr/share/licenses/$pkgname/seatd-LICENSE"
+}
+
+dev() {
+	default_dev
+	amove usr/share/libweston-16
+}
+
+gl() {
+	pkgdesc="OpenGL renderer for the FPLinux DRM compositor"
+	depends="$pkgname=$pkgver-r$pkgrel fplinux-mesa"
+	amove usr/lib/libweston-16/gl-renderer.so
+}
+
+sha512sums="
+23b7a1138833f8aacc57758231d14c2f1bc9ec20ad2fef125ffffb8d63853968e8a8ed2d8bbf6ad1600d7f40358a705ca24838a683e01b1c84279cf8ae1cfe48  weston-16.0.0.tar.xz
+8cb21cfbd9aa25966fe3f586de75d24a8625142ffb49e6ec357875c347d3e92d535467b817d79fdc704f80858a145f1107c488adbf22a1c337dbc6ccccc8b00a  seatd-0.9.3.tar.gz
+78d308ebdc1dcbd6dd66d99fedf6375242b1fc3369af1a2c6b9d28a53fb1af6af0c3842a96b7f47be68f91ec38cb6126bb8d8b5010103030df14fddf2ec99523  minimal-cairo.patch
+8417e4bb5d285bc2d968ed90c2a24a7038a293dbedcda5de3e0b453e4264eb80eeee0a0d9ac23c7524a9c87f7f588965a0ecc345e66b3b764dbc1eb7b963f6d8  internal-pixels.patch
+f157e6d11ae9ee82c5cda3ddf31964a51465dd7f44d2469fb21bf99b6d4f1d6efd5ee3dabfee5a5eb96db77655975dd0bbc0dd794d92b70bd17e40910c983ae3  presentation-completion.patch
+021a656bf46846f708678c65a3ee57cfbb955ed4deabe2ffab2b7d588de6272365235519f7b9cdc1919f6c8e25473453e0e32310b008275e528979e8b6826d14  yuv-plane-color.patch
+b427573bdf1e43e253b4d029bad8db33518d027df0d3a1b193fa4e1447e637b9c8136d9585c578212799a9447c9bfa3e0490a64ad58e11437850e5ac0adff0db  fplinux-pixman-buffer.h
+4e2e278da3c427045df310a7219cd0993ad911527cedf37edbaefdb3a71fd7925a885c82a57e777cbeb61f93d3c461f6864b99770b523c07edeb0dde7f132adb  fplinux-weston-presentation.h
+260c02ff0a3e04ff0c2a95a936494b6a114a0a22121557059591d44af5fab5644ab8484be61eb33c12a6c9eef2170a108d51e2972adaef942568d94ae0d4ec83  LICENSE
+"

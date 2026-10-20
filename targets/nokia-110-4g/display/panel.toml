@@ -126,7 +126,7 @@ commands = [
 [bootstrap]
 spi_hz = 48000000
 reset_ms = 16
-prepare_pins = false
+prepare_pins = true
 commands_after = []
 
 [linux]

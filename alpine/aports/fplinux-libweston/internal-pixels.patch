@@ -1,0 +1,321 @@
+--- a/include/libweston/libweston.h
++++ b/include/libweston/libweston.h
+@@ -1668,6 +1668,7 @@
+ 	WESTON_BUFFER_DMABUF,
+ 	WESTON_BUFFER_RENDERER_OPAQUE,
+ 	WESTON_BUFFER_SOLID,
++	WESTON_BUFFER_PIXMAN,
+ };
+ 
+ struct weston_buffer {
+@@ -1682,6 +1683,7 @@
+ 		void *dmabuf;
+ 		void *legacy_buffer;
+ 		struct weston_solid_buffer_values solid;
++		pixman_image_t *pixman_image;
+ 	};
+ 
+ 	int32_t width, height;
+--- a/libweston/compositor.c
++++ b/libweston/compositor.c
+@@ -83,6 +83,7 @@
+ #include "alpha-modifier.h"
+ #include "backend.h"
+ #include "libweston-internal.h"
++#include "fplinux-pixman-buffer.h"
+ #include "color.h"
+ #include "color-management.h"
+ #include "color-representation.h"
+@@ -2984,6 +2985,8 @@
+ 	assert(buffer->passive_count == 0);
+ 
+ 	wl_signal_emit_mutable(&buffer->destroy_signal, buffer);
++	if (buffer->type == WESTON_BUFFER_PIXMAN)
++		pixman_image_unref(buffer->pixman_image);
+ 	free(buffer->format_modifier_name);
+ 	free(buffer);
+ }
+@@ -3008,6 +3011,7 @@
+ 		buffer->dmabuf = NULL;
+ 		break;
+ 	case WESTON_BUFFER_SOLID:
++	case WESTON_BUFFER_PIXMAN:
+ 		break;
+ 	case WESTON_BUFFER_RENDERER_OPAQUE:
+ 		buffer->legacy_buffer = NULL;
+@@ -3313,6 +3317,91 @@
+ 	free(buffer_ref);
+ }
+ 
++/* FPLinux's compositor-owned pixels never create a Wayland client buffer. */
++WL_EXPORT struct weston_buffer_reference *
++weston_buffer_create_internal_image(struct weston_compositor *compositor,
++                                   pixman_image_t *image)
++{
++	struct weston_buffer_reference *ret;
++	struct weston_buffer *buffer;
++	pixman_format_code_t format;
++
++	if (!image ||
++	    (compositor->renderer->type != WESTON_RENDERER_PIXMAN &&
++	     compositor->renderer->type != WESTON_RENDERER_GL))
++		return NULL;
++	format = pixman_image_get_format(image);
++	if (format != PIXMAN_r5g6b5 && format != PIXMAN_a8r8g8b8)
++		return NULL;
++	ret = zalloc(sizeof(*ret));
++	if (!ret)
++		return NULL;
++	buffer = zalloc(sizeof(*buffer));
++	if (!buffer) {
++		free(ret);
++		return NULL;
++	}
++	wl_signal_init(&buffer->destroy_signal);
++	buffer->type = WESTON_BUFFER_PIXMAN;
++	buffer->pixman_image = pixman_image_ref(image);
++	buffer->width = pixman_image_get_width(image);
++	buffer->height = pixman_image_get_height(image);
++	buffer->stride = pixman_image_get_stride(image);
++	buffer->buffer_origin = ORIGIN_TOP_LEFT;
++	buffer->pixel_format = pixel_format_get_info_by_pixman(format);
++	buffer->format_modifier = DRM_FORMAT_MOD_LINEAR;
++	buffer->format_modifier_name =
++		pixel_format_get_modifier(buffer->format_modifier);
++	weston_buffer_reference(ret, buffer, BUFFER_MAY_BE_ACCESSED);
++	return ret;
++}
++
++WL_EXPORT void
++weston_surface_attach_internal_image(struct weston_surface *surface,
++                                    struct weston_buffer_reference *buffer_ref)
++{
++	struct weston_buffer *buffer = buffer_ref->buffer;
++	struct weston_paint_node *node;
++
++	assert(!surface->resource);
++	assert(buffer && buffer->type == WESTON_BUFFER_PIXMAN);
++	weston_buffer_reference(&surface->buffer_ref, buffer,
++				BUFFER_MAY_BE_ACCESSED);
++	surface->width_from_buffer = buffer->width;
++	surface->height_from_buffer = buffer->height;
++	weston_surface_set_size(surface, buffer->width, buffer->height);
++
++	pixman_region32_fini(&surface->opaque);
++	surface->is_opaque =
++		pixman_image_get_format(buffer->pixman_image) == PIXMAN_r5g6b5 &&
++		surface->alpha_modifier == 1.0f;
++	if (surface->is_opaque)
++		pixman_region32_init_rect(&surface->opaque, 0, 0,
++					 buffer->width, buffer->height);
++	else
++		pixman_region32_init(&surface->opaque);
++
++	weston_surface_build_buffer_matrix(surface,
++					   &surface->surface_to_buffer_matrix);
++	weston_matrix_invert(&surface->buffer_to_surface_matrix,
++			     &surface->surface_to_buffer_matrix);
++	wl_list_for_each(node, &surface->paint_node_list, surface_link)
++		node->status |= WESTON_PAINT_NODE_BUFFER_DIRTY |
++				WESTON_PAINT_NODE_BUFFER_PARAMS_DIRTY |
++				WESTON_PAINT_NODE_VIEW_DIRTY;
++}
++
++WL_EXPORT void
++weston_buffer_destroy_internal_image(struct weston_buffer_reference *buffer_ref)
++{
++	assert(buffer_ref && buffer_ref->buffer);
++	assert(buffer_ref->type == BUFFER_MAY_BE_ACCESSED);
++	assert(buffer_ref->buffer->type == WESTON_BUFFER_PIXMAN);
++	weston_buffer_reference(buffer_ref, NULL, BUFFER_WILL_NOT_BE_ACCESSED);
++	free(buffer_ref);
++}
++
++
+ static void
+ single_pixel_buffer_destroy(struct wl_resource *resource)
+ {
+@@ -3464,7 +3553,8 @@
+ 	struct weston_buffer *buffer = surface->buffer_ref.buffer;
+ 	struct weston_paint_node *walk_node;
+ 
+-	if (buffer->type == WESTON_BUFFER_SHM) {
++	if (buffer->type == WESTON_BUFFER_SHM ||
++	    buffer->type == WESTON_BUFFER_PIXMAN) {
+ 		if (pnode->draw_solid)
+ 			goto out;
+ 
+@@ -9816,6 +9906,9 @@
+ 			buffer->solid.r, buffer->solid.g, buffer->solid.b,
+ 			buffer->solid.a);
+ 		break;
++	case WESTON_BUFFER_PIXMAN:
++		fputs("\t\tcompositor-owned Pixman image\n", fp);
++		break;
+ 	case WESTON_BUFFER_RENDERER_OPAQUE:
+ 		fputs("\t\tEGL buffer:\n"
+ 		      "\t\t\t[format may be inaccurate]\n", fp);
+--- a/libweston/pixman-renderer.c
++++ b/libweston/pixman-renderer.c
+@@ -713,6 +713,15 @@
+ 	if (!buffer)
+ 		return;
+ 
++	if (buffer->type == WESTON_BUFFER_PIXMAN) {
++		ps->image = pixman_image_ref(buffer->pixman_image);
++		/* Only SHM references call wl_shm_buffer_begin/end_access. */
++		weston_buffer_reference(&ps->buffer_ref, NULL,
++					BUFFER_WILL_NOT_BE_ACCESSED);
++		weston_buffer_release_reference(&ps->buffer_release_ref, NULL);
++		return;
++	}
++
+ 	if (buffer->type == WESTON_BUFFER_SOLID) {
+ 		pixman_renderer_surface_set_color(es,
+ 						  buffer->solid.r,
+--- a/libweston/renderer-gl/gl-renderer.c
++++ b/libweston/renderer-gl/gl-renderer.c
+@@ -3370,6 +3370,13 @@
+ 	gl_renderer_garbage_collect_programs(gr);
+ }
+ 
++static bool
++buffer_is_cpu_upload(const struct weston_buffer *buffer)
++{
++	return buffer->type == WESTON_BUFFER_SHM ||
++		buffer->type == WESTON_BUFFER_PIXMAN;
++}
++
+ static void
+ gl_renderer_flush_damage(struct weston_paint_node *pnode)
+ {
+@@ -3395,17 +3402,21 @@
+ 	/* This can happen if a SHM wl_buffer gets destroyed before we flush
+ 	 * damage, because wayland-server just nukes the wl_shm_buffer from
+ 	 * underneath us */
+-	if (!buffer->shm_buffer)
++	if (buffer->type == WESTON_BUFFER_SHM && !buffer->shm_buffer)
+ 		return;
+ 
+ 	if (!pixman_region32_not_empty(&gb->texture_damage) &&
+ 	    !gb->needs_full_upload)
+ 		goto done;
+ 
+-	data = wl_shm_buffer_get_data(buffer->shm_buffer);
++	if (buffer->type == WESTON_BUFFER_PIXMAN)
++		data = (uint8_t *)pixman_image_get_data(buffer->pixman_image);
++	else
++		data = wl_shm_buffer_get_data(buffer->shm_buffer);
+ 
+ 	if (gb->needs_full_upload || quirks->force_full_upload) {
+-		wl_shm_buffer_begin_access(buffer->shm_buffer);
++		if (buffer->type == WESTON_BUFFER_SHM)
++			wl_shm_buffer_begin_access(buffer->shm_buffer);
+ 
+ 		for (j = 0; j < gb->num_textures; j++) {
+ 			int hsub = pixel_format_hsub(buffer->pixel_format, j);
+@@ -3420,12 +3431,14 @@
+ 					    gb->texture_format[j].type,
+ 					    data + gb->offset[j]);
+ 		}
+-		wl_shm_buffer_end_access(buffer->shm_buffer);
++		if (buffer->type == WESTON_BUFFER_SHM)
++			wl_shm_buffer_end_access(buffer->shm_buffer);
+ 		goto done;
+ 	}
+ 
+ 	rectangles = pixman_region32_rectangles(&gb->texture_damage, &n);
+-	wl_shm_buffer_begin_access(buffer->shm_buffer);
++	if (buffer->type == WESTON_BUFFER_SHM)
++		wl_shm_buffer_begin_access(buffer->shm_buffer);
+ 	for (i = 0; i < n; i++) {
+ 		pixman_box32_t r;
+ 
+@@ -3451,7 +3464,8 @@
+ 					    data + gb->offset[j]);
+ 		}
+ 	}
+-	wl_shm_buffer_end_access(buffer->shm_buffer);
++	if (buffer->type == WESTON_BUFFER_SHM)
++		wl_shm_buffer_end_access(buffer->shm_buffer);
+ 
+ done:
+ 	glPixelStorei(GL_UNPACK_ROW_LENGTH_EXT, 0);
+@@ -3502,7 +3516,7 @@
+ }
+ 
+ static void
+-gl_renderer_attach_shm(struct weston_surface *es, struct weston_buffer *buffer)
++gl_renderer_attach_pixels(struct weston_surface *es, struct weston_buffer *buffer)
+ {
+ 	struct weston_compositor *ec = es->compositor;
+ 	struct gl_renderer *gr = get_renderer(ec);
+@@ -3607,17 +3621,20 @@
+ 		texture_format[0] = buffer->pixel_format->gl;
+ 	}
+ 
+-	/* If this surface previously had a SHM buffer, its gl_buffer_state will
++	/* If this surface previously had a CPU buffer, its gl_buffer_state will
+ 	 * be speculatively retained. Check to see if we can reuse it rather
+ 	 * than allocating a new one. */
+ 	assert(!gs->buffer ||
+-	      (old_buffer && old_buffer->type == WESTON_BUFFER_SHM));
++	      (old_buffer && buffer_is_cpu_upload(old_buffer)));
+ 	if (gs->buffer &&
+ 	    buffer->width == old_buffer->width &&
+ 	    buffer->height == old_buffer->height &&
+ 	    buffer->pixel_format == old_buffer->pixel_format) {
+ 		gs->buffer->pitch = pitch;
+ 		memcpy(gs->buffer->offset, offset, sizeof(offset));
++		/* Internal attachments have no client commit damage. */
++		if (buffer->type == WESTON_BUFFER_PIXMAN)
++			gs->buffer->needs_full_upload = true;
+ 		return;
+ 	}
+ 
+@@ -4404,15 +4421,15 @@
+ 	if (gs->buffer_ref.buffer == buffer)
+ 		return;
+ 
+-	/* SHM buffers are a little special in that they are allocated
++	/* CPU buffers are a little special in that they are allocated
+ 	 * per-surface rather than per-buffer, because we keep a shadow
+-	 * copy of the SHM data in a GL texture; for these we need to
++	 * copy of the CPU data in a GL texture; for these we need to
+ 	 * destroy the buffer state when we're switching to another
+ 	 * buffer type. For all the others, the gl_buffer_state comes
+ 	 * from the weston_buffer itself, and will only be destroyed
+ 	 * along with it. */
+-	if (gs->buffer && gs->buffer_ref.buffer->type == WESTON_BUFFER_SHM) {
+-		if (!buffer || buffer->type != WESTON_BUFFER_SHM) {
++	if (gs->buffer && buffer_is_cpu_upload(gs->buffer_ref.buffer)) {
++		if (!buffer || !buffer_is_cpu_upload(buffer)) {
+ 			destroy_buffer_state(gs->buffer);
+ 			gs->buffer = NULL;
+ 		}
+@@ -4428,7 +4445,8 @@
+ 
+ 	switch (buffer->type) {
+ 	case WESTON_BUFFER_SHM:
+-		gl_renderer_attach_shm(es, buffer);
++	case WESTON_BUFFER_PIXMAN:
++		gl_renderer_attach_pixels(es, buffer);
+ 		break;
+ 	case WESTON_BUFFER_DMABUF:
+ 	case WESTON_BUFFER_RENDERER_OPAQUE:
+@@ -4547,6 +4565,7 @@
+ 		*(uint32_t *)target = pack_color(format, &buffer->solid);
+ 		return 0;
+ 	case WESTON_BUFFER_SHM:
++	case WESTON_BUFFER_PIXMAN:
+ 	case WESTON_BUFFER_DMABUF:
+ 	case WESTON_BUFFER_RENDERER_OPAQUE:
+ 		break;
+@@ -4600,7 +4619,7 @@
+ 
+ 	gs->surface->renderer_state = NULL;
+ 
+-	if (gs->buffer && gs->buffer_ref.buffer->type == WESTON_BUFFER_SHM)
++	if (gs->buffer && buffer_is_cpu_upload(gs->buffer_ref.buffer))
+ 		destroy_buffer_state(gs->buffer);
+ 	gs->buffer = NULL;

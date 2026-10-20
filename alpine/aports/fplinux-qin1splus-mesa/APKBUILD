@@ -1,0 +1,20 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-qin1splus-mesa
+pkgver=1
+pkgrel=0
+pkgdesc="Mesa configuration for Xiaomi Qin 1s+"
+url="https://github.com/fplinux/fplinux"
+arch="noarch"
+license="GPL-2.0-only"
+depends="fplinux-mesa"
+options="!check"
+source="drirc"
+builddir="$srcdir"
+
+package() {
+	install -Dm644 "$srcdir/drirc" "$pkgdir/etc/drirc"
+}
+
+sha512sums="
+bf15694a619a3946315c228307df8e3182e4463f6429e097d9485bd2a08bb2b1bd8aac50dd0709775373ebce193147621c4e28902dd8b8089ca146b75a79c290  drirc
+"

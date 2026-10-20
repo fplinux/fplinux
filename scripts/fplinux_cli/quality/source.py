@@ -49,6 +49,20 @@ APORT_ROOT = ("alpine", "aports")
 APORT_C_SUFFIXES = frozenset({".c"})
 _CHECK_COMMAND_TIMEOUT = 15 * 60
 _PACKAGE_CONFIG_TIMEOUT = 30
+_QUALITY_INCLUDE = "/opt/quality/include"
+_LVGL_APORTS = frozenset(
+    {"fplinux-launcher", "fplinux-settings", "fplinux-snake", "fplinux-notes", "fplinux-ui"}
+)
+_UI_RUNTIME_SOURCE = "lib/fplinux/fplinux-ui.c"
+_LVGL_RUNTIME_SOURCES = frozenset(
+    {
+        _UI_RUNTIME_SOURCE,
+        "lib/fplinux/fplinux-ui-listview.c",
+        "lib/fplinux/fplinux-ui-menu.c",
+        "lib/fplinux/fplinux-ui-screen.c",
+        "lib/fplinux/fplinux-ui-text.c",
+    }
+)
 
 
 def _run_direct(
@@ -355,7 +369,7 @@ def check_release_lock() -> None:
 
 
 def alpine_apkbuilds(files: list[Path]) -> list[str]:
-    """Discover every regular first-party Alpine aport recipe."""
+    """Discover regular first-party Alpine recipes."""
     result = [
         path.relative_to(ROOT).as_posix()
         for path in files
@@ -454,14 +468,44 @@ def pkg_config_cflags(package: str) -> list[str]:
 def userspace_c_include_flags(source: str) -> list[str]:
     """Return compile flags needed by one source's headers."""
     path = PurePosixPath(source)
-    flags: list[str] = []
+    flags = ["-I", "include"]
+    aport = path.parts[2] if path.parts[:2] == APORT_ROOT and len(path.parts) >= 3 else None
+    if aport in _LVGL_APORTS or source in _LVGL_RUNTIME_SOURCES:
+        flags.extend(
+            (
+                "-isystem",
+                _QUALITY_INCLUDE,
+                f'-DLV_CONF_PATH="{ROOT / "alpine/aports/fplinux-lvgl/lv_conf.h"}"',
+            )
+        )
+    if source == _UI_RUNTIME_SOURCE:
+        flags.extend(("-I", "alpine/aports/fplinux-ui"))
+        flags.extend(pkg_config_cflags("wayland-client"))
+        flags.extend(pkg_config_cflags("xkbcommon"))
+    if source == "lib/fplinux/fplinux-ui-session.c":
+        flags.extend(pkg_config_cflags("json-c"))
+    if source == "alpine/aports/fplinux-session/fplinux-shell.c":
+        flags.extend(
+            ("-isystem", _QUALITY_INCLUDE, "-isystem", f"{_QUALITY_INCLUDE}/libweston-16")
+        )
+        flags.extend(pkg_config_cflags("pixman-1"))
+        flags.extend(pkg_config_cflags("wayland-server"))
+        flags.extend(pkg_config_cflags("xkbcommon"))
+        flags.extend(pkg_config_cflags("libinput"))
     if path.parts[:3] == (*APORT_ROOT, "fplinux-bluetooth"):
         flags.extend(pkg_config_cflags("dbus-1"))
     if source == "lib/fplinux/fplinux-input-session.c":
         flags.extend(pkg_config_cflags("libevdev"))
     shared = registration.SHARED_APORT_SOURCES.get(path.parent.name, ())
-    if source == "lib/fplinux/fplinux-drm-session.c" or (
-        "include/fplinux/fplinux-drm-session.h" in shared
+    uses_gpu = source in registration.GPU_OUTPUT_SOURCES or (
+        "include/fplinux/fplinux-gpu.h" in shared
+    )
+    if uses_gpu:
+        flags.extend(("-isystem", _QUALITY_INCLUDE))
+    if (
+        source in registration.DRM_SESSION_SOURCES
+        or uses_gpu
+        or ("include/fplinux/fplinux-drm-session.h" in shared)
     ):
         flags.extend(pkg_config_cflags("libdrm"))
     if source == "lib/fplinux/fplinux-keyboard-text.c":
@@ -483,11 +527,25 @@ def userspace_c_include_flags(source: str) -> list[str]:
     return flags
 
 
+def generate_ui_protocol_header(output: Path) -> None:
+    """Generate the public xdg-shell client header used by the UI aport."""
+    result = capture(
+        ["pkg-config", "--variable=pkgdatadir", "wayland-protocols"],
+        timeout=_PACKAGE_CONFIG_TIMEOUT,
+    )
+    if result.returncode or not result.stdout.strip():
+        fail(result.stderr.strip() or "pkg-config could not resolve wayland-protocols")
+    protocol = Path(result.stdout.strip()) / "stable/xdg-shell/xdg-shell.xml"
+    run(["wayland-scanner", "client-header", str(protocol), str(output)])
+
+
 def run_userspace_analysis(output: Path, sources: list[tuple[str, bool]]) -> None:
     """Run Clang Static Analyzer for every discovered userspace C source."""
     if output.is_symlink() or (output.exists() and not output.is_dir()):
         fail(f"invalid scan-build output path: {output}")
     output.mkdir(parents=True, exist_ok=True)
+    if any(source == _UI_RUNTIME_SOURCE for source, _libusb in sources):
+        generate_ui_protocol_header(output / "xdg-shell-client-protocol.h")
     common_flags = [
         "-std=c11",
         "-O2",
@@ -513,6 +571,8 @@ def run_userspace_analysis(output: Path, sources: list[tuple[str, bool]]) -> Non
     ]
     for index, (source, requires_libusb) in enumerate(sources):
         flags = [*common_flags, *userspace_c_include_flags(source)]
+        if source == _UI_RUNTIME_SOURCE:
+            flags.extend(("-I", str(output)))
         if requires_libusb:
             flags.extend(libusb_flags)
             flags.append("-pthread")
@@ -680,6 +740,8 @@ def main() -> None:
             for apkbuild in apkbuilds:
                 run(["apkbuild-lint", apkbuild])
     if "c" in selected:
+        with report_stage(reporter, "ui-profile"):
+            run(["python3", "scripts/fplinux_ui_profile.py", "--check"])
         c_sources = userspace_c_sources(files)
         with report_stage(reporter, "c-analysis"):
             check_userspace_c(c_sources)

@@ -1,0 +1,21 @@
+{
+  "profiles": {
+    "sample": {
+      "width": 128,
+      "height": 128,
+      "logo": {
+        "splash_mark": 32,
+        "about": "mark 32",
+        "boot_mark": 32
+      }
+    }
+  },
+  "themes": {
+    "light": {
+      "background": "#FFFFFF"
+    },
+    "dark": {
+      "background": "#000000"
+    }
+  }
+}

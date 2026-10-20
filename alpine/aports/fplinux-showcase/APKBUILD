@@ -8,13 +8,21 @@ arch="armv7"
 license="GPL-2.0-only"
 depends="fplinux-base fplinux-font-terminus-data"
 makedepends_build="clang22 lld22 pkgconf"
-makedepends_host="musl-dev linux-headers fplinux-libdrm-dev"
+makedepends_host="musl-dev linux-headers fplinux-libdrm-dev fplinux-mesa-dev"
 options="!check"
 source="
 	armada-scene.c
 	armada-scene.h
 	armada-frame.h
 	armada-math.h
+	armada-geometry.c
+	armada-geometry.h
+	armada-overlay.c
+	armada-overlay.h
+	armada-gpu-renderer.c
+	armada-gpu-renderer.h
+	armada-scene.vert
+	armada-scene.frag
 	armada-renderer.c
 	armada-renderer.h
 	armada-storyboard.c
@@ -24,6 +32,10 @@ source="
 	fplinux-showcase.c
 	fplinux-drm-session.c
 	fplinux-drm-session.h
+	fplinux-gpu.c
+	fplinux-gpu.h
+	fplinux-gpu-output.c
+	fplinux-gpu-output.h
 	fplinux-cli.c
 	fplinux-cli.h
 	fplinux-font.c
@@ -31,6 +43,8 @@ source="
 	fplinux-brightness-client.c
 	fplinux-brightness-client.h
 	fplinux-keypad.h
+	fplinux-keypad-light.c
+	fplinux-keypad-light.h
 "
 builddir="$srcdir"
 
@@ -42,34 +56,56 @@ build() {
 		-I"$srcdir" $(pkg-config --cflags libdrm) \
 		"$srcdir/armada-scene.c" \
 		"$srcdir/armada-renderer.c" \
+		"$srcdir/armada-geometry.c" \
+		"$srcdir/armada-overlay.c" \
+		"$srcdir/armada-gpu-renderer.c" \
 		"$srcdir/armada-storyboard.c" \
 		"$srcdir/showcase-hardware.c" \
 		"$srcdir/fplinux-showcase.c" \
 		"$srcdir/fplinux-drm-session.c" \
+		"$srcdir/fplinux-gpu.c" \
+		"$srcdir/fplinux-gpu-output.c" \
 		"$srcdir/fplinux-brightness-client.c" \
+		"$srcdir/fplinux-keypad-light.c" \
 		"$srcdir/fplinux-font.c" \
-		"$srcdir/fplinux-cli.c" $(pkg-config --libs libdrm) $LDFLAGS -Wl,--gc-sections -o fplinux-showcase
+		"$srcdir/fplinux-cli.c" $(pkg-config --libs libdrm) -ldl $LDFLAGS -Wl,--gc-sections -o fplinux-showcase
 }
 
 package() {
 	install -Dm755 "$builddir/fplinux-showcase" \
 		"$pkgdir/usr/bin/fplinux-showcase"
+	install -Dm644 "$srcdir/armada-scene.vert" \
+		"$pkgdir/usr/share/fplinux/armada/armada-scene.vert"
+	install -Dm644 "$srcdir/armada-scene.frag" \
+		"$pkgdir/usr/share/fplinux/armada/armada-scene.frag"
 }
 
 sha512sums="
-32031991e6e183bc7fccfeed2c8d71086b5f7ca914738b022b23da7fe5ac62189ca11d161db7dfa2fe105cc99dccd7dbefd36eafa49bb45ba8f5bb657aca23e0  armada-scene.c
-593896def94ae1843c926eb8bd5c7abb22b884213948f40e63b705efd9de56077f146c4adb42337daae9a9e95ad37a09245e4fbaae48af44140c9e6555e5e437  armada-scene.h
+d03dcf30cc7b71ba078a1e56c26d7dae21dcc4c581b4ea96d206d647e4ca2d3872308652e40250e68df69ebff02139b236afe2ce998787c237918fdb9d93878b  armada-scene.c
+0fbed6140344dd6b8d5f6b0f2ccc6c61a1dd2b1b34a30f0a60d33382d0131f0c9badd06c8bd61b6f53c195a00a613b344b1d9292e0125c237c19c44109a0b994  armada-scene.h
 735c4f366c7046cf9fdb11322a5cd9ee94c803d040eca984a5ac9cf9ce5474d5b8ce0f40c8ee83f364a545334f6f71a69003994bdc818389f63f227e92f005f0  armada-frame.h
 0cc0bdcc870f0033b6ac07c72a2027b32532923faffb50c93af3f56560dd816b551f64e938200b0b6dbd9bdda8cf1aa9682e86a6fbe0fd937f7207c731998b00  armada-math.h
-edc49a1e529c0859ab6d56225857a312374a357bc035eaf2a6e1df112987fdc3f92ae972ef00cc0077a061538a80d9d476ea1745ae11e14398b7df8474b5dfd8  armada-renderer.c
+ec15831c3cec86d466335e3889da00dd41dc34210a8250741d14eb1b3d4a574a1ce82ef45b97648fd1ce2629d434caef21adc780a67bea5f38254e3b119888a4  armada-geometry.c
+87c9eed1119d93c3fc052f46abfbe1e6322b8c5b77e6d353d586768b4b954e7858fbccb8f15bcb03cc81345bb396e438ee52e223d7a661455231e115d3b9da13  armada-geometry.h
+d329b595d2ca34c17445f30a4e2b05750d7cb83deeefadc364de74e38f1fdce457e63a215502e97a2d459e2cabc8eac6a4e5267c26000c034fe5b176cf2025fe  armada-overlay.c
+dd5e13849408155db2e569b7190a13045c37788e4735c143847bb855e69b5d91dc546ece88e740296c668c255d80dda40901db2e820d3d8a23ac49b6eeafda7d  armada-overlay.h
+3ab99a487cafa487b379fa1893a2f0f8150d13733c5b8141c5f773f0604082fa76f80b75a20bf42897702b27b13e906e6cbefb0c83532a51cbcb60a5affc4ffb  armada-gpu-renderer.c
+6ed95a22da06d7cc9f810b57165ab5e35e511676aec81f412754105dd75e47277175a2180c3ced038f102101c0e25bfc2a31104b9052cb148b08545b987c9caf  armada-gpu-renderer.h
+843aa88c7a109126300b1e7fc4ce0a7261e94a4d7a3b8438fbd8cca3c79e94bc57f6cf961337d3aa238a366264adc9578fa1b01cb7975e80cde209098b7a599e  armada-scene.vert
+8a0c83efee9bbe4154472f926238790f2b4197d89aef5ab5d1b2851e9f9012991d919ccf80747254fd013a96d0c709292e1857f3cc8b7a2e67c7df7d5957dcf5  armada-scene.frag
+0a0c2407eec6aa30b3fd01935e8c5966cb66ca14b86de5966b538b52258876b63ce16f97ffab156b9939475b120fb73348119ac936db2eaa4b62975ebbe4d494  armada-renderer.c
 43a6397b6546f3b15ebf438aee82753314eb31088220d93d9c757a164aca6c1ee8f12481e32f2503794b8c4856d44554b11820653f2792bf452f8c2ababb37e8  armada-renderer.h
 686ca204eda5b7e0281aef2248c547455b331a9a3bd4d251e36491047e25da2438e889d71e9a4bf621a62d1ac47dbdd06409450d14d55209a147fd45ea7c5dc2  armada-storyboard.c
 d8cbb7fbba28f9d6c5fcf9bf5bcc29e9f146e1b1bf32143249ef379f235b3819997d0e53097d0eda9d62cf9ca3ade265b2f9de015a9a31a661c29ff33b04082c  armada-storyboard.h
-da22f39253a30c6e6f14ba56f35cb5bb183499f142279b207d591e82375a60a3108816d04a0a0d55f9e962f3a12773b698ff17c1503544fafb60c0c24350e262  showcase-hardware.c
-757aeb96a09dafd1e6dc250a22b825979ed5364adb9629ecd066567b2b1703f2e672cf94de9cc22ae590851267591e4a751004b8408997d7aed105b15b3e95ef  showcase-hardware.h
-d01052651b5c89c15d4d97fa483a0603a8185afd7257a976a3d16324c7bb30fd799b42b2adf5c244fa60327711a9f29c0518e515e19f0f4c706d087144fd8697  fplinux-showcase.c
-24d96f52eeb3adb9b37e34967199a0efea630af580782fe2f29000862b678d5ae96b4516e291b61ca70a8d9242af43fc720d801e158c7933e957cda0aaf5afdd  fplinux-drm-session.c
-5b63a683e9aac0a4b1faef31c0a09b9ec4131992d5cb69f858c6276855a8d92404c4cf23a1b4c8927d802311e9634b354502745ef15e00a4209744acf51131a7  fplinux-drm-session.h
+5712891da9911ca3e974707dcb5f75ada0ae05334a05c64f923a76a7dcca89b8880cabbaeefcc3041fd31fb2d9d893ff90d7f652c7951e3202e6a200e0dfd8bd  showcase-hardware.c
+0d8fa9d04faab6acb98ff75b1d4b647ccd72097506c1af2a627996a62786cc88ee45b437c44e54fe8415b279669d39babf976c4499e322a84cdcd6136f1251d7  showcase-hardware.h
+e1dbdbd318b9622e44b3fe2fdb846d6533ed7fdfa95f8b598575e3386d361920b77ce3de9768f71f34ad064524eec0ae96fea6640e9733060fe42d9572b94ac3  fplinux-showcase.c
+6b253f856c2a6886801ec56fd4f607019b89c5465a9fffd78ea4196cadc90688b452b10e45d4767e2cfddd5d846dad4bba2b8452e0c79426f08a4ed057e0e104  fplinux-drm-session.c
+a71678fa063e52aa2220c2bfd391a2a3cf154c04c1cdb7e078e3942f4f24d8510c1d7bd8d5b57bd96e0d32842c319f53f52731c26e0b80bbfb32774c7ba8fc74  fplinux-drm-session.h
+e8b0dfbcb7fb85a89769c5fd34ec28d5dc760cb2c942fdd62106fc7e2cc0b48f3554f04790ff8dd4c1434efbdfaa23bc09cfd3aae30794266dd198cbf2bc70c1  fplinux-gpu.c
+10900357bfb08a54a9327d5a26039103f3887f05b32af1165843308a6ab7a7289dacf08afda48041daab62b17b6b49fd4b59a32c29814d0a9ff476bd34a0b61a  fplinux-gpu.h
+28075090738c4c164535b2b51139b37ae6e8bffa3d5d23bdfd8d3a6372b30e0a2bcf4bed2ecdd8a412360f2d79a74c824a7fa9f4b4aa8cc1a7162658e3b87eb3  fplinux-gpu-output.c
+a9f09ae634fadb765916ddfa79ef109a5ea5385bbe37a131e26540bfc06547649ef7dae07b510f99462bb8c34f33b68358556093159e70185b99356521e01430  fplinux-gpu-output.h
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
 9348115546f586a5078627b79014fd5a59989bb84b04a22de80b4e5780200a54c7f2b532a376b160e33aec5f058f382d15b08f3545b1234389dd2f4e405422da  fplinux-font.c
@@ -77,4 +113,6 @@ dd731108a9774c00bb1267f96c266929ee2a8d63d2c8f62a9f3c73b884996edc1cf5e83b772e058a
 a16c1b2b84831be3da5bbf1d198c827a4bfde8bb435e4ac6d52777ca8472cedc700be5007a4320e6ffcafcf3ff3183a0de4e7068a94576e0016ca9b09c650bcf  fplinux-brightness-client.c
 031e8a9a9fed64c19b947d6d1b7510f2bf0dd76ae7712cd23f8fbf838a28e29eefec2adaa772070f75c930a42bf0e77290825ea88fd545800dbca30bdd61f0ee  fplinux-brightness-client.h
 0a6d41b98223953b0b890be3041fba31e7878e6752094ed439b1e1e7e9240b2c7bf175ae671d05485ee25fa9ae74e45ddc63e9592768bd5d19e6e4ae6765a978  fplinux-keypad.h
+b3cb015618abc4b52b46e0995bc74cc2fea8734342e424fb952f738de63de542b9f64fa35e1bd4e753cae4667a1f00ce6070422fa1fe070ad3cc5031eb625dc9  fplinux-keypad-light.c
+61f4aa5b3eacd8f5c2fe6f71fbe2743b0ff8c8eb707801592021d9d3a2781aedab9bc1d46ef5b4506a6b9ca2ad134289a93d40115cc8acef349039807fb322a9  fplinux-keypad-light.h
 "

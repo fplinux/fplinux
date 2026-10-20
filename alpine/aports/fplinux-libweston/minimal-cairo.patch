@@ -1,0 +1,116 @@
+--- a/meson_options.txt
++++ b/meson_options.txt
+@@ -149,0 +150,7 @@
++	'image-cairo',
++	type: 'feature',
++	value: 'enabled',
++	description: 'Cairo helpers for desktop clients and window borders'
++)
++
++option(
+--- a/shared/meson.build
++++ b/shared/meson.build
+@@ -53,2 +53,2 @@
+-	dependency('cairo'),
+-	dependency('libpng'),
++	dependency('cairo', required: get_option('image-cairo'), disabler: true),
++	dependency('libpng', required: get_option('image-cairo'), disabler: true),
+--- a/clients/meson.build
++++ b/clients/meson.build
+@@ -500 +500 @@
+-if get_option('shell-desktop') or get_option('shell-kiosk') or get_option('shell-ivi')
++if (get_option('shell-desktop') or get_option('shell-kiosk') or get_option('shell-ivi')) and not get_option('image-cairo').disabled()
+--- a/frontend/main.c
++++ b/frontend/main.c
+@@ -362,77 +362,72 @@
+
+ static struct wet_compositor *
+ to_wet_compositor(struct weston_compositor *compositor)
+ {
+ 	return weston_compositor_get_user_data(compositor);
+ }
+
+ WL_EXPORT void
+ wet_process_destroy(struct wet_process *process, int status, bool call_cleanup)
+ {
+ 	wl_list_remove(&process->link);
+ 	if (call_cleanup && process->cleanup)
+ 		process->cleanup(process, status, process->cleanup_data);
+ 	free(process->path);
+ 	free(process);
+ }
+
+ static int
+ sigchld_handler(int signal_number, void *data)
+ {
+-	struct wet_process *p;
++	struct wet_process *p, *next;
+ 	struct wet_compositor *wet = data;
+ 	int status;
+ 	pid_t pid;
+
+-	while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+-		if (wet->autolaunch_pid != -1 && wet->autolaunch_pid == pid) {
+-			if (wet->autolaunch_watch)
+-				wl_display_terminate(wet->compositor->wl_display);
+-			wet->autolaunch_pid = -1;
+-			continue;
+-		}
+-
+-		wl_list_for_each(p, &wet->child_process_list, link) {
+-			if (p->pid == pid)
+-				break;
+-		}
+-
+-		/* An unknown child process exited. Oh well. */
+-		if (&p->link == &wet->child_process_list)
++	/* Other plugins own their unregistered children and their wait status. */
++	if (wet->autolaunch_pid != -1 &&
++	    waitpid(wet->autolaunch_pid, &status, WNOHANG) == wet->autolaunch_pid) {
++		if (wet->autolaunch_watch)
++			wl_display_terminate(wet->compositor->wl_display);
++		wet->autolaunch_pid = -1;
++	}
++
++	wl_list_for_each_safe(p, next, &wet->child_process_list, link) {
++		pid = waitpid(p->pid, &status, WNOHANG);
++		if (pid < 0 && errno != ECHILD)
++			weston_log("waitpid error %s\n", strerror(errno));
++		if (pid != p->pid)
+ 			continue;
+
+ 		if (WIFEXITED(status)) {
+ 			weston_log("%s exited with status %d\n", p->path,
+ 				   WEXITSTATUS(status));
+ 		} else if (WIFSIGNALED(status)) {
+ 			weston_log("%s died on signal %d\n", p->path,
+ 				   WTERMSIG(status));
+ 		} else {
+ 			weston_log("%s disappeared\n", p->path);
+ 		}
+
+ 		wet_process_destroy(p, status, true);
+ 	}
+-
+-	if (pid < 0 && errno != ECHILD)
+-		weston_log("waitpid error %s\n", strerror(errno));
+
+ 	return 1;
+ }
+
+ static void
+ cleanup_for_child_process() {
+ 	sigset_t allsigs;
+
+ 	/* Put the client in a new session so it won't catch signals
+ 	* intended for the parent. Sharing a session can be
+ 	* confusing when launching weston under gdb, as the ctrl-c
+ 	* intended for gdb will pass to the child, and weston
+ 	* will cleanly shut down when the child exits.
+ 	*/
+ 	setsid();
+
+ 	/* do not give our signal mask to the new process */
+ 	sigfillset(&allsigs);
+ 	sigprocmask(SIG_UNBLOCK, &allsigs, NULL);
+ }

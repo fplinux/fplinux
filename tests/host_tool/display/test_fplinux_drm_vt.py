@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Exercise guardian process cleanup with a substituted VT ioctl boundary."""
+"""Exercise DRM display selection and guardian cleanup with synthetic devices."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ class DrmVtGuardianTests:
     @pytest.fixture(scope="class")
     @classmethod
     def harness(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[GuardianHarness]:
-        """Link the production owner; only open and VT ioctls are substituted."""
+        """Link the production session with synthetic DRM queries and VT ioctls."""
         with c_build_directory(tmp_path_factory, "fplinux-drm-vt") as temporary:
             executable = temporary / "fplinux-vttest"
             guardian = temporary / "vt-guardian"
@@ -69,13 +69,78 @@ class DrmVtGuardianTests:
                     str(ROOT / "tests/host_tool/display/fplinux-drm-vt.c"),
                     str(ROOT / "tests/host_tool/display/fplinux-drm-vt-fake.c"),
                     str(ROOT / "lib/fplinux/fplinux-drm-session.c"),
-                    "-Wl,--wrap=open,--wrap=ioctl,--wrap=execv",
+                    str(ROOT / "tests/host_tool/display/fplinux-drm-selection-fake.c"),
+                    "-Wl,--wrap=open,--wrap=close,--wrap=ioctl,--wrap=execv",
+                    "-Wl,--wrap=drmGetDevices2,--wrap=drmFreeDevices",
+                    "-Wl,--wrap=drmSetClientCap,--wrap=drmSetMaster",
+                    "-Wl,--wrap=drmModeGetResources,--wrap=drmModeFreeResources",
+                    "-Wl,--wrap=drmModeGetConnector,--wrap=drmModeGetConnectorCurrent",
+                    "-Wl,--wrap=drmModeFreeConnector",
+                    "-Wl,--wrap=drmModeGetEncoder,--wrap=drmModeFreeEncoder",
+                    "-Wl,--wrap=drmModeGetPlaneResources,--wrap=drmModeFreePlaneResources",
+                    "-Wl,--wrap=drmModeGetPlane,--wrap=drmModeFreePlane",
+                    "-Wl,--wrap=drmModeObjectGetProperties,--wrap=drmModeFreeObjectProperties",
+                    "-Wl,--wrap=drmModeGetProperty,--wrap=drmModeFreeProperty",
                     *flags,
                 ],
                 name="compile DRM VT guardian host harness",
                 check=True,
             )
             yield GuardianHarness(executable, guardian)
+
+    @pytest.fixture(scope="class")
+    @classmethod
+    def handoff_executable(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+        """Link real acquisition/dispatch with synthetic VT and DRM ownership."""
+        with c_build_directory(tmp_path_factory, "fplinux-drm-handoff") as temporary:
+            executable = temporary / "drm-handoff"
+            flags = shlex.split(
+                run_process(
+                    ["pkg-config", "--cflags", "--libs", "libdrm"],
+                    name="read DRM compiler and linker flags",
+                    timeout=10,
+                    check=True,
+                ).stdout
+            )
+            compile_c(
+                executable,
+                [
+                    "-std=gnu11",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    f"-I{ROOT / 'include/fplinux'}",
+                    str(ROOT / "tests/host_tool/display/fplinux-drm-handoff.c"),
+                    str(ROOT / "lib/fplinux/fplinux-drm-session.c"),
+                    "-Wl,--wrap=open,--wrap=execv,--wrap=ioctl,--wrap=drmIoctl",
+                    "-Wl,--wrap=drmSetClientCap,--wrap=drmSetMaster,--wrap=drmDropMaster",
+                    "-Wl,--wrap=drmModeGetResources,--wrap=drmModeFreeResources",
+                    "-Wl,--wrap=drmModeGetConnector,--wrap=drmModeFreeConnector",
+                    "-Wl,--wrap=drmModeGetEncoder,--wrap=drmModeFreeEncoder",
+                    "-Wl,--wrap=drmModeGetPlaneResources,--wrap=drmModeFreePlaneResources",
+                    "-Wl,--wrap=drmModeGetPlane,--wrap=drmModeFreePlane",
+                    "-Wl,--wrap=drmModeObjectGetProperties,--wrap=drmModeFreeObjectProperties",
+                    "-Wl,--wrap=drmModeGetProperty,--wrap=drmModeFreeProperty",
+                    "-Wl,--wrap=drmModeCreatePropertyBlob,--wrap=drmModeDestroyPropertyBlob",
+                    "-Wl,--wrap=drmModeAddFB2,--wrap=drmModeRmFB",
+                    *flags,
+                ],
+                name="compile DRM acquisition and dispatch with synthetic devices",
+                check=True,
+            )
+            yield executable
+
+    @pytest.mark.parametrize("mode", ["initial-acquire", "already-active", "pending-release"])
+    def test_first_dispatch_preserves_a_release_queued_during_initialization(
+        self, harness: GuardianHarness, handoff_executable: Path, mode: str
+    ) -> None:
+        """A pending release hands DRM to the terminal and permits a later acquire."""
+        run_process(
+            [str(handoff_executable), str(harness.guardian), mode],
+            name=f"exercise DRM ownership after initialization: {mode}",
+            timeout=10,
+            check=True,
+        )
 
     @pytest.mark.parametrize(
         "mode",
@@ -89,6 +154,33 @@ class DrmVtGuardianTests:
         run_process(
             [str(harness.executable), mode, str(harness.guardian)],
             name=f"exercise DRM guardian {mode}",
+            timeout=10,
+            check=True,
+        )
+
+    @pytest.mark.parametrize(
+        "mode",
+        [
+            "gpu-panel",
+            "cold-panel",
+            "panel-card7",
+            "ambiguous",
+            "no-panel",
+            "explicit-gpu",
+            "explicit-panel",
+            "explicit-missing",
+            "nv16-panel",
+            "nv16-unsupported",
+            "probe-error",
+        ],
+    )
+    def test_display_selection_uses_unique_compatible_kms_device(
+        self, harness: GuardianHarness, mode: str
+    ) -> None:
+        """Synthetic DRM devices exercise selection and failed-open VT cleanup."""
+        run_process(
+            [str(harness.executable), mode, str(harness.guardian)],
+            name=f"exercise DRM display selection {mode}",
             timeout=10,
             check=True,
         )

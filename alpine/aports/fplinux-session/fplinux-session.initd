@@ -1,0 +1,41 @@
+#!/sbin/openrc-run
+# SPDX-License-Identifier: GPL-2.0-only
+# shellcheck shell=sh disable=SC2034
+
+description="Graphical phone session"
+command="/usr/bin/fplinux-session"
+# A compositor that dies, for example killed for memory, would leave the
+# display black: the supervisor starts the session again after 2 s, and gives
+# up after more than 5 restarts within a minute.
+supervisor=supervise-daemon
+respawn_delay=2
+respawn_max=5
+respawn_period=60
+retry="TERM/5/KILL/2"
+output_log="/var/log/fplinux-session.log"
+error_log="/var/log/fplinux-session.log"
+leds_dir=/sys/class/leds
+
+depend() {
+	need localmount
+	after fplinux-input fplinux-brightness
+}
+
+start_pre() {
+	if service_started fplinux-terminal; then
+		eerror "Stop fplinux-terminal before starting the graphical session"
+		return 1
+	fi
+	return 0
+}
+
+stop_post() {
+	# The manager restores the keypad light's trigger when it ends, but not
+	# when the compositor was killed.
+	for trigger in "$leds_dir"/*kbd_backlight/trigger; do
+		if [ -w "$trigger" ]; then
+			echo input-events 2>/dev/null >"$trigger" || :
+		fi
+	done
+	return 0
+}

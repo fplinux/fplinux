@@ -364,6 +364,7 @@ void VID_Init(const byte *palette)
 	Cvar_SetValue("vid_bpp", FPLINUX_QUAKE_VIDEO_BITS_PER_PIXEL);
 	Cvar_SetValue("vid_refreshrate", fixed_mode.refresh);
 
+	Con_Printf("Quake renderer: software\n");
 	Con_Printf("FPLinux video: render %ux%u -> DRM %ux%u RGB565, %s, "
 		   "%ux downscale, %u page%s\n",
 		   render_width, render_height, framebuffer_width,

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Host harness for the production ARMADA renderer and compiled timeline. */
 
-#include "../../../alpine/aports/fplinux-showcase/armada-scene.h"
+#include "armada-scene.h"
+#include "armada-renderer.h"
+#include "armada-storyboard.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -87,8 +89,9 @@ static int output_cases_match(struct armada_scene *scene,
 			&expectations[index];
 		struct armada_outputs actual;
 
-		armada_scene_render(scene, expected->frame, metrics, &actual);
-		if (((expected->fields & EXPECT_KEYPAD) &&
+		if (!armada_scene_render(scene, expected->frame, metrics,
+					 &actual) ||
+		    ((expected->fields & EXPECT_KEYPAD) &&
 		     actual.keypad != expected->keypad) ||
 		    ((expected->fields & EXPECT_RUMBLE) &&
 		     actual.rumble != expected->rumble) ||
@@ -165,8 +168,12 @@ static int render_case(unsigned int width, unsigned int height,
 	uint16_t *storage =
 		malloc((count + 2U * GUARD_PIXELS) * sizeof(*storage));
 	uint16_t *pixels;
+	const uint16_t *scene_pixels;
 	struct armada_scene *scene;
+	struct armada_renderer *renderer;
+	struct armada_storyboard storyboard = { 0 };
 	struct fplinux_font font = { 0 };
+	char error[512];
 	const char *check = "scene creation";
 	uint32_t frame = 0U;
 	size_t index;
@@ -185,10 +192,23 @@ static int render_case(unsigned int width, unsigned int height,
 		free(storage);
 		return EXIT_FAILURE;
 	}
-	scene = armada_scene_create(width, height, pixels, &font);
+	scene = armada_scene_create_with_renderer(width, height, &font, NULL,
+						  ARMADA_RENDER_SOFTWARE, error,
+						  sizeof(error));
 	if (!scene) {
 		fprintf(stderr, "showcase %ux%u: %s failed\n", width, height,
 			check);
+		fplinux_font_close(&font);
+		free(storage);
+		return EXIT_FAILURE;
+	}
+	scene_pixels = armada_scene_pixels(scene);
+	renderer = armada_renderer_create(width, height, pixels, &font);
+	if (!renderer) {
+		fprintf(stderr,
+			"showcase %ux%u: guarded renderer creation failed\n",
+			width, height);
+		armada_scene_destroy(scene);
 		fplinux_font_close(&font);
 		free(storage);
 		return EXIT_FAILURE;
@@ -197,21 +217,26 @@ static int render_case(unsigned int width, unsigned int height,
 		struct armada_outputs outputs;
 		unsigned int glyph_height = width == 128U ? 12U : 16U;
 
-		armada_scene_render(scene, 0U, &metrics, &outputs);
+		check = "opening frame render";
+		if (!armada_scene_render(scene, 0U, &metrics, &outputs))
+			goto fail;
 		/* Complete solid glyphs prove both overlay lines fit their surfaces. */
 		check = "opening overlay layout";
-		if (color_count(pixels, width, height / 12U, glyph_height,
+		if (color_count(scene_pixels, width, height / 12U, glyph_height,
 				0xe7bfU) != (width == 128U ? 936U : 1664U) ||
-		    color_count(pixels, width, height - glyph_height - 2U,
+		    color_count(scene_pixels, width, height - glyph_height - 2U,
 				glyph_height,
 				0x3f1fU) != (width == 128U ? 1296U : 2304U))
 			goto fail;
-		armada_scene_render(scene, 1020U, &metrics, &outputs);
 		frame = 1020U;
+		check = "closing frame render";
+		if (!armada_scene_render(scene, frame, &metrics, &outputs))
+			goto fail;
 		check = "closing overlay layout";
-		if (color_count(pixels, width, height * 3U / 4U, glyph_height,
+		if (color_count(scene_pixels, width, height * 3U / 4U,
+				glyph_height,
 				0x3f1fU) != (width == 128U ? 720U : 1280U) ||
-		    color_count(pixels, width,
+		    color_count(scene_pixels, width,
 				height * 3U / 4U + glyph_height + 2U,
 				glyph_height,
 				0xe7bfU) != (width == 128U ? 1008U : 1792U))
@@ -220,32 +245,47 @@ static int render_case(unsigned int width, unsigned int height,
 	for (index = 0; index < sizeof(frames) / sizeof(frames[0]); ++index) {
 		struct armada_outputs first_outputs;
 		struct armada_outputs second_outputs;
+		struct armada_outputs guarded_outputs;
+		struct armada_frame prepared;
 		uint64_t first_hash;
 		uint64_t second_hash;
 		struct armada_scene *fresh;
+		bool rendered;
 
 		frame = frames[index];
 		memset(pixels, 0, count * sizeof(*pixels));
-		armada_scene_render(scene, frames[index], &metrics,
-				    &first_outputs);
-		first_hash = frame_hash(pixels, count);
+		check = "frame render";
+		if (!armada_scene_render(scene, frame, &metrics,
+					 &first_outputs))
+			goto fail;
+		first_hash = frame_hash(scene_pixels, count);
+		armada_storyboard_update(&storyboard, frame, &prepared,
+					 &guarded_outputs);
+		armada_renderer_render(renderer, &prepared, &metrics);
 		check = "guarded detailed render";
 		if (!guards_are_intact(storage, count) ||
-		    !frame_has_detail(pixels, count))
+		    !frame_has_detail(scene_pixels, count) ||
+		    frame_hash(pixels, count) != first_hash)
+			goto fail;
+		/* The borrowed renderer surface's previous contents are not inputs. */
+		memset(pixels, 0xa5, count * sizeof(*pixels));
+		armada_renderer_render(renderer, &prepared, &metrics);
+		if (!guards_are_intact(storage, count) ||
+		    frame_hash(pixels, count) != first_hash)
 			goto fail;
 		/* Playback, repeated frames and seeks must produce the same image/cues. */
 		check = "fresh scene creation";
-		fresh = armada_scene_create(width, height, pixels, &font);
+		fresh = armada_scene_create_with_renderer(
+			width, height, &font, NULL, ARMADA_RENDER_SOFTWARE,
+			error, sizeof(error));
 		if (!fresh)
 			goto fail;
-		/* A fresh destination's previous contents are not a scene input. */
-		memset(pixels, 0xa5, count * sizeof(*pixels));
-		armada_scene_render(fresh, frames[index], &metrics,
-				    &second_outputs);
+		rendered = armada_scene_render(fresh, frame, &metrics,
+					       &second_outputs);
+		second_hash = frame_hash(armada_scene_pixels(fresh), count);
 		armada_scene_destroy(fresh);
-		second_hash = frame_hash(pixels, count);
 		check = "repeatable render";
-		if (!guards_are_intact(storage, count) ||
+		if (!rendered || !guards_are_intact(storage, count) ||
 		    first_hash != second_hash ||
 		    memcmp(&first_outputs, &second_outputs,
 			   sizeof(first_outputs)) != 0)
@@ -262,19 +302,22 @@ static int render_case(unsigned int width, unsigned int height,
 		if (!output_cases_match(scene, &metrics, output_expectations,
 					ARRAY_SIZE(output_expectations)))
 			goto fail;
-		memset(pixels, 0, count * sizeof(*pixels));
-		armada_scene_render(scene, 0U, &metrics, &first);
-		first_hash = frame_hash(pixels, count);
-		memset(pixels, 0, count * sizeof(*pixels));
-		armada_scene_render(scene, ARMADA_DURATION_FRAMES, &metrics,
-				    &wrapped);
-		wrapped_hash = frame_hash(pixels, count);
+		check = "first loop frame render";
+		if (!armada_scene_render(scene, 0U, &metrics, &first))
+			goto fail;
+		first_hash = frame_hash(scene_pixels, count);
+		check = "wrapped loop frame render";
+		if (!armada_scene_render(scene, ARMADA_DURATION_FRAMES,
+					 &metrics, &wrapped))
+			goto fail;
+		wrapped_hash = frame_hash(scene_pixels, count);
 		check = "loop wrap";
 		if (first_hash != wrapped_hash ||
 		    memcmp(&first, &wrapped, sizeof(first)) != 0)
 			goto fail;
 	}
 	armada_scene_destroy(scene);
+	armada_renderer_destroy(renderer);
 	fplinux_font_close(&font);
 	free(storage);
 	return EXIT_SUCCESS;
@@ -283,6 +326,7 @@ fail:
 	fprintf(stderr, "showcase %ux%u frame %u: %s failed\n", width, height,
 		(unsigned int)frame, check);
 	armada_scene_destroy(scene);
+	armada_renderer_destroy(renderer);
 	fplinux_font_close(&font);
 	free(storage);
 	return EXIT_FAILURE;
@@ -291,6 +335,8 @@ fail:
 int main(int argc, char **argv)
 {
 	return argc == 3 && render_case(240U, 320U, argv[2]) == EXIT_SUCCESS &&
+			       render_case(320U, 240U, argv[2]) ==
+				       EXIT_SUCCESS &&
 			       render_case(128U, 160U, argv[1]) ==
 				       EXIT_SUCCESS ?
 		       EXIT_SUCCESS :

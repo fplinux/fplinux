@@ -18,10 +18,21 @@ depend() {
 	after bootmisc fplinux-brightness
 }
 
-start() {
-	if [ ! -c /dev/dri/card0 ]; then
-		einfo "No DRM display; terminal remains stopped"
-		return 0
+start_pre() {
+	if service_started fplinux-session; then
+		eerror "Stop fplinux-session before starting the DRM terminal"
+		return 1
 	fi
-	default_start
+	return 0
+}
+
+start() {
+	for device in /dev/dri/card[0-9]*; do
+		if [ -c "$device" ]; then
+			default_start
+			return "$?"
+		fi
+	done
+	einfo "No DRM display; terminal remains stopped"
+	return 0
 }

@@ -1,33 +1,24 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "armada-renderer.h"
+#include "armada-geometry.h"
 #include "armada-math.h"
+#include "armada-overlay.h"
 
 #include <float.h>
-#include <stdio.h>
 #include <stdlib.h>
 
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
-#define ARMADA_STROKES 20U
 #define ARMADA_NEAR_WATER_DISTANCE 13.0f
 #define ARMADA_WATER_FAR_DISTANCE 80.0f
 #define ARMADA_CLOUD_HEIGHT 7.2f
 #define ARMADA_SUN_RADIUS 0.046f
 #define ARMADA_MOON_RADIUS 0.040f
-#define ARMADA_FINAL_METRICS (32U * ARMADA_FRAMES_PER_SECOND)
 #define ARMADA_BACKGROUND_SCALE 4U
 #define ARMADA_TRIANGLE_TILE_SIDE 8
 #define ARMADA_GLASS_IOR 1.50f
 #define ARMADA_GLASS_ABSORPTION 0.72f
 #define ARMADA_SHADOW_SIDE 128U
 #define ARMADA_LIGHT_SAMPLES 12U
-
-struct armada_prepared_stroke {
-	float midpoint_x;
-	float midpoint_y;
-	float unit_x;
-	float unit_y;
-	float half_length;
-};
 
 struct armada_shadow_bounds {
 	float minimum_u;
@@ -70,61 +61,12 @@ struct armada_renderer {
 	float cloud_transmittance;
 };
 
-struct armada_stroke {
-	int8_t ax;
-	int8_t ay;
-	int8_t bx;
-	int8_t by;
-};
-
-struct armada_glyph {
-	uint8_t first;
-	uint8_t count;
-};
-
 struct armada_water_sample {
 	float height;
 	float gradient_x;
 	float gradient_z;
 };
 
-static const struct armada_stroke strokes[ARMADA_STROKES] = {
-	{ -30, -62, -30, 62 }, { -30, 62, 34, 62 },   { -30, 10, 25, 10 },
-	{ -30, -62, -30, 62 }, { -30, 62, 30, 62 },   { 30, 12, 30, 62 },
-	{ -30, 12, 30, 12 },   { -30, -62, -30, 62 }, { -30, -62, 34, -62 },
-	{ -32, 62, 32, 62 },   { 0, -62, 0, 62 },     { -32, -62, 32, -62 },
-	{ -31, -62, -31, 62 }, { 31, -62, 31, 62 },   { -31, 62, 31, -62 },
-	{ -31, -60, -31, 62 }, { 31, -60, 31, 62 },   { -31, -60, 31, -60 },
-	{ -33, -62, 33, 62 },  { -33, 62, 33, -62 },
-};
-
-static const struct armada_glyph glyphs[ARMADA_LETTERS] = {
-	{ 0, 3 }, { 3, 4 }, { 7, 2 }, { 9, 3 }, { 12, 3 }, { 15, 3 }, { 18, 2 },
-};
-
-struct armada_prism_profile {
-	float across;
-	float depth;
-};
-
-static const uint8_t stroke_prism_faces[20][3] = {
-	{ 0, 1, 7 }, { 0, 7, 6 },  { 1, 2, 8 },	 { 1, 8, 7 },  { 2, 3, 9 },
-	{ 2, 9, 8 }, { 3, 4, 10 }, { 3, 10, 9 }, { 4, 5, 11 }, { 4, 11, 10 },
-	{ 5, 0, 6 }, { 5, 6, 11 }, { 0, 2, 1 },	 { 0, 3, 2 },  { 0, 4, 3 },
-	{ 0, 5, 4 }, { 6, 7, 8 },  { 6, 8, 9 },	 { 6, 9, 10 }, { 6, 10, 11 },
-};
-
-static const struct armada_prism_profile stroke_prism_profile[6] = {
-	{ -0.062f, -0.170f }, { 0.062f, -0.170f }, { 0.088f, -0.142f },
-	{ 0.088f, 0.170f },   { -0.088f, 0.170f }, { -0.088f, -0.142f },
-};
-
-static float vec_length(struct armada_vec3 v)
-{
-	float squared = vec_dot(v, v);
-	return squared > 0.0000001f ? squared * fast_inverse_sqrt(squared) :
-				      0.0f;
-}
 static struct armada_vec3 vec_reflect(struct armada_vec3 direction,
 				      struct armada_vec3 normal)
 {
@@ -244,30 +186,6 @@ static float surface_cloud_coverage(const struct armada_renderer *renderer,
 	return global_coverage * (1.0f - projection_weight) +
 	       projected_coverage * projection_weight;
 }
-static void prepare_stroke_geometry(struct armada_renderer *renderer)
-{
-	unsigned int index;
-
-	for (index = 0; index < ARRAY_SIZE(strokes); ++index) {
-		const struct armada_stroke *stroke = &strokes[index];
-		struct armada_prepared_stroke *prepared =
-			&renderer->prepared_strokes[index];
-		float ax = (float)stroke->ax / 100.0f;
-		float ay = (float)stroke->ay / 100.0f;
-		float bx = (float)stroke->bx / 100.0f;
-		float by = (float)stroke->by / 100.0f;
-		float dx = bx - ax;
-		float dy = by - ay;
-		float inverse = fast_inverse_sqrt(dx * dx + dy * dy);
-
-		prepared->unit_x = dx * inverse;
-		prepared->unit_y = dy * inverse;
-		prepared->midpoint_x = (ax + bx) * 0.5f;
-		prepared->midpoint_y = (ay + by) * 0.5f;
-		prepared->half_length = vec_length(vec3(dx, dy, 0.0f)) * 0.5f;
-	}
-}
-
 static struct armada_vec3
 rotate_forward(const struct armada_letter_state *letter,
 	       struct armada_vec3 value)
@@ -426,21 +344,6 @@ static struct armada_vec3 sky_color(const struct armada_renderer *renderer,
 		color = color_mix(color, cloud_color, cloud_opacity);
 	}
 	return color;
-}
-
-static struct armada_vec3 letter_base_color(unsigned int letter)
-{
-	static const struct armada_vec3 colors[ARMADA_LETTERS] = {
-		{ 1.0f, 0.23137255f, 0.18823529f },
-		{ 1.0f, 0.58431373f, 0.0f },
-		{ 1.0f, 0.83921569f, 0.03921569f },
-		{ 0.20392157f, 0.78039216f, 0.34901961f },
-		{ 0.19607843f, 0.67843137f, 0.90196078f },
-		{ 0.03921569f, 0.51764706f, 1.0f },
-		{ 0.68627451f, 0.32156863f, 0.87058824f },
-	};
-
-	return colors[letter];
 }
 
 static void add_ripple_ring(struct armada_water_sample *sample, float x,
@@ -1015,7 +918,7 @@ prepare_glass_surface(const struct armada_renderer *renderer,
 		      unsigned int letter, struct armada_vec3 normal,
 		      struct armada_vec3 point, bool reflection)
 {
-	struct armada_vec3 base = letter_base_color(letter);
+	struct armada_vec3 base = armada_letter_base_color(letter);
 	struct armada_vec3 relative = vec_sub(point, camera_position());
 	struct armada_vec3 incident = vec_normalize(relative);
 	float facing = f_clamp(-vec_dot(normal, incident), 0.0f, 1.0f);
@@ -1280,7 +1183,7 @@ static void render_water_shadows(struct armada_renderer *renderer)
 					     renderer->shadow_right);
 	prepare_shadow_light_samples(renderer, sunlight);
 	for (letter = 0; letter < ARMADA_LETTERS; ++letter) {
-		const struct armada_glyph *glyph = &glyphs[letter];
+		const struct armada_glyph *glyph = &armada_glyphs[letter];
 		struct armada_shadow_bounds *bounds =
 			&renderer->shadow_bounds[letter];
 		unsigned int stroke;
@@ -1294,7 +1197,7 @@ static void render_water_shadows(struct armada_renderer *renderer)
 		};
 		renderer->shadow_filter[letter] =
 			vec_scale(color_mix(vec3(1.0f, 1.0f, 1.0f),
-					    letter_base_color(letter),
+					    armada_letter_base_color(letter),
 					    ARMADA_GLASS_ABSORPTION),
 				  0.92f);
 		if (!renderer->frame->letters[letter].visible)
@@ -1307,7 +1210,7 @@ static void render_water_shadows(struct armada_renderer *renderer)
 
 			for (corner = 0; corner < 12U; ++corner) {
 				const struct armada_prism_profile *profile =
-					&stroke_prism_profile[corner % 6U];
+					&armada_prism_profile[corner % 6U];
 				struct triangle_vertex *vertex =
 					&vertices[stroke_index][corner];
 				float along =
@@ -1357,7 +1260,7 @@ static void render_water_shadows(struct armada_renderer *renderer)
 	     ++index)
 		renderer->shadow_depth[index] = -FLT_MAX;
 	for (letter = 0; letter < ARMADA_LETTERS; ++letter) {
-		const struct armada_glyph *glyph = &glyphs[letter];
+		const struct armada_glyph *glyph = &armada_glyphs[letter];
 		float *depth = renderer->shadow_depth +
 			       (size_t)letter * ARMADA_SHADOW_SIDE *
 				       ARMADA_SHADOW_SIDE;
@@ -1400,13 +1303,13 @@ static void render_water_shadows(struct armada_renderer *renderer)
 						       renderer->shadow_min_v) *
 						      renderer->shadow_scale_v;
 			}
-			for (face = 0; face < ARRAY_SIZE(stroke_prism_faces);
+			for (face = 0; face < ARRAY_SIZE(armada_prism_faces);
 			     ++face)
 				shadow_rasterize_triangle(
 					renderer, depth,
-					&projected[stroke_prism_faces[face][0]],
-					&projected[stroke_prism_faces[face][1]],
-					&projected[stroke_prism_faces[face][2]]);
+					&projected[armada_prism_faces[face][0]],
+					&projected[armada_prism_faces[face][1]],
+					&projected[armada_prism_faces[face][2]]);
 		}
 	}
 }
@@ -1807,21 +1710,21 @@ triangle_rasterize_stroke(struct armada_renderer *renderer, unsigned int letter,
 
 	for (vertex = 0; vertex < ARRAY_SIZE(vertices); ++vertex) {
 		const struct armada_prism_profile *profile =
-			&stroke_prism_profile[vertex %
-					      ARRAY_SIZE(stroke_prism_profile)];
+			&armada_prism_profile[vertex %
+					      ARRAY_SIZE(armada_prism_profile)];
 
 		vertices[vertex].world = triangle_stroke_world(
 			renderer, letter, stroke,
-			along[vertex / ARRAY_SIZE(stroke_prism_profile)],
+			along[vertex / ARRAY_SIZE(armada_prism_profile)],
 			profile->across, profile->depth, reflection);
 		if (!triangle_project(renderer, &vertices[vertex], reflection))
 			return;
 	}
-	for (face = 0; face < ARRAY_SIZE(stroke_prism_faces); ++face)
+	for (face = 0; face < ARRAY_SIZE(armada_prism_faces); ++face)
 		triangle_rasterize(renderer,
-				   &vertices[stroke_prism_faces[face][0]],
-				   &vertices[stroke_prism_faces[face][1]],
-				   &vertices[stroke_prism_faces[face][2]],
+				   &vertices[armada_prism_faces[face][0]],
+				   &vertices[armada_prism_faces[face][1]],
+				   &vertices[armada_prism_faces[face][2]],
 				   letter, reflection);
 }
 
@@ -1831,7 +1734,7 @@ static void triangle_rasterize_letters(struct armada_renderer *renderer,
 	unsigned int letter;
 
 	for (letter = 0; letter < ARMADA_LETTERS; ++letter) {
-		const struct armada_glyph *glyph = &glyphs[letter];
+		const struct armada_glyph *glyph = &armada_glyphs[letter];
 		unsigned int index;
 
 		if (!renderer->frame->letters[letter].visible)
@@ -1889,86 +1792,6 @@ static void render_scene(struct armada_renderer *renderer)
 	triangle_rasterize_letters(renderer, false);
 }
 
-static void put_pixel(struct armada_renderer *renderer, int x, int y,
-		      uint16_t color)
-{
-	if (x >= 0 && y >= 0 && (unsigned int)x < renderer->width &&
-	    (unsigned int)y < renderer->height)
-		renderer->pixels[(size_t)y * renderer->width + (unsigned int)x] =
-			color;
-}
-
-static void draw_character(struct armada_renderer *renderer, int x, int y,
-			   char character, uint16_t color)
-{
-	const struct fplinux_font *font = renderer->font;
-	const unsigned char *glyph;
-
-	if (character >= 'a' && character <= 'z')
-		character = (char)(character - 'a' + 'A');
-	glyph = fplinux_font_glyph(font, (unsigned char)character);
-	if (!glyph)
-		return;
-	for (unsigned int row = 0; row < font->height; ++row)
-		for (unsigned int column = 0; column < font->width; ++column)
-			if (glyph[row * font->row_bytes + column / 8U] &
-			    (0x80U >> (column % 8U)))
-				put_pixel(renderer, x + (int)column,
-					  y + (int)row, color);
-}
-
-static void draw_text(struct armada_renderer *renderer, int x, int y,
-		      const char *text, uint16_t color)
-{
-	while (*text) {
-		draw_character(renderer, x, y, *text, color);
-		x += (int)renderer->font->width;
-		++text;
-	}
-}
-
-static void draw_centered(struct armada_renderer *renderer, int y,
-			  const char *text, uint16_t color)
-{
-	int width = (int)(strlen(text) * renderer->font->width);
-
-	draw_text(renderer, ((int)renderer->width - width) / 2, y, text, color);
-}
-
-static void draw_overlay(struct armada_renderer *renderer,
-			 const struct armada_metrics *metrics)
-{
-	unsigned int line_height = renderer->font->height + 2U;
-	uint16_t cyan = color_to_rgb565(vec3(0.25f, 0.88f, 1.0f));
-	uint16_t white = color_to_rgb565(vec3(0.90f, 0.96f, 1.0f));
-	char line[48];
-
-	draw_centered(renderer, (int)renderer->height / 12, "FPLINUX ARMADA",
-		      white);
-	if (renderer->frame->number >= ARMADA_FINAL_METRICS && metrics &&
-	    metrics->valid) {
-		snprintf(line, sizeof(line), "AVG %u.%u FPS",
-			 metrics->average_fps_tenths / 10U,
-			 metrics->average_fps_tenths % 10U);
-		draw_centered(renderer, (int)renderer->height * 3 / 4, line,
-			      cyan);
-		snprintf(line, sizeof(line), "MIN %u.%u  MAX %u MS",
-			 metrics->minimum_fps_tenths / 10U,
-			 metrics->minimum_fps_tenths % 10U,
-			 metrics->maximum_frame_us / 1000U);
-		draw_centered(renderer,
-			      (int)renderer->height * 3 / 4 + (int)line_height,
-			      line, white);
-		draw_centered(renderer,
-			      (int)renderer->height - (int)line_height,
-			      "BACK EXITS", white);
-	} else {
-		draw_centered(renderer,
-			      (int)renderer->height - (int)line_height,
-			      "DISPLAY KEYS HAPTICS", cyan);
-	}
-}
-
 struct armada_renderer *armada_renderer_create(unsigned int width,
 					       unsigned int height,
 					       uint16_t *pixels,
@@ -2023,7 +1846,7 @@ struct armada_renderer *armada_renderer_create(unsigned int width,
 		free(renderer);
 		return NULL;
 	}
-	prepare_stroke_geometry(renderer);
+	armada_prepare_stroke_geometry(renderer->prepared_strokes);
 	for (y = 0; y < renderer->height; ++y) {
 		unsigned int x;
 
@@ -2078,5 +1901,6 @@ void armada_renderer_render(struct armada_renderer *renderer,
 				   frame->environment.celestial_direction) *
 			0.20f;
 	render_scene(renderer);
-	draw_overlay(renderer, metrics);
+	armada_overlay_draw(renderer->width, renderer->height, renderer->pixels,
+			    renderer->font, frame->number, metrics);
 }

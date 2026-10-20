@@ -1,0 +1,90 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+case "${1:-}" in
+-h | --help)
+	printf 'Usage: fplinux-session\nStart the graphical phone session.\n'
+	exit 0
+	;;
+"") ;;
+*)
+	printf 'fplinux-session: unexpected argument\n' >&2
+	exit 2
+	;;
+esac
+if [ "$#" -gt 1 ]; then
+	printf 'fplinux-session: unexpected argument\n' >&2
+	exit 2
+fi
+set -eu
+
+if [ -f /etc/fplinux/preparation ]; then
+	exec /usr/libexec/fplinux/preparation /run/fplinux-preparation-status
+fi
+
+# Prints "us" and then, in name order, the XKB layouts named by installed
+# input languages (input=yes, xkb=<layout>) whose layout package registered
+# them; XKB keeps at most three beside US.
+keyboard_layouts() {
+	for language in /usr/share/fplinux/languages/*; do
+		case ${language##*/} in
+		[a-z][a-z] | [a-z][a-z][a-z]) ;;
+		*) continue ;;
+		esac
+		if [ -f "$language" ] && grep -qx 'input=yes' "$language"; then
+			sed -n 's/^xkb=//p' "$language"
+		fi
+	done | sort -u | {
+		layouts=us
+		count=0
+		while IFS= read -r layout; do
+			case $layout in
+			"" | us | *[!a-z0-9_]*) continue ;;
+			esac
+			if [ "$count" -lt 3 ] &&
+				[ -f "/usr/share/fplinux/xkb/layouts/$layout" ]; then
+				layouts=$layouts,$layout
+				count=$((count + 1))
+			fi
+		done
+		printf '%s\n' "$layouts"
+	}
+}
+
+if ! id fplinux >/dev/null 2>&1; then
+	if ! grep -q '^fplinux:' /etc/group; then
+		addgroup -S fplinux
+	fi
+	adduser -S -D -h /home/fplinux -s /bin/sh -G fplinux fplinux
+fi
+mkdir -p /run/fplinux-gui/compositor /run/fplinux-gui/user /home/fplinux
+chown root:fplinux /run/fplinux-gui
+chmod 0750 /run/fplinux-gui
+chown root:root /run/fplinux-gui/compositor
+chmod 0700 /run/fplinux-gui/compositor
+chown fplinux:fplinux /run/fplinux-gui/user /home/fplinux
+chmod 0700 /run/fplinux-gui/user /home/fplinux
+rm -f /run/fplinux-gui/ready /run/fplinux-gui/control.sock
+# External keyboards type every input language that has a registered layout.
+sed "s/^keymap_layout=.*/keymap_layout=$(keyboard_layouts)/" \
+	/etc/fplinux/weston.ini >/run/fplinux-gui/compositor/weston.ini
+export XDG_RUNTIME_DIR=/run/fplinux-gui/compositor
+# The embedded seatd binds the seat to the active virtual terminal (its default
+# while SEATD_VTBOUND is unset): while the session runs, the kernel console
+# neither draws nor acts on keys such as Ctrl+Alt+Del from external keyboards.
+export LIBSEAT_BACKEND=builtin
+# libinput keeps every quirks file it reads in memory; none of libinput's own
+# quirks applies to FPLinux devices, so it reads one minimal file instead.
+export LIBINPUT_QUIRKS_DIR=/usr/share/fplinux/libinput
+export FPLINUX_APP_RUNTIME_DIR=/run/fplinux-gui/user
+# When memory runs out, the kernel kills applications before the compositor and
+# its manager; the manager starts applications with the default score.
+if ! echo -900 >/proc/self/oom_score_adj; then
+	printf 'fplinux-session: cannot lower the OOM score\n' >&2
+fi
+umask 0007
+# An empty --flight-rec-scopes turns off weston's flight recorder, a 5 MiB
+# in-memory log ring that only a debugger could read; the log file stays.
+exec /usr/bin/weston --config=/run/fplinux-gui/compositor/weston.ini \
+	--socket=/run/fplinux-gui/wayland-0 --backend=drm \
+	--shell=/usr/lib/weston/fplinux-shell.so --idle-time=0 \
+	--flight-rec-scopes=

@@ -1,0 +1,569 @@
+{
+  "description": "UI screen profiles in physical pixels, with Noto Sans bitmap fonts and RGB565-exact theme colours.",
+  "selection_rule": "largest pixel area with profile.width <= screen.width and profile.height <= screen.height; earlier profile wins equal-area ties; smaller screens use 128x128 (unsupported, logged); geometry uses the real screen size",
+  "tile_radius": {
+    "16": 3,
+    "20": 4,
+    "24": 5,
+    "32": 7,
+    "40": 8,
+    "48": 10,
+    "56": 12,
+    "60": 13
+  },
+  "profiles": {
+    "128x128": {
+      "width": 128,
+      "height": 128,
+      "fonts": {
+        "body": "NotoSans SemiCondensed 12 4bpp",
+        "title": "NotoSans SemiCondensed Bold 13 4bpp",
+        "clock": "NotoSans Bold 24 4bpp digits",
+        "softkey": "NotoSans Condensed 12 4bpp",
+        "metrics": {
+          "body": {
+            "line": 15,
+            "advance": 6
+          },
+          "title": {
+            "line": 18,
+            "advance": 7
+          },
+          "clock": {
+            "line": 20,
+            "advance": 14
+          },
+          "softkey": {
+            "line": 15,
+            "advance": 6
+          }
+        },
+        "build": {
+          "bpp": 4,
+          "hinting": "TrueType hinting; lv_font_conv --autohint-off",
+          "kerning": "GPOS pairs converted to a legacy kern table",
+          "symbols": "U+2713 from Noto Sans Symbols 2 v2.008; U+2190-2193 from Noto Sans Math v3.000",
+          "digits": "tabular"
+        }
+      },
+      "status_height": 16,
+      "softkey_height": 16,
+      "header_height": 20,
+      "margin": 4,
+      "gutter": 6,
+      "spacing": 4,
+      "gap_small": 2,
+      "content_padding": 2,
+      "scrollbar_offset": 2,
+      "row_height": 20,
+      "row_height_detail": 32,
+      "row_padding": 4,
+      "row_gap": 4,
+      "list_padding": 1,
+      "row_icon_size": 16,
+      "status_icon_size": 12,
+      "app_icon_size": 32,
+      "frame_padding": 3,
+      "field_padding": 2,
+      "field_lines": 3,
+      "text_box_padding": 2,
+      "field_status_inline": false,
+      "picker_columns": 9,
+      "picker_cell": [13, 18],
+      "picker_border": 1,
+      "picker_padding": 2,
+      "alert_margin": 2,
+      "alert_padding": 3,
+      "alert_gap": 3,
+      "spinner_size": 16,
+      "spinner_width": 2,
+      "bar_height": 4,
+      "legend_margin": 2,
+      "legend_gap": 4,
+      "battery": {
+        "body": [16, 8],
+        "cap": [1, 4],
+        "bar": [2, 4],
+        "bolt_height": 7
+      },
+      "home_gap": 4,
+      "home_hint": "replaces the date while shown",
+      "logo": {
+        "splash_mark": 48,
+        "about": "mark 32",
+        "boot_mark": 32
+      },
+      "focus_width": 2,
+      "scrollbar_width": 2,
+      "alert_border": 2,
+      "menu_edge": 2,
+      "divider": 1,
+      "grid_columns": 3,
+      "grid_scrollbar_offset": 0,
+      "integrated_surface": [128, 96],
+      "catalogue_default": "list",
+      "picker_font": "font_large",
+      "selection": {
+        "grid_ring_width": 2,
+        "grid_ring_gap": 1,
+        "grid_tile_inset": 1,
+        "grid_ring_colour": "focus",
+        "list_tile_ring_width": 1,
+        "list_tile_ring_gap": 0,
+        "list_tile_ring_colour": "tile_ring"
+      }
+    },
+    "128x160": {
+      "width": 128,
+      "height": 160,
+      "fonts": {
+        "body": "NotoSans SemiCondensed 12 4bpp",
+        "title": "NotoSans SemiCondensed Bold 13 4bpp",
+        "clock": "NotoSans Bold 24 4bpp digits",
+        "softkey": "NotoSans Condensed 12 4bpp",
+        "metrics": {
+          "body": {
+            "line": 15,
+            "advance": 6
+          },
+          "title": {
+            "line": 18,
+            "advance": 7
+          },
+          "clock": {
+            "line": 20,
+            "advance": 14
+          },
+          "softkey": {
+            "line": 15,
+            "advance": 6
+          }
+        },
+        "build": {
+          "bpp": 4,
+          "hinting": "TrueType hinting; lv_font_conv --autohint-off",
+          "kerning": "GPOS pairs converted to a legacy kern table",
+          "symbols": "U+2713 from Noto Sans Symbols 2 v2.008; U+2190-2193 from Noto Sans Math v3.000",
+          "digits": "tabular"
+        }
+      },
+      "status_height": 16,
+      "softkey_height": 16,
+      "header_height": 20,
+      "margin": 4,
+      "gutter": 6,
+      "spacing": 4,
+      "gap_small": 2,
+      "content_padding": 2,
+      "scrollbar_offset": 2,
+      "row_height": 22,
+      "row_height_detail": 32,
+      "row_padding": 4,
+      "row_gap": 4,
+      "list_padding": 1,
+      "row_icon_size": 16,
+      "status_icon_size": 12,
+      "app_icon_size": 32,
+      "frame_padding": 3,
+      "field_padding": 2,
+      "field_lines": 3,
+      "text_box_padding": 2,
+      "field_status_inline": false,
+      "picker_columns": 9,
+      "picker_cell": [13, 18],
+      "picker_border": 1,
+      "picker_padding": 2,
+      "alert_margin": 2,
+      "alert_padding": 3,
+      "alert_gap": 3,
+      "spinner_size": 16,
+      "spinner_width": 2,
+      "bar_height": 4,
+      "legend_margin": 2,
+      "legend_gap": 4,
+      "battery": {
+        "body": [16, 8],
+        "cap": [1, 4],
+        "bar": [2, 4],
+        "bolt_height": 7
+      },
+      "home_gap": 4,
+      "home_hint": "below the date",
+      "logo": {
+        "splash_mark": 64,
+        "about": "mark 32",
+        "boot_mark": 48
+      },
+      "focus_width": 2,
+      "scrollbar_width": 2,
+      "alert_border": 2,
+      "menu_edge": 2,
+      "divider": 1,
+      "grid_columns": 3,
+      "grid_scrollbar_offset": 0,
+      "integrated_surface": [128, 128],
+      "catalogue_default": "grid",
+      "picker_font": "font_large",
+      "selection": {
+        "grid_ring_width": 2,
+        "grid_ring_gap": 1,
+        "grid_tile_inset": 1,
+        "grid_ring_colour": "focus",
+        "list_tile_ring_width": 1,
+        "list_tile_ring_gap": 0,
+        "list_tile_ring_colour": "tile_ring"
+      }
+    },
+    "176x220": {
+      "width": 176,
+      "height": 220,
+      "fonts": {
+        "body": "NotoSans 13 4bpp",
+        "title": "NotoSans Bold 16 4bpp",
+        "clock": "NotoSans Bold 28 4bpp digits",
+        "softkey": "NotoSans 13 4bpp",
+        "metrics": {
+          "body": {
+            "line": 15,
+            "advance": 8
+          },
+          "title": {
+            "line": 21,
+            "advance": 10
+          },
+          "clock": {
+            "line": 25,
+            "advance": 16
+          },
+          "softkey": {
+            "line": 15,
+            "advance": 8
+          }
+        },
+        "build": {
+          "bpp": 4,
+          "hinting": "TrueType hinting; lv_font_conv --autohint-off",
+          "kerning": "GPOS pairs converted to a legacy kern table",
+          "symbols": "U+2713 from Noto Sans Symbols 2 v2.008; U+2190-2193 from Noto Sans Math v3.000",
+          "digits": "tabular"
+        }
+      },
+      "status_height": 18,
+      "softkey_height": 24,
+      "header_height": 24,
+      "margin": 6,
+      "gutter": 10,
+      "spacing": 6,
+      "gap_small": 3,
+      "content_padding": 4,
+      "scrollbar_offset": 6,
+      "row_height": 26,
+      "row_height_detail": 36,
+      "row_padding": 6,
+      "row_gap": 6,
+      "list_padding": 4,
+      "row_icon_size": 20,
+      "status_icon_size": 16,
+      "app_icon_size": 40,
+      "frame_padding": 4,
+      "field_padding": 3,
+      "field_lines": 4,
+      "text_box_padding": 3,
+      "field_status_inline": false,
+      "picker_columns": 6,
+      "picker_cell": [26, 22],
+      "picker_border": 2,
+      "picker_padding": 3,
+      "alert_margin": 6,
+      "alert_padding": 6,
+      "alert_gap": 4,
+      "spinner_size": 24,
+      "spinner_width": 3,
+      "bar_height": 6,
+      "legend_margin": 6,
+      "legend_gap": 6,
+      "battery": {
+        "body": [21, 10],
+        "cap": [2, 5],
+        "bar": [3, 6],
+        "bolt_height": 9
+      },
+      "home_gap": 6,
+      "home_hint": "below the date",
+      "logo": {
+        "splash_mark": 80,
+        "about": "lockup 160 wide",
+        "boot_mark": 64
+      },
+      "focus_width": 2,
+      "scrollbar_width": 2,
+      "alert_border": 2,
+      "menu_edge": 2,
+      "divider": 1,
+      "grid_columns": 3,
+      "grid_scrollbar_offset": 4,
+      "integrated_surface": [176, 178],
+      "catalogue_default": "grid",
+      "picker_font": "font_large",
+      "selection": {
+        "grid_ring_width": 2,
+        "grid_ring_gap": 2,
+        "grid_tile_inset": 0,
+        "grid_ring_colour": "focus",
+        "list_tile_ring_width": 1,
+        "list_tile_ring_gap": 0,
+        "list_tile_ring_colour": "tile_ring"
+      }
+    },
+    "240x320": {
+      "width": 240,
+      "height": 320,
+      "fonts": {
+        "body": "NotoSans 14 4bpp",
+        "title": "NotoSans Bold 18 4bpp",
+        "clock": "NotoSans Bold 32 4bpp digits",
+        "softkey": "NotoSans 14 4bpp",
+        "metrics": {
+          "body": {
+            "line": 18,
+            "advance": 8
+          },
+          "title": {
+            "line": 22,
+            "advance": 11
+          },
+          "clock": {
+            "line": 27,
+            "advance": 19
+          },
+          "softkey": {
+            "line": 18,
+            "advance": 8
+          }
+        },
+        "build": {
+          "bpp": 4,
+          "hinting": "TrueType hinting; lv_font_conv --autohint-off",
+          "kerning": "GPOS pairs converted to a legacy kern table",
+          "symbols": "U+2713 from Noto Sans Symbols 2 v2.008; U+2190-2193 from Noto Sans Math v3.000",
+          "digits": "tabular"
+        }
+      },
+      "status_height": 20,
+      "softkey_height": 32,
+      "header_height": 28,
+      "margin": 8,
+      "gutter": 14,
+      "spacing": 8,
+      "gap_small": 4,
+      "content_padding": 6,
+      "scrollbar_offset": 8,
+      "row_height": 36,
+      "row_height_detail": 44,
+      "row_padding": 8,
+      "row_gap": 8,
+      "list_padding": 6,
+      "row_icon_size": 24,
+      "status_icon_size": 16,
+      "app_icon_size": 56,
+      "frame_padding": 6,
+      "field_padding": 4,
+      "field_lines": 4,
+      "text_box_padding": 4,
+      "field_status_inline": true,
+      "picker_columns": 6,
+      "picker_cell": [30, 24],
+      "picker_border": 2,
+      "picker_padding": 4,
+      "alert_margin": 8,
+      "alert_padding": 8,
+      "alert_gap": 6,
+      "spinner_size": 32,
+      "spinner_width": 4,
+      "bar_height": 8,
+      "legend_margin": 8,
+      "legend_gap": 8,
+      "battery": {
+        "body": [23, 12],
+        "cap": [2, 6],
+        "bar": [3, 8],
+        "bolt_height": 11
+      },
+      "home_gap": 8,
+      "home_hint": "below the date",
+      "logo": {
+        "splash_mark": 96,
+        "about": "lockup 200 wide",
+        "boot_mark": 80
+      },
+      "focus_width": 2,
+      "scrollbar_width": 2,
+      "alert_border": 2,
+      "menu_edge": 2,
+      "divider": 1,
+      "grid_columns": 3,
+      "grid_scrollbar_offset": 8,
+      "integrated_surface": [240, 268],
+      "catalogue_default": "grid",
+      "picker_font": "font_large",
+      "selection": {
+        "grid_ring_width": 2,
+        "grid_ring_gap": 2,
+        "grid_tile_inset": 0,
+        "grid_ring_colour": "focus",
+        "list_tile_ring_width": 1,
+        "list_tile_ring_gap": 0,
+        "list_tile_ring_colour": "tile_ring"
+      }
+    },
+    "320x240": {
+      "width": 320,
+      "height": 240,
+      "fonts": {
+        "body": "NotoSans 14 4bpp",
+        "title": "NotoSans Bold 18 4bpp",
+        "clock": "NotoSans Bold 32 4bpp digits",
+        "softkey": "NotoSans 14 4bpp",
+        "metrics": {
+          "body": {
+            "line": 18,
+            "advance": 8
+          },
+          "title": {
+            "line": 22,
+            "advance": 11
+          },
+          "clock": {
+            "line": 27,
+            "advance": 19
+          },
+          "softkey": {
+            "line": 18,
+            "advance": 8
+          }
+        },
+        "build": {
+          "bpp": 4,
+          "hinting": "TrueType hinting; lv_font_conv --autohint-off",
+          "kerning": "GPOS pairs converted to a legacy kern table",
+          "symbols": "U+2713 from Noto Sans Symbols 2 v2.008; U+2190-2193 from Noto Sans Math v3.000",
+          "digits": "tabular"
+        }
+      },
+      "status_height": 20,
+      "softkey_height": 24,
+      "header_height": 26,
+      "margin": 6,
+      "gutter": 10,
+      "spacing": 6,
+      "gap_small": 3,
+      "content_padding": 4,
+      "scrollbar_offset": 6,
+      "row_height": 30,
+      "row_height_detail": 40,
+      "row_padding": 6,
+      "row_gap": 6,
+      "list_padding": 4,
+      "row_icon_size": 24,
+      "status_icon_size": 16,
+      "app_icon_size": 60,
+      "frame_padding": 4,
+      "field_padding": 3,
+      "field_lines": 3,
+      "text_box_padding": 3,
+      "field_status_inline": true,
+      "picker_columns": 9,
+      "picker_cell": [30, 24],
+      "picker_border": 2,
+      "picker_padding": 3,
+      "alert_margin": 6,
+      "alert_padding": 6,
+      "alert_gap": 4,
+      "spinner_size": 32,
+      "spinner_width": 4,
+      "bar_height": 8,
+      "legend_margin": 6,
+      "legend_gap": 6,
+      "battery": {
+        "body": [23, 12],
+        "cap": [2, 6],
+        "bar": [3, 8],
+        "bolt_height": 11
+      },
+      "home_gap": 6,
+      "home_hint": "below the date",
+      "logo": {
+        "splash_mark": 96,
+        "about": "lockup 200 wide",
+        "boot_mark": 80
+      },
+      "focus_width": 2,
+      "scrollbar_width": 2,
+      "alert_border": 2,
+      "menu_edge": 2,
+      "divider": 1,
+      "grid_columns": 4,
+      "grid_scrollbar_offset": 4,
+      "integrated_surface": [320, 196],
+      "catalogue_default": "grid",
+      "picker_font": "font_large",
+      "selection": {
+        "grid_ring_width": 2,
+        "grid_ring_gap": 2,
+        "grid_tile_inset": 0,
+        "grid_ring_colour": "focus",
+        "list_tile_ring_width": 1,
+        "list_tile_ring_gap": 0,
+        "list_tile_ring_colour": "tile_ring"
+      }
+    }
+  },
+  "modal": {
+    "scrim_opacity": 128
+  },
+  "themes": {
+    "light": {
+      "background": "#F7F7F7",
+      "surface": "#EFEFEF",
+      "bar": "#EFEFEF",
+      "popup": "#E7E7E7",
+      "foreground": "#181818",
+      "bar_text": "#181818",
+      "muted": "#39454A",
+      "disabled": "#6B797B",
+      "border": "#BDC7CE",
+      "accent": "#396173",
+      "accent_text": "#FFFFFF",
+      "focus": "#396173",
+      "warning": "#845100",
+      "danger": "#B51418",
+      "tile_ring": "#FFFFFF",
+      "brand": "#EFAA52",
+      "scrim": "#000000"
+    },
+    "dark": {
+      "background": "#101010",
+      "surface": "#212021",
+      "bar": "#212021",
+      "popup": "#292829",
+      "foreground": "#DEDFDE",
+      "bar_text": "#DEDFDE",
+      "muted": "#BDC7CE",
+      "disabled": "#848E94",
+      "border": "#39454A",
+      "accent": "#ADCFDE",
+      "accent_text": "#083442",
+      "focus": "#ADCFDE",
+      "warning": "#F7BE7B",
+      "danger": "#FFB6AD",
+      "tile_ring": "#083442",
+      "brand": "#EFAA52",
+      "scrim": "#000000"
+    }
+  },
+  "tiles": {
+    "settings": "#4A5D73",
+    "notes": "#A56100",
+    "snake": "#9C3873"
+  }
+}

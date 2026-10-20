@@ -1,0 +1,19 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-language-ru
+pkgver=1
+pkgrel=0
+pkgdesc="Russian language definition for FPLinux"
+url="https://github.com/fplinux/fplinux"
+arch="noarch"
+license="GPL-2.0-only"
+# Russian input uses the matching layout for external keyboards.
+depends="fplinux-xkb-ru"
+options="!check"
+source="ru"
+
+package() {
+	install -Dm644 "$srcdir/ru" "$pkgdir/usr/share/fplinux/languages/ru"
+}
+sha512sums="
+44f15192a5fec0c6ccabbf3a0182f39b08534263369584e023d3286be635c6d441dfc25301bec46daed224c633511df19f93a01615a1c0dac9d49a331c993871  ru
+"

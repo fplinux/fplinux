@@ -1,0 +1,176 @@
+{
+  "_comment": "System alpha-mask glyphs and rounded application tiles. Profile colours and radii apply to every supported screen size. Styles use filled glyphs up to filled_max_size when available; an exception records a deliberate alternative. Tile glyph geometry gives the box and stroke in pixels.",
+  "tabler_version": "3.48.0",
+  "glyph_sizes": [12, 16, 20, 24],
+  "filled_max_size": 16,
+  "glyphs": {
+    "app": {
+      "source": "tabler",
+      "name": "app-window",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "lock": {
+      "source": "tabler",
+      "name": "lock",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "brightness": {
+      "source": "tabler",
+      "name": "brightness-up",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "screen-timeout": {
+      "source": "tabler",
+      "name": "hourglass",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "auto-lock": {
+      "source": "tabler",
+      "name": "lock",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "theme": {
+      "source": "tabler",
+      "name": "contrast",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "filled",
+        "24": "filled"
+      },
+      "exception": "The outline contrast glyph reads as a D in a circle; the filled half disc is the usual light/dark sign at every size."
+    },
+    "date-time": {
+      "source": "tabler",
+      "name": "clock",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "language": {
+      "source": "tabler",
+      "name": "language",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "display": {
+      "source": "tabler",
+      "name": "device-mobile",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "about": {
+      "source": "tabler",
+      "name": "info-circle",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "keyboard": {
+      "source": "tabler",
+      "name": "keyboard",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    }
+  },
+  "tile_sizes": [16, 20, 24, 32, 40, 48, 56, 60],
+  "tile_glyph": {
+    "16": {
+      "glyph": 12,
+      "stroke": 1.3333
+    },
+    "20": {
+      "glyph": 14,
+      "stroke": 1.4
+    },
+    "24": {
+      "glyph": 16,
+      "stroke": 1.3333
+    },
+    "32": {
+      "glyph": 20,
+      "stroke": 1.6
+    },
+    "40": {
+      "glyph": 24,
+      "stroke": 1.85
+    },
+    "48": {
+      "glyph": 28,
+      "stroke": 2.0417
+    },
+    "56": {
+      "glyph": 32,
+      "stroke": 2.3333
+    },
+    "60": {
+      "glyph": 34,
+      "stroke": 2.4706
+    }
+  },
+  "contrast": {
+    "glyph_on_tile": 4.5,
+    "tile_on_page": 2,
+    "tile_distance": 10
+  },
+  "apps": {
+    "org.fplinux.settings": {
+      "tile": "settings",
+      "glyph": "settings",
+      "install": true
+    },
+    "org.fplinux.snake": {
+      "tile": "snake",
+      "glyph": "device-gamepad-2",
+      "install": true
+    },
+    "org.fplinux.notes": {
+      "tile": "notes",
+      "glyph": "notes",
+      "install": true
+    }
+  }
+}

@@ -5,6 +5,13 @@
 #include "fplinux-quake-internal.h"
 #include "test-quake-video.h"
 
+#ifdef FPLINUX_TEST_QUAKE_GPU
+#define FPLINUX_QUAKE_GL_DISPATCH_IMPLEMENTATION
+#include "fplinux-gpu-output.h"
+#include "fplinux-quake-gl.h"
+#include "fplinux-quake-stats.h"
+#endif
+
 #include <errno.h>
 #include <linux/vt.h>
 #include <signal.h>
@@ -32,6 +39,240 @@ qboolean vsync_available;
 qboolean adaptive_vsync_available;
 void (*vid_menudrawfn)(void);
 void (*vid_menukeyfn)(knum_t key);
+
+#ifdef FPLINUX_TEST_QUAKE_GPU
+unsigned int com_argc;
+const char **com_argv;
+
+struct fplinux_gpu {
+	struct fplinux_drm_session *session;
+};
+
+struct fplinux_gpu_output {
+	struct fplinux_gpu gpu;
+};
+
+static GLenum fake_get_error(void)
+{
+	return GL_NO_ERROR;
+}
+
+__typeof__(&glGetError) fplinux_quake_glGetError = fake_get_error;
+
+bool fplinux_quake_stats_enabled(void)
+{
+	return false;
+}
+
+void fplinux_quake_stats_gpu_sample(uint64_t elapsed_ns)
+{
+	(void)elapsed_ns;
+	Sys_Error("event pump unexpectedly reported GPU timing");
+}
+
+static const GLubyte *forbidden_get_string(GLenum name)
+{
+	(void)name;
+	Sys_Error("disabled statistics unexpectedly probed GL support");
+}
+
+__typeof__(&glGetString) fplinux_quake_glGetString = forbidden_get_string;
+
+qboolean GL_ExtensionCheck_String(const char *extension, const char *search)
+{
+	(void)extension;
+	(void)search;
+	Sys_Error("disabled statistics unexpectedly checked a GL extension");
+}
+
+static void fake_get_integer(GLenum name, GLint *value)
+{
+	(void)name;
+	*value = 0;
+}
+
+static void fake_generate_textures(GLsizei count, GLuint *textures)
+{
+	for (GLsizei i = 0; i < count; ++i)
+		textures[i] = (GLuint)i + 1;
+}
+
+static void fake_bind_texture(GLenum target, GLuint texture)
+{
+	(void)target;
+	(void)texture;
+}
+
+static void fake_texture_image(GLenum target, GLint level,
+			       GLint internal_format, GLsizei width,
+			       GLsizei height, GLint border, GLenum format,
+			       GLenum type, const void *pixels)
+{
+	(void)target;
+	(void)level;
+	(void)internal_format;
+	(void)width;
+	(void)height;
+	(void)border;
+	(void)format;
+	(void)type;
+	(void)pixels;
+}
+
+static void fake_texture_parameter(GLenum target, GLenum name, GLint value)
+{
+	(void)target;
+	(void)name;
+	(void)value;
+}
+
+static void fake_delete_textures(GLsizei count, const GLuint *textures)
+{
+	(void)count;
+	(void)textures;
+}
+
+static void forbidden_frame_copy(GLenum target, GLint level, GLint xoffset,
+				 GLint yoffset, GLint x, GLint y, GLsizei width,
+				 GLsizei height)
+{
+	(void)target;
+	(void)level;
+	(void)xoffset;
+	(void)yoffset;
+	(void)x;
+	(void)y;
+	(void)width;
+	(void)height;
+	Sys_Error("event pump unexpectedly copied a frame");
+}
+
+__typeof__(&glGetIntegerv) fplinux_quake_glGetIntegerv = fake_get_integer;
+__typeof__(&glGenTextures) fplinux_quake_glGenTextures = fake_generate_textures;
+__typeof__(&glBindTexture) fplinux_quake_glBindTexture = fake_bind_texture;
+__typeof__(&glTexImage2D) fplinux_quake_glTexImage2D = fake_texture_image;
+__typeof__(&glTexParameteri) fplinux_quake_glTexParameteri =
+	fake_texture_parameter;
+__typeof__(&glDeleteTextures) fplinux_quake_glDeleteTextures =
+	fake_delete_textures;
+__typeof__(&glCopyTexSubImage2D) fplinux_quake_glCopyTexSubImage2D =
+	forbidden_frame_copy;
+
+void fplinux_quake_gl_draw_buffer(GLenum mode)
+{
+	(void)mode;
+}
+
+void fplinux_quake_gl_read_buffer(GLenum mode)
+{
+	(void)mode;
+}
+
+bool fplinux_quake_gl_load(struct fplinux_gpu *gpu, char *error, size_t size)
+{
+	(void)gpu;
+	(void)error;
+	(void)size;
+	return true;
+}
+
+/* The fake output owns its context and borrows the already-open display. */
+struct fplinux_gpu_output *
+fplinux_gpu_output_open(struct fplinux_drm_session *session,
+			enum fplinux_gpu_api api, unsigned int width,
+			unsigned int height, bool clockwise, char *error,
+			size_t size)
+{
+	struct fplinux_gpu_output *output = calloc(1, sizeof(*output));
+
+	(void)api;
+	(void)width;
+	(void)height;
+	(void)clockwise;
+	if (error && size)
+		snprintf(error, size, "%s",
+			 output ? "" : "allocate fake output");
+	if (output)
+		output->gpu.session = session;
+	return output;
+}
+
+struct fplinux_gpu *
+fplinux_gpu_output_gpu(const struct fplinux_gpu_output *output)
+{
+	return output ? (struct fplinux_gpu *)&output->gpu : NULL;
+}
+
+bool fplinux_gpu_output_render(struct fplinux_gpu_output *output,
+			       unsigned int texture)
+{
+	(void)output;
+	(void)texture;
+	Sys_Error("event pump unexpectedly rendered a frame");
+}
+
+bool fplinux_gpu_output_present(struct fplinux_gpu_output *output)
+{
+	(void)output;
+	Sys_Error("event pump unexpectedly presented a frame");
+}
+
+const char *fplinux_gpu_output_error(const struct fplinux_gpu_output *output)
+{
+	(void)output;
+	return "unexpected GPU output failure";
+}
+
+bool fplinux_gpu_output_close(struct fplinux_gpu_output *output)
+{
+	free(output);
+	return true;
+}
+
+void *fplinux_gpu_get_proc(struct fplinux_gpu *gpu, const char *name)
+{
+	(void)gpu;
+	(void)name;
+	return NULL;
+}
+
+const char *fplinux_gpu_device(const struct fplinux_gpu *gpu)
+{
+	(void)gpu;
+	return "fake device";
+}
+
+const char *fplinux_gpu_renderer(const struct fplinux_gpu *gpu)
+{
+	(void)gpu;
+	return "fake renderer";
+}
+
+const char *fplinux_gpu_version(const struct fplinux_gpu *gpu)
+{
+	(void)gpu;
+	return "2.1 fake";
+}
+
+int COM_CheckParm(const char *argument)
+{
+	(void)argument;
+	return 0;
+}
+
+void GL_Init(void)
+{
+}
+
+void GL_Shutdown(void)
+{
+}
+
+void QPic32_InitPalettes(const byte *palette)
+{
+	(void)palette;
+}
+#endif
 
 /* Engine allocation and setup do not render or execute game logic. */
 int Hunk_HighMark(void)
@@ -127,6 +368,7 @@ bool __wrap_fplinux_drm_session_open(struct fplinux_drm_session *session,
 	(void)error;
 	(void)size;
 	memset(session, 0, sizeof(*session));
+	session->present_fence = -1;
 	session->width = 240;
 	session->height = 320;
 	session->stride = 480;

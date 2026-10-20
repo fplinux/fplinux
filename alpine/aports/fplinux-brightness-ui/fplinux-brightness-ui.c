@@ -217,7 +217,7 @@ int main(int argc, char **argv)
 		fplinux_brightness_close(&app.brightness);
 		return 1;
 	}
-	if (!fplinux_drm_session_open(&app.display, "/dev/dri/card0", NULL,
+	if (!fplinux_drm_session_open(&app.display, NULL, NULL,
 				      DRM_FORMAT_RGB565, error,
 				      sizeof(error))) {
 		fprintf(stderr, "fplinux-brightness-ui: %s\n", error);

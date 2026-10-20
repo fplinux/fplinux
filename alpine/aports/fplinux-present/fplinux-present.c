@@ -21,7 +21,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#define DEFAULT_DRM "/dev/dri/card0"
 #define DEFAULT_TTY "/dev/tty0"
 #define DEFAULT_FPS 10U
 #define DEFAULT_REPEAT 1U
@@ -177,7 +176,7 @@ static enum fplinux_cli_result parse_options(int argc, char **argv,
 				     .flags = FPLINUX_CLI_REPEAT },
 		[OPTION_DRM] = { .name = "drm",
 				 .metavar = "PATH",
-				 .help = "DRM device (default: /dev/dri/card0)",
+				 .help = "DRM device (default: automatic display selection)",
 				 .flags = FPLINUX_CLI_REPEAT },
 		[OPTION_TTY] = { .name = "tty",
 				 .metavar = "PATH",
@@ -200,7 +199,6 @@ static enum fplinux_cli_result parse_options(int argc, char **argv,
 	enum fplinux_cli_result result;
 
 	*options = (struct options){
-		.drm_path = DEFAULT_DRM,
 		.tty_path = DEFAULT_TTY,
 		.mode = PRESENT_MODE_NV16,
 		.repeat = DEFAULT_REPEAT,

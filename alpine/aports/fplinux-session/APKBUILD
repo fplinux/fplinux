@@ -1,0 +1,137 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-session
+pkgver=1
+pkgrel=0
+pkgdesc="Graphical phone session and application lifecycle"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="GPL-2.0-only"
+depends="fplinux-libweston fplinux-brand fplinux-font-terminus-data json-c"
+makedepends_build="clang22 lld22 pkgconf"
+makedepends_host="musl-dev linux-headers fplinux-libweston-dev json-c-dev pixman-dev fplinux-libdrm-dev"
+subpackages="$pkgname-openrc"
+install="$pkgname.pre-install"
+options="!check"
+source="
+	fplinux-shell.c
+	session-core.c
+	session-core.h
+	session-launch-surface.c
+	session-launch-surface.h
+	fplinux-pixman-buffer.h
+	fplinux-weston-presentation.h
+	session-power.c
+	session-power.h
+	session-settings.c
+	session-settings.h
+	fplinux-settings-values.c
+	fplinux-settings-values.h
+	session-battery.c
+	session-battery.h
+	fplinux-session
+	fplinux-session.initd
+	weston.ini
+	10-fplinux.quirks
+	fplinux-ui-session.c
+	fplinux-ui-session.h
+	fplinux-desktop-entry.c
+	fplinux-desktop-entry.h
+	fplinux-ui-profile.c
+	fplinux-ui-profile.h
+	fplinux-keypad.h
+	fplinux-keypad-light.c
+	fplinux-keypad-light.h
+	fplinux-brightness-client.c
+	fplinux-brightness-client.h
+	fplinux-language.c
+	fplinux-language.h
+	preparation.c
+	preparation.h
+	preparation-status.c
+	preparation-render.c
+	fplinux-drm-session.c
+	fplinux-drm-session.h
+	fplinux-font.c
+	fplinux-font.h
+	fplinux-cli.c
+	fplinux-cli.h
+"
+builddir="$srcdir"
+
+build() {
+	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
+	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		-fPIC -shared -I"$srcdir" \
+		$(pkg-config --cflags libweston-16 weston json-c pixman-1) \
+		fplinux-shell.c session-core.c session-power.c session-settings.c \
+		fplinux-settings-values.c \
+		session-battery.c session-launch-surface.c fplinux-ui-session.c \
+		fplinux-ui-profile.c fplinux-keypad-light.c \
+		fplinux-brightness-client.c fplinux-language.c fplinux-desktop-entry.c \
+		$(pkg-config --libs libweston-16 json-c pixman-1) \
+		$LDFLAGS -o fplinux-shell.so
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		-I"$srcdir" $(pkg-config --cflags libdrm json-c) \
+		preparation.c preparation-status.c preparation-render.c \
+		fplinux-drm-session.c fplinux-font.c fplinux-cli.c \
+		$(pkg-config --libs libdrm json-c) $LDFLAGS -o preparation
+}
+
+package() {
+	install -Dm755 "$builddir/fplinux-shell.so" "$pkgdir/usr/lib/weston/fplinux-shell.so"
+	install -Dm755 "$srcdir/fplinux-session" "$pkgdir/usr/bin/fplinux-session"
+	install -Dm755 "$srcdir/fplinux-session.initd" "$pkgdir/etc/init.d/fplinux-session"
+	install -Dm755 "$builddir/preparation" "$pkgdir/usr/libexec/fplinux/preparation"
+	install -Dm644 "$srcdir/weston.ini" "$pkgdir/etc/fplinux/weston.ini"
+	install -Dm644 "$srcdir/10-fplinux.quirks" \
+		"$pkgdir/usr/share/fplinux/libinput/10-fplinux.quirks"
+	mkdir -p "$pkgdir/etc/runlevels/default"
+	ln -s /etc/init.d/fplinux-session \
+		"$pkgdir/etc/runlevels/default/fplinux-session"
+}
+
+sha512sums="
+1ad81db9c1a542f09f5f1a10a06d09f579b4c2684cbee9eead04bc6dd7eec584820e6791a1528592c25e368d18e991fcb6d5bce23fdbd7d5d97e0d9dda270e3e  fplinux-shell.c
+5bc2e60b46c74b3121e535ba0697787b8c9b47b09d16785e6a1943c86ac99f7b7190e3c71cc810ea9ab86da0534fb0c92cfe7aac4d32ab2e273b97fd53b1d252  session-core.c
+7cf2d52a1f55e72dd7b116fcdd4bb5bf5de3e119ddd9183e4a5f23d2aedb044c3ac8e588be66f188bb7591e03ffea5565ae97b177df541c9db37aed112363861  session-core.h
+9a3873ed927987851a93927c0f1def5593d6a4480e685d9ec4581799d29ddbe3233e97b56128f4b7b6c9da1cc4ca98381a8975417bcbe8c8e992d050735f40d6  session-launch-surface.c
+7deab94cbfc72596de55cc0bdd57c7b39a28cb35064ce637d5232f39556a6d94f04bacf063be2c2add6ed47f288c660bca1bab9e8011fe1b5d2e97f97cbe4ff4  session-launch-surface.h
+b427573bdf1e43e253b4d029bad8db33518d027df0d3a1b193fa4e1447e637b9c8136d9585c578212799a9447c9bfa3e0490a64ad58e11437850e5ac0adff0db  fplinux-pixman-buffer.h
+4e2e278da3c427045df310a7219cd0993ad911527cedf37edbaefdb3a71fd7925a885c82a57e777cbeb61f93d3c461f6864b99770b523c07edeb0dde7f132adb  fplinux-weston-presentation.h
+ab8f244ddcbb0e516924d53232699e772b663c04b7afea75bd56f809504c200f6dca1cd0bb9aa86935487318fffad7aa9b6bf504f1b15e54c54f9b80158576ac  session-power.c
+c4da00dc597f78de20544e7acb712a7e49a9b16172c1e8d92fe3b5f161ca22f43be3208878aeb1935f24f0202cdb48f4c9fbbe19d00ba1ab7f9e70b47b9714a8  session-power.h
+c229d03017e45108a99371a634f1b5184479ceddbb8ea2c57ee3c6502853dd454e18b8fc36030446fa6151f3d687b2000a8bb27b6ebfd80b2606633253ae434d  session-settings.c
+f2b1f82989278a49a70b4b3d99d60842a4cb8c750ea21656e22a9b0f9a2894037b600d800eda2e8e160adf1d926afe18fcdb0fc79228539c5aba9096c8f7728a  session-settings.h
+7608a917aad8485f71038c21855f044e567381a9ebb83ea986d4dca8129a3b681974adcbe25d5294ac89007e86b7e295a568458a9d5a95c9ab8285a6a2a9c526  fplinux-settings-values.c
+e85173937a9a7684ab606cf355878cb1a52ba20dc8dc738db00e64de6aa206b99828b59dd399563d5d983e6be2c95ec618f630078922e47b14e586a7f0bbee59  fplinux-settings-values.h
+e868dc60fcbd18509f2cdc78c116bc0181aa74485ce569bc8934219f64272595de78972b5847f64d377f0c6287150da2e177e850db04cbb67e3ac4a1dc838413  session-battery.c
+299072bc64d38d84ddf73601fa0c942086a8647d04217db47bcea41050c940eb8172d43623233ce9e0d1f563d03f6ad68a44394b41d2762309c7d0d783c9b8dc  session-battery.h
+a77cc064d012fd8827952ec105b6fea5597b1360231d83de260b118899799f251e8143d547558526d60e19a088797c68a6f1bfac958f6be660b71aa2fbca0160  fplinux-session
+d402db6d9d509a70a85b327cad4335282b5d652fa23511c642414e2b2491f66b05f339f27d8b304dd6c3c9a0d1782e2edfbde4ca6f71a02a357e834f0eee1310  fplinux-session.initd
+ae69b5c4cfee0889018c3e232b4f342e5bc7fdc0ffb2fbabdd5b3b80bdb42e9ffd0600822c8155853159c90df122f1969ea65b701f26464f10b0ecc1e013f529  weston.ini
+e252576c42bdc2b6baee904c9943c2523be58d57e976d348a764a050e8c0cbcaee771c8bc3a82d885b5174fe79cff8bd39493bf16773ac91114c3b0cd463d04c  10-fplinux.quirks
+44c4dae2154ace287bb0cca2861a12708f1c47fd4c002d82c2bb40cffcda301c8d171c305128c388eb489b45921138bc2c8abbdbad7ba8e480992373ce16edd9  fplinux-ui-session.c
+222a50057879ee8e02462365519c578424aeb51526992dee8de2682bf464dd3f0d9d89e26d70b63d866c2e819878e57ca5c5ad3582d51b1ef108a80a57d1eaf3  fplinux-ui-session.h
+da9487bd879fb7f523db1f20ba936a0994dc990cc649c9bfaf02235d33651f4afba6fe057a91bf9c2b867e314f6272c5ca7c3e91cb5eeb807797a0508715bcfb  fplinux-desktop-entry.c
+056faa694f98cefb0ecc814023dc597937affaeba8e97245d36611b1ed79ddd65e0fa4339eea23ad96643fa9463901a21d07acefbf8372762341e063feaabd21  fplinux-desktop-entry.h
+ee0a8f7e30ca698d657a5c947c17276dc479c7460921d93738e71f9cb6cf0c650296da9f42f79b481db59f59d98c86cca443f8aa0b7770093b1967ce92d252b1  fplinux-ui-profile.c
+a5246061f13bf0f6f8b74b153e607b8bf71492de7c9db6d40925f9a76f7d08c76a49c35459a02179eb5c7ebd742cb2b4111876289828a61aa4c652ccf7749044  fplinux-ui-profile.h
+0a6d41b98223953b0b890be3041fba31e7878e6752094ed439b1e1e7e9240b2c7bf175ae671d05485ee25fa9ae74e45ddc63e9592768bd5d19e6e4ae6765a978  fplinux-keypad.h
+b3cb015618abc4b52b46e0995bc74cc2fea8734342e424fb952f738de63de542b9f64fa35e1bd4e753cae4667a1f00ce6070422fa1fe070ad3cc5031eb625dc9  fplinux-keypad-light.c
+61f4aa5b3eacd8f5c2fe6f71fbe2743b0ff8c8eb707801592021d9d3a2781aedab9bc1d46ef5b4506a6b9ca2ad134289a93d40115cc8acef349039807fb322a9  fplinux-keypad-light.h
+a16c1b2b84831be3da5bbf1d198c827a4bfde8bb435e4ac6d52777ca8472cedc700be5007a4320e6ffcafcf3ff3183a0de4e7068a94576e0016ca9b09c650bcf  fplinux-brightness-client.c
+031e8a9a9fed64c19b947d6d1b7510f2bf0dd76ae7712cd23f8fbf838a28e29eefec2adaa772070f75c930a42bf0e77290825ea88fd545800dbca30bdd61f0ee  fplinux-brightness-client.h
+0e113a3d69fa45b700c5c84b7bf10df2656cf986d594252274bb8afbaebbd952ef793d272aed728a911edc1a445eaa911aced6cb9cc0f419967e12a6c9e8d478  fplinux-language.c
+e3e550c2f07726b0f20d49f30300e88c862b3cac031c29b4a89c282719634fea22a5cc6a491c081d95c6381c05cbae6a50b09a579e0d219cf2fab9f29ff63898  fplinux-language.h
+c7f177958c2b6374fe222fac4d1d8caae5bbe0e18ffda9a43289c4efef667e0d47b3f909c41982f1cb6a5b5fd8905d065ad7c456f5d7c0afd3e97cb231327400  preparation.c
+408cf4b972a1dce7bee433b1e9cca9ef23c993e810edd8e55d8b80b1127b97c456e4c88c424ab317b31c22bf9a7ceedf130a3b6cb83c2df622313a3d2ff2b5e5  preparation.h
+9e42ac572f48b7e663831a5f145dddc15f0127ea33f9230f2eef10f766c6f3bd0a430019b35aaf1c8a2ad9d400ae2ba0ff4504bc6419edf4ac21e77ebfd1365a  preparation-status.c
+bcdeba50d1718ca92a0587341c2b9dfcd461f21c88961187b14d231906c153f74710f2e45ed83c451328680ddd1e150776a931b1a45942f3b673c673dd6d8058  preparation-render.c
+6b253f856c2a6886801ec56fd4f607019b89c5465a9fffd78ea4196cadc90688b452b10e45d4767e2cfddd5d846dad4bba2b8452e0c79426f08a4ed057e0e104  fplinux-drm-session.c
+a71678fa063e52aa2220c2bfd391a2a3cf154c04c1cdb7e078e3942f4f24d8510c1d7bd8d5b57bd96e0d32842c319f53f52731c26e0b80bbfb32774c7ba8fc74  fplinux-drm-session.h
+9348115546f586a5078627b79014fd5a59989bb84b04a22de80b4e5780200a54c7f2b532a376b160e33aec5f058f382d15b08f3545b1234389dd2f4e405422da  fplinux-font.c
+dd731108a9774c00bb1267f96c266929ee2a8d63d2c8f62a9f3c73b884996edc1cf5e83b772e058a8cbc8fa3c820721a66bd75253bf759d9a0acdf6e546962bf  fplinux-font.h
+60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
+9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
+"

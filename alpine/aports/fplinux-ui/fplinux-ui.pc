@@ -1,0 +1,10 @@
+prefix=/usr
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: fplinux-ui
+Description: FPLinux LVGL Wayland application runtime
+Version: 1
+Requires: lvgl
+Libs: -L${libdir} -lfplinux-ui
+Cflags: -I${includedir}/fplinux

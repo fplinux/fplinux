@@ -7,6 +7,7 @@
 
 #include <assert.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,8 +18,9 @@
 /*
  * The main loop, renderer and libtsm are real. Device sessions and the shell
  * process are replaced by an in-memory display, scheduled keypad events and a
- * socket peer. A virtual poll clock makes a delayed shell reply deterministic;
- * this does not exercise a kernel PTY, evdev devices or a DRM device.
+ * socket peer for input scenarios. A virtual poll clock makes a delayed shell
+ * reply deterministic. Exit-status scenarios use a real PTY and child process;
+ * none of these scenarios exercise evdev devices or a DRM device.
  */
 struct scheduled_key {
 	uint64_t time_ms;
@@ -72,6 +74,12 @@ static bool modifier_scenario;
 static const struct scheduled_key *input_keys = compose_keys;
 static size_t input_count = sizeof(compose_keys) / sizeof(compose_keys[0]);
 static const char *keymap_root;
+static const char *child_path;
+static const char *child_scenario;
+static int display_events[2] = { -1, -1 };
+static bool wait_event_queued;
+static bool wait_event_dispatched;
+static bool last_output_visible;
 
 int fplinux_terminal_main(int argc, char **argv);
 int fixture_clock_gettime(clockid_t clock, struct timespec *time);
@@ -82,9 +90,29 @@ bool __real_fplinux_terminal_keyboard_open(
 bool __wrap_fplinux_terminal_keyboard_open(
 	struct fplinux_terminal_keyboard *keyboard, const char *data_root,
 	char *error, size_t error_size);
+bool __real_fplinux_terminal_pty_open(struct fplinux_terminal_pty *pty,
+				      unsigned int columns, unsigned int rows,
+				      const char *shell, const char *startup,
+				      const char *shell_token);
+bool __real_fplinux_terminal_pty_shell_foreground(
+	const struct fplinux_terminal_pty *pty);
+bool __real_fplinux_terminal_pty_finished(struct fplinux_terminal_pty *pty,
+					  int *status);
+void __real_fplinux_terminal_pty_close(struct fplinux_terminal_pty *pty);
+bool __wrap_fplinux_terminal_pty_open(struct fplinux_terminal_pty *pty,
+				      unsigned int columns, unsigned int rows,
+				      const char *shell, const char *startup,
+				      const char *shell_token);
+bool __wrap_fplinux_terminal_pty_shell_foreground(
+	const struct fplinux_terminal_pty *pty);
+bool __wrap_fplinux_terminal_pty_finished(struct fplinux_terminal_pty *pty,
+					  int *status);
+void __wrap_fplinux_terminal_pty_close(struct fplinux_terminal_pty *pty);
 
 int fixture_clock_gettime(clockid_t clock, struct timespec *time)
 {
+	if (child_path)
+		return clock_gettime(clock, time);
 	assert(clock == CLOCK_MONOTONIC);
 	time->tv_sec = (time_t)(now_ms / 1000);
 	time->tv_nsec = (long)(now_ms % 1000) * 1000000;
@@ -96,6 +124,15 @@ int fixture_poll(struct pollfd *descriptors, nfds_t count, int timeout)
 	uint64_t deadline = 4500;
 	int ready;
 
+	if (child_path) {
+		/* Release the child only after display dispatch with a closed PTY. */
+		if (!wait_event_queued &&
+		    !access("terminal-stream-closed", F_OK)) {
+			assert(write(display_events[1], "v", 1) == 1);
+			wait_event_queued = true;
+		}
+		return poll(descriptors, count, timeout);
+	}
 	assert(++polls < 1000);
 	ready = poll(descriptors, count, 0);
 	assert(ready >= 0);
@@ -122,13 +159,18 @@ int fixture_poll(struct pollfd *descriptors, nfds_t count, int timeout)
 	return poll(descriptors, count, 0);
 }
 
-bool fplinux_terminal_pty_open(struct fplinux_terminal_pty *pty,
-			       unsigned int columns, unsigned int rows,
-			       const char *shell, const char *startup,
-			       const char *shell_token)
+bool __wrap_fplinux_terminal_pty_open(struct fplinux_terminal_pty *pty,
+				      unsigned int columns, unsigned int rows,
+				      const char *shell, const char *startup,
+				      const char *shell_token)
 {
 	int pair[2];
 
+	if (child_path)
+		return __real_fplinux_terminal_pty_open(pty, columns, rows,
+							child_path,
+							child_scenario,
+							shell_token);
 	(void)columns;
 	(void)rows;
 	(void)shell;
@@ -142,19 +184,24 @@ bool fplinux_terminal_pty_open(struct fplinux_terminal_pty *pty,
 	return true;
 }
 
-bool fplinux_terminal_pty_shell_foreground(
+bool __wrap_fplinux_terminal_pty_shell_foreground(
 	const struct fplinux_terminal_pty *pty)
 {
+	if (child_path)
+		return __real_fplinux_terminal_pty_shell_foreground(pty);
 	(void)pty;
 	return true;
 }
 
-bool fplinux_terminal_pty_finished(struct fplinux_terminal_pty *pty,
-				   int *status)
+bool __wrap_fplinux_terminal_pty_finished(struct fplinux_terminal_pty *pty,
+					  int *status)
 {
 	char bytes[16];
-	ssize_t size = read(peer, bytes, sizeof(bytes));
+	ssize_t size;
 
+	if (child_path)
+		return __real_fplinux_terminal_pty_finished(pty, status);
+	size = read(peer, bytes, sizeof(bytes));
 	(void)pty;
 	if (size > 0) {
 		assert(!committed_ms && size == 1);
@@ -167,8 +214,14 @@ bool fplinux_terminal_pty_finished(struct fplinux_terminal_pty *pty,
 	return now_ms >= 4500 || (committed_ms && now_ms >= committed_ms + 40);
 }
 
-void fplinux_terminal_pty_close(struct fplinux_terminal_pty *pty)
+void __wrap_fplinux_terminal_pty_close(struct fplinux_terminal_pty *pty)
 {
+	if (child_path) {
+		__real_fplinux_terminal_pty_close(pty);
+		assert(last_output_visible);
+		assert(wait_event_dispatched);
+		return;
+	}
 	assert(close(pty->fd) == 0);
 	assert(close(peer) == 0);
 }
@@ -188,6 +241,8 @@ bool fplinux_drm_session_open(struct fplinux_drm_session *session,
 	session->page_bytes = session->stride * session->height;
 	session->mapping = calloc(2, session->page_bytes);
 	assert(session->mapping);
+	if (child_path)
+		assert(!pipe2(display_events, O_CLOEXEC | O_NONBLOCK));
 	return true;
 }
 
@@ -201,12 +256,27 @@ bool fplinux_drm_session_set_active_handler(struct fplinux_drm_session *session,
 int fplinux_drm_session_fd(const struct fplinux_drm_session *session)
 {
 	(void)session;
+	if (child_path)
+		return display_events[0];
 	return -1;
 }
 
 bool fplinux_drm_session_dispatch(struct fplinux_drm_session *session)
 {
 	(void)session;
+	if (child_path) {
+		char event;
+		int marker;
+
+		assert(read(display_events[0], &event, 1) == 1);
+		assert(event == 'v');
+		marker = open("terminal-vt-dispatched",
+			      O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+		assert(marker >= 0);
+		assert(!close(marker));
+		wait_event_dispatched = true;
+		return true;
+	}
 	assert(false);
 	return false;
 }
@@ -220,6 +290,10 @@ bool fplinux_drm_session_present(struct fplinux_drm_session *session,
 	bool glyph_visible = pixels[0] != pixels[1];
 
 	session->shown_page = page;
+	if (child_path) {
+		last_output_visible = glyph_visible;
+		return true;
+	}
 	if (modifier_scenario)
 		return true;
 	if (!committed_ms && glyph_visible)
@@ -242,6 +316,10 @@ bool fplinux_drm_session_present(struct fplinux_drm_session *session,
 
 bool fplinux_drm_session_close(struct fplinux_drm_session *session)
 {
+	if (child_path) {
+		assert(!close(display_events[0]));
+		assert(!close(display_events[1]));
+	}
 	free(session->mapping);
 	return true;
 }
@@ -263,6 +341,8 @@ bool fplinux_input_session_next(struct fplinux_input_session *session,
 	const struct scheduled_key *key;
 
 	(void)session;
+	if (child_path)
+		return false;
 	if (input_index == input_count ||
 	    now_ms < input_keys[input_index].delivery_ms)
 		return false;
@@ -319,9 +399,14 @@ int main(int argc, char **argv)
 {
 	char *arguments[] = { "fplinux-terminal", "--font", NULL, NULL };
 
-	assert(argc == 4);
+	assert(argc == 4 || argc == 5);
 	arguments[2] = argv[1];
 	keymap_root = argv[2];
+	if (argc == 5) {
+		child_path = argv[4];
+		child_scenario = argv[3];
+		return fplinux_terminal_main(3, arguments);
+	}
 	echo_enabled = !strcmp(argv[3], "echo");
 	if (!strcmp(argv[3], "delayed-hold")) {
 		modifier_scenario = true;

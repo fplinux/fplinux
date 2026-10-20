@@ -24,6 +24,14 @@
 #define FPLINUX_TERMINAL_REPEAT_MS 50U
 #define FPLINUX_TERMINAL_READ_BUDGET_BYTES 65536U
 #define FPLINUX_TERMINAL_INPUT_REDRAW_MS 20U
+#define FPLINUX_TERMINAL_CHILD_POLL_MS 50
+
+enum pty_output_state {
+	PTY_OUTPUT_PENDING,
+	PTY_OUTPUT_DRAINED,
+	PTY_OUTPUT_CLOSED,
+	PTY_OUTPUT_ERROR,
+};
 
 struct terminal_app {
 	struct fplinux_terminal terminal;
@@ -189,8 +197,13 @@ static void repeat_key(struct terminal_app *app, uint64_t now_ms)
 	app->repeat_ms = now_ms + FPLINUX_TERMINAL_REPEAT_MS;
 }
 
-static bool flush_input(struct terminal_app *app)
+static bool flush_input(struct terminal_app *app, bool *closed)
 {
+	if (*closed) {
+		fplinux_terminal_consume(&app->terminal,
+					 app->terminal.output_size);
+		return true;
+	}
 	while (app->terminal.output_size) {
 		ssize_t size = write(app->pty.fd, app->terminal.output,
 				     app->terminal.output_size);
@@ -208,12 +221,18 @@ static bool flush_input(struct terminal_app *app)
 		}
 		if (size < 0 && errno == EINTR)
 			continue;
+		if (size < 0 && errno == EIO) {
+			*closed = true;
+			fplinux_terminal_consume(&app->terminal,
+						 app->terminal.output_size);
+			return true;
+		}
 		return size < 0 && errno == EAGAIN;
 	}
 	return true;
 }
 
-static bool read_output(struct terminal_app *app)
+static enum pty_output_state read_output(struct terminal_app *app)
 {
 	char bytes[4096];
 	size_t total = 0;
@@ -231,9 +250,11 @@ static bool read_output(struct terminal_app *app)
 		if (size < 0 && errno == EINTR)
 			continue;
 		/* Linux returns EIO after the PTY slave has closed. */
-		return size < 0 && errno == EAGAIN;
+		if (!size || (size < 0 && errno == EIO))
+			return PTY_OUTPUT_CLOSED;
+		return errno == EAGAIN ? PTY_OUTPUT_DRAINED : PTY_OUTPUT_ERROR;
 	}
-	return true;
+	return PTY_OUTPUT_PENDING;
 }
 
 static bool present(struct terminal_app *app)
@@ -253,25 +274,41 @@ static bool present(struct terminal_app *app)
 
 static int run_terminal(struct terminal_app *app)
 {
-	int child_status = 0;
+	enum pty_output_state output_state = PTY_OUTPUT_PENDING;
+	bool input_closed = false;
+	bool child_finished = false;
+	/* Missing wait status must not decode as a successful child exit. */
+	int child_status = 1 << 8;
 
 	while (!stop_signal) {
 		uint64_t now_ms = monotonic_ms();
-		int timeout = fplinux_terminal_timeout(&app->terminal, now_ms);
-		bool can_input = app->terminal.output_size <
-				 FPLINUX_TERMINAL_OUTPUT_BYTES / 2;
-		struct pollfd
-			descriptors[3 + FPLINUX_INPUT_SESSION_DEVICE_COUNT] = {
-				{ .fd = app->pty.fd,
-				  .events = can_input ? POLLIN : 0 },
-				{ .fd = fplinux_drm_session_fd(&app->display),
-				  .events = POLLIN },
-				{ .fd = app->input_enabled && can_input ?
-						fplinux_input_session_get_fd(
-							&app->input) :
-						-1,
-				  .events = POLLIN },
-			};
+		/* A closed stream cannot wake poll when its child later exits. */
+		int timeout = output_state == PTY_OUTPUT_CLOSED ?
+				      FPLINUX_TERMINAL_CHILD_POLL_MS :
+				      fplinux_terminal_timeout(&app->terminal,
+							       now_ms);
+		bool can_input = !input_closed && !child_finished &&
+				 output_state != PTY_OUTPUT_CLOSED &&
+				 app->terminal.output_size <
+					 FPLINUX_TERMINAL_OUTPUT_BYTES / 2;
+		struct pollfd descriptors[3 +
+					  FPLINUX_INPUT_SESSION_DEVICE_COUNT] = {
+			{ .fd = output_state == PTY_OUTPUT_CLOSED ? -1 :
+								    app->pty.fd,
+			  .events =
+				  app->terminal.output_size <
+						  FPLINUX_TERMINAL_OUTPUT_BYTES /
+							  2 ?
+					  POLLIN :
+					  0 },
+			{ .fd = fplinux_drm_session_fd(&app->display),
+			  .events = POLLIN },
+			{ .fd = app->input_enabled && can_input ?
+					fplinux_input_session_get_fd(
+						&app->input) :
+					-1,
+			  .events = POLLIN },
+		};
 		nfds_t descriptor_count = 3;
 		struct fplinux_input_event event;
 
@@ -289,9 +326,9 @@ static int run_terminal(struct terminal_app *app)
 				"fplinux-terminal: PTY input queue exhausted\n");
 			return 1;
 		}
-		if (app->terminal.output_size)
+		if (!input_closed && app->terminal.output_size)
 			descriptors[0].events |= POLLOUT;
-		if (app->repeat_device) {
+		if (can_input && app->repeat_device) {
 			int repeat_timeout =
 				now_ms >= app->repeat_ms ?
 					0 :
@@ -309,6 +346,8 @@ static int run_terminal(struct terminal_app *app)
 			if (timeout < 0 || redraw_timeout < timeout)
 				timeout = redraw_timeout;
 		}
+		if (child_finished && output_state == PTY_OUTPUT_PENDING)
+			timeout = 0;
 		if (poll(descriptors, descriptor_count, timeout) < 0) {
 			if (errno == EINTR)
 				continue;
@@ -323,13 +362,28 @@ static int run_terminal(struct terminal_app *app)
 							  app->display.control,
 							  app->display.vt))
 			return 1;
-		if (descriptors[0].revents & POLLIN)
-			if (!read_output(app))
-				break;
-		if ((descriptors[0].revents & POLLOUT) && !flush_input(app))
-			break;
+		if (descriptors[0].revents & POLLNVAL) {
+			errno = EBADF;
+			return 1;
+		}
+		if (descriptors[0].revents & (POLLIN | POLLHUP | POLLERR))
+			output_state = read_output(app);
+		if (output_state == PTY_OUTPUT_ERROR)
+			return 1;
+		if (output_state == PTY_OUTPUT_CLOSED) {
+			input_closed = true;
+			app->redraw_ms = 0;
+		}
+		if ((descriptors[0].revents & POLLERR) &&
+		    output_state == PTY_OUTPUT_DRAINED) {
+			errno = EIO;
+			return 1;
+		}
+		if ((descriptors[0].revents & POLLOUT) &&
+		    !flush_input(app, &input_closed))
+			return 1;
 		now_ms = monotonic_ms();
-		if (app->input_enabled && can_input) {
+		if (app->input_enabled && can_input && !input_closed) {
 			while (app->terminal.output_size <
 				       FPLINUX_TERMINAL_OUTPUT_BYTES / 2 &&
 			       fplinux_input_session_next(&app->input, &event))
@@ -349,16 +403,30 @@ static int run_terminal(struct terminal_app *app)
 				    app->display.control))
 				return 1;
 		}
-		if (!flush_input(app) ||
-		    fplinux_terminal_pty_finished(&app->pty, &child_status))
-			break;
+		if (!flush_input(app, &input_closed))
+			return 1;
+		if (!child_finished)
+			child_finished = fplinux_terminal_pty_finished(
+				&app->pty, &child_status);
+		if (child_finished) {
+			input_closed = true;
+			fplinux_terminal_consume(&app->terminal,
+						 app->terminal.output_size);
+			if (output_state != PTY_OUTPUT_CLOSED) {
+				output_state = read_output(app);
+				if (output_state == PTY_OUTPUT_ERROR)
+					return 1;
+			}
+			app->redraw_ms = 0;
+		}
 		if (app->terminal.active && app->terminal.dirty &&
 		    monotonic_ms() >= app->redraw_ms) {
 			if (!present(app))
 				return 1;
 			app->redraw_ms = 0;
 		}
-		if (descriptors[0].revents & (POLLERR | POLLHUP | POLLNVAL))
+		if (child_finished && (output_state == PTY_OUTPUT_CLOSED ||
+				       output_state == PTY_OUTPUT_DRAINED))
 			break;
 	}
 	if (stop_signal)
@@ -388,7 +456,7 @@ int main(int argc, char **argv)
 	struct fplinux_cli_option options[] = {
 		{ .name = "drm",
 		  .metavar = "PATH",
-		  .help = "DRM device (default /dev/dri/card0)" },
+		  .help = "DRM device (default: automatic display selection)" },
 		{ .name = "tty",
 		  .metavar = "PATH",
 		  .help = "VT control device (default /dev/tty0)" },
@@ -419,10 +487,9 @@ int main(int argc, char **argv)
 	sigaction(SIGINT, &action, NULL);
 	if (!generate_token(token))
 		goto fail;
-	if (!fplinux_drm_session_open(
-		    &app.display,
-		    options[0].value ? options[0].value : "/dev/dri/card0",
-		    options[1].value, DRM_FORMAT_RGB565, error, sizeof(error)))
+	if (!fplinux_drm_session_open(&app.display, options[0].value,
+				      options[1].value, DRM_FORMAT_RGB565,
+				      error, sizeof(error)))
 		goto fail;
 	app.display_open = true;
 	font = options[2].value;

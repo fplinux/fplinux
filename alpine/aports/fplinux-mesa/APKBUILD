@@ -1,0 +1,92 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-mesa
+pkgver=26.2.5
+pkgrel=0
+pkgdesc="Panfrost EGL, OpenGL and OpenGL ES libraries for FPLinux"
+url="https://www.mesa3d.org"
+arch="armv7"
+license="MIT AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND SGI-B-2.0 AND Apache-2.0"
+depends="fplinux-libdrm libexpat"
+makedepends_build="bison clang22 clang22-dev flex lld22 llvm22-dev meson pkgconf py3-mako python3 samurai spirv-llvm-translator-dev spirv-tools-dev"
+makedepends_host="musl-dev linux-headers libstdc++-dev eudev-dev fplinux-expat-dev fplinux-libdrm-dev"
+subpackages="$pkgname-dev $pkgname-gbm:gbm"
+options="!check"
+source="
+	https://archive.mesa3d.org/mesa-$pkgver.tar.xz
+	neon-clang.patch
+	afbc-policy.patch
+	NOTICE
+"
+builddir="$srcdir/mesa-$pkgver"
+
+build() {
+	: "${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
+	# Internal shaders are compiled by native tools from this same release.
+	CC=clang CXX=clang++ CPPFLAGS="${HOSTCPPFLAGS:-}" CFLAGS=-Os \
+		CXXFLAGS=-Os LDFLAGS=-fuse-ld=lld \
+		PKG_CONFIG_PATH= \
+		PKG_CONFIG_LIBDIR=/usr/lib/pkgconfig:/usr/share/pkgconfig \
+		PKG_CONFIG_SYSROOT_DIR=/ \
+		PATH="/usr/lib/llvm22/bin:$PATH" \
+		meson setup --prefix=/usr --libdir=lib --buildtype=release \
+		--auto-features=disabled --wrap-mode=nodownload \
+		-Dgallium-drivers= -Dvulkan-drivers= -Dplatforms= \
+		-Dopengl=false -Dgles1=disabled -Dgles2=disabled \
+		-Degl=disabled -Dglx=disabled -Dgbm=disabled \
+		-Dllvm=enabled -Dshared-llvm=enabled -Ddraw-use-llvm=false \
+		-Dspirv-tools=enabled \
+		-Dmesa-clc=enabled -Dinstall-mesa-clc=true \
+		-Dprecomp-compiler=enabled -Dinstall-precomp-compiler=true \
+		-Dtools=panfrost -Dpanfrost-rust=false \
+		-Dzlib=disabled -Dzstd=disabled -Dshader-cache=disabled \
+		-Dxmlconfig=disabled -Dexpat=disabled -Dbuild-tests=false \
+		host-output
+	PATH="/usr/lib/llvm22/bin:$PATH" meson compile -j "${JOBS:-1}" -C host-output \
+		mesa_clc vtn_bindgen2 panfrost_compile
+	export PATH="$builddir/host-output/src/compiler/clc:$builddir/host-output/src/compiler/spirv:$builddir/host-output/src/panfrost/clc:$PATH"
+	cat >fplinux-cross.meson <<-EOF
+		[binaries]
+		ar = '$CHOST-ar'
+		[properties]
+		pkg_config_libdir = ['$CBUILDROOT/usr/lib/pkgconfig', '$CBUILDROOT/usr/share/pkgconfig']
+	EOF
+	abuild-meson --cross-file fplinux-cross.meson \
+		--sysconfdir=/etc \
+		--auto-features=disabled \
+		-Ddefault_library=shared -Db_ndebug=true \
+		-Dgallium-drivers=panfrost -Dvulkan-drivers= -Dplatforms= \
+		-Dopengl=true -Dgles1=disabled -Dgles2=enabled \
+		-Degl=enabled -Degl-native-platform=surfaceless \
+		-Dglx=disabled -Dglvnd=disabled -Dgbm=enabled \
+		-Dllvm=disabled -Dmesa-clc=system -Dprecomp-compiler=system \
+		-Dpanfrost-rust=false -Dgallium-rusticl=false \
+		-Dzlib=disabled -Dzstd=disabled -Dshader-cache=disabled \
+		-Dxmlconfig=enabled -Dexpat=enabled -Dbuild-tests=false \
+		output
+	meson compile -j "${JOBS:-1}" -C output
+}
+
+package() {
+	DESTDIR="$pkgdir" meson install --no-rebuild -C output
+	mkdir -p "$pkgdir/usr/share/licenses/$pkgname"
+	cp -r licenses/. "$pkgdir/usr/share/licenses/$pkgname/"
+	install -Dm644 "$srcdir/NOTICE" "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
+	install -Dm644 "$CBUILDROOT/usr/share/licenses/fplinux-expat-dev/COPYING" \
+		"$pkgdir/usr/share/licenses/libexpat/COPYING"
+}
+
+gbm() {
+	pkgdesc="GBM buffer management library for FPLinux"
+	depends="fplinux-libdrm"
+	amove usr/lib/libgbm.so.*
+	mkdir -p "$subpkgdir/usr/share/licenses"
+	cp -r "$pkgdir/usr/share/licenses/$pkgname" \
+		"$subpkgdir/usr/share/licenses/$pkgname"
+}
+
+sha512sums="
+08c7d7ea426ddfb0f7bc51b06e18c363a4d31cf1a8b203828bb455eda0189e41d2215eb9f627585ed11e0d0f231a6a8c9f0c7176238760cd76b62e20c35ccd6a  mesa-26.2.5.tar.xz
+1c83949f8904fa0d4cb189fc9bc5dd8910e6fd17009b95d46927713f228f4f81bf4dc74cc326bfd6752d969416e259d542e95e7e61b1aa11ca88acf5e8fd6988  neon-clang.patch
+8b8d9de7cbd4ace3626abb17ab1ec9498f02233e7a5d3e4aa931be8f326e2dd2c35d6c6c89e7cb6592d2b7a0e79e0f3c79b6fce20f386520dbb1250366d11f0c  afbc-policy.patch
+8e47e57850393eb2be96a3fccd04e07092a61b42d94a60b3c2193de51ba95276d6553febb06b5075c6b311ef8f2a64d25e30920478e7109f28628bedb6740428  NOTICE
+"

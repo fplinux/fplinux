@@ -1,0 +1,7 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+#include "xdg-shell-client-protocol.h"
+
+const struct wl_interface *source_protocol(void)
+{
+	return &xdg_wm_base_interface;
+}

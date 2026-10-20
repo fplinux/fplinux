@@ -1,0 +1,4 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+addgroup -S fplinux 2> /dev/null || true
+adduser -S -D -h /home/fplinux -s /bin/sh -G fplinux fplinux 2> /dev/null || true

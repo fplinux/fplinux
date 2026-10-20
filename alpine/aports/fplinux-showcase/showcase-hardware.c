@@ -6,7 +6,6 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <glob.h>
 #include <linux/input.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,210 +15,11 @@
 
 #define SHOWCASE_KEYPAD_PHYS "fplinux/keypad0"
 #define SHOWCASE_VIBRATOR_PHYS "fplinux/vibrator0"
-#ifndef FPLINUX_SHOWCASE_KEYPAD_LED_GLOB
-#define FPLINUX_SHOWCASE_KEYPAD_LED_GLOB "/sys/class/leds/*/brightness"
+#ifndef FPLINUX_KEYPAD_LED_CLASS_DIR
+#define FPLINUX_KEYPAD_LED_CLASS_DIR "/sys/class/leds"
 #endif
 #define SHOWCASE_MAX_INPUT_DEVICES 64
 #define SHOWCASE_EFFECT_LENGTH_MS 5000U
-
-static bool read_number(const char *path, int *value)
-{
-	char buffer[32];
-	char *end;
-	long parsed;
-	ssize_t count;
-	int descriptor = open(path, O_RDONLY | O_CLOEXEC);
-
-	if (descriptor < 0)
-		return false;
-	count = read(descriptor, buffer, sizeof(buffer) - 1U);
-	if (close(descriptor) < 0 && count >= 0)
-		count = -1;
-	if (count <= 0)
-		return false;
-	buffer[count] = '\0';
-	errno = 0;
-	parsed = strtol(buffer, &end, 10);
-	if (errno || end == buffer || (*end != '\0' && *end != '\n') ||
-	    parsed < 0 || parsed > INT32_MAX) {
-		errno = EINVAL;
-		return false;
-	}
-	*value = (int)parsed;
-	return true;
-}
-
-static bool read_selected_trigger(const char *path, char **value)
-{
-	char *buffer = NULL;
-	char *selected;
-	char *end;
-	size_t capacity = 0;
-	ssize_t count;
-	int saved_errno;
-	FILE *file = fopen(path, "re");
-
-	if (!file)
-		return false;
-	errno = 0;
-	count = getline(&buffer, &capacity, file);
-	saved_errno = errno;
-	if (fclose(file) < 0 && count >= 0) {
-		free(buffer);
-		return false;
-	}
-	if (count < 0) {
-		free(buffer);
-		errno = saved_errno ? saved_errno : EIO;
-		return false;
-	}
-	selected = strchr(buffer, '[');
-	end = selected ? strchr(selected + 1, ']') : NULL;
-	if (!end || end == selected + 1) {
-		free(buffer);
-		errno = EINVAL;
-		return false;
-	}
-	*end = '\0';
-	memmove(buffer, selected + 1, (size_t)(end - selected));
-	*value = buffer;
-	return true;
-}
-
-static bool write_attribute(const char *path, const char *value, size_t length)
-{
-	ssize_t written;
-	int descriptor = open(path, O_WRONLY | O_CLOEXEC);
-
-	if (descriptor < 0)
-		return false;
-	written = write(descriptor, value, length);
-	if (close(descriptor) < 0 && written == (ssize_t)length)
-		written = -1;
-	if (written != (ssize_t)length) {
-		if (written >= 0)
-			errno = EIO;
-		return false;
-	}
-	return true;
-}
-
-static bool write_number(const char *path, int value)
-{
-	char buffer[32];
-	int length = snprintf(buffer, sizeof(buffer), "%d\n", value);
-
-	if (length <= 0 || length >= (int)sizeof(buffer)) {
-		errno = EOVERFLOW;
-		return false;
-	}
-	return write_attribute(path, buffer, (size_t)length);
-}
-
-static bool set_class_output(struct showcase_class_output *output,
-			     const char *directory)
-{
-	int brightness_length;
-	int maximum_length;
-	int trigger_length;
-
-	brightness_length = snprintf(output->brightness,
-				     sizeof(output->brightness),
-				     "%s/brightness", directory);
-	maximum_length = snprintf(output->max_brightness,
-				  sizeof(output->max_brightness),
-				  "%s/max_brightness", directory);
-	trigger_length = snprintf(output->trigger, sizeof(output->trigger),
-				  "%s/trigger", directory);
-	if (brightness_length < 0 || maximum_length < 0 || trigger_length < 0 ||
-	    brightness_length >= (int)sizeof(output->brightness) ||
-	    maximum_length >= (int)sizeof(output->max_brightness) ||
-	    trigger_length >= (int)sizeof(output->trigger)) {
-		errno = ENAMETOOLONG;
-		return false;
-	}
-	return true;
-}
-
-static bool keyboard_led_path(const char *brightness_path)
-{
-	static const char function[] = "kbd_backlight";
-	const char *component;
-	const char *brightness;
-	size_t component_length;
-
-	brightness = strrchr(brightness_path, '/');
-	if (!brightness || strcmp(brightness, "/brightness"))
-		return false;
-	component = brightness;
-	while (component > brightness_path && component[-1] != '/')
-		--component;
-	component_length = (size_t)(brightness - component);
-	return (component_length == sizeof(function) - 1U &&
-		!memcmp(component, function, sizeof(function) - 1U)) ||
-	       (component_length > sizeof(function) - 1U &&
-		component[component_length - sizeof(function)] == ':' &&
-		!memcmp(component + component_length - sizeof(function) + 1U,
-			function, sizeof(function) - 1U));
-}
-
-static bool select_keypad_led(struct showcase_class_output *output, char *error,
-			      size_t error_size)
-{
-	char directory[SHOWCASE_CLASS_PATH_BYTES];
-	const char *attribute;
-	glob_t matches = { 0 };
-	const char *selected = NULL;
-	int result;
-	size_t index;
-
-	result = glob(FPLINUX_SHOWCASE_KEYPAD_LED_GLOB, 0, NULL, &matches);
-	if (result == GLOB_NOMATCH) {
-		snprintf(error, error_size,
-			 "required keypad LED is unavailable");
-		errno = ENODEV;
-		return false;
-	}
-	if (result != 0) {
-		snprintf(error, error_size, "cannot enumerate keypad LEDs");
-		errno = EIO;
-		return false;
-	}
-	for (index = 0; index < matches.gl_pathc; ++index) {
-		if (!keyboard_led_path(matches.gl_pathv[index]))
-			continue;
-		if (selected) {
-			snprintf(error, error_size, "ambiguous keypad LEDs");
-			errno = ENOTUNIQ;
-			goto fail;
-		}
-		selected = matches.gl_pathv[index];
-	}
-	if (!selected) {
-		snprintf(error, error_size,
-			 "required keypad LED is unavailable");
-		errno = ENODEV;
-		goto fail;
-	}
-	attribute = strrchr(selected, '/');
-	if (!attribute || (size_t)(attribute - selected) >= sizeof(directory)) {
-		snprintf(error, error_size, "keypad LED path is too long");
-		errno = ENAMETOOLONG;
-		goto fail;
-	}
-	memcpy(directory, selected, (size_t)(attribute - selected));
-	directory[attribute - selected] = '\0';
-	if (!set_class_output(output, directory)) {
-		snprintf(error, error_size, "keypad LED path is too long");
-		goto fail;
-	}
-	globfree(&matches);
-	return true;
-
-fail:
-	globfree(&matches);
-	return false;
-}
 
 static bool bit_is_set(const unsigned long *bits, unsigned int bit)
 {
@@ -227,9 +27,30 @@ static bool bit_is_set(const unsigned long *bits, unsigned int bit)
 		(1UL << (bit % (8U * sizeof(*bits))))) != 0;
 }
 
-static int open_input(const char *required_name, const char *required_phys,
-		      int flags)
+static bool input_supports(int descriptor, unsigned int type, unsigned int code,
+			   unsigned int maximum)
 {
+	unsigned long bits[(KEY_MAX + 8U * sizeof(unsigned long)) /
+			   (8U * sizeof(unsigned long))] = { 0 };
+	size_t bytes = (maximum + 8U) / 8U;
+
+	if (bytes > sizeof(bits)) {
+		errno = EOVERFLOW;
+		return false;
+	}
+	if (ioctl(descriptor, EVIOCGBIT(type, bytes), bits) < 0)
+		return false;
+	if (!bit_is_set(bits, code)) {
+		errno = ENOTSUP;
+		return false;
+	}
+	return true;
+}
+
+static int open_input(const char *required_name, const char *required_phys,
+		      int flags, int required_key)
+{
+	int saved_errno = ENODEV;
 	int index;
 
 	for (index = 0; index < SHOWCASE_MAX_INPUT_DEVICES; ++index) {
@@ -248,28 +69,19 @@ static int open_input(const char *required_name, const char *required_phys,
 		    strcmp(phys, required_phys) == 0 &&
 		    (!required_name ||
 		     (ioctl(descriptor, EVIOCGNAME(sizeof(name)), name) >= 0 &&
-		      strcmp(name, required_name) == 0)))
-			return descriptor;
+		      strcmp(name, required_name) == 0))) {
+			if (required_key < 0 ||
+			    (input_supports(descriptor, 0, EV_KEY, EV_MAX) &&
+			     input_supports(descriptor, EV_KEY,
+					    (unsigned int)required_key,
+					    KEY_MAX)))
+				return descriptor;
+			saved_errno = errno;
+		}
 		close(descriptor);
 	}
-	errno = ENODEV;
+	errno = saved_errno;
 	return -1;
-}
-
-static bool input_supports(int descriptor, unsigned int type, unsigned int code,
-			   unsigned int maximum)
-{
-	unsigned long bits[(KEY_MAX + 8U * sizeof(unsigned long)) /
-			   (8U * sizeof(unsigned long))] = { 0 };
-	size_t bytes = (maximum + 8U) / 8U;
-
-	if (bytes > sizeof(bits)) {
-		errno = EOVERFLOW;
-		return false;
-	}
-	if (ioctl(descriptor, EVIOCGBIT(type, bytes), bits) < 0)
-		return false;
-	return bit_is_set(bits, code);
 }
 
 static bool write_force_feedback(int descriptor, int effect_id, int value)
@@ -302,42 +114,41 @@ bool showcase_hardware_open(struct showcase_hardware *state,
 		.u.rumble.strong_magnitude = UINT16_MAX,
 		.u.rumble.weak_magnitude = UINT16_MAX,
 	};
-	int maximum;
+	char directory[FPLINUX_KEYPAD_LIGHT_PATH_BYTES];
 
 	memset(state, 0, sizeof(*state));
 	state->keypad = -1;
 	state->vibrator = -1;
 	state->effect_id = -1;
-	state->keypad_original = -1;
 	state->brightness.fd = -1;
 	state->lcd_level = -1;
-	if (keypad_led) {
-		if (!set_class_output(&state->keypad_led, keypad_led)) {
-			snprintf(error, error_size,
-				 "keypad LED path is too long");
+	if (!keypad_led) {
+		if (fplinux_keypad_light_find(directory, sizeof(directory),
+					      FPLINUX_KEYPAD_LED_CLASS_DIR) <
+		    0) {
+			snprintf(error, error_size, "%s",
+				 errno == ENOTUNIQ ?
+					 "ambiguous keypad LEDs" :
+					 "required keypad LED is unavailable");
 			return false;
 		}
-	} else if (!select_keypad_led(&state->keypad_led, error, error_size)) {
-		return false;
+		keypad_led = directory;
 	}
-	state->keypad =
-		open_input(NULL, SHOWCASE_KEYPAD_PHYS, O_RDONLY | O_NONBLOCK);
+	state->keypad = open_input(NULL, SHOWCASE_KEYPAD_PHYS,
+				   O_RDONLY | O_NONBLOCK,
+				   FPLINUX_KEY_SOFT_RIGHT);
 	if (state->keypad < 0) {
-		snprintf(error, error_size, "required keypad %s is unavailable",
-			 SHOWCASE_KEYPAD_PHYS);
-		return false;
-	}
-	if (ioctl(state->keypad, EVIOCGBIT(0, sizeof(event_bits)), event_bits) <
-		    0 ||
-	    !bit_is_set(event_bits, EV_KEY) ||
-	    !input_supports(state->keypad, EV_KEY, FPLINUX_KEY_SOFT_RIGHT,
-			    KEY_MAX)) {
-		snprintf(error, error_size,
-			 "keypad does not expose the right soft key");
+		if (errno == ENODEV)
+			snprintf(error, error_size,
+				 "required keypad %s is unavailable",
+				 SHOWCASE_KEYPAD_PHYS);
+		else
+			snprintf(error, error_size,
+				 "keypad does not expose the right soft key");
 		return false;
 	}
 
-	state->vibrator = open_input(NULL, SHOWCASE_VIBRATOR_PHYS, O_RDWR);
+	state->vibrator = open_input(NULL, SHOWCASE_VIBRATOR_PHYS, O_RDWR, -1);
 	if (state->vibrator < 0) {
 		snprintf(error, error_size,
 			 "required vibrator %s is unavailable",
@@ -364,24 +175,9 @@ bool showcase_hardware_open(struct showcase_hardware *state,
 		return false;
 	}
 
-	if (!read_number(state->keypad_led.max_brightness, &maximum) ||
-	    maximum < 1 ||
-	    !read_number(state->keypad_led.brightness,
-			 &state->keypad_original) ||
-	    !read_selected_trigger(state->keypad_led.trigger,
-				   &state->keypad_trigger_original)) {
+	if (fplinux_keypad_light_open(&state->keypad_light, keypad_led) < 0) {
 		snprintf(error, error_size,
 			 "required keypad LED interface is unavailable");
-		return false;
-	}
-	state->keypad_interface = true;
-	if (!write_attribute(state->keypad_led.trigger, "none", 4U)) {
-		snprintf(error, error_size,
-			 "cannot release keypad LED trigger");
-		return false;
-	}
-	if (!write_number(state->keypad_led.brightness, 0)) {
-		snprintf(error, error_size, "cannot switch keypad LED off");
 		return false;
 	}
 	return true;
@@ -438,17 +234,8 @@ bool showcase_hardware_close(struct showcase_hardware *state)
 	}
 	fplinux_brightness_close(&state->brightness);
 
-	if (state->keypad_interface && state->keypad_original >= 0 &&
-	    !write_number(state->keypad_led.brightness, state->keypad_original))
+	if (fplinux_keypad_light_close(&state->keypad_light) < 0)
 		ok = false;
-	/* A zero brightness write removes the trigger, so restore it last. */
-	if (state->keypad_interface &&
-	    !write_attribute(state->keypad_led.trigger,
-			     state->keypad_trigger_original,
-			     strlen(state->keypad_trigger_original)))
-		ok = false;
-	free(state->keypad_trigger_original);
-	state->keypad_trigger_original = NULL;
 	state->keypad_on = false;
 	if (state->vibrator >= 0 && state->effect_uploaded) {
 		if (!write_force_feedback(state->vibrator, state->effect_id, 0))
@@ -475,8 +262,8 @@ bool showcase_hardware_apply_outputs(struct showcase_hardware *state,
 				     const struct armada_outputs *outputs)
 {
 	if (outputs->keypad != state->keypad_on) {
-		if (!write_number(state->keypad_led.brightness,
-				  outputs->keypad ? 1 : 0))
+		if (fplinux_keypad_light_set(&state->keypad_light,
+					     outputs->keypad) < 0)
 			return false;
 		state->keypad_on = outputs->keypad;
 	}

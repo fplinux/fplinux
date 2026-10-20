@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MIT */
-/* Keyboard layout selection and printable text filtering. */
+/* Keyboard layout selection. */
 
 #ifndef FPLINUX_KEYBOARD_TEXT_H
 #define FPLINUX_KEYBOARD_TEXT_H
@@ -42,8 +42,5 @@ bool fplinux_keyboard_text_symbols(
 bool fplinux_keyboard_text_keymap(
 	const struct fplinux_keyboard_text_layouts *layouts, char *keymap,
 	size_t keymap_size);
-
-/* Accepts non-empty UTF-8 text without C0, DEL or C1 control characters. */
-bool fplinux_keyboard_text_is_printable(const char *text);
 
 #endif

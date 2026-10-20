@@ -89,7 +89,7 @@ commands = [
 
 [bootstrap]
 spi_hz = 24000000
-prepare_pins = false
+prepare_pins = true
 commands_after = []
 
 [linux]

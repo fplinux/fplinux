@@ -1,0 +1,17 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-language-en
+pkgver=1
+pkgrel=0
+pkgdesc="English language definition for FPLinux"
+url="https://github.com/fplinux/fplinux"
+arch="noarch"
+license="GPL-2.0-only"
+options="!check"
+source="en"
+
+package() {
+	install -Dm644 "$srcdir/en" "$pkgdir/usr/share/fplinux/languages/en"
+}
+sha512sums="
+d68a8ea56437081f84e17cf37978b3d6e8f77b5cb7296b1241b2d4ab3c311a76c531e480c2922f55012cfb9626a5fd3502cd037c1dd060356c2115472e161b6e  en
+"

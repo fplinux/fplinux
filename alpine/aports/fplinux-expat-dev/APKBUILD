@@ -1,0 +1,32 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-expat-dev
+pkgver=2.9.0
+pkgrel=0
+pkgdesc="Expat development headers for FPLinux"
+url="https://libexpat.github.io/"
+arch="noarch"
+license="MIT"
+depends="libexpat=$pkgver-r0"
+options="!check"
+source="https://distfiles.alpinelinux.org/distfiles/v3.24/expat-$pkgver.tar.xz"
+builddir="$srcdir/expat-$pkgver"
+
+package() {
+	install -Dm644 lib/expat.h "$pkgdir/usr/include/expat.h"
+	install -Dm644 lib/expat_external.h "$pkgdir/usr/include/expat_external.h"
+	install -d "$pkgdir/usr/lib/pkgconfig"
+	sed -e 's|@prefix@|/usr|g' \
+		-e 's|@exec_prefix@|${prefix}|g' \
+		-e 's|@libdir@|${exec_prefix}/lib|g' \
+		-e 's|@includedir@|${prefix}/include|g' \
+		-e 's|@PACKAGE_NAME@|expat|g' \
+		-e "s|@PACKAGE_VERSION@|$pkgver|g" \
+		-e 's|@LIBM@|-lm|g' \
+		expat.pc.in >"$pkgdir/usr/lib/pkgconfig/expat.pc"
+	ln -s libexpat.so.1 "$pkgdir/usr/lib/libexpat.so"
+	install -Dm644 COPYING "$pkgdir/usr/share/licenses/$pkgname/COPYING"
+}
+
+sha512sums="
+677b5a39ea47aa238813412061eefba0ff2e819597efee69452eab7fd63b1387537eda0dfd4e5891b938be202dc87df4b5115bdae75c6b81643ac2363bb99b34  expat-2.9.0.tar.xz
+"

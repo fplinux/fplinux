@@ -5,6 +5,7 @@
 #include "showcase-hardware.h"
 #include "fplinux-cli.h"
 #include "fplinux-drm-session.h"
+#include "fplinux-gpu-output.h"
 
 #include <errno.h>
 #include <inttypes.h>
@@ -19,7 +20,6 @@
 #include <unistd.h>
 
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
-#define SHOWCASE_DRM "/dev/dri/card0"
 #define SHOWCASE_TTY "/dev/tty0"
 #define SHOWCASE_NANOSECONDS_PER_SECOND 1000000000ULL
 #define SHOWCASE_MICROSECONDS_PER_SECOND 1000000ULL
@@ -31,6 +31,7 @@
 struct showcase_options {
 	uint64_t runs;
 	const char *keypad_led;
+	enum armada_render_mode renderer;
 };
 
 struct frame_statistics {
@@ -43,6 +44,7 @@ struct frame_statistics {
 enum showcase_option {
 	SHOWCASE_OPTION_RUNS,
 	SHOWCASE_OPTION_KEYPAD_LED,
+	SHOWCASE_OPTION_RENDERER,
 };
 
 static volatile sig_atomic_t stop_requested;
@@ -89,6 +91,16 @@ static const char *parse_showcase_option(size_t option, const char *value,
 	case SHOWCASE_OPTION_KEYPAD_LED:
 		options->keypad_led = value;
 		break;
+	case SHOWCASE_OPTION_RENDERER:
+		if (strcmp(value, "auto") == 0)
+			options->renderer = ARMADA_RENDER_AUTO;
+		else if (strcmp(value, "software") == 0)
+			options->renderer = ARMADA_RENDER_SOFTWARE;
+		else if (strcmp(value, "gpu") == 0)
+			options->renderer = ARMADA_RENDER_GPU;
+		else
+			return "--renderer must be auto, software, or gpu";
+		break;
 	}
 	return NULL;
 }
@@ -106,6 +118,11 @@ static enum fplinux_cli_result parse_options(int argc, char **argv,
 			.name = "keypad-led",
 			.metavar = "DIR",
 			.help = "use the keypad LED brightness directory",
+		},
+		{
+			.name = "renderer",
+			.metavar = "auto|software|gpu",
+			.help = "select rendering (default: auto)",
 		},
 	};
 	struct fplinux_cli cli = {
@@ -259,8 +276,9 @@ int main(int argc, char **argv)
 	struct showcase_options options;
 	struct frame_statistics statistics = { 0 };
 	struct armada_scene *scene = NULL;
+	struct fplinux_gpu_output *gpu_output = NULL;
 	struct fplinux_font font = { 0 };
-	uint16_t *pixels = NULL;
+	const uint16_t *pixels = NULL;
 	uint64_t frame_limit;
 	uint64_t completed_runs = 0;
 	uint64_t finished_ns = 0;
@@ -295,7 +313,7 @@ int main(int argc, char **argv)
 		goto cleanup;
 	}
 	hardware_open = true;
-	if (!fplinux_drm_session_open(&display, SHOWCASE_DRM, SHOWCASE_TTY,
+	if (!fplinux_drm_session_open(&display, NULL, SHOWCASE_TTY,
 				      DRM_FORMAT_RGB565, error,
 				      sizeof(error))) {
 		fprintf(stderr, "fplinux-showcase: %s\n", error);
@@ -310,9 +328,10 @@ int main(int argc, char **argv)
 	}
 	if (display.pages != 2U ||
 	    !((display.width == 240U && display.height == 320U) ||
-	      (display.width == 128U && display.height == 160U))) {
+	      (display.width == 128U && display.height == 160U) ||
+	      (display.width == 320U && display.height == 240U))) {
 		fprintf(stderr,
-			"fplinux-showcase: expected two-page RGB565 240x320 or 128x160 framebuffer\n");
+			"fplinux-showcase: expected two-page RGB565 240x320, 128x160, or 320x240 framebuffer\n");
 		goto cleanup;
 	}
 	if (!fplinux_font_open_default(&font, display.width, error,
@@ -320,20 +339,23 @@ int main(int argc, char **argv)
 		fprintf(stderr, "fplinux-showcase: %s\n", error);
 		goto cleanup;
 	}
-	pixels =
-		calloc((size_t)display.width * display.height, sizeof(*pixels));
-	if (!pixels) {
-		fprintf(stderr,
-			"fplinux-showcase: cannot allocate render surface\n");
-		goto cleanup;
-	}
-	scene = armada_scene_create(display.width, display.height, pixels,
-				    &font);
+	scene = armada_scene_create_with_renderer(display.width, display.height,
+						  &font, &display,
+						  options.renderer, error,
+						  sizeof(error));
 	if (!scene) {
 		fprintf(stderr, "fplinux-showcase: cannot create scene: %s\n",
-			strerror(errno));
+			error);
 		goto cleanup;
 	}
+	gpu_output = armada_scene_output(scene);
+	pixels = armada_scene_pixels(scene);
+	if (armada_scene_fallback_reason(scene)[0])
+		fprintf(stderr,
+			"fplinux-showcase: GPU unavailable: %s; using software\n",
+			armada_scene_fallback_reason(scene));
+	fprintf(stderr, "fplinux-showcase: renderer=%s\n",
+		armada_scene_renderer(scene));
 	if (!process_usage(&started_cpu_us, &peak_rss_kib)) {
 		fprintf(stderr,
 			"fplinux-showcase: cannot read process resource usage: %s\n",
@@ -365,8 +387,12 @@ int main(int argc, char **argv)
 				"fplinux-showcase: cannot read CLOCK_MONOTONIC\n");
 			goto cleanup;
 		}
-		if (!fplinux_drm_session_dispatch(&display))
+		if (!fplinux_drm_session_dispatch(&display)) {
+			fprintf(stderr,
+				"fplinux-showcase: display event handling failed: %s\n",
+				strerror(errno));
 			goto cleanup;
+		}
 		if (!display.active) {
 			usleep(20000);
 			continue;
@@ -397,23 +423,38 @@ int main(int argc, char **argv)
 		}
 		update_metrics(&statistics, now_ns, &metrics);
 		render_started = monotonic_ns();
-		armada_scene_render(
-			scene, (uint32_t)(next_frame % ARMADA_DURATION_FRAMES),
-			&metrics, &outputs);
+		if (!armada_scene_render(
+			    scene,
+			    (uint32_t)(next_frame % ARMADA_DURATION_FRAMES),
+			    &metrics, &outputs)) {
+			fprintf(stderr, "fplinux-showcase: render failed: %s\n",
+				armada_scene_error(scene));
+			goto cleanup;
+		}
 		page = 1U - display.shown_page;
-		copy_frame(&display, pixels, page);
+		if (!gpu_output)
+			copy_frame(&display, pixels, page);
 		if (!showcase_hardware_apply_outputs(&hardware, &outputs)) {
 			fprintf(stderr,
 				"fplinux-showcase: cannot apply synchronized hardware cue: %s\n",
 				strerror(errno));
 			goto cleanup;
 		}
-		__sync_synchronize();
-		if (!fplinux_drm_session_present(&display, page)) {
-			fprintf(stderr,
-				"fplinux-showcase: cannot present frame: %s\n",
-				strerror(errno));
-			goto cleanup;
+		if (gpu_output) {
+			if (!fplinux_gpu_output_present(gpu_output)) {
+				fprintf(stderr,
+					"fplinux-showcase: cannot present frame: %s\n",
+					fplinux_gpu_output_error(gpu_output));
+				goto cleanup;
+			}
+		} else {
+			__sync_synchronize();
+			if (!fplinux_drm_session_present(&display, page)) {
+				fprintf(stderr,
+					"fplinux-showcase: cannot present frame: %s\n",
+					strerror(errno));
+				goto cleanup;
+			}
 		}
 		render_finished = monotonic_ns();
 		render_us = render_finished > render_started ?
@@ -469,9 +510,12 @@ int main(int argc, char **argv)
 	}
 
 cleanup:
-	armada_scene_destroy(scene);
+	if (!armada_scene_destroy(scene)) {
+		fprintf(stderr,
+			"fplinux-showcase: renderer cleanup was incomplete\n");
+		success = false;
+	}
 	fplinux_font_close(&font);
-	free(pixels);
 	if (display_open)
 		fplinux_drm_session_set_active_handler(&display, NULL, NULL);
 	if (hardware_open && !showcase_hardware_close(&hardware)) {

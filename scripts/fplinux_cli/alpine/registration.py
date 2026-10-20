@@ -1,13 +1,44 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """Current package producers, build dependencies and shared project sources."""
 
+LANGUAGE_SOURCES = (
+    "lib/fplinux/fplinux-language.c",
+    "include/fplinux/fplinux-language.h",
+)
+SETTINGS_VALUES_SOURCES = (
+    "lib/fplinux/fplinux-settings-values.c",
+    "include/fplinux/fplinux-settings-values.h",
+)
 MULTITAP_SOURCES = (
     "lib/fplinux/fplinux-multitap.c",
     "include/fplinux/fplinux-multitap.h",
+    *LANGUAGE_SOURCES,
+)
+UI_PROFILE_SOURCES = (
+    "lib/fplinux/fplinux-ui-profile.c",
+    "include/fplinux/fplinux-ui-profile.h",
+)
+UI_SOFTKEY_LAYOUT_SOURCES = (
+    "lib/fplinux/fplinux-ui-softkey-layout.c",
+    "include/fplinux/fplinux-ui-softkey-layout.h",
+)
+DESKTOP_ENTRY_SOURCES = (
+    "lib/fplinux/fplinux-desktop-entry.c",
+    "include/fplinux/fplinux-desktop-entry.h",
+    "include/fplinux/fplinux-ui-session.h",
 )
 DRM_SESSION_SOURCES = (
     "lib/fplinux/fplinux-drm-session.c",
     "include/fplinux/fplinux-drm-session.h",
+)
+GPU_SOURCES = (
+    "lib/fplinux/fplinux-gpu.c",
+    "include/fplinux/fplinux-gpu.h",
+)
+GPU_OUTPUT_SOURCES = (
+    *GPU_SOURCES,
+    "lib/fplinux/fplinux-gpu-output.c",
+    "include/fplinux/fplinux-gpu-output.h",
 )
 KEYBOARD_TEXT_SOURCES = (
     "lib/fplinux/fplinux-keyboard-text.c",
@@ -27,6 +58,10 @@ BRIGHTNESS_CLIENT_SOURCES = (
 )
 INPUT_DEVICE_SOURCES = ("include/fplinux/fplinux-input-device.h",)
 KEYPAD_CODE_SOURCES = ("include/fplinux/fplinux-keypad.h",)
+KEYPAD_LIGHT_SOURCES = (
+    "lib/fplinux/fplinux-keypad-light.c",
+    "include/fplinux/fplinux-keypad-light.h",
+)
 INPUT_SESSION_SOURCES = (
     "lib/fplinux/fplinux-input-session.c",
     "include/fplinux/fplinux-input-session.h",
@@ -37,6 +72,11 @@ SHARED_APORT_SOURCES = {
         *BRIGHTNESS_CLIENT_SOURCES,
     ),
     "fplinux-bluetooth": CLI_SOURCES,
+    "fplinux-brand": (
+        "alpine/aports/fplinux-icons/svgraster.py",
+        "lib/fplinux/fplinux-ui-profile.json",
+        "LICENSES/CC-BY-ND-4.0.txt",
+    ),
     "fplinux-brightness-ui": (
         *FONT_SOURCES,
         *DRM_SESSION_SOURCES,
@@ -48,21 +88,63 @@ SHARED_APORT_SOURCES = {
     ),
     "fplinux-charge": CLI_SOURCES,
     "fplinux-cpuclock": CLI_SOURCES,
+    "fplinux-debug-tools": (*DRM_SESSION_SOURCES, *CLI_SOURCES, *GPU_OUTPUT_SOURCES),
     "fplinux-fm": CLI_SOURCES,
+    "fplinux-gpu-probe": (*CLI_SOURCES, *GPU_SOURCES),
+    "fplinux-icons": ("lib/fplinux/fplinux-ui-profile.json",),
     "fplinux-jack": CLI_SOURCES,
     "fplinux-jpeg": CLI_SOURCES,
+    "fplinux-language-en": ("alpine/aports/fplinux-language/en",),
+    "fplinux-language-ru": ("alpine/aports/fplinux-language/ru",),
+    "fplinux-launcher": (
+        *CLI_SOURCES,
+        *DESKTOP_ENTRY_SOURCES,
+        *UI_PROFILE_SOURCES,
+    ),
+    "fplinux-libweston": (
+        "include/fplinux/fplinux-pixman-buffer.h",
+        "include/fplinux/fplinux-weston-presentation.h",
+        "LICENSE",
+    ),
+    "fplinux-lvgl": ("LICENSE",),
+    "fplinux-notes": CLI_SOURCES,
     "fplinux-present": (
         *DRM_SESSION_SOURCES,
         *CLI_SOURCES,
     ),
+    "fplinux-qin1splus-mesa": ("targets/xiaomi-qin-1s-plus/rootfs/drirc",),
     "fplinux-rotate": (*DRM_SESSION_SOURCES, *CLI_SOURCES),
+    "fplinux-session": (
+        *DRM_SESSION_SOURCES,
+        *FONT_SOURCES,
+        *CLI_SOURCES,
+        *SETTINGS_VALUES_SOURCES,
+        *BRIGHTNESS_CLIENT_SOURCES,
+        *KEYPAD_LIGHT_SOURCES,
+        *KEYPAD_CODE_SOURCES,
+        *DESKTOP_ENTRY_SOURCES,
+        *UI_PROFILE_SOURCES,
+        *LANGUAGE_SOURCES,
+        "lib/fplinux/fplinux-ui-session.c",
+        "include/fplinux/fplinux-pixman-buffer.h",
+        "include/fplinux/fplinux-weston-presentation.h",
+    ),
+    "fplinux-settings": (
+        *MULTITAP_SOURCES,
+        *CLI_SOURCES,
+        *SETTINGS_VALUES_SOURCES,
+        *UI_PROFILE_SOURCES,
+    ),
     "fplinux-showcase": (
         *FONT_SOURCES,
         *DRM_SESSION_SOURCES,
+        *GPU_OUTPUT_SOURCES,
         *CLI_SOURCES,
         *KEYPAD_CODE_SOURCES,
         *BRIGHTNESS_CLIENT_SOURCES,
+        *KEYPAD_LIGHT_SOURCES,
     ),
+    "fplinux-snake": CLI_SOURCES,
     "fplinux-terminal": (
         *FONT_SOURCES,
         *CLI_SOURCES,
@@ -75,24 +157,69 @@ SHARED_APORT_SOURCES = {
     ),
     "fplinux-tyrquake": (
         *DRM_SESSION_SOURCES,
+        *GPU_OUTPUT_SOURCES,
         *CLI_SOURCES,
         *INPUT_DEVICE_SOURCES,
         *KEYPAD_CODE_SOURCES,
         *INPUT_SESSION_SOURCES,
     ),
+    "fplinux-ui": (
+        *MULTITAP_SOURCES,
+        *UI_PROFILE_SOURCES,
+        *UI_SOFTKEY_LAYOUT_SOURCES,
+        "lib/fplinux/fplinux-ui.c",
+        "include/fplinux/fplinux-ui.h",
+        "lib/fplinux/fplinux-ui-session.c",
+        "include/fplinux/fplinux-ui-session.h",
+        "lib/fplinux/fplinux-ui-text.c",
+        "include/fplinux/fplinux-ui-text.h",
+        "lib/fplinux/fplinux-ui-text-model.c",
+        "include/fplinux/fplinux-ui-text-model.h",
+        "lib/fplinux/fplinux-ui-listview.c",
+        "include/fplinux/fplinux-ui-listview.h",
+        "lib/fplinux/fplinux-ui-menu.c",
+        "include/fplinux/fplinux-ui-menu.h",
+        "lib/fplinux/fplinux-ui-prefs.c",
+        "include/fplinux/fplinux-ui-prefs.h",
+        "lib/fplinux/fplinux-ui-screen.c",
+        "include/fplinux/fplinux-ui-screen.h",
+        "lib/fplinux/fplinux-ui-screen-model.c",
+        "include/fplinux/fplinux-ui-screen-model.h",
+        "lib/fplinux/fplinux-ui-locale.c",
+        "include/fplinux/fplinux-ui-locale.h",
+        "include/fplinux/fplinux-ui-fonts.h",
+        "include/fplinux/fplinux-ui-internal.h",
+        "include/fplinux/fplinux-ui-style-internal.h",
+        "lib/fplinux/fplinux-ui-profile.json",
+        "scripts/fplinux_ui_profile.py",
+        "scripts/fplinux_ui_fonts.py",
+        "LICENSES/LGPL-2.1-or-later.txt",
+        "LICENSES/GPL-2.0-only.txt",
+    ),
 }
 COMMON_PACKAGES = (
     "fplinux-base",
     "fplinux-bash",
+    "fplinux-brand",
     "fplinux-busybox",
+    "fplinux-icons",
+    "fplinux-language-en",
+    "fplinux-language-ru",
+    "fplinux-launcher",
     "fplinux-ncurses",
+    "fplinux-notes",
     "fplinux-openrc",
     "fplinux-readline",
-    "fplinux-terminal",
+    "fplinux-session",
+    "fplinux-settings",
+    "fplinux-snake",
+    "fplinux-ui",
     "fplinux-input",
     "fplinux-libdrm",
-    "fplinux-libtsm",
     "fplinux-libudev",
+    "fplinux-libweston",
+    "fplinux-wayland",
+    "fplinux-xkb-ru",
 )
 LOCAL_BUILD_DEPENDENCIES = {
     "fplinux-apk-tools": ("fplinux-mbedtls-static-dev",),
@@ -107,25 +234,56 @@ LOCAL_BUILD_DEPENDENCIES = {
     "fplinux-bash": ("fplinux-ncurses", "fplinux-readline"),
     "fplinux-bluez": ("fplinux-bluez-glib", "fplinux-ncurses", "fplinux-readline"),
     "fplinux-brightness-ui": ("fplinux-libdrm",),
+    "fplinux-debug-tools": ("fplinux-libdrm", "fplinux-mesa"),
     "fplinux-fm": ("fplinux-alsa-lib",),
+    "fplinux-gpu-probe": ("fplinux-mesa", "fplinux-libdrm"),
     "fplinux-jack": ("fplinux-alsa-lib",),
+    "fplinux-launcher": ("fplinux-ui",),
+    "fplinux-mesa": ("fplinux-expat-dev", "fplinux-libdrm"),
+    "fplinux-libweston": (
+        "fplinux-wayland",
+        "fplinux-libdrm",
+        "fplinux-libxkbcommon",
+        "fplinux-mesa",
+    ),
+    "fplinux-notes": ("fplinux-ui",),
     "fplinux-readline": ("fplinux-ncurses",),
     "fplinux-present": ("fplinux-libdrm",),
+    "fplinux-qin1splus-mesa": ("fplinux-mesa",),
     "fplinux-rotate": ("fplinux-libdrm",),
-    "fplinux-showcase": ("fplinux-libdrm",),
+    "fplinux-session": ("fplinux-libweston",),
+    "fplinux-settings": ("fplinux-ui",),
+    "fplinux-showcase": ("fplinux-libdrm", "fplinux-mesa"),
+    "fplinux-snake": ("fplinux-ui",),
     "fplinux-terminal": (
         "fplinux-libdrm",
         "fplinux-libtsm",
         "fplinux-libxkbcommon",
     ),
-    "fplinux-tyrquake": ("fplinux-libdrm",),
+    "fplinux-tyrquake": ("fplinux-libdrm", "fplinux-mesa"),
+    "fplinux-ui": (
+        "fplinux-lvgl",
+        "fplinux-wayland",
+        "fplinux-libxkbcommon",
+        "fplinux-icons",
+    ),
 }
 SUBPACKAGE_APORTS = {
     "fplinux-alsa-lib-card-profiles": "fplinux-alsa-lib",
     "fplinux-bash-loadables": "fplinux-bash",
     "fplinux-bluez-libs": "fplinux-bluez",
     "fplinux-glib-static-dev": "fplinux-glib",
+    "fplinux-libweston-dev": "fplinux-libweston",
+    "fplinux-libweston-gl": "fplinux-libweston",
+    "fplinux-libxkbcommon-dev": "fplinux-libxkbcommon",
+    "fplinux-libxkbcommon-static": "fplinux-libxkbcommon",
+    "fplinux-lvgl-dev": "fplinux-lvgl",
+    "fplinux-mesa-gbm": "fplinux-mesa",
     "fplinux-ncurses-curses": "fplinux-ncurses",
+    "fplinux-session-openrc": "fplinux-session",
+    "fplinux-ui-dev": "fplinux-ui",
+    "fplinux-wayland-cursor": "fplinux-wayland",
+    "fplinux-wayland-dev": "fplinux-wayland",
     "fplinux-font-terminus-6x12": "fplinux-font-terminus",
     "fplinux-font-terminus-8x16": "fplinux-font-terminus",
 }

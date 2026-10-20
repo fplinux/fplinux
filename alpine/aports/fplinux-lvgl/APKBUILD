@@ -1,0 +1,84 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-lvgl
+pkgver=9.6.0
+pkgrel=0
+pkgdesc="RGB565 LVGL runtime for FPLinux applications"
+url="https://lvgl.io"
+arch="armv7"
+license="MIT AND GPL-2.0-only AND Zlib AND OFL-1.1"
+makedepends_build="clang22 lld22 cmake samurai pkgconf"
+makedepends_host="musl-dev linux-headers gcc"
+subpackages="$pkgname-dev"
+options="!check"
+source="
+	lvgl-$pkgver.tar.gz::https://github.com/lvgl/lvgl/archive/refs/tags/v$pkgver.tar.gz
+	lv_conf.h
+	shared-abi.patch
+	canvas-cache-drop.patch
+	LICENSE
+"
+builddir="$srcdir/lvgl-$pkgver"
+
+# -ffile-prefix-map keeps the build directory out of the file names in LVGL's
+# log messages. -Bsymbolic-functions binds LVGL's calls to its own functions
+# without the PLT, so applications cannot replace an LVGL function.
+build() {
+	: "${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
+	SYSROOT="$CBUILDROOT" cmake -S . -B output -G Ninja \
+		-DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_LIBDIR=lib \
+		-DCMAKE_BUILD_TYPE=MinSizeRel \
+		-DCMAKE_C_COMPILER="$CC" -DCMAKE_CXX_COMPILER="$CXX" \
+		-DCMAKE_ASM_COMPILER="$CC" \
+		-DCMAKE_ASM_FLAGS="--target=$CHOST --sysroot=$CBUILDROOT $CFLAGS" \
+		-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=armv7 \
+		-DCMAKE_SYSROOT="$CBUILDROOT" \
+		-DCMAKE_C_FLAGS="$CFLAGS -ffile-prefix-map=$builddir=lvgl-$pkgver" \
+		-DCMAKE_CXX_FLAGS="$CXXFLAGS -nostdlib++" \
+		-DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS" \
+		-DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS -Wl,-Bsymbolic-functions" \
+		-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+		-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+		-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+		-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
+		-DBUILD_SHARED_LIBS=ON \
+		-DLV_BUILD_CONF_PATH="$srcdir/lv_conf.h" \
+		-DLV_BUILD_SET_CONFIG_OPTS=ON \
+		-DLV_BUILD_LVGL_H_SYSTEM_INCLUDE=ON \
+		-DLV_FETCH_DEPENDENCIES=OFF -DLV_USE_FIND_PACKAGE=OFF \
+		-DCONFIG_LV_BUILD_DEMOS=OFF -DCONFIG_LV_BUILD_EXAMPLES=OFF \
+		-DCONFIG_LV_USE_SNAPSHOT=ON \
+		-DCONFIG_LV_USE_THORVG=OFF -DCONFIG_LV_USE_THORVG_INTERNAL=OFF
+	cmake --build output
+}
+
+package() {
+	DESTDIR="$pkgdir" cmake --install output
+	rm -f "$pkgdir/usr/include/lvgl/config/lv_conf.h"
+	install -Dm644 "$srcdir/lv_conf.h" \
+		"$pkgdir/usr/include/lvgl/config/lv_conf.h"
+	install -Dm644 LICENCE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENCE.txt"
+	install -Dm644 "$srcdir/LICENSE" \
+		"$pkgdir/usr/share/licenses/$pkgname/FPLinux-GPL-2.0.txt"
+	# COPYRIGHTS.md lists the bundled third-party code. The texts of the
+	# licences that must travel with it are installed next to it: OFL-1.1 for
+	# the built-in fonts (Montserrat, Font Awesome) and Zlib for LodePNG.
+	install -Dm644 COPYRIGHTS.md \
+		"$pkgdir/usr/share/licenses/$pkgname/COPYRIGHTS.md"
+	_fontlic=scripts/generators/built_in_font/font_license
+	install -Dm644 "$_fontlic/Montserrat/OFL.txt" \
+		"$pkgdir/usr/share/licenses/$pkgname/Montserrat-OFL.txt"
+	install -Dm644 "$_fontlic/FontAwesome5/LICENSE.txt" \
+		"$pkgdir/usr/share/licenses/$pkgname/FontAwesome5-LICENSE.txt"
+	# LodePNG carries its licence as the comment at the top of lodepng.h.
+	sed -n '2,/^\*\//{/^\*\//!p}' src/libs/lodepng/lodepng.h \
+		>"$pkgdir/usr/share/licenses/$pkgname/LodePNG-LICENSE.txt"
+	chmod 644 "$pkgdir/usr/share/licenses/$pkgname/LodePNG-LICENSE.txt"
+}
+
+sha512sums="
+4cb5769cddcc27f697343a81e02def51448187c12136432e35d5df9aa2db32ce0e7f55754afd65653b26b4bef71d17fde716e763b0c8c12e128ecda99187badf  lvgl-9.6.0.tar.gz
+80baa9d9b4ade59adf39fa8b7c5d6978cfc595d28650556320efadc2b357504fc9b7a8baec1248ea45ae390f6d93cc198519746e559654a30ba2865b548b2b52  lv_conf.h
+76b89727220ebffcab26505e4aef915999b1a1eb0a190f2a1f126e0ed654ab9eb7e7cde762e6fc9f2ae1d9a9c7809c97d561b602624ae5e5210350b26d6098f8  shared-abi.patch
+7147e3735f8e4c1bef4009c0a76a3a8939402b9fc5b7fe96c7ab0db6564cf494322d0787c86ae8c3b87686759cafdc09fb49f49d047ca0e3f925e710537f0353  canvas-cache-drop.patch
+260c02ff0a3e04ff0c2a95a936494b6a114a0a22121557059591d44af5fab5644ab8484be61eb33c12a6c9eef2170a108d51e2972adaef942568d94ae0d4ec83  LICENSE
+"

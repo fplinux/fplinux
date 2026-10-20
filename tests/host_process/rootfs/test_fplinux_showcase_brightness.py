@@ -35,7 +35,7 @@ class ShowcaseScene:
     executable: Path
     work: Path
 
-    def run_showcase(
+    def run_showcase(  # noqa: PLR0913 -- independent scene and input controls stay explicit.
         self,
         *,
         extra_frame: bool = False,
@@ -43,6 +43,9 @@ class ShowcaseScene:
         font_error: str | None = None,
         led_trigger: str = "input-events",
         led_brightness: int = 1,
+        right_soft_key: str | None = None,
+        renderer: str | None = "software",
+        gpu_init_failure: bool = False,
     ) -> list[str]:
         """Collect requests sent over a test-owned Unix socket during a scene."""
         case = Path(tempfile.mkdtemp(dir=self.work, prefix="scene-"))
@@ -59,6 +62,7 @@ class ShowcaseScene:
         socket_path = case / "brightness.sock"
         requests: list[str] = []
         server_errors: list[Exception] = []
+        stopping = threading.Event()
 
         with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as server:
             server.bind(str(socket_path))
@@ -69,6 +73,8 @@ class ShowcaseScene:
                 try:
                     connection, _ = server.accept()
                     with connection:
+                        if stopping.is_set():
+                            return
                         connection.settimeout(5)
                         while request := connection.recv(32):
                             requests.append(request.decode("ascii"))
@@ -80,6 +86,7 @@ class ShowcaseScene:
             worker.start()
             try:
                 environment = os.environ.copy()
+                environment.pop("SHOWCASE_GPU_INIT_FAIL", None)
                 environment["SHOWCASE_BRIGHTNESS_SOCKET"] = str(socket_path)
                 environment["SHOWCASE_KEYPAD_LED"] = str(keypad_led)
                 font_path = case / "font.psf"
@@ -90,21 +97,29 @@ class ShowcaseScene:
                 elif font_error != "missing":
                     write_solid_ascii_font(font_path, width=6, height=12)
                 environment["SHOWCASE_FONT_PATH"] = str(font_path)
+                if right_soft_key is not None:
+                    environment["SHOWCASE_RIGHT_SOFT_KEY"] = right_soft_key
                 if extra_frame or vt_cycle:
                     environment["SHOWCASE_EXTRA_FRAME"] = "1"
                 if vt_cycle:
                     environment["SHOWCASE_VT_CYCLE"] = "1"
+                if gpu_init_failure:
+                    environment["SHOWCASE_GPU_INIT_FAIL"] = "1"
+                arguments = [str(self.executable), "--keypad-led", str(keypad_led)]
+                if renderer is not None:
+                    arguments.extend(["--renderer", renderer])
                 result = run_process(
-                    [str(self.executable), "--keypad-led", str(keypad_led)],
+                    arguments,
                     name="render Showcase with a local brightness service",
                     timeout=10,
                     env=environment,
                 )
             finally:
+                stopping.set()
+                with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as wakeup:
+                    wakeup.connect(str(socket_path))
                 worker.join(timeout=5)
 
-        assert not (worker.is_alive()), "brightness service did not stop"
-        assert (server_errors) == ([])
         if font_error:
             assert (result.returncode) == (1), result.stderr
             if font_error == "wrong-size":
@@ -112,8 +127,16 @@ class ShowcaseScene:
             else:
                 assert ("cannot load font /usr/share/fplinux/fonts/default.psf") in (result.stderr)
             assert (result.stdout) == ("")
+        elif gpu_init_failure and renderer == "gpu":
+            assert result.returncode == 1, result.stderr
+            assert "controlled GPU initialization failure" in result.stderr
+            assert result.stdout == ""
         else:
             assert (result.returncode) == (0), result.stderr
+            if gpu_init_failure:
+                assert "controlled GPU initialization failure" in result.stderr
+        assert not (worker.is_alive()), "brightness service did not stop"
+        assert (server_errors) == ([])
         assert ((keypad_led / "brightness").read_text(encoding="ascii").splitlines()[0]) == (
             str(led_brightness)
         )
@@ -145,6 +168,8 @@ def executable() -> Iterator[Path]:
                 "-Wall",
                 "-Wextra",
                 "-Werror",
+                "-isystem",
+                "/opt/quality/include",
                 f"-I{APORT}",
                 f"-I{SHARED}",
                 str(APORT / "fplinux-showcase.c"),
@@ -152,7 +177,12 @@ def executable() -> Iterator[Path]:
                 str(APORT / "armada-scene.c"),
                 str(APORT / "armada-storyboard.c"),
                 str(APORT / "armada-renderer.c"),
+                str(APORT / "armada-geometry.c"),
+                str(APORT / "armada-overlay.c"),
+                str(APORT / "armada-gpu-renderer.c"),
                 str(ROOT / "lib/fplinux/fplinux-font.c"),
+                str(ROOT / "lib/fplinux/fplinux-gpu.c"),
+                str(ROOT / "lib/fplinux/fplinux-keypad-light.c"),
                 str(ROOT / "lib/fplinux/fplinux-brightness-client.c"),
                 str(ROOT / "lib/fplinux/fplinux-cli.c"),
                 str(FAKE_DEVICES),
@@ -163,6 +193,7 @@ def executable() -> Iterator[Path]:
                 "-Wl,--wrap=write",
                 "-Wl,--wrap=connect",
                 "-Wl,--wrap=close",
+                "-ldl",
                 *drm_flags,
                 "-o",
                 str(executable),
@@ -183,8 +214,113 @@ def scene(executable: Path) -> Iterator[ShowcaseScene]:
         yield ShowcaseScene(executable, Path(case.name))
 
 
+@pytest.fixture(scope="class")
+def keypad_executable(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Link the hardware consumer with controlled evdev and LED boundaries."""
+    executable = tmp_path_factory.mktemp("showcase-keypad") / "showcase-keypad"
+    drm_flags = shlex.split(
+        run_process(
+            ["pkg-config", "--cflags", "libdrm"],
+            name="read DRM header flags for Showcase device doubles",
+            timeout=10,
+            check=True,
+        ).stdout
+    )
+    run_process(
+        [
+            "cc",
+            "-O2",
+            "-std=c11",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            f"-I{APORT}",
+            f"-I{SHARED}",
+            str(ROOT / "tests/host_process/rootfs/fplinux-showcase-keypad.c"),
+            str(APORT / "showcase-hardware.c"),
+            str(ROOT / "lib/fplinux/fplinux-keypad-light.c"),
+            str(ROOT / "lib/fplinux/fplinux-brightness-client.c"),
+            str(FAKE_DEVICES),
+            "-Wl,--wrap=open",
+            "-Wl,--wrap=fopen",
+            "-Wl,--wrap=ioctl",
+            "-Wl,--wrap=read",
+            "-Wl,--wrap=write",
+            "-Wl,--wrap=connect",
+            "-Wl,--wrap=close",
+            *drm_flags,
+            "-o",
+            str(executable),
+        ],
+        name="compile Showcase keypad output consumer",
+        timeout=30,
+        check=True,
+    )
+    return executable
+
+
 class FplinuxShowcaseBrightnessTests:
     """Run the scene with simulated evdev, DRM, and a local brightness service."""
+
+    @pytest.mark.parametrize("renderer", [None, "auto"], ids=["default", "explicit-auto"])
+    def test_auto_renderer_falls_back_after_gpu_init_error_and_restores_state(
+        self, scene: ShowcaseScene, renderer: str | None
+    ) -> None:
+        """GPU setup failure leaves auto playback and borrowed hardware state usable."""
+        requests = scene.run_showcase(renderer=renderer, gpu_init_failure=True)
+
+        assert requests[0] == "CLAIM"
+        assert requests[1].startswith("SHOW ")
+        assert requests[2] == "RELEASE"
+        assert len(requests) == 3
+
+    def test_explicit_gpu_init_error_releases_brightness_and_restores_led(
+        self, scene: ShowcaseScene
+    ) -> None:
+        """A required GPU startup error returns the acquired brightness and LED state."""
+        requests = scene.run_showcase(renderer="gpu", gpu_init_failure=True)
+
+        assert requests == ["CLAIM", "RELEASE"]
+
+    @pytest.mark.parametrize(
+        "led",
+        [(1, 1, "ON 1\nOFF 0\n"), (255, 37, "ON 255\nOFF 0\n")],
+        ids=["binary", "multilevel"],
+    )
+    def test_keypad_output_uses_full_brightness_and_restores_borrowed_state(
+        self, keypad_executable: Path, tmp_path: Path, led: tuple[int, int, str]
+    ) -> None:
+        """Logical ON/OFF uses the LED's range and returns its borrowed state."""
+        maximum, original, expected = led
+        (tmp_path / "brightness").write_text(f"{original}\n", encoding="ascii")
+        (tmp_path / "max_brightness").write_text(f"{maximum}\n", encoding="ascii")
+        (tmp_path / "trigger").write_text("none [input-events] timer\n", encoding="ascii")
+        environment = os.environ.copy()
+        environment["SHOWCASE_KEYPAD_LED"] = str(tmp_path)
+
+        result = run_process(
+            [str(keypad_executable), str(tmp_path)],
+            name="toggle Showcase keypad output and restore its borrowed state",
+            timeout=5,
+            env=environment,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == expected
+        assert (tmp_path / "brightness").read_text("ascii").splitlines()[0] == str(original)
+        assert (tmp_path / "trigger").read_text("ascii") == "none [input-events] timer\n"
+
+    @pytest.mark.parametrize("right_soft_key", ["event0", "event2"], ids=["first", "second"])
+    def test_right_soft_key_exits_with_the_usable_keypad(
+        self, scene: ShowcaseScene, right_soft_key: str
+    ) -> None:
+        """Only the usable member of two matching keypads can end the running scene."""
+        requests = scene.run_showcase(right_soft_key=right_soft_key)
+
+        assert (requests[0]) == ("CLAIM")
+        assert requests[1].startswith("SHOW ")
+        assert (requests[2]) == ("RELEASE")
+        assert (len(requests)) == (3)
 
     @pytest.mark.parametrize("led_trigger", ["input-events", "none"], ids=["automatic", "manual"])
     def test_exit_restores_selected_trigger_with_led_initially_off(

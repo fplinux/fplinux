@@ -109,6 +109,7 @@ class TerminalLayoutKeyTests:
                     str(TERMINAL / "terminal-keyboard.c"),
                     str(ROOT / "lib/fplinux/fplinux-keyboard-text.c"),
                     str(ROOT / "lib/fplinux/fplinux-multitap.c"),
+                    str(ROOT / "lib/fplinux/fplinux-language.c"),
                     "-ltsm",
                     "-lxkbcommon",
                 ],

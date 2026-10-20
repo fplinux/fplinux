@@ -2,6 +2,7 @@
 /* Real guardian processes with a file-backed substitute for VT ioctls. */
 #define _GNU_SOURCE
 #include "fplinux-drm-session.h"
+#include "fplinux-drm-selection-fake.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -23,6 +24,7 @@ static int ready_fd = -1;
 static bool killall_mode;
 static bool exec_failure;
 static const char *guardian_path;
+static bool selection_mode;
 
 static bool child_pid(pid_t parent, pid_t *child)
 {
@@ -124,6 +126,7 @@ int __wrap_execv(const char *path, char *const argv[])
 int __wrap_open(const char *path, int flags, ...)
 {
 	mode_t mode = 0;
+	int selection_result;
 
 	if (flags & O_CREAT) {
 		va_list arguments;
@@ -132,6 +135,9 @@ int __wrap_open(const char *path, int flags, ...)
 		mode = va_arg(arguments, unsigned int);
 		va_end(arguments);
 	}
+	if (selection_mode &&
+	    fplinux_drm_selection_open(path, flags, &selection_result))
+		return selection_result;
 	if (!strcmp(path, "/dev/tty5"))
 		return __real_open(console_path, flags, mode);
 	if (!strcmp(path, "test-drm")) {
@@ -175,16 +181,19 @@ int main(int argc, char **argv)
 	if (prctl(PR_SET_CHILD_SUBREAPER, 1) < 0)
 		goto cleanup;
 	step = "unknown mode";
-	if (!strcmp(argv[1], "segv"))
-		failure_signal = SIGSEGV;
-	else if (!strcmp(argv[1], "kill"))
-		failure_signal = SIGKILL;
-	else if (!strcmp(argv[1], "killall"))
-		killall_mode = true;
-	else if (!strcmp(argv[1], "exec-fail"))
-		exec_failure = true;
-	else if (strcmp(argv[1], "normal"))
-		goto cleanup;
+	selection_mode = fplinux_drm_selection_setup(argv[1]);
+	if (!selection_mode) {
+		if (!strcmp(argv[1], "segv"))
+			failure_signal = SIGSEGV;
+		else if (!strcmp(argv[1], "kill"))
+			failure_signal = SIGKILL;
+		else if (!strcmp(argv[1], "killall"))
+			killall_mode = true;
+		else if (!strcmp(argv[1], "exec-fail"))
+			exec_failure = true;
+		else if (strcmp(argv[1], "normal"))
+			goto cleanup;
+	}
 	step = "console and pipe setup";
 	snprintf(console_path, sizeof(console_path), "%s/console", directory);
 	console = open(console_path, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
@@ -207,10 +216,17 @@ int main(int argc, char **argv)
 		    prctl(PR_SET_NAME, "fplinux-vttest", 0, 0, 0) < 0)
 			_exit(5);
 		setrlimit(RLIMIT_CORE, &no_core);
-		if (fplinux_drm_session_open(&session, "test-drm", console_path,
-					     DRM_FORMAT_RGB565, error,
-					     sizeof(error)))
+		if (fplinux_drm_session_open(
+			    &session,
+			    selection_mode ? fplinux_drm_selection_path() :
+					     "test-drm",
+			    console_path,
+			    selection_mode ? fplinux_drm_selection_format() :
+					     DRM_FORMAT_RGB565,
+			    error, sizeof(error)))
 			_exit(2);
+		if (selection_mode)
+			_exit(fplinux_drm_selection_check(errno) ? 0 : 3);
 		_exit(errno == (exec_failure ? EIO : ENODEV) ? 0 : 3);
 	}
 	close(inherited[1]);

@@ -1,0 +1,7 @@
+--- a/env_support/cmake/main.cmake
++++ b/env_support/cmake/main.cmake
+@@ -145,0 +146,4 @@
++set_target_properties(lvgl PROPERTIES
++    VERSION ${LVGL_VERSION}
++    SOVERSION ${LVGL_SOVERSION}
++)

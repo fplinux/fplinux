@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# libinput device quirks for FPLinux. fplinux-session points
+# LIBINPUT_QUIRKS_DIR at this directory, so libinput reads this file instead
+# of its own database. No FPLinux input device needs a quirk, but libinput
+# fails to load a directory without one complete section. Bluetooth keyboards
+# are external input devices.
+
+[Bluetooth Keyboards]
+MatchUdevType=keyboard
+MatchBus=bluetooth
+AttrKeyboardIntegration=external

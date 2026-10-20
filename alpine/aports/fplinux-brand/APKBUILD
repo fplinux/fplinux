@@ -1,0 +1,52 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-brand
+pkgver=1
+pkgrel=0
+pkgdesc="FPLinux brand marks and lockups for the session"
+url="https://github.com/fplinux/fplinux"
+arch="noarch"
+license="CC-BY-ND-4.0"
+makedepends_build="nodejs python3"
+options="!check"
+# The build copies svgraster.py from alpine/aports/fplinux-icons,
+# fplinux-ui-profile.json from lib/fplinux and CC-BY-ND-4.0.txt from LICENSES.
+source="
+	fplinux-mark-light.svg
+	fplinux-mark-dark.svg
+	fplinux-lockup-light.svg
+	fplinux-lockup-dark.svg
+	generate-brand.py
+	svgraster.py
+	fplinux-ui-profile.json
+	CC-BY-ND-4.0.txt
+"
+builddir="$srcdir"
+
+build() {
+	# Sizes come from the profiles' logo table; resvg is pinned in the image.
+	NODE_PATH=/opt/quality/node-tools/node_modules PYTHONDONTWRITEBYTECODE=1 \
+		python3 generate-brand.py --profile fplinux-ui-profile.json \
+		--out "$builddir/brand"
+}
+
+package() {
+	local file
+	# mark-{light,dark}-N.png and lockup-{light,dark}-W.png; consumers keep
+	# 1/8 of the mark height free around them.
+	for file in "$builddir"/brand/*.png "$builddir"/brand/*.rgb565; do
+		install -Dm644 "$file" "$pkgdir/usr/share/fplinux/brand/${file##*/}"
+	done
+	install -Dm644 "$srcdir/CC-BY-ND-4.0.txt" \
+		"$pkgdir/usr/share/licenses/$pkgname/CC-BY-ND-4.0.txt"
+}
+
+sha512sums="
+786a05143ed75ad0a4191722340e944f2f15edbf87ef184789b54c818f773fb3a8e067eb2e08d89a83c99b180e18bea31daf0fda70e693ffd6cec9b417c037fc  fplinux-mark-light.svg
+4ab7518cbd6604613f5453f2b59cf21956c91c6d7a6ee10b7478793fc68b8409ad61c547d2e942d7370849da5224f9ff88adf5368e19799373739f39eca97e54  fplinux-mark-dark.svg
+dbfb7764a9f5c01fae9a0ae8c459a39883309f8b146ad7080a0ec4d2ba9e92b2598a0caa554ea88a078591e2727aa859a9510361f5019ca0d38261244601d780  fplinux-lockup-light.svg
+200ced0fdea2296f1e067b5516cf6e028fee565c0085d91d1f3da32c866df4cd6ef1f33fdefbcd6eba6572ea14e62dced4e0156239c15f515a1542c350c818ef  fplinux-lockup-dark.svg
+e4ed31d9e7dbb48e07a7d21ff680b8a8d01dfc7f76c60d075cc8aee656b30bb6a07a60ba4c2f4adb8fc24fac04a9f5360aba5e069b1ccea78de2139fd9c1602e  generate-brand.py
+dd02856111137ad00d51d2ca75d0755a8ef3ab1877a47ed0d16c300bc0f373150c167aea64521cde6838e132dd5fdd4bd61139dac4356ae0b3599c90a1d0f3a7  svgraster.py
+7383b91adf88d48a855c84a5b70ac97ffbe81c4a4ced02271d95420726e823fae38557bebe6492fac254c073a37b8e64e9ac22e95a8b6d4bf18724d7236cf86a  fplinux-ui-profile.json
+55a5bd4aaa9f764673b0734636d47ccaccadc21471bb33fdbd6031a84d96c181ea344cfa6c9945fb4c5d49610813e0bcbe7d2a7a6a7638b2f406af797d142a83  CC-BY-ND-4.0.txt
+"

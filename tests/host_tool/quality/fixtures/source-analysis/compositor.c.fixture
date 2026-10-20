@@ -1,0 +1,15 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+#include <libweston/desktop.h>
+#include <libweston/libweston.h>
+#include <libweston/shell-utils.h>
+#include <libweston/version.h>
+#include <weston/weston.h>
+
+#if WESTON_VERSION_MAJOR != 16
+#error Session analysis must use the supported compositor API
+#endif
+
+struct weston_surface *source_surface(struct weston_surface *surface)
+{
+	return surface;
+}

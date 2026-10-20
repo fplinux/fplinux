@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Snake
+Name[ru]=Змейка
+Exec=/usr/bin/fplinux-snake
+Icon=org.fplinux.snake
+Categories=Game;
+X-FPLinux-Mode=fullscreen

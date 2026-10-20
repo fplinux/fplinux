@@ -1,0 +1,42 @@
+--- a/src/util/format/u_format_unpack_neon.c
++++ b/src/util/format/u_format_unpack_neon.c
+@@ -29,7 +29,7 @@
+ /* armhf builds default to vfp, not neon, and refuses to compile neon intrinsics
+  * unless you tell it "no really".
+  */
+-#if DETECT_ARCH_ARM
++#if DETECT_ARCH_ARM && !defined(__clang__)
+ #pragma GCC target ("fpu=neon")
+ #endif
+ 
+@@ -37,6 +37,9 @@
+ #include "u_format_pack.h"
+ #include "util/u_cpu_detect.h"
+ 
++#if DETECT_ARCH_ARM && defined(__clang__)
++__attribute__((target("neon")))
++#endif
+ static void
+ util_format_b8g8r8a8_unorm_unpack_rgba_8unorm_neon(uint8_t *restrict dst, const uint8_t *restrict src, unsigned width)
+ {
+--- a/src/panfrost/lib/pan_afbc.c
++++ b/src/panfrost/lib/pan_afbc.c
+@@ -11,7 +11,7 @@
+ #if DETECT_ARCH_AARCH64 || (DETECT_ARCH_ARM && !defined(__SOFTFP__))
+ /* armhf builds default to VFP, not NEON, and refuses to compile NEON
+  * intrinsics unless you tell it "no really". */
+-#if DETECT_ARCH_ARM
++#if DETECT_ARCH_ARM && !defined(__clang__)
+ #pragma GCC target ("fpu=neon")
+ #endif
+ #include <arm_neon.h>
+@@ -98,6 +98,9 @@
+ #else
+ 
+ /* Arm A32 NEON intrinsics and generic version. */
++#if DETECT_ARCH_ARM && !defined(__SOFTFP__) && defined(__clang__)
++__attribute__((target("neon")))
++#endif
+ uint32_t
+ pan_afbc_payload_layout_packed(unsigned arch,
+                                const struct pan_afbc_headerblock *headers,

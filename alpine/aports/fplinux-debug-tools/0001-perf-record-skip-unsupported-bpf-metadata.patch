@@ -1,0 +1,16 @@
+Disable BPF metadata sections when libbpf support is absent.
+
+--- a/builtin-record.c
++++ b/builtin-record.c
+@@ -1804,6 +1804,11 @@ static void record__init_features(struct record *rec)
+ 	for (feat = HEADER_FIRST_FEATURE; feat < HEADER_LAST_FEATURE; feat++)
+ 		perf_header__set_feat(&session->header, feat);
+ 
++#ifndef HAVE_LIBBPF_SUPPORT
++	perf_header__clear_feat(&session->header, HEADER_BPF_PROG_INFO);
++	perf_header__clear_feat(&session->header, HEADER_BPF_BTF);
++#endif
++
+ 	if (rec->no_buildid)
+ 		perf_header__clear_feat(&session->header, HEADER_BUILD_ID);
+ 

@@ -32,6 +32,8 @@ typedef struct {
 extern short *d_pzbuffer;
 extern byte *r_warpbuffer;
 extern byte *host_colormap;
+extern unsigned int com_argc;
+extern const char **com_argv;
 extern qvidmode_t vid_windowed_mode;
 extern qvidmode_t *vid_modelist;
 extern int vid_nummodes;
@@ -56,8 +58,10 @@ void Con_Printf(const char *format, ...);
 _Noreturn void Sys_Quit(void);
 _Noreturn void Sys_Error(const char *format, ...);
 int LittleLong(int value);
+int COM_CheckParm(const char *argument);
 void VID_Init(const byte *palette);
 void VID_Shutdown(void);
+void VID_ProcessEvents(void);
 void Sys_SendKeyEvents(void);
 
 #endif

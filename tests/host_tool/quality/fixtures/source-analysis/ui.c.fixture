@@ -1,0 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+#include <fplinux/fplinux-ui.h>
+
+#if LV_COLOR_DEPTH != 16
+#error UI analysis must use RGB565
+#endif
+
+lv_obj_t *source_object(lv_obj_t *object)
+{
+	return object;
+}

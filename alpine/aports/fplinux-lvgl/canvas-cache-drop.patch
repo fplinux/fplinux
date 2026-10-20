@@ -1,0 +1,8 @@
+Drop the canvas draw buffer from the image caches, not the address of
+the pointer field that refers to it.
+
+--- a/src/widgets/canvas/lv_canvas.c
++++ b/src/widgets/canvas/lv_canvas.c
+@@ -472 +472 @@
+-    lv_image_cache_drop(&canvas->draw_buf);
++    lv_image_cache_drop(canvas->draw_buf);

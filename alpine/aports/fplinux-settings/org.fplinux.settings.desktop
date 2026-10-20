@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Settings
+Name[ru]=Настройки
+Exec=/usr/bin/fplinux-settings
+Icon=org.fplinux.settings
+Categories=Settings;System;
+X-FPLinux-Mode=integrated

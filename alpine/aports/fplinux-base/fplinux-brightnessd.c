@@ -124,7 +124,7 @@ static int load_config(struct brightness_service *service, const char *path,
 			goto invalid;
 		if (end)
 			*end = '\0';
-		if (!decimal(cursor, 63, &raw) || (i == 0 && raw != 0) ||
+		if (!decimal(cursor, 65535, &raw) || (i == 0 && raw != 0) ||
 		    (i > 0 && raw <= previous))
 			goto invalid;
 		service->levels[i] = raw;

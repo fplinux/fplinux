@@ -45,22 +45,6 @@ static const char *const special_keys[] = {
 	"Esc", "F1", "F2", "F3",  "F4",	 "F5",	"F6",
 	"F7",  "F8", "F9", "F10", "F11", "F12",
 };
-static const char *const languages[] = {
-	"English (EN)",
-	"Russian (RU)",
-};
-
-static uint32_t uppercase(uint32_t character)
-{
-	if (character >= 'a' && character <= 'z')
-		return character - 'a' + 'A';
-	if (character >= 0x430 && character <= 0x44f)
-		return character - 0x20;
-	if (character == 0x451)
-		return 0x401;
-	return character;
-}
-
 static void send_character(struct fplinux_terminal *terminal,
 			   uint32_t character)
 {
@@ -69,7 +53,7 @@ static void send_character(struct fplinux_terminal *terminal,
 
 	if (terminal->alphabetic_mode == FPLINUX_TERMINAL_UPPER ||
 	    (terminal->modifier & TSM_SHIFT_MASK))
-		character = uppercase(character);
+		character = fplinux_multitap_uppercase(character);
 	keysym = character <= 0xff ? character : 0x01000000U | character;
 	tsm_vte_handle_keyboard(terminal->vte, keysym, ascii,
 				terminal->modifier, character);
@@ -229,10 +213,8 @@ static void select_menu(struct fplinux_terminal *terminal)
 	} else if (menu == FPLINUX_TERMINAL_MENU_LANGUAGE) {
 		if (!commit_composition(terminal))
 			return;
-		fplinux_multitap_set_language(&terminal->compose,
-					      index == 0 ?
-						      FPLINUX_MULTITAP_ENGLISH :
-						      FPLINUX_MULTITAP_RUSSIAN);
+		fplinux_multitap_set_language(
+			&terminal->compose, &fplinux_terminal_languages[index]);
 	} else {
 		switch (index) {
 		case MENU_MODIFIERS:
@@ -247,7 +229,7 @@ static void select_menu(struct fplinux_terminal *terminal)
 		case MENU_LANGUAGE:
 			terminal->menu = FPLINUX_TERMINAL_MENU_LANGUAGE;
 			terminal->menu_index = terminal->compose.language ==
-					       FPLINUX_MULTITAP_RUSSIAN;
+					       &fplinux_terminal_languages[1];
 			break;
 		case MENU_INTERRUPT:
 			send_phone_key(terminal, XKB_KEY_c, 'c',
@@ -623,7 +605,7 @@ void fplinux_terminal_tick(struct fplinux_terminal *terminal, uint64_t now_ms,
 		clear_line(terminal, shell_foreground);
 	if (!composition_paused(terminal) &&
 	    fplinux_multitap_pending(&terminal->compose) &&
-	    now_ms - terminal->compose_ms >= FPLINUX_MULTITAP_TIMEOUT_MS)
+	    now_ms - terminal->compose_ms >= terminal->compose.timeout_ms)
 		commit_composition(terminal);
 	if (!terminal->history && !composition_paused(terminal) &&
 	    !fplinux_multitap_pending(&terminal->compose) &&
@@ -670,7 +652,7 @@ int fplinux_terminal_timeout(const struct fplinux_terminal *terminal,
 	if (!composition_paused(terminal) &&
 	    fplinux_multitap_pending(&terminal->compose))
 		timeout = deadline_timeout(now_ms, terminal->compose_ms,
-					   FPLINUX_MULTITAP_TIMEOUT_MS,
+					   terminal->compose.timeout_ms,
 					   timeout);
 	if (!terminal->history && !composition_paused(terminal) &&
 	    !fplinux_multitap_pending(&terminal->compose) &&
@@ -714,7 +696,7 @@ uint32_t fplinux_terminal_preedit(const struct fplinux_terminal *terminal)
 
 	return terminal->alphabetic_mode == FPLINUX_TERMINAL_UPPER ||
 			       (terminal->modifier & TSM_SHIFT_MASK) ?
-		       uppercase(candidate) :
+		       fplinux_multitap_uppercase(candidate) :
 		       candidate;
 }
 
@@ -729,7 +711,8 @@ fplinux_terminal_menu_count(const struct fplinux_terminal *terminal)
 	case FPLINUX_TERMINAL_MENU_SPECIAL:
 		return sizeof(special_keys) / sizeof(special_keys[0]);
 	case FPLINUX_TERMINAL_MENU_LANGUAGE:
-		return sizeof(languages) / sizeof(languages[0]);
+		return sizeof(fplinux_terminal_languages) /
+		       sizeof(fplinux_terminal_languages[0]);
 	default:
 		return 0;
 	}
@@ -745,9 +728,9 @@ const char *fplinux_terminal_menu_label(const struct fplinux_terminal *terminal,
 	if (terminal->menu == FPLINUX_TERMINAL_MENU_SPECIAL)
 		return special_keys[index];
 	if (terminal->menu == FPLINUX_TERMINAL_MENU_LANGUAGE)
-		return languages[index];
+		return fplinux_terminal_languages[index].name;
 	if (index == MENU_LANGUAGE &&
-	    terminal->compose.language == FPLINUX_MULTITAP_RUSSIAN)
+	    terminal->compose.language == &fplinux_terminal_languages[1])
 		return "Language: RU...";
 	return main_menu[index];
 }
@@ -761,9 +744,8 @@ void fplinux_terminal_status(const struct fplinux_terminal *terminal,
 			   terminal->mode == FPLINUX_TERMINAL_UPPER   ? "ABC" :
 									"abc";
 	const char *language =
-		terminal->compose.language == FPLINUX_MULTITAP_RUSSIAN ? "RU" :
-									 "EN";
-	char middle[32];
+		terminal->compose.language->indicator[FPLINUX_LANGUAGE_LOWER];
+	char middle[FPLINUX_LANGUAGE_TEXT_BYTES + sizeof("123 ") - 1];
 	size_t columns = tsm_screen_get_width(terminal->screen);
 	size_t middle_size;
 

@@ -1,0 +1,144 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+/*
+ * The application ABI of libfplinux-ui.so.1: exactly the functions declared
+ * in the installed headers fplinux-ui.h, fplinux-ui-screen.h,
+ * fplinux-ui-text.h, fplinux-ui-menu.h, fplinux-ui-prefs.h,
+ * fplinux-ui-locale.h. A new function is added here and in its header; none
+ * is removed or changed while the soname stays libfplinux-ui.so.1. Every
+ * other symbol, such as the fonts, the session protocol functions and the
+ * xdg-shell interfaces, stays local to the library.
+ */
+{
+global:
+	fplinux_ui_alert_new;
+	fplinux_ui_alert_set_progress;
+	fplinux_ui_alert_set_text;
+	fplinux_ui_back;
+	fplinux_ui_canvas_new;
+	fplinux_ui_canvas_object;
+	fplinux_ui_canvas_set_key_handler;
+	fplinux_ui_canvas_set_keyboard_keys;
+	fplinux_ui_close;
+	fplinux_ui_current;
+	fplinux_ui_decimal_separator;
+	fplinux_ui_form_add_item_command;
+	fplinux_ui_form_append_choice;
+	fplinux_ui_form_append_date;
+	fplinux_ui_form_append_gauge;
+	fplinux_ui_form_append_image;
+	fplinux_ui_form_append_string;
+	fplinux_ui_form_append_text_field;
+	fplinux_ui_form_delete;
+	fplinux_ui_form_delete_all;
+	fplinux_ui_form_get_choice;
+	fplinux_ui_form_get_date;
+	fplinux_ui_form_get_focus;
+	fplinux_ui_form_get_text;
+	fplinux_ui_form_get_value;
+	fplinux_ui_form_is_chosen;
+	fplinux_ui_form_is_hidden;
+	fplinux_ui_form_move_item;
+	fplinux_ui_form_new;
+	fplinux_ui_form_set_appearance;
+	fplinux_ui_form_set_choice;
+	fplinux_ui_form_set_chosen;
+	fplinux_ui_form_set_constraint;
+	fplinux_ui_form_set_date;
+	fplinux_ui_form_set_focus;
+	fplinux_ui_form_set_hidden;
+	fplinux_ui_form_set_string;
+	fplinux_ui_form_set_text;
+	fplinux_ui_form_set_value;
+	fplinux_ui_format_date;
+	fplinux_ui_format_number;
+	fplinux_ui_glyph;
+	fplinux_ui_go_back;
+	fplinux_ui_header;
+	fplinux_ui_height;
+	fplinux_ui_home;
+	fplinux_ui_image_load;
+	fplinux_ui_input_locale;
+	fplinux_ui_is_fullscreen;
+	fplinux_ui_is_softkey;
+	fplinux_ui_is_visible;
+	fplinux_ui_keep_screen_on;
+	fplinux_ui_lifecycle;
+	fplinux_ui_list_add_item_command;
+	fplinux_ui_list_append;
+	fplinux_ui_list_delete;
+	fplinux_ui_list_delete_all;
+	fplinux_ui_list_get_focused;
+	fplinux_ui_list_insert;
+	fplinux_ui_list_invalidate;
+	fplinux_ui_list_is_selected;
+	fplinux_ui_list_new;
+	fplinux_ui_list_new_virtual;
+	fplinux_ui_list_rows_deleted;
+	fplinux_ui_list_rows_inserted;
+	fplinux_ui_list_set;
+	fplinux_ui_list_set_focused;
+	fplinux_ui_list_set_icon;
+	fplinux_ui_list_set_select_label;
+	fplinux_ui_list_set_selected;
+	fplinux_ui_list_size;
+	fplinux_ui_locale;
+	fplinux_ui_menu_close;
+	fplinux_ui_menu_is_open;
+	fplinux_ui_menu_open;
+	fplinux_ui_metrics;
+	fplinux_ui_now_ms;
+	fplinux_ui_open;
+	fplinux_ui_pop;
+	fplinux_ui_prefs_close;
+	fplinux_ui_prefs_get;
+	fplinux_ui_prefs_get_int;
+	fplinux_ui_prefs_open;
+	fplinux_ui_prefs_remove;
+	fplinux_ui_prefs_save;
+	fplinux_ui_prefs_set;
+	fplinux_ui_prefs_set_int;
+	fplinux_ui_push;
+	fplinux_ui_quit;
+	fplinux_ui_replace;
+	fplinux_ui_run;
+	fplinux_ui_screen;
+	fplinux_ui_screen_add_command;
+	fplinux_ui_screen_get_command_item;
+	fplinux_ui_screen_get_content_size;
+	fplinux_ui_screen_get_data;
+	fplinux_ui_screen_remove_command;
+	fplinux_ui_screen_remove_item_command;
+	fplinux_ui_screen_set_data;
+	fplinux_ui_screen_set_item_listener;
+	fplinux_ui_screen_set_listener;
+	fplinux_ui_screen_set_title;
+	fplinux_ui_scroll_key;
+	fplinux_ui_send;
+	fplinux_ui_set_fullscreen;
+	fplinux_ui_set_softkeys;
+	fplinux_ui_softkey_bar_create;
+	fplinux_ui_softkey_bar_set;
+	fplinux_ui_set_title;
+	fplinux_ui_state_dir;
+	fplinux_ui_text_box_get;
+	fplinux_ui_text_box_new;
+	fplinux_ui_text_box_set;
+	fplinux_ui_text_box_set_constraint;
+	fplinux_ui_text_create;
+	fplinux_ui_text_delete;
+	fplinux_ui_text_get;
+	fplinux_ui_text_indicator;
+	fplinux_ui_text_is_empty;
+	fplinux_ui_text_is_picker_open;
+	fplinux_ui_text_key;
+	fplinux_ui_text_object;
+	fplinux_ui_text_set;
+	fplinux_ui_text_set_change_cb;
+	fplinux_ui_text_set_constraint;
+	fplinux_ui_text_set_focused;
+	fplinux_ui_theme;
+	fplinux_ui_watch_fd;
+	fplinux_ui_width;
+local:
+	*;
+};

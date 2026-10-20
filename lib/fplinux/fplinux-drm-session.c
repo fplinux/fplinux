@@ -31,6 +31,7 @@ static void initialize(struct fplinux_drm_session *session)
 	session->control = -1;
 	session->signal_fd = -1;
 	session->guardian_fd = -1;
+	session->present_fence = -1;
 }
 
 static uint32_t property_id(int fd, uint32_t object, uint32_t type,
@@ -65,12 +66,15 @@ static uint32_t property_id(int fd, uint32_t object, uint32_t type,
 
 static bool add_property(struct fplinux_drm_session *session,
 			 drmModeAtomicReq *request, uint32_t object,
-			 uint32_t type, const char *name, uint64_t value)
+			 uint32_t type, uint32_t *property, const char *name,
+			 uint64_t value)
 {
-	uint32_t property = property_id(session->drm, object, type, name, NULL);
+	/* IDs remain valid for the selected objects until the DRM fd closes. */
+	if (!*property)
+		*property = property_id(session->drm, object, type, name, NULL);
 
-	return property &&
-	       drmModeAtomicAddProperty(request, object, property, value) >= 0;
+	return *property &&
+	       drmModeAtomicAddProperty(request, object, *property, value) >= 0;
 }
 
 static bool find_display(struct fplinux_drm_session *session, uint32_t format)
@@ -84,6 +88,7 @@ static bool find_display(struct fplinux_drm_session *session, uint32_t format)
 	if (!resources)
 		return false;
 	for (index = 0; index < resources->count_connectors; ++index) {
+		/* A cold connector may have no cached modes to enumerate. */
 		drmModeConnector *connector = drmModeGetConnector(
 			session->drm, resources->connectors[index]);
 
@@ -156,14 +161,72 @@ static bool find_display(struct fplinux_drm_session *session, uint32_t format)
 		errno = EINVAL;
 		goto done;
 	}
-	ok = drmModeCreatePropertyBlob(session->drm, &session->mode,
-				       sizeof(session->mode),
-				       &session->mode_blob) == 0;
+	ok = true;
 done:
 	if (planes)
 		drmModeFreePlaneResources(planes);
 	drmModeFreeResources(resources);
 	return ok;
+}
+
+static char *find_display_path(uint32_t format)
+{
+	drmDevicePtr *devices;
+	char *path = NULL;
+	int count = drmGetDevices2(0, NULL, 0);
+	int saved_errno = ENODEV;
+
+	if (count <= 0) {
+		errno = count < 0 ? -count : ENODEV;
+		return NULL;
+	}
+	devices = calloc((size_t)count, sizeof(*devices));
+	if (!devices)
+		return NULL;
+	count = drmGetDevices2(0, devices, count);
+	if (count < 0) {
+		saved_errno = -count;
+		goto done;
+	}
+	for (int index = 0; index < count; ++index) {
+		struct fplinux_drm_session candidate;
+		bool usable;
+		int probe_errno;
+
+		if (!(devices[index]->available_nodes &
+		      (1 << DRM_NODE_PRIMARY)))
+			continue;
+		initialize(&candidate);
+		candidate.drm = open(devices[index]->nodes[DRM_NODE_PRIMARY],
+				     O_RDONLY | O_CLOEXEC);
+		if (candidate.drm < 0)
+			continue;
+		/* Enumeration never claims a VT or requests DRM master. */
+		usable = drmSetClientCap(candidate.drm, DRM_CLIENT_CAP_ATOMIC,
+					 1) == 0 &&
+			 find_display(&candidate, format);
+		probe_errno = errno;
+		close(candidate.drm);
+		if (!usable && probe_errno != ENOTUNIQ)
+			continue;
+		if (!usable || path) {
+			saved_errno = ENOTUNIQ;
+			free(path);
+			path = NULL;
+			goto done;
+		}
+		path = strdup(devices[index]->nodes[DRM_NODE_PRIMARY]);
+		if (!path) {
+			saved_errno = errno;
+			goto done;
+		}
+	}
+done:
+	if (count > 0)
+		drmFreeDevices(devices, count);
+	free(devices);
+	errno = saved_errno;
+	return path;
 }
 
 static bool create_buffers(struct fplinux_drm_session *session, uint32_t format)
@@ -223,6 +286,7 @@ static bool create_buffers(struct fplinux_drm_session *session, uint32_t format)
 		return false;
 	}
 	session->pages = 2;
+	session->format = format;
 	return true;
 }
 
@@ -350,8 +414,10 @@ static bool acquire_vt(struct fplinux_drm_session *session, const char *path)
 		.relsig = SIGRTMIN + 4,
 		.acqsig = SIGRTMIN + 5,
 	};
+	const struct timespec no_wait = { 0 };
 	sigset_t signals;
 	char tty_path[32];
+	int acquired;
 
 	session->control =
 		open(path ? path : "/dev/tty0", O_RDWR | O_NOCTTY | O_CLOEXEC);
@@ -384,15 +450,22 @@ static bool acquire_vt(struct fplinux_drm_session *session, const char *path)
 	    ioctl(session->control, VT_ACTIVATE, session->vt) < 0 ||
 	    ioctl(session->control, VT_WAITACTIVE, session->vt) < 0)
 		return false;
-	/* The acquire signal also remains queued for dispatch. */
-	ioctl(session->tty, VT_RELDISP, VT_ACKACQ);
-	return true;
+	if (ioctl(session->tty, VT_RELDISP, VT_ACKACQ) < 0)
+		return false;
+	/* Do not let this completed acquisition overtake a later release. */
+	sigdelset(&signals, mode.relsig);
+	do {
+		acquired = sigtimedwait(&signals, NULL, &no_wait);
+	} while (acquired < 0 && errno == EINTR);
+	/* An already active unused VT does not generate an acquire signal. */
+	return acquired >= 0 || errno == EAGAIN;
 }
 
 bool fplinux_drm_session_open(struct fplinux_drm_session *session,
 			      const char *drm_path, const char *tty_path,
 			      uint32_t format, char *error, size_t error_size)
 {
+	char *automatic_path = NULL;
 	int saved_errno;
 
 	if (!session)
@@ -402,18 +475,29 @@ bool fplinux_drm_session_open(struct fplinux_drm_session *session,
 		errno = EINVAL;
 		goto fail;
 	}
+	if (!drm_path) {
+		automatic_path = find_display_path(format);
+		if (!automatic_path)
+			goto fail;
+		drm_path = automatic_path;
+	}
 	if (!acquire_vt(session, tty_path))
 		goto fail;
-	session->drm = open(drm_path ? drm_path : "/dev/dri/card0",
-			    O_RDWR | O_CLOEXEC);
+	session->drm = open(drm_path, O_RDWR | O_CLOEXEC);
 	if (session->drm < 0 || drmSetMaster(session->drm) < 0 ||
 	    drmSetClientCap(session->drm, DRM_CLIENT_CAP_ATOMIC, 1) < 0 ||
-	    !find_display(session, format) || !create_buffers(session, format))
+	    !find_display(session, format) ||
+	    drmModeCreatePropertyBlob(session->drm, &session->mode,
+				      sizeof(session->mode),
+				      &session->mode_blob) < 0 ||
+	    !create_buffers(session, format))
 		goto fail;
 	session->active = true;
+	free(automatic_path);
 	return true;
 fail:
 	saved_errno = errno;
+	free(automatic_path);
 	if (error && error_size)
 		snprintf(error, error_size, "cannot open DRM display: %s",
 			 strerror(saved_errno));
@@ -448,6 +532,8 @@ bool fplinux_drm_session_dispatch(struct fplinux_drm_session *session)
 			return false;
 		}
 		if (signal.ssi_signo == (uint32_t)(SIGRTMIN + 4)) {
+			if (!fplinux_drm_session_wait_present(session))
+				return false;
 			if (session->active_handler &&
 			    !session->active_handler(session, false,
 						     session->active_data))
@@ -457,6 +543,8 @@ bool fplinux_drm_session_dispatch(struct fplinux_drm_session *session)
 			    ioctl(session->tty, VT_RELDISP, 1) < 0)
 				return false;
 		} else if (signal.ssi_signo == (uint32_t)(SIGRTMIN + 5)) {
+			if (!fplinux_drm_session_wait_present(session))
+				return false;
 			if (ioctl(session->tty, VT_RELDISP, VT_ACKACQ) < 0 ||
 			    drmSetMaster(session->drm) < 0)
 				return false;
@@ -521,11 +609,11 @@ static bool wait_fence(int fd)
 	return true;
 }
 
-bool fplinux_drm_session_present(struct fplinux_drm_session *session,
-				 unsigned int page)
+static bool submit_present(struct fplinux_drm_session *session,
+			   unsigned int page, uint32_t flags, int *fence)
 {
+	struct fplinux_drm_property_ids *properties;
 	drmModeAtomicReq *request;
-	int fence = -1;
 	bool ok;
 	int saved_errno;
 
@@ -540,42 +628,138 @@ bool fplinux_drm_session_present(struct fplinux_drm_session *session,
 	request = drmModeAtomicAlloc();
 	if (!request)
 		return false;
+	properties = &session->property_ids;
 	ok = add_property(session, request, session->connector,
-			  DRM_MODE_OBJECT_CONNECTOR, "CRTC_ID",
+			  DRM_MODE_OBJECT_CONNECTOR,
+			  &properties->connector_crtc_id, "CRTC_ID",
 			  session->crtc) &&
 	     add_property(session, request, session->crtc, DRM_MODE_OBJECT_CRTC,
-			  "MODE_ID", session->mode_blob) &&
+			  &properties->crtc_mode_id, "MODE_ID",
+			  session->mode_blob) &&
 	     add_property(session, request, session->crtc, DRM_MODE_OBJECT_CRTC,
-			  "ACTIVE", 1) &&
+			  &properties->crtc_active, "ACTIVE", 1) &&
 	     add_property(session, request, session->crtc, DRM_MODE_OBJECT_CRTC,
-			  "OUT_FENCE_PTR", (uintptr_t)&fence) &&
+			  &properties->crtc_out_fence_ptr, "OUT_FENCE_PTR",
+			  (uintptr_t)fence) &&
 	     add_property(session, request, session->plane,
-			  DRM_MODE_OBJECT_PLANE, "FB_ID",
-			  session->framebuffers[page]) &&
+			  DRM_MODE_OBJECT_PLANE, &properties->plane_fb_id,
+			  "FB_ID", session->framebuffers[page]) &&
 	     add_property(session, request, session->plane,
-			  DRM_MODE_OBJECT_PLANE, "CRTC_ID", session->crtc) &&
+			  DRM_MODE_OBJECT_PLANE, &properties->plane_crtc_id,
+			  "CRTC_ID", session->crtc) &&
 	     add_property(session, request, session->plane,
-			  DRM_MODE_OBJECT_PLANE, "CRTC_X", 0) &&
+			  DRM_MODE_OBJECT_PLANE, &properties->plane_crtc_x,
+			  "CRTC_X", 0) &&
 	     add_property(session, request, session->plane,
-			  DRM_MODE_OBJECT_PLANE, "CRTC_Y", 0) &&
+			  DRM_MODE_OBJECT_PLANE, &properties->plane_crtc_y,
+			  "CRTC_Y", 0) &&
 	     add_property(session, request, session->plane,
-			  DRM_MODE_OBJECT_PLANE, "CRTC_W", session->width) &&
+			  DRM_MODE_OBJECT_PLANE, &properties->plane_crtc_w,
+			  "CRTC_W", session->width) &&
 	     add_property(session, request, session->plane,
-			  DRM_MODE_OBJECT_PLANE, "CRTC_H", session->height) &&
+			  DRM_MODE_OBJECT_PLANE, &properties->plane_crtc_h,
+			  "CRTC_H", session->height) &&
 	     add_property(session, request, session->plane,
-			  DRM_MODE_OBJECT_PLANE, "SRC_X", 0) &&
+			  DRM_MODE_OBJECT_PLANE, &properties->plane_src_x,
+			  "SRC_X", 0) &&
 	     add_property(session, request, session->plane,
-			  DRM_MODE_OBJECT_PLANE, "SRC_Y", 0) &&
+			  DRM_MODE_OBJECT_PLANE, &properties->plane_src_y,
+			  "SRC_Y", 0) &&
 	     add_property(session, request, session->plane,
-			  DRM_MODE_OBJECT_PLANE, "SRC_W",
-			  (uint64_t)session->width << 16) &&
+			  DRM_MODE_OBJECT_PLANE, &properties->plane_src_w,
+			  "SRC_W", (uint64_t)session->width << 16) &&
 	     add_property(session, request, session->plane,
-			  DRM_MODE_OBJECT_PLANE, "SRC_H",
-			  (uint64_t)session->height << 16);
+			  DRM_MODE_OBJECT_PLANE, &properties->plane_src_h,
+			  "SRC_H", (uint64_t)session->height << 16);
 	if (ok)
-		ok = drmModeAtomicCommit(session->drm, request,
-					 DRM_MODE_ATOMIC_ALLOW_MODESET,
-					 NULL) == 0;
+		ok = drmModeAtomicCommit(session->drm, request, flags, NULL) ==
+		     0;
+	saved_errno = errno;
+	drmModeAtomicFree(request);
+	errno = saved_errno;
+	return ok;
+}
+
+bool fplinux_drm_session_wait_present(struct fplinux_drm_session *session)
+{
+	bool ok;
+	int saved_errno;
+
+	if (!session) {
+		errno = EINVAL;
+		return false;
+	}
+	if (session->presentation_error) {
+		errno = session->presentation_error;
+		return false;
+	}
+	if (session->present_fence < 0)
+		return true;
+	ok = wait_fence(session->present_fence);
+	saved_errno = errno;
+	close(session->present_fence);
+	session->present_fence = -1;
+	if (!ok) {
+		session->presentation_error = saved_errno;
+		errno = saved_errno;
+		return false;
+	}
+	session->shown_page = session->pending_page;
+	session->presented = true;
+	return true;
+}
+
+bool fplinux_drm_session_queue_present(struct fplinux_drm_session *session,
+				       unsigned int page)
+{
+	int fence = -1;
+	int saved_errno;
+	bool ok;
+
+	if (!session) {
+		errno = EINVAL;
+		return false;
+	}
+	if (session->presentation_error) {
+		errno = session->presentation_error;
+		return false;
+	}
+	if (session->present_fence >= 0) {
+		errno = EBUSY;
+		return false;
+	}
+	ok = submit_present(session, page,
+			    DRM_MODE_ATOMIC_ALLOW_MODESET |
+				    DRM_MODE_ATOMIC_NONBLOCK,
+			    &fence);
+	saved_errno = errno;
+	if (!ok) {
+		if (fence >= 0)
+			close(fence);
+		errno = saved_errno;
+		return false;
+	}
+	if (fence < 0) {
+		session->presentation_error = EIO;
+		errno = EIO;
+		return false;
+	}
+	session->present_fence = fence;
+	session->pending_page = page;
+	return true;
+}
+
+bool fplinux_drm_session_present(struct fplinux_drm_session *session,
+				 unsigned int page)
+{
+	int fence = -1;
+	bool ok;
+	int saved_errno;
+
+	if (!fplinux_drm_session_wait_present(session))
+		return false;
+	ok = submit_present(session, page, DRM_MODE_ATOMIC_ALLOW_MODESET,
+			    &fence);
 	if (ok) {
 		if (fence < 0) {
 			errno = EIO;
@@ -587,7 +771,6 @@ bool fplinux_drm_session_present(struct fplinux_drm_session *session,
 	saved_errno = errno;
 	if (fence >= 0)
 		close(fence);
-	drmModeAtomicFree(request);
 	if (ok) {
 		session->shown_page = page;
 		session->presented = true;
@@ -596,15 +779,57 @@ bool fplinux_drm_session_present(struct fplinux_drm_session *session,
 	return ok;
 }
 
+bool fplinux_drm_session_acquire_buffer(struct fplinux_drm_session *session,
+					int *fd)
+{
+	if (fd)
+		*fd = -1;
+	if (!session || !fd || session->drm < 0 || !session->handle ||
+	    !session->mapping) {
+		errno = EINVAL;
+		return false;
+	}
+	if (session->buffer_acquired) {
+		errno = EBUSY;
+		return false;
+	}
+	if (!fplinux_drm_session_wait_present(session))
+		return false;
+	if (drmPrimeHandleToFD(session->drm, session->handle,
+			       DRM_CLOEXEC | DRM_RDWR, fd) < 0)
+		return false;
+	session->buffer_acquired = true;
+	return true;
+}
+
+void fplinux_drm_session_release_buffer(struct fplinux_drm_session *session)
+{
+	if (!session)
+		return;
+	/* Completion failures remain observable through wait and close. */
+	fplinux_drm_session_wait_present(session);
+	session->buffer_acquired = false;
+}
+
 bool fplinux_drm_session_close(struct fplinux_drm_session *session)
 {
 	bool ok = true;
+	int completion_error = 0;
 
 	if (!session)
 		return false;
+	if (session->buffer_acquired) {
+		errno = EBUSY;
+		return false;
+	}
+	if (!fplinux_drm_session_wait_present(session)) {
+		completion_error = errno;
+		ok = false;
+	}
 	if (session->active_handler && session->active)
 		ok = session->active_handler(session, false,
-					     session->active_data);
+					     session->active_data) &&
+		     ok;
 	if (session->mapping && munmap(session->mapping, session->size) < 0)
 		ok = false;
 	if (session->drm >= 0) {
@@ -659,5 +884,7 @@ bool fplinux_drm_session_close(struct fplinux_drm_session *session)
 		close(session->control);
 	}
 	initialize(session);
+	if (completion_error)
+		errno = completion_error;
 	return ok;
 }

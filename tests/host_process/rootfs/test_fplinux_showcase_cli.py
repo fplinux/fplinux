@@ -37,7 +37,7 @@ class ShowcaseBinaries:
 def compile_with_class_roots(class_root: Path) -> Path:
     """Compile real class discovery with simulated input and display devices."""
     executable = class_root / "fplinux-showcase"
-    leds = class_root / "cases" / "*" / "leds" / "*" / "brightness"
+    leds = class_root / "cases" / "*" / "leds"
     drm_flags = shlex.split(
         run_process(
             ["pkg-config", "--cflags", "--libs", "libdrm"],
@@ -54,15 +54,22 @@ def compile_with_class_roots(class_root: Path) -> Path:
             "-Wall",
             "-Wextra",
             "-Werror",
+            "-isystem",
+            "/opt/quality/include",
             f"-I{APORT}",
             f"-I{SHARED}",
-            f'-DFPLINUX_SHOWCASE_KEYPAD_LED_GLOB="{leds}"',
+            f'-DFPLINUX_KEYPAD_LED_CLASS_DIR="{leds}"',
             str(SOURCE),
             str(APORT / "showcase-hardware.c"),
             str(APORT / "armada-scene.c"),
             str(APORT / "armada-storyboard.c"),
             str(APORT / "armada-renderer.c"),
+            str(APORT / "armada-geometry.c"),
+            str(APORT / "armada-overlay.c"),
+            str(APORT / "armada-gpu-renderer.c"),
             str(ROOT / "lib/fplinux/fplinux-font.c"),
+            str(ROOT / "lib/fplinux/fplinux-gpu.c"),
+            str(ROOT / "lib/fplinux/fplinux-keypad-light.c"),
             str(ROOT / "lib/fplinux/fplinux-brightness-client.c"),
             str(ROOT / "lib/fplinux/fplinux-cli.c"),
             str(FAKE_DEVICES),
@@ -73,6 +80,7 @@ def compile_with_class_roots(class_root: Path) -> Path:
             "-Wl,--wrap=write",
             "-Wl,--wrap=connect",
             "-Wl,--wrap=close",
+            "-ldl",
             *drm_flags,
             "-o",
             str(executable),
@@ -116,6 +124,8 @@ def binaries() -> Iterator[ShowcaseBinaries]:
                 "-Wall",
                 "-Wextra",
                 "-Werror",
+                "-isystem",
+                "/opt/quality/include",
                 f"-I{APORT}",
                 f"-I{SHARED}",
                 str(SOURCE),
@@ -123,10 +133,17 @@ def binaries() -> Iterator[ShowcaseBinaries]:
                 str(APORT / "armada-scene.c"),
                 str(APORT / "armada-storyboard.c"),
                 str(APORT / "armada-renderer.c"),
+                str(APORT / "armada-geometry.c"),
+                str(APORT / "armada-overlay.c"),
+                str(APORT / "armada-gpu-renderer.c"),
                 str(ROOT / "lib/fplinux/fplinux-font.c"),
+                str(ROOT / "lib/fplinux/fplinux-gpu.c"),
+                str(ROOT / "lib/fplinux/fplinux-gpu-output.c"),
+                str(ROOT / "lib/fplinux/fplinux-keypad-light.c"),
                 str(ROOT / "lib/fplinux/fplinux-drm-session.c"),
                 str(ROOT / "lib/fplinux/fplinux-brightness-client.c"),
                 str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                "-ldl",
                 *drm_flags,
                 "-o",
                 str(executable),
@@ -153,10 +170,17 @@ def class_tree(binaries: ShowcaseBinaries) -> Iterator[Path]:
 class FplinuxShowcaseCliTests:
     """Run the actual binary only through its argument and early-startup boundary."""
 
-    def test_help_returns_before_keypad_lookup(self, binaries: ShowcaseBinaries) -> None:
+    @pytest.mark.parametrize(
+        "arguments",
+        [("--help",), ("--renderer", "invalid", "--help")],
+        ids=["plain", "invalid-renderer"],
+    )
+    def test_help_returns_before_keypad_lookup(
+        self, binaries: ShowcaseBinaries, arguments: tuple[str, ...]
+    ) -> None:
         """Help lists the Showcase options and exits before any device lookup."""
         result = run_process(
-            [str(binaries.executable), "--help"],
+            [str(binaries.executable), *arguments],
             name="show FPLinux Showcase help",
             timeout=5,
         )
@@ -165,6 +189,10 @@ class FplinuxShowcaseCliTests:
         assert ("Usage:") in (result.stdout)
         assert ("--runs") in (result.stdout)
         assert ("--keypad-led") in (result.stdout)
+        assert "--renderer" in result.stdout
+        assert "auto" in result.stdout
+        assert "software" in result.stdout
+        assert "gpu" in result.stdout
         assert (result.stderr) == ("")
 
     @pytest.mark.parametrize(
@@ -178,6 +206,11 @@ class FplinuxShowcaseCliTests:
             ("--runs", "--help"),
             ("--runs", "1", "--runs", "2"),
             ("--keypad-led", "one", "--keypad-led", "two"),
+            ("--renderer", "vulkan"),
+            ("--renderer", ""),
+            ("--renderer", "GPU"),
+            ("--renderer",),
+            ("--renderer", "auto", "--renderer", "software"),
         ],
         ids=[
             "zero-runs",
@@ -188,12 +221,17 @@ class FplinuxShowcaseCliTests:
             "missing-run-value",
             "repeated-runs",
             "repeated-keypad-led",
+            "unknown-renderer",
+            "empty-renderer",
+            "uppercase-renderer",
+            "missing-renderer-value",
+            "repeated-renderer",
         ],
     )
     def test_invalid_or_repeated_options_fail_before_keypad_lookup(
         self, binaries: ShowcaseBinaries, arguments: tuple[str, ...]
     ) -> None:
-        """Bad run counts and repeated single-use options fail before any device lookup."""
+        """Invalid values and repeated single-use options fail before any device lookup."""
         result = run_process(
             [str(binaries.executable), *arguments],
             name=f"reject FPLinux Showcase arguments {arguments}",
@@ -206,8 +244,9 @@ class FplinuxShowcaseCliTests:
         assert ("required keypad") not in (result.stderr)
         assert (result.stdout) == ("")
 
-    def test_valid_options_reach_keypad_lookup(
-        self, binaries: ShowcaseBinaries, class_tree: Path
+    @pytest.mark.parametrize("renderer", ["auto", "software", "gpu"])
+    def test_valid_renderer_options_reach_keypad_lookup(
+        self, binaries: ShowcaseBinaries, class_tree: Path, renderer: str
     ) -> None:
         """Valid overrides are accepted; startup then fails to find the keypad on this host."""
         result = run_process(
@@ -215,6 +254,8 @@ class FplinuxShowcaseCliTests:
                 str(binaries.executable),
                 "--runs",
                 "1",
+                "--renderer",
+                renderer,
                 "--keypad-led",
                 str(class_tree / "keypad-led"),
             ],
@@ -271,3 +312,29 @@ class FplinuxShowcaseCliTests:
         assert (result.returncode) != (0)
         assert ("ambiguous keypad LEDs") in (result.stderr)
         assert ("required keypad fplinux/keypad0") not in (result.stderr)
+
+    def test_keypad_discovery_rejects_devices_without_the_right_soft_key(
+        self, binaries: ShowcaseBinaries, class_tree: Path
+    ) -> None:
+        """Matching physical paths do not make a keypad without the exit key usable."""
+        add_class_device(class_tree / "leds", "panel:kbd_backlight")
+        keyboard_led = class_tree / "leds/panel:kbd_backlight"
+        environment = os.environ.copy()
+        environment["SHOWCASE_KEYPAD_LED"] = str(keyboard_led)
+        environment["SHOWCASE_RIGHT_SOFT_KEY"] = "none"
+
+        result = run_process(
+            [str(binaries.discovery_executable), "--runs", "1"],
+            name="reject Showcase keypads without an exit key",
+            timeout=5,
+            env=environment,
+        )
+
+        assert (result.returncode) == (1)
+        assert ("keypad does not expose the right soft key") in (result.stderr)
+        assert ("required keypad LED interface is unavailable") not in (result.stderr)
+        assert (result.stdout) == ("")
+        assert ((keyboard_led / "brightness").read_text(encoding="ascii")) == ("1\n")
+        assert ((keyboard_led / "trigger").read_text(encoding="ascii")) == (
+            "[none] input-events\n"
+        )

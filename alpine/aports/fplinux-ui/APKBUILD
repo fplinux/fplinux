@@ -1,0 +1,205 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-ui
+pkgver=1
+pkgrel=0
+pkgdesc="Shared LVGL keypad UI and Wayland SHM application runtime"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="GPL-2.0-only AND LGPL-2.1-or-later AND OFL-1.1"
+depends="fplinux-lvgl fplinux-wayland fplinux-libxkbcommon json-c fplinux-icons"
+# The UI fonts also need lv_font_conv 1.5.3, which the build image pins in its
+# npm tools (/opt/quality/node-tools, run by nodejs) rather than an Alpine
+# package.
+makedepends_build="clang22 lld22 pkgconf wayland-dev wayland-protocols gettext python3
+	py3-fonttools nodejs"
+makedepends_host="musl-dev musl-libintl linux-headers gcc fplinux-lvgl-dev fplinux-wayland-dev fplinux-libxkbcommon-dev json-c-dev"
+subpackages="$pkgname-dev"
+options="!check"
+# Noto Sans v2.015 (hinted), Noto Sans Symbols 2 v2.008 and Noto Sans Math
+# v3.000 from Noto's distribution repository at the commit that published
+# Noto Sans v2.015; fplinux_ui_fonts.py also pins each file's SHA-256 and the
+# release archive it equals.
+_noto=https://raw.githubusercontent.com/notofonts/notofonts.github.io/28b15b4b43b7bed62b5cf6e6b0b5ff5846270535/fonts
+_notogh=https://raw.githubusercontent.com/notofonts
+source="
+	NotoSans-Regular-2.015.ttf::$_noto/NotoSans/hinted/ttf/NotoSans-Regular.ttf
+	NotoSans-Bold-2.015.ttf::$_noto/NotoSans/hinted/ttf/NotoSans-Bold.ttf
+	NotoSans-SemiCondensed-2.015.ttf::$_noto/NotoSans/hinted/ttf/NotoSans-SemiCondensed.ttf
+	NotoSans-SemiCondensedBold-2.015.ttf::$_noto/NotoSans/hinted/ttf/NotoSans-SemiCondensedBold.ttf
+	NotoSans-Condensed-2.015.ttf::$_noto/NotoSans/hinted/ttf/NotoSans-Condensed.ttf
+	NotoSansSymbols2-Regular-2.008.ttf::$_noto/NotoSansSymbols2/hinted/ttf/NotoSansSymbols2-Regular.ttf
+	NotoSansMath-Regular-3.000.ttf::$_noto/NotoSansMath/hinted/ttf/NotoSansMath-Regular.ttf
+	NotoSans-OFL-2.015.txt::$_notogh/latin-greek-cyrillic/NotoSans-v2.015/OFL.txt
+	NotoSansSymbols2-OFL-2.008.txt::$_notogh/symbols/NotoSansSymbols2-v2.008/OFL.txt
+	NotoSansMath-OFL-3.000.txt::$_notogh/math/NotoSansMath-v3.000/OFL.txt
+	fplinux-ui.c
+	fplinux-ui.h
+	fplinux-ui-session.c
+	fplinux-ui-session.h
+	fplinux-ui-text.c
+	fplinux-ui-text.h
+	fplinux-ui-text-model.c
+	fplinux-ui-text-model.h
+	fplinux-ui-listview.c
+	fplinux-ui-listview.h
+	fplinux-ui-menu.c
+	fplinux-ui-menu.h
+	fplinux-ui-prefs.c
+	fplinux-ui-prefs.h
+	fplinux-ui-screen.c
+	fplinux-ui-screen.h
+	fplinux-ui-screen-model.c
+	fplinux-ui-screen-model.h
+	fplinux-ui-profile.c
+	fplinux-ui-profile.h
+	fplinux-ui-profile.json
+	fplinux_ui_profile.py
+	fplinux_ui_fonts.py
+	fplinux-ui-fonts.h
+	fplinux-ui-internal.h
+	fplinux-ui-locale.c
+	fplinux-ui-locale.h
+	fplinux-language.c
+	fplinux-language.h
+	fplinux-multitap.c
+	fplinux-multitap.h
+	fplinux-ui.pc
+	fplinux-ui.map
+	ru.po
+	LGPL-2.1-or-later.txt
+	GPL-2.0-only.txt
+	fplinux-ui-softkey-layout.c
+	fplinux-ui-softkey-layout.h
+	fplinux-ui-style-internal.h
+"
+builddir="$srcdir"
+
+build() {
+	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
+	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+	wayland-scanner client-header \
+		/usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml \
+		xdg-shell-client-protocol.h
+	wayland-scanner private-code \
+		/usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml \
+		xdg-shell-protocol.c
+	# The models, the profile table, the soft-key layout, the list view, the
+	# language reader and the multi-tap engine stay private to the library.
+	# The library exports exactly the functions of its installed headers,
+	# listed in fplinux-ui.map.
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror -fPIC \
+		-fvisibility=hidden -I"$srcdir" \
+		-c fplinux-language.c fplinux-multitap.c \
+		fplinux-ui-text-model.c fplinux-ui-screen-model.c \
+		fplinux-ui-profile.c fplinux-ui-softkey-layout.c
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror -fPIC \
+		-fvisibility=hidden -I"$srcdir" $(pkg-config --cflags lvgl) \
+		-c fplinux-ui-listview.c
+	# Rasterize each profile's Noto Sans fonts at 4 bpp.
+	python3 fplinux_ui_fonts.py --tokens fplinux-ui-profile.json \
+		--sources "$srcdir" --output fonts \
+		--lv-font-conv /opt/quality/node-tools/node_modules/.bin/lv_font_conv
+	for font in fonts/*.c; do
+		"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror -fPIC \
+			-fvisibility=hidden -I"$srcdir" $(pkg-config --cflags lvgl) \
+			-c "$font" -o "${font%.c}.o"
+	done
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror -fPIC \
+		-I"$srcdir" $(pkg-config --cflags lvgl wayland-client xkbcommon json-c) \
+		-shared fplinux-ui.c fplinux-ui-session.c fplinux-ui-text.c \
+		fplinux-ui-menu.c fplinux-ui-prefs.c fplinux-ui-screen.c \
+		fplinux-ui-locale.c \
+		fplinux-ui-listview.o \
+		fplinux-language.o fplinux-multitap.o \
+		fplinux-ui-text-model.o fplinux-ui-screen-model.o \
+		fplinux-ui-profile.o fplinux-ui-softkey-layout.o fonts/*.o \
+		xdg-shell-protocol.c $LDFLAGS \
+		$(pkg-config --libs lvgl wayland-client xkbcommon json-c) \
+		-Wl,--version-script=fplinux-ui.map \
+		-Wl,-soname,libfplinux-ui.so.1 -o libfplinux-ui.so.1
+	msgfmt --check --output-file=ru.mo ru.po
+}
+
+package() {
+	install -Dm755 libfplinux-ui.so.1 "$pkgdir/usr/lib/libfplinux-ui.so.1"
+	ln -s libfplinux-ui.so.1 "$pkgdir/usr/lib/libfplinux-ui.so"
+	install -Dm644 fplinux-ui.h "$pkgdir/usr/include/fplinux/fplinux-ui.h"
+	install -Dm644 fplinux-ui-session.h \
+		"$pkgdir/usr/include/fplinux/fplinux-ui-session.h"
+	install -Dm644 fplinux-ui-text.h \
+		"$pkgdir/usr/include/fplinux/fplinux-ui-text.h"
+	install -Dm644 fplinux-ui-menu.h \
+		"$pkgdir/usr/include/fplinux/fplinux-ui-menu.h"
+	install -Dm644 fplinux-ui-prefs.h \
+		"$pkgdir/usr/include/fplinux/fplinux-ui-prefs.h"
+	install -Dm644 fplinux-ui-screen.h \
+		"$pkgdir/usr/include/fplinux/fplinux-ui-screen.h"
+	install -Dm644 fplinux-ui-locale.h \
+		"$pkgdir/usr/include/fplinux/fplinux-ui-locale.h"
+	install -Dm644 fplinux-ui.pc "$pkgdir/usr/lib/pkgconfig/fplinux-ui.pc"
+	# musl looks for LANG=ru_RU.UTF-8 in ru_RU, then in ru.
+	install -Dm644 ru.mo \
+		"$pkgdir/usr/share/locale/ru/LC_MESSAGES/fplinux-ui.mo"
+	install -Dm644 LGPL-2.1-or-later.txt \
+		"$pkgdir/usr/share/licenses/$pkgname/LGPL-2.1-or-later.txt"
+	install -Dm644 GPL-2.0-only.txt \
+		"$pkgdir/usr/share/licenses/$pkgname/GPL-2.0-only.txt"
+	install -Dm644 NotoSans-OFL-2.015.txt \
+		"$pkgdir/usr/share/licenses/$pkgname/NotoSans-OFL.txt"
+	install -Dm644 NotoSansSymbols2-OFL-2.008.txt \
+		"$pkgdir/usr/share/licenses/$pkgname/NotoSansSymbols2-OFL.txt"
+	install -Dm644 NotoSansMath-OFL-3.000.txt \
+		"$pkgdir/usr/share/licenses/$pkgname/NotoSansMath-OFL.txt"
+}
+
+sha512sums="
+e56a55c162f87f80b5f3adad1d076b106b79b1fa28f2219a5b6d658d60500bbc9ef0c50df502ea2f6376269b33de59ceb72234c5ced85d0280f41f66773018b0  NotoSans-Regular-2.015.ttf
+0604b29154fd975f6b07493aa7fb3aa39bc2a9e97430b1306ede4dd136061076a2bbcb1a1487b5c801ebe1276ad2845951c87355675308db3d8a51c937471f14  NotoSans-Bold-2.015.ttf
+dd840968b919578ea5e9bf1ec908bfcca37cf34d0b21fd5ad667a0b04a39e1366868a951d263c9203176a261c06dd9a690d5442cd54156e0d1a4d6a6559c571b  NotoSans-SemiCondensed-2.015.ttf
+6c4e0bb9f302b253735d746ad7efab8f43ba5b60d5098948163c8110d868ad518745b6e16c40f5afb8ab35a7816a8c6c5ef5912c046e4138e1ab6967b1335917  NotoSans-SemiCondensedBold-2.015.ttf
+a46c597e5ad58fb27ae2f919238f8c0351fc4b9b8dc3ad1332085ad02b3d6dfd814c88d821cc3d35d082de26ae6f123a53c6cd4bcc7469ef88f952347ed3aa62  NotoSans-Condensed-2.015.ttf
+221a0d60655a2a976aa77c13571da6286521d44d37bce07e80e92f0584d9ade8e38320f8f95cca132f6b09b48330c7d5a53fb7ecf60387ec6ee8f3da319d5f2e  NotoSansSymbols2-Regular-2.008.ttf
+c64350b40561efba3c5fe9de0be3be27146d5423e4c403f6c12ac862bd0027937221adf16c0226acb822e4e23078c33bd56391fc97f6a61e9dd9372e91c67b8d  NotoSansMath-Regular-3.000.ttf
+df9ec827d8c71a5566862223e195dccb6e835438c1df2756f887e19dd44cd6589c8cf6853ca47410607dd81599c87daaea698f803a2de5ca2248a67df94e23b0  NotoSans-OFL-2.015.txt
+a20a22c0b75b7801ee79fd436a6e7f99e82906df9cc70119eff9ebe0a9a1efc6afdc17a514f8292ecccb86a64274a053aa5b38aa9174fe3c38e00bd698e4c509  NotoSansSymbols2-OFL-2.008.txt
+a64454634a8c33caaadde3be7508971da56cf9a3eeb1d8b959f5c0ccbb914c2be1aa307538f1dbe8d7629aea78f7b9c3be19912626250003bdf64f0d0e1f64e2  NotoSansMath-OFL-3.000.txt
+336bbec2f908bc2c7392acd8ec92e52229cae033b2642355c5f2ebff75da802a298adbb06bc318089f0a3ed9f0158dc321e28de7a4671cff982bb9ab01fdbb15  fplinux-ui.c
+6044882c01fafb8e327a3d58e49a4f0a675721417bcfcd7163b7e047b417ae60d5f9b0af9c7accdb548385cfe37558ef5180ba3769416891660f638df394d486  fplinux-ui.h
+44c4dae2154ace287bb0cca2861a12708f1c47fd4c002d82c2bb40cffcda301c8d171c305128c388eb489b45921138bc2c8abbdbad7ba8e480992373ce16edd9  fplinux-ui-session.c
+222a50057879ee8e02462365519c578424aeb51526992dee8de2682bf464dd3f0d9d89e26d70b63d866c2e819878e57ca5c5ad3582d51b1ef108a80a57d1eaf3  fplinux-ui-session.h
+9d58cc289a3eed1e8b0acbdd16c7fa6bfdbc6dda4115ee07a4b9858fe9e9154e889e287bff0c3a60cf2935a4a58c56ea96aa3fe94ca1acf9fb8e0e91236afdb2  fplinux-ui-text.c
+52f7448ef472c319fed8cdb593f5fad05aab1ce89bc93cbbc2a68d050fb9199e96e14711a2791ceec36571ef9823844ddc96ae86ba07e4dac4f26867b2175139  fplinux-ui-text.h
+07175d24e12fbfae90d92be2a034af754c332e1e7a404d0233029d26cc0ad7abf6da47b3e07ced4330c77d5d5ff0ce75bc9314e2acc1f799795050ec2f1b8f06  fplinux-ui-text-model.c
+2cb17cdf7a6ba3a77f999b24fdaed36f4e4417ff5528abd1eb572bbf1719d3e31892da982d451425db82ef12dd1d5e9afcff3788c8870ceb898f17e75bef003b  fplinux-ui-text-model.h
+2949f40306b8e6cc8de4795230f81be96ad9c66c5b01395f8d0e1c62752acee9a3c66bac92e3270bcc693780236065431f29ad53407629e2c0ae6d773662637d  fplinux-ui-listview.c
+8ae373bf5a6e7d1d17647a1659dfb0cad142d22436533285e265fd81f412e6b536a84a83a53a1ebd04627158a37dc0cb254abbcbcdc48ecc53dd07cca73acc85  fplinux-ui-listview.h
+b4a2f6414830e03562fb348892417df792acc36fd616b261c4cd8aebb1b8e7a74f76e52b91bd561ef5d41d17361b65e51f4523c4a1d4423ee99b893bbccae070  fplinux-ui-menu.c
+3cb5f4799a11a9e6bec8237a1fd669dd28e4855a11e8f6520aeda802a595ffed88b3e636555b58d2fb3098882f4574b32a75184ddbe0a614e4edda14aa6e7ed3  fplinux-ui-menu.h
+411008fef16568ac13c7523ec93dfd3f3c34602beb78ec69f14b6d1e0ca0a4e96a7766df88dc91d0549c939e9717efdbd07911a33c3dd1a18c83f5f736698b13  fplinux-ui-prefs.c
+aed3b3f1298c423d67cc5ebb194b17d9be9cb8a9a727774a493fe53dc3816cfa25c9433698dd91ee977f5a50661c90d3e48a85e53ff8fc58cc18587d2d516654  fplinux-ui-prefs.h
+a2600679a259491472d05e24a8405981f4d8cd9b300ffe887ee9f78f86e6acd736f8f94132668f2df1494e2f6cb6b35bc508f1aa4d055d1e0eaf4fb2519eeff5  fplinux-ui-screen.c
+3649fdba34646f996a6de32b6d70cd003d52a7ce97ee4dee919399e1f1d1f6467aa258fb4e082a9c9febe58e80805d50aed8b9257b8d76549d091e8e49c36b83  fplinux-ui-screen.h
+ac3e7712cd4c0337b4ea7ff77e5966951721f0fb92b6a5de5cf6d767f76ad05066fc362ebaa2f9a64a8e7a5d73b3d29015684c91094b6e5782c5aae94cc075cb  fplinux-ui-screen-model.c
+26d114a574df077b012d9fe893dc2a0cb938cebf0a005058c5f8232486b05cf809e5968af2c708aa8c423f891350a71a8e26583500b66e4736699c858ed410bb  fplinux-ui-screen-model.h
+ee0a8f7e30ca698d657a5c947c17276dc479c7460921d93738e71f9cb6cf0c650296da9f42f79b481db59f59d98c86cca443f8aa0b7770093b1967ce92d252b1  fplinux-ui-profile.c
+a5246061f13bf0f6f8b74b153e607b8bf71492de7c9db6d40925f9a76f7d08c76a49c35459a02179eb5c7ebd742cb2b4111876289828a61aa4c652ccf7749044  fplinux-ui-profile.h
+7383b91adf88d48a855c84a5b70ac97ffbe81c4a4ced02271d95420726e823fae38557bebe6492fac254c073a37b8e64e9ac22e95a8b6d4bf18724d7236cf86a  fplinux-ui-profile.json
+7317d2b5140aab9a22b76dc2ef4eec5609464d608f3dfe8c7afb36d766580acc9440056b7b4bbc23075144d548d8de885568757b6a2c7246615a7a0a2e7df393  fplinux_ui_profile.py
+4166346aecbc303885705f435b7cd905c30b61383bcbca77732044d94be8a76049e3b69ddd68b2ea8328e5090f513488a94b4d9eb1510e458f69d93e17e29f99  fplinux_ui_fonts.py
+e71ed6a44e0ffeedcfef2b7aad955c90401b9e12ba2dfec1f64ff16dd1c0ab6f4ef14a7ef485466292437d599fef0dfb1fe482aad92698f23b6c9b2fb070f704  fplinux-ui-fonts.h
+72690351bd00d65ff12613965ac7dc57c3ba6f3e0e8b8a2ddb1efeddfe218f863a5d409b1bbdf0aa5db133c5d84056ce8197e02ed34f318527b65aacb37cf584  fplinux-ui-internal.h
+a6284d13d173f21aeb306ac5c38c181c25b2c874fc0050ce40c3d87ed696ae25eb3449fc5329e9c9ac4d295801920db9e9d6a3edaf067ae31e5ab34677142721  fplinux-ui-locale.c
+c0ebbe1beb4898f9b6de76f910470f0a052c6c17e754967d1f8e93dcbd527b7eed5f31236ef677790577f93d98f4f1e237f37d0a2725b5718d3ee62389604ad8  fplinux-ui-locale.h
+0e113a3d69fa45b700c5c84b7bf10df2656cf986d594252274bb8afbaebbd952ef793d272aed728a911edc1a445eaa911aced6cb9cc0f419967e12a6c9e8d478  fplinux-language.c
+e3e550c2f07726b0f20d49f30300e88c862b3cac031c29b4a89c282719634fea22a5cc6a491c081d95c6381c05cbae6a50b09a579e0d219cf2fab9f29ff63898  fplinux-language.h
+445ed5909ae89e45408e9d925cc1cfe1fb85c07ad4fce76128a8f55fd4fdff7b0e7c957dcbc5bcdd4bf71759b93eb6b360cb22d4507e0e6375369fa68b311190  fplinux-multitap.c
+2cd893f9960835c0bae05ffe8f460d315ae18266973db4370b7649dab648109038b75d5724230f82ba1c3ae8fe55f76548a490cb2e815c9eebd712df0d75f0cf  fplinux-multitap.h
+0f0cdff74f1aba6459c951b510e645c2a517129b92a4b1a234885f1452cccc7ff9045c0f0263d7b3fe79af9fa3b19d5791b5e64e24f11f1ceeb5c6eef338647d  fplinux-ui.pc
+d9d6e1a1091f54d2eca85012637402bcf1c1d11a80857ca2ea0d8f0bfa18cfc3ff9974a34078d02f7ae77f31720ffb9aa5652c73e030a75dd6c66d1645d35d21  fplinux-ui.map
+17c8adeef87e4b25f11a48d1a2ae060b5c6460a98f8f284e25f8cbf5b724ea420607d393a2f8464080fe8f4a6ac411011bd3bbb06950057f1d863b598934ccd8  ru.po
+63d998a7e568075385abdf17ce8478588db3a76c9c6e89fce82b87b71dc029b84cd66d4ad2b4b64c1cfb375e4f75851f4a60b8073ed8a76f403c856450b26c88  LGPL-2.1-or-later.txt
+260c02ff0a3e04ff0c2a95a936494b6a114a0a22121557059591d44af5fab5644ab8484be61eb33c12a6c9eef2170a108d51e2972adaef942568d94ae0d4ec83  GPL-2.0-only.txt
+ea4787019bfab85d0d895eb86ea671a6fa6dad6b684c6e010f2bd5cd1b83d9b524deebba6e97ee2682b6e6d57cfa6bf2a05a79b58b91bfa013617da535b34238  fplinux-ui-softkey-layout.c
+93c6c4932c4be2fb9fd9a968f69753eec69348fee64b220aae9bdb64eb3a6f1ba1950c497c8d8b24f0b713896cc8643ead6a35d9a4bf4e90c2a169871090753d  fplinux-ui-softkey-layout.h
+af04dad34fe00513f1cd0ce0c7ec8fad12aabb6fbb7023d5316963139f3e159726cbf7539593617b0bb293a93b000a21010f3f4a86ee62db24ea16e1f83c0a90  fplinux-ui-style-internal.h
+"

@@ -1,0 +1,32 @@
+--- a/src/gallium/drivers/panfrost/driinfo_panfrost.h
++++ b/src/gallium/drivers/panfrost/driinfo_panfrost.h
+@@ -1,6 +1,8 @@
+ /* panfrost specific driconf options */
+ DRI_CONF_SECTION_PERFORMANCE
+    /* AFBC options. */
++   DRI_CONF_OPT_B(pan_afbc, true, "Enable AFBC framebuffer compression")
++
+    DRI_CONF_OPT_B(pan_afbc_tiled, true, "Use AFBC tiled layout whenever "
+                   "possible")
+ 
+--- a/src/gallium/drivers/panfrost/pan_screen.c
++++ b/src/gallium/drivers/panfrost/pan_screen.c
+@@ -412,7 +412,7 @@ panfrost_query_modifiers(struct pipe_screen *screen,
+       if (mod == DRM_FORMAT_MOD_ARM_INTERLEAVED_64K)
+          continue;
+ 
+-      if ((dev->debug & PAN_DBG_NO_AFBC) && drm_is_afbc(mod))
++      if (!dev->has_afbc && drm_is_afbc(mod))
+          continue;
+ 
+       if (!allow_afrc && drm_is_afrc(mod))
+@@ -1034,7 +1034,8 @@ panfrost_create_screen(int fd, const struct pipe_screen_config *config,
+       return NULL;
+    }
+ 
+-   if (dev->debug & PAN_DBG_NO_AFBC)
++   if ((dev->debug & PAN_DBG_NO_AFBC) ||
++       !driQueryOptionb(config->options, "pan_afbc"))
+       dev->has_afbc = false;
+ 
+    dev->relaxed_afbc_yuv_imports =

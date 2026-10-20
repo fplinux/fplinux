@@ -8,13 +8,21 @@ arch="armv7"
 license="GPL-2.0-or-later AND MIT-0 AND CC0-1.0 AND MIT"
 depends="fplinux-base fplinux-input"
 makedepends_build="clang22 lld22 make patch pkgconf llvm22"
-makedepends_host="musl-dev linux-headers gcc libevdev-dev eudev-dev fplinux-libdrm-dev"
+makedepends_host="musl-dev linux-headers gcc libevdev-dev eudev-dev fplinux-libdrm-dev fplinux-mesa-dev"
 options="!check"
 source="
 	tyrquake-$pkgver.tar.gz::https://disenchant.net/files/engine/tyrquake-$pkgver.tar.gz
 	0001-FPLinux-add-native-runtime-support.patch
 	fplinux-quake.c
 	fplinux-quake-internal.h
+	fplinux-quake-stats.c
+	fplinux-quake-stats.h
+	fplinux-quake-gl.c
+	fplinux-quake-gl.h
+	fplinux-gpu.c
+	fplinux-gpu.h
+	fplinux-gpu-output.c
+	fplinux-gpu-output.h
 	fplinux-drm-session.c
 	fplinux-drm-session.h
 	fplinux-cli.c
@@ -25,6 +33,7 @@ source="
 	fplinux-keypad.h
 	in_fplinux.c
 	vid_fplinux.c
+	vid_fplinux_gl.c
 "
 builddir="$srcdir/tyrquake-$pkgver"
 
@@ -33,6 +42,14 @@ prepare() {
 	install -Dm644 "$srcdir/fplinux-drm-session.c" common/fplinux-drm-session.c
 	install -Dm644 "$srcdir/fplinux-drm-session.h" common/fplinux-drm-session.h
 	install -Dm644 "$srcdir/fplinux-quake-internal.h" common/fplinux-quake-internal.h
+	install -Dm644 "$srcdir/fplinux-quake-stats.c" common/fplinux-quake-stats.c
+	install -Dm644 "$srcdir/fplinux-quake-stats.h" common/fplinux-quake-stats.h
+	install -Dm644 "$srcdir/fplinux-quake-gl.c" common/fplinux-quake-gl.c
+	install -Dm644 "$srcdir/fplinux-quake-gl.h" include/fplinux-quake-gl.h
+	install -Dm644 "$srcdir/fplinux-gpu.c" common/fplinux-gpu.c
+	install -Dm644 "$srcdir/fplinux-gpu.h" common/fplinux-gpu.h
+	install -Dm644 "$srcdir/fplinux-gpu-output.c" common/fplinux-gpu-output.c
+	install -Dm644 "$srcdir/fplinux-gpu-output.h" common/fplinux-gpu-output.h
 	install -Dm644 "$srcdir/fplinux-input-device.h" \
 		common/fplinux-input-device.h
 	install -Dm644 "$srcdir/fplinux-input-session.c" \
@@ -42,6 +59,7 @@ prepare() {
 	install -Dm644 "$srcdir/fplinux-keypad.h" common/fplinux-keypad.h
 	install -Dm644 "$srcdir/in_fplinux.c" common/in_fplinux.c
 	install -Dm644 "$srcdir/vid_fplinux.c" common/vid_fplinux.c
+	install -Dm644 "$srcdir/vid_fplinux_gl.c" common/vid_fplinux_gl.c
 }
 
 build() {
@@ -70,7 +88,7 @@ build() {
 		QBASEDIR=/tmp/fplinux-quake \
 		TYR_VERSION=v$pkgver \
 		TYR_VERSION_TIME="$SOURCE_DATE_EPOCH" \
-		bin/tyr-quake
+		bin/tyr-quake bin/tyr-glquake
 	"$CC" $CPPFLAGS $CFLAGS -std=gnu11 -Wall -Wextra -Werror \
 		-I"$srcdir" \
 		"$srcdir/fplinux-quake.c" \
@@ -79,16 +97,25 @@ build() {
 
 package() {
 	install -Dm755 bin/tyr-quake "$pkgdir/usr/bin/tyr-quake"
+	install -Dm755 bin/tyr-glquake "$pkgdir/usr/bin/tyr-glquake"
 	install -Dm755 bin/fplinux-quake "$pkgdir/usr/bin/quake"
 }
 
 sha512sums="
 ecceeecb43866c10c0669b4362ce2eda7a790c502764b3d644566e7637ffbde0548676c9dcea07963db0d91d83c248e3497603c0a3a2e1a12a1418a82c07179a  tyrquake-0.71.tar.gz
-0d89b932b42a8c96c2db7f8d657f4a4d9070460acd9950093e4f7fe93f1fddd76979c80a505b169235136b35bff22bf44d99e2ffeb24ad6d7ba6c03d8539a37c  0001-FPLinux-add-native-runtime-support.patch
-015f818472de50eef0f2efc46d60231aaf29ce14395e59e289b11c1ead56037f7bf44710c600f5590cd75e1fcfac4cd10e5d265a1d79208bc49a2a042e24e15b  fplinux-quake.c
-b60ce43c4ebba95f1ff6dd7531510d4474b2d82c3befacd506a9ae8088fa67b79a44f31c0c69b84f290ac1e41b112dc3c41132b20e66964d46abcc52420b186c  fplinux-quake-internal.h
-24d96f52eeb3adb9b37e34967199a0efea630af580782fe2f29000862b678d5ae96b4516e291b61ca70a8d9242af43fc720d801e158c7933e957cda0aaf5afdd  fplinux-drm-session.c
-5b63a683e9aac0a4b1faef31c0a09b9ec4131992d5cb69f858c6276855a8d92404c4cf23a1b4c8927d802311e9634b354502745ef15e00a4209744acf51131a7  fplinux-drm-session.h
+c7a7c12608d9fffa61210224ba7ce267278e1201cd838c8e47c292b479fc2e229e5a267f775bc9b8151cca61e9f8a187752b515013d7d7707eb97876d9543feb  0001-FPLinux-add-native-runtime-support.patch
+81ca186e4a695583199352f013cd191cdda0a2f25870856616c07769ef28796f7c6d2d4cac1c5af0f996c9fc00ee90118035a587df784e01aa5d117c13314dec  fplinux-quake.c
+1ec65c06b2886423ad45ca0a5f0e03eb43cc75a0d71e5d6d0d6c079e0c9f22c462b5675e0e844acfa2507a01aa860da705b33cc5fa9fd00c0cf8531f61b10f77  fplinux-quake-internal.h
+83594f9fd96d9005a5614e3b2b332a80744fb5ede742c0c693a1cffd0251a8c09d9bcee81a45c9fd0eb70ca3d2624258e8bfa4df509134e5fe796ebcc6295ea8  fplinux-quake-stats.c
+7e18a7b77cb17d525001af0b7983c242c5acff9975fa432394781a56b8dedf772f45a992efbec7d755e00d678af37e27d72a61bed6ae21c2d6756f2a1a6fea4c  fplinux-quake-stats.h
+d18b79af15c6f2f6b71e06d10abbe95d49c59d51ef763d9405965670e0e916b66af8d9953da176e40219391927d76ca5ab078fd4a9409171cec6a6739d64721c  fplinux-quake-gl.c
+ceb4ca8d7781934e3d3a188e989f7ed64f86e0cade4c1acfe5d1a60d04b4b5a7ed7cdd0bdb9333d60331bbf96236a48b7984f3c9e73e16e89dad0287ee3cce49  fplinux-quake-gl.h
+e8b0dfbcb7fb85a89769c5fd34ec28d5dc760cb2c942fdd62106fc7e2cc0b48f3554f04790ff8dd4c1434efbdfaa23bc09cfd3aae30794266dd198cbf2bc70c1  fplinux-gpu.c
+10900357bfb08a54a9327d5a26039103f3887f05b32af1165843308a6ab7a7289dacf08afda48041daab62b17b6b49fd4b59a32c29814d0a9ff476bd34a0b61a  fplinux-gpu.h
+28075090738c4c164535b2b51139b37ae6e8bffa3d5d23bdfd8d3a6372b30e0a2bcf4bed2ecdd8a412360f2d79a74c824a7fa9f4b4aa8cc1a7162658e3b87eb3  fplinux-gpu-output.c
+a9f09ae634fadb765916ddfa79ef109a5ea5385bbe37a131e26540bfc06547649ef7dae07b510f99462bb8c34f33b68358556093159e70185b99356521e01430  fplinux-gpu-output.h
+6b253f856c2a6886801ec56fd4f607019b89c5465a9fffd78ea4196cadc90688b452b10e45d4767e2cfddd5d846dad4bba2b8452e0c79426f08a4ed057e0e104  fplinux-drm-session.c
+a71678fa063e52aa2220c2bfd391a2a3cf154c04c1cdb7e078e3942f4f24d8510c1d7bd8d5b57bd96e0d32842c319f53f52731c26e0b80bbfb32774c7ba8fc74  fplinux-drm-session.h
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
 defa0078d5b788c6180813f46b42042fd401555cce70fc7ae40550b7c27b65a04972678b5beb8c65e41dbcfe36ba6b926154d94c2700e345bb8d3d2ba251e4ef  fplinux-input-device.h
@@ -96,5 +123,6 @@ defa0078d5b788c6180813f46b42042fd401555cce70fc7ae40550b7c27b65a04972678b5beb8c65
 2720eb45e6d403009c72ff8025ac28adde8320f4005917afc05e24bd0bcaffb2a90fc23f7213a0c9c9a9af7d7a3f6dcad4f4e44cf6f979a0157bae6c98117fc0  fplinux-input-session.h
 0a6d41b98223953b0b890be3041fba31e7878e6752094ed439b1e1e7e9240b2c7bf175ae671d05485ee25fa9ae74e45ddc63e9592768bd5d19e6e4ae6765a978  fplinux-keypad.h
 5eac95a1f35f2ffbf2f4726cef6cbac8cbecf2028eca2b121bdf7416522bf9bb4e9947fc416c811edea8a1eb70cf2bd30c06173a2558b08521e9928c229d5ad6  in_fplinux.c
-d8f01d4fbd5b3ccbf222f0105c0db198d33bf98d373741ea92c5c8d59195d34d05eb8975c96840f7f20cbb3e23a696169799a4524ed05a20a9b0d41d78b1c8d3  vid_fplinux.c
+31957da66122002c363b39de7e22bba6d47b56dc407b6c0aec9127179ec2fab8f44d9b4f35286a7d6742517329bbca38ecac6e534f8c326e50a550086e318f87  vid_fplinux.c
+8b0e56eee873d5afbb03ffe312f4bb2c0f44287d36bb13bdf16256827b7d9f98207d5b2490aeed667cbbee5e87c5acd593f818d581334ef30240f63824b18688  vid_fplinux_gl.c
 "

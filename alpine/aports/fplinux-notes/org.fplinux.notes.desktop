@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Notes
+Name[ru]=Заметки
+Exec=/usr/bin/fplinux-notes
+Icon=org.fplinux.notes
+Categories=Utility;TextEditor;
+X-FPLinux-Mode=integrated

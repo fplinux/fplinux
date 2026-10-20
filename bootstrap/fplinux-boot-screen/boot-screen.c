@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "boot-screen.h"
+#include "fplinux-boot-mark.h"
 
 #include "font.h"
 
-#define FPLINUX_BOOT_SCREEN_COLOUR_BACKGROUND 0x0841U
+/*
+ * The bootloader cannot read the theme setting, so it always uses the brand
+ * dark scheme: the Ink background the generated mark is composited on.
+ */
+#define FPLINUX_BOOT_SCREEN_COLOUR_BACKGROUND FPLINUX_BOOT_MARK_BACKGROUND
 #define FPLINUX_BOOT_SCREEN_COLOUR_SURFACE 0x18c3U
 #define FPLINUX_BOOT_SCREEN_COLOUR_PRIMARY 0xf79eU
 #define FPLINUX_BOOT_SCREEN_COLOUR_MUTED 0xbdf7U
@@ -303,40 +308,113 @@ static void draw_progress_bar(struct fplinux_boot_screen *screen, uint32_t y,
 		fill_rect(screen, margin, y, fill, height, colour);
 }
 
+/* The mark of the largest UI profile that fits the screen, else the first. */
+static const struct fplinux_boot_mark *
+boot_mark(const struct fplinux_boot_screen *screen)
+{
+	const struct fplinux_boot_mark *mark = &fplinux_boot_marks[0];
+	size_t i;
+
+	for (i = 1; i < FPLINUX_BOOT_MARK_COUNT; ++i)
+		if (fplinux_boot_marks[i].profile_width <=
+			    screen->canvas.width &&
+		    fplinux_boot_marks[i].profile_height <=
+			    screen->canvas.height)
+			mark = &fplinux_boot_marks[i];
+	return mark;
+}
+
+/* One fill per run; background runs are skipped on the painted screen. */
+static void draw_mark(struct fplinux_boot_screen *screen,
+		      const struct fplinux_boot_mark *mark, uint32_t left,
+		      uint32_t top)
+{
+	uint32_t x = 0;
+	uint32_t y = 0;
+	size_t i;
+
+	for (i = 0; i < mark->run_count; ++i) {
+		uint32_t index = FPLINUX_BOOT_MARK_RUN_INDEX(mark->runs[i]);
+		uint32_t length = FPLINUX_BOOT_MARK_RUN_LENGTH(mark->runs[i]);
+
+		if (index != 0)
+			fill_rect(screen, left + x, top + y, length, 1,
+				  fplinux_boot_mark_palette[index]);
+		x += length;
+		if (x >= mark->size) {
+			x = 0;
+			++y;
+		}
+	}
+}
+
+/*
+ * A top-down stack: the mark from h/12, the brand, the model
+ * and the mode; the progress bar at 45 % of the height unless the stack
+ * reaches it, then half a line below the stack; the status under the bar.
+ */
 static void render_adaptive(struct fplinux_boot_screen *screen)
 {
+	const struct fplinux_boot_mark *mark = boot_mark(screen);
 	uint32_t w = screen->canvas.width;
 	uint32_t h = screen->canvas.height;
 	uint32_t brand_scale =
 		text_width(string_length(screen->brand), 2) + w / 6U <= w ? 2 :
 									    1;
+	uint32_t font_height = active_font->height;
+	uint32_t line = font_height + 2U;
 	uint32_t bar_height = h / 24U < 6 ? 6 : h / 24U;
 	uint32_t bar_y = h * 45U / 100U;
-	uint32_t status_y = bar_y + bar_height + h / 24U;
-	uint32_t line = (uint32_t)active_font->height + 2U;
-	uint32_t y = h / 10U;
+	uint32_t status_y;
+	uint32_t note_y;
+	uint32_t y = h / 12U;
 	const char *status = screen->status_text;
 	uint16_t status_colour = FPLINUX_BOOT_SCREEN_COLOUR_MUTED;
 	char heading[14];
 
+	draw_mark(screen, mark, w > mark->size ? (w - mark->size) / 2U : 0, y);
+	y += mark->size + line / 2;
 	draw_text_centered(screen, y, screen->brand, brand_scale,
 			   FPLINUX_BOOT_SCREEN_COLOUR_PRIMARY);
-	y += (uint32_t)active_font->height * brand_scale + line / 2;
+	y += font_height * brand_scale + line / 2;
 	draw_text_centered(screen, y, screen->model, 1,
 			   FPLINUX_BOOT_SCREEN_COLOUR_MUTED);
 	y += line;
 	draw_text_centered(screen, y, screen->mode, 1,
 			   FPLINUX_BOOT_SCREEN_COLOUR_DIM);
+	y += line;
 
+	if (bar_y < y + line / 2)
+		bar_y = y + line / 2;
+	if (screen->has_error) {
+		uint32_t block = 2U * line + font_height;
+
+		if (h > block + bar_height + 1U) {
+			uint32_t limit = h - block - bar_height - 1U;
+
+			if (bar_y > limit && limit >= y)
+				bar_y = limit;
+		}
+	}
+	status_y = bar_y + bar_height + h / 24U;
 	draw_progress_bar(screen, bar_y, bar_height);
 
 	if (screen->has_error) {
+		/*
+		 * The heading and two detail lines stay on screen: on the
+		 * smallest screens they move up, but not over the bar frame.
+		 */
+		uint32_t block = 2U * line + font_height;
+
+		if (status_y + block > h)
+			status_y = h > block ? h - block : 0;
+		if (status_y < bar_y + bar_height + 1U)
+			status_y = bar_y + bar_height + 1U;
 		format_error_heading(heading, screen->error_code);
 		draw_text_centered(screen, status_y, heading, 1,
 				   FPLINUX_BOOT_SCREEN_COLOUR_ERROR);
-		draw_wrapped_detail(
-			screen, w / 12U, w - w / 12U, status_y + line,
-			(w - w / 6U) / FPLINUX_BOOT_SCREEN_FONT_ADVANCE, 1);
+		draw_wrapped_detail(screen, w / 12U, w - w / 12U,
+				    status_y + line, line, 1);
 		return;
 	}
 
@@ -348,8 +426,12 @@ static void render_adaptive(struct fplinux_boot_screen *screen)
 		status_colour = FPLINUX_BOOT_SCREEN_COLOUR_ERROR;
 	draw_text_centered(screen, status_y, status, 1, status_colour);
 
+	/* The note keeps its place near the bottom unless the status needs it. */
+	note_y = h - h / 12U - 8U;
+	if (note_y < status_y + line)
+		note_y = status_y + line;
 	if (screen->note[0] != '\0')
-		draw_text_centered(screen, h - h / 12U - 8, screen->note, 1,
+		draw_text_centered(screen, note_y, screen->note, 1,
 				   FPLINUX_BOOT_SCREEN_COLOUR_DIM);
 }
 

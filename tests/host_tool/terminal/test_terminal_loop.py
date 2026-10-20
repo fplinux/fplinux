@@ -29,6 +29,7 @@ class TerminalLoopHarness:
 
     executable: Path
     font: Path
+    child: Path
 
 
 class TerminalLoopTests:
@@ -50,6 +51,32 @@ class TerminalLoopTests:
         """A queued hold opens Modifiers; a queued tap still needs menu selection."""
         self._check_scenario(harness, scenario)
 
+    @pytest.mark.parametrize(
+        ("scenario", "status"),
+        [("pty-success", 0), ("pty-failure", 37), ("pty-buffered-failure", 37)],
+        ids=["successful-child", "failed-child", "buffered-output"],
+    )
+    def test_pty_stream_closure_preserves_child_exit_status(
+        self, harness: TerminalLoopHarness, tmp_path: Path, scenario: str, status: int
+    ) -> None:
+        """After PTY closure the last output remains visible and VT dispatch releases the child."""
+        result = run_process(
+            [
+                str(harness.executable),
+                str(harness.font),
+                str(ROOT / "tests/host_tool/terminal/fixtures/terminal-xkb"),
+                scenario,
+                str(harness.child),
+            ],
+            name=f"run terminal loop {scenario} with real PTY",
+            timeout=5,
+            cwd=tmp_path,
+            env={**os.environ, "HOME": str(tmp_path), "LC_ALL": "C.UTF-8"},
+            check=False,
+        )
+
+        assert result.returncode == status, result.stderr
+
     @pytest.fixture(scope="class")
     @classmethod
     def harness(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[TerminalLoopHarness]:
@@ -58,6 +85,7 @@ class TerminalLoopTests:
             executable = temporary / "terminal-loop"
             main_object = temporary / "terminal-main.o"
             font = temporary / "fixture.psf"
+            child = temporary / "terminal-pty-child"
             header = struct.pack("<8I", 0x864AB572, 0, 32, 1, 2, 12, 12, 8)
             font.write_bytes(header + b"\x00" * 12 + b"\x80" * 12 + b" \xffa\xff")
             flags = run_process(
@@ -91,6 +119,18 @@ class TerminalLoopTests:
                 check=True,
             )
             compile_c(
+                child,
+                [
+                    "-std=c11",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    str(ROOT / "tests/host_tool/terminal/fplinux-terminal-pty-child.c"),
+                ],
+                name="compile terminal PTY child",
+                check=True,
+            )
+            compile_c(
                 executable,
                 [
                     *compiler,
@@ -102,18 +142,24 @@ class TerminalLoopTests:
                     str(TERMINAL / "terminal-render.c"),
                     str(TERMINAL / "terminal-keyboard.c"),
                     str(TERMINAL / "terminal-diagnostic.c"),
+                    str(TERMINAL / "terminal-pty.c"),
                     str(ROOT / "lib/fplinux/fplinux-cli.c"),
                     str(ROOT / "lib/fplinux/fplinux-font.c"),
                     str(ROOT / "lib/fplinux/fplinux-multitap.c"),
+                    str(ROOT / "lib/fplinux/fplinux-language.c"),
                     str(ROOT / "lib/fplinux/fplinux-keyboard-text.c"),
                     "-Wl,--wrap=fplinux_terminal_keyboard_open",
+                    "-Wl,--wrap=fplinux_terminal_pty_open",
+                    "-Wl,--wrap=fplinux_terminal_pty_shell_foreground",
+                    "-Wl,--wrap=fplinux_terminal_pty_finished",
+                    "-Wl,--wrap=fplinux_terminal_pty_close",
                     "-ltsm",
                     "-lxkbcommon",
                 ],
                 name="link terminal loop harness",
                 check=True,
             )
-            yield TerminalLoopHarness(executable, font)
+            yield TerminalLoopHarness(executable, font, child)
 
     def _check_scenario(self, harness: TerminalLoopHarness, scenario: str) -> None:
         """Run one process with fresh shell state and owned files."""

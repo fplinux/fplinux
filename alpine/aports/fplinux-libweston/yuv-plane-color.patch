@@ -1,0 +1,22 @@
+--- a/libweston/backend-drm/kms.c
++++ b/libweston/backend-drm/kms.c
+@@ -2020,12 +2020,14 @@ drm_output_apply_state_atomic(struct drm_output_state *state,
+ 						plane_state->blend_mode,
+ 						req);
+ 
+-		ret |= drm_plane_set_color_encoding(plane,
+-						    plane_state->color_encoding,
+-						    req);
++		if (pinfo && pinfo->color_model == COLOR_MODEL_YUV) {
++			ret |= drm_plane_set_color_encoding(plane,
++							    plane_state->color_encoding,
++							    req);
+ 
+-		ret |= drm_plane_set_color_range(plane,
+-						 plane_state->color_range, req);
++			ret |= drm_plane_set_color_range(plane,
++							 plane_state->color_range, req);
++		}
+ 
+ 		if (ret != 0) {
+ 			weston_log("couldn't set plane state\n");

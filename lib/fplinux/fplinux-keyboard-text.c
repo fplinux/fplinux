@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-/* Keyboard layout selection and printable text filtering. */
+/* Keyboard layout selection. */
 
 #define _POSIX_C_SOURCE 200809L
 
@@ -162,20 +162,4 @@ bool fplinux_keyboard_text_keymap(
 		"};\n",
 		symbols);
 	return length >= 0 && (size_t)length < keymap_size;
-}
-
-bool fplinux_keyboard_text_is_printable(const char *text)
-{
-	const unsigned char *byte = (const unsigned char *)text;
-
-	if (*byte == '\0')
-		return false;
-	for (; *byte != '\0'; ++byte) {
-		if (*byte < 0x20U || *byte == 0x7fU)
-			return false;
-		/* UTF-8 encodes the C1 controls U+0080..U+009F as c2 80..9f. */
-		if (*byte == 0xc2U && byte[1] >= 0x80U && byte[1] <= 0x9fU)
-			return false;
-	}
-	return true;
 }

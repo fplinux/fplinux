@@ -20,9 +20,11 @@ if TYPE_CHECKING:
 class QuakeVtTests:
     """Observe ownership changes without drawing, running the game or opening a VT."""
 
-    @pytest.fixture(scope="class")
+    @pytest.fixture(scope="class", params=["software", "gpu"])
     @classmethod
-    def executable(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    def executable(
+        cls, tmp_path_factory: pytest.TempPathFactory, request: pytest.FixtureRequest
+    ) -> Iterator[Path]:
         """Link the host harness once for this test group."""
         with c_build_directory(tmp_path_factory, "quake-vt") as directory:
             executable = directory / "quake-vt"
@@ -41,12 +43,19 @@ class QuakeVtTests:
                     "-Wall",
                     "-Wextra",
                     "-Werror",
+                    "-isystem",
+                    "/opt/quality/include",
                     "-DNQ_HACK",
                     f"-I{ROOT / 'include/fplinux'}",
                     f"-I{ROOT / 'tests/host_tool/quake/quake-video-compat'}",
                     f"-I{ROOT / 'alpine/aports/fplinux-tyrquake'}",
                     str(ROOT / "tests/host_tool/quake/fplinux-quake-vt.c"),
-                    str(ROOT / "alpine/aports/fplinux-tyrquake/vid_fplinux.c"),
+                    str(
+                        ROOT
+                        / "alpine/aports/fplinux-tyrquake"
+                        / ("vid_fplinux_gl.c" if request.param == "gpu" else "vid_fplinux.c")
+                    ),
+                    *(["-DFPLINUX_TEST_QUAKE_GPU"] if request.param == "gpu" else []),
                     str(ROOT / "lib/fplinux/fplinux-drm-session.c"),
                     (
                         "-Wl,--wrap=drmDropMaster,--wrap=drmSetMaster,--wrap=ioctl,"

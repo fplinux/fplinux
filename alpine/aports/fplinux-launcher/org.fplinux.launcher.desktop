@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=FPLinux
+Name[ru]=FPLinux
+Exec=/usr/bin/fplinux-launcher
+NoDisplay=true
+X-FPLinux-Mode=launcher

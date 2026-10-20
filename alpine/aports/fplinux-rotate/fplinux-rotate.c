@@ -489,9 +489,8 @@ static bool present_image(const struct fplinux_rotate_image *image,
 	uint16_t *pixels;
 	bool ok;
 
-	if (!fplinux_drm_session_open(&session, "/dev/dri/card0", NULL,
-				      DRM_FORMAT_RGB565, error,
-				      sizeof(error))) {
+	if (!fplinux_drm_session_open(&session, NULL, NULL, DRM_FORMAT_RGB565,
+				      error, sizeof(error))) {
 		fprintf(stderr, "fplinux-rotate: %s\n", error);
 		return false;
 	}

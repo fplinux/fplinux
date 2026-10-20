@@ -5,10 +5,11 @@
  * those functions from the linked objects reach the wrappers below:
  *
  * - open() backs /dev/input/event0 (read-only keypad) and event1 (read-write
- *   vibrator) with /dev/null and exits with status 2 when a path containing
- *   "/backlight/" is opened;
+ *   vibrator) with /dev/null. SHOWCASE_RIGHT_SOFT_KEY adds a second keypad at
+ *   event2 and selects which keypad exposes the exit key (event0, event2 or
+ *   none). A path containing "/backlight/" exits with status 2;
  * - ioctl() answers grab, physical path, event bits and force-feedback upload
- *   and removal for those two descriptors, matching only the request number;
+ *   and removal for those descriptors, matching only the request number;
  * - read() reports a right soft key press once one frame, or two with
  *   SHOWCASE_EXTRA_FRAME set, has been presented;
  * - write() discards vibrator events;
@@ -17,6 +18,8 @@
  * Strong fplinux_drm_session_* definitions replace the DRM and VT session with
  * a 128x160 memory buffer. SHOWCASE_VT_CYCLE makes the second dispatch release
  * and reacquire the display in one call.
+ * The GPU output opener rejects all initialization unless the case requests
+ * SHOWCASE_GPU_INIT_FAIL, which supplies a controlled initialization error.
  *
  * These doubles do not prove real evdev semantics, VT switching with an
  * inactive interval, DRM page presentation or sysfs LED file behavior. The
@@ -25,6 +28,7 @@
 #define _GNU_SOURCE
 
 #include "fplinux-drm-session.h"
+#include "fplinux-gpu-output.h"
 #include "fplinux-keypad.h"
 
 #include <errno.h>
@@ -40,7 +44,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-static int keypad = -1;
+static int keypads[2] = { -1, -1 };
 static int vibrator = -1;
 static int dispatches;
 static int frames_presented;
@@ -53,6 +57,89 @@ ssize_t __real_read(int fd, void *buffer, size_t size);
 ssize_t __real_write(int fd, const void *buffer, size_t size);
 int __real_connect(int fd, const struct sockaddr *address, socklen_t length);
 int __real_close(int fd);
+
+struct fplinux_gpu_output *
+fplinux_gpu_output_open(struct fplinux_drm_session *session,
+			enum fplinux_gpu_api api, unsigned int width,
+			unsigned int height, bool clockwise, char *error,
+			size_t error_size)
+{
+	(void)session;
+	(void)api;
+	(void)width;
+	(void)height;
+	(void)clockwise;
+	if (!getenv("SHOWCASE_GPU_INIT_FAIL")) {
+		fputs("Showcase unexpectedly initialized GPU\n", stderr);
+		exit(2);
+	}
+	snprintf(error, error_size, "controlled GPU initialization failure");
+	return NULL;
+}
+
+static _Noreturn void unexpected_gpu_output(void)
+{
+	fputs("Showcase unexpectedly used GPU output\n", stderr);
+	exit(2);
+}
+
+struct fplinux_gpu *
+fplinux_gpu_output_gpu(const struct fplinux_gpu_output *output)
+{
+	if (output)
+		unexpected_gpu_output();
+	return NULL;
+}
+
+bool fplinux_gpu_output_render(struct fplinux_gpu_output *output,
+			       unsigned int texture)
+{
+	(void)output;
+	(void)texture;
+	unexpected_gpu_output();
+}
+
+bool fplinux_gpu_output_begin_cpu(struct fplinux_gpu_output *output,
+				  void **pixels, size_t *stride)
+{
+	(void)output;
+	(void)pixels;
+	(void)stride;
+	unexpected_gpu_output();
+}
+
+bool fplinux_gpu_output_end_cpu(struct fplinux_gpu_output *output)
+{
+	(void)output;
+	unexpected_gpu_output();
+}
+
+bool fplinux_gpu_output_present(struct fplinux_gpu_output *output)
+{
+	(void)output;
+	unexpected_gpu_output();
+}
+
+const char *fplinux_gpu_output_error(const struct fplinux_gpu_output *output)
+{
+	(void)output;
+	unexpected_gpu_output();
+}
+
+bool fplinux_gpu_output_close(struct fplinux_gpu_output *output)
+{
+	if (output)
+		unexpected_gpu_output();
+	return true;
+}
+
+static bool keypad_has_right_soft_key(int fd)
+{
+	const char *device = getenv("SHOWCASE_RIGHT_SOFT_KEY");
+
+	return !device || (!strcmp(device, "event0") && fd == keypads[0]) ||
+	       (!strcmp(device, "event2") && fd == keypads[1]);
+}
 
 /* Model the LED sysfs trigger selection and brightness-zero side effect only. */
 static bool select_led_trigger(const char *selected)
@@ -95,6 +182,7 @@ FILE *__wrap_fopen(const char *path, const char *mode)
 int __wrap_open(const char *path, int flags, ...)
 {
 	const char *directory = getenv("SHOWCASE_KEYPAD_LED");
+	const char *right_soft_key = getenv("SHOWCASE_RIGHT_SOFT_KEY");
 	int descriptor;
 
 	if (strstr(path, "/backlight/")) {
@@ -102,13 +190,16 @@ int __wrap_open(const char *path, int flags, ...)
 			path);
 		exit(2);
 	}
-	if (!strcmp(path, "/dev/input/event0")) {
+	if (!strcmp(path, "/dev/input/event0") ||
+	    (right_soft_key && !strcmp(path, "/dev/input/event2"))) {
+		int index = !strcmp(path, "/dev/input/event0") ? 0 : 1;
+
 		if ((flags & O_ACCMODE) != O_RDONLY) {
 			errno = ENOENT;
 			return -1;
 		}
-		keypad = __real_open("/dev/null", flags);
-		return keypad;
+		keypads[index] = __real_open("/dev/null", flags);
+		return keypads[index];
 	}
 	if (!strcmp(path, "/dev/input/event1")) {
 		if ((flags & O_ACCMODE) != O_RDWR) {
@@ -142,6 +233,12 @@ int __wrap_open(const char *path, int flags, ...)
 
 int __wrap_close(int fd)
 {
+	if (fd == keypads[0])
+		keypads[0] = -1;
+	if (fd == keypads[1])
+		keypads[1] = -1;
+	if (fd == vibrator)
+		vibrator = -1;
 	if (fd == led_brightness)
 		led_brightness = -1;
 	if (fd == led_trigger)
@@ -171,8 +268,9 @@ int __wrap_ioctl(int fd, unsigned long request, ...)
 	void *value;
 	unsigned int number = _IOC_NR(request);
 	unsigned int bytes = _IOC_SIZE(request);
+	bool is_keypad = fd == keypads[0] || fd == keypads[1];
 
-	if (fd != keypad && fd != vibrator) {
+	if (!is_keypad && fd != vibrator) {
 		errno = ENOTTY;
 		return -1;
 	}
@@ -182,8 +280,8 @@ int __wrap_ioctl(int fd, unsigned long request, ...)
 	value = va_arg(arguments, void *);
 	va_end(arguments);
 	if (number == _IOC_NR(EVIOCGPHYS(0))) {
-		const char *phys = fd == keypad ? "fplinux/keypad0" :
-						  "fplinux/vibrator0";
+		const char *phys = is_keypad ? "fplinux/keypad0" :
+					       "fplinux/vibrator0";
 
 		snprintf(value, bytes, "%s", phys);
 		return (int)strlen(phys) + 1;
@@ -191,14 +289,16 @@ int __wrap_ioctl(int fd, unsigned long request, ...)
 	if (number >= _IOC_NR(EVIOCGBIT(0, 0)) &&
 	    number <= _IOC_NR(EVIOCGBIT(EV_MAX, 0))) {
 		unsigned int type = number - _IOC_NR(EVIOCGBIT(0, 0));
-		unsigned int bit = fd == keypad ? FPLINUX_KEY_SOFT_RIGHT :
-						  FF_RUMBLE;
+		unsigned int bit = is_keypad ? FPLINUX_KEY_SOFT_RIGHT :
+					       FF_RUMBLE;
 		unsigned char *bits = value;
 
 		memset(bits, 0, bytes);
 		if (type == 0)
-			bit = fd == keypad ? EV_KEY : EV_FF;
-		if (type == 0 || (fd == keypad && type == EV_KEY) ||
+			bit = is_keypad ? EV_KEY : EV_FF;
+		if (type == 0 ||
+		    (is_keypad && type == EV_KEY &&
+		     keypad_has_right_soft_key(fd)) ||
 		    (fd == vibrator && type == EV_FF)) {
 			if (bit / 8U < bytes)
 				bits[bit / 8U] |= 1U << (bit % 8U);
@@ -222,9 +322,10 @@ ssize_t __wrap_read(int fd, void *buffer, size_t size)
 	};
 	const char *extra_frame = getenv("SHOWCASE_EXTRA_FRAME");
 
-	if (fd != keypad)
+	if (fd != keypads[0] && fd != keypads[1])
 		return __real_read(fd, buffer, size);
-	if (frames_presented < (extra_frame ? 2 : 1)) {
+	if (!keypad_has_right_soft_key(fd) ||
+	    frames_presented < (extra_frame ? 2 : 1)) {
 		errno = EAGAIN;
 		return -1;
 	}
@@ -307,6 +408,23 @@ bool fplinux_drm_session_dispatch(struct fplinux_drm_session *session)
 bool fplinux_drm_session_present(struct fplinux_drm_session *session,
 				 unsigned int page)
 {
+	if (getenv("SHOWCASE_GPU_INIT_FAIL")) {
+		const uint16_t *pixels =
+			(const uint16_t *)((const unsigned char *)
+						   session->mapping +
+					   page * session->page_bytes);
+		size_t count = session->page_bytes / sizeof(*pixels);
+		size_t different = 0;
+
+		for (size_t index = 1; index < count; ++index)
+			if (pixels[index] != pixels[0])
+				++different;
+		if (different <= count / 16U) {
+			fputs("Showcase fallback presented a blank frame\n",
+			      stderr);
+			return false;
+		}
+	}
 	session->shown_page = page;
 	++frames_presented;
 	return true;

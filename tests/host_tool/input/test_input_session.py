@@ -53,6 +53,7 @@ class InputSessionTests:
         [
             "lifecycle",
             "classification",
+            "split-phone",
             "rejected",
             "modifiers",
             "frames",
@@ -63,6 +64,7 @@ class InputSessionTests:
         ids=[
             "lifecycle",
             "classification",
+            "split-phone",
             "rejected",
             "modifiers",
             "frames",

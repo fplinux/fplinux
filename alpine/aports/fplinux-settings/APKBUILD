@@ -1,0 +1,71 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-settings
+pkgver=1
+pkgrel=0
+pkgdesc="Phone settings and system information for FPLinux"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="GPL-2.0-only"
+depends="fplinux-ui fplinux-brand"
+makedepends_build="clang22 lld22 pkgconf gettext"
+makedepends_host="musl-dev musl-libintl linux-headers fplinux-ui-dev"
+options="!check"
+source="
+	fplinux-settings.c
+	fplinux-cli.c
+	fplinux-cli.h
+	settings-core.c
+	settings-core.h
+	fplinux-settings-values.c
+	fplinux-settings-values.h
+	fplinux-ui-profile.c
+	fplinux-ui-profile.h
+	org.fplinux.settings.desktop
+	fplinux-language.c
+	fplinux-language.h
+	fplinux-multitap.c
+	fplinux-multitap.h
+	ru.po
+"
+builddir="$srcdir"
+
+build() {
+	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
+	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		$(pkg-config --cflags fplinux-ui) \
+		fplinux-settings.c settings-core.c fplinux-cli.c fplinux-ui-profile.c \
+		fplinux-settings-values.c \
+		fplinux-language.c fplinux-multitap.c \
+		$(pkg-config --libs fplinux-ui) $LDFLAGS \
+		-Wl,--gc-sections -o fplinux-settings
+	# English is the source text; other languages are catalogues.
+	msgfmt --check --output-file=ru.mo ru.po
+}
+
+package() {
+	install -Dm755 "$builddir/fplinux-settings" \
+		"$pkgdir/usr/bin/fplinux-settings"
+	install -Dm644 "$srcdir/org.fplinux.settings.desktop" \
+		"$pkgdir/usr/share/applications/org.fplinux.settings.desktop"
+	install -Dm644 "$builddir/ru.mo" \
+		"$pkgdir/usr/share/locale/ru/LC_MESSAGES/org.fplinux.settings.mo"
+}
+
+sha512sums="
+5a4fc8721688473cfdeea9c01665555fe726023054fbc2a417da6355d05564f838f98f2d849739cf3e995055c9bde495d5abe2fb16104665823a5048d772a39d  fplinux-settings.c
+60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
+9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
+57064872bbbc42ab4953647da64e605bb9f190047443bbd9f105e5b69a49caaf840e14c85f1ad41946435cccd7e071a7482e2aa14c11b9c23d30556b7bb3d9a2  settings-core.c
+1d4bc4f3e937f94b13d0b0f99abfb3538b3528b5f2a857c98181292ec96508be67f7363b4c22ebd365b3de32ddffe3e5ef111f4b965d32dc8b12063cd762faeb  settings-core.h
+7608a917aad8485f71038c21855f044e567381a9ebb83ea986d4dca8129a3b681974adcbe25d5294ac89007e86b7e295a568458a9d5a95c9ab8285a6a2a9c526  fplinux-settings-values.c
+e85173937a9a7684ab606cf355878cb1a52ba20dc8dc738db00e64de6aa206b99828b59dd399563d5d983e6be2c95ec618f630078922e47b14e586a7f0bbee59  fplinux-settings-values.h
+ee0a8f7e30ca698d657a5c947c17276dc479c7460921d93738e71f9cb6cf0c650296da9f42f79b481db59f59d98c86cca443f8aa0b7770093b1967ce92d252b1  fplinux-ui-profile.c
+a5246061f13bf0f6f8b74b153e607b8bf71492de7c9db6d40925f9a76f7d08c76a49c35459a02179eb5c7ebd742cb2b4111876289828a61aa4c652ccf7749044  fplinux-ui-profile.h
+b7c62152e23187013fbcd2a92d9f8bb978a32a0bc543a06441fbed5dbf7586a8e7797a5d226abbe3b65a09203d6fbcddd11745235d8ae811f3ed2e7622a23b5a  org.fplinux.settings.desktop
+0e113a3d69fa45b700c5c84b7bf10df2656cf986d594252274bb8afbaebbd952ef793d272aed728a911edc1a445eaa911aced6cb9cc0f419967e12a6c9e8d478  fplinux-language.c
+e3e550c2f07726b0f20d49f30300e88c862b3cac031c29b4a89c282719634fea22a5cc6a491c081d95c6381c05cbae6a50b09a579e0d219cf2fab9f29ff63898  fplinux-language.h
+445ed5909ae89e45408e9d925cc1cfe1fb85c07ad4fce76128a8f55fd4fdff7b0e7c957dcbc5bcdd4bf71759b93eb6b360cb22d4507e0e6375369fa68b311190  fplinux-multitap.c
+2cd893f9960835c0bae05ffe8f460d315ae18266973db4370b7649dab648109038b75d5724230f82ba1c3ae8fe55f76548a490cb2e815c9eebd712df0d75f0cf  fplinux-multitap.h
+abcd8e915bdf7450aa673ddc908a5f31c1b416d7c8a9aa7bfe38bd3f41d2d38003b5b073c5e94fc841e563d4cd172b76fbb9760274fef38a9f325aa1d85e4c57  ru.po
+"

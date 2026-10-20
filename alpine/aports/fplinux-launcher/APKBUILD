@@ -1,0 +1,87 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-launcher
+pkgver=1
+pkgrel=0
+pkgdesc="Keypad home, system bars and package-driven FPLinux app catalogue"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="GPL-2.0-only"
+depends="fplinux-ui fplinux-icons fplinux-brand"
+makedepends_build="clang22 lld22 pkgconf gettext"
+makedepends_host="musl-dev musl-libintl linux-headers gcc fplinux-ui-dev"
+options="!check"
+source="
+	fplinux-launcher.c
+	launcher-catalogue.c
+	launcher-catalogue.h
+	launcher-layout.c
+	launcher-layout.h
+	launcher-launch.c
+	launcher-launch.h
+	launcher-power.c
+	launcher-power.h
+	launcher-text.c
+	launcher-text.h
+	launcher-tasks.c
+	launcher-tasks.h
+	org.fplinux.launcher.desktop
+	ru.po
+	fplinux-cli.c
+	fplinux-cli.h
+	fplinux-desktop-entry.c
+	fplinux-desktop-entry.h
+	fplinux-ui-session.h
+	fplinux-ui-profile.c
+	fplinux-ui-profile.h
+"
+builddir="$srcdir"
+
+build() {
+	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
+	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		-I"$srcdir" $(pkg-config --cflags fplinux-ui) \
+		fplinux-launcher.c launcher-catalogue.c launcher-layout.c \
+		launcher-power.c launcher-text.c launcher-tasks.c launcher-launch.c fplinux-cli.c \
+		fplinux-ui-profile.c fplinux-desktop-entry.c $LDFLAGS \
+		$(pkg-config --libs fplinux-ui) -o fplinux-launcher
+	msgfmt --check --output-file=ru.mo ru.po
+}
+
+package() {
+	install -Dm755 fplinux-launcher "$pkgdir/usr/bin/fplinux-launcher"
+	install -Dm644 org.fplinux.launcher.desktop \
+		"$pkgdir/usr/share/applications/org.fplinux.launcher.desktop"
+	install -Dm644 ru.mo \
+		"$pkgdir/usr/share/locale/ru/LC_MESSAGES/org.fplinux.launcher.mo"
+	# The launcher watches the tile directories of every profile's sizes
+	# (fplinux-ui-profile.json row_icon_size and app_icon_size).
+	for size in 16 20 24 32 40 48 56 60; do
+		install -d "$pkgdir/usr/share/icons/hicolor/${size}x$size/apps"
+	done
+}
+
+sha512sums="
+2adecfb20d4aeb20047477a0c1b75f03a7f39d4affe51e9282400183fd90f3beca97d82506de1166da012b9e7cfbf9ec65cafee3ad5b7db1f8c61894fc7efadf  fplinux-launcher.c
+c5be6cda8a21a9904c6ca799c607145cb491c0ce25880f5bdab8ff617237530b8f4c8b2fa32aab48bf135b9875966c9a447a1020b6b6c005bbdb4b943149d0bc  launcher-catalogue.c
+e35a72fabc0ddc423e04d2031bde99ecd86b79f8d010df35a925010cacb7a9006858147aede27dbcf6392ab67aa2f6b87baa9057a6db6b5ceb134e401a68df2c  launcher-catalogue.h
+518a850d3779adec849483f858c0787314b7fddc985fb892141ebf39b163771ddd9d12da5bdb78218b1284c700fdac37f8af9fc17b322cb1b8f300c4eece3cc5  launcher-layout.c
+aa04d798d631e88c8817dab645deca28d97af8762d5d771a479aea0433d42680d35f6825697fc54d040d3943ea835ac39c53835e2cce07f6fd77621651782931  launcher-layout.h
+05daa6f3240378432ebef3c5eae3cc2cb39ca04636cb8c6fd990401ed7df00479253c1bd2f4157bc1e46444559c682ace2ed9cdbf026ec6b647602d932fa8e95  launcher-launch.c
+6d4bc5bdc9d72b277291423b888f22211bbbde97e9463b118c4a197f25a30406fab4c5e47d0283eb659434889af0edb642750fcf897323526ce0589a44caf0eb  launcher-launch.h
+f8685b7d14ee93f67b2476ae75ba68bd8747ce9d22dc9d6d4296f8ab2cf941555214496a45239a19a4bea95dd13fdfadcfe3091025383a9c8dfbfffce93ca070  launcher-power.c
+67c90bcda25449f97998334109707826c90d5e81796d760326cb61e9afa2635c9e49a7ae2246c960454da300e4f00d7569b61d3cdd91ae643de531168d1b88c7  launcher-power.h
+b659f8eb7ca4e5ea9dbfc390144f0aee26bc3ead28b02e131e12481be6f390f1ade2ee63379d970c0fdcb9d5e139f158d74342ffd2427bcb06ced0ca50cbcd1b  launcher-text.c
+5bdf1887b0e6c4bd3e46c8b8ac1e555509a351da69d7933ece6d3f6b27bd8da88431a9f6180bab56d2db29015ca6ddde580f23c99bbcb9b178b511b0d62f2d74  launcher-text.h
+6c83e4d82df62d715c6f2c87ed23d7fe825559f0af1b0ced8d77a5050ee779a6e866b35bd6b8c54f547f32dd0dd8629e35238b561ef13c91a9aa000ccd0a125b  launcher-tasks.c
+6d1c902cc2080d71168728bfdfd5f0f2d809c8ea67bb6afdf92be98fb63622b760239615147c9cf3a7237e3e1a2c453831f150c96c0a8f3151f637135dc73842  launcher-tasks.h
+000d1e9bbe362c0156403fc52bf55ca826beffe0d2889e2ff5bd4dba3bc2d990a18b08a840be22d9eb6842adc1ac0b35fa1e7ba3e1b9ab39a48714e00b61e680  org.fplinux.launcher.desktop
+59102f4c7ed421f12ab24fab992937892ffd5f7e3e4ffc29a60e21a687a265f2ad27253c4bada52ab27c229a103ae71f3a51925265b097167f32ecd634441f17  ru.po
+60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
+9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
+da9487bd879fb7f523db1f20ba936a0994dc990cc649c9bfaf02235d33651f4afba6fe057a91bf9c2b867e314f6272c5ca7c3e91cb5eeb807797a0508715bcfb  fplinux-desktop-entry.c
+056faa694f98cefb0ecc814023dc597937affaeba8e97245d36611b1ed79ddd65e0fa4339eea23ad96643fa9463901a21d07acefbf8372762341e063feaabd21  fplinux-desktop-entry.h
+222a50057879ee8e02462365519c578424aeb51526992dee8de2682bf464dd3f0d9d89e26d70b63d866c2e819878e57ca5c5ad3582d51b1ef108a80a57d1eaf3  fplinux-ui-session.h
+ee0a8f7e30ca698d657a5c947c17276dc479c7460921d93738e71f9cb6cf0c650296da9f42f79b481db59f59d98c86cca443f8aa0b7770093b1967ce92d252b1  fplinux-ui-profile.c
+a5246061f13bf0f6f8b74b153e607b8bf71492de7c9db6d40925f9a76f7d08c76a49c35459a02179eb5c7ebd742cb2b4111876289828a61aa4c652ccf7749044  fplinux-ui-profile.h
+"

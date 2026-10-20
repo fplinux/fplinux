@@ -33,16 +33,11 @@ static int print_symbols(const char *data_root)
 int main(int argc, char **argv)
 {
 	if (argc != 3) {
-		fprintf(stderr, "usage: %s symbols|printable ARGUMENT\n",
-			argv[0]);
+		fprintf(stderr, "usage: %s symbols ARGUMENT\n", argv[0]);
 		return 2;
 	}
 	if (strcmp(argv[1], "symbols") == 0)
 		return print_symbols(argv[2]);
-	if (strcmp(argv[1], "printable") == 0)
-		return fplinux_keyboard_text_is_printable(argv[2]) ?
-			       EXIT_SUCCESS :
-			       EXIT_FAILURE;
 	fprintf(stderr, "unknown mode %s\n", argv[1]);
 	return 2;
 }

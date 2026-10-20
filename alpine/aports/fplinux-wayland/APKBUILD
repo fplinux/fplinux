@@ -1,0 +1,78 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-wayland
+pkgver=1.26.0
+pkgrel=0
+pkgdesc="Wayland libraries for FPLinux graphical applications"
+url="https://wayland.freedesktop.org"
+arch="armv7"
+license="MIT"
+makedepends_build="clang22 lld22 meson samurai expat-dev pkgconf"
+makedepends_host="musl-dev linux-headers libffi-dev"
+subpackages="$pkgname-dev $pkgname-cursor"
+options="!check"
+_protocolver=1.49
+source="
+	https://gitlab.freedesktop.org/wayland/wayland/-/releases/$pkgver/downloads/wayland-$pkgver.tar.xz
+	https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/$_protocolver/downloads/wayland-protocols-$_protocolver.tar.xz
+"
+builddir="$srcdir/wayland-$pkgver"
+
+build() {
+	: "${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
+	CC=clang CPPFLAGS="${HOSTCPPFLAGS:-}" CFLAGS=-Os LDFLAGS=-fuse-ld=lld \
+		PKG_CONFIG_PATH= \
+		PKG_CONFIG_LIBDIR=/usr/lib/pkgconfig:/usr/share/pkgconfig \
+		PKG_CONFIG_SYSROOT_DIR=/ \
+		meson setup --prefix="$builddir/host" --libdir=lib \
+		-Dlibraries=false -Dtests=false -Ddocumentation=false \
+		-Ddtd_validation=false host-output
+	meson compile -C host-output
+	meson install --no-rebuild -C host-output
+	export PATH="$builddir/host/bin:$PATH"
+	export PKG_CONFIG_PATH_FOR_BUILD="$builddir/host/lib/pkgconfig"
+	export PKG_CONFIG_SYSROOT_DIR_FOR_BUILD=/
+	cat >fplinux-cross.meson <<-EOF
+		[binaries]
+		ar = '$CHOST-ar'
+		[properties]
+		pkg_config_libdir = ['$CBUILDROOT/usr/lib/pkgconfig', '$CBUILDROOT/usr/share/pkgconfig']
+	EOF
+	abuild-meson --cross-file fplinux-cross.meson \
+		-Ddefault_library=shared -Dscanner=false -Dtests=false \
+		-Ddocumentation=false -Ddtd_validation=false output
+	meson compile -C output
+	PKG_CONFIG_PATH="$builddir/host/lib/pkgconfig" \
+		PKG_CONFIG_LIBDIR=/usr/lib/pkgconfig:/usr/share/pkgconfig \
+		PKG_CONFIG_SYSROOT_DIR=/ \
+		meson setup --prefix=/usr --libdir=lib -Dtests=false \
+		protocol-output "$srcdir/wayland-protocols-$_protocolver"
+	meson compile -C protocol-output
+}
+
+package() {
+	DESTDIR="$pkgdir" meson install --no-rebuild -C output
+	DESTDIR="$pkgdir" meson install --no-rebuild -C protocol-output
+	install -Dm644 protocol/wayland.xml "$pkgdir/usr/share/wayland/wayland.xml"
+	rm -f "$pkgdir"/usr/lib/libwayland-egl* \
+		"$pkgdir"/usr/lib/pkgconfig/wayland-egl*
+	install -Dm644 COPYING "$pkgdir/usr/share/licenses/$pkgname/COPYING"
+}
+
+dev() {
+	default_dev
+	amove usr/share/wayland-protocols usr/share/wayland
+	install -Dm644 "$srcdir/wayland-protocols-$_protocolver/COPYING" \
+		"$subpkgdir/usr/share/licenses/$subpkgname/wayland-protocols-COPYING"
+}
+
+# No FPLinux program loads libwayland-cursor; weston's build only checks for
+# it, so the -dev package keeps its link and pulls this package in.
+cursor() {
+	pkgdesc="Wayland cursor theme library"
+	amove usr/lib/libwayland-cursor.so.*
+}
+
+sha512sums="
+50861b0c40cedec5f31b49ff1e99fc135a299fa4a8e2ff50ff4bac3f42e2f3f7be38271929fd2f6e58d83d5df516f643946ceba7937cc199581487c082c7ec31  wayland-1.26.0.tar.xz
+c6f58586c4e3046fb545f31959eb662426ddf94cab627a136bec905c3a1c75087ed2850d49e44964241a9158a3559ad02607647a19fb5f1c1fb254160b04806c  wayland-protocols-1.49.tar.xz
+"

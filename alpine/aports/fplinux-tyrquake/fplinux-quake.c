@@ -21,7 +21,6 @@
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
 #define FPLINUX_QUAKE_CARD_MOUNT "/mnt/card"
 #define FPLINUX_QUAKE_GAME_DATA FPLINUX_QUAKE_CARD_MOUNT "/fplinux/quake/id1"
-#define FPLINUX_QUAKE_ENGINE "/usr/bin/tyr-quake"
 #define FPLINUX_QUAKE_LOCK_PATH "/tmp/fplinux-quake.lock"
 /* Kibibytes the engine reserves for its own allocator. The default suits a
  * phone that keeps its game data on a card; a phone holding that data in RAM
@@ -33,6 +32,12 @@
 
 static volatile sig_atomic_t pending_signal;
 static const int forwarded_signals[] = { SIGHUP, SIGINT, SIGQUIT, SIGTERM };
+
+enum quake_renderer {
+	QUAKE_RENDERER_AUTO,
+	QUAKE_RENDERER_SOFTWARE,
+	QUAKE_RENDERER_GPU,
+};
 
 static _Noreturn void die(const char *message)
 {
@@ -275,8 +280,12 @@ void fplinux_quake_remove_runtime(const char *runtime)
 			strerror(errno));
 }
 
-static pid_t start_engine(const char *runtime, unsigned long heap_kib)
+static pid_t start_engine(const char *runtime, unsigned long heap_kib,
+			  enum quake_renderer renderer, bool stats)
 {
+	const char *engine = renderer == QUAKE_RENDERER_SOFTWARE ?
+				     FPLINUX_QUAKE_SOFTWARE_ENGINE :
+				     FPLINUX_QUAKE_GPU_ENGINE;
 	char heap[32];
 	pid_t child;
 
@@ -284,13 +293,18 @@ static pid_t start_engine(const char *runtime, unsigned long heap_kib)
 		die("heap size is too long");
 
 	char *const arguments[] = {
-		(char *)FPLINUX_QUAKE_ENGINE,
+		(char *)engine,
 		"-nolan",
 		"-basedir",
 		(char *)runtime,
 		"-heapsize",
 		heap,
 		"+mlook",
+		"+fplinux_stats",
+		stats ? "1" : "0",
+		renderer == QUAKE_RENDERER_AUTO ?
+			FPLINUX_QUAKE_FALLBACK_ARGUMENT :
+			NULL,
 		NULL,
 	};
 
@@ -302,9 +316,9 @@ static pid_t start_engine(const char *runtime, unsigned long heap_kib)
 		reset_signal_handlers();
 		if (setenv("HOME", runtime, 1) < 0)
 			_exit(126);
-		execv(FPLINUX_QUAKE_ENGINE, arguments);
-		fprintf(stderr, "quake: cannot execute %s: %s\n",
-			FPLINUX_QUAKE_ENGINE, strerror(errno));
+		execv(engine, arguments);
+		fprintf(stderr, "quake: cannot execute %s: %s\n", engine,
+			strerror(errno));
 		_exit(126);
 	}
 	return child;
@@ -338,10 +352,14 @@ static int wait_for_engine(pid_t child)
 
 enum quake_option {
 	QUAKE_OPTION_HEAPSIZE,
+	QUAKE_OPTION_RENDERER,
+	QUAKE_OPTION_STATS,
 };
 
 struct quake_options {
 	unsigned long heap_kib;
+	enum quake_renderer renderer;
+	bool stats;
 };
 
 static bool parse_heap_kib(const char *value, unsigned long *heap_kib,
@@ -385,6 +403,19 @@ static const char *parse_quake_option(size_t option, const char *value,
 		if (!parse_heap_kib(value, &options->heap_kib, &argument_error))
 			return argument_error;
 		return NULL;
+	case QUAKE_OPTION_RENDERER:
+		if (!strcmp(value, "auto"))
+			options->renderer = QUAKE_RENDERER_AUTO;
+		else if (!strcmp(value, "software"))
+			options->renderer = QUAKE_RENDERER_SOFTWARE;
+		else if (!strcmp(value, "gpu"))
+			options->renderer = QUAKE_RENDERER_GPU;
+		else
+			return "--renderer must be auto, software or gpu";
+		return NULL;
+	case QUAKE_OPTION_STATS:
+		options->stats = true;
+		return NULL;
 	default:
 		return "unknown option";
 	}
@@ -399,6 +430,15 @@ static enum fplinux_cli_result parse_arguments(int argc, char **argv,
 			.metavar = "KIBIBYTES",
 			.help = "memory the engine reserves (default 32768)",
 		},
+		[QUAKE_OPTION_RENDERER] = {
+			.name = "renderer",
+			.metavar = "auto|software|gpu",
+			.help = "drawing engine (default auto; GPU requires Mesa)",
+		},
+		[QUAKE_OPTION_STATS] = {
+			.name = "stats",
+			.help = "show frame timing, memory and temperature",
+		},
 	};
 	struct fplinux_cli cli = {
 		.program = argv[0],
@@ -411,6 +451,8 @@ static enum fplinux_cli_result parse_arguments(int argc, char **argv,
 	};
 
 	options->heap_kib = FPLINUX_QUAKE_HEAP_DEFAULT_KIB;
+	options->renderer = QUAKE_RENDERER_AUTO;
+	options->stats = false;
 	return fplinux_cli_parse(&cli, argc, argv);
 }
 
@@ -435,7 +477,8 @@ int main(int argc, char **argv)
 	require_pak(pak0);
 	prepare_runtime(runtime, sizeof(runtime));
 	install_signal_handlers();
-	child = start_engine(runtime, options.heap_kib);
+	child = start_engine(runtime, options.heap_kib, options.renderer,
+			     options.stats);
 	child_status = wait_for_engine(child);
 	fplinux_quake_remove_runtime(runtime);
 	close(lock);

@@ -4,6 +4,24 @@
 #include <stdio.h>
 #include <string.h>
 
+const struct fplinux_multitap_language fplinux_terminal_languages[2] = {
+	{
+		.code = "en",
+		.name = "English (EN)",
+		.indicator = { "EN", "EN", "EN" },
+		.keys = { " 0", ".,!?@$/+-=%^_:;'*#1", "abc2", "def3", "ghi4",
+			  "jkl5", "mno6", "pqrs7", "tuv8", "wxyz9" },
+	},
+	{
+		.code = "ru",
+		.name = "Russian (RU)",
+		.indicator = { "RU", "RU", "RU" },
+		.keys = { " 0", ".,!?@$/+-=%^_:;'*#1", "абвг2", "деёжз3",
+			  "ийкл4", "мноп5", "рсту6", "фхцч7", "шщъы8",
+			  "ьэюя9" },
+	},
+};
+
 static void queue_write(struct tsm_vte *vte, const char *bytes, size_t size,
 			void *data)
 {
@@ -61,7 +79,8 @@ bool fplinux_terminal_init(struct fplinux_terminal *terminal,
 	};
 
 	memset(terminal, 0, sizeof(*terminal));
-	fplinux_multitap_init(&terminal->compose);
+	fplinux_multitap_init(&terminal->compose,
+			      &fplinux_terminal_languages[0], 700);
 	if (!shell_token || !*shell_token || strlen(shell_token) > 32)
 		return false;
 	snprintf(terminal->shell_marker, sizeof(terminal->shell_marker),

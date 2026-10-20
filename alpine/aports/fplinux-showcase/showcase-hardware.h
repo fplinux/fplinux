@@ -4,31 +4,21 @@
 
 #include "armada-scene.h"
 #include "fplinux-brightness-client.h"
-
-#define SHOWCASE_CLASS_PATH_BYTES 512U
-
-struct showcase_class_output {
-	char brightness[SHOWCASE_CLASS_PATH_BYTES];
-	char max_brightness[SHOWCASE_CLASS_PATH_BYTES];
-	char trigger[SHOWCASE_CLASS_PATH_BYTES];
-};
+#include "fplinux-keypad-light.h"
 
 struct showcase_hardware {
 	int keypad;
 	int vibrator;
 	int effect_id;
-	int keypad_original;
-	char *keypad_trigger_original;
 	struct fplinux_brightness_client brightness;
 	bool keypad_grabbed;
-	bool keypad_interface;
 	bool effect_uploaded;
 	bool keypad_on;
 	bool rumble_on;
 	bool brightness_claimed;
 	uint16_t rumble_cue_id;
 	int lcd_level;
-	struct showcase_class_output keypad_led;
+	struct fplinux_keypad_light keypad_light;
 };
 
 struct fplinux_drm_session;

@@ -1,0 +1,116 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-debug-tools
+pkgver=7.1.0
+pkgrel=0
+pkgdesc="Performance, tracing and display diagnostic tools for FPLinux debug builds"
+url="https://perf.wiki.kernel.org/"
+arch="armv7"
+license="GPL-2.0-only"
+depends="strace"
+makedepends_build="bison clang22 flex lld22 llvm22 make pkgconf"
+makedepends_host="elfutils-dev fplinux-libdrm-dev fplinux-mesa-dev linux-headers musl-dev zlib-dev zstd-dev"
+options="!check"
+source="https://cdn.kernel.org/pub/linux/kernel/tools/perf/v$pkgver/perf-$pkgver.tar.xz
+	0001-perf-record-skip-unsupported-bpf-metadata.patch
+	fplinux-display-test.c
+	display-test-pattern.c
+	display-test-pattern.h
+	display-test-gpu.c
+	display-test-gpu.h
+	display-test-gpu.vert
+	display-test-gpu.frag
+	fplinux-gpu.c
+	fplinux-gpu.h
+	fplinux-gpu-output.c
+	fplinux-gpu-output.h
+	fplinux-drm-session.c
+	fplinux-drm-session.h
+	fplinux-cli.c
+	fplinux-cli.h
+"
+builddir="$srcdir/perf-$pkgver/tools/perf"
+
+build() {
+	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
+	# Keep ELF symbols and stdio reports without optional language, UI or tracing libraries.
+	make -f Makefile.perf -j"${JOBS:-1}" \
+		ARCH=arm \
+		CROSS_COMPILE="$CHOST-" \
+		CC="$CC --sysroot=$CBUILDROOT" \
+		CXX="$CXX --sysroot=$CBUILDROOT" \
+		LD="$CHOST-ld -m armelf_linux_eabi" \
+		AR=/usr/lib/llvm22/bin/llvm-ar \
+		HOSTCC=cc HOSTLD=ld HOSTAR=ar \
+		CLANG_CROSS_FLAGS="--target=$CHOST --sysroot=$CBUILDROOT" \
+		EXTRA_CFLAGS="$CPPFLAGS $CFLAGS" \
+		LDFLAGS="$LDFLAGS" \
+		prefix=/usr lib=lib \
+		WERROR=0 \
+		BUILD_BPF_SKEL=0 \
+		NO_AIO=1 \
+		NO_BACKTRACE=1 \
+		NO_CAPSTONE=1 \
+		NO_DEMANGLE=1 \
+		NO_JEVENTS=1 \
+		NO_JVMTI=1 \
+		NO_LIBBABELTRACE=1 \
+		NO_LIBBPF=1 \
+		NO_LIBDEBUGINFOD=1 \
+		NO_LIBDW=1 \
+		NO_LIBLLVM=1 \
+		NO_LIBNUMA=1 \
+		NO_LIBPFM4=1 \
+		NO_LIBPYTHON=1 \
+		NO_LIBTRACEEVENT=1 \
+		NO_LIBUNWIND=1 \
+		NO_LZMA=1 \
+		NO_RUST=1 \
+		NO_SDT=1 \
+		NO_SHELLCHECK=1 \
+		NO_SLANG=1 \
+		perf
+
+	"$CC" $CPPFLAGS $CFLAGS -std=c11 -Wall -Wextra -Werror \
+		-I"$srcdir" $(pkg-config --cflags libdrm) \
+		"$srcdir/fplinux-display-test.c" \
+		"$srcdir/display-test-pattern.c" \
+		"$srcdir/display-test-gpu.c" \
+		"$srcdir/fplinux-gpu.c" \
+		"$srcdir/fplinux-gpu-output.c" \
+		"$srcdir/fplinux-drm-session.c" \
+		"$srcdir/fplinux-cli.c" \
+		$(pkg-config --libs libdrm) -ldl $LDFLAGS -o fplinux-display-test
+}
+
+package() {
+	install -Dm755 perf "$pkgdir/usr/bin/perf"
+	install -Dm755 fplinux-display-test "$pkgdir/usr/bin/fplinux-display-test"
+	install -Dm644 "$srcdir/display-test-gpu.vert" \
+		"$pkgdir/usr/share/fplinux/display-test/display-test-gpu.vert"
+	install -Dm644 "$srcdir/display-test-gpu.frag" \
+		"$pkgdir/usr/share/fplinux/display-test/display-test-gpu.frag"
+	install -Dm644 Documentation/tips.txt \
+		"$pkgdir/usr/share/doc/perf-tip/tips.txt"
+	install -Dm644 "$builddir/../../LICENSES/preferred/GPL-2.0" \
+		"$pkgdir/usr/share/licenses/$pkgname/GPL-2.0"
+}
+sha512sums="
+ce08606f52f5429cf23fb88c2aa8aeb9090d3b96c96f5a296ce9a65a66b1035c22afd1818136986512958552a024b6e4188e660c526387a7ee9c32adf2056899  perf-7.1.0.tar.xz
+5cab8be7741000b016fbc1ea808e07f3ce6d5fe6478ec849f29380d3aaa938e5d02c3a40eda019f06cc7b3dbbbad41d16f9614d51c5f3b2e9d50ca038eb83fef  0001-perf-record-skip-unsupported-bpf-metadata.patch
+6f1f9c3480ade5caae6c90def0d2463f33c078022a255a6e4909d7087f8fb182e14c8c10bfac670102706ebe93469637aa4e8da0b69f303d00a41e109365d018  fplinux-display-test.c
+da89be2125d70599a648465208ead5dcfe8cf42a168dc0debd269e3cee60a269ed6fc08db8d7032d8e79c92576b94c3ef92af5938d560ff80db5e4769fbf7bfc  display-test-pattern.c
+01814973ede09bb7d094d4b3b12cac3016f22b37ea09caae0ca3b8fdf79f2a6f7ef96caaf7f72f139804924b8744feeb250b5e227062e95b328958afca1f9032  display-test-pattern.h
+316cc0088a963374f1a6f99f878e1e6c321333b2374b3c5fb2937b6943f96a12f692a707aaf8c0650193906e12351f1e6b6fd73eeea7acbe3538987768c0b04f  display-test-gpu.c
+831acf37fbcef6fcbe79d61a15694635e9758a71532ae40c2034d9e37d67f0c2bc158532288de09db57534b89c046483bdee1ba8c92001a84663d1c5fd62f6ae  display-test-gpu.h
+30983aa3e3b9f5e02ed3b9d1f366daaf36be0af7bc2c2468726dddcda22f44b2261c794962f957b93c4aef2b8357fa9960d1a8e4055678c5fb11fc4c6ae9cebd  display-test-gpu.vert
+035af3ca0398145730811fb6a7c7aba18ec22f199832d5befffcdb60586449fca0593b28d031445076e040d016f834464fe4f0bde8bd8ddaffe0dfb0957f1ef8  display-test-gpu.frag
+e8b0dfbcb7fb85a89769c5fd34ec28d5dc760cb2c942fdd62106fc7e2cc0b48f3554f04790ff8dd4c1434efbdfaa23bc09cfd3aae30794266dd198cbf2bc70c1  fplinux-gpu.c
+10900357bfb08a54a9327d5a26039103f3887f05b32af1165843308a6ab7a7289dacf08afda48041daab62b17b6b49fd4b59a32c29814d0a9ff476bd34a0b61a  fplinux-gpu.h
+28075090738c4c164535b2b51139b37ae6e8bffa3d5d23bdfd8d3a6372b30e0a2bcf4bed2ecdd8a412360f2d79a74c824a7fa9f4b4aa8cc1a7162658e3b87eb3  fplinux-gpu-output.c
+a9f09ae634fadb765916ddfa79ef109a5ea5385bbe37a131e26540bfc06547649ef7dae07b510f99462bb8c34f33b68358556093159e70185b99356521e01430  fplinux-gpu-output.h
+6b253f856c2a6886801ec56fd4f607019b89c5465a9fffd78ea4196cadc90688b452b10e45d4767e2cfddd5d846dad4bba2b8452e0c79426f08a4ed057e0e104  fplinux-drm-session.c
+a71678fa063e52aa2220c2bfd391a2a3cf154c04c1cdb7e078e3942f4f24d8510c1d7bd8d5b57bd96e0d32842c319f53f52731c26e0b80bbfb32774c7ba8fc74  fplinux-drm-session.h
+60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
+9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
+"

@@ -1,0 +1,38 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-gpu-probe
+pkgver=1
+pkgrel=0
+pkgdesc="Offscreen Panfrost rendering check for FPLinux"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="GPL-2.0-only"
+depends="fplinux-mesa fplinux-libdrm"
+makedepends_build="clang22 lld22 pkgconf"
+makedepends_host="musl-dev linux-headers fplinux-mesa-dev fplinux-libdrm-dev"
+options="!check"
+source="fplinux-gpu-probe.c fplinux-cli.c fplinux-cli.h fplinux-gpu.c fplinux-gpu.h"
+builddir="$srcdir"
+
+build() {
+	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
+	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+	"$CC" $CPPFLAGS $CFLAGS -O2 -std=c11 -Wall -Wextra -Werror \
+		-I"$srcdir" $(pkg-config --cflags egl glesv2 libdrm) \
+		"$srcdir/fplinux-gpu-probe.c" "$srcdir/fplinux-cli.c" \
+		"$srcdir/fplinux-gpu.c" \
+		$(pkg-config --libs glesv2 libdrm) -ldl $LDFLAGS \
+		-o fplinux-gpu-probe
+}
+
+package() {
+	install -Dm755 "$builddir/fplinux-gpu-probe" \
+		"$pkgdir/usr/bin/fplinux-gpu-probe"
+}
+
+sha512sums="
+c9eb96977f0806d8f43278d60fbf14917b3aa923622a870520b266b2da5413f46c2c01cf1c2850e44e460cd2017ac5bbb5e333c690e32717dc05b1349f3faa71  fplinux-gpu-probe.c
+60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
+9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
+e8b0dfbcb7fb85a89769c5fd34ec28d5dc760cb2c942fdd62106fc7e2cc0b48f3554f04790ff8dd4c1434efbdfaa23bc09cfd3aae30794266dd198cbf2bc70c1  fplinux-gpu.c
+10900357bfb08a54a9327d5a26039103f3887f05b32af1165843308a6ab7a7289dacf08afda48041daab62b17b6b49fd4b59a32c29814d0a9ff476bd34a0b61a  fplinux-gpu.h
+"

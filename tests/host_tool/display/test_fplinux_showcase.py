@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -27,6 +28,7 @@ class ShowcaseHarness:
     """Linked scene renderer and its two immutable fixture fonts."""
 
     executable: Path
+    output_executable: Path
     small_font: Path
     large_font: Path
 
@@ -40,10 +42,19 @@ class FplinuxShowcaseHostToolTests:
         """Link the host harness once for this test group."""
         with c_build_directory(tmp_path_factory, "fplinux-showcase") as temporary:
             executable = temporary / "fplinux-showcase-test"
+            output_executable = temporary / "armada-output-test"
             small_font = temporary / "small.psf"
             large_font = temporary / "large.psf"
             write_solid_ascii_font(small_font, width=6, height=12)
             write_solid_ascii_font(large_font, width=8, height=16)
+            drm_flags = shlex.split(
+                run_process(
+                    ["pkg-config", "--cflags", "--libs", "libdrm"],
+                    name="read DRM flags for the Showcase GPU boundary",
+                    timeout=10,
+                    check=True,
+                ).stdout
+            )
             compile_c(
                 executable,
                 [
@@ -52,24 +63,101 @@ class FplinuxShowcaseHostToolTests:
                     "-Wall",
                     "-Wextra",
                     "-Werror",
+                    "-isystem",
+                    "/opt/quality/include",
                     f"-I{APORT}",
                     f"-I{ROOT / 'include/fplinux'}",
                     str(HARNESS),
                     str(SCENE),
                     str(APORT / "armada-storyboard.c"),
                     str(APORT / "armada-renderer.c"),
+                    str(APORT / "armada-geometry.c"),
+                    str(APORT / "armada-overlay.c"),
+                    str(APORT / "armada-gpu-renderer.c"),
                     str(ROOT / "lib/fplinux/fplinux-font.c"),
+                    str(ROOT / "lib/fplinux/fplinux-gpu.c"),
+                    str(ROOT / "lib/fplinux/fplinux-gpu-output.c"),
+                    str(ROOT / "lib/fplinux/fplinux-drm-session.c"),
+                    "-ldl",
+                    *drm_flags,
                 ],
                 name="compile FPLinux showcase host harness",
                 check=True,
             )
-            yield ShowcaseHarness(executable, small_font, large_font)
+            compile_c(
+                output_executable,
+                [
+                    "-O2",
+                    "-std=c11",
+                    "-Wall",
+                    "-Wextra",
+                    "-Werror",
+                    "-isystem",
+                    "/opt/quality/include",
+                    f"-I{APORT}",
+                    f"-I{ROOT / 'include/fplinux'}",
+                    f'-DARMADA_SHADER_DIRECTORY="{APORT}"',
+                    str(ROOT / "tests/host_tool/display/armada-output.c"),
+                    str(SCENE),
+                    str(APORT / "armada-storyboard.c"),
+                    str(APORT / "armada-renderer.c"),
+                    str(APORT / "armada-geometry.c"),
+                    str(APORT / "armada-overlay.c"),
+                    str(APORT / "armada-gpu-renderer.c"),
+                    str(ROOT / "lib/fplinux/fplinux-font.c"),
+                    *drm_flags,
+                ],
+                name="compile ARMADA native output host harness",
+                check=True,
+            )
+            yield ShowcaseHarness(executable, output_executable, small_font, large_font)
 
-    def test_renderer_and_timeline_at_both_display_sizes(self, harness: ShowcaseHarness) -> None:
+    def test_software_renderer_and_timeline_at_supported_display_sizes(
+        self, harness: ShowcaseHarness
+    ) -> None:
         """Protect bounds, frame-history independence, cues, and loop wrapping."""
         run_process(
             [str(harness.executable), str(harness.small_font), str(harness.large_font)],
             name="run FPLinux showcase host harness",
             timeout=30,
+            check=True,
+        )
+
+    @pytest.mark.parametrize(("width", "height"), [(240, 320), (128, 160), (320, 240)])
+    def test_gpu_scene_uses_the_padded_native_back_page(
+        self, harness: ShowcaseHarness, width: int, height: int
+    ) -> None:
+        """Exercise actual scene objects with synthetic GPU and display output."""
+        font = harness.small_font if width == 128 else harness.large_font
+        run_process(
+            [str(harness.output_executable), "render", str(width), str(height), str(font)],
+            name=f"render ARMADA into a padded {width}x{height} native output",
+            timeout=10,
+            check=True,
+        )
+
+    @pytest.mark.parametrize(
+        "scenario",
+        [
+            "output-failure",
+            "forced-gpu-failure",
+            "missing-procedure",
+            "shader-failure",
+            "link-failure",
+            "target-failure",
+            "cleanup-failure",
+            "render-failure",
+            "begin-failure",
+            "end-failure",
+        ],
+    )
+    def test_gpu_failure_cleanup_and_software_fallback(
+        self, harness: ShowcaseHarness, scenario: str
+    ) -> None:
+        """Keep ownership ordered and stop failed frames before presentation."""
+        run_process(
+            [str(harness.output_executable), scenario, "240", "320", str(harness.large_font)],
+            name=f"exercise ARMADA native output {scenario}",
+            timeout=10,
             check=True,
         )

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from fplinux_cli.alpine.aports import materialize_aport_sources
 
 from tests import ROOT
 from tests.c_harness import c_build_directory, compile_c
@@ -18,8 +19,6 @@ from tests.process import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-
-TERMINAL = ROOT / "alpine/aports/fplinux-terminal"
 
 
 @dataclass(frozen=True)
@@ -37,8 +36,9 @@ class TerminalEngineTests:
     @pytest.fixture(scope="class")
     @classmethod
     def harness(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[TerminalEngineHarness]:
-        """Link the production terminal sources and write the fixture fonts."""
+        """Link the staged terminal sources and write the fixture fonts."""
         with c_build_directory(tmp_path_factory, "fplinux-terminal-engine") as directory:
+            aport = materialize_aport_sources("fplinux-terminal", ROOT, directory / "aport")
             executable = directory / "terminal-engine"
             fonts = []
             for width, height in ((6, 12), (8, 16), (8, 32)):
@@ -63,24 +63,23 @@ class TerminalEngineTests:
                     "-Wextra",
                     "-Werror",
                     "-I",
-                    str(ROOT / "include/fplinux"),
-                    "-I",
-                    str(TERMINAL),
+                    str(aport),
                     str(ROOT / "tests/host_tool/terminal/fplinux-terminal-engine.c"),
-                    str(TERMINAL / "terminal-engine.c"),
-                    str(TERMINAL / "terminal-input.c"),
-                    str(TERMINAL / "terminal-help.c"),
-                    str(TERMINAL / "terminal-pty.c"),
-                    str(TERMINAL / "terminal-render.c"),
-                    str(ROOT / "lib/fplinux/fplinux-font.c"),
-                    str(ROOT / "lib/fplinux/fplinux-multitap.c"),
+                    str(aport / "terminal-engine.c"),
+                    str(aport / "terminal-input.c"),
+                    str(aport / "terminal-help.c"),
+                    str(aport / "terminal-pty.c"),
+                    str(aport / "terminal-render.c"),
+                    str(aport / "fplinux-font.c"),
+                    str(aport / "fplinux-multitap.c"),
+                    str(aport / "fplinux-language.c"),
                     "-ltsm",
                 ],
                 name="compile terminal engine harness",
                 check=True,
             )
             yield TerminalEngineHarness(
-                executable, TERMINAL / "fplinux-terminal.bashrc", tuple(fonts)
+                executable, aport / "fplinux-terminal.bashrc", tuple(fonts)
             )
 
     def run_scenario(self, harness: TerminalEngineHarness, scenario: str) -> None:
@@ -138,6 +137,12 @@ class TerminalEngineTests:
     ) -> None:
         """Engine state and queued PTY bytes follow the documented terminal controls."""
         self.run_scenario(harness, scenario)
+
+    def test_status_preserves_full_utf8_language_indicator_when_it_fits(
+        self, harness: TerminalEngineHarness
+    ) -> None:
+        """A maximum-size indicator is complete on a wide screen and omitted on a narrow one."""
+        self.run_scenario(harness, "language-status")
 
     @pytest.mark.parametrize(
         "scenario",
