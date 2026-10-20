@@ -15,7 +15,13 @@ struct platform_device {
 };
 struct resource {
 	phys_addr_t start;
+	phys_addr_t end;
 };
+static inline resource_size_t resource_size(const struct resource *resource)
+{
+	return resource->end - resource->start + 1;
+}
+
 #define IORESOURCE_MEM 0x00000200
 void *devm_platform_ioremap_resource_byname(struct platform_device *pdev,
 					    const char *name);

@@ -284,6 +284,49 @@ static DBusHandlerResult handle_property(DBusConnection *connection,
 	return DBUS_HANDLER_RESULT_HANDLED;
 }
 
+static bool copy_sent_file(DBusConnection *connection, DBusMessage *message)
+{
+	const char *path;
+	char bytes[4096];
+	int source;
+	int destination;
+	ssize_t size;
+
+	if (!dbus_message_get_args(message, NULL, DBUS_TYPE_STRING, &path,
+				   DBUS_TYPE_INVALID))
+		fail("SendFile did not supply one filename");
+	source = open(path, O_RDONLY);
+	if (source < 0) {
+		send_reply(connection, dbus_message_new_error(
+					       message, DBUS_ERROR_FAILED,
+					       "cannot open SendFile source"));
+		return false;
+	}
+	destination = open("sent-bytes", O_WRONLY | O_CREAT | O_EXCL, 0600);
+	if (destination < 0)
+		fail("cannot create the sent-file observation");
+	for (;;) {
+		size = read(source, bytes, sizeof(bytes));
+		if (size < 0 && errno == EINTR)
+			continue;
+		if (size <= 0)
+			break;
+		for (ssize_t used = 0; used < size;) {
+			ssize_t written = write(destination, bytes + used,
+						(size_t)(size - used));
+
+			if (written < 0 && errno == EINTR)
+				continue;
+			if (written <= 0)
+				fail("cannot record sent-file contents");
+			used += written;
+		}
+	}
+	if (size < 0 || close(source) < 0 || close(destination) < 0)
+		fail("cannot finish the sent-file observation");
+	return true;
+}
+
 static DBusHandlerResult handle(DBusConnection *connection,
 				DBusMessage *message, void *data)
 {
@@ -297,6 +340,9 @@ static DBusHandlerResult handle(DBusConnection *connection,
 	if (dbus_message_is_method_call(message, "org.bluez.obex.ObjectPush1",
 					"SendFile")) {
 		const char *complete = "complete";
+
+		if (!copy_sent_file(connection, message))
+			return DBUS_HANDLER_RESULT_HANDLED;
 		emit_property(connection, TRANSFER_PATH,
 			      "org.bluez.obex.Transfer1", "Status",
 			      DBUS_TYPE_STRING, &complete);

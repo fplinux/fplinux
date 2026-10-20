@@ -29,6 +29,9 @@ static struct {
 	u8 response[16];
 	size_t response_bytes;
 	unsigned int acquires, releases, writes;
+	unsigned int mute_writes;
+	int current_mute;
+	bool muted;
 	int acquire_error;
 	int read_error;
 	bool fail_first_irq;
@@ -113,12 +116,14 @@ int sdio_writesb(struct sdio_func *func, unsigned int address,
 {
 	static const u8 enable[] = { 1, 0x8c, 0xfc, 3, 0, 0, 1 };
 	static const u8 mute[] = { 1, 0x8c, 0xfc, 2, 2, 1 };
+	static const u8 unmute[] = { 1, 0x8c, 0xfc, 2, 2, 0 };
 	static const u8 tune_low[] = { 1, 0x8c, 0xfc, 3, 1, 0x2e, 0x22 };
 	static const u8 tune_play[] = { 1, 0x8c, 0xfc, 3, 1, 0x38, 0x27 };
 	static const u8 seek[] = { 1, 0x8c, 0xfc, 4, 4, 0x2e, 0x22, 0 };
 	static const u8 disable[] = { 1, 0x8c, 0xfc, 2, 0x12, 0 };
 	static const u8 enabled[] = { 4, 0x0e, 4, 1, 0x8c, 0xfc, 0 };
 	static const u8 muted[] = { 4, 0x0e, 5, 1, 0x8c, 0xfc, 0, 1 };
+	static const u8 unmuted[] = { 4, 0x0e, 5, 1, 0x8c, 0xfc, 0, 0 };
 	static const u8 tuned_low[] = { 4, 0x0e, 8, 1,	  0x8c, 0xfc,
 					0, 0,	 0, 0x2e, 0x22 };
 	static const u8 tuned_play[] = { 4, 0x0e, 8, 1,	   0x8c, 0xfc,
@@ -146,10 +151,13 @@ int sdio_writesb(struct sdio_func *func, unsigned int address,
 		response_bytes = sizeof(enabled);
 		break;
 	case 2:
-		expected = mute;
+		assert(request[5] <= 1);
+		expected = request[5] ? mute : unmute;
 		expected_bytes = sizeof(mute);
-		response = muted;
+		response = request[5] ? muted : unmuted;
 		response_bytes = sizeof(muted);
+		bench.muted = request[5];
+		bench.mute_writes++;
 		break;
 	case 1:
 		low = request[5] == 0x2e;
@@ -272,13 +280,22 @@ struct v4l2_ctrl *v4l2_ctrl_new_std(struct v4l2_ctrl_handler *handler,
 	control->handler = handler;
 	control->ops = ops;
 	control->val = value;
+	bench.current_mute = value;
 	handler->control = control;
 	return control;
 }
 int v4l2_ctrl_s_ctrl(struct v4l2_ctrl *control, int value)
 {
+	int ret;
+
 	control->val = value;
-	return control->ops->s_ctrl(control);
+	/* Ordinary V4L2 controls skip writes equal to their current value. */
+	if (value == bench.current_mute)
+		return 0;
+	ret = control->ops->s_ctrl(control);
+	if (!ret)
+		bench.current_mute = value;
+	return ret;
 }
 
 static int tune(struct file *file, bool play)
@@ -352,6 +369,17 @@ static void check_recovery(enum fault fault, int error, bool with_other,
 							    &seek) == error);
 	check_frequency(&file, -EIO, 0);
 	writes = bench.writes;
+	if (fault == SEEK_TIMEOUT) {
+		static const u8 late[] = { 4, 0x0e, 8, 1,    0x8c, 0xfc,
+					   0, 0,    0, 0x38, 0x27 };
+
+		memcpy(bench.response, late, sizeof(late));
+		bench.response_bytes = sizeof(late);
+		bench.queued = true;
+		assert(bench.irq(13, bench.irq_context) == IRQ_HANDLED);
+		check_frequency(&file, -EIO, 0);
+		assert(bench.writes == writes);
+	}
 	assert(tune(&file, true) == -EIO && bench.writes == writes);
 	assert(!file.video->fops->release(&file));
 	assert(bench.releases == (with_other ? 0U : 1U));
@@ -395,8 +423,71 @@ static void check_recovery(enum fault fault, int error, bool with_other,
 	marlin2_transport_destroy(transport);
 }
 
-int main(void)
+static void check_unmute_after_reopen(bool failed_seek)
 {
+	const struct marlin2_transport_radio_ops radio_ops = {
+		.acquire = acquire,
+		.release = release,
+	};
+	const struct v4l2_hw_freq_seek seek = { .type = 1, .seek_upward = 1 };
+	struct marlin2_transport *transport;
+	struct marlin2_fm *radio;
+	struct v4l2_ctrl *mute;
+	struct file file;
+	unsigned int writes;
+
+	memset(&bench, 0, sizeof(bench));
+	bench.host = (struct mmc_host){ 10240, 10240, 20 };
+	bench.card.host = &bench.host;
+	bench.card.cccr.multi_block = true;
+	bench.func = (struct sdio_func){ &bench.card, 1, 512 };
+	bench.gpio.irq = 13;
+	transport = marlin2_transport_create(&bench.dev, &radio_ops, &bench);
+	assert(!IS_ERR(transport));
+	radio = marlin2_fm_register(&bench.dev, transport);
+	assert(!IS_ERR(radio) && bench.video);
+	file = (struct file){ .video = bench.video };
+	mute = file.video->ctrl_handler->control;
+	assert(!file.video->fops->open(&file));
+	assert(!tune(&file, false) && bench.muted);
+	assert(!v4l2_ctrl_s_ctrl(mute, 0) && !bench.muted);
+	writes = bench.mute_writes;
+	assert(!v4l2_ctrl_s_ctrl(mute, 0));
+	assert(bench.mute_writes == writes && !bench.muted);
+
+	if (failed_seek) {
+		bench.fault = SEEK_STATUS;
+		assert(file.video->ioctl_ops->vidioc_s_hw_freq_seek(
+			       &file, NULL, &seek) == -EREMOTEIO);
+		check_frequency(&file, -EIO, 0);
+	}
+	assert(!file.video->fops->release(&file));
+	assert(bench.releases == 1);
+	bench.fault = NONE;
+	assert(!file.video->fops->open(&file));
+	assert(!tune(&file, true) && bench.muted);
+	assert(bench.acquires == 2);
+	writes = bench.mute_writes;
+	assert(!v4l2_ctrl_s_ctrl(mute, 0));
+	assert(!bench.muted && bench.mute_writes == writes + 1);
+	assert(!file.video->fops->release(&file));
+	marlin2_fm_unregister(radio);
+	marlin2_transport_destroy(transport);
+}
+
+int main(int argc, char **argv)
+{
+	if (argc == 2) {
+		if (!strcmp(argv[1], "mute-reopen"))
+			check_unmute_after_reopen(false);
+		else if (!strcmp(argv[1], "mute-recovery"))
+			check_unmute_after_reopen(true);
+		else
+			assert(false);
+		puts("Marlin2 FM reopen mute host consumer case passed");
+		return 0;
+	}
+	assert(argc == 1);
 	check_recovery(SEEK_STATUS, -EREMOTEIO, false, false, false);
 	check_recovery(SEEK_FORMAT, -EPROTO, false, false, false);
 	check_recovery(SEEK_TIMEOUT, -ETIMEDOUT, false, false, false);

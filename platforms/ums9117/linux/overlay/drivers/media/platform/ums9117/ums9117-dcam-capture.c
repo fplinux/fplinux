@@ -598,7 +598,7 @@ static void dcam_unbind(struct v4l2_async_notifier *notifier,
 	struct ums9117_dcam_capture *capture = dcam_from_notifier(notifier);
 
 	if (capture->registered) {
-		video_unregister_device(&capture->video);
+		vb2_video_unregister_device(&capture->video);
 		capture->registered = false;
 	}
 	capture->sensor = NULL;

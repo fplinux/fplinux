@@ -14,6 +14,7 @@
 #include <media/v4l2-mediabus.h>
 
 #include "fplinux-camera-i2c.h"
+#include "ums9117-fixed-format.h"
 
 #define GC032A_ID_HIGH_REG 0xf0
 #define GC032A_ID_LOW_REG 0xf1
@@ -214,51 +215,16 @@ static int gc032a_runtime_suspend(struct device *dev)
 static int gc032a_init_state(struct v4l2_subdev *sd,
 			     struct v4l2_subdev_state *state)
 {
-	struct v4l2_mbus_framefmt *format =
-		v4l2_subdev_state_get_format(state, 0);
-
-	format->width = GC032A_WIDTH;
-	format->height = GC032A_HEIGHT;
-	format->code = MEDIA_BUS_FMT_YUYV8_2X8;
-	format->field = V4L2_FIELD_NONE;
-	format->colorspace = V4L2_COLORSPACE_SRGB;
-	format->ycbcr_enc = V4L2_YCBCR_ENC_601;
-	format->quantization = V4L2_QUANTIZATION_FULL_RANGE;
-	format->xfer_func = V4L2_XFER_FUNC_SRGB;
-	return 0;
-}
-
-static int gc032a_enum_mbus_code(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_state *state,
-				 struct v4l2_subdev_mbus_code_enum *code)
-{
-	if (code->pad || code->index)
-		return -EINVAL;
-	code->code = MEDIA_BUS_FMT_YUYV8_2X8;
-	return 0;
+	return ums9117_fixed_format_init_state(state, GC032A_WIDTH,
+					       GC032A_HEIGHT);
 }
 
 static int gc032a_enum_frame_size(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_state *state,
 				  struct v4l2_subdev_frame_size_enum *size)
 {
-	if (size->pad || size->index || size->code != MEDIA_BUS_FMT_YUYV8_2X8)
-		return -EINVAL;
-	size->min_width = GC032A_WIDTH;
-	size->max_width = GC032A_WIDTH;
-	size->min_height = GC032A_HEIGHT;
-	size->max_height = GC032A_HEIGHT;
-	return 0;
-}
-
-static int gc032a_set_fmt(struct v4l2_subdev *sd,
-			  struct v4l2_subdev_state *state,
-			  struct v4l2_subdev_format *format)
-{
-	if (format->pad)
-		return -EINVAL;
-	format->format = *v4l2_subdev_state_get_format(state, 0);
-	return 0;
+	return ums9117_fixed_format_enum_frame_size(size, GC032A_WIDTH,
+						    GC032A_HEIGHT);
 }
 
 static int gc032a_enable_streams(struct v4l2_subdev *sd,
@@ -309,10 +275,10 @@ static int gc032a_disable_streams(struct v4l2_subdev *sd,
 }
 
 static const struct v4l2_subdev_pad_ops gc032a_pad_ops = {
-	.enum_mbus_code = gc032a_enum_mbus_code,
+	.enum_mbus_code = ums9117_fixed_format_enum_mbus_code,
 	.enum_frame_size = gc032a_enum_frame_size,
 	.get_fmt = v4l2_subdev_get_fmt,
-	.set_fmt = gc032a_set_fmt,
+	.set_fmt = ums9117_fixed_format_set_fmt,
 	.enable_streams = gc032a_enable_streams,
 	.disable_streams = gc032a_disable_streams,
 };

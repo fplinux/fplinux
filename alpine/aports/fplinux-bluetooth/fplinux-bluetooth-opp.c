@@ -273,23 +273,14 @@ static DBusHandlerResult watch_filter(DBusConnection *connection,
 	return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 }
 
-static void add_matches(DBusConnection *connection, const char *path)
+static void add_matches(DBusConnection *connection)
 {
 	DBusError error;
-	char rule[PATH_MAX + 160];
 	dbus_error_init(&error);
-	if (path != NULL) {
-		snprintf(
-			rule, sizeof(rule),
-			"type='signal',interface='%s',member='PropertiesChanged',path='%s'",
-			PROPERTIES, path);
-		dbus_bus_add_match(connection, rule, &error);
-	} else {
-		dbus_bus_add_match(
-			connection,
-			"type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged',arg0='org.bluez.obex.Transfer1'",
-			&error);
-	}
+	dbus_bus_add_match(
+		connection,
+		"type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged',arg0='org.bluez.obex.Transfer1'",
+		&error);
 	dbus_bus_add_match(
 		connection,
 		"type='signal',interface='org.freedesktop.DBus',member='NameOwnerChanged',arg0='org.bluez.obex'",
@@ -352,7 +343,11 @@ int fplinux_bluetooth_opp_send(const char *peer, const char *file,
 			       const volatile sig_atomic_t *interrupted)
 {
 	struct stat information;
-	if (stat(file, &information) < 0 || !S_ISREG(information.st_mode))
+	char resolved[PATH_MAX];
+	const char *source = resolved;
+
+	if (realpath(file, resolved) == NULL ||
+	    stat(resolved, &information) < 0 || !S_ISREG(information.st_mode))
 		return fplinux_bluetooth_fail(
 			"%s is not a regular readable file", file);
 	DBusConnection *connection = fplinux_bluetooth_system_bus();
@@ -387,7 +382,7 @@ int fplinux_bluetooth_opp_send(const char *peer, const char *file,
 	message =
 		method(session_copy, "org.bluez.obex.ObjectPush1", "SendFile");
 	if (message == NULL ||
-	    !dbus_message_append_args(message, DBUS_TYPE_STRING, &file,
+	    !dbus_message_append_args(message, DBUS_TYPE_STRING, &source,
 				      DBUS_TYPE_INVALID)) {
 		remove_session(connection, session_copy);
 		return fplinux_bluetooth_fail("cannot form SendFile request");
@@ -396,7 +391,7 @@ int fplinux_bluetooth_opp_send(const char *peer, const char *file,
 	 * before its method reply reaches us.  A terminal signal dispatched before
 	 * its returned object path is retained until that path is known. */
 	struct watch watch = { 0 };
-	add_matches(connection, NULL);
+	add_matches(connection);
 	if (!dbus_connection_add_filter(connection, watch_filter, &watch,
 					NULL)) {
 		dbus_message_unref(message);
@@ -654,7 +649,7 @@ int fplinux_bluetooth_opp_receive(const char *peer, const char *directory,
 	if (!dbus_connection_add_filter(connection, receiver_filter, &receiver,
 					NULL))
 		return fplinux_bluetooth_fail("cannot install receive monitor");
-	add_matches(connection, NULL);
+	add_matches(connection);
 	printf("accepting one OPP file from %s for %d seconds\n", peer,
 	       seconds);
 	int64_t deadline = fplinux_bluetooth_now_ms() + (int64_t)seconds * 1000;

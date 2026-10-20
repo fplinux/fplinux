@@ -60,12 +60,10 @@ struct ums9117_drm_profile {
 	/* Raw mode 3 sends 16-bit pixels and releases CS between DCS bytes. */
 	bool spi_native_16bit;
 	/*
-	 * NULL retains the fixed WLED recipe. A name enables a raw range whose
-	 * maximum is derived from equal non-zero board WLED current levels.
+	 * Raw backlight name. Its maximum is derived from equal non-zero board
+	 * WLED current levels.
 	 */
 	const char *wled_backlight_name;
-	/* Enable native-size NV16 presentation. */
-	bool native_nv16;
 	/* LCDC CTRL bits required by this panel's transport. */
 	u32 lcdc_ctrl_set;
 	u32 lcdc_ctrl_clear;

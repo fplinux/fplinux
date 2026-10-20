@@ -14,6 +14,7 @@
 #include <linux/overflow.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
+#include <linux/soc/ums9117/mmio.h>
 #include <linux/workqueue.h>
 
 #include <media/v4l2-ctrls.h>
@@ -1290,22 +1291,6 @@ static const struct v4l2_ioctl_ops ums9117_rota_ioctl_ops = {
 	.vidioc_log_status = v4l2_ctrl_log_status,
 };
 
-static void __iomem *ums9117_rota_map_shared(struct platform_device *pdev,
-					     const char *name,
-					     resource_size_t address)
-{
-	struct resource *resource =
-		platform_get_resource_byname(pdev, IORESOURCE_MEM, name);
-	void __iomem *base;
-
-	if (!resource || resource->start != address ||
-	    resource_size(resource) != 4)
-		return IOMEM_ERR_PTR(-EINVAL);
-	base = devm_ioremap(&pdev->dev, resource->start,
-			    resource_size(resource));
-	return base ? base : IOMEM_ERR_PTR(-ENOMEM);
-}
-
 static void ums9117_rota_restore_gate(struct ums9117_rota_dev *rota)
 {
 	if (!rota->gate_acquired)
@@ -1336,15 +1321,15 @@ static int ums9117_rota_probe(struct platform_device *pdev)
 	rota->base = devm_ioremap_resource(&pdev->dev, resource);
 	if (IS_ERR(rota->base))
 		return PTR_ERR(rota->base);
-	rota->gate_state = ums9117_rota_map_shared(
+	rota->gate_state = ums9117_devm_ioremap_shared_register(
 		pdev, "ap-ahb-gate-state", UMS9117_AP_AHB_GATE_STATE_PHYS);
-	rota->gate_set = ums9117_rota_map_shared(pdev, "ap-ahb-gate-set",
-						 UMS9117_AP_AHB_GATE_SET_PHYS);
-	rota->gate_clear = ums9117_rota_map_shared(
+	rota->gate_set = ums9117_devm_ioremap_shared_register(
+		pdev, "ap-ahb-gate-set", UMS9117_AP_AHB_GATE_SET_PHYS);
+	rota->gate_clear = ums9117_devm_ioremap_shared_register(
 		pdev, "ap-ahb-gate-clear", UMS9117_AP_AHB_GATE_CLEAR_PHYS);
-	rota->reset_set = ums9117_rota_map_shared(
+	rota->reset_set = ums9117_devm_ioremap_shared_register(
 		pdev, "ap-ahb-reset-set", UMS9117_AP_AHB_RESET_SET_PHYS);
-	rota->reset_clear = ums9117_rota_map_shared(
+	rota->reset_clear = ums9117_devm_ioremap_shared_register(
 		pdev, "ap-ahb-reset-clear", UMS9117_AP_AHB_RESET_CLEAR_PHYS);
 	if (IS_ERR(rota->gate_state) || IS_ERR(rota->gate_set) ||
 	    IS_ERR(rota->gate_clear) || IS_ERR(rota->reset_set) ||

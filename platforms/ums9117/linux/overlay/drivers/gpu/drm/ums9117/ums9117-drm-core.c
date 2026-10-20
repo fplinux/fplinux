@@ -311,7 +311,8 @@ int ums9117_drm_probe(struct platform_device *pdev)
 	int ret;
 
 	if (!profile || !profile->name || !profile->width || !profile->height ||
-	    !profile->init || !profile->init_count)
+	    !profile->init || !profile->init_count ||
+	    !profile->wled_backlight_name)
 		return -EINVAL;
 	if (!(IS_ENABLED(CONFIG_DRM_UMS9117_SPI) &&
 	      profile->transport == UMS9117_DRM_TRANSPORT_SPI1_3WIRE) &&
@@ -369,10 +370,10 @@ int ums9117_drm_probe(struct platform_device *pdev)
 					 DRM_MODE_CONNECTOR_Unknown);
 	if (ret)
 		return ret;
-	ret = drm_simple_display_pipe_init(
-		drm, &udrm->pipe, &ums9117_drm_pipe_funcs, formats,
-		profile->native_nv16 ? ARRAY_SIZE(formats) : 1, modifiers,
-		&udrm->connector);
+	ret = drm_simple_display_pipe_init(drm, &udrm->pipe,
+					   &ums9117_drm_pipe_funcs, formats,
+					   ARRAY_SIZE(formats), modifiers,
+					   &udrm->connector);
 	if (ret)
 		return ret;
 	ret = drm_plane_create_color_properties(&udrm->pipe.plane,

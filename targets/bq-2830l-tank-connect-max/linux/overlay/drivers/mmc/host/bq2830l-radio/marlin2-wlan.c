@@ -1053,6 +1053,8 @@ static int change_beacon(struct wiphy *wiphy, struct net_device *netdev,
 
 	if (!READ_ONCE(wlan->ap_started))
 		return -ENETDOWN;
+	if (beacon->head || beacon->tail)
+		return -EOPNOTSUPP;
 	return set_beacon_ies(wlan, beacon);
 }
 

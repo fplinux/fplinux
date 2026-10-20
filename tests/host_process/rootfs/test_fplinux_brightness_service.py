@@ -66,6 +66,23 @@ def signal_daemon(brightness_binaries: BrightnessBinaries) -> Path:
 class FPLinuxBrightnessServiceTests:
     """Check the daemon's state and preview lifecycle on the host."""
 
+    def test_eight_bit_backlight_applies_configured_raw_levels(
+        self, brightness: BrightnessProcesses
+    ) -> None:
+        """Logical levels select raw values through 255 on an eight-bit backlight."""
+        brightness.config.write_text(
+            "backlight=lcd\nlevels=0,1,2,4,8,16,32,127,160,208,255\n", encoding="ascii"
+        )
+        (brightness.backlight / "max_brightness").write_text("255\n", encoding="ascii")
+        brightness.start_daemon()
+        assert brightness.run_cli("get").stdout == "7\n"
+        assert brightness.raw() == "127\n"
+        assert brightness.run_cli("set", "10").returncode == 0
+        assert brightness.run_cli("get").stdout == "10\n"
+        assert brightness.raw() == "255\n"
+        assert brightness.run_cli("set", "0").returncode == 0
+        assert brightness.raw() == "0\n"
+
     def test_preview_keeps_new_baseline_until_release(
         self, brightness: BrightnessProcesses
     ) -> None:
@@ -187,13 +204,14 @@ class FPLinuxBrightnessServiceTests:
         [
             ("backlight=../lcd\nlevels=0,1,2,4,7,11,16,23,32,44,63\n", "63\n"),
             ("backlight=lcd\nlevels=0,1,2,4,7,11,16,23,32,44\n", "63\n"),
-            ("backlight=lcd\nlevels=0,1,2,4,7,11,16,23,32,44,64\n", "63\n"),
+            ("backlight=lcd\nlevels=0,1,2,4,7,11,16,23,32,44,65536\n", "65535\n"),
             ("backlight=lcd\nlevels=0,1,2,4,7,11,11,23,32,44,63\n", "63\n"),
             ("backlight=lcd\nlevels=1,2,3,4,7,11,16,23,32,44,63\n", "63\n"),
             (CONFIG + "extra=yes\n", "63\n"),
             (CONFIG.rstrip("\n"), "63\n"),
             (None, "63\n"),
             (CONFIG, "62\n"),
+            ("backlight=lcd\nlevels=0,1,2,4,8,16,32,127,160,208,255\n", "254\n"),
             (CONFIG, None),
         ],
         ids=[
@@ -206,6 +224,7 @@ class FPLinuxBrightnessServiceTests:
             "missing-newline",
             "missing-config",
             "wrong-maximum",
+            "eight-bit-table-exceeds-device",
             "missing-maximum",
         ],
     )

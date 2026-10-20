@@ -31,6 +31,7 @@
 #include <linux/regmap.h>
 #include <linux/sched/signal.h>
 #include <linux/slab.h>
+#include <linux/soc/ums9117/mmio.h>
 #include <linux/string.h>
 #include <linux/sysfs.h>
 #include <linux/uio.h>
@@ -401,22 +402,6 @@ static bool ums9117_nandc_b0_has_owned_ecc(u32 b0)
 	       (b0 & UMS9117_NANDC_FEATURE_B0_ECC_EN);
 }
 
-static void __iomem *ums9117_nandc_map_shared(struct platform_device *pdev,
-					      const char *name,
-					      resource_size_t minimum_size)
-{
-	struct resource *resource;
-	void __iomem *base;
-
-	resource = platform_get_resource_byname(pdev, IORESOURCE_MEM, name);
-	if (!resource || resource_size(resource) < minimum_size)
-		return IOMEM_ERR_PTR(-EINVAL);
-
-	base = devm_ioremap(&pdev->dev, resource->start,
-			    resource_size(resource));
-	return base ? base : IOMEM_ERR_PTR(-ENOMEM);
-}
-
 static int ums9117_nandc_map_resources(struct ums9117_nandc *nandc,
 				       struct platform_device *pdev)
 {
@@ -440,7 +425,7 @@ static int ums9117_nandc_map_resources(struct ums9117_nandc *nandc,
 		if (i == UMS9117_NANDC_RES_PINMUX ||
 		    i == UMS9117_NANDC_RES_PINCONF)
 			minimum_size = UMS9117_NANDC_PIN_WINDOW_BYTES;
-		nandc->regs[i] = ums9117_nandc_map_shared(
+		nandc->regs[i] = ums9117_devm_ioremap_shared(
 			pdev, ums9117_nandc_resource_names[i], minimum_size);
 		if (IS_ERR(nandc->regs[i]))
 			return PTR_ERR(nandc->regs[i]);

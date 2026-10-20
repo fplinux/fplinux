@@ -5,6 +5,7 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
+#include <linux/soc/ums9117/fm-wire.h>
 #include <linux/spinlock.h>
 #include <linux/unaligned.h>
 #include <media/v4l2-ctrls.h>
@@ -13,7 +14,6 @@
 #include <media/v4l2-ioctl.h>
 
 #include "marlin2-fm.h"
-#include "marlin2-fm-wire.h"
 #include "marlin2-transport.h"
 
 #define MARLIN2_FM_MIN_10KHZ 8750
@@ -36,7 +36,10 @@ struct marlin2_fm {
 	struct mutex lock;
 	spinlock_t rx_lock;
 	struct completion done;
-	struct marlin2_fm_transaction transaction;
+	struct ums9117_fm_wire wire;
+	u8 reply[11];
+	int error;
+	bool pending;
 	struct marlin2_channel *channel;
 	enum fm_state state;
 	u16 frequency_10khz;
@@ -56,7 +59,9 @@ static void transport_error(void *context, int error)
 	unsigned long flags;
 
 	spin_lock_irqsave(&radio->rx_lock, flags);
-	marlin2_fm_transaction_fail(&radio->transaction, error);
+	radio->error = error;
+	radio->pending = false;
+	radio->wire.event_bytes = 0;
 	complete(&radio->done);
 	spin_unlock_irqrestore(&radio->rx_lock, flags);
 }
@@ -72,10 +77,19 @@ static void receive(void *context, u8 subtype, const u8 *payload,
 	if (subtype)
 		return;
 	spin_lock_irqsave(&radio->rx_lock, flags);
-	pending = radio->transaction.pending;
-	ret = marlin2_fm_event_receive(&radio->transaction, payload,
-				       payload_bytes);
-	if (ret || (pending && !radio->transaction.pending))
+	pending = radio->pending;
+	ret = radio->error;
+	if (!ret)
+		ret = ums9117_fm_wire_receive(&radio->wire, pending, payload,
+					      payload_bytes);
+	if (ret) {
+		radio->error = ret;
+		radio->pending = false;
+		radio->wire.event_bytes = 0;
+	} else if (radio->wire.complete) {
+		radio->pending = false;
+	}
+	if (ret || (pending && !radio->pending))
 		complete(&radio->done);
 	spin_unlock_irqrestore(&radio->rx_lock, flags);
 }
@@ -85,7 +99,7 @@ static int command(struct marlin2_fm *radio, u8 subcommand, const u8 *payload,
 		   size_t payload_bytes, u8 *reply, size_t reply_bytes,
 		   bool seek)
 {
-	u8 request[MARLIN2_FM_COMMAND_BYTES];
+	u8 request[UMS9117_FM_COMMAND_BYTES];
 	unsigned long flags;
 	size_t request_bytes;
 	size_t received_bytes = 0;
@@ -93,14 +107,22 @@ static int command(struct marlin2_fm *radio, u8 subcommand, const u8 *payload,
 					 MARLIN2_FM_COMMAND_TIMEOUT_MS;
 	int ret;
 
-	request_bytes = marlin2_fm_command_build(
+	request_bytes = ums9117_fm_command_build(
 		request, sizeof(request), subcommand, payload, payload_bytes);
 	if (!request_bytes)
 		return -EINVAL;
 	spin_lock_irqsave(&radio->rx_lock, flags);
 	reinit_completion(&radio->done);
-	ret = marlin2_fm_transaction_begin(&radio->transaction, reply_bytes,
-					   seek);
+	if (radio->error)
+		ret = radio->error;
+	else if (radio->pending || radio->wire.event_bytes)
+		ret = -EBUSY;
+	else
+		ret = ums9117_fm_wire_begin(&radio->wire, radio->reply,
+					    sizeof(radio->reply), reply_bytes,
+					    seek);
+	if (!ret)
+		radio->pending = true;
 	spin_unlock_irqrestore(&radio->rx_lock, flags);
 	if (ret)
 		return unknown_state(radio, ret);
@@ -115,10 +137,10 @@ static int command(struct marlin2_fm *radio, u8 subcommand, const u8 *payload,
 		return unknown_state(radio, -ETIMEDOUT);
 	}
 	spin_lock_irqsave(&radio->rx_lock, flags);
-	ret = radio->transaction.error;
+	ret = radio->error;
 	if (!ret) {
-		received_bytes = radio->transaction.reply_bytes;
-		memcpy(reply, radio->transaction.reply, received_bytes);
+		received_bytes = radio->wire.reply_bytes;
+		memcpy(reply, radio->reply, received_bytes);
 	}
 	spin_unlock_irqrestore(&radio->rx_lock, flags);
 	if (ret < 0)
@@ -159,7 +181,9 @@ static int enable(struct marlin2_fm *radio)
 			return ret;
 		/* The prior runtime is gone; RX still owns its transaction lock. */
 		spin_lock_irqsave(&radio->rx_lock, flags);
-		memset(&radio->transaction, 0, sizeof(radio->transaction));
+		memset(&radio->wire, 0, sizeof(radio->wire));
+		radio->error = 0;
+		radio->pending = false;
 		reinit_completion(&radio->done);
 		spin_unlock_irqrestore(&radio->rx_lock, flags);
 		radio->state = FM_OFF;
@@ -170,6 +194,10 @@ static int enable(struct marlin2_fm *radio)
 	if (ret)
 		return ret;
 	radio->held = true;
+	/* Enabling starts muted, including after a fresh runtime recovery. */
+	ret = v4l2_ctrl_s_ctrl(radio->mute, 1);
+	if (ret)
+		return ret;
 	ret = command(radio, 0x00, payload, sizeof(payload), reply,
 		      sizeof(reply), false);
 	if (ret)

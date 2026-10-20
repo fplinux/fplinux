@@ -11,6 +11,7 @@
 #include <linux/platform_device.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
+#include <linux/soc/ums9117/mmio.h>
 #include <linux/string.h>
 #include <linux/usb/musb.h>
 
@@ -106,21 +107,6 @@ static bool ums9117_musb_is_inherited(const struct ums9117_musb_glue *glue)
 {
 	return IS_ENABLED(CONFIG_USB_MUSB_UMS9117_INHERITED) &&
 	       !glue->cold_owned;
-}
-
-static void __iomem *ums9117_musb_ioremap_shared(struct platform_device *pdev,
-						 const char *name,
-						 resource_size_t minimum_size)
-{
-	struct resource *resource;
-	void __iomem *base;
-
-	resource = platform_get_resource_byname(pdev, IORESOURCE_MEM, name);
-	if (!resource || resource_size(resource) < minimum_size)
-		return IOMEM_ERR_PTR(-EINVAL);
-	base = devm_ioremap(&pdev->dev, resource->start,
-			    resource_size(resource));
-	return base ? base : IOMEM_ERR_PTR(-ENOMEM);
 }
 
 static int ums9117_musb_alias_update(void __iomem *base, u32 offset,
@@ -803,17 +789,17 @@ static int ums9117_musb_get_cold_resources(struct platform_device *pdev,
 {
 	int ret;
 
-	glue->ap_ahb = ums9117_musb_ioremap_shared(pdev, "ap-ahb",
+	glue->ap_ahb = ums9117_devm_ioremap_shared(pdev, "ap-ahb",
 						   UMS9117_MUSB_AP_AHB_BYTES);
 	if (IS_ERR(glue->ap_ahb))
 		return dev_err_probe(&pdev->dev, PTR_ERR(glue->ap_ahb),
 				     "could not map AP AHB registers\n");
-	glue->anlg_phy_g8 = ums9117_musb_ioremap_shared(
+	glue->anlg_phy_g8 = ums9117_devm_ioremap_shared(
 		pdev, "anlg-phy-g8", UMS9117_MUSB_ANLG_PHY_G8_BYTES);
 	if (IS_ERR(glue->anlg_phy_g8))
 		return dev_err_probe(&pdev->dev, PTR_ERR(glue->anlg_phy_g8),
 				     "could not map G8 USB PHY registers\n");
-	glue->anlg_phy_top = ums9117_musb_ioremap_shared(
+	glue->anlg_phy_top = ums9117_devm_ioremap_shared(
 		pdev, "anlg-phy-top", UMS9117_MUSB_ANLG_PHY_TOP_BYTES);
 	if (IS_ERR(glue->anlg_phy_top))
 		return dev_err_probe(&pdev->dev, PTR_ERR(glue->anlg_phy_top),

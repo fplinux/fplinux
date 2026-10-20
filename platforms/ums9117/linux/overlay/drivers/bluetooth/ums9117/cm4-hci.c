@@ -7,6 +7,7 @@
 #include <linux/ktime.h>
 #include <linux/mutex.h>
 #include <linux/skbuff.h>
+#include <linux/soc/ums9117/fm-wire.h>
 #include <linux/string.h>
 #include <linux/workqueue.h>
 #include <net/bluetooth/bluetooth.h>
@@ -25,24 +26,17 @@
 #define UMS9117_HCI_QUIESCE_TIMEOUT_NS (2ULL * NSEC_PER_SEC)
 #define UMS9117_FM_REPLY_TIMEOUT_MS 1000
 #define UMS9117_FM_SEEK_TIMEOUT_MS 15000
-#define UMS9117_FM_EVENT_BYTES (3 + 255)
-#define UMS9117_FM_COMMAND_BYTES (4 + 255)
 
 struct fm_transaction {
 	struct completion done;
+	struct ums9117_fm_wire wire;
 	u8 command[UMS9117_FM_COMMAND_BYTES];
-	u8 event[UMS9117_FM_EVENT_BYTES];
 	u8 reply[UMS9117_FM_EVENT_BYTES];
 	size_t command_bytes;
-	size_t event_bytes;
-	size_t reply_bytes;
-	size_t expected_bytes;
 	bool active;
 	bool held;
 	bool pending;
 	bool sent;
-	bool seek;
-	bool acknowledged;
 	int result;
 	int error;
 };
@@ -62,7 +56,6 @@ static struct {
 	bool running;
 	bool opened;
 	bool rx_discard;
-	int rx_callback_error;
 	bool suspending;
 	bool transport_suspended;
 	bool core_suspended;
@@ -100,56 +93,13 @@ static void finish_fm_command(int error)
 
 	if (error) {
 		fm->error = error;
-		fm->event_bytes = 0;
+		fm->wire.event_bytes = 0;
 	}
 	if (!fm->pending)
 		return;
 	fm->result = error;
 	fm->pending = false;
 	complete(&fm->done);
-}
-
-static int receive_fm_bytes(const u8 *input, size_t length)
-{
-	struct fm_transaction *fm = &runtime.fm;
-	size_t index;
-
-	for (index = 0; index < length; index++) {
-		if (!fm->event_bytes && input[index] != HCI_EVENT_PKT)
-			return -EPROTO;
-		fm->event[fm->event_bytes++] = input[index];
-		if (fm->event_bytes < 3 || fm->event_bytes < 3U + fm->event[2])
-			continue;
-		/* Complete events may be split across reads or share one read. */
-		if (fm->pending && fm->sent &&
-		    fm->event[1] == HCI_EV_CMD_COMPLETE &&
-		    fm->event_bytes >= 7 && fm->event[4] == 0x8c &&
-		    fm->event[5] == 0xfc) {
-			if (fm->seek && !fm->event[6]) {
-				if (fm->event_bytes != 7 || fm->acknowledged)
-					return -EPROTO;
-				fm->acknowledged = true;
-			} else {
-				/* A firmware error may omit the success payload. */
-				if (fm->event_bytes != fm->expected_bytes &&
-				    !(fm->event_bytes == 7 && fm->event[6]))
-					return -EPROTO;
-				memcpy(fm->reply, fm->event, fm->event_bytes);
-				fm->reply_bytes = fm->event_bytes;
-				finish_fm_command(0);
-			}
-		} else if (fm->pending && fm->sent && fm->seek &&
-			   fm->event[1] == 0xff && fm->event_bytes >= 4 &&
-			   fm->event[3] == 0x30) {
-			if (!fm->acknowledged || fm->event_bytes != 9)
-				return -EPROTO;
-			memcpy(fm->reply, fm->event, fm->event_bytes);
-			fm->reply_bytes = fm->event_bytes;
-			finish_fm_command(0);
-		}
-		fm->event_bytes = 0;
-	}
-	return 0;
 }
 
 /* Called only by the existing CM4 worker, with io_lock held. */
@@ -166,13 +116,16 @@ static int service_fm(void)
 	/* Quarantine late replies after failure; only a cold start permits TX. */
 	if (ret || fm->error)
 		return ret;
-	ret = receive_fm_bytes(input, received);
+	ret = ums9117_fm_wire_receive(&fm->wire, fm->pending && fm->sent, input,
+				      received);
 	if (ret) {
 		finish_fm_command(ret);
 		return 0;
 	}
+	if (fm->pending && fm->sent && fm->wire.complete)
+		finish_fm_command(0);
 	/* Drain earlier events before publishing a request they could not answer. */
-	if (!fm->pending || fm->sent || received || fm->event_bytes)
+	if (!fm->pending || fm->sent || received || fm->wire.event_bytes)
 		return 0;
 	ret = ums9117_cm4_mailbox_fm_write(fm->command, fm->command_bytes);
 	if (ret == -EAGAIN)
@@ -248,23 +201,18 @@ int ums9117_hci_fm_command(u8 subcommand, const u8 *payload,
 	ret = fm_admission_error();
 	if (ret)
 		goto unlock_io;
-	fm->command[0] = HCI_COMMAND_PKT;
-	fm->command[1] = 0x8c;
-	fm->command[2] = 0xfc;
-	fm->command[3] = payload_bytes + 1;
-	fm->command[4] = subcommand;
-	if (payload_bytes)
-		memcpy(fm->command + 5, payload, payload_bytes);
-	fm->command_bytes = 5 + payload_bytes;
-	fm->expected_bytes = reply_bytes;
-	fm->seek = seek;
-	fm->acknowledged = false;
+	fm->command_bytes =
+		ums9117_fm_command_build(fm->command, sizeof(fm->command),
+					 subcommand, payload, payload_bytes);
+	ret = ums9117_fm_wire_begin(&fm->wire, fm->reply, sizeof(fm->reply),
+				    reply_bytes, seek);
+	if (ret)
+		goto unlock_io;
 	reinit_completion(&fm->done);
 	fm->active = true;
 	fm->pending = true;
 	fm->sent = false;
 	fm->result = -EINPROGRESS;
-	fm->reply_bytes = 0;
 	mutex_unlock(&io_lock);
 
 	wait_for_completion_timeout(&fm->done, msecs_to_jiffies(timeout_ms));
@@ -274,8 +222,8 @@ int ums9117_hci_fm_command(u8 subcommand, const u8 *payload,
 		finish_fm_command(-ETIMEDOUT);
 	ret = fm->error ? fm->error : fm->result;
 	if (!ret) {
-		memcpy(reply, fm->reply, fm->reply_bytes);
-		ret = fm->reply_bytes;
+		memcpy(reply, fm->reply, fm->wire.reply_bytes);
+		ret = fm->wire.reply_bytes;
 	}
 unlock_io:
 	mutex_unlock(&io_lock);
@@ -312,7 +260,6 @@ static void fail_transport(int error)
 	release_tx();
 	kfree_skb(runtime.rx_skb);
 	runtime.rx_skb = NULL;
-	runtime.rx_callback_error = 0;
 	bt_dev_err(runtime.hdev, "transport stopped: %pe", ERR_PTR(error));
 }
 
@@ -331,12 +278,6 @@ static void observe_pm_reply(const struct sk_buff *skb)
 
 static int receive_frame(struct hci_dev *hdev, struct sk_buff *skb)
 {
-	int ret;
-
-	if (runtime.rx_callback_error) {
-		kfree_skb(skb);
-		return 0;
-	}
 	observe_pm_reply(skb);
 	if (runtime.rx_discard) {
 		kfree_skb(skb);
@@ -344,9 +285,7 @@ static int receive_frame(struct hci_dev *hdev, struct sk_buff *skb)
 		return 0;
 	}
 	/* hci_recv_frame consumes skb on success and failure. */
-	ret = hci_recv_frame(hdev, skb);
-	if (ret && ret != -ENXIO)
-		runtime.rx_callback_error = ret;
+	hci_recv_frame(hdev, skb);
 	runtime.rx_discard = !runtime.opened;
 	return 0;
 }
@@ -365,13 +304,7 @@ static int receive_bytes(const u8 *input, size_t length)
 		runtime.rx_skb = NULL;
 		return ret;
 	}
-	if (!runtime.rx_callback_error)
-		return 0;
-	ret = runtime.rx_callback_error;
-	runtime.rx_callback_error = 0;
-	kfree_skb(runtime.rx_skb);
-	runtime.rx_skb = NULL;
-	return ret;
+	return 0;
 }
 
 static int validate_tx_frame(u8 type, const u8 *header, size_t length)
@@ -636,9 +569,8 @@ int ums9117_hci_transport_start(const u8 *rx_prefix, size_t prefix_bytes)
 	}
 	/* A stopped stream has no queued work or partial TX/RX buffers. */
 	runtime.rx_discard = true;
-	runtime.rx_callback_error = 0;
 	runtime.fm.active = false;
-	runtime.fm.event_bytes = 0;
+	runtime.fm.wire.event_bytes = 0;
 	ret = receive_bytes(rx_prefix, prefix_bytes);
 	if (ret) {
 		kfree_skb(runtime.rx_skb);
@@ -679,9 +611,8 @@ void ums9117_hci_transport_stop(void)
 	kfree_skb(runtime.rx_skb);
 	runtime.rx_skb = NULL;
 	runtime.rx_discard = true;
-	runtime.rx_callback_error = 0;
 	runtime.fm.active = false;
-	runtime.fm.event_bytes = 0;
+	runtime.fm.wire.event_bytes = 0;
 	mutex_unlock(&io_lock);
 }
 
@@ -776,8 +707,9 @@ int ums9117_hci_suspend_prepare(void)
 	if (runtime.error)
 		ret = runtime.error;
 	else if (runtime.suspending || runtime.fm.held || runtime.fm.pending ||
-		 runtime.fm.event_bytes || hci_busy(hdev) || runtime.tx_skb ||
-		 runtime.rx_skb || !skb_queue_empty(&runtime.tx_queue))
+		 runtime.fm.wire.event_bytes || hci_busy(hdev) ||
+		 runtime.tx_skb || runtime.rx_skb ||
+		 !skb_queue_empty(&runtime.tx_queue))
 		ret = -EBUSY;
 	else {
 		runtime.suspending = true;

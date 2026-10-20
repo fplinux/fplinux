@@ -5,4 +5,4 @@ bq2830l-radio-y := bq2830l-radio-power.o marlin2-sdio.o \
 	marlin2-transport.o marlin2-transport-wire.o
 bq2830l-radio-$(CONFIG_BQ2830L_WLAN) += marlin2-wlan.o marlin2-wlan-wire.o
 bq2830l-radio-$(CONFIG_BQ2830L_BLUETOOTH) += marlin2-bluetooth.o marlin2-bluetooth-wire.o
-bq2830l-radio-$(CONFIG_BQ2830L_FM) += marlin2-fm.o marlin2-fm-wire.o
+bq2830l-radio-$(CONFIG_BQ2830L_FM) += marlin2-fm.o

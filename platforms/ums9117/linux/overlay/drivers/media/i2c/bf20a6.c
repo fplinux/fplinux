@@ -14,6 +14,7 @@
 #include <media/v4l2-mediabus.h>
 
 #include "fplinux-camera-i2c.h"
+#include "ums9117-fixed-format.h"
 
 #define BF20A6_ID_HIGH_REG 0xfc
 #define BF20A6_ID_LOW_REG 0xfd
@@ -166,51 +167,16 @@ static int bf20a6_runtime_suspend(struct device *dev)
 static int bf20a6_init_state(struct v4l2_subdev *sd,
 			     struct v4l2_subdev_state *state)
 {
-	struct v4l2_mbus_framefmt *format =
-		v4l2_subdev_state_get_format(state, 0);
-
-	format->width = BF20A6_WIDTH;
-	format->height = BF20A6_HEIGHT;
-	format->code = MEDIA_BUS_FMT_YUYV8_2X8;
-	format->field = V4L2_FIELD_NONE;
-	format->colorspace = V4L2_COLORSPACE_SRGB;
-	format->ycbcr_enc = V4L2_YCBCR_ENC_601;
-	format->quantization = V4L2_QUANTIZATION_FULL_RANGE;
-	format->xfer_func = V4L2_XFER_FUNC_SRGB;
-	return 0;
-}
-
-static int bf20a6_enum_mbus_code(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_state *state,
-				 struct v4l2_subdev_mbus_code_enum *code)
-{
-	if (code->pad || code->index)
-		return -EINVAL;
-	code->code = MEDIA_BUS_FMT_YUYV8_2X8;
-	return 0;
+	return ums9117_fixed_format_init_state(state, BF20A6_WIDTH,
+					       BF20A6_HEIGHT);
 }
 
 static int bf20a6_enum_frame_size(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_state *state,
 				  struct v4l2_subdev_frame_size_enum *size)
 {
-	if (size->pad || size->index || size->code != MEDIA_BUS_FMT_YUYV8_2X8)
-		return -EINVAL;
-	size->min_width = BF20A6_WIDTH;
-	size->max_width = BF20A6_WIDTH;
-	size->min_height = BF20A6_HEIGHT;
-	size->max_height = BF20A6_HEIGHT;
-	return 0;
-}
-
-static int bf20a6_set_fmt(struct v4l2_subdev *sd,
-			  struct v4l2_subdev_state *state,
-			  struct v4l2_subdev_format *format)
-{
-	if (format->pad)
-		return -EINVAL;
-	format->format = *v4l2_subdev_state_get_format(state, 0);
-	return 0;
+	return ums9117_fixed_format_enum_frame_size(size, BF20A6_WIDTH,
+						    BF20A6_HEIGHT);
 }
 
 static int bf20a6_enable_streams(struct v4l2_subdev *sd,
@@ -261,10 +227,10 @@ static int bf20a6_disable_streams(struct v4l2_subdev *sd,
 }
 
 static const struct v4l2_subdev_pad_ops bf20a6_pad_ops = {
-	.enum_mbus_code = bf20a6_enum_mbus_code,
+	.enum_mbus_code = ums9117_fixed_format_enum_mbus_code,
 	.enum_frame_size = bf20a6_enum_frame_size,
 	.get_fmt = v4l2_subdev_get_fmt,
-	.set_fmt = bf20a6_set_fmt,
+	.set_fmt = ums9117_fixed_format_set_fmt,
 	.enable_streams = bf20a6_enable_streams,
 	.disable_streams = bf20a6_disable_streams,
 };

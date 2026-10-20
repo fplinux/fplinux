@@ -22,7 +22,6 @@ static const struct ums9117_drm_profile uniwa_v1000_drm_profile = {
 	.spi_init_clock_divider = 1,
 	.spi_native_16bit = true,
 	.wled_backlight_name = "uniwa-v1000-backlight",
-	.native_nv16 = true,
 	.lcdc_ctrl_set = BIT(1),
 	.lcdc_ctrl_clear = BIT(2) | (7U << 5),
 };

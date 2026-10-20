@@ -34,6 +34,7 @@ config BQ2830L_FM
 	bool "BQ 2830L SDIO FM receiver"
 	depends on MMC_SDHCI_UMS9117_BQ_RADIO
 	depends on VIDEO_DEV=y && MEDIA_RADIO_SUPPORT
+	select UMS9117_FM_WIRE
 	help
 	  Provide a V4L2 FM receiver using the shared external radio.
 	  The target's fitted audio route supplies the standard FM mixer.

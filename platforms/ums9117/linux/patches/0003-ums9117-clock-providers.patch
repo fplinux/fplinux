@@ -62,19 +62,6 @@ index 775519e..5e30d44 100644
  #define SPRD_GATE_CLK(_struct, _name, _parent, _reg,			\
  		      _enable_mask, _flags, _gate_flags)		\
  	SPRD_SC_GATE_CLK_OPS(_struct, _name, _parent, _reg, 0,		\
-diff --git a/drivers/hwspinlock/Kconfig b/drivers/hwspinlock/Kconfig
-index 3874d15..bd67845 100644
---- a/drivers/hwspinlock/Kconfig
-+++ b/drivers/hwspinlock/Kconfig
-@@ -30,7 +30,7 @@ config HWSPINLOCK_QCOM
-
- config HWSPINLOCK_SPRD
- 	tristate "SPRD Hardware Spinlock device"
--	depends on ARCH_SPRD || COMPILE_TEST
-+	depends on ARCH_SPRD || ARCH_UMS9117 || COMPILE_TEST
- 	help
- 	  Say y here to support the SPRD Hardware Spinlock device.
-
 diff --git a/drivers/reset/Kconfig b/drivers/reset/Kconfig
 index b3b9e0f..5e60570 100644
 --- a/drivers/reset/Kconfig

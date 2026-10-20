@@ -10,6 +10,7 @@ from tests.c_harness import c_build_directory, compile_c
 from tests.process import run_process
 
 AUDIO = ROOT / "platforms/ums9117/linux/overlay/sound/drivers/ums9117"
+SHARED_INCLUDE = ROOT / "platforms/shared/linux/overlay/include"
 HARNESS = ROOT / "tests/host_tool/ums9117/audio/audio-profile.c"
 COMPAT = ROOT / "tests/host_tool/ums9117/audio/native-operation-compat/audio"
 UNALIGNED = ROOT / "tests/fixtures/ums9117-kernel/fm-compat"
@@ -36,6 +37,7 @@ class AudioProfileHostComponentTests:
                     f"-I{COMPAT}",
                     f"-I{UNALIGNED}",
                     f"-I{AUDIO}",
+                    f"-I{SHARED_INCLUDE}",
                     str(HARNESS),
                     str(AUDIO / "ums9117-audio-profile.c"),
                 ],

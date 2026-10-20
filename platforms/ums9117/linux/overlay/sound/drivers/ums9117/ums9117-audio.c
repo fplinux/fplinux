@@ -99,10 +99,6 @@
 #define UMS9117_VBC_ADC1_DATA 0x1014
 #define UMS9117_VBC_ADC1_CHANNEL BIT(5)
 #define UMS9117_VBC_DAC_CHANNELS (BIT(0) | BIT(1))
-#define UMS9117_VBC_FIFO_EMPTY BIT(18)
-#define UMS9117_VBC_FIFO_FULL BIT(19)
-#define UMS9117_VBC_FIFO_READ GENMASK(17, 9)
-#define UMS9117_VBC_FIFO_WRITE GENMASK(8, 0)
 #define UMS9117_VBC_DAC0_DG_GAIN GENMASK(6, 0)
 #define UMS9117_VBC_DAC1_DG_GAIN GENMASK(13, 7)
 #define UMS9117_VBC_DAC0_DG_ENABLE BIT(14)
@@ -606,26 +602,12 @@ int ums9117_audio_set_dac_processing(
 	return apply_dac_processing(audio);
 }
 
-static int fifo_frames(u32 status)
-{
-	unsigned int read_ptr = FIELD_GET(UMS9117_VBC_FIFO_READ, status);
-	unsigned int write_ptr = FIELD_GET(UMS9117_VBC_FIFO_WRITE, status);
-
-	if (read_ptr >= UMS9117_AUDIO_FIFO_FRAMES ||
-	    write_ptr >= UMS9117_AUDIO_FIFO_FRAMES)
-		return -EIO;
-	if (status & UMS9117_VBC_FIFO_EMPTY)
-		return 0;
-	if (status & UMS9117_VBC_FIFO_FULL)
-		return UMS9117_AUDIO_FIFO_FRAMES;
-	return (write_ptr + UMS9117_AUDIO_FIFO_FRAMES - read_ptr) %
-	       UMS9117_AUDIO_FIFO_FRAMES;
-}
-
 int ums9117_audio_queued(struct ums9117_audio *audio)
 {
-	int left = fifo_frames(readl(audio->vbc + UMS9117_VBC_DAC1_STATUS));
-	int right = fifo_frames(readl(audio->vbc + UMS9117_VBC_DAC0_STATUS));
+	int left = sprd_vbc_fifo_frames(
+		readl(audio->vbc + UMS9117_VBC_DAC1_STATUS));
+	int right = sprd_vbc_fifo_frames(
+		readl(audio->vbc + UMS9117_VBC_DAC0_STATUS));
 
 	if (left < 0 || right < 0)
 		return -EIO;
@@ -646,9 +628,7 @@ int ums9117_audio_capture_available(struct ums9117_audio *audio)
 	u32 status = readl(audio->vbc + UMS9117_VBC_ADC1_STATUS);
 
 	/* Once full, continuity cannot be guaranteed even if no read was lost. */
-	if (status & UMS9117_VBC_FIFO_FULL)
-		return -EPIPE;
-	return fifo_frames(status);
+	return sprd_vbc_fifo_capture_frames(status);
 }
 
 u16 ums9117_audio_read_capture(struct ums9117_audio *audio)

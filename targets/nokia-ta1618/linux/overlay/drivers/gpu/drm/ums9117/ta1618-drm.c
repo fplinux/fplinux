@@ -22,7 +22,6 @@ static const struct ums9117_drm_profile ta1618_drm_profile = {
 	.sleep_out_ms = 120,
 	.spi_frame_clock_divider = 0,
 	.wled_backlight_name = "ta1618-backlight",
-	.native_nv16 = true,
 	.lcdc_ctrl_set = BIT(2),
 	.lcdc_ctrl_clear = BIT(1) | (7U << 5),
 };

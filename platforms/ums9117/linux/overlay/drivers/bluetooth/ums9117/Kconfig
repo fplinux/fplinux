@@ -7,6 +7,7 @@ config BT_UMS9117_CM4
 	select FW_LOADER
 	select SPRD_MBOX
 	select BT_HCIUART_H4
+	select UMS9117_FM_WIRE
 	help
 	  Start the UMS9117 CM4 controller from external firmware and fitted
 	  Bluetooth records, then expose its mailbox transport as a Linux HCI

@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     import pytest
 
 AUDIO = ROOT / "platforms/ums9117/linux/overlay/sound/drivers/ums9117"
+SHARED_INCLUDE = ROOT / "platforms/shared/linux/overlay/include"
 HARNESS = ROOT / "tests/host_tool/ums9117/audio/audio-start.c"
 COMPAT = ROOT / "tests/host_tool/ums9117/audio/native-operation-compat/vbc"
 TYPES = ROOT / "tests/host_tool/ums9117/audio/native-operation-compat/audio"
@@ -43,6 +44,7 @@ class AudioStartHostComponentTests:
                     f"-I{COMPAT}",
                     f"-I{TYPES}",
                     f"-I{AUDIO}",
+                    f"-I{SHARED_INCLUDE}",
                     str(HARNESS),
                     str(AUDIO / "ums9117-audio.c"),
                 ],

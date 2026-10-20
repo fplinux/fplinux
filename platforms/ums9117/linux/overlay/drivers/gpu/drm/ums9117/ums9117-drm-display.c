@@ -7,6 +7,7 @@
 #include <linux/mfd/syscon.h>
 #include <linux/of.h>
 #include <linux/slab.h>
+#include <linux/soc/ums9117/mmio.h>
 #include <video/mipi_display.h>
 
 #include <drm/drm_fb_dma_helper.h>
@@ -86,8 +87,7 @@ static void ums9117_drm_set_wled_state(struct ums9117_drm *udrm, bool known,
 	spin_lock_irqsave(&udrm->lock, flags);
 	udrm->wled_known = known;
 	udrm->wled_on = known && on;
-	if (udrm->backlight_max_brightness)
-		udrm->backlight_applied = known ? brightness : 0;
+	udrm->backlight_applied = known ? brightness : 0;
 	spin_unlock_irqrestore(&udrm->lock, flags);
 }
 
@@ -105,8 +105,7 @@ static int ums9117_drm_wled_set(struct ums9117_drm *udrm, bool on,
 	unsigned int i;
 	int ret;
 
-	if (on && udrm->backlight_max_brightness &&
-	    (!brightness || brightness > udrm->backlight_max_brightness))
+	if (on && (!brightness || brightness > udrm->backlight_max_brightness))
 		return -EINVAL;
 	ret = regmap_update_bits(udrm->pmic, SC2720_MODULE_EN0,
 				 SC2720_MODULE_EN0_WLED_MODULE_ENABLE,
@@ -130,13 +129,11 @@ static int ums9117_drm_wled_set(struct ums9117_drm *udrm, bool on,
 	}
 	if (!ret && on) {
 		for (i = 0; !ret && i < ARRAY_SIZE(current_regs); i++) {
-			u32 current_level = udrm->wled_levels[i];
+			u32 current_level = udrm->wled_levels[i] ? brightness :
+								   0;
 
 			if (udrm->wled_levels[i])
 				active_mask |= 0xc << (i * 4);
-			if (udrm->backlight_max_brightness &&
-			    udrm->wled_levels[i])
-				current_level = brightness;
 			ret = regmap_read(udrm->pmic, current_regs[i], &value);
 			if (!ret)
 				ret = regmap_write(
@@ -313,7 +310,6 @@ static unsigned int ums9117_drm_cached_backlight_level(struct ums9117_drm *udrm)
 	return brightness;
 }
 
-#if IS_ENABLED(CONFIG_BACKLIGHT_CLASS_DEVICE)
 static int
 ums9117_drm_backlight_update_status(struct backlight_device *backlight)
 {
@@ -365,7 +361,6 @@ static const struct backlight_ops ums9117_drm_backlight_ops = {
 	.update_status = ums9117_drm_backlight_update_status,
 	.get_brightness = ums9117_drm_backlight_get_brightness,
 };
-#endif
 
 static int ums9117_drm_reset_panel(struct ums9117_drm *udrm, u16 phase_ms)
 {
@@ -416,18 +411,6 @@ static int ums9117_drm_wake_panel(struct ums9117_drm *udrm)
 		return ums9117_drm_dcs(udrm, MIPI_DCS_SET_DISPLAY_ON, NULL, 0);
 	}
 	return -EINVAL;
-}
-
-static void __iomem *ums9117_drm_ioremap_shared(struct platform_device *pdev,
-						const char *name)
-{
-	struct resource *resource;
-
-	resource = platform_get_resource_byname(pdev, IORESOURCE_MEM, name);
-	if (!resource || resource_size(resource) < sizeof(u32))
-		return IOMEM_ERR_PTR(-EINVAL);
-	return devm_ioremap(&pdev->dev, resource->start,
-			    resource_size(resource));
 }
 
 static int ums9117_drm_configure_pin_group(struct platform_device *pdev,
@@ -710,10 +693,7 @@ int ums9117_drm_display_enable_locked(struct ums9117_drm *udrm,
 							    &damage);
 	if (!ret) {
 		brightness = ums9117_drm_cached_backlight_level(udrm);
-		ret = ums9117_drm_wled_set(udrm,
-					   !udrm->backlight_max_brightness ||
-						   brightness != 0,
-					   brightness);
+		ret = ums9117_drm_wled_set(udrm, brightness != 0, brightness);
 	}
 	if (ret)
 		return ret;
@@ -763,15 +743,18 @@ static int ums9117_drm_map_common_resources(struct ums9117_drm *udrm,
 	udrm->lcdc = devm_platform_ioremap_resource_byname(pdev, "lcdc");
 	if (IS_ERR(udrm->lcdc))
 		return PTR_ERR(udrm->lcdc);
-	udrm->ap_ahb_gate_set =
-		ums9117_drm_ioremap_shared(pdev, "ap-ahb-gate-set");
-	udrm->ap_ahb_reset_set =
-		ums9117_drm_ioremap_shared(pdev, "ap-ahb-reset-set");
-	udrm->ap_ahb_reset_clear =
-		ums9117_drm_ioremap_shared(pdev, "ap-ahb-reset-clear");
-	if (IS_ERR(udrm->ap_ahb_gate_set) || IS_ERR(udrm->ap_ahb_reset_set) ||
-	    IS_ERR(udrm->ap_ahb_reset_clear))
-		return -EINVAL;
+	udrm->ap_ahb_gate_set = ums9117_devm_ioremap_shared(
+		pdev, "ap-ahb-gate-set", sizeof(u32));
+	if (IS_ERR(udrm->ap_ahb_gate_set))
+		return PTR_ERR(udrm->ap_ahb_gate_set);
+	udrm->ap_ahb_reset_set = ums9117_devm_ioremap_shared(
+		pdev, "ap-ahb-reset-set", sizeof(u32));
+	if (IS_ERR(udrm->ap_ahb_reset_set))
+		return PTR_ERR(udrm->ap_ahb_reset_set);
+	udrm->ap_ahb_reset_clear = ums9117_devm_ioremap_shared(
+		pdev, "ap-ahb-reset-clear", sizeof(u32));
+	if (IS_ERR(udrm->ap_ahb_reset_clear))
+		return PTR_ERR(udrm->ap_ahb_reset_clear);
 	udrm->aon_apb =
 		syscon_regmap_lookup_by_phandle(dev->of_node, "sprd,aon-apb");
 	if (IS_ERR(udrm->aon_apb))
@@ -791,16 +774,14 @@ static int ums9117_drm_map_common_resources(struct ums9117_drm *udrm,
 	for (i = 0; i < ARRAY_SIZE(udrm->wled_levels); i++) {
 		if (udrm->wled_levels[i] > SC2720_BLTC_CURRENT_LEVEL_MASK)
 			return -EINVAL;
-		if (!udrm->profile->wled_backlight_name ||
-		    !udrm->wled_levels[i])
+		if (!udrm->wled_levels[i])
 			continue;
 		if (!udrm->backlight_max_brightness)
 			udrm->backlight_max_brightness = udrm->wled_levels[i];
 		else if (udrm->wled_levels[i] != udrm->backlight_max_brightness)
 			return -EINVAL;
 	}
-	if (udrm->profile->wled_backlight_name &&
-	    !udrm->backlight_max_brightness)
+	if (!udrm->backlight_max_brightness)
 		return -EINVAL;
 	udrm->backlight_effective = udrm->backlight_max_brightness;
 	if (of_find_property(dev->of_node, "sprd,wled-default-level", NULL)) {
@@ -879,8 +860,6 @@ int ums9117_drm_display_register_backlight(struct ums9117_drm *udrm,
 		.scale = BACKLIGHT_SCALE_UNKNOWN,
 	};
 
-	if (!udrm->profile->wled_backlight_name)
-		return 0;
 	if (!udrm->backlight_max_brightness)
 		return -EINVAL;
 	properties.max_brightness = udrm->backlight_max_brightness;

@@ -116,6 +116,11 @@ class BluetoothContext:
         """Return the synthetic device-discovery directory for this bus."""
         return self.root / "platform-driver"
 
+    @property
+    def service_directory(self) -> Path:
+        """Keep the service's file lookup separate from the client's cwd."""
+        return self.root / "service"
+
     @staticmethod
     def stop_process(process: subprocess.Popen[str]) -> None:
         """Stop an owned process group, matching the host-test process boundary."""
@@ -141,9 +146,11 @@ class BluetoothContext:
     def start_service(self, mode: str) -> None:
         """Start the external fake and wait for its explicit readiness marker."""
         ready = self.root / "service-ready"
+        self.service_directory.mkdir(exist_ok=True)
         self.fake = subprocess.Popen(
             [str(self.tools.service), mode, str(ready)],
             env=self.child_environment(),
+            cwd=self.service_directory,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -354,6 +361,39 @@ class FplinuxBluetoothHostToolTests:
 
         assert (result.returncode) == (0), result.stderr
         assert (result.stdout) == (f"sent {payload} to {PEER}\n")
+
+    def test_send_relative_path_opens_the_clients_file_from_another_service_cwd(
+        self, bluetooth_case: BluetoothContext
+    ) -> None:
+        """The service consumes the client's bytes despite a same-named local file."""
+        payload = bluetooth_case.root / "payload"
+        payload.write_bytes(b"selected by the client\n")
+        bluetooth_case.service_directory.mkdir()
+        (bluetooth_case.service_directory / "payload").write_bytes(b"service decoy\n")
+        bluetooth_case.start_service("send-fast")
+
+        result = bluetooth_case.run_client("send", PEER, "payload")
+
+        assert result.returncode == 0, result.stderr
+        assert (bluetooth_case.service_directory / "sent-bytes").read_bytes() == (
+            b"selected by the client\n"
+        )
+        assert result.stdout == f"sent payload to {PEER}\n"
+
+    @pytest.mark.parametrize("source_kind", ["missing", "directory"])
+    def test_send_missing_or_nonregular_file_is_rejected_before_contacting_obexd(
+        self, bluetooth_case: BluetoothContext, source_kind: str
+    ) -> None:
+        """Invalid file inputs are diagnosed even without an obexd service."""
+        if source_kind == "directory":
+            (bluetooth_case.root / "invalid-payload").mkdir()
+
+        result = bluetooth_case.run_client("send", PEER, "invalid-payload")
+
+        assert result.returncode == 1
+        assert result.stdout == ""
+        assert "invalid-payload" in result.stderr
+        assert "D-Bus" not in result.stderr
 
     def test_receive_uses_name_before_authorization_and_writes_fixture_bytes(
         self, bluetooth_case: BluetoothContext

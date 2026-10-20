@@ -3,11 +3,10 @@
 #define FPLINUX_UMS9117_AUDIO_H
 
 #include <linux/types.h>
+#include <linux/soc/sprd/vbc-fifo.h>
 
 struct platform_device;
 struct ums9117_audio;
-
-#define UMS9117_AUDIO_FIFO_FRAMES 320U
 
 enum ums9117_audio_dac_rate {
 	UMS9117_AUDIO_DAC_24K,

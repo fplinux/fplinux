@@ -26,7 +26,6 @@ static const struct ums9117_drm_profile bq2830l_drm_profile = {
 	.sleep_in_ms = 200,
 	.spi_frame_clock_divider = 1,
 	.wled_backlight_name = "bq-2830l-backlight",
-	.native_nv16 = true,
 	.lcdc_ctrl_set = BIT(1),
 	.lcdc_ctrl_clear = BIT(2) | (7U << 5),
 };

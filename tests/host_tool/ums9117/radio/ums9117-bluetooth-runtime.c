@@ -66,6 +66,8 @@ static struct {
 	unsigned int fm_writes;
 	unsigned long fm_reply_delay_ms;
 	u64 fm_reply_at;
+	const u8 *fm_reply_on_write;
+	size_t fm_reply_on_write_bytes;
 } fake;
 
 /*
@@ -214,18 +216,13 @@ void hci_unregister_dev(struct hci_dev *hdev)
 
 int hci_recv_frame(struct hci_dev *hdev, struct sk_buff *skb)
 {
-	int ret = 0;
-
 	assert(hdev == fake.hdev);
 	fake.received_frames++;
 	if (skb->type == 4 && skb->len == 3 &&
 	    !memcmp(skb->data, "\xff\x01\x42", 3))
 		fake.sentinel_events++;
-	if (skb->type == 4 && skb->len == 2 &&
-	    !memcmp(skb->data, "\xfe\x00", 2))
-		ret = -EIO;
 	kfree_skb(skb);
-	return ret;
+	return 0;
 }
 
 /*
@@ -373,6 +370,12 @@ int ums9117_cm4_mailbox_fm_write(const u8 *data, size_t bytes)
 	fake.fm_reply_at =
 		fake.now + fake.fm_reply_delay_ms * (NSEC_PER_SEC / 1000);
 	fake.fm_writes++;
+	if (fake.fm_reply_on_write) {
+		assert(!fake.fm_input_bytes);
+		memcpy(fake.fm_input, fake.fm_reply_on_write,
+		       fake.fm_reply_on_write_bytes);
+		fake.fm_input_bytes = fake.fm_reply_on_write_bytes;
+	}
 	return 0;
 }
 
@@ -556,22 +559,6 @@ static void close_discards_a_frame_reassembled_after_reopening(void)
 	stop();
 }
 
-static void receive_callback_failure_stops_following_delivery(void)
-{
-	const u8 rejected[] = { HCI_EVENT_PKT, 0xfe, 0x00 };
-	const u8 sentinel[] = { HCI_EVENT_PKT, 0xff, 0x01, 0x42 };
-
-	start();
-	controller_input(rejected, sizeof(rejected));
-	pump();
-	assert(fake.received_frames == 1);
-	assert(fake.hdev->stat.err_rx == 1);
-	controller_input(sentinel, sizeof(sentinel));
-	pump();
-	assert(fake.received_frames == 1 && !fake.sentinel_events);
-	stop();
-}
-
 static void native_receiver_error_stops_following_delivery(void)
 {
 	const u8 invalid_type[] = { 0 };
@@ -694,6 +681,80 @@ static void fm_commands_preserve_config_bytes_and_short_error_responses(void)
 	assert(fake.fm_writes == 2);
 	data_still_flows();
 	stop();
+}
+
+static void fm_drains_old_split_replies_before_sending_a_request(void)
+{
+	const u8 stale[] = { 0x04, 0x0e, 0x04, 0x01, 0x8c, 0xfc, 0x02 };
+	const u8 current[] = { 0x04, 0x0e, 0x04, 0x01, 0x8c, 0xfc, 0x00 };
+	u8 reply[7];
+
+	start();
+	memcpy(fake.fm_input, stale, sizeof(stale));
+	fake.fm_input_bytes = sizeof(stale);
+	fake.fm_sent = true;
+	fake.fm_chunk = 2;
+	fake.fm_reply_on_write = current;
+	fake.fm_reply_on_write_bytes = sizeof(current);
+	assert(ums9117_hci_fm_command(0, NULL, 0, reply, sizeof(reply),
+				      false) == 7);
+	assert(fake.fm_writes == 1 && !fake.fm_input_bytes);
+	assert(!memcmp(reply, current, sizeof(current)));
+	data_still_flows();
+	stop();
+}
+
+static void fm_clock_reply_retains_all_seventeen_bytes(void)
+{
+	const u8 request[] = { 0x01, 0x8c, 0xfc, 0x0b, 0x22, 0x00, 0x94, 0x41,
+			       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01 };
+	const u8 clock[] = { 0x04, 0x0e, 0x0e, 0x01, 0x8c, 0xfc,
+			     0x00, 0x00, 0x94, 0x41, 0x00, 0x00,
+			     0x80, 0x01, 0x00, 0x00, 0x03 };
+	const u8 payload[] = { 0x00, 0x94, 0x41, 0x00, 0x00,
+			       0x00, 0x00, 0x00, 0x00, 0x01 };
+	u8 reply[17];
+
+	start();
+	memcpy(fake.fm_input, clock, sizeof(clock));
+	fake.fm_input_bytes = sizeof(clock);
+	fake.fm_chunk = 1;
+	assert(ums9117_hci_fm_command(0x22, payload, sizeof(payload), reply,
+				      sizeof(reply), false) == 17);
+	assert(fake.fm_output_bytes == sizeof(request));
+	assert(!memcmp(fake.fm_output, request, sizeof(request)));
+	assert(!memcmp(reply, clock, sizeof(clock)));
+	data_still_flows();
+	stop();
+}
+
+static void fm_invalid_seek_order_quarantines_only_the_radio(void)
+{
+	const u8 duplicate_ack[] = { 0x04, 0x0e, 0x04, 0x01, 0x8c, 0xfc, 0x00,
+				     0x04, 0x0e, 0x04, 0x01, 0x8c, 0xfc, 0x00 };
+	const u8 premature_result[] = { 0x04, 0xff, 0x06, 0x30, 0x00,
+					0x48, 0x1c, 0x10, 0x27 };
+	const u8 payload[] = { 0x2e, 0x22, 0x01 };
+	const u8 *events[] = { duplicate_ack, premature_result };
+	const size_t lengths[] = { sizeof(duplicate_ack),
+				   sizeof(premature_result) };
+	u8 reply[9];
+	size_t index;
+
+	for (index = 0; index < 2; index++) {
+		start();
+		memcpy(fake.fm_input, events[index], lengths[index]);
+		fake.fm_input_bytes = lengths[index];
+		assert(ums9117_hci_fm_command(0x04, payload, sizeof(payload),
+					      reply, sizeof(reply),
+					      true) == -EPROTO);
+		assert(ums9117_hci_fm_command(0x04, payload, sizeof(payload),
+					      reply, sizeof(reply),
+					      true) == -EPROTO);
+		assert(fake.fm_writes == 1);
+		data_still_flows();
+		stop();
+	}
 }
 
 static void enabled_fm_vetoes_suspend_until_disable(void)
@@ -869,11 +930,13 @@ int main(void)
 	stop();
 	closed_controller_frames_are_discarded_until_reopened();
 	close_discards_a_frame_reassembled_after_reopening();
-	receive_callback_failure_stops_following_delivery();
 	native_receiver_error_stops_following_delivery();
 	fm_late_split_seek_reply_completes_and_preserves_bluetooth();
 	fm_timeout_quarantines_late_replies_without_stopping_bluetooth();
 	fm_commands_preserve_config_bytes_and_short_error_responses();
+	fm_drains_old_split_replies_before_sending_a_request();
+	fm_clock_reply_retains_all_seventeen_bytes();
+	fm_invalid_seek_order_quarantines_only_the_radio();
 	enabled_fm_vetoes_suspend_until_disable();
 	power_cycles_keep_devices_and_allow_stopped_suspend();
 	fm_and_bluetooth_hold_power_independently();

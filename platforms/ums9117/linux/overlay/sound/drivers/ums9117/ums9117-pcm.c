@@ -193,7 +193,7 @@ static const struct snd_pcm_hardware ums9117_pcm_hardware = {
 	.periods_min = 2,
 	.periods_max =
 		UMS9117_PCM_BUFFER_BYTES_MAX / UMS9117_PCM_PERIOD_BYTES_MIN,
-	.fifo_size = UMS9117_AUDIO_FIFO_FRAMES,
+	.fifo_size = SPRD_VBC_FIFO_FRAMES,
 };
 
 static const struct snd_pcm_hardware ums9117_capture_hardware = {
@@ -212,7 +212,7 @@ static const struct snd_pcm_hardware ums9117_capture_hardware = {
 	.periods_min = 2,
 	.periods_max =
 		UMS9117_PCM_BUFFER_BYTES_MAX / UMS9117_PCM_PERIOD_BYTES_MIN,
-	.fifo_size = UMS9117_AUDIO_FIFO_FRAMES,
+	.fifo_size = SPRD_VBC_FIFO_FRAMES,
 };
 
 static bool ums9117_pcm_headphone_fed_speaker(const struct ums9117_pcm *audio)
@@ -680,7 +680,7 @@ static int ums9117_pcm_fill_silence_locked(struct ums9117_pcm *audio)
 
 	if (queued < 0)
 		return queued;
-	for (; queued < UMS9117_AUDIO_FIFO_FRAMES; queued++)
+	for (; queued < SPRD_VBC_FIFO_FRAMES; queued++)
 		ums9117_audio_write(audio->digital, 0, 0);
 	return 0;
 }
@@ -1410,7 +1410,7 @@ static int ums9117_pcm_fill(struct ums9117_pcm *audio,
 	ret = ums9117_pcm_pending_frames(audio, runtime, &pending);
 	if (ret)
 		return ret;
-	space = UMS9117_AUDIO_FIFO_FRAMES - queued;
+	space = SPRD_VBC_FIFO_FRAMES - queued;
 	*written = min(pending, space);
 	ums9117_pcm_write_frames(audio, runtime, *written);
 	*pending_after = pending - *written;
@@ -2050,10 +2050,43 @@ ums9117_pcm_pointer(struct snd_pcm_substream *substream)
 	return position;
 }
 
+static int ums9117_pcm_ioctl(struct snd_pcm_substream *substream,
+			     unsigned int command, void *argument)
+{
+	struct ums9117_pcm *audio = snd_pcm_substream_chip(substream);
+	struct snd_pcm_runtime *runtime = substream->runtime;
+	snd_pcm_uframes_t position;
+	unsigned long flags;
+
+	if (command != SNDRV_PCM_IOCTL1_RESET ||
+	    substream->stream != SNDRV_PCM_STREAM_CAPTURE)
+		return snd_pcm_lib_ioctl(substream, command, argument);
+
+	/* RESET folds ALSA's counters into the ring. Publish the same origin
+	 * to the FIFO producer before either the timer or notifier can run.
+	 * The producer can run before ALSA's later post-reset updates appl_ptr.
+	 */
+	snd_pcm_stream_lock(substream);
+	spin_lock_irqsave(&audio->fifo_lock, flags);
+	position = snd_pcm_running(substream) ? audio->capture.hw_pos : 0;
+	audio->capture.hw_pos = position;
+	audio->capture_ptr = position;
+	runtime->status->hw_ptr = position;
+	runtime->control->appl_ptr = position;
+	runtime->hw_ptr_base = 0;
+	runtime->hw_ptr_interrupt = position - position % runtime->period_size;
+	runtime->hw_ptr_jiffies = jiffies;
+	if (!snd_pcm_running(substream))
+		runtime->hw_ptr_wrap = 0;
+	spin_unlock_irqrestore(&audio->fifo_lock, flags);
+	snd_pcm_stream_unlock(substream);
+	return 0;
+}
+
 static const struct snd_pcm_ops ums9117_pcm_ops = {
 	.open = ums9117_pcm_open,
 	.close = ums9117_pcm_close,
-	.ioctl = snd_pcm_lib_ioctl,
+	.ioctl = ums9117_pcm_ioctl,
 	.prepare = ums9117_pcm_prepare,
 	.trigger = ums9117_pcm_trigger,
 	.pointer = ums9117_pcm_pointer,

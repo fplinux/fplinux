@@ -19,6 +19,7 @@
 #include <linux/regmap.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
+#include <linux/soc/ums9117/mmio.h>
 #include <linux/spinlock.h>
 #include <linux/string.h>
 #include <linux/wait.h>
@@ -2285,21 +2286,6 @@ static int jpeg_stats_show(struct seq_file *seq, void *unused)
 }
 DEFINE_SHOW_ATTRIBUTE(jpeg_stats);
 
-static void __iomem *jpeg_map_shared(struct platform_device *pdev,
-				     const char *name, resource_size_t address)
-{
-	struct resource *resource =
-		platform_get_resource_byname(pdev, IORESOURCE_MEM, name);
-	void __iomem *mapping;
-
-	if (!resource || resource->start != address ||
-	    resource_size(resource) != 4)
-		return IOMEM_ERR_PTR(-EINVAL);
-	mapping = devm_ioremap(&pdev->dev, resource->start,
-			       resource_size(resource));
-	return mapping ?: IOMEM_ERR_PTR(-ENOMEM);
-}
-
 static void jpeg_restore_clock_gate(struct ums9117_jpeg_hw *hw)
 {
 	u32 value = readl(hw->clock);
@@ -2352,15 +2338,22 @@ struct ums9117_jpeg_hw *ums9117_jpeg_hw_create(struct platform_device *pdev)
 	hw->base = devm_ioremap_resource(dev, resource);
 	if (IS_ERR(hw->base))
 		return ERR_CAST(hw->base);
-	hw->gate_state = jpeg_map_shared(pdev, "ap-ahb-gate-state", 0x20e00000);
-	hw->gate_set = jpeg_map_shared(pdev, "ap-ahb-gate-set", 0x20e01000);
-	hw->gate_clear = jpeg_map_shared(pdev, "ap-ahb-gate-clear", 0x20e02000);
-	hw->reset_set = jpeg_map_shared(pdev, "ap-ahb-reset-set", 0x20e01004);
-	hw->reset_clear =
-		jpeg_map_shared(pdev, "ap-ahb-reset-clear", 0x20e02004);
-	hw->clock = jpeg_map_shared(pdev, "dcam-clock", 0x21500088);
-	hw->cpu_qos = jpeg_map_shared(pdev, "cpu-qos", 0x20e000a4);
-	hw->dcam_qos = jpeg_map_shared(pdev, "dcam-qos", 0x20e03058);
+	hw->gate_state = ums9117_devm_ioremap_shared_register(
+		pdev, "ap-ahb-gate-state", 0x20e00000);
+	hw->gate_set = ums9117_devm_ioremap_shared_register(
+		pdev, "ap-ahb-gate-set", 0x20e01000);
+	hw->gate_clear = ums9117_devm_ioremap_shared_register(
+		pdev, "ap-ahb-gate-clear", 0x20e02000);
+	hw->reset_set = ums9117_devm_ioremap_shared_register(
+		pdev, "ap-ahb-reset-set", 0x20e01004);
+	hw->reset_clear = ums9117_devm_ioremap_shared_register(
+		pdev, "ap-ahb-reset-clear", 0x20e02004);
+	hw->clock = ums9117_devm_ioremap_shared_register(pdev, "dcam-clock",
+							 0x21500088);
+	hw->cpu_qos = ums9117_devm_ioremap_shared_register(pdev, "cpu-qos",
+							   0x20e000a4);
+	hw->dcam_qos = ums9117_devm_ioremap_shared_register(pdev, "dcam-qos",
+							    0x20e03058);
 	if (IS_ERR(hw->gate_state))
 		return ERR_CAST(hw->gate_state);
 	if (IS_ERR(hw->gate_set))

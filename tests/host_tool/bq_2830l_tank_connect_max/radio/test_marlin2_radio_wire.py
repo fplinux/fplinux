@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Host-linked Bluetooth, FM and shared packet wire contracts."""
+"""Host-linked Bluetooth and shared packet wire contracts."""
 
 from __future__ import annotations
 
@@ -53,15 +53,6 @@ def test_h4_transmit_lengths_padding_and_setup_reply_matching(tmp_path: Path) ->
         tmp_path,
         component="bluetooth",
         expected_stdout="Marlin2 Bluetooth wire host cases passed\n",
-    )
-
-
-def test_fm_commands_split_replies_seek_ack_and_failed_transactions(tmp_path: Path) -> None:
-    """Link command and event code; V4L2 core and the receiver do not execute."""
-    run_wire_component(
-        tmp_path,
-        component="fm",
-        expected_stdout="Marlin2 FM wire host cases passed\n",
     )
 
 

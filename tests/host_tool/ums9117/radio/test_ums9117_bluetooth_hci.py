@@ -16,6 +16,7 @@ KERNEL = ROOT / "platforms/ums9117/linux/overlay/drivers/bluetooth/ums9117"
 FIXTURES = ROOT / "tests/host_tool/ums9117/radio"
 KERNEL_COMPAT = ROOT / "tests/fixtures/ums9117-kernel"
 COMPAT = KERNEL_COMPAT / "bluetooth-compat"
+PLATFORM = ROOT / "platforms/ums9117/linux/overlay"
 
 
 class Ums9117BluetoothHciHostTests:
@@ -25,6 +26,8 @@ class Ums9117BluetoothHciHostTests:
         """Compile and execute an isolated, self-checking C fixture."""
         source = KERNEL / "cm4-hci.c" if component == "runtime" else KERNEL / f"cm4-{component}.c"
         sources = [source]
+        if component == "runtime":
+            sources.append(PLATFORM / "lib/ums9117-fm-wire.c")
         flags = ["-DCONFIG_RADIO_UMS9117_CM4=1"] if component == "runtime" else []
         with c_build_directory(tmp_path_factory, "ums9117_bluetooth_hci") as temporary:
             executable = temporary / component
@@ -41,6 +44,7 @@ class Ums9117BluetoothHciHostTests:
                     *flags,
                     f"-I{COMPAT}",
                     f"-I{KERNEL}",
+                    f"-I{PLATFORM / 'include'}",
                     str(FIXTURES / f"ums9117-bluetooth-{component}.c"),
                     *(str(source) for source in sources),
                 ],

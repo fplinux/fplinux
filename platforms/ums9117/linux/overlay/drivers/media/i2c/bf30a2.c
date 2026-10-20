@@ -16,6 +16,7 @@
 
 #include "bf30a2-regs.h"
 #include "fplinux-camera-i2c.h"
+#include "ums9117-fixed-format.h"
 
 #ifdef CONFIG_MACH_NOKIA_110_4G
 #include "nokia110-bf30a2-mode.h"
@@ -432,54 +433,16 @@ static int bf30a2_runtime_suspend(struct device *dev)
 static int bf30a2_init_state(struct v4l2_subdev *sd,
 			     struct v4l2_subdev_state *state)
 {
-	struct v4l2_mbus_framefmt *format =
-		v4l2_subdev_state_get_format(state, 0);
-
-	format->width = BF30A2_WIDTH;
-	format->height = BF30A2_HEIGHT;
-	format->code = MEDIA_BUS_FMT_YUYV8_2X8;
-	format->field = V4L2_FIELD_NONE;
-	format->colorspace = V4L2_COLORSPACE_SRGB;
-	format->ycbcr_enc = V4L2_YCBCR_ENC_601;
-	format->quantization = V4L2_QUANTIZATION_FULL_RANGE;
-	format->xfer_func = V4L2_XFER_FUNC_SRGB;
-	return 0;
-}
-
-static int bf30a2_enum_mbus_code(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_state *state,
-				 struct v4l2_subdev_mbus_code_enum *code)
-{
-	if (code->pad || code->index)
-		return -EINVAL;
-	code->code = MEDIA_BUS_FMT_YUYV8_2X8;
-	return 0;
+	return ums9117_fixed_format_init_state(state, BF30A2_WIDTH,
+					       BF30A2_HEIGHT);
 }
 
 static int bf30a2_enum_frame_size(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_state *state,
 				  struct v4l2_subdev_frame_size_enum *size)
 {
-	if (size->pad || size->index || size->code != MEDIA_BUS_FMT_YUYV8_2X8)
-		return -EINVAL;
-	size->min_width = BF30A2_WIDTH;
-	size->max_width = BF30A2_WIDTH;
-	size->min_height = BF30A2_HEIGHT;
-	size->max_height = BF30A2_HEIGHT;
-	return 0;
-}
-
-static int bf30a2_set_fmt(struct v4l2_subdev *sd,
-			  struct v4l2_subdev_state *state,
-			  struct v4l2_subdev_format *format)
-{
-	struct v4l2_mbus_framefmt *sensor_format;
-
-	if (format->pad)
-		return -EINVAL;
-	sensor_format = v4l2_subdev_state_get_format(state, 0);
-	format->format = *sensor_format;
-	return 0;
+	return ums9117_fixed_format_enum_frame_size(size, BF30A2_WIDTH,
+						    BF30A2_HEIGHT);
 }
 
 static int bf30a2_enable_streams(struct v4l2_subdev *sd,
@@ -547,10 +510,10 @@ static int bf30a2_disable_streams(struct v4l2_subdev *sd,
 }
 
 static const struct v4l2_subdev_pad_ops bf30a2_pad_ops = {
-	.enum_mbus_code = bf30a2_enum_mbus_code,
+	.enum_mbus_code = ums9117_fixed_format_enum_mbus_code,
 	.enum_frame_size = bf30a2_enum_frame_size,
 	.get_fmt = v4l2_subdev_get_fmt,
-	.set_fmt = bf30a2_set_fmt,
+	.set_fmt = ums9117_fixed_format_set_fmt,
 	.enable_streams = bf30a2_enable_streams,
 	.disable_streams = bf30a2_disable_streams,
 };

@@ -26,7 +26,6 @@ static const struct ums9117_drm_profile inoi244_drm_profile = {
 	.sleep_in_ms = 5,
 	.sleep_out_ms = 200,
 	.wled_backlight_name = "inoi244-backlight",
-	.native_nv16 = true,
 	.lcdc_ctrl_set = BIT(1),
 	.lcdc_ctrl_clear = BIT(2) | (7U << 5),
 };
