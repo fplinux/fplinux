@@ -40,41 +40,27 @@ def main() -> None:
     """Check the dependency closure and forbidden producer interfaces of one archive."""
     root = Path(sys.argv[1]).resolve()
     sys.path[:0] = [str(root / "scripts"), str(root)]
-    manifest = json.loads((root / "device-data-manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads((root / "runtime-manifest.json").read_text(encoding="utf-8"))
     from fplinux_cli.device_data.cpio import create_device_data_initramfs  # noqa: PLC0415
     from fplinux_cli.device_data.inputs import (  # noqa: PLC0415
-        capture_device_data_generation,
+        capture_phone_data,
     )
-    from fplinux_cli.device_data.portable import (  # noqa: PLC0415
-        prepare_portable_device_data,
-    )
-    from fplinux_cli.device_data.prepare import (  # noqa: PLC0415
-        materialize_device_data,
-        publish_device_data_generation,
-    )
+    from fplinux_cli.runtime.cli import main  # noqa: PLC0415
     from fplinux_cli.runtime.nand_backup import backup_nand  # noqa: PLC0415
 
     for operation in (
         create_device_data_initramfs,
-        capture_device_data_generation,
-        prepare_portable_device_data,
-        materialize_device_data,
-        publish_device_data_generation,
+        capture_phone_data,
+        main,
         backup_nand,
     ):
         assert callable(operation)
-    parser = load_file(
-        root / "targets" / manifest["target"] / manifest["device_data"]["parser"],
-        "archive_target_parser",
-    )
+    descriptor = manifest["device_data"]
+    parser = load_file(root / descriptor["parser"], "archive_target_parser")
     assert callable(parser.prepare_device_data)
-    platform = root / "platforms" / manifest["platform"] / "host"
-    stock_image = load_file(platform / "stock_image.py", "archive_stock_image")
-    assert callable(stock_image.prepare_board_maps)
-    nand = manifest["nand"]
-    ecc = nand is not None and "ecc_format" in nand
+    ecc = descriptor["ecc_module"] is not None
     if ecc:
-        corrector = load_file(platform / "nand_ecc.py", "archive_nand_ecc")
+        corrector = load_file(root / descriptor["ecc_module"], "archive_nand_ecc")
         assert callable(corrector.decode_main)
     for name in ("cli", "build", "environment", "reporting"):
         require_unavailable(f"fplinux_cli.{name}")

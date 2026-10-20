@@ -4,11 +4,3 @@ sha256 = "5555555555555555555555555555555555555555555555555555555555555555"
 cache_name = "fdl1.bin"
 license = "MIT"
 path = "fdl1.bin"
-
-[maps]
-url = "https://example.invalid/maps.7z"
-sha256 = "6666666666666666666666666666666666666666666666666666666666666666"
-cache_name = "maps.7z"
-license = "MIT"
-pinmap_path = "pinmap.bin"
-keymap_path = "keymap.bin"

@@ -132,16 +132,12 @@ class BridgeProcess:
 BRIDGE_SESSION_ID = "a" * 64
 
 
-def bridge_runtime(transport: str = "none") -> dict[str, Any]:
+def bridge_runtime() -> dict[str, Any]:
     """Return the complete adapter input for one bridge acknowledgement case."""
     return {
         **runtime_identity(),
-        "transport": transport,
-        "assets": {
-            "fdl1": "assets/fdl1.bin",
-            "pinmap": "assets/pinmap.bin",
-            "keymap": "assets/keymap.bin",
-        },
+        "transport": "usb-ncm",
+        "assets": {"fdl1": "assets/fdl1.bin"},
         "host_tools": {
             "loader": "host/spd_dump",
             "bridge": "host/libc_server",
@@ -169,7 +165,6 @@ def prepared_session() -> dict[str, str]:
 def run_bridge(  # noqa: PLR0913 -- each keyword replaces one external boundary.
     bridge: BridgeProcess,
     *,
-    transport: str = "none",
     runtime: dict[str, Any] | None = None,
     start_bridge: Callable[..., BridgeProcess] | None = None,
     output: io.StringIO | None = None,
@@ -191,6 +186,13 @@ def run_bridge(  # noqa: PLR0913 -- each keyword replaces one external boundary.
         bootrom = mock.Mock(spec=Path)
         bootrom.exists.side_effect = bootrom_present
         transport_module = mock.Mock()
+        ready = {**prepared_session(), "status": "ready"}
+
+        def bound_session(_session: object, *, on_linux_usb: Callable[[], None]) -> dict[str, str]:
+            on_linux_usb()
+            return ready
+
+        transport_module.wait_for_bound_session.side_effect = bound_session
         popen = (
             mock.Mock(return_value=bridge)
             if start_bridge is None
@@ -208,11 +210,7 @@ def run_bridge(  # noqa: PLR0913 -- each keyword replaces one external boundary.
             ),
             mock.patch.object(ADAPTER.subprocess, "Popen", popen),
             mock.patch.object(ADAPTER.shutil, "which", return_value="/usr/bin/stdbuf"),
-            mock.patch.object(
-                ADAPTER.importlib,
-                "import_module",
-                return_value=transport_module,
-            ),
+            mock.patch.object(ADAPTER, "ssh_transport", transport_module),
         ]
         with contextlib.ExitStack() as stack:
             stack.enter_context(contextlib.redirect_stdout(output or io.StringIO()))
@@ -220,7 +218,7 @@ def run_bridge(  # noqa: PLR0913 -- each keyword replaces one external boundary.
                 stack.enter_context(patch)
             ADAPTER.run(
                 bundle,
-                runtime or bridge_runtime(transport),
+                runtime or bridge_runtime(),
                 prepared_session(),
                 expected_device_identity="9" * 64,
                 events=events,

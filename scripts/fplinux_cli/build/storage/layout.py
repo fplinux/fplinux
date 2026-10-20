@@ -147,9 +147,14 @@ memory@{layout["ram_base"]:x} {{
 """.encode("ascii")
 
 
-def genimage_config(fit: Mapping[str, Any], storage: Mapping[str, Any]) -> bytes:
+def genimage_config(fit: Mapping[str, Any] | None, storage: Mapping[str, Any]) -> bytes:
     """Return one deterministic MBR/FAT/ext4 genimage configuration."""
     template = Path(__file__).with_name("genimage.cfg.in").read_text(encoding="ascii")
+    boot_files = (
+        f'\t\tfile {fit["filename"]} {{\n\t\t\timage = "{fit["filename"]}"\n\t\t}}'
+        if fit is not None
+        else ""
+    )
     return substitute_template(
         template,
         {
@@ -161,6 +166,6 @@ def genimage_config(fit: Mapping[str, Any], storage: Mapping[str, Any]) -> bytes
             "ROOT_FILENAME": storage["root_filename"],
             "ROOT_OFFSET": str(storage["root_offset"]),
             "ROOT_SIZE": str(storage["root_size"]),
-            "FIT_FILENAME": fit["filename"],
+            "BOOT_FILES": boot_files,
         },
     ).encode("ascii")

@@ -3,15 +3,25 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
 from fplinux_cli import common
 from fplinux_cli.build.kernel import state as linux_state
+from fplinux_cli.manifests.linux import discover_linux_targets
+from fplinux_cli.workspace import build_inputs as workspace_inputs
+from fplinux_cli.workspace import staging as workspace_staging
 
+from tests import ROOT
 from tests.fixtures.linux_source import (
     linux_source as linux_source,  # noqa: PLC0414 -- pytest fixture export.
+)
+from tests.small.workspace.workspace_fixtures import (
+    empty_package_graph,
+    workspace_root,
+    write_registration_source,
 )
 
 if TYPE_CHECKING:
@@ -22,6 +32,105 @@ if TYPE_CHECKING:
 
 class SharedLinuxTests:
     """Source switches reuse one tree while causal image inputs remain independent."""
+
+    def test_captured_peer_bytes_and_modes_reach_source_preparation(
+        self, linux_source: LinuxSourceContext
+    ) -> None:
+        """Staging keeps immutable peer inputs while independent bytes retain a recipe hit."""
+        root = linux_source.root
+        for relative in (
+            "platforms/soc/linux/overlay/soc.h",
+            "targets/alpha/linux/overlay/alpha.h",
+            "targets/beta/linux/overlay/beta.h",
+        ):
+            (root / relative).write_bytes(b"/* fixture overlay */\n")
+        platform_path = root / "platforms/soc/platform.toml"
+        with platform_path.open("a") as manifest:
+            manifest.write('\n[bootstrap]\nbackend = "sc9820e"\n[host]\ntools = []\n')
+        source_lock = root / "sources.lock.toml"
+        source_lock.write_text(
+            '[linux]\nversion = "test"\nurl = "https://example.invalid/linux.tar.xz"\n'
+            f'sha256 = "{linux_source.sources["linux"]["sha256"]}"\n'
+            + (ROOT / "tests/fixtures/sc9820e-manifest/sources.lock.toml").read_text()
+        )
+        with (root / "targets/alpha/target.toml").open("a") as manifest:
+            manifest.write(
+                '\n[loader.build]\nfdl1_source = "chipram"\n'
+                'fdl2_source = "u_boot"\nsml_source = "trusted_firmware"\n'
+            )
+        selected = discover_linux_targets(
+            root, linux_source.sources, linux_source.sources["linux"]["sha256"]
+        )[0]
+        selected.config["device_data"] = {"groups": {}}
+        selected.config["linux"]["root"] = {"kind": "initramfs"}
+        selected_files = [
+            (path.relative_to(root).as_posix(), path)
+            for path in (
+                source_lock,
+                platform_path,
+                root / "targets/alpha/target.toml",
+                root / "targets/alpha/driver.c",
+                root / "targets/alpha/fragment",
+            )
+        ]
+        selected_files.append(write_registration_source(root))
+        with (
+            workspace_root(root),
+            empty_package_graph(),
+            mock.patch.object(workspace_inputs, "load_target", return_value=selected.config),
+            mock.patch.object(workspace_inputs, "load_platform", return_value={}),
+            mock.patch.object(
+                workspace_inputs, "target_build_source_files", return_value=selected_files
+            ),
+        ):
+            before = workspace_inputs.target_workspace_snapshot("alpha")
+            peer = root / "targets/beta/driver.c"
+            peer.write_bytes(b"int beta = 2;\n")
+            peer.chmod(0o640)
+            changed = workspace_inputs.target_workspace_snapshot("alpha")
+            peer.write_bytes(b"int beta = 3;\n")
+            peer.chmod(0o600)
+            before_path = workspace_staging.stage_workspace_snapshot(before)
+            changed_path = workspace_staging.stage_workspace_snapshot(changed)
+
+            assert before.recipe == changed.recipe
+            assert before_path != changed_path
+            staged_peer = changed_path / "targets/beta/driver.c"
+            assert staged_peer.read_bytes() == b"int beta = 2;\n"
+            assert staged_peer.stat().st_mode & 0o777 == 0o640
+
+            with mock.patch.object(common, "ROOT", before_path):
+                source, old_state = replace(linux_source, root=before_path).prepare("alpha")
+            assert (source / "drivers/beta.c").read_bytes() == b"int beta = 1;\n"
+            with mock.patch.object(common, "ROOT", changed_path):
+                _, changed_state = replace(linux_source, root=changed_path).prepare("alpha")
+            assert (source / "drivers/beta.c").read_bytes() == b"int beta = 2;\n"
+            assert changed_state.linux_recipe == old_state.linux_recipe
+            assert changed_state.tree_recipe != old_state.tree_recipe
+
+            unrelated = root / "targets/beta/rootfs/config"
+            unrelated.parent.mkdir()
+            unrelated.write_bytes(b"unrelated rootfs input\n")
+            current = workspace_inputs.target_workspace_snapshot("alpha")
+            unrelated.write_bytes(b"changed unrelated rootfs input\n")
+            assert workspace_inputs.target_workspace_snapshot("alpha").recipe == current.recipe
+
+    def test_target_patch_runs_after_its_board_copy(
+        self, linux_source: LinuxSourceContext
+    ) -> None:
+        """The normalized declaration reader retains the builder's copy-before-patch order."""
+        manifest = linux_source.root / "targets/alpha/target.toml"
+        manifest.write_text(
+            manifest.read_text().replace("patches = []", 'patches = ["driver.patch"]')
+        )
+        (manifest.parent / "driver.patch").write_text(
+            "--- a/drivers/alpha.c\n+++ b/drivers/alpha.c\n"
+            "@@ -1 +1 @@\n-int alpha = 1;\n+int alpha = 2;\n"
+        )
+
+        source, _ = linux_source.prepare("alpha")
+
+        assert (source / "drivers/alpha.c").read_bytes() == b"int alpha = 2;\n"
 
     def test_peer_overlay_add_edit_remove_updates_tree_and_preserves_image_independence(
         self, linux_source: LinuxSourceContext

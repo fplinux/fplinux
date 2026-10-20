@@ -35,19 +35,15 @@ def _declared_packages(config: Mapping[str, object], owner: str, layer: str) -> 
 
 def _target_rootfs(
     config: Mapping[str, object],
-) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
     """Read normalized target base packages and its optional profile delta."""
     table = config.get("rootfs")
     package_fields = {
         "base_packages",
         "packages",
-        "exclude_packages",
     }
     if not isinstance(table, Mapping) or set(table) != package_fields:
-        fail(
-            "normalized target rootfs must contain exactly base_packages, packages and "
-            "exclude_packages"
-        )
+        fail("normalized target rootfs must contain exactly base_packages and packages")
 
     def read(field: str) -> tuple[str, ...]:
         raw = table.get(field)
@@ -61,16 +57,7 @@ def _target_rootfs(
             fail(f"normalized target rootfs {field} must not contain duplicates")
         return result
 
-    base_packages = read("base_packages")
-    packages = read("packages")
-    exclude_packages = read("exclude_packages")
-    overlap = set(packages) & set(exclude_packages)
-    if overlap:
-        fail(
-            "normalized target rootfs packages/exclude_packages conflict: "
-            + ", ".join(sorted(overlap))
-        )
-    return base_packages, packages, exclude_packages
+    return read("base_packages"), read("packages")
 
 
 def aport_producer(package: str) -> str:
@@ -102,6 +89,10 @@ def selected_packages(
     owners: dict[str, str] = {}
     for owner, packages in (
         ("common", registration.COMMON_PACKAGES),
+        (
+            "build type",
+            ("fplinux-debug-tools",) if target_config.get("build_type") == "debug" else (),
+        ),
         ("platform", _declared_packages(platform_config, "platform", "rootfs")),
     ):
         for package in packages:
@@ -109,7 +100,7 @@ def selected_packages(
             if previous is not None:
                 fail(f"package {package} is owned by both {previous} and {owner}")
             owners[package] = owner
-    base_packages, packages, exclude_packages = _target_rootfs(target_config)
+    base_packages, packages = _target_rootfs(target_config)
     duplicate_additions = set(base_packages) & set(owners)
     if duplicate_additions:
         fail(
@@ -126,14 +117,6 @@ def selected_packages(
         )
     for package in packages:
         owners[package] = "profile"
-    unknown_excludes = set(exclude_packages) - set(owners)
-    if unknown_excludes:
-        fail(
-            "target profile rootfs excludes a package not owned by the base rootfs: "
-            + ", ".join(sorted(unknown_excludes))
-        )
-    for package in exclude_packages:
-        del owners[package]
     text_consumers = {"fplinux-terminal", "fplinux-brightness-ui", "fplinux-showcase"}
     font_sizes = {"fplinux-font-terminus-6x12", "fplinux-font-terminus-8x16"}
     selected_fonts = set(owners) & font_sizes

@@ -31,6 +31,14 @@ RAM_SESSION_DTB_MARKERS = {
 }
 
 
+def verify_forbidden_dtb_markers(tree: bytes, forbidden_markers: list[str]) -> None:
+    """Preserve the selected target's RAM-only storage exclusion policy."""
+    lowered = tree.lower()
+    for marker in forbidden_markers:
+        if marker.lower().encode() in lowered:
+            fail(f"target DTB contains forbidden storage marker {marker}")
+
+
 def _verify_session_dtb(tree: bytes) -> None:
     """Require one canonical marker for each RAM-session DT property."""
     try:
@@ -52,6 +60,56 @@ def _verify_session_dtb(tree: bytes) -> None:
             fail(f"target DTB marker {name} must occur exactly once")
 
 
+def _verify_dhtb_image(  # noqa: PLR0913 -- image bounds and diagnostic contexts stay explicit.
+    image: bytes,
+    *,
+    load_address: int,
+    payload_limit: int,
+    output_name: str,
+    declared_name: str,
+    limit_name: str,
+) -> None:
+    """Validate the shared UMS image envelope before reading embedded payloads."""
+    if image[:4] != b"DHTB" or len(image) < 0x200:
+        fail(f"{output_name} does not have a complete DHTB header")
+    declared = struct.unpack_from("<I", image, 0x30)[0]
+    if declared + 0x200 > len(image):
+        fail(f"{declared_name} declared size exceeds the RAM image")
+    if load_address + len(image) >= payload_limit:
+        fail(f"{limit_name} reaches its declared payload limit")
+
+
+def _verify_session_slot(  # noqa: PLR0913 -- slot bounds and diagnostic contexts stay explicit.
+    image: bytes,
+    symbols: dict[str, int],
+    *,
+    load_address: int,
+    preceding_end: int,
+    slot_name: str,
+    preceding_name: str,
+    bounds_error: str,
+) -> dict[str, int | str]:
+    """Describe one aligned, bounded and untouched session slot after its payload."""
+    session_start = symbols["fplinux_session_start"]
+    session_end = symbols["fplinux_session_end"]
+    expected_start = (preceding_end + RAM_SESSION_ALIGNMENT - 1) & -RAM_SESSION_ALIGNMENT
+    if session_start != expected_start or session_start % RAM_SESSION_ALIGNMENT:
+        fail(f"{slot_name} slot does not immediately follow {preceding_name}")
+    if session_end - session_start != RAM_SESSION_BYTES:
+        fail(f"{slot_name} slot does not have its exact ABI size")
+    if not load_address <= session_start < session_end <= load_address + len(image):
+        fail(bounds_error)
+    offset = session_start - load_address
+    template = image[offset : offset + RAM_SESSION_BYTES]
+    if template != bytes(RAM_SESSION_BYTES):
+        fail(f"canonical {slot_name} slot is not all zero")
+    return {
+        "offset": offset,
+        "bytes": RAM_SESSION_BYTES,
+        "template_sha256": sha256_bytes(template),
+    }
+
+
 def verify_images(  # noqa: PLR0913 -- artifacts and target limits stay explicit.
     ramboot: Path,
     *,
@@ -66,21 +124,19 @@ def verify_images(  # noqa: PLR0913 -- artifacts and target limits stay explicit
     image = ramboot.read_bytes()
     kernel = zimage.read_bytes()
     tree = dtb.read_bytes()
-    if image[:4] != b"DHTB" or len(image) < 0x200:
-        fail("bootstrap output does not have a complete DHTB header")
-    declared = struct.unpack_from("<I", image, 0x30)[0]
-    if declared + 0x200 > len(image):
-        fail("DHTB declared size exceeds the RAM image")
-    if load_address + len(image) >= payload_limit:
-        fail("RAM image reaches its declared payload limit")
+    _verify_dhtb_image(
+        image,
+        load_address=load_address,
+        payload_limit=payload_limit,
+        output_name="bootstrap output",
+        declared_name="DHTB",
+        limit_name="RAM image",
+    )
     if len(kernel) < 0x28 or kernel[0x24:0x28] != b"\x18\x28\x6f\x01":
         fail("zImage has invalid ARM magic")
     if tree[:4] != b"\xd0\x0d\xfe\xed":
         fail("target DTB has invalid FDT magic")
-    lowered = tree.lower()
-    for marker in forbidden_markers:
-        if marker.lower().encode() in lowered:
-            fail(f"target DTB contains forbidden storage marker {marker}")
+    verify_forbidden_dtb_markers(tree, forbidden_markers)
 
     symbols = _bootstrap_map_symbols(map_file)
     required = {
@@ -120,25 +176,17 @@ def verify_images(  # noqa: PLR0913 -- artifacts and target limits stay explicit
     if image[dtb_start - load_address : dtb_end - load_address] != tree:
         fail("embedded DTB bytes differ from the built DTB")
 
-    session_start = symbols["fplinux_session_start"]
-    session_end = symbols["fplinux_session_end"]
-    expected_start = (dtb_end + RAM_SESSION_ALIGNMENT - 1) & -RAM_SESSION_ALIGNMENT
-    if session_start != expected_start or session_start % RAM_SESSION_ALIGNMENT:
-        fail("RAM-session slot does not immediately follow the aligned embedded DTB")
-    if session_end - session_start != RAM_SESSION_BYTES:
-        fail("RAM-session slot does not have its exact ABI size")
-    if not load_address <= session_start < session_end <= load_address + len(image):
-        fail("RAM-session slot lies outside the RAM image")
-    offset = session_start - load_address
-    template = image[offset : offset + RAM_SESSION_BYTES]
-    if template != bytes(RAM_SESSION_BYTES):
-        fail("canonical RAM-session slot is not all zero")
+    descriptor = _verify_session_slot(
+        image,
+        symbols,
+        load_address=load_address,
+        preceding_end=dtb_end,
+        slot_name="RAM-session",
+        preceding_name="the aligned embedded DTB",
+        bounds_error="RAM-session slot lies outside the RAM image",
+    )
     _verify_session_dtb(tree)
-    return {
-        "offset": offset,
-        "bytes": RAM_SESSION_BYTES,
-        "template_sha256": sha256_bytes(template),
-    }
+    return descriptor
 
 
 def _bootstrap_map_symbols(map_file: Path) -> dict[str, int]:
@@ -166,13 +214,14 @@ def verify_sd_stage0_image(  # noqa: PLR0913 -- artifacts and target limits stay
     """Verify the resident stage0, embedded U-Boot and session slot."""
     image = ramboot.read_bytes()
     binary = uboot.binary.read_bytes()
-    if image[:4] != b"DHTB" or len(image) < 0x200:
-        fail("U-Boot stage0 output does not have a complete DHTB header")
-    declared = struct.unpack_from("<I", image, 0x30)[0]
-    if declared + 0x200 > len(image):
-        fail("U-Boot stage0 DHTB declared size exceeds the RAM image")
-    if load_address + len(image) >= payload_limit:
-        fail("U-Boot stage0 reaches its declared payload limit")
+    _verify_dhtb_image(
+        image,
+        load_address=load_address,
+        payload_limit=payload_limit,
+        output_name="U-Boot stage0 output",
+        declared_name="U-Boot stage0 DHTB",
+        limit_name="U-Boot stage0",
+    )
 
     symbols = _bootstrap_map_symbols(map_file)
     required = {
@@ -205,22 +254,16 @@ def verify_sd_stage0_image(  # noqa: PLR0913 -- artifacts and target limits stay
     if image[uboot_start - load_address : uboot_end - load_address] != binary:
         fail("embedded full U-Boot bytes differ from its verified binary")
 
-    session_start = symbols["fplinux_session_start"]
-    session_end = symbols["fplinux_session_end"]
-    expected_start = (uboot_end + RAM_SESSION_ALIGNMENT - 1) & -RAM_SESSION_ALIGNMENT
-    if session_start != expected_start or session_start % RAM_SESSION_ALIGNMENT:
-        fail("stage0 session slot does not immediately follow embedded U-Boot")
-    if session_end - session_start != RAM_SESSION_BYTES:
-        fail("stage0 session slot does not have its exact ABI size")
-    offset = session_start - load_address
-    template = image[offset : offset + RAM_SESSION_BYTES]
-    if template != bytes(RAM_SESSION_BYTES):
-        fail("canonical stage0 session slot is not all zero")
+    descriptor = _verify_session_slot(
+        image,
+        symbols,
+        load_address=load_address,
+        preceding_end=uboot_end,
+        slot_name="stage0 session",
+        preceding_name="embedded U-Boot",
+        bounds_error="canonical stage0 session slot is not all zero",
+    )
     for name in ("stage0_ops", "uboot_handoff"):
         if not load_address <= symbols[name] < symbols["__bss_end"]:
             fail(f"resident {name} lies outside the stage0 image")
-    return {
-        "offset": offset,
-        "bytes": RAM_SESSION_BYTES,
-        "template_sha256": sha256_bytes(template),
-    }
+    return descriptor

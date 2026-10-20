@@ -1,0 +1,141 @@
+--- a/spd_dump.c
++++ b/spd_dump.c
+@@ -22,6 +22,7 @@
+ #include <stdint.h>
+ #include <string.h>
+ #include <ctype.h> // tolower
++#include <errno.h>
+ 
+ #ifndef LIBUSB_DETACH
+ /* detach the device from crappy kernel drivers */
+@@ -101,6 +102,53 @@
+ #define FLAGS_TRANSCODE 2
+ 
+ #if USE_LIBUSB
++static int usb_selector_number(const char *value, unsigned limit) {
++	char *end;
++	unsigned long number;
++	if (!*value || strspn(value, "0123456789") != strlen(value))
++		ERR_EXIT("invalid USB selector\n");
++	errno = 0;
++	number = strtoul(value, &end, 10);
++	if (errno || *end || !number || number > limit)
++		ERR_EXIT("invalid USB selector\n");
++	return number;
++}
++
++static libusb_device_handle *open_selected_usb(int bus, int address) {
++	libusb_device **devices, *selected = NULL;
++	libusb_device_handle *handle = NULL;
++	struct libusb_device_descriptor desc;
++	ssize_t count, i;
++	int err;
++
++	count = libusb_get_device_list(NULL, &devices);
++	if (count < 0)
++		ERR_EXIT("libusb_get_device_list failed: %s\n", libusb_error_name(count));
++	for (i = 0; i < count; i++) {
++		if (libusb_get_bus_number(devices[i]) != bus ||
++				libusb_get_device_address(devices[i]) != address) continue;
++		if (selected) {
++			libusb_free_device_list(devices, 1);
++			ERR_EXIT("ambiguous USB selector\n");
++		}
++		selected = devices[i];
++	}
++	if (!selected) {
++		libusb_free_device_list(devices, 1);
++		return NULL;
++	}
++	err = libusb_get_device_descriptor(selected, &desc);
++	if (err < 0 || desc.idVendor != 0x1782 || desc.idProduct != 0x4d00) {
++		libusb_free_device_list(devices, 1);
++		ERR_EXIT("selected USB device is not 1782:4d00\n");
++	}
++	err = libusb_open(selected, &handle);
++	libusb_free_device_list(devices, 1);
++	if (err < 0)
++		ERR_EXIT("libusb_open selected device failed: %s\n", libusb_error_name(err));
++	return handle;
++}
++
+ static void find_endpoints(libusb_device_handle *dev_handle, int result[4]) {
+ 	int endp_in = -1, endp_out = -1, endp_in_blk = 0, endp_out_blk = 0;
+ 	int i, k, err;
+@@ -1136,6 +1184,7 @@
+ int main(int argc, char **argv) {
+ #if USE_LIBUSB
+ 	libusb_device_handle *device;
++	int usb_bus = 0, usb_address = 0;
+ #else
+ 	int serial;
+ #endif
+@@ -1147,14 +1196,18 @@
+ 	int keep_charge = 0, end_data = 1, blk_size = 0;
+ 	int secure_boot = 0;
+ 
++	while (argc > 1) {
+ #if USE_LIBUSB
+-	(void)tty;
+-	ret = libusb_init(NULL);
+-	if (ret < 0)
+-		ERR_EXIT("libusb_init failed: %s\n", libusb_error_name(ret));
++		if (!strcmp(argv[1], "--usb-bus")) {
++			if (argc <= 2 || usb_bus) ERR_EXIT("bad USB selector\n");
++			usb_bus = usb_selector_number(argv[2], 255);
++			argc -= 2; argv += 2;
++		} else if (!strcmp(argv[1], "--usb-device")) {
++			if (argc <= 2 || usb_address) ERR_EXIT("bad USB selector\n");
++			usb_address = usb_selector_number(argv[2], 127);
++			argc -= 2; argv += 2;
++		} else
+ #endif
+-
+-	while (argc > 1) {
+ 		if (!strcmp(argv[1], "--tty")) {
+ 			if (argc <= 2) ERR_EXIT("bad option\n");
+ 			tty = argv[2];
+@@ -1172,9 +1225,19 @@
+ 		} else break;
+ 	}
+ 
++#if USE_LIBUSB
++	if (!!usb_bus != !!usb_address)
++		ERR_EXIT("USB bus and device must be specified together\n");
++	(void)tty;
++	ret = libusb_init(NULL);
++	if (ret < 0)
++		ERR_EXIT("libusb_init failed: %s\n", libusb_error_name(ret));
++#endif
++
+ 	for (i = 0; ; i++) {
+ #if USE_LIBUSB
+-		device = libusb_open_device_with_vid_pid(NULL, 0x1782, 0x4d00);
++		device = usb_bus ? open_selected_usb(usb_bus, usb_address) :
++			libusb_open_device_with_vid_pid(NULL, 0x1782, 0x4d00);
+ 		if (device) break;
+ 		if (i >= wait)
+ 			ERR_EXIT("libusb_open_device failed\n");
+@@ -1197,9 +1260,12 @@
+ 	io->verbose = verbose;
+ 
+ 	while (argc > 1) {
+-		if (!strcmp(argv[1], "fdl")) {
++		if (!strcmp(argv[1], "fdl") || !strcmp(argv[1], "fdl_exec")) {
+ 			const char *fn; uint32_t addr;
++			int final_exec = !strcmp(argv[1], "fdl_exec");
+ 			if (argc <= 3) ERR_EXIT("bad command\n");
++			if (final_exec && (!fdl_loaded || argc != 4 || end_data != 1))
++				ERR_EXIT("fdl_exec requires a loaded FDL, end_data 1 and no following command\n");
+ 
+ 			fn = argv[2];
+ 			addr = str_to_addr(argv[3], "ram", ram_addr);
+@@ -1290,6 +1356,8 @@
+ 
+ 				encode_msg(io, BSL_CMD_EXEC_DATA, NULL, 0);
+ 				send_msg(io);
++				/* Completion means transmission only; Linux must be checked separately. */
++				if (final_exec) break;
+ 				// Feature phones respond immediately,
+ 				// but it may take a second for a smartphone to respond.
+ 				ret = recv_msg_timeout(io, 15000);

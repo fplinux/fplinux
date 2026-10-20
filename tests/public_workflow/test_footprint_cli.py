@@ -43,12 +43,23 @@ class FootprintCli:
             timeout=10,
         )
 
-    def publish_bundle(self, *, profile: str | None = None, build_type: str = "release") -> Path:
+    def publish_bundle(
+        self,
+        *,
+        profile: str | None = None,
+        build_type: str = "release",
+        kernel_image: str = "zImage",
+        initramfs_delivery: str | None = None,
+    ) -> Path:
         """Publish independent archive fixtures with a complete current-bundle manifest."""
         output = self.root / ".cache/out"
         output.mkdir(parents=True, exist_ok=True)
         staging = create_bundle_staging(output, "example", profile, build_type=build_type)
-        bundle = FootprintFixture(staging).bundle(external=profile is not None)
+        bundle = FootprintFixture(staging).bundle(
+            external=profile is not None,
+            kernel_image=kernel_image,
+            initramfs_delivery=initramfs_delivery,
+        )
         manifest = json.loads(bundle.manifest_bytes)
         manifest.update(
             target="example",
@@ -162,6 +173,32 @@ class FootprintCliTests:
         assert (missing.returncode) == (1), missing.stderr
         assert ("build example --build-type debug") in (missing.stderr)
         assert (missing.stdout) == ("")
+
+    def test_raw_image_with_separate_ram_archive_retains_selected_debug_build(
+        self, footprint_cli: FootprintCli
+    ) -> None:
+        """The public reader reports raw Image and its RAM backing from the selected bundle."""
+        footprint_cli.publish_bundle()
+        footprint_cli.publish_bundle(
+            build_type="debug", kernel_image="Image", initramfs_delivery="external"
+        )
+
+        result = footprint_cli.run_cli(
+            "inspect", "footprint", "example", "--build-type", "debug", "--json"
+        )
+
+        assert result.returncode == 0, result.stderr
+        report = json.loads(result.stdout)
+        assert report["identity"]["build_type"] == "debug"
+        assert report["layers"]["kernel_image_name"] == "Image"
+        assert report["layers"]["kernel_image_bytes"] == 12
+        assert report["rootfs"]["source"] == "ram-squashfs-composition"
+        assert report["layers"]["embedded_initramfs"] is None
+        assert report["layers"]["external_initramfs"]["cpio_bytes"] > 120
+        text = footprint_cli.run_cli("inspect", "footprint", "example", "--build-type", "debug")
+        assert text.returncode == 0, text.stderr
+        assert "Kernel Image: 12 B" in text.stdout
+        assert "External initramfs:" in text.stdout
 
     @pytest.mark.parametrize(
         "payload",
@@ -290,6 +327,7 @@ class FootprintCliTests:
             "--events",
             "events.jsonl",
         )
-        assert (result.returncode) == (1), result.stderr
-        assert ("cannot be used with --from-dump") in (result.stderr)
+        assert result.returncode == 2, result.stderr
+        assert "--events: not allowed with argument --from-dump" in result.stderr
+        assert "Traceback" not in result.stderr
         assert not ((footprint_cli.root / "events.jsonl").exists())

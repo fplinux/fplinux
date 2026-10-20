@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import common
 from fplinux_cli.artifacts.bundles import CurrentBundle, discard_superseded_bundle_generations
+from fplinux_cli.build import DEFAULT_BUILD_MEMORY_MIB
 from fplinux_cli.build import reuse as bundles_commands
 from fplinux_cli.cache.prune import operations as cache_prune
 from fplinux_cli.common import fail, sha256_file
@@ -178,6 +179,7 @@ def _build_container_command(  # noqa: PLR0913
     log_environment: dict[str, str],
     image_recipe: str,
     image_content: str,
+    memory_mib: int = DEFAULT_BUILD_MEMORY_MIB,
     profile: str | None = None,
     build_type: str = "release",
 ) -> list[str]:
@@ -198,7 +200,7 @@ def _build_container_command(  # noqa: PLR0913
         "--read-only",
         "--privileged",
         "--memory",
-        "2g",
+        f"{memory_mib}m",
         "--network",
         "none" if offline else "host",
         "--tmpfs",
@@ -280,8 +282,10 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
     target: str,
     jobs: int,
     *,
+    memory_mib: int = DEFAULT_BUILD_MEMORY_MIB,
     profile: str | None = None,
     build_type: str = "release",
+    include_device_data: bool = True,
     verbose: bool = False,
     offline: bool = False,
     reporter: RunReporter | None = None,
@@ -292,7 +296,7 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
         fail("--jobs must be positive")
     release = releases.load_release(target)
     snapshot = workspace_build_inputs.target_workspace_snapshot(
-        target, profile, build_type=build_type
+        target, profile, build_type=build_type, include_device_data=include_device_data
     )
     container_lock = images.load_container_lock()
     image_recipe = images.container_image_recipe_digest(container_lock)
@@ -322,6 +326,7 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
                 "build",
                 target=bundles_commands.profile_log_target(target, profile),
                 verbose=verbose,
+                build_type=build_type,
             )
         _print_build_result(
             target, bundle, release, cached=True, profile=profile, build_type=build_type
@@ -342,6 +347,7 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
             "build",
             target=bundles_commands.profile_log_target(target, profile),
             verbose=verbose,
+            build_type=build_type,
         )
     kern, image, current_image = _require_build_environment(
         container_lock, image_recipe, offline=offline, reporter=reporter
@@ -363,32 +369,44 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
             f"{log_environment['FPLINUX_LOG_DISPLAY_ROOT']}/container"
         )
         with reporter.stage("container", passthrough=True, show_tail=False) as stage:
-            stage.run(
-                _build_container_command(
-                    kern,
-                    target=target,
-                    profile=profile,
-                    build_type=build_type,
-                    jobs=jobs,
-                    image=image,
-                    offline=offline,
-                    snapshot=snapshot,
-                    workspace=workspace,
-                    downloads=downloads,
-                    ccache=ccache,
-                    host_tools=host_tools,
-                    apk_signing=apk_signing,
-                    apks=apks,
-                    rootfs=rootfs,
-                    linux=linux,
-                    output=output,
-                    logs=container_logs,
-                    log_environment=log_environment,
-                    image_recipe=image_recipe,
-                    image_content=current_image.image_content,
-                ),
-                env=environment_kern.kern_environment(),
-            )
+            try:
+                stage.run(
+                    _build_container_command(
+                        kern,
+                        target=target,
+                        profile=profile,
+                        build_type=build_type,
+                        jobs=jobs,
+                        memory_mib=memory_mib,
+                        image=image,
+                        offline=offline,
+                        snapshot=snapshot,
+                        workspace=workspace,
+                        downloads=downloads,
+                        ccache=ccache,
+                        host_tools=host_tools,
+                        apk_signing=apk_signing,
+                        apks=apks,
+                        rootfs=rootfs,
+                        linux=linux,
+                        output=output,
+                        logs=container_logs,
+                        log_environment=log_environment,
+                        image_recipe=image_recipe,
+                        image_content=current_image.image_content,
+                    ),
+                    env=environment_kern.kern_environment(),
+                )
+            except SystemExit as error:
+                if error.code == 137:
+                    environment_kern.report_kern_memory_failure(
+                        stage,
+                        memory_mib=memory_mib,
+                        advice=(
+                            "Increase build --memory-mib if the host has enough available memory."
+                        ),
+                    )
+                raise
         identity = bundles_commands.build_identity(snapshot, current_image, cache)
         current = bundles_commands.matching_target_bundle(
             target,

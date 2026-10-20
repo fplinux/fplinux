@@ -173,8 +173,10 @@ def command_action(
             build,
             args.target,
             args.jobs,
+            memory_mib=args.memory_mib,
             profile=args.profile,
             build_type=args.build_type,
+            include_device_data=args.include_device_data,
             verbose=args.verbose,
             offline=args.offline,
         )
@@ -223,6 +225,10 @@ def command_action(
             boot=args.boot,
             events=args.events,
         )
+        if args.loader_trace:
+            action = partial(action, loader_trace=True)
+        if args.from_dump is not None:
+            action = partial(action, from_dump=args.from_dump)
     elif args.command == "console":
         from fplinux_cli.cli.runtime import console_target  # noqa: PLC0415 -- selected backend.
 
@@ -256,20 +262,30 @@ def command_action(
         else:
             raise AssertionError(f"unhandled nand command: {args.nand_command}")
     elif args.command == "device-data":
-        if args.device_data_command != "prepare":
-            raise AssertionError(f"unhandled device-data command: {args.device_data_command}")
         from fplinux_cli.cli.device_data import (  # noqa: PLC0415 -- selected backend.
             prepare_device_data,
+            report_device_data,
         )
 
-        action = partial(
-            prepare_device_data,
-            args.target,
-            from_dump=args.from_dump,
-            events=args.events,
-            jobs=args.jobs,
-            offline=args.offline,
-        )
+        if args.device_data_command == "prepare":
+            action = partial(
+                prepare_device_data,
+                args.target,
+                from_dump=args.from_dump,
+                from_originals=args.from_originals,
+                events=args.events,
+                jobs=args.jobs,
+                offline=args.offline,
+            )
+        elif args.device_data_command == "report":
+            action = partial(
+                report_device_data,
+                args.target,
+                from_dump=args.from_dump,
+                offline=args.offline,
+            )
+        else:
+            raise AssertionError(f"unhandled device-data command: {args.device_data_command}")
     elif args.command == "target":
         if args.target_command != "new":
             raise AssertionError(f"unhandled target command: {args.target_command}")

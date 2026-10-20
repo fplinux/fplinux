@@ -5,11 +5,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from fplinux_cli.build import DEFAULT_BUILD_MEMORY_MIB
 from fplinux_cli.cache.prune.operations import discard_superseded_profile_logs
 from fplinux_cli.common import ROOT, fail
 from fplinux_cli.environment.image_state import load_image_state
 from fplinux_cli.environment.images import container_image_recipe_digest, load_container_lock
-from fplinux_cli.environment.kern import kern_box_name, kern_environment
+from fplinux_cli.environment.kern import (
+    kern_box_name,
+    kern_environment,
+    report_kern_memory_failure,
+)
 from fplinux_cli.manifests.paths import normalize_profile
 from fplinux_cli.reporting.run import RunReporter
 from fplinux_cli.workspace.quality_inputs import quality_workspace_snapshot
@@ -54,7 +59,7 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
     build_type: str,
     jobs: int,
 ) -> None:
-    """Run cache-missing source and kernel checks against one disposable workspace."""
+    """Run cache-missing analyzers and tests against one disposable workspace."""
     container_logs = reporter.root / "containers"
     if container_logs.is_symlink() or (container_logs.exists() and not container_logs.is_dir()):
         fail(f"invalid checker container log directory: {container_logs}")
@@ -69,10 +74,12 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
                 kern=kern,
                 image=image,
             )
-        if "python" in source_scopes and (workspace / "tests").is_dir():
-            run_test_workload(reporter, workspace, kern=kern, image=image, names=[])
         for scope in source_scopes:
             publish_success_receipt(cache, recipes[scope])
+
+    if "tests" in missing:
+        run_test_workload(reporter, workspace, kern=kern, image=image, names=[])
+        publish_success_receipt(cache, recipes["tests"])
 
     if "kernel" not in missing:
         return
@@ -93,6 +100,8 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
         "--pull",
         "never",
         "--read-only",
+        "--memory",
+        f"{DEFAULT_BUILD_MEMORY_MIB}m",
         "--tmpfs",
         "/tmp:8g",  # noqa: S108 -- container tmpfs.
         "--no-uid-range",
@@ -112,59 +121,78 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
         "--quiet",
     ]
     with reporter.stage("kernel-prepare", passthrough=True, show_tail=False) as stage:
-        stage.run(
-            [
-                kern,
-                "box",
-                kern_box_name("kernel-prepare"),
-                *common,
-                "--network",
-                "host",
-                "--volume",
-                f"{analyzer_cache['downloads']}:/cache/downloads",
-                "--volume",
-                f"{analyzer_cache['linux']}:/cache/linux",
-                "--",
-                "python3",
-                "-m",
-                "fplinux_cli.quality.kernel",
-                "prepare",
-                *([] if profile is None else ["--profile", profile]),
-                "--build-type",
-                build_type,
-            ],
-            env=environment,
-            timeout=_KERNEL_PREPARE_TIMEOUT,
-        )
+        try:
+            stage.run(
+                [
+                    kern,
+                    "box",
+                    kern_box_name("kernel-prepare"),
+                    *common,
+                    "--network",
+                    "host",
+                    "--volume",
+                    f"{analyzer_cache['downloads']}:/cache/downloads",
+                    "--volume",
+                    f"{analyzer_cache['linux']}:/cache/linux",
+                    "--",
+                    "python3",
+                    "-m",
+                    "fplinux_cli.quality.kernel",
+                    "prepare",
+                    *([] if profile is None else ["--profile", profile]),
+                    "--build-type",
+                    build_type,
+                ],
+                env=environment,
+                timeout=_KERNEL_PREPARE_TIMEOUT,
+            )
+        except SystemExit as error:
+            if error.code == 137:
+                report_kern_memory_failure(
+                    stage,
+                    memory_mib=DEFAULT_BUILD_MEMORY_MIB,
+                    advice="",
+                )
+            raise
     with reporter.stage("kernel-analysis", passthrough=True, show_tail=False) as stage:
-        stage.run(
-            [
-                kern,
-                "box",
-                kern_box_name("kernel-analysis"),
-                *common,
-                "--network",
-                "none",
-                "--volume",
-                f"{analyzer_cache['analysis']}:/cache/analysis",
-                "--volume",
-                f"{analyzer_cache['downloads']}:/cache/downloads:ro",
-                "--volume",
-                f"{analyzer_cache['linux']}:/cache/linux:ro",
-                "--",
-                "python3",
-                "-m",
-                "fplinux_cli.quality.kernel",
-                "check",
-                "--jobs",
-                str(jobs),
-                *([] if profile is None else ["--profile", profile]),
-                "--build-type",
-                build_type,
-            ],
-            env=environment,
-            timeout=_KERNEL_ANALYSIS_TIMEOUT,
-        )
+        try:
+            stage.run(
+                [
+                    kern,
+                    "box",
+                    kern_box_name("kernel-analysis"),
+                    *common,
+                    "--network",
+                    "none",
+                    "--volume",
+                    f"{analyzer_cache['analysis']}:/cache/analysis",
+                    "--volume",
+                    f"{analyzer_cache['downloads']}:/cache/downloads:ro",
+                    "--volume",
+                    f"{analyzer_cache['linux']}:/cache/linux:ro",
+                    "--",
+                    "python3",
+                    "-m",
+                    "fplinux_cli.quality.kernel",
+                    "check",
+                    "--jobs",
+                    str(jobs),
+                    *([] if profile is None else ["--profile", profile]),
+                    "--build-type",
+                    build_type,
+                ],
+                env=environment,
+                timeout=_KERNEL_ANALYSIS_TIMEOUT,
+            )
+        except SystemExit as error:
+            if error.code == 137:
+                advice = ""
+                if jobs > 1:
+                    advice = "Use check --jobs 1 to run kernel contexts serially."
+                report_kern_memory_failure(
+                    stage, memory_mib=DEFAULT_BUILD_MEMORY_MIB, advice=advice
+                )
+            raise
     publish_success_receipt(cache, recipes["kernel"])
 
 
@@ -187,6 +215,7 @@ def check(  # noqa: PLR0913 -- public check options stay explicit.
     reporter = RunReporter.create(
         "check",
         target=None if profile is None else f"profiles/{profile}",
+        build_type=build_type,
         verbose=verbose,
     )
     if "repository" in selected:

@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import importlib
 import os
 import re
 import shutil
@@ -16,6 +15,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
+from fplinux_cli.runtime import ssh_transport
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
     from typing import TextIO
@@ -23,9 +24,6 @@ if TYPE_CHECKING:
 BACKLIGHT_CHANNELS = "rgbw"
 SESSION_ID = re.compile(r"[0-9a-f]{64}\Z")
 DISPLAY_KEYS = frozenset({"spi_mode", "lcd_id", "backlight_channels", "backlight_level"})
-# A pin map holding only its all-ones terminator applies no board pin entry.
-NEUTRAL_PINMAP = b"\xff" * 8
-USB_RULES_FILE = Path("/etc/udev/rules.d/60-fplinux.rules")
 
 
 def fail(message: str) -> NoReturn:
@@ -196,33 +194,22 @@ def fpdoom_options(config: dict[str, Any]) -> list[str]:
     ]
 
 
-@contextmanager
-def map_directory(
-    bundle: Path, assets: dict[str, str], *, device_data: Path | None = None
-) -> Iterator[Path]:
-    """Serve the declared loader maps and optional prepared device data together."""
+def loader_payload_sources(bundle: Path, *, device_data: Path | None = None) -> dict[str, Path]:
+    """Select the admitted supplemental firmware served to the RAM bootstrap."""
     capsule = device_data if device_data is not None else bundle / "device-data.cpio"
     if device_data is not None and not capsule.is_file():
         fail(f"prepared device data is missing: {capsule}")
-    if (
-        "pinmap" in assets
-        and not capsule.is_file()
-        and not (capsule.parent / "pinmap.bin").is_file()
-    ):
-        yield bundle / Path(assets["pinmap"]).parent
-        return
-    with tempfile.TemporaryDirectory(prefix="fplinux-pinmap-") as temporary:
+    return {"device-data.cpio": capsule} if capsule.is_file() else {}
+
+
+@contextmanager
+def payload_directory(bundle: Path, *, device_data: Path | None = None) -> Iterator[Path]:
+    """Own the bridge's served files for one bootstrap handoff."""
+    sources = loader_payload_sources(bundle, device_data=device_data)
+    with tempfile.TemporaryDirectory(prefix="fplinux-payload-") as temporary:
         directory = Path(temporary)
-        for role, name in (("pinmap", "pinmap.bin"), ("keymap", "keymap.bin")):
-            prepared = capsule.parent / name
-            if prepared.is_file():
-                shutil.copyfile(prepared, directory / name)
-            elif role in assets:
-                shutil.copyfile(bundle / assets[role], directory / name)
-            elif role == "pinmap":
-                (directory / name).write_bytes(NEUTRAL_PINMAP)
-        if capsule.is_file():
-            shutil.copyfile(capsule, directory / "device-data.cpio")
+        for name, source in sources.items():
+            shutil.copyfile(source, directory / name)
         yield directory
 
 
@@ -286,59 +273,32 @@ def wait_for_bootrom_disconnect(device: Path, wait_seconds: int) -> None:
 
 
 def complete_linux_handoff(
-    runtime: dict[str, Any],
     session: dict[str, Any],
     linux_usb: dict[str, int],
     *,
     expected_device_identity: str,
     events: Callable[[str], None] | None = None,
-) -> dict[str, Any] | None:
-    """Return the verified SSH session, or None for a no-transport handoff."""
-    if runtime["transport"] == "none":
-        print("Bridge acknowledged the Linux transition; no host-side transport is selected.")
-        return None
-
+) -> dict[str, Any]:
+    """Return the verified USB-NCM SSH session after the bridge acknowledgement."""
     linux_id = f"{linux_usb['vendor_id']:04x}:{linux_usb['product_id']:04x}"
     print(
         "Bridge acknowledged the Linux transition; waiting up to "
         f"{linux_usb['wait_seconds']} seconds for Linux USB-NCM {linux_id}.",
         flush=True,
     )
-    transport_module = importlib.import_module("ssh_transport")
 
     def linux_usb_observed() -> None:
         if events is not None:
             events("linux-usb")
 
-    ready: dict[str, Any] = transport_module.wait_for_bound_session(
+    ready: dict[str, Any] = ssh_transport.wait_for_bound_session(
         session, on_linux_usb=linux_usb_observed
     )
-    transport_module.require_device_identity(ready, expected_device_identity)
-    transport_module.sync_clock(ready)
+    ssh_transport.require_device_identity(ready, expected_device_identity)
     if events is not None:
         events("ssh-ready")
     print("Private USB-NCM SSH session is ready.", flush=True)
     return ready
-
-
-def prepare_usb_access(bundle: Path) -> None:
-    """Install the phone access rules once without replacing existing local rules."""
-    if USB_RULES_FILE.exists():
-        return
-    rules = bundle / "60-fplinux.rules"
-    if not rules.is_file():
-        fail("The archive's phone USB access rules are missing")
-    sudo = shutil.which("sudo")
-    udevadm = shutil.which("udevadm")
-    if sudo is None or udevadm is None:
-        fail("sudo and udevadm are required for the initial phone USB access setup")
-    for command in (
-        [sudo, "install", "-m", "0644", str(rules), str(USB_RULES_FILE)],
-        [sudo, udevadm, "control", "--reload-rules"],
-    ):
-        result = subprocess.run(command, check=False)
-        if result.returncode:
-            fail("Phone USB access setup was not completed; restart Run.sh to try again")
 
 
 def run(  # noqa: PLR0913 -- runtime, session, handoff, user data and output are distinct inputs.
@@ -350,31 +310,23 @@ def run(  # noqa: PLR0913 -- runtime, session, handoff, user data and output are
     events: Callable[[str], None] | None = None,
     device_data: Path | None = None,
     output: TextIO | None = None,
-    setup_host: bool = False,
-) -> dict[str, Any] | None:
-    """Execute the fixed RAM-only UMS9117 sequence for one declared transport."""
+    loader_trace: bool = False,
+) -> dict[str, Any]:
+    """Execute the fixed RAM-only UMS9117 sequence and authenticate its SSH session."""
     display_name = runtime_target_display_name(runtime)
     session_token = prepared_session_token(session)
     assets = runtime["assets"]
-    if set(assets) not in ({"fdl1"}, {"fdl1", "pinmap", "keymap"}):
+    if set(assets) != {"fdl1"}:
         fail("runtime assets do not match the UMS9117 platform contract")
-    if "pinmap" in assets:
-        pinmap = Path(assets["pinmap"])
-        keymap = Path(assets["keymap"])
-        if (
-            pinmap.name != "pinmap.bin"
-            or keymap.name != "keymap.bin"
-            or pinmap.parent != keymap.parent
-        ):
-            fail("platform map assets must share a directory and fixed protocol names")
     tools = runtime["host_tools"]
-    if set(tools) not in ({"loader", "bridge"}, {"loader", "bridge", "keyboard"}):
+    if not {"loader", "bridge"}.issubset(tools) or set(tools) - {
+        "loader",
+        "bridge",
+        "keyboard",
+        "nand_ecc",
+    }:
         fail("runtime host tools do not match the UMS9117 platform contract")
     config = adapter_config(runtime["adapter"])
-    if setup_host and not USB_RULES_FILE.exists():
-        if events is not None:
-            events("usb-access-setup")
-        prepare_usb_access(bundle)
     stdbuf = shutil.which("stdbuf")
     if stdbuf is None:
         fail("GNU stdbuf is required (install coreutils before starting the RAM loader)")
@@ -394,6 +346,8 @@ def run(  # noqa: PLR0913 -- runtime, session, handoff, user data and output are
         addresses,
         config["exec_distance"],
     )
+    if loader_trace:
+        loader_argv[1:1] = ["--verbose", "1"]
     bootrom_id = f"{bootrom_usb['vendor_id']:04x}:{bootrom_usb['product_id']:04x}"
     print(f"{display_name} console RAM boot")
     operations = ["RAM FDL1 load", "RAM payload load"]
@@ -474,8 +428,7 @@ def run(  # noqa: PLR0913 -- runtime, session, handoff, user data and output are
                     fail("BootROM USB did not disconnect before the retry deadline")
                 time.sleep(0.01)
     finally:
-        transport_module = importlib.import_module("ssh_transport")
-        transport_module.remove_personalized_image(session)
+        ssh_transport.remove_personalized_image(session)
     if successful_bootrom_device is None:
         fail("RAM loader completed without a BootROM USB device")
 
@@ -494,14 +447,14 @@ def run(  # noqa: PLR0913 -- runtime, session, handoff, user data and output are
             config["session_name"],
         ]
     )
-    with map_directory(bundle, assets, device_data=device_data) as maps:
+    with payload_directory(bundle, device_data=device_data) as payload:
         bridge_process: subprocess.Popen[Any] | None = None
         try:
             if events is not None:
                 events("linux-start")
             bridge_process = subprocess.Popen(
                 bridge_argv,
-                cwd=maps,
+                cwd=payload,
                 stdout=output,
                 stderr=subprocess.STDOUT if output is not None else None,
             )
@@ -521,7 +474,6 @@ def run(  # noqa: PLR0913 -- runtime, session, handoff, user data and output are
     if events is not None:
         events("linux-transition")
     return complete_linux_handoff(
-        runtime,
         session,
         linux_usb,
         expected_device_identity=expected_device_identity,

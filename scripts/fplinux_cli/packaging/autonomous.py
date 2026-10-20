@@ -13,7 +13,7 @@ from typing import Any
 
 from fplinux_cli import common
 from fplinux_cli.common import ZIP_TIMESTAMP, canonical_json_bytes, fail, sha256_bytes
-from fplinux_cli.device_data.prepare import NAND_ECC_MODULE, NAND_ECC_TOOL
+from fplinux_cli.device_data.prepare import NAND_ECC_TOOL
 from fplinux_cli.manifests.identity import target_display_name
 from fplinux_cli.packaging.readme import shutdown_instructions
 
@@ -26,81 +26,17 @@ WINDOWS_TOOLS = {
     "driver": "tools/driver/wdi-simple.exe",
 }
 
-_RUNTIME_PYTHON = (
-    "__init__.py",
-    "common.py",
-    "device_data/__init__.py",
-    "device_data/audio_profile.py",
-    "device_data/cpio.py",
-    "device_data/formats.py",
-    "device_data/inputs.py",
-    "device_data/partitions.py",
-    "device_data/portable.py",
-    "device_data/prepare.py",
-    "manifests/__init__.py",
-    "manifests/audio.py",
-    "manifests/identity.py",
-    "manifests/values.py",
-    "runtime/__init__.py",
-    "runtime/nand_backup.py",
-)
-_CM4_PYTHON = (
-    "device_data/bluetooth_firmware.py",
-    "device_data/cm4.py",
-    "device_data/fitted.py",
-    "device_data/fm_radio.py",
-)
-
-
-def runtime_python_files(config: dict[str, Any]) -> tuple[str, ...]:
-    """Select the shared runtime and the phone's declared radio preparation."""
-    selected = list(_RUNTIME_PYTHON)
-    groups = config["device_data"]["groups"]
-    if "bluetooth" in groups or "fm-radio" in groups:
-        selected.extend(_CM4_PYTHON)
-    if "wcn-firmware" in groups or "bluetooth" in groups:
-        selected.append("device_data/running_nv.py")
-    return tuple(f"scripts/fplinux_cli/{name}" for name in selected)
-
 
 @dataclass(frozen=True)
 class AutonomousPayload:
-    """Additional archive members and their executable ZIP modes."""
+    """Additional archive members, native runtime inputs and executable ZIP modes."""
 
     files: dict[str, bytes]
+    runtime_files: set[str]
     executables: set[str]
 
 
-def _source_bytes(relative: str) -> bytes:
-    source = common.ROOT / relative
-    if source.is_symlink() or not source.is_file():
-        fail(f"autonomous package input is missing or invalid: {source}")
-    return source.read_bytes()
-
-
-def device_data_manifest(target: str, config: dict[str, Any]) -> bytes:
-    """Declare only the selected phone, including its separately extracted board maps."""
-    declarations = config["device_data"]
-    groups = {
-        **declarations["groups"],
-        "board-maps": [
-            {"source": "pinmap.bin", "destination": "pinmap.bin"},
-            {"source": "keymap.bin", "destination": "keymap.bin"},
-        ],
-    }
-    return canonical_json_bytes(
-        {
-            "target": target,
-            "platform": config["platform"],
-            "machine_compatible": config["identity"]["compatible"],
-            "audio_policy": config["audio_policy"],
-            "nand": config["nand"],
-            "device_data": {"parser": declarations["parser"], "groups": groups},
-        }
-    )
-
-
-def _readme(config: dict[str, Any], *, host: str) -> bytes:
+def _readme(config: dict[str, Any], *, host: str, preparation: bool) -> bytes:
     name = target_display_name(config["identity"])
     instructions = config["adapter"]["boot_instructions"]
     shutdown = shutdown_instructions(
@@ -126,68 +62,65 @@ def _readme(config: dict[str, Any], *, host: str) -> bytes:
               sh Run.sh
             """).removesuffix("\n")
         dump_command = "sh Run.sh --from-dump /path/to/nand.bin"
+    introduction = (
+        "This archive is only for {name}. RAM boot does not access internal storage."
+        if config.get("platform") == "sc9820e"
+        else "This archive is only for {name}. Internal storage is read only."
+    ).format(name=name)
     sections = [
         dedent("""\
             FPLinux - {name}
 
-            This archive is only for {name}. Internal storage is read only.
+            {introduction}
             """)
         .removesuffix("\n")
-        .format(name=name),
+        .format(name=name, introduction=introduction),
         host_instructions,
         dedent("""\
             For a fresh load, keep the phone disconnected until Run displays
             the connection instructions. Leave a running phone connected to reopen SSH.
             {instructions}
-
-            The first run saves a complete backup and prepares your phone's own data.
-            When it finishes, release cards as described below before disconnecting USB.
-            If the phone stays on, briefly remove
-            and reinsert its battery. Run the same script with the phone powered off
-            to start FPLinux and open SSH. Type exit or press Ctrl+D to close SSH.
-            Open the same launcher again to reconnect while the phone remains on.
-            Only one launcher can run from this directory at a time.
-            Ctrl+C cancels loading or waiting; it does not power the phone off.
-
-            To prepare from an existing complete NAND backup without connecting the phone:
-              {dump_command}
-            This preparation preserves the backup and cannot replace existing data/phone.
-
-            Keep this directory for this one phone. Your NAND backup is data/nand.bin,
-            prepared phone data is data/phone, and private connection keys are data/session.
-            Each launch writes a new log in logs and displays its exact path.
             """)
         .removesuffix("\n")
-        .format(instructions=instructions, dump_command=dump_command),
-        shutdown.removesuffix("\n"),
+        .format(instructions=instructions),
     ]
+    if preparation:
+        sections.append(
+            dedent("""\
+                The first run saves a complete backup and prepares your phone's own data.
+                When it finishes, release cards as described below before disconnecting USB.
+                If the phone stays on, briefly remove and reinsert its battery. Run the same
+                launcher again with the phone powered off to start FPLinux.
+                Your NAND backup is data/nand.bin and prepared phone data is data/phone.
+
+                To prepare from an existing complete NAND backup without connecting the phone:
+                  {dump_command}
+                This preparation preserves the backup and cannot replace existing data/phone.
+                """)
+            .removesuffix("\n")
+            .format(dump_command=dump_command)
+        )
+    if config.get("platform") == "sc9820e":
+        sections.append("The source-built RAM loaders are included in this archive.")
+    sections.extend(
+        [
+            dedent("""\
+                Run loads FPLinux into RAM and opens SSH. Type exit or press Ctrl+D to
+                close SSH. Open the same launcher again to reconnect while the phone
+                remains on.
+                Only one launcher can run from this directory at a time.
+                Ctrl+C cancels loading or waiting; it does not power the phone off.
+                """).removesuffix("\n"),
+            dedent("""\
+                Keep this directory for this one phone. Private connection keys and
+                session records are stored in data/session. Each launch writes a new
+                log in logs and displays its exact path.
+                """).removesuffix("\n"),
+        ]
+    )
+    sections.append(shutdown.removesuffix("\n"))
     text = "\n\n".join(sections) + "\n"
     return text.encode("utf-8")
-
-
-def _linux_host_tool(target: str, platform: str, tool: str, *, offline: bool) -> bytes:
-    from fplinux_cli.build.workflow import prepare_host_tool  # noqa: PLC0415
-    from fplinux_cli.reporting.run import RunReporter  # noqa: PLC0415
-
-    cache = common.ROOT / ".cache"
-    cache.mkdir(exist_ok=True)
-    reporter = RunReporter.create("package", target=target, verbose=False)
-    with tempfile.TemporaryDirectory(dir=cache, prefix=".autonomous-host-") as temporary:
-        output = Path(temporary)
-        prepare_host_tool(
-            target,
-            platform,
-            tool,
-            output,
-            offline=offline,
-            reporter=reporter,
-        )
-        executable = output / tool
-        if executable.is_symlink() or not executable.is_file():
-            fail(f"the prepared host tool is missing or invalid: {tool}")
-        contents = executable.read_bytes()
-    reporter.finish()
-    return contents
 
 
 def _linux_ecc_sources(platform: str, *, offline: bool) -> dict[str, bytes]:
@@ -231,46 +164,27 @@ def _linux_ecc_sources(platform: str, *, offline: bool) -> dict[str, bytes]:
 
 
 def autonomous_payload(
-    target: str,
     config: dict[str, Any],
     *,
     host: str,
     offline: bool,
+    runtime: dict[str, Any],
 ) -> AutonomousPayload:
-    """Collect runtime code and prepared native dependencies without personal data."""
-    files = {
-        "Run.py": _source_bytes("common/autonomous.py"),
-        "device-data-manifest.json": device_data_manifest(target, config),
-        "README.txt": _readme(config, host=host),
-    }
-    for relative in runtime_python_files(config):
-        files[relative] = _source_bytes(relative)
-    parser = config["device_data"]["parser"]
+    """Collect host dependencies; executable project code comes from the built bundle."""
+    direct_boot = config["platform"] == "sc9820e"
+    if direct_boot and host != "linux":
+        fail("SC9820E archives support Linux x86-64 only")
+    descriptor = runtime["device_data"]
+    files = {"README.txt": _readme(config, host=host, preparation=descriptor is not None)}
     platform = config["platform"]
-    nand = config["nand"]
-    has_ecc = nand is not None and "ecc_format" in nand
-    for relative in (
-        f"targets/{target}/{parser}",
-        f"platforms/{platform}/host/stock_image.py",
-    ):
-        files[relative] = _source_bytes(relative)
-    if has_ecc:
-        relative = f"platforms/{platform}/{NAND_ECC_MODULE}"
-        files[relative] = _source_bytes(relative)
-
-    executables = {"Run.py"}
+    has_ecc = descriptor is not None and descriptor["ecc_module"] is not None
+    executables: set[str] = set()
     if host == "windows10":
         from fplinux_cli.build.host_tools.windows import prepare_windows_host  # noqa: PLC0415
         from fplinux_cli.build.host_tools.windows_driver import (  # noqa: PLC0415
             prepare_windows_driver,
         )
 
-        files["Run.cmd"] = _source_bytes("common/Run.cmd")
-        files["common/__init__.py"] = _source_bytes("common/__init__.py")
-        files["common/windows_host.py"] = _source_bytes("common/windows_host.py")
-        for source in sorted((common.ROOT / "common/windows").rglob("*.ps1")):
-            relative = source.relative_to(common.ROOT).as_posix()
-            files[relative] = _source_bytes(relative)
         dependencies = prepare_windows_host(
             cache=common.ROOT / ".cache", offline=offline, nand_ecc=has_ecc
         )
@@ -294,16 +208,12 @@ def autonomous_payload(
     else:
         from fplinux_cli.build.host_tools.linux_host import prepare_linux_host  # noqa: PLC0415
 
-        files["Run.sh"] = _source_bytes("common/Run.sh")
-        files["tools/fphelper_t117"] = _linux_host_tool(
-            target, platform, "fphelper_t117", offline=offline
-        )
-        files["licenses/host-tools/Unlicense.txt"] = _source_bytes("LICENSES/Unlicense.txt")
-        executables.update({"Run.sh", "tools/fphelper_t117"})
+        if platform == "ums9117":
+            license_file = common.ROOT / "LICENSES/Unlicense.txt"
+            if license_file.is_symlink() or not license_file.is_file():
+                fail(f"host tool license is missing or invalid: {license_file}")
+            files["licenses/host-tools/Unlicense.txt"] = license_file.read_bytes()
         if has_ecc:
-            relative = f"tools/{NAND_ECC_TOOL}"
-            files[relative] = _linux_host_tool(target, platform, NAND_ECC_TOOL, offline=offline)
-            executables.add(relative)
             files.update(_linux_ecc_sources(platform, offline=offline))
         for relative, source in prepare_linux_host(
             cache=common.ROOT / ".cache", offline=offline
@@ -313,4 +223,5 @@ def autonomous_payload(
             files[relative] = source.read_bytes()
             if source.stat().st_mode & 0o111:
                 executables.add(relative)
-    return AutonomousPayload(files, executables)
+    runtime_files = {relative for relative in files if relative.startswith(("runtime/", "tools/"))}
+    return AutonomousPayload(files, runtime_files, executables)

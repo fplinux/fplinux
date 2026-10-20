@@ -38,6 +38,36 @@ from tests import ROOT
 class SelectedTestRunTests:
     """A test result owns logs, never a full quality-check success receipt."""
 
+    def test_directory_selection_uses_captured_workspace(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A directory captured earlier remains selectable after its live path disappears."""
+        captured = tmp_path / "captured"
+        (captured / "tests/small/quality").mkdir(parents=True)
+        live = tmp_path / "live"
+        live.mkdir()
+        monkeypatch.chdir(live)
+
+        [(_label, command, timeout)] = testing.pytest_commands(
+            ["tests/small/quality"], workspace=captured
+        )
+
+        assert command[-1] == "tests/small/quality"
+        assert timeout == 90
+
+    def test_live_directory_missing_from_capture_is_not_selected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A newly created live directory cannot enter an immutable selected workload."""
+        captured = tmp_path / "captured"
+        captured.mkdir()
+        live = tmp_path / "live"
+        (live / "tests/small/quality").mkdir(parents=True)
+        monkeypatch.chdir(live)
+
+        with pytest.raises(SystemExit, match="test directory not found in captured workspace"):
+            testing.pytest_commands(["tests/small/quality"], workspace=captured)
+
     def test_named_selection_counts_each_tiers_time_budget_once(self) -> None:
         """Names spanning tiers get their combined budget; more names in a tier add nothing."""
 
@@ -48,7 +78,7 @@ class SelectedTestRunTests:
         small = selected_budget("tests.small.environment.test_common.FirstCase")
         host_process = selected_budget("tests.host_process.test_process")
         assert small == 90
-        assert host_process == 180
+        assert host_process == 300
         assert (
             selected_budget(
                 "tests.small.environment.test_common.FirstCase",
@@ -62,7 +92,7 @@ class SelectedTestRunTests:
                 "tests/small/test_example.py::ExampleTests::test_first",
                 "tests/host_process/test_example.py::test_example[case]",
             )
-            == 270
+            == 390
         )
 
     @pytest.mark.parametrize(
@@ -80,10 +110,16 @@ class SelectedTestRunTests:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             cache = root / ".cache"
-            recipe = CheckReceiptRecipe("python", "a" * 64, "b" * 64, "c" * 64)
-            publish_success_receipt(cache, recipe)
-            receipt = receipt_path(cache, recipe)
-            original = receipt.read_bytes()
+            recipes = [
+                CheckReceiptRecipe(scope, "a" * 64, "b" * 64, "c" * 64)
+                for scope in ("python", "tests")
+            ]
+            for recipe in recipes:
+                publish_success_receipt(cache, recipe)
+            original = {
+                receipt_path(cache, recipe): receipt_path(cache, recipe).read_bytes()
+                for recipe in recipes
+            }
             fixture = root / "tests/small/test_example.py"
             fixture.parent.mkdir(parents=True)
             fixture.write_text("# fixture\n")
@@ -111,7 +147,7 @@ class SelectedTestRunTests:
                     runtime,
                     "run_quality_command",
                     side_effect=failure,
-                ),
+                ) as container_workload,
                 contextlib.redirect_stdout(io.StringIO()),
                 contextlib.redirect_stderr(io.StringIO()),
             ):
@@ -123,8 +159,9 @@ class SelectedTestRunTests:
                     assert (raised.value.code) == (exit_code)
                 else:
                     output.run_entrypoint(lambda: testing.run_tests(["tests.small.test_example"]))
-            assert (receipt.read_bytes()) == (original)
-            assert (list((cache / "check-results").rglob("*.json"))) == ([receipt])
+            container_workload.assert_called_once()
+            assert {path: path.read_bytes() for path in original} == original
+            assert set((cache / "check-results").rglob("*.json")) == set(original)
             assert (list((cache / "quality-workspaces").iterdir())) == ([])
             runs = list((cache / "logs/test").glob("*/run.json"))
             assert (len(runs)) == (1)
@@ -173,16 +210,19 @@ class SelectedTestRunTests:
             testing.run_test_workload(
                 reporter, tmp_path, kern="kern", image="image", names=[], tier="host_process"
             )
-        assert budgets == [("container", 180.0), ("host", 70.0)]
+        assert budgets == [("container", 300.0), ("host", 190.0)]
 
-    def test_failing_host_tests_do_not_publish_python_success(self, tmp_path: Path) -> None:
-        """A successful source check and image workload cannot certify a failed host case."""
+    def test_failing_host_tests_keep_earned_python_success_without_tests_success(
+        self, tmp_path: Path
+    ) -> None:
+        """Host test failure preserves successful analyzers and the previous test receipt."""
         module = tmp_path / "workspace/tests/host_process/cache/test_image_tag.py"
         module.parent.mkdir(parents=True)
         module.touch()
         cache = tmp_path / ".cache"
-        original = CheckReceiptRecipe("python", "a" * 64, "b" * 64, "c" * 64)
+        original = CheckReceiptRecipe("tests", "a" * 64, "b" * 64, "c" * 64)
         changed = replace(original, closure_digest="d" * 64)
+        python = replace(changed, scope="python")
         publish_success_receipt(cache, original)
         reporter = output.RunReporter(
             "check", tmp_path / "logs", str(tmp_path / "logs"), verbose=False
@@ -202,12 +242,12 @@ class SelectedTestRunTests:
             checks._run_missing_checks(  # noqa: SLF001 -- exercise the receipt publishing owner.
                 reporter=reporter,
                 cache=cache,
-                missing=("python",),
+                missing=("python", "tests"),
                 analyzer_cache={},
                 workspace=tmp_path / "workspace",
                 kern="kern",
                 image="image",
-                recipes={"python": changed},
+                recipes={"python": python, "tests": changed},
                 profile=None,
                 build_type="release",
                 jobs=1,
@@ -215,19 +255,21 @@ class SelectedTestRunTests:
         assert raised.value.code == 1
         assert receipt_matches(cache, original)
         assert not receipt_matches(cache, changed)
+        assert receipt_matches(cache, python)
 
     @pytest.mark.parametrize(
         "implementation",
         [
             "scripts/fplinux_cli/quality/host_testing.py",
             "scripts/fplinux_cli/dependencies/inputs.py",
+            "scripts/fplinux_cli/quality/scopes.py",
         ],
-        ids=["host-environment", "dependency-declarations"],
+        ids=["host-environment", "dependency-declarations", "check-selection"],
     )
-    def test_host_preparation_edits_revoke_success_receipts(
+    def test_preparation_and_selection_edits_revoke_success_receipts(
         self, tmp_path: Path, implementation: str
     ) -> None:
-        """Dependency selection and host environment changes must invalidate cached checks."""
+        """Dependency preparation and check selection changes invalidate cached checks."""
         shutil.copytree(
             ROOT / "scripts/fplinux_cli",
             tmp_path / "scripts/fplinux_cli",
@@ -236,7 +278,7 @@ class SelectedTestRunTests:
         cache = tmp_path / ".cache"
         with mock.patch.object(common, "ROOT", tmp_path):
             original = CheckReceiptRecipe(
-                "python", "a" * 64, check_orchestration_recipe_digest("b" * 64), "c" * 64
+                "tests", "a" * 64, check_orchestration_recipe_digest("b" * 64), "c" * 64
             )
             publish_success_receipt(cache, original)
             assert receipt_matches(cache, original)
@@ -247,14 +289,16 @@ class SelectedTestRunTests:
             )
             assert receipt_matches(cache, same)
             source = tmp_path / implementation
-            source.write_text(source.read_text() + "\n# changed preparation\n")
+            source.write_text(source.read_text() + "\n# changed check inputs\n")
             changed = replace(
                 original, orchestration_recipe=check_orchestration_recipe_digest("b" * 64)
             )
             assert not receipt_matches(cache, changed)
 
-    def test_host_python_change_revokes_only_python_success(self, tmp_path: Path) -> None:
-        """The host runtime affects Python test receipts without changing C check inputs."""
+    def test_host_python_change_revokes_tests_success_without_invalidating_analyzers(
+        self, tmp_path: Path
+    ) -> None:
+        """Host runtime identity belongs to tests; Python and C analyzers use the image."""
 
         def recipe(scope: str) -> CheckReceiptRecipe:
             return check_scope_receipt_recipe(
@@ -264,11 +308,14 @@ class SelectedTestRunTests:
                 orchestration_recipe="c" * 64,
             )
 
-        python = recipe("python")
-        c = recipe("c")
-        publish_success_receipt(tmp_path, python)
-        publish_success_receipt(tmp_path, c)
-        assert receipt_matches(tmp_path, recipe("python"))
+        for scope in ("python", "tests", "c"):
+            publish_success_receipt(tmp_path, recipe(scope))
+            assert receipt_matches(tmp_path, recipe(scope))
         with mock.patch.object(sys, "version", "3.14.8 (a different host runtime)"):
-            assert not receipt_matches(tmp_path, recipe("python"))
+            assert not receipt_matches(tmp_path, recipe("tests"))
+            assert receipt_matches(tmp_path, recipe("python"))
+            assert receipt_matches(tmp_path, recipe("c"))
+        with mock.patch.object(sys.implementation, "cache_tag", "cpython-314-other"):
+            assert not receipt_matches(tmp_path, recipe("tests"))
+            assert receipt_matches(tmp_path, recipe("python"))
             assert receipt_matches(tmp_path, recipe("c"))

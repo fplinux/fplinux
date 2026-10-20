@@ -1,0 +1,548 @@
+--- a/fpdoom/syscode.h
++++ b/fpdoom/syscode.h
+@@ -61,18 +61,15 @@
+ 
+ int sys_lzma_decode(const uint8_t *src, unsigned src_size,
+ 		uint8_t *dst, unsigned dst_size);
+-void scan_firmware(intptr_t fw_addr);
+ uint32_t sys_timer_ms(void);
+ void sys_wait_ms(uint32_t delay);
+ void sys_wait_us(uint32_t delay);
+ void sys_wait_clk(uint32_t delay);
+-int sys_getkeymap(uint8_t *dest);
+ 
+ uint32_t adi_read(uint32_t addr);
+ void adi_write(uint32_t addr, uint32_t val);
+ void sys_init(void);
+ void sys_start(void);
+-int sys_event(int *rkey);
+ void sys_brightness(unsigned val);
+ void sys_framebuffer(void *base);
+ void sys_start_refresh(void);
+@@ -96,20 +93,14 @@
+ // extern
+ 
+ extern struct sys_data {
+-	short *keymap_addr;
+ 	uint32_t chip_id;
+ 	struct sys_display { uint16_t w1, h1, w2, h2; } display;
+-	uint16_t keytrn[2][64]; // must be aligned by 4
+ 	uint8_t brightness, init_done;
+-	uint8_t keyrows, keycols, keyflags;
+ 	uint8_t scaler;
+-	/* rotate = key << 4 | screen */
+ 	uint8_t rotate, lcd_cs;
+ 	uint8_t spi_mode;
+ 	int8_t charge;
+-	uint8_t gpio_init;
+ #if UMS9117
+-	uint8_t eic9_key;
+ 	uint8_t bl_extra[4];
+ 	uint8_t headless;
+ #else
+@@ -125,7 +116,6 @@
+ 
+ // appinit
+ 
+-void keytrn_init(void);
+ void lcd_appinit(void);
+ 
+ #define KEYPAD_ENUM(M) \
+--- a/ums9117/entry.c
++++ b/ums9117/entry.c
+@@ -80,8 +80,6 @@
+ 	exit(1); \
+ } while (0)
+ 
+-uint16_t gpio_data[16];
+-
+ #if TWO_STAGE
+ struct entry2 {
+ 	uint32_t dhtb[0x200 / 4];
+@@ -241,13 +239,8 @@
+ 	// sys_data.lcd_cs = 0;
+ 	// sys_data.mac = 0;
+ 	// sys_data.spi = 0;
+-	// sys_data.gpio_init = 0;
+ 	sys_data.charge = -1;
+ 	sys_data.spi_mode = 3;
+-	sys_data.keyrows = 8;
+-	sys_data.keycols = 8;
+-
+-	gpio_data[0] = ~0;
+ 
+ 	// CHAKEYAKE T190: w=0x2f
+ 	// Inoi 284 Flip: rgbw=0x16
+@@ -304,27 +297,6 @@
+ 			unsigned a = strtol(argv[1], NULL, 0);
+ 			if (a < 0x100) sys_data.mac = a | 0x100;
+ 			argc -= 2; argv += 2;
+-		} else if (!strcmp(argv[0], "--gpio_init")) {
+-			sys_data.gpio_init = 1;
+-			argc -= 1; argv += 1;
+-		} else if (argc >= 2 && !strcmp(argv[0], "--gpio_data")) {
+-			char *s = argv[1];
+-			int i = 0, a, val;
+-			for (;;) {
+-				a = strtol(s, &s, 0);
+-				val = 1;
+-				if (a < 0) val = 0, a = -a;
+-				if (a >= 0x80) ERR_EXIT("invalid gpio_data num\n");
+-				gpio_data[i++] = a | val << 15;
+-				if ((unsigned)i >= sizeof(gpio_data) / sizeof(*gpio_data))
+-					ERR_EXIT("too many gpio_data\n");
+-				a = *s++;
+-				if (!a) break;
+-				if (a != ',') ERR_EXIT("invalid separator\n");
+-			}
+-			gpio_data[i] = ~0;
+-			sys_data.gpio_init = 1;
+-			argc -= 2; argv += 2;
+ 		} else if (argc >= 2 && !strcmp(argv[0], "--bl_extra")) {
+ 			char *s = argv[1]; unsigned i;
+ 			for (i = 0; i < 4; i++)
+@@ -356,31 +328,6 @@
+ 		} else if (argc >= 2 && !strcmp(argv[0], "--charge")) {
+ 			sys_data.charge = atoi(argv[1]);
+ 			argc -= 2; argv += 2;
+-		} else if (argc >= 2 && !strcmp(argv[0], "--keyflags")) {
+-			sys_data.keyflags = ~atoi(argv[1]);
+-			argc -= 2; argv += 2;
+-		} else if (argc >= 2 && !strcmp(argv[0], "--keyrows")) {
+-			unsigned a = atoi(argv[1]);
+-			if (a - 2 <= 6) sys_data.keyrows = a;
+-			argc -= 2; argv += 2;
+-		} else if (argc >= 2 && !strcmp(argv[0], "--keycols")) {
+-			unsigned a = atoi(argv[1]);
+-			if (a - 2 <= 6) sys_data.keycols = a;
+-			argc -= 2; argv += 2;
+-		} else if (argc >= 2 && !strcmp(argv[0], "--keymap")) {
+-			FILE *f = fopen(argv[1], "rb");
+-			if (f) {
+-				uint8_t *p = (uint8_t*)sys_data.keytrn;
+-				printf("keymap loaded from file\n");
+-				sys_data.keymap_addr = (short*)p;
+-				memset(p, -1, 64 * 2);
+-				fread(p, 1, 64 * 2, f);
+-				fclose(f);
+-			}
+-			argc -= 2; argv += 2;
+-		} else if (argc >= 2 && !strcmp(argv[0], "--eic9_key")) {
+-			sys_data.eic9_key = strtol(argv[1], NULL, 0);
+-			argc -= 2; argv += 2;
+ 		} else if (argc >= 2 && !strcmp(argv[0], "--dir")) {
+ #if LIBC_SDIO
+ 			fatdata_t *fatdata = &fatdata_glob;
+@@ -401,7 +348,6 @@
+ 		} else break;
+ 	}
+ 
+-	scan_firmware(0);
+ 	sys_init();
+ #if TWO_STAGE
+ 	memcpy(data_copy, &sys_data, sizeof(sys_data));
+--- a/ums9117/syscomm.c
++++ b/ums9117/syscomm.c
+@@ -1,138 +1,6 @@
+ #include "common.h"
+ #include "syscode.h"
+ 
+-#include <stdio.h>
+-#include <string.h>
+-#include <stdlib.h>
+-
+-#define DBG_LOG(...) fprintf(stderr, __VA_ARGS__)
+-#define ERR_EXIT(...) \
+-	do { fprintf(stderr, "!!! " __VA_ARGS__); exit(1); } while (0)
+-
+-uint32_t *pinmap_addr, *gpiomap_addr;
+-
+-static uint8_t* loadfile(const char *fn, size_t *num) {
+-	size_t n, j = 0; uint8_t *buf = 0;
+-	FILE *fi = fopen(fn, "rb");
+-	if (fi) {
+-		fseek(fi, 0, SEEK_END);
+-		n = ftell(fi);
+-		if (n) {
+-			fseek(fi, 0, SEEK_SET);
+-			buf = (uint8_t*)malloc(n);
+-			if (buf) j = fread(buf, 1, n, fi);
+-		}
+-		fclose(fi);
+-	}
+-	if (num) *num = j;
+-	return buf;
+-}
+-
+-static int keymap_compare5x5(short *keymap, const int8_t *keymap2) {
+-	unsigned x, y;
+-	for (y = 0; y < 5; y++)
+-	for (x = 0; x < 5; x++)
+-		if (keymap[y * 8 + x] != keymap2[y * 5 + x]) return 1;
+-	return 0;
+-}
+-
+-static int detect_eic9(short *keymap) {
+-	static const int8_t keys_ta1276[] = {
+-		0x08, 0x01, 0x04, 0x31, 0x06,
+-		0x23, 0x33, 0x09, 0x39, 0x36,
+-		0x30, 0x32, 0x07, 0x38, 0x35,
+-		0x2a,   -1, 0x05, 0x37, 0x34,
+-		  -1,   -1,   -1,   -1,   -1 };
+-	uint32_t m0 = 0x23f2, m1 = 0x3ff0408;
+-	unsigned x, y; int key = 0;
+-	if (sys_data.keyrows != 8 || sys_data.keycols != 8) return 0;
+-
+-	for (y = 0; y < 8; y++)
+-	for (x = 0; x < 8; x++) {
+-		unsigned a = keymap[y * 8 + x];
+-		if (y >= 5 || x >= 5) {
+-			if ((int)a != -1) return 0;
+-		}
+-		if (a < 32) m0 &= ~(1 << a);
+-		a -= 32;
+-		if (a < 32) m1 &= ~(1 << a);
+-	}
+-	// if (m0 | m1) DBG_LOG("missing keys: 0x%08x%08x\n", m1, m0);
+-	if (!m0) m0 = m1, m1 = 0, key = 32;
+-	if (!m0 || m1 || (m0 & (m0 - 1))) return 0;
+-	key += __builtin_ctz(m0);
+-	if (key == 0x0d && keymap_compare5x5(keymap, keys_ta1276)) key = 0;
+-	return key;
+-}
+-
+-static uint32_t* gpiomap_check(uint32_t *p, unsigned size) {
+-	uint32_t *p0;
+-	if (size < 8 + 12) return NULL;
+-	// skip empty GPIO related table
+-	if (~p[0] || p[1] != 0xffff) return NULL;
+-	p0 = p += 2; size -= 8;
+-	for (; size >= 12; p += 3, size -= 12) {
+-		uint32_t a = p[0];
+-		if (a & 0xfffeff80) {
+-			if (a != 0xffff || p[1] != 2 || p[2] != 5) break;
+-			return p0;
+-		}
+-		if (p[1] >= 2 || p[2] >= 6) break;
+-	}
+-	return NULL;
+-}
+-
+-static int pinmap_check(uint32_t *p, uint32_t size) {
+-	if ((size < 8) || (size & 3)) return -1;
+-	for (; size > 8; size -= 8, p += 2) {
+-		uint32_t addr = p[0];
+-		if (!(addr - 0x40608000 < 0x1000) &&
+-				!(addr - 0x402a0000 < 0x1000))
+-			break;
+-	}
+-	if (~(p[0] & p[1])) return -1;
+-	gpiomap_addr = gpiomap_check(p + 2, size - 8);
+-	return 0;
+-}
+-
+-void scan_firmware(intptr_t fw_addr) {
+-#if LIBC_SDIO
+-	const char *pinmap_fn = "/" FPBIN_DIR "pinmap.bin";
+-	const char *keymap_fn = "/" FPBIN_DIR "keymap.bin";
+-#else
+-	const char *pinmap_fn = "pinmap.bin";
+-	const char *keymap_fn = "keymap.bin";
+-#endif
+-	size_t size;
+-	(void)fw_addr;
+-
+-	pinmap_addr = (uint32_t*)loadfile(pinmap_fn, &size);
+-	if (!pinmap_addr) ERR_EXIT("pinmap not found\n");
+-	if (pinmap_check(pinmap_addr, size)) ERR_EXIT("pinmap check failed\n");
+-	if (sys_data.gpio_init && !gpiomap_addr)
+-		ERR_EXIT("gpiomap not found\n");
+-
+-	if (!sys_data.keymap_addr) {
+-		FILE *f = fopen(keymap_fn, "rb");
+-		if (f) {
+-			uint8_t *p = (uint8_t*)sys_data.keytrn;
+-			DBG_LOG("keymap loaded from file\n");
+-			sys_data.keymap_addr = (short*)p;
+-			memset(p, -1, 64 * 2);
+-			fread(p, 1, 64 * 2, f);
+-			fclose(f);
+-		}
+-	}
+-	{
+-		short *keymap = sys_data.keymap_addr;
+-		unsigned key = sys_data.eic9_key;
+-		if (keymap && !key) key = detect_eic9(keymap);
+-		if (key - 1 >= 0x39) key = 0;
+-		if (key) DBG_LOG("eic9_key = 0x%02x\n", key);
+-		sys_data.eic9_key = key;
+-	}
+-}
+-
+ // system timer, 1ms step
+ uint32_t sys_timer_ms(void) {
+ 	return MEM4(0x4023000c);
+@@ -148,48 +16,6 @@
+ 	sys_wait_clk(delay);
+ }
+ 
+-#define X(num, name) KEYPAD_##name = num,
+-enum { KEYPAD_ENUM(X) };
+-#undef X
+-
+-int sys_getkeymap(uint8_t *dest) {
+-	short *keymap = sys_data.keymap_addr;
+-	int i, j, rotate = sys_data.rotate >> 4 & 3;
+-	static const unsigned char num_turn[][4 + 9] = {
+-		{ "\004\005\006\007123456789" },
+-		{ "\007\006\004\005369258147" },
+-		{ "\005\004\007\006987654321" },
+-		{ "\006\007\005\004741852963" },
+-	};
+-	int nrow = sys_data.keyrows;
+-	int ncol = sys_data.keycols;
+-	int flags = 0;
+-
+-	memset(dest, -1, 64);
+-
+-	for (i = 0; i < ncol; i++)
+-	for (j = 0; j < nrow; j++) {
+-		unsigned a = keymap[i * nrow + j];
+-		if (a - KEYPAD_UP < 4)
+-			a = num_turn[rotate][a - KEYPAD_UP];
+-		else if (a - KEYPAD_1 < 9)
+-			a = num_turn[rotate][a - KEYPAD_1 + 4];
+-		if (a > 0xff) a = 0xff;
+-		dest[j * 8 + i] = a;
+-		if (a == KEYPAD_CENTER) flags = 1;
+-	}
+-	{
+-		unsigned a = sys_data.eic9_key;
+-		if (a) {
+-			if (a == KEYPAD_CENTER) flags = 1;
+-			dest[0x3f] = a;
+-		}
+-	}
+-	if (sys_data.keyflags)
+-		flags = sys_data.keyflags;
+-	return flags;
+-}
+-
+ struct sys_data sys_data;
+ 
+ #if !CHIP
+--- a/ums9117/syscode.c
++++ b/ums9117/syscode.c
+@@ -50,98 +50,7 @@
+ 	DBG_LOG("chip_id: %s = 0x%x\n", "num", t0);
+ }
+ 
+-#define GPIO_BASE 0x40280000
+-
+-#define gpio_get(id, off) gpio_set(id, off, -1)
+-static int gpio_set(unsigned id, unsigned off, int state) {
+-	uint32_t addr, tmp, shl = id & 0xf;
+-	if (id >= 0x80) FATAL();
+-	addr = GPIO_BASE + ((id >> 4) << 7);
+-	addr += off;
+-	tmp = MEM4(addr);
+-	if (state < 0) return tmp >> shl & 1;
+-	tmp &= ~(1u << shl);
+-	tmp |= state << shl;
+-	MEM4(addr) = tmp;
+-	return 0;
+-}
+-
+-extern uint16_t gpio_data[];
+-
+-static void gpio_init(void *ptr) {
+-	struct {
+-		int16_t id, val; uint32_t dir, mode;
+-	} *tab = ptr;
+-	int i;
+-
+-	APB_CR(0x1000) = 8;
+-
+-	for (i = 0; tab[i].id != -1; i++) {
+-		int a = tab[i].id, val;
+-		gpio_set(a, 4, 1);	// GPIO_DMSK
+-		if (!tab[i].dir) {
+-			gpio_set(a, 8, 1); // GPIO_DIR
+-			gpio_set(a, 0x28, 0); // GPIO_INEN
+-			val = tab[i].val;
+-			val = val != -1 && (val & 0xff);
+-			gpio_set(a, 0, val); // GPIO_DATA
+-		} else {
+-			gpio_set(a, 8, 0); // GPIO_DIR
+-			gpio_set(a, 0x28, 1); // GPIO_INEN
+-		}
+-	}
+-
+-	{
+-		uint16_t *p = gpio_data;
+-		unsigned a;
+-		while ((a = *p++) != 0xffff) {
+-			gpio_set(a & 0x7fff, 0, a >> 15);
+-		}
+-	}
+-}
+-
+-extern uint32_t *pinmap_addr, *gpiomap_addr;
+-
+-static void pin_init(void) {
+-	const volatile uint32_t *pinmap = pinmap_addr;
+-
+-	APB_CR(0x1000) = 0x100000;
+-	APB_CR(0x10b0) = 0x1000;
+-	for (;;) {
+-		uint32_t addr = pinmap[0], val = pinmap[1];
+-		pinmap += 2;
+-		if (addr - 0x40608000 < 0x1000) {
+-			adi_write(addr, val & 0xffff);
+-		} else if (addr - 0x402a0000 < 0x1000) {
+-			/* Linux programs the audio and matrix pins. */
+-			switch (addr & ~0x400U) {
+-			case 0x402a0088:
+-			case 0x402a008c:
+-			case 0x402a0090:
+-			case 0x402a0094:
+-			case 0x402a0098:
+-			case 0x402a009c:
+-			case 0x402a00a0:
+-			case 0x402a00a4:
+-			case 0x402a00a8:
+-			case 0x402a00ac:
+-			case 0x402a00f0:
+-			case 0x402a00f8:
+-			case 0x402a00fc:
+-			case 0x402a0104:
+-			case 0x402a0108:
+-			case 0x402a010c:
+-				break;
+-			default:
+-				MEM4(addr) = val;
+-			}
+-		} else break;
+-	}
+-	MEM4(0x402a0018) &= 0xe0000000;
+-
+-	if (sys_data.gpio_init)
+-		gpio_init((void*)gpiomap_addr);
+-}
++#include "early-init.h"
+ 
+ #define BACKLIGHT_METHOD 1
+ 
+@@ -639,106 +548,18 @@
+ 	LCDC_BASE->img.ctrl |= 1;
+ }
+ 
+-void eic_mask_or(unsigned val) {
+-	uint32_t addr = 0x40608280;
+-	// EIC_DBNC_DMSK
+-	adi_write_or(addr + 4, val);
+-}
+-
+-int eic_read(void) {
+-	uint32_t addr = 0x40608280;
+-	// EIC_DBNC_DATA
+-	return adi_read(addr);
+-}
+-
+-#define EIC_PB 1
+-
+-int keypad_read_pb(void) {
+-	return eic_read() >> EIC_PB ^ 1;
+-}
+-
+-int sys_event(int *rkey) {
+-	static int static_i = 0;
+-	static uint32_t static_ev, static_st;
+-	static uint8_t pb_saved[8] = { 0 };
+-	static uint8_t eic9_saved = 0;
+-	uint32_t event, status;
+-	int i = static_i;
+-	uint16_t *keytrn;
+-	unsigned k, down;
+-
+-	if (!sys_data.keymap_addr) return EVENT_END;
+-	event = static_ev;
+-	status = static_st;
+-	if (!i) {
+-		keypad_base_t *kpd = KEYPAD_BASE;
+-		event = kpd->int_raw;
+-		status = kpd->key_status;
+-		event &= 0xff;
+-		if (!event) {
+-			if (sys_data.eic9_key) {
+-				int eic = eic_read(), x = eic >> 9 & 1;
+-				if ((eic9_saved ^ x) & 1) {
+-					eic9_saved = down = x;
+-					event = (~eic >> EIC_PB & 1) << 12;
+-					k = 0x3f; i = 8;
+-					goto found_key;
+-				}
+-			}
+-			return EVENT_END;
+-		}
+-		kpd->int_clr = 0xfff;
+-		if (status & 8) return EVENT_END;
+-		{
+-			int eic = eic_read();
+-			event |= (~eic >> EIC_PB & 1) << 12;
+-			if (sys_data.eic9_key) {
+-				int x = eic >> 9 & 1;
+-				eic9_saved = (eic9_saved ^ x) << 1 | x;
+-			}
+-		}
+-		static_ev = event;
+-		static_st = status;
+-	}
+-
+-	for (; i < 8; i++) {
+-		if (event >> i & 1) {
+-			k = status >> (i & 3) * 8;
+-			down = i < 4;
+-			k = (k & 0x70) >> 1 | (k & 7);
+-found_key:
+-			keytrn = sys_data.keytrn[0];
+-			if (down) {
+-				if (event >> 12)
+-					pb_saved[k >> 3] |= 1 << (k & 7), keytrn += 64;
+-			} else {
+-				uint8_t *p = &pb_saved[k >> 3];
+-				unsigned a = *p, b = 1 << (k & 7);
+-				if (a & b) *p = a ^ b, keytrn += 64;
+-			}
+-			k = keytrn[k];
+-			if (k) {
+-				*rkey = k;
+-				static_i = i + 1;
+-				return down ? EVENT_KEYDOWN : EVENT_KEYUP;
+-			}
+-		}
+-	}
+-	if ((eic9_saved & 2) && i == 8) {
+-		k = 0x3f; down = eic9_saved & 1;
+-		goto found_key;
+-	}
+-	static_i = 0;
+-	return EVENT_END;
+-}
+-
+ void sys_set_handlers(void) {
+ 	// TODO
+ }
+ 
+ void sys_init(void) {
+ 	init_chip_id();
+-	pin_init();
++
++#ifdef FPLINUX_BOARD_INIT
++	FPLINUX_BOARD_INIT();
++#else
++	ums9117_bootstrap_early_init(NULL, 0);
++#endif
+ 
+ 	if (!sys_data.headless) {
+ 		lcd_init(lcm_init());

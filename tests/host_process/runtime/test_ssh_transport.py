@@ -140,7 +140,6 @@ class SshTransportFakeToolTests:
         # A sleeping local process replaces an SSH channel that never replies.
         # USB discovery is controlled; the process timeout and cleanup are real.
         with (
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=private_runtime),
             mock.patch.object(ssh_transport, "_usb_devices", return_value=[Path("/usb/phone")]),
             mock.patch.object(ssh_transport, "_ncm_interface", return_value="usb0"),
             mock.patch.object(ssh_transport, "_network_ready", return_value=True),
@@ -175,7 +174,6 @@ class SshTransportFakeToolTests:
         ssh.chmod(0o755)
 
         with (
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=private_runtime),
             mock.patch.object(ssh_transport, "_usb_devices", return_value=[Path("/usb/phone")]),
             mock.patch.object(ssh_transport, "_ncm_interface", return_value="usb0"),
             mock.patch.object(ssh_transport, "_network_ready", return_value=True),
@@ -255,7 +253,6 @@ class SshTransportUploadTests:
                 return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
             with (
-                mock.patch.object(ssh_transport, "_runtime_root", return_value=runtime),
                 mock.patch.object(ssh_transport, "_ssh_argv", side_effect=local_ssh),
                 mock.patch.object(ssh_transport, "_sftp", side_effect=local_sftp),
                 mock.patch.dict(os.environ, {"FPLINUX_AVAILABLE_BLOCKS": str(available_blocks)}),

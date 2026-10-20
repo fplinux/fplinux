@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 class BuildLifecycleTests:
     """Keep cache hits and readers ahead of every mutable or external action."""
 
-    def test_release_debug_release_hits_keep_both_types_and_ignore_jobs(
+    def test_release_debug_release_hits_keep_both_types_and_ignore_resource_limits(
         self, command_bundle: CommandBundleContext
     ) -> None:
         """Switching type reuses its own generation without starting build work."""
@@ -74,15 +74,21 @@ class BuildLifecycleTests:
             mock.patch.object(prune_operations, "discard_obsolete_rootfs") as rootfs_gc,
             mock.patch.object(prune_operations, "discard_obsolete_apks") as apks_gc,
         ):
-            for build_type, jobs in (("release", 1), ("debug", 8), ("release", 8)):
+            for build_type, jobs, memory_mib in (
+                ("release", 1, 2048),
+                ("debug", 8, 2048),
+                ("release", 8, 4096),
+            ):
                 old = command_bundle.create_generation("b" * 64, build_type=build_type)
                 stdout = io.StringIO()
+                journals_before = set((command_bundle.cache / "logs").rglob("run.json"))
                 with contextlib.redirect_stdout(stdout):
                     output.run_entrypoint(
                         functools.partial(
                             build_commands.build,
                             "phone",
                             jobs,
+                            memory_mib=memory_mib,
                             verbose=True,
                             offline=True,
                             build_type=build_type,
@@ -97,6 +103,13 @@ class BuildLifecycleTests:
                 assert not (old.exists())
                 assert command_bundle.bundle_path.is_dir()
                 assert debug.is_dir()
+                new_journals = set((command_bundle.cache / "logs").rglob("run.json")) - (
+                    journals_before
+                )
+                assert len(new_journals) == 1
+                metadata = json.loads(new_journals.pop().read_text())
+                assert metadata["build_type"] == build_type
+                assert metadata["status"] == "success"
             assert (rootfs_gc.call_args_list) == ([mock.call(command_bundle.cache)] * 3)
             assert (apks_gc.call_args_list) == ([mock.call(command_bundle.cache)] * 3)
 
@@ -250,17 +263,99 @@ class BuildLifecycleTests:
         metadata = next((command_bundle.root / ".cache/logs/build/phone").rglob("run.json"))
         assert (json.loads(metadata.read_text(encoding="utf-8"))["status"]) == ("failed")
 
-    def test_successful_build_discards_superseded_after_host_validation(
-        self, command_bundle: CommandBundleContext
+    @pytest.mark.parametrize(
+        ("memory_mib", "status"),
+        [
+            pytest.param(2048, 137, id="two-gib-limit"),
+            pytest.param(12288, 137, id="twelve-gib-limit"),
+            pytest.param(2048, 1, id="other-container-failure"),
+        ],
+    )
+    def test_build_memory_failure_reports_selected_budget_and_preserves_exit(
+        self,
+        command_bundle: CommandBundleContext,
+        capsys: pytest.CaptureFixture[str],
+        memory_mib: int,
+        status: int,
+    ) -> None:
+        """A confirmed limit failure explains the build control without changing its status."""
+        command_bundle.clear_current_bundle()
+        workspace = command_bundle.cache / "workspace"
+        workspace.mkdir()
+        reporter = output.RunReporter(
+            "build", command_bundle.cache / "test-logs", "test", verbose=False
+        )
+        failure = SystemExit(status)
+
+        def fail_workload(stage: output.Stage, command: list[str], **_kwargs: object) -> None:
+            assert command[command.index("--memory") + 1] == f"{memory_mib}m"
+            stage.write(
+                b"kern: the workload was killed by the kernel's OOM killer "
+                b"against this box's own memory cap.\n"
+            )
+            raise failure
+
+        with (
+            mock.patch.object(common, "ROOT", command_bundle.root),
+            mock.patch.object(releases, "load_release", return_value=command_bundle.release),
+            mock.patch.object(
+                workspace_inputs, "target_workspace_snapshot", return_value=command_bundle.snapshot
+            ),
+            mock.patch.object(images, "load_container_lock", return_value=command_bundle.lock),
+            mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(
+                build_commands,
+                "_require_build_environment",
+                return_value=("kern", "image", ImageState("e" * 64, "a" * 64, "a" * 64)),
+            ),
+            mock.patch.object(kern_env, "kern_environment", return_value={}),
+            mock.patch.object(
+                workspace_staging, "stage_workspace_snapshot", return_value=workspace
+            ),
+            mock.patch.object(workspace_staging, "discard_staged_workspace_snapshot") as discard,
+            mock.patch.object(output.Stage, "run", autospec=True, side_effect=fail_workload),
+            pytest.raises(SystemExit) as raised,
+        ):
+            build_commands.build("phone", 4, memory_mib=memory_mib, reporter=reporter)
+
+        assert raised.value is failure
+        stderr = capsys.readouterr().err
+        hint = f"Kern memory limit reached ({memory_mib} MiB)."
+        assert stderr.count(hint) == int(status == 137)
+        assert ("Increase build --memory-mib" in stderr) == (status == 137)
+        assert "--jobs" not in stderr
+        log = (reporter.root / "02-container.log").read_text()
+        assert log.count(hint) == int(status == 137)
+        discard.assert_called_once_with(command_bundle.snapshot, workspace)
+
+    @pytest.mark.parametrize(
+        ("memory_mib", "expected_memory", "build_type"),
+        [
+            pytest.param(None, "8192m", "release", id="default-eight-gib-release"),
+            pytest.param(4096, "4096m", "debug", id="explicit-four-gib-debug"),
+        ],
+    )
+    def test_successful_build_uses_memory_budget_and_discards_superseded_after_host_validation(
+        self,
+        command_bundle: CommandBundleContext,
+        memory_mib: int | None,
+        expected_memory: str,
+        build_type: str,
     ) -> None:
         """Retain old generations until the container result validates on the host."""
         workspace = command_bundle.root / ".cache/workspaces/current"
         workspace.mkdir(parents=True)
-        old = command_bundle.create_generation("b" * 64)
+        old = command_bundle.create_generation("b" * 64, build_type=build_type)
         command_bundle.clear_current_bundle()
+        result_bundle = command_bundle.bundle_path
+        if build_type == "debug":
+            result_bundle = command_bundle.create_generation("d" * 64, build_type="debug")
 
-        def publish_result(_stage: output.Stage, _command: list[str], **_kwargs: object) -> None:
-            publish_current_bundle(command_bundle.output, "phone", command_bundle.bundle_path)
+        def publish_result(_stage: output.Stage, command: list[str], **_kwargs: object) -> None:
+            assert command[command.index("--memory") + 1] == expected_memory
+            publish_current_bundle(
+                command_bundle.output, "phone", result_bundle, build_type=build_type
+            )
 
         with (
             mock.patch.object(common, "ROOT", command_bundle.root),
@@ -299,16 +394,27 @@ class BuildLifecycleTests:
         ):
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
-                output.run_entrypoint(lambda: build_commands.build("phone", 4))
+                if memory_mib is None:
+                    output.run_entrypoint(
+                        lambda: build_commands.build("phone", 4, build_type=build_type)
+                    )
+                else:
+                    output.run_entrypoint(
+                        lambda: build_commands.build(
+                            "phone", 4, memory_mib=memory_mib, build_type=build_type
+                        )
+                    )
 
-        assert ("build phone --build-type release: OK") in (stdout.getvalue())
-        assert ("build phone --build-type release: OK (cached)") not in (stdout.getvalue())
+        assert (f"build phone --build-type {build_type}: OK") in (stdout.getvalue())
+        assert (f"build phone --build-type {build_type}: OK (cached)") not in (stdout.getvalue())
         assert not (old.exists())
         discard.assert_called_once_with(command_bundle.snapshot, workspace)
         rootfs_gc.assert_called_once_with(command_bundle.cache)
         apks_gc.assert_called_once_with(command_bundle.cache)
         metadata = next((command_bundle.root / ".cache/logs/build/phone").rglob("run.json"))
-        assert (json.loads(metadata.read_text(encoding="utf-8"))["status"]) == ("success")
+        recorded = json.loads(metadata.read_text(encoding="utf-8"))
+        assert recorded["status"] == "success"
+        assert recorded["build_type"] == build_type
 
     def test_offline_build_miss_requires_the_current_image_without_setup(
         self, command_bundle: CommandBundleContext
@@ -367,6 +473,7 @@ class BuildLifecycleTests:
                 "/usr/bin/kern",
                 target="phone",
                 jobs=6,
+                memory_mib=2048,
                 image="localhost/fplinux-build:locked",
                 offline=False,
                 snapshot=command_bundle.snapshot,
@@ -397,7 +504,7 @@ class BuildLifecycleTests:
         assert ("--read-only") in (command)
         assert ("--privileged") in (command)
         assert ("--memory") in (command)
-        assert (command[command.index("--memory") + 1]) == ("2g")
+        assert (command[command.index("--memory") + 1]) == ("2048m")
         assert not (any(mount.split(":", 2)[1] == "/cache" for mount in mounts))
         assert ("FPLINUX_CONTAINER_IMAGE_SOURCE_RECIPE=" + "e" * 64) in (command)
         assert ("FPLINUX_CONTAINER_IMAGE_CONTENT=" + "a" * 64) in (command)
@@ -431,6 +538,7 @@ class BuildLifecycleTests:
             "/usr/bin/kern",
             target="phone",
             jobs=6,
+            memory_mib=2048,
             image="localhost/fplinux-build:locked",
             offline=True,
             snapshot=command_bundle.snapshot,

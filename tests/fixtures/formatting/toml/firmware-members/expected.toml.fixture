@@ -1,0 +1,7 @@
+[adapter]
+exec_distance = 0x0040
+
+[audio_profile]
+firmware = [
+  { source = "phone-audio.bin", destination = 'audio.bin', size = 4, sha256 = "audio-sha" }, # Audio settings
+]

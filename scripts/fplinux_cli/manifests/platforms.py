@@ -10,7 +10,6 @@ from fplinux_cli.common import fail
 from fplinux_cli.manifests.identity import BUILD_TYPES, IdentityError, validate_platform_identity
 from fplinux_cli.manifests.linux import normalize_linux_integration
 from fplinux_cli.manifests.values import (
-    KCONFIG_SYMBOL,
     TARGET_NAME,
     exact_table,
     integer_value,
@@ -23,45 +22,6 @@ from fplinux_cli.manifests.values import (
     string_array,
     validate_usb,
 )
-
-
-def _dt_config_checks(value: object) -> list[dict[str, str]]:
-    """Validate the compiled device-tree ownership checks declared by the platform."""
-    name = "platform linux dt_config_checks"
-    if not isinstance(value, list):
-        fail(f"{name} must be an array")
-    result: list[dict[str, str]] = []
-    identities: set[tuple[str, str, str | None]] = set()
-    for index, raw in enumerate(value):
-        item_name = f"{name}[{index}]"
-        fields = {"path", "compatible", "config"}
-        if isinstance(raw, dict) and "property" in raw:
-            fields.add("property")
-        check = exact_table(raw, fields, item_name)
-        path = nonempty_string(check.get("path"), f"{item_name} path")
-        if not path.startswith("/") or (
-            path != "/" and any(part in {"", ".", ".."} for part in path[1:].split("/"))
-        ):
-            fail(f"{item_name} path must be a canonical absolute device-tree path")
-        compatible = nonempty_string(check.get("compatible"), f"{item_name} compatible")
-        symbol = nonempty_string(check.get("config"), f"{item_name} config")
-        if KCONFIG_SYMBOL.fullmatch(symbol) is None:
-            fail(f"{item_name} config must be a CONFIG_* symbol")
-        property_name = (
-            nonempty_string(check["property"], f"{item_name} property")
-            if "property" in check
-            else None
-        )
-        identity = (path, compatible, property_name)
-        if identity in identities:
-            condition = f" property {property_name}" if property_name is not None else ""
-            fail(f"{name} repeats ownership for {path} compatible {compatible}{condition}")
-        identities.add(identity)
-        requirement = {"path": path, "compatible": compatible, "config": symbol}
-        if property_name is not None:
-            requirement["property"] = property_name
-        result.append(requirement)
-    return result
 
 
 def _platform_boot_layout(value: object, name: str) -> dict[str, int]:
@@ -183,7 +143,7 @@ def load_platform(platform: str) -> dict[str, Any]:
             "bootstrap",
             "runtime",
             "host",
-            "uboot",
+            *({"uboot"} if "uboot" in raw else set()),
         },
         f"platform {platform}",
     )
@@ -234,7 +194,6 @@ def load_platform(platform: str) -> dict[str, Any]:
     ):
         relative_value(linux.get(key), f"platform linux {key}")
     string_array(linux.get("targets"), "platform linux targets")
-    linux["dt_config_checks"] = _dt_config_checks(linux.get("dt_config_checks"))
     build_types = exact_table(
         linux.get("build_types"), set(BUILD_TYPES), "platform linux build_types"
     )
@@ -242,20 +201,61 @@ def load_platform(platform: str) -> dict[str, Any]:
         relative_value(fragment, f"platform linux build_types {build_type}")
     linux.update(normalize_linux_integration(linux, "platform linux", root=common.ROOT))
 
-    uboot = exact_table(
-        config.get("uboot"),
-        {"source", "archive_prefix", "patches", "required_config", "copies"},
-        "platform uboot",
+    if "uboot" in config:
+        uboot = exact_table(
+            config["uboot"],
+            {"source", "archive_prefix", "patches", "required_config", "copies"},
+            "platform uboot",
+        )
+        for key in ("source", "archive_prefix"):
+            relative_value(uboot[key], f"platform uboot {key}")
+        path_array(uboot.get("patches"), "platform uboot patches", allow_empty=True)
+        kconfig_line_array(uboot.get("required_config"), "platform uboot required_config")
+        path_steps(uboot.get("copies"), "platform uboot copies")
+
+    config["bootstrap"] = _bootstrap(config.get("bootstrap"))
+    backend = config["bootstrap"]["backend"]
+    config["runtime"] = _runtime(config.get("runtime"), backend)
+
+    host = exact_table(
+        config.get("host"),
+        {"runtime_tools", "tools"},
+        "platform host",
     )
-    for key in ("source", "archive_prefix"):
-        relative_value(uboot[key], f"platform uboot {key}")
-    path_array(uboot.get("patches"), "platform uboot patches", allow_empty=True)
-    kconfig_line_array(uboot.get("required_config"), "platform uboot required_config")
-    path_steps(uboot.get("copies"), "platform uboot copies")
+    tools = host.get("tools")
+    if not isinstance(tools, list) or not tools:
+        fail("platform host tools must be a non-empty array")
+    validated_tools = [validate_host_tool(tool, index) for index, tool in enumerate(tools)]
+    tool_names = [tool["name"] for tool in validated_tools]
+    if len(tool_names) != len(set(tool_names)):
+        fail("platform host tool names must be unique")
+    runtime_tools = host.get("runtime_tools")
+    if not isinstance(runtime_tools, dict) or not runtime_tools:
+        fail("platform host runtime_tools must be a non-empty table")
+    for role, tool_name in runtime_tools.items():
+        nonempty_string(role, "platform host runtime role")
+        if tool_name not in tool_names:
+            fail(f"platform host runtime role {role} references an unknown tool")
+
+    return config
+
+
+def _bootstrap(value: object) -> dict[str, Any]:
+    """Validate the inputs consumed by either current RAM bootstrap backend."""
+    if not isinstance(value, dict):
+        fail("platform bootstrap must be a table")
+    backend = value.get("backend")
+    if not isinstance(backend, str) or backend not in {"ums9117", "sc9820e"}:
+        fail("platform bootstrap backend must be ums9117 or sc9820e")
+    if backend == "sc9820e":
+        bootstrap = exact_table(value, {"backend", "toolchain"}, "platform bootstrap")
+        nonempty_string(bootstrap.get("toolchain"), "platform bootstrap toolchain")
+        return bootstrap
 
     bootstrap = exact_table(
-        config.get("bootstrap"),
+        value,
         {
+            "backend",
             "vendor_source_lock",
             "vendor_cache_name",
             "archive_prefix",
@@ -309,36 +309,41 @@ def load_platform(platform: str) -> dict[str, Any]:
     )
     nonempty_string(bootstrap.get("toolchain"), "platform bootstrap toolchain")
     integer_value(bootstrap.get("lto"), "platform bootstrap lto", bounds=(0, 1))
+    return bootstrap
 
+
+def _runtime(value: object, backend: str) -> dict[str, Any]:
+    """Validate runtime settings owned by the selected loader backend."""
     runtime = exact_table(
-        config.get("runtime"),
-        {"fdl1_load_address", "adapter", "usb"},
+        value,
+        {"adapter", "usb", *({"fdl1_load_address"} if backend == "ums9117" else set())},
         "platform runtime",
     )
-    integer_value(
-        runtime.get("fdl1_load_address"),
-        "platform runtime fdl1_load_address",
-        bounds=(0, 0xFFFFFFFF),
-        alignment=4,
-    )
+    if backend == "ums9117":
+        integer_value(
+            runtime.get("fdl1_load_address"),
+            "platform runtime fdl1_load_address",
+            bounds=(0, 0xFFFFFFFF),
+            alignment=4,
+        )
     adapter = exact_table(
         runtime.get("adapter"),
         {
-            "brightness",
-            "rotation",
+            *({"brightness", "rotation"} if backend == "ums9117" else set()),
             "handoff_wait_seconds",
             "usb_release_wait_seconds",
         },
         "platform runtime adapter",
     )
-    integer_value(adapter.get("brightness"), "platform adapter brightness", bounds=(0, 100))
-    integer_value(
-        adapter.get("rotation"),
-        "platform adapter rotation",
-        bounds=(0, 270),
-    )
-    if adapter["rotation"] not in {0, 90, 180, 270}:
-        fail("platform adapter rotation must be 0, 90, 180 or 270")
+    if backend == "ums9117":
+        integer_value(adapter.get("brightness"), "platform adapter brightness", bounds=(0, 100))
+        integer_value(
+            adapter.get("rotation"),
+            "platform adapter rotation",
+            bounds=(0, 270),
+        )
+        if adapter["rotation"] not in {0, 90, 180, 270}:
+            fail("platform adapter rotation must be 0, 90, 180 or 270")
     integer_value(
         adapter.get("handoff_wait_seconds"),
         "platform adapter handoff_wait_seconds",
@@ -357,24 +362,4 @@ def load_platform(platform: str) -> dict[str, Any]:
         interface_fields=True,
     )
 
-    host = exact_table(
-        config.get("host"),
-        {"runtime_tools", "tools"},
-        "platform host",
-    )
-    tools = host.get("tools")
-    if not isinstance(tools, list) or not tools:
-        fail("platform host tools must be a non-empty array")
-    validated_tools = [validate_host_tool(tool, index) for index, tool in enumerate(tools)]
-    tool_names = [tool["name"] for tool in validated_tools]
-    if len(tool_names) != len(set(tool_names)):
-        fail("platform host tool names must be unique")
-    runtime_tools = host.get("runtime_tools")
-    if not isinstance(runtime_tools, dict) or not runtime_tools:
-        fail("platform host runtime_tools must be a non-empty table")
-    for role, tool_name in runtime_tools.items():
-        nonempty_string(role, "platform host runtime role")
-        if tool_name not in tool_names:
-            fail(f"platform host runtime role {role} references an unknown tool")
-
-    return config
+    return runtime

@@ -18,7 +18,7 @@ def _header(panel: dict[str, Any]) -> list[str]:
 def render_bootstrap_display(display: dict[str, Any]) -> bytes | None:
     """Render data included by the target's existing bootstrap hooks."""
     panel = display["panel"]
-    if panel is None:
+    if panel is None or panel["renderer"] != "ums9117":
         return None
     lines = _header(panel)
     bootstrap = panel["bootstrap"]
@@ -29,10 +29,9 @@ def render_bootstrap_display(display: dict[str, Any]) -> bytes | None:
         lines.extend(
             [
                 "",
-                "static const struct {",
-                "\tuint32_t offset;",
-                "\tuint32_t value;",
-                "} fplinux_panel_pads[] = {",
+                '#include "panel-pads.h"',
+                "",
+                "static const struct ums9117_bootstrap_panel_pad fplinux_panel_pads[] = {",
             ]
         )
         for group in ("control", "data"):
@@ -43,7 +42,15 @@ def render_bootstrap_display(display: dict[str, Any]) -> bytes | None:
                 address = pins[f"{group}_base"] + offset
                 lines.append(f"\t{{ 0x{address:03x}, 0x{mux:08x} }},")
                 lines.append(f"\t{{ 0x{address + 0x400:03x}, 0x{config:08x} }},")
-        lines.append("};")
+        lines.extend(
+            [
+                "};",
+                "",
+                "#define FPLINUX_LCD_PREPARE() \\",
+                "\tums9117_bootstrap_prepare_panel_pads(fplinux_panel_pads, \\",
+                "\t\tsizeof(fplinux_panel_pads) / sizeof(fplinux_panel_pads[0]))",
+            ]
+        )
     lines.extend(["", "static const uint8_t fplinux_panel_init[] = {"])
     for step in [*panel["commands"], *bootstrap["commands_after"]]:
         if step["command"] or step["data"]:
@@ -101,11 +108,33 @@ def linux_panel_addresses_header_name(target: str) -> str:
     return f"fplinux-{target}-panel-addresses.h"
 
 
+def render_mipi_dbi_firmware(panel: dict[str, Any]) -> bytes:
+    """Encode the Linux panel command file, including its one-byte delays."""
+    contents = bytearray(b"MIPI DBI" + b"\0" * 7 + b"\1")
+    for step in panel["commands"]:
+        if step["command"] or step["data"]:
+            contents.extend((step["command"], len(step["data"]), *step["data"]))
+        if step["delay_ms"]:
+            contents.extend((0, 1, step["delay_ms"]))
+    return bytes(contents)
+
+
 def render_linux_display_files(target: str, display: dict[str, Any]) -> dict[str, bytes]:
-    """Render the compiled panel commands and unchanged DT timing/pin properties."""
+    """Render target panel commands and their Linux DT properties."""
     panel = display["panel"]
     if panel is None:
         return {}
+    if panel["renderer"] == "mipi-dbi":
+        timing = (
+            f"// {_SPDX_TAG}: GPL-2.0-only\n"
+            "/* Generated from the target panel profile. */\n"
+            f"hactive = <{panel['width']}>;\n"
+            f"vactive = <{panel['height']}>;\n"
+        )
+        return {
+            f"firmware/{panel['firmware']}": render_mipi_dbi_firmware(panel),
+            f"arch/arm/boot/dts/unisoc/{linux_panel_dtsi_name(target)}": timing.encode("ascii"),
+        }
     lines = _header(panel)
     transport = (
         "UMS9117_DRM_TRANSPORT_SPI1_3WIRE"

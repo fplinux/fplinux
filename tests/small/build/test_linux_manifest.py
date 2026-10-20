@@ -114,6 +114,14 @@ class LinuxManifestTests:
         manifest = linux_inputs.target(tmp_path, "phone", platform_name="demo")
         with manifest.open("a", encoding="utf-8") as output:
             output.write('\n[display]\npanel = "display/panel.toml"\nboot_font = "6x8"\n')
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace(
+                "[linux]\n",
+                '[linux]\ndt_config_checks = [{path="/amplifier", '
+                'compatible="example,amplifier", config="CONFIG_AMPLIFIER"}]\n',
+            ),
+            encoding="utf-8",
+        )
         panel = tmp_path / "targets/phone/display/panel.toml"
         panel.parent.mkdir()
         panel.write_bytes((ROOT / "tests/fixtures/display/panel.toml").read_bytes())
@@ -135,6 +143,13 @@ class LinuxManifestTests:
 
         assert discovered[0].config["display"]["width"] == 128
         assert discovered[0].config["display"]["height"] == 160
+        assert discovered[0].config["linux"]["dt_config_checks"] == [
+            {
+                "path": "/amplifier",
+                "compatible": "example,amplifier",
+                "config": "CONFIG_AMPLIFIER",
+            }
+        ]
         assert discovered[0].config["linux"]["copies"] == [
             {"source": "linux/board.dts", "destination": "arch/arm/boot/dts/phone.dts"},
             {

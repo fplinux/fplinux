@@ -95,6 +95,7 @@ _CHECK_IMPLEMENTATION = _MANIFEST_IMPLEMENTATION | frozenset(
         "scripts/fplinux_cli/environment/images.py",
         "scripts/fplinux_cli/quality/__init__.py",
         "scripts/fplinux_cli/quality/source_gate.py",
+        "scripts/fplinux_cli/quality/scopes.py",
         "scripts/fplinux_cli/quality/testing.py",
         "scripts/fplinux_cli/quality/host_testing.py",
         "scripts/fplinux_cli/dependencies/__init__.py",
@@ -207,7 +208,8 @@ def _source_scope_uses_file(  # noqa: PLR0911
         return _is_shell_source(file) or name in {".editorconfig", ".shellcheckrc"}
     if scope == "alpine":
         return (
-            file.path in {"alpine.lock.toml", "alpine/abuild.conf"}
+            file.path
+            in {"alpine.lock.toml", "alpine/abuild.conf", "profiles/default/profile.toml"}
             or (len(parts) == 3 and parts[0] == "targets" and name == "target.toml")
             or (len(parts) == 3 and parts[0] == "platforms" and name == "platform.toml")
             or (len(parts) == 4 and parts[:2] == ("alpine", "aports") and name == "APKBUILD")
@@ -215,6 +217,8 @@ def _source_scope_uses_file(  # noqa: PLR0911
     if scope == "c":
         return (
             name in {".clang-format", ".clang-format-ignore", "_clang-format"}
+            or file.path
+            in {"lib/fplinux/fplinux-ui-profile.json", "scripts/fplinux_ui_profile.py"}
             or (len(parts) == 3 and parts[0] == "targets" and name == "target.toml")
             or (len(parts) == 3 and parts[0] == "platforms" and name == "platform.toml")
         )
@@ -355,7 +359,7 @@ def _kernel_scope_paths(
                 target_data.get("linux"), base=target_path.parent, captured=captured
             )
         )
-        if profile == "microsd-uboot":
+        if profile in {"microsd-uboot", "microsd-root"}:
             microsd = target_data.get("microsd", {})
             if isinstance(microsd, dict):
                 patches = microsd.get("linux_patches")
@@ -394,7 +398,9 @@ def check_scope_closure_digest(
     build_type: str = "release",
 ) -> str:
     """Hash only captured files that can affect one exact check scope."""
-    if scope == "kernel":
+    if scope == "tests":
+        selected = list(snapshot.files)
+    elif scope == "kernel":
         paths = _kernel_scope_paths(snapshot, profile, build_type=build_type)
         selected = [file for file in snapshot.files if file.path in paths]
     elif scope == "c":

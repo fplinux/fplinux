@@ -30,9 +30,7 @@ _TARGET_ORDER = {
         "linux",
         "bootstrap",
         "adapter",
-        "loader_maps",
         "device_data",
-        "board_maps",
         "bluetooth",
         "audio_profile",
         "fm_radio",
@@ -51,15 +49,17 @@ _TARGET_ORDER = {
         "dtb",
         "debug_dtb",
         "patches",
-        "forbidden_dtb_markers",
-        "forbidden_config",
+        "additional_forbidden_dtb_markers",
+        "additional_forbidden_config",
         "overlay",
         "copies",
         "appends",
+        "dt_config_checks",
     ),
     "linux.memory": ("base", "size"),
     "linux.copies": _COPY_FIELDS,
     "linux.appends": _COPY_FIELDS,
+    "linux.dt_config_checks": ("path", "compatible", "property", "config"),
     "bootstrap": ("lcd_config", "image", "map", "dtb_destination", "record_prefix"),
     "adapter": (
         "spi_mode",
@@ -69,12 +69,7 @@ _TARGET_ORDER = {
         "session_name",
         "boot_instructions",
     ),
-    "loader_maps": ("pinmap", "keymap"),
-    "loader_maps.pinmap": ("member", "sha256"),
-    "loader_maps.keymap": ("member", "sha256"),
-    "device_data": ("parser",),
-    "board_maps": ("firmware",),
-    "board_maps.firmware": _FIRMWARE_FIELDS,
+    "device_data": ("parser", "originals_parser"),
     "bluetooth": ("firmware",),
     "bluetooth.firmware": _FIRMWARE_FIELDS,
     "audio_profile": (
@@ -336,9 +331,8 @@ def _policy(relative: str) -> Mapping[str, Sequence[str]]:  # noqa: PLR0911
         return _PROFILE_ORDER
     if relative.startswith("platforms/") and relative.endswith("/loader/assets.lock.toml"):
         return {
-            "": ("fdl1", "maps"),
+            "": ("fdl1",),
             "fdl1": ("url", "sha256", "cache_name", "license", "path"),
-            "maps": ("url", "sha256", "cache_name", "license", "pinmap_path", "keymap_path"),
         }
     if relative.endswith("/release/manifest.toml"):
         return {"": ("image", "bundle_files", "runtime_files", "documents")}

@@ -200,8 +200,11 @@ def build_profile_sd_image(
     image_config = target_config["image"]
     if image_config["kind"] == "none":
         return None
-    if image_config["kind"] != "ext4-root" or fit is None or ext4 is None:
-        fail("whole-card image requires FIT and ext4 root artifacts")
+    if image_config["kind"] != "ext4-root" or ext4 is None:
+        fail("whole-card image requires an ext4 root artifact")
+    fit_config = target_config["fit"]
+    if (fit_config["kind"] == "none") != (fit is None):
+        fail("whole-card FIT artifact does not match the selected profile")
     storage = target_config["storage"]
     if not isinstance(storage, dict):
         fail("whole-card image requires a storage layout")
@@ -214,7 +217,7 @@ def build_profile_sd_image(
                 fit,
                 ext4,
                 destination,
-                fit_spec=target_config["fit"],
+                fit_spec=fit_config if fit is not None else None,
                 storage=storage,
             )
         )

@@ -1,9 +1,0 @@
-[adapter]
-exec_distance = 0x0040
-
-[loader_maps]
-pinmap = { member = "pins/member.bin", sha256 = "pin-sha" }
-keymap = { member = 'keys/member.bin', sha256 = "key-sha" } # Key settings
-
-[board_maps]
-firmware = []

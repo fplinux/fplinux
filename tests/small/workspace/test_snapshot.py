@@ -15,6 +15,7 @@ import fplinux_cli.workspace.quality_inputs as workspace_quality
 import fplinux_cli.workspace.staging as workspace_staging
 import pytest
 from fplinux_cli import common
+from fplinux_cli.build.runtime import runtime_source_files
 from fplinux_cli.manifests.linux import discover_linux_targets
 
 from tests import ROOT
@@ -37,10 +38,10 @@ class WorkspaceSnapshotTests:
 
     @pytest.mark.parametrize(
         "owner",
-        ["environment/downloads.py", "manifests/values.py"],
-        ids=("verified-transfer", "sha-validation"),
+        ["environment/downloads.py", "manifests/values.py", "manifests/linux.py"],
+        ids=("verified-transfer", "sha-validation", "storage-policy"),
     )
-    def test_selected_build_snapshot_changes_after_a_download_owner_edit(
+    def test_selected_build_snapshot_changes_after_a_build_owner_edit(
         self, owner: str, tmp_path: Path
     ) -> None:
         """Owner bytes are causal in the selected build; unrelated documentation is reusable."""
@@ -103,11 +104,11 @@ class WorkspaceSnapshotTests:
             (directory / "APKBUILD").write_text(f"pkgname={package}\n")
         target = {
             "platform": "demo",
+            "linux": {"root": {"kind": "initramfs"}},
             "device_data": {"groups": {}},
             "rootfs": {
                 "base_packages": ["fplinux-selected"],
                 "packages": [],
-                "exclude_packages": [],
             },
             "bundle": {"packages": []},
         }
@@ -180,7 +181,11 @@ class WorkspaceSnapshotTests:
             mock.patch.object(
                 workspace_inputs,
                 "load_target",
-                return_value={"platform": "demo", "device_data": {"groups": {}}},
+                return_value={
+                    "platform": "demo",
+                    "linux": {"root": {"kind": "initramfs"}},
+                    "device_data": {"groups": {}},
+                },
             ),
         ):
             release = workspace_inputs.target_workspace_snapshot("demo", build_type="release")
@@ -222,7 +227,11 @@ class WorkspaceSnapshotTests:
             mock.patch.object(
                 workspace_inputs,
                 "load_target",
-                return_value={"platform": "demo", "device_data": {"groups": {}}},
+                return_value={
+                    "platform": "demo",
+                    "linux": {"root": {"kind": "initramfs"}},
+                    "device_data": {"groups": {}},
+                },
             ),
         ):
             snapshot = workspace_inputs.target_workspace_snapshot("demo")
@@ -260,7 +269,7 @@ class WorkspaceSnapshotTests:
         host_cli_header = write("include/fplinux/fplinux-cli.h")
         host_input = write("tools/local-input.h")
         host_patch = write("tools/local.patch")
-        loader_events = write("common/loader_events.py")
+        loader_events = write("scripts/fplinux_cli/runtime/events.py")
         panel = write("targets/phone/display/panel.toml")
         write("alpine/ramroot-init.sh", b"#!/bin/sh\nexit 0\n")
         unrelated = write("unselected.txt")
@@ -278,7 +287,6 @@ class WorkspaceSnapshotTests:
             "shared/platform-copy.c",
             "shared/platform-append.cfg",
             "shared/bootstrap/main.c",
-            "common/run.py",
             "platforms/demo/host/adapter.py",
         ):
             write(relative)
@@ -298,7 +306,7 @@ class WorkspaceSnapshotTests:
                 "copies": [{"source": "kernel/copy.c"}],
                 "appends": [{"source": "kernel/append.cfg"}],
             },
-            "bootstrap": {"source": "bootstrap"},
+            "bootstrap": {"backend": "ums9117", "source": "bootstrap"},
             "uboot": {"kind": "none"},
             "fit": {"kind": "none"},
             "image": {"kind": "none"},
@@ -314,6 +322,7 @@ class WorkspaceSnapshotTests:
                 "appends": [{"source": "shared/platform-append.cfg"}],
             },
             "bootstrap": {
+                "backend": "ums9117",
                 "shared_copies": [{"source": "shared/bootstrap"}],
                 "patches": ["patches/bootstrap.patch"],
             },
@@ -333,6 +342,9 @@ class WorkspaceSnapshotTests:
                 ]
             },
         }
+
+        for source in runtime_source_files("phone", target, root=root).values():
+            write(source.relative_to(root).as_posix())
 
         def shared_sources(package: str, root: Path) -> tuple[Path, ...]:
             del root
@@ -424,7 +436,7 @@ class WorkspaceSnapshotTests:
         platform = linux_inputs.platform(root, "demo", source_lock="linux", arch="arm")
         with platform.open("a", encoding="utf-8") as output:
             output.write(
-                '[bootstrap]\nvendor_source_lock = "bootstrap"\n'
+                '[bootstrap]\nbackend = "ums9117"\nvendor_source_lock = "bootstrap"\n'
                 '[[host.tools]]\ntype = "make-archive"\nsource_lock = "host"\n'
             )
         linux_inputs.platform(root, "other", source_lock="linux", arch="riscv")
@@ -466,7 +478,12 @@ class WorkspaceSnapshotTests:
             )
         ]
         causal_sources.append(write_registration_source(root))
-        target_config = {"platform": "demo", "device_data": {"groups": {}}}
+        target_config = {
+            "platform": "demo",
+            "linux": {"root": {"kind": "initramfs"}},
+            "bootstrap": {"backend": "ums9117"},
+            "device_data": {"groups": {}},
+        }
         with (
             workspace_root(root),
             empty_package_graph(),

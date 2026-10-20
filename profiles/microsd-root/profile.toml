@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: GPL-2.0-only
+name = "microsd-root"
+
+[linux.root]
+kind = "external"
+filesystem = "ext4"
+wait_seconds = 10
+
+[rootfs]
+packages = [
+  "fplinux-microsd-root",
+  "fplinux-ncurses-curses",
+  "fplinux-resize2fs",
+]
+
+[bootstrap]
+kind = "linux"
+
+[uboot]
+kind = "none"
+
+[fit]
+kind = "none"
+
+[storage]
+filename = "FPLINUX.img"
+disk_signature = 0x46504c52
+boot_partition = 1
+boot_offset = 0x00100000
+boot_size = 0x04000000
+boot_label = "FPLDATA"
+root_partition = 2
+root_offset = 0x04100000
+root_size = 0x20000000
+root_filename = "FPLROOT.ext4"
+root_label = "FPLROOT"
+root_uuid = "b056a978-6d94-4b17-9ac7-5b63963bb6ad"
+block_size = 4096
+inode_size = 256
+
+[runtime]
+transport = "usb-ncm"
+runnable = true

@@ -27,6 +27,7 @@ BUILD_MANIFEST_FIELDS = frozenset(
         "files",
         "generation",
         "kbuild_receipt",
+        "kernel_artifacts",
         "linux_recipe",
         "profile",
         "build_type",

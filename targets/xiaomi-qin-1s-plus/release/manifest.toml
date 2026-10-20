@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-2.0-only
+image = "image/ramboot.bin"
+bundle_files = [
+  "assets/fdl1.bin",
+  "assets/fdl2.bin",
+  "assets/sml.bin",
+  "image/ramboot.bin",
+  "host/spd_dump",
+  "runtime-manifest.json",
+  "assets.lock.toml",
+  "THIRD_PARTY_NOTICES.md",
+]
+runtime_files = [
+  "assets/fdl1.bin",
+  "assets/fdl2.bin",
+  "assets/sml.bin",
+  "image/ramboot.bin",
+  "host/spd_dump",
+  "runtime-manifest.json",
+]
+documents = []

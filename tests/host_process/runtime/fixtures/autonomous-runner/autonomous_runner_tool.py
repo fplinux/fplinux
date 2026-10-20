@@ -42,6 +42,8 @@ def _ssh(root: Path, boundary: Path) -> None:
         print(f"6.18.42-fplinux-{suffix}")
     elif command.startswith("fplinux-clock "):
         print("system=1234 rtc=kept")
+    elif command == "printf ready":
+        print("ready", end="")
     elif "-tt" in sys.argv:
         with (boundary / "shells.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(session) + "\n")
@@ -86,7 +88,7 @@ def main() -> None:
     elif tool == "libc_server.exe":
         received = boundary / "bridge-received"
         received.mkdir()
-        for name in ("device-data.cpio", "pinmap.bin", "keymap.bin"):
+        for name in ("device-data.cpio",):
             shutil.copyfile(Path.cwd() / name, received / name)
         token = sys.argv[sys.argv.index("--fplinux-handoff") + 1]
         (boundary / "handoff-session.txt").write_text(token, encoding="ascii")

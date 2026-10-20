@@ -251,8 +251,12 @@ def check_one_context(
         objects = sparse_targets(target, target_config, platform)
         output = sparse_output(target, profile, build_type=build_type)
         initramfs = output / "initramfs"
-        if target_config["linux"]["root"]["kind"] == "initramfs":
+        initramfs_delivery = target_config["bootstrap"]["initramfs_delivery"]
+        embedded_initramfs = initramfs_delivery == "embedded"
+        if embedded_initramfs:
             defconfig += f'CONFIG_INITRAMFS_SOURCE="{initramfs}"\n'
+        elif initramfs_delivery == "external":
+            defconfig += 'CONFIG_INITRAMFS_SOURCE=""\n'
         config_enable, config_disable = profile_kconfig_actions(target_config)
         kbuild = [
             "make",
@@ -297,7 +301,7 @@ def check_one_context(
         if config_diff.stat().st_size:
             run_checkpatch([*checkpatch, str(config_diff)])
     with report_stage(reporter, f"kconfig-{label}"):
-        if target_config["linux"]["root"]["kind"] == "initramfs":
+        if embedded_initramfs:
             initramfs.mkdir()
         (output / ".config").write_text(defconfig)
         if profile_config_command is not None:
@@ -307,8 +311,15 @@ def check_one_context(
         requested = kconfig_values(defconfig)
         requested.update(dict.fromkeys(config_enable, "y"))
         requested.update(dict.fromkeys(config_disable, "n"))
-        if target_config["linux"]["root"]["kind"] != "initramfs":
-            # An external-root kernel has no embedded archive to compress.
+        if initramfs_delivery == "none":
+            # Disabling initial RAM disks removes this entire Kconfig subtree.
+            requested = {
+                symbol: value
+                for symbol, value in requested.items()
+                if not symbol.startswith(("CONFIG_INITRAMFS_", "CONFIG_RD_"))
+            }
+        elif not embedded_initramfs:
+            # Only an embedded archive has a Kbuild compression choice.
             requested = {
                 symbol: value
                 for symbol, value in requested.items()

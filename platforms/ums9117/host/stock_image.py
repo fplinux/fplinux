@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # ruff: noqa: INP001
-"""Extract UMS9117 board maps and a board report from a phone's stock firmware.
+"""Extract a UMS9117 board report from a phone's stock firmware.
 
 The input is the phone's own complete NAND backup. The stock application image
 is found through the phone's partition table and passed to the pinned
 fphelper_t117 host tool, which locates and unpacks the firmware tables. The
-loader pin map and keymap are the tool's output unchanged. The remaining board
+loader pin map and keymap are read from the tool's output. The remaining board
 values are read from the unpacked image; each reported value names where it
 came from, and a value that cannot be found is reported as unresolved instead
 of being guessed. Choices that the stock firmware does not record are left to a
@@ -25,16 +25,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from fplinux_cli.device_data.formats import (
-    PhysicalNand,
-    PreparedGroup,
-    RequiredPartition,
-)
+from fplinux_cli.device_data.formats import PhysicalNand, RequiredPartition
 from fplinux_cli.device_data.partitions import discover_partitions
 
 TOOL_NAME = "fphelper_t117"
 IMAGE_NAME = "stock-image.bin"
-REPORT_NAME = "board-report.json"
 _TOOL_SECONDS = 120
 
 # The stock application image, as the phone's partition tables name it.
@@ -330,12 +325,11 @@ class _StockMemory:
         return value
 
 
-def prepare_board_maps(nand: PhysicalNand, *, host_tools: Path) -> PreparedGroup:
-    """Extract the loader pin map and keymap and write the board report.
+def extract_board_report(nand: PhysicalNand, *, host_tools: Path) -> bytes:
+    """Extract the board report as JSON bytes for contributor review.
 
     ``host_tools`` is the directory holding the target's built host tools. The
-    stock image is kept as the group's original; the report is for review and
-    is not a build input.
+    stock image and its unpacked pin map and keymap supply the report values.
     """
     tool_name = TOOL_NAME + ".exe" if os.name == "nt" else TOOL_NAME
     tool = host_tools / tool_name
@@ -363,11 +357,7 @@ def prepare_board_maps(nand: PhysicalNand, *, host_tools: Path) -> PreparedGroup
         keymap=keymap,
         lcd_candidates=lcd_candidates,
     )
-    return PreparedGroup(
-        originals={IMAGE_NAME: image.contents},
-        prepared={"pinmap.bin": pinmap, "keymap.bin": keymap},
-        reports={REPORT_NAME: (json.dumps(report, indent=2) + "\n").encode("ascii")},
-    )
+    return (json.dumps(report, indent=2) + "\n").encode("ascii")
 
 
 def _run_tool(tool: Path, work: Path, *arguments: str) -> str:

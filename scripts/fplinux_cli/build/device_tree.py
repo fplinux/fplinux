@@ -62,7 +62,32 @@ def exact_path_properties(
     if len(requested_paths) != len(set(requested_paths)):
         raise ValueError("device-tree paths must not contain duplicates")
     requested = {_path_parts(path): path for path in requested_paths}
+    return _tree_properties(data, requested)
 
+
+def all_path_properties(tree: bytes | Path) -> dict[str, dict[str, bytes]]:
+    """Return every exact node and property after validating the complete tree."""
+    return _tree_properties(_read_tree(tree), None)
+
+
+def memory_reservations(tree: bytes | Path) -> tuple[tuple[int, int], ...]:
+    """Return the validated FDT memory-reservation address/size pairs."""
+    data = _read_tree(tree)
+    _tree_properties(data, None)
+    position = struct.unpack_from(">I", data, 16)[0]
+    reservations: list[tuple[int, int]] = []
+    while True:
+        address, size = struct.unpack_from(">QQ", data, position)
+        if address == 0 and size == 0:
+            return tuple(reservations)
+        reservations.append((address, size))
+        position += 16
+
+
+def _tree_properties(
+    data: bytes, requested: dict[tuple[str, ...], str] | None
+) -> dict[str, dict[str, bytes]]:
+    """Parse one validated FDT, selecting paths only when requested."""
     if len(data) < FDT_HEADER_SIZE:
         raise DeviceTreeError("compiled DTB does not have a complete FDT header")
     (
@@ -144,7 +169,7 @@ def exact_path_properties(
                 raise DeviceTreeError(f"compiled DTB repeats node {_display_path(path)}")
             seen_nodes.add(path)
             all_properties[path] = set()
-            if path in requested:
+            if requested is None or path in requested:
                 properties[path] = {}
             position = (terminator + 4) & ~3
             if position > structure_end:
@@ -198,6 +223,8 @@ def exact_path_properties(
                 raise DeviceTreeError("compiled DTB ends before the root node is closed")
             if any(data[position:structure_end]):
                 raise DeviceTreeError("compiled DTB has data after its final structure token")
+            if requested is None:
+                return {_display_path(parts): values for parts, values in properties.items()}
             missing = requested.keys() - properties.keys()
             if missing:
                 path = min(missing)

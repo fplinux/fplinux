@@ -64,6 +64,7 @@ class CommandBundleContext:
             "apk_signing_key": self.signing_key,
             "device_identity": "9" * 64,
             "rootfs_receipt": {"recipe": "f" * 64, "sha256": "0" * 64},
+            "kernel_artifacts": {},
             "boot_artifacts": {"required": [], "runnable": runnable},
             "files": {
                 source.relative_to(path).as_posix(): file_record(source)
@@ -97,17 +98,14 @@ class CommandBundleContext:
         payload.parent.mkdir(parents=True)
         payload.write_bytes(image)
         payload.chmod(0o644)
-        runner = path / "runner/run.py"
-        runner.parent.mkdir()
-        runner.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
-        runner.chmod(0o755)
+        runtime = path / "fplinux.py"
+        runtime.write_text("#!/usr/bin/env python3.14\n", encoding="utf-8")
+        runtime.chmod(0o755)
         client = path / "host/fplinux-usb-keyboard"
         client.parent.mkdir()
         client.write_text("keyboard client\n", encoding="utf-8")
         client.chmod(0o755)
-        ssh_helper = path / "runner/ssh_transport.py"
-        ssh_helper.write_text("# bundled SSH helper\n", encoding="utf-8")
-        ssh_helper.chmod(0o644)
+        (path / "runtime-manifest.json").write_bytes(canonical_json_bytes({"adapter": {}}))
         (path / BUILD_MANIFEST_NAME).write_bytes(
             canonical_json_bytes(
                 self.manifest(generation, path, profile, runnable=runnable, build_type=build_type)

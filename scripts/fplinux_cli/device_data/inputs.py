@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import lzma
-import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -15,7 +14,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
 DEVICE_DATA_SNAPSHOT_ROOT = PurePosixPath(".fplinux-inputs/device-data")
-GENERATION_NAME = re.compile(r"generation-[A-Za-z0-9_-]+")
 
 
 @dataclass(frozen=True)
@@ -53,8 +51,13 @@ def rootfs_firmware_inputs(
     )
 
 
+def rootfs_receives_firmware(*, root_kind: str, platform: str) -> bool:
+    """Select built rootfs delivery where the loader has no supplemental capsule."""
+    return root_kind == "external" or platform == "sc9820e"
+
+
 def device_data_cache_directory(cache: Path, target: str) -> Path:
-    """Return the private generation root used by one target."""
+    """Return the private phone, backup and session root used by one target."""
     return cache / "device-data" / target
 
 
@@ -68,53 +71,33 @@ def snapshot_device_data_path(target: str, group: str, destination: str) -> str:
     return (DEVICE_DATA_SNAPSHOT_ROOT / target / "groups" / group / destination).as_posix()
 
 
-def current_device_data_generation(cache: Path, target: str) -> Path | None:
-    """Resolve the atomically selected generation; an old or absent layout is a miss."""
-    directory = device_data_cache_directory(cache, target)
-    if directory.is_symlink():
-        fail(f"device-data directory is invalid: {directory}")
-    if not directory.exists():
-        return None
-    if not directory.is_dir():
-        fail(f"device-data directory is invalid: {directory}")
-    pointer = directory / "current"
-    if pointer.is_symlink():
-        fail(f"device-data current pointer is invalid: {pointer}")
-    if not pointer.exists():
-        return None
-    if not pointer.is_file():
-        fail(f"device-data current pointer is invalid: {pointer}")
-    try:
-        value = pointer.read_text(encoding="ascii")
-    except (OSError, UnicodeError) as error:
-        fail(f"device-data current pointer cannot be read: {pointer}: {error}")
-    if not value.endswith("\n") or value.count("\n") != 1:
-        fail(f"device-data current pointer is invalid: {pointer}")
-    generation_name = value[:-1]
-    if GENERATION_NAME.fullmatch(generation_name) is None:
-        fail(f"device-data current pointer is invalid: {pointer}")
-    generations = directory / "generations"
-    generation = generations / generation_name
-    _require_directory_chain((cache, cache / "device-data", directory, generations, generation))
-    return generation
-
-
 def capture_external_device_data(
     target: str,
     groups: Mapping[str, list[dict[str, Any]]],
     cache: Path,
 ) -> dict[str, tuple[FirmwareInput, ...]]:
-    """Capture every complete current group while allowing whole groups to be absent."""
+    """Capture prepared phone groups while allowing whole build inputs to be absent."""
     if not groups:
         return {}
-    generation = current_device_data_generation(cache, target)
-    if generation is None:
+    directory = device_data_cache_directory(cache, target)
+    phone = directory / "phone"
+    if not phone.exists() and not phone.is_symlink():
         return {}
-    return capture_device_data_generation(
-        groups,
-        generation,
-        path_field="source",
-        require_all=False,
+    _require_directory_chain((cache, cache / "device-data", directory))
+    return capture_phone_data(groups, phone, require_all=False)
+
+
+def capture_phone_data(
+    groups: Mapping[str, list[dict[str, Any]]],
+    phone: Path,
+    *,
+    require_all: bool = True,
+) -> dict[str, tuple[FirmwareInput, ...]]:
+    """Admit runtime data from the same flat store in a checkout or archive."""
+    if not groups:
+        return {}
+    return _capture_device_data_directory(
+        groups, phone, path_field="source", require_all=require_all
     )
 
 
@@ -126,41 +109,44 @@ def capture_snapshot_device_data(
     """Read all complete groups from one immutable build workspace snapshot."""
     if not groups:
         return {}
-    generation = root / DEVICE_DATA_SNAPSHOT_ROOT / target
-    if not generation.exists():
+    directory = root / DEVICE_DATA_SNAPSHOT_ROOT / target
+    if not directory.exists():
         return {}
-    return capture_device_data_generation(
+    return _capture_device_data_directory(
         groups,
-        generation,
+        directory,
         path_field="destination",
         require_all=False,
     )
 
 
-def capture_device_data_generation(
+def _capture_device_data_directory(
     groups: Mapping[str, list[dict[str, Any]]],
-    generation: Path,
+    directory: Path,
     *,
     path_field: str,
     require_all: bool,
 ) -> dict[str, tuple[FirmwareInput, ...]]:
-    """Validate named all-or-nothing groups from one staged or selected generation."""
-    _require_directory_chain((generation, generation / "groups"))
+    """Validate named all-or-nothing groups from one fixed prepared directory."""
+    _require_directory_chain((directory, directory / "groups"))
     captured: dict[str, tuple[FirmwareInput, ...]] = {}
     for group_name in sorted(groups):
         declarations = groups[group_name]
-        directory = generation / "groups" / group_name
-        paths = [directory / str(declaration[path_field]) for declaration in declarations]
+        group_directory = directory / "groups" / group_name
+        paths = [group_directory / str(declaration[path_field]) for declaration in declarations]
         present = any(path.exists() or path.is_symlink() for path in paths)
         if not present:
             if require_all:
                 fail(f"device-data group {group_name} is absent")
             continue
-        if directory.is_symlink() or not directory.is_dir():
-            fail(f"device-data group {group_name} directory is missing or invalid: {directory}")
+        if group_directory.is_symlink() or not group_directory.is_dir():
+            fail(
+                f"device-data group {group_name} directory is missing or invalid: "
+                f"{group_directory}"
+            )
         captured[group_name] = _capture_group_firmware(
             declarations,
-            directory,
+            group_directory,
             path_field=path_field,
             group=group_name,
         )

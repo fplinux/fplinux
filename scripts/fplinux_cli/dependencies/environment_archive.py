@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import copy
+import gzip
 import json
 import shutil
 import tarfile
@@ -35,7 +37,13 @@ from fplinux_cli.environment.kern import (
     require_kern,
 )
 
-from .snapshots import copy_verified, object_path, prepare_directory
+from .snapshots import (
+    copy_verified,
+    object_path,
+    prepare_directory,
+    read_snapshot,
+    require_matching_environment,
+)
 
 if TYPE_CHECKING:
     from fplinux_cli.reporting.run import RunReporter
@@ -53,6 +61,12 @@ def save_environment(directory: Path, reporter: RunReporter) -> dict[str, Any]:
     state = current_image_state(kern, image, recipe)
     if state is None:
         fail("current build environment is unavailable; run ./fplinux setup first")
+    manifest_path = directory / "manifest.json"
+    if manifest_path.exists() or manifest_path.is_symlink():
+        saved: dict[str, Any] | None = read_snapshot(directory)["environment"]
+        if saved is not None:
+            require_matching_environment(ImageState(**saved["state"]), state)
+            return saved
     metadata = _capture_environment_metadata(kern, image, state, reporter)
     metadata_digest = common.sha256_bytes(metadata)
     metadata_path = object_path(directory, metadata_digest)
@@ -70,7 +84,8 @@ def save_environment(directory: Path, reporter: RunReporter) -> dict[str, Any]:
                     env=kern_environment(),
                     timeout=_ENVIRONMENT_TIMEOUT,
                 )
-                _require_image_archive(archive, transport)
+                layers = _require_image_archive(archive, transport)
+                _compress_image_layers(archive, layers)
                 if current_image_state(kern, image, recipe) != state:
                     fail("source build environment changed during snapshot export")
                 digest = sha256_file(archive)
@@ -196,7 +211,53 @@ def restore_environment(
         remove_images(kern, {transport, staging} & set(current))
 
 
-def _require_image_archive(archive: Path, reference: str) -> None:
+def _compress_image_layers(archive: Path, layers: tuple[str, ...]) -> None:
+    """Keep the native outer tar plain while compressing its unchanged layer bytes."""
+    try:
+        with tempfile.TemporaryDirectory(dir=archive.parent, prefix=".layers-") as temporary:
+            compressed_archive = Path(temporary) / "environment.tar"
+            compressed_layer = Path(temporary) / "layer.gz"
+            pending = set(layers)
+            with (
+                tarfile.open(archive, "r:") as source,
+                tarfile.open(compressed_archive, "w", format=tarfile.PAX_FORMAT) as destination,
+            ):
+                for member in source:
+                    name = member.name.removeprefix("./")
+                    contents = source.extractfile(member) if member.isfile() else None
+                    if name in layers:
+                        if contents is None:
+                            fail(f"Kern export layer is not a regular file: {name}")
+                        with (
+                            contents,
+                            compressed_layer.open("wb") as output,
+                            gzip.GzipFile(
+                                filename="",
+                                mode="wb",
+                                compresslevel=1,
+                                fileobj=output,
+                                mtime=0,
+                            ) as compressed,
+                        ):
+                            shutil.copyfileobj(contents, compressed)
+                        compressed_member = copy.copy(member)
+                        compressed_member.size = compressed_layer.stat().st_size
+                        with compressed_layer.open("rb") as stream:
+                            destination.addfile(compressed_member, stream)
+                        pending.discard(name)
+                    elif contents is not None:
+                        with contents:
+                            destination.addfile(member, contents)
+                    else:
+                        destination.addfile(member)
+            if pending:
+                fail("Kern export is missing an image layer")
+            compressed_archive.replace(archive)
+    except (OSError, tarfile.TarError) as error:
+        fail(f"Kern export layers cannot be compressed: {error}")
+
+
+def _require_image_archive(archive: Path, reference: str) -> tuple[str, ...]:
     try:
         with tarfile.open(archive, "r:") as bundle:
             members = [
@@ -209,10 +270,20 @@ def _require_image_archive(archive: Path, reference: str) -> None:
                 fail("Kern export image manifest cannot be read")
             with source:
                 manifest = json.load(source)
-            if not isinstance(manifest, list) or not any(
-                isinstance(item, dict) and reference in item.get("RepoTags", [])
-                for item in manifest
-            ):
+            if not isinstance(manifest, list):
                 fail("Kern export does not contain the exact requested image reference")
+            for item in manifest:
+                if not isinstance(item, dict) or reference not in item.get("RepoTags", []):
+                    continue
+                layers = item.get("Layers")
+                if not isinstance(layers, list) or not layers:
+                    fail("Kern export image layers are invalid")
+                names: list[str] = []
+                for layer in layers:
+                    if not isinstance(layer, str) or not layer:
+                        fail("Kern export image layer path is invalid")
+                    names.append(layer)
+                return tuple(names)
+            fail("Kern export does not contain the exact requested image reference")
     except (OSError, tarfile.TarError, ValueError) as error:
         fail(f"Kern export cannot be verified: {error}")

@@ -6,7 +6,7 @@ from __future__ import annotations
 import tomllib
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from fplinux_cli.common import fail, load_toml
 from fplinux_cli.manifests.audio import AudioPolicyError, audio_policy_from_profile
@@ -18,19 +18,31 @@ from fplinux_cli.manifests.identity import (
     validate_target_identity,
 )
 from fplinux_cli.manifests.values import (
+    KCONFIG_SYMBOL,
     TARGET_NAME,
+    exact_table,
     nonempty_string,
     path_array,
     path_steps,
     relative_value,
     sha256_value,
+    string_array,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterator, Mapping
     from pathlib import Path
 
 _REPOSITORY_SOURCE_BASE = PurePosixPath()
+
+_FORBIDDEN_STORAGE_DTB_MARKERS = ("spi-nand", "mtd", "ubi", "emmc")
+_FORBIDDEN_STORAGE_CONFIG = (
+    "CONFIG_MTD=y",
+    "CONFIG_UBI=y",
+    "CONFIG_SCSI=y",
+    "CONFIG_ATA=y",
+    "CONFIG_NVME_CORE=y",
+)
 
 
 @dataclass(frozen=True)
@@ -40,6 +52,84 @@ class LinuxTarget:
     name: str
     config: dict[str, Any]
     platform: dict[str, Any]
+
+
+def linux_dt_config_checks(value: object, name: str) -> list[dict[str, str]]:
+    """Validate compiled device-tree ownership checks declared by one Linux owner."""
+    if not isinstance(value, list):
+        fail(f"{name} must be an array")
+    result: list[dict[str, str]] = []
+    identities: set[tuple[str, str, str | None]] = set()
+    for index, raw in enumerate(value):
+        item_name = f"{name}[{index}]"
+        fields = {"path", "compatible", "config"}
+        if isinstance(raw, dict) and "property" in raw:
+            fields.add("property")
+        check = exact_table(raw, fields, item_name)
+        path = nonempty_string(check.get("path"), f"{item_name} path")
+        if not path.startswith("/") or (
+            path != "/" and any(part in {"", ".", ".."} for part in path[1:].split("/"))
+        ):
+            fail(f"{item_name} path must be a canonical absolute device-tree path")
+        compatible = nonempty_string(check.get("compatible"), f"{item_name} compatible")
+        symbol = nonempty_string(check.get("config"), f"{item_name} config")
+        if KCONFIG_SYMBOL.fullmatch(symbol) is None:
+            fail(f"{item_name} config must be a CONFIG_* symbol")
+        property_name = (
+            nonempty_string(check["property"], f"{item_name} property")
+            if "property" in check
+            else None
+        )
+        identity = (path, compatible, property_name)
+        if identity in identities:
+            condition = f" property {property_name}" if property_name is not None else ""
+            fail(f"{name} repeats ownership for {path} compatible {compatible}{condition}")
+        identities.add(identity)
+        requirement = {"path": path, "compatible": compatible, "config": symbol}
+        if property_name is not None:
+            requirement["property"] = property_name
+        result.append(requirement)
+    return result
+
+
+def linux_storage_policy(
+    additional_config: object, additional_dtb_markers: object
+) -> dict[str, list[str]]:
+    """Combine the mandatory internal-storage exclusions with board restrictions."""
+    return {
+        "forbidden_config": [
+            *string_array(
+                additional_config, "target linux additional_forbidden_config", allow_empty=True
+            ),
+            *_FORBIDDEN_STORAGE_CONFIG,
+        ],
+        "forbidden_dtb_markers": [
+            *_FORBIDDEN_STORAGE_DTB_MARKERS,
+            *string_array(
+                additional_dtb_markers,
+                "target linux additional_forbidden_dtb_markers",
+                allow_empty=True,
+            ),
+        ],
+    }
+
+
+def linux_declarations(
+    linux: dict[str, Any],
+    *,
+    owner: Literal["platform", "target"],
+    kind: Literal["patch", "copy", "append"],
+    source_base: PurePosixPath = _REPOSITORY_SOURCE_BASE,
+) -> Iterator[tuple[str, str, str]]:
+    """Enumerate one normalized operation group without choosing consumer order."""
+    operation = f"{owner}-{kind}"
+    if kind == "patch":
+        for relative in linux["patches"]:
+            yield operation, (source_base / relative).as_posix(), ""
+        return
+    key = "copies" if kind == "copy" else "appends"
+    for step in linux[key]:
+        yield operation, (source_base / step["source"]).as_posix(), step["destination"]
 
 
 def is_shared_linux_operation(operation: str) -> bool:
@@ -124,6 +214,9 @@ def normalize_linux_integration(
             captured=captured,
         ),
         "appends": path_steps(value.get("appends"), f"{name} appends"),
+        "dt_config_checks": linux_dt_config_checks(
+            value.get("dt_config_checks", []), f"{name} dt_config_checks"
+        ),
     }
 
 

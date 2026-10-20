@@ -78,7 +78,14 @@ class LoaderArgumentsTests:
 class LoaderExecutionTests:
     """The loader result, bridge exit status and BootROM release gate the Linux transition."""
 
-    def test_transient_bootrom_node_reaches_loader_without_settle_delay(self) -> None:
+    @pytest.mark.parametrize(
+        ("loader_trace", "trace_arguments"),
+        [(False, []), (True, ["--verbose", "1"])],
+        ids=["default", "loader-trace"],
+    )
+    def test_transient_bootrom_node_reaches_loader_without_settle_delay(
+        self, *, loader_trace: bool, trace_arguments: list[str]
+    ) -> None:
         """Open a detected short-lived BootROM node before it disconnects."""
         with tempfile.TemporaryDirectory() as temporary:
             bundle = Path(temporary)
@@ -100,25 +107,37 @@ class LoaderExecutionTests:
                 contextlib.redirect_stdout(io.StringIO()),
                 mock.patch.object(ADAPTER, "usb_device_path", return_value=bootrom),
                 mock.patch.object(ADAPTER.time, "sleep", side_effect=expire_on_long_sleep),
-                mock.patch.object(ADAPTER.subprocess, "run", side_effect=run_loader),
+                mock.patch.object(ADAPTER.subprocess, "run", side_effect=run_loader) as loader,
                 mock.patch.object(
                     ADAPTER.subprocess,
                     "Popen",
                     return_value=BridgeProcess(0),
                 ),
                 mock.patch.object(ADAPTER.shutil, "which", return_value="/usr/bin/stdbuf"),
-                mock.patch.object(
-                    ADAPTER.importlib,
-                    "import_module",
-                    return_value=transport_module,
-                ),
+                mock.patch.object(ADAPTER, "ssh_transport", transport_module),
             ):
                 ADAPTER.run(
                     bundle,
-                    bridge_runtime("none"),
+                    bridge_runtime(),
                     prepared_session(),
                     expected_device_identity="9" * 64,
+                    loader_trace=loader_trace,
                 )
+
+            assert loader.call_args.args[0] == [
+                str(bundle / "host/spd_dump"),
+                *trace_arguments,
+                "--wait",
+                "0",
+                "t117_exec_dist",
+                "0x314d",
+                "fdl",
+                str(bundle / "assets/fdl1.bin"),
+                "0x6200",
+                "fdl",
+                prepared_session()["image"],
+                "0x80100000",
+            ]
 
         transport_module.remove_personalized_image.assert_called_once()
 
@@ -151,15 +170,11 @@ class LoaderExecutionTests:
                     return_value=BridgeProcess(0),
                 ),
                 mock.patch.object(ADAPTER.shutil, "which", return_value="/usr/bin/stdbuf"),
-                mock.patch.object(
-                    ADAPTER.importlib,
-                    "import_module",
-                    return_value=transport_module,
-                ),
+                mock.patch.object(ADAPTER, "ssh_transport", transport_module),
             ):
                 ADAPTER.run(
                     bundle,
-                    bridge_runtime("none"),
+                    bridge_runtime(),
                     prepared_session(),
                     expected_device_identity="9" * 64,
                 )
@@ -192,16 +207,12 @@ class LoaderExecutionTests:
                 mock.patch.object(ADAPTER.subprocess, "run", side_effect=fail_loader),
                 mock.patch.object(ADAPTER.subprocess, "Popen") as popen,
                 mock.patch.object(ADAPTER.shutil, "which", return_value="/usr/bin/stdbuf"),
-                mock.patch.object(
-                    ADAPTER.importlib,
-                    "import_module",
-                    return_value=transport_module,
-                ),
+                mock.patch.object(ADAPTER, "ssh_transport", transport_module),
                 pytest.raises(SystemExit, match="failed after 3 attempts"),
             ):
                 ADAPTER.run(
                     bundle,
-                    bridge_runtime("none"),
+                    bridge_runtime(),
                     prepared_session(),
                     expected_device_identity="9" * 64,
                 )
@@ -251,15 +262,11 @@ class LoaderExecutionTests:
                     return_value=BridgeProcess(0),
                 ),
                 mock.patch.object(ADAPTER.shutil, "which", return_value="/usr/bin/stdbuf"),
-                mock.patch.object(
-                    ADAPTER.importlib,
-                    "import_module",
-                    return_value=transport_module,
-                ),
+                mock.patch.object(ADAPTER, "ssh_transport", transport_module),
             ):
                 ADAPTER.run(
                     bundle,
-                    bridge_runtime("none"),
+                    bridge_runtime(),
                     prepared_session(),
                     expected_device_identity="9" * 64,
                 )
@@ -284,18 +291,14 @@ class LoaderExecutionTests:
                 mock.patch.object(ADAPTER.subprocess, "run", loader),
                 mock.patch.object(ADAPTER.subprocess, "Popen") as popen,
                 mock.patch.object(ADAPTER.shutil, "which", return_value="/usr/bin/stdbuf"),
-                mock.patch.object(
-                    ADAPTER.importlib,
-                    "import_module",
-                    return_value=transport_module,
-                ),
+                mock.patch.object(ADAPTER, "ssh_transport", transport_module),
                 mock.patch.object(ADAPTER.time, "monotonic", clock.monotonic),
                 mock.patch.object(ADAPTER.time, "sleep", clock.sleep),
                 pytest.raises(SystemExit, match="retry deadline"),
             ):
                 ADAPTER.run(
                     bundle,
-                    bridge_runtime("none"),
+                    bridge_runtime(),
                     prepared_session(),
                     expected_device_identity="9" * 64,
                 )
@@ -319,16 +322,12 @@ class LoaderExecutionTests:
                 mock.patch.object(ADAPTER.subprocess, "run", loader),
                 mock.patch.object(ADAPTER.subprocess, "Popen") as popen,
                 mock.patch.object(ADAPTER.shutil, "which", return_value="/usr/bin/stdbuf"),
-                mock.patch.object(
-                    ADAPTER.importlib,
-                    "import_module",
-                    return_value=transport_module,
-                ),
+                mock.patch.object(ADAPTER, "ssh_transport", transport_module),
                 pytest.raises(SystemExit, match="cancelled"),
             ):
                 ADAPTER.run(
                     bundle,
-                    bridge_runtime("none"),
+                    bridge_runtime(),
                     prepared_session(),
                     expected_device_identity="9" * 64,
                 )

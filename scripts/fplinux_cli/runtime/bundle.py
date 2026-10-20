@@ -1,31 +1,38 @@
-#!/usr/bin/env python3.14
 # SPDX-License-Identifier: GPL-2.0-only
-"""Run a validated FPLinux RAM-only bundle through its fixed platform adapter."""
+"""Admit one immutable bundle and its selected runtime closure."""
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import importlib.util
 import json
 import os
-import signal
+import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, NoReturn
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-    from types import FrameType, ModuleType
-    from typing import TextIO
+    from types import ModuleType
 
-ADAPTER_PATH = "runner/platform_adapter.py"
-IDENTITY_PATH = "runner/identity.py"
-SSH_HELPER_PATH = "runner/ssh_transport.py"
-EVENTS_HELPER_PATH = "runner/loader_events.py"
+    from .windows_host import WindowsBundle
+
+IDENTITY_PATH = "scripts/fplinux_cli/manifests/identity.py"
+SSH_HELPER_PATH = "scripts/fplinux_cli/runtime/ssh_transport.py"
+EVENTS_HELPER_PATH = "scripts/fplinux_cli/runtime/events.py"
 REQUIRED_PYTHON = (3, 14)
-TRANSPORTS = frozenset({"usb-ncm", "none"})
-_identity_module: ModuleType | None = None
+
+
+@dataclass(frozen=True)
+class ValidatedBundle:
+    """One admitted runtime closure and the identities reused by its host operations."""
+
+    root: Path
+    runtime: dict[str, Any]
+    generation: str
+    device_identity: str
+    windows: WindowsBundle | None
 
 
 def fail(message: str) -> NoReturn:
@@ -34,25 +41,20 @@ def fail(message: str) -> NoReturn:
 
 
 def identity_module() -> ModuleType:
-    """Load the shared identity contract from a bundle or source checkout."""
-    global _identity_module  # noqa: PLW0603
+    """Use the canonical identity implementation in the delivered closure."""
+    from fplinux_cli.manifests import identity  # noqa: PLC0415
 
-    if _identity_module is not None:
-        return _identity_module
-    candidates = (
-        Path(__file__).with_name("identity.py"),
-        Path(__file__).resolve().parents[1] / "scripts/fplinux_cli/manifests/identity.py",
-    )
-    source = next((path for path in candidates if path.is_file()), None)
-    if source is None:
-        fail("runner identity contract is missing")
-    spec = importlib.util.spec_from_file_location("fplinux_runtime_identity", source)
-    if spec is None or spec.loader is None:
-        fail("runner identity contract cannot be loaded")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    _identity_module = module
-    return module
+    return identity
+
+
+def adapter_path(runtime: dict[str, Any]) -> str:
+    """Select the adapter from the admitted platform identity."""
+    identity = runtime.get("identity")
+    platform_identity = identity.get("platform") if isinstance(identity, dict) else None
+    platform = platform_identity.get("name") if isinstance(platform_identity, dict) else None
+    if not isinstance(platform, str) or re.fullmatch(r"[a-z0-9][a-z0-9-]*", platform) is None:
+        fail("runtime platform name must be a normalized basename")
+    return f"platforms/{platform}/host/adapter.py"
 
 
 def validate_runtime_identity(runtime: dict[str, Any]) -> dict[str, Any]:
@@ -93,8 +95,8 @@ def require_string(value: object, name: str) -> str:
 def require_transport(value: object) -> str:
     """Validate the one host-side transport contract for this bundle."""
     transport = require_string(value, "runtime transport")
-    if transport not in TRANSPORTS:
-        fail("runtime transport must be one of: none, usb-ncm")
+    if transport != "usb-ncm":
+        fail("runtime transport must be usb-ncm")
     return transport
 
 
@@ -201,6 +203,8 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
             "assets",
             "adapter",
             "host_tools",
+            "nand",
+            "device_data",
             "sha256",
         },
         "runtime manifest",
@@ -273,18 +277,35 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
     root["host_tools"] = validate_path_table(root.get("host_tools"), "runtime host tools")
     if not isinstance(root.get("adapter"), dict):
         fail("runtime adapter must be an object")
+    selected_adapter = adapter_path(root)
+    root["nand"] = validate_nand(root["nand"], platform=root["identity"]["platform"]["name"])
 
+    root["device_data"] = validate_device_data(root["device_data"])
+    if root["device_data"] is not None and root["nand"] is None:
+        fail("runtime preparation requires a declared NAND reader")
     expected_paths = {
         root["image"],
-        ADAPTER_PATH,
+        "fplinux.py",
+        selected_adapter,
         IDENTITY_PATH,
         *root["assets"].values(),
         *root["host_tools"].values(),
         SSH_HELPER_PATH,
         EVENTS_HELPER_PATH,
+        *(
+            f"scripts/fplinux_cli/runtime/{name}.py"
+            for name in ("cli", "workflow", "bundle", "boot")
+        ),
     }
-    hashes = require_object(root.get("sha256"), expected_paths, "runtime hashes")
+    if root["device_data"] is not None:
+        for field in ("parser", "ecc_module"):
+            if root["device_data"][field] is not None:
+                expected_paths.add(root["device_data"][field])
+    hashes = root.get("sha256")
+    if not isinstance(hashes, dict) or not expected_paths.issubset(hashes):
+        fail("runtime hashes do not include the required runtime closure")
     for relative, value in hashes.items():
+        relative_name(relative, "runtime hash path")
         if (
             not isinstance(value, str)
             or len(value) != 64
@@ -292,6 +313,102 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
         ):
             fail(f"runtime hash for {relative} must be a lowercase SHA-256 digest")
     return root
+
+
+def validate_device_data(value: object) -> dict[str, Any] | None:
+    """Admit the exact preparation inputs delivered for this bundle."""
+    if value is None:
+        return None
+    from fplinux_cli.manifests.audio import validate_audio_policy  # noqa: PLC0415
+
+    descriptor = require_object(
+        value, {"parser", "groups", "audio_policy", "ecc_module"}, "device data"
+    )
+    for field in ("parser", "ecc_module"):
+        if descriptor[field] is not None:
+            descriptor[field] = relative_name(descriptor[field], f"device data {field}")
+    descriptor["audio_policy"] = validate_audio_policy(descriptor["audio_policy"])
+    if not isinstance(descriptor["groups"], dict) or not descriptor["groups"]:
+        fail("device data groups must be a non-empty object")
+    for group, entries in descriptor["groups"].items():
+        if not isinstance(group, str) or not group or not isinstance(entries, list):
+            fail("device data groups must contain named file lists")
+        for entry in entries:
+            if not isinstance(entry, dict) or not {"source", "destination"}.issubset(entry):
+                fail(f"device data group {group} contains an invalid file")
+            relative_name(entry["source"], f"device data {group} source")
+            relative_name(entry["destination"], f"device data {group} destination")
+    return descriptor
+
+
+def validate_nand(value: object, *, platform: str) -> dict[str, Any] | None:
+    """Admit the read-only reader contract even when no preparation is required."""
+    if value is None:
+        return None
+    fields = {"raw_device", "id", "raw_page_bytes"}
+    if not isinstance(value, dict) or set(value) not in (
+        {"raw_device"},
+        fields,
+        fields | {"ecc_format"},
+    ):
+        fail("runtime NAND reader requires raw_device and optionally id with raw_page_bytes")
+    if platform != "ums9117":
+        fail("this platform does not support the runtime NAND reader")
+    if (
+        not isinstance(value["raw_device"], str)
+        or re.fullmatch(r"/dev/[A-Za-z0-9][A-Za-z0-9._-]*", value["raw_device"]) is None
+    ):
+        fail("runtime NAND raw_device must name one device directly under /dev")
+    if "id" in value:
+        require_integer(value, "id", "runtime NAND id", bounds=(0, 0xFFFF))
+        require_integer(
+            value, "raw_page_bytes", "runtime NAND raw_page_bytes", bounds=(1, 0xFFFFFFFF)
+        )
+    if "ecc_format" in value and (
+        value["ecc_format"] != "ums9117-bch12" or value["raw_page_bytes"] != 2176
+    ):
+        fail("runtime NAND ECC requires ums9117-bch12 with 2176-byte pages")
+    return value
+
+
+def admit_bundle(bundle: Path) -> ValidatedBundle:
+    """Reject incomplete or changed content before host setup or USB discovery."""
+    windows_archive = (bundle / "windows-host.json").is_file()
+    if windows_archive != (os.name == "nt"):
+        command = "Run.cmd on Windows" if windows_archive else "Run.sh on Linux"
+        fail(f"Open this archive with {command}")
+    runtime = load_runtime_manifest(bundle / "runtime-manifest.json")
+    if not windows_archive and "60-fplinux.rules" not in runtime["sha256"]:
+        fail("runtime hashes do not include the phone USB access rules")
+    for relative, expected in runtime["sha256"].items():
+        path = bundle / relative
+        require_file(
+            path, executable=not windows_archive and relative in runtime["host_tools"].values()
+        )
+        # The immutable build identity admits the image once, including its size.
+        if relative == runtime["image"]:
+            continue
+        actual = digest(path)
+        if actual != expected:
+            fail(f"{relative} SHA256 mismatch: expected {expected}, got {actual}")
+    runtime = validate_runtime_identity(runtime)
+    from . import ssh_transport  # noqa: PLC0415
+
+    identity = ssh_transport.bundle_identity(bundle, runtime)
+    device_identity = ssh_transport.build_manifest_device_identity(bundle)
+    windows = None
+    if windows_archive:
+        from .windows_host import validate_archive  # noqa: PLC0415
+
+        windows = validate_archive(
+            bundle,
+            runtime,
+            generation=identity["bundle_generation"],
+            device_identity=device_identity,
+        )
+    return ValidatedBundle(
+        bundle, runtime, identity["bundle_generation"], device_identity, windows
+    )
 
 
 def require_file(path: Path, *, executable: bool = False) -> None:
@@ -327,163 +444,3 @@ def load_adapter(path: Path) -> ModuleType:
     if not callable(getattr(module, "run", None)):
         fail("platform adapter does not expose run(bundle, runtime, session)")
     return module
-
-
-def arguments() -> argparse.Namespace:
-    """Parse either a fresh RAM load or an authenticated reconnect action."""
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--events", type=Path, metavar="PATH", help="write flushed JSONL loader events"
-    )
-    parser.add_argument(
-        "--reconnect",
-        action="store_true",
-        help="reconnect to a ready SSH session with this device identity",
-    )
-    action = parser.add_mutually_exclusive_group()
-    action.add_argument("--exec", dest="exec_command", metavar="COMMAND")
-    action.add_argument("--upload", nargs=2, metavar=("LOCAL", "REMOTE"))
-    action.add_argument("--pull", nargs=2, metavar=("REMOTE", "LOCAL"))
-    result = parser.parse_args()
-    if result.reconnect and result.events is not None:
-        parser.error("--events is available only for a fresh RAM load")
-    if not result.reconnect and any(
-        value is not None for value in (result.exec_command, result.upload, result.pull)
-    ):
-        parser.error("--exec, --upload and --pull require --reconnect")
-    return result
-
-
-def main() -> None:
-    """Verify the bundle closure and enter the fixed adapter."""
-    options = arguments()
-    bundle = Path(__file__).resolve().parent.parent
-    runtime = load_runtime_manifest(bundle / "runtime-manifest.json")
-    for relative, expected in runtime["sha256"].items():
-        if relative == runtime["image"]:
-            continue
-        path = bundle / relative
-        require_file(path, executable=relative in runtime["host_tools"].values())
-        actual = digest(path)
-        if actual != expected:
-            fail(f"{relative} SHA256 mismatch: expected {expected}, got {actual}")
-    runtime = validate_runtime_identity(runtime)
-    event_module = load_module(bundle / EVENTS_HELPER_PATH, "fplinux_loader_events")
-    with event_module.record_events(
-        options.events,
-        target=runtime["target"],
-        profile=runtime["profile"],
-        build_type=runtime["build_type"],
-    ) as events:
-        handoff = run_bundle(bundle, runtime, options, events.emit)
-    if handoff is not None:
-        ssh, session = handoff
-        if not options.reconnect and not os.isatty(0):
-            print("No interactive terminal is attached; the loader is complete.", flush=True)
-            return
-        ssh.open_shell(session)
-        fail("SSH client returned without replacing the runner")
-
-
-def run_bundle(  # noqa: PLR0913 -- bundle, session actions, data and log destinations stay explicit.
-    bundle: Path,
-    runtime: dict[str, Any],
-    options: argparse.Namespace,
-    emit: Callable[[str], None],
-    *,
-    device_data: Path | None = None,
-    output: TextIO | None = None,
-    setup_host: bool = False,
-    session_root: Path | None = None,
-) -> tuple[ModuleType, dict[str, Any]] | None:
-    """Enter the verified runner and keep its observable stages in one stream."""
-    if not options.reconnect:
-        print(f"bundle build type: {runtime['build_type']}", flush=True)
-    image = bundle / runtime["image"]
-    require_file(image)
-    with image.open("rb") as stream:
-        header = stream.read(4)
-    if header != b"DHTB":
-        fail("RAM payload does not have a DHTB header")
-    host_preflight()
-    if options.reconnect:
-        if runtime["transport"] != "usb-ncm":
-            fail("--reconnect is unavailable when runtime transport is none")
-        ssh = load_module(bundle / SSH_HELPER_PATH, "ssh_transport")
-        ssh.bundle_identity(bundle, runtime)
-        device_identity = ssh.build_manifest_device_identity(bundle)
-        session = ssh.load_current_session(runtime["target"], runtime_root=session_root)
-        session = ssh.reacquire_bound_session(session)
-        ssh.require_device_identity(session, device_identity)
-        if options.exec_command is not None:
-            result = ssh.run_remote(session, options.exec_command)
-            if result.returncode:
-                raise SystemExit(result.returncode)
-            return None
-        if options.upload is not None:
-            ssh.upload(session, options.upload[0], options.upload[1])
-            return None
-        if options.pull is not None:
-            ssh.pull(session, options.pull[0], options.pull[1])
-            return None
-        return ssh, session
-
-    adapter = load_adapter(bundle / ADAPTER_PATH)
-    session = None
-    previous_handlers: dict[signal.Signals, Any] = {}
-
-    def stop_session(signum: int, _frame: FrameType | None) -> None:
-        raise SystemExit(128 + signum)
-
-    for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
-        previous_handlers[signum] = signal.signal(signum, stop_session)
-    try:
-        ssh = load_module(bundle / SSH_HELPER_PATH, "ssh_transport")
-        ssh.bundle_identity(bundle, runtime)
-        device_identity = ssh.build_manifest_device_identity(bundle)
-        session = ssh.prepare_session(
-            image,
-            runtime["personalization"],
-            runtime["target"],
-            runtime["usb"]["linux_gadget"],
-            runtime_root=session_root,
-        )
-        ready: dict[str, Any] | None = adapter.run(
-            bundle,
-            runtime,
-            session,
-            expected_device_identity=device_identity,
-            events=emit,
-            device_data=device_data,
-            output=output,
-            setup_host=setup_host,
-        )
-    finally:
-        if session is not None:
-            ssh.finish_session(session)
-        for signum, handler in previous_handlers.items():
-            signal.signal(signum, handler)
-    emit("complete")
-    return (ssh, ready) if ready is not None else None
-
-
-def reconnect_live_bundle(
-    bundle: Path, runtime: dict[str, Any], *, session_root: Path
-) -> tuple[ModuleType, dict[str, Any]] | None:
-    """Reuse a live authenticated phone; absence alone permits a fresh archive boot."""
-    host_preflight()
-    if runtime["transport"] != "usb-ncm":
-        fail("this archive does not support authenticated reconnect")
-    ssh = load_module(bundle / SSH_HELPER_PATH, "ssh_transport")
-    ssh.bundle_identity(bundle, runtime)
-    device_identity = ssh.build_manifest_device_identity(bundle)
-    session = ssh.load_live_session(runtime["target"], runtime_root=session_root)
-    if session is None:
-        return None
-    session = ssh.reacquire_bound_session(session)
-    ssh.require_device_identity(session, device_identity)
-    return ssh, session
-
-
-if __name__ == "__main__":
-    main()

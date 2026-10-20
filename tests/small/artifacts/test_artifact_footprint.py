@@ -158,6 +158,48 @@ class ArtifactFootprintTests:
         assert ("debug/rootfs.cpio") in (report["layers"]["host_debug_file_bytes"])
 
     @staticmethod
+    def test_raw_image_with_separate_initramfs_reports_ram_root_and_actual_artifact_paths(
+        tmp_path: Path,
+    ) -> None:
+        """An empty Kbuild initramfs source does not make a separately loaded RAM root a disk."""
+        fixture = FootprintFixture(tmp_path)
+        report = inspect_footprint(
+            fixture.bundle(
+                initramfs_delivery="external", kernel_image="Image", artifact_directory="symbols"
+            )
+        )
+
+        assert report["rootfs"]["source"] == "ram-squashfs-composition"
+        assert report["layers"]["initramfs_delivery"] == "external"
+        assert report["layers"]["kernel_image_name"] == "Image"
+        assert report["layers"]["kernel_image_bytes"] == 12
+        assert "kernel_zimage_bytes" not in report["layers"]
+        assert report["layers"]["embedded_initramfs"] is None
+        assert report["layers"]["external_initramfs"] == {
+            "cpio_bytes": len(fixture.initramfs),
+            "sha256": hashlib.sha256(fixture.initramfs).hexdigest(),
+        }
+        assert report["layers"]["ram_root"]["bytes"] == 120
+        assert "symbols/Image" in report["layers"]["host_debug_file_bytes"]
+
+    @staticmethod
+    def test_raw_image_delta_compares_kernel_bytes_without_calling_them_zimage(
+        tmp_path: Path,
+    ) -> None:
+        """A raw kernel report uses the actual Image name in the saved comparison."""
+        fixture = FootprintFixture(tmp_path)
+        before = inspect_footprint(
+            fixture.bundle(initramfs_delivery="external", kernel_image="Image")
+        )
+        after = {**before, "layers": {**before["layers"], "kernel_image_bytes": 20}}
+
+        delta = compare_footprints(before, after)
+
+        assert delta["kernel_image_name"] == "Image"
+        assert delta["kernel_image_byte_delta"] == 8
+        assert "kernel_zimage_byte_delta" not in delta
+
+    @staticmethod
     def test_changed_artifact_is_rejected_before_reporting_its_size(tmp_path: Path) -> None:
         """A stale or incomplete selected bundle cannot yield misleading measurements."""
         fixture = FootprintFixture(tmp_path)

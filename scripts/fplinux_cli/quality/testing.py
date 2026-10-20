@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 TEST_TIERS = {
     "small": 90,
-    "host_process": 180,
+    "host_process": 300,
     "host_tool": 240,
     "artifact": 300,
     "public_workflow": 90,
@@ -29,6 +29,7 @@ TEST_TIERS = {
 HOST_TEST_MODULES = (
     "tests/host_process/alpine/test_alpine_source_ownership.py",
     "tests/host_process/cache/test_image_tag.py",
+    "tests/host_process/cache/test_prune_rootfs_ownership.py",
 )
 
 
@@ -49,9 +50,19 @@ def test_name(value: str) -> str:
         nodes = identifiers.split("::") if separator else []
         if bracket:
             nodes[-1] += bracket + parameter
-        parts = path.split("/")
+        parts = path.removesuffix("/").split("/")
+        directory = (
+            not separator
+            and len(parts) >= 2
+            and parts[0] == "tests"
+            and parts[1] in TEST_TIERS
+            and all(part.replace("-", "_").isidentifier() for part in parts[2:])
+        )
+        if directory:
+            return "/".join(parts)
         if (
             len(parts) >= 3
+            and not path.endswith("/")
             and parts[0] == "tests"
             and parts[1] in TEST_TIERS
             and all(part.isidentifier() for part in parts[2:-1])
@@ -60,7 +71,7 @@ def test_name(value: str) -> str:
             and all(_valid_node_name(node) for node in nodes)
         ):
             return value
-        message = "use tests/<tier>/<module>.py[::<class>][::<method>[<parameter>]]"
+        message = "use tests/<tier>[/<directory>] or tests/<tier>/<module>.py[::<node>]"
         raise argparse.ArgumentTypeError(message)
     parts = value.split(".")
     if (
@@ -87,6 +98,11 @@ def _valid_node_name(value: str) -> bool:
 def _pytest_node_id(value: str, workspace: Path = Path()) -> str:
     """Resolve dotted selectors against the captured source workspace."""
     if "/" in value:
+        path = value.partition("::")[0]
+        if not path.endswith(".py"):
+            directory = (workspace / path).resolve()
+            if not directory.is_relative_to(workspace.resolve()) or not directory.is_dir():
+                fail(f"test directory not found in captured workspace: {path}")
         return value
     parts = value.split(".")
     for length in range(len(parts), 2, -1):
@@ -108,7 +124,10 @@ def add_test_arguments(parser: argparse.ArgumentParser) -> None:
         nargs="*",
         type=test_name,
         metavar="TEST",
-        help="dotted module, class or method, or pytest node ID; omit to discover all test tiers",
+        help=(
+            "test directory, dotted module, class or method, or pytest node ID; "
+            "omit to discover all test tiers"
+        ),
     )
     selection.add_argument("--tier", choices=TEST_TIERS, help="discover only this test tier")
     parser.add_argument(
@@ -137,7 +156,12 @@ def _pytest_command(
 
 
 def pytest_commands(
-    names: list[str], *, tier: str | None = None, verbose: bool = False, failfast: bool = False
+    names: list[str],
+    *,
+    tier: str | None = None,
+    verbose: bool = False,
+    failfast: bool = False,
+    workspace: Path = Path(),
 ) -> list[tuple[str, list[str], int]]:
     """Keep the existing per-tier discovery order and timeout policy."""
     cache_dir = Path(os.environ.get("FPLINUX_LOG_ROOT", ".cache")) / "pytest-cache"
@@ -148,7 +172,7 @@ def pytest_commands(
     if names:
         selected_tiers = {name.split("/" if "/" in name else ".")[1] for name in names}
         timeout = sum(TEST_TIERS[value] for value in selected_tiers)
-        nodes = [_pytest_node_id(name) for name in names]
+        nodes = [_pytest_node_id(name, workspace) for name in names]
         return [("selected", command(nodes), timeout)]
     tiers = (tier,) if tier is not None else tuple(TEST_TIERS)
     return [(name, command([f"tests/{name}"]), TEST_TIERS[name]) for name in tiers]
@@ -211,8 +235,14 @@ def run_test_workload(  # noqa: PLR0913 -- public selection and runtime inputs s
 
     selected = [_pytest_node_id(name, workspace) for name in names]
     host_modules = [module for module in HOST_TEST_MODULES if (workspace / module).is_file()]
+    selected_host_nodes = [
+        [node]
+        if node.partition("::")[0] in HOST_TEST_MODULES
+        else [module for module in host_modules if module.startswith(node + "/")]
+        for node in selected
+    ]
     needs_host = (
-        any(node.partition("::")[0] in HOST_TEST_MODULES for node in selected)
+        any(selected_host_nodes)
         if names
         else bool(host_modules) and tier in (None, "host_process")
     )
@@ -227,7 +257,9 @@ def run_test_workload(  # noqa: PLR0913 -- public selection and runtime inputs s
             host_python, host_environment = resources.enter_context(
                 host_pytest_environment(workspace, reporter)
             )
-        workloads = pytest_commands(names, tier=tier, verbose=verbose, failfast=failfast)
+        workloads = pytest_commands(
+            names, tier=tier, verbose=verbose, failfast=failfast, workspace=workspace
+        )
         for label, _command, timeout in workloads:
             with reporter.stage(label, passthrough=True, show_tail=False) as stage:
 
@@ -235,28 +267,47 @@ def run_test_workload(  # noqa: PLR0913 -- public selection and runtime inputs s
                     nodes: list[str],
                     *,
                     host: bool,
+                    log_name: str | None = None,
                     container_cache_dir: Path = Path("/logs") / label / "pytest-cache",
                 ) -> _PytestInvocation:
                     cache_dir = reporter.root / "pytest-cache" if host else container_cache_dir
                     command = _pytest_command(
                         nodes, verbose=verbose, failfast=failfast, cache_dir=cache_dir
                     )
-                    return _PytestInvocation("host" if host else "container", command)
+                    return _PytestInvocation("host" if host else "container", command, log_name)
 
                 if names:
-                    groups: list[tuple[Literal["container", "host"], list[str]]] = []
-                    for node in selected:
+                    groups: list[tuple[Literal["container", "host"], list[str], bool]] = []
+                    for node, host_nodes in zip(selected, selected_host_nodes, strict=True):
+                        directory = (workspace / node).is_dir()
+                        if directory:
+                            nodes = [node]
+                            for module in host_nodes:
+                                nodes.extend(("--ignore", module))
+                            groups.append(("container", nodes, True))
+                            if host_nodes:
+                                groups.append(("host", host_nodes, False))
+                            continue
                         runtime: Literal["container", "host"] = (
                             "host" if node.partition("::")[0] in HOST_TEST_MODULES else "container"
                         )
-                        if runtime == "container" and groups and groups[-1][0] == runtime:
+                        if (
+                            runtime == "container"
+                            and groups
+                            and groups[-1][0] == runtime
+                            and not groups[-1][2]
+                        ):
                             groups[-1][1].append(node)
                         else:
-                            groups.append((runtime, [node]))
+                            groups.append((runtime, [node], False))
                     invocations = []
-                    for index, (runtime, nodes) in enumerate(groups, start=1):
+                    for index, (runtime, nodes, directory) in enumerate(groups, start=1):
                         if runtime == "host":
                             invocations.append(invocation(nodes, host=True))
+                        elif directory:
+                            invocations.append(
+                                invocation(nodes, host=False, log_name=f"{label}-{index}")
+                            )
                         else:
                             command = [
                                 "python3",

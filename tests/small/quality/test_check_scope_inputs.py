@@ -24,6 +24,80 @@ FIXTURES = ROOT / "tests/fixtures/quality/check-scope"
 class CheckScopeTests:
     """Keep scope recipes bound to the inputs checked by their consumers."""
 
+    @pytest.mark.parametrize(
+        "changed_path",
+        ["scripts/tool.py", "tests/fixtures/input.bin", "alpine/aports/demo/app.c", "README.md"],
+    )
+    def test_tests_receipt_tracks_the_complete_captured_workspace(
+        self, tmp_path: Path, changed_path: str
+    ) -> None:
+        """The full test workload misses on captured source, fixture and mode edits."""
+        contents = {
+            "scripts/tool.py": b"value = 1\n",
+            "tests/fixtures/input.bin": b"\x00\xff",
+            "alpine/aports/demo/app.c": b"int value = 1;\n",
+            "README.md": b"# Project\n",
+        }
+
+        def recipe(inputs: dict[str, bytes], *, changed_mode: bool = False) -> CheckReceiptRecipe:
+            snapshot = WorkspaceSnapshot(
+                tuple(
+                    WorkspaceFile(
+                        path, data, 0o755 if changed_mode and path == changed_path else 0o644
+                    )
+                    for path, data in inputs.items()
+                ),
+                "a" * 64,
+            )
+            return check_scope_receipt_recipe(
+                "tests",
+                check_scope_closure_digest("tests", snapshot),
+                image_generation="b" * 64,
+                orchestration_recipe="c" * 64,
+            )
+
+        publish_success_receipt(tmp_path, recipe(contents))
+        assert receipt_matches(tmp_path, recipe(contents))
+        changed = {**contents, changed_path: contents[changed_path] + b"changed\n"}
+        assert not receipt_matches(tmp_path, recipe(changed))
+        assert not receipt_matches(tmp_path, recipe(contents, changed_mode=True))
+        assert not receipt_matches(tmp_path, recipe({**contents, "new-input": b"new\n"}))
+        removed = contents.copy()
+        del removed[changed_path]
+        assert not receipt_matches(tmp_path, recipe(removed))
+
+    def test_alpine_receipt_tracks_default_profile_without_other_profile_misses(
+        self, tmp_path: Path
+    ) -> None:
+        """Default target validation follows its profile while unrelated profiles stay reusable."""
+
+        def recipe(default: bytes, other: bytes) -> CheckReceiptRecipe:
+            snapshot = WorkspaceSnapshot(
+                (
+                    WorkspaceFile("profiles/default/profile.toml", default, 0o644),
+                    WorkspaceFile("profiles/other/profile.toml", other, 0o644),
+                    WorkspaceFile("alpine/abuild.conf", b"CFLAGS=-Os\n", 0o644),
+                ),
+                "a" * 64,
+            )
+            return check_scope_receipt_recipe(
+                "alpine",
+                check_scope_closure_digest("alpine", snapshot),
+                image_generation="b" * 64,
+                orchestration_recipe="c" * 64,
+            )
+
+        original = b"[rootfs]\npackages = []\n"
+        changed = b'[rootfs]\npackages = ["fplinux-invalid-profile-probe"]\n'
+        first = recipe(original, original)
+        publish_success_receipt(tmp_path, first)
+        assert receipt_matches(tmp_path, first)
+        assert receipt_matches(tmp_path, recipe(original, changed))
+        second = recipe(changed, original)
+        assert not receipt_matches(tmp_path, second)
+        publish_success_receipt(tmp_path, second)
+        assert receipt_matches(tmp_path, second)
+
     @pytest.mark.parametrize("owner", ["platforms/demo", "targets/demo"])
     def test_kernel_receipt_tracks_declared_overlay_contents_and_topology(
         self, tmp_path: Path, owner: str

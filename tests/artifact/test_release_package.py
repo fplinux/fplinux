@@ -8,6 +8,7 @@ import hashlib
 import io
 import json
 import sys
+import tarfile
 import zipfile
 from typing import TYPE_CHECKING
 from unittest import mock
@@ -33,6 +34,7 @@ from tests.small.cli.package_docs_fixtures import write_offline_export
 
 if TYPE_CHECKING:
     from pathlib import Path
+    from typing import Any
 
 
 class ReleaseArchiveInputs:
@@ -42,17 +44,17 @@ class ReleaseArchiveInputs:
         """Create a synthetic bundle, notices, offline export and checkout-only documents."""
         self.root = root
         self.documentation = write_offline_export(self.root)
-        self.event_helper = (common.ROOT / "common/loader_events.py").read_bytes()
+        self.event_helper = (common.ROOT / "scripts/fplinux_cli/runtime/events.py").read_bytes()
         self.cache = self.root / ".cache"
         self.target = "nokia-ta1618"
         self.snapshot = WorkspaceSnapshot((), "a" * 64)
         self.image_recipe = "b" * 64
-        self.target_config = {
+        self.target_config: dict[str, Any] = {
             "platform": "demo",
             "identity": {"brand": "ACME", "product": "Demo", "hardware_codes": ["D-1"]},
             "adapter": {"boot_instructions": "Hold the left soft key while connecting USB."},
             "linux": {"root": {"kind": "initramfs"}},
-            "rootfs": {"base_packages": [], "packages": [], "exclude_packages": []},
+            "rootfs": {"base_packages": [], "packages": []},
             "bundle": {"packages": []},
             "runtime": {
                 "assets": {"pinmap": "assets/pinmap.bin"},
@@ -64,11 +66,6 @@ class ReleaseArchiveInputs:
                 "image/ramboot.bin",
                 "assets/pinmap.bin",
                 "host/keyboard",
-                "runner/run.py",
-                "runner/loader_events.py",
-                "runner/identity.py",
-                "runner/ssh_transport.py",
-                "runner/platform_adapter.py",
                 "runtime-manifest.json",
                 "apks/demo.apk",
                 "assets.lock.toml",
@@ -77,11 +74,6 @@ class ReleaseArchiveInputs:
                 "image/ramboot.bin",
                 "assets/pinmap.bin",
                 "host/keyboard",
-                "runner/run.py",
-                "runner/loader_events.py",
-                "runner/identity.py",
-                "runner/ssh_transport.py",
-                "runner/platform_adapter.py",
                 "runtime-manifest.json",
             ],
             "documents": ["release/EXTRA.txt"],
@@ -136,32 +128,45 @@ class ReleaseArchiveInputs:
         apk: bytes,
         metadata: bytes,
         build_type: str = "release",
-        board_maps: dict[str, bytes] | None = None,
+        runtime_sources: dict[str, bytes] | None = None,
     ) -> None:
         """Publish one valid immutable generation with the requested APK bytes."""
         bundle = self.cache / "out" / self.target / "builds" / build_type / "bundles" / generation
         payloads = {
+            "60-fplinux.rules": b"SUBSYSTEM==usb\n",
             "image/ramboot.bin": b"ramboot\n",
             "device-data.cpio": b"synthetic phone capsule\n",
             "assets/pinmap.bin": b"pinmap\n",
             "host/keyboard": b"keyboard\n",
-            "runner/run.py": b"#!/usr/bin/env python3\n",
-            "runner/loader_events.py": self.event_helper,
-            "runner/identity.py": b"identity helper\n",
-            "runner/ssh_transport.py": b"ssh helper\n",
-            "runner/platform_adapter.py": b"adapter\n",
-            "runtime-manifest.json": b"{}\n",
+            "fplinux.py": b"#!/usr/bin/env python3\n",
+            "scripts/fplinux_cli/runtime/events.py": self.event_helper,
+            "scripts/fplinux_cli/manifests/identity.py": b"identity helper\n",
+            "scripts/fplinux_cli/runtime/ssh_transport.py": b"ssh helper\n",
+            "platforms/demo/host/adapter.py": b"adapter\n",
             "apks/demo.apk": apk,
             "assets.lock.toml": metadata,
-            **(board_maps or {}),
+            **(runtime_sources or {}),
         }
+        runtime = {
+            "nand": None,
+            "device_data": None,
+            "host_tools": {"keyboard": "host/keyboard"},
+            "sha256": {
+                relative: hashlib.sha256(contents).hexdigest()
+                for relative, contents in payloads.items()
+                if not relative.startswith("apks/")
+                and relative not in {"assets.lock.toml", "device-data.cpio"}
+            },
+        }
+        payloads["runtime-manifest.json"] = canonical_json_bytes(runtime)
         for relative, data in payloads.items():
             path = bundle / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
-            path.chmod(0o755 if relative in {"host/keyboard", "runner/run.py"} else 0o644)
+            path.chmod(0o755 if relative in {"host/keyboard", "fplinux.py"} else 0o644)
         manifest = {
             "rootfs_receipt": {"recipe": "d" * 64, "sha256": "e" * 64},
+            "kernel_artifacts": {},
             "boot_artifacts": {"required": []},
             "container_image_recipe": self.image_recipe,
             "container_image_content": "c" * 64,
@@ -195,6 +200,35 @@ class ReleaseArchiveInputs:
         if set(values) != {"Archive SHA256", "Phone-test payload SHA256"}:
             pytest.fail("package output omitted an archive or phone-test payload digest")
         return values["Archive SHA256"], values["Phone-test payload SHA256"]
+
+    def prepare_loader_license_sources(self) -> None:
+        """Supply exact admitted source archives without replacing notice collection."""
+        digests = {}
+        for name, members in {
+            "board": {
+                "board-release/Licenses/README": b"original board license explanation\n",
+                "board-release/Licenses/gpl-2.0.txt": b"original board GPL terms\n",
+            },
+            "monitor": {"monitor-release/license.md": b"original secure monitor license\n"},
+        }.items():
+            path = self.cache / "downloads/loaders" / f"{name}.tar.gz"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with tarfile.open(path, "w:gz") as archive:
+                for member_name, contents in members.items():
+                    member = tarfile.TarInfo(member_name)
+                    member.size = len(contents)
+                    archive.addfile(member, io.BytesIO(contents))
+            digests[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+        template = (
+            ROOT / "tests/artifact/fixtures/release-package/loader-sources.lock.toml.in"
+        ).read_text(encoding="utf-8")
+        (self.root / "sources.lock.toml").write_text(
+            template.format(board_sha256=digests["board"], monitor_sha256=digests["monitor"]),
+            encoding="utf-8",
+        )
+        self.target_config["loader"] = {
+            "build": {"fdl1_source": "first", "fdl2_source": "board", "sml_source": "monitor"}
+        }
 
     def record_phone_tested(self, payload: str) -> None:
         """Record one phone-tested payload in the release verification lock."""
@@ -236,10 +270,158 @@ def release_inputs(tmp_path: Path) -> ReleaseArchiveInputs:
 class ReleaseArchiveArtifactTests:
     """Exercise real archive creation with host identity inputs isolated."""
 
-    def test_package_carries_frozen_board_maps_and_qualifies_their_bytes(
+    @pytest.mark.parametrize("platform", ["ums9117", "sc9820e"])
+    def test_ordinary_archive_accepts_current_normal_or_clean_build_but_rejects_changed_sources(
+        self, release_inputs: ReleaseArchiveInputs, platform: str
+    ) -> None:
+        """Real identity admission accepts either build policy for the unchanged sources."""
+        inputs = release_inputs
+        inputs.target_config["platform"] = platform
+        if platform == "sc9820e":
+            inputs.prepare_loader_license_sources()
+        sources_changed = False
+
+        def package_snapshot(
+            *_arguments: object, include_device_data: bool = True, **_options: object
+        ) -> WorkspaceSnapshot:
+            """Replace capture while keeping normal, clean and changed sources distinct."""
+            if sources_changed:
+                return WorkspaceSnapshot((), ("7" if include_device_data else "8") * 64)
+            return WorkspaceSnapshot((), ("a" if include_device_data else "9") * 64)
+
+        with contextlib.ExitStack() as stack:
+            for patch in inputs.package_patches():
+                stack.enter_context(patch)
+            stack.enter_context(
+                mock.patch.object(workspaces, "target_workspace_snapshot", package_snapshot)
+            )
+            inputs.package(candidate=True)
+            inputs.snapshot = WorkspaceSnapshot((), "9" * 64)
+            inputs.publish_bundle(
+                "d" * 64,
+                apk=b"application version one\n",
+                metadata=b"asset provenance version one\n",
+            )
+            inputs.package(candidate=True)
+            sources_changed = True
+            with pytest.raises(SystemExit, match="build output is stale"):
+                inputs.package(candidate=True)
+
+        workspace_digests: set[str] = set()
+        archives = list((inputs.cache / "out/candidates").glob("*.zip"))
+        assert len(archives) == 2
+        for archive_path in archives:
+            with zipfile.ZipFile(archive_path) as archive:
+                root = archive.namelist()[0].partition("/")[0]
+                manifest = json.loads(archive.read(f"{root}/build-manifest.json"))
+                workspace_digests.add(manifest["workspace_digest"])
+                assert archive.read(f"{root}/image/ramboot.bin") == b"ramboot\n"
+        assert workspace_digests == {"a" * 64, "9" * 64}
+
+    @pytest.mark.parametrize("platform", ["ums9117", "sc9820e"])
+    def test_ordinary_archive_rejects_an_owner_build_after_personal_device_data_changes(
+        self, release_inputs: ReleaseArchiveInputs, platform: str
+    ) -> None:
+        """A clean snapshot cannot admit a build containing different personal inputs."""
+        inputs = release_inputs
+        inputs.target_config["platform"] = platform
+        if platform == "sc9820e":
+            inputs.prepare_loader_license_sources()
+
+        def package_snapshot(
+            *_arguments: object, include_device_data: bool = True, **_options: object
+        ) -> WorkspaceSnapshot:
+            """Retain the source-only recipe while changing the personal-data recipe."""
+            return WorkspaceSnapshot((), ("6" if include_device_data else "9") * 64)
+
+        with contextlib.ExitStack() as stack:
+            for patch in inputs.package_patches():
+                stack.enter_context(patch)
+            stack.enter_context(
+                mock.patch.object(workspaces, "target_workspace_snapshot", package_snapshot)
+            )
+            with pytest.raises(SystemExit, match="build output is stale"):
+                inputs.package(candidate=True)
+        assert not (inputs.cache / "out/candidates").exists()
+
+    def test_sc9820e_linux_archive_delivers_built_loaders_without_private_inputs(
         self, release_inputs: ReleaseArchiveInputs
     ) -> None:
-        """Prepared maps survive standalone packaging and change its phone-test digest."""
+        """An ordinary archive retains every admitted stage and needs no loader import."""
+        release_inputs.target_config["platform"] = "sc9820e"
+        release_inputs.prepare_loader_license_sources()
+        bundle = (
+            release_inputs.cache
+            / "out"
+            / release_inputs.target
+            / "builds/release/bundles"
+            / ("c" * 64)
+        )
+        stages = {
+            "assets/fdl1.bin": b"built first stage\n",
+            "assets/fdl2.bin": b"built board initializer\n",
+            "assets/sml.bin": b"built secure monitor\n",
+        }
+        release_inputs.target_config["runtime"]["assets"] = {
+            "fdl1": "assets/fdl1.bin",
+            "fdl2": "assets/fdl2.bin",
+            "sml": "assets/sml.bin",
+        }
+        for relative, contents in stages.items():
+            stage = bundle / relative
+            stage.write_bytes(contents)
+            stage.chmod(0o644)
+        for field in ("bundle_files", "runtime_files"):
+            release_inputs.release_manifest[field] = [
+                *release_inputs.release_manifest[field],
+                *stages,
+            ]
+        manifest_path = bundle / BUILD_MANIFEST_NAME
+        manifest = json.loads(manifest_path.read_bytes())
+        manifest["files"].update({relative: file_record(bundle / relative) for relative in stages})
+        manifest_path.write_bytes(canonical_json_bytes(manifest))
+        publish_current_bundle(release_inputs.cache / "out", release_inputs.target, bundle)
+        with contextlib.ExitStack() as stack:
+            for patch in release_inputs.package_patches():
+                stack.enter_context(patch)
+            release_inputs.package(candidate=True)
+
+        archive_path = next((release_inputs.cache / "out/candidates").glob("*.zip"))
+        with zipfile.ZipFile(archive_path) as archive:
+            root = archive.namelist()[0].partition("/")[0]
+            payloads = {
+                name.removeprefix(f"{root}/"): archive.read(name) for name in archive.namelist()
+            }
+            assert {relative: payloads[relative] for relative in stages} == {
+                "assets/fdl1.bin": b"built first stage\n",
+                "assets/fdl2.bin": b"built board initializer\n",
+                "assets/sml.bin": b"built secure monitor\n",
+            }
+            assert payloads["device-data.cpio"] == b"synthetic phone capsule\n"
+            assert (
+                payloads["licenses/loaders/fdl2/README"] == b"original board license explanation\n"
+            )
+            assert payloads["licenses/loaders/fdl2/gpl-2.0.txt"] == b"original board GPL terms\n"
+            assert (
+                payloads["licenses/loaders/sml/license.md"] == b"original secure monitor license\n"
+            )
+            assert payloads["host/keyboard"] == b"keyboard\n"
+            assert payloads["fplinux.py"] == b"#!/usr/bin/env python3\n"
+            assert "python3.14 -I fplinux.py run\n" in payloads["README.txt"].decode()
+            assert "--loader-inputs" not in payloads["README.txt"].decode()
+            assert "python3.14 -I fplinux.py run --reconnect" in payloads["README.txt"].decode()
+            assert "Run.py" not in payloads
+            assert not any(name.startswith(".cache/") for name in payloads)
+            assert all(
+                archive.getinfo(f"{root}/{relative}").external_attr >> 16 == 0o100644
+                for relative in stages
+            )
+            assert archive.getinfo(f"{root}/fplinux.py").external_attr >> 16 == 0o100755
+
+    def test_package_carries_the_bundle_runtime_and_qualifies_its_bytes(
+        self, release_inputs: ReleaseArchiveInputs
+    ) -> None:
+        """Runtime source bytes come from the selected bundle and affect phone qualification."""
         with contextlib.ExitStack() as stack:
             for patch in release_inputs.package_patches():
                 stack.enter_context(patch)
@@ -248,7 +430,7 @@ class ReleaseArchiveArtifactTests:
                 "d" * 64,
                 apk=b"application version one\n",
                 metadata=b"asset provenance version one\n",
-                board_maps={"pinmap.bin": b"prepared pins\n", "keymap.bin": b"prepared keys\n"},
+                runtime_sources={"scripts/fplinux_cli/runtime/workflow.py": b"frozen workflow\n"},
             )
             _archive_digest, second_digest = release_inputs.package(candidate=True)
 
@@ -259,9 +441,10 @@ class ReleaseArchiveArtifactTests:
                 payloads.append(
                     {name.split("/", 1)[1]: archive.read(name) for name in archive.namelist()}
                 )
-        mapped = next(payload for payload in payloads if "pinmap.bin" in payload)
-        assert mapped["pinmap.bin"] == b"prepared pins\n"
-        assert mapped["keymap.bin"] == b"prepared keys\n"
+        runtime = next(
+            payload for payload in payloads if "scripts/fplinux_cli/runtime/workflow.py" in payload
+        )
+        assert runtime["scripts/fplinux_cli/runtime/workflow.py"] == b"frozen workflow\n"
 
     def test_debug_package_requires_its_own_build_and_names_the_selected_type(
         self, release_inputs: ReleaseArchiveInputs
@@ -386,11 +569,10 @@ class ReleaseArchiveArtifactTests:
             "device-data.cpio": b"synthetic phone capsule\n",
             "assets/pinmap.bin": b"pinmap\n",
             "host/keyboard": b"keyboard\n",
-            "runner/run.py": b"#!/usr/bin/env python3\n",
-            "runner/identity.py": b"identity helper\n",
-            "runner/ssh_transport.py": b"ssh helper\n",
-            "runner/platform_adapter.py": b"adapter\n",
-            "runtime-manifest.json": b"{}\n",
+            "fplinux.py": b"#!/usr/bin/env python3\n",
+            "scripts/fplinux_cli/manifests/identity.py": b"identity helper\n",
+            "scripts/fplinux_cli/runtime/ssh_transport.py": b"ssh helper\n",
+            "platforms/demo/host/adapter.py": b"adapter\n",
             "apks/demo.apk": b"application version one\n",
             "assets.lock.toml": b"asset provenance version one\n",
             **release_inputs.documentation,
@@ -399,18 +581,22 @@ class ReleaseArchiveArtifactTests:
             assert (payloads[relative]) == (expected)
         assert payloads["README.txt"].startswith(b"FPLinux for ACME Demo (D-1)\n")
         assert b"unmount all data-card filesystems" in payloads["README.txt"]
-        assert payloads["runner/loader_events.py"] == release_inputs.event_helper
+        assert payloads["scripts/fplinux_cli/runtime/events.py"] == release_inputs.event_helper
+        runtime = json.loads(payloads["runtime-manifest.json"])
+        assert all(
+            hashlib.sha256(payloads[name]).hexdigest() == digest
+            for name, digest in runtime["sha256"].items()
+        )
         assert set(payloads) == {
             *expected_files,
-            "runner/loader_events.py",
+            "scripts/fplinux_cli/runtime/events.py",
+            "runtime-manifest.json",
             "build-manifest.json",
             "SHA256SUMS",
             "README.txt",
         }
         for relative, mode in modes.items():
-            expected_mode = (
-                0o100755 if relative in {"host/keyboard", "runner/run.py"} else 0o100644
-            )
+            expected_mode = 0o100755 if relative in {"host/keyboard", "fplinux.py"} else 0o100644
             assert mode == expected_mode
 
         checksums = {
@@ -425,28 +611,37 @@ class ReleaseArchiveArtifactTests:
     def test_archived_loader_events_work_without_the_source_checkout(
         self, release_inputs: ReleaseArchiveInputs
     ) -> None:
-        """An isolated interpreter writes a flushed record with only the archived helper."""
+        """An isolated interpreter imports the archived package and writes a flushed record."""
+        release_inputs.publish_bundle(
+            "d" * 64,
+            apk=b"application version one\n",
+            metadata=b"asset provenance version one\n",
+            runtime_sources={
+                relative: (ROOT / relative).read_bytes()
+                for relative in (
+                    "scripts/fplinux_cli/__init__.py",
+                    "scripts/fplinux_cli/common.py",
+                    "scripts/fplinux_cli/runtime/__init__.py",
+                )
+            },
+        )
         with contextlib.ExitStack() as stack:
             for patch in release_inputs.package_patches():
                 stack.enter_context(patch)
             release_inputs.package(candidate=True)
         archive_path = next((release_inputs.cache / "out/candidates").glob("*.zip"))
-        with zipfile.ZipFile(archive_path) as archive:
-            helper_name = next(
-                name for name in archive.namelist() if name.endswith("/runner/loader_events.py")
-            )
-            helper_bytes = archive.read(helper_name)
         extracted = release_inputs.root / "standalone"
         extracted.mkdir()
-        helper = extracted / "loader_events.py"
-        helper.write_bytes(helper_bytes)
+        with zipfile.ZipFile(archive_path) as archive:
+            archive.extractall(extracted)  # noqa: S202 -- test-owned ZIP from controlled inputs.
+        archive_root = next(extracted.iterdir())
         # -I and an empty environment keep the checkout and PYTHONPATH off sys.path.
         result = run_process(
             [
                 sys.executable,
                 "-I",
                 str(ROOT / "tests/artifact/fixtures/release-package/archived_events_consumer.py"),
-                str(helper),
+                str(archive_root),
                 str(extracted / "events.jsonl"),
             ],
             name="archived loader events",
@@ -511,6 +706,7 @@ class ReleaseArchiveArtifactTests:
             path.chmod(0o644)
         manifest = {
             "rootfs_receipt": {"recipe": "d" * 64, "sha256": "e" * 64},
+            "kernel_artifacts": {},
             "boot_artifacts": {
                 "required": list(required),
                 "runnable": True,

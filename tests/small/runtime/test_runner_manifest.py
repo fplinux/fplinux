@@ -3,37 +3,18 @@
 
 from __future__ import annotations
 
-import hashlib
-import importlib.util
 import json
 import sys
-from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any
 from unittest import mock
 
 import pytest
+from fplinux_cli.runtime import bundle as bundle_runtime
 
-from common import loader_events
-from tests import ROOT
 from tests.fixtures.runtime_manifest import runtime_manifest
 
-if TYPE_CHECKING:
-    from types import ModuleType
-
-
-def load_runner() -> ModuleType:
-    """Load the standalone runner as a normal Python module."""
-    path = ROOT / "common/run.py"
-    spec = importlib.util.spec_from_file_location("fplinux_ram_runner", path)
-    if spec is None or spec.loader is None:
-        raise AssertionError(f"unable to load RAM runner: {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-RUNNER = load_runner()
+RUNNER = bundle_runtime
 
 
 class BundleReadErrorTests:
@@ -57,7 +38,7 @@ class PythonRuntimeTests:
 
     def test_accepts_python_314(self) -> None:
         """Python 3.14 satisfies the standalone preflight."""
-        with mock.patch.object(RUNNER.sys, "version_info", mock.Mock(major=3, minor=14)):
+        with mock.patch.object(sys, "version_info", mock.Mock(major=3, minor=14)):
             RUNNER.host_preflight()
 
     @pytest.mark.parametrize(
@@ -68,7 +49,7 @@ class PythonRuntimeTests:
         """Older and unsupported newer interpreters fail before phone access."""
         with (
             mock.patch.object(
-                RUNNER.sys,
+                sys,
                 "version_info",
                 mock.Mock(major=major, minor=minor),
             ),
@@ -88,8 +69,8 @@ def runtime_manifest_path(tmp_path: Path) -> Path:
 def load_manifest(runtime_manifest_path: Path, manifest: dict[str, Any]) -> dict[str, Any]:
     """Load one manifest through the shipped consumer."""
     runtime_manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    runtime = cast("dict[str, Any]", RUNNER.load_runtime_manifest(runtime_manifest_path))
-    return cast("dict[str, Any]", RUNNER.validate_runtime_identity(runtime))
+    runtime = RUNNER.load_runtime_manifest(runtime_manifest_path)
+    return RUNNER.validate_runtime_identity(runtime)
 
 
 class RuntimeManifestTests:
@@ -141,16 +122,15 @@ class RuntimeManifestTests:
 
         assert isinstance(loaded["identity"], dict)
 
-    def test_accepts_an_explicit_no_transport_handoff_contract(
+    def test_rejects_a_handoff_without_authenticated_usb_transport(
         self, runtime_manifest_path: Path
     ) -> None:
-        """A host-only bundle declares that it will not create USB-NCM transport."""
+        """Every delivered phone runtime requires its authenticated USB connection."""
         manifest = runtime_manifest()
         manifest["transport"] = "none"
 
-        loaded = load_manifest(runtime_manifest_path, manifest)
-
-        assert (loaded["transport"]) == ("none")
+        with pytest.raises(SystemExit, match="runtime transport"):
+            load_manifest(runtime_manifest_path, manifest)
 
     def test_accepts_identity_without_unverified_codes_or_aliases(
         self, runtime_manifest_path: Path
@@ -181,7 +161,7 @@ class RuntimeManifestTests:
         manifest = runtime_manifest()
         manifest["transport"] = "serial"
 
-        with pytest.raises(SystemExit, match="runtime transport must be one of"):
+        with pytest.raises(SystemExit, match="runtime transport must be usb-ncm"):
             load_manifest(runtime_manifest_path, manifest)
 
     def test_rejects_a_runtime_manifest_missing_required_fields(
@@ -285,8 +265,8 @@ class RuntimeManifestTests:
     @pytest.mark.parametrize(
         "helper",
         [
-            pytest.param("runner/ssh_transport.py", id="ssh-transport"),
-            pytest.param("runner/identity.py", id="identity"),
+            pytest.param("scripts/fplinux_cli/runtime/ssh_transport.py", id="ssh-transport"),
+            pytest.param("scripts/fplinux_cli/manifests/identity.py", id="identity"),
         ],
     )
     def test_rejects_a_runtime_without_a_mandatory_runner_helper_hash(
@@ -297,212 +277,6 @@ class RuntimeManifestTests:
         del manifest["sha256"][helper]
 
         with (
-            pytest.raises(SystemExit, match="runtime hashes must contain exactly"),
+            pytest.raises(SystemExit, match="runtime hashes do not include"),
         ):
             load_manifest(runtime_manifest_path, manifest)
-
-
-@dataclass(frozen=True)
-class RunnerBundle:
-    """A regular bundle and the runner path used by its entry point."""
-
-    bundle: Path
-    runner: Path
-
-
-@pytest.fixture
-def no_transport_bundle(tmp_path: Path) -> RunnerBundle:
-    """Build one regular hashed bundle that has no USB-NCM transport."""
-    bundle = tmp_path / "bundle"
-    runner = bundle / "runner/run.py"
-    manifest = runtime_manifest()
-    manifest["transport"] = "none"
-    payloads = {
-        "image/ramboot.bin": b"DHTB RAM image\n",
-        "runner/identity.py": (ROOT / "scripts/fplinux_cli/manifests/identity.py").read_bytes(),
-        "runner/platform_adapter.py": b"adapter\n",
-        "runner/ssh_transport.py": b"unused but hashed helper\n",
-        "runner/loader_events.py": (ROOT / "common/loader_events.py").read_bytes(),
-        "assets/fdl1.bin": b"fdl1\n",
-        "host/loader": b"loader\n",
-    }
-    for relative, data in payloads.items():
-        path = bundle / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-        path.chmod(0o755 if relative == "host/loader" else 0o644)
-        manifest["sha256"][relative] = hashlib.sha256(data).hexdigest()
-    runner.parent.mkdir(parents=True, exist_ok=True)
-    runner.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
-    runner.chmod(0o755)
-    (bundle / "runtime-manifest.json").write_text(
-        json.dumps(manifest),
-        encoding="utf-8",
-    )
-
-    return RunnerBundle(bundle=bundle, runner=runner)
-
-
-class NoTransportRunnerTests:
-    """Exercise the shipped runner's no-transport handoff boundary."""
-
-    def test_none_transport_hands_session_to_adapter_without_ssh_handoff(
-        self, no_transport_bundle: RunnerBundle
-    ) -> None:
-        """A host-only run passes its session to the adapter and finishes it without a shell."""
-        adapter = mock.Mock()
-        adapter.run.return_value = None
-        session = {"image": str(no_transport_bundle.bundle / "image/ramboot.bin")}
-        ssh = mock.Mock()
-        ssh.build_manifest_device_identity.return_value = "e" * 64
-        ssh.prepare_session.return_value = session
-        with (
-            mock.patch.object(RUNNER, "__file__", str(no_transport_bundle.runner)),
-            mock.patch.object(RUNNER, "_identity_module", None),
-            mock.patch.object(RUNNER, "host_preflight"),
-            mock.patch.object(RUNNER, "load_adapter", return_value=adapter),
-            mock.patch.object(
-                RUNNER,
-                "load_module",
-                side_effect=lambda _path, name: (
-                    loader_events if name == "fplinux_loader_events" else ssh
-                ),
-            ),
-            mock.patch.object(sys, "argv", [str(no_transport_bundle.runner)]),
-        ):
-            RUNNER.main()
-
-        runtime = adapter.run.call_args.args[1]
-        assert (runtime["transport"]) == ("none")
-        assert (adapter.run.call_args.args[2]) is (session)
-        assert (adapter.run.call_args.kwargs["expected_device_identity"]) == ("e" * 64)
-        ssh.prepare_session.assert_called_once()
-        ssh.wait_for_bound_session.assert_not_called()
-        ssh.open_shell.assert_not_called()
-        ssh.finish_session.assert_called_once_with(session)
-
-    def test_standalone_reconnect_checks_the_running_device_identity(
-        self, no_transport_bundle: RunnerBundle
-    ) -> None:
-        """Reconnect through the bundle manifest's kernel identity, not its generation."""
-        runtime_path = no_transport_bundle.bundle / "runtime-manifest.json"
-        manifest = json.loads(runtime_path.read_text(encoding="utf-8"))
-        manifest["transport"] = "usb-ncm"
-        runtime_path.write_text(json.dumps(manifest), encoding="utf-8")
-        session: dict[str, str] = {}
-        ready = {**session, "interface": "usb0"}
-        result = mock.Mock(returncode=0)
-        ssh = mock.Mock()
-        ssh.build_manifest_device_identity.return_value = "e" * 64
-        ssh.load_current_session.return_value = session
-        ssh.reacquire_bound_session.return_value = ready
-        ssh.run_remote.return_value = result
-
-        with (
-            mock.patch.object(RUNNER, "__file__", str(no_transport_bundle.runner)),
-            mock.patch.object(RUNNER, "_identity_module", None),
-            mock.patch.object(RUNNER, "host_preflight"),
-            mock.patch.object(
-                RUNNER,
-                "load_module",
-                side_effect=lambda _path, name: (
-                    loader_events if name == "fplinux_loader_events" else ssh
-                ),
-            ),
-            mock.patch.object(
-                sys,
-                "argv",
-                [str(no_transport_bundle.runner), "--reconnect", "--exec", "true"],
-            ),
-        ):
-            RUNNER.main()
-
-        ssh.require_device_identity.assert_called_once_with(ready, "e" * 64)
-        ssh.run_remote.assert_called_once_with(ready, "true")
-        # Only a fresh run sets the phone clock; reconnecting leaves it running.
-        ssh.sync_clock.assert_not_called()
-
-    def test_standalone_reconnect_rejects_another_device_before_remote_action(
-        self, no_transport_bundle: RunnerBundle
-    ) -> None:
-        """A mismatched kernel identity prevents the requested standalone command."""
-        runtime_path = no_transport_bundle.bundle / "runtime-manifest.json"
-        manifest = json.loads(runtime_path.read_text(encoding="utf-8"))
-        manifest["transport"] = "usb-ncm"
-        runtime_path.write_text(json.dumps(manifest), encoding="utf-8")
-        session: dict[str, str] = {}
-        ready = {**session, "interface": "usb0"}
-        ssh = mock.Mock()
-        ssh.build_manifest_device_identity.return_value = "e" * 64
-        ssh.load_current_session.return_value = session
-        ssh.reacquire_bound_session.return_value = ready
-        ssh.require_device_identity.side_effect = SystemExit(
-            "fplinux ssh: current SSH session exposes a different kernel identity"
-        )
-
-        with (
-            mock.patch.object(RUNNER, "__file__", str(no_transport_bundle.runner)),
-            mock.patch.object(RUNNER, "_identity_module", None),
-            mock.patch.object(RUNNER, "host_preflight"),
-            mock.patch.object(
-                RUNNER,
-                "load_module",
-                side_effect=lambda _path, name: (
-                    loader_events if name == "fplinux_loader_events" else ssh
-                ),
-            ),
-            mock.patch.object(
-                sys,
-                "argv",
-                [
-                    str(no_transport_bundle.runner),
-                    "--reconnect",
-                    "--exec",
-                    "touch /tmp/should-not-run",
-                ],
-            ),
-            pytest.raises(SystemExit, match="different kernel identity"),
-        ):
-            RUNNER.main()
-
-        ssh.require_device_identity.assert_called_once_with(ready, "e" * 64)
-        ssh.run_remote.assert_not_called()
-
-    def test_standalone_reconnect_rejects_unverified_bundle_contents_first(
-        self, no_transport_bundle: RunnerBundle
-    ) -> None:
-        """A bundle that fails its content check never reaches the phone session."""
-        runtime_path = no_transport_bundle.bundle / "runtime-manifest.json"
-        manifest = json.loads(runtime_path.read_text(encoding="utf-8"))
-        manifest["transport"] = "usb-ncm"
-        runtime_path.write_text(json.dumps(manifest), encoding="utf-8")
-        ssh = mock.Mock()
-        ssh.bundle_identity.side_effect = SystemExit("fplinux: runtime image changed")
-
-        with (
-            mock.patch.object(RUNNER, "__file__", str(no_transport_bundle.runner)),
-            mock.patch.object(RUNNER, "_identity_module", None),
-            mock.patch.object(RUNNER, "host_preflight"),
-            mock.patch.object(
-                RUNNER,
-                "load_module",
-                side_effect=lambda _path, name: (
-                    loader_events if name == "fplinux_loader_events" else ssh
-                ),
-            ),
-            mock.patch.object(
-                sys,
-                "argv",
-                [
-                    str(no_transport_bundle.runner),
-                    "--reconnect",
-                    "--exec",
-                    "touch /tmp/should-not-run",
-                ],
-            ),
-            pytest.raises(SystemExit, match="runtime image changed"),
-        ):
-            RUNNER.main()
-
-        ssh.load_current_session.assert_not_called()
-        ssh.run_remote.assert_not_called()

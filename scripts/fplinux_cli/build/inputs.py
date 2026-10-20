@@ -34,6 +34,19 @@ _BOOTSTRAP_IMPLEMENTATION_SOURCES = (
     "scripts/fplinux_cli/manifests/identity.py",
     "scripts/fplinux_cli/manifests/display.py",
 )
+_SC9820E_BOOTSTRAP_IMPLEMENTATION_SOURCES = (
+    "scripts/fplinux_cli/common.py",
+    "scripts/fplinux_cli/templates.py",
+    "scripts/fplinux_cli/build/environment.py",
+    "scripts/fplinux_cli/build/inputs.py",
+    "scripts/fplinux_cli/build/process.py",
+    "scripts/fplinux_cli/build/device_tree.py",
+    "scripts/fplinux_cli/build/bootstrap/recipe.py",
+    "scripts/fplinux_cli/build/bootstrap/stage.py",
+    "scripts/fplinux_cli/build/bootstrap/result.py",
+    "scripts/fplinux_cli/build/bootstrap/sc9820e.py",
+    "scripts/fplinux_cli/build/bootstrap/verify.py",
+)
 _KERNEL_IMPLEMENTATION_SOURCES = (
     *_CORE_IMPLEMENTATION_SOURCES,
     "scripts/fplinux_cli/build/display.py",
@@ -62,6 +75,7 @@ _BUILD_STAGE_SOURCES = (
     "scripts/fplinux_cli/build/host_tools/__init__.py",
     "scripts/fplinux_cli/build/host_tools/host.py",
     "scripts/fplinux_cli/build/publish.py",
+    "scripts/fplinux_cli/build/runtime.py",
     "scripts/fplinux_cli/build/bootstrap/__init__.py",
     "scripts/fplinux_cli/build/bootstrap/verify.py",
     "scripts/fplinux_cli/build/kernel/__init__.py",
@@ -118,12 +132,14 @@ def selected_profile(target_config: dict[str, Any]) -> str | None:
     return profile
 
 
-def bootstrap_implementation_sources() -> list[tuple[str, Path]]:
+def bootstrap_implementation_sources(backend: str = "ums9117") -> list[tuple[str, Path]]:
     """Capture the operations that produce the selected bootstrap bytes."""
-    return [
-        (relative, require_file(root_source(relative)))
-        for relative in _BOOTSTRAP_IMPLEMENTATION_SOURCES
-    ]
+    sources = (
+        _SC9820E_BOOTSTRAP_IMPLEMENTATION_SOURCES
+        if backend == "sc9820e"
+        else _BOOTSTRAP_IMPLEMENTATION_SOURCES
+    )
+    return [(relative, require_file(root_source(relative))) for relative in sources]
 
 
 def kernel_implementation_sources() -> list[tuple[str, Path]]:
@@ -137,10 +153,15 @@ def kernel_implementation_sources() -> list[tuple[str, Path]]:
 def selected_build_sources(target_config: dict[str, Any]) -> tuple[str, ...]:
     """Deliver the current build stages and only the selected storage backends."""
     sources = {
-        *_BOOTSTRAP_IMPLEMENTATION_SOURCES,
         *_KERNEL_IMPLEMENTATION_SOURCES,
         *_BUILD_STAGE_SOURCES,
+        "scripts/fplinux_cli/build/bootstrap/result.py",
     }
+    if target_config["bootstrap"].get("backend") == "sc9820e":
+        sources.update(_SC9820E_BOOTSTRAP_IMPLEMENTATION_SOURCES)
+        sources.add("scripts/fplinux_cli/build/loaders.py")
+    else:
+        sources.update(_BOOTSTRAP_IMPLEMENTATION_SOURCES)
     if target_config["uboot"]["kind"] == "full":
         sources.add("scripts/fplinux_cli/build/storage/uboot.py")
     if target_config["image"]["kind"] == "ext4-root":
@@ -148,11 +169,10 @@ def selected_build_sources(target_config: dict[str, Any]) -> tuple[str, ...]:
             (
                 "scripts/fplinux_cli/build/storage/ext4.py",
                 "scripts/fplinux_cli/build/storage/mke2fs.conf",
+                "scripts/fplinux_cli/build/storage/sd.py",
+                "scripts/fplinux_cli/build/storage/genimage.cfg.in",
             )
         )
-        if target_config["fit"]["kind"] == "sha256":
-            sources.add("scripts/fplinux_cli/build/storage/sd.py")
-            sources.add("scripts/fplinux_cli/build/storage/genimage.cfg.in")
     if target_config["fit"]["kind"] == "sha256":
         sources.add("scripts/fplinux_cli/build/storage/fit.py")
         sources.add("scripts/fplinux_cli/build/storage/linux.its.in")

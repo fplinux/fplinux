@@ -13,7 +13,7 @@ _HARDWARE_CODE = re.compile(r"[A-Z0-9][A-Z0-9._-]*\Z")
 _COMPATIBLE = re.compile(r"[a-z0-9][a-z0-9.-]*,[a-z0-9][a-z0-9+._-]*\Z")
 _PLATFORM_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*\Z")
 
-RUNTIME_IDENTITY_PATH = "runner/identity.py"
+RUNTIME_IDENTITY_PATH = "scripts/fplinux_cli/manifests/identity.py"
 BUILD_TYPES = ("release", "debug")
 
 

@@ -2,7 +2,7 @@
 platform = "demo"
 
 # Device inputs
-[board_maps]
+[fm_radio]
 firmware = []
 
 # Loader controls

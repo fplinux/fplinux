@@ -145,7 +145,9 @@ class BuiltinFirmwareTests:
         config_path = firmware_profile.root / ".config"
         config_path.write_text("CONFIG_FW_LOADER=y\n" + firmware_setting, encoding="ascii")
 
-        kernel_build.assert_external_firmware_kconfig(config_path)
+        kernel_build.assert_external_firmware_kconfig(
+            config_path, {"display": {"panel": None}}, firmware_profile.root
+        )
 
     def test_ram_configuration_rejects_embedded_device_data(
         self, firmware_profile: FirmwareProfile
@@ -157,4 +159,6 @@ class BuiltinFirmwareTests:
         )
 
         with pytest.raises(SystemExit, match="RAM kernel unexpectedly contains built-in firmware"):
-            kernel_build.assert_external_firmware_kconfig(config_path)
+            kernel_build.assert_external_firmware_kconfig(
+                config_path, {"display": {"panel": None}}, firmware_profile.root
+            )

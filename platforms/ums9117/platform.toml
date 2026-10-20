@@ -376,6 +376,7 @@ patches = [
   "platforms/ums9117/bootstrap/patches/0002-headless.patch",
   "platforms/ums9117/bootstrap/patches/0003-target-display-transport.patch",
   "platforms/ums9117/bootstrap/patches/0004-linux-owned-input-audio.patch",
+  "platforms/ums9117/bootstrap/patches/0005-target-owned-early-init.patch",
 ]
 toolchain = "arm-none-eabi"
 lto = 0
@@ -384,6 +385,7 @@ safety_target = "fplinux-safety-check"
 build_targets = ["clean", "all", "map"]
 load_address = 0x80100000
 payload_limit = 0x82000000
+backend = "ums9117"
 
 [[bootstrap.shared_copies]]
 source = "bootstrap/fplinux-boot-screen"
@@ -514,7 +516,7 @@ name = "fplinux-usb-keyboard"
 source = "common/host/fplinux-usb-keyboard.c"
 self_test = true
 
-# Reads the stock firmware tables for the board-maps device-data group. It
+# Reads the stock firmware tables for contributor board reports. It
 # uses no libusb symbols; the static link keeps the binary self-contained.
 [[host.tools]]
 type = "make-archive"

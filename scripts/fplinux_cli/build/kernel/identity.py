@@ -151,7 +151,9 @@ def device_kernel_identity(  # noqa: PLR0913
     target: str,
     linux_recipe: str,
     bootstrap_recipe: str,
+    environment_recipe: str,
     root: Mapping[str, object],
+    initramfs_delivery: str,
     kbuild_implementation: str,
     arch: str,
     defconfig: Path,
@@ -166,11 +168,21 @@ def device_kernel_identity(  # noqa: PLR0913
         build_type = validate_build_type(build_type)
     except IdentityError as error:
         raise DeviceStateError(str(error)) from error
+    normalized_root = _require_root(root)
+    if normalized_root["kind"] == "initramfs":
+        if initramfs_delivery not in {"embedded", "external"}:
+            message = "initramfs root requires embedded or external delivery"
+            raise DeviceStateError(message)
+    elif initramfs_delivery != "none":
+        message = "external root must not declare initramfs delivery"
+        raise DeviceStateError(message)
     payload = {
         "target": _require_target(target),
         "linux_recipe": _require_digest(linux_recipe, "prepared Linux recipe"),
         "bootstrap_recipe": _require_digest(bootstrap_recipe, "bootstrap recipe"),
-        "root": _require_root(root),
+        "environment_recipe": _require_digest(environment_recipe, "build environment recipe"),
+        "root": normalized_root,
+        "initramfs_delivery": initramfs_delivery,
         "kbuild_implementation": _require_digest(kbuild_implementation, "Kbuild implementation"),
         "kernel": {
             "arch": _require_target(arch),

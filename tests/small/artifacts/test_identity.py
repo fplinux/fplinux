@@ -150,6 +150,7 @@ class IdentityTests:
         """Rebuild DT bytes for visible identity, not provenance-only aliases."""
         source = {"version": "test", "sha256": "a" * 64}
         target = {
+            "platform": "ums9117",
             "identity": validate_target_identity(self.target()),
             "audio_policy": {
                 "speaker_vibration": False,

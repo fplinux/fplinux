@@ -62,7 +62,11 @@ def main() -> None:
             common.ROOT,
         )
         external_root = target_config["linux"]["root"]["kind"] == "external"
-        firmware = firmware_inputs.rootfs_firmware_inputs(device_data) if external_root else ()
+        rootfs_delivery = firmware_inputs.rootfs_receives_firmware(
+            root_kind=target_config["linux"]["root"]["kind"],
+            platform=target_config["platform"],
+        )
+        firmware = firmware_inputs.rootfs_firmware_inputs(device_data) if rootfs_delivery else ()
         audio_profile_firmware = device_data.get("audio-profile") if external_root else None
         sources = common.load_toml(common.ROOT / "sources.lock.toml")
         linux_base = sha256_value(
@@ -81,7 +85,8 @@ def main() -> None:
         work.mkdir(parents=True, exist_ok=True)
         if not external_root:
             device_data_initramfs = work / "device-data.cpio"
-            device_data_initramfs.write_bytes(create_device_data_initramfs(device_data))
+            capsule_groups = {} if rootfs_delivery else device_data
+            device_data_initramfs.write_bytes(create_device_data_initramfs(capsule_groups))
             device_data_initramfs.chmod(0o600)
         inputs_build.CACHE.mkdir(parents=True, exist_ok=True)
 
@@ -174,7 +179,7 @@ def main() -> None:
         sd_image_artifact,
     )
     with process_build.report_stage(reporter, "bootstrap"):
-        ramboot, ramboot_map, personalization = build_bootstrap(
+        bootstrap = build_bootstrap(
             sources,
             args.target,
             target_config,
@@ -183,12 +188,26 @@ def main() -> None:
             zimage=zimage,
             dtb=dtb,
             uboot=profile_uboot,
+            kernel_output=kernel_output,
+            rootfs_output=rootfs_output,
         )
     with process_build.report_stage(reporter, "assets"):
         asset_lock_path = work / "assets.lock.toml"
-        asset_outputs = assets_build.build_assets(
-            target_config["loader_assets"], work / "assets", lock_output=asset_lock_path
-        )
+        if target_config["bootstrap"]["backend"] == "sc9820e":
+            from fplinux_cli.build.loaders import build_loaders  # noqa: PLC0415
+
+            asset_outputs = build_loaders(
+                sources,
+                args.target,
+                target_config,
+                work=work,
+                jobs=args.jobs,
+                lock_output=asset_lock_path,
+            )
+        else:
+            asset_outputs = assets_build.build_assets(
+                target_config["loader_assets"], work / "assets", lock_output=asset_lock_path
+            )
     with process_build.report_stage(reporter, "host-tools"):
         host_tools = host_build.build_host_tools(sources, platform, work)
     with process_build.report_stage(reporter, "publish"):
@@ -201,10 +220,11 @@ def main() -> None:
             rootfs=rootfs,
             kernel_output=kernel_output,
             zimage=zimage,
-            dtb=dtb,
-            ramboot=ramboot,
-            ramboot_map=ramboot_map,
-            personalization=personalization,
+            dtb=bootstrap.dtb or dtb,
+            ramboot=bootstrap.image,
+            ramboot_map=bootstrap.map,
+            personalization=bootstrap.personalization,
+            payload_regions=bootstrap.regions,
             asset_lock_path=asset_lock_path,
             asset_outputs=asset_outputs,
             host_tools=host_tools,
@@ -215,7 +235,6 @@ def main() -> None:
             kbuild_receipt=kbuild_receipt,
             bundle_packages=selected_bundle_packages,
             bundle_apks=bundle_apk_outputs,
-            board_maps=device_data.get("board-maps", ()),
             boot_files=boot_files,
             boot_artifacts=boot_artifacts,
         )

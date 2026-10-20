@@ -173,12 +173,10 @@ class RootfsPruneTests:
         publish_image_state(cache, ImageState("a" * 64, "b" * 64, "b" * 64))
         existing = cache / "rootfs" / ("1" * 64)
         existing.mkdir(parents=True)
-        generation = cache / "device-data/phone/generations/generation-test"
-        bluetooth = generation / "groups/bluetooth"
+        phone = cache / "device-data/phone/phone"
+        bluetooth = phone / "groups/bluetooth"
         bluetooth.mkdir(parents=True)
         (bluetooth / "present.bin").write_bytes(b"present!")
-        current = cache / "device-data/phone/current"
-        current.write_text("generation-test\n", encoding="ascii")
         target_config = {
             "platform": "platform",
             "linux": {"root": {"kind": "initramfs"}},
@@ -230,13 +228,13 @@ class RootfsPruneTests:
         publish_image_state(cache, ImageState("a" * 64, "b" * 64, "b" * 64))
         default_recipe = "3" * 64
         profile_recipe = "4" * 64
-        for recipe in (default_recipe, profile_recipe):
+        clean_profile_recipe = "7" * 64
+        for recipe in (default_recipe, profile_recipe, clean_profile_recipe):
             (cache / "rootfs" / recipe).mkdir(parents=True)
         device_data = cache / "device-data/phone"
-        firmware_directory = device_data / "generations/generation-test/groups/bluetooth"
+        firmware_directory = device_data / "phone/groups/bluetooth"
         firmware_directory.mkdir(parents=True)
         (firmware_directory / "controller.bin").write_bytes(b"firmware")
-        (device_data / "current").write_text("generation-test\n", encoding="ascii")
 
         def target_config(_target: str, profile: str | None = None) -> dict[str, object]:
             firmware = (
@@ -287,6 +285,8 @@ class RootfsPruneTests:
             }
             if packages == ("package-base",):
                 assert (firmware_inputs) == (())
+            elif not firmware_inputs:
+                return clean_profile_recipe
             else:
                 assert (len(firmware_inputs)) == (1)
                 assert (firmware_inputs[0].contents) == (b"firmware")
@@ -314,6 +314,7 @@ class RootfsPruneTests:
         decisions = {entry.path: entry.action for entry in plan.entries}
         assert (decisions[f"rootfs/{default_recipe}"]) == ("protected")
         assert (decisions[f"rootfs/{profile_recipe}"]) == ("protected")
+        assert (decisions[f"rootfs/{clean_profile_recipe}"]) == ("protected")
 
     @staticmethod
     def test_automatic_rootfs_cleanup_removes_only_superseded_generations(tmp_path: Path) -> None:
@@ -361,10 +362,10 @@ class RootfsPruneTests:
 
     @staticmethod
     @pytest.mark.parametrize("root_kind", ["initramfs", "external"])
-    def test_automatic_rootfs_cleanup_retains_bluetooth_and_fm_recipe(
+    def test_automatic_rootfs_cleanup_retains_normal_and_without_device_data_variants(
         tmp_path: Path, root_kind: str
     ) -> None:
-        """Cleanup retains RAM without firmware and external roots with Bluetooth/FM."""
+        """Cleanup retains a firmware-free root and the current rootfs radio delivery."""
         cache = tmp_path / ".cache"
         public_key = alpine_signing.signing_public_key(cache)
         public_key.parent.mkdir(parents=True)
@@ -383,10 +384,9 @@ class RootfsPruneTests:
             ("fm-radio", "radio.bin", b"radio"),
             ("audio-profile", "audio.bin", b"audio"),
         ):
-            directory = device_data / "generations/generation-test/groups" / group
+            directory = device_data / "phone/groups" / group
             directory.mkdir(parents=True)
             (directory / filename).write_bytes(contents)
-        (device_data / "current").write_text("generation-test\n", encoding="ascii")
         captured = firmware_inputs.capture_external_device_data("phone", groups, cache)
         image_recipe = container_artifact_recipe_digest("a" * 64, "b" * 64)
         signing_key = alpine_signing.signing_key_identity(cache)
@@ -399,12 +399,14 @@ class RootfsPruneTests:
 
         without_firmware = recipe_for()
         with_radio_firmware = recipe_for("bluetooth", "fm-radio")
-        current = without_firmware if root_kind == "initramfs" else with_radio_firmware
+        current = {without_firmware}
+        if root_kind == "external":
+            current.add(with_radio_firmware)
         bluetooth_only = recipe_for("bluetooth")
         with_audio_profile = recipe_for("bluetooth", "fm-radio", "audio-profile")
         all_recipes = {without_firmware, with_radio_firmware, bluetooth_only, with_audio_profile}
         assert len(all_recipes) == 4
-        obsolete = all_recipes - {current}
+        obsolete = all_recipes - current
         for recipe in all_recipes:
             directory = cache / "rootfs" / recipe
             directory.mkdir(parents=True)
@@ -431,7 +433,7 @@ class RootfsPruneTests:
             removed = prune_operations.discard_obsolete_rootfs(cache)
 
         assert set(removed) == {f"rootfs/{recipe}" for recipe in obsolete}
-        assert (cache / "rootfs" / current / "rootfs.cpio").is_file()
+        assert all((cache / "rootfs" / recipe / "rootfs.cpio").is_file() for recipe in current)
         assert all(not (cache / "rootfs" / recipe).exists() for recipe in obsolete)
 
     @staticmethod

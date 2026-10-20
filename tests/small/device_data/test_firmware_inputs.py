@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import lzma
+import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,24 +44,24 @@ def _declaration(
 
 @dataclass(frozen=True)
 class FirmwareInputs:
-    """Selected immutable generation and mutable declarations owned by one case."""
+    """Selected phone data and mutable declarations owned by one case."""
 
     root: Path
     cache: Path
-    generation: Path
+    phone: Path
     groups: dict[str, list[dict[str, object]]]
     target: str
 
     def write_group(self, name: str, files: dict[str, bytes]) -> Path:
         """Populate one selected group's controlled input bytes."""
-        directory = self.generation / "groups" / name
+        directory = self.phone / "groups" / name
         directory.mkdir()
         for filename, contents in files.items():
             (directory / filename).write_bytes(contents)
         return directory
 
     def capture(self) -> dict[str, tuple[firmware_inputs.FirmwareInput, ...]]:
-        """Capture admitted inputs through the production selected-generation consumer."""
+        """Capture admitted inputs through the production flat-store consumer."""
         return firmware_inputs.capture_external_device_data(
             self.target,
             self.groups,
@@ -70,15 +71,14 @@ class FirmwareInputs:
 
 @pytest.fixture
 def firmware_generation() -> Iterator[FirmwareInputs]:
-    """Own one isolated selected device-data generation until teardown."""
+    """Own one isolated selected phone store until teardown."""
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         cache = root / ".cache"
         target = "demo"
         target_root = cache / "device-data" / target
-        generation = target_root / "generations/generation-test"
-        (generation / "groups").mkdir(parents=True)
-        (target_root / "current").write_text("generation-test\n", encoding="ascii")
+        phone = target_root / "phone"
+        (phone / "groups").mkdir(parents=True)
         groups: dict[str, list[dict[str, object]]] = {
             "bluetooth": [
                 _declaration(
@@ -95,7 +95,7 @@ def firmware_generation() -> Iterator[FirmwareInputs]:
                 )
             ],
         }
-        yield FirmwareInputs(root, cache, generation, groups, target)
+        yield FirmwareInputs(root, cache, phone, groups, target)
 
 
 class FirmwareInputTests:
@@ -160,30 +160,51 @@ class FirmwareInputTests:
     def test_old_firmware_layout_is_a_cache_miss(
         self, firmware_generation: FirmwareInputs
     ) -> None:
-        """An obsolete direct-file cache is ignored without a compatibility reader."""
+        """An obsolete generation cache is ignored without a compatibility reader."""
         target_root = firmware_generation.cache / "device-data" / firmware_generation.target
-        (target_root / "current").unlink()
-        old = firmware_generation.cache / "firmware" / firmware_generation.target
+        shutil.rmtree(firmware_generation.phone)
+        old = target_root / "generations/generation-test/groups/bluetooth"
         old.mkdir(parents=True)
         (old / "controller.bin").write_bytes(b"firmware")
+        (target_root / "current").write_text("generation-test\n", encoding="ascii")
 
         assert (firmware_generation.capture()) == ({})
 
-    def test_profile_bytes_are_causal_but_unrelated_generation_files_are_not(
-        self, firmware_generation: FirmwareInputs
+    @pytest.mark.parametrize(
+        ("platform", "root_kind", "personal_data_is_build_input"),
+        [
+            pytest.param("ums9117", "initramfs", False, id="ums-ram-runtime-data"),
+            pytest.param("ums9117", "external", True, id="ums-external-build-data"),
+            pytest.param("sc9820e", "initramfs", True, id="sc9820e-build-data"),
+        ],
+    )
+    def test_profile_bytes_affect_only_builds_that_deliver_personal_data(
+        self,
+        firmware_generation: FirmwareInputs,
+        platform: str,
+        root_kind: str,
+        *,
+        personal_data_is_build_input: bool,
     ) -> None:
-        """The workspace recipe follows declared profile bytes and ignores adjacent files."""
+        """Runtime capsules leave build identity fixed; rootfs delivery captures private inputs."""
         firmware_generation.write_group("bluetooth", {"controller.bin": b"firmware"})
         audio = firmware_generation.write_group("audio-profile", {"profile.bin": b"profile"})
-        target_config = {"platform": "demo", "device_data": {"groups": firmware_generation.groups}}
+        target_config = {
+            "platform": platform,
+            "linux": {"root": {"kind": root_kind}},
+            "device_data": {"groups": firmware_generation.groups},
+        }
         base = firmware_generation.root / "base-source"
         base.write_bytes(b"base")
         registration = firmware_generation.root / "scripts/fplinux_cli/alpine/registration.py"
         registration.parent.mkdir(parents=True)
         registration.write_bytes(b"# empty package declarations\n")
-        source_locks = write_source_lock_files(
-            firmware_generation.root, firmware_generation.target
-        )
+        source_locks = [
+            (relative.replace("platforms/demo/", f"platforms/{platform}/"), source)
+            for relative, source in write_source_lock_files(
+                firmware_generation.root, firmware_generation.target
+            )
+        ]
 
         with (
             mock.patch.object(workspace_module, "ROOT", firmware_generation.root),
@@ -214,13 +235,16 @@ class FirmwareInputTests:
             staged = workspace_staging.stage_workspace_snapshot(first)
 
         assert (first.recipe) == (unrelated.recipe)
-        assert (first.recipe) != (changed.recipe)
+        assert (first.recipe != changed.recipe) is personal_data_is_build_input
         staged_profile = staged / (
             ".fplinux-inputs/device-data/demo/groups/audio-profile/fplinux/profile.bin"
         )
-        assert (staged_profile.read_bytes()) == (b"profile")
-        assert (staged_profile.stat().st_mode & 0o777) == (0o600)
-        assert (".cache") not in (staged_profile.relative_to(staged).parts)
+        if personal_data_is_build_input:
+            assert (staged_profile.read_bytes()) == (b"profile")
+            assert (staged_profile.stat().st_mode & 0o777) == (0o600)
+            assert (".cache") not in (staged_profile.relative_to(staged).parts)
+        else:
+            assert not staged_profile.exists()
 
     def test_rootfs_receipt_depends_on_bluetooth_not_audio_or_adjacent_files(
         self, firmware_generation: FirmwareInputs

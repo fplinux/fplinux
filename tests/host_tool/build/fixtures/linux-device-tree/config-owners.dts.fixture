@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/dts-v1/;
+
+/ {
+	controller {
+		compatible = "example,controller";
+
+		amplifier {
+			compatible = "example,amplifier";
+		};
+	};
+};

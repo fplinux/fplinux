@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from typing import TYPE_CHECKING, Any
 
@@ -10,6 +11,7 @@ from fplinux_cli import common
 from fplinux_cli.common import fail, load_toml
 from fplinux_cli.manifests.values import (
     TARGET_NAME,
+    basename_value,
     exact_table,
     integer_value,
     nonempty_string,
@@ -63,6 +65,39 @@ def _pins(value: object, name: str) -> list[list[int]]:
     return result
 
 
+def _mipi_dbi_panel(raw: dict[str, Any]) -> dict[str, Any]:
+    panel = exact_table(
+        raw,
+        {"renderer", "firmware", "width", "height", "commands"},
+        "target display MIPI DBI panel",
+    )
+    for field in ("width", "height"):
+        integer_value(panel[field], f"target display panel {field}", bounds=(1, 65535))
+    firmware = basename_value(panel["firmware"], "target display panel firmware")
+    # The panel driver stores its firmware lookup name in a 40-byte buffer.
+    if len(firmware) > 39 or re.fullmatch(r"[a-z0-9][a-z0-9,._-]*\.bin", firmware) is None:
+        fail("target display panel firmware must be a MIPI DBI .bin filename")
+    panel["commands"] = _commands(panel["commands"], "target display panel commands")
+    if not panel["commands"]:
+        fail("target display MIPI DBI panel must contain commands")
+    for step in panel["commands"]:
+        if step["command"] == 0 and step["data"]:
+            fail("target display MIPI DBI command 0 parameters are reserved for delays")
+        if step["delay_ms"] > 255:
+            fail("target display MIPI DBI delay_ms must fit in one byte")
+    return panel
+
+
+def _display_result(panel: dict[str, Any], boot_font: str, source: str) -> dict[str, Any]:
+    return {
+        "width": panel["width"],
+        "height": panel["height"],
+        "boot_font": boot_font,
+        "panel": panel,
+        "source": source,
+    }
+
+
 def load_display(
     target: str,
     raw: object,
@@ -100,6 +135,10 @@ def load_display(
             panel_raw = tomllib.loads(contents.decode("utf-8"))
         except (UnicodeDecodeError, tomllib.TOMLDecodeError) as error:
             fail(f"invalid TOML in {relative}: {error}")
+    if panel_raw.get("renderer") == "mipi-dbi":
+        return _display_result(_mipi_dbi_panel(panel_raw), boot_font, source)
+    if "renderer" in panel_raw:
+        fail("target display panel renderer must be mipi-dbi when specified")
     panel = exact_table(
         panel_raw,
         {
@@ -205,10 +244,5 @@ def load_display(
                 alignment=4,
             )
             pins[group] = _pins(pins[group], f"target display panel pins {group}")
-    return {
-        "width": panel["width"],
-        "height": panel["height"],
-        "boot_font": boot_font,
-        "panel": panel,
-        "source": source,
-    }
+    panel["renderer"] = "ums9117"
+    return _display_result(panel, boot_font, source)

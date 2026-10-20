@@ -7,5 +7,5 @@ exec_distance = 0
 session_name = "demo"
 
 # Device inputs
-[board_maps]
+[fm_radio]
 firmware = []

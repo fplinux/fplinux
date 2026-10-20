@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING, Any
 from unittest import mock
 
 import pytest
-from fplinux_cli.cli import nand
 from fplinux_cli.runtime import nand_backup, ssh_transport
 
 if TYPE_CHECKING:
@@ -48,7 +47,6 @@ class NandSshContext:
         """Execute the real stream transport with the fake SSH process."""
         with (
             destination.open("w+b") as stream,
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=self.root),
             mock.patch.dict(
                 os.environ,
                 {"PATH": f"{self.tools}:{os.environ['PATH']}", "FPLINUX_STREAM_MODE": mode},
@@ -108,7 +106,6 @@ class NandBackupSshStreamTests:
         destination = nand_ssh_case.directory / "nand.raw"
         destination.write_bytes(b"previous raw image")
         with (
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=nand_ssh_case.root),
             mock.patch.dict(
                 os.environ,
                 {
@@ -129,18 +126,13 @@ class NandBackupSshStreamTests:
         assert (destination.read_bytes()) == (b"previous raw image")
         assert (list(destination.parent.glob(".nand.raw.*"))) == ([])
 
-    def test_target_backup_streams_only_its_declared_read_device(
+    def test_backup_streams_only_the_requested_read_device(
         self, nand_ssh_case: NandSshContext
     ) -> None:
-        """Target selection reaches the real SSH process with one read of its declared device."""
+        """The shared backup reaches the real SSH process with one read of its selected device."""
         destination = nand_ssh_case.directory / "nokia.raw"
         commands = nand_ssh_case.directory / "remote-commands"
         with (
-            mock.patch(
-                "fplinux_cli.runtime.bundle_session.current_target_ssh_session",
-                return_value=(ssh_transport, nand_ssh_case.session),
-            ) as acquire,
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=nand_ssh_case.root),
             mock.patch.dict(
                 os.environ,
                 {
@@ -152,12 +144,14 @@ class NandBackupSshStreamTests:
             ),
             pytest.raises(SystemExit, match="expected 142606336 bytes, got 14"),
         ):
-            nand.backup_target_nand("nokia-ta1618", destination, profile="microsd-uboot")
+            nand_backup.backup_nand(
+                lambda: (ssh_transport, nand_ssh_case.session),
+                destination,
+                target="nokia-ta1618",
+                raw_device="/dev/ums9117-nand-raw",
+            )
 
         assert not (destination.exists())
-        acquire.assert_called_once_with(
-            "nokia-ta1618", profile="microsd-uboot", build_type="release"
-        )
         read_commands = commands.read_text(encoding="ascii").splitlines()
         assert (len(read_commands)) == (1), read_commands
         # dd copies the device to stdout; any block size is a valid read.
@@ -173,11 +167,6 @@ class NandBackupSshStreamTests:
         destination = nand_ssh_case.directory / "inoi.raw"
         destination.write_bytes(b"previous complete image")
         with (
-            mock.patch(
-                "fplinux_cli.runtime.bundle_session.current_target_ssh_session",
-                return_value=(ssh_transport, nand_ssh_case.session),
-            ),
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=nand_ssh_case.root),
             mock.patch.dict(
                 os.environ,
                 {
@@ -188,7 +177,12 @@ class NandBackupSshStreamTests:
             ),
             pytest.raises(SystemExit, match="exit status 8: NAND read failed"),
         ):
-            nand.backup_target_nand("inoi-244-modern-4g", destination)
+            nand_backup.backup_nand(
+                lambda: (ssh_transport, nand_ssh_case.session),
+                destination,
+                target="inoi-244-modern-4g",
+                raw_device="/dev/ums9117-nand-raw",
+            )
 
         assert (destination.read_bytes()) == (b"previous complete image")
         assert (list(destination.parent.glob(".inoi.raw.*"))) == ([])
@@ -213,9 +207,7 @@ class NandBackupSshStreamTests:
         self, nand_ssh_case: NandSshContext
     ) -> None:
         """SIGINT stops the SSH child group without delivering a signal to this test runner."""
-        runtime_base = nand_ssh_case.directory / "xdg-runtime"
-        runtime_base.mkdir(mode=0o700)
-        runtime_root = runtime_base / "fplinux"
+        runtime_root = nand_ssh_case.directory / "stream-runtime"
         runtime_root.mkdir(mode=0o700)
         session = create_ready_session(runtime_root)
         session_path = Path(session["private_key"]).parent / "session.json"
@@ -230,7 +222,6 @@ class NandBackupSshStreamTests:
             "PATH": f"{nand_ssh_case.tools}:{os.environ['PATH']}",
             "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONPATH": str(ROOT / "scripts"),
-            "XDG_RUNTIME_DIR": str(runtime_base),
         }
         process = subprocess.Popen(
             [sys.executable, str(helper), str(session_path), str(destination)],

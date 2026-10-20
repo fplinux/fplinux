@@ -69,6 +69,7 @@ def stage_bundle(  # noqa: PLR0913 -- slot and independently varied manifest ide
         "linux_recipe": "c" * 64,
         "device_identity": "d" * 64,
         "rootfs_receipt": {"recipe": "e" * 64, "sha256": "f" * 64},
+        "kernel_artifacts": {},
         "boot_artifacts": {"required": []},
         "kbuild_receipt": {"recipe": "0" * 64, "sha256": "1" * 64},
         "profile": manifest_profile,

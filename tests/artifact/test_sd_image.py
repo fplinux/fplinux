@@ -79,7 +79,7 @@ class SdInputs:
 @pytest.fixture
 def sd_inputs() -> Iterator[SdInputs]:
     """Own the large source and expanded card images for one scenario."""
-    required = ("genimage", "mcopy", "mke2fs", "mkdosfs", "xz")
+    required = ("genimage", "mcopy", "mdir", "mke2fs", "mkdosfs", "xz")
     missing = [name for name in required if shutil.which(name) is None]
     if missing:
         pytest.fail("quality image lacks required image tools: " + ", ".join(missing))
@@ -148,6 +148,49 @@ class SdImageTests:
         sd_inputs.fit.write_bytes(b"FPLINUX altered FIT payload\n")
         sd_inputs.build()
         assert (before) != (sha256_file(sd_inputs.output))
+
+    def test_ram_linux_profile_contains_exact_ext4_root_and_an_empty_fat_partition(
+        self, sd_inputs: SdInputs
+    ) -> None:
+        """A USB-loaded kernel receives the same card layout without a card boot payload."""
+        result = sd_image.build(
+            None, sd_inputs.rootfs, sd_inputs.output, fit_spec=None, storage=STORAGE
+        )
+        assert result == sd_inputs.output
+        raw = sd_inputs.extract_raw()
+        assert raw.stat().st_size == ROOT_OFFSET + ROOT_SIZE
+        with raw.open("rb") as stream:
+            mbr = stream.read(512)
+            assert mbr[510:512] == b"\x55\xaa"
+            assert struct.unpack_from("<I", mbr, 440)[0] == 0x46504C58
+            assert struct.unpack_from("<B3sB3sII", mbr, 462)[4:] == (133120, 131072)
+            stream.seek(ROOT_OFFSET)
+            assert stream.read(ROOT_SIZE) == sd_inputs.rootfs.read_bytes()
+        directory = subprocess.run(
+            ["mdir", "-b", "-i", f"{raw}@@{BOOT_OFFSET}", "::"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=120,
+        )
+        assert directory.stdout == ""
+
+    @pytest.mark.parametrize("with_fit", [False, True], ids=["missing-fit", "unexpected-fit"])
+    def test_fit_bytes_and_specification_must_be_selected_together(
+        self, sd_inputs: SdInputs, *, with_fit: bool
+    ) -> None:
+        """A profile mismatch fails before replacing the previously published card image."""
+        sd_inputs.build()
+        before = sd_inputs.output.read_bytes()
+        with pytest.raises(sd_image.SdImageError, match="selected together"):
+            sd_image.build(
+                sd_inputs.fit if with_fit else None,
+                sd_inputs.rootfs,
+                sd_inputs.output,
+                fit_spec=None if with_fit else FIT_SPEC,
+                storage=STORAGE,
+            )
+        assert sd_inputs.output.read_bytes() == before
 
     def test_rebuild_from_unchanged_inputs_is_byte_reproducible(self, sd_inputs: SdInputs) -> None:
         """Rebuilding the same FIT and ext4 bytes publishes an identical compressed image."""

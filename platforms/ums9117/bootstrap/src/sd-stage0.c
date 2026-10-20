@@ -23,7 +23,7 @@ void ums9117_uboot_handoff(uint32_t entry, uint32_t handoff)
 	__attribute__((noreturn));
 
 enum sd_stage {
-	SD_STAGE_PINMAP = 0,
+	SD_STAGE_BOARD_INIT = 0,
 	SD_STAGE_DISPLAY,
 	SD_STAGE_TIMER,
 	SD_STAGE_UBOOT,
@@ -34,7 +34,8 @@ enum sd_stage {
 };
 
 static const char *const stage_labels[SD_STAGE_COUNT] = {
-	"PINMAP", "DISPLAY", "TIMER", "U-BOOT", "MICROSD", "VERIFY", "LINUX",
+	"BOARD INIT", "DISPLAY", "TIMER", "U-BOOT",
+	"MICROSD",    "VERIFY",	 "LINUX",
 };
 
 enum ums9117_sd_stage0_failure_code {
@@ -286,7 +287,6 @@ void ums9117_sd_stage0_main(const struct ums9117_sd_stage0_board *board)
 		canvas.present = ums9117_boot_canvas_present;
 	}
 
-	scan_firmware(0);
 	if (has_display) {
 		sys_start();
 		sys_framebuffer(boot_canvas.pixels);
@@ -295,7 +295,7 @@ void ums9117_sd_stage0_main(const struct ums9117_sd_stage0_board *board)
 					     SD_STAGE_COUNT) != 0)
 			stage0_fail(UMS9117_SD_STAGE0_FAILURE_BOOT_SCREEN, 0U);
 	}
-	(void)fplinux_boot_screen_set_stage(&boot_screen, SD_STAGE_PINMAP,
+	(void)fplinux_boot_screen_set_stage(&boot_screen, SD_STAGE_BOARD_INIT,
 					    FPLINUX_BOOT_SCREEN_DONE);
 	if (boot_canvas.width != board->display_width ||
 	    boot_canvas.height != board->display_height)

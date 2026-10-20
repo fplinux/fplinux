@@ -5,14 +5,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 from dataclasses import replace
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, Any
+from unittest import mock
 
+from fplinux_cli.build.runtime import runtime_source_files
+from fplinux_cli.runtime import bundle as bundle_runtime
 from fplinux_cli.runtime import ssh_transport
+from fplinux_cli.runtime.windows_host import (
+    WindowsBundle,
+    WindowsHost,
+    WindowsTransport,
+)
 
-from common.windows_host import WindowsBundle, WindowsHost, WindowsTransport, validate_archive
 from tests import ROOT
 from tests.bundle_support import file_record
 from tests.fixtures.executables import install_python_script
@@ -21,6 +29,16 @@ from tests.small.runtime.adapter_fixtures import adapter_data
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+
+def admitted_windows(directory: Path) -> WindowsBundle:
+    """Exercise complete admission before returning this fixture's native host context."""
+    with mock.patch.object(
+        bundle_runtime, "os", SimpleNamespace(name="nt", access=os.access, X_OK=os.X_OK)
+    ):
+        admitted = bundle_runtime.admit_bundle(directory)
+    assert admitted.windows is not None
+    return admitted.windows
 
 
 def endpoint_session(directory: Path) -> dict[str, Any]:
@@ -43,6 +61,7 @@ def endpoint_session(directory: Path) -> dict[str, Any]:
         "private_key": str(directory / "id_ed25519"),
         "known_hosts": str(directory / "known_hosts"),
         "status": "ready",
+        "prepared_data_sha256": None,
     }
 
 
@@ -148,7 +167,7 @@ def saved_connection(transport: WindowsTransport) -> dict[str, Any]:
 
 def session_preparation_bundle(directory: Path) -> WindowsBundle:
     """Use real session/image consumers and a controlled native key-generation process."""
-    bundle = validate_archive(archive_files(directory))
+    bundle = admitted_windows(archive_files(directory))
     template = bytes(512)
     image = b"DHTB" + b"p" * 1020 + template + b"unchanged suffix"
     (directory / bundle.runtime["image"]).write_bytes(image)
@@ -173,13 +192,13 @@ def archive_files(directory: Path) -> Path:
         "bridge": "tools/libc_server.exe",
     }
     runtime["sha256"].pop("host/loader")
-    sources = {
-        "runner/run.py": ROOT / "common/run.py",
-        "runner/identity.py": ROOT / "scripts/fplinux_cli/manifests/identity.py",
-        "runner/platform_adapter.py": ROOT / "platforms/ums9117/host/adapter.py",
-        "runner/ssh_transport.py": ROOT / "scripts/fplinux_cli/runtime/ssh_transport.py",
-        "runner/loader_events.py": ROOT / "common/loader_events.py",
-    }
+    sources = runtime_source_files(
+        "demo",
+        {"platform": "ums9117", "linux": {"root": {"kind": "initramfs"}}},
+    )
+    runtime["device_data"] = None
+    runtime["nand"] = None
+    runtime["sha256"] = {}
     files = {
         "image/ramboot.bin": b"DHTB synthetic image\n",
         "assets/fdl1.bin": b"synthetic first stage\n",
@@ -192,12 +211,12 @@ def archive_files(directory: Path) -> Path:
         destination = directory / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(payload)
-        if relative != "runner/run.py":
-            runtime["sha256"][relative] = hashlib.sha256(payload).hexdigest()
+        runtime["sha256"][relative] = hashlib.sha256(payload).hexdigest()
     runtime_path = directory / "runtime-manifest.json"
     runtime_path.write_text(json.dumps(runtime))
     manifest = {
         "rootfs_receipt": None,
+        "kernel_artifacts": {},
         "boot_artifacts": None,
         "container_image_recipe": None,
         "container_image_content": None,

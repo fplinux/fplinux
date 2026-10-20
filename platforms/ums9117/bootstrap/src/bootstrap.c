@@ -149,18 +149,6 @@ void lcd_appinit(void)
 	display->h2 = display->h1;
 }
 
-void keytrn_init(void)
-{
-	uint8_t map[64];
-	int index;
-
-	(void)sys_getkeymap(map);
-	for (index = 0; index < 64; ++index) {
-		sys_data.keytrn[0][index] = map[index];
-		sys_data.keytrn[1][index] = map[index] | 0x8000;
-	}
-}
-
 void ums9117_bootstrap_enable_timer_gates(
 	struct ums9117_bootstrap_timer_gates *snapshot)
 {

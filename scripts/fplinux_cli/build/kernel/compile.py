@@ -30,10 +30,12 @@ from .configuration import (
     assert_profile_kconfig,
     audio_profile_implementation,
     audio_profile_kconfig_arguments,
+    panel_firmware_kconfig_arguments,
     prepare_kernel_config,
     profile_kconfig_actions,
     profile_kconfig_arguments,
     verify_builtin_audio_profile,
+    verify_builtin_panel_firmware,
 )
 from .identity import DeviceStateError, device_kernel_identity, localversion
 from .receipts import KbuildStateError
@@ -76,11 +78,12 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
     audio_profile_firmware: tuple[firmware_inputs.FirmwareInput, ...] | None,
     jobs: int,
 ) -> tuple[Path, Path, dict[str, str], str]:
-    """Build or exactly reuse zImage and the declared target DTB in ``work/kernel``."""
+    """Build or exactly reuse the declared kernel image and DTB in ``work/kernel``."""
     try:
         work = output.parent
         defconfig, config_paths = prepare_kernel_config(target, target_config, platform, work)
         root_contract = target_config["linux"]["root"]
+        initramfs_delivery = target_config["bootstrap"]["initramfs_delivery"]
         if root_contract["kind"] == "initramfs":
             audio_profile_firmware = None
         initramfs_record: dict[str, int | str] | None = None
@@ -91,7 +94,8 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
                 rootfs.with_name(alpine_state.INITRAMFS_NAME)
             )
             initramfs_record = kbuild_state.initramfs_identity(kernel_rootfs)
-            initramfs_input = kbuild_state.initramfs_input_path(work, initramfs_record)
+            if initramfs_delivery == "embedded":
+                initramfs_input = kbuild_state.initramfs_input_path(work, initramfs_record)
             initramfs_receipt = alpine_state.trusted_receipt_identity(rootfs_output, rootfs_recipe)
             device_root: dict[str, object] = {
                 "kind": "initramfs",
@@ -122,7 +126,9 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
             target=target,
             linux_recipe=current_linux.linux_recipe,
             bootstrap_recipe=bootstrap_recipe,
+            environment_recipe=os.environ["FPLINUX_CONTAINER_IMAGE_RECIPE"],
             root=device_root,
+            initramfs_delivery=initramfs_delivery,
             kbuild_implementation=kbuild_state.implementation_identity(implementation),
             arch=platform["linux"]["arch"],
             defconfig=defconfig,
@@ -144,6 +150,7 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
             "LOCALVERSION",
             localversion(device_identity),
             *audio_profile_kconfig_arguments(target, audio_profile_firmware),
+            *panel_firmware_kconfig_arguments(target_config, linux_source),
             *profile_kconfig_arguments(config_enable, config_disable),
         ]
         commands = kernel_build_commands(
@@ -165,6 +172,7 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
             defconfig=defconfig,
             defconfig_path="generated/kernel.defconfig",
             root=root_contract,
+            initramfs_delivery=initramfs_delivery,
             initramfs=initramfs_record,
             initramfs_input=initramfs_input,
             initramfs_receipt=initramfs_receipt,
@@ -180,7 +188,7 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
             kbuild_state.discard_success_receipt(work)
             kbuild_state.prepare_output(work, output)
             linux_state.write_profile_root(output, target_config)
-            if initramfs_record is not None:
+            if initramfs_input is not None:
                 kbuild_state.materialize_initramfs_input(work, kernel_rootfs, plan)
             shutil.copyfile(defconfig, output / ".config")
             ccache_environment = {
@@ -205,7 +213,7 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
         config_text = inputs_build.require_file(output / ".config").read_text()
         try:
             verify_dtb_kconfig(
-                dtb, kconfig_values(config_text), platform["linux"]["dt_config_checks"]
+                dtb, kconfig_values(config_text), target_config["linux"]["dt_config_checks"]
             )
             process_build.log_message("DTB/Kconfig consistency verified")
             verify_target_identity(
@@ -228,13 +236,14 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
             output / ".config", config_paths[-1], target_config["build_type"]
         )
         if root_contract["kind"] == "initramfs":
-            assert_external_firmware_kconfig(output / ".config")
+            assert_external_firmware_kconfig(output / ".config", target_config, linux_source)
         verify_builtin_audio_profile(
             target,
             output / ".config",
             vmlinux,
             audio_profile_firmware,
         )
+        verify_builtin_panel_firmware(target_config, output / ".config", vmlinux, linux_source)
         for forbidden in target_config["linux"]["forbidden_config"]:
             if forbidden in config_text:
                 fail(f"kernel unexpectedly contains {forbidden}")

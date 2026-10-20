@@ -38,7 +38,6 @@ SSH_PORT = 22
 REMOTE_PATH = re.compile(r"/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+")
 TARGET_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
 SHA256 = re.compile(r"[0-9a-f]{64}")
-CLOCK_STATUS = re.compile(r"system=(?P<system>[0-9]+) rtc=(?P<rtc>kept|written|failed)")
 BUILD_MANIFEST_FIELDS = frozenset(
     {
         "rootfs_receipt",
@@ -50,6 +49,7 @@ BUILD_MANIFEST_FIELDS = frozenset(
         "files",
         "generation",
         "kbuild_receipt",
+        "kernel_artifacts",
         "linux_recipe",
         "profile",
         "build_type",
@@ -94,30 +94,8 @@ def _private_directory(path: Path) -> Path:
     return path
 
 
-def _runtime_root() -> Path:
-    value = os.environ.get("XDG_RUNTIME_DIR")
-    if not value:
-        fail("XDG_RUNTIME_DIR is not set")
-    base = Path(value)
-    if not base.is_absolute():
-        fail("XDG_RUNTIME_DIR must be absolute")
-    try:
-        metadata = base.lstat()
-    except OSError as error:
-        fail(f"XDG_RUNTIME_DIR is unavailable: {error}")
-    if (
-        not stat.S_ISDIR(metadata.st_mode)
-        or stat.S_ISLNK(metadata.st_mode)
-        or metadata.st_uid != os.getuid()
-    ):
-        fail("XDG_RUNTIME_DIR must be a real directory owned by the current user")
-    return _private_directory(base / "fplinux")
-
-
-def _selected_runtime_root(path: Path | None) -> Path:
-    """Use the caller's private session directory or the CLI's volatile runtime."""
-    if path is None:
-        return _runtime_root()
+def _selected_runtime_root(path: Path) -> Path:
+    """Use the caller's explicit private session directory."""
     if not path.is_absolute():
         fail("session runtime directory must be absolute")
     return _private_directory(path)
@@ -126,8 +104,6 @@ def _selected_runtime_root(path: Path | None) -> Path:
 def _session_runtime_root(session: dict[str, Any]) -> Path:
     """Keep every operation bound to the directory chosen during preparation."""
     value = session.get("runtime_root")
-    if value is None:
-        return _runtime_root()
     if not isinstance(value, str):
         fail("session runtime directory is invalid")
     return _selected_runtime_root(Path(value))
@@ -261,18 +237,6 @@ def bundle_identity(bundle: Path, runtime: dict[str, Any]) -> dict[str, str]:
     return {
         "bundle_generation": generation,
     }
-
-
-def load_bundle_context(bundle: Path) -> tuple[dict[str, Any], dict[str, str]]:
-    """Load the minimum standalone reconnect context from an extracted bundle."""
-    data = _regular_file_bytes(bundle / "runtime-manifest.json", "runtime manifest")
-    try:
-        runtime = json.loads(data)
-    except (UnicodeDecodeError, json.JSONDecodeError) as error:
-        fail(f"runtime manifest is invalid: {error}")
-    if not isinstance(runtime, dict):
-        fail("runtime manifest root is not an object")
-    return runtime, bundle_identity(bundle, runtime)
 
 
 def build_manifest_device_identity(bundle: Path) -> str:
@@ -487,7 +451,6 @@ def _copy_personalized_image(
 def _session_directory(root: Path, target: str, usb_serial: str) -> Path:
     if TARGET_NAME.fullmatch(target) is None or re.fullmatch(r"[0-9a-f]{32}", usb_serial) is None:
         fail("session directory identity is invalid")
-    # Leave room for OpenSSH's temporary control-socket suffix.
     identity = f"{target}\0{usb_serial}".encode("ascii")
     name = hashlib.sha256(identity).hexdigest()[:32]
     return root / "sessions" / name
@@ -521,26 +484,6 @@ def _remove_owned_session(directory: Path, target: str, usb_serial: str, *, root
         "usb_serial": usb_serial,
     }:
         fail(f"refusing to remove an unrecognized session directory: {directory}")
-    control_path = directory / "mux"
-    if control_path.exists():
-        try:
-            subprocess.run(
-                [
-                    _require_tool("ssh"),
-                    "-F",
-                    "/dev/null",
-                    "-S",
-                    str(control_path),
-                    "-O",
-                    "exit",
-                    "localhost",
-                ],
-                capture_output=True,
-                timeout=5,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            fail(f"SSH connection did not stop before session cleanup: {directory}")
     shutil.rmtree(directory)
 
 
@@ -583,7 +526,7 @@ def prepare_session(
     target: str,
     linux_usb: dict[str, Any],
     *,
-    runtime_root: Path | None = None,
+    runtime_root: Path,
 ) -> dict[str, Any]:
     """Create keys, addressing and one mode-0600 personalized image copy."""
     if TARGET_NAME.fullmatch(target) is None:
@@ -688,9 +631,8 @@ def prepare_session(
         "product_id": linux_usb["product_id"],
         "wait_seconds": linux_usb["wait_seconds"],
         "status": "prepared",
+        "runtime_root": str(root),
     }
-    if runtime_root is not None:
-        state["runtime_root"] = str(root)
     try:
         _write_json(state_path, state)
     except BaseException:
@@ -859,25 +801,16 @@ def _network_ready(interface: str, session: dict[str, Any]) -> bool:
     )
 
 
-def _ssh_option_values(
-    session: dict[str, Any],
+def ssh_policy_options(
     *,
+    usb_serial: str,
+    known_hosts: str,
+    host_address: str,
     connect_timeout: int = 5,
 ) -> list[tuple[str, str]]:
-    """Return the client policy shared by bundled and direct OpenSSH use."""
-    alias = f"fplinux-{session['usb_serial']}"
-    directory = _session_directory(
-        _session_runtime_root(session), session["target"], session["usb_serial"]
-    )
-    # Archive paths can exceed the Unix control-socket limit; direct clients also
-    # leave no background connection after the archive's terminal closes.
-    archive_session = "runtime_root" in session
+    """Bind public-key authentication to one phone without ambient client routing."""
     return [
         ("BatchMode", "yes"),
-        ("ControlMaster", "no" if archive_session else "auto"),
-        ("ControlPersist", "no" if archive_session else "60"),
-        # OpenSSH appends a temporary suffix; keep the Unix socket path short.
-        ("ControlPath", "none" if archive_session else str(directory / "mux")),
         ("ServerAliveInterval", "5"),
         ("ServerAliveCountMax", "3"),
         ("IdentitiesOnly", "yes"),
@@ -886,11 +819,9 @@ def _ssh_option_values(
         ("KbdInteractiveAuthentication", "no"),
         ("PreferredAuthentications", "publickey"),
         ("NumberOfPasswordPrompts", "0"),
-        ("IdentityFile", str(session["private_key"])),
         ("StrictHostKeyChecking", "yes"),
-        ("UserKnownHostsFile", str(session["known_hosts"])),
-        ("GlobalKnownHostsFile", "/dev/null"),
-        ("HostKeyAlias", alias),
+        ("UserKnownHostsFile", known_hosts),
+        ("HostKeyAlias", f"fplinux-{usb_serial}"),
         ("CheckHostIP", "no"),
         ("ClearAllForwardings", "yes"),
         ("ForwardAgent", "no"),
@@ -899,10 +830,31 @@ def _ssh_option_values(
         ("PermitLocalCommand", "no"),
         ("ProxyCommand", "none"),
         ("ProxyJump", "none"),
-        ("BindAddress", str(session["host_address"])),
+        ("BindAddress", host_address),
         ("ConnectTimeout", str(connect_timeout)),
         ("ConnectionAttempts", "1"),
         ("LogLevel", "ERROR"),
+    ]
+
+
+def _ssh_option_values(
+    session: dict[str, Any],
+    *,
+    connect_timeout: int = 5,
+) -> list[tuple[str, str]]:
+    """Combine the phone policy with Unix identity and direct connection ownership."""
+    return [
+        ("ControlMaster", "no"),
+        ("ControlPersist", "no"),
+        ("ControlPath", "none"),
+        ("IdentityFile", str(session["private_key"])),
+        ("GlobalKnownHostsFile", "/dev/null"),
+        *ssh_policy_options(
+            usb_serial=session["usb_serial"],
+            known_hosts=str(session["known_hosts"]),
+            host_address=str(session["host_address"]),
+            connect_timeout=connect_timeout,
+        ),
     ]
 
 
@@ -911,9 +863,7 @@ def _ssh_options(session: dict[str, Any], *, connect_timeout: int = 5) -> list[s
     arguments = ["-F", "/dev/null"]
     for name, value in _ssh_option_values(session, connect_timeout=connect_timeout):
         rendered = value
-        if name in {"IdentityFile", "UserKnownHostsFile"} or (
-            name == "ControlPath" and value != "none"
-        ):
+        if name in {"IdentityFile", "UserKnownHostsFile"}:
             rendered = _ssh_config_value(value)
         arguments.extend(("-o", f"{name}={rendered}"))
     return arguments
@@ -954,11 +904,9 @@ def _ssh_argv(
     command: str | None = None,
     *,
     connect_timeout: int = 5,
-    shared: bool = True,
 ) -> list[str]:
     argv = [
         _require_tool("ssh"),
-        *([] if shared else ["-S", "none"]),
         *_ssh_options(session, connect_timeout=connect_timeout),
         f"root@{session['phone_address']}",
     ]
@@ -1034,6 +982,27 @@ def _mark_current(session: dict[str, Any]) -> dict[str, Any]:
         _remove_owned_session(directory, target, usb_serial, root=root)
         raise
     return session
+
+
+def bind_prepared_content(
+    session: dict[str, Any], *, bundle_generation: str, prepared_data_sha256: str | None
+) -> None:
+    """Keep the actual runtime and capsule binding in the saved connection record."""
+    session["bundle_generation"] = bundle_generation
+    session["prepared_data_sha256"] = prepared_data_sha256
+    _write_json(Path(session["private_key"]).parent / "session.json", session)
+
+
+def require_prepared_content(
+    session: dict[str, Any], *, bundle_generation: str, prepared_data_sha256: str | None
+) -> None:
+    """Refuse to reconnect after the selected bundle or personal contents changed."""
+    if (
+        session.get("bundle_generation") != bundle_generation
+        or "prepared_data_sha256" not in session
+        or session["prepared_data_sha256"] != prepared_data_sha256
+    ):
+        fail("the running phone uses different runtime or prepared phone data; shut it down first")
 
 
 def _retry_pause(deadline: float) -> None:
@@ -1135,13 +1104,23 @@ def _validate_session(
         "wait_seconds",
         "status",
         "interface",
+        "runtime_root",
     }
     if not isinstance(value, dict):
         fail("current SSH session state has unexpected fields")
-    if "runtime_root" in value:
-        required.add("runtime_root")
-        if not isinstance(value["runtime_root"], str):
-            fail("session runtime directory is invalid")
+    if "bundle_generation" in value or "prepared_data_sha256" in value:
+        required.update({"bundle_generation", "prepared_data_sha256"})
+        generation = value.get("bundle_generation")
+        prepared = value.get("prepared_data_sha256")
+        if (
+            not isinstance(generation, str)
+            or SHA256.fullmatch(generation) is None
+            or (
+                prepared is not None
+                and (not isinstance(prepared, str) or SHA256.fullmatch(prepared) is None)
+            )
+        ):
+            fail("current SSH session content identity is invalid")
     if set(value) != required:
         fail("current SSH session state has unexpected fields")
     if value.get("status") != "ready":
@@ -1226,22 +1205,21 @@ def _read_current_session(path: Path, target: str, *, root: Path) -> dict[str, A
     return session
 
 
-def load_current_session(target: str, *, runtime_root: Path | None = None) -> dict[str, Any]:
+def load_current_session(target: str, *, runtime_root: Path) -> dict[str, Any]:
     """Load only the session that completed USB and private identity binding."""
     if TARGET_NAME.fullmatch(target) is None:
         fail(f"invalid target name: {target}")
     root = _selected_runtime_root(runtime_root)
     path = root / "current" / f"{target}.json"
     if path.is_symlink() or not path.is_file():
-        if runtime_root is None:
-            fail(f"no ready SSH session for {target}; run ./fplinux run {target} first")
         fail(
-            f"no ready SSH session for {target}; start the powered-off phone with sh Run.sh first"
+            f"no ready SSH session for {target}; "
+            "start the powered-off phone with the launcher first"
         )
     return _read_current_session(path, target, root=root)
 
 
-def load_live_session(target: str, *, runtime_root: Path | None = None) -> dict[str, Any] | None:
+def load_live_session(target: str, *, runtime_root: Path) -> dict[str, Any] | None:
     """Select a saved exact USB session; absence alone permits another RAM load."""
     if TARGET_NAME.fullmatch(target) is None:
         fail(f"invalid target name: {target}")
@@ -1268,22 +1246,12 @@ def reacquire_bound_session(session: dict[str, Any]) -> dict[str, Any]:
     return _wait_for_authenticated_endpoint(session, scan_host_key=False)
 
 
-def open_shell(session: dict[str, Any]) -> None:
-    """Replace the runner with the session-scoped interactive SSH client."""
-    session = _validate_session(session)
-    if not os.isatty(0):
-        fail("interactive SSH requires a terminal; use --exec for a non-interactive command")
-    argv = _ssh_argv(session)
-    argv[1:1] = ["-tt"]
-    os.execv(argv[0], argv)
-
-
 def run_shell(session: dict[str, Any]) -> int:
     """Run interactive SSH with inherited terminal streams and reap it on cancellation."""
     session = _validate_session(session)
     if not os.isatty(0):
         fail("interactive SSH requires a terminal; use --exec for a non-interactive command")
-    argv = _ssh_argv(session, shared=False)
+    argv = _ssh_argv(session)
     argv[1:1] = ["-tt"]
     process = subprocess.Popen(argv)
     interrupted: int | None = None
@@ -1333,7 +1301,7 @@ def run_remote(
     """Run a command; shared metadata operations leave caller input untouched."""
     session = _validate_session(session)
     return subprocess.run(
-        _ssh_argv(session, command, shared=shared),
+        _ssh_argv(session, command),
         stdin=subprocess.DEVNULL if shared else None,
         capture_output=capture_output,
         text=True,
@@ -1362,32 +1330,6 @@ def require_device_identity(session: dict[str, Any], device_identity: str) -> st
             f"  bundle: kernel *{expected_suffix}"
         )
     return releases[0]
-
-
-def sync_clock(session: dict[str, Any]) -> None:
-    """Set the phone clock from host UTC; a failure warns and leaves the session usable."""
-    host_seconds = int(time.time())
-    result = run_remote(
-        session,
-        f"fplinux-clock {host_seconds}",
-        capture_output=True,
-        shared=True,
-    )
-    status = CLOCK_STATUS.fullmatch(result.stdout.strip())
-    detail = result.stderr.strip().splitlines()
-    reason = detail[-1] if detail else f"unexpected clock status (exit {result.returncode})"
-    if status is None:
-        print(f"fplinux ssh: phone clock was not set: {reason}", file=sys.stderr, flush=True)
-        return
-    phone_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(status["system"])))
-    if status["rtc"] == "failed":
-        print(
-            f"fplinux ssh: phone clock set to {phone_time}, but its RTC was not written: {reason}",
-            file=sys.stderr,
-            flush=True,
-        )
-        return
-    print(f"Phone clock set to {phone_time} (RTC {status['rtc']}).", flush=True)
 
 
 def _stream_stderr_detail(stream: BinaryIO) -> str:
@@ -1431,9 +1373,7 @@ def stream_remote(
     interrupted: int | None = None
     with tempfile.TemporaryFile(mode="w+b") as stderr:
         process = subprocess.Popen(
-            # Dropbear may retain a writer after a multiplexed channel closes.
-            # A dedicated transport preserves cancellation of the remote reader.
-            _ssh_argv(session, command, shared=False),
+            _ssh_argv(session, command),
             stdin=subprocess.DEVNULL,
             stdout=destination,
             stderr=stderr,

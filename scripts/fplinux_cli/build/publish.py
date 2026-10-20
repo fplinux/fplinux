@@ -20,6 +20,7 @@ from fplinux_cli.artifacts.bundles import (
 )
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build.identity import runtime_identity
+from fplinux_cli.build.runtime import device_data_descriptor, runtime_source_files
 from fplinux_cli.build.storage.stage import default_boot_artifacts
 from fplinux_cli.common import (
     canonical_json_bytes,
@@ -28,34 +29,12 @@ from fplinux_cli.common import (
     sha256_bytes,
     sha256_file,
 )
-from fplinux_cli.manifests.identity import RUNTIME_IDENTITY_PATH
 from fplinux_cli.manifests.values import relative_value, sha256_value
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
     from pathlib import Path
 
-    from fplinux_cli.device_data.inputs import FirmwareInput
-
-
-def runner_source() -> Path:
-    """Return the one shared runner source path."""
-    return common.ROOT / "common/run.py"
-
-
-def ssh_transport_source() -> Path:
-    """Return the SSH session helper published beside the runner."""
-    return common.ROOT / "scripts/fplinux_cli/runtime/ssh_transport.py"
-
-
-def identity_source() -> Path:
-    """Return the shared identity contract published beside the runner."""
-    return common.ROOT / "scripts/fplinux_cli/manifests/identity.py"
-
-
-def adapter_source(platform: str) -> Path:
-    """Return the fixed adapter path for a validated platform."""
-    return common.ROOT / "platforms" / platform / "host/adapter.py"
+    from fplinux_cli.build.bootstrap.result import PayloadRegion
 
 
 def copy_file(source: Path, destination: Path, *, executable: bool = False) -> None:
@@ -82,6 +61,7 @@ def runtime_manifest(  # noqa: PLR0913 -- each published artifact role stays exp
     asset_outputs: dict[str, tuple[str, str]],
     host_tools: dict[str, Path],
     personalization: dict[str, int | str],
+    payload_regions: dict[str, PayloadRegion] | None = None,
 ) -> dict[str, Any]:
     """Create the generic runtime contract consumed by the common runner."""
     declared_assets = {
@@ -91,24 +71,24 @@ def runtime_manifest(  # noqa: PLR0913 -- each published artifact role stays exp
     platform_host = platform["host"]
     runtime = target_config["runtime"]
     runtime_tools = {role: f"host/{name}" for role, name in platform_host["runtime_tools"].items()}
-    for name in platform_host["runtime_tools"].values():
+    device_data = device_data_descriptor(target, target_config)
+    if device_data is not None and device_data["ecc_module"] is not None:
+        from fplinux_cli.device_data.prepare import (  # noqa: PLC0415 -- selected ECC runtime.
+            NAND_ECC_TOOL,
+        )
+
+        runtime_tools["nand_ecc"] = f"host/{NAND_ECC_TOOL}"
+    for relative in runtime_tools.values():
+        name = relative.removeprefix("host/")
         if name not in host_tools:
             fail(f"runtime host tool was not built: {name}")
     hashes = {
         image: sha256_file(inputs_build.require_file(release / image)),
-        "runner/platform_adapter.py": sha256_file(
-            inputs_build.require_file(release / "runner/platform_adapter.py")
-        ),
+        **{
+            relative: sha256_file(inputs_build.require_file(release / relative))
+            for relative in runtime_source_files(target, target_config)
+        },
     }
-    hashes["runner/ssh_transport.py"] = sha256_file(
-        inputs_build.require_file(release / "runner/ssh_transport.py")
-    )
-    hashes["runner/loader_events.py"] = sha256_file(
-        inputs_build.require_file(release / "runner/loader_events.py")
-    )
-    hashes[RUNTIME_IDENTITY_PATH] = sha256_file(
-        inputs_build.require_file(release / RUNTIME_IDENTITY_PATH)
-    )
     hashes.update(
         {
             declared_assets[role]: sha256_file(
@@ -122,9 +102,12 @@ def runtime_manifest(  # noqa: PLR0913 -- each published artifact role stays exp
             runtime_tools[role]: sha256_file(
                 inputs_build.require_file(release / runtime_tools[role])
             )
-            for role in platform_host["runtime_tools"]
+            for role in runtime_tools
         }
     )
+    adapter = dict(runtime["adapter"])
+    if payload_regions is not None:
+        adapter["regions"] = payload_regions
     return {
         "target": target,
         "profile": inputs_build.selected_profile(target_config),
@@ -143,8 +126,10 @@ def runtime_manifest(  # noqa: PLR0913 -- each published artifact role stays exp
         "usb": runtime["usb"],
         "personalization": personalization,
         "assets": declared_assets,
-        "adapter": runtime["adapter"],
+        "adapter": adapter,
         "host_tools": runtime_tools,
+        "nand": target_config.get("nand"),
+        "device_data": device_data,
         "sha256": hashes,
     }
 
@@ -174,9 +159,9 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
     kbuild_receipt: dict[str, str],
     bundle_packages: tuple[str, ...],
     bundle_apks: dict[str, Path],
-    board_maps: Sequence[FirmwareInput],
     boot_files: dict[str, Path],
     boot_artifacts: dict[str, Any],
+    payload_regions: dict[str, PayloadRegion] | None,
 ) -> Path:
     """Complete one already-private immutable bundle staging directory."""
     if set(bundle_packages) != set(bundle_apks):
@@ -194,11 +179,9 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
     copy_file(ramboot, release / image_name)
     if target_config["linux"]["root"]["kind"] == "initramfs":
         copy_file(work / "device-data.cpio", release / "device-data.cpio")
-    for firmware in board_maps:
-        destination = release / relative_value(firmware.destination, "board map path")
-        replace_file_atomically(destination, firmware.contents, 0o600, sync=False)
+    kernel_name = zimage.name
     debug_outputs = [
-        (zimage, "zImage"),
+        (zimage, kernel_name),
         (dtb, target_config["linux"]["debug_dtb"]),
         (kernel_output / "vmlinux", "vmlinux"),
         (kernel_output / "System.map", "System.map"),
@@ -214,14 +197,8 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
         copy_file(work / "assets" / relative, release / "assets" / relative)
     for name, source in host_tools.items():
         copy_file(source, release / "host" / name, executable=True)
-    copy_file(runner_source(), release / "runner/run.py", executable=True)
-    copy_file(common.ROOT / "common/loader_events.py", release / "runner/loader_events.py")
-    copy_file(ssh_transport_source(), release / "runner/ssh_transport.py")
-    copy_file(identity_source(), release / RUNTIME_IDENTITY_PATH)
-    copy_file(
-        adapter_source(target_config["platform"]),
-        release / "runner/platform_adapter.py",
-    )
+    for relative, source in runtime_source_files(target, target_config).items():
+        copy_file(source, release / relative, executable=relative in {"fplinux.py", "Run.sh"})
     copy_file(asset_lock_path, release / "assets.lock.toml")
     copy_file(common.ROOT / "THIRD_PARTY_NOTICES.md", release / "THIRD_PARTY_NOTICES.md")
     for package, source in sorted(bundle_apks.items()):
@@ -241,6 +218,7 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
         asset_outputs=asset_outputs,
         host_tools=host_tools,
         personalization=personalization,
+        payload_regions=payload_regions,
     )
     write_json(release / "runtime-manifest.json", runtime)
 
@@ -275,6 +253,19 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
         "rootfs_receipt": rootfs_receipt,
         "kbuild_receipt": kbuild_receipt,
         "boot_artifacts": boot_artifacts,
+        "kernel_artifacts": {
+            "image": f"debug/{kernel_name}",
+            "config": "debug/kernel.config",
+            "vmlinux": "debug/vmlinux",
+            "system_map": "debug/System.map",
+            "rootfs": "debug/rootfs.cpio",
+            "initramfs": (
+                "debug/initramfs.cpio"
+                if target_config["bootstrap"]["initramfs_delivery"] != "none"
+                else None
+            ),
+            "initramfs_delivery": target_config["bootstrap"]["initramfs_delivery"],
+        },
         "files": published_file_records(release),
     }
     generation = sha256_bytes(canonical_json_bytes(payload))
@@ -323,9 +314,9 @@ def publish_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay explicit
     kbuild_receipt: dict[str, str],
     bundle_packages: tuple[str, ...],
     bundle_apks: dict[str, Path],
-    board_maps: Sequence[FirmwareInput] = (),
     boot_files: dict[str, Path] | None = None,
     boot_artifacts: dict[str, Any] | None = None,
+    payload_regions: dict[str, PayloadRegion] | None = None,
 ) -> Path:
     """Publish a complete immutable bundle and select it as current."""
     profile = inputs_build.selected_profile(target_config)
@@ -361,9 +352,9 @@ def publish_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay explicit
             kbuild_receipt=kbuild_receipt,
             bundle_packages=bundle_packages,
             bundle_apks=bundle_apks,
-            board_maps=board_maps,
             boot_files=boot_files,
             boot_artifacts=boot_artifacts,
+            payload_regions=payload_regions,
         )
     finally:
         discard_bundle_staging(

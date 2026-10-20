@@ -23,7 +23,7 @@
 #endif
 
 enum ums9117_boot_stage {
-	UMS9117_BOOT_STAGE_PINMAP = 0,
+	UMS9117_BOOT_STAGE_BOARD_INIT = 0,
 	UMS9117_BOOT_STAGE_DISPLAY,
 	UMS9117_BOOT_STAGE_TIMER,
 	UMS9117_BOOT_STAGE_KERNEL,
@@ -33,7 +33,8 @@ enum ums9117_boot_stage {
 };
 
 static const char *const boot_stage_labels[UMS9117_BOOT_STAGE_COUNT] = {
-	"PINMAP", "DISPLAY", "TIMER", "KERNEL", "DEVICE TREE", "PREPARE LINUX",
+	"BOARD INIT", "DISPLAY",     "TIMER",
+	"KERNEL",     "DEVICE TREE", "PREPARE LINUX",
 };
 
 static const struct fplinux_boot_screen_identity boot_identity = {
@@ -115,7 +116,7 @@ static void prepare_usb_handoff(void)
 }
 
 /*
- * Paint on the display that the vendor runtime initialized. Until this runs,
+ * Paint on the display that the bootstrap runtime initialized. Until this runs,
  * every boot-screen update is a no-op, so a board without a display reports
  * its stages only through the host records.
  */
@@ -139,8 +140,6 @@ static void start_boot_screen(uint32_t ram_bytes, size_t zimage_bytes,
 	canvas.fill_rect = ums9117_boot_canvas_fill_rect;
 	canvas.present = ums9117_boot_canvas_present;
 
-	/* Loads the board pin map over the host libc channel. */
-	scan_firmware(0);
 	sys_start();
 	sys_framebuffer(boot_canvas.pixels);
 	if (fplinux_boot_screen_init(&boot_screen, &canvas, &boot_identity,
@@ -148,7 +147,7 @@ static void start_boot_screen(uint32_t ram_bytes, size_t zimage_bytes,
 				     UMS9117_BOOT_STAGE_COUNT) != 0)
 		ums9117_boot_fail(8, "BOOT SCREEN INIT FAIL");
 
-	set_stage(UMS9117_BOOT_STAGE_PINMAP, FPLINUX_BOOT_SCREEN_DONE);
+	set_stage(UMS9117_BOOT_STAGE_BOARD_INIT, FPLINUX_BOOT_SCREEN_DONE);
 	sprintf(note, "RAM %luM KERNEL %luK DTB %luK",
 		(unsigned long)(ram_bytes >> 20),
 		(unsigned long)(zimage_bytes >> 10),
@@ -173,16 +172,12 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 
 	fprintf(stderr,
 		"%s_LINUX_BOOTSTRAP event=stage stage=0 "
-		"ram=0x%08lx zimage=%lu dtb=%lu message=ENTRY\n",
+		"ram=0x%08lx zimage=%lu dtb=%lu message=BOARD INIT OK\n",
 		FPLINUX_BOOTSTRAP_RECORD_PREFIX, (unsigned long)ram_bytes,
 		(unsigned long)zimage_bytes, (unsigned long)dtb_bytes);
 
-	if (has_display) {
+	if (has_display)
 		start_boot_screen(ram_bytes, zimage_bytes, dtb_bytes);
-	} else {
-		/* Loads the board pin map over the host libc channel. */
-		scan_firmware(0);
-	}
 	/* The loader must have initialized exactly the board display, or none. */
 	if (sys_data.display.w1 != board->display_width ||
 	    sys_data.display.h1 != board->display_height)

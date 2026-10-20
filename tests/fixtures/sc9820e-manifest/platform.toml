@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: GPL-2.0-only
+[identity]
+vendor = "Unisoc"
+soc = "SC9820E"
+aliases = []
+compatible = "sprd,sc9820e"
+
+[rootfs]
+packages = []
+
+[bundle]
+packages = []
+
+[linux]
+source_lock = "linux"
+arch = "arm"
+cross_compile = "arm-none-eabi-"
+analysis_cross_compile = "arm-none-eabi-"
+defconfig = "platforms/sc9820e/linux/config/defconfig"
+build_types = { debug = "platforms/sc9820e/linux/config/debug.config", release = "platforms/sc9820e/linux/config/release.config" }
+config_script = "scripts/config"
+dts_directory = "arch/arm/boot/dts/unisoc"
+platform_identity_header = "arch/arm/mach-sc9820e/fplinux-platform-identity.h"
+targets = ["Image", "dtbs"]
+image_output = "arch/arm/boot/Image"
+dtb_output_directory = "arch/arm/boot/dts"
+patches = []
+overlay = "platforms/sc9820e/linux/overlay"
+copies = []
+appends = []
+dt_config_checks = []
+
+[bootstrap]
+toolchain = "arm-none-eabi"
+backend = "sc9820e"
+
+[runtime.adapter]
+handoff_wait_seconds = 60
+usb_release_wait_seconds = 10
+
+[runtime.usb.bootrom]
+vendor_id = 0x1782
+product_id = 0x4d00
+wait_seconds = 300
+
+[runtime.usb.linux_gadget]
+vendor_id = 0x0525
+product_id = 0xa4a6
+keyboard_interface = 0
+wait_seconds = 60
+
+[host.runtime_tools]
+loader = "spd_dump"
+
+[[host.tools]]
+type = "make-archive"
+name = "spd_dump"
+source_lock = "flash"
+cache_name = "flash.tar.gz"
+archive_prefix = "flash-{commit}/"
+source_directory = "spd_dump"
+binary = "spd_dump"
+link = "static-libusb"
+copies = []
+patches = []
+self_test = false
+
+[[host.tools.members]]
+path = "spd_dump.c"
+digest_key = "spd_dump_c_sha256"

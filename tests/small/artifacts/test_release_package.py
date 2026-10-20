@@ -38,11 +38,11 @@ def release_inputs(tmp_path: Path) -> ReleaseInputs:
     target = "nokia-ta1618"
     target_config: dict[str, Any] = {
         "platform": "demo",
-        "rootfs": {"base_packages": [], "packages": [], "exclude_packages": []},
+        "rootfs": {"base_packages": [], "packages": []},
         "bundle": {"packages": []},
-        "runtime": {"assets": {"pinmap": "assets/pinmap.bin"}},
+        "runtime": {"assets": {"fdl1": "assets/fdl1.bin"}},
     }
-    # The runner uses "keyboard"; "extractor" is built for the checkout only.
+    # The runtime uses "keyboard"; "extractor" is built for the checkout only.
     platform: dict[str, Any] = {
         "rootfs": {"packages": ["fplinux-font-terminus-6x12"]},
         "bundle": {"packages": ["demo"]},
@@ -55,26 +55,16 @@ def release_inputs(tmp_path: Path) -> ReleaseInputs:
         "image": "image/ramboot.bin",
         "bundle_files": [
             "image/ramboot.bin",
-            "assets/pinmap.bin",
+            "assets/fdl1.bin",
             "host/keyboard",
-            "runner/run.py",
-            "runner/identity.py",
-            "runner/ssh_transport.py",
-            "runner/loader_events.py",
-            "runner/platform_adapter.py",
             "runtime-manifest.json",
             "apks/demo.apk",
             "assets.lock.toml",
         ],
         "runtime_files": [
             "image/ramboot.bin",
-            "assets/pinmap.bin",
+            "assets/fdl1.bin",
             "host/keyboard",
-            "runner/run.py",
-            "runner/identity.py",
-            "runner/ssh_transport.py",
-            "runner/loader_events.py",
-            "runner/platform_adapter.py",
             "runtime-manifest.json",
         ],
         "documents": ["release/EXTRA.txt"],
@@ -97,7 +87,7 @@ def release_inputs(tmp_path: Path) -> ReleaseInputs:
 
 
 class ReleaseManifestPolicyTests:
-    """Exercise release-path and runtime-closure policy without creating an archive."""
+    """Exercise static release paths and tool selection without creating an archive."""
 
     @staticmethod
     @pytest.mark.parametrize(
@@ -189,7 +179,7 @@ class ReleaseManifestPolicyTests:
         )
         profile = {
             **release_inputs.target_config,
-            "rootfs": {"base_packages": [], "packages": ["demo"], "exclude_packages": []},
+            "rootfs": {"base_packages": [], "packages": ["demo"]},
         }
         with (
             mock.patch.object(common, "ROOT", release_inputs.root),
@@ -240,13 +230,8 @@ class ReleaseManifestPolicyTests:
 
         assert release["bundle_files"] == [
             "image/ramboot.bin",
-            "assets/pinmap.bin",
+            "assets/fdl1.bin",
             "host/keyboard",
-            "runner/run.py",
-            "runner/identity.py",
-            "runner/ssh_transport.py",
-            "runner/loader_events.py",
-            "runner/platform_adapter.py",
             "runtime-manifest.json",
             "assets.lock.toml",
             "apks/demo.apk",
@@ -326,16 +311,16 @@ class ReleaseManifestPolicyTests:
                 release_inputs.target, release_inputs.target_config
             )
 
-    def test_runtime_closure_requires_the_identity_helper(
+    def test_release_contract_requires_the_runtime_manifest(
         self, release_inputs: ReleaseInputs
     ) -> None:
-        """A standalone runner without its identity helper is rejected before packaging."""
+        """The runtime manifest supplies the built closure independently of release files."""
         broken = {
             **release_inputs.release_manifest,
             "runtime_files": [
                 path
                 for path in release_inputs.release_manifest["runtime_files"]
-                if path != "runner/identity.py"
+                if path != "runtime-manifest.json"
             ],
         }
         with (
@@ -348,23 +333,8 @@ class ReleaseManifestPolicyTests:
                 release_inputs.target, release_inputs.target_config
             )
 
-    def test_normalized_manifest_includes_runner_tools_but_not_build_only_tools(
-        self, release_inputs: ReleaseInputs
-    ) -> None:
-        """Manifest validation requires runner tools and omits build tools from executables."""
-        with (
-            mock.patch.object(common, "ROOT", release_inputs.root),
-            mock.patch.object(
-                releases, "load_release", return_value=release_inputs.release_manifest
-            ),
-            mock.patch.object(platforms, "load_platform", return_value=release_inputs.platform),
-        ):
-            release = package_commands.load_release_manifest(
-                release_inputs.target, release_inputs.target_config
-            )
-        assert ("host/keyboard") in (release["executables"])
-        assert ("host/extractor") not in (release["executables"])
-
+    def test_release_contract_requires_runner_tools(self, release_inputs: ReleaseInputs) -> None:
+        """Release validation rejects a bundle missing a required runner tool."""
         without_runner_tool = {
             **release_inputs.release_manifest,
             "runtime_files": [

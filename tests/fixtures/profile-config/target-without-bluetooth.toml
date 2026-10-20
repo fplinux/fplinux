@@ -19,8 +19,8 @@ memory = { base = 0x80200000, size = 0x03c00000 }
 dtb = "%(target)s.dtb"
 debug_dtb = "%(target)s.dtb"
 patches = []
-forbidden_dtb_markers = ["forbidden"]
-forbidden_config = ["CONFIG_FORBIDDEN=y"]
+additional_forbidden_dtb_markers = ["forbidden"]
+additional_forbidden_config = ["CONFIG_FORBIDDEN=y"]
 overlay = "linux/overlay"
 copies = []
 appends = []

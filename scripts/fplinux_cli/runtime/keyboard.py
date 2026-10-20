@@ -5,16 +5,16 @@ from __future__ import annotations
 
 import os
 import pwd
-import stat
 import subprocess
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fplinux_cli import common
 from fplinux_cli.common import fail
-from fplinux_cli.runtime.bundle_session import _current_ssh_session
+from fplinux_cli.runtime.bundle_session import bundle_runtime_command
+from fplinux_cli.runtime.runner import reconnect_bundle
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from fplinux_cli.artifacts.bundles import CurrentBundle
 
 
@@ -42,34 +42,16 @@ def _keyboard_interface(config: dict[str, Any]) -> str:
     return str(config["runtime"]["usb"]["linux_gadget"]["keyboard_interface"])
 
 
-def _sudo_keyboard_runtime_directory(uid: int) -> Path:
-    """Find the invoking user's existing runtime directory without borrowing root state."""
-    inherited = os.environ.get("XDG_RUNTIME_DIR")
-    candidates = ([Path(inherited)] if inherited else []) + [Path(f"/run/user/{uid}")]
-    for candidate in candidates:
-        if not candidate.is_absolute():
-            continue
-        try:
-            metadata = candidate.lstat()
-        except OSError:
-            continue
-        if stat.S_ISDIR(metadata.st_mode) and metadata.st_uid == uid:
-            return candidate
-    return fail(f"keyboard verification cannot find an existing runtime directory for UID {uid}")
-
-
 def _verify_keyboard_session(
     bundle: CurrentBundle,
-    manifest: dict[str, Any],
     target: str,
     *,
     profile: str | None,
-    build_type: str,
 ) -> None:
     """Verify as the session owner while keeping an explicitly sudoed keyboard privileged."""
     sudo_uid = os.environ.get("SUDO_UID")
     if os.geteuid() != 0 or sudo_uid is None or sudo_uid == "0":
-        _current_ssh_session(bundle, manifest, target)
+        reconnect_bundle(bundle, target, profile=profile, exec_command="true")
         return
     if not sudo_uid.isascii() or not sudo_uid.isdecimal():
         fail("sudo keyboard verification requires a valid SUDO_UID")
@@ -80,25 +62,14 @@ def _verify_keyboard_session(
         fail("sudo keyboard verification cannot resolve the invoking user")
     if account.pw_name != os.environ.get("SUDO_USER"):
         fail("sudo keyboard verification requires the matching invoking user")
-    runtime = _sudo_keyboard_runtime_directory(uid)
     environment = {
         **os.environ,
         "HOME": account.pw_dir,
         "USER": account.pw_name,
         "LOGNAME": account.pw_name,
-        "XDG_RUNTIME_DIR": str(runtime),
     }
-    command = [
-        str(common.ROOT / "fplinux"),
-        "console",
-        target,
-        "--build-type",
-        build_type,
-        "--exec",
-        "true",
-    ]
-    if profile is not None:
-        command.extend(["--profile", profile])
+    command = bundle_runtime_command(bundle, "run", target=target, profile=profile)
+    command.extend(["--reconnect", "--exec", "true"])
     try:
         result = subprocess.run(
             command,
@@ -114,18 +85,16 @@ def _verify_keyboard_session(
         raise SystemExit(result.returncode)
 
 
-def forward_keyboard(  # noqa: PLR0913 -- bundle, controls and privilege policies stay explicit.
+def forward_keyboard(
     bundle: CurrentBundle,
-    manifest: dict[str, Any],
     target: str,
     config: dict[str, Any],
     keyboard: str,
     *,
     profile: str | None,
-    build_type: str,
 ) -> None:
     """Replace this process with the keyboard bridge after authenticating its session."""
-    _verify_keyboard_session(bundle, manifest, target, profile=profile, build_type=build_type)
+    _verify_keyboard_session(bundle, target, profile=profile)
     client = _keyboard_client(bundle)
     arguments = [
         str(client),

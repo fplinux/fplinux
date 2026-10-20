@@ -50,8 +50,19 @@ def apply_scripts_config(arguments: list[str]) -> None:
 
 
 def resolve_initramfs_compression(config: Path) -> None:
-    """Model the external Kconfig choice: XZ compression requires an initramfs source."""
+    """Model removal of initial RAM disks and the embedded-archive compression choice."""
     values = kconfig_values(config.read_text())
+    if values.get("CONFIG_BLK_DEV_INITRD") == "n":
+        for symbol in (
+            "CONFIG_INITRAMFS_SOURCE",
+            "CONFIG_INITRAMFS_COMPRESSION_XZ",
+            "CONFIG_INITRAMFS_COMPRESSION_GZIP",
+            "CONFIG_RD_GZIP",
+            "CONFIG_RD_XZ",
+        ):
+            values.pop(symbol, None)
+        config.write_text("".join(f"{symbol}={value}\n" for symbol, value in values.items()))
+        return
     if not values.get("CONFIG_INITRAMFS_SOURCE", '""').strip('"'):
         config.write_text(
             config.read_text().replace(
@@ -94,7 +105,9 @@ class AnalyzerContext:
             ),
             mock.patch.object(kernel_contexts, "discover_targets", return_value=(self.target,)),
             mock.patch.object(
-                kernel_contexts, "discover_profiles", return_value=("default", "microsd-uboot")
+                kernel_contexts,
+                "discover_profiles",
+                return_value=("default", "microsd-uboot", "microsd-root"),
             ),
             mock.patch.object(
                 kernel_analysis,
@@ -157,6 +170,7 @@ def analyzer_context() -> Iterator[AnalyzerContext]:
         projected = root / "driver.c"
         projected.write_text("int test_driver;\n")
         target_config: dict[str, Any] = {
+            "bootstrap": {"initramfs_delivery": "embedded"},
             "identity": {
                 "display_name": "Test target",
                 "compatible": "test,target",
@@ -235,6 +249,59 @@ class KernelAnalyzerWorkIsolationTests:
             analyzer_context.cache_path("work") / "include/generated/fplinux/fplinux-root.dtsi"
         )
         assert ("init=/init rdinit=/init") in (root_include.read_text())
+
+    def test_external_ram_analysis_keeps_ram_bootargs_without_embedding_an_archive(
+        self, analyzer_context: AnalyzerContext
+    ) -> None:
+        """A separately loaded boot archive does not select Kbuild's compression choice."""
+        analyzer_context.defconfig.write_text(
+            'CONFIG_TEST=y\nCONFIG_INITRAMFS_SOURCE="old.cpio"\n'
+            "CONFIG_INITRAMFS_COMPRESSION_XZ=y\n"
+        )
+        analyzer_context.target_config["bootstrap"]["initramfs_delivery"] = "external"
+
+        analyzer_context.run_check(analyzer_context.target_config)
+
+        output = analyzer_context.cache_path("work")
+        config = kconfig_values((output / ".config").read_text())
+        assert config["CONFIG_INITRAMFS_SOURCE"] == '""'
+        assert not (output / "initramfs").exists()
+        assert (
+            "init=/init rdinit=/init"
+            in (output / "include/generated/fplinux/fplinux-root.dtsi").read_text()
+        )
+
+    def test_external_root_accepts_removed_initrd_settings_after_modeled_kconfig(
+        self, analyzer_context: AnalyzerContext
+    ) -> None:
+        """Disabling initial RAM disks removes their inherited source and decoders."""
+        (analyzer_context.source / "scripts/config").write_text("#!/bin/sh\n")
+        analyzer_context.defconfig.write_text(
+            'CONFIG_TEST=y\nCONFIG_BLK_DEV_INITRD=y\nCONFIG_INITRAMFS_SOURCE=""\n'
+            "CONFIG_INITRAMFS_COMPRESSION_XZ=y\nCONFIG_RD_GZIP=y\nCONFIG_RD_XZ=y\n"
+        )
+        config = analyzer_context.target_config
+        config["bootstrap"]["initramfs_delivery"] = "none"
+        config["linux"].update(
+            root={
+                "kind": "external",
+                "filesystem": "ext4",
+                "partuuid": "46504c52-02",
+                "wait_seconds": 10,
+            },
+            config_disable=["CONFIG_BLK_DEV_INITRD"],
+        )
+        # This scenario observes Kconfig policy; DTB validation has separate tests.
+        with mock.patch.object(kernel_analysis, "verify_root_bootargs"):
+            analyzer_context.run_check(config, "microsd-root")
+
+        output = (
+            analyzer_context.cache
+            / "analysis/sparse/test-target/profiles/microsd-root/builds/release/work"
+        )
+        actual = kconfig_values((output / ".config").read_text())
+        assert actual == {"CONFIG_TEST": "y", "CONFIG_BOARD": "y", "CONFIG_BLK_DEV_INITRD": "n"}
+        assert not (output / "initramfs").exists()
 
     def test_profile_actions_reach_configuration_through_modeled_kconfig(
         self, analyzer_context: AnalyzerContext

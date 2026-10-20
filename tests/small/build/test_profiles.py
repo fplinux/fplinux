@@ -10,10 +10,13 @@ from unittest import mock
 import pytest
 from fplinux_cli import common
 from fplinux_cli.alpine import selection as alpine_state
+from fplinux_cli.build.bootstrap.verify import verify_forbidden_dtb_markers
 from fplinux_cli.build.kernel import configuration as kernel_build
 from fplinux_cli.build.kernel import prepare as linux_build
 from fplinux_cli.common import ROOT
 from fplinux_cli.manifests import kernel, paths, platforms, targets
+
+from tests.fdt import binary_tree
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -118,6 +121,28 @@ class GlobalProfileTests:
         assert (card["uboot"]["defconfig"]) == ("uboot/defconfig")
         assert (card["runtime"]) == (ram["runtime"])
 
+    @staticmethod
+    @pytest.mark.usefixtures("profile_context")
+    @pytest.mark.parametrize("marker", ["spi-nand", "mtd", "ubi", "emmc", "forbidden"])
+    def test_storage_policy_rejects_common_and_board_dtb_nodes(marker: str) -> None:
+        """A board's additions cannot replace the mandatory internal-storage exclusions."""
+        config = targets.load_target("first")
+        with pytest.raises(SystemExit, match=f"forbidden storage marker {marker}"):
+            verify_forbidden_dtb_markers(
+                binary_tree([], [(marker.upper(), [], [])]),
+                config["linux"]["forbidden_dtb_markers"],
+            )
+
+    @pytest.mark.parametrize("old_field", ["forbidden_config", "forbidden_dtb_markers"])
+    def test_storage_policy_rejects_replaced_raw_fields(
+        self, profile_context: ProfileContext, old_field: str
+    ) -> None:
+        """Manifests must declare board additions through the current explicit schema."""
+        manifest = profile_context.root / "targets/first/target.toml"
+        manifest.write_text(manifest.read_text().replace(f"additional_{old_field}", old_field))
+        with pytest.raises(SystemExit, match="target linux"):
+            targets.load_target("first")
+
     def test_board_local_directory_cannot_define_a_global_profile(
         self, profile_context: ProfileContext
     ) -> None:
@@ -200,52 +225,19 @@ class GlobalProfileTests:
         assert (set(groups)) == ({"bluetooth", "fm-radio"})
         assert ("fm-radio") not in (targets.load_target("second")["device_data"]["groups"])
 
-    def test_board_maps_declaration_alone_needs_no_target_parser_or_sizes(
-        self, profile_context: ProfileContext
-    ) -> None:
-        """The target loader accepts board-map declarations without a target parser or size."""
-        profile_context.write_target_manifest("first", "target-without-bluetooth.toml")
-        path = profile_context.root / "targets/first/target.toml"
-        declaration = (
-            '\n[board_maps]\nfirmware = [{ source = "pinmap.bin", destination = "pinmap.bin" }]\n'
-        )
-        path.write_text(path.read_text(encoding="utf-8") + declaration, encoding="utf-8")
-        assert (targets.load_target("first")["device_data"]) == (
-            {"groups": {"board-maps": [{"source": "pinmap.bin", "destination": "pinmap.bin"}]}}
-        )
-
     @pytest.mark.parametrize("profile", ["default", "microsd-uboot"])
-    def test_loader_map_members_stay_board_owned_across_boot_profiles(
+    def test_first_stage_loader_is_shared_across_boards_and_boot_profiles(
         self, profile_context: ProfileContext, profile: str
     ) -> None:
-        """The manifest supplies both runtime map paths and the selected build outputs."""
-        path = profile_context.root / "targets/first/target.toml"
-        path.write_text(
-            path.read_text(encoding="utf-8")
-            + '\n[loader_maps]\npinmap = { member = "first/pins.bin", '
-            'sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" }\n'
-            'keymap = { member = "first/keys.bin", '
-            'sha256 = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" }\n',
-            encoding="utf-8",
-        )
+        """Platform loader inputs survive target selection and a different system root."""
+        del profile_context
         config = targets.load_target("first", profile)
-        assert config["runtime"]["assets"] == {
-            "fdl1": "assets/loader.bin",
-            "pinmap": "assets/pinmap.bin",
-            "keymap": "assets/keymap.bin",
-        }
-        assert config["loader_assets"][1]["output"] == [
+        assert config["runtime"]["assets"] == {"fdl1": "assets/loader.bin"}
+        assert config["loader_assets"][0]["output"] == [
             {
-                "role": "pinmap",
-                "path": "pinmap.bin",
-                "member": "first/pins.bin",
-                "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-            },
-            {
-                "role": "keymap",
-                "path": "keymap.bin",
-                "member": "first/keys.bin",
-                "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                "role": "fdl1",
+                "path": "loader.bin",
+                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             },
         ]
         assert targets.load_target("second", profile)["runtime"]["assets"] == {
@@ -479,14 +471,14 @@ class KernelConfigCompositionTests:
 
 
 class BuildTypeSelectionTests:
-    """Kernel type selection preserves current rootfs and prepared-source consumers."""
+    """Build type selection preserves boot policy, optional APKs and prepared sources."""
 
     @staticmethod
     @pytest.mark.parametrize(("target", "profile"), REPOSITORY_PROFILES)
-    def test_build_type_does_not_change_packages_root_or_linux_source_recipe(
+    def test_debug_adds_tools_without_changing_boot_bundle_or_linux_source_recipe(
         target: str, profile: str
     ) -> None:
-        """Both types reuse each boot profile's unchanged packages and source projection."""
+        """Debug adds tracing tools while retaining boot policy, optional APKs and sources."""
         sources = common.load_toml(ROOT / "sources.lock.toml")
         release = targets.load_target(target, profile)
         debug = targets.load_target(target, profile, build_type="debug")
@@ -497,7 +489,8 @@ class BuildTypeSelectionTests:
         assert (release["profile"]) == (debug["profile"])
         release_packages = alpine_state.selected_packages(platform, release)
         debug_packages = alpine_state.selected_packages(platform, debug)
-        assert (release_packages) == (debug_packages)
+        assert "fplinux-debug-tools" not in release_packages
+        assert debug_packages == tuple(sorted((*release_packages, "fplinux-debug-tools")))
         assert (alpine_state.bundle_packages(platform, release, release_packages)) == (
             alpine_state.bundle_packages(platform, debug, debug_packages)
         )
@@ -517,7 +510,7 @@ class RepositoryProfileCompressionTests:
     ) -> None:
         """RAM admits ZSTD and microSD admits LZO-RLE for every target offering them."""
         prepared_configs = {
-            "default": {
+            "initramfs": {
                 "correct": (
                     "CONFIG_ZRAM=y\n"
                     "# CONFIG_ZRAM_BACKEND_LZO is not set\n"
@@ -531,7 +524,7 @@ class RepositoryProfileCompressionTests:
                     "CONFIG_ZRAM_DEF_COMP_LZORLE=y\n"
                 ),
             },
-            "microsd-uboot": {
+            "external": {
                 "correct": (
                     "# CONFIG_BLK_DEV_INITRD is not set\n"
                     "CONFIG_EXT4_FS=y\n"
@@ -552,8 +545,8 @@ class RepositoryProfileCompressionTests:
         }
 
         prepared = tmp_path / ".config"
-        contents = prepared_configs[profile]
         linux = targets.load_target(target, profile)["linux"]
+        contents = prepared_configs[linux["root"]["kind"]]
         compressor_enable = [
             symbol
             for symbol in linux["config_enable"]

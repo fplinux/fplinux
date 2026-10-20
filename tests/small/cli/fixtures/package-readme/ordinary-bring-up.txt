@@ -4,9 +4,6 @@ Use an archive for this exact phone. On a Linux x86-64 PC, install Python 3.14,
 GNU coreutils, iproute2 and OpenSSH. The PC must configure a new USB network
 interface through IPv4 DHCP. Use a USB data cable.
 
-XDG_RUNTIME_DIR must name an existing absolute directory owned by your user;
-a normal Linux login session provides it.
-
 From the extracted archive directory, check its files and install USB rules:
 
   sha256sum -c SHA256SUMS
@@ -15,16 +12,25 @@ From the extracted archive directory, check its files and install USB rules:
 
 Keep the powered-off phone disconnected. Start the runner as your regular user:
 
-  ./runner/run.py
+  python3.14 -I fplinux.py run
 
 Wait until the runner asks for the phone, then follow its instruction:
 
   Hold the left soft key while connecting USB.
 
-If connected too early, disconnect and restart this sequence. Exit the shell
-to return to the PC; Linux keeps running. Reconnect with:
+If connected too early, disconnect and restart this sequence.
 
-  ./runner/run.py --reconnect
+Exit the SSH shell to return to the PC; Linux keeps running. Leave it
+connected and run the same command again to reopen SSH, or require the
+saved session with:
+
+  python3.14 -I fplinux.py run --reconnect
+
+Keep this extracted directory for this phone. Private connection keys and
+session records are stored in data/session. Each launch writes a new log
+in logs and displays its exact path.
+Loader progress is printed in the terminal; add --events /path/to/events.jsonl
+to a fresh load to save its progress events.
 
 Phone support, controls and limits: docs/porting/checklist/index.html
 Shared archive procedures: docs/guides/standalone-archive/index.html

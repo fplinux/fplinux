@@ -49,10 +49,12 @@ def _aport_checksum_snapshot(package: str) -> WorkspaceSnapshot:
 
 
 def _checksum_block_bounds(data: bytes, *, path: Path) -> tuple[int, int] | None:
-    """Locate the one simple multiline ``sha512sums`` assignment in an APKBUILD."""
+    """Locate the multiline or initially empty ``sha512sums`` assignment."""
     offset = 0
     start: int | None = None
     for line in data.splitlines(keepends=True):
+        if line.rstrip(b"\r\n") == b'sha512sums=""':
+            return offset, offset + len(line)
         if line.rstrip(b"\r\n") == b'sha512sums="':
             if start is not None:
                 fail(f"APKBUILD has multiple sha512sums blocks: {path}")
@@ -122,6 +124,7 @@ def _checksum_container_command(  # noqa: PLR0913
         "/cache/downloads",
         package,
         SOURCE_DATE_EPOCH,
+        "offline" if offline else "online",
     ]
 
 

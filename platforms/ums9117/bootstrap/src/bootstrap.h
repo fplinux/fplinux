@@ -54,6 +54,5 @@ void ums9117_bootstrap_copy_dtb(uint32_t destination, size_t bytes);
 void ums9117_bootstrap_flush_dcache_range(void *start, size_t bytes);
 
 void lcd_appinit(void);
-void keytrn_init(void);
 
 #endif

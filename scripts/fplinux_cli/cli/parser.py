@@ -7,6 +7,7 @@ import argparse
 import os
 from pathlib import Path
 
+from fplinux_cli.build import DEFAULT_BUILD_MEMORY_MIB
 from fplinux_cli.cli.logs import add_log_arguments
 from fplinux_cli.manifests.identity import BUILD_TYPES
 from fplinux_cli.manifests.paths import GLOBAL_PROFILES
@@ -30,17 +31,17 @@ def _check_scope(value: str) -> str:
     return value
 
 
-def _positive_jobs(value: str) -> int:
-    """Parse one positive worker limit before it can take the cache lock."""
+def _positive_integer(value: str) -> int:
+    """Parse one positive resource limit before it can take the cache lock."""
     try:
-        jobs = int(value)
+        number = int(value)
     except ValueError as error:
         message = "must be a positive integer"
         raise argparse.ArgumentTypeError(message) from error
-    if jobs < 1:
+    if number < 1:
         message = "must be a positive integer"
         raise argparse.ArgumentTypeError(message)
-    return jobs
+    return number
 
 
 def _default_build_jobs() -> int:
@@ -49,12 +50,12 @@ def _default_build_jobs() -> int:
 
 
 def _profile_name(value: str) -> str:
-    """Accept one of the two public build profiles."""
+    """Accept one declared public build profile."""
     if TARGET_NAME.fullmatch(value) is None:
         raise argparse.ArgumentTypeError(f"invalid profile name: {value!r}")
     if value not in GLOBAL_PROFILES:
         raise argparse.ArgumentTypeError(
-            f"unknown profile: {value!r} (choose from default, microsd-uboot)"
+            f"unknown profile: {value!r} (choose from {', '.join(GLOBAL_PROFILES)})"
         )
     return value
 
@@ -84,33 +85,40 @@ def _add_boot_profile_options(parser: argparse.ArgumentParser, verb: str) -> Non
     )
 
 
-def _add_device_data_prepare_command(
+def _add_device_data_commands(
     parser: argparse.ArgumentParser,
     targets: tuple[str, ...],
 ) -> None:
-    """Add the canonical fitted-data preparation command."""
+    """Declare normal phone-data preparation and the separate board report."""
     commands = parser.add_subparsers(
         dest="device_data_command",
         required=True,
-        metavar="{prepare}",
+        metavar="{prepare,report}",
     )
     prepare = commands.add_parser(
         "prepare",
-        help="extract all declared device data from one physical NAND backup",
+        help="prepare all declared device data from one supported source",
     )
     prepare.add_argument("target", choices=targets)
-    prepare.add_argument(
+    source = prepare.add_mutually_exclusive_group()
+    source.add_argument(
         "--events", type=Path, metavar="PATH", help="write loader events as JSON lines"
     )
-    prepare.add_argument(
+    source.add_argument(
         "--from-dump",
         type=Path,
         metavar="PATH",
         help="use an existing physical NAND backup without connecting the phone",
     )
+    source.add_argument(
+        "--from-originals",
+        type=Path,
+        metavar="MANIFEST.json",
+        help="use a manifest of named original files without connecting the phone",
+    )
     prepare.add_argument(
         "--jobs",
-        type=_positive_jobs,
+        type=_positive_integer,
         default=_default_build_jobs(),
         metavar="N",
         help="limit jobs when the read-only NAND loader must be built",
@@ -119,6 +127,14 @@ def _add_device_data_prepare_command(
         "--offline",
         action="store_true",
         help="build the read-only NAND loader without network access",
+    )
+    report = commands.add_parser(
+        "report", help="extract a board report from a saved NAND without selecting phone data"
+    )
+    report.add_argument("target", choices=targets)
+    report.add_argument("--from-dump", type=Path, required=True, metavar="PATH")
+    report.add_argument(
+        "--offline", action="store_true", help="prepare the tool without network access"
     )
 
 
@@ -133,13 +149,21 @@ def create_parser(
         metavar=_PUBLIC_COMMAND_METAVAR,
     )
     commands.add_parser("doctor", help="check the project-local build runtime")
-    check_parser = commands.add_parser("check", help="run the source quality gate")
+    check_parser = commands.add_parser(
+        "check",
+        help="run quality checks and tests",
+        description=(
+            "Run every quality scope by default. The python scope runs Python analyzers; "
+            "the tests scope runs all five test tiers."
+        ),
+    )
     _add_build_type_option(check_parser)
     check_parser.add_argument(
         "scopes",
         nargs="*",
         type=_check_scope,
         metavar=_CHECK_SCOPE_METAVAR,
+        help="select scopes; omit to run all checks and tests",
     )
     check_parser.add_argument(
         "--list",
@@ -150,7 +174,7 @@ def create_parser(
     check_parser.add_argument(
         "--verbose",
         action="store_true",
-        help="stream complete stage output while retaining logs",
+        help="stream complete stage output; incompatible with --jobs greater than 1",
     )
     check_parser.add_argument(
         "--no-cache",
@@ -159,10 +183,13 @@ def create_parser(
     )
     check_parser.add_argument(
         "--jobs",
-        type=_positive_jobs,
+        type=_positive_integer,
         default=None,
         metavar="N",
-        help="limit concurrent kernel check contexts (default: 3, or 1 with --verbose)",
+        help=(
+            "limit concurrent kernel check contexts "
+            "(default: 3 with kernel, 1 without kernel or with --verbose)"
+        ),
     )
     check_parser.add_argument(
         "--profile",
@@ -283,10 +310,23 @@ def create_parser(
         help="build one global profile (default: default)",
     )
     build_parser.add_argument(
+        "--without-device-data",
+        dest="include_device_data",
+        action="store_false",
+        help="exclude locally prepared device data from the build",
+    )
+    build_parser.add_argument(
         "--jobs",
         type=int,
         default=_default_build_jobs(),
         help="limit parallel compilation (default: available CPUs, up to 8)",
+    )
+    build_parser.add_argument(
+        "--memory-mib",
+        type=_positive_integer,
+        default=DEFAULT_BUILD_MEMORY_MIB,
+        metavar="N",
+        help="set the build container memory budget in MiB (default: %(default)s)",
     )
     build_parser.add_argument(
         "--verbose",
@@ -334,7 +374,7 @@ def create_parser(
     package_parser.add_argument(
         "--autonomous",
         action="store_true",
-        help="prepare this phone's own data on first run and boot it on later runs",
+        help="bundle host tools and a single launcher for this phone",
     )
     package_parser.add_argument(
         "--host",
@@ -356,11 +396,24 @@ def create_parser(
         action="store_true",
         help="under the global cache lock, remove disposable staged workspaces",
     )
-    run_parser = commands.add_parser("run", help="run a target's volatile-RAM loader")
+    run_parser = commands.add_parser(
+        "run", help="prepare phone data, start Linux or reopen its SSH connection"
+    )
     _add_build_type_option(run_parser)
     run_parser.add_argument("target", choices=targets)
     run_parser.add_argument(
+        "--from-dump",
+        type=Path,
+        metavar="PATH",
+        help="prepare the first run from an existing complete NAND backup",
+    )
+    run_parser.add_argument(
         "--events", type=Path, metavar="PATH", help="write loader events as JSON lines"
+    )
+    run_parser.add_argument(
+        "--loader-trace",
+        action="store_true",
+        help="report RAM-loader protocol commands and reply sizes without payload bytes",
     )
     _add_boot_profile_options(run_parser, "run")
 
@@ -396,9 +449,9 @@ def create_parser(
     nand_identify_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
 
     device_data_parser = commands.add_parser(
-        "device-data", help="prepare target-owned fitted data from one NAND image"
+        "device-data", help="prepare phone data or inspect a saved NAND for a board report"
     )
-    _add_device_data_prepare_command(device_data_parser, targets)
+    _add_device_data_commands(device_data_parser, targets)
 
     target_parser = commands.add_parser("target", help="create a phone target")
     target_commands = target_parser.add_subparsers(

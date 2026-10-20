@@ -29,3 +29,18 @@ def panel_profile(panel_root: Path) -> dict[str, Any]:
     return load_display(
         "demo", {"panel": "display/panel.toml", "boot_font": "7x14"}, root=panel_root
     )
+
+
+@pytest.fixture
+def mipi_dbi_source() -> bytes:
+    """Supply a short MIPI DBI command sequence with an explicit delay."""
+    return (ROOT / "tests/fixtures/display/mipi-dbi-panel.toml").read_bytes()
+
+
+@pytest.fixture
+def mipi_dbi_display(mipi_dbi_source: bytes) -> dict[str, Any]:
+    return load_display(
+        "demo",
+        {"panel": "display/panel.toml", "boot_font": "6x8"},
+        captured={"targets/demo/display/panel.toml": mipi_dbi_source},
+    )

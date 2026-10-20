@@ -22,6 +22,7 @@ from tests import ROOT
 from tests.bundle_support import file_record
 from tests.fixtures import portable_archive as archive_fixtures
 from tests.fixtures.executables import install_python_script
+from tests.fixtures.portable_archive import capsule_files
 from tests.process import run_process
 
 if TYPE_CHECKING:
@@ -38,19 +39,32 @@ class AutonomousRunnerArchive:
 
     root: Path
 
-    def run(self, *arguments: str) -> subprocess.CompletedProcess[str]:
-        """Enter the delivered launcher with local terminal input and owned tool paths."""
-        environment = {
+    def environment(self) -> dict[str, str]:
+        """Keep every controlled executable and USB endpoint inside this archive."""
+        return {
             "PATH": str(self.root / "bin"),
             "LANG": "C.UTF-8",
             "PYTHONDONTWRITEBYTECODE": "1",
             "FPLINUX_AUTONOMOUS_TEST_ROOT": str(self.root),
         }
+
+    def run(self, *arguments: str) -> subprocess.CompletedProcess[str]:
+        """Enter the delivered launcher with local terminal input and owned tool paths."""
         return run_process(
             [sys.executable, "-I", str(self.root / "terminal.py"), *arguments],
             name="autonomous archive runner",
             cwd=self.root.parent,
-            env=environment,
+            env=self.environment(),
+            timeout=30,
+        )
+
+    def run_direct(self, *arguments: str) -> subprocess.CompletedProcess[str]:
+        """Execute the real fixed-bundle CLI with no terminal or checkout imports."""
+        return run_process(
+            [sys.executable, "-I", str(self.root / "fplinux.py"), *arguments],
+            name="noninteractive archive command",
+            cwd=self.root.parent,
+            env=self.environment(),
             timeout=30,
         )
 
@@ -66,12 +80,11 @@ def _refresh_archive_closure(root: Path) -> None:
     """Declare the controlled delivery bytes for the real admission consumers."""
     runtime_path = root / "runtime-manifest.json"
     runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
-    runtime["assets"].update({"pinmap": "assets/pinmap.bin", "keymap": "assets/keymap.bin"})
     runtime["personalization"]["template_sha256"] = hashlib.sha256(bytes(512)).hexdigest()
     for device in runtime["usb"].values():
         device["wait_seconds"] = 2
     runtime["adapter"].update({"handoff_wait_seconds": 2, "usb_release_wait_seconds": 2})
-    for relative in (*runtime["sha256"], "assets/pinmap.bin", "assets/keymap.bin"):
+    for relative in runtime["sha256"]:
         runtime["sha256"][relative] = hashlib.sha256((root / relative).read_bytes()).hexdigest()
     runtime_path.write_text(json.dumps(runtime), encoding="utf-8")
     build_path = root / "build-manifest.json"
@@ -94,14 +107,15 @@ def autonomous_runner_archive(portable_archive: PortableArchive) -> AutonomousRu
     boundary = root / "boundary"
     boundary.mkdir()
     (boundary / "bootrom").touch()
-    (root / "assets/pinmap.bin").write_bytes(b"bundle fallback pinmap")
-    (root / "assets/keymap.bin").write_bytes(b"bundle fallback keymap")
     (root / "image/ramboot.bin").write_bytes(b"DHTB" + b"p" * 1020 + bytes(512) + b"suffix")
     (root / "60-fplinux.rules").write_bytes(b'SUBSYSTEM=="usb", MODE="0660"\n')
     peer_root = ROOT / "tests/host_process/runtime/fixtures/autonomous-runner"
     shutil.copyfile(peer_root / "autonomous_terminal.py", root / "terminal.py")
     discovery = (peer_root / "autonomous_usb_boundary.py").read_text(encoding="utf-8")
-    for relative in ("runner/platform_adapter.py", "runner/ssh_transport.py"):
+    for relative in (
+        "platforms/ums9117/host/adapter.py",
+        "scripts/fplinux_cli/runtime/ssh_transport.py",
+    ):
         with (root / relative).open("a", encoding="utf-8") as stream:
             stream.write("\n" + discovery)
     tools = root / "bin"
@@ -129,17 +143,20 @@ def test_prepared_phone_data_reaches_bridge_with_owned_log_and_archive_session(
 ) -> None:
     """Real orchestration forwards prepared data and performs the controlled USB setup."""
     archive = autonomous_runner_archive
-    expected_capsule = (archive.root / "data/phone/device-data.cpio").read_bytes()
 
     result = archive.run()
 
     assert result.returncode == 0, result.stderr
     received = archive.root / "boundary/bridge-received"
-    assert (received / "device-data.cpio").read_bytes() == expected_capsule
-    assert (received / "pinmap.bin").read_bytes() == bytes.fromhex(
-        "b0002a40 10000000 ffffffff ffffffff"
-    )
-    assert (received / "keymap.bin").read_bytes() == bytes.fromhex("2a00 3100")
+    assert capsule_files((received / "device-data.cpio").read_bytes()) == {
+        "lib/firmware/chip/radio.bin": b"radio",
+        "lib/firmware/chip/fm.bin": b"fm",
+        "lib/firmware/fplinux/audio.bin": b"profile",
+    }
+    assert not (received / "pinmap.bin").exists()
+    assert not (received / "keymap.bin").exists()
+    assert not (archive.root / "data/phone/device-data.cpio").exists()
+    assert not list((archive.root / "data").glob(".boot-*"))
     assert (archive.root / "boundary/usb-access.rules").read_bytes() == (
         b'SUBSYSTEM=="usb", MODE="0660"\n'
     )
@@ -152,7 +169,7 @@ def test_prepared_phone_data_reaches_bridge_with_owned_log_and_archive_session(
     assert not Path(session["image"]).exists()
     assert (archive.root / "boundary/handoff-session.txt").read_text() == session["session_id"]
     assert archive.shells() == [session]
-    log = max((archive.root / "logs").glob("*.log")).read_text()
+    log = max((archive.root / "logs").rglob("*.log")).read_text()
     for output in (
         "controlled RAM loader stdout",
         "controlled RAM loader stderr",
@@ -163,6 +180,30 @@ def test_prepared_phone_data_reaches_bridge_with_owned_log_and_archive_session(
         assert output not in result.stdout + result.stderr
     assert "controlled interactive shell output" in result.stdout
     assert "controlled interactive shell output" not in log
+
+
+def test_first_run_rejects_a_corrupted_ram_image_before_privileged_usb_setup(
+    autonomous_runner_archive: AutonomousRunnerArchive,
+) -> None:
+    """A new archive's backup boot must admit its image before installing host rules."""
+    archive = autonomous_runner_archive
+    shutil.rmtree(archive.root / "data/phone")
+    image = archive.root / "image/ramboot.bin"
+    contents = bytearray(image.read_bytes())
+    contents[-1] ^= 1
+    image.write_bytes(contents)
+
+    result = archive.run()
+
+    assert result.returncode == 1
+    assert "runtime closure differs from its immutable build manifest" in result.stderr
+    assert not (archive.root / "boundary/usb-access.rules").exists()
+    assert not (archive.root / "boundary/rules-reloaded").exists()
+    assert not (archive.root / "boundary/ram-loads.txt").exists()
+    assert not (archive.root / "data/nand.bin").exists()
+    log = max((archive.root / "logs").rglob("*.log")).read_text()
+    assert "usb-access-setup" not in log
+    assert "Setting up USB access" not in result.stdout + log
 
 
 @pytest.fixture
@@ -192,6 +233,58 @@ def test_live_archive_session_reopens_shell_without_another_ram_load(
     assert archive.shells() == [saved_session, saved_session]
     assert (archive.root / "boundary/ram-loads.txt").read_text() == "RAM load\n"
     assert (archive.root / "boundary/loaded-image.bin").read_bytes() == loaded_image
+
+
+def test_explicit_repreparation_refuses_the_previous_live_phone_without_another_load(
+    live_runner_archive: AutonomousRunnerArchive, tmp_path: Path
+) -> None:
+    """Prepared bytes change through the public preparation action while old RAM stays live."""
+    archive = live_runner_archive
+    saved_session = archive.shells()[0]
+    backup = tmp_path / "another-phone.bin"
+    with backup.open("wb") as stream:
+        stream.truncate(138412032)
+        stream.write(b"other")
+
+    prepared = archive.run_direct("prepare", "--replace", "--from-dump", str(backup))
+    assert prepared.returncode == 0, prepared.stderr
+    assert (archive.root / "data/phone/groups/bluetooth/radio.bin").read_bytes() == b"other"
+
+    stopped = archive.run()
+
+    assert stopped.returncode == 1
+    assert "different runtime or prepared phone data" in stopped.stderr
+    assert archive.shells() == [saved_session]
+    assert (archive.root / "boundary/ram-loads.txt").read_text() == "RAM load\n"
+
+
+def test_explicit_remote_command_stdout_contains_only_the_remote_bytes(
+    live_runner_archive: AutonomousRunnerArchive,
+) -> None:
+    """The actual entrypoint keeps runtime progress off the remote command's stdout."""
+    archive = live_runner_archive
+
+    result = archive.run_direct("run", "--reconnect", "--exec", "printf ready")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "ready"
+    assert "Log:" in result.stderr
+    assert (archive.root / "boundary/ram-loads.txt").read_text() == "RAM load\n"
+
+
+def test_explicit_reconnect_shell_requires_a_terminal_without_starting_another_boot(
+    live_runner_archive: AutonomousRunnerArchive,
+) -> None:
+    """The delivered CLI rejects an explicit noninteractive shell after authenticating."""
+    archive = live_runner_archive
+    saved_session = archive.shells()[0]
+
+    result = archive.run_direct("run", "--reconnect")
+
+    assert result.returncode == 1
+    assert "interactive SSH requires a terminal" in result.stderr
+    assert archive.shells() == [saved_session]
+    assert (archive.root / "boundary/ram-loads.txt").read_text() == "RAM load\n"
 
 
 @pytest.mark.parametrize(

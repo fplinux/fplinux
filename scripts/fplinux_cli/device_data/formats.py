@@ -299,7 +299,7 @@ def fixed_nv_records(partition: bytes, required_sizes: Mapping[int, int]) -> dic
 
 @dataclass(frozen=True)
 class PreparedGroup:
-    """Original fitted records, the complete normalized output and review reports for one group.
+    """Original records, the complete normalized output and review reports for one group.
 
     Reports describe the extraction for a person; builds never read them.
     """
@@ -311,6 +311,6 @@ class PreparedGroup:
 
 @dataclass(frozen=True)
 class DeviceDataPreparation:
-    """All independently declared groups extracted from one physical NAND image."""
+    """All independently declared groups prepared from one admitted source."""
 
     groups: dict[str, PreparedGroup]

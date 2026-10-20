@@ -12,15 +12,15 @@ import pytest
 from fplinux_cli import common
 from fplinux_cli.alpine import selection, signing
 from fplinux_cli.artifacts.bundles import publish_current_bundle
-from fplinux_cli.build import reuse as bundles
 from fplinux_cli.build.host_tools import linux_host, windows_driver
 from fplinux_cli.build.host_tools import windows as windows_build
+from fplinux_cli.build.identity import runtime_identity
+from fplinux_cli.build.runtime import device_data_descriptor, runtime_source_files
 from fplinux_cli.common import canonical_json_bytes
 from fplinux_cli.environment import image_state, images
 from fplinux_cli.environment.image_state import ImageState
 from fplinux_cli.manifests import platforms, releases, targets
 from fplinux_cli.packaging import archive as package
-from fplinux_cli.packaging import autonomous as autonomous_package
 from fplinux_cli.packaging import sources as package_sources
 from fplinux_cli.workspace import build_inputs
 from fplinux_cli.workspace.capture import WorkspaceSnapshot
@@ -35,6 +35,14 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
+class ArchivePhone:
+    """Select one phone and whether the fixture requires personal preparation."""
+
+    target: str
+    required_phone_data: bool = True
+
+
+@dataclass(frozen=True)
 class ArchiveInputs:
     """Synthetic bundle and prepared tools owned by one archive case."""
 
@@ -43,6 +51,7 @@ class ArchiveInputs:
     bundle: Path
     manifest: bytes
     native_files: dict[str, Path]
+    linux_files: dict[str, Path]
     windows_scripts: dict[str, bytes]
 
 
@@ -61,30 +70,39 @@ def archive_inputs(
 ) -> ArchiveInputs:
     """Replace compilation and host identity, retaining real collection and ZIP writing."""
     source = common.ROOT
-    target = getattr(request, "param", "nokia-ta1618")
+    selected = getattr(request, "param", "nokia-ta1618")
+    phone = ArchivePhone(selected) if isinstance(selected, str) else selected
+    target = phone.target
     config = targets.load_target(target)
+    if not phone.required_phone_data:
+        config["device_data"] = {"parser": None, "groups": {}}
     platform = platforms.load_platform(config["platform"])
     rootfs_packages = selection.selected_packages(platform, config)
     selected_bundle_packages = selection.bundle_packages(platform, config, rootfs_packages)
     release = releases.load_release(target, bundle_packages=selected_bundle_packages)
-    for relative in (
+    source_files = [
         "LICENSE",
         "LICENSES/Unlicense.txt",
         "third-party-licenses/musl/COPYRIGHT",
         "common/60-fplinux.rules",
-        "common/autonomous.py",
-        "common/__init__.py",
-        "common/windows_host.py",
+        "common/runtime.py",
         "common/Run.sh",
         "common/Run.cmd",
-        "platforms/ums9117/host/stock_image.py",
-        "platforms/ums9117/host/nand_ecc.py",
-        "platforms/ums9117/host/nand-ecc/Makefile",
-        "platforms/ums9117/host/nand-ecc/ums9117-nand-ecc.c",
         "include/fplinux/fplinux-cli.h",
         "lib/fplinux/fplinux-cli.c",
-        f"targets/{target}/{config['device_data']['parser']}",
-    ):
+    ]
+    if config["platform"] == "ums9117":
+        source_files.extend(
+            [
+                "platforms/ums9117/host/nand_ecc.py",
+                "platforms/ums9117/host/nand-ecc/Makefile",
+                "platforms/ums9117/host/nand-ecc/ums9117-nand-ecc.c",
+            ]
+        )
+        parser = config["device_data"]["parser"]
+        if parser is not None:
+            source_files.append(f"targets/{target}/{parser}")
+    for relative in source_files:
         write_archive_file(tmp_path, relative, (source / relative).read_bytes())
     shutil.copytree(source / "scripts/fplinux_cli", tmp_path / "scripts/fplinux_cli")
     shutil.copytree(source / "alpine/aports", tmp_path / "alpine/aports")
@@ -102,45 +120,63 @@ def archive_inputs(
     generation = "c" * 64
     bundle = tmp_path / ".cache/out" / target / "builds/release/bundles" / generation
     normalized = package.load_release_manifest(target, config)
-    for relative in normalized["bundle_files"]:
+    runtime_sources = runtime_source_files(target, config, root=source)
+    bundle_files = [*normalized["bundle_files"], *runtime_sources]
+    if device_data_descriptor(target, config) is not None and (config.get("nand") or {}).get(
+        "ecc_format"
+    ):
+        bundle_files.append("host/ums9117-nand-ecc")
+    for relative in bundle_files:
         contents = (
             b"BUILDER PERSONAL DATA MUST STAY PRIVATE\n"
             if relative == "device-data.cpio"
             else f"synthetic built file: {relative}\n".encode()
         )
-        mode = 0o755 if relative in normalized["executables"] else 0o644
+        mode = (
+            0o755
+            if relative
+            in {
+                "fplinux.py",
+                "Run.sh",
+                "host/spd_dump",
+                "host/libc_server",
+                "host/fplinux-usb-keyboard",
+                "host/ums9117-nand-ecc",
+            }
+            else 0o644
+        )
         write_archive_file(bundle, relative, contents, mode=mode)
-    prepared_maps = {
-        "pinmap.bin": b"BUILDER PERSONAL PINS MUST STAY PRIVATE\n",
-        "keymap.bin": b"BUILDER PERSONAL KEYS MUST STAY PRIVATE\n",
-    }
-    for relative, contents in prepared_maps.items():
-        write_archive_file(bundle, relative, contents, mode=0o600)
-    for relative, source_path in {
-        "runner/run.py": "common/run.py",
-        "runner/platform_adapter.py": "platforms/ums9117/host/adapter.py",
-        "runner/identity.py": "scripts/fplinux_cli/manifests/identity.py",
-        "runner/ssh_transport.py": "scripts/fplinux_cli/runtime/ssh_transport.py",
-        "runner/loader_events.py": "common/loader_events.py",
-    }.items():
-        write_archive_file(bundle, relative, (source / source_path).read_bytes())
+    for relative, source_path in runtime_sources.items():
+        write_archive_file(
+            bundle,
+            relative,
+            source_path.read_bytes(),
+            mode=0o755 if relative in {"fplinux.py", "Run.sh"} else 0o644,
+        )
     write_archive_file(bundle, "image/ramboot.bin", b"DHTB synthetic built RAM payload\n")
     runtime = runtime_manifest()
-    runtime["adapter"] = adapter_data()
+    runtime["identity"] = runtime_identity(
+        config["identity"], config["platform"], platform["identity"]
+    )
+    runtime["adapter"] = (
+        dict(config["runtime"]["adapter"]) if config["platform"] == "sc9820e" else adapter_data()
+    )
     runtime["assets"] = dict(config["runtime"]["assets"])
     runtime["target"] = target
     runtime["host_tools"] = {
         role: f"host/{name}" for role, name in platform["host"]["runtime_tools"].items()
     }
+    runtime["device_data"] = device_data_descriptor(target, config)
+    runtime["nand"] = config.get("nand")
+    if runtime["device_data"] is not None and runtime["device_data"]["ecc_module"] is not None:
+        runtime["host_tools"]["nand_ecc"] = "host/ums9117-nand-ecc"
+        write_archive_file(bundle, "host/ums9117-nand-ecc", b"prepared BCH decoder", mode=0o755)
     runtime["sha256"] = {
         name: hashlib.sha256((bundle / name).read_bytes()).hexdigest()
         for name in (
             "image/ramboot.bin",
             *runtime["assets"].values(),
-            "runner/platform_adapter.py",
-            "runner/identity.py",
-            "runner/ssh_transport.py",
-            "runner/loader_events.py",
+            *runtime_sources,
             *runtime["host_tools"].values(),
         )
     }
@@ -149,15 +185,13 @@ def archive_inputs(
     manifest = canonical_json_bytes(
         {
             "rootfs_receipt": {"recipe": "d" * 64, "sha256": "e" * 64},
+            "kernel_artifacts": {},
             "boot_artifacts": {"required": []},
             "container_image_recipe": "b" * 64,
             "container_image_content": "c" * 64,
             "apk_signing_key": signing_digest,
             "device_identity": "f" * 64,
-            "files": {
-                relative: file_record(bundle / relative)
-                for relative in (*normalized["bundle_files"], *prepared_maps)
-            },
+            "files": {relative: file_record(bundle / relative) for relative in bundle_files},
             "generation": generation,
             "kbuild_receipt": {"recipe": "0" * 64, "sha256": "1" * 64},
             "linux_recipe": "2" * 64,
@@ -174,7 +208,6 @@ def archive_inputs(
         for relative in (
             "tools/spd_dump.exe",
             "tools/libc_server.exe",
-            "tools/fphelper_t117.exe",
             "tools/libusb-1.0.dll",
             "tools/openssh/ssh.exe",
             "tools/openssh/ssh-keygen.exe",
@@ -238,18 +271,6 @@ def archive_inputs(
     monkeypatch.setattr(
         image_state, "load_image_state", lambda *_args: ImageState("b" * 64, "c" * 64, "c" * 64)
     )
-    monkeypatch.setattr(
-        bundles,
-        "build_identity",
-        lambda *_args: bundles.BuildIdentity(snapshot.recipe, "b" * 64, "c" * 64, signing_digest),
-    )
-    monkeypatch.setattr(
-        autonomous_package,
-        "_linux_host_tool",
-        lambda _target, _platform, tool, **_kwargs: (
-            b"extractor" if tool == "fphelper_t117" else b"prepared BCH decoder"
-        ),
-    )
     monkeypatch.setattr(windows_build, "prepare_windows_host", prepared_native)
     monkeypatch.setattr(windows_driver, "prepare_windows_driver", prepared_driver)
     monkeypatch.setattr(linux_host, "prepare_linux_host", prepared_linux)
@@ -262,5 +283,11 @@ def archive_inputs(
     )
     write_offline_export(tmp_path)
     return ArchiveInputs(
-        tmp_path, target, bundle, manifest, {**native_files, **driver_files}, windows_scripts
+        root=tmp_path,
+        target=target,
+        bundle=bundle,
+        manifest=manifest,
+        native_files={**native_files, **driver_files},
+        linux_files=linux_files,
+        windows_scripts=windows_scripts,
     )

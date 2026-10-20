@@ -22,14 +22,13 @@ _EXCLUSIVE_CACHE_COMMANDS = frozenset(
         "dependencies",
         "device-data",
         "format",
-        "nand",
         "probe-build",
         "setup",
         "test",
     }
 )
 
-_SHARED_CACHE_COMMANDS = frozenset({"console", "package", "run", "verify"})
+_SHARED_CACHE_COMMANDS = frozenset({"console", "nand", "package", "run", "verify"})
 
 
 def _cache_lock_exclusive(args: argparse.Namespace) -> bool | None:

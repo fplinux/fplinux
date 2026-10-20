@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -18,9 +19,49 @@ from fplinux_cli.workspace import build_inputs as workspace_module
 from fplinux_cli.workspace import capture as workspace_capture
 from fplinux_cli.workspace import staging as workspace_staging
 
+from tests import ROOT
+from tests.process import run_process
+
+STAGED_STORAGE_PEER = (
+    ROOT / "tests/host_process/workspace/fixtures/staged-storage/render_card_config.py"
+)
+
 
 class StagedWorkspaceTests:
     """Load staged build imports and compute recipes in real Python processes."""
+
+    def test_sc_external_root_snapshot_renders_the_card_image_without_fit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The selected workspace delivers the card producer and its runtime template."""
+        sources = workspace_module.target_build_source_files("xiaomi-qin-1s-plus", "microsd-root")
+        snapshot = workspace_capture.workspace_snapshot(sources)
+        monkeypatch.setattr(workspace_staging, "ROOT", tmp_path)
+        staged = workspace_staging.stage_workspace_snapshot(snapshot)
+
+        result = run_process(
+            [
+                sys.executable,
+                "-B",
+                str(STAGED_STORAGE_PEER),
+                "xiaomi-qin-1s-plus",
+                "microsd-root",
+            ],
+            name="render the external-root card config from staged build sources",
+            cwd=staged,
+            env={"PYTHONPATH": str(staged / "scripts")},
+            timeout=20,
+            check=True,
+        )
+
+        rendered = json.loads(result.stdout)
+        assert rendered["image"] == "FPLINUX.img.xz"
+        configuration = rendered["configuration"]
+        assert "image FPLINUX.img {" in configuration
+        assert 'image = "FPLROOT.ext4"' in configuration
+        assert "offset = 68157440" in configuration
+        assert "size = 536870912" in configuration
+        assert "FPLINUX.ITB" not in configuration
 
     def test_microsd_source_snapshot_supports_build_imports_and_both_configurations(self) -> None:
         """The staged source loads the build consumer and selected/default boot policies."""

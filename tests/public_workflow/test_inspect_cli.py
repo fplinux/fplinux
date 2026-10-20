@@ -67,6 +67,7 @@ class InspectCli:
             "device_identity": "e" * 64,
             "linux_recipe": "f" * 64,
             "rootfs_receipt": {},
+            "kernel_artifacts": {},
             "kbuild_receipt": {},
             "boot_artifacts": {"required": []},
         }

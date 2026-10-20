@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: GPL-2.0-only
+platform = "sc9820e"
+
+[identity]
+brand = "Example"
+product = "Phone"
+hardware_codes = []
+compatible = "example,phone"
+
+[rootfs]
+packages = []
+
+[bundle]
+packages = []
+
+[linux]
+config_fragment = "linux/config/config.fragment"
+memory = { base = 0x80000000, size = 0x20000000 }
+dtb = "unisoc/example-phone.dtb"
+debug_dtb = "example-phone.dtb"
+patches = []
+additional_forbidden_dtb_markers = []
+additional_forbidden_config = []
+overlay = "linux/overlay"
+copies = []
+appends = []
+
+[bootstrap]
+image = "ramboot.bin"
+map = "ramboot.map"
+record_prefix = "EXAMPLE_PHONE"
+
+[bootstrap.layout]
+entry_load = 0x80002060
+entry_limit = 0x80004000
+kernel_load = 0x80008000
+kernel_stage = 0x81008000
+kernel_stage_limit = 0x82000000
+fdt_load = 0x85400000
+initramfs_load = 0x85500000
+stack = 0x9ffeff50
+
+[adapter]
+session_name = "example-phone-linux"
+boot_instructions = "Power off and connect."
+
+[loader]
+fdl1_load = 0x00005000
+sml_load = 0x8e000000
+fdl2_load = 0x9efffe00
+stack_guard_start = 0x808e0000
+stack_guard_end = 0x808f0000
+
+[loader.build]
+source = "loader"
+fdl1_source = "chipram"
+fdl2_source = "u_boot"
+sml_source = "trusted_firmware"

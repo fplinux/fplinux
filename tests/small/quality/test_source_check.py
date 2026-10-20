@@ -203,8 +203,68 @@ class SourceInventoryTests:
                     ]
                 )
 
+    def test_application_and_shared_sources_enter_analysis_and_formatting(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Application owners and registered shared code receive the same checks."""
+        recipes = (
+            "alpine/aports/fplinux-ui/APKBUILD",
+            "alpine/aports/fplinux-notes/APKBUILD",
+            "alpine/aports/demo-app/APKBUILD",
+        )
+        package_sources = (
+            "alpine/aports/fplinux-ui/app.c",
+            "alpine/aports/fplinux-notes/app.c",
+            "alpine/aports/demo-app/app.c",
+        )
+        shared_sources = (
+            "lib/fplinux/fplinux-ui-session.c",
+            "lib/fplinux/fplinux-ui-profile.c",
+            "lib/fplinux/fplinux-desktop-entry.c",
+            "lib/fplinux/fplinux-language.c",
+            "lib/fplinux/fplinux-keypad-light.c",
+            "lib/fplinux/fplinux-cli.c",
+        )
+        files = []
+        for relative in (*recipes, *package_sources, *shared_sources):
+            path = tmp_path / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("# recipe\n" if path.name == "APKBUILD" else "int example;\n")
+            files.append(path)
+        monkeypatch.setattr(source_check, "ROOT", tmp_path)
+        monkeypatch.setattr(source_check, "discover_targets", lambda: ())
+        monkeypatch.setattr(registration, "SHARED_APORT_SOURCE_PATHS", frozenset(shared_sources))
+
+        assert source_check.alpine_apkbuilds(files) == [
+            "alpine/aports/fplinux-ui/APKBUILD",
+            "alpine/aports/fplinux-notes/APKBUILD",
+            "alpine/aports/demo-app/APKBUILD",
+        ]
+        assert source_check.userspace_c_sources(files) == [
+            ("alpine/aports/demo-app/app.c", False),
+            ("alpine/aports/fplinux-notes/app.c", False),
+            ("alpine/aports/fplinux-ui/app.c", False),
+            ("lib/fplinux/fplinux-cli.c", False),
+            ("lib/fplinux/fplinux-desktop-entry.c", False),
+            ("lib/fplinux/fplinux-keypad-light.c", False),
+            ("lib/fplinux/fplinux-language.c", False),
+            ("lib/fplinux/fplinux-ui-profile.c", False),
+            ("lib/fplinux/fplinux-ui-session.c", False),
+        ]
+        assert source_check.project_c_format_sources(files) == [
+            "alpine/aports/demo-app/app.c",
+            "alpine/aports/fplinux-notes/app.c",
+            "alpine/aports/fplinux-ui/app.c",
+            "lib/fplinux/fplinux-cli.c",
+            "lib/fplinux/fplinux-desktop-entry.c",
+            "lib/fplinux/fplinux-keypad-light.c",
+            "lib/fplinux/fplinux-language.c",
+            "lib/fplinux/fplinux-ui-profile.c",
+            "lib/fplinux/fplinux-ui-session.c",
+        ]
+
     def test_boot_and_shared_driver_c_use_the_project_format_contract(self) -> None:
-        """Profile U-Boot and shared driver sources use the project C style."""
+        """U-Boot, loader ports and shared drivers use the project C style."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             uboot = root / "targets/phone/uboot"
@@ -219,6 +279,9 @@ class SourceInventoryTests:
             target_common = root / "targets/phone/common/board.h"
             target_common.parent.mkdir(parents=True)
             target_common.write_text("int board;\n")
+            loader = root / "targets/phone/loader/monitor/platform.c"
+            loader.parent.mkdir(parents=True)
+            loader.write_text("int platform;\n")
             userspace = root / "alpine/aports/demo/app.c"
             userspace.parent.mkdir(parents=True)
             userspace.write_text("int app;\n")
@@ -228,13 +291,14 @@ class SourceInventoryTests:
             ):
                 assert (
                     source_check.project_c_format_sources(
-                        [source, header, platform_common, target_common, userspace]
+                        [source, header, platform_common, target_common, loader, userspace]
                     )
                 ) == (
                     [
                         "alpine/aports/demo/app.c",
                         "platforms/soc/common/core.c",
                         "targets/phone/common/board.h",
+                        "targets/phone/loader/monitor/platform.c",
                         "targets/phone/uboot/board.c",
                         "targets/phone/uboot/board.h",
                     ]
@@ -251,7 +315,7 @@ class SourceInventoryTests:
             targets = {
                 "phone": {
                     "platform": "soc",
-                    "rootfs": {"base_packages": [], "packages": [], "exclude_packages": []},
+                    "rootfs": {"base_packages": [], "packages": []},
                     "bundle": {"packages": []},
                 },
             }

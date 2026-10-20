@@ -6,11 +6,6 @@ bundle_files = [
   "host/spd_dump",
   "host/libc_server",
   "host/fplinux-usb-keyboard",
-  "runner/run.py",
-  "runner/loader_events.py",
-  "runner/identity.py",
-  "runner/platform_adapter.py",
-  "runner/ssh_transport.py",
   "runtime-manifest.json",
   "assets.lock.toml",
   "THIRD_PARTY_NOTICES.md",
@@ -21,11 +16,6 @@ runtime_files = [
   "host/spd_dump",
   "host/libc_server",
   "host/fplinux-usb-keyboard",
-  "runner/run.py",
-  "runner/loader_events.py",
-  "runner/identity.py",
-  "runner/platform_adapter.py",
-  "runner/ssh_transport.py",
   "runtime-manifest.json",
 ]
 documents = []

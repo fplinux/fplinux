@@ -77,16 +77,20 @@ class FootprintFixture:
         self.directory = directory
         self.database = (ARTIFACT_FILES / "installed").read_bytes()
 
-    def bundle(
+    def bundle(  # noqa: PLR0913 -- archive contents and delivery policy remain explicit.
         self,
         *,
         compression: str = "gzip",
         external: bool = False,
+        initramfs_delivery: str | None = None,
+        kernel_image: str = "zImage",
+        artifact_directory: str = "debug",
         lower_compression: str = "xz",
         extra: list[tuple[str, bytes, int, int, int]] | None = None,
         extra_apks: dict[str, bytes] | None = None,
     ) -> CurrentBundle:
         """Write actual archives, ELF and matching file records for one report."""
+        delivery = initramfs_delivery or ("none" if external else "embedded")
         cpio = newc(
             [
                 ("lib/apk/db/installed", self.database, 0o100644, 1, 1),
@@ -108,24 +112,32 @@ class FootprintFixture:
             ]
         )
         payloads = {
-            "debug/rootfs.cpio": cpio,
-            "debug/kernel.config": (
+            f"{artifact_directory}/rootfs.cpio": cpio,
+            f"{artifact_directory}/kernel.config": (
                 b"# CONFIG_BLK_DEV_INITRD is not set\n"
                 if external
-                else b'CONFIG_INITRAMFS_SOURCE="initramfs.cpio"\n'
+                else (
+                    b'CONFIG_INITRAMFS_SOURCE="initramfs.cpio"\n'
+                    if delivery == "embedded"
+                    else b'CONFIG_INITRAMFS_SOURCE=""\n'
+                )
             ),
-            "debug/zImage": b"kernel-image",
-            "debug/vmlinux": kernel_with_initramfs(self.initramfs, compression),
-            "debug/System.map": b"00001000 D __initramfs_size\n00001004 D __initramfs_start\n",
+            f"{artifact_directory}/{kernel_image}": b"kernel-image",
+            f"{artifact_directory}/vmlinux": kernel_with_initramfs(self.initramfs, compression),
+            f"{artifact_directory}/System.map": (
+                b"00001000 D __initramfs_size\n00001004 D __initramfs_start\n"
+            ),
             "image/ramboot.bin": b"boot-image",
             "apks/optional.apk": optional_apk(),
             **(extra_apks or {}),
         }
         if not external:
-            payloads["debug/initramfs.cpio"] = self.initramfs
+            payloads[f"{artifact_directory}/initramfs.cpio"] = self.initramfs
+        if delivery != "embedded":
+            payloads[f"{artifact_directory}/System.map"] = b"00002000 T kernel_entry\n"
+            payloads[f"{artifact_directory}/vmlinux"] = b"no embedded boot archive"
         if external:
             payloads["card.img.gz"] = gzip.compress(b"card-image", mtime=0)
-            payloads["debug/System.map"] = b"00002000 T kernel_entry\n"
         records = {}
         for name, data in payloads.items():
             path = self.directory / name
@@ -144,6 +156,15 @@ class FootprintFixture:
                 "build_type": "release",
                 "generation": "a" * 64,
                 "files": records,
+                "kernel_artifacts": {
+                    "image": f"{artifact_directory}/{kernel_image}",
+                    "config": f"{artifact_directory}/kernel.config",
+                    "vmlinux": f"{artifact_directory}/vmlinux",
+                    "system_map": f"{artifact_directory}/System.map",
+                    "rootfs": f"{artifact_directory}/rootfs.cpio",
+                    "initramfs": None if external else f"{artifact_directory}/initramfs.cpio",
+                    "initramfs_delivery": delivery,
+                },
                 "boot_artifacts": {"required": ["card.img.gz"] if external else []},
             }
         ).encode()

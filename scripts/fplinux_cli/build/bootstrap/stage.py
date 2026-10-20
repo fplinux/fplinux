@@ -14,6 +14,7 @@ from fplinux_cli.build.display import render_bootstrap_display
 from fplinux_cli.common import fail
 
 from .recipe import generated_bootstrap_files, uboot_build_header
+from .result import BootstrapBuild
 from .verify import verify_images, verify_sd_stage0_image
 
 if TYPE_CHECKING:
@@ -32,7 +33,9 @@ def build_bootstrap(  # noqa: PLR0913 -- source selection and payload inputs sta
     zimage: Path,
     dtb: Path,
     uboot: UbootBuild | None = None,
-) -> tuple[Path, Path, dict[str, int | str]]:
+    kernel_output: Path | None = None,
+    rootfs_output: Path | None = None,
+) -> BootstrapBuild:
     """Build and verify the declarative bootstrap contract."""
     platform_bootstrap = platform["bootstrap"]
     target_bootstrap = target_config["bootstrap"]
@@ -43,6 +46,21 @@ def build_bootstrap(  # noqa: PLR0913 -- source selection and payload inputs sta
         if not bootstrap_work.is_dir():
             fail(f"generated bootstrap path is not a directory: {bootstrap_work}")
         shutil.rmtree(bootstrap_work)
+
+    if platform_bootstrap.get("backend") == "sc9820e":
+        from .sc9820e import build_sc9820e  # noqa: PLC0415 -- selected backend only.
+
+        if kernel_output is None or rootfs_output is None:
+            fail("SC9820E bootstrap requires kernel and rootfs output directories")
+        return build_sc9820e(
+            target,
+            target_config,
+            work=bootstrap_work,
+            kernel=zimage,
+            dtb=dtb,
+            kernel_output=kernel_output,
+            rootfs_output=rootfs_output,
+        )
 
     bootstrap = bootstrap_work / platform_bootstrap["source_destination"]
     vendor = bootstrap_work / platform_bootstrap["vendor_destination"]
@@ -178,4 +196,4 @@ def build_bootstrap(  # noqa: PLR0913 -- source selection and payload inputs sta
             payload_limit=target_bootstrap["payload_limit"],
             forbidden_markers=target_config["linux"]["forbidden_dtb_markers"],
         )
-    return ramboot, ramboot_map, personalization
+    return BootstrapBuild(ramboot, ramboot_map, personalization)

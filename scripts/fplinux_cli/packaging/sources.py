@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from fplinux_cli.dependencies.inputs import DependencyInput
+    from fplinux_cli.manifests.loaders import LoaderSource
 
 _PROJECT_DIRECTORIES = frozenset(
     {
@@ -167,11 +168,12 @@ def _archive_input(
 
 def _build_sources(config: dict[str, Any], platform: dict[str, Any]) -> list[DependencyInput]:
     from fplinux_cli.build.sources import source_lock_entry  # noqa: PLC0415
+    from fplinux_cli.dependencies.inputs import DependencyInput  # noqa: PLC0415
     from fplinux_cli.device_data.prepare import NAND_ECC_TOOL  # noqa: PLC0415
+    from fplinux_cli.manifests.loaders import loader_sources  # noqa: PLC0415
 
     sources = common.load_toml(common.ROOT / "sources.lock.toml")
     linux = source_lock_entry(sources, platform["linux"]["source_lock"])
-    bootstrap = platform["bootstrap"]
     result = [
         _archive_input(
             name="linux",
@@ -179,16 +181,31 @@ def _build_sources(config: dict[str, Any], platform: dict[str, Any]) -> list[Dep
             destination=f"downloads/linux/linux-{linux['version']}.tar.xz",
             purpose="linux-source",
         ),
-        _archive_input(
-            name="bootstrap",
-            entry=source_lock_entry(sources, bootstrap["vendor_source_lock"]),
-            destination=f"downloads/{bootstrap['vendor_cache_name']}",
-            purpose="bootstrap-source",
-        ),
     ]
+    if platform["bootstrap"]["backend"] == "sc9820e":
+        result.extend(
+            DependencyInput(
+                key=f"loader:{source.role}",
+                url=source.url,
+                sha256=source.sha256,
+                size=None,
+                destination=f"downloads/{source.cache_name}",
+                purpose="loader-source",
+            )
+            for source in loader_sources(config["loader"]["build"], sources)
+        )
+    else:
+        bootstrap = platform["bootstrap"]
+        result.append(
+            _archive_input(
+                name="bootstrap",
+                entry=source_lock_entry(sources, bootstrap["vendor_source_lock"]),
+                destination=f"downloads/{bootstrap['vendor_cache_name']}",
+                purpose="bootstrap-source",
+            )
+        )
     runtime_tools = platform["host"]["runtime_tools"]
-    selected = {runtime_tools["loader"], runtime_tools["bridge"]}
-    selected.add("fphelper_t117")
+    selected = {runtime_tools[role] for role in ("loader", "bridge") if role in runtime_tools}
     if (config.get("nand") or {}).get("ecc_format"):
         selected.add(NAND_ECC_TOOL)
     archive_tools = [
@@ -237,6 +254,64 @@ def _collect_archives(
             }
         )
     return records
+
+
+def _loader_license_notices(
+    sources: Sequence[LoaderSource], files: dict[str, bytes]
+) -> dict[str, bytes]:
+    """Retain the board initializer and secure monitor's original license files."""
+    notices = {}
+    for source in sources:
+        if source.role == "fdl1":
+            continue
+        member = f"upstream/{source.cache_name}"
+        with tarfile.open(fileobj=io.BytesIO(files[member])) as archive:
+            if source.role == "fdl2":
+                prefix = f"{source.archive_prefix}/Licenses/"
+                selected = [
+                    item
+                    for item in archive.getmembers()
+                    if item.isfile() and item.name.startswith(prefix)
+                ]
+                if not selected:
+                    fail("RAM board initializer license files are missing")
+            else:
+                prefix = f"{source.archive_prefix}/"
+                selected = [
+                    item
+                    for item in archive.getmembers()
+                    if item.isfile() and item.name == f"{prefix}license.md"
+                ]
+                if not selected:
+                    fail("RAM secure monitor license is missing")
+            for item in selected:
+                stream = archive.extractfile(item)
+                if stream is None:
+                    fail(f"RAM loader license is not a regular file: {item.name}")
+                name = item.name.removeprefix(prefix)
+                notices[f"licenses/loaders/{source.role}/{name}"] = stream.read()
+    return notices
+
+
+def collect_loader_license_notices(config: dict[str, Any]) -> dict[str, bytes]:
+    """Read ordinary binary notices from the admitted cached loader archives."""
+    from fplinux_cli.manifests.loaders import loader_sources  # noqa: PLC0415
+
+    sources = loader_sources(
+        config["loader"]["build"], common.load_toml(common.ROOT / "sources.lock.toml")
+    )
+    archives = {}
+    for source in sources:
+        if source.role == "fdl1":
+            continue
+        path = download_locked_file(
+            source.url,
+            source.sha256,
+            common.ROOT / ".cache/downloads" / source.cache_name,
+            offline=True,
+        )
+        archives[f"upstream/{source.cache_name}"] = path.read_bytes()
+    return _loader_license_notices(sources, archives)
 
 
 def _linux_runtime_sources(
@@ -359,6 +434,15 @@ def collect_source_files(config: dict[str, Any], *, host: str, offline: bool) ->
         )
         inputs.extend(source_inputs)
     records = _collect_archives(inputs, payload.files, offline=offline)
+    if platform["bootstrap"]["backend"] == "sc9820e":
+        from fplinux_cli.manifests.loaders import loader_sources  # noqa: PLC0415
+
+        sources = common.load_toml(common.ROOT / "sources.lock.toml")
+        payload.notices.update(
+            _loader_license_notices(
+                loader_sources(config["loader"]["build"], sources), payload.files
+            )
+        )
     if host == "linux":
         records.extend(_linux_runtime_sources(payload.files, payload.notices, offline=offline))
     else:

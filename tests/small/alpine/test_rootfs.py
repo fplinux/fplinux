@@ -49,13 +49,10 @@ def verified_rootfs(alpine_source: AlpineSourceContext) -> Path:
     )
     (root / "etc/init.d/networking").write_text("#!/bin/sh\n", encoding="utf-8")
     (root / "etc/runlevels/boot/networking").symlink_to("/etc/init.d/networking")
-    (root / "etc/init.d/fplinux-terminal").write_text("#!/bin/sh\n", encoding="utf-8")
     (root / "etc/init.d/fplinux-brightness").write_text("#!/bin/sh\n", encoding="utf-8")
-    (root / "usr/bin/fplinux-terminal").write_text("terminal\n", encoding="utf-8")
     (root / "usr/bin/fplinux-brightness").write_text("brightness\n", encoding="utf-8")
     (root / "usr/libexec/fplinux").mkdir(parents=True)
     (root / "usr/libexec/fplinux/brightnessd").write_text("brightnessd\n", encoding="utf-8")
-    (root / "etc/runlevels/default/fplinux-terminal").symlink_to("/etc/init.d/fplinux-terminal")
     (root / "etc/runlevels/default/fplinux-brightness").symlink_to(
         "/etc/init.d/fplinux-brightness"
     )
@@ -72,6 +69,21 @@ def write_world(root: Path, packages: tuple[str, ...]) -> None:
     )
 
 
+def install_graphical_session(root: Path) -> None:
+    """Provide the graphical session's runtime files and enabled service."""
+    for relative in (
+        "etc/init.d/fplinux-session",
+        "usr/bin/fplinux-session",
+        "usr/bin/weston",
+        "usr/lib/weston/fplinux-shell.so",
+        "etc/fplinux/weston.ini",
+    ):
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("graphical session fixture\n", encoding="utf-8")
+    (root / "etc/runlevels/default/fplinux-session").symlink_to("/etc/init.d/fplinux-session")
+
+
 def fake_apk_owner(owners: dict[str, str]) -> Callable[[Path, str, str], None]:
     """Fake apk file-ownership answers; paths outside ``owners`` always match."""
 
@@ -85,6 +97,84 @@ def fake_apk_owner(owners: dict[str, str]) -> Callable[[Path, str, str], None]:
 
 class AlpineRootfsTests:
     """Protect Alpine rootfs behavior with controlled temporary inputs."""
+
+    def test_graphical_rootfs_accepts_session_without_a_drm_terminal(
+        self, alpine_source: AlpineSourceContext
+    ) -> None:
+        """A graphical composition owns startup without requiring the recovery terminal."""
+        root = verified_rootfs(alpine_source)
+        install_graphical_session(root)
+        packages = ("fplinux-base", "fplinux-session")
+        write_world(root, packages)
+
+        with mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"):
+            alpine_rootfs_verify._verify_alpine_rootfs(root, packages)  # noqa: SLF001
+
+    @pytest.mark.parametrize(
+        "missing",
+        [
+            "usr/bin/fplinux-session",
+            "usr/bin/weston",
+            "usr/lib/weston/fplinux-shell.so",
+            "etc/fplinux/weston.ini",
+            "etc/init.d/fplinux-session",
+            "etc/runlevels/default/fplinux-session",
+        ],
+        ids=["command", "compositor", "shell", "configuration", "service", "startup"],
+    )
+    def test_graphical_rootfs_requires_its_runtime_and_startup_service(
+        self, alpine_source: AlpineSourceContext, missing: str
+    ) -> None:
+        """A selected graphical session must have the files used to start its compositor."""
+        root = verified_rootfs(alpine_source)
+        install_graphical_session(root)
+        packages = ("fplinux-base", "fplinux-session")
+        write_world(root, packages)
+        (root / missing).unlink()
+
+        with (
+            mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"),
+            pytest.raises(SystemExit, match=re.escape((root / missing).name)),
+        ):
+            alpine_rootfs_verify._verify_alpine_rootfs(root, packages)  # noqa: SLF001
+
+    def test_graphical_rootfs_requires_the_session_openrc_package_owner(
+        self, alpine_source: AlpineSourceContext
+    ) -> None:
+        """The enabled service must be supplied by the graphical OpenRC package."""
+        root = verified_rootfs(alpine_source)
+        install_graphical_session(root)
+        packages = ("fplinux-base", "fplinux-session")
+        write_world(root, packages)
+        owners = {"/etc/init.d/fplinux-session": "fplinux-terminal-openrc"}
+
+        with (
+            mock.patch.object(alpine_rootfs_verify, "_require_apk_owner", fake_apk_owner(owners)),
+            pytest.raises(SystemExit, match="fplinux-session: fplinux-terminal-openrc"),
+        ):
+            alpine_rootfs_verify._verify_alpine_rootfs(root, packages)  # noqa: SLF001
+
+    @pytest.mark.parametrize("graphical", [False, True], ids=["recovery", "graphical"])
+    def test_selected_recovery_terminal_requires_explicit_startup(
+        self, alpine_source: AlpineSourceContext, *, graphical: bool
+    ) -> None:
+        """Installing the recovery command must not start a second DRM owner during boot."""
+        root = verified_rootfs(alpine_source)
+        packages: tuple[str, ...] = ("fplinux-base", "fplinux-terminal")
+        if graphical:
+            install_graphical_session(root)
+            packages = (*packages, "fplinux-session")
+        write_world(root, packages)
+        (root / "usr/bin/fplinux-terminal").write_text("terminal fixture\n", encoding="utf-8")
+        (root / "etc/init.d/fplinux-terminal").write_text("#!/bin/sh\n", encoding="utf-8")
+
+        with mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"):
+            alpine_rootfs_verify._verify_alpine_rootfs(root, packages)  # noqa: SLF001
+            (root / "etc/runlevels/default/fplinux-terminal").symlink_to(
+                "/etc/init.d/fplinux-terminal"
+            )
+            with pytest.raises(SystemExit, match="explicit recovery action"):
+                alpine_rootfs_verify._verify_alpine_rootfs(root, packages)  # noqa: SLF001
 
     def test_materializing_a_subpackage_copies_the_producer_sources(
         self, alpine_source: AlpineSourceContext
@@ -137,7 +227,7 @@ class AlpineRootfsTests:
     ) -> None:
         """A mocked offline ``apk add --simulate`` result accepts or rejects the bundle APKs."""
         root = verified_rootfs(alpine_source)
-        base = ("fplinux-base", "fplinux-terminal")
+        base = ("fplinux-base",)
         bundle_apk = alpine_source.write("built/fplinux-package-b.apk", b"bundle\n")
         unresolved = (
             "ERROR: unable to select packages:\n"
@@ -172,7 +262,7 @@ class AlpineRootfsTests:
     ) -> None:
         """Composition writes the target table and rejects changed installed bytes."""
         root = verified_rootfs(alpine_source)
-        packages = ("fplinux-base", "fplinux-terminal")
+        packages = ("fplinux-base",)
         write_world(root, packages)
         table = {"backlight": "screen-backlight", "levels": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}
         config = root / "etc/fplinux/brightness.conf"
@@ -197,7 +287,7 @@ class AlpineRootfsTests:
     ) -> None:
         """A headless target does not receive display configuration."""
         root = verified_rootfs(alpine_source)
-        packages = ("fplinux-base", "fplinux-terminal")
+        packages = ("fplinux-base",)
         write_world(root, packages)
         alpine_rootfs_files._install_display_brightness(root, None)  # noqa: SLF001
         config = root / "etc/fplinux/brightness.conf"
@@ -214,7 +304,7 @@ class AlpineRootfsTests:
     ) -> None:
         """The composed base rootfs must provide the command and its default runlevel."""
         root = verified_rootfs(alpine_source)
-        packages = ("fplinux-base", "fplinux-terminal")
+        packages = ("fplinux-base",)
         write_world(root, packages)
         command = root / "usr/bin/fplinux-brightness"
         daemon = root / "usr/libexec/fplinux/brightnessd"
@@ -238,7 +328,7 @@ class AlpineRootfsTests:
     ) -> None:
         """A gadgetless root accepts no input bridge, while the selected bridge is required."""
         root = verified_rootfs(alpine_source)
-        without_input = ("fplinux-base", "fplinux-terminal")
+        without_input = ("fplinux-base",)
         write_world(root, without_input)
         with mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"):
             alpine_rootfs_verify._verify_alpine_rootfs(root, without_input)  # noqa: SLF001
@@ -256,7 +346,7 @@ class AlpineRootfsTests:
     ) -> None:
         """A root lacking network startup must be rejected before publication."""
         root = verified_rootfs(alpine_source)
-        packages = ("fplinux-base", "fplinux-terminal")
+        packages = ("fplinux-base",)
         write_world(root, packages)
         with mock.patch.object(alpine_rootfs_verify, "_require_apk_owner"):
             alpine_rootfs_verify._verify_alpine_rootfs(root, packages)  # noqa: SLF001
@@ -276,7 +366,7 @@ class AlpineRootfsTests:
     ) -> None:
         """The selected Bluetooth root rejects stock daemon and GLib replacements."""
         root = verified_rootfs(alpine_source)
-        base = ("fplinux-base", "fplinux-terminal")
+        base = ("fplinux-base",)
         with_bluetooth = (*base, "fplinux-bluetooth")
         replaced = {
             "/usr/lib/bluetooth/obexd": ("bluez-obexd", "fplinux-bluez"),
@@ -318,7 +408,7 @@ class AlpineRootfsTests:
     ) -> None:
         """A root without dependent tools must replace the package manager and drop OpenSSL."""
         root = verified_rootfs(alpine_source)
-        base = ("fplinux-base", "fplinux-terminal")
+        base = ("fplinux-base",)
         with_apk_tools = (*base, "fplinux-apk-tools")
         installed: set[str] = {"apk-tools", "libapk", "libcrypto3", "libssl3", "ssl_client"}
         minirootfs_owner = fake_apk_owner({"/sbin/apk": "apk-tools"})
@@ -361,7 +451,7 @@ class AlpineRootfsTests:
     ) -> None:
         """An explicit Wi-Fi dependency can coexist with the Mbed TLS package manager."""
         root = verified_rootfs(alpine_source)
-        packages = ("fplinux-base", "fplinux-terminal", "fplinux-apk-tools", "fplinux-wifi")
+        packages = ("fplinux-base", "fplinux-apk-tools", "fplinux-wifi")
         installed = {"libcrypto3", "libssl3"}
         write_world(root, packages)
 
@@ -388,7 +478,7 @@ class AlpineRootfsTests:
     ) -> None:
         """Declared OpenSSL dependencies never permit the replaced package manager."""
         root = verified_rootfs(alpine_source)
-        packages = ("fplinux-base", "fplinux-terminal", "fplinux-apk-tools", "fplinux-wifi")
+        packages = ("fplinux-base", "fplinux-apk-tools", "fplinux-wifi")
         installed = {leftover, "libcrypto3", "libssl3"}
         write_world(root, packages)
 
@@ -412,7 +502,7 @@ class AlpineRootfsTests:
     ) -> None:
         """Selecting libcrypto does not authorize an unrelated leftover libssl package."""
         root = verified_rootfs(alpine_source)
-        packages = ("fplinux-base", "fplinux-terminal", "fplinux-apk-tools")
+        packages = ("fplinux-base", "fplinux-apk-tools")
         installed = {"libcrypto3", "libssl3"}
         write_world(root, packages)
 
@@ -434,7 +524,7 @@ class AlpineRootfsTests:
     ) -> None:
         """A persistent root rejects a shutdown runlevel missing data-safety services."""
         root = verified_rootfs(alpine_source)
-        without_input = ("fplinux-base", "fplinux-terminal")
+        without_input = ("fplinux-base",)
         microsd_root = (*without_input, "fplinux-microsd-root")
         write_world(root, microsd_root)
         with (

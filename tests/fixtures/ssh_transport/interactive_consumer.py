@@ -20,12 +20,8 @@ def main() -> None:
         command: str | None = None,
         *,
         connect_timeout: int = 5,
-        shared: bool = True,
     ) -> list[str]:
         del session, command, connect_timeout
-        if shared:
-            message = "interactive shell must own its connection"
-            raise AssertionError(message)
         return [
             sys.executable,
             str(Path(__file__).with_name("interactive_peer.py")),

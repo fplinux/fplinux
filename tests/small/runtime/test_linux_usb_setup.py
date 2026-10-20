@@ -8,8 +8,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
-from tests.small.runtime.adapter_fixtures import ADAPTER
+from fplinux_cli.runtime import boot as runner
 
 
 def test_existing_local_rules_are_preserved_without_privileged_commands(
@@ -19,13 +18,13 @@ def test_existing_local_rules_are_preserved_without_privileged_commands(
     destination = tmp_path / "etc/60-fplinux.rules"
     destination.parent.mkdir()
     destination.write_bytes(b"local phone access policy\n")
-    monkeypatch.setattr(ADAPTER, "USB_RULES_FILE", destination)
+    monkeypatch.setattr(runner, "USB_RULES_FILE", destination)
 
     def reject_command(*_arguments: object, **_options: object) -> None:
         pytest.fail("existing local rules must not invoke a privileged command")
 
-    monkeypatch.setattr(ADAPTER.subprocess, "run", reject_command)
-    ADAPTER.prepare_usb_access(tmp_path)
+    monkeypatch.setattr(subprocess, "run", reject_command)
+    runner.prepare_usb_access(tmp_path)
     assert destination.read_bytes() == b"local phone access policy\n"
 
 
@@ -38,8 +37,8 @@ def test_new_rules_are_installed_before_udev_reload(
     (bundle / "60-fplinux.rules").write_bytes(b"phone access rules\n")
     destination = tmp_path / "etc/60-fplinux.rules"
     destination.parent.mkdir()
-    monkeypatch.setattr(ADAPTER, "USB_RULES_FILE", destination)
-    monkeypatch.setattr(ADAPTER.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(runner, "USB_RULES_FILE", destination)
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
     effects: list[str] = []
 
     def host_command(argv: list[str], *, check: bool) -> subprocess.CompletedProcess[bytes]:
@@ -56,8 +55,8 @@ def test_new_rules_are_installed_before_udev_reload(
             effects.append("reloaded")
         return subprocess.CompletedProcess(argv, 0)
 
-    monkeypatch.setattr(ADAPTER.subprocess, "run", host_command)
-    ADAPTER.prepare_usb_access(bundle)
+    monkeypatch.setattr(subprocess, "run", host_command)
+    runner.prepare_usb_access(bundle)
     assert effects == ["installed", "reloaded"]
     assert destination.stat().st_mode & 0o777 == 0o644
 
@@ -67,8 +66,8 @@ def test_declined_privileged_install_does_not_reload_udev(
 ) -> None:
     """A refused setup stops before the next privileged host operation."""
     (tmp_path / "60-fplinux.rules").write_bytes(b"phone rules\n")
-    monkeypatch.setattr(ADAPTER, "USB_RULES_FILE", tmp_path / "missing-rules")
-    monkeypatch.setattr(ADAPTER.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(runner, "USB_RULES_FILE", tmp_path / "missing-rules")
+    monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
     attempted: list[list[str]] = []
 
     def refused(argv: list[str], *, check: bool) -> subprocess.CompletedProcess[bytes]:
@@ -76,8 +75,8 @@ def test_declined_privileged_install_does_not_reload_udev(
         attempted.append(argv)
         return subprocess.CompletedProcess(argv, 1)
 
-    monkeypatch.setattr(ADAPTER.subprocess, "run", refused)
+    monkeypatch.setattr(subprocess, "run", refused)
     with pytest.raises(SystemExit, match="USB access setup was not completed"):
-        ADAPTER.prepare_usb_access(tmp_path)
+        runner.prepare_usb_access(tmp_path)
     assert len(attempted) == 1
     assert attempted[0][1] == "install"

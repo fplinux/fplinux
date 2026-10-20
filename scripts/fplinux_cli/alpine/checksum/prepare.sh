@@ -6,6 +6,7 @@ stage_root=$1
 downloads=$2
 package=$3
 checksum_epoch=$4
+checksum_mode=$5
 source_cache=$downloads/alpine/sources
 stage_aport=$stage_root/alpine/aports/$package
 
@@ -16,4 +17,4 @@ restore_ownership() {
 }
 trap restore_ownership EXIT HUP INT TERM
 chown -R builder:builder "$stage_aport" "$source_cache"
-su builder -s /bin/sh -- "$stage_root/checksum/builder.sh" "$source_cache" "$checksum_epoch"
+su builder -s /bin/sh -- "$stage_root/checksum/builder.sh" "$source_cache" "$checksum_epoch" "$checksum_mode"

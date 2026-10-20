@@ -14,9 +14,11 @@ from unittest import mock
 import pytest
 from fplinux_cli import common
 from fplinux_cli.build.device_tree import (
+    DeviceTreeError,
     exact_path_properties,
     parse_nul_string,
     parse_nul_string_list,
+    verify_dtb_kconfig,
     verify_profile_dtb_layout,
 )
 from fplinux_cli.build.identity import (
@@ -73,28 +75,160 @@ def test_compiled_audio_policy_contains_only_the_selected_topology_property(
     assert exact_path_properties(dtb, "/audio")["/audio"] == {property_name: b""}
 
 
+@pytest.fixture
+def dt_config_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Own two board manifests, with amplifier wiring declared by only one board."""
+    for relative, source in (
+        ("platforms/sc9820e/platform.toml", "tests/fixtures/sc9820e-manifest/platform.toml"),
+        ("targets/phone/target.toml", "tests/fixtures/sc9820e-manifest/target.toml"),
+        ("targets/other/target.toml", "tests/fixtures/sc9820e-manifest/target.toml"),
+        ("profiles/default/profile.toml", "profiles/default/profile.toml"),
+    ):
+        destination = tmp_path / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((ROOT / source).read_bytes())
+    (tmp_path / "platforms/sc9820e/linux/overlay").mkdir(parents=True)
+    for target in ("phone", "other"):
+        (tmp_path / f"targets/{target}/linux/overlay").mkdir(parents=True)
+        (tmp_path / f"targets/{target}/loader").mkdir()
+    platform = tmp_path / "platforms/sc9820e/platform.toml"
+    platform.write_text(
+        platform.read_text(encoding="utf-8").replace(
+            "dt_config_checks = []",
+            'dt_config_checks = [{path="/controller", compatible="example,controller", '
+            'config="CONFIG_CONTROLLER"}]',
+        ),
+        encoding="utf-8",
+    )
+    board = tmp_path / "targets/phone/target.toml"
+    board.write_text(
+        board.read_text(encoding="utf-8").replace(
+            "[linux]\n",
+            '[linux]\ndt_config_checks = [{path="/controller/amplifier", '
+            'compatible="example,amplifier", config="CONFIG_AMPLIFIER"}]\n',
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(common, "ROOT", tmp_path)
+    return tmp_path
+
+
+@pytest.mark.parametrize(
+    ("target", "missing_symbol", "expected_error"),
+    [
+        (
+            "phone",
+            "CONFIG_AMPLIFIER",
+            (
+                "enabled DTB node /controller/amplifier compatible example,amplifier "
+                "requires CONFIG_AMPLIFIER=y"
+            ),
+        ),
+        (
+            "phone",
+            "CONFIG_CONTROLLER",
+            (
+                "enabled DTB node /controller compatible example,controller "
+                "requires CONFIG_CONTROLLER=y"
+            ),
+        ),
+        ("other", "CONFIG_AMPLIFIER", None),
+        (
+            "other",
+            "CONFIG_CONTROLLER",
+            (
+                "enabled DTB node /controller compatible example,controller "
+                "requires CONFIG_CONTROLLER=y"
+            ),
+        ),
+    ],
+)
+def test_compiled_dt_requires_platform_and_selected_board_config_owners(
+    dt_config_checkout: Path, target: str, missing_symbol: str, expected_error: str | None
+) -> None:
+    """The board requirement rejects a missing driver without spreading to a sibling board."""
+    dtb = dt_config_checkout / "owners.dtb"
+    run_process(
+        [
+            "dtc",
+            "-I",
+            "dts",
+            "-O",
+            "dtb",
+            "-o",
+            str(dtb),
+            str(TREE_FIXTURES / "config-owners.dts.fixture"),
+        ],
+        name="compile platform and board config owners",
+        timeout=15,
+        check=True,
+    )
+    checks = targets.load_target(target)["linux"]["dt_config_checks"]
+    config = {"CONFIG_CONTROLLER": "y", "CONFIG_AMPLIFIER": "y"}
+    verify_dtb_kconfig(dtb, config, checks)
+
+    del config[missing_symbol]
+
+    if expected_error is None:
+        verify_dtb_kconfig(dtb, config, checks)
+    else:
+        with pytest.raises(DeviceTreeError) as failure:
+            verify_dtb_kconfig(dtb, config, checks)
+        assert str(failure.value) == expected_error
+
+
 def _write_peripheral_binding_stubs(include: Path) -> None:
     """Supply symbols for CPP and DTC without validating peripheral configuration."""
-    event_codes = [
-        *(f"KEY_NUMERIC_{digit}" for digit in range(10)),
-        "KEY_NUMERIC_STAR",
-        "KEY_NUMERIC_POUND",
-        "KEY_UP",
-        "KEY_DOWN",
-        "KEY_LEFT",
-        "KEY_RIGHT",
-        "KEY_OK",
-        "KEY_F13",
-        "KEY_F14",
-        "KEY_PICKUP_PHONE",
-        "KEY_POWER",
-    ]
+    event_codes = {
+        "KEY_NUMERIC_0": 0x200,
+        "KEY_NUMERIC_1": 0x201,
+        "KEY_NUMERIC_2": 0x202,
+        "KEY_NUMERIC_3": 0x203,
+        "KEY_NUMERIC_4": 0x204,
+        "KEY_NUMERIC_5": 0x205,
+        "KEY_NUMERIC_6": 0x206,
+        "KEY_NUMERIC_7": 0x207,
+        "KEY_NUMERIC_8": 0x208,
+        "KEY_NUMERIC_9": 0x209,
+        "KEY_NUMERIC_STAR": 0x20A,
+        "KEY_NUMERIC_POUND": 0x20B,
+        "KEY_UP": 103,
+        "KEY_DOWN": 108,
+        "KEY_LEFT": 105,
+        "KEY_RIGHT": 106,
+        "KEY_OK": 0x160,
+        "KEY_F13": 183,
+        "KEY_F14": 184,
+        "KEY_PICKUP_PHONE": 0x1BD,
+        "KEY_POWER": 116,
+        "KEY_0": 11,
+        "KEY_1": 2,
+        "KEY_2": 3,
+        "KEY_3": 4,
+        "KEY_4": 5,
+        "KEY_5": 6,
+        "KEY_6": 7,
+        "KEY_7": 8,
+        "KEY_8": 9,
+        "KEY_9": 10,
+        "KEY_PHONE": 169,
+        "KEY_ENTER": 28,
+        "KEY_MENU": 139,
+        "KEY_BACK": 158,
+    }
     bindings = {
-        "interrupt-controller/arm-gic.h": "#define GIC_SPI 0\n#define IRQ_TYPE_LEVEL_HIGH 4\n",
+        "interrupt-controller/arm-gic.h": (
+            "#define GIC_SPI 0\n#define GIC_PPI 1\n"
+            "#define GIC_CPU_MASK_SIMPLE(cpus) 0\n"
+            "#define IRQ_TYPE_LEVEL_HIGH 4\n#define IRQ_TYPE_LEVEL_LOW 8\n"
+        ),
         "gpio/gpio.h": "#define GPIO_ACTIVE_HIGH 0\n#define GPIO_ACTIVE_LOW 1\n",
-        "input/input.h": "#define MATRIX_KEY(row, col, key) (key)\n",
+        "input/input.h": (
+            "#include <dt-bindings/input/linux-event-codes.h>\n"
+            "#define MATRIX_KEY(row, col, key) (((row) << 24) | ((col) << 16) | (key))\n"
+        ),
         "input/linux-event-codes.h": "".join(
-            f"#define {name} {value}\n" for value, name in enumerate(event_codes)
+            f"#define {name} {value}\n" for name, value in event_codes.items()
         ),
         "leds/common.h": '#define LED_FUNCTION_KBD_BACKLIGHT "kbd_backlight"\n',
     }
@@ -104,11 +238,9 @@ def _write_peripheral_binding_stubs(include: Path) -> None:
         header.write_text(contents, encoding="ascii")
 
 
-@pytest.fixture
-def nokia110_microsd_dtb(tmp_path: Path) -> Path:
-    """Compile the board's DT projections; binding stubs do not validate peripherals."""
-    target = "nokia-110-4g"
-    config = targets.load_target(target, "microsd-uboot")
+def _compile_target_dtb(tmp_path: Path, target: str, *, profile: str | None = None) -> Path:
+    """Compile real board projections with syntax-only peripheral binding stubs."""
+    config = targets.load_target(target, profile)
     platform = platforms.load_platform(config["platform"])
     source = tmp_path / "source"
     dts_directory = platform["linux"]["dts_directory"]
@@ -145,7 +277,7 @@ def nokia110_microsd_dtb(tmp_path: Path) -> Path:
             "-o",
             str(preprocessed),
         ],
-        name="preprocess Nokia 110 microSD DT projections",
+        name=f"preprocess {target} {profile or 'default'} DT projections",
         timeout=30,
         check=True,
     )
@@ -162,11 +294,63 @@ def nokia110_microsd_dtb(tmp_path: Path) -> Path:
             str(dtb),
             str(preprocessed),
         ],
-        name="compile Nokia 110 microSD DT projections",
+        name=f"compile {target} {profile or 'default'} DT projections",
         timeout=30,
         check=True,
     )
     return dtb
+
+
+@pytest.fixture
+def nokia110_microsd_dtb(tmp_path: Path) -> Path:
+    """Compile the board's DT projections; binding stubs do not validate peripherals."""
+    return _compile_target_dtb(tmp_path, "nokia-110-4g", profile="microsd-uboot")
+
+
+def test_qin_compiled_ram_tree_has_canonical_initrd_markers_and_ram_bootargs(
+    tmp_path: Path,
+) -> None:
+    """The real projection compiles with one root include owning both initrd cells."""
+    dtb = _compile_target_dtb(tmp_path, "xiaomi-qin-1s-plus")
+    nodes = exact_path_properties(dtb, ("/chosen", "/memory@80000000"))
+    chosen = nodes["/chosen"]
+    assert chosen["linux,initrd-start"] == bytes.fromhex("e5e5e5e5")
+    assert chosen["linux,initrd-end"] == bytes.fromhex("f6f6f6f6")
+    assert chosen["rng-seed"] == bytes([0xA1]) * 64
+    bootargs = parse_nul_string(chosen["bootargs"], "bootargs").split()
+    assert "init=/init" in bootargs
+    assert "rdinit=/init" in bootargs
+    assert not any(argument.startswith("root=") for argument in bootargs)
+    memory = nodes["/memory@80000000"]
+    assert memory["device_type"] == b"memory\0"
+    assert memory["reg"] == bytes.fromhex("8000000020000000")
+
+
+def test_qin_compiled_keymaps_publish_phone_role_codes(tmp_path: Path) -> None:
+    """The board's matrix and GPIO keys deliver the phone application's Linux key ABI."""
+    dtb = _compile_target_dtb(tmp_path, "xiaomi-qin-1s-plus")
+    gpio_codes = {
+        "key-0": "00000200",
+        "key-1": "00000201",
+        "key-2": "00000202",
+        "key-3": "00000203",
+        "key-5": "00000205",
+        "key-7": "00000207",
+        "key-8": "00000208",
+        "key-9": "00000209",
+        "key-hash": "0000020b",
+        "key-star": "0000020a",
+        "key-back": "000000b8",
+        "key-power": "00000074",
+    }
+    paths = ("/keypad@40250000", "/gpio-keys", *(f"/gpio-keys/{key}" for key in gpio_codes))
+    nodes = exact_path_properties(dtb, paths)
+    assert nodes["/keypad@40250000"]["linux,keymap"] == bytes.fromhex(
+        "000001bd 0001006a 00020069 01000067 01010160 0102006c 020000b7 02010204 02020206"
+    )
+    assert nodes["/gpio-keys"]["compatible"] == b"xiaomi,qin1s-plus-gpio-keys\0"
+    for key, expected_code in gpio_codes.items():
+        assert nodes[f"/gpio-keys/{key}"]["linux,code"] == bytes.fromhex(expected_code)
 
 
 def test_nokia110_compiled_microsd_tree_preserves_the_boot_display_reservation(

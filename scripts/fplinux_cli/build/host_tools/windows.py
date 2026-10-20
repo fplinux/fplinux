@@ -127,6 +127,14 @@ def verify_windows_dependencies(
     return imports
 
 
+def _required_tools(*, nand_ecc: bool) -> set[str]:
+    """Select only the native programs used by the delivered runtime."""
+    selected = {"spd_dump", "libc_server"}
+    if nand_ecc:
+        selected.add(NAND_ECC_TOOL)
+    return selected
+
+
 def _build_tools(  # noqa: PLR0913 -- compile paths and offline policy are distinct inputs.
     *,
     compiler: Path,
@@ -146,9 +154,7 @@ def _build_tools(  # noqa: PLR0913 -- compile paths and offline policy are disti
     tools = package / "tools"
     tools.mkdir(parents=True)
     source_files: dict[str, Path] = {}
-    required_tools = {"spd_dump", "libc_server", "fphelper_t117"}
-    if nand_ecc:
-        required_tools.add(NAND_ECC_TOOL)
+    required_tools = _required_tools(nand_ecc=nand_ecc)
     for recipe in recipes:
         if recipe["name"] not in required_tools:
             continue
@@ -178,7 +184,7 @@ def _build_tools(  # noqa: PLR0913 -- compile paths and offline policy are disti
             [common.ROOT / relative for relative in recipe["patches"]],
         )
         is_ecc = recipe["name"] == NAND_ECC_TOOL
-        main = "main.c" if recipe["name"] == "fphelper_t117" else f"{recipe['name']}.c"
+        main = f"{recipe['name']}.c"
         output = tools / f"{recipe['name']}.exe"
         command = [
             str(compiler),
@@ -207,7 +213,7 @@ def _build_tools(  # noqa: PLR0913 -- compile paths and offline policy are disti
                 f"Build with the x86-64 LLVM-MinGW UCRT compiler:\n{shlex.join(source_command)}\n",
                 encoding="utf-8",
             )
-        elif recipe["name"] != "fphelper_t117":
+        else:
             command.extend(
                 [
                     "-DUSE_LIBUSB=1",
@@ -259,7 +265,7 @@ def prepare_windows_host(*, cache: Path, offline: bool, nand_ecc: bool = False) 
         patches = [
             common.ROOT / relative
             for recipe in load_platform("ums9117")["host"]["tools"]
-            if recipe["name"] in {"spd_dump", "libc_server", "fphelper_t117"}
+            if recipe["name"] in _required_tools(nand_ecc=nand_ecc)
             for relative in recipe["patches"]
         ]
         environment = WindowsBuildEnvironment(work=work, inputs=[*archives.values(), *patches])

@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
+renderer = "mipi-dbi"
+firmware = "demo-panel.bin"
+width = 240
+height = 320
+commands = [
+  { command = 0x11, delay_ms = 120 },
+  { command = 0x3a, data = [
+    0x55,
+  ] },
+  { command = 0x29 },
+]

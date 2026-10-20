@@ -53,12 +53,19 @@ def kernel_inputs(tmp_path: Path) -> KernelInputs:
     )
 
 
-def kernel_identity(kernel_inputs: KernelInputs, *, build_type: str = "release") -> str:
+def kernel_identity(
+    kernel_inputs: KernelInputs,
+    *,
+    build_type: str = "release",
+    initramfs_delivery: str = "embedded",
+) -> str:
     return device_state.device_kernel_identity(
         target=kernel_inputs.target,
         linux_recipe=kernel_inputs.linux_recipe,
         bootstrap_recipe=kernel_inputs.bootstrap_recipe,
+        environment_recipe="a" * 64,
         root=kernel_inputs.root,
+        initramfs_delivery=initramfs_delivery,
         kbuild_implementation=kbuild_state.implementation_identity(
             [("scripts/implementation.py", kernel_inputs.implementation)]
         ),
@@ -88,6 +95,20 @@ class DeviceStateTests:
         assert (identity) == (kernel_identity(kernel_inputs))
         assert re.search(r"^[0-9a-f]{64}$", identity) is not None
         assert (device_state.localversion(identity)) == ("-fplinux-" + identity[:16])
+
+    def test_external_ram_delivery_covers_archive_bytes_and_trusted_receipt(
+        self, kernel_inputs: KernelInputs
+    ) -> None:
+        """The separately loaded RAM root cannot reuse an identity for other boot bytes."""
+        external = kernel_identity(kernel_inputs, initramfs_delivery="external")
+        assert external == kernel_identity(kernel_inputs, initramfs_delivery="external")
+        assert external != kernel_identity(kernel_inputs)
+
+        kernel_inputs.root["artifact"] = {"sha256": "6" * 64, "size": 1234}
+        assert external != kernel_identity(kernel_inputs, initramfs_delivery="external")
+        kernel_inputs.root["artifact"] = {"sha256": "1" * 64, "size": 1234}
+        kernel_inputs.root["receipt"] = {"recipe": "9" * 64, "sha256": "8" * 64}
+        assert external != kernel_identity(kernel_inputs, initramfs_delivery="external")
 
     def test_defconfig_metadata_does_not_change_the_device_kernel_identity(
         self, kernel_inputs: KernelInputs
@@ -155,7 +176,9 @@ class DeviceStateTests:
             "target": kernel_inputs.target,
             "linux_recipe": kernel_inputs.linux_recipe,
             "bootstrap_recipe": kernel_inputs.bootstrap_recipe,
+            "environment_recipe": "a" * 64,
             "root": kernel_inputs.root,
+            "initramfs_delivery": "embedded",
             "kbuild_implementation": kbuild_state.implementation_identity(
                 [("scripts/implementation.py", kernel_inputs.implementation)]
             ),
@@ -186,7 +209,9 @@ class DeviceStateTests:
                 target=kernel_inputs.target,
                 linux_recipe=kernel_inputs.linux_recipe,
                 bootstrap_recipe=kernel_inputs.bootstrap_recipe,
+                environment_recipe="a" * 64,
                 root={"kind": "initramfs", "artifact": {"sha256": "1" * 64}},
+                initramfs_delivery="embedded",
                 kbuild_implementation="9" * 64,
                 arch=kernel_inputs.arch,
                 defconfig=kernel_inputs.defconfig,
@@ -197,7 +222,9 @@ class DeviceStateTests:
                 target=kernel_inputs.target,
                 linux_recipe=kernel_inputs.linux_recipe,
                 bootstrap_recipe=kernel_inputs.bootstrap_recipe,
+                environment_recipe="a" * 64,
                 root=kernel_inputs.root,
+                initramfs_delivery="embedded",
                 kbuild_implementation="9" * 64,
                 arch=kernel_inputs.arch,
                 defconfig=kernel_inputs.defconfig,

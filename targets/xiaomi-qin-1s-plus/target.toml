@@ -1,0 +1,140 @@
+# SPDX-License-Identifier: GPL-2.0-only
+platform = "sc9820e"
+
+[identity]
+brand = "Xiaomi"
+product = "Qin 1s+"
+hardware_codes = []
+compatible = "xiaomi,qin1s-plus"
+
+[display]
+panel = "display/panel.toml"
+boot_font = "6x8"
+
+[display_brightness]
+backlight = "sprd_backlight"
+levels = [0, 18, 36, 54, 72, 90, 108, 127, 169, 212, 255]
+
+[rootfs]
+packages = [
+  "fplinux-audio",
+  "fplinux-font-terminus-8x16",
+  "fplinux-gpu-probe",
+  "fplinux-libweston-gl",
+  "fplinux-mesa",
+  "fplinux-qin1splus-mesa",
+]
+
+[bundle]
+packages = [
+  "fplinux-ffmpeg",
+  "fplinux-present",
+  "fplinux-showcase",
+  "fplinux-tyrquake",
+]
+
+[linux]
+config_fragment = "linux/config/config.fragment"
+memory = { base = 0x80000000, size = 0x20000000 }
+dtb = "unisoc/sc9820e-xiaomi-qin-1s-plus.dtb"
+debug_dtb = "sc9820e-xiaomi-qin-1s-plus.dtb"
+patches = [
+  "linux/patches/0001-qin1splus-panel.patch",
+  "linux/patches/0002-qin1splus-gpio-keypad.patch",
+  "linux/patches/0003-qin1splus-gpio-keypad-binding.patch",
+  "linux/patches/0004-qin1splus-panel-te.patch",
+  "linux/patches/0005-qin1splus-capture.patch",
+  "linux/patches/0006-qin1splus-capture-binding.patch",
+]
+additional_forbidden_dtb_markers = []
+additional_forbidden_config = []
+overlay = "linux/overlay"
+copies = []
+
+[[linux.appends]]
+source = "linux/fragments/dts/unisoc.Makefile"
+destination = "arch/arm/boot/dts/unisoc/Makefile"
+
+[[linux.appends]]
+source = "linux/fragments/drivers/usb/musb/qin1splus-inherited.Kconfig"
+destination = "drivers/usb/musb/Kconfig"
+
+[[linux.appends]]
+source = "linux/fragments/drivers/usb/musb/qin1splus-inherited.Makefile"
+destination = "drivers/usb/musb/Makefile"
+
+[[linux.appends]]
+source = "linux/fragments/sound/drivers/qin1splus/sound-parent.Kconfig"
+destination = "sound/drivers/Kconfig"
+
+[[linux.appends]]
+source = "linux/fragments/sound/drivers/qin1splus/sound-parent.Makefile"
+destination = "sound/drivers/Makefile"
+
+[[linux.appends]]
+source = "linux/fragments/drivers/remoteproc/qin1splus.Kconfig"
+destination = "drivers/remoteproc/Kconfig"
+
+[[linux.appends]]
+source = "linux/fragments/drivers/remoteproc/qin1splus.Makefile"
+destination = "drivers/remoteproc/Makefile"
+
+[[linux.appends]]
+source = "linux/fragments/drivers/bluetooth/qin1splus.Kconfig"
+destination = "drivers/bluetooth/Kconfig"
+
+[[linux.appends]]
+source = "linux/fragments/drivers/bluetooth/qin1splus.Makefile"
+destination = "drivers/bluetooth/Makefile"
+
+[[linux.dt_config_checks]]
+path = "/i2c@70700000/amplifier@59"
+compatible = "awinic,aw87339"
+config = "CONFIG_AW87339"
+
+[bootstrap]
+image = "qin_linux_ramboot.bin"
+map = "qin_linux_ramboot.map"
+record_prefix = "XIAOMI_QIN_1S_PLUS"
+
+[bootstrap.layout]
+entry_load = 0x80002060
+entry_limit = 0x80004000
+kernel_load = 0x80008000
+kernel_stage = 0x81008000
+kernel_stage_limit = 0x82000000
+fdt_load = 0x85400000
+initramfs_load = 0x85500000
+stack = 0x9ffeff50
+
+[adapter]
+session_name = "xiaomi-qin-1s-plus-linux"
+boot_instructions = "Power the phone off, hold the call key, then connect USB while keeping the key pressed."
+
+[device_data]
+originals_parser = "qin1splus_device_data.py"
+
+[wcn_firmware]
+firmware = [
+  { source = "wcnmodem.bin", destination = "wcnmodem.bin", size = 1540096 },
+  { source = "system-config.bin", destination = "qin1splus/system-config.bin", size = 616 },
+  { source = "system-cali.bin", destination = "qin1splus/system-cali.bin", size = 3292 },
+  { source = "wcn-config.bin", destination = "qin1splus/wcn-config.bin", size = 616 },
+  { source = "wcn-cali.bin", destination = "qin1splus/wcn-cali.bin", size = 3292 },
+]
+
+[microsd]
+linux_patches = []
+
+[loader]
+fdl1_load = 0x00005000
+sml_load = 0x8e000000
+fdl2_load = 0x9efffe00
+stack_guard_start = 0x808e0000
+stack_guard_end = 0x808f0000
+
+[loader.build]
+source = "loader"
+fdl1_source = "sprd_chipram"
+fdl2_source = "sprd_u_boot"
+sml_source = "arm_trusted_firmware"

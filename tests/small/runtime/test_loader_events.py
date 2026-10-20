@@ -9,8 +9,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
-
-from common.loader_events import record_events
+from fplinux_cli.runtime.events import record_events
 
 
 class LoaderEventTests:

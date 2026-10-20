@@ -3,9 +3,7 @@
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
-import io
 import ipaddress
 import itertools
 import json
@@ -56,6 +54,7 @@ def write_bundle(bundle: Path) -> tuple[dict[str, Any], str]:
 
     payload = {
         "rootfs_receipt": {"recipe": "5" * 64, "sha256": "6" * 64},
+        "kernel_artifacts": {},
         "boot_artifacts": {"required": []},
         "container_image_recipe": "7" * 64,
         "container_image_content": "4" * 64,
@@ -277,38 +276,17 @@ def ssh_runtime(tmp_path: Path) -> SshRuntime:
 class SshTransportSmallTests:
     """Exercise in-process session, bundle and transfer boundaries."""
 
-    def test_open_shell_rejects_a_noninteractive_process(self, ssh_runtime: SshRuntime) -> None:
+    def test_run_shell_rejects_a_noninteractive_process(self, ssh_runtime: SshRuntime) -> None:
         """Do not launch forced-PTY SSH when the host has no input terminal."""
         session = ssh_runtime.session()
         with (
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=ssh_runtime.root),
             mock.patch("fplinux_cli.runtime.ssh_transport.os.isatty", return_value=False),
-            mock.patch("fplinux_cli.runtime.ssh_transport.os.execv") as execute,
+            mock.patch("fplinux_cli.runtime.ssh_transport.subprocess.Popen") as execute,
             pytest.raises(SystemExit, match="interactive SSH requires a terminal"),
         ):
-            ssh_transport.open_shell(session)
+            ssh_transport.run_shell(session)
 
         execute.assert_not_called()
-
-    def test_open_shell_executes_for_an_input_terminal(self, ssh_runtime: SshRuntime) -> None:
-        """Replace the runner with ssh forcing a remote PTY for the session's phone."""
-        session = ssh_runtime.session()
-        with (
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=ssh_runtime.root),
-            mock.patch("fplinux_cli.runtime.ssh_transport.os.isatty", return_value=True),
-            mock.patch(
-                "fplinux_cli.runtime.ssh_transport.shutil.which", return_value="/usr/bin/ssh"
-            ),
-            mock.patch("fplinux_cli.runtime.ssh_transport.os.execv") as execute,
-        ):
-            ssh_transport.open_shell(session)
-
-        execute.assert_called_once()
-        program, argv = execute.call_args.args
-        assert (program) == ("/usr/bin/ssh")
-        assert (argv[0]) == ("/usr/bin/ssh")
-        assert ("-tt") in (argv)
-        assert (argv[-1]) == ("root@10.23.45.2")
 
     def test_bundle_identity_rejects_a_runtime_image_outside_its_build_manifest(
         self, ssh_runtime: SshRuntime
@@ -352,8 +330,7 @@ class SshTransportSmallTests:
         (current / "phone.json").write_text(json.dumps(state), encoding="utf-8")
         (current / "phone.json").chmod(0o600)
 
-        with mock.patch.object(ssh_transport, "_runtime_root", return_value=ssh_runtime.root):
-            loaded = ssh_transport.load_current_session("phone")
+        loaded = ssh_transport.load_current_session("phone", runtime_root=ssh_runtime.root)
 
         assert (loaded) == (state)
 
@@ -406,75 +383,6 @@ class SshTransportSmallTests:
         ):
             ssh_transport.require_device_identity(session, "9" * 64)
 
-    @pytest.mark.parametrize(
-        "rtc", [pytest.param("kept", id="kept"), pytest.param("written", id="written")]
-    )
-    def test_clock_sync_sends_host_utc_seconds_and_reports_the_phone_clock(
-        self, ssh_runtime: SshRuntime, rtc: str
-    ) -> None:
-        """One phone command carries whole host UTC seconds; its RTC outcome is shown."""
-        session = ssh_runtime.session()
-        result = subprocess.CompletedProcess(
-            [], 0, stdout=f"system=1788739201 rtc={rtc}\n", stderr=""
-        )
-        output = io.StringIO()
-        with (
-            mock.patch("fplinux_cli.runtime.ssh_transport.time.time", return_value=1788739200.75),
-            mock.patch.object(ssh_transport, "run_remote", return_value=result) as remote,
-            contextlib.redirect_stdout(output),
-        ):
-            ssh_transport.sync_clock(session)
-
-        assert (remote.call_count) == (1)
-        assert (remote.call_args.args[:2]) == ((session, "fplinux-clock 1788739200"))
-        assert (output.getvalue()) == (f"Phone clock set to 2026-09-07T00:00:01Z (RTC {rtc}).\n")
-
-    @pytest.mark.parametrize(
-        ("result", "warning"),
-        [
-            pytest.param(
-                subprocess.CompletedProcess(
-                    [],
-                    1,
-                    stdout="system=1788739200 rtc=failed\n",
-                    stderr="fplinux-clock: cannot store a readable time in /dev/rtc0\n",
-                ),
-                "fplinux ssh: phone clock set to 2026-09-07T00:00:00Z, but its RTC was not "
-                "written: fplinux-clock: cannot store a readable time in /dev/rtc0\n",
-                id="rtc-not-written",
-            ),
-            pytest.param(
-                subprocess.CompletedProcess(
-                    [], 255, stdout="", stderr="Connection closed by 10.23.45.2 port 22\n"
-                ),
-                "fplinux ssh: phone clock was not set: Connection closed by 10.23.45.2 port 22\n",
-                id="transport-lost",
-            ),
-            pytest.param(
-                subprocess.CompletedProcess([], 0, stdout="done\n", stderr=""),
-                "fplinux ssh: phone clock was not set: unexpected clock status (exit 0)\n",
-                id="unexpected-status",
-            ),
-        ],
-    )
-    def test_clock_sync_failure_warns_and_returns(
-        self, ssh_runtime: SshRuntime, result: subprocess.CompletedProcess[str], warning: str
-    ) -> None:
-        """A clock failure is a warning, so the caller can still report a ready session."""
-        session = ssh_runtime.session()
-        output = io.StringIO()
-        errors = io.StringIO()
-        with (
-            mock.patch("fplinux_cli.runtime.ssh_transport.time.time", return_value=1788739200.0),
-            mock.patch.object(ssh_transport, "run_remote", return_value=result),
-            contextlib.redirect_stdout(output),
-            contextlib.redirect_stderr(errors),
-        ):
-            ssh_transport.sync_clock(session)
-
-        assert (output.getvalue()) == ("")
-        assert (errors.getvalue()) == (warning)
-
     def test_current_session_rejects_an_unknown_field(self, ssh_runtime: SshRuntime) -> None:
         """An unrecognized host-state record is not a reconnect session."""
         state = {**ssh_runtime.session(), "unexpected": "value"}
@@ -484,10 +392,9 @@ class SshTransportSmallTests:
         (current / "phone.json").chmod(0o600)
 
         with (
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=ssh_runtime.root),
             pytest.raises(SystemExit, match="unexpected fields"),
         ):
-            ssh_transport.load_current_session("phone")
+            ssh_transport.load_current_session("phone", runtime_root=ssh_runtime.root)
 
     def test_usb_session_text_is_exactly_seven_fields_with_nul_padding(self) -> None:
         """Emit the canonical fixed USB-gadget consumer record."""
@@ -535,7 +442,6 @@ class SshTransportSmallTests:
             subprocess.CompletedProcess([], 0, stdout=f"{state['session_id']}\n", stderr=""),
         ]
         with (
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=ssh_runtime.root),
             mock.patch.object(ssh_transport, "_usb_devices", return_value=[Path("/usb/phone")]),
             mock.patch.object(ssh_transport, "_ncm_interface", return_value="usb1"),
             mock.patch.object(ssh_transport, "_network_ready", return_value=True),
@@ -567,7 +473,6 @@ class SshTransportSmallTests:
         # The phone is absent on the first USB poll and present on every later one.
         usb_polls = itertools.chain([[]], itertools.repeat([Path("/usb/phone")]))
         with (
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=ssh_runtime.root),
             mock.patch.object(ssh_transport, "_usb_devices", side_effect=usb_polls),
             mock.patch.object(ssh_transport, "_ncm_interface", return_value="usb1"),
             mock.patch.object(ssh_transport, "_network_ready", side_effect=network),
@@ -634,7 +539,6 @@ class SshTransportSmallTests:
             write_private_text(path, value)
 
         with (
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=ssh_runtime.root),
             mock.patch.object(ssh_transport, "_write_private_text", side_effect=fail_config),
             pytest.raises(OSError, match="disk full"),
         ):
@@ -656,8 +560,7 @@ class SshTransportSmallTests:
         unrelated_file = unrelated / "keep.txt"
         unrelated_file.write_bytes(b"unrelated contents\n")
 
-        with mock.patch.object(ssh_transport, "_runtime_root", return_value=ssh_runtime.root):
-            ssh_transport._cleanup_target_sessions(ssh_runtime.root, "phone")  # noqa: SLF001
+        ssh_transport._cleanup_target_sessions(ssh_runtime.root, "phone")  # noqa: SLF001
 
         assert not Path(selected["private_key"]).parent.exists()
         assert Path(other["private_key"]).read_text(encoding="ascii") == "private\n"
@@ -681,7 +584,6 @@ class SshTransportSmallTests:
         keygen_failure = subprocess.CompletedProcess([], 1, stdout="", stderr="keygen failed")
 
         with (
-            mock.patch.object(ssh_transport, "_runtime_root", return_value=ssh_runtime.root),
             mock.patch.object(ssh_transport, "_require_tool", side_effect=lambda name: name),
             mock.patch.object(
                 ssh_transport,
@@ -703,6 +605,7 @@ class SshTransportSmallTests:
                 descriptor,
                 "phone",
                 {"vendor_id": 0x0525, "product_id": 0xA4A6, "wait_seconds": 1},
+                runtime_root=ssh_runtime.root,
             )
 
         assert not ((current / "phone.json").exists())

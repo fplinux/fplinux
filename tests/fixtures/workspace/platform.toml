@@ -3,6 +3,7 @@ source_lock = "linux"
 
 [bootstrap]
 vendor_source_lock = "bootstrap"
+backend = "ums9117"
 
 [[host.tools]]
 type = "make-archive"

@@ -63,16 +63,16 @@ def loader_handoff() -> Iterator[LoaderHandoff]:
 
 
 class LoaderHandoffProcessTests:
-    """Exercise real process replacement without qualifying a phone or SSH server."""
+    """Exercise child SSH lifetime without qualifying a phone or SSH server."""
 
-    def test_interactive_shell_observes_complete_before_replacing_runner(
+    def test_interactive_shell_observes_complete_and_returns_its_exit_status(
         self, loader_handoff: LoaderHandoff
     ) -> None:
-        """An interactive exec preserves the completed loader stream and SSH exit status."""
+        """The parent survives the SSH child and preserves loader events and SSH status."""
         result = loader_handoff.run_loader("interactive")
         assert (result.returncode) == (23), result.stderr
         shell = json.loads((loader_handoff.root / "shell.json").read_text(encoding="utf-8"))
-        assert (shell["pid"]) == (
+        assert (shell["pid"]) != (
             int((loader_handoff.root / "runner.pid").read_text(encoding="ascii"))
         )
         assert ([event["event"] for event in shell["events"]]) == (
@@ -90,8 +90,7 @@ class LoaderHandoffProcessTests:
         )
         assert (loader_handoff.events()) == (shell["events"])
         assert (loader_handoff.commands()[0]) == ("uname -r")
-        assert loader_handoff.commands()[1].startswith("fplinux-clock ")
-        assert (loader_handoff.commands()[2]) == ("root@10.23.45.2")
+        assert (loader_handoff.commands()[1]) == ("root@10.23.45.2")
         assert (
             len(list(loader_handoff.root.glob("runtime/fplinux/sessions/*/client_ed25519")))
         ) == (1)
@@ -107,31 +106,11 @@ class LoaderHandoffProcessTests:
         assert (names[-2:]) == (["ssh-ready", "complete"])
         assert (names.count("complete")) == (1)
         assert not ((loader_handoff.root / "shell.json").exists())
-        assert (len(loader_handoff.commands())) == (2)
+        assert (len(loader_handoff.commands())) == (1)
         assert ("No interactive terminal is attached") in (result.stdout)
         assert (
             len(list(loader_handoff.root.glob("runtime/fplinux/sessions/*/client_ed25519")))
         ) == (1)
-
-    def test_none_transport_completes_without_ssh_and_removes_unready_session(
-        self, loader_handoff: LoaderHandoff
-    ) -> None:
-        """A declared no-transport load ends at the acknowledged Linux transition."""
-        result = loader_handoff.run_loader("none")
-        assert (result.returncode) == (0), result.stderr
-        assert ([event["event"] for event in loader_handoff.events()]) == (
-            [
-                "waiting-for-device",
-                "device-found",
-                "ram-loader-start",
-                "ram-loader-complete",
-                "linux-start",
-                "linux-transition",
-                "complete",
-            ]
-        )
-        assert (loader_handoff.commands()) == ([])
-        assert (list(loader_handoff.root.glob("runtime/fplinux/sessions/*"))) == ([])
 
     @pytest.mark.parametrize(
         "mode",

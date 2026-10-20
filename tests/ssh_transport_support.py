@@ -39,6 +39,7 @@ def create_ready_session(
         path.chmod(0o600)
     state: dict[str, Any] = {
         "target": target,
+        "runtime_root": str(root),
         "session_id": session_id.hex(),
         "usb_serial": usb_serial,
         "network": "10.23.45.0/30",

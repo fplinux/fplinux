@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 from typing import TYPE_CHECKING
 
 from fplinux_cli.common import ROOT
@@ -47,7 +48,25 @@ def _remove_candidates(cache: Path, entries: Sequence[InventoryEntry]) -> PruneA
         if entry.action != "candidate":
             continue
         destination = managed_candidate_directory(cache, entry.path)
-        shutil.rmtree(destination)
+        try:
+            shutil.rmtree(destination)
+        except PermissionError:
+            # Container build users can own private directories in abandoned work trees.
+            destination = managed_candidate_directory(cache, entry.path)
+            subprocess.run(
+                [
+                    "unshare",
+                    "--map-auto",
+                    "--map-root-user",
+                    "--",
+                    "rm",
+                    "--recursive",
+                    "--force",
+                    "--",
+                    str(destination),
+                ],
+                check=True,
+            )
         removed.append(entry.path)
         logical += entry.logical_bytes or 0
         allocated += entry.allocated_bytes or 0

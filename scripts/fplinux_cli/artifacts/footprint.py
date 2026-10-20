@@ -17,7 +17,6 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.common import canonical_json_bytes, sha256_bytes, sha256_file
-from fplinux_cli.manifests.kernel import kconfig_values
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -251,7 +250,7 @@ def _rootfs_report(data: bytes, *, external: bool) -> tuple[dict[str, Any], dict
 
 
 def _ram_root_report(initramfs: bytes) -> dict[str, Any]:
-    """Describe the compressed lower image that is actually embedded."""
+    """Describe the compressed lower image delivered in the RAM boot archive."""
     contents = {entry.name: entry.data for entry in _cpio_entries(initramfs)}
     lower = contents["root.squashfs"]
     if len(lower) < 96 or lower[:4] != b"hsqs":
@@ -396,21 +395,31 @@ def inspect_footprint(bundle: CurrentBundle) -> dict[str, Any]:
     try:
         manifest = json.loads(bundle.manifest_bytes)
         files = _verified_files(bundle, manifest)
-        cpio = files["debug/rootfs.cpio"].read_bytes()
-        config = files["debug/kernel.config"].read_text(encoding="utf-8")
-        external = kconfig_values(config).get("CONFIG_INITRAMFS_SOURCE", '""') == '""'
-        rootfs, providers = _rootfs_report(cpio, external=external)
+        artifacts = manifest["kernel_artifacts"]
+        delivery = artifacts["initramfs_delivery"]
+        if delivery not in {"embedded", "external", "none"}:
+            raise FootprintError("invalid initramfs delivery in build manifest")
+        cpio = files[artifacts["rootfs"]].read_bytes()
+        image = files[artifacts["image"]]
+        rootfs, providers = _rootfs_report(cpio, external=delivery == "none")
         embedded = None
+        external_initramfs = None
         ram_root = None
-        if not external:
-            initramfs = files["debug/initramfs.cpio"].read_bytes()
+        if delivery != "none":
+            initramfs = files[artifacts["initramfs"]].read_bytes()
             ram_root = _ram_root_report(initramfs)
             rootfs["source"] = "ram-squashfs-composition"
-            embedded = _embedded_initramfs(
-                files["debug/vmlinux"].read_bytes(),
-                files["debug/System.map"].read_bytes(),
-                initramfs,
-            )
+            if delivery == "embedded":
+                embedded = _embedded_initramfs(
+                    files[artifacts["vmlinux"]].read_bytes(),
+                    files[artifacts["system_map"]].read_bytes(),
+                    initramfs,
+                )
+            else:
+                external_initramfs = {
+                    "cpio_bytes": len(initramfs),
+                    "sha256": sha256_bytes(initramfs),
+                }
         optional = {
             name: {**_apk_report(path, providers), "sha256": manifest["files"][name]["sha256"]}
             for name, path in files.items()
@@ -428,13 +437,19 @@ def inspect_footprint(bundle: CurrentBundle) -> dict[str, Any]:
             },
             "layers": {
                 "boot_artifact_bytes": boot,
-                "kernel_zimage_bytes": files["debug/zImage"].stat().st_size,
+                "kernel_image_name": image.name,
+                "kernel_image_bytes": image.stat().st_size,
+                **(
+                    {"kernel_zimage_bytes": image.stat().st_size} if image.name == "zImage" else {}
+                ),
+                "initramfs_delivery": delivery,
                 "embedded_initramfs": embedded,
+                "external_initramfs": external_initramfs,
                 "ram_root": ram_root,
                 "host_debug_file_bytes": {
                     name: manifest["files"][name]["size"]
                     for name in files
-                    if name.startswith("debug/")
+                    if name.startswith(str(PurePosixPath(artifacts["image"]).parent) + "/")
                 },
                 "description": (
                     "Nested layers overlap; host debug copies are not added to loaded bytes"
@@ -474,13 +489,22 @@ def compare_footprints(before: dict[str, Any], after: dict[str, Any]) -> dict[st
     old_initramfs = old_layers["embedded_initramfs"]
     new_initramfs = new_layers["embedded_initramfs"]
     old_boot, new_boot = old_layers["boot_artifact_bytes"], new_layers["boot_artifact_bytes"]
+    old_image_name = old_layers.get("kernel_image_name", "zImage")
+    new_image_name = new_layers.get("kernel_image_name", "zImage")
+    old_image_bytes = old_layers.get("kernel_image_bytes", old_layers.get("kernel_zimage_bytes"))
+    new_image_bytes = new_layers.get("kernel_image_bytes", new_layers.get("kernel_zimage_bytes"))
+    image_delta = new_image_bytes - old_image_bytes
     return {
         "before": before["identity"],
         "after": after["identity"],
         "same_rootfs_content": old_root["content_sha256"] == new_root["content_sha256"],
         "layers": {"before": before["layers"], "after": after["layers"]},
-        "kernel_zimage_byte_delta": (
-            new_layers["kernel_zimage_bytes"] - old_layers["kernel_zimage_bytes"]
+        "kernel_image_name": new_image_name if old_image_name == new_image_name else "image",
+        "kernel_image_byte_delta": image_delta,
+        **(
+            {"kernel_zimage_byte_delta": image_delta}
+            if old_image_name == new_image_name == "zImage"
+            else {}
         ),
         "boot_artifact_byte_delta": {
             name: new_boot.get(name, 0) - old_boot.get(name, 0)

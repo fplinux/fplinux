@@ -87,7 +87,7 @@ class NewTargetTests:
     def test_new_target_loads_as_a_headless_ram_only_phone(
         self, target_checkout: TargetCheckout
     ) -> None:
-        """The manifest boundary accepts the skeleton with only FDL1, no display and board maps."""
+        """The skeleton boots through FDL1 without a display or mandatory personal data."""
         printed = create_target("hammer-horizon-lte")
 
         config = targets.load_target("hammer-horizon-lte")
@@ -107,17 +107,7 @@ class NewTargetTests:
         ).exists()
         assert DISPLAY_KEYS.isdisjoint(config["runtime"]["adapter"])
         assert (config["runtime"]["adapter"]["exec_distance"]) == (0)
-        # A new phone can prepare its board maps from a backup without a target parser.
-        assert (config["device_data"]) == (
-            {
-                "groups": {
-                    "board-maps": [
-                        {"source": "pinmap.bin", "destination": "pinmap.bin"},
-                        {"source": "keymap.bin", "destination": "keymap.bin"},
-                    ]
-                }
-            }
-        )
+        assert config["device_data"] == {"groups": {}}
         assert (paths.discover_profiles("hammer-horizon-lte")) == (("default",))
         with pytest.raises(SystemExit, match="does not support profile microsd-uboot"):
             targets.load_target("hammer-horizon-lte", "microsd-uboot")
@@ -151,13 +141,15 @@ class NewTargetTests:
 
         assert readme.startswith("FPLinux for HAMMER Horizon LTE\n")
         assert "Keep the powered-off phone disconnected" in prose
-        assert "./runner/run.py\n" in readme
+        assert "python3.14 -I fplinux.py run\n" in readme
         assert "Wait until the runner asks for the phone, then follow its instruction" in prose
         assert "Power the phone off, hold *, then connect USB while keeping * pressed." in prose
         assert "If connected too early, disconnect and restart this sequence." in prose
-        assert readme.index("./runner/run.py\n") < readme.index("Wait until the runner")
+        assert readme.index("python3.14 -I fplinux.py run\n") < readme.index(
+            "Wait until the runner"
+        )
         assert readme.index("Wait until the runner") < readme.index("Power the phone off, hold *")
-        assert "./runner/run.py --reconnect" in readme
+        assert "python3.14 -I fplinux.py run --reconnect" in readme
         assert "Phone support, controls and limits: docs/porting/checklist/index.html" in prose
         assert "confirm it on this phone before use" in prose
         assert "Configuration alone does not establish support" in prose

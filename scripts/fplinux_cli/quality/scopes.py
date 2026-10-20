@@ -11,8 +11,7 @@ from fplinux_cli.common import fail
 if TYPE_CHECKING:
     from pathlib import PurePath
 
-CHECK_SCOPES = (
-    "repository",
+SOURCE_CHECK_SCOPES = (
     "source",
     "container",
     "metadata",
@@ -24,11 +23,10 @@ CHECK_SCOPES = (
     "shell",
     "alpine",
     "c",
-    "kernel",
 )
 
 
-SOURCE_CHECK_SCOPES = CHECK_SCOPES[1:-1]
+CHECK_SCOPES = ("repository", *SOURCE_CHECK_SCOPES, "tests", "kernel")
 
 
 def is_project_c_source(path: PurePath) -> bool:
@@ -40,7 +38,7 @@ def is_project_c_source(path: PurePath) -> bool:
         or (
             len(path.parts) >= 4
             and path.parts[0] in {"platforms", "targets"}
-            and path.parts[2] in {"common", "uboot"}
+            and path.parts[2] in {"common", "loader", "uboot"}
         )
     )
 

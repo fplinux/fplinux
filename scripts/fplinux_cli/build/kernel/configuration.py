@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import common
 from fplinux_cli.build import inputs as inputs_build
+from fplinux_cli.build.display import render_mipi_dbi_firmware
 from fplinux_cli.common import fail
 from fplinux_cli.device_data import inputs as firmware_inputs
 from fplinux_cli.manifests.kernel import compose_kernel_config, kconfig_values, kernel_config_paths
@@ -74,11 +75,52 @@ def assert_build_type_kconfig(config: Path, fragment: Path, build_type: str) -> 
             fail(f"{build_type} build did not preserve {symbol}={value}")
 
 
-def assert_external_firmware_kconfig(config: Path) -> None:
-    """Require a RAM kernel to receive its firmware outside the kernel image."""
+def assert_external_firmware_kconfig(
+    config: Path, target_config: dict[str, Any], source: Path
+) -> None:
+    """Allow only the generated panel commands inside a RAM kernel."""
     values = kconfig_values(inputs_build.require_file(config).read_text())
-    if values.get("CONFIG_EXTRA_FIRMWARE", '""') != '""':
+    panel = target_config["display"]["panel"]
+    expected = (
+        f'"{panel["firmware"]}"' if panel is not None and panel["renderer"] == "mipi-dbi" else '""'
+    )
+    if values.get("CONFIG_EXTRA_FIRMWARE", '""') != expected:
         fail("RAM kernel unexpectedly contains built-in firmware")
+    if expected != '""' and values.get("CONFIG_EXTRA_FIRMWARE_DIR") != f'"{source / "firmware"}"':
+        fail("RAM kernel lost its generated panel firmware directory")
+
+
+def panel_firmware_kconfig_arguments(target_config: dict[str, Any], source: Path) -> list[str]:
+    """Embed generated panel commands so DRM can initialize before userspace."""
+    panel = target_config["display"]["panel"]
+    if panel is None or panel["renderer"] != "mipi-dbi":
+        return []
+    return [
+        "--set-str",
+        "EXTRA_FIRMWARE",
+        panel["firmware"],
+        "--set-str",
+        "EXTRA_FIRMWARE_DIR",
+        str(source / "firmware"),
+    ]
+
+
+def verify_builtin_panel_firmware(
+    target_config: dict[str, Any], config_path: Path, vmlinux: Path, source: Path
+) -> None:
+    """Require the generated panel command file in the built kernel image."""
+    panel = target_config["display"]["panel"]
+    if panel is None or panel["renderer"] != "mipi-dbi":
+        return
+    values = kconfig_values(inputs_build.require_file(config_path).read_text())
+    if (
+        values.get("CONFIG_EXTRA_FIRMWARE") != f'"{panel["firmware"]}"'
+        or values.get("CONFIG_EXTRA_FIRMWARE_DIR") != f'"{source / "firmware"}"'
+    ):
+        fail("kernel configuration lost its built-in panel firmware")
+    contents = render_mipi_dbi_firmware(panel)
+    if not _file_contains(vmlinux, contents):
+        fail("kernel artifact does not embed the generated panel firmware")
 
 
 def audio_profile_kconfig_arguments(

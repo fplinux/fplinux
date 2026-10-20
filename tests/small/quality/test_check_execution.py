@@ -5,13 +5,20 @@ from __future__ import annotations
 
 import argparse
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
+import pytest
 from fplinux_cli.quality import checks
 from fplinux_cli.quality import runtime as quality_runtime
-from fplinux_cli.quality.receipts import check_scope_receipt_recipe
+from fplinux_cli.quality.receipts import (
+    check_scope_receipt_recipe,
+    publish_success_receipt,
+    receipt_matches,
+)
 from fplinux_cli.quality.scopes import resolve_check_scopes
+from fplinux_cli.reporting.run import RunReporter, Stage
 
 from tests.small.quality.check_fixtures import _RecordingReporter
 
@@ -24,6 +31,161 @@ class CheckScopeSelectionTests:
         assert (resolve_check_scopes(["kernel", "python", "kernel", "repository"])) == (
             ("repository", "python", "kernel")
         )
+
+    def test_default_selection_includes_source_tests_and_kernel_checks(self) -> None:
+        """Omitting scopes retains the complete gate, including the full test workload."""
+        assert resolve_check_scopes([]) == (
+            "repository",
+            "source",
+            "container",
+            "metadata",
+            "docs",
+            "spelling",
+            "secrets",
+            "licenses",
+            "python",
+            "shell",
+            "alpine",
+            "c",
+            "tests",
+            "kernel",
+        )
+
+
+class AnalyzerAndTestExecutionTests:
+    """Exercise scope routing and receipts with controlled external container processes."""
+
+    @pytest.mark.parametrize(
+        ("selected", "source_scopes", "test_tiers"),
+        [
+            (("python",), ["python"], []),
+            (
+                ("tests",),
+                [],
+                ["small", "host_process", "host_tool", "artifact", "public_workflow"],
+            ),
+            (
+                ("python", "tests"),
+                ["python"],
+                ["small", "host_process", "host_tool", "artifact", "public_workflow"],
+            ),
+        ],
+        ids=("python-analyzers-only", "all-test-tiers-only", "analyzers-and-all-test-tiers"),
+    )
+    def test_selected_scopes_route_to_their_workload_and_earn_receipts(
+        self,
+        tmp_path: Path,
+        selected: tuple[str, ...],
+        source_scopes: list[str],
+        test_tiers: list[str],
+    ) -> None:
+        """Python runs no pytest; tests runs all tiers without entering the source checker."""
+        workspace = tmp_path / "workspace"
+        (workspace / "tests").mkdir(parents=True)
+        commands: list[list[str]] = []
+        recipes = {
+            scope: check_scope_receipt_recipe(
+                scope,
+                "a" * 64,
+                image_generation="b" * 64,
+                orchestration_recipe="c" * 64,
+            )
+            for scope in selected
+        }
+        cache = tmp_path / "cache"
+        with mock.patch.object(quality_runtime, "kern_environment", return_value={}):
+            checks._run_missing_checks(  # noqa: SLF001 -- controlled execution boundary.
+                reporter=_RecordingReporter(tmp_path / "logs", commands),  # type: ignore[arg-type]
+                cache=cache,
+                missing=selected,
+                analyzer_cache={},
+                workspace=workspace,
+                kern="kern",
+                image="image",
+                recipes=recipes,
+                profile=None,
+                build_type="release",
+                jobs=1,
+            )
+
+        workloads = [command[command.index("--") + 1 :] for command in commands]
+        analyzer_workloads = [
+            command
+            for command in workloads
+            if command[:3] == ["python3", "-m", "fplinux_cli.quality.source"]
+        ]
+        assert analyzer_workloads == (
+            [["python3", "-m", "fplinux_cli.quality.source", *source_scopes]]
+            if source_scopes
+            else []
+        )
+        pytest_workloads = [
+            command for command in workloads if command[:3] == ["python3", "-m", "pytest"]
+        ]
+        assert [command[-1] for command in pytest_workloads] == [
+            f"tests/{tier}" for tier in test_tiers
+        ]
+        assert len(workloads) == len(analyzer_workloads) + len(pytest_workloads)
+        assert all(receipt_matches(cache, recipe) for recipe in recipes.values())
+
+    def test_final_container_tier_failure_keeps_python_success_and_previous_tests_receipt(
+        self, tmp_path: Path
+    ) -> None:
+        """Earlier tiers cannot certify tests when the final container workload fails."""
+        workspace = tmp_path / "workspace"
+        (workspace / "tests").mkdir(parents=True)
+        python = check_scope_receipt_recipe(
+            "python", "a" * 64, image_generation="b" * 64, orchestration_recipe="c" * 64
+        )
+        previous_tests = replace(python, scope="tests")
+        changed_tests = replace(previous_tests, closure_digest="d" * 64)
+        cache = tmp_path / "cache"
+        publish_success_receipt(cache, previous_tests)
+        analyzer_commands: list[list[str]] = []
+        test_commands: list[list[str]] = []
+
+        def container_workload(
+            _stage: object, _workspace: Path, command: list[str], **_kwargs: object
+        ) -> None:
+            test_commands.append(command)
+            if command[-1] == "tests/public_workflow":
+                raise SystemExit(1)
+
+        with (
+            mock.patch.object(quality_runtime, "kern_environment", return_value={}),
+            mock.patch.object(
+                quality_runtime, "run_quality_command", side_effect=container_workload
+            ),
+            pytest.raises(SystemExit) as raised,
+        ):
+            checks._run_missing_checks(  # noqa: SLF001 -- receipt publishing boundary.
+                reporter=_RecordingReporter(  # type: ignore[arg-type]
+                    tmp_path / "logs", analyzer_commands
+                ),
+                cache=cache,
+                missing=("python", "tests"),
+                analyzer_cache={},
+                workspace=workspace,
+                kern="kern",
+                image="image",
+                recipes={"python": python, "tests": changed_tests},
+                profile=None,
+                build_type="release",
+                jobs=1,
+            )
+
+        assert raised.value.code == 1
+        assert len(analyzer_commands) == 1
+        assert [command[-1] for command in test_commands] == [
+            "tests/small",
+            "tests/host_process",
+            "tests/host_tool",
+            "tests/artifact",
+            "tests/public_workflow",
+        ]
+        assert receipt_matches(cache, python)
+        assert receipt_matches(cache, previous_tests)
+        assert not receipt_matches(cache, changed_tests)
 
 
 class RepositoryFastPathTests:
@@ -52,10 +214,71 @@ class RepositoryFastPathTests:
 
 
 class KernelExecutionLimitTests:
-    """Keep kernel worker limits out of the prepare container command."""
+    """Keep container memory explicit and worker limits on the analysis process."""
 
-    def test_kernel_limit_reaches_only_the_analysis_command(self) -> None:
-        """Pass --jobs to kernel analysis while prepare keeps the same arguments."""
+    @pytest.mark.parametrize(
+        ("failed_stage", "jobs", "status", "has_serial_advice"),
+        [
+            pytest.param("kernel-prepare", 3, 137, False, id="serial-preparation"),
+            pytest.param("kernel-analysis", 3, 137, True, id="parallel-analysis"),
+            pytest.param("kernel-analysis", 1, 137, False, id="serial-analysis"),
+            pytest.param("kernel-analysis", 3, 1, False, id="other-analysis-failure"),
+        ],
+    )
+    def test_kernel_memory_failure_reports_only_applicable_controls(  # noqa: PLR0913 -- phase, budget and outcome stay explicit.
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        failed_stage: str,
+        jobs: int,
+        status: int,
+        *,
+        has_serial_advice: bool,
+    ) -> None:
+        """Only parallel analysis can recommend serial contexts; preparation is already serial."""
+        reporter = RunReporter("check", tmp_path / "logs", "test", verbose=False)
+        failure = SystemExit(status)
+
+        def fail_workload(stage: Stage, command: list[str], **_kwargs: object) -> None:
+            assert command[command.index("--memory") + 1] == "8192m"
+            if stage.name == failed_stage:
+                stage.write(
+                    b"kern: the workload was killed by the kernel's OOM killer "
+                    b"against this box's own memory cap.\n"
+                )
+                raise failure
+
+        with (
+            mock.patch.object(checks, "kern_environment", return_value={}),
+            mock.patch.object(Stage, "run", autospec=True, side_effect=fail_workload),
+            pytest.raises(SystemExit) as raised,
+        ):
+            checks._run_missing_checks(  # noqa: SLF001 -- controlled execution boundary.
+                reporter=reporter,
+                cache=tmp_path / "cache",
+                missing=("kernel",),
+                analyzer_cache={
+                    name: tmp_path / name for name in ("analysis", "downloads", "linux")
+                },
+                workspace=tmp_path / "workspace",
+                kern="kern",
+                image="image",
+                recipes={},
+                profile="microsd-uboot",
+                build_type="debug",
+                jobs=jobs,
+            )
+
+        assert raised.value is failure
+        stderr = capsys.readouterr().err
+        assert stderr.count("Kern memory limit reached (8192 MiB).") == int(status == 137)
+        assert (
+            "Use check --jobs 1 to run kernel contexts serially." in stderr
+        ) == has_serial_advice
+        assert "--memory-mib" not in stderr
+
+    def test_kernel_memory_and_worker_limits_reach_the_correct_processes(self) -> None:
+        """Give both containers a compiler memory budget and only analysis --jobs."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             cache = root / "cache"
@@ -113,6 +336,9 @@ class KernelExecutionLimitTests:
                 (second_prepare, "prepare", None),
                 (second_analysis, "check", 2),
             ):
+                container_arguments = command[3 : command.index("--")]
+                assert container_arguments.count("--memory") == 1
+                assert container_arguments[container_arguments.index("--memory") + 1] == "8192m"
                 workload = command[command.index("--") + 1 :]
                 assert workload[:3] == ["python3", "-m", "fplinux_cli.quality.kernel"]
                 arguments = workload[3:]

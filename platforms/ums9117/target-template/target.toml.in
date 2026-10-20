@@ -25,14 +25,8 @@ memory = { base = 0x80200000, size = 0x03c00000 }
 dtb = "unisoc/ums9117-@TARGET@.dtb"
 debug_dtb = "ums9117-@TARGET@.dtb"
 patches = []
-forbidden_dtb_markers = ["spi-nand", "mtd", "ubi", "emmc"]
-forbidden_config = [
-  "CONFIG_MTD=y",
-  "CONFIG_UBI=y",
-  "CONFIG_SCSI=y",
-  "CONFIG_ATA=y",
-  "CONFIG_NVME_CORE=y",
-]
+additional_forbidden_dtb_markers = []
+additional_forbidden_config = []
 overlay = "linux/overlay"
 copies = []
 
@@ -55,10 +49,3 @@ exec_distance = 0
 session_name = "@TARGET@-linux"
 # Replace * if this phone uses another BootROM key.
 boot_instructions = "Power the phone off, hold *, then connect USB while keeping * pressed."
-
-# Extracted from the stock firmware in a NAND backup together with a board report.
-[board_maps]
-firmware = [
-  { source = "pinmap.bin", destination = "pinmap.bin" },
-  { source = "keymap.bin", destination = "keymap.bin" },
-]

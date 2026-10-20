@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Assemble one deterministic TA-1618 microSD image from prebuilt artifacts."""
+"""Assemble one deterministic microSD image from prebuilt artifacts."""
 
 from __future__ import annotations
 
@@ -66,25 +66,29 @@ def _run(command: list[str], *, stdout: BinaryIO | None = None) -> None:
 
 
 def build(
-    fit: Path,
+    fit: Path | None,
     rootfs: Path,
     destination: Path,
     *,
-    fit_spec: Mapping[str, object],
+    fit_spec: Mapping[str, object] | None,
     storage: Mapping[str, object],
 ) -> Path:
-    """Publish one ``FPLINUX.img.xz`` from exact FIT and ext4 inputs."""
+    """Publish one ``FPLINUX.img.xz`` from ext4 and the selected optional FIT."""
     compressed_name = compressed_image_name(storage)
     image_name = str(storage["filename"])
-    fit_name = str(fit_spec["filename"])
     rootfs_name = str(storage["root_filename"])
     rootfs_bytes = _require_integer(storage["root_size"], "root size")
     if destination.name != compressed_name:
         raise SdImageError(f"microSD image must be named {compressed_name}")
-    _require_input(fit, fit_name)
+    if (fit is None) != (fit_spec is None):
+        message = "FIT input and specification must be selected together"
+        raise SdImageError(message)
+    if fit is not None and fit_spec is not None:
+        fit_name = str(fit_spec["filename"])
+        _require_input(fit, fit_name)
+        if fit.name != fit_name:
+            raise SdImageError(f"FIT input must be named {fit_name}")
     _require_input(rootfs, rootfs_name)
-    if fit.name != fit_name:
-        raise SdImageError(f"FIT input must be named {fit_name}")
     if rootfs.name != rootfs_name:
         raise SdImageError(f"root filesystem input must be named {rootfs_name}")
     if rootfs.stat().st_size != rootfs_bytes:
@@ -104,7 +108,6 @@ def build(
         tool_temporary = temporary / "tmp"
         staging = temporary / compressed_name
         config = temporary / "genimage.cfg"
-        staged_fit = input_path / fit_name
         staged_rootfs = input_path / rootfs_name
         input_path.mkdir()
         output_path.mkdir()
@@ -112,10 +115,12 @@ def build(
         tool_temporary.mkdir()
         config.write_bytes(profile_layout.genimage_config(fit_spec, storage))
 
-        shutil.copyfile(fit, staged_fit)
+        if fit is not None and fit_spec is not None:
+            staged_fit = input_path / str(fit_spec["filename"])
+            shutil.copyfile(fit, staged_fit)
+            os.utime(staged_fit, (epoch, epoch))
+            _require_input(staged_fit, str(fit_spec["filename"]))
         shutil.copyfile(rootfs, staged_rootfs)
-        os.utime(staged_fit, (epoch, epoch))
-        _require_input(staged_fit, fit_name)
         _require_input(staged_rootfs, rootfs_name)
         _run(
             [

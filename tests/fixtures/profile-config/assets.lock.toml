@@ -4,11 +4,3 @@ sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 cache_name = "loader.bin"
 license = "MIT"
 path = "loader.bin"
-
-[maps]
-url = "https://example.invalid/maps.7z"
-sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-cache_name = "maps.7z"
-license = "NOASSERTION"
-pinmap_path = "pinmap.bin"
-keymap_path = "keymap.bin"

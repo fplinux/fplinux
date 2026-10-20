@@ -16,20 +16,23 @@ Hold the left soft key while connecting USB.
 
 The first run saves a complete backup and prepares your phone's own data.
 When it finishes, release cards as described below before disconnecting USB.
-If the phone stays on, briefly remove
-and reinsert its battery. Run the same script with the phone powered off
-to start FPLinux and open SSH. Type exit or press Ctrl+D to close SSH.
-Open the same launcher again to reconnect while the phone remains on.
-Only one launcher can run from this directory at a time.
-Ctrl+C cancels loading or waiting; it does not power the phone off.
+If the phone stays on, briefly remove and reinsert its battery. Run the same
+launcher again with the phone powered off to start FPLinux.
+Your NAND backup is data/nand.bin and prepared phone data is data/phone.
 
 To prepare from an existing complete NAND backup without connecting the phone:
   sh Run.sh --from-dump /path/to/nand.bin
 This preparation preserves the backup and cannot replace existing data/phone.
 
-Keep this directory for this one phone. Your NAND backup is data/nand.bin,
-prepared phone data is data/phone, and private connection keys are data/session.
-Each launch writes a new log in logs and displays its exact path.
+Run loads FPLinux into RAM and opens SSH. Type exit or press Ctrl+D to
+close SSH. Open the same launcher again to reconnect while the phone
+remains on.
+Only one launcher can run from this directory at a time.
+Ctrl+C cancels loading or waiting; it does not power the phone off.
+
+Keep this directory for this one phone. Private connection keys and
+session records are stored in data/session. Each launch writes a new
+log in logs and displays its exact path.
 
 Before removing power, stop programs using data cards, disable card-backed
 swap, flush writes and unmount all data-card filesystems. Do not unplug USB

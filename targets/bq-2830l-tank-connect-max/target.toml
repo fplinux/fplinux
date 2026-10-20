@@ -37,14 +37,8 @@ patches = [
   "linux/patches/0002-bq-vendor-prefix.patch",
   "linux/patches/0003-bq-bluetooth-sdio-fixed-port.patch",
 ]
-forbidden_dtb_markers = ["spi-nand", "mtd", "ubi", "emmc"]
-forbidden_config = [
-  "CONFIG_MTD=y",
-  "CONFIG_UBI=y",
-  "CONFIG_SCSI=y",
-  "CONFIG_ATA=y",
-  "CONFIG_NVME_CORE=y",
-]
+additional_forbidden_dtb_markers = []
+additional_forbidden_config = []
 overlay = "linux/overlay"
 copies = []
 
@@ -89,13 +83,6 @@ boot_instructions = "Power the phone off, hold the green call key, then connect 
 
 [device_data]
 parser = "bq2830l_device_data.py"
-
-# Extracted from the stock firmware in a NAND backup together with a board report.
-[board_maps]
-firmware = [
-  { source = "pinmap.bin", destination = "pinmap.bin" },
-  { source = "keymap.bin", destination = "keymap.bin" },
-]
 
 [audio_profile]
 speaker_from_headphones = true

@@ -24,14 +24,13 @@ image @IMAGE@ {
 
 image FPLINUX.vfat {
 	temporary = true
+	empty = true
 	size = @BOOT_SIZE@
 
 	vfat {
 		label = "@BOOT_LABEL@"
 		extraargs = "-F 32 --invariant -i @DISK_SIGNATURE@"
 
-		file @FIT_FILENAME@ {
-			image = "@FIT_FILENAME@"
-		}
+@BOOT_FILES@
 	}
 }

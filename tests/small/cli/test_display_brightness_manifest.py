@@ -39,6 +39,15 @@ class DisplayBrightnessManifestTests:
         with mock.patch.object(targets, "load_toml", return_value=raw):
             assert ("display_brightness") not in (targets.load_target("nokia-ta1618"))
 
+    @pytest.mark.parametrize("maximum", [255, 65535], ids=["eight-bit", "sixteen-bit"])
+    def test_raw_levels_above_six_bits_are_preserved(self, maximum: int) -> None:
+        """Backlights with wider raw ranges retain their target-selected levels."""
+        raw = common.load_toml(common.ROOT / "targets/nokia-ta1618/target.toml")
+        raw["display_brightness"] = {"backlight": "screen", "levels": [*range(10), maximum]}
+        with mock.patch.object(targets, "load_toml", return_value=raw):
+            table = targets.load_target("nokia-ta1618")["display_brightness"]
+        assert table == {"backlight": "screen", "levels": [*range(10), maximum]}
+
     @pytest.mark.parametrize(
         ("table", "error"),
         [
@@ -50,10 +59,10 @@ class DisplayBrightnessManifestTests:
                 {"backlight": "screen", "levels": [0, 1, 2, 3, 4, 5, 5, 7, 8, 9, 10]},
                 "strictly ascend",
             ),
-            ({"backlight": "screen", "levels": [*range(10), 64]}, "integer in 0..63"),
+            ({"backlight": "screen", "levels": [*range(10), 65536]}, "integer in 0..65535"),
             (
                 {"backlight": "screen", "levels": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, True]},
-                "integer in 0..63",
+                "integer in 0..65535",
             ),
         ],
         ids=[
@@ -62,8 +71,8 @@ class DisplayBrightnessManifestTests:
             "exactly 11-3",
             "start at 0-4",
             "strictly ascend-5",
-            "integer in 0..63-6",
-            "integer in 0..63-7",
+            "integer in 0..65535-6",
+            "integer in 0..65535-7",
         ],
     )
     def test_invalid_table_is_rejected_by_target_loader(

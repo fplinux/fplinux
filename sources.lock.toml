@@ -48,3 +48,27 @@ license = "GPL-2.0-only"
 bch_c_sha256 = "d4ce0126a61c8f8e4cbdca958e31cdd778a59337fbeafd6032cc6e8bf5315603"
 bch_h_sha256 = "7df0b1891f5494eca70e756c9a8ba4b8fc75a4c6c8925b018151723a87a865a6"
 copying_sha256 = "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+
+[sprd_chipram]
+repository = "https://github.com/yonglongliu/chipram"
+commit = "61fdb1f975457599839d91418706b83dacc41203"
+archive_url = "https://codeload.github.com/yonglongliu/chipram/tar.gz/61fdb1f975457599839d91418706b83dacc41203"
+archive_sha256 = "ff5e4398ba90727e0b292482dc8c46f846dd6fc95512b966bf6eda929d72f6c5"
+archive_prefix = "chipram-61fdb1f975457599839d91418706b83dacc41203"
+license = "NOASSERTION"
+
+[sprd_u_boot]
+repository = "https://github.com/yonglongliu/u-boot15"
+commit = "b2abd80f0b1f872889ba857b8f9abce8c4dcf405"
+archive_url = "https://codeload.github.com/yonglongliu/u-boot15/tar.gz/b2abd80f0b1f872889ba857b8f9abce8c4dcf405"
+archive_sha256 = "6dcf91a591442a93fe6f66857e58eb19ab8d5cab50060405c1e981696a100472"
+archive_prefix = "u-boot15-b2abd80f0b1f872889ba857b8f9abce8c4dcf405"
+license = "GPL-2.0-only"
+
+[arm_trusted_firmware]
+repository = "https://github.com/ARM-software/arm-trusted-firmware"
+commit = "6bb37adc203567c2f9322dfbe34058a5f12d4c70"
+archive_url = "https://codeload.github.com/ARM-software/arm-trusted-firmware/tar.gz/6bb37adc203567c2f9322dfbe34058a5f12d4c70"
+archive_sha256 = "129983ed471a29bd1dc125ec5147a4891731f6aa544818e7dec4fc11472bfdf3"
+archive_prefix = "arm-trusted-firmware-6bb37adc203567c2f9322dfbe34058a5f12d4c70"
+license = "BSD-3-Clause"

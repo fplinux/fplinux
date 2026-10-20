@@ -199,7 +199,63 @@ class MockedCheckReceiptOrchestrationTests:
         else:
             discard_workspace.assert_called_once_with(snapshot, workspace)
 
-    def test_exact_success_hit_skips_workspace_and_checker(self) -> None:
+    def test_default_gate_runs_analyzers_every_test_tier_and_kernel(self, tmp_path: Path) -> None:
+        """The omitted-scope entry point retains the full workload and reusable successes."""
+        (tmp_path / ".cache").mkdir()
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        commands: list[list[str]] = []
+        snapshot = WorkspaceSnapshot(
+            (
+                *self._snapshot().files,
+                WorkspaceFile(
+                    "scripts/fplinux_cli/quality/kernel/analysis.py", b"kernel checker\n", 0o644
+                ),
+            ),
+            "a" * 64,
+        )
+        with mock.patch.object(checks, "check_git_diff") as repository_check:
+            self._run(tmp_path, workspace, snapshot, [], commands)
+            repository_check.assert_called_once()
+
+        workloads = [command[command.index("--") + 1 :] for command in commands]
+        assert workloads[0] == [
+            "python3",
+            "-m",
+            "fplinux_cli.quality.source",
+            "source",
+            "container",
+            "metadata",
+            "docs",
+            "spelling",
+            "secrets",
+            "licenses",
+            "python",
+            "shell",
+            "alpine",
+            "c",
+        ]
+        assert [command[-1] for command in workloads[1:6]] == [
+            "tests/small",
+            "tests/host_process",
+            "tests/host_tool",
+            "tests/artifact",
+            "tests/public_workflow",
+        ]
+        assert [command[:3] for command in workloads[1:6]] == [["python3", "-m", "pytest"]] * 5
+        assert [command[:4] for command in workloads[6:]] == [
+            ["python3", "-m", "fplinux_cli.quality.kernel", "prepare"],
+            ["python3", "-m", "fplinux_cli.quality.kernel", "check"],
+        ]
+        with mock.patch.object(checks, "check_git_diff") as repository_check:
+            self._run(tmp_path, workspace, snapshot, [], commands, exact_hit_guard=True)
+            repository_check.assert_called_once()
+        assert len(commands) == 8
+
+    @pytest.mark.parametrize(("scope", "command_count"), [("c", 1), ("tests", 5)])
+    def test_exact_success_hit_skips_workspace_and_checker(
+        self, scope: str, command_count: int
+    ) -> None:
         """Return a verified scope hit before workspace materialization."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -209,18 +265,18 @@ class MockedCheckReceiptOrchestrationTests:
             commands: list[list[str]] = []
             snapshot = self._snapshot()
 
-            self._run(root, workspace, snapshot, ["c"], commands)
-            assert (len(commands)) == (1)
+            self._run(root, workspace, snapshot, [scope], commands)
+            assert len(commands) == command_count
 
             self._run(
                 root,
                 workspace,
                 snapshot,
-                ["c"],
+                [scope],
                 commands,
                 exact_hit_guard=True,
             )
-            assert (len(commands)) == (1)
+            assert len(commands) == command_count
 
     def test_kernel_hit_is_reused_with_a_different_worker_limit(self) -> None:
         """Reuse a kernel success when only --jobs changes between check runs."""
@@ -253,7 +309,10 @@ class MockedCheckReceiptOrchestrationTests:
             )
             assert (len(commands)) == (2)
 
-    def test_no_cache_bypasses_an_exact_outer_receipt(self) -> None:
+    @pytest.mark.parametrize(("scope", "command_count"), [("c", 2), ("tests", 10)])
+    def test_no_cache_bypasses_an_exact_outer_receipt(
+        self, scope: str, command_count: int
+    ) -> None:
         """Execute the checker when the caller explicitly ignores receipts."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -262,9 +321,9 @@ class MockedCheckReceiptOrchestrationTests:
             workspace.mkdir()
             commands: list[list[str]] = []
             snapshot = self._snapshot()
-            self._run(root, workspace, snapshot, ["c"], commands)
-            self._run(root, workspace, snapshot, ["c"], commands, no_cache=True)
-            assert (len(commands)) == (2)
+            self._run(root, workspace, snapshot, [scope], commands)
+            self._run(root, workspace, snapshot, [scope], commands, no_cache=True)
+            assert len(commands) == command_count
 
     def test_only_missing_scope_runs_in_a_mixed_selection(self) -> None:
         """Avoid rerunning a hit when another selected scope is missing."""
@@ -284,23 +343,24 @@ class MockedCheckReceiptOrchestrationTests:
                 ]
             ) == ([["c"], ["docs"]])
 
-    def test_changed_c_bytes_are_a_cold_miss(self) -> None:
-        """Invalidate the C result when one checked source byte changes."""
+    @pytest.mark.parametrize(("scope", "command_count"), [("c", 2), ("tests", 10)])
+    def test_changed_c_bytes_are_a_cold_miss(self, scope: str, command_count: int) -> None:
+        """Invalidate analysis and test results when a covered C input changes."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / ".cache").mkdir()
             workspace = root / "workspace"
             workspace.mkdir()
             commands: list[list[str]] = []
-            self._run(root, workspace, self._snapshot(), ["c"], commands)
+            self._run(root, workspace, self._snapshot(), [scope], commands)
             self._run(
                 root,
                 workspace,
                 self._snapshot(c_source=b"int changed;\n"),
-                ["c"],
+                [scope],
                 commands,
             )
-            assert (len(commands)) == (2)
+            assert len(commands) == command_count
 
     def test_failed_forced_rerun_keeps_last_good_success(self) -> None:
         """A failed forced rerun leaves the previous exact success usable."""

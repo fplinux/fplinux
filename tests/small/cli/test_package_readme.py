@@ -23,24 +23,59 @@ def readme_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, 
     routes.write_text(json.dumps([{"id": "demo-phone", "slug": "phones/demo-model"}]))
     monkeypatch.setattr(common, "ROOT", tmp_path)
     return {
+        "platform": "ums9117",
         "identity": {"brand": "ACME", "product": "Demo", "hardware_codes": ["D-1"]},
         "adapter": {"boot_instructions": "Hold the left soft key while connecting USB."},
         "linux": {"root": {"kind": "initramfs"}},
+        "device_data": {
+            "parser": "phone_data.py",
+            "groups": {"audio-profile": [{"source": "audio.bin", "destination": "audio.bin"}]},
+        },
+        "audio_policy": {
+            "speaker_vibration": False,
+            "speaker_from_headphones": False,
+            "headfree_headphones_only": False,
+        },
+        "nand": {"raw_device": "/dev/raw-nand"},
     }
 
 
 @pytest.mark.parametrize(
-    ("target", "root_kind", "document"),
+    ("target", "platform", "root_kind", "with_groups", "document"),
     [
-        pytest.param("demo-phone", "initramfs", "ordinary-ram.txt", id="ram"),
-        pytest.param("demo-phone", "external", "ordinary-system-card.txt", id="system-card"),
-        pytest.param("new-phone", "initramfs", "ordinary-bring-up.txt", id="bring-up"),
+        pytest.param("demo-phone", "ums9117", "initramfs", True, "ordinary-ram.txt", id="ram"),
+        pytest.param(
+            "demo-phone", "ums9117", "initramfs", False, "ordinary-headless.txt", id="headless"
+        ),
+        pytest.param(
+            "demo-phone", "ums9117", "external", True, "ordinary-system-card.txt", id="system-card"
+        ),
+        pytest.param(
+            "new-phone", "ums9117", "initramfs", False, "ordinary-bring-up.txt", id="bring-up"
+        ),
+        pytest.param(
+            "demo-phone",
+            "sc9820e",
+            "initramfs",
+            True,
+            "ordinary-source-loaders.txt",
+            id="source-loaders",
+        ),
     ],
 )
-def test_ordinary_readme_preserves_the_complete_archive_instructions(
-    readme_config: dict[str, Any], target: str, root_kind: str, document: str
+def test_ordinary_readme_preserves_the_complete_archive_instructions(  # noqa: PLR0913 -- phone, boot, data and document cases remain explicit.
+    readme_config: dict[str, Any],
+    target: str,
+    platform: str,
+    root_kind: str,
+    *,
+    with_groups: bool,
+    document: str,
 ) -> None:
+    readme_config["platform"] = platform
     readme_config["linux"]["root"]["kind"] = root_kind
+    if not with_groups:
+        readme_config["device_data"] = {"parser": None, "groups": {}}
     expected = ROOT / "tests/small/cli/fixtures/package-readme" / document
 
     assert ordinary_readme(target, readme_config) == expected.read_bytes()
@@ -78,8 +113,27 @@ def test_readme_names_the_selected_variant_and_existing_offline_route(
     assert "Hold the left soft key while connecting USB." in text
     assert "docs/phones/demo-model/index.html" in text
     assert text.index("Wait until the runner asks") < text.index("Hold the left soft key")
-    assert "XDG_RUNTIME_DIR must name an existing absolute directory owned by your user" in text
-    assert "a normal Linux login session provides it" in text
+
+
+def test_source_loader_archive_runs_with_its_bundled_stages(
+    readme_config: dict[str, Any],
+) -> None:
+    """A fresh load and reconnect need no separate loader files or import command."""
+    readme_config["platform"] = "sc9820e"
+    text = ordinary_readme("demo-phone", readme_config).decode()
+    words = " ".join(text.split())
+
+    assert "includes its source-built RAM loaders" in words
+    assert "does not read or write the phone's internal storage" in words
+    load = "python3.14 -I fplinux.py run\n"
+    assert load in text
+    assert text.index(load) < text.index("Wait until the runner asks")
+    assert "python3.14 -I fplinux.py run --reconnect\n" in text
+    assert "--loader-inputs" not in text
+    assert "PAC" not in text
+    assert "data/session" in text
+    assert "--events /path/to/events.jsonl" in text
+    assert "complete NAND backup" not in words
 
 
 def test_ram_readme_requires_card_release_before_disconnect(readme_config: dict[str, Any]) -> None:
@@ -91,6 +145,12 @@ def test_ram_readme_requires_card_release_before_disconnect(readme_config: dict[
     assert text.index("unmount all data-card") < text.index("Only after releasing the cards")
     assert "mount -o remount,ro /" not in text
     assert "FPLINUX.img.xz" not in text
+    assert "complete NAND backup in data/nand.bin" in words
+    assert "your phone's data in data/phone" in words
+    assert text.index("Wait for preparation to finish") < text.index("open SSH")
+    assert "Run the same command again with the phone powered off" in words
+    assert "data/session" in text
+    assert "in logs and displays its exact path" in words
 
 
 def test_system_root_readme_requires_prepared_card_and_observed_read_only_root(
@@ -112,6 +172,7 @@ def test_system_root_readme_requires_prepared_card_and_observed_read_only_root(
     assert "grep ' / ' /proc/mounts" in text
     assert "If remounting fails, keep the phone powered" in text
     assert text.index("The root entry must show ro") < text.index("Only after releasing the cards")
+    assert "complete NAND backup" not in words
 
 
 def test_target_without_a_published_page_keeps_new_phone_archive_instructions(

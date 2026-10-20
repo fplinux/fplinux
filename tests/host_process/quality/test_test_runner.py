@@ -82,8 +82,36 @@ def selection_context(tmp_path: Path) -> SelectionContext:
     return SelectionContext(tmp_path, tmp_path / "executed.txt")
 
 
+def _prepare_gui_selection_modules(root: Path) -> None:
+    """Give a GUI component and its shared-language neighbor observable tests."""
+    directory = root / "tests/host_tool/gui"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory.parent / "__init__.py").touch()
+    (directory / "__init__.py").touch()
+    for module in ("test_desktop_entry.py", "test_language_files.py"):
+        shutil.copyfile(
+            ROOT / "tests/host_process/quality/fixtures/test-runner/selection_cases.py",
+            directory / module,
+        )
+
+
 class TestSelectionProcessTests:
     """Run the in-image entry point on controlled files; this is not a Kern test."""
+
+    @pytest.mark.parametrize("selection", ["tests/small/domain", "tests/small/domain/"])
+    def test_directory_discovers_only_its_tests(
+        self, selection_context: SelectionContext, selection: str
+    ) -> None:
+        """A selected directory uses normal pytest discovery without neighboring packages."""
+        result = selection_context.run(selection, failing_fixture=False)
+
+        assert result.returncode == 0, result.stderr
+        assert selection_context.executed() == [
+            "tests.small.domain.test_selection.FailureCase.test_first",
+            "tests.small.domain.test_selection.FailureCase.test_second",
+            "tests.small.domain.test_selection.PassingCase.test_first",
+            "tests.small.domain.test_selection.PassingCase.test_second",
+        ]
 
     def test_class_and_method_select_only_requested_cases(
         self, selection_context: SelectionContext
@@ -113,6 +141,55 @@ class TestSelectionProcessTests:
             for case in ("FailureCase", "PassingCase")
             for method in ("test_first", "test_second")
         ]
+
+    @pytest.mark.parametrize("select_tier", [False, True])
+    def test_automatic_discovery_runs_gui_and_its_shared_neighbor(
+        self, selection_context: SelectionContext, *, select_tier: bool
+    ) -> None:
+        """Both automatic selection forms execute GUI components and shared tests."""
+        _prepare_gui_selection_modules(selection_context.root)
+
+        result = selection_context.run(
+            *(["--tier", "host_tool"] if select_tier else []), failing_fixture=False
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert [name for name in selection_context.executed() if ".gui." in name] == [
+            "tests.host_tool.gui.test_desktop_entry.FailureCase.test_first",
+            "tests.host_tool.gui.test_desktop_entry.FailureCase.test_second",
+            "tests.host_tool.gui.test_desktop_entry.PassingCase.test_first",
+            "tests.host_tool.gui.test_desktop_entry.PassingCase.test_second",
+            "tests.host_tool.gui.test_language_files.FailureCase.test_first",
+            "tests.host_tool.gui.test_language_files.FailureCase.test_second",
+            "tests.host_tool.gui.test_language_files.PassingCase.test_first",
+            "tests.host_tool.gui.test_language_files.PassingCase.test_second",
+        ]
+        assert (
+            "tests.host_tool.test_selection.PassingCase.test_first" in selection_context.executed()
+        )
+
+    @pytest.mark.parametrize(
+        "selection",
+        [
+            "tests.host_tool.gui.test_desktop_entry",
+            "tests/host_tool/gui/test_desktop_entry.py",
+        ],
+        ids=["dotted", "native"],
+    )
+    def test_explicit_gui_selection_keeps_ordinary_collection_failure(
+        self, selection_context: SelectionContext, selection: str
+    ) -> None:
+        """An explicit GUI module reports its real pytest collection error."""
+        _prepare_gui_selection_modules(selection_context.root)
+        (selection_context.root / "tests/host_tool/gui/test_desktop_entry.py").write_text(
+            "raise RuntimeError('intentional GUI collection failure')\n"
+        )
+
+        result = selection_context.run(selection, failing_fixture=False)
+
+        assert result.returncode == 1, result.stderr
+        assert "intentional GUI collection failure" in result.stdout + result.stderr
+        assert selection_context.executed() == []
 
     @pytest.mark.parametrize("package", ["build", "domain"])
     @pytest.mark.parametrize(
@@ -456,6 +533,71 @@ def mixed_runtime_context(tmp_path: Path) -> MixedRuntimeContext:
 
 class MixedRuntimeProcessTests:
     """Exercise the controller with real pytest, not dependency preparation or real Kern."""
+
+    def test_container_directory_runs_only_its_tests(
+        self, mixed_runtime_context: MixedRuntimeContext
+    ) -> None:
+        """A selected container directory discovers its cases without preparing host tests."""
+        result = mixed_runtime_context.run("tests/host_process/domain")
+
+        assert result.returncode == 0, result.stderr
+        assert mixed_runtime_context.executed() == [
+            "container:tests.host_process.domain.test_selection.FailureCase.test_first",
+            "container:tests.host_process.domain.test_selection.FailureCase.test_second",
+            "container:tests.host_process.domain.test_selection.PassingCase.test_first",
+            "container:tests.host_process.domain.test_selection.PassingCase.test_second",
+        ]
+        assert mixed_runtime_context.kern_trace.read_text().splitlines() == ["container"]
+
+    @pytest.mark.parametrize("selection", ["tests/host_process", "tests/host_process/cache"])
+    def test_directory_routes_host_cases_once_outside_container(
+        self, mixed_runtime_context: MixedRuntimeContext, selection: str
+    ) -> None:
+        """Directory discovery excludes owned host modules while retaining all selected cases."""
+        neighbor = mixed_runtime_context.root / "tests/host_process/cache/test_neighbor.py"
+        shutil.copyfile(
+            ROOT / "tests/host_process/quality/fixtures/test-runner/selection_cases.py", neighbor
+        )
+
+        result = mixed_runtime_context.run(selection)
+
+        assert result.returncode == 0, result.stderr
+        modules = [("container", "cache.test_neighbor")]
+        if selection == "tests/host_process":
+            modules.extend(
+                [
+                    ("container", "domain.test_selection"),
+                    ("host", "alpine.test_alpine_source_ownership"),
+                ]
+            )
+        modules.append(("host", "cache.test_image_tag"))
+        assert mixed_runtime_context.executed() == [
+            f"{runtime}:tests.host_process.{module}.{case}.{method}"
+            for runtime, module in modules
+            for case in ("FailureCase", "PassingCase")
+            for method in ("test_first", "test_second")
+        ]
+        assert mixed_runtime_context.kern_trace.read_text().splitlines() == ["container"]
+
+    def test_tier_workload_runs_gui_and_its_shared_neighbor(
+        self, mixed_runtime_context: MixedRuntimeContext
+    ) -> None:
+        """The outer controller includes GUI components in ordinary tier discovery."""
+        _prepare_gui_selection_modules(mixed_runtime_context.root)
+
+        result = mixed_runtime_context.run("--tier", "host_tool")
+
+        assert result.returncode == 0, result.stderr
+        assert mixed_runtime_context.executed() == [
+            "container:tests.host_tool.gui.test_desktop_entry.FailureCase.test_first",
+            "container:tests.host_tool.gui.test_desktop_entry.FailureCase.test_second",
+            "container:tests.host_tool.gui.test_desktop_entry.PassingCase.test_first",
+            "container:tests.host_tool.gui.test_desktop_entry.PassingCase.test_second",
+            "container:tests.host_tool.gui.test_language_files.FailureCase.test_first",
+            "container:tests.host_tool.gui.test_language_files.FailureCase.test_second",
+            "container:tests.host_tool.gui.test_language_files.PassingCase.test_first",
+            "container:tests.host_tool.gui.test_language_files.PassingCase.test_second",
+        ]
 
     def test_explicit_mixed_repeated_and_overlapping_selections_preserve_order(
         self, mixed_runtime_context: MixedRuntimeContext

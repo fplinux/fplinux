@@ -18,5 +18,5 @@ depend() {
 }
 
 stop_post() {
-	rm -f -- /root/.ssh/authorized_keys
+	rm -f -- /run/fplinux-ssh/authorized_keys
 }

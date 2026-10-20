@@ -84,13 +84,16 @@ def inspect_target_footprint(
     print("Boot artifacts:")
     for name, size in sorted(layers["boot_artifact_bytes"].items()):
         print(f"  {_byte_size(size)}  {name}")
-    print(f"Kernel zImage: {_byte_size(layers['kernel_zimage_bytes'])}")
+    print(f"Kernel {layers['kernel_image_name']}: {_byte_size(layers['kernel_image_bytes'])}")
     embedded = layers["embedded_initramfs"]
     if embedded is not None:
         print(
             f"Embedded initramfs ({embedded['compression']}): "
             f"{_byte_size(embedded['compressed_bytes'])}"
         )
+    external_initramfs = layers["external_initramfs"]
+    if external_initramfs is not None:
+        print(f"External initramfs: {_byte_size(external_initramfs['cpio_bytes'])}")
     rootfs = report["rootfs"]
     print(f"Root filesystem ({rootfs['source']}):")
     print(f"  cpio: {_byte_size(rootfs['cpio_bytes'])}")
@@ -127,7 +130,10 @@ def inspect_footprint_diff(before: Path, after: Path, *, json_output: bool = Fal
     print(f"before: {display_text(before)}")
     print(f"after: {display_text(after)}")
     print(f"same rootfs content: {'yes' if report['same_rootfs_content'] else 'no'}")
-    print(f"Kernel zImage delta: {_byte_size(report['kernel_zimage_byte_delta'])}")
+    print(
+        f"Kernel {report['kernel_image_name']} delta: "
+        f"{_byte_size(report['kernel_image_byte_delta'])}"
+    )
     print("Boot artifact deltas:")
     for name, delta in report["boot_artifact_byte_delta"].items():
         print(f"  {_byte_size(delta)}  {name}")

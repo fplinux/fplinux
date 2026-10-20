@@ -10,6 +10,7 @@ import io
 import json
 import os
 import stat
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,13 +18,20 @@ from typing import TYPE_CHECKING, Any, BinaryIO
 from unittest import mock
 
 import pytest
+from fplinux_cli import common
 from fplinux_cli.cli import nand
 from fplinux_cli.device_data.formats import NandGeometry
 from fplinux_cli.device_data.prepare import dump_page_bytes
-from fplinux_cli.runtime import nand_backup
+from fplinux_cli.runtime import bundle_session, nand_backup
+
+from tests.small.build.command_fixtures import (
+    command_bundle as command_bundle,  # noqa: PLC0414 -- pytest fixture export.
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
+
+    from tests.small.build.command_fixtures import CommandBundleContext
 
 
 def _geometry_report(  # noqa: PLR0913 -- each reported value stays visible at the call site.
@@ -391,40 +399,44 @@ class NandBackupTests:
         """A missing board declaration cannot fall back to another board's reader."""
         with (
             mock.patch.object(nand, "load_target", return_value={}),
-            mock.patch("fplinux_cli.runtime.bundle_session.current_target_ssh_session") as acquire,
+            mock.patch.object(bundle_session, "resolve_target_bundle") as resolve,
             pytest.raises(SystemExit, match="not supported for target no-reader"),
         ):
             nand.backup_target_nand("no-reader", nand_destination.destination)
 
-        acquire.assert_not_called()
+        resolve.assert_not_called()
 
 
-class NandIdentifyTests:
-    """Report what the running reader identifies without saving an image."""
+class NandCommandSelectionTests:
+    """Leave authenticated device operations and their output with the selected runtime."""
 
-    def test_identify_prints_the_reader_report_unchanged_and_reads_no_pages(self) -> None:
-        """An unidentified chip's ID bytes and feature values reach the user as reported."""
-        phone = FakePhone(UNKNOWN_CHIP, b"must not be read")
+    @pytest.mark.parametrize("action", ["identify", "backup"])
+    def test_nand_action_delegates_to_the_selected_runtime_with_inherited_output(
+        self, command_bundle: CommandBundleContext, action: str
+    ) -> None:
+        """Identification keeps terminal output, and backup retains the caller's destination."""
         with (
-            tempfile.TemporaryDirectory() as temporary,
-            mock.patch("fplinux_cli.reporting.run.ROOT", Path(temporary)),
+            mock.patch.object(common, "ROOT", command_bundle.root),
             mock.patch.object(
                 nand, "load_target", return_value={"nand": {"raw_device": "/dev/demo-raw"}}
             ),
-            mock.patch(
-                "fplinux_cli.runtime.bundle_session.current_target_ssh_session",
-                return_value=(phone, {}),
-            ) as acquire,
-            contextlib.redirect_stdout(io.StringIO()) as stdout,
-            contextlib.redirect_stderr(io.StringIO()),
+            mock.patch.object(
+                subprocess, "run", return_value=subprocess.CompletedProcess([], 0)
+            ) as child,
         ):
-            nand.identify_target_nand("demo-phone")
-
-        assert (stdout.getvalue()) == (UNKNOWN_CHIP)
-        assert (phone.raw_reads()) == ([])
-        assert (len(phone.commands)) == (1)
-        assert ("/dev/demo-raw") in (phone.commands[0])
-        acquire.assert_called_once_with("demo-phone", profile=None, build_type="release")
+            if action == "backup":
+                output = command_bundle.root / "selected-nand.bin"
+                assert nand.backup_target_nand("phone", output) == output
+            else:
+                nand.identify_target_nand("phone")
+        arguments = child.call_args.args[0]
+        assert arguments[2:5] == [str(command_bundle.bundle_path / "fplinux.py"), "nand", action]
+        if action == "backup":
+            assert arguments[5] == str(command_bundle.root / "selected-nand.bin")
+        assert arguments[arguments.index("--data-root") + 1] == str(
+            command_bundle.root / ".cache/device-data/phone"
+        )
+        assert child.call_args.kwargs == {"check": False}
 
 
 @dataclass(frozen=True)

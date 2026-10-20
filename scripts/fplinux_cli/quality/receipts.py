@@ -155,12 +155,12 @@ def check_scope_receipt_recipe(  # noqa: PLR0913 -- source, image and kernel typ
     profile: str | None = None,
     build_type: str = "release",
 ) -> CheckReceiptRecipe:
-    """Bind one cacheable source scope to its exact closure and OCI identities."""
-    if scope not in (*SOURCE_CHECK_SCOPES, "kernel"):
+    """Bind one cacheable scope to its exact closure and execution identities."""
+    if scope not in (*SOURCE_CHECK_SCOPES, "tests", "kernel"):
         fail(f"check scope does not support receipts: {scope}")
     if orchestration_recipe is None:
         orchestration_recipe = check_orchestration_recipe_digest()
-    if scope == "python":
+    if scope == "tests":
         orchestration_recipe = hashlib.sha256(
             canonical_json_bytes(
                 {

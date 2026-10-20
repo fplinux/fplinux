@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import io
-import json
+import subprocess
 from typing import TYPE_CHECKING
 from unittest import mock
 
@@ -15,8 +15,7 @@ import pytest
 from fplinux_cli import common
 from fplinux_cli.artifacts.bundles import publish_current_bundle
 from fplinux_cli.environment import images
-from fplinux_cli.manifests import targets
-from fplinux_cli.runtime import bundle_session
+from fplinux_cli.workspace.capture import WorkspaceSnapshot
 
 from tests.small.build.command_fixtures import (
     command_bundle as command_bundle,  # noqa: PLC0414 -- pytest fixture export.
@@ -28,6 +27,63 @@ if TYPE_CHECKING:
 
 class VerifyLifecycleTests:
     """Keep cache hits and readers ahead of every mutable or external action."""
+
+    def test_verify_accepts_the_clean_build_while_local_preparation_exists(
+        self,
+        command_bundle: CommandBundleContext,
+    ) -> None:
+        """An ordinary snapshot containing device data cannot stale the selected clean build."""
+        ordinary = WorkspaceSnapshot((), "d" * 64)
+        path = command_bundle.create_generation("0" * 64)
+        publish_current_bundle(command_bundle.output, "phone", path)
+        stdout = io.StringIO()
+        with (
+            mock.patch.object(common, "ROOT", command_bundle.root),
+            mock.patch.object(
+                workspace_inputs,
+                "target_workspace_snapshot",
+                side_effect=[ordinary, command_bundle.snapshot],
+            ) as snapshot,
+            mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(
+                subprocess, "run", return_value=subprocess.CompletedProcess([], 0)
+            ) as reconnect,
+            contextlib.redirect_stdout(stdout),
+        ):
+            runtime_commands.verify_booted("phone")
+
+        assert snapshot.call_args_list == [
+            mock.call("phone", None, build_type="release"),
+            mock.call("phone", None, build_type="release", include_device_data=False),
+        ]
+        assert reconnect.call_args.args[0][2] == str(path / "fplinux.py")
+        assert reconnect.call_args.args[0][-3:] == ["--reconnect", "--exec", "true"]
+        assert stdout.getvalue() == (
+            "verify: the phone runs the current release build (9999999999999999)\n"
+        )
+
+    def test_verify_rejects_when_neither_supported_snapshot_matches_the_bundle(
+        self,
+        command_bundle: CommandBundleContext,
+    ) -> None:
+        """A clean fallback cannot admit changed sources or another build's device-data choice."""
+        with (
+            mock.patch.object(common, "ROOT", command_bundle.root),
+            mock.patch.object(
+                workspace_inputs,
+                "target_workspace_snapshot",
+                side_effect=[
+                    WorkspaceSnapshot((), "d" * 64),
+                    WorkspaceSnapshot((), "e" * 64),
+                ],
+            ),
+            mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
+            mock.patch.object(subprocess, "run") as reconnect,
+            pytest.raises(SystemExit, match="build output is stale"),
+        ):
+            runtime_commands.verify_booted("phone")
+
+        reconnect.assert_not_called()
 
     def test_verify_reports_no_success_when_reconnect_fails(
         self, command_bundle: CommandBundleContext
@@ -47,36 +103,17 @@ class VerifyLifecycleTests:
                 return_value="e" * 64,
             ),
             mock.patch.object(
-                runtime_commands,
-                "_current_ssh_session",
-                side_effect=SystemExit(
-                    "fplinux ssh: cannot read the running kernel identity (exit 7)"
-                ),
+                subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess([], 7),
             ),
             contextlib.redirect_stdout(stdout),
-            pytest.raises(SystemExit, match=r"running kernel identity \(exit 7\)"),
+            pytest.raises(SystemExit) as error,
         ):
             runtime_commands.verify_booted("phone")
 
         assert (stdout.getvalue()) == ("")
-
-    def test_reconnect_does_not_set_the_phone_clock(
-        self, command_bundle: CommandBundleContext
-    ) -> None:
-        """Reacquiring a running session never calls the bundle helper's clock sync."""
-        manifest = json.loads(command_bundle.bundle.manifest_bytes)
-        # The bundle's SSH helper is the phone boundary; only its clock call is observed.
-        ssh = mock.Mock()
-        ssh.load_bundle_context.return_value = (
-            {"target": "phone"},
-            {"bundle_generation": command_bundle.bundle.generation},
-        )
-
-        with mock.patch.object(bundle_session, "_load_bundle_ssh_helper", return_value=ssh):
-            bundle_session._current_ssh_session(command_bundle.bundle, manifest, "phone")  # noqa: SLF001
-
-        # Only a fresh run sets the phone clock; reconnecting leaves it running.
-        ssh.sync_clock.assert_not_called()
+        assert error.value.code == 7
 
     def test_verify_resolves_the_selected_microsd_generation(
         self, command_bundle: CommandBundleContext
@@ -84,7 +121,7 @@ class VerifyLifecycleTests:
         """Verification checks the selected bundle identity without falling back to RAM."""
         profile = "microsd-uboot"
         path = command_bundle.create_generation("b" * 64, profile=profile)
-        selected = publish_current_bundle(command_bundle.output, "phone", path, profile)
+        publish_current_bundle(command_bundle.output, "phone", path, profile)
         with (
             mock.patch.object(common, "ROOT", command_bundle.root),
             mock.patch.object(
@@ -92,24 +129,25 @@ class VerifyLifecycleTests:
             ) as snapshot,
             mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
             mock.patch.object(
-                runtime_commands, "_current_ssh_session", return_value=(mock.Mock(), {})
+                subprocess, "run", return_value=subprocess.CompletedProcess([], 0)
             ) as session,
             contextlib.redirect_stdout(io.StringIO()),
         ):
             runtime_commands.verify_booted("phone", profile=profile)
         snapshot.assert_called_once_with("phone", profile, build_type="release")
-        assert (session.call_args.args[0]) == (selected)
-        assert (session.call_args.args[1]["profile"]) == (profile)
+        arguments = session.call_args.args[0]
+        assert arguments[2] == str(path / "fplinux.py")
+        assert arguments[9] == str(
+            command_bundle.root / ".cache/logs/run/phone/profiles/microsd-uboot"
+        )
 
     def test_verify_reports_the_manifest_identity_after_reconnect_accepts(
         self, command_bundle: CommandBundleContext
     ) -> None:
         """Report the selected device identity after the reconnect boundary accepts it."""
-        target_config: dict[str, object] = {}
         stdout = io.StringIO()
         with (
             mock.patch.object(common, "ROOT", command_bundle.root),
-            mock.patch.object(targets, "load_target", return_value=target_config),
             mock.patch.object(
                 workspace_inputs,
                 "target_workspace_snapshot",
@@ -117,9 +155,9 @@ class VerifyLifecycleTests:
             ),
             mock.patch.object(images, "container_image_recipe_digest", return_value="e" * 64),
             mock.patch.object(
-                runtime_commands,
-                "_current_ssh_session",
-                return_value=(mock.Mock(), {}),
+                subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess([], 0),
             ) as current_session,
             contextlib.redirect_stdout(stdout),
         ):
@@ -128,4 +166,4 @@ class VerifyLifecycleTests:
         assert (stdout.getvalue()) == (
             "verify: the phone runs the current release build (9999999999999999)\n"
         )
-        current_session.assert_called_once_with(command_bundle.bundle, mock.ANY, "phone")
+        assert current_session.call_args.args[0][-3:] == ["--reconnect", "--exec", "true"]

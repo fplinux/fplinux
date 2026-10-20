@@ -13,6 +13,7 @@ copies = []
 
 [linux]
 defconfig = "platforms/demo/kernel/defconfig"
+dt_config_checks = []
 
 [bootstrap]
 kernel_destination = "zImage"
@@ -20,6 +21,7 @@ toolchain = "toolchain"
 lto = 0
 load_address = 0x80100000
 payload_limit = 0x82000000
+backend = "ums9117"
 
 [bootstrap.layout]
 ram_base = 0x80000000

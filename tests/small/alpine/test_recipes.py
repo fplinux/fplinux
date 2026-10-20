@@ -228,10 +228,12 @@ class AlpineRecipesTests:
         for name in (
             *consumers,
             unrelated,
+            "fplinux-expat-dev",
             "fplinux-font-terminus",
             "fplinux-libdrm",
             "fplinux-libtsm",
             "fplinux-libxkbcommon",
+            "fplinux-mesa",
         ):
             alpine_source.write(f"alpine/aports/{name}/APKBUILD", f"pkgname={name}\n".encode())
         repository = ROOT

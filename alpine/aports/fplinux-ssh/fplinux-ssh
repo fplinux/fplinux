@@ -11,8 +11,8 @@ state_dir=/run/fplinux-ssh
 decoded_key=$state_dir/.client-key.$$
 host_key=$state_dir/dropbear_ed25519_host_key
 host_key_tmp=$state_dir/.dropbear_ed25519_host_key.$$
-authorized_keys=/root/.ssh/authorized_keys
-authorized_keys_tmp=/root/.ssh/.authorized_keys.$$
+authorized_keys=$state_dir/authorized_keys
+authorized_keys_tmp=$state_dir/.authorized_keys.$$
 
 fail() {
 	printf 'fplinux-ssh: %s\n' "$*" >&2
@@ -86,9 +86,6 @@ else
 	mv -- "$host_key_tmp" "$host_key"
 fi
 
-[ ! -L /root/.ssh ] || fail "refusing symlinked root SSH directory"
-mkdir -p /root/.ssh
-chmod 0700 /root/.ssh
 printf '%s ssh-ed25519 %s fplinux-session\n' \
 	'no-port-forwarding,no-agent-forwarding,no-X11-forwarding' "$client_key" \
 	>"$authorized_keys_tmp"
@@ -97,4 +94,4 @@ mv -f -- "$authorized_keys_tmp" "$authorized_keys"
 
 cleanup_temporary_files
 trap - EXIT
-exec /usr/sbin/dropbear -F -E -r "$host_key" -p "$phone_address:22" -s -j -k
+exec /usr/sbin/dropbear -F -E -r "$host_key" -D "$state_dir" -p "$phone_address:22" -s -j -k

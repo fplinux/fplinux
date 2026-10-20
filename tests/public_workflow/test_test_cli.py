@@ -24,6 +24,7 @@ class TestCommandCliTests:
         for option in ("--tier", "--verbose", "--failfast"):
             assert (option) in (result.stdout)
         assert ("module, class or method") in (result.stdout)
+        assert ("test directory") in (result.stdout)
         assert (result.stderr) == ("")
 
     @pytest.mark.parametrize(
@@ -34,6 +35,11 @@ class TestCommandCliTests:
             (".cache.private_test",),
             ("tests.small.environment.test_common..method",),
             ("tests/small/../../private_test.py",),
+            ("tests/small/../host_process",),
+            ("tests/small//quality",),
+            ("tests/small/quality::test_example",),
+            ("tests.small.quality::test_example",),
+            ("tests/small/test_selection.py/",),
             ("/outside/test_private.py",),
             ("tests/small/test_selection.py::--help",),
             ("--collect-only",),

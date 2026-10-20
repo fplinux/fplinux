@@ -354,21 +354,23 @@ def load_profile(
     except (OSError, tomllib.TOMLDecodeError) as error:
         fail(f"profile manifest is invalid: {path}: {error}")
     fields = {"name", "linux", "rootfs", "bootstrap", "uboot", "fit", "runtime"}
+    if profile != "default":
+        fields.add("storage")
     if profile == "microsd-uboot":
-        fields |= {"layout", "storage"}
+        fields.add("layout")
     config = exact_table(raw, fields, f"profile {profile}")
     if config["name"] != profile:
         fail(f"profile name does not match its directory: {path}")
     linux = exact_table(config["linux"], {"root"}, f"profile {profile} linux")
     root = _profile_linux_root(linux["root"], f"profile {profile} linux root")
-    expected_root = "external" if profile == "microsd-uboot" else "initramfs"
+    expected_root = "initramfs" if profile == "default" else "external"
     if root["kind"] != expected_root:
         fail(f"profile {profile} requires {expected_root} root")
     rootfs = exact_table(config["rootfs"], {"packages"}, f"profile {profile} rootfs")
     packages = package_array(rootfs["packages"], f"profile {profile} rootfs packages")
     expected_packages = (
         ["fplinux-microsd-root", "fplinux-ncurses-curses", "fplinux-resize2fs"]
-        if profile == "microsd-uboot"
+        if profile != "default"
         else []
     )
     if packages != expected_packages:
@@ -377,7 +379,7 @@ def load_profile(
         config["runtime"], {"transport", "runnable"}, f"profile {profile} runtime"
     )
     if runtime != {"transport": "usb-ncm", "runnable": True}:
-        fail("both profiles require runnable usb-ncm transport")
+        fail("boot profiles require runnable usb-ncm transport")
     bootstrap = _profile_bootstrap(target, config["bootstrap"], microsd.get("bootstrap"))
     uboot = _profile_uboot(target, profile, config["uboot"], microsd.get("uboot"), platform)
     layout = (
@@ -394,10 +396,11 @@ def load_profile(
     )
     fit = _profile_fit(config["fit"], f"profile {profile} fit", layout)
     external = root["kind"] == "external"
+    uboot_boot = profile == "microsd-uboot"
     if (
-        (bootstrap["kind"] == "uboot-stage0") != external
-        or (uboot["kind"] == "full") != external
-        or (fit["kind"] == "sha256") != external
+        (bootstrap["kind"] == "uboot-stage0") != uboot_boot
+        or (uboot["kind"] == "full") != uboot_boot
+        or (fit["kind"] == "sha256") != uboot_boot
     ):
         fail(f"profile {profile} boot components do not match its root filesystem")
     image: dict[str, Any] = {"kind": "none"}

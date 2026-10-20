@@ -9,9 +9,9 @@ from typing import Any
 def runtime_manifest() -> dict[str, Any]:
     """Return one complete runtime contract."""
     image = "image/ramboot.bin"
-    adapter = "runner/platform_adapter.py"
-    identity_helper = "runner/identity.py"
-    ssh_helper = "runner/ssh_transport.py"
+    adapter = "platforms/ums9117/host/adapter.py"
+    identity_helper = "scripts/fplinux_cli/manifests/identity.py"
+    ssh_helper = "scripts/fplinux_cli/runtime/ssh_transport.py"
     fdl1 = "assets/fdl1.bin"
     loader = "host/loader"
     return {
@@ -55,12 +55,19 @@ def runtime_manifest() -> dict[str, Any]:
         "assets": {"fdl1": fdl1},
         "adapter": {"kind": "demo"},
         "host_tools": {"loader": loader},
+        "nand": None,
+        "device_data": None,
         "sha256": {
             image: "a" * 64,
             adapter: "b" * 64,
             identity_helper: "1" * 64,
             ssh_helper: "c" * 64,
-            "runner/loader_events.py": "2" * 64,
+            "scripts/fplinux_cli/runtime/events.py": "2" * 64,
+            "scripts/fplinux_cli/runtime/bundle.py": "3" * 64,
+            "scripts/fplinux_cli/runtime/boot.py": "4" * 64,
+            "scripts/fplinux_cli/runtime/cli.py": "5" * 64,
+            "scripts/fplinux_cli/runtime/workflow.py": "6" * 64,
+            "fplinux.py": "7" * 64,
             fdl1: "d" * 64,
             loader: "f" * 64,
         },

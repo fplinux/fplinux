@@ -11,8 +11,9 @@ from fplinux_cli.environment import images
 from fplinux_cli.manifests import targets
 from fplinux_cli.manifests.paths import normalize_profile
 from fplinux_cli.runtime import bundle_session as runtime_bundle_session
-from fplinux_cli.runtime.bundle_session import _current_ssh_session, _manifest_device_identity
+from fplinux_cli.runtime.bundle_session import _manifest_device_identity
 from fplinux_cli.runtime.keyboard import forward_keyboard
+from fplinux_cli.runtime.runner import reconnect_bundle
 from fplinux_cli.workspace import build_inputs as workspaces
 
 
@@ -27,28 +28,21 @@ def console_target(  # noqa: PLR0913 -- public CLI modes remain explicit.
     pull: list[str] | None,
 ) -> None:
     """Open the SSH session, or forward one evdev keyboard over USB."""
-    config = targets.load_target(target, profile, build_type=build_type)
-    bundle, manifest = runtime_bundle_session.resolve_target_bundle(
+    bundle, _manifest = runtime_bundle_session.resolve_target_bundle(
         target, profile, build_type=build_type
     )
     if keyboard is None:
-        ssh_transport, session = _current_ssh_session(bundle, manifest, target)
-        if exec_command is not None:
-            result = ssh_transport.run_remote(session, exec_command)
-            if result.returncode:
-                raise SystemExit(result.returncode)
-            return
-        if upload is not None:
-            ssh_transport.upload(session, upload[0], upload[1])
-            return
-        if pull is not None:
-            ssh_transport.pull(session, pull[0], pull[1])
-            return
-        ssh_transport.open_shell(session)
+        reconnect_bundle(
+            bundle,
+            target,
+            profile=profile,
+            exec_command=exec_command,
+            upload=upload,
+            pull=pull,
+        )
         return
-    forward_keyboard(
-        bundle, manifest, target, config, keyboard, profile=profile, build_type=build_type
-    )
+    config = targets.load_target(target, profile, build_type=build_type)
+    forward_keyboard(bundle, target, config, keyboard, profile=profile)
 
 
 def verify_booted(target: str, *, profile: str | None = None, build_type: str = "release") -> None:
@@ -61,7 +55,14 @@ def verify_booted(target: str, *, profile: str | None = None, build_type: str = 
     image_recipe = images.container_image_recipe_digest()
     image_state = image_states.load_image_state(common.ROOT / ".cache", image_recipe)
     identity = cli_bundles.build_identity(snapshot, image_state, common.ROOT / ".cache")
-    if not cli_bundles.manifest_matches_identity(manifest, identity):
+    current = cli_bundles.manifest_matches_identity(manifest, identity)
+    if not current:
+        snapshot = workspaces.target_workspace_snapshot(
+            target, profile, build_type=build_type, include_device_data=False
+        )
+        identity = cli_bundles.build_identity(snapshot, image_state, common.ROOT / ".cache")
+        current = cli_bundles.manifest_matches_identity(manifest, identity)
+    if not current:
         fail(
             "build output is stale; rebuild it: "
             + runtime_bundle_session.profile_command(
@@ -69,5 +70,5 @@ def verify_booted(target: str, *, profile: str | None = None, build_type: str = 
             )
         )
     device_identity = _manifest_device_identity(manifest)
-    _current_ssh_session(bundle, manifest, target)
+    reconnect_bundle(bundle, target, profile=profile, exec_command="true")
     print(f"verify: the phone runs the current {build_type} build ({device_identity[:16]})")

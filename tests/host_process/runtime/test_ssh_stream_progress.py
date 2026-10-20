@@ -28,13 +28,11 @@ def local_stream(
     runtime = tmp_path / "runtime"
     runtime.mkdir(mode=0o700)
     session = create_ready_session(runtime)
-    monkeypatch.setattr(ssh_transport, "_runtime_root", lambda: runtime)
 
     def stream(
         mode: str, destination: BinaryIO, timeout: float, progress: Callable[[int], None]
     ) -> None:
-        def local_ssh(_session: dict[str, Any], _command: str, *, shared: bool) -> list[str]:
-            assert not shared
+        def local_ssh(_session: dict[str, Any], _command: str) -> list[str]:
             return [
                 sys.executable,
                 str(ROOT / "tests" / "fixtures" / "ssh_transport" / "progress_writer.py"),

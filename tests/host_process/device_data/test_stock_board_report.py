@@ -29,8 +29,6 @@ from tests.fixtures.stock_board_report import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from fplinux_cli.device_data.formats import PreparedGroup
-
 FAKE_TOOL = ROOT / "tests/fixtures/fphelper/fake_fphelper.py"
 
 BASE = 0x80100000
@@ -140,11 +138,11 @@ class BoardReportContext:
             },
         )
 
-    def prepare(self, image: bytes) -> PreparedGroup:
+    def extract(self, image: bytes) -> bytes:
         """Execute production board extraction through the controlled tool process."""
         nand = backup(image, vbm=agreeing_vbm())
-        group: PreparedGroup = STOCK_IMAGE.prepare_board_maps(nand, host_tools=self.host_tools)
-        return group
+        report: bytes = STOCK_IMAGE.extract_board_report(nand, host_tools=self.host_tools)
+        return report
 
 
 @pytest.fixture
@@ -161,20 +159,14 @@ def board_report_case(tmp_path: Path) -> BoardReportContext:
 class BoardReportTests:
     """Run extraction against a scripted stand-in for fphelper_t117."""
 
-    def test_report_lists_every_value_with_its_source_and_keeps_the_maps(
+    def test_report_lists_every_value_with_its_source(
         self, board_report_case: BoardReportContext
     ) -> None:
-        """The maps are the tool's bytes; the report reads the rest from the stock image."""
+        """The report reads the tool's maps and the remaining stock-image values."""
         image = _report_image()
         board_report_case.complete_scenario(image)
 
-        group = board_report_case.prepare(image)
-
-        assert (group.prepared) == (
-            {"pinmap.bin": REPORT_PINMAP, "keymap.bin": keymap(SPARSE_KEYMAP)}
-        )
-        assert (group.originals) == ({"stock-image.bin": image})
-        report = json.loads(group.reports["board-report.json"])
+        report = json.loads(board_report_case.extract(image))
         assert (report["stock_image"]) == (
             {
                 "partition_table": "VBM",
@@ -271,7 +263,7 @@ class BoardReportTests:
         image = _report_image(with_fuel_gauge=False)
         board_report_case.complete_scenario(image)
 
-        report = json.loads(board_report_case.prepare(image).reports["board-report.json"])
+        report = json.loads(board_report_case.extract(image))
 
         assert (report["fgu_current_calibration"]) is None
         assert ("fgu_current_calibration") not in (report["sources"])
@@ -316,11 +308,11 @@ class BoardReportTests:
         commands: dict[str, dict[str, Any]] | None,
         message: str,
     ) -> None:
-        """No board-map files are produced without a successful tool run that found them."""
+        """No report is returned without a successful tool run that found the board maps."""
         image = _report_image()
         if commands is None:
             board_report_case.tool.unlink()
         else:
             board_report_case.scenario(image, commands)
         with pytest.raises(ValueError, match=message):
-            board_report_case.prepare(image)
+            board_report_case.extract(image)

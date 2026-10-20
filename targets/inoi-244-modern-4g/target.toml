@@ -32,17 +32,12 @@ memory = { base = 0x80200000, size = 0x03c00000 }
 dtb = "unisoc/ums9117-inoi-244-modern-4g.dtb"
 debug_dtb = "ums9117-inoi-244-modern-4g.dtb"
 patches = []
-forbidden_dtb_markers = ["spi-nand", "mtd", "ubi", "emmc"]
-forbidden_config = [
+additional_forbidden_dtb_markers = []
+additional_forbidden_config = [
   "CONFIG_MMC_REMOVABLE=y",
   "CONFIG_MMC_GPIO=y",
   "CONFIG_GPIO_EIC_SPRD=y",
   "CONFIG_GPIO_EIC_SPRD=m",
-  "CONFIG_MTD=y",
-  "CONFIG_UBI=y",
-  "CONFIG_SCSI=y",
-  "CONFIG_ATA=y",
-  "CONFIG_NVME_CORE=y",
 ]
 overlay = "linux/overlay"
 copies = []
@@ -77,10 +72,6 @@ backlight_level = 0x12
 exec_distance = 0
 session_name = "inoi244-linux"
 boot_instructions = "Power the phone off, hold *, then connect USB while keeping * pressed."
-
-[loader_maps]
-pinmap = { member = "inoi_244/pinmap.bin", sha256 = "044e79980d5994fce3a9075e7a39b34791ba8b925911df61ea86c5665705552b" }
-keymap = { member = "inoi_244/keymap.bin", sha256 = "d7414fcc64cdc1aa1d61d6e63327a78db2d54d80b8134bf5e64b5316ff06073c" }
 
 [device_data]
 parser = "inoi244_device_data.py"

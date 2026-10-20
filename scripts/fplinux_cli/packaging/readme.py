@@ -8,6 +8,7 @@ from textwrap import dedent
 from typing import Any
 
 from fplinux_cli import common
+from fplinux_cli.build.runtime import device_data_descriptor
 from fplinux_cli.common import fail
 from fplinux_cli.manifests.identity import target_display_name
 from fplinux_cli.manifests.values import relative_value
@@ -70,11 +71,13 @@ def shutdown_instructions(*, external_root: bool, with_offline_documentation: bo
 
 
 def ordinary_readme(target: str, config: dict[str, Any]) -> bytes:
-    """Build source-runner instructions without repeating qualification summaries."""
+    """Describe the selected phone's shared launch workflow and local state."""
     name = target_display_name(config["identity"])
     instructions = config["adapter"]["boot_instructions"]
     documentation = phone_documentation_path(target)
     external_root = config["linux"]["root"]["kind"] == "external"
+    source_loaders = config.get("platform") == "sc9820e"
+    preparation = device_data_descriptor(target, config) is not None
     sections = [
         dedent("""\
             FPLinux for {name}
@@ -82,9 +85,6 @@ def ordinary_readme(target: str, config: dict[str, Any]) -> bytes:
             Use an archive for this exact phone. On a Linux x86-64 PC, install Python 3.14,
             GNU coreutils, iproute2 and OpenSSH. The PC must configure a new USB network
             interface through IPv4 DHCP. Use a USB data cable.
-
-            XDG_RUNTIME_DIR must name an existing absolute directory owned by your user;
-            a normal Linux login session provides it.
 
             From the extracted archive directory, check its files and install USB rules:
 
@@ -105,26 +105,61 @@ def ordinary_readme(target: str, config: dict[str, Any]) -> bytes:
                 for the whole powered session.
                 """).removesuffix("\n")
         )
+    if source_loaders:
+        sections.append(
+            dedent("""\
+                The archive includes its source-built RAM loaders. Loading does not
+                read or write the phone's internal storage.
+                """).removesuffix("\n")
+        )
     sections.append(
         dedent("""\
             Keep the powered-off phone disconnected. Start the runner as your regular user:
 
-              ./runner/run.py
+              python3.14 -I fplinux.py run
 
             Wait until the runner asks for the phone, then follow its instruction:
 
               {instructions}
 
-            If connected too early, disconnect and restart this sequence. Exit the shell
-            to return to the PC; Linux keeps running. Reconnect with:
-
-              ./runner/run.py --reconnect
-
-            Phone support, controls and limits: {documentation}
-            Shared archive procedures: docs/guides/standalone-archive/index.html
+            If connected too early, disconnect and restart this sequence.
             """)
         .removesuffix("\n")
-        .format(instructions=instructions, documentation=documentation)
+        .format(instructions=instructions)
+    )
+    if preparation:
+        sections.append(
+            dedent("""\
+                The first run saves a complete NAND backup in data/nand.bin and prepares
+                your phone's data in data/phone. Wait for preparation to finish and follow
+                its storage-release instructions before disconnecting USB. If the phone
+                stays powered, remove and reinsert its battery. Run the same command again
+                with the phone powered off to load FPLinux and open SSH.
+                """).removesuffix("\n")
+        )
+    sections.extend(
+        [
+            dedent("""\
+                Exit the SSH shell to return to the PC; Linux keeps running. Leave it
+                connected and run the same command again to reopen SSH, or require the
+                saved session with:
+
+                  python3.14 -I fplinux.py run --reconnect
+                """).removesuffix("\n"),
+            dedent("""\
+                Keep this extracted directory for this phone. Private connection keys and
+                session records are stored in data/session. Each launch writes a new log
+                in logs and displays its exact path.
+                Loader progress is printed in the terminal; add --events /path/to/events.jsonl
+                to a fresh load to save its progress events.
+                """).removesuffix("\n"),
+            dedent("""\
+                Phone support, controls and limits: {documentation}
+                Shared archive procedures: docs/guides/standalone-archive/index.html
+                """)
+            .removesuffix("\n")
+            .format(documentation=documentation),
+        ]
     )
     if documentation == "docs/porting/checklist/index.html":
         sections.append(

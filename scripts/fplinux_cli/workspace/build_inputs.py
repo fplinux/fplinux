@@ -5,7 +5,8 @@ from __future__ import annotations
 
 import tomllib
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from pathlib import PurePosixPath
+from typing import TYPE_CHECKING, Any, Literal
 
 from fplinux_cli.alpine.registration import CLI_SOURCES
 from fplinux_cli.alpine.selection import (
@@ -16,12 +17,18 @@ from fplinux_cli.alpine.selection import (
     shared_aport_sources,
 )
 from fplinux_cli.build.inputs import selected_build_sources
+from fplinux_cli.build.runtime import runtime_source_files
 from fplinux_cli.build.sources import source_lock_entry
 from fplinux_cli.common import ROOT, canonical_json_bytes, fail
 from fplinux_cli.device_data import inputs as firmware_inputs
 from fplinux_cli.manifests.assets import resolve_asset_sources
 from fplinux_cli.manifests.kernel import kernel_config_paths
-from fplinux_cli.manifests.linux import discover_linux_targets, is_shared_linux_operation
+from fplinux_cli.manifests.linux import (
+    discover_linux_targets,
+    is_shared_linux_operation,
+    linux_declarations,
+)
+from fplinux_cli.manifests.loaders import loader_sources
 from fplinux_cli.manifests.paths import (
     platform_asset_lock_path,
     profile_manifest_path,
@@ -166,7 +173,8 @@ def target_build_source_files(
         add_source_path(files, source)
     add_source_path(files, target_root / "target.toml")
     add_source_path(files, target_release_manifest_path(target))
-    add_source_path(files, platform_asset_lock_path(target_config["platform"]))
+    if platform["bootstrap"]["backend"] == "ums9117":
+        add_source_path(files, platform_asset_lock_path(target_config["platform"]))
     display_source = target_config["display"]["source"]
     if display_source is not None:
         add_source_path(files, target_root / display_source)
@@ -184,6 +192,8 @@ def target_build_source_files(
         for step in target_config["uboot"]["copies"]:
             add_source_path(files, ROOT / step["source"])
     add_source_path(files, target_root / target_config["bootstrap"]["source"])
+    if platform["bootstrap"]["backend"] == "sc9820e":
+        add_source_path(files, target_root / target_config["loader"]["build"]["source"])
     lcd_config = target_config["bootstrap"].get("lcd_config")
     if lcd_config is not None:
         add_source_path(files, target_root / lcd_config)
@@ -200,10 +210,13 @@ def target_build_source_files(
     for key in ("copies", "appends"):
         for step in platform["linux"][key]:
             add_source_path(files, ROOT / step["source"])
-    for step in platform["bootstrap"]["shared_copies"]:
-        add_source_path(files, ROOT / step["source"])
-    for relative in platform["bootstrap"]["patches"]:
-        add_source_path(files, ROOT / relative)
+    if platform["bootstrap"]["backend"] == "sc9820e":
+        add_source_path(files, platform_root / "bootstrap")
+    else:
+        for step in platform["bootstrap"]["shared_copies"]:
+            add_source_path(files, ROOT / step["source"])
+        for relative in platform["bootstrap"]["patches"]:
+            add_source_path(files, ROOT / relative)
     for recipe in platform["host"]["tools"]:
         if recipe["type"] == "cc-libusb":
             add_source_path(files, ROOT / recipe["source"])
@@ -214,9 +227,8 @@ def target_build_source_files(
                 add_source_path(files, ROOT / step["source"])
             for relative in recipe["patches"]:
                 add_source_path(files, ROOT / relative)
-    add_source_path(files, ROOT / "common/run.py")
-    add_source_path(files, ROOT / "common/loader_events.py")
-    add_source_path(files, platform_root / "host/adapter.py")
+    for path in runtime_source_files(target, target_config, root=ROOT).values():
+        add_source_path(files, path)
     return sorted(files.items())
 
 
@@ -225,25 +237,16 @@ def _linux_source_operations(
 ) -> Iterator[tuple[str, str, str]]:
     """Name the peer operations whose topology participates in a workspace recipe."""
     for target in targets:
-        target_root = ROOT / "targets" / target.name
-        for owner, source_root, config in (
-            ("platform", ROOT, target.platform),
-            ("target", target_root, target.config),
-        ):
-            for relative in config["linux"]["patches"]:
-                yield (
-                    f"{owner}-patch",
-                    (source_root / relative).relative_to(ROOT).as_posix(),
-                    "",
+        owners: tuple[tuple[Literal["platform", "target"], PurePosixPath, dict[str, Any]], ...] = (
+            ("platform", PurePosixPath(), target.platform["linux"]),
+            ("target", PurePosixPath("targets") / target.name, target.config["linux"]),
+        )
+        kinds: tuple[Literal["patch", "copy", "append"], ...] = ("patch", "copy", "append")
+        for owner, source_base, linux in owners:
+            for kind in kinds:
+                yield from linux_declarations(
+                    linux, owner=owner, kind=kind, source_base=source_base
                 )
-            for key in ("copies", "appends"):
-                operation = f"{owner}-{'copy' if key == 'copies' else 'append'}"
-                for step in config["linux"][key]:
-                    yield (
-                        operation,
-                        (source_root / step["source"]).relative_to(ROOT).as_posix(),
-                        step["destination"],
-                    )
         for relative in target.config.get("microsd", {}).get("linux_patches", []):
             yield "target-patch", f"targets/{target.name}/{relative}", ""
 
@@ -310,36 +313,46 @@ def _captured_source_declarations(
     sources = _captured_toml(source_file)
     platform_file = files[f"platforms/{platform_name}/platform.toml"]
     platform = _captured_toml(platform_file)
+    target_file = files[f"targets/{target}/target.toml"]
+    target_config = _captured_toml(target_file)
     source_names = {
         platform["linux"]["source_lock"],
-        platform["bootstrap"]["vendor_source_lock"],
         *(
             tool["source_lock"]
             for tool in platform["host"]["tools"]
             if tool["type"] == "make-archive"
         ),
     }
+    if platform["bootstrap"]["backend"] == "ums9117":
+        source_names.add(platform["bootstrap"]["vendor_source_lock"])
+    else:
+        source_names.update(
+            source.source_lock
+            for source in loader_sources(target_config["loader"]["build"], sources)
+        )
     selected = {name: source_lock_entry(sources, name) for name in sorted(source_names)}
-    target_file = files[f"targets/{target}/target.toml"]
-    target_config = _captured_toml(target_file)
-    asset_file = files[f"platforms/{platform_name}/loader/assets.lock.toml"]
-    assets = resolve_asset_sources(
-        _captured_toml(asset_file),
-        loader_maps=target_config.get("loader_maps"),
-    )
+    asset_declaration: dict[str, Any] = {"records": []}
+    if platform["bootstrap"]["backend"] == "ums9117":
+        asset_file = files[f"platforms/{platform_name}/loader/assets.lock.toml"]
+        assets = resolve_asset_sources(_captured_toml(asset_file))
+        asset_declaration = {"mode": asset_file.mode, "records": assets}
     declarations = canonical_json_bytes(
         {
             "sources": {"mode": source_file.mode, "records": selected},
-            "assets": {"mode": asset_file.mode, "records": assets},
+            "assets": asset_declaration,
         }
     )
     return sources, declarations
 
 
 def target_workspace_snapshot(
-    target: str, profile: str | None = None, *, build_type: str = "release"
+    target: str,
+    profile: str | None = None,
+    *,
+    build_type: str = "release",
+    include_device_data: bool = True,
 ) -> WorkspaceSnapshot:
-    """Read the selected build closure before deciding whether staging is needed."""
+    """Capture selected sources and, by default, locally prepared device data."""
     target_config = load_target(target, profile, build_type=build_type)
     source_snapshot = snapshot_from_inventory(
         lambda: target_build_source_files(
@@ -354,11 +367,13 @@ def target_workspace_snapshot(
         causal_files, target, target_config["platform"]
     )
     linux_sources = shared_linux_source_files(target_config, sources, captured_files=causal_files)
-    materialized_sources = (
+    materialized_sources = [
         *_MATERIALIZED_BUILD_SOURCES,
         "sources.lock.toml",
-        f"platforms/{target_config['platform']}/loader/assets.lock.toml",
-    )
+    ]
+    asset_lock = f"platforms/{target_config['platform']}/loader/assets.lock.toml"
+    if asset_lock in causal_files:
+        materialized_sources.append(asset_lock)
     auxiliary_files = [causal_files.pop(relative) for relative in materialized_sources]
     for captured in linux_sources.files:
         relative = captured.path
@@ -369,10 +384,14 @@ def target_workspace_snapshot(
         else:
             auxiliary_files.append(captured)
     device_data_groups = target_config["device_data"]["groups"]
-    captured_groups = firmware_inputs.capture_external_device_data(
-        target,
-        device_data_groups,
-        ROOT / ".cache",
+    build_uses_device_data = firmware_inputs.rootfs_receives_firmware(
+        root_kind=target_config["linux"]["root"]["kind"],
+        platform=target_config["platform"],
+    )
+    captured_groups = (
+        firmware_inputs.capture_external_device_data(target, device_data_groups, ROOT / ".cache")
+        if include_device_data and build_uses_device_data
+        else {}
     )
     firmware_files = tuple(
         WorkspaceFile(

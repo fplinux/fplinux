@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import json
 import tempfile
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, Any, Literal
 
 from fplinux_cli import common
 from fplinux_cli.build import inputs as inputs_build
@@ -23,7 +23,11 @@ from fplinux_cli.build.identity import (
 )
 from fplinux_cli.build.storage import layout as profile_layout
 from fplinux_cli.common import fail, sha256_bytes, sha256_file
-from fplinux_cli.manifests.linux import discover_linux_targets, is_shared_linux_operation
+from fplinux_cli.manifests.linux import (
+    discover_linux_targets,
+    is_shared_linux_operation,
+    linux_declarations,
+)
 from fplinux_cli.manifests.values import sha256_value
 
 from . import state as linux_state
@@ -42,42 +46,26 @@ def integration_inputs(
     """Return typed Linux recipe inputs in projection order."""
     platform_linux = platform["linux"]
     target_linux = target_config["linux"]
-    result = [
-        (
-            "platform-patch",
-            relative,
-            "",
-            inputs_build.require_file(inputs_build.root_source(relative)),
-        )
-        for relative in platform_linux["patches"]
-    ]
-
-    def add_steps(operation: str, steps: list[dict[str, Any]], *, platform_owned: bool) -> None:
-        for step in steps:
-            relative = step["source"]
-            if platform_owned:
-                identity = relative
-                path = inputs_build.root_source(relative)
-            else:
-                identity = f"targets/{target}/{relative}"
-                path = inputs_build.target_source(target, relative)
-            result.append(
-                (operation, identity, step["destination"], inputs_build.require_file(path))
-            )
-
-    add_steps("platform-copy", platform_linux["copies"], platform_owned=True)
-    add_steps("target-copy", target_linux["copies"], platform_owned=False)
-    result.extend(
-        (
-            "target-patch",
-            f"targets/{target}/{relative}",
-            "",
-            inputs_build.require_file(inputs_build.target_source(target, relative)),
-        )
-        for relative in target_linux["patches"]
+    target_base = PurePosixPath("targets") / target
+    groups: tuple[
+        tuple[Literal["platform", "target"], Literal["patch", "copy", "append"], dict[str, Any]],
+        ...,
+    ] = (
+        ("platform", "patch", platform_linux),
+        ("platform", "copy", platform_linux),
+        ("target", "copy", target_linux),
+        ("target", "patch", target_linux),
+        ("platform", "append", platform_linux),
+        ("target", "append", target_linux),
     )
-    add_steps("platform-append", platform_linux["appends"], platform_owned=True)
-    add_steps("target-append", target_linux["appends"], platform_owned=False)
+    result = []
+    for owner, kind, linux in groups:
+        source_base = PurePosixPath() if owner == "platform" else target_base
+        for operation, identity, destination in linux_declarations(
+            linux, owner=owner, kind=kind, source_base=source_base
+        ):
+            path = inputs_build.require_file(inputs_build.root_source(identity))
+            result.append((operation, identity, destination, path))
     return result
 
 
@@ -89,12 +77,9 @@ def generated_linux_files(
     platform_identity = platform["identity"]
     platform_linux = platform["linux"]
     dts_directory = platform_linux["dts_directory"]
-    return {
+    generated = {
         f"{dts_directory}/{linux_identity_dtsi_name(target)}": linux_identity_dtsi(
             target_identity, platform_identity
-        ),
-        f"{dts_directory}/{linux_audio_policy_dtsi_name(target)}": linux_audio_policy_dtsi(
-            target_config["audio_policy"]
         ),
         **render_linux_display_files(target, target_config["display"]),
         platform_linux["platform_identity_header"]: linux_platform_identity_header(
@@ -104,6 +89,11 @@ def generated_linux_files(
             target_identity, arch=platform_linux["arch"]
         ): linux_machine_binding(target_identity, platform_identity, arch=platform_linux["arch"]),
     }
+    if target_config["platform"] == "ums9117":
+        generated[f"{dts_directory}/{linux_audio_policy_dtsi_name(target)}"] = (
+            linux_audio_policy_dtsi(target_config["audio_policy"])
+        )
+    return generated
 
 
 def linux_recipe_digest(

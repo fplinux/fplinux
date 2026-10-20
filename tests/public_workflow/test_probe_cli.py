@@ -146,6 +146,7 @@ class ProbeCliTests:
             "Containerfile",
             "container.lock.toml",
             "environment.lock.toml",
+            "sources.lock.toml",
             ".kernignore",
             "package.json",
             "package-lock.json",

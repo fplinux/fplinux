@@ -14,7 +14,15 @@ if active := os.environ.get("FPLINUX_TEST_ACTIVE_SESSION"):
     session = Path.cwd() / "session.json"
     if session.is_file():
         Path(active).write_text(str(session), encoding="utf-8")
+if Path.cwd().name == "payload" and (destination := os.environ.get("FPLINUX_TEST_BRIDGE_PAYLOAD")):
+    Path(destination).write_text(
+        json.dumps({path.name: path.read_bytes().hex() for path in Path.cwd().iterdir()}),
+        encoding="utf-8",
+    )
 
 print("controlled loader output", flush=True)
 print("controlled loader diagnostic", file=sys.stderr, flush=True)
-raise SystemExit(int(os.environ.get("FPLINUX_TEST_LOADER_STATUS", "0")))
+status_name = (
+    "FPLINUX_TEST_BRIDGE_STATUS" if Path.cwd().name == "payload" else "FPLINUX_TEST_LOADER_STATUS"
+)
+raise SystemExit(int(os.environ.get(status_name, "0")))

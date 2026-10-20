@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0-only
+[device_data]
+originals_parser = "originals_parser.py"
+
+[wcn_firmware]
+firmware = [
+  { source = "wcnmodem.bin", destination = "wcnmodem.bin", size = 3 },
+  { source = "system-config.bin", destination = "example/system-config.bin", size = 5 },
+  { source = "system-cali.bin", destination = "example/system-cali.bin", size = 5 },
+  { source = "wcn-config.bin", destination = "example/wcn-config.bin", size = 5 },
+  { source = "wcn-cali.bin", destination = "example/wcn-cali.bin", size = 5 },
+]

@@ -187,6 +187,25 @@ def test_empty_firmware_archive_contains_only_explicit_rndis_configuration(
     assert len(archive) % 512 == 0
 
 
+@pytest.mark.parametrize("transport", [None, "rndis"])
+def test_preparation_archive_explicitly_selects_the_phone_progress_screen(
+    tmp_path: Path, cpio: str, transport: str | None
+) -> None:
+    archive = create_device_data_initramfs({}, usb_transport=transport, preparation=True)
+    _extract(archive, tmp_path, cpio)
+
+    files = {
+        path.relative_to(tmp_path).as_posix(): path.read_bytes()
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    }
+    expected = {"etc/fplinux/preparation": b"1\n"}
+    if transport == "rndis":
+        expected["etc/fplinux/usb-transport"] = b"rndis\n"
+    assert files == expected
+    assert (tmp_path / "etc/fplinux/preparation").stat().st_mode & 0o777 == 0o600
+
+
 def test_duplicate_firmware_destinations_are_rejected() -> None:
     with pytest.raises(SystemExit, match="firmware destination already exists"):
         create_device_data_initramfs(

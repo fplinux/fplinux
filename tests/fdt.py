@@ -12,6 +12,8 @@ type FdtNode = tuple[str, FdtProperties, list[FdtNode]]
 def binary_tree(
     properties: FdtProperties,
     children: list[FdtNode] | None = None,
+    *,
+    reservations: tuple[tuple[int, int], ...] = (),
 ) -> bytes:
     """Construct a minimal binary FDT with root properties and nested children."""
     child_nodes = children or []
@@ -57,7 +59,7 @@ def binary_tree(
 
     structure = encoded_node("", properties, child_nodes) + struct.pack(">I", 9)
 
-    reserved = b"\0" * 16
+    reserved = b"".join(struct.pack(">QQ", *region) for region in reservations) + b"\0" * 16
     structure_offset = 40 + len(reserved)
     strings_offset = structure_offset + len(structure)
     total_size = strings_offset + len(strings)

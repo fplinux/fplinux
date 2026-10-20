@@ -39,7 +39,7 @@ PUBLIC_COMMANDS = (
     "target",
     "verify",
 )
-PUBLIC_CHECK_SCOPES = (
+PUBLIC_SOURCE_CHECK_SCOPES = (
     "source",
     "container",
     "metadata",
@@ -102,11 +102,16 @@ class CheckCommandTests:
         assert (result.stdout) == ("")
         assert (result.stderr) == ("FPLinux requires Python 3.14.\n")
 
-    def test_list_wraps_every_inner_source_scope_in_host_boundaries(self) -> None:
-        """Expose the inner checker scopes between repository and kernel checks."""
+    def test_list_prints_every_scope_on_its_own_line(self) -> None:
+        """Keep the machine-readable listing and include the separate test workload."""
         result = self.run_check("--list")
         assert (result.returncode) == (0), result.stderr
-        assert (result.stdout.splitlines()) == (["repository", *PUBLIC_CHECK_SCOPES, "kernel"])
+        assert result.stdout.splitlines() == [
+            "repository",
+            *PUBLIC_SOURCE_CHECK_SCOPES,
+            "tests",
+            "kernel",
+        ]
         assert (result.stderr) == ("")
 
     def test_list_rejects_a_worker_limit_that_cannot_affect_listing(self) -> None:
@@ -121,7 +126,18 @@ class CheckCommandTests:
         result = self.run_check("--help")
 
         assert (result.returncode) == (0), result.stderr
-        assert re.search(r"default: 3, or\s+1 with --verbose", result.stdout) is not None
+        help_text = " ".join(result.stdout.split())
+        assert "default: 3 with kernel, 1 without kernel or with --verbose" in help_text
+        assert "incompatible with --jobs greater than 1" in help_text
+
+    def test_help_explains_full_defaults_and_separate_python_and_tests_scopes(self) -> None:
+        """Help makes the default full gate and each Python workload explicit."""
+        result = self.run_check("--help")
+
+        assert result.returncode == 0, result.stderr
+        assert "Run every quality scope by default." in result.stdout
+        assert re.search(r"python scope runs Python\s+analyzers", result.stdout) is not None
+        assert re.search(r"tests scope runs all five test\s+tiers", result.stdout) is not None
 
     @pytest.mark.parametrize("value", ["0", "-1", "two"], ids=["zero", "negative", "text"])
     def test_jobs_requires_a_positive_integer_before_running_checks(self, value: str) -> None:

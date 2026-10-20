@@ -8,10 +8,15 @@ import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
+from fplinux_cli.runtime import windows_host
+from fplinux_cli.runtime.windows_host import bound_interface, exact_usb_devices
 
-from common import windows_host
-from common.windows_host import bound_interface, exact_usb_devices, validate_archive
-from tests.windows_host_support import archive_files, endpoint_session, endpoint_snapshot
+from tests.windows_host_support import (
+    admitted_windows,
+    archive_files,
+    endpoint_session,
+    endpoint_snapshot,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -20,7 +25,7 @@ if TYPE_CHECKING:
 def test_archive_validation_uses_selected_runtime_and_separate_native_tools(
     tmp_path: Path,
 ) -> None:
-    bundle = validate_archive(archive_files(tmp_path))
+    bundle = admitted_windows(archive_files(tmp_path))
     assert bundle.runtime["target"] == "demo"
     assert bundle.runtime["host_tools"] == {
         "loader": "tools/spd_dump.exe",
@@ -33,7 +38,7 @@ def test_changed_native_tool_is_rejected_before_windows_discovery(tmp_path: Path
     root = archive_files(tmp_path)
     (root / "tools/openssh/ssh.exe").write_bytes(b"different tool\n")
     with pytest.raises(SystemExit, match=r"Windows file checksum differs: tools/openssh/ssh.exe"):
-        validate_archive(root)
+        admitted_windows(root)
 
 
 def test_exact_device_discovery_excludes_composite_interfaces() -> None:
@@ -138,6 +143,11 @@ def test_host_preparation_progress_precedes_a_windows_discovery_timeout(
     events: list[str] = []
 
     with pytest.raises(subprocess.TimeoutExpired):
-        windows_host.boot_archive(root, capsule, events=events.append)
+        windows_host.boot_archive(
+            admitted_windows(root),
+            capsule,
+            session_root=root / "data/session",
+            events=events.append,
+        )
 
     assert events == ["host-preparation"]

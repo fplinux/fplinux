@@ -44,32 +44,57 @@ class RuntimeIdentityTests:
             )
 
 
-@pytest.mark.parametrize("capsule", [False, True])
-@pytest.mark.parametrize("prepared", [False, True])
-def test_loader_uses_prepared_maps_or_declared_fallback_with_either_capsule_layout(
-    tmp_path: Path, *, capsule: bool, prepared: bool
+@pytest.mark.parametrize("capsule_layout", ["absent", "bundle", "external"])
+def test_loader_serves_only_the_selected_capsule_and_releases_its_directory(
+    tmp_path: Path, capsule_layout: str
 ) -> None:
-    """Prepared maps take precedence; absence keeps the locked first-boot maps."""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "pinmap.bin").write_bytes(b"locked pins")
-    (assets / "keymap.bin").write_bytes(b"locked keys")
-    if capsule:
-        (tmp_path / "device-data.cpio").write_bytes(b"firmware capsule")
-    if prepared:
-        (tmp_path / "pinmap.bin").write_bytes(b"prepared pins")
-        (tmp_path / "keymap.bin").write_bytes(b"prepared keys")
+    """The bridge receives the supplied CPIO bytes or an empty owned directory."""
+    capsule_parent = tmp_path / "data/phone" if capsule_layout == "external" else tmp_path
+    capsule_parent.mkdir(parents=True, exist_ok=True)
+    capsule = capsule_parent / "device-data.cpio"
+    if capsule_layout != "absent":
+        capsule.write_bytes(b"firmware capsule")
+    if capsule_layout == "external":
+        (tmp_path / "device-data.cpio").write_bytes(b"unselected capsule")
 
-    with ADAPTER.map_directory(
+    with ADAPTER.payload_directory(
         tmp_path,
-        {"fdl1": "assets/fdl1.bin", "pinmap": "assets/pinmap.bin", "keymap": "assets/keymap.bin"},
+        device_data=capsule if capsule_layout == "external" else None,
     ) as served:
-        assert (served / "pinmap.bin").read_bytes() == (
-            b"prepared pins" if prepared else b"locked pins"
-        )
-        assert (served / "keymap.bin").read_bytes() == (
-            b"prepared keys" if prepared else b"locked keys"
-        )
+        observed = {path.name: path.read_bytes() for path in served.iterdir()}
+        expected = {} if capsule_layout == "absent" else {"device-data.cpio": b"firmware capsule"}
+        assert observed == expected
+        assert served != capsule_parent
+
+    assert not served.exists()
+    if capsule_layout != "absent":
+        assert capsule.read_bytes() == b"firmware capsule"
+
+
+def test_loader_releases_served_capsule_after_consumer_failure(
+    tmp_path: Path,
+) -> None:
+    """A failed bridge releases its staged files while preserving the supplied capsule."""
+    capsule = tmp_path / "device-data.cpio"
+    capsule.write_bytes(b"firmware capsule")
+    served_directory: Path | None = None
+    observed: dict[str, bytes] = {}
+
+    def fail_bridge() -> None:
+        nonlocal served_directory
+        with ADAPTER.payload_directory(tmp_path, device_data=capsule) as served:
+            served_directory = served
+            observed.update({path.name: path.read_bytes() for path in served.iterdir()})
+            message = "controlled bridge failure"
+            raise RuntimeError(message)
+
+    with pytest.raises(RuntimeError, match="controlled bridge failure"):
+        fail_bridge()
+
+    assert observed == {"device-data.cpio": b"firmware capsule"}
+    assert served_directory is not None
+    assert not served_directory.exists()
+    assert capsule.read_bytes() == b"firmware capsule"
 
 
 class BacklightConfigurationTests:
@@ -141,8 +166,8 @@ class AdapterPreflightTests:
             run_bridge(BridgeProcess(0), runtime=runtime, events=events.append)
         assert (events) == ([])
 
-    def test_headless_target_serves_only_a_neutral_pinmap(self) -> None:
-        """Without maps or display settings, the bootstrap starts headless on an empty pin map."""
+    def test_headless_target_uses_an_empty_bridge_directory_without_a_capsule(self) -> None:
+        """The headless loader serves no supplemental files and releases its bridge directory."""
         runtime = bridge_runtime()
         runtime["assets"] = {"fdl1": "assets/fdl1.bin"}
         runtime["adapter"] = headless_adapter_data()
@@ -180,7 +205,7 @@ class AdapterPreflightTests:
                 "test-linux",
             ]
         )
-        assert (served) == ({"pinmap.bin": b"\xff\xff\xff\xff\xff\xff\xff\xff"})
+        assert served == {}
         assert (len(directories)) == (1)
         assert not (directories[0].exists())
         assert ("Headless target: the phone shows no boot screen") in (output.getvalue())
@@ -188,19 +213,14 @@ class AdapterPreflightTests:
     @pytest.mark.parametrize(
         "assets",
         [
+            pytest.param({"fdl2": "assets/fdl2.bin"}, id="missing-fdl1"),
             pytest.param(
-                {"fdl1": "assets/fdl1.bin", "pinmap": "assets/pinmap.bin"}, id="missing-keymap"
-            ),
-            pytest.param(
-                {"fdl1": "assets/fdl1.bin", "keymap": "assets/keymap.bin"}, id="missing-pinmap"
-            ),
-            pytest.param(
-                {"pinmap": "assets/pinmap.bin", "keymap": "assets/keymap.bin"}, id="missing-fdl1"
+                {"fdl1": "assets/fdl1.bin", "foreign": "assets/foreign.bin"}, id="foreign-asset"
             ),
         ],
     )
-    def test_incomplete_map_assets_are_rejected(self, assets: dict[str, str]) -> None:
-        """Pin map and keymap are declared together, and FDL1 is always required."""
+    def test_missing_fdl1_and_foreign_assets_are_rejected(self, assets: dict[str, str]) -> None:
+        """The UMS9117 asset contract requires FDL1 and excludes other platforms' stages."""
         runtime = bridge_runtime()
         runtime["assets"] = assets
         with (

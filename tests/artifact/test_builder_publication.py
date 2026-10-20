@@ -7,7 +7,7 @@ import hashlib
 import json
 import os
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, cast
 from unittest import mock
 
@@ -22,13 +22,14 @@ from fplinux_cli.artifacts.bundles import (
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import publish as publish_build
 from fplinux_cli.build.bootstrap import verify as bootstrap_build
-from fplinux_cli.device_data.inputs import FirmwareInput
+from fplinux_cli.build.runtime import runtime_source_files
 
 from tests.fdt import binary_tree
-from tests.small.runtime.adapter_fixtures import ADAPTER
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from fplinux_cli.build.bootstrap.result import PayloadRegion
 
 
 @dataclass(frozen=True)
@@ -193,7 +194,9 @@ class PublicationInputs:
         ramboot: Path | None = None,
         bundle_packages: tuple[str, ...] | None = None,
         personalization: dict[str, int | str] | None = None,
-        board_maps: tuple[FirmwareInput, ...] = (),
+        payload_regions: dict[str, PayloadRegion] | None = None,
+        *,
+        asset_outputs: dict[str, tuple[str, str]] | None = None,
     ) -> Path:
         """Publish the configured fixture through the builder entry point."""
         with mock.patch.dict(os.environ, self.environment, clear=False):
@@ -219,12 +222,18 @@ class PublicationInputs:
                     else personalization
                 ),
                 asset_lock_path=self.asset_lock,
-                asset_outputs={
-                    "pin": (
-                        "pin.bin",
-                        hashlib.sha256((self.work / "assets/pin.bin").read_bytes()).hexdigest(),
-                    )
-                },
+                asset_outputs=(
+                    {
+                        "pin": (
+                            "pin.bin",
+                            hashlib.sha256(
+                                (self.work / "assets/pin.bin").read_bytes()
+                            ).hexdigest(),
+                        )
+                    }
+                    if asset_outputs is None
+                    else asset_outputs
+                ),
                 host_tools={"keyboard": self.host_tool},
                 linux_recipe="c" * 64,
                 device_identity="9" * 64,
@@ -235,7 +244,7 @@ class PublicationInputs:
                     tuple(self.bundle_apks) if bundle_packages is None else bundle_packages
                 ),
                 bundle_apks=self.bundle_apks,
-                board_maps=board_maps,
+                payload_regions=payload_regions,
             )
 
     def staging_directories(self) -> list[Path]:
@@ -267,8 +276,9 @@ def publication_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Publi
         path.write_bytes(data)
         return path
 
-    write("common/run.py", b"#!/usr/bin/env python3\n")
-    write("common/loader_events.py", (common.ROOT / "common/loader_events.py").read_bytes())
+    write("common/runtime.py", b"#!/usr/bin/env python3\n")
+    write("common/60-fplinux.rules", b'SUBSYSTEM=="usb"\n')
+    write("scripts/fplinux_cli/runtime/events.py", b"# bundled events helper\n")
     write("scripts/fplinux_cli/manifests/identity.py", b"# identity contract\n")
     write("scripts/fplinux_cli/runtime/ssh_transport.py", b"# bundled SSH helper\n")
     write("platforms/demo/host/adapter.py", b"ADAPTER = 'demo'\n")
@@ -314,7 +324,7 @@ def publication_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Publi
         "platform": "demo",
         "bundle": {"packages": list(bundle_apks)},
         "linux": {"debug_dtb": "demo.dtb", "root": {"kind": "initramfs"}},
-        "bootstrap": {"load_address": 2},
+        "bootstrap": {"load_address": 2, "initramfs_delivery": "embedded"},
         "runtime": {
             "fdl1_load_address": 1,
             "usb": {"kind": "test"},
@@ -335,17 +345,16 @@ def publication_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Publi
             "runtime_tools": {"keyboard": "keyboard"},
         },
     }
+    runtime_sources = runtime_source_files("demo", target_config, root=root)
+    for source in runtime_sources.values():
+        if not source.exists():
+            write(source.relative_to(root).as_posix(), b"# standalone runtime source\n")
     release_manifest = {
         "image": "image/ramboot.bin",
         "bundle_files": [
             "image/ramboot.bin",
             "assets/pin.bin",
             "host/keyboard",
-            "runner/run.py",
-            "runner/loader_events.py",
-            "runner/identity.py",
-            "runner/ssh_transport.py",
-            "runner/platform_adapter.py",
             "runtime-manifest.json",
             "assets.lock.toml",
             "THIRD_PARTY_NOTICES.md",
@@ -391,6 +400,57 @@ def publication_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Publi
 
 class BuilderPublicationTests:
     """Exercise builder-facing immutable bundle publication."""
+
+    def test_raw_image_regions_and_external_initramfs_have_actual_published_paths(
+        self, publication_inputs: PublicationInputs
+    ) -> None:
+        """Runtime upload metadata and footprint paths describe the produced raw artifacts."""
+        image = publication_inputs.zimage.with_name("Image")
+        image.write_bytes(b"raw ARM Image\n")
+        inputs = replace(publication_inputs, zimage=image)
+        inputs.target_config["bootstrap"]["initramfs_delivery"] = "external"
+        inputs.target_config["bootstrap"]["backend"] = "sc9820e"
+        loaders = {"fdl1": b"first-stage", "fdl2": b"board-init", "sml": b"secure-monitor"}
+        inputs.release_manifest["bundle_files"].remove("assets/pin.bin")
+        inputs.release_manifest["bundle_files"].extend(f"assets/{role}.bin" for role in loaders)
+        for role, contents in loaders.items():
+            (inputs.work / "assets" / f"{role}.bin").write_bytes(contents)
+        regions: dict[str, PayloadRegion] = {
+            "entry": {"offset": 0, "size": 12, "load_address": 0x80002060},
+            "kernel": {"offset": 64, "size": 14, "load_address": 0x80008000},
+            "dtb": {"offset": 128, "size": 4, "load_address": 0x85400000},
+            "initramfs": {"offset": 192, "size": 12, "load_address": 0x85500000},
+        }
+        published = inputs.publish(
+            payload_regions=regions,
+            asset_outputs={
+                role: (f"{role}.bin", hashlib.sha256(contents).hexdigest())
+                for role, contents in loaders.items()
+            },
+        )
+        runtime = json.loads((published / "runtime-manifest.json").read_text())
+        manifest = json.loads((published / BUILD_MANIFEST_NAME).read_text())
+        assert runtime["adapter"]["regions"] == regions
+        assert "regions" not in inputs.target_config["runtime"]["adapter"]
+        assert runtime["assets"] == {
+            "fdl1": "assets/fdl1.bin",
+            "fdl2": "assets/fdl2.bin",
+            "sml": "assets/sml.bin",
+        }
+        for role, contents in loaders.items():
+            assert (published / "assets" / f"{role}.bin").read_bytes() == contents
+            assert runtime["sha256"][f"assets/{role}.bin"] == hashlib.sha256(contents).hexdigest()
+        assert (published / "debug/Image").read_bytes() == b"raw ARM Image\n"
+        assert not (published / "debug/zImage").exists()
+        assert manifest["kernel_artifacts"] == {
+            "image": "debug/Image",
+            "config": "debug/kernel.config",
+            "vmlinux": "debug/vmlinux",
+            "system_map": "debug/System.map",
+            "rootfs": "debug/rootfs.cpio",
+            "initramfs": "debug/initramfs.cpio",
+            "initramfs_delivery": "external",
+        }
 
     def test_publish_uses_staging_and_records_every_payload_file(
         self, publication_inputs: PublicationInputs
@@ -453,6 +513,8 @@ class BuilderPublicationTests:
                 "assets",
                 "adapter",
                 "host_tools",
+                "nand",
+                "device_data",
                 "sha256",
             }
         )
@@ -461,48 +523,107 @@ class BuilderPublicationTests:
         assert (runtime["identity"]["target"]["display_name"]) == ("Demo Phone")
         assert (runtime["identity"]["platform"]["name"]) == ("demo")
         assert (runtime["transport"]) == ("usb-ncm")
-        helper = published / "runner/ssh_transport.py"
+        helper = published / "scripts/fplinux_cli/runtime/ssh_transport.py"
         assert (runtime["personalization"]["bytes"]) == (512)
         assert (runtime["assets"]) == ({"pin": "assets/pin.bin"})
-        assert (runtime["sha256"]["runner/ssh_transport.py"]) == (
+        assert (runtime["sha256"]["scripts/fplinux_cli/runtime/ssh_transport.py"]) == (
             hashlib.sha256(helper.read_bytes()).hexdigest()
         )
-        event_source = (publication_inputs.root / "common/loader_events.py").read_bytes()
-        assert ((published / "runner/loader_events.py").read_bytes()) == (event_source)
-        assert (runtime["sha256"]["runner/loader_events.py"]) == (
+        event_source = (
+            publication_inputs.root / "scripts/fplinux_cli/runtime/events.py"
+        ).read_bytes()
+        assert ((published / "scripts/fplinux_cli/runtime/events.py").read_bytes()) == (
+            event_source
+        )
+        assert (runtime["sha256"]["scripts/fplinux_cli/runtime/events.py"]) == (
             hashlib.sha256(event_source).hexdigest()
         )
+        assert runtime["device_data"] is None
+        assert runtime["nand"] is None
+        assert (published / "60-fplinux.rules").read_bytes() == b'SUBSYSTEM=="usb"\n'
+        assert (
+            runtime["sha256"]["60-fplinux.rules"]
+            == hashlib.sha256(b'SUBSYSTEM=="usb"\n').hexdigest()
+        )
+        assert (published / "fplinux.py").read_bytes() == b"#!/usr/bin/env python3\n"
+        assert (published / "platforms/demo/host/adapter.py").read_bytes() == b"ADAPTER = 'demo'\n"
+        assert not (published / "runner").exists()
 
     @pytest.mark.parametrize("root_kind", ["initramfs", "external"])
-    def test_published_board_maps_are_exposed_by_adapter_mapping(
+    def test_publication_keeps_capsules_only_for_ram_roots(
         self, publication_inputs: PublicationInputs, root_kind: str
     ) -> None:
-        """Published map bytes are exposed through the adapter's serving-directory mapping."""
-        pinmap = b"\xb8\x04\x01\x20\x08\x00\xff\xff\xff\xff\xff\xff\xff\xff"
-        keymap = b"\x2a\x00\x31\x00"
-        board_maps = tuple(
-            FirmwareInput(name, name, contents, hashlib.sha256(contents).hexdigest())
-            for name, contents in (("pinmap.bin", pinmap), ("keymap.bin", keymap))
-        )
+        """External-root data belongs to its built rootfs, RAM roots keep the capsule."""
         publication_inputs.target_config["linux"]["root"] = {"kind": root_kind}
+        publication_inputs.target_config["platform"] = "ums9117"
+        publication_inputs.target_config["nand"] = {"raw_device": "/dev/raw-nand"}
+        publication_inputs.target_config["bootstrap"]["initramfs_delivery"] = (
+            "embedded" if root_kind == "initramfs" else "none"
+        )
+        for source in runtime_source_files(
+            "demo", publication_inputs.target_config, root=publication_inputs.root
+        ).values():
+            if not source.exists():
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_bytes(b"# independent NAND runtime\n")
 
-        published = publication_inputs.publish(board_maps=board_maps)
-        manifest = json.loads((published / BUILD_MANIFEST_NAME).read_text())
+        published = publication_inputs.publish()
         assert (published / "device-data.cpio").exists() is (root_kind == "initramfs")
-        for name, expected in (("pinmap.bin", pinmap), ("keymap.bin", keymap)):
-            assert (published / name).read_bytes() == expected
-            assert (published / name).stat().st_mode & 0o777 == 0o600
-            assert manifest["files"][name]["sha256"] == hashlib.sha256(expected).hexdigest()
-        with ADAPTER.map_directory(published, {"fdl1": "assets/fdl1.bin"}) as served:
-            assert (served / "pinmap.bin").read_bytes() == pinmap
-            assert (served / "keymap.bin").read_bytes() == keymap
+        runtime = json.loads((published / "runtime-manifest.json").read_bytes())
+        assert runtime["device_data"] is None
+        assert runtime["nand"] == {"raw_device": "/dev/raw-nand"}
+
+    def test_runtime_preparation_captures_the_declared_parser_without_board_maps(
+        self, publication_inputs: PublicationInputs
+    ) -> None:
+        """The bundle owns the parser bytes and the exact requested preparation groups."""
+        config = publication_inputs.target_config
+        config["platform"] = "ums9117"
+        config["device_data"] = {
+            "parser": "phone_data.py",
+            "groups": {"audio-profile": [{"source": "audio.bin", "destination": "audio.bin"}]},
+        }
+        config["audio_policy"] = {
+            "speaker_vibration": False,
+            "speaker_from_headphones": False,
+            "headfree_headphones_only": False,
+        }
+        config["nand"] = {"raw_device": "/dev/raw-nand"}
+        for source in runtime_source_files("demo", config, root=publication_inputs.root).values():
+            if not source.exists():
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_bytes(b"# declared preparation source\n")
+
+        published = publication_inputs.publish()
+        runtime = json.loads((published / "runtime-manifest.json").read_bytes())
+
+        descriptor = runtime["device_data"]
+        assert descriptor == {
+            "parser": "targets/demo/phone_data.py",
+            "groups": {"audio-profile": [{"source": "audio.bin", "destination": "audio.bin"}]},
+            "audio_policy": {
+                "speaker_vibration": False,
+                "speaker_from_headphones": False,
+                "headfree_headphones_only": False,
+            },
+            "ecc_module": None,
+        }
+        assert runtime["nand"] == {"raw_device": "/dev/raw-nand"}
+        parser = published / "targets/demo/phone_data.py"
+        assert parser.read_bytes() == b"# declared preparation source\n"
+        assert (
+            runtime["sha256"]["targets/demo/phone_data.py"]
+            == hashlib.sha256(parser.read_bytes()).hexdigest()
+        )
+        assert not (published / "device-data-manifest.json").exists()
+        assert not (published / "pinmap.bin").exists()
+        assert not (published / "keymap.bin").exists()
 
     def test_named_profile_publishes_to_its_own_current_bundle_slot(
         self, publication_inputs: PublicationInputs
     ) -> None:
         """Publish to the named profile slot with its identity in both manifests."""
         publication_inputs.target_config["profile"] = "usb-host-lab"
-        publication_inputs.target_config["runtime"]["transport"] = "none"
 
         published = publication_inputs.publish()
         current = resolve_current_bundle(publication_inputs.output, "demo", "usb-host-lab")
@@ -515,7 +636,7 @@ class BuilderPublicationTests:
         assert (current.path) == (published)
         assert (manifest["profile"]) == ("usb-host-lab")
         assert (runtime["profile"]) == ("usb-host-lab")
-        assert (runtime["transport"]) == ("none")
+        assert (runtime["transport"]) == ("usb-ncm")
 
     def test_publishing_debug_retains_release_and_records_its_type_in_both_manifests(
         self, publication_inputs: PublicationInputs
@@ -545,6 +666,7 @@ class BuilderPublicationTests:
             "partuuid": "46504c58-02",
             "wait_seconds": 10,
         }
+        publication_inputs.target_config["bootstrap"]["initramfs_delivery"] = "none"
 
         publication_inputs.initramfs.unlink()
         published = publication_inputs.publish()

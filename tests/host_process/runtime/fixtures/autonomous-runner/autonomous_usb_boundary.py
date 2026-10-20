@@ -5,11 +5,11 @@ This peer is appended to the delivered adapter and transport modules. Loader,
 session creation, authentication decisions and reconnect remain their real code.
 """
 
+import os
 from pathlib import Path
 from typing import Any
 
-_boundary_root = Path(__file__).resolve().parents[1] / "boundary"
-USB_RULES_FILE = _boundary_root / "usb-access.rules"
+_boundary_root = Path(os.environ["FPLINUX_AUTONOMOUS_TEST_ROOT"]) / "boundary"
 
 
 def usb_device_path(vendor: int, product: int) -> Path | None:

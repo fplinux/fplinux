@@ -3,16 +3,24 @@
 
 from __future__ import annotations
 
+import io
 import subprocess
+import tarfile
 from typing import TYPE_CHECKING
 
+import pytest
 from fplinux_cli import common
-from fplinux_cli.packaging.sources import project_source_files
+from fplinux_cli.manifests.loaders import LoaderSource
+from fplinux_cli.packaging.sources import (
+    _build_sources,
+    _loader_license_notices,
+    project_source_files,
+)
+
+from tests import ROOT
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 
 def test_source_companion_keeps_active_sources_and_excludes_private_runtime_files(
@@ -47,3 +55,90 @@ def test_source_companion_keeps_active_sources_and_excludes_private_runtime_file
     assert b"personal phone image" not in all_contents
     assert b"private evidence" not in all_contents
     assert b"private instructions" not in all_contents
+
+
+def test_sc9820e_source_companion_selects_the_three_loader_archives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Source delivery uses the same declared inputs without requiring a NAND bridge."""
+    source_lock = ROOT / "tests/small/cli/fixtures/package-sources/loader-sources.lock.toml"
+    (tmp_path / "sources.lock.toml").write_bytes(source_lock.read_bytes())
+    monkeypatch.setattr(common, "ROOT", tmp_path)
+    config = {
+        "loader": {
+            "build": {
+                "fdl1_source": "first",
+                "fdl2_source": "board",
+                "sml_source": "monitor",
+            }
+        }
+    }
+    platform = {
+        "linux": {"source_lock": "linux"},
+        "bootstrap": {"backend": "sc9820e"},
+        "host": {"runtime_tools": {"loader": "uploader"}, "tools": []},
+    }
+    inputs = _build_sources(config, platform)
+    assert {item.key: item.destination for item in inputs} == {
+        "linux": "downloads/linux/linux-1.2.3.tar.xz",
+        "loader:fdl1": "downloads/loaders/first.tar.gz",
+        "loader:fdl2": "downloads/loaders/board.tar.gz",
+        "loader:sml": "downloads/loaders/monitor.tar.gz",
+    }
+    assert {item.key: item.sha256 for item in inputs if item.purpose == "loader-source"} == {
+        "loader:fdl1": "b" * 64,
+        "loader:fdl2": "c" * 64,
+        "loader:sml": "d" * 64,
+    }
+
+
+def _source_archive(members: dict[str, bytes]) -> bytes:
+    payload = io.BytesIO()
+    with tarfile.open(fileobj=payload, mode="w:gz") as archive:
+        for name, contents in members.items():
+            member = tarfile.TarInfo(name)
+            member.size = len(contents)
+            archive.addfile(member, io.BytesIO(contents))
+    return payload.getvalue()
+
+
+def test_loader_distribution_retains_exact_upstream_license_files() -> None:
+    """Runtime notices preserve original bytes while full sources stay in the companion."""
+    sources = tuple(
+        LoaderSource(
+            role, role, "https://example.invalid/source", "a" * 64, f"loaders/{role}.tar.gz", role
+        )
+        for role in ("fdl1", "fdl2", "sml")
+    )
+    files = {
+        "upstream/loaders/fdl1.tar.gz": _source_archive({"fdl1/main.c": b"original copyright\n"}),
+        "upstream/loaders/fdl2.tar.gz": _source_archive(
+            {
+                "fdl2/Licenses/README": b"original license explanation\n",
+                "fdl2/Licenses/gpl-2.0.txt": b"original GPL terms\n",
+                "fdl2/main.c": b"original board code\n",
+            }
+        ),
+        "upstream/loaders/sml.tar.gz": _source_archive(
+            {
+                "sml/license.md": b"original monitor license\n",
+                "sml/main.c": b"monitor code\n",
+            }
+        ),
+    }
+    notices = _loader_license_notices(sources, files)
+    assert notices == {
+        "licenses/loaders/fdl2/README": b"original license explanation\n",
+        "licenses/loaders/fdl2/gpl-2.0.txt": b"original GPL terms\n",
+        "licenses/loaders/sml/license.md": b"original monitor license\n",
+    }
+
+
+@pytest.mark.parametrize("role", ["fdl2", "sml"])
+def test_loader_distribution_rejects_an_archive_missing_its_license_files(role: str) -> None:
+    source = LoaderSource(
+        role, role, "https://example.invalid/source", "a" * 64, f"loaders/{role}.tar.gz", role
+    )
+    files = {f"upstream/loaders/{role}.tar.gz": _source_archive({f"{role}/main.c": b"source"})}
+    with pytest.raises(SystemExit, match=r"license.*missing"):
+        _loader_license_notices((source,), files)

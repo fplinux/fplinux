@@ -1,27 +1,26 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Resolve exact build generations and authenticated phone sessions."""
+"""Resolve exact build generations and the checkout's runtime paths."""
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import sys
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import common
 from fplinux_cli.artifacts.bundles import BundleStateError, resolve_current_bundle
-from fplinux_cli.common import fail, sha256_file
+from fplinux_cli.common import fail
+from fplinux_cli.device_data.inputs import device_data_cache_directory
 from fplinux_cli.manifests.paths import normalize_profile
 
 if TYPE_CHECKING:
-    from types import ModuleType
+    from pathlib import Path
 
     from fplinux_cli.artifacts.bundles import CurrentBundle
 
 MICROSD_BOOT_MODE = "microsd"
 MICROSD_BOOT_PROFILE = "microsd-uboot"
 PUBLIC_BOOT_MODES = (MICROSD_BOOT_MODE,)
-SSH_HELPER_PATH = "runner/ssh_transport.py"
 
 
 def profile_command(
@@ -84,58 +83,38 @@ def resolve_target_bundle(
         )
 
 
-def _load_bundle_ssh_helper(
-    bundle: CurrentBundle,
-    manifest: dict[str, Any],
-) -> ModuleType:
-    """Load only the SSH helper hashed by the selected immutable generation."""
-    path = bundle.path / SSH_HELPER_PATH
-    files = manifest.get("files")
-    record = files.get(SSH_HELPER_PATH) if isinstance(files, dict) else None
-    expected = record.get("sha256") if isinstance(record, dict) else None
-    if (
-        not isinstance(expected, str)
-        or path.is_symlink()
-        or not path.is_file()
-        or sha256_file(path) != expected
-    ):
-        fail(f"current bundle has no valid SSH transport helper: {path}")
-    name = f"fplinux_bundle_ssh_transport_{bundle.generation}"
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        fail(f"current bundle SSH transport helper cannot be loaded: {path}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    required = {
-        "load_bundle_context",
-        "load_current_session",
-        "reacquire_bound_session",
-        "run_remote",
-        "stream_remote",
-        "upload",
-        "pull",
-        "open_shell",
-    }
-    if any(not callable(getattr(module, name, None)) for name in required):
-        fail("current bundle SSH transport helper has an incompatible API")
-    return module
+def target_data_root(target: str) -> Path:
+    """Use the same personal store for every source-checkout runtime command."""
+    return device_data_cache_directory(common.ROOT / ".cache", target)
 
 
-def _current_ssh_session(
+def bundle_runtime_command(
     bundle: CurrentBundle,
-    manifest: dict[str, Any],
+    action: str,
+    *arguments: str,
     target: str,
-) -> tuple[ModuleType, dict[str, Any]]:
-    """Reacquire an authenticated session with the selected device identity."""
-    ssh = _load_bundle_ssh_helper(bundle, manifest)
-    runtime, identity = ssh.load_bundle_context(bundle.path)
-    if runtime.get("target") != target or identity.get("bundle_generation") != bundle.generation:
-        fail("current bundle SSH identity disagrees with the selected generation")
-    session = ssh.load_current_session(target)
-    session = ssh.reacquire_bound_session(session)
-    ssh.require_device_identity(session, _manifest_device_identity(manifest))
-    return ssh, session
+    profile: str | None,
+) -> list[str]:
+    """Execute the selected bundle's entry point with isolated Python imports."""
+    entry = bundle.path / "fplinux.py"
+    if entry.is_symlink() or not entry.is_file():
+        fail(f"current bundle has no valid runtime entry point: {entry}")
+    logs = common.ROOT / ".cache/logs/run" / target
+    if profile is not None:
+        logs = logs / "profiles" / profile
+    return [
+        sys.executable,
+        "-I",
+        str(entry),
+        action,
+        *arguments,
+        "--bundle",
+        str(bundle.path),
+        "--data-root",
+        str(target_data_root(target)),
+        "--log-root",
+        str(logs),
+    ]
 
 
 def _manifest_device_identity(manifest: dict[str, Any]) -> str:
@@ -148,13 +127,3 @@ def _manifest_device_identity(manifest: dict[str, Any]) -> str:
     ):
         fail("current bundle device identity is invalid")
     return device_identity
-
-
-def current_target_ssh_session(
-    target: str, *, profile: str | None = None, build_type: str = "release"
-) -> tuple[ModuleType, dict[str, Any]]:
-    """Resolve the authenticated session for one exact target and build profile."""
-    bundle, manifest = resolve_target_bundle(
-        target, normalize_profile(profile), build_type=build_type
-    )
-    return _current_ssh_session(bundle, manifest, target)

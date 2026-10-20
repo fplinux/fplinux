@@ -178,6 +178,18 @@ def preserve_inputs(  # noqa: PLR0913 -- closure, storage and acquisition polici
     }
 
 
+def require_matching_environment(saved: ImageState, current: ImageState) -> None:
+    """Keep the first export only when its declared and installed tools still match."""
+    if (
+        saved.container_image_recipe != current.container_image_recipe
+        or saved.image_content != current.image_content
+    ):
+        fail(
+            "dependency directory already contains another build environment; "
+            "choose another directory"
+        )
+
+
 def publish_snapshot(directory: Path, manifest: dict[str, Any]) -> None:
     """Publish a verified input set without replacing another saved snapshot."""
     destination = directory / "manifest.json"
@@ -187,8 +199,12 @@ def publish_snapshot(directory: Path, manifest: dict[str, Any]) -> None:
             fail(
                 "dependency directory already contains another snapshot; choose another directory"
             )
-        # The first preserved exact image remains attached to this external input set.
         if previous["environment"] is not None:
+            if manifest["environment"] is not None:
+                require_matching_environment(
+                    ImageState(**previous["environment"]["state"]),
+                    ImageState(**manifest["environment"]["state"]),
+                )
             return
     replace_file_atomically(destination, canonical_json_bytes(manifest), 0o600)
 

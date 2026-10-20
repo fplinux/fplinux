@@ -3,15 +3,21 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 from unittest import mock
 
 import pytest
 from fplinux_cli import common
 from fplinux_cli.build.inputs import selected_build_sources
+from fplinux_cli.build.runtime import runtime_source_files
+from fplinux_cli.device_data.inputs import capture_snapshot_device_data
 from fplinux_cli.workspace import build_inputs, staging
 
+from tests import ROOT
+from tests.small.device_data.firmware_fixtures import (
+    qin_firmware as qin_firmware,  # noqa: PLC0414 -- pytest fixture export.
+)
 from tests.small.workspace.workspace_fixtures import (
     empty_package_graph,
     workspace_root,
@@ -25,29 +31,32 @@ if TYPE_CHECKING:
 
     from fplinux_cli.workspace.capture import WorkspaceSnapshot
 
+    from tests.small.device_data.firmware_fixtures import QinFirmwareContext
+
 
 @dataclass(frozen=True)
 class SourceDeclarationCheckout:
-    """A temporary checkout with two mapped targets and one FDL-only target."""
+    """A temporary checkout with three targets sharing one pinned loader."""
 
     root: Path
+    target_config: dict[str, Any]
+    platform_config: dict[str, Any]
 
-    def write_source_locks(self) -> None:
-        """Create the raw declarations and package metadata owned by this fixture."""
-        write_source_lock_files(self.root, "phone-a")
-        write_registration_source(self.root)
-
-    def snapshot(self, target: str = "phone-a") -> WorkspaceSnapshot:
+    def snapshot(
+        self, target: str = "phone-a", *, include_device_data: bool = True
+    ) -> WorkspaceSnapshot:
         """Capture the real target workspace with controlled configuration discovery."""
-        return build_inputs.target_workspace_snapshot(target)
+        return build_inputs.target_workspace_snapshot(
+            target, include_device_data=include_device_data
+        )
 
 
 @pytest.fixture
 def declaration_checkout(tmp_path: Path) -> Iterator[SourceDeclarationCheckout]:
     """Control config/package discovery while exercising real capture, selection and staging."""
     root = tmp_path
-    checkout = SourceDeclarationCheckout(root)
-    checkout.write_source_locks()
+    write_source_lock_files(root, "phone-a")
+    write_registration_source(root)
     sources = root / "sources.lock.toml"
     sources.write_text(
         sources.read_text(encoding="utf-8").replace(
@@ -74,7 +83,7 @@ def declaration_checkout(tmp_path: Path) -> Iterator[SourceDeclarationCheckout]:
             "copies": [],
             "appends": [],
         },
-        "bootstrap": {"source": "bootstrap"},
+        "bootstrap": {"backend": "ums9117", "source": "bootstrap"},
         "uboot": {"kind": "none"},
         "fit": {"kind": "none"},
         "image": {"kind": "none"},
@@ -88,24 +97,19 @@ def declaration_checkout(tmp_path: Path) -> Iterator[SourceDeclarationCheckout]:
             "copies": [],
             "appends": [],
         },
-        "bootstrap": {"vendor_source_lock": "bootstrap", "shared_copies": [], "patches": []},
+        "bootstrap": {
+            "backend": "ums9117",
+            "vendor_source_lock": "bootstrap",
+            "shared_copies": [],
+            "patches": [],
+        },
         "host": {
             "tools": [{"type": "make-archive", "source_lock": "host", "copies": [], "patches": []}]
         },
     }
-    for target, pinmap_digest, keymap_digest in (
-        ("phone-a", "a" * 64, "b" * 64),
-        ("phone-b", "c" * 64, "d" * 64),
-        ("phone-fdl", None, None),
-    ):
-        manifest = 'platform = "demo"\n'
-        if pinmap_digest is not None:
-            manifest += (
-                "[loader_maps]\n"
-                f'pinmap = {{member = "{target}/pinmap.bin", sha256 = "{pinmap_digest}"}}\n'
-                f'keymap = {{member = "{target}/keymap.bin", sha256 = "{keymap_digest}"}}\n'
-            )
-        write(f"targets/{target}/target.toml", manifest)
+    checkout = SourceDeclarationCheckout(root, target_config, platform_config)
+    for target in ("phone-a", "phone-b", "phone-fdl"):
+        write(f"targets/{target}/target.toml", 'platform = "demo"\n')
         write(f"targets/{target}/release/manifest.toml")
         write(f"targets/{target}/kernel/config.fragment")
         write(f"targets/{target}/bootstrap/main.c")
@@ -115,12 +119,11 @@ def declaration_checkout(tmp_path: Path) -> Iterator[SourceDeclarationCheckout]:
         "platforms/demo/kernel/release.config",
         "profiles/default/profile.toml",
         "alpine/ramroot-init.sh",
-        "common/run.py",
-        "common/loader_events.py",
-        "platforms/demo/host/adapter.py",
         *selected_build_sources(target_config),
     ):
         write(relative)
+    for source in runtime_source_files("phone-a", target_config, root=root).values():
+        write(source.relative_to(root).as_posix())
 
     # Build implementation content is irrelevant to these controlled source-input cases.
     # Peer Linux discovery and package selection are separate component boundaries.
@@ -134,6 +137,174 @@ def declaration_checkout(tmp_path: Path) -> Iterator[SourceDeclarationCheckout]:
         mock.patch.object(build_inputs, "discover_linux_targets", return_value=()),
     ):
         yield checkout
+
+
+@pytest.fixture
+def sc_declaration_checkout(
+    declaration_checkout: SourceDeclarationCheckout,
+) -> SourceDeclarationCheckout:
+    """Select source-built loaders with target patches and three pinned source archives."""
+    root = declaration_checkout.root
+    target = declaration_checkout.target_config
+    target["bootstrap"]["backend"] = "sc9820e"
+    target["loader"] = {
+        "build": {
+            "source": "loader",
+            "fdl1_source": "chipram",
+            "fdl2_source": "u_boot",
+            "sml_source": "trusted_firmware",
+        }
+    }
+    platform = declaration_checkout.platform_config
+    platform["bootstrap"] = {"backend": "sc9820e", "toolchain": "arm-none-eabi"}
+    manifest = root / "platforms/demo/platform.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8")
+        .replace('backend = "ums9117"', 'backend = "sc9820e"')
+        .replace('vendor_source_lock = "bootstrap"\n', ""),
+        encoding="utf-8",
+    )
+    (root / "targets/phone-a/target.toml").write_text(
+        (ROOT / "tests/fixtures/sc9820e-manifest/target.toml")
+        .read_text(encoding="utf-8")
+        .replace('platform = "sc9820e"', 'platform = "demo"'),
+        encoding="utf-8",
+    )
+    (root / "platforms/demo/loader/assets.lock.toml").unlink()
+    entry = root / "platforms/demo/bootstrap/entry.s"
+    entry.parent.mkdir(parents=True)
+    entry.write_bytes(b"source-built entry\n")
+    loader_patch = root / "targets/phone-a/loader/chipram.patch"
+    loader_patch.parent.mkdir()
+    loader_patch.write_bytes(b"board-owned loader patch\n")
+    with (root / "sources.lock.toml").open("ab") as lock:
+        lock.write(b"\n")
+        lock.write((ROOT / "tests/fixtures/sc9820e-manifest/sources.lock.toml").read_bytes())
+    for relative in selected_build_sources(target):
+        source = root / relative
+        if not source.exists():
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_bytes(b"build implementation fixture\n")
+    return declaration_checkout
+
+
+def test_sc_snapshot_stages_loader_sources_without_unrelated_cache_bytes(
+    sc_declaration_checkout: SourceDeclarationCheckout,
+) -> None:
+    """A RAM build captures its entry and loader source while excluding unrelated local bytes."""
+    checkout = sc_declaration_checkout
+    before = checkout.snapshot()
+    local_loader = checkout.root / ".cache/loader-inputs/phone-a/fdl1.bin"
+    local_loader.parent.mkdir(parents=True)
+    local_loader.write_bytes(b"private-loader-original")
+
+    after = checkout.snapshot()
+    workspace = staging.stage_workspace_snapshot(after)
+
+    assert after.recipe == before.recipe
+    assert (workspace / "platforms/demo/bootstrap/entry.s").read_bytes() == b"source-built entry\n"
+    assert (workspace / "targets/phone-a/loader/chipram.patch").read_bytes() == (
+        b"board-owned loader patch\n"
+    )
+    assert b'fdl1_source = "chipram"' in (workspace / "targets/phone-a/target.toml").read_bytes()
+    assert not (workspace / "platforms/demo/loader/assets.lock.toml").exists()
+    assert not (workspace / ".fplinux-inputs/loader").exists()
+    assert all(
+        b"private-loader-original" not in source.contents for source in after.materialized_files
+    )
+
+
+@pytest.mark.parametrize(
+    ("relative", "original", "changed"),
+    [
+        ("platforms/demo/bootstrap/entry.s", b"source-built entry\n", b"changed entry\n"),
+        (
+            "targets/phone-a/loader/chipram.patch",
+            b"board-owned loader patch\n",
+            b"changed loader patch\n",
+        ),
+    ],
+    ids=("entry", "loader-patch"),
+)
+@pytest.mark.parametrize(
+    "include_device_data", [True, False], ids=["ordinary", "without-device-data"]
+)
+def test_sc_source_change_misses_while_staging_keeps_captured_bytes(
+    sc_declaration_checkout: SourceDeclarationCheckout,
+    relative: str,
+    original: bytes,
+    changed: bytes,
+    *,
+    include_device_data: bool,
+) -> None:
+    """The handoff and loader sources are causal and retain snapshot ownership."""
+    checkout = sc_declaration_checkout
+    before = checkout.snapshot(include_device_data=include_device_data)
+    (checkout.root / relative).write_bytes(changed)
+    after = checkout.snapshot(include_device_data=include_device_data)
+    previous_workspace = staging.stage_workspace_snapshot(before)
+
+    assert after.recipe != before.recipe
+    assert (previous_workspace / relative).read_bytes() == original
+
+
+@pytest.mark.parametrize("digest", ["d" * 64, "e" * 64, "f" * 64], ids=["fdl1", "fdl2", "sml"])
+def test_sc_selected_loader_archive_change_misses_build_recipe(
+    sc_declaration_checkout: SourceDeclarationCheckout, digest: str
+) -> None:
+    """Every loader stage's actual source archive participates in the selected build."""
+    checkout = sc_declaration_checkout
+    before = checkout.snapshot()
+    lock = checkout.root / "sources.lock.toml"
+    lock.write_text(lock.read_text().replace(digest, "7" * 64), encoding="utf-8")
+
+    assert checkout.snapshot().recipe != before.recipe
+
+
+def test_without_device_data_ignores_prepared_radio_changes_and_stages_no_payload(
+    sc_declaration_checkout: SourceDeclarationCheckout, qin_firmware: QinFirmwareContext
+) -> None:
+    """An external-root build captures private radio unless explicitly built without it."""
+    checkout = sc_declaration_checkout
+    checkout.target_config["linux"]["root"]["kind"] = "external"
+    firmware = replace(qin_firmware, target="phone-a")
+    checkout.target_config["device_data"]["groups"] = firmware.groups
+    first_generation = firmware.publish()
+    ordinary_before = checkout.snapshot()
+    clean_before = build_inputs.target_workspace_snapshot("phone-a", include_device_data=False)
+    second_generation = firmware.publish(system_calibration=b"system calibration B\x00")
+
+    ordinary_after = checkout.snapshot()
+    clean_after = build_inputs.target_workspace_snapshot("phone-a", include_device_data=False)
+    clean_workspace = staging.stage_workspace_snapshot(clean_after)
+    ordinary_workspace = staging.stage_workspace_snapshot(ordinary_after)
+
+    assert ordinary_before.recipe != ordinary_after.recipe
+    assert clean_before.recipe == clean_after.recipe
+    assert clean_after.recipe != ordinary_after.recipe
+    assert capture_snapshot_device_data("phone-a", firmware.groups, clean_workspace) == {}
+    captured = capture_snapshot_device_data("phone-a", firmware.groups, ordinary_workspace)
+    assert {item.destination: item.contents for item in captured["wcn-firmware"]}[
+        "qin1splus/system-cali.bin"
+    ] == b"system calibration B\x00"
+    assert first_generation.is_dir()
+    assert second_generation.is_dir()
+
+
+def test_sc_unused_bootstrap_archive_keeps_hit_and_selected_host_archive_misses(
+    sc_declaration_checkout: SourceDeclarationCheckout,
+) -> None:
+    """The source-built backend does not acquire a causal dependency on a UMS-only archive."""
+    checkout = sc_declaration_checkout
+    before = checkout.snapshot()
+    lock = checkout.root / "sources.lock.toml"
+    lock.write_text(lock.read_text(encoding="utf-8").replace("2" * 64, "9" * 64), encoding="utf-8")
+    unused_changed = checkout.snapshot()
+    lock.write_text(lock.read_text(encoding="utf-8").replace("3" * 64, "8" * 64), encoding="utf-8")
+    host_changed = checkout.snapshot()
+
+    assert unused_changed.recipe == before.recipe
+    assert host_changed.recipe != unused_changed.recipe
 
 
 @pytest.mark.parametrize(
@@ -162,6 +333,27 @@ def test_selected_global_record_changes_build_recipe(
     assert after.recipe != before.recipe
 
 
+def test_board_storage_additions_change_the_selected_workspace_recipe(
+    declaration_checkout: SourceDeclarationCheckout,
+) -> None:
+    """Changing a board validation rule cannot reuse the selected build artifact."""
+    checkout = declaration_checkout
+    manifest = checkout.root / "targets/phone-a/target.toml"
+    with manifest.open("a") as declaration:
+        declaration.write(
+            "\n[linux]\nadditional_forbidden_config = []\nadditional_forbidden_dtb_markers = []\n"
+        )
+    before = checkout.snapshot()
+    manifest.write_text(
+        manifest.read_text().replace(
+            "additional_forbidden_config = []",
+            'additional_forbidden_config = ["CONFIG_BOARD_STORAGE=y"]',
+        )
+    )
+
+    assert checkout.snapshot().recipe != before.recipe
+
+
 def test_unused_global_record_preserves_build_recipe_but_changes_staged_sources(
     declaration_checkout: SourceDeclarationCheckout,
 ) -> None:
@@ -185,36 +377,14 @@ def test_unused_global_record_preserves_build_recipe_but_changes_staged_sources(
     assert (after_path / "sources.lock.toml").read_bytes() == changed
 
 
-def test_common_maps_archive_changes_only_mapped_build_recipes(
+def test_target_bootstrap_changes_only_its_build_recipe(
     declaration_checkout: SourceDeclarationCheckout,
 ) -> None:
-    """An archive pin is causal for mapped targets and auxiliary for FDL-only consumers."""
-    targets = ("phone-a", "phone-b", "phone-fdl")
-    before = {target: declaration_checkout.snapshot(target) for target in targets}
-    lock = declaration_checkout.root / "platforms/demo/loader/assets.lock.toml"
-    lock.write_text(lock.read_text(encoding="utf-8").replace("6" * 64, "8" * 64), encoding="utf-8")
-
-    after = {target: declaration_checkout.snapshot(target) for target in targets}
-
-    assert after["phone-a"].recipe != before["phone-a"].recipe
-    assert after["phone-b"].recipe != before["phone-b"].recipe
-    assert after["phone-fdl"].recipe == before["phone-fdl"].recipe
-    assert after["phone-fdl"].materialization_recipe != before["phone-fdl"].materialization_recipe
-
-
-@pytest.mark.parametrize(
-    ("old", "new"),
-    [("phone-a/pinmap.bin", "phone-a/other-pinmap.bin"), ("a" * 64, "e" * 64)],
-    ids=("member", "member-digest"),
-)
-def test_target_map_selection_changes_only_its_build_recipe(
-    declaration_checkout: SourceDeclarationCheckout, old: str, new: str
-) -> None:
-    """One model's extracted member and pin leave another model's build reusable."""
+    """One board's early initialization leaves another board's build reusable."""
     before_a = declaration_checkout.snapshot("phone-a")
     before_b = declaration_checkout.snapshot("phone-b")
-    target = declaration_checkout.root / "targets/phone-a/target.toml"
-    target.write_text(target.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
+    source = declaration_checkout.root / "targets/phone-a/bootstrap/main.c"
+    source.write_text("changed board initialization\n", encoding="utf-8")
 
     assert declaration_checkout.snapshot("phone-a").recipe != before_a.recipe
     assert declaration_checkout.snapshot("phone-b").recipe == before_b.recipe
@@ -223,7 +393,7 @@ def test_target_map_selection_changes_only_its_build_recipe(
 def test_common_fdl1_pin_changes_every_consumer_build_recipe(
     declaration_checkout: SourceDeclarationCheckout,
 ) -> None:
-    """The common loader file remains a causal input for mapped and FDL-only targets."""
+    """The shared first-stage loader is causal for every target that consumes it."""
     targets = ("phone-a", "phone-b", "phone-fdl")
     before = {target: declaration_checkout.snapshot(target) for target in targets}
     lock = declaration_checkout.root / "platforms/demo/loader/assets.lock.toml"

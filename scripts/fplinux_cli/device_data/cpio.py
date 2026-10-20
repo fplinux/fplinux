@@ -21,8 +21,9 @@ def create_device_data_initramfs(
     groups: Mapping[str, Sequence[FirmwareInput]],
     *,
     usb_transport: str | None = None,
+    preparation: bool = False,
 ) -> bytes:
-    """Package optional runtime firmware and the selected USB transport as newc."""
+    """Package runtime firmware, USB transport and an optional preparation marker as newc."""
     if usb_transport not in (None, "ncm", "rndis"):
         fail(f"unsupported USB transport: {usb_transport}")
 
@@ -36,6 +37,8 @@ def create_device_data_initramfs(
             files[path] = contents
     if usb_transport == "rndis":
         files["etc/fplinux/usb-transport"] = b"rndis\n"
+    if preparation:
+        files["etc/fplinux/preparation"] = b"1\n"
 
     directories: set[str] = set()
     for path in files:

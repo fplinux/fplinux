@@ -141,6 +141,28 @@ def bootstrap_recipe_digest(
     """Hash exactly the bootstrap inputs which can change the RAM image."""
     platform_bootstrap = platform["bootstrap"]
     target_bootstrap = target_config["bootstrap"]
+    if platform_bootstrap.get("backend") == "sc9820e":
+        from .sc9820e import PLATFORM_SOURCE  # noqa: PLC0415 -- selected backend only.
+
+        manifest = {
+            "target": target,
+            "target_bootstrap": target_bootstrap,
+            "platform_bootstrap": platform_bootstrap,
+            "linux_memory": target_config["linux"]["memory"],
+            "loader_stack_guard": {
+                field: target_config["loader"][field]
+                for field in ("stack_guard_start", "stack_guard_end")
+            },
+            "target_source": bootstrap_tree_entries(
+                inputs_build.target_source(target, target_bootstrap["source"])
+            ),
+            "platform_source": bootstrap_tree_entries(inputs_build.root_source(PLATFORM_SOURCE)),
+            "implementation": {
+                name: sha256_file(path)
+                for name, path in inputs_build.bootstrap_implementation_sources("sc9820e")
+            },
+        }
+        return sha256_bytes(canonical_json_bytes(manifest))
     vendor_source = sources_build.source_lock_entry(
         sources, platform_bootstrap["vendor_source_lock"]
     )

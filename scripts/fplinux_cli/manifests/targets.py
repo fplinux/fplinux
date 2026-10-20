@@ -22,8 +22,9 @@ from fplinux_cli.manifests.identity import (
     validate_record_prefix,
     validate_target_identity,
 )
-from fplinux_cli.manifests.linux import normalize_linux_integration
+from fplinux_cli.manifests.linux import linux_storage_policy, normalize_linux_integration
 from fplinux_cli.manifests.paths import (
+    declared_boot_profiles,
     normalize_profile,
     platform_asset_lock_path,
     target_directory,
@@ -40,8 +41,195 @@ from fplinux_cli.manifests.values import (
     package_array,
     path_array,
     relative_value,
-    string_array,
 )
+
+
+def _sc_boot_layout(value: object, memory: dict[str, Any]) -> dict[str, int]:
+    """Validate ordered RAM payload arenas before their actual artifact sizes are known."""
+    name = "target bootstrap layout"
+    fields = {
+        "entry_load",
+        "entry_limit",
+        "kernel_load",
+        "kernel_stage",
+        "kernel_stage_limit",
+        "fdt_load",
+        "initramfs_load",
+        "stack",
+    }
+    layout = exact_table(value, fields, name)
+    normalized = {
+        field: integer_value(layout[field], f"{name} {field}", bounds=(0, 0xFFFFFFFF), alignment=4)
+        for field in fields
+    }
+    if not (
+        memory["base"]
+        <= normalized["entry_load"]
+        < normalized["entry_limit"]
+        <= normalized["kernel_load"]
+        < normalized["kernel_stage"]
+        < normalized["kernel_stage_limit"]
+        <= normalized["fdt_load"]
+        < normalized["initramfs_load"]
+        < normalized["stack"]
+        < memory["base"] + memory["size"]
+    ):
+        fail(f"{name} entry, payload and stack ranges must be ordered inside Linux memory")
+    return normalized
+
+
+def _target_bootstrap(value: object, backend: str, memory: dict[str, Any]) -> dict[str, Any]:
+    """Validate board-owned inputs for the selected platform bootstrap."""
+    fields = {"image", "map", "record_prefix"}
+    if backend == "sc9820e":
+        fields.add("layout")
+    else:
+        fields.add("dtb_destination")
+        if isinstance(value, dict) and "lcd_config" in value:
+            fields.add("lcd_config")
+    bootstrap = exact_table(value, fields, "target bootstrap")
+    for key in ("image", "map"):
+        relative_value(bootstrap[key], f"target bootstrap {key}")
+    try:
+        bootstrap["record_prefix"] = validate_record_prefix(bootstrap["record_prefix"])
+    except IdentityError as error:
+        fail(str(error))
+    if backend == "sc9820e":
+        bootstrap["layout"] = _sc_boot_layout(bootstrap["layout"], memory)
+    else:
+        relative_value(bootstrap["dtb_destination"], "target bootstrap dtb_destination")
+        bootstrap["lcd_config"] = (
+            relative_value(bootstrap["lcd_config"], "target bootstrap lcd_config")
+            if "lcd_config" in bootstrap
+            else None
+        )
+    return bootstrap
+
+
+def _target_adapter(value: object, backend: str, display: dict[str, Any]) -> dict[str, Any]:
+    """Keep board display-loader settings confined to the UMS9117 adapter."""
+    fields = {"session_name", "boot_instructions"}
+    display_keys = {"spi_mode", "backlight_channels", "backlight_level"}
+    has_display = isinstance(value, dict) and not display_keys.isdisjoint(value)
+    if backend == "ums9117":
+        fields.add("exec_distance")
+        if has_display:
+            fields.update(display_keys)
+    adapter = exact_table(value, fields, "target adapter")
+    if backend == "ums9117":
+        integer_value(adapter["exec_distance"], "target adapter exec_distance", bounds=(0, 0xFFFF))
+        # Without these settings the UMS9117 RAM loader runs headless.
+        if has_display:
+            integer_value(adapter["spi_mode"], "target adapter spi_mode", bounds=(0, 3))
+            panel = display["panel"]
+            if panel is None:
+                fail("target adapter display settings require a panel")
+            adapter = {**adapter, "lcd_id": panel["id"]}
+            nonempty_string(adapter["backlight_channels"], "target adapter backlight_channels")
+            integer_value(
+                adapter["backlight_level"], "target adapter backlight_level", bounds=(0, 0x3F)
+            )
+    for key in ("session_name", "boot_instructions"):
+        nonempty_string(adapter[key], f"target adapter {key}")
+    return adapter
+
+
+def _sc_loader(target: str, value: object) -> dict[str, Any]:
+    """Validate the board-owned RAM placement and source-built loader selection."""
+    loader = exact_table(
+        value,
+        {
+            "fdl1_load",
+            "sml_load",
+            "fdl2_load",
+            "stack_guard_start",
+            "stack_guard_end",
+            "build",
+        },
+        "target loader",
+    )
+    for role in ("fdl1", "sml", "fdl2"):
+        integer_value(
+            loader[f"{role}_load"],
+            f"target loader {role}_load",
+            bounds=(0, 0xFFFFFFFF),
+            alignment=4,
+        )
+    for field in ("stack_guard_start", "stack_guard_end"):
+        integer_value(loader[field], f"target loader {field}", bounds=(0, 0xFFFFFFFF), alignment=4)
+    if loader["stack_guard_start"] >= loader["stack_guard_end"]:
+        fail("target loader stack guard must have increasing bounds")
+    build = exact_table(
+        loader["build"],
+        {"source", "fdl1_source", "fdl2_source", "sml_source"},
+        "target loader build",
+    )
+    source = relative_value(build["source"], "target loader build source")
+    source_path = target_directory(target) / source
+    if source_path.is_symlink() or not source_path.is_dir():
+        fail("target loader build source must name a regular source directory")
+    for role in ("fdl1", "fdl2", "sml"):
+        basename_value(build[f"{role}_source"], f"target loader build {role}_source")
+    return loader
+
+
+def _combined_bootstrap(
+    bootstrap: dict[str, Any], platform: dict[str, Any], selected_profile: dict[str, Any]
+) -> dict[str, Any]:
+    """Derive one bootstrap and initramfs-delivery contract for downstream consumers."""
+    backend = platform["backend"]
+    profile_bootstrap = selected_profile["bootstrap"]
+    kind = profile_bootstrap["kind"]
+    if kind == "uboot-stage0" and backend != "ums9117":
+        fail("uboot-stage0 requires the ums9117 bootstrap backend")
+    stage0_layout = selected_profile["layout"] if kind == "uboot-stage0" else None
+    if kind == "uboot-stage0":
+        if stage0_layout is None:
+            fail("resident U-Boot stage has no layout")
+        if stage0_layout["resident_start"] != platform["load_address"]:
+            fail("resident stage must start at the platform load address")
+    if selected_profile["linux"]["root"]["kind"] == "external":
+        initramfs_delivery = "none"
+    elif backend == "ums9117":
+        initramfs_delivery = "embedded"
+    else:
+        initramfs_delivery = "external"
+    result: dict[str, Any] = {
+        "backend": backend,
+        "kind": kind,
+        "source": profile_bootstrap["source"] if kind == "uboot-stage0" else "bootstrap",
+        "image": profile_bootstrap["image"] if kind == "uboot-stage0" else bootstrap["image"],
+        "map": profile_bootstrap["map"] if kind == "uboot-stage0" else bootstrap["map"],
+        "record_prefix": bootstrap["record_prefix"],
+        "toolchain": platform["toolchain"],
+        "initramfs_delivery": initramfs_delivery,
+    }
+    if backend == "sc9820e":
+        layout = bootstrap["layout"]
+        result.update(
+            layout=layout,
+            load_address=layout["entry_load"],
+            payload_limit=layout["entry_limit"],
+        )
+    else:
+        result.update(
+            lcd_config=bootstrap["lcd_config"],
+            kernel_destination=platform["kernel_destination"],
+            dtb_destination=bootstrap["dtb_destination"],
+            load_address=(
+                stage0_layout["resident_start"]
+                if stage0_layout is not None
+                else platform["load_address"]
+            ),
+            payload_limit=(
+                stage0_layout["resident_limit"]
+                if stage0_layout is not None
+                else platform["payload_limit"]
+            ),
+            layout=stage0_layout if stage0_layout is not None else platform["layout"],
+            lto=platform["lto"],
+        )
+    return result
 
 
 def load_target(
@@ -67,8 +255,7 @@ def load_target(
             *({"audio_profile"} if "audio_profile" in raw else set()),
             *({"fm_radio"} if "fm_radio" in raw else set()),
             *({"wcn_firmware"} if "wcn_firmware" in raw else set()),
-            *({"board_maps"} if "board_maps" in raw else set()),
-            *({"loader_maps"} if "loader_maps" in raw else set()),
+            *({"loader"} if "loader" in raw else set()),
             *({"nand"} if "nand" in raw else set()),
             *({"display_brightness"} if "display_brightness" in raw else set()),
             *({"display"} if "display" in raw else set()),
@@ -100,7 +287,7 @@ def load_target(
         if not isinstance(levels, list) or len(levels) != 11:
             fail("target display_brightness levels must contain exactly 11 raw values")
         for index, value in enumerate(levels):
-            integer_value(value, f"target display_brightness levels[{index}]", bounds=(0, 63))
+            integer_value(value, f"target display_brightness levels[{index}]", bounds=(0, 65535))
         if levels[0] != 0 or any(a >= b for a, b in pairwise(levels)):
             fail("target display_brightness levels must start at 0 and strictly ascend")
     if "nand" in config:
@@ -130,13 +317,22 @@ def load_target(
     platform_name = nonempty_string(config.get("platform"), f"target {target} platform")
     if VALUE_NAME.fullmatch(platform_name) is None:
         fail(f"target {target} has invalid platform: {path}")
+    platform = load_platform(platform_name)
+    backend = platform["bootstrap"]["backend"]
+    if backend == "sc9820e":
+        if "nand" in config:
+            fail("sc9820e targets must not declare NAND")
+        config["loader"] = _sc_loader(target, config.get("loader"))
+    elif "loader" in config:
+        fail("target loader is only supported by the sc9820e bootstrap backend")
     bundle = exact_table(config.get("bundle"), {"packages"}, "target bundle")
     package_array(bundle.get("packages"), "target bundle packages")
     rootfs = exact_table(config.get("rootfs"), {"packages"}, "target rootfs")
     target_rootfs_packages = package_array(rootfs.get("packages"), "target rootfs packages")
 
+    raw_linux = config.get("linux")
     linux = exact_table(
-        config.get("linux"),
+        raw_linux,
         {
             "dtb",
             "config_fragment",
@@ -146,8 +342,13 @@ def load_target(
             "overlay",
             "copies",
             "appends",
-            "forbidden_config",
-            "forbidden_dtb_markers",
+            "additional_forbidden_config",
+            "additional_forbidden_dtb_markers",
+            *(
+                {"dt_config_checks"}
+                if isinstance(raw_linux, dict) and "dt_config_checks" in raw_linux
+                else set()
+            ),
         },
         "target linux",
     )
@@ -159,6 +360,13 @@ def load_target(
         )
     if not memory["size"] or memory["base"] + memory["size"] > 0x100000000:
         fail("target linux memory range is invalid")
+    if backend == "sc9820e" and not (
+        memory["base"]
+        <= config["loader"]["stack_guard_start"]
+        < config["loader"]["stack_guard_end"]
+        <= memory["base"] + memory["size"]
+    ):
+        fail("target loader stack guard must fit inside Linux memory")
     relative_value(linux.get("dtb"), "target linux dtb")
     relative_value(linux.get("debug_dtb"), "target linux debug_dtb")
     linux.update(
@@ -169,92 +377,40 @@ def load_target(
             source_base=PurePosixPath("targets") / target,
         )
     )
-    string_array(linux.get("forbidden_config"), "target linux forbidden_config")
-    string_array(linux.get("forbidden_dtb_markers"), "target linux forbidden_dtb_markers")
-
-    raw_bootstrap = config.get("bootstrap")
-    has_lcd_config = isinstance(raw_bootstrap, dict) and "lcd_config" in raw_bootstrap
-    bootstrap = exact_table(
-        raw_bootstrap,
-        {
-            "image",
-            "map",
-            "dtb_destination",
-            "record_prefix",
-            *({"lcd_config"} if has_lcd_config else set()),
-        },
-        "target bootstrap",
-    )
-    for key in ("image", "map", "dtb_destination"):
-        relative_value(bootstrap.get(key), f"target bootstrap {key}")
-    lcd_config = (
-        relative_value(bootstrap["lcd_config"], "target bootstrap lcd_config")
-        if has_lcd_config
-        else None
-    )
-    try:
-        record_prefix = validate_record_prefix(bootstrap.get("record_prefix"))
-    except IdentityError as error:
-        fail(str(error))
-
-    # Without the loader display settings the RAM loader runs headless.
-    display_keys = {"spi_mode", "backlight_channels", "backlight_level"}
-    raw_adapter = config.get("adapter")
-    has_display = isinstance(raw_adapter, dict) and not display_keys.isdisjoint(raw_adapter)
-    adapter = exact_table(
-        raw_adapter,
-        {
-            *(display_keys if has_display else set()),
-            "exec_distance",
-            "session_name",
-            "boot_instructions",
-        },
-        "target adapter",
-    )
-    if has_display:
-        integer_value(adapter.get("spi_mode"), "target adapter spi_mode", bounds=(0, 3))
-        panel = config["display"]["panel"]
-        if panel is None:
-            fail("target adapter display settings require a panel")
-        adapter = {**adapter, "lcd_id": panel["id"]}
-        nonempty_string(adapter.get("backlight_channels"), "target adapter backlight_channels")
-        integer_value(
-            adapter.get("backlight_level"),
-            "target adapter backlight_level",
-            bounds=(0, 0x3F),
+    linux.update(
+        linux_storage_policy(
+            linux.pop("additional_forbidden_config"),
+            linux.pop("additional_forbidden_dtb_markers"),
         )
-    integer_value(
-        adapter.get("exec_distance"),
-        "target adapter exec_distance",
-        bounds=(0, 0xFFFF),
     )
-    for key in ("session_name", "boot_instructions"):
-        nonempty_string(adapter.get(key), f"target adapter {key}")
 
-    platform = load_platform(str(config["platform"]))
-    # Only the default RAM profile is available without the microSD boot inputs.
+    bootstrap = _target_bootstrap(config.get("bootstrap"), backend, memory)
+    adapter = _target_adapter(config.get("adapter"), backend, config["display"])
+    if (profile or "default") not in declared_boot_profiles(config):
+        fail(f"target {target} does not support profile {profile}")
     microsd: dict[str, Any] = {}
     if "microsd" in config:
-        microsd = exact_table(
-            config["microsd"], {"linux_patches", "bootstrap", "uboot"}, "target microsd"
-        )
+        microsd_fields = {"linux_patches"}
+        if backend == "ums9117":
+            microsd_fields |= {"bootstrap", "uboot"}
+        microsd = exact_table(config["microsd"], microsd_fields, "target microsd")
         path_array(microsd.get("linux_patches"), "target microsd linux_patches", allow_empty=True)
-    elif profile is not None:
-        fail(f"target {target} does not support profile {profile}")
     selected_profile = load_profile(target, profile or "default", platform, microsd)
-    physical = platform["bootstrap"]["layout"]
-    if not (
-        physical["ram_base"]
-        <= memory["base"]
-        < memory["base"] + memory["size"]
-        <= physical["ram_base"] + physical["ram_size"]
-    ):
-        fail("target Linux memory must fit inside physical RAM")
+    if backend == "ums9117":
+        physical = platform["bootstrap"]["layout"]
+        if not (
+            physical["ram_base"]
+            <= memory["base"]
+            < memory["base"] + memory["size"]
+            <= physical["ram_base"] + physical["ram_size"]
+        ):
+            fail("target Linux memory must fit inside physical RAM")
     if identity["compatible"] == platform["identity"]["compatible"]:
         fail("target and platform compatibles must be distinct")
     profile_linux = selected_profile["linux"]
     config["linux"] = {
         **linux,
+        "dt_config_checks": [*platform["linux"]["dt_config_checks"], *linux["dt_config_checks"]],
         "config_enable": profile_linux["config_enable"],
         "config_disable": profile_linux["config_disable"],
         "patches": [*linux["patches"], *profile_linux["patches"]],
@@ -300,26 +456,18 @@ def load_target(
             wcn["firmware"],
             "target WCN firmware",
         )
-    has_parser_groups = bool(device_data_groups)
-    # The platform, not the target parser, extracts the board maps. Their sizes
-    # differ between phones, so a declaration may leave them to the extraction.
-    if "board_maps" in config:
-        board_maps = exact_table(config.pop("board_maps"), {"firmware"}, "target board-maps")
-        device_data_groups["board-maps"] = firmware_array(
-            board_maps["firmware"],
-            "target board-maps firmware",
-            size_required=False,
-        )
-    if has_parser_groups:
-        device_data = exact_table(
-            config.get("device_data"),
+    if device_data_groups:
+        device_data = config.get("device_data")
+        if not isinstance(device_data, dict) or set(device_data) not in (
             {"parser"},
-            "target device_data",
-        )
-        parser = basename_value(device_data["parser"], "target device_data parser")
+            {"originals_parser"},
+        ):
+            fail("target device_data must contain exactly one of parser or originals_parser")
+        source_field = "originals_parser" if "originals_parser" in device_data else "parser"
+        parser = basename_value(device_data[source_field], f"target device_data {source_field}")
         if not parser.endswith(".py"):
-            fail("target device_data parser must be a Python filename")
-        config["device_data"] = {"parser": parser, "groups": device_data_groups}
+            fail(f"target device_data {source_field} must be a Python filename")
+        config["device_data"] = {source_field: parser, "groups": device_data_groups}
     elif "device_data" in config:
         fail("target device_data requires a declared parser group")
     else:
@@ -327,62 +475,34 @@ def load_target(
     config["rootfs"] = {
         "base_packages": target_rootfs_packages,
         "packages": selected_profile["rootfs"]["packages"],
-        "exclude_packages": [],
     }
     config["profile"] = profile
     config["build_type"] = build_type
-    platform_bootstrap = platform["bootstrap"]
     platform_runtime = platform["runtime"]
-    profile_bootstrap = selected_profile["bootstrap"]
-    bootstrap_kind = profile_bootstrap["kind"]
-    profile_layout = selected_profile["layout"]
-    stage0_layout = profile_layout if isinstance(profile_layout, dict) else None
-    if bootstrap_kind == "uboot-stage0":
-        if stage0_layout is None:
-            fail(f"profile {profile} resident U-Boot stage has no layout")
-        if stage0_layout["resident_start"] != platform_bootstrap["load_address"]:
-            fail(f"profile {profile} resident stage must start at the platform load address")
-    config["bootstrap"] = {
-        "kind": bootstrap_kind,
-        "source": (
-            profile_bootstrap["source"] if bootstrap_kind == "uboot-stage0" else "bootstrap"
-        ),
-        "image": (
-            profile_bootstrap["image"] if bootstrap_kind == "uboot-stage0" else bootstrap["image"]
-        ),
-        "map": (
-            profile_bootstrap["map"] if bootstrap_kind == "uboot-stage0" else bootstrap["map"]
-        ),
-        "record_prefix": record_prefix,
-        "lcd_config": lcd_config,
-        "kernel_destination": platform_bootstrap["kernel_destination"],
-        "dtb_destination": bootstrap["dtb_destination"],
-        "load_address": (
-            stage0_layout["resident_start"]
-            if stage0_layout is not None
-            else platform_bootstrap["load_address"]
-        ),
-        "payload_limit": (
-            stage0_layout["resident_limit"]
-            if stage0_layout is not None
-            else platform_bootstrap["payload_limit"]
-        ),
-        "toolchain": platform_bootstrap["toolchain"],
-        "lto": platform_bootstrap["lto"],
-    }
+    config["bootstrap"] = _combined_bootstrap(bootstrap, platform["bootstrap"], selected_profile)
     for key in ("uboot", "fit", "layout", "storage", "image"):
         config[key] = selected_profile[key]
     transport = selected_profile["runtime"]["transport"]
-    config["loader_assets"] = load_asset_sources(
-        platform_asset_lock_path(platform_name), loader_maps=config.pop("loader_maps", None)
+    config["loader_assets"] = (
+        load_asset_sources(platform_asset_lock_path(platform_name)) if backend == "ums9117" else []
     )
+    runtime_adapter = {**platform_runtime["adapter"], **adapter}
+    if backend == "sc9820e":
+        runtime_adapter["loader"] = {
+            key: value for key, value in config["loader"].items() if key != "build"
+        }
     config["runtime"] = {
-        "fdl1_load_address": platform_runtime["fdl1_load_address"],
-        "assets": asset_bundle_paths(config["loader_assets"]),
-        "adapter": {
-            **platform_runtime["adapter"],
-            **adapter,
-        },
+        "fdl1_load_address": (
+            platform_runtime["fdl1_load_address"]
+            if backend == "ums9117"
+            else config["loader"]["fdl1_load"]
+        ),
+        "assets": (
+            asset_bundle_paths(config["loader_assets"])
+            if backend == "ums9117"
+            else {role: f"assets/{role}.bin" for role in ("fdl1", "fdl2", "sml")}
+        ),
+        "adapter": runtime_adapter,
         "usb": platform_runtime["usb"],
         "transport": transport,
         "runnable": selected_profile["runtime"]["runnable"],

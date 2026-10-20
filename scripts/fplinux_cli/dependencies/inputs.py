@@ -18,7 +18,10 @@ from fplinux_cli.alpine import lock as alpine_lock
 from fplinux_cli.alpine import registration as alpine_registration
 from fplinux_cli.alpine import selection as alpine_selection
 from fplinux_cli.common import fail, load_toml, relative_name, sha256_bytes
+from fplinux_cli.environment.images import spreadtrum_flash_image_source
 from fplinux_cli.manifests.assets import load_asset_sources
+from fplinux_cli.manifests.loaders import loader_sources
+from fplinux_cli.manifests.paths import declared_boot_profiles
 from fplinux_cli.manifests.values import sha256_value
 
 if TYPE_CHECKING:
@@ -260,9 +263,38 @@ def npm_declarations(
         fail("package-lock.json must declare package records")
     inputs = []
     context = {}
+    downloaded_packages: set[str] = set()
     for name, record in sorted(packages.items()):
         if name == "":
             context[name] = record
+            continue
+        context[name] = {
+            field: record[field]
+            for field in (
+                "version",
+                "resolved",
+                "integrity",
+                "inBundle",
+                "bundleDependencies",
+                "dependencies",
+                "optionalDependencies",
+                "peerDependencies",
+                "peerDependenciesMeta",
+                "optional",
+                "os",
+                "cpu",
+                "libc",
+            )
+            if field in record
+        }
+        if record.get("inBundle") is True:
+            owner = name
+            while "/node_modules/" in owner:
+                owner = owner.rsplit("/node_modules/", 1)[0]
+                if owner in downloaded_packages:
+                    break
+            else:
+                fail(f"bundled npm package has no exact parent registry input: {name}")
             continue
         url = record.get("resolved")
         integrity = record.get("integrity")
@@ -289,23 +321,7 @@ def npm_declarations(
                 algorithm=algorithm,
             )
         )
-        context[name] = {
-            field: record[field]
-            for field in (
-                "version",
-                "resolved",
-                "integrity",
-                "dependencies",
-                "optionalDependencies",
-                "peerDependencies",
-                "peerDependenciesMeta",
-                "optional",
-                "os",
-                "cpu",
-                "libc",
-            )
-            if field in record
-        }
+        downloaded_packages.add(name)
     return {"packages": context}, inputs
 
 
@@ -326,7 +342,7 @@ def _selected_declarations(
                 root / "platforms" / platform_name / "platform.toml"
             )
         platform = platforms[platform_name]
-        selected_profiles = ["default", *(["microsd-uboot"] if "microsd" in target else [])]
+        selected_profiles = declared_boot_profiles(target)
         profile_context = {}
         for profile in selected_profiles:
             declaration = load_toml(root / "profiles" / profile / "profile.toml")
@@ -415,6 +431,7 @@ def _environment_lock(
 
 def _environment_declarations(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
     container_lock = load_toml(root / "container.lock.toml")
+    quality_source = spreadtrum_flash_image_source(root)
     container_context, inputs = _container_declarations(root)
     npm_context, npm_inputs = npm_declarations(
         root / "package-lock.json",
@@ -427,6 +444,15 @@ def _environment_declarations(root: Path) -> tuple[dict[str, object], list[Depen
     inputs.extend(lock_inputs)
     inputs.extend(
         [
+            DependencyInput(
+                key="container:spreadtrum-flash",
+                url=quality_source["archive_url"],
+                sha256=quality_source["archive_sha256"],
+                size=None,
+                destination="downloads/spreadtrum_flash.tar.gz",
+                purpose="quality-source",
+                arch="x86_64",
+            ),
             _source_input(
                 "kern:archive",
                 container_lock["kern"],
@@ -449,6 +475,7 @@ def _environment_declarations(root: Path) -> tuple[dict[str, object], list[Depen
         "container": container_context,
         "npm": npm_context,
         "environment_lock": lock_context,
+        "quality_sources": {"spreadtrum_flash": quality_source},
     }, inputs
 
 
@@ -506,16 +533,17 @@ def _inventory(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
         )
         active_sources[source_name] = source
         bootstrap = platform["bootstrap"]
-        source_name = bootstrap["vendor_source_lock"]
-        inputs.append(
-            _source_input(
-                f"source:{source_name}:bootstrap",
-                sources[source_name],
-                f"downloads/{bootstrap['vendor_cache_name']}",
-                "bootstrap-source",
+        if bootstrap["backend"] == "ums9117":
+            source_name = bootstrap["vendor_source_lock"]
+            inputs.append(
+                _source_input(
+                    f"source:{source_name}:bootstrap",
+                    sources[source_name],
+                    f"downloads/{bootstrap['vendor_cache_name']}",
+                    "bootstrap-source",
+                )
             )
-        )
-        active_sources[source_name] = sources[source_name]
+            active_sources[source_name] = sources[source_name]
         host_context = []
         for tool in platform["host"]["tools"]:
             if tool["type"] != "make-archive":
@@ -540,10 +568,12 @@ def _inventory(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
             "rootfs": sorted(platform["rootfs"]["packages"]),
             "bundle": sorted(platform["bundle"]["packages"]),
             "linux_source": linux["source_lock"],
-            "bootstrap_source": bootstrap["vendor_source_lock"],
-            "bootstrap_cache": bootstrap["vendor_cache_name"],
+            "bootstrap_backend": bootstrap["backend"],
             "host": host_context,
         }
+        if bootstrap["backend"] == "ums9117":
+            platform_context[name]["bootstrap_source"] = bootstrap["vendor_source_lock"]
+            platform_context[name]["bootstrap_cache"] = bootstrap["vendor_cache_name"]
         if any(
             selection["profiles"].get("microsd-uboot", {}).get("uboot") == "full"
             for selection in targets.values()
@@ -558,9 +588,24 @@ def _inventory(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
             platform_context[name]["uboot"] = lock
     asset_context = {}
     for target, selection in targets.items():
+        if platforms[selection["platform"]]["bootstrap"]["backend"] == "sc9820e":
+            selected_loaders = loader_sources(raw_targets[target]["loader"]["build"], sources)
+            asset_context[target] = [asdict(source) for source in selected_loaders]
+            for source in selected_loaders:
+                active_sources[source.source_lock] = sources[source.source_lock]
+                inputs.append(
+                    DependencyInput(
+                        key=f"source:{source.source_lock}:loader",
+                        url=source.url,
+                        sha256=source.sha256,
+                        size=None,
+                        destination=f"downloads/{source.cache_name}",
+                        purpose="loader-source",
+                    )
+                )
+            continue
         assets = load_asset_sources(
-            root / "platforms" / selection["platform"] / "loader/assets.lock.toml",
-            loader_maps=raw_targets[target].get("loader_maps"),
+            root / "platforms" / selection["platform"] / "loader/assets.lock.toml"
         )
         asset_context[target] = assets
         for asset in assets:

@@ -9,8 +9,12 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from fplinux_cli.build.device_tree import exact_path_properties
 from fplinux_cli.build.display import render_bootstrap_display, render_linux_display_files
+from fplinux_cli.manifests.display import load_display
 
 from tests import ROOT
+from tests.fixtures.display import (
+    mipi_dbi_source as mipi_dbi_source,  # noqa: PLC0414 -- pytest fixture export.
+)
 from tests.fixtures.display import (
     panel_profile as panel_profile,  # noqa: PLC0414 -- pytest fixture export.
 )
@@ -69,6 +73,8 @@ def test_compiled_panel_data_preserves_sequences_and_projects_pin_base_changes( 
                 "-I",
                 str(tmp_path),
                 "-I",
+                str(ROOT / "platforms/ums9117/bootstrap/src"),
+                "-I",
                 str(ROOT / "platforms/ums9117/linux/overlay/drivers/gpu/drm/ums9117"),
                 "-I",
                 str(ROOT / "tests/fixtures/ums9117-kernel/lcm-compat"),
@@ -121,4 +127,37 @@ def test_compiled_panel_properties_keep_offsets_and_values_paired(
         "sprd,pinconf-values": [0x182004, 0x82046],
         "sprd,pinmux-offsets": [0, 4],
         "sprd,pinmux-values": [0x10, 0x30],
+    }
+
+
+@pytest.mark.parametrize(("width", "height"), [(240, 320), (128, 96)])
+def test_compiled_mipi_dbi_timing_uses_the_panel_geometry(
+    tmp_path: Path, mipi_dbi_source: bytes, width: int, height: int
+) -> None:
+    contents = (
+        mipi_dbi_source.decode("ascii")
+        .replace("width = 240", f"width = {width}")
+        .replace("height = 320", f"height = {height}")
+        .encode("ascii")
+    )
+    display = load_display(
+        "demo",
+        {"panel": "display/panel.toml", "boot_font": "6x8"},
+        captured={"targets/demo/display/panel.toml": contents},
+    )
+    for name, data in render_linux_display_files("demo", display).items():
+        (tmp_path / name.rsplit("/", 1)[-1]).write_bytes(data)
+    source = tmp_path / "panel.dts"
+    source.write_bytes((ROOT / "tests/host_tool/build/fixtures/panel.dts.fixture").read_bytes())
+    dtb = tmp_path / "panel.dtb"
+    run_process(
+        ["dtc", "-I", "dts", "-O", "dtb", "-i", str(tmp_path), "-o", str(dtb), str(source)],
+        name="compile generated MIPI DBI panel timing",
+        timeout=15,
+        check=True,
+    )
+    properties = exact_path_properties(dtb, "/panel")["/panel"]
+    assert properties == {
+        "hactive": struct.pack(">I", width),
+        "vactive": struct.pack(">I", height),
     }

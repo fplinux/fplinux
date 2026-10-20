@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import importlib.util
 import ipaddress
 import json
 import os
@@ -22,6 +21,9 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
+
+from . import bundle as bundle_runtime
+from . import ssh_transport
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -47,16 +49,6 @@ def fail(message: str) -> NoReturn:
     raise SystemExit(f"FPLinux: {message}")
 
 
-def _load_runner(root: Path) -> ModuleType:
-    source = root / "runner/run.py"
-    spec = importlib.util.spec_from_file_location("fplinux_ram_runner", source)
-    if spec is None or spec.loader is None:
-        fail("The archive runner is missing")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 @dataclass(frozen=True)
 class WindowsBundle:
     """The validated canonical image and its separately packaged native tools."""
@@ -70,25 +62,21 @@ class WindowsBundle:
     device_identity: str
 
 
-def validate_archive(root: Path) -> WindowsBundle:
+def validate_archive(
+    root: Path, runtime: dict[str, Any], *, generation: str, device_identity: str
+) -> WindowsBundle:
     """Check files without discovering USB or creating private host state."""
-    runner = _load_runner(root)
-    runtime = runner.load_runtime_manifest(root / "runtime-manifest.json")
-    for relative, expected in runtime["sha256"].items():
-        runner.require_file(root / relative)
-        if relative != runtime["image"] and runner.digest(root / relative) != expected:
-            fail(f"Archive file checksum differs: {relative}")
-    runtime = runner.validate_runtime_identity(runtime)
+    runner = bundle_runtime
     if runtime["transport"] != "usb-ncm":
         fail("This archive does not support the authenticated Linux endpoint")
-    if runtime["host_tools"] != {role: WINDOWS_TOOLS[role] for role in ("loader", "bridge")}:
+    if any(
+        runtime["host_tools"].get(role) != WINDOWS_TOOLS[role] for role in ("loader", "bridge")
+    ):
         fail("The RAM runner does not select this archive's native Windows tools")
-    adapter = runner.load_adapter(root / runner.ADAPTER_PATH)
+    adapter = runner.load_adapter(root / runner.adapter_path(runtime))
     adapter.runtime_target_display_name(runtime)
     adapter.adapter_config(runtime["adapter"])
-    ssh = runner.load_module(root / runner.SSH_HELPER_PATH, "ssh_transport")
-    identity = ssh.bundle_identity(root, runtime)
-    device_identity = ssh.build_manifest_device_identity(root)
+    ssh = ssh_transport
     try:
         windows = json.loads((root / "windows-host.json").read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
@@ -117,7 +105,7 @@ def validate_archive(root: Path) -> WindowsBundle:
         {role: root / relative for role, relative in WINDOWS_TOOLS.items()},
         adapter,
         ssh,
-        identity["bundle_generation"],
+        generation,
         device_identity,
     )
 
@@ -221,7 +209,7 @@ class WindowsHost:
 
     def ps(self, script: str, *arguments: str, timeout: float = 20) -> dict[str, Any]:
         """Run one packaged PowerShell file with literal arguments and JSON output."""
-        source = Path(__file__).resolve().parent / "windows" / script
+        source = Path(__file__).resolve().parents[3] / "common/windows" / script
         if not source.is_file():
             fail(f"Windows command file is missing: {source}")
         result = subprocess.run(
@@ -348,9 +336,9 @@ class WindowsHost:
             fail("Cannot protect the local session: " + result.stderr.strip()[-1000:])
         self.require_private(path)
 
-    def runtime_root(self, archive: Path, *, directory: Path | None = None) -> Path:
-        """Open this archive's private reconnect and temporary loading storage."""
-        root = directory or archive / "data/session"
+    def runtime_root(self, directory: Path) -> Path:
+        """Open the caller's private reconnect and temporary loading storage."""
+        root = directory
         if not root.exists():
             root.mkdir(parents=True)
             self.secure_new(root, directory=True)
@@ -394,17 +382,22 @@ class WindowsHost:
 
 
 def _write_session(host: WindowsHost, directory: Path, session: dict[str, Any]) -> None:
-    temporary = directory / "session.json.tmp"
+    temporary: Path | None = None
     try:
-        with temporary.open("x", encoding="utf-8") as stream:
+        with tempfile.NamedTemporaryFile(
+            dir=directory, prefix=".session.json.", mode="w", encoding="utf-8", delete=False
+        ) as stream:
+            temporary = Path(stream.name)
             json.dump(session, stream, sort_keys=True)
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
         host.secure_new(temporary)
         temporary.replace(directory / "session.json")
+        temporary = None
     finally:
-        temporary.unlink(missing_ok=True)
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _prepare_session(
@@ -412,9 +405,10 @@ def _prepare_session(
     bundle: WindowsBundle,
     *,
     events: Callable[[str], None] | None = None,
-    session_root: Path | None = None,
+    session_root: Path,
+    prepared_data_sha256: str | None = None,
 ) -> dict[str, Any]:
-    root = host.runtime_root(bundle.root, directory=session_root)
+    root = host.runtime_root(session_root)
     if events is not None:
         events("network-preparation")
     occupied = {
@@ -437,13 +431,17 @@ def _prepare_session(
     directory = root / serial
     directory.mkdir()
     try:
-        return _prepare_session_directory(
+        session = _prepare_session_directory(
             host, bundle, directory, network=network, session_id=session_id, events=events
         )
+        session["prepared_data_sha256"] = prepared_data_sha256
+        _write_session(host, directory, session)
     except BaseException:
         with suppress(OSError):
             shutil.rmtree(directory)
         raise
+    else:
+        return session
 
 
 def _prepare_session_directory(  # noqa: PLR0913 -- owned session inputs stay explicit.
@@ -506,7 +504,7 @@ def _prepare_session_directory(  # noqa: PLR0913 -- owned session inputs stay ex
     )
     host.secure_new(image)
     linux_usb = bundle.runtime["usb"]["linux_gadget"]
-    session = {
+    return {
         "target": bundle.runtime["target"],
         "session_id": session_id.hex(),
         "usb_serial": serial,
@@ -524,9 +522,8 @@ def _prepare_session_directory(  # noqa: PLR0913 -- owned session inputs stay ex
         "generation": bundle.generation,
         "device_identity": bundle.device_identity,
         "status": "prepared",
+        "prepared_data_sha256": None,
     }
-    _write_session(host, directory, session)
-    return session
 
 
 class WindowsTransport:
@@ -540,36 +537,18 @@ class WindowsTransport:
     def _ssh_arguments(
         self, session: dict[str, Any], command: str | None = None, *, connect_timeout: int = 5
     ) -> list[str]:
-        options = {
-            "BatchMode": "yes",
-            "IdentitiesOnly": "yes",
-            "IdentityAgent": "none",
-            "PasswordAuthentication": "no",
-            "KbdInteractiveAuthentication": "no",
-            "PreferredAuthentications": "publickey",
-            "NumberOfPasswordPrompts": "0",
-            "StrictHostKeyChecking": "yes",
-            "HostKeyAlgorithms": "ssh-ed25519",
-            "UserKnownHostsFile": str(session["known_hosts"]).replace("\\", "/"),
-            "GlobalKnownHostsFile": "NUL",
-            "HostKeyAlias": f"fplinux-{session['usb_serial']}",
-            "CheckHostIP": "no",
-            "ClearAllForwardings": "yes",
-            "ForwardAgent": "no",
-            "ForwardX11": "no",
-            "Tunnel": "no",
-            "PermitLocalCommand": "no",
-            "ProxyCommand": "none",
-            "ProxyJump": "none",
-            "BindAddress": session["host_address"],
-            "ConnectTimeout": str(connect_timeout),
-            "ConnectionAttempts": "1",
-            "ServerAliveInterval": "5",
-            "ServerAliveCountMax": "3",
-            "LogLevel": "ERROR",
-        }
+        options = [
+            *self.bundle.ssh.ssh_policy_options(
+                usb_serial=session["usb_serial"],
+                known_hosts=str(session["known_hosts"]).replace("\\", "/"),
+                host_address=session["host_address"],
+                connect_timeout=connect_timeout,
+            ),
+            ("HostKeyAlgorithms", "ssh-ed25519"),
+            ("GlobalKnownHostsFile", "NUL"),
+        ]
         argv = [str(self.bundle.tools["ssh"]), "-4", "-F", "NUL", "-i", session["private_key"]]
-        for name, value in options.items():
+        for name, value in options:
             rendered = self.bundle.ssh._ssh_config_value(value)  # noqa: SLF001 -- config quoting.
             if name in {"IdentityAgent", "ProxyCommand", "ProxyJump"}:
                 rendered = "none"
@@ -609,7 +588,7 @@ class WindowsTransport:
             creationflags=_console_creation_flags(),
         )
 
-    def open_shell(self, session: dict[str, Any]) -> int:
+    def run_shell(self, session: dict[str, Any]) -> int:
         """Keep SSH on the current terminal and reap it when the caller is cancelled."""
         self._require_bound(session)
         if not os.isatty(0):
@@ -773,8 +752,9 @@ class WindowsTransport:
                     continue
             except subprocess.TimeoutExpired:
                 continue
-            session["status"] = "ready"
-            _write_session(self.host, Path(session["directory"]), session)
+            if session["status"] != "ready":
+                session["status"] = "ready"
+                _write_session(self.host, Path(session["directory"]), session)
             return
         fail(
             "The exact USB RNDIS and authenticated SSH endpoint "
@@ -800,6 +780,7 @@ class WindowsTransport:
             "generation",
             "device_identity",
             "status",
+            "prepared_data_sha256",
         }
         if not isinstance(value, dict) or set(value) != required or value.get("status") != "ready":
             fail("Saved phone connection is not ready")
@@ -854,11 +835,17 @@ class WindowsTransport:
             self.host.require_private(path)
         return value
 
-    def load_live_session(self, target: str) -> dict[str, Any] | None:
+    def load_live_session(
+        self,
+        target: str,
+        *,
+        session_root: Path,
+        prepared_data_sha256: str | None = None,
+    ) -> dict[str, Any] | None:
         """Distinguish an absent saved phone from a present endpoint that cannot authenticate."""
         if target != self.bundle.runtime["target"]:
             fail("The requested connection belongs to another target")
-        root = self.host.runtime_root(self.bundle.root)
+        root = self.host.runtime_root(session_root)
         candidates: list[dict[str, Any]] = []
         for state_path in root.glob("*/session.json"):
             try:
@@ -886,6 +873,8 @@ class WindowsTransport:
         if not live:
             return None
         session = live[0]
+        if session["prepared_data_sha256"] != prepared_data_sha256:
+            fail("The running phone uses different prepared phone data; shut it down first")
         self.authenticate(
             session,
             timeout=self.bundle.runtime["usb"]["linux_gadget"]["wait_seconds"],
@@ -923,11 +912,19 @@ class WindowsTransport:
                 directory.rmdir()
 
 
-def load_live_session(root: Path, target: str) -> tuple[WindowsTransport, dict[str, Any]] | None:
-    """Admit the archive and reconnect, returning absence without suppressing setup failures."""
-    bundle = validate_archive(root)
+def load_live_session(
+    bundle: WindowsBundle,
+    *,
+    session_root: Path,
+    prepared_data_sha256: str | None = None,
+) -> tuple[WindowsTransport, dict[str, Any]] | None:
+    """Reconnect the admitted native bundle without repeating closure validation."""
     transport = WindowsTransport(WindowsHost(), bundle)
-    session = transport.load_live_session(target)
+    session = transport.load_live_session(
+        bundle.runtime["target"],
+        session_root=session_root,
+        prepared_data_sha256=prepared_data_sha256,
+    )
     return (transport, session) if session is not None else None
 
 
@@ -992,18 +989,19 @@ def _ensure_bootrom_driver(  # noqa: PLR0913 -- selected snapshot and driver set
     )
 
 
-def boot_archive(
-    root: Path,
+def boot_archive(  # noqa: PLR0913 -- native loading inputs have separate owners.
+    bundle: WindowsBundle,
     device_data: Path,
     *,
     events: Callable[[str], None] | None = None,
     log: Path | None = None,
-    session_root: Path | None = None,
+    session_root: Path,
+    prepared_data_sha256: str | None = None,
 ) -> tuple[WindowsTransport, dict[str, Any]]:
     """Boot one selected archive with its external data capsule and return authenticated SSH."""
     if events is not None:
         events("host-preparation")
-    bundle = validate_archive(root)
+    root = bundle.root
     if device_data.is_symlink() or not device_data.is_file():
         fail("The prepared device data capsule is missing")
     host = WindowsHost()
@@ -1019,7 +1017,13 @@ def boot_archive(
         timestamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
         log = root / "logs" / f"{timestamp}.{time.time_ns() % 1_000_000_000:09d}Z.log"
     log.parent.mkdir(parents=True, exist_ok=True)
-    session = _prepare_session(host, bundle, events=events, session_root=session_root)
+    session = _prepare_session(
+        host,
+        bundle,
+        events=events,
+        session_root=session_root,
+        prepared_data_sha256=prepared_data_sha256,
+    )
     directory = Path(session["directory"])
     image = Path(session["image"])
     ready = False
@@ -1057,23 +1061,14 @@ def boot_archive(
             events("ram-loader-complete")
         fdl.unlink()
         image.unlink()
-        maps = directory / "maps"
-        maps.mkdir()
-        host.secure_new(maps, directory=True)
-        shutil.copyfile(device_data, maps / "device-data.cpio")
-        host.secure_new(maps / "device-data.cpio")
-        for role in ("pinmap", "keymap"):
-            extracted = device_data.parent / f"{role}.bin"
-            canonical = bundle.runtime["assets"].get(role)
-            if extracted.is_file():
-                shutil.copyfile(extracted, maps / f"{role}.bin")
-            elif canonical is not None:
-                shutil.copyfile(root / canonical, maps / f"{role}.bin")
-            elif role == "pinmap":
-                (maps / "pinmap.bin").write_bytes(adapter.NEUTRAL_PINMAP)
-            mapped = maps / f"{role}.bin"
-            if mapped.is_file():
-                host.secure_new(mapped)
+        payload = directory / "payload"
+        payload.mkdir()
+        host.secure_new(payload, directory=True)
+        sources = adapter.loader_payload_sources(root, device_data=device_data)
+        for name, source in sources.items():
+            destination = payload / name
+            shutil.copyfile(source, destination)
+            host.secure_new(destination)
         print("Waiting for the authenticated Linux connection...", flush=True)
         if events is not None:
             events("linux-start")
@@ -1087,7 +1082,7 @@ def boot_archive(
                 config["session_name"],
             ],
             timeout=config["handoff_wait_seconds"],
-            cwd=maps,
+            cwd=payload,
             log=log,
         )
         deadline = time.monotonic() + config["usb_release_wait_seconds"]
@@ -1113,7 +1108,7 @@ def boot_archive(
         try:
             for temporary in (image, directory / "fdl1.bin"):
                 temporary.unlink(missing_ok=True)
-            for stage in (directory / "maps", directory / "driver"):
+            for stage in (directory / "payload", directory / "driver"):
                 if stage.exists():
                     shutil.rmtree(stage)
             if not ready:

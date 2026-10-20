@@ -4,8 +4,6 @@
 from __future__ import annotations
 
 import json
-import shutil
-import subprocess
 from typing import TYPE_CHECKING
 
 from fplinux_cli.build import inputs as inputs_build
@@ -17,21 +15,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
     from typing import Any
-
-
-def extract_7z_member(archive: Path, member: str) -> bytes:
-    """Extract exactly one declared 7z member without a shell."""
-    executable = shutil.which("7z") or shutil.which("7zz")
-    if executable is None:
-        fail("7z or 7zz is required")
-    result = subprocess.run(
-        [executable, "x", "-so", str(archive), member],
-        capture_output=True,
-        check=False,
-    )
-    if result.returncode:
-        fail(result.stderr.decode(errors="replace").strip())
-    return result.stdout
 
 
 def write_checked(data: bytes, destination: Path, expected: str) -> None:
@@ -57,8 +40,7 @@ def _asset_lock_bytes(sources: Sequence[dict[str, Any]]) -> bytes:
             lines.extend(("", "[[source.output]]"))
             lines.extend(
                 f"{field} = {json.dumps(output[field], ensure_ascii=False)}"
-                for field in ("role", "path", "member", "sha256")
-                if field in output
+                for field in ("role", "path", "sha256")
             )
     return ("\n".join(lines) + "\n").encode("utf-8")
 
@@ -77,11 +59,7 @@ def build_assets(
         )
         for item in source["output"]:
             expected = item["sha256"]
-            data = (
-                archive.read_bytes()
-                if source["kind"] == "file"
-                else extract_7z_member(archive, item["member"])
-            )
+            data = archive.read_bytes()
             destination = output / item["path"]
             write_checked(data, destination, expected)
             result[item["role"]] = (item["path"], expected)

@@ -8,10 +8,9 @@ import subprocess
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from fplinux_cli.runtime import windows_host
 
-from common import windows_host
-from common.windows_host import validate_archive
-from tests.windows_host_support import StubWindowsHost, archive_files
+from tests.windows_host_support import StubWindowsHost, admitted_windows, archive_files
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -56,7 +55,7 @@ class DriverHost(StubWindowsHost):
 
 def ensure_driver(host: DriverHost, root: Path, events: list[str]) -> None:
     """Exercise the production decision with a real validated temporary archive."""
-    bundle = validate_archive(archive_files(root))
+    bundle = admitted_windows(archive_files(root))
     directory = root / "private-session"
     directory.mkdir()
     windows_host._ensure_bootrom_driver(  # noqa: SLF001 -- selected host component boundary.
@@ -119,8 +118,8 @@ def test_success_status_without_winusb_binding_is_not_ready(
         nonlocal now
         now += delay
 
-    monkeypatch.setattr("common.windows_host.time.monotonic", lambda: now)
-    monkeypatch.setattr("common.windows_host.time.sleep", advance_clock)
+    monkeypatch.setattr("fplinux_cli.runtime.windows_host.time.monotonic", lambda: now)
+    monkeypatch.setattr("fplinux_cli.runtime.windows_host.time.sleep", advance_clock)
     events: list[str] = []
     with pytest.raises(SystemExit, match=r"WinUSB did not become ready.*restart Run[.]cmd"):
         ensure_driver(host, tmp_path, events)
@@ -210,7 +209,7 @@ def test_driver_license_checksum_is_required_before_windows_effects(tmp_path: Pa
     root = archive_files(tmp_path)
     (root / "licenses/windows-driver/License.rtf").write_bytes(b"replaced terms")
     with pytest.raises(SystemExit, match="Windows file checksum differs: licenses/windows-driver"):
-        validate_archive(root)
+        admitted_windows(root)
 
 
 @pytest.mark.parametrize("consent", [True, False])
@@ -262,15 +261,21 @@ def test_boot_invites_connection_then_requires_driver_before_loader(
         _bundle: windows_host.WindowsBundle,
         *,
         events: object = None,
-        session_root: Path | None = None,
+        session_root: Path,
+        prepared_data_sha256: str | None = None,
     ) -> dict[str, str]:
-        del events, session_root
+        del events, session_root, prepared_data_sha256
         return {"directory": str(directory), "image": str(image)}
 
     monkeypatch.setattr(windows_host, "_prepare_session", prepared_session)
     if consent:
         with pytest.raises(LoaderReachedError):
-            windows_host.boot_archive(root, capsule, events=events.append)
+            windows_host.boot_archive(
+                admitted_windows(root),
+                capsule,
+                session_root=root / "data/session",
+                events=events.append,
+            )
         assert host.effects[-1] == ("loader", str(root / "tools/spd_dump.exe"))
         assert events == [
             "host-preparation",
@@ -282,7 +287,12 @@ def test_boot_invites_connection_then_requires_driver_before_loader(
         ]
     else:
         with pytest.raises(SystemExit, match="setup was declined"):
-            windows_host.boot_archive(root, capsule, events=events.append)
+            windows_host.boot_archive(
+                admitted_windows(root),
+                capsule,
+                session_root=root / "data/session",
+                events=events.append,
+            )
         assert all(effect[0] != "loader" for effect in host.effects)
         assert events == ["host-preparation", "waiting-for-device", "device-found"]
     assert not image.exists()

@@ -10,9 +10,10 @@ from fplinux_cli.common import fail, load_toml
 from fplinux_cli.manifests.values import TARGET_NAME
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
-GLOBAL_PROFILES = ("default", "microsd-uboot")
+GLOBAL_PROFILES = ("default", "microsd-uboot", "microsd-root")
 
 
 def normalize_profile(profile: str | None) -> str | None:
@@ -20,7 +21,7 @@ def normalize_profile(profile: str | None) -> str | None:
     if profile is None or profile == "default":
         return None
     if profile not in GLOBAL_PROFILES:
-        fail(f"unknown profile: {profile}; choose default or microsd-uboot")
+        fail(f"unknown profile: {profile}; choose from {', '.join(GLOBAL_PROFILES)}")
     return profile
 
 
@@ -90,7 +91,7 @@ def profiles_directory(target: str | None = None) -> Path:
 
 
 def profile_directory(target: str, profile: str) -> Path:
-    """Return one of the two global profile directories."""
+    """Return one declared global profile directory."""
     normalize_profile(profile)
     path = profiles_directory(target) / profile
     if path.is_symlink() or not path.is_dir():
@@ -106,10 +107,18 @@ def profile_manifest_path(target: str, profile: str) -> Path:
     return path
 
 
-def discover_profiles(target: str) -> tuple[str, ...]:
-    """Expose both boot policies, or only the default one for a target without microSD inputs."""
-    for profile in GLOBAL_PROFILES:
-        profile_manifest_path(target, profile)
-    if "microsd" not in load_toml(target_directory(target) / "target.toml"):
+def declared_boot_profiles(target: Mapping[str, object]) -> tuple[str, ...]:
+    """Select current boot policies from the board's platform and microSD declaration."""
+    if "microsd" not in target:
         return ("default",)
-    return GLOBAL_PROFILES
+    if target.get("platform") == "sc9820e":
+        return ("default", "microsd-root")
+    return ("default", "microsd-uboot")
+
+
+def discover_profiles(target: str) -> tuple[str, ...]:
+    """Expose the policies supported by the selected board's boot integration."""
+    profiles = declared_boot_profiles(load_toml(target_directory(target) / "target.toml"))
+    for profile in profiles:
+        profile_manifest_path(target, profile)
+    return profiles

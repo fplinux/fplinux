@@ -5,11 +5,3 @@ sha256 = "062d5e1a298c0e378eeefcc67dddba6fd4d6be10a683511c849ec59c17fb7414"
 cache_name = "t117_fdl1.bin"
 license = "Unlicense"
 path = "t117_fdl1.bin"
-
-[maps]
-url = "https://github.com/ilyakurdyukov/fpdoom/releases/download/1.20251101/t117_maps.7z"
-sha256 = "9295f209f33ab688711ae4496a90d319ae2aef79420a2fd823d1beabd7f2ede1"
-cache_name = "t117_maps-20260814.7z"
-license = "NOASSERTION"
-pinmap_path = "pinmap.bin"
-keymap_path = "keymap.bin"

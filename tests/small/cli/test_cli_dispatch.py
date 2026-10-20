@@ -71,6 +71,29 @@ class CliCacheLockTests:
     """Keep lock-mode selection at the in-process command dispatcher."""
 
     @pytest.mark.parametrize(
+        ("options", "include_device_data"),
+        [([], True), (["--without-device-data"], False)],
+        ids=["ordinary-build", "without-device-data"],
+    )
+    def test_build_forwards_the_explicit_device_data_selection(
+        self, dispatch_root: Path, options: list[str], *, include_device_data: bool
+    ) -> None:
+        """The public build option reaches snapshot policy while the normal cache lock is held."""
+        events, build = run_dispatch(
+            dispatch_root,
+            ["build", "target", "--jobs", "1", *options],
+            "fplinux_cli.build.workflow.build",
+        )
+
+        assert events == [
+            ("lock", dispatch_root / ".cache", True, "build", "target", None),
+            "command",
+            "unlock",
+        ]
+        assert build.call_args.args == ("target", 1)
+        assert build.call_args.kwargs["include_device_data"] is include_device_data
+
+    @pytest.mark.parametrize(
         ("arguments", "callback_name", "exclusive", "target", "profile"),
         [
             (
@@ -144,21 +167,21 @@ class CliCacheLockTests:
             (
                 ["nand", "backup", "nokia-ta1618", "backup.bin"],
                 "fplinux_cli.cli.nand.backup_target_nand",
-                True,
+                False,
                 "nokia-ta1618",
                 None,
             ),
             (
                 ["nand", "backup", "nokia-ta1618", "backup.bin", "--profile", "microsd-uboot"],
                 "fplinux_cli.cli.nand.backup_target_nand",
-                True,
+                False,
                 "nokia-ta1618",
                 "microsd-uboot",
             ),
             (
                 ["nand", "identify", "nokia-ta1618"],
                 "fplinux_cli.cli.nand.identify_target_nand",
-                True,
+                False,
                 "nokia-ta1618",
                 None,
             ),
@@ -237,11 +260,32 @@ class CliCacheLockTests:
                 mock.call(
                     "nokia-ta1618",
                     from_dump=Path("saved-nand.bin"),
+                    from_originals=None,
                     events=None,
                     jobs=2,
                     offline=True,
                 )
             )
+
+    def test_named_originals_reach_prepare_under_the_exclusive_cache_lock(
+        self, dispatch_root: Path
+    ) -> None:
+        """The saved-original source stays an explicit path through the public dispatcher."""
+        events, callback = run_dispatch(
+            dispatch_root,
+            ["device-data", "prepare", "target", "--from-originals", "originals.json"],
+            "fplinux_cli.cli.device_data.prepare_device_data",
+        )
+
+        assert events == [
+            ("lock", dispatch_root / ".cache", True, "device-data", "target", None),
+            "command",
+            "unlock",
+        ]
+        assert callback.call_args.args == ("target",)
+        assert callback.call_args.kwargs["from_originals"] == Path("originals.json")
+        assert callback.call_args.kwargs["from_dump"] is None
+        assert callback.call_args.kwargs["events"] is None
 
     def test_format_forwards_only_the_explicit_paths(self, dispatch_root: Path) -> None:
         """Pass the ordered source selection through the exclusive command boundary."""
@@ -273,6 +317,18 @@ class CliCacheLockTests:
         )
         assert (callback.call_args.kwargs["events"]) == (Path("loader-events.jsonl"))
 
+    @pytest.mark.parametrize("trace_arguments", [[], ["--loader-trace"]], ids=["default", "trace"])
+    def test_run_enables_loader_trace_only_when_requested(
+        self, dispatch_root: Path, trace_arguments: list[str]
+    ) -> None:
+        """The public switch reaches the run backend without changing its default."""
+        _events, callback = run_dispatch(
+            dispatch_root,
+            ["run", "target", *trace_arguments],
+            "fplinux_cli.runtime.runner.run_target",
+        )
+        assert callback.call_args.kwargs.get("loader_trace", False) is bool(trace_arguments)
+
     def test_build_forwards_offline_to_the_dispatcher(self, dispatch_root: Path) -> None:
         """The parsed build switch reaches its callback without changing lock mode."""
         events, build = run_dispatch(
@@ -288,6 +344,48 @@ class CliCacheLockTests:
         )
         assert build.call_args.kwargs["offline"]
         assert not (build.call_args.kwargs["verbose"])
+
+    @pytest.mark.parametrize(
+        ("options", "expected"),
+        [
+            pytest.param([], 8192, id="default-eight-gib"),
+            pytest.param(["--memory-mib", "4096"], 4096, id="explicit-four-gib"),
+        ],
+    )
+    def test_build_forwards_the_memory_budget(
+        self, dispatch_root: Path, options: list[str], expected: int
+    ) -> None:
+        """The build callback receives the parsed memory budget in MiB."""
+        _events, build = run_dispatch(
+            dispatch_root,
+            ["build", "target", *options],
+            "fplinux_cli.build.workflow.build",
+        )
+
+        assert build.call_args.kwargs["memory_mib"] == expected
+
+    @pytest.mark.parametrize("value", ["0", "-1", "invalid"])
+    def test_build_rejects_invalid_memory_before_locking(
+        self, dispatch_root: Path, value: str
+    ) -> None:
+        """An invalid memory budget cannot create cache state or start a build."""
+        with (
+            mock.patch.object(sys, "argv", ["fplinux", "build", "target", "--memory-mib", value]),
+            mock.patch.object(lifecycle, "ROOT", dispatch_root),
+            mock.patch.object(cli, "discover_targets", return_value=("target",)),
+            mock.patch.object(
+                lifecycle,
+                "cache_lock",
+                side_effect=AssertionError("invalid arguments must not lock"),
+            ) as lock,
+            contextlib.redirect_stderr(io.StringIO()),
+            pytest.raises(SystemExit) as stopped,
+        ):
+            cli.main()
+
+        assert stopped.value.code == 2
+        lock.assert_not_called()
+        assert not (dispatch_root / ".cache").exists()
 
     @pytest.mark.parametrize(
         ("arguments", "callback_name"),
@@ -441,9 +539,18 @@ class CliCacheLockTests:
             (["check"], [], False, 3),
             (["check", "kernel"], ["kernel"], False, 3),
             (["check", "docs"], ["docs"], False, 1),
+            (["check", "tests"], ["tests"], False, 1),
+            (["check", "python", "tests"], ["python", "tests"], False, 1),
             (["check", "--verbose"], [], True, 1),
         ],
-        ids=["check", "check-kernel", "check-docs", "check---verbose"],
+        ids=[
+            "check",
+            "check-kernel",
+            "check-docs",
+            "check-tests",
+            "check-python-tests",
+            "check---verbose",
+        ],
     )
     def test_check_defaults_match_the_selected_execution_boundary(
         self,
