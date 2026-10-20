@@ -15,6 +15,8 @@ from fplinux_cli.build import probe
 from fplinux_cli.environment import kern
 from fplinux_cli.reporting import run as output
 from fplinux_cli.reporting.run import RunReporter, Stage
+from fplinux_cli.workspace import build_inputs as workspace_inputs
+from fplinux_cli.workspace import staging as workspace_staging
 
 from tests import ROOT
 from tests.process import run_process
@@ -50,9 +52,13 @@ class ProbeHeaderTests:
 
             def preprocess_instead_of_kern(command: Sequence[str], **_kwargs: object) -> None:
                 """Translate the container paths and run its compiler in preprocess-only mode."""
+                mount = next(
+                    argument for argument in command if argument.endswith(":/workspace:ro")
+                )
+                workspace = Path(mount.removesuffix(":/workspace:ro"))
                 compiler = list(command[command.index("--") + 1 :])
                 compiler = [
-                    argument.replace("/workspace/", f"{root}/")
+                    argument.replace("/workspace/", f"{workspace}/")
                     .replace("/output/", f"{destination.parent}/")
                     .replace("=/sysroot", f"={sysroot}")
                     for argument in compiler
@@ -68,6 +74,8 @@ class ProbeHeaderTests:
                 mock.patch.object(common, "ROOT", root),
                 mock.patch.object(output, "ROOT", root),
                 mock.patch.object(kern, "ROOT", root),
+                mock.patch.object(workspace_inputs, "ROOT", root),
+                mock.patch.object(workspace_staging, "ROOT", root),
                 mock.patch.object(Stage, "run", side_effect=preprocess_instead_of_kern),
             ):
                 source.write_text(

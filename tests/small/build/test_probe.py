@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Probe output publication with an explicit compiler-process stub."""
+"""Probe input isolation and publication with an explicit compiler-process stub."""
 
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ from fplinux_cli.build import probe
 from fplinux_cli.environment import kern
 from fplinux_cli.reporting import run as output
 from fplinux_cli.reporting.run import RunReporter, Stage
+from fplinux_cli.workspace import build_inputs as workspace_inputs
+from fplinux_cli.workspace import staging as workspace_staging
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -68,19 +70,72 @@ class ProbePublicationTests:
         "succeeds",
         [pytest.param(False, id="compiler-failure"), pytest.param(True, id="compiler-success")],
     )
-    def test_output_is_replaced_only_after_compilation_succeeds(*, succeeds: bool) -> None:
-        """Partial compiler output must never replace an existing useful executable."""
+    @pytest.mark.parametrize(
+        ("source_name", "source_contents"),
+        [
+            pytest.param(
+                "tools/probes/probe.c",
+                b'#include "../../include/fplinux/probe.h"\n#include "local.h"\nint probe;\n',
+                id="ordinary",
+            ),
+            pytest.param(
+                ".cache/tools/probe.c",
+                b'#include "../../include/fplinux/probe.h"\nint probe;\n',
+                id="ignored",
+            ),
+        ],
+    )
+    def test_compilation_uses_staged_inputs_and_publishes_only_on_success(
+        source_name: str, source_contents: bytes, *, succeeds: bool
+    ) -> None:
+        """Compile isolated source bytes, retaining an earlier output on compiler failure."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            source = root / "probe.c"
-            source.write_text("int main(void) { return 0; }\n")
+            source = root / source_name
+            source.parent.mkdir(parents=True)
+            source.write_bytes(source_contents)
+            header = root / "include/fplinux/probe.h"
+            header.parent.mkdir(parents=True)
+            header.write_bytes(b'#include "probe-detail.h"\n#define VALUE 0\n')
+            (header.parent / "probe-detail.h").write_bytes(b"#define DETAIL 1\n")
+            sibling = source.with_name("local.h")
+            sibling.write_bytes(b"#define LOCAL 2\n")
+            registry = root / ".cache/kern/registry"
+            registry.parent.mkdir(parents=True)
+            registry.write_bytes(b"private runtime state")
             destination = root / ".cache/tools/probe"
-            destination.parent.mkdir(parents=True)
+            destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(b"previous executable")
             destination.chmod(0o751)
+            staged_workspaces: list[Path] = []
 
             def compiler_stub(command: Sequence[str], **_kwargs: object) -> None:
-                """Write the requested temporary output before reporting compiler status."""
+                """Observe the mounted inputs before returning controlled compiler output."""
+                mount = next(
+                    argument for argument in command if argument.endswith(":/workspace:ro")
+                )
+                workspace = Path(mount.removesuffix(":/workspace:ro"))
+                staged_workspaces.append(workspace)
+                assert not registry.is_relative_to(workspace)
+                source.write_bytes(b"changed checkout source\n")
+                header.write_bytes(b"changed checkout header\n")
+                sibling.write_bytes(b"changed checkout sibling\n")
+                assert (workspace / source_name).read_bytes() == source_contents
+                assert (workspace / "include/fplinux/probe.h").read_bytes() == (
+                    b'#include "probe-detail.h"\n#define VALUE 0\n'
+                )
+                assert (workspace / "include/fplinux/probe-detail.h").read_bytes() == (
+                    b"#define DETAIL 1\n"
+                )
+                if source_name.startswith(".cache/"):
+                    assert not (workspace / sibling.relative_to(root)).exists()
+                else:
+                    assert (workspace / sibling.relative_to(root)).read_bytes() == (
+                        b"#define LOCAL 2\n"
+                    )
+                assert not (workspace / ".cache/kern").exists()
+                assert not (workspace / ".cache/tools/probe").exists()
+                assert f"/workspace/{source_name}" in command
                 requested = Path(command[command.index("-o") + 1])
                 (destination.parent / requested.name).write_bytes(b"new executable")
                 if not succeeds:
@@ -90,6 +145,8 @@ class ProbePublicationTests:
                 mock.patch.object(common, "ROOT", root),
                 mock.patch.object(output, "ROOT", root),
                 mock.patch.object(kern, "ROOT", root),
+                mock.patch.object(workspace_inputs, "ROOT", root),
+                mock.patch.object(workspace_staging, "ROOT", root),
                 mock.patch.object(Stage, "run", side_effect=compiler_stub),
             ):
                 reporter = RunReporter.create("probe-build", target=None, verbose=False)
@@ -113,4 +170,11 @@ class ProbePublicationTests:
                         compile_probe(reporter)
                     assert destination.read_bytes() == b"previous executable"
                     assert destination.stat().st_mode & 0o777 == 0o751
-                assert list(destination.parent.iterdir()) == [destination]
+                assert staged_workspaces
+                assert all(not workspace.exists() for workspace in staged_workspaces)
+                assert sorted(path.name for path in destination.parent.iterdir()) == (
+                    ["local.h", "probe", "probe.c"]
+                    if source_name.startswith(".cache/")
+                    else ["probe"]
+                )
+                assert registry.read_bytes() == b"private runtime state"

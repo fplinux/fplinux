@@ -19,6 +19,9 @@ from fplinux_cli.environment import definition
 from fplinux_cli.environment import kern as environment_kern
 from fplinux_cli.environment import runtime as environment_runtime
 from fplinux_cli.reporting.run import RunReporter
+from fplinux_cli.workspace import build_inputs as workspace_inputs
+from fplinux_cli.workspace import capture as workspace_capture
+from fplinux_cli.workspace import staging as workspace_staging
 
 if TYPE_CHECKING:
     from fplinux_cli.environment.state import EnvironmentState
@@ -186,9 +189,18 @@ def _compile_probe(  # noqa: PLR0913 -- explicit compiler inputs and reporting b
     rootfs: Path,
     reporter: RunReporter,
 ) -> None:
-    output.parent.mkdir(parents=True, exist_ok=True)
+    source_relative = source.relative_to(common.ROOT)
+    source_files = {source_relative.as_posix(): source}
+    workspace_inputs.add_source_path(source_files, common.ROOT / "include")
+    if source_relative.parts[0] != ".cache":
+        for header in sorted(source.parent.glob("*.h")):
+            if header.is_file():
+                workspace_inputs.add_source_path(source_files, header)
+    snapshot = workspace_capture.workspace_snapshot(list(source_files.items()))
+    workspace = workspace_staging.stage_workspace_snapshot(snapshot)
     temporary: Path | None = None
     try:
+        output.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
             dir=output.parent, prefix=f".{output.name}.", delete=False
         ) as stream:
@@ -208,7 +220,7 @@ def _compile_probe(  # noqa: PLR0913 -- explicit compiler inputs and reporting b
             "-I/workspace/include/fplinux",
             "-o",
             f"/output/{temporary.name}",
-            f"/workspace/{source.relative_to(common.ROOT).as_posix()}",
+            f"/workspace/{source_relative.as_posix()}",
         ]
         with reporter.stage("compile") as stage:
             stage.run(
@@ -217,7 +229,7 @@ def _compile_probe(  # noqa: PLR0913 -- explicit compiler inputs and reporting b
                     rootfs,
                     command,
                     volumes=[
-                        (common.ROOT, "/workspace:ro"),
+                        (workspace, "/workspace:ro"),
                         (sysroot, "/sysroot:ro"),
                         (output.parent, "/output"),
                     ],
@@ -230,8 +242,11 @@ def _compile_probe(  # noqa: PLR0913 -- explicit compiler inputs and reporting b
         temporary.replace(output)
         temporary = None
     finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+        try:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        finally:
+            workspace_staging.discard_staged_workspace_snapshot(snapshot, workspace)
 
 
 def build_probe(source: str, *, output: str) -> None:
