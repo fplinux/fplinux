@@ -49,6 +49,8 @@ build() {
 	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
 	export CFLAGS="$CFLAGS -std=gnu17 -DSYS_BASHRC='\"/etc/bash/bashrc\"'"
 	export CFLAGS_FOR_BUILD="-Os -std=gnu17"
+	# musl supports allocating getcwd; configure cannot run its cross-build probe.
+	export bash_cv_getcwd_malloc=yes
 	./configure \
 		--build="$CBUILD" \
 		--host="$CHOST" \
