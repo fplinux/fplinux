@@ -5,7 +5,7 @@ description: Linux interfaces that FPLinux provides to phone applications for au
 
 import FeatureStatus from '../../../components/FeatureStatus.astro';
 
-This page lists the standard Linux interfaces that FPLinux provides on the phone and the names and units an application needs to use them. Everyday use of the same hardware is described under [Features](/fplinux/features/), for example in [Sound and recording](/fplinux/use/audio/). Check the [phone catalog](/fplinux/phones/#support-status) and your phone's page for available hardware, verified uses and limitations. An interface can exist without its physical function being verified.
+This page lists the standard Linux interfaces that FPLinux provides on [UMS9117](/fplinux/platforms/ums9117/) and [SC9820E](/fplinux/platforms/sc9820e/) phones, with their platform scope, names and units. Everyday use of the same hardware is described under [Features](/fplinux/features/), for example in [Sound and recording](/fplinux/use/audio/). Check the [phone catalog](/fplinux/phones/#support-status) and your phone's page for available hardware, verified uses and limitations. An interface can exist without its physical function being verified.
 
 Device numbers such as `eventN`, `videoN`, `thermal_zoneN` and `iio:deviceN` are assigned at boot. Find a device by the name or path given here, never by its number.
 
@@ -13,7 +13,9 @@ Keypad, keyboard and mouse input is described in [Input](/fplinux/develop/input/
 
 ## Audio
 
-When audio is available, ALSA card `0` has the card and PCM name `UMS9117 Headphones`. The image includes `aplay`, `arecord` and `amixer`.
+### UMS9117 audio
+
+On UMS9117 targets with audio, ALSA card `0` has the card and PCM name `UMS9117 Headphones`. The image includes `aplay`, `arecord` and `amixer`.
 
 | PCM | Direction | Format |
 | --- | --- | --- |
@@ -43,7 +45,7 @@ The speaker plays the sum of both channels, so PCM is scaled down whenever the s
 
 With idle silence on, stream starts and stops are silent and the outputs are not reopened between files. Keeping the outputs active uses extra idle power. With it off, each stream start and stop clicks on the speaker, and changing the `hw:0,0` rate can produce one audible transition. The switch does not affect a stream that is already playing.
 
-### Jack detection
+#### Jack detection
 
 The read-only card control `Headphone Jack` is `on` while a plug is in the 3.5 mm socket. It is a card control, not a mixer control, so `amixer sget` does not show it:
 
@@ -54,6 +56,20 @@ amixer -c 0 cget iface=CARD,name='Headphone Jack'
 The input device `UMS9117 Headphones Headphone` reports the same state as `SW_HEADPHONE_INSERT` once the plug has settled. The state cannot tell headphones from a headset or another cable, and it does not change `Capture Source`. Plug changes during sleep are reported after wake.
 
 Where included and supported, the `fplinux-jack` service starts at boot and sets the two output switches when the plug changes: headphones on and speaker off on insertion, the reverse on removal, always enabling the new output first. It changes nothing between plug events, so a manual setting lasts until the next change. Without device data there is no speaker switch, and the service leaves the outputs alone.
+
+<span id="sc9820e-capture" />
+
+### SC9820E audio
+
+The Xiaomi Qin 1s+ exposes ALSA card `0` and PCM `hw:0,0` named `SC9820E PCM`. The image includes `aplay`, `arecord` and `amixer`.
+
+| PCM | Direction | Format |
+| --- | --- | --- |
+| `default` | Playback | Input converted to stereo S16_LE at 48 kHz on `hw:0,0` |
+| `hw:0,0` | Playback | Stereo S16_LE at 48 kHz, mixed into the single rear speaker |
+| `hw:0,0` | Capture | Mono S16_LE at 48 kHz from the built-in microphone |
+
+Playback and capture are mutually exclusive: close one PCM handle before opening the other, including stopped streams. `Master Playback Volume` accepts one integer from `0` to `7`, defaults to `1` at boot and mutes at `0`. It can change during playback. There are no output-selection, capture-source or automatic-routing controls. Use the shared [playback and recording commands](/fplinux/use/audio/); the [phone page](/fplinux/phones/xiaomi-qin-1s-plus/#audio) states the verified uses and physical limits.
 
 ## Vibration
 
@@ -80,7 +96,7 @@ An accepted effect alone does not show that the phone physically vibrates.
 
 <FeatureStatus feature="camera" />
 
-FPLinux provides a V4L2 capture interface but no camera application. Check your phone's page for capture support, profile restrictions and usable modes. The device is a `/dev/videoN` node whose driver name is `ums9117-dcam`; other video nodes belong to the image codecs. Identify it with `VIDIOC_QUERYCAP` and discover formats and sizes with `VIDIOC_ENUM_FMT` and `VIDIOC_ENUM_FRAMESIZES`.
+The UMS9117 platform provides a V4L2 capture interface but no camera application. Camera capture is unsupported on the SC9820E Xiaomi Qin 1s+. Check your phone's page for capture support, profile restrictions and usable modes. The device is a `/dev/videoN` node whose driver name is `ums9117-dcam`; other video nodes belong to the image codecs. Identify it with `VIDIOC_QUERYCAP` and discover formats and sizes with `VIDIOC_ENUM_FMT` and `VIDIOC_ENUM_FRAMESIZES`.
 
 The capture interface delivers single-planar, uncompressed YUV 4:2:2 NV16 through MMAP buffers. A frame contains `width × height` Y bytes followed by the same number of interleaved Cb,Cr bytes; `bytesperline` is the width and `sizeimage` is `2 × width × height`. Use the returned color metadata and the monotonic frame timestamps.
 
@@ -96,13 +112,15 @@ Resource rules:
 
 ## FM radio
 
-When FM radio is available, its V4L2 device is `/dev/radio0`. It tunes the receiver only: FM audio goes directly to the audio outputs, and `/dev/radio0` provides no samples. `fplinux-fm` uses this device together with `FM Playback Switch`.
+On supported UMS9117 phones, the FM V4L2 device is `/dev/radio0`. FM radio is unsupported on the SC9820E Xiaomi Qin 1s+. The device tunes the receiver only: FM audio goes directly to the audio outputs, and `/dev/radio0` provides no samples. `fplinux-fm` uses this device together with `FM Playback Switch`.
 
 From the first tune until `/dev/radio0` is closed, sleep requests fail. If a tuner operation times out, stop using FM and cold-boot the phone before trying again; sleep requests keep failing until then.
 
 ## Power supply, temperature and ADC
 
-When the corresponding device is present, it exposes these readings:
+### UMS9117 readings
+
+On UMS9117 phones, the corresponding devices expose these readings when present:
 
 | Value | Location | Unit and meaning |
 | --- | --- | --- |
@@ -117,6 +135,12 @@ The battery device has the `type` value `Battery`. The charge counter has no emp
 The IIO device `sc2720-auxadc`, when present, exposes raw codes on channels 0, 1, 2, 4 and 14 without conversion; the signals connected to them are not identified.
 
 Find it under `/sys/bus/iio/devices/` by its `name`, then read `in_voltage0_raw`, `in_voltage1_raw`, `in_voltage2_raw`, `in_voltage4_raw` or `in_voltage14_raw`. There is no scale or processed physical-unit reading.
+
+### SC9820E readings
+
+On Xiaomi Qin 1s+, the thermal zone whose `type` is `board-thermal` exposes board thermistor temperature through `temp` in m°C. This is not a CPU temperature sensor and provides no automatic CPU thermal protection. Use the shared [temperature-reading procedure](/fplinux/use/cpu-and-temperature/#temperature).
+
+The calibrated ADC supports board-sensor and supply-voltage readings within the [phone-page limits](/fplinux/phones/xiaomi-qin-1s-plus/#storage-and-power). Absolute accuracy, battery telemetry and charging are not verified. Inputs requiring the unavailable switchable USB reference supply return an unsupported-operation error. The UMS9117 `sc2720-*` power-supply and raw-ADC interfaces above do not apply to this phone.
 
 ## Display backlight
 
@@ -133,9 +157,11 @@ For diagnostics, the standard backlight class device under `/sys/class/backlight
 
 ## Keypad light
 
-When available, the keypad light is the LED class device `/sys/class/leds/:kbd_backlight`. It is binary: `brightness` accepts `0` and `1`. Its default trigger `input-events` lights it during input activity. The trigger commands are shown in [Screen, keypad light and vibration](/fplinux/use/display-and-lights/).
+When available, the keypad light is the LED class device `/sys/class/leds/:kbd_backlight`. Read `max_brightness` for its range: `0` switches the light off, and nonzero levels select brightness. Most phones expose binary control; the [phone pages](/fplinux/phones/) list other ranges. The default trigger `input-events`, when supported, lights it during input activity. The trigger commands are shown in [Screen, keypad light and vibration](/fplinux/use/display-and-lights/).
 
 ## Hardware JPEG and scaler
+
+This interface applies to UMS9117. It is unavailable on SC9820E; the presence of a JPEG engine there is unknown.
 
 The `ums9117-jpeg` driver exposes separate V4L2 mem2mem multiplanar streaming nodes for decoding, encoding, and fixed raw scaling. The supplied application discovers the node with the matching card identity.
 
@@ -155,6 +181,8 @@ The supplied application performs negotiation, raw-plane packing, and decoder cr
 
 ## Hardware rotation
 
+This interface applies to UMS9117. It is unavailable on SC9820E; the presence of a rotation engine there is unknown.
+
 ROTA exposes V4L2 mem2mem OUTPUT/CAPTURE multiplanar queues, with MMAP and DMA-BUF buffers. The [image-rotation application](/fplinux/apps/image-tools/rotate/) handles device discovery and negotiation. Other V4L2 consumers may use independent source-plane strides, each a multiple of four bytes. Capture rows are packed.
 
 Supported controls are rotation by 90, 180 or 270 degrees, or horizontal mirroring with rotation set to zero. Set rotation and HFLIP together when switching between these modes. Vertical mirroring and rotation-plus-flip combinations are not supported.
@@ -167,12 +195,22 @@ Queues support repeated jobs, multiple contexts, STREAMOFF and closing with unfi
 
 ## DRM display
 
+The standard [graphical session](/fplinux/use/session/) owns DRM and presents Wayland client surfaces. A graphical application uses Wayland rather than acquiring DRM master. Stop the session before running a direct-display tool; its low-level contract follows.
+
+Use the geometry, supported formats and framebuffer pitch reported by DRM. The [phone page](/fplinux/phones/) states its native size and visible display results.
+
+### SC9820E transfers
+
+The Xiaomi Qin 1s+ uses the shared DRM MIPI DBI driver with RGB565 buffers. Display-frame writes use SPI TX DMA, while short commands use PIO. Native NV16 display conversion is not verified; use [`fplinux-present --mode cpu-rgb565`](/fplinux/apps/image-tools/present/) for NV16 input within the phone's verified image limits. See [GPU rendering](/fplinux/platforms/sc9820e/#gpu-rendering) and [application renderer selection](/fplinux/apps/#choose-a-renderer) for the separate rendering path.
+
+### UMS9117 transfers
+
 RGB565 framebuffers contain the complete native image with two bytes per pixel and a tight native-width row stride. Atomic clients can provide `FB_DAMAGE_CLIPS` in framebuffer coordinates. The driver merges the visible clips into one bounding rectangle and expands its horizontal edges outward to even pixel boundaries for the controller's four-byte source alignment. Pixels included by that expansion come from the complete framebuffer.
 
 Each transfer sets the panel's address window. A commit without damage clips, the first frame after display enable and the first frame after wake transfer the complete image. A commit whose supplied clips do not intersect the visible image completes without a pixel transfer. Changing framebuffer objects does not remove the client's obligation to supply a complete image and damage relative to the preceding displayed frame.
 
 Where native NV16 presentation is available, its updates transfer the complete image. The KMS plane requires native geometry; scaling and rotation are not supported.
 
-### Completion
+#### Completion
 
 The page-flip event and output fence complete after the controller finishes the transfer, or after the bounded error path stops it. A failed transfer reports an error through the output fence and leaves the backlight off. Completion allows buffer ownership to advance; it does not report the panel's scan phase or guarantee an optical presentation timestamp. The driver does not expose a periodic hardware vblank counter.

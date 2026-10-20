@@ -21,7 +21,7 @@ Start the phone first, as described in [Run FPLinux](/fplinux/start/run/) or, fo
 
 The phone appears on your computer as a small USB Ethernet device. Your computer receives its address automatically; do not set addresses by hand or reuse an address from an earlier run. The link carries the shell, file copies and the keyboard bridge described below.
 
-It is not an Internet connection. The phone gets no gateway or DNS over USB and does not forward traffic for your computer. To give the phone Internet access, use a [Bluetooth PAN connection](/fplinux/use/bluetooth/).
+It is not an Internet connection. The phone gets no gateway or DNS over USB and does not forward traffic for your computer. Supported UMS9117 phones can use a [Bluetooth PAN connection](/fplinux/use/bluetooth/) for Internet access. Bluetooth is unsupported on the SC9820E Xiaomi Qin 1s+.
 
 The phone is always the USB device on this cable. It cannot act as a USB host, so USB keyboards, drives and other peripherals cannot be plugged into the phone.
 
@@ -40,7 +40,7 @@ The phone is always the USB device on this cable. It cannot act as a USB host, s
     <TabItem label="Linux runner archive">
 
 ```sh title="PC"
-./runner/run.py --reconnect
+python3.14 -I fplinux.py run --reconnect
 ```
 
     </TabItem>
@@ -51,7 +51,7 @@ You get a root shell. It is authenticated with a key created for the current ses
 
 :::note[Match the running build]
 
-Use the target, profile and build type that started the phone. For a microSD system card, add `--profile microsd-uboot` to every `./fplinux console` and `./fplinux verify` command. For a debug build, also add `--build-type debug`. The defaults select the release RAM build; a command for a different build refuses the session.
+Use the target, profile and build type that started the phone. For a microSD system card, pass the selected `--profile` to every `./fplinux console` and `./fplinux verify` command; see [system-card profiles](/fplinux/guides/microsd-system-card/). For a debug build, also add `--build-type debug`. The defaults select the release RAM build; a command for a different build refuses the session.
 
 :::
 
@@ -78,7 +78,7 @@ Use `--exec` when you do not need an interactive shell. The command runs on the 
     <TabItem label="Linux runner archive">
 
 ```sh title="PC"
-./runner/run.py --reconnect --exec 'uname -r'
+python3.14 -I fplinux.py run --reconnect --exec 'uname -r'
 ```
 
     </TabItem>
@@ -105,8 +105,8 @@ Upload a file from your computer to the phone, or pull one from the phone:
     <TabItem label="Linux runner archive">
 
 ```sh title="PC"
-./runner/run.py --reconnect --upload ./song.wav /tmp/song.wav
-./runner/run.py --reconnect --pull /tmp/recording.wav ./recording.wav
+python3.14 -I fplinux.py run --reconnect --upload ./song.wav /tmp/song.wav
+python3.14 -I fplinux.py run --reconnect --pull /tmp/recording.wav ./recording.wav
 ```
 
     </TabItem>
@@ -131,9 +131,9 @@ Limits:
 
 <FeatureStatus feature="host-keyboard-bridge" />
 
-Use the bridge only where your phone checklist lists support for the current profile.
+The bridge is available on supported [UMS9117](/fplinux/platforms/ums9117/) phones; use it only where your phone checklist lists support for the current profile. The [SC9820E Xiaomi Qin 1s+](/fplinux/platforms/sc9820e/) uses SSH for PC command input and does not support this bridge.
 
-The keyboard bridge forwards one keyboard from your computer to the phone. On the phone it behaves like any other keyboard: it types into the [phone terminal](/fplinux/use/terminal/) and into applications such as [TyrQuake](/fplinux/apps/tyrquake/).
+The keyboard bridge forwards one keyboard from your computer to the phone. On the phone it behaves like any other keyboard: it controls the [graphical interface](/fplinux/use/session/) and types into its text fields, or into direct-display applications such as [TyrQuake](/fplinux/apps/tyrquake/) when the graphical session is stopped.
 
 :::caution[The forwarded keyboard is captured]
 
@@ -169,7 +169,7 @@ The bridge can run alongside a shell, a single command or a file copy. If the ca
 From a source checkout, a ready session also has an OpenSSH configuration that works only for that session:
 
 ```sh title="PC"
-ssh -F "$XDG_RUNTIME_DIR/fplinux/current/<target>.ssh-config" fplinux
+ssh -F ".cache/device-data/<target>/session/current/<target>.ssh-config" fplinux
 ```
 
-It pins the keys of the current session. Do not copy it to a later session or use it as a general phone login. The `./fplinux console` and `./runner/run.py --reconnect` commands remain the supported way to reconnect, because they also check that the target and running image still match.
+It pins the keys of the current session. Do not copy it to a later session or use it as a general phone login. The `./fplinux console` and `python3.14 -I fplinux.py run --reconnect` commands remain the supported way to reconnect, because they also check that the target and running image still match.

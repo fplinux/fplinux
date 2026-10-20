@@ -16,7 +16,7 @@ FPLinux is built from source on your PC. One command builds a complete image for
 
 Check the phone's [support status](/fplinux/phones/#support-status), boot key and storage limits before building. The examples below use `nokia-ta1618`; replace it with your phone's target.
 
-FPLinux brings its own pinned build environment and keeps it inside the checkout. You do not need Docker, Podman or another container engine.
+FPLinux keeps one prepared Alpine root filesystem inside the checkout and runs it with its pinned Kern runtime. Builds, source checks and formatting use this filesystem read-only, with writable files kept in their own working directories.
 
 ## Build your first image
 
@@ -36,7 +36,7 @@ FPLinux brings its own pinned build environment and keeps it inside the checkout
    ./fplinux doctor
    ```
 
-   `setup` downloads and prepares the pinned build environment. `doctor` reports anything on the host that prevents a build.
+   `setup` downloads and prepares the pinned build environment. If its inputs change, it prepares and validates a complete replacement before switching to it and removing the previous environment. Changes to phone sources reuse the existing environment. `doctor` reports anything on the host that prevents a build.
 
 3. Build the image for your phone:
 
@@ -56,15 +56,19 @@ FPLinux brings its own pinned build environment and keeps it inside the checkout
 
 Builds use up to eight CPUs and run at a lower scheduling priority, so the desktop stays usable. Add `--jobs N` to change the number of parallel compilation jobs, or `--verbose` to watch the complete tool output. Run `./fplinux build --help` for all options.
 
-Each build container starts with a 2 GiB memory budget. Build processes use nice level 10, preserving an already lower scheduling priority.
+Each build has an 8 GiB memory limit. Add `--memory-mib N` to set a positive limit in MiB, for example `--memory-mib 4096` for 4 GiB on a host with less available RAM. Build processes use nice level 10, preserving an already lower scheduling priority.
 
-Where supported, Bluetooth, FM radio, the speaker and tuned audio levels need data from your own phone. A build without that data still succeeds; prepare it later with [Device data](/fplinux/guides/device-data/) and build again.
+Where supported, Bluetooth, FM radio, the speaker and tuned audio levels need data from your own phone. UMS9117 RAM builds keep this data separate from the kernel and root filesystem: the first `run` prepares it, and the next `run` loads it without rebuilding. For a microSD system card or Qin's optional original-file import, prepare the data before building the image; see [Device data](/fplinux/guides/device-data/).
+
+Add `--without-device-data` to build without prepared personal data while keeping it in your local cache. A later build without this option includes the prepared data again. Use this option when building a Qin image for an autonomous archive; see [Packaging](/fplinux/develop/packaging/#create-an-autonomous-ram-archive).
+
+The [Xiaomi Qin 1s+](/fplinux/phones/xiaomi-qin-1s-plus/) build also compiles its RAM-loading stages and includes them in the bundle. Use `xiaomi-qin-1s-plus` with the same `build`, `run`, `console` and `verify` commands; no separate loader files or phone backup are needed to start it. Its standalone archives run on Linux x86-64.
 
 ## Choose a build
 
 Two choices change what you build:
 
-- **Boot mode.** The default build runs entirely from RAM and leaves nothing behind after power-off. `--profile microsd-uboot` builds a system that keeps its files on a microSD card; see [microSD system card](/fplinux/guides/microsd-system-card/). It is available only for targets that declare microSD boot support; check your phone's [support status](/fplinux/phones/#support-status) before selecting it.
+- **Boot mode.** The default build runs entirely from RAM and leaves nothing behind after power-off. Supported UMS9117 targets use `--profile microsd-uboot` for a microSD system card; the Xiaomi Qin 1s+ implementation uses `--profile microsd-root`, which loads Linux over USB and uses the card for the system root. Both require the PC at every start. See [microSD system card](/fplinux/guides/microsd-system-card/) for profile selection and the shared procedure, and check your phone's [support status](/fplinux/phones/#support-status) before selecting a profile.
 - **Build type.** `release` is the default. `--build-type debug` adds kernel diagnostics; see [Debugging](/fplinux/develop/debugging/).
 
 Use the same profile and build type in every command for that build. If you built with options, pass the same options to `run`, `console`, `verify`, `package` and `inspect`:
@@ -118,7 +122,13 @@ See [Debugging](/fplinux/develop/debugging/) for more ways to read logs.
 
 ### The host runs out of memory
 
-Limit parallel compilation:
+A build can reach its memory budget while the host still has free memory. In that case, increase the budget with `--memory-mib N`, choosing a value that fits the host's available RAM. For example:
+
+```sh title="PC"
+./fplinux build nokia-ta1618 --memory-mib 4096
+```
+
+If the host itself runs out of memory, limit parallel compilation:
 
 ```sh title="PC"
 ./fplinux build nokia-ta1618 --jobs 1

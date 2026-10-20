@@ -12,22 +12,22 @@ Control the screen brightness, keypad light and vibration through the interfaces
 
 The display has a fixed native size, listed on the selected [phone page](/fplinux/phones/). RGB565 images use two bytes per pixel and packed rows. The display does not scale or rotate images; prepare their size and orientation before using the [image tools](/fplinux/apps/#image-tools).
 
-Applications that present frames directly use the [DRM display interface](/fplinux/develop/device-interfaces/#drm-display). The phone pages state the limits of each phone's visible image results.
+The [graphical session](/fplinux/use/session/) uses Wayland. Applications that present frames directly use the [DRM display interface](/fplinux/develop/device-interfaces/#drm-display) and need the graphical session stopped. The phone pages state the limits of each phone's visible image results.
 
 ## Screen brightness
 
 <FeatureStatus feature="lcd-backlight" />
 
-Brightness uses a scale from `0` to `10`. Level `7` is selected at every boot, and `0` switches the backlight off. Read and change the level in a shell on the phone:
+Brightness uses a scale from `0` to `10`; `0` switches the backlight off. The default level is `7`. The graphical session restores its saved brightness when available. Read and change the level in a shell on the phone:
 
 ```sh title="Phone"
 fplinux-brightness get
 fplinux-brightness set 4
 ```
 
-To change it with the keypad, install the optional [Brightness control](/fplinux/apps/brightness/) application.
+To change it with the keypad, use **Settings → Display → Brightness** in the [phone interface](/fplinux/use/session/). The optional direct-display [Brightness control](/fplinux/apps/brightness/) application uses the same service.
 
-The level stays in effect until the phone powers off; it is not saved for the next boot. The numbers are settings, not percentages or light measurements, and the same number can look different on different phones.
+The brightness service keeps the level during the current boot. Settings saves its selection with the other [session settings](/fplinux/use/session/#settings); those files survive power-off only on a persistent system root. The numbers are settings, not percentages or light measurements, and the same number can look different on different phones.
 
 Restarting the brightness service during the same boot preserves the selected level. Automatic screen-brightness control is not provided.
 
@@ -45,17 +45,22 @@ If you set level `0`, the screen stays dark. Restore it with `fplinux-brightness
 
 <FeatureStatus feature="keypad-backlight" />
 
-By default the keypad light turns on when you press a key and turns off about five seconds after the last key press. Input from a connected keyboard counts too. Check [keypad-light support](/fplinux/phones/#support-status) for your phone: manual lighting and automatic lighting from physical keys can have different support states. The light is either on or off; it has no brightness levels.
+On phones with automatic keypad lighting, the light turns on when you press a key and turns off about five seconds after the last key press. Input from a connected keyboard counts too. Check [keypad-light support](/fplinux/phones/#support-status) for your phone: manual lighting and automatic lighting from physical keys can have different support states. Most phones expose on/off control; the phone page lists any different brightness range.
 
-To switch it on or off by hand:
+On phones with automatic lighting, first disable its trigger:
 
 ```sh title="Phone"
 echo none > /sys/class/leds/:kbd_backlight/trigger
-echo 1 > /sys/class/leds/:kbd_backlight/brightness
+```
+
+Switch the light on at its maximum level or off:
+
+```sh title="Phone"
+cat /sys/class/leds/:kbd_backlight/max_brightness > /sys/class/leds/:kbd_backlight/brightness
 echo 0 > /sys/class/leds/:kbd_backlight/brightness
 ```
 
-A light switched on this way stays on until you switch it off. To return to automatic behavior:
+A light switched on this way stays on until you switch it off. On phones with automatic lighting, restore its trigger with:
 
 ```sh title="Phone"
 echo input-events > /sys/class/leds/:kbd_backlight/trigger

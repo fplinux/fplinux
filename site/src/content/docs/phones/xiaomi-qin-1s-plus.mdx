@@ -1,0 +1,84 @@
+---
+---
+
+import PhoneIdentity from '../../../components/PhoneIdentity.astro';
+import PhoneBoot from '../../../components/PhoneBoot.astro';
+import PhoneChecklist from '../../../components/PhoneChecklist.astro';
+
+<PhoneIdentity />
+
+FPLinux uses both Cortex-A53 cores with a 32-bit ARM kernel and 512 MiB of RAM. The CPU starts at 1.3 GHz and supports manual switching to 768 MHz without changing voltage; see [CPU speed](/fplinux/use/cpu-and-temperature/#cpu-speed). Use the default RAM profile or the [`microsd-root` system-card profile](/fplinux/guides/microsd-system-card/).
+
+## Support checklist
+
+Each status applies to this phone and the conditions in its note. See [Support status](/fplinux/phones/#support-status) for the meaning of the labels and [common limitations](/fplinux/phones/#limitations-on-every-phone).
+
+<PhoneChecklist />
+
+## Before you start
+
+Use a Linux PC and the shared [build](/fplinux/start/build/), [run](/fplinux/start/run/) and [connection](/fplinux/use/connect/) instructions, or a [Linux standalone archive](/fplinux/guides/standalone-archive/). The build supplies the three RAM-loading stages. No separate loader files or phone backup are needed. An autonomous archive starts Linux and opens SSH on its first run. Native Windows execution is unsupported.
+
+Use USB power. Intermittent resets to BootROM under application load are unresolved. Operation with a connected battery, charging and wired headsets are not qualified. Every cold start requires the PC loader; internal eMMC remains disabled.
+
+## Radio data
+
+Wi-Fi and Bluetooth are unsupported and stay off by default. Radio data is optional and is not needed for the supported screen, audio, application, storage or sleep functions. To prepare it from five original files saved from this same phone, use [Prepare data from original files](/fplinux/guides/device-data/#prepare-data-from-original-files) with these exact names:
+
+| Original | Contents |
+| --- | --- |
+| `wcnmodem-firmware.bin` | The 1540096-byte radio firmware image, without partition padding |
+| `system-connectivity_configure.ini` | The complete system radio configuration |
+| `system-connectivity_calibration.ini` | The complete system radio calibration |
+| `wcn-connectivity_configure.ini` | The complete WCN radio configuration |
+| `wcn-connectivity_calibration.ini` | The complete WCN radio calibration |
+
+FPLinux does not supply or extract these files from this phone. A whole storage dump or partition is not an accepted firmware image. Preparation retains both configuration/calibration pairs; rebuilding includes the prepared data in the system image. Keep images and archives containing this phone's data private. Preparing the data does not enable Wi-Fi or Bluetooth.
+
+## Boot key
+
+<PhoneBoot />
+
+## Controls and display
+
+The RGB565 display works at its native 240×320 size, including after blanking and unblanking. Tear-free output across all applications is not verified. Complete physical keypad input has not been tested. Use SSH for command input; forwarding a physical PC keyboard to the phone is unsupported.
+
+The standard image starts the Weston/Wayland [phone interface](/fplinux/use/session/). Native output from Home, the application catalog, Notes and Settings works with the Pixman renderer and with the Panfrost GL renderer. These display results do not establish complete physical keypad support.
+
+The Mali-T820 MC1 GPU supports [GPU rendering in ARMADA and TyrQuake](/fplinux/apps/#choose-a-renderer).
+
+Use [Screen brightness](/fplinux/use/display-and-lights/#screen-brightness) to read or change the logical level from `0` to `10`. The default is `7`; the graphical session can restore its saved selection. Level `1` visibly dims the display, and restoring `7` works; other levels are not verified. For diagnostics, the native backlight is `sprd_backlight` with a raw range of `0` to `255`.
+
+The keypad light supports manual settings from `0` to `255` and automatic lighting after input; see [Keypad light](/fplinux/use/display-and-lights/#keypad-light). Visible illumination of the upper key row works; complete physical keypad input remains untested.
+
+The vibration motor supports on/off force-feedback effects with a five-second automatic cutoff. Vibration strength is fixed.
+
+## Audio
+
+The built-in microphone supports mono S16_LE recording at 48 kHz using the shared [recording command](/fplinux/use/audio/#record-from-the-microphone). Recording starts after about one second. Speech quality and sensitivity are uncalibrated.
+
+The rear speaker plays both channels of a stereo file. Use the Qin controls in [Volume](/fplinux/use/audio/#volume). Loudness and playback quality are uncalibrated, and stability under combined application and speaker load is not fully qualified. Stop playback before recording, and stop recording before playback. Wired-headphone playback, wired-headset recording and automatic audio routing are unsupported.
+
+## Applications
+
+ARMADA and TyrQuake support [renderer selection](/fplinux/apps/#choose-a-renderer). Use the [direct-display procedure](/fplinux/use/session/#direct-display-applications) with the graphical session stopped.
+
+[ARMADA](/fplinux/apps/armada/) supports software and GPU rendering. Exit and termination restore its previous direct-display state, LCD brightness and keypad-light trigger and stop vibration. Physical soft-key operation is not verified.
+
+[TyrQuake](/fplinux/apps/tyrquake/) can use game data on an ext4 microSD data card or in RAM. Software and GPU rendering are available. Complete physical keypad operation is not verified. There is no game sound.
+
+## Storage and power
+
+Insert a microSD card before boot and keep it installed throughout the powered session; hot insertion and removal are unqualified. A 16 GB ext4 card supports persistent files. FAT32 data-file use is not verified. The `microsd-root` profile uses ext4 on the card as `/` and preserves installed packages and files across cold starts. Follow the shared [system-card procedure](/fplinux/guides/microsd-system-card/). Files in RAM, including `/tmp`, disappear when power is removed.
+
+Before removing power in the RAM profile, [release data cards](/fplinux/use/power/#release-data-cards). With a system card, follow [shutdown on USB power](/fplinux/use/power/#shut-down-a-system-card-on-usb-power), including the read-only root check. Software `poweroff` stops Linux and turns the display off; USB can still supply power afterwards. Power-off with a connected battery and the physical power-key action are not verified. Reboot is unsupported. Every new Linux session requires the PC loader.
+
+Suspend-to-idle (`s2idle`) and RTC alarm wake work on USB power in both profiles. Close playback and recording first. In the RAM profile, unmount data-card filesystems; in `microsd-root`, the ext4 system root can remain mounted read-write. Keep the card installed and use the shared [sleep](/fplinux/use/power/#sleep) and [clock alarm](/fplinux/use/power/#clock-and-alarms) commands. Graphical-session resume is not qualified. Deep suspend is unsupported. Wake through physical keys, battery-powered sleep and resume with other mounted card filesystems are not verified.
+
+The RTC supports reading and setting time, one-shot alarms while Linux is running and wake from `s2idle`. Long-term clock retention without power and alarm wake from power-off are not verified. Follow the shared [clock instructions](/fplinux/use/power/#clock-and-alarms); automatic system-time initialization from the RTC is disabled.
+
+The temperature reading comes from a board thermistor rather than the CPU. Board-sensor and supply-voltage readings are available through the [sensor interfaces](/fplinux/develop/device-interfaces/#sc9820e-readings). Absolute measurement accuracy, battery telemetry and charging are not verified.
+
+Internal eMMC is disabled and cannot be read or written through FPLinux.
+
+Wi-Fi, Bluetooth, mobile service, camera capture and FM radio are unsupported.

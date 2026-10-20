@@ -44,7 +44,7 @@ Use this sequence only when your [phone page](/fplinux/phones/) lists battery-on
 
 </Steps>
 
-A short press of the <Key>Red</Key> key does not power off; releasing it before five seconds cancels the request. The key works even while the terminal or a game uses the keypad.
+A short press of the <Key>Red</Key> key does not power off; releasing it before five seconds cancels the request. In the [graphical session](/fplinux/use/session/), a short press returns Home, or locks and blanks the screen when already on Home. The power-off hold works even while an application uses the keypad.
 
 With a system card, Linux stops its services, writes pending data and makes the card read-only before the phone turns off. If shutdown cannot start, the phone stays on instead of cutting power. Wait until the phone is off before you remove the card.
 
@@ -54,7 +54,7 @@ Use this procedure with a supported microSD system-card profile when the phone c
 
 <Steps>
 
-1. Keep the USB cable connected. Stop the programs and services that write to the card, turn off any swap on the card and unmount every card filesystem except the system root.
+1. Keep the USB cable connected. Save graphical work and stop the interface with `rc-service fplinux-session stop`. Stop the other programs and services that write to the card, turn off any swap on the card and unmount every card filesystem except the system root.
 
 2. Write pending data and make the system root read-only:
 
@@ -87,6 +87,8 @@ After the phone is off, start it normally, without holding the boot key, to use 
 
 <FeatureStatus feature="suspend" />
 
+The graphical session's screen timeout and keypad lock leave Linux, programs and USB running. They are separate from system sleep below.
+
 Sleep preserves the session in RAM while the screen and USB are off and programs are paused. Before sleeping, check that your [phone page](/fplinux/phones/) supports sleep in the current profile and lists a wake source you can use. Put the phone to sleep from a root shell:
 
 ```sh title="Phone"
@@ -107,13 +109,13 @@ Wake it with a supported power-key action or a [clock alarm](#clock-and-alarms),
 
 Each time `./fplinux run` or a standalone archive starts a new session, it tries to set the phone's clock to your computer's current time in UTC and prints the result. A clock-setting failure leaves the session usable, so check the result before relying on the time. Reconnecting to a running session does not change the clock. The phone has no time zones; its clock and its battery-backed clock both hold UTC.
 
-The battery-backed clock is updated only when its time cannot be read. To store the current time in it:
+The launcher's initial clock synchronization updates the battery-backed clock only when its time cannot be read. Saving the date and time in [Settings](/fplinux/use/session/#settings) also attempts to update it. To store the current time from a shell:
 
 ```sh title="Phone"
 hwclock -u -w -f /dev/rtc0
 ```
 
-The clock covers 1980 to 2099. It can lose its time while the battery is out, so check it before relying on it.
+On UMS9117 phones, the clock covers 1980 to 2099. A phone can lose its clock setting while the battery is out, so check it before relying on it.
 
 Where RTC wake is supported for your phone and profile, set an alarm before sleeping. This example wakes after 60 seconds; writing `0` first clears an alarm that is already set:
 
@@ -130,13 +132,15 @@ An alarm fires once. It keeps its absolute time if you change the clock, and an 
 <FeatureStatus feature="charger-status" />
 <FeatureStatus feature="battery-telemetry" />
 
+The interfaces and charge helper below apply to supported [UMS9117](/fplinux/platforms/ums9117/) phones. Charger status, battery telemetry and charging are not qualified on the [SC9820E Xiaomi Qin 1s+](/fplinux/platforms/sc9820e/); its board-temperature and ADC readings do not establish battery support.
+
 Check whether charger power is connected (`1`) or not (`0`):
 
 ```sh title="Phone"
 cat /sys/class/power_supply/sc2720-charger/online
 ```
 
-This shows that power is connected, not that the battery is charging. FPLinux does not show a battery percentage and does not control charging. The battery voltage, current and a relative charge counter are available where battery telemetry is supported; their names and units are listed in [Device interfaces](/fplinux/develop/device-interfaces/). Their accuracy has not been checked against a measuring instrument.
+This shows that power is connected, not that the battery is charging. The graphical battery icon is an estimate from available readings, not a calibrated battery percentage. FPLinux does not control charging. The battery voltage, current and a relative charge counter are available where battery telemetry is supported; their names and units are listed in [Device interfaces](/fplinux/develop/device-interfaces/). Their accuracy has not been checked against a measuring instrument.
 
 Check the [phone page](/fplinux/phones/) for battery-telemetry support and the power setup in which it has been tested. The charge measurement helper requires an enabled fuel gauge and a battery installed.
 

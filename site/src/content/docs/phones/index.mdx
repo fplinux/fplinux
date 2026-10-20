@@ -8,7 +8,7 @@ description: Compare exact phone targets and read their detailed support checkli
 import PhoneCatalog from '../../../components/PhoneCatalog.astro';
 import SupportMatrix from '../../../components/SupportMatrix.astro';
 
-FPLinux runs on keypad phones built on the Unisoc UMS9117. Each phone has its own target, the name you pass to `./fplinux build` and `./fplinux run`. A target describes one exact phone model; do not use it for a different model, even one with the same chip.
+FPLinux runs on keypad phones built on the Unisoc UMS9117 and SC9820E. Each phone has its own target, the name you pass to `./fplinux build` and `./fplinux run`. A target describes one exact phone model; do not use it for a different model, even one with the same chip.
 
 <PhoneCatalog />
 
@@ -18,6 +18,8 @@ FPLinux runs on keypad phones built on the Unisoc UMS9117. Each phone has its ow
 
 Hardware presence and FPLinux support are separate. **Present** means the phone has the component; **Absent** means its absence has been established; **Unknown** means its presence has not been established. Software-only functions have no hardware-presence label. Presence alone does not establish FPLinux support.
 
+**Stock** records the function in the original phone firmware: **Available**, **Unavailable** or **Unknown**. A dash means there is no direct stock comparison, as with FPLinux-specific applications and loader interfaces. A missing stock function does not by itself prove the physical absence of a component. Stock support does not qualify its FPLinux implementation.
+
 The phone checklists and comparison tables use four support labels:
 
 - **Verified**: the stated function has been used on that exact phone, under the conditions named in its checklist. It does not qualify other profiles, peripherals or related functions.
@@ -25,9 +27,9 @@ The phone checklists and comparison tables use four support labels:
 - **Not tested**: use of this function on that phone has not been established.
 - **Unsupported**: FPLinux has no supported way to use it on that phone. The hardware may still be present.
 
-The [feature overview](/fplinux/features/) separately describes whether a function is **Implemented** or **Not implemented**, and **Device-tested** or **Not tested**. Device-tested means at least one documented configuration has been tested. Use the exact phone, profile and subfunction in the checklist to decide what you can use.
+The [feature overview](/fplinux/features/) separately describes whether each platform implements a function. Every phone has its own result, including when its platform has no implementation. Platform status cannot hide a phone's hardware, stock function or FPLinux limitation.
 
-The comparisons below summarize broad functions. Each phone page contains the detailed checklist, prerequisites, controls and safe shutdown procedure.
+The comparisons below group phones by [platform](/fplinux/platforms/). Each phone page contains the detailed checklist, prerequisites, controls and safe shutdown procedure. Use the exact phone, profile and subfunction in the checklist to decide what you can use.
 
 ## Limitations on every phone
 
@@ -36,13 +38,13 @@ The comparisons below summarize broad functions. Each phone page contains the de
 - USB works only as a device attached to a PC. USB host and OTG are not supported.
 - Linux cannot reboot the phone. To start FPLinux again, end the session and load it from the PC.
 - The phone cannot start FPLinux on its own; every start needs the PC and the USB loader.
-- FPLinux cannot be installed to the phone's internal storage or mount it. It can only save a raw backup of it for [device data](/fplinux/guides/device-data/).
+- FPLinux cannot be installed to the phone's internal storage or mount it. Targets with a read-only NAND interface can save a raw backup for [device data](/fplinux/guides/device-data/); other targets provide no internal-storage access.
 
 Every boot uses the PC's USB loader, including a [microSD system card](/fplinux/guides/microsd-system-card/). Start the loader before connecting the powered-off phone and use its exact boot key; see [Run FPLinux](/fplinux/start/run/). Booting normally starts the stock firmware.
 
 ## Hardware support
 
-Compare hardware functions. The exact-phone checklist separates component presence from supported use and explains partial results.
+Compare hardware functions. Each cell separates FPLinux support, physical presence and the stock function where a comparison exists. The exact-phone checklist explains limits and uncertain stock results.
 
 <SupportMatrix kind="hardware" />
 

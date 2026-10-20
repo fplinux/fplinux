@@ -8,7 +8,7 @@ source:
 import FeatureStatus from '../../../components/FeatureStatus.astro';
 import Key from '../../../components/Key.astro';
 
-TyrQuake 0.71 is the Quake engine, packaged for FPLinux. The package does not contain the game itself: you need a legally obtained `pak0.pak` from Quake.
+TyrQuake 0.71 is the Quake engine, packaged for FPLinux with [software and GPU renderers](/fplinux/apps/#choose-a-renderer). The package does not contain the game itself: you need a legally obtained `pak0.pak` from Quake.
 
 <FeatureStatus feature="tyrquake" />
 
@@ -24,13 +24,13 @@ The game reads `pak0.pak` from this path, and also any readable `pak1.pak` to `p
 /mnt/card/fplinux/quake/id1/pak0.pak
 ```
 
-The files stay where you put them; the game reads them in place and never writes to that directory. Choose one of the following places.
+The files stay where you put them; the game reads them in place and never writes to that directory. Choose one of the following places, using a filesystem and boot profile supported on your [phone page](/fplinux/phones/).
 
 ### On a microSD data card
 
 [Mount the card](/fplinux/use/microsd/) at `/mnt/card`, create the directory `fplinux/quake/id1` on it, and upload `pak0.pak` there as described in [Connect from a PC](/fplinux/use/connect/). The files stay on the card.
 
-If the card is FAT32 and `/mnt/card` is not mounted, `quake` mounts the card read-only by itself. Mount an ext4 card yourself before you start the game.
+On a phone with supported FAT32 data-card use, if `/mnt/card` is not mounted, `quake` mounts a FAT32 card read-only by itself. Mount an ext4 card yourself before you start the game.
 
 ### On a microSD system card
 
@@ -57,7 +57,7 @@ Then upload `pak0.pak` to `/mnt/card/fplinux/quake/id1/pak0.pak`. The file takes
 
 ## Start the game
 
-Start the game in the local terminal or from the PC, as described in [Start an application](/fplinux/apps/):
+Stop the graphical session and run the game from the USB shell, following [Direct-display applications](/fplinux/use/session/#direct-display-applications):
 
 ```sh title="Phone"
 quake
@@ -70,6 +70,18 @@ quake --heapsize 16384
 ```
 
 If the value is smaller than the game data needs, the game stops during startup.
+
+### Performance overlay
+
+Add `--stats` to show frame rate, average frame duration, CPU time, GPU scene time, resident memory and temperature:
+
+```sh title="Phone"
+quake --stats
+```
+
+The overlay works with both renderers and updates about once a second. CPU is average process CPU time per frame, including the engine's threads and excluding blocked waits. GPU scene time covers scene and HUD rendering; it excludes the output conversion and display transfer. A metric the phone cannot provide is shown as `--`; the software renderer has no GPU scene time. `TEMP` is the phone's single readable thermal sensor, not necessarily a CPU sensor.
+
+Measurements have overhead. For a frame-rate counter alone, use `show_fps 1` in the game's console. A `timedemo` plays a recorded demo as fast as possible for benchmarking; its movement speed does not represent normal gameplay.
 
 ## Controls
 
@@ -117,7 +129,7 @@ All other keys, including the arrow keys, keep the game's standard bindings. The
 
 ## Quit
 
-Press <Key>Right soft</Key> to open the menu, choose **Quit**, and confirm with <Key>Centre</Key>. The display returns to the terminal.
+Press <Key>Right soft</Key> to open the menu, choose **Quit**, and confirm with <Key>Centre</Key>. Restart the graphical session from the USB shell after the game exits.
 
 ## Limitations
 

@@ -9,7 +9,9 @@ import FeatureStatus from '../../../../components/FeatureStatus.astro';
 import Figure from '../../../../components/Figure.astro';
 import JpegOperations from '../../../../assets/diagrams/jpeg-operations.svg';
 
-`fplinux-jpeg` uses the phone's image accelerator to decode JPEG files, encode NV16 frames as JPEG, and halve NV16 frames. `fplinux-jpeg-cpu` is a separate software tool for the same kinds of work. Neither command falls back to the other. Both are part of the system on every phone; run them on the phone as described in [Applications](/fplinux/apps/). The raw files they read and write are described in [Raw image formats](/fplinux/develop/raw-image-formats/).
+On [UMS9117](/fplinux/platforms/ums9117/), `fplinux-jpeg` uses the image accelerator to decode JPEG files, encode NV16 frames as JPEG, and halve NV16 frames. `fplinux-jpeg-cpu` is a separate software tool for the same kinds of work. Neither command falls back to the other. Both are included in UMS9117 images; run them on the phone as described in [Applications](/fplinux/apps/). The raw files they read and write are described in [Raw image formats](/fplinux/develop/raw-image-formats/).
+
+This guide covers UMS9117. These tools are not supplied for [SC9820E](/fplinux/platforms/sc9820e/).
 
 <FeatureStatus feature="jpeg-codec-and-scaling" />
 

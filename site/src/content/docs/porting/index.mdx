@@ -26,6 +26,11 @@ A phone port is a small, complete description of one exact phone model, called a
 		href="/fplinux/porting/ums9117/"
 	/>
 	<LinkCard
+		title="SC9820E platform"
+		description="RAM loading, platform boundaries and current target limits."
+		href="/fplinux/porting/sc9820e/"
+	/>
+	<LinkCard
 		title="Target and platform identity"
 		description="Names, hardware codes and compatible strings of a target and its platform."
 		href="/fplinux/porting/identity/"
@@ -44,7 +49,7 @@ A phone port is a small, complete description of one exact phone model, called a
 | `platforms/<soc>/` | SoC support shared by its phones: processor and interrupt integration, controller drivers, SoC Devicetree nodes and the fixed RAM-loader flow. |
 | `targets/<phone>/` | One phone: board wiring and memory, panel, keymap, bootstrap inputs, values passed to the loader and device-data declarations. |
 | `alpine/` | Phone userspace: one Alpine package recipe per component, the root-filesystem package policy and OpenRC services. |
-| `common/` | Target-neutral host and runtime tools, such as the RAM bundle runner and the USB keyboard client, and the contracts they share. |
+| `common/` | Target-neutral runtime entry points and host tools, such as the USB keyboard client, and the contracts they share. |
 
 C libraries shared by host tools and phone packages live in `lib/fplinux/`, with their headers in `include/fplinux/`. Their runtime requirements belong to each component, not to the package that consumes it.
 
@@ -54,12 +59,12 @@ The boundaries run both ways:
 - A target never duplicates SoC addresses, controller support or the platform loader sequence.
 - `bootstrap/` contains no SoC loader policy and no phone addresses, register setup, panel sequences, keymaps or assets.
 - `common/` does not depend on a phone memory map, board register layout or bootstrap protocol. Phone programs and services are maintained as Alpine aports, even when they are target-neutral.
-- A target selects the shared bundle runner through its manifest instead of copying a runner or adding a target-specific launcher.
+- Every selected bundle and standalone archive uses the shared minimal runtime through `fplinux.py`; target and platform configuration supply its loading and preparation requirements.
 
 ## Where code goes
 
 - Keep board-specific data in the target. Move code into a platform or another shared layer only when more than one current target uses the same behavior. SoC-specific host translation belongs to the selected platform.
-- A profile selects boot and storage policy, not peripheral features. The `default` profile runs from RAM and `microsd-uboot` uses the microSD system card. A target without microSD boot inputs offers only `default`. Feature profiles are not accepted.
+- A profile selects boot and storage policy, not peripheral features. The `default` profile runs from RAM; supported targets offer a [microSD system-card profile](/fplinux/guides/microsd-system-card/). A target without microSD boot inputs offers only `default`. Feature profiles are not accepted.
 - Follow the [Linux integration contract](/fplinux/porting/linux-integration/) when adding kernel code, configuration or Devicetree inputs.
 - Name a target and its platform as described in [Target and platform identity](/fplinux/porting/identity/).
 

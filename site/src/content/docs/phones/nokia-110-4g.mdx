@@ -17,9 +17,9 @@ Each status applies to this handset and the conditions in its note. See [Support
 
 ## Before you start
 
-Prepare [device data](/fplinux/guides/device-data/) from this same handset for its board maps, Bluetooth, FM radio and fitted audio. Do not use another phone's backup or prepared data.
+The RAM launcher prepares [device data](/fplinux/guides/device-data/) from this same handset for Bluetooth, FM radio and fitted audio. Do not use another phone's backup or prepared data.
 
-Use the authenticated USB shell described in [Connect from a computer](/fplinux/use/connect/) for command input. The local terminal is visible; physical keypad use, orientation and color accuracy are unqualified.
+Use the authenticated USB shell described in [Connect from a computer](/fplinux/use/connect/) for command input. Display qualification covers the direct-display terminal; it does not establish graphical-session support. Physical keypad use, orientation and color accuracy are unqualified.
 
 ## Boot key
 
@@ -33,6 +33,6 @@ Insert a microSD card before boot and leave it installed throughout the powered 
 
 Under USB power with a read-only microSD system root, an RTC alarm can resume `s2idle`. Deep suspend, battery operation, other wake sources and the physical power-key action are unqualified.
 
-Before disconnecting USB or removing the battery, [release data cards](/fplinux/use/power/#release-data-cards). If the phone stays powered, remove and reinsert its battery before booting normally. Follow [Run FPLinux](/fplinux/start/run/) to start a new session.
+Before disconnecting USB or removing the battery, follow [End the session safely](/fplinux/use/power/#end-the-session-safely) for your RAM or system-card session. If the phone stays powered after safe shutdown, remove and reinsert its battery before booting normally. Follow [Run FPLinux](/fplinux/start/run/) to start a new session.
 
 Feature support does not establish release readiness. See [Standalone archives](/fplinux/guides/standalone-archive/).

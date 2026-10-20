@@ -1,0 +1,15 @@
+---
+title: Platforms
+description: Choose the UMS9117 or SC9820E feature set, then check support on your exact phone.
+---
+
+A platform supplies the shared implementation for a family of chips. A phone target selects the board wiring, display, controls and boot settings. An implemented platform function can still be unavailable or untested on a particular phone.
+
+| Platform | Distinct implementations | Phone results |
+| --- | --- | --- |
+| [Unisoc UMS9117](/fplinux/platforms/ums9117/) | ROTA image rotation, JPEG codec and scaling, read-only NAND, `microsd-uboot` on selected targets | [Phone comparison](/fplinux/phones/#hardware-support) |
+| [Unisoc SC9820E](/fplinux/platforms/sc9820e/) | Panfrost GPU rendering, SPI display DMA, `microsd-root` | [Xiaomi Qin 1s+](/fplinux/phones/xiaomi-qin-1s-plus/) |
+
+The [feature overview](/fplinux/features/) compares implementations. The [phone checklists](/fplinux/phones/) record verified behavior, limits and hardware presence for each model. Platform status does not establish a physical result on every phone.
+
+[Build](/fplinux/start/build/), [run](/fplinux/start/run/), [SSH and file transfer](/fplinux/use/connect/) and [package installation](/fplinux/guides/packages/) use shared procedures. Select the exact target and a supported profile; never substitute another phone's target because it has the same chip.

@@ -17,14 +17,13 @@ Document sections use this order; absent sections are skipped:
 
 | Document | Section order |
 | --- | --- |
-| Target | `platform`, identity, NAND, display, display brightness, rootfs, bundle, Linux, bootstrap, adapter, loader maps, device data, board maps, Bluetooth, audio profile, FM radio, WCN firmware, microSD |
+| Target | `platform`, identity, NAND, display, display brightness, rootfs, bundle, Linux, bootstrap, adapter, device data, Bluetooth, audio profile, FM radio, WCN firmware, microSD |
 | Platform | identity, rootfs, bundle, U-Boot, Linux, bootstrap, runtime, host |
 | Profile | `name`, Linux root, rootfs, bootstrap, U-Boot, FIT, layout, storage, runtime |
 | Source lock | Linux, bootstrap source, host source and files, transfer source and files |
 | Alpine lock | release/branch/architecture/triplet, repositories, minirootfs, runtime, runtime additions, sysroot, package catalogue |
-| Container lock | Kern, OCI |
-| Environment lock | selection, ordered inputs |
-| Loader asset lock | FDL1, maps |
+| Environment lock | Kern, Alpine base, package selection, tools, ordered inputs |
+| Loader asset lock | FDL1 |
 | Release manifest | image, bundle files, runtime files, documents |
 
 Target fields follow their consumer roles:
@@ -36,13 +35,13 @@ Target fields follow their consumer roles:
 | display | `panel`, `boot_font` |
 | display_brightness | `backlight`, `levels` |
 | rootfs, bundle | `packages` |
-| linux | `config_fragment`, `memory`, `dtb`, `debug_dtb`, `patches`, `forbidden_dtb_markers`, `forbidden_config`, `overlay`, `copies`, `appends` |
+| linux | `config_fragment`, `memory`, `dtb`, `debug_dtb`, `patches`, `additional_forbidden_dtb_markers`, `additional_forbidden_config`, `overlay`, `copies`, `appends`, `dt_config_checks` |
 | memory | `base`, `size` |
 | copy, append | `source`, `destination` |
+| linux.dt_config_checks | `path`, `compatible`, `property`, `config` |
 | bootstrap | `lcd_config`, `image`, `map`, `dtb_destination`, `record_prefix` |
 | adapter | `spi_mode`, `backlight_channels`, `backlight_level`, `exec_distance`, `session_name`, `boot_instructions` |
-| loader_maps | `pinmap`, `keymap`; each uses `member`, `sha256` |
-| device_data | `parser` |
+| device_data | `parser`, `originals_parser` |
 | audio_profile | `speaker_vibration`, `speaker_from_headphones`, `headfree_headphones_only`, `firmware` |
 | firmware record | `source`, `destination`, `size`, `sha256` |
 | microsd | `linux_patches`, bootstrap, U-Boot |
@@ -51,11 +50,15 @@ Target fields follow their consumer roles:
 
 Platform identity uses `vendor`, `soc`, `aliases`, `compatible`. Linux groups source and toolchain, configuration, destinations and outputs, then patches, overlay, copies, appends and configuration checks. Bootstrap groups source and destination paths, files and patches, toolchain and build settings, load limits, copies and memory layout. Runtime groups the load address, adapter and USB identities. Host runtime tools precede tool recipes; recipe members precede nonempty copy tables. Empty copy arrays remain ordinary fields.
 
+Platforms declare `linux.dt_config_checks` for shared hardware; targets may add the same array for board-specific devices. The build checks both lists against the compiled device tree and kernel configuration.
+
 Profiles group root kind/filesystem/wait, package selection, boot kinds, resident and load ranges, storage partitions, then runtime transport and runnability. Their package arrays retain their order.
 
-The environment lock's selection uses `arch`, `apk_groups`. Each input uses `key`, `url`, `sha256`, `bytes`, `destination`, `purpose`, `arch`. Input records, package groups and packages within those groups retain their order.
+The environment lock owns the pinned Kern release, Alpine base root filesystem, direct APK selection, tool metadata and exact downloaded inputs. The installation recipe contains actions; it reads package and tool selections from this lock. The npm-owned `package-lock.json` defines the host environment's npm dependency graph.
 
-The platform loader asset lock's `[fdl1]` uses `url`, `sha256`, `cache_name`, `license`, `path`. Its `[maps]` uses `url`, `sha256`, `cache_name`, `license`, `pinmap_path`, `keymap_path`. Generated standalone asset locks retain their resolved source/output form.
+The environment lock's Kern section uses `version`, `archive_url`, `archive_sha256`, `binary_sha256`; its base section uses `release`, `arch`, `url`, `sha256`. Selection uses `arch`, `apk_groups`. Each named tool uses `version` or, for Sparse, `commit`, followed by `input`. Each input uses `key`, `url`, `sha256` or `checksum` and `algorithm`, optional `bytes`, then `destination`, `purpose`, `arch`. Input records, package groups and packages within those groups retain their order.
+
+The platform loader asset lock's `[fdl1]` uses `url`, `sha256`, `cache_name`, `license`, `path`. Generated standalone asset locks retain their resolved source/output form.
 
 Independent source-file hash dictionaries, verified-release entries, spelling identifier/word dictionaries, Alpine repositories and runtime additions use case-sensitive lexical key order. The two reordered array families are target and platform rootfs/bundle package sets, which use package-name order, and Alpine package records, which use filename order. Other arrays, including profile packages and Alpine runtime/sysroot packages, retain their order.
 

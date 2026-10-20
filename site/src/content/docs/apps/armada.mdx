@@ -10,7 +10,7 @@ import armada from '../../../assets/screens/armada.png';
 import FeatureStatus from '../../../components/FeatureStatus.astro';
 import Key from '../../../components/Key.astro';
 
-FPLinux: ARMADA is a showcase for the phone. It renders a 3D scene on the phone itself, while the LCD brightness, the keypad light and the vibrator follow the same timeline. One cycle of the presentation lasts 38 seconds; it repeats until you exit.
+FPLinux: ARMADA is a showcase for the phone. It renders a 3D scene while the LCD brightness, the keypad light and the vibrator follow the same timeline. One cycle of the presentation lasts 38 seconds; it repeats until you exit. Choose [software or GPU rendering](/fplinux/apps/#choose-a-renderer) with `--renderer`.
 
 <FeatureStatus feature="fplinux-armada" />
 
@@ -20,7 +20,7 @@ Check [phone support status](/fplinux/phones/#support-status) for the physical e
 
 ## Install and start
 
-Install `fplinux-showcase.apk` as described in [Packages](/fplinux/guides/packages/). Its installed package name is `fplinux-showcase`. Start the application in the local terminal or from the PC, as described in [Start an application](/fplinux/apps/):
+Install `fplinux-showcase.apk` as described in [Packages](/fplinux/guides/packages/). Its installed package name is `fplinux-showcase`. Stop the graphical session and run the application from the USB shell, following [Direct-display applications](/fplinux/use/session/#direct-display-applications):
 
 ```sh title="Phone"
 fplinux-showcase
@@ -34,7 +34,7 @@ fplinux-showcase --runs 1
 
 `--runs N` requires a positive decimal count; without it, the presentation repeats until you exit. `--keypad-led DIR` selects the keypad light's brightness directory instead of discovering it automatically.
 
-The application needs a `240×320` or `128×160` display, the right soft key, the system brightness service, the keypad light and the vibrator. If one of them is missing, it does not start and names the missing part.
+The same application package supports `240×320`, `128×160` and `320×240` displays. It needs the right soft key, the system brightness service, the keypad light and the vibrator. If one of them is missing, it does not start and names the missing part.
 
 ## What you see and feel
 
@@ -44,6 +44,6 @@ There is no soundtrack. On phones that vibrate through the speaker, its low vibr
 
 ## Exit
 
-Press <Key>Right soft</Key> at any time. The display returns to the terminal, the LCD returns to your brightness level, including a level you changed while the presentation ran, the keypad light returns to its level before the start, and the vibration stops.
+Press <Key>Right soft</Key> at any time. The LCD returns to your brightness level, including a level you changed while the presentation ran, the keypad light returns to its level before the start, and the vibration stops. Restart the graphical session from the USB shell after the application exits.
 
 After it exits, the application prints one line of figures for the run: the number of completed cycles, the frames shown, frame rates and frame times, its CPU use and its peak memory.

@@ -7,11 +7,11 @@ import { CardGrid, LinkCard } from '@astrojs/starlight/components';
 import Figure from '../../../components/Figure.astro';
 import KeypadNames from '../../../assets/diagrams/keypad-names.svg';
 
-FPLinux comes with a few phone applications.
+The standard [phone interface](/fplinux/use/session/) includes Home, an application catalog, Tasks, Settings, Notes and Snake. Open these applications from the catalog.
 
 ## Optional applications
 
-These are optional packages that you install when you want them; see [Install an optional application](#install-an-optional-application).
+These are optional packages that you install when you want them; see [Install an optional application](#install-an-optional-application). The packages supplied by a build and their supported uses depend on its platform ([UMS9117](/fplinux/platforms/ums9117/) or [SC9820E](/fplinux/platforms/sc9820e/)) and [phone](/fplinux/phones/#application-support).
 
 <CardGrid>
 	<LinkCard
@@ -38,7 +38,7 @@ These are optional packages that you install when you want them; see [Install an
 
 ## Image tools
 
-The image tools are part of the system on every phone.
+[UMS9117](/fplinux/platforms/ums9117/) images include the rotation, JPEG and presentation tools. On the [SC9820E Xiaomi Qin 1s+](/fplinux/platforms/sc9820e/), `fplinux-present` is an optional package and uses `--mode cpu-rgb565`; the UMS9117 ROTA and JPEG interfaces do not apply.
 
 <CardGrid>
 	<LinkCard
@@ -68,16 +68,22 @@ Install the APK as described in [Packages](/fplinux/guides/packages/). In a RAM 
 
 ## Start an application
 
-Start an application in either of two ways:
+Open graphical applications from the [application catalog](/fplinux/use/session/#home-and-applications). For command-line tools, run their commands in the [USB shell](/fplinux/use/connect/); `--exec` returns when the command exits and shows its output.
 
-- On the phone, type its command in the [local terminal](/fplinux/use/terminal/).
-- From the PC, run its command on the phone with `--exec`, as described in [Connect from a PC](/fplinux/use/connect/). The PC command returns when the application exits and shows its output.
-
-Brightness control, ARMADA and TyrQuake take over the display while they run. When they exit, the display returns to the terminal. `fplinux-present` and the `fplinux-rotate` preview take over the display only while they show a picture.
+Brightness control, ARMADA, TyrQuake, `fplinux-present` and the `fplinux-rotate` preview use the display directly. Follow the [direct-display procedure](/fplinux/use/session/#direct-display-applications) to stop the graphical session before starting them and restart it afterwards. Exiting one of these applications does not restart Home.
 
 The application pages name the phone keys as follows.
 
 <Figure caption="Phone keys" width="32rem"><KeypadNames /></Figure>
+
+## Choose a renderer
+
+ARMADA and TyrQuake accept `--renderer auto|software|gpu`. The default, `auto`, starts the GPU renderer when a supported hardware context is available and falls back to software if GPU initialization fails. The selected renderer is printed at startup. A rendering error after startup ends the application.
+
+- `--renderer software` uses the CPU and works without Mesa installed.
+- `--renderer gpu` requires the hardware renderer and reports an error when it cannot start.
+
+GPU rendering is available on [Xiaomi Qin 1s+](/fplinux/phones/xiaomi-qin-1s-plus/#applications). Choose a renderer for the application you use; GPU mode does not guarantee a higher frame rate. Other supported phones use software rendering.
 
 ## Command-line behavior
 

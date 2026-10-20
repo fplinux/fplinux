@@ -32,7 +32,7 @@ The APKs are in the `apks/` folder of the build directory that `./fplinux build`
   'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-showcase.apk'
 ```
 
-Use the target, profile and build type of the running session. For a microSD system card, add `--profile microsd-uboot` to both commands.
+Use the target, profile and build type of the running session. For a microSD system card, pass the selected `--profile` to both commands; see [system-card profiles](/fplinux/guides/microsd-system-card/).
 
 </TabItem>
 <TabItem label="Linux runner archive">
@@ -40,9 +40,9 @@ Use the target, profile and build type of the running session. For a microSD sys
 Run the commands from the extracted archive directory:
 
 ```sh title="PC"
-./runner/run.py --reconnect --upload \
+python3.14 -I fplinux.py run --reconnect --upload \
   ./apks/fplinux-showcase.apk /tmp/fplinux-showcase.apk
-./runner/run.py --reconnect --exec \
+python3.14 -I fplinux.py run --reconnect --exec \
   'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-showcase.apk'
 ```
 
@@ -64,7 +64,7 @@ Stop the application first. Remove it by its package name, without `.apk`:
 <TabItem label="Linux runner archive">
 
 ```sh title="PC"
-./runner/run.py --reconnect --exec 'apk del fplinux-showcase'
+python3.14 -I fplinux.py run --reconnect --exec 'apk del fplinux-showcase'
 ```
 
 </TabItem>

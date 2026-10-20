@@ -15,7 +15,6 @@ Find what you see below. Each entry names the likely cause and links to the page
 | --- | --- |
 | `fplinux ssh: required host tool is missing: NAME` | Install the PC tools listed in [Run FPLinux](/fplinux/start/run/#before-you-start). |
 | `fplinux run: GNU stdbuf is required (install coreutils …)` | Install GNU coreutils. |
-| `fplinux ssh: XDG_RUNTIME_DIR is not set` | Run the loader as your regular user in your normal login session, not as root or through `sudo`. |
 | `fplinux: current build is missing or invalid; rebuild it: …` | Run the build command it prints. Pass the same profile and build type to `build` and `run`. |
 
 ### The loader keeps waiting for the phone
@@ -48,7 +47,7 @@ The load finished, but the phone did not hand over to Linux in time. The loader 
 
 ### The session never becomes ready
 
-The loader prints `Bridge acknowledged the Linux transition; waiting up to 60 seconds for Linux USB-NCM 0525:a4a6.` and later stops with `fplinux ssh: the exact USB-NCM SSH session did not become ready before the deadline`.
+The runtime log records `Bridge acknowledged the Linux transition; waiting up to 60 seconds for Linux USB-NCM 0525:a4a6.` and the launcher later stops with `fplinux ssh: the exact USB-NCM SSH session did not become ready before the deadline`. The launcher prints the log's exact path when it starts.
 
 The loader did not authenticate the Linux USB session in time. Check that the PC has a network manager that runs IPv4 DHCP on a newly attached USB network interface, such as NetworkManager. While the loader waits, look for a new USB network interface with an IPv4 address:
 
@@ -60,11 +59,15 @@ See [Run FPLinux](/fplinux/start/run/#before-you-start) for the PC requirements.
 
 ### console reports no session
 
-```text title="Output"
-fplinux ssh: no ready SSH session for <target>; run ./fplinux run <target> first
-```
+No load of this target has reached a ready session on this PC, or you passed a different target name. Select the same target, profile and build type. Start the phone with `./fplinux run <target>` if no session exists; this command also prepares required UMS9117 RAM data on first use. See [Run FPLinux](/fplinux/start/run/).
 
-No load of this target has reached a ready session on this PC, or you passed a different target name. Start the phone with `./fplinux run <target>`.
+### The launcher says the phone is already running
+
+`This phone is already running. Close its existing launcher first.` means another launcher holds the data-directory lock. Exit its SSH shell and close that launcher, then use the same `run` command to reconnect. Exiting the shell leaves Linux running.
+
+### Preparation asks you to keep the phone powered
+
+Storage is still mounted or used as swap, or the runtime could not verify its state. Reader access is retained under `reader/session/` in the private data directory. Keep power connected and release storage safely as described in [Power](/fplinux/use/power/). Cancelling the launcher does not power the phone off.
 
 ### console or verify cannot reconnect
 
@@ -74,7 +77,7 @@ No load of this target has reached a ready session on this PC, or you passed a d
 
 `current SSH session exposes a different kernel identity` means the phone runs a different build from the one you selected:
 
-- Pass the same profile and build type that started the session. A phone started from a microSD system card needs `--profile microsd-uboot`.
+- Pass the same profile and build type that started the session. For a microSD system card, use the profile selected in [Boot from the card](/fplinux/guides/microsd-system-card/#boot-from-the-card).
 - If `verify` reports `build output is stale; rebuild it`, your checkout changed inputs that affect the selected runtime after the build. Rebuild, then start a fresh session to run the new build. Changes only to documentation or optional APKs do not require a fresh RAM load.
 
 See [Check which build is running](/fplinux/start/run/#check-which-build-is-running).
@@ -91,23 +94,24 @@ See [Check which build is running](/fplinux/start/run/#check-which-build-is-runn
 
 ### The screen is dark
 
+- **The graphical session blanked the screen.** Press and release a key to wake it, then unlock if prompted. See [Lock and screen timeout](/fplinux/use/session/#lock-and-screen-timeout).
 - **The brightness is `0`.** Restore it from a shell opened [from your computer](/fplinux/use/connect/) with `fplinux-brightness set 7`. See [Screen brightness](/fplinux/use/display-and-lights/#screen-brightness).
 - **The phone is asleep.** Use the key or armed RTC alarm listed as a verified wake source on your phone page. Ordinary keypad keys do not wake a sleeping phone, and keys pressed during sleep are lost. See [Sleep](/fplinux/use/power/#sleep).
 - **The loader printed `Headless target`.** A target created for a phone that is not supported yet shows no screen; use the phone from your computer. See [Bring up a new phone](/fplinux/porting/bring-up/).
 
-### The screen shows kernel text instead of the terminal
+### The screen shows kernel text
 
-You switched to the diagnostic console. On a phone with supported keypad input, press and release the <Key>Right soft</Key> key to return to the terminal. From your computer, run `chvt 2` in a phone shell. See [Diagnostic console](/fplinux/use/terminal/#diagnostic-console).
+Inspect `rc-service fplinux-session status` and `/var/log/fplinux-session.log` from the [USB shell](/fplinux/use/connect/). Save any recoverable work before restarting the service, because restarting closes graphical applications. Terminal opens from the graphical application catalog.
 
 ### Keys type digits or the wrong case
 
-These controls apply to phones with verified keypad input. Otherwise, use the USB shell and check the phone's input status.
+In graphical text fields, <Key>#</Key> changes the text mode; see [Type text](/fplinux/use/session/#type-text). Terminal uses its own shell controls described below. Check the phone's input status if no keypad text appears; the [USB shell](/fplinux/use/connect/) remains available for control.
 
 The terminal is in `123` mode or in `ABC`. Hold <Key>\*</Key> to switch between digits and letters, and press <Key>\*</Key> to switch between `abc` and `ABC`. See [Type with the keypad](/fplinux/use/terminal/#type-with-the-keypad).
 
-### The terminal does not start after installing a layout
+### A keyboard layout is unavailable in Terminal
 
-At most three keyboard layouts can be installed beside US. With more, the terminal refuses to start and names the problem. Remove a layout package. See [Russian keyboard layout](/fplinux/use/terminal/#russian-keyboard-layout).
+The graphical session loads installed keyboard layouts when it starts. Save your work and restart the session after adding a layout package. It accepts up to three registered layouts beside US. The keypad language is selected separately in Settings or Terminal's Options menu. See [Keyboard layout packages](/fplinux/develop/input/#keyboard-layout-packages).
 
 ### No sound
 
@@ -115,7 +119,7 @@ Check the output and automatic-routing entries in your [phone checklist](/fplinu
 
 - **The volume is low.** Both outputs start at `1` after every boot. Raise them as shown in [Volume](/fplinux/use/audio/#volume).
 - **Headphones are plugged in.** Where automatic routing is supported, any plug in the socket moves playback away from the speaker.
-- **The speaker controls are missing.** The image was built without [device data](/fplinux/guides/device-data/). Prepare it from the same phone and build again.
+- **The speaker controls are missing.** Check the phone's [device data](/fplinux/guides/device-data/) and audio support. UMS9117 RAM launches require all declared data; after explicitly replacing it, start a fresh RAM session. A system card must be rebuilt and written with the new data.
 - **FM radio is on.** A file cannot play while FM radio plays, and the other way round.
 - **Speaker-based vibration:** headphone sound is muted while the phone vibrates and for about a second afterwards.
 
@@ -127,7 +131,7 @@ Stop using FM and cold-boot the phone. Until then the phone cannot sleep. See [I
 
 ### Bluetooth does not work or does not pair
 
-- **The image has no Bluetooth.** Bluetooth needs firmware from the same phone's [device data](/fplinux/guides/device-data/). Prepare it and build again.
+- **The image has no Bluetooth.** Bluetooth needs firmware from the same phone's [device data](/fplinux/guides/device-data/). UMS9117 RAM runs prepare required data automatically. Qin's optional original-file import and microSD system cards need an explicit rebuild. Check the phone's support status before expecting Bluetooth to work.
 - **Bluetooth is off.** It starts powered off; turn it on with `bluetoothctl power on`.
 - **The other device remembers an old pairing.** After every new RAM load the phone has forgotten its pairings. Run `remove PHONE-MAC` on the other device, then pair again. A microSD system card keeps pairing records between boots.
 
@@ -151,10 +155,10 @@ See [microSD card](/fplinux/use/microsd/).
 
 ### The system card does not start
 
-- Only targets with microSD boot support accept `--profile microsd-uboot`. Check the phone checklist before selecting it.
-- The image must come from a `--profile microsd-uboot` build.
+- Check that your phone supports a [microSD system-card profile](/fplinux/guides/microsd-system-card/#build-the-card-image).
+- The image must come from a build of that profile for your exact target.
 - `FPLINUX.img.xz` must be decompressed and written to the whole card device, not to a partition or copied as a file, and read back for comparison. See [Prepare the card](/fplinux/guides/microsd-system-card/#prepare-the-card).
-- Start the loader with `--boot microsd` or `--profile microsd-uboot`, not both. Together they stop with `fplinux: --boot and --profile cannot be used together`.
+- Start the loader with the same profile and build type, following [Boot from the card](/fplinux/guides/microsd-system-card/#boot-from-the-card).
 - Leave the card in the phone for the whole session.
 
 See [microSD system card](/fplinux/guides/microsd-system-card/).
@@ -166,10 +170,10 @@ See [microSD system card](/fplinux/guides/microsd-system-card/).
 | Message | What to do |
 | --- | --- |
 | `Kern is not ready for this checkout; run ./fplinux setup` | Run `./fplinux setup` with network access. |
-| `the pinned build image is not ready; run ./fplinux setup` | Run `./fplinux setup` with network access. |
+| `the pinned build environment is not ready; run ./fplinux setup` | Run `./fplinux setup` with network access. |
 | `Kern cannot map the package builder; configure newuidmap/newgidmap …` | Install `newuidmap` and `newgidmap` and give your user subordinate UID and GID ranges. |
 | `the build interface currently supports Linux hosts only` | Build on a Linux PC. |
-| `the pinned build image currently targets linux/amd64` | Build on an x86-64 PC. |
+| `the pinned build environment currently targets linux/amd64` | Build on an x86-64 PC. |
 
 See [What you need](/fplinux/start/build/#what-you-need).
 
@@ -186,7 +190,7 @@ A message such as `NAME SHA256 mismatch: expected …, received …` means the d
 
 ### An offline build stops
 
-`offline build requires the current pinned OCI image; run ./fplinux setup online first`. Run `./fplinux setup` once with network access, then build offline again. See [Build without network access](/fplinux/start/build/#build-without-network-access).
+`offline execution requires the current pinned environment; run ./fplinux setup online first`. Run `./fplinux setup` once with network access, then build offline again. See [Build without network access](/fplinux/start/build/#build-without-network-access).
 
 ### A build fails or the PC runs out of memory
 

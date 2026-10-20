@@ -31,7 +31,7 @@ Describe the operation actually completed. A saved file and its computed digest 
 
 Messages written to `/dev/kmsg` use a component prefix and a severity matching the outcome; failures are not informational messages. Long-running services log state transitions instead of repeating the same unavailable-device error on every retry. The local terminal may use a compact visual format when it is not parsed as a protocol.
 
-Supervised services use OpenRC's `output_logger` and `error_logger` hooks with the shared kernel-log forwarder, which writes bounded records and splits long lines into fragments. Do not use `/dev/kmsg` as an ordinary stream log file. Choose stream priorities from the producer's meaning: stderr from an external daemon can contain ordinary diagnostics, not only errors.
+Supervised services that log to the kernel use OpenRC's `output_logger` and `error_logger` hooks with the shared kernel-log forwarder, which writes bounded records and splits long lines into fragments. The Weston graphical session keeps its compositor and application output in `/var/log/fplinux-session.log` through OpenRC's `output_log` and `error_log`. Do not use `/dev/kmsg` as an ordinary stream log file. Choose stream priorities from the producer's meaning: stderr from an external daemon can contain ordinary diagnostics, not only errors.
 
 ## Embedded projects
 

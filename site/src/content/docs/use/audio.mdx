@@ -10,16 +10,20 @@ import FeatureStatus from '../../../components/FeatureStatus.astro';
 import Figure from '../../../components/Figure.astro';
 import AudioRouting from '../../../assets/diagrams/audio-routing.svg';
 
-Play sound, adjust its volume and record from a microphone with the commands below. Check [support status](/fplinux/phones/#support-status) and your [phone page](/fplinux/phones/) for the available outputs, microphones and automatic headphone switching. Run commands in a shell on the phone, either in the [phone terminal](/fplinux/use/terminal/) or [from your computer](/fplinux/use/connect/).
+Play sound, adjust its volume and record from a microphone with the commands below. Check [support status](/fplinux/phones/#support-status) and your [phone page](/fplinux/phones/) for the available outputs, microphones and automatic headphone switching. Run commands in the [USB shell](/fplinux/use/connect/) or, on an image that includes it, the [phone terminal](/fplinux/use/terminal/).
+
+The [SC9820E](/fplinux/platforms/sc9820e/) Xiaomi Qin 1s+ uses the rear speaker and built-in microphone, with mutually exclusive playback and recording. It uses `Master Playback Volume`; wired headphones, headset recording and automatic output switching are unsupported. Output selection, per-output volume, equalizer and idle-silence controls below apply to supported [UMS9117](/fplinux/platforms/ums9117/) targets. The [phone page](/fplinux/phones/xiaomi-qin-1s-plus/#audio) states Qin's verified uses and limits.
 
 <FeatureStatus feature="headphone-audio" />
 <FeatureStatus feature="speaker-audio" />
 
 ## Prepare device data first
 
-The speaker, full volume range and equalizer, where supported, use [device data](/fplinux/guides/device-data/) prepared from the same phone before it is loaded. Without device data, headphones still play with a smaller volume range and the speaker controls are missing. Do not reuse device data from another phone, even of the same model. Follow the [device-data guide](/fplinux/guides/device-data/) for a source checkout or [standalone archive](/fplinux/guides/standalone-archive/) for a downloaded archive.
+On supported UMS9117 targets, the speaker, full volume range and equalizer use [device data](/fplinux/guides/device-data/) prepared from the same phone before it is loaded. Without device data, headphones still play with a smaller volume range and the speaker controls are missing. Do not reuse device data from another phone, even of the same model. Follow the [device-data guide](/fplinux/guides/device-data/) for a source checkout or [standalone archive](/fplinux/guides/standalone-archive/) for a downloaded archive.
 
 ## Play a file
+
+On Xiaomi Qin 1s+, stop recording before starting playback.
 
 <Steps>
 
@@ -33,13 +37,13 @@ The speaker, full volume range and equalizer, where supported, use [device data]
 
 </Steps>
 
-The default playback device converts any sample rate to 48 kHz, so ordinary WAV files play without preparation. Volume starts low after every boot; raise it as shown in [Volume](#volume).
+The default playback device converts any sample rate to 48 kHz, so ordinary WAV files play without preparation. Volume starts low after every boot; see [Volume](#volume) for your phone's controls and verified levels.
 
 ## Where the sound goes
 
-Where automatic headphone switching is supported, plugging in headphones moves playback to them; unplugging moves it to the speaker. This also happens during playback, recording and FM radio, which keep running. The socket only detects that a plug is inserted; it cannot tell headphones from a headset or another cable. A plug change made while the phone sleeps is applied when it wakes.
+On UMS9117 phones with automatic headphone switching, plugging in headphones moves playback to them; unplugging moves it to the speaker. This also happens during playback, recording and FM radio, which keep running. The socket only detects that a plug is inserted; it cannot tell headphones from a headset or another cable. A plug change made while the phone sleeps is applied when it wakes.
 
-With speaker output available, you can also choose the outputs by hand. A manual choice lasts until the next plug or unplug. For example, to play through the speaker as well as the headphones:
+On supported UMS9117 targets with speaker output available, you can also choose the outputs by hand. A manual choice lasts until the next plug or unplug. For example, to play through the speaker as well as the headphones:
 
 ```sh title="Phone"
 amixer -c 0 cset name='Speaker Playback Switch' on
@@ -58,6 +62,18 @@ To choose outputs only by hand until the next boot, stop automatic switching wit
 
 ## Volume
 
+### Xiaomi Qin 1s+
+
+`Master Playback Volume` accepts levels `0` to `7` and starts at `1` after boot. Level `0` mutes the speaker, and levels `1` to `7` produce audible output. Loudness and playback quality are uncalibrated; see the [phone-page limits](/fplinux/phones/xiaomi-qin-1s-plus/#audio) for simultaneous application use.
+
+```sh title="Phone"
+amixer -c 0 cget name='Master Playback Volume'
+amixer -c 0 cset name='Master Playback Volume' 0
+amixer -c 0 cset name='Master Playback Volume' 1
+```
+
+### UMS9117 targets
+
 Each available output has its own volume from `0` to `9`. Both start at `1` after every boot, and `0` mutes. Without device data, the headphone range is `0` to `6`. Use the controls for the outputs supported on your phone.
 
 ```sh title="Phone"
@@ -74,7 +90,7 @@ Volume, output and equalizer settings last until the next boot.
 
 ## Equalizer and limiter
 
-Where supported, device data enables the equalizer and automatic level control, which limits peaks near full volume. Loudness and dynamics have not been matched to stock playback. Both are on by default and apply to FM radio as well. The equalizer makes playback louder, most noticeably on the speaker. To turn them off:
+On supported UMS9117 targets, device data enables the equalizer and automatic level control, which limits peaks near full volume. Loudness and dynamics have not been matched to stock playback. Both are on by default and apply to FM radio as well. The equalizer makes playback louder, most noticeably on the speaker. To turn them off:
 
 ```sh title="Phone"
 amixer -c 0 cset name='EQ Playback Switch' off
@@ -85,7 +101,7 @@ A change takes effect immediately, so you hear a step in level if you switch dur
 
 ## Silence between files
 
-The enabled outputs stay active with silent PCM between files by default. This avoids clicks at playback transitions and uses more power. To let the audio hardware stop while idle:
+On supported UMS9117 targets, the enabled outputs stay active with silent PCM between files by default. This avoids clicks at playback transitions and uses more power. To let the audio hardware stop while idle:
 
 ```sh title="Phone"
 amixer -c 0 cset name='Idle Silence Playback Switch' off
@@ -97,20 +113,20 @@ Set it to `on` to restore the default. It does not alter a file already playing.
 
 <FeatureStatus feature="phone-microphone" />
 
-If built-in microphone recording is supported, record ten seconds of mono audio:
+If built-in microphone recording is supported, record ten seconds of mono audio. On Xiaomi Qin 1s+, stop playback first:
 
 ```sh title="Phone"
 arecord -D hw:0,0 -f S16_LE -c 1 -r 48000 -d 10 /tmp/recording.wav
 ```
 
-If headset recording is supported, select a wired four-contact headset before recording:
+On a UMS9117 phone with headset recording support, select a wired four-contact headset before recording:
 
 ```sh title="Phone"
 amixer -c 0 cset name='Capture Source' Headset
 arecord -D hw:0,0 -f S16_LE -c 1 -r 48000 -d 10 /tmp/headset.wav
 ```
 
-After recording ends, select the built-in microphone again:
+After headset recording ends, select the built-in microphone again:
 
 ```sh title="Phone"
 amixer -c 0 cset name='Capture Source' Internal
@@ -118,11 +134,11 @@ amixer -c 0 cset name='Capture Source' Internal
 
 Plugging in a headset does not change the source, and the source cannot change while a recording runs. The headset input can produce a short noise during the first second, so start recording before the sound you want. There is no automatic gain or noise suppression. Copy the result to your computer with `--pull`, as shown in [Copy files](/fplinux/use/connect/); files in `/tmp` disappear at power-off.
 
-Recording can run while a file plays, as long as playback uses 48 kHz, which the default playback device always does.
+On supported UMS9117 targets, recording can run while a file plays, as long as playback uses 48 kHz, which the default playback device always does.
 
 ## Limitations
 
-- [FM radio](/fplinux/use/fm-radio/) cannot play while a file plays or a recording runs, and the other way round.
+- On supported UMS9117 phones, [FM radio](/fplinux/use/fm-radio/) cannot play while a file plays or a recording runs, and the other way round.
 - There are no phone calls and no live monitoring of the microphone.
 - For wireless output, see [Bluetooth A2DP playback](/fplinux/use/bluetooth/#send-audio-to-an-a2dp-sink). Check your phone page before choosing a sink or profile.
 

@@ -7,16 +7,15 @@ import Key from '../../../components/Key.astro';
 
 ## Debug builds
 
-`release` is the default build type. A `debug` build adds kernel diagnostics and keeps everything else the same: the same applications, packages and hardware support.
+`release` is the default build type. A `debug` build adds kernel diagnostics and the `fplinux-debug-tools` package, which supplies perf 7.1.0 and Alpine's strace 6.19. Applications and hardware support follow the selected target.
 
 | Kernel facility | `release` | `debug` |
 | --- | --- | --- |
 | Symbol names (`kallsyms`) | Included | Included |
-| Kernel log buffer | 64 KiB | 128 KiB |
-| Module loading | Disabled | Enabled |
-| ftrace, kprobes, DMATEST and `/dev/mem` | Disabled | Enabled |
+| Kernel log buffer | 64 KiB | 128 KiB on UMS9117; 256 KiB on SC9820E |
+| ftrace, function/function-graph tracing, kprobe/uprobe events, syscall tracing and DMATEST | Disabled | Enabled in the kernel configuration |
 
-The debug kernel can load modules, but FPLinux ships no loadable modules.
+UMS9117 debug builds also enable module loading, `/dev/mem` and the `irqsoff` tracer. SC9820E builds keep those facilities disabled. FPLinux ships no loadable modules.
 
 Build and load a debug image with `--build-type debug`, and pass the same option to every later command for that session:
 
@@ -45,14 +44,53 @@ Filters such as `--command`, `--target`, `--profile` and `--status` work with al
 
 Messages from the kernel, loader and phone programs follow the [logging contract](/fplinux/develop/logging/).
 
-## Trace the kernel
+## Profile a program
 
-The debug kernel includes debugfs, tracefs, kprobe events and the `irqsoff` tracer. No tracer or probe is active after boot. Check the current state in the phone's root shell:
+Open a root shell on the debug image:
+
+```sh title="PC"
+./fplinux console xiaomi-qin-1s-plus --build-type debug
+```
+
+Use explicit software events for CPU accounting. These commands measure a bounded hashing workload; replace the command after `--` with the program you need to investigate:
 
 ```sh title="Phone"
+perf stat -e task-clock,context-switches,cpu-migrations,page-faults -- sh -c 'dd if=/dev/zero bs=64K count=512 | sha256sum'
+perf record -e cpu-clock -F 99 -o /tmp/perf.data -- sh -c 'dd if=/dev/zero bs=64K count=2048 | sha256sum'
+perf report --stdio --no-children -i /tmp/perf.data
+strace -f -c -- sh -c 'dd if=/dev/zero bs=64K count=512 | sha256sum'
+```
+
+`task-clock` measures CPU time and `cpu-clock` samples software CPU time; these examples do not require a hardware performance counter. `strace -f -c` summarizes system calls, including those made by child processes. Use `strace -f -p PID` to attach to a running program and <Key>Ctrl</Key>+<Key>C</Key> to detach. Tracing adds overhead, so compare the program's behavior without it as well.
+
+The supplied perf supports software counters and CPU sampling with a text report. It is built without libtraceevent, libdw or libunwind: `perf sched`, `perf trace` and DWARF call graphs are unavailable. Use tracefs for kernel tracing. Store short captures under `/tmp`; it uses the phone's RAM.
+
+## Check display presentation
+
+Debug images include `fplinux-display-test`. It uses the native display size and the normal DRM presentation and console handoff. `geometry` shows color corners and one-pixel detail; `gray` holds a constant field. Both present once, hold until `--duration-ms`, and restore the console. `ids` and `motion` repeat complementary 16-bit frame markers at the top, middle and bottom; the moving edge advances eight pixels per completed frame.
+
+```sh title="Phone"
+fplinux-display-test --pattern geometry --duration-ms 3000
+fplinux-display-test --pattern gray --duration-ms 3000
+fplinux-display-test --pattern motion --fps 0 --duration-ms 3000 > /tmp/display.csv
+fplinux-display-test --renderer gpu --pattern geometry --verify --duration-ms 3000
+```
+
+Software drawing is the default. `--renderer gpu` requires a supported GPU and uses the shared GPU-to-DRM presentation path; initialization failures remain errors. `--verify` compares every visible RGB565 pixel with the software reference before presentation. It adds CPU readback and comparison, so omit it when measuring performance.
+
+GPU scene rendering overlaps the preceding display transfer. Its CSV completion timestamp records when the previous presentation is observed complete after preparing the next frame; it is not the kernel's exact completion timestamp. The last presentation is drained before restoring the console. Use completed-frame throughput to compare these modes, rather than interpreting the GPU rows as isolated rendering or SPI latency.
+
+`--fps 0` removes application pacing. The CSV records frame ID, drawing start, submission and completed presentation as monotonic nanoseconds. The summary counts completed presentations. Runs are limited by both `--frames` (default: 120) and `--duration-ms` (default: 3000, maximum: 60000); an in-flight presentation can finish after the deadline. For one minute of motion, use `--pattern motion --fps 0 --frames 65536 --duration-ms 60000`. These timings do not measure optical refresh or prove the absence of tearing or flicker. A camera's exposure, sampling rate and rolling shutter also affect recorded transitions. Run `fplinux-display-test --help` for the remaining options.
+
+## Trace the kernel
+
+The debug kernel enables debugfs, tracefs, function and function-graph tracing, kprobe/uprobe events and syscall tracing. Check the mounted tracing filesystem and the facilities exposed by the running kernel before selecting a tracer or event. If tracefs is not mounted, mount it first:
+
+```sh title="Phone"
+mountpoint -q /sys/kernel/tracing || mount -t tracefs nodev /sys/kernel/tracing
 cat /sys/kernel/tracing/available_tracers
 cat /sys/kernel/tracing/current_tracer
-cat /sys/kernel/tracing/kprobe_events
+cat /sys/kernel/tracing/available_events
 ```
 
 :::caution[Tracing can destabilize the phone]
@@ -61,14 +99,28 @@ Tracers and dynamic probes can crash the kernel and use up the phone's small RAM
 
 :::
 
-To clean up, first disable probes in any extra trace instances you created. Then remove the root probes, restore the `nop` tracer and free the trace buffer:
+Use a separate trace instance for a capture so its tracer, enabled events and buffer do not replace another capture's state. Choose an unused instance name and keep the same shell open until cleanup:
 
 ```sh title="Phone"
-echo 0 > /sys/kernel/tracing/events/kprobes/enable
-echo > /sys/kernel/tracing/kprobe_events
-echo nop > /sys/kernel/tracing/current_tracer
-echo 1 > /sys/kernel/tracing/free_buffer
+trace_instance=/sys/kernel/tracing/instances/fplinux-debug-$$
+mkdir "$trace_instance" || exit 1
+cleanup_trace() {
+    printf 0 > "$trace_instance/tracing_on"
+    printf 0 > "$trace_instance/events/enable"
+    printf nop > "$trace_instance/current_tracer"
+    rmdir "$trace_instance"
+}
+trap cleanup_trace EXIT
 ```
+
+Configure the capture through files inside that instance. When finished, stop it, disable its events, restore its tracer and remove only that instance:
+
+```sh title="Phone"
+cleanup_trace
+trap - EXIT
+```
+
+Dynamic probe definitions are shared between instances. Disable your probe in each instance that uses it, then remove only that definition with `printf '%s' '-:GROUP/EVENT' >> /sys/kernel/tracing/kprobe_events` or the corresponding `uprobe_events` file. Replace `GROUP/EVENT` with the name you created; do not clear the shared probe files.
 
 ## Build a test program for the phone
 
@@ -81,8 +133,8 @@ echo 1 > /sys/kernel/tracing/free_buffer
 Copy it to a running phone and start it:
 
 ```sh title="PC"
-./fplinux console nokia-ta1618 --upload .cache/tools/diag-arm /tmp/diag-arm
-./fplinux console nokia-ta1618 --exec 'chmod +x /tmp/diag-arm && /tmp/diag-arm'
+./fplinux console nokia-ta1618 --build-type debug --upload .cache/tools/diag-arm /tmp/diag-arm
+./fplinux console nokia-ta1618 --build-type debug --exec 'chmod +x /tmp/diag-arm && /tmp/diag-arm'
 ```
 
 `probe-build` only compiles. It does not add the program to an image. A failed compile leaves an earlier output unchanged. On the first run it downloads the pinned packages it needs; run `./fplinux setup` first if the build environment is not prepared.
@@ -93,6 +145,8 @@ Follow [Report a problem](/fplinux/help/report/) for the information to include 
 
 ## Log command reference
 
-`latest` is selected after applying filters. A directory basename is accepted only when it identifies one run. `--stage` accepts a stage name or complete stage path; a shared name selects all matches. `show --failed` filters stages of the chosen run, rather than selecting another run. When `--stage` is omitted, `show --failed` explains a result with no failed or interrupted stages and exits successfully. `--tail 0` omits existing output. `follow` stays with its selected invocation and prints new stages until completion; Ctrl+C stops only the reader.
+`latest` is selected after applying filters, including `--build-type release` or `--build-type debug`. Runs without recorded build type show `unknown` and do not match either filter. A directory basename is accepted only when it identifies one run. `--stage` accepts a stage name or complete stage path; a shared name selects all matches. An unknown stage reports the available IDs. Use `--tail 0` to list stage headings without their existing output.
+
+`show --failed` filters stages of the chosen run, rather than selecting another run. It includes unfinished child stages when their parent run failed or was interrupted; the heading preserves the child's recorded status and explains the unfinished state. Reading logs does not change their recorded metadata. To select the latest failed build, use `logs show latest --command build --status failed --failed`. With no matching stages, the reader explains that result and exits successfully. `follow` stays with its selected invocation and prints new stages until completion; Ctrl+C stops only the reader.
 
 Times are UTC. Output is grouped by stage, not globally merged; verbose parent logs may repeat child output. Log inspection needs no prepared build environment. Exit status is `0` for successful inspection, including a failed run, `1` for missing/ambiguous runs or read errors, `2` for invalid arguments and `130` for Ctrl+C. A running record without a surviving process is reported as incomplete.

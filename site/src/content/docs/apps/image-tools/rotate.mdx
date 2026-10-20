@@ -10,7 +10,9 @@ import rotateSource from '../../../../assets/screens/rotate-source.png';
 import rotateResult from '../../../../assets/screens/rotate-result.png';
 import FeatureStatus from '../../../../components/FeatureStatus.astro';
 
-`fplinux-rotate` rotates a raw image by 90, 180 or 270 degrees, or mirrors it horizontally. It runs either on the CPU or on the phone's image rotation accelerator (ROTA), and can show the result on the display. The command is part of the system on every phone; run it on the phone as described in [Applications](/fplinux/apps/).
+`fplinux-rotate` rotates a raw image by 90, 180 or 270 degrees, or mirrors it horizontally. On [UMS9117](/fplinux/platforms/ums9117/), it runs either on the CPU or on the image rotation accelerator (ROTA), and can show the result on the display. The command is included in UMS9117 images; run it on the phone as described in [Applications](/fplinux/apps/).
+
+This guide covers UMS9117. The tool is not supplied for [SC9820E](/fplinux/platforms/sc9820e/).
 
 <FeatureStatus feature="image-rotation" />
 
@@ -57,7 +59,7 @@ The result file has packed rows in the same format as the source. Vertical mirro
 
 ## Preview on the display
 
-`--display` and `--display-ms` convert the result to RGB565 and show it until the time runs out; whichever of the two comes last sets the time. The result must be exactly the size of the display: the preview does not scale the image or rotate the console. For a `128×160` display, rotate a `160×128` source by 90 degrees. The terminal returns when the preview ends.
+`--display` and `--display-ms` convert the result to RGB565 and show it until the time runs out; whichever of the two comes last sets the time. The result must be exactly the size of the display: the preview does not scale the image or rotate the console. For a `128×160` display, rotate a `160×128` source by 90 degrees. Stop the graphical session before a preview and restart it afterwards, following [Direct-display applications](/fplinux/use/session/#direct-display-applications).
 
 The NV12 and NV16 preview uses a limited-range BT.601 conversion. Full-range images may appear with changed contrast or colors; the preview is not a check of color fidelity. This conversion does not change the saved raw result.
 
@@ -82,17 +84,13 @@ NV12 rotates the luma grid and its half-size chroma grid separately, preserving 
 
 Use ROTA during [camera capture](/fplinux/use/camera/) only if that combination is qualified on your [phone page](/fplinux/phones/#support-status). Otherwise, stop capture first or use `--engine cpu`. Use the CPU path when ROTA is unavailable.
 
-## Timing figures
-
-`--iterations` and `--benchmark` print the time spent in each stage, in microseconds, together with the process CPU time. `--benchmark` does not hold a preview. The figures describe this process, not the whole system, and they do not measure when the picture becomes visible.
-
 ## If the accelerator fails
 
 If the accelerator cannot be stopped safely after an error, it refuses all further work until the phone is [powered off](/fplinux/use/power/) and started again. Use `--engine cpu` in the meantime.
 
 ## Timing reference
 
-`--iterations N` repeats the selected engine on the same input. `--benchmark N` runs four same-input batches in CPU/ROTA/ROTA/CPU order, with N iterations per batch:
+`--iterations N` repeats the selected engine on the same input. `--benchmark N` runs four same-input batches in CPU/ROTA/ROTA/CPU order, with N iterations per batch. Both print stage times in microseconds and process CPU time:
 
 ```sh
 fplinux-rotate --engine rota --format rgb565 --width 320 --height 240 \

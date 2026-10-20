@@ -14,9 +14,9 @@ Prepare the build environment with [Build FPLinux](/fplinux/start/build/), then 
 ./fplinux dependencies verify ../fplinux-inputs
 ```
 
-`create` selects the external inputs declared by the checkout's locks, package recipes and build environment configuration. It checks each download against its declared checksum and any declared size, stores shared bytes once and exports the current build environment through Kern. Missing inputs are downloaded at their exact declared versions; the command does not choose replacements.
+`create` selects the external inputs declared by the checkout's locks, package recipes and build environment configuration. It checks each download against its declared checksum and any declared size, stores shared bytes once and archives the prepared build root filesystem. Missing inputs are downloaded at their exact declared versions; the command does not choose replacements.
 
-The environment lock declares package selection and the exact APK and wheel downloads. The platform loader asset lock pins the RAM loader and shared map archive; target manifests select map members and pin their extracted hashes. Prepared [device data](/fplinux/guides/device-data/) remains separate.
+The snapshot includes the exact APK, wheel and declared loader source or binary downloads. Prepared [device data](/fplinux/guides/device-data/) remains separate.
 
 To require locally stored inputs, add `--offline`. Repeat `--from PATH` to look for original downloads in additional local files or directories; only bytes that match a declared checksum are accepted:
 
@@ -26,7 +26,7 @@ To require locally stored inputs, add `--offline`. Repeat `--from PATH` to look 
 
 Offline creation requires every declared archive to be available locally. The command reports missing exact inputs instead of querying a package registry for replacement versions.
 
-The directory's `manifest.json` records the selected inputs, original URLs, checksums, sizes and environment state. Each directory holds one input set. Use another directory to preserve a different set. Existing contents are verified before reuse.
+The directory's `manifest.json` records the selected inputs, original URLs, checksums, sizes and environment state. Each directory holds one input set and its saved build environment. Repeating `create` with the same inputs and environment verifies and reuses the saved archive. A changed input set or build environment requires another directory; a conflict leaves the saved manifest intact.
 
 ## Verify a snapshot
 
@@ -43,9 +43,9 @@ Verification checks the stored bytes and their agreement with this checkout's cu
 ./fplinux doctor
 ```
 
-Restoration verifies the complete snapshot before writing its declared cache destinations and requires the current external declarations to match. Loading the saved environment also requires its exact image recipe. The environment's file bytes, links, numeric owners and permission bits are checked before it becomes available. Timestamps, extended attributes and hardlink relationships are outside that comparison.
+Restoration verifies the complete snapshot before writing its declared cache destinations and requires the current external declarations to match. Restoring the saved environment also requires its exact preparation recipe. Its root filesystem archive preserves file bytes, links, logical numeric owners and permission bits; these are checked before the environment becomes available. Timestamps, extended attributes and hardlink relationships are outside that comparison.
 
-An existing cache file with different bytes is reported and retained for inspection before input restoration writes any files. The snapshot restores the environment and external inputs, not compiled APKs, root filesystems, kernels or successful build results. Build the selected phone afterwards:
+An existing cache file with different bytes is reported and retained for inspection before input restoration writes any files. The snapshot restores the host environment and external inputs, not compiled APKs, phone root filesystems, kernels or successful build results. Build the selected phone afterwards:
 
 ```sh title="PC"
 ./fplinux build nokia-ta1618 --offline
@@ -53,7 +53,7 @@ An existing cache file with different bytes is reported and retained for inspect
 
 ## Save inputs without an environment
 
-Add `--inputs-only` when creating a snapshot to omit the environment export:
+Add `--inputs-only` when creating a snapshot to omit the environment archive:
 
 ```sh title="PC"
 ./fplinux dependencies create ../fplinux-inputs --inputs-only

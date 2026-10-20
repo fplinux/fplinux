@@ -35,13 +35,13 @@ Run every command from the root of the source checkout.
 Choose a target name and the phone's public brand and product names:
 
 ```sh title="PC"
-./fplinux target new <target> --brand <brand> --product "<product>"
+./fplinux target new <target> --platform ums9117 --brand <brand> --product "<product>"
 ```
 
 - `<target>` names the new `targets/<target>` directory and is the target name for every other command. It consists of lowercase letters and digits separated by single hyphens.
 - `--brand` and `--product` are the public names described in [Target and platform identity](/fplinux/porting/identity/). The device name, the brand and product separated by one space, must be ASCII and at most 31 characters long.
 - `--compatible <vendor>,<device>` sets the board compatible string. Without it, the command forms one from the lowercase brand and product, for example `hammer,horizon-lte`.
-- `--platform <platform>` selects a platform explicitly. With the single current platform, the command selects `ums9117` by default; when more than one platform exists, this option is required.
+- `--platform ums9117` selects the platform supported by this headless bring-up workflow. This workflow does not support SC9820E.
 
 The command creates the target manifest, headless bootstrap, board Devicetree, kernel configuration and standalone-archive descriptions. It uses the platform's pinned RAM loader. It lists the files it created. It refuses an existing target directory and leaves nothing behind when a name or identity field is invalid.
 
@@ -69,25 +69,25 @@ Wait until the loader asks for the phone. Only then hold the boot key named in t
 	<BringUpConnection />
 </Figure>
 
-Right after you connect the phone, run `lsusb` in a second terminal and keep the phone's line for the report. In BootROM mode it reads `ID 1782:4d00 Spreadtrum Communications Inc.` If the loader does not see the phone, run `lsusb` while the phone is still connected with the key held and keep whatever line appears, or note that no new line appeared.
+Right after you connect the phone, run `lsusb` in a second terminal and keep the phone's line for the report. In BootROM mode it reads `ID 1782:4d00 Spreadtrum Communications Inc.` If the loader does not see the phone, run `lsusb` while the phone is still connected with the key held and keep whatever line appears, or note that no new line appeared. A headless target with no runtime data groups boots directly; it does not stop for automatic NAND preparation.
 
-A successful boot includes these milestones, with other output between them:
+A successful boot records these milestones in the `runtime.log` whose path `run` prints, with other output between them:
 
 ```text title="Output"
 BSL_REP_VER: "SPRD3\0"
 BSL_REP_VER: "Custom FDL1: CHIP ID = 0x98180001\0"
 <TARGET>_LINUX_BOOTSTRAP event=stage stage=1 message=NO DISPLAY
 <TARGET>_LINUX_BOOTSTRAP event=stage stage=5 message=PREPARE LINUX
-Private USB-NCM SSH session is ready.
+Secure phone connection is ready.
 ```
 
 The first `BSL_REP_VER` line comes from the phone's BootROM, the second from the RAM loader (FDL1) once it runs. Its `CHIP ID` identifies the SoC; the supported phones report `0x98180001`. The bootstrap records use the target's `record_prefix`; see [Logging](/fplinux/develop/logging/). `NO DISPLAY` confirms headless mode. Wait for the authenticated session's final readiness message before using phone commands.
 
-From an interactive terminal, `run` then opens a shell on the phone. Leaving that shell does not stop Linux. Keep the complete `run` output for the report.
+From an interactive terminal, `run` then opens a shell on the phone. Leaving that shell does not stop Linux. Keep the complete `run` output and its runtime log for the report. Close this launcher before opening another interactive launcher; explicit NAND and remote command operations can use the existing session.
 
 ## Where the boot stopped
 
-Find the last line that `run` printed:
+Find the last milestone or error in the runtime log:
 
 | Last output | Meaning | What to do |
 | --- | --- | --- |
@@ -96,7 +96,7 @@ Find the last line that `run` printed:
 | BootROM `BSL_REP_VER`, no `Custom FDL1` line, then `fplinux run: RAM loader failed after 3 attempts` | The RAM loader did not start. | [Set the exec distance](#fdl1-does-not-start). |
 | `Custom FDL1`, then failed attempts or `event=error error=2 message=64MB RAM REQUIRED` | Another SoC variant or memory size. | [Report the phone](#loading-stops-after-fdl1-starts). |
 | `PREPARE LINUX`, then an error about the bridge, BootROM USB or the SSH session | Linux USB did not come up. | [Check Linux USB](#linux-usb-does-not-appear). |
-| `Private USB-NCM SSH session is ready.` | Linux runs. | [Identify the NAND chip](#identify-the-nand-chip). |
+| `Secure phone connection is ready.` | Linux runs. | [Identify the NAND chip](#identify-the-nand-chip). |
 
 ### The loader does not see the phone
 
@@ -116,7 +116,7 @@ If FDL1 does not start with the new target's `exec_distance = 0`, set this in th
 exec_distance = 0x314d
 ```
 
-Build and run the target again. The loader then lists the extra operation:
+Build and run the target again. The runtime log then lists the extra operation:
 
 ```text title="Output"
 Operations: exec-distance setup, RAM FDL1 load, RAM payload load.
@@ -136,7 +136,7 @@ FPLinux does not start on such a phone. [Report it](#report-the-phone) with the 
 
 ### Linux USB does not appear
 
-After `PREPARE LINUX`, the phone leaves BootROM USB `1782:4d00` and Linux starts its USB device `0525:a4a6`. When the boot stops before `Private USB-NCM SSH session is ready.`, `run` ends with an error such as:
+After `PREPARE LINUX`, the phone leaves BootROM USB `1782:4d00` and Linux starts its USB device `0525:a4a6`. When the boot stops before `Secure phone connection is ready.`, `run` ends with an error such as:
 
 ```text title="Output"
 fplinux run: bridge did not acknowledge the Linux transition before the deadline
@@ -187,11 +187,11 @@ feature_c0=0x00
 ./fplinux nand backup <target> nand.bin
 ```
 
-The command reads the complete NAND through the running session, which takes several minutes, and reports the two files it writes:
+The command reads the complete NAND through the running session, which takes several minutes, and reports progress and the backup path:
 
 ```text title="Output"
-NAND backup saved: nand.bin (138412032 bytes, sha256=...)
-NAND geometry saved: nand.bin.json (chip DS35M1GA, id_bytes e521)
+Reading NAND: 100.0% (132.0/132.0 MiB) · … MiB/s
+Backup saved: /path/to/nand.bin
 ```
 
 `nand.bin` holds every page's main and OOB bytes. `nand.bin.json` is the geometry receipt. Both files are readable only by you.
@@ -211,10 +211,10 @@ When you are done, [end the session safely](/fplinux/use/power/) before returnin
 The board report lists the keypad, panel, pin and other board values found in the stock firmware in your backup. Prepare it from the saved backup; the phone does not need to be connected, and no target build is required:
 
 ```sh title="PC"
-./fplinux device-data prepare <target> --from-dump nand.bin
+./fplinux device-data report <target> --from-dump nand.bin
 ```
 
-The command reads `nand.bin` with its receipt `nand.bin.json`, prepares the host extraction tool in the pinned build environment without a target bundle, and prints the location of `board-report.json`. Use `--offline` when the required environment and source archives are already available locally.
+The command reads `nand.bin` with its receipt `nand.bin.json`, prepares the host extraction tool in the pinned build environment without a target bundle, and prints the location of `.cache/diagnostics/device-data/<target>/report-*/board-report.json`. A new target without declared NAND geometry needs the receipt; the command does not infer geometry from file length. Use `--offline` when the required environment and source archives are already available locally. The report is independent of runtime data groups and supplies no pin-map or keymap files to later boots.
 
 [Board data from the stock firmware](/fplinux/porting/ums9117/#board-data-from-the-stock-firmware) describes what the report contains and which decisions it leaves to a person. [Device data](/fplinux/guides/device-data/) describes device-data preparation in general.
 

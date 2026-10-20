@@ -256,7 +256,7 @@ def create_parser(
     setup_parser.add_argument(
         "--force",
         action="store_true",
-        help="rebuild the pinned image even when the current recipe is ready",
+        help="rebuild the pinned build environment even when it is ready",
     )
     dependencies_parser = commands.add_parser(
         "dependencies", help="preserve exact external build inputs"
@@ -326,7 +326,7 @@ def create_parser(
         type=_positive_integer,
         default=DEFAULT_BUILD_MEMORY_MIB,
         metavar="N",
-        help="set the build container memory budget in MiB (default: %(default)s)",
+        help="set the build memory budget in MiB (default: %(default)s)",
     )
     build_parser.add_argument(
         "--verbose",
@@ -394,7 +394,7 @@ def create_parser(
         "--apply",
         dest="prune_apply",
         action="store_true",
-        help="under the global cache lock, remove disposable staged workspaces",
+        help="remove disposable staged workspaces",
     )
     run_parser = commands.add_parser(
         "run", help="prepare phone data, start Linux or reopen its SSH connection"

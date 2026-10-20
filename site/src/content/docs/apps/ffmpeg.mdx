@@ -37,4 +37,4 @@ Raw output has no dimensions, timestamps or pixel-format header. Read the output
 - Compressed video encoding, resizing, rotation and pixel-format conversion are not included. Keep the decoded native pixel format.
 - Keep raw output bounded in `/run` or `/tmp`: a complete raw video can use much more memory than its compressed input. Retain only needed frames or send them through standard output to a consumer.
 
-The package does not replace the [hardware JPEG tools](/fplinux/apps/image-tools/jpeg/) or [rotation tool](/fplinux/apps/image-tools/rotate/).
+On UMS9117, the package does not replace the [hardware JPEG tools](/fplinux/apps/image-tools/jpeg/) or [rotation tool](/fplinux/apps/image-tools/rotate/). Those UMS9117 interfaces do not apply to SC9820E.

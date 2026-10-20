@@ -1,0 +1,22 @@
+---
+title: SC9820E platform
+description: SC9820E Linux integration, USB loading and target-owned hardware support.
+source:
+  - platforms/sc9820e
+---
+
+The `sc9820e` platform provides 32-bit ARM Linux integration for the Unisoc SC9820E. Its Devicetree compatible is `sprd,sc9820e`. The current target is [Xiaomi Qin 1s+](/fplinux/phones/xiaomi-qin-1s-plus/); its checklist records exact-phone support and limitations.
+
+## Platform and target boundaries
+
+The platform owns processor, interrupt and timer integration, clocks, ADI and PMIC access, GPIO, SPI, matrix keypad, backlight and microSD controller support. Panfrost provides the GPU kernel interface, with Mesa in userspace. The target supplies its memory layout, enabled devices, panel description, keypad wiring, USB handoff, audio paths and graphics configuration. Keep board-specific configuration in the target.
+
+The display uses the shared DRM MIPI DBI driver with a target-owned panel description. Input uses evdev with phone keypad devices identified by `phys=fplinux/keypad0`; Qin divides its keys between matrix and GPIO devices. The standard Weston session owns these devices and supplies Wayland surfaces and [input](/fplinux/develop/input/#wayland-applications) to graphical applications. Direct-display tools use the shared [DRM interface](/fplinux/develop/device-interfaces/#drm-display) with the session stopped. The [brightness service](/fplinux/use/display-and-lights/#screen-brightness) is shared by both. Offscreen GPU rendering is separate from the panel interface and does not imply GPU acceleration in an application.
+
+## RAM loading
+
+The host loader and the three phone-side RAM-loading stages are built from pinned sources. FDL1 initializes memory and receives the RAM images, SML provides the secure monitor and CPU power interface, and the early FDL2 board initialization transfers control to the Linux entry before storage initialization. The target owns the loader patches, monitor platform files and RAM layout. The bundle includes the resulting loader binaries with its normal integrity checks.
+
+The current target supports the Linux source-checkout workflow and ordinary or autonomous [Linux standalone archives](/fplinux/guides/standalone-archive/). The default profile keeps the system in RAM; `microsd-root` loads Linux over USB and selects an ext4 system root on microSD. Both profiles require a fresh PC load for every session. Autonomous archives support the default RAM profile and open SSH without NAND preparation. Follow [microSD system card](/fplinux/guides/microsd-system-card/) for the shared card procedure and check the [phone page](/fplinux/phones/xiaomi-qin-1s-plus/) for qualified profiles, sleep, power and storage limits.
+
+Headless target generation and native Windows execution are unsupported. The target inherits the USB device setup established during loading; USB host mode is unsupported. Wi-Fi and Bluetooth stay off by default and are unsupported.

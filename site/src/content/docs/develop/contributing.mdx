@@ -17,7 +17,7 @@ The source is on [GitHub](https://github.com/fplinux/fplinux). Phone, applicatio
 
 Pass each file you edited as a path relative to the checkout. The command does not walk directories. It refuses files that have no project formatter instead of guessing one. Tracked and non-ignored untracked sources are accepted. Selected files are formatted together; if any formatter fails, the command leaves them unchanged. The [source-format contract](/fplinux/develop/code-style/formats/) describes ordering, templates and format-specific limits.
 
-Declared Linux patches are accepted too. Their affected C and header regions use the pinned Linux formatting tools; other patch contents are retained. This needs the pinned Linux source archive and downloads it if missing. Containerfiles, ordinary plain text and other patch series have no formatter and are rejected.
+Declared Linux patches are accepted too. Their affected C and header regions use the pinned Linux formatting tools; other patch contents are retained. This needs the pinned Linux source archive and downloads it if missing. Ordinary plain text and other patch series have no formatter and are rejected.
 
 ## Run the quality gate
 
@@ -32,7 +32,10 @@ While you work, run only the parts you need. `--list` shows them:
 ```sh title="PC"
 ./fplinux check --list
 ./fplinux check python
+./fplinux check tests
 ```
+
+`python` checks Python formatting, lint and types. `tests` runs all five pytest tiers. The complete gate includes both. `./fplinux test` selects smaller workloads and always executes them.
 
 On a PC with little memory, check the kernel configurations one at a time:
 
@@ -40,21 +43,26 @@ On a PC with little memory, check the kernel configurations one at a time:
 ./fplinux check --no-cache --jobs 1
 ```
 
+For `check`, `--jobs` limits simultaneous kernel configurations, not test processes. Its default is three when kernel checks are selected, and one otherwise or with `--verbose`. Explicit values above one require the `kernel` scope and cannot be combined with `--verbose`. For `build`, `--jobs` instead limits parallel compilation.
+
 An ordinary build or RAM load without source changes does not need the gate.
+
+The graphical session, its applications and shared UI libraries participate in the default source checks and test discovery. Focused graphical-session tests can also be selected explicitly with `./fplinux test`.
 
 ## Run tests
 
-Run pytest workloads by a dotted module, class or test name, a pytest node selector, or one tier:
+Run pytest workloads by a directory, dotted module, class or test name, a pytest node selector, or one tier:
 
 ```sh title="PC"
 ./fplinux test tests.small.workspace.test_snapshot
 ./fplinux test 'tests/small/workspace/test_snapshot.py::WorkspaceSnapshotTests::test_snapshot_recipe_includes_file_mode'
+./fplinux test tests/host_tool/gui
 ./fplinux test --tier small
 ```
 
 The tiers are `small`, `host_process`, `host_tool`, `artifact` and `public_workflow`. Without a selection, all five run in that order. Node selectors use `path.py::Class::method` or `path.py::test_function`; append `[case-id]` to select a parameterized case, and quote brackets in the shell. `--verbose` shows individual test names and streams output; `--failfast` stops on the first failure or error.
 
-Tests run against a captured source snapshot. Most run with read-only sources and no network access in the pinned environment. Source-cache ownership and image-publication metadata tests run on the host with real subordinate UID/GID mappings and the same locked Python dependencies. They require the namespace support used by `setup`; unavailable mappings fail instead of skipping tests.
+Tests run against a captured source snapshot. Directory selections must exist inside `tests/<tier>/` in that snapshot and use ordinary pytest discovery. Most tests run with read-only sources and no network access in the pinned environment. Source-cache ownership and environment-publication metadata tests run on the host with real subordinate UID/GID mappings and the same locked Python dependencies, including when selected through a directory. They require the namespace support used by `setup`; unavailable mappings fail instead of skipping tests.
 
 A selected run always executes and does not refresh a successful `check` result or replace `./fplinux check`. Exit status is `0` for success, `1` for failures or unresolved names, `2` for invalid arguments and `5` when pytest finds no tests. Ctrl+C returns `130`.
 

@@ -7,11 +7,15 @@ description: Short definitions of the words these pages use for phones, loading,
 
 ### UMS9117
 
-The Unisoc chip in every supported phone, also known by its reference name T117. See [UMS9117 platform](/fplinux/porting/ums9117/).
+The Unisoc chip used by several supported phones, also known by its reference name T117. See [UMS9117 features](/fplinux/platforms/ums9117/).
+
+### SC9820E
+
+The Unisoc chip used by the Xiaomi Qin 1s+. See [SC9820E features](/fplinux/platforms/sc9820e/).
 
 ### Platform
 
-The code shared by all phones with the same chip. FPLinux has one platform, `ums9117`.
+The code shared by phones with the same chip. FPLinux has the `ums9117` and `sc9820e` platforms.
 
 ### Target
 
@@ -23,7 +27,7 @@ The result for one function on one exact phone, with its tested conditions and r
 
 ### Implementation status
 
-Whether FPLinux provides a function, and whether a device result is recorded for it. This does not establish support on every model. See [Features](/fplinux/features/#status-meaning).
+Whether FPLinux provides a function on a particular platform. This does not establish a device result or support on every model. See [Features](/fplinux/features/#status-meaning).
 
 ### Stock firmware
 
@@ -31,17 +35,17 @@ The software the phone came with. Starting the phone normally, without the boot 
 
 ### Internal storage
 
-The phone's built-in flash memory, which holds the stock firmware. FPLinux only reads it, to prepare [device data](/fplinux/guides/device-data/) and backups.
+The phone's built-in flash memory, which holds the stock firmware. Targets with a read-only NAND interface can prepare [device data](/fplinux/guides/device-data/) and backups. Other targets provide no internal-storage access.
 
 ### Device data
 
-Radio firmware and calibration, Bluetooth records, FM settings, audio tuning and, on targets that declare them, board maps read from your own phone's internal storage. FPLinux does not ship these inputs. See [Device data](/fplinux/guides/device-data/).
+Radio firmware and calibration, Bluetooth records, FM settings and audio tuning from your own phone. FPLinux does not ship these inputs. Target-owned board initialization and Linux keymaps are separate. See [Device data](/fplinux/guides/device-data/).
 
 ## Loading the phone
 
 ### Loader
 
-The PC side of a start: `./fplinux run` in a source checkout, or the runner in a [standalone archive](/fplinux/guides/standalone-archive/). It sends FPLinux over USB. The ordinary runner opens a shell when started from an interactive terminal; the autonomous archive launcher prepares your data on first use and starts the phone interface on later runs. See [Run FPLinux](/fplinux/start/run/).
+The PC side of a start: `./fplinux run` in a source checkout, or `fplinux.py run` in a [standalone archive](/fplinux/guides/standalone-archive/). The shared runtime prepares required UMS9117 RAM data on first use, sends FPLinux over USB and opens SSH. Qin and headless UMS9117 targets without runtime data groups boot directly. Running the same command again reopens an authenticated live session. See [Run FPLinux](/fplinux/start/run/).
 
 ### Boot key
 
@@ -65,13 +69,13 @@ The default build. It runs entirely from the phone's RAM and forgets everything 
 
 ### microSD system card
 
-A build that keeps the Linux system on a microSD card, so packages and files persist. Each cold start still needs a load from the PC, which starts the U-Boot boot loader; U-Boot then starts Linux from the card. See [microSD system card](/fplinux/guides/microsd-system-card/).
+A build that keeps the Linux system on a microSD card, so packages and files persist. Each cold start still needs the PC loader. UMS9117 uses U-Boot to start Linux from the card; SC9820E loads Linux over USB and mounts the card as its root. See [microSD system card](/fplinux/guides/microsd-system-card/).
 
 ## Builds and packages
 
 ### Profile
 
-The boot mode a build is made for: the RAM system by default, or `microsd-uboot` for a system card on targets that support it. Check your phone's supported profiles and pass the same `--profile` to every command for that build.
+The boot mode a build is made for: the RAM system by default, or a microSD system card with `microsd-uboot` on supported UMS9117 targets and `microsd-root` on Qin. Check your phone's supported profiles and pass the same `--profile` to every command for that build.
 
 ### Build type
 

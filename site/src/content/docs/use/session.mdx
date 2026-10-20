@@ -1,0 +1,69 @@
+---
+title: Phone interface
+description: Open applications, switch tasks, type text and change settings in the graphical phone session.
+source:
+  - alpine/aports/fplinux-session
+  - alpine/aports/fplinux-launcher
+  - alpine/aports/fplinux-settings
+  - alpine/aports/fplinux-notes
+  - alpine/aports/fplinux-snake
+  - alpine/aports/fplinux-terminal
+---
+
+import Key from '../../../components/Key.astro';
+
+The standard image starts a Weston/Wayland session with a Home screen and an application catalog. It includes Settings, Notes, Snake and [Terminal](/fplinux/use/terminal/). The [USB shell](/fplinux/use/connect/) remains available alongside the interface. Check your [phone page](/fplinux/phones/) for physical display and keypad support; selecting the graphical session does not establish that every phone has been tested with it.
+
+## Home and applications
+
+From Home, press <Key>Centre</Key> to open the application catalog. Move with the D-pad and press <Key>Centre</Key> to open the selected application. The <Key>Left soft</Key> key switches the catalog between a grid and a list; <Key>Right soft</Key> returns to Home. Follow the labels at the bottom of the screen inside applications.
+
+A short press and release of <Key>Red</Key> in an application offers **Minimize** on <Key>Left soft</Key> and **Close** on <Key>Right soft</Key>. Press <Key>Red</Key> again to close it. Minimize keeps the application in the session and returns to Home; Close asks it to save and exit, then returns to Home. Press <Key>Centre</Key> (**Cancel**) or an external keyboard's <Key>Esc</Key> to dismiss the choice and return to the application. <Key>Ctrl</Key>+<Key>Esc</Key> returns directly to Home. From Tasks or the catalog, <Key>Red</Key> returns to Home.
+
+Press <Key>Left soft</Key> on Home to open **Tasks**, select a task to return to it, or choose **Close app** and confirm to close it. Save important work before closing a task; unsaved changes can be lost.
+
+An external keyboard uses arrows, <Key>Enter</Key> and <Key>Esc</Key> for navigation. <Key>Tab</Key> opens Tasks from Home or switches the catalog view. Available Bluetooth and forwarded USB keyboards depend on the phone's [input support](/fplinux/use/connect/#type-with-your-computers-keyboard).
+
+## Type text
+
+Text fields use multi-tap input on the phone keypad: press a digit repeatedly to choose a letter, then pause or press another digit to commit it. The field shows its input language and mode. <Key>#</Key> changes the text mode, and <Key>\*</Key> opens symbols. Use the D-pad to move the cursor and the on-screen **Clear**, **Options** and **Back** actions to edit or leave the field. An external keyboard types through the session's keyboard layout; <Key>Alt</Key>+<Key>Shift</Key> switches installed layouts.
+
+Notes holds one note of up to 1,000 characters. **Options → Save** saves it and leaves the editor. The application also attempts to save when it becomes hidden or closes. Use Save and check for an error before relying on the saved copy.
+
+## Settings
+
+Open Settings from the catalog:
+
+- **Display** controls brightness from `1` to `10`, screen timeout, auto-lock and the light or dark theme.
+- **Time & language** changes the date and time in UTC and the interface language.
+- **Input** selects the keypad input language independently of the interface language.
+
+The available languages come from installed language packages. The standard image includes English and Russian. Changing a theme or interface language closes other graphical applications and reloads Home, so save your work first. See [Clock and alarms](/fplinux/use/power/#clock-and-alarms) for clock synchronization and battery-backed time.
+
+Settings are stored in `/etc/fplinux/session.conf`. Notes and application preferences are stored under `/home/fplinux/.local/state/fplinux/`. Restarting the graphical session keeps these files. In the default RAM boot, they disappear when the phone powers off. They survive a reboot only on a supported [persistent system root](/fplinux/guides/microsd-system-card/). A data card alone does not make these paths persistent.
+
+## Lock and screen timeout
+
+By default the screen dims and turns off after 30 seconds without input, then locks after another five seconds. Change these intervals in Settings. A key press wakes the screen without passing that press to the application. To unlock, press <Key>Left soft</Key> or <Key>Centre</Key>, then <Key>\*</Key> when prompted. On Home, a short press of <Key>Red</Key> locks the keypad and turns off the screen.
+
+Locking prevents accidental keypad input; it is not a password lock. Screen timeout and locking do not suspend Linux: programs and USB remain active. [System sleep](/fplinux/use/power/#sleep) is a separate, phone-specific operation. The battery icon is an estimate where readings are available; it does not establish calibrated battery measurement or charging support.
+
+## Snake
+
+Use the D-pad or <Key>2</Key>, <Key>4</Key>, <Key>6</Key> and <Key>8</Key> to steer. <Key>Centre</Key> starts or pauses play, and <Key>Right soft</Key> exits. Returning Home or locking pauses the game.
+
+## Direct-display applications
+
+ARMADA, TyrQuake, Brightness control and the image presentation tools use DRM directly. Run them with the graphical session stopped. Save your work, open a [USB shell](/fplinux/use/connect/) and stop the service:
+
+```sh title="Phone"
+rc-service fplinux-session stop
+```
+
+Run the application's command from that shell, following its [application guide](/fplinux/apps/). After it exits, start the graphical session again:
+
+```sh title="Phone"
+rc-service fplinux-session start
+```
+
+Stopping the service closes graphical applications. Exiting a direct-display application does not restart the graphical session.

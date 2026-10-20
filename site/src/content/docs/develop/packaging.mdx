@@ -26,6 +26,8 @@ Ordinary Linux runner packaging also requires a current offline site export. Ins
 
 A candidate contains `CANDIDATE-NOTICE.txt` and is meant only for testing on the phone. Do not publish it as a release. Creating or checking a candidate does not show that the phone boots or that any feature works.
 
+For the Xiaomi Qin 1s+, select `xiaomi-qin-1s-plus` in the build and package commands. Its loader stages are compiled and included in both ordinary and autonomous Linux archives. Optional prepared phone data is part of an ordinary build image, so keep archives containing it private. Autonomous archives omit prepared phone data and open SSH on the first run without NAND preparation. Qin does not support native Windows execution.
+
 For a [microSD system card](/fplinux/guides/microsd-system-card/), build that profile and package it as a candidate; the archive then also contains `FPLINUX.img.xz`:
 
 ```sh title="PC"
@@ -35,7 +37,7 @@ For a [microSD system card](/fplinux/guides/microsd-system-card/), build that pr
 
 ## Create an autonomous RAM archive
 
-Build the phone once, then package it for either host:
+For a supported UMS9117 target, build the phone once, then package it for either host:
 
 ```sh title="PC"
 ./fplinux build nokia-ta1618
@@ -43,15 +45,26 @@ Build the phone once, then package it for either host:
 ./fplinux package nokia-ta1618 --autonomous --host windows10 --candidate
 ```
 
-The hosts are Linux x86-64 and Windows 10 or 11 x64. Each archive contains only the selected phone's configuration. It bundles Python, OpenSSH and extraction tools, and omits the build's prepared phone data. The owner uses the same `Run.sh` or `Run.cmd` for preparation, loading and reconnecting: first to save and prepare their phone's own data, then to load FPLinux with that data and open SSH. Opening the same launcher again reconnects to the running phone. Only one launcher can run from the extracted directory at a time. These archives contain the selected host's tools, a short README and licenses; optional APKs and the offline site are omitted. Source and build material is written to a matching separate `*-sources.zip`. Keep both archives together when distributing them. Follow [Standalone archive](/fplinux/guides/standalone-archive/) for host requirements, connection order and current qualification limits.
+The UMS9117 hosts are Linux x86-64 and Windows 10 or 11 x64. Both launchers invoke the archive's shared `fplinux.py run` runtime. The owner uses the same `Run.sh` or `Run.cmd` for preparation, loading and reconnecting: first to save and prepare required phone data, then, after a safe disconnect and restart, to load FPLinux with that data and open SSH. Headless targets without runtime data groups boot directly.
 
-Autonomous packaging supports the default RAM profile. Add `--offline` to use only dependencies already stored locally. Without `--autonomous`, packaging creates the ordinary Linux runner archive with its build's prepared data.
+For Qin, build without prepared personal data and select the Linux host:
+
+```sh title="PC"
+./fplinux build xiaomi-qin-1s-plus --without-device-data
+./fplinux package xiaomi-qin-1s-plus --autonomous --host linux --candidate
+```
+
+`--without-device-data` keeps prepared data in the local cache but excludes it from the image. Qin autonomous packaging requires this build selection; it refuses an image containing prepared personal data. Its launcher loads FPLinux and opens SSH on the first run.
+
+Each archive contains only the selected phone's configuration, the selected host's Python and OpenSSH, a short README and licenses. UMS9117 archives also include extraction tools. Opening the same launcher again reconnects to the running phone. Only one launcher can run from the extracted directory at a time. Optional APKs and the offline site are omitted. Source and build material is written to a matching separate `*-sources.zip`. Keep both archives together when distributing them. Follow [Standalone archive](/fplinux/guides/standalone-archive/) for host requirements, connection order and current qualification limits.
+
+Autonomous packaging supports the default RAM profile. Add `--offline` to use only dependencies already stored locally. Without `--autonomous`, packaging creates the ordinary Linux runner archive, which uses `python3.14 -I fplinux.py run` with host-installed Python and OpenSSH. UMS9117 RAM preparation and reconnect behavior are shared across both archive forms and source-checkout launches. Qin and system-card builds include any prepared data selected at build time; keep archives containing personal data private.
 
 ## Release archives
 
 A release archive needs a phone test of the exact executable payload: the runtime files and the bundled APKs. After a candidate passes on the phone, its `Phone-test payload SHA256` is recorded for that target in `releases.lock.toml`. Only then does `./fplinux package nokia-ta1618` (without `--candidate`) write a release archive below `.cache/out/releases/`; otherwise it refuses. Documentation, notices and checksums are outside the payload, so changing them does not need a new phone test, but any change to the payload does. No payload is recorded yet, so no release archive can be created. The microSD system card is packaged only as a candidate.
 
-An ordinary Linux runner archive contains the image, the host tools and runner, the optional APKs, the USB rules, a `README.txt` for the selected phone, license notices, the build manifest and `SHA256SUMS`. It contains no build trees, caches or kernel debug files.
+An ordinary Linux runner archive contains the image, the host tools, the minimal runtime and its `fplinux.py` entry point, the optional APKs, the USB rules, a `README.txt` for the selected phone, license notices, the build manifest and `SHA256SUMS`. It contains no build trees, caches or kernel debug files. Runtime data and connection keys are kept in the extracted directory's `data/`; launch logs are under `logs/`.
 
 ## Inspect artifacts
 

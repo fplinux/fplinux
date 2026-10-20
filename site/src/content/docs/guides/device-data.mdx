@@ -3,9 +3,7 @@ title: Device data
 description: Prepare the phone-specific data that radio connections and phone audio need.
 ---
 
-import { Steps } from '@astrojs/starlight/components';
-
-Some features need data that only your phone's own firmware contains. FPLinux does not download this data. Prepare it from your own phone, read-only, using a source checkout or an [autonomous RAM archive](/fplinux/guides/standalone-archive/).
+Some features need data that only your phone's own firmware contains. FPLinux does not download this data. The phone page identifies the supported source: a read-only NAND backup or a set of original files already saved from that phone. UMS9117 RAM launches prepare required data automatically on first use, both from a checkout and from a [standalone archive](/fplinux/guides/standalone-archive/). Qin boots directly; importing its optional radio data is a separate developer procedure.
 
 ## What needs device data
 
@@ -16,77 +14,90 @@ Some features need data that only your phone's own firmware contains. FPLinux do
 | FM radio | FM receiver settings | FM radio is unavailable |
 | Audio profile | headphone, speaker and combined gains, equalizer, automatic level control, and on phones that vibrate through the speaker, the vibration tone | headphones use generic volume levels; no speaker output |
 
-In a source checkout, each group is optional, but all declared groups are prepared together from one read of the phone. A partially present, damaged or mismatched group fails the build. Device data does not establish hardware support; check the [support status](/fplinux/phones/#support-status) and phone page for its limits.
+All declared groups are prepared together from the selected source. A UMS9117 RAM launch requires the complete declared set and prepares it when it is absent. A partially present, damaged or mismatched group is rejected. Device data does not establish hardware support; check the [support status](/fplinux/phones/#support-status) and phone page for its limits.
 
 Prepare data from the same physical phone you will run. Do not reuse data from another handset, even of the same model.
 
-An autonomous RAM archive also prepares the phone's pin map and keymap. It keeps these maps separate from the firmware and audio data and uses them for subsequent loads of that phone.
+Board initialization and the Linux keymap belong to the target's source configuration. They are not prepared phone data. Contributors can extract a separate [board report](#extract-a-board-report) from a backup.
 
 :::caution[Keep it private]
 
-The phone backup and prepared data are private. Do not share or publish them, or an image or archive that contains them, unless you have the rights to do so. Prepared data in a checkout is stored under `.cache/device-data/`, readable only by you. An autonomous archive starts without prepared phone data; see [Standalone archive](/fplinux/guides/standalone-archive/#first-run-prepare-your-phone) for its backup and data locations. Keep the extracted archive directory private after preparation.
+The phone backup and prepared data are private. Do not share or publish them, or an image or archive that contains them, unless you have the rights to do so. A checkout stores the complete backup and geometry receipt as `.cache/device-data/<target>/nand.bin` and `nand.bin.json`, prepared files under `phone/groups/`, and reports under `phone/reports/`. A standalone archive uses the same layout under `data/`. Keep these directories private after preparation.
 
 :::
 
 ## Prepare data from the phone
 
-For an autonomous archive, follow [Standalone archive](/fplinux/guides/standalone-archive/). The first run prepares your phone's data without rebuilding the image.
+Build the default RAM image, then follow [Run FPLinux](/fplinux/start/run/#load-the-phone) from a checkout or [First run](/fplinux/guides/standalone-archive/#first-run) from an archive. On a UMS9117 target with required groups, the first launch reads the complete NAND and prepares the data. Wait for its safe-disconnect instructions, then start the same command again with the phone powered off. The next RAM boot uses the prepared data without rebuilding the kernel or root filesystem.
 
-The steps below use a source checkout and `nokia-ta1618`; use the exact target and boot key from your [phone page](/fplinux/phones/).
+The reader does not mount, erase, restore or write the phone's internal storage or NV data. A completed backup is reused if preparation must be retried. Targets with no required runtime groups boot directly and do not read NAND automatically.
 
-<Steps>
+If storage inspection fails or a removable filesystem is still mounted or used as swap, the command retains reader keys under `reader/session/` in the data directory. Keep the phone powered and retain those keys. Run the launcher again to reconnect and repeat the storage check; do not remove power while storage safety is unresolved. PC `console` commands require a normal session and cannot reopen this preparation session. Cancelling the command does not power the phone off.
 
-1. Power the phone off and disconnect USB.
+To explicitly prepare or replace the selected UMS9117 data during development:
 
-2. Start the preparation:
+```sh title="PC"
+./fplinux device-data prepare nokia-ta1618
+```
 
-   ```sh title="PC"
-   ./fplinux device-data prepare nokia-ta1618
-   ```
+This command builds the default RAM bundle when needed and uses the same preparation workflow. It is not needed for an ordinary first run.
 
-   The command builds and starts a read-only RAM system for the phone.
-
-3. Connect the phone only when the loader asks, holding its boot key, exactly as in [Run FPLinux](/fplinux/start/run/).
-
-4. Wait. The command reads the phone's complete internal storage, prepares the data and prints the next commands:
-
-   ```text title="Output"
-   Next:
-     ./fplinux build nokia-ta1618
-     ./fplinux run nokia-ta1618
-   ```
-
-5. Rebuild the output so it includes the data:
-
-   ```sh title="PC"
-   ./fplinux build nokia-ta1618
-   ```
-
-6. End the preparation session as described in [Power](/fplinux/use/power/) and disconnect USB.
-
-7. Start a new session with the phone powered off, following [Run FPLinux](/fplinux/start/run/).
-
-</Steps>
-
-The reader is read-only. It does not mount, erase, restore or write the phone's internal storage or NV data. Ordinary `build` and `run` commands use only data that is already prepared; they never read the phone's storage.
-
-If you build with `--profile microsd-uboot`, rebuild that profile too. Both profiles use the same prepared data. RAM kernels contain no prepared phone data; the accompanying `device-data.cpio` holds it separately. A microSD build stores prepared data in its kernel and system-card image. Keep those files and ordinary standalone archives private. Autonomous RAM archives omit prepared data and prepare the owner's data on first use.
+UMS9117 RAM boots send the prepared data in a temporary `device-data.cpio`, separate from the immutable kernel and root filesystem. A microSD build stores prepared data in its kernel and system-card image: after preparation, explicitly rebuild that profile and write its new card image. A RAM launch does not update an existing system card. SC9820E RAM builds include optional prepared radio data in the root filesystem. Keep images and archives containing prepared data private.
 
 ## Prepare data from a saved backup
 
 If you already saved a complete backup of this phone's internal storage with [`nand backup`](#save-a-nand-backup), prepare the data without connecting the phone:
 
 ```sh title="PC"
-./fplinux device-data prepare nokia-ta1618 --from-dump nand.bin
+./fplinux run nokia-ta1618 --from-dump nand.bin
 ```
 
 Keep the `nand.bin.json` file that `nand backup` wrote beside the backup; the command uses it to check the backup's layout and SHA-256. It refuses an incomplete backup or incompatible storage chip. The backup file and its receipt are not changed. A target that declares its NAND chip also accepts a backup without a receipt; in that case, no saved digest is available to check the complete backup. If both chip declarations exist, they must agree. Preparation supports 2048 main bytes per page, 64 pages per block and 65536 pages in total, with each page's main bytes followed by its OOB bytes. Without a chip declaration or receipt, it refuses to infer the layout from the file length.
 
-This form builds any required extraction tools in the pinned environment; it does not require an existing phone build or start a loader. Add `--offline` to use the environment and source archives already stored locally.
+This form uses an existing default RAM bundle, prepares `phone/` and exits without connecting to the phone. It refuses to replace already prepared data. Use the same `run` command again without `--from-dump` to boot.
 
-For a new target that declares `board-maps`, preparation also extracts its pin map and keymap. See [Bring up a new phone](/fplinux/porting/bring-up/) for using that output to configure the target.
+To explicitly replace prepared data without an existing bundle, use the developer command:
+
+```sh title="PC"
+./fplinux device-data prepare nokia-ta1618 --from-dump nand.bin
+```
+
+The developer form prepares any required extraction tools in the pinned environment. Add `--offline` to use the environment and source archives already stored locally. Saved backups in other directories can be used through `--from-dump`; preparation does not delete or migrate those directories.
 
 Run `./fplinux device-data prepare --help` for the remaining options.
+
+## Prepare data from original files
+
+For a target that accepts named original files, use the complete file set listed on its phone page. This command reads those local files; it does not build an image, connect to the phone or read its storage:
+
+```sh title="PC"
+./fplinux device-data prepare xiaomi-qin-1s-plus --from-originals originals.json
+```
+
+The UTF-8 JSON manifest has these fields:
+
+| Field | Value |
+| --- | --- |
+| `target` | The exact target passed to the command |
+| `directory` | The directory containing the originals; a relative path is resolved beside the manifest |
+| `files` | An array containing one record for every required original |
+| `files[].name` | The original's filename, without directories |
+| `files[].size` | Its positive size in bytes |
+| `files[].sha256` | Its SHA-256 digest as 64 hexadecimal characters |
+
+The manifest records the originals you selected. The command checks every size and digest before preparing data, but these checks do not authenticate a handset or establish where a file came from. Do not combine files from different phones. Linked source files or directories are rejected. `--from-originals`, `--from-dump` and `--events` are mutually exclusive.
+
+Preparation leaves the original files and manifest unchanged, selects the complete prepared set and prints the build command. The prepared store records their identities without keeping another copy of the original files. Rebuild and start a new session to use it. Importing data alone does not enable a radio feature that the phone page lists as unsupported.
+
+## Extract a board report
+
+For UMS9117 bring-up, extract a report from a saved complete backup:
+
+```sh title="PC"
+./fplinux device-data report <target> --from-dump nand.bin
+```
+
+This developer command works independently of runtime firmware and audio groups. It prepares the required host tool and writes `.cache/diagnostics/device-data/<target>/report-*/board-report.json`; it does not prepare runtime board maps. Add `--offline` to use locally available dependencies. Keep the backup's geometry receipt beside it, especially for a new target with no declared chip geometry. See [Bring up a new phone](/fplinux/porting/bring-up/#prepare-the-board-report) for the complete workflow.
 
 ## Save a NAND backup
 

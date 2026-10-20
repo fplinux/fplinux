@@ -14,11 +14,13 @@ Brightness control shows the LCD brightness level as a number from `0` to `10` a
 
 <FeatureStatus feature="brightness-control" />
 
+The graphical session includes brightness control in [Settings](/fplinux/use/session/#settings). UMS9117 builds also supply `fplinux-brightness-ui.apk` as an optional direct-display application. The Xiaomi Qin 1s+ build does not supply this APK, and physical keypad use of this application is not verified on that phone.
+
 <PhoneScreen src={brightness} alt="Brightness control at level 7 of 10 on a 240×320 screen" caption="Brightness control at level 7 on a 240×320 screen." />
 
 ## Install and start
 
-Install `fplinux-brightness-ui.apk` as described in [Packages](/fplinux/guides/packages/). Its installed package name is `fplinux-brightness-ui`. Start the application in the local terminal or from the PC, as described in [Start an application](/fplinux/apps/):
+Install `fplinux-brightness-ui.apk` as described in [Packages](/fplinux/guides/packages/). Its installed package name is `fplinux-brightness-ui`. Stop the graphical session and run the application from the USB shell, following [Direct-display applications](/fplinux/use/session/#direct-display-applications):
 
 ```sh title="Phone"
 fplinux-brightness-ui

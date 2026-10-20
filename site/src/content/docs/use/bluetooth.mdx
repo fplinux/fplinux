@@ -13,6 +13,8 @@ import Key from '../../../components/Key.astro';
 
 Pair devices, exchange files, use a Bluetooth Internet connection (PAN) and connect keyboards or mice with `bluetoothctl` and `fplinux-bluetooth` in a shell on the phone. Optional packages add A2DP audio output. Check [support status](/fplinux/phones/#support-status) and your [phone page](/fplinux/phones/) for the supported functions, peers and profiles before using a procedure below.
 
+These procedures apply to supported [UMS9117](/fplinux/platforms/ums9117/) phones. Bluetooth is unsupported on the [SC9820E Xiaomi Qin 1s+](/fplinux/platforms/sc9820e/); preparing optional radio data does not enable it.
+
 <FeatureStatus feature="bluetooth" />
 
 Bluetooth needs firmware taken from the same phone, which is part of its [device data](/fplinux/guides/device-data/). An image built without it boots normally but has no Bluetooth. Do not use firmware copied from another phone.
@@ -166,7 +168,7 @@ Use this procedure only with a sink and boot profile supported on your phone pag
 
 ## Keyboards and mice
 
-Where supported, Bluetooth keyboards and mice work as ordinary input devices: they type in the [phone terminal](/fplinux/use/terminal/) and control applications such as [TyrQuake](/fplinux/apps/tyrquake/). The procedure below uses Bluetooth Low Energy; check your phone page for keyboard and mouse support. Bluetooth Classic keyboards and mice have not been tested.
+Where supported, Bluetooth keyboards and mice appear as ordinary input devices. Keyboards control the [graphical interface](/fplinux/use/session/) and type into its text fields. Direct-display applications such as [TyrQuake](/fplinux/apps/tyrquake/) use their own input controls with the graphical session stopped. The procedure below uses Bluetooth Low Energy; check your phone page for keyboard and mouse support. Bluetooth Classic keyboards and mice have not been tested.
 
 Put the keyboard or mouse into pairing mode, then pair it from the phone:
 

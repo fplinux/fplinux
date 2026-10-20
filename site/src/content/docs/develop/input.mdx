@@ -7,7 +7,7 @@ import Figure from '../../../components/Figure.astro';
 import KeypadCodes from '../../../assets/diagrams/keypad-codes.svg';
 import Key from '../../../components/Key.astro';
 
-Phone applications read the phone keypad, keyboards and mice through one shared input stack. This page defines what an application or a keyboard layout package can rely on. To use keyboard layouts in the terminal, see [Terminal](/fplinux/use/terminal/).
+The graphical session receives the phone keypad, keyboards and mice through Weston and libinput. Wayland applications receive input from the compositor; direct-display tools use the raw input session described below. This page defines both boundaries and the keyboard layout package contract. See [Phone interface](/fplinux/use/session/) for user controls and [Terminal](/fplinux/use/terminal/) for shell input.
 
 ## Devices
 
@@ -33,9 +33,17 @@ A code has its phone role only on the device whose `phys` string is `fplinux/key
 
 Holding the power key for five seconds requests power-off even while an application holds the keypad; see [Power](/fplinux/use/power/).
 
-## Input sessions
+## Wayland applications
 
-Project applications read input through the shared input session, `include/fplinux/fplinux-input-session.h`. It classifies each device by the keypad `phys` string and by its capabilities, never by its bus:
+Graphical applications use ordinary Wayland keyboard input. The shared UI runtime in `include/fplinux/fplinux-ui.h` handles the compositor's keymap, focus changes and key releases and distinguishes phone keypad events from external keyboard events. It also supplies the multi-tap editor used by Notes and Settings. Applications must not open or grab evdev devices while the graphical session owns input.
+
+The compositor reserves the short red-key action and <Key>Ctrl</Key>+<Key>Esc</Key> for Home. Screen blanking and keyguard handling belong to the session, so a waking key press or a locked key must not reach an application. The [session guide](/fplinux/use/session/) owns the user-facing controls.
+
+A Canvas can enable key repeat with `fplinux_ui_canvas_set_key_repeat()`. The runtime repeats the phone's four D-pad keys and external keys marked repeatable by the compositor's XKB map, using the compositor's delay and rate. Phone digits, held gestures and commands are not repeated. Leaving or covering the Canvas cancels held repeats; returning to it requires a new key press. Text fields keep their own Clear repeat behavior.
+
+## Direct-display input sessions
+
+Direct-display applications read input through `include/fplinux/fplinux-input-session.h`, with the [graphical session stopped](/fplinux/use/session/#direct-display-applications). It classifies each device by the keypad `phys` string and by its capabilities, never by its bus:
 
 | Source | Device |
 | --- | --- |
@@ -49,7 +57,7 @@ An application chooses which sources it accepts. The session then guarantees:
 
 - **Grab.** Every accepted device is grabbed for the life of the session, so its keys do not reach the local console or another application.
 - **Hotplug.** A device that connects later is added. A device that disconnects is removed, and all of its pressed keys are released before the removal is reported.
-- **No autorepeat.** The session delivers presses and releases only. An application that needs key repeat generates it itself, as the terminal does.
+- **No autorepeat.** The session delivers presses and releases only. An application that needs key repeat generates it itself.
 - **Suspend.** Before an application hands the display and input to another terminal or application, it suspends its session: all grabs are released and releases and device removals are queued. Drain `fplinux_input_session_next()` before handing over ownership, so no pressed key remains in the application. On resume, the current devices are grabbed again and reported as new devices.
 
 ## Keyboard layout packages
@@ -64,6 +72,6 @@ Each further layout is a separate optional APK that:
 
 `fplinux-xkb-ru`, which adds Russian, is the reference example.
 
-An application builds its keymap from the `evdev` keycodes with `aliases(qwerty)`, the `complete` types and compatibility, and the symbols `pc+us+fplinux(function_keys)`. Each registered layout follows as the next group, in name order, then `group(alt_shift_toggle)`: <Key>Alt</Key>+<Key>Shift</Key> switches between the layouts. A layout file can include only files under `/usr/share/fplinux/xkb`.
-
 XKB allows four groups, so at most three layouts can be registered beside US. A registration name may contain only lowercase letters, digits and `_`. With more layouts or an invalid name, an application refuses to start and names the problem.
+
+The graphical session selects US and up to three registered XKB layouts named by installed input-language packages when it starts. Its clients use that compositor-provided keymap. Restart the session after adding keyboard language packages; the keypad input language can be changed in Settings without changing the interface language.

@@ -1,6 +1,6 @@
 ---
 title: FPLinux
-description: Open-source Linux for keypad phones built on the Unisoc UMS9117.
+description: Open-source Linux for keypad phones built on the Unisoc UMS9117 and SC9820E.
 template: splash
 hero:
   tagline: 'Root on a keypad.<span class="sub">Open-source Linux for keypad phones.</span>'
@@ -20,9 +20,8 @@ import PhoneCards from '../../components/PhoneCards.astro';
 import PhoneScreen from '../../components/PhoneScreen.astro';
 import armada from '../../assets/screens/armada.png';
 import brightness from '../../assets/screens/brightness.png';
-import terminalMenu from '../../assets/screens/terminal-menu.png';
 
-FPLinux is an open-source Linux system for keypad phones built on the Unisoc UMS9117 chip. It drives the phone's screen and keypad and, depending on the phone, its sound, FM radio, Bluetooth and microSD card, and it gives you a real shell on the phone and from your computer.
+FPLinux is an open-source Linux system for keypad phones built on the Unisoc UMS9117 and SC9820E chips. It provides a graphical phone interface and a shell from your computer. Depending on the phone, it also supports sound, FM radio, Bluetooth and microSD cards.
 
 ## Pick your phone
 
@@ -43,7 +42,7 @@ Start the loader, then connect the phone while holding its boot key. [Run FPLinu
 </Card>
 <Card title="3. Use" icon="seti:shell">
 
-Work in the shell on the phone or from your computer. [Phone terminal](/fplinux/use/terminal/)
+Open applications and settings on the phone. [Phone interface](/fplinux/use/session/)
 
 </Card>
 
@@ -56,9 +55,9 @@ FPLinux runs from the phone's RAM. To keep files and installed packages between 
 The [feature overview](/fplinux/features/) separates implementation from device checks. Your phone's checklist records its supported functions and limits.
 
 <CardGrid>
-<Card title="Terminal on the keypad" icon="seti:shell">
+<Card title="Phone interface" icon="mobile-android">
 
-Multi-tap typing, a menu for symbols and modifiers, scrollback and a Russian layout. [Phone terminal](/fplinux/use/terminal/)
+Home, an application catalog, task switching, Settings, Terminal, Notes and Snake. [Phone interface](/fplinux/use/session/)
 
 </Card>
 <Card title="Your computer, connected" icon="laptop">
@@ -83,7 +82,7 @@ A persistent system on a card that keeps files and packages. [System card](/fpli
 </Card>
 <Card title="Apps and packages" icon="puzzle">
 
-A showcase, brightness control, TyrQuake, image tools and optional FFmpeg. [Applications](/fplinux/apps/)
+Built-in graphical applications, a showcase, TyrQuake, image tools and optional FFmpeg. [Applications](/fplinux/apps/)
 
 </Card>
 
@@ -94,7 +93,6 @@ A showcase, brightness control, TyrQuake, image tools and optional FFmpeg. [Appl
 <div class="fp-phone-row">
 	<PhoneScreen src={armada} scale={1} alt="ARMADA showcase scene" caption="ARMADA showcase" />
 	<PhoneScreen src={brightness} scale={1} alt="Brightness control at level 7" caption="Brightness control" />
-	<PhoneScreen src={terminalMenu} scale={1} alt="Terminal menu" caption="Terminal menu" />
 </div>
 
 These interface examples use a 240×320 display.

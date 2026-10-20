@@ -1,19 +1,21 @@
 ---
 title: Features
-description: FPLinux capabilities, implementation status and the difference between a device check and support on your phone.
+description: Compare UMS9117 and SC9820E implementations separately from support on each phone.
 ---
 
 import FeatureCatalog from '../../components/FeatureCatalog.astro';
 
-FPLinux provides shared interfaces for the display, input, sound, connectivity, storage and power. The guides explain how to use each function. Availability and limits on one exact phone belong to its [support checklist](/fplinux/phones/).
+FPLinux provides shared interfaces for the display, input, sound, connectivity, storage and power. Their implementations differ between [UMS9117](/fplinux/platforms/ums9117/) and [SC9820E](/fplinux/platforms/sc9820e/). The guides explain how to use each function; availability and limits on one exact phone belong to its [support checklist](/fplinux/phones/).
 
 ## Status meaning
 
-**Implemented** means FPLinux provides the interface or application. **Not implemented** means it has no supported FPLinux path.
+**Implemented** means FPLinux provides a shared platform implementation of the interface or application. It may still require hardware fitted to the selected phone or an optional package. **Not implemented** means there is no shared implementation; an individual target can provide its own.
 
-**Device-tested** means the documentation records a result on at least one device configuration. It does not mean every phone, profile or subfunction is verified. **Not tested** means no device result is recorded for that capability; source code, compilation and host checks do not establish a device result.
+Platform status describes FPLinux code only. A platform implementation does not establish that every phone has the required component, board wiring or working driver path. Each phone records its own hardware, stock-firmware functions and FPLinux results; none of these values is inherited from the platform.
 
-The [phone status legend](/fplinux/phones/#support-status) explains **Verified**, **Partial**, **Not tested** and **Unsupported** for one model. Hardware presence is recorded separately. For example, a phone can have a microphone while its wired-headset recording path remains untested.
+For example, BQ 2830L supplies its own external-radio Wi-Fi implementation. This does not give Wi-Fi to other UMS9117 phones or make it a shared UMS9117 feature.
+
+The [phone status legend](/fplinux/phones/#support-status) explains **Verified**, **Partial**, **Not tested** and **Unsupported** for one model. **Stock: Available** describes the original firmware, not FPLinux. Source code, compilation and platform status do not establish a physical result. A phone can have a microphone while its FPLinux recording path remains untested.
 
 ## Capability overview
 
@@ -21,7 +23,7 @@ The [phone status legend](/fplinux/phones/#support-status) explains **Verified**
 
 ## Not implemented
 
-Entries marked **Not implemented** have no supported software path. That status does not establish whether a phone contains the hardware. Check the selected phone's checklist before choosing a model or planning a port.
+Entries marked **Not implemented** have no shared platform implementation. That status does not establish whether a phone contains the hardware or provides a target-specific implementation. Check the selected phone's checklist before choosing a model or planning a port.
 
 ## Choose or bring up a phone
 

@@ -1,0 +1,40 @@
+---
+title: SC9820E features
+description: SC9820E display, GPU, audio and storage implementations and their current limits.
+---
+
+import FeatureCatalog from '../../../components/FeatureCatalog.astro';
+
+The SC9820E platform currently has one target: [Xiaomi Qin 1s+](/fplinux/phones/xiaomi-qin-1s-plus/). Its checklist records the supported functions and remaining limits. Use USB power; operation with a connected battery and charging are not qualified.
+
+## Display and images
+
+The display supports native-size RGB565 images. [Image presentation](/fplinux/apps/image-tools/present/) provides `--mode cpu-rgb565` for NV16 input. Native NV16 presentation is not verified.
+
+The UMS9117 ROTA and JPEG engines are separate implementations and do not apply to this platform. The rotation and JPEG applications have no supported SC9820E path. [FFmpeg](/fplinux/apps/ffmpeg/) provides software decoding; it does not supply a video player or hardware video decoding.
+
+## GPU rendering
+
+The Mali-T820 MC1 supports [GPU rendering in ARMADA and TyrQuake](/fplinux/apps/#choose-a-renderer) through Panfrost and Mesa. Check the Qin page for application limits. The standard image starts the Weston/Wayland [phone interface](/fplinux/use/session/). GPU rendering, JPEG processing and video decoding are distinct functions.
+
+## Audio and power
+
+The [audio guide](/fplinux/use/audio/) provides the Qin speaker volume and built-in microphone commands. Playback and capture are mutually exclusive. Wired-headset routing is unsupported, and audio quality remains uncalibrated.
+
+Manual CPU frequency selection, RTC alarms, suspend-to-idle, vibration and board-sensor readings have supported paths with limits recorded on the phone page. The board thermistor does not measure CPU temperature; automatic frequency scaling and CPU thermal protection are unavailable. Use the shared [power instructions](/fplinux/use/power/) for storage preparation before sleep or shutdown.
+
+## Loading and storage
+
+Builds and Linux archives include the RAM-loading stages. No separate FDL1, FDL2, SML or phone backup is needed. The autonomous Linux archive starts Linux and SSH on its first run. Native Windows execution is unsupported.
+
+The default system runs in RAM. The `microsd-root` profile loads Linux over USB and mounts the system root from an ext4 microSD card. Follow the shared [system-card instructions](/fplinux/guides/microsd-system-card/). Both profiles need the PC loader at every cold start. Internal eMMC access is disabled.
+
+Wi-Fi, Bluetooth, FM, camera capture and mobile service have no supported path. Preparing optional radio data does not enable them.
+
+## Implemented functions
+
+These labels describe shared platform implementations. Read the [Qin checklist](/fplinux/phones/xiaomi-qin-1s-plus/#support-checklist) for its hardware, stock-firmware functions, FPLinux results and limits. **Not implemented** does not establish absence of hardware, and a platform implementation does not establish support on every phone using that chip. A target can also supply its own board-specific implementation.
+
+<FeatureCatalog platform="sc9820e" />
+
+For integration contracts, see [SC9820E porting](/fplinux/porting/sc9820e/).

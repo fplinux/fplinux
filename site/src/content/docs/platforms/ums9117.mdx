@@ -1,0 +1,30 @@
+---
+title: UMS9117 features
+description: UMS9117 implementations, image engines, storage and the limits of platform-wide support claims.
+---
+
+import FeatureCatalog from '../../../components/FeatureCatalog.astro';
+
+UMS9117, also called T117, is the platform used by the listed Nokia, INOI, Maxvi, BQ and UNIWA targets. Display panels, keypad layouts, audio routing, cameras and radio hardware vary by phone. Use the [phone comparison](/fplinux/phones/#hardware-support) and its detailed checklists to choose a model.
+
+## Display and image engines
+
+This platform implements the [ROTA rotation engine](/fplinux/apps/image-tools/rotate/) and [JPEG codec and scaling engine](/fplinux/apps/image-tools/jpeg/). These are separate from a GPU and from the CPU rendering used by ARMADA and TyrQuake. [Image presentation](/fplinux/apps/image-tools/present/) documents the native NV16 path and its input constraints.
+
+## Storage and phone data
+
+The default system runs in RAM. The read-only NAND interface saves a backup for [phone-data preparation](/fplinux/guides/device-data/); it does not provide writable internal storage. An autonomous archive performs that preparation on first use.
+
+Targets offering a microSD system card use `microsd-uboot`: the PC loads U-Boot into RAM, then U-Boot starts Linux from the card. Follow the shared [system-card instructions](/fplinux/guides/microsd-system-card/). A data card used by the RAM profile is a separate option.
+
+## Audio and radio
+
+The [audio guide](/fplinux/use/audio/) covers UMS9117 output selection, per-output volume and tuning from the phone's data. Microphone, headset and speaker results remain phone-specific. [FM](/fplinux/use/fm-radio/), [Bluetooth](/fplinux/use/bluetooth/) and Wi-Fi also depend on the target; the BQ Wi-Fi implementation does not establish Wi-Fi support on the other UMS9117 phones.
+
+## Implemented functions
+
+These labels describe shared platform implementations. They do not establish the components fitted to a phone or its stock-firmware functions, and they do not replace [verified phone results](/fplinux/phones/#support-status). Each target records its own result for every feature and can supply a board-specific implementation, such as [BQ Wi-Fi](/fplinux/phones/bq-2830l-tank-connect-max/#support-checklist).
+
+<FeatureCatalog platform="ums9117" />
+
+For integration contracts and hardware interfaces used when adding a target, see [UMS9117 porting](/fplinux/porting/ums9117/).

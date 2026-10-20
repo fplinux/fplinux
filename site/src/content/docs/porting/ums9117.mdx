@@ -8,7 +8,7 @@ source:
 import Figure from '../../../components/Figure.astro';
 import PlatformTarget from '../../../assets/diagrams/platform-target.svg';
 
-The `ums9117` platform supports phones built on the Unisoc UMS9117, also known by its reference name T117: an ARMv7-A SoC with one Cortex-A7 CPU. Its Devicetree compatible is `sprd,ums9117`. All [current phones](/fplinux/phones/) use this platform.
+The `ums9117` platform supports phones built on the Unisoc UMS9117, also known by its reference name T117: an ARMv7-A SoC with one Cortex-A7 CPU. Its Devicetree compatible is `sprd,ums9117`. The [phone catalog](/fplinux/phones/) lists each target's platform.
 
 <Figure caption="What the platform shares and what each target adds for its phone.">
 	<PlatformTarget />
@@ -45,15 +45,15 @@ The table describes the shared integration and target requirements. Use the [fea
 - The values the loader needs, in the `[adapter]` table of its `target.toml`: the boot instructions, the exec distance and, for a phone with a boot screen, the loader display settings.
 - The device-data groups that must come from the exact phone.
 
-Display targets select one target-owned panel description through `[display].panel` in `target.toml`. It defines the native size, transport, panel ID, initialization sequence and transfer settings used by the loader, bootstrap and Linux display. The selected SPI or LCM transport must agree with the board pin configuration. Set `boot_font` to `"6x8"` or `"7x14"` in the same `[display]` table. Select the local terminal font with `fplinux-font-terminus-6x12` or `fplinux-font-terminus-8x16` in `[rootfs].packages`.
+Display targets select one target-owned panel description through `[display].panel` in `target.toml`. It defines the native size, transport, panel ID, initialization sequence and transfer settings used by the loader, bootstrap and Linux display. The selected SPI or LCM transport must agree with the board pin configuration. Set `boot_font` to `"6x8"` for a 128×160 display or `"7x14"` for a 240×320 or 320×240 display in the same `[display]` table; it selects the bootstrap and Linux console font. GUI applications use the fonts selected by the shared UI profile.
 
 Use `targets/nokia-ta1618/` as an example of a display target with both RAM and microSD boot inputs. Keep the new phone's panel, keypad, board wiring and device-data declarations in its own target.
 
-The platform's `loader/assets.lock.toml` pins the common RAM loader in `[fdl1]` and the shared map archive in `[maps]`. A target using archived maps declares both `pinmap` and `keymap` in `[loader_maps]` in its `target.toml`; each contains the archive `member` and its extracted `sha256`. Targets using maps prepared from their own NAND backup declare them through `[board_maps]` instead.
+The platform's `loader/assets.lock.toml` pins the common RAM loader in `[fdl1]`. Target-owned early initialization supplies the board setup needed before Linux; the panel description supplies the display and pad settings. Linux reads its keypad map from the target's Devicetree. Normal boot needs no external pin-map or keymap archive and no maps extracted from the phone.
 
 ## Headless targets
 
-A target loads headless when it has none of the loader display settings (`spi_mode`, `backlight_channels` and `backlight_level` in `[adapter]`) and no panel selected in `[display]`. The loader leaves the panel and backlight untouched and reports boot progress only to the PC. Without pin-map and keymap loader assets, the loader applies no board pin settings and leaves the keypad uninitialized.
+A target loads headless when it has none of the loader display settings (`spi_mode`, `backlight_channels` and `backlight_level` in `[adapter]`) and no panel selected in `[display]`. The loader leaves the panel and backlight untouched and reports boot progress only to the PC. The headless template provides no display or keypad initialization and declares no runtime data groups, so its first run boots directly to SSH.
 
 `./fplinux target new` creates such a target; see [Bring up a new phone](/fplinux/porting/bring-up/).
 
@@ -61,24 +61,17 @@ The headless target retains the boot stage's USB state through `CONFIG_USB_MUSB_
 
 ## Local terminal requirements
 
-The terminal on the phone screen is shared userspace. It knows no panel registers or scan codes, so a target that offers it must provide, itself or through the platform:
+The standard image uses the Weston/Wayland [phone interface](/fplinux/use/session/). Weston owns display and input; applications use [Wayland input](/fplinux/develop/input/#wayland-applications) and client surfaces. A port must verify the compositor and native application output separately from its earlier direct-display results.
 
-- a DRM/KMS card with an atomic RGB565 scanout plane and dumb buffers;
-- Linux virtual terminals, including `VT_PROCESS` switching;
-- `/dev/ptmx` and `devpts` for the interactive shell;
-- evdev input following the [input contract](/fplinux/develop/input/), with the phone keypad identified by `phys=fplinux/keypad0`;
-- built-in configuration and device nodes for DRM, virtual terminals, evdev and pseudo-terminals;
-- for the PC keyboard bridge, its uinput and generic-serial dependencies.
+Terminal is an application in that session. It uses the shared GUI font and input, and needs `/dev/ptmx` with a mounted `devpts` filesystem for Bash. Its terminal type is `xterm-256color`. Verify the keypad, keyboard layouts, shell output, Home/Tasks transitions and closing running jobs through the graphical application.
 
-The terminal starts only when `/dev/dri/card0` exists and sets `TERM=xterm-256color`. Input ownership must follow the active graphical session, so the terminal and full-screen applications can hand the display and keypad to each other.
-
-The display session owns a virtual terminal and DRM master. On a VT switch it releases display and input ownership and reacquires them on return. Kernel `fbcon` remains the diagnostic console; it does not render the graphical terminal.
+Kernel `fbcon` remains the Linux text console. Its font and virtual terminal are separate from Terminal's GUI font and client surface. The Weston session disables keyboard VT-switching shortcuts.
 
 Linux inputs follow the [shared integration contract](/fplinux/porting/linux-integration/).
 
 ## Board data from the stock firmware
 
-A target that declares the `board-maps` device-data group, as a new target does, gets a loader pin map, a keymap and a board report extracted from the stock firmware in the phone's NAND backup. Preparation from a saved backup builds the required host extraction tool without a target bundle or a phone connection; see [Device data](/fplinux/guides/device-data/). The board report lists:
+Use `./fplinux device-data report <target> --from-dump nand.bin` to extract a board report from the stock firmware in the phone's saved NAND backup. It builds the required host extraction tool without a target bundle or phone connection and writes the report under `.cache/diagnostics/device-data/<target>/report-*/`. The report is separate from prepared runtime firmware and audio data; see [Device data](/fplinux/guides/device-data/#extract-a-board-report). It lists:
 
 - the keypad matrix with the phone key codes, the boot key and, when exactly one standard phone key is missing from the matrix, that key as the candidate for external-interrupt line 9 (`eic9_candidate`);
 - every panel in the firmware's LCD list: its 16-bit ID, the controller name when the firmware gives it, size, SPI or LCM interface, SPI clock or DBI timing, and the initialization commands and delays when they can be decoded;
@@ -86,7 +79,7 @@ A target that declares the `board-maps` device-data group, as a new target does,
 - the white LED backlight level and the fuel-gauge current calibration;
 - the NAND chip configurations listed by the firmware.
 
-A value that cannot be found is listed as unresolved. Preparation stops when the partition table, the signed application image, the pin map or the keymap is missing, or when the copies of the partition table disagree.
+A value that cannot be found is listed as unresolved. Report extraction stops when the partition table, the signed application image, the pin map or the keymap is missing, or when the copies of the partition table disagree. Extracted maps are temporary report inputs, not runtime files or build inputs.
 
 A person still has to decide which panel is fitted, the keypad light current, whether a vibration motor is fitted and whether the radio works with the prepared firmware. Keys on other external-interrupt lines, the line-9 candidate and the decoded panel commands must be confirmed on the phone.
 

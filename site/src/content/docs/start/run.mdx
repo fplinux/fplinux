@@ -8,9 +8,9 @@ import Figure from '../../../components/Figure.astro';
 import RunFlow from '../../../assets/diagrams/run-flow.svg';
 import Key from '../../../components/Key.astro';
 
-`./fplinux run` loads your build into the phone's RAM over a USB cable, waits for Linux to start and opens a shell on the phone over a private USB network link.
+`./fplinux run <target>` selects an already-built bundle, prepares required phone data on first use, and loads FPLinux over USB. Once Linux starts, it opens a shell over a private USB network link. The same command reopens the authenticated connection to a phone that is still running. It does not build an image.
 
-For a packaged archive, including first-run device-data preparation on Linux or Windows, follow [Standalone archive](/fplinux/guides/standalone-archive/). The instructions below use a source checkout on Linux.
+For a packaged archive, follow [Standalone archive](/fplinux/guides/standalone-archive/). The instructions below use a source checkout on Linux.
 
 <Figure caption="From PC to phone shell"><RunFlow /></Figure>
 
@@ -18,7 +18,6 @@ For a packaged archive, including first-run device-data preparation on Linux or 
 
 - A finished build for your phone; see [Build FPLinux](/fplinux/start/build/).
 - On the PC: GNU `stdbuf` from coreutils, `ip` from iproute2, and the OpenSSH client tools `ssh`, `ssh-keygen`, `ssh-keyscan` and `sftp`.
-- `XDG_RUNTIME_DIR` set to an existing absolute directory owned by your user. A normal Linux login session provides it.
 - A network manager that automatically runs IPv4 DHCP on a newly attached USB network interface. NetworkManager does this.
 - A USB data cable that fits your phone.
 - Your phone's exact target and boot key, from its [phone page](/fplinux/phones/). Check its [support status](/fplinux/phones/#support-status) and power limits before starting.
@@ -57,21 +56,14 @@ Run the loader as your regular user, not as root.
 3. Wait until the loader asks for the phone:
 
    ```text title="Output"
-   Nokia 3210 4G (TA-1618) console RAM boot
-   Operations: exec-distance setup, RAM FDL1 load, RAM payload load.
-   There are no flash, erase, partition, or NV commands.
-
    Power the phone off, hold *, then connect USB while keeping * pressed.
-   Waiting up to 300 seconds for BootROM USB 1782:4d00...
    ```
 
 4. Only now hold your phone's boot key and connect the USB cable to the powered-off phone, keeping the key pressed. The Nokia example uses <Key>\*</Key>.
 
-5. Wait for the session. The loader reports its progress and finishes with:
+5. On a UMS9117 target that needs device data, the first run saves a complete read-only NAND backup and prepares the required radio and audio data. The phone shows the bytes read and percentage, then preparation and its result, instead of the ordinary Home screen. The PC keeps the detailed log; if it cannot send progress updates to the phone, it warns and continues showing progress locally. Keep USB connected until the command confirms that storage is safe to disconnect and asks you to restart. Disconnect USB; if the phone stays powered, remove and reinsert its battery. Repeat from step 1 with the same command. No kernel or root-filesystem rebuild is needed for this RAM boot.
 
-   ```text title="Output"
-   Private USB-NCM SSH session is ready.
-   ```
+6. Wait for Linux and the SSH session. Qin and headless UMS9117 targets without required runtime data boot directly on their first run.
 
 </Steps>
 
@@ -83,13 +75,21 @@ Do not connect the phone first and then decide which target to run. If you conne
 
 ## After the phone boots
 
-`run` sets the phone's clock from the PC and reports a warning if that fails. From an interactive terminal, it then opens a shell on the phone. Without a terminal, for example in a script, it returns as soon as the session is ready.
+On a fresh session, `run` tries to set the phone's clock from the PC and prints the result. A clock-setting failure leaves the session usable. From an interactive terminal, it then opens a shell on the phone. Without a terminal, for example in a script, it returns as soon as the session is ready. See [Clock and alarms](/fplinux/use/power/#clock-and-alarms).
 
 Exiting the shell does not stop Linux. The phone keeps running while it has power.
 
 ## Reconnect
 
-Use `console` with the same target, profile and build type that started the session. [Connect from your PC](/fplinux/use/connect/) covers opening a shell, running one command, copying files and typing with the PC keyboard. Do not start a fresh load only to reopen the shell.
+Run the same `./fplinux run <target>` command with the same profile and build type. It authenticates the saved session before reopening SSH. A present connection that cannot be authenticated causes an error.
+
+Use `console` when you require an existing session, run one command, copy files or type with the PC keyboard; see [Connect from your PC](/fplinux/use/connect/).
+
+## Phone data and logs
+
+The checkout keeps the first backup as `.cache/device-data/<target>/nand.bin` with its geometry receipt `nand.bin.json`. Prepared data is under `phone/groups/`, preparation reports under `phone/reports/`, and private connection keys under `session/` in the same target directory. Keep this directory private and use it with the same physical phone. See [Device data](/fplinux/guides/device-data/) for saved backups and explicit preparation.
+
+Each launch prints its log path. Its `runtime.log` and `run.json` are kept under `.cache/logs/run/<target>/`, with an additional `profiles/<profile>/` directory for a selected profile. Interactive SSH commands and terminal output are not recorded. Only one launcher can use the same target data directory at a time; close the active launcher before reopening it.
 
 ## Check which build is running
 
@@ -119,11 +119,11 @@ Install the rules from [Allow USB access](#allow-usb-access), reload them, then 
 
 ### A loader attempt fails
 
-After a failed attempt, the loader asks you to disconnect the phone, power it off and reconnect it in boot ROM mode. After the third failed attempt it stops with `fplinux run: RAM loader failed after 3 attempts`.
+After a failed attempt, the loader asks you to disconnect the phone, power it off and reconnect it in boot ROM mode. After the third failed attempt it stops with `fplinux run: RAM loader failed after 3 attempts`. Read the `runtime.log` path printed at startup for the complete USB loader diagnostics.
 
 ### The phone is already running FPLinux
 
-[Reconnect](#reconnect) with `console`. Start a fresh load only from a powered-off phone.
+[Reconnect](#reconnect) with the same `run` command or with `console`. Start a fresh load only from a powered-off phone.
 
 ### Linux starts but the shell does not connect
 
@@ -143,4 +143,4 @@ Check that you passed the same profile and build type as the running session. If
 
 The file is overwritten. Each line is one JSON object with `event`, `target`, `profile`, `build_type` and a UTC `time`. A successful load writes these events in order: `waiting-for-device`, `device-found`, `ram-loader-start`, `ram-loader-complete`, `linux-start`, `linux-transition`, `linux-usb`, `ssh-ready` and `complete`. A loader retry can repeat `device-found` and `ram-loader-start`. A `failure` event adds the last `stage`, a short `cause` and the `exit_status`. `complete` is written before the interactive shell opens. The events contain no SSH credentials. The loader-first sequence above still applies.
 
-`linux-usb` records the first observation of the exact device bound to this load; `ssh-ready` records session authentication. Live device-data preparation and fresh ordinary standalone runner loads accept the same option. It is incompatible with `--from-dump` and standalone `--reconnect`.
+`linux-usb` records the first observation of the exact device bound to this load; `ssh-ready` records session authentication. First-run preparation ends after the backup and data are ready; a later launch performs the normal boot. Live device-data preparation and fresh standalone loads accept the same option. An invocation that only prepares a saved backup emits no loading milestones. `device-data prepare` rejects `--events` with `--from-dump`; standalone `--reconnect` also rejects `--events`.
