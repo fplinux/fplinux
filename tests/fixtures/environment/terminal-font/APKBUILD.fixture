@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
+pkgver=1
+builddir="$srcdir/terminus-font-$pkgver"
+
+build() {
+	cat terminal.psf.in >ter-u12n-terminal.psf
+	cat terminal-8x16.psf.in >ter-u16n-terminal.psf
+}

@@ -367,6 +367,10 @@ def _environment_lock(root: Path) -> tuple[dict[str, Any], list[DependencyInput]
 
 def _environment_declarations(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
     lock_context, inputs = _environment_lock(root)
+    ui_fonts = ui_font_environment_inputs(root)
+    inputs.extend(ui_fonts)
+    terminal_fonts = terminus_font_environment_inputs(root)
+    inputs.extend(terminal_fonts)
     quality_source = spreadtrum_flash_environment_source(root)
     inputs.append(
         DependencyInput(
@@ -389,8 +393,26 @@ def _environment_declarations(root: Path) -> tuple[dict[str, object], list[Depen
     return {
         "npm": npm_context,
         "environment_lock": lock_context,
-        "quality_sources": {"spreadtrum_flash": quality_source},
+        "quality_sources": {
+            "spreadtrum_flash": quality_source,
+            "ui_fonts": [asdict(item) for item in ui_fonts],
+            "terminal_fonts": [asdict(item) for item in terminal_fonts],
+        },
     }, inputs
+
+
+def ui_font_environment_inputs(root: Path) -> list[DependencyInput]:
+    """Select the UI package's pinned font and license downloads for offline rendering."""
+    _context, inputs = _apkbuild_declarations(root / "alpine/aports/fplinux-ui/APKBUILD")
+    return sorted(inputs, key=lambda item: item.key)
+
+
+def terminus_font_environment_inputs(root: Path) -> list[DependencyInput]:
+    """Select the bitmap font package's pinned archive for offline rendering."""
+    _context, inputs = _apkbuild_declarations(
+        root / "alpine/aports/fplinux-font-terminus/APKBUILD"
+    )
+    return sorted(inputs, key=lambda item: item.key)
 
 
 def environment_inputs(root: Path) -> list[DependencyInput]:

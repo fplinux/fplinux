@@ -256,7 +256,11 @@ def _install_gui_headers(tools: Mapping[str, ToolInput], temporary: Path) -> Non
     lvgl = tools["lvgl"]
     lvgl_root = temporary / "lvgl"
     _extract_archive(lvgl.archive, lvgl_root)
-    shutil.copytree(lvgl_root / f"lvgl-{lvgl.identity}/include/lvgl", include / "lvgl")
+    lvgl_source = lvgl_root / f"lvgl-{lvgl.identity}"
+    shutil.copytree(lvgl_source / "include/lvgl", include / "lvgl")
+    _install_file(
+        lvgl_source / "src/libs/lodepng/lodepng.h", include / "lvgl/src/libs/lodepng/lodepng.h"
+    )
     _install_file(lvgl.archive, Path("/opt/quality/src/lvgl.tar.gz"))
 
     weston = tools["weston"]
@@ -359,10 +363,42 @@ def _install_libtsm(tool: ToolInput, resources: Path, temporary: Path) -> None:
     subprocess.run(["pkg-config", "--modversion", "libtsm"], check=True)
 
 
-def _finish_environment(resources: Path, recipe: str, generation: str) -> None:
-    shutil.copytree(
-        resources / "quality/spreadtrum-flash", Path("/opt/quality/src/spreadtrum-flash")
+def _install_quality_sources(resources: Path, destination: Path) -> None:
+    """Install the captured source inputs consumed by offline quality tools."""
+    shutil.copytree(resources / "quality/spreadtrum-flash", destination / "spreadtrum-flash")
+    for source in sorted((resources / "quality/ui-fonts").iterdir()):
+        _install_file(source, destination / "ui-fonts" / source.name)
+
+
+def _install_terminal_font(resources: Path, temporary: Path, destination: Path) -> None:
+    """Build the offline renderer's bitmap fonts through their package producer."""
+    source = temporary / "terminus"
+    source.mkdir()
+    for archive in sorted((resources / "quality/terminus").iterdir()):
+        _extract_archive(archive, source)
+    aport = resources / "alpine/aports/fplinux-font-terminus/APKBUILD"
+    subprocess.run(
+        [
+            "sh",
+            "-eu",
+            "-c",
+            (
+                'srcdir=$1; . "$2"; cd "$builddir"; build; '
+                'install -Dm644 ter-u12n-terminal.psf "$3/ter-u12n-terminal.psf"; '
+                'install -Dm644 ter-u16n-terminal.psf "$3/ter-u16n-terminal.psf"; '
+                'install -Dm644 OFL.TXT "$3/Terminus-OFL.txt"'
+            ),
+            "sh",
+            source,
+            aport,
+            destination,
+        ],
+        check=True,
     )
+
+
+def _finish_environment(resources: Path, recipe: str, generation: str) -> None:
+    _install_quality_sources(resources, Path("/opt/quality/src"))
     Path("/var/log/apk.log").unlink(missing_ok=True)
     for directory in (
         "/cache/analysis",
@@ -407,6 +443,7 @@ def main() -> None:
         _install_quality_tools(tools, temporary_root)
         _install_gui_headers(tools, temporary_root)
         _install_libtsm(tools["libtsm"], args.resources, temporary_root)
+        _install_terminal_font(args.resources, temporary_root, Path("/opt/quality/fonts"))
     _finish_environment(args.resources, args.recipe, args.generation)
 
 

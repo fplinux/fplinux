@@ -148,6 +148,8 @@ class ProbeCliTests:
             "package.json",
             "package-lock.json",
             "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",
+            "alpine/aports/fplinux-ui/APKBUILD",
+            "alpine/aports/fplinux-font-terminus/APKBUILD",
         ):
             destination = probe_cli.root / relative
             destination.parent.mkdir(parents=True, exist_ok=True)

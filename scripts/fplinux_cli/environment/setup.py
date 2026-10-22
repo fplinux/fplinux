@@ -75,6 +75,16 @@ def _stage_environment_inputs(context: Path, *, offline: bool) -> None:
                 context / "quality/spreadtrum-flash",
             )
             continue
+        if item.key.startswith("aport:fplinux-ui:"):
+            destination = context / "quality/ui-fonts" / source.name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            os.link(source, destination)
+            continue
+        if item.key.startswith("aport:fplinux-font-terminus:"):
+            destination = context / "quality/terminus" / source.name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            os.link(source, destination)
+            continue
         destination = (
             context / "npm" / source.name
             if item.purpose == "npm-package"

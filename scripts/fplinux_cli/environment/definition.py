@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import asdict
 from typing import TYPE_CHECKING, Any, Protocol
 
 from fplinux_cli import common
@@ -28,11 +29,13 @@ ENVIRONMENT_RECIPE_INPUTS = (
     "scripts/fplinux_cli/environment/image_content.py",
     "scripts/fplinux_cli/environment/install_wheels.py",
     "scripts/fplinux_cli/common.py",
+    "scripts/fplinux_cli/dependencies/inputs.py",
     "scripts/fplinux_cli/build/host_tools/host.py",
     "package.json",
     "package-lock.json",
     "environment.lock.toml",
     "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",
+    "alpine/aports/fplinux-font-terminus/APKBUILD",
 )
 
 
@@ -238,6 +241,12 @@ def spreadtrum_flash_environment_source(root: Path) -> dict[str, Any]:
 
 def environment_recipe_digest(lock: dict[str, Any] | None = None) -> str:
     """Hash installation code, resources, exact input declarations and runtime bytes."""
+    # Dependency declarations use this module's lock validation during initialization.
+    from fplinux_cli.dependencies.inputs import (  # noqa: PLC0415
+        terminus_font_environment_inputs,
+        ui_font_environment_inputs,
+    )
+
     if lock is None:
         lock = load_environment_lock()
     return file_recipe_digest(
@@ -247,6 +256,14 @@ def environment_recipe_digest(lock: dict[str, Any] | None = None) -> str:
             + common.canonical_json_bytes(lock)
             + b"fplinux.quality-source-projection\0"
             + common.canonical_json_bytes(spreadtrum_flash_environment_source(common.ROOT))
+            + b"fplinux.quality-ui-font-projection\0"
+            + common.canonical_json_bytes(
+                [asdict(item) for item in ui_font_environment_inputs(common.ROOT)]
+            )
+            + b"fplinux.quality-terminal-font-projection\0"
+            + common.canonical_json_bytes(
+                [asdict(item) for item in terminus_font_environment_inputs(common.ROOT)]
+            )
         ),
     )
 

@@ -81,6 +81,8 @@ def dependency_checkout(monkeypatch: pytest.MonkeyPatch) -> Iterator[DependencyC
             "fplinux-ncurses",
             "fplinux-readline",
             "fplinux-libtsm",
+            "fplinux-ui",
+            "fplinux-font-terminus",
         ):
             checkout.write(
                 f"alpine/aports/{package}/APKBUILD",
@@ -91,6 +93,74 @@ def dependency_checkout(monkeypatch: pytest.MonkeyPatch) -> Iterator[DependencyC
 
 class DependencyInputTests:
     """Keep downloads bound to their original checksum and consumer cache path."""
+
+    def test_environment_admits_existing_terminal_font_archive_without_target_selection(
+        self, dependency_checkout: DependencyCheckout
+    ) -> None:
+        """Host rendering shares the bitmap package's native archive declaration."""
+        dependency_checkout.write(
+            "alpine/aports/fplinux-font-terminus/APKBUILD",
+            'pkgname=fplinux-font-terminus\npkgver=4.49.1\narch="noarch"\n'
+            'source="terminus-font-$pkgver.tar.gz::https://example.invalid/terminus-$pkgver.tar.gz"\n'
+            f'sha512sums="{"3" * 128}  terminus-font-4.49.1.tar.gz"\n',
+        )
+
+        inputs = environment_inputs(dependency_checkout.root)
+
+        key = "aport:fplinux-font-terminus:terminus-font-4.49.1.tar.gz"
+        original = next(item for item in inputs if item.key == key)
+        assert original == DependencyInput(
+            key="aport:fplinux-font-terminus:terminus-font-4.49.1.tar.gz",
+            url="https://example.invalid/terminus-4.49.1.tar.gz",
+            sha256=None,
+            size=None,
+            destination="downloads/alpine/sources/terminus-font-4.49.1.tar.gz",
+            purpose="aport-source",
+            arch="noarch",
+            checksum="3" * 128,
+            algorithm="sha512",
+        )
+        selected_inputs, context = dependency_selection(dependency_checkout.root)
+        assert sum(item.key == key for item in selected_inputs) == 1
+        producers = context["producers"]
+        assert isinstance(producers, list)
+        assert "fplinux-font-terminus" not in producers
+
+    def test_environment_admits_ui_font_originals_without_target_packages(
+        self, dependency_checkout: DependencyCheckout
+    ) -> None:
+        """Offline setup and snapshots share the UI package's native checksum and cache slot."""
+        dependency_checkout.write(
+            "alpine/aports/fplinux-ui/APKBUILD",
+            'pkgname=fplinux-ui\narch="armv7"\n'
+            'source="face.ttf::https://example.invalid/face.ttf local.c"\n'
+            f'sha512sums="{"1" * 128}  face.ttf\n{"2" * 128}  local.c"\n',
+        )
+        environment = environment_inputs(dependency_checkout.root)
+        original = next(item for item in environment if item.key == "aport:fplinux-ui:face.ttf")
+        assert original.url == "https://example.invalid/face.ttf"
+        assert original.checksum == "1" * 128
+        assert original.algorithm == "sha512"
+        assert original.destination == "downloads/alpine/sources/face.ttf"
+        assert original.purpose == "aport-source"
+        inputs, context = dependency_selection(dependency_checkout.root)
+        assert original in inputs
+        assert sum(item.key == original.key for item in inputs) == 1
+        producers = context["producers"]
+        assert isinstance(producers, list)
+        assert "fplinux-ui" not in producers
+        target = dependency_checkout.root / "targets/test-phone/target.toml"
+        declaration = tomlkit.parse(target.read_text(encoding="utf-8"))
+        rootfs = declaration["rootfs"]
+        assert isinstance(rootfs, Table)
+        rootfs["packages"] = ["fplinux-ui"]
+        target.write_text(tomlkit.dumps(declaration), encoding="utf-8")
+        selected_inputs, selected_context = dependency_selection(dependency_checkout.root)
+        selected_producers = selected_context["producers"]
+        assert isinstance(selected_producers, list)
+        assert "fplinux-ui" in selected_producers
+        assert sum(item.key == original.key for item in selected_inputs) == 1
+        assert original in selected_inputs
 
     def test_source_built_loaders_select_their_three_archives_without_ums_assets(
         self, dependency_checkout: DependencyCheckout
