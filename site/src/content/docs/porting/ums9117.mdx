@@ -63,7 +63,7 @@ The headless target retains the boot stage's USB state through `CONFIG_USB_MUSB_
 
 The standard image uses the Weston/Wayland [phone interface](/fplinux/use/session/). Weston owns display and input; applications use [Wayland input](/fplinux/develop/input/#wayland-applications) and client surfaces. A port must verify the compositor and native application output separately from its earlier direct-display results.
 
-Terminal is an application in that session. It uses the shared GUI font and input, and needs `/dev/ptmx` with a mounted `devpts` filesystem for Bash. Its terminal type is `xterm-256color`. Verify the keypad, keyboard layouts, shell output, Home/Tasks transitions and closing running jobs through the graphical application.
+Terminal is an application in that session. Its [terminal font and input controls](/fplinux/use/terminal/) are separate from the Linux text console; Bash needs `/dev/ptmx` with a mounted `devpts` filesystem. Its terminal type is `xterm-256color`. Verify the keypad, keyboard layouts, shell output, Home/Tasks transitions and closing running jobs through the graphical application.
 
 Kernel `fbcon` remains the Linux text console. Its font and virtual terminal are separate from Terminal's GUI font and client surface. The Weston session disables keyboard VT-switching shortcuts.
 

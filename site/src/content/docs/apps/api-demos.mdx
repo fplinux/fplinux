@@ -1,0 +1,12 @@
+---
+title: API Demos
+description: Interactive examples of the graphical interface and LVGL widgets.
+---
+
+API Demos is an optional developer application in the graphical session. Install `fplinux-example-apidemo` with the [package workflow](/fplinux/guides/packages/), then open **API Demos** from the launcher.
+
+Press **OK** to browse the catalogue, or type a name to search. Search matches translated names, English names and the C API names shown beneath each example. **#** changes the phone input mode and **\*** opens the symbol picker. The soft-key labels show the actions available on each screen.
+
+The examples cover lists, forms, alerts, text, commands, Canvas, software frames, soft keys, appearance, locale and preferences, lifecycle, LVGL widgets, vibration and sound. The virtual-list and form-choice examples use the same shared controls as other applications. Layout and fonts follow the screen profile.
+
+Preferences are stored in the application's private state directory. The example distinguishes the values in memory, the file's visible contents and the result of saving; follow the [application-state contract](/fplinux/develop/application-state/) when using these APIs. The sound and vibration sections show capabilities, request results and errors. Sending a request or queueing audio frames does not establish that a physical effect occurred. Sound pauses while the application is hidden; vibration stops. Closing the relevant example releases its resources.

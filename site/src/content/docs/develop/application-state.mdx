@@ -1,0 +1,49 @@
+---
+title: Application state
+description: Preserve working data, report storage outcomes and handle graphical application closing.
+source:
+  - include/fplinux/fplinux-storage.h
+  - include/fplinux/fplinux-ui-prefs.h
+  - include/fplinux/fplinux-ui.h
+  - alpine/aports/fplinux-session
+---
+
+Use this contract when adding state to a graphical application. The [session guide](/fplinux/use/session/#saving-and-storage-errors) explains the controls and storage lifetime to users. Application preferences use the installed `fplinux-ui-prefs.h` interface; the graphical session owns system settings and Clock configuration.
+
+## Reading and saving
+
+Opening preferences reads existing values without requiring a write to an already private directory. A missing file or directory gives an empty object in memory. An unreadable existing file is an error: do not substitute defaults and later overwrite data that could not be read. Private directories belong to the effective user and exclude group and other access; writes create missing directories and preserve private file permissions.
+
+Changes to a preferences object stay in memory until saving. A `fplinux_storage_result` distinguishes three outcomes:
+
+| State | Meaning for the caller |
+| --- | --- |
+| `FPLINUX_STORAGE_UNPUBLISHED` | This attempt did not replace the destination. Retain the candidate and the original error. |
+| `FPLINUX_STORAGE_PUBLISHED_UNSYNCED` | The replacement is visible, but required synchronization was not confirmed. Do not claim that the old file remains. |
+| `FPLINUX_STORAGE_DURABLE` | The required write and synchronization completed. The matching candidate may be marked saved. |
+
+The result's `error` preserves the original failure. A successful unchanged save is not sufficient while synchronization is pending. Keep the preferences object alive until the pending write is resolved; closing it discards its in-memory changes and pending synchronization. Neither success nor file synchronization makes a RAM-root file survive power-off.
+
+Keep application policy outside the file writer. An applied theme or font choice may continue for the current session despite a failed save. A rejected alarm form must remain a draft. Once an operation has been accepted and published, retain its stable object identity: retrying storage must not add a second object or repeat another user action. Match acknowledgments to the submitted draft revision before clearing its dirty state.
+
+## Storage errors
+
+Preserve working data and keep the relevant controls available after a write failure. A failed explicit Save leaves the editor open. Minimize keeps the process and its draft in memory; failed background saving must not prevent Home or create repeated modal messages. Show the unresolved state when the application returns.
+
+Use the shared storage-error text for the cause and select the outcome text separately. Insufficient space, a storage limit, read-only storage, denied access and an I/O error need different explanations. An error after publication means that saving is unconfirmed; it does not mean that the action was rejected. A short unsaved marker may remain until a successful save.
+
+The owner of accepted system configuration retries its latest state with a bounded delay. It does not replay a list of commands. An explicit Retry makes one immediate attempt. An unaccepted user draft is not included in a background checkpoint. Timekeeping, ringing, timer controls and shell input must not wait for preferences to become writable.
+
+Report background failures on a change of error state and on recovery, following the [logging contract](/fplinux/develop/logging/#phone-userspace). Do not rely on a log file as the only notice when its own filesystem may be full. A data-card error, a full writable root and a failed memory allocation are distinct failures; do not introduce a global unavailable-storage flag or delete user data automatically.
+
+## Closing an application
+
+Register a close handler with `fplinux_ui_set_close_handler()` when ordinary closing needs a save decision. It runs before the final closing lifecycle and returns `FPLINUX_UI_CLOSE_READY`, `FPLINUX_UI_CLOSE_CANCEL` or `FPLINUX_UI_CLOSE_WAIT`. WAIT keeps the interface interactive; answer the pending request with `fplinux_ui_close_reply()` after the user's decision. Repeated delivery of the same request must not repeat the save operation.
+
+After a failed document save, offer Retry, Stay and Discard. Retry saves the current data; Stay returns to it; Discard explicitly permits closing without saving it. Configuration forms with a separate Save action retain their explicit-save contract: cancelling an unsaved alarm form must not create an alarm.
+
+The session brings a background task forward when it needs a decision. Close requests remain tied to that task's instance. A second explicit close can force termination of a waiting application; an unanswered request and a system restart also have bounded termination paths. The final CLOSE event is a last opportunity for best-effort cleanup, not an opportunity to open a dialog or veto termination. Do not promise preservation of unsaved data after forced termination.
+
+## Verification boundary
+
+Check publication outcomes using real temporary files and controlled failures at the file boundary. Observe both file contents and the returned result before and after publication. Test consumer reactions through the actual application and session interfaces: draft retention, retry, Home, cancellation and final closing. A callback-only test does not establish a cancellable session lifecycle. Keep these checks separate from physical-phone observations and do not fill a phone's filesystem to exercise error handling.

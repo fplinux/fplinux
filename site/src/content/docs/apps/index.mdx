@@ -7,13 +7,18 @@ import { CardGrid, LinkCard } from '@astrojs/starlight/components';
 import Figure from '../../../components/Figure.astro';
 import KeypadNames from '../../../assets/diagrams/keypad-names.svg';
 
-The standard [phone interface](/fplinux/use/session/) includes Home, an application catalog, Tasks, Settings, Notes and Snake. Open these applications from the catalog.
+The standard [phone interface](/fplinux/use/session/) includes Home, an application catalog, Tasks, Settings, [Calculator](/fplinux/use/calculator/), [Clocks](/fplinux/use/clocks/), Notes, Snake and [Terminal](/fplinux/use/terminal/). Open these applications from the catalog.
 
 ## Optional applications
 
 These are optional packages that you install when you want them; see [Install an optional application](#install-an-optional-application). The packages supplied by a build and their supported uses depend on its platform ([UMS9117](/fplinux/platforms/ums9117/) or [SC9820E](/fplinux/platforms/sc9820e/)) and [phone](/fplinux/phones/#application-support).
 
 <CardGrid>
+	<LinkCard
+		title="API Demos"
+		description="Explore the graphical interface and LVGL widgets. Package: <code>fplinux-example-apidemo</code>."
+		href="/fplinux/apps/api-demos/"
+	/>
 	<LinkCard
 		title="Brightness control"
 		description="Set the LCD brightness level with the keypad. Command: <code>fplinux-brightness-ui</code>."

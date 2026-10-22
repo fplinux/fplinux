@@ -5,22 +5,28 @@ source:
   - alpine/aports/fplinux-session
   - alpine/aports/fplinux-launcher
   - alpine/aports/fplinux-settings
+  - alpine/aports/fplinux-calculator
+  - alpine/aports/fplinux-clocks
   - alpine/aports/fplinux-notes
   - alpine/aports/fplinux-snake
   - alpine/aports/fplinux-terminal
 ---
 
-import Key from '../../../components/Key.astro';
+import Key from "../../../components/Key.astro";
 
-The standard image starts a Weston/Wayland session with a Home screen and an application catalog. It includes Settings, Notes, Snake and [Terminal](/fplinux/use/terminal/). The [USB shell](/fplinux/use/connect/) remains available alongside the interface. Check your [phone page](/fplinux/phones/) for physical display and keypad support; selecting the graphical session does not establish that every phone has been tested with it.
+The standard image starts a Weston/Wayland session with a Home screen and an application catalog. It includes Settings, [Calculator](/fplinux/use/calculator/), [Clocks](/fplinux/use/clocks/), Notes, Snake and [Terminal](/fplinux/use/terminal/). The [USB shell](/fplinux/use/connect/) remains available alongside the interface. Check your [phone page](/fplinux/phones/) for physical display and keypad support; selecting the graphical session does not establish that every phone has been tested with it.
 
 ## Home and applications
 
 From Home, press <Key>Centre</Key> to open the application catalog. Move with the D-pad and press <Key>Centre</Key> to open the selected application. The <Key>Left soft</Key> key switches the catalog between a grid and a list; <Key>Right soft</Key> returns to Home. Follow the labels at the bottom of the screen inside applications.
 
+Hold a D-pad key to continue moving. In lists, <Key>Up</Key> from the first item goes to the last, and <Key>Down</Key> from the last goes to the first. The catalog grid wraps between its first and last rows. <Key>Left</Key> and <Key>Right</Key> move by pages in lists and long information screens; they stop at the ends. Inside an editable field, the D-pad moves the cursor instead.
+
+**Back** from a page opened through **Options** returns to the menu with its previous selection. Press **Back** again to close the menu. Confirming an action, such as **Send** or **Done**, completes it and returns to the application.
+
 A short press and release of <Key>Red</Key> in an application offers **Minimize** on <Key>Left soft</Key> and **Close** on <Key>Right soft</Key>. Press <Key>Red</Key> again to close it. Minimize keeps the application in the session and returns to Home; Close asks it to save and exit, then returns to Home. Press <Key>Centre</Key> (**Cancel**) or an external keyboard's <Key>Esc</Key> to dismiss the choice and return to the application. <Key>Ctrl</Key>+<Key>Esc</Key> returns directly to Home. From Tasks or the catalog, <Key>Red</Key> returns to Home.
 
-Press <Key>Left soft</Key> on Home to open **Tasks**, select a task to return to it, or choose **Close app** and confirm to close it. Save important work before closing a task; unsaved changes can be lost.
+Press <Key>Left soft</Key> on Home to open **Tasks**, select a task to return to it, or choose **Close app** and confirm to close it. An application that needs a save decision returns to the foreground. See [saving and storage errors](#saving-and-storage-errors) before discarding changes or forcing an application to close.
 
 An external keyboard uses arrows, <Key>Enter</Key> and <Key>Esc</Key> for navigation. <Key>Tab</Key> opens Tasks from Home or switches the catalog view. Available Bluetooth and forwarded USB keyboards depend on the phone's [input support](/fplinux/use/connect/#type-with-your-computers-keyboard).
 
@@ -28,7 +34,7 @@ An external keyboard uses arrows, <Key>Enter</Key> and <Key>Esc</Key> for naviga
 
 Text fields use multi-tap input on the phone keypad: press a digit repeatedly to choose a letter, then pause or press another digit to commit it. The field shows its input language and mode. <Key>#</Key> changes the text mode, and <Key>\*</Key> opens symbols. Use the D-pad to move the cursor and the on-screen **Clear**, **Options** and **Back** actions to edit or leave the field. An external keyboard types through the session's keyboard layout; <Key>Alt</Key>+<Key>Shift</Key> switches installed layouts.
 
-Notes holds one note of up to 1,000 characters. **Options → Save** saves it and leaves the editor. The application also attempts to save when it becomes hidden or closes. Use Save and check for an error before relying on the saved copy.
+Notes holds one note of up to 1,000 characters. **Options → Save** saves it and leaves the editor after confirmation. The application also attempts to save when it becomes hidden or closes. A failed save keeps the text available; follow the [save choices](#saving-and-storage-errors) before leaving it.
 
 ## Settings
 
@@ -40,7 +46,17 @@ Open Settings from the catalog:
 
 The available languages come from installed language packages. The standard image includes English and Russian. Changing a theme or interface language closes other graphical applications and reloads Home, so save your work first. See [Clock and alarms](/fplinux/use/power/#clock-and-alarms) for clock synchronization and battery-backed time.
 
-Settings are stored in `/etc/fplinux/session.conf`. Notes and application preferences are stored under `/home/fplinux/.local/state/fplinux/`. Restarting the graphical session keeps these files. In the default RAM boot, they disappear when the phone powers off. They survive a reboot only on a supported [persistent system root](/fplinux/guides/microsd-system-card/). A data card alone does not make these paths persistent.
+Settings are stored in `/etc/fplinux/session.conf`. Notes and application preferences are stored under `/home/fplinux/.local/state/fplinux/`; the session stores confirmed [Clock configuration](/fplinux/use/clocks/#lifetime-and-sleep) in `/var/lib/fplinux/clocks/`. Restarting the graphical session keeps these files. In the default RAM boot, they disappear when the phone powers off. They survive a reboot only on a supported [persistent system root](/fplinux/guides/microsd-system-card/). A data card alone does not make these paths persistent.
+
+## Saving and storage errors
+
+After a failed Save, keep the application open until the data is saved or you decide to discard it. Notes and Calculator offer **Retry**, **Stay** and **Discard** when closing requires a decision. Retry tries saving again, Stay returns to the current data and Discard closes without saving it. Home and Minimize keep the application and its current data in memory.
+
+An unsaved marker means that saving is not confirmed. The error distinguishes insufficient space, unavailable write access and other storage failures. **Saving not confirmed** can also appear after a replacement file became visible but its synchronization failed. Do not assume that the previous saved value is unchanged.
+
+Applied settings and a selected Terminal font can continue to work for the current session despite a save error. Confirmed Clock reminders and timer controls continue while the session retries its configuration. An unsaved alarm form remains a draft until Save is accepted.
+
+A second explicit close of an application waiting for a decision can force it to exit. Changing the interface theme or language restarts other applications after a warning; stopping the graphical service also closes them. Save important work before these actions. Forced termination and power-off can lose unsaved data.
 
 ## Lock and screen timeout
 

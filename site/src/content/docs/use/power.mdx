@@ -44,7 +44,7 @@ Use this sequence only when your [phone page](/fplinux/phones/) lists battery-on
 
 </Steps>
 
-A short press of the <Key>Red</Key> key does not power off; releasing it before five seconds cancels the request. In the [graphical session](/fplinux/use/session/), a short press returns Home, or locks and blanks the screen when already on Home. The power-off hold works even while an application uses the keypad.
+A short press of the <Key>Red</Key> key does not power off; releasing it before five seconds cancels the request. See [application controls](/fplinux/use/session/#home-and-applications) for its action in the graphical session. The power-off hold works even while an application uses the keypad.
 
 With a system card, Linux stops its services, writes pending data and makes the card read-only before the phone turns off. If shutdown cannot start, the phone stays on instead of cutting power. Wait until the phone is off before you remove the card.
 
@@ -107,7 +107,7 @@ Wake it with a supported power-key action or a [clock alarm](#clock-and-alarms),
 
 <FeatureStatus feature="real-time-clock" />
 
-Each time `./fplinux run` or a standalone archive starts a new session, it tries to set the phone's clock to your computer's current time in UTC and prints the result. A clock-setting failure leaves the session usable, so check the result before relying on the time. Reconnecting to a running session does not change the clock. The phone has no time zones; its clock and its battery-backed clock both hold UTC.
+Each time `./fplinux run` or a standalone archive starts a new session, it tries to set the phone's clock to your computer's current time in UTC and prints the result. A clock-setting failure leaves the session usable, so check the result before relying on the time. Reconnecting to a running session does not change the clock. The system clock and battery-backed clock both hold UTC; the [Clocks application](/fplinux/use/clocks/) can display local times at chosen UTC offsets without changing them.
 
 The launcher's initial clock synchronization updates the battery-backed clock only when its time cannot be read. Saving the date and time in [Settings](/fplinux/use/session/#settings) also attempts to update it. To store the current time from a shell:
 
@@ -117,7 +117,7 @@ hwclock -u -w -f /dev/rtc0
 
 On UMS9117 phones, the clock covers 1980 to 2099. A phone can lose its clock setting while the battery is out, so check it before relying on it.
 
-Where RTC wake is supported for your phone and profile, set an alarm before sleeping. This example wakes after 60 seconds; writing `0` first clears an alarm that is already set:
+Where RTC wake is supported for your phone and profile, set an alarm before sleeping. These RTC alarms are separate from the Clocks application's reminders. This example wakes after 60 seconds; writing `0` first clears an alarm that is already set:
 
 ```sh title="Phone"
 echo 0 > /sys/class/rtc/rtc0/wakealarm

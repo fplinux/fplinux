@@ -1,0 +1,28 @@
+---
+title: Calculator
+description: Calculate with the phone keypad and keep a calculation between application launches.
+source:
+  - alpine/aports/fplinux-calculator
+---
+
+import Key from '../../../components/Key.astro';
+
+Open **Calculator** from the [application catalog](/fplinux/use/session/#home-and-applications). Enter a number, choose an operation with the D-pad, enter the next number and press <Key>Centre</Key> to calculate.
+
+| Key | Action |
+| --- | --- |
+| Digits | Enter a number |
+| <Key>Up</Key> | Add |
+| <Key>Down</Key> | Subtract |
+| <Key>Left</Key> | Multiply |
+| <Key>Right</Key> | Divide |
+| <Key>Centre</Key> | Calculate the result |
+| <Key>\*</Key> | Enter the decimal separator |
+| <Key>#</Key> | Change the sign |
+| **Clear** | Delete a character; hold to reset the calculation |
+
+Operations apply from left to right. For example, `2 + 3 × 4` gives `20`. The application shows an error for division by zero or a result outside its numeric range; entering a new number starts another calculation.
+
+An external keyboard accepts digits, `+`, `-`, `*`, `/` and `=`; <Key>Enter</Key> calculates, and <Key>Backspace</Key> deletes. A dot or comma enters the decimal separator, and `x` also multiplies.
+
+Use **Back** to save and leave without clearing the calculation. While **Clear** owns the right soft key, **Back** remains available through **Options**. The [shared application controls](/fplinux/use/session/#home-and-applications) also minimize or close Calculator. A failed save keeps the calculation available and offers the [shared save choices](/fplinux/use/session/#saving-and-storage-errors). In a RAM boot, saved application state lasts until the phone powers off; see [where settings and application state are stored](/fplinux/use/session/#settings).

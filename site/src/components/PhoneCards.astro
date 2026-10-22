@@ -37,7 +37,7 @@ const status = (feature: string, phone: string): SupportStatus =>
 				<div class:list={["mini-phone", { "no-render": !image }]}>
 					{image && (
 						<img
-							alt={`FPLinux terminal on the ${phone.name}`}
+							alt={`Terminal application area for the ${size} display profile`}
 							class="fp-pixel"
 							height={image.height * scale}
 							src={image.src}
@@ -54,6 +54,9 @@ const status = (feature: string, phone: string): SupportStatus =>
 						</p>
 					)}
 				</div>
+				{image && (
+					<p class="render-note">Terminal application area · {size} profile</p>
+				)}
 				<h3>{phone.name}</h3>
 				<p class="meta">{`${phone.id} · ${size} display`}</p>
 				<ul class="chips">
@@ -142,6 +145,12 @@ const status = (feature: string, phone: string): SupportStatus =>
 		margin: 0;
 		color: var(--sl-color-gray-3);
 		font-size: var(--sl-text-sm);
+	}
+
+	.render-note {
+		margin: 0;
+		color: var(--sl-color-gray-2);
+		font-size: var(--sl-text-xs);
 	}
 
 	.chips {

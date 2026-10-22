@@ -90,6 +90,14 @@ Explain what changed and why.
 
 For example, the subject `perf(ums9117): enable NEON and reduce codec overhead` uses type `perf` and scope `ums9117`. The scope and the body are required. Accepted scopes are listed in `commitlint.config.mjs`.
 
+Choose the scope of the component that owns the change. Shared controls and navigation use `ui`; application lifecycle, locking and phone session policy use `session`; GPU and display presentation use `graphics`; the shared host loading and reconnect workflow uses `runtime`. Use an application's scope for a change confined to that application, such as `fix(terminal): return to the parent options menu`. Platform and phone scopes use their full project identifiers. A shared change keeps its owning scope when it also updates callers or tests.
+
+## Explore the application UI
+
+Install the optional [API Demos application](/fplinux/apps/api-demos/) to explore the shared UI controls. Its examples name the C functions they use; the installed headers in `fplinux-ui-dev` define the interfaces. Application packages depend on `fplinux-ui` and build against `fplinux-ui-dev`.
+
+Follow the [application-state contract](/fplinux/develop/application-state/) when saving preferences, reporting storage errors and handling close decisions.
+
 ## Preview this site
 
 The documentation site lives in `site/` and uses Node.js `24.21.0` and npm `12.2.0`. Install the locked site tools once, then start a local preview that reloads as you edit:

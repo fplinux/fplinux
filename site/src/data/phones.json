@@ -35,6 +35,8 @@
   },
   {
     "id": "uniwa-v1000-4g",
+    "render": "terminal-keypad-320x240",
+    "renderScale": 1,
     "slug": "phones/uniwa-v1000-4g"
   },
   {

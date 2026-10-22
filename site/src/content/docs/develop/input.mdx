@@ -3,9 +3,9 @@ title: Input
 description: What phone applications and keyboard layout packages can rely on from the shared input stack.
 ---
 
-import Figure from '../../../components/Figure.astro';
-import KeypadCodes from '../../../assets/diagrams/keypad-codes.svg';
-import Key from '../../../components/Key.astro';
+import Figure from "../../../components/Figure.astro";
+import KeypadCodes from "../../../assets/diagrams/keypad-codes.svg";
+import Key from "../../../components/Key.astro";
 
 The graphical session receives the phone keypad, keyboards and mice through Weston and libinput. Wayland applications receive input from the compositor; direct-display tools use the raw input session described below. This page defines both boundaries and the keyboard layout package contract. See [Phone interface](/fplinux/use/session/) for user controls and [Terminal](/fplinux/use/terminal/) for shell input.
 
@@ -17,7 +17,9 @@ The phone keypad, keyboards forwarded by the [USB keyboard bridge](/fplinux/use/
 
 The keypad sends standard Linux input codes. `include/fplinux/fplinux-keypad.h` names their phone roles.
 
-<Figure caption="Keypad and Linux key codes" width="38rem"><KeypadCodes /></Figure>
+<Figure caption="Keypad and Linux key codes" width="38rem">
+  <KeypadCodes />
+</Figure>
 
 | Phone key | Linux code |
 | --- | --- |
@@ -37,9 +39,13 @@ Holding the power key for five seconds requests power-off even while an applicat
 
 Graphical applications use ordinary Wayland keyboard input. The shared UI runtime in `include/fplinux/fplinux-ui.h` handles the compositor's keymap, focus changes and key releases and distinguishes phone keypad events from external keyboard events. It also supplies the multi-tap editor used by Notes and Settings. Applications must not open or grab evdev devices while the graphical session owns input.
 
-The compositor reserves the short red-key action and <Key>Ctrl</Key>+<Key>Esc</Key> for Home. Screen blanking and keyguard handling belong to the session, so a waking key press or a locked key must not reach an application. The [session guide](/fplinux/use/session/) owns the user-facing controls.
+The compositor reserves the short red-key action and <Key>Ctrl</Key>+<Key>Esc</Key> for session controls. Screen blanking and keyguard handling belong to the session, so a waking key press or a locked key must not reach an application. The [session guide](/fplinux/use/session/#home-and-applications) owns the user-facing controls.
 
-A Canvas can enable key repeat with `fplinux_ui_canvas_set_key_repeat()`. The runtime repeats the phone's four D-pad keys and external keys marked repeatable by the compositor's XKB map, using the compositor's delay and rate. Phone digits, held gestures and commands are not repeated. Leaving or covering the Canvas cancels held repeats; returning to it requires a new key press. Text fields keep their own Clear repeat behavior.
+The shared runtime repeats accepted navigation and text editing in Lists, Forms, TextBoxes, Alerts and Options menus, using the compositor's delay and rate. Raw text fields also participate when the application passes the received key to `fplinux_ui_text_key()`. The phone repeats only its four D-pad keys; external keyboard input follows the compositor's XKB repeatability. Command activation stays a single action. Losing input focus, opening a menu or covering the current screen cancels the held repeat; returning requires a new press. Text fields keep their own Clear and held-digit gestures.
+
+A Canvas selects its repeat policy with `fplinux_ui_canvas_set_key_repeat()`: `FPLINUX_UI_CANVAS_REPEAT_NONE` is the default; `FPLINUX_UI_CANVAS_REPEAT_NAVIGATION` repeats arrow keys without Ctrl or Alt; `FPLINUX_UI_CANVAS_REPEAT_KEYMAP` also allows repeatable keyboard text, as Terminal needs. A catalog uses navigation-only repetition so holding Enter cannot first open it and then launch an application. Leave repetition disabled for a physical-key tester or a drawing control that needs only the original presses and releases.
+
+Use `fplinux_ui_navigate()` to open a child page from a high-level Options command. The shared screen stack retains the originating menu's selection and scroll position. `fplinux_ui_go_back()` returns to that menu; `fplinux_ui_pop()` completes an action without reopening it. Ordinary `fplinux_ui_push()` does not create this return path, so an action's error alert returns to the application. The low-level `fplinux_ui_menu_open()` API displays one popup at a time and closes it before its callback; it does not create a page history.
 
 ## Direct-display input sessions
 

@@ -1,0 +1,48 @@
+---
+title: Clocks
+description: Set dated or repeating alarms, run a countdown, measure elapsed time and compare UTC offsets.
+source:
+  - alpine/aports/fplinux-clocks
+  - alpine/aports/fplinux-session
+  - alpine/aports/fplinux-launcher
+---
+
+import Key from '../../../components/Key.astro';
+
+Open **Clock** from the [application catalog](/fplinux/use/session/#home-and-applications). Choose **Alarms**, **Timer**, **Stopwatch** or **World clock** with the D-pad and <Key>Centre</Key>. Follow the soft-key labels for the selected task. **Options** also opens the clock face, settings and help; missed reminders appear there when available.
+
+## Alarms
+
+Open **Alarms**, choose **New** and set **Time**. For a one-time alarm, select its **Date**. The initial time is the last one used, or 07:00 the first time; its date is the next occurrence of that time. For a repeating alarm, choose every day, Monday–Friday, Saturday–Sunday or individual days. At least one day must be selected for a repeat. The **Name** is optional.
+
+Choose **Save** to confirm the form. A time or date editor accepts digits directly; <Key>Left</Key> and <Key>Right</Key> select a part, while <Key>Up</Key> and <Key>Down</Key> change it. Cancelling an editor keeps its old value. An enabled one-time alarm must be in the future; a rejected save keeps the form available for correction.
+
+The alarm list shows the time, date or repeat days and whether the alarm is enabled. Select an alarm to edit it. A new alarm is enabled when saved; editing an existing alarm keeps its enabled or disabled state. **Options** provides **Enable**, **Disable** and **Delete** for the selected alarm. After a one-time alarm rings, its date remains visible and the alarm is disabled. Enabling an alarm whose date has passed opens its form with a proposed future date; choose **Save** to confirm it. Stopping a repeating alarm leaves its schedule enabled.
+
+When an alarm is due, the session lights the screen and shows its time, name and controls above the application or keyguard. **Stop** dismisses it; **Snooze** schedules another reminder after the configured number of minutes. Dismissing a reminder returns to the previous screen and keeps the keypad locked if it was locked. **Missed events** lists reminders which were not handled.
+
+## Timer and stopwatch
+
+In **Timer**, choose **Edit** and enter one duration as `HH:MM:SS`, then choose **Start**. The large number shows the remaining time. While it runs, <Key>Centre</Key> pauses it and **Stop** ends the countdown. On pause, <Key>Centre</Key> resumes it; **Options** can change the duration, restart or reset it. After completion, **Repeat** starts the same duration again. Its reminder has **Stop**, without Snooze. **Back** leaves the countdown running.
+
+In **Stopwatch**, choose **Start**. **Lap** records a lap while it runs; <Key>Centre</Key> pauses or continues it. While paused, **Options** opens the laps or resets the result. Resetting a nonzero result asks for confirmation. The lap list shows each lap and its total elapsed time. Leaving the page or closing Clock keeps the measurement running.
+
+## World clock
+
+Choose **Add** and select a **UTC offset** from `UTC−12:00` to `UTC+14:00` in 15-minute steps. Each row shows the offset's local time and whether its date is today, tomorrow or yesterday relative to the phone. Select a saved offset for the full date, then choose **Edit** to select a new offset or **Delete** to remove it. Adjust the offset with **Edit** when daylight saving time starts or ends.
+
+World clocks do not change the phone's time or alarm schedules. Set the system date, time and interface language in [Settings](/fplinux/use/session/#settings). Clock uses the shared date and time display. Its own **Settings** choose the digital or analog clock face and the Snooze interval; each choice is saved when accepted.
+
+## Lifetime and sleep
+
+Closing Clock or using Home keeps confirmed alarms, the timer and the stopwatch with the running graphical session. Minimizing also keeps an open edit form; closing an unsaved form does not create an alarm.
+
+Confirmed alarms, saved UTC offsets, clock-face style, Snooze interval and the last timer duration survive a restart of the graphical service. A running timer, stopwatch, Snooze reminder and active signal do not resume after that restart. Past one-time alarms remain disabled, and repeating alarms wait for their next future occurrence.
+
+During a RAM boot, saved configuration lasts until the entire Linux session is powered off. A [persistent system root](/fplinux/guides/microsd-system-card/) preserves it across reboot. A separate microSD data card does not store Clock's configuration.
+
+The normal [screen timeout](/fplinux/use/session/#lock-and-screen-timeout) leaves Linux and the session running, so reminders still appear. System suspend is different: Clocks does not program an RTC wake alarm. Set a separate [RTC alarm](/fplinux/use/power/#clock-and-alarms) before suspending. Neither kind of alarm switches on a powered-off phone. Check the phone's time before relying on an alarm.
+
+A storage error does not stop timekeeping, active reminders or timer controls. Save failures keep forms available. A change already accepted by the session can remain active while its saving is unconfirmed; Retry saves the accepted configuration without adding a second alarm. See the [shared storage-error guidance](/fplinux/use/session/#saving-and-storage-errors).
+
+The reminder attempts to play a tone and use vibration through the phone's available interfaces. Audio output already in use or an unavailable device can prevent a signal; the visual reminder remains available. Check your phone's audio and vibration support before relying on it.

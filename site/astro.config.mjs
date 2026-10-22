@@ -103,6 +103,7 @@ export default defineConfig({
 				{
 					items: pages(
 						"apps",
+						"apps/api-demos",
 						"apps/brightness",
 						"apps/armada",
 						"apps/tyrquake",
@@ -121,6 +122,7 @@ export default defineConfig({
 							"develop/packaging",
 							"develop/device-interfaces",
 							"develop/input",
+							"develop/application-state",
 							"develop/raw-image-formats",
 							"develop/logging"
 						),
