@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-// The pinned container image installs the Node quality tools outside the source
+// The pinned build environment installs the Node quality tools outside the source
 // tree, so resolve the shared preset from there when the local lookup fails.
 const NODE_TOOLS = "/opt/quality/node-tools/node_modules";
 
@@ -26,32 +26,47 @@ try {
 }
 
 const SCOPES = [
+  "apidemo",
   "audio",
   "bluetooth",
   "bootstrap",
   "bq-2830l-tank-connect-max",
   "build",
   "cache",
+  "calculator",
   "cli",
+  "clocks",
   "console",
   "deps",
   "device-data",
+  "graphics",
   "host",
   "inoi-240-modern-4g",
   "inoi-244-modern-4g",
   "input",
+  "launcher",
   "maxvi-k15n-4g",
   "media",
+  "nokia-110-4g",
   "nokia-ta1618",
+  "notes",
   "quality",
   "release",
   "repo",
   "rootfs",
+  "runtime",
+  "sc9820e",
+  "session",
+  "settings",
   "site",
+  "snake",
   "storage",
+  "terminal",
+  "ui",
   "ums9117",
   "uniwa-v1000-4g",
   "wifi",
+  "xiaomi-qin-1s-plus",
 ];
 
 export default {
