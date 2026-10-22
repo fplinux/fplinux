@@ -114,6 +114,7 @@ SHARED_APORT_SOURCES = {
     "fplinux-clocks": (*CLI_SOURCES, *UTF8_SOURCES, "include/fplinux/fplinux-storage.h"),
     "fplinux-cpuclock": CLI_SOURCES,
     "fplinux-debug-tools": (*DRM_SESSION_SOURCES, *CLI_SOURCES, *GPU_OUTPUT_SOURCES),
+    "fplinux-example-apidemo": CLI_SOURCES,
     "fplinux-fm": CLI_SOURCES,
     "fplinux-gpu-probe": (*CLI_SOURCES, *GPU_SOURCES),
     "fplinux-icons": (
@@ -289,6 +290,7 @@ LOCAL_BUILD_DEPENDENCIES = {
     "fplinux-calculator": ("fplinux-ui",),
     "fplinux-clocks": ("fplinux-ui",),
     "fplinux-debug-tools": ("fplinux-libdrm", "fplinux-mesa"),
+    "fplinux-example-apidemo": ("fplinux-ui",),
     "fplinux-fm": ("fplinux-alsa-lib",),
     "fplinux-gpu-probe": ("fplinux-mesa", "fplinux-libdrm"),
     "fplinux-jack": ("fplinux-alsa-lib",),

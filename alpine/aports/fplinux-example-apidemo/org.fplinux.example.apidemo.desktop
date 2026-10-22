@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=API Demos
+Name[ru]=Демо API
+Exec=/usr/bin/fplinux-example-apidemo
+Icon=org.fplinux.example.apidemo
+Categories=Development;
+X-FPLinux-Mode=integrated

@@ -17,7 +17,7 @@ packages = [
 ]
 
 [bundle]
-packages = []
+packages = ["fplinux-example-apidemo"]
 
 [linux]
 source_lock = "linux"

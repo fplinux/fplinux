@@ -53,6 +53,7 @@ _LVGL_APORTS = frozenset(
     {
         "fplinux-calculator",
         "fplinux-clocks",
+        "fplinux-example-apidemo",
         "fplinux-launcher",
         "fplinux-settings",
         "fplinux-snake",
@@ -168,10 +169,15 @@ def source_files(*, enforce_policy: bool) -> list[Path]:
             continue
         if not path.is_file():
             continue
-        if is_site_asset(relative) or relative.as_posix() in {
-            "site/src/fonts/OFL.txt",
-            "site/public/fonts/OFL.txt",
-        }:
+        application_image = (
+            relative.parent == Path("alpine/aports/fplinux-example-apidemo")
+            and relative.suffix == ".png"
+        )
+        if (
+            is_site_asset(relative)
+            or application_image
+            or relative.as_posix() in {"site/src/fonts/OFL.txt", "site/public/fonts/OFL.txt"}
+        ):
             continue
         if path.suffix.lower() == ".pak" or QUAKE_DATA_NAME.fullmatch(path.name):
             if enforce_policy:

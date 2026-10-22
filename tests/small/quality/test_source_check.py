@@ -104,11 +104,37 @@ class SourceInventoryTests:
             ):
                 source_check.source_files(enforce_policy=True)
 
-    def test_source_inventory_rejects_binary_artifacts(self) -> None:
+    def test_source_inventory_accepts_application_pngs_without_text_decoding(
+        self, tmp_path: Path
+    ) -> None:
+        """Bundled example pictures are resources; their C consumer remains checked."""
+        package = tmp_path / "alpine/aports/fplinux-example-apidemo"
+        package.mkdir(parents=True)
+        source = package / "example.c"
+        source.write_text("int example;\n", encoding="utf-8")
+        (package / "picture.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00")
+        with mock.patch.object(source_check, "ROOT", tmp_path):
+            files = source_check.source_files(enforce_policy=True)
+            source_check.check_text(files)
+        assert files == [source]
+
+    @pytest.mark.parametrize(
+        "relative",
+        [
+            "artifact.bin",
+            "alpine/aports/fplinux-example-apidemo/artifact.bin",
+            "alpine/aports/fplinux-example-apidemo/generated/picture.png",
+            "alpine/aports/other-application/picture.png",
+        ],
+        ids=["ordinary-artifact", "application-artifact", "nested-image", "other-application"],
+    )
+    def test_source_inventory_rejects_binary_artifacts(self, relative: str) -> None:
         """Keep binary rejection in the explicit source scope."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "artifact.bin").write_bytes(b"\x00\xff")
+            artifact = root / relative
+            artifact.parent.mkdir(parents=True, exist_ok=True)
+            artifact.write_bytes(b"\x00\xff")
             with (
                 mock.patch.object(source_check, "ROOT", root),
                 pytest.raises(SystemExit, match="binary artifact is not allowed"),

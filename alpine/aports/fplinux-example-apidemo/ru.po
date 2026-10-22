@@ -1,0 +1,2630 @@
+# Russian translation of fplinux-example-apidemo.
+# SPDX-License-Identifier: 0BSD
+msgid ""
+msgstr ""
+"Project-Id-Version: fplinux-example-apidemo\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "In memory"
+msgstr "В памяти"
+
+msgid "Save result"
+msgstr "Результат сохранения"
+
+msgid "No save attempted"
+msgstr "Сохранение не выполнялось"
+
+msgid " and "
+msgstr " и "
+
+msgid " text."
+msgstr " текст."
+
+msgid "%1$s failed: %2$s (%3$s)."
+msgstr "Ошибка %1$s: %2$s (%3$s)."
+
+msgid "%1$s, lines of %2$d px"
+msgstr "%1$s, строка %2$d пкс"
+
+msgid "%1$s: %2$s takes no “%3$s”."
+msgstr "%1$s: %2$s не принимает «%3$s»."
+
+msgid "%1$s: the text does not suit %2$s. Clear it and try again."
+msgstr "%1$s: текст не подходит для %2$s. Сотрите его и повторите."
+
+msgid "%1$u character:\n%2$s"
+msgid_plural "%1$u characters:\n%2$s"
+msgstr[0] "%1$u символ:\n%2$s"
+msgstr[1] "%1$u символа:\n%2$s"
+msgstr[2] "%1$u символов:\n%2$s"
+
+msgid "%d command"
+msgid_plural "%d commands"
+msgstr[0] "%d команда"
+msgstr[1] "%d команды"
+msgstr[2] "%d команд"
+
+msgid "%d file"
+msgid_plural "%d files"
+msgstr[0] "%d файл"
+msgstr[1] "%d файла"
+msgstr[2] "%d файлов"
+
+msgid "%d px"
+msgstr "%d пкс"
+
+msgid "%d × %d px"
+msgstr "%d × %d пкс"
+
+msgid "%ld ms"
+msgstr "%ld мс"
+
+msgid "%s has no number to call."
+msgstr "%s: нет номера для звонка."
+
+msgid "%s has no number to call.\nfplinux_ui_screen_get_command_item() = SIZE_MAX"
+msgstr "%s: нет номера для звонка.\nfplinux_ui_screen_get_command_item() = SIZE_MAX"
+
+msgid "%s%%"
+msgstr "%s %%"
+
+msgid "%s: %s"
+msgstr "%s: %s"
+
+msgid "%s: longer than the limit of %d character."
+msgid_plural "%s: longer than the limit of %d characters."
+msgstr[0] "%s: длиннее предела в %d символ."
+msgstr[1] "%s: длиннее предела в %d символа."
+msgstr[2] "%s: длиннее предела в %d символов."
+
+msgid "%s: “%s”"
+msgstr "%s: «%s»"
+
+msgid "%u Hz"
+msgstr "%u Гц"
+
+msgid "%u demo"
+msgid_plural "%u demos"
+msgstr[0] "%u пример"
+msgstr[1] "%u примера"
+msgstr[2] "%u примеров"
+
+msgid "%zu opened, then %s (%s)"
+msgstr "Открыто %zu, затем %s (%s)"
+
+msgid "%zu row is marked."
+msgid_plural "%zu rows are marked."
+msgstr[0] "Отмечена %zu строка."
+msgstr[1] "Отмечены %zu строки."
+msgstr[2] "Отмечено %zu строк."
+
+msgid "%zu: %s"
+msgstr "%zu: %s"
+
+msgid "%zu: %s, hidden"
+msgstr "%zu: %s, скрыт"
+
+msgid "0–10, step 1"
+msgstr "0–10, шаг 1"
+
+msgid "0–1000, step 50"
+msgstr "0–1000, шаг 50"
+
+msgid "1 s pulse"
+msgstr "Импульс 1 с"
+
+msgid "10 new messages"
+msgstr "10 новых сообщений"
+
+msgid "100 ms pulse"
+msgstr "Импульс 100 мс"
+
+msgid "2/8: scroll text."
+msgstr "2/8: прокрутка текста."
+
+msgid "256 letters"
+msgstr "256 букв"
+
+msgid "3 channels"
+msgstr "3 канала"
+
+msgid "30 August 2026, 14:05:"
+msgstr "30 августа 2026 года, 14:05:"
+
+msgid "4 s pulse"
+msgstr "Импульс 4 с"
+
+msgid "48001 Hz"
+msgstr "48001 Гц"
+
+msgid "5 streams"
+msgstr "5 потоков"
+
+msgid "50 ms pause"
+msgstr "Пауза 50 мс"
+
+msgid "65 durations"
+msgstr "65 значений"
+
+msgid "7999 Hz"
+msgstr "7999 Гц"
+
+msgid ": "
+msgstr ": "
+
+msgid "A HELP command always goes to the options menu, so the left soft key shows Options even though Help is the only command there."
+msgstr "Команда HELP всегда уходит в меню опций, поэтому на левой клавише «Опции», хотя там только «Справка»."
+
+msgid "A HELP command opens the application's own help, such as this alert."
+msgstr "Команда HELP открывает справку самого приложения, например это оповещение."
+
+msgid "A NULL label shows the type's word in the system language. ITEM and SCREEN commands need their own."
+msgstr "Подпись NULL показывает слово типа на языке системы. Командам ITEM и SCREEN нужна своя."
+
+msgid "A bar takes no keys: Left/Right call lv_bar_set_value(). Next: the next bar."
+msgstr "Индикатор не принимает клавиш: влево/вправо вызывают lv_bar_set_value(). «Далее»: следующий индикатор."
+
+msgid "A chart takes no keys; the screen moves its cursor. Left/Right: point. Up/Down or a digit: value. Next: the other chart."
+msgstr "График не принимает клавиш, курсор двигает экран. Влево/вправо: точка. Вверх/вниз или цифра: значение. «Далее»: другой график."
+
+msgid "A choice whose text does not fit on its line"
+msgstr "Вариант, текст которого не помещается в строку"
+
+msgid "A colour photo"
+msgstr "Цветное фото"
+
+msgid "A date and time item with a long label"
+msgstr "Пункт даты и времени с длинной подписью"
+
+msgid "A gauge"
+msgstr "Шкала"
+
+msgid "A gauge whose label is too long for its line"
+msgstr "Шкала с подписью, которая не помещается в строку"
+
+msgid "A label alone"
+msgstr "Только подпись"
+
+msgid "A line break in the label"
+msgstr "Перенос строки в подписи"
+
+msgid "A long text breaks at spaces into as many lines as it needs."
+msgstr "Длинный текст переносится по пробелам на столько строк, сколько нужно."
+
+msgid "A message to %s."
+msgstr "Сообщение для %s."
+
+msgid "A page of the menu. Back: the previous page."
+msgstr "Страница меню. «Назад»: предыдущая страница."
+
+msgid "A photo, decoded once"
+msgstr "Фото, декодировано раз"
+
+msgid "A profile this demo does not know"
+msgstr "Профиль, неизвестный этому примеру"
+
+msgid "A read-only field takes the focus, but no typing."
+msgstr "Поле только для чтения берёт фокус, но не ввод."
+
+msgid "A read-only text box shows a long text, such as a licence or a message, without a caret, a mode or a counter.\n\nUp and Down scroll it by a line, Left and Right by a page. The scroll indicator at the right shows where you are.\n\nThe right soft key stays Back: there is no Clear, because nothing can be typed. OK starts no new line.\n\nThe application can still replace the text with fplinux_ui_text_box_set(), for example when a new message arrives.\n\nGive the box FPLINUX_UI_TEXT_UNEDITABLE with fplinux_ui_text_box_set_constraint(), added with | to any type.\n\nThis is the end of the text."
+msgstr "Поле только для чтения показывает длинный текст, например лицензию или сообщение, без курсора, режима и счётчика.\n\nВверх и вниз прокручивают его на строку, влево и вправо — на страницу. Полоса прокрутки справа показывает, где вы.\n\nПравая софт-клавиша остаётся «Назад»: «Стереть» нет, потому что вводить нечего. OK не переносит строку.\n\nПриложение по-прежнему может заменить текст через fplinux_ui_text_box_set(), например когда приходит новое сообщение.\n\nЗадайте полю FPLINUX_UI_TEXT_UNEDITABLE через fplinux_ui_text_box_set_constraint(), добавив его через | к любому типу.\n\nЭто конец текста."
+
+msgid "A read-only text field scrolls its text while it has the focus"
+msgstr "Поле только для чтения прокручивает текст, пока оно в фокусе"
+
+msgid "A row whose text is much longer than the screen is wide"
+msgstr "Строка, текст которой намного длиннее ширины экрана"
+
+msgid "A scale takes no keys. Left/Right: move the needle with lv_scale_set_line_needle_value()."
+msgstr "Шкала не принимает клавиш. Влево/вправо: двигать стрелку через lv_scale_set_line_needle_value()."
+
+msgid "A shape in two colours"
+msgstr "Фигура в двух цветах"
+
+msgid "A single remaining command goes on the left soft key itself when its legend fits beside the others."
+msgstr "Единственная оставшаяся команда сама встаёт на левую софт-клавишу, если её подпись помещается рядом с остальными."
+
+msgid "A span group can stop after a number of lines and end with dots, however long its text is."
+msgstr "Группа фрагментов может остановиться после нескольких строк и закончиться многоточием, какой бы длинный текст в ней ни был."
+
+msgid "A spinner turns by itself. The runtime stops it while the phone is locked. The system's busy alert turns in steps instead."
+msgstr "Индикатор ожидания вращается сам. Пока телефон заблокирован, среда его останавливает. Системное окно ожидания вращается рывками."
+
+msgid "A string item shows a label above its text."
+msgstr "Строковый элемент показывает подпись над текстом."
+
+msgid "A string item wraps its text onto as many lines as it needs. When the form is taller than the screen, Up and Down scroll it by a line, since no item here takes the focus. Nothing is cut and nothing moves."
+msgstr "Строковый элемент переносит текст на столько строк, сколько нужно. Когда форма выше экрана, вверх/вниз прокручивают её на строку: здесь ни один элемент не берёт фокус. Ничего не обрезано и ничего не движется."
+
+msgid "A string item's label wraps onto more lines"
+msgstr "Подпись строкового пункта переносится на новые строки"
+
+msgid "A system glyph"
+msgstr "Системный значок"
+
+msgid "A text again. Next, \"\" clears it."
+msgstr "Снова текст. Затем \"\" его сотрёт."
+
+msgid "A text alone, without a label."
+msgstr "Только текст, без подписи."
+
+msgid "A text box takes several lines. OK starts a new one."
+msgstr "В поле можно писать в несколько строк. OK начинает новую."
+
+msgid "A theme this demo does not know."
+msgstr "Тема, неизвестная этому примеру."
+
+msgid "A timerfd expires every second; fplinux_ui_watch_fd() adds it to the event loop with POLLIN. Unlike LVGL timers, the watch keeps running while the application is hidden."
+msgstr "timerfd срабатывает каждую секунду; fplinux_ui_watch_fd() добавляет его в цикл событий с POLLIN. В отличие от таймеров LVGL, наблюдение продолжается, пока приложение скрыто."
+
+msgid "A title too long for the title band scrolls once when the screen opens"
+msgstr "Заголовок длиннее полосы заголовка прокручивается один раз при открытии экрана"
+
+msgid "A warning takes the warning colour for its frame and title."
+msgstr "Рамка и заголовок предупреждения — цвета предупреждения."
+
+msgid "API Demos"
+msgstr "Демо API"
+
+msgid "About"
+msgstr "О программе"
+
+msgid "Actions"
+msgstr "Действия"
+
+msgid "Add"
+msgstr "Добавить"
+
+msgid "Add a new item"
+msgstr "Добавить новый пункт"
+
+msgid "Add and remove"
+msgstr "Добавить и убрать"
+
+msgid "Add icons"
+msgstr "Добавить значки"
+
+msgid "Add one"
+msgstr "Добавить"
+
+msgid "Add second field"
+msgstr "Добавить второе поле"
+
+msgid "Airplane mode"
+msgstr "Режим полёта"
+
+msgid "Alerts"
+msgstr "Оповещения"
+
+msgid "All %d file copied."
+msgid_plural "All %d files copied."
+msgstr[0] "Скопирован %d файл."
+msgstr[1] "Скопированы все %d файла."
+msgstr[2] "Скопированы все %d файлов."
+
+msgid "An 8000 Hz mono stream holds 2048 frames, 256 ms. A full stream takes fewer frames; Queued falls as the system plays them."
+msgstr "Моно-поток 8000 Гц вмещает 2048 кадров, 256 мс. Полный поток принимает меньше кадров; «В очереди» убывает, пока система их играет."
+
+msgid "An LVGL timer updates this screen ten times a second. It pauses while the application is hidden and is deleted on Back, so that an idle application never wakes up."
+msgstr "Таймер LVGL обновляет этот экран десять раз в секунду. Он приостановлен, пока приложение скрыто, и удаляется по «Назад», чтобы бездействующее приложение не просыпалось."
+
+msgid "An alarm is set"
+msgstr "Будильник включён"
+
+msgid "An alert grows with its text up to the surface less its margins. A longer text scrolls: Up and Down by a line, Left and Right by a page.\n\nKeep alerts short anyway: at 128 pixels a line holds about sixteen letters, and four lines fit without scrolling.\n\nThe soft keys stay the same while the text scrolls."
+msgstr "Оповещение растёт с текстом до размера поверхности без полей. Более длинный текст прокручивается: вверх/вниз — на строку, влево/вправо — на страницу.\n\nИ всё же пишите коротко: при ширине 128 пикселей в строку входит около шестнадцати букв, а без прокрутки — четыре строки.\n\nПока текст прокручивается, программные клавиши не меняются."
+
+msgid "An alpha-only shape"
+msgstr "Фигура из альфа-канала"
+
+msgid "An application without an icon"
+msgstr "Приложение без значка"
+
+msgid "An application would leave here, with fplinux_ui_back()."
+msgstr "Здесь приложение вышло бы через fplinux_ui_back()."
+
+msgid "An error takes the danger colour for its frame and title."
+msgstr "Рамка и заголовок ошибки — цвета опасности."
+
+msgid "An image per state: the ring is drawn in code. OK: press or switch. Next: the next button. The third one is disabled."
+msgstr "Для каждого состояния своя картинка, кольцо нарисовано в коде. OK: нажать или переключить. «Далее»: следующая кнопка. Третья недоступна."
+
+msgid "An information alert is framed in the focus colour. With timeout 0 it stays until you close it."
+msgstr "Рамка сведений — цвета фокуса. С тайм-аутом 0 оповещение остаётся, пока его не закроют."
+
+msgid "And a detail line that is longer still, so that it scrolls after the text"
+msgstr "И строка подробностей ещё длиннее, поэтому она прокручивается после текста"
+
+msgid "And so does its text, which never scrolls."
+msgstr "Как и его текст, который никогда не прокручивается."
+
+msgid "Animated image"
+msgstr "Анимация"
+
+msgid "Anna"
+msgstr "Анна"
+
+msgid "Another long row: the focus moves, the old row rests"
+msgstr "Ещё одна длинная строка: фокус уходит, старая строка замирает"
+
+msgid "Answer: %s"
+msgstr "Ответ: %s"
+
+msgid "Answer: none"
+msgstr "Ответ: нет"
+
+msgid "Any text"
+msgstr "Любой текст"
+
+msgid "Any text, no limit"
+msgstr "Любой текст без ограничения"
+
+msgid "Appearance errors"
+msgstr "Ошибки вида"
+
+msgid "Append"
+msgstr "Добавить в конец"
+
+msgid "Apple"
+msgstr "Яблоко"
+
+msgid "Apple\nBanana\nCherry\nLemon"
+msgstr "Яблоко\nБанан\nВишня\nЛимон"
+
+msgid "Apple\nBanana\nCherry\nLemon\nOrange\nPlum"
+msgstr "Яблоко\nБанан\nВишня\nЛимон\nАпельсин\nСлива"
+
+msgid "April"
+msgstr "Апрель"
+
+msgid "Arc"
+msgstr "Дуга"
+
+msgid "Arc label"
+msgstr "Текст по дуге"
+
+msgid "Arrows: move between days. OK: choose. Next: the month arrows."
+msgstr "Стрелки: переход между днями. OK: выбрать. «Далее»: стрелки месяцев."
+
+msgid "Arrows: move between days. OK: choose. Next: the year list, then the month list."
+msgstr "Стрелки: переход между днями. OK: выбрать. «Далее»: список лет, затем список месяцев."
+
+msgid "Arrows: move between keys. OK: press. Digits, * and # press their keys. Next: the other matrix."
+msgstr "Стрелки: переход между клавишами. OK: нажать. Цифры, * и # нажимают свои клавиши. «Далее»: другая матрица."
+
+msgid "Arrows: move between keys. OK: type the key. %1$s: erase, %2$s: done. For real text use fplinux_ui_text, which has multi-tap."
+msgstr "Стрелки: переход между клавишами. OK: ввести клавишу. %1$s: стереть, %2$s: готово. Для настоящего ввода используйте fplinux_ui_text с мультитапом."
+
+msgid "Arrows: move the selected cell. Prices use fplinux_ui_format_number()."
+msgstr "Стрелки: двигать выбранную ячейку. Цены выводит fplinux_ui_format_number()."
+
+msgid "August"
+msgstr "Август"
+
+msgid "Back"
+msgstr "Назад"
+
+msgid "Back has priority 0 and takes the right soft key. Exit, priority 3, goes to the menu, last."
+msgstr "У «Назад» приоритет 0, и она занимает правую софт-клавишу. «Выход» с приоритетом 3 уходит в меню, последней."
+
+msgid "Back to the catalogue"
+msgstr "Назад в каталог"
+
+msgid "Background playback"
+msgstr "Фоновое воспроизведение"
+
+msgid "Balance"
+msgstr "Баланс"
+
+msgid "Banana"
+msgstr "Банан"
+
+msgid "Bar"
+msgstr "Индикатор"
+
+msgid "Bars"
+msgstr "Столбцы"
+
+msgid "Battery low"
+msgstr "Батарея разряжена"
+
+msgid "Bells"
+msgstr "Колокола"
+
+msgid "Birthday"
+msgstr "День рождения"
+
+msgid "Bluetooth"
+msgstr "Bluetooth"
+
+msgid "Body text: rows, values, dialogs. Aa Бб Ёё 0123 № € ₽ ✓ ← ↑ → ↓"
+msgstr "Основной текст: строки, значения, диалоги. Aa Бб Ёё 0123 № € ₽ ✓ ← ↑ → ↓"
+
+msgid "Boris"
+msgstr "Борис"
+
+msgid "Brightness"
+msgstr "Яркость"
+
+msgid "Build a list as a flex column of buttons. Up/Down: move. OK: choose."
+msgstr "Список стройте как flex-колонку кнопок. Вверх/вниз: переход. OK: выбрать."
+
+msgid "Build a window as a column of a header row and a content. Next: the next header button. OK: press it. Up/Down: the next button, then scroll. Left/Right: scroll."
+msgstr "Окно стройте как колонку из строки заголовка и содержимого. «Далее»: следующая кнопка заголовка. OK: нажать её. Вверх/вниз: следующая кнопка, затем прокрутка. Влево/вправо: прокрутка."
+
+msgid "Button"
+msgstr "Кнопка"
+
+msgid "Button matrix"
+msgstr "Матрица кнопок"
+
+msgid "Calendar"
+msgstr "Календарь"
+
+msgid "Calendar with lists"
+msgstr "Календарь со списками"
+
+msgid "Call"
+msgstr "Позвонить"
+
+msgid "Call support"
+msgstr "Позвонить в поддержку"
+
+msgid "Calling %s."
+msgstr "Звоним: %s."
+
+msgid "Calling %s.\nThe item listener received index %zu."
+msgstr "Звоним: %s.\nОбработчик строк получил индекс %zu."
+
+msgid "Calling %s.\nThe item listener received item %zu."
+msgstr "Звоним: %s.\nОбработчик элементов получил элемент %zu."
+
+msgid "Calling %s.\nfplinux_ui_screen_get_command_item() = %zu"
+msgstr "Звоним: %s.\nfplinux_ui_screen_get_command_item() = %zu"
+
+msgid "Calls off"
+msgstr "Запретить звонки"
+
+msgid "Calls on"
+msgstr "Разрешить звонки"
+
+msgid "Cancel"
+msgstr "Отмена"
+
+msgid "Cancel chosen"
+msgstr "Выбрана «Отмена»"
+
+msgid "Cancelled"
+msgstr "Отменено"
+
+msgid "Cancelled: the callback received FPLINUX_UI_MENU_CANCELLED."
+msgstr "Отменено: обратный вызов получил FPLINUX_UI_MENU_CANCELLED."
+
+msgid "Canvas"
+msgstr "Холст"
+
+msgid "Canvas fields"
+msgstr "Поля на холсте"
+
+msgid "Catalogue"
+msgstr "Каталог"
+
+msgid "Cell: %s"
+msgstr "Ячейка: %s"
+
+msgid "Change"
+msgstr "Сменить"
+
+msgid "Change listener"
+msgstr "Обработчик изменений"
+
+msgid "Change the button"
+msgstr "Изменить кнопку"
+
+msgid "Changed %d time."
+msgid_plural "Changed %d times."
+msgstr[0] "Изменено %d раз."
+msgstr[1] "Изменено %d раза."
+msgstr[2] "Изменено %d раз."
+
+msgid "Changing items"
+msgstr "Изменение формы"
+
+msgid "Changing rows"
+msgstr "Изменение строк"
+
+msgid "Changing the type"
+msgstr "Смена типа"
+
+msgid "Channels"
+msgstr "Каналы"
+
+msgid "Chart"
+msgstr "График"
+
+msgid "Checkbox"
+msgstr "Флажок"
+
+msgid "Checked in this order: EINVAL for a rate or channel count out of range, ENOTSUP without sound, EAGAIN while hidden, EMFILE with four streams open, then errors of the audio service such as EBUSY or ECONNREFUSED."
+msgstr "Порядок проверки: EINVAL для частоты или числа каналов вне диапазона, ENOTSUP без звука, EAGAIN, пока приложение скрыто, EMFILE при четырёх открытых потоках, затем ошибки звуковой службы, например EBUSY или ECONNREFUSED."
+
+msgid "Checked in this order: EINVAL for a wrong pattern, ENOTSUP without a vibrator, EAGAIN while the application is hidden."
+msgstr "Порядок проверки: EINVAL для неверного шаблона, ENOTSUP без вибромотора, EAGAIN, пока приложение скрыто."
+
+msgid "Cheese"
+msgstr "Сыр"
+
+msgid "Cherry"
+msgstr "Вишня"
+
+msgid "Chime"
+msgstr "Перезвон"
+
+msgid "Choices"
+msgstr "Выбор"
+
+msgid "Choose a title with OK and send it with the left soft key. The title names the application's window for the system; version 1 does not draw it, the status bar shows the time and the battery."
+msgstr "Выберите заголовок клавишей OK и отправьте его левой софт-клавишей. Заголовок называет окно приложения для системы; версия 1 его не показывает, в строке состояния только время и батарея."
+
+msgid "Choose all toppings"
+msgstr "Выбрать всю начинку"
+
+msgid "Chosen"
+msgstr "Выбрано"
+
+msgid "Chosen: %s"
+msgstr "Выбрано: %s"
+
+msgid "Chosen: %s, action %d."
+msgstr "Выбрано: %s, действие %d."
+
+msgid "Chosen: none"
+msgstr "Выбрано: ничего"
+
+msgid "Clamped"
+msgstr "Ограничено"
+
+msgid "Clara"
+msgstr "Клара"
+
+msgid "Classic"
+msgstr "Классическое"
+
+msgid "Clear"
+msgstr "Стереть"
+
+msgctxt "soft key"
+msgid "Clear"
+msgstr "Стереть"
+
+msgctxt "weather"
+msgid "Clear"
+msgstr "Ясно"
+
+msgid "Clear all"
+msgstr "Очистить"
+
+msgid "Clear text"
+msgstr "Стереть текст"
+
+msgid "Clear the search"
+msgstr "Стереть поиск"
+
+msgid "Close"
+msgstr "Закрыть"
+
+msgid "Close NULL"
+msgstr "Закрыть NULL"
+
+msgid "Closed by fplinux_ui_menu_close(): no callback."
+msgstr "Закрыто через fplinux_ui_menu_close(), без обратного вызова."
+
+msgid "Closed; frames not yet heard are dropped"
+msgstr "Закрыт; непрозвучавшие кадры отброшены"
+
+msgid "Closes after 1.5 s"
+msgstr "Закрытие через 1,5 с"
+
+msgid "Closes after 4 s"
+msgstr "Закрытие через 4 с"
+
+msgid "Closes in 3 s."
+msgstr "Закроется через 3 с."
+
+msgid "Command"
+msgstr "Команда"
+
+msgid "Command types"
+msgstr "Типы команд"
+
+msgid "Commands and menus"
+msgstr "Команды и меню"
+
+msgid "Confirmation"
+msgstr "Подтверждение"
+
+msgid "Connecting"
+msgstr "Подключение"
+
+msgid "Connection lost"
+msgstr "Связь потеряна"
+
+msgid "Content sizes"
+msgstr "Размеры содержимого"
+
+msgid "Copy the address"
+msgstr "Копировать адрес"
+
+msgid "Copying"
+msgstr "Копирование"
+
+msgid "Copying 20 files."
+msgstr "Копируются 20 файлов."
+
+msgid "Copying file %d of %d."
+msgstr "Копируется файл %d из %d."
+
+msgid "Count"
+msgstr "Счёт"
+
+msgid "Count marks"
+msgstr "Посчитать отметки"
+
+msgid "Crust"
+msgstr "Тесто"
+
+msgid "Custom symbol"
+msgstr "Свой значок"
+
+msgid "D-pad: move"
+msgstr "Стрелки: двигать"
+
+msgid "Dark"
+msgstr "Тёмная"
+
+msgid "Dashes"
+msgstr "Штрихи"
+
+msgid "Date"
+msgstr "Дата"
+
+msgid "Date and time"
+msgstr "Дата и время"
+
+msgid "Dates"
+msgstr "Даты"
+
+msgid "Dates and times"
+msgstr "Дата и время"
+
+msgid "Day"
+msgstr "День"
+
+msgid "December"
+msgstr "Декабрь"
+
+msgid "Decimal number"
+msgstr "Десятичное число"
+
+msgid "Decoration only, never text"
+msgstr "Только украшение, никогда не текст"
+
+msgid "Default label"
+msgstr "Подпись по умолчанию"
+
+msgid "Delete"
+msgstr "Удалить"
+
+msgid "Delete all"
+msgstr "Удалить все"
+
+msgid "Delete first"
+msgstr "Удалить первое"
+
+msgid "Delete last"
+msgstr "Удалить последнее"
+
+msgid "Delete last row"
+msgstr "Удалить последнюю"
+
+msgid "Delete photo"
+msgstr "Удалить фото"
+
+msgid "Delete stored data"
+msgstr "Удалить сохранённое"
+
+msgid "Delete the photo?"
+msgstr "Удалить фото?"
+
+msgid "Deprecated in LVGL 9.6"
+msgstr "Устарело в LVGL 9.6"
+
+msgid "Details"
+msgstr "Детали"
+
+msgid "Dialogs, the options menu, the symbol grid"
+msgstr "Диалоги, меню опций, таблица символов"
+
+msgid "Digits: type. *: erase. Left/Right: move the caret. Next: the next field. Letters need a keyboard: use fplinux_ui_text, which has multi-tap."
+msgstr "Цифры: ввод. *: стереть. Влево/вправо: курсор. «Далее»: следующее поле. Для букв нужна клавиатура: используйте fplinux_ui_text с мультитапом."
+
+msgid "Display"
+msgstr "Экран"
+
+msgid "Display settings"
+msgstr "Настройки экрана"
+
+msgid "Dimming below a modal"
+msgstr "Затемнение под модальным окном"
+
+msgid "Dividers, unfocused frames, tracks"
+msgstr "Разделители, рамки без фокуса, дорожки"
+
+msgid "Dmitry"
+msgstr "Дмитрий"
+
+msgid "Done"
+msgstr "Готово"
+
+msgid "Done: %s"
+msgstr "Готово: %s"
+
+msgid "Dots"
+msgstr "Многоточие"
+
+msgid "Downloading"
+msgstr "Загрузка"
+
+msgid "Drawn with lv_draw"
+msgstr "Нарисовано lv_draw"
+
+msgid "Dropdown list"
+msgstr "Выпадающий список"
+
+msgid "Each command shows its glyph in the options menu. Rename has none: its text still lines up with the others."
+msgstr "В меню опций у каждой команды свой значок. У «Переименовать» его нет, но текст выровнен с остальными."
+
+msgid "Each item loads its page with lv_menu_set_load_page_event()."
+msgstr "Каждый пункт открывает свою страницу через lv_menu_set_load_page_event()."
+
+msgid "Edit"
+msgstr "Изменить"
+
+msgid "Eight frames drawn in code, one every 125 ms. OK: pause or play. The runtime stops every animation while the phone is locked."
+msgstr "Восемь кадров нарисованы в коде, по кадру в 125 мс. OK: пауза или воспроизведение. Пока телефон заблокирован, среда останавливает любую анимацию."
+
+msgid "Empty ID"
+msgstr "Пустой ID"
+
+msgid "End fplinux_ui_run() without a CLOSE event? Applications use this after a fatal error."
+msgstr "Завершить fplinux_ui_run() без события CLOSE? Так делают приложения после неустранимой ошибки."
+
+msgid "Ends in 6 s."
+msgstr "Закончится через 6 с."
+
+msgid "Erase"
+msgstr "Стереть"
+
+msgid "Error"
+msgstr "Ошибка"
+
+msgid "Errors"
+msgstr "Ошибки"
+
+msgid "Escape and Enter"
+msgstr "Escape и Enter"
+
+msgid "Eva"
+msgstr "Ева"
+
+msgid "Event %zu"
+msgstr "Событие %zu"
+
+msgid "Event %zu: %s."
+msgstr "Событие %zu: %s."
+
+msgid "Explore FPLinux UI functions and LVGL widgets, one demo at a time. Type a word to search, or press OK for the catalogue.\nThis page is the raw LVGL screen: fplinux_ui_header(), fplinux_ui_text_create(), fplinux_ui_set_softkeys(), fplinux_ui_scroll_key() and fplinux_ui_menu_open()."
+msgstr "Изучайте функции интерфейса FPLinux и виджеты LVGL — по одному примеру на экран. Наберите слово для поиска или нажмите OK, чтобы открыть каталог.\nЭта страница — обычный экран LVGL: fplinux_ui_header(), fplinux_ui_text_create(), fplinux_ui_set_softkeys(), fplinux_ui_scroll_key() и fplinux_ui_menu_open()."
+
+msgid "Exclusive list"
+msgstr "Выбор одного"
+
+msgid "Exit"
+msgstr "Выход"
+
+msgid "Request sent"
+msgstr "Запрос отправлен"
+
+msgid "Stop requested"
+msgstr "Запрошена остановка"
+
+msgid "Vibration request failed"
+msgstr "Ошибка запроса вибрации"
+
+msgid "Streaming"
+msgstr "Передача аудио"
+
+msgid "February"
+msgstr "Февраль"
+
+msgid "Fill"
+msgstr "Заполнить"
+
+msgid "Find"
+msgstr "Поиск"
+
+msgid "First row"
+msgstr "Первая строка"
+
+msgid "Fixed for the process. Without a vibrator, every pattern fails with ENOTSUP."
+msgstr "Не меняется, пока процесс работает. Без вибромотора любой шаблон даёт ENOTSUP."
+
+msgid "Fixed for the process. Without sound, every open fails with ENOTSUP."
+msgstr "Не меняется, пока процесс работает. Без звука любое открытие даёт ENOTSUP."
+
+msgid "Focus"
+msgstr "Фокус"
+
+msgid "Focus rings, gauges, spinners, scrolling"
+msgstr "Рамки фокуса, шкалы, индикаторы ожидания, прокрутка"
+
+msgid "Focus the last"
+msgstr "Фокус на последний"
+
+msgid "Forget number"
+msgstr "Забыть номер"
+
+msgid "Form"
+msgstr "Форма"
+
+msgid "Forms"
+msgstr "Формы"
+
+msgid "Fr"
+msgstr "Пт"
+
+msgid "Fruit"
+msgstr "Фрукт"
+
+msgid "Full screen"
+msgstr "Весь экран"
+
+msgid "Full screen without a title"
+msgstr "Весь экран без заголовка"
+
+msgid "Gauges"
+msgstr "Шкалы"
+
+msgid "Get and set text"
+msgstr "Чтение и запись"
+
+msgid "Give it a command"
+msgstr "Дать команду"
+
+msgid "Glyph errors"
+msgstr "Ошибки значков"
+
+msgid "Go to mark"
+msgstr "Перейти к отметке"
+
+msgid "Grape"
+msgstr "Виноград"
+
+msgid "HYPERLINK without commands"
+msgstr "HYPERLINK без команд"
+
+msgid "Heartbeat"
+msgstr "Сердцебиение"
+
+msgid "Hello"
+msgstr "Привет"
+
+msgid "Help"
+msgstr "Справка"
+
+msgid "Help command"
+msgstr "Команда справки"
+
+msgid "Hidden %u times, shown %u times"
+msgstr "Скрыто: %u, показано: %u"
+
+msgid "Hidden decimal"
+msgstr "Скрытое число"
+
+msgid "Hidden phone number"
+msgstr "Скрытый номер"
+
+msgid "Hide"
+msgstr "Скрыть"
+
+msgid "Hide the text"
+msgstr "Скрыть текст"
+
+msgid "Home"
+msgstr "Домой"
+
+msgid "Horizontal, with a section"
+msgstr "Горизонтальная, с участком"
+
+msgid "ID with /"
+msgstr "ID с /"
+
+msgid "ITEM without a label"
+msgstr "ITEM без подписи"
+
+msgid "Ignored"
+msgstr "Пропущено"
+
+msgid "Image"
+msgstr "Изображение"
+
+msgid "Image button"
+msgstr "Кнопка-картинка"
+
+msgid "Image link"
+msgstr "Ссылка-картинка"
+
+msgid "Images"
+msgstr "Изображения"
+
+msgid "Images that fail"
+msgstr "Изображения с ошибкой"
+
+msgid "Implicit list"
+msgstr "Простой список"
+
+msgid "In the file"
+msgstr "В файле"
+
+msgid "Inbox"
+msgstr "Входящие"
+
+msgid "Index %zu is no longer marked."
+msgstr "Индекс %zu больше не отмечен."
+
+msgid "Index %zu is still marked: an EXCLUSIVE list ignores unmarking."
+msgstr "Индекс %zu всё ещё отмечен: список EXCLUSIVE не снимает отметку."
+
+msgid "Index %zu, size %zu."
+msgstr "Индекс %zu, размер %zu."
+
+msgid "Index %zu: %s.\nCommand: FPLINUX_UI_SELECT_COMMAND"
+msgstr "Индекс %zu: %s.\nКоманда: FPLINUX_UI_SELECT_COMMAND"
+
+msgid "Index %zu: %s.\nOK on the marked row is reported too."
+msgstr "Индекс %zu: %s.\nOK на отмеченной строке тоже приходит."
+
+msgid "Infinite"
+msgstr "По кругу"
+
+msgid "Information"
+msgstr "Сведения"
+
+msgid "Information about something"
+msgstr "Сведения о чём-либо"
+
+msgid "Insert"
+msgstr "Вставить"
+
+msgid "Insert a number"
+msgstr "Вставить число"
+
+msgid "Insert at the top"
+msgstr "Вставить в начало"
+
+msgid "Insert first"
+msgstr "Вставить первой"
+
+msgid "Insert here"
+msgstr "Вставить здесь"
+
+msgid "Insert letters"
+msgstr "Вставить буквы"
+
+msgid "Insert sample"
+msgstr "Вставить пример"
+
+msgid "Integer"
+msgstr "Целое число"
+
+msgid "Into 4 bytes"
+msgstr "В 4 байта"
+
+msgid "Into 8 bytes"
+msgstr "В 8 байт"
+
+msgid "It looks plain until it has a command."
+msgstr "Без команды он выглядит обычным текстом."
+
+msgid "It never takes the focus."
+msgstr "Фокус на него не переходит."
+
+msgid "Item"
+msgstr "Элемент"
+
+msgid "Item %d"
+msgstr "Элемент %d"
+
+msgid "Item %zu"
+msgstr "Пункт %zu"
+
+msgid "Item %zu ran “%s”.\nget_focus() = %s"
+msgstr "Элемент %zu выполнил «%s».\nget_focus() = %s"
+
+msgid "Item %zu: %d"
+msgstr "Элемент %zu: %d"
+
+msgid "Item %zu: %s"
+msgstr "Элемент %zu: %s"
+
+msgid "Item %zu: %s, %s"
+msgstr "Элемент %zu: %s, %s"
+
+msgid "Item %zu: %zu chosen"
+msgid_plural "Item %zu: %zu chosen"
+msgstr[0] "Элемент %zu: выбран %zu вариант"
+msgstr[1] "Элемент %zu: выбрано %zu варианта"
+msgstr[2] "Элемент %zu: выбрано %zu вариантов"
+
+msgid "Item %zu: none chosen"
+msgstr "Элемент %zu: ничего не выбрано"
+
+msgid "Item %zu: “%s”"
+msgstr "Элемент %zu: «%s»"
+
+msgid "Item commands"
+msgstr "Команды элементов"
+
+msgid "Item listener"
+msgstr "Обработчик элементов"
+
+msgid "Items"
+msgstr "Элементы"
+
+msgid "January"
+msgstr "Январь"
+
+msgid "July"
+msgstr "Июль"
+
+msgid "June"
+msgstr "Июнь"
+
+msgid "Keep the screen on"
+msgstr "Не гасить экран"
+
+msgid "Key tester"
+msgstr "Проверка клавиш"
+
+msgid "Keyboard"
+msgstr "Клавиатура"
+
+msgid "Keys"
+msgstr "Клавиши"
+
+msgid "LED"
+msgstr "Светодиод"
+
+msgid "LVGL objects"
+msgstr "Объекты LVGL"
+
+msgid "LVGL widgets"
+msgstr "Виджеты LVGL"
+
+msgid "Label"
+msgstr "Надпись"
+
+msgid "Label and text"
+msgstr "Подпись и текст"
+
+msgid "Label refused"
+msgstr "Подпись отклонена"
+
+msgid "Labels"
+msgstr "Подписи"
+
+msgid "Language"
+msgstr "Язык"
+
+msgid "Language and data"
+msgstr "Язык и данные"
+
+msgid "Large"
+msgstr "Крупный"
+
+msgid "Last key: %3$s\n\nA canvas without a title draws on the whole surface, %1$d × %2$d px. With no commands, every key comes to its handler, which goes back on the right soft key."
+msgstr "Последняя клавиша: %3$s\n\nХолст без заголовка рисует на всей поверхности, %1$d × %2$d пкс. Без команд каждая клавиша приходит в его обработчик, а он по правой софт-клавише возвращается назад."
+
+msgid "Last row"
+msgstr "Последняя строка"
+
+msgid "Leave"
+msgstr "Выйти"
+
+msgid "Leave chosen"
+msgstr "Выбрано «Выйти»"
+
+msgid "Return to the Home view? The application stays open in background."
+msgstr "Вернуться на главный экран? Приложение останется открытым в фоне."
+
+msgid "Leave for the launcher's catalogue? The application gets CLOSE and saves."
+msgstr "Выйти в каталог? Приложение получит CLOSE и сохранит данные."
+
+msgid "Leave without saving?"
+msgstr "Выйти без сохранения?"
+
+msgid "Leaving the application"
+msgstr "Выход из приложения"
+
+msgid "Left command that fits"
+msgstr "Короткая команда"
+
+msgid "Left soft key"
+msgstr "Левая софт-клавиша"
+
+msgid "Left/Right: digit. Up/Down: change it. Next: the other spinbox. The spinbox always writes a point; use fplinux_ui_format_number() for the language's own separator."
+msgstr "Влево/вправо: разряд. Вверх/вниз: изменить его. «Далее»: другой счётчик. Счётчик всегда пишет точку; для разделителя языка используйте fplinux_ui_format_number()."
+
+msgid "Left/Right: turn the text."
+msgstr "Влево/вправо: повернуть текст."
+
+msgid "Left/Right: value. Next: the next arc."
+msgstr "Влево/вправо: значение. «Далее»: следующая дуга."
+
+msgid "Left/Right: value. On the range slider OK picks the knob that Left/Right move. Next: the next slider."
+msgstr "Влево/вправо: значение. На ползунке диапазона OK выбирает, какую ручку двигают влево/вправо. «Далее»: следующий ползунок."
+
+msgid "Legends a fullscreen application draws"
+msgstr "Подписи, которые рисует полноэкранное приложение"
+
+msgid "Lemon"
+msgstr "Лимон"
+
+msgid "Lifecycle"
+msgstr "Жизненный цикл"
+
+msgid "Light"
+msgstr "Светлая"
+
+msgid "Light or dark theme"
+msgstr "Светлая или тёмная тема"
+
+msgid "Limited text box"
+msgstr "Поле с пределом"
+
+msgid "Line"
+msgstr "Линия"
+
+msgid "Links and buttons"
+msgstr "Ссылки и кнопки"
+
+msgid "List"
+msgstr "Список"
+
+msgid "List the items"
+msgstr "Перечислить элементы"
+
+msgid "List: %1$d × %2$d px\nForm: %3$d × %4$d px\nText box: %5$d × %6$d px\nAlert: %7$d × %8$d px\nNULL screen: %9$s"
+msgstr "Список: %1$d × %2$d пкс\nФорма: %3$d × %4$d пкс\nМногострочное поле: %5$d × %6$d пкс\nОповещение: %7$d × %8$d пкс\nЭкран NULL: %9$s"
+
+msgid "Lists"
+msgstr "Списки"
+
+msgid "Long form items"
+msgstr "Длинные пункты формы"
+
+msgid "Long left command"
+msgstr "Длинная команда"
+
+msgid "Long list rows"
+msgstr "Длинные строки списка"
+
+msgid "Long text"
+msgstr "Длинный текст"
+
+msgid "Look"
+msgstr "Внешний вид"
+
+msgid "Make editable"
+msgstr "Разрешить ввод"
+
+msgid "Make read-only"
+msgstr "Только чтение"
+
+msgid "March"
+msgstr "Март"
+
+msgid "Marimba"
+msgstr "Маримба"
+
+msgid "Mark"
+msgstr "Отметить"
+
+msgid "Marked"
+msgstr "Отмечена"
+
+msgid "Marked rows"
+msgstr "Отмеченные строки"
+
+msgid "May"
+msgstr "Май"
+
+msgid "Medium"
+msgstr "Средний"
+
+msgid "Menu"
+msgstr "Меню"
+
+msgid "Menu on a canvas"
+msgstr "Меню на холсте"
+
+msgid "Message"
+msgstr "Сообщение"
+
+msgid "Message %zu"
+msgstr "Сообщение %zu"
+
+msgid "Message box"
+msgstr "Окно сообщения"
+
+msgid "Message sent"
+msgstr "Сообщение отправлено"
+
+msgid "Metrics"
+msgstr "Размеры профиля"
+
+msgid "Middle row"
+msgstr "Средняя строка"
+
+msgid "Missing file"
+msgstr "Нет файла"
+
+msgid "Mo"
+msgstr "Пн"
+
+msgid "Mono"
+msgstr "Моно"
+
+msgid "Month"
+msgstr "Месяц"
+
+msgid "Move down"
+msgstr "Опустить"
+
+msgid "Move up"
+msgstr "Поднять"
+
+msgid "Multiple list"
+msgstr "Выбор нескольких"
+
+msgid "Mushrooms"
+msgstr "Грибы"
+
+msgid "Mute"
+msgstr "Выключить звук"
+
+msgid "NULL frames"
+msgstr "Кадры NULL"
+
+msgid "Name"
+msgstr "Имя"
+
+msgid "New line"
+msgstr "Перенос"
+
+msgid "New message"
+msgstr "Новое сообщение"
+
+msgid "New name"
+msgstr "Новое имя"
+
+msgid "New row %d"
+msgstr "Новая строка %d"
+
+msgid "Next"
+msgstr "Далее"
+
+msgid "Next field"
+msgstr "Следующее поле"
+
+msgid "Next type"
+msgstr "Следующий тип"
+
+msgid "No"
+msgstr "Нет"
+
+msgid "No SIM card"
+msgstr "Нет SIM-карты"
+
+msgid "No demo matches the search. Change it, or clear it to open the whole catalogue."
+msgstr "Ни один пример не подходит. Измените поиск или сотрите его, чтобы открыть весь каталог."
+
+msgid "No icon"
+msgstr "Без значка"
+
+msgid "No number"
+msgstr "Нет номера"
+
+msgid "No status or soft-key bar here, so the canvas draws its own. Options > Normal view brings the system bars back, and Back leaves the demo between them."
+msgstr "Здесь нет строки состояния и панели софт-клавиш, поэтому холст рисует свою панель. «Опции» > «Обычный вид» возвращает системные панели, а «Назад» выходит из примера, тоже между ними."
+
+msgid "No stream"
+msgstr "Нет потока"
+
+msgid "No. %d"
+msgstr "№ %d"
+
+msgid "Normal"
+msgstr "Обычная"
+
+msgid "Normal view"
+msgstr "Обычный вид"
+
+msgid "Not a picture"
+msgstr "Не картинка"
+
+msgid "Not available"
+msgstr "Недоступно"
+
+msgid "Not busy"
+msgstr "Не занято"
+
+msgid "Not changed yet."
+msgstr "Ещё не изменено."
+
+msgid "Not marked"
+msgstr "Не отмечена"
+
+msgid "Not saved"
+msgstr "Не сохранено"
+
+msgid "Not set"
+msgstr "Не задано"
+
+msgid "Note"
+msgstr "Заметка"
+
+msgid "Nothing changed yet."
+msgstr "Пока ничего не изменилось."
+
+msgid "Nothing chosen yet."
+msgstr "Пока ничего не выбрано."
+
+msgid "Nothing sent yet."
+msgstr "Пока ничего не отправлено."
+
+msgid "Notification sound"
+msgstr "Звук уведомлений"
+
+msgid "November"
+msgstr "Ноябрь"
+
+msgid "Now"
+msgstr "Сейчас"
+
+msgid "Now lock the keypad."
+msgstr "Заблокируйте клавиатуру."
+
+msgid "Numbers"
+msgstr "Числа"
+
+msgid "OK"
+msgstr "OK"
+
+msgid "OK adds a command and choosing one removes it. One command sits on the left soft key; two or more go to Options. The title counts them."
+msgstr "OK добавляет команду, а выбор команды её убирает. Одна команда стоит на левой софт-клавише, две и больше уходят в «Опции». Заголовок их считает."
+
+msgid "OK chooses a pattern and plays it. Stop, Back or hiding the application stops it. The system may pause a long repeat to spare the motor."
+msgstr "OK выбирает шаблон и запускает его. «Стоп», «Назад» или скрытие приложения его останавливают. Долгий повтор система может прерывать, чтобы беречь мотор."
+
+msgid "OK opens the catalogue, or the demos whose names contain the search.\n2 to 9 type the search, # changes the input mode and * opens the symbols.\nUp and Down scroll this text.\nIn a demo, the soft-key legends name what each key does."
+msgstr "OK открывает каталог или примеры, в названии которых есть искомое.\nКлавиши 2–9 вводят текст поиска, # меняет режим ввода, * открывает символы.\nВверх и Вниз прокручивают этот текст.\nВ примерах подписи софт-клавиш называют действие каждой клавиши."
+
+msgid "OK pushes a new screen on top. Replace swaps this screen for a new one. Pop deletes the top screen, as Back does here; from an application's first screen Back leaves the application instead."
+msgstr "OK кладёт новый экран сверху. «Заменить» меняет этот экран на новый. «Убрать» удаляет верхний экран, как здесь «Назад»; на первом экране приложения «Назад» вместо этого выходит из приложения."
+
+msgid "OK reads the price."
+msgstr "OK читает цену."
+
+msgid "OK runs the item's first command."
+msgstr "OK выполняет первую команду элемента."
+
+msgid "OK switches between Start and Pause: the listener adds the command again with the same id and a new label."
+msgstr "OK переключает «Старт» и «Пауза»: обработчик снова добавляет команду с тем же id и новой подписью."
+
+msgid "OK with a NULL label"
+msgstr "OK с подписью NULL"
+
+msgid "OK writes it there, replacing it atomically."
+msgstr "OK записывает его туда, атомарно заменяя старый."
+
+msgid "OK: on or off. Left/Right: brightness. Next: the next LED. LVGL's off level is %u, its on level %u."
+msgstr "OK: включить или выключить. Влево/вправо: яркость. «Далее»: следующий светодиод. У LVGL уровень выключения %u, включения %u."
+
+msgid "OK: open the list, then choose. Up/Down: move. Back: close the list."
+msgstr "OK: открыть список, затем выбрать. Вверх/вниз: переход. «Назад»: закрыть список."
+
+msgid "OK: open the message box. In it, Left/Right: move between its buttons, OK: answer, Back: close it."
+msgstr "OK: открыть окно сообщения. В нём влево/вправо: переход между кнопками, OK: ответить, «Назад»: закрыть."
+
+msgid "OK: press the focused button. Next: the next button. The disabled button takes no focus."
+msgstr "OK: нажать выбранную кнопку. «Далее»: следующая кнопка. Недоступная кнопка фокус не получает."
+
+msgid "OK: switch. Left: off, Right: on. Next: the next switch. The third one is disabled."
+msgstr "OK: переключить. Влево: выкл., вправо: вкл. «Далее»: следующий переключатель. Третий недоступен."
+
+msgid "October"
+msgstr "Октябрь"
+
+msgid "Off"
+msgstr "Выключено"
+
+msgid "Olives"
+msgstr "Оливки"
+
+msgid "On"
+msgstr "Включено"
+
+msgid "On a string item"
+msgstr "Для строкового элемента"
+
+msgid "On the list: %s.\nMaximum −1: %s."
+msgstr "Для списка: %s.\nМаксимум −1: %s."
+
+msgid "On the list: %s.\nOn NULL: %s."
+msgstr "Для списка: %s.\nДля NULL: %s."
+
+msgid "One checked"
+msgstr "Одна отмеченная"
+
+msgid "One line"
+msgstr "Одна строка"
+
+msgid "One line that ends with dots where it is cut"
+msgstr "Одна строка, которая обрезается многоточием"
+
+msgid "One line that scrolls round and round by itself"
+msgstr "Одна строка, которая прокручивается сама по кругу"
+
+msgid "One line, no limit: %s"
+msgstr "Одна строка, без ограничения: %s"
+
+msgid "One line, up to 24 characters: %s"
+msgstr "Одна строка, до 24 символов: %s"
+
+msgid "One paragraph, "
+msgstr "Один абзац, "
+
+msgid "Only the valid command reached the screen."
+msgstr "На экран попала только верная команда."
+
+msgid "Open"
+msgstr "Открыть"
+
+msgid "Opened at"
+msgstr "Открыт в"
+
+msgid "Option %zu"
+msgstr "Вариант %zu"
+
+msgid "Options"
+msgstr "Опции"
+
+msgid "Options > Full screen asks for the whole display: the surface grows over the system bars and FPLINUX_UI_EVENT_RESIZE brings its new size. Options > Content sizes measures the other kinds of screens."
+msgstr "«Опции» > «Весь экран» просит весь дисплей: поверхность растёт поверх системных панелей, а FPLINUX_UI_EVENT_RESIZE сообщает её новый размер. «Опции» > «Размеры содержимого» измеряет экраны других видов."
+
+msgid "Options menu with icons"
+msgstr "Меню со значками"
+
+msgid "Options opens a menu that the application closes after 3 s, unless you choose first."
+msgstr "«Опции» открывают меню, которое приложение закроет через 3 с, если вы не выберете раньше."
+
+msgid "Options opens the menu. Each command there shows its icon, a system glyph from fplinux_ui_glyph(), in the row's text colour."
+msgstr "«Опции» открывают меню. Каждая команда там показывает свой значок — системный символ из fplinux_ui_glyph() — в цвете текста строки."
+
+msgid "Options opens the menu. Other menu replaces it from the callback; Back closes the current popup."
+msgstr "«Опции» открывают меню. «Другое меню» заменяет его из обратного вызова; «Назад» закрывает текущее меню."
+
+msgid "Orange"
+msgstr "Апельсин"
+
+msgid "Other menu"
+msgstr "Другое меню"
+
+msgid "Out of range"
+msgstr "Вне диапазона"
+
+msgid "PIN"
+msgstr "PIN-код"
+
+msgid "PLAIN with a command"
+msgstr "PLAIN с командой"
+
+msgid "Paging"
+msgstr "Листание"
+
+msgid "Paint"
+msgstr "Рисовать"
+
+msgid "Password"
+msgstr "Пароль"
+
+msgid "Passwords"
+msgstr "Пароли"
+
+msgid "Past the end"
+msgstr "За концом списка"
+
+msgid "Pattern"
+msgstr "Шаблон"
+
+msgid "Patterns"
+msgstr "Шаблоны"
+
+msgid "Pause"
+msgstr "Пауза"
+
+msgid "Paused"
+msgstr "На паузе"
+
+msgid "Paused while hidden"
+msgstr "Скрыто: пауза"
+
+msgid "Pear"
+msgstr "Груша"
+
+msgid "Peppers"
+msgstr "Перец"
+
+msgid "Phone number"
+msgstr "Номер телефона"
+
+msgid "Photo"
+msgstr "Фото"
+
+msgid "Play"
+msgstr "Играть"
+
+msgid "Playing"
+msgstr "Играет"
+
+msgid "Playing %s."
+msgstr "Играет: %s."
+
+msgid "Plum"
+msgstr "Слива"
+
+msgid "Point %u: %d"
+msgstr "Точка %u: %d"
+
+msgid "Points"
+msgstr "Точки"
+
+msgid "Pop"
+msgstr "Убрать"
+
+msgid "Popup"
+msgstr "Список"
+
+msgid "Preference rules"
+msgstr "Правила настроек"
+
+msgid "Preferences"
+msgstr "Настройки"
+
+msgid "Preparing"
+msgstr "Подготовка"
+
+msgid "Preparing, then a bar."
+msgstr "Подготовка, затем шкала."
+
+msgid "Press"
+msgstr "Нажать"
+
+msgid "Press a key. Escape and Enter of a keyboard come here too."
+msgstr "Нажмите клавишу. Escape и Enter клавиатуры тоже приходят сюда."
+
+msgid "Press a key. Only Back has a command."
+msgstr "Нажмите клавишу. Команда есть только у «Назад»."
+
+msgid "Pressed: %s"
+msgstr "Нажато: %s"
+
+msgid "Pressed: none"
+msgstr "Нажато: ничего"
+
+msgid "Presses: %u"
+msgstr "Нажатий: %u"
+
+msgid "Presses: 0"
+msgstr "Нажатий: 0"
+
+msgid "Price"
+msgstr "Цена"
+
+msgid "Priorities and ties"
+msgstr "Приоритеты"
+
+msgid "Priority 0"
+msgstr "Приоритет 0"
+
+msgid "Priority 1, added first"
+msgstr "Приоритет 1, добавлена первой"
+
+msgid "Priority 1, added second"
+msgstr "Приоритет 1, добавлена второй"
+
+msgid "Priority 2"
+msgstr "Приоритет 2"
+
+msgid "Progress"
+msgstr "Прогресс"
+
+msgid "Progress bar"
+msgstr "Шкала выполнения"
+
+msgid "Progress errors"
+msgstr "Ошибки индикатора"
+
+msgid "Push"
+msgstr "Открыть"
+
+msgid "Queued"
+msgstr "В очереди"
+
+msgid "Quit without CLOSE"
+msgstr "Завершить без CLOSE"
+
+msgid "Radio buttons"
+msgstr "Переключатели"
+
+msgid "Range"
+msgstr "Диапазон"
+
+msgid "Rate"
+msgstr "Частота"
+
+msgid "Read"
+msgstr "Читать"
+
+msgid "Read-only"
+msgstr "Только чтение"
+
+msgid "Read-only box"
+msgstr "Только чтение"
+
+msgid "Read-only fields"
+msgstr "Поля для чтения"
+
+msgid "Refresh"
+msgstr "Обновить"
+
+msgid "Refused calls"
+msgstr "Отклонённые вызовы"
+
+msgid "Refused commands"
+msgstr "Ошибки команд"
+
+msgid "Relabel a command"
+msgstr "Смена подписи"
+
+msgid "Remove"
+msgstr "Удалить"
+
+msgid "Remove detail"
+msgstr "Убрать деталь"
+
+msgid "Remove second field"
+msgstr "Убрать второе поле"
+
+msgid "Remove text"
+msgstr "Убрать текст"
+
+msgid "Rename"
+msgstr "Переименовать"
+
+msgid "Repeating"
+msgstr "По кругу"
+
+msgid "Replace"
+msgstr "Заменить"
+
+msgid "Request"
+msgstr "Запрос"
+
+msgid "Reset"
+msgstr "Сброс"
+
+msgid "Result"
+msgstr "Результат"
+
+msgid "Results"
+msgstr "Результаты"
+
+msgid "Reverse"
+msgstr "Обратная"
+
+msgid "Right soft key"
+msgstr "Правая софт-клавиша"
+
+msgid "Ringtone"
+msgstr "Мелодия"
+
+msgid "Roller"
+msgstr "Барабан"
+
+msgid "Round, with a needle"
+msgstr "Круглая, со стрелкой"
+
+msgid "Rounded ends"
+msgstr "Скруглённые концы"
+
+msgid "Row %d"
+msgstr "Строка %d"
+
+msgid "Row details"
+msgstr "Детали строк"
+
+msgid "Row icons"
+msgstr "Значки строк"
+
+msgid "Rules"
+msgstr "Правила"
+
+msgid "Running"
+msgstr "Идёт"
+
+msgid "SCREEN without a label"
+msgstr "SCREEN без подписи"
+
+msgid "SOS"
+msgstr "SOS"
+
+msgid "Sa"
+msgstr "Сб"
+
+msgid "Save"
+msgstr "Сохранить"
+
+msgid "Save the draft and send it to all contacts"
+msgstr "Сохранить черновик и отправить всем контактам"
+
+msgid "Saved"
+msgstr "Сохранено"
+
+msgid "Scale"
+msgstr "Шкала"
+
+msgid "Screen"
+msgstr "Экран"
+
+msgid "Screen %d"
+msgstr "Экран %d"
+
+msgid "Screen %d was replaced and is gone: Back skips it."
+msgstr "Экран %d заменён и удалён: «Назад» его пропускает."
+
+msgid "Screen stack"
+msgstr "Стек экранов"
+
+msgid "Scroll"
+msgstr "Прокрутка"
+
+msgid "Scrolling text"
+msgstr "Прокрутка текста"
+
+msgid "Search"
+msgstr "Найти"
+
+msgid "Search: %s"
+msgstr "Поиск: %s"
+
+msgid "Searching"
+msgstr "Поиск"
+
+msgid "Secondary text: details, labels, hints"
+msgstr "Второстепенный текст: подробности, подписи, подсказки"
+
+msgid "Seconds on this screen"
+msgstr "Секунд на этом экране"
+
+msgid "Select"
+msgstr "Выбрать"
+
+msgid "Select label"
+msgstr "Подпись выбора"
+
+msgid "Selected"
+msgstr "Выбрано"
+
+msgid "Send"
+msgstr "Отправить"
+
+msgid "Send a message"
+msgstr "Отправить сообщение"
+
+msgid "September"
+msgstr "Сентябрь"
+
+msgid "Set"
+msgstr "Задать"
+
+msgid "Set 1,25"
+msgstr "Задать 1,25"
+
+msgid "Set 2.75"
+msgstr "Задать 2.75"
+
+msgid "Set 7 digits"
+msgstr "Задать 7 цифр"
+
+msgid "Set a long text"
+msgstr "Задать длинный текст"
+
+msgid "Set before the alert showed."
+msgstr "Задан до показа оповещения."
+
+msgid "Set by the application"
+msgstr "Задано приложением"
+
+msgid "Set letters"
+msgstr "Задать буквы"
+
+msgid "Several lines"
+msgstr "Несколько строк"
+
+msgid "Several lines, no limit: %s"
+msgstr "Несколько строк, без ограничения: %s"
+
+msgid "Several lines, up to 24 characters: %s"
+msgstr "Несколько строк, до 24 символов: %s"
+
+msgid "Short choice"
+msgstr "Короткий вариант"
+
+msgid "Short detail"
+msgstr "Короткие подробности"
+
+msgid "Short row"
+msgstr "Короткая строка"
+
+msgid "Show"
+msgstr "Показать"
+
+msgid "Show hidden"
+msgstr "Показать скрытые"
+
+msgid "Show the focus"
+msgstr "Показать фокус"
+
+msgid "Show the text"
+msgstr "Показать текст"
+
+msgid "Show values"
+msgstr "Показать значения"
+
+msgid "Shown: %s"
+msgstr "Показ: %s"
+
+msgid "Size"
+msgstr "Размер"
+
+msgid "Size and focus"
+msgstr "Размер и фокус"
+
+msgid "Sketch pad"
+msgstr "Рисунок"
+
+msgid "Slider"
+msgstr "Ползунок"
+
+msgid "Small"
+msgstr "Мелкий"
+
+msgid "Sound"
+msgstr "Звук"
+
+msgid "Sound: off"
+msgstr "Звук: выкл."
+
+msgid "Sound: on"
+msgstr "Звук: вкл."
+
+msgid "Spinbox"
+msgstr "Счётчик"
+
+msgid "Spinner"
+msgstr "Индикатор занятости"
+
+msgid "Spinner with Cancel"
+msgstr "Индикатор с отменой"
+
+msgid "Spinner, then a bar"
+msgstr "Индикатор, затем шкала"
+
+msgid "Star"
+msgstr "Звезда"
+
+msgid "Start"
+msgstr "Старт"
+
+msgid "Start opens a stream; a timer keeps 160 ms of a 440 Hz tone queued, 660 Hz on the right in stereo. Hiding the application pauses the stream with its frames kept."
+msgstr "Старт открывает поток; таймер держит в очереди 160 мс тона 440 Гц, в стерео справа 660 Гц. Скрытое приложение ставит поток на паузу, его кадры сохраняются."
+
+msgid "State"
+msgstr "Состояние"
+
+msgid "State directory"
+msgstr "Папка состояния"
+
+msgid "Status"
+msgstr "Состояние"
+
+msgid "Stay"
+msgstr "Остаться"
+
+msgid "Stay chosen"
+msgstr "Выбрано «Остаться»"
+
+msgid "Stereo"
+msgstr "Стерео"
+
+msgid "Stop"
+msgstr "Стоп"
+
+msgid "Stopped"
+msgstr "Остановлено"
+
+msgid "Stored"
+msgstr "В файле"
+
+msgid "Stream"
+msgstr "Поток"
+
+msgid "String items"
+msgstr "Строки текста"
+
+msgid "Styled text"
+msgstr "Текст со стилями"
+
+msgid "Su"
+msgstr "Вс"
+
+msgid "Supported"
+msgstr "Поддержка"
+
+msgid "Surface: %1$d × %2$d px\nFull screen: %3$s\nContent area: %4$d × %5$d px\n\n%6$s"
+msgstr "Поверхность: %1$d × %2$d пкс\nВесь экран: %3$s\nОбласть содержимого: %4$d × %5$d пкс\n\n%6$s"
+
+msgid "Switch"
+msgstr "Переключатель"
+
+msgid "Switched off"
+msgstr "Выключено"
+
+msgid "Switched on"
+msgstr "Включено"
+
+msgid "Symmetrical"
+msgstr "Симметричная"
+
+msgid "System glyphs"
+msgstr "Системные значки"
+
+msgid "System language"
+msgstr "Язык системы"
+
+msgid "Table"
+msgstr "Таблица"
+
+msgid "Tabs"
+msgstr "Вкладки"
+
+msgid "Take its command"
+msgstr "Забрать команду"
+
+msgid "Text"
+msgstr "Текст"
+
+msgid "Text and glyphs"
+msgstr "Текст и значки"
+
+msgid "Text and glyphs on accent"
+msgstr "Текст и значки на accent"
+
+msgid "Text and glyphs on bar"
+msgstr "Текст и значки на bar"
+
+msgid "Text area"
+msgstr "Текстовое поле"
+
+msgid "Text box"
+msgstr "Многострочное поле"
+
+msgid "Text box types"
+msgstr "Типы поля"
+
+msgid "Text errors"
+msgstr "Ошибки текста"
+
+msgid "Text fields"
+msgstr "Поля ввода"
+
+msgid "Text set"
+msgstr "Текст задан"
+
+msgid "Text set before showing"
+msgstr "Текст до показа"
+
+msgid "Text size"
+msgstr "Размер текста"
+
+msgid "Text that follows an arc"
+msgstr "Текст, который идёт по дуге"
+
+msgid "Text while shown"
+msgstr "Текст во время показа"
+
+msgid "Text: “%1$s”\nEmpty: %2$s\nMode: %3$s"
+msgstr "Текст: «%1$s»\nПусто: %2$s\nРежим: %3$s"
+
+msgid "Th"
+msgstr "Чт"
+
+msgid "The alert left the stack before its listener ran. The listener must not pop it; the runtime deletes it afterwards."
+msgstr "Оповещение ушло со стека до вызова обработчика. Обработчик не должен его снимать: среда удалит его сама."
+
+msgid "The box took the text."
+msgstr "Поле приняло текст."
+
+msgid "The canvas keeps its own pixels. Arrows: draw with lv_canvas_set_px(). OK: draw it again."
+msgstr "Холст хранит свои пиксели. Стрелки: рисовать через lv_canvas_set_px(). OK: нарисовать заново."
+
+msgid "The command reached the listener as usual."
+msgstr "Команда пришла к обработчику как обычно."
+
+msgid "The commands were added with the priorities 2, 1, 0 and 1. The options menu lists the lower numbers first; the two of priority 1 keep the order of addition."
+msgstr "Команды добавлены с приоритетами 2, 1, 0 и 1. Меню опций ставит меньшие числа выше, а две команды с приоритетом 1 идут в порядке добавления."
+
+msgid "The constructor's text, replaced at once."
+msgstr "Текст конструктора, он сразу заменён."
+
+msgid "The dark theme, chosen in Settings."
+msgstr "Тёмная тема, выбранная в Настройках."
+
+msgid "The first BACK, CANCEL, EXIT or STOP command by priority: here Back."
+msgstr "Первая по приоритету команда BACK, CANCEL, EXIT или STOP: здесь «Назад»."
+
+msgid "The first tab. Left/Right: the next tab. Up/Down: scroll the tab."
+msgstr "Первая вкладка. Влево/вправо: другая вкладка. Вверх/вниз: прокрутка вкладки."
+
+msgid "The focused element's own action, otherwise the first OK command."
+msgstr "Действие элемента в фокусе, иначе первая команда OK."
+
+msgid "The form is empty."
+msgstr "Форма пуста."
+
+msgid "The frame and title of a warning"
+msgstr "Рамка и заголовок предупреждения"
+
+msgid "The frame and title of an error"
+msgstr "Рамка и заголовок ошибки"
+
+msgid "The keypad is locked"
+msgstr "Клавиатура заблокирована"
+
+msgid "The light theme, chosen in Settings."
+msgstr "Светлая тема, выбранная в Настройках."
+
+msgid "The list of demos"
+msgstr "Список примеров"
+
+msgid "The listener received id %d, type %s."
+msgstr "Обработчик получил id %d, тип %s."
+
+msgid "The listener received id %d."
+msgstr "Обработчик получил id %d."
+
+msgid "The listener stopped the work and forgot the alert. The runtime deletes the alert after the call."
+msgstr "Обработчик остановил работу и забыл оповещение. Среда удалит оповещение после вызова."
+
+msgid "The one remaining command, otherwise Options with all the others: here Cancel, Exit, Stop, Item, Screen and Help."
+msgstr "Единственная оставшаяся команда, иначе «Опции» со всеми остальными: здесь «Отмена», «Выход», «Стоп», «Элемент», «Экран» и «Справка»."
+
+msgid "The page"
+msgstr "Страница"
+
+msgid "The preferences could not be read at start."
+msgstr "Не удалось прочитать настройки при запуске."
+
+msgid "The reserved select id"
+msgstr "Зарезервированный id выбора"
+
+msgid "The ring around a tile on accent"
+msgstr "Кольцо вокруг плитки на accent"
+
+msgid "The screen below"
+msgstr "Экран ниже"
+
+msgid "The screens scroll by themselves. On a canvas, give each key to fplinux_ui_scroll_key() with the object that holds more than it shows.\n\nUp and Down scroll by one line of the object's font, Left and Right by a page. The function returns true when it used the key, also at either end, so that the application does not move anything else while the user reads.\n\nIt returns false for other keys, for keys with Ctrl or Alt and when the content fits.\n\nThe scroll indicator at the right is a thumb in the focus colour, without a track, as in every list.\n\nThis is the end of the text."
+msgstr "Экраны прокручиваются сами. На холсте передавайте каждую клавишу в fplinux_ui_scroll_key() вместе с объектом, в котором больше, чем видно.\n\nВверх и вниз прокручивают на строку шрифта объекта, влево и вправо — на страницу. Функция возвращает true, если использовала клавишу, в том числе на краях, чтобы приложение ничего больше не двигало, пока пользователь читает.\n\nОна возвращает false для других клавиш, для клавиш с Ctrl или Alt и когда содержимое помещается.\n\nПолоса прокрутки справа — ползунок цвета фокуса без дорожки, как в любом списке.\n\nЭто конец текста."
+
+msgid "The second tab. A tab view has a bar of tab buttons and one page per tab."
+msgstr "Вторая вкладка. У вкладок есть полоса кнопок и по странице на вкладку."
+
+msgid "The selected row or cell"
+msgstr "Выбранная строка или ячейка"
+
+msgid "The status and soft-key bars"
+msgstr "Строка состояния и панель софт-клавиш"
+
+msgid "The third tab. Swiping between tabs needs a touch screen; here Left and Right call lv_tabview_set_active()."
+msgstr "Третья вкладка. Для перелистывания жестом нужен сенсорный экран; здесь влево и вправо вызывают lv_tabview_set_active()."
+
+msgid "The time now, in the system language:"
+msgstr "Текущее время на языке системы:"
+
+msgid "The title is NULL, so the alert shows the word of its kind. Close shows the next one."
+msgstr "Заголовок равен NULL, поэтому показано слово вида. «Закрыть» покажет следующее."
+
+msgid "The title is NULL, so the alert shows the word of its kind. This is the last one."
+msgstr "Заголовок равен NULL, поэтому показано слово вида. Это последнее."
+
+msgid "Theme"
+msgstr "Тема"
+
+msgid "Theme colours"
+msgstr "Цвета темы"
+
+msgid "Theme fonts"
+msgstr "Шрифты темы"
+
+msgid "There is no undo."
+msgstr "Отменить нельзя."
+
+msgid "Thick"
+msgstr "Толстое"
+
+msgid "Thin"
+msgstr "Тонкое"
+
+msgid "This alert closes itself after 1.5 s."
+msgstr "Это оповещение закроется само через 1,5 с."
+
+msgid "This alert refused a negative maximum, so it is still a plain alert with Close."
+msgstr "Оповещение не приняло отрицательный максимум и осталось обычным, с «Закрыть»."
+
+msgid "This demo stops at 32 screens."
+msgstr "Этот пример останавливается на 32 экранах."
+
+msgid "This label is too long for the soft-key bar, so the left soft key shows Options and the command becomes the first item of the menu. Prefer a short word."
+msgstr "Эта подпись слишком длинна для панели софт-клавиш, поэтому на левой клавише «Опции», а команда стала первым пунктом меню. Лучше выбрать короткое слово."
+
+msgid "This text comes from the application's catalogue."
+msgstr "Этот текст взят из каталога перевода приложения."
+
+msgid "This warning closes itself after 4 s. The time runs only while it is on top and visible."
+msgstr "Это предупреждение закроется само через 4 с. Время идёт, только пока оно сверху и на экране."
+
+msgid "Ticks"
+msgstr "Тики"
+
+msgid "Tile 1 of 4. Right: the next tile. Down: the tile below."
+msgstr "Плитка 1 из 4. Вправо: следующая плитка. Вниз: плитка ниже."
+
+msgid "Tile 2 of 4. Left: back. Down: the tile below."
+msgstr "Плитка 2 из 4. Влево: назад. Вниз: плитка ниже."
+
+msgid "Tile 3 of 4. Up: the first tile. Right: the next tile."
+msgstr "Плитка 3 из 4. Вверх: первая плитка. Вправо: следующая плитка."
+
+msgid "Tile 4 of 4. Swiping needs a touch screen; here the arrows call lv_tileview_set_tile_by_index()."
+msgstr "Плитка 4 из 4. Для жестов нужен сенсорный экран; здесь стрелки вызывают lv_tileview_set_tile_by_index()."
+
+msgid "Tiles"
+msgstr "Плитки"
+
+msgid "Time"
+msgstr "Время"
+
+msgid "Time and timers"
+msgstr "Время и таймеры"
+
+msgid "Timed menu"
+msgstr "Меню на время"
+
+msgid "Title"
+msgstr "Заголовок"
+
+msgid "Title bands, form and field frames"
+msgstr "Полосы заголовков, рамки форм и полей"
+
+msgid "Title from the kind"
+msgstr "Заголовок по виду"
+
+msgid "Titles and emphasis"
+msgstr "Заголовки и выделение"
+
+msgid "Today"
+msgstr "Сегодня"
+
+msgid "Toggle"
+msgstr "Сменить"
+
+msgid "Toggle limit"
+msgstr "Сменить предел"
+
+msgid "Tone"
+msgstr "Тон"
+
+msgid "Took %s frames"
+msgstr "Принято кадров: %s"
+
+msgid "Top up"
+msgstr "Пополнить"
+
+msgid "Toppings"
+msgstr "Начинка"
+
+msgid "Tu"
+msgstr "Вт"
+
+msgid "Two decimals"
+msgstr "Два знака после запятой"
+
+msgid "Two lines"
+msgstr "Две строки"
+
+msgid "Two lines at most"
+msgstr "Не больше двух строк"
+
+msgid "Two pulses"
+msgstr "Два импульса"
+
+msgid "Type here"
+msgstr "Введите текст"
+
+msgid "Type kept"
+msgstr "Тип прежний"
+
+msgid "Type letters, then choose a type."
+msgstr "Введите буквы и выберите тип."
+
+msgid "Typed: "
+msgstr "Набрано: "
+
+msgid "Typed: %s"
+msgstr "Набрано: %s"
+
+msgid "Unavailable"
+msgstr "Недоступна"
+
+msgid "Unavailable items, placeholders"
+msgstr "Недоступные пункты, заполнители"
+
+msgid "Unfocused rows end with an ellipsis"
+msgstr "Строки без фокуса кончаются многоточием"
+
+msgid "Unknown style"
+msgstr "Неизвестный стиль"
+
+msgid "Unknown type"
+msgstr "Неизвестный тип"
+
+msgid "Unlimited text box"
+msgstr "Поле без предела"
+
+msgid "Unmark"
+msgstr "Снять"
+
+msgid "Unmark all"
+msgstr "Снять все"
+
+msgid "Up/Down: move. OK: mark or choose. A radio button unchecks its checked siblings."
+msgstr "Вверх/вниз: переход. OK: отметить или выбрать. Переключатель снимает отметку с соседних."
+
+msgid "Up/Down: move. OK: open. Back: the previous page."
+msgstr "Вверх/вниз: переход. OK: открыть. «Назад»: предыдущая страница."
+
+msgid "Up/Down: scroll."
+msgstr "Вверх/вниз: прокрутка."
+
+msgid "Up/Down: turn the roller. OK: choose. Next: the other roller. The infinite one starts again after its last option."
+msgstr "Вверх/вниз: крутить барабан. OK: выбрать. «Далее»: другой барабан. Бесконечный после последнего значения начинает сначала."
+
+msgid "Update"
+msgstr "Обновить"
+
+msgid "Valid pattern"
+msgstr "Верный шаблон"
+
+msgid "Valid stream"
+msgstr "Верный поток"
+
+msgid "Value"
+msgstr "Значение"
+
+msgid "Value 150, maximum 100."
+msgstr "Значение 150, максимум 100."
+
+msgid "Value above maximum"
+msgstr "Значение выше максимума"
+
+msgid "Values"
+msgstr "Значения"
+
+msgid "Vibration"
+msgstr "Вибрация"
+
+msgid "Vibration stopped while hidden"
+msgstr "Скрыто: вибрация остановлена"
+
+msgid "Vibrator"
+msgstr "Вибромотор"
+
+msgid "View"
+msgstr "Посмотреть"
+
+msgid "Virtual changes"
+msgstr "Изменение данных"
+
+msgid "Virtual exclusive"
+msgstr "Виртуальный выбор"
+
+msgid "Virtual list"
+msgstr "Виртуальный список"
+
+msgid "Virtual multiple"
+msgstr "Виртуальные отметки"
+
+msgid "Visibility"
+msgstr "Видимость"
+
+msgid "Volume"
+msgstr "Громкость"
+
+msgid "Lock the keypad, then return: the application stays foreground. Home keeps it in background; reopening restores this screen. While hidden, it draws nothing and should pause its UI timers."
+msgstr "Заблокируйте клавиатуру и вернитесь: приложение останется на переднем плане. Home оставляет его в фоне; повторный запуск вернёт этот экран. Скрытое приложение ничего не рисует и должно приостановить таймеры интерфейса."
+
+msgid "Foreground"
+msgstr "На переднем плане"
+
+msgid "Background"
+msgstr "В фоне"
+
+msgid "Closing"
+msgstr "Закрывается"
+
+msgid "Last hidden state"
+msgstr "Состояние при последнем скрытии"
+
+msgid "Warning"
+msgstr "Предупреждение"
+
+msgid "Watched descriptor"
+msgstr "Наблюдаемый дескриптор"
+
+msgid "We"
+msgstr "Ср"
+
+msgid "Website"
+msgstr "Сайт"
+
+msgid "Week"
+msgstr "Неделя"
+
+msgid "When the keypad locks"
+msgstr "Когда блокируется клавиатура"
+
+msgid "When the screen turns off"
+msgstr "Когда гаснет экран"
+
+msgid "While hidden"
+msgstr "Когда скрыто"
+
+msgid "While it was open, fplinux_ui_menu_is_open() returned %s and a second open %s."
+msgstr "Пока меню было открыто, fplinux_ui_menu_is_open() вернула %s, а второе открытие — %s."
+
+msgid "While on, the display does not dim, turn off or lock while this application is visible. The red key still offers Minimize or Close. Back releases the request."
+msgstr "Пока это включено, экран не тускнеет, не гаснет и не блокируется, если это приложение видно. Красная клавиша по-прежнему предлагает свернуть или закрыть приложение. «Назад» снимает запрос."
+
+msgid "Whole number"
+msgstr "Целое число"
+
+msgid "Whole surface"
+msgstr "Вся поверхность"
+
+msgid "Wi-Fi"
+msgstr "Wi-Fi"
+
+msgid "Window"
+msgstr "Окно"
+
+msgid "Window title"
+msgstr "Заголовок окна"
+
+msgid "With a line break"
+msgstr "С переносом строки"
+
+msgid "Without item listener"
+msgstr "Без обработчика элементов"
+
+msgid "Wrap"
+msgstr "Перенос строк"
+
+msgid "Write"
+msgstr "Записать"
+
+msgid "Written: %s"
+msgstr "Записано: %s"
+
+msgid "Yes"
+msgstr "Да"
+
+msgid "fplinux_ui_format_number(value, decimals), without digit grouping:"
+msgstr "fplinux_ui_format_number(value, decimals), без разделения разрядов:"
+
+msgid "fplinux_ui_image_load() decodes a PNG once, at its size. Left/Right: turn the shape with lv_image_set_rotation()."
+msgstr "fplinux_ui_image_load() декодирует PNG один раз, в нужном размере. Влево/вправо: повернуть фигуру через lv_image_set_rotation()."
+
+msgid "fplinux_ui_pop() returned false: this is the only screen."
+msgstr "fplinux_ui_pop() вернула false: это единственный экран."
+
+msgid "held %llu ms"
+msgstr "нажата %llu мс"
+
+msgid "kg"
+msgstr "кг"
+
+msgid "left soft key"
+msgstr "левая софт-клавиша"
+
+msgid "lv_menu is deprecated: build menu navigation from base widgets, pages of button rows with one shown."
+msgstr "lv_menu устарел: стройте меню из базовых виджетов, страниц со строками-кнопками, из которых видна одна."
+
+msgid "none yet"
+msgstr "пока нет"
+
+msgid "not a soft key"
+msgstr "не софт-клавиша"
+
+msgid "note.txt"
+msgstr "note.txt"
+
+msgid "pressed"
+msgstr "нажата"
+
+msgid "released"
+msgstr "отпущена"
+
+msgid "right soft key"
+msgstr "правая софт-клавиша"
+
+msgid "secondary"
+msgstr "второстепенный"
+
+msgid "several styles"
+msgstr "несколько стилей"
+
+msgid "struck out"
+msgstr "зачёркнутый"
+
+msgid "underlined"
+msgstr "подчёркнутый"
+
+msgid "Soft-key bar"
+msgstr "Панель софт-клавиш"
+
+msgid "Empty legends"
+msgstr "Пустые подписи"
+
+msgid "Left legend"
+msgstr "Левая подпись"
+
+msgid "Centre legend"
+msgstr "Центральная подпись"
+
+msgid "Left and centre legends"
+msgstr "Левая и центральная подписи"
+
+msgid "Right legend"
+msgstr "Правая подпись"
+
+msgid "Left and right legends"
+msgstr "Левая и правая подписи"
+
+msgid "Centre and right legends"
+msgstr "Центральная и правая подписи"
+
+msgid "Three legends"
+msgstr "Три подписи"
+
+msgid "Long legends"
+msgstr "Длинные подписи"
+
+msgid "Changing legends"
+msgstr "Смена подписей"
+
+msgid "Legend byte limit"
+msgstr "Лимит подписи в байтах"
+
+msgid "Legend control character"
+msgstr "Управляющий символ"
+
+msgid "Missing bar parent"
+msgstr "Панель без родителя"
+
+msgid "Application settings"
+msgstr "Настройки приложения"
+
+msgid "Select application"
+msgstr "Выбрать приложение"
+
+msgid "Return to catalogue"
+msgstr "Вернуться в каталог"
+
+msgid "Toggle full screen"
+msgstr "Переключить полный экран"
+
+msgid "Change legends"
+msgstr "Изменить подписи"
+
+msgid "Preview of application legends. Options switches full screen; Back returns."
+msgstr "Подписи приложения. Через «Функции» переключите полный экран; «Назад» вернёт в каталог."
+
+msgid "Rejected: %s. Legends stay unchanged."
+msgstr "Отказ: %s. Подписи не изменились."
+
+#: apidemo-frame.c
+#, c-format
+msgid "Completed frames: %u"
+msgstr "Завершённых кадров: %u"
+
+#: apidemo-frame.c
+msgid "Direct drawing"
+msgstr "Прямое рисование"
+
+#: apidemo-frame.c
+msgid "Frame errors"
+msgstr "Ошибки кадров"
+
+#: apidemo-frame.c
+msgid "Full repaint"
+msgstr "Перерисовать всё"
+
+#: apidemo-frame.c
+msgid "Full screen / normal"
+msgstr "Полный экран / обычный"
+
+#: apidemo-frame.c
+msgid "How to try frames"
+msgstr "Как проверить кадры"
+
+#: apidemo-frame.c
+msgid "Interrupted painting"
+msgstr "Рисование с перерывами"
+
+#: apidemo-frame.c
+#, c-format
+msgid "NULL new: %1$s\nNULL object: %2$s\nNULL pixels: %3$s\nNULL resize: %4$s\nNULL damage: %5$s\nNULL present: %6$s\nNULL timer owner: %7$s\nNULL enabled timer: %8$s\nZero width: %9$s\nNULL delete: OK"
+msgstr "NULL new: %1$s\nNULL object: %2$s\nNULL pixels: %3$s\nNULL resize: %4$s\nNULL damage: %5$s\nNULL present: %6$s\nNULL владелец таймера: %7$s\nNULL включённый таймер: %8$s\nНулевая ширина: %9$s\nNULL delete: OK"
+
+#: apidemo-frame.c
+msgid "Pause animation"
+msgstr "Приостановить анимацию"
+
+#: apidemo-frame.c
+msgid "Resume animation"
+msgstr "Продолжить анимацию"
+
+#: apidemo-frame.c
+msgid "Software frames"
+msgstr "Программные кадры"
+
+#: apidemo-frame.c
+msgid "The red square changes only its old and new rectangles. Options > Full repaint marks the whole buffer.\n\nDirect drawing uses one buffer and finishes in one timer call. Interrupted painting uses two: one call draws half a square, the next finishes and publishes it. A system menu opened between calls still sees the last completed square.\n\nLock the phone or switch applications: the registered timer pauses automatically. Return to resume. Pause animation keeps it stopped even after hiding and showing.\n\nFull screen changes the buffer size on RESIZE, clears old damage and draws a complete frame. Back restores normal view."
+msgstr "У красного квадрата обновляются только старая и новая области. Пункт «Перерисовать всё» в меню «Опции» помечает весь буфер.\n\nПрямое рисование использует один буфер и завершается за один вызов таймера. Рисование с перерывами использует два: первый вызов рисует половину квадрата, второй завершает и публикует кадр. Системное меню, открытое между вызовами, видит последний завершённый квадрат.\n\nЗаблокируйте телефон или переключите приложение: зарегистрированный таймер остановится автоматически. При возвращении он продолжит работу. Пункт «Приостановить анимацию» сохраняет паузу и после скрытия и показа.\n\nПолноэкранный режим меняет размер буфера по событию RESIZE, сбрасывает прежние области изменений и рисует целый кадр. «Назад» возвращает обычный режим."
