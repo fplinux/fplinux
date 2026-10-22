@@ -1,0 +1,28 @@
+#!/sbin/openrc-run
+# SPDX-License-Identifier: GPL-2.0-only
+# shellcheck shell=sh disable=SC2034
+
+name="FPLinux audio"
+description="Mix the applications' sound and play it on the sound card"
+supervisor=supervise-daemon
+command=/usr/libexec/fplinux/audiod
+command_args="--period-frames ${period_frames:-480} --buffer-frames ${buffer_frames:-1440}"
+input_file=/dev/null
+output_logger="/usr/libexec/fplinux/kmsg --level 6 --tag fplinux-audiod"
+error_logger="/usr/libexec/fplinux/kmsg --level 3 --tag fplinux-audiod"
+respawn_delay=1
+respawn_max=0
+retry="TERM/3/KILL/2"
+
+depend() {
+	need devfs
+	before fplinux-session
+}
+
+start_pre() {
+	# The rootfs is installed without scripts and the session creates its
+	# account later, but the sockets need the group now.
+	grep -q '^fplinux:' /etc/group || addgroup -S fplinux
+	# setgid, so that the sockets get group fplinux.
+	checkpath -d -o root:fplinux -m 2750 /run/fplinux-audio
+}

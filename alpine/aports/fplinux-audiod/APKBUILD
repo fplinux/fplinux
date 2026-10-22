@@ -1,0 +1,61 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-audiod
+pkgver=1
+pkgrel=0
+pkgdesc="System audio service for FPLinux"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="GPL-2.0-only"
+depends="fplinux-alsa-lib fplinux-base"
+makedepends_build="clang22 lld22"
+makedepends_host="fplinux-alsa-lib-dev musl-dev"
+subpackages="$pkgname-openrc"
+options="!check"
+source="
+	audiod.c
+	audio-device.c
+	audio-device.h
+	audio-mixer.c
+	audio-mixer.h
+	audio-streams.c
+	audio-streams.h
+	fplinux-audio-protocol.h
+	fplinux-cli.c
+	fplinux-cli.h
+	fplinux-audiod.initd
+	fplinux-audiod.confd
+"
+builddir="$srcdir"
+
+build() {
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror -I"$srcdir" \
+		"$srcdir/audiod.c" "$srcdir/audio-device.c" \
+		"$srcdir/audio-mixer.c" "$srcdir/audio-streams.c" \
+		"$srcdir/fplinux-cli.c" \
+		$LDFLAGS -Wl,--gc-sections -lasound -o audiod
+}
+
+package() {
+	install -Dm755 "$builddir/audiod" "$pkgdir/usr/libexec/fplinux/audiod"
+	install -Dm755 "$srcdir/fplinux-audiod.initd" \
+		"$pkgdir/etc/init.d/fplinux-audiod"
+	install -Dm644 "$srcdir/fplinux-audiod.confd" \
+		"$pkgdir/etc/conf.d/fplinux-audiod"
+	mkdir -p "$pkgdir/etc/runlevels/default"
+	ln -s /etc/init.d/fplinux-audiod \
+		"$pkgdir/etc/runlevels/default/fplinux-audiod"
+}
+sha512sums="
+6d6fd2b9f5ec3a61edba1885976906d62e2931f206e7274853b23533743ba837b1c55184ff9f176140c8c641206faa5439c733d71ae1c0d939054794d8cf225d  audiod.c
+061177bd8cf2012a2933cdcfdfeee635dff304593d07dc951b760d974d7dd090d58ba989376256eaedd60540b06d67aa6a5072da566bae13199f1b58204dac7c  audio-device.c
+3c042d11be2690adffb341e6bd2b220a1cdd409cd469d935d2371741e9b72224e54a4880b3df94c158c3393af8ff34298ea0fd0647e352d7b231f192db51b0ff  audio-device.h
+13b1960bdfa34a8cbd3d26114f0707b226f5b184a1d5ffc9ea92aa92e83b00542ea264dc0740880205dc3f77c01b60fbe270c5410cad659c9ee450b59c0bf9f2  audio-mixer.c
+64f70745915d3eb69030505120a2732ec734f2320502bf6bb524b5a6eaa58a9bcc7152aa0febff9f5e9059ae5739fcc4f90b87f0995cf8ad8944ce55f1bddbfd  audio-mixer.h
+c5d98d46c075cde9ec2fbcf075326e2875bdd915865c30b08c4286f3e63127bbdfc05921aeaf4e1c43632c0a29719d652aa3e08959c86eb478d066e0539fbab1  audio-streams.c
+f517e8016850506a9c0434d5d051daf00e91d65dd61e7f1d2bd7b17dd07c006cb5b7fbbde15fe34605c9451064ef8bb0de32dccbcd471904688c85421ec80b99  audio-streams.h
+c115dac1c2af268136e93254adcec58e7b61bac2f14cfa77b61a4a227f27ad0dcae8e83d18120f82891d6c5c81777f5d39165d78935f6fa6cc8cbf81048df423  fplinux-audio-protocol.h
+60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
+9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
+91d9004c73f63ce3a3cf95e8583b083fb3e33e3402177a9db7d4c144afc1d89f3e11b56f1c72c7e87920eac57b0d11a0c42aa54c5335a10838698ec2538f53d0  fplinux-audiod.initd
+780041319ba1a26dfb88d1533baa0479839a45ad30166fde824d78b2c1ceaa160c3d2ef6b864aa50ba01f46e700ed9df988267dc07a3e204c0fb35cb4b6561d1  fplinux-audiod.confd
+"

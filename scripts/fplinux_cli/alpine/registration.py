@@ -63,6 +63,10 @@ INPUT_SESSION_SOURCES = (
     "include/fplinux/fplinux-input-session.h",
 )
 SHARED_APORT_SOURCES = {
+    "fplinux-audiod": (
+        *CLI_SOURCES,
+        "include/fplinux/fplinux-audio-protocol.h",
+    ),
     "fplinux-base": (
         *CLI_SOURCES,
         *BRIGHTNESS_CLIENT_SOURCES,
@@ -189,6 +193,7 @@ SHARED_APORT_SOURCES = {
     ),
 }
 COMMON_PACKAGES = (
+    "fplinux-audiod",
     "fplinux-base",
     "fplinux-bash",
     "fplinux-brand",
@@ -218,6 +223,7 @@ LOCAL_BUILD_DEPENDENCIES = {
     "fplinux-apk-tools": ("fplinux-mbedtls-static-dev",),
     "fplinux-uclient": ("fplinux-mbedtls-static-dev",),
     "fplinux-audio": ("fplinux-alsa-lib",),
+    "fplinux-audiod": ("fplinux-alsa-lib",),
     "fplinux-bluealsa": (
         "fplinux-alsa-lib",
         "fplinux-bluez",
@@ -263,6 +269,7 @@ LOCAL_BUILD_DEPENDENCIES = {
 }
 SUBPACKAGE_APORTS = {
     "fplinux-alsa-lib-card-profiles": "fplinux-alsa-lib",
+    "fplinux-audiod-openrc": "fplinux-audiod",
     "fplinux-bash-loadables": "fplinux-bash",
     "fplinux-bluez-libs": "fplinux-bluez",
     "fplinux-glib-static-dev": "fplinux-glib",

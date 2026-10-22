@@ -141,6 +141,13 @@ def _verify_alpine_rootfs(  # noqa: PLR0913 -- verify each independently selecte
         "/usr/bin/fplinux-brightness": "fplinux-base",
         "/usr/libexec/fplinux/brightnessd": "fplinux-base",
     }
+    if "fplinux-audiod" in packages:
+        owners.update(
+            {
+                "/usr/libexec/fplinux/audiod": "fplinux-audiod",
+                "/etc/init.d/fplinux-audiod": "fplinux-audiod-openrc",
+            }
+        )
     if "fplinux-session" in packages:
         owners.update(
             {
@@ -221,6 +228,8 @@ def _verify_alpine_rootfs(  # noqa: PLR0913 -- verify each independently selecte
 
     _require_openrc_service(root, "boot", "networking")
     _require_openrc_service(root, "default", "fplinux-brightness")
+    if "fplinux-audiod" in packages:
+        _require_openrc_service(root, "default", "fplinux-audiod")
     if "fplinux-session" in packages:
         _require_openrc_service(root, "default", "fplinux-session")
     if "fplinux-input" in packages:

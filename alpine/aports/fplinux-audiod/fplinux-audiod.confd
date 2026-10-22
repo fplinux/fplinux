@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# The sound card's period and buffer in frames at 48000 Hz: multiples of 480
+# (10 ms), the buffer 2 to 14 periods.
+period_frames=480
+buffer_frames=1440
