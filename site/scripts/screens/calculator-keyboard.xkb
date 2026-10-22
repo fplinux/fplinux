@@ -1,0 +1,52 @@
+// SPDX-License-Identifier: GPL-2.0-only
+xkb_keymap {
+    xkb_keycodes "calculator" {
+        minimum = 8;
+        maximum = 255;
+        <AE01> = 10;
+        <AE02> = 11;
+        <AE03> = 12;
+        <AE04> = 13;
+        <AE05> = 14;
+        <AE06> = 15;
+        <AE07> = 16;
+        <AE08> = 17;
+        <AE09> = 18;
+        <AE10> = 19;
+        <AE11> = 20;
+        <AE12> = 21;
+        <AD12> = 35;
+        <RTRN> = 36;
+        <AB02> = 53;
+        <AB08> = 59;
+        <AB10> = 61;
+        <MENU> = 135;
+    };
+    xkb_types "calculator" {
+        type "ONE_LEVEL" {
+            modifiers = None;
+            map[None] = Level1;
+        };
+    };
+    xkb_compatibility "calculator" {};
+    xkb_symbols "calculator" {
+        key <AE01> { [ 1 ], repeat = No };
+        key <AE02> { [ 2 ], repeat = No };
+        key <AE03> { [ 3 ], repeat = No };
+        key <AE04> { [ 4 ], repeat = No };
+        key <AE05> { [ 5 ], repeat = No };
+        key <AE06> { [ 6 ], repeat = No };
+        key <AE07> { [ 7 ], repeat = No };
+        key <AE08> { [ 8 ], repeat = No };
+        key <AE09> { [ 9 ], repeat = No };
+        key <AE10> { [ 0 ], repeat = No };
+        key <AE11> { [ minus ], repeat = No };
+        key <AE12> { [ plus ], repeat = No };
+        key <AD12> { [ equal ], repeat = No };
+        key <RTRN> { [ Return ], repeat = No };
+        key <AB02> { [ x ], repeat = No };
+        key <AB08> { [ comma ], repeat = No };
+        key <AB10> { [ slash ], repeat = No };
+        key <MENU> { [ Menu ], repeat = No };
+    };
+};

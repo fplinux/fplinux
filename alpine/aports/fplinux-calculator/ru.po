@@ -1,0 +1,43 @@
+# Russian translation of fplinux-calculator.
+# SPDX-License-Identifier: GPL-2.0-only
+msgid ""
+msgstr ""
+"Project-Id-Version: fplinux-calculator\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "Calculator"
+msgstr "Калькулятор"
+
+msgid "Clear"
+msgstr "Стереть"
+
+msgid "Equals"
+msgstr "Равно"
+
+msgid "Error"
+msgstr "Ошибка"
+
+msgid "Reset"
+msgstr "Сброс"
+
+msgid "Calculator (unsaved)"
+msgstr "Калькулятор (не сохранено)"
+
+msgid "Calculation not saved"
+msgstr "Расчёт не сохранён"
+
+msgid "Saving not confirmed"
+msgstr "Сохранение не подтверждено"
+
+msgid "Retry"
+msgstr "Повторить"
+
+msgid "Stay"
+msgstr "Остаться"
+
+msgid "Discard"
+msgstr "Не сохранять"

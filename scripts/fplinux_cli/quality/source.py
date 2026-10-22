@@ -51,6 +51,7 @@ _PACKAGE_CONFIG_TIMEOUT = 30
 _QUALITY_INCLUDE = "/opt/quality/include"
 _LVGL_APORTS = frozenset(
     {
+        "fplinux-calculator",
         "fplinux-launcher",
         "fplinux-settings",
         "fplinux-snake",

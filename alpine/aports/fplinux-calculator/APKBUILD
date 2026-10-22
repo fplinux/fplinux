@@ -1,0 +1,52 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-calculator
+pkgver=1
+pkgrel=0
+pkgdesc="Keypad calculator for the FPLinux graphical session"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="GPL-2.0-only"
+depends="fplinux-ui"
+makedepends_build="clang22 lld22 pkgconf gettext"
+makedepends_host="musl-dev musl-libintl linux-headers fplinux-ui-dev"
+options="!check"
+source="
+	fplinux-calculator.c
+	calculator.c
+	calculator.h
+	fplinux-cli.c
+	fplinux-cli.h
+	org.fplinux.calculator.desktop
+	ru.po
+"
+builddir="$srcdir"
+
+build() {
+	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
+	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		$(pkg-config --cflags fplinux-ui) \
+		fplinux-calculator.c calculator.c fplinux-cli.c \
+		$(pkg-config --libs fplinux-ui) -lm $LDFLAGS \
+		-Wl,--gc-sections -o fplinux-calculator
+	msgfmt --check --output-file=ru.mo ru.po
+}
+
+package() {
+	install -Dm755 "$builddir/fplinux-calculator" \
+		"$pkgdir/usr/bin/fplinux-calculator"
+	install -Dm644 "$srcdir/org.fplinux.calculator.desktop" \
+		"$pkgdir/usr/share/applications/org.fplinux.calculator.desktop"
+	install -Dm644 "$builddir/ru.mo" \
+		"$pkgdir/usr/share/locale/ru/LC_MESSAGES/org.fplinux.calculator.mo"
+}
+
+sha512sums="
+376e25519b0ba55a68af9ffcb781b259fb18abfd5226245fd0e071496724766cd4f60fa1c4b078b0789241e179aebf4e472e07f08e161f16ae8925430f655438  fplinux-calculator.c
+0eb14fd952a79d643771109fbfc9deebdc263b99a0efc436dd9c2fd50e0ce0ddce937b0939ed7efca8ea6283b9bdf1e0462483bdbb61e8d4614096b14e978e7c  calculator.c
+9e29fb6298245d54ed0dae08e3c6d8642499bade78fe5ea6f4a1aeb1d154cbb1c9feb1df0f7b0cde0946d77c302ac6d8dc283202a867faf7919e2bd0aba9291b  calculator.h
+60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
+9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
+e2aee6bcb336ac9da5a877fbc4ea6aba3fe485a9f6c150611f4bff50dfaf5dc99a25e2b529f2c8dc179f93c52aa11d71e84dc1db8d4bf41afe2d412d585f60b3  org.fplinux.calculator.desktop
+feb0cde74d3c5813421d00bec5426bf982827c961e25e3441f3f5ea1b606119074e11993de5272d25f813f09ddc4647e7526a8efc55443f8544fe925d23ddae1  ru.po
+"

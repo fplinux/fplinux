@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Calculator
+Name[ru]=Калькулятор
+Exec=/usr/bin/fplinux-calculator
+Icon=org.fplinux.calculator
+Categories=Utility;Calculator;
+X-FPLinux-Mode=integrated
