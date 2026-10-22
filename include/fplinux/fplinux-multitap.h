@@ -13,10 +13,9 @@
 /* Input languages offered at once; further installed ones are left out. */
 #define FPLINUX_MULTITAP_LANGUAGE_COUNT 8U
 
-/* An input language: its key map and the names shown for it. */
+/* An input language: its key map and mode indicators. */
 struct fplinux_multitap_language {
 	char code[FPLINUX_LANGUAGE_CODE_BYTES];
-	char name[FPLINUX_LANGUAGE_TEXT_BYTES];
 	/* Mode indicators indexed by enum fplinux_language_case. */
 	char indicator[3][FPLINUX_LANGUAGE_TEXT_BYTES];
 	/* UTF-8 characters cycled by keys 0-9; each contains its own digit. */

@@ -34,6 +34,7 @@ def test_language_reader_loads_shipped_files_and_rejects_invalid_definitions(
             f"-I{ROOT / 'include/fplinux'}",
             str(ROOT / "tests/host_tool/gui/fplinux-language.c"),
             str(ROOT / "lib/fplinux/fplinux-language.c"),
+            str(ROOT / "lib/fplinux/fplinux-utf8.c"),
         ],
         name="compile language reader harness",
     )

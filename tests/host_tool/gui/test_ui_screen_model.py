@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Host command assignment, focus movement and date editing without LVGL."""
+"""Host command assignment, focus movement and segmented editing without LVGL."""
 
 from pathlib import Path
 
@@ -8,8 +8,8 @@ from tests.process import run_process
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def test_screen_model_commands_focus_and_date_editing(tmp_path: Path) -> None:
-    """Commands remain reachable, focus follows rows and date input is formatted."""
+def test_screen_model_commands_focus_and_segmented_editing(tmp_path: Path) -> None:
+    """Commands stay reachable; date and elapsed duration retain their input rules."""
     executable = tmp_path / "screen-model"
     run_process(
         [

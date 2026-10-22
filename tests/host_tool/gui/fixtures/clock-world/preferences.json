@@ -1,0 +1,15 @@
+{
+  "view": 0,
+  "snooze_minutes": 5,
+  "last_alarm_hour": 7,
+  "last_alarm_minute": 0,
+  "timer_duration_seconds": 0,
+  "next_alarm_id": 1,
+  "next_world_id": 5,
+  "alarms": [],
+  "world": [
+    { "id": 1, "offset_minutes": -210 },
+    { "id": 3, "offset_minutes": 345 },
+    { "id": 4, "offset_minutes": 0 }
+  ]
+}

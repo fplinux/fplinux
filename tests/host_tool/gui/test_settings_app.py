@@ -52,6 +52,7 @@ def settings_app(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 str(aport / "settings-core.c"),
                 str(ROOT / "lib/fplinux/fplinux-settings-values.c"),
                 str(ROOT / "lib/fplinux/fplinux-multitap.c"),
+                str(ROOT / "lib/fplinux/fplinux-utf8.c"),
                 str(ROOT / "lib/fplinux/fplinux-cli.c"),
                 str(ROOT / "lib/fplinux/fplinux-ui-profile.c"),
                 str(app_object),
@@ -174,6 +175,14 @@ def test_settings_russian_catalogue_translates_about_labels(tmp_path: Path) -> N
         "locale-applied",
         "theme-failed",
         "locale-failed",
+        "brightness-retry-current",
+        "save-failed-no-space",
+        "save-failed-read-only",
+        "save-failed-published",
+        "theme-warning-cancel",
+        "locale-warning-cancel",
+        "theme-visibility-recovery",
+        "locale-visibility-recovery",
     ],
 )
 def test_settings_callbacks_preserve_visible_values_and_setting_requests(

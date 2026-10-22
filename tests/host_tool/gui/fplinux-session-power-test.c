@@ -833,7 +833,8 @@ static void test_settings_file(void)
 	strcpy(settings.input_locale, "kk");
 	settings.theme = FPLINUX_UI_SESSION_THEME_DARK;
 	umask(0077);
-	check(fplinux_session_settings_save(&settings, path),
+	check(fplinux_session_settings_save(&settings, path).state ==
+		      FPLINUX_STORAGE_DURABLE,
 	      "settings are saved");
 	check(file_is(path, "screen_off_seconds=120\n"
 			    "auto_lock_seconds=off\n"

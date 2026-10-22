@@ -21,7 +21,8 @@ if TYPE_CHECKING:
 TEST_TIERS = {
     "small": 90,
     "host_process": 300,
-    "host_tool": 240,
+    # Native application builds and screen captures share this tier's budget.
+    "host_tool": 600,
     "artifact": 300,
     "public_workflow": 90,
 }
@@ -163,7 +164,7 @@ def pytest_commands(
     failfast: bool = False,
     workspace: Path = Path(),
 ) -> list[tuple[str, list[str], int]]:
-    """Keep the existing per-tier discovery order and timeout policy."""
+    """Use one time budget per selected test tier and retain discovery order."""
     cache_dir = Path(os.environ.get("FPLINUX_LOG_ROOT", ".cache")) / "pytest-cache"
 
     def command(nodes: list[str]) -> list[str]:
@@ -175,7 +176,14 @@ def pytest_commands(
         nodes = [_pytest_node_id(name, workspace) for name in names]
         return [("selected", command(nodes), timeout)]
     tiers = (tier,) if tier is not None else tuple(TEST_TIERS)
-    return [(name, command([f"tests/{name}"]), TEST_TIERS[name]) for name in tiers]
+    return [
+        (
+            name,
+            command([f"tests/{name}"]),
+            TEST_TIERS[name],
+        )
+        for name in tiers
+    ]
 
 
 def pytest_environment() -> dict[str, str]:

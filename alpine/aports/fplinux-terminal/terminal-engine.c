@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "fplinux-terminal.h"
 
-#include <stdio.h>
 #include <string.h>
 
 static void queue_write(struct tsm_vte *vte, const char *bytes, size_t size,
@@ -18,26 +17,8 @@ static void queue_write(struct tsm_vte *vte, const char *bytes, size_t size,
 	terminal->output_size += size;
 }
 
-static void shell_marker(struct tsm_vte *vte, const char *text, size_t size,
-			 void *data)
-{
-	struct fplinux_terminal *terminal = data;
-	size_t prefix_size = strlen(terminal->shell_marker);
-
-	(void)vte;
-	/* Only this shell's prompt marker can enable the Readline action. */
-	if (size != prefix_size + 1 ||
-	    memcmp(text, terminal->shell_marker, prefix_size))
-		return;
-	if (text[prefix_size] == 'B')
-		terminal->editing = true;
-	else if (text[prefix_size] == 'C')
-		terminal->editing = false;
-}
-
 bool fplinux_terminal_init(struct fplinux_terminal *terminal,
-			   unsigned int columns, unsigned int rows,
-			   const char *shell_token)
+			   unsigned int columns, unsigned int rows)
 {
 	/* Shell colours stay legible on the terminal's dark background. */
 	uint8_t palette[TSM_COLOR_NUM][3] = {
@@ -62,27 +43,25 @@ bool fplinux_terminal_init(struct fplinux_terminal *terminal,
 	};
 
 	memset(terminal, 0, sizeof(*terminal));
-	fplinux_multitap_init(&terminal->compose, NULL,
-			      FPLINUX_TERMINAL_COMPOSE_MS);
-	fplinux_terminal_load_languages(terminal, NULL, NULL);
-	if (!shell_token || !*shell_token || strlen(shell_token) > 32)
-		return false;
-	snprintf(terminal->shell_marker, sizeof(terminal->shell_marker),
-		 "777;%s;", shell_token);
+	fplinux_text_input_init(&terminal->input, NULL, NULL, false);
 	if (!columns || !rows ||
 	    tsm_screen_new(&terminal->screen, NULL, NULL) < 0)
 		return false;
-	if (tsm_screen_resize(terminal->screen, columns, rows) < 0 ||
-	    tsm_vte_new(&terminal->vte, terminal->screen, queue_write, terminal,
+	if (tsm_vte_new(&terminal->vte, terminal->screen, queue_write, terminal,
 			NULL, NULL) < 0)
 		goto fail;
 	if (tsm_vte_set_custom_palette(terminal->vte, palette) < 0 ||
 	    tsm_vte_set_palette(terminal->vte, "custom") < 0)
 		goto fail;
+	/* Colour retained cells in both buffers before the first viewport shrink. */
+	tsm_screen_set_flags(terminal->screen, TSM_SCREEN_ALTERNATE);
+	tsm_screen_erase_screen(terminal->screen, false);
+	tsm_screen_reset_flags(terminal->screen, TSM_SCREEN_ALTERNATE);
+	if (tsm_screen_resize(terminal->screen, columns, rows) < 0)
+		goto fail;
 	tsm_screen_set_max_sb(terminal->screen,
 			      FPLINUX_TERMINAL_SCROLLBACK_LINES);
 	tsm_vte_set_backspace_sends_delete(terminal->vte, true);
-	tsm_vte_set_osc_cb(terminal->vte, shell_marker, terminal);
 	terminal->cursor_visible = true;
 	terminal->dirty = true;
 	return true;

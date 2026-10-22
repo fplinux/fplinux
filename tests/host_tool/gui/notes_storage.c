@@ -20,6 +20,8 @@ struct fplinux_ui {
 	fplinux_ui_event_cb event_callback;
 	void *event_context;
 	bool left;
+	fplinux_ui_close_cb prepare_close;
+	void *close_context;
 };
 
 static struct fplinux_ui runtime;
@@ -29,13 +31,11 @@ static bool reopening;
 
 int fplinux_notes_application_main(int argc, char **argv);
 
-/* Directory creation and resolution belong to the controlled UI boundary. */
-bool fplinux_ui_state_dir(const char *app_id, char *path, size_t capacity)
+/* Resolve app storage at the UI boundary; retain the real file writer. */
+struct fplinux_ui_prefs *fplinux_ui_prefs_open(const char *app_id)
 {
 	assert(!strcmp(app_id, "org.fplinux.notes"));
-	assert(strlen(state_directory) < capacity);
-	snprintf(path, capacity, "%s", state_directory);
-	return true;
+	return fplinux_ui_prefs_open_directory(state_directory);
 }
 
 struct fplinux_ui *fplinux_ui_open(const char *app_id,
@@ -71,12 +71,33 @@ const char *fplinux_ui_text_box_get(const struct fplinux_ui_screen *box)
 	return box->text;
 }
 
+const void *fplinux_ui_glyph(struct fplinux_ui *ui, const char *name,
+			     enum fplinux_ui_glyph_size size)
+{
+	assert(ui == &runtime && size == FPLINUX_UI_GLYPH_ROW);
+	return name;
+}
+
 bool fplinux_ui_screen_add_command(struct fplinux_ui_screen *screen,
 				   const struct fplinux_ui_command *command)
 {
 	if (command->type == FPLINUX_UI_COMMAND_SCREEN)
 		screen->save_command = command->id;
 	return true;
+}
+
+bool fplinux_ui_screen_set_title(struct fplinux_ui_screen *screen,
+				 const char *title)
+{
+	assert(screen && !strcmp(title, "Notes"));
+	return true;
+}
+
+const char *fplinux_ui_storage_error(struct fplinux_storage_result result)
+{
+	(void)result;
+	assert(!"controlled note storage must remain writable");
+	return "Storage write failed";
 }
 
 void fplinux_ui_screen_set_listener(struct fplinux_ui_screen *screen,
@@ -108,12 +129,42 @@ void fplinux_ui_push(struct fplinux_ui *ui, struct fplinux_ui_screen *screen)
 	assert(screen == ui->editor);
 }
 
+struct fplinux_ui_screen *fplinux_ui_current(const struct fplinux_ui *ui)
+{
+	return ui->editor;
+}
+
+bool fplinux_ui_pop(struct fplinux_ui *ui)
+{
+	(void)ui;
+	assert(!"no save alert is expected");
+	return false;
+}
+
+void fplinux_ui_set_close_handler(struct fplinux_ui *ui,
+				  fplinux_ui_close_cb callback, void *context)
+{
+	ui->prepare_close = callback;
+	ui->close_context = context;
+}
+
+bool fplinux_ui_close_reply(struct fplinux_ui *ui,
+			    enum fplinux_ui_close_response response)
+{
+	(void)ui;
+	(void)response;
+	assert(!"a successful close needs no delayed reply");
+	return false;
+}
+
 void fplinux_ui_go_back(struct fplinux_ui *ui)
 {
 	struct fplinux_ui_prefs *saved =
 		fplinux_ui_prefs_open("org.fplinux.notes");
 
 	assert(saved);
+	assert(ui->prepare_close(ui, ui->close_context) ==
+	       FPLINUX_UI_CLOSE_READY);
 	assert(!strcmp(fplinux_ui_prefs_get(saved, "note", ""), note));
 	fplinux_ui_prefs_close(saved);
 	ui->left = true;

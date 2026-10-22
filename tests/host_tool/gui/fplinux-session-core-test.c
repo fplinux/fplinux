@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
 #include "session-core.h"
+#include "settings-session-boundary.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -20,12 +21,14 @@
 #include <unistd.h>
 
 #include "fplinux-keypad.h"
+#include "clock-wire.h"
 
 #define TEST_PEERS 8
 #define TEST_MESSAGES 64
 #define TEST_LAUNCHER "org.fplinux.launcher"
 #define TEST_APP "org.fplinux.notes"
 #define TEST_SETTINGS "org.fplinux.settings"
+#define TEST_CLOCK "org.fplinux.clock"
 
 enum command_type {
 	COMMAND_HELLO,
@@ -35,6 +38,7 @@ enum command_type {
 	COMMAND_EVENT,
 	COMMAND_DISCONNECTED,
 	COMMAND_HOLD_CLOSE,
+	COMMAND_CLOSE_DECISION,
 	COMMAND_CRASH,
 };
 
@@ -66,6 +70,14 @@ struct fixture {
 	int height;
 	const char *locale;
 	bool tearing_down;
+	bool media;
+	bool vibrator_on;
+	bool fail_vibration;
+	int audio_listener;
+	int audio_control;
+	char audio_socket[PATH_MAX];
+	char audio_messages[128][256];
+	size_t audio_message_count;
 	unsigned int teardown_callbacks;
 	bool frame_held;
 	unsigned int visible_frame;
@@ -77,6 +89,7 @@ struct fixture {
 	char socket_path[PATH_MAX];
 	char peer_socket[PATH_MAX];
 	char settings[PATH_MAX];
+	char clock_preferences[PATH_MAX];
 	char languages[PATH_MAX];
 	char brightness_socket[PATH_MAX];
 	char brightness_level[PATH_MAX];
@@ -93,6 +106,8 @@ static struct fixture *active_fixture;
 static time_t current_time = 1735689600;
 static bool clock_fails;
 static bool sync_fails;
+static bool directory_sync_fails;
+static unsigned int sync_calls;
 static pid_t peer_manager;
 
 static void fail(const char *expression, int line)
@@ -132,7 +147,11 @@ int __real_fsync(int fd);
 /* Persistence can fail while the applied preference remains live. */
 int __wrap_fsync(int fd)
 {
-	if (sync_fails) {
+	struct stat status;
+
+	++sync_calls;
+	CHECK(fstat(fd, &status) == 0);
+	if (sync_fails || (directory_sync_fails && S_ISDIR(status.st_mode))) {
 		errno = EIO;
 		return -1;
 	}
@@ -182,6 +201,10 @@ static void cleanup(void)
 		close(fixture->peers[i].fd);
 	if (fixture->listener >= 0)
 		close(fixture->listener);
+	if (fixture->audio_control >= 0)
+		close(fixture->audio_control);
+	if (fixture->audio_listener >= 0)
+		close(fixture->audio_listener);
 	free(fixture);
 	active_fixture = NULL;
 }
@@ -249,6 +272,7 @@ static int run_peer(void)
 	int channel = connect_at(getenv("FPLINUX_TEST_PEER_SOCKET"));
 	int session_fd = -1;
 	bool hold_close = false;
+	char close_decision[8] = "ready";
 
 	peer_manager = getppid();
 	CHECK(id && strlen(id) < sizeof(command.app_id));
@@ -294,6 +318,13 @@ static int run_peer(void)
 				command.type = COMMAND_SENT;
 				send_command(channel, &command);
 				break;
+			case COMMAND_CLOSE_DECISION:
+				CHECK(strlen(command.message.value) <
+				      sizeof(close_decision));
+				strcpy(close_decision, command.message.value);
+				command.type = COMMAND_SENT;
+				send_command(channel, &command);
+				break;
 			case COMMAND_CRASH:
 				return 23;
 			default:
@@ -328,6 +359,18 @@ static int run_peer(void)
 				command.message.frame_fd = -1;
 			}
 			send_command(channel, &command);
+			if (command.message.type ==
+				    FPLINUX_UI_SESSION_PREPARE_CLOSE &&
+			    close_decision[0]) {
+				struct fplinux_ui_session_message response = {
+					.type = FPLINUX_UI_SESSION_CLOSE_REPLY,
+					.serial = command.message.serial,
+				};
+
+				strcpy(response.value, close_decision);
+				CHECK(fplinux_ui_session_send(session_fd,
+							      &response));
+			}
 			if (command.message.type == FPLINUX_UI_SESSION_CLOSE &&
 			    !hold_close) {
 				char path[PATH_MAX];
@@ -461,9 +504,55 @@ static void add_entry(struct fixture *fixture, const char *id, const char *mode)
 	CHECK(chmod(path, 0600) == 0);
 }
 
+/* The external audio service records policy packets; it performs no mixing. */
+static void observe_audio(struct fixture *fixture)
+{
+	if (fixture->audio_listener < 0)
+		return;
+	if (fixture->audio_control < 0) {
+		fixture->audio_control = accept4(fixture->audio_listener, NULL,
+						 NULL,
+						 SOCK_CLOEXEC | SOCK_NONBLOCK);
+		if (fixture->audio_control < 0)
+			return;
+	}
+	for (;;) {
+		char packet[256];
+		ssize_t bytes = recv(fixture->audio_control, packet,
+				     sizeof(packet) - 1, MSG_DONTWAIT);
+
+		if (bytes < 0 && (errno == EAGAIN || errno == EINTR))
+			return;
+		if (!bytes) {
+			close(fixture->audio_control);
+			fixture->audio_control = -1;
+			return;
+		}
+		CHECK(bytes > 0 && fixture->audio_message_count < 128);
+		packet[bytes] = '\0';
+		strcpy(fixture->audio_messages[fixture->audio_message_count++],
+		       packet);
+	}
+}
+
+static bool test_vibrate(void *context, bool on)
+{
+	struct fixture *fixture = context;
+
+	CHECK(fixture->vibrator_on != on);
+	if (fixture->fail_vibration) {
+		fixture->fail_vibration = false;
+		errno = EIO;
+		return false;
+	}
+	fixture->vibrator_on = on;
+	return true;
+}
+
 static struct fixture *create_fixture(const char *root, int width, int height,
 				      bool brightness, unsigned int keypad_max,
-				      const char *locale, bool power_supply)
+				      const char *locale, int battery_percent,
+				      bool media)
 {
 	struct fixture *fixture = calloc(1, sizeof(*fixture));
 	struct passwd *account = getpwuid(getuid());
@@ -473,6 +562,9 @@ static struct fixture *create_fixture(const char *root, int width, int height,
 	CHECK(fixture && account);
 	active_fixture = fixture;
 	fixture->listener = -1;
+	fixture->audio_listener = -1;
+	fixture->audio_control = -1;
+	fixture->media = media;
 	fixture->now_ms = 1000;
 	fixture->width = width;
 	fixture->height = height;
@@ -505,9 +597,9 @@ static struct fixture *create_fixture(const char *root, int width, int height,
 			"input.indicator.upper=АБВ\n");
 	}
 	CHECK(snprintf(settings, sizeof(settings),
-		       "screen_off_seconds=30\nauto_lock_seconds=off\n"
+		       "screen_off_seconds=30\nauto_lock_seconds=%s\n"
 		       "locale=%s\ninput_locale=en\ntheme=light\nbrightness=7\n",
-		       locale) < (int)sizeof(settings));
+		       media ? "0" : "off", locale) < (int)sizeof(settings));
 	write_file(fixture->settings, settings);
 	fixture->listener = listen_at(fixture->peer_socket);
 	CHECK(fcntl(fixture->listener, F_SETFL, O_NONBLOCK) == 0);
@@ -517,6 +609,7 @@ static struct fixture *create_fixture(const char *root, int width, int height,
 	add_entry(fixture, TEST_LAUNCHER, "launcher");
 	add_entry(fixture, TEST_APP, "integrated");
 	add_entry(fixture, TEST_SETTINGS, "integrated");
+	add_entry(fixture, TEST_CLOCK, "integrated");
 	if (brightness) {
 		int listener = listen_at(fixture->brightness_socket);
 
@@ -546,8 +639,8 @@ static struct fixture *create_fixture(const char *root, int width, int height,
 		path_join(path, light, "max_brightness");
 		write_file(path, keypad_max == 1 ? "1\n" : "255\n");
 	}
-	if (power_supply) {
-		char supply[PATH_MAX];
+	if (battery_percent >= 0) {
+		char supply[PATH_MAX], capacity[16];
 
 		path_join(fixture->power_supply, root, "power-supply");
 		CHECK(mkdir(fixture->power_supply, 0700) == 0);
@@ -556,13 +649,21 @@ static struct fixture *create_fixture(const char *root, int width, int height,
 		path_join(path, supply, "type");
 		write_file(path, "Battery\n");
 		path_join(fixture->battery_capacity, supply, "capacity");
-		write_file(fixture->battery_capacity, "3\n");
+		CHECK(snprintf(capacity, sizeof(capacity), "%d\n",
+			       battery_percent) < (int)sizeof(capacity));
+		write_file(fixture->battery_capacity, capacity);
 		path_join(supply, fixture->power_supply, "charger");
 		CHECK(mkdir(supply, 0700) == 0);
 		path_join(path, supply, "type");
 		write_file(path, "Unknown\n");
 		path_join(fixture->charger_online, supply, "online");
 		write_file(fixture->charger_online, "0\n");
+	}
+	path_join(fixture->clock_preferences, root, "clocks");
+	if (media) {
+		path_join(fixture->audio_socket, root, "audio.sock");
+		fixture->audio_listener = listen_at(fixture->audio_socket);
+		CHECK(fcntl(fixture->audio_listener, F_SETFL, O_NONBLOCK) == 0);
 	}
 	options = (struct fplinux_session_options){
 		.applications = fixture->applications,
@@ -575,12 +676,21 @@ static struct fixture *create_fixture(const char *root, int width, int height,
 		.width = width,
 		.height = height,
 		.settings_path = fixture->settings,
+		.clock_preferences_directory = fixture->clock_preferences,
 		.languages_dir = fixture->languages,
 		.brightness_socket = brightness ? fixture->brightness_socket :
 						  NULL,
 		.leds_dir = keypad_max ? fixture->leds : NULL,
-		.power_supply_dir = power_supply ? fixture->power_supply : NULL,
+		.power_supply_dir =
+			battery_percent >= 0 ? fixture->power_supply : NULL,
+		.clock_signal_path = getenv("FPLINUX_TEST_CLOCK_SIGNAL_FILE") ?
+					     "/proc/self/exe" :
+					     NULL,
 		.clock_ms = clock_ms,
+		.audio_socket = media ? fixture->audio_socket : NULL,
+		.audio_service = media ? "/proc/self/exe" : NULL,
+		.audio_device = media ? "/dev/null" : NULL,
+		.vibrate = media ? test_vibrate : NULL,
 		.changed = session_changed,
 		.hold_frame = hold_frame,
 		.capture_frame = capture_frame,
@@ -599,6 +709,25 @@ static uint64_t real_ms(void)
 	return (uint64_t)time.tv_sec * 1000 + (uint64_t)time.tv_nsec / 1000000;
 }
 
+static void observe_peer(struct peer *peer)
+{
+	struct command event;
+	ssize_t bytes;
+
+	while ((bytes = recv(peer->fd, &event, sizeof(event), 0)) > 0) {
+		CHECK(bytes == (ssize_t)sizeof(event));
+		if (event.type == COMMAND_SENT)
+			++peer->sent;
+		else if (event.type == COMMAND_DISCONNECTED)
+			peer->disconnected = true;
+		else {
+			CHECK(event.type == COMMAND_EVENT);
+			CHECK(peer->message_count < TEST_MESSAGES);
+			peer->messages[peer->message_count++] = event.message;
+		}
+	}
+}
+
 static void pump(struct fixture *fixture, unsigned int duration_ms)
 {
 	uint64_t deadline = real_ms() + duration_ms;
@@ -611,6 +740,7 @@ static void pump(struct fixture *fixture, unsigned int duration_ms)
 		int channel;
 
 		fplinux_session_dispatch(fixture->session);
+		observe_audio(fixture);
 		while ((channel = accept4(fixture->listener, NULL, NULL,
 					  SOCK_CLOEXEC)) >= 0) {
 			struct command hello;
@@ -629,27 +759,8 @@ static void pump(struct fixture *fixture, unsigned int duration_ms)
 			strcpy(peer->id, hello.app_id);
 			CHECK(fcntl(channel, F_SETFL, O_NONBLOCK) == 0);
 		}
-		for (size_t i = 0; i < fixture->peer_count; ++i) {
-			struct peer *peer = &fixture->peers[i];
-			struct command event;
-			ssize_t bytes;
-
-			while ((bytes = recv(peer->fd, &event, sizeof(event),
-					     0)) > 0) {
-				CHECK(bytes == (ssize_t)sizeof(event));
-				if (event.type == COMMAND_SENT)
-					++peer->sent;
-				else if (event.type == COMMAND_DISCONNECTED)
-					peer->disconnected = true;
-				else {
-					CHECK(event.type == COMMAND_EVENT);
-					CHECK(peer->message_count <
-					      TEST_MESSAGES);
-					peer->messages[peer->message_count++] =
-						event.message;
-				}
-			}
-		}
+		for (size_t i = 0; i < fixture->peer_count; ++i)
+			observe_peer(&fixture->peers[i]);
 		poll(&fd, 1, 2);
 	} while (real_ms() < deadline);
 }
@@ -714,8 +825,13 @@ static void issue(struct fixture *fixture, struct peer *peer,
 	uint64_t deadline = real_ms() + 2000;
 
 	send_command(peer->fd, &command);
-	while (peer->sent == sent && real_ms() < deadline)
-		pump(fixture, 2);
+	/* Dispatch can reject the message and terminate its sender. */
+	while (peer->sent == sent && real_ms() < deadline) {
+		struct pollfd fd = { .fd = peer->fd, .events = POLLIN };
+
+		poll(&fd, 1, 2);
+		observe_peer(peer);
+	}
 	CHECK(peer->sent > sent);
 	pump(fixture, 4);
 }
@@ -770,6 +886,7 @@ static struct peer *start_launcher(struct fixture *fixture)
 		authenticate(fixture, launcher, NULL);
 
 	CHECK(config.mode == FPLINUX_UI_SESSION_LAUNCHER);
+	CHECK(!config.audio && !config.vibration);
 	CHECK(config.screen_width == fixture->width &&
 	      config.screen_height == fixture->height);
 	CHECK(!strcmp(config.locale, fixture->locale) &&
@@ -845,6 +962,8 @@ static struct peer *show_app(struct fixture *fixture, struct peer *launcher,
 	struct peer *app = launch_app(fixture, launcher, id);
 	struct fplinux_ui_session_message config =
 		authenticate(fixture, app, NULL);
+	if (fixture->media)
+		CHECK(config.audio && config.vibration);
 	commit_app(fixture, app, &config);
 	struct fplinux_ui_session_message active =
 		active_for(fixture, launcher, id);
@@ -943,6 +1062,133 @@ static void test_home_retains_exit_saves(struct fixture *fixture)
 	wait_reaped(fixture, pid);
 	expect_file(saved, "saved\n");
 	CHECK(fplinux_session_focused_pid(fixture->session) == launcher->pid);
+}
+
+static void set_close_decision(struct fixture *fixture, struct peer *peer,
+			       const char *decision)
+{
+	struct command command = { .type = COMMAND_CLOSE_DECISION };
+	unsigned int sent = peer->sent;
+	uint64_t deadline = real_ms() + 2000;
+
+	strcpy(command.message.value, decision);
+	send_command(peer->fd, &command);
+	while (peer->sent == sent && real_ms() < deadline)
+		pump(fixture, 2);
+	CHECK(peer->sent > sent);
+}
+
+static void answer_close(struct fixture *fixture, struct peer *peer,
+			 uint32_t serial, const char *decision)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_CLOSE_REPLY,
+		.serial = serial,
+	};
+
+	strcpy(message.value, decision);
+	issue(fixture, peer, &message);
+}
+
+static void return_home(struct fixture *fixture, struct peer *launcher);
+static struct fplinux_ui_session_message query_tasks(struct fixture *fixture,
+						     struct peer *launcher);
+static const struct fplinux_ui_session_task *
+task_record(const struct fplinux_ui_session_message *snapshot, const char *id);
+static void task_action(struct fixture *fixture, struct peer *launcher,
+			enum fplinux_ui_session_message_type type,
+			const char *id, uint32_t token);
+
+static void test_close_cancel_and_stale_reply(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *app = show_app(fixture, launcher, TEST_APP);
+	struct fplinux_ui_session_message ignored;
+
+	set_close_decision(fixture, app, "");
+	send_type(fixture, app, FPLINUX_UI_SESSION_EXIT);
+	struct fplinux_ui_session_message first = wait_message(
+		fixture, app, FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
+
+	CHECK(first.serial);
+	const struct fplinux_session_process *process =
+		fplinux_session_find_process(fixture->session, app->pid);
+
+	CHECK(process && !process->closing && process->shown);
+	CHECK(process->lifecycle == FPLINUX_UI_SESSION_FOREGROUND);
+	answer_close(fixture, app, first.serial, "cancel");
+	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
+	CHECK(!take_message(app, FPLINUX_UI_SESSION_CLOSE, NULL, &ignored));
+	send_type(fixture, app, FPLINUX_UI_SESSION_EXIT);
+	struct fplinux_ui_session_message second = wait_message(
+		fixture, app, FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
+
+	CHECK(second.serial && second.serial != first.serial);
+	answer_close(fixture, app, first.serial, "ready");
+	process = fplinux_session_find_process(fixture->session, app->pid);
+	CHECK(process && !process->closing && process->shown);
+	answer_close(fixture, app, second.serial, "ready");
+	struct fplinux_ui_session_message active =
+		active_for(fixture, launcher, "");
+
+	CHECK(fixture->frame_held);
+	acknowledge(fixture, launcher, &active);
+	wait_message(fixture, app, FPLINUX_UI_SESSION_CLOSE, NULL);
+	wait_reaped(fixture, app->pid);
+}
+
+static void
+test_close_wait_allows_home_and_forced_close(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *app = show_app(fixture, launcher, TEST_APP);
+	struct fplinux_ui_session_message ignored;
+
+	set_close_decision(fixture, app, "wait");
+	send_type(fixture, app, FPLINUX_UI_SESSION_EXIT);
+	wait_message(fixture, app, FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
+	pump(fixture, 10);
+	fixture->now_ms += 4000;
+	pump(fixture, 10);
+	const struct fplinux_session_process *process =
+		fplinux_session_find_process(fixture->session, app->pid);
+
+	CHECK(process && !process->closing && process->shown);
+	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
+	CHECK(!take_message(app, FPLINUX_UI_SESSION_CLOSE, NULL, &ignored));
+	return_home(fixture, launcher);
+	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
+	struct fplinux_ui_session_message tasks =
+		query_tasks(fixture, launcher);
+	uint32_t token = task_record(&tasks, TEST_APP)->token;
+
+	task_action(fixture, launcher, FPLINUX_UI_SESSION_CLOSE_TASK, TEST_APP,
+		    token);
+	wait_message(fixture, app, FPLINUX_UI_SESSION_CLOSE, NULL);
+	wait_reaped(fixture, app->pid);
+	CHECK(fplinux_session_focused_pid(fixture->session) == settings->pid);
+}
+
+static void test_close_unanswered_has_bounded_timeout(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *app = show_app(fixture, launcher, TEST_APP);
+
+	set_close_decision(fixture, app, "");
+	send_type(fixture, app, FPLINUX_UI_SESSION_EXIT);
+	wait_message(fixture, app, FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
+	fixture->now_ms += 2999;
+	pump(fixture, 4);
+	CHECK(!fplinux_session_find_process(fixture->session, app->pid)
+		       ->closing);
+	++fixture->now_ms;
+	pump(fixture, 4);
+	struct fplinux_ui_session_message active =
+		active_for(fixture, launcher, "");
+
+	acknowledge(fixture, launcher, &active);
+	wait_message(fixture, app, FPLINUX_UI_SESSION_CLOSE, NULL);
+	wait_reaped(fixture, app->pid);
 }
 
 static void
@@ -1064,6 +1310,39 @@ static void return_home(struct fixture *fixture, struct peer *launcher)
 		active_for(fixture, launcher, "");
 
 	acknowledge(fixture, launcher, &home);
+}
+
+static void
+test_close_background_wait_activates_same_instance(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *app = show_app(fixture, launcher, TEST_APP);
+	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
+	struct fplinux_ui_session_message tasks =
+		query_tasks(fixture, launcher);
+	uint32_t token = task_record(&tasks, TEST_APP)->token;
+
+	set_close_decision(fixture, app, "wait");
+	task_action(fixture, launcher, FPLINUX_UI_SESSION_CLOSE_TASK, TEST_APP,
+		    token);
+	struct fplinux_ui_session_message prepare = wait_message(
+		fixture, app, FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
+	struct fplinux_ui_session_message parked =
+		active_for(fixture, launcher, "");
+
+	acknowledge(fixture, launcher, &parked);
+	struct fplinux_ui_session_message active =
+		active_for(fixture, launcher, TEST_APP);
+
+	acknowledge(fixture, launcher, &active);
+	CHECK(active.token == token);
+	CHECK(fixture->peer_count == 3);
+	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
+	CHECK(fplinux_session_find_process(fixture->session, settings->pid)
+		      ->lifecycle == FPLINUX_UI_SESSION_BACKGROUND);
+	answer_close(fixture, app, prepare.serial, "cancel");
+	CHECK(!fplinux_session_find_process(fixture->session, app->pid)
+		       ->closing);
 }
 
 static void test_task_controls(struct fixture *fixture)
@@ -1995,6 +2274,49 @@ static void test_input_language(struct fixture *fixture, bool save_fails)
 	      !strcmp(config.input_locale, "ru"));
 }
 
+static void test_settings_retries_latest_value(struct fixture *fixture,
+					       bool explicit)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
+
+	sync_fails = true;
+	setting(fixture, settings, "auto_lock_seconds", "5");
+	struct fplinux_ui_session_message reply =
+		wait_message(fixture, settings, FPLINUX_UI_SESSION_ERROR,
+			     "auto_lock_seconds");
+
+	CHECK(reply.applied && !strcmp(reply.value, "5"));
+	CHECK(reply.storage_state == FPLINUX_STORAGE_UNPUBLISHED &&
+	      reply.storage_error == EIO);
+	setting(fixture, settings, "auto_lock_seconds", "30");
+	reply = wait_message(fixture, settings, FPLINUX_UI_SESSION_ERROR,
+			     "auto_lock_seconds");
+	CHECK(reply.applied && !strcmp(reply.value, "30"));
+	fixture->now_ms += 2000;
+	pump(fixture, 4);
+	sync_fails = false;
+	if (explicit) {
+		setting(fixture, settings, "auto_lock_seconds", "30");
+		reply = wait_message(fixture, settings,
+				     FPLINUX_UI_SESSION_SETTING,
+				     "auto_lock_seconds");
+	} else {
+		fixture->now_ms += 4000;
+		pump(fixture, 4);
+		setting(fixture, settings, "auto_lock_seconds", "");
+		reply = wait_message(fixture, settings,
+				     FPLINUX_UI_SESSION_SETTING,
+				     "auto_lock_seconds");
+	}
+	CHECK(reply.applied && !strcmp(reply.value, "30"));
+	CHECK(reply.storage_state == FPLINUX_STORAGE_DURABLE &&
+	      !reply.storage_error);
+	expect_file(fixture->settings,
+		    "screen_off_seconds=30\nauto_lock_seconds=30\n"
+		    "locale=en\ninput_locale=en\ntheme=light\nbrightness=7\n");
+}
+
 static void test_brightness_restore(struct fixture *fixture, bool crash)
 {
 	struct peer *launcher = start_launcher(fixture);
@@ -2300,6 +2622,234 @@ static void test_settings_errors_time(struct fixture *fixture)
 	CHECK(current_time == 1740746040);
 }
 
+struct settings_session_context {
+	struct fixture *fixture;
+	struct peer *launcher;
+	struct peer *settings;
+	size_t request_index;
+	const char *setting;
+	const char *value;
+	unsigned int rejected_changes;
+	bool save_failed;
+	enum fplinux_storage_state storage_state;
+	enum fplinux_storage_state cancel_storage_state;
+	int cancel_storage_error;
+	unsigned int sync_calls_after_failure;
+	uint32_t redraw_serial;
+};
+
+static void flush_settings_session(void *context, struct fplinux_ui *ui)
+{
+	struct settings_session_context *session = context;
+	struct fplinux_ui_session_message message;
+	bool progressed;
+
+	do {
+		progressed = false;
+		while (settings_session_next_request(
+			ui, &session->request_index, &message)) {
+			issue(session->fixture, session->settings, &message);
+			progressed = true;
+		}
+		pump(session->fixture, 10);
+		while (session->settings->message_count) {
+			message = session->settings->messages[0];
+			--session->settings->message_count;
+			memmove(session->settings->messages,
+				&session->settings->messages[1],
+				session->settings->message_count *
+					sizeof(message));
+			if (message.type == FPLINUX_UI_SESSION_ERROR &&
+			    !strcmp(message.name, session->setting) &&
+			    !strcmp(message.value, session->value)) {
+				CHECK(!strcmp(message.reason,
+					      session->save_failed ?
+						      "save-failed" :
+						      "not-foreground"));
+				if (session->save_failed) {
+					CHECK(message.applied);
+					if (!strcmp(message.name, "theme") ||
+					    !strcmp(message.name, "locale"))
+						CHECK(message.serial);
+					CHECK(message.storage_state ==
+						      session->storage_state &&
+					      message.storage_error == EIO);
+					session->redraw_serial = message.serial;
+					session->sync_calls_after_failure =
+						sync_calls;
+				}
+				++session->rejected_changes;
+			}
+			if (session->sync_calls_after_failure &&
+			    !strcmp(session->setting, "screen_off_seconds") &&
+			    !strcmp(message.name, "brightness")) {
+				CHECK(message.type ==
+					      FPLINUX_UI_SESSION_SETTING &&
+				      message.applied &&
+				      !strcmp(message.value, "7"));
+				session->cancel_storage_state =
+					message.storage_state;
+				session->cancel_storage_error =
+					message.storage_error;
+			}
+			settings_session_receive(ui, &message);
+			progressed = true;
+		}
+	} while (progressed);
+}
+
+static void recover_settings_storage(void *context)
+{
+	struct settings_session_context *session = context;
+
+	CHECK(session->rejected_changes == 1);
+	CHECK(sync_calls == session->sync_calls_after_failure);
+	expect_file(session->fixture->brightness_level, "7\n");
+	expect_file(
+		session->fixture->settings,
+		session->storage_state == FPLINUX_STORAGE_UNPUBLISHED ?
+			"screen_off_seconds=30\nauto_lock_seconds=off\n"
+			"locale=en\ninput_locale=en\ntheme=light\nbrightness=7\n" :
+			"screen_off_seconds=60\nauto_lock_seconds=off\n"
+			"locale=en\ninput_locale=en\ntheme=light\nbrightness=7\n");
+	sync_fails = false;
+	directory_sync_fails = false;
+}
+
+static void
+test_settings_preview_cancel_keeps_storage_retry(struct fixture *fixture,
+						 bool published)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
+	struct settings_session_context context = {
+		.fixture = fixture,
+		.launcher = launcher,
+		.settings = settings,
+		.setting = "screen_off_seconds",
+		.value = "60",
+		.save_failed = true,
+		.storage_state = published ?
+					 FPLINUX_STORAGE_PUBLISHED_UNSYNCED :
+					 FPLINUX_STORAGE_UNPUBLISHED,
+	};
+	const struct settings_session_boundary boundary = {
+		.flush = flush_settings_session,
+		.recover_storage = recover_settings_storage,
+		.context = &context,
+	};
+
+	sync_fails = !published;
+	directory_sync_fails = published;
+	CHECK(settings_session_preview_retry_test(&boundary) == 0);
+	CHECK(context.rejected_changes == 1);
+	CHECK(context.cancel_storage_state == context.storage_state);
+	CHECK(context.cancel_storage_error == EIO);
+	CHECK(sync_calls > context.sync_calls_after_failure);
+	expect_file(fixture->settings,
+		    "screen_off_seconds=60\nauto_lock_seconds=off\n"
+		    "locale=en\ninput_locale=en\ntheme=light\nbrightness=7\n");
+}
+
+static void home_settings_session(void *context)
+{
+	struct settings_session_context *session = context;
+
+	return_home(session->fixture, session->launcher);
+	CHECK(fplinux_session_theme(session->fixture->session) ==
+	      FPLINUX_UI_SESSION_THEME_LIGHT);
+}
+
+static void resume_settings_session(void *context)
+{
+	struct settings_session_context *session = context;
+	struct fplinux_ui_session_message snapshot =
+		query_tasks(session->fixture, session->launcher);
+	const struct fplinux_ui_session_task *task =
+		task_record(&snapshot, TEST_SETTINGS);
+
+	CHECK(task->lifecycle == FPLINUX_UI_SESSION_BACKGROUND);
+	CHECK(session->rejected_changes == 1);
+	CHECK(fplinux_session_theme(session->fixture->session) ==
+	      FPLINUX_UI_SESSION_THEME_LIGHT);
+	task_action(session->fixture, session->launcher,
+		    FPLINUX_UI_SESSION_ACTIVATE, TEST_SETTINGS, task->token);
+	struct fplinux_ui_session_message active =
+		active_for(session->fixture, session->launcher, TEST_SETTINGS);
+
+	CHECK(active.theme == FPLINUX_UI_SESSION_THEME_LIGHT);
+	CHECK(!strcmp(active.locale, "en"));
+	acknowledge(session->fixture, session->launcher, &active);
+}
+
+static void test_settings_choice_home_before_request(struct fixture *fixture,
+						     bool theme)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
+	struct settings_session_context context = {
+		.fixture = fixture,
+		.launcher = launcher,
+		.settings = settings,
+		.setting = theme ? "theme" : "locale",
+		.value = theme ? "dark" : "fr",
+	};
+	const struct settings_session_boundary boundary = {
+		.flush = flush_settings_session,
+		.home = home_settings_session,
+		.resume = resume_settings_session,
+		.context = &context,
+	};
+
+	CHECK(settings_session_test(theme, &boundary) == 0);
+}
+
+static void
+test_settings_applied_error_rebuilds_before_ack(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
+	pid_t previous_launcher = launcher->pid;
+	struct settings_session_context context = {
+		.fixture = fixture,
+		.launcher = launcher,
+		.settings = settings,
+		.setting = "theme",
+		.value = "dark",
+		.save_failed = true,
+		.storage_state = FPLINUX_STORAGE_UNPUBLISHED,
+	};
+	const struct settings_session_boundary boundary = {
+		.flush = flush_settings_session,
+		.context = &context,
+	};
+
+	sync_fails = true;
+	CHECK(settings_session_save_failure_test(&boundary) == 0);
+	sync_fails = false;
+	CHECK(context.rejected_changes == 1 && context.redraw_serial);
+	CHECK(fixture->frame_held);
+	struct fplinux_ui_session_message redraw = {
+		.type = FPLINUX_UI_SESSION_REDRAW_ACK,
+		.serial = context.redraw_serial,
+	};
+
+	issue(fixture, settings, &redraw);
+	CHECK(fixture->frame_held);
+	wait_reaped(fixture, previous_launcher);
+	launcher = wait_peer(fixture, TEST_LAUNCHER);
+	authenticate(fixture, launcher, NULL);
+	send_type(fixture, launcher, FPLINUX_UI_SESSION_READY);
+	fplinux_session_surface_committed(fixture->session, launcher->pid,
+					  fixture->width, fixture->height);
+	fplinux_session_frame(fixture->session, launcher->pid);
+	struct fplinux_ui_session_message active =
+		active_for(fixture, launcher, TEST_SETTINGS);
+
+	acknowledge(fixture, launcher, &active);
+	CHECK(!fixture->frame_held);
+}
+
 static void
 test_fullscreen_launch_retains_until_first_buffer(struct fixture *fixture)
 {
@@ -2349,6 +2899,10 @@ static void test_appearance_waits_for_both_frames(struct fixture *fixture,
 
 	sync_fails = false;
 	CHECK(reply.serial && !strcmp(reply.value, "dark"));
+	CHECK(reply.applied);
+	CHECK(reply.storage_state == (save_fails ? FPLINUX_STORAGE_UNPUBLISHED :
+						   FPLINUX_STORAGE_DURABLE));
+	CHECK(reply.storage_error == (save_fails ? EIO : 0));
 	CHECK(fixture->frame_held);
 	redraw.serial = reply.serial + 1;
 	issue(fixture, settings, &redraw);
@@ -2410,7 +2964,21 @@ static void test_appearance_end_keeps_visible_dialog(struct fixture *fixture,
 	show_end_prompt(fixture, launcher, settings, &active);
 	/* The controlled compositor now shows the END dialog above the old scene. */
 	fixture->visible_frame = 2;
+	if (!retain)
+		set_close_decision(fixture, settings, "");
 	end_action(fixture, launcher, &active, retain ? "minimize" : "close");
+	if (!retain) {
+		struct fplinux_ui_session_message prepare =
+			wait_message(fixture, settings,
+				     FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
+		const struct fplinux_session_process *process =
+			fplinux_session_find_process(fixture->session,
+						     settings->pid);
+
+		CHECK(process && !process->closing &&
+		      process->lifecycle == FPLINUX_UI_SESSION_FOREGROUND);
+		answer_close(fixture, settings, prepare.serial, "ready");
+	}
 	active = active_for(fixture, launcher, "");
 	CHECK(fixture->frame_held && fixture->retained_frame == 2);
 	acknowledge(fixture, launcher, &active);
@@ -2479,20 +3047,793 @@ static void test_battery_charger_wake(struct fixture *fixture,
 	CHECK(!strcmp(active.notice, notice));
 }
 
+static struct fplinux_ui_session_message battery_notice(struct fixture *fixture,
+							struct peer *launcher,
+							const char *capacity,
+							const char *notice)
+{
+	write_file(fixture->battery_capacity, capacity);
+	fixture->now_ms += 60000;
+	struct fplinux_ui_session_message active = wait_message(
+		fixture, launcher, FPLINUX_UI_SESSION_ACTIVE, NULL);
+	struct fplinux_ui_session_message next;
+
+	while (take_message(launcher, FPLINUX_UI_SESSION_ACTIVE, NULL, &next))
+		active = next;
+	CHECK(!strcmp(active.notice, notice));
+	return active;
+}
+
+static void test_battery_notice_waits_for_current_frame(struct fixture *fixture,
+							bool upgrade)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *app = show_app(fixture, launcher, TEST_APP);
+	struct fplinux_ui_session_message keep_on = {
+		.type = FPLINUX_UI_SESSION_KEEP_SCREEN_ON,
+		.enabled = true,
+	};
+	struct fplinux_ui_session_message ignored;
+
+	issue(fixture, app, &keep_on);
+	clear_messages(fixture, launcher);
+	clear_messages(fixture, app);
+	struct fplinux_ui_session_message low =
+		battery_notice(fixture, launcher, "10\n", "battery-low");
+	struct fplinux_ui_session_message current = low;
+
+	CHECK(!fplinux_session_launcher_on_top(fixture->session));
+	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
+	CHECK(fplinux_session_find_process(fixture->session, app->pid)->shown);
+	CHECK(phone_gesture(fixture, FPLINUX_KEY_2));
+	CHECK(!take_message(app, FPLINUX_UI_SESSION_VISIBILITY, NULL,
+			    &ignored));
+	commit_launcher(fixture, launcher);
+	CHECK(!fplinux_session_launcher_on_top(fixture->session));
+	if (upgrade) {
+		current = battery_notice(fixture, launcher, "3\n",
+					 "battery-critical");
+		acknowledge(fixture, launcher, &low);
+		CHECK(!fplinux_session_launcher_on_top(fixture->session));
+		CHECK(fplinux_session_focused_pid(fixture->session) ==
+		      app->pid);
+	} else {
+		struct fplinux_ui_session_message stale = low;
+
+		--stale.serial;
+		acknowledge(fixture, launcher, &stale);
+		CHECK(!fplinux_session_launcher_on_top(fixture->session));
+	}
+	acknowledge(fixture, launcher, &current);
+	CHECK(fplinux_session_launcher_on_top(fixture->session));
+	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
+	fplinux_session_set_launcher_shown(fixture->session, true);
+	pump(fixture, 4);
+	CHECK(fplinux_session_focused_pid(fixture->session) == launcher->pid);
+	ignored =
+		wait_message(fixture, app, FPLINUX_UI_SESSION_VISIBILITY, NULL);
+	CHECK(!ignored.visible);
+	if (upgrade) {
+		struct fplinux_ui_session_message dismiss = {
+			.type = FPLINUX_UI_SESSION_DISMISS,
+			.notice = "battery-low",
+		};
+
+		issue(fixture, launcher, &dismiss);
+		CHECK(fplinux_session_launcher_on_top(fixture->session));
+		CHECK(fplinux_session_focused_pid(fixture->session) ==
+		      launcher->pid);
+	}
+	struct fplinux_ui_session_message dismiss = {
+		.type = FPLINUX_UI_SESSION_DISMISS,
+	};
+
+	strcpy(dismiss.notice, current.notice);
+	issue(fixture, launcher, &dismiss);
+	CHECK(!fplinux_session_launcher_on_top(fixture->session));
+	fplinux_session_set_launcher_shown(fixture->session, false);
+	pump(fixture, 4);
+	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
+	ignored =
+		wait_message(fixture, app, FPLINUX_UI_SESSION_VISIBILITY, NULL);
+	CHECK(ignored.visible);
+}
+
+static volatile sig_atomic_t clock_signal_stopped;
+
+static void clock_signal_stop(int number)
+{
+	clock_signal_stopped = number;
+}
+
+/* A real child replaces only the ALSA/evdev signal process in host tests. */
+static int run_clock_signal_peer(void)
+{
+	const char *path = getenv("FPLINUX_TEST_CLOCK_SIGNAL_FILE");
+	const char *mode = getenv("FPLINUX_TEST_CLOCK_SIGNAL_MODE");
+	struct sigaction action = { .sa_handler = clock_signal_stop };
+	FILE *file;
+
+	CHECK(path && mode);
+	sigemptyset(&action.sa_mask);
+	CHECK(sigaction(SIGTERM, &action, NULL) == 0);
+	file = fopen(path, "a");
+	CHECK(file);
+	CHECK(fprintf(file, "start %ld\n", (long)getpid()) > 0);
+	CHECK(fclose(file) == 0);
+	if (!strcmp(mode, "fail"))
+		return 1;
+	while (!clock_signal_stopped) {
+		struct timespec interval = { .tv_nsec = 20000000 };
+
+		nanosleep(&interval, NULL);
+	}
+	file = fopen(path, "a");
+	CHECK(file);
+	CHECK(fprintf(file, "stop %ld\n", (long)getpid()) > 0);
+	CHECK(fclose(file) == 0);
+	return 0;
+}
+
+static pid_t wait_clock_signal(struct fixture *fixture, unsigned int starts,
+			       unsigned int stops)
+{
+	uint64_t deadline = real_ms() + 2000;
+	const char *path = getenv("FPLINUX_TEST_CLOCK_SIGNAL_FILE");
+	pid_t last_pid = 0;
+
+	do {
+		FILE *file = fopen(path, "r");
+		unsigned int started = 0, stopped = 0;
+		char kind[16];
+		long pid;
+
+		if (file) {
+			while (fscanf(file, "%15s %ld", kind, &pid) == 2) {
+				if (!strcmp(kind, "start")) {
+					++started;
+					last_pid = (pid_t)pid;
+				} else {
+					CHECK(!strcmp(kind, "stop"));
+					++stopped;
+				}
+			}
+			CHECK(!ferror(file));
+			CHECK(fclose(file) == 0);
+		}
+		if (started == starts && stopped == stops)
+			return last_pid;
+		pump(fixture, 2);
+	} while (real_ms() < deadline);
+	CHECK(false);
+	return 0;
+}
+
+static struct fplinux_ui_session_message
+clock_request(struct fixture *fixture, struct peer *peer, const char *name,
+	      const char *json, uint32_t serial)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_CLOCK,
+		.serial = serial,
+	};
+
+	CHECK(strlen(name) < sizeof(message.name));
+	CHECK(strlen(json) < sizeof(message.clock_data));
+	strcpy(message.name, name);
+	strcpy(message.clock_data, json);
+	issue(fixture, peer, &message);
+	message = wait_message(fixture, peer, FPLINUX_UI_SESSION_CLOCK, name);
+	CHECK(message.serial == serial);
+	return message;
+}
+
+static struct clock_model clock_snapshot(struct fixture *fixture,
+					 struct peer *peer, uint32_t serial)
+{
+	struct fplinux_ui_session_message reply = clock_request(
+		fixture, peer, "snapshot", "{\"op\":\"snapshot\"}", serial);
+	struct clock_model model;
+	struct clock_result result;
+	uint64_t response_serial;
+
+	CHECK(!reply.reason[0]);
+	CHECK(clock_wire_snapshot_decode(
+		      reply.clock_data, strlen(reply.clock_data), &model,
+		      &result, &response_serial) == CLOCK_OK);
+	CHECK(result.status == CLOCK_OK && response_serial == serial);
+	return model;
+}
+
+static struct fplinux_ui_session_message
+clock_active(struct fixture *fixture, struct peer *launcher,
+	     enum clock_event_kind kind, struct clock_ring *ring)
+{
+	struct fplinux_ui_session_message message;
+	uint64_t serial;
+
+	do {
+		message = wait_message(fixture, launcher,
+				       FPLINUX_UI_SESSION_ACTIVE, NULL);
+		CHECK(clock_wire_ring_decode(message.clock_data,
+					     strlen(message.clock_data), ring,
+					     &serial) == CLOCK_OK);
+	} while (ring->event.kind != kind);
+	CHECK(serial == ring->event.id);
+	return message;
+}
+
+static void test_clock_survives_home_close(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *clocks = show_app(fixture, launcher, TEST_CLOCK);
+	struct fplinux_ui_session_message reply =
+		clock_request(fixture, clocks, "timer-set",
+			      "{\"op\":\"timer-set\",\"seconds\":5}", 1);
+
+	CHECK(!reply.reason[0]);
+	reply = clock_request(fixture, clocks, "timer-start",
+			      "{\"op\":\"timer-start\"}", 2);
+	CHECK(!reply.reason[0]);
+	reply = clock_request(fixture, clocks, "stopwatch-start",
+			      "{\"op\":\"stopwatch-start\"}", 3);
+	CHECK(!reply.reason[0]);
+	struct clock_model snapshot = clock_snapshot(fixture, clocks, 4);
+
+	CHECK(snapshot.timer.state == CLOCK_TIMER_RUNNING);
+	CHECK(snapshot.timer.deadline_ms == 6000);
+	CHECK(snapshot.stopwatch.running);
+	return_home(fixture, launcher);
+	struct fplinux_ui_session_message background = {
+		.type = FPLINUX_UI_SESSION_CLOCK,
+		.serial = 5,
+		.name = "timer-stop",
+		.clock_data = "{\"op\":\"timer-stop\"}",
+	};
+
+	issue(fixture, clocks, &background);
+	CHECK(!take_message(clocks, FPLINUX_UI_SESSION_CLOCK, NULL, &reply));
+	struct fplinux_ui_session_message tasks =
+		query_tasks(fixture, launcher);
+	uint32_t clock_token = task_record(&tasks, TEST_CLOCK)->token;
+
+	task_action(fixture, launcher, FPLINUX_UI_SESSION_ACTIVATE, TEST_CLOCK,
+		    clock_token);
+	struct fplinux_ui_session_message resumed =
+		active_for(fixture, launcher, TEST_CLOCK);
+
+	acknowledge(fixture, launcher, &resumed);
+	CHECK(fplinux_session_focused_pid(fixture->session) == clocks->pid);
+	snapshot = clock_snapshot(fixture, clocks, 6);
+	CHECK(snapshot.timer.state == CLOCK_TIMER_RUNNING);
+	send_type(fixture, clocks, FPLINUX_UI_SESSION_EXIT);
+	struct fplinux_ui_session_message home =
+		active_for(fixture, launcher, "");
+
+	acknowledge(fixture, launcher, &home);
+	wait_reaped(fixture, clocks->pid);
+	struct peer *notes = show_app(fixture, launcher, TEST_APP);
+	struct clock_ring ring;
+
+	clear_messages(fixture, launcher);
+	fixture->now_ms = 7000;
+	current_time -= 3600;
+	pump(fixture, 4);
+	struct fplinux_ui_session_message active =
+		clock_active(fixture, launcher, CLOCK_EVENT_TIMER, &ring);
+
+	CHECK(ring.event.id == 1 && ring.event.source_id == 0);
+	CHECK(ring.event.due_monotonic_ms == 6000);
+	CHECK(!fplinux_session_launcher_on_top(fixture->session));
+	CHECK(fplinux_session_focused_pid(fixture->session) == notes->pid);
+	acknowledge(fixture, launcher, &active);
+	CHECK(fplinux_session_launcher_on_top(fixture->session));
+	CHECK(fplinux_session_focused_pid(fixture->session) == notes->pid);
+	fplinux_session_set_launcher_shown(fixture->session, true);
+	CHECK(fplinux_session_focused_pid(fixture->session) == launcher->pid);
+	reply = clock_request(fixture, launcher, "dismiss",
+			      "{\"op\":\"dismiss\",\"event_id\":1}", 7);
+	CHECK(!reply.reason[0]);
+	CHECK(!fplinux_session_launcher_on_top(fixture->session));
+	fplinux_session_set_launcher_shown(fixture->session, false);
+	CHECK(fplinux_session_focused_pid(fixture->session) == notes->pid);
+	return_home(fixture, launcher);
+	clocks = show_app(fixture, launcher, TEST_CLOCK);
+	snapshot = clock_snapshot(fixture, clocks, 8);
+	CHECK(snapshot.timer.state == CLOCK_TIMER_FINISHED);
+	CHECK(snapshot.stopwatch.running);
+	CHECK(clock_model_stopwatch_elapsed(&snapshot) == 6000);
+}
+
+static void test_clock_authority(struct fixture *fixture, bool launcher_only)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *peer = launcher_only ?
+				    launcher :
+				    show_app(fixture, launcher, TEST_APP);
+	struct fplinux_ui_session_message request = {
+		.type = FPLINUX_UI_SESSION_CLOCK,
+		.serial = 17,
+		.name = "timer-set",
+		.app_id = TEST_CLOCK,
+		.clock_data = "{\"op\":\"timer-set\",\"seconds\":1}",
+	};
+	issue(fixture, peer, &request);
+	/* Rejection closes the managed process; it may exit before forwarding
+	 * a disconnect notification through the test-only observation channel.
+	 */
+	wait_reaped(fixture, peer->pid);
+	CHECK(!take_message(peer, FPLINUX_UI_SESSION_CLOCK, NULL, &request));
+	if (launcher_only) {
+		launcher = wait_peer(fixture, TEST_LAUNCHER);
+		authenticate(fixture, launcher, NULL);
+		send_type(fixture, launcher, FPLINUX_UI_SESSION_READY);
+		fplinux_session_surface_committed(fixture->session,
+						  launcher->pid, fixture->width,
+						  fixture->height);
+		fplinux_session_frame(fixture->session, launcher->pid);
+		struct fplinux_ui_session_message active =
+			active_for(fixture, launcher, "");
+
+		acknowledge(fixture, launcher, &active);
+	}
+	struct peer *clocks = show_app(fixture, launcher, TEST_CLOCK);
+	struct clock_model model = clock_snapshot(fixture, clocks, 18);
+
+	CHECK(model.timer.state == CLOCK_TIMER_STOPPED);
+	CHECK(model.timer.duration_seconds == 0);
+	fixture->now_ms += 2000;
+	pump(fixture, 4);
+	model = clock_snapshot(fixture, clocks, 19);
+	CHECK(model.active.kind == CLOCK_EVENT_NONE);
+	CHECK(model.timer.state == CLOCK_TIMER_STOPPED);
+}
+
+static void test_clock_save_retry_preserves_identity(struct fixture *fixture,
+						     bool published)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *clocks = show_app(fixture, launcher, TEST_CLOCK);
+	const char *add =
+		"{\"op\":\"alarm-add\",\"alarm\":{\"label\":\"Wake\",\"schedule\":0,"
+		"\"once_utc\":1735689660,\"hour\":0,\"minute\":0,\"repeat_days\":0,\"enabled\":true}}";
+	const char *same_add =
+		"{ \"alarm\":{\"enabled\":true,\"repeat_days\":0,\"minute\":0,\"hour\":0,"
+		"\"once_utc\":1735689660,\"schedule\":0,\"label\":\"Wake\"},\"op\":\"alarm-add\"}";
+	struct fplinux_ui_session_message reply;
+	struct clock_model model;
+	struct clock_result result;
+	uint64_t serial;
+
+	sync_fails = !published;
+	directory_sync_fails = published;
+	reply = clock_request(fixture, clocks, "alarm-add", add, 11);
+	CHECK(!strcmp(reply.reason, "storage-error"));
+	CHECK(clock_wire_snapshot_decode(reply.clock_data,
+					 strlen(reply.clock_data), &model,
+					 &result, &serial) == CLOCK_OK);
+	CHECK(result.applied == published && result.storage.error == EIO);
+	CHECK(result.storage.state ==
+	      (published ? FPLINUX_STORAGE_PUBLISHED_UNSYNCED :
+			   FPLINUX_STORAGE_UNPUBLISHED));
+	CHECK(model.alarm_count == (published ? 1 : 0));
+	CHECK(model.next_alarm_id == (published ? 2 : 1));
+	sync_fails = false;
+	directory_sync_fails = false;
+	model = clock_snapshot(fixture, clocks, 12);
+	CHECK(model.alarm_count == (published ? 1 : 0));
+	CHECK(model.next_alarm_id == (published ? 2 : 1));
+	reply = clock_request(fixture, clocks, "alarm-add", add, 11);
+	CHECK(!reply.reason[0]);
+	/* A successful reply may be lost; the same semantic request is retried. */
+	reply = clock_request(fixture, clocks, "alarm-add", same_add, 11);
+	CHECK(!reply.reason[0]);
+	model = clock_snapshot(fixture, clocks, 13);
+	CHECK(model.alarm_count == 1 && model.alarms[0].id == 1);
+	CHECK(model.next_alarm_id == 2);
+	reply = clock_request(fixture, clocks, "timer-set",
+			      "{\"op\":\"timer-set\",\"seconds\":90}", 11);
+	CHECK(!strcmp(reply.reason, "invalid"));
+	model = clock_snapshot(fixture, clocks, 14);
+	CHECK(model.alarm_count == 1 && model.timer.duration_seconds == 0);
+}
+
+static void
+test_clock_save_checkpoints_current_model_without_edit(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *clocks = show_app(fixture, launcher, TEST_CLOCK);
+	struct clock_model model;
+	struct clock_result result;
+	uint64_t serial;
+
+	directory_sync_fails = true;
+	struct fplinux_ui_session_message reply = clock_request(
+		fixture, clocks, "alarm-add",
+		"{\"op\":\"alarm-add\",\"alarm\":{\"label\":\"Wake\",\"schedule\":0,"
+		"\"once_utc\":1735689660,\"hour\":0,\"minute\":0,\"repeat_days\":0,\"enabled\":true}}",
+		11);
+
+	CHECK(!strcmp(reply.reason, "storage-error"));
+	reply = clock_request(fixture, clocks, "stopwatch-start",
+			      "{\"op\":\"stopwatch-start\"}", 12);
+	CHECK(!reply.reason[0]);
+	current_time += 60;
+	fixture->now_ms += 60000;
+	pump(fixture, 4);
+	directory_sync_fails = false;
+	reply = clock_request(fixture, clocks, "save", "{\"op\":\"save\"}", 13);
+	CHECK(!reply.reason[0]);
+	CHECK(clock_wire_snapshot_decode(reply.clock_data,
+					 strlen(reply.clock_data), &model,
+					 &result, &serial) == CLOCK_OK);
+	CHECK(result.applied && result.status == CLOCK_OK && serial == 13);
+	CHECK(result.storage.state == FPLINUX_STORAGE_DURABLE &&
+	      !result.storage.error);
+	CHECK(model.alarm_count == 1 && model.alarms[0].id == 1);
+	CHECK(model.alarms[0].generation == 1 && model.next_alarm_id == 2);
+	CHECK(model.active.id == 1 && model.active.generation == 1);
+	CHECK(model.stopwatch.running && model.stopwatch.elapsed_ms == 60000);
+}
+
+static void test_clock_locked_ring_keys(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *clocks = show_app(fixture, launcher, TEST_CLOCK);
+	struct fplinux_ui_session_message reply = clock_request(
+		fixture, clocks, "alarm-add",
+		"{\"op\":\"alarm-add\",\"alarm\":{\"label\":\"Wake\",\"schedule\":0,"
+		"\"once_utc\":1735689660,\"hour\":0,\"minute\":0,\"repeat_days\":0,\"enabled\":true}}",
+		1);
+
+	CHECK(!reply.reason[0]);
+	return_home(fixture, launcher);
+	struct fplinux_ui_session_message select = {
+		.type = FPLINUX_UI_SESSION_SELECT,
+		.value = "home",
+	};
+
+	issue(fixture, launcher, &select);
+	phone_gesture(fixture, FPLINUX_KEY_POWER);
+	CHECK(fplinux_session_is_locked(fixture->session));
+	current_time += 60;
+	fixture->now_ms += 60000;
+	pump(fixture, 4);
+	struct clock_ring ring;
+	struct fplinux_ui_session_message active =
+		clock_active(fixture, launcher, CLOCK_EVENT_ALARM, &ring);
+
+	CHECK(ring.event.id == 1 && !strcmp(ring.event.label, "Wake"));
+	CHECK(active.locked && active.display == FPLINUX_UI_SESSION_DISPLAY_ON);
+	CHECK(fplinux_session_wake_pending(fixture->session));
+	acknowledge(fixture, launcher, &active);
+	fplinux_session_set_launcher_shown(fixture->session, true);
+	CHECK(fplinux_session_keyboard_key(fixture->session, KEY_COMPOSE,
+					   true));
+	CHECK(fplinux_session_keyboard_key(fixture->session, KEY_COMPOSE,
+					   false));
+	CHECK(fplinux_session_is_locked(fixture->session));
+	CHECK(fplinux_session_key(fixture->session, FPLINUX_KEY_SOFT_LEFT, true,
+				  fixture->now_ms));
+	reply = clock_request(
+		fixture, launcher, "snooze",
+		"{\"op\":\"snooze\",\"event_id\":1,\"minutes\":1}", 2);
+	CHECK(!reply.reason[0]);
+	CHECK(!fplinux_session_key(fixture->session, FPLINUX_KEY_SOFT_LEFT,
+				   false, fixture->now_ms + 1));
+	CHECK(fplinux_session_is_locked(fixture->session));
+	CHECK(!phone_gesture(fixture, FPLINUX_KEY_STAR));
+	clear_messages(fixture, launcher);
+	fixture->now_ms += 60000;
+	pump(fixture, 4);
+	active = clock_active(fixture, launcher, CLOCK_EVENT_ALARM, &ring);
+	CHECK(ring.event.id == 2 && ring.event.snoozed);
+	acknowledge(fixture, launcher, &active);
+	CHECK(!fplinux_session_key(fixture->session, FPLINUX_KEY_SOFT_RIGHT,
+				   false, fixture->now_ms));
+	CHECK(fplinux_session_key(fixture->session, FPLINUX_KEY_SOFT_RIGHT,
+				  true, fixture->now_ms));
+	CHECK(fplinux_session_key(fixture->session, FPLINUX_KEY_SOFT_RIGHT,
+				  false, fixture->now_ms + 1));
+	reply = clock_request(fixture, launcher, "dismiss",
+			      "{\"op\":\"dismiss\",\"event_id\":1}", 3);
+	CHECK(!strcmp(reply.reason, "stale-event"));
+	reply = clock_request(fixture, launcher, "dismiss",
+			      "{\"op\":\"dismiss\",\"event_id\":2}", 4);
+	CHECK(!reply.reason[0]);
+	CHECK(fplinux_session_is_locked(fixture->session));
+}
+
+static void test_clock_recovers_after_reset_rtc(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *clocks = show_app(fixture, launcher, TEST_CLOCK);
+	struct fplinux_ui_session_message reply = clock_request(
+		fixture, clocks, "snapshot", "{\"op\":\"snapshot\"}", 1);
+
+	CHECK(!strcmp(reply.reason, "clock-unavailable"));
+	CHECK(!reply.clock_data[0]);
+	CHECK(fplinux_session_focused_pid(fixture->session) == clocks->pid);
+	current_time = 1735689600;
+	pump(fixture, 4);
+	struct clock_model model = clock_snapshot(fixture, clocks, 2);
+
+	CHECK(model.wall_utc == 1735689600 && model.alarm_count == 0);
+	reply = clock_request(fixture, clocks, "timer-set",
+			      "{\"op\":\"timer-set\",\"seconds\":2}", 3);
+	CHECK(!reply.reason[0]);
+	reply = clock_request(fixture, clocks, "timer-start",
+			      "{\"op\":\"timer-start\"}", 4);
+	CHECK(!reply.reason[0]);
+	fixture->now_ms += 2000;
+	pump(fixture, 4);
+	struct clock_ring ring;
+
+	clock_active(fixture, launcher, CLOCK_EVENT_TIMER, &ring);
+	CHECK(ring.event.id == 1 && ring.event.due_monotonic_ms == 3000);
+}
+
+static void test_clock_restart_needs_new_ring_frame(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *clocks = show_app(fixture, launcher, TEST_CLOCK);
+	struct command crash = { .type = COMMAND_CRASH };
+	struct clock_ring ring;
+
+	clock_request(fixture, clocks, "timer-set",
+		      "{\"op\":\"timer-set\",\"seconds\":1}", 1);
+	clock_request(fixture, clocks, "timer-start",
+		      "{\"op\":\"timer-start\"}", 2);
+	fixture->now_ms += 1000;
+	pump(fixture, 4);
+	struct fplinux_ui_session_message active =
+		clock_active(fixture, launcher, CLOCK_EVENT_TIMER, &ring);
+
+	acknowledge(fixture, launcher, &active);
+	fplinux_session_set_launcher_shown(fixture->session, true);
+	CHECK(fplinux_session_launcher_on_top(fixture->session));
+	send_command(launcher->fd, &crash);
+	wait_reaped(fixture, launcher->pid);
+	launcher = wait_peer(fixture, TEST_LAUNCHER);
+	authenticate(fixture, launcher, NULL);
+	send_type(fixture, launcher, FPLINUX_UI_SESSION_READY);
+	fplinux_session_surface_committed(fixture->session, launcher->pid,
+					  fixture->width, fixture->height);
+	fplinux_session_frame(fixture->session, launcher->pid);
+	CHECK(!fplinux_session_launcher_on_top(fixture->session));
+	CHECK(fplinux_session_focused_pid(fixture->session) == clocks->pid);
+	active = clock_active(fixture, launcher, CLOCK_EVENT_TIMER, &ring);
+	CHECK(ring.event.id == 1);
+	acknowledge(fixture, launcher, &active);
+	CHECK(fplinux_session_launcher_on_top(fixture->session));
+	fplinux_session_set_launcher_shown(fixture->session, true);
+	CHECK(fplinux_session_focused_pid(fixture->session) == launcher->pid);
+}
+
+static unsigned int audio_count(struct fixture *fixture, const char *kind,
+				pid_t pid)
+{
+	char prefix[64];
+	unsigned int count = 0;
+	size_t length;
+
+	CHECK(snprintf(prefix, sizeof(prefix), "%s %ld", kind, (long)pid) <
+	      (int)sizeof(prefix));
+	length = strlen(prefix);
+	for (size_t i = 0; i < fixture->audio_message_count; ++i)
+		if (!strncmp(fixture->audio_messages[i], prefix, length) &&
+		    (fixture->audio_messages[i][length] == '\0' ||
+		     fixture->audio_messages[i][length] == ' '))
+			++count;
+	return count;
+}
+
+static int audio_audible(struct fixture *fixture, pid_t pid)
+{
+	int value = -1;
+
+	for (size_t i = 0; i < fixture->audio_message_count; ++i) {
+		long owner;
+		int audible;
+
+		if (sscanf(fixture->audio_messages[i], "AUDIBLE %ld %d", &owner,
+			   &audible) == 2 &&
+		    owner == (long)pid)
+			value = audible;
+	}
+	return value;
+}
+
+static void start_vibration(struct fixture *fixture, struct peer *app)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_VIBRATE,
+		.pattern_count = 3,
+		.pattern = { 0, 1000, 1000 },
+		.repeat = true,
+	};
+
+	/* A second request observes the motor's minimum gap after the last stop. */
+	fixture->now_ms += 100;
+	issue(fixture, app, &message);
+	CHECK(fixture->vibrator_on);
+}
+
+static void test_media_home_resume_close(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *app = show_app(fixture, launcher, TEST_APP);
+	pid_t pid = app->pid;
+	struct fplinux_ui_session_message active;
+
+	pump(fixture, 4);
+	CHECK(audio_count(fixture, "APP", pid) == 1 &&
+	      audio_audible(fixture, pid) == 1);
+	start_vibration(fixture, app);
+	clear_messages(fixture, launcher);
+	fplinux_session_home(fixture->session);
+	active = active_for(fixture, launcher, "");
+	acknowledge(fixture, launcher, &active);
+	pump(fixture, 4);
+	CHECK(!fixture->vibrator_on && audio_audible(fixture, pid) == 0);
+	CHECK(audio_count(fixture, "GONE", pid) == 0);
+	CHECK(launch_app(fixture, launcher, TEST_APP)->pid == pid);
+	active = active_for(fixture, launcher, TEST_APP);
+	acknowledge(fixture, launcher, &active);
+	pump(fixture, 4);
+	CHECK(audio_audible(fixture, pid) == 1 && !fixture->vibrator_on);
+	CHECK(audio_count(fixture, "APP", pid) == 1);
+	start_vibration(fixture, app);
+	clear_messages(fixture, launcher);
+	send_type(fixture, app, FPLINUX_UI_SESSION_EXIT);
+	active = active_for(fixture, launcher, "");
+	acknowledge(fixture, launcher, &active);
+	wait_message(fixture, app, FPLINUX_UI_SESSION_CLOSE, NULL);
+	wait_reaped(fixture, pid);
+	CHECK(!fixture->vibrator_on && audio_count(fixture, "GONE", pid) == 1);
+}
+
+static void test_media_lock_crash(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *app = show_app(fixture, launcher, TEST_APP);
+	struct command crash = { .type = COMMAND_CRASH };
+	pid_t pid = app->pid;
+	struct fplinux_ui_session_message request = {
+		.type = FPLINUX_UI_SESSION_VIBRATE,
+		.pattern_count = 2,
+		.pattern = { 0, 1000 },
+	};
+
+	start_vibration(fixture, app);
+	fixture->now_ms += 30000;
+	pump(fixture, 4);
+	CHECK(fplinux_session_is_locked(fixture->session));
+	CHECK(!fixture->vibrator_on && audio_audible(fixture, pid) == 0);
+	CHECK(audio_count(fixture, "GONE", pid) == 0);
+	issue(fixture, app, &request);
+	struct fplinux_ui_session_message error = wait_message(
+		fixture, app, FPLINUX_UI_SESSION_ERROR, "vibration");
+
+	CHECK(!strcmp(error.reason, strerror(EAGAIN)) && !fixture->vibrator_on);
+	send_command(app->fd, &crash);
+	wait_reaped(fixture, pid);
+	CHECK(!fixture->vibrator_on && audio_count(fixture, "GONE", pid) == 1);
+}
+
+static void test_media_effect_error(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *app = show_app(fixture, launcher, TEST_APP);
+	struct fplinux_ui_session_message request = {
+		.type = FPLINUX_UI_SESSION_VIBRATE,
+		.pattern_count = 2,
+		.pattern = { 0, 200 },
+	};
+
+	fixture->fail_vibration = true;
+	issue(fixture, app, &request);
+	struct fplinux_ui_session_message error = wait_message(
+		fixture, app, FPLINUX_UI_SESSION_ERROR, "vibration");
+
+	CHECK(!strcmp(error.reason, strerror(EIO)) && !fixture->vibrator_on);
+	CHECK(audio_audible(fixture, app->pid) == 1);
+	issue(fixture, app, &request);
+	error = wait_message(fixture, app, FPLINUX_UI_SESSION_ERROR,
+			     "vibration");
+	CHECK(!strcmp(error.reason, strerror(ENODEV)) && !fixture->vibrator_on);
+}
+
+static void test_clock_signal_lifetime(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *clocks = show_app(fixture, launcher, TEST_CLOCK);
+	struct fplinux_ui_session_message reply =
+		clock_request(fixture, clocks, "timer-set",
+			      "{\"op\":\"timer-set\",\"seconds\":1}", 1);
+
+	CHECK(!reply.reason[0]);
+	clock_request(fixture, clocks, "timer-start",
+		      "{\"op\":\"timer-start\"}", 2);
+	fixture->now_ms += 1000;
+	pid_t failed_pid = wait_clock_signal(fixture, 1, 0);
+
+	pump(fixture, 20);
+	if (fixture->media) {
+		CHECK(audio_count(fixture, "CLOCK", failed_pid) == 1);
+		CHECK(audio_audible(fixture, failed_pid) == 1);
+		CHECK(audio_count(fixture, "GONE", failed_pid) == 1);
+	}
+	errno = 0;
+	CHECK(waitpid(failed_pid, NULL, WNOHANG) == -1 && errno == ECHILD);
+	clock_request(fixture, launcher, "dismiss",
+		      "{\"op\":\"dismiss\",\"event_id\":1}", 3);
+	CHECK(setenv("FPLINUX_TEST_CLOCK_SIGNAL_MODE", "wait", 1) == 0);
+	clock_request(fixture, clocks, "timer-restart",
+		      "{\"op\":\"timer-restart\"}", 4);
+	fixture->now_ms += 1000;
+	pid_t second_pid = wait_clock_signal(fixture, 2, 0);
+
+	CHECK(second_pid != failed_pid);
+	if (fixture->media) {
+		CHECK(audio_count(fixture, "CLOCK", second_pid) == 1);
+		CHECK(audio_audible(fixture, second_pid) == 1);
+		CHECK(audio_count(fixture, "GONE", second_pid) == 0);
+	}
+	clock_request(fixture, launcher, "dismiss",
+		      "{\"op\":\"dismiss\",\"event_id\":2}", 5);
+	wait_clock_signal(fixture, 2, 1);
+	pump(fixture, 20);
+	if (fixture->media)
+		CHECK(audio_count(fixture, "GONE", second_pid) == 1);
+	errno = 0;
+	CHECK(waitpid(second_pid, NULL, WNOHANG) == -1 && errno == ECHILD);
+	clock_request(fixture, clocks, "timer-restart",
+		      "{\"op\":\"timer-restart\"}", 6);
+	fixture->now_ms += 1000;
+	pid_t final_pid = wait_clock_signal(fixture, 3, 1);
+
+	fplinux_session_destroy(fixture->session);
+	fixture->session = NULL;
+	if (fixture->media) {
+		observe_audio(fixture);
+		CHECK(audio_count(fixture, "CLOCK", final_pid) == 1);
+		CHECK(audio_count(fixture, "GONE", final_pid) == 1);
+		CHECK(audio_count(fixture, "GONE", clocks->pid) == 1);
+	}
+	wait_clock_signal(fixture, 3, 2);
+	errno = 0;
+	CHECK(waitpid(final_pid, NULL, WNOHANG) == -1 && errno == ECHILD);
+}
+
 int main(int argc, char **argv)
 {
 	if (getenv("FPLINUX_APP_ID"))
 		return run_peer();
+	if (argc == 1 && getenv("FPLINUX_TEST_CLOCK_SIGNAL_FILE"))
+		return run_clock_signal_peer();
 	CHECK(argc == 3 || argc == 7);
 	CHECK(atexit(cleanup) == 0);
 	bool brightness = !strcmp(argv[1], "brightness-home") ||
 			  !strcmp(argv[1], "brightness-crash") ||
+			  !strncmp(argv[1], "settings-preview-cancel-", 24) ||
 			  !strncmp(argv[1], "task-view-", 10) ||
 			  !strncmp(argv[1], "wake-", 5);
 	unsigned int keypad_max = 0;
 	int width = argc == 7 ? atoi(argv[3]) : 240;
 	int height = argc == 7 ? atoi(argv[4]) : 320;
 	struct fixture *fixture;
+	char signal_path[PATH_MAX];
+
+	if (!strcmp(argv[1], "clock-reset-rtc"))
+		current_time = 0;
+	if (!strcmp(argv[1], "clock-signal-lifetime") ||
+	    !strcmp(argv[1], "media-clock-owner")) {
+		path_join(signal_path, argv[2], "signal-log");
+		CHECK(setenv("FPLINUX_TEST_CLOCK_SIGNAL_FILE", signal_path,
+			     1) == 0);
+		CHECK(setenv("FPLINUX_TEST_CLOCK_SIGNAL_MODE", "fail", 1) == 0);
+	}
 
 	if (!strcmp(argv[1], "keypad-light"))
 		keypad_max = 255;
@@ -2501,12 +3842,62 @@ int main(int argc, char **argv)
 	fixture = create_fixture(
 		argv[2], width, height, brightness, keypad_max,
 		!strcmp(argv[1], "task-localized-title") ? "ru" : "en",
-		!strncmp(argv[1], "battery-", 8));
+		!strncmp(argv[1], "battery-notice-", 15) ? 80 :
+		!strncmp(argv[1], "battery-", 8)	 ? 3 :
+							   -1,
+		!strncmp(argv[1], "media-", 6));
 
-	if (!strcmp(argv[1], "startup-frame-before-ready"))
+	if (!strcmp(argv[1], "media-home-resume-close"))
+		test_media_home_resume_close(fixture);
+	else if (!strcmp(argv[1], "media-lock-crash"))
+		test_media_lock_crash(fixture);
+	else if (!strcmp(argv[1], "media-effect-error"))
+		test_media_effect_error(fixture);
+	else if (!strcmp(argv[1], "media-clock-owner"))
+		test_clock_signal_lifetime(fixture);
+	else if (!strcmp(argv[1], "clock-reset-rtc"))
+		test_clock_recovers_after_reset_rtc(fixture);
+	else if (!strcmp(argv[1], "clock-signal-lifetime"))
+		test_clock_signal_lifetime(fixture);
+	else if (!strcmp(argv[1], "clock-launcher-restart"))
+		test_clock_restart_needs_new_ring_frame(fixture);
+	else if (!strcmp(argv[1], "clock-survives-home-close"))
+		test_clock_survives_home_close(fixture);
+	else if (!strcmp(argv[1], "clock-foreign-peer"))
+		test_clock_authority(fixture, false);
+	else if (!strcmp(argv[1], "clock-launcher-authority"))
+		test_clock_authority(fixture, true);
+	else if (!strcmp(argv[1], "clock-locked-ring-keys"))
+		test_clock_locked_ring_keys(fixture);
+	else if (!strcmp(argv[1], "clock-save-retry"))
+		test_clock_save_retry_preserves_identity(fixture, false);
+	else if (!strcmp(argv[1], "clock-published-retry"))
+		test_clock_save_retry_preserves_identity(fixture, true);
+	else if (!strcmp(argv[1], "clock-save-current-model"))
+		test_clock_save_checkpoints_current_model_without_edit(fixture);
+	else if (!strcmp(argv[1], "startup-frame-before-ready"))
 		test_startup_frame_before_ready(fixture);
 	else if (!strcmp(argv[1], "home-retains-exit-saves"))
 		test_home_retains_exit_saves(fixture);
+	else if (!strcmp(argv[1], "close-cancel-stale"))
+		test_close_cancel_and_stale_reply(fixture);
+	else if (!strcmp(argv[1], "close-wait-home-force"))
+		test_close_wait_allows_home_and_forced_close(fixture);
+	else if (!strcmp(argv[1], "close-unanswered-timeout"))
+		test_close_unanswered_has_bounded_timeout(fixture);
+	else if (!strcmp(argv[1], "close-background-wait"))
+		test_close_background_wait_activates_same_instance(fixture);
+	else if (!strcmp(argv[1], "settings-retry-latest"))
+		test_settings_retries_latest_value(fixture, false);
+	else if (!strcmp(argv[1], "settings-retry-unchanged"))
+		test_settings_retries_latest_value(fixture, true);
+	else if (!strcmp(argv[1], "settings-applied-error-view"))
+		test_settings_applied_error_rebuilds_before_ack(fixture);
+	else if (!strcmp(argv[1], "settings-preview-cancel-retry"))
+		test_settings_preview_cancel_keeps_storage_retry(fixture,
+								 false);
+	else if (!strcmp(argv[1], "settings-preview-cancel-published-retry"))
+		test_settings_preview_cancel_keeps_storage_retry(fixture, true);
 	else if (!strcmp(argv[1], "shutdown-saves-bounded"))
 		test_shutdown_saves_and_bounds_unresponsive_peers(fixture);
 	else if (!strcmp(argv[1], "task-controls"))
@@ -2590,6 +3981,14 @@ int main(int argc, char **argv)
 		test_keypad_light(fixture, keypad_max == 1);
 	else if (!strcmp(argv[1], "settings-errors-time"))
 		test_settings_errors_time(fixture);
+	else if (!strcmp(argv[1], "settings-theme-home-before-request"))
+		test_settings_choice_home_before_request(fixture, true);
+	else if (!strcmp(argv[1], "settings-locale-home-before-request"))
+		test_settings_choice_home_before_request(fixture, false);
+	else if (!strcmp(argv[1], "battery-notice-frame"))
+		test_battery_notice_waits_for_current_frame(fixture, false);
+	else if (!strcmp(argv[1], "battery-notice-upgrade"))
+		test_battery_notice_waits_for_current_frame(fixture, true);
 	else if (!strcmp(argv[1], "battery-charger-wake-charged"))
 		test_battery_charger_wake(fixture, "80\n", 80, "");
 	else if (!strcmp(argv[1], "battery-charger-wake-low"))

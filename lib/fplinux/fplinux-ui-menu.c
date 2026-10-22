@@ -35,9 +35,7 @@ bool fplinux_ui_scroll_key(lv_obj_t *object, const struct fplinux_ui_key *key)
 	int32_t line;
 	int32_t step;
 
-	if (!object || key->control || key->alt ||
-	    (key->code != KEY_UP && key->code != KEY_DOWN &&
-	     key->code != KEY_LEFT && key->code != KEY_RIGHT))
+	if (!object || !fplinux_ui_is_direction_key(key))
 		return false;
 	lv_obj_update_layout(object);
 	if (lv_obj_get_scroll_top(object) <= 0 &&
@@ -129,13 +127,13 @@ static lv_obj_t *add_title(struct fplinux_ui *ui, lv_obj_t *popup,
 static int32_t popup_height(struct fplinux_ui *ui, int32_t top, size_t count)
 {
 	int32_t surface = fplinux_ui_modal_height(ui);
-	int32_t row = fplinux_ui_spec(ui)->row_height;
+	const struct fplinux_ui_profile_spec *spec = fplinux_ui_spec(ui);
+	int32_t row = spec->row_height;
+	int32_t inset = top + 2 * spec->list_padding;
 	int32_t height = surface;
 
-	if (count < (size_t)(surface - top) / (size_t)row + 1)
-		height = top + (int32_t)count * row;
-	if (height > surface)
-		height = surface;
+	if (surface > inset && count <= (size_t)(surface - inset) / (size_t)row)
+		height = inset + (int32_t)count * row;
 	return height;
 }
 
@@ -211,7 +209,6 @@ fplinux_ui_menu_view_create(struct fplinux_ui *ui, const char *title,
 		errno = error;
 		return NULL;
 	}
-	lv_obj_set_style_pad_ver(fplinux_ui_listview_object(view->list), 0, 0);
 	/*
 	 * Inactive while filled: the first row measures its text for the
 	 * marquee once the rows have their icon boxes, not on the wider row
@@ -253,13 +250,40 @@ bool fplinux_ui_menu_view_key(struct fplinux_ui_menu_view *view,
 	return true;
 }
 
+static void reveal_selection(struct fplinux_ui_menu_view *view)
+{
+	lv_obj_t *row = fplinux_ui_listview_selected_row(view->list);
+
+	if (row)
+		lv_obj_scroll_to_view(row, LV_ANIM_OFF);
+}
+
+void fplinux_ui_menu_view_get_position(const struct fplinux_ui_menu_view *view,
+				       struct fplinux_ui_menu_position *position)
+{
+	position->selected = fplinux_ui_listview_selected(view->list);
+	position->scroll_y =
+		lv_obj_get_scroll_y(fplinux_ui_listview_object(view->list));
+}
+
+void fplinux_ui_menu_view_set_position(
+	struct fplinux_ui_menu_view *view,
+	const struct fplinux_ui_menu_position *position)
+{
+	lv_obj_t *object = fplinux_ui_listview_object(view->list);
+
+	fplinux_ui_listview_select(view->list, position->selected);
+	lv_obj_update_layout(object);
+	lv_obj_scroll_to_y(object, position->scroll_y, LV_ANIM_OFF);
+	reveal_selection(view);
+}
+
 /* At the bottom of the new surface; the selected item stays in view. */
 void fplinux_ui_menu_view_resize(struct fplinux_ui_menu_view *view)
 {
 	const struct fplinux_ui_profile_spec *spec;
 	int32_t surface;
 	int32_t height;
-	lv_obj_t *row;
 
 	if (!view || !view->popup)
 		return;
@@ -273,9 +297,7 @@ void fplinux_ui_menu_view_resize(struct fplinux_ui_menu_view *view)
 				 fplinux_ui_width(view->ui) - 2 * spec->margin);
 	lv_obj_set_height(view->body, height - view->top);
 	lv_obj_update_layout(view->popup);
-	row = fplinux_ui_listview_selected_row(view->list);
-	if (row)
-		lv_obj_scroll_to_view(row, LV_ANIM_OFF);
+	reveal_selection(view);
 }
 
 void fplinux_ui_menu_view_delete(struct fplinux_ui_menu_view *view)

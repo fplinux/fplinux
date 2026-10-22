@@ -63,6 +63,14 @@ struct fplinux_ui_command {
 	 * fplinux_ui_glyph(ui, "delete", FPLINUX_UI_GLYPH_ROW); NULL for none.
 	 */
 	const void *icon;
+	/*
+	 * Retains a directly assigned soft-key command: the left action stays
+	 * visible when long legends need shortening, and the right action is
+	 * not displaced by a text field's Clear (then offered on the left or
+	 * in Options). Does not override command
+	 * priority or move commands out of Options.
+	 */
+	bool keep_visible;
 };
 
 /* An implicit List reports OK on a row with this reserved command id. */
@@ -133,14 +141,26 @@ void *fplinux_ui_screen_get_data(const struct fplinux_ui_screen *screen);
 bool fplinux_ui_screen_get_content_size(const struct fplinux_ui_screen *screen,
 					int *width, int *height);
 
-/* The screen stack. push and replace take ownership of the screen. */
+/* The screen stack. push, navigate and replace take ownership of the screen. */
 void fplinux_ui_push(struct fplinux_ui *ui, struct fplinux_ui_screen *screen);
+/*
+ * Opens a child. During a high-level Options command callback, Back from
+ * this child also restores that owner's Options, with the selected command
+ * and scroll position. Other calls act like push. The command's type does
+ * not establish navigation: SCREEN and HELP still describe its key scope.
+ */
+void fplinux_ui_navigate(struct fplinux_ui *ui,
+			 struct fplinux_ui_screen *screen);
 void fplinux_ui_replace(struct fplinux_ui *ui,
 			struct fplinux_ui_screen *screen);
-/* Deletes the top screen; false when it is the only one. */
+/* Completes an action without restoring Options; false for the only screen. */
 bool fplinux_ui_pop(struct fplinux_ui *ui);
 struct fplinux_ui_screen *fplinux_ui_current(const struct fplinux_ui *ui);
-/* Pops the top screen, or leaves the application from its first screen. */
+/*
+ * Returns to the immediate parent, restoring its current Options after a
+ * navigate from that menu. Removed commands are not restored. Leaves the
+ * application from its first screen.
+ */
 void fplinux_ui_go_back(struct fplinux_ui *ui);
 
 /*
@@ -329,6 +349,13 @@ size_t fplinux_ui_form_append_date(struct fplinux_ui_screen *form,
 				   enum fplinux_ui_date_mode mode,
 				   time_t value);
 /*
+ * One HH:MM:SS value, from 00:00:00 through 99:59:59, edited like Date/Time.
+ * Values are elapsed seconds, independent of the calendar and timezone.
+ * Append returns SIZE_MAX and set returns false with ERANGE above 359999.
+ */
+size_t fplinux_ui_form_append_duration(struct fplinux_ui_screen *form,
+				       const char *label, unsigned int seconds);
+/*
  * A read-only image, centred and no wider than the form; label may be NULL.
  * The source is an image source as for fplinux_ui_list_set_icon().
  */
@@ -359,6 +386,22 @@ time_t fplinux_ui_form_get_date(const struct fplinux_ui_screen *form,
 				size_t item);
 void fplinux_ui_form_set_date(struct fplinux_ui_screen *form, size_t item,
 			      time_t value);
+/*
+ * Called when the user accepts a Date, Time or Duration editor with Done,
+ * including an unchanged value. Cancel does not call it. The callback runs
+ * before the ordinary change listener, which still reports only changed
+ * values. NULL removes the listener.
+ */
+void fplinux_ui_form_set_edit_listener(struct fplinux_ui_screen *form,
+				       fplinux_ui_change_cb accepted,
+				       void *context);
+/* A Date, Time or Duration editor is active; false for NULL or another screen. */
+bool fplinux_ui_form_is_editing(const struct fplinux_ui_screen *form);
+/* UINT_MAX with EINVAL for another item or screen. */
+unsigned int fplinux_ui_form_get_duration(const struct fplinux_ui_screen *form,
+					  size_t item);
+bool fplinux_ui_form_set_duration(struct fplinux_ui_screen *form, size_t item,
+				  unsigned int seconds);
 void fplinux_ui_form_set_focus(struct fplinux_ui_screen *form, size_t item);
 /* The focused item; SIZE_MAX when no item has focus or for another screen. */
 size_t fplinux_ui_form_get_focus(const struct fplinux_ui_screen *form);
@@ -440,7 +483,9 @@ bool fplinux_ui_text_box_set_constraint(
  * not pop it; the alert stays readable during the call and is deleted after
  * it. When the alert closed by its timeout, Close or a command was the only
  * screen, the application then leaves as fplinux_ui_go_back() does from its
- * first screen, unless the listener pushed or replaced a screen.
+ * first screen, unless the listener pushed or replaced a screen. A commandless
+ * informational alert opened by navigate restores its owner's Options after
+ * Close or timeout, provided that owner is still current.
  */
 enum fplinux_ui_alert_kind {
 	FPLINUX_UI_ALERT_INFO,
@@ -497,6 +542,17 @@ void fplinux_ui_canvas_set_key_handler(struct fplinux_ui_screen *canvas,
 				       fplinux_ui_canvas_key_cb handler,
 				       void *context);
 /*
+ * The filter runs before Canvas commands and the ordinary key handler.
+ * Returning true owns the key, including its release; false leaves it to
+ * ordinary routing. This lets an input component handle a held soft key.
+ */
+typedef bool (*fplinux_ui_canvas_key_filter_cb)(
+	struct fplinux_ui *ui, struct fplinux_ui_screen *canvas,
+	const struct fplinux_ui_key *key, void *context);
+void fplinux_ui_canvas_set_key_filter(struct fplinux_ui_screen *canvas,
+				      fplinux_ui_canvas_key_filter_cb filter,
+				      void *context);
+/*
  * With raw true, Escape and Enter of an external keyboard go to the key
  * handler instead of the right soft key and OK, for a terminal or an editor;
  * the phone keys and the keyboard's Menu key keep the commands. Off by
@@ -505,13 +561,19 @@ void fplinux_ui_canvas_set_key_handler(struct fplinux_ui_screen *canvas,
 void fplinux_ui_canvas_set_keyboard_keys(struct fplinux_ui_screen *canvas,
 					 bool raw);
 
+enum fplinux_ui_canvas_repeat {
+	FPLINUX_UI_CANVAS_REPEAT_NONE,
+	FPLINUX_UI_CANVAS_REPEAT_NAVIGATION,
+	FPLINUX_UI_CANVAS_REPEAT_KEYMAP,
+};
+
 /*
- * Opt in to compositor-paced key repeat; disabled by default. Only keys
- * delivered to this Canvas repeat: external repeatable XKB keys and the
- * phone's four D-pad keys. Phone digits, held gestures and commands remain
- * one-shot. Covering, leaving or disabling the Canvas cancels the hold.
+ * NONE is the default. NAVIGATION repeats arrows; KEYMAP also repeats other
+ * external keys marked repeatable by XKB, for a terminal or text editor.
+ * Phone digits and commands remain one-shot. Covering or leaving the Canvas,
+ * or changing its repeat policy, cancels the hold.
  */
 void fplinux_ui_canvas_set_key_repeat(struct fplinux_ui_screen *canvas,
-				      bool enabled);
+				      enum fplinux_ui_canvas_repeat policy);
 
 #endif

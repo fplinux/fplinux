@@ -83,7 +83,7 @@ class ReleaseArchiveInputs:
             "bundle": {"packages": ["demo"]},
             "host": {"runtime_tools": {"keyboard": "keyboard"}, "tools": [{"name": "keyboard"}]},
         }
-        for package in (*registration.COMMON_PACKAGES, "fplinux-font-terminus", "demo"):
+        for package in (*registration.COMMON_PACKAGES, "demo"):
             apkbuild = self.root / "alpine/aports" / package / "APKBUILD"
             apkbuild.parent.mkdir(parents=True)
             apkbuild.write_text(f"pkgname={package}\n", encoding="utf-8")

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "launcher-text.h"
+#include "fplinux-settings-values.h"
 
 #include <string.h>
 
@@ -141,8 +142,8 @@ bool fplinux_launcher_clock_is_ready(time_t now)
 {
 	const struct tm *date = localtime(&now);
 
-	return date && date->tm_year >= 1980 - 1900 &&
-	       date->tm_year <= 2099 - 1900;
+	return date && date->tm_year >= FPLINUX_SETTINGS_YEAR_MIN - 1900 &&
+	       date->tm_year <= FPLINUX_SETTINGS_YEAR_MAX - 1900;
 }
 
 uint32_t fplinux_launcher_clock_delay(const struct timespec *now)

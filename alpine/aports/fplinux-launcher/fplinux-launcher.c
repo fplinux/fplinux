@@ -8,6 +8,7 @@
 #include "fplinux-ui-session.h"
 #include "fplinux-ui.h"
 #include "launcher-catalogue.h"
+#include "launcher-clock.h"
 #include "launcher-layout.h"
 #include "launcher-launch.h"
 #include "launcher-power.h"
@@ -103,6 +104,7 @@ struct launcher {
 	/* The launcher owns one canvas, including its system notices. */
 	struct fplinux_ui_screen *canvas;
 	struct fplinux_launcher_tasks tasks;
+	struct fplinux_launcher_clock ringing;
 	bool reported_tasks;
 	const struct fplinux_ui_theme *theme;
 	/* The display's profile and the surface regions derived from it. */
@@ -1143,33 +1145,10 @@ static void catalogue_scroll(const struct launcher *launcher,
 }
 
 /*
- * The grid's scroll indicator track: border under the thumb,
- * which the viewport draws after its content.
- */
-static void draw_grid_track(lv_event_t *event)
-{
-	const struct launcher *launcher = lv_event_get_user_data(event);
-	struct fplinux_launcher_rect track =
-		fplinux_launcher_grid_track(launcher->spec, &launcher->frame);
-	lv_draw_rect_dsc_t style;
-	lv_area_t area;
-
-	lv_obj_get_coords(lv_event_get_target_obj(event), &area);
-	area.x1 += track.x;
-	area.y1 += track.y;
-	area.x2 = area.x1 + track.width - 1;
-	area.y2 = area.y1 + track.height - 1;
-	lv_draw_rect_dsc_init(&style);
-	style.bg_color = launcher->theme->border;
-	style.bg_opa = LV_OPA_COVER;
-	lv_draw_rect(lv_event_get_layer(event), &style, &area);
-}
-
-/*
  * The catalogue: the band with the selected app's name (grid) or Apps
  * (list), and a viewport that scrolls by the fewest pixels that keep the
  * selection visible, with the scroll indicator of the runtime's lists, in
- * the grid over a track and clear of the selection ring.
+ * the grid clear of the selection ring.
  */
 static void draw_catalogue(struct launcher *launcher, bool focus)
 {
@@ -1215,21 +1194,10 @@ static void draw_catalogue(struct launcher *launcher, bool focus)
 	lv_obj_set_scrollable(viewport, true);
 	lv_obj_set_scroll_dir(viewport, LV_DIR_VER);
 	lv_obj_set_scrollbar_mode(viewport, LV_SCROLLBAR_MODE_AUTO);
-	lv_obj_set_style_bg_color(viewport, theme->focus, LV_PART_SCROLLBAR);
-	lv_obj_set_style_bg_opa(viewport, LV_OPA_COVER, LV_PART_SCROLLBAR);
-	lv_obj_set_style_width(viewport, spec->scrollbar_width,
-			       LV_PART_SCROLLBAR);
-	lv_obj_set_style_pad_right(
-		viewport,
-		grid ? spec->grid_scrollbar_offset :
-		       (spec->margin - spec->scrollbar_width) / 2,
-		LV_PART_SCROLLBAR);
+	fplinux_ui_style_scrollbar(launcher->ui, viewport);
 	lv_obj_set_style_pad_ver(viewport, spec->list_padding,
 				 LV_PART_SCROLLBAR);
 	content = fplinux_launcher_content_height(&scroll, total_rows);
-	if (grid && content > area.height)
-		lv_obj_add_event_cb(viewport, draw_grid_track,
-				    LV_EVENT_DRAW_MAIN_END, launcher);
 	for (size_t i = 0; i < launcher->app_count; ++i) {
 		bool selected = focus && i == launcher->selected;
 
@@ -1292,10 +1260,7 @@ static void draw_dialog(struct launcher *launcher, const char *heading,
 	lv_obj_set_scrollable(dialog, true);
 	lv_obj_set_scroll_dir(dialog, LV_DIR_VER);
 	lv_obj_set_scrollbar_mode(dialog, LV_SCROLLBAR_MODE_AUTO);
-	lv_obj_set_style_bg_color(dialog, theme->focus, LV_PART_SCROLLBAR);
-	lv_obj_set_style_bg_opa(dialog, LV_OPA_COVER, LV_PART_SCROLLBAR);
-	lv_obj_set_style_width(dialog, spec->scrollbar_width,
-			       LV_PART_SCROLLBAR);
+	fplinux_ui_style_scrollbar(launcher->ui, dialog);
 	lv_obj_set_style_pad_right(dialog, box.scrollbar_inset,
 				   LV_PART_SCROLLBAR);
 	lv_obj_set_style_pad_ver(dialog, spec->content_padding,
@@ -1326,7 +1291,8 @@ static void render(struct launcher *launcher)
 		&launcher->tasks,
 		(screen != SCREEN_HOME && screen != SCREEN_CATALOGUE) ||
 			notice != FPLINUX_LAUNCHER_NOTICE_NONE ||
-			launcher->end_prompt);
+			launcher->end_prompt ||
+			fplinux_launcher_clock_is_ringing(&launcher->ringing));
 	clear_view(launcher);
 	if (launcher->lock_glyph)
 		lv_obj_set_hidden(launcher->lock_glyph, screen != SCREEN_LOCK);
@@ -1389,6 +1355,12 @@ static void render(struct launcher *launcher)
 				   legends[FPLINUX_LAUNCHER_LEGEND_LEFT],
 				   legends[FPLINUX_LAUNCHER_LEGEND_CENTRE],
 				   legends[FPLINUX_LAUNCHER_LEGEND_RIGHT]);
+	fplinux_launcher_clock_render(&launcher->ringing);
+}
+
+static void clock_view_changed(void *context)
+{
+	render(context);
 }
 
 static void activate_selected(struct launcher *launcher)
@@ -1514,6 +1486,9 @@ static void handle_key(struct launcher *launcher,
 	enum fplinux_launcher_notice notice = shown_notice(launcher);
 
 	if (!key->pressed)
+		return;
+	/* Native Alert owns ringing input, also when allocation must be retried. */
+	if (fplinux_launcher_clock_is_ringing(&launcher->ringing))
 		return;
 	if (fplinux_ui_current(launcher->ui) != launcher->canvas)
 		return;
@@ -1718,6 +1693,9 @@ static void receive_active(struct launcher *launcher,
 	copy_message_text(launcher->active_right, message->right);
 	receive_reason(launcher, message->reason);
 	receive_battery(launcher, message);
+	if (!fplinux_launcher_clock_update(&launcher->ringing,
+					   message->clock_data))
+		fprintf(stderr, "fplinux-launcher: invalid clock ring\n");
 	/*
 	 * A launcher restarted after a fullscreen application, a crash or a
 	 * language change opens the view the manager last learned about.
@@ -1746,6 +1724,9 @@ static void receive_active(struct launcher *launcher,
 	render(launcher);
 	/* Draw after this ACTIVE; the runtime binds its ACK to a new commit. */
 	lv_refr_now(NULL);
+	if (fplinux_launcher_clock_is_ringing(&launcher->ringing) &&
+	    !fplinux_launcher_clock_is_visible(&launcher->ringing))
+		return;
 	struct fplinux_ui_session_message ack = {
 		.type = FPLINUX_UI_SESSION_ACTIVE_ACK,
 		.serial = message->serial,
@@ -1783,6 +1764,9 @@ static void ui_event(struct fplinux_ui *ui,
 		if (update_paused(launcher))
 			render(launcher);
 	} else if (event->type != FPLINUX_UI_EVENT_SESSION) {
+		return;
+	} else if (fplinux_launcher_clock_receive(&launcher->ringing,
+						  message)) {
 		return;
 	} else if (fplinux_launcher_tasks_receive(&launcher->tasks, message)) {
 		return;
@@ -1971,6 +1955,8 @@ int main(int argc, char **argv)
 	}
 	fplinux_ui_canvas_set_key_handler(launcher.canvas, canvas_key,
 					  &launcher);
+	fplinux_ui_canvas_set_key_repeat(launcher.canvas,
+					 FPLINUX_UI_CANVAS_REPEAT_NAVIGATION);
 	fplinux_ui_canvas_set_keyboard_keys(launcher.canvas, true);
 	fplinux_ui_push(launcher.ui, launcher.canvas);
 	fplinux_launcher_tasks_init(
@@ -1980,6 +1966,8 @@ int main(int argc, char **argv)
 			.view_changed = tasks_view_changed,
 			.context = &launcher,
 		});
+	fplinux_launcher_clock_init(&launcher.ringing, launcher.ui,
+				    clock_view_changed, &launcher);
 	/* The profile's presentation until the first ACTIVE names one. */
 	launcher.presentation = launcher.spec->catalogue_list ?
 					FPLINUX_LAUNCHER_VIEW_LIST :

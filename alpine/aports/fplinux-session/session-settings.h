@@ -7,6 +7,7 @@
 #include <time.h>
 
 #include "fplinux-language.h"
+#include "fplinux-storage.h"
 #include "fplinux-ui-session.h"
 
 enum fplinux_session_setting {
@@ -66,9 +67,10 @@ bool fplinux_session_settings_format(
  */
 bool fplinux_session_settings_load(struct fplinux_session_settings *settings,
 				   const char *languages, const char *path);
-/* Replaces path atomically with a synchronized root-readable 0644 file. */
-bool fplinux_session_settings_save(
-	const struct fplinux_session_settings *settings, const char *path);
+/* Replaces path atomically; reports publication separately from durability. */
+struct fplinux_storage_result
+fplinux_session_settings_save(const struct fplinux_session_settings *settings,
+			      const char *path);
 /*
  * Parses local "YYYY-MM-DD HH:MM" (seconds 0) or "YYYY-MM-DD HH:MM:SS" within
  * the RTC range 1980...2099.

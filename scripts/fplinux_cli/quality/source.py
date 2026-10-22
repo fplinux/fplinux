@@ -63,9 +63,12 @@ _UI_RUNTIME_SOURCE = "lib/fplinux/fplinux-ui.c"
 _LVGL_RUNTIME_SOURCES = frozenset(
     {
         _UI_RUNTIME_SOURCE,
+        "lib/fplinux/fplinux-ui-frame.c",
         "lib/fplinux/fplinux-ui-listview.c",
         "lib/fplinux/fplinux-ui-menu.c",
         "lib/fplinux/fplinux-ui-screen.c",
+        "lib/fplinux/fplinux-ui-style.c",
+        "lib/fplinux/fplinux-ui-symbol-picker.c",
         "lib/fplinux/fplinux-ui-text.c",
     }
 )

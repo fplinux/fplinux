@@ -86,6 +86,10 @@ def notes_executable(notes_build_directory: Path) -> Path:
         "unicode",
         "autosave",
         "implicit_failure",
+        "back_failure",
+        "close_retry",
+        "close_discard",
+        "published_unsynced",
     ],
 )
 def test_notes_save_listeners(notes_executable: Path, scenario: str) -> None:
@@ -133,6 +137,7 @@ def test_notes_saves_private_utf8_file_and_reloads(
             str(HERE / "notes_storage.c"),
             str(notes_build_directory / "notes.o"),
             str(ROOT / "lib/fplinux/fplinux-ui-prefs.c"),
+            str(ROOT / "lib/fplinux/fplinux-utf8.c"),
             str(ROOT / "lib/fplinux/fplinux-cli.c"),
             *gettext_link_flags(),
         ],

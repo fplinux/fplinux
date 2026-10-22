@@ -82,6 +82,7 @@ def preparation(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Preparatio
                 str(APORT / "preparation-render.c"),
                 str(ROOT / "lib/fplinux/fplinux-cli.c"),
                 str(ROOT / "lib/fplinux/fplinux-font.c"),
+                str(ROOT / "lib/fplinux/fplinux-utf8.c"),
                 str(PEERS / "preparation-session.c"),
                 "-Wl,--wrap=fopen,--wrap=fplinux_font_glyph",
                 *json_flags,

@@ -56,13 +56,26 @@ if ! id fplinux >/dev/null 2>&1; then
 	fi
 	adduser -S -D -h /home/fplinux -s /bin/sh -G fplinux fplinux
 fi
-mkdir -p /run/fplinux-gui/compositor /run/fplinux-gui/user /home/fplinux
-chown root:fplinux /run/fplinux-gui
-chmod 0750 /run/fplinux-gui
-chown root:root /run/fplinux-gui/compositor
-chmod 0700 /run/fplinux-gui/compositor
-chown fplinux:fplinux /run/fplinux-gui/user /home/fplinux
-chmod 0700 /run/fplinux-gui/user /home/fplinux
+
+# Correct existing private directories do not need metadata writes on startup.
+prepare_directory() {
+	mkdir -p "$1"
+	session_directory_owner=$(stat -c '%u:%g' "$1")
+	session_directory_mode=$(stat -c '%a' "$1")
+	if [ "$session_directory_owner" != "$2" ]; then
+		chown "$2" "$1"
+	fi
+	if [ "$session_directory_mode" != "$3" ]; then
+		chmod "$3" "$1"
+	fi
+}
+
+session_group=$(id -g fplinux)
+session_owner=$(id -u fplinux):$session_group
+prepare_directory /run/fplinux-gui "0:$session_group" 750
+prepare_directory /run/fplinux-gui/compositor 0:0 700
+prepare_directory /run/fplinux-gui/user "$session_owner" 700
+prepare_directory /home/fplinux "$session_owner" 700
 rm -f /run/fplinux-gui/ready /run/fplinux-gui/control.sock
 # External keyboards type every input language that has a registered layout.
 sed "s/^keymap_layout=.*/keymap_layout=$(keyboard_layouts)/" \

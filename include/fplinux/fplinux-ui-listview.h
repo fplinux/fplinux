@@ -31,7 +31,6 @@ typedef void (*fplinux_ui_listview_cb)(struct fplinux_ui_listview *list,
 struct fplinux_ui_listview *
 fplinux_ui_listview_create(struct fplinux_ui *ui, lv_obj_t *parent,
 			   enum fplinux_ui_listview_marker marker);
-void fplinux_ui_listview_delete(struct fplinux_ui_listview *list);
 lv_obj_t *fplinux_ui_listview_object(struct fplinux_ui_listview *list);
 
 /*

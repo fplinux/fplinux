@@ -18,6 +18,7 @@
 #include <weston/weston.h>
 
 #include "fplinux-brightness-client.h"
+#include "fplinux-audio-protocol.h"
 #include "fplinux-language.h"
 #include "fplinux-pixman-buffer.h"
 #include "fplinux-ui-profile.h"
@@ -1359,6 +1360,12 @@ WL_EXPORT int wet_shell_init(struct weston_compositor *compositor, int *argc,
 		.leds_dir = "/sys/class/leds",
 		.power_supply_dir = "/sys/class/power_supply",
 		.rtc_path = "/dev/rtc0",
+		.audio_socket = FPLINUX_AUDIO_CONTROL_SOCKET,
+		.audio_service = "/usr/libexec/fplinux/audiod",
+		.audio_device = "/dev/snd/pcmC0D0p",
+		.input_dir = "/dev/input",
+		.clock_signal_path = "/usr/libexec/fplinux/clock-signal",
+		.clock_preferences_directory = "/var/lib/fplinux/clocks",
 		.changed = update_surfaces,
 		.launch_frame = receive_launch_frame,
 		.hold_frame = hold_frame,

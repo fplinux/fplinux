@@ -181,6 +181,7 @@ def executable() -> Iterator[Path]:
                 str(APORT / "armada-overlay.c"),
                 str(APORT / "armada-gpu-renderer.c"),
                 str(ROOT / "lib/fplinux/fplinux-font.c"),
+                str(ROOT / "lib/fplinux/fplinux-utf8.c"),
                 str(ROOT / "lib/fplinux/fplinux-gpu.c"),
                 str(ROOT / "lib/fplinux/fplinux-keypad-light.c"),
                 str(ROOT / "lib/fplinux/fplinux-brightness-client.c"),

@@ -37,6 +37,7 @@ def test_settings_values_and_date_only_save_preserves_running_clock(tmp_path: Pa
             str(session / "session-settings.c"),
             str(ROOT / "lib/fplinux/fplinux-settings-values.c"),
             str(ROOT / "lib/fplinux/fplinux-language.c"),
+            str(ROOT / "lib/fplinux/fplinux-utf8.c"),
         ],
         name="compile Settings core harness",
     )

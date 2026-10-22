@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # Render the documentation phone screens from the production UI sources.
 #
-# The phone programs draw into RGB565 buffers; small host drivers call the same
-# drawing code, save the frames and convert them to PNG without scaling.
+# Terminal runs as a real application under a controlled Wayland peer. The
+# other phone programs draw into RGB565 buffers through small host drivers.
 # FPLINUX_SOURCES names the directory with the checksummed upstream archives
 # (default: the project download cache).
 set -eu
@@ -46,23 +46,6 @@ extract_verified() {
 	tar -xzf "$archive" -C "$work"
 }
 
-build_libtsm() {
-	version=$(aport_value fplinux-libtsm pkgver)
-	tsm=$work/libtsm-$version
-	extract_verified fplinux-libtsm "libtsm-$version.tar.gz"
-	patch -s -d "$tsm" -p1 \
-		<"$aports/fplinux-libtsm/0001-xterm-function-keys.patch"
-	for unit in src/tsm/tsm-render.c src/tsm/tsm-screen.c \
-		src/tsm/tsm-selection.c src/tsm/tsm-unicode.c \
-		src/tsm/tsm-vte-charsets.c src/tsm/tsm-vte.c \
-		src/shared/shl-htable.c external/wcwidth/wcwidth.c; do
-		cc -c -O2 -std=gnu99 -D_GNU_SOURCE -I"$tsm/src/tsm" \
-			-I"$tsm/src/shared" -I"$tsm/external" \
-			-I"$tsm/external/wcwidth" "$tsm/$unit" \
-			-o "$work/libtsm-$(basename "$unit" .c).o"
-	done
-}
-
 build_fonts() {
 	version=$(aport_value fplinux-font-terminus pkgver)
 	font=$work/terminus-font-$version
@@ -71,36 +54,6 @@ build_fonts() {
 		python3 "$font/bin/bdftopsf.py" -2 -o "$work/ter-u${size}n.psf" \
 			"$font/ter-u${size}n.bdf"
 	done
-}
-
-# Arguments: width, height, PSF font chosen by fplinux-terminal for that width.
-run_terminal() {
-	mkdir -p -- "$work/$1x$2"
-	"$work/terminal-screens" "$1" "$2" "$work/$3" \
-		"$aports/fplinux-base/issue" "$aports/fplinux-base/hostname" \
-		"$work/$1x$2"
-}
-
-render_terminal() {
-	terminal=$aports/fplinux-terminal
-	build_libtsm
-	# The terminal needs only xkbcommon keysym values; libtsm ships them.
-	compile -I"$root/include/fplinux" -I"$terminal" -I"$screens_dir" \
-		-I"$tsm/src/tsm" -I"$tsm/external" \
-		"$screens_dir/terminal-screens.c" "$screens_dir/screen-frame.c" \
-		"$terminal/terminal-engine.c" "$terminal/terminal-input.c" \
-		"$terminal/terminal-help.c" "$terminal/terminal-render.c" \
-		"$root/lib/fplinux/fplinux-font.c" \
-		"$root/lib/fplinux/fplinux-multitap.c" "$work"/libtsm-*.o \
-		-o "$work/terminal-screens"
-	# The shared default font is ter-u12n below 200 pixels, else ter-u16n.
-	run_terminal 240 320 ter-u16n.psf
-	for name in terminal-keypad terminal-menu terminal-modifiers; do
-		png 240 320 "$work/240x320/$name.rgb565" "$name.png"
-	done
-	run_terminal 128 160 ter-u12n.psf
-	png 128 160 "$work/128x160/terminal-keypad.rgb565" \
-		terminal-keypad-128x160.png
 }
 
 render_brightness() {
@@ -146,6 +99,6 @@ render_armada_and_rotation() {
 
 mkdir -p -- "$output"
 build_fonts
-render_terminal
+sh "$screens_dir/render-terminal.sh" "$output"
 render_brightness
 render_armada_and_rotation

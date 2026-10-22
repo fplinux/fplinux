@@ -88,12 +88,14 @@ size_t fplinux_ui_index_deleted(size_t index, size_t at, size_t count);
 size_t fplinux_ui_focus_next(size_t from, size_t count,
 			     bool (*focusable)(size_t index, void *context),
 			     void *context);
-/*
- * The focus moved by rows, without wrapping: Up and Down move it by one,
- * Left and Right by a page. No focus gives the first row; an empty list
- * gives SIZE_MAX.
- */
-size_t fplinux_ui_focus_step(size_t focus, size_t count, long rows);
+enum fplinux_ui_focus_boundary {
+	FPLINUX_UI_FOCUS_CLAMP,
+	FPLINUX_UI_FOCUS_WRAP,
+};
+
+/* No focus gives the first row; an empty list gives SIZE_MAX. */
+size_t fplinux_ui_focus_step(size_t focus, size_t count, long rows,
+			     enum fplinux_ui_focus_boundary boundary);
 
 /*
  * The least scroll that brings the span top .. bottom (inclusive, content
@@ -209,11 +211,14 @@ enum fplinux_ui_date_part {
 	FPLINUX_UI_DATE_YEAR,
 	FPLINUX_UI_DATE_HOUR,
 	FPLINUX_UI_DATE_MINUTE,
+	FPLINUX_UI_DATE_SECOND,
+	FPLINUX_UI_DURATION_HOUR,
 	FPLINUX_UI_DATE_PART_COUNT,
 };
 
 #define FPLINUX_UI_DATE_YEAR_MIN 1900
 #define FPLINUX_UI_DATE_YEAR_MAX 2099
+#define FPLINUX_UI_DURATION_MAX_SECONDS 359999U
 /* The text before a part, such as "/" or ". ", and its terminator. */
 #define FPLINUX_UI_DATE_SEPARATOR_BYTES 8U
 /* The longest edited text: twelve digits, four separators, terminator. */
@@ -231,6 +236,8 @@ enum fplinux_ui_date_part {
  * then September, then October gives 31 October.
  */
 struct fplinux_ui_date_edit {
+	/* Duration uses the same segments, without a local calendar value. */
+	bool duration;
 	struct tm time;
 	int values[FPLINUX_UI_DATE_PART_COUNT];
 	int day;
@@ -255,6 +262,11 @@ struct fplinux_ui_date_edit {
  */
 void fplinux_ui_date_edit_begin(struct fplinux_ui_date_edit *edit, time_t value,
 				bool date, bool time, const char *pattern);
+/* HH:MM:SS, from 00:00:00 through 99:59:59, without timezone conversion. */
+void fplinux_ui_duration_edit_begin(struct fplinux_ui_date_edit *edit,
+				    unsigned int seconds);
+unsigned int
+fplinux_ui_duration_edit_value(const struct fplinux_ui_date_edit *edit);
 /* One step down (-1) or up (+1), wrapping inside the part's range. */
 void fplinux_ui_date_edit_step(struct fplinux_ui_date_edit *edit, int delta);
 /* The previous (-1) or next (+1) part, wrapping. */

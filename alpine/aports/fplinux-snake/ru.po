@@ -44,3 +44,9 @@ msgstr "Счёт %u"
 
 msgid "You won!"
 msgstr "Победа!"
+
+msgid "Scores not saved"
+msgstr "Счёт не сохранён"
+
+msgid "Score saving not confirmed"
+msgstr "Сохранение счёта не подтверждено"

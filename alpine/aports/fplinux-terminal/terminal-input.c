@@ -1,18 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "fplinux-terminal.h"
 
-#include <ctype.h>
-#include <limits.h>
 #include <linux/input-event-codes.h>
-#include <stdio.h>
-#include <string.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
 
-#define FPLINUX_TERMINAL_POUND_HOLD_MS 650U
-#define FPLINUX_TERMINAL_STAR_HOLD_MS 650U
 #define FPLINUX_TERMINAL_CURSOR_MS 600U
-
-#define FPLINUX_TERMINAL_TITLE_BYTES 128U
 
 const unsigned int fplinux_terminal_modifier_masks[] = {
 	TSM_CONTROL_MASK,
@@ -39,9 +31,6 @@ static const struct {
 					       N_("Symbols") },
 	[FPLINUX_TERMINAL_COMMAND_SPECIAL] = { FPLINUX_TERMINAL_TYPE_SCREEN,
 					       N_("Special keys") },
-	/* Named by language_item. */
-	[FPLINUX_TERMINAL_COMMAND_LANGUAGE] = { FPLINUX_TERMINAL_TYPE_SCREEN,
-						NULL },
 	[FPLINUX_TERMINAL_COMMAND_SCROLLBACK] = { FPLINUX_TERMINAL_TYPE_SCREEN,
 						  N_("Scrollback") },
 	[FPLINUX_TERMINAL_COMMAND_INTERRUPT] = { FPLINUX_TERMINAL_TYPE_SCREEN,
@@ -50,85 +39,59 @@ static const struct {
 						 N_("End input Ctrl+D") },
 	[FPLINUX_TERMINAL_COMMAND_SEARCH] = { FPLINUX_TERMINAL_TYPE_SCREEN,
 					      N_("Search Ctrl+R") },
+	[FPLINUX_TERMINAL_COMMAND_FONT_SIZE] = { FPLINUX_TERMINAL_TYPE_SCREEN,
+						 N_("Font size") },
 	[FPLINUX_TERMINAL_COMMAND_HELP] = { FPLINUX_TERMINAL_TYPE_HELP, NULL },
 	[FPLINUX_TERMINAL_COMMAND_EXIT] = { FPLINUX_TERMINAL_TYPE_EXIT, NULL },
-};
-static const char *const symbols[] = {
-	"#", "*", "|", "&", "~",  "`", "\\", "<", ">", "[", "]",
-	"{", "}", "(", ")", "\"", "'", ":",  ";", "!", "?", "@",
-	"$", "%", "^", "_", "=",  "+", "-",  "/", ".", ",",
+	[FPLINUX_TERMINAL_COMMAND_INSERT] = { FPLINUX_TERMINAL_TYPE_OK,
+					      N_("Insert") },
+	[FPLINUX_TERMINAL_COMMAND_CANCEL] = { FPLINUX_TERMINAL_TYPE_CANCEL,
+					      N_("Cancel") },
 };
 static const char *const special_keys[] = {
 	"Esc", "F1", "F2", "F3",  "F4",	 "F5",	"F6",
 	"F7",  "F8", "F9", "F10", "F11", "F12",
 };
 
-/* The options menu shows the code in capitals. */
-static void language_code(const struct fplinux_terminal *terminal,
-			  char code[FPLINUX_LANGUAGE_CODE_BYTES])
-{
-	const char *source =
-		terminal->languages.language[terminal->language].code;
-	size_t index;
-
-	for (index = 0;
-	     index + 1 < FPLINUX_LANGUAGE_CODE_BYTES && source[index]; ++index)
-		code[index] = (char)toupper((unsigned char)source[index]);
-	code[index] = '\0';
-}
-
-static void select_language(struct fplinux_terminal *terminal, size_t index)
-{
-	char code[FPLINUX_LANGUAGE_CODE_BYTES];
-
-	terminal->language = index;
-	fplinux_multitap_set_language(&terminal->compose,
-				      &terminal->languages.language[index]);
-	language_code(terminal, code);
-	snprintf(terminal->language_item, sizeof(terminal->language_item),
-		 _("Language: %s"), code);
-	terminal->dirty = true;
-}
-
 void fplinux_terminal_load_languages(struct fplinux_terminal *terminal,
 				     const char *directory, const char *first)
 {
-	fplinux_multitap_load_languages(&terminal->languages, directory, first);
-	select_language(terminal, 0);
+	fplinux_text_input_load_languages(&terminal->input, directory, first);
+	terminal->dirty = true;
 }
 
-static void send_character(struct fplinux_terminal *terminal,
-			   uint32_t character)
+static bool can_send(const struct fplinux_terminal *terminal)
 {
-	uint32_t ascii = character < 128 ? character : TSM_VTE_INVALID;
+	/* Reserve room for one encoded key before asking the VTE to emit it. */
+	return terminal->output_size <= sizeof(terminal->output) - 32;
+}
+
+static enum fplinux_multitap_emit_result send_character(void *context,
+							uint32_t character)
+{
+	struct fplinux_terminal *terminal = context;
+	uint32_t ascii;
 	uint32_t keysym;
 
-	if (terminal->alphabetic_mode == FPLINUX_TERMINAL_UPPER ||
-	    (terminal->modifier & TSM_SHIFT_MASK))
+	if (!can_send(terminal))
+		return FPLINUX_MULTITAP_EMIT_BLOCKED;
+	character = fplinux_text_input_apply_case(&terminal->input, character,
+						  false);
+	if (terminal->modifier & TSM_SHIFT_MASK)
 		character = fplinux_multitap_uppercase(character);
+	ascii = character < 128 ? character : TSM_VTE_INVALID;
 	keysym = character <= 0xff ? character : 0x01000000U | character;
 	tsm_vte_handle_keyboard(terminal->vte, keysym, ascii,
 				terminal->modifier, character);
 	terminal->modifier = 0;
 	terminal->dirty = true;
-}
-
-static enum fplinux_multitap_emit_result emit_composition(void *data,
-							  uint32_t character)
-{
-	struct fplinux_terminal *terminal = data;
-
-	/* The event loop drains PTY input before accepting another key. */
-	if (terminal->output_size > sizeof(terminal->output) - 32)
-		return FPLINUX_MULTITAP_EMIT_BLOCKED;
-	send_character(terminal, character);
 	return FPLINUX_MULTITAP_EMIT_ACCEPTED;
 }
 
 static bool commit_composition(struct fplinux_terminal *terminal)
 {
-	return fplinux_multitap_commit(&terminal->compose, emit_composition,
-				       terminal) != FPLINUX_MULTITAP_BLOCKED;
+	return fplinux_text_input_commit(&terminal->input, send_character,
+					 terminal) != FPLINUX_MULTITAP_BLOCKED;
 }
 
 static void return_live(struct fplinux_terminal *terminal)
@@ -160,13 +123,11 @@ static void scroll(struct fplinux_terminal *terminal, uint32_t keysym)
 	terminal->dirty = true;
 }
 
-static void send_phone_key(struct fplinux_terminal *terminal, uint32_t keysym,
+static bool send_phone_key(struct fplinux_terminal *terminal, uint32_t keysym,
 			   uint32_t character, unsigned int modifiers)
 {
-	if (!commit_composition(terminal)) {
-		terminal->failed = true;
-		return;
-	}
+	if (!commit_composition(terminal) || !can_send(terminal))
+		return false;
 	return_live(terminal);
 	modifiers |= terminal->modifier;
 	if (keysym == XKB_KEY_Tab && (modifiers & TSM_SHIFT_MASK))
@@ -175,45 +136,65 @@ static void send_phone_key(struct fplinux_terminal *terminal, uint32_t keysym,
 				character);
 	terminal->modifier = 0;
 	terminal->cursor_visible = true;
+	return true;
 }
 
-static void set_mode(struct fplinux_terminal *terminal,
-		     enum fplinux_terminal_mode mode)
+/* Cancels a pending letter, else disarms the modifiers, else erases. */
+static enum fplinux_multitap_emit_result erase_character(void *context)
 {
-	terminal->mode = mode;
-	if (mode != FPLINUX_TERMINAL_NUMERIC)
-		terminal->alphabetic_mode = mode;
+	struct fplinux_terminal *terminal = context;
+
+	if (fplinux_multitap_pending(&terminal->input.compose))
+		fplinux_text_input_cancel(&terminal->input);
+	else if (terminal->modifier)
+		terminal->modifier = 0;
+	else if (!send_phone_key(terminal, XKB_KEY_BackSpace, TSM_VTE_INVALID,
+				 0))
+		return FPLINUX_MULTITAP_EMIT_BLOCKED;
 	terminal->dirty = true;
+	return FPLINUX_MULTITAP_EMIT_ACCEPTED;
 }
 
-static void hold_star(struct fplinux_terminal *terminal, uint64_t now_ms)
-{
-	set_mode(terminal, terminal->mode == FPLINUX_TERMINAL_NUMERIC ?
-				   terminal->alphabetic_mode :
-				   FPLINUX_TERMINAL_NUMERIC);
-	terminal->star_held = true;
-	terminal->compose_ms = now_ms;
-}
+static bool picker_key(struct fplinux_terminal *terminal, unsigned int code);
 
-void fplinux_terminal_key(struct fplinux_terminal *terminal, uint32_t keysym,
+bool fplinux_terminal_key(struct fplinux_terminal *terminal, uint32_t keysym,
 			  uint32_t ascii, unsigned int modifiers,
 			  uint32_t unicode)
 {
+	if (terminal->input.picker_open) {
+		switch (keysym) {
+		case XKB_KEY_Left:
+			return picker_key(terminal, KEY_LEFT);
+		case XKB_KEY_Right:
+			return picker_key(terminal, KEY_RIGHT);
+		case XKB_KEY_Up:
+			return picker_key(terminal, KEY_UP);
+		case XKB_KEY_Down:
+			return picker_key(terminal, KEY_DOWN);
+		case XKB_KEY_Return:
+		case XKB_KEY_KP_Enter:
+			return picker_key(terminal, KEY_OK);
+		case XKB_KEY_Escape:
+			return picker_key(terminal, KEY_F14);
+		default:
+			return true;
+		}
+	}
 	if ((modifiers & ~TSM_LOCK_MASK) == TSM_SHIFT_MASK &&
 	    (keysym == XKB_KEY_Page_Up || keysym == XKB_KEY_Page_Down)) {
-		if (commit_composition(terminal))
-			scroll(terminal, keysym);
-		return;
+		if (!commit_composition(terminal))
+			return false;
+		scroll(terminal, keysym);
+		return true;
 	}
+	if (!commit_composition(terminal) || !can_send(terminal))
+		return false;
 	return_live(terminal);
-	if (!commit_composition(terminal)) {
-		terminal->failed = true;
-		return;
-	}
 	/* Phone one-shot modifiers never alter the external keyboard source. */
 	tsm_vte_handle_keyboard(terminal->vte, keysym, ascii, modifiers,
 				unicode);
 	terminal->cursor_visible = true;
+	return true;
 }
 
 static uint32_t phone_keysym(unsigned int code)
@@ -234,134 +215,116 @@ static uint32_t phone_keysym(unsigned int code)
 	}
 }
 
-static void clear_line(struct fplinux_terminal *terminal, bool shell_foreground)
+static bool picker_key(struct fplinux_terminal *terminal, unsigned int code)
 {
-	fplinux_multitap_cancel(&terminal->compose);
-	terminal->modifier = 0;
-	terminal->pound_held = true;
-	terminal->dirty = true;
-	if (!shell_foreground || !terminal->editing)
-		return;
-	if (sizeof(FPLINUX_TERMINAL_CLEAR_LINE) - 1 >
-	    sizeof(terminal->output) - terminal->output_size) {
-		terminal->failed = true;
-		return;
+	enum fplinux_text_input_direction direction;
+
+	switch (code) {
+	case KEY_LEFT:
+		direction = FPLINUX_TEXT_INPUT_LEFT;
+		break;
+	case KEY_RIGHT:
+		direction = FPLINUX_TEXT_INPUT_RIGHT;
+		break;
+	case KEY_UP:
+		direction = FPLINUX_TEXT_INPUT_UP;
+		break;
+	case KEY_DOWN:
+		direction = FPLINUX_TEXT_INPUT_DOWN;
+		break;
+	case KEY_OK:
+		if (fplinux_text_input_select_symbol(
+			    &terminal->input, send_character, terminal) ==
+		    FPLINUX_MULTITAP_EMIT_BLOCKED)
+			return false;
+		terminal->dirty = true;
+		return true;
+	case KEY_F14:
+	case KEY_NUMERIC_STAR:
+		fplinux_text_input_close_picker(&terminal->input);
+		terminal->dirty = true;
+		return true;
+	default:
+		return true;
 	}
-	memcpy(terminal->output + terminal->output_size,
-	       FPLINUX_TERMINAL_CLEAR_LINE,
-	       sizeof(FPLINUX_TERMINAL_CLEAR_LINE) - 1);
-	terminal->output_size += sizeof(FPLINUX_TERMINAL_CLEAR_LINE) - 1;
+	fplinux_text_input_move_picker(&terminal->input, direction);
+	terminal->dirty = true;
+	return true;
 }
 
-void fplinux_terminal_phone(struct fplinux_terminal *terminal,
-			    unsigned int code, bool pressed, bool repeat,
-			    uint64_t now_ms, bool shell_foreground)
+bool fplinux_terminal_phone(struct fplinux_terminal *terminal,
+			    unsigned int code, bool pressed, uint64_t now_ms)
 {
 	uint32_t keysym = phone_keysym(code);
 
-	if (code == KEY_NUMERIC_STAR) {
-		if (repeat)
-			return;
-		if (pressed) {
-			return_live(terminal);
-			terminal->star_down = true;
-			terminal->star_held = false;
-			terminal->star_ms = now_ms;
-		} else if (terminal->star_down) {
-			if (!terminal->star_held &&
-			    now_ms - terminal->star_ms >=
-				    FPLINUX_TERMINAL_STAR_HOLD_MS)
-				hold_star(terminal, now_ms);
-			if (!terminal->star_held)
-				set_mode(
-					terminal,
-					terminal->alphabetic_mode ==
-							FPLINUX_TERMINAL_LOWER ?
-						FPLINUX_TERMINAL_UPPER :
-						FPLINUX_TERMINAL_LOWER);
-			terminal->star_down = false;
-			terminal->compose_ms = now_ms;
+	if (!pressed) {
+		if (code >= KEY_NUMERIC_0 && code <= KEY_NUMERIC_9) {
+			unsigned char digit =
+				(unsigned char)('0' + code - KEY_NUMERIC_0);
+
+			enum fplinux_multitap_result result =
+				fplinux_text_input_release(&terminal->input,
+							   digit, now_ms,
+							   send_character,
+							   terminal);
+
+			if (result == FPLINUX_MULTITAP_BLOCKED)
+				return false;
+			if (result != FPLINUX_MULTITAP_IGNORED)
+				terminal->dirty = true;
 		}
-		return;
+		if (code == KEY_F14)
+			fplinux_text_input_clear_release(&terminal->input);
+		return true;
 	}
-	if (code == KEY_NUMERIC_POUND) {
-		if (repeat)
-			return;
-		if (pressed) {
-			return_live(terminal);
-			terminal->pound_down = true;
-			terminal->pound_held = false;
-			terminal->pound_cancelled =
-				fplinux_multitap_pending(&terminal->compose);
-			fplinux_multitap_cancel(&terminal->compose);
-			terminal->pound_ms = now_ms;
-		} else if (terminal->pound_down) {
-			if (!terminal->pound_held &&
-			    now_ms - terminal->pound_ms >=
-				    FPLINUX_TERMINAL_POUND_HOLD_MS)
-				clear_line(terminal, shell_foreground);
-			if (!terminal->pound_held) {
-				if (!terminal->pound_cancelled)
-					send_phone_key(terminal,
-						       XKB_KEY_BackSpace,
-						       TSM_VTE_INVALID, 0);
-				terminal->modifier = 0;
-			}
-			terminal->pound_down = false;
-		}
-		terminal->dirty = true;
-		return;
+	if (terminal->input.picker_open)
+		return picker_key(terminal, code);
+	if (terminal->history && code == KEY_F14) {
+		return_live(terminal);
+		return true;
 	}
-	if (!pressed)
-		return;
 	if (terminal->history &&
 	    (keysym == XKB_KEY_Up || keysym == XKB_KEY_Down ||
 	     keysym == XKB_KEY_Left || keysym == XKB_KEY_Right)) {
 		scroll(terminal, keysym);
-		return;
+		return true;
 	}
 	return_live(terminal);
 	if (code >= KEY_NUMERIC_0 && code <= KEY_NUMERIC_9) {
-		unsigned char character =
-			(unsigned char)('0' + code - KEY_NUMERIC_0);
-		/* A key queued before the terminal was uncovered is older. */
-		uint64_t elapsed = now_ms >= terminal->compose_ms ?
-					   now_ms - terminal->compose_ms :
-					   0;
-
-		if (repeat)
-			return;
-		if (terminal->mode == FPLINUX_TERMINAL_NUMERIC) {
-			if (commit_composition(terminal))
-				send_character(terminal, character);
-		} else {
-			fplinux_multitap_press(&terminal->compose, character,
-					       elapsed > UINT32_MAX ?
-						       UINT32_MAX :
-						       (uint32_t)elapsed,
-					       emit_composition, terminal);
-			terminal->compose_ms = now_ms;
-		}
+		if (fplinux_text_input_press(
+			    &terminal->input,
+			    (unsigned char)('0' + code - KEY_NUMERIC_0), now_ms,
+			    send_character,
+			    terminal) == FPLINUX_MULTITAP_BLOCKED)
+			return false;
+	} else if (code == KEY_NUMERIC_POUND) {
+		if (fplinux_text_input_next_mode(&terminal->input,
+						 send_character, terminal) ==
+		    FPLINUX_MULTITAP_BLOCKED)
+			return false;
+	} else if (code == KEY_NUMERIC_STAR) {
+		if (fplinux_text_input_open_picker(&terminal->input,
+						   send_character, terminal) ==
+		    FPLINUX_MULTITAP_BLOCKED)
+			return false;
+	} else if (code == KEY_F14) {
+		if (fplinux_text_input_clear_press(&terminal->input, now_ms,
+						   erase_character, terminal) ==
+		    FPLINUX_MULTITAP_EMIT_BLOCKED)
+			return false;
 	} else if (keysym != XKB_KEY_NoSymbol) {
-		send_phone_key(terminal, keysym, TSM_VTE_INVALID, 0);
+		if (!send_phone_key(terminal, keysym, TSM_VTE_INVALID, 0))
+			return false;
 	}
 	terminal->cursor_visible = true;
 	terminal->cursor_ms = now_ms;
 	terminal->dirty = true;
-}
-
-static bool composition_paused(const struct fplinux_terminal *terminal)
-{
-	return terminal->star_down || terminal->paused;
+	return true;
 }
 
 void fplinux_terminal_cancel_held(struct fplinux_terminal *terminal)
 {
-	terminal->star_down = false;
-	terminal->star_held = false;
-	terminal->pound_down = false;
-	terminal->pound_held = false;
-	terminal->pound_cancelled = false;
+	fplinux_text_input_cancel_held(&terminal->input);
 	terminal->dirty = true;
 }
 
@@ -373,28 +336,24 @@ void fplinux_terminal_pause(struct fplinux_terminal *terminal, bool paused,
 	terminal->paused = paused;
 	/* A pending letter waited under the cover; it gets a fresh timeout. */
 	if (!paused)
-		terminal->compose_ms = now_ms;
-	/* A held * or # is let go under the cover; its gesture does nothing. */
+		terminal->input.compose_ms = now_ms;
 	if (paused)
 		fplinux_terminal_cancel_held(terminal);
 	terminal->dirty = true;
 }
 
-void fplinux_terminal_tick(struct fplinux_terminal *terminal, uint64_t now_ms,
-			   bool shell_foreground)
+void fplinux_terminal_tick(struct fplinux_terminal *terminal, uint64_t now_ms)
 {
-	if (terminal->star_down && !terminal->star_held &&
-	    now_ms - terminal->star_ms >= FPLINUX_TERMINAL_STAR_HOLD_MS)
-		hold_star(terminal, now_ms);
-	if (terminal->pound_down && !terminal->pound_held &&
-	    now_ms - terminal->pound_ms >= FPLINUX_TERMINAL_POUND_HOLD_MS)
-		clear_line(terminal, shell_foreground);
-	if (!composition_paused(terminal) &&
-	    fplinux_multitap_pending(&terminal->compose) &&
-	    now_ms - terminal->compose_ms >= terminal->compose.timeout_ms)
-		commit_composition(terminal);
-	if (!terminal->history && !composition_paused(terminal) &&
-	    !fplinux_multitap_pending(&terminal->compose) &&
+	bool pending = fplinux_multitap_pending(&terminal->input.compose);
+
+	if (terminal->paused)
+		return;
+	fplinux_text_input_tick(&terminal->input, now_ms, send_character,
+				erase_character, terminal);
+	if (pending != fplinux_multitap_pending(&terminal->input.compose))
+		terminal->dirty = true;
+	if (!terminal->history && !terminal->input.picker_open &&
+	    !fplinux_multitap_pending(&terminal->input.compose) &&
 	    now_ms - terminal->cursor_ms >= FPLINUX_TERMINAL_CURSOR_MS &&
 	    !(tsm_screen_get_flags(terminal->screen) &
 	      TSM_SCREEN_HIDE_CURSOR)) {
@@ -406,10 +365,11 @@ void fplinux_terminal_tick(struct fplinux_terminal *terminal, uint64_t now_ms,
 
 uint32_t fplinux_terminal_preedit(const struct fplinux_terminal *terminal)
 {
-	uint32_t candidate = fplinux_multitap_candidate(&terminal->compose);
+	uint32_t candidate = fplinux_text_input_apply_case(
+		&terminal->input,
+		fplinux_multitap_candidate(&terminal->input.compose), false);
 
-	return terminal->alphabetic_mode == FPLINUX_TERMINAL_UPPER ||
-			       (terminal->modifier & TSM_SHIFT_MASK) ?
+	return terminal->modifier & TSM_SHIFT_MASK ?
 		       fplinux_multitap_uppercase(candidate) :
 		       candidate;
 }
@@ -418,7 +378,12 @@ bool fplinux_terminal_command(const struct fplinux_terminal *terminal,
 			      enum fplinux_terminal_command command,
 			      struct fplinux_terminal_command_info *info)
 {
+	bool picker_command = command == FPLINUX_TERMINAL_COMMAND_INSERT ||
+			      command == FPLINUX_TERMINAL_COMMAND_CANCEL;
+
 	if ((unsigned int)command >= FPLINUX_TERMINAL_COMMAND_COUNT)
+		return false;
+	if (terminal->input.picker_open != picker_command)
 		return false;
 	/* The scrollback has Back for Clear and does not offer itself. */
 	if (terminal->history ?
@@ -427,57 +392,68 @@ bool fplinux_terminal_command(const struct fplinux_terminal *terminal,
 		    command == FPLINUX_TERMINAL_COMMAND_LIVE)
 		return false;
 	info->type = commands[command].type;
-	info->label = command == FPLINUX_TERMINAL_COMMAND_LANGUAGE ?
-			      terminal->language_item :
-		      commands[command].label ? _(commands[command].label) :
+	info->label = commands[command].label ? _(commands[command].label) :
 						NULL;
 	/* The options menu follows the order of the commands. */
 	info->priority = (int)command;
 	return true;
 }
 
-/* Cancels a pending letter, else disarms the modifiers, else erases. */
-static void clear(struct fplinux_terminal *terminal)
-{
-	if (fplinux_multitap_pending(&terminal->compose))
-		fplinux_multitap_cancel(&terminal->compose);
-	else if (terminal->modifier)
-		terminal->modifier = 0;
-	else
-		send_phone_key(terminal, XKB_KEY_BackSpace, TSM_VTE_INVALID, 0);
-	terminal->dirty = true;
-}
-
-void fplinux_terminal_run(struct fplinux_terminal *terminal,
+bool fplinux_terminal_run(struct fplinux_terminal *terminal,
 			  enum fplinux_terminal_command command)
 {
 	switch (command) {
 	case FPLINUX_TERMINAL_COMMAND_ENTER:
-		send_phone_key(terminal, XKB_KEY_Return, TSM_VTE_INVALID, 0);
+		if (!send_phone_key(terminal, XKB_KEY_Return, TSM_VTE_INVALID,
+				    0))
+			return false;
 		break;
 	case FPLINUX_TERMINAL_COMMAND_CLEAR:
-		clear(terminal);
+		if (erase_character(terminal) == FPLINUX_MULTITAP_EMIT_BLOCKED)
+			return false;
+		break;
+	case FPLINUX_TERMINAL_COMMAND_SYMBOLS:
+		if (fplinux_text_input_open_picker(&terminal->input,
+						   send_character, terminal) ==
+		    FPLINUX_MULTITAP_BLOCKED)
+			return false;
+		return_live(terminal);
+		break;
+	case FPLINUX_TERMINAL_COMMAND_INSERT:
+		if (terminal->input.picker_open &&
+		    fplinux_text_input_select_symbol(
+			    &terminal->input, send_character, terminal) ==
+			    FPLINUX_MULTITAP_EMIT_BLOCKED)
+			return false;
+		break;
+	case FPLINUX_TERMINAL_COMMAND_CANCEL:
+		fplinux_text_input_close_picker(&terminal->input);
 		break;
 	case FPLINUX_TERMINAL_COMMAND_LIVE:
 		return_live(terminal);
 		break;
 	case FPLINUX_TERMINAL_COMMAND_SCROLLBACK:
-		if (commit_composition(terminal))
-			terminal->history = true;
+		if (!commit_composition(terminal))
+			return false;
+		terminal->history = true;
 		break;
 	case FPLINUX_TERMINAL_COMMAND_INTERRUPT:
-		send_phone_key(terminal, XKB_KEY_c, 'c', TSM_CONTROL_MASK);
+		if (!send_phone_key(terminal, XKB_KEY_c, 'c', TSM_CONTROL_MASK))
+			return false;
 		break;
 	case FPLINUX_TERMINAL_COMMAND_END_INPUT:
-		send_phone_key(terminal, XKB_KEY_d, 'd', TSM_CONTROL_MASK);
+		if (!send_phone_key(terminal, XKB_KEY_d, 'd', TSM_CONTROL_MASK))
+			return false;
 		break;
 	case FPLINUX_TERMINAL_COMMAND_SEARCH:
-		send_phone_key(terminal, XKB_KEY_r, 'r', TSM_CONTROL_MASK);
+		if (!send_phone_key(terminal, XKB_KEY_r, 'r', TSM_CONTROL_MASK))
+			return false;
 		break;
 	default:
-		return;
+		return true;
 	}
 	terminal->dirty = true;
+	return true;
 }
 
 void fplinux_terminal_set_modifiers(struct fplinux_terminal *terminal,
@@ -486,26 +462,6 @@ void fplinux_terminal_set_modifiers(struct fplinux_terminal *terminal,
 	terminal->modifier = modifiers &
 			     (TSM_CONTROL_MASK | TSM_ALT_MASK | TSM_SHIFT_MASK);
 	terminal->dirty = true;
-}
-
-size_t fplinux_terminal_symbol_count(void)
-{
-	return sizeof(symbols) / sizeof(symbols[0]);
-}
-
-const char *fplinux_terminal_symbol(size_t index)
-{
-	return index < fplinux_terminal_symbol_count() ? symbols[index] : "";
-}
-
-void fplinux_terminal_type_symbol(struct fplinux_terminal *terminal,
-				  size_t index)
-{
-	if (index >= fplinux_terminal_symbol_count())
-		return;
-	return_live(terminal);
-	if (commit_composition(terminal))
-		send_character(terminal, (unsigned char)symbols[index][0]);
 }
 
 size_t fplinux_terminal_special_count(void)
@@ -519,76 +475,16 @@ const char *fplinux_terminal_special(size_t index)
 							  "";
 }
 
-void fplinux_terminal_send_special(struct fplinux_terminal *terminal,
+bool fplinux_terminal_send_special(struct fplinux_terminal *terminal,
 				   size_t index)
 {
 	if (index >= fplinux_terminal_special_count())
-		return;
-	send_phone_key(terminal,
-		       index ? XKB_KEY_F1 + (uint32_t)index - 1 :
-			       XKB_KEY_Escape,
-		       TSM_VTE_INVALID, 0);
+		return true;
+	if (!send_phone_key(terminal,
+			    index ? XKB_KEY_F1 + (uint32_t)index - 1 :
+				    XKB_KEY_Escape,
+			    TSM_VTE_INVALID, 0))
+		return false;
 	terminal->dirty = true;
-}
-
-void fplinux_terminal_select_language(struct fplinux_terminal *terminal,
-				      size_t index)
-{
-	if (index >= terminal->languages.count || !commit_composition(terminal))
-		return;
-	select_language(terminal, index);
-}
-
-void fplinux_terminal_title(const struct fplinux_terminal *terminal,
-			    fplinux_terminal_title_fits fits, void *context,
-			    char *text, size_t size)
-{
-	const struct fplinux_multitap_language *language =
-		&terminal->languages.language[terminal->language];
-	const char *mode = terminal->mode == FPLINUX_TERMINAL_NUMERIC ?
-				   "123" :
-			   terminal->alphabetic_mode == FPLINUX_TERMINAL_UPPER ?
-				   language->indicator[FPLINUX_LANGUAGE_UPPER] :
-				   language->indicator[FPLINUX_LANGUAGE_LOWER];
-	char forms[3][FPLINUX_TERMINAL_TITLE_BYTES];
-	char modifiers[32] = "";
-	size_t count = 0;
-	size_t chosen = 0;
-	size_t used = 0;
-
-	if (!size)
-		return;
-	if (terminal->history) {
-		unsigned int lines = fplinux_terminal_history_offset(terminal);
-
-		/* The scrollback's one form; the band shortens it if needed. */
-		snprintf(forms[count++], sizeof(forms[0]),
-			 ngettext("%u line above", "%u lines above", lines),
-			 lines);
-	} else {
-		for (unsigned int index = 0;
-		     index < FPLINUX_TERMINAL_MODIFIER_COUNT; ++index)
-			if (terminal->modifier &
-			    fplinux_terminal_modifier_masks[index])
-				used += (size_t)snprintf(
-					modifiers + used,
-					sizeof(modifiers) - used,
-					used ? "+%s" : "%s",
-					fplinux_terminal_modifier_names[index]);
-		/* A status line, not a sentence: two spaces part its fields. */
-		if (*modifiers) {
-			snprintf(forms[count++], sizeof(forms[0]), "%s  %s  %s",
-				 _("Terminal"), modifiers, mode);
-			snprintf(forms[count++], sizeof(forms[0]), "%s  %s",
-				 modifiers, mode);
-		} else {
-			snprintf(forms[count++], sizeof(forms[0]), "%s  %s",
-				 _("Terminal"), mode);
-		}
-		snprintf(forms[count++], sizeof(forms[0]), "%s", mode);
-	}
-	/* The first form that fits; the last is the shortest and stays. */
-	while (chosen + 1 < count && !fits(forms[chosen], context))
-		++chosen;
-	snprintf(text, size, "%s", forms[chosen]);
+	return true;
 }

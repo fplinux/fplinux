@@ -114,6 +114,306 @@
         "20": "outline",
         "24": "outline"
       }
+    },
+    "save": {
+      "source": "tabler",
+      "name": "device-floppy",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "send": {
+      "source": "tabler",
+      "name": "send",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "edit": {
+      "source": "tabler",
+      "name": "pencil",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "search": {
+      "source": "tabler",
+      "name": "search",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "add": {
+      "source": "tabler",
+      "name": "plus",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "delete": {
+      "source": "tabler",
+      "name": "trash",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "help": {
+      "source": "tabler",
+      "name": "help",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "refresh": {
+      "source": "tabler",
+      "name": "refresh",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "backspace": {
+      "source": "tabler",
+      "name": "backspace",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "equal": {
+      "source": "tabler",
+      "name": "equal",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "exit": {
+      "source": "tabler",
+      "name": "logout",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "cancel": {
+      "source": "tabler",
+      "name": "x",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "back": {
+      "source": "tabler",
+      "name": "arrow-left",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "alarm": {
+      "source": "tabler",
+      "name": "alarm",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "timer": {
+      "source": "tabler",
+      "name": "hourglass",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "stopwatch": {
+      "source": "tabler",
+      "name": "stopwatch",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "world": {
+      "source": "tabler",
+      "name": "world",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "snooze": {
+      "source": "tabler",
+      "name": "alarm-snooze",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "play": {
+      "source": "tabler",
+      "name": "player-play",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "pause": {
+      "source": "tabler",
+      "name": "player-pause",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "stop": {
+      "source": "tabler",
+      "name": "player-stop",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "flag": {
+      "source": "tabler",
+      "name": "flag",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "list": {
+      "source": "tabler",
+      "name": "list",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "settings": {
+      "name": "settings",
+      "source": "tabler",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "check": {
+      "source": "tabler",
+      "name": "check",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "enter": {
+      "source": "tabler",
+      "name": "corner-down-left",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "symbols": {
+      "source": "tabler",
+      "name": "math-symbols",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "history": {
+      "source": "tabler",
+      "name": "history",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "text-size": {
+      "source": "tabler",
+      "name": "text-size",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "no-sim": {
+      "source": "project",
+      "name": "no-sim",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
     }
   },
   "tile_sizes": [16, 20, 24, 32, 40, 48, 56, 60],
@@ -157,6 +457,16 @@
     "tile_distance": 10
   },
   "apps": {
+    "org.fplinux.clock": {
+      "tile": "clock",
+      "glyph": "clock",
+      "install": true
+    },
+    "org.fplinux.calculator": {
+      "tile": "calculator",
+      "glyph": "calculator",
+      "install": true
+    },
     "org.fplinux.settings": {
       "tile": "settings",
       "glyph": "settings",

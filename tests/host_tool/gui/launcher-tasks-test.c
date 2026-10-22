@@ -432,8 +432,6 @@ static void test_interruptions(struct fplinux_ui *ui,
 	fplinux_launcher_tasks_open(tasks);
 	snapshot(tasks, 202);
 	invoke(ui, FPLINUX_UI_COMMAND_SCREEN);
-	fplinux_ui_push(ui, new_screen("Options"));
-	assert(ui->depth == 4);
 	fplinux_launcher_tasks_set_blocked(tasks, true);
 	assert(ui->depth == 1);
 	assert(!ui->tasks_open);

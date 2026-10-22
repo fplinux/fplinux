@@ -16,6 +16,10 @@
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
 /* Linux permits at most 253 descriptors in one SCM_RIGHTS message. */
 #define SESSION_MAX_FDS 253
+#define VIBRATION_PULSE_MIN_MS 50
+#define VIBRATION_PULSE_MAX_MS 3000
+#define VIBRATION_PAUSE_MIN_MS 100
+#define VIBRATION_PAUSE_MAX_MS 60000
 
 static const char *const message_names[] = {
 	[FPLINUX_UI_SESSION_HELLO] = "HELLO",
@@ -44,6 +48,10 @@ static const char *const message_names[] = {
 	[FPLINUX_UI_SESSION_CLOSE_TASK] = "CLOSE_TASK",
 	[FPLINUX_UI_SESSION_END] = "END",
 	[FPLINUX_UI_SESSION_REDRAW_ACK] = "REDRAW_ACK",
+	[FPLINUX_UI_SESSION_CLOCK] = "clock",
+	[FPLINUX_UI_SESSION_VIBRATE] = "VIBRATE",
+	[FPLINUX_UI_SESSION_PREPARE_CLOSE] = "PREPARE_CLOSE",
+	[FPLINUX_UI_SESSION_CLOSE_REPLY] = "CLOSE_REPLY",
 };
 
 static const char *const lifecycle_names[] = {
@@ -69,16 +77,24 @@ static const char *const theme_names[] = {
 	[FPLINUX_UI_SESSION_THEME_DARK] = "dark",
 };
 
+static const char *const storage_names[] = {
+	[FPLINUX_STORAGE_UNPUBLISHED] = "unpublished",
+	[FPLINUX_STORAGE_PUBLISHED_UNSYNCED] = "published-unsynced",
+	[FPLINUX_STORAGE_DURABLE] = "durable",
+};
+
 /* Every field a packet may carry; anything else makes it invalid. */
 static const char *const field_names[] = {
-	"type",		 "mode",	 "app_id",     "active_id",
-	"selected_id",	 "title",	 "left",       "centre",
-	"right",	 "reason",	 "width",      "height",
-	"display",	 "locked",	 "visible",    "enabled",
-	"locale",	 "input_locale", "name",       "value",
-	"battery",	 "charging",	 "notice",     "screen_width",
-	"screen_height", "theme",	 "serial",     "lifecycle",
-	"tasks",	 "token",	 "end_prompt",
+	"type",		 "mode",	  "app_id",	   "active_id",
+	"selected_id",	 "title",	  "left",	   "centre",
+	"right",	 "reason",	  "width",	   "height",
+	"display",	 "locked",	  "visible",	   "enabled",
+	"locale",	 "input_locale",  "name",	   "value",
+	"battery",	 "charging",	  "notice",	   "screen_width",
+	"screen_height", "theme",	  "serial",	   "lifecycle",
+	"tasks",	 "token",	  "end_prompt",	   "clock",
+	"audio",	 "vibration",	  "pattern",	   "repeat",
+	"applied",	 "storage_state", "storage_error",
 };
 
 static void add_string(struct json_object *object, const char *name,
@@ -117,6 +133,30 @@ static bool get_string(struct json_object *object, const char *name,
 	return true;
 }
 
+static bool clock_data_valid(const char *text)
+{
+	size_t bytes = strnlen(text, FPLINUX_UI_SESSION_CLOCK_BYTES);
+
+	if (bytes == FPLINUX_UI_SESSION_CLOCK_BYTES)
+		return false;
+	for (size_t i = 0; i < bytes; ++i)
+		if ((unsigned char)text[i] < 0x20 || text[i] == 0x7f)
+			return false;
+	return true;
+}
+
+static bool get_clock(struct json_object *object, unsigned int type, char *data)
+{
+	struct json_object *field;
+
+	if (json_object_object_get_ex(object, "clock", &field) &&
+	    type != FPLINUX_UI_SESSION_CLOCK &&
+	    type != FPLINUX_UI_SESSION_ACTIVE)
+		return false;
+	return get_string(object, "clock", data,
+			  FPLINUX_UI_SESSION_CLOCK_BYTES);
+}
+
 static bool get_int(struct json_object *object, const char *name, int *value)
 {
 	struct json_object *field;
@@ -150,10 +190,18 @@ static bool get_choice(struct json_object *object, const char *field_name,
 		       const char *const *names, unsigned int count,
 		       unsigned int fallback, unsigned int *choice)
 {
-	char name[16] = { 0 };
+	struct json_object *field;
+	const char *name;
 	unsigned int i;
 
-	if (!get_string(object, field_name, name, sizeof(name)))
+	if (!json_object_object_get_ex(object, field_name, &field)) {
+		*choice = fallback;
+		return true;
+	}
+	if (!json_object_is_type(field, json_type_string))
+		return false;
+	name = json_object_get_string(field);
+	if (strlen(name) != (size_t)json_object_get_string_len(field))
 		return false;
 	if (!name[0]) {
 		*choice = fallback;
@@ -334,6 +382,131 @@ static bool end_action_valid(const char *value)
 	       !strcmp(value, "cancel");
 }
 
+static bool close_response_valid(const char *value)
+{
+	return !strcmp(value, "ready") || !strcmp(value, "cancel") ||
+	       !strcmp(value, "wait");
+}
+
+static bool
+storage_result_valid(const struct fplinux_ui_session_message *message)
+{
+	if ((unsigned int)message->storage_state >= ARRAY_SIZE(storage_names) ||
+	    message->storage_error < 0)
+		return false;
+	if (message->type != FPLINUX_UI_SESSION_SETTING &&
+	    message->type != FPLINUX_UI_SESSION_ERROR)
+		return !message->applied && !message->storage_state &&
+		       !message->storage_error;
+	if (message->storage_state == FPLINUX_STORAGE_DURABLE)
+		return message->applied && !message->storage_error;
+	if (message->storage_state == FPLINUX_STORAGE_PUBLISHED_UNSYNCED)
+		return message->applied && message->storage_error;
+	return true;
+}
+
+static bool get_storage_fields(struct json_object *object, unsigned int type,
+			       struct fplinux_ui_session_message *message)
+{
+	struct json_object *field;
+	unsigned int state;
+	bool has_storage =
+		json_object_object_get_ex(object, "applied", &field) ||
+		json_object_object_get_ex(object, "storage_state", &field) ||
+		json_object_object_get_ex(object, "storage_error", &field);
+
+	if (has_storage && type != FPLINUX_UI_SESSION_SETTING &&
+	    type != FPLINUX_UI_SESSION_ERROR)
+		return false;
+	if (!get_bool(object, "applied", &message->applied) ||
+	    !get_int(object, "storage_error", &message->storage_error) ||
+	    !get_choice(object, "storage_state", storage_names,
+			ARRAY_SIZE(storage_names), FPLINUX_STORAGE_UNPUBLISHED,
+			&state))
+		return false;
+	message->storage_state = state;
+	message->type = type;
+	return storage_result_valid(message);
+}
+
+bool fplinux_ui_session_vibrate_valid(
+	const struct fplinux_ui_session_message *message)
+{
+	const unsigned int *pattern = message->pattern;
+	unsigned int count = message->pattern_count;
+	unsigned int last_pulse;
+	unsigned int pause;
+
+	if (message->type != FPLINUX_UI_SESSION_VIBRATE ||
+	    count > FPLINUX_UI_SESSION_PATTERN)
+		return false;
+	if (!count)
+		return !message->repeat;
+	if (count < 2 || pattern[0] > VIBRATION_PAUSE_MAX_MS)
+		return false;
+	for (unsigned int i = 1; i < count; ++i) {
+		bool pulse = i % 2;
+		unsigned int min = pulse	 ? VIBRATION_PULSE_MIN_MS :
+				   i + 1 < count ? VIBRATION_PAUSE_MIN_MS :
+						   0;
+		unsigned int max = pulse ? VIBRATION_PULSE_MAX_MS :
+					   VIBRATION_PAUSE_MAX_MS;
+
+		if (pattern[i] < min || pattern[i] > max)
+			return false;
+	}
+	if (!message->repeat)
+		return true;
+	/* The final pause and initial wait also separate repeated pulses. */
+	last_pulse = count % 2 ? count - 2 : count - 1;
+	pause = pattern[0] + (count % 2 ? pattern[count - 1] : 0);
+	if (pause)
+		return pause >= VIBRATION_PAUSE_MIN_MS;
+	/* With no pause, distinct last and first pulses join into one pulse. */
+	return last_pulse > 1 &&
+	       pattern[last_pulse] + pattern[1] <= VIBRATION_PULSE_MAX_MS;
+}
+
+static bool get_media_fields(struct json_object *object, unsigned int type,
+			     struct fplinux_ui_session_message *message)
+{
+	struct json_object *field;
+	struct json_object *pattern;
+	size_t count;
+
+	if ((json_object_object_get_ex(object, "audio", &field) ||
+	     json_object_object_get_ex(object, "vibration", &field)) &&
+	    type != FPLINUX_UI_SESSION_CONFIG)
+		return false;
+	if (!get_bool(object, "audio", &message->audio) ||
+	    !get_bool(object, "vibration", &message->vibration))
+		return false;
+	if (type != FPLINUX_UI_SESSION_VIBRATE)
+		return !json_object_object_get_ex(object, "pattern", &field) &&
+		       !json_object_object_get_ex(object, "repeat", &field);
+	if (!json_object_object_get_ex(object, "pattern", &pattern) ||
+	    !json_object_is_type(pattern, json_type_array) ||
+	    !get_bool(object, "repeat", &message->repeat))
+		return false;
+	count = json_object_array_length(pattern);
+	if (count > FPLINUX_UI_SESSION_PATTERN)
+		return false;
+	message->pattern_count = count;
+	for (size_t i = 0; i < count; ++i) {
+		int64_t duration;
+
+		field = json_object_array_get_idx(pattern, i);
+		if (!json_object_is_type(field, json_type_int))
+			return false;
+		duration = json_object_get_int64(field);
+		if (duration < 0 || duration > VIBRATION_PAUSE_MAX_MS)
+			return false;
+		message->pattern[i] = duration;
+	}
+	message->type = type;
+	return fplinux_ui_session_vibrate_valid(message);
+}
+
 static bool
 frame_dimensions_valid(const struct fplinux_ui_session_message *message)
 {
@@ -382,8 +555,19 @@ bool fplinux_ui_session_send(int fd,
 	    (unsigned int)message->display >= ARRAY_SIZE(display_names) ||
 	    (unsigned int)message->theme >= ARRAY_SIZE(theme_names) ||
 	    !input_locale_valid(message->input_locale) ||
+	    !clock_data_valid(message->clock_data) ||
+	    !storage_result_valid(message) ||
+	    ((message->audio || message->vibration) &&
+	     message->type != FPLINUX_UI_SESSION_CONFIG) ||
+	    ((message->pattern_count || message->repeat) &&
+	     message->type != FPLINUX_UI_SESSION_VIBRATE) ||
+	    (message->type == FPLINUX_UI_SESSION_VIBRATE &&
+	     !fplinux_ui_session_vibrate_valid(message)) ||
 	    (message->input_locale[0] &&
 	     message->type != FPLINUX_UI_SESSION_CONFIG &&
+	     message->type != FPLINUX_UI_SESSION_ACTIVE) ||
+	    (message->clock_data[0] &&
+	     message->type != FPLINUX_UI_SESSION_CLOCK &&
 	     message->type != FPLINUX_UI_SESSION_ACTIVE) ||
 	    (message->type == FPLINUX_UI_SESSION_LIFECYCLE &&
 	     (unsigned int)message->lifecycle >= ARRAY_SIZE(lifecycle_names)) ||
@@ -404,20 +588,58 @@ bool fplinux_ui_session_send(int fd,
 	     (!frame_message_valid(message) || message->frame_fd < 0 ||
 	      !frame_dimensions_valid(message))) ||
 	    ((message->type == FPLINUX_UI_SESSION_ACTIVE_ACK ||
-	      message->type == FPLINUX_UI_SESSION_REDRAW_ACK) &&
-	     !message->serial)) {
+	      message->type == FPLINUX_UI_SESSION_REDRAW_ACK ||
+	      message->type == FPLINUX_UI_SESSION_PREPARE_CLOSE ||
+	      message->type == FPLINUX_UI_SESSION_CLOSE_REPLY) &&
+	     !message->serial) ||
+	    (message->type == FPLINUX_UI_SESSION_CLOSE_REPLY &&
+	     !close_response_valid(message->value))) {
 		errno = EINVAL;
 		return false;
 	}
 	object = json_object_new_object();
 	if (!object)
 		return false;
+	add_string(object, "clock", message->clock_data);
 	add_string(object, "type", message_names[message->type]);
+	if (message->applied || message->storage_state ||
+	    message->storage_error) {
+		json_object_object_add(
+			object, "applied",
+			json_object_new_boolean(message->applied));
+		add_string(object, "storage_state",
+			   storage_names[message->storage_state]);
+		json_object_object_add(
+			object, "storage_error",
+			json_object_new_int(message->storage_error));
+	}
+	if (message->type == FPLINUX_UI_SESSION_CONFIG) {
+		json_object_object_add(object, "audio",
+				       json_object_new_boolean(message->audio));
+		json_object_object_add(
+			object, "vibration",
+			json_object_new_boolean(message->vibration));
+	}
+	if (message->type == FPLINUX_UI_SESSION_VIBRATE) {
+		struct json_object *pattern = json_object_new_array();
+
+		for (unsigned int i = 0; i < message->pattern_count; ++i)
+			json_object_array_add(
+				pattern,
+				json_object_new_int64(message->pattern[i]));
+		json_object_object_add(object, "pattern", pattern);
+		json_object_object_add(
+			object, "repeat",
+			json_object_new_boolean(message->repeat));
+	}
 	if ((message->type == FPLINUX_UI_SESSION_ACTIVE ||
 	     message->type == FPLINUX_UI_SESSION_ACTIVE_ACK ||
 	     message->type == FPLINUX_UI_SESSION_REDRAW_ACK ||
 	     message->type == FPLINUX_UI_SESSION_SETTING ||
-	     message->type == FPLINUX_UI_SESSION_ERROR) &&
+	     message->type == FPLINUX_UI_SESSION_ERROR ||
+	     message->type == FPLINUX_UI_SESSION_CLOCK ||
+	     message->type == FPLINUX_UI_SESSION_PREPARE_CLOSE ||
+	     message->type == FPLINUX_UI_SESSION_CLOSE_REPLY) &&
 	    message->serial)
 		json_object_object_add(object, "serial",
 				       json_object_new_int64(message->serial));
@@ -699,12 +921,20 @@ int fplinux_ui_session_receive(int fd,
 			type == FPLINUX_UI_SESSION_ACTIVE;
 	if (valid)
 		valid = get_task_fields(object, type, message);
+	if (valid)
+		valid = get_clock(object, type, message->clock_data);
+	if (valid)
+		valid = get_media_fields(object, type, message);
+	if (valid)
+		valid = get_storage_fields(object, type, message);
 	if (valid && json_object_object_get_ex(object, "end_prompt", &field))
 		valid = type == FPLINUX_UI_SESSION_ACTIVE;
 	if (valid && message->end_prompt)
 		valid = message->token && task_id_valid(message->active_id);
 	if (valid && type == FPLINUX_UI_SESSION_END)
 		valid = end_action_valid(message->value);
+	if (valid && type == FPLINUX_UI_SESSION_CLOSE_REPLY)
+		valid = close_response_valid(message->value);
 	if (valid && json_object_object_get_ex(object, "serial", &field)) {
 		int64_t serial = json_object_get_int64(field);
 
@@ -719,7 +949,9 @@ int fplinux_ui_session_receive(int fd,
 	message->theme = theme;
 	json_object_put(object);
 	if (valid && (type == FPLINUX_UI_SESSION_ACTIVE_ACK ||
-		      type == FPLINUX_UI_SESSION_REDRAW_ACK))
+		      type == FPLINUX_UI_SESSION_REDRAW_ACK ||
+		      type == FPLINUX_UI_SESSION_PREPARE_CLOSE ||
+		      type == FPLINUX_UI_SESSION_CLOSE_REPLY))
 		valid = message->serial != 0;
 	if (valid && fd_count)
 		valid = frame_message_valid(message) &&

@@ -2,6 +2,8 @@
 #define _POSIX_C_SOURCE 200809L
 #include "fplinux-ui-locale.h"
 #include "fplinux-language.h"
+#include "fplinux-text-input.h"
+#include "fplinux-utf8.h"
 
 #include <errno.h>
 #include <stdint.h>
@@ -144,49 +146,6 @@ static bool format_pattern(const struct fplinux_language *language,
 	return true;
 }
 
-/* Encodes a code point as UTF-8; returns the byte count. */
-static size_t encode_utf8(uint32_t code, char *out)
-{
-	if (code < 0x80) {
-		out[0] = (char)code;
-		return 1;
-	}
-	if (code < 0x800) {
-		out[0] = (char)(0xc0 | code >> 6);
-		out[1] = (char)(0x80 | (code & 0x3f));
-		return 2;
-	}
-	if (code < 0x10000) {
-		out[0] = (char)(0xe0 | code >> 12);
-		out[1] = (char)(0x80 | (code >> 6 & 0x3f));
-		out[2] = (char)(0x80 | (code & 0x3f));
-		return 3;
-	}
-	out[0] = (char)(0xf0 | code >> 18);
-	out[1] = (char)(0x80 | (code >> 12 & 0x3f));
-	out[2] = (char)(0x80 | (code >> 6 & 0x3f));
-	out[3] = (char)(0x80 | (code & 0x3f));
-	return 4;
-}
-
-/* The first character of valid UTF-8 text and its byte count. */
-static size_t decode_utf8(const char *text, uint32_t *code)
-{
-	const unsigned char *bytes = (const unsigned char *)text;
-	size_t count = bytes[0] < 0x80 ? 1 :
-		       bytes[0] < 0xe0 ? 2 :
-		       bytes[0] < 0xf0 ? 3 :
-					 4;
-
-	*code = count == 1 ? bytes[0] :
-		count == 2 ? bytes[0] & 0x1fU :
-		count == 3 ? bytes[0] & 0x0fU :
-			     bytes[0] & 0x07U;
-	for (size_t i = 1; i < count; ++i)
-		*code = *code << 6 | (bytes[i] & 0x3fU);
-	return count;
-}
-
 /*
  * Names are stored as they appear inside a sentence ("вторник"); a date
  * that begins with one starts with a capital ("Вторник, 30 августа").
@@ -194,7 +153,9 @@ static size_t decode_utf8(const char *text, uint32_t *code)
  */
 static bool copy_capitalized(const char *text, char *out, size_t size)
 {
-	char first[4];
+	const unsigned char *cursor = (const unsigned char *)text;
+	const unsigned char *end = cursor + strlen(text);
+	char first[FPLINUX_TEXT_INPUT_UTF8_BYTES];
 	uint32_t code;
 	size_t first_bytes;
 	size_t length;
@@ -204,9 +165,12 @@ static bool copy_capitalized(const char *text, char *out, size_t size)
 		out[0] = '\0';
 		return true;
 	}
-	first_bytes = decode_utf8(text, &code);
+	if (!fplinux_utf8_next(&cursor, end, &code))
+		return false;
+	first_bytes = (size_t)(cursor - (const unsigned char *)text);
 	rest = strlen(text + first_bytes);
-	length = encode_utf8((uint32_t)towupper((wint_t)code), first);
+	length = fplinux_text_input_encode_utf8(
+		(uint32_t)towupper((wint_t)code), first);
 	if (length + rest >= size)
 		return false;
 	memcpy(out, first, length);

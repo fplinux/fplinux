@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 
 #include "fplinux-multitap.h"
+#include "fplinux-utf8.h"
 
 #include <string.h>
 #include <wctype.h>
@@ -8,53 +9,19 @@
 /* Language files listed per load; a code takes four bytes. */
 #define LANGUAGE_LIST_COUNT 64U
 
-/* Decodes one UTF-8 character; returns its bytes, or 0 when invalid. */
-static size_t decode_utf8(const char *text, uint32_t *character)
-{
-	const unsigned char *bytes = (const unsigned char *)text;
-	uint32_t value;
-	size_t count;
-
-	if (bytes[0] < 0x80) {
-		*character = bytes[0];
-		return 1;
-	}
-	if (bytes[0] >= 0xc2 && bytes[0] <= 0xdf) {
-		value = bytes[0] & 0x1f;
-		count = 2;
-	} else if (bytes[0] >= 0xe0 && bytes[0] <= 0xef) {
-		value = bytes[0] & 0x0f;
-		count = 3;
-	} else if (bytes[0] >= 0xf0 && bytes[0] <= 0xf4) {
-		value = bytes[0] & 0x07;
-		count = 4;
-	} else {
-		return 0;
-	}
-	for (size_t index = 1; index < count; ++index) {
-		if ((bytes[index] & 0xc0) != 0x80)
-			return 0;
-		value = value << 6 | (bytes[index] & 0x3f);
-	}
-	if ((count == 3 && value < 0x800) || (count == 4 && value < 0x10000) ||
-	    value > 0x10ffff || (value >= 0xd800 && value <= 0xdfff))
-		return 0;
-	*character = value;
-	return count;
-}
-
 /* The index-th character of a validated key map; 0 past its end. */
 static uint32_t character_at(const char *characters, size_t index)
 {
-	while (*characters) {
-		uint32_t character;
-		size_t size = decode_utf8(characters, &character);
+	const unsigned char *cursor = (const unsigned char *)characters;
+	const unsigned char *end = cursor + strlen(characters);
 
-		if (!size)
+	while (cursor < end) {
+		uint32_t character;
+
+		if (!fplinux_utf8_next(&cursor, end, &character))
 			return 0;
 		if (!index--)
 			return character;
-		characters += size;
 	}
 	return 0;
 }
@@ -62,16 +29,16 @@ static uint32_t character_at(const char *characters, size_t index)
 /* A key map is non-empty valid UTF-8 that contains the key's digit. */
 static bool is_key_map_valid(const char *characters, unsigned char digit)
 {
+	const unsigned char *cursor = (const unsigned char *)characters;
+	const unsigned char *end = cursor + strlen(characters);
 	bool has_digit = false;
 
-	while (*characters) {
+	while (cursor < end) {
 		uint32_t character;
-		size_t size = decode_utf8(characters, &character);
 
-		if (!size)
+		if (!fplinux_utf8_next(&cursor, end, &character))
 			return false;
 		has_digit |= character == digit;
-		characters += size;
 	}
 	return has_digit;
 }
@@ -90,7 +57,6 @@ static bool add_language(struct fplinux_multitap_languages *languages,
 			return false;
 	input = &languages->language[languages->count++];
 	memcpy(input->code, language->code, sizeof(input->code));
-	memcpy(input->name, language->name, sizeof(input->name));
 	memcpy(input->indicator, language->indicator, sizeof(input->indicator));
 	memcpy(input->keys, language->multitap, sizeof(input->keys));
 	return true;

@@ -24,6 +24,8 @@ struct fplinux_session;
  * without language files the system language is the built-in English.
  * clock_ms returns
  * CLOCK_MONOTONIC milliseconds; NULL selects the system clock.
+ * clock_preferences_directory is the private directory for the clock owner;
+ * its parent must exist. The owner creates its directory and preferences file.
  *
  * width and height are the output size. They select the screen profile,
  * whose status and soft-key bars frame integrated applications, and must
@@ -45,7 +47,19 @@ struct fplinux_session_options {
 	const char *leds_dir;
 	const char *power_supply_dir;
 	const char *rtc_path;
+	/* Playback capability uses the installed service and playback node. */
+	const char *audio_socket;
+	const char *audio_service;
+	const char *audio_device;
+	/* Directory of evdev devices; NULL disables application vibration. */
+	const char *input_dir;
+	/* NULL disables the bounded audio/vibration helper. */
+	const char *clock_signal_path;
+	/* Owner-only nonempty private preferences directory. */
+	const char *clock_preferences_directory;
 	uint64_t (*clock_ms)(void *context);
+	/* UTC seconds; NULL selects the system wall clock. */
+	int64_t (*clock_utc)(void *context);
 	void (*changed)(void *context);
 	/* Borrowed RGB565 LAUNCH card, or -1 to clear; called before CLOSE. */
 	void (*launch_frame)(void *context, int fd, int width, int height);
@@ -53,6 +67,8 @@ struct fplinux_session_options {
 	void (*hold_frame)(void *context, bool enabled);
 	/* Return an owned close-on-exec RGB565 scene descriptor, or -1. */
 	int (*capture_frame)(void *context, int *width, int *height);
+	/* Optional vibrator boundary; false reports errno and loses the device. */
+	bool (*vibrate)(void *context, bool on);
 	void *context;
 };
 
@@ -120,8 +136,8 @@ bool fplinux_session_is_ready(struct fplinux_session *session);
 bool fplinux_session_is_locked(struct fplinux_session *session);
 /*
  * The shell places the launcher surface above every application, which it
- * hides: the keyguard is engaged, or a battery notice is due and the launcher
- * has drawn its first frame.
+ * hides: the keyguard is engaged, or a system notice or clock ring is due and
+ * the launcher has drawn its view.
  */
 bool fplinux_session_launcher_on_top(struct fplinux_session *session);
 /*

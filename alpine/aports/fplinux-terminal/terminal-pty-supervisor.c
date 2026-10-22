@@ -52,8 +52,7 @@ static void shell_setup_failed(int fd, int error)
 }
 
 static pid_t start_shell(int slave, int owner_fd, int status_fd,
-			 const char *shell, const char *startup,
-			 const char *token)
+			 const char *shell, const char *startup)
 {
 	int setup[2];
 	int error = 0;
@@ -76,8 +75,7 @@ static pid_t start_shell(int slave, int owner_fd, int status_fd,
 		if (slave > STDERR_FILENO)
 			close(slave);
 		if (setenv("TERM", "xterm-256color", 1) ||
-		    setenv("LANG", "C.UTF-8", 1) || setenv("SHELL", shell, 1) ||
-		    setenv("FPLINUX_TERMINAL_PROMPT_TOKEN", token, 1))
+		    setenv("LANG", "C.UTF-8", 1) || setenv("SHELL", shell, 1))
 			shell_setup_failed(setup[1], errno);
 		/* READY is safe only after this PID owns the PTY's separate SID. */
 		while (write(setup[1], &error, sizeof(error)) < 0 &&
@@ -234,7 +232,7 @@ int main(int argc, char **argv)
 	int slave;
 	int status;
 
-	if (argc != 7)
+	if (argc != 6)
 		return 126;
 	events[0].fd = parse_fd(argv[1]);
 	status_fd = parse_fd(argv[2]);
@@ -256,8 +254,7 @@ int main(int argc, char **argv)
 		return 126;
 	}
 	closedir(directory);
-	shell = start_shell(slave, events[0].fd, status_fd, argv[4], argv[5],
-			    argv[6]);
+	shell = start_shell(slave, events[0].fd, status_fd, argv[4], argv[5]);
 	close(slave);
 	if (shell < 0) {
 		report(status_fd, FPLINUX_TERMINAL_PTY_ERROR, -1, 0, errno);

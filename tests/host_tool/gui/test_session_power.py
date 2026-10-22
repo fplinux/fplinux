@@ -27,6 +27,7 @@ def test_display_keyguard_and_settings_policy(tmp_path: Path) -> None:
             str(APORT / "session-settings.c"),
             str(ROOT / "lib/fplinux/fplinux-settings-values.c"),
             str(ROOT / "lib/fplinux/fplinux-language.c"),
+            str(ROOT / "lib/fplinux/fplinux-utf8.c"),
             "-o",
             str(executable),
         ],

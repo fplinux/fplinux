@@ -8,13 +8,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "fplinux-multitap.h"
+#include "fplinux-text-input.h"
 
-#define FPLINUX_UI_TEXT_MODEL_COMMIT_MS 1000U
-#define FPLINUX_UI_TEXT_MODEL_HOLD_MS 500U
-#define FPLINUX_UI_TEXT_MODEL_REPEAT_MS 100U
-/* Symbol picker columns until set, and for a count that does not divide. */
-#define FPLINUX_UI_TEXT_MODEL_PICKER_COLUMNS 6U
 /* Linux KEY_CNT: phone and keyboard codes are tracked below this value. */
 #define FPLINUX_UI_TEXT_MODEL_KEY_COUNT 0x300U
 
@@ -69,14 +64,8 @@ struct fplinux_ui_text_model {
 	size_t limit;
 	bool multiline;
 	bool focused;
-	/*
-	 * Short # steps through the sentence, lower and upper case of each
-	 * input language in order, then to digits, then back to the first.
-	 */
-	struct fplinux_multitap_languages languages;
-	size_t language;
-	enum fplinux_language_case letter_case;
-	bool numeric;
+	/* Shared modes, composition, physical holds and symbol selection. */
+	struct fplinux_text_input input;
 	enum fplinux_ui_text_model_type type;
 	/* The DECIMAL separator, '.' or ','. */
 	char separator;
@@ -91,21 +80,9 @@ struct fplinux_ui_text_model {
 	bool password;
 	char *masked;
 	size_t masked_capacity;
-	/* Letters, or the * cycle of a PHONE field. */
-	struct fplinux_multitap compose;
-	uint64_t compose_ms;
-	/*
-	 * Phone digit waiting for its long press; 0 when none. A PHONE field
-	 * waits for 0 after typing it, to replace it with +.
-	 */
-	unsigned int held_code;
-	uint64_t held_ms;
-	bool clearing;
-	uint64_t clear_ms;
-	bool picker_open;
-	unsigned int picker_index;
-	/* Up and Down in the symbol grid move by this many symbols. */
-	unsigned int picker_columns;
+	/* A typed 0 in PHONE waits for its field-specific replacement by +. */
+	bool phone_zero_held;
+	uint64_t phone_zero_ms;
 	/*
 	 * Read-only (UNEDITABLE): presses are left to the caller, the status
 	 * is empty and the picker stays closed; the text can still be set.
@@ -137,6 +114,8 @@ fplinux_ui_text_model_key(struct fplinux_ui_text_model *model,
 /* Runs the commit, long-press and Clear repeat deadlines due at now_ms. */
 void fplinux_ui_text_model_tick(struct fplinux_ui_text_model *model,
 				uint64_t now_ms);
+/* Stops phone gestures without committing or replacing pending text. */
+void fplinux_ui_text_model_cancel_held(struct fplinux_ui_text_model *model);
 /* Returns false when nothing is scheduled. */
 bool fplinux_ui_text_model_deadline(const struct fplinux_ui_text_model *model,
 				    uint64_t *deadline_ms);
@@ -164,10 +143,7 @@ void fplinux_ui_text_model_set_focused(struct fplinux_ui_text_model *model,
 				       bool focused);
 /* Cancel without insertion when the picker view could not be created. */
 void fplinux_ui_text_model_cancel_picker(struct fplinux_ui_text_model *model);
-/*
- * Columns of the symbol grid: a divisor of the symbol count (1, 2, 3, 4, 6, 9,
- * 12, 18 or 36); any other count selects FPLINUX_UI_TEXT_MODEL_PICKER_COLUMNS.
- */
+/* Columns of the symbol grid; 0 selects the shared default. */
 void fplinux_ui_text_model_set_picker_columns(
 	struct fplinux_ui_text_model *model, unsigned int columns);
 /*
@@ -207,8 +183,5 @@ fplinux_ui_text_model_indicator(const struct fplinux_ui_text_model *model);
  */
 void fplinux_ui_text_model_status(const struct fplinux_ui_text_model *model,
 				  char *status, size_t size);
-
-size_t fplinux_ui_text_model_symbol_count(void);
-const char *fplinux_ui_text_model_symbol(size_t index);
 
 #endif

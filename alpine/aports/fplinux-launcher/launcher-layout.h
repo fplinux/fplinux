@@ -126,16 +126,6 @@ void fplinux_launcher_scroll_layout(const struct fplinux_ui_profile_spec *spec,
 				    int width, int viewport_height, bool grid,
 				    struct fplinux_launcher_scroll *scroll);
 
-/*
- * The catalogue grid's scroll indicator in viewport coordinates: the
- * runtime's bar of scrollbar_width at grid_scrollbar_offset from
- * the right edge, over the thumb's range inside list_padding at the top and
- * the bottom; the track is drawn there under the thumb.
- */
-struct fplinux_launcher_rect
-fplinux_launcher_grid_track(const struct fplinux_ui_profile_spec *spec,
-			    const struct fplinux_launcher_frame *frame);
-
 /* The height of rows items' content, 0 without items. */
 int fplinux_launcher_content_height(
 	const struct fplinux_launcher_scroll *scroll, size_t rows);

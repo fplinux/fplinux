@@ -2,7 +2,6 @@
 
 #include "fplinux-ui-listview.h"
 #include "fplinux-ui-internal.h"
-#include "fplinux-ui-style-internal.h"
 #include "fplinux-ui-screen-model.h"
 
 #include <errno.h>
@@ -316,18 +315,9 @@ fplinux_ui_listview_create(struct fplinux_ui *ui, lv_obj_t *parent,
 	lv_obj_set_scroll_dir(object, LV_DIR_VER);
 	lv_obj_set_scrollbar_mode(object, LV_SCROLLBAR_MODE_AUTO);
 	fplinux_ui_style_scrollbar(ui, object);
-	lv_obj_set_style_pad_right(object,
-				   (spec->margin - spec->scrollbar_width) / 2,
-				   LV_PART_SCROLLBAR);
 	lv_obj_set_style_pad_ver(object, spec->list_padding, LV_PART_SCROLLBAR);
 	lv_obj_add_event_cb(object, delete_cb, LV_EVENT_DELETE, list);
 	return list;
-}
-
-void fplinux_ui_listview_delete(struct fplinux_ui_listview *list)
-{
-	if (list)
-		lv_obj_delete(list->object);
 }
 
 lv_obj_t *fplinux_ui_listview_object(struct fplinux_ui_listview *list)
@@ -575,11 +565,26 @@ static lv_obj_t *make_row(struct fplinux_ui_listview *list, const char *text)
 	return row;
 }
 
+/* Scrolls the content by dy, within its bounds, then shows the focus. */
+static void keep_focus(struct fplinux_ui_listview *list, int32_t dy)
+{
+	lv_obj_t *row;
+
+	if (dy)
+		lv_obj_scroll_by_bounded(list->object, 0, dy, LV_ANIM_OFF);
+	if (!list->count || !list->selectable)
+		return;
+	row = row_at(list, list->selected);
+	lv_obj_update_layout(list->object);
+	lv_obj_scroll_to_view(row, LV_ANIM_OFF);
+}
+
 /* Returns the new row's index, or SIZE_MAX with errno for a NULL text. */
 size_t fplinux_ui_listview_add(struct fplinux_ui_listview *list,
 			       const char *text, const char *detail)
 {
 	size_t index = list->count;
+	bool had_details = list->details;
 	lv_obj_t *row;
 
 	if (!text || list->is_virtual) {
@@ -594,21 +599,9 @@ size_t fplinux_ui_listview_add(struct fplinux_ui_listview *list,
 		fplinux_ui_listview_set_marked(list, 0, true);
 	if (!index && list->selectable)
 		show_selected(list, true);
+	else if (!had_details && list->details)
+		keep_focus(list, 0);
 	return index;
-}
-
-/* Scrolls the content by dy, within its bounds, then shows the focus. */
-static void keep_focus(struct fplinux_ui_listview *list, int32_t dy)
-{
-	lv_obj_t *row;
-
-	if (dy)
-		lv_obj_scroll_by_bounded(list->object, 0, dy, LV_ANIM_OFF);
-	if (!list->count || !list->selectable)
-		return;
-	row = row_at(list, list->selected);
-	lv_obj_update_layout(list->object);
-	lv_obj_scroll_to_view(row, LV_ANIM_OFF);
 }
 
 size_t fplinux_ui_listview_insert(struct fplinux_ui_listview *list,
@@ -675,6 +668,7 @@ bool fplinux_ui_listview_set_text(struct fplinux_ui_listview *list,
 				  size_t index, const char *text,
 				  const char *detail)
 {
+	bool had_details = list->details;
 	lv_obj_t *row;
 
 	if (list->is_virtual || index >= list->count || !text) {
@@ -687,6 +681,8 @@ bool fplinux_ui_listview_set_text(struct fplinux_ui_listview *list,
 	/* A focused row's marquee starts over with the new text. */
 	fplinux_ui_marquee_changed(list->ui, row_text(list, row),
 				   row_detail(list, row));
+	if (!had_details && list->details)
+		keep_focus(list, 0);
 	return true;
 }
 
@@ -827,15 +823,17 @@ static size_t page_rows(struct fplinux_ui_listview *list)
  * Moves the selection, or scrolls a read-only list, by rows: one for Up
  * and Down, a visible page for Left and Right.
  */
-static bool move(struct fplinux_ui_listview *list, long rows)
+static bool move(struct fplinux_ui_listview *list, long rows,
+		 enum fplinux_ui_focus_boundary boundary)
 {
 	size_t index;
 
 	if (!list->count)
 		return false;
 	if (list->is_virtual) {
-		virtual_focus(list, fplinux_ui_focus_step(list->selected,
-							  list->count, rows));
+		virtual_focus(list,
+			      fplinux_ui_focus_step(list->selected, list->count,
+						    rows, boundary));
 		return true;
 	}
 	if (!list->selectable) {
@@ -846,7 +844,8 @@ static bool move(struct fplinux_ui_listview *list, long rows)
 					 LV_ANIM_OFF);
 		return true;
 	}
-	index = fplinux_ui_focus_step(list->selected, list->count, rows);
+	index = fplinux_ui_focus_step(list->selected, list->count, rows,
+				      boundary);
 	if (index != list->selected)
 		move_selection(list, index);
 	return true;
@@ -879,12 +878,14 @@ bool fplinux_ui_listview_key(struct fplinux_ui_listview *list,
 		return false;
 	if (key->code == KEY_UP || key->code == KEY_DOWN ||
 	    key->code == KEY_LEFT || key->code == KEY_RIGHT) {
-		rows = key->code == KEY_UP || key->code == KEY_DOWN ?
-			       1 :
-			       (long)page_rows(list);
+		bool row_step = key->code == KEY_UP || key->code == KEY_DOWN;
+
+		rows = row_step ? 1 : (long)page_rows(list);
 		if (key->code == KEY_UP || key->code == KEY_LEFT)
 			rows = -rows;
-		if (!move(list, rows))
+		if (!move(list, rows,
+			  row_step ? FPLINUX_UI_FOCUS_WRAP :
+				     FPLINUX_UI_FOCUS_CLAMP))
 			return false;
 		*used |= bit;
 		if (list->selected != before && list->select)

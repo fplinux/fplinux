@@ -5,13 +5,18 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "fplinux-storage.h"
+#include "fplinux-ui-vibration.h"
+
 #define FPLINUX_UI_SESSION_SOCKET "/run/fplinux-gui/control.sock"
 /* The logical Wayland seat assigned to the phone's built-in keypad. */
 #define FPLINUX_UI_KEYPAD_SEAT "fplinux-keypad"
 #define FPLINUX_UI_SESSION_ID_BYTES 128
 #define FPLINUX_UI_SESSION_TEXT_BYTES 128
-/* Bounded labels, including escaped quotes and backslashes, and state fields. */
-#define FPLINUX_UI_SESSION_PACKET_BYTES 4096
+#define FPLINUX_UI_SESSION_CLOCK_BYTES 16384
+/* Clock text may double when quotes and backslashes are escaped. */
+#define FPLINUX_UI_SESSION_PACKET_BYTES \
+	(2 * FPLINUX_UI_SESSION_CLOCK_BYTES + 4096)
 #define FPLINUX_UI_SESSION_LOCALE_BYTES 8
 #define FPLINUX_UI_SESSION_NAME_BYTES 32
 #define FPLINUX_UI_SESSION_FRAME_MAX_WIDTH 320
@@ -19,6 +24,7 @@
 /* Portrait and landscape share the same bounded RGB565 pixel budget. */
 #define FPLINUX_UI_SESSION_FRAME_MAX_PIXELS (240U * 320U)
 #define FPLINUX_UI_SESSION_TASK_MAX 4
+#define FPLINUX_UI_SESSION_PATTERN FPLINUX_UI_VIBRATION_PATTERN_MAX
 
 /* Each packet is one JSON object on a Unix SOCK_SEQPACKET connection. */
 enum fplinux_ui_session_message_type {
@@ -48,6 +54,10 @@ enum fplinux_ui_session_message_type {
 	FPLINUX_UI_SESSION_CLOSE_TASK,
 	FPLINUX_UI_SESSION_END,
 	FPLINUX_UI_SESSION_REDRAW_ACK,
+	FPLINUX_UI_SESSION_CLOCK,
+	FPLINUX_UI_SESSION_VIBRATE,
+	FPLINUX_UI_SESSION_PREPARE_CLOSE,
+	FPLINUX_UI_SESSION_CLOSE_REPLY,
 };
 
 enum fplinux_ui_session_lifecycle {
@@ -104,17 +114,25 @@ enum fplinux_ui_session_theme {
  * FRAME_MAX_WIDTH/HEIGHT/PIXELS. SCM_RIGHTS transfers it outside the JSON object.
  * CANCEL ends startup or BUSY without an application-crashed notice.
  *
- * HOME backgrounds the foreground application. EXIT returns to the catalogue.
+ * HOME backgrounds the foreground application. EXIT requests ordinary close
+ * and a return to the catalogue; a cancelled close keeps the application.
  * LIFECYCLE reports foreground, background or closing independently of surface
- * VISIBILITY. CLOSE asks a client to save and exit; the manager may terminate a
- * client which does not respond. MODE requests integrated or fullscreen mode.
+ * VISIBILITY. PREPARE_CLOSE(serial, reason) starts an ordinary user close.
+ * CLOSE_REPLY returns the same serial with value ready, cancel or wait. Wait
+ * leaves the application interactive for its decision; another explicit Close
+ * may force it to exit. An unanswered preparation has a bounded timeout.
+ * CLOSE is final, including forced termination, and cannot be cancelled.
+ * MODE requests integrated or fullscreen mode.
  * BUSY(enabled, title) extends launch progress through a blocking operation.
  * Ordinary input arrives through Wayland keyboard events.
  * KEEP_SCREEN_ON applies only while the requesting application is visible.
  *
  * SETTING(name, value) belongs to org.fplinux.settings: empty value queries,
  * otherwise it sets a value. The manager replies with the applied SETTING or
- * ERROR. input_locale selects the keypad language independently of locale.
+ * ERROR. Reply applied records whether the value already took effect;
+ * storage_state and storage_error report publication and synchronization
+ * separately. An applied ERROR still supplies the current value.
+ * input_locale selects the keypad language independently of locale.
  * Applied theme/locale replies, including save-failed errors, carry a nonzero
  * serial. REDRAW_ACK acknowledges the complete view drawn for that reply after
  * its Wayland commit and following server sync. Queries carry no redraw serial.
@@ -125,13 +143,13 @@ enum fplinux_ui_session_theme {
  * the complete bounded snapshot, including [] when no tasks remain. Each
  * task has an app_id, title, lifecycle and nonzero instance token. Launcher
  * ACTIVATE and CLOSE_TASK carry app_id and token together, so a stale action
- * cannot affect a restarted application. CLOSE_TASK uses the normal CLOSE
- * lifecycle and its bounded termination policy.
+ * cannot affect a restarted application. CLOSE_TASK starts PREPARE_CLOSE;
+ * repeating it while the client waits forces the final CLOSE lifecycle.
  *
  * ACTIVE.end_prompt asks the launcher to offer Minimize and Close for the
  * foreground active_id and token. Launcher END answers with that app_id and
  * token and value minimize, close or cancel. Repeated Red closes the same
- * foreground instance through the normal CLOSE lifecycle.
+ * foreground instance through the same close preparation and final lifecycle.
  * An ACTIVE end prompt may attach the current scene as bounded RGB565 pixels
  * using the same descriptor and dimensions as a LAUNCH frame.
  */
@@ -165,7 +183,7 @@ struct fplinux_ui_session_message {
 	int battery;
 	bool charging;
 	char notice[FPLINUX_UI_SESSION_NAME_BYTES];
-	/* ACTIVE/ACTIVE_ACK or applied SETTING/ERROR/REDRAW_ACK correlation. */
+	/* ACTIVE/ACK, CLOCK, applied settings/ACK or close preparation/reply. */
 	uint32_t serial;
 	/* LAUNCH or ACTIVE end prompt: one tightly packed RGB565 SCM_RIGHTS fd. */
 	bool has_frame;
@@ -178,7 +196,23 @@ struct fplinux_ui_session_message {
 	bool has_tasks;
 	unsigned int task_count;
 	struct fplinux_ui_session_task tasks[FPLINUX_UI_SESSION_TASK_MAX];
+	/* CLOCK or ACTIVE: control-free text interpreted by the clock owner. */
+	char clock_data[FPLINUX_UI_SESSION_CLOCK_BYTES];
+	/* CONFIG: capabilities available to this application. */
+	bool audio;
+	bool vibration;
+	/* VIBRATE: pause, pulse, pause, pulse... in ms; [] stops. */
+	unsigned int pattern_count;
+	unsigned int pattern[FPLINUX_UI_SESSION_PATTERN];
+	bool repeat;
+	/* SETTING/ERROR replies: owner acceptance is separate from file durability. */
+	bool applied;
+	enum fplinux_storage_state storage_state;
+	int storage_error;
 };
+
+bool fplinux_ui_session_vibrate_valid(
+	const struct fplinux_ui_session_message *message);
 
 /* connect sends HELLO and returns a nonblocking, close-on-exec descriptor. */
 int fplinux_ui_session_connect(const char *app_id);

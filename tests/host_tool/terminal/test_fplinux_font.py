@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import os
 import struct
 import tempfile
 from pathlib import Path
@@ -66,6 +65,7 @@ class FontTests:
                     str(ROOT / "include/fplinux"),
                     str(ROOT / "tests/host_tool/terminal/fplinux-font.c"),
                     str(ROOT / "lib/fplinux/fplinux-font.c"),
+                    str(ROOT / "lib/fplinux/fplinux-utf8.c"),
                     "-Wl,--wrap=fopen",
                 ],
                 name="compile font loader harness",
@@ -98,22 +98,6 @@ class FontTests:
                 check=True,
             )
             return result.stdout
-
-    @pytest.mark.parametrize("locale", ["C", "C.UTF-8"])
-    def test_unicode_cursor_advances_only_for_valid_bounded_scalars(
-        self, font_executable: Path, locale: str
-    ) -> None:
-        """Decoding preserves invalid input and does not depend on the process locale."""
-        environment = os.environ.copy()
-        environment["LC_ALL"] = locale
-        result = run_process(
-            [str(font_executable), "--unicode"],
-            name="check bounded UTF-8 cursor and scalar results",
-            env=environment,
-            timeout=10,
-            check=True,
-        )
-        assert result.stdout == ""
 
     @pytest.mark.parametrize(
         ("width", "small_expected", "large_expected"),

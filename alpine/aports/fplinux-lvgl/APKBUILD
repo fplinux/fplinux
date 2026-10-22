@@ -56,6 +56,8 @@ package() {
 	rm -f "$pkgdir/usr/include/lvgl/config/lv_conf.h"
 	install -Dm644 "$srcdir/lv_conf.h" \
 		"$pkgdir/usr/include/lvgl/config/lv_conf.h"
+	install -Dm644 src/libs/lodepng/lodepng.h \
+		"$pkgdir/usr/include/lvgl/src/libs/lodepng/lodepng.h"
 	install -Dm644 LICENCE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENCE.txt"
 	install -Dm644 "$srcdir/LICENSE" \
 		"$pkgdir/usr/share/licenses/$pkgname/FPLinux-GPL-2.0.txt"

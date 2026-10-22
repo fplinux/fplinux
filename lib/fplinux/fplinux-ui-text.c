@@ -2,8 +2,8 @@
 
 #include "fplinux-ui-text.h"
 #include "fplinux-ui-internal.h"
-#include "fplinux-ui-style-internal.h"
 #include "fplinux-ui-locale.h"
+#include "fplinux-ui-symbol-picker.h"
 #include "fplinux-ui-text-model.h"
 
 #include <errno.h>
@@ -30,8 +30,7 @@ struct fplinux_ui_text {
 	/* label is named to the marquee as the focused element's. */
 	bool marquee;
 	/* Symbol grid on the display's top layer while the picker is open. */
-	lv_obj_t *picker;
-	unsigned int picker_index;
+	struct fplinux_ui_symbol_picker *picker;
 	/* Paused whenever the model has no deadline. */
 	lv_timer_t *timer;
 	unsigned int rendered;
@@ -42,109 +41,28 @@ struct fplinux_ui_text {
 
 static struct fplinux_ui_text *fields;
 
-static void render_cell(struct fplinux_ui_text *field, unsigned int index,
-			bool selected)
-{
-	lv_obj_t *cell = lv_obj_get_child(field->picker, (int32_t)index);
-
-	lv_obj_set_style_bg_opa(cell, selected ? LV_OPA_COVER : LV_OPA_TRANSP,
-				0);
-	lv_obj_set_style_text_color(cell,
-				    selected ? field->theme->accent_text :
-					       field->theme->foreground,
-				    0);
-}
-
-static void picker_delete_cb(lv_event_t *event)
-{
-	struct fplinux_ui_text *field = lv_event_get_user_data(event);
-
-	field->picker = NULL;
-	fplinux_ui_modal_set(field->ui, FPLINUX_UI_MODAL_PICKER, false);
-}
-
-/*
- * The grid covers the field, moved up when it would leave the display or
- * meet the legend bar of a fullscreen application. Its symbols use the
- * large font, whose bold strokes keep thin punctuation legible.
- */
-static void open_picker(struct fplinux_ui_text *field)
-{
-	const struct fplinux_ui_theme *theme = field->theme;
-	const struct fplinux_ui_profile_spec *spec = field->spec;
-	lv_display_t *display = lv_obj_get_display(field->frame);
-	unsigned int count = (unsigned int)fplinux_ui_text_model_symbol_count();
-	unsigned int columns = field->model.picker_columns;
-	unsigned int rows = (count + columns - 1) / columns;
-	int32_t cell_width = spec->picker_cell_width;
-	int32_t cell_height = spec->picker_cell_height;
-	int32_t inset = spec->picker_border + spec->picker_padding;
-	int32_t width = (int32_t)columns * cell_width + 2 * inset;
-	int32_t height = (int32_t)rows * cell_height + 2 * inset;
-	int32_t line = lv_font_get_line_height(theme->font_large);
-	int32_t bottom = fplinux_ui_modal_height(field->ui) - height;
-	lv_area_t frame;
-	int32_t y;
-
-	lv_obj_update_layout(field->frame);
-	lv_obj_get_coords(field->frame, &frame);
-	y = frame.y1 < bottom ? frame.y1 : bottom;
-	field->picker = lv_obj_create(lv_display_get_layer_top(display));
-	lv_obj_remove_style_all(field->picker);
-	lv_obj_set_size(field->picker, width, height);
-	lv_obj_set_pos(field->picker,
-		       (lv_display_get_horizontal_resolution(display) - width) /
-			       2,
-		       y > 0 ? y : 0);
-	lv_obj_set_style_bg_color(field->picker, theme->popup, 0);
-	lv_obj_set_style_bg_opa(field->picker, LV_OPA_COVER, 0);
-	lv_obj_set_style_border_color(field->picker, theme->focus, 0);
-	lv_obj_set_style_border_width(field->picker, spec->picker_border, 0);
-	lv_obj_set_style_pad_all(field->picker, spec->picker_padding, 0);
-	lv_obj_set_style_text_font(field->picker, theme->font_large, 0);
-	lv_obj_set_scrollable(field->picker, false);
-	for (unsigned int index = 0; index < count; ++index) {
-		lv_obj_t *cell = lv_label_create(field->picker);
-
-		lv_label_set_text(cell, fplinux_ui_text_model_symbol(index));
-		lv_obj_set_size(cell, cell_width, cell_height);
-		lv_obj_set_pos(cell, (int32_t)(index % columns) * cell_width,
-			       (int32_t)(index / columns) * cell_height);
-		lv_obj_set_style_pad_top(cell, (cell_height - line) / 2, 0);
-		lv_obj_set_style_text_align(cell, LV_TEXT_ALIGN_CENTER, 0);
-		lv_obj_set_style_bg_color(cell, theme->accent, 0);
-		render_cell(field, index, false);
-	}
-	lv_obj_add_event_cb(field->picker, picker_delete_cb, LV_EVENT_DELETE,
-			    field);
-	if (!fplinux_ui_scrim_attach(field->ui, field->picker)) {
-		lv_obj_delete(field->picker);
-		fplinux_ui_text_model_cancel_picker(&field->model);
-		return;
-	}
-	field->picker_index = field->model.picker_index;
-	render_cell(field, field->picker_index, true);
-	fplinux_ui_modal_set(field->ui, FPLINUX_UI_MODAL_PICKER, true);
-}
-
 static void render_picker(struct fplinux_ui_text *field)
 {
-	unsigned int index = field->model.picker_index;
+	unsigned int index = field->model.input.picker_index;
 
-	if (!field->model.picker_open) {
-		if (field->picker)
-			lv_obj_delete(field->picker);
+	if (!field->model.input.picker_open) {
+		fplinux_ui_symbol_picker_delete(field->picker);
+		field->picker = NULL;
 		return;
+	}
+	if (field->picker && !fplinux_ui_symbol_picker_is_open(field->picker)) {
+		fplinux_ui_symbol_picker_delete(field->picker);
+		field->picker = NULL;
 	}
 	if (!field->picker) {
-		open_picker(field);
+		field->picker = fplinux_ui_symbol_picker_create(
+			field->ui, field->frame,
+			FPLINUX_UI_SYMBOL_PICKER_ANCHORED, index);
+		if (!field->picker)
+			fplinux_ui_text_model_cancel_picker(&field->model);
 		return;
 	}
-	if (index == field->picker_index)
-		return;
-	render_cell(field, field->picker_index, false);
-	render_cell(field, index, true);
-	field->picker_index = index;
+	fplinux_ui_symbol_picker_select(field->picker, index);
 }
 
 static void render_selection(lv_obj_t *label, uint32_t start, uint32_t end)
@@ -201,7 +119,7 @@ static void render(struct fplinux_ui_text *field)
 	char status[64];
 
 	render_picker(field);
-	caret_visible = model->focused && !model->picker_open &&
+	caret_visible = model->focused && !model->input.picker_open &&
 			!model->read_only;
 	/* Unchanged text and caret keep the textarea's Up/Down column. */
 	if (strcmp(lv_textarea_get_text(field->area), view)) {
@@ -308,6 +226,7 @@ static bool move_line(struct fplinux_ui_text *field, bool up)
 		lv_textarea_cursor_up(field->area);
 	else
 		lv_textarea_cursor_down(field->area);
+	finish_scroll(field->area);
 	after = lv_textarea_get_cursor_pos(field->area);
 	if (after == before)
 		return false;
@@ -353,14 +272,14 @@ static void frame_delete_cb(lv_event_t *event)
 	struct fplinux_ui_text *field = lv_event_get_user_data(event);
 	struct fplinux_ui_text **link = &fields;
 
+	fplinux_ui_cancel_text_key_repeat(field->ui, field);
 	while (*link != field)
 		link = &(*link)->next;
 	*link = field->next;
 	/* The children still exist; the label goes with the frame. */
 	if (field->marquee)
 		fplinux_ui_marquee_blur(field->ui, field->label);
-	if (field->picker)
-		lv_obj_delete(field->picker);
+	fplinux_ui_symbol_picker_delete(field->picker);
 	lv_timer_delete(field->timer);
 	fplinux_ui_text_model_cleanup(&field->model);
 	free(field);
@@ -495,8 +414,8 @@ struct fplinux_ui_text *fplinux_ui_text_create(struct fplinux_ui *ui,
 		errno = ENOMEM;
 		return NULL;
 	}
-	field->timer = lv_timer_create(timer_cb,
-				       FPLINUX_UI_TEXT_MODEL_COMMIT_MS, field);
+	field->timer =
+		lv_timer_create(timer_cb, FPLINUX_TEXT_INPUT_COMMIT_MS, field);
 	if (!field->timer) {
 		fplinux_ui_text_model_cleanup(&field->model);
 		free(field);
@@ -558,8 +477,18 @@ bool fplinux_ui_text_key(struct fplinux_ui_text *field,
 	else if (!consumed && field->model.read_only &&
 		 field->model.multiline && field->model.focused)
 		consumed = fplinux_ui_scroll_key(field->area, key);
+	if (consumed && key->pressed &&
+	    fplinux_ui_text_can_repeat(field->ui, field))
+		fplinux_ui_claim_text_key(field->ui, field, key);
 	update(field);
 	return consumed;
+}
+
+bool fplinux_ui_text_can_repeat(const struct fplinux_ui *ui,
+				const struct fplinux_ui_text *field)
+{
+	return field && field->ui == ui && field->model.focused &&
+	       lv_obj_is_visible(field->frame);
 }
 
 const char *fplinux_ui_text_get(const struct fplinux_ui_text *field)
@@ -633,7 +562,21 @@ const char *fplinux_ui_text_indicator(const struct fplinux_ui_text *field)
 
 bool fplinux_ui_text_is_picker_open(const struct fplinux_ui_text *field)
 {
-	return field->model.picker_open;
+	return field->model.input.picker_open;
+}
+
+void fplinux_ui_text_cancel_input(struct fplinux_ui *ui,
+				  enum fplinux_ui_key_source source)
+{
+	if (source != FPLINUX_UI_KEY_PHONE)
+		return;
+	for (struct fplinux_ui_text *field = fields; field;
+	     field = field->next) {
+		if (field->ui != ui)
+			continue;
+		fplinux_ui_text_model_cancel_held(&field->model);
+		update(field);
+	}
 }
 
 /* Canvas fields also lose focus while another screen or alert is on top. */
@@ -692,14 +635,17 @@ void fplinux_ui_text_resize(struct fplinux_ui *ui)
 	     field = field->next) {
 		if (field->ui != ui || !field->picker)
 			continue;
-		/* Its scrim goes with it; picker_delete_cb() forgets it. */
-		lv_obj_delete(field->picker);
-		open_picker(field);
+		if (!fplinux_ui_symbol_picker_refresh(field->picker)) {
+			fplinux_ui_text_model_cancel_picker(&field->model);
+			update(field);
+		}
 	}
 }
 
 void fplinux_ui_text_set_focused(struct fplinux_ui_text *field, bool focused)
 {
+	if (!focused)
+		fplinux_ui_cancel_text_key_repeat(field->ui, field);
 	fplinux_ui_text_model_set_focused(&field->model, focused);
 	update(field);
 	show_line(field);

@@ -34,6 +34,9 @@ static struct {
 	size_t used;
 } capture = { .fd = -1 };
 
+static char transcript[32768];
+static size_t transcript_used;
+
 ssize_t __real_read(int fd, void *bytes, size_t size);
 ssize_t __wrap_read(int fd, void *bytes, size_t size);
 
@@ -47,6 +50,10 @@ ssize_t __wrap_read(int fd, void *bytes, size_t size)
 		memcpy(capture.bytes + capture.used, bytes, (size_t)count);
 		capture.used += (size_t)count;
 		capture.bytes[capture.used] = '\0';
+		assert((size_t)count < sizeof(transcript) - transcript_used);
+		memcpy(transcript + transcript_used, bytes, (size_t)count);
+		transcript_used += (size_t)count;
+		transcript[transcript_used] = '\0';
 	}
 	return count;
 }
@@ -216,7 +223,7 @@ static struct job_set wait_for_jobs(struct fplinux_terminal_session *session)
 		assert(now_ms() < deadline);
 		dispatch(session);
 	}
-	assert(!fplinux_terminal_pty_shell_foreground(pty));
+	assert(tcgetpgrp(pty->fd) != pty->shell);
 	for (index = 0; index < 3; ++index) {
 		assert(!kill(jobs.pids[index], 0));
 		assert(getsid(jobs.pids[index]) == jobs.shell);
@@ -264,10 +271,9 @@ static void run_owner(int report_fd, const char *startup, pid_t observer)
 	assert(!prctl(PR_SET_PDEATHSIG, SIGKILL));
 	assert(getppid() == observer);
 	assert(!setpgid(0, 0));
-	assert(fplinux_terminal_init(&terminal, SCREEN_COLUMNS, SCREEN_ROWS,
-				     "session-test"));
+	assert(fplinux_terminal_init(&terminal, SCREEN_COLUMNS, SCREEN_ROWS));
 	assert(fplinux_terminal_pty_open(&pty, SCREEN_COLUMNS, SCREEN_ROWS,
-					 "/bin/bash", startup, "session-test"));
+					 "/bin/bash", startup));
 	save_pids(&pty);
 	fplinux_terminal_session_init(&session, &terminal, &pty);
 	children = wait_for_jobs(&session);
@@ -363,9 +369,8 @@ static void wait_for_raw(struct fplinux_terminal_session *session,
 
 static void wait_for_prompt(struct fplinux_terminal_session *session)
 {
-	wait_for_raw(session, "\033]777;session-test;B\a");
-	assert(session->terminal->editing);
-	assert(fplinux_terminal_pty_shell_foreground(session->pty));
+	wait_for_raw(session, geteuid() == 0 ? "# " : "$ ");
+	assert(tcgetpgrp(session->pty->fd) == session->pty->shell);
 }
 
 static void type_text(struct fplinux_terminal *terminal, const char *text)
@@ -399,24 +404,14 @@ static void start_jobs(struct fplinux_terminal_session *session)
 
 static void press(struct fplinux_terminal *terminal, unsigned int code)
 {
-	fplinux_terminal_phone(terminal, code, true, false, 0, true);
-	fplinux_terminal_phone(terminal, code, false, false, 1, true);
-}
-
-static void hold_pound(struct fplinux_terminal *terminal, uint64_t now)
-{
-	fplinux_terminal_phone(terminal, KEY_NUMERIC_POUND, true, false, now,
-			       true);
-	fplinux_terminal_tick(terminal, now + 700, true);
-	fplinux_terminal_phone(terminal, KEY_NUMERIC_POUND, false, false,
-			       now + 701, true);
+	fplinux_terminal_phone(terminal, code, true, 0);
+	fplinux_terminal_phone(terminal, code, false, 1);
 }
 
 static void bash_readline(struct fplinux_terminal_session *session)
 {
 	struct fplinux_terminal *terminal = session->terminal;
 	FILE *completion = fopen("completion-target", "wx");
-	unsigned int position;
 
 	assert(completion);
 	assert(!fclose(completion));
@@ -427,24 +422,15 @@ static void bash_readline(struct fplinux_terminal_session *session)
 		"bind -x '\"\\e[98~\":printf \"<LINE:%s>\\n\" \"$READLINE_LINE\"'");
 	enter(terminal);
 	wait_for_prompt(session);
-	for (position = 0; position < 3; ++position) {
-		type_text(terminal, "printf 'BAD-LONG-WRAPPED-LINE\\n'");
-		if (!position)
-			fplinux_terminal_key(terminal, XKB_KEY_a, 'a',
-					     TSM_CONTROL_MASK, 'a');
-		else if (position == 1)
-			fplinux_terminal_key(terminal, XKB_KEY_Left,
-					     TSM_VTE_INVALID, 0,
-					     TSM_VTE_INVALID);
-		hold_pound(terminal, 1000 + position * 1000);
-		type_text(terminal, "\033[98~");
-		wait_for_raw(session, "<LINE:>\r\n");
-		wait_for_prompt(session);
-		type_text(terminal, "printf 'GOOD\\n'");
-		enter(terminal);
-		wait_for_raw(session, "GOOD\r\n");
-		wait_for_prompt(session);
-	}
+	type_text(terminal, "printf 'BAD-LONG-WRAPPED-LINE\\n'");
+	fplinux_terminal_key(terminal, XKB_KEY_u, 'u', TSM_CONTROL_MASK, 'u');
+	type_text(terminal, "\033[98~");
+	wait_for_raw(session, "<LINE:>\r\n");
+	wait_for_prompt(session);
+	type_text(terminal, "printf 'GOOD\\n'");
+	enter(terminal);
+	wait_for_raw(session, "GOOD\r\n");
+	wait_for_prompt(session);
 	type_text(terminal, "printf '%s\\n' ./completion");
 	press(terminal, KEY_PICKUP_PHONE);
 	enter(terminal);
@@ -463,14 +449,12 @@ static void bash_readline(struct fplinux_terminal_session *session)
 	enter(terminal);
 	wait_for_raw(session, "HISTORY-ONE\r\n");
 	wait_for_prompt(session);
-	type_text(terminal,
-		  "printf '\\e]133;B\\a\\e]777;unrelated;B\\a'; "
-		  "read -rs -n 1 value; printf 'GOT:%s\\n' \"$value\"");
+	type_text(terminal, "printf 'READ-READY\\n'; read -rs -n 1 value; "
+			    "printf 'GOT:%s\\n' \"$value\"");
 	enter(terminal);
-	wait_for_raw(session, "\033]777;unrelated;B\a");
-	assert(!terminal->editing);
-	assert(fplinux_terminal_pty_shell_foreground(session->pty));
-	hold_pound(terminal, 5000);
+	wait_for_raw(session, "READ-READY\r\n");
+	assert(tcgetpgrp(session->pty->fd) == session->pty->shell);
+	press(terminal, KEY_NUMERIC_POUND);
 	assert(!terminal->output_size);
 	type_text(terminal, "q");
 	wait_for_raw(session, "GOT:q\r\n");
@@ -479,6 +463,48 @@ static void bash_readline(struct fplinux_terminal_session *session)
 	enter(terminal);
 	finish(session);
 	assert(fplinux_terminal_session_result(session) == 0);
+	capture.fd = -1;
+}
+
+static void bash_history_failure(struct fplinux_terminal_session *session)
+{
+	static const char warning[] =
+		"History cannot be saved. It remains available in this shell.";
+	struct fplinux_terminal *terminal = session->terminal;
+	const char *first;
+
+	capture.fd = session->pty->fd;
+	wait_for_prompt(session);
+	/* /dev/full accepts an open and rejects the real history write. */
+	type_text(terminal, "HISTFILE=/dev/full");
+	enter(terminal);
+	wait_for_prompt(session);
+	type_text(terminal, "printf 'HISTORY-KEPT\\n'");
+	enter(terminal);
+	wait_for_raw(session, "HISTORY-KEPT\r\n");
+	wait_for_prompt(session);
+	press(terminal, KEY_UP);
+	enter(terminal);
+	wait_for_raw(session, "HISTORY-KEPT\r\n");
+	wait_for_prompt(session);
+	type_text(terminal, "history | grep '[H]ISTORY-KEPT' | wc -l");
+	enter(terminal);
+	wait_for_raw(session, "2\r\n");
+	wait_for_prompt(session);
+	type_text(terminal, "printf 'INPUT-STILL-WORKS\\n'");
+	enter(terminal);
+	wait_for_raw(session, "INPUT-STILL-WORKS\r\n");
+	wait_for_prompt(session);
+	first = strstr(transcript, warning);
+	assert(first && !strstr(first + strlen(warning), warning));
+	assert(!strstr(transcript, "history: /dev/full"));
+	type_text(terminal, "exit 0");
+	enter(terminal);
+	finish(session);
+	assert(fplinux_terminal_session_result(session) == 0);
+	first = strstr(transcript, warning);
+	assert(first && !strstr(first + strlen(warning), warning));
+	assert(!strstr(transcript, "history: /dev/full"));
 	capture.fd = -1;
 }
 
@@ -495,7 +521,8 @@ int main(int argc, char **argv)
 
 	assert(argc == 5);
 	is_jobs = !strcmp(argv[1], "jobs") || !strcmp(argv[1], "owner-death");
-	is_bash = !strcmp(argv[1], "bash-readline");
+	is_bash = !strcmp(argv[1], "bash-readline") ||
+		  !strcmp(argv[1], "bash-history-failure");
 	shell = is_jobs || is_bash ? "/bin/bash" : argv[2];
 	if (is_jobs) {
 		result = snprintf(startup, sizeof(startup),
@@ -513,14 +540,16 @@ int main(int argc, char **argv)
 		return 0;
 	}
 	assert(fplinux_terminal_init(&terminal, is_bash ? 21 : SCREEN_COLUMNS,
-				     is_bash ? 12 : SCREEN_ROWS,
-				     "session-test"));
+				     is_bash ? 12 : SCREEN_ROWS));
 	assert(fplinux_terminal_pty_open(&pty, is_bash ? 21 : SCREEN_COLUMNS,
 					 is_bash ? 12 : SCREEN_ROWS, shell,
-					 startup, "session-test"));
+					 startup));
 	save_pids(&pty);
 	fplinux_terminal_session_init(&session, &terminal, &pty);
-	if (is_bash) {
+	if (!strcmp(argv[1], "bash-history-failure")) {
+		bash_history_failure(&session);
+		result = 0;
+	} else if (is_bash) {
 		bash_readline(&session);
 		result = 0;
 	} else if (is_jobs) {

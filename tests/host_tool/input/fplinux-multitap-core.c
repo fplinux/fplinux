@@ -334,7 +334,6 @@ static void assert_language_files(const char *directory)
 	names_are(&fixture, by_code, 3);
 	fplinux_multitap_load_languages(&languages, directory, "ru");
 	names_are(&languages, russian_first, 3);
-	assert(!strcmp(languages.language[0].name, "Русский"));
 	assert(!strcmp(
 		languages.language[0].indicator[FPLINUX_LANGUAGE_SENTENCE],
 		"Абв"));
@@ -342,7 +341,6 @@ static void assert_language_files(const char *directory)
 		       "абв"));
 	assert(!strcmp(languages.language[0].indicator[FPLINUX_LANGUAGE_UPPER],
 		       "АБВ"));
-	assert(!strcmp(languages.language[1].name, "English"));
 	/* A system-only language is not offered; the order stays by code. */
 	fplinux_multitap_load_languages(&languages, directory, "sy");
 	names_are(&languages, by_code, 3);
@@ -365,7 +363,6 @@ static void assert_file_defined_key_map(void)
 	uint32_t emitted[4];
 	struct unicode_output output = { emitted, 0 };
 
-	assert(!strcmp(language->name, "Test"));
 	fplinux_multitap_init(&state, language, 1000);
 	fplinux_multitap_press(&state, '2', 0, emit_unicode_list, &output);
 	assert(fplinux_multitap_candidate(&state) == U'ß');

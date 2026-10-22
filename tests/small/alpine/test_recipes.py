@@ -298,7 +298,7 @@ class AlpineRecipesTests:
         *,
         terminal_rootfs_changes: bool,
     ) -> None:
-        """Library source and configuration changes invalidate linked APKs and rootfs inputs."""
+        """Library changes invalidate linked APKs; selected runtime data invalidates rootfs."""
         packages = (
             "fplinux-font-terminus",
             "fplinux-libdrm",
@@ -325,6 +325,8 @@ class AlpineRecipesTests:
             for name in packages
         }
         rootfs_before = alpine_source.recipe(packages=("fplinux-terminal",))
+        terminal_with_font = ("fplinux-terminal", "fplinux-font-terminus")
+        font_rootfs_before = alpine_source.recipe(packages=terminal_with_font)
         alpine_source.write(f"alpine/aports/{library}/{filename}", b"changed library input\n")
         for name in packages:
             after = alpine_recipes.alpine_package_recipe(
@@ -336,6 +338,10 @@ class AlpineRecipesTests:
                 assert (before[name]) == (after), name
         rootfs_after = alpine_source.recipe(packages=("fplinux-terminal",))
         assert (rootfs_before != rootfs_after) == terminal_rootfs_changes
+        font_rootfs_after = alpine_source.recipe(packages=terminal_with_font)
+        assert (font_rootfs_before != font_rootfs_after) == (
+            terminal_rootfs_changes or library == "fplinux-font-terminus"
+        )
 
     def test_unselected_aport_is_not_causal(self, alpine_source: AlpineSourceContext) -> None:
         """Files outside the selected package set cannot invalidate its rootfs."""

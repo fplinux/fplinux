@@ -6,8 +6,10 @@
 #include <fplinux/fplinux-ui-prefs.h>
 #include <libintl.h>
 #include <linux/input-event-codes.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define APP_ID "org.fplinux.snake"
 #define TICK_MS 125
@@ -32,22 +34,42 @@ struct snake_app {
 	bool short_score;
 	bool played;
 	bool screen_kept_on;
+	struct fplinux_storage_result saved;
 };
 
+static void refresh(struct snake_app *app);
+
 /* The preferences keep the scores in memory until they are saved. */
-static void store_scores(struct snake_app *app)
+static bool store_scores(struct snake_app *app)
 {
-	fplinux_ui_prefs_set_int(app->prefs, "last_score",
-				 app->played ? app->snake.score :
-					       app->previous_score);
-	fplinux_ui_prefs_set_int(app->prefs, "best", app->snake.best);
+	return fplinux_ui_prefs_set_int(app->prefs, "last_score",
+					app->played ? app->snake.score :
+						      app->previous_score) &&
+	       fplinux_ui_prefs_set_int(app->prefs, "best", app->snake.best);
 }
 
 static void save_scores(struct snake_app *app)
 {
-	store_scores(app);
-	if (!fplinux_ui_prefs_save(app->prefs))
+	struct fplinux_storage_result result;
+
+	if (!store_scores(app)) {
+		result.state = FPLINUX_STORAGE_UNPUBLISHED;
+		result.error = errno;
+	} else {
+		result = fplinux_ui_prefs_save(app->prefs);
+	}
+	if (result.state != FPLINUX_STORAGE_DURABLE &&
+	    (app->saved.state != result.state ||
+	     app->saved.error != result.error)) {
+		errno = result.error;
 		perror("fplinux-snake: save scores");
+	} else if (result.state == FPLINUX_STORAGE_DURABLE &&
+		   app->saved.error) {
+		fputs("fplinux-snake: scores saved\n", stderr);
+	}
+	app->saved = result;
+	if (app->message)
+		refresh(app);
 }
 
 static void load_scores(struct snake_app *app)
@@ -108,7 +130,7 @@ static void draw_board(lv_event_t *event)
 static void refresh(struct snake_app *app)
 {
 	bool playing = !app->snake.paused;
-	char message[160];
+	char message[256];
 
 	if (app->short_score)
 		snprintf(message, sizeof(message), "%u", app->snake.score);
@@ -119,15 +141,25 @@ static void refresh(struct snake_app *app)
 	snprintf(message, sizeof(message), _("Best %u"), app->snake.best);
 	lv_label_set_text(app->best, message);
 	if (app->snake.dead)
-		lv_label_set_text(app->message, _("Game over"));
+		snprintf(message, sizeof(message), "%s", _("Game over"));
 	else if (app->snake.won)
-		lv_label_set_text(app->message, _("You won!"));
+		snprintf(message, sizeof(message), "%s", _("You won!"));
 	else {
 		snprintf(message, sizeof(message),
 			 _("Paused\nArrows / 2/4/6/8\nLast score %u"),
 			 app->previous_score);
-		lv_label_set_text(app->message, message);
 	}
+	if (app->saved.state != FPLINUX_STORAGE_DURABLE) {
+		size_t used = strlen(message);
+
+		snprintf(message + used, sizeof(message) - used, "\n%s\n%s",
+			 app->saved.state ==
+					 FPLINUX_STORAGE_PUBLISHED_UNSYNCED ?
+				 _("Score saving not confirmed") :
+				 _("Scores not saved"),
+			 fplinux_ui_storage_error(app->saved));
+	}
+	lv_label_set_text(app->message, message);
 	lv_obj_set_hidden(app->message, playing);
 	fplinux_ui_softkey_bar_set(app->ui, app->softkey_bar, "",
 				   playing ? _("Pause") :
@@ -325,7 +357,9 @@ int main(int argc, char **argv)
 		.program = "fplinux-snake",
 		.description = "Play Snake with the phone keypad",
 	};
-	struct snake_app app = { 0 };
+	struct snake_app app = {
+		.saved = { .state = FPLINUX_STORAGE_DURABLE },
+	};
 	int result;
 
 	result = fplinux_cli_parse(&cli, argc, argv);

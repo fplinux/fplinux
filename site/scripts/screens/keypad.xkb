@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: GPL-2.0-only
+xkb_keymap {
+    xkb_keycodes "keypad" {
+        minimum = 8;
+        maximum = 255;
+        <ESC> = 9;
+    };
+    xkb_types "keypad" {
+        type "ONE_LEVEL" {
+            modifiers = None;
+            map[None] = Level1;
+        };
+    };
+    xkb_compatibility "keypad" {};
+    xkb_symbols "keypad" {
+        key <ESC> { [ Escape ], repeat = No };
+    };
+};

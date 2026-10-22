@@ -4,6 +4,8 @@
 
 #include <stdbool.h>
 
+#include "fplinux-storage.h"
+
 /*
  * Application preferences: string values by key in the file "preferences" of
  * the application's state directory. Changes stay in memory until
@@ -15,6 +17,14 @@ struct fplinux_ui_prefs;
 
 /* A missing file opens empty; NULL with errno on an unreadable file. */
 struct fplinux_ui_prefs *fplinux_ui_prefs_open(const char *app_id);
+/*
+ * Opens "preferences" in an explicit private directory without the UI runtime.
+ * A missing directory opens empty without creating it. An existing directory
+ * must belong to the effective user and allow no group or other access.
+ * Reading never changes its permissions. The caller owns the choice of
+ * directory and serializes writers, just as with fplinux_ui_prefs_open().
+ */
+struct fplinux_ui_prefs *fplinux_ui_prefs_open_directory(const char *directory);
 /* Frees the preferences without saving. NULL is accepted. */
 void fplinux_ui_prefs_close(struct fplinux_ui_prefs *prefs);
 
@@ -29,7 +39,14 @@ bool fplinux_ui_prefs_set_int(struct fplinux_ui_prefs *prefs, const char *key,
 			      long long value);
 bool fplinux_ui_prefs_remove(struct fplinux_ui_prefs *prefs, const char *key);
 
-/* Writes, syncs and renames a temporary file; does nothing when unchanged. */
-bool fplinux_ui_prefs_save(struct fplinux_ui_prefs *prefs);
+/*
+ * Creates missing directories, makes the private application directory mode
+ * 0700, then writes, syncs and renames a mode-0600 temporary file. A published
+ * but unsynchronized save remains pending: an unchanged retry completes its
+ * synchronization without replacing the file again. Errors preserve errno;
+ * only DURABLE confirms the current values. Closing discards pending state.
+ */
+struct fplinux_storage_result
+fplinux_ui_prefs_save(struct fplinux_ui_prefs *prefs);
 
 #endif

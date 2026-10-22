@@ -36,8 +36,7 @@ int main(int argc, char **argv)
 	char text[256] = { 0 };
 	struct dirent *entry;
 	unsigned int files = 0;
-	int error;
-	bool saved;
+	struct fplinux_storage_result saved;
 	FILE *file;
 	DIR *dir;
 
@@ -50,7 +49,6 @@ int main(int argc, char **argv)
 		abort();
 	fplinux_session_settings_defaults(&settings, NULL);
 	saved = fplinux_session_settings_save(&settings, path);
-	error = errno;
 	file = fopen(path, "r");
 	if (!file || !fgets(text, sizeof(text), file) || fclose(file) < 0)
 		abort();
@@ -64,14 +62,16 @@ int main(int argc, char **argv)
 	unlink(path);
 	rmdir(directory);
 	if (files != 1 ||
-	    (fail_kind == 0 && (!saved || !strcmp(text, "old\n"))) ||
-	    (fail_kind == 1 &&
-	     (saved || error != EIO || strcmp(text, "old\n"))) ||
+	    (fail_kind == 0 && (saved.state != FPLINUX_STORAGE_DURABLE ||
+				saved.error || !strcmp(text, "old\n"))) ||
+	    (fail_kind == 1 && (saved.state != FPLINUX_STORAGE_UNPUBLISHED ||
+				saved.error != EIO || strcmp(text, "old\n"))) ||
 	    (fail_kind == 2 &&
-	     (saved || error != EIO || !strcmp(text, "old\n")))) {
+	     (saved.state != FPLINUX_STORAGE_PUBLISHED_UNSYNCED ||
+	      saved.error != EIO || !strcmp(text, "old\n")))) {
 		fprintf(stderr,
 			"FAIL: fsync kind=%d saved=%d errno=%d files=%u first=%s",
-			fail_kind, saved, error, files, text);
+			fail_kind, saved.state, saved.error, files, text);
 		return 1;
 	}
 	return 0;

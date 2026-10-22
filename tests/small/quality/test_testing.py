@@ -38,6 +38,34 @@ from tests import ROOT
 class SelectedTestRunTests:
     """A test result owns logs, never a full quality-check success receipt."""
 
+    @pytest.mark.parametrize("tier", [None, "host_tool"])
+    def test_host_tool_selections_and_discovery_share_time_for_native_builds(
+        self, tier: str | None
+    ) -> None:
+        """Selecting native workloads retains the tier's ten-minute shared deadline."""
+        workloads = testing.pytest_commands([], tier=tier)
+        full = {label: timeout for label, _command, timeout in workloads}
+        assert full["host_tool"] == 600
+        if tier is None:
+            assert {label: timeout for label, timeout in full.items() if label != "host_tool"} == {
+                "small": 90,
+                "host_process": 300,
+                "artifact": 300,
+                "public_workflow": 90,
+            }
+        for names in (
+            ["tests.host_tool.gui.test_clocks_screens"],
+            [
+                "tests.host_tool.gui.test_apidemo_screens",
+                "tests.host_tool.gui.test_terminal_screens",
+                "tests.host_tool.gui.test_calculator_screens",
+                "tests.host_tool.gui.test_clocks_screens",
+                "tests.host_tool.gui.test_ui_client_frames",
+            ],
+        ):
+            [(_label, _command, selected_timeout)] = testing.pytest_commands(names)
+            assert selected_timeout == 600
+
     def test_directory_selection_uses_captured_workspace(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

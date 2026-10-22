@@ -13,22 +13,22 @@ static const struct help_section sections[] = {
 		N_("Typing"),
 		N_("2–9: Press repeatedly to choose a letter. Pause or press another key to send it.\n"
 		   "1: punctuation. 0: space.\n"
-		   "*: switch letter case. Hold *: switch between digits and letters.\n"
-		   "#: cancel a pending letter, otherwise erase. Hold #: clear the line at the Bash prompt.\n"
+		   "*: choose a symbol. #: cycle letter case, input languages and 123.\n"
+		   "Hold a digit to type the digit.\n"
 		   "OK: Enter. Dial: Tab completion.\n"
-		   "Clear: cancel a pending letter or the modifiers, otherwise erase.\n"
-		   "The title shows the input mode, such as abc or 123."),
+		   "Clear: cancel a pending letter or the modifiers, otherwise erase. Hold to repeat.\n"
+		   "The line above the soft keys shows the input mode, such as abc or 123."),
 	},
 	{
 		N_("Options"),
-		N_("Modifiers: Mark Ctrl, Alt or Shift and choose Done. They apply to the next key or letter, and the title shows them until then.\n"
+		N_("Modifiers: Mark Ctrl, Alt or Shift and choose Done. They apply to the next key or letter and stay visible above the soft keys until then. In scrollback, C, A and S stand for Ctrl, Alt and Shift when space is tight.\n"
 		   "Symbols and Special keys: type a symbol, Esc or F1–F12.\n"
-		   "Language: choose the letters of multi-tap.\n"
-		   "Interrupt, End input and Search send Ctrl+C, Ctrl+D and Ctrl+R."),
+		   "Interrupt, End input and Search send Ctrl+C, Ctrl+D and Ctrl+R.\n"
+		   "Font size: choose Compact (6×12) or Larger (8×16). The choice is saved."),
 	},
 	{
 		N_("Scrollback"),
-		N_("Options > Scrollback shows earlier output. Up/Down: scroll one line. Left/Right: scroll one page. The title shows how many lines are above.\n"
+		N_("Options > Scrollback shows earlier output. Up/Down: scroll one line. Left/Right: scroll one page. The counter above the soft keys shows how many lines are above.\n"
 		   "Back or typing returns to live output.\n"
 		   "At the Bash prompt, Up/Down choose earlier commands, and Search finds one."),
 	},

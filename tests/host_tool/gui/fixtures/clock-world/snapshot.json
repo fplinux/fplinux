@@ -1,0 +1,52 @@
+{
+  "op": "snapshot",
+  "status": "ok",
+  "applied": true,
+  "storage": "durable",
+  "error": 0,
+  "serial": 9,
+  "model": {
+    "wall_utc": 1704067200,
+    "monotonic_ms": 1000,
+    "view": 0,
+    "snooze_minutes": 5,
+    "last_alarm_hour": 7,
+    "last_alarm_minute": 0,
+    "alarms": [],
+    "active": {
+      "id": 0,
+      "kind": 0,
+      "source_id": 0,
+      "generation": 0,
+      "label": "",
+      "due_wall_utc": 0,
+      "due_monotonic_ms": 0,
+      "ring_started_ms": 0,
+      "snoozed": false,
+      "missed_reason": 0
+    },
+    "queue": [],
+    "missed": [],
+    "missed_total": 0,
+    "timer": {
+      "state": 0,
+      "generation": 1,
+      "duration_seconds": 0,
+      "remaining_ms": 0,
+      "deadline_ms": 0
+    },
+    "stopwatch": {
+      "running": false,
+      "elapsed_ms": 0,
+      "laps": []
+    },
+    "world": [
+      { "id": 1, "offset_minutes": -210 },
+      { "id": 3, "offset_minutes": 345 },
+      { "id": 4, "offset_minutes": 0 }
+    ],
+    "next_alarm_id": 1,
+    "next_world_id": 5,
+    "next_event_id": 1
+  }
+}

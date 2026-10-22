@@ -1,151 +1,70 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
-/* Run the existing JSON packet contract with a one-packet memory transport. */
 #include "fplinux-ui-session.h"
 
+#include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <stdlib.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
-static char packet[FPLINUX_UI_SESSION_PACKET_BYTES * 2];
-static size_t packet_bytes;
-static int packet_fds[253];
-static size_t packet_fd_count;
-static int receive_fault;
+static bool interrupt_receive;
 
-/* Faults that a real Linux socket cannot emit, exercised by the shared test. */
-void fplinux_protocol_transport_fault(int fault)
-{
-	receive_fault = fault;
-}
+ssize_t __real_recvmsg(int fd, struct msghdr *message, int flags);
 
-int __wrap_socketpair(int domain, int type, int protocol, int pair[2])
-{
-	(void)domain;
-	(void)type;
-	(void)protocol;
-	pair[0] = 1001;
-	pair[1] = 1002;
-	return 0;
-}
-
-ssize_t __wrap_send(int fd, const void *data, size_t length, int flags)
-{
-	(void)fd;
-	(void)flags;
-	if (packet_bytes || length > sizeof(packet))
-		abort();
-	memcpy(packet, data, length);
-	packet_bytes = length;
-	return (ssize_t)length;
-}
-
-ssize_t __wrap_sendmsg(int fd, const struct msghdr *message, int flags)
-{
-	ssize_t sent;
-
-	if (message->msg_iovlen != 1 || packet_fd_count)
-		abort();
-	sent = __wrap_send(fd, message->msg_iov[0].iov_base,
-			   message->msg_iov[0].iov_len, flags);
-	for (struct cmsghdr *item = CMSG_FIRSTHDR(message); item;
-	     item = CMSG_NXTHDR((struct msghdr *)message, item)) {
-		if (item->cmsg_level != SOL_SOCKET ||
-		    item->cmsg_type != SCM_RIGHTS)
-			abort();
-		for (size_t i = 0;
-		     i < (item->cmsg_len - CMSG_LEN(0)) / sizeof(int); ++i) {
-			int original;
-
-			if (packet_fd_count == 253)
-				abort();
-			memcpy(&original,
-			       (char *)CMSG_DATA(item) + i * sizeof(int),
-			       sizeof(original));
-			packet_fds[packet_fd_count] = dup(original);
-			if (packet_fds[packet_fd_count++] < 0)
-				abort();
-		}
-	}
-	return sent;
-}
-
+/* Inject only EINTR; packet bytes and descriptors remain kernel-owned. */
 ssize_t __wrap_recvmsg(int fd, struct msghdr *message, int flags)
 {
-	size_t length = packet_bytes;
-	size_t capacity = message->msg_iov[0].iov_len;
-	size_t control_capacity = message->msg_controllen;
-	size_t count = packet_fd_count;
-
-	(void)fd;
-	if (receive_fault == 4 || receive_fault == 5) {
-		errno = receive_fault == 4 ? EINTR : EAGAIN;
-		receive_fault = 0;
+	if (interrupt_receive) {
+		interrupt_receive = false;
+		errno = EINTR;
 		return -1;
 	}
-	if (!length) {
-		errno = EAGAIN;
-		return -1;
-	}
-	memcpy(message->msg_iov[0].iov_base, packet,
-	       length < capacity ? length : capacity);
-	packet_bytes = 0;
-	message->msg_flags = length > capacity ? MSG_TRUNC : 0;
-	if (count) {
-		struct cmsghdr *rights;
-
-		if (control_capacity < CMSG_SPACE(count * sizeof(int)))
-			abort();
-		rights = CMSG_FIRSTHDR(message);
-		rights->cmsg_level = SOL_SOCKET;
-		rights->cmsg_type = SCM_RIGHTS;
-		rights->cmsg_len = CMSG_LEN(count * sizeof(int));
-		for (size_t i = 0; i < count; ++i)
-			if ((flags & MSG_CMSG_CLOEXEC) && receive_fault != 3 &&
-			    fcntl(packet_fds[i], F_SETFD, FD_CLOEXEC) < 0)
-				abort();
-		memcpy(CMSG_DATA(rights), packet_fds, count * sizeof(int));
-		message->msg_controllen = CMSG_SPACE(count * sizeof(int));
-		if (receive_fault == 1) {
-			/*
-			 * A valid rights header followed by credentials, as
-			 * the kernel sends them: with their struct ucred. musl's
-			 * CMSG_NXTHDR() never returns a last header without
-			 * data, which the kernel does not send either.
-			 */
-			struct ucred credentials = { .pid = getpid() };
-			struct cmsghdr *unexpected =
-				(struct cmsghdr *)((char *)rights +
-						   message->msg_controllen);
-
-			if (control_capacity <
-			    message->msg_controllen +
-				    CMSG_SPACE(sizeof(credentials)))
-				abort();
-			unexpected->cmsg_level = SOL_SOCKET;
-			unexpected->cmsg_type = SCM_CREDENTIALS;
-			unexpected->cmsg_len = CMSG_LEN(sizeof(credentials));
-			memcpy(CMSG_DATA(unexpected), &credentials,
-			       sizeof(credentials));
-			message->msg_controllen +=
-				CMSG_SPACE(sizeof(credentials));
-		}
-	} else {
-		message->msg_controllen = 0;
-	}
-	if (receive_fault == 2)
-		message->msg_flags |= MSG_CTRUNC;
-	receive_fault = 0;
-	packet_fd_count = 0;
-	return (ssize_t)((flags & MSG_TRUNC) || length < capacity ? length :
-								    capacity);
+	return __real_recvmsg(fd, message, flags);
 }
 
-int __real_close(int fd);
-int __wrap_close(int fd)
+int main(void)
 {
-	return fd == 1001 || fd == 1002 ? 0 : __real_close(fd);
+	const uint16_t pixels[] = { 0x1234, 0xffff, 0, 0xabcd };
+	uint16_t copied[4] = { 0 };
+	struct fplinux_ui_session_message sent = {
+		.type = FPLINUX_UI_SESSION_LAUNCH,
+		.width = 2,
+		.height = 2,
+		.has_frame = true,
+	};
+	struct fplinux_ui_session_message received;
+	int pair[2];
+	int producer;
+
+	assert(socketpair(AF_UNIX,
+			  SOCK_SEQPACKET | SOCK_CLOEXEC | SOCK_NONBLOCK, 0,
+			  pair) == 0);
+	assert(fplinux_ui_session_receive(pair[1], &received) == 0);
+	assert(errno == EAGAIN || errno == EWOULDBLOCK);
+	producer = memfd_create("session-interrupted-receive", MFD_CLOEXEC);
+	assert(producer >= 0);
+	assert(write(producer, pixels, sizeof(pixels)) == sizeof(pixels));
+	sent.frame_fd = producer;
+	assert(fplinux_ui_session_send(pair[0], &sent));
+	assert(close(producer) == 0);
+	interrupt_receive = true;
+	assert(fplinux_ui_session_receive(pair[1], &received) == 1);
+	assert(received.type == FPLINUX_UI_SESSION_LAUNCH);
+	assert(received.has_frame && received.frame_fd >= 0);
+	assert(received.width == 2 && received.height == 2);
+	assert((fcntl(received.frame_fd, F_GETFD) & FD_CLOEXEC) != 0);
+	assert(pread(received.frame_fd, copied, sizeof(copied), 0) ==
+	       sizeof(copied));
+	assert(!memcmp(copied, pixels, sizeof(pixels)));
+	assert(close(received.frame_fd) == 0);
+	assert(fplinux_ui_session_receive(pair[1], &received) == 0);
+	assert(errno == EAGAIN || errno == EWOULDBLOCK);
+	assert(close(pair[0]) == 0);
+	assert(close(pair[1]) == 0);
+	return 0;
 }

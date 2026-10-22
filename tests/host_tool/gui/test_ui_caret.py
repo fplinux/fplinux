@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import fplinux_ui_fonts
@@ -72,7 +73,10 @@ def caret_consumer(
             f"-I{ROOT / 'include/fplinux'}",
             str(ROOT / "tests/host_tool/gui/fplinux-ui-caret.c"),
             str(ROOT / "lib/fplinux/fplinux-ui-text.c"),
+            str(ROOT / "lib/fplinux/fplinux-ui-style.c"),
             str(ROOT / "lib/fplinux/fplinux-ui-text-model.c"),
+            str(ROOT / "lib/fplinux/fplinux-ui-symbol-picker.c"),
+            str(ROOT / "lib/fplinux/fplinux-text-input.c"),
             str(ROOT / "lib/fplinux/fplinux-ui-screen.c"),
             str(ROOT / "lib/fplinux/fplinux-ui-screen-model.c"),
             str(ROOT / "lib/fplinux/fplinux-ui-listview.c"),
@@ -81,6 +85,7 @@ def caret_consumer(
             str(ROOT / "lib/fplinux/fplinux-ui-profile.c"),
             str(ROOT / "lib/fplinux/fplinux-multitap.c"),
             str(ROOT / "lib/fplinux/fplinux-language.c"),
+            str(ROOT / "lib/fplinux/fplinux-utf8.c"),
             str(directory / spec.c_name),
             str(directory / "fplinux-ui-fonts.c"),
             str(archive),
@@ -93,7 +98,17 @@ def caret_consumer(
 
 
 @pytest.mark.parametrize(
-    "scenario", ["blink", "transitions", "scroll", "screen", "deadlines", "column", "spacing"]
+    "scenario",
+    [
+        "blink",
+        "transitions",
+        "scroll",
+        "vertical-scroll",
+        "screen",
+        "deadlines",
+        "column",
+        "spacing",
+    ],
 )
 def test_native_caret_pixels_and_lifecycle(caret_consumer: Path, scenario: str) -> None:
     """Host-rendered caret phases preserve editing, scrolling and screen focus."""
@@ -108,6 +123,57 @@ def test_native_caret_pixels_and_lifecycle(caret_consumer: Path, scenario: str) 
         check=True,
     )
     assert result.stdout.endswith(f"{scenario}: ok\n")
+
+
+def test_native_form_pages_keep_focus_in_visible_content(caret_consumer: Path) -> None:
+    """Read-only forms page with line overlap; a choice scrolled away loses focus."""
+    run_process(
+        [
+            str(caret_consumer),
+            "form-pages",
+            str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
+        ],
+        name="page the native form and blur a hidden choice",
+        timeout=10,
+        check=True,
+    )
+
+
+def test_native_menu_restore_reveals_command_after_reordering(caret_consumer: Path) -> None:
+    """An unchanged menu retains scroll; a moved chosen command remains fully visible."""
+    run_process(
+        [
+            str(caret_consumer),
+            "menu-position",
+            str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
+        ],
+        name="restore native menu focus after command reordering",
+        timeout=10,
+        check=True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("width", "height", "offset"),
+    [(128, 128, 1), (128, 160, 1), (176, 220, 2), (240, 320, 3), (320, 240, 2)],
+)
+def test_native_list_form_menu_and_read_only_text_share_scrollbar_appearance(
+    caret_consumer: Path, width: int, height: int, offset: int
+) -> None:
+    """Actual widgets show the same idle thumb and hide it when their content fits."""
+    run_process(
+        [
+            str(caret_consumer),
+            "scrollbars",
+            str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
+            str(width),
+            str(height),
+            str(offset),
+        ],
+        name=f"native list, form, menu and read-only text scrollbars at {width}x{height}",
+        timeout=10,
+        check=True,
+    )
 
 
 def test_alert_delivers_all_application_command_ids(caret_consumer: Path) -> None:
@@ -169,6 +235,23 @@ def test_exclusive_first_row_and_refill_keep_one_mark(
     )
 
 
+@pytest.mark.parametrize("kind", ["exclusive", "multiple", "popup"])
+def test_form_choices_own_input_text_and_preserve_selection(
+    caret_consumer: Path, kind: str
+) -> None:
+    """Native choices retain mutable input text through selection and deletion."""
+    run_process(
+        [
+            str(caret_consumer),
+            f"choice-{kind}",
+            str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
+        ],
+        name=f"retain text and selection in a native {kind} form choice",
+        timeout=10,
+        check=True,
+    )
+
+
 @pytest.mark.parametrize("editing", ["pending", "clear"])
 def test_options_keeps_text_box_suspended_across_visibility(
     caret_consumer: Path, editing: str
@@ -197,6 +280,54 @@ def test_menu_restores_only_focused_canvas_field_after_visibility(
             str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
         ],
         name="restore native Canvas text-field focus after a covered visibility change",
+        timeout=10,
+        check=True,
+    )
+
+
+@dataclass(frozen=True)
+class MenuGeometry:
+    """Owned popup dimensions and expected insets, independent of profile lookup."""
+
+    width: int
+    height: int
+    padding: int
+    row_height: int
+    header_height: int
+    margin: int
+
+
+@pytest.mark.parametrize(
+    "geometry",
+    [
+        pytest.param(MenuGeometry(128, 128, 1, 20, 20, 4), id="128x128"),
+        pytest.param(MenuGeometry(128, 160, 1, 22, 20, 4), id="128x160"),
+        pytest.param(MenuGeometry(176, 220, 4, 26, 24, 6), id="176x220"),
+        pytest.param(MenuGeometry(240, 320, 6, 36, 28, 8), id="240x320"),
+        pytest.param(MenuGeometry(320, 240, 4, 30, 26, 6), id="320x240"),
+    ],
+)
+@pytest.mark.parametrize("titled", [False, True])
+def test_native_menu_keeps_list_insets_when_created_and_resized(
+    caret_consumer: Path,
+    geometry: MenuGeometry,
+    *,
+    titled: bool,
+) -> None:
+    """Popup bounds include both row insets and stay bounded by the resized surface."""
+    run_process(
+        [
+            str(caret_consumer),
+            "menu-title-insets" if titled else "menu-insets",
+            str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
+            str(geometry.width),
+            str(geometry.height),
+            str(geometry.padding),
+            str(geometry.row_height),
+            str(geometry.header_height),
+            str(geometry.margin),
+        ],
+        name=f"native menu insets at {geometry.width}x{geometry.height}, title={titled}",
         timeout=10,
         check=True,
     )

@@ -3,28 +3,38 @@
  * The application ABI of libfplinux-ui.so.1: exactly the functions declared
  * in the installed headers fplinux-ui.h, fplinux-ui-screen.h,
  * fplinux-ui-text.h, fplinux-ui-menu.h, fplinux-ui-prefs.h,
- * fplinux-ui-locale.h. A new function is added here and in its header; none
- * is removed or changed while the soname stays libfplinux-ui.so.1. Every
- * other symbol, such as the fonts, the session protocol functions and the
- * xdg-shell interfaces, stays local to the library.
+ * fplinux-ui-locale.h, fplinux-ui-symbol-picker.h, fplinux-ui-audio.h,
+ * fplinux-ui-vibration.h and fplinux-ui-frame.h. A new function is added
+ * here and in its header. The library and its current consumers are built
+ * together. Every other symbol, such as the fonts, session
+ * protocol functions and xdg-shell interfaces, stays local to the library.
  */
 {
 global:
 	fplinux_ui_alert_new;
 	fplinux_ui_alert_set_progress;
 	fplinux_ui_alert_set_text;
+	fplinux_ui_audio_background_supported;
+	fplinux_ui_audio_close;
+	fplinux_ui_audio_open;
+	fplinux_ui_audio_queued;
+	fplinux_ui_audio_supported;
+	fplinux_ui_audio_write;
 	fplinux_ui_back;
 	fplinux_ui_canvas_new;
 	fplinux_ui_canvas_object;
+	fplinux_ui_canvas_set_key_filter;
 	fplinux_ui_canvas_set_key_handler;
 	fplinux_ui_canvas_set_key_repeat;
 	fplinux_ui_canvas_set_keyboard_keys;
 	fplinux_ui_close;
+	fplinux_ui_close_reply;
 	fplinux_ui_current;
 	fplinux_ui_decimal_separator;
 	fplinux_ui_form_add_item_command;
 	fplinux_ui_form_append_choice;
 	fplinux_ui_form_append_date;
+	fplinux_ui_form_append_duration;
 	fplinux_ui_form_append_gauge;
 	fplinux_ui_form_append_image;
 	fplinux_ui_form_append_string;
@@ -33,10 +43,12 @@ global:
 	fplinux_ui_form_delete_all;
 	fplinux_ui_form_get_choice;
 	fplinux_ui_form_get_date;
+	fplinux_ui_form_get_duration;
 	fplinux_ui_form_get_focus;
 	fplinux_ui_form_get_text;
 	fplinux_ui_form_get_value;
 	fplinux_ui_form_is_chosen;
+	fplinux_ui_form_is_editing;
 	fplinux_ui_form_is_hidden;
 	fplinux_ui_form_move_item;
 	fplinux_ui_form_new;
@@ -45,6 +57,8 @@ global:
 	fplinux_ui_form_set_chosen;
 	fplinux_ui_form_set_constraint;
 	fplinux_ui_form_set_date;
+	fplinux_ui_form_set_duration;
+	fplinux_ui_form_set_edit_listener;
 	fplinux_ui_form_set_focus;
 	fplinux_ui_form_set_hidden;
 	fplinux_ui_form_set_string;
@@ -52,6 +66,14 @@ global:
 	fplinux_ui_form_set_value;
 	fplinux_ui_format_date;
 	fplinux_ui_format_number;
+	fplinux_ui_frame_damage;
+	fplinux_ui_frame_delete;
+	fplinux_ui_frame_new;
+	fplinux_ui_frame_object;
+	fplinux_ui_frame_pixels;
+	fplinux_ui_frame_present;
+	fplinux_ui_frame_resize;
+	fplinux_ui_frame_set_timer;
 	fplinux_ui_glyph;
 	fplinux_ui_go_back;
 	fplinux_ui_header;
@@ -94,11 +116,13 @@ global:
 	fplinux_ui_prefs_get;
 	fplinux_ui_prefs_get_int;
 	fplinux_ui_prefs_open;
+	fplinux_ui_prefs_open_directory;
 	fplinux_ui_prefs_remove;
 	fplinux_ui_prefs_save;
 	fplinux_ui_prefs_set;
 	fplinux_ui_prefs_set_int;
 	fplinux_ui_push;
+	fplinux_ui_navigate;
 	fplinux_ui_quit;
 	fplinux_ui_replace;
 	fplinux_ui_run;
@@ -115,12 +139,21 @@ global:
 	fplinux_ui_screen_set_title;
 	fplinux_ui_scroll_key;
 	fplinux_ui_send;
+	fplinux_ui_set_close_handler;
 	fplinux_ui_set_fullscreen;
 	fplinux_ui_set_softkeys;
 	fplinux_ui_softkey_bar_create;
 	fplinux_ui_softkey_bar_set;
 	fplinux_ui_set_title;
 	fplinux_ui_state_dir;
+	fplinux_ui_storage_error;
+	fplinux_ui_style_scrollbar;
+	fplinux_ui_symbol_picker_columns;
+	fplinux_ui_symbol_picker_create;
+	fplinux_ui_symbol_picker_delete;
+	fplinux_ui_symbol_picker_is_open;
+	fplinux_ui_symbol_picker_refresh;
+	fplinux_ui_symbol_picker_select;
 	fplinux_ui_text_box_get;
 	fplinux_ui_text_box_new;
 	fplinux_ui_text_box_set;
@@ -138,6 +171,9 @@ global:
 	fplinux_ui_text_set_constraint;
 	fplinux_ui_text_set_focused;
 	fplinux_ui_theme;
+	fplinux_ui_vibration_play;
+	fplinux_ui_vibration_stop;
+	fplinux_ui_vibration_supported;
 	fplinux_ui_watch_fd;
 	fplinux_ui_width;
 local:

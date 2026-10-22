@@ -9,7 +9,7 @@
 #include <string.h>
 
 #define INITIAL_CAPACITY 64U
-#define UTF8_MAX_BYTES 4U
+#define UTF8_MAX_BYTES FPLINUX_TEXT_INPUT_UTF8_BYTES
 /* U+2022 BULLET, which masks a password character. */
 #define BULLET "\xe2\x80\xa2"
 #define BULLET_BYTES (sizeof(BULLET) - 1)
@@ -22,39 +22,9 @@ static const struct fplinux_multitap_language phone_star = {
 	.keys = { "*+pw" },
 };
 
-static const char *const symbols[] = {
-	".", ",", "?", "!", "'",  "\"", "-", "(", ")", "@", "/", ":",
-	";", "_", "+", "=", "*",  "#",	"%", "&", "$", "<", ">", "~",
-	"[", "]", "{", "}", "\\", "|",	"«", "»", "—", "№", "€", "°",
-};
-
 static bool is_continuation(char byte)
 {
 	return ((unsigned char)byte & 0xc0) == 0x80;
-}
-
-static size_t encode_utf8(uint32_t character, char *bytes)
-{
-	if (character < 0x80) {
-		bytes[0] = (char)character;
-		return 1;
-	}
-	if (character < 0x800) {
-		bytes[0] = (char)(0xc0 | character >> 6);
-		bytes[1] = (char)(0x80 | (character & 0x3f));
-		return 2;
-	}
-	if (character < 0x10000) {
-		bytes[0] = (char)(0xe0 | character >> 12);
-		bytes[1] = (char)(0x80 | ((character >> 6) & 0x3f));
-		bytes[2] = (char)(0x80 | (character & 0x3f));
-		return 3;
-	}
-	bytes[0] = (char)(0xf0 | character >> 18);
-	bytes[1] = (char)(0x80 | ((character >> 12) & 0x3f));
-	bytes[2] = (char)(0x80 | ((character >> 6) & 0x3f));
-	bytes[3] = (char)(0x80 | (character & 0x3f));
-	return 4;
 }
 
 static size_t count_characters(const char *text, size_t bytes)
@@ -142,28 +112,18 @@ static bool starts_sentence(const struct fplinux_ui_text_model *model)
 static uint32_t apply_case(const struct fplinux_ui_text_model *model,
 			   uint32_t character)
 {
-	/* The PHONE * cycle types p and w as they are. */
-	if (model->numeric)
-		return character;
-	switch (model->letter_case) {
-	case FPLINUX_LANGUAGE_UPPER:
-		return fplinux_multitap_uppercase(character);
-	case FPLINUX_LANGUAGE_SENTENCE:
-		return starts_sentence(model) ?
-			       fplinux_multitap_uppercase(character) :
-			       character;
-	default:
-		return character;
-	}
+	return fplinux_text_input_apply_case(&model->input, character,
+					     starts_sentence(model));
 }
 
 static size_t pending_bytes(const struct fplinux_ui_text_model *model,
 			    char *bytes)
 {
-	if (!fplinux_multitap_pending(&model->compose))
+	if (!fplinux_multitap_pending(&model->input.compose))
 		return 0;
-	return encode_utf8(
-		apply_case(model, fplinux_multitap_candidate(&model->compose)),
+	return fplinux_text_input_encode_utf8(
+		apply_case(model,
+			   fplinux_multitap_candidate(&model->input.compose)),
 		bytes);
 }
 
@@ -201,7 +161,8 @@ static enum fplinux_multitap_emit_result emit_character(void *context,
 {
 	struct fplinux_ui_text_model *model = context;
 	char bytes[UTF8_MAX_BYTES];
-	size_t size = encode_utf8(apply_case(model, character), bytes);
+	size_t size = fplinux_text_input_encode_utf8(
+		apply_case(model, character), bytes);
 
 	return insert_bytes(model, bytes, size) ?
 		       FPLINUX_MULTITAP_EMIT_ACCEPTED :
@@ -210,17 +171,19 @@ static enum fplinux_multitap_emit_result emit_character(void *context,
 
 static void commit_pending(struct fplinux_ui_text_model *model)
 {
-	model->held_code = 0;
-	if (!fplinux_multitap_pending(&model->compose))
+	model->phone_zero_held = false;
+	if (!fplinux_multitap_pending(&model->input.compose)) {
+		model->input.held_digit = 0;
 		return;
-	fplinux_multitap_commit(&model->compose, emit_character, model);
+	}
+	fplinux_text_input_commit(&model->input, emit_character, model);
 	model->dirty = true;
 }
 
 static void cancel_pending(struct fplinux_ui_text_model *model)
 {
-	model->held_code = 0;
-	fplinux_multitap_cancel(&model->compose);
+	model->phone_zero_held = false;
+	fplinux_text_input_cancel(&model->input);
 	model->dirty = true;
 }
 
@@ -269,7 +232,7 @@ static void refresh_display(struct fplinux_ui_text_model *model)
 	size_t size = pending_bytes(model, bytes);
 
 	if (size && !reserve(model, model->length + size)) {
-		fplinux_multitap_cancel(&model->compose);
+		fplinux_text_input_cancel(&model->input);
 		size = 0;
 	}
 	memcpy(model->display, model->text, model->cursor);
@@ -291,18 +254,17 @@ static void finish(struct fplinux_ui_text_model *model)
 
 /* Returns false when the pending character does not fit. */
 static bool press_multitap(struct fplinux_ui_text_model *model,
-			   unsigned char key, uint64_t now_ms)
+			   unsigned char key, uint64_t now_ms, bool hold)
 {
-	uint64_t elapsed =
-		now_ms > model->compose_ms ? now_ms - model->compose_ms : 0;
 	char bytes[UTF8_MAX_BYTES];
 	size_t size;
 
-	fplinux_multitap_press(&model->compose, key,
-			       elapsed > UINT32_MAX ? UINT32_MAX :
-						      (uint32_t)elapsed,
-			       emit_character, model);
-	model->compose_ms = now_ms;
+	if (hold)
+		fplinux_text_input_press(&model->input, key, now_ms,
+					 emit_character, model);
+	else
+		fplinux_text_input_compose(&model->input, key, now_ms,
+					   emit_character, model);
 	model->dirty = true;
 	size = pending_bytes(model, bytes);
 	if (!fits(model, model->characters + 1) ||
@@ -311,42 +273,6 @@ static bool press_multitap(struct fplinux_ui_text_model *model,
 		return false;
 	}
 	return true;
-}
-
-static void press_letter_key(struct fplinux_ui_text_model *model,
-			     unsigned int code, unsigned char digit,
-			     uint64_t now_ms)
-{
-	if (!press_multitap(model, digit, now_ms))
-		return;
-	model->held_code = code;
-	model->held_ms = now_ms;
-}
-
-static enum fplinux_language_case
-first_case(const struct fplinux_ui_text_model *model)
-{
-	return model->password ? FPLINUX_LANGUAGE_LOWER :
-				 FPLINUX_LANGUAGE_SENTENCE;
-}
-
-static void next_mode(struct fplinux_ui_text_model *model)
-{
-	if (model->numeric) {
-		model->numeric = false;
-		model->language = 0;
-		model->letter_case = first_case(model);
-	} else if (model->letter_case != FPLINUX_LANGUAGE_UPPER) {
-		++model->letter_case;
-	} else if (model->language + 1 < model->languages.count) {
-		++model->language;
-		model->letter_case = first_case(model);
-	} else {
-		model->numeric = true;
-	}
-	fplinux_multitap_set_language(
-		&model->compose, &model->languages.language[model->language]);
-	model->dirty = true;
 }
 
 static bool is_number(const struct fplinux_ui_text_model *model)
@@ -394,12 +320,12 @@ static bool type_separator(struct fplinux_ui_text_model *model)
 
 static void decimal_star(struct fplinux_ui_text_model *model, uint64_t now_ms)
 {
-	bool again = model->separator_typed &&
-		     model->separator_revision == model->revision &&
-		     now_ms < model->separator_ms +
-				      FPLINUX_UI_TEXT_MODEL_COMMIT_MS &&
-		     model->cursor &&
-		     model->text[model->cursor - 1] == model->separator;
+	bool again =
+		model->separator_typed &&
+		model->separator_revision == model->revision &&
+		now_ms < model->separator_ms + FPLINUX_TEXT_INPUT_COMMIT_MS &&
+		model->cursor &&
+		model->text[model->cursor - 1] == model->separator;
 
 	model->separator_typed = false;
 	if (again) {
@@ -428,8 +354,8 @@ static void type_digit(struct fplinux_ui_text_model *model, unsigned int code,
 		return;
 	if (model->type == FPLINUX_UI_TEXT_MODEL_PHONE &&
 	    code == KEY_NUMERIC_0) {
-		model->held_code = code;
-		model->held_ms = now_ms;
+		model->phone_zero_held = true;
+		model->phone_zero_ms = now_ms;
 	}
 }
 
@@ -442,9 +368,19 @@ static void hold_plus(struct fplinux_ui_text_model *model)
 	model->dirty = true;
 }
 
+static void hold_phone_zero(struct fplinux_ui_text_model *model,
+			    uint64_t now_ms)
+{
+	if (!model->phone_zero_held ||
+	    now_ms < model->phone_zero_ms + FPLINUX_TEXT_INPUT_HOLD_MS)
+		return;
+	model->phone_zero_held = false;
+	hold_plus(model);
+}
+
 static void delete_backward(struct fplinux_ui_text_model *model)
 {
-	if (fplinux_multitap_pending(&model->compose)) {
+	if (fplinux_multitap_pending(&model->input.compose)) {
 		cancel_pending(model);
 		return;
 	}
@@ -452,6 +388,15 @@ static void delete_backward(struct fplinux_ui_text_model *model)
 		delete_range(model,
 			     previous_boundary(model->text, model->cursor),
 			     model->cursor);
+}
+
+static enum fplinux_multitap_emit_result erase_character(void *context)
+{
+	struct fplinux_ui_text_model *model = context;
+
+	delete_backward(model);
+	return model->cursor ? FPLINUX_MULTITAP_EMIT_ACCEPTED :
+			       FPLINUX_MULTITAP_EMIT_REJECTED;
 }
 
 static void delete_forward(struct fplinux_ui_text_model *model)
@@ -486,45 +431,42 @@ static void move_to_line_edge(struct fplinux_ui_text_model *model, bool end)
 
 static void open_picker(struct fplinux_ui_text_model *model)
 {
-	commit_pending(model);
-	model->picker_open = true;
-	model->picker_index = 0;
+	model->phone_zero_held = false;
+	fplinux_text_input_open_picker(&model->input, emit_character, model);
 	model->dirty = true;
 }
 
 static void close_picker(struct fplinux_ui_text_model *model, bool insert)
 {
-	const char *symbol = symbols[model->picker_index];
-
 	if (insert)
-		insert_bytes(model, symbol, strlen(symbol));
-	model->picker_open = false;
+		fplinux_text_input_select_symbol(&model->input, emit_character,
+						 model);
+	else
+		fplinux_text_input_close_picker(&model->input);
 	model->dirty = true;
 }
 
-/* Arrows wrap within the grid; the symbol count fills whole rows. */
 static bool move_picker(struct fplinux_ui_text_model *model, unsigned int code)
 {
-	unsigned int count = sizeof(symbols) / sizeof(symbols[0]);
-	unsigned int step;
+	enum fplinux_text_input_direction direction;
 
 	switch (code) {
 	case KEY_LEFT:
-		step = count - 1;
+		direction = FPLINUX_TEXT_INPUT_LEFT;
 		break;
 	case KEY_RIGHT:
-		step = 1;
+		direction = FPLINUX_TEXT_INPUT_RIGHT;
 		break;
 	case KEY_UP:
-		step = count - model->picker_columns;
+		direction = FPLINUX_TEXT_INPUT_UP;
 		break;
 	case KEY_DOWN:
-		step = model->picker_columns;
+		direction = FPLINUX_TEXT_INPUT_DOWN;
 		break;
 	default:
 		return false;
 	}
-	model->picker_index = (model->picker_index + step) % count;
+	fplinux_text_input_move_picker(&model->input, direction);
 	model->dirty = true;
 	return true;
 }
@@ -566,7 +508,9 @@ pound_key(struct fplinux_ui_text_model *model)
 {
 	switch (model->type) {
 	case FPLINUX_UI_TEXT_MODEL_ANY:
-		next_mode(model);
+		fplinux_text_input_next_mode(&model->input, emit_character,
+					     model);
+		model->dirty = true;
 		return FPLINUX_UI_TEXT_MODEL_CONSUMED;
 	case FPLINUX_UI_TEXT_MODEL_PHONE:
 		insert_bytes(model, "#", 1);
@@ -599,14 +543,14 @@ phone_key(struct fplinux_ui_text_model *model, unsigned int code,
 {
 	bool had_pending;
 
-	if (model->picker_open)
+	if (model->input.picker_open)
 		return picker_phone_key(model, code);
 	if (code >= KEY_NUMERIC_0 && code <= KEY_NUMERIC_9) {
 		unsigned char digit =
 			(unsigned char)('0' + code - KEY_NUMERIC_0);
 
-		if (!model->numeric)
-			press_letter_key(model, code, digit, now_ms);
+		if (!model->input.numeric)
+			press_multitap(model, digit, now_ms, true);
 		else
 			type_digit(model, code, digit, now_ms);
 		return FPLINUX_UI_TEXT_MODEL_CONSUMED;
@@ -614,12 +558,14 @@ phone_key(struct fplinux_ui_text_model *model, unsigned int code,
 	if (code == KEY_NUMERIC_STAR &&
 	    model->type == FPLINUX_UI_TEXT_MODEL_PHONE) {
 		/* The * cycle steps a pending character instead of committing. */
-		model->held_code = 0;
-		press_multitap(model, '0', now_ms);
+		model->input.held_digit = 0;
+		model->phone_zero_held = false;
+		press_multitap(model, '0', now_ms, false);
 		return FPLINUX_UI_TEXT_MODEL_CONSUMED;
 	}
 	if (code == KEY_F14) {
-		model->held_code = 0;
+		model->input.held_digit = 0;
+		model->phone_zero_held = false;
 		if (fplinux_ui_text_model_is_empty(model))
 			return FPLINUX_UI_TEXT_MODEL_IGNORED;
 		/*
@@ -627,12 +573,11 @@ phone_key(struct fplinux_ui_text_model *model, unsigned int code,
 		 * key is consumed at the start of the text even with nothing
 		 * to delete.
 		 */
-		delete_backward(model);
-		model->clearing = model->cursor > 0;
-		model->clear_ms = now_ms + FPLINUX_UI_TEXT_MODEL_HOLD_MS;
+		fplinux_text_input_clear_press(&model->input, now_ms,
+					       erase_character, model);
 		return FPLINUX_UI_TEXT_MODEL_CONSUMED;
 	}
-	had_pending = fplinux_multitap_pending(&model->compose);
+	had_pending = fplinux_multitap_pending(&model->input.compose);
 	commit_pending(model);
 	switch (code) {
 	case KEY_NUMERIC_POUND:
@@ -702,7 +647,7 @@ keyboard_key(struct fplinux_ui_text_model *model,
 {
 	if (key->shortcut)
 		return FPLINUX_UI_TEXT_MODEL_IGNORED;
-	if (model->picker_open) {
+	if (model->input.picker_open) {
 		if (move_picker(model, key->code))
 			return FPLINUX_UI_TEXT_MODEL_CONSUMED;
 		if (key->code == KEY_ENTER || key->code == KEY_KPENTER ||
@@ -713,7 +658,8 @@ keyboard_key(struct fplinux_ui_text_model *model,
 		close_picker(model, false);
 	}
 	if (key->code == KEY_BACKSPACE) {
-		model->held_code = 0;
+		model->input.held_digit = 0;
+		model->phone_zero_held = false;
 		if (fplinux_ui_text_model_is_empty(model))
 			return FPLINUX_UI_TEXT_MODEL_IGNORED;
 		delete_backward(model);
@@ -755,7 +701,7 @@ keyboard_key(struct fplinux_ui_text_model *model,
 
 void fplinux_ui_text_model_cancel_picker(struct fplinux_ui_text_model *model)
 {
-	if (!model->picker_open)
+	if (!model->input.picker_open)
 		return;
 	close_picker(model, false);
 	finish(model);
@@ -773,14 +719,26 @@ static bool take_consumed(struct fplinux_ui_text_model *model,
 }
 
 static void release_key(struct fplinux_ui_text_model *model,
-			const struct fplinux_ui_text_model_key *key)
+			const struct fplinux_ui_text_model_key *key,
+			uint64_t now_ms)
 {
+	bool had_pending = fplinux_multitap_pending(&model->input.compose);
+
 	if (key->keyboard)
 		return;
-	if (key->code == model->held_code)
-		model->held_code = 0;
+	if (key->code >= KEY_NUMERIC_0 && key->code <= KEY_NUMERIC_9)
+		fplinux_text_input_release(
+			&model->input,
+			(unsigned char)('0' + key->code - KEY_NUMERIC_0),
+			now_ms, emit_character, model);
+	if (key->code == KEY_NUMERIC_0) {
+		hold_phone_zero(model, now_ms);
+		model->phone_zero_held = false;
+	}
 	if (key->code == KEY_F14)
-		model->clearing = false;
+		fplinux_text_input_clear_release(&model->input);
+	if (had_pending != fplinux_multitap_pending(&model->input.compose))
+		model->dirty = true;
 }
 
 bool fplinux_ui_text_model_init(struct fplinux_ui_text_model *model,
@@ -802,12 +760,7 @@ bool fplinux_ui_text_model_init(struct fplinux_ui_text_model *model,
 	model->limit = limit;
 	model->multiline = multiline;
 	model->focused = true;
-	fplinux_multitap_load_languages(&model->languages, directory,
-					input_language);
-	model->letter_case = FPLINUX_LANGUAGE_SENTENCE;
-	fplinux_multitap_init(&model->compose, &model->languages.language[0],
-			      FPLINUX_UI_TEXT_MODEL_COMMIT_MS);
-	model->picker_columns = FPLINUX_UI_TEXT_MODEL_PICKER_COLUMNS;
+	fplinux_text_input_init(&model->input, directory, input_language, true);
 	return true;
 }
 
@@ -835,7 +788,8 @@ fplinux_ui_text_model_key(struct fplinux_ui_text_model *model,
 	if (!key->pressed) {
 		bool consumed = take_consumed(model, key);
 
-		release_key(model, key);
+		release_key(model, key, now_ms);
+		finish(model);
 		return consumed ? FPLINUX_UI_TEXT_MODEL_CONSUMED :
 				  FPLINUX_UI_TEXT_MODEL_IGNORED;
 	}
@@ -855,47 +809,40 @@ fplinux_ui_text_model_key(struct fplinux_ui_text_model *model,
 void fplinux_ui_text_model_tick(struct fplinux_ui_text_model *model,
 				uint64_t now_ms)
 {
-	if (model->held_code &&
-	    now_ms >= model->held_ms + FPLINUX_UI_TEXT_MODEL_HOLD_MS) {
-		model->held_code = 0;
-		/* A held letter key types its digit; a held typed 0 becomes +. */
-		if (fplinux_multitap_pending(&model->compose))
-			fplinux_multitap_hold(&model->compose, emit_character,
-					      model);
-		else
-			hold_plus(model);
+	bool had_pending = fplinux_multitap_pending(&model->input.compose);
+
+	hold_phone_zero(model, now_ms);
+	fplinux_text_input_tick(&model->input, now_ms, emit_character,
+				erase_character, model);
+	if (had_pending != fplinux_multitap_pending(&model->input.compose))
 		model->dirty = true;
-	}
-	if (fplinux_multitap_pending(&model->compose) && !model->held_code &&
-	    now_ms >= model->compose_ms + FPLINUX_UI_TEXT_MODEL_COMMIT_MS) {
-		fplinux_multitap_expire(&model->compose,
-					FPLINUX_UI_TEXT_MODEL_COMMIT_MS,
-					emit_character, model);
+	finish(model);
+}
+
+void fplinux_ui_text_model_cancel_held(struct fplinux_ui_text_model *model)
+{
+	if (model->input.picker_open)
 		model->dirty = true;
-	}
-	if (model->clearing && now_ms >= model->clear_ms) {
-		delete_backward(model);
-		model->clearing = model->cursor > 0;
-		model->clear_ms = now_ms + FPLINUX_UI_TEXT_MODEL_REPEAT_MS;
-	}
+	model->phone_zero_held = false;
+	fplinux_text_input_cancel_held(&model->input);
 	finish(model);
 }
 
 bool fplinux_ui_text_model_deadline(const struct fplinux_ui_text_model *model,
 				    uint64_t *deadline_ms)
 {
-	uint64_t deadline = UINT64_MAX;
+	uint64_t deadline;
+	bool scheduled = fplinux_text_input_deadline(&model->input, &deadline);
 
-	if (model->held_code)
-		deadline = model->held_ms + FPLINUX_UI_TEXT_MODEL_HOLD_MS;
-	else if (fplinux_multitap_pending(&model->compose))
-		deadline = model->compose_ms + FPLINUX_UI_TEXT_MODEL_COMMIT_MS;
-	if (model->clearing && model->clear_ms < deadline)
-		deadline = model->clear_ms;
-	if (deadline == UINT64_MAX)
-		return false;
-	*deadline_ms = deadline;
-	return true;
+	if (model->phone_zero_held &&
+	    (!scheduled ||
+	     model->phone_zero_ms + FPLINUX_TEXT_INPUT_HOLD_MS < deadline)) {
+		deadline = model->phone_zero_ms + FPLINUX_TEXT_INPUT_HOLD_MS;
+		scheduled = true;
+	}
+	if (scheduled)
+		*deadline_ms = deadline;
+	return scheduled;
 }
 
 /* Whether text suits the type; numbers may be unfinished, such as "-". */
@@ -948,7 +895,7 @@ bool fplinux_ui_text_model_set_text(struct fplinux_ui_text_model *model,
 	if (!reserve(model, length))
 		return false;
 	cancel_pending(model);
-	model->clearing = false;
+	model->input.clearing = false;
 	memcpy(model->text, text, length + 1);
 	use_separator(model);
 	model->length = length;
@@ -976,16 +923,16 @@ bool fplinux_ui_text_model_set_type(struct fplinux_ui_text_model *model,
 	}
 	model->type = type;
 	model->separator = separator;
-	model->numeric = type != FPLINUX_UI_TEXT_MODEL_ANY;
-	model->language = 0;
-	model->letter_case = first_case(model);
-	model->picker_open = false;
+	fplinux_text_input_reset_mode(&model->input,
+				      type != FPLINUX_UI_TEXT_MODEL_ANY);
+	model->input.picker_open = false;
 	model->separator_typed = false;
 	use_separator(model);
-	fplinux_multitap_set_language(&model->compose,
-				      type == FPLINUX_UI_TEXT_MODEL_PHONE ?
-					      &phone_star :
-					      &model->languages.language[0]);
+	fplinux_multitap_set_language(
+		&model->input.compose,
+		type == FPLINUX_UI_TEXT_MODEL_PHONE ?
+			&phone_star :
+			&model->input.languages.language[0]);
 	model->dirty = true;
 	finish(model);
 	return true;
@@ -997,8 +944,7 @@ void fplinux_ui_text_model_set_password(struct fplinux_ui_text_model *model,
 	if (model->password == password)
 		return;
 	model->password = password;
-	if (password && model->letter_case == FPLINUX_LANGUAGE_SENTENCE)
-		model->letter_case = FPLINUX_LANGUAGE_LOWER;
+	fplinux_text_input_set_sentence_case(&model->input, !password);
 	model->dirty = true;
 	finish(model);
 }
@@ -1010,8 +956,8 @@ void fplinux_ui_text_model_set_focused(struct fplinux_ui_text_model *model,
 		return;
 	if (!focused) {
 		commit_pending(model);
-		model->picker_open = false;
-		model->clearing = false;
+		model->input.picker_open = false;
+		model->input.clearing = false;
 		memset(model->consumed, 0, sizeof(model->consumed));
 	}
 	model->focused = focused;
@@ -1022,9 +968,7 @@ void fplinux_ui_text_model_set_focused(struct fplinux_ui_text_model *model,
 void fplinux_ui_text_model_set_picker_columns(
 	struct fplinux_ui_text_model *model, unsigned int columns)
 {
-	if (!columns || fplinux_ui_text_model_symbol_count() % columns)
-		columns = FPLINUX_UI_TEXT_MODEL_PICKER_COLUMNS;
-	model->picker_columns = columns;
+	fplinux_text_input_set_picker_columns(&model->input, columns);
 }
 
 void fplinux_ui_text_model_set_read_only(struct fplinux_ui_text_model *model,
@@ -1034,8 +978,8 @@ void fplinux_ui_text_model_set_read_only(struct fplinux_ui_text_model *model,
 		return;
 	if (read_only) {
 		commit_pending(model);
-		model->picker_open = false;
-		model->clearing = false;
+		model->input.picker_open = false;
+		model->input.clearing = false;
 		model->separator_typed = false;
 	}
 	model->read_only = read_only;
@@ -1059,7 +1003,8 @@ void fplinux_ui_text_model_set_caret(struct fplinux_ui_text_model *model,
 
 bool fplinux_ui_text_model_is_empty(const struct fplinux_ui_text_model *model)
 {
-	return !model->length && !fplinux_multitap_pending(&model->compose);
+	return !model->length &&
+	       !fplinux_multitap_pending(&model->input.compose);
 }
 
 bool fplinux_ui_text_model_takes_newline(
@@ -1080,13 +1025,13 @@ fplinux_ui_text_model_view(const struct fplinux_ui_text_model *model)
 size_t fplinux_ui_text_model_caret(const struct fplinux_ui_text_model *model)
 {
 	return count_characters(model->text, model->cursor) +
-	       (fplinux_multitap_pending(&model->compose) ? 1 : 0);
+	       (fplinux_multitap_pending(&model->input.compose) ? 1 : 0);
 }
 
 bool fplinux_ui_text_model_pending(const struct fplinux_ui_text_model *model,
 				   size_t *index)
 {
-	if (!fplinux_multitap_pending(&model->compose))
+	if (!fplinux_multitap_pending(&model->input.compose))
 		return false;
 	*index = count_characters(model->text, model->cursor);
 	return true;
@@ -1095,10 +1040,7 @@ bool fplinux_ui_text_model_pending(const struct fplinux_ui_text_model *model,
 const char *
 fplinux_ui_text_model_indicator(const struct fplinux_ui_text_model *model)
 {
-	if (model->numeric)
-		return "123";
-	return model->languages.language[model->language]
-		.indicator[model->letter_case];
+	return fplinux_text_input_indicator(&model->input);
 }
 
 void fplinux_ui_text_model_status(const struct fplinux_ui_text_model *model,
@@ -1117,17 +1059,7 @@ void fplinux_ui_text_model_status(const struct fplinux_ui_text_model *model,
 	}
 	snprintf(status, size, "%s  %zu/%zu", indicator,
 		 model->characters +
-			 (fplinux_multitap_pending(&model->compose) ? 1 : 0),
+			 (fplinux_multitap_pending(&model->input.compose) ? 1 :
+									    0),
 		 model->limit);
-}
-
-size_t fplinux_ui_text_model_symbol_count(void)
-{
-	return sizeof(symbols) / sizeof(symbols[0]);
-}
-
-const char *fplinux_ui_text_model_symbol(size_t index)
-{
-	return index < fplinux_ui_text_model_symbol_count() ? symbols[index] :
-							      NULL;
 }

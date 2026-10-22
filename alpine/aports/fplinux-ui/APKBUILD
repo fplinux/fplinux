@@ -33,13 +33,25 @@ source="
 	NotoSansSymbols2-OFL-2.008.txt::$_notogh/symbols/NotoSansSymbols2-v2.008/OFL.txt
 	NotoSansMath-OFL-3.000.txt::$_notogh/math/NotoSansMath-v3.000/OFL.txt
 	fplinux-ui.c
+	fplinux-ui-style.c
 	fplinux-ui.h
+	fplinux-storage.h
+	fplinux-audio-client.c
+	fplinux-audio-client-internal.h
+	fplinux-audio-protocol.h
+	fplinux-ui-audio.h
+	fplinux-ui-vibration.h
+	fplinux-ui-frame.c
+	fplinux-ui-frame.h
+	fplinux-ui-frame-private.h
 	fplinux-ui-session.c
 	fplinux-ui-session.h
 	fplinux-ui-text.c
 	fplinux-ui-text.h
 	fplinux-ui-text-model.c
 	fplinux-ui-text-model.h
+	fplinux-ui-symbol-picker.c
+	fplinux-ui-symbol-picker.h
 	fplinux-ui-listview.c
 	fplinux-ui-listview.h
 	fplinux-ui-menu.c
@@ -61,8 +73,12 @@ source="
 	fplinux-ui-locale.h
 	fplinux-language.c
 	fplinux-language.h
+	fplinux-utf8.c
+	fplinux-utf8.h
 	fplinux-multitap.c
 	fplinux-multitap.h
+	fplinux-text-input.c
+	fplinux-text-input.h
 	fplinux-ui.pc
 	fplinux-ui.map
 	ru.po
@@ -70,7 +86,6 @@ source="
 	GPL-2.0-only.txt
 	fplinux-ui-softkey-layout.c
 	fplinux-ui-softkey-layout.h
-	fplinux-ui-style-internal.h
 "
 builddir="$srcdir"
 
@@ -84,12 +99,12 @@ build() {
 		/usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml \
 		xdg-shell-protocol.c
 	# The models, the profile table, the soft-key layout, the list view, the
-	# language reader and the multi-tap engine stay private to the library.
+	# language reader and the text-input engine stay private to the library.
 	# The library exports exactly the functions of its installed headers,
 	# listed in fplinux-ui.map.
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror -fPIC \
 		-fvisibility=hidden -I"$srcdir" \
-		-c fplinux-language.c fplinux-multitap.c \
+		-c fplinux-language.c fplinux-multitap.c fplinux-text-input.c fplinux-utf8.c \
 		fplinux-ui-text-model.c fplinux-ui-screen-model.c \
 		fplinux-ui-profile.c fplinux-ui-softkey-layout.c
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror -fPIC \
@@ -106,11 +121,12 @@ build() {
 	done
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror -fPIC \
 		-I"$srcdir" $(pkg-config --cflags lvgl wayland-client xkbcommon json-c) \
-		-shared fplinux-ui.c fplinux-ui-session.c fplinux-ui-text.c \
+		-shared fplinux-ui.c fplinux-ui-style.c fplinux-ui-session.c fplinux-ui-text.c \
+		fplinux-audio-client.c fplinux-ui-frame.c \
 		fplinux-ui-menu.c fplinux-ui-prefs.c fplinux-ui-screen.c \
-		fplinux-ui-locale.c \
+		fplinux-ui-locale.c fplinux-ui-symbol-picker.c \
 		fplinux-ui-listview.o \
-		fplinux-language.o fplinux-multitap.o \
+		fplinux-language.o fplinux-multitap.o fplinux-text-input.o fplinux-utf8.o \
 		fplinux-ui-text-model.o fplinux-ui-screen-model.o \
 		fplinux-ui-profile.o fplinux-ui-softkey-layout.o fonts/*.o \
 		xdg-shell-protocol.c $LDFLAGS \
@@ -124,10 +140,19 @@ package() {
 	install -Dm755 libfplinux-ui.so.1 "$pkgdir/usr/lib/libfplinux-ui.so.1"
 	ln -s libfplinux-ui.so.1 "$pkgdir/usr/lib/libfplinux-ui.so"
 	install -Dm644 fplinux-ui.h "$pkgdir/usr/include/fplinux/fplinux-ui.h"
+	install -Dm644 fplinux-storage.h "$pkgdir/usr/include/fplinux/fplinux-storage.h"
+	install -Dm644 fplinux-ui-audio.h \
+		"$pkgdir/usr/include/fplinux/fplinux-ui-audio.h"
+	install -Dm644 fplinux-ui-vibration.h \
+		"$pkgdir/usr/include/fplinux/fplinux-ui-vibration.h"
+	install -Dm644 fplinux-ui-frame.h \
+		"$pkgdir/usr/include/fplinux/fplinux-ui-frame.h"
 	install -Dm644 fplinux-ui-session.h \
 		"$pkgdir/usr/include/fplinux/fplinux-ui-session.h"
 	install -Dm644 fplinux-ui-text.h \
 		"$pkgdir/usr/include/fplinux/fplinux-ui-text.h"
+	install -Dm644 fplinux-ui-symbol-picker.h \
+		"$pkgdir/usr/include/fplinux/fplinux-ui-symbol-picker.h"
 	install -Dm644 fplinux-ui-menu.h \
 		"$pkgdir/usr/include/fplinux/fplinux-ui-menu.h"
 	install -Dm644 fplinux-ui-prefs.h \
@@ -163,43 +188,58 @@ c64350b40561efba3c5fe9de0be3be27146d5423e4c403f6c12ac862bd0027937221adf16c0226ac
 df9ec827d8c71a5566862223e195dccb6e835438c1df2756f887e19dd44cd6589c8cf6853ca47410607dd81599c87daaea698f803a2de5ca2248a67df94e23b0  NotoSans-OFL-2.015.txt
 a20a22c0b75b7801ee79fd436a6e7f99e82906df9cc70119eff9ebe0a9a1efc6afdc17a514f8292ecccb86a64274a053aa5b38aa9174fe3c38e00bd698e4c509  NotoSansSymbols2-OFL-2.008.txt
 a64454634a8c33caaadde3be7508971da56cf9a3eeb1d8b959f5c0ccbb914c2be1aa307538f1dbe8d7629aea78f7b9c3be19912626250003bdf64f0d0e1f64e2  NotoSansMath-OFL-3.000.txt
-00075fa9091590881967cc949c41dd2555fe9ea2dd68379c2a5abb1757713c2bb14a8bd549c2a65a6f70162e061637967afbae5f15eaeed1ae45d4082fbcd168  fplinux-ui.c
-68a90b7d5e1e66481a6cade6e30e735d7a85b0bd195451bc4100c5ad693ff11d3a51a48c04bea99de90300c400af0ee38202a6ab30f990adc7e2e49c0d70ed3a  fplinux-ui.h
-44c4dae2154ace287bb0cca2861a12708f1c47fd4c002d82c2bb40cffcda301c8d171c305128c388eb489b45921138bc2c8abbdbad7ba8e480992373ce16edd9  fplinux-ui-session.c
-222a50057879ee8e02462365519c578424aeb51526992dee8de2682bf464dd3f0d9d89e26d70b63d866c2e819878e57ca5c5ad3582d51b1ef108a80a57d1eaf3  fplinux-ui-session.h
-9d58cc289a3eed1e8b0acbdd16c7fa6bfdbc6dda4115ee07a4b9858fe9e9154e889e287bff0c3a60cf2935a4a58c56ea96aa3fe94ca1acf9fb8e0e91236afdb2  fplinux-ui-text.c
+67bb57e9ce0e1bdb4e3a1bd650477efb625c75678a15a64f544f5d3d5101ba8e71dd3df308f6e66523cdd535195dac7eae20a43c0208fe9e0979dce6380ed103  fplinux-ui.c
+f7b6944a265823076b9b4f48a6b3876db6f246e66aae78a588a51e6c491561fd98e675095a455ac69a9cdada7bf9567623a8a572389e1d584c1b2ee6455bf73e  fplinux-ui-style.c
+e9b22201d11761d4adabd7dadd4fa5ed9bd5d8d9496f44c9e3766e3cb1f3c4e3efe1ac6870eb06072f12d8ef54a6e0a2a5db334627a911ed8825ff415a2f5e08  fplinux-ui.h
+c2a1a77ae236231200f2b037f320a513380957aaf44396c9b6fa889e1a6d249324e2b270cef183593134d55d5a3fef36ddce2485d6e759512f4888058d52839b  fplinux-storage.h
+a49464163861393788407942a71dc787debd1697f8bec1c8eeeaa6b3f45e7cf5d76b6530295409108a2dd7b3b972a5a5bdb0a3c5dd2fa7979f069467684fcb1f  fplinux-audio-client.c
+c7394f11a3d4ed7485cf380c6c2cadbcf1b4f90c6b9c41e8280577cca02b5fed288636aecc11639213f400c5663a952a82dc8513326e41df1baf5c2994a2e429  fplinux-audio-client-internal.h
+c115dac1c2af268136e93254adcec58e7b61bac2f14cfa77b61a4a227f27ad0dcae8e83d18120f82891d6c5c81777f5d39165d78935f6fa6cc8cbf81048df423  fplinux-audio-protocol.h
+0aa7c8110aa2dde7c89f98b149c8f36677d31bccd15cff742686012df77af3b0f548a17151ab23b3ce91f14c79fac378e40fd9c09b280e982270c81a5192753c  fplinux-ui-audio.h
+fb71d098944d301398925f41659bd758c1ec616af5dc5fc080173191b4fd7f12f711caa1763e1b576cc52bd3cb3d41801c557acb8fde7f51cf76eb6e95338e1c  fplinux-ui-vibration.h
+681433e70b4941c006fcc1e45d84c2faebdf2859c65da5ce91adf799b20e8f97c6953a34cabed7d6e98b8b6ce191e388d83de70402cd35d7ebc7919cd25ff63d  fplinux-ui-frame.c
+8bbb416737ae9bd545c1f48e70a6f8e19b1e517b6fb65bc79c9dd5740c78271e9ba029299aaa68ee6af6a0c3545b53fedf30536a310c5f0a4ffa2952db303523  fplinux-ui-frame.h
+c31372448b3e03da7d876d41d291069fc5fdc867a1917d45e96639bedca10ff7dc89fe41836c449a9f5634a258d21a2a3b0651163103ab11c40ca3b02551e028  fplinux-ui-frame-private.h
+11bfc48901529d5791e19d1429d9c4e2b6b375bcbc7a557f55a3963c79f30b36954a7a2ab6cae5f2554d40f819bf8812ee862fb30160bc44d828da6797064901  fplinux-ui-session.c
+3991af614423342cb5f0bcf05c563b400bf4142ada035884e5eaff751f9532bf52a844b6e18c7d3cf758f9f25d8d6dbaa5422433c6af4f01e432e5bdf86094f1  fplinux-ui-session.h
+984ebd31d125195bee997d9f9c0745cfcd2d73f68f0748779638d407c2e62675cb2dc0d250673d72e187e53d22bb142558dd360ccb2c28ab5ca5e847e69fcdbc  fplinux-ui-text.c
 52f7448ef472c319fed8cdb593f5fad05aab1ce89bc93cbbc2a68d050fb9199e96e14711a2791ceec36571ef9823844ddc96ae86ba07e4dac4f26867b2175139  fplinux-ui-text.h
-07175d24e12fbfae90d92be2a034af754c332e1e7a404d0233029d26cc0ad7abf6da47b3e07ced4330c77d5d5ff0ce75bc9314e2acc1f799795050ec2f1b8f06  fplinux-ui-text-model.c
-2cb17cdf7a6ba3a77f999b24fdaed36f4e4417ff5528abd1eb572bbf1719d3e31892da982d451425db82ef12dd1d5e9afcff3788c8870ceb898f17e75bef003b  fplinux-ui-text-model.h
-2949f40306b8e6cc8de4795230f81be96ad9c66c5b01395f8d0e1c62752acee9a3c66bac92e3270bcc693780236065431f29ad53407629e2c0ae6d773662637d  fplinux-ui-listview.c
-8ae373bf5a6e7d1d17647a1659dfb0cad142d22436533285e265fd81f412e6b536a84a83a53a1ebd04627158a37dc0cb254abbcbcdc48ecc53dd07cca73acc85  fplinux-ui-listview.h
-b4a2f6414830e03562fb348892417df792acc36fd616b261c4cd8aebb1b8e7a74f76e52b91bd561ef5d41d17361b65e51f4523c4a1d4423ee99b893bbccae070  fplinux-ui-menu.c
+80ba45232d662b59005f72333ac0f98d5142b64da50028d724f96da1d3989182f7a18e42bc2ca9c0ab268adf9e2d9da1677c2cae418e5e2be5ea4f0d4c3dcb0e  fplinux-ui-text-model.c
+77617e0e54bfdcd21b1528332a14d228321e49e590e6228956ba14f353c44f7e9852200025d80d4f4b7469a37d7591c8c96dd343ac0e6b7f6f49730ea122ad65  fplinux-ui-text-model.h
+c778e52b93ccd83d7543fee0f26681513abe8a12841a04313ead0eb61ee1515dcbde23408d2d4011bfce10cacd27afbbdf95be624ebeee2e2db186fbadba214f  fplinux-ui-symbol-picker.c
+1bcc263302770757e5c5259d6ce2ada6fbc55804490a5279511c4fa2189b9eea5f6fb4ea550f46d2c76522d967043c7e72541f91fd778f468f9aa020ea9b056b  fplinux-ui-symbol-picker.h
+2904c11738fc2acf0ffe7d566b909fc1c6b86090b8fff8431687ba72faf2eb4981102bc01290dfadc577c49d4b6c3143a3730fca37f7fd3005a92f9e7d89d87a  fplinux-ui-listview.c
+c8cc962788c9d833cc3cab442dfcd9aa0d6a30026b902bf45a125ce5d7aac3ecdb979e5212f9f8d82e993af8b07e302e833cbe28bab48f8c44d7cbd784cd4cbb  fplinux-ui-listview.h
+ac15b72bd330f22f65e83e15b0b1bbd5fb5295fb011baa4aecf4438c6242f016005d895a505dc3c2d1b4ab00ccf5957e060d989699745d9eee4913b973ac4eb2  fplinux-ui-menu.c
 3cb5f4799a11a9e6bec8237a1fd669dd28e4855a11e8f6520aeda802a595ffed88b3e636555b58d2fb3098882f4574b32a75184ddbe0a614e4edda14aa6e7ed3  fplinux-ui-menu.h
-411008fef16568ac13c7523ec93dfd3f3c34602beb78ec69f14b6d1e0ca0a4e96a7766df88dc91d0549c939e9717efdbd07911a33c3dd1a18c83f5f736698b13  fplinux-ui-prefs.c
-aed3b3f1298c423d67cc5ebb194b17d9be9cb8a9a727774a493fe53dc3816cfa25c9433698dd91ee977f5a50661c90d3e48a85e53ff8fc58cc18587d2d516654  fplinux-ui-prefs.h
-458d98347a13d65d4f5e8e47a8d3533dea5e187e5322034470276aa25cd0675a26ed935aadd7d2633c6226073742defa3ab10e4187e5bda53b2c3b8019985a67  fplinux-ui-screen.c
-8187a68d08d0cada0fd35ca4c74b31324cd95f7c425b2f0e8f405172d9ec13297aed355795883f270ddb0eeaea3f213ea95c0132fef67d0de3e8b9c4cf205689  fplinux-ui-screen.h
-ac3e7712cd4c0337b4ea7ff77e5966951721f0fb92b6a5de5cf6d767f76ad05066fc362ebaa2f9a64a8e7a5d73b3d29015684c91094b6e5782c5aae94cc075cb  fplinux-ui-screen-model.c
-26d114a574df077b012d9fe893dc2a0cb938cebf0a005058c5f8232486b05cf809e5968af2c708aa8c423f891350a71a8e26583500b66e4736699c858ed410bb  fplinux-ui-screen-model.h
-ee0a8f7e30ca698d657a5c947c17276dc479c7460921d93738e71f9cb6cf0c650296da9f42f79b481db59f59d98c86cca443f8aa0b7770093b1967ce92d252b1  fplinux-ui-profile.c
-a5246061f13bf0f6f8b74b153e607b8bf71492de7c9db6d40925f9a76f7d08c76a49c35459a02179eb5c7ebd742cb2b4111876289828a61aa4c652ccf7749044  fplinux-ui-profile.h
-6d888f2e6e0d2f5790a4a17d7d7364d14a28abb2d62537c1b2c78b47bf200c505a04c030fcf218f1ff1a51e423ad1931da241382919b6ccc27953b21b8bfb392  fplinux-ui-profile.json
-7317d2b5140aab9a22b76dc2ef4eec5609464d608f3dfe8c7afb36d766580acc9440056b7b4bbc23075144d548d8de885568757b6a2c7246615a7a0a2e7df393  fplinux_ui_profile.py
+ac27d4a3b2991c40ae55dce1dbf6356ed7de849a676d3b9b29287450ab821951f8eeecd98f19da5d89802c67dcf3efbcba7518aedf157c944c8a86b51f42edb0  fplinux-ui-prefs.c
+576456b0e4be805037e229140944f4f295401a0794c8ff6d0ef8d10a97d5fbc9c415d8cc2e0394ea098175158b14bcf86882f5cff505101526fcacffc2720d5e  fplinux-ui-prefs.h
+acd290f79e3855796d311c6bbdc2f0e252ae92b3b3aa9748332323c6f4f72c95bc7912dd6777863b318e359510f8b947f87035f51152f3bbdd65e9ced1954a19  fplinux-ui-screen.c
+baf3244f93bee8b449a174051eb486dc5f91f578a8d11b8f08a7811449d360a258fa19f5b5383d778c7c59c1ba580ce9c3a22c1956fb207eea647ab02ddf1d6f  fplinux-ui-screen.h
+edb89fcd825e5b60589dccc488229c834ab668b688a7b00953841d97f32566ead35833c51f3431619bd4c0dffffc6d5bc1643552d5fc9f4b322f7ce3091b7085  fplinux-ui-screen-model.c
+54cde07e0607a9cb3e722b56a4251c65d6fef6af5a9e1a8157cff62774cca1a52c5ebe2f55e1a2326e361745e4ea0ea176f2e027268542d0a08c3a8cf3bd2cfd  fplinux-ui-screen-model.h
+7500fcd0dd4498021539fdc1a768ec691f4910cb0db054a903f57ab183388576df13f4a6c448bdd91a22480b53688f7c35453ae902088fb43a754f219db21775  fplinux-ui-profile.c
+c4e36f71ac6e411f65ab502a60f6bcc6284eced740c0462c34ca1014ddf13d63474a47d6d88a39d25e7b7b090b8506b993e97fc80b89a0dd540a984fe5420504  fplinux-ui-profile.h
+622744ce4eb3348650ac8912cfded130d01a7492022369d0e4ff72fcdbcfc51e7c5b4e13db6ad450ce6f185d9c33af326c80462138326f7cf882dbe3e965ed9f  fplinux-ui-profile.json
+71a59dfd11eab905ad3b95a763f105fd8bbcc708a5610c9b366dbcd84e0681710552c42efd09d9a50f3d6f50b84f70523f78eed460faca5f57ba51c6e8a24b52  fplinux_ui_profile.py
 ca6d4871e3f8aa9cd36e7d462a045018cbfda459f79751a3ece3e9fbd2944a4baaaf32880a338edf0be6b65538bf4a01e4d3bacccf11a5aa56d67745ee27dbd9  fplinux_ui_fonts.py
 e71ed6a44e0ffeedcfef2b7aad955c90401b9e12ba2dfec1f64ff16dd1c0ab6f4ef14a7ef485466292437d599fef0dfb1fe482aad92698f23b6c9b2fb070f704  fplinux-ui-fonts.h
-6d7452cdc6d114d150bb2bf1d7880b051cc7dfa033e150813382315e6379e71061610ee5392d76cc981c2a7ac8171c723309c643d241322adffb72de559ab2b6  fplinux-ui-internal.h
-a6284d13d173f21aeb306ac5c38c181c25b2c874fc0050ce40c3d87ed696ae25eb3449fc5329e9c9ac4d295801920db9e9d6a3edaf067ae31e5ab34677142721  fplinux-ui-locale.c
+a2c32ae24afdc238f25d33e1f69b3d34f04b6cd4d07ea716025bbe6287d524eac11313467dbc8d209dd82f2560191ba8059e85cf1a2333e2a4bc1c7e02ad8f85  fplinux-ui-internal.h
+fe470ac4009917a24a5d5f4ad49f0e1a1c9dc807d66eaa42d6a982e00a0ad6f9734d50343de28f8d83f0ec43733240f639cd87d43fc268d7ee71d636e1a03353  fplinux-ui-locale.c
 c0ebbe1beb4898f9b6de76f910470f0a052c6c17e754967d1f8e93dcbd527b7eed5f31236ef677790577f93d98f4f1e237f37d0a2725b5718d3ee62389604ad8  fplinux-ui-locale.h
-0e113a3d69fa45b700c5c84b7bf10df2656cf986d594252274bb8afbaebbd952ef793d272aed728a911edc1a445eaa911aced6cb9cc0f419967e12a6c9e8d478  fplinux-language.c
+d6eee7e5b8c7e2dcc867d73d214b757524c2bd4c768e8eca0d4ee3906b6b697fa17da0829c74d89953842471a394c0a6d6aa9302ba11c0971b8a71bfeec03912  fplinux-language.c
 e3e550c2f07726b0f20d49f30300e88c862b3cac031c29b4a89c282719634fea22a5cc6a491c081d95c6381c05cbae6a50b09a579e0d219cf2fab9f29ff63898  fplinux-language.h
-445ed5909ae89e45408e9d925cc1cfe1fb85c07ad4fce76128a8f55fd4fdff7b0e7c957dcbc5bcdd4bf71759b93eb6b360cb22d4507e0e6375369fa68b311190  fplinux-multitap.c
-2cd893f9960835c0bae05ffe8f460d315ae18266973db4370b7649dab648109038b75d5724230f82ba1c3ae8fe55f76548a490cb2e815c9eebd712df0d75f0cf  fplinux-multitap.h
+475d3e841583e95ec24fd52db547800778fdbcc174336ee6fbc4f812b173c1c70af5314301f82fa981695b9d1011f378408eda35219d75d500ff5ccfe595bb5d  fplinux-utf8.c
+e5cf966fa72932f820b605980bf93a663115b8c43d4cf8fc48d3890d3d99587b4e78e82853f6fcb94fc86635775041bbabec656712c20425381623f73e370c18  fplinux-utf8.h
+2063a9c3e501b867b39f97a20200e7213cbc02dd7e856ea7dd1d61703af113cc38e853ac6a7ff007929f93264b1831b9141a542ca11152cf76a3d5ef4fb1ff9c  fplinux-multitap.c
+0cccc5788f6a878ae1d48ae3af22fd0902e63e7fa7b06e7f00fb815aa51bbbaff88ba0b92bba917fd868dfdf8436e6977827231decb416d7cd15115f7ad845d4  fplinux-multitap.h
+397a28569b896435187a43287745955f4a2cea9acaf648a7a36e88757b559a284e6aa3c679e9da32701ef186a2809a11f1624cb5079341dfc8297b65c753b0fd  fplinux-text-input.c
+e986ed181daa4c7db53341224fab869d59ea97f688650aac9a9fa18846b84045497f0dd4658b9bc6d41090be2dce64e2f46ea4799fc412d5886af6e7423eb791  fplinux-text-input.h
 0f0cdff74f1aba6459c951b510e645c2a517129b92a4b1a234885f1452cccc7ff9045c0f0263d7b3fe79af9fa3b19d5791b5e64e24f11f1ceeb5c6eef338647d  fplinux-ui.pc
-c2a273dd6b00d163949dd988fa20d9672f9a103602e4164d0e36409594ea2c20181bf4aceffdadd08de8f56b5547e08e9cab2231fb5ed5076159f636ceb5e82f  fplinux-ui.map
-17c8adeef87e4b25f11a48d1a2ae060b5c6460a98f8f284e25f8cbf5b724ea420607d393a2f8464080fe8f4a6ac411011bd3bbb06950057f1d863b598934ccd8  ru.po
+977d3d1939f14fb5d9947459a0dfa72dfd1a17a46e191ae927c31782b91138094226488320ddb63f1484699b0d212b08fae18bc508403d011c836a7cb757ff9d  fplinux-ui.map
+b17f9a7f401d23d538a6dcee14a5d082b38f63961d0401354f55c21c4189d4d1fddb799b441a32dfa36b690000cd3fc8276ed0e0270775d07c3f5e0582abbabd  ru.po
 63d998a7e568075385abdf17ce8478588db3a76c9c6e89fce82b87b71dc029b84cd66d4ad2b4b64c1cfb375e4f75851f4a60b8073ed8a76f403c856450b26c88  LGPL-2.1-or-later.txt
 260c02ff0a3e04ff0c2a95a936494b6a114a0a22121557059591d44af5fab5644ab8484be61eb33c12a6c9eef2170a108d51e2972adaef942568d94ae0d4ec83  GPL-2.0-only.txt
 ea4787019bfab85d0d895eb86ea671a6fa6dad6b684c6e010f2bd5cd1b83d9b524deebba6e97ee2682b6e6d57cfa6bf2a05a79b58b91bfa013617da535b34238  fplinux-ui-softkey-layout.c
 93c6c4932c4be2fb9fd9a968f69753eec69348fee64b220aae9bdb64eb3a6f1ba1950c497c8d8b24f0b713896cc8643ead6a35d9a4bf4e90c2a169871090753d  fplinux-ui-softkey-layout.h
-af04dad34fe00513f1cd0ce0c7ec8fad12aabb6fbb7023d5316963139f3e159726cbf7539593617b0bb293a93b000a21010f3f4a86ee62db24ea16e1f83c0a90  fplinux-ui-style-internal.h
 "

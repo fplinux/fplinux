@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #define _POSIX_C_SOURCE 200809L
 #include "fplinux-language.h"
+#include "fplinux-utf8.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -109,49 +110,18 @@ static bool is_key(const char *key)
 	return length && !key[length];
 }
 
-/* Strict UTF-8 without control characters. */
+/* Language text excludes C0, DEL and C1 controls. */
 static bool is_text(const char *text)
 {
-	const unsigned char *bytes = (const unsigned char *)text;
+	const unsigned char *cursor = (const unsigned char *)text;
+	const unsigned char *end = cursor + strlen(text);
 
-	while (*bytes) {
-		unsigned char lead = *bytes;
+	while (cursor < end) {
 		uint32_t code;
-		uint32_t minimum;
-		size_t extra;
 
-		if (lead < 0x80) {
-			if (lead < 0x20 || lead == 0x7f)
-				return false;
-			++bytes;
-			continue;
-		}
-		if (lead >= 0xc2 && lead <= 0xdf) {
-			extra = 1;
-			minimum = 0x80;
-			code = lead & 0x1f;
-		} else if (lead >= 0xe0 && lead <= 0xef) {
-			extra = 2;
-			minimum = 0x800;
-			code = lead & 0x0f;
-		} else if (lead >= 0xf0 && lead <= 0xf4) {
-			extra = 3;
-			minimum = 0x10000;
-			code = lead & 0x07;
-		} else {
+		if (!fplinux_utf8_next(&cursor, end, &code) || code < 0x20 ||
+		    (code >= 0x7f && code <= 0x9f))
 			return false;
-		}
-		for (size_t i = 1; i <= extra; ++i) {
-			if ((bytes[i] & 0xc0) != 0x80)
-				return false;
-			code = code << 6 | (bytes[i] & 0x3f);
-		}
-		/* C1 controls are control characters too. */
-		if (code < minimum || code > 0x10ffff ||
-		    (code >= 0xd800 && code <= 0xdfff) ||
-		    (code >= 0x80 && code <= 0x9f))
-			return false;
-		bytes += extra + 1;
 	}
 	return true;
 }

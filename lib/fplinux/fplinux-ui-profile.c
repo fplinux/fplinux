@@ -28,7 +28,7 @@ static const struct fplinux_ui_profile_spec profiles[] = {
 		.content_padding = 2,
 		.list_padding = 1,
 		.scrollbar_width = 2,
-		.scrollbar_offset = 2,
+		.scrollbar_offset = 1,
 		.focus_width = 2,
 		.divider_width = 1,
 		.row_height = 20,
@@ -39,7 +39,6 @@ static const struct fplinux_ui_profile_spec profiles[] = {
 		.status_icon_size = 12,
 		.app_icon_size = 32,
 		.grid_columns = 3,
-		.grid_scrollbar_offset = 0,
 		.catalogue_list = true,
 		.row_tile_radius = 3,
 		.app_tile_radius = 7,
@@ -80,7 +79,6 @@ static const struct fplinux_ui_profile_spec profiles[] = {
 		.battery_bar_height = 4,
 		.bolt_height = 7,
 		.splash_mark = 48,
-		.boot_mark = 32,
 		.about_logo_width = 32,
 		.about_lockup = false,
 	},
@@ -102,7 +100,7 @@ static const struct fplinux_ui_profile_spec profiles[] = {
 		.content_padding = 2,
 		.list_padding = 1,
 		.scrollbar_width = 2,
-		.scrollbar_offset = 2,
+		.scrollbar_offset = 1,
 		.focus_width = 2,
 		.divider_width = 1,
 		.row_height = 22,
@@ -113,7 +111,6 @@ static const struct fplinux_ui_profile_spec profiles[] = {
 		.status_icon_size = 12,
 		.app_icon_size = 32,
 		.grid_columns = 3,
-		.grid_scrollbar_offset = 0,
 		.catalogue_list = false,
 		.row_tile_radius = 3,
 		.app_tile_radius = 7,
@@ -154,7 +151,6 @@ static const struct fplinux_ui_profile_spec profiles[] = {
 		.battery_bar_height = 4,
 		.bolt_height = 7,
 		.splash_mark = 64,
-		.boot_mark = 48,
 		.about_logo_width = 32,
 		.about_lockup = false,
 	},
@@ -176,7 +172,7 @@ static const struct fplinux_ui_profile_spec profiles[] = {
 		.content_padding = 4,
 		.list_padding = 4,
 		.scrollbar_width = 2,
-		.scrollbar_offset = 6,
+		.scrollbar_offset = 2,
 		.focus_width = 2,
 		.divider_width = 1,
 		.row_height = 26,
@@ -187,7 +183,6 @@ static const struct fplinux_ui_profile_spec profiles[] = {
 		.status_icon_size = 16,
 		.app_icon_size = 40,
 		.grid_columns = 3,
-		.grid_scrollbar_offset = 4,
 		.catalogue_list = false,
 		.row_tile_radius = 4,
 		.app_tile_radius = 8,
@@ -228,7 +223,6 @@ static const struct fplinux_ui_profile_spec profiles[] = {
 		.battery_bar_height = 6,
 		.bolt_height = 9,
 		.splash_mark = 80,
-		.boot_mark = 64,
 		.about_logo_width = 160,
 		.about_lockup = true,
 	},
@@ -250,7 +244,7 @@ static const struct fplinux_ui_profile_spec profiles[] = {
 		.content_padding = 6,
 		.list_padding = 6,
 		.scrollbar_width = 2,
-		.scrollbar_offset = 8,
+		.scrollbar_offset = 3,
 		.focus_width = 2,
 		.divider_width = 1,
 		.row_height = 36,
@@ -261,7 +255,6 @@ static const struct fplinux_ui_profile_spec profiles[] = {
 		.status_icon_size = 16,
 		.app_icon_size = 56,
 		.grid_columns = 3,
-		.grid_scrollbar_offset = 8,
 		.catalogue_list = false,
 		.row_tile_radius = 5,
 		.app_tile_radius = 12,
@@ -302,7 +295,6 @@ static const struct fplinux_ui_profile_spec profiles[] = {
 		.battery_bar_height = 8,
 		.bolt_height = 11,
 		.splash_mark = 96,
-		.boot_mark = 80,
 		.about_logo_width = 200,
 		.about_lockup = true,
 	},
@@ -324,7 +316,7 @@ static const struct fplinux_ui_profile_spec profiles[] = {
 		.content_padding = 4,
 		.list_padding = 4,
 		.scrollbar_width = 2,
-		.scrollbar_offset = 6,
+		.scrollbar_offset = 2,
 		.focus_width = 2,
 		.divider_width = 1,
 		.row_height = 30,
@@ -335,7 +327,6 @@ static const struct fplinux_ui_profile_spec profiles[] = {
 		.status_icon_size = 16,
 		.app_icon_size = 60,
 		.grid_columns = 4,
-		.grid_scrollbar_offset = 4,
 		.catalogue_list = false,
 		.row_tile_radius = 5,
 		.app_tile_radius = 13,
@@ -376,15 +367,14 @@ static const struct fplinux_ui_profile_spec profiles[] = {
 		.battery_bar_height = 8,
 		.bolt_height = 11,
 		.splash_mark = 96,
-		.boot_mark = 80,
 		.about_logo_width = 200,
 		.about_lockup = true,
 	},
 };
 
-static const struct fplinux_ui_theme_spec palettes[] = {
-	[FPLINUX_UI_PALETTE_LIGHT] = {
-		.kind = 0,
+static const struct fplinux_ui_theme_spec themes[] = {
+	/* light */
+	{
 		.rgb = {
 			[FPLINUX_UI_COLOUR_BACKGROUND] = 0xf7f7f7,
 			[FPLINUX_UI_COLOUR_SURFACE] = 0xefefef,
@@ -406,8 +396,8 @@ static const struct fplinux_ui_theme_spec palettes[] = {
 		},
 		.scrim_opacity = 128,
 	},
-	[FPLINUX_UI_PALETTE_DARK] = {
-		.kind = 1,
+	/* dark */
+	{
 		.rgb = {
 			[FPLINUX_UI_COLOUR_BACKGROUND] = 0x101010,
 			[FPLINUX_UI_COLOUR_SURFACE] = 0x212021,
@@ -431,16 +421,8 @@ static const struct fplinux_ui_theme_spec palettes[] = {
 	},
 };
 
-/* The palette of each theme kind: light, dark. */
-static const enum fplinux_ui_palette theme_palettes[] = {
-	FPLINUX_UI_PALETTE_LIGHT,
-	FPLINUX_UI_PALETTE_DARK,
-};
-
 _Static_assert(ARRAY_SIZE(profiles) == FPLINUX_UI_PROFILE_COUNT,
 	       "one entry per profile");
-_Static_assert(ARRAY_SIZE(palettes) == FPLINUX_UI_PALETTE_COUNT,
-	       "one entry per palette");
 
 /* The largest fitting pixel area wins; ABI order breaks equal-area ties. */
 int fplinux_ui_profile_for_screen(int width, int height)
@@ -467,16 +449,9 @@ const struct fplinux_ui_profile_spec *fplinux_ui_profile_spec(int profile)
 	return &profiles[profile];
 }
 
-const struct fplinux_ui_theme_spec *fplinux_ui_palette_spec(int palette)
-{
-	if (palette < 0 || palette >= FPLINUX_UI_PALETTE_COUNT)
-		return NULL;
-	return &palettes[palette];
-}
-
 const struct fplinux_ui_theme_spec *fplinux_ui_theme_spec(int kind)
 {
-	if (kind < 0 || kind >= (int)ARRAY_SIZE(theme_palettes))
+	if (kind < 0 || kind >= (int)ARRAY_SIZE(themes))
 		return NULL;
-	return &palettes[theme_palettes[kind]];
+	return &themes[kind];
 }

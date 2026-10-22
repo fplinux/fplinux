@@ -4,6 +4,7 @@
 #include <fplinux/fplinux-ui-prefs.h>
 
 #include <assert.h>
+#include <errno.h>
 #include <linux/input-event-codes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,7 +12,7 @@
 
 struct lv_obj {
 	lv_area_t area;
-	char text[160];
+	char text[256];
 	bool hidden;
 };
 
@@ -366,11 +367,26 @@ bool fplinux_ui_prefs_set_int(struct fplinux_ui_prefs *instance,
 	return true;
 }
 
-bool fplinux_ui_prefs_save(struct fplinux_ui_prefs *instance)
+struct fplinux_storage_result
+fplinux_ui_prefs_save(struct fplinux_ui_prefs *instance)
 {
+	if (!strcmp(scenario, "save-failure")) {
+		return (struct fplinux_storage_result){
+			.state = FPLINUX_STORAGE_UNPUBLISHED, .error = ENOSPC
+		};
+	}
 	instance->saved_last = instance->last;
 	instance->saved_best = instance->best;
-	return true;
+	return (struct fplinux_storage_result){
+		.state = FPLINUX_STORAGE_DURABLE
+	};
+}
+
+const char *fplinux_ui_storage_error(struct fplinux_storage_result result)
+{
+	assert(result.state == FPLINUX_STORAGE_UNPUBLISHED &&
+	       result.error == ENOSPC);
+	return "Not enough storage space";
 }
 
 static void draw(void)
@@ -457,6 +473,24 @@ int fplinux_ui_run(struct fplinux_ui *instance)
 		assert(!game_timer.paused && ui.kept_on);
 		send_event(FPLINUX_UI_EVENT_CLOSE, false, 0, false);
 		assert(game_timer.paused && !ui.kept_on);
+	} else if (!strcmp(scenario, "save-failure")) {
+		bool notice = false;
+
+		key(KEY_OK);
+		assert(!game_timer.paused);
+		key(KEY_HOME);
+		assert(home_requested && game_timer.paused && !ui.closed);
+		assert(prefs.saved_last == 17 && prefs.saved_best == 20);
+		send_event(FPLINUX_UI_EVENT_VISIBILITY, true, 0, false);
+		for (size_t index = 0; index < object_count; ++index)
+			if (!objects[index].hidden &&
+			    strstr(objects[index].text, "Scores not saved"))
+				notice = true;
+		assert(notice);
+		key(KEY_OK);
+		assert(!game_timer.paused && ui.kept_on);
+		key(KEY_F14);
+		assert(back_requested && game_timer.paused);
 	} else {
 		assert(strcmp(scenario, "geometry") == 0);
 		send_event(FPLINUX_UI_EVENT_CLOSE, false, 0, false);

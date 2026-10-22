@@ -34,6 +34,7 @@ def is_project_c_source(path: PurePath) -> bool:
         path.parts[:2] == ("alpine", "aports")
         or path.as_posix() in registration.SHARED_APORT_SOURCE_PATHS
         or path.parts[:1] == ("tests",)
+        or path.parts[:3] == ("site", "scripts", "screens")
         or (
             len(path.parts) >= 4
             and path.parts[0] in {"platforms", "targets"}

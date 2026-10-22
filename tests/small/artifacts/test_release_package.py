@@ -72,7 +72,7 @@ def release_inputs(tmp_path: Path) -> ReleaseInputs:
     readme = root / "targets" / target / "release/EXTRA.txt"
     readme.parent.mkdir(parents=True)
     readme.write_text("phone instructions\n", encoding="utf-8")
-    for package in (*registration.COMMON_PACKAGES, "fplinux-font-terminus", "demo"):
+    for package in (*registration.COMMON_PACKAGES, "demo"):
         apkbuild = root / "alpine/aports" / package / "APKBUILD"
         apkbuild.parent.mkdir(parents=True)
         apkbuild.write_text(f"pkgname={package}\n", encoding="utf-8")

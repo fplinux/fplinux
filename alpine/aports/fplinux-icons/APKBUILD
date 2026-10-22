@@ -6,17 +6,19 @@ _tablerver=3.48.0
 pkgdesc="System glyphs and application tiles for the FPLinux graphical session"
 url="https://github.com/fplinux/fplinux"
 arch="noarch"
-license="MIT"
+license="GPL-2.0-only AND MIT"
 makedepends_build="nodejs python3"
 options="!check"
 # fplinux-ui-profile.json is copied from lib/fplinux by the build.
 source="
 	tabler-icons-$_tablerver.tgz::https://registry.npmjs.org/@tabler/icons/-/icons-$_tablerver.tgz
 	icons.json
+	no-sim.svg
 	tile.svg
 	generate-icons.py
 	svgraster.py
 	fplinux-ui-profile.json
+	GPL-2.0-only.txt
 "
 builddir="$srcdir"
 
@@ -35,13 +37,17 @@ package() {
 		"$pkgdir/usr/share/"
 	install -Dm644 "$srcdir/package/LICENSE" \
 		"$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+	install -Dm644 "$srcdir/GPL-2.0-only.txt" \
+		"$pkgdir/usr/share/licenses/$pkgname/GPL-2.0-only.txt"
 }
 
 sha512sums="
 950934ea0547355067269d143a0b6d879e2671904933badd60ab00c4a38fae88f56db480c7eff18ae3967c7972be074bdccf98f88d0720dae31dadf2829f1e5d  tabler-icons-3.48.0.tgz
-b2de505dcce969ac7aaa11898ce25520ecdf77f7af92f1054719620ae17cfd809e7934e9eaca56764c97970718beb36f9283e5c8b19e6987011222765d5df8b1  icons.json
+22d4100151839c02bb947fe2259a2287ef8360f661f374f0726f52ba231a9b2227e027ee770ec5e7987e8f681313da26e15ace578921dcdb63cfa83667084324  icons.json
+2e55f7c171bf66dfc1e1d14f2b25f4ebeb59111e2382b88e953c452185dc9a385525e7b1b6606b0098944c151fb8fc7f686fc84fbce9cbdc9b319d76363cb76c  no-sim.svg
 bb1bf43051cc8948923591e26dafce9ffdec5812a2067b7d21797c83118065cb3268fcb4ec8bf6a5781d5d930a124abf3ca4faf8ed0005ac559c4eb5131df491  tile.svg
 f19274c478d935b0b39e5ce37f2f68813290fe1bd893c9827b5f25e1b55272a85f307f4f81594f89c412b806728fce17ccbd377c364e70e66965ef6819e28654  generate-icons.py
 dd02856111137ad00d51d2ca75d0755a8ef3ab1877a47ed0d16c300bc0f373150c167aea64521cde6838e132dd5fdd4bd61139dac4356ae0b3599c90a1d0f3a7  svgraster.py
-6d888f2e6e0d2f5790a4a17d7d7364d14a28abb2d62537c1b2c78b47bf200c505a04c030fcf218f1ff1a51e423ad1931da241382919b6ccc27953b21b8bfb392  fplinux-ui-profile.json
+622744ce4eb3348650ac8912cfded130d01a7492022369d0e4ff72fcdbcfc51e7c5b4e13db6ad450ce6f185d9c33af326c80462138326f7cf882dbe3e965ed9f  fplinux-ui-profile.json
+260c02ff0a3e04ff0c2a95a936494b6a114a0a22121557059591d44af5fab5644ab8484be61eb33c12a6c9eef2170a108d51e2972adaef942568d94ae0d4ec83  GPL-2.0-only.txt
 "

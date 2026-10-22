@@ -6,6 +6,8 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
+#include <linux/input-event-codes.h>
 
 #include "fplinux-ui-menu.h"
 #include "fplinux-ui-profile.h"
@@ -13,6 +15,13 @@
 
 /* Shared by the library's sources but not exported from it. */
 #define FPLINUX_UI_INTERNAL __attribute__((visibility("hidden")))
+
+static inline bool fplinux_ui_is_direction_key(const struct fplinux_ui_key *key)
+{
+	return !key->control && !key->alt &&
+	       (key->code == KEY_UP || key->code == KEY_DOWN ||
+		key->code == KEY_LEFT || key->code == KEY_RIGHT);
+}
 
 /*
  * fplinux-ui.c: the token table entry of the profile chosen from the
@@ -112,9 +121,25 @@ fplinux_ui_text_is_read_only(const struct fplinux_ui_text *field);
  */
 FPLINUX_UI_INTERNAL bool
 fplinux_ui_text_takes_newline(const struct fplinux_ui_text *field);
+/* A captured raw field still belongs to this UI, is focused and visible. */
+FPLINUX_UI_INTERNAL bool
+fplinux_ui_text_can_repeat(const struct fplinux_ui *ui,
+			   const struct fplinux_ui_text *field);
+/* Claim only the exact key in the current fallback application callback. */
+FPLINUX_UI_INTERNAL void
+fplinux_ui_claim_text_key(struct fplinux_ui *ui, struct fplinux_ui_text *field,
+			  const struct fplinux_ui_key *key);
+/* Blur and deletion revoke both a pending claim and a captured raw hold. */
+FPLINUX_UI_INTERNAL void
+fplinux_ui_cancel_text_key_repeat(struct fplinux_ui *ui,
+				  const struct fplinux_ui_text *field);
 /* Raw fields within a Canvas follow that screen's focus under stacked modals. */
 FPLINUX_UI_INTERNAL void fplinux_ui_text_canvas_active(lv_obj_t *canvas,
 						       bool active);
+/* Wayland departure cancels phone gestures before synthetic key releases. */
+FPLINUX_UI_INTERNAL void
+fplinux_ui_text_cancel_input(struct fplinux_ui *ui,
+			     enum fplinux_ui_key_source source);
 /* Stop held input in all focused FPLinux fields, including Canvas/raw fields. */
 FPLINUX_UI_INTERNAL void fplinux_ui_text_menu_suspend(struct fplinux_ui *ui);
 /* Restore surviving visible fields that the menu took focus from. */
@@ -127,6 +152,11 @@ FPLINUX_UI_INTERNAL void fplinux_ui_text_resize(struct fplinux_ui *ui);
  * open menu, routes keys to it, shows its legends and calls the callback.
  */
 struct fplinux_ui_menu_view;
+
+struct fplinux_ui_menu_position {
+	size_t selected;
+	int32_t scroll_y;
+};
 
 /* Draws the pop-up on the display's top layer; NULL with errno. */
 FPLINUX_UI_INTERNAL struct fplinux_ui_menu_view *
@@ -142,6 +172,15 @@ fplinux_ui_menu_view_delete(struct fplinux_ui_menu_view *view);
 /* The surface changed size: the pop-up fits it again; NULL does nothing. */
 FPLINUX_UI_INTERNAL void
 fplinux_ui_menu_view_resize(struct fplinux_ui_menu_view *view);
+FPLINUX_UI_INTERNAL void
+fplinux_ui_menu_view_get_position(const struct fplinux_ui_menu_view *view,
+				  struct fplinux_ui_menu_position *position);
+FPLINUX_UI_INTERNAL void fplinux_ui_menu_view_set_position(
+	struct fplinux_ui_menu_view *view,
+	const struct fplinux_ui_menu_position *position);
+FPLINUX_UI_INTERNAL void
+fplinux_ui_menu_set_position(struct fplinux_ui *ui,
+			     const struct fplinux_ui_menu_position *position);
 
 /*
  * fplinux-ui.c: a title label in font, one line high so that a longer title
@@ -167,13 +206,13 @@ struct fplinux_ui_screen;
 enum fplinux_ui_key_route {
 	FPLINUX_UI_KEY_UNHANDLED,
 	FPLINUX_UI_KEY_HANDLED,
-	FPLINUX_UI_KEY_TO_REPEAT_CANVAS,
+	FPLINUX_UI_KEY_REPEATABLE,
 };
 
-/* NULL cancels every seat; a screen cancels keys owned by that Canvas. */
+/* NULL cancels every seat; a screen cancels keys owned by that screen. */
 FPLINUX_UI_INTERNAL void
 fplinux_ui_cancel_key_repeat(struct fplinux_ui *ui,
-			     const struct fplinux_ui_screen *canvas);
+			     const struct fplinux_ui_screen *screen);
 
 /* fplinux-ui.c: where the stack lives; NULL until the first screen. */
 FPLINUX_UI_INTERNAL struct fplinux_ui_screens **
@@ -182,11 +221,10 @@ fplinux_ui_screens_slot(struct fplinux_ui *ui);
 FPLINUX_UI_INTERNAL enum fplinux_ui_key_route
 fplinux_ui_screens_key(struct fplinux_ui_screens *screens,
 		       const struct fplinux_ui_key *key);
-/* The captured Canvas must still be the active, opted-in screen. */
-FPLINUX_UI_INTERNAL bool
-fplinux_ui_screens_repeat_key(struct fplinux_ui_screens *screens,
-			      struct fplinux_ui_screen *canvas,
-			      const struct fplinux_ui_key *key);
+/* The active Options callback records the menu position before it closes. */
+FPLINUX_UI_INTERNAL void fplinux_ui_screens_menu_position(
+	struct fplinux_ui_screens *screens,
+	const struct fplinux_ui_menu_position *position);
 /* Hidden screens run no timers. */
 FPLINUX_UI_INTERNAL void
 fplinux_ui_screens_set_visible(struct fplinux_ui_screens *screens,

@@ -222,18 +222,34 @@ class SourceInventoryTests:
             userspace = root / "alpine/aports/demo/app.c"
             userspace.parent.mkdir(parents=True)
             userspace.write_text("int app;\n")
+            capture = root / "site/scripts/screens/capture.c"
+            capture.parent.mkdir(parents=True)
+            capture.write_text("int capture;\n")
+            capture_header = capture.with_suffix(".h")
+            capture_header.write_text("int capture;\n")
             with (
                 mock.patch.object(source_check, "ROOT", root),
                 mock.patch.object(source_check, "discover_targets", return_value=()),
             ):
                 assert (
                     source_check.project_c_format_sources(
-                        [source, header, platform_common, target_common, loader, userspace]
+                        [
+                            source,
+                            header,
+                            platform_common,
+                            target_common,
+                            loader,
+                            userspace,
+                            capture,
+                            capture_header,
+                        ]
                     )
                 ) == (
                     [
                         "alpine/aports/demo/app.c",
                         "platforms/soc/common/core.c",
+                        "site/scripts/screens/capture.c",
+                        "site/scripts/screens/capture.h",
                         "targets/phone/common/board.h",
                         "targets/phone/loader/monitor/platform.c",
                         "targets/phone/uboot/board.c",

@@ -115,11 +115,20 @@ msgstr "Настройки"
 msgid "Stay"
 msgstr "Остаться"
 
+msgid "Changing this setting closes other apps. Unsaved changes may be lost."
+msgstr "Изменение этой настройки закроет другие приложения. Несохранённые изменения могут быть потеряны."
+
+msgid "Change"
+msgstr "Изменить"
+
 msgid "System"
 msgstr "Система"
 
-msgid "The change works until the phone restarts."
-msgstr "Изменение действует до перезапуска телефона."
+msgid "The setting is applied for this session. It was not saved."
+msgstr "Настройка действует в текущем сеансе, но не сохранена."
+
+msgid "The setting is applied. Saving is not confirmed."
+msgstr "Настройка применена. Сохранение не подтверждено."
 
 msgid "The setting was not changed. Try again."
 msgstr "Настройка не изменена. Повторите."

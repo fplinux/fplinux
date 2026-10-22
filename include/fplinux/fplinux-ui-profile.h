@@ -29,11 +29,7 @@ struct fplinux_ui_profile_spec {
 	int scrollbar_width, scrollbar_offset, focus_width, divider_width;
 	int row_height, row_height_detail, row_padding, row_gap;
 	int row_icon_size, status_icon_size, app_icon_size;
-	/*
-	 * The catalogue grid's columns, and its scroll indicator's distance
-	 * from the right edge, which keeps the bar clear of the selection ring.
-	 */
-	int grid_columns, grid_scrollbar_offset;
+	int grid_columns;
 	/* The catalogue opens as a list instead of the grid by default. */
 	bool catalogue_list;
 	/* Corner radius of a colour tile at row_icon_size and app_icon_size. */
@@ -60,7 +56,7 @@ struct fplinux_ui_profile_spec {
 		battery_cap_height, battery_bar_width, battery_bar_height,
 		bolt_height;
 	/* Brand marks are square; About shows a lockup or the mark alone. */
-	int splash_mark, boot_mark, about_logo_width;
+	int splash_mark, about_logo_width;
 	bool about_lockup;
 };
 
@@ -86,16 +82,7 @@ enum fplinux_ui_colour {
 	FPLINUX_UI_COLOUR_COUNT,
 };
 
-/* Palettes: the brand light and dark themes. */
-enum fplinux_ui_palette {
-	FPLINUX_UI_PALETTE_LIGHT,
-	FPLINUX_UI_PALETTE_DARK,
-	FPLINUX_UI_PALETTE_COUNT,
-};
-
 struct fplinux_ui_theme_spec {
-	/* enum fplinux_ui_theme_kind: 0 light, 1 dark. */
-	int kind;
 	/* 0xRRGGBB, each exact in RGB565. */
 	uint32_t rgb[FPLINUX_UI_COLOUR_COUNT];
 	/* Modal backdrop opacity, 0 transparent to 255 opaque. */
@@ -115,7 +102,5 @@ const struct fplinux_ui_profile_spec *fplinux_ui_profile_spec(int profile);
  * as enum fplinux_ui_session_theme); NULL for an unknown kind.
  */
 const struct fplinux_ui_theme_spec *fplinux_ui_theme_spec(int kind);
-/* A palette by enum fplinux_ui_palette; NULL for an unknown one. */
-const struct fplinux_ui_theme_spec *fplinux_ui_palette_spec(int palette);
 
 #endif

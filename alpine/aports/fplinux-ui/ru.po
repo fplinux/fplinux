@@ -69,3 +69,24 @@ msgstr "Внимание"
 
 msgid "Error"
 msgstr "Ошибка"
+
+msgid "Not enough storage space"
+msgstr "Недостаточно места для сохранения"
+
+msgid "Storage limit reached"
+msgstr "Доступное место для сохранения исчерпано"
+
+msgid "Storage is read-only"
+msgstr "Хранилище доступно только для чтения"
+
+msgid "Storage access denied"
+msgstr "Нет доступа к хранилищу"
+
+msgid "Not enough memory to save changes"
+msgstr "Недостаточно памяти для сохранения изменений"
+
+msgid "Could not save changes"
+msgstr "Не удалось сохранить изменения"
+
+msgid "Storage input/output error"
+msgstr "Ошибка ввода-вывода хранилища"

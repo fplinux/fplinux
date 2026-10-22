@@ -43,6 +43,8 @@ static int check_layout(void)
 		{ { 150, 0, 150 }, { { 8, 108 }, { 120, 0 }, { 124, 108 } } },
 	};
 	struct fplinux_softkey_box boxes[3];
+	char text[64];
+	int advance = 6;
 
 	for (size_t i = 0; i < sizeof(cases) / sizeof(*cases); ++i) {
 		fplinux_softkey_layout(240, 8, 8, cases[i].widths, boxes);
@@ -56,6 +58,20 @@ static int check_layout(void)
 	CHECK(boxes[0].x == 2 && boxes[0].width == 52);
 	CHECK(boxes[1].x == 58 && boxes[1].width == 12);
 	CHECK(boxes[2].x == 74 && boxes[2].width == 52);
+	/* Three visible form actions stay distinct on the 128-pixel profile. */
+	fplinux_softkey_layout(128, 2, 4, (int[]){ 54, 48, 36 }, boxes);
+	CHECK(boxes[0].x == 2 && boxes[0].width == 40);
+	CHECK(boxes[1].x == 46 && boxes[1].width == 40);
+	CHECK(boxes[2].x == 90 && boxes[2].width == 36);
+	fplinux_softkey_fit_text("Сохранить", boxes[0].width, measure, &advance,
+				 text, sizeof(text));
+	CHECK(!strcmp(text, "Сохра…"));
+	fplinux_softkey_fit_text("Изменить", boxes[1].width, measure, &advance,
+				 text, sizeof(text));
+	CHECK(!strcmp(text, "Измен…"));
+	fplinux_softkey_fit_text("Отмена", boxes[2].width, measure, &advance,
+				 text, sizeof(text));
+	CHECK(!strcmp(text, "Отмена"));
 	return 0;
 }
 

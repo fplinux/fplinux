@@ -15,5 +15,20 @@ msgstr "Заметки"
 msgid "Save"
 msgstr "Сохранить"
 
-msgid "The note was not saved. Close and try Save again."
-msgstr "Заметка не сохранена. Закройте сообщение и повторите."
+msgid "Notes (unsaved)"
+msgstr "Заметки (не сохранено)"
+
+msgid "Note not saved"
+msgstr "Заметка не сохранена"
+
+msgid "Saving not confirmed"
+msgstr "Сохранение не подтверждено"
+
+msgid "Retry"
+msgstr "Повторить"
+
+msgid "Stay"
+msgstr "Остаться"
+
+msgid "Discard"
+msgstr "Не сохранять"

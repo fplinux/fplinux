@@ -3,6 +3,9 @@ xkb_keymap {
     xkb_keycodes "test" {
         minimum = 8;
         maximum = 255;
+        <RTRN> = 36;
+        <TAB> = 23;
+        <DOWN> = 116;
         <AC01> = 38;
         <LFSH> = 50;
         <FK24> = 202;
@@ -20,6 +23,9 @@ xkb_keymap {
     };
     xkb_compatibility "test" {};
     xkb_symbols "test" {
+        key <RTRN> { [ Return ], repeat = Yes };
+        key <TAB> { [ Tab ], repeat = Yes };
+        key <DOWN> { [ Down ], repeat = Yes };
         key <AC01> {
             type = "TWO_LEVEL",
             symbols[Group1] = [ a, A ],

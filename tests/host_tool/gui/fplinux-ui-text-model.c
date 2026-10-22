@@ -190,6 +190,55 @@ static void verify_long_digit_press(void)
 	fplinux_ui_text_model_cleanup(&model);
 }
 
+static void verify_overdue_digit_release(void)
+{
+	struct fplinux_ui_text_model model;
+	uint64_t deadline;
+
+	init(&model, false, 0, UPPER);
+	phone(&model, KEY_NUMERIC_2, true, 0);
+	assert(phone(&model, KEY_NUMERIC_2, false, 600) ==
+	       FPLINUX_UI_TEXT_MODEL_CONSUMED);
+	shows(&model, "2", 1);
+	assert(!pending_at(&model, 0));
+	fplinux_ui_text_model_tick(&model, 600);
+	fplinux_ui_text_model_tick(&model, 1600);
+	shows(&model, "2", 1);
+	assert(!fplinux_ui_text_model_deadline(&model, &deadline));
+
+	phone(&model, KEY_NUMERIC_3, true, 2000);
+	phone(&model, KEY_NUMERIC_3, false, 2499);
+	fplinux_ui_text_model_tick(&model, 2600);
+	shows(&model, "2D", 2);
+	assert(pending_at(&model, 1));
+	fplinux_ui_text_model_tick(&model, 3000);
+	shows(&model, "2D", 2);
+	fplinux_ui_text_model_cleanup(&model);
+}
+
+static void verify_overdue_phone_zero_release(void)
+{
+	struct fplinux_ui_text_model model;
+	uint64_t deadline;
+
+	init(&model, false, 0, SENTENCE);
+	assert(fplinux_ui_text_model_set_type(
+		&model, FPLINUX_UI_TEXT_MODEL_PHONE, '.'));
+	phone(&model, KEY_NUMERIC_0, true, 0);
+	assert(phone(&model, KEY_NUMERIC_0, false, 600) ==
+	       FPLINUX_UI_TEXT_MODEL_CONSUMED);
+	shows(&model, "+", 1);
+	fplinux_ui_text_model_tick(&model, 600);
+	fplinux_ui_text_model_tick(&model, 1600);
+	shows(&model, "+", 1);
+	assert(!fplinux_ui_text_model_deadline(&model, &deadline));
+	phone(&model, KEY_NUMERIC_0, true, 2000);
+	phone(&model, KEY_NUMERIC_0, false, 2499);
+	fplinux_ui_text_model_tick(&model, 2600);
+	shows(&model, "+0", 2);
+	fplinux_ui_text_model_cleanup(&model);
+}
+
 static void cycles_through(const char *directory, const char *preferred,
 			   const char *const modes[], size_t count)
 {
@@ -377,7 +426,7 @@ static void verify_symbol_picker(void)
 	init(&model, false, 0, LOWER);
 	tap(&model, KEY_NUMERIC_2, 0);
 	tap(&model, KEY_NUMERIC_STAR, 10);
-	assert(model.picker_open);
+	assert(model.input.picker_open);
 	shows(&model, "a", 1);
 	tap(&model, KEY_RIGHT, 20);
 	tap(&model, KEY_DOWN, 30);
@@ -389,7 +438,7 @@ static void verify_symbol_picker(void)
 	       FPLINUX_UI_TEXT_MODEL_CONSUMED);
 	phone(&model, KEY_F13, false, 61);
 	tap(&model, KEY_OK, 70);
-	assert(!model.picker_open);
+	assert(!model.input.picker_open);
 	shows(&model, "a(", 2);
 
 	tap(&model, KEY_NUMERIC_STAR, 100);
@@ -398,16 +447,16 @@ static void verify_symbol_picker(void)
 	tap(&model, KEY_NUMERIC_STAR, 130);
 	tap(&model, KEY_LEFT, 140);
 	tap(&model, KEY_OK, 150);
-	shows(&model, "a(«°", 4);
+	shows(&model, "a(`^", 4);
 
 	/* The right soft key and * close the picker without inserting. */
 	tap(&model, KEY_NUMERIC_STAR, 200);
 	tap(&model, KEY_F14, 210);
-	assert(!model.picker_open);
+	assert(!model.input.picker_open);
 	tap(&model, KEY_NUMERIC_STAR, 220);
 	tap(&model, KEY_NUMERIC_STAR, 230);
-	assert(!model.picker_open);
-	shows(&model, "a(«°", 4);
+	assert(!model.input.picker_open);
+	shows(&model, "a(`^", 4);
 
 	/* Keyboard Enter inserts; other keyboard input closes and applies. */
 	tap(&model, KEY_NUMERIC_STAR, 300);
@@ -415,8 +464,8 @@ static void verify_symbol_picker(void)
 	keyboard(&model, KEY_ENTER, "\r", false);
 	tap(&model, KEY_NUMERIC_STAR, 310);
 	keyboard(&model, KEY_Q, "q", false);
-	assert(!model.picker_open);
-	shows(&model, "a(«°,q", 6);
+	assert(!model.input.picker_open);
+	shows(&model, "a(`^,q", 6);
 	fplinux_ui_text_model_cleanup(&model);
 }
 
@@ -425,11 +474,11 @@ static void pick(struct fplinux_ui_text_model *model, const unsigned int *codes,
 		 size_t count)
 {
 	tap(model, KEY_NUMERIC_STAR, 0);
-	assert(model->picker_open);
+	assert(model->input.picker_open);
 	for (size_t index = 0; index < count; ++index)
 		tap(model, codes[index], 10 + 10 * index);
 	tap(model, KEY_OK, 1000);
-	assert(!model->picker_open);
+	assert(!model->input.picker_open);
 }
 
 static void picks(unsigned int columns, const unsigned int *codes, size_t count,
@@ -453,10 +502,10 @@ static void verify_failed_picker_view(void)
 	assert(fplinux_ui_text_model_set_text(&model, "a"));
 	assert(phone(&model, KEY_NUMERIC_STAR, true, 10) ==
 	       FPLINUX_UI_TEXT_MODEL_CONSUMED);
-	assert(model.picker_open);
+	assert(model.input.picker_open);
 	revision = model.revision;
 	fplinux_ui_text_model_cancel_picker(&model);
-	assert(!model.picker_open);
+	assert(!model.input.picker_open);
 	assert(model.focused);
 	assert(model.revision != revision);
 	shows(&model, "a", 1);
@@ -471,7 +520,7 @@ static void verify_failed_picker_view(void)
 	fplinux_ui_text_model_cleanup(&model);
 }
 
-/* Up and Down move by the column count; a count that does not divide is 6. */
+/* Vertical movement keeps its column even with an incomplete final row. */
 static void verify_picker_columns(void)
 {
 	static const unsigned int right_down[] = { KEY_RIGHT, KEY_DOWN };
@@ -480,22 +529,22 @@ static void verify_picker_columns(void)
 	static const unsigned int down_4[] = { KEY_DOWN, KEY_DOWN, KEY_DOWN,
 					       KEY_DOWN };
 	static const unsigned int left_up[] = { KEY_LEFT, KEY_UP };
-	/* 6 x 6 (176x220, 240x320). */
+	/* Six columns have a final row containing the two shell symbols. */
 	picks(6, right_down, 2, "(");
-	picks(6, up, 1, "«");
-	picks(6, left_up, 2, "|");
+	picks(6, up, 1, "`");
+	picks(6, left_up, 2, "»");
 	picks(6, down_4, 4, "[");
-	/* 9 x 4 (128x128, 128x160): Down from the last row wraps to the first. */
+	/* Nine columns preserve the same wrap for the incomplete final row. */
 	picks(9, right_down, 2, "/");
-	picks(9, up, 1, "}");
-	picks(9, left_up, 2, "{");
-	picks(9, down_4, 4, ".");
+	picks(9, up, 1, "`");
+	picks(9, left_up, 2, "\\");
+	picks(9, down_4, 4, "`");
 	/* One row: Up and Down stay; one column: they move as Left and Right. */
-	picks(36, down, 1, ".");
+	picks(38, down, 1, ".");
 	picks(1, down, 1, ",");
-	picks(1, up, 1, "°");
-	/* Another count falls back to six columns. */
-	picks(7, down, 1, "-");
+	picks(1, up, 1, "^");
+	/* Other widths work; zero falls back to six columns. */
+	picks(7, down, 1, "(");
 	picks(0, down, 1, "-");
 }
 
@@ -545,7 +594,7 @@ static void verify_read_only(void)
 	     index < sizeof(phone_codes) / sizeof(phone_codes[0]); ++index) {
 		assert(phone(&model, phone_codes[index], true, 100) ==
 		       FPLINUX_UI_TEXT_MODEL_IGNORED);
-		assert(!model.picker_open);
+		assert(!model.input.picker_open);
 		assert(!fplinux_ui_text_model_deadline(&model, &deadline));
 		assert(phone(&model, phone_codes[index], false, 2000) ==
 		       FPLINUX_UI_TEXT_MODEL_IGNORED);
@@ -582,10 +631,10 @@ static void verify_read_only(void)
 	fplinux_ui_text_model_status(&model, status, sizeof(status));
 	assert(!strcmp(status, "abc  10/10"));
 	tap(&model, KEY_NUMERIC_STAR, 6100);
-	assert(model.picker_open);
+	assert(model.input.picker_open);
 	/* Read-only closes an open picker without inserting. */
 	fplinux_ui_text_model_set_read_only(&model, true);
-	assert(!model.picker_open);
+	assert(!model.input.picker_open);
 	shows(&model, "read onlya", 10);
 	fplinux_ui_text_model_cleanup(&model);
 
@@ -710,13 +759,13 @@ static void verify_keyboard_shortcuts(void)
 	assert(pending_at(&model, 0));
 	assert(model.revision == revision);
 	tap(&model, KEY_NUMERIC_STAR, 20);
-	picker_index = model.picker_index;
+	picker_index = model.input.picker_index;
 	revision = model.revision;
 	for (size_t i = 0; i < sizeof(codes) / sizeof(codes[0]); ++i) {
 		assert(keyboard(&model, codes[i], "a", true) ==
 		       FPLINUX_UI_TEXT_MODEL_IGNORED);
-		assert(model.picker_open);
-		assert(model.picker_index == picker_index);
+		assert(model.input.picker_open);
+		assert(model.input.picker_index == picker_index);
 		assert(model.revision == revision);
 		shows(&model, "a", 1);
 	}
@@ -1206,10 +1255,199 @@ static void verify_password_masking(void)
 	fplinux_ui_text_model_cleanup(&model);
 }
 
+struct input_sink {
+	uint32_t characters[8];
+	size_t count;
+	bool blocked;
+	bool rejected;
+	unsigned int remaining;
+};
+
+static enum fplinux_multitap_emit_result sink_character(void *context,
+							uint32_t character)
+{
+	struct input_sink *sink = context;
+
+	if (sink->blocked)
+		return FPLINUX_MULTITAP_EMIT_BLOCKED;
+	if (sink->rejected)
+		return FPLINUX_MULTITAP_EMIT_REJECTED;
+	assert(sink->count <
+	       sizeof(sink->characters) / sizeof(sink->characters[0]));
+	sink->characters[sink->count++] = character;
+	return FPLINUX_MULTITAP_EMIT_ACCEPTED;
+}
+
+static enum fplinux_multitap_emit_result sink_erase(void *context)
+{
+	struct input_sink *sink = context;
+
+	if (sink->blocked)
+		return FPLINUX_MULTITAP_EMIT_BLOCKED;
+	if (!sink->remaining)
+		return FPLINUX_MULTITAP_EMIT_REJECTED;
+	--sink->remaining;
+	return FPLINUX_MULTITAP_EMIT_ACCEPTED;
+}
+
+static void verify_shared_input_blocked_events_can_be_retried(void)
+{
+	struct fplinux_text_input input;
+	struct input_sink sink = { 0 };
+	char label[FPLINUX_TEXT_INPUT_UTF8_BYTES];
+	uint64_t deadline;
+
+	fplinux_text_input_init(&input, NULL, NULL, false);
+	fplinux_text_input_press(&input, '2', 0, sink_character, &sink);
+	fplinux_text_input_release(&input, '2', 1, sink_character, &sink);
+	sink.blocked = true;
+	assert(fplinux_text_input_press(&input, '3', 100, sink_character,
+					&sink) == FPLINUX_MULTITAP_BLOCKED);
+	assert(fplinux_multitap_candidate(&input.compose) == 'a');
+	assert(fplinux_text_input_deadline(&input, &deadline));
+	assert(deadline == 1000);
+	assert(sink.count == 0);
+	sink.blocked = false;
+	fplinux_text_input_press(&input, '3', 100, sink_character, &sink);
+	fplinux_text_input_release(&input, '3', 101, sink_character, &sink);
+	assert(sink.count == 1 && sink.characters[0] == 'a');
+	assert(fplinux_multitap_candidate(&input.compose) == 'd');
+	sink.blocked = true;
+	assert(fplinux_text_input_next_mode(&input, sink_character, &sink) ==
+	       FPLINUX_MULTITAP_BLOCKED);
+	assert(!strcmp(fplinux_text_input_indicator(&input), "abc"));
+	assert(fplinux_multitap_candidate(&input.compose) == 'd');
+	assert(fplinux_text_input_open_picker(&input, sink_character, &sink) ==
+	       FPLINUX_MULTITAP_BLOCKED);
+	assert(!input.picker_open);
+	sink.blocked = false;
+	fplinux_text_input_open_picker(&input, sink_character, &sink);
+	assert(sink.count == 2 && sink.characters[1] == 'd');
+	input.picker_index = 34;
+	assert(!strcmp(fplinux_text_input_symbol_label(34, label), "€"));
+	sink.blocked = true;
+	assert(fplinux_text_input_select_symbol(&input, sink_character,
+						&sink) ==
+	       FPLINUX_MULTITAP_EMIT_BLOCKED);
+	assert(input.picker_open && input.picker_index == 34);
+	sink.blocked = false;
+	fplinux_text_input_select_symbol(&input, sink_character, &sink);
+	assert(!input.picker_open);
+	assert(sink.count == 3 && sink.characters[2] == 0x20ac);
+	fplinux_text_input_reset_mode(&input, true);
+	sink.blocked = true;
+	assert(fplinux_text_input_press(&input, '9', 200, sink_character,
+					&sink) == FPLINUX_MULTITAP_BLOCKED);
+	assert(sink.count == 3);
+	sink.blocked = false;
+	fplinux_text_input_press(&input, '9', 200, sink_character, &sink);
+	assert(sink.count == 4 && sink.characters[3] == '9');
+}
+
+static void verify_shared_clear_deadlines_preserve_blocked_repeat(void)
+{
+	struct fplinux_text_input input;
+	struct input_sink sink = { .remaining = 4 };
+	uint64_t deadline;
+
+	fplinux_text_input_init(&input, NULL, NULL, false);
+	fplinux_text_input_clear_press(&input, 100, sink_erase, &sink);
+	assert(sink.remaining == 3);
+	assert(fplinux_text_input_deadline(&input, &deadline) &&
+	       deadline == 600);
+	sink.blocked = true;
+	assert(fplinux_text_input_tick(&input, 600, sink_character, sink_erase,
+				       &sink) == FPLINUX_MULTITAP_BLOCKED);
+	assert(sink.remaining == 3);
+	assert(fplinux_text_input_deadline(&input, &deadline) &&
+	       deadline == 600);
+	sink.blocked = false;
+	fplinux_text_input_tick(&input, 600, sink_character, sink_erase, &sink);
+	assert(sink.remaining == 2);
+	assert(fplinux_text_input_deadline(&input, &deadline) &&
+	       deadline == 700);
+	fplinux_text_input_clear_release(&input);
+	fplinux_text_input_tick(&input, 900, sink_character, sink_erase, &sink);
+	assert(sink.remaining == 2);
+	assert(!fplinux_text_input_deadline(&input, &deadline));
+}
+
+static void verify_shared_release_preserves_blocked_and_rejected_emission(void)
+{
+	struct fplinux_text_input input;
+	struct input_sink sink = { .blocked = true };
+	uint64_t deadline;
+
+	fplinux_text_input_init(&input, NULL, NULL, false);
+	fplinux_text_input_press(&input, '2', 0, sink_character, &sink);
+	assert(fplinux_text_input_release(&input, '2', 600, sink_character,
+					  &sink) == FPLINUX_MULTITAP_BLOCKED);
+	assert(!sink.count);
+	assert(fplinux_text_input_deadline(&input, &deadline));
+	assert(deadline == 500);
+	assert(fplinux_multitap_candidate(&input.compose) == '2');
+	sink.blocked = false;
+	assert(fplinux_text_input_release(&input, '2', 600, sink_character,
+					  &sink) == FPLINUX_MULTITAP_COMMITTED);
+	fplinux_text_input_tick(&input, 1600, sink_character, sink_erase,
+				&sink);
+	assert(sink.count == 1 && sink.characters[0] == '2');
+	assert(!fplinux_text_input_deadline(&input, &deadline));
+
+	fplinux_text_input_press(&input, '3', 2000, sink_character, &sink);
+	sink.rejected = true;
+	assert(fplinux_text_input_release(&input, '3', 2600, sink_character,
+					  &sink) == FPLINUX_MULTITAP_REJECTED);
+	sink.rejected = false;
+	fplinux_text_input_tick(&input, 3600, sink_character, sink_erase,
+				&sink);
+	assert(sink.count == 1 && sink.characters[0] == '2');
+	assert(!fplinux_text_input_deadline(&input, &deadline));
+}
+
+static void verify_cancelled_hold_does_not_edit_on_synthetic_release(void)
+{
+	struct fplinux_ui_text_model model;
+
+	init(&model, false, 0, UPPER);
+	phone(&model, KEY_NUMERIC_2, true, 0);
+	fplinux_ui_text_model_cancel_held(&model);
+	phone(&model, KEY_NUMERIC_2, false, 600);
+	fplinux_ui_text_model_tick(&model, 600);
+	shows(&model, "A", 1);
+	fplinux_ui_text_model_tick(&model, 1000);
+	shows(&model, "A", 1);
+	assert(!pending_at(&model, 0));
+	assert(fplinux_ui_text_model_set_text(&model, "abc"));
+	phone(&model, KEY_F14, true, 2000);
+	fplinux_ui_text_model_cancel_held(&model);
+	phone(&model, KEY_F14, false, 2600);
+	fplinux_ui_text_model_tick(&model, 2600);
+	shows(&model, "ab", 2);
+	assert(fplinux_ui_text_model_set_text(&model, ""));
+	assert(fplinux_ui_text_model_set_type(
+		&model, FPLINUX_UI_TEXT_MODEL_PHONE, '.'));
+	phone(&model, KEY_NUMERIC_0, true, 3000);
+	fplinux_ui_text_model_cancel_held(&model);
+	phone(&model, KEY_NUMERIC_0, false, 3600);
+	fplinux_ui_text_model_tick(&model, 3600);
+	shows(&model, "0", 1);
+	fplinux_ui_text_model_cleanup(&model);
+}
+
 int main(int argc, char **argv)
 {
-	assert(argc == 2);
+	assert(argc == 2 || argc == 3);
 	languages = argv[1];
+	if (argc == 3) {
+		if (!strcmp(argv[2], "overdue-digit-release"))
+			verify_overdue_digit_release();
+		else if (!strcmp(argv[2], "overdue-phone-zero-release"))
+			verify_overdue_phone_zero_release();
+		else
+			assert(!"unknown text model scenario");
+		return 0;
+	}
 	verify_sentence_case_punctuation_and_space();
 	verify_commit_timeout_boundary();
 	verify_long_digit_press();
@@ -1230,5 +1468,9 @@ int main(int argc, char **argv)
 	verify_phone_keys();
 	verify_number_and_phone_lines();
 	verify_password_masking();
+	verify_shared_input_blocked_events_can_be_retried();
+	verify_shared_clear_deadlines_preserve_blocked_repeat();
+	verify_shared_release_preserves_blocked_and_rejected_emission();
+	verify_cancelled_hold_does_not_edit_on_synthetic_release();
 	return 0;
 }

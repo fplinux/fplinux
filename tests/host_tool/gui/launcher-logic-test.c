@@ -113,8 +113,24 @@ static void test_navigation(void)
 		.reveal_margin = 2,
 	};
 
-	check(fplinux_launcher_move(0, 10, 3, 2, FPLINUX_LAUNCHER_MOVE_UP) == 0,
-	      "Up stops at the first row");
+	check(fplinux_launcher_move(0, 10, 3, 2, FPLINUX_LAUNCHER_MOVE_UP) == 9,
+	      "grid Up wraps from the first row into the last row");
+	check(fplinux_launcher_move(2, 10, 3, 2, FPLINUX_LAUNCHER_MOVE_UP) == 9,
+	      "grid Up clamps a missing last-row column to the final app");
+	check(fplinux_launcher_move(1, 11, 3, 2, FPLINUX_LAUNCHER_MOVE_UP) ==
+		      10,
+	      "grid Up preserves the column when it exists in the last row");
+	check(fplinux_launcher_move(9, 11, 3, 2, FPLINUX_LAUNCHER_MOVE_DOWN) ==
+		      0,
+	      "grid Down wraps from the last row to the first column");
+	check(fplinux_launcher_move(10, 11, 3, 2, FPLINUX_LAUNCHER_MOVE_DOWN) ==
+		      1,
+	      "grid Down wraps to the same first-row column");
+	check(fplinux_launcher_move(0, 10, 1, 4, FPLINUX_LAUNCHER_MOVE_UP) == 9,
+	      "list Up wraps to the final app");
+	check(fplinux_launcher_move(9, 10, 1, 4, FPLINUX_LAUNCHER_MOVE_DOWN) ==
+		      0,
+	      "list Down wraps to the first app");
 	check(fplinux_launcher_move(8, 10, 3, 2, FPLINUX_LAUNCHER_MOVE_DOWN) ==
 		      9,
 	      "Down selects the final app in an incomplete row");
@@ -127,6 +143,17 @@ static void test_navigation(void)
 	check(fplinux_launcher_move(7, 10, 1, 4, FPLINUX_LAUNCHER_MOVE_LEFT) ==
 		      3,
 	      "list Left returns one page");
+	check(fplinux_launcher_move(0, 10, 1, 1, FPLINUX_LAUNCHER_MOVE_LEFT) ==
+		      0,
+	      "one-row list Left page stops at the first app");
+	check(fplinux_launcher_move(9, 10, 1, 1, FPLINUX_LAUNCHER_MOVE_RIGHT) ==
+		      9,
+	      "one-row list Right page stops at the final app");
+	check(fplinux_launcher_move(2, 3, 3, 2, FPLINUX_LAUNCHER_MOVE_UP) == 2,
+	      "a single grid row keeps its column on Up");
+	check(fplinux_launcher_move(2, 3, 3, 2, FPLINUX_LAUNCHER_MOVE_DOWN) ==
+		      2,
+	      "a single grid row keeps its column on Down");
 	check(fplinux_launcher_digit_index(2, 3, 4, 10) == 9,
 	      "phone digits count from the first visible row");
 	check(fplinux_launcher_digit_index(2, 3, 5, 10) == 10,

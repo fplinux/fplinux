@@ -70,7 +70,7 @@ static bool selectable(size_t index, void *context)
 	return items[index];
 }
 
-static void focus_follows_items_and_stops_at_list_edges(void)
+static void focus_follows_items_with_explicit_edge_behavior(void)
 {
 	bool items[] = { false, true, false, true, false };
 
@@ -84,11 +84,19 @@ static void focus_follows_items_and_stops_at_list_edges(void)
 	assert(fplinux_ui_focus_deleted(4, 3, 2, 5) == 2);
 	assert(fplinux_ui_focus_deleted(1, 0, 5, 5) == SIZE_MAX);
 	assert(fplinux_ui_index_deleted(2, 2, 1) == SIZE_MAX);
-	assert(fplinux_ui_focus_step(2, 10, 4) == 6);
-	assert(fplinux_ui_focus_step(2, 10, -4) == 0);
-	assert(fplinux_ui_focus_step(8, 10, 4) == 9);
-	assert(fplinux_ui_focus_step(SIZE_MAX, 10, 1) == 0);
-	assert(fplinux_ui_focus_step(SIZE_MAX, 0, 1) == SIZE_MAX);
+	assert(fplinux_ui_focus_step(2, 10, 4, FPLINUX_UI_FOCUS_CLAMP) == 6);
+	assert(fplinux_ui_focus_step(2, 10, -4, FPLINUX_UI_FOCUS_CLAMP) == 0);
+	assert(fplinux_ui_focus_step(8, 10, 4, FPLINUX_UI_FOCUS_CLAMP) == 9);
+	assert(fplinux_ui_focus_step(0, 10, -1, FPLINUX_UI_FOCUS_CLAMP) == 0);
+	assert(fplinux_ui_focus_step(9, 10, 1, FPLINUX_UI_FOCUS_CLAMP) == 9);
+	assert(fplinux_ui_focus_step(0, 10, -1, FPLINUX_UI_FOCUS_WRAP) == 9);
+	assert(fplinux_ui_focus_step(9, 10, 1, FPLINUX_UI_FOCUS_WRAP) == 0);
+	assert(fplinux_ui_focus_step(0, 1, -1, FPLINUX_UI_FOCUS_WRAP) == 0);
+	assert(fplinux_ui_focus_step(0, 1, 1, FPLINUX_UI_FOCUS_WRAP) == 0);
+	assert(fplinux_ui_focus_step(SIZE_MAX, 10, 1, FPLINUX_UI_FOCUS_WRAP) ==
+	       0);
+	assert(fplinux_ui_focus_step(SIZE_MAX, 0, 1, FPLINUX_UI_FOCUS_WRAP) ==
+	       SIZE_MAX);
 	assert(fplinux_ui_reveal_scroll(10, 109, 5, 20) == 5);
 	assert(fplinux_ui_reveal_scroll(10, 109, 95, 120) == -11);
 	assert(fplinux_ui_reveal_scroll(10, 109, 25, 40) == 0);
@@ -102,17 +110,23 @@ static void virtual_focus_moves_scroll_and_survives_row_changes(void)
 	fplinux_ui_virtual_init(&window, 100, 20, 60, changed);
 	assert(window.focus == 0 && window.top == 0);
 	fplinux_ui_virtual_set_focus(
-		&window, fplinux_ui_focus_step(window.focus, window.count, 3),
+		&window,
+		fplinux_ui_focus_step(window.focus, window.count, 3,
+				      FPLINUX_UI_FOCUS_CLAMP),
 		changed);
 	assert(window.focus == 3 && window.top == 20);
 	fplinux_ui_virtual_set_focus(&window, 99, changed);
 	assert(window.focus == 99 && window.top == 1940);
 	fplinux_ui_virtual_set_focus(
-		&window, fplinux_ui_focus_step(window.focus, window.count, 1),
+		&window,
+		fplinux_ui_focus_step(window.focus, window.count, 1,
+				      FPLINUX_UI_FOCUS_CLAMP),
 		changed);
 	assert(window.focus == 99 && window.top == 1940);
 	fplinux_ui_virtual_set_focus(
-		&window, fplinux_ui_focus_step(window.focus, window.count, -3),
+		&window,
+		fplinux_ui_focus_step(window.focus, window.count, -3,
+				      FPLINUX_UI_FOCUS_CLAMP),
 		changed);
 	assert(window.focus == 96 && window.top == 1920);
 
@@ -193,12 +207,57 @@ static void date_editing_keeps_the_day_and_formats_typed_time(void)
 	shows_date(&edit, "09:30", 0, 2);
 }
 
+static void duration_editing_uses_elapsed_hours_minutes_and_seconds(void)
+{
+	struct fplinux_ui_date_edit edit;
+
+	fplinux_ui_duration_edit_begin(&edit, 300);
+	shows_date(&edit, "00:05:00", 0, 2);
+	fplinux_ui_date_edit_digit(&edit, 1);
+	fplinux_ui_date_edit_digit(&edit, 2);
+	fplinux_ui_date_edit_digit(&edit, 3);
+	fplinux_ui_date_edit_digit(&edit, 4);
+	fplinux_ui_date_edit_digit(&edit, 5);
+	fplinux_ui_date_edit_digit(&edit, 6);
+	shows_date(&edit, "12:34:56", 6, 8);
+	assert(fplinux_ui_duration_edit_value(&edit) == 45296);
+	fplinux_ui_date_edit_move(&edit, 1);
+	shows_date(&edit, "12:34:56", 0, 2);
+
+	fplinux_ui_duration_edit_begin(&edit, 359999);
+	shows_date(&edit, "99:59:59", 0, 2);
+	fplinux_ui_date_edit_step(&edit, 1);
+	shows_date(&edit, "00:59:59", 0, 2);
+	fplinux_ui_date_edit_step(&edit, -1);
+	shows_date(&edit, "99:59:59", 0, 2);
+	fplinux_ui_date_edit_move(&edit, 1);
+	fplinux_ui_date_edit_step(&edit, 1);
+	shows_date(&edit, "99:00:59", 3, 5);
+	fplinux_ui_date_edit_move(&edit, 1);
+	fplinux_ui_date_edit_step(&edit, 1);
+	shows_date(&edit, "99:00:00", 6, 8);
+	fplinux_ui_date_edit_digit(&edit, 7);
+	assert(fplinux_ui_duration_edit_value(&edit) == 356407);
+
+	assert(setenv("TZ", "EST5EDT", 1) == 0);
+	tzset();
+	fplinux_ui_duration_edit_begin(&edit, 90061);
+	shows_date(&edit, "25:01:01", 0, 2);
+	assert(fplinux_ui_duration_edit_value(&edit) == 90061);
+	assert(setenv("TZ", "UTC0", 1) == 0);
+	tzset();
+	fplinux_ui_duration_edit_begin(&edit, 90061);
+	shows_date(&edit, "25:01:01", 0, 2);
+	assert(fplinux_ui_duration_edit_value(&edit) == 90061);
+}
+
 int main(void)
 {
 	command_assignment_keeps_back_and_remaining_actions();
-	focus_follows_items_and_stops_at_list_edges();
+	focus_follows_items_with_explicit_edge_behavior();
 	virtual_focus_moves_scroll_and_survives_row_changes();
 	date_editing_keeps_the_day_and_formats_typed_time();
+	duration_editing_uses_elapsed_hours_minutes_and_seconds();
 	puts("screen model: OK");
 	return 0;
 }

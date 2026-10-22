@@ -30,7 +30,30 @@ typedef void (*lv_timer_cb_t)(lv_timer_t *timer);
 #define LV_COORD_MAX 32767
 #define LV_TEXT_FLAG_NONE 0
 #define LV_EVENT_DRAW_MAIN 1
+#define LV_ALIGN_BOTTOM_MID 1
+#define LV_ALIGN_LEFT_MID 2
+#define LV_ALIGN_RIGHT_MID 3
+#define LV_OPA_COVER 255
+#define LV_BORDER_SIDE_TOP 1
 
+lv_obj_t *lv_obj_create(lv_obj_t *parent);
+lv_obj_t *lv_label_create(lv_obj_t *parent);
+void lv_obj_remove_style_all(lv_obj_t *object);
+void lv_obj_set_size(lv_obj_t *object, int width, int height);
+void lv_obj_align(lv_obj_t *object, int align, int x, int y);
+void lv_obj_set_style_bg_color(lv_obj_t *object, lv_color_t color,
+			       int selector);
+void lv_obj_set_style_bg_opa(lv_obj_t *object, lv_opa_t opacity, int selector);
+void lv_obj_set_style_border_color(lv_obj_t *object, lv_color_t color,
+				   int selector);
+void lv_obj_set_style_border_width(lv_obj_t *object, int width, int selector);
+void lv_obj_set_style_border_side(lv_obj_t *object, int side, int selector);
+void lv_obj_set_style_text_font(lv_obj_t *object, const lv_font_t *font,
+				int selector);
+void lv_obj_set_style_text_color(lv_obj_t *object, lv_color_t color,
+				 int selector);
+void lv_label_set_text(lv_obj_t *object, const char *text);
+const char *lv_label_get_text(const lv_obj_t *object);
 void lv_obj_set_scrollable(lv_obj_t *object, bool scrollable);
 void lv_obj_add_event_cb(lv_obj_t *object, lv_event_cb_t callback, int type,
 			 void *context);

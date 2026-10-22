@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #define _GNU_SOURCE
 #include "fplinux-ui-prefs.h"
+#include "fplinux-utf8.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -9,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -16,12 +18,6 @@
 #define VALUE_MAX_BYTES 65535U
 /* The longest stored line: key, '=', a value with every byte escaped. */
 #define LINE_MAX_BYTES (KEY_MAX_BYTES + 1U + 2U * VALUE_MAX_BYTES)
-
-/*
- * Declared in fplinux-ui.h, which needs LVGL; the preferences do not. The
- * runtime library defines it.
- */
-bool fplinux_ui_state_dir(const char *app_id, char *path, size_t capacity);
 
 struct preference {
 	char *key;
@@ -39,7 +35,10 @@ struct fplinux_ui_prefs {
 	struct preference *items;
 	size_t count;
 	size_t capacity;
+	size_t parent_sync_stop;
 	bool changed;
+	bool pending_sync;
+	bool parents_unsynced;
 };
 
 /* ASCII letters, digits, '.', '_' and '-'; independent of the C locale. */
@@ -62,48 +61,16 @@ static bool valid_key(const char *key)
 	return length > 0;
 }
 
-/* Strict UTF-8: no overlong forms, surrogates or code points past U+10FFFF. */
 static bool valid_utf8(const char *text, size_t length)
 {
-	const unsigned char *bytes = (const unsigned char *)text;
-	size_t index = 0;
+	const unsigned char *cursor = (const unsigned char *)text;
+	const unsigned char *end = cursor + length;
 
-	while (index < length) {
-		unsigned char lead = bytes[index];
-		unsigned int minimum;
-		unsigned int code;
-		size_t extra;
+	while (cursor < end) {
+		uint32_t code;
 
-		if (lead < 0x80) {
-			++index;
-			continue;
-		}
-		if (lead >= 0xc2 && lead <= 0xdf) {
-			extra = 1;
-			minimum = 0x80;
-			code = lead & 0x1f;
-		} else if (lead >= 0xe0 && lead <= 0xef) {
-			extra = 2;
-			minimum = 0x800;
-			code = lead & 0x0f;
-		} else if (lead >= 0xf0 && lead <= 0xf4) {
-			extra = 3;
-			minimum = 0x10000;
-			code = lead & 0x07;
-		} else {
+		if (!fplinux_utf8_next(&cursor, end, &code))
 			return false;
-		}
-		if (length - index <= extra)
-			return false;
-		for (size_t i = 1; i <= extra; ++i) {
-			if ((bytes[index + i] & 0xc0) != 0x80)
-				return false;
-			code = code << 6 | (bytes[index + i] & 0x3f);
-		}
-		if (code < minimum || code > 0x10ffff ||
-		    (code >= 0xd800 && code <= 0xdfff))
-			return false;
-		index += extra + 1;
 	}
 	return true;
 }
@@ -244,28 +211,50 @@ static bool load(struct fplinux_ui_prefs *prefs)
 	if (!error && ferror(file))
 		error = errno ? errno : EIO;
 	free(line);
-	fclose(file);
+	if (fclose(file) && !error)
+		error = errno ? errno : EIO;
 	/* The file as loaded is the saved state. */
 	prefs->changed = false;
 	errno = error;
 	return !error;
 }
 
-struct fplinux_ui_prefs *fplinux_ui_prefs_open(const char *app_id)
+struct fplinux_ui_prefs *fplinux_ui_prefs_open_directory(const char *directory)
 {
-	struct fplinux_ui_prefs *prefs = calloc(1, sizeof(*prefs));
+	struct fplinux_ui_prefs *prefs;
+	struct stat status;
 	int error;
+	int fd;
 
+	if (!directory || !directory[0]) {
+		errno = EINVAL;
+		return NULL;
+	}
+	prefs = calloc(1, sizeof(*prefs));
 	if (!prefs)
 		return NULL;
-	if (!fplinux_ui_state_dir(app_id, prefs->directory,
-				  sizeof(prefs->directory))) {
+	if (snprintf(prefs->directory, sizeof(prefs->directory), "%s",
+		     directory) >= (int)sizeof(prefs->directory) ||
+	    snprintf(prefs->path, sizeof(prefs->path), "%s/preferences",
+		     directory) >= (int)sizeof(prefs->path)) {
+		error = ENAMETOOLONG;
+		goto fail;
+	}
+	fd = open(directory, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+	if (fd < 0) {
+		if (errno == ENOENT)
+			return prefs;
 		error = errno;
 		goto fail;
 	}
-	if (snprintf(prefs->path, sizeof(prefs->path), "%s/preferences",
-		     prefs->directory) >= (int)sizeof(prefs->path)) {
-		error = ENAMETOOLONG;
+	if (fstat(fd, &status) < 0) {
+		error = errno;
+		close(fd);
+		goto fail;
+	}
+	close(fd);
+	if (status.st_uid != geteuid() || (status.st_mode & 0077)) {
+		error = EACCES;
 		goto fail;
 	}
 	if (!load(prefs)) {
@@ -417,31 +406,143 @@ static bool sync_directory(const char *path)
 	return true;
 }
 
+/* Zero denotes the current directory for a relative first component. */
+static size_t parent_length(const char *path, size_t length)
+{
+	while (length > 1 && path[length - 1] == '/')
+		--length;
+	while (length && path[length - 1] != '/')
+		--length;
+	while (length > 1 && path[length - 1] == '/')
+		--length;
+	return length;
+}
+
+static bool prepare_directory(struct fplinux_ui_prefs *prefs)
+{
+	char path[PATH_MAX];
+	struct stat status;
+	size_t length;
+	int error;
+	int fd;
+
+	strcpy(path, prefs->directory);
+	length = strlen(path);
+	for (size_t i = 1; i <= length; ++i) {
+		char saved = path[i];
+
+		if (saved && saved != '/')
+			continue;
+		path[i] = '\0';
+		if (stat(path, &status) < 0) {
+			if (errno != ENOENT)
+				return false;
+			if (mkdir(path, 0700) < 0) {
+				if (errno != EEXIST)
+					return false;
+			} else if (!prefs->parents_unsynced) {
+				prefs->parent_sync_stop =
+					parent_length(path, i);
+				prefs->parents_unsynced = true;
+			}
+			if (stat(path, &status) < 0)
+				return false;
+		}
+		if (!S_ISDIR(status.st_mode)) {
+			errno = ENOTDIR;
+			return false;
+		}
+		path[i] = saved;
+	}
+	fd = open(prefs->directory, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+	if (fd < 0)
+		return false;
+	if (fstat(fd, &status) < 0) {
+		error = errno;
+		goto fail;
+	}
+	if (status.st_uid != geteuid()) {
+		error = EACCES;
+		goto fail;
+	}
+	if ((status.st_mode & 07777) != 0700 && fchmod(fd, 0700) < 0) {
+		error = errno;
+		goto fail;
+	}
+	close(fd);
+	return true;
+fail:
+	close(fd);
+	errno = error;
+	return false;
+}
+
+/* Newly created directory entries also need their parents synchronized. */
+static bool sync_publication(struct fplinux_ui_prefs *prefs)
+{
+	char path[PATH_MAX];
+	size_t length;
+
+	strcpy(path, prefs->directory);
+	length = strlen(path);
+	while (length > 1 && path[length - 1] == '/')
+		path[--length] = '\0';
+	for (;;) {
+		if (!sync_directory(path))
+			return false;
+		if (!prefs->parents_unsynced ||
+		    length == prefs->parent_sync_stop)
+			break;
+		length = parent_length(path, length);
+		if (!length)
+			return sync_directory(".");
+		path[length] = '\0';
+	}
+	return true;
+}
+
+static struct fplinux_storage_result
+save_result(enum fplinux_storage_state state, int error)
+{
+	if (error)
+		errno = error;
+	return (struct fplinux_storage_result){ .state = state,
+						.error = error };
+}
+
 /*
  * A new mode-0600 file in the same directory replaces the old one by rename,
  * so a crash leaves either the previous or the new preferences.
  */
-bool fplinux_ui_prefs_save(struct fplinux_ui_prefs *prefs)
+struct fplinux_storage_result
+fplinux_ui_prefs_save(struct fplinux_ui_prefs *prefs)
 {
 	char temporary[PATH_MAX];
 	FILE *file;
 	int error;
 	int fd;
 
-	if (!prefs) {
-		errno = EINVAL;
-		return false;
+	if (!prefs)
+		return save_result(FPLINUX_STORAGE_UNPUBLISHED, EINVAL);
+	if (!prefs->changed) {
+		if (prefs->pending_sync)
+			goto synchronize;
+		return save_result(FPLINUX_STORAGE_DURABLE, 0);
 	}
-	if (!prefs->changed)
-		return true;
+	if (!prepare_directory(prefs))
+		return save_result(FPLINUX_STORAGE_UNPUBLISHED, errno);
 	if (snprintf(temporary, sizeof(temporary), "%s/.preferences.XXXXXX",
 		     prefs->directory) >= (int)sizeof(temporary)) {
-		errno = ENAMETOOLONG;
-		return false;
+		return save_result(FPLINUX_STORAGE_UNPUBLISHED, ENAMETOOLONG);
 	}
 	fd = mkostemp(temporary, O_CLOEXEC);
 	if (fd < 0)
-		return false;
+		return save_result(FPLINUX_STORAGE_UNPUBLISHED, errno);
+	if (fchmod(fd, 0600) < 0) {
+		error = errno;
+		close(fd);
+		goto fail;
+	}
 	file = fdopen(fd, "w");
 	if (!file) {
 		error = errno;
@@ -462,12 +563,15 @@ bool fplinux_ui_prefs_save(struct fplinux_ui_prefs *prefs)
 		error = errno;
 		goto fail;
 	}
-	if (!sync_directory(prefs->directory))
-		return false;
 	prefs->changed = false;
-	return true;
+	prefs->pending_sync = true;
+synchronize:
+	if (!sync_publication(prefs))
+		return save_result(FPLINUX_STORAGE_PUBLISHED_UNSYNCED, errno);
+	prefs->pending_sync = false;
+	prefs->parents_unsynced = false;
+	return save_result(FPLINUX_STORAGE_DURABLE, 0);
 fail:
 	unlink(temporary);
-	errno = error;
-	return false;
+	return save_result(FPLINUX_STORAGE_UNPUBLISHED, error);
 }

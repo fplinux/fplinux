@@ -1,15 +1,21 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #define _GNU_SOURCE
 #include "fplinux-ui.h"
+#include "fplinux-audio-client-internal.h"
+#include "fplinux-audio-protocol.h"
 #include "fplinux-language.h"
+#include "fplinux-ui-audio.h"
 #include "fplinux-ui-fonts.h"
+#include "fplinux-ui-frame-private.h"
 #include "fplinux-ui-internal.h"
 #include "fplinux-ui-menu.h"
+#include "fplinux-ui-prefs.h"
 #include "fplinux-ui-screen.h"
 #include "fplinux-ui-profile.h"
 #include "fplinux-ui-screen-model.h"
 #include "fplinux-ui-session.h"
 #include "fplinux-ui-softkey-layout.h"
+#include "fplinux-ui-vibration.h"
 #include "xdg-shell-client-protocol.h"
 
 #include <errno.h>
@@ -46,6 +52,12 @@
 #define MARQUEE_SPEED_PX_S 30
 #define MARQUEE_MIN_MS 300
 #define MARQUEE_MAX_MS 10000
+
+_Static_assert(FPLINUX_UI_AUDIO_RATE_MIN == FPLINUX_AUDIO_RATE_MIN &&
+		       FPLINUX_UI_AUDIO_RATE_MAX == FPLINUX_AUDIO_RATE_MAX &&
+		       FPLINUX_UI_AUDIO_STREAMS_MAX ==
+			       FPLINUX_AUDIO_CLIENT_STREAMS,
+	       "the public audio formats match the stream transport");
 
 /* The theme's font slots, as the profile table names them. */
 enum font_slot {
@@ -90,6 +102,28 @@ struct frame_buffer {
 	bool busy;
 };
 
+enum repeat_target {
+	REPEAT_NONE,
+	REPEAT_MENU,
+	REPEAT_SCREEN,
+	REPEAT_RAW_TEXT,
+};
+
+struct repeat_owner {
+	enum repeat_target target;
+	union {
+		struct fplinux_ui_menu_view *menu;
+		struct fplinux_ui_screen *screen;
+		struct fplinux_ui_text *field;
+	};
+};
+
+struct text_key_claim {
+	struct text_key_claim *previous;
+	const struct fplinux_ui_key *key;
+	struct fplinux_ui_text *field;
+};
+
 struct input_seat {
 	struct input_seat *next;
 	struct fplinux_ui *ui;
@@ -103,7 +137,8 @@ struct input_seat {
 	/* Only presses delivered to this surface can acquire a release. */
 	unsigned char pressed[KEY_CNT / 8];
 	lv_timer_t *repeat_timer;
-	struct fplinux_ui_screen *repeat_canvas;
+	struct repeat_owner repeat_owner;
+	uint64_t repeat_generation;
 	unsigned int repeat_code;
 	int32_t repeat_rate;
 	int32_t repeat_delay;
@@ -119,13 +154,19 @@ struct fplinux_ui {
 	void *watch_context;
 	fplinux_ui_event_cb callback;
 	void *context;
+	fplinux_ui_close_cb close_callback;
+	void *close_context;
+	uint32_t close_serial;
+	enum fplinux_ui_close_response close_response;
 	struct wl_display *wayland;
 	struct wl_registry *registry;
 	struct wl_compositor *compositor;
 	struct wl_shm *shm;
 	struct input_seat *seats;
-	/* A dispatch cannot arm a Canvas that its callback covered or deleted. */
+	/* A dispatch cannot arm an owner that its callback covered or deleted. */
 	uint64_t repeat_generation;
+	/* A raw field may claim only this fallback application's exact key. */
+	struct text_key_claim *text_claim;
 	struct wl_surface *surface;
 	struct xdg_wm_base *wm;
 	struct xdg_surface *xdg_surface;
@@ -164,8 +205,6 @@ struct fplinux_ui {
 	uint16_t *canvas;
 	void *draw_buffer;
 	const lv_font_t *fonts[FONT_SLOTS];
-	/* A slot's font is not built in; logged once. */
-	bool font_fallback;
 	const struct fplinux_ui_profile_spec *spec;
 	struct fplinux_ui_theme theme;
 	struct fplinux_ui_metrics metrics;
@@ -200,6 +239,9 @@ struct fplinux_ui {
 	/* Keep the submitted view until the manager completes an EXIT. */
 	bool exit_pending;
 	bool visible;
+	bool audio;
+	bool vibration;
+	struct fplinux_audio_client *audio_client;
 	enum fplinux_ui_lifecycle lifecycle;
 	bool quit;
 	bool failed;
@@ -218,20 +260,56 @@ static void release_keys(struct input_seat *seat);
 
 static void stop_repeat(struct input_seat *seat)
 {
-	seat->repeat_canvas = NULL;
+	seat->repeat_owner = (struct repeat_owner){ 0 };
 	if (seat->repeat_timer)
 		lv_timer_pause(seat->repeat_timer);
 }
 
 void fplinux_ui_cancel_key_repeat(struct fplinux_ui *ui,
-				  const struct fplinux_ui_screen *canvas)
+				  const struct fplinux_ui_screen *screen)
 {
 	if (!ui)
 		return;
 	++ui->repeat_generation;
+	for (struct text_key_claim *claim = ui->text_claim; claim;
+	     claim = claim->previous)
+		claim->field = NULL;
 	for (struct input_seat *seat = ui->seats; seat; seat = seat->next)
-		if (!canvas || seat->repeat_canvas == canvas)
+		if (!screen || (seat->repeat_owner.target == REPEAT_SCREEN &&
+				seat->repeat_owner.screen == screen))
 			stop_repeat(seat);
+}
+
+void fplinux_ui_claim_text_key(struct fplinux_ui *ui,
+			       struct fplinux_ui_text *field,
+			       const struct fplinux_ui_key *key)
+{
+	if (ui && ui->text_claim && ui->text_claim->key == key && key->pressed)
+		ui->text_claim->field = field;
+}
+
+void fplinux_ui_cancel_text_key_repeat(struct fplinux_ui *ui,
+				       const struct fplinux_ui_text *field)
+{
+	bool cancelled = false;
+
+	if (!ui || !field)
+		return;
+	for (struct text_key_claim *claim = ui->text_claim; claim;
+	     claim = claim->previous)
+		if (claim->field == field) {
+			claim->field = NULL;
+			cancelled = true;
+		}
+	for (struct input_seat *seat = ui->seats; seat; seat = seat->next) {
+		if (seat->repeat_owner.target != REPEAT_RAW_TEXT ||
+		    seat->repeat_owner.field != field)
+			continue;
+		stop_repeat(seat);
+		cancelled = true;
+	}
+	if (cancelled)
+		++ui->repeat_generation;
 }
 
 _Static_assert(FPLINUX_UI_PROFILE_320X240 + 1 == FPLINUX_UI_PROFILE_COUNT,
@@ -280,7 +358,10 @@ static void finish_menu(struct fplinux_ui *ui, int action)
 {
 	fplinux_ui_menu_cb callback = ui->menu_callback;
 	void *context = ui->menu_context;
+	struct fplinux_ui_menu_position position;
 
+	fplinux_ui_menu_view_get_position(ui->menu, &position);
+	fplinux_ui_screens_menu_position(ui->screens, &position);
 	fplinux_ui_menu_close(ui);
 	if (callback)
 		callback(ui, action, context);
@@ -291,8 +372,8 @@ static void finish_menu(struct fplinux_ui *ui, int action)
  * the application neither misses the release of a key it saw pressed nor
  * receives the release of the key that closed the menu.
  */
-static bool route_menu_key(struct fplinux_ui *ui,
-			   const struct fplinux_ui_key *key)
+static enum fplinux_ui_key_route
+route_menu_key(struct fplinux_ui *ui, const struct fplinux_ui_key *key)
 {
 	bool keyboard = key->source == FPLINUX_UI_KEY_KEYBOARD;
 	unsigned char bit = (unsigned char)(1U << (key->code % 8));
@@ -300,39 +381,79 @@ static bool route_menu_key(struct fplinux_ui *ui,
 	int action;
 
 	if (key->code >= KEY_CNT)
-		return ui->menu != NULL;
+		return ui->menu ? FPLINUX_UI_KEY_HANDLED :
+				  FPLINUX_UI_KEY_UNHANDLED;
 	pressed = &ui->menu_keys[keyboard][key->code / 8];
 	if (key->pressed) {
 		if (!ui->menu)
-			return false;
+			return FPLINUX_UI_KEY_UNHANDLED;
 		*pressed |= bit;
 	} else {
 		if (!(*pressed & bit))
-			return false;
+			return FPLINUX_UI_KEY_UNHANDLED;
 		*pressed &= (unsigned char)~bit;
 		if (!ui->menu)
-			return true;
+			return FPLINUX_UI_KEY_HANDLED;
 	}
-	if (fplinux_ui_menu_view_key(ui->menu, key, &action))
+	if (fplinux_ui_menu_view_key(ui->menu, key, &action)) {
 		finish_menu(ui, action);
-	return true;
+		return FPLINUX_UI_KEY_HANDLED;
+	}
+	return key->pressed && fplinux_ui_is_direction_key(key) ?
+		       FPLINUX_UI_KEY_REPEATABLE :
+		       FPLINUX_UI_KEY_HANDLED;
 }
 
-static enum fplinux_ui_key_route
-dispatch_event(struct fplinux_ui *ui, const struct fplinux_ui_event *event)
+static struct repeat_owner dispatch_event(struct fplinux_ui *ui,
+					  const struct fplinux_ui_event *event)
 {
+	struct repeat_owner owner = { 0 };
+
+	if (event->type == FPLINUX_UI_EVENT_INPUT_CANCEL)
+		fplinux_ui_text_cancel_input(ui, event->key.source);
 	if (event->type == FPLINUX_UI_EVENT_KEY) {
 		enum fplinux_ui_key_route route;
+		struct fplinux_ui_menu_view *menu = ui->menu;
+		struct fplinux_ui_screen *screen;
 
-		if (route_menu_key(ui, &event->key))
-			return FPLINUX_UI_KEY_HANDLED;
+		route = route_menu_key(ui, &event->key);
+		if (route != FPLINUX_UI_KEY_UNHANDLED) {
+			if (route == FPLINUX_UI_KEY_REPEATABLE)
+				owner = (struct repeat_owner){
+					.target = REPEAT_MENU,
+					.menu = menu,
+				};
+			return owner;
+		}
+		screen = fplinux_ui_current(ui);
 		route = fplinux_ui_screens_key(ui->screens, &event->key);
-		if (route != FPLINUX_UI_KEY_UNHANDLED)
-			return route;
+		if (route != FPLINUX_UI_KEY_UNHANDLED) {
+			if (route == FPLINUX_UI_KEY_REPEATABLE)
+				owner = (struct repeat_owner){
+					.target = REPEAT_SCREEN,
+					.screen = screen,
+				};
+			return owner;
+		}
 	}
-	if (ui->callback)
+	if (ui->callback) {
+		struct text_key_claim claim = {
+			.previous = ui->text_claim,
+			.key = event->type == FPLINUX_UI_EVENT_KEY ?
+				       &event->key :
+				       NULL,
+		};
+
+		ui->text_claim = &claim;
 		ui->callback(ui, event, ui->context);
-	return FPLINUX_UI_KEY_UNHANDLED;
+		if (claim.field)
+			owner = (struct repeat_owner){
+				.target = REPEAT_RAW_TEXT,
+				.field = claim.field,
+			};
+		ui->text_claim = claim.previous;
+	}
+	return owner;
 }
 
 static void set_lifecycle(struct fplinux_ui *ui,
@@ -356,6 +477,32 @@ static void request_close(struct fplinux_ui *ui)
 	set_lifecycle(ui, FPLINUX_UI_CLOSING);
 	dispatch_event(ui, &event);
 	ui->quit = true;
+}
+
+static const char *const close_response_names[] = { "ready", "cancel", "wait" };
+
+static bool prepare_close(struct fplinux_ui *ui, uint32_t serial)
+{
+	enum fplinux_ui_close_response response;
+
+	if (ui->close_serial == serial) {
+		struct fplinux_ui_session_message reply = {
+			.type = FPLINUX_UI_SESSION_CLOSE_REPLY,
+			.serial = serial,
+		};
+
+		strcpy(reply.value, close_response_names[ui->close_response]);
+		return fplinux_ui_session_send(ui->session_fd, &reply);
+	}
+	ui->close_serial = serial;
+	ui->close_response = FPLINUX_UI_CLOSE_WAIT;
+	/* Back held the last frame; a save decision must be visible and usable. */
+	ui->exit_pending = false;
+	fplinux_ui_cancel_key_repeat(ui, NULL);
+	response = ui->close_callback ?
+			   ui->close_callback(ui, ui->close_context) :
+			   FPLINUX_UI_CLOSE_READY;
+	return fplinux_ui_close_reply(ui, response);
 }
 
 /* [a-z]{2,3}, the name of a file in FPLINUX_LANGUAGE_DIRECTORY. */
@@ -435,6 +582,7 @@ static void set_visible(struct fplinux_ui *ui, bool visible)
 		return;
 	/* Synthetic releases must observe that held gestures are now hidden. */
 	ui->visible = visible;
+	fplinux_ui_frames_set_visible(ui, visible);
 	if (!visible)
 		for (struct input_seat *seat = ui->seats; seat;
 		     seat = seat->next)
@@ -474,8 +622,14 @@ static bool receive_session(struct fplinux_ui *ui)
 
 	while ((received = fplinux_ui_session_receive(ui->session_fd,
 						      &message)) > 0) {
+		bool setting_reply =
+			message.type == FPLINUX_UI_SESSION_SETTING ||
+			(message.type == FPLINUX_UI_SESSION_ERROR &&
+			 message.applied);
+
 		/* These requests travel only from client to manager. */
-		if (message.type == FPLINUX_UI_SESSION_LAUNCH) {
+		if (message.type == FPLINUX_UI_SESSION_LAUNCH ||
+		    message.type == FPLINUX_UI_SESSION_CLOSE_REPLY) {
 			if (message.has_frame)
 				close(message.frame_fd);
 			errno = EPROTO;
@@ -505,18 +659,21 @@ static bool receive_session(struct fplinux_ui *ui)
 			set_lifecycle(ui, lifecycle);
 			continue;
 		}
+		if (message.type == FPLINUX_UI_SESSION_PREPARE_CLOSE) {
+			if (!prepare_close(ui, message.serial))
+				return false;
+			continue;
+		}
 		/*
 		 * The settings app learns the applied locale from the reply,
 		 * the launcher from ACTIVE; the application then redraws
 		 * with gettext in the new language.
 		 */
-		if (message.type == FPLINUX_UI_SESSION_SETTING &&
-		    !strcmp(message.name, "locale") &&
+		if (setting_reply && !strcmp(message.name, "locale") &&
 		    is_language_code(message.value) &&
 		    strcmp(message.value, ui->locale))
 			set_language(ui, message.value);
-		if (message.type == FPLINUX_UI_SESSION_SETTING &&
-		    !strcmp(message.name, "input_locale") &&
+		if (setting_reply && !strcmp(message.name, "input_locale") &&
 		    is_language_code(message.value))
 			strcpy(ui->input_locale, message.value);
 		/*
@@ -524,8 +681,7 @@ static bool receive_session(struct fplinux_ui *ui)
 		 * the theme in place and the application rebuilds its
 		 * screens, whose styles keep the colours they were made with.
 		 */
-		if (message.type == FPLINUX_UI_SESSION_SETTING &&
-		    !strcmp(message.name, "theme"))
+		if (setting_reply && !strcmp(message.name, "theme"))
 			set_theme_kind(ui, message.value);
 		if (message.type == FPLINUX_UI_SESSION_ACTIVE &&
 		    is_language_code(message.locale) &&
@@ -900,32 +1056,78 @@ static bool key_repeats(const struct input_seat *seat, unsigned int code)
 	return seat->keymap && xkb_keymap_key_repeats(seat->keymap, code + 8);
 }
 
+static bool same_repeat_owner(const struct repeat_owner *first,
+			      const struct repeat_owner *second)
+{
+	if (first->target != second->target)
+		return false;
+	switch (first->target) {
+	case REPEAT_MENU:
+		return first->menu == second->menu;
+	case REPEAT_SCREEN:
+		return first->screen == second->screen;
+	case REPEAT_RAW_TEXT:
+		return first->field == second->field;
+	case REPEAT_NONE:
+		return false;
+	}
+	return false;
+}
+
+static bool repeat_owner_current(struct fplinux_ui *ui,
+				 const struct repeat_owner *owner)
+{
+	switch (owner->target) {
+	case REPEAT_MENU:
+		return ui->menu == owner->menu;
+	case REPEAT_SCREEN:
+		return !ui->menu && fplinux_ui_current(ui) == owner->screen;
+	case REPEAT_RAW_TEXT:
+		return !ui->menu && !fplinux_ui_current(ui) &&
+		       fplinux_ui_text_can_repeat(ui, owner->field);
+	case REPEAT_NONE:
+		return false;
+	}
+	return false;
+}
+
 static void repeat_key(lv_timer_t *timer)
 {
 	struct input_seat *seat = lv_timer_get_user_data(timer);
 	struct fplinux_ui *ui = seat->ui;
-	struct fplinux_ui_screen *canvas = seat->repeat_canvas;
+	struct repeat_owner owner = seat->repeat_owner;
+	struct repeat_owner delivered;
+	uint64_t generation = seat->repeat_generation;
 	unsigned char bit = (unsigned char)(1U << (seat->repeat_code % 8));
-	struct fplinux_ui_key key = {
-		.source = seat->source,
-		.code = seat->repeat_code,
-		.pressed = true,
-		.time_ms = fplinux_ui_now_ms(),
+	struct fplinux_ui_event event = {
+		.type = FPLINUX_UI_EVENT_KEY,
+		.key = {
+			.source = seat->source,
+			.code = seat->repeat_code,
+			.pressed = true,
+			.time_ms = fplinux_ui_now_ms(),
+		},
 	};
 
-	if (!canvas || !seat->focused || !ui->visible || ui->quit ||
+	if (generation != ui->repeat_generation || !seat->focused ||
+	    !ui->visible || ui->quit ||
 	    !(seat->pressed[seat->repeat_code / 8] & bit) ||
-	    !key_repeats(seat, seat->repeat_code)) {
+	    !key_repeats(seat, seat->repeat_code) ||
+	    !repeat_owner_current(ui, &owner)) {
 		stop_repeat(seat);
 		return;
 	}
-	resolve_keyboard_key(seat, &key);
-	if (!fplinux_ui_screens_repeat_key(ui->screens, canvas, &key)) {
+	resolve_keyboard_key(seat, &event.key);
+	delivered = dispatch_event(ui, &event);
+	if (generation != ui->repeat_generation ||
+	    !same_repeat_owner(&owner, &seat->repeat_owner) ||
+	    !same_repeat_owner(&owner, &delivered) ||
+	    !repeat_owner_current(ui, &owner)) {
 		stop_repeat(seat);
 		return;
 	}
 	/* One event per wakeup; a delayed callback never catches up in a burst. */
-	if (seat->repeat_canvas == canvas && seat->repeat_rate > 0) {
+	if (seat->repeat_rate > 0) {
 		uint32_t period = 1000U / (uint32_t)seat->repeat_rate;
 
 		lv_timer_set_period(timer, period ? period : 1);
@@ -934,7 +1136,7 @@ static void repeat_key(lv_timer_t *timer)
 }
 
 static void start_repeat(struct input_seat *seat, unsigned int code,
-			 struct fplinux_ui_screen *canvas)
+			 const struct repeat_owner *owner)
 {
 	uint32_t delay;
 
@@ -948,7 +1150,8 @@ static void start_repeat(struct input_seat *seat, unsigned int code,
 			return;
 		}
 	}
-	seat->repeat_canvas = canvas;
+	seat->repeat_owner = *owner;
+	seat->repeat_generation = seat->ui->repeat_generation;
 	seat->repeat_code = code;
 	lv_timer_set_period(seat->repeat_timer, delay);
 	lv_timer_reset(seat->repeat_timer);
@@ -964,7 +1167,7 @@ static void keyboard_key(void *data, struct wl_keyboard *keyboard,
 	bool pressed = state == WL_KEYBOARD_KEY_STATE_PRESSED;
 	bool repeats;
 	uint64_t generation;
-	enum fplinux_ui_key_route route;
+	struct repeat_owner owner;
 	unsigned char bit = (unsigned char)(1U << (code % 8));
 	struct fplinux_ui_event event = {
 		.type = FPLINUX_UI_EVENT_KEY,
@@ -993,10 +1196,10 @@ static void keyboard_key(void *data, struct wl_keyboard *keyboard,
 		seat->pressed[code / 8] &= (unsigned char)~bit;
 	resolve_keyboard_key(seat, &event.key);
 	generation = ui->repeat_generation;
-	route = dispatch_event(ui, &event);
-	if (pressed && repeats && route == FPLINUX_UI_KEY_TO_REPEAT_CANVAS &&
-	    generation == ui->repeat_generation)
-		start_repeat(seat, code, fplinux_ui_current(ui));
+	owner = dispatch_event(ui, &event);
+	if (pressed && repeats && generation == ui->repeat_generation &&
+	    repeat_owner_current(ui, &owner))
+		start_repeat(seat, code, &owner);
 }
 
 static void keyboard_modifiers(void *data, struct wl_keyboard *keyboard,
@@ -1312,6 +1515,8 @@ static int wait_config(struct fplinux_ui *ui)
 			    config.screen_height > FPLINUX_UI_SCREEN_MAX)
 				return EINVAL;
 			ui->config_mode = config.mode;
+			ui->audio = config.audio;
+			ui->vibration = config.vibration;
 			ui->requested_mode = config.mode;
 			ui->fullscreen = config.mode ==
 					 FPLINUX_UI_SESSION_FULLSCREEN;
@@ -1453,30 +1658,12 @@ static const char *slot_id(const struct fplinux_ui_profile_spec *spec,
 	return ids[slot];
 }
 
-/*
- * Resolves a slot to a font compiled into the runtime. An id that this build
- * lacks falls back to the 240x320 profile's font in the same slot, logged
- * once, and a clock font that is still missing to the title font. Returns 0
- * or an errno value.
- */
+/* Resolve the profile's slot to a built-in font, or return an errno value. */
 static int open_font(struct fplinux_ui *ui, enum font_slot slot)
 {
-	const struct fplinux_ui_profile_spec *fallback =
-		fplinux_ui_profile_spec(FPLINUX_UI_PROFILE_240X320);
 	const char *id = slot_id(ui->spec, slot);
 
 	ui->fonts[slot] = fplinux_ui_builtin_font(id);
-	if (ui->fonts[slot])
-		return 0;
-	if (!ui->font_fallback)
-		fprintf(stderr,
-			"fplinux-ui: font %s not built in; using the %dx%d "
-			"fonts\n",
-			id, fallback->width, fallback->height);
-	ui->font_fallback = true;
-	ui->fonts[slot] = fplinux_ui_builtin_font(slot_id(fallback, slot));
-	if (!ui->fonts[slot] && slot == FONT_CLOCK)
-		ui->fonts[slot] = ui->fonts[FONT_TITLE];
 	return ui->fonts[slot] ? 0 : EIO;
 }
 
@@ -1646,11 +1833,12 @@ static bool read_wayland(struct fplinux_ui *ui)
 int fplinux_ui_run(struct fplinux_ui *ui)
 {
 	while (!ui->quit && !ui->failed) {
-		struct pollfd descriptors[3] = {
+		struct pollfd descriptors[4] = {
 			{ .fd = wl_display_get_fd(ui->wayland),
 			  .events = POLLIN },
 			{ .fd = ui->session_fd, .events = POLLIN },
 			{ .fd = ui->watch_fd, .events = ui->watch_events },
+			{ .fd = -1, .events = POLLIN },
 		};
 		uint32_t timeout_ms;
 		int received;
@@ -1696,8 +1884,9 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 				"fplinux-ui: READY sent after first Wayland flush\n");
 		}
 		/* LVGL refresh timers sleep between frames; no fixed busy polling. */
+		descriptors[3].fd = fplinux_audio_client_fd(ui->audio_client);
 		received = poll(
-			descriptors, 3,
+			descriptors, 4,
 			timeout_ms == LV_NO_TIMER_READY ? -1 : (int)timeout_ms);
 		if (received < 0) {
 			if (errno == EINTR)
@@ -1712,6 +1901,9 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		}
 		if ((descriptors[0].revents & POLLIN) && !read_wayland(ui))
 			ui->failed = true;
+		if (descriptors[3].revents)
+			fplinux_audio_client_dispatch(ui->audio_client,
+						      descriptors[3].revents);
 		if (descriptors[2].revents && ui->watch_callback)
 			ui->watch_callback(ui, ui->watch_fd,
 					   descriptors[2].revents,
@@ -1726,6 +1918,9 @@ void fplinux_ui_close(struct fplinux_ui *ui)
 {
 	if (!ui)
 		return;
+	fplinux_ui_frames_set_visible(ui, false);
+	fplinux_audio_client_close(ui->audio_client);
+	ui->audio_client = NULL;
 	if (ui->frame_ack_sync)
 		wl_callback_destroy(ui->frame_ack_sync);
 	/* The application is leaving: no callbacks, legends or marquees. */
@@ -1782,6 +1977,67 @@ void fplinux_ui_quit(struct fplinux_ui *ui)
 	fplinux_ui_cancel_key_repeat(ui, NULL);
 	ui->quit = true;
 	set_lifecycle(ui, FPLINUX_UI_CLOSING);
+}
+
+void fplinux_ui_set_close_handler(struct fplinux_ui *ui,
+				  fplinux_ui_close_cb callback, void *context)
+{
+	ui->close_callback = callback;
+	ui->close_context = context;
+}
+
+bool fplinux_ui_close_reply(struct fplinux_ui *ui,
+			    enum fplinux_ui_close_response response)
+{
+	struct fplinux_ui_session_message reply = {
+		.type = FPLINUX_UI_SESSION_CLOSE_REPLY,
+		.serial = ui->close_serial,
+	};
+
+	if (!ui->close_serial || ui->close_response != FPLINUX_UI_CLOSE_WAIT ||
+	    (unsigned int)response > FPLINUX_UI_CLOSE_WAIT || ui->quit) {
+		errno = EINVAL;
+		return false;
+	}
+	strcpy(reply.value, close_response_names[response]);
+	if (!fplinux_ui_session_send(ui->session_fd, &reply))
+		return false;
+	ui->close_response = response;
+	ui->exit_pending = response == FPLINUX_UI_CLOSE_READY;
+	return true;
+}
+
+const char *fplinux_ui_storage_error(struct fplinux_storage_result result)
+{
+	const char *message;
+
+	if (result.state == FPLINUX_STORAGE_DURABLE)
+		return "";
+	switch (result.error) {
+	case ENOSPC:
+		message = "Not enough storage space";
+		break;
+	case EDQUOT:
+		message = "Storage limit reached";
+		break;
+	case EROFS:
+		message = "Storage is read-only";
+		break;
+	case EACCES:
+	case EPERM:
+		message = "Storage access denied";
+		break;
+	case ENOMEM:
+		message = "Not enough memory to save changes";
+		break;
+	case EIO:
+		message = "Storage input/output error";
+		break;
+	default:
+		message = "Could not save changes";
+		break;
+	}
+	return dgettext(FPLINUX_UI_TEXT_DOMAIN, message);
 }
 
 void fplinux_ui_watch_fd(struct fplinux_ui *ui, int fd, short events,
@@ -1884,7 +2140,8 @@ const void *fplinux_ui_glyph(struct fplinux_ui *ui, const char *name,
 bool fplinux_ui_send(struct fplinux_ui *ui,
 		     const struct fplinux_ui_session_message *message)
 {
-	if (message->type == FPLINUX_UI_SESSION_LIFECYCLE) {
+	if (message->type == FPLINUX_UI_SESSION_LIFECYCLE ||
+	    message->type == FPLINUX_UI_SESSION_PREPARE_CLOSE) {
 		errno = EINVAL;
 		return false;
 	}
@@ -2409,6 +2666,107 @@ bool fplinux_ui_keep_screen_on(struct fplinux_ui *ui, bool enabled)
 	return fplinux_ui_send(ui, &message);
 }
 
+bool fplinux_ui_audio_supported(const struct fplinux_ui *ui)
+{
+	return ui->audio;
+}
+
+bool fplinux_ui_audio_background_supported(const struct fplinux_ui *ui)
+{
+	(void)ui;
+	return false;
+}
+
+static bool media_eligible(const struct fplinux_ui *ui)
+{
+	return ui->visible && !ui->quit && !ui->exit_pending &&
+	       ui->lifecycle == FPLINUX_UI_FOREGROUND;
+}
+
+struct fplinux_audio_stream *fplinux_ui_audio_open(struct fplinux_ui *ui,
+						   unsigned int rate,
+						   unsigned int channels)
+{
+	if (!fplinux_audio_format_valid(rate, channels)) {
+		errno = EINVAL;
+		return NULL;
+	}
+	if (!ui->audio) {
+		errno = ENOTSUP;
+		return NULL;
+	}
+	if (!media_eligible(ui)) {
+		errno = EAGAIN;
+		return NULL;
+	}
+	if (!ui->audio_client) {
+		ui->audio_client = fplinux_audio_client_create();
+		if (!ui->audio_client)
+			return NULL;
+	}
+	return fplinux_audio_stream_open(ui->audio_client, rate, channels);
+}
+
+long fplinux_ui_audio_write(struct fplinux_audio_stream *stream,
+			    const int16_t *frames, size_t count)
+{
+	return fplinux_audio_stream_write(stream, frames, count);
+}
+
+long fplinux_ui_audio_queued(const struct fplinux_audio_stream *stream)
+{
+	return fplinux_audio_stream_queued(stream);
+}
+
+void fplinux_ui_audio_close(struct fplinux_audio_stream *stream)
+{
+	fplinux_audio_stream_close(stream);
+}
+
+bool fplinux_ui_vibration_supported(const struct fplinux_ui *ui)
+{
+	return ui->vibration;
+}
+
+bool fplinux_ui_vibration_play(struct fplinux_ui *ui,
+			       const unsigned int *pattern_ms, size_t count,
+			       bool repeat)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_VIBRATE,
+		.repeat = repeat,
+	};
+
+	if (pattern_ms && count && count <= FPLINUX_UI_SESSION_PATTERN) {
+		memcpy(message.pattern, pattern_ms,
+		       count * sizeof(*pattern_ms));
+		message.pattern_count = count;
+	}
+	if (!message.pattern_count ||
+	    !fplinux_ui_session_vibrate_valid(&message)) {
+		errno = EINVAL;
+		return false;
+	}
+	if (!ui->vibration) {
+		errno = ENOTSUP;
+		return false;
+	}
+	if (!media_eligible(ui)) {
+		errno = EAGAIN;
+		return false;
+	}
+	return fplinux_ui_send(ui, &message);
+}
+
+bool fplinux_ui_vibration_stop(struct fplinux_ui *ui)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_VIBRATE,
+	};
+
+	return fplinux_ui_send(ui, &message);
+}
+
 bool fplinux_ui_is_visible(const struct fplinux_ui *ui)
 {
 	return ui->visible;
@@ -2461,13 +2819,12 @@ bool fplinux_ui_is_softkey(const struct fplinux_ui_key *key, bool left)
 	       key->code == (left ? KEY_F13 : KEY_F14);
 }
 
-bool fplinux_ui_state_dir(const char *app_id, char *path, size_t capacity)
+static bool state_directory_path(const char *app_id, char *path,
+				 size_t capacity)
 {
 	const char *root = getenv("XDG_STATE_HOME");
 	const char *home = getenv("HOME");
 	char base[PATH_MAX];
-	struct stat status;
-	size_t length;
 
 	if (!app_id || !app_id[0] || strchr(app_id, '/') ||
 	    !strcmp(app_id, ".") || !strcmp(app_id, "..")) {
@@ -2476,22 +2833,36 @@ bool fplinux_ui_state_dir(const char *app_id, char *path, size_t capacity)
 	}
 	if (root && root[0] == '/') {
 		if (snprintf(base, sizeof(base), "%s", root) >=
-		    (int)sizeof(base))
+		    (int)sizeof(base)) {
+			errno = ENAMETOOLONG;
 			return false;
+		}
 	} else {
 		if (!home || home[0] != '/') {
 			errno = EINVAL;
 			return false;
 		}
 		if (snprintf(base, sizeof(base), "%s/.local/state", home) >=
-		    (int)sizeof(base))
+		    (int)sizeof(base)) {
+			errno = ENAMETOOLONG;
 			return false;
+		}
 	}
 	if (snprintf(path, capacity, "%s/fplinux/%s", base, app_id) >=
 	    (int)capacity) {
 		errno = ENAMETOOLONG;
 		return false;
 	}
+	return true;
+}
+
+bool fplinux_ui_state_dir(const char *app_id, char *path, size_t capacity)
+{
+	struct stat status;
+	size_t length;
+
+	if (!state_directory_path(app_id, path, capacity))
+		return false;
 	length = strlen(path);
 	for (size_t i = 1; i <= length; ++i) {
 		char saved = path[i];
@@ -2511,6 +2882,15 @@ bool fplinux_ui_state_dir(const char *app_id, char *path, size_t capacity)
 		path[i] = saved;
 	}
 	return true;
+}
+
+struct fplinux_ui_prefs *fplinux_ui_prefs_open(const char *app_id)
+{
+	char directory[PATH_MAX];
+
+	if (!state_directory_path(app_id, directory, sizeof(directory)))
+		return NULL;
+	return fplinux_ui_prefs_open_directory(directory);
 }
 
 /* A top-layer popup owns its scrim, even when their parent deletes both. */
@@ -2762,11 +3142,19 @@ bool fplinux_ui_menu_is_open(const struct fplinux_ui *ui)
 	return ui->menu != NULL;
 }
 
+void fplinux_ui_menu_set_position(
+	struct fplinux_ui *ui, const struct fplinux_ui_menu_position *position)
+{
+	if (ui->menu)
+		fplinux_ui_menu_view_set_position(ui->menu, position);
+}
+
 /* A failed legend update surfaces as a session error in the main loop. */
 void fplinux_ui_menu_close(struct fplinux_ui *ui)
 {
 	if (!ui->menu)
 		return;
+	fplinux_ui_cancel_key_repeat(ui, NULL);
 	fplinux_ui_menu_view_delete(ui->menu);
 	ui->menu = NULL;
 	ui->menu_callback = NULL;

@@ -27,8 +27,14 @@ msgstr "Экран не обновлён. Откройте терминал сн
 msgid "The terminal could not close. Open Terminal again."
 msgstr "Терминал не закрылся. Откройте его снова."
 
+msgid "The settings could not be loaded. Open Terminal again."
+msgstr "Настройки не загружены. Откройте терминал снова."
+
 msgid "Insert"
 msgstr "Вставить"
+
+msgid "Cancel"
+msgstr "Отмена"
 
 msgid "Send"
 msgstr "Послать"
@@ -36,6 +42,12 @@ msgstr "Послать"
 #: fplinux-terminal.c terminal-input.c
 msgid "Terminal"
 msgstr "Терминал"
+
+msgid "Terminal (unsaved)"
+msgstr "Терминал (не сохранено)"
+
+msgid "Saving not confirmed"
+msgstr "Сохранение не подтверждено"
 
 #: fplinux-terminal.c terminal-input.c
 msgid "Symbols"
@@ -45,10 +57,6 @@ msgstr "Символы"
 msgid "Special keys"
 msgstr "Служебные клавиши"
 
-#: fplinux-terminal.c
-msgid "Input language"
-msgstr "Язык ввода"
-
 #: fplinux-terminal.c terminal-input.c
 msgid "Modifiers"
 msgstr "Модификаторы"
@@ -56,6 +64,18 @@ msgstr "Модификаторы"
 #: fplinux-terminal.c
 msgid "Done"
 msgstr "Готово"
+
+#: fplinux-terminal.c terminal-input.c
+msgid "Font size"
+msgstr "Размер шрифта"
+
+#: fplinux-terminal.c
+msgid "Compact (6×12)"
+msgstr "Компактный (6×12)"
+
+#: fplinux-terminal.c
+msgid "Larger (8×16)"
+msgstr "Крупный (8×16)"
 
 #: fplinux-terminal.c
 msgid "Help"
@@ -85,19 +105,6 @@ msgstr "Конец ввода Ctrl+D"
 msgid "Search Ctrl+R"
 msgstr "Поиск Ctrl+R"
 
-#: terminal-input.c
-#, c-format
-msgid "Language: %s"
-msgstr "Язык ввода: %s"
-
-#: terminal-input.c
-#, c-format
-msgid "%u line above"
-msgid_plural "%u lines above"
-msgstr[0] "%u строка выше"
-msgstr[1] "%u строки выше"
-msgstr[2] "%u строк выше"
-
 #: terminal-help.c
 msgid "Typing"
 msgstr "Ввод текста"
@@ -118,39 +125,39 @@ msgstr "Выход"
 msgid ""
 "2–9: Press repeatedly to choose a letter. Pause or press another key to send it.\n"
 "1: punctuation. 0: space.\n"
-"*: switch letter case. Hold *: switch between digits and letters.\n"
-"#: cancel a pending letter, otherwise erase. Hold #: clear the line at the Bash prompt.\n"
+"*: choose a symbol. #: cycle letter case, input languages and 123.\n"
+"Hold a digit to type the digit.\n"
 "OK: Enter. Dial: Tab completion.\n"
-"Clear: cancel a pending letter or the modifiers, otherwise erase.\n"
-"The title shows the input mode, such as abc or 123."
+"Clear: cancel a pending letter or the modifiers, otherwise erase. Hold to repeat.\n"
+"The line above the soft keys shows the input mode, such as abc or 123."
 msgstr ""
 "2–9: нажимайте несколько раз, чтобы выбрать букву. Пауза или другая клавиша отправляет её.\n"
 "1: знаки препинания. 0: пробел.\n"
-"*: смена регистра. Удерживайте *: переключение между цифрами и буквами.\n"
-"#: отменяет набираемую букву, иначе стирает. Удерживайте #: очистить строку в приглашении Bash.\n"
+"*: выбор символа. #: смена регистра, языка ввода и режима 123.\n"
+"Удерживайте цифровую клавишу, чтобы ввести цифру.\n"
 "OK: Enter. Вызов: дополнение по Tab.\n"
-"«Стереть»: отменяет набираемую букву или модификаторы, иначе стирает.\n"
-"Заголовок показывает режим ввода, например абв или 123."
+"«Стереть»: отменяет набираемую букву или модификаторы, иначе стирает. Удерживайте для повтора.\n"
+"Строка над экранными клавишами показывает режим ввода, например абв или 123."
 
 #: terminal-help.c
 msgid ""
-"Modifiers: Mark Ctrl, Alt or Shift and choose Done. They apply to the next key or letter, and the title shows them until then.\n"
+"Modifiers: Mark Ctrl, Alt or Shift and choose Done. They apply to the next key or letter and stay visible above the soft keys until then. In scrollback, C, A and S stand for Ctrl, Alt and Shift when space is tight.\n"
 "Symbols and Special keys: type a symbol, Esc or F1–F12.\n"
-"Language: choose the letters of multi-tap.\n"
-"Interrupt, End input and Search send Ctrl+C, Ctrl+D and Ctrl+R."
+"Interrupt, End input and Search send Ctrl+C, Ctrl+D and Ctrl+R.\n"
+"Font size: choose Compact (6×12) or Larger (8×16). The choice is saved."
 msgstr ""
-"«Модификаторы»: отметьте Ctrl, Alt или Shift и выберите «Готово». Они действуют на следующую клавишу или букву, и до тех пор заголовок показывает их.\n"
+"«Модификаторы»: отметьте Ctrl, Alt или Shift и выберите «Готово». Они действуют на следующую клавишу или букву и до тех пор видны над экранными клавишами. При прокрутке, если места мало, C, A и S обозначают Ctrl, Alt и Shift.\n"
 "«Символы» и «Служебные клавиши»: ввод символа, Esc или F1–F12.\n"
-"«Язык ввода»: буквы для набора на клавишах.\n"
-"«Прервать», «Конец ввода» и «Поиск» отправляют Ctrl+C, Ctrl+D и Ctrl+R."
+"«Прервать», «Конец ввода» и «Поиск» отправляют Ctrl+C, Ctrl+D и Ctrl+R.\n"
+"«Размер шрифта»: выберите «Компактный (6×12)» или «Крупный (8×16)». Выбор сохраняется."
 
 #: terminal-help.c
 msgid ""
-"Options > Scrollback shows earlier output. Up/Down: scroll one line. Left/Right: scroll one page. The title shows how many lines are above.\n"
+"Options > Scrollback shows earlier output. Up/Down: scroll one line. Left/Right: scroll one page. The counter above the soft keys shows how many lines are above.\n"
 "Back or typing returns to live output.\n"
 "At the Bash prompt, Up/Down choose earlier commands, and Search finds one."
 msgstr ""
-"«Опции > Прокрутка» показывает прежний вывод. Вверх/вниз: на одну строку. Влево/вправо: на страницу. Заголовок показывает, сколько строк выше.\n"
+"«Опции > Прокрутка» показывает прежний вывод. Вверх/вниз: на одну строку. Влево/вправо: на страницу. Счётчик над экранными клавишами показывает, сколько строк выше.\n"
 "«Назад» или набор текста возвращает к текущему выводу.\n"
 "В приглашении Bash вверх/вниз выбирают прежние команды, а «Поиск» находит нужную."
 

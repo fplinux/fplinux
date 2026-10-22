@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""Generate the UI profile and palette table of libfplinux-ui and the session.
+"""Generate the UI profile and theme table of libfplinux-ui and the session.
 
 lib/fplinux/fplinux-ui-profile.json defines the runtime profiles. After a change, run
 
@@ -64,7 +64,6 @@ INT_FIELDS = (
     "status_icon_size",
     "app_icon_size",
     "grid_columns",
-    "grid_scrollbar_offset",
     "frame_padding",
     "field_padding",
     "field_lines",
@@ -94,8 +93,6 @@ CONVERTED_KEYS = frozenset(
         "picker_cell",
         "battery",
         "logo",
-        "integrated_surface",
-        "picker_font",
         "selection",
         "home_hint",
     }
@@ -129,7 +126,6 @@ FIELD_ORDER = (
     "status_icon_size",
     "app_icon_size",
     "grid_columns",
-    "grid_scrollbar_offset",
     "catalogue_list",
     "row_tile_radius",
     "app_tile_radius",
@@ -170,7 +166,6 @@ FIELD_ORDER = (
     "battery_bar_height",
     "bolt_height",
     "splash_mark",
-    "boot_mark",
     "about_logo_width",
     "about_lockup",
 )
@@ -195,12 +190,8 @@ COLOURS = (
     "brand",
     "scrim",
 )
-# enum fplinux_ui_palette, then the palette of each theme kind (light, dark).
-PALETTES = (
-    ("FPLINUX_UI_PALETTE_LIGHT", "light", 0),
-    ("FPLINUX_UI_PALETTE_DARK", "dark", 1),
-)
-THEME_PALETTES = ("FPLINUX_UI_PALETTE_LIGHT", "FPLINUX_UI_PALETTE_DARK")
+# The order of enum fplinux_ui_theme_kind and enum fplinux_ui_session_theme.
+THEMES = ("light", "dark")
 _HEX = re.compile(r"#[0-9A-Fa-f]{6}")
 # The lock screen's unlock hint: where it goes, and whether it replaces the date.
 HOME_HINTS = {"below the date": False, "replaces the date while shown": True}
@@ -208,8 +199,6 @@ HOME_HINTS = {"below the date": False, "replaces the date while shown": True}
 FUNCTIONS = """\
 _Static_assert(ARRAY_SIZE(profiles) == FPLINUX_UI_PROFILE_COUNT,
 \t       "one entry per profile");
-_Static_assert(ARRAY_SIZE(palettes) == FPLINUX_UI_PALETTE_COUNT,
-\t       "one entry per palette");
 
 /* The largest fitting pixel area wins; ABI order breaks equal-area ties. */
 int fplinux_ui_profile_for_screen(int width, int height)
@@ -236,18 +225,11 @@ const struct fplinux_ui_profile_spec *fplinux_ui_profile_spec(int profile)
 \treturn &profiles[profile];
 }
 
-const struct fplinux_ui_theme_spec *fplinux_ui_palette_spec(int palette)
-{
-\tif (palette < 0 || palette >= FPLINUX_UI_PALETTE_COUNT)
-\t\treturn NULL;
-\treturn &palettes[palette];
-}
-
 const struct fplinux_ui_theme_spec *fplinux_ui_theme_spec(int kind)
 {
-\tif (kind < 0 || kind >= (int)ARRAY_SIZE(theme_palettes))
+\tif (kind < 0 || kind >= (int)ARRAY_SIZE(themes))
 \t\treturn NULL;
-\treturn &palettes[theme_palettes[kind]];
+\treturn &themes[kind];
 }
 """
 
@@ -398,7 +380,7 @@ def profile_fields(
     fields["bolt_height"] = _integer(name, "battery.bolt_height", battery.get("bolt_height"))
     logo = _mapping(name, "logo", profile["logo"])
     fields["splash_mark"] = _integer(name, "logo.splash_mark", logo.get("splash_mark"))
-    fields["boot_mark"] = _integer(name, "logo.boot_mark", logo.get("boot_mark"))
+    _integer(name, "logo.boot_mark", logo.get("boot_mark"))
     fields["about_logo_width"], fields["about_lockup"] = _about(name, logo.get("about"))
     fields["row_tile_radius"] = _tile_radius(name, tile_radii, fields["row_icon_size"])
     fields["app_tile_radius"] = _tile_radius(name, tile_radii, fields["app_icon_size"])
@@ -406,15 +388,6 @@ def profile_fields(
     if profile["home_hint"] not in HOME_HINTS:
         raise ProfileError(f"{name}: home_hint must be one of {', '.join(HOME_HINTS)}")
     fields["home_hint_replaces_date"] = HOME_HINTS[profile["home_hint"]]
-    # Derived and fixed values are checked instead of stored.
-    surface = _pair(name, "integrated_surface", profile["integrated_surface"])
-    width, height = int(fields["width"]), int(fields["height"])
-    bars = int(fields["status_height"]) + int(fields["softkey_height"])
-    expected = (width, height - bars)
-    if surface != expected:
-        raise ProfileError(f"{name}: integrated_surface must be {list(expected)}")
-    if profile["picker_font"] != "font_large":
-        raise ProfileError(f"{name}: the picker has only the font_large slot")
     if set(fields) != set(FIELD_ORDER):
         raise ProfileError(f"{name}: fields differ from FIELD_ORDER")
     return fields
@@ -492,20 +465,17 @@ def render(data: object) -> str:
         lines.append("\t{")
         lines.extend(f"\t\t.{field} = {_literal(fields[field])}," for field in FIELD_ORDER)
         lines.append("\t},")
-    lines.extend(("};", "", "static const struct fplinux_ui_theme_spec palettes[] = {"))
-    for constant, name, kind in PALETTES:
+    lines.extend(("};", "", "static const struct fplinux_ui_theme_spec themes[] = {"))
+    for name in THEMES:
         values = palette(name, themes.get(name))
-        lines.append(f"\t[{constant}] = {{")
-        lines.append(f"\t\t.kind = {kind},")
+        lines.append(f"\t/* {name} */")
+        lines.append("\t{")
         lines.append("\t\t.rgb = {")
         lines.extend(
             f"\t\t\t[FPLINUX_UI_COLOUR_{token.upper()}] = 0x{value:06x},"
             for token, value in zip(COLOURS, values, strict=True)
         )
         lines.extend(("\t\t},", f"\t\t.scrim_opacity = {scrim_opacity},", "\t},"))
-    lines.extend(("};", "", "/* The palette of each theme kind: light, dark. */"))
-    lines.append("static const enum fplinux_ui_palette theme_palettes[] = {")
-    lines.extend(f"\t{constant}," for constant in THEME_PALETTES)
     lines.extend(("};", "", FUNCTIONS))
     return "\n".join(lines)
 

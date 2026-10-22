@@ -121,7 +121,8 @@ size_t fplinux_ui_focus_next(size_t from, size_t count,
 	return SIZE_MAX;
 }
 
-size_t fplinux_ui_focus_step(size_t focus, size_t count, long rows)
+size_t fplinux_ui_focus_step(size_t focus, size_t count, long rows,
+			     enum fplinux_ui_focus_boundary boundary)
 {
 	if (!count)
 		return SIZE_MAX;
@@ -131,7 +132,18 @@ size_t fplinux_ui_focus_step(size_t focus, size_t count, long rows)
 		/* Negated as unsigned, which LONG_MIN survives. */
 		unsigned long back = -(unsigned long)rows;
 
+		if (boundary == FPLINUX_UI_FOCUS_WRAP) {
+			back %= count;
+			return back > focus ? count - (back - focus) :
+					      focus - back;
+		}
 		return back >= focus ? 0 : focus - (size_t)back;
+	}
+	if (boundary == FPLINUX_UI_FOCUS_WRAP) {
+		size_t step = (unsigned long)rows % count;
+
+		return step >= count - focus ? step - (count - focus) :
+					       focus + step;
 	}
 	if ((unsigned long)rows >= count - 1 - focus)
 		return count - 1;
@@ -351,6 +363,8 @@ static const int limits[FPLINUX_UI_DATE_PART_COUNT][2] = {
 				   FPLINUX_UI_DATE_YEAR_MAX },
 	[FPLINUX_UI_DATE_HOUR] = { 0, 23 },
 	[FPLINUX_UI_DATE_MINUTE] = { 0, 59 },
+	[FPLINUX_UI_DATE_SECOND] = { 0, 59 },
+	[FPLINUX_UI_DURATION_HOUR] = { 0, 99 },
 };
 
 static int clamp(int value, int low, int high)
@@ -389,6 +403,8 @@ static unsigned int part_width(enum fplinux_ui_date_part part)
  */
 static void fit_day(struct fplinux_ui_date_edit *edit)
 {
+	if (edit->duration)
+		return;
 	edit->values[FPLINUX_UI_DATE_DAY] =
 		clamp(edit->day, 1, part_high(edit, FPLINUX_UI_DATE_DAY));
 }
@@ -493,6 +509,22 @@ void fplinux_ui_date_edit_begin(struct fplinux_ui_date_edit *edit, time_t value,
 	edit->part = edit->order[0];
 }
 
+void fplinux_ui_duration_edit_begin(struct fplinux_ui_date_edit *edit,
+				    unsigned int seconds)
+{
+	memset(edit, 0, sizeof(*edit));
+	edit->duration = true;
+	if (seconds > FPLINUX_UI_DURATION_MAX_SECONDS)
+		seconds = FPLINUX_UI_DURATION_MAX_SECONDS;
+	edit->values[FPLINUX_UI_DURATION_HOUR] = (int)(seconds / 3600U);
+	edit->values[FPLINUX_UI_DATE_MINUTE] = (int)(seconds / 60U % 60U);
+	edit->values[FPLINUX_UI_DATE_SECOND] = (int)(seconds % 60U);
+	add_part(edit, FPLINUX_UI_DURATION_HOUR, "", 0);
+	add_part(edit, FPLINUX_UI_DATE_MINUTE, ":", 1);
+	add_part(edit, FPLINUX_UI_DATE_SECOND, ":", 1);
+	edit->part = edit->order[0];
+}
+
 static void complete_part(struct fplinux_ui_date_edit *edit)
 {
 	int *value = &edit->values[edit->part];
@@ -565,6 +597,17 @@ time_t fplinux_ui_date_edit_value(const struct fplinux_ui_date_edit *edit)
 	time.tm_min = copy.values[FPLINUX_UI_DATE_MINUTE];
 	time.tm_isdst = -1;
 	return mktime(&time);
+}
+
+unsigned int
+fplinux_ui_duration_edit_value(const struct fplinux_ui_date_edit *edit)
+{
+	struct fplinux_ui_date_edit copy = *edit;
+
+	fplinux_ui_date_edit_finish(&copy);
+	return (unsigned int)copy.values[FPLINUX_UI_DURATION_HOUR] * 3600U +
+	       (unsigned int)copy.values[FPLINUX_UI_DATE_MINUTE] * 60U +
+	       (unsigned int)copy.values[FPLINUX_UI_DATE_SECOND];
 }
 
 /* UTF-8 characters in text: the bytes that do not continue one. */

@@ -7,7 +7,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include "fplinux-multitap.h"
+#include "fplinux-text-input.h"
 
 /*
  * Visible text is English and translated through the application's gettext
@@ -18,14 +18,6 @@
 
 #define FPLINUX_TERMINAL_SCROLLBACK_LINES 512U
 #define FPLINUX_TERMINAL_OUTPUT_BYTES 16384U
-#define FPLINUX_TERMINAL_CLEAR_LINE "\033[99~"
-#define FPLINUX_TERMINAL_COMPOSE_MS 700U
-
-enum fplinux_terminal_mode {
-	FPLINUX_TERMINAL_LOWER,
-	FPLINUX_TERMINAL_UPPER,
-	FPLINUX_TERMINAL_NUMERIC,
-};
 
 /*
  * The commands of the terminal screen. The GUI attaches them to its canvas
@@ -40,13 +32,15 @@ enum fplinux_terminal_command {
 	FPLINUX_TERMINAL_COMMAND_MODIFIERS,
 	FPLINUX_TERMINAL_COMMAND_SYMBOLS,
 	FPLINUX_TERMINAL_COMMAND_SPECIAL,
-	FPLINUX_TERMINAL_COMMAND_LANGUAGE,
 	FPLINUX_TERMINAL_COMMAND_SCROLLBACK,
 	FPLINUX_TERMINAL_COMMAND_INTERRUPT,
 	FPLINUX_TERMINAL_COMMAND_END_INPUT,
 	FPLINUX_TERMINAL_COMMAND_SEARCH,
+	FPLINUX_TERMINAL_COMMAND_FONT_SIZE,
 	FPLINUX_TERMINAL_COMMAND_HELP,
 	FPLINUX_TERMINAL_COMMAND_EXIT,
+	FPLINUX_TERMINAL_COMMAND_INSERT,
+	FPLINUX_TERMINAL_COMMAND_CANCEL,
 	FPLINUX_TERMINAL_COMMAND_COUNT,
 };
 
@@ -78,34 +72,17 @@ struct fplinux_terminal {
 	bool failed;
 	bool dirty;
 	bool history;
-	bool editing;
 	bool cursor_visible;
-	char shell_marker[64];
-	/* Input languages from the language files, English first. */
-	struct fplinux_multitap_languages languages;
-	size_t language;
-	/* The options menu item naming the input language. */
-	char language_item[64];
-	struct fplinux_multitap compose;
-	bool pound_down;
-	bool pound_held;
-	bool pound_cancelled;
-	bool star_down;
-	bool star_held;
+	/* Shared keypad modes, composition, physical holds and symbols. */
+	struct fplinux_text_input input;
 	/* Hidden, or covered by another screen or the options menu. */
 	bool paused;
 	unsigned int modifier;
-	enum fplinux_terminal_mode mode;
-	enum fplinux_terminal_mode alphabetic_mode;
-	uint64_t compose_ms;
-	uint64_t pound_ms;
-	uint64_t star_ms;
 	uint64_t cursor_ms;
 };
 
 bool fplinux_terminal_init(struct fplinux_terminal *terminal,
-			   unsigned int columns, unsigned int rows,
-			   const char *shell_token);
+			   unsigned int columns, unsigned int rows);
 void fplinux_terminal_destroy(struct fplinux_terminal *terminal);
 /*
  * Replaces the built-in English input language with the input languages of
@@ -117,19 +94,18 @@ void fplinux_terminal_feed(struct fplinux_terminal *terminal, const char *bytes,
 			   size_t size);
 /* Remove only bytes actually accepted by the PTY; unsent input stays queued. */
 void fplinux_terminal_consume(struct fplinux_terminal *terminal, size_t size);
-void fplinux_terminal_key(struct fplinux_terminal *terminal, uint32_t keysym,
+/* False leaves a blocked event with its caller for a later retry. */
+bool fplinux_terminal_key(struct fplinux_terminal *terminal, uint32_t keysym,
 			  uint32_t ascii, unsigned int modifiers,
 			  uint32_t unicode);
-/* Phone keys that no command uses: digits, * and #, the D-pad and Dial. */
-void fplinux_terminal_phone(struct fplinux_terminal *terminal,
-			    unsigned int code, bool pressed, bool repeat,
-			    uint64_t now_ms, bool shell_foreground);
-void fplinux_terminal_tick(struct fplinux_terminal *terminal, uint64_t now_ms,
-			   bool shell_foreground);
+/* Returns false only when output is blocked and the event must be retried. */
+bool fplinux_terminal_phone(struct fplinux_terminal *terminal,
+			    unsigned int code, bool pressed, uint64_t now_ms);
+void fplinux_terminal_tick(struct fplinux_terminal *terminal, uint64_t now_ms);
 /*
  * A pending letter waits while the terminal is hidden or covered by another
  * screen or the options menu and gets a fresh timeout when it is shown and
- * uncovered; a held * or # is abandoned, since its release may go elsewhere.
+ * uncovered. Physical holds and an open symbol picker are cancelled.
  */
 void fplinux_terminal_pause(struct fplinux_terminal *terminal, bool paused,
 			    uint64_t now_ms);
@@ -144,25 +120,11 @@ bool fplinux_terminal_command(const struct fplinux_terminal *terminal,
 			      enum fplinux_terminal_command command,
 			      struct fplinux_terminal_command_info *info);
 /*
- * Runs Enter, Clear, Live, Scrollback, Interrupt, End input or Search. The
- * GUI opens the screens of the other commands.
+ * Runs terminal actions and shared symbol selection. Other screens belong
+ * to the GUI. False preserves a blocked command for a later retry.
  */
-void fplinux_terminal_run(struct fplinux_terminal *terminal,
+bool fplinux_terminal_run(struct fplinux_terminal *terminal,
 			  enum fplinux_terminal_command command);
-/*
- * Whether text fits the title band. The GUI measures it in pixels in the
- * band's font; the engine needs no LVGL.
- */
-typedef bool (*fplinux_terminal_title_fits)(const char *text, void *context);
-/*
- * The title band: the input mode and armed modifiers, or the scrollback
- * position. When the text does not fit, the name gives way first, then the
- * modifiers; the mode is always shown.
- */
-void fplinux_terminal_title(const struct fplinux_terminal *terminal,
-			    fplinux_terminal_title_fits fits, void *context,
-			    char *text, size_t size);
-
 /* Ctrl, Alt and Shift as TSM masks, armed for the next phone key. */
 #define FPLINUX_TERMINAL_MODIFIER_COUNT 3U
 extern const unsigned int
@@ -171,17 +133,9 @@ extern const char *const
 	fplinux_terminal_modifier_names[FPLINUX_TERMINAL_MODIFIER_COUNT];
 void fplinux_terminal_set_modifiers(struct fplinux_terminal *terminal,
 				    unsigned int modifiers);
-/* The symbols and special keys offered in lists, and typing one. */
-size_t fplinux_terminal_symbol_count(void);
-const char *fplinux_terminal_symbol(size_t index);
-void fplinux_terminal_type_symbol(struct fplinux_terminal *terminal,
-				  size_t index);
 size_t fplinux_terminal_special_count(void);
 const char *fplinux_terminal_special(size_t index);
-void fplinux_terminal_send_special(struct fplinux_terminal *terminal,
+bool fplinux_terminal_send_special(struct fplinux_terminal *terminal,
 				   size_t index);
-/* Commits a pending letter and selects an input language by index. */
-void fplinux_terminal_select_language(struct fplinux_terminal *terminal,
-				      size_t index);
 
 #endif

@@ -220,10 +220,14 @@ size_t fplinux_launcher_move(size_t selected, size_t count, size_t columns,
 	step = columns > 1 || !page ? 1 : page;
 	switch (move) {
 	case FPLINUX_LAUNCHER_MOVE_UP:
-		return selected >= columns ? selected - columns : selected;
+		if (selected >= columns)
+			return selected - columns;
+		return selected < last % columns ?
+			       last - last % columns + selected :
+			       last;
 	case FPLINUX_LAUNCHER_MOVE_DOWN:
 		if (selected / columns == last / columns)
-			return selected;
+			return selected % columns;
 		return selected + columns < last ? selected + columns : last;
 	case FPLINUX_LAUNCHER_MOVE_LEFT:
 		return selected > step ? selected - step : 0;
@@ -371,20 +375,6 @@ void fplinux_launcher_scroll_layout(const struct fplinux_ui_profile_spec *spec,
 	scroll->item = size;
 	scroll->reveal_margin = spec->grid_ring_gap + spec->grid_ring_width -
 				spec->grid_tile_inset + spec->gap_small;
-}
-
-struct fplinux_launcher_rect
-fplinux_launcher_grid_track(const struct fplinux_ui_profile_spec *spec,
-			    const struct fplinux_launcher_frame *frame)
-{
-	return (struct fplinux_launcher_rect){
-		.x = frame->width - spec->grid_scrollbar_offset -
-		     spec->scrollbar_width,
-		.y = spec->list_padding,
-		.width = spec->scrollbar_width,
-		.height = at_least(
-			frame->viewport_height - 2 * spec->list_padding, 0),
-	};
 }
 
 void fplinux_launcher_home_layout(const struct fplinux_ui_profile_spec *spec,

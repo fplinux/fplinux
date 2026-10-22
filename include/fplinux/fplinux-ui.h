@@ -7,6 +7,8 @@
 #include <stdint.h>
 #include <lvgl/lvgl.h>
 
+#include "fplinux-storage.h"
+
 struct fplinux_ui;
 /* The session protocol of fplinux-ui-session.h, for system components. */
 struct fplinux_ui_session_message;
@@ -85,6 +87,15 @@ typedef void (*fplinux_ui_event_cb)(struct fplinux_ui *ui,
 				    void *context);
 typedef void (*fplinux_ui_fd_cb)(struct fplinux_ui *ui, int fd, short events,
 				 void *context);
+
+enum fplinux_ui_close_response {
+	FPLINUX_UI_CLOSE_READY,
+	FPLINUX_UI_CLOSE_CANCEL,
+	FPLINUX_UI_CLOSE_WAIT,
+};
+
+typedef enum fplinux_ui_close_response (*fplinux_ui_close_cb)(
+	struct fplinux_ui *ui, void *context);
 
 enum fplinux_ui_theme_kind {
 	FPLINUX_UI_THEME_LIGHT,
@@ -172,6 +183,21 @@ void fplinux_ui_close(struct fplinux_ui *ui);
 /* Run returns 0 after normal CLOSE/quit, -1 on a connection/rendering error. */
 int fplinux_ui_run(struct fplinux_ui *ui);
 void fplinux_ui_quit(struct fplinux_ui *ui);
+/*
+ * Ordinary user close calls this handler before final CLOSE. READY permits
+ * closing, CANCEL keeps the application, and WAIT keeps its decision UI
+ * interactive until close_reply(). Without a handler the runtime is ready.
+ * Forced CLOSE, signals and connection failure still deliver EVENT_CLOSE
+ * and exit without waiting. The handler does not replace that final event.
+ */
+void fplinux_ui_set_close_handler(struct fplinux_ui *ui,
+				  fplinux_ui_close_cb callback, void *context);
+/* Answers the current WAIT; false with EINVAL when none is pending. */
+bool fplinux_ui_close_reply(struct fplinux_ui *ui,
+			    enum fplinux_ui_close_response response);
+/* Translated errno cause; the application presents publication state separately. */
+/* Empty for DURABLE, including an unchanged save. */
+const char *fplinux_ui_storage_error(struct fplinux_storage_result result);
 /* One optional descriptor; fd ownership stays with the caller. */
 void fplinux_ui_watch_fd(struct fplinux_ui *ui, int fd, short events,
 			 fplinux_ui_fd_cb callback, void *context);
@@ -182,6 +208,13 @@ int fplinux_ui_height(const struct fplinux_ui *ui);
 const struct fplinux_ui_theme *fplinux_ui_theme(const struct fplinux_ui *ui);
 const struct fplinux_ui_metrics *
 fplinux_ui_metrics(const struct fplinux_ui *ui);
+
+/*
+ * Apply the system scrollbar's colour, width and inset to a raw LVGL
+ * object. Scroll direction, visibility mode and vertical padding belong
+ * to its viewport. The object and UI remain owned by the caller.
+ */
+void fplinux_ui_style_scrollbar(struct fplinux_ui *ui, lv_obj_t *object);
 
 /*
  * A system glyph by name, at the profile's
@@ -234,7 +267,7 @@ bool fplinux_ui_softkey_bar_set(struct fplinux_ui *ui, lv_obj_t *bar,
 				const char *right);
 /* Standard title band at the top of the screen; content starts below it. */
 lv_obj_t *fplinux_ui_header(struct fplinux_ui *ui, const char *title);
-/* Leave the application for the launcher catalogue (Back on the first screen). */
+/* Request ordinary close and the catalogue (Back on the first screen). */
 bool fplinux_ui_back(struct fplinux_ui *ui);
 /* Background the application for the home view (system Home). */
 bool fplinux_ui_home(struct fplinux_ui *ui);

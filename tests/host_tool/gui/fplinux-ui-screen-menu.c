@@ -10,7 +10,10 @@
  * content sizes that screens report before and after a surface resize.
  */
 #include <errno.h>
+#include <libintl.h>
+#include <limits.h>
 #include <linux/input-event-codes.h>
+#include <lvgl/src/libs/lodepng/lodepng.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -85,6 +88,8 @@ static size_t object_count;
 static char local_legends[3][64];
 static struct fplinux_ui_text text_field;
 static const char *input_languages;
+static int legend_advance;
+static bool russian_labels;
 /* The session legends sent by the screen. */
 static struct {
 	char legends[3][64];
@@ -99,8 +104,10 @@ static const struct fplinux_ui_profile_spec spec = {
 	.alert_margin = 8,
 	.alert_padding = 6,
 	.alert_border = 2,
+	.legend_gap = 4,
+	.legend_margin = 2,
 };
-static const struct fplinux_ui_metrics metrics = {
+static struct fplinux_ui_metrics metrics = {
 	.screen_width = 240,
 	.screen_height = 320,
 };
@@ -115,6 +122,7 @@ static struct {
 	size_t count;
 	int actions[MENU_ITEMS];
 	char texts[MENU_ITEMS][32];
+	struct fplinux_ui_menu_position position;
 } menu;
 
 /* What the screens reported to the application. */
@@ -124,6 +132,10 @@ static struct fired {
 	int items;
 	size_t item_index;
 	int item_id;
+	int changes;
+	size_t changed_index;
+	int accepts;
+	size_t accepted_index;
 } fired;
 
 /* LVGL */
@@ -191,6 +203,13 @@ ZERO(lv_result_t, lv_image_decoder_get_info, const void *src,
      lv_image_header_t *header)
 NOTHING(lv_image_set_src, lv_obj_t *obj, const void *src)
 ZERO(lv_image_src_t, lv_image_src_get_type, const void *src)
+unsigned int lodepng_decode32(unsigned char **out, unsigned int *width,
+			      unsigned int *height, const unsigned char *input,
+			      size_t size)
+{
+	*out = NULL;
+	return 1;
+}
 NOTHING(lv_label_set_long_mode, lv_obj_t *obj, lv_label_long_mode_t mode)
 NOTHING(lv_label_set_text_fmt, lv_obj_t *obj, const char *format, ...)
 NOTHING(lv_label_set_text_selection_end, lv_obj_t *obj, uint32_t index)
@@ -280,6 +299,8 @@ NOTHING(lv_obj_set_style_pad_left, lv_obj_t *obj, int32_t value,
 	lv_style_selector_t selector)
 NOTHING(lv_obj_set_style_pad_right, lv_obj_t *obj, int32_t value,
 	lv_style_selector_t selector)
+NOTHING(lv_obj_set_style_radius, lv_obj_t *obj, int32_t value,
+	lv_style_selector_t selector)
 NOTHING(lv_obj_set_style_pad_row, lv_obj_t *obj, int32_t value,
 	lv_style_selector_t selector)
 NOTHING(lv_obj_set_style_pad_ver, lv_obj_t *obj, int32_t value,
@@ -328,18 +349,27 @@ void lv_obj_get_coords(const lv_obj_t *obj, lv_area_t *coords)
 	*coords = (lv_area_t){ 0 };
 }
 
-/* Every legend fits. */
+/* Controlled character advances, independent of the screen assignment rules. */
 void lv_text_get_size(lv_point_t *size, const char *text, const lv_font_t *font,
 		      int32_t letter_space, int32_t line_space,
 		      int32_t max_width, lv_text_flag_t flag)
 {
 	*size = (lv_point_t){ 0 };
+	for (; *text; ++text)
+		if (((unsigned char)*text & 0xc0) != 0x80)
+			size->x += legend_advance;
 }
 
 /* The runtime around the screens */
 
 char *dgettext(const char *domain, const char *text)
 {
+	if (russian_labels) {
+		if (!strcmp(text, "Edit"))
+			return "Изменить";
+		if (!strcmp(text, "Cancel"))
+			return "Отмена";
+	}
 	return (char *)text;
 }
 
@@ -362,8 +392,14 @@ NOTHING(fplinux_ui_title_hide, lv_obj_t *label)
 NOTHING(fplinux_ui_title_init, lv_obj_t *label, const lv_font_t *font)
 NOTHING(fplinux_ui_title_scroll, lv_obj_t *label)
 NOTHING(fplinux_ui_text_canvas_active, lv_obj_t *canvas, bool active)
-ZERO(bool, fplinux_ui_text_is_empty, const struct fplinux_ui_text *field)
-ZERO(bool, fplinux_ui_text_is_picker_open, const struct fplinux_ui_text *field)
+bool fplinux_ui_text_is_empty(const struct fplinux_ui_text *field)
+{
+	return fplinux_ui_text_model_is_empty(&field->model);
+}
+bool fplinux_ui_text_is_picker_open(const struct fplinux_ui_text *field)
+{
+	return field->model.input.picker_open;
+}
 ZERO(bool, fplinux_ui_text_is_read_only, const struct fplinux_ui_text *field)
 bool fplinux_ui_text_key(struct fplinux_ui_text *field,
 			 const struct fplinux_ui_key *key)
@@ -643,6 +679,7 @@ bool fplinux_ui_menu_open(struct fplinux_ui *owner, const char *title,
 	menu.callback = callback;
 	menu.context = context;
 	menu.count = count;
+	menu.position = (struct fplinux_ui_menu_position){ 0 };
 	for (size_t i = 0; i < count; ++i) {
 		menu.actions[i] = items[i].action;
 		snprintf(menu.texts[i], sizeof(menu.texts[i]), "%s",
@@ -654,6 +691,15 @@ bool fplinux_ui_menu_open(struct fplinux_ui *owner, const char *title,
 bool fplinux_ui_menu_is_open(const struct fplinux_ui *owner)
 {
 	return menu.open;
+}
+
+void fplinux_ui_menu_set_position(
+	struct fplinux_ui *owner,
+	const struct fplinux_ui_menu_position *position)
+{
+	CHECK(menu.open);
+	CHECK(position->selected < menu.count);
+	menu.position = *position;
 }
 
 void fplinux_ui_menu_close(struct fplinux_ui *owner)
@@ -676,6 +722,8 @@ static void choose(const char *text)
 	for (size_t i = 0; menu.open && i < menu.count; ++i) {
 		if (strcmp(menu.texts[i], text))
 			continue;
+		menu.position.selected = i;
+		fplinux_ui_screens_menu_position(ui.screens, &menu.position);
 		fplinux_ui_menu_close(&ui);
 		callback(&ui, menu.actions[i], context);
 		return;
@@ -698,6 +746,24 @@ static void on_item(struct fplinux_ui *owner, struct fplinux_ui_screen *screen,
 	++fired.items;
 	fired.item_index = index;
 	fired.item_id = id;
+}
+
+static void on_change(struct fplinux_ui *owner,
+		      struct fplinux_ui_screen *screen, size_t index,
+		      void *context)
+{
+	++fired.changes;
+	fired.changed_index = index;
+}
+
+static void on_edit(struct fplinux_ui *owner, struct fplinux_ui_screen *screen,
+		    size_t index, void *context)
+{
+	++fired.accepts;
+	fired.accepted_index = index;
+	CHECK(!fplinux_ui_form_is_editing(screen));
+	/* Acceptance is visible before the corresponding changed value. */
+	CHECK(fired.changes == 0);
 }
 
 static const struct fplinux_ui_command delete_command = {
@@ -767,6 +833,171 @@ static void finish(void)
 	ui.legend_bar = NULL;
 	object_count = 0;
 	memset(objects, 0, sizeof(objects));
+	legend_advance = 0;
+	russian_labels = false;
+	metrics.screen_width = 240;
+	surface_width = 240;
+}
+
+struct navigation {
+	bool plain_push;
+	bool alert;
+	bool replace_owner;
+	size_t item;
+};
+
+static void navigate_command(struct fplinux_ui *owner,
+			     struct fplinux_ui_screen *screen, int id,
+			     void *context)
+{
+	struct navigation *navigation = context;
+	struct fplinux_ui_screen *child;
+
+	if (navigation->replace_owner) {
+		struct fplinux_ui_screen *replacement =
+			fplinux_ui_form_new(owner, "Replacement");
+
+		CHECK(replacement);
+		fplinux_ui_replace(owner, replacement);
+	}
+	child = navigation->alert ?
+			fplinux_ui_alert_new(owner, FPLINUX_UI_ALERT_INFO,
+					     "Help", "Navigation help", 0) :
+			fplinux_ui_form_new(owner, "Child");
+	CHECK(child);
+	if (navigation->plain_push)
+		fplinux_ui_push(owner, child);
+	else
+		fplinux_ui_navigate(owner, child);
+}
+
+static void navigate_item(struct fplinux_ui *owner,
+			  struct fplinux_ui_screen *screen, size_t index,
+			  int id, void *context)
+{
+	struct navigation *navigation = context;
+
+	navigation->item = index;
+	navigate_command(owner, screen, id, context);
+}
+
+static void test_navigation_restores_current_command_and_menu_position(void)
+{
+	struct navigation navigation = { 0 };
+	struct fplinux_ui_screen *list = open_list_options();
+	const struct fplinux_ui_command first = {
+		.id = 400,
+		.type = FPLINUX_UI_COMMAND_HELP,
+		.label = "First",
+		.priority = -1,
+	};
+	const struct fplinux_ui_command renamed = {
+		.id = REFRESH_ID,
+		.type = FPLINUX_UI_COMMAND_SCREEN,
+		.label = "Updated",
+		.priority = 2,
+	};
+
+	fplinux_ui_screen_set_listener(list, navigate_command, NULL,
+				       &navigation);
+	menu.position.scroll_y = 57;
+	choose("Refresh");
+	CHECK(fplinux_ui_current(&ui) != list && !menu.open);
+	CHECK(fplinux_ui_screen_add_command(list, &first));
+	CHECK(fplinux_ui_screen_add_command(list, &renamed));
+	fplinux_ui_go_back(&ui);
+	CHECK(fplinux_ui_current(&ui) == list && menu.open);
+	CHECK(menu.count == 3 && menu.position.selected == 2);
+	CHECK(!strcmp(menu.texts[2], "Updated"));
+	CHECK(menu.position.scroll_y == 57);
+	finish();
+}
+
+static void test_navigation_pop_and_plain_push_do_not_restore_options(void)
+{
+	struct navigation navigation = { 0 };
+	struct fplinux_ui_screen *list = open_list_options();
+
+	fplinux_ui_screen_set_listener(list, navigate_command, NULL,
+				       &navigation);
+	choose("Refresh");
+	CHECK(fplinux_ui_pop(&ui));
+	CHECK(fplinux_ui_current(&ui) == list && !menu.open);
+	press_options();
+	navigation.plain_push = true;
+	choose("Refresh");
+	fplinux_ui_go_back(&ui);
+	CHECK(fplinux_ui_current(&ui) == list && !menu.open);
+	/* A later navigate outside the command callback has no menu origin. */
+	navigate_command(&ui, list, REFRESH_ID, &(struct navigation){ 0 });
+	fplinux_ui_go_back(&ui);
+	CHECK(fplinux_ui_current(&ui) == list && !menu.open);
+	finish();
+}
+
+static void test_navigation_item_origin_follows_inserted_row(void)
+{
+	struct navigation navigation = { .item = NONE };
+	struct fplinux_ui_screen *list = open_list_options();
+
+	fplinux_ui_screen_set_item_listener(list, navigate_item, &navigation);
+	choose("Delete");
+	CHECK(navigation.item == 1);
+	CHECK(fplinux_ui_list_insert(list, 0, "New", NULL) == 0);
+	fplinux_ui_go_back(&ui);
+	CHECK(menu.open &&
+	      !strcmp(menu.texts[menu.position.selected], "Delete"));
+	choose("Delete");
+	CHECK(navigation.item == 2);
+	finish();
+}
+
+static void
+test_navigation_removed_command_and_replaced_owner_are_not_restored(void)
+{
+	struct navigation navigation = { 0 };
+	struct fplinux_ui_screen *list = open_list_options();
+	const struct fplinux_ui_command help = {
+		.id = 400,
+		.type = FPLINUX_UI_COMMAND_HELP,
+	};
+
+	fplinux_ui_screen_set_listener(list, navigate_command, NULL,
+				       &navigation);
+	choose("Refresh");
+	CHECK(fplinux_ui_screen_add_command(list, &help));
+	fplinux_ui_screen_remove_command(list, REFRESH_ID);
+	fplinux_ui_go_back(&ui);
+	CHECK(fplinux_ui_current(&ui) == list && !menu.open);
+	press_options();
+	navigation.replace_owner = true;
+	choose("Help");
+	fplinux_ui_go_back(&ui);
+	CHECK(!menu.open && fplinux_ui_current(&ui) != list);
+	finish();
+}
+
+static void test_only_navigated_informational_alert_close_restores_options(void)
+{
+	struct navigation navigation = { .alert = true };
+	struct fplinux_ui_screen *list = open_list_options();
+	struct fplinux_ui_key close = {
+		.source = FPLINUX_UI_KEY_PHONE,
+		.code = KEY_F14,
+		.pressed = true,
+	};
+
+	fplinux_ui_screen_set_listener(list, navigate_command, NULL,
+				       &navigation);
+	choose("Refresh");
+	CHECK(fplinux_ui_screens_key(ui.screens, &close));
+	CHECK(fplinux_ui_current(&ui) == list && menu.open);
+	CHECK(!strcmp(menu.texts[menu.position.selected], "Refresh"));
+	navigation.plain_push = true;
+	choose("Refresh");
+	CHECK(fplinux_ui_screens_key(ui.screens, &close));
+	CHECK(fplinux_ui_current(&ui) == list && !menu.open);
+	finish();
 }
 
 /* A row inserted above: Delete fires for B at its new index. */
@@ -970,6 +1201,181 @@ static bool legends_are(const char *left, const char *centre, const char *right)
 	       !strcmp(drawn.legends[2], right);
 }
 
+static bool has_text(const char *text)
+{
+	for (size_t i = 0; i < object_count; ++i)
+		if (!strcmp(objects[i].text, text))
+			return true;
+	return false;
+}
+
+static void test_duration_commits_or_cancels_without_changing_form_focus(void)
+{
+	struct fplinux_ui_screen *form = fplinux_ui_form_new(&ui, "Timer");
+	size_t duration =
+		fplinux_ui_form_append_duration(form, "Duration", 300);
+	size_t gauge =
+		fplinux_ui_form_append_gauge(form, "Level", 0, 10, 5, true);
+
+	CHECK(form && duration == 0 && gauge == 1);
+	fplinux_ui_screen_set_listener(form, NULL, on_change, NULL);
+	fplinux_ui_form_set_edit_listener(form, on_edit, NULL);
+	fplinux_ui_push(&ui, form);
+	fired = (struct fired){ 0 };
+	CHECK(!fplinux_ui_form_is_editing(form));
+	CHECK(has_text("00:05:00"));
+	CHECK(legends_are("", "Edit", ""));
+	press(KEY_OK);
+	CHECK(fplinux_ui_form_is_editing(form));
+	CHECK(legends_are("", "Done", "Cancel"));
+	press(KEY_RIGHT);
+	press(KEY_UP);
+	CHECK(fplinux_ui_form_get_focus(form) == duration);
+	CHECK(fplinux_ui_form_get_duration(form, duration) == 300);
+	CHECK(fired.changes == 0);
+	press(KEY_F14);
+	CHECK(!fplinux_ui_form_is_editing(form));
+	CHECK(fplinux_ui_form_get_duration(form, duration) == 300);
+	CHECK(fired.changes == 0 && fired.accepts == 0 && has_text("00:05:00"));
+	press(KEY_OK);
+	press(KEY_RIGHT);
+	press(KEY_UP);
+	press(KEY_RIGHT);
+	press(KEY_UP);
+	press(KEY_OK);
+	CHECK(fplinux_ui_form_get_duration(form, duration) == 361);
+	CHECK(fired.changes == 1 && fired.changed_index == duration);
+	CHECK(fired.accepts == 1 && fired.accepted_index == duration);
+	CHECK(has_text("00:06:01"));
+	press(KEY_DOWN);
+	CHECK(fplinux_ui_form_get_focus(form) == gauge);
+	CHECK(fplinux_ui_form_set_duration(form, duration, 359999));
+	CHECK(has_text("99:59:59"));
+	errno = 0;
+	CHECK(!fplinux_ui_form_set_duration(form, duration, 360000));
+	CHECK(errno == ERANGE);
+	CHECK(fplinux_ui_form_get_duration(form, duration) == 359999);
+	errno = 0;
+	CHECK(fplinux_ui_form_append_duration(form, "Too long", 360000) ==
+	      NONE);
+	CHECK(errno == ERANGE);
+	errno = 0;
+	CHECK(fplinux_ui_form_get_duration(form, gauge) == UINT_MAX);
+	CHECK(errno == EINVAL);
+	finish();
+}
+
+static void test_unchanged_date_done_reports_acceptance_without_change(void)
+{
+	struct fplinux_ui_screen *form = fplinux_ui_form_new(&ui, "Date");
+	size_t date =
+		fplinux_ui_form_append_date(form, "Date", FPLINUX_UI_DATE, 0);
+
+	CHECK(form && date == 0);
+	fplinux_ui_screen_set_listener(form, NULL, on_change, NULL);
+	fplinux_ui_form_set_edit_listener(form, on_edit, NULL);
+	fplinux_ui_push(&ui, form);
+	fired = (struct fired){ 0 };
+	press(KEY_OK);
+	CHECK(fplinux_ui_form_is_editing(form));
+	press(KEY_OK);
+	CHECK(!fplinux_ui_form_is_editing(form));
+	CHECK(fired.accepts == 1 && fired.accepted_index == date);
+	CHECK(fired.changes == 0);
+	CHECK(fplinux_ui_form_get_date(form, date) == 0);
+	press(KEY_OK);
+	press(KEY_UP);
+	press(KEY_F14);
+	CHECK(fired.accepts == 1 && fired.changes == 0);
+	CHECK(fplinux_ui_form_get_date(form, date) == 0);
+	fplinux_ui_form_set_edit_listener(form, NULL, NULL);
+	press(KEY_OK);
+	press(KEY_OK);
+	CHECK(fired.accepts == 1 && fired.changes == 0);
+	CHECK(!fplinux_ui_form_is_editing(NULL));
+	finish();
+}
+
+static void test_retained_save_stays_on_narrow_form_with_edit_and_cancel(void)
+{
+	struct fplinux_ui_command save = {
+		.id = REFRESH_ID,
+		.type = FPLINUX_UI_COMMAND_SCREEN,
+		.label = "Сохранить",
+		.keep_visible = true,
+	};
+	const struct fplinux_ui_command cancel = {
+		.id = BACK_ID,
+		.type = FPLINUX_UI_COMMAND_CANCEL,
+	};
+	struct fplinux_ui_screen *form = fplinux_ui_form_new(&ui, "Alarm");
+
+	CHECK(form);
+	CHECK(fplinux_ui_form_append_date(form, "Time", FPLINUX_UI_TIME, 0) ==
+	      0);
+	CHECK(fplinux_ui_screen_add_command(form, &save));
+	CHECK(fplinux_ui_screen_add_command(form, &cancel));
+	fplinux_ui_screen_set_listener(form, on_command, NULL, NULL);
+	legend_advance = 6;
+	russian_labels = true;
+	metrics.screen_width = surface_width = 128;
+	fplinux_ui_push(&ui, form);
+	CHECK(legends_are("Сохранить", "Изменить", "Отмена"));
+	fired = (struct fired){ 0 };
+	press(KEY_F13);
+	CHECK(!menu.open && fired.command_id == REFRESH_ID);
+	press(KEY_OK);
+	CHECK(legends_are("", "Done", "Отмена"));
+	press(KEY_F14);
+	CHECK(legends_are("Сохранить", "Изменить", "Отмена"));
+	press(KEY_F14);
+	CHECK(fired.command_id == BACK_ID);
+	/* Other callers retain the existing collapse policy. */
+	save.keep_visible = false;
+	CHECK(fplinux_ui_screen_add_command(form, &save));
+	CHECK(legends_are("Options", "Изменить", "Отмена"));
+	finish();
+}
+
+static void test_retained_cancel_leaves_phone_text_correction_available(void)
+{
+	const struct fplinux_ui_command done = {
+		.id = OPEN_ID,
+		.type = FPLINUX_UI_COMMAND_OK,
+		.label = "Done",
+	};
+	const struct fplinux_ui_command cancel = {
+		.id = BACK_ID,
+		.type = FPLINUX_UI_COMMAND_CANCEL,
+		.keep_visible = true,
+	};
+	struct fplinux_ui_screen *form = fplinux_ui_form_new(&ui, "Name");
+	size_t name = fplinux_ui_form_append_text_field(
+		form, NULL, "abcdef", 32, FPLINUX_UI_TEXT_ANY);
+
+	CHECK(form && name == 0);
+	CHECK(fplinux_ui_screen_add_command(form, &done));
+	CHECK(fplinux_ui_screen_add_command(form, &cancel));
+	fplinux_ui_screen_set_listener(form, on_command, NULL, NULL);
+	fplinux_ui_push(&ui, form);
+	CHECK(legends_are("Clear", "Done", "Cancel"));
+	fired = (struct fired){ 0 };
+	press(KEY_F14);
+	CHECK(fired.commands == 1 && fired.command_id == BACK_ID);
+	CHECK(!strcmp(fplinux_ui_form_get_text(form, name), "abcdef"));
+	press(KEY_F13);
+	CHECK(!strcmp(fplinux_ui_form_get_text(form, name), "abcde"));
+	CHECK(fired.commands == 1);
+	CHECK(fplinux_ui_screen_add_command(form, &refresh_command));
+	CHECK(legends_are("Options", "Done", "Cancel"));
+	press_options();
+	choose("Clear");
+	CHECK(!strcmp(fplinux_ui_form_get_text(form, name), "abcd"));
+	press(KEY_OK);
+	CHECK(fired.command_id == OPEN_ID);
+	finish();
+}
+
 /*
  * A HYPERLINK or BUTTON string item takes the focus while it has item
  * commands: OK runs the first by priority, named by the centre legend,
@@ -1132,6 +1538,11 @@ int main(int argc, char *argv[])
 	if (argc != 2)
 		return EXIT_FAILURE;
 	input_languages = argv[1];
+	test_navigation_restores_current_command_and_menu_position();
+	test_navigation_pop_and_plain_push_do_not_restore_options();
+	test_navigation_item_origin_follows_inserted_row();
+	test_navigation_removed_command_and_replaced_owner_are_not_restored();
+	test_only_navigated_informational_alert_close_restores_options();
 	test_row_inserted_above();
 	test_row_deleted();
 	test_item_command_removed();
@@ -1141,6 +1552,10 @@ int main(int argc, char *argv[])
 	test_screen_popped();
 	test_application_menu_kept();
 	test_content_size();
+	test_duration_commits_or_cancels_without_changing_form_focus();
+	test_unchanged_date_done_reports_acceptance_without_change();
+	test_retained_save_stays_on_narrow_form_with_edit_and_cancel();
+	test_retained_cancel_leaves_phone_text_correction_available();
 	test_form_appearance();
 	test_form_get_focus_errors();
 	test_hidden_text_box_stops_clear_repeat();

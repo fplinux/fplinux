@@ -133,3 +133,32 @@ msgstr "Слишком много открытых приложений"
 
 msgid "Close an application in Tasks, then try again. Your open applications were kept."
 msgstr "Закройте приложение в «Задачах» и попробуйте ещё раз. Открытые приложения сохранены."
+
+msgid "Alarm"
+msgstr "Будильник"
+
+msgid "Time is up"
+msgstr "Время вышло"
+
+msgid "Timer"
+msgstr "Таймер"
+
+msgid "Stop"
+msgstr "Стоп"
+
+msgid "Snooze"
+msgstr "Отложить"
+
+#, c-format
+msgid "Snooze: %u min"
+msgstr "Повтор: %u мин"
+
+#, c-format
+msgid "Missed: %llu"
+msgstr "Пропущено: %llu"
+
+msgid "Waiting…"
+msgstr "Ожидание…"
+
+msgid "Action failed. Try again."
+msgstr "Не удалось выполнить действие. Попробуйте ещё раз."

@@ -77,6 +77,7 @@ class MultiTapCoreTests:
                     str(HARNESS),
                     str(CORE),
                     str(LANGUAGE),
+                    str(ROOT / "lib/fplinux/fplinux-utf8.c"),
                 ],
                 name="compile multi-tap harness",
                 check=True,

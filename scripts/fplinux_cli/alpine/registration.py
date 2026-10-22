@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """Current package producers, build dependencies and shared project sources."""
 
+UTF8_SOURCES = (
+    "lib/fplinux/fplinux-utf8.c",
+    "include/fplinux/fplinux-utf8.h",
+)
 LANGUAGE_SOURCES = (
     "lib/fplinux/fplinux-language.c",
     "include/fplinux/fplinux-language.h",
@@ -14,6 +18,11 @@ MULTITAP_SOURCES = (
     "include/fplinux/fplinux-multitap.h",
     *LANGUAGE_SOURCES,
 )
+TEXT_INPUT_SOURCES = (
+    "lib/fplinux/fplinux-text-input.c",
+    "include/fplinux/fplinux-text-input.h",
+    *MULTITAP_SOURCES,
+)
 UI_PROFILE_SOURCES = (
     "lib/fplinux/fplinux-ui-profile.c",
     "include/fplinux/fplinux-ui-profile.h",
@@ -26,6 +35,7 @@ DESKTOP_ENTRY_SOURCES = (
     "lib/fplinux/fplinux-desktop-entry.c",
     "include/fplinux/fplinux-desktop-entry.h",
     "include/fplinux/fplinux-ui-session.h",
+    "include/fplinux/fplinux-ui-vibration.h",
 )
 DRM_SESSION_SOURCES = (
     "lib/fplinux/fplinux-drm-session.c",
@@ -44,6 +54,11 @@ CLI_SOURCES = (
     "lib/fplinux/fplinux-cli.c",
     "include/fplinux/fplinux-cli.h",
 )
+AUDIO_CLIENT_SOURCES = (
+    "lib/fplinux/fplinux-audio-client.c",
+    "include/fplinux/fplinux-audio-client-internal.h",
+    "include/fplinux/fplinux-audio-protocol.h",
+)
 FONT_SOURCES = (
     "lib/fplinux/fplinux-font.c",
     "include/fplinux/fplinux-font.h",
@@ -57,6 +72,13 @@ KEYPAD_CODE_SOURCES = ("include/fplinux/fplinux-keypad.h",)
 KEYPAD_LIGHT_SOURCES = (
     "lib/fplinux/fplinux-keypad-light.c",
     "include/fplinux/fplinux-keypad-light.h",
+)
+CLOCK_SOURCES = (
+    "include/fplinux/fplinux-storage.h",
+    "alpine/aports/fplinux-clocks/clock-model.c",
+    "alpine/aports/fplinux-clocks/clock-model.h",
+    "alpine/aports/fplinux-clocks/clock-wire.c",
+    "alpine/aports/fplinux-clocks/clock-wire.h",
 )
 INPUT_SESSION_SOURCES = (
     "lib/fplinux/fplinux-input-session.c",
@@ -78,6 +100,7 @@ SHARED_APORT_SOURCES = {
         "LICENSES/CC-BY-ND-4.0.txt",
     ),
     "fplinux-brightness-ui": (
+        *UTF8_SOURCES,
         *FONT_SOURCES,
         *DRM_SESSION_SOURCES,
         *BRIGHTNESS_CLIENT_SOURCES,
@@ -87,19 +110,26 @@ SHARED_APORT_SOURCES = {
         *CLI_SOURCES,
     ),
     "fplinux-charge": CLI_SOURCES,
+    "fplinux-clocks": (*CLI_SOURCES, *UTF8_SOURCES, "include/fplinux/fplinux-storage.h"),
     "fplinux-cpuclock": CLI_SOURCES,
     "fplinux-debug-tools": (*DRM_SESSION_SOURCES, *CLI_SOURCES, *GPU_OUTPUT_SOURCES),
     "fplinux-fm": CLI_SOURCES,
     "fplinux-gpu-probe": (*CLI_SOURCES, *GPU_SOURCES),
-    "fplinux-icons": ("lib/fplinux/fplinux-ui-profile.json",),
+    "fplinux-icons": (
+        "lib/fplinux/fplinux-ui-profile.json",
+        "LICENSES/GPL-2.0-only.txt",
+    ),
     "fplinux-jack": CLI_SOURCES,
     "fplinux-jpeg": CLI_SOURCES,
     "fplinux-language-en": ("alpine/aports/fplinux-language/en",),
     "fplinux-language-ru": ("alpine/aports/fplinux-language/ru",),
     "fplinux-launcher": (
+        *UTF8_SOURCES,
+        *CLOCK_SOURCES,
         *CLI_SOURCES,
         *DESKTOP_ENTRY_SOURCES,
         *UI_PROFILE_SOURCES,
+        "include/fplinux/fplinux-settings-values.h",
     ),
     "fplinux-libweston": (
         "include/fplinux/fplinux-pixman-buffer.h",
@@ -115,6 +145,9 @@ SHARED_APORT_SOURCES = {
     "fplinux-qin1splus-mesa": ("targets/xiaomi-qin-1s-plus/rootfs/drirc",),
     "fplinux-rotate": (*DRM_SESSION_SOURCES, *CLI_SOURCES),
     "fplinux-session": (
+        *UTF8_SOURCES,
+        *CLOCK_SOURCES,
+        *AUDIO_CLIENT_SOURCES,
         *DRM_SESSION_SOURCES,
         *FONT_SOURCES,
         *CLI_SOURCES,
@@ -126,16 +159,20 @@ SHARED_APORT_SOURCES = {
         *UI_PROFILE_SOURCES,
         *LANGUAGE_SOURCES,
         "lib/fplinux/fplinux-ui-session.c",
+        "lib/fplinux/fplinux-ui-prefs.c",
+        "include/fplinux/fplinux-ui-prefs.h",
         "include/fplinux/fplinux-pixman-buffer.h",
         "include/fplinux/fplinux-weston-presentation.h",
     ),
     "fplinux-settings": (
+        *UTF8_SOURCES,
         *MULTITAP_SOURCES,
         *CLI_SOURCES,
         *SETTINGS_VALUES_SOURCES,
         *UI_PROFILE_SOURCES,
     ),
     "fplinux-showcase": (
+        *UTF8_SOURCES,
         *FONT_SOURCES,
         *DRM_SESSION_SOURCES,
         *GPU_OUTPUT_SOURCES,
@@ -146,9 +183,11 @@ SHARED_APORT_SOURCES = {
     ),
     "fplinux-snake": CLI_SOURCES,
     "fplinux-terminal": (
+        *UTF8_SOURCES,
         *CLI_SOURCES,
+        *FONT_SOURCES,
         *KEYPAD_CODE_SOURCES,
-        *MULTITAP_SOURCES,
+        *TEXT_INPUT_SOURCES,
     ),
     "fplinux-tyrquake": (
         *DRM_SESSION_SOURCES,
@@ -159,17 +198,28 @@ SHARED_APORT_SOURCES = {
         *INPUT_SESSION_SOURCES,
     ),
     "fplinux-ui": (
-        *MULTITAP_SOURCES,
+        *UTF8_SOURCES,
+        "include/fplinux/fplinux-storage.h",
+        *AUDIO_CLIENT_SOURCES,
+        *TEXT_INPUT_SOURCES,
         *UI_PROFILE_SOURCES,
         *UI_SOFTKEY_LAYOUT_SOURCES,
         "lib/fplinux/fplinux-ui.c",
+        "lib/fplinux/fplinux-ui-style.c",
         "include/fplinux/fplinux-ui.h",
+        "include/fplinux/fplinux-ui-audio.h",
+        "include/fplinux/fplinux-ui-vibration.h",
+        "lib/fplinux/fplinux-ui-frame.c",
+        "include/fplinux/fplinux-ui-frame.h",
+        "include/fplinux/fplinux-ui-frame-private.h",
         "lib/fplinux/fplinux-ui-session.c",
         "include/fplinux/fplinux-ui-session.h",
         "lib/fplinux/fplinux-ui-text.c",
         "include/fplinux/fplinux-ui-text.h",
         "lib/fplinux/fplinux-ui-text-model.c",
         "include/fplinux/fplinux-ui-text-model.h",
+        "lib/fplinux/fplinux-ui-symbol-picker.c",
+        "include/fplinux/fplinux-ui-symbol-picker.h",
         "lib/fplinux/fplinux-ui-listview.c",
         "include/fplinux/fplinux-ui-listview.h",
         "lib/fplinux/fplinux-ui-menu.c",
@@ -184,7 +234,6 @@ SHARED_APORT_SOURCES = {
         "include/fplinux/fplinux-ui-locale.h",
         "include/fplinux/fplinux-ui-fonts.h",
         "include/fplinux/fplinux-ui-internal.h",
-        "include/fplinux/fplinux-ui-style-internal.h",
         "lib/fplinux/fplinux-ui-profile.json",
         "scripts/fplinux_ui_profile.py",
         "scripts/fplinux_ui_fonts.py",
@@ -198,6 +247,7 @@ COMMON_PACKAGES = (
     "fplinux-bash",
     "fplinux-brand",
     "fplinux-busybox",
+    "fplinux-font-terminus",
     "fplinux-icons",
     "fplinux-language-en",
     "fplinux-language-ru",

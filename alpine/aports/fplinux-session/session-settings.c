@@ -258,6 +258,8 @@ static bool write_all(int fd, const char *text, size_t length)
 
 		if (written < 0 && errno == EINTR)
 			continue;
+		if (written == 0)
+			errno = EIO;
 		if (written <= 0)
 			return false;
 		text += written;
@@ -298,9 +300,13 @@ static bool sync_parent(const char *path)
 	return true;
 }
 
-bool fplinux_session_settings_save(
-	const struct fplinux_session_settings *settings, const char *path)
+struct fplinux_storage_result
+fplinux_session_settings_save(const struct fplinux_session_settings *settings,
+			      const char *path)
 {
+	struct fplinux_storage_result result = {
+		.state = FPLINUX_STORAGE_UNPUBLISHED,
+	};
 	char temporary[PATH_MAX];
 	char text[256];
 	char screen_off[16];
@@ -318,8 +324,10 @@ bool fplinux_session_settings_save(
 					     auto_lock, sizeof(auto_lock)) ||
 	    !fplinux_session_settings_format(settings,
 					     FPLINUX_SESSION_SETTING_THEME,
-					     theme, sizeof(theme)))
-		return false;
+					     theme, sizeof(theme))) {
+		errno = EINVAL;
+		goto failed;
+	}
 	length = snprintf(
 		text, sizeof(text),
 		"screen_off_seconds=%s\nauto_lock_seconds=%s\nlocale=%s\n"
@@ -334,11 +342,11 @@ bool fplinux_session_settings_save(
 	    snprintf(temporary, sizeof(temporary), "%s.XXXXXX", path) >=
 		    (int)sizeof(temporary)) {
 		errno = ENAMETOOLONG;
-		return false;
+		goto failed;
 	}
 	fd = mkostemp(temporary, O_CLOEXEC);
 	if (fd < 0)
-		return false;
+		goto failed;
 	/* mkostemp creates 0600 and the session umask is 0007. */
 	if (!write_all(fd, text, (size_t)length) || fchmod(fd, 0644) < 0 ||
 	    fsync(fd) < 0) {
@@ -346,15 +354,23 @@ bool fplinux_session_settings_save(
 		close(fd);
 		unlink(temporary);
 		errno = error;
-		return false;
+		goto failed;
 	}
 	if (close(fd) < 0 || rename(temporary, path) < 0) {
 		error = errno;
 		unlink(temporary);
 		errno = error;
-		return false;
+		goto failed;
 	}
-	return sync_parent(path);
+	result.state = FPLINUX_STORAGE_PUBLISHED_UNSYNCED;
+	if (!sync_parent(path))
+		goto failed;
+	result.state = FPLINUX_STORAGE_DURABLE;
+	return result;
+failed:
+	result.error = errno ? errno : EIO;
+	errno = result.error;
+	return result;
 }
 
 static bool has_digits(const char *value, size_t first, size_t count)

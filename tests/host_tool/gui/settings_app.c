@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _POSIX_C_SOURCE 200809L
 #include "fplinux-language.h"
+#include "settings-session-boundary.h"
 
 #include <fplinux/fplinux-ui.h>
 #include <fplinux/fplinux-ui-locale.h>
@@ -68,6 +69,7 @@ static bool resources_opened;
 static int selected_profile;
 static bool dark_theme;
 static const char *expected_logo;
+static const struct settings_session_boundary *session_boundary;
 int fplinux_settings_main(int argc, char **argv);
 
 static void copy_text(char *target, size_t size, const char *text)
@@ -120,15 +122,21 @@ static void command(struct fplinux_ui *ui, enum fplinux_ui_command_type type)
 	assert(screen->command);
 	for (size_t i = 0; i < screen->command_count; i++) {
 		if (screen->commands[i].type == type) {
+			bool alert = screen->message[0];
+
+			if (alert)
+				--ui->depth;
 			screen->command(ui, screen, screen->commands[i].id,
 					screen->context);
+			if (alert)
+				free(screen);
 			return;
 		}
 	}
 	assert(!"requested visible command is missing");
 }
 
-static void choose_row(struct fplinux_ui *ui, const char *text)
+static void select_row(struct fplinux_ui *ui, const char *text)
 {
 	struct fplinux_ui_screen *screen = ui->stack[ui->depth - 1];
 	size_t index = row_named(screen, text);
@@ -137,31 +145,56 @@ static void choose_row(struct fplinux_ui *ui, const char *text)
 	screen->change(ui, screen, index, screen->context);
 }
 
+static void choose_row(struct fplinux_ui *ui, const char *text)
+{
+	size_t sent = ui->sent_count;
+
+	select_row(ui, text);
+	if (!strcmp(ui->stack[ui->depth - 1]->message,
+		    "Changing this setting closes other apps. Unsaved changes may be lost.")) {
+		assert(ui->sent_count == sent);
+		command(ui, FPLINUX_UI_COMMAND_SCREEN);
+	}
+}
+
+static void deliver_reply(struct fplinux_ui *ui,
+			  const struct fplinux_ui_session_message *message)
+{
+	struct fplinux_ui_event event = {
+		.type = FPLINUX_UI_EVENT_SESSION,
+		.session = message,
+	};
+
+	if (message->applied) {
+		if (!strcmp(message->name, "input_locale"))
+			copy_text(ui->input_locale, sizeof(ui->input_locale),
+				  message->value);
+		else if (!strcmp(message->name, "locale"))
+			copy_text(ui->locale, sizeof(ui->locale),
+				  message->value);
+		else if (!strcmp(message->name, "theme"))
+			ui->theme.kind = !strcmp(message->value, "dark") ?
+						 FPLINUX_UI_THEME_DARK :
+						 FPLINUX_UI_THEME_LIGHT;
+	}
+	ui->event(ui, &event, ui->context);
+}
+
 static void reply(struct fplinux_ui *ui,
 		  enum fplinux_ui_session_message_type type, const char *name,
 		  const char *value, const char *reason)
 {
-	struct fplinux_ui_session_message message = { .type = type };
-	struct fplinux_ui_event event = {
-		.type = FPLINUX_UI_EVENT_SESSION,
-		.session = &message,
+	struct fplinux_ui_session_message message = {
+		.type = type,
+		.applied = type == FPLINUX_UI_SESSION_SETTING ||
+			   !strcmp(reason, "save-failed"),
+		.storage_error = !strcmp(reason, "save-failed") ? EIO : 0,
 	};
 
 	copy_text(message.name, sizeof(message.name), name);
 	copy_text(message.value, sizeof(message.value), value);
 	copy_text(message.reason, sizeof(message.reason), reason);
-	if (type == FPLINUX_UI_SESSION_SETTING) {
-		if (!strcmp(name, "input_locale"))
-			copy_text(ui->input_locale, sizeof(ui->input_locale),
-				  value);
-		else if (!strcmp(name, "locale"))
-			copy_text(ui->locale, sizeof(ui->locale), value);
-		else if (!strcmp(name, "theme"))
-			ui->theme.kind = !strcmp(value, "dark") ?
-						 FPLINUX_UI_THEME_DARK :
-						 FPLINUX_UI_THEME_LIGHT;
-	}
-	ui->event(ui, &event, ui->context);
+	deliver_reply(ui, &message);
 }
 
 static void set_lifecycle(struct fplinux_ui *ui,
@@ -265,7 +298,7 @@ static void test_errors(struct fplinux_ui *ui)
 		{ "input_locale", "en", "failed", "Input language",
 		  "The setting was not changed. Try again." },
 		{ "theme", "dark", "save-failed", "Theme",
-		  "The change works until the phone restarts." },
+		  "The setting is applied for this session. It was not saved.\nStorage input/output error" },
 		{ "brightness", "7", "failed", "Brightness",
 		  "The setting was not changed. Try again." },
 		{ "time", "2026-10-02 12:00:00", "failed", "Date and time",
@@ -280,7 +313,8 @@ static void test_errors(struct fplinux_ui *ui)
 		      cases[i].value, cases[i].reason);
 		alert = current(ui, cases[i].title);
 		assert(!strcmp(alert->message, cases[i].text));
-		if (strcmp(cases[i].name, "time")) {
+		if (strcmp(cases[i].name, "time") &&
+		    strcmp(cases[i].reason, "save-failed")) {
 			assert(ui->sent_count == sent + 1);
 			expect_sent(ui, sent, cases[i].name, "");
 		} else {
@@ -302,11 +336,18 @@ static void test_notice_survives_reply(struct fplinux_ui *ui, bool theme)
 	assert(!current(ui, title)->message[0]);
 	assert(ui->depth == 3);
 	reply(ui, FPLINUX_UI_SESSION_ERROR, name, value, "save-failed");
-	assert(!strcmp(current(ui, title)->message,
-		       "The change works until the phone restarts."));
+	assert(ui->depth == 3);
+	assert(!strcmp(ui->stack[1]->title,
+		       theme ? "Display" : "Time & language"));
+	assert(!strcmp(ui->stack[1]->rows[theme ? 3 : 1].detail,
+		       theme ? "Dark" : "Français"));
+	assert(!strcmp(
+		current(ui, title)->message,
+		"The setting is applied for this session. It was not saved.\nStorage input/output error"));
 	reply(ui, FPLINUX_UI_SESSION_SETTING, name, value, "");
-	assert(!strcmp(current(ui, title)->message,
-		       "The change works until the phone restarts."));
+	assert(!strcmp(
+		current(ui, title)->message,
+		"The setting is applied for this session. It was not saved.\nStorage input/output error"));
 	close_notice(ui);
 	current(ui, theme ? "Display" : "Time & language");
 	assert(ui->depth == 2);
@@ -362,13 +403,17 @@ static void test_choice_reply(struct fplinux_ui *ui, bool theme,
 	}
 	if (outcome != SETTING_APPLIED) {
 		const char *notice =
-			failed ? "The setting was not changed. Try again." :
-				 "The change works until the phone restarts.";
+			failed ?
+				"The setting was not changed. Try again." :
+				"The setting is applied for this session. It was not saved.\nStorage input/output error";
 
 		reply(ui, FPLINUX_UI_SESSION_ERROR, name, new_value,
 		      failed ? "failed" : "save-failed");
 		assert(!strcmp(current(ui, title)->message, notice));
-		expect_sent(ui, sent + 1, name, "");
+		if (failed)
+			expect_sent(ui, sent + 1, name, "");
+		else
+			assert(ui->sent_count == sent + 1);
 		/* An applied value and the query reply both leave the notice. */
 		reply(ui, FPLINUX_UI_SESSION_SETTING, name,
 		      failed ? old_value : new_value, "");
@@ -396,6 +441,236 @@ static void test_choice_reply(struct fplinux_ui *ui, bool theme,
 		command(ui, FPLINUX_UI_COMMAND_BACK);
 		current(ui, "Settings");
 		assert(ui->depth == 1);
+	}
+}
+
+static void test_choice_home_before_request(struct fplinux_ui *ui, bool theme)
+{
+	const char *group = theme ? "Display" : "Time & language";
+	const char *title = theme ? "Theme" : "Language";
+	const char *after = theme ? "Dark" : "Français";
+	const char *name = theme ? "theme" : "locale";
+	const char *value = theme ? "dark" : "fr";
+	struct fplinux_ui_screen *selector;
+	size_t sent;
+	unsigned int alerts;
+
+	session_boundary->flush(session_boundary->context, ui);
+	open_row(ui, group);
+	open_row(ui, title);
+	selector = current(ui, title);
+	choose_row(ui, after);
+	alerts = ui->alerts;
+	sent = ui->sent_count;
+	expect_sent(ui, sent - 1, name, value);
+	command(ui, FPLINUX_UI_COMMAND_BACK);
+	assert(current(ui, title) == selector);
+	/* Home travels separately and reaches the manager before this outbox. */
+	session_boundary->home(session_boundary->context);
+	session_boundary->flush(session_boundary->context, ui);
+	assert(ui->lifecycle == FPLINUX_UI_BACKGROUND && !ui->visible);
+	assert(ui->alerts == alerts + 1);
+	assert(!strcmp(current(ui, title)->message,
+		       "The setting was not changed. Try again."));
+	close_notice(ui);
+	/* A rejected background query must not leave this selector waiting. */
+	session_boundary->resume(session_boundary->context);
+	session_boundary->flush(session_boundary->context, ui);
+	assert(ui->lifecycle == FPLINUX_UI_FOREGROUND && ui->visible);
+	if (ui->depth == 3)
+		command(ui, FPLINUX_UI_COMMAND_BACK);
+	current(ui, group);
+	assert(ui->depth == 2);
+	assert(!strcmp(detail(ui, group, title), theme ? "Light" : "English"));
+	open_row(ui, title);
+	sent = ui->sent_count;
+	choose_row(ui, after);
+	assert(ui->sent_count == sent + 1);
+	expect_sent(ui, sent, name, value);
+	/* The second selection retains the visual barrier until its reply. */
+	selector = current(ui, title);
+	command(ui, FPLINUX_UI_COMMAND_BACK);
+	assert(current(ui, title) == selector && ui->depth == 3);
+}
+
+static void test_change_warning_can_cancel(struct fplinux_ui *ui, bool theme)
+{
+	const char *title = theme ? "Theme" : "Language";
+	const char *before = theme ? "Light" : "English";
+	size_t sent = ui->sent_count;
+
+	open_row(ui, theme ? "Display" : "Time & language");
+	open_row(ui, title);
+	select_row(ui, theme ? "Dark" : "Français");
+	assert(ui->sent_count == sent);
+	assert(!strcmp(
+		current(ui, title)->message,
+		"Changing this setting closes other apps. Unsaved changes may be lost."));
+	command(ui, FPLINUX_UI_COMMAND_CANCEL);
+	struct fplinux_ui_screen *selector = current(ui, title);
+
+	assert(ui->depth == 3 &&
+	       selector->focused == row_named(selector, before));
+	assert(selector->rows[row_named(selector, before)].selected);
+	assert(ui->sent_count == sent);
+}
+
+static void
+test_pending_choice_recovers_after_visibility_only(struct fplinux_ui *ui,
+						   bool theme)
+{
+	const char *group = theme ? "Display" : "Time & language";
+	const char *title = theme ? "Theme" : "Language";
+	const char *name = theme ? "theme" : "locale";
+	const char *before = theme ? "light" : "en";
+	const char *after = theme ? "dark" : "fr";
+
+	open_row(ui, group);
+	open_row(ui, title);
+	choose_row(ui, theme ? "Dark" : "Français");
+	size_t sent = ui->sent_count;
+
+	set_visible(ui, false);
+	reply(ui, FPLINUX_UI_SESSION_ERROR, name, after, "not-foreground");
+	assert(ui->lifecycle == FPLINUX_UI_FOREGROUND);
+	assert(ui->sent_count == sent);
+	close_notice(ui);
+	command(ui, FPLINUX_UI_COMMAND_BACK);
+	assert(ui->depth == 3);
+	set_visible(ui, true);
+	assert(ui->sent_count == sent + 1);
+	expect_sent(ui, sent, name, "");
+	reply(ui, FPLINUX_UI_SESSION_SETTING, name, before, "");
+	current(ui, group);
+	assert(ui->depth == 2);
+}
+
+static void test_brightness_save_retries_current_value(struct fplinux_ui *ui)
+{
+	open_brightness(ui);
+	preview(ui, 8);
+	command(ui, FPLINUX_UI_COMMAND_OK);
+	reply(ui, FPLINUX_UI_SESSION_ERROR, "brightness", "8", "save-failed");
+	assert(!strcmp(ui->stack[1]->rows[0].detail, "8"));
+	close_notice(ui);
+	open_row(ui, "Brightness");
+	size_t sent = ui->sent_count;
+
+	command(ui, FPLINUX_UI_COMMAND_OK);
+	assert(ui->sent_count == sent + 1);
+	expect_sent(ui, sent, "brightness", "8");
+}
+
+static void
+test_save_failure_preserves_state_and_cause(struct fplinux_ui *ui,
+					    enum fplinux_storage_state state,
+					    int error, const char *expected)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_ERROR,
+		.applied = true,
+		.storage_state = state,
+		.storage_error = error,
+	};
+
+	open_row(ui, "Display");
+	open_row(ui, "Theme");
+	choose_row(ui, "Dark");
+	size_t sent = ui->sent_count;
+
+	copy_text(message.name, sizeof(message.name), "theme");
+	copy_text(message.value, sizeof(message.value), "dark");
+	copy_text(message.reason, sizeof(message.reason), "save-failed");
+	deliver_reply(ui, &message);
+	assert(ui->sent_count == sent);
+	assert(!strcmp(current(ui, "Theme")->message, expected));
+	assert(!strcmp(ui->stack[1]->rows[3].detail, "Dark"));
+	/* A later value reply can rebuild the view without acknowledging this error. */
+	reply(ui, FPLINUX_UI_SESSION_SETTING, "locale", "en", "");
+	assert(!strcmp(ui->stack[1]->title, "Time & language"));
+	assert(!strcmp(current(ui, "Theme")->message, expected));
+	close_notice(ui);
+	current(ui, "Time & language");
+}
+
+static void test_session_save_failure_rebuilds_before_ack(struct fplinux_ui *ui)
+{
+	session_boundary->flush(session_boundary->context, ui);
+	open_row(ui, "Display");
+	open_row(ui, "Theme");
+	choose_row(ui, "Dark");
+	size_t sent = ui->sent_count;
+
+	session_boundary->flush(session_boundary->context, ui);
+	assert(ui->theme.kind == FPLINUX_UI_THEME_DARK);
+	assert(ui->sent_count == sent);
+	assert(ui->depth == 3 && !strcmp(ui->stack[1]->title, "Display"));
+	assert(!strcmp(ui->stack[1]->rows[3].detail, "Dark"));
+	assert(!strcmp(
+		current(ui, "Theme")->message,
+		"The setting is applied for this session. It was not saved.\nStorage input/output error"));
+}
+
+static void test_session_preview_cancel_preserves_retry(struct fplinux_ui *ui)
+{
+	struct fplinux_ui_screen *form;
+	size_t sent;
+
+	session_boundary->flush(session_boundary->context, ui);
+	open_row(ui, "Display");
+	open_row(ui, "Screen timeout");
+	select_row(ui, "1 min");
+	session_boundary->flush(session_boundary->context, ui);
+	current(ui, "Screen timeout");
+	close_notice(ui);
+	assert(!strcmp(detail(ui, "Display", "Screen timeout"), "1 min"));
+	open_row(ui, "Brightness");
+	form = current(ui, "Brightness");
+	assert(form->rows[row_named(form, "Level")].value == 7);
+	preview(ui, 8);
+	session_boundary->flush(session_boundary->context, ui);
+	command(ui, FPLINUX_UI_COMMAND_CANCEL);
+	session_boundary->flush(session_boundary->context, ui);
+	assert(!strcmp(detail(ui, "Display", "Brightness"), "7"));
+	session_boundary->recover_storage(session_boundary->context);
+	open_row(ui, "Screen timeout");
+	sent = ui->sent_count;
+	select_row(ui, "1 min");
+	assert(ui->sent_count == sent + 1);
+	expect_sent(ui, sent, "screen_off_seconds", "60");
+	session_boundary->flush(session_boundary->context, ui);
+	open_row(ui, "Screen timeout");
+	sent = ui->sent_count;
+	select_row(ui, "1 min");
+	assert(ui->sent_count == sent);
+	current(ui, "Display");
+}
+
+bool settings_session_next_request(struct fplinux_ui *ui, size_t *index,
+				   struct fplinux_ui_session_message *message)
+{
+	if (*index == ui->sent_count)
+		return false;
+	assert(*index < ui->sent_count);
+	*message = ui->sent[(*index)++];
+	return true;
+}
+
+void settings_session_receive(struct fplinux_ui *ui,
+			      const struct fplinux_ui_session_message *message)
+{
+	if (message->type == FPLINUX_UI_SESSION_LIFECYCLE) {
+		enum fplinux_ui_lifecycle lifecycle =
+			message->lifecycle == FPLINUX_UI_SESSION_FOREGROUND ?
+				FPLINUX_UI_FOREGROUND :
+				FPLINUX_UI_BACKGROUND;
+
+		set_lifecycle(ui, lifecycle);
+	} else if (message->type == FPLINUX_UI_SESSION_VISIBILITY) {
+		set_visible(ui, message->visible);
+	} else if (message->type == FPLINUX_UI_SESSION_SETTING ||
+		   message->type == FPLINUX_UI_SESSION_ERROR) {
+		deliver_reply(ui, message);
 	}
 }
 
@@ -470,7 +745,9 @@ static void test_brightness_background(struct fplinux_ui *ui, bool save)
 	assert(form->rows[row_named(form, "Level")].value == 4);
 	sent = ui->sent_count;
 	command(ui, save ? FPLINUX_UI_COMMAND_OK : FPLINUX_UI_COMMAND_CANCEL);
-	assert(ui->sent_count == sent);
+	assert(ui->sent_count == sent + (save ? 1 : 0));
+	if (save)
+		expect_sent(ui, sent, "brightness", "4");
 	assert(!strcmp(detail(ui, "Display", "Brightness"), "4"));
 }
 
@@ -597,8 +874,14 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 {
 	struct fplinux_ui_event close = { .type = FPLINUX_UI_EVENT_CLOSE };
 
-	if (!strcmp(scenario, "about") ||
-	    !strcmp(scenario, "about-missing-logo"))
+	if (session_boundary && !strcmp(scenario, "save-failed-session"))
+		test_session_save_failure_rebuilds_before_ack(ui);
+	else if (session_boundary && !strcmp(scenario, "preview-cancel-retry"))
+		test_session_preview_cancel_preserves_retry(ui);
+	else if (session_boundary)
+		test_choice_home_before_request(ui, !strcmp(scenario, "theme"));
+	else if (!strcmp(scenario, "about") ||
+		 !strcmp(scenario, "about-missing-logo"))
 		test_about(ui);
 	else if (!strcmp(scenario, "errors"))
 		test_errors(ui);
@@ -616,6 +899,28 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		test_brightness_hidden(ui);
 	else if (!strcmp(scenario, "input"))
 		test_input_language(ui);
+	else if (!strcmp(scenario, "brightness-retry-current"))
+		test_brightness_save_retries_current_value(ui);
+	else if (!strcmp(scenario, "save-failed-no-space"))
+		test_save_failure_preserves_state_and_cause(
+			ui, FPLINUX_STORAGE_UNPUBLISHED, ENOSPC,
+			"The setting is applied for this session. It was not saved.\nNot enough storage space");
+	else if (!strcmp(scenario, "save-failed-read-only"))
+		test_save_failure_preserves_state_and_cause(
+			ui, FPLINUX_STORAGE_UNPUBLISHED, EROFS,
+			"The setting is applied for this session. It was not saved.\nStorage is read-only");
+	else if (!strcmp(scenario, "save-failed-published"))
+		test_save_failure_preserves_state_and_cause(
+			ui, FPLINUX_STORAGE_PUBLISHED_UNSYNCED, EIO,
+			"The setting is applied. Saving is not confirmed.\nStorage input/output error");
+	else if (!strcmp(scenario, "theme-warning-cancel"))
+		test_change_warning_can_cancel(ui, true);
+	else if (!strcmp(scenario, "locale-warning-cancel"))
+		test_change_warning_can_cancel(ui, false);
+	else if (!strcmp(scenario, "theme-visibility-recovery"))
+		test_pending_choice_recovers_after_visibility_only(ui, true);
+	else if (!strcmp(scenario, "locale-visibility-recovery"))
+		test_pending_choice_recovers_after_visibility_only(ui, false);
 	else if (!strcmp(scenario, "theme-save-failed"))
 		test_notice_survives_reply(ui, true);
 	else if (!strcmp(scenario, "locale-save-failed"))
@@ -646,6 +951,45 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 	return 0;
 }
 
+int settings_session_save_failure_test(
+	const struct settings_session_boundary *boundary)
+{
+	char *arguments[] = { "fplinux-settings", NULL };
+
+	scenario = "save-failed-session";
+	session_boundary = boundary;
+	int result = fplinux_settings_main(1, arguments);
+
+	session_boundary = NULL;
+	return result;
+}
+
+int settings_session_preview_retry_test(
+	const struct settings_session_boundary *boundary)
+{
+	char *arguments[] = { "fplinux-settings", NULL };
+	int result;
+
+	scenario = "preview-cancel-retry";
+	session_boundary = boundary;
+	result = fplinux_settings_main(1, arguments);
+	session_boundary = NULL;
+	return result;
+}
+
+int settings_session_test(bool theme,
+			  const struct settings_session_boundary *boundary)
+{
+	char *arguments[] = { "fplinux-settings", NULL };
+	int result;
+
+	scenario = theme ? "theme" : "locale";
+	session_boundary = boundary;
+	result = fplinux_settings_main(1, arguments);
+	session_boundary = NULL;
+	return result;
+}
+
 void fplinux_ui_close(struct fplinux_ui *ui)
 {
 	while (ui->depth)
@@ -656,6 +1000,22 @@ void fplinux_ui_close(struct fplinux_ui *ui)
 const struct fplinux_ui_theme *fplinux_ui_theme(const struct fplinux_ui *ui)
 {
 	return &ui->theme;
+}
+
+/* The controlled UI boundary supplies the common error copy used by the app. */
+const char *fplinux_ui_storage_error(struct fplinux_storage_result result)
+{
+	switch (result.error) {
+	case ENOSPC:
+		return "Not enough storage space";
+	case EROFS:
+		return "Storage is read-only";
+	case EIO:
+		return "Storage input/output error";
+	default:
+		assert(!"unexpected storage error at controlled UI boundary");
+		return "";
+	}
 }
 
 const struct fplinux_ui_metrics *fplinux_ui_metrics(const struct fplinux_ui *ui)
@@ -687,9 +1047,8 @@ const void *fplinux_ui_glyph(struct fplinux_ui *ui, const char *name,
 			     enum fplinux_ui_glyph_size size)
 {
 	(void)ui;
-	(void)name;
-	(void)size;
-	return NULL;
+	assert(size == FPLINUX_UI_GLYPH_ROW);
+	return name;
 }
 
 bool fplinux_ui_send(struct fplinux_ui *ui,
@@ -796,6 +1155,12 @@ bool fplinux_ui_screen_add_command(struct fplinux_ui_screen *screen,
 				   const struct fplinux_ui_command *command)
 {
 	assert(screen->command_count < 4);
+	if (command->label && !strcmp(command->label, "Save"))
+		assert(command->icon && !strcmp(command->icon, "save"));
+	if (command->label && !strcmp(command->label, "Change"))
+		assert(command->icon && !strcmp(command->icon, "edit"));
+	if (command->type == FPLINUX_UI_COMMAND_CANCEL)
+		assert(command->icon && !strcmp(command->icon, "cancel"));
 	screen->commands[screen->command_count++] = *command;
 	return true;
 }

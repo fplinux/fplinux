@@ -29,6 +29,7 @@ def settings_sync_harness(tmp_path: Path) -> Path:
             str(APORT / "session-settings.c"),
             str(ROOT / "lib/fplinux/fplinux-settings-values.c"),
             str(ROOT / "lib/fplinux/fplinux-language.c"),
+            str(ROOT / "lib/fplinux/fplinux-utf8.c"),
             "-Wl,--wrap=fsync",
             "-o",
             str(executable),

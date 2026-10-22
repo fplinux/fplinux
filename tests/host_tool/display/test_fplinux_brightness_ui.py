@@ -56,6 +56,7 @@ class BrightnessUiTests:
                     str(ROOT / "tests/host_tool/display/fplinux-brightness-ui.c"),
                     str(APP / "brightness-ui.c"),
                     str(ROOT / "lib/fplinux/fplinux-font.c"),
+                    str(ROOT / "lib/fplinux/fplinux-utf8.c"),
                 ],
                 name="compile brightness UI host behavior",
                 check=True,

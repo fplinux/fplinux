@@ -1,52 +1,87 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "terminal-render.h"
 
-#include <limits.h>
+#include <string.h>
 
-static unsigned int glyph_width(const lv_font_t *font, uint32_t character)
+static bool glyph_descriptor(const lv_font_t *font,
+			     lv_font_glyph_dsc_t *descriptor,
+			     uint32_t character, uint32_t next)
 {
-	lv_font_glyph_dsc_t glyph;
-	unsigned int width;
+	const struct fplinux_font *psf = font->dsc;
+	const unsigned char *bitmap = fplinux_font_glyph(psf, character);
 
-	if (!lv_font_get_glyph_dsc(font, &glyph, character, 0))
-		return 0;
-	if (glyph.is_placeholder) {
-		lv_font_glyph_release_draw_data(&glyph);
-		return 0;
-	}
-	width = glyph.adv_w;
-	if (glyph.box_w > width)
-		width = glyph.box_w;
-	lv_font_glyph_release_draw_data(&glyph);
-	return width;
-}
-
-bool fplinux_terminal_grid_init(struct fplinux_terminal_grid *grid,
-				const lv_font_t *font)
-{
-	int32_t height;
-	unsigned int width = 0;
-
-	if (!font || (height = lv_font_get_line_height(font)) <= 0)
+	(void)next;
+	if (!bitmap)
 		return false;
-	/* The shell and both installed keypad languages share these columns. */
-	for (uint32_t code = 0x20; code <= 0x45f; ++code) {
-		unsigned int candidate;
-
-		if (code == 0x7f)
-			code = 0x400;
-		candidate = glyph_width(font, code);
-		if (candidate > width)
-			width = candidate;
-	}
-	if (!width || width > INT_MAX)
-		return false;
-	*grid = (struct fplinux_terminal_grid){
-		.font = font,
-		.cell_width = width,
-		.cell_height = (unsigned int)height,
+	*descriptor = (lv_font_glyph_dsc_t){
+		.gid.index =
+			(uint32_t)((bitmap - psf->bitmap) / psf->glyph_bytes),
+		.format = LV_FONT_GLYPH_FORMAT_A1,
+		.adv_w = psf->width,
+		.box_w = psf->width,
+		.box_h = psf->height,
+		.stride = psf->row_bytes,
 	};
 	return true;
+}
+
+static const void *glyph_bitmap(lv_font_glyph_dsc_t *descriptor,
+				lv_draw_buf_t *draw_buffer)
+{
+	const struct fplinux_font *psf = descriptor->resolved_font->dsc;
+	const unsigned char *bitmap =
+		psf->bitmap + (size_t)descriptor->gid.index * psf->glyph_bytes;
+
+	if (descriptor->req_raw_bitmap)
+		return bitmap;
+	if (!draw_buffer)
+		return NULL;
+	/* LVGL supplies an A8 destination even for one-bit source glyphs. */
+	for (unsigned int row = 0; row < psf->height; ++row) {
+		unsigned char *pixels =
+			draw_buffer->data + row * draw_buffer->header.stride;
+
+		for (unsigned int column = 0; column < psf->width; ++column) {
+			unsigned char bits =
+				bitmap[row * psf->row_bytes + column / 8U];
+
+			pixels[column] = bits & (0x80U >> (column % 8U)) ?
+						 LV_OPA_COVER :
+						 0;
+		}
+	}
+	lv_draw_buf_flush_cache(draw_buffer, NULL);
+	return draw_buffer;
+}
+
+bool fplinux_terminal_grid_open(struct fplinux_terminal_grid *grid,
+				const char *path)
+{
+	memset(grid, 0, sizeof(*grid));
+	if (!fplinux_font_open(&grid->psf, path))
+		return false;
+	if (!((grid->psf.width == 6 && grid->psf.height == 12) ||
+	      (grid->psf.width == 8 && grid->psf.height == 16))) {
+		fplinux_terminal_grid_close(grid);
+		return false;
+	}
+	grid->font = (lv_font_t){
+		.dsc = &grid->psf,
+		.get_glyph_dsc = glyph_descriptor,
+		.get_glyph_bitmap = glyph_bitmap,
+		.line_height = grid->psf.height,
+		.kerning = LV_FONT_KERNING_NONE,
+		.static_bitmap = 1,
+	};
+	grid->cell_width = grid->psf.width;
+	grid->cell_height = grid->psf.height;
+	return true;
+}
+
+void fplinux_terminal_grid_close(struct fplinux_terminal_grid *grid)
+{
+	fplinux_font_close(&grid->psf);
+	memset(grid, 0, sizeof(*grid));
 }
 
 static void rectangle(lv_layer_t *layer, const lv_area_t *area,
@@ -63,34 +98,16 @@ static void rectangle(lv_layer_t *layer, const lv_area_t *area,
 static void glyph(const struct fplinux_terminal_grid *grid, lv_layer_t *layer,
 		  const lv_area_t *cell, uint32_t character, lv_color_t color)
 {
-	lv_draw_letter_dsc_t letter;
-	lv_font_glyph_dsc_t descriptor;
+	lv_draw_label_dsc_t letter;
 	lv_point_t position = { .x = cell->x1, .y = cell->y1 };
 
 	if (!character || character == ' ')
 		return;
-	if (lv_font_get_glyph_dsc(grid->font, &descriptor, character, 0)) {
-		bool fits = !descriptor.is_placeholder &&
-			    descriptor.box_w <= grid->cell_width;
-
-		lv_font_glyph_release_draw_data(&descriptor);
-		if (!fits)
-			character = '?';
-	} else {
-		character = '?';
-	}
-	if (lv_font_get_glyph_dsc(grid->font, &descriptor, character, 0)) {
-		position.x +=
-			((int32_t)grid->cell_width - descriptor.box_w) / 2 -
-			descriptor.ofs_x;
-		lv_font_glyph_release_draw_data(&descriptor);
-	}
-	lv_draw_letter_dsc_init(&letter);
-	letter.font = grid->font;
-	letter.unicode = character;
+	lv_draw_label_dsc_init(&letter);
+	letter.font = &grid->font;
 	letter.color = color;
 	letter.opa = LV_OPA_COVER;
-	lv_draw_letter(layer, &letter, &position);
+	lv_draw_character(layer, &letter, &position, character);
 }
 
 void fplinux_terminal_render(struct fplinux_terminal *terminal,
@@ -127,6 +144,12 @@ void fplinux_terminal_render(struct fplinux_terminal *terminal,
 							cell->fg.b);
 			bool cursor = !terminal->history && row == cursor_y &&
 				      column == cursor_x;
+			bool cursor_underline =
+				cursor &&
+				(preedit ||
+				 (terminal->cursor_visible &&
+				  !(tsm_screen_get_flags(terminal->screen) &
+				    TSM_SCREEN_HIDE_CURSOR)));
 
 			area.x2 = area.x1 + (int32_t)grid->cell_width - 1;
 			area.y2 = area.y1 + (int32_t)grid->cell_height - 1;
@@ -141,13 +164,10 @@ void fplinux_terminal_render(struct fplinux_terminal *terminal,
 			      cursor && preedit ? preedit : cell->ch,
 			      cursor && preedit ? lv_color_hex(0x083442) :
 						  text);
-			if (cell->attr2.underline || (cursor && preedit) ||
-			    (cursor && terminal->cursor_visible &&
-			     !(tsm_screen_get_flags(terminal->screen) &
-			       TSM_SCREEN_HIDE_CURSOR))) {
+			if (cell->attr2.underline || cursor_underline) {
 				area.y1 = area.y2 - 1;
 				rectangle(layer, &area,
-					  cursor ? foreground : text);
+					  cursor_underline ? foreground : text);
 			}
 		}
 	terminal->dirty = false;

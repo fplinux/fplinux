@@ -68,7 +68,7 @@ def test_screen_selection_uses_fitting_area_and_stable_tie_order(
 
 
 def test_unknown_profile_and_theme_ids_return_no_entry(profile_table: dict[str, Any]) -> None:
-    assert profile_table["unknown"] == [True, True, True, True, True, True]
+    assert profile_table["unknown"] == [True, True, True, True]
 
 
 def test_landscape_layout_preserves_horizontal_capacity(profile_table: dict[str, Any]) -> None:
@@ -97,8 +97,8 @@ def test_themes_select_distinct_colours_with_translucent_scrim(
     light, dark = profile_table["themes"]
     assert light["background"] != dark["background"]
     assert light["foreground"] != dark["foreground"]
-    for palette in profile_table["palettes"] + profile_table["themes"]:
-        assert palette["foreground"] != palette["background"]
+    for theme in profile_table["themes"]:
+        assert theme["foreground"] != theme["background"]
     for opacity in profile_table["scrim_opacities"]:
         assert 0 < opacity < 255
 
@@ -110,6 +110,8 @@ def test_token_changes_reach_the_compiled_consumer(tmp_path: Path) -> None:
     tokens["tile_radius"]["16"] = 4
     tokens["tile_radius"]["32"] = 8
     tokens["themes"]["light"]["background"] = "#FFFFFF"
+    tokens["themes"]["dark"]["foreground"] = "#FFFFFF"
+    tokens["modal"]["scrim_opacity"] = 73
     source = tmp_path / "profile.c"
     source.write_text(fplinux_ui_profile.render(tokens))
     table = read_profile_table(source, tmp_path)
@@ -119,4 +121,6 @@ def test_token_changes_reach_the_compiled_consumer(tmp_path: Path) -> None:
     assert table["profiles"][0]["app_tile_radius"] == 8
     assert table["profiles"][1]["row_tile_radius"] == 4
     assert table["profiles"][1]["app_tile_radius"] == 8
-    assert table["palettes"][0]["background"] == 0xFFFFFF
+    assert table["themes"][0]["background"] == 0xFFFFFF
+    assert table["themes"][1]["foreground"] == 0xFFFFFF
+    assert table["scrim_opacities"] == [73, 73]

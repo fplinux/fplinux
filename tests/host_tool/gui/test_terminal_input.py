@@ -35,8 +35,11 @@ def terminal_input(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 str(ROOT / "tests/host_tool/gui/terminal-input-test.c"),
                 str(aport / "terminal-engine.c"),
                 str(aport / "terminal-input.c"),
+                str(aport / "terminal-help.c"),
                 str(ROOT / "lib/fplinux/fplinux-multitap.c"),
+                str(ROOT / "lib/fplinux/fplinux-text-input.c"),
                 str(ROOT / "lib/fplinux/fplinux-language.c"),
+                str(ROOT / "lib/fplinux/fplinux-utf8.c"),
                 str(ROOT / "lib/fplinux/fplinux-ui-screen-model.c"),
                 "-ltsm",
                 *gettext_link_flags(),
@@ -46,7 +49,9 @@ def terminal_input(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         yield executable
 
 
-@pytest.mark.parametrize("scenario", ["languages", "pause", "modifiers", "commands", "title"])
+@pytest.mark.parametrize(
+    "scenario", ["languages", "pause", "modifiers", "gestures", "blocked", "commands"]
+)
 def test_terminal_input_keeps_pty_bytes_deadlines_and_gui_commands(
     terminal_input: Path, scenario: str
 ) -> None:
@@ -63,8 +68,11 @@ def test_terminal_input_keeps_pty_bytes_deadlines_and_gui_commands(
     assert result.stdout == f"terminal-input {scenario}: OK\n"
 
 
-def test_terminal_catalogue_translates_commands_and_background_shell_help(tmp_path: Path) -> None:
-    catalogue = tmp_path / "terminal-ru.mo"
+def test_terminal_catalogue_translates_commands_and_background_shell_help(
+    terminal_input: Path, tmp_path: Path
+) -> None:
+    catalogue = tmp_path / "ru/LC_MESSAGES/fplinux-terminal.mo"
+    catalogue.parent.mkdir(parents=True)
     run_process(
         [
             "msgfmt",
@@ -81,11 +89,19 @@ def test_terminal_catalogue_translates_commands_and_background_shell_help(tmp_pa
         russian = gettext.GNUTranslations(file)
     assert russian.gettext("Terminal") == "Терминал"
     assert russian.gettext("Special keys") == "Служебные клавиши"
-    assert russian.gettext("Language: %s") == "Язык ввода: %s"
-    assert russian.ngettext("%u line above", "%u lines above", 1) == "%u строка выше"
-    assert russian.ngettext("%u line above", "%u lines above", 2) == "%u строки выше"
-    assert russian.ngettext("%u line above", "%u lines above", 5) == "%u строк выше"
+    assert russian.gettext("Font size") == "Размер шрифта"
     help_fixtures = ROOT / "tests/host_tool/gui/fixtures/terminal-help"
-    help_text = (help_fixtures / "en.txt").read_text(encoding="utf-8").removesuffix("\n")
-    expected = (help_fixtures / "ru.txt").read_text(encoding="utf-8").removesuffix("\n")
-    assert russian.gettext(help_text) == expected
+    result = run_process(
+        [
+            str(terminal_input),
+            "help",
+            str(tmp_path),
+            str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
+        ],
+        name="translate production Terminal exit help",
+        timeout=10,
+        env={},
+        check=True,
+    )
+    assert result.stdout == (help_fixtures / "ru.txt").read_text(encoding="utf-8")
+    assert result.stderr == ""

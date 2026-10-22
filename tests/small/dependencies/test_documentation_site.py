@@ -73,6 +73,8 @@ def test_root_formatter_preserves_the_separate_site_frontend_contract(tmp_path: 
         "site/src/data/support.json": b"{}\n",
         "site/scripts/screens/helper.py": b"print('screen')\n",
         "site/scripts/screens/render.sh": b"#!/bin/sh\necho screen\n",
+        "site/scripts/screens/capture.c": b"int capture;\n",
+        "site/scripts/screens/capture.h": b"int capture;\n",
     }
     write_files(tmp_path, contents)
     inventory = [(relative, tmp_path / relative) for relative in contents]
@@ -82,10 +84,13 @@ def test_root_formatter_preserves_the_separate_site_frontend_contract(tmp_path: 
     assert formats.markdown == ("docs/guide.md",)
     assert formats.python == ("site/scripts/screens/helper.py",)
     assert formats.posix_shell == ("site/scripts/screens/render.sh",)
+    assert formats.c == ("site/scripts/screens/capture.c", "site/scripts/screens/capture.h")
     root_owned = {
         "docs/guide.md",
         "site/scripts/screens/helper.py",
         "site/scripts/screens/render.sh",
+        "site/scripts/screens/capture.c",
+        "site/scripts/screens/capture.h",
     }
     assert formats.supported() == root_owned
     for relative in contents:

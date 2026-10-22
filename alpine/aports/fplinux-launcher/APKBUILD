@@ -8,12 +8,14 @@ arch="armv7"
 license="GPL-2.0-only"
 depends="fplinux-ui fplinux-icons fplinux-brand"
 makedepends_build="clang22 lld22 pkgconf gettext"
-makedepends_host="musl-dev musl-libintl linux-headers gcc fplinux-ui-dev"
+makedepends_host="musl-dev musl-libintl linux-headers gcc fplinux-ui-dev json-c-dev"
 options="!check"
 source="
 	fplinux-launcher.c
 	launcher-catalogue.c
 	launcher-catalogue.h
+	launcher-clock.c
+	launcher-clock.h
 	launcher-layout.c
 	launcher-layout.h
 	launcher-launch.c
@@ -24,6 +26,13 @@ source="
 	launcher-text.h
 	launcher-tasks.c
 	launcher-tasks.h
+	clock-model.c
+	clock-model.h
+	clock-wire.c
+	clock-wire.h
+	fplinux-storage.h
+	fplinux-utf8.c
+	fplinux-utf8.h
 	org.fplinux.launcher.desktop
 	ru.po
 	fplinux-cli.c
@@ -31,8 +40,10 @@ source="
 	fplinux-desktop-entry.c
 	fplinux-desktop-entry.h
 	fplinux-ui-session.h
+	fplinux-ui-vibration.h
 	fplinux-ui-profile.c
 	fplinux-ui-profile.h
+	fplinux-settings-values.h
 "
 builddir="$srcdir"
 
@@ -40,11 +51,12 @@ build() {
 	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
 	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
-		-I"$srcdir" $(pkg-config --cflags fplinux-ui) \
+		-I"$srcdir" $(pkg-config --cflags fplinux-ui json-c) \
 		fplinux-launcher.c launcher-catalogue.c launcher-layout.c \
-		launcher-power.c launcher-text.c launcher-tasks.c launcher-launch.c fplinux-cli.c \
+		launcher-power.c launcher-text.c launcher-tasks.c launcher-launch.c launcher-clock.c \
+		clock-model.c clock-wire.c fplinux-cli.c fplinux-utf8.c \
 		fplinux-ui-profile.c fplinux-desktop-entry.c $LDFLAGS \
-		$(pkg-config --libs fplinux-ui) -o fplinux-launcher
+		$(pkg-config --libs fplinux-ui json-c) -o fplinux-launcher
 	msgfmt --check --output-file=ru.mo ru.po
 }
 
@@ -62,26 +74,37 @@ package() {
 }
 
 sha512sums="
-2adecfb20d4aeb20047477a0c1b75f03a7f39d4affe51e9282400183fd90f3beca97d82506de1166da012b9e7cfbf9ec65cafee3ad5b7db1f8c61894fc7efadf  fplinux-launcher.c
+d863f78b873650a21ca34c55fce1fb7809b10bdea56ab14aeea32fa67bc3dfdbe733b10054bb263a641d8851ade640d7c2cab27ae350ddb047fc0948ea01e9de  fplinux-launcher.c
 c5be6cda8a21a9904c6ca799c607145cb491c0ce25880f5bdab8ff617237530b8f4c8b2fa32aab48bf135b9875966c9a447a1020b6b6c005bbdb4b943149d0bc  launcher-catalogue.c
 e35a72fabc0ddc423e04d2031bde99ecd86b79f8d010df35a925010cacb7a9006858147aede27dbcf6392ab67aa2f6b87baa9057a6db6b5ceb134e401a68df2c  launcher-catalogue.h
-518a850d3779adec849483f858c0787314b7fddc985fb892141ebf39b163771ddd9d12da5bdb78218b1284c700fdac37f8af9fc17b322cb1b8f300c4eece3cc5  launcher-layout.c
-aa04d798d631e88c8817dab645deca28d97af8762d5d771a479aea0433d42680d35f6825697fc54d040d3943ea835ac39c53835e2cce07f6fd77621651782931  launcher-layout.h
+df0aab7882d34cd5e753745da7574f7b46146ab57406eeb64abd9cd56070a9330b2f82f203b26a5d7180f7a554e7fe4a44b787309d86ccf88c485604deeb10e9  launcher-clock.c
+302dd973ac1ea6c4efc3125aafdf55295789701e39d4bc08c4efa156dd24e977e7175efef0156e3762104e35ecd6d5465c604df1806ed1355e52819f3f42ddd6  launcher-clock.h
+3a860af49f882d94174aba5a8ec3ffd1d13091fe4f3151ec7ac4c4da41d0e1d21a02797bb48eac029e6938a928ec7b23e7a11d1921d02077b27623b21c1c2903  launcher-layout.c
+386913455ba68a996fb80c918a417064d853fdbbdab1d5dbceb88c665fccb0d4e3d5ba5375a4d50c3f003dedae7278b6b43c38d8b900933b2a3ab463206bc233  launcher-layout.h
 05daa6f3240378432ebef3c5eae3cc2cb39ca04636cb8c6fd990401ed7df00479253c1bd2f4157bc1e46444559c682ace2ed9cdbf026ec6b647602d932fa8e95  launcher-launch.c
 6d4bc5bdc9d72b277291423b888f22211bbbde97e9463b118c4a197f25a30406fab4c5e47d0283eb659434889af0edb642750fcf897323526ce0589a44caf0eb  launcher-launch.h
 f8685b7d14ee93f67b2476ae75ba68bd8747ce9d22dc9d6d4296f8ab2cf941555214496a45239a19a4bea95dd13fdfadcfe3091025383a9c8dfbfffce93ca070  launcher-power.c
 67c90bcda25449f97998334109707826c90d5e81796d760326cb61e9afa2635c9e49a7ae2246c960454da300e4f00d7569b61d3cdd91ae643de531168d1b88c7  launcher-power.h
-b659f8eb7ca4e5ea9dbfc390144f0aee26bc3ead28b02e131e12481be6f390f1ade2ee63379d970c0fdcb9d5e139f158d74342ffd2427bcb06ced0ca50cbcd1b  launcher-text.c
+c6ca2cdedadb9ee0b7b94567fd0430d5ef8882e2decbe3c4f28261736c019e86d1743f3fd6ccd0005bef645a30b22aec12a4f4bb61082d74bc7397af0a17072e  launcher-text.c
 5bdf1887b0e6c4bd3e46c8b8ac1e555509a351da69d7933ece6d3f6b27bd8da88431a9f6180bab56d2db29015ca6ddde580f23c99bbcb9b178b511b0d62f2d74  launcher-text.h
 6c83e4d82df62d715c6f2c87ed23d7fe825559f0af1b0ced8d77a5050ee779a6e866b35bd6b8c54f547f32dd0dd8629e35238b561ef13c91a9aa000ccd0a125b  launcher-tasks.c
 6d1c902cc2080d71168728bfdfd5f0f2d809c8ea67bb6afdf92be98fb63622b760239615147c9cf3a7237e3e1a2c453831f150c96c0a8f3151f637135dc73842  launcher-tasks.h
+0b4123b1cbeef0e3d6b4fc4feffee92d161ea67b6796f82d9920641c8e4c85096e525c0529a74c8a91f2b0d58cb2897d83238deb7c834de1f4b9b579ca64f2e8  clock-model.c
+9e8d0cf6e7d3801d0a91b2e452a79673b0e9e05e7e3ee0d80e1a24d1e1bf263d970170134dc9b13f1c9adae1c750737d9ae023d10eecb30b94699766d3c83c15  clock-model.h
+b442cad3dcc67a69058510e4bc44e06e0779932732830643b52e13079bbbd4d644a85efb45492edd8c9ed96809b7036696228553546aa5d71fd71b4bb088394f  clock-wire.c
+81f377672d497b91516c157bac4a1041df5f44cf834ceac5a04b4ac07227049fb5d643f51fed01fd2e23a1358b737aae5a733600fb4b81f01e56b2fa2c5cf130  clock-wire.h
+c2a1a77ae236231200f2b037f320a513380957aaf44396c9b6fa889e1a6d249324e2b270cef183593134d55d5a3fef36ddce2485d6e759512f4888058d52839b  fplinux-storage.h
+475d3e841583e95ec24fd52db547800778fdbcc174336ee6fbc4f812b173c1c70af5314301f82fa981695b9d1011f378408eda35219d75d500ff5ccfe595bb5d  fplinux-utf8.c
+e5cf966fa72932f820b605980bf93a663115b8c43d4cf8fc48d3890d3d99587b4e78e82853f6fcb94fc86635775041bbabec656712c20425381623f73e370c18  fplinux-utf8.h
 000d1e9bbe362c0156403fc52bf55ca826beffe0d2889e2ff5bd4dba3bc2d990a18b08a840be22d9eb6842adc1ac0b35fa1e7ba3e1b9ab39a48714e00b61e680  org.fplinux.launcher.desktop
-59102f4c7ed421f12ab24fab992937892ffd5f7e3e4ffc29a60e21a687a265f2ad27253c4bada52ab27c229a103ae71f3a51925265b097167f32ecd634441f17  ru.po
+f0de5d3ecec4e7830a5fb231e97bd9f3f2bc5546cb29dccc08e2d8d580684e3ac1a785b9de5e95c88be62e7b25b283eeb8164c1d92f786f262ff2d41c5d4ad3b  ru.po
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
 da9487bd879fb7f523db1f20ba936a0994dc990cc649c9bfaf02235d33651f4afba6fe057a91bf9c2b867e314f6272c5ca7c3e91cb5eeb807797a0508715bcfb  fplinux-desktop-entry.c
 056faa694f98cefb0ecc814023dc597937affaeba8e97245d36611b1ed79ddd65e0fa4339eea23ad96643fa9463901a21d07acefbf8372762341e063feaabd21  fplinux-desktop-entry.h
-222a50057879ee8e02462365519c578424aeb51526992dee8de2682bf464dd3f0d9d89e26d70b63d866c2e819878e57ca5c5ad3582d51b1ef108a80a57d1eaf3  fplinux-ui-session.h
-ee0a8f7e30ca698d657a5c947c17276dc479c7460921d93738e71f9cb6cf0c650296da9f42f79b481db59f59d98c86cca443f8aa0b7770093b1967ce92d252b1  fplinux-ui-profile.c
-a5246061f13bf0f6f8b74b153e607b8bf71492de7c9db6d40925f9a76f7d08c76a49c35459a02179eb5c7ebd742cb2b4111876289828a61aa4c652ccf7749044  fplinux-ui-profile.h
+3991af614423342cb5f0bcf05c563b400bf4142ada035884e5eaff751f9532bf52a844b6e18c7d3cf758f9f25d8d6dbaa5422433c6af4f01e432e5bdf86094f1  fplinux-ui-session.h
+fb71d098944d301398925f41659bd758c1ec616af5dc5fc080173191b4fd7f12f711caa1763e1b576cc52bd3cb3d41801c557acb8fde7f51cf76eb6e95338e1c  fplinux-ui-vibration.h
+7500fcd0dd4498021539fdc1a768ec691f4910cb0db054a903f57ab183388576df13f4a6c448bdd91a22480b53688f7c35453ae902088fb43a754f219db21775  fplinux-ui-profile.c
+c4e36f71ac6e411f65ab502a60f6bcc6284eced740c0462c34ca1014ddf13d63474a47d6d88a39d25e7b7b090b8506b993e97fc80b89a0dd540a984fe5420504  fplinux-ui-profile.h
+e85173937a9a7684ab606cf355878cb1a52ba20dc8dc738db00e64de6aa206b99828b59dd399563d5d983e6be2c95ec618f630078922e47b14e586a7f0bbee59  fplinux-settings-values.h
 "

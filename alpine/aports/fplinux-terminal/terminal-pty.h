@@ -17,10 +17,7 @@ struct fplinux_terminal_pty {
 
 bool fplinux_terminal_pty_open(struct fplinux_terminal_pty *pty,
 			       unsigned int columns, unsigned int rows,
-			       const char *shell, const char *startup,
-			       const char *shell_token);
-bool fplinux_terminal_pty_shell_foreground(
-	const struct fplinux_terminal_pty *pty);
+			       const char *shell, const char *startup);
 bool fplinux_terminal_pty_finished(struct fplinux_terminal_pty *pty,
 				   int *status);
 void fplinux_terminal_pty_close(struct fplinux_terminal_pty *pty);

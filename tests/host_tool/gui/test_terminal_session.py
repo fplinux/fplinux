@@ -68,7 +68,9 @@ def terminal_session_harness(
                 str(TERMINAL / "terminal-session.c"),
                 str(TERMINAL / "terminal-pty.c"),
                 str(ROOT / "lib/fplinux/fplinux-multitap.c"),
+                str(ROOT / "lib/fplinux/fplinux-text-input.c"),
                 str(ROOT / "lib/fplinux/fplinux-language.c"),
+                str(ROOT / "lib/fplinux/fplinux-utf8.c"),
                 "-ltsm",
                 *gettext_link_flags(),
                 "-Wl,--wrap=read",
@@ -137,10 +139,18 @@ def test_gui_process_group_death_leaves_no_shell_jobs_or_guardian(
     assert _run_session(terminal_session_harness, tmp_path, "owner-death") == 0
 
 
-def test_shipped_bashrc_keeps_readline_editing_completion_history_and_prompt_authentication(
+def test_shipped_bashrc_keeps_readline_editing_completion_history_and_shell_reads(
     terminal_session_harness: TerminalSessionHarness, tmp_path: Path
 ) -> None:
     assert _run_session(terminal_session_harness, tmp_path, "bash-readline") == 0
+    history_directory = tmp_path / "state/fplinux/org.fplinux.terminal"
+    assert history_directory.stat().st_mode & 0o777 == 0o700
+
+
+def test_history_write_failure_keeps_bash_input_and_memory_without_warning_spam(
+    terminal_session_harness: TerminalSessionHarness, tmp_path: Path
+) -> None:
+    assert _run_session(terminal_session_harness, tmp_path, "bash-history-failure") == 0
 
 
 def _run_session(harness: TerminalSessionHarness, directory: Path, scenario: str) -> int:

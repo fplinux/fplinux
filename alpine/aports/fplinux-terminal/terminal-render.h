@@ -3,17 +3,21 @@
 #define FPLINUX_TERMINAL_RENDER_H
 
 #include "fplinux-terminal.h"
+#include "fplinux-font.h"
 #include <lvgl/lvgl.h>
 
 struct fplinux_terminal_grid {
-	const lv_font_t *font;
+	struct fplinux_font psf;
+	lv_font_t font;
 	unsigned int cell_width;
 	unsigned int cell_height;
 };
 
-/* Place the shared proportional GUI font in fixed terminal columns. */
-bool fplinux_terminal_grid_init(struct fplinux_terminal_grid *grid,
-				const lv_font_t *font);
+/* Load a 6x12 or 8x16 PSF font into an unopened grid. */
+bool fplinux_terminal_grid_open(struct fplinux_terminal_grid *grid,
+				const char *path);
+/* Close after every object that draws the grid has been deleted. */
+void fplinux_terminal_grid_close(struct fplinux_terminal_grid *grid);
 void fplinux_terminal_render(struct fplinux_terminal *terminal,
 			     const struct fplinux_terminal_grid *grid,
 			     lv_layer_t *layer, const lv_area_t *bounds);

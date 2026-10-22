@@ -26,8 +26,7 @@ static bool read_report(int fd, struct fplinux_terminal_pty_report *report)
 
 bool fplinux_terminal_pty_open(struct fplinux_terminal_pty *pty,
 			       unsigned int columns, unsigned int rows,
-			       const char *shell, const char *startup,
-			       const char *shell_token)
+			       const char *shell, const char *startup)
 {
 	struct winsize size = { 0 };
 	struct fplinux_terminal_pty_report report;
@@ -88,7 +87,7 @@ bool fplinux_terminal_pty_open(struct fplinux_terminal_pty *pty,
 		/* Exec discards LVGL buffers and mappings; the guardian is a tiny ELF. */
 		execl(FPLINUX_TERMINAL_PTY_HELPER_PATH,
 		      FPLINUX_TERMINAL_PTY_HELPER_PATH, owner_text, status_text,
-		      slave_text, shell, startup, shell_token, (char *)NULL);
+		      slave_text, shell, startup, (char *)NULL);
 		_exit(127);
 	}
 	close(slave);
@@ -129,12 +128,6 @@ fail:
 	fplinux_terminal_pty_close(pty);
 	errno = error;
 	return false;
-}
-
-bool fplinux_terminal_pty_shell_foreground(
-	const struct fplinux_terminal_pty *pty)
-{
-	return pty->shell > 0 && tcgetpgrp(pty->fd) == pty->shell;
 }
 
 bool fplinux_terminal_pty_finished(struct fplinux_terminal_pty *pty,
