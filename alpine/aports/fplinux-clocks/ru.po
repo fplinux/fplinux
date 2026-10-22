@@ -1,0 +1,368 @@
+# Russian translation of fplinux-clocks.
+# SPDX-License-Identifier: GPL-2.0-only
+msgid ""
+msgstr ""
+"Project-Id-Version: fplinux-clocks\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "Clock"
+msgstr "Часы"
+
+msgid "Alarms"
+msgstr "Будильники"
+
+msgid "Timer"
+msgstr "Таймер"
+
+msgid "Stopwatch"
+msgstr "Секундомер"
+
+msgid "World clock"
+msgstr "Мировое время"
+
+msgid "Show clock"
+msgstr "Показать часы"
+
+msgid "Settings"
+msgstr "Настройки"
+
+msgid "Help"
+msgstr "Справка"
+
+msgid "Missed alarms"
+msgstr "Пропущенные"
+
+msgid "New alarm"
+msgstr "Новый будильник"
+
+msgid "Edit alarm"
+msgstr "Изменить будильник"
+
+msgid "Alarm"
+msgstr "Будильник"
+
+msgid "Time"
+msgstr "Время"
+
+msgid "Date"
+msgstr "Дата"
+
+msgid "Repeat"
+msgstr "Повтор"
+
+msgid "Name"
+msgstr "Название"
+
+msgid "Alarm name"
+msgstr "Название будильника"
+
+msgid "Once"
+msgstr "Один раз"
+
+msgid "Daily"
+msgstr "Каждый день"
+
+msgid "Mon–Fri"
+msgstr "Пн–пт"
+
+msgid "Sat–Sun"
+msgstr "Сб–вс"
+
+msgid "Choose days"
+msgstr "Выбрать дни"
+
+msgid "Mon"
+msgstr "Пн"
+
+msgid "Tue"
+msgstr "Вт"
+
+msgid "Wed"
+msgstr "Ср"
+
+msgid "Thu"
+msgstr "Чт"
+
+msgid "Fri"
+msgstr "Пт"
+
+msgid "Sat"
+msgstr "Сб"
+
+msgid "Sun"
+msgstr "Вс"
+
+msgid "Monday"
+msgstr "Понедельник"
+
+msgid "Tuesday"
+msgstr "Вторник"
+
+msgid "Wednesday"
+msgstr "Среда"
+
+msgid "Thursday"
+msgstr "Четверг"
+
+msgid "Friday"
+msgstr "Пятница"
+
+msgid "Saturday"
+msgstr "Суббота"
+
+msgid "Sunday"
+msgstr "Воскресенье"
+
+msgid "Today"
+msgstr "Сегодня"
+
+msgid "Tomorrow"
+msgstr "Завтра"
+
+msgid "Yesterday"
+msgstr "Вчера"
+
+msgid "On"
+msgstr "Вкл."
+
+msgid "Off"
+msgstr "Выкл."
+
+msgid "Enable"
+msgstr "Включить"
+
+msgid "Disable"
+msgstr "Выключить"
+
+msgid "Save"
+msgstr "Сохранить"
+
+msgid "Saving…"
+msgstr "Сохранение…"
+
+msgid "Trying again…"
+msgstr "Повтор…"
+
+msgid "Retry"
+msgstr "Повторить"
+
+msgid "Saving not confirmed"
+msgstr "Сохранение не подтверждено"
+
+msgid "Change not saved"
+msgstr "Изменение не сохранено"
+
+msgid "Retry saving"
+msgstr "Повторить сохранение"
+
+msgid "Edit"
+msgstr "Изменить"
+
+msgid "Delete"
+msgstr "Удалить"
+
+msgid "Done"
+msgstr "Готово"
+
+msgid "Cancel"
+msgstr "Отмена"
+
+msgid "Back"
+msgstr "Назад"
+
+msgid "Close"
+msgstr "Закрыть"
+
+msgid "Leave"
+msgstr "Выйти"
+
+msgid "Stay"
+msgstr "Остаться"
+
+msgid "Confirm"
+msgstr "Подтвердить"
+
+msgid "Leave without saving?"
+msgstr "Выйти без сохранения?"
+
+msgid "Delete this alarm?"
+msgstr "Удалить этот будильник?"
+
+msgid "Delete this UTC offset?"
+msgstr "Удалить это смещение UTC?"
+
+msgid "Choose a future date and time"
+msgstr "Выберите будущую дату и время"
+
+msgid "This time has passed. Choose another date or time."
+msgstr "Это время уже прошло. Выберите другую дату или время."
+
+msgid "Choose the new date, then save to enable."
+msgstr "Выберите новую дату и сохраните, чтобы включить."
+
+msgid "Check the date, time and repeat days."
+msgstr "Проверьте дату, время и дни повтора."
+
+msgid "Select at least one day."
+msgstr "Выберите хотя бы один день."
+
+msgid "Use a name of up to 32 characters."
+msgstr "Введите название длиной до 32 знаков."
+
+msgid "This alarm is ringing. Stop it and apply the change?"
+msgstr "Будильник сработал. Остановить сигнал и сохранить изменения?"
+
+msgid "The list is full. Delete an item first."
+msgstr "Список заполнен. Сначала удалите запись."
+
+msgid "The list is full. Delete a UTC offset first."
+msgstr "Список заполнен. Сначала удалите смещение UTC."
+
+msgid "Could not save the alarm. Try again."
+msgstr "Не удалось сохранить будильник. Повторите попытку."
+
+msgid "Could not delete the alarm. Try again."
+msgstr "Не удалось удалить будильник. Повторите попытку."
+
+msgid "Could not start the timer. Try again."
+msgstr "Не удалось запустить таймер. Повторите попытку."
+
+msgid "Could not pause the timer. Try again."
+msgstr "Не удалось приостановить таймер. Повторите попытку."
+
+msgid "Could not stop the timer. Try again."
+msgstr "Не удалось остановить таймер. Повторите попытку."
+
+msgid "Could not save the duration. Try again."
+msgstr "Не удалось сохранить длительность. Повторите попытку."
+
+msgid "Could not add the UTC offset. Try again."
+msgstr "Не удалось добавить смещение UTC. Повторите попытку."
+
+msgid "Could not save the UTC offset. Try again."
+msgstr "Не удалось сохранить смещение UTC. Повторите попытку."
+
+msgid "This UTC offset is already in your list."
+msgstr "Это смещение UTC уже есть в списке."
+
+msgid "Lap history is full. Pause and reset to record more."
+msgstr "История кругов заполнена. Приостановите и сбросьте секундомер, чтобы записать новые."
+
+msgid "Could not apply the change. Try again."
+msgstr "Не удалось сохранить изменения. Повторите попытку."
+
+msgid "Could not confirm the change. Retry?"
+msgstr "Не удалось подтвердить сохранение. Повторить?"
+
+msgid "Clocks are loading. Try again in a moment."
+msgstr "Часы загружаются. Повторите через несколько секунд."
+
+msgid "Time unavailable"
+msgstr "Время недоступно"
+
+msgid "Start"
+msgstr "Старт"
+
+msgid "Pause"
+msgstr "Пауза"
+
+msgid "Resume"
+msgstr "Продолжить"
+
+msgid "Stop"
+msgstr "Стоп"
+
+msgid "Start over"
+msgstr "Начать заново"
+
+msgid "Reset"
+msgstr "Сбросить"
+
+msgid "Paused"
+msgstr "Пауза"
+
+msgid "Time is up"
+msgstr "Время вышло"
+
+msgid "Duration"
+msgstr "Длительность"
+
+msgid "Timer duration"
+msgstr "Длительность таймера"
+
+msgid "Enter a duration greater than zero."
+msgstr "Укажите время больше нуля."
+
+msgid "Use a duration up to 99:59:59."
+msgstr "Укажите длительность до 99:59:59."
+
+msgid "Lap"
+msgstr "Круг"
+
+msgid "Laps"
+msgstr "Круги"
+
+msgid "Total"
+msgstr "Всего"
+
+msgid "No laps yet"
+msgstr "Пока нет кругов"
+
+msgid "Reset the stopwatch and delete laps?"
+msgstr "Сбросить секундомер и удалить круги?"
+
+msgid "Add UTC offset"
+msgstr "Добавить пояс"
+
+msgid "UTC offset"
+msgstr "Смещение UTC"
+
+msgid "Clock settings"
+msgstr "Настройки часов"
+
+msgid "Clock face"
+msgstr "Циферблат"
+
+msgid "Digital"
+msgstr "Цифровой"
+
+msgid "Analog"
+msgstr "Стрелочный"
+
+msgid "Snooze"
+msgstr "Отложить"
+
+#, c-format
+msgid "%u min"
+msgstr "%u мин"
+
+msgid "No missed alarms"
+msgstr "Нет пропущенных будильников"
+
+msgid "Clear history"
+msgstr "Очистить историю"
+
+msgid "Clear missed alarms?"
+msgstr "Очистить пропущенные будильники?"
+
+msgid "Clock help"
+msgstr "Справка по часам"
+
+msgid "Choose a time and date, or repeat on selected days. Save sets the alarm; Cancel leaves it unchanged."
+msgstr "Выберите время и дату или повтор по дням недели. «Сохранить» устанавливает будильник, «Отмена» оставляет прежние значения."
+
+msgid "Timer and stopwatch"
+msgstr "Таймер и секундомер"
+
+msgid "You can leave this screen while time is running."
+msgstr "Во время отсчёта можно выйти из этого экрана."
+
+msgid "Power"
+msgstr "Питание"
+
+msgid "Alarms ring while the phone is on. They cannot turn on a powered-off phone."
+msgstr "Будильники срабатывают, пока телефон включён. Они не включат выключенный телефон."

@@ -1,0 +1,18 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+#include <fplinux/fplinux-ui.h>
+#include "clock-presentation.h"
+
+#if LV_COLOR_DEPTH != 16
+#error UI analysis must use RGB565
+#endif
+
+bool source_offset_time(struct fplinux_ui *ui, int offset_minutes, int64_t utc)
+{
+	char time[32];
+	char date[64];
+	char relative[32];
+
+	return clock_presentation_offset(ui, offset_minutes, utc, time,
+					 sizeof(time), date, sizeof(date),
+					 relative, sizeof(relative));
+}

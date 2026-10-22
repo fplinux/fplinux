@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Clock
+Name[ru]=Часы
+Exec=/usr/bin/fplinux-clocks
+Icon=org.fplinux.clock
+Categories=Utility;
+X-FPLinux-Mode=integrated

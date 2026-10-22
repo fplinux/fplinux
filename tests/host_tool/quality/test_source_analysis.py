@@ -60,6 +60,17 @@ def test_compositor_header_consumer_compiles_with_input_and_pixel_dependencies(
     compile_fixture("compositor.c.fixture", flags, tmp_path / "compositor.o")
 
 
+def test_clock_presentation_headers_compile_with_ui_dependencies(
+    tmp_path: Path,
+) -> None:
+    """Fixed-offset presentation declarations use the configured GUI headers."""
+    flags = source_check.userspace_c_include_flags(
+        "alpine/aports/fplinux-clocks/clock-presentation.c"
+    )
+    flags.extend(("-I", str(ROOT / "alpine/aports/fplinux-clocks")))
+    compile_fixture("clock.c.fixture", flags, tmp_path / "clock.o")
+
+
 def test_generated_xdg_shell_header_compiles_with_wayland_client(tmp_path: Path) -> None:
     """The installed protocol XML and scanner produce usable client declarations."""
     source_check.generate_ui_protocol_header(tmp_path / "xdg-shell-client-protocol.h")

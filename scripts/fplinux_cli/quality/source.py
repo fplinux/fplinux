@@ -52,6 +52,7 @@ _QUALITY_INCLUDE = "/opt/quality/include"
 _LVGL_APORTS = frozenset(
     {
         "fplinux-calculator",
+        "fplinux-clocks",
         "fplinux-launcher",
         "fplinux-settings",
         "fplinux-snake",

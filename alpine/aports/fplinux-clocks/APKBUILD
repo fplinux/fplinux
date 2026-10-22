@@ -1,0 +1,69 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-clocks
+pkgver=1
+pkgrel=0
+pkgdesc="Alarms, countdown timer, stopwatch and world clocks"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="GPL-2.0-only"
+depends="fplinux-ui"
+makedepends_build="clang22 lld22 pkgconf gettext"
+makedepends_host="musl-dev musl-libintl linux-headers fplinux-ui-dev json-c-dev"
+options="!check"
+source="
+	fplinux-clocks.c
+	clock-client.c
+	clock-client.h
+	clock-model.c
+	clock-model.h
+	clock-presentation.c
+	clock-presentation.h
+	clock-wire.c
+	clock-wire.h
+	fplinux-storage.h
+	fplinux-utf8.c
+	fplinux-utf8.h
+	fplinux-cli.c
+	fplinux-cli.h
+	org.fplinux.clock.desktop
+	ru.po
+"
+builddir="$srcdir"
+
+build() {
+	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
+	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		$(pkg-config --cflags fplinux-ui json-c) \
+		fplinux-clocks.c clock-client.c clock-model.c \
+		clock-presentation.c clock-wire.c fplinux-cli.c fplinux-utf8.c \
+		$(pkg-config --libs fplinux-ui json-c) -lm $LDFLAGS \
+		-flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe -o fplinux-clocks
+	msgfmt --check --output-file=ru.mo ru.po
+}
+
+package() {
+	install -Dm755 "$builddir/fplinux-clocks" "$pkgdir/usr/bin/fplinux-clocks"
+	install -Dm644 "$srcdir/org.fplinux.clock.desktop" \
+		"$pkgdir/usr/share/applications/org.fplinux.clock.desktop"
+	install -Dm644 "$builddir/ru.mo" \
+		"$pkgdir/usr/share/locale/ru/LC_MESSAGES/org.fplinux.clock.mo"
+}
+sha512sums="
+ee31297978bcc63f9a82429a3c6a38cc690f6f1d81e36d99ed35298c1778b2598604909cc3f40714d0c47c1110e8f31b66ed858ea67abe2cd243cde5e3da25d1  fplinux-clocks.c
+b8d35f6abf36c08267563115db4df3c25039a62a1f1f0100ad2ec72c1551e9ce6ab4d096ef23a17966936c1febff498ec77868a9dd6cbd040e67459ef7418655  clock-client.c
+a4facecfaa615d838493c6f0a8598cd60fddce18f15d9034db2fea703a84107d54c8ab803df8bd99fc0b2f7d81e799b1a2ad7bd04d0a30d5f445bd6340f0e818  clock-client.h
+0b4123b1cbeef0e3d6b4fc4feffee92d161ea67b6796f82d9920641c8e4c85096e525c0529a74c8a91f2b0d58cb2897d83238deb7c834de1f4b9b579ca64f2e8  clock-model.c
+9e8d0cf6e7d3801d0a91b2e452a79673b0e9e05e7e3ee0d80e1a24d1e1bf263d970170134dc9b13f1c9adae1c750737d9ae023d10eecb30b94699766d3c83c15  clock-model.h
+e33cea0608b552655a1386e3f3ca0f5111ff7a73736770a695c6238a81beb6d1c69a8e56ece56de34ba039a1cfed0cf217c2dc6c12c4032c791242864a5bfdfb  clock-presentation.c
+1b78ab4fe86ab80bc9ce6c1807d5beffb3657445e1e7367d45a6dd5bd29b41e5fcaded21bd3c9ab83cd1865be1577ce2b25464ae520435120517ddceaa529d34  clock-presentation.h
+b442cad3dcc67a69058510e4bc44e06e0779932732830643b52e13079bbbd4d644a85efb45492edd8c9ed96809b7036696228553546aa5d71fd71b4bb088394f  clock-wire.c
+81f377672d497b91516c157bac4a1041df5f44cf834ceac5a04b4ac07227049fb5d643f51fed01fd2e23a1358b737aae5a733600fb4b81f01e56b2fa2c5cf130  clock-wire.h
+c2a1a77ae236231200f2b037f320a513380957aaf44396c9b6fa889e1a6d249324e2b270cef183593134d55d5a3fef36ddce2485d6e759512f4888058d52839b  fplinux-storage.h
+475d3e841583e95ec24fd52db547800778fdbcc174336ee6fbc4f812b173c1c70af5314301f82fa981695b9d1011f378408eda35219d75d500ff5ccfe595bb5d  fplinux-utf8.c
+e5cf966fa72932f820b605980bf93a663115b8c43d4cf8fc48d3890d3d99587b4e78e82853f6fcb94fc86635775041bbabec656712c20425381623f73e370c18  fplinux-utf8.h
+60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
+9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
+17229ff2f9bc1e0f82253c0122f5e0f29479a51ffbbf072c6bf572bf06b063e655468ab3e30ec879a3c2256466383f332ebe3095f2e5c4bfbcc2c54fa350b491  org.fplinux.clock.desktop
+71b8e0d3387883fd953086a52113f0329c85fce04033126d3c4a92e49f112675f8452caed19e9b004b0d91ccd2a0c7bb727702036c476009d6c8cb8d51c50517  ru.po
+"

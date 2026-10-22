@@ -1,0 +1,58 @@
+// SPDX-License-Identifier: GPL-2.0-only
+xkb_keymap {
+    xkb_keycodes "clocks" {
+        minimum = 8;
+        maximum = 255;
+        <ESC> = 9;
+        <AE01> = 10;
+        <AE02> = 11;
+        <AE03> = 12;
+        <AE04> = 13;
+        <AE05> = 14;
+        <AE06> = 15;
+        <AE07> = 16;
+        <AE08> = 17;
+        <AE09> = 18;
+        <AE10> = 19;
+        <BKSP> = 22;
+        <AD02> = 25;
+        <AD03> = 26;
+        <AD05> = 28;
+        <AD06> = 29;
+        <AD09> = 32;
+        <RTRN> = 36;
+        <AC01> = 38;
+        <AC08> = 45;
+        <MENU> = 135;
+    };
+    xkb_types "clocks" {
+        type "ONE_LEVEL" {
+            modifiers = None;
+            map[None] = Level1;
+        };
+    };
+    xkb_compatibility "clocks" {};
+    xkb_symbols "clocks" {
+        key <ESC> { [ Escape ], repeat = No };
+        key <AE01> { [ 1 ], repeat = No };
+        key <AE02> { [ 2 ], repeat = No };
+        key <AE03> { [ 3 ], repeat = No };
+        key <AE04> { [ 4 ], repeat = No };
+        key <AE05> { [ 5 ], repeat = No };
+        key <AE06> { [ 6 ], repeat = No };
+        key <AE07> { [ 7 ], repeat = No };
+        key <AE08> { [ 8 ], repeat = No };
+        key <AE09> { [ 9 ], repeat = No };
+        key <AE10> { [ 0 ], repeat = No };
+        key <BKSP> { [ BackSpace ], repeat = No };
+        key <AD02> { [ w ], repeat = No };
+        key <AD03> { [ e ], repeat = No };
+        key <AD05> { [ t ], repeat = No };
+        key <AD06> { [ y ], repeat = No };
+        key <AD09> { [ o ], repeat = No };
+        key <RTRN> { [ Return ], repeat = No };
+        key <AC01> { [ a ], repeat = No };
+        key <AC08> { [ k ], repeat = No };
+        key <MENU> { [ Menu ], repeat = No };
+    };
+};
