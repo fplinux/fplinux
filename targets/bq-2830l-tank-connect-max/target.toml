@@ -38,7 +38,7 @@ patches = [
   "linux/patches/0003-bq-bluetooth-sdio-fixed-port.patch",
 ]
 additional_forbidden_dtb_markers = []
-additional_forbidden_config = []
+additional_forbidden_config = ["CONFIG_BT_HCIUART=y", "CONFIG_BT_HCIUART=m"]
 overlay = "linux/overlay"
 copies = []
 
