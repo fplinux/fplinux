@@ -1,0 +1,30 @@
+// SPDX-License-Identifier: 0BSD
+xkb_keymap {
+    xkb_keycodes "notes" {
+        minimum = 8;
+        maximum = 255;
+        <AC01> = 38;
+        <AB05> = 56;
+        <AB03> = 54;
+        <AC03> = 40;
+        <RTRN> = 36;
+        <ESC> = 9;
+        <MENU> = 135;
+    };
+    xkb_types "notes" {
+        type "ONE_LEVEL" {
+            modifiers = None;
+            map[None] = Level1;
+        };
+    };
+    xkb_compatibility "notes" {};
+    xkb_symbols "notes" {
+        key <AC01> { [ a ], repeat = No };
+        key <AB05> { [ b ], repeat = No };
+        key <AB03> { [ c ], repeat = No };
+        key <AC03> { [ d ], repeat = No };
+        key <RTRN> { [ Return ], repeat = No };
+        key <ESC> { [ Escape ], repeat = No };
+        key <MENU> { [ Menu ], repeat = No };
+    };
+};

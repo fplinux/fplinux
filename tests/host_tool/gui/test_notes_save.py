@@ -90,6 +90,13 @@ def notes_executable(notes_build_directory: Path) -> Path:
         "close_retry",
         "close_discard",
         "published_unsynced",
+        "unsynced_close",
+        "clean_empty",
+        "clean_loaded",
+        "last_key_home",
+        "save_retry",
+        "reverted",
+        "activation",
     ],
 )
 def test_notes_save_listeners(notes_executable: Path, scenario: str) -> None:

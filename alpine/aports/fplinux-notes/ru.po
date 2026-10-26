@@ -30,5 +30,8 @@ msgstr "Повторить"
 msgid "Stay"
 msgstr "Остаться"
 
-msgid "Discard"
-msgstr "Не сохранять"
+msgid "Discard changes"
+msgstr "Отбросить изменения"
+
+msgid "Close anyway"
+msgstr "Закрыть всё равно"
