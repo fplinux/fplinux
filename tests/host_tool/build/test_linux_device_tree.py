@@ -301,6 +301,29 @@ def _compile_target_dtb(tmp_path: Path, target: str, *, profile: str | None = No
     return dtb
 
 
+@pytest.mark.parametrize(
+    ("target", "expected_id", "expected_page_bytes"),
+    [
+        ("inoi-244-modern-4g", None, None),
+        ("inoi-240-modern-4g", 0x21E5, 2112),
+        ("nokia-ta1618", 0xB1A1, 2176),
+    ],
+)
+def test_compiled_nand_policy_keeps_chip_discovery_and_fixed_boards_distinct(
+    tmp_path: Path, target: str, expected_id: int | None, expected_page_bytes: int | None
+) -> None:
+    """INOI244 selects the fitted chip while existing fixed boards retain their guard."""
+    dtb = _compile_target_dtb(tmp_path, target)
+    path = "/soc/nand-controller@21a00000"
+    properties = exact_path_properties(dtb, (path,))[path]
+    assert properties["compatible"] == b"fplinux,ums9117-nandc-ro\0"
+    expected_property = None if expected_id is None else expected_id.to_bytes(4, "big")
+    assert properties.get("fplinux,nand-id") == expected_property
+    declaration = targets.load_target(target)["nand"]
+    assert declaration.get("id") == expected_id
+    assert declaration.get("raw_page_bytes") == expected_page_bytes
+
+
 @pytest.fixture
 def nokia110_microsd_dtb(tmp_path: Path) -> Path:
     """Compile the board's DT projections; binding stubs do not validate peripherals."""

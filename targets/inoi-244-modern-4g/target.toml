@@ -9,8 +9,6 @@ compatible = "inoi,244-modern-4g"
 
 [nand]
 raw_device = "/dev/ums9117-nand-raw"
-id = 0x21e5
-raw_page_bytes = 2112
 
 [display]
 panel = "display/panel.toml"

@@ -37,6 +37,7 @@
 #include <linux/uio.h>
 #include <linux/vmalloc.h>
 
+#include "ums9117-nandc-chip.h"
 #include "ums9117-nandc-feature.h"
 
 #define UMS9117_NANDC_MMIO_BYTES 0x1000U
@@ -103,15 +104,6 @@
 #define UMS9117_NANDC_INSTRUCTION_WORDS 8U
 #define UMS9117_NANDC_PINMUX_COUNT 17U
 #define UMS9117_NANDC_PINCONF_COUNT 16U
-/*
- * Supported geometry.  The data job transfers the main area as two 1 KiB
- * sectors; larger OOB areas, other block sizes, larger chips and multiple
- * planes are refused.
- */
-#define UMS9117_NANDC_PAGE_MAIN_BYTES 2048U
-#define UMS9117_NANDC_PAGES_PER_BLOCK 64U
-#define UMS9117_NANDC_OOB_MAX_BYTES 128U
-#define UMS9117_NANDC_PAGE_COUNT_MAX 65536U
 #define UMS9117_NANDC_BATCH_BYTES (32U * UMS9117_NANDC_PAGE_MAIN_BYTES)
 #define UMS9117_NANDC_FEATURE_B0_ECC_EN BIT(4)
 #define UMS9117_NANDC_FEATURE_B0_OTP_EN BIT(6)
@@ -169,128 +161,6 @@ struct ums9117_nandc_pin {
 	u32 offset;
 	u32 value;
 	u32 snapshot;
-};
-
-/* Physical geometry of one chip, keyed by its two READ_ID bytes. */
-struct ums9117_nandc_chip {
-	const char *name;
-	u8 manufacturer_id;
-	u8 device_id;
-	u16 page_main_bytes;
-	u16 oob_bytes;
-	u16 pages_per_block;
-	u16 block_count;
-	u8 plane_count;
-	u8 feature_b0_defined_mask;
-};
-
-/*
- * Add a chip only when a source states its physical OOB size.  The phone
- * firmware's NAND ID table does not state it, so IDs known from that table
- * alone are absent.
- */
-static const struct ums9117_nandc_chip ums9117_nandc_chips[] = {
-	/* Physical layout of the fitted Nokia TA-1618 chip. */
-	{
-		.name = "FM25LG01B",
-		.manufacturer_id = 0xa1,
-		.device_id = 0xb1,
-		.page_main_bytes = 2048,
-		.oob_bytes = 128,
-		.pages_per_block = 64,
-		.block_count = 1024,
-		.plane_count = 1,
-		.feature_b0_defined_mask = 0xff,
-	},
-	/* Physical layout of the fitted INOI 240/244 chips. */
-	{
-		.name = "DS35M1GA",
-		.manufacturer_id = 0xe5,
-		.device_id = 0x21,
-		.page_main_bytes = 2048,
-		.oob_bytes = 64,
-		.pages_per_block = 64,
-		.block_count = 1024,
-		.plane_count = 1,
-		.feature_b0_defined_mask = 0xff,
-	},
-	{
-		.name = "GD5F1GQ4RExxG",
-		.manufacturer_id = 0xc8,
-		.device_id = 0xc1,
-		.page_main_bytes = 2048,
-		.oob_bytes = 128,
-		.pages_per_block = 64,
-		.block_count = 1024,
-		.plane_count = 1,
-		.feature_b0_defined_mask = 0xff,
-	},
-	{
-		.name = "GD5F1GQ5RExxG",
-		.manufacturer_id = 0xc8,
-		.device_id = 0x41,
-		.page_main_bytes = 2048,
-		.oob_bytes = 128,
-		.pages_per_block = 64,
-		.block_count = 1024,
-		.plane_count = 1,
-		.feature_b0_defined_mask = 0xff,
-	},
-	{
-		.name = "GD5F1GM7RExxG",
-		.manufacturer_id = 0xc8,
-		.device_id = 0x81,
-		.page_main_bytes = 2048,
-		.oob_bytes = 128,
-		.pages_per_block = 64,
-		.block_count = 1024,
-		.plane_count = 1,
-		.feature_b0_defined_mask = 0xff,
-	},
-	{
-		.name = "GD5F1GQ5RExxH",
-		.manufacturer_id = 0xc8,
-		.device_id = 0x21,
-		.page_main_bytes = 2048,
-		.oob_bytes = 64,
-		.pages_per_block = 64,
-		.block_count = 1024,
-		.plane_count = 1,
-		.feature_b0_defined_mask = 0xff,
-	},
-	{
-		.name = "F50D1G41LB",
-		.manufacturer_id = 0xc8,
-		.device_id = 0x11,
-		.page_main_bytes = 2048,
-		.oob_bytes = 64,
-		.pages_per_block = 64,
-		.block_count = 1024,
-		.plane_count = 1,
-		.feature_b0_defined_mask = 0xff,
-	},
-	{
-		.name = "MX35UF1G14AC",
-		.manufacturer_id = 0xc2,
-		.device_id = 0x90,
-		.page_main_bytes = 2048,
-		.oob_bytes = 64,
-		.pages_per_block = 64,
-		.block_count = 1024,
-		.plane_count = 1,
-		.feature_b0_defined_mask = 0xff,
-	},
-	{
-		.name = "F35UQA001G",
-		.manufacturer_id = 0xcd,
-		.device_id = 0x61,
-		.page_main_bytes = 2048,
-		.oob_bytes = 64,
-		.pages_per_block = 64,
-		.block_count = 1024,
-		.plane_count = 1,
-		.feature_b0_defined_mask = 0xd7,
-	},
 };
 
 struct ums9117_nandc {
@@ -367,34 +237,6 @@ static const u32 ums9117_nandc_pinconf_offsets[] = {
 	0x40U, 0x0cU, 0x08U, 0x30U, 0x10U, 0x00U, 0x2cU, 0x38U,
 	0x3cU, 0x34U, 0x28U, 0x14U, 0x18U, 0x1cU, 0x20U, 0x04U,
 };
-
-static bool ums9117_nandc_chip_supported(const struct ums9117_nandc_chip *chip)
-{
-	return chip->page_main_bytes == UMS9117_NANDC_PAGE_MAIN_BYTES &&
-	       chip->oob_bytes <= UMS9117_NANDC_OOB_MAX_BYTES &&
-	       chip->pages_per_block == UMS9117_NANDC_PAGES_PER_BLOCK &&
-	       chip->plane_count == 1 &&
-	       (u32)chip->block_count * chip->pages_per_block <=
-		       UMS9117_NANDC_PAGE_COUNT_MAX;
-}
-
-/*
- * READ_ID stores its first byte, the manufacturer, in SNFC_FEATURE[7:0] and
- * the device byte in [15:8].  Any other register value is unknown.
- */
-static const struct ums9117_nandc_chip *ums9117_nandc_find_chip(u32 id_raw)
-{
-	unsigned int i;
-
-	for (i = 0; i < ARRAY_SIZE(ums9117_nandc_chips); i++) {
-		const struct ums9117_nandc_chip *chip = &ums9117_nandc_chips[i];
-		u32 chip_id = (u32)chip->device_id << 8 | chip->manufacturer_id;
-
-		if (id_raw == chip_id)
-			return ums9117_nandc_chip_supported(chip) ? chip : NULL;
-	}
-	return NULL;
-}
 
 static bool ums9117_nandc_b0_has_owned_ecc(u32 b0)
 {

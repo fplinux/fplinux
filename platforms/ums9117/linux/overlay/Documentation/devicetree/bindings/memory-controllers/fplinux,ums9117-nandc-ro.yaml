@@ -19,6 +19,7 @@ description: |
 
     ID     Chip           OOB bytes
     A1 B1  FM25LG01B      128
+    A1 A5  FM25LS01       128
     E5 21  DS35M1GA       64
     C8 C1  GD5F1GQ4RExxG  128
     C8 41  GD5F1GQ5RExxG  128
@@ -50,6 +51,7 @@ properties:
     $ref: /schemas/types.yaml#/definitions/uint32
     enum:
       - 0x0000b1a1
+      - 0x0000a5a1
       - 0x000021e5
       - 0x0000c1c8
       - 0x000041c8
