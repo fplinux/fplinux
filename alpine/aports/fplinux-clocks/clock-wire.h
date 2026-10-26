@@ -42,6 +42,7 @@ enum clock_request_op {
 	CLOCK_REQUEST_SET_SNOOZE,
 	CLOCK_REQUEST_CLEAR_MISSED,
 	CLOCK_REQUEST_SAVE,
+	CLOCK_REQUEST_ALARM_CANCEL_SNOOZE,
 };
 
 /* Only fields belonging to op are encoded. The decoder initializes all fields

@@ -166,6 +166,7 @@ static void explicit_schedules_and_selections_encode_literal_fields(void)
 		"{\"op\":\"world-delete\",\"id\":37}",
 		"{\"op\":\"set-view\",\"view\":0}",
 		"{\"op\":\"timer-set\",\"seconds\":359999}",
+		"{\"op\":\"alarm-cancel-snooze\",\"id\":37}",
 	};
 	struct clock_request request;
 	char json[512];
@@ -181,7 +182,7 @@ static void explicit_schedules_and_selections_encode_literal_fields(void)
 	}
 }
 
-static void disabled_once_saves_recheck_owner_time_without_moving_the_date(void)
+static void disabled_once_saves_retain_the_date_without_enabling(void)
 {
 	static const char disabled_save[] =
 		"{\"op\":\"alarm-add\",\"alarm\":{\"label\":\"Later\",\"schedule\":0,"
@@ -195,20 +196,20 @@ static void disabled_once_saves_recheck_owner_time_without_moving_the_date(void)
 					 &request) == CLOCK_OK);
 	/* The date was future while editing, but passed before owner acceptance. */
 	assert(clock_model_tick(&model, 1704067320, 1000) == CLOCK_OK);
-	before = model;
-	assert(clock_wire_request_apply(&model, &request) == CLOCK_INVALID);
-	assert(!memcmp(&model, &before, sizeof(model)));
-	request.alarm.once_utc = 1704153660; /* 2024-01-02 00:01 UTC */
 	assert(clock_wire_request_apply(&model, &request) == CLOCK_OK);
 	assert(model.alarm_count == 1 && model.alarms[0].id == 1);
 	assert(!model.alarms[0].spec.enabled && !model.alarms[0].next_due_utc);
-	assert(model.alarms[0].spec.once_utc == 1704153660);
+	assert(model.alarms[0].spec.once_utc == 1704067260);
 	request.op = CLOCK_REQUEST_ALARM_EDIT;
 	request.id = 1;
-	request.alarm.once_utc = 1704067260;
+	request.alarm.once_utc = 1704067200;
+	assert(clock_wire_request_apply(&model, &request) == CLOCK_OK);
+	assert(model.alarms[0].spec.once_utc == 1704067200);
+	request.alarm.enabled = true;
 	before = model;
 	assert(clock_wire_request_apply(&model, &request) == CLOCK_INVALID);
 	assert(!memcmp(&model, &before, sizeof(model)));
+	request.alarm.enabled = false;
 	request.alarm.once_utc = 1704240060; /* 2024-01-03 00:01 UTC */
 	assert(clock_wire_request_apply(&model, &request) == CLOCK_OK);
 	assert(!model.alarms[0].spec.enabled);
@@ -663,7 +664,7 @@ int main(int argc, char **argv)
 	literal_requests_drive_the_session_owner(argv[1]);
 	malformed_requests_leave_the_output_unchanged();
 	explicit_schedules_and_selections_encode_literal_fields();
-	disabled_once_saves_recheck_owner_time_without_moving_the_date();
+	disabled_once_saves_retain_the_date_without_enabling();
 	preferences_restore_configuration_without_replaying_runtime();
 	snapshot_retains_user_values_and_checks_encoder_independently(argv[2]);
 	literal_ring_preserves_large_identity_and_rejects_partial_output();

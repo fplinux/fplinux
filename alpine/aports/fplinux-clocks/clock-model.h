@@ -204,6 +204,9 @@ enum clock_status clock_model_alarm_enable(struct clock_model *model,
 					   bool cancel_active);
 enum clock_status clock_model_alarm_delete(struct clock_model *model,
 					   uint32_t id, bool cancel_active);
+/* Cancel only the pending snooze; retain the alarm's regular schedule. */
+enum clock_status clock_model_alarm_cancel_snooze(struct clock_model *model,
+						  uint32_t id);
 const struct clock_alarm *
 clock_model_alarm_find(const struct clock_model *model, uint32_t id);
 

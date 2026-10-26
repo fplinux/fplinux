@@ -9,14 +9,31 @@
 #include <json-c/json.h>
 
 static const char *const request_names[] = {
-	"snapshot",	   "alarm-add",	      "alarm-edit",
-	"alarm-enable",	   "alarm-delete",    "dismiss",
-	"snooze",	   "timer-set",	      "timer-start",
-	"timer-pause",	   "timer-resume",    "timer-stop",
-	"timer-restart",   "stopwatch-start", "stopwatch-pause",
-	"stopwatch-reset", "stopwatch-lap",   "world-add",
-	"world-edit",	   "world-delete",    "set-view",
-	"set-snooze",	   "clear-missed",    "save",
+	"snapshot",
+	"alarm-add",
+	"alarm-edit",
+	"alarm-enable",
+	"alarm-delete",
+	"dismiss",
+	"snooze",
+	"timer-set",
+	"timer-start",
+	"timer-pause",
+	"timer-resume",
+	"timer-stop",
+	"timer-restart",
+	"stopwatch-start",
+	"stopwatch-pause",
+	"stopwatch-reset",
+	"stopwatch-lap",
+	"world-add",
+	"world-edit",
+	"world-delete",
+	"set-view",
+	"set-snooze",
+	"clear-missed",
+	"save",
+	"alarm-cancel-snooze",
 };
 
 const char *clock_wire_request_name(enum clock_request_op op)
@@ -491,6 +508,7 @@ static bool read_request(struct json_object *object,
 	case CLOCK_REQUEST_ALARM_EDIT:
 	case CLOCK_REQUEST_ALARM_ENABLE:
 	case CLOCK_REQUEST_ALARM_DELETE:
+	case CLOCK_REQUEST_ALARM_CANCEL_SNOOZE:
 	case CLOCK_REQUEST_WORLD_EDIT:
 	case CLOCK_REQUEST_WORLD_DELETE:
 		if (!unsigned_value(object, "id", UINT32_MAX, &value) || !value)
@@ -584,6 +602,7 @@ static struct json_object *make_request(const struct clock_request *request)
 	case CLOCK_REQUEST_ALARM_EDIT:
 	case CLOCK_REQUEST_ALARM_ENABLE:
 	case CLOCK_REQUEST_ALARM_DELETE:
+	case CLOCK_REQUEST_ALARM_CANCEL_SNOOZE:
 	case CLOCK_REQUEST_WORLD_EDIT:
 	case CLOCK_REQUEST_WORLD_DELETE:
 		add_uint(object, "id", request->id);
@@ -683,6 +702,7 @@ enum clock_status clock_wire_request_apply(struct clock_model *model,
 		return CLOCK_INVALID;
 	if ((checked.op == CLOCK_REQUEST_ALARM_ADD ||
 	     checked.op == CLOCK_REQUEST_ALARM_EDIT) &&
+	    checked.alarm.enabled &&
 	    checked.alarm.schedule == CLOCK_ALARM_ONCE) {
 		int64_t due;
 
@@ -706,6 +726,8 @@ enum clock_status clock_wire_request_apply(struct clock_model *model,
 	case CLOCK_REQUEST_ALARM_DELETE:
 		return clock_model_alarm_delete(model, checked.id,
 						checked.cancel_active);
+	case CLOCK_REQUEST_ALARM_CANCEL_SNOOZE:
+		return clock_model_alarm_cancel_snooze(model, checked.id);
 	case CLOCK_REQUEST_DISMISS:
 		return clock_model_dismiss(model, checked.event_id);
 	case CLOCK_REQUEST_SNOOZE:

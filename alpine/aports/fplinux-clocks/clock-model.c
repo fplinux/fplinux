@@ -553,6 +553,21 @@ enum clock_status clock_model_alarm_delete(struct clock_model *model,
 	return CLOCK_OK;
 }
 
+enum clock_status clock_model_alarm_cancel_snooze(struct clock_model *model,
+						  uint32_t id)
+{
+	struct clock_alarm *alarm;
+
+	if (!model)
+		return CLOCK_INVALID;
+	alarm = find_alarm(model, id);
+	if (!alarm)
+		return CLOCK_NOT_FOUND;
+	alarm->snoozed = false;
+	alarm->snooze_deadline_ms = 0;
+	return CLOCK_OK;
+}
+
 enum clock_status clock_model_dismiss(struct clock_model *model,
 				      uint64_t event_id)
 {

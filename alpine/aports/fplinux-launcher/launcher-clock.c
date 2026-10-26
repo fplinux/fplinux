@@ -62,6 +62,7 @@ static void alert_text(const struct fplinux_launcher_clock *clock, char *text,
 	const char *label = ring->event.label[0] ? ring->event.label :
 						   _("Alarm");
 	char time_text[32];
+	char snooze_text[80];
 	const char *status = clock->pending ? _("Waiting…") :
 			     clock->action_failed ?
 					      _("Action failed. Try again.") :
@@ -76,8 +77,10 @@ static void alert_text(const struct fplinux_launcher_clock *clock, char *text,
 				    FPLINUX_UI_DATE_CLOCK, time_text,
 				    sizeof(time_text)))
 		time_text[0] = '\0';
-	snprintf(text, capacity, "%s\n%s%s%s", time_text, label,
-		 status[0] ? "\n" : "", status);
+	snprintf(snooze_text, sizeof(snooze_text), _("Snooze: %u min"),
+		 ring->snooze_minutes);
+	snprintf(text, capacity, "%s\n%s\n%s%s%s", time_text, label,
+		 snooze_text, status[0] ? "\n" : "", status);
 }
 
 /* Never pop an unrelated screen or retain an Alert deleted by the runtime. */

@@ -330,11 +330,54 @@ static void explicit_dates_and_weekdays_choose_absolute_utc_minutes(void)
 	assert(!memcmp(&before, &model, sizeof(model)));
 }
 
+static void cancelling_snooze_preserves_regular_alarm_schedule(void)
+{
+	for (unsigned int weekly = 0; weekly < 2; ++weekly) {
+		struct clock_model model;
+		struct clock_alarm_spec spec = {
+			.schedule = weekly ? CLOCK_ALARM_WEEKLY :
+					     CLOCK_ALARM_ONCE,
+			.once_utc = weekly ? 0 : 1704067260,
+			.minute = weekly ? 1 : 0,
+			.repeat_days = weekly ? 127 : 0,
+			.enabled = true,
+		};
+		int64_t next;
+		uint32_t generation;
+
+		assert(clock_model_init(&model, 1704067200, 1000) == CLOCK_OK);
+		assert(clock_model_alarm_add(&model, &spec, NULL) == CLOCK_OK);
+		assert(clock_model_tick(&model, 1704067260, 61000) == CLOCK_OK);
+		assert(clock_model_snooze(&model, model.active.id, 5) ==
+		       CLOCK_OK);
+		assert(model.alarms[0].snoozed);
+		assert(model.alarms[0].spec.enabled == (bool)weekly);
+		next = model.alarms[0].next_due_utc;
+		generation = model.alarms[0].generation;
+		assert(clock_model_alarm_cancel_snooze(&model, 1) == CLOCK_OK);
+		assert(!model.alarms[0].snoozed &&
+		       !model.alarms[0].snooze_deadline_ms);
+		assert(model.alarms[0].next_due_utc == next);
+		assert(model.alarms[0].generation == generation);
+		assert(model.alarms[0].spec.enabled == (bool)weekly);
+		assert(clock_model_tick(&model, 1704067560, 361000) ==
+		       CLOCK_OK);
+		assert(!model.active.id);
+		if (weekly) {
+			assert(next == 1704153660);
+			assert(clock_model_tick(&model, next, 86461000) ==
+			       CLOCK_OK);
+			assert(model.active.kind == CLOCK_EVENT_ALARM);
+		}
+	}
+}
+
 int main(void)
 {
 	countdown_and_stopwatch_use_monotonic_time();
 	scheduled_alarms_do_not_replay_after_wall_adjustment();
 	snooze_uses_deadline_and_rejects_stale_actions();
+	cancelling_snooze_preserves_regular_alarm_schedule();
 	late_alarms_and_bounded_queue_record_misses();
 	world_offsets_keep_stable_ids_and_reject_invalid_or_duplicate_values();
 	bounded_utf8_preserves_user_text();

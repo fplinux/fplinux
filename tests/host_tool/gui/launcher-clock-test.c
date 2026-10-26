@@ -220,7 +220,7 @@ static void test_alarm(struct fplinux_ui *ui,
 	assert(fplinux_launcher_clock_is_ringing(clock));
 	assert(fplinux_launcher_clock_is_visible(clock));
 	assert(!strcmp(alert->title, "Alarm"));
-	assert(!strcmp(alert->text, "00:00\nWake up"));
+	assert(!strcmp(alert->text, "00:00\nWake up\nSnooze: 5 min"));
 	assert(alert->command_count == 2);
 	assert(!strcmp(find_command(alert, FPLINUX_UI_COMMAND_STOP)->label,
 		       "Stop"));
