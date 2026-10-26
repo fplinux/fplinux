@@ -65,6 +65,9 @@ def read_engine_report(path: Path) -> EngineReport:
 def quake_engine_environment(tmp_path: Path) -> Iterator[dict[str, str]]:
     """Own fake card data and the lock while leaving process and runtime operations real."""
     (tmp_path / "pak0.pak").write_bytes(b"test-owned game data\n")
+    gpu_engine = tmp_path / "gpu-engine"
+    gpu_engine.write_bytes(b"test-owned engine presence\n")
+    gpu_engine.chmod(0o700)
     yield {
         "FPLINUX_QUAKE_TEST_ROOT": str(tmp_path),
         "HOME": str(tmp_path / "original-home"),
@@ -358,6 +361,84 @@ class TyrQuakeLauncherCliTests:
 
 class TyrQuakeLauncherProcessTests:
     """Observe engine handoff and session ownership with host-only card and executable peers."""
+
+    @pytest.mark.parametrize("arguments", [(), ("--renderer=auto",)])
+    def test_auto_without_the_gpu_engine_runs_software_and_removes_runtime(
+        self,
+        quake_launcher: Path,
+        quake_engine_environment: dict[str, str],
+        tmp_path: Path,
+        arguments: tuple[str, ...],
+    ) -> None:
+        """A base-only installation retains the default playable software engine."""
+        (tmp_path / "gpu-engine").unlink()
+
+        result = run_process(
+            [str(quake_launcher), *arguments],
+            name="run TyrQuake without the optional GPU engine",
+            timeout=5,
+            env=quake_engine_environment,
+        )
+
+        assert result.returncode == 23, result.stderr
+        assert result.stdout == ""
+        assert result.stderr == ""
+        report = read_engine_report(tmp_path / "engine-report")
+        assert report.executable == "/usr/bin/tyr-quake"
+        assert report.arguments == (
+            "/usr/bin/tyr-quake",
+            "-nolan",
+            "-basedir",
+            str(report.home),
+            "-heapsize",
+            "32768",
+            "+mlook",
+            "+fplinux_stats",
+            "0",
+        )
+        assert report.lock_closed
+        assert report.signals_default
+        assert not report.home.exists()
+        with (tmp_path / "session.lock").open("r+") as lock:
+            fcntl.lockf(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def test_explicit_gpu_without_the_engine_fails_and_releases_the_session(
+        self,
+        quake_launcher: Path,
+        quake_engine_environment: dict[str, str],
+        tmp_path: Path,
+    ) -> None:
+        """A forced renderer cannot silently become a software session."""
+        (tmp_path / "gpu-engine").unlink()
+        runtime: Path | None = None
+
+        def remember_runtime(process: subprocess.Popen[str], deadline: float) -> None:
+            nonlocal runtime
+            del deadline
+            runtime = RUNTIME_ROOT / f"fplinux-quake.{process.pid}"
+
+        try:
+            result = run_process(
+                [str(quake_launcher), "--renderer=gpu"],
+                name="require a missing TyrQuake GPU engine",
+                timeout=5,
+                env=quake_engine_environment,
+                while_running=remember_runtime,
+            )
+
+            assert result.returncode == 126, result.stderr
+            assert result.stdout == ""
+            assert result.stderr == (
+                "quake: cannot execute /usr/bin/tyr-glquake: No such file or directory\n"
+            )
+            assert not (tmp_path / "engine-report").exists()
+            assert runtime is not None
+            assert not runtime.exists()
+            with (tmp_path / "session.lock").open("r+") as lock:
+                fcntl.lockf(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            if runtime is not None:
+                shutil.rmtree(runtime, ignore_errors=True)
 
     @pytest.mark.parametrize(
         ("arguments", "engine", "fallback", "heap", "stats"),

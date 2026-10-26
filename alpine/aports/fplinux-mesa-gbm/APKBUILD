@@ -1,0 +1,72 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-mesa-gbm
+pkgver=@version:aport_mesa_26_2_5_tar_xz@
+pkgrel=0
+pkgdesc="GBM buffer management library for FPLinux"
+url="https://www.mesa3d.org"
+arch="armv7"
+license="MIT AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND SGI-B-2.0 AND Apache-2.0"
+depends="fplinux-libdrm"
+depends_dev="fplinux-libdrm-dev"
+makedepends_build="clang22 lld22 meson pkgconf py3-mako py3-packaging py3-yaml python3 samurai"
+makedepends_host="musl-dev linux-headers libstdc++-dev fplinux-libdrm-dev"
+subpackages="$pkgname-dev fplinux-mesa-headers:headers:noarch"
+options="!check"
+source="
+	@source:aport_mesa_26_2_5_tar_xz@
+	neon-clang.patch
+	NOTICE
+"
+builddir="$srcdir/mesa-$pkgver"
+
+build() {
+	: "${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
+	cat >fplinux-cross.meson <<-EOF
+		[binaries]
+		ar = '$CHOST-ar'
+		[properties]
+		pkg_config_libdir = ['$CBUILDROOT/usr/lib/pkgconfig', '$CBUILDROOT/usr/share/pkgconfig']
+	EOF
+	abuild-meson --cross-file fplinux-cross.meson \
+		--sysconfdir=/etc \
+		--auto-features=disabled \
+		-Ddefault_library=shared -Db_ndebug=true \
+		-Dgallium-drivers= -Dvulkan-drivers= -Dplatforms= \
+		-Dopengl=false -Dgles1=disabled -Dgles2=disabled \
+		-Degl=disabled -Dglx=disabled -Dglvnd=disabled -Dgbm=enabled \
+		-Dllvm=disabled -Dpanfrost-rust=false -Dgallium-rusticl=false \
+		-Dzlib=disabled -Dzstd=disabled -Dshader-cache=disabled \
+		-Dxmlconfig=disabled -Dexpat=disabled -Dbuild-tests=false \
+		output
+	meson compile -C output
+}
+
+package() {
+	DESTDIR="$pkgdir" meson install --no-rebuild -C output
+	mkdir -p "$pkgdir/usr/share/licenses/$pkgname"
+	cp -r licenses/. "$pkgdir/usr/share/licenses/$pkgname/"
+	install -Dm644 "$srcdir/NOTICE" "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
+}
+
+headers() {
+	pkgdesc="EGL, OpenGL and OpenGL ES API headers for FPLinux"
+	depends=""
+	local header
+	for header in \
+		KHR/khrplatform.h \
+		EGL/egl.h EGL/eglext.h EGL/eglplatform.h \
+		EGL/eglext_angle.h EGL/eglmesaext.h \
+		GLES2/gl2.h GLES2/gl2ext.h GLES2/gl2platform.h \
+		GLES3/gl3.h GLES3/gl31.h GLES3/gl32.h GLES3/gl3ext.h GLES3/gl3platform.h \
+		GL/gl.h GL/glcorearb.h GL/glext.h; do
+		install -Dm644 "$builddir/include/$header" "$subpkgdir/usr/include/$header"
+	done
+	mkdir -p "$subpkgdir/usr/share/licenses/$subpkgname"
+	cp -r "$builddir/licenses/." "$subpkgdir/usr/share/licenses/$subpkgname/"
+	install -Dm644 "$srcdir/NOTICE" "$subpkgdir/usr/share/licenses/$subpkgname/NOTICE"
+}
+
+sha512sums="
+1c83949f8904fa0d4cb189fc9bc5dd8910e6fd17009b95d46927713f228f4f81bf4dc74cc326bfd6752d969416e259d542e95e7e61b1aa11ca88acf5e8fd6988  neon-clang.patch
+8e47e57850393eb2be96a3fccd04e07092a61b42d94a60b3c2193de51ba95276d6553febb06b5075c6b311ef8f2a64d25e30920478e7109f28628bedb6740428  NOTICE
+"

@@ -8,7 +8,7 @@ arch="armv7"
 license="GPL-2.0-only"
 depends="strace"
 makedepends_build="bison clang22 flex lld22 llvm22 make pkgconf"
-makedepends_host="elfutils-dev fplinux-libdrm-dev fplinux-mesa-dev linux-headers musl-dev zlib-dev zstd-dev"
+makedepends_host="elfutils-dev fplinux-libdrm-dev fplinux-mesa-headers linux-headers musl-dev zlib-dev zstd-dev"
 options="!check"
 source="
 	@source:aport_perf_7_1_0_tar_xz@

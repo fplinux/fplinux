@@ -283,12 +283,16 @@ void fplinux_quake_remove_runtime(const char *runtime)
 static pid_t start_engine(const char *runtime, unsigned long heap_kib,
 			  enum quake_renderer renderer, bool stats)
 {
-	const char *engine = renderer == QUAKE_RENDERER_SOFTWARE ?
-				     FPLINUX_QUAKE_SOFTWARE_ENGINE :
-				     FPLINUX_QUAKE_GPU_ENGINE;
+	const char *engine;
 	char heap[32];
 	pid_t child;
 
+	if (renderer == QUAKE_RENDERER_AUTO &&
+	    access(FPLINUX_QUAKE_GPU_ENGINE, X_OK) < 0 && errno == ENOENT)
+		renderer = QUAKE_RENDERER_SOFTWARE;
+	engine = renderer == QUAKE_RENDERER_SOFTWARE ?
+			 FPLINUX_QUAKE_SOFTWARE_ENGINE :
+			 FPLINUX_QUAKE_GPU_ENGINE;
 	if (snprintf(heap, sizeof(heap), "%lu", heap_kib) >= (int)sizeof(heap))
 		die("heap size is too long");
 

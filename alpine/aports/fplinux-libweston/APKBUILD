@@ -8,8 +8,8 @@ arch="armv7"
 license="MIT AND GPL-2.0-only"
 depends="fplinux-wayland fplinux-libdrm fplinux-libxkbcommon fplinux-mesa-gbm libinput-libs pixman libdisplay-info"
 makedepends_build="clang22 lld22 meson samurai wayland-dev"
-makedepends_host="musl-dev linux-headers fplinux-wayland-dev fplinux-libdrm-dev fplinux-libxkbcommon-dev fplinux-mesa-dev libinput-dev libevdev-dev eudev-dev pixman-dev libdisplay-info-dev"
-subpackages="$pkgname-dev $pkgname-gl:gl"
+makedepends_host="musl-dev linux-headers fplinux-wayland-dev fplinux-libdrm-dev fplinux-libxkbcommon-dev fplinux-mesa-gbm-dev fplinux-mesa-headers libinput-dev libevdev-dev eudev-dev pixman-dev libdisplay-info-dev"
+subpackages="$pkgname-dev"
 options="!check"
 _seatver=@version:aport_seatd_0_9_3_tar_gz@
 source="
@@ -19,6 +19,9 @@ source="
 	internal-pixels.patch
 	presentation-completion.patch
 	yuv-plane-color.patch
+	drm-gbm-renderer.patch
+	pixel-format-gl-metadata.patch
+	renderer-gl-install.patch
 	fplinux-pixman-buffer.h
 	fplinux-weston-presentation.h
 	LICENSE
@@ -54,7 +57,7 @@ build() {
 		-Dbackend-headless=false -Dbackend-pipewire=false \
 		-Dbackend-rdp=false -Dbackend-vnc=false \
 		-Dbackend-wayland=false -Dbackend-x11=false \
-		-Drenderer-gl=true -Drenderer-vulkan=false \
+		-Drenderer-gl=false -Drenderer-vulkan=false \
 		-Dxwayland=false -Dsystemd=false \
 		-Dshell-desktop=false -Dshell-ivi=false -Dshell-kiosk=false \
 		-Dshell-lua=false -Dcolor-management-lcms=false \
@@ -81,17 +84,14 @@ dev() {
 	amove usr/share/libweston-16
 }
 
-gl() {
-	pkgdesc="OpenGL renderer for the FPLinux DRM compositor"
-	depends="$pkgname=$pkgver-r$pkgrel fplinux-mesa"
-	amove usr/lib/libweston-16/gl-renderer.so
-}
-
 sha512sums="
 78d308ebdc1dcbd6dd66d99fedf6375242b1fc3369af1a2c6b9d28a53fb1af6af0c3842a96b7f47be68f91ec38cb6126bb8d8b5010103030df14fddf2ec99523  minimal-cairo.patch
 8417e4bb5d285bc2d968ed90c2a24a7038a293dbedcda5de3e0b453e4264eb80eeee0a0d9ac23c7524a9c87f7f588965a0ecc345e66b3b764dbc1eb7b963f6d8  internal-pixels.patch
 f157e6d11ae9ee82c5cda3ddf31964a51465dd7f44d2469fb21bf99b6d4f1d6efd5ee3dabfee5a5eb96db77655975dd0bbc0dd794d92b70bd17e40910c983ae3  presentation-completion.patch
 021a656bf46846f708678c65a3ee57cfbb955ed4deabe2ffab2b7d588de6272365235519f7b9cdc1919f6c8e25473453e0e32310b008275e528979e8b6826d14  yuv-plane-color.patch
+59e69679814cd9e55b2bb4df34185e5778c50fe4869579fe699b5d6ea2189876be59efb74659a4390fe7bfe324ca5b0f8c3613cd53709f02d4e81ad9a8b697ba  drm-gbm-renderer.patch
+7d421f2c7692f8b605078208164f68515a85a13a4f10ca9122985c110e2c0056ca8caf2a5e3e1a58b58b4186d1516ee92262e72ad011579d78cca3e12bc7047a  pixel-format-gl-metadata.patch
+08d081f825ec296575ffaa439e7a03a64b3d2202d83fcadee1edc2470feb630cba5c4c6359ae85767400999d6dd090a586da72a9a55170b6b09e02e6313199cd  renderer-gl-install.patch
 b427573bdf1e43e253b4d029bad8db33518d027df0d3a1b193fa4e1447e637b9c8136d9585c578212799a9447c9bfa3e0490a64ad58e11437850e5ac0adff0db  fplinux-pixman-buffer.h
 4e2e278da3c427045df310a7219cd0993ad911527cedf37edbaefdb3a71fd7925a885c82a57e777cbeb61f93d3c461f6864b99770b523c07edeb0dde7f132adb  fplinux-weston-presentation.h
 260c02ff0a3e04ff0c2a95a936494b6a114a0a22121557059591d44af5fab5644ab8484be61eb33c12a6c9eef2170a108d51e2972adaef942568d94ae0d4ec83  LICENSE

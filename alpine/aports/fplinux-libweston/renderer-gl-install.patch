@@ -1,0 +1,11 @@
+--- a/libweston/renderer-gl/meson.build
++++ b/libweston/renderer-gl/meson.build
+@@ -58,6 +58,7 @@
+ 	dependencies: deps_renderer_gl,
+ 	name_prefix: '',
+ 	install: true,
+-	install_dir: dir_module_libweston
++	install_dir: dir_module_libweston,
++	install_tag: 'renderer-gl'
+ )
+ env_modmap += 'gl-renderer.so=@0@;'.format(plugin_gl.full_path())

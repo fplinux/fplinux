@@ -7,8 +7,9 @@ url="https://disenchant.net/tyrquake/"
 arch="armv7"
 license="GPL-2.0-or-later AND MIT-0 AND CC0-1.0 AND MIT"
 depends="fplinux-base fplinux-input"
+subpackages="$pkgname-gpu:gpu"
 makedepends_build="clang22 lld22 make patch pkgconf llvm22"
-makedepends_host="musl-dev linux-headers gcc libevdev-dev eudev-dev fplinux-libdrm-dev fplinux-mesa-dev"
+makedepends_host="musl-dev linux-headers gcc libevdev-dev eudev-dev fplinux-libdrm-dev fplinux-mesa-headers"
 options="!check"
 source="
 	@source:aport_tyrquake_0_71_tar_gz@
@@ -101,9 +102,15 @@ package() {
 	install -Dm755 bin/fplinux-quake "$pkgdir/usr/bin/quake"
 }
 
+gpu() {
+	pkgdesc="GPU renderer for TyrQuake on FPLinux"
+	depends="$pkgname=$pkgver-r$pkgrel fplinux-mesa"
+	amove usr/bin/tyr-glquake
+}
+
 sha512sums="
 c7a7c12608d9fffa61210224ba7ce267278e1201cd838c8e47c292b479fc2e229e5a267f775bc9b8151cca61e9f8a187752b515013d7d7707eb97876d9543feb  0001-FPLinux-add-native-runtime-support.patch
-81ca186e4a695583199352f013cd191cdda0a2f25870856616c07769ef28796f7c6d2d4cac1c5af0f996c9fc00ee90118035a587df784e01aa5d117c13314dec  fplinux-quake.c
+9ea637ddc3da2ae81f6710e4a085c830cece6564b63aef6915c8a66483044cf70fcecf45e50efedd23ffe005586ea9941af27a89a1c26d3f29a76387a97bb806  fplinux-quake.c
 1ec65c06b2886423ad45ca0a5f0e03eb43cc75a0d71e5d6d0d6c079e0c9f22c462b5675e0e844acfa2507a01aa860da705b33cc5fa9fd00c0cf8531f61b10f77  fplinux-quake-internal.h
 83594f9fd96d9005a5614e3b2b332a80744fb5ede742c0c693a1cffd0251a8c09d9bcee81a45c9fd0eb70ca3d2624258e8bfa4df509134e5fe796ebcc6295ea8  fplinux-quake-stats.c
 7e18a7b77cb17d525001af0b7983c242c5acff9975fa432394781a56b8dedf772f45a992efbec7d755e00d678af37e27d72a61bed6ae21c2d6756f2a1a6fea4c  fplinux-quake-stats.h

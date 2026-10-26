@@ -63,6 +63,24 @@ static bool fails(const char *name)
 	return strcmp(scenario, name) == 0;
 }
 
+FILE *__real_fopen(const char *path, const char *mode);
+
+FILE *__wrap_fopen(const char *path, const char *mode)
+{
+	const char *root = getenv("FPLINUX_ARMADA_TEST_SHADER_ROOT");
+	const char *name = strrchr(path, '/');
+	char replacement[4096];
+
+	if (!root || !name ||
+	    (strcmp(name + 1, "armada-scene.vert") &&
+	     strcmp(name + 1, "armada-scene.frag")))
+		return __real_fopen(path, mode);
+	assert(!fails("missing-shaders-software"));
+	assert(snprintf(replacement, sizeof(replacement), "%s/%s", root,
+			name + 1) < (int)sizeof(replacement));
+	return __real_fopen(replacement, mode);
+}
+
 static GLuint allocate_object(enum object_kind kind)
 {
 	GLuint object = next_object++;
@@ -725,18 +743,28 @@ int main(int argc, char **argv)
 	assert(storage && fplinux_font_open(&font, argv[4]));
 	memset(storage, GUARD_VALUE, display.size + 2U * GUARD_BYTES);
 	display.mapping = storage + GUARD_BYTES;
-	mode = fails("forced-gpu-failure") ? ARMADA_RENDER_GPU :
-					     ARMADA_RENDER_AUTO;
+	if (fails("forced-gpu-failure") || fails("missing-shaders-gpu"))
+		mode = ARMADA_RENDER_GPU;
+	else if (fails("missing-shaders-software"))
+		mode = ARMADA_RENDER_SOFTWARE;
+	else
+		mode = ARMADA_RENDER_AUTO;
 	scene = armada_scene_create_with_renderer(display.width, display.height,
 						  &font, &display, mode, error,
 						  sizeof(error));
-	if (fails("forced-gpu-failure") || fails("cleanup-failure")) {
+	if (fails("forced-gpu-failure") || fails("cleanup-failure") ||
+	    fails("missing-shaders-gpu")) {
 		assert(!scene && error[0]);
 		if (fails("cleanup-failure"))
 			assert(strstr(error, "GPU cleanup failed"));
+		if (fails("missing-shaders-gpu")) {
+			assert(strstr(error, "cannot read ARMADA shader"));
+			assert(strstr(error, "No such file or directory"));
+		}
 	} else if (fails("output-failure") || fails("missing-procedure") ||
 		   fails("shader-failure") || fails("link-failure") ||
-		   fails("target-failure")) {
+		   fails("target-failure") || fails("missing-shaders-auto") ||
+		   fails("missing-shaders-software")) {
 		const uint16_t *pixels;
 		size_t count = (size_t)display.width * display.height;
 		size_t different = 0;
@@ -744,7 +772,16 @@ int main(int argc, char **argv)
 		assert(scene && !live_output && !armada_scene_output(scene));
 		assert(armada_scene_pixels(scene));
 		assert(strcmp(armada_scene_renderer(scene), "software") == 0);
-		assert(armada_scene_fallback_reason(scene)[0]);
+		if (fails("missing-shaders-software"))
+			assert(!armada_scene_fallback_reason(scene)[0]);
+		else
+			assert(armada_scene_fallback_reason(scene)[0]);
+		if (fails("missing-shaders-auto")) {
+			assert(strstr(armada_scene_fallback_reason(scene),
+				      "cannot read ARMADA shader"));
+			assert(strstr(armada_scene_fallback_reason(scene),
+				      "No such file or directory"));
+		}
 		assert(armada_scene_render(scene, 0U, NULL, &cues));
 		pixels = armada_scene_pixels(scene);
 		for (size_t index = 1; index < count; ++index)

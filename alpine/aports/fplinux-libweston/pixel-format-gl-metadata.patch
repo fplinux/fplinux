@@ -1,0 +1,31 @@
+--- a/libweston/pixel-formats.c
++++ b/libweston/pixel-formats.c
+@@ -47,6 +47,9 @@
+ #ifdef ENABLE_EGL
+ #include <EGL/egl.h>
+ #include <EGL/eglext.h>
++#endif
++
++/* Pixel format metadata is shared with separately built renderer modules. */
+ #include <GLES2/gl2.h>
+ #include <GLES2/gl2ext.h>
+ #include <GLES3/gl3.h>
+@@ -81,18 +84,6 @@
+ #define GL_INTERNALFORMAT(fmt) .gl_internalformat = (fmt)
+ #define GL_FORMAT(fmt) .gl_format = (fmt)
+ #define GL_TYPE(type) .gl_type = (type)
+-#else
+-#define GL_FORMAT_INFO(internal_, external_, type_, swizzles_) \
+-	.gl = { \
+-		.internal = 0, \
+-		.external = 0, \
+-		.type = 0, \
+-		.swizzles.array = { 0, 0, 0, 0 }, \
+-	}
+-#define GL_INTERNALFORMAT(fmt) .gl_internalformat = 0
+-#define GL_FORMAT(fmt) .gl_format = 0
+-#define GL_TYPE(type) .gl_type = 0
+-#endif
+ 
+ #ifdef ENABLE_VULKAN
+ #include <vulkan/vulkan.h>

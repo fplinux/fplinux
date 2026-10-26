@@ -6,10 +6,11 @@ pkgdesc="Panfrost EGL, OpenGL and OpenGL ES libraries for FPLinux"
 url="https://www.mesa3d.org"
 arch="armv7"
 license="MIT AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND SGI-B-2.0 AND Apache-2.0"
-depends="fplinux-libdrm libexpat"
-makedepends_build="bison clang22 clang22-dev flex lld22 llvm22-dev meson pkgconf py3-mako python3 samurai spirv-llvm-translator-dev spirv-tools-dev"
-makedepends_host="musl-dev linux-headers libstdc++-dev eudev-dev fplinux-expat-dev fplinux-libdrm-dev"
-subpackages="$pkgname-dev $pkgname-gbm:gbm"
+depends="fplinux-libdrm fplinux-mesa-gbm=$pkgver-r$pkgrel libexpat"
+depends_dev="fplinux-mesa-headers=$pkgver-r$pkgrel fplinux-mesa-gbm-dev=$pkgver-r$pkgrel"
+makedepends_build="bison clang22 clang22-dev flex lld22 llvm22-dev meson pkgconf py3-mako py3-packaging py3-yaml python3 samurai spirv-llvm-translator-dev spirv-tools-dev"
+makedepends_host="musl-dev linux-headers libstdc++-dev eudev-dev fplinux-expat-dev fplinux-libdrm-dev fplinux-mesa-gbm-dev"
+subpackages="$pkgname-dev"
 options="!check"
 source="
 	@source:aport_mesa_26_2_5_tar_xz@
@@ -58,6 +59,7 @@ build() {
 		-Dopengl=true -Dgles1=disabled -Dgles2=enabled \
 		-Degl=enabled -Degl-native-platform=surfaceless \
 		-Dglx=disabled -Dglvnd=disabled -Dgbm=enabled \
+		-Dlibgbm-external=true \
 		-Dllvm=disabled -Dmesa-clc=system -Dprecomp-compiler=system \
 		-Dpanfrost-rust=false -Dgallium-rusticl=false \
 		-Dzlib=disabled -Dzstd=disabled -Dshader-cache=disabled \
@@ -75,13 +77,13 @@ package() {
 		"$pkgdir/usr/share/licenses/libexpat/COPYING"
 }
 
-gbm() {
-	pkgdesc="GBM buffer management library for FPLinux"
-	depends="fplinux-libdrm"
-	amove usr/lib/libgbm.so.*
-	mkdir -p "$subpkgdir/usr/share/licenses"
-	cp -r "$pkgdir/usr/share/licenses/$pkgname" \
-		"$subpkgdir/usr/share/licenses/$pkgname"
+dev() {
+	# Public API headers have one owner in the independent headers package.
+	rm -rf "${pkgdir:?}/usr/include/EGL" "${pkgdir:?}/usr/include/GLES2" \
+		"${pkgdir:?}/usr/include/GLES3" "${pkgdir:?}/usr/include/KHR"
+	rm -f "${pkgdir:?}/usr/include/GL/gl.h" "${pkgdir:?}/usr/include/GL/glcorearb.h" \
+		"${pkgdir:?}/usr/include/GL/glext.h"
+	default_dev
 }
 
 sha512sums="

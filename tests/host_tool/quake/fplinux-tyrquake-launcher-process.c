@@ -117,6 +117,10 @@ int __wrap_access(const char *path, int mode)
 {
 	char replacement[4096];
 
+	if (!strcmp(path, "/usr/bin/tyr-glquake")) {
+		fixture_path(replacement, sizeof(replacement), "gpu-engine");
+		return __real_access(replacement, mode);
+	}
 	if (!is_card_pak(path))
 		return __real_access(path, mode);
 	record_resource_access();
@@ -136,10 +140,17 @@ int __wrap_symlink(const char *target, const char *path)
 
 int __wrap_execv(const char *path, char *const arguments[])
 {
+	char replacement[4096];
+
 	if (strcmp(path, "/usr/bin/tyr-quake") &&
 	    strcmp(path, "/usr/bin/tyr-glquake")) {
 		errno = ENOENT;
 		return -1;
+	}
+	if (!strcmp(path, "/usr/bin/tyr-glquake")) {
+		fixture_path(replacement, sizeof(replacement), "gpu-engine");
+		if (__real_access(replacement, X_OK) < 0)
+			return -1;
 	}
 	if (setenv("FPLINUX_QUAKE_TEST_EXEC_PATH", path, 1) < 0)
 		return -1;

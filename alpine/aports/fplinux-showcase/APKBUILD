@@ -7,8 +7,9 @@ url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-only"
 depends="fplinux-base fplinux-font-terminus-data"
+subpackages="$pkgname-gpu:gpu"
 makedepends_build="clang22 lld22 pkgconf"
-makedepends_host="musl-dev linux-headers fplinux-libdrm-dev fplinux-mesa-dev"
+makedepends_host="musl-dev linux-headers fplinux-libdrm-dev fplinux-mesa-headers"
 options="!check"
 source="
 	armada-scene.c
@@ -81,6 +82,13 @@ package() {
 		"$pkgdir/usr/share/fplinux/armada/armada-scene.vert"
 	install -Dm644 "$srcdir/armada-scene.frag" \
 		"$pkgdir/usr/share/fplinux/armada/armada-scene.frag"
+}
+
+gpu() {
+	pkgdesc="GPU scene resources for the FPLinux ARMADA showcase"
+	depends="$pkgname=$pkgver-r$pkgrel fplinux-mesa"
+	amove usr/share/fplinux/armada/armada-scene.vert \
+		usr/share/fplinux/armada/armada-scene.frag
 }
 
 sha512sums="

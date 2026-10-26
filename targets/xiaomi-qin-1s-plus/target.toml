@@ -30,7 +30,9 @@ packages = [
   "fplinux-ffmpeg",
   "fplinux-present",
   "fplinux-showcase",
+  "fplinux-showcase-gpu",
   "fplinux-tyrquake",
+  "fplinux-tyrquake-gpu",
 ]
 
 [linux]

@@ -107,6 +107,7 @@ class FplinuxShowcaseHostToolTests:
                     str(APORT / "armada-gpu-renderer.c"),
                     str(ROOT / "lib/fplinux/fplinux-font.c"),
                     str(ROOT / "lib/fplinux/fplinux-utf8.c"),
+                    "-Wl,--wrap=fopen",
                     *drm_flags,
                 ],
                 name="compile ARMADA native output host harness",
@@ -122,6 +123,36 @@ class FplinuxShowcaseHostToolTests:
             [str(harness.executable), str(harness.small_font), str(harness.large_font)],
             name="run FPLinux showcase host harness",
             timeout=30,
+            check=True,
+        )
+
+    @pytest.mark.parametrize("mode", ["auto", "software", "gpu"])
+    @pytest.mark.parametrize("vertex_present", [False, True], ids=["no-shaders", "no-fragment"])
+    def test_missing_optional_shaders_preserve_the_renderer_policy(
+        self,
+        harness: ShowcaseHarness,
+        tmp_path: Path,
+        mode: str,
+        *,
+        vertex_present: bool,
+    ) -> None:
+        """Real missing shader files allow CPU modes and fail a forced GPU scene."""
+        if vertex_present:
+            (tmp_path / "armada-scene.vert").write_bytes(
+                (APORT / "armada-scene.vert").read_bytes()
+            )
+
+        run_process(
+            [
+                str(harness.output_executable),
+                f"missing-shaders-{mode}",
+                "240",
+                "320",
+                str(harness.large_font),
+            ],
+            name=f"render ARMADA in {mode} mode without optional shaders",
+            timeout=10,
+            env={"FPLINUX_ARMADA_TEST_SHADER_ROOT": str(tmp_path), "LC_ALL": "C"},
             check=True,
         )
 

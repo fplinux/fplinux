@@ -277,12 +277,16 @@ class AlpineRecipesTests:
             "fplinux-libdrm",
             "fplinux-libtsm",
             "fplinux-libxkbcommon",
-            "fplinux-mesa",
+            "fplinux-mesa-gbm",
         ):
             alpine_source.write(f"alpine/aports/{name}/APKBUILD", f"pkgname={name}\n".encode())
         repository = ROOT
         for directory in ("lib/fplinux", "include/fplinux"):
             shutil.copytree(repository / directory, alpine_source.root / directory)
+        for source in alpine_selection.shared_aport_sources(
+            "fplinux-mesa-gbm", alpine_source.root
+        ):
+            alpine_source.write(source.relative_to(alpine_source.root).as_posix(), b"GBM input\n")
         font_source = alpine_source.write(
             "lib/fplinux/fplinux-font.c", b"fixture original font reader\n"
         )
