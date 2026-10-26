@@ -26,16 +26,11 @@ from . import receipts as kbuild_state
 from . import state as linux_state
 from .configuration import (
     assert_build_type_kconfig,
-    assert_external_firmware_kconfig,
     assert_profile_kconfig,
-    audio_profile_implementation,
-    audio_profile_kconfig_arguments,
-    panel_firmware_kconfig_arguments,
+    prepare_builtin_firmware,
     prepare_kernel_config,
     profile_kconfig_actions,
     profile_kconfig_arguments,
-    verify_builtin_audio_profile,
-    verify_builtin_panel_firmware,
 )
 from .identity import DeviceStateError, device_kernel_identity, localversion
 from .receipts import KbuildStateError
@@ -84,8 +79,6 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
         defconfig, config_paths = prepare_kernel_config(target, target_config, platform, work)
         root_contract = target_config["linux"]["root"]
         initramfs_delivery = target_config["bootstrap"]["initramfs_delivery"]
-        if root_contract["kind"] == "initramfs":
-            audio_profile_firmware = None
         initramfs_record: dict[str, int | str] | None = None
         initramfs_input: Path | None = None
         initramfs_receipt: dict[str, str] | None = None
@@ -119,8 +112,11 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
             linux_source / platform["linux"]["config_script"]
         )
         current_linux = linux_state.require_prepared_linux(linux_source, prepared_linux)
+        builtin_firmware = prepare_builtin_firmware(
+            target_config, audio_profile_firmware, source=linux_source, work=work
+        )
         implementation = inputs_build.kernel_implementation_sources()
-        implementation.extend(audio_profile_implementation(target, audio_profile_firmware))
+        implementation.extend(builtin_firmware.implementation())
         config_enable, config_disable = profile_kconfig_actions(target_config)
         device_identity = device_kernel_identity(
             target=target,
@@ -149,8 +145,7 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
             "--set-str",
             "LOCALVERSION",
             localversion(device_identity),
-            *audio_profile_kconfig_arguments(target, audio_profile_firmware),
-            *panel_firmware_kconfig_arguments(target_config, linux_source),
+            *builtin_firmware.kconfig_arguments(),
             *profile_kconfig_arguments(config_enable, config_disable),
         ]
         commands = kernel_build_commands(
@@ -235,15 +230,7 @@ def build_kernel(  # noqa: PLR0913 -- build inputs and causal receipts stay expl
         assert_build_type_kconfig(
             output / ".config", config_paths[-1], target_config["build_type"]
         )
-        if root_contract["kind"] == "initramfs":
-            assert_external_firmware_kconfig(output / ".config", target_config, linux_source)
-        verify_builtin_audio_profile(
-            target,
-            output / ".config",
-            vmlinux,
-            audio_profile_firmware,
-        )
-        verify_builtin_panel_firmware(target_config, output / ".config", vmlinux, linux_source)
+        builtin_firmware.verify(output / ".config", vmlinux)
         for forbidden in target_config["linux"]["forbidden_config"]:
             if forbidden in config_text:
                 fail(f"kernel unexpectedly contains {forbidden}")

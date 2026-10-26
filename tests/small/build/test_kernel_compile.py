@@ -9,9 +9,12 @@ from pathlib import Path
 import pytest
 from fplinux_cli.alpine import rootfs_state
 from fplinux_cli.build import process as process_build
+from fplinux_cli.build.display import render_linux_display_files
 from fplinux_cli.build.kernel import compile as kernel_build
 from fplinux_cli.build.kernel import state as linux_state
 from fplinux_cli.build.kernel.state import PreparedLinuxState
+from fplinux_cli.common import sha256_bytes
+from fplinux_cli.device_data.inputs import FirmwareInput
 from fplinux_cli.environment.definition import environment_artifact_recipe_digest
 from fplinux_cli.manifests.kernel import kconfig_values
 from fplinux_cli.manifests.platforms import load_platform
@@ -63,11 +66,17 @@ class KernelCommandPeer:
             if self.forbidden_config is not None:
                 with (self.output / ".config").open("a") as stream:
                     stream.write(self.forbidden_config + "\n")
-            version = kconfig_values((self.output / ".config").read_text())["CONFIG_LOCALVERSION"]
+            values = kconfig_values((self.output / ".config").read_text())
+            version = values["CONFIG_LOCALVERSION"]
+            firmware_directory = Path(values.get("CONFIG_EXTRA_FIRMWARE_DIR", '""').strip('"'))
+            firmware_names = values.get("CONFIG_EXTRA_FIRMWARE", '""').strip('"').split()
+            firmware = b"".join(
+                (firmware_directory / name).read_bytes() for name in firmware_names
+            )
             for relative, content in (
                 (self.image, b"kernel " + version.encode()),
                 (self.dtb, b"device tree"),
-                ("vmlinux", b"kernel symbols"),
+                ("vmlinux", b"kernel symbols" + firmware),
                 ("System.map", b"kernel map"),
             ):
                 path = self.output / relative
@@ -129,6 +138,10 @@ def test_ram_build_uses_declared_image_delivery_and_causal_root_identity(  # noq
     source = tmp_path / "linux"
     (source / "scripts").mkdir(parents=True)
     (source / "scripts/config").write_text("external Kbuild command peer\n")
+    for relative, contents in render_linux_display_files(target, target_config["display"]).items():
+        path = source / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(contents)
     output = tmp_path / "work/kernel"
     rootfs_output = tmp_path / "rootfs"
     rootfs_output.mkdir()
@@ -156,9 +169,6 @@ def test_ram_build_uses_declared_image_delivery_and_causal_root_identity(  # noq
         "verify_target_identity",
         "verify_root_bootargs",
         "verify_profile_dtb_layout",
-        "assert_external_firmware_kconfig",
-        "verify_builtin_audio_profile",
-        "verify_builtin_panel_firmware",
     ]
 
     def ignore_validator(*_args: object) -> None:
@@ -166,7 +176,6 @@ def test_ram_build_uses_declared_image_delivery_and_causal_root_identity(  # noq
 
     for name in validators:
         monkeypatch.setattr(kernel_build, name, ignore_validator)
-    monkeypatch.setattr(kernel_build, "panel_firmware_kconfig_arguments", lambda *_args: [])
 
     def build() -> tuple[Path, Path, dict[str, str], str]:
         return kernel_build.build_kernel(
@@ -231,10 +240,22 @@ def test_ram_build_uses_declared_image_delivery_and_causal_root_identity(  # noq
 
 
 @pytest.mark.parametrize(
-    ("target", "profile", "make_target"),
+    ("target", "profile", "make_target", "audio_destination", "firmware_names"),
     [
-        ("nokia-ta1618", "microsd-uboot", "zImage"),
-        ("xiaomi-qin-1s-plus", "microsd-root", "Image"),
+        (
+            "nokia-ta1618",
+            "microsd-uboot",
+            "zImage",
+            "fplinux/ta1618-audio-profile.bin",
+            "fplinux/ta1618-audio-profile.bin",
+        ),
+        (
+            "xiaomi-qin-1s-plus",
+            "microsd-root",
+            "Image",
+            "qin1splus-audio-profile.bin",
+            "qin1splus-audio-profile.bin xiaomi,qin1splus-gc9307.bin",
+        ),
     ],
 )
 @pytest.mark.parametrize(
@@ -251,6 +272,8 @@ def test_external_root_rebuilds_for_another_environment(  # noqa: PLR0913
     target: str,
     profile: str,
     make_target: str,
+    audio_destination: str,
+    firmware_names: str,
     environment_recipe: str,
     environment_content: str,
 ) -> None:
@@ -261,6 +284,10 @@ def test_external_root_rebuilds_for_another_environment(  # noqa: PLR0913
     source = tmp_path / "linux"
     (source / "scripts").mkdir(parents=True)
     (source / "scripts/config").write_text("external Kbuild command peer\n")
+    for relative, contents in render_linux_display_files(target, target_config["display"]).items():
+        path = source / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(contents)
     output = tmp_path / "work/kernel"
     rootfs_output = tmp_path / "rootfs"
     rootfs_output.mkdir()
@@ -284,11 +311,14 @@ def test_external_root_rebuilds_for_another_environment(  # noqa: PLR0913
         "verify_target_identity",
         "verify_root_bootargs",
         "verify_profile_dtb_layout",
-        "verify_builtin_audio_profile",
-        "verify_builtin_panel_firmware",
     ):
         monkeypatch.setattr(kernel_build, name, ignore_validator)
-    monkeypatch.setattr(kernel_build, "panel_firmware_kconfig_arguments", lambda *_args: [])
+    profile_bytes = b"independent admitted sound settings\0\xff"
+    audio_profile = (
+        FirmwareInput(
+            "phone-profile.bin", audio_destination, profile_bytes, sha256_bytes(profile_bytes)
+        ),
+    )
 
     def select_environment(recipe: str, content: str) -> None:
         monkeypatch.setenv("FPLINUX_ENVIRONMENT_RECIPE", recipe)
@@ -312,7 +342,7 @@ def test_external_root_rebuilds_for_another_environment(  # noqa: PLR0913
             rootfs=rootfs,
             rootfs_output=rootfs_output,
             rootfs_recipe="d" * 64,
-            audio_profile_firmware=None,
+            audio_profile_firmware=audio_profile,
             jobs=2,
         )
 
@@ -320,6 +350,10 @@ def test_external_root_rebuilds_for_another_environment(  # noqa: PLR0913
     image, _dtb, first_receipt, first_identity = build()
     assert peer.commands[-1][-2:] == [make_target, "dtbs"]
     first_image = image.read_bytes()
+    configuration = kconfig_values((output / ".config").read_text())
+    assert configuration["CONFIG_EXTRA_FIRMWARE"] == f'"{firmware_names}"'
+    assert configuration["CONFIG_EXTRA_FIRMWARE_DIR"] == f'"{tmp_path / "work/builtin-firmware"}"'
+    assert profile_bytes in (output / "vmlinux").read_bytes()
     first_command_count = len(peer.commands)
 
     select_environment(environment_recipe, environment_content)

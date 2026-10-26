@@ -51,6 +51,7 @@ def firmware_workspace(qin_firmware: QinFirmwareContext, platform: str, root_kin
     target = {
         "platform": platform,
         "linux": {"root": {"kind": root_kind}},
+        "uboot": {"kind": "none"},
         "device_data": {"groups": qin_firmware.groups},
     }
     with (
@@ -76,7 +77,8 @@ def firmware_workspace(qin_firmware: QinFirmwareContext, platform: str, root_kin
 @pytest.mark.parametrize(
     ("platform", "root_kind", "rootfs_delivery"),
     [
-        pytest.param("sc9820e", "initramfs", True, id="qin-ram-rootfs"),
+        pytest.param("sc9820e", "initramfs", False, id="qin-ram-runtime-data"),
+        pytest.param("sc9820e", "external", True, id="qin-external-rootfs"),
         pytest.param("ums9117", "initramfs", False, id="ums-ram-runtime-data"),
         pytest.param("ums9117", "external", True, id="external-rootfs"),
     ],
@@ -114,8 +116,8 @@ def test_build_stage_delivers_snapshot_bytes_at_the_selected_loader_boundary(  #
     else:
         assert not snapshot_firmware.exists()
     current_calibration = (
-        qin_firmware.cache
-        / "device-data"
+        qin_firmware.root
+        / "data/fplinux/phones"
         / qin_firmware.target
         / "phone/groups/wcn-firmware/system-cali.bin"
     )
