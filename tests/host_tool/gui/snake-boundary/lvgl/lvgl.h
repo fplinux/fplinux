@@ -55,6 +55,9 @@ void lv_obj_set_hidden(lv_obj_t *object, bool hidden);
 void lv_obj_add_event_cb(lv_obj_t *object, lv_event_cb_t callback, int type,
 			 void *context);
 void lv_obj_get_coords(lv_obj_t *object, lv_area_t *area);
+int lv_obj_get_width(const lv_obj_t *object);
+int lv_obj_get_height(const lv_obj_t *object);
+void lv_obj_update_layout(lv_obj_t *object);
 void lv_label_set_text(lv_obj_t *object, const char *text);
 void *lv_event_get_user_data(lv_event_t *event);
 lv_layer_t *lv_event_get_layer(lv_event_t *event);

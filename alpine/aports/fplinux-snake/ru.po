@@ -24,16 +24,23 @@ msgstr "Пауза"
 
 #, c-format
 msgid ""
-"Paused\n"
 "Arrows / 2/4/6/8\n"
 "Last score %u"
 msgstr ""
-"Пауза\n"
 "Стрелки / 2/4/6/8\n"
 "Прошлый счёт %u"
 
+msgid "Paused"
+msgstr "Пауза"
+
+msgid "Snake"
+msgstr "Змейка"
+
 msgid "Play"
 msgstr "Играть"
+
+msgid "Resume"
+msgstr "Продолжить"
 
 msgid "Restart"
 msgstr "Заново"

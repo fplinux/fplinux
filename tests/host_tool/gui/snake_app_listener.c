@@ -2,6 +2,7 @@
 /* Host UI, drawing, timer and in-memory preferences double for the app. */
 #include <fplinux/fplinux-ui.h>
 #include <fplinux/fplinux-ui-prefs.h>
+#include <fplinux/fplinux-ui-screen.h>
 
 #include <assert.h>
 #include <errno.h>
@@ -36,6 +37,19 @@ struct fplinux_ui {
 	int height;
 	bool kept_on;
 	bool closed;
+	struct fplinux_ui_screen *current;
+};
+
+struct fplinux_ui_screen {
+	struct fplinux_ui_screen *below;
+	fplinux_ui_command_cb listener;
+	fplinux_ui_screen_key_filter_cb filter;
+	fplinux_ui_canvas_key_cb direction;
+	void *context;
+	int play;
+	int back;
+	char text[256];
+	char title[64];
 };
 
 struct fplinux_ui_prefs {
@@ -59,6 +73,7 @@ static const struct fplinux_ui_theme theme = {
 static struct lv_obj objects[16];
 static size_t object_count;
 static struct lv_obj screen;
+static struct fplinux_ui_screen canvas;
 static struct lv_obj *board;
 static lv_event_cb_t draw_callback;
 static struct lv_event draw_event;
@@ -134,6 +149,21 @@ void lv_obj_add_event_cb(lv_obj_t *object, lv_event_cb_t callback, int type,
 void lv_obj_get_coords(lv_obj_t *object, lv_area_t *area)
 {
 	*area = object->area;
+}
+
+int lv_obj_get_width(const lv_obj_t *object)
+{
+	return object->area.x2 - object->area.x1 + 1;
+}
+
+int lv_obj_get_height(const lv_obj_t *object)
+{
+	return object->area.y2 - object->area.y1 + 1;
+}
+
+void lv_obj_update_layout(lv_obj_t *object)
+{
+	assert(object == &screen);
 }
 
 void lv_label_set_text(lv_obj_t *object, const char *text)
@@ -237,6 +267,8 @@ struct fplinux_ui *fplinux_ui_open(const char *id, fplinux_ui_event_cb callback,
 
 void fplinux_ui_close(struct fplinux_ui *instance)
 {
+	if (instance->current && instance->current != &canvas)
+		free(instance->current);
 	instance->closed = true;
 }
 
@@ -249,6 +281,103 @@ lv_obj_t *fplinux_ui_screen(struct fplinux_ui *instance)
 int fplinux_ui_width(const struct fplinux_ui *instance)
 {
 	return instance->width;
+}
+
+struct fplinux_ui_screen *fplinux_ui_canvas_new(struct fplinux_ui *instance,
+						const char *title)
+{
+	assert(instance == &ui && !title);
+	lv_obj_set_size(&screen, ui.width, ui.height);
+	return &canvas;
+}
+
+lv_obj_t *fplinux_ui_canvas_object(struct fplinux_ui_screen *instance)
+{
+	assert(instance == &canvas);
+	return &screen;
+}
+
+void fplinux_ui_canvas_set_key_handler(struct fplinux_ui_screen *instance,
+				       fplinux_ui_canvas_key_cb handler,
+				       void *context)
+{
+	assert(instance == &canvas);
+	instance->direction = handler;
+	instance->context = context;
+}
+
+void fplinux_ui_screen_set_key_filter(struct fplinux_ui_screen *instance,
+				      fplinux_ui_screen_key_filter_cb filter,
+				      void *context)
+{
+	instance->filter = filter;
+	instance->context = context;
+}
+
+void fplinux_ui_screen_set_listener(struct fplinux_ui_screen *instance,
+				    fplinux_ui_command_cb listener,
+				    fplinux_ui_change_cb changed, void *context)
+{
+	assert(!changed);
+	instance->listener = listener;
+	instance->context = context;
+}
+
+bool fplinux_ui_screen_add_command(struct fplinux_ui_screen *instance,
+				   const struct fplinux_ui_command *command)
+{
+	if (command->type == FPLINUX_UI_COMMAND_OK)
+		instance->play = command->id;
+	else {
+		assert(command->type == FPLINUX_UI_COMMAND_BACK);
+		instance->back = command->id;
+	}
+	return true;
+}
+
+struct fplinux_ui_screen *fplinux_ui_alert_new(struct fplinux_ui *instance,
+					       enum fplinux_ui_alert_kind kind,
+					       const char *title,
+					       const char *text,
+					       unsigned int timeout_ms)
+{
+	struct fplinux_ui_screen *alert = calloc(1, sizeof(*alert));
+
+	assert(instance == &ui && kind == FPLINUX_UI_ALERT_INFO && !timeout_ms);
+	assert(alert);
+	snprintf(alert->title, sizeof(alert->title), "%s", title);
+	snprintf(alert->text, sizeof(alert->text), "%s", text);
+	return alert;
+}
+
+bool fplinux_ui_alert_set_text(struct fplinux_ui_screen *alert,
+			       const char *text)
+{
+	snprintf(alert->text, sizeof(alert->text), "%s", text);
+	return true;
+}
+
+void fplinux_ui_push(struct fplinux_ui *instance,
+		     struct fplinux_ui_screen *pushed)
+{
+	pushed->below = instance->current;
+	instance->current = pushed;
+}
+
+bool fplinux_ui_pop(struct fplinux_ui *instance)
+{
+	struct fplinux_ui_screen *popped = instance->current;
+
+	assert(popped && popped != &canvas && popped->below == &canvas);
+	instance->current = popped->below;
+	free(popped);
+	return true;
+}
+
+void fplinux_ui_go_back(struct fplinux_ui *instance)
+{
+	assert(instance->current == &canvas);
+	fplinux_ui_back(instance);
 }
 
 int fplinux_ui_height(const struct fplinux_ui *instance)
@@ -404,7 +533,33 @@ static void pulse(void)
 
 static void key(unsigned int code)
 {
-	send_event(FPLINUX_UI_EVENT_KEY, true, code, true);
+	struct fplinux_ui_screen *current = ui.current;
+	struct fplinux_ui_key key = { .code = code, .pressed = true };
+	int action;
+
+	if (code == KEY_HOME) {
+		fplinux_ui_home(&ui);
+		return;
+	}
+	if (current->filter &&
+	    current->filter(&ui, current, &key, current->context))
+		return;
+	if (code == KEY_OK || code == KEY_ENTER || code == KEY_KPENTER)
+		action = current->play;
+	else if (code == KEY_F14 || code == KEY_ESC)
+		action = current->back;
+	else {
+		if (current->direction)
+			current->direction(&ui, current, &key,
+					   current->context);
+		return;
+	}
+	/* Remove an Alert before its listener, as the screen API requires. */
+	if (current != &canvas)
+		ui.current = current->below;
+	current->listener(&ui, current, action, current->context);
+	if (current != &canvas)
+		free(current);
 }
 
 static void test_listener(void)
@@ -451,8 +606,67 @@ static void test_listener(void)
 	assert(prefs.saved_last == played_score && prefs.saved_best == 20);
 }
 
+static void activate(enum fplinux_ui_activation activation)
+{
+	const struct fplinux_ui_event event = {
+		.type = FPLINUX_UI_EVENT_ACTIVATION,
+		.activation = activation,
+	};
+
+	ui.callback(&ui, &event, ui.context);
+}
+
+static void test_activation(void)
+{
+	lv_area_t running_head;
+	unsigned int running_cells;
+	struct fplinux_ui_screen *paused;
+
+	key(KEY_OK);
+	pulse();
+	assert(!game_timer.paused && ui.kept_on);
+	activate(FPLINUX_UI_ACTIVATION_RESUME);
+	assert(!game_timer.paused && ui.current == &canvas);
+	running_head = head;
+	running_cells = drawn_cells;
+	activate(FPLINUX_UI_ACTIVATION_OPEN);
+	assert(game_timer.paused && !ui.kept_on);
+	assert(ui.current != &canvas && !strcmp(ui.current->title, "Paused"));
+	assert(!strcmp(centre_key, "Resume"));
+	paused = ui.current;
+	activate(FPLINUX_UI_ACTIVATION_OPEN);
+	activate(FPLINUX_UI_ACTIVATION_RESUME);
+	assert(ui.current == paused);
+	pulse();
+	assert(!memcmp(&head, &running_head, sizeof(head)));
+	assert(drawn_cells == running_cells);
+	assert(prefs.saved_last == 17 && prefs.saved_best == 20);
+	key(KEY_OK);
+	assert(!game_timer.paused);
+	for (unsigned int index = 0; index < 40 && !game_timer.paused; ++index)
+		pulse();
+	assert(game_timer.paused && ui.current != &canvas);
+	assert(!strcmp(ui.current->title, "Game over"));
+	paused = ui.current;
+	running_head = head;
+	running_cells = drawn_cells;
+	activate(FPLINUX_UI_ACTIVATION_OPEN);
+	activate(FPLINUX_UI_ACTIVATION_RESUME);
+	assert(ui.current == paused && !strcmp(ui.current->title, "Game over"));
+	assert(!strcmp(centre_key, "Restart"));
+	pulse();
+	assert(!memcmp(&head, &running_head, sizeof(head)));
+	assert(drawn_cells == running_cells);
+}
+
 int fplinux_ui_run(struct fplinux_ui *instance)
 {
+	if (!strcmp(scenario, "close-during-open")) {
+		assert(instance == &ui && !board && !ui.current);
+		assert(!game_timer.callback && !ui.kept_on);
+		assert(prefs.saved_last == 17 && prefs.saved_best == 20);
+		return 0;
+	}
 	assert(instance == &ui && board);
 	assert(board->area.x1 == expected_x && board->area.y1 == expected_y);
 	assert(board->area.x2 - board->area.x1 + 1 == expected_width);
@@ -465,28 +679,22 @@ int fplinux_ui_run(struct fplinux_ui *instance)
 	assert(drawn_cells == 4);
 	if (strcmp(scenario, "listener") == 0)
 		test_listener();
-	else if (strcmp(scenario, "close-during-open") == 0) {
-		assert(game_timer.paused && !ui.kept_on);
-		assert(prefs.saved_last == 17 && prefs.saved_best == 20);
-	} else if (strcmp(scenario, "close-playing") == 0) {
+	else if (!strcmp(scenario, "activation"))
+		test_activation();
+	else if (strcmp(scenario, "close-playing") == 0) {
 		key(KEY_OK);
 		assert(!game_timer.paused && ui.kept_on);
 		send_event(FPLINUX_UI_EVENT_CLOSE, false, 0, false);
 		assert(game_timer.paused && !ui.kept_on);
 	} else if (!strcmp(scenario, "save-failure")) {
-		bool notice = false;
-
 		key(KEY_OK);
 		assert(!game_timer.paused);
 		key(KEY_HOME);
 		assert(home_requested && game_timer.paused && !ui.closed);
 		assert(prefs.saved_last == 17 && prefs.saved_best == 20);
 		send_event(FPLINUX_UI_EVENT_VISIBILITY, true, 0, false);
-		for (size_t index = 0; index < object_count; ++index)
-			if (!objects[index].hidden &&
-			    strstr(objects[index].text, "Scores not saved"))
-				notice = true;
-		assert(notice);
+		assert(ui.current != &canvas &&
+		       strstr(ui.current->text, "Scores not saved"));
 		key(KEY_OK);
 		assert(!game_timer.paused && ui.kept_on);
 		key(KEY_F14);
@@ -522,7 +730,9 @@ int main(int argc, char **argv)
 	expected_width = atoi(argv[8]);
 	expected_height = atoi(argv[9]);
 	assert(fplinux_snake_app_main(1, application_argv) == 0);
-	assert(ui.closed && prefs.closed && game_timer.deleted);
+	assert(ui.closed && prefs.closed);
+	assert(game_timer.deleted ==
+	       (strcmp(scenario, "close-during-open") != 0));
 	puts("snake-app-listener: all checks passed");
 	return 0;
 }

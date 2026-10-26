@@ -116,6 +116,18 @@ def test_close_during_ui_open_saves_scores_before_view_creation(snake_app: Path)
     assert result.stdout == "snake-app-listener: all checks passed\n"
 
 
+def test_open_pauses_the_current_board_and_preserves_game_over_while_resume_keeps_state(
+    snake_app: Path,
+) -> None:
+    result = run_process(
+        [str(snake_app), "activation", "128", "160", "16", "16", "1", "17", "126", "126"],
+        name="run Snake activation listener harness",
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout == "snake-app-listener: all checks passed\n"
+
+
 def test_score_write_failure_is_visible_and_keeps_play_and_back_available(snake_app: Path) -> None:
     result = run_process(
         [str(snake_app), "save-failure", "128", "160", "16", "16", "1", "17", "126", "126"],
