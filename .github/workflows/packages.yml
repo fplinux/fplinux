@@ -1,0 +1,215 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: fplinux-release
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  prepare-inputs:
+    if: github.repository == 'fplinux/fplinux'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      targets: ${{ steps.matrix.outputs.targets }}
+      snapshot: ${{ steps.inputs.outputs.snapshot }}
+      release_id: ${{ steps.inputs.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.14"
+      - id: matrix
+        run: echo "targets=$(./fplinux ci matrix)" >> "$GITHUB_OUTPUT"
+      - run: sh .github/scripts/prepare-linux.sh
+      - id: inputs
+        run: ./fplinux ci prepare-inputs --output-dir "$RUNNER_TEMP/fplinux-inputs"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: dependency-inputs
+          path: ${{ runner.temp }}/fplinux-inputs/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 2
+
+  check:
+    needs: prepare-inputs
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.14"
+      - run: sh .github/scripts/prepare-linux.sh
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: dependency-inputs
+          path: ${{ runner.temp }}/fplinux-inputs
+      - run: ./fplinux ci restore-inputs --directory "$RUNNER_TEMP/fplinux-inputs" --snapshot "${{ needs.prepare-inputs.outputs.snapshot }}"
+      - run: ./fplinux setup --offline
+      - run: ./fplinux doctor
+      - run: ./fplinux check --no-cache
+
+  build:
+    needs: [prepare-inputs, check]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare-inputs.outputs.targets) }}
+    env:
+      FPLINUX_TARGET: ${{ matrix.target }}
+      FPLINUX_PACKAGE_HOSTS: ${{ join(matrix.hosts, ' ') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.14"
+      - run: sh .github/scripts/prepare-linux.sh
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: dependency-inputs
+          path: ${{ runner.temp }}/fplinux-inputs
+      - run: ./fplinux ci restore-inputs --directory "$RUNNER_TEMP/fplinux-inputs" --snapshot "${{ needs.prepare-inputs.outputs.snapshot }}"
+      - run: ./fplinux setup --offline
+      - run: ./fplinux doctor
+      - run: ./fplinux build "$FPLINUX_TARGET" --without-device-data --offline
+      - run: |
+          for host in $FPLINUX_PACKAGE_HOSTS; do
+            ./fplinux package "$FPLINUX_TARGET" --host "$host" --output-directory .cache/ci/packages
+          done
+          for archive in .cache/ci/packages/*.zip; do
+            ./fplinux inspect archive "$archive"
+          done
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: packages-${{ matrix.target }}
+          path: .cache/ci/packages/*.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 2
+
+  assemble:
+    needs: [prepare-inputs, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.14"
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          pattern: packages-*
+          merge-multiple: true
+          path: .cache/ci/intermediate
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: dependency-inputs
+          path: ${{ runner.temp }}/fplinux-inputs
+      - run: ./fplinux ci assemble --input-dir .cache/ci/intermediate --inputs-dir "$RUNNER_TEMP/fplinux-inputs" --output-dir .cache/ci/distribution
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: distribution
+          path: .cache/ci/distribution/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 2
+
+  smoke-linux:
+    needs: assemble
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.14"
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: distribution
+          path: .cache/ci/distribution
+      - run: sudo apt-get update && sudo apt-get install --no-install-recommends -y udev iproute2
+      - run: sudo install -m 0644 common/60-fplinux.rules /etc/udev/rules.d/60-fplinux.rules
+      - run: ./fplinux ci smoke --directory .cache/ci/distribution --host linux
+
+  smoke-windows:
+    needs: assemble
+    runs-on: windows-2025
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.14"
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: distribution
+          path: distribution
+      - run: .github/scripts/smoke-windows.ps1 -Python (Get-Command python).Source -Checkout $env:GITHUB_WORKSPACE -Distribution (Join-Path $env:GITHUB_WORKSPACE 'distribution')
+        shell: pwsh
+
+  publish:
+    needs: [check, smoke-linux, smoke-windows]
+    if: github.repository == 'fplinux/fplinux' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.14"
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: distribution
+          path: .cache/ci/distribution
+      - run: ./fplinux ci publish --directory .cache/ci/distribution --commit "$GITHUB_SHA"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  pages:
+    needs: prepare-inputs
+    if: github.repository == 'fplinux/fplinux' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml
+    with:
+      snapshot: ${{ needs.prepare-inputs.outputs.snapshot }}

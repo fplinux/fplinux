@@ -1,7 +1,11 @@
 Linux host tool rebuilding and library replacement
 
 The project directory contains the current source, tool recipes and patches.
-The upstream directory contains the exact source archives listed in downloads.json.
+The upstream directory contains the exact source archives. For a single runtime,
+its inventory is upstream/downloads.json. In a complete release,
+select selections/<target>/<linux|windows>/upstream/downloads.json instead.
+Selections also retain their Alpine source channels and host source projections.
+Shared project and upstream paths remain relative to the source archive root.
 Project platform recipes select tool members, project copies and ordered patches.
 
 Use a Linux x86-64 musl build environment, such as Alpine, and select an

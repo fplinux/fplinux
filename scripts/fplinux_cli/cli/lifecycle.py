@@ -22,13 +22,14 @@ _EXCLUSIVE_CACHE_COMMANDS = frozenset(
         "dependencies",
         "device-data",
         "format",
+        "package",
         "probe-build",
         "setup",
         "test",
     }
 )
 
-_SHARED_CACHE_COMMANDS = frozenset({"console", "nand", "package", "run", "verify"})
+_SHARED_CACHE_COMMANDS = frozenset({"console", "nand", "run", "verify"})
 
 
 def _cache_lock_exclusive(args: argparse.Namespace) -> bool | None:
@@ -39,10 +40,13 @@ def _cache_lock_exclusive(args: argparse.Namespace) -> bool | None:
         return True if args.prune_apply else None
     if args.command == "inspect":
         return False if args.inspect_kind in {"bundle", "footprint"} else None
-    if args.command in _EXCLUSIVE_CACHE_COMMANDS:
+    if args.command in _EXCLUSIVE_CACHE_COMMANDS or (
+        args.command == "ci"
+        and args.ci_command in {"prepare-inputs", "restore-inputs", "site-install"}
+    ):
         return True
     if args.command in _SHARED_CACHE_COMMANDS:
-        return bool(args.command == "package" and args.autonomous)
+        return False
     return None
 
 

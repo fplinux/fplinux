@@ -1,14 +1,14 @@
 name: Documentation site
 
 on:
-  push:
-    branches: [main]
+  workflow_call:
+    inputs:
+      snapshot:
+        description: Exact dependency snapshot prepared by this release workflow
+        required: true
+        type: string
 
 permissions: {}
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
   build:
@@ -18,13 +18,18 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
-          node-version: "24.21.0"
-      - run: npm install --global npm@12.2.0
-      - run: npm ci --strict-peer-deps --no-audit --no-fund
-        working-directory: site
+          python-version: "3.14"
+      - run: sh .github/scripts/prepare-linux.sh
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        with:
+          name: dependency-inputs
+          path: ${{ runner.temp }}/fplinux-inputs
+      - run: ./fplinux ci restore-inputs --directory "$RUNNER_TEMP/fplinux-inputs" --snapshot "${{ inputs.snapshot }}"
+      - run: ./fplinux ci site-install
       - run: npm run check
         working-directory: site
       - run: npm run build

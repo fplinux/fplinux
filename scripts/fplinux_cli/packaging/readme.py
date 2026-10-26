@@ -32,36 +32,87 @@ def phone_documentation_path(target: str) -> str:
     return f"docs/{slug}/index.html"
 
 
+def preparation_instructions(*, emmc: bool) -> str:
+    """Describe the selected read and its safe-disconnect message before the normal boot."""
+    if emmc:
+        return dedent("""\
+            When phone settings are needed
+
+            The launcher reads only the selected sound settings from the phone's
+            read-only internal storage and prepares the files FPLinux needs.
+            Keep USB connected until the launcher tells you: "Disconnect USB."
+            The earlier message "Your phone data is ready" is not the end of this step.
+            If the launcher cannot check that storage is safe to disconnect, keep the
+            phone powered and follow its error message.
+
+            When asked, disconnect USB. If the phone stays on, remove and reinsert its
+            battery. Start the launcher again with the phone powered off and disconnected.
+            Wait for the connection instructions again, then connect to start FPLinux.
+
+            Compatible saved settings are reused on later launches and by new archives
+            for this same phone. They can be prepared again without another phone read.
+            """)
+    return dedent("""\
+        When a backup is needed
+
+        The launcher copies the phone's internal memory to your computer and prepares
+        the files FPLinux needs. It does not change the phone's internal memory.
+        Keep USB connected until the launcher tells you: "Disconnect USB."
+        The earlier message "Your phone data is ready" is not the end of this step.
+        If the launcher cannot check that storage is safe to disconnect, keep the
+        phone powered and follow its error message.
+
+        When asked, disconnect USB. If the phone stays on, remove and reinsert its
+        battery. Start the launcher again with the phone powered off and disconnected.
+        Wait for the connection instructions again, then connect to start FPLinux.
+
+        If a compatible backup is already saved, the launcher uses it and continues
+        to start FPLinux without this extra restart. New archives can reuse the backup
+        of this same phone; a new backup is made when the saved one cannot be used.
+        """)
+
+
 def shutdown_instructions(*, external_root: bool, with_offline_documentation: bool) -> str:
     """Keep card-release prerequisites beside the archive's power-removal action."""
     sections = [
         dedent("""\
-            Before removing power, stop programs using data cards, disable card-backed
-            swap, flush writes and unmount all data-card filesystems. Do not unplug USB
-            or remove the battery while a writable card filesystem is mounted.
+            Shut down safely
+
+            Save any files you need from RAM to your computer or a supported memory
+            card. Files in RAM are lost when the phone turns off.
+
+            If you use a microSD card for files, stop programs using it and turn off
+            any swap stored on the card. Save pending writes and unmount the card's
+            filesystems so Linux finishes using them. Do not unplug USB or remove
+            the battery until this is done. Pulling the card out is not a substitute
+            for unmounting it.
             """).removesuffix("\n")
     ]
     if external_root:
         sections.append(
             dedent("""\
-                With a microSD system root, keep USB connected. Stop its writers and
-                unmount other card filesystems, then run on the phone:
+                If Linux itself runs from microSD, keep USB connected. Stop programs
+                and services writing to the card, turn off any swap on it, and unmount
+                all card filesystems except the system filesystem (/). Then run these
+                commands in the phone's terminal:
 
                   sync
                   mount -o remount,ro /
                   grep ' / ' /proc/mounts
 
-                The root entry must show ro. If remounting fails, keep the phone powered
-                and stop the remaining writers before trying again. After confirming ro:
+                The line for / must show ro, which means read-only. If remounting fails,
+                keep the phone powered and stop the remaining programs writing to the
+                card before trying again. Only after confirming ro, run:
 
                   poweroff
                 """).removesuffix("\n")
         )
     sections.append(
         dedent("""\
-            Only after releasing the cards, disconnect USB. If the phone stays powered,
-            remove and reinsert its battery before booting normally. A fresh USB load
-            is required after power-off.
+            After unmounting data cards and making any system card read-only, disconnect USB.
+            If the phone stays on, remove and reinsert its battery. Start the phone
+            normally, without holding the USB boot key, to use its original system.
+            To use FPLinux again after power-off, repeat the startup instructions.
             """).removesuffix("\n")
     )
     instructions = "\n\n".join(sections) + "\n"
@@ -78,15 +129,19 @@ def ordinary_readme(target: str, config: dict[str, Any]) -> bytes:
     external_root = config["linux"]["root"]["kind"] == "external"
     source_loaders = config.get("platform") == "sc9820e"
     preparation = device_data_descriptor(target, config) is not None
+    emmc = config.get("emmc") is not None
     sections = [
         dedent("""\
             FPLinux for {name}
 
-            Use an archive for this exact phone. On a Linux x86-64 PC, install Python 3.14,
+            Before you start
+
+            Use this archive only with this exact phone. On a Linux x86-64 PC, install Python 3.14,
             GNU coreutils, iproute2 and OpenSSH. The PC must configure a new USB network
             interface through IPv4 DHCP. Use a USB data cable.
 
-            From the extracted archive directory, check its files and install USB rules:
+            Extract the whole ZIP into a folder. Open a terminal in that folder,
+            check the files and install the USB access rules:
 
               sha256sum -c SHA256SUMS
               sudo install -m 0644 ./60-fplinux.rules /etc/udev/rules.d/60-fplinux.rules
@@ -98,60 +153,69 @@ def ordinary_readme(target: str, config: dict[str, Any]) -> bytes:
     if external_root:
         sections.append(
             dedent("""\
-                Before starting the runner, prepare the microSD system card from FPLINUX.img.xz:
+                Before starting FPLinux, prepare the microSD system card from FPLINUX.img.xz:
                   docs/guides/microsd-system-card/index.html
 
-                Insert the prepared card into the powered-off phone and keep it installed
-                for the whole powered session.
+                Insert the prepared card into the powered-off phone and leave it in
+                until FPLinux has shut down safely.
                 """).removesuffix("\n")
         )
     if source_loaders:
-        sections.append(
-            dedent("""\
-                The archive includes its source-built RAM loaders. Loading does not
-                read or write the phone's internal storage.
-                """).removesuffix("\n")
-        )
+        loading = "All files needed to load FPLinux into RAM are included."
+        if emmc:
+            loading += " Internal storage is read only."
+        else:
+            loading += " Loading does\nnot read or write the phone's internal storage."
+        sections.append(loading)
     sections.append(
         dedent("""\
-            Keep the powered-off phone disconnected. Start the runner as your regular user:
+            Start FPLinux
+
+            Turn the phone off and leave USB disconnected. Run this command as your
+            regular user, not as root:
 
               python3.14 -I fplinux.py run
 
-            Wait until the runner asks for the phone, then follow its instruction:
+            Wait until the launcher asks you to connect the phone. Then follow its instruction:
 
               {instructions}
 
-            If connected too early, disconnect and restart this sequence.
+            If you connected too early, disconnect USB, turn the phone off and start again.
             """)
         .removesuffix("\n")
         .format(instructions=instructions)
     )
     if preparation:
-        sections.append(
-            dedent("""\
-                The first run saves a complete NAND backup in data/nand.bin and prepares
-                your phone's data in data/phone. Wait for preparation to finish and follow
-                its storage-release instructions before disconnecting USB. If the phone
-                stays powered, remove and reinsert its battery. Run the same command again
-                with the phone powered off to load FPLinux and open SSH.
-                """).removesuffix("\n")
-        )
+        sections.append(preparation_instructions(emmc=emmc).removesuffix("\n"))
     sections.extend(
         [
             dedent("""\
-                Exit the SSH shell to return to the PC; Linux keeps running. Leave it
-                connected and run the same command again to reopen SSH, or require the
-                saved session with:
+                Reconnect to a running phone
+
+                After loading, the launcher opens the phone's command-line terminal
+                on your computer using SSH. Type exit or press Ctrl+D to close this
+                terminal; FPLinux keeps running on the phone.
+
+                While the phone is still running FPLinux, connect USB and run the same
+                command from the same extracted folder. Do not turn the phone off or
+                hold its boot key. To reconnect without starting a new boot, use:
 
                   python3.14 -I fplinux.py run --reconnect
+
+                Ctrl+C cancels loading or waiting; it does not turn the phone off.
                 """).removesuffix("\n"),
+            shutdown_instructions(
+                external_root=external_root, with_offline_documentation=True
+            ).removesuffix("\n"),
             dedent("""\
-                Keep this extracted directory for this phone. Private connection keys and
-                session records are stored in data/session. Each launch writes a new log
-                in logs and displays its exact path.
-                Loader progress is printed in the terminal; add --events /path/to/events.jsonl
-                to a fresh load to save its progress events.
+                Help and saved files
+
+                Each launch saves a runtime.log file under logs and shows its full path.
+                Include that log when reporting a startup problem.
+                Keep this extracted folder to reconnect to its running phone. It holds
+                the private connection keys and session information in data/session.
+                Loading progress appears in the terminal. For machine-readable progress,
+                add --events /path/to/events.jsonl when starting a new boot.
                 """).removesuffix("\n"),
             dedent("""\
                 Phone support, controls and limits: {documentation}
@@ -161,18 +225,35 @@ def ordinary_readme(target: str, config: dict[str, Any]) -> bytes:
             .format(documentation=documentation),
         ]
     )
+    if preparation:
+        saved_data = "original settings" if emmc else "backup"
+        prepared_from = "them" if emmc else "it"
+        saved_files = (
+            f"Your phone's {saved_data} and the files prepared from {prepared_from} "
+            "are saved on your computer:"
+        )
+        sections.append(
+            dedent("""\
+                {saved_files}
+                  ~/.local/share/fplinux/phones/{target}
+                If XDG_DATA_HOME is set, its directory replaces ~/.local/share.
+                This folder is separate from the extracted ZIP, so new archives can
+                reuse compatible saved data. Use it with only this physical phone.
+                For another phone of the same model, add --phone-data PATH to the
+                startup command and choose a different folder. PATH is the exact
+                folder to use, without adding a model subfolder.
+                """)
+            .removesuffix("\n")
+            .format(target=target, saved_files=saved_files)
+        )
     if documentation == "docs/porting/checklist/index.html":
         sections.append(
             dedent("""\
-                The configured BootROM key is a starting point for bring-up; confirm it
-                on this phone before use. Configuration alone does not establish support.
+                This phone has no published support page. The boot key above comes
+                from its configuration; confirm it on this phone before use. A
+                configuration file alone does not mean the phone has been tested.
                 """).removesuffix("\n")
         )
-    sections.append(
-        shutdown_instructions(
-            external_root=external_root, with_offline_documentation=True
-        ).removesuffix("\n")
-    )
     text = "\n\n".join(sections) + "\n"
     return text.encode("utf-8")
 

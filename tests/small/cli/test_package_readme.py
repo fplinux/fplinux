@@ -74,6 +74,8 @@ def test_ordinary_readme_preserves_the_complete_archive_instructions(  # noqa: P
 ) -> None:
     readme_config["platform"] = platform
     readme_config["linux"]["root"]["kind"] = root_kind
+    if platform == "sc9820e":
+        readme_config.pop("nand")
     if not with_groups:
         readme_config["device_data"] = {"parser": None, "groups": {}}
     expected = ROOT / "tests/small/cli/fixtures/package-readme" / document
@@ -112,7 +114,7 @@ def test_readme_names_the_selected_variant_and_existing_offline_route(
     assert text.startswith("FPLinux for ACME Demo (D-1)\n")
     assert "Hold the left soft key while connecting USB." in text
     assert "docs/phones/demo-model/index.html" in text
-    assert text.index("Wait until the runner asks") < text.index("Hold the left soft key")
+    assert text.index("Wait until the launcher asks") < text.index("Hold the left soft key")
 
 
 def test_source_loader_archive_runs_with_its_bundled_stages(
@@ -120,14 +122,15 @@ def test_source_loader_archive_runs_with_its_bundled_stages(
 ) -> None:
     """A fresh load and reconnect need no separate loader files or import command."""
     readme_config["platform"] = "sc9820e"
+    readme_config.pop("nand")
     text = ordinary_readme("demo-phone", readme_config).decode()
     words = " ".join(text.split())
 
-    assert "includes its source-built RAM loaders" in words
+    assert "All files needed to load FPLinux into RAM are included" in words
     assert "does not read or write the phone's internal storage" in words
     load = "python3.14 -I fplinux.py run\n"
     assert load in text
-    assert text.index(load) < text.index("Wait until the runner asks")
+    assert text.index(load) < text.index("Wait until the launcher asks")
     assert "python3.14 -I fplinux.py run --reconnect\n" in text
     assert "--loader-inputs" not in text
     assert "PAC" not in text
@@ -136,21 +139,36 @@ def test_source_loader_archive_runs_with_its_bundled_stages(
     assert "complete NAND backup" not in words
 
 
+def test_emmc_readme_describes_only_selected_originals_and_the_required_restart(
+    readme_config: dict[str, Any],
+) -> None:
+    readme_config["platform"] = "sc9820e"
+    readme_config.pop("nand")
+    readme_config["emmc"] = {"raw_device": "/dev/mmcblk1"}
+    text = ordinary_readme("demo-phone", readme_config).decode()
+    words = " ".join(text.split())
+    assert "reads only the selected sound settings" in words
+    assert 'Keep USB connected until the launcher tells you: "Disconnect USB."' in words
+    assert "Start the launcher again with the phone powered off and disconnected" in words
+    assert "Your phone's original settings and the files prepared from them" in words
+    assert "does not read or write the phone's internal storage" not in words
+    assert "backup" not in text
+
+
 def test_ram_readme_requires_card_release_before_disconnect(readme_config: dict[str, Any]) -> None:
     text = ordinary_readme("demo-phone", readme_config).decode()
     words = " ".join(text.split())
 
-    assert "disable card-backed swap, flush writes and unmount" in words
-    assert "Do not unplug USB or remove the battery while a writable card filesystem" in words
-    assert text.index("unmount all data-card") < text.index("Only after releasing the cards")
+    assert "turn off any swap stored on the card" in words
+    assert "Save pending writes and unmount the card's filesystems" in words
+    assert "Do not unplug USB or remove the battery until this is done" in words
+    assert text.index("Shut down safely") < text.index("After unmounting data cards")
     assert "mount -o remount,ro /" not in text
     assert "FPLINUX.img.xz" not in text
-    assert "complete NAND backup in data/nand.bin" in words
-    assert "your phone's data in data/phone" in words
-    assert text.index("Wait for preparation to finish") < text.index("open SSH")
-    assert "Run the same command again with the phone powered off" in words
+    assert "Start the launcher again with the phone powered off and disconnected" in words
+    assert 'Keep USB connected until the launcher tells you: "Disconnect USB."' in words
     assert "data/session" in text
-    assert "in logs and displays its exact path" in words
+    assert "runtime.log file under logs and shows its full path" in words
 
 
 def test_system_root_readme_requires_prepared_card_and_observed_read_only_root(
@@ -163,15 +181,15 @@ def test_system_root_readme_requires_prepared_card_and_observed_read_only_root(
     assert "prepare the microSD system card from FPLINUX.img.xz" in words
     assert "docs/guides/microsd-system-card/index.html" in text
     assert "Insert the prepared card into the powered-off phone" in words
-    assert "keep it installed for the whole powered session" in words
-    startup = text.index("Keep the powered-off phone disconnected")
+    assert "leave it in until FPLinux has shut down safely" in words
+    startup = text.index("Turn the phone off and leave USB disconnected")
     assert text.index("docs/guides/microsd-system-card/index.html") < startup
     assert text.index("Insert the prepared card") < startup
-    assert text.index("for the whole powered session") < startup
+    assert text.index("until FPLinux has shut down safely") < startup
     assert "mount -o remount,ro /" in text
     assert "grep ' / ' /proc/mounts" in text
-    assert "If remounting fails, keep the phone powered" in text
-    assert text.index("The root entry must show ro") < text.index("Only after releasing the cards")
+    assert "If remounting fails, keep the phone powered" in words
+    assert text.index("The line for / must show ro") < text.index("After unmounting data cards")
     assert "complete NAND backup" not in words
 
 

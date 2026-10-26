@@ -22,7 +22,7 @@ def main() -> None:
     from fplinux_cli.runtime import bundle as bundle_runtime  # noqa: PLC0415
     from fplinux_cli.runtime.cli import main as runtime_main  # noqa: PLC0415
 
-    host = "nt" if sys.argv[3] == "windows10" else "posix"
+    host = "nt" if sys.argv[3] == "windows" else "posix"
     with mock.patch.object(
         bundle_runtime, "os", SimpleNamespace(name=host, access=os.access, X_OK=os.X_OK)
     ):

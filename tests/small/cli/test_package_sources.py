@@ -12,12 +12,9 @@ import pytest
 from fplinux_cli import common
 from fplinux_cli.manifests.loaders import LoaderSource
 from fplinux_cli.packaging.sources import (
-    _build_sources,
     _loader_license_notices,
     project_source_files,
 )
-
-from tests import ROOT
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -34,6 +31,22 @@ def test_source_companion_keeps_active_sources_and_excludes_private_runtime_file
     source.write_bytes(b"original tracked source\n")
     source.chmod(0o755)
     subprocess.run(["git", "-C", str(tmp_path), "add", "common/boot.py"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--quiet",
+            "-m",
+            "Initial source",
+        ],
+        check=True,
+    )
     source.write_bytes(b"active edited source\n")
     (tmp_path / "common/new.py").write_bytes(b"new source\n")
     (tmp_path / "common/id_ed25519.pem").write_bytes(b"private key\n")
@@ -55,41 +68,6 @@ def test_source_companion_keeps_active_sources_and_excludes_private_runtime_file
     assert b"personal phone image" not in all_contents
     assert b"private evidence" not in all_contents
     assert b"private instructions" not in all_contents
-
-
-def test_sc9820e_source_companion_selects_the_three_loader_archives(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Source delivery uses the same declared inputs without requiring a NAND bridge."""
-    source_lock = ROOT / "tests/small/cli/fixtures/package-sources/loader-sources.lock.toml"
-    (tmp_path / "sources.lock.toml").write_bytes(source_lock.read_bytes())
-    monkeypatch.setattr(common, "ROOT", tmp_path)
-    config = {
-        "loader": {
-            "build": {
-                "fdl1_source": "first",
-                "fdl2_source": "board",
-                "sml_source": "monitor",
-            }
-        }
-    }
-    platform = {
-        "linux": {"source_lock": "linux"},
-        "bootstrap": {"backend": "sc9820e"},
-        "host": {"runtime_tools": {"loader": "uploader"}, "tools": []},
-    }
-    inputs = _build_sources(config, platform)
-    assert {item.key: item.destination for item in inputs} == {
-        "linux": "downloads/linux/linux-1.2.3.tar.xz",
-        "loader:fdl1": "downloads/loaders/first.tar.gz",
-        "loader:fdl2": "downloads/loaders/board.tar.gz",
-        "loader:sml": "downloads/loaders/monitor.tar.gz",
-    }
-    assert {item.key: item.sha256 for item in inputs if item.purpose == "loader-source"} == {
-        "loader:fdl1": "b" * 64,
-        "loader:fdl2": "c" * 64,
-        "loader:sml": "d" * 64,
-    }
 
 
 def _source_archive(members: dict[str, bytes]) -> bytes:

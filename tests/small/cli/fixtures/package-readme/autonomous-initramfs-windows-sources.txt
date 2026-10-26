@@ -1,0 +1,105 @@
+FPLinux - ACME Demo (D-1)
+
+This archive is only for ACME Demo (D-1). Internal storage is read only.
+FPLinux runs in the phone's temporary memory (RAM). Files kept only
+in RAM are lost when the phone loses power.
+
+Before you start
+
+Extract the entire ZIP into a folder on your PC. Keep all its files
+together; do not open the launcher from inside the ZIP. Use this folder
+with one physical phone and a USB data cable. Only one launcher can
+run from this folder at a time.
+
+Use a Windows 10 or 11 x64 PC. Python and the tools needed to connect
+to the phone are included. Run the launcher as your regular Windows user.
+It may ask to install a USB driver. Read the included driver license
+and approve the administrator prompt if you agree to install it.
+If driver setup asks you to restart the launcher, open Run.cmd again.
+
+Start FPLinux
+
+1. Turn the phone off and disconnect its USB cable.
+2. Double-click Run.cmd in the extracted folder.
+3. Wait for the launcher's invitation to connect the phone, then follow
+   these instructions:
+
+Hold the left soft key while connecting USB.
+
+Keep USB connected and follow the messages in this window.
+Ctrl+C cancels loading or waiting; it does not power the phone off.
+
+When a backup is needed
+
+The launcher copies the phone's internal memory to your computer and prepares
+the files FPLinux needs. It does not change the phone's internal memory.
+Keep USB connected until the launcher tells you: "Disconnect USB."
+The earlier message "Your phone data is ready" is not the end of this step.
+If the launcher cannot check that storage is safe to disconnect, keep the
+phone powered and follow its error message.
+
+When asked, disconnect USB. If the phone stays on, remove and reinsert its
+battery. Start the launcher again with the phone powered off and disconnected.
+Wait for the connection instructions again, then connect to start FPLinux.
+
+If a compatible backup is already saved, the launcher uses it and continues
+to start FPLinux without this extra restart. New archives can reuse the backup
+of this same phone; a new backup is made when the saved one cannot be used.
+
+Use FPLinux and reconnect
+
+Once FPLinux is running, the launcher opens SSH: a command-line
+terminal on your PC where you can enter phone commands.
+
+Type exit or press Ctrl+D to close the phone terminal. The phone
+keeps running. To reconnect, leave it powered and connected by USB,
+then open the same launcher from the same folder again.
+
+Shut down safely
+
+Save any files you need from RAM to your computer or a supported memory
+card. Files in RAM are lost when the phone turns off.
+
+If you use a microSD card for files, stop programs using it and turn off
+any swap stored on the card. Save pending writes and unmount the card's
+filesystems so Linux finishes using them. Do not unplug USB or remove
+the battery until this is done. Pulling the card out is not a substitute
+for unmounting it.
+
+After unmounting data cards and making any system card read-only, disconnect USB.
+If the phone stays on, remove and reinsert its battery. Start the phone
+normally, without holding the USB boot key, to use its original system.
+To use FPLinux again after power-off, repeat the startup instructions.
+
+Help and saved files
+
+Each launch saves runtime.log in a new folder inside logs and
+displays its exact path. Include that runtime.log when asking for
+help. Private connection keys and details needed to reconnect are
+saved in data/session; keep them private and keep this folder for
+the same physical phone.
+
+The phone's backup and prepared data are saved on the PC in:
+  %LOCALAPPDATA%\FPLinux\phones\demo-phone
+This folder holds the internal-storage backup nand.bin, its
+matching nand.bin.json file, and prepared phone data in phone/.
+Compatible backup and prepared data can be reused by other
+FPLinux archives for this same physical phone.
+Add --phone-data PATH to the launch command to choose a separate
+folder, for example when using another handset. PATH is used
+exactly as given.
+
+Use an existing backup
+
+To use a complete internal-storage backup from this same phone,
+run this command from the extracted folder:
+  Run.cmd --from-dump "C:\path\to\nand.bin"
+Keep its matching nand.bin.json file beside nand.bin; the launcher
+needs both files to check the backup. It preserves both input files,
+copies the backup into the saved-data folder and prepares the phone
+data if needed. It then continues loading FPLinux. Connect the phone
+only when the launcher asks.
+
+Matching source and build material:
+  FPLinux-demo-phone-windows-x64-1234567890ab-sources.zip
+Keep it available alongside this archive. Licenses remain included here.

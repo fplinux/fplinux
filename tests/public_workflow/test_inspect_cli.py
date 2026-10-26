@@ -61,6 +61,9 @@ class InspectCli:
             "generation": generation,
             "files": {"payload.bin": file_record(payload)},
             "workspace_digest": "a" * 64,
+            "release_id": "aaaaaaaaaaaa",
+            "source_commit": "a" * 40,
+            "source_snapshot": "b" * 64,
             "environment_recipe": "b" * 64,
             "environment_content": "c" * 64,
             "apk_signing_key": "d" * 64,
@@ -76,23 +79,20 @@ class InspectCli:
             output, "example", staging, generation, profile, build_type=build_type
         )
 
-    def make_archive(
-        self, *, candidate: bool = True, damaged: bool = False, extra: bool = False
-    ) -> Path:
+    def make_archive(self, *, damaged: bool = False, extra: bool = False) -> Path:
         """Write an independently checksummed ZIP without calling the production packager."""
-        contents = {
-            "build-manifest.json": json.dumps(
-                {
-                    "target": "example",
-                    "profile": None,
-                    "build_type": "release",
-                    "generation": "1" * 64,
-                }
-            ).encode(),
-            "payload.bin": b"abc",
+        manifest = {
+            "target": "example",
+            "release_id": "aaaaaaaaaaaa",
+            "source_commit": "a" * 40,
+            "source_snapshot": "b" * 64,
+            "profile": None,
+            "build_type": "release",
+            "files": {"payload.bin": {"mode": 0o644, "size": 3, "sha256": ABC_SHA256}},
         }
-        if candidate:
-            contents["CANDIDATE-NOTICE.txt"] = b"Candidate\n"
+        canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        manifest["generation"] = hashlib.sha256(canonical).hexdigest()
+        contents = {"build-manifest.json": json.dumps(manifest).encode(), "payload.bin": b"abc"}
         checksums = "".join(
             f"{hashlib.sha256(data).hexdigest()}  {name}\n" for name, data in contents.items()
         )
@@ -103,7 +103,9 @@ class InspectCli:
         path = self.root / "example.zip"
         with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for name, data in contents.items():
-                archive.writestr("bundle/" + name, data)
+                item = zipfile.ZipInfo("bundle/" + name)
+                item.external_attr = 0o100644 << 16
+                archive.writestr(item, data)
             archive.writestr("bundle/SHA256SUMS", checksums)
         return path
 
@@ -168,22 +170,16 @@ class InspectCliTests:
         assert ("build-manifest checksums: OK") in (result.stdout)
         assert (str(inspect_cli.root)) not in (result.stdout)
 
-    @pytest.mark.parametrize(
-        ("candidate", "kind"),
-        [
-            pytest.param(True, "candidate", id="candidate"),
-            pytest.param(False, "release", id="release"),
-        ],
-    )
     def test_archive_reports_identity_and_checks_every_listed_file_without_extraction(
-        self, inspect_cli: InspectCli, *, candidate: bool, kind: str
+        self, inspect_cli: InspectCli
     ) -> None:
-        """Both package kinds report verified bytes without creating an extracted tree."""
-        archive = inspect_cli.make_archive(candidate=candidate)
+        """Runtime archives report verified bytes without creating an extracted tree."""
+        archive = inspect_cli.make_archive()
         original = archive.read_bytes()
         result = inspect_cli.run_cli("inspect", "archive", archive.name)
         assert (result.returncode) == (0), result.stderr
-        assert (f"kind: {kind}\n") in (result.stdout)
+        assert ("kind: runtime\n") in (result.stdout)
+        assert "release_id: aaaaaaaaaaaa\n" in result.stdout
         assert ("target: example\n") in (result.stdout)
         assert (f"3 {ABC_SHA256} payload.bin\n") in (result.stdout)
         assert ("SHA256SUMS: OK") in (result.stdout)

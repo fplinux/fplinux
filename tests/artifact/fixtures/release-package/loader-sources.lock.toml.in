@@ -1,15 +1,24 @@
 # SPDX-License-Identifier: GPL-2.0-only
 [first]
-archive_url = "https://example.invalid/first.tar.gz"
-archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+version = "1"
+name = "first.tar.gz"
+url = "https://example.invalid/first.tar.gz"
+algorithm = "sha256"
+checksum = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 archive_prefix = "first-release"
 
 [board]
-archive_url = "https://example.invalid/board.tar.gz"
-archive_sha256 = "{board_sha256}"
+version = "1"
+name = "board.tar.gz"
+url = "https://example.invalid/board.tar.gz"
+algorithm = "sha256"
+checksum = "{board_sha256}"
 archive_prefix = "board-release"
 
 [monitor]
-archive_url = "https://example.invalid/monitor.tar.gz"
-archive_sha256 = "{monitor_sha256}"
+version = "1"
+name = "monitor.tar.gz"
+url = "https://example.invalid/monitor.tar.gz"
+algorithm = "sha256"
+checksum = "{monitor_sha256}"
 archive_prefix = "monitor-release"

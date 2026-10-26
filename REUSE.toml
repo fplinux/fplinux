@@ -36,7 +36,6 @@ path = [
   "platforms/**",
   "profiles/**",
   "pyproject.toml",
-  "releases.lock.toml",
   "scripts/**",
   "site/**",
   "sources.lock.toml",

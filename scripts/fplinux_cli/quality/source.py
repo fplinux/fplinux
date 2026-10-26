@@ -11,7 +11,6 @@ import shlex
 import signal
 import subprocess
 import tempfile
-import tomllib
 from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
@@ -357,25 +356,6 @@ def check_markdown_links(files: list[Path]) -> None:
                         )
 
 
-def check_release_lock() -> None:
-    """Validate the release verification lock against known targets."""
-    with (ROOT / "releases.lock.toml").open("rb") as stream:
-        lock = tomllib.load(stream)
-    if set(lock) != {"verified"} or not isinstance(lock["verified"], dict):
-        fail("releases.lock.toml must contain exactly one [verified] table")
-    targets = set(discover_targets())
-    for name, digest in lock["verified"].items():
-        if name not in targets:
-            fail(f"verified release entry is not a target: {name}")
-        if (
-            not isinstance(digest, str)
-            or len(digest) != 64
-            or any(character not in "0123456789abcdef" for character in digest)
-        ):
-            fail(f"invalid recorded phone-test SHA256 for target: {name}")
-
-
-
 def alpine_apkbuilds(files: list[Path]) -> list[str]:
     """Discover regular first-party Alpine recipes."""
     result = [
@@ -686,7 +666,6 @@ def main() -> None:
         check_canonical_sources(files, formats, selected)
     if "metadata" in selected:
         with report_stage(reporter, "metadata"):
-            check_release_lock()
             run(["taplo", "check", *toml_files])
     if "docs" in selected:
         markdown_paths = [

@@ -303,14 +303,12 @@ _ROOT_ORDERS: dict[str, dict[str, tuple[str, ...]]] = {
         "sysroot": ("packages",),
         "package": ("repository", "file", "sha256", "bytes"),
     },
-    "releases.lock.toml": {"": ("verified",)},
 }
 
 _LEXICAL_TABLES = {
     "_typos.toml": {"default.extend-identifiers", "default.extend-words"},
     "sources.lock.toml": {"", "fpdoom_host.files", "spreadtrum_flash.files"},
     "alpine.lock.toml": {"runtime.additions"},
-    "releases.lock.toml": {"verified"},
 }
 
 

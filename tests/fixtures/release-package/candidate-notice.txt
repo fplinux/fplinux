@@ -1,4 +1,0 @@
-PHONE-TEST CANDIDATE - DO NOT PUBLISH
-
-This archive is for testing on the target phone only.
-Candidate packaging does not make it release-ready.

@@ -18,7 +18,7 @@ from fplinux_cli.runtime.bundle_session import PUBLIC_BOOT_MODES
 
 _CHECK_SCOPE_METAVAR = "{" + ",".join(CHECK_SCOPES) + "}"
 _PUBLIC_COMMAND_METAVAR = (
-    "{doctor,check,test,logs,inspect,format,setup,dependencies,build,probe-build,checksum,package,prune,"
+    "{doctor,check,test,logs,inspect,format,setup,dependencies,ci,build,probe-build,checksum,package,prune,"
     "run,console,nand,device-data,target,verify}"
 )
 
@@ -149,6 +149,30 @@ def _add_device_data_commands(
     )
 
 
+def _add_ci_commands(commands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Expose the release workflow's locally reproducible stages."""
+    ci_parser = commands.add_parser("ci", help="prepare and verify complete releases")
+    stages = ci_parser.add_subparsers(dest="ci_command", required=True)
+    stages.add_parser("matrix", help="print the supported runtime archive selections")
+    stages.add_parser("bootstrap", help="check native build-runner prerequisites")
+    stages.add_parser("site-install", help="install documentation tooling from saved originals")
+    prepare = stages.add_parser(
+        "prepare-inputs", help="preserve exact inputs for all release jobs"
+    )
+    prepare.add_argument("--output-dir", type=Path, required=True, metavar="PATH")
+    restore = stages.add_parser("restore-inputs", help="restore this run's preserved input set")
+    restore.add_argument("--directory", type=Path, required=True, metavar="PATH")
+    restore.add_argument("--snapshot", required=True, metavar="SHA256")
+    assemble = stages.add_parser("assemble", help="assemble the complete runtime and source set")
+    assemble.add_argument("--input-dir", type=Path, required=True, metavar="PATH")
+    assemble.add_argument("--output-dir", type=Path, required=True, metavar="PATH")
+    assemble.add_argument("--inputs-dir", type=Path, required=True, metavar="PATH")
+    smoke = stages.add_parser("smoke", help="start and reopen archives on their native host")
+    smoke.add_argument("--directory", type=Path, required=True, metavar="PATH")
+    smoke.add_argument("--host", choices=("linux", "windows"), required=True)
+    publish = stages.add_parser("publish", help="publish a verified complete release")
+    publish.add_argument("--directory", type=Path, required=True, metavar="PATH")
+    publish.add_argument("--commit", required=True, metavar="SHA")
 
 
 def create_parser(
@@ -247,6 +271,7 @@ def create_parser(
     diff_parser.add_argument("--json", action="store_true", help="print the full comparison")
     for kind, help_text in (
         ("archive", "check and inspect a FPLinux ZIP"),
+        ("distribution", "verify a complete release directory"),
         ("apk", "read APK metadata and file list"),
     ):
         item_parser = inspections.add_parser(kind, help=help_text)
@@ -332,6 +357,7 @@ def create_parser(
     )
     import_parser.add_argument("directory", type=Path, metavar="PARTS")
     import_parser.add_argument("output", type=Path, metavar="OUTPUT")
+    _add_ci_commands(commands)
     commit_message_parser = commands.add_parser("_commit-msg")
     commit_message_parser.add_argument("message_file")
     build_parser = commands.add_parser("build", help="build a target in .cache/out")
@@ -398,29 +424,16 @@ def create_parser(
     package_parser = commands.add_parser(
         "package", help="package an existing build for standalone use"
     )
-    _add_build_type_option(package_parser)
     package_parser.add_argument("target", choices=targets)
     _add_boot_profile_options(package_parser, "package")
     package_parser.add_argument(
-        "--candidate",
-        action="store_true",
-        help="create a clearly marked phone-test candidate",
-    )
-    package_parser.add_argument(
-        "--autonomous",
-        action="store_true",
-        help="bundle host tools and a single launcher for this phone",
-    )
-    package_parser.add_argument(
         "--host",
-        choices=("linux", "windows10"),
+        choices=("linux", "windows"),
         default="linux",
-        help="select the x86-64 host (default: linux; windows10 requires --autonomous)",
+        help="select the x86-64 host (default: linux)",
     )
     package_parser.add_argument(
-        "--offline",
-        action="store_true",
-        help="prepare autonomous host dependencies only from the existing download cache",
+        "--output-directory", type=Path, metavar="PATH", help="write both ZIPs to this directory"
     )
     prune_parser = commands.add_parser(
         "prune", help="list disposable cached files, or remove them with --apply"

@@ -190,8 +190,8 @@ class ReleaseManifestPolicyTests:
             )
             preinstalled = package_commands.load_release_manifest(release_inputs.target, profile)
 
-        assert ("apks/demo.apk") in (default["qualification_files"])
-        assert ("apks/demo.apk") not in (preinstalled["qualification_files"])
+        assert ("apks/demo.apk") in (default["bundle_files"])
+        assert ("apks/demo.apk") not in (preinstalled["bundle_files"])
         assert (preinstalled["bundle_files"]) == (
             [
                 path

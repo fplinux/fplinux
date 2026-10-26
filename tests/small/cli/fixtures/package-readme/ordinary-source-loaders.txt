@@ -1,48 +1,73 @@
 FPLinux for ACME Demo (D-1)
 
-Use an archive for this exact phone. On a Linux x86-64 PC, install Python 3.14,
+Before you start
+
+Use this archive only with this exact phone. On a Linux x86-64 PC, install Python 3.14,
 GNU coreutils, iproute2 and OpenSSH. The PC must configure a new USB network
 interface through IPv4 DHCP. Use a USB data cable.
 
-From the extracted archive directory, check its files and install USB rules:
+Extract the whole ZIP into a folder. Open a terminal in that folder,
+check the files and install the USB access rules:
 
   sha256sum -c SHA256SUMS
   sudo install -m 0644 ./60-fplinux.rules /etc/udev/rules.d/60-fplinux.rules
   sudo udevadm control --reload-rules
 
-The archive includes its source-built RAM loaders. Loading does not
-read or write the phone's internal storage.
+All files needed to load FPLinux into RAM are included. Loading does
+not read or write the phone's internal storage.
 
-Keep the powered-off phone disconnected. Start the runner as your regular user:
+Start FPLinux
+
+Turn the phone off and leave USB disconnected. Run this command as your
+regular user, not as root:
 
   python3.14 -I fplinux.py run
 
-Wait until the runner asks for the phone, then follow its instruction:
+Wait until the launcher asks you to connect the phone. Then follow its instruction:
 
   Hold the left soft key while connecting USB.
 
-If connected too early, disconnect and restart this sequence.
+If you connected too early, disconnect USB, turn the phone off and start again.
 
-Exit the SSH shell to return to the PC; Linux keeps running. Leave it
-connected and run the same command again to reopen SSH, or require the
-saved session with:
+Reconnect to a running phone
+
+After loading, the launcher opens the phone's command-line terminal
+on your computer using SSH. Type exit or press Ctrl+D to close this
+terminal; FPLinux keeps running on the phone.
+
+While the phone is still running FPLinux, connect USB and run the same
+command from the same extracted folder. Do not turn the phone off or
+hold its boot key. To reconnect without starting a new boot, use:
 
   python3.14 -I fplinux.py run --reconnect
 
-Keep this extracted directory for this phone. Private connection keys and
-session records are stored in data/session. Each launch writes a new log
-in logs and displays its exact path.
-Loader progress is printed in the terminal; add --events /path/to/events.jsonl
-to a fresh load to save its progress events.
+Ctrl+C cancels loading or waiting; it does not turn the phone off.
+
+Shut down safely
+
+Save any files you need from RAM to your computer or a supported memory
+card. Files in RAM are lost when the phone turns off.
+
+If you use a microSD card for files, stop programs using it and turn off
+any swap stored on the card. Save pending writes and unmount the card's
+filesystems so Linux finishes using them. Do not unplug USB or remove
+the battery until this is done. Pulling the card out is not a substitute
+for unmounting it.
+
+After unmounting data cards and making any system card read-only, disconnect USB.
+If the phone stays on, remove and reinsert its battery. Start the phone
+normally, without holding the USB boot key, to use its original system.
+To use FPLinux again after power-off, repeat the startup instructions.
+Full shutdown instructions are included in docs/use/power/index.html.
+
+Help and saved files
+
+Each launch saves a runtime.log file under logs and shows its full path.
+Include that log when reporting a startup problem.
+Keep this extracted folder to reconnect to its running phone. It holds
+the private connection keys and session information in data/session.
+Loading progress appears in the terminal. For machine-readable progress,
+add --events /path/to/events.jsonl when starting a new boot.
 
 Phone support, controls and limits: docs/phones/demo-model/index.html
 Shared archive procedures: docs/guides/standalone-archive/index.html
-
-Before removing power, stop programs using data cards, disable card-backed
-swap, flush writes and unmount all data-card filesystems. Do not unplug USB
-or remove the battery while a writable card filesystem is mounted.
-
-Only after releasing the cards, disconnect USB. If the phone stays powered,
-remove and reinsert its battery before booting normally. A fresh USB load
-is required after power-off.
-Full shutdown instructions are included in docs/use/power/index.html.

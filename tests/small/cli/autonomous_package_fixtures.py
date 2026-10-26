@@ -12,11 +12,11 @@ import pytest
 from fplinux_cli import common
 from fplinux_cli.alpine import selection, signing
 from fplinux_cli.artifacts.bundles import publish_current_bundle
+from fplinux_cli.artifacts.release import ReleaseContext
 from fplinux_cli.build.host_tools import linux_host, windows_driver
 from fplinux_cli.build.host_tools import windows as windows_build
 from fplinux_cli.build.identity import runtime_identity
 from fplinux_cli.build.runtime import device_data_descriptor, runtime_source_files
-from fplinux_cli.artifacts.release import ReleaseContext
 from fplinux_cli.common import canonical_json_bytes
 from fplinux_cli.environment import definition
 from fplinux_cli.environment import state as environment_states
@@ -29,6 +29,7 @@ from fplinux_cli.workspace.capture import WorkspaceSnapshot
 
 from tests.bundle_support import file_record
 from tests.fixtures.runtime_manifest import runtime_manifest
+from tests.host_process.runtime.sc9820e.fixtures import prepare_runtime
 from tests.small.cli.package_docs_fixtures import write_offline_export
 from tests.small.runtime.adapter_fixtures import adapter_data
 
@@ -123,6 +124,14 @@ def archive_inputs(
     bundle = tmp_path / ".cache/out" / target / "builds/release/bundles" / generation
     normalized = package.load_release_manifest(target, config)
     runtime_sources = runtime_source_files(target, config, root=source)
+    if config.get("emmc") is not None and device_data_descriptor(target, config) is not None:
+        # This fixture tests archive admission; actual filesystem imports belong to artifact tests.
+        for name in ("ext4", "cachetools", "crcmod"):
+            for relative, contents in (
+                (f"scripts/{name}/__init__.py", b"NAME = 'test-only dependency'\n"),
+                (f"licenses/phone-data/{name}-LICENSE.txt", b"test-only dependency notice\n"),
+            ):
+                runtime_sources[relative] = write_archive_file(tmp_path, relative, contents)
     bundle_files = [*normalized["bundle_files"], *runtime_sources]
     if device_data_descriptor(target, config) is not None and (config.get("nand") or {}).get(
         "ecc_format"
@@ -157,11 +166,27 @@ def archive_inputs(
         )
     write_archive_file(bundle, "image/ramboot.bin", b"DHTB synthetic built RAM payload\n")
     runtime = runtime_manifest()
+    if config["platform"] == "sc9820e":
+        sc9820e_root = tmp_path / "sc9820e-runtime"
+        sc9820e_root.mkdir()
+        sc9820e_runtime, _session, assets = prepare_runtime(sc9820e_root)
+        runtime.update(
+            {
+                key: sc9820e_runtime[key]
+                for key in ("adapter", "assets", "addresses", "personalization")
+            }
+        )
+        image = bytearray((sc9820e_root / "ramboot.bin").read_bytes())
+        slot = runtime["personalization"]["offset"]
+        image[slot : slot + 512] = bytes(512)
+        runtime["personalization"]["template_sha256"] = hashlib.sha256(bytes(512)).hexdigest()
+        write_archive_file(bundle, "image/ramboot.bin", bytes(image))
+        for role, relative in config["runtime"]["assets"].items():
+            write_archive_file(bundle, relative, (assets / f"{role}.bin").read_bytes())
+    else:
+        runtime["adapter"] = adapter_data()
     runtime["identity"] = runtime_identity(
         config["identity"], config["platform"], platform["identity"]
-    )
-    runtime["adapter"] = (
-        dict(config["runtime"]["adapter"]) if config["platform"] == "sc9820e" else adapter_data()
     )
     runtime["assets"] = dict(config["runtime"]["assets"])
     runtime["target"] = target
@@ -247,7 +272,10 @@ def archive_inputs(
 
     def prepared_native(**_options: object) -> dict[str, Path]:
         """Stand in for the separate, expensive cross-compilation boundary."""
+        assert _options["platform"] == config["platform"]
         files = dict(native_files)
+        if _options["platform"] == "sc9820e":
+            files.pop("tools/libc_server.exe")
         if _options.get("nand_ecc"):
             files["tools/ums9117-nand-ecc.exe"] = write_archive_file(
                 tmp_path / "prepared-native", "tools/ums9117-nand-ecc.exe", b"prepared BCH decoder"
@@ -273,6 +301,7 @@ def archive_inputs(
         return dict(linux_files)
 
     monkeypatch.setattr(common, "ROOT", tmp_path)
+    monkeypatch.setattr(package, "current_release_context", lambda: context)
     monkeypatch.setattr(targets, "load_target", lambda *_args, **_kwargs: config)
     monkeypatch.setattr(releases, "load_release", lambda *_args, **_kwargs: release)
     monkeypatch.setattr(platforms, "load_platform", lambda *_args: platform)

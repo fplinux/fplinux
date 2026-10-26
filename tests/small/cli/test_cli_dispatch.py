@@ -71,6 +71,118 @@ class CliCacheLockTests:
     """Keep lock-mode selection at the in-process command dispatcher."""
 
     @pytest.mark.parametrize(
+        ("arguments", "callback_name"),
+        [
+            (["build", "target"], "fplinux_cli.build.workflow.build"),
+            (["run", "target"], "fplinux_cli.runtime.runner.run_target"),
+            (["console", "target"], "fplinux_cli.cli.runtime.console_target"),
+            (["verify", "target"], "fplinux_cli.cli.runtime.verify_booted"),
+            (["nand", "identify", "target"], "fplinux_cli.cli.nand.identify_target_nand"),
+            (
+                ["nand", "backup", "target", "nand.bin"],
+                "fplinux_cli.cli.nand.backup_target_nand",
+            ),
+            (
+                ["device-data", "prepare", "target", "--from-dump", "nand.bin"],
+                "fplinux_cli.cli.device_data.prepare_device_data",
+            ),
+        ],
+        ids=["build", "run", "console", "verify", "identify", "backup", "prepare"],
+    )
+    def test_explicit_phone_directory_reaches_every_store_consumer(
+        self, dispatch_root: Path, arguments: list[str], callback_name: str
+    ) -> None:
+        """The parser forwards a chosen store and leaves the default store unspecified."""
+        _events, selected = run_dispatch(
+            dispatch_root, [*arguments, "--phone-data", "second phone"], callback_name
+        )
+        assert selected.call_args.kwargs["phone_data"] == Path("second phone")
+
+        _events, ordinary = run_dispatch(dispatch_root, arguments, callback_name)
+        assert ordinary.call_args.kwargs.get("phone_data") is None
+
+    @pytest.mark.parametrize(
+        ("arguments", "message"),
+        [
+            (
+                ["dependencies", "restore"],
+                "restore requires a snapshot directory or --release ID",
+            ),
+            (
+                ["dependencies", "restore", "snapshot", "--release", "aaaaaaaaaaaa"],
+                "restore --release cannot be combined with a directory or --inputs-only",
+            ),
+            (
+                ["dependencies", "restore", "--release", "aaaaaaaaaaaa", "--inputs-only"],
+                "restore --release cannot be combined with a directory or --inputs-only",
+            ),
+        ],
+    )
+    def test_invalid_dependency_restore_selection_stops_before_cache_access(
+        self, arguments: list[str], message: str
+    ) -> None:
+        """Report incompatible user arguments without starting restoration or a traceback."""
+        with (
+            mock.patch.object(sys, "argv", ["fplinux", *arguments]),
+            mock.patch.object(
+                lifecycle,
+                "cache_lock",
+                side_effect=AssertionError("invalid selection must not access cache state"),
+            ),
+            pytest.raises(SystemExit, match=message),
+        ):
+            cli.main()
+
+    def test_package_forwards_the_selected_host_and_destination(self, dispatch_root: Path) -> None:
+        """Keep the chosen asset name and output path under the packaging writer lock."""
+        events, package = run_dispatch(
+            dispatch_root,
+            [
+                "package",
+                "target",
+                "--host",
+                "windows",
+                "--output-directory",
+                "archives",
+            ],
+            "fplinux_cli.packaging.archive.package_target",
+        )
+        assert events[0] == ("lock", dispatch_root / ".cache", True, "package", "target", None)
+        assert package.call_args.kwargs["host"] == "windows"
+        assert package.call_args.kwargs["output_directory"] == Path("archives")
+
+    @pytest.mark.parametrize(
+        ("arguments", "callback_name", "locked"),
+        [
+            (["ci", "matrix"], "fplinux_cli.ci.commands.run_ci", False),
+            (
+                ["ci", "restore-inputs", "--directory", "inputs", "--snapshot", "a" * 64],
+                "fplinux_cli.ci.commands.run_ci",
+                True,
+            ),
+            (["_pre-push"], "fplinux_cli.quality.pre_push.check_pre_push", False),
+            (
+                ["inspect", "distribution", "archives"],
+                "fplinux_cli.cli.inspect.inspect_distribution",
+                False,
+            ),
+        ],
+    )
+    def test_release_stages_keep_readers_separate_from_cache_restoration(
+        self, dispatch_root: Path, arguments: list[str], callback_name: str, *, locked: bool
+    ) -> None:
+        """Only restoration needs cache ownership among the new release stages."""
+        events, _callback = run_dispatch(dispatch_root, arguments, callback_name)
+        if locked:
+            assert events == [
+                ("lock", dispatch_root / ".cache", True, "ci", None, None),
+                "command",
+                "unlock",
+            ]
+        else:
+            assert events == ["command"]
+
+    @pytest.mark.parametrize(
         ("options", "include_device_data"),
         [([], True), (["--without-device-data"], False)],
         ids=["ordinary-build", "without-device-data"],
@@ -151,7 +263,7 @@ class CliCacheLockTests:
             (
                 ["package", "target"],
                 "fplinux_cli.packaging.archive.package_target",
-                False,
+                True,
                 "target",
                 None,
             ),
@@ -249,6 +361,7 @@ class CliCacheLockTests:
                     Path("backup.bin"),
                     profile=profile,
                     build_type="release",
+                    phone_data=None,
                 )
             )
         elif callback_name == "fplinux_cli.cli.nand.identify_target_nand":
@@ -393,7 +506,6 @@ class CliCacheLockTests:
             (["build", "target"], "fplinux_cli.build.workflow.build"),
             (["check", "kernel"], "fplinux_cli.quality.checks.check"),
             (["inspect", "bundle", "target"], "fplinux_cli.cli.inspect.inspect_bundle"),
-            (["package", "target"], "fplinux_cli.packaging.archive.package_target"),
             (["run", "target"], "fplinux_cli.runtime.runner.run_target"),
             (["console", "target"], "fplinux_cli.cli.runtime.console_target"),
             (["verify", "target"], "fplinux_cli.cli.runtime.verify_booted"),
@@ -410,7 +522,6 @@ class CliCacheLockTests:
             "build-target",
             "check-kernel",
             "inspect-bundle-target",
-            "package-target",
             "run-target",
             "console-target",
             "verify-target",
@@ -600,7 +711,7 @@ class CliCacheLockTests:
         ("arguments", "callback_name"),
         [
             (
-                ["package", "target", "--profile", "microsd-uboot", "--candidate"],
+                ["package", "target", "--profile", "microsd-uboot"],
                 "fplinux_cli.packaging.archive.package_target",
             ),
             (
@@ -613,7 +724,7 @@ class CliCacheLockTests:
             ),
         ],
         ids=[
-            "package-target---profile-microsd-uboot---candidate",
+            "package-target---profile-microsd-uboot",
             "run-target---profile-microsd-uboot",
             "console-target---profile-microsd-uboot---exec-id",
         ],
@@ -621,7 +732,7 @@ class CliCacheLockTests:
     def test_profile_consumers_use_the_selected_shared_lock_identity(
         self, dispatch_root: Path, arguments: list[str], callback_name: str
     ) -> None:
-        """Package, run and console retain the named bundle slot under the shared cache lock."""
+        """Each consumer retains its selected bundle slot under the required cache lock."""
         events, callback = run_dispatch(dispatch_root, arguments, callback_name)
 
         assert (events) == (
@@ -629,7 +740,7 @@ class CliCacheLockTests:
                 (
                     "lock",
                     dispatch_root / ".cache",
-                    False,
+                    arguments[0] == "package",
                     arguments[0],
                     "target",
                     "microsd-uboot",
@@ -641,45 +752,38 @@ class CliCacheLockTests:
         assert (callback.call_args.kwargs["profile"]) == ("microsd-uboot")
 
     @pytest.mark.parametrize(
-        ("options", "autonomous", "host", "offline"),
+        ("options", "host"),
         [
-            (["--autonomous"], True, "linux", False),
-            (["--autonomous", "--host", "windows10", "--offline"], True, "windows10", True),
-            (["--host", "windows10"], False, "windows10", False),
-            (["--offline"], False, "linux", True),
+            ([], "linux"),
+            (["--host", "windows"], "windows"),
         ],
-        ids=["linux-autonomous", "windows-autonomous-offline", "windows-policy", "offline-policy"],
+        ids=["linux", "windows"],
     )
     def test_package_host_options_reach_the_backend_under_the_required_lock(
         self,
         dispatch_root: Path,
         *,
         options: list[str],
-        autonomous: bool,
         host: str,
-        offline: bool,
     ) -> None:
-        """Forward host policy inputs; only autonomous preparation owns a writer lock."""
+        """Both native archive hosts prepare their runtime under an exclusive cache lock."""
         events, package = run_dispatch(
             dispatch_root,
-            ["package", "target", "--candidate", *options],
+            ["package", "target", *options],
             "fplinux_cli.packaging.archive.package_target",
         )
 
         assert events == [
-            ("lock", dispatch_root / ".cache", autonomous, "package", "target", None),
+            ("lock", dispatch_root / ".cache", True, "package", "target", None),
             "command",
             "unlock",
         ]
         package.assert_called_once_with(
             "target",
             profile=None,
-            build_type="release",
             boot=None,
-            candidate=True,
-            autonomous=autonomous,
             host=host,
-            offline=offline,
+            output_directory=None,
         )
 
     @pytest.mark.parametrize(
@@ -693,14 +797,14 @@ class CliCacheLockTests:
                 ),
             ),
             (
-                ["package", "nokia-ta1618", "--boot", "microsd", "--candidate"],
+                ["package", "nokia-ta1618", "--boot", "microsd"],
                 "fplinux_cli.packaging.archive.package_target",
                 mock.call(
                     "nokia-ta1618",
                     profile=None,
                     boot="microsd",
-                    candidate=True,
-                    build_type="release",
+                    host="linux",
+                    output_directory=None,
                 ),
             ),
             (
@@ -713,7 +817,7 @@ class CliCacheLockTests:
         ],
         ids=[
             "run-nokia-ta1618---boot-microsd",
-            "package-nokia-ta1618---boot-microsd---candidate",
+            "package-nokia-ta1618---boot-microsd",
             "run-target---boot-microsd",
         ],
     )
@@ -729,7 +833,7 @@ class CliCacheLockTests:
                 (
                     "lock",
                     dispatch_root / ".cache",
-                    False,
+                    command == "package",
                     command,
                     target,
                     "microsd-uboot",

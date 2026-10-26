@@ -79,6 +79,12 @@ def command_action(
             )
 
             action = partial(inspect_archive, args.path)
+        elif args.inspect_kind == "distribution":
+            from fplinux_cli.cli.inspect import (  # noqa: PLC0415 -- selected backend.
+                inspect_distribution,
+            )
+
+            action = partial(inspect_distribution, args.path)
         elif args.inspect_kind == "footprint":
             from fplinux_cli.cli.inspect import (  # noqa: PLC0415 -- selected backend.
                 inspect_target_footprint,
@@ -181,6 +187,10 @@ def command_action(
             )
 
             action = partial(import_dependencies, args.directory, args.output)
+    elif args.command == "ci":
+        from fplinux_cli.ci.commands import run_ci  # noqa: PLC0415 -- selected backend.
+
+        action = partial(run_ci, args)
     elif args.command == "test":
         from fplinux_cli.quality.testing import run_tests  # noqa: PLC0415 -- selected backend.
 
@@ -232,17 +242,10 @@ def command_action(
             package_target,
             args.target,
             profile=args.profile,
-            build_type=args.build_type,
             boot=args.boot,
-            candidate=args.candidate,
+            host=args.host,
+            output_directory=args.output_directory,
         )
-        if args.autonomous or args.host != "linux" or args.offline:
-            action = partial(
-                action,
-                autonomous=args.autonomous,
-                host=args.host,
-                offline=args.offline,
-            )
     elif args.command == "prune":
         from fplinux_cli.cache.prune.operations import prune  # noqa: PLC0415 -- selected backend.
 

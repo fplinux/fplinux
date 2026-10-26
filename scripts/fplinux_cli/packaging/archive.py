@@ -11,12 +11,12 @@ from typing import Any
 
 from fplinux_cli import common
 from fplinux_cli.alpine.selection import bundle_packages, selected_packages
+from fplinux_cli.artifacts.release import current_release_context
 from fplinux_cli.build import reuse as cli_bundles
 from fplinux_cli.common import (
     ZIP_TIMESTAMP,
     canonical_json_bytes,
     fail,
-    payload_digest,
     sha256_bytes,
     sha256_file,
 )
@@ -25,14 +25,44 @@ from fplinux_cli.environment import state as environment_states
 from fplinux_cli.manifests import platforms, releases, targets
 from fplinux_cli.packaging.autonomous import autonomous_payload
 from fplinux_cli.packaging.documentation import offline_documentation
+from fplinux_cli.packaging.hosts import runtime_hosts
 from fplinux_cli.packaging.readme import append_source_companion, ordinary_readme
 from fplinux_cli.runtime import bundle_session as runtime_bundle_session
+from fplinux_cli.runtime.windows_tools import WINDOWS_TOOLS
 from fplinux_cli.workspace import build_inputs as workspaces
 
 SHARED_PACKAGE_FILES = {
     "LICENSE": "LICENSE",
     "licenses/musl/COPYRIGHT": "third-party-licenses/musl/COPYRIGHT",
 }
+
+
+def distribution_record(archive: Path, manifest: dict[str, Any], host: str) -> dict[str, str]:
+    """Bind a final runtime archive to its phone and exact kernel identity."""
+    return {
+        "archive": archive.name,
+        "target": manifest["target"],
+        "host": host,
+        "identity": manifest["device_identity"],
+        "sha256": sha256_file(archive),
+    }
+
+
+def finalize_checksums(files: dict[str, bytes]) -> None:
+    """Replace the complete member checksum list after the payload is final."""
+    files["SHA256SUMS"] = "".join(
+        f"{sha256_bytes(files[name])}  {name}\n" for name in sorted(files) if name != "SHA256SUMS"
+    ).encode()
+
+
+def finalize_runtime(
+    files: dict[str, bytes], manifest: dict[str, Any], executables: set[str]
+) -> None:
+    """Project the final runtime members into its manifest and checksum inventory."""
+    files.pop("build-manifest.json", None)
+    files.pop("SHA256SUMS", None)
+    files["build-manifest.json"] = _package_manifest(files, manifest, executables)
+    finalize_checksums(files)
 
 
 def target_archive_file(
@@ -110,22 +140,10 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
     }
     if not required_runtime.issubset(runtime_files):
         fail("release runtime files omit required runtime inputs")
-    qualification_files = [
-        *runtime_files,
-        *(
-            relative
-            for relative in bundle_files
-            if len(PurePosixPath(relative).parts) == 2
-            and PurePosixPath(relative).parts[0] == "apks"
-            and PurePosixPath(relative).suffix == ".apk"
-            and relative not in runtime_files
-        ),
-    ]
     return {
         "image": image,
         "bundle_files": bundle_files,
         "runtime_files": runtime_files,
-        "qualification_files": qualification_files,
         "documents": documents,
     }
 
@@ -146,17 +164,17 @@ def _project_runtime(
     files: dict[str, bytes],
     *,
     host: str,
-    autonomous: bool,
+    ready_runtime: bool,
 ) -> None:
     """Admit only the runtime delivered for this host, preserving its kernel identity."""
     runtime = json.loads(files["runtime-manifest.json"])
-    if host == "windows10":
+    if host == "windows":
         runtime["host_tools"] = {
-            role: f"tools/{Path(relative).name}.exe"
+            role: WINDOWS_TOOLS.get(role, f"tools/{Path(relative).name}.exe")
             for role, relative in runtime["host_tools"].items()
             if role != "keyboard"
         }
-    elif autonomous:
+    elif ready_runtime:
         runtime["host_tools"] = {
             role: path for role, path in runtime["host_tools"].items() if role != "keyboard"
         }
@@ -173,7 +191,7 @@ def _project_runtime(
         if relative in files
     }
     files["runtime-manifest.json"] = canonical_json_bytes(runtime)
-    if host == "windows10":
+    if host == "windows":
         windows = json.loads(files["windows-host.json"])
         windows["sha256"] = {
             name: digest
@@ -240,39 +258,35 @@ def _write_archive(
     return archive
 
 
-def package_target(  # noqa: PLR0913 -- archive host and build selectors remain explicit.
+def package_target(
     target: str,
     *,
     profile: str | None = None,
-    build_type: str = "release",
     boot: str | None = None,
-    candidate: bool = False,
-    autonomous: bool = False,
     host: str = "linux",
-    offline: bool = False,
+    output_directory: Path | None = None,
 ) -> None:
-    if host not in {"linux", "windows10"}:
-        fail("package host must be linux or windows10")
-    if host == "windows10" and not autonomous:
-        fail("--host windows10 requires --autonomous")
-    if offline and not autonomous:
-        fail("package --offline requires --autonomous")
+    if host not in {"linux", "windows"}:
+        fail("package host must be linux or windows")
+    build_type = "release"
     selected_profile = runtime_bundle_session.selected_context_profile(
         target, profile=profile, boot=boot
     )
-    if selected_profile is not None and not candidate:
-        fail("non-default boot contexts can only be packaged with --candidate")
     config = targets.load_target(target, selected_profile, build_type=build_type)
-    if config["platform"] == "sc9820e" and host == "windows10":
-        fail("SC9820E archives support Linux x86-64 only")
-    if autonomous and config["linux"]["root"]["kind"] != "initramfs":
-        fail("--autonomous supports only the RAM boot context")
+    ready_runtime = config["linux"]["root"]["kind"] == "initramfs"
+    if ready_runtime and host not in runtime_hosts(config):
+        fail(f"runtime archives do not support host {host} for this target")
+    if not ready_runtime and host != "linux":
+        fail("external-root exports support Linux x86-64 only")
+    release_context = current_release_context()
     release = load_release_manifest(target, config)
-    documentation = {} if autonomous else offline_documentation()
+    documentation = {} if ready_runtime else offline_documentation()
     bundle, manifest = runtime_bundle_session.resolve_target_bundle(
         target, selected_profile, build_type=build_type
     )
-    without_device_data = autonomous and config["platform"] == "sc9820e"
+    if any(manifest.get(key) != value for key, value in release_context.fields().items()):
+        fail("build release context is stale; rebuild this target before packaging")
+    without_device_data = ready_runtime and config["platform"] == "sc9820e"
     if without_device_data:
         snapshot = workspaces.target_workspace_snapshot(
             target, selected_profile, build_type=build_type, include_device_data=False
@@ -286,7 +300,7 @@ def package_target(  # noqa: PLR0913 -- archive host and build selectors remain 
         common.ROOT / ".cache", environment_recipe
     )
     identity = cli_bundles.build_identity(snapshot, environment_state, common.ROOT / ".cache")
-    if not autonomous and not cli_bundles.manifest_matches_identity(manifest, identity):
+    if not cli_bundles.manifest_matches_identity(manifest, identity):
         clean_snapshot = workspaces.target_workspace_snapshot(
             target, selected_profile, build_type=build_type, include_device_data=False
         )
@@ -310,7 +324,6 @@ def package_target(  # noqa: PLR0913 -- archive host and build selectors remain 
         fail(str(error))
     reserved = {
         "build-manifest.json",
-        "CANDIDATE-NOTICE.txt",
         "SHA256SUMS",
         *SHARED_PACKAGE_FILES,
     }
@@ -319,9 +332,6 @@ def package_target(  # noqa: PLR0913 -- archive host and build selectors remain 
         fail(f"profile boot artifact has a reserved archive path: {min(collision)}")
     bundle_files = list(
         dict.fromkeys((*release["bundle_files"], *required_boot_artifacts, *runtime_files))
-    )
-    qualification_files = list(
-        dict.fromkeys((*release["qualification_files"], *required_boot_artifacts, *runtime_files))
     )
     if (
         not cli_bundles.manifest_matches_identity(manifest, identity)
@@ -361,15 +371,14 @@ def package_target(  # noqa: PLR0913 -- archive host and build selectors remain 
                 or relative.startswith("common/windows/")
             )
         )
-        or (host == "windows10" and relative in {"Run.sh", "60-fplinux.rules"})
-        or (not autonomous and relative == "Run.sh")
+        or (host == "windows" and relative in {"Run.sh", "60-fplinux.rules"})
+        or (not ready_runtime and relative == "Run.sh")
     }
     for relative in host_omissions:
         files.pop(relative)
     executables.difference_update(host_omissions)
-    qualification_files = [relative for relative in qualification_files if relative in files]
     add_target_files(files, target, release["documents"])
-    if not autonomous:
+    if not ready_runtime:
         files["README.txt"] = ordinary_readme(target, config)
         if config["platform"] == "sc9820e":
             from fplinux_cli.packaging.sources import (  # noqa: PLC0415
@@ -379,7 +388,7 @@ def package_target(  # noqa: PLR0913 -- archive host and build selectors remain 
             files.update(collect_loader_license_notices(config))
     source_files: dict[str, bytes] = {}
     source_executables: set[str] = set()
-    if autonomous:
+    if ready_runtime:
         prepared_files = {"device-data.cpio"}
         for relative in prepared_files:
             files.pop(relative, None)
@@ -388,44 +397,27 @@ def package_target(  # noqa: PLR0913 -- archive host and build selectors remain 
             for relative in files
             if relative.startswith("apks/")
             or relative == "host/fplinux-usb-keyboard"
-            or (host == "windows10" and relative.startswith("host/"))
+            or (host == "windows" and relative.startswith("host/"))
         }
         for relative in omitted:
             files.pop(relative)
         executables.difference_update(omitted)
-        qualification_files = [relative for relative in qualification_files if relative in files]
-        additions = autonomous_payload(config, host=host, offline=offline, runtime=runtime)
+        additions = autonomous_payload(config, host=host, runtime=runtime)
         collisions = (set(additions.files) & set(files)) - {"README.txt"}
         if collisions:
-            fail(f"duplicate autonomous archive path: {min(collisions)}")
+            fail(f"duplicate runtime archive path: {min(collisions)}")
         files.update(additions.files)
-        qualification_files.extend(additions.runtime_files)
         executables.update(additions.executables)
         from fplinux_cli.packaging.sources import collect_source_files  # noqa: PLC0415
 
-        sources = collect_source_files(config, host=host, offline=offline)
+        sources = collect_source_files(config, host=host)
         source_files.update(sources.files)
         source_executables.update(sources.executables)
         files.update(sources.notices)
         for relative in tuple(files):
             if relative.startswith("sources/"):
                 source_files[relative] = files.pop(relative)
-        qualification_files = [relative for relative in qualification_files if relative in files]
-    _project_runtime(files, host=host, autonomous=autonomous)
-    qualification_payload = {relative: files[relative] for relative in qualification_files}
-    qualification_digest = payload_digest(qualification_payload, executables)
-    verified_digest = None if candidate else releases.verified_runtime_digest(target)
-    if not candidate and verified_digest != qualification_digest:
-        fail(
-            "this executable payload is not phone-tested for release; "
-            "use --candidate for phone testing "
-            f"(phone-test payload SHA256 {qualification_digest})"
-        )
-
-    if candidate:
-        files["CANDIDATE-NOTICE.txt"] = (
-            Path(__file__).with_suffix("") / "CANDIDATE-NOTICE.txt"
-        ).read_bytes()
+    _project_runtime(files, host=host, ready_runtime=ready_runtime)
     collisions = set(files) & set(documentation)
     if collisions:
         fail(f"duplicate documentation archive path: {min(collisions)}")
@@ -435,50 +427,32 @@ def package_target(  # noqa: PLR0913 -- archive host and build selectors remain 
         if source.is_symlink() or not source.is_file():
             fail(f"shared package file is missing or invalid: {source}")
         files[archive_name] = source.read_bytes()
-    qualifier = f"{build_type}-candidate" if candidate else build_type
-    context = boot if boot is not None else selected_profile
-    context_component = "" if context is None else f"-{context}"
-    autonomous_component = "-autonomous" if autonomous else ""
-    base_stem = (
-        f"FPLinux-{target}{context_component}-{qualifier}{autonomous_component}-{host}-x86_64"
-    )
+    context_component = "" if selected_profile is None else f"-{selected_profile}"
+    base_stem = f"FPLinux-{target}{context_component}-{host}-x64"
     source_stem = None
-    if autonomous:
-        # Pair before the companion name enters README and its final manifest record.
-        pairing_digest = payload_digest(
-            {
-                **{f"runtime/{name}": value for name, value in files.items()},
-                "runtime/build-manifest.json": _package_manifest(files, manifest, executables),
-                **{f"source/{name}": value for name, value in source_files.items()},
-            },
-            {
-                *(f"runtime/{name}" for name in executables),
-                *(f"source/{name}" for name in source_executables),
-            },
-        )
-        source_stem = f"{base_stem}-{pairing_digest[:16]}-sources"
+    if ready_runtime:
+        source_stem = f"{base_stem}-{release_context.release_id}-sources"
         files["README.txt"] = append_source_companion(files["README.txt"], source_stem)
-    files["build-manifest.json"] = _package_manifest(files, manifest, executables)
-    checksums = "".join(f"{sha256_bytes(files[name])}  {name}\n" for name in sorted(files))
-    files["SHA256SUMS"] = checksums.encode()
-    content_digest = payload_digest(files, executables)
-    stem = f"{base_stem}-{content_digest[:16]}"
-    destination = common.ROOT / ".cache/out" / ("candidates" if candidate else "releases")
+    finalize_runtime(files, manifest, executables)
+    stem = f"{base_stem}-{release_context.release_id}"
+    destination = (
+        output_directory if output_directory is not None else common.ROOT / ".cache/out/releases"
+    )
     archive = _write_archive(
         destination,
         stem,
         files,
         executables,
-        compression=zipfile.ZIP_DEFLATED if autonomous else zipfile.ZIP_STORED,
+        compression=zipfile.ZIP_DEFLATED if ready_runtime else zipfile.ZIP_STORED,
     )
     if source_stem is not None:
         source_files["DISTRIBUTION.json"] = canonical_json_bytes(
-            {"archive": archive.name, "archive_sha256": sha256_file(archive)}
+            {
+                **release_context.fields(),
+                "runtimes": [distribution_record(archive, manifest, host)],
+            }
         )
-        source_checksums = "".join(
-            f"{sha256_bytes(source_files[name])}  {name}\n" for name in sorted(source_files)
-        )
-        source_files["SHA256SUMS"] = source_checksums.encode()
+        finalize_checksums(source_files)
         source_archive = _write_archive(
             destination,
             source_stem,
@@ -486,10 +460,9 @@ def package_target(  # noqa: PLR0913 -- archive host and build selectors remain 
             source_executables,
             compression=zipfile.ZIP_DEFLATED,
         )
-        print(f"Matching sources: {source_archive.relative_to(common.ROOT)}")
+        print(f"Matching sources: {common.display_text(source_archive)}")
 
     image_digest = sha256_bytes(files[release["image"]])
-    print(f"FPLinux {qualifier} package: {archive.relative_to(common.ROOT)}")
+    print(f"FPLinux package: {common.display_text(archive)}")
     print(f"Archive SHA256: {sha256_file(archive)}")
-    print(f"Phone-test payload SHA256: {qualification_digest}")
     print(f"ramboot.bin SHA256: {image_digest}")
