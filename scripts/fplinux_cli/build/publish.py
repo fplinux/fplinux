@@ -249,7 +249,7 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
         )
 
         phone_data_files = prepare_python_modules(
-            release, root=common.ROOT, cache=inputs_build.CACHE, offline=True
+            release, root=common.ROOT, cache=inputs_build.CACHE
         )
         for source in phone_data_files.values():
             source.chmod(0o644)

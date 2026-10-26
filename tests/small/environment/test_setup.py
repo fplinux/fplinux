@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def test_ready_direct_setup_finishes_its_own_reporter(tmp_path: Path) -> None:
+def test_ready_setup_finishes_its_reporter(tmp_path: Path) -> None:
     """A prepared-environment hit publishes successful public setup run metadata."""
     expected = EnvironmentState("a" * 64, "b" * 64, "c" * 64)
     with (
@@ -24,11 +24,12 @@ def test_ready_direct_setup_finishes_its_own_reporter(tmp_path: Path) -> None:
         mock.patch.object(kern, "ROOT", tmp_path),
         mock.patch.object(reporting, "ROOT", tmp_path),
         mock.patch.object(env_setup, "install_kern", return_value="kern"),
+        mock.patch.object(env_setup, "load_environment_lock", return_value={}),
         mock.patch.object(env_setup, "environment_recipe_digest", return_value="a" * 64),
         mock.patch.object(env_setup, "current_environment_state", return_value=expected),
         mock.patch.object(env_setup, "install_git_hooks"),
     ):
-        assert env_setup.setup(lock={}) == expected
+        env_setup.prepare_setup()
     paths = list((tmp_path / ".cache/logs/setup").glob("*/run.json"))
     assert len(paths) == 1
     assert json.loads(paths[0].read_text())["status"] == "success"

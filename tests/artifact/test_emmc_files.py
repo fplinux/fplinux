@@ -65,7 +65,7 @@ def saved_phone(tmp_path: Path) -> SavedPhone:
     image = tmp_path / "phone.bin"
     write_disk(image, partitions)
     delivery = tmp_path / "reader"
-    prepare_python_modules(delivery, root=ROOT, cache=Path("/cache"), offline=True)
+    prepare_python_modules(delivery, root=ROOT, cache=Path("/cache"))
     return SavedPhone(image, delivery / "scripts", partitions[0][1], partitions[1][1])
 
 

@@ -25,7 +25,6 @@ from fplinux_cli.workspace import staging as workspace_staging
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from urllib.request import Request
 
 
 class ProbePublicationTests:
@@ -77,11 +76,14 @@ class ProbePublicationTests:
             assert ((keys / "release.pub").read_bytes()) == (b"release signing key\n")
 
     @staticmethod
-    def test_first_sysroot_acquires_only_its_base_and_selected_native_packages(
+    @pytest.mark.parametrize("original_present", [False, True], ids=["missing", "saved"])
+    def test_first_sysroot_requires_local_base_and_selected_native_packages(
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
+        *,
+        original_present: bool,
     ) -> None:
-        """A first probe acquires its exact inputs before offline APK installation."""
+        """A probe never downloads; exact local originals permit isolated installation."""
         archive = io.BytesIO()
         with tarfile.open(fileobj=archive, mode="w:gz") as bundle:
             key = b"release signing key\n"
@@ -117,15 +119,15 @@ class ProbePublicationTests:
                 {"file": "runtime.apk", "repository": "main", "sha256": "d" * 64, "bytes": 100},
             ],
         }
-        payloads = {
-            "https://example.invalid/minirootfs.tar.gz": base,
-            "https://example.invalid/main/sysroot.apk": package,
-        }
-        requested: list[str] = []
-
-        def response(request: Request, **_kwargs: object) -> io.BytesIO:
-            requested.append(request.full_url)
-            return io.BytesIO(payloads[request.full_url])
+        if original_present:
+            originals = tmp_path / ".cache/downloads"
+            base_path = originals / "sources/alpine_target/minirootfs.tar.gz"
+            base_path.parent.mkdir(parents=True)
+            base_path.write_bytes(base)
+            package_path = originals / "alpine/packages/sysroot.apk"
+            package_path.parent.mkdir(parents=True)
+            package_path.write_bytes(package)
+        installed: list[Path] = []
 
         def install(_stage: Stage, command: list[str], **_kwargs: object) -> None:
             volumes = {
@@ -138,6 +140,7 @@ class ProbePublicationTests:
             assert command[command.index("--network") + 1] == "none"
             assert "--no-network" in command
             (volumes["/sysroot"] / "installed").write_bytes(b"prepared sysroot\n")
+            installed.append(volumes["/sysroot"])
 
         monkeypatch.setattr(common, "ROOT", tmp_path)
         monkeypatch.setattr(output, "ROOT", tmp_path)
@@ -146,9 +149,14 @@ class ProbePublicationTests:
         monkeypatch.setattr(Stage, "run", install)
         state = EnvironmentState("a" * 64, "b" * 64, "c" * 64)
         reporter = RunReporter.create("probe-build", target=None, verbose=False)
-        with mock.patch("urllib.request.urlopen", side_effect=response):
+        with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")):
+            if not original_present:
+                with pytest.raises(SystemExit, match=r"minirootfs.tar.gz.*setup --all"):
+                    probe._prepare_sysroot("kern", tmp_path / "rootfs", state, reporter)  # noqa: SLF001 -- probe preparation boundary.
+                assert installed == []
+                assert not list((tmp_path / ".cache/probe-build").glob("*/installed"))
+                return
             sysroot = probe._prepare_sysroot("kern", tmp_path / "rootfs", state, reporter)  # noqa: SLF001 -- probe preparation boundary.
-        assert set(requested) == set(payloads)
         assert (sysroot / "installed").read_bytes() == b"prepared sysroot\n"
         assert not (tmp_path / ".cache/downloads/alpine/packages/runtime.apk").exists()
         with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")):

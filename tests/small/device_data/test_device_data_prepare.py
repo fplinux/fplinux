@@ -259,7 +259,7 @@ def test_target_without_groups_rejects_explicit_preparation_before_build_or_sour
     monkeypatch.setattr(cli, "ROOT", tmp_path)
     monkeypatch.setattr(cli, "load_target", lambda _target: {"device_data": {"groups": {}}})
     with pytest.raises(SystemExit, match="not supported for target demo-phone"):
-        cli.prepare_device_data(TARGET, from_dump=None, jobs=1, offline=True)
+        cli.prepare_device_data(TARGET, from_dump=None, jobs=1)
     assert not (tmp_path / ".cache/device-data").exists()
 
 
@@ -315,9 +315,7 @@ def test_saved_source_cli_imports_canonical_backup_without_loading_a_phone(
         monkeypatch.setattr(cli, name, reject_phone)
 
     selected = phone_data.root / "other-phone" if explicit else None
-    cli.prepare_device_data(
-        TARGET, from_dump=phone_data.backup, jobs=2, offline=True, phone_data=selected
-    )
+    cli.prepare_device_data(TARGET, from_dump=phone_data.backup, jobs=2, phone_data=selected)
 
     default = phone_data.root / "data/fplinux/phones/demo-phone/phone"
     phone = default if selected is None else selected / "phone"
@@ -335,12 +333,12 @@ def test_saved_source_cli_imports_canonical_backup_without_loading_a_phone(
         assert f"./fplinux run demo-phone --phone-data {selected}" in output
 
 
-def test_offline_nested_build_failure_leaves_no_running_receipt(
+def test_unprepared_environment_nested_build_failure_leaves_no_running_receipt(
     phone_data: PhoneData,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A real offline build rejection finishes preparation without loading a phone."""
+    """A missing environment finishes preparation without loading a phone."""
     monkeypatch.setattr(common, "ROOT", phone_data.root)
     monkeypatch.setattr(cli, "ROOT", phone_data.root)
     monkeypatch.setattr(cli, "preparation_recipe", lambda *_args, **_kwargs: "a" * 64)
@@ -378,12 +376,10 @@ def test_offline_nested_build_failure_leaves_no_running_receipt(
     monkeypatch.setattr(cli, "prepare_target", reject_load)
 
     with pytest.raises(SystemExit) as raised:
-        reporting.run_entrypoint(
-            lambda: cli.prepare_device_data(TARGET, from_dump=None, jobs=1, offline=True)
-        )
+        reporting.run_entrypoint(lambda: cli.prepare_device_data(TARGET, from_dump=None, jobs=1))
 
     assert raised.value.code == 1
-    assert capsys.readouterr().err.count("offline execution requires") == 1
+    assert capsys.readouterr().err.count("run ./fplinux setup demo-phone") == 1
     receipts = list((phone_data.root / ".cache/logs").rglob("run.json"))
     assert receipts
     assert all(json.loads(receipt.read_bytes())["status"] == "failed" for receipt in receipts)

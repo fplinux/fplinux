@@ -10,22 +10,26 @@ description: Package a build as a standalone archive, inspect artifacts and meas
 Build the phone once, then package the hosts you need:
 
 ```sh title="PC"
+./fplinux setup nokia-ta1618
 ./fplinux build nokia-ta1618 --without-device-data
 ./fplinux package nokia-ta1618
+./fplinux setup nokia-ta1618 --host windows
 ./fplinux package nokia-ta1618 --host windows
 ```
 
 The default host is Linux x86-64. RAM archives can also be packaged for Windows 10 or 11 x64 through `--host windows`, including Xiaomi Qin 1s+:
 
 ```sh title="PC"
+./fplinux setup xiaomi-qin-1s-plus
 ./fplinux build xiaomi-qin-1s-plus --without-device-data
 ./fplinux package xiaomi-qin-1s-plus
+./fplinux setup xiaomi-qin-1s-plus --host windows
 ./fplinux package xiaomi-qin-1s-plus --host windows
 ```
 
 USB loading and SSH from Windows have not been verified with Qin 1s+.
 
-Packaging reads the current release build without rebuilding it. It rejects stale source context, changed built files and unsupported hosts. Debug remains a build option; `package` accepts release builds only. Host tools and corresponding sources are prepared from the saved local inputs. See [Dependency snapshots](/fplinux/guides/dependencies/) if an exact input is missing.
+Packaging reads the current release build without rebuilding it. It rejects stale source context, changed built files and unsupported hosts. Debug remains a build option; `package` accepts release builds only. Host tools and corresponding sources are prepared from the saved local inputs. Select the archive host with setup to acquire its originals; setup does not create the ZIP. See [Dependency snapshots](/fplinux/guides/dependencies/) to restore saved inputs.
 
 The runnable ZIP includes the RAM image, phone loaders, the selected host's Python and OpenSSH, one launcher, `README.txt`, licenses, the build manifest and `SHA256SUMS`. It also includes the extraction tools needed by the selected phone. Optional APKs, the offline site, prepared phone data, private keys and session logs are excluded. RAM images receive personal phone data at launch, so publishing one does not publish the contents of your personal store.
 
@@ -49,7 +53,7 @@ Install the pinned site tools as described in [Contributing](/fplinux/develop/co
 
 ## Complete releases
 
-The workflow in `.github/workflows/packages.yml` prepares one inputs-only dependency snapshot for the exact event commit and shares that artifact with the check, target-build and documentation jobs. Every target is built once, then packaged sequentially for its supported hosts. `./fplinux ci matrix` reports the current eight targets and sixteen runtime selections. Later setup, build and package steps use the restored originals offline.
+The workflow in `.github/workflows/packages.yml` prepares one inputs-only dependency snapshot for the exact event commit and shares that artifact with the check, target-build and documentation jobs. Every target is built once, then packaged sequentially for its supported hosts. `./fplinux ci matrix` reports the current eight targets and sixteen runtime selections. Later setup steps use `--offline` with the restored originals; build and package always use local inputs. The documentation job selects `setup --site --offline` to install only its site tools.
 
 A complete Release contains the sixteen runnable ZIPs, one common source ZIP, dependency transport parts of at most 1 GiB, their `FPLinux-<release_id>-inputs.sha256` index, `DEPENDENCIES.json`, `RELEASE.json` and the outer `SHA256SUMS`. Each runtime README names the final common source ZIP. `DISTRIBUTION.json` inside that source ZIP binds each target, host and kernel identity to its final runtime hash. Shared source paths are stored once; variable host and target build material remains under `selections/<target>/<host>/`.
 

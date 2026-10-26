@@ -137,7 +137,7 @@ Copy it to a running phone and start it:
 ./fplinux console nokia-ta1618 --build-type debug --exec 'chmod +x /tmp/diag-arm && /tmp/diag-arm'
 ```
 
-`probe-build` only compiles. It does not add the program to an image. A failed compile leaves an earlier output unchanged. On the first run it downloads the pinned packages it needs; run `./fplinux setup` first if the build environment is not prepared.
+`probe-build` compiles using local inputs. It does not add the program to an image. A failed compile leaves an earlier output unchanged. Prepare the shared build environment with `./fplinux setup` first; if another input is missing, the command reports the required setup selection.
 
 ## Report a problem
 

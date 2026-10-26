@@ -71,6 +71,106 @@ class CliCacheLockTests:
     """Keep lock-mode selection at the in-process command dispatcher."""
 
     @pytest.mark.parametrize(
+        ("arguments", "target", "host", "site", "all_inputs", "force", "offline"),
+        [
+            (["setup"], None, "linux", False, False, False, False),
+            (["setup", "target"], "target", "linux", False, False, False, False),
+            (
+                ["setup", "target", "--host", "windows", "--offline", "--force"],
+                "target",
+                "windows",
+                False,
+                False,
+                True,
+                True,
+            ),
+            (["setup", "--site", "--offline"], None, "linux", True, False, False, True),
+            (["setup", "--all", "--force"], None, "linux", False, True, True, False),
+        ],
+        ids=("environment", "target-linux", "target-windows", "site", "all"),
+    )
+    def test_setup_forwards_selection_under_its_exclusive_cache_lock(  # noqa: PLR0913 -- independent command expectations remain visible.
+        self,
+        dispatch_root: Path,
+        arguments: list[str],
+        target: str | None,
+        host: str,
+        *,
+        site: bool,
+        all_inputs: bool,
+        force: bool,
+        offline: bool,
+    ) -> None:
+        """The selector and default host reach preparation without creating an export path."""
+        events, callback = run_dispatch(
+            dispatch_root, arguments, "fplinux_cli.environment.setup.prepare_setup"
+        )
+
+        assert events == [
+            ("lock", dispatch_root / ".cache", True, "setup", target, None),
+            "command",
+            "unlock",
+        ]
+        assert callback.call_args == mock.call(
+            target, host=host, site=site, all_inputs=all_inputs, force=force, offline=offline
+        )
+
+    @pytest.mark.parametrize(
+        ("arguments", "message"),
+        [
+            (["setup", "target", "--site"], "not allowed with argument"),
+            (["setup", "target", "--all"], "not allowed with argument"),
+            (["setup", "--site", "--all"], "not allowed with argument"),
+            (["setup", "--host", "linux"], "setup --host requires TARGET"),
+            (["setup", "--site", "--host", "windows"], "setup --host requires TARGET"),
+            (["setup", "--all", "--host", "windows"], "setup --host requires TARGET"),
+            (["setup", "--site", "--force"], "setup --force cannot be combined with --site"),
+        ],
+    )
+    def test_invalid_setup_selection_stops_before_cache_access(
+        self, arguments: list[str], message: str, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Incompatible preparation scopes cannot acquire the writer lock or modify the cache."""
+        with (
+            mock.patch.object(sys, "argv", ["fplinux", *arguments]),
+            mock.patch.object(cli, "discover_targets", return_value=("target",)),
+            mock.patch.object(
+                lifecycle, "cache_lock", side_effect=AssertionError("unexpected cache access")
+            ),
+            pytest.raises(SystemExit) as error,
+        ):
+            cli.main()
+
+        output = capsys.readouterr()
+        assert message in f"{error.value.code}\n{output.err}"
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            ["build", "target", "--offline"],
+            ["checksum", "example", "--offline"],
+            ["device-data", "prepare", "target", "--offline"],
+            ["device-data", "report", "target", "--from-dump", "nand.bin", "--offline"],
+        ],
+    )
+    def test_ordinary_commands_reject_the_removed_download_policy_switch(
+        self, arguments: list[str], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Only explicit preparation commands expose a choice about downloading originals."""
+        with (
+            mock.patch.object(sys, "argv", ["fplinux", *arguments]),
+            mock.patch.object(cli, "discover_targets", return_value=("target",)),
+            mock.patch.object(
+                lifecycle, "cache_lock", side_effect=AssertionError("unexpected cache access")
+            ),
+            pytest.raises(SystemExit) as error,
+        ):
+            cli.main()
+
+        assert error.value.code == 2
+        assert "unrecognized arguments: --offline" in capsys.readouterr().err
+
+    @pytest.mark.parametrize(
         ("arguments", "callback_name"),
         [
             (["build", "target"], "fplinux_cli.build.workflow.build"),
@@ -258,7 +358,7 @@ class CliCacheLockTests:
                 None,
                 None,
             ),
-            (["setup"], "fplinux_cli.environment.setup.setup", True, None, None),
+            (["setup"], "fplinux_cli.environment.setup.prepare_setup", True, None, None),
             (["prune", "--apply"], "fplinux_cli.cache.prune.operations.prune", True, None, None),
             (
                 ["package", "target"],
@@ -306,7 +406,6 @@ class CliCacheLockTests:
                     "saved-nand.bin",
                     "--jobs",
                     "2",
-                    "--offline",
                 ],
                 "fplinux_cli.cli.device_data.prepare_device_data",
                 True,
@@ -332,7 +431,7 @@ class CliCacheLockTests:
             "nand-backup-nokia-ta1618-backup.bin",
             "nand-backup-nokia-ta1618-backup.bin---profile-microsd-uboot",
             "nand-identify-nokia-ta1618",
-            "device-data-prepare-nokia-ta1618---from-dump-saved-nand.bin---jobs-2---offline",
+            "device-data-prepare-nokia-ta1618---from-dump-saved-nand.bin---jobs-2",
         ],
     )
     def test_dispatcher_chooses_the_required_lock_mode(  # noqa: PLR0913 -- fixture and independent dispatch expectations stay explicit.
@@ -376,7 +475,6 @@ class CliCacheLockTests:
                     from_originals=None,
                     events=None,
                     jobs=2,
-                    offline=True,
                 )
             )
 
@@ -441,22 +539,6 @@ class CliCacheLockTests:
             "fplinux_cli.runtime.runner.run_target",
         )
         assert callback.call_args.kwargs.get("loader_trace", False) is bool(trace_arguments)
-
-    def test_build_forwards_offline_to_the_dispatcher(self, dispatch_root: Path) -> None:
-        """The parsed build switch reaches its callback without changing lock mode."""
-        events, build = run_dispatch(
-            dispatch_root, ["build", "target", "--offline"], "fplinux_cli.build.workflow.build"
-        )
-
-        assert (events) == (
-            [
-                ("lock", dispatch_root / ".cache", True, "build", "target", None),
-                "command",
-                "unlock",
-            ]
-        )
-        assert build.call_args.kwargs["offline"]
-        assert not (build.call_args.kwargs["verbose"])
 
     @pytest.mark.parametrize(
         ("options", "expected"),

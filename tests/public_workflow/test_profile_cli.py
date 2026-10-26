@@ -83,4 +83,4 @@ class ProfileAndToolCliHelpWorkflowTests:
         assert ("nokia-ta1618") in (result.stdout)
         assert ("--from-dump PATH") in (result.stdout)
         assert ("--jobs N") in (result.stdout)
-        assert ("--offline") in (result.stdout)
+        assert "--offline" not in result.stdout

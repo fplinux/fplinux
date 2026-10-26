@@ -83,7 +83,7 @@ To prepare data without booting or requiring an existing bundle, use the develop
 ./fplinux device-data prepare nokia-ta1618 --from-dump nand.bin
 ```
 
-The developer form prepares any required extraction tools in the pinned environment and finishes after preparation. It preserves a known acquisition receipt when importing the backup; a raw file without one remains without an acquisition receipt, so a later automatic RAM launch may require a fresh live backup. Add `--offline` to use the environment and source archives already stored locally. Saved backups in other directories can be used through `--from-dump`; preparation leaves those directories unchanged.
+The developer form prepares any required extraction tools from local inputs in the pinned environment and finishes after preparation. Run `./fplinux setup nokia-ta1618` first if the target's dependencies are missing. It preserves a known acquisition receipt when importing the backup; a raw file without one remains without an acquisition receipt, so a later automatic RAM launch may require a fresh live backup. Saved backups in other directories can be used through `--from-dump`; preparation leaves those directories unchanged.
 
 Run `./fplinux device-data prepare --help` for the remaining options.
 
@@ -132,7 +132,7 @@ For UMS9117 bring-up, extract a report from a saved complete backup:
 ./fplinux device-data report <target> --from-dump nand.bin
 ```
 
-This developer command works independently of runtime firmware and audio groups. It prepares the required host tool and writes `.cache/diagnostics/device-data/<target>/report-*/board-report.json`; it does not prepare runtime board maps. Add `--offline` to use locally available dependencies. Keep the backup's geometry receipt beside it, especially for a new target with no declared chip geometry. See [Bring up a new phone](/fplinux/porting/bring-up/#prepare-the-board-report) for the complete workflow.
+This developer command works independently of runtime firmware and audio groups. It prepares the required host tool from local inputs and writes `.cache/diagnostics/device-data/<target>/report-*/board-report.json`; it does not prepare runtime board maps. Use `./fplinux setup <target>` for missing dependencies. Keep the backup's geometry receipt beside it, especially for a new target with no declared chip geometry. See [Bring up a new phone](/fplinux/porting/bring-up/#prepare-the-board-report) for the complete workflow.
 
 ## Save a NAND backup
 

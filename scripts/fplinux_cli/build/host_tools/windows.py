@@ -239,20 +239,18 @@ def _copy_licenses(toolchain: Path, libusb_source: Path, package: Path) -> None:
     shutil.copyfile(libusb_source, package / "sources" / libusb_source.name)
 
 
-def prepare_windows_host(
-    *, cache: Path, offline: bool, platform: str, nand_ecc: bool = False
-) -> dict[str, Path]:
+def prepare_windows_host(*, cache: Path, platform: str, nand_ecc: bool = False) -> dict[str, Path]:
     """Build and collect Windows files while the caller owns the project cache lock."""
     cache = cache.resolve()
     lock = load_host_sources(common.ROOT, "windows-host.lock.toml")
     recipes = _native_tool_recipes(platform, nand_ecc=nand_ecc)
     root = cache / "windows-host" / platform
     archives = {
-        name: resolve_source(common.ROOT, entry["source_id"]).acquire(cache, offline=offline)
+        name: resolve_source(common.ROOT, entry["source_id"]).acquire(cache, offline=True)
         for name, entry in lock.items()
     }
     tool_sources = [
-        resolve_source(common.ROOT, recipe["source_lock"]).acquire(cache, offline=offline)
+        resolve_source(common.ROOT, recipe["source_lock"]).acquire(cache, offline=True)
         for recipe in recipes
     ]
     root.mkdir(parents=True, exist_ok=True)

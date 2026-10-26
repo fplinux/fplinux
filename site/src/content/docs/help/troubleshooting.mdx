@@ -175,22 +175,21 @@ See [microSD system card](/fplinux/guides/microsd-system-card/).
 
 See [What you need](/fplinux/start/build/#what-you-need).
 
-### setup or a build fails while downloading
+### setup fails while downloading
 
 Show the failed part of the last run:
 
 ```sh title="PC"
 ./fplinux logs show latest --command setup --failed
-./fplinux logs show latest --command build --failed
 ```
 
 - **The host cannot be reached or the request times out.** Check the PC's connection and retry after the network or server recovers.
 - **An exact package URL returns 404.** The repository may have removed that package revision. Retrying cannot restore it. Restore the matching [dependency snapshot or release inputs](/fplinux/guides/dependencies/) if you have them; otherwise [report the missing URL](/fplinux/help/report/).
 - **`NAME SHA256 mismatch: expected …, received …`.** The downloaded bytes differ from the pinned input and are rejected. Restore a matching dependency snapshot or report the URL and expected/received hashes. Do not disable verification or substitute a different package version.
 
-### An offline build stops
+### A build reports missing inputs
 
-The command names the missing input or reports that the pinned environment is absent or out of date. With matching dependency inputs restored, run `./fplinux setup --offline` to prepare the environment without downloads. A complete local snapshot can also restore its saved environment. Without saved inputs, run `./fplinux setup` online; missing build inputs may then require an online build. See [Dependency snapshots](/fplinux/guides/dependencies/) and [Build without network access](/fplinux/start/build/#build-without-network-access).
+Builds use local inputs and never download dependencies. The command names the missing input and required setup selection, or reports that the pinned environment is absent or out of date. With matching dependency inputs restored, run the reported setup command with `--offline`, for example `./fplinux setup nokia-ta1618 --offline`. A complete local snapshot can also restore its saved environment. Without saved inputs, run the selected setup command with network access, then retry the build. See [Dependency snapshots](/fplinux/guides/dependencies/) and [Build without network access](/fplinux/start/build/#build-without-network-access).
 
 ### A build fails or the PC runs out of memory
 

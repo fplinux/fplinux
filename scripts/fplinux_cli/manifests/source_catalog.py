@@ -29,7 +29,13 @@ class ResolvedSource:
     destination: str
     archive_prefix: str | None = None
 
-    def acquire(self, cache: Path, *, offline: bool = True) -> Path:
+    def acquire(
+        self,
+        cache: Path,
+        *,
+        offline: bool = True,
+        setup_command: str = "./fplinux setup --all",
+    ) -> Path:
         """Acquire or verify the canonical original with its owner's checksum."""
         return download_locked_file(
             self.url,
@@ -38,6 +44,7 @@ class ResolvedSource:
             offline=offline,
             algorithm=self.algorithm,
             size=self.size,
+            setup_command=setup_command,
         )
 
 

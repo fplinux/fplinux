@@ -22,8 +22,6 @@ from .state import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from fplinux_cli.reporting.run import RunReporter
-
 
 def environment_arguments(rootfs: Path) -> list[str]:
     """Supply the rootfs and the shared tool environment for every Kern invocation."""
@@ -168,12 +166,8 @@ def publish_environment(kern: str, candidate: Path, state: EnvironmentState) -> 
     return state
 
 
-def require_environment(
-    *, offline: bool = False, reporter: RunReporter | None = None
-) -> tuple[str, Path, EnvironmentState]:
-    """Prepare the current exact environment when the calling workflow permits setup."""
-    from .setup import setup  # noqa: PLC0415 -- setup uses this module's rootfs publication.
-
+def require_environment(*, target: str | None = None) -> tuple[str, Path, EnvironmentState]:
+    """Require the exact environment previously prepared by an explicit setup command."""
     lock = load_environment_lock()
     recipe = environment_recipe_digest(lock)
     if kern_available(lock):
@@ -181,11 +175,7 @@ def require_environment(
         current = current_environment_state(kern, recipe)
         if current is not None:
             return kern, environment_rootfs(ROOT / ".cache", current), current
-    if offline:
-        fail(
-            "offline execution requires the current pinned environment; "
-            "run ./fplinux setup online first"
-        )
-    state = setup(offline=offline, reporter=reporter, lock=lock, environment_recipe=recipe)
-    kern = require_kern(lock)
-    return kern, environment_rootfs(ROOT / ".cache", state), state
+    selector = "--all" if target is None else target
+    return fail(
+        f"the current pinned environment is missing or stale; run ./fplinux setup {selector}"
+    )

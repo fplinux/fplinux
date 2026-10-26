@@ -138,7 +138,7 @@ def _checksum_container_command(
     ]
 
 
-def checksum_aport(package: str, *, offline: bool = False) -> None:
+def checksum_aport(package: str) -> None:
     """Regenerate one aport's SHA-512 block from its exact canonical source closure."""
     aport = _canonical_aport(package)
     apkbuild = aport / "APKBUILD"
@@ -146,13 +146,11 @@ def checksum_aport(package: str, *, offline: bool = False) -> None:
     before_apkbuild = apkbuild.read_bytes()
     mode = apkbuild.stat().st_mode & 0o777
     reporter = RunReporter.create("checksum", target=package, verbose=False)
-    kern, rootfs, _state = environment_runtime.require_environment(
-        offline=offline, reporter=reporter
-    )
+    kern, rootfs, _state = environment_runtime.require_environment()
     cache = common.ROOT / ".cache"
     downloads = build_commands.ensure_build_directory(cache / "downloads")
     with reporter.stage("source-inputs"):
-        acquire_inputs(aport_source_inputs(common.ROOT, (package,)), cache, offline=offline)
+        acquire_inputs(aport_source_inputs(common.ROOT, (package,)), cache, offline=True)
     with reporter.stage("workspace"):
         snapshot_root = staging.stage_workspace_snapshot(before_snapshot)
     checksum_root = build_commands.ensure_build_directory(cache / "checksum")

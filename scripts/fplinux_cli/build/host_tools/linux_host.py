@@ -13,16 +13,8 @@ from pathlib import Path
 from fplinux_cli import common
 from fplinux_cli.build.host_tools.host_package import publish_host_package
 from fplinux_cli.common import canonical_json_bytes, fail
-from fplinux_cli.environment.definition import (
-    environment_recipe_digest,
-    load_environment_lock,
-)
-from fplinux_cli.environment.kern import kern_box_name, kern_environment, require_kern
-from fplinux_cli.environment.runtime import (
-    current_environment_state,
-    environment_arguments,
-    environment_rootfs,
-)
+from fplinux_cli.environment.kern import kern_box_name, kern_environment
+from fplinux_cli.environment.runtime import environment_arguments, require_environment
 from fplinux_cli.manifests.source_catalog import load_host_sources, resolve_source
 from fplinux_cli.templates import substitute_template
 
@@ -91,21 +83,12 @@ def _verify_python(package: Path) -> None:
         fail(result.stderr.strip() or "bundled Linux Python runtime verification failed")
 
 
-def prepare_linux_host(*, cache: Path, offline: bool) -> dict[str, Path]:
+def prepare_linux_host(*, cache: Path) -> dict[str, Path]:
     """Collect runtime files while the caller owns the project cache lock."""
     cache = cache.resolve()
     for entry in load_host_sources(common.ROOT, "linux-host.lock.toml").values():
-        resolve_source(common.ROOT, entry["source_id"]).acquire(cache, offline=offline)
-    lock = load_environment_lock()
-    recipe = environment_recipe_digest(lock)
-    kern = require_kern(lock)
-    state = current_environment_state(kern, recipe)
-    if state is None:
-        fail(
-            "Linux standalone runtime requires the current pinned environment; "
-            "run ./fplinux setup first"
-        )
-    rootfs = environment_rootfs(common.ROOT / ".cache", state)
+        resolve_source(common.ROOT, entry["source_id"]).acquire(cache, offline=True)
+    kern, rootfs, _state = require_environment()
     root = cache / "linux-host"
     root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=root, prefix=".export-") as temporary:

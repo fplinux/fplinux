@@ -80,7 +80,7 @@ class ChecksumAportContext:
             contextlib.redirect_stdout(io.StringIO()),
             contextlib.redirect_stderr(io.StringIO()),
         ):
-            output.run_entrypoint(lambda: checksum_commands.checksum_aport(PACKAGE, offline=True))
+            output.run_entrypoint(lambda: checksum_commands.checksum_aport(PACKAGE))
 
     @staticmethod
     def staged_apkbuild(command: list[str]) -> Path:

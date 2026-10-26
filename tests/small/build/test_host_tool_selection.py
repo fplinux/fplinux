@@ -34,12 +34,13 @@ def native_host_compiler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setenv("FPLINUX_ENVIRONMENT_CONTENT", "2" * 64)
 
     def binary(recipe: dict[str, Any], output: Path) -> Path:
+        name: str = recipe["name"]
         contents = bytearray(64)
         contents[:6] = b"\x7fELF\x02\x01"
         struct.pack_into("<H", contents, 18, 62)
         struct.pack_into("<H", contents, 54, 56)
-        destination = output / recipe["name"]
-        destination.write_bytes(contents + recipe["name"].encode("ascii"))
+        destination = output / name
+        destination.write_bytes(contents + name.encode("ascii"))
         destination.chmod(0o755)
         return destination
 
@@ -54,9 +55,10 @@ def native_host_compiler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
 
     monkeypatch.setattr(host, "build_make_host_tool", make_binary)
     monkeypatch.setattr(host, "build_cc_libusb_tool", binary)
-    monkeypatch.setattr(host.subprocess, "run", inspect)
+    monkeypatch.setattr(subprocess, "run", inspect)
 
 
+@pytest.mark.usefixtures("native_host_compiler")
 @pytest.mark.parametrize(
     ("target", "ecc_module", "expected"),
     [
@@ -82,7 +84,6 @@ def test_target_host_build_publishes_only_runtime_tools_and_selected_ecc(
     ecc_module: str | None,
     expected: set[str],
     tmp_path: Path,
-    native_host_compiler: None,
 ) -> None:
     """Ordinary RAM bundles omit report tools and preserve the real NAND decoder consumer."""
     config = load_target(target)
@@ -106,9 +107,8 @@ def test_target_host_build_publishes_only_runtime_tools_and_selected_ecc(
         assert path.stat().st_mode & 0o777 == 0o755
 
 
-def test_explicit_board_report_host_build_publishes_the_report_helper(
-    tmp_path: Path, native_host_compiler: None
-) -> None:
+@pytest.mark.usefixtures("native_host_compiler")
+def test_explicit_board_report_host_build_publishes_the_report_helper(tmp_path: Path) -> None:
     """Contributor reports retain their declared tool without adding ordinary runtime files."""
     files = host.build_host_tools(
         common.load_toml(ROOT / "sources.lock.toml"),

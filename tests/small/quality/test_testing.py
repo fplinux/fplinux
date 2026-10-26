@@ -18,6 +18,7 @@ import pytest
 from fplinux_cli import common
 from fplinux_cli.environment import runtime as environment_runtime
 from fplinux_cli.environment.state import EnvironmentState
+from fplinux_cli.manifests.source_catalog import ResolvedSource
 from fplinux_cli.quality import checks, host_testing, runtime, testing
 from fplinux_cli.quality.receipts import (
     CheckReceiptRecipe,
@@ -33,6 +34,65 @@ from fplinux_cli.workspace import quality_inputs
 from fplinux_cli.workspace import staging as workspace_staging
 
 from tests import ROOT
+
+
+@pytest.mark.parametrize("original_state", ["missing", "mismatched", "ready"])
+def test_emmc_workload_requires_exact_local_originals_without_downloads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, original_state: str
+) -> None:
+    """Missing originals stop test execution; matching saved bytes reach the workload."""
+    from fplinux_cli.build.host_tools import phone_data  # noqa: PLC0415 -- workload-only input.
+
+    module = tmp_path / "tests/artifact/test_emmc_files.py"
+    module.parent.mkdir(parents=True)
+    module.touch()
+    original = ResolvedSource(
+        "python_ext4",
+        "fixture",
+        "ext4.whl",
+        "https://example.invalid/ext4.whl",
+        "sha256",
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        3,
+        "downloads/sources/python_ext4/ext4.whl",
+    )
+    saved = tmp_path / ".cache/downloads/sources/python_ext4/ext4.whl"
+    if original_state != "missing":
+        saved.parent.mkdir(parents=True)
+        saved.write_bytes(b"abc" if original_state == "ready" else b"bad")
+    monkeypatch.setattr(common, "ROOT", tmp_path)
+    monkeypatch.setattr(phone_data, "preparation_sources", lambda _root: (original,))
+    reporter = output.RunReporter("test", tmp_path / "logs", "test", verbose=False)
+    commands: list[list[str]] = []
+
+    def run_workload(
+        _stage: output.Stage, _workspace: Path, command: list[str], **options: object
+    ) -> None:
+        assert options["downloads"] == tmp_path / ".cache/downloads"
+        commands.append(command)
+
+    with (
+        mock.patch.object(runtime, "run_quality_command", side_effect=run_workload),
+        mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")),
+    ):
+        if original_state != "ready":
+            with pytest.raises(SystemExit, match=r"ext4.whl.*setup --all"):
+                testing.run_test_workload(
+                    reporter,
+                    tmp_path,
+                    kern="kern",
+                    rootfs=tmp_path / "rootfs",
+                    names=[],
+                    tier="artifact",
+                )
+            assert commands == []
+            return
+        testing.run_test_workload(
+            reporter, tmp_path, kern="kern", rootfs=tmp_path / "rootfs", names=[], tier="artifact"
+        )
+    assert len(commands) == 1
+    assert commands[0][-1] == "tests/artifact"
+    assert saved.read_bytes() == b"abc"
 
 
 class SelectedTestRunTests:

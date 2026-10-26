@@ -223,7 +223,11 @@ def aport_source_inputs(root: Path, packages: Sequence[str]) -> list[DependencyI
 
 
 def acquire_inputs(
-    inputs: Sequence[DependencyInput], cache: Path, *, offline: bool
+    inputs: Sequence[DependencyInput],
+    cache: Path,
+    *,
+    offline: bool,
+    setup_command: str = "./fplinux setup --all",
 ) -> dict[str, Path]:
     """Acquire selected originals once before their consumers use only local files."""
     result = {}
@@ -238,6 +242,7 @@ def acquire_inputs(
             offline=offline,
             algorithm=item.algorithm,
             size=item.size,
+            setup_command=setup_command,
         )
     return result
 
@@ -399,18 +404,29 @@ def environment_inputs(root: Path) -> list[DependencyInput]:
     return sorted(_environment_declarations(root)[1], key=lambda item: item.key)
 
 
-def _host_declarations(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
+def _host_declarations(
+    root: Path,
+    hosts: Sequence[str] = ("linux-host", "windows-host", "windows-driver"),
+) -> tuple[dict[str, object], list[DependencyInput]]:
     """Retain the originals consumed by autonomous runtime and driver preparation."""
-    locks = {
-        host: load_host_sources(root, f"{host}.lock.toml")
-        for host in ("linux-host", "windows-host", "windows-driver")
-    }
+    locks = {host: load_host_sources(root, f"{host}.lock.toml") for host in hosts}
     inputs = {
         entry["source_id"]: source_input(resolve_source(root, entry["source_id"]))
         for lock in locks.values()
         for entry in lock.values()
     }
     return dict(locks), list(inputs.values())
+
+
+def host_inputs(root: Path, host: str) -> list[DependencyInput]:
+    """Select originals for one standalone runtime and its native preparation tools."""
+    if host == "linux":
+        hosts: tuple[str, ...] = ("linux-host",)
+    elif host == "windows":
+        hosts = ("windows-host", "windows-driver")
+    else:
+        fail(f"unsupported runtime host: {host}")
+    return deduplicate_inputs(_host_declarations(root, hosts)[1])
 
 
 def _inventory(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
@@ -515,6 +531,11 @@ def _inventory(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
         "producers": producers,
         "aports": aport_context,
     }
+    return context, deduplicate_inputs(inputs)
+
+
+def deduplicate_inputs(inputs: Sequence[DependencyInput]) -> list[DependencyInput]:
+    """Merge shared consumers while rejecting conflicting originals or cache destinations."""
     unique: dict[str, DependencyInput] = {}
     destinations: dict[str, tuple[str | None, str | None, str]] = {}
     for item in inputs:
@@ -527,7 +548,7 @@ def _inventory(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
             fail(f"dependency cache destination has conflicting checksums: {item.destination}")
         unique[item.key] = item
         destinations[item.destination] = identity
-    return context, [unique[key] for key in sorted(unique)]
+    return [unique[key] for key in sorted(unique)]
 
 
 def dependency_selection(root: Path) -> tuple[list[DependencyInput], dict[str, object]]:

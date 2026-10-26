@@ -13,11 +13,13 @@ Use the matching source revision and the twelve-character build ID shown in the 
 
 ```sh title="PC"
 ./fplinux dependencies restore --release <release-id>
-./fplinux setup --offline
+./fplinux setup nokia-ta1618 --offline
 ./fplinux doctor
 ```
 
 Each public Release contains its complete inputs-only snapshot, split into transport parts, alongside the runtime ZIPs and corresponding sources. Restoration downloads those public assets without private credentials, checks their association with this source checkout, verifies the transport and stored originals, then restores the declared cache files. It selects the explicit build ID; there is no `latest` selection.
+
+The setup example selects `nokia-ta1618`; replace it with your target. Use the [setup selection](/fplinux/start/build/#select-setup-inputs) for a Windows archive, site tools or the complete checkout. Setup installs tools and prepares dependencies; it does not build images or archives.
 
 The snapshot preserves the build inputs, not the host operating system. Use a Linux x86-64 host with Python 3.14, Git, GNU tar, Zstandard and coreutils, plus the user namespaces and subordinate-ID tools described in [Build FPLinux](/fplinux/start/build/). An incompatible source checkout is rejected. Prepared [device data](/fplinux/guides/device-data/) and private package-signing keys remain separate local inputs.
 
@@ -62,7 +64,7 @@ Restoration verifies the complete snapshot before writing its declared cache des
 An existing cache file with different bytes is reported and retained for inspection before input restoration writes any files. The snapshot restores the host environment and external inputs, not compiled APKs, phone root filesystems, kernels or successful build results. Build the selected phone afterwards:
 
 ```sh title="PC"
-./fplinux build nokia-ta1618 --offline
+./fplinux build nokia-ta1618
 ```
 
 ## Save inputs without an environment
@@ -84,7 +86,7 @@ To recreate the environment from those originals, restore only the inputs and re
 
 The selected inputs include npm registry archives declared by the root and `site/package-lock.json`, including locked optional platform packages. The site uses the exact Node.js and npm versions declared by the root package, with a separate Linux x86-64 glibc Node.js original. Site registry archives are restored under `.cache/downloads/site/npm/`.
 
-After acquiring or restoring inputs, `./fplinux ci site-install` installs the pinned site runtime and runs `npm ci` offline using those originals. Follow [Preview this site](/fplinux/develop/contributing/#preview-this-site) to select that runtime and run the site tools.
+After restoring inputs, `./fplinux setup --site --offline` installs the pinned site runtime and runs `npm ci` offline using those originals. To acquire and install only site inputs directly, use `./fplinux setup --site`. Neither selection prepares Alpine or builds the offline site. Follow [Preview this site](/fplinux/develop/contributing/#preview-this-site) to select that runtime and run the site tools.
 
 ## Transport an inputs-only snapshot
 

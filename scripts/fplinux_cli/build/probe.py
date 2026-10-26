@@ -15,7 +15,6 @@ from fplinux_cli.build.environment import SOURCE_DATE_EPOCH
 from fplinux_cli.build.workflow import ensure_build_directory
 from fplinux_cli.common import canonical_json_bytes, fail, relative_name, sha256_bytes
 from fplinux_cli.dependencies.inputs import acquire_inputs, alpine_package_input, source_input
-from fplinux_cli.environment import definition
 from fplinux_cli.environment import kern as environment_kern
 from fplinux_cli.environment import runtime as environment_runtime
 from fplinux_cli.manifests.source_catalog import acquire_source, resolve_source
@@ -124,12 +123,12 @@ def _prepare_sysroot(
         print("probe-build: reusing prepared sysroot", flush=True)
         return sysroot
 
-    with reporter.stage("sysroot-downloads"):
+    with reporter.stage("sysroot-inputs"):
         selected_inputs = [
             source_input(resolve_source(common.ROOT, lock["minirootfs"]["source_id"])),
             *(alpine_package_input(lock, records[name]) for name in lock["sysroot"]["packages"]),
         ]
-        acquire_inputs(selected_inputs, cache, offline=False)
+        acquire_inputs(selected_inputs, cache, offline=True)
         packages = _alpine_group_packages(lock, records, "sysroot", cache=cache)
     downloads = cache / "downloads/alpine/packages"
     with tempfile.TemporaryDirectory(dir=sysroots, prefix=".prepare-") as temporary:
@@ -253,13 +252,7 @@ def _compile_probe(  # noqa: PLR0913 -- explicit compiler inputs and reporting b
 def build_probe(source: str, *, output: str) -> None:
     """Publish one static ARMv7 probe only after the pinned compiler succeeds."""
     source_path, output_path = resolve_probe_paths(source, output, root=common.ROOT)
-    lock = definition.load_environment_lock()
-    environment_recipe = definition.environment_recipe_digest(lock)
-    kern = environment_kern.require_kern(lock)
-    state = environment_runtime.current_environment_state(kern, environment_recipe)
-    if state is None:
-        fail("probe-build requires the current pinned build environment; run ./fplinux setup")
-    rootfs = environment_runtime.environment_rootfs(common.ROOT / ".cache", state)
+    kern, rootfs, state = environment_runtime.require_environment()
     reporter = RunReporter.create("probe-build", target=None, verbose=False)
     sysroot = _prepare_sysroot(kern, rootfs, state, reporter)
     _compile_probe(source_path, output_path, sysroot, kern=kern, rootfs=rootfs, reporter=reporter)

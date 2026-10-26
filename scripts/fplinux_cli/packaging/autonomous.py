@@ -263,9 +263,9 @@ def autonomous_payload(
         )
 
         dependencies = prepare_windows_host(
-            cache=common.ROOT / ".cache", offline=True, platform=platform, nand_ecc=has_ecc
+            cache=common.ROOT / ".cache", platform=platform, nand_ecc=has_ecc
         )
-        dependencies.update(prepare_windows_driver(cache=common.ROOT / ".cache", offline=True))
+        dependencies.update(prepare_windows_driver(cache=common.ROOT / ".cache"))
         for relative, source in dependencies.items():
             if relative in files:
                 fail(f"duplicate Windows archive path: {relative}")
@@ -292,9 +292,7 @@ def autonomous_payload(
             files["licenses/host-tools/Unlicense.txt"] = license_file.read_bytes()
         if has_ecc:
             files.update(_linux_ecc_sources(platform))
-        for relative, source in prepare_linux_host(
-            cache=common.ROOT / ".cache", offline=True
-        ).items():
+        for relative, source in prepare_linux_host(cache=common.ROOT / ".cache").items():
             if relative in files:
                 fail(f"duplicate Linux archive path: {relative}")
             files[relative] = source.read_bytes()

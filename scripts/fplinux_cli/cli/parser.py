@@ -134,19 +134,11 @@ def _add_device_data_commands(
         metavar="N",
         help="limit jobs when the read-only phone loader must be built",
     )
-    prepare.add_argument(
-        "--offline",
-        action="store_true",
-        help="build the read-only phone loader without network access",
-    )
     report = commands.add_parser(
         "report", help="extract a board report from a saved NAND without selecting phone data"
     )
     report.add_argument("target", choices=targets)
     report.add_argument("--from-dump", type=Path, required=True, metavar="PATH")
-    report.add_argument(
-        "--offline", action="store_true", help="prepare the tool without network access"
-    )
 
 
 def _add_ci_commands(commands: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
@@ -288,11 +280,35 @@ def create_parser(
         metavar="PATH",
         help="normalized repository-relative source path or declared Linux patch",
     )
-    setup_parser = commands.add_parser("setup", help="prepare the pinned build environment")
+    setup_parser = commands.add_parser(
+        "setup", help="prepare the build environment or selected exact external inputs"
+    )
+    setup_selection = setup_parser.add_mutually_exclusive_group()
+    setup_selection.add_argument(
+        "target",
+        nargs="?",
+        choices=targets,
+        metavar="TARGET",
+        help="prepare every supported profile and build type for this target",
+    )
+    setup_selection.add_argument(
+        "--site", action="store_true", help="prepare and install documentation tooling only"
+    )
+    setup_selection.add_argument(
+        "--all",
+        dest="all_inputs",
+        action="store_true",
+        help="prepare the environment, all checkout inputs and documentation tooling",
+    )
+    setup_parser.add_argument(
+        "--host",
+        choices=("linux", "windows"),
+        help="prepare this target's archive host originals (default: linux; requires TARGET)",
+    )
     setup_parser.add_argument(
         "--offline",
         action="store_true",
-        help="recreate the pinned environment from exact local inputs without network access",
+        help="prepare the selected consumers using only exact local inputs",
     )
     setup_parser.add_argument(
         "--force",
@@ -398,11 +414,6 @@ def create_parser(
         action="store_true",
         help="stream complete stage output while retaining logs",
     )
-    build_parser.add_argument(
-        "--offline",
-        action="store_true",
-        help="build without downloads, using the prepared environment and saved inputs",
-    )
     probe_parser = commands.add_parser(
         "probe-build", help="build one static ARMv7 hard-float musl C probe"
     )
@@ -420,11 +431,6 @@ def create_parser(
         help="regenerate one Alpine aport sha512sums block in the pinned build environment",
     )
     checksum_parser.add_argument("aport")
-    checksum_parser.add_argument(
-        "--offline",
-        action="store_true",
-        help="regenerate using only exact originals already stored locally",
-    )
     package_parser = commands.add_parser(
         "package", help="package an existing build for standalone use"
     )

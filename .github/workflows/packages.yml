@@ -91,9 +91,9 @@ jobs:
           name: dependency-inputs
           path: ${{ runner.temp }}/fplinux-inputs
       - run: ./fplinux ci restore-inputs --directory "$RUNNER_TEMP/fplinux-inputs" --snapshot "${{ needs.prepare-inputs.outputs.snapshot }}"
-      - run: ./fplinux setup --offline
+      - run: ./fplinux setup "$FPLINUX_TARGET" --offline
       - run: ./fplinux doctor
-      - run: ./fplinux build "$FPLINUX_TARGET" --without-device-data --offline
+      - run: ./fplinux build "$FPLINUX_TARGET" --without-device-data
       - run: |
           for host in $FPLINUX_PACKAGE_HOSTS; do
             ./fplinux package "$FPLINUX_TARGET" --host "$host" --output-directory .cache/ci/packages

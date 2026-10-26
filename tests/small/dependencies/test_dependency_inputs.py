@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 import tomlkit
+from fplinux_cli import common
 from fplinux_cli.alpine import registration
 from fplinux_cli.dependencies.inputs import (
     DependencyInput,
@@ -19,9 +20,11 @@ from fplinux_cli.dependencies.inputs import (
     build_source_inputs,
     dependency_selection,
     environment_inputs,
+    host_inputs,
     npm_declarations,
 )
 from fplinux_cli.dependencies.snapshots import require_checkout
+from fplinux_cli.environment import setup as env_setup
 
 _FIXTURES = Path(__file__).parents[2] / "fixtures/dependencies"
 
@@ -116,6 +119,100 @@ def test_host_original_has_one_checksum_size_and_cache_slot(
         not item.key.startswith(("source:windows_", "source:linux_host_"))
         for item in environment_inputs(dependency_checkout.root)
     )
+
+
+@pytest.mark.parametrize(
+    ("host", "expected"),
+    [
+        ("linux", {"source:linux_host_libusb"}),
+        (
+            "windows",
+            {
+                "source:windows_host_llvm_mingw",
+                "source:windows_host_python",
+                "source:windows_driver_libwdi",
+            },
+        ),
+    ],
+)
+def test_host_selection_excludes_other_runtime_originals(
+    dependency_checkout: DependencyCheckout, host: str, expected: set[str]
+) -> None:
+    """Preparing one archive host cannot require the other host's runtime or driver."""
+    selected = host_inputs(dependency_checkout.root, host)
+
+    assert {item.key for item in selected} == expected
+    assert len({item.destination for item in selected}) == len(selected)
+
+
+@pytest.mark.parametrize("host", ["linux", "windows"])
+def test_target_setup_unions_profile_debug_and_bundle_originals_only(
+    dependency_checkout: DependencyCheckout, monkeypatch: pytest.MonkeyPatch, host: str
+) -> None:
+    """Target preparation includes optional build variants without another board's inputs."""
+    checkout = dependency_checkout
+    monkeypatch.setattr(common, "ROOT", checkout.root)
+    monkeypatch.setattr(env_setup, "ROOT", checkout.root)
+    platform = common.load_toml(checkout.root / "platforms/test-platform/platform.toml")
+    platform["host"]["runtime_tools"] = {"loader": "loader"}
+    platform["uboot"] = {"source": "uboot.lock.toml"}
+    monkeypatch.setattr(env_setup, "load_platform", lambda _name: platform)
+    checkout.write("uboot.lock.toml", 'source="card_boot"\n')
+    checkout.write("targets/test-phone/target.toml", 'platform="test-platform"\n[microsd]\n')
+    checkout.write(
+        "targets/other-phone/target.toml",
+        'platform="test-platform"\n[rootfs]\npackages=["fplinux-other"]\n',
+    )
+    for package, source in (
+        ("fplinux-bash", "phone"),
+        ("fplinux-card", "card"),
+        ("fplinux-debug-tools", "debug"),
+        ("fplinux-bundle", "bundle"),
+        ("fplinux-other", "other"),
+    ):
+        checkout.source(source, filename=f"{source}.tar.gz", checksum="8" * 128)
+        checkout.write(
+            f"alpine/aports/{package}/APKBUILD",
+            f'pkgname={package}\npkgver=1\nsource="@source:{source}@"\n',
+        )
+    checkout.source("card_boot", filename="boot.tar.gz", checksum="7" * 128)
+
+    def selected_target(_target: str, profile: str, *, build_type: str) -> dict[str, object]:
+        card = profile == "microsd-uboot"
+        return {
+            "build_type": build_type,
+            "rootfs": {
+                "base_packages": ["fplinux-bash"],
+                "packages": ["fplinux-card"] if card else [],
+            },
+            "bundle": {"packages": ["fplinux-bundle"]},
+            "linux": {"root": {"kind": "external" if card else "initramfs"}},
+            "uboot": {"kind": "full" if card else "none"},
+            "loader_assets": [{"source_id": "loader"}],
+        }
+
+    monkeypatch.setattr(env_setup, "load_target", selected_target)
+    selected = env_setup.target_setup_inputs("test-phone", host=host)
+    keys = {item.key for item in selected}
+
+    assert {
+        "source:phone",
+        "source:card",
+        "source:debug",
+        "source:bundle",
+        "source:card_boot",
+        "source:kernel",
+        "source:support",
+        "source:host",
+        "source:loader",
+        "source:alpine_target",
+        "alpine:armv7:runtime-1-r0.apk",
+    } <= keys
+    assert "source:other" not in keys
+    assert not any(key.startswith("npm:") for key in keys)
+    assert ("source:linux_host_libusb" in keys) is (host == "linux")
+    assert ("source:windows_driver_libwdi" in keys) is (host == "windows")
+    assert len(keys) == len(selected)
 
 
 def test_runtime_source_selection_keeps_report_original_restorable_offline(

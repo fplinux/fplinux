@@ -23,16 +23,6 @@ def _list_check_scopes(check_parser: argparse.ArgumentParser, scopes: list[str])
         print(scope)
 
 
-def _setup_action(*, force: bool, offline: bool) -> None:
-    """Prepare the build environment while discarding its internal state object."""
-    from fplinux_cli.environment.setup import setup  # noqa: PLC0415 -- setup-only backend.
-
-    if offline:
-        setup(force=force, offline=True)
-    else:
-        setup(force=force)
-
-
 def _nand_backup_action(
     target: str,
     output: Path,
@@ -136,7 +126,23 @@ def command_action(
                 jobs=jobs,
             )
     elif args.command == "setup":
-        action = partial(_setup_action, force=args.force, offline=args.offline)
+        if args.host is not None and args.target is None:
+            fail("setup --host requires TARGET")
+        if args.site and args.force:
+            fail("setup --force cannot be combined with --site")
+        from fplinux_cli.environment.setup import (  # noqa: PLC0415 -- selected backend.
+            prepare_setup,
+        )
+
+        action = partial(
+            prepare_setup,
+            args.target,
+            host=args.host or "linux",
+            site=args.site,
+            all_inputs=args.all_inputs,
+            force=args.force,
+            offline=args.offline,
+        )
     elif args.command == "dependencies":
         if args.dependencies_command == "create":
             from fplinux_cli.dependencies.workflow import (  # noqa: PLC0415 -- selected backend.
@@ -227,14 +233,13 @@ def command_action(
             build_type=args.build_type,
             include_device_data=args.include_device_data,
             verbose=args.verbose,
-            offline=args.offline,
         )
     elif args.command == "checksum":
         from fplinux_cli.alpine.checksum import (  # noqa: PLC0415 -- selected backend.
             checksum_aport,
         )
 
-        action = partial(checksum_aport, args.aport, offline=args.offline)
+        action = partial(checksum_aport, args.aport)
     elif args.command == "probe-build":
         from fplinux_cli.build.probe import build_probe  # noqa: PLC0415 -- selected backend.
 
@@ -317,14 +322,12 @@ def command_action(
                 from_originals=args.from_originals,
                 events=args.events,
                 jobs=args.jobs,
-                offline=args.offline,
             )
         elif args.device_data_command == "report":
             action = partial(
                 report_device_data,
                 args.target,
                 from_dump=args.from_dump,
-                offline=args.offline,
             )
         else:
             raise AssertionError(f"unhandled device-data command: {args.device_data_command}")

@@ -76,7 +76,7 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
                 for path in sorted((workspace / "alpine/aports").glob("*/APKBUILD"))
             )
             with reporter.stage("alpine-inputs"):
-                acquire_inputs(aport_source_inputs(workspace, packages), cache, offline=False)
+                acquire_inputs(aport_source_inputs(workspace, packages), cache, offline=True)
             downloads = cache / "downloads"
         with reporter.stage("source", passthrough=True, show_tail=False) as stage:
             run_quality_command(
@@ -110,7 +110,7 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
                 for source_id in sorted(source_ids)
             ],
             cache,
-            offline=False,
+            offline=True,
         )
     environment = kern_environment()
     log_mount = ["--volume", f"{container_logs}:/logs"]
@@ -290,7 +290,7 @@ def check(  # noqa: PLR0913 -- public check options stay explicit.
             reporter.finish()
             return
 
-    kern, rootfs, current_environment = require_environment(reporter=reporter)
+    kern, rootfs, current_environment = require_environment()
 
     recipes = receipt_recipes(current_environment.generation)
     missing = tuple(

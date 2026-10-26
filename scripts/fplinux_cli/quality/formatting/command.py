@@ -177,7 +177,7 @@ def format_sources(values: Sequence[str]) -> None:
             source.checksum not in fetched
             and inspect_linux_base(ROOT / ".cache", source.checksum) is None
         ):
-            source.acquire(ROOT / ".cache", offline=False)
+            source.acquire(ROOT / ".cache", offline=True)
             fetched.add(source.checksum)
     if patches:
         if linux_cache.is_symlink() or (linux_cache.exists() and not linux_cache.is_dir()):

@@ -11,7 +11,7 @@ FPLinux is built from source on your PC. One command builds a complete image for
 
 - A Linux x86-64 PC with Python 3.14.
 - Unprivileged user namespaces, and `newuidmap` and `newgidmap` with subordinate UID and GID ranges for your user.
-- Network access for the first setup and build.
+- Network access for setup, or matching saved dependency inputs.
 - The exact target name from your [phone page](/fplinux/phones/).
 
 Check the phone's [support status](/fplinux/phones/#support-status), boot key and storage limits before building. The examples below use `nokia-ta1618`; replace it with your phone's target.
@@ -29,14 +29,14 @@ FPLinux keeps one prepared Alpine root filesystem inside the checkout and runs i
    cd fplinux
    ```
 
-2. Prepare the build environment and check the host:
+2. Prepare the build environment and your phone's dependencies, then check the host:
 
    ```sh title="PC"
-   ./fplinux setup
+   ./fplinux setup nokia-ta1618
    ./fplinux doctor
    ```
 
-   `setup` downloads and prepares the pinned build environment. If its inputs change, it prepares and validates a complete replacement before switching to it and removing the previous environment. Changes to phone sources reuse the existing environment. `doctor` reports anything on the host that prevents a build.
+   `setup nokia-ta1618` downloads the pinned inputs for this target and prepares the shared build environment. If the environment's inputs change, it prepares and validates a complete replacement before switching to it and removing the previous environment. Changes to phone sources reuse the existing environment. `doctor` reports anything on the host that prevents a build.
 
 3. Build the image for your phone:
 
@@ -81,15 +81,29 @@ Use the same profile and build type in every command for that build. If you buil
 
 Each combination of phone, profile and build type is kept separately. Building one does not replace another.
 
+## Select setup inputs
+
+Choose the preparation you need:
+
+| Command | Prepares |
+| --- | --- |
+| `./fplinux setup` | The shared Alpine build environment |
+| `./fplinux setup nokia-ta1618` | The shared environment and this target's dependencies for every supported boot profile, release and debug builds, and Linux archives |
+| `./fplinux setup nokia-ta1618 --host windows` | The same target build dependencies, with Windows archive tools, runtime and driver inputs instead of the Linux archive runtime |
+| `./fplinux setup --site` | The pinned site runtime and npm dependencies, without the Alpine environment |
+| `./fplinux setup --all` | The shared environment, every checkout dependency and the site tools |
+
+The target, `--site` and `--all` selections are mutually exclusive. `--host` requires a target. Setup prepares inputs and tools; build phone images, ZIP archives and the offline site with their respective commands. `--force` rebuilds only the shared environment and cannot be used with `--site`.
+
 ## Build without network access
 
-After one online build has downloaded everything it needs, you can rebuild offline:
+Builds use local inputs and never download dependencies. After setup, run the same build command with or without a network connection:
 
 ```sh title="PC"
-./fplinux build nokia-ta1618 --offline
+./fplinux build nokia-ta1618
 ```
 
-If the build environment is missing or out of date, the offline build stops and asks you to run `./fplinux setup` online first.
+If the environment or an exact input is missing or out of date, the command stops and names the setup command to run. Add `--offline` to setup when all selected originals are already stored locally, for example `./fplinux setup nokia-ta1618 --offline`.
 
 To keep the pinned downloads and build environment outside the build cache, or restore them into a matching checkout, use [Dependency snapshots](/fplinux/guides/dependencies/).
 

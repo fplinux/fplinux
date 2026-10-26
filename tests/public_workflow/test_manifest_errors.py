@@ -43,7 +43,7 @@ class ManifestErrorWorkflowTests:
         target = checkout / "targets/nokia-ta1618"
         (target / "release/manifest.toml").write_text("image = [\n", encoding="utf-8")
         result = run_process(
-            [str(checkout / "fplinux"), "build", "nokia-ta1618", "--offline"],
+            [str(checkout / "fplinux"), "build", "nokia-ta1618"],
             name="public build with invalid release TOML",
             timeout=10,
             cwd=checkout,

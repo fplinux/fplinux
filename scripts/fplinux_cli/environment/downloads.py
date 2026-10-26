@@ -25,6 +25,7 @@ def download_locked_file(  # noqa: PLR0913 -- checksum, size and offline policy 
     offline: bool = False,
     algorithm: str = "sha256",
     size: int | None = None,
+    setup_command: str = "./fplinux setup --all",
 ) -> Path:
     """Fetch one declared checksum match atomically, or require saved bytes offline."""
     if not url.startswith("https://"):
@@ -39,7 +40,10 @@ def download_locked_file(  # noqa: PLR0913 -- checksum, size and offline policy 
     ):
         return destination
     if offline:
-        fail(f"offline locked input is missing or mismatched: {url}: {destination}")
+        fail(
+            f"offline locked input is missing or mismatched: {url}: {destination}; "
+            f"run {setup_command}"
+        )
 
     def verify(path: Path) -> None:
         actual = _locked_file_digest(path, algorithm=algorithm)

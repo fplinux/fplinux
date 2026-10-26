@@ -104,9 +104,7 @@ def test_original_preparation_publishes_the_complete_capture_when_source_paths_c
     for name in ("build", "prepare_target", "prepare_host_tool"):
         monkeypatch.setattr(cli_device_data, name, reject_phone_access)
 
-    cli_device_data.prepare_device_data(
-        "example", from_dump=None, from_originals=manifest, jobs=1, offline=True
-    )
+    cli_device_data.prepare_device_data("example", from_dump=None, from_originals=manifest, jobs=1)
 
     target_root = tmp_path / "user-data/fplinux/phones/example"
     phone = target_root / "phone"

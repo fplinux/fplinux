@@ -60,7 +60,7 @@ def test_pure_projection_preserves_sources_and_required_notices(
 ) -> None:
     root, cache = reader_originals
     destination = tmp_path / "delivery"
-    files = prepare_python_modules(destination, root=root, cache=cache, offline=True)
+    files = prepare_python_modules(destination, root=root, cache=cache)
 
     assert files["scripts/ext4/reader.py"].read_bytes() == b"VALUE = b'unchanged source'\n"
     assert files["scripts/cachetools/__init__.py"].read_bytes() == b"NAME = 'cachetools'\n"
@@ -79,5 +79,5 @@ def test_offline_projection_requires_admitted_original_bytes(
         b"incomplete"
     )
     with pytest.raises(SystemExit):
-        prepare_python_modules(tmp_path / "delivery", root=root, cache=cache, offline=True)
+        prepare_python_modules(tmp_path / "delivery", root=root, cache=cache)
     assert not (tmp_path / "delivery/scripts/ext4").exists()

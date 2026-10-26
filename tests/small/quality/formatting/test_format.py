@@ -122,17 +122,21 @@ class FormatContainerBoundaryTests:
         )
         assert ("--read-only") in (command)
 
-    def test_patch_formatting_reuses_only_the_canonical_original_cache(
+    @pytest.mark.parametrize("original_present", [False, True], ids=["missing", "saved"])
+    def test_patch_formatting_requires_only_the_canonical_local_original(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
+        *,
+        original_present: bool,
     ) -> None:
-        """Acquisition verifies the restored original before a network-free formatter stage."""
+        """Missing originals fail locally; verified saved bytes reach the formatter stage."""
         patch = tmp_path / "selected.patch"
         patch.write_bytes(b"patch fixture\n")
         original = tmp_path / ".cache/downloads/sources/kernel/canonical.tar.xz"
-        original.parent.mkdir(parents=True)
-        original.write_bytes(b"original archive\n")
+        if original_present:
+            original.parent.mkdir(parents=True)
+            original.write_bytes(b"original archive\n")
         source = source_build_metadata(
             "kernel",
             {
@@ -169,6 +173,12 @@ class FormatContainerBoundaryTests:
         monkeypatch.setattr(format_module, "kern_environment", dict)
         monkeypatch.setattr(reporting.Stage, "run", record_command)
         with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")):
+            if not original_present:
+                with pytest.raises(SystemExit, match=r"canonical.tar.xz.*setup --all"):
+                    format_module.format_sources(["selected.patch"])
+                assert commands == []
+                assert patch.read_bytes() == b"patch fixture\n"
+                return
             format_module.format_sources(["selected.patch"])
 
         assert original.read_bytes() == b"original archive\n"

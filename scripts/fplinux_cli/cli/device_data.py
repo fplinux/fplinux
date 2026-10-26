@@ -72,7 +72,6 @@ def _saved_source_tools(
     spec: DeviceDataSpec,
     platform: str,
     *,
-    offline: bool,
     reporter: RunReporter,
     board_report: bool = False,
 ) -> Iterator[DeviceDataTools]:
@@ -86,9 +85,7 @@ def _saved_source_tools(
     with tempfile.TemporaryDirectory(prefix="device-data-host-", dir=ROOT / ".cache") as temporary:
         host_tools = Path(temporary)
         for tool in required:
-            prepare_host_tool(
-                spec.target, platform, tool, host_tools, offline=offline, reporter=reporter
-            )
+            prepare_host_tool(spec.target, platform, tool, host_tools, reporter=reporter)
         yield DeviceDataTools(host_tools=host_tools)
 
 
@@ -97,7 +94,6 @@ def prepare_device_data(  # noqa: PLR0913 -- explicit source, build and loader c
     *,
     from_dump: Path | None,
     jobs: int,
-    offline: bool,
     from_originals: Path | None = None,
     events: Path | None = None,
     phone_data: Path | None = None,
@@ -121,7 +117,7 @@ def prepare_device_data(  # noqa: PLR0913 -- explicit source, build and loader c
     runtime_preparation = from_originals is None and (from_dump is None or "emmc" in config)
     if runtime_preparation:
         with reporter.stage("build", show_tail=False):
-            build(target, jobs, offline=offline, reporter=reporter, phone_data=phone_data)
+            build(target, jobs, reporter=reporter, phone_data=phone_data)
         with reporter.stage("prepare", show_tail=False):
             prepare_target(
                 target,
@@ -147,9 +143,7 @@ def prepare_device_data(  # noqa: PLR0913 -- explicit source, build and loader c
             )
     elif from_dump is not None:
         with (
-            _saved_source_tools(
-                spec, str(config["platform"]), offline=offline, reporter=reporter
-            ) as tools,
+            _saved_source_tools(spec, str(config["platform"]), reporter=reporter) as tools,
             locked_phone_store(target, root=phone_data) as store,
             reporter.stage("prepare"),
         ):
@@ -176,7 +170,7 @@ def _show_prepared_data(target: str, destination: Path, *, phone_data: Path | No
     )
 
 
-def report_device_data(target: str, *, from_dump: Path, offline: bool) -> None:
+def report_device_data(target: str, *, from_dump: Path) -> None:
     """Write a contributor board report without requiring runtime data groups."""
     config = load_target(target)
     platform = str(config["platform"])
@@ -192,9 +186,7 @@ def report_device_data(target: str, *, from_dump: Path, offline: bool) -> None:
     destination = Path(tempfile.mkdtemp(prefix="report-", dir=target_reports))
     try:
         with (
-            _saved_source_tools(
-                spec, platform, offline=offline, reporter=reporter, board_report=True
-            ) as tools,
+            _saved_source_tools(spec, platform, reporter=reporter, board_report=True) as tools,
             reporter.stage("report"),
         ):
             report = write_board_report(spec, from_dump, destination, tools, extractor=extractor)

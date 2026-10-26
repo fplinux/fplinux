@@ -3,7 +3,7 @@ title: Contributing
 description: Format, check and test a change, and write a commit message FPLinux accepts.
 ---
 
-Prepare the pinned environment as described in [Build FPLinux](/fplinux/start/build/) before running source checks and tests. These commands do not require a completed phone build, and you do not install formatters or linters yourself. Code follows the [code style](/fplinux/develop/code-style/), and messages from the kernel, loader and phone programs follow the [logging contract](/fplinux/develop/logging/).
+Prepare the pinned environment with `./fplinux setup` before running source checks and tests. Use `./fplinux setup --all` for the complete quality gate, or select the target whose build inputs you need; see [setup selections](/fplinux/start/build/#select-setup-inputs). Checks, tests and formatting use local inputs and report the setup command needed if an input is missing. These commands do not require a completed phone build, and you do not install formatters or linters yourself. Code follows the [code style](/fplinux/develop/code-style/), and messages from the kernel, loader and phone programs follow the [logging contract](/fplinux/develop/logging/).
 
 ## Where the code is
 
@@ -17,7 +17,7 @@ The source is on [GitHub](https://github.com/fplinux/fplinux). Phone, applicatio
 
 Pass each file you edited as a path relative to the checkout. The command does not walk directories. It refuses files that have no project formatter instead of guessing one. Tracked and non-ignored untracked sources are accepted. Selected files are formatted together; if any formatter fails, the command leaves them unchanged. The [source-format contract](/fplinux/develop/code-style/formats/) describes ordering, templates and format-specific limits.
 
-Declared Linux patches are accepted too. Their affected C and header regions use the pinned Linux formatting tools; other patch contents are retained. This needs the pinned Linux source archive and downloads it if missing. Ordinary plain text and other patch series have no formatter and are rejected.
+Declared Linux patches are accepted too. Their affected C and header regions use the pinned Linux formatting tools; other patch contents are retained. This needs the pinned Linux source archive prepared by setup for the affected target. Ordinary plain text and other patch series have no formatter and are rejected.
 
 ## Run the quality gate
 
@@ -76,7 +76,7 @@ After you change a source file of an Alpine package under `alpine/aports/`, rege
 ./fplinux checksum fplinux-terminal
 ```
 
-This is the only supported way to update them. Do not run `abuild checksum` in the checkout or edit digest lines by hand. Add `--offline` to reuse sources that are already downloaded.
+This is the only supported way to update them. Do not run `abuild checksum` in the checkout or edit digest lines by hand. The command uses local sources; prepare missing inputs with the setup command it reports.
 
 ## Write the commit message
 
@@ -102,17 +102,16 @@ Follow the [application-state contract](/fplinux/develop/application-state/) whe
 
 ## Preview this site
 
-The documentation site lives in `site/` and uses the exact Node.js and npm versions declared by the root package. Acquire the locked inputs once, install the site tools from those originals, then start a local preview that reloads as you edit. Replace `/path/to/fplinux-inputs` with a folder outside `.cache/` on a disk with enough free space:
+The documentation site lives in `site/` and uses the exact Node.js and npm versions declared by the root package. Prepare only the site inputs and tools, then start a local preview that reloads as you edit:
 
 ```sh title="PC"
-./fplinux dependencies create "/path/to/fplinux-inputs" --inputs-only
-./fplinux ci site-install
+./fplinux setup --site
 export PATH="$PWD/.cache/site/node/bin:$PATH"
 cd site
 npm run dev
 ```
 
-If you already restored a matching [dependency snapshot](/fplinux/guides/dependencies/), start with `ci site-install`. The install uses the preserved Linux x86-64 glibc Node.js runtime, imports locked registry archives into its npm cache and runs `npm ci` offline. The runtime remains available at `.cache/site/node/bin` for subsequent site commands.
+If you already restored a matching [dependency snapshot](/fplinux/guides/dependencies/), use `./fplinux setup --site --offline`. Setup installs the pinned Linux x86-64 glibc Node.js runtime, imports locked registry archives into its npm cache and runs `npm ci` offline. It does not prepare the Alpine environment. The runtime remains available at `.cache/site/node/bin` for subsequent site commands.
 
 Pages are in `site/src/content/docs/`. Run these commands from `site/` before submitting a documentation change:
 

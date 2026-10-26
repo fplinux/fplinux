@@ -112,13 +112,24 @@ def _profile_log_entries(  # noqa: PLR0913 -- profile log ownership is explicit.
 
 
 def log_retention_entries(cache: Path) -> list[InventoryEntry]:
-    """Classify only generated check, format, setup, and per-target build logs."""
+    """Classify generated command logs, including setup and build runs per target."""
     logs = cache / "logs"
     entries = [
         *log_entries(logs / "check", label="check", identity="logs/check"),
         *log_entries(logs / "format", label="format", identity="logs/format"),
         *log_entries(logs / "setup", label="setup", identity="logs/setup"),
     ]
+    setups = logs / "setup"
+    if setups.is_dir() and not setups.is_symlink():
+        for target in sorted(setups.iterdir(), key=lambda item: item.name):
+            if (
+                not target.is_dir()
+                or target.is_symlink()
+                or TARGET_NAME.fullmatch(target.name) is None
+            ):
+                continue
+            identity = f"logs/setup/{target.name}"
+            entries.extend(log_entries(target, label=f"setup {target.name}", identity=identity))
     declared = declared_profiles()
     check_profiles = logs / "check" / "profiles"
     if check_profiles.is_dir() and not check_profiles.is_symlink():

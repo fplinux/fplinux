@@ -46,19 +46,17 @@ def _wheel(archive: Path, destination: Path, package: str, version: str) -> dict
     return files
 
 
-def prepare_python_modules(
-    destination: Path, *, root: Path, cache: Path, offline: bool
-) -> dict[str, Path]:
+def prepare_python_modules(destination: Path, *, root: Path, cache: Path) -> dict[str, Path]:
     """Read verified originals without installing packages or compiling native extensions."""
     sources = {source.id: source for source in preparation_sources(root)}
     files = {}
     for package, source_id in (("ext4", "python_ext4"), ("cachetools", "python_cachetools")):
         source = sources[source_id]
         files.update(
-            _wheel(source.acquire(cache, offline=offline), destination, package, source.version)
+            _wheel(source.acquire(cache, offline=True), destination, package, source.version)
         )
     source = sources["python_crcmod"]
-    with tarfile.open(source.acquire(cache, offline=offline)) as archive:
+    with tarfile.open(source.acquire(cache, offline=True)) as archive:
         prefix = f"crcmod-{source.version}/"
         selected = {
             **{

@@ -16,14 +16,21 @@ from fplinux_cli.alpine.aports import materialize_aport_sources
 from fplinux_cli.alpine.sources import font_source_manifest
 from fplinux_cli.build import DEFAULT_BUILD_MEMORY_MIB
 from fplinux_cli.build.host_tools.host import extract_host_members
-from fplinux_cli.common import ROOT, error_message, fail
+from fplinux_cli.common import ROOT, error_message, fail, load_toml
 from fplinux_cli.dependencies.inputs import (
     acquire_inputs,
+    build_source_inputs,
+    deduplicate_inputs,
     environment_inputs,
+    host_inputs,
     terminus_font_environment_inputs,
     ui_font_environment_inputs,
     ui_icon_environment_inputs,
 )
+from fplinux_cli.manifests.identity import BUILD_TYPES
+from fplinux_cli.manifests.paths import declared_boot_profiles, target_directory
+from fplinux_cli.manifests.platforms import load_platform
+from fplinux_cli.manifests.targets import load_target
 from fplinux_cli.reporting.run import RunReporter
 
 from .definition import (
@@ -43,9 +50,73 @@ from .runtime import (
 )
 
 if TYPE_CHECKING:
+    from fplinux_cli.dependencies.inputs import DependencyInput
+
     from .state import EnvironmentState
 
 _ENVIRONMENT_SETUP_TIMEOUT = 2 * 60 * 60
+
+
+def target_setup_inputs(target: str, *, host: str = "linux") -> list[DependencyInput]:
+    """Select every supported build variant and the chosen archive host's originals."""
+    declaration = load_toml(target_directory(target) / "target.toml")
+    platform = load_platform(declaration["platform"])
+    inputs = host_inputs(ROOT, host)
+    for profile in declared_boot_profiles(declaration):
+        for build_type in BUILD_TYPES:
+            config = load_target(target, profile, build_type=build_type)
+            inputs.extend(build_source_inputs(ROOT, platform, config))
+    return deduplicate_inputs(inputs)
+
+
+def prepare_setup(  # noqa: PLR0913 -- public preparation selectors and environment policy stay explicit.
+    target: str | None = None,
+    *,
+    host: str = "linux",
+    site: bool = False,
+    all_inputs: bool = False,
+    force: bool = False,
+    offline: bool = False,
+) -> None:
+    """Prepare selected originals and their current local consumers without an export."""
+    reporter = RunReporter.create("setup", target=target, verbose=False)
+    if site or all_inputs:
+        if all_inputs:
+            from fplinux_cli.dependencies.workflow import (  # noqa: PLC0415 -- complete inventory only.
+                checkout_declarations,
+            )
+
+            with reporter.stage("setup-selection"):
+                inputs, _context = checkout_declarations()
+            setup_command = "./fplinux setup --all"
+        else:
+            from fplinux_cli.dependencies.site_inputs import (  # noqa: PLC0415 -- site-only selection.
+                site_dependency_selection,
+            )
+
+            with reporter.stage("setup-selection"):
+                inputs, _context = site_dependency_selection(ROOT)
+            setup_command = "./fplinux setup --site"
+    elif target is not None:
+        with reporter.stage("setup-selection"):
+            inputs = target_setup_inputs(target, host=host)
+        setup_command = f"./fplinux setup {target} --host {host}"
+    else:
+        inputs = []
+        setup_command = "./fplinux setup"
+    if inputs:
+        with reporter.stage("setup-inputs"):
+            acquire_inputs(inputs, ROOT / ".cache", offline=offline, setup_command=setup_command)
+    if not site:
+        setup(force=force, offline=offline, reporter=reporter)
+    if site or all_inputs:
+        from fplinux_cli.dependencies.site_install import (  # noqa: PLC0415 -- documentation consumer only.
+            install_site,
+        )
+
+        with reporter.stage("site-install"):
+            install_site()
+    reporter.finish()
 
 
 def _stage_environment_inputs(context: Path, *, offline: bool) -> None:
@@ -185,27 +256,16 @@ def setup(
     *,
     force: bool = False,
     offline: bool = False,
-    reporter: RunReporter | None = None,
-    lock: dict[str, Any] | None = None,
-    environment_recipe: str | None = None,
+    reporter: RunReporter,
 ) -> EnvironmentState:
     """Reuse an exact environment or prepare a replacement while retaining the old tree."""
-    own_reporter = reporter is None
-    if reporter is None:
-        reporter = RunReporter.create("setup", target=None, verbose=False)
-    if lock is None:
-        lock = load_environment_lock()
+    lock = load_environment_lock()
     kern = install_kern(lock, offline=offline)
-    current_recipe = environment_recipe_digest(lock)
-    if environment_recipe is not None and environment_recipe != current_recipe:
-        fail("environment inputs changed before setup")
-    environment_recipe = current_recipe
+    environment_recipe = environment_recipe_digest(lock)
     current = current_environment_state(kern, environment_recipe)
     if current is not None and not force:
         install_git_hooks()
         print("Build environment is ready")
-        if own_reporter:
-            reporter.finish()
         return current
 
     directory = ensure_project_directory(ROOT / ".cache/environment")
@@ -247,6 +307,4 @@ def setup(
                     file=sys.stderr,
                 )
     install_git_hooks()
-    if own_reporter:
-        reporter.finish()
     return state

@@ -151,7 +151,7 @@ def _build_driver(
     return library / "installer_x64.exe"
 
 
-def prepare_windows_driver(*, cache: Path, offline: bool) -> dict[str, Path]:
+def prepare_windows_driver(*, cache: Path) -> dict[str, Path]:
     """Prepare the helper and redistribution material under the caller's cache lock."""
     # Keep the delivered build recipe usable without the project Python package.
     from fplinux_cli import common  # noqa: PLC0415
@@ -175,11 +175,11 @@ def prepare_windows_driver(*, cache: Path, offline: bool) -> dict[str, Path]:
     host_lock = load_host_sources(common.ROOT, "windows-host.lock.toml")
     toolchain_entry = host_lock["llvm_mingw"]
     archives = {
-        name: resolve_source(common.ROOT, entry["source_id"]).acquire(cache, offline=offline)
+        name: resolve_source(common.ROOT, entry["source_id"]).acquire(cache, offline=True)
         for name, entry in lock.items()
     }
     toolchain_archive = resolve_source(common.ROOT, toolchain_entry["source_id"]).acquire(
-        cache, offline=offline
+        cache, offline=True
     )
     root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=root, prefix=".build-") as temporary:

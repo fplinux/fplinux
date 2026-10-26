@@ -23,7 +23,8 @@ import fplinux_cli.workspace.staging as workspace_staging
 import pytest
 from fplinux_cli import common
 from fplinux_cli.artifacts.bundles import bundle_pointer, publish_current_bundle
-from fplinux_cli.environment import definition, setup
+from fplinux_cli.dependencies.inputs import DependencyInput
+from fplinux_cli.environment import definition, runtime
 from fplinux_cli.environment.state import EnvironmentState
 from fplinux_cli.manifests import releases, targets
 
@@ -92,7 +93,6 @@ class BuildLifecycleTests:
                             jobs,
                             memory_mib=memory_mib,
                             verbose=True,
-                            offline=True,
                             build_type=build_type,
                         )
                     )
@@ -459,10 +459,10 @@ class BuildLifecycleTests:
         assert recorded["status"] == "success"
         assert recorded["build_type"] == build_type
 
-    def test_offline_build_miss_propagates_offline_environment_policy_without_staging(
+    def test_build_miss_rejects_missing_environment_without_staging_or_downloads(
         self, command_bundle: CommandBundleContext
     ) -> None:
-        """Propagate the unavailable offline environment before staging build sources."""
+        """Fail with explicit setup advice before staging sources or acquiring inputs."""
         command_bundle.clear_current_bundle()
         with (
             mock.patch.object(common, "ROOT", command_bundle.root),
@@ -478,35 +478,82 @@ class BuildLifecycleTests:
                 definition, "load_environment_lock", return_value=command_bundle.lock
             ),
             mock.patch.object(definition, "environment_recipe_digest", return_value="e" * 64),
-            mock.patch.object(kern_env, "kern_available", return_value=True),
-            mock.patch.object(kern_env, "require_kern", return_value="kern"),
-            mock.patch.object(
-                build_commands,
-                "require_environment",
-                side_effect=SystemExit(
-                    "offline execution requires the current pinned environment"
-                ),
-            ) as require_environment,
-            mock.patch.object(
-                setup,
-                "setup",
-                side_effect=AssertionError("offline build must not set up an environment"),
-            ),
+            mock.patch.object(runtime, "ROOT", command_bundle.root),
+            mock.patch.object(runtime, "load_environment_lock", return_value=command_bundle.lock),
+            mock.patch.object(runtime, "environment_recipe_digest", return_value="e" * 64),
+            mock.patch.object(runtime, "kern_available", return_value=False),
+            mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")),
             mock.patch.object(
                 workspace_staging,
                 "stage_workspace_snapshot",
-                side_effect=AssertionError(
-                    "offline environment failure must not stage a workspace"
-                ),
+                side_effect=AssertionError("missing environment must not stage a workspace"),
             ),
-            pytest.raises(
-                SystemExit, match="offline execution requires the current pinned environment"
-            ),
+            pytest.raises(SystemExit, match=r"missing or stale; run ./fplinux setup phone"),
         ):
-            output.run_entrypoint(lambda: build_commands.build("phone", 4, offline=True))
+            output.run_entrypoint(lambda: build_commands.build("phone", 4))
 
         assert not (bundle_pointer(command_bundle.output, "phone").exists())
-        require_environment.assert_called_once_with(offline=True, reporter=mock.ANY)
+
+    @pytest.mark.parametrize("original_state", ["missing", "mismatched"])
+    def test_build_miss_requires_exact_local_originals_before_container_execution(
+        self,
+        command_bundle: CommandBundleContext,
+        capsys: pytest.CaptureFixture[str],
+        original_state: str,
+    ) -> None:
+        """A missing selected original fails with target setup advice without downloading."""
+        command_bundle.clear_current_bundle()
+        workspace = command_bundle.cache / "workspace"
+        workspace.mkdir()
+        original = command_bundle.cache / "downloads/sources/example/archive.tar.gz"
+        if original_state == "mismatched":
+            original.parent.mkdir(parents=True)
+            original.write_bytes(b"bad")
+        selected = DependencyInput(
+            key="source:example",
+            url="https://example.invalid/archive.tar.gz",
+            sha256="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            size=3,
+            destination="downloads/sources/example/archive.tar.gz",
+            purpose="source-original",
+        )
+        with (
+            mock.patch.object(common, "ROOT", command_bundle.root),
+            mock.patch.object(output, "ROOT", command_bundle.root),
+            mock.patch.object(releases, "load_release", return_value=command_bundle.release),
+            mock.patch.object(
+                workspace_inputs, "target_workspace_snapshot", return_value=command_bundle.snapshot
+            ),
+            mock.patch.object(
+                definition, "load_environment_lock", return_value=command_bundle.lock
+            ),
+            mock.patch.object(definition, "environment_recipe_digest", return_value="e" * 64),
+            mock.patch.object(
+                build_commands,
+                "require_environment",
+                return_value=(
+                    "kern",
+                    command_bundle.cache / "environment/rootfs",
+                    EnvironmentState("e" * 64, "b" * 64, "a" * 64),
+                ),
+            ),
+            mock.patch.object(
+                workspace_staging, "stage_workspace_snapshot", return_value=workspace
+            ),
+            mock.patch.object(build_commands, "captured_build_inputs", return_value=[selected]),
+            mock.patch.object(workspace_staging, "discard_staged_workspace_snapshot"),
+            mock.patch.object(output.Stage, "run", side_effect=AssertionError("container")),
+            mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")),
+            pytest.raises(SystemExit) as raised,
+        ):
+            output.run_entrypoint(lambda: build_commands.build("phone", 4))
+        assert raised.value.code == 1
+        error = capsys.readouterr().err
+        assert "archive.tar.gz" in error
+        assert "run ./fplinux setup phone" in error
+        assert not bundle_pointer(command_bundle.output, "phone").exists()
+        if original_state == "mismatched":
+            assert original.read_bytes() == b"bad"
 
     def test_build_argv_has_explicit_memory_budget_and_narrow_mounts(
         self, command_bundle: CommandBundleContext

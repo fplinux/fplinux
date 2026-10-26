@@ -269,7 +269,7 @@ def run_test_workload(  # noqa: PLR0913 -- public selection and runtime inputs s
 
         with reporter.stage("phone-data-inputs"):
             for source in preparation_sources(workspace):
-                source.acquire(common.ROOT / ".cache", offline=False)
+                source.acquire(common.ROOT / ".cache", offline=True)
         downloads = common.ROOT / ".cache/downloads"
     with ExitStack() as resources:
         host_python: Path | None = None
@@ -397,7 +397,7 @@ def run_tests(
     reporter = RunReporter.create("test", target=None, verbose=verbose)
     with reporter.stage("workspace-snapshot"):
         snapshot = quality_workspace_snapshot(enforce_source_policy=False)
-    kern, rootfs, _state = require_environment(reporter=reporter)
+    kern, rootfs, _state = require_environment()
     with reporter.stage("workspace"):
         workspace = stage_quality_workspace_snapshot(snapshot)
     try:

@@ -10,7 +10,6 @@ import tarfile
 import tempfile
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
@@ -31,9 +30,6 @@ from fplinux_cli.workspace.capture import workspace_snapshot
 
 from tests.fixtures import linux_inputs
 from tests.small.quality.check_fixtures import _RecordingReporter
-
-if TYPE_CHECKING:
-    from urllib.request import Request
 
 
 class CheckScopeSelectionTests:
@@ -225,13 +221,14 @@ class RepositoryFastPathTests:
         reporter.finish.assert_called_once_with()
 
 
-class KernelInputAcquisitionTests:
-    """Acquire captured originals before their offline preparation process."""
+class KernelLocalInputTests:
+    """Require captured originals before their isolated preparation process."""
 
-    def test_first_kernel_check_acquires_captured_sources_before_offline_preparation(
-        self, tmp_path: Path
+    @pytest.mark.parametrize("original_present", [False, True], ids=["missing", "saved"])
+    def test_first_kernel_check_requires_captured_sources_and_reuses_success(
+        self, tmp_path: Path, *, original_present: bool
     ) -> None:
-        """Acquire selected originals before preparation, then reuse the success on the host."""
+        """Only exact saved originals permit preparation; no check enters the network."""
         archive = io.BytesIO()
         makefile = b"VERSION = fixture\n"
         with tarfile.open(fileobj=archive, mode="w:gz") as bundle:
@@ -261,13 +258,11 @@ class KernelInputAcquisitionTests:
         cache = root / ".cache"
         environment = EnvironmentState("b" * 64, "c" * 64, "d" * 64)
         publish_environment_state(cache, environment)
-        requests: list[str] = []
         commands: list[list[str]] = []
-
-        def serve_original(request: Request, **_kwargs: object) -> io.BytesIO:
-            requests.append(request.full_url)
-            assert request.full_url == "https://example.invalid/selected-linux.tar.gz"
-            return io.BytesIO(original)
+        if original_present:
+            local = cache / resolve_source(workspace, "linux-captured").destination
+            local.parent.mkdir(parents=True)
+            local.write_bytes(original)
 
         def container_workload(_stage: Stage, command: list[str], **_kwargs: object) -> None:
             assert command[command.index("--network") + 1] == "none"
@@ -310,10 +305,14 @@ class KernelInputAcquisitionTests:
             ) as require_environment,
             mock.patch.object(RunReporter, "create", side_effect=reporter_for_run),
             mock.patch.object(Stage, "run", autospec=True, side_effect=container_workload),
-            mock.patch("urllib.request.urlopen", side_effect=serve_original),
+            mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")),
         ):
+            if not original_present:
+                with pytest.raises(SystemExit, match=r"selected-linux.tar.gz.*setup --all"):
+                    checks.check(["kernel"], profile="microsd-uboot")
+                assert commands == []
+                return
             checks.check(["kernel"], profile="microsd-uboot")
-            assert requests == ["https://example.invalid/selected-linux.tar.gz"]
             assert len(commands) == 2
             with (
                 mock.patch.object(

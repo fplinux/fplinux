@@ -40,6 +40,13 @@ def _candidate_destination(cache: Path, identity: str) -> Path:  # noqa: PLR0911
         return cache.joinpath(*parts)
     if (
         len(parts) == 4
+        and parts[:2] == ["logs", "setup"]
+        and TARGET_NAME.fullmatch(parts[2]) is not None
+        and parts[3]
+    ):
+        return cache.joinpath(*parts)
+    if (
+        len(parts) == 4
         and parts[0] == "out"
         and parts[2] == "profiles"
         and TARGET_NAME.fullmatch(parts[1]) is not None

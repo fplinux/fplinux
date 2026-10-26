@@ -143,24 +143,23 @@ def test_board_report_cli_prepares_pinned_tool_without_a_runtime_parser(
         },
     )
 
-    def install_tool(  # noqa: PLR0913 -- mirrors the host-tool preparation boundary.
+    def install_tool(
         target: str,
         platform: str,
         tool: str,
         output: Path,
         *,
-        offline: bool,
         reporter: object,
     ) -> None:
         del reporter
-        assert (target, platform, tool, offline) == ("headless", "ums9117", "fphelper_t117", True)
+        assert (target, platform, tool) == ("headless", "ums9117", "fphelper_t117")
         shutil.copyfile(tools / "fphelper_t117", output / "fphelper_t117")
         (output / "fphelper_t117").chmod(0o755)
         shutil.copyfile(tools / "scenario.json", output / "scenario.json")
 
     monkeypatch.setattr(cli, "prepare_host_tool", install_tool)
 
-    cli.report_device_data("headless", from_dump=saved, offline=True)
+    cli.report_device_data("headless", from_dump=saved)
 
     reports = list(
         (tmp_path / ".cache/diagnostics/device-data/headless").glob("*/board-report.json")

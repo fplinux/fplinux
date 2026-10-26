@@ -91,7 +91,7 @@ def test_public_original_import_retains_exact_source_originals_outputs_and_priva
 ) -> None:
     """The real parser, target import, materializer and publisher admit one complete source."""
     expected_manifest = device_data_cli.manifest.read_bytes()
-    result = device_data_cli.run("--from-originals", str(device_data_cli.manifest), "--offline")
+    result = device_data_cli.run("--from-originals", str(device_data_cli.manifest))
 
     assert result.returncode == 0, result.stderr
     phone = device_data_cli.phone()
@@ -368,7 +368,6 @@ def test_public_nand_import_retains_canonical_source_and_only_known_acquisition_
             "example",
             "--from-dump",
             str(source),
-            "--offline",
         ],
         name="public physical NAND import",
         cwd=root,

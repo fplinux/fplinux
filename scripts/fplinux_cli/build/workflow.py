@@ -41,22 +41,19 @@ def ensure_build_directory(path: Path) -> Path:
     return path
 
 
-def prepare_host_tool(  # noqa: PLR0913 -- operation inputs and environment policy stay explicit.
+def prepare_host_tool(
     target: str,
     platform: str,
     tool: str,
     output: Path,
     *,
-    offline: bool,
     reporter: RunReporter,
 ) -> None:
     """Build one cached host utility in the pinned environment without fitted device data."""
     snapshot = workspace_capture.workspace_snapshot(
         workspace_build_inputs.target_build_source_files(target, host_tools=(tool,))
     )
-    kern, environment_rootfs, environment_state = require_environment(
-        offline=offline, reporter=reporter
-    )
+    kern, environment_rootfs, environment_state = require_environment(target=target)
     cache = common.ROOT / ".cache"
     downloads = ensure_build_directory(cache / "downloads")
     host_tools = ensure_build_directory(cache / "host-tools")
@@ -70,7 +67,9 @@ def prepare_host_tool(  # noqa: PLR0913 -- operation inputs and environment poli
             fail(f"platform host tool is not declared: {platform}: {tool}")
         if recipe["type"] == "make-archive":
             with reporter.stage("host-tool-inputs"):
-                resolve_source(workspace, recipe["source_lock"]).acquire(cache, offline=offline)
+                resolve_source(workspace, recipe["source_lock"]).acquire(
+                    cache, offline=True, setup_command=f"./fplinux setup {target}"
+                )
         container_logs = ensure_build_directory(reporter.root / "host-tools")
         log_environment = reporter.container_environment("/logs")
         log_environment["FPLINUX_LOG_DISPLAY_ROOT"] += "/host-tools"
@@ -252,7 +251,6 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
     build_type: str = "release",
     include_device_data: bool = True,
     verbose: bool = False,
-    offline: bool = False,
     reporter: RunReporter | None = None,
     phone_data: Path | None = None,
 ) -> None:
@@ -319,9 +317,7 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
             verbose=verbose,
             build_type=build_type,
         )
-    kern, environment_rootfs, current_environment = require_environment(
-        offline=offline, reporter=reporter
-    )
+    kern, environment_rootfs, current_environment = require_environment(target=target)
     apk_signing = ensure_build_directory(cache / "apk-signing")
     downloads = ensure_build_directory(cache / "downloads")
     ccache = ensure_build_directory(cache / "ccache")
@@ -337,7 +333,8 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
             acquire_inputs(
                 captured_build_inputs(workspace, snapshot.source_declarations),
                 cache,
-                offline=offline,
+                offline=True,
+                setup_command=f"./fplinux setup {target}",
             )
         container_logs = ensure_build_directory(reporter.root / "container")
         log_environment = reporter.container_environment("/logs")
