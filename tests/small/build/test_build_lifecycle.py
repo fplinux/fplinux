@@ -154,6 +154,7 @@ class BuildLifecycleTests:
             "e" * 64,
             "a" * 64,
             command_bundle.signing_key,
+            command_bundle.release_context,
         )
         with mock.patch.object(common, "ROOT", command_bundle.root):
             source = command_bundle.bundle_path / relative
@@ -178,6 +179,7 @@ class BuildLifecycleTests:
             "e" * 64,
             "a" * 64,
             command_bundle.signing_key,
+            command_bundle.release_context,
         )
         with mock.patch.object(common, "ROOT", command_bundle.root):
             matched = bundles_commands.matching_target_bundle(
@@ -192,6 +194,26 @@ class BuildLifecycleTests:
         assert (bundle) == (command_bundle.bundle)
         assert (manifest) == (json.loads(command_bundle.bundle.manifest_bytes))
 
+    def test_new_release_rejects_bundle_with_unchanged_target_inputs(
+        self, command_bundle: CommandBundleContext
+    ) -> None:
+        """A global release change must not return the image's previous stamped BUILD_ID."""
+        identity = bundles_commands.BuildIdentity(
+            command_bundle.snapshot.recipe,
+            "e" * 64,
+            "a" * 64,
+            command_bundle.signing_key,
+            replace(
+                command_bundle.release_context,
+                release_id="abcdef012345",
+                source_snapshot="abcdef012345" + "0" * 52,
+            ),
+        )
+        with mock.patch.object(common, "ROOT", command_bundle.root):
+            assert (
+                bundles_commands.matching_target_bundle("phone", identity, "image/ramboot.bin")
+                is None
+            )
 
     @pytest.mark.parametrize(
         ("field", "changed"),
@@ -211,6 +233,7 @@ class BuildLifecycleTests:
             changed if field == "environment_recipe" else "e" * 64,
             changed if field == "environment_content" else "a" * 64,
             changed if field == "apk_signing_key" else command_bundle.signing_key,
+            command_bundle.release_context,
         )
         with mock.patch.object(common, "ROOT", command_bundle.root):
             assert (

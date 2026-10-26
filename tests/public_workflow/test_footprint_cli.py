@@ -65,6 +65,9 @@ class FootprintCli:
             target="example",
             profile=profile,
             build_type=build_type,
+            release_id="e" * 12,
+            source_commit="e" * 40,
+            source_snapshot="d" * 64,
             workspace_digest="a" * 64,
             environment_recipe="b" * 64,
             environment_content="c" * 64,
@@ -140,6 +143,9 @@ class FootprintCliTests:
         assert (report["identity"]["target"]) == ("example")
         assert (report["identity"]["profile"]) == (profile)
         assert (report["identity"]["build_type"]) == (build_type)
+        assert report["identity"]["release_id"] == "e" * 12
+        assert report["identity"]["source_commit"] == "e" * 40
+        assert report["identity"]["source_snapshot"] == "d" * 64
         assert (report["layers"]["kernel_zimage_bytes"]) == (12)
         if profile is None:
             assert (report["rootfs"]["source"]) == ("ram-squashfs-composition")
@@ -157,6 +163,7 @@ class FootprintCliTests:
         assert (report["rootfs"]["files"]["/bin/one-link"]["accounted_bytes"]) == (0)
         text = footprint_cli.run_cli(*arguments)
         assert (text.returncode) == (0), text.stderr
+        assert "release_id: eeeeeeeeeeee" in text.stdout
         assert ("Kernel zImage: 12 B") in (text.stdout)
         assert ("7 B  shared 1-r0") in (text.stdout)
         assert ("Nested layers overlap") in (text.stdout)
@@ -240,6 +247,9 @@ class FootprintCliTests:
             target="example",
             profile=None,
             build_type="release",
+            release_id="e" * 12,
+            source_commit="e" * 40,
+            source_snapshot="d" * 64,
             workspace_digest="a" * 64,
             environment_recipe="b" * 64,
             environment_content="c" * 64,

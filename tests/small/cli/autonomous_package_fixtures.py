@@ -16,6 +16,7 @@ from fplinux_cli.build.host_tools import linux_host, windows_driver
 from fplinux_cli.build.host_tools import windows as windows_build
 from fplinux_cli.build.identity import runtime_identity
 from fplinux_cli.build.runtime import device_data_descriptor, runtime_source_files
+from fplinux_cli.artifacts.release import ReleaseContext
 from fplinux_cli.common import canonical_json_bytes
 from fplinux_cli.environment import definition
 from fplinux_cli.environment import state as environment_states
@@ -181,10 +182,13 @@ def archive_inputs(
             *runtime["host_tools"].values(),
         )
     }
+    context = ReleaseContext("1234567890ab", "1234567890ab" + "0" * 28, "a" * 64)
+    runtime.update(context.fields())
     write_archive_file(bundle, "runtime-manifest.json", canonical_json_bytes(runtime))
-    snapshot = WorkspaceSnapshot((), "a" * 64)
+    snapshot = WorkspaceSnapshot((), "a" * 64, release_context=context)
     manifest = canonical_json_bytes(
         {
+            **context.fields(),
             "rootfs_receipt": {"recipe": "d" * 64, "sha256": "e" * 64},
             "kernel_artifacts": {},
             "boot_artifacts": {"required": []},

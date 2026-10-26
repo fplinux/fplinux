@@ -62,6 +62,25 @@ class AlpineRecipesTests:
             alpine_source.packages[0], "1" * 64, alpine_source.signing_key, alpine_source.root
         )
 
+    def test_release_change_recomposes_rootfs_and_preserves_package_recipe(
+        self, alpine_source: AlpineSourceContext
+    ) -> None:
+        """A new displayed build ID misses rootfs while unchanged APK inputs stay reusable."""
+        first = alpine_source.recipe(release_id="012345abcdef")
+        package = alpine_recipes.alpine_package_recipe(
+            alpine_source.packages[0], "1" * 64, alpine_source.signing_key, alpine_source.root
+        )
+        output = alpine_source.root / "cached-rootfs"
+        output.mkdir()
+        (output / "rootfs.cpio").write_bytes(b"root filesystem\n")
+        alpine_rootfs_state.write_receipt(output, first)
+        assert alpine_rootfs_state.receipt_matches(output, first)
+        changed = alpine_source.recipe(release_id="abcdef012345")
+        assert changed != first
+        assert not alpine_rootfs_state.receipt_matches(output, changed)
+        assert package == alpine_recipes.alpine_package_recipe(
+            alpine_source.packages[0], "1" * 64, alpine_source.signing_key, alpine_source.root
+        )
 
     def test_selected_aport_bytes_change_the_rootfs_recipe(
         self, alpine_source: AlpineSourceContext

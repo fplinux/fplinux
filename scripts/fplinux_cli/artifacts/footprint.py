@@ -433,7 +433,16 @@ def inspect_footprint(bundle: CurrentBundle) -> dict[str, Any]:
         }
         return {
             "identity": {
-                key: manifest.get(key) for key in ("target", "profile", "build_type", "generation")
+                key: manifest.get(key)
+                for key in (
+                    "target",
+                    "profile",
+                    "build_type",
+                    "generation",
+                    "release_id",
+                    "source_commit",
+                    "source_snapshot",
+                )
             },
             "layers": {
                 "boot_artifact_bytes": boot,

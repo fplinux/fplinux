@@ -81,6 +81,7 @@ class AlpineSourceContext:
         display_brightness: dict[str, Any] | None = None,
         *,
         root_kind: str = "initramfs",
+        release_id: str = "012345abcdef",
     ) -> str:
         """Compute the rootfs recipe for this checkout and the scenario's selected inputs."""
         return alpine_recipes.alpine_rootfs_recipe(
@@ -88,6 +89,7 @@ class AlpineSourceContext:
             self.signing_key if signing_key is None else signing_key,
             self.packages if packages is None else packages,
             self.root,
+            release_id=release_id,
             display_brightness=display_brightness,
             root_kind=root_kind,
         )

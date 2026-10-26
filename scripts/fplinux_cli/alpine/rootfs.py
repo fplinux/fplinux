@@ -14,6 +14,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO
 
+from fplinux_cli.artifacts.release import current_release_context
 from fplinux_cli.build import process as process_build
 from fplinux_cli.build.inputs import CACHE, require_file
 from fplinux_cli.common import ROOT, alpine_tar_filter, fail
@@ -33,6 +34,7 @@ from .recipes import alpine_rootfs_recipe
 from .rootfs_files import (
     _install_display_brightness,
     _normalize_rootfs,
+    _stamp_build_id,
     _write_ramroot_initramfs,
     _write_rootfs_cpio,
 )
@@ -159,11 +161,13 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
 ) -> tuple[Path, Path, str, dict[str, Path]]:
     """Build the standard rootfs and any APKs published in its bundle."""
     environment_recipe = os.environ.get("FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE", "")
+    release_id = current_release_context().release_id
     signing_private_key, signing_public_key, signing_key_identity = _ensure_apk_signing_key()
     recipe = alpine_rootfs_recipe(
         environment_recipe,
         signing_key_identity,
         packages,
+        release_id=release_id,
         firmware_inputs=firmware,
         display_brightness=display_brightness,
         root_kind="external" if external_image is not None else "initramfs",
@@ -306,6 +310,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
 
             firmware_inputs.install_firmware_inputs(root, firmware)
             _install_display_brightness(root, display_brightness)
+            _stamp_build_id(root, release_id)
             _verify_alpine_rootfs(
                 root,
                 packages,

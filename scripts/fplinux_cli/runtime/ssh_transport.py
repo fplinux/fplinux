@@ -25,6 +25,8 @@ import zlib
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, NoReturn
 
+from fplinux_cli.artifacts.build_manifest import BUILD_MANIFEST_FIELDS
+
 if TYPE_CHECKING:
     from collections.abc import Callable
     from types import FrameType
@@ -38,25 +40,6 @@ SSH_PORT = 22
 REMOTE_PATH = re.compile(r"/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+")
 TARGET_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
 SHA256 = re.compile(r"[0-9a-f]{64}")
-BUILD_MANIFEST_FIELDS = frozenset(
-    {
-        "rootfs_receipt",
-        "boot_artifacts",
-        "environment_recipe",
-        "environment_content",
-        "apk_signing_key",
-        "device_identity",
-        "files",
-        "generation",
-        "kbuild_receipt",
-        "kernel_artifacts",
-        "linux_recipe",
-        "profile",
-        "build_type",
-        "target",
-        "workspace_digest",
-    }
-)
 RFC1918_NETWORKS = tuple(
     ipaddress.IPv4Network(value) for value in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
 )
@@ -216,6 +199,9 @@ def bundle_identity(bundle: Path, runtime: dict[str, Any]) -> dict[str, str]:
         or manifest.get("build_type") != build_type
     ):
         fail("build manifest does not match the runtime target, profile or build type")
+    for field in ("release_id", "source_commit", "source_snapshot"):
+        if field not in runtime or manifest[field] != runtime[field]:
+            fail("build manifest does not match the runtime release identity")
     generation = manifest.get("generation")
     if not isinstance(generation, str) or SHA256.fullmatch(generation) is None:
         fail("build manifest generation is invalid")

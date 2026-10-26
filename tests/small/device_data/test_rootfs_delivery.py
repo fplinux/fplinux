@@ -62,9 +62,19 @@ def test_qin_ram_rootfs_installs_payload_and_firmware_changes_recipe(tmp_path: P
     assert installed.stat().st_mode & 0o777 == 0o600
     assert not (root / "lib/firmware/qin1splus/system-config.bin").exists()
     with_firmware = alpine_rootfs_recipe(
-        "a" * 64, "b" * 64, (), firmware_inputs=captured, root_kind="initramfs"
+        "a" * 64,
+        "b" * 64,
+        (),
+        release_id="012345abcdef",
+        firmware_inputs=captured,
+        root_kind="external",
     )
     without_firmware = alpine_rootfs_recipe(
-        "a" * 64, "b" * 64, (), firmware_inputs=(), root_kind="initramfs"
+        "a" * 64,
+        "b" * 64,
+        (),
+        release_id="012345abcdef",
+        firmware_inputs=(),
+        root_kind="external",
     )
     assert with_firmware != without_firmware

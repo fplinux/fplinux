@@ -138,17 +138,42 @@ def test_autonomous_zip_preserves_receipts_omits_personal_data_and_is_determinis
 ) -> None:
     """Recipients get the fixed-phone runtime, complete checksums and no builder capsule."""
     inputs = archive_inputs
-    original_inputs = {name: source.read_bytes() for name, source in inputs.native_files.items()}
-    package.package_target(inputs.target, autonomous=True, host=host, candidate=True)
-    archive, payload, modes = _archive(inputs.root)
-    original = archive.read_bytes()
-    companion = next((inputs.root / ".cache/out/candidates").glob("*-sources.zip"))
-    assert payload["README.txt"].endswith(
-        (
-            "\nMatching source and build material:\n"
-            f"  {companion.name}\n"
-            "Keep it available alongside this archive. Licenses remain included here.\n"
-        ).encode()
+    package.package_target(inputs.target, host=host)
+    path, files, modes = _archive(inputs.root)
+    original = path.read_bytes()
+    assert path.name == f"FPLinux-{inputs.target}-{host}-x64-1234567890ab.zip"
+    companion = path.with_name(path.stem + "-sources.zip")
+    with zipfile.ZipFile(companion) as archive:
+        metadata = json.loads(archive.read(f"{companion.stem}/DISTRIBUTION.json"))
+        assert (
+            archive.read(f"{companion.stem}/project/source.c")
+            == b"controlled corresponding source\n"
+        )
+    assert metadata == {
+        "release_id": "1234567890ab",
+        "source_commit": "1234567890ab" + "0" * 28,
+        "source_snapshot": "a" * 64,
+        "runtimes": [
+            {
+                "archive": path.name,
+                "target": inputs.target,
+                "host": host,
+                "identity": "f" * 64,
+                "sha256": hashlib.sha256(original).hexdigest(),
+            }
+        ],
+    }
+    assert f"  {companion.name}\n".encode() in files["README.txt"]
+    assert (
+        not {
+            "device-data.cpio",
+            "device-data-manifest.json",
+            "pinmap.bin",
+            "keymap.bin",
+            "CANDIDATE-NOTICE.txt",
+            "DEVELOPMENT-NOTICE.txt",
+        }
+        & files.keys()
     )
     with zipfile.ZipFile(companion) as source:
         source_prefix = source.namelist()[0].partition("/")[0] + "/"
@@ -186,7 +211,18 @@ def test_autonomous_zip_preserves_receipts_omits_personal_data_and_is_determinis
         if inputs.target == "bq-2830l-tank-connect-max"
         else {"loader", "bridge"}
     )
-    assert all(name in payload for name in runtime["sha256"])
+    assert build["release_id"] == "1234567890ab"
+    assert set(build["files"]) == set(files) - {"build-manifest.json", "SHA256SUMS"}
+    for name, record in build["files"].items():
+        assert record == {
+            "mode": modes[name] & 0o777,
+            "size": len(files[name]),
+            "sha256": hashlib.sha256(files[name]).hexdigest(),
+        }
+    for name, digest in runtime["sha256"].items():
+        assert hashlib.sha256(files[name]).hexdigest() == digest
+    checksums = dict(line.split("  ")[::-1] for line in files["SHA256SUMS"].decode().splitlines())
+    assert set(checksums) == set(files) - {"SHA256SUMS"}
     assert all(
         hashlib.sha256(payload[name]).hexdigest() == digest
         for name, digest in runtime["sha256"].items()
@@ -547,32 +583,57 @@ def test_sc9820e_linux_archive_delivers_loaders_and_starts_without_phone_data(
     package.package_target(
         inputs.target, autonomous=True, host="linux", candidate=True, offline=True
     )
-    archive, payload, modes = _archive(inputs.root)
-    runtime = json.loads(payload["runtime-manifest.json"])
-
-    assert runtime["assets"] == {
-        "fdl1": "assets/fdl1.bin",
-        "sml": "assets/sml.bin",
-        "fdl2": "assets/fdl2.bin",
-    }
-    assert runtime["host_tools"] == {"loader": "host/spd_dump"}
-    for relative in ("assets/fdl1.bin", "assets/sml.bin", "assets/fdl2.bin"):
-        assert payload[relative] == (inputs.bundle / relative).read_bytes()
-        assert runtime["sha256"][relative] == hashlib.sha256(payload[relative]).hexdigest()
-    assert modes["Run.sh"] == 0o100755
-    assert "THIRD_PARTY_NOTICES.md" in payload
-    assert "runtime/bin/python3.14" in payload
-    assert "runtime/lib/ld-musl-x86_64.so.1" in payload
-    assert "device-data-manifest.json" not in payload
-    assert "device-data.cpio" not in payload
-    assert "tools/fphelper_t117" not in payload
-    assert not any(name.startswith(("sources/", "data/")) for name in payload)
-    readme = " ".join(payload["README.txt"].decode().split())
-    assert "Run loads FPLinux into RAM and opens SSH." in readme
-    assert "source-built RAM loaders are included" in readme
-    assert "--from-dump" not in readme
-    assert "backup" not in readme
-
+    assert runtime["nand"] is None
+    assert runtime["emmc"]["raw_device"] == "/dev/mmcblk1"
+    assert files["targets/xiaomi-qin-1s-plus/device-data/rf-fields.tsv"]
+    for name in ("ext4", "cachetools", "crcmod"):
+        assert f"scripts/{name}/__init__.py" in runtime["sha256"]
+        assert f"licenses/phone-data/{name}-LICENSE.txt" in files
+    loader = "tools/spd_dump.exe" if host == "windows" else "host/spd_dump"
+    assert runtime["host_tools"] == {"loader": loader}
+    for name in ("assets/fdl1.bin", "assets/sml.bin", "assets/fdl2.bin"):
+        assert files[name] == (archive_inputs.bundle / name).read_bytes()
+    assert "device-data.cpio" not in files
+    assert "tools/libc_server.exe" not in files
+    assert "host/libc_server" not in files
+    assert not any("nand-ecc" in name for name in files)
+    if host == "windows":
+        assert "Run.cmd" in files
+        assert "Run.sh" not in files
+        assert "runtime/python.exe" in files
+        assert "runtime/bin/python3.14" not in files
+        assert not any(name.startswith("host/") for name in files)
+        assert b"Windows have not been verified with this phone" in files["README.txt"]
+        windows = json.loads(files["windows-host.json"])
+        assert windows["host_tools"] == {
+            "loader": "tools/spd_dump.exe",
+            "ssh": "tools/openssh/ssh.exe",
+            "keygen": "tools/openssh/ssh-keygen.exe",
+            "keyscan": "tools/openssh/ssh-keyscan.exe",
+            "driver": "tools/driver/wdi-simple.exe",
+        }
+        for name, digest in windows["sha256"].items():
+            assert hashlib.sha256(files[name]).hexdigest() == digest
+    else:
+        assert modes["Run.sh"] == 0o100755
+        assert "runtime/bin/python3.14" in files
+    assert runtime["release_id"] == "1234567890ab"
+    for name, digest in runtime["sha256"].items():
+        assert hashlib.sha256(files[name]).hexdigest() == digest
+    companion = path.with_name(path.stem + "-sources.zip")
+    with zipfile.ZipFile(companion) as source:
+        metadata = json.loads(source.read(f"{companion.stem}/DISTRIBUTION.json"))
+    assert metadata["release_id"] == "1234567890ab"
+    assert metadata["runtimes"][0]["host"] == host
+    assert metadata["runtimes"][0]["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert "backup" not in files["README.txt"].decode()
+    readme = " ".join(files["README.txt"].decode().split())
+    assert "reads only the selected sound settings" in readme
+    assert "selected original files in originals/" in readme
+    assert "--from-dump" in readme
+    assert "phone-user-area.bin" in readme
+    assert "nand.bin.json" not in readme
+    assert "RAM boot does not access internal storage" not in readme
     extracted = tmp_path / "recipient"
     with zipfile.ZipFile(archive) as source:
         source.extractall(extracted)  # noqa: S202 -- owned ZIP built from controlled inputs.
@@ -596,8 +657,10 @@ def test_sc9820e_linux_archive_delivers_loaders_and_starts_without_phone_data(
 def test_sc9820e_autonomous_archive_requires_a_build_without_personal_device_data(
     archive_inputs: ArchiveInputs, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Real identity admission rejects an owner's build and preserves clean image bytes."""
-    inputs = archive_inputs
+    manifest = json.loads(archive_inputs.manifest)
+    context = ReleaseContext(
+        manifest["release_id"], manifest["source_commit"], manifest["source_snapshot"]
+    )
 
     def package_snapshot(
         *_arguments: object, include_device_data: bool = True, **_options: object

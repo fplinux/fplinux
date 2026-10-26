@@ -11,30 +11,12 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from fplinux_cli.artifacts.build_manifest import BUILD_MANIFEST_FIELDS
 from fplinux_cli.artifacts.records import regular_file_record
 from fplinux_cli.common import canonical_json_bytes, is_sha256, sha256_file
 from fplinux_cli.manifests.identity import BUILD_TYPES
 
 BUILD_MANIFEST_NAME = "build-manifest.json"
-BUILD_MANIFEST_FIELDS = frozenset(
-    {
-        "rootfs_receipt",
-        "boot_artifacts",
-        "environment_recipe",
-        "environment_content",
-        "apk_signing_key",
-        "device_identity",
-        "files",
-        "generation",
-        "kbuild_receipt",
-        "kernel_artifacts",
-        "linux_recipe",
-        "profile",
-        "build_type",
-        "target",
-        "workspace_digest",
-    }
-)
 
 
 class BundleStateError(RuntimeError):

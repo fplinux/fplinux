@@ -232,6 +232,9 @@ def archive_files(directory: Path) -> Path:
         "build_type": "release",
         "target": "demo",
         "workspace_digest": None,
+        "release_id": "aaaaaaaaaaaa",
+        "source_commit": "a" * 40,
+        "source_snapshot": "b" * 64,
     }
     canonical = (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode()
     manifest["generation"] = hashlib.sha256(canonical).hexdigest()

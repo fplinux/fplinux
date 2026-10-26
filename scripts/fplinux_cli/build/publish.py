@@ -18,6 +18,7 @@ from fplinux_cli.artifacts.bundles import (
     publish_current_bundle,
     published_file_records,
 )
+from fplinux_cli.artifacts.release import current_release_context
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build.identity import runtime_identity
 from fplinux_cli.build.runtime import device_data_descriptor, runtime_source_files
@@ -109,6 +110,7 @@ def runtime_manifest(  # noqa: PLR0913 -- each published artifact role stays exp
     if payload_regions is not None:
         adapter["regions"] = payload_regions
     return {
+        **current_release_context().fields(),
         "target": target,
         "profile": inputs_build.selected_profile(target_config),
         "build_type": target_config["build_type"],
@@ -241,6 +243,7 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
         "sha256": sha256_value(kbuild_receipt.get("sha256"), "Kbuild receipt SHA-256"),
     }
     payload = {
+        **current_release_context().fields(),
         "target": target,
         "profile": inputs_build.selected_profile(target_config),
         "build_type": target_config["build_type"],

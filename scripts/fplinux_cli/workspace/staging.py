@@ -7,7 +7,8 @@ import shutil
 import tempfile
 from pathlib import Path, PurePosixPath
 
-from fplinux_cli.common import ROOT, fail
+from fplinux_cli.artifacts.release import BUILD_IDENTITY_NAME
+from fplinux_cli.common import ROOT, canonical_json_bytes, fail
 
 from .capture import WorkspaceFile, WorkspaceSnapshot, snapshot_recipe, workspace_relative_path
 
@@ -81,6 +82,10 @@ def _stage_snapshot(
     try:
         for source in snapshot.materialized_files:
             _write_snapshot_file(staging / source.path, source)
+        if snapshot.release_context is not None:
+            identity = staging / BUILD_IDENTITY_NAME
+            identity.write_bytes(canonical_json_bytes(snapshot.release_context.fields()))
+            identity.chmod(0o644)
         staged_marker = staging / marker_relative
         staged_marker.parent.mkdir(parents=True, exist_ok=True)
         staged_marker.write_bytes((recipe + "\n").encode())
@@ -179,7 +184,7 @@ def _validate_snapshot(snapshot: WorkspaceSnapshot, marker_relative: PurePosixPa
             fail(f"workspace snapshot has non-bytes contents: {source.path}")
         if type(source.mode) is not int or not 0 <= source.mode <= 0o777:
             fail(f"workspace snapshot has invalid mode: {source.path}")
-    if marker in paths:
+    if marker in paths or BUILD_IDENTITY_NAME in paths:
         fail("workspace snapshot collides with its recipe marker")
 
 

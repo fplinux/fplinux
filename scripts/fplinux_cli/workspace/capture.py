@@ -13,6 +13,8 @@ from fplinux_cli.common import canonical_json_bytes, fail, relative_name
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from fplinux_cli.artifacts.release import ReleaseContext
+
 
 @dataclass(frozen=True)
 class WorkspaceFile:
@@ -34,17 +36,25 @@ class WorkspaceSnapshot:
     linux_operations: tuple[tuple[str, str, str], ...] = ()
     alpine_graph: bytes = b""
     source_declarations: bytes = b""
+    release_context: ReleaseContext | None = None
 
     @property
     def materialization_recipe(self) -> str:
         """Bind the disposable workspace slot to every file it contains."""
-        return snapshot_recipe(
+        recipe = snapshot_recipe(
             self.materialized_files,
             self.build_type,
             self.linux_operations,
             self.alpine_graph,
             self.source_declarations,
         )
+        if self.release_context is not None:
+            return hashlib.sha256(
+                canonical_json_bytes(
+                    {"workspace": recipe, "release": self.release_context.fields()}
+                )
+            ).hexdigest()
+        return recipe
 
     @property
     def materialized_files(self) -> tuple[WorkspaceFile, ...]:

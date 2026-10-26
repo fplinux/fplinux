@@ -17,6 +17,7 @@ from fplinux_cli.alpine.selection import (
     shared_aport_sources,
 )
 from fplinux_cli.alpine.sources import aport_source_ids
+from fplinux_cli.artifacts.release import current_release_context
 from fplinux_cli.build.inputs import selected_build_sources
 from fplinux_cli.build.runtime import (
     runtime_host_tools,
@@ -57,6 +58,7 @@ if TYPE_CHECKING:
     from collections.abc import Collection, Iterator, Mapping
     from pathlib import Path
 
+    from fplinux_cli.artifacts.release import ReleaseContext
     from fplinux_cli.manifests.linux import LinuxTarget
 
 STAGED_BUILD_SOURCES = (
@@ -81,6 +83,7 @@ STAGED_BUILD_SOURCES = (
     "scripts/fplinux_cli/artifacts/__init__.py",
     "scripts/fplinux_cli/artifacts/records.py",
     "scripts/fplinux_cli/artifacts/bundles.py",
+    "scripts/fplinux_cli/artifacts/release.py",
     "scripts/fplinux_cli/common.py",
     "scripts/fplinux_cli/manifests",
     "scripts/fplinux_cli/environment/__init__.py",
@@ -375,8 +378,11 @@ def target_workspace_snapshot(  # noqa: PLR0913 -- target, build context and per
     *,
     build_type: str = "release",
     include_device_data: bool = True,
+    release_context: ReleaseContext | None = None,
 ) -> WorkspaceSnapshot:
     """Capture selected sources and, by default, locally prepared device data."""
+    if release_context is None:
+        release_context = current_release_context(ROOT)
     target_config = load_target(target, profile, build_type=build_type)
     source_snapshot = snapshot_from_inventory(
         lambda: target_build_source_files(
@@ -465,4 +471,5 @@ def target_workspace_snapshot(  # noqa: PLR0913 -- target, build context and per
         linux_operations=linux_sources.operations,
         alpine_graph=alpine_graph,
         source_declarations=source_declarations,
+        release_context=release_context,
     )

@@ -18,6 +18,9 @@ def runtime_manifest() -> dict[str, Any]:
         "target": "demo",
         "profile": None,
         "build_type": "release",
+        "release_id": "aaaaaaaaaaaa",
+        "source_commit": "a" * 40,
+        "source_snapshot": "b" * 64,
         "identity": {
             "target": {
                 "brand": "Demo",

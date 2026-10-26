@@ -62,6 +62,9 @@ def stage_bundle(  # noqa: PLR0913 -- slot and independently varied manifest ide
     (staging / "payload").chmod(0o644)
     payload = {
         "target": "demo",
+        "release_id": "aaaaaaaaaaaa",
+        "source_commit": "a" * 40,
+        "source_snapshot": "b" * 64,
         "workspace_digest": "a" * 64,
         "environment_recipe": "b" * 64,
         "environment_content": "2" * 64,

@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 _RUNTIME_MODULES = (
     "__init__.py",
     "common.py",
+    "artifacts/__init__.py",
+    "artifacts/build_manifest.py",
     "device_data/__init__.py",
     "device_data/formats.py",
     "manifests/__init__.py",

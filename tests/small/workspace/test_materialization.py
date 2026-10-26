@@ -3,12 +3,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 from unittest import mock
 
 import fplinux_cli.workspace.capture as workspace_capture
 import fplinux_cli.workspace.staging as workspace_staging
 import pytest
+from fplinux_cli.artifacts.release import ReleaseContext, current_release_context
 
 from tests.small.workspace.workspace_fixtures import write_source
 
@@ -19,6 +21,26 @@ if TYPE_CHECKING:
 
 class WorkspaceMaterializationTests:
     """Keep cache materialization causally bound to an already read snapshot."""
+
+    def test_staged_release_survives_target_projection_and_selects_its_own_slot(
+        self, tmp_path: Path
+    ) -> None:
+        """A partial target workspace carries the full release rather than rehashing itself."""
+        source = write_source(tmp_path)
+        causal = workspace_capture.workspace_snapshot([("selected/source.c", source)])
+        first_release = ReleaseContext("012345abcdef", None, "012345abcdef" + "0" * 52)
+        second_release = ReleaseContext("abcdef012345", None, "abcdef012345" + "0" * 52)
+        first = replace(causal, release_context=first_release)
+        second = replace(causal, release_context=second_release)
+        with mock.patch.object(workspace_staging, "ROOT", tmp_path):
+            first_path = workspace_staging.stage_workspace_snapshot(first)
+            second_path = workspace_staging.stage_workspace_snapshot(second)
+            assert current_release_context(first_path) == first_release
+            assert current_release_context(second_path) == second_release
+            assert first_path != second_path
+            assert first.recipe == second.recipe
+            workspace_staging.discard_staged_workspace_snapshot(first, first_path)
+            workspace_staging.discard_staged_workspace_snapshot(second, second_path)
 
     def test_materialization_uses_precomputed_bytes_after_checkout_changes(
         self, tmp_path: Path

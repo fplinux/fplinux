@@ -46,6 +46,9 @@ def write_bundle(bundle: Path) -> tuple[dict[str, Any], str]:
         "target": "phone",
         "profile": None,
         "build_type": "release",
+        "release_id": "aaaaaaaaaaaa",
+        "source_commit": "a" * 40,
+        "source_snapshot": "b" * 64,
         "image": "image/ramboot.bin",
         "sha256": {"image/ramboot.bin": hashlib.sha256(image.read_bytes()).hexdigest()},
     }
@@ -70,6 +73,9 @@ def write_bundle(bundle: Path) -> tuple[dict[str, Any], str]:
         "build_type": "release",
         "target": "phone",
         "workspace_digest": "d" * 64,
+        "release_id": "aaaaaaaaaaaa",
+        "source_commit": "a" * 40,
+        "source_snapshot": "b" * 64,
     }
     canonical = (
         json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n"
@@ -322,7 +328,25 @@ class SshTransportSmallTests:
         ):
             ssh_transport.bundle_identity(bundle, {**runtime, **changed})
 
-    def test_current_session_loads_ready_bound_session(self, ssh_runtime: SshRuntime) -> None:
+    @pytest.mark.parametrize(
+        "changed",
+        [
+            pytest.param({"release_id": "cccccccccccc"}, id="release-id"),
+            pytest.param({"source_commit": None}, id="source-commit"),
+            pytest.param({"source_snapshot": "c" * 64}, id="source-snapshot"),
+        ],
+    )
+    def test_bundle_identity_rejects_a_runtime_from_another_release(
+        self, ssh_runtime: SshRuntime, changed: dict[str, str | None]
+    ) -> None:
+        """Runtime and immutable build metadata must describe the same source release."""
+        bundle = ssh_runtime.directory / "bundle"
+        runtime, _generation = write_bundle(bundle)
+
+        with pytest.raises(SystemExit, match="runtime release identity"):
+            ssh_transport.bundle_identity(bundle, {**runtime, **changed})
+
+    def test_saved_session_loads_ready_bound_session(self, ssh_runtime: SshRuntime) -> None:
         """A ready RAM session remains usable through its private binding."""
         state = ssh_runtime.session()
         current = ssh_runtime.root / "current"

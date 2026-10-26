@@ -19,6 +19,18 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+def _stamp_build_id(root: Path, release_id: str) -> None:
+    """Stamp the composed image after package installation, leaving APKs reusable."""
+    path = require_file(root / "etc/os-release")
+    lines = [
+        line
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if not line.startswith("BUILD_ID=")
+    ]
+    lines.append(f"BUILD_ID={release_id}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def _brightness_config_text(display_brightness: dict[str, Any]) -> str:
     """Render the target's validated brightness table for the phone runtime."""
     levels = ",".join(str(level) for level in display_brightness["levels"])

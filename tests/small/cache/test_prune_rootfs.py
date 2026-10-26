@@ -12,6 +12,7 @@ import fplinux_cli.cache.prune.alpine as prune_alpine
 import fplinux_cli.cache.prune.operations as prune_operations
 import fplinux_cli.device_data.inputs as firmware_inputs
 import pytest
+from fplinux_cli.artifacts.release import current_release_context
 from fplinux_cli.cache.prune.operations import apply_prune, plan_prune
 from fplinux_cli.environment.definition import environment_artifact_recipe_digest
 from fplinux_cli.environment.state import EnvironmentState, publish_environment_state
@@ -76,10 +77,12 @@ class RootfsPruneTests:
             _signing_key: str,
             packages: tuple[str, ...],
             *,
+            release_id: str,
             firmware_inputs: tuple[firmware_inputs.FirmwareInput, ...],
             display_brightness: dict[str, object] | None,
             root_kind: str,
         ) -> str:
+            assert release_id == current_release_context().release_id
             assert (root_kind) == ("initramfs")
             assert (firmware_inputs) == (())
             assert (display_brightness) == (
@@ -271,10 +274,12 @@ class RootfsPruneTests:
             _key: str,
             packages: tuple[str, ...],
             *,
+            release_id: str,
             firmware_inputs: tuple[firmware_inputs.FirmwareInput, ...],
             display_brightness: dict[str, object] | None,
             root_kind: str,
         ) -> str:
+            assert release_id == current_release_context().release_id
             assert (display_brightness) is None
             assert (root_kind) == ("external" if packages == ("package-host",) else "initramfs")
             recipes: dict[tuple[str, ...], str] = {
@@ -392,7 +397,12 @@ class RootfsPruneTests:
         def recipe_for(*selected_groups: str) -> str:
             selected = tuple(item for group in selected_groups for item in captured[group])
             return alpine_recipes.alpine_rootfs_recipe(
-                environment_recipe, signing_key, (), firmware_inputs=selected, root_kind=root_kind
+                environment_recipe,
+                signing_key,
+                (),
+                release_id=current_release_context().release_id,
+                firmware_inputs=selected,
+                root_kind=root_kind,
             )
 
         without_firmware = recipe_for()

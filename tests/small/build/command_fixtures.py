@@ -12,6 +12,7 @@ from fplinux_cli.artifacts.bundles import (
     bundle_pointer,
     publish_current_bundle,
 )
+from fplinux_cli.artifacts.release import ReleaseContext
 from fplinux_cli.common import canonical_json_bytes
 from fplinux_cli.environment.state import EnvironmentState, publish_environment_state
 from fplinux_cli.workspace.capture import WorkspaceSnapshot
@@ -37,7 +38,8 @@ class CommandBundleContext:
         signing_key.parent.mkdir(parents=True)
         signing_key.write_bytes(b"test public signing key\n")
         self.signing_key = hashlib.sha256(signing_key.read_bytes()).hexdigest()
-        self.snapshot = WorkspaceSnapshot((), "c" * 64)
+        self.release_context = ReleaseContext("012345abcdef", "0" * 40, "012345abcdef" + "0" * 52)
+        self.snapshot = WorkspaceSnapshot((), "c" * 64, release_context=self.release_context)
         publish_environment_state(self.cache, EnvironmentState("e" * 64, "b" * 64, "a" * 64))
         self.bundle_path = self.create_generation("a" * 64)
         self.bundle = publish_current_bundle(self.output, "phone", self.bundle_path)
@@ -53,6 +55,9 @@ class CommandBundleContext:
     ) -> dict[str, object]:
         """Describe one complete synthetic bundle independently of its resolver."""
         return {
+            "release_id": "012345abcdef",
+            "source_commit": "0" * 40,
+            "source_snapshot": "012345abcdef" + "0" * 52,
             "workspace_digest": self.snapshot.recipe,
             "environment_recipe": "e" * 64,
             "environment_content": "a" * 64,

@@ -194,6 +194,9 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
             "target",
             "profile",
             "build_type",
+            "release_id",
+            "source_commit",
+            "source_snapshot",
             "identity",
             "transport",
             "image",
@@ -213,6 +216,10 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
     root["profile"] = require_optional_profile(root.get("profile"))
     if root.get("build_type") not in ("release", "debug"):
         fail("runtime build type must be release or debug")
+    root["release_id"] = require_string(root["release_id"], "runtime release ID")
+    if root["source_commit"] is not None:
+        root["source_commit"] = require_string(root["source_commit"], "runtime source commit")
+    root["source_snapshot"] = require_string(root["source_snapshot"], "runtime source snapshot")
     if not isinstance(root.get("identity"), dict):
         fail("runtime identity must be an object")
     root["transport"] = require_transport(root.get("transport"))

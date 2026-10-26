@@ -18,6 +18,7 @@ from fplinux_cli.artifacts.bundles import (
 from fplinux_cli.runtime.bundle_session import bundle_manifest
 
 if TYPE_CHECKING:
+    from fplinux_cli.artifacts.release import ReleaseContext
     from fplinux_cli.environment.state import EnvironmentState
     from fplinux_cli.workspace.capture import WorkspaceSnapshot
 
@@ -30,6 +31,7 @@ class BuildIdentity:
     environment_recipe: str
     environment_content: str
     apk_signing_key: str
+    release: ReleaseContext
 
 
 def profile_log_target(target: str, profile: str | None) -> str:
@@ -41,15 +43,16 @@ def profile_log_target(target: str, profile: str | None) -> str:
 
 def manifest_matches_identity(manifest: dict[str, Any], identity: BuildIdentity | None) -> bool:
     """Return whether a manifest matches one exact host-visible build identity."""
-    return identity is not None and all(
-        manifest.get(field) == value
-        for field, value in (
-            ("workspace_digest", identity.workspace_digest),
-            ("environment_recipe", identity.environment_recipe),
-            ("environment_content", identity.environment_content),
-            ("apk_signing_key", identity.apk_signing_key),
-        )
-    )
+    if identity is None:
+        return False
+    fields = {
+        "workspace_digest": identity.workspace_digest,
+        "environment_recipe": identity.environment_recipe,
+        "environment_content": identity.environment_content,
+        "apk_signing_key": identity.apk_signing_key,
+        **identity.release.fields(),
+    }
+    return all(manifest.get(field) == value for field, value in fields.items())
 
 
 def required_boot_artifacts(manifest: dict[str, Any]) -> tuple[str, ...]:
@@ -109,7 +112,7 @@ def build_identity(
     snapshot: WorkspaceSnapshot, environment_state: EnvironmentState | None, cache: Path
 ) -> BuildIdentity | None:
     """Read the exact host-visible inputs without creating signing state."""
-    if environment_state is None:
+    if environment_state is None or snapshot.release_context is None:
         return None
     try:
         signing_key = signing.signing_key_identity(cache)
@@ -120,4 +123,5 @@ def build_identity(
         environment_state.recipe,
         environment_state.content,
         signing_key,
+        snapshot.release_context,
     )

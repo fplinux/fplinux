@@ -551,7 +551,8 @@ class WorkspaceSnapshotTests:
                 linux_inputs.write(root, f"targets/phone-b/{relative}", "unrelated\n")
             unrelated = workspace_inputs.target_workspace_snapshot("phone-a")
             assert (changed.recipe) == (unrelated.recipe)
-            assert (changed.materialization_recipe) == (unrelated.materialization_recipe)
+            assert changed.materialization_recipe != unrelated.materialization_recipe
+            assert changed.release_context != unrelated.release_context
             with peer_manifest.open("a", encoding="utf-8") as output:
                 output.write(
                     '\n[rootfs]\npackages = ["unrelated"]\n[bootstrap]\nsource = "missing"\n'

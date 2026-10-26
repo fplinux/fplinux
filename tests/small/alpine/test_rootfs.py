@@ -30,6 +30,17 @@ if TYPE_CHECKING:
     from tests.small.alpine.fixtures import AlpineSourceContext
 
 
+def test_composed_rootfs_stamps_build_id_without_changing_system_version(tmp_path: Path) -> None:
+    """Image composition adds the selected ID and replaces any previous stamped value."""
+    release = tmp_path / "etc/os-release"
+    release.parent.mkdir()
+    release.write_bytes(b'NAME=FPLinux\nVERSION_ID=1\nBUILD_ID="old"\n')
+    alpine_rootfs_files._stamp_build_id(tmp_path, "012345abcdef")  # noqa: SLF001 -- inspect composed image bytes.
+    assert release.read_bytes() == b"NAME=FPLinux\nVERSION_ID=1\nBUILD_ID=012345abcdef\n"
+    alpine_rootfs_files._stamp_build_id(tmp_path, "abcdef012345")  # noqa: SLF001 -- compose the next release.
+    assert release.read_bytes() == b"NAME=FPLinux\nVERSION_ID=1\nBUILD_ID=abcdef012345\n"
+
+
 def verified_rootfs(alpine_source: AlpineSourceContext) -> Path:
     """Create the smallest root tree accepted without optional packages."""
     root = alpine_source.directory / "verified-rootfs"

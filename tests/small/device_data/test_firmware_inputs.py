@@ -258,6 +258,7 @@ class FirmwareInputTests:
                 "1" * 64,
                 "2" * 64,
                 ("fplinux-base",),
+                release_id="012345abcdef",
                 firmware_inputs=firmware_inputs.rootfs_firmware_inputs(
                     firmware_generation.capture()
                 ),
@@ -314,7 +315,11 @@ class FirmwareInputTests:
         )
         captured = firmware_inputs.rootfs_firmware_inputs(firmware_generation.capture())
         first = alpine_recipes.alpine_rootfs_recipe(
-            "1" * 64, "2" * 64, ("fplinux-base",), firmware_inputs=captured
+            "1" * 64,
+            "2" * 64,
+            ("fplinux-base",),
+            release_id="012345abcdef",
+            firmware_inputs=captured,
         )
         rootfs = firmware_generation.root / "radio-rootfs"
         rootfs.mkdir()
@@ -328,6 +333,7 @@ class FirmwareInputTests:
             "1" * 64,
             "2" * 64,
             ("fplinux-base",),
+            release_id="012345abcdef",
             firmware_inputs=firmware_inputs.rootfs_firmware_inputs(firmware_generation.capture()),
         )
         assert changed != first

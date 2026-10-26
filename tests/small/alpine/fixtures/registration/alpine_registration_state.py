@@ -27,6 +27,8 @@ with mock.patch.object(packages, "CACHE", root / ".cache"):
             }
             for name in names
         },
-        "rootfs": recipes.alpine_rootfs_recipe("1" * 64, "d" * 64, selected),
+        "rootfs": recipes.alpine_rootfs_recipe(
+            "1" * 64, "d" * 64, selected, release_id="012345abcdef"
+        ),
     }
 print(json.dumps(result))

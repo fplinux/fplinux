@@ -148,7 +148,13 @@ class IdentityTests:
 
     def test_linux_recipe_tracks_generated_identity_but_not_platform_aliases(self) -> None:
         """Rebuild DT bytes for visible identity, not provenance-only aliases."""
-        source = {"version": "test", "sha256": "a" * 64}
+        source = {
+            "version": "test",
+            "name": "linux-test.tar.xz",
+            "url": "https://example.invalid/linux-test.tar.xz",
+            "algorithm": "sha256",
+            "checksum": "a" * 64,
+        }
         target = {
             "platform": "ums9117",
             "identity": validate_target_identity(self.target()),
@@ -174,6 +180,7 @@ class IdentityTests:
         platform = {
             "identity": validate_platform_identity(self.platform()),
             "linux": {
+                "source_lock": "linux",
                 "arch": "arm",
                 "dts_directory": "arch/arm/boot/dts/unisoc",
                 "platform_identity_header": "arch/arm/mach-ums9117/fplinux-platform-identity.h",

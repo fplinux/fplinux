@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import common
-import subprocess
+from fplinux_cli.artifacts.release import capture_public_sources, source_identity_bytes
 from fplinux_cli.common import canonical_json_bytes, fail
 from fplinux_cli.environment.downloads import download_locked_file
 
@@ -22,102 +22,16 @@ if TYPE_CHECKING:
     from fplinux_cli.manifests.loaders import LoaderSource
 
 
-_PROJECT_DIRECTORIES = frozenset(
-    {
-        "LICENSES",
-        "third-party-licenses",
-        "alpine",
-        "bootstrap",
-        "common",
-        "include",
-        "lib",
-        "platforms",
-        "profiles",
-        "scripts",
-        "site",
-        "targets",
-    }
-)
 
 
-_PROJECT_ROOT_FILES = frozenset(
-    {
-        ".clang-format",
-        ".editorconfig",
-        ".gitattributes",
-        ".gitignore",
-        ".taplo.toml",
-        "LICENSE",
-        "README.md",
-        "REUSE.toml",
-        "THIRD_PARTY_NOTICES.md",
-        "fplinux",
-        "package-lock.json",
-        "package.json",
-        "pyproject.toml",
-    }
-)
 
 
-_PRIVATE_COMPONENTS = frozenset(
-    {
-        "__pycache__",
-        "diagnostics",
-        "dist",
-        "dumps",
-        "evidence",
-        "handoffs",
-        "keys",
-        "node_modules",
-        "private",
-        "research",
-        "signing",
-    }
-)
 
 
-_NON_SOURCE_SUFFIXES = frozenset(
-    {
-        ".apk",
-        ".bin",
-        ".cpio",
-        ".dll",
-        ".dump",
-        ".elf",
-        ".exe",
-        ".key",
-        ".pem",
-        ".pub",
-        ".pyc",
-        ".pyo",
-    }
-)
 
 
-def _git_paths(*arguments: str) -> set[str]:
-    result = subprocess.run(
-        ["git", "-C", str(common.ROOT), *arguments, "-z"],
-        capture_output=True,
-        check=False,
-    )
-    if result.returncode:
-        fail("source packaging requires the active Git checkout")
-    return {name.decode("utf-8") for name in result.stdout.split(b"\0") if name}
 
 
-def _project_source(relative: str) -> bool:
-    path = Path(relative)
-    if "AGENTS.md" in path.parts or any(part in _PRIVATE_COMPONENTS for part in path.parts):
-        return False
-    if path.name.startswith(".env") or path.suffix.lower() in _NON_SOURCE_SUFFIXES:
-        return False
-    if len(path.parts) == 1:
-        return relative in _PROJECT_ROOT_FILES or (
-            not relative.startswith(".") and relative.endswith(".lock.toml")
-        )
-    if any(part.startswith(".") for part in path.parts):
-        return False
-    return path.parts[0] in _PROJECT_DIRECTORIES
 
 
 
@@ -132,28 +46,15 @@ class SourcePayload:
 
 def project_source_files() -> SourcePayload:
     """Read active tracked and nonignored project source bytes, retaining executable modes."""
-    tracked = _git_paths("ls-files", "--cached")
-    new = _git_paths("ls-files", "--others", "--exclude-standard")
-    deleted = _git_paths("diff", "--cached", "--name-only", "--diff-filter=D")
+    snapshot = capture_public_sources()
     files = {}
     executables = set()
-    for relative in sorted((tracked | new) - deleted):
-        if not _project_source(relative):
-            continue
-        source = common.ROOT / relative
-        if not source.exists() and not source.is_symlink():
-            continue
-        current = common.ROOT
-        for part in Path(relative).parts:
-            current /= part
-            if current.is_symlink():
-                fail(f"source archive input must not traverse a symlink: {relative}")
-        if not source.is_file():
-            fail(f"source archive input must be a regular file: {relative}")
-        member = f"project/{relative}"
-        files[member] = source.read_bytes()
-        if source.stat().st_mode & 0o111:
+    for source in snapshot.files:
+        member = f"project/{source.path}"
+        files[member] = source.contents
+        if source.mode & 0o111:
             executables.add(member)
+    files["project/.fplinux-release.json"] = source_identity_bytes(snapshot)
     return SourcePayload(files, executables, {})
 
 

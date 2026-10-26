@@ -9,6 +9,7 @@ from unittest import mock
 
 import pytest
 from fplinux_cli.alpine import recipes, rootfs_state, signing
+from fplinux_cli.artifacts.release import ReleaseContext
 from fplinux_cli.cache.prune import alpine as prune_alpine
 from fplinux_cli.cache.prune.operations import discard_obsolete_rootfs
 from fplinux_cli.device_data.inputs import capture_external_device_data
@@ -39,7 +40,12 @@ def test_prune_retains_both_current_qin_rootfs_variants_and_expires_changed_inpu
     publish_environment_state(cache, EnvironmentState("a" * 64, "b" * 64, "b" * 64))
     environment_recipe = environment_artifact_recipe_digest("a" * 64, "b" * 64)
     signing_key = signing.signing_key_identity(cache)
-    rootfs_recipe = partial(recipes.alpine_rootfs_recipe, root=alpine_source.root)
+    release_context = ReleaseContext("012345abcdef", "012345abcdef" + "a" * 28, "b" * 64)
+    rootfs_recipe = partial(
+        recipes.alpine_rootfs_recipe,
+        root=alpine_source.root,
+        release_id=release_context.release_id,
+    )
 
     def selected_recipe() -> str:
         selected = capture_external_device_data(qin_firmware.target, qin_firmware.groups, cache)
@@ -71,6 +77,7 @@ def test_prune_retains_both_current_qin_rootfs_variants_and_expires_changed_inpu
         mock.patch.object(prune_alpine, "load_target", return_value=target),
         mock.patch.object(prune_alpine, "load_platform", return_value={}),
         mock.patch.object(prune_alpine, "selected_packages", return_value=()),
+        mock.patch.object(prune_alpine, "current_release_context", return_value=release_context),
         mock.patch.object(prune_alpine, "alpine_rootfs_recipe", new=rootfs_recipe),
         mock.patch.object(prune_alpine, "environment_recipe_digest", return_value="a" * 64),
     ):

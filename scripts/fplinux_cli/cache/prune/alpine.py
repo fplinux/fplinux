@@ -10,6 +10,7 @@ from fplinux_cli.alpine.packages import PACKAGE_CACHE_DIRECTORY
 from fplinux_cli.alpine.recipes import alpine_rootfs_recipe
 from fplinux_cli.alpine.selection import aport_build_order, bundle_packages, selected_packages
 from fplinux_cli.alpine.signing import signing_key_identity
+from fplinux_cli.artifacts.release import current_release_context
 from fplinux_cli.device_data import inputs as firmware_inputs
 from fplinux_cli.environment.definition import (
     environment_artifact_recipe_digest,
@@ -31,6 +32,7 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
     """Return every currently valid rootfs recipe, or ``None`` if that is unknown."""
     try:
         signing_key = signing_key_identity(cache)
+        release_id = current_release_context().release_id
         environment_source_recipe = environment_recipe_digest()
         environment_state = load_environment_state(cache, environment_source_recipe)
         if environment_state is None:
@@ -68,6 +70,7 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
                             environment_recipe,
                             signing_key,
                             packages,
+                            release_id=release_id,
                             firmware_inputs=selected_firmware,
                             display_brightness=target_config.get("display_brightness"),
                             root_kind=root_kind,
