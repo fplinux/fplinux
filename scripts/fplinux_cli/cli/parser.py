@@ -275,7 +275,7 @@ def create_parser(
         "dependencies", help="preserve exact external build inputs"
     )
     dependency_commands = dependencies_parser.add_subparsers(
-        dest="dependencies_command", required=True, metavar="{create,verify,restore}"
+        dest="dependencies_command", required=True, metavar="{create,verify,restore,export,import}"
     )
     create_snapshot_parser = dependency_commands.add_parser(
         "create", help="save a dependency snapshot outside .cache"
@@ -303,14 +303,35 @@ def create_parser(
     )
     verify_snapshot_parser.add_argument("directory", type=Path, metavar="DIRECTORY")
     restore_snapshot_parser = dependency_commands.add_parser(
-        "restore", help="restore exact inputs and the saved build environment without downloading"
+        "restore", help="restore dependencies from a local snapshot or download release inputs"
     )
-    restore_snapshot_parser.add_argument("directory", type=Path, metavar="DIRECTORY")
+    restore_snapshot_parser.add_argument(
+        "directory",
+        type=Path,
+        nargs="?",
+        metavar="DIRECTORY",
+        help="local snapshot containing inputs and, when saved, the build environment",
+    )
+    restore_snapshot_parser.add_argument(
+        "--release",
+        metavar="ID",
+        help="download this release's dependency inputs; prepare its build environment separately",
+    )
     restore_snapshot_parser.add_argument(
         "--inputs-only",
         action="store_true",
         help="restore inputs for a fresh offline environment build",
     )
+    export_parser = dependency_commands.add_parser(
+        "export", help="split an inputs-only snapshot into checked transport parts"
+    )
+    export_parser.add_argument("directory", type=Path, metavar="SNAPSHOT")
+    export_parser.add_argument("output", type=Path, metavar="OUTPUT")
+    import_parser = dependency_commands.add_parser(
+        "import", help="verify transport parts and extract a dependency snapshot"
+    )
+    import_parser.add_argument("directory", type=Path, metavar="PARTS")
+    import_parser.add_argument("output", type=Path, metavar="OUTPUT")
     commit_message_parser = commands.add_parser("_commit-msg")
     commit_message_parser.add_argument("message_file")
     build_parser = commands.add_parser("build", help="build a target in .cache/out")

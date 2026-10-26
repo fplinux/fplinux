@@ -133,7 +133,7 @@ def command_action(
         action = partial(_setup_action, force=args.force, offline=args.offline)
     elif args.command == "dependencies":
         if args.dependencies_command == "create":
-            from fplinux_cli.cli.dependencies import (  # noqa: PLC0415 -- selected backend.
+            from fplinux_cli.dependencies.workflow import (  # noqa: PLC0415 -- selected backend.
                 create_dependencies,
             )
 
@@ -145,17 +145,42 @@ def command_action(
                 inputs_only=args.inputs_only,
             )
         elif args.dependencies_command == "verify":
-            from fplinux_cli.cli.dependencies import (  # noqa: PLC0415 -- selected backend.
+            from fplinux_cli.dependencies.workflow import (  # noqa: PLC0415 -- selected backend.
                 verify_dependencies,
             )
 
             action = partial(verify_dependencies, args.directory)
-        else:
-            from fplinux_cli.cli.dependencies import (  # noqa: PLC0415 -- selected backend.
+        elif args.dependencies_command == "restore":
+            from fplinux_cli.dependencies.workflow import (  # noqa: PLC0415 -- selected backend.
                 restore_dependencies,
             )
 
-            action = partial(restore_dependencies, args.directory, inputs_only=args.inputs_only)
+            if args.release is not None:
+                if args.directory is not None or args.inputs_only:
+                    fail("restore --release cannot be combined with a directory or --inputs-only")
+                from fplinux_cli.dependencies.releases import (  # noqa: PLC0415 -- public release download.
+                    restore_release,
+                )
+
+                action = partial(restore_release, args.release)
+            else:
+                if args.directory is None:
+                    fail("restore requires a snapshot directory or --release ID")
+                action = partial(
+                    restore_dependencies, args.directory, inputs_only=args.inputs_only
+                )
+        elif args.dependencies_command == "export":
+            from fplinux_cli.dependencies.workflow import (  # noqa: PLC0415 -- selected backend.
+                export_dependencies,
+            )
+
+            action = partial(export_dependencies, args.directory, args.output)
+        else:
+            from fplinux_cli.dependencies.workflow import (  # noqa: PLC0415 -- selected backend.
+                import_dependencies,
+            )
+
+            action = partial(import_dependencies, args.directory, args.output)
     elif args.command == "test":
         from fplinux_cli.quality.testing import run_tests  # noqa: PLC0415 -- selected backend.
 

@@ -12,7 +12,7 @@ from unittest.mock import patch
 import pytest
 from fplinux_cli.dependencies.site_inputs import site_dependency_selection
 from fplinux_cli.dependencies.snapshots import preserve_inputs, publish_snapshot
-from fplinux_cli.cli.dependencies import restore_dependencies
+from fplinux_cli.dependencies.workflow import restore_dependencies
 
 from tests.small.dependencies.snapshot_fixtures import selected_checkout
 
