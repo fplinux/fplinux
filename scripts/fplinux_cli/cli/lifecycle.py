@@ -42,7 +42,7 @@ def _cache_lock_exclusive(args: argparse.Namespace) -> bool | None:
         return False if args.inspect_kind in {"bundle", "footprint"} else None
     if args.command in _EXCLUSIVE_CACHE_COMMANDS or (
         args.command == "ci"
-        and args.ci_command in {"prepare-inputs", "restore-inputs", "site-install"}
+        and args.ci_command in {"prepare-inputs", "restore-inputs", "site-install", "preflight"}
     ):
         return True
     if args.command in _SHARED_CACHE_COMMANDS:

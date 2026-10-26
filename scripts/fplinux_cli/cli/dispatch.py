@@ -209,6 +209,12 @@ def command_action(
         )
 
         action = partial(check_commit_message, args.message_file)
+    elif args.command == "_pre-push":
+        from fplinux_cli.quality.pre_push import (  # noqa: PLC0415 -- selected backend.
+            check_pre_push,
+        )
+
+        action = check_pre_push
     elif args.command == "build":
         from fplinux_cli.build.workflow import build  # noqa: PLC0415 -- selected backend.
 

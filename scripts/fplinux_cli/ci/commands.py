@@ -41,6 +41,10 @@ def run_ci(args: argparse.Namespace) -> None:
         from .inputs import restore_inputs  # noqa: PLC0415 -- selected backend.
 
         restore_inputs(args.directory, snapshot=args.snapshot)
+    elif args.ci_command == "preflight":
+        from .preflight import prepare_push  # noqa: PLC0415 -- explicit preparation.
+
+        prepare_push(args.commit, args.directory)
     elif args.ci_command == "site-install":
         from fplinux_cli.dependencies.site_install import (  # noqa: PLC0415 -- native site runtime.
             install_site,
