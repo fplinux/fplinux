@@ -3,11 +3,16 @@
 
 from __future__ import annotations
 
+import hashlib
+import os
+import shutil
+import tarfile
 import tempfile
 from pathlib import Path
 
 import pytest
 from fplinux_cli.alpine import selection as alpine_state
+from fplinux_cli.alpine.aports import materialize_aport_sources
 from fplinux_cli.manifests import platforms, targets
 
 from tests import ROOT
@@ -49,15 +54,47 @@ class FontSplitTests:
         """Each payload uses srcdir for its license and declares an unversioned data capability."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            source = root / "source"
+            checkout = root / "checkout"
+            aport = checkout / "alpine/aports/fplinux-font-terminus"
+            aport.mkdir(parents=True)
+            shutil.copyfile(
+                ROOT / "alpine/aports/fplinux-font-terminus/APKBUILD", aport / "APKBUILD"
+            )
+            cache = root / "cache"
+            original = (
+                cache
+                / "downloads/sources/aport_terminus_font_4_49_1_tar_gz"
+                / "terminus-font-4.49.1.tar.gz"
+            )
+            original.parent.mkdir(parents=True)
+            license_path = root / "OFL.TXT"
+            license_path.write_bytes(b"fixture font license\n")
+            with tarfile.open(original, "w:gz") as archive:
+                archive.add(license_path, arcname="terminus-font-4.49.1/OFL.TXT")
+            catalog = (
+                ROOT / "tests/host_tool/terminal/fixtures/font-packaging/sources.lock.txt.in"
+            ).read_text()
+            (checkout / "sources.lock.toml").write_text(
+                catalog.replace("@CHECKSUM@", hashlib.sha512(original.read_bytes()).hexdigest())
+            )
+            stage = materialize_aport_sources(
+                "fplinux-font-terminus", checkout, root / "stage", cache=cache
+            )
+            run_process(
+                ["abuild", "-F", "fetch", "verify", "unpack"],
+                name="unpack verified font license original",
+                timeout=30,
+                cwd=stage,
+                env=os.environ | {"SRCDEST": str(root / "native-sources")},
+                check=True,
+            )
+            source = stage / "src"
             package = root / "package"
             child = root / "child"
-            license_path = source / "terminus-font-4.49.1/OFL.TXT"
-            license_path.parent.mkdir(parents=True)
-            license_path.write_bytes(b"fixture font license\n")
             font = package / "usr/share/fplinux/fonts" / filename
             font.parent.mkdir(parents=True)
             font.write_bytes(b"fixture selected PSF\n")
+            font.chmod(0o644)
             other_filename = "ter-u16n.psf" if cell == "6x12" else "ter-u12n.psf"
             other_font = font.parent / other_filename
             other_font.write_bytes(b"fixture other PSF\n")
@@ -65,7 +102,7 @@ class FontSplitTests:
                 [
                     "sh",
                     str(ROOT / "tests/fixtures/font_split.sh"),
-                    str(ROOT / "alpine/aports/fplinux-font-terminus/APKBUILD"),
+                    str(stage / "APKBUILD"),
                     cell,
                     str(source),
                     str(package),
@@ -79,17 +116,14 @@ class FontSplitTests:
             assert not (font.exists())
             assert (other_font.read_bytes()) == (b"fixture other PSF\n")
             assert not ((child / "usr/share/fplinux/fonts" / other_filename).exists())
-            assert ((child / "usr/share/fplinux/fonts" / filename).read_bytes()) == (
-                b"fixture selected PSF\n"
-            )
+            selected_font = child / "usr/share/fplinux/fonts" / filename
+            assert selected_font.read_bytes() == b"fixture selected PSF\n"
+            assert selected_font.stat().st_mode & 0o777 == 0o644
             default = child / "usr/share/fplinux/fonts/default.psf"
             assert default.is_symlink()
             assert (default.read_bytes()) == (b"fixture selected PSF\n")
-            assert (
-                (
-                    child
-                    / "usr/share/licenses"
-                    / f"fplinux-font-terminus-{cell}"
-                    / "Terminus-OFL.txt"
-                ).read_bytes()
-            ) == (b"fixture font license\n")
+            installed_license = (
+                child / "usr/share/licenses" / f"fplinux-font-terminus-{cell}" / "Terminus-OFL.txt"
+            )
+            assert installed_license.read_bytes() == b"fixture font license\n"
+            assert installed_license.stat().st_mode & 0o777 == 0o644

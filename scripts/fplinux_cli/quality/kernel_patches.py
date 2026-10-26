@@ -23,7 +23,7 @@ from fplinux_cli.build.kernel.projection import (
     project_changes,
     write_files,
 )
-from fplinux_cli.build.sources import apply_patches
+from fplinux_cli.build.sources import apply_patches, source_lock_entry
 from fplinux_cli.common import ROOT, fail, load_toml
 from fplinux_cli.manifests.paths import discover_profiles, discover_targets
 from fplinux_cli.manifests.platforms import load_platform
@@ -67,11 +67,10 @@ def linux_contexts(selected: frozenset[str]) -> tuple[LinuxContext, ...]:
             )
             if matches:
                 found.update(matches)
-                contexts.append(
-                    LinuxContext(
-                        target, profile, sources[platform["linux"]["source_lock"]], inputs
-                    )
-                )
+                source = source_lock_entry(sources, platform["linux"]["source_lock"])
+                if source["algorithm"] != "sha256":
+                    fail("Linux source requires a SHA-256 pin")
+                contexts.append(LinuxContext(target, profile, source, inputs))
     if selected - found:
         fail("not a declared Linux patch: " + ", ".join(sorted(selected - found)))
     return tuple(contexts)
@@ -250,14 +249,14 @@ def format_linux_patches(selected: frozenset[str], archives: Path) -> None:
     """Update only selected patches after every consuming context succeeds."""
     contexts = linux_contexts(selected)
     outputs: dict[str, bytes] = {}
-    for digest in sorted({context.source["sha256"] for context in contexts}):
-        matching = [context for context in contexts if context.source["sha256"] == digest]
+    for digest in sorted({context.source["checksum"] for context in contexts}):
+        matching = [context for context in contexts if context.source["checksum"] == digest]
         source = matching[0].source
-        source_name = source["version"]
         paths = {
             name for context in matching for step in context.inputs for name in step.destinations()
         }
-        base = read_base(archives / f"linux-{source_name}.tar.xz", source, paths)
+        archive = archives / Path(source["destination"]).relative_to("downloads")
+        base = read_base(archive, source, paths)
         for context in matching:
             print(f"Linux patch context: {context.target}/{context.profile}")
             for name, contents in format_context(base, context.inputs, selected).items():

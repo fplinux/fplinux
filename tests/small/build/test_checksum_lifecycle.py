@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import shutil
 import subprocess
@@ -48,6 +49,15 @@ class ChecksumAportContext:
             ROOT / "scripts/fplinux_cli/alpine/checksum",
             self.root / "scripts/fplinux_cli/alpine/checksum",
         )
+        (self.root / "sources.lock.toml").write_text("")
+        for relative in (
+            "scripts/fplinux_cli/alpine/aports.py",
+            "scripts/fplinux_cli/alpine/sources.py",
+            "scripts/fplinux_cli/manifests/source_catalog.py",
+        ):
+            destination = self.root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / relative, destination)
 
     def run(self, container_run: Callable[..., None]) -> None:
         """Invoke the checksum workflow with a controlled environment and Kern execution."""
@@ -119,6 +129,39 @@ class ChecksumAportTests:
         assert (checksum_aport.apkbuild.stat().st_mode & 0o777) == (0o640)
         assert (checksum_aport.apkbuild.stat().st_ino) != (inode_before)
         assert (list(checksum_aport.aport.glob(".APKBUILD.*"))) == ([])
+
+    def test_checksum_command_publishes_the_new_local_source_entry(
+        self,
+        checksum_aport: ChecksumAportContext,
+    ) -> None:
+        """The command writes a newly added local pin back into its canonical recipe."""
+        source = checksum_aport.aport / "new-local.c"
+        source.write_bytes(b"int new_local_source;\n")
+        checksum_aport.apkbuild.write_bytes(
+            checksum_aport.apkbuild.read_bytes().replace(
+                b'source="local.c"',
+                b'source="local.c new-local.c"',
+            )
+        )
+        checksum = hashlib.sha512(source.read_bytes()).hexdigest()
+        expected = (
+            (APORT_FILES / "after.APKBUILD")
+            .read_bytes()
+            .replace(
+                b'source="local.c"',
+                b'source="local.c new-local.c"',
+            )
+            .replace(b'"\npackage()', f'{checksum}  new-local.c\n"\npackage()'.encode())
+        )
+
+        def generate(_stage: output.Stage, command: list[str], **_kwargs: object) -> None:
+            generated = checksum_aport.staged_apkbuild(command)
+            assert (generated.parent / "new-local.c").read_bytes() == b"int new_local_source;\n"
+            generated.write_bytes(expected)
+
+        checksum_aport.run(generate)
+
+        assert checksum_aport.apkbuild.read_bytes() == expected
 
     def test_container_shares_downloads_and_keeps_the_stage_private(
         self, checksum_aport: ChecksumAportContext

@@ -1,0 +1,4 @@
+[libusb]
+source = "linux_host_libusb"
+licenses = ["libusb/COPYING"]
+version = "1.0-r0"

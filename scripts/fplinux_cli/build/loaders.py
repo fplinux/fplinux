@@ -23,6 +23,7 @@ from fplinux_cli.build.bootstrap import recipe as bootstrap_recipe
 from fplinux_cli.common import canonical_json_bytes, fail, replace_file_atomically, sha256_bytes
 from fplinux_cli.manifests import loaders as loader_manifest
 from fplinux_cli.manifests.loaders import loader_sources
+from fplinux_cli.manifests.source_catalog import acquire_source
 
 if TYPE_CHECKING:
     from fplinux_cli.manifests.loaders import LoaderSource
@@ -97,9 +98,7 @@ def _cache_hit(recipe: str, output: Path) -> bool:
 
 
 def _extract_source(source: LoaderSource, destination: Path) -> Path:
-    archive = sources_build.fetch(
-        source.url, source.sha256, inputs_build.CACHE / "downloads", source.cache_name
-    )
+    archive = acquire_source(common.ROOT, source.source_lock, inputs_build.CACHE)
     prefix = PurePosixPath(source.archive_prefix)
     with tarfile.open(archive, "r:gz") as stream:
         members = []

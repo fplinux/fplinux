@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-font-terminus
-pkgver=4.49.1
+pkgver=@version:aport_terminus_font_4_49_1_tar_gz@
 pkgrel=0
 pkgdesc="Terminus bitmap fonts for FPLinux applications"
 url="https://terminus-font.sourceforge.net/"
@@ -9,7 +9,9 @@ license="OFL-1.1"
 makedepends_build="python3"
 subpackages="$pkgname-6x12:font_6x12 $pkgname-8x16:font_8x16"
 options="!check"
-source="terminus-font-$pkgver.tar.gz::https://downloads.sourceforge.net/project/terminus-font/terminus-font-4.49/terminus-font-$pkgver.tar.gz"
+source="
+	@source:aport_terminus_font_4_49_1_tar_gz@
+"
 builddir="$srcdir/terminus-font-$pkgver"
 
 build() {
@@ -47,5 +49,4 @@ font_8x16() {
 	_font 8x16 ter-u16n.psf
 }
 sha512sums="
-2e3a99960c459a453b5879bebbebeb653f0a22060177bf75c67bbeb7d32cfe1acce9e74a88fdc42e299b6dc402e0708552487abd26e80e985c7d6059b0d445a8  terminus-font-4.49.1.tar.gz
 "

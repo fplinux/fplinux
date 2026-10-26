@@ -28,6 +28,7 @@ from fplinux_cli.manifests.linux import (
     is_shared_linux_operation,
     linux_declarations,
 )
+from fplinux_cli.manifests.source_catalog import resolve_source_record
 from fplinux_cli.manifests.values import sha256_value
 
 from . import state as linux_state
@@ -103,10 +104,11 @@ def linux_recipe_digest(
     platform: dict[str, Any],
 ) -> str:
     """Hash the pinned Linux release and every ordered projection operation."""
-    version = linux_source.get("version")
-    if not isinstance(version, str) or not version:
-        fail("Linux source version must be a non-empty string")
-    source_digest = sha256_value(linux_source.get("sha256"), "Linux source")
+    source = resolve_source_record(platform["linux"]["source_lock"], linux_source)
+    if source.algorithm != "sha256":
+        fail("Linux source requires a SHA-256 pin")
+    version = source.version
+    source_digest = source.checksum
     manifest = {
         "version": version,
         "sha256": source_digest,

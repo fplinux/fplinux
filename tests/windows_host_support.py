@@ -260,11 +260,6 @@ def archive_files(directory: Path) -> Path:
         destination.write_bytes(payload)
         if relative not in runtime["sha256"]:
             hashes[relative] = hashlib.sha256(payload).hexdigest()
-    license_path = directory / "licenses/windows-driver/License.rtf"
-    license_path.parent.mkdir(parents=True)
-    license_payload = b"{\\rtf1 Synthetic Microsoft license terms.}"
-    license_path.write_bytes(license_payload)
-    hashes["licenses/windows-driver/License.rtf"] = hashlib.sha256(license_payload).hexdigest()
     (directory / "windows-host.json").write_text(
         json.dumps({"host_tools": tools, "sha256": hashes})
     )

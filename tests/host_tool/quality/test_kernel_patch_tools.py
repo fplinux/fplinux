@@ -14,10 +14,13 @@ import pytest
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build.kernel.projection import LinuxInput, file_contents, project_changes
 from fplinux_cli.common import ROOT, sha256_file
+from fplinux_cli.quality import kernel_patches
 from fplinux_cli.quality.kernel_patches import (
+    LinuxContext,
     binding_paths,
     check_linux_changes,
     format_context,
+    format_linux_patches,
     source_diff,
 )
 from fplinux_cli.workspace.capture import WorkspaceFile
@@ -174,10 +177,45 @@ class KernelPatchToolTests:
         step = self.patch(kernel_root, "bad.patch", kernel_base, changed)
         original = step.source.read_bytes()
         archive = self.archive(kernel_root, kernel_base)
-        source = {"version": "fixture", "sha256": sha256_file(archive)}
+        source = {"version": "fixture", "algorithm": "sha256", "checksum": sha256_file(archive)}
         with pytest.raises(SystemExit, match=r"Linux patch needs formatting: bad.patch"):
             check_linux_changes([step], archive, source, kernel_root / "config.patch")
         assert (step.source.read_bytes()) == (original)
+
+    def test_formatter_reads_the_canonical_original_and_declared_archive_name(
+        self,
+        kernel_root: Path,
+        kernel_base: dict[str, WorkspaceFile],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A restored original formats patches without an archive in the retired cache path."""
+        changed = self.changed_source(kernel_base, b" return  7;")
+        step = self.patch(kernel_root, "canonical.patch", kernel_base, changed)
+        original = kernel_root / "downloads/sources/kernel/original-input.tar.xz"
+        original.parent.mkdir(parents=True)
+        self.archive(kernel_root, kernel_base).replace(original)
+        context = LinuxContext(
+            "fixture",
+            "default",
+            {
+                "version": "fixture",
+                "algorithm": "sha256",
+                "checksum": sha256_file(original),
+                "destination": "downloads/sources/kernel/original-input.tar.xz",
+            },
+            (step,),
+        )
+        monkeypatch.setattr(kernel_patches, "ROOT", kernel_root)
+        monkeypatch.setattr(kernel_patches, "linux_contexts", lambda _selected: (context,))
+
+        format_linux_patches(frozenset({step.identity}), kernel_root / "downloads")
+
+        destination = kernel_root / "formatted"
+        list(project_changes(kernel_base, [step], destination))
+        assert (destination / "drivers/example.c").read_bytes() == (
+            FIXTURES / "formatted.c.fixture"
+        ).read_bytes()
+        assert not (kernel_root / "downloads/linux-fixture.tar.xz").exists()
 
     def test_appended_fragment_generates_destination_kconfig_diff(
         self, kernel_root: Path, kernel_base: dict[str, WorkspaceFile]
@@ -188,7 +226,7 @@ class KernelPatchToolTests:
         step = LinuxInput("platform-append", "feature.fragment", "drivers/Kconfig", fragment)
         delta = kernel_root / "config.patch"
         archive = self.archive(kernel_root, kernel_base)
-        source = {"version": "fixture", "sha256": sha256_file(archive)}
+        source = {"version": "fixture", "algorithm": "sha256", "checksum": sha256_file(archive)}
         check_linux_changes([step], archive, source, delta)
         generated = LinuxInput("platform-patch", "config.patch", "", delta)
         destination = kernel_root / "result"

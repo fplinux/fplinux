@@ -12,14 +12,16 @@ import struct
 import subprocess
 import tarfile
 import tempfile
+from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import common
 from fplinux_cli.build import environment as build_env
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
 from fplinux_cli.build import sources as sources_build
+from fplinux_cli.build.runtime import selected_host_tool_recipes
 from fplinux_cli.common import (
     canonical_json_bytes,
     fail,
@@ -31,8 +33,12 @@ from fplinux_cli.common import (
 from fplinux_cli.environment import downloads
 from fplinux_cli.manifests import values as manifest_values
 from fplinux_cli.manifests.platforms import load_platform
+from fplinux_cli.manifests.source_catalog import acquire_source, resolve_source_record
 from fplinux_cli.manifests.values import relative_value, sha256_value
 from fplinux_cli.reporting.run import run_entrypoint
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 _COMPILER_ENVIRONMENT = (
     "AR",
@@ -100,12 +106,7 @@ def build_make_host_tool(
 ) -> Path:
     """Build one pinned make-archive host recipe."""
     source_lock = sources_build.source_lock_entry(sources, recipe["source_lock"])
-    archive = sources_build.fetch(
-        source_lock.get("archive_url"),
-        source_lock.get("archive_sha256"),
-        inputs_build.CACHE / "downloads",
-        recipe["cache_name"],
-    )
+    archive = acquire_source(common.ROOT, recipe["source_lock"], inputs_build.CACHE)
     commit = source_lock.get("commit")
     hashes = source_lock.get("files")
     if not isinstance(commit, str) or not commit:
@@ -239,7 +240,13 @@ def _host_tool_recipe(sources: dict[str, Any], recipe: dict[str, Any]) -> str:
             local_files[relative] = sha256_file(
                 inputs_build.require_file(inputs_build.root_source(relative))
             )
-        upstream: dict[str, Any] = {"commit": commit, "members": members}
+        upstream: dict[str, Any] = {
+            "original": asdict(
+                resolve_source_record(recipe["source_lock"], sources.get(recipe["source_lock"]))
+            ),
+            "commit": commit,
+            "members": members,
+        }
     elif recipe["type"] == "cc-libusb":
         for relative in (
             recipe["source"],
@@ -316,17 +323,16 @@ def _publish_host_tool(slot: Path, recipe_digest: str, binary: Path) -> None:
 
 
 def build_host_tools(
-    sources: dict[str, Any], platform: dict[str, Any], work: Path, *, tool: str | None = None
+    sources: dict[str, Any], platform: dict[str, Any], work: Path, *, tools: Collection[str]
 ) -> dict[str, Path]:
     """Build the requested typed platform host-tool recipes."""
+    recipes = selected_host_tool_recipes(platform, tools)
     source_work = work / "host-build"
     output = work / "host"
     source_work.mkdir(parents=True, exist_ok=True)
     output.mkdir(parents=True, exist_ok=True)
     result: dict[str, Path] = {}
-    for recipe in platform["host"]["tools"]:
-        if tool is not None and recipe["name"] != tool:
-            continue
+    for recipe in recipes:
         recipe_digest = _host_tool_recipe(sources, recipe)
         cache_name = relative_value(recipe["name"], "host tool name")
         slot = inputs_build.CACHE / "host-tools" / cache_name
@@ -360,7 +366,7 @@ def main() -> None:
         fail(f"platform {args.platform} does not declare host tool {args.tool}")
     sources = common.load_toml(common.ROOT / "sources.lock.toml")
     with tempfile.TemporaryDirectory(prefix="fplinux-host-tool-") as temporary:
-        tools = build_host_tools(sources, platform, Path(temporary), tool=args.tool)
+        tools = build_host_tools(sources, platform, Path(temporary), tools=(args.tool,))
         destination = inputs_build.OUTPUT / args.tool
         shutil.copyfile(tools[args.tool], destination)
         destination.chmod(0o755)

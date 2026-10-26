@@ -1,0 +1,6 @@
+[llvm_mingw]
+source = "windows_host_llvm_mingw"
+directory = "toolchain"
+
+[python]
+source = "windows_host_python"

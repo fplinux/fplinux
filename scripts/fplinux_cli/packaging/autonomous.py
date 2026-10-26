@@ -130,8 +130,8 @@ def _linux_ecc_sources(platform: str, *, offline: bool) -> dict[str, bytes]:
         extract_host_members,
     )
     from fplinux_cli.build.sources import source_lock_entry  # noqa: PLC0415
-    from fplinux_cli.environment.downloads import download_locked_file  # noqa: PLC0415
     from fplinux_cli.manifests.platforms import load_platform  # noqa: PLC0415
+    from fplinux_cli.manifests.source_catalog import acquire_source  # noqa: PLC0415
 
     recipe = next(
         item for item in load_platform(platform)["host"]["tools"] if item["name"] == NAND_ECC_TOOL
@@ -139,12 +139,7 @@ def _linux_ecc_sources(platform: str, *, offline: bool) -> dict[str, bytes]:
     sources = common.load_toml(common.ROOT / "sources.lock.toml")
     lock = source_lock_entry(sources, recipe["source_lock"])
     cache = common.ROOT / ".cache"
-    archive = download_locked_file(
-        lock["archive_url"],
-        lock["archive_sha256"],
-        cache / "downloads" / recipe["cache_name"],
-        offline=offline,
-    )
+    archive = acquire_source(common.ROOT, recipe["source_lock"], cache, offline=offline)
     payload = io.BytesIO()
     with tempfile.TemporaryDirectory(dir=cache, prefix=".autonomous-ecc-source-") as temporary:
         source = Path(temporary) / recipe["source_directory"]
@@ -186,7 +181,7 @@ def autonomous_payload(
         )
 
         dependencies = prepare_windows_host(
-            cache=common.ROOT / ".cache", offline=offline, nand_ecc=has_ecc
+            cache=common.ROOT / ".cache", offline=offline, platform=platform, nand_ecc=has_ecc
         )
         dependencies.update(prepare_windows_driver(cache=common.ROOT / ".cache", offline=offline))
         for relative, source in dependencies.items():

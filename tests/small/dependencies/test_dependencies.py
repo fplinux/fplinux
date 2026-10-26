@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
-from fplinux_cli.cli.dependencies import create_dependencies, restore_dependencies
 from fplinux_cli.dependencies import environment_archive
 from fplinux_cli.dependencies.inputs import DependencyInput
 from fplinux_cli.dependencies.snapshots import (
@@ -22,6 +21,7 @@ from fplinux_cli.dependencies.snapshots import (
     publish_snapshot,
     read_snapshot,
 )
+from fplinux_cli.cli.dependencies import create_dependencies, restore_dependencies
 from fplinux_cli.environment.definition import environment_recipe_digest
 from fplinux_cli.environment.state import EnvironmentState
 from fplinux_cli.reporting.run import RunReporter

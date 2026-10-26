@@ -46,27 +46,35 @@ class SharedLinuxTests:
             (root / relative).write_bytes(b"/* fixture overlay */\n")
         platform_path = root / "platforms/soc/platform.toml"
         with platform_path.open("a") as manifest:
-            manifest.write('\n[bootstrap]\nbackend = "sc9820e"\n[host]\ntools = []\n')
+            manifest.write(
+                '\n[bootstrap]\nbackend = "sc9820e"\n[host]\ntools = []\nruntime_tools = {}\n'
+            )
         source_lock = root / "sources.lock.toml"
         source_lock.write_text(
-            '[linux]\nversion = "test"\nurl = "https://example.invalid/linux.tar.xz"\n'
-            f'sha256 = "{linux_source.sources["linux"]["sha256"]}"\n'
+            '[linux]\nversion = "test"\nname = "linux-test.tar.xz"\n'
+            'url = "https://example.invalid/linux.tar.xz"\nalgorithm = "sha256"\n'
+            f'checksum = "{linux_source.sources["linux"]["checksum"]}"\n'
             + (ROOT / "tests/fixtures/sc9820e-manifest/sources.lock.toml").read_text()
+            + (ROOT / "tests/fixtures/linux-source/snapshot-sources.lock.toml").read_text()
         )
+        alpine_lock = root / "alpine.lock.toml"
+        alpine_lock.write_text('[minirootfs]\nsource = "alpine_target"\n')
         with (root / "targets/alpha/target.toml").open("a") as manifest:
             manifest.write(
                 '\n[loader.build]\nfdl1_source = "chipram"\n'
                 'fdl2_source = "u_boot"\nsml_source = "trusted_firmware"\n'
             )
         selected = discover_linux_targets(
-            root, linux_source.sources, linux_source.sources["linux"]["sha256"]
+            root, linux_source.sources, linux_source.sources["linux"]["checksum"]
         )[0]
         selected.config["device_data"] = {"groups": {}}
         selected.config["linux"]["root"] = {"kind": "initramfs"}
+        selected.config["uboot"] = {"kind": "none"}
         selected_files = [
             (path.relative_to(root).as_posix(), path)
             for path in (
                 source_lock,
+                alpine_lock,
                 platform_path,
                 root / "targets/alpha/target.toml",
                 root / "targets/alpha/driver.c",
@@ -297,7 +305,7 @@ class SharedLinuxTests:
         assert (source / "arch/other/boot/dts/fplinux-delta-identity.dtsi").is_file()
         with linux_source.archive.open("ab") as archive:
             archive.write(b"\0")
-        linux_source.sources["linux"]["sha256"] = common.sha256_file(linux_source.archive)
+        linux_source.sources["linux"]["checksum"] = common.sha256_file(linux_source.archive)
         changed, _ = linux_source.prepare("alpha")
         assert (changed) != (source)
         assert (source / "drivers/alpha.c").is_file()

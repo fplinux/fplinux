@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-xkb
-pkgver=2.48
+pkgver=@version:aport_xkeyboard_config_2_48_tar_xz@
 pkgrel=0
 pkgdesc="US keyboard layout data for FPLinux applications"
 url="https://gitlab.freedesktop.org/xkeyboard-config/xkeyboard-config"
@@ -8,7 +8,7 @@ arch="noarch"
 license="HPND AND HPND-sell-variant AND X11 AND X11-distribute-modifications-variant AND MIT AND MIT-open-group AND xkeyboard-config-Zinoviev"
 options="!check"
 source="
-	https://www.x.org/releases/individual/data/xkeyboard-config/xkeyboard-config-$pkgver.tar.xz
+	@source:aport_xkeyboard_config_2_48_tar_xz@
 	fplinux
 	fplinux.rules
 "
@@ -37,7 +37,6 @@ package() {
 		"$pkgdir/usr/share/licenses/$pkgname/COPYING"
 }
 sha512sums="
-2c24f9cca97b8863ff2e71fc3780e9c3e22e4486c80d45022e2208d559bdb40824bdb8a4037e0d5690900b6e080ddef4eacfc8bff843e04ba5ab86940f1fb6ea  xkeyboard-config-2.48.tar.xz
 82facea83a5f6b6b6fccb9c42b5e7eff92c26689456f5d53d95171092c6874d2f32ea3f5fcda35d162f937e1e503afe468016efa86a9927d0f1430802d010294  fplinux
 c279556f90a46362ac753016dbef1b274acfb4d132f44e5ac102ce84c694fdbec67a40f8c3503ac16721daf6dab918f926419226866de92894bcec99047579ad  fplinux.rules
 "

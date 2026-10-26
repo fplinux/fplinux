@@ -1,7 +1,0 @@
-#define OPT_M64
-#define WDF_VER 1011
-#define COINSTALLER_DIR "wdf"
-#define X64_DIR "x64"
-#define WDK_DIR ".."
-#define ENABLE_LOGGING 1
-#define _GNU_SOURCE 1

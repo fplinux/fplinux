@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-xkb-ru
-pkgver=2.48
+pkgver=@version:aport_xkeyboard_config_2_48_tar_xz@
 pkgrel=0
 pkgdesc="Russian keyboard layout data for FPLinux applications"
 url="https://gitlab.freedesktop.org/xkeyboard-config/xkeyboard-config"
@@ -8,7 +8,9 @@ arch="noarch"
 license="HPND AND HPND-sell-variant AND X11 AND X11-distribute-modifications-variant AND MIT AND MIT-open-group AND xkeyboard-config-Zinoviev"
 depends="fplinux-xkb"
 options="!check"
-source="https://www.x.org/releases/individual/data/xkeyboard-config/xkeyboard-config-$pkgver.tar.xz"
+source="
+	@source:aport_xkeyboard_config_2_48_tar_xz@
+"
 builddir="$srcdir/xkeyboard-config-$pkgver"
 
 package() {
@@ -21,5 +23,4 @@ package() {
 		"$pkgdir/usr/share/licenses/$pkgname/COPYING"
 }
 sha512sums="
-2c24f9cca97b8863ff2e71fc3780e9c3e22e4486c80d45022e2208d559bdb40824bdb8a4037e0d5690900b6e080ddef4eacfc8bff843e04ba5ab86940f1fb6ea  xkeyboard-config-2.48.tar.xz
 "

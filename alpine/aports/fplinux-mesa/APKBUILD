@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-mesa
-pkgver=26.2.5
+pkgver=@version:aport_mesa_26_2_5_tar_xz@
 pkgrel=0
 pkgdesc="Panfrost EGL, OpenGL and OpenGL ES libraries for FPLinux"
 url="https://www.mesa3d.org"
@@ -12,7 +12,7 @@ makedepends_host="musl-dev linux-headers libstdc++-dev eudev-dev fplinux-expat-d
 subpackages="$pkgname-dev $pkgname-gbm:gbm"
 options="!check"
 source="
-	https://archive.mesa3d.org/mesa-$pkgver.tar.xz
+	@source:aport_mesa_26_2_5_tar_xz@
 	neon-clang.patch
 	afbc-policy.patch
 	NOTICE
@@ -85,7 +85,6 @@ gbm() {
 }
 
 sha512sums="
-08c7d7ea426ddfb0f7bc51b06e18c363a4d31cf1a8b203828bb455eda0189e41d2215eb9f627585ed11e0d0f231a6a8c9f0c7176238760cd76b62e20c35ccd6a  mesa-26.2.5.tar.xz
 1c83949f8904fa0d4cb189fc9bc5dd8910e6fd17009b95d46927713f228f4f81bf4dc74cc326bfd6752d969416e259d542e95e7e61b1aa11ca88acf5e8fd6988  neon-clang.patch
 8b8d9de7cbd4ace3626abb17ab1ec9498f02233e7a5d3e4aa931be8f326e2dd2c35d6c6c89e7cb6592d2b7a0e79e0f3c79b6fce20f386520dbb1250366d11f0c  afbc-policy.patch
 8e47e57850393eb2be96a3fccd04e07092a61b42d94a60b3c2193de51ba95276d6553febb06b5075c6b311ef8f2a64d25e30920478e7109f28628bedb6740428  NOTICE

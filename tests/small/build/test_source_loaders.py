@@ -125,8 +125,9 @@ def loader_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> LoaderCh
     (source_root / "bl31").mkdir()
     (source_root / "bl31/platform.mk").write_bytes(b"board port\n")
     sources: dict[str, Any] = {}
+    catalog_records = []
     for name in ("chipram", "u_boot", "trusted_firmware"):
-        archive = tmp_path / f"cache/downloads/loaders/{name}.tar.gz"
+        archive = tmp_path / f"cache/downloads/sources/{name}/{name}.tar.gz"
         archive.parent.mkdir(parents=True, exist_ok=True)
         with tarfile.open(archive, "w:gz") as stream:
             for relative, data in (
@@ -138,10 +139,19 @@ def loader_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> LoaderCh
                 member.size = len(data)
                 stream.addfile(member, io.BytesIO(data))
         sources[name] = {
-            "archive_url": f"https://example.invalid/{name}.tar.gz",
-            "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+            "version": "test",
+            "name": f"{name}.tar.gz",
+            "url": f"https://example.invalid/{name}.tar.gz",
+            "algorithm": "sha256",
+            "checksum": hashlib.sha256(archive.read_bytes()).hexdigest(),
             "archive_prefix": f"{name}-source",
         }
+        catalog_records.append(
+            f'[{name}]\nversion = "test"\nname = "{name}.tar.gz"\n'
+            f'url = "https://example.invalid/{name}.tar.gz"\nalgorithm = "sha256"\n'
+            f'checksum = "{sources[name]["checksum"]}"\narchive_prefix = "{name}-source"\n'
+        )
+    (tmp_path / "sources.lock.toml").write_text("\n".join(catalog_records), encoding="utf-8")
     config: dict[str, Any] = {
         "loader": {
             "fdl1_load": 0x5000,

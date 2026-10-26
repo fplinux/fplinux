@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+[uboot_fixture]
+version = "2026.07"
+name = "source.tar.bz2"
+url = "https://example.invalid/u-boot.tar.bz2"
+algorithm = "sha256"
+checksum = "{checksum}"
+bytes = {size}
+archive_prefix = "u-boot-2026.07"
+license = "GPL-2.0-only"

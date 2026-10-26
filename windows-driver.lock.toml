@@ -1,14 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0-only
 [libwdi]
-version = "1.5.1"
-url = "https://codeload.github.com/pbatard/libwdi/tar.gz/refs/tags/v1.5.1"
-sha256 = "a695e93db0977dfdc5c6a99a4ea91b22f9027547d0177b2a0f3075078643c929"
-size = 289593
-name = "libwdi-1.5.1.tar.gz"
+source = "windows_driver_libwdi"
 directory = "libwdi-1.5.1"
-
-[wdf]
-version = "1.11"
-url = "https://go.microsoft.com/fwlink/p/?LinkID=253170"
-sha256 = "29314207814ce9d5d73695f7e9239539cf37c79e750b9d5ea5a5ef5487a583d6"
-size = 31318016
-name = "wdfcoinstaller.msi"

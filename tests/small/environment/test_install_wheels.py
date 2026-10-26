@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import tomllib
 import zipfile
 from pathlib import Path
 
@@ -27,12 +29,17 @@ def wheel_inputs(tmp_path: Path) -> tuple[Path, Path, Path]:
             "quality_fixture-1.0.dist-info/METADATA",
             (_FIXTURES / "METADATA").read_bytes(),
         )
-    lock = tmp_path / "environment.lock.toml"
+    lock = tmp_path / "environment-inputs.json"
     lock.write_text(
-        (_FIXTURES / "environment.lock.toml.in.fixture")
-        .read_text()
-        .format(
-            sha256=hashlib.sha256(archive.read_bytes()).hexdigest(), size=archive.stat().st_size
+        json.dumps(
+            tomllib.loads(
+                (_FIXTURES / "environment.lock.toml.in.fixture")
+                .read_text()
+                .format(
+                    sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
+                    size=archive.stat().st_size,
+                )
+            )
         )
     )
     return lock, inputs, tmp_path / "python"
@@ -56,12 +63,9 @@ def test_mismatched_wheel_is_rejected_before_extraction(
 ) -> None:
     """An archive that does not meet its declaration cannot install payload."""
     lock, inputs, destination = wheel_inputs
-    lines = lock.read_text().splitlines()
-    replacement = f'sha256 = "{"0" * 64}"' if mismatch == "sha256" else "bytes = 1"
-    lock.write_text(
-        "\n".join(replacement if line.startswith(f"{mismatch} = ") else line for line in lines)
-        + "\n"
-    )
+    document = json.loads(lock.read_text())
+    document["input"][0][mismatch] = "0" * 64 if mismatch == "sha256" else 1
+    lock.write_text(json.dumps(document))
     with pytest.raises(SystemExit, match=r"wheel (SHA-256|size) mismatch: environment:example"):
         wheel_installer.install_wheels(lock, inputs, destination)
     assert not list(destination.iterdir())

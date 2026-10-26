@@ -4,18 +4,18 @@
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
 import sysconfig
 import tempfile
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
 
 @dataclass(frozen=True)
@@ -120,18 +120,41 @@ def _install_python(lock: Path, inputs: Path, resources: Path) -> None:
     subprocess.run([sys.executable, "-B", "-m", "pytest", "--version"], check=True)
 
 
+def install_node_runtime(node_archive: Path, npm_archive: Path, destination: Path) -> None:
+    """Install one pinned Node archive with the npm original selected by its consumer."""
+    _extract_archive(node_archive, destination, strip_components=1)
+    npm_root = destination / "lib/node_modules/npm"
+    shutil.rmtree(npm_root)
+    _extract_archive(npm_archive, npm_root, strip_components=1)
+    for executable, script in (("npm", "npm-cli.js"), ("npx", "npx-cli.js")):
+        link = destination / "bin" / executable
+        link.unlink(missing_ok=True)
+        link.symlink_to(f"../lib/node_modules/npm/bin/{script}")
+
+
+def populate_npm_cache(npm: Path, cache: Path, archives: Sequence[Path]) -> None:
+    """Import verified registry originals through npm's supported offline cache boundary."""
+    for archive in archives:
+        subprocess.run(
+            [
+                npm.with_name("node"),
+                npm,
+                "cache",
+                "add",
+                "--offline",
+                "--ignore-scripts",
+                "--cache",
+                cache,
+                archive,
+            ],
+            check=True,
+        )
+
+
 def _install_node(tools: Mapping[str, ToolInput], resources: Path, temporary: Path) -> None:
     node = tools["node"]
     npm = tools["npm"]
-    node_root = Path("/opt/quality/node")
-    _extract_archive(node.archive, node_root, strip_components=1)
-    npm_root = node_root / "lib/node_modules/npm"
-    shutil.rmtree(npm_root)
-    _extract_archive(npm.archive, npm_root, strip_components=1)
-    for executable, script in (("npm", "npm-cli.js"), ("npx", "npx-cli.js")):
-        link = node_root / "bin" / executable
-        link.unlink(missing_ok=True)
-        link.symlink_to(f"../lib/node_modules/npm/bin/{script}")
+    install_node_runtime(node.archive, npm.archive, Path("/opt/quality/node"))
     npm_cache = temporary / "npm-cache"
     actual_node = subprocess.check_output(["node", "--version"], text=True).strip()
     actual_npm = subprocess.check_output(
@@ -144,20 +167,9 @@ def _install_node(tools: Mapping[str, ToolInput], resources: Path, temporary: Pa
     node_tools = Path("/opt/quality/node-tools")
     for filename in ("package.json", "package-lock.json"):
         _install_file(resources / filename, node_tools / filename)
-    for archive in sorted((resources / "npm").glob("*.tgz")):
-        subprocess.run(
-            [
-                "npm",
-                "cache",
-                "add",
-                "--offline",
-                "--ignore-scripts",
-                "--cache",
-                npm_cache,
-                archive,
-            ],
-            check=True,
-        )
+    populate_npm_cache(
+        Path("/opt/quality/node/bin/npm"), npm_cache, sorted((resources / "npm").glob("*.tgz"))
+    )
     subprocess.run(
         [
             "npm",
@@ -366,8 +378,9 @@ def _install_libtsm(tool: ToolInput, resources: Path, temporary: Path) -> None:
 def _install_quality_sources(resources: Path, destination: Path) -> None:
     """Install the captured source inputs consumed by offline quality tools."""
     shutil.copytree(resources / "quality/spreadtrum-flash", destination / "spreadtrum-flash")
-    for source in sorted((resources / "quality/ui-fonts").iterdir()):
-        _install_file(source, destination / "ui-fonts" / source.name)
+    for name in ("ui-fonts", "ui-icons"):
+        for source in sorted((resources / "quality" / name).iterdir()):
+            _install_file(source, destination / name / source.name)
 
 
 def _install_terminal_font(resources: Path, temporary: Path, destination: Path) -> None:
@@ -376,7 +389,7 @@ def _install_terminal_font(resources: Path, temporary: Path, destination: Path) 
     source.mkdir()
     for archive in sorted((resources / "quality/terminus").iterdir()):
         _extract_archive(archive, source)
-    aport = resources / "alpine/aports/fplinux-font-terminus/APKBUILD"
+    aport = resources / "quality/terminus-aport/APKBUILD"
     subprocess.run(
         [
             "sh",
@@ -431,8 +444,7 @@ def main() -> None:
     parser.add_argument("--recipe", required=True)
     parser.add_argument("--generation", required=True)
     args = parser.parse_args()
-    with args.lock.open("rb") as stream:
-        declarations = tomllib.load(stream)
+    declarations = json.loads(args.lock.read_text())
     tools = _tool_inputs(declarations, args.inputs)
     _prepare_system(declarations)
     _install_python(args.lock, args.inputs, args.resources)

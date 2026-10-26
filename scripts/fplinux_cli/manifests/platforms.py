@@ -81,7 +81,6 @@ def validate_host_tool(value: object, index: int) -> dict[str, Any]:
                 "type",
                 "name",
                 "source_lock",
-                "cache_name",
                 "archive_prefix",
                 "source_directory",
                 "binary",
@@ -93,7 +92,7 @@ def validate_host_tool(value: object, index: int) -> dict[str, Any]:
             },
             name,
         )
-        for key in ("name", "source_lock", "cache_name", "archive_prefix", "binary"):
+        for key in ("name", "source_lock", "archive_prefix", "binary"):
             nonempty_string(recipe.get(key), f"{name} {key}")
         if recipe.get("link") != "static-libusb":
             fail(f"{name} link must be static-libusb")
@@ -257,7 +256,6 @@ def _bootstrap(value: object) -> dict[str, Any]:
         {
             "backend",
             "vendor_source_lock",
-            "vendor_cache_name",
             "archive_prefix",
             "source_destination",
             "vendor_destination",
@@ -279,7 +277,7 @@ def _bootstrap(value: object) -> dict[str, Any]:
         },
         "platform bootstrap",
     )
-    for key in ("vendor_source_lock", "vendor_cache_name", "archive_prefix", "safety_target"):
+    for key in ("vendor_source_lock", "archive_prefix", "safety_target"):
         nonempty_string(bootstrap.get(key), f"platform bootstrap {key}")
     for key in ("source_destination", "vendor_destination", "output_destination", "pack_reloc"):
         relative_value(bootstrap.get(key), f"platform bootstrap {key}")

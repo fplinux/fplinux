@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-font-sources-fixture
+pkgver=1
+pkgrel=0
+pkgdesc="Local font source fixture"
+url="https://example.invalid/fonts"
+arch="noarch"
+license="OFL-1.1"
+options="!check"
+source="
+	face.ttf
+	fplinux-font-sources.json
+"
+builddir="$srcdir"

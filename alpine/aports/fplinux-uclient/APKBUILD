@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-uclient
-pkgver=20260607
+pkgver=@version:aport_uclient_daad21fa2c17cae54d37149bf27bb3dd78e50a3f_tar_gz@
 pkgrel=0
 pkgdesc="Small HTTP and HTTPS downloader using Mbed TLS"
 url="https://git.openwrt.org/project/uclient.git"
@@ -10,20 +10,20 @@ depends="ca-certificates-bundle"
 makedepends_build="clang22 lld22 llvm22 cmake pkgconf samurai"
 makedepends_host="json-c-dev fplinux-mbedtls-static-dev musl-dev"
 options="!check"
-_uclient_commit=daad21fa2c17cae54d37149bf27bb3dd78e50a3f # gitleaks:allow -- Public source revision.
-_libubox_commit=7dd127841e82eb1cfb61185da37dde7b9bd9ba6d
-_ustream_commit=99f1c0db5a729f615bc5114b3b52fd8ac8083f34
+_uclient_directory=@archive_prefix:aport_uclient_daad21fa2c17cae54d37149bf27bb3dd78e50a3f_tar_gz@
+_libubox_directory=@archive_prefix:libubox@
+_ustream_directory=@archive_prefix:aport_ustream_ssl_99f1c0db5a729f615bc5114b3b52fd8ac8083f34_tar_gz@
 source="
-	uclient-$_uclient_commit.tar.gz::https://github.com/openwrt/uclient/archive/$_uclient_commit.tar.gz
-	libubox-$_libubox_commit.tar.gz::https://github.com/openwrt/libubox/archive/$_libubox_commit.tar.gz
-	ustream-ssl-$_ustream_commit.tar.gz::https://github.com/openwrt/ustream-ssl/archive/$_ustream_commit.tar.gz
+	@source:aport_uclient_daad21fa2c17cae54d37149bf27bb3dd78e50a3f_tar_gz@
+	@source:libubox@
+	@source:aport_ustream_ssl_99f1c0db5a729f615bc5114b3b52fd8ac8083f34_tar_gz@
 	0001-ustream-static-mbedtls.diff
-	"
+"
 builddir="$srcdir"
 
 prepare() {
 	default_prepare
-	patch -d "$srcdir/ustream-ssl-$_ustream_commit" -p1 \
+	patch -d "$srcdir/$_ustream_directory" -p1 \
 		<"$srcdir/0001-ustream-static-mbedtls.diff"
 }
 
@@ -55,14 +55,14 @@ _build_component() {
 build() {
 	: "${CC:?missing target CC}" \
 		"${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
-	_build_component "libubox-$_libubox_commit" \
+	_build_component "$_libubox_directory" \
 		-DBUILD_LUA=OFF -DBUILD_EXAMPLES=OFF
-	_build_component "ustream-ssl-$_ustream_commit" -DMBEDTLS=ON \
+	_build_component "$_ustream_directory" -DMBEDTLS=ON \
 		-DCMAKE_C_FLAGS="$CPPFLAGS $CFLAGS -ffile-prefix-map=$srcdir=. -I$CBUILDROOT/usr/include/fplinux-mbedtls-static" \
 		-Dmbedtls_library="$CBUILDROOT/usr/lib/fplinux-mbedtls-static/libmbedtls.a" \
 		-Dmbedx509_library="$CBUILDROOT/usr/lib/fplinux-mbedtls-static/libmbedx509.a" \
 		-Dmbedcrypto_library:STRING="$CBUILDROOT/usr/lib/fplinux-mbedtls-static/libmbedcrypto.a;$CBUILDROOT/usr/lib/fplinux-mbedtls-static/libeverest.a;$CBUILDROOT/usr/lib/fplinux-mbedtls-static/libp256m.a;pthread"
-	_build_component "uclient-$_uclient_commit" -DBUILD_UCODE=OFF
+	_build_component "$_uclient_directory" -DBUILD_UCODE=OFF
 }
 
 package() {
@@ -81,15 +81,12 @@ package() {
 	# The upstream projects keep ISC notices in their source headers.
 	local component
 	mkdir -p "$pkgdir/usr/share/licenses/$pkgname"
-	for component in "uclient-$_uclient_commit" "libubox-$_libubox_commit" \
-		"ustream-ssl-$_ustream_commit"; do
+	for component in "$_uclient_directory" "$_libubox_directory" \
+		"$_ustream_directory"; do
 		sed -n '/Copyright/,/\*\//p' "$srcdir/$component/"*.c "$srcdir/$component/"*.h \
 			>"$pkgdir/usr/share/licenses/$pkgname/$component.txt"
 	done
 }
 sha512sums="
-c3f8bae4bf331fe8baaf2d071aac054c677f612880b2c0d5bc641a9776354ef4b20750c83a35aef84a5d14c59e5662df85be7a6a9c38dc2d4bacce8b607324f7  uclient-daad21fa2c17cae54d37149bf27bb3dd78e50a3f.tar.gz
-fec5004aad55b3fa922c88b512431e8e2f4085bbcc9d9f232501dcf405832c8cbc9b8ecc79efcaf6413416e4a3b9f4e8f0a0828e3641c42c5436a703cb23333b  libubox-7dd127841e82eb1cfb61185da37dde7b9bd9ba6d.tar.gz
-ebddae51ee1ba23fb01f1dac41bdb4aa5f351092fbafcaf569bad7cf648242979fcc00a83ef52bb9bf57de2fc9785e8d55bda8532f933384b60ac6327be17dc7  ustream-ssl-99f1c0db5a729f615bc5114b3b52fd8ac8083f34.tar.gz
 fb24955c80f395e29bd96b46e85c63ff86a0e35a515b622d07596209eafa50a40bd6dc10376e77e0613e00ab9a9ff9b6387e9e1050bdf6266013aa954a2f853b  0001-ustream-static-mbedtls.diff
 "

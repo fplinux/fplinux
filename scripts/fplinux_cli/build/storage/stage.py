@@ -14,11 +14,11 @@ from fplinux_cli import common
 from fplinux_cli.alpine import rootfs_state as alpine_state
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
-from fplinux_cli.build import sources as sources_build
 from fplinux_cli.build.device_tree import DeviceTreeError
 from fplinux_cli.build.identity import uboot_identity_dtsi, uboot_identity_dtsi_name
 from fplinux_cli.common import fail
 from fplinux_cli.manifests.platforms import load_platform
+from fplinux_cli.manifests.source_catalog import resolve_source
 from fplinux_cli.manifests.values import sha256_value
 
 from . import layout as profile_layout
@@ -37,12 +37,7 @@ def build_profile_uboot(
     if config["kind"] != "full":
         fail(f"unsupported U-Boot profile kind: {config['kind']}")
     lock = config["lock"]
-    archive = sources_build.fetch(
-        lock["archive_url"],
-        lock["archive_sha256"],
-        inputs_build.CACHE / "downloads/uboot",
-        "source.tar.bz2",
-    )
+    archive = resolve_source(common.ROOT, lock["source_id"]).acquire(inputs_build.CACHE)
     environment_recipe = sha256_value(
         os.environ.get("FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE"),
         "environment recipe",

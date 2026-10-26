@@ -397,6 +397,7 @@ class NewTargetDeviceTreeTests:
             )
             shutil.copytree(ROOT / "platforms/ums9117/loader", platform_directory / "loader")
             shutil.copytree(ROOT / "profiles", root / "profiles")
+            shutil.copy2(ROOT / "sources.lock.toml", root)
             (root / "targets").mkdir()
             with (
                 mock.patch.object(common, "ROOT", root),

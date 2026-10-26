@@ -8,9 +8,7 @@ community = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/armv7"
 main = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/armv7"
 
 [minirootfs]
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/armv7/alpine-minirootfs-3.24.2-armv7.tar.gz"
-sha256 = "5552f1ef2398cee46ef2cf733f8f1258f39a77ad065dfd47282fc0df9fe1976c"
-bytes = 3180242
+source = "alpine_target"
 
 [runtime]
 packages = [

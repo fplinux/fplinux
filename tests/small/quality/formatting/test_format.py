@@ -3,11 +3,17 @@
 
 from __future__ import annotations
 
+import hashlib
+from functools import partial
 from pathlib import Path
+from unittest import mock
 
 import pytest
+from fplinux_cli.manifests.source_catalog import source_build_metadata
 from fplinux_cli.quality.formatting import command as format_module
 from fplinux_cli.quality.formatting.command import format_snapshot, resolve_format_paths
+from fplinux_cli.quality.kernel_patches import LinuxContext
+from fplinux_cli.reporting import run as reporting
 from fplinux_cli.workspace.capture import WorkspaceSnapshot, workspace_snapshot
 
 
@@ -115,6 +121,62 @@ class FormatContainerBoundaryTests:
             }
         )
         assert ("--read-only") in (command)
+
+    def test_patch_formatting_reuses_only_the_canonical_original_cache(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Acquisition verifies the restored original before a network-free formatter stage."""
+        patch = tmp_path / "selected.patch"
+        patch.write_bytes(b"patch fixture\n")
+        original = tmp_path / ".cache/downloads/sources/kernel/canonical.tar.xz"
+        original.parent.mkdir(parents=True)
+        original.write_bytes(b"original archive\n")
+        source = source_build_metadata(
+            "kernel",
+            {
+                "version": "fixture",
+                "name": "canonical.tar.xz",
+                "url": "https://example.invalid/canonical.tar.xz",
+                "algorithm": "sha256",
+                "checksum": hashlib.sha256(b"original archive\n").hexdigest(),
+            },
+        )
+        context = LinuxContext("fixture", "default", source, ())
+        inventory = _inventory(tmp_path, "selected.patch")
+        snapshot = workspace_snapshot(inventory)
+        commands: list[list[str]] = []
+
+        def record_command(_stage: reporting.Stage, command: list[str], **_kwargs: object) -> None:
+            commands.append(command)
+
+        monkeypatch.setattr(format_module, "ROOT", tmp_path)
+        monkeypatch.setattr(
+            format_module,
+            "resolve_format_paths",
+            partial(resolve_format_paths, root=tmp_path, inventory=inventory),
+        )
+        monkeypatch.setattr(reporting, "ROOT", tmp_path)
+        monkeypatch.setattr(format_module, "quality_files", lambda **_kwargs: inventory)
+        monkeypatch.setattr(
+            format_module, "quality_workspace_snapshot", lambda **_kwargs: snapshot
+        )
+        monkeypatch.setattr(format_module, "linux_contexts", lambda _selected: (context,))
+        monkeypatch.setattr(
+            format_module, "require_environment", lambda: ("kern", tmp_path / "rootfs", None)
+        )
+        monkeypatch.setattr(format_module, "kern_environment", dict)
+        monkeypatch.setattr(reporting.Stage, "run", record_command)
+        with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")):
+            format_module.format_sources(["selected.patch"])
+
+        assert original.read_bytes() == b"original archive\n"
+        assert patch.read_bytes() == b"patch fixture\n"
+        assert not (tmp_path / ".cache/downloads/linux").exists()
+        assert len(commands) == 1
+        assert f"{tmp_path / '.cache/downloads'}:/linux-archives:ro" in commands[0]
+        assert commands[0][commands[0].index("--network") + 1] == "none"
 
 
 class FormatPublicationTests:

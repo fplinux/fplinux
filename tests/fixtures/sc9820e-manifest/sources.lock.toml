@@ -1,15 +1,24 @@
 # SPDX-License-Identifier: GPL-2.0-only
 [chipram]
-archive_url = "https://example.invalid/chipram.tar.gz"
-archive_sha256 = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+version = "1"
+name = "chipram.tar.gz"
+algorithm = "sha256"
+url = "https://example.invalid/chipram.tar.gz"
+checksum = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
 archive_prefix = "chipram-source"
 
 [u_boot]
-archive_url = "https://example.invalid/u-boot.tar.gz"
-archive_sha256 = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+version = "1"
+name = "u_boot.tar.gz"
+algorithm = "sha256"
+url = "https://example.invalid/u-boot.tar.gz"
+checksum = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 archive_prefix = "u-boot-source"
 
 [trusted_firmware]
-archive_url = "https://example.invalid/trusted-firmware.tar.gz"
-archive_sha256 = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+version = "1"
+name = "trusted_firmware.tar.gz"
+algorithm = "sha256"
+url = "https://example.invalid/trusted-firmware.tar.gz"
+checksum = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 archive_prefix = "trusted-firmware-source"

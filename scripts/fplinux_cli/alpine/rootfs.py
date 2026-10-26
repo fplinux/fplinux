@@ -15,10 +15,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO
 
 from fplinux_cli.build import process as process_build
-from fplinux_cli.build import sources as sources_build
 from fplinux_cli.build.inputs import CACHE, require_file
-from fplinux_cli.common import alpine_tar_filter, fail
+from fplinux_cli.common import ROOT, alpine_tar_filter, fail
 from fplinux_cli.device_data import inputs as firmware_inputs
+from fplinux_cli.manifests.source_catalog import acquire_source
 
 from . import lock as alpine_lock
 from . import rootfs_state
@@ -224,12 +224,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
         lock = alpine_lock.load_alpine_lock()
         records = alpine_lock.package_records(lock)
         minirootfs_record = lock["minirootfs"]
-        minirootfs = sources_build.fetch(
-            minirootfs_record.get("url"),
-            minirootfs_record.get("sha256"),
-            CACHE / "downloads/alpine",
-            f"alpine-minirootfs-{lock['release']}-{lock['arch']}.tar.gz",
-        )
+        minirootfs = acquire_source(ROOT, minirootfs_record["source_id"], CACHE)
         if minirootfs.stat().st_size != minirootfs_record.get("bytes"):
             fail("locked Alpine minirootfs size does not match its downloaded bytes")
         runtime_packages = _alpine_runtime_packages(lock, records, packages)

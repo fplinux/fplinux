@@ -1,34 +1,32 @@
 [kern]
-version = "0.33.0"
-archive_url = "https://example.invalid/runtime"
-archive_sha256 = "archive-hash"
+source = "kern"
 binary_sha256 = "binary-hash"
 
 [base]
-release = "3.24.2"
+source = "alpine_environment"
 arch = "x86_64"
-url = "https://example.invalid/rootfs"
-sha256 = "base-hash"
 
 [selection]
 arch = "x86_64"
 apk_groups = [["z=1", "a=2"], ["b=3"]]
 
 [tools.node]
-version = "24.21.0"
-input = "source:node"
+input = "environment:node"
 
 [tools.sparse]
-commit = "source-commit"
-input = "source:sparse"
+input = "environment:sparse"
 
 [[input]]
-key = "wheel:z"
-url = "https://example.invalid/z.whl"
-sha256 = "wheel-sha"
-bytes = 123
-destination = "wheels/z.whl"
-purpose = "container-wheel"
+key = "environment:node"
+source = "node"
+purpose = "environment-source"
+arch = "x86_64"
+
+[[input]]
+key = "environment:sparse"
+source = "sparse"
+purpose = "environment-source"
+arch = "x86_64"
 
 # APK input
 [[input]]
@@ -36,6 +34,6 @@ key = "apk:a"
 url = "https://example.invalid/a.apk"
 sha256 = "apk-sha"
 bytes = 456
-destination = "apks/a.apk"
-purpose = "container-apk"
+destination = "downloads/apks/a.apk"
+purpose = "environment-package"
 arch = "x86_64"

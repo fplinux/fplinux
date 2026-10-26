@@ -15,14 +15,12 @@ from unittest import mock
 import pytest
 from fplinux_cli import common
 from fplinux_cli.build import inputs as inputs_build
-from fplinux_cli.build import sources as sources_build
 from fplinux_cli.build.kernel import prepare as linux_build
+from fplinux_cli.build.kernel import state as linux_state
 from fplinux_cli.manifests.linux import discover_linux_targets
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-
-    from fplinux_cli.build.kernel import state as linux_state
 
 SOURCE_FILES = Path(__file__).with_name("linux-source")
 
@@ -67,7 +65,7 @@ class LinuxSourceContext:
         self, name: str, *, external: bool = False
     ) -> tuple[Path, linux_state.PreparedLinuxState]:
         """Load a selected Linux context and run the production preparer."""
-        digest = self.sources["linux"]["sha256"]
+        digest = self.sources["linux"]["checksum"]
         selected = next(
             target
             for target in discover_linux_targets(self.root, self.sources, digest)
@@ -118,15 +116,17 @@ def linux_source(tmp_path: Path) -> Iterator[LinuxSourceContext]:
         sources = {
             "linux": {
                 "version": "test",
-                "sha256": common.sha256_file(archive),
+                "name": "linux-test.tar.xz",
                 "url": "https://example.invalid/linux-test.tar.xz",
+                "algorithm": "sha256",
+                "checksum": common.sha256_file(archive),
             }
         }
         cache = root / "cache"
         with (
             mock.patch.object(common, "ROOT", root),
             mock.patch.object(inputs_build, "CACHE", cache),
-            mock.patch.object(sources_build, "fetch", return_value=archive) as fetch,
+            mock.patch.object(linux_state, "acquire_source", return_value=archive) as fetch,
         ):
             context = LinuxSourceContext(root, cache, archive, sources, fetch)
             context.platform("soc")

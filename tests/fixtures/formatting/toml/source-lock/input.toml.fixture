@@ -1,9 +1,19 @@
+[linux]
+license = "GPL-2.0-only"
+checksum = "linux-hash"
+algorithm = "sha256"
+url = "https://example.invalid/linux"
+name = "linux-1.tar.xz"
+version = "1"
+
+[fpdoom_host]
+license = "GPL-2.0-only"
+checksum = "host-hash"
+algorithm = "sha256"
+url = "https://example.invalid/host"
+name = "host-2.tar.gz"
+version = "2"
+
 [fpdoom_host.files]
 z_sha256 = "z"
 a_sha256 = "a"
-
-[linux]
-license = "GPL-2.0-only"
-sha256 = "hash"
-url = "https://example.invalid/linux"
-version = "1"

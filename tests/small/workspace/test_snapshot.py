@@ -104,6 +104,7 @@ class WorkspaceSnapshotTests:
             (directory / "APKBUILD").write_text(f"pkgname={package}\n")
         target = {
             "platform": "demo",
+            "uboot": {"kind": "none"},
             "linux": {"root": {"kind": "initramfs"}},
             "device_data": {"groups": {}},
             "rootfs": {
@@ -183,6 +184,7 @@ class WorkspaceSnapshotTests:
                 "load_target",
                 return_value={
                     "platform": "demo",
+                    "uboot": {"kind": "none"},
                     "linux": {"root": {"kind": "initramfs"}},
                     "device_data": {"groups": {}},
                 },
@@ -229,6 +231,7 @@ class WorkspaceSnapshotTests:
                 "load_target",
                 return_value={
                     "platform": "demo",
+                    "uboot": {"kind": "none"},
                     "linux": {"root": {"kind": "initramfs"}},
                     "device_data": {"groups": {}},
                 },
@@ -327,9 +330,11 @@ class WorkspaceSnapshotTests:
                 "patches": ["patches/bootstrap.patch"],
             },
             "host": {
+                "runtime_tools": {"keyboard": "keyboard", "loader": "loader"},
                 "tools": [
-                    {"type": "cc-libusb", "source": "tools/loader.c"},
+                    {"name": "keyboard", "type": "cc-libusb", "source": "tools/loader.c"},
                     {
+                        "name": "loader",
                         "type": "make-archive",
                         "copies": [
                             {
@@ -339,7 +344,7 @@ class WorkspaceSnapshotTests:
                         ],
                         "patches": ["tools/local.patch"],
                     },
-                ]
+                ],
             },
         }
 
@@ -359,7 +364,9 @@ class WorkspaceSnapshotTests:
             ),
             mock.patch.object(common, "ROOT", root),
             mock.patch.object(
-                workspace_inputs, "STAGED_BUILD_SOURCES", ("always.txt", "sources.lock.toml")
+                workspace_inputs,
+                "STAGED_BUILD_SOURCES",
+                ("always.txt", "sources.lock.toml", "alpine.lock.toml"),
             ),
             mock.patch.object(workspace_inputs, "selected_build_sources", return_value=()),
             mock.patch.object(workspace_inputs, "load_target", return_value=target),
@@ -437,7 +444,8 @@ class WorkspaceSnapshotTests:
         with platform.open("a", encoding="utf-8") as output:
             output.write(
                 '[bootstrap]\nbackend = "ums9117"\nvendor_source_lock = "bootstrap"\n'
-                '[[host.tools]]\ntype = "make-archive"\nsource_lock = "host"\n'
+                '[host.runtime_tools]\nloader = "loader"\n'
+                '[[host.tools]]\nname = "loader"\ntype = "make-archive"\nsource_lock = "host"\n'
             )
         linux_inputs.platform(root, "other", source_lock="linux", arch="riscv")
         selected = linux_inputs.target(root, "phone-a", platform_name="demo")
@@ -469,6 +477,7 @@ class WorkspaceSnapshotTests:
             (path.relative_to(root).as_posix(), path)
             for path in (
                 root / "sources.lock.toml",
+                root / "alpine.lock.toml",
                 root / "platforms/demo/loader/assets.lock.toml",
                 platform,
                 selected,
@@ -480,6 +489,7 @@ class WorkspaceSnapshotTests:
         causal_sources.append(write_registration_source(root))
         target_config = {
             "platform": "demo",
+            "uboot": {"kind": "none"},
             "linux": {"root": {"kind": "initramfs"}},
             "bootstrap": {"backend": "ums9117"},
             "device_data": {"groups": {}},
@@ -523,7 +533,7 @@ class WorkspaceSnapshotTests:
             assert staged_overlay.read_bytes() == b"int overlay_peer = 2;\n"
             assert staged_overlay.stat().st_mode & 0o777 == 0o640
             staged_targets = discover_linux_targets(
-                changed_path, {"linux": {"sha256": "1" * 64}}, "1" * 64
+                changed_path, common.load_toml(changed_path / "sources.lock.toml"), "1" * 64
             )
             assert ([target.name for target in staged_targets]) == (["phone-a", "phone-b"])
 

@@ -1,4 +1,5 @@
 license = "GPL-2.0-only"
 commit = "c"
 tag = "t"
-version = "v"
+repository = "https://example.invalid/u-boot.git"
+source = "u_boot"

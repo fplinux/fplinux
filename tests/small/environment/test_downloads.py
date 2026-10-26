@@ -23,33 +23,20 @@ _ABC_SHA512 = (
 )
 
 
-def _download(consumer: str, destination: Path) -> Path:
-    """Invoke either existing consumer without replacing its implementation."""
-    if consumer == "source":
-        return fetch(_URL, _ABC_SHA256, destination.parent, destination.name)
-    return download_locked_file(_URL, _ABC_SHA256, destination)
-
-
-@pytest.mark.parametrize("consumer", ["source", "locked"])
-def test_verified_refresh_publishes_complete_private_bytes_and_reuses_them(
-    tmp_path: Path, consumer: str
-) -> None:
+def test_verified_refresh_publishes_complete_private_bytes_and_reuses_them(tmp_path: Path) -> None:
     destination = tmp_path / "locked.bin"
     destination.write_bytes(b"previous declaration")
     destination.chmod(0o640)
     with mock.patch("urllib.request.urlopen", return_value=io.BytesIO(b"abc")):
-        assert _download(consumer, destination) == destination
+        assert download_locked_file(_URL, _ABC_SHA256, destination) == destination
     assert destination.read_bytes() == b"abc"
     assert destination.stat().st_mode & 0o777 == 0o600
     assert list(tmp_path.iterdir()) == [destination]
     with mock.patch("urllib.request.urlopen", side_effect=AssertionError("unexpected network")):
-        assert _download(consumer, destination) == destination
+        assert download_locked_file(_URL, _ABC_SHA256, destination) == destination
 
 
-@pytest.mark.parametrize("consumer", ["source", "locked"])
-def test_checksum_failure_preserves_old_bytes_and_removes_failed_temporary(
-    tmp_path: Path, consumer: str
-) -> None:
+def test_checksum_failure_preserves_old_bytes_and_removes_failed_temporary(tmp_path: Path) -> None:
     destination = tmp_path / "locked.bin"
     destination.write_bytes(b"previous declaration")
     destination.chmod(0o640)
@@ -57,34 +44,46 @@ def test_checksum_failure_preserves_old_bytes_and_removes_failed_temporary(
         mock.patch("urllib.request.urlopen", return_value=io.BytesIO(b"unverified response")),
         pytest.raises(SystemExit, match="SHA256 mismatch"),
     ):
-        _download(consumer, destination)
+        download_locked_file(_URL, _ABC_SHA256, destination)
     assert destination.read_bytes() == b"previous declaration"
     assert destination.stat().st_mode & 0o777 == 0o640
     assert list(tmp_path.iterdir()) == [destination]
 
 
-@pytest.mark.parametrize("consumer", ["source", "locked"])
-def test_network_failure_preserves_old_bytes_and_the_consumer_error(
-    tmp_path: Path, consumer: str
-) -> None:
+def test_network_failure_preserves_old_bytes_and_the_consumer_error(tmp_path: Path) -> None:
     destination = tmp_path / "locked.bin"
     destination.write_bytes(b"previous declaration")
     error = urllib.error.URLError("controlled network failure")
-    expected_error = urllib.error.URLError if consumer == "source" else SystemExit
     with (
         mock.patch("urllib.request.urlopen", side_effect=error),
-        pytest.raises(expected_error) as failure,
+        pytest.raises(SystemExit) as failure,
     ):
-        _download(consumer, destination)
-    if consumer == "source":
-        assert failure.value is error
-    else:
-        assert str(failure.value) == (
-            "fplinux: locked download failed: https://example.invalid/locked.bin: "
-            "<urlopen error controlled network failure>"
-        )
+        download_locked_file(_URL, _ABC_SHA256, destination)
+    assert str(failure.value) == (
+        "fplinux: locked download failed: https://example.invalid/locked.bin: "
+        "<urlopen error controlled network failure>"
+    )
     assert destination.read_bytes() == b"previous declaration"
     assert list(tmp_path.iterdir()) == [destination]
+
+
+@pytest.mark.parametrize("contents", [b"abc", None, b"wrong"], ids=["hit", "missing", "mismatch"])
+def test_native_artifact_consumer_requires_exact_saved_bytes_without_network(
+    tmp_path: Path,
+    contents: bytes | None,
+) -> None:
+    destination = tmp_path / "locked.bin"
+    if contents is not None:
+        destination.write_bytes(contents)
+    with mock.patch("urllib.request.urlopen", side_effect=AssertionError("unexpected network")):
+        if contents == b"abc":
+            assert fetch(_URL, _ABC_SHA256, tmp_path, "locked.bin") == destination
+        else:
+            with pytest.raises(SystemExit, match="offline locked input is missing or mismatched"):
+                fetch(_URL, _ABC_SHA256, tmp_path, "locked.bin")
+    if contents is not None:
+        assert destination.read_bytes() == contents
+    assert list(tmp_path.iterdir()) == ([destination] if contents is not None else [])
 
 
 def test_locked_size_failure_keeps_previous_bytes_after_checksum_matches(tmp_path: Path) -> None:

@@ -6,7 +6,7 @@ Original FPLinux code and documentation are licensed under `GPL-2.0-only` unless
 
 ## Where versions are recorded
 
-The corresponding source snapshot records exact versions, URLs, commits and hashes in `sources.lock.toml`, `environment.lock.toml`, `alpine.lock.toml`, package locks, host-runtime locks, platform loader asset locks, target manifests and the platform U-Boot source lock. Binary archives carry the resolved asset lock as `assets.lock.toml`, plus content receipts and `SHA256SUMS`. Aport `APKBUILD` files pin their own upstream archives or commits and verify remote and local source members with SHA-512 sums.
+The corresponding source snapshot records exact versions, URLs, commits and hashes in `sources.lock.toml`, `environment.lock.toml`, `alpine.lock.toml`, package locks, host-runtime locks, platform loader asset locks, target manifests and the platform U-Boot source lock. Binary archives carry the resolved asset lock as `assets.lock.toml`, plus content receipts and `SHA256SUMS`. Aport `APKBUILD` files refer to upstream originals declared in `sources.lock.toml`. The build resolves these references into local files with SHA-512 checksums; checksums for checked-in package sources remain in the APKBUILD.
 
 ## Third-party components
 
@@ -57,7 +57,7 @@ The corresponding source snapshot records exact versions, URLs, commits and hash
 | Terminus 4.49.1                          | Terminal, brightness control and showcase text  | OFL-1.1; upstream release archive                                                                                     |
 | Noto Sans                                | Documentation website font                      | OFL-1.1; Copyright 2022 The Noto Project Authors                                                                      |
 | Bash 5.3.20                              | Interactive local shell and Readline editing    | GPL-3.0-or-later; upstream release built by the corresponding FPLinux aport                                           |
-| OpenWrt uclient, libubox and ustream-ssl | HTTP and HTTPS download client and libraries    | ISC; exact source commits pinned by the `fplinux-uclient` APKBUILD                                                    |
+| OpenWrt uclient, libubox and ustream-ssl | HTTP and HTTPS download client and libraries    | ISC; exact source commits pinned in `sources.lock.toml`                                                               |
 | CA certificates bundle                   | HTTPS certificate verification                  | MPL-2.0; supplied by the pinned Alpine package set                                                                    |
 | TyrQuake 0.71                            | Quake engine for FPLinux                        | GPL-2.0-or-later; bundled decoders use MIT-0, CC0-1.0 and MIT                                                         |
 | BusyBox                                  | Shell and base userspace applets                | GPL-2.0-only; supplied by the pinned Alpine package set                                                               |
@@ -73,22 +73,13 @@ The corresponding source snapshot records exact versions, URLs, commits and hash
 | BCH library                              | Host correction of selected NAND main data      | GPL-2.0-only; Copyright 2011 Parrot S.A.; pinned python-bchlib source                                                 |
 | `t117_fdl1.bin`                          | T117 first-stage RAM loader                     | The Unlicense; pinned spreadtrum_flash release asset                                                                  |
 
-The TyrQuake APKBUILD verifies the upstream 0.71 source archive and each local
-source or patch through its checked-in SHA-512 sums. Its FLAC, MP3 and WAV
-decoders use MIT-0; the minimp3 portions of the MP3 decoder use CC0-1.0; and
-stb_vorbis uses MIT. Quake PAK files are separate game data. They are not part
-of the source tree, root filesystem, RAM image, source companion or release
-archive.
+The TyrQuake 0.71 source archive is pinned in `sources.lock.toml`; the APKBUILD records SHA-512 sums for local sources and patches. Its FLAC, MP3 and WAV decoders use MIT-0; the minimp3 portions of the MP3 decoder use CC0-1.0; and stb_vorbis uses MIT. Quake PAK files are separate game data. They are not part of the source tree, root filesystem, RAM image, source companion or release archive.
 
 The website's Noto Sans font retains its copyright and Open Font License
 notice in `site/public/fonts/OFL.txt`. The generated offline site carries the
 font and its notice.
 
-Autonomous Linux archives include Python 3.14.8 and OpenSSH 10.3p1;
-Windows archives include Python 3.14.7 and Win32-OpenSSH 10.0.0.0p2-Preview.
-Their included license directories retain the notices for these runtimes and
-their libraries. The Windows driver helper uses libwdi 1.5.1 under
-LGPL-3.0-or-later and includes the redistributable's displayed license.
+Linux archives include Python 3.14.8 and OpenSSH 10.3p1; Windows archives include Python 3.14.7 and Win32-OpenSSH 10.0.0.0p2-Preview. Their included license directories retain the notices for these runtimes and their libraries. The Windows driver helper uses libwdi 1.5.1 under LGPL-3.0-or-later and includes its GNU GPL and LGPL license texts. It installs the WinUSB driver included with Windows 10 and 11.
 
 The Git tree does not contain `spreadtrum_flash` source, `spd_dump`, `fphelper_t117` or `t117_fdl1.bin`.
 The local build downloads exact pinned inputs, verifies their hashes, and writes

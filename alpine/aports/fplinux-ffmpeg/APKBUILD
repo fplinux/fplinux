@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-ffmpeg
-pkgver=9.0.2
+pkgver=@version:aport_ffmpeg_9_0_2_tar_xz@
 pkgrel=0
 pkgdesc="MPEG-4, H.263 and H.264 software video decoding for FPLinux"
 url="https://ffmpeg.org"
@@ -9,7 +9,9 @@ license="LGPL-2.1-or-later AND IJG"
 makedepends_build="clang22 lld22 llvm22 make"
 makedepends_host="musl-dev"
 options="!check"
-source="https://ffmpeg.org/releases/ffmpeg-$pkgver.tar.xz"
+source="
+	@source:aport_ffmpeg_9_0_2_tar_xz@
+"
 builddir="$srcdir/ffmpeg-$pkgver"
 
 build() {
@@ -54,5 +56,4 @@ package() {
 		>"$pkgdir/usr/share/licenses/$pkgname/NOTICE"
 }
 sha512sums="
-7756f8434371b9bc1d01cf578bf49014e058b0869c3c1df05030f5f4035f1def64b2e7dba3cf340da4dc8dd9239dd5f894530c9e45793ac27876807079aa546a  ffmpeg-9.0.2.tar.xz
 "

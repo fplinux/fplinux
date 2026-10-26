@@ -14,7 +14,6 @@ from unittest import mock
 import pytest
 from fplinux_cli import common
 from fplinux_cli.build import process as process_build
-from fplinux_cli.build import sources as sources_build
 from fplinux_cli.build.host_tools import host as host_build
 from fplinux_cli.environment import downloads
 from fplinux_cli.manifests import platforms
@@ -148,7 +147,7 @@ class HostRecipeTests:
         archived_source = root / "archive-source.c"
         archived_source.write_bytes(b"upstream\n")
         with tarfile.open(archive, "w:gz") as tar:
-            tar.add(archived_source, arcname="bridge-deadbeef/bridge.c")
+            tar.add(archived_source, arcname=f"bridge-{'a' * 40}/bridge.c")
         local_input = root / "platforms/demo/local-input.h"
         local_input.parent.mkdir(parents=True)
         local_input.write_bytes(b"local input\n")
@@ -159,9 +158,11 @@ class HostRecipeTests:
         recipe["patches"] = []
         sources = {
             "bridge-source": {
-                "archive_url": "https://example.invalid/bridge.tar.gz",
-                "archive_sha256": "0" * 64,
-                "commit": "deadbeef",
+                "version": "a" * 40,
+                "name": "bridge.tar.gz",
+                "url": "https://example.invalid/bridge.tar.gz",
+                "algorithm": "sha256",
+                "checksum": common.sha256_file(archive),
                 "files": {
                     "bridge_c_sha256": hashlib.sha256(b"upstream\n").hexdigest(),
                 },
@@ -180,7 +181,7 @@ class HostRecipeTests:
 
         with (
             mock.patch.object(common, "ROOT", root),
-            mock.patch.object(sources_build, "fetch", return_value=archive),
+            mock.patch.object(host_build, "acquire_source", return_value=archive),
             mock.patch.object(process_build, "run", side_effect=build_binary) as run,
         ):
             first = host_build.build_make_host_tool(sources, recipe, work, output)

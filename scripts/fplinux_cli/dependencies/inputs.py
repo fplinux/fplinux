@@ -5,41 +5,36 @@ from __future__ import annotations
 
 import base64
 import binascii
-import fnmatch
 import json
 import re
-import shlex
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 from fplinux_cli.alpine import lock as alpine_lock
-from fplinux_cli.alpine import registration as alpine_registration
 from fplinux_cli.alpine import selection as alpine_selection
+from fplinux_cli.alpine.sources import aport_declaration, aport_sources
+from fplinux_cli.build.runtime import (
+    runtime_host_tools,
+    runtime_needs_nand_ecc,
+    selected_host_tool_recipes,
+)
 from fplinux_cli.common import fail, load_toml, relative_name, sha256_bytes
 from fplinux_cli.environment.definition import (
     load_environment_lock,
     spreadtrum_flash_environment_source,
 )
+from fplinux_cli.environment.downloads import download_locked_file
 from fplinux_cli.manifests.assets import load_asset_sources
+from fplinux_cli.manifests.identity import BUILD_TYPES
 from fplinux_cli.manifests.loaders import loader_sources
 from fplinux_cli.manifests.paths import declared_boot_profiles
+from fplinux_cli.manifests.source_catalog import ResolvedSource, load_host_sources, resolve_source
 from fplinux_cli.manifests.values import sha256_value
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
-
-_ASSIGNMENT = re.compile(
-    r"^([A-Za-z_][A-Za-z0-9_]*)=(\"(?:[^\"\\]|\\.)*\"|'[^']*'|[^\n]*)",
-    re.MULTILINE,
-)
-_VARIABLE = re.compile(r"\$\{([^{}]+)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
-_SOURCE_LOOP = re.compile(
-    r"^for ([A-Za-z_][A-Za-z0-9_]*) in ([^;]+); do\s*"
-    r'source="\$source ([^"\n]+)"\s*done$',
-    re.MULTILINE,
-)
+    from collections.abc import Sequence
 
 
 @dataclass(frozen=True)
@@ -78,137 +73,6 @@ class DependencyInput:
             fail(f"dependency {self.key} has an invalid {self.algorithm} checksum")
         if self.algorithm == "sha256" and self.sha256 is not None and expected != self.sha256:
             fail(f"dependency {self.key} has conflicting SHA-256 checksums")
-
-
-def _expand(value: str, variables: dict[str, str], *, owner: str) -> str:
-    """Expand the literal parameter substitutions used in source declarations."""
-    if "$(" in value or "`" in value:
-        fail(f"{owner} dependency declaration uses an unsupported command substitution")
-
-    def replace(match: re.Match[str]) -> str:
-        expression = match[1] or match[2]
-        parsed = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)(.*)", expression)
-        if parsed is None:
-            fail(f"{owner} dependency declaration has an unsupported variable: {expression}")
-        name, operation = parsed.groups()
-        if name not in variables:
-            fail(f"{owner} dependency declaration has an unknown variable: {name}")
-        expanded = _expand(
-            variables[name], {k: v for k, v in variables.items() if k != name}, owner=owner
-        )
-        if not operation:
-            return expanded
-        if operation.startswith("/"):
-            parts = operation.split("/")
-            if len(parts) == 3 and parts[1]:
-                return expanded.replace(parts[1], parts[2], 1)
-        for operator in ("%%", "%", "##", "#"):
-            if not operation.startswith(operator):
-                continue
-            pattern = operation.removeprefix(operator)
-            positions = range(len(expanded) + 1)
-            indices: Iterable[int] = positions
-            if operator in {"%", "##"}:
-                indices = reversed(positions)
-            for index in indices:
-                candidate = expanded[index:] if operator.startswith("%") else expanded[:index]
-                if fnmatch.fnmatchcase(candidate, pattern):
-                    return expanded[:index] if operator.startswith("%") else expanded[index:]
-            return expanded
-        return fail(
-            f"{owner} dependency declaration has an unsupported substitution: {expression}"
-        )
-
-    result = _VARIABLE.sub(replace, value)
-    if "$" in result:
-        fail(f"{owner} dependency declaration contains unresolved shell syntax")
-    return result
-
-
-def _apkbuild_declarations(path: Path) -> tuple[dict[str, object], list[DependencyInput]]:
-    """Read maintained source declarations without executing the package recipe."""
-    text = path.read_text(encoding="utf-8").replace("\\\n", "")
-    raw = {match[1]: match[2] for match in _ASSIGNMENT.finditer(text)}
-    variables: dict[str, str] = {}
-    for name, value in raw.items():
-        if value.startswith(("'", '"')):
-            variables[name] = value[1:-1]
-        else:
-            variables[name] = value.split(" #", 1)[0].rstrip()
-    owner = path.parent.name
-    sources = _expand(variables.get("source", ""), variables, owner=owner).split()
-    source_loops = list(_SOURCE_LOOP.finditer(text))
-    remaining = _SOURCE_LOOP.sub("", text)
-    source_assignments = [
-        match for match in _ASSIGNMENT.finditer(remaining) if match[1] == "source"
-    ]
-    without_sources = remaining
-    for assignment in reversed(source_assignments):
-        without_sources = (
-            without_sources[: assignment.start()] + without_sources[assignment.end() :]
-        )
-    if re.search(r"^\s*source=", without_sources, re.MULTILINE):
-        fail(f"{owner} has an unsupported conditional source declaration")
-    if re.search(r"^for .*\n(?:(?!^done).)*\bsource=", remaining, re.MULTILINE | re.DOTALL):
-        fail(f"{owner} has an unsupported source declaration loop")
-    for loop in source_loops:
-        name, values, template = loop.groups()
-        for value in shlex.split(values):
-            sources.extend(_expand(template, {**variables, name: value}, owner=owner).split())
-    checksum_words = _expand(variables.get("sha512sums", ""), variables, owner=owner).split()
-    if len(checksum_words) % 2:
-        fail(f"{owner} has an invalid sha512sums declaration")
-    checksums = dict(zip(checksum_words[1::2], checksum_words[::2], strict=True))
-    arch = _expand(variables.get("arch", ""), variables, owner=owner)
-    inputs: list[DependencyInput] = []
-    source_context: list[dict[str, str]] = []
-    for source in sources:
-        if "::" in source:
-            filename, url = source.split("::", 1)
-        else:
-            url = source
-            filename = PurePosixPath(urlsplit(url).path).name
-        if not url.startswith("https://"):
-            if "://" in url:
-                fail(f"{owner} source must use HTTPS: {url}")
-            source_context.append({"file": source})
-            continue
-        checksum = checksums.get(filename)
-        if checksum is None:
-            fail(f"{owner} external source has no checksum: {filename}")
-        inputs.append(
-            DependencyInput(
-                key=f"aport:{owner}:{filename}",
-                url=url,
-                sha256=None,
-                size=None,
-                destination=f"downloads/alpine/sources/{filename}",
-                purpose="aport-source",
-                arch=arch or None,
-                checksum=checksum,
-                algorithm="sha512",
-            )
-        )
-        source_context.append({"file": filename, "url": url, "sha512": checksum})
-    context: dict[str, object] = {"sources": source_context}
-    for name in (
-        "pkgname",
-        "pkgver",
-        "pkgrel",
-        "arch",
-        "provides",
-        "provider_priority",
-        "replaces",
-        "depends",
-        "makedepends_build",
-        "makedepends_host",
-        "subpackages",
-    ):
-        value = _expand(variables.get(name, ""), variables, owner=owner)
-        context[name] = (
-            sorted(value.split()) if name not in {"pkgname", "pkgver", "pkgrel"} else value
-        )
-    return context, inputs
 
 
 def npm_declarations(
@@ -290,7 +154,7 @@ def _selected_declarations(
     targets = {}
     raw_targets = {}
     platforms = {}
-    packages = set(alpine_registration.COMMON_PACKAGES)
+    packages: set[str] = set()
     for path in sorted((root / "targets").glob("*/target.toml")):
         target = load_toml(path)
         raw_targets[path.parent.name] = target
@@ -304,15 +168,25 @@ def _selected_declarations(
         profile_context = {}
         for profile in selected_profiles:
             declaration = load_toml(root / "profiles" / profile / "profile.toml")
-            packages.update(declaration["rootfs"]["packages"])
+            for build_type in BUILD_TYPES:
+                selected = {
+                    **target,
+                    "build_type": build_type,
+                    "rootfs": {
+                        "base_packages": target["rootfs"]["packages"],
+                        "packages": declaration["rootfs"]["packages"],
+                    },
+                }
+                rootfs_packages = alpine_selection.selected_packages(platform, selected, root)
+                packages.update(rootfs_packages)
+                packages.update(
+                    alpine_selection.bundle_packages(platform, selected, rootfs_packages, root)
+                )
             profile_context[profile] = {
                 "packages": sorted(declaration["rootfs"]["packages"]),
                 "bootstrap": declaration["bootstrap"]["kind"],
                 "uboot": declaration["uboot"]["kind"],
             }
-        for declaration in (platform, target):
-            for layer in ("rootfs", "bundle"):
-                packages.update(declaration[layer]["packages"])
         targets[path.parent.name] = {
             "platform": platform_name,
             "rootfs": sorted(target["rootfs"]["packages"]),
@@ -324,28 +198,136 @@ def _selected_declarations(
     return targets, platforms, packages, raw_targets
 
 
-def _source_input(
-    key: str,
-    source: dict[str, Any],
-    destination: str,
-    purpose: str,
-) -> DependencyInput:
+def source_input(source: ResolvedSource) -> DependencyInput:
+    """Describe one canonical direct original independently of its consumers."""
     return DependencyInput(
-        key=key,
-        url=source["archive_url"],
-        sha256=source["archive_sha256"],
-        size=None,
-        destination=destination,
-        purpose=purpose,
+        key=f"source:{source.id}",
+        url=source.url,
+        sha256=source.checksum if source.algorithm == "sha256" else None,
+        size=source.size,
+        destination=source.destination,
+        purpose="source-original",
+        checksum=source.checksum if source.algorithm != "sha256" else None,
+        algorithm=source.algorithm,
     )
+
+
+def aport_source_inputs(root: Path, packages: Sequence[str]) -> list[DependencyInput]:
+    """Resolve every upstream original in the selected native package closure."""
+    selected = {}
+    for package in alpine_selection.aport_build_order(packages):
+        for source in aport_sources(root, package):
+            selected[source.id] = source_input(source)
+    return [selected[key] for key in sorted(selected)]
+
+
+def acquire_inputs(
+    inputs: Sequence[DependencyInput], cache: Path, *, offline: bool
+) -> dict[str, Path]:
+    """Acquire selected originals once before their consumers use only local files."""
+    result = {}
+    for item in inputs:
+        expected = item.checksum or item.sha256
+        if expected is None:
+            fail(f"dependency input has no checksum: {item.key}")
+        result[item.key] = download_locked_file(
+            item.url,
+            expected,
+            cache / item.destination,
+            offline=offline,
+            algorithm=item.algorithm,
+            size=item.size,
+        )
+    return result
+
+
+def alpine_package_input(lock: dict[str, Any], record: dict[str, Any]) -> DependencyInput:
+    """Resolve one native binary APK for both full builds and selected sysroots."""
+    return DependencyInput(
+        key=f"alpine:{lock['arch']}:{record['file']}",
+        url=f"{lock['repositories'][record['repository']]}/{record['file']}",
+        sha256=record["sha256"],
+        size=record["bytes"],
+        destination=f"downloads/alpine/packages/{record['file']}",
+        purpose="target-package",
+        arch=lock["arch"],
+    )
+
+
+def _target_package_inputs(lock: dict[str, Any]) -> list[DependencyInput]:
+    """Describe the phone's exact native binary APK closure at its established cache paths."""
+    return [alpine_package_input(lock, record) for record in lock["package"]]
+
+
+def captured_build_inputs(root: Path, source_declarations: bytes) -> list[DependencyInput]:
+    """Resolve the captured source selection and native APKs from the same staged checkout."""
+    declarations = json.loads(source_declarations)
+    selected = {
+        item.key: item
+        for source_id in declarations["sources"]["records"]
+        for item in (source_input(resolve_source(root, source_id)),)
+    }
+    for item in _target_package_inputs(alpine_lock.load_alpine_lock(root)):
+        selected[item.key] = item
+    return [selected[key] for key in sorted(selected)]
+
+
+def build_source_inputs(
+    root: Path, platform: dict[str, Any], config: dict[str, Any]
+) -> list[DependencyInput]:
+    """Resolve the exact package, platform and boot originals used by one build."""
+    selected: dict[str, DependencyInput] = {}
+    rootfs = alpine_selection.selected_packages(platform, config, root)
+    packages = (*rootfs, *alpine_selection.bundle_packages(platform, config, rootfs, root))
+    for item in aport_source_inputs(root, packages):
+        selected[item.key] = item
+    source_ids = {platform["linux"]["source_lock"]}
+    bootstrap = platform["bootstrap"]
+    if bootstrap["backend"] == "ums9117":
+        source_ids.add(bootstrap["vendor_source_lock"])
+    host_tools = runtime_host_tools(platform, nand_ecc=runtime_needs_nand_ecc(config))
+    source_ids.update(
+        tool["source_lock"]
+        for tool in selected_host_tool_recipes(platform, host_tools.values())
+        if tool["type"] == "make-archive"
+    )
+    if config["uboot"]["kind"] == "full":
+        source_ids.add(load_toml(root / platform["uboot"]["source"])["source"])
+    if bootstrap["backend"] == "sc9820e":
+        source_ids.update(
+            source.source_lock
+            for source in loader_sources(
+                config["loader"]["build"], load_toml(root / "sources.lock.toml")
+            )
+        )
+    else:
+        source_ids.update(source["source_id"] for source in config["loader_assets"])
+    for source_id in sorted(source_ids):
+        item = source_input(resolve_source(root, source_id))
+        selected[item.key] = item
+    alpine = alpine_lock.load_alpine_lock(root)
+    target_base = source_input(
+        resolve_source(root, load_toml(root / "alpine.lock.toml")["minirootfs"]["source"])
+    )
+    selected[target_base.key] = target_base
+    for item in _target_package_inputs(alpine):
+        selected[item.key] = item
+    return [selected[key] for key in sorted(selected)]
 
 
 def _environment_lock(root: Path) -> tuple[dict[str, Any], list[DependencyInput]]:
     """Load the exact package closure selected for the build environment."""
     lock = load_environment_lock(root)
     records = lock["input"]
+    direct = {
+        record["key"]: record["source"]
+        for record in load_toml(root / "environment.lock.toml")["input"]
+        if "source" in record
+    }
     inputs = [
-        DependencyInput(
+        source_input(resolve_source(root, direct[record["key"]]))
+        if record["key"] in direct
+        else DependencyInput(
             key=record["key"],
             url=record["url"],
             sha256=record.get("sha256"),
@@ -371,18 +353,10 @@ def _environment_declarations(root: Path) -> tuple[dict[str, object], list[Depen
     inputs.extend(ui_fonts)
     terminal_fonts = terminus_font_environment_inputs(root)
     inputs.extend(terminal_fonts)
+    ui_icons = ui_icon_environment_inputs(root)
+    inputs.extend(ui_icons)
     quality_source = spreadtrum_flash_environment_source(root)
-    inputs.append(
-        DependencyInput(
-            key="environment:spreadtrum-flash",
-            url=quality_source["archive_url"],
-            sha256=quality_source["archive_sha256"],
-            size=None,
-            destination="downloads/spreadtrum_flash.tar.gz",
-            purpose="quality-source",
-            arch=lock_context["base"]["arch"],
-        )
-    )
+    inputs.append(source_input(resolve_source(root, "spreadtrum_flash")))
     npm_context, npm_inputs = npm_declarations(
         root / "package-lock.json",
         key_prefix="npm",
@@ -397,22 +371,24 @@ def _environment_declarations(root: Path) -> tuple[dict[str, object], list[Depen
             "spreadtrum_flash": quality_source,
             "ui_fonts": [asdict(item) for item in ui_fonts],
             "terminal_fonts": [asdict(item) for item in terminal_fonts],
+            "ui_icons": [asdict(item) for item in ui_icons],
         },
     }, inputs
 
 
 def ui_font_environment_inputs(root: Path) -> list[DependencyInput]:
     """Select the UI package's pinned font and license downloads for offline rendering."""
-    _context, inputs = _apkbuild_declarations(root / "alpine/aports/fplinux-ui/APKBUILD")
-    return sorted(inputs, key=lambda item: item.key)
+    return [source_input(source) for source in aport_sources(root, "fplinux-ui")]
 
 
 def terminus_font_environment_inputs(root: Path) -> list[DependencyInput]:
     """Select the bitmap font package's pinned archive for offline rendering."""
-    _context, inputs = _apkbuild_declarations(
-        root / "alpine/aports/fplinux-font-terminus/APKBUILD"
-    )
-    return sorted(inputs, key=lambda item: item.key)
+    return [source_input(source) for source in aport_sources(root, "fplinux-font-terminus")]
+
+
+def ui_icon_environment_inputs(root: Path) -> list[DependencyInput]:
+    """Select the icon package's pinned originals for offline native rendering."""
+    return [source_input(source) for source in aport_sources(root, "fplinux-icons")]
 
 
 def environment_inputs(root: Path) -> list[DependencyInput]:
@@ -420,84 +396,57 @@ def environment_inputs(root: Path) -> list[DependencyInput]:
     return sorted(_environment_declarations(root)[1], key=lambda item: item.key)
 
 
+def _host_declarations(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
+    """Retain the originals consumed by autonomous runtime and driver preparation."""
+    locks = {
+        host: load_host_sources(root, f"{host}.lock.toml")
+        for host in ("linux-host", "windows-host", "windows-driver")
+    }
+    inputs = {
+        entry["source_id"]: source_input(resolve_source(root, entry["source_id"]))
+        for lock in locks.values()
+        for entry in lock.values()
+    }
+    return dict(locks), list(inputs.values())
+
+
 def _inventory(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
     alpine = alpine_lock.load_alpine_lock(root)
     sources = load_toml(root / "sources.lock.toml")
     targets, platforms, packages, raw_targets = _selected_declarations(root)
     environment_context, inputs = _environment_declarations(root)
-    inputs.extend(
-        [
-            DependencyInput(
-                key="alpine:minirootfs",
-                url=alpine["minirootfs"]["url"],
-                sha256=alpine["minirootfs"]["sha256"],
-                size=alpine["minirootfs"]["bytes"],
-                destination=f"downloads/alpine/alpine-minirootfs-{alpine['release']}-{alpine['arch']}.tar.gz",
-                purpose="target-base",
-                arch=alpine["arch"],
-            ),
-        ]
-    )
-    for record in alpine["package"]:
-        filename = record["file"]
-        inputs.append(
-            DependencyInput(
-                key=f"alpine:{alpine['arch']}:{filename}",
-                url=f"{alpine['repositories'][record['repository']]}/{filename}",
-                sha256=record["sha256"],
-                size=record["bytes"],
-                destination=f"downloads/alpine/packages/{filename}",
-                purpose="target-package",
-                arch=alpine["arch"],
-            )
+    host_dependencies, host_inputs = _host_declarations(root)
+    inputs.extend(host_inputs)
+    inputs.append(
+        source_input(
+            resolve_source(root, load_toml(root / "alpine.lock.toml")["minirootfs"]["source"])
         )
+    )
+    inputs.extend(_target_package_inputs(alpine))
     platform_context = {}
     active_sources = {}
     for name, platform in sorted(platforms.items()):
         linux = platform["linux"]
         source_name = linux["source_lock"]
         source = sources[source_name]
-        inputs.append(
-            DependencyInput(
-                key=f"source:{source_name}:linux",
-                url=source["url"],
-                sha256=source["sha256"],
-                size=None,
-                destination=f"downloads/linux/linux-{source['version']}.tar.xz",
-                purpose="linux-source",
-            )
-        )
+        inputs.append(source_input(resolve_source(root, source_name)))
         active_sources[source_name] = source
         bootstrap = platform["bootstrap"]
         if bootstrap["backend"] == "ums9117":
             source_name = bootstrap["vendor_source_lock"]
-            inputs.append(
-                _source_input(
-                    f"source:{source_name}:bootstrap",
-                    sources[source_name],
-                    f"downloads/{bootstrap['vendor_cache_name']}",
-                    "bootstrap-source",
-                )
-            )
+            inputs.append(source_input(resolve_source(root, source_name)))
             active_sources[source_name] = sources[source_name]
         host_context = []
         for tool in platform["host"]["tools"]:
             if tool["type"] != "make-archive":
                 continue
             source_name = tool["source_lock"]
-            inputs.append(
-                _source_input(
-                    f"source:{source_name}:host",
-                    sources[source_name],
-                    f"downloads/{tool['cache_name']}",
-                    "host-source",
-                )
-            )
+            inputs.append(source_input(resolve_source(root, source_name)))
             active_sources[source_name] = sources[source_name]
             host_context.append(
                 {
                     field: tool[field]
-                    for field in ("name", "source_lock", "cache_name", "archive_prefix", "members")
+                    for field in ("name", "source_lock", "archive_prefix", "members")
                 }
             )
         platform_context[name] = {
@@ -509,18 +458,13 @@ def _inventory(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
         }
         if bootstrap["backend"] == "ums9117":
             platform_context[name]["bootstrap_source"] = bootstrap["vendor_source_lock"]
-            platform_context[name]["bootstrap_cache"] = bootstrap["vendor_cache_name"]
         if any(
             selection["profiles"].get("microsd-uboot", {}).get("uboot") == "full"
             for selection in targets.values()
             if selection["platform"] == name
         ):
             lock = load_toml(root / platform["uboot"]["source"])
-            inputs.append(
-                _source_input(
-                    f"uboot:{name}", lock, "downloads/uboot/source.tar.bz2", "uboot-source"
-                )
-            )
+            inputs.append(source_input(resolve_source(root, lock["source"])))
             platform_context[name]["uboot"] = lock
     asset_context = {}
     for target, selection in targets.items():
@@ -529,40 +473,20 @@ def _inventory(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
             asset_context[target] = [asdict(source) for source in selected_loaders]
             for source in selected_loaders:
                 active_sources[source.source_lock] = sources[source.source_lock]
-                inputs.append(
-                    DependencyInput(
-                        key=f"source:{source.source_lock}:loader",
-                        url=source.url,
-                        sha256=source.sha256,
-                        size=None,
-                        destination=f"downloads/{source.cache_name}",
-                        purpose="loader-source",
-                    )
-                )
+                inputs.append(source_input(resolve_source(root, source.source_lock)))
             continue
         assets = load_asset_sources(
-            root / "platforms" / selection["platform"] / "loader/assets.lock.toml"
+            root / "platforms" / selection["platform"] / "loader/assets.lock.toml",
+            source_root=root,
         )
         asset_context[target] = assets
         for asset in assets:
-            inputs.append(
-                DependencyInput(
-                    key=f"asset:{target}:{asset['id']}",
-                    url=asset["url"],
-                    sha256=asset["sha256"],
-                    size=None,
-                    destination=f"downloads/{asset['cache_name']}",
-                    purpose="loader-asset",
-                )
-            )
+            inputs.append(source_input(resolve_source(root, asset["source_id"])))
     aport_context = {}
     producers = sorted(alpine_selection.aport_build_order(sorted(packages)))
     for producer in producers:
-        declaration, source_inputs = _apkbuild_declarations(
-            root / "alpine/aports" / producer / "APKBUILD"
-        )
-        aport_context[producer] = declaration
-        inputs.extend(source_inputs)
+        aport_context[producer] = aport_declaration(root, producer)
+        inputs.extend(source_input(source) for source in aport_sources(root, producer))
     context: dict[str, object] = {
         **environment_context,
         "alpine": {
@@ -577,6 +501,7 @@ def _inventory(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
             "package": sorted(alpine["package"], key=lambda record: record["file"]),
         },
         "sources": active_sources,
+        "hosts": host_dependencies,
         "targets": targets,
         "platforms": platform_context,
         "assets": asset_context,

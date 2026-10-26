@@ -4,7 +4,6 @@
   },
   "bootstrap": {
     "vendor_source_lock": "vendor",
-    "vendor_cache_name": "vendor.tar.gz",
     "archive_prefix": "vendor-{commit}/",
     "source_destination": "bootstrap",
     "vendor_destination": "vendor",

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from unittest import mock
 
 from fplinux_cli import common
-from fplinux_cli.cli import dependencies
+from fplinux_cli.dependencies import workflow as dependencies
 from fplinux_cli.reporting import run
 
 if TYPE_CHECKING:
@@ -26,6 +26,6 @@ def selected_checkout(
     with (
         mock.patch.object(common, "ROOT", root),
         mock.patch.object(run, "ROOT", root),
-        mock.patch.object(dependencies, "_checkout_declarations", return_value=(inputs, context)),
+        mock.patch.object(dependencies, "checkout_declarations", return_value=(inputs, context)),
     ):
         yield

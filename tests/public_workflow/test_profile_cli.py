@@ -22,7 +22,6 @@ class ProfileAndToolCliHelpWorkflowTests:
             pytest.param(("build",), id="build"),
             pytest.param(("check",), id="check"),
             pytest.param(("run",), id="run"),
-            pytest.param(("package",), id="package"),
             pytest.param(("console",), id="console"),
             pytest.param(("verify",), id="verify"),
             pytest.param(("inspect", "bundle"), id="inspect-bundle"),

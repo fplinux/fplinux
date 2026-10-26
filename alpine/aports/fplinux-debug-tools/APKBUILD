@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-debug-tools
-pkgver=7.1.0
+pkgver=@version:aport_perf_7_1_0_tar_xz@
 pkgrel=0
 pkgdesc="Performance, tracing and display diagnostic tools for FPLinux debug builds"
 url="https://perf.wiki.kernel.org/"
@@ -10,7 +10,8 @@ depends="strace"
 makedepends_build="bison clang22 flex lld22 llvm22 make pkgconf"
 makedepends_host="elfutils-dev fplinux-libdrm-dev fplinux-mesa-dev linux-headers musl-dev zlib-dev zstd-dev"
 options="!check"
-source="https://cdn.kernel.org/pub/linux/kernel/tools/perf/v$pkgver/perf-$pkgver.tar.xz
+source="
+	@source:aport_perf_7_1_0_tar_xz@
 	0001-perf-record-skip-unsupported-bpf-metadata.patch
 	fplinux-display-test.c
 	display-test-pattern.c
@@ -96,7 +97,6 @@ package() {
 		"$pkgdir/usr/share/licenses/$pkgname/GPL-2.0"
 }
 sha512sums="
-ce08606f52f5429cf23fb88c2aa8aeb9090d3b96c96f5a296ce9a65a66b1035c22afd1818136986512958552a024b6e4188e660c526387a7ee9c32adf2056899  perf-7.1.0.tar.xz
 5cab8be7741000b016fbc1ea808e07f3ce6d5fe6478ec849f29380d3aaa938e5d02c3a40eda019f06cc7b3dbbbad41d16f9614d51c5f3b2e9d50ca038eb83fef  0001-perf-record-skip-unsupported-bpf-metadata.patch
 6f1f9c3480ade5caae6c90def0d2463f33c078022a255a6e4909d7087f8fb182e14c8c10bfac670102706ebe93469637aa4e8da0b69f303d00a41e109365d018  fplinux-display-test.c
 da89be2125d70599a648465208ead5dcfe8cf42a168dc0debd269e3cee60a269ed6fc08db8d7032d8e79c92576b94c3ef92af5938d560ff80db5e4769fbf7bfc  display-test-pattern.c

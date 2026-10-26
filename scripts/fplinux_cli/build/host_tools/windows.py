@@ -11,18 +11,22 @@ import tarfile
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from fplinux_cli import common
 from fplinux_cli.build.host_tools.host import copy_host_project_files, extract_host_members
 from fplinux_cli.build.host_tools.host_package import copy_mingw_licenses, publish_host_package
 from fplinux_cli.build.host_tools.windows_environment import WindowsBuildEnvironment
+from fplinux_cli.build.runtime import runtime_host_tools, selected_host_tool_recipes
 from fplinux_cli.build.sources import source_lock_entry
 from fplinux_cli.common import canonical_json_bytes, fail
 from fplinux_cli.device_data.prepare import NAND_ECC_TOOL
-from fplinux_cli.environment.downloads import download_locked_file
 from fplinux_cli.manifests.platforms import load_platform
+from fplinux_cli.manifests.source_catalog import load_host_sources, resolve_source
 from fplinux_cli.manifests.values import relative_value
+
+if TYPE_CHECKING:
+    from typing import Any
 
 _SYSTEM_DLLS = frozenset(
     {
@@ -60,16 +64,6 @@ _SYSTEM_DLLS = frozenset(
         "wtsapi32.dll",
     }
 )
-
-
-def _download(entry: dict[str, Any], directory: Path, *, offline: bool) -> Path:
-    return download_locked_file(
-        entry["url"],
-        entry["sha256"],
-        directory / entry["name"],
-        offline=offline,
-        size=entry["size"],
-    )
 
 
 def _extract_zip(
@@ -127,44 +121,37 @@ def verify_windows_dependencies(
     return imports
 
 
-def _required_tools(*, nand_ecc: bool) -> set[str]:
-    """Select only the native programs used by the delivered runtime."""
-    selected = {"spd_dump", "libc_server"}
-    if nand_ecc:
-        selected.add(NAND_ECC_TOOL)
-    return selected
+def _native_tool_recipes(platform: str, *, nand_ecc: bool) -> list[dict[str, Any]]:
+    """Select the platform's archive tools used by the native Windows runtime."""
+    declaration = load_platform(platform)
+    selected = runtime_host_tools(declaration, nand_ecc=nand_ecc)
+    return [
+        recipe
+        for recipe in selected_host_tool_recipes(declaration, selected.values())
+        if recipe["type"] == "make-archive"
+    ]
 
 
-def _build_tools(  # noqa: PLR0913 -- compile paths and offline policy are distinct inputs.
+def _build_tools(  # noqa: PLR0913 -- source cache and compile paths are distinct inputs.
     *,
     compiler: Path,
     libusb: Path,
-    downloads: Path,
     work: Path,
     package: Path,
-    offline: bool,
+    cache: Path,
     environment: WindowsBuildEnvironment,
-    nand_ecc: bool,
+    recipes: list[dict[str, Any]],
 ) -> None:
     sources = common.load_toml(common.ROOT / "sources.lock.toml")
-    recipes = load_platform("ums9117")["host"]["tools"]
     include = libusb / "include" / "libusb-1.0"
     include.mkdir()
     shutil.copyfile(libusb / "include" / "libusb.h", include / "libusb.h")
     tools = package / "tools"
     tools.mkdir(parents=True)
     source_files: dict[str, Path] = {}
-    required_tools = _required_tools(nand_ecc=nand_ecc)
     for recipe in recipes:
-        if recipe["name"] not in required_tools:
-            continue
         lock = source_lock_entry(sources, recipe["source_lock"])
-        archive = download_locked_file(
-            lock["archive_url"],
-            lock["archive_sha256"],
-            downloads / recipe["cache_name"],
-            offline=offline,
-        )
+        archive = resolve_source(common.ROOT, recipe["source_lock"]).acquire(cache, offline=True)
         source = work / recipe["source_directory"]
         prefix = recipe["archive_prefix"].replace("{commit}", lock["commit"])
         extract_host_members(archive, prefix, recipe["members"], lock["files"], source)
@@ -252,23 +239,38 @@ def _copy_licenses(toolchain: Path, libusb_source: Path, package: Path) -> None:
     shutil.copyfile(libusb_source, package / "sources" / libusb_source.name)
 
 
-def prepare_windows_host(*, cache: Path, offline: bool, nand_ecc: bool = False) -> dict[str, Path]:
+def prepare_windows_host(
+    *, cache: Path, offline: bool, platform: str, nand_ecc: bool = False
+) -> dict[str, Path]:
     """Build and collect Windows files while the caller owns the project cache lock."""
     cache = cache.resolve()
-    lock = common.load_toml(common.ROOT / "windows-host.lock.toml")
-    root = cache / "windows-host"
-    downloads = root / "downloads"
-    archives = {name: _download(entry, downloads, offline=offline) for name, entry in lock.items()}
+    lock = load_host_sources(common.ROOT, "windows-host.lock.toml")
+    recipes = _native_tool_recipes(platform, nand_ecc=nand_ecc)
+    root = cache / "windows-host" / platform
+    archives = {
+        name: resolve_source(common.ROOT, entry["source_id"]).acquire(cache, offline=offline)
+        for name, entry in lock.items()
+    }
+    tool_sources = [
+        resolve_source(common.ROOT, recipe["source_lock"]).acquire(cache, offline=offline)
+        for recipe in recipes
+    ]
     root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=root, prefix=".build-") as temporary:
         work = Path(temporary)
-        patches = [
-            common.ROOT / relative
-            for recipe in load_platform("ums9117")["host"]["tools"]
-            if recipe["name"] in _required_tools(nand_ecc=nand_ecc)
-            for relative in recipe["patches"]
-        ]
-        environment = WindowsBuildEnvironment(work=work, inputs=[*archives.values(), *patches])
+        patches = [common.ROOT / relative for recipe in recipes for relative in recipe["patches"]]
+        copies = [common.ROOT / copy["source"] for recipe in recipes for copy in recipe["copies"]]
+        environment = WindowsBuildEnvironment(
+            work=work,
+            inputs=[
+                *archives.values(),
+                *tool_sources,
+                common.ROOT / "sources.lock.toml",
+                common.ROOT / "platforms" / platform / "platform.toml",
+                *patches,
+                *copies,
+            ],
+        )
         toolchain_root = work / "toolchain"
         toolchain_root.mkdir()
         with tarfile.open(archives["llvm_mingw"]) as archive:
@@ -292,12 +294,11 @@ def prepare_windows_host(*, cache: Path, offline: bool, nand_ecc: bool = False) 
         _build_tools(
             compiler=toolchain / "bin/x86_64-w64-mingw32-gcc",
             libusb=libusb,
-            downloads=cache / "downloads",
             work=work,
             package=package,
-            offline=offline,
+            cache=cache,
             environment=environment,
-            nand_ecc=nand_ecc,
+            recipes=recipes,
         )
         shutil.copyfile(libusb / "MinGW64/dll/libusb-1.0.dll", package / "tools/libusb-1.0.dll")
         _extract_zip(archives["python"], package / "runtime")

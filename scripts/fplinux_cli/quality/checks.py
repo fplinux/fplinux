@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING
 
 from fplinux_cli.build import DEFAULT_BUILD_MEMORY_MIB
 from fplinux_cli.cache.prune.operations import discard_superseded_profile_logs
-from fplinux_cli.common import ROOT, fail
+from fplinux_cli.common import ROOT, fail, load_toml
+from fplinux_cli.dependencies.inputs import acquire_inputs, aport_source_inputs, source_input
 from fplinux_cli.environment.definition import environment_recipe_digest, load_environment_lock
 from fplinux_cli.environment.kern import (
     kern_box_name,
@@ -16,7 +17,8 @@ from fplinux_cli.environment.kern import (
 )
 from fplinux_cli.environment.runtime import environment_arguments, require_environment
 from fplinux_cli.environment.state import load_environment_state
-from fplinux_cli.manifests.paths import normalize_profile
+from fplinux_cli.manifests.paths import declared_boot_profiles, normalize_profile
+from fplinux_cli.manifests.source_catalog import resolve_source
 from fplinux_cli.reporting.run import RunReporter
 from fplinux_cli.workspace.quality_inputs import quality_workspace_snapshot
 from fplinux_cli.workspace.staging import (
@@ -67,6 +69,15 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
     container_logs.mkdir(parents=True, exist_ok=True)
     source_scopes = [scope for scope in missing if scope in SOURCE_CHECK_SCOPES]
     if source_scopes:
+        downloads = None
+        if "alpine" in source_scopes:
+            packages = tuple(
+                path.parent.name
+                for path in sorted((workspace / "alpine/aports").glob("*/APKBUILD"))
+            )
+            with reporter.stage("alpine-inputs"):
+                acquire_inputs(aport_source_inputs(workspace, packages), cache, offline=False)
+            downloads = cache / "downloads"
         with reporter.stage("source", passthrough=True, show_tail=False) as stage:
             run_quality_command(
                 stage,
@@ -74,6 +85,7 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
                 ["python3", "-m", "fplinux_cli.quality.source", *source_scopes],
                 kern=kern,
                 rootfs=rootfs,
+                downloads=downloads,
             )
         for scope in source_scopes:
             publish_success_receipt(cache, recipes[scope])
@@ -84,6 +96,22 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
 
     if "kernel" not in missing:
         return
+    with reporter.stage("kernel-inputs"):
+        source_ids: set[str] = set()
+        for path in sorted((workspace / "targets").glob("*/target.toml")):
+            target = load_toml(path)
+            if (profile or "default") not in declared_boot_profiles(target):
+                continue
+            platform = load_toml(workspace / "platforms" / target["platform"] / "platform.toml")
+            source_ids.add(platform["linux"]["source_lock"])
+        acquire_inputs(
+            [
+                source_input(resolve_source(workspace, source_id))
+                for source_id in sorted(source_ids)
+            ],
+            cache,
+            offline=False,
+        )
     environment = kern_environment()
     log_mount = ["--volume", f"{container_logs}:/logs"]
     log_environment = reporter.container_environment("/logs/kernel")
@@ -127,9 +155,9 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
                     kern_box_name("kernel-prepare"),
                     *common,
                     "--network",
-                    "host",
+                    "none",
                     "--volume",
-                    f"{analyzer_cache['downloads']}:/cache/downloads",
+                    f"{analyzer_cache['downloads']}:/cache/downloads:ro",
                     "--volume",
                     f"{analyzer_cache['linux']}:/cache/linux",
                     "--",

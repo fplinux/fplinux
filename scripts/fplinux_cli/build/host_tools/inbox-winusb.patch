@@ -1,0 +1,203 @@
+--- a/examples/common_controls.manifest
++++ b/examples/common_controls.manifest
+@@ -1,5 +1,10 @@
+ <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+ <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
++  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
++    <application>
++      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
++    </application>
++  </compatibility>
+   <dependency>
+     <dependentAssembly>
+       <assemblyIdentity
+--- a/libwdi/embedder.h
++++ b/libwdi/embedder.h
+@@ -23,10 +23,6 @@
+ #error both 32 and 64 bit support have been disabled - check your config.h
+ #endif
+ 
+-#if !defined(WDK_DIR) && !defined(LIBUSB0_DIR) && !defined(USER_DIR) && !defined(LIBUSBK_DIR)
+-#error at least one of WDK_DIR, LIBUSB0_DIR, LIBUSBK_DIR or USER_DIR must be defined - check your config.h
+-#endif
+-
+ // Some adjustment is needed for MSVC
+ #if defined(_MSC_VER)
+ #pragma warning(disable:6385)
+--- a/libwdi/embedder_files.h
++++ b/libwdi/embedder_files.h
+@@ -134,12 +134,12 @@
+ 	{ 0, INSTALLER_PATH_ARM "\\installer_arm64.exe", "." },
+ #endif
+ // inf templates for the tokenizer ("" directory means no extraction)
+-	{ 0, "winusb.inf.in", "" },
++	{ 0, "winusb10.inf.in", "" },
+ 	{ 0, "libusb0.inf.in", "" },
+ 	{ 0, "libusbk.inf.in", "" },
+ 	{ 0, "usbser.inf.in", "" },
+ // cat file lists for self signing
+-	{ 0, "winusb.cat.in", "" },
++	{ 0, "winusb10.cat.in", "" },
+ 	{ 0, "libusb0.cat.in", "" },
+ 	{ 0, "libusbk.cat.in", "" },
+ 	{ 0, "usbser.cat.in", "" },
+--- a/libwdi/libwdi.c
++++ b/libwdi/libwdi.c
+@@ -56,9 +56,9 @@
+ static DWORD timeout = DEFAULT_TIMEOUT;
+ static HANDLE pipe_handle = INVALID_HANDLE_VALUE;
+ static VS_FIXEDFILEINFO driver_version[WDI_NB_DRIVERS-1] = { {0}, {0}, {0}, {0} };
+-static const char* driver_name[WDI_NB_DRIVERS-1] = {"winusbcoinstaller2.dll", "libusb0.dll", "libusbK.dll", ""};
+-static const char* inf_template[WDI_NB_DRIVERS-1] = {"winusb.inf.in", "libusb0.inf.in", "libusbk.inf.in", "usbser.inf.in"};
+-static const char* cat_template[WDI_NB_DRIVERS-1] = {"winusb.cat.in", "libusb0.cat.in", "libusbk.cat.in", "usbser.cat.in"};
++static const char* driver_name[WDI_NB_DRIVERS-1] = {"", "libusb0.dll", "libusbK.dll", ""};
++static const char* inf_template[WDI_NB_DRIVERS-1] = {"winusb10.inf.in", "libusb0.inf.in", "libusbk.inf.in", "usbser.inf.in"};
++static const char* cat_template[WDI_NB_DRIVERS-1] = {"winusb10.cat.in", "libusb0.cat.in", "libusbk.cat.in", "usbser.cat.in"};
+ static const char* ms_compat_id[WDI_NB_DRIVERS-1] = {"MS_COMP_WINUSB", "MS_COMP_LIBUSB0", "MS_COMP_LIBUSBK", "MS_COMP_USBSER"};
+ int nWindowsVersion = WINDOWS_UNDEFINED;
+ int nWindowsBuildNumber = -1;
+@@ -598,7 +598,7 @@
+ }
+ 
+ 
+-// Retrieve the version info from the WinUSB, libusbK or libusb0 drivers
++// Retrieve the version info from the libusbK or libusb0 drivers
+ int get_version_info(int driver_type, VS_FIXEDFILEINFO* driver_info)
+ {
+ 	// Version (avoids linking against version.lib)
+@@ -712,8 +712,8 @@
+ #endif
+ 
+ 	if (driver_type < WDI_USER) {	// github issue #40
+-		if (driver_type != WDI_CDC) {
+-			// The CDC driver does not have embedded binaries
++		if ((driver_type != WDI_CDC) && (driver_type != WDI_WINUSB)) {
++			// The inbox drivers do not have embedded binaries
+ 			if (driver_info != NULL) {
+ 				memset(driver_info, 0, sizeof(VS_FIXEDFILEINFO));
+ 			}
+@@ -723,11 +723,7 @@
+ 
+ 	switch (driver_type) {
+ 	case WDI_WINUSB:
+-#if defined(WDK_DIR)
+ 		return TRUE;
+-#else
+-		return FALSE;
+-#endif
+ 	case WDI_LIBUSB0:
+ #if defined(LIBUSB0_DIR)
+ 		return (platform_arch == IMAGE_FILE_MACHINE_ARM64 || platform_arch == IMAGE_FILE_MACHINE_AMD64 || platform_arch == IMAGE_FILE_MACHINE_I386);
+@@ -894,7 +890,7 @@
+ 	MUTEX_START;
+ 
+ 	GET_WINDOWS_VERSION;
+-	if (nWindowsVersion < WINDOWS_7) {
++	if (nWindowsVersion < WINDOWS_10) {
+ 		wdi_err("This version of Windows is no longer supported");
+ 		r = WDI_ERROR_NOT_SUPPORTED;
+ 		goto out;
+@@ -1281,7 +1277,7 @@
+ 	MUTEX_START;
+ 
+ 	GET_WINDOWS_VERSION;
+-	if (nWindowsVersion < WINDOWS_7) {
++	if (nWindowsVersion < WINDOWS_10) {
+ 		wdi_err("This version of Windows is no longer supported");
+ 		r = WDI_ERROR_NOT_SUPPORTED;
+ 		goto out;
+@@ -1460,10 +1456,6 @@
+ 		static_strcpy(inf_entities[DEVICE_MANUFACTURER].replace, vendor_name);
+ 	}
+ 
+-	// Set the WDF and KMDF versions for WinUSB and libusbK
+-	static_sprintf(inf_entities[WDF_VERSION].replace, "%05d", WDF_VER);
+-	static_sprintf(inf_entities[KMDF_VERSION].replace, "%d.%d", WDF_VER/1000, WDF_VER%1000);
+-
+ 	// Extra check, in case somebody modifies our code
+ 	if ((driver_type < 0) && (driver_type >= WDI_USER)) {
+ 		wdi_err("Program assertion failed - driver_version[] index out of range");
+@@ -1471,19 +1463,24 @@
+ 		goto out;
+ 	}
+ 
+-	// Write the date and version data
+-	file_time.dwHighDateTime = driver_version[driver_type].dwFileDateMS;
+-	file_time.dwLowDateTime = driver_version[driver_type].dwFileDateLS;
+-	if ( ((file_time.dwHighDateTime == 0) && (file_time.dwLowDateTime == 0))
+-	  || (!FileTimeToLocalFileTime(&file_time, &local_time))
+-	  || (!FileTimeToSystemTime(&local_time, &system_time)) ) {
+-		GetLocalTime(&system_time);
+-	}
+-	static_sprintf(inf_entities[DRIVER_DATE].replace,
+-		"%02d/%02d/%04d", system_time.wMonth, system_time.wDay, system_time.wYear);
+-	static_sprintf(inf_entities[DRIVER_VERSION].replace, "%d.%d.%d.%d",
+-		(int)driver_version[driver_type].dwFileVersionMS>>16, (int)driver_version[driver_type].dwFileVersionMS&0xFFFF,
+-		(int)driver_version[driver_type].dwFileVersionLS>>16, (int)driver_version[driver_type].dwFileVersionLS&0xFFFF);
++	// The inbox driver package version belongs to the source-built helper.
++	if (driver_type == WDI_WINUSB) {
++		static_strcpy(inf_entities[DRIVER_DATE].replace, WINUSB_DRIVER_DATE);
++		static_strcpy(inf_entities[DRIVER_VERSION].replace, WINUSB_DRIVER_VERSION);
++	} else {
++		file_time.dwHighDateTime = driver_version[driver_type].dwFileDateMS;
++		file_time.dwLowDateTime = driver_version[driver_type].dwFileDateLS;
++		if ( ((file_time.dwHighDateTime == 0) && (file_time.dwLowDateTime == 0))
++		  || (!FileTimeToLocalFileTime(&file_time, &local_time))
++		  || (!FileTimeToSystemTime(&local_time, &system_time)) ) {
++			GetLocalTime(&system_time);
++		}
++		static_sprintf(inf_entities[DRIVER_DATE].replace,
++			"%02d/%02d/%04d", system_time.wMonth, system_time.wDay, system_time.wYear);
++		static_sprintf(inf_entities[DRIVER_VERSION].replace, "%d.%d.%d.%d",
++			(int)driver_version[driver_type].dwFileVersionMS>>16, (int)driver_version[driver_type].dwFileVersionMS&0xFFFF,
++			(int)driver_version[driver_type].dwFileVersionLS>>16, (int)driver_version[driver_type].dwFileVersionLS&0xFFFF);
++	}
+ 
+ 	// Tokenize the inf
+ 	if ((options != NULL) && (options->external_inf))
+--- /dev/null
++++ b/libwdi/winusb10.inf.in
+@@ -0,0 +1,39 @@
++; #INF_FILENAME#
++; Copyright (c) 2010-2023 Pete Batard <pete@akeo.ie> (GNU LGPL)
++[Strings]
++DeviceName = "#DEVICE_DESCRIPTION#"
++VendorName = "#DEVICE_MANUFACTURER#"
++DeviceID   = "#DEVICE_HARDWARE_ID#"
++DeviceGUID = "#DEVICE_INTERFACE_GUID#"
++
++[Version]
++Signature   = "$Windows NT$"
++Class       = "USBDevice"
++ClassGuid   = {88bae032-5a81-49f0-bc3d-a4ff138216d6}
++Provider    = "libwdi"
++CatalogFile = #CAT_FILENAME#
++DriverVer   = #DRIVER_DATE#, #DRIVER_VERSION#
++PnpLockdown = 1
++
++[Manufacturer]
++%VendorName% = libusbDevice_WinUSB,NTamd64
++
++[libusbDevice_WinUSB.NTamd64]
++%DeviceName% = USB_Install, USB\%DeviceID%
++
++[USB_Install]
++Include = winusb.inf
++Needs   = WINUSB.NT
++
++[USB_Install.Services]
++Include = winusb.inf
++Needs   = WINUSB.NT.Services
++
++[USB_Install.HW]
++AddReg = #USE_DEVICE_INTERFACE_GUID#
++
++[NoDeviceInterfaceGUID]
++; Avoids adding a DeviceInterfaceGUID for generic driver
++
++[AddDeviceInterfaceGUID]
++HKR,,DeviceInterfaceGUIDs,0x10000,%DeviceGUID%
+--- /dev/null
++++ b/libwdi/winusb10.cat.in
+@@ -0,0 +1 @@
++# The inbox WinUSB driver does not need extra binaries.

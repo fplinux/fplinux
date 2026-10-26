@@ -1,6 +1,3 @@
 [fdl1]
-url = "https://example.invalid/loader.bin"
-sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-cache_name = "loader.bin"
-license = "MIT"
+source = "loader"
 path = "loader.bin"

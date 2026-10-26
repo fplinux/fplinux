@@ -1,9 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # RAM loader
 [fdl1]
-url = "https://example.invalid/stage"
 # Pinned loader
-sha256 = "loader-sha"
-cache_name = "stage.bin"
-license = "Unlicense"
+source = "loader_stage"
 path = "stage.bin"

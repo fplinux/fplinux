@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-bluez
-pkgver=5.87
+pkgver=@version:aport_bluez_5_87_tar_xz@
 pkgrel=0
 pkgdesc="Bluetooth profiles and object-push transfers for FPLinux"
 url="https://www.bluez.org/"
@@ -13,7 +13,8 @@ makedepends_build="autoconf automake clang22 libtool lld22 pkgconf llvm22"
 makedepends_host="dbus-dev fplinux-bluez-glib-dev linux-headers musl-dev readline-dev"
 subpackages="$pkgname-libs:libs $pkgname-dev"
 options="!check"
-source="https://www.kernel.org/pub/linux/bluetooth/bluez-$pkgver.tar.xz
+source="
+	@source:aport_bluez_5_87_tar_xz@
 	bluetooth.initd
 	org.bluez.obex.service
 	modules-load.conf
@@ -123,7 +124,6 @@ dev() {
 	depends="$pkgname-libs=$pkgver-r$pkgrel"
 }
 sha512sums="
-f1e3bede9b0bbc3b5cfe9fed5f7945be7cbcf7a299729b5f82f1cba4bbbd6c4d2e372c9685f61458dfc374c9dfee352b6c2933a2c0d7727b8171ff394055e169  bluez-5.87.tar.xz
 fc03200243e9cdf4fd73f51d199c70cf81e0d39748811e858f3031abf9b9de4b64677d37683b88813bf790fdd1fe88cd4d60bcd1c9725ee8a95ae3ac4fa3701e  bluetooth.initd
 d6766a4992ed4141569d6d82a802a771a5cb4c08873bfb0fdbedeea4d738bf9b56d9e0452ec19b7635418b1af4ab9b1735692043d629cbed3ce0eda6f51e1c6f  org.bluez.obex.service
 e2135385add87b4156caf76edda5d7161d8ef4ba50b898ad7921ed09886e2df7f638eecd1a09604118d7cbd9d915c726c8b4d4064565c7adea6620fb59f9971e  modules-load.conf

@@ -19,6 +19,7 @@ from urllib.parse import unquote
 
 from fplinux_cli.alpine import lock as alpine_lock
 from fplinux_cli.alpine import registration, selection
+from fplinux_cli.alpine.aports import materialize_aport_sources
 from fplinux_cli.common import ROOT, fail
 from fplinux_cli.manifests.paths import discover_targets
 from fplinux_cli.manifests.platforms import load_platform
@@ -372,6 +373,7 @@ def check_release_lock() -> None:
             or any(character not in "0123456789abcdef" for character in digest)
         ):
             fail(f"invalid recorded phone-test SHA256 for target: {name}")
+
 
 
 def alpine_apkbuilds(files: list[Path]) -> list[str]:
@@ -734,7 +736,10 @@ def main() -> None:
             validate_package_selections()
             run(["sh", "-n", "alpine/abuild.conf"])
             for apkbuild in apkbuilds:
-                run(["apkbuild-lint", apkbuild])
+                package = Path(apkbuild).parent.name
+                with tempfile.TemporaryDirectory(prefix="fplinux-aport-lint-") as temporary:
+                    staged = materialize_aport_sources(package, ROOT, Path(temporary) / package)
+                    run(["apkbuild-lint", "APKBUILD"], cwd=staged)
     if "c" in selected:
         with report_stage(reporter, "ui-profile"):
             run(["python3", "scripts/fplinux_ui_profile.py", "--check"])

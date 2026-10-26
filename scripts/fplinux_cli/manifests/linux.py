@@ -17,6 +17,7 @@ from fplinux_cli.manifests.identity import (
     validate_platform_name,
     validate_target_identity,
 )
+from fplinux_cli.manifests.source_catalog import resolve_source_record
 from fplinux_cli.manifests.values import (
     KCONFIG_SYMBOL,
     TARGET_NAME,
@@ -288,7 +289,10 @@ def discover_linux_targets(
         source = sources.get(source_lock)
         if not isinstance(source, dict):
             fail(f"unknown Linux source lock: {source_lock}")
-        if sha256_value(source.get("sha256"), f"source {source_lock} sha256") != source_sha256:
+        original = resolve_source_record(source_lock, source)
+        if original.algorithm != "sha256":
+            fail(f"Linux source requires a SHA-256 pin: {source_lock}")
+        if original.checksum != source_sha256:
             continue
 
         try:

@@ -1,14 +1,10 @@
 [kern]
-version = "1.0.0"
-archive_url = "https://example.invalid/kern.tar.gz"
-archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+source = "kern"
 binary_sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 [base]
-release = "3.24.2"
+source = "alpine_environment"
 arch = "x86_64"
-url = "https://example.invalid/base.tar.gz"
-sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 
 [tools]
 
@@ -27,24 +23,18 @@ arch = "x86_64"
 
 [[input]]
 key = "kern:archive"
-url = "https://example.invalid/kern.tar.gz"
-sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-destination = "downloads/kern/kern.tar.gz"
+source = "kern"
 purpose = "kern-runtime"
 arch = "x86_64"
 
 [[input]]
 key = "environment:base-rootfs"
-url = "https://example.invalid/base.tar.gz"
-sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-destination = "downloads/kern/alpine-minirootfs.tar.gz"
+source = "alpine_environment"
 purpose = "environment-base"
 arch = "x86_64"
 
 [[input]]
 key = "environment:tool-source"
-url = "https://example.invalid/tool-2.0.tar.gz"
-sha256 = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-destination = "downloads/environment/tool/tool-2.0.tar.gz"
+source = "tool_source"
 purpose = "environment-source"
 arch = "x86_64"

@@ -22,6 +22,9 @@ def test_installed_quality_sources_preserve_ui_fonts_licenses_and_uploader(tmp_p
     (fonts / "face.ttf").write_bytes(b"font fixture\n")
     (fonts / "face.ttf").chmod(0o600)
     (fonts / "OFL.txt").write_bytes(b"font license\n")
+    icons = resources / "quality/ui-icons"
+    icons.mkdir()
+    (icons / "tabler.tgz").write_bytes(b"icon archive fixture\n")
     uploader = resources / "quality/spreadtrum-flash"
     uploader.mkdir()
     (uploader / "spd_dump.c").write_bytes(b"uploader fixture\n")
@@ -34,6 +37,8 @@ def test_installed_quality_sources_preserve_ui_fonts_licenses_and_uploader(tmp_p
     assert (destination / "ui-fonts/face.ttf").read_bytes() == b"font fixture\n"
     assert (destination / "ui-fonts/face.ttf").stat().st_mode & 0o777 == 0o644
     assert (destination / "ui-fonts/OFL.txt").read_bytes() == b"font license\n"
+    assert (destination / "ui-icons/tabler.tgz").read_bytes() == b"icon archive fixture\n"
+    assert (destination / "ui-icons/tabler.tgz").stat().st_mode & 0o777 == 0o644
     assert (destination / "spreadtrum-flash/spd_dump.c").read_bytes() == b"uploader fixture\n"
     assert (destination / "lvgl.tar.gz").read_bytes() == b"existing tool source\n"
 
@@ -54,7 +59,7 @@ def _terminal_font_inputs(
         ):
             if filename != missing_input:
                 bundle.add(_FIXTURES / source, arcname=f"terminus-font-1/{filename}")
-    aport = resources / "alpine/aports/fplinux-font-terminus/APKBUILD"
+    aport = resources / "quality/terminus-aport/APKBUILD"
     aport.parent.mkdir(parents=True)
     shutil.copyfile(_FIXTURES / "APKBUILD.fixture", aport)
     temporary = tmp_path / "temporary"

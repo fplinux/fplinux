@@ -5,15 +5,14 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import tomllib
+import json
 import zipfile
 from pathlib import Path
 
 
 def install_wheels(lock: Path, inputs: Path, destination: Path) -> None:
     """Verify local wheels before extracting their declared bytes."""
-    with lock.open("rb") as stream:
-        declarations = tomllib.load(stream)
+    declarations = json.loads(lock.read_text())
     destination.mkdir(parents=True, exist_ok=True)
     for record in declarations["input"]:
         cached_path = Path(record["destination"])

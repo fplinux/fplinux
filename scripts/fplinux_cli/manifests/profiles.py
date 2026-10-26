@@ -10,6 +10,7 @@ from typing import Any
 from fplinux_cli import common
 from fplinux_cli.common import fail
 from fplinux_cli.manifests.paths import profile_manifest_path, target_directory
+from fplinux_cli.manifests.source_catalog import resolve_source
 from fplinux_cli.manifests.values import (
     GIT_COMMIT,
     UUID,
@@ -82,12 +83,10 @@ def _profile_uboot_lock(profile: str, relative: str) -> dict[str, str]:
     lock = exact_table(
         raw,
         {
-            "version",
+            "source",
             "repository",
             "tag",
             "commit",
-            "archive_url",
-            "archive_sha256",
             "license",
         },
         f"profile {profile} U-Boot lock",
@@ -95,6 +94,14 @@ def _profile_uboot_lock(profile: str, relative: str) -> dict[str, str]:
     normalized: dict[str, Any] = {
         key: nonempty_string(lock.get(key), f"profile {profile} U-Boot lock {key}") for key in lock
     }
+    source = resolve_source(common.ROOT, normalized.pop("source"))
+    normalized.update(
+        version=source.version,
+        archive_url=source.url,
+        archive_sha256=source.checksum,
+        destination=source.destination,
+        source_id=source.id,
+    )
     if re.fullmatch(r"[0-9]{4}\.[0-9]{2}", normalized["version"]) is None:
         fail(f"profile {profile} U-Boot version must use YYYY.MM syntax")
     if not normalized["repository"].startswith("https://"):

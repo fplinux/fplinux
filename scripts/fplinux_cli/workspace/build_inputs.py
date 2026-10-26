@@ -16,8 +16,14 @@ from fplinux_cli.alpine.selection import (
     selected_packages,
     shared_aport_sources,
 )
+from fplinux_cli.alpine.sources import aport_source_ids
 from fplinux_cli.build.inputs import selected_build_sources
-from fplinux_cli.build.runtime import runtime_source_files
+from fplinux_cli.build.runtime import (
+    runtime_host_tools,
+    runtime_needs_nand_ecc,
+    runtime_source_files,
+    selected_host_tool_recipes,
+)
 from fplinux_cli.build.sources import source_lock_entry
 from fplinux_cli.common import ROOT, canonical_json_bytes, fail
 from fplinux_cli.device_data import inputs as firmware_inputs
@@ -48,7 +54,7 @@ from .capture import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Collection, Iterator, Mapping
     from pathlib import Path
 
     from fplinux_cli.manifests.linux import LinuxTarget
@@ -64,6 +70,7 @@ STAGED_BUILD_SOURCES = (
     "scripts/fplinux_cli/alpine/selection.py",
     "scripts/fplinux_cli/alpine/lock.py",
     "scripts/fplinux_cli/alpine/recipes.py",
+    "scripts/fplinux_cli/alpine/sources.py",
     "scripts/fplinux_cli/alpine/signing.py",
     "scripts/fplinux_cli/alpine/aports.py",
     "scripts/fplinux_cli/alpine/packages.py",
@@ -137,6 +144,7 @@ def target_build_source_files(
     *,
     build_type: str = "release",
     target_config: dict[str, Any] | None = None,
+    host_tools: Collection[str] | None = None,
 ) -> list[tuple[str, Path]]:
     """Resolve only the selected target/platform build closure."""
     if target_config is None:
@@ -215,7 +223,11 @@ def target_build_source_files(
             add_source_path(files, ROOT / step["source"])
         for relative in platform["bootstrap"]["patches"]:
             add_source_path(files, ROOT / relative)
-    for recipe in platform["host"]["tools"]:
+    if host_tools is None:
+        host_tools = runtime_host_tools(
+            platform, nand_ecc=runtime_needs_nand_ecc(target_config)
+        ).values()
+    for recipe in selected_host_tool_recipes(platform, host_tools):
         if recipe["type"] == "cc-libusb":
             add_source_path(files, ROOT / recipe["source"])
             for relative in CLI_SOURCES:
@@ -259,9 +271,7 @@ def shared_linux_source_files(
     platform_path = f"platforms/{target_config['platform']}/platform.toml"
     platform = _captured_toml(captured_files[platform_path])
     source_lock = platform["linux"]["source_lock"]
-    source = sources.get(source_lock)
-    if not isinstance(source, dict):
-        fail(f"unknown Linux source lock: {source_lock}")
+    source = source_lock_entry(sources, source_lock)
     source_sha256 = sha256_value(source.get("sha256"), f"source {source_lock} sha256")
     targets = discover_linux_targets(ROOT, sources, source_sha256)
     files: dict[str, Path] = {}
@@ -304,7 +314,12 @@ def _captured_toml(source: WorkspaceFile) -> dict[str, Any]:
 
 
 def _captured_source_declarations(
-    files: dict[str, WorkspaceFile], target: str, platform_name: str
+    files: dict[str, WorkspaceFile],
+    target: str,
+    platform_name: str,
+    *,
+    uboot_source: str | None,
+    nand_ecc: bool,
 ) -> tuple[dict[str, Any], bytes]:
     """Select source and loader records from the captured checkout bytes."""
     source_file = files["sources.lock.toml"]
@@ -313,11 +328,15 @@ def _captured_source_declarations(
     platform = _captured_toml(platform_file)
     target_file = files[f"targets/{target}/target.toml"]
     target_config = _captured_toml(target_file)
+    alpine = _captured_toml(files["alpine.lock.toml"])
     source_names = {
+        alpine["minirootfs"]["source"],
         platform["linux"]["source_lock"],
         *(
             tool["source_lock"]
-            for tool in platform["host"]["tools"]
+            for tool in selected_host_tool_recipes(
+                platform, runtime_host_tools(platform, nand_ecc=nand_ecc).values()
+            )
             if tool["type"] == "make-archive"
         ),
     }
@@ -328,12 +347,19 @@ def _captured_source_declarations(
             source.source_lock
             for source in loader_sources(target_config["loader"]["build"], sources)
         )
-    selected = {name: source_lock_entry(sources, name) for name in sorted(source_names)}
+    for relative, captured in files.items():
+        if relative.startswith("alpine/aports/") and relative.endswith("/APKBUILD"):
+            source_names.update(aport_source_ids(captured.contents.decode("utf-8")))
+    if uboot_source is not None:
+        uboot = _captured_toml(files[uboot_source])
+        source_names.add(uboot["source"])
     asset_declaration: dict[str, Any] = {"records": []}
     if platform["bootstrap"]["backend"] == "ums9117":
         asset_file = files[f"platforms/{platform_name}/loader/assets.lock.toml"]
-        assets = resolve_asset_sources(_captured_toml(asset_file))
+        assets = resolve_asset_sources(_captured_toml(asset_file), source_records=sources)
+        source_names.update(asset["source_id"] for asset in assets)
         asset_declaration = {"mode": asset_file.mode, "records": assets}
+    selected = {name: source_lock_entry(sources, name) for name in sorted(source_names)}
     declarations = canonical_json_bytes(
         {
             "sources": {"mode": source_file.mode, "records": selected},
@@ -343,7 +369,7 @@ def _captured_source_declarations(
     return sources, declarations
 
 
-def target_workspace_snapshot(
+def target_workspace_snapshot(  # noqa: PLR0913 -- target, build context and personal inputs are distinct.
     target: str,
     profile: str | None = None,
     *,
@@ -362,7 +388,13 @@ def target_workspace_snapshot(
     )
     causal_files = {source.path: source for source in source_snapshot.files}
     sources, source_declarations = _captured_source_declarations(
-        causal_files, target, target_config["platform"]
+        causal_files,
+        target,
+        target_config["platform"],
+        uboot_source=(
+            target_config["uboot"]["source"] if target_config["uboot"]["kind"] == "full" else None
+        ),
+        nand_ecc=runtime_needs_nand_ecc(target_config),
     )
     linux_sources = shared_linux_source_files(target_config, sources, captured_files=causal_files)
     materialized_sources = [

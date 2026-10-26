@@ -38,6 +38,7 @@ def write_source_lock_files(root: Path, target: str = "demo") -> list[tuple[str,
     """Supply captured lock inputs beside controlled target and package discovery."""
     fixture_files = {
         "sources.lock.toml": "sources.lock.toml",
+        "alpine.lock.toml": "alpine.lock.toml",
         "platforms/demo/platform.toml": "platform.toml",
         f"targets/{target}/target.toml": "target.toml",
         "platforms/demo/loader/assets.lock.toml": "assets.lock.toml",

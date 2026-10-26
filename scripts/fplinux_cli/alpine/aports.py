@@ -32,6 +32,7 @@ from .selection import (
     local_build_dependencies,
     shared_aport_sources,
 )
+from .sources import materialize_source_metadata
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -105,7 +106,14 @@ def _copy_shared_aport_sources(
         destination.chmod(source.stat().st_mode & 0o777)
 
 
-def materialize_aport_sources(package: str, source_root: Path, destination: Path) -> Path:
+def materialize_aport_sources(
+    package: str,
+    source_root: Path,
+    destination: Path,
+    *,
+    cache: Path = CACHE,
+    verify_local: bool = True,
+) -> Path:
     """Copy one canonical aport and its mapped shared files into a writable stage."""
     if PACKAGE_ID.fullmatch(package) is None:
         fail(f"invalid Alpine package identifier: {package}")
@@ -125,6 +133,9 @@ def materialize_aport_sources(package: str, source_root: Path, destination: Path
 
     shutil.copytree(source_aport, destination)
     _copy_shared_aport_sources(package, destination, source_root=source_root)
+    materialize_source_metadata(
+        package, source_root, destination, cache=cache, verify_local=verify_local
+    )
     return destination
 
 

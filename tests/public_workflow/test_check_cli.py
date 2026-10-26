@@ -27,6 +27,7 @@ PUBLIC_COMMANDS = (
     "format",
     "setup",
     "dependencies",
+    "ci",
     "build",
     "probe-build",
     "checksum",
@@ -78,6 +79,7 @@ class CheckCommandTests:
             tuple(re.findall(r"^    ([a-z][a-z-]*)\s{2,}", result.stdout, flags=re.MULTILINE))
         ) == (PUBLIC_COMMANDS)
         assert ("_commit-msg") not in (result.stdout)
+        assert ("_pre-push") not in (result.stdout)
 
     def test_launcher_rejects_a_host_without_python314(self, tmp_path: Path) -> None:
         """Fail clearly before importing the CLI when its only Python is absent."""

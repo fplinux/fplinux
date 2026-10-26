@@ -10,44 +10,101 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
+from fplinux_cli import common
 from fplinux_cli.build.host_tools.windows import (
-    _download,
     _extract_zip,
+    _native_tool_recipes,
     verify_windows_dependencies,
 )
+from fplinux_cli.manifests.source_catalog import acquire_source
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-def test_locked_windows_download_can_be_reused_without_network(tmp_path: Path) -> None:
+@pytest.fixture
+def windows_original(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    """Resolve the Windows consumer through one canonical original owner."""
+    monkeypatch.setattr(common, "ROOT", tmp_path)
+    (tmp_path / "sources.lock.toml").write_text(
+        '[windows]\nversion="1"\nname="windows.zip"\n'
+        'url="https://example.invalid/windows.zip"\nalgorithm="sha256"\n'
+        'checksum="5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"\n'
+        "bytes=6\n"
+    )
+    return {"source_id": "windows"}
+
+
+def test_locked_windows_download_can_be_reused_without_network(
+    tmp_path: Path, windows_original: dict[str, str]
+) -> None:
     """Replace the HTTPS response; checksum and offline cache behavior remain real."""
-    lock = {
-        "url": "https://example.invalid/windows.zip",
-        "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
-        "size": 6,
-        "name": "windows.zip",
-    }
+    lock = windows_original
     with mock.patch("urllib.request.urlopen", return_value=io.BytesIO(b"hello\n")):
-        path = _download(lock, tmp_path, offline=False)
+        path = acquire_source(common.ROOT, lock["source_id"], tmp_path, offline=False)
     assert path.read_bytes() == b"hello\n"
     with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")):
-        assert _download(lock, tmp_path, offline=True) == path
+        assert acquire_source(common.ROOT, lock["source_id"], tmp_path, offline=True) == path
 
 
-def test_missing_windows_download_fails_offline_without_network(tmp_path: Path) -> None:
-    lock = {
-        "url": "https://example.invalid/windows.zip",
-        "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
-        "size": 6,
-        "name": "windows.zip",
-    }
+def test_missing_windows_download_fails_offline_without_network(
+    tmp_path: Path, windows_original: dict[str, str]
+) -> None:
+    lock = windows_original
     with (
         mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")),
         pytest.raises(SystemExit, match="offline locked input is missing or mismatched"),
     ):
-        _download(lock, tmp_path, offline=True)
-    assert not (tmp_path / "windows.zip").exists()
+        acquire_source(common.ROOT, lock["source_id"], tmp_path, offline=True)
+    assert not (tmp_path / "downloads/sources/windows/windows.zip").exists()
+
+
+@pytest.mark.parametrize(
+    ("platform", "nand_ecc", "expected"),
+    [
+        ("sc9820e", False, ["spd_dump"]),
+        ("ums9117", False, ["spd_dump", "libc_server"]),
+        ("ums9117", True, ["spd_dump", "libc_server", "ums9117-nand-ecc"]),
+    ],
+)
+def test_native_windows_payload_uses_the_selected_platform_runtime_tools(
+    platform: str, expected: list[str], *, nand_ecc: bool
+) -> None:
+    recipes = _native_tool_recipes(platform, nand_ecc=nand_ecc)
+
+    assert [recipe["name"] for recipe in recipes] == expected
+
+
+def test_native_tool_selection_uses_runtime_roles_instead_of_fixed_binary_names() -> None:
+    config = {
+        "host": {
+            "runtime_tools": {"loader": "upload", "bridge": "bridge", "keyboard": "input"},
+            "tools": [
+                {"name": "upload", "type": "make-archive"},
+                {"name": "bridge", "type": "make-archive"},
+                {"name": "input", "type": "cc-libusb"},
+                {"name": "report", "type": "make-archive"},
+            ],
+        }
+    }
+    with mock.patch("fplinux_cli.build.host_tools.windows.load_platform", return_value=config):
+        recipes = _native_tool_recipes("selected", nand_ecc=False)
+
+    assert [recipe["name"] for recipe in recipes] == ["upload", "bridge"]
+
+
+def test_native_windows_selection_rejects_an_absent_required_decoder() -> None:
+    config = {
+        "host": {
+            "runtime_tools": {"loader": "upload"},
+            "tools": [{"name": "upload", "type": "make-archive"}],
+        }
+    }
+    with (
+        mock.patch("fplinux_cli.build.host_tools.windows.load_platform", return_value=config),
+        pytest.raises(SystemExit, match="host tools are not declared: ums9117-nand-ecc"),
+    ):
+        _native_tool_recipes("selected", nand_ecc=True)
 
 
 def test_openssh_projection_keeps_selected_client_and_notice(tmp_path: Path) -> None:

@@ -50,6 +50,7 @@ def target_checkout() -> Iterator[TargetCheckout]:
         shutil.copytree(REPOSITORY / "platforms/ums9117/loader", platform / "loader")
         shutil.copytree(REPOSITORY / "alpine/aports", root / "alpine/aports")
         shutil.copytree(REPOSITORY / "profiles", root / "profiles")
+        shutil.copy2(REPOSITORY / "sources.lock.toml", root)
         target_directory = root / "targets"
         target_directory.mkdir()
         with mock.patch.object(common, "ROOT", root):
@@ -140,19 +141,24 @@ class NewTargetTests:
         prose = " ".join(readme.split())
 
         assert readme.startswith("FPLinux for HAMMER Horizon LTE\n")
-        assert "Keep the powered-off phone disconnected" in prose
+        assert "Turn the phone off and leave USB disconnected." in prose
         assert "python3.14 -I fplinux.py run\n" in readme
-        assert "Wait until the runner asks for the phone, then follow its instruction" in prose
+        assert "Wait until the launcher asks you to connect the phone." in prose
         assert "Power the phone off, hold *, then connect USB while keeping * pressed." in prose
-        assert "If connected too early, disconnect and restart this sequence." in prose
-        assert readme.index("python3.14 -I fplinux.py run\n") < readme.index(
-            "Wait until the runner"
+        assert (
+            "If you connected too early, disconnect USB, turn the phone off and start again."
+            in prose
         )
-        assert readme.index("Wait until the runner") < readme.index("Power the phone off, hold *")
+        assert readme.index("python3.14 -I fplinux.py run\n") < readme.index(
+            "Wait until the launcher"
+        )
+        assert readme.index("Wait until the launcher") < readme.index(
+            "Power the phone off, hold *"
+        )
         assert "python3.14 -I fplinux.py run --reconnect" in readme
         assert "Phone support, controls and limits: docs/porting/checklist/index.html" in prose
         assert "confirm it on this phone before use" in prose
-        assert "Configuration alone does not establish support" in prose
+        assert "A configuration file alone does not mean the phone has been tested." in prose
 
     @pytest.mark.usefixtures("target_checkout")
     def test_new_target_release_carries_every_declared_bundle_apk(self) -> None:

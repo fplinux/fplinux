@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-libtsm
-pkgver=4.8.0
+pkgver=@version:libtsm@
 pkgrel=0
 pkgdesc="Terminal screen and escape sequence engine for FPLinux"
 url="https://github.com/kmscon/libtsm"
@@ -11,7 +11,7 @@ makedepends_host="musl-dev"
 subpackages="$pkgname-dev"
 options="!check"
 source="
-	libtsm-$pkgver.tar.gz::https://github.com/kmscon/libtsm/archive/refs/tags/v$pkgver.tar.gz
+	@source:libtsm@
 	0001-xterm-function-keys.patch
 "
 builddir="$srcdir/libtsm-$pkgver"
@@ -38,6 +38,5 @@ package() {
 		"$pkgdir/usr/share/licenses/$pkgname/LICENSE_wcwidth"
 }
 sha512sums="
-cd40679eb25ade1505dbf7eca8d032ae5dc57b92be4f3a7ea4be79b68d2988bb6f8ba202d0bdf4b4dc76b7c743bc54ecc315b24e29b055cbfed9aefb29a653f6  libtsm-4.8.0.tar.gz
 e7de3d02ab1f96d3013b174711885265000ca6f24da0c11fc36f4eef9705a911fc7cfad9537f644f649465ae23fd2e15dacf36d426bef7b7ac64f4aca5a0d03e  0001-xterm-function-keys.patch
 "

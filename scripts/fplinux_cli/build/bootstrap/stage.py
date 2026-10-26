@@ -7,11 +7,13 @@ import shutil
 import tarfile
 from typing import TYPE_CHECKING, Any
 
+from fplinux_cli import common
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
 from fplinux_cli.build import sources as sources_build
 from fplinux_cli.build.display import render_bootstrap_display
 from fplinux_cli.common import fail
+from fplinux_cli.manifests.source_catalog import acquire_source
 
 from .recipe import generated_bootstrap_files, uboot_build_header
 from .result import BootstrapBuild
@@ -80,11 +82,8 @@ def build_bootstrap(  # noqa: PLR0913 -- source selection and payload inputs sta
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(inputs_build.require_file(source), destination)
     linux_lock = sources_build.source_lock_entry(sources, platform["linux"]["source_lock"])
-    linux_archive = sources_build.fetch(
-        linux_lock.get("url"),
-        linux_lock.get("sha256"),
-        inputs_build.CACHE / "downloads/linux",
-        f"linux-{linux_lock['version']}.tar.xz",
+    linux_archive = acquire_source(
+        common.ROOT, platform["linux"]["source_lock"], inputs_build.CACHE
     )
     with tarfile.open(linux_archive, "r:*") as source_archive:
         for step in platform_bootstrap["linux_copies"]:
@@ -112,11 +111,8 @@ def build_bootstrap(  # noqa: PLR0913 -- source selection and payload inputs sta
     vendor_lock = sources_build.source_lock_entry(
         sources, platform_bootstrap["vendor_source_lock"]
     )
-    archive = sources_build.fetch(
-        vendor_lock.get("archive_url"),
-        vendor_lock.get("archive_sha256"),
-        inputs_build.CACHE / "downloads",
-        platform_bootstrap["vendor_cache_name"],
+    archive = acquire_source(
+        common.ROOT, platform_bootstrap["vendor_source_lock"], inputs_build.CACHE
     )
     commit = vendor_lock.get("commit")
     if not isinstance(commit, str) or not commit:

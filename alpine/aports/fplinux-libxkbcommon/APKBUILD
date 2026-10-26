@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-libxkbcommon
-pkgver=1.13.2
+pkgver=@version:aport_libxkbcommon_1_13_2_tar_gz@
 pkgrel=0
 pkgdesc="Keyboard layout library for FPLinux applications"
 url="https://xkbcommon.org"
@@ -10,7 +10,9 @@ makedepends_build="bison clang22 lld22 llvm22 meson samurai"
 makedepends_host="musl-dev"
 subpackages="$pkgname-dev $pkgname-static"
 options="!check"
-source="libxkbcommon-$pkgver.tar.gz::https://github.com/xkbcommon/libxkbcommon/archive/refs/tags/xkbcommon-$pkgver.tar.gz"
+source="
+	@source:aport_libxkbcommon_1_13_2_tar_gz@
+"
 builddir="$srcdir/libxkbcommon-xkbcommon-$pkgver"
 
 build() {
@@ -45,5 +47,4 @@ static() {
 }
 
 sha512sums="
-261af9e02ad533bb6560e2711171812c7d92094db8b54eaa19b477ab68270e6d62b315e18d42527ca9c944e87f36f063d003d74aeb4829b21ecb96ab1b0c1ce7  libxkbcommon-1.13.2.tar.gz
 "

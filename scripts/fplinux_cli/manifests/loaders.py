@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fplinux_cli.common import fail
+from fplinux_cli.manifests.source_catalog import source_build_metadata
 from fplinux_cli.manifests.values import (
     basename_value,
     nonempty_string,
@@ -32,9 +33,7 @@ def loader_sources(build: dict[str, Any], sources: dict[str, Any]) -> tuple[Load
     result = []
     for role in ("fdl1", "fdl2", "sml"):
         name = basename_value(build[f"{role}_source"], f"loader build {role}_source")
-        source = sources.get(name)
-        if not isinstance(source, dict):
-            fail(f"source lock entry is missing: {name}")
+        source = source_build_metadata(name, sources.get(name))
         url = nonempty_string(source.get("archive_url"), f"loader source {name} archive_url")
         if not url.startswith("https://"):
             fail(f"loader source {name} archive_url must use HTTPS")
@@ -49,7 +48,7 @@ def loader_sources(build: dict[str, Any], sources: dict[str, Any]) -> tuple[Load
                 sha256=sha256_value(
                     source.get("archive_sha256"), f"loader source {name} archive_sha256"
                 ),
-                cache_name=f"loaders/{name}.tar.gz",
+                cache_name=source["destination"].removeprefix("downloads/"),
                 archive_prefix=prefix,
             )
         )

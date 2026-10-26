@@ -43,7 +43,6 @@ from fplinux_cli.alpine import (
     signing as alpine_signing,
 )
 from fplinux_cli.build import process as process_build
-from fplinux_cli.build import sources as sources_build
 
 from tests.small.alpine.fixtures import (
     alpine_source as alpine_source,  # noqa: PLC0414 -- pytest fixture export.
@@ -426,6 +425,7 @@ class AlpineCacheTests:
             "release": "3.24.1",
             "arch": "armv7",
             "minirootfs": {
+                "source_id": "alpine_target",
                 "url": "https://example.invalid",
                 "sha256": "a" * 64,
                 "bytes": archive.stat().st_size,
@@ -460,7 +460,7 @@ class AlpineCacheTests:
             ),
             mock.patch.object(alpine_lock, "load_alpine_lock", return_value=lock),
             mock.patch.object(alpine_lock, "package_records", return_value={}),
-            mock.patch.object(sources_build, "fetch", return_value=archive),
+            mock.patch.object(alpine_rootfs, "acquire_source", return_value=archive),
             mock.patch.object(alpine_rootfs, "_alpine_runtime_packages", return_value=[]),
             mock.patch.object(alpine_rootfs, "_alpine_group_packages", return_value=[]),
             mock.patch.object(tarfile, "open", return_value=archive_context),

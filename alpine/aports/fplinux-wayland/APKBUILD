@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-wayland
-pkgver=1.26.0
+pkgver=@version:aport_wayland_1_26_0_tar_xz@
 pkgrel=0
 pkgdesc="Wayland libraries for FPLinux graphical applications"
 url="https://wayland.freedesktop.org"
@@ -10,10 +10,10 @@ makedepends_build="clang22 lld22 meson samurai expat-dev pkgconf"
 makedepends_host="musl-dev linux-headers libffi-dev"
 subpackages="$pkgname-dev $pkgname-cursor"
 options="!check"
-_protocolver=1.49
+_protocolver=@version:aport_wayland_protocols_1_49_tar_xz@
 source="
-	https://gitlab.freedesktop.org/wayland/wayland/-/releases/$pkgver/downloads/wayland-$pkgver.tar.xz
-	https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/$_protocolver/downloads/wayland-protocols-$_protocolver.tar.xz
+	@source:aport_wayland_1_26_0_tar_xz@
+	@source:aport_wayland_protocols_1_49_tar_xz@
 "
 builddir="$srcdir/wayland-$pkgver"
 
@@ -73,6 +73,4 @@ cursor() {
 }
 
 sha512sums="
-50861b0c40cedec5f31b49ff1e99fc135a299fa4a8e2ff50ff4bac3f42e2f3f7be38271929fd2f6e58d83d5df516f643946ceba7937cc199581487c082c7ec31  wayland-1.26.0.tar.xz
-c6f58586c4e3046fb545f31959eb662426ddf94cab627a136bec905c3a1c75087ed2850d49e44964241a9158a3559ad02607647a19fb5f1c1fb254160b04806c  wayland-protocols-1.49.tar.xz
 "

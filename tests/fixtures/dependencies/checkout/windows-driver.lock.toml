@@ -1,0 +1,3 @@
+[libwdi]
+source = "windows_driver_libwdi"
+directory = "libwdi"

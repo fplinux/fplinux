@@ -1,14 +1,50 @@
 [linux]
-sha256 = "1111111111111111111111111111111111111111111111111111111111111111"
+version = "1"
+name = "linux.tar.gz"
+url = "https://example.invalid/linux.tar.gz"
+algorithm = "sha256"
+checksum = "1111111111111111111111111111111111111111111111111111111111111111"
 
 [bootstrap]
-archive_url = "https://example.invalid/boot.tar.gz"
-archive_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
+version = "1"
+name = "boot.tar.gz"
+url = "https://example.invalid/boot.tar.gz"
+algorithm = "sha256"
+checksum = "2222222222222222222222222222222222222222222222222222222222222222"
 
 [host]
-archive_url = "https://example.invalid/host.tar.gz"
-archive_sha256 = "3333333333333333333333333333333333333333333333333333333333333333"
+version = "1"
+name = "host.tar.gz"
+url = "https://example.invalid/host.tar.gz"
+algorithm = "sha256"
+checksum = "3333333333333333333333333333333333333333333333333333333333333333"
 
 [unused]
+version = "1"
+name = "unused.tar.gz"
 url = "https://example.invalid/unused.tar.gz"
-sha256 = "4444444444444444444444444444444444444444444444444444444444444444"
+algorithm = "sha256"
+checksum = "4444444444444444444444444444444444444444444444444444444444444444"
+
+[loader_fdl1]
+version = "1"
+name = "fdl1.bin"
+url = "https://example.invalid/fdl1.bin"
+algorithm = "sha256"
+checksum = "5555555555555555555555555555555555555555555555555555555555555555"
+license = "MIT"
+
+[alpine_target]
+version = "1"
+name = "alpine.tar.gz"
+url = "https://example.invalid/alpine.tar.gz"
+algorithm = "sha256"
+checksum = "6666666666666666666666666666666666666666666666666666666666666666"
+bytes = 1
+
+[storage_boot]
+version = "1"
+name = "u-boot.tar.bz2"
+url = "https://example.invalid/u-boot.tar.bz2"
+algorithm = "sha256"
+checksum = "7777777777777777777777777777777777777777777777777777777777777777"

@@ -15,7 +15,7 @@ from fplinux_cli.environment import kern
 def test_saved_archive_installs_the_exact_binary_without_downloading(tmp_path: Path) -> None:
     """Verified saved release bytes install the executable when no runtime is present."""
     executable = b"static runtime fixture\n"
-    archive = tmp_path / ".cache/downloads/kern/kern.tar.gz"
+    archive = tmp_path / ".cache/downloads/sources/kern/kern.tar.gz"
     archive.parent.mkdir(parents=True)
     with tarfile.open(archive, "w:gz") as bundle:
         member = tarfile.TarInfo("kern")
@@ -27,6 +27,7 @@ def test_saved_archive_installs_the_exact_binary_without_downloading(tmp_path: P
             "archive_url": "https://example.invalid/kern.tar.gz",
             "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
             "binary_sha256": hashlib.sha256(executable).hexdigest(),
+            "destination": "downloads/sources/kern/kern.tar.gz",
         }
     }
     with (

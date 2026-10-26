@@ -1,15 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0-only
 [kern]
-version = "0.33.0"
-archive_url = "https://github.com/getkern/kern/releases/download/v0.33.0/kern-x86_64-unknown-linux-musl.tar.gz"
-archive_sha256 = "3cf562cce7645d8b6320baceb30508af094b083109132ee89ae5f7e81d27a633"
+source = "kern"
 binary_sha256 = "c16b3b2d4e06e551be5edb9bba8dcfc80001f112177e48ed69d628413a8fe1ff"
 
 [base]
-release = "3.24.2"
+source = "alpine_environment"
 arch = "x86_64"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86_64/alpine-minirootfs-3.24.2-x86_64.tar.gz"
-sha256 = "c5ca053cfe1d85c5b96dff8b9bc57045f7f184a30ffb6b65776409ca90388677"
 
 [selection]
 arch = "x86_64"
@@ -129,152 +125,113 @@ apk_groups = [
 ]
 
 [tools.node]
-version = "24.21.0"
 input = "environment:node"
 
 [tools.npm]
-version = "12.2.0"
 input = "environment:npm"
 
 [tools.ruff]
-version = "0.16.10"
 input = "environment:ruff"
 
 [tools.sparse]
-commit = "37156835e3d725b6d750f000be33ba3814bb2310"
 input = "environment:sparse"
 
 [tools.typos]
-version = "1.50.3"
 input = "environment:typos"
 
 [tools.vale-google]
-version = "0.7.0"
 input = "environment:vale-google"
 
 [tools.libtsm]
-version = "4.8.0"
 input = "environment:libtsm"
 
 [tools.lvgl]
-version = "9.6.0"
 input = "environment:lvgl"
 
 [tools.weston]
-version = "16.0.0"
 input = "environment:weston"
 
 [tools.mesa-headers]
-version = "26.1.6-r0"
 input = "environment:mesa-headers"
 
 [tools.gitleaks]
-version = "8.30.1"
 input = "environment:gitleaks"
 
 [[input]]
 key = "kern:archive"
-url = "https://github.com/getkern/kern/releases/download/v0.33.0/kern-x86_64-unknown-linux-musl.tar.gz"
-sha256 = "3cf562cce7645d8b6320baceb30508af094b083109132ee89ae5f7e81d27a633"
-bytes = 1084292
-destination = "downloads/kern/kern.tar.gz"
+source = "kern"
 purpose = "kern-runtime"
 arch = "x86_64"
 
 [[input]]
 key = "environment:base-rootfs"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86_64/alpine-minirootfs-3.24.2-x86_64.tar.gz"
-sha256 = "c5ca053cfe1d85c5b96dff8b9bc57045f7f184a30ffb6b65776409ca90388677"
-destination = "downloads/kern/alpine-minirootfs.tar.gz"
+source = "alpine_environment"
 purpose = "environment-base"
 arch = "x86_64"
 
 [[input]]
 key = "environment:node"
-url = "https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64-musl.tar.xz"
-sha256 = "34ab095af8efe9018f21489d3dc19871fb5edd4f130a71469b69c05fd4e32a5e"
-destination = "downloads/environment/node/node-v24.21.0-linux-x64-musl.tar.xz"
+source = "node"
 purpose = "environment-source"
 arch = "x86_64"
 
 [[input]]
 key = "environment:npm"
-url = "https://registry.npmjs.org/npm/-/npm-12.2.0.tgz"
-checksum = "66c2632a94e796649738b2d7894d710c2cc2e1696893823066687f6b0d8a52e5f2b54eeaeaa32ffdc513ecca1e49ff794a5c2ec3f9515d879f1b3182b291cf35"
-algorithm = "sha512"
-destination = "downloads/environment/npm/npm-12.2.0.tgz"
+source = "npm"
 purpose = "environment-source"
 arch = "x86_64"
 
 [[input]]
 key = "environment:ruff"
-url = "https://github.com/astral-sh/ruff/releases/download/0.16.10/ruff-x86_64-unknown-linux-musl.tar.gz"
-sha256 = "ad1b2138407a0c53b936524df99d87211333f7bc40478d6860f42994597f7ff0"
-destination = "downloads/environment/ruff/ruff-x86_64-unknown-linux-musl.tar.gz"
+source = "ruff"
 purpose = "environment-source"
 arch = "x86_64"
 
 [[input]]
 key = "environment:sparse"
-url = "https://git.kernel.org/pub/scm/devel/sparse/sparse.git/snapshot/sparse-37156835e3d725b6d750f000be33ba3814bb2310.tar.gz"
-sha256 = "feca4eb2f0cb61416f4946e0a537d20da8e5eb0d8064fb3f1323a19cb5738ffc"
-destination = "downloads/environment/sparse/sparse-37156835e3d725b6d750f000be33ba3814bb2310.tar.gz"
+source = "sparse"
 purpose = "environment-source"
 arch = "x86_64"
 
 [[input]]
 key = "environment:typos"
-url = "https://github.com/crate-ci/typos/releases/download/v1.50.3/typos-v1.50.3-x86_64-unknown-linux-musl.tar.gz"
-sha256 = "aca6b5d546307092b8d0a8e0a89dd80f9da51f2f7617c5e45c5607c1684ffbf2"
-destination = "downloads/environment/typos/typos-v1.50.3-x86_64-unknown-linux-musl.tar.gz"
+source = "typos"
 purpose = "environment-source"
 arch = "x86_64"
 
 [[input]]
 key = "environment:vale-google"
-url = "https://github.com/vale-cli/Google/archive/refs/tags/v0.7.0.tar.gz"
-sha256 = "a4d6458fef518d51e5e7e84445a066ce73075ca5b8bb71f0feabb344258a4059"
-destination = "downloads/environment/vale-google/v0.7.0.tar.gz"
+source = "vale_google"
 purpose = "environment-source"
 arch = "x86_64"
 
 [[input]]
 key = "environment:libtsm"
-url = "https://github.com/kmscon/libtsm/archive/refs/tags/v4.8.0.tar.gz"
-sha256 = "50811e9e94fc798eb5dcbaff20f81067c942ec47f329f91bbe4caeb35a61ff05"
-destination = "downloads/environment/libtsm/v4.8.0.tar.gz"
+source = "libtsm"
 purpose = "environment-source"
 arch = "x86_64"
 
 [[input]]
 key = "environment:lvgl"
-url = "https://github.com/lvgl/lvgl/archive/refs/tags/v9.6.0.tar.gz"
-sha256 = "b20ee3acc1bba13c62d854f9ebd62e4c51e0b443b1e0225892e86442defa84df"
-destination = "downloads/environment/lvgl/v9.6.0.tar.gz"
+source = "lvgl"
 purpose = "environment-source"
 arch = "x86_64"
 
 [[input]]
 key = "environment:weston"
-url = "https://gitlab.freedesktop.org/wayland/weston/-/releases/16.0.0/downloads/weston-16.0.0.tar.xz"
-sha256 = "dfb32e2bccabda957b94a8d0ec6075acd18c71c87ebc543ee3e618d294ca0f7f"
-destination = "downloads/environment/weston/weston-16.0.0.tar.xz"
+source = "weston"
 purpose = "environment-source"
 arch = "x86_64"
 
 [[input]]
 key = "environment:mesa-headers"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/mesa-dev-26.1.6-r0.apk"
-sha256 = "fcd8e3caf92e1945e3301e7e0c9b38655956d3bcb20add990f33d85aaff244a1"
-destination = "downloads/environment/mesa-headers/mesa-dev-26.1.6-r0.apk"
+source = "mesa_headers"
 purpose = "environment-source"
 arch = "x86_64"
 
 [[input]]
 key = "environment:gitleaks"
-url = "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz"
-sha256 = "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
-destination = "downloads/environment/gitleaks/gitleaks_8.30.1_linux_x64.tar.gz"
+source = "gitleaks"
 purpose = "environment-source"
 arch = "x86_64"
 
@@ -3286,54 +3243,36 @@ arch = "x86_64"
 
 [[input]]
 key = "environment:tomlkit"
-url = "https://files.pythonhosted.org/packages/13/bc/8c13eb66537dce1d2bd3a57132902f38d0e7f5bb46fa9f4daed9fe9d76ee/tomlkit-0.15.1-py3-none-any.whl"
-sha256 = "177a05aece5a8ca5266fd3c448abb47b8d352f09d477d3ca8332db4d89b24304"
-bytes = 49449
-destination = "downloads/environment/tomlkit/tomlkit-0.15.1-py3-none-any.whl"
+source = "tomlkit"
 purpose = "environment-source"
 arch = "x86_64"
 
 [[input]]
 key = "environment:dtschema"
-url = "https://files.pythonhosted.org/packages/32/59/e5fafef672bde12c0d237462e5e936650df55e2bfc46aac3164ad5d4e953/dtschema-2026.9-py3-none-any.whl"
-sha256 = "defcbe1be176dec69c65b9700c9cd992cba3b409976a1404b9c0b5080aa5f4c1"
-bytes = 125946
-destination = "downloads/environment/dtschema/dtschema-2026.9-py3-none-any.whl"
+source = "dtschema"
 purpose = "environment-source"
 arch = "x86_64"
 
 [[input]]
 key = "environment:pytest"
-url = "https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl"
-sha256 = "37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c"
-bytes = 386536
-destination = "downloads/environment/pytest/pytest-9.1.1-py3-none-any.whl"
+source = "pytest"
 purpose = "environment-source"
 arch = "x86_64"
 
 [[input]]
 key = "environment:iniconfig"
-url = "https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl"
-sha256 = "f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12"
-bytes = 7484
-destination = "downloads/environment/iniconfig/iniconfig-2.3.0-py3-none-any.whl"
+source = "iniconfig"
 purpose = "environment-source"
 arch = "x86_64"
 
 [[input]]
 key = "environment:pluggy"
-url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl"
-sha256 = "e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746"
-bytes = 20538
-destination = "downloads/environment/pluggy/pluggy-1.6.0-py3-none-any.whl"
+source = "pluggy"
 purpose = "environment-source"
 arch = "x86_64"
 
 [[input]]
 key = "environment:pygments"
-url = "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl"
-sha256 = "2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9"
-bytes = 1250147
-destination = "downloads/environment/pygments/pygments-2.21.0-py3-none-any.whl"
+source = "pygments"
 purpose = "environment-source"
 arch = "x86_64"

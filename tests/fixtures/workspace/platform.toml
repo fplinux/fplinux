@@ -5,6 +5,10 @@ source_lock = "linux"
 vendor_source_lock = "bootstrap"
 backend = "ums9117"
 
+[host.runtime_tools]
+loader = "loader"
+
 [[host.tools]]
 type = "make-archive"
+name = "loader"
 source_lock = "host"

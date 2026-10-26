@@ -8,13 +8,15 @@ import stat
 import subprocess
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 import pytest
+from fplinux_cli.alpine.aports import materialize_aport_sources
+from fplinux_cli.manifests.source_catalog import ResolvedSource
 
 from tests import ROOT
 from tests.apk_support import ApkIdentity, signed_apk_tree
 
-RECIPE = ROOT / "alpine/aports/fplinux-busybox/APKBUILD"
 INSTALLER = ROOT / "tests/fixtures/busybox/packaging-installer.sh"
 FIXTURES = ROOT / "tests/fixtures/busybox"
 CORE_PAYLOAD = (FIXTURES / "core-payload.sh").read_bytes()
@@ -24,6 +26,13 @@ EXTRAS_CONFIG = (FIXTURES / "extras-udhcpd.conf").read_bytes()
 
 def _stage_core(temporary: Path, *, arch: str) -> tuple[Path, ApkIdentity]:
     """Execute recipe metadata and packaging with controlled external build outputs."""
+    original = temporary / "controlled-original"
+    original.write_bytes(b"controlled external source input\n")
+    # Compilation and original acquisition are outside this packaging boundary.
+    with mock.patch.object(ResolvedSource, "acquire", return_value=original):
+        aport = materialize_aport_sources(
+            "fplinux-busybox", ROOT, temporary / "native-aport", cache=temporary / "cache"
+        )
     sources = temporary / "src"
     build = sources / "busybox-1.37.0"
     (build / "applets").mkdir(parents=True)
@@ -50,7 +59,7 @@ def _stage_core(temporary: Path, *, arch: str) -> tuple[Path, ApkIdentity]:
             "sh",
             "-eu",
             str(FIXTURES / "package-core.sh"),
-            str(RECIPE),
+            str(aport / "APKBUILD"),
             str(sources),
             str(stage),
             str(metadata),

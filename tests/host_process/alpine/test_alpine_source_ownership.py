@@ -40,6 +40,11 @@ def _build_fixture(directory: Path, *, fail_build: bool) -> None:
         child_script,
     )
     child_script.chmod(0o644)
+    fixture_source = directory / "checkout"
+    aport = fixture_source / "alpine/aports/fplinux-xkb-ru"
+    aport.mkdir(parents=True)
+    (aport / "APKBUILD").write_text("pkgname=fplinux-xkb-ru\n")
+    (fixture_source / "alpine/abuild.conf").write_text("PACKAGER=Fixture\n")
     lookup = pwd.getpwnam
 
     def account(user: str) -> pwd.struct_passwd:
@@ -72,6 +77,7 @@ def _build_fixture(directory: Path, *, fail_build: bool) -> None:
 
     with (
         mock.patch.object(alpine_builder, "CACHE", cache),
+        mock.patch.object(alpine_builder, "ROOT", fixture_source),
         mock.patch.object(alpine_packages, "CACHE", cache),
         mock.patch.object(pwd, "getpwnam", side_effect=account),
         mock.patch.object(alpine_builder, "_run_as_builder", side_effect=run_tool),

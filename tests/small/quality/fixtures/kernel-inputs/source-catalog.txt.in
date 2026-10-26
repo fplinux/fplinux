@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+[linux-captured]
+version = "fixture"
+name = "selected-linux.tar.gz"
+url = "https://example.invalid/selected-linux.tar.gz"
+algorithm = "sha256"
+checksum = "%(checksum)s"
+bytes = %(size)d
+
+[linux-skipped]
+version = "fixture"
+name = "other-linux.tar.gz"
+url = "https://example.invalid/other-linux.tar.gz"
+algorithm = "sha256"
+checksum = "%(checksum)s"

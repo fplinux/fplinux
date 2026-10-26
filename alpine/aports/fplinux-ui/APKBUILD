@@ -7,7 +7,7 @@ url="https://github.com/fplinux/fplinux"
 arch="armv7"
 license="GPL-2.0-only AND LGPL-2.1-or-later AND OFL-1.1"
 depends="fplinux-lvgl fplinux-wayland fplinux-libxkbcommon json-c fplinux-icons"
-# The UI fonts also need lv_font_conv 1.5.3, which the build image pins in its
+# The UI fonts also need lv_font_conv, which the build image pins in its
 # npm tools (/opt/quality/node-tools, run by nodejs) rather than an Alpine
 # package.
 makedepends_build="clang22 lld22 pkgconf wayland-dev wayland-protocols gettext python3
@@ -15,23 +15,17 @@ makedepends_build="clang22 lld22 pkgconf wayland-dev wayland-protocols gettext p
 makedepends_host="musl-dev musl-libintl linux-headers gcc fplinux-lvgl-dev fplinux-wayland-dev fplinux-libxkbcommon-dev json-c-dev"
 subpackages="$pkgname-dev"
 options="!check"
-# Noto Sans v2.015 (hinted), Noto Sans Symbols 2 v2.008 and Noto Sans Math
-# v3.000 from Noto's distribution repository at the commit that published
-# Noto Sans v2.015; fplinux_ui_fonts.py also pins each file's SHA-256 and the
-# release archive it equals.
-_noto=https://raw.githubusercontent.com/notofonts/notofonts.github.io/28b15b4b43b7bed62b5cf6e6b0b5ff5846270535/fonts
-_notogh=https://raw.githubusercontent.com/notofonts
 source="
-	NotoSans-Regular-2.015.ttf::$_noto/NotoSans/hinted/ttf/NotoSans-Regular.ttf
-	NotoSans-Bold-2.015.ttf::$_noto/NotoSans/hinted/ttf/NotoSans-Bold.ttf
-	NotoSans-SemiCondensed-2.015.ttf::$_noto/NotoSans/hinted/ttf/NotoSans-SemiCondensed.ttf
-	NotoSans-SemiCondensedBold-2.015.ttf::$_noto/NotoSans/hinted/ttf/NotoSans-SemiCondensedBold.ttf
-	NotoSans-Condensed-2.015.ttf::$_noto/NotoSans/hinted/ttf/NotoSans-Condensed.ttf
-	NotoSansSymbols2-Regular-2.008.ttf::$_noto/NotoSansSymbols2/hinted/ttf/NotoSansSymbols2-Regular.ttf
-	NotoSansMath-Regular-3.000.ttf::$_noto/NotoSansMath/hinted/ttf/NotoSansMath-Regular.ttf
-	NotoSans-OFL-2.015.txt::$_notogh/latin-greek-cyrillic/NotoSans-v2.015/OFL.txt
-	NotoSansSymbols2-OFL-2.008.txt::$_notogh/symbols/NotoSansSymbols2-v2.008/OFL.txt
-	NotoSansMath-OFL-3.000.txt::$_notogh/math/NotoSansMath-v3.000/OFL.txt
+	@source:aport_notosans_regular_2_015_ttf@
+	@source:aport_notosans_bold_2_015_ttf@
+	@source:aport_notosans_semicondensed_2_015_ttf@
+	@source:aport_notosans_semicondensedbold_2_015_ttf@
+	@source:aport_notosans_condensed_2_015_ttf@
+	@source:aport_notosanssymbols2_regular_2_008_ttf@
+	@source:aport_notosansmath_regular_3_000_ttf@
+	@source:aport_notosans_ofl_2_015_txt@
+	@source:aport_notosanssymbols2_ofl_2_008_txt@
+	@source:aport_notosansmath_ofl_3_000_txt@
 	fplinux-ui.c
 	fplinux-ui-style.c
 	fplinux-ui.h
@@ -178,16 +172,6 @@ package() {
 }
 
 sha512sums="
-e56a55c162f87f80b5f3adad1d076b106b79b1fa28f2219a5b6d658d60500bbc9ef0c50df502ea2f6376269b33de59ceb72234c5ced85d0280f41f66773018b0  NotoSans-Regular-2.015.ttf
-0604b29154fd975f6b07493aa7fb3aa39bc2a9e97430b1306ede4dd136061076a2bbcb1a1487b5c801ebe1276ad2845951c87355675308db3d8a51c937471f14  NotoSans-Bold-2.015.ttf
-dd840968b919578ea5e9bf1ec908bfcca37cf34d0b21fd5ad667a0b04a39e1366868a951d263c9203176a261c06dd9a690d5442cd54156e0d1a4d6a6559c571b  NotoSans-SemiCondensed-2.015.ttf
-6c4e0bb9f302b253735d746ad7efab8f43ba5b60d5098948163c8110d868ad518745b6e16c40f5afb8ab35a7816a8c6c5ef5912c046e4138e1ab6967b1335917  NotoSans-SemiCondensedBold-2.015.ttf
-a46c597e5ad58fb27ae2f919238f8c0351fc4b9b8dc3ad1332085ad02b3d6dfd814c88d821cc3d35d082de26ae6f123a53c6cd4bcc7469ef88f952347ed3aa62  NotoSans-Condensed-2.015.ttf
-221a0d60655a2a976aa77c13571da6286521d44d37bce07e80e92f0584d9ade8e38320f8f95cca132f6b09b48330c7d5a53fb7ecf60387ec6ee8f3da319d5f2e  NotoSansSymbols2-Regular-2.008.ttf
-c64350b40561efba3c5fe9de0be3be27146d5423e4c403f6c12ac862bd0027937221adf16c0226acb822e4e23078c33bd56391fc97f6a61e9dd9372e91c67b8d  NotoSansMath-Regular-3.000.ttf
-df9ec827d8c71a5566862223e195dccb6e835438c1df2756f887e19dd44cd6589c8cf6853ca47410607dd81599c87daaea698f803a2de5ca2248a67df94e23b0  NotoSans-OFL-2.015.txt
-a20a22c0b75b7801ee79fd436a6e7f99e82906df9cc70119eff9ebe0a9a1efc6afdc17a514f8292ecccb86a64274a053aa5b38aa9174fe3c38e00bd698e4c509  NotoSansSymbols2-OFL-2.008.txt
-a64454634a8c33caaadde3be7508971da56cf9a3eeb1d8b959f5c0ccbb914c2be1aa307538f1dbe8d7629aea78f7b9c3be19912626250003bdf64f0d0e1f64e2  NotoSansMath-OFL-3.000.txt
 67bb57e9ce0e1bdb4e3a1bd650477efb625c75678a15a64f544f5d3d5101ba8e71dd3df308f6e66523cdd535195dac7eae20a43c0208fe9e0979dce6380ed103  fplinux-ui.c
 f7b6944a265823076b9b4f48a6b3876db6f246e66aae78a588a51e6c491561fd98e675095a455ac69a9cdada7bf9567623a8a572389e1d584c1b2ee6455bf73e  fplinux-ui-style.c
 e9b22201d11761d4adabd7dadd4fa5ed9bd5d8d9496f44c9e3766e3cb1f3c4e3efe1ac6870eb06072f12d8ef54a6e0a2a5db334627a911ed8825ff415a2f5e08  fplinux-ui.h
@@ -222,7 +206,7 @@ edb89fcd825e5b60589dccc488229c834ab668b688a7b00953841d97f32566ead35833c51f343161
 c4e36f71ac6e411f65ab502a60f6bcc6284eced740c0462c34ca1014ddf13d63474a47d6d88a39d25e7b7b090b8506b993e97fc80b89a0dd540a984fe5420504  fplinux-ui-profile.h
 622744ce4eb3348650ac8912cfded130d01a7492022369d0e4ff72fcdbcfc51e7c5b4e13db6ad450ce6f185d9c33af326c80462138326f7cf882dbe3e965ed9f  fplinux-ui-profile.json
 71a59dfd11eab905ad3b95a763f105fd8bbcc708a5610c9b366dbcd84e0681710552c42efd09d9a50f3d6f50b84f70523f78eed460faca5f57ba51c6e8a24b52  fplinux_ui_profile.py
-ca6d4871e3f8aa9cd36e7d462a045018cbfda459f79751a3ece3e9fbd2944a4baaaf32880a338edf0be6b65538bf4a01e4d3bacccf11a5aa56d67745ee27dbd9  fplinux_ui_fonts.py
+d4067a14959f987accf6138fdf6ee07962e674598c36e74da97fdaa15e6d7a8aced56b0c8611d10c52881811e4266ca0125bbeba072ca32c9b723cff7afd7c8c  fplinux_ui_fonts.py
 e71ed6a44e0ffeedcfef2b7aad955c90401b9e12ba2dfec1f64ff16dd1c0ab6f4ef14a7ef485466292437d599fef0dfb1fe482aad92698f23b6c9b2fb070f704  fplinux-ui-fonts.h
 a2c32ae24afdc238f25d33e1f69b3d34f04b6cd4d07ea716025bbe6287d524eac11313467dbc8d209dd82f2560191ba8059e85cf1a2333e2a4bc1c7e02ad8f85  fplinux-ui-internal.h
 fe470ac4009917a24a5d5f4ad49f0e1a1c9dc807d66eaa42d6a982e00a0ad6f9734d50343de28f8d83f0ec43733240f639cd87d43fc268d7ee71d636e1a03353  fplinux-ui-locale.c

@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-libdrm
-pkgver=2.4.134
+pkgver=@version:aport_libdrm_2_4_134_tar_xz@
 pkgrel=0
 pkgdesc="DRM modesetting library for FPLinux applications"
 url="https://dri.freedesktop.org"
@@ -10,7 +10,9 @@ makedepends_build="clang22 lld22 meson samurai"
 makedepends_host="musl-dev linux-headers"
 subpackages="$pkgname-dev"
 options="!check"
-source="https://dri.freedesktop.org/libdrm/libdrm-$pkgver.tar.xz"
+source="
+	@source:aport_libdrm_2_4_134_tar_xz@
+"
 builddir="$srcdir/libdrm-$pkgver"
 
 build() {
@@ -40,5 +42,4 @@ package() {
 		>"$pkgdir/usr/share/licenses/$pkgname/COPYING"
 }
 sha512sums="
-ef2abddea59d1e93c83a48de920431b839ab50d6071ef4da3cf126e7d64ba7b235f2e34e1169d49ad9de2937a0a18acd66bb8d324b067239b1136e0ddbe792a1  libdrm-2.4.134.tar.xz
 "

@@ -2,6 +2,7 @@
 pkgname=fplinux-jpeg
 pkgver=1
 pkgrel=0
+_jpegver=@version:aport_libjpeg_turbo_3_2_0_tar_gz@
 pkgdesc="V4L2 and software JPEG tools for FPLinux"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
@@ -18,7 +19,7 @@ source="
 	jpeg-cpu-codec.h
 	fplinux-cli.c
 	fplinux-cli.h
-	https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.0/libjpeg-turbo-3.2.0.tar.gz
+	@source:aport_libjpeg_turbo_3_2_0_tar_gz@
 "
 builddir="$srcdir"
 
@@ -33,7 +34,7 @@ prepare() {
 		SAVE_MARKERS_SUPPORTED BLOCK_SMOOTHING_SUPPORTED \
 		QUANT_1PASS_SUPPORTED QUANT_2PASS_SUPPORTED; do
 		sed -i "/^#define $capability[[:space:]]/s/^#define/#undef/" \
-			"$srcdir/libjpeg-turbo-3.2.0/src/jmorecfg.h"
+			"$srcdir/libjpeg-turbo-$_jpegver/src/jmorecfg.h"
 	done
 }
 
@@ -50,7 +51,7 @@ build() {
 	jpeg_ar="$(command -v "$CHOST-ar")"
 	CC="$CC" \
 	CFLAGS="$CFLAGS -O3 -mcpu=cortex-a7 -mfpu=vfpv4 -mfloat-abi=hard" \
-	cmake -S "$srcdir/libjpeg-turbo-3.2.0" -B jpeg-build -G Ninja \
+	cmake -S "$srcdir/libjpeg-turbo-$_jpegver" -B jpeg-build -G Ninja \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=armv7 \
 		-DCMAKE_C_COMPILER="$CC" -DCMAKE_ASM_COMPILER="$CC" \
@@ -71,7 +72,7 @@ build() {
 	"$CC" $CPPFLAGS $CFLAGS -O3 -mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard \
 		-std=c11 -Wall -Wextra -Werror \
 		-I"$srcdir" \
-		-I"$srcdir/libjpeg-turbo-3.2.0/src" -Ijpeg-build \
+		-I"$srcdir/libjpeg-turbo-$_jpegver/src" -Ijpeg-build \
 		"$srcdir/fplinux-jpeg-cpu.c" \
 		"$srcdir/jpeg-cpu-codec.c" jpeg-build/libjpeg.a \
 		"$srcdir/fplinux-cli.c" $LDFLAGS -Wl,--gc-sections -o fplinux-jpeg-cpu
@@ -82,9 +83,9 @@ package() {
 		"$pkgdir/usr/bin/fplinux-jpeg"
 	install -Dm755 "$builddir/fplinux-jpeg-cpu" \
 		"$pkgdir/usr/bin/fplinux-jpeg-cpu"
-	install -Dm644 "$srcdir/libjpeg-turbo-3.2.0/LICENSE.md" \
+	install -Dm644 "$srcdir/libjpeg-turbo-$_jpegver/LICENSE.md" \
 		"$pkgdir/usr/share/licenses/$pkgname/libjpeg-turbo-LICENSE.md"
-	install -Dm644 "$srcdir/libjpeg-turbo-3.2.0/README.ijg" \
+	install -Dm644 "$srcdir/libjpeg-turbo-$_jpegver/README.ijg" \
 		"$pkgdir/usr/share/licenses/$pkgname/README.ijg"
 }
 
@@ -97,5 +98,4 @@ dc06aaad6b66f68bd6835e55024acc271366b85a53d6c31c0741388880abad68ed7dd1bcf10d459f
 968f1e0c4b539acc21e593c932bee24b9caa810d474e7d745708a173539ee34931205eb2cc1c2d3f1a28218c26a1b4d61999a8d4b1708af002cbba076ea7435e  jpeg-cpu-codec.h
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
-13536db56c16e5364690ae2d31343a203e3b653c853c1f5314d36c8eb06700e92342737f1381f0171b3eb0223384c5fbcde91b55a46576952c4e75dc049cd045  libjpeg-turbo-3.2.0.tar.gz
 "

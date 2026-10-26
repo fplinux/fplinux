@@ -36,9 +36,9 @@ class DriverHost(StubWindowsHost):
         self.binds = binds
         self.effects: list[tuple[str, Any]] = []
 
-    def confirm_driver_install(self, license_path: Path) -> bool:
+    def confirm_driver_install(self) -> bool:
         """Model the native dialog result; this does not establish real GUI behavior."""
-        self.effects.append(("consent", license_path.read_bytes()))
+        self.effects.append(("consent", True))
         return self.consent
 
     def install_bootrom_driver(
@@ -81,7 +81,7 @@ def test_declined_terms_stop_before_any_installer(tmp_path: Path) -> None:
     events: list[str] = []
     with pytest.raises(SystemExit, match=r"setup was declined.*restart Run[.]cmd"):
         ensure_driver(host, tmp_path, events)
-    assert host.effects == [("consent", b"{\\rtf1 Synthetic Microsoft license terms.}")]
+    assert host.effects == [("consent", True)]
     assert events == []
 
 
@@ -91,7 +91,7 @@ def test_accepted_setup_checks_live_binding_before_ready(tmp_path: Path, service
     events: list[str] = []
     ensure_driver(host, tmp_path, events)
     assert host.effects == [
-        ("consent", b"{\\rtf1 Synthetic Microsoft license terms.}"),
+        ("consent", True),
         ("installer", (tmp_path / "tools/driver/wdi-simple.exe", tmp_path / "private-session")),
     ]
     assert host.snapshot["devices"][0]["service"] == "WinUSB"

@@ -8,9 +8,7 @@ main = "https://example.invalid/main/armv7"
 community = "https://example.invalid/community/armv7"
 
 [minirootfs]
-url = "https://example.invalid/target.tar.gz"
-sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
-bytes = 2
+source = "alpine_target"
 
 [runtime]
 packages = ["runtime-1-r0.apk"]

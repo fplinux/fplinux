@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
-from fplinux_cli.common import ROOT, fail, sha256_file
+from fplinux_cli.common import ROOT, fail, load_toml, sha256_file
+from fplinux_cli.manifests.source_catalog import resolve_source
 
 from .lock import _sha256
 from .selection import (
@@ -17,6 +19,7 @@ from .selection import (
     selected_aport_graph,
     shared_aport_sources,
 )
+from .sources import aport_declaration
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -87,10 +90,14 @@ def alpine_rootfs_recipe(  # noqa: PLR0913 -- each selected rootfs input is caus
         "packages": list(selected),
         "registration": selected_aport_graph(selected),
         "lock": _source_file(root / "alpine.lock.toml", root),
+        "minirootfs": asdict(
+            resolve_source(root, load_toml(root / "alpine.lock.toml")["minirootfs"]["source"])
+        ),
         "abuild": _source_file(root / "alpine/abuild.conf", root),
         "aports": {
             name: _source_tree(root / "alpine/aports" / name, root) for name in build_packages
         },
+        "originals": {name: aport_declaration(root, name)["originals"] for name in build_packages},
         "shared_aport_sources": shared_aport_source_records(build_packages, root),
         "firmware": [firmware.recipe_record() for firmware in firmware_inputs],
         "display_brightness": display_brightness,
@@ -104,6 +111,8 @@ def alpine_rootfs_recipe(  # noqa: PLR0913 -- each selected rootfs input is caus
             _source_file(root / "scripts/fplinux_cli/alpine/lock.py", root),
             _source_file(root / "scripts/fplinux_cli/alpine/selection.py", root),
             _source_file(root / "scripts/fplinux_cli/alpine/recipes.py", root),
+            _source_file(root / "scripts/fplinux_cli/alpine/sources.py", root),
+            _source_file(root / "scripts/fplinux_cli/manifests/source_catalog.py", root),
             _source_file(root / "scripts/fplinux_cli/alpine/signing.py", root),
             _source_file(root / "scripts/fplinux_cli/alpine/aports.py", root),
             _source_file(root / "scripts/fplinux_cli/alpine/packages.py", root),
@@ -151,11 +160,17 @@ def alpine_package_recipe(
                 library: _source_tree(root / "alpine/aports" / library, root)
                 for library in dependencies
             },
+            "originals": {
+                producer: aport_declaration(root, producer)["originals"]
+                for producer in (name, *dependencies)
+            },
             "shared_aport_sources": shared_aport_source_records((name, *dependencies), root),
             "implementation": [
                 _source_file(root / "scripts/fplinux_cli/alpine/lock.py", root),
                 _source_file(root / "scripts/fplinux_cli/alpine/selection.py", root),
                 _source_file(root / "scripts/fplinux_cli/alpine/recipes.py", root),
+                _source_file(root / "scripts/fplinux_cli/alpine/sources.py", root),
+                _source_file(root / "scripts/fplinux_cli/manifests/source_catalog.py", root),
                 _source_file(root / "scripts/fplinux_cli/alpine/signing.py", root),
                 _source_file(root / "scripts/fplinux_cli/alpine/aports.py", root),
                 _source_file(root / "scripts/fplinux_cli/alpine/packages.py", root),

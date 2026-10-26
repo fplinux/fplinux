@@ -29,6 +29,7 @@ class AlpineSourceContext:
         self.signing_key = "d" * 64
         self.packages = ("fplinux-package-a", "fplinux-package-b")
         self.write("alpine.lock.toml", (ALPINE_FILES / "alpine.lock.toml").read_bytes())
+        self.write("sources.lock.toml", (ALPINE_FILES / "sources.lock.toml").read_bytes())
         self.write("alpine/abuild.conf", b"PACKAGER=FPLinux\n")
         for name in self.packages:
             self.write(f"alpine/aports/{name}/APKBUILD", f"pkgname={name}\n".encode())
@@ -38,6 +39,7 @@ class AlpineSourceContext:
             "lock.py",
             "selection.py",
             "recipes.py",
+            "sources.py",
             "signing.py",
             "aports.py",
             "packages.py",
@@ -51,7 +53,11 @@ class AlpineSourceContext:
         self.write("scripts/fplinux_cli/build/inputs.py", b"build input validation\n")
         self.write("scripts/fplinux_cli/build/process.py", b"build process execution\n")
         self.write("scripts/fplinux_cli/build/sources.py", b"source fetching\n")
-        for owner in ("environment/downloads.py", "manifests/values.py"):
+        for owner in (
+            "environment/downloads.py",
+            "manifests/values.py",
+            "manifests/source_catalog.py",
+        ):
             relative = f"scripts/fplinux_cli/{owner}"
             self.write(relative, (ROOT / relative).read_bytes())
         self.write("scripts/fplinux_cli/common.py", b"shared archive and file operations\n")
@@ -67,7 +73,7 @@ class AlpineSourceContext:
         path.write_bytes(contents)
         return path
 
-    def recipe(
+    def recipe(  # noqa: PLR0913 -- keep independently varied rootfs inputs explicit.
         self,
         image: str = "1" * 64,
         signing_key: str | None = None,

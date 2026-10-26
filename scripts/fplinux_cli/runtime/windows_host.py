@@ -38,7 +38,6 @@ WINDOWS_TOOLS = {
     "keyscan": "tools/openssh/ssh-keyscan.exe",
     "driver": "tools/driver/wdi-simple.exe",
 }
-DRIVER_LICENSE = "licenses/windows-driver/License.rtf"
 
 
 def _console_creation_flags() -> int:
@@ -85,9 +84,9 @@ def validate_archive(
     if windows["host_tools"] != WINDOWS_TOOLS:
         fail("Windows host tools do not match this archive format")
     hashes = windows["sha256"]
-    required_files = {*WINDOWS_TOOLS.values(), DRIVER_LICENSE}
+    required_files = {*WINDOWS_TOOLS.values()}
     if not isinstance(hashes, dict) or not required_files.issubset({*runtime["sha256"], *hashes}):
-        fail("Windows host manifest lacks native tool or driver license checksums")
+        fail("Windows host manifest lacks native tool checksums")
     for relative, expected in hashes.items():
         name = runner.relative_name(relative, "Windows file")
         if not isinstance(expected, str) or ssh.SHA256.fullmatch(expected) is None:
@@ -253,9 +252,9 @@ class WindowsHost:
             timeout=timeout,
         )
 
-    def confirm_driver_install(self, license_path: Path) -> bool:
-        """Require native consent and explicit acceptance of the bundled Microsoft terms."""
-        result = self.ps("driver-consent.ps1", "-LicensePath", str(license_path), timeout=300)
+    def confirm_driver_install(self) -> bool:
+        """Require native consent to driver replacement and certificate trust changes."""
+        result = self.ps("driver-consent.ps1", timeout=300)
         return result["accepted"] is True
 
     def install_bootrom_driver(
@@ -964,7 +963,7 @@ def _ensure_bootrom_driver(  # noqa: PLR0913 -- selected snapshot and driver set
     if (usb["vendor_id"], usb["product_id"]) != (0x1782, 0x4D00):
         fail("Automatic USB driver setup is unavailable for this BootROM USB ID")
     try:
-        accepted = host.confirm_driver_install(bundle.root / DRIVER_LICENSE)
+        accepted = host.confirm_driver_install()
     except subprocess.TimeoutExpired:
         fail("USB driver consent timed out; disconnect the phone and restart Run.cmd")
     if not accepted:

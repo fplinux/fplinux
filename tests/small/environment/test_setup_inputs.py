@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 from typing import TYPE_CHECKING
 from unittest import mock
 
@@ -13,6 +14,7 @@ from fplinux_cli.dependencies.inputs import (
     DependencyInput,
     terminus_font_environment_inputs,
     ui_font_environment_inputs,
+    ui_icon_environment_inputs,
 )
 from fplinux_cli.environment import setup as env_setup
 
@@ -46,7 +48,43 @@ def setup_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path,
     )
     monkeypatch.setattr(env_setup, "ROOT", root)
     monkeypatch.setattr(env_setup, "ENVIRONMENT_RECIPE_INPUTS", ("install.py",))
-    monkeypatch.setattr(env_setup, "environment_inputs", lambda _root: [item])
+    for package, declarations in (
+        ("fplinux-ui", "face ofl"),
+        ("fplinux-font-terminus", "terminus"),
+        ("fplinux-icons", "tabler"),
+    ):
+        aport = root / "alpine/aports" / package / "APKBUILD"
+        aport.parent.mkdir(parents=True)
+        references = " ".join(f"@source:{name}@" for name in declarations.split())
+        aport.write_text(f'pkgname={package}\npkgver=1\nsource="{references}"\nsha512sums=""\n')
+    catalog = []
+    for name, filename, data in (
+        ("face", "face.ttf", b"font fixture\n"),
+        ("ofl", "OFL.txt", b"font license\n"),
+        ("terminus", "terminus.tar.gz", b"bitmap archive fixture\n"),
+        ("tabler", "tabler.tgz", b"icon archive fixture\n"),
+    ):
+        original = root / ".cache/downloads/sources" / name / filename
+        original.parent.mkdir(parents=True)
+        original.write_bytes(data)
+        catalog.append(
+            f'[{name}]\nversion="1"\nname="{filename}"\nurl="https://example.invalid/{filename}"\nalgorithm="sha512"\nchecksum="{hashlib.sha512(data).hexdigest()}"\n'
+        )
+    (root / "sources.lock.toml").write_text("\n".join(catalog))
+    (root / "package-lock.json").write_text(
+        json.dumps({"packages": {"node_modules/lv_font_conv": {"version": "1.5.3"}}})
+    )
+    monkeypatch.setattr(
+        env_setup,
+        "environment_inputs",
+        lambda selected_root: [
+            item,
+            *ui_font_environment_inputs(selected_root),
+            *terminus_font_environment_inputs(selected_root),
+            *ui_icon_environment_inputs(selected_root),
+        ],
+    )
+    monkeypatch.setattr(env_setup, "load_environment_lock", lambda: {"input": []})
     return root, context
 
 
@@ -64,6 +102,17 @@ def test_offline_staging_contains_declared_bytes_and_preserves_recipe_mode(
     assert (context / "install.py").stat().st_mode & 0o777 == 0o755
     assert not (context / "inputs/private").exists()
     assert (root / ".cache/private/phone-state").read_bytes() == b"private\n"
+
+
+def test_offline_staging_captures_the_icon_packages_declared_archive(
+    setup_inputs: tuple[Path, Path],
+) -> None:
+    """The same verified package original reaches the offline native renderer."""
+    _root, context = setup_inputs
+    with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")):
+        env_setup._stage_environment_inputs(context, offline=True)  # noqa: SLF001 -- test the host staging boundary.
+    assert (context / "quality/ui-icons/tabler.tgz").read_bytes() == b"icon archive fixture\n"
+    assert not (context / "inputs/downloads/sources/tabler/tabler.tgz").exists()
 
 
 def test_offline_missing_input_reports_its_url_without_downloading(
@@ -112,26 +161,9 @@ def test_mismatched_download_leaves_previous_cached_input(setup_inputs: tuple[Pa
 
 
 @pytest.fixture
-def ui_font_inputs(
-    setup_inputs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
-) -> tuple[Path, Path]:
+def ui_font_inputs(setup_inputs: tuple[Path, Path]) -> tuple[Path, Path]:
     """Declare font originals in their package and isolate setup from unrelated downloads."""
     root, context = setup_inputs
-    font = root / ".cache/downloads/alpine/sources/face.ttf"
-    font.parent.mkdir(parents=True)
-    font.write_bytes(b"font fixture\n")
-    license_file = font.with_name("OFL.txt")
-    license_file.write_bytes(b"font license\n")
-    aport = root / "alpine/aports/fplinux-ui/APKBUILD"
-    aport.parent.mkdir(parents=True)
-    font_digest = hashlib.sha512(b"font fixture\n").hexdigest()
-    license_digest = hashlib.sha512(b"font license\n").hexdigest()
-    aport.write_text(
-        'source="face.ttf::https://example.invalid/face.ttf '
-        'OFL.txt::https://example.invalid/OFL.txt local.c"\n'
-        f'sha512sums="{font_digest}  face.ttf\n{license_digest}  OFL.txt"\n'
-    )
-    monkeypatch.setattr(env_setup, "environment_inputs", ui_font_environment_inputs)
     return root, context
 
 
@@ -153,7 +185,7 @@ def test_offline_staging_rejects_unavailable_ui_font_original(
 ) -> None:
     """Missing or mismatched originals stop setup instead of silently omitting UI fonts."""
     root, context = ui_font_inputs
-    font = root / ".cache/downloads/alpine/sources/face.ttf"
+    font = root / ".cache/downloads/sources/face/face.ttf"
     if available:
         font.write_bytes(b"different font\n")
     else:
@@ -167,23 +199,11 @@ def test_offline_staging_rejects_unavailable_ui_font_original(
 
 
 @pytest.fixture
-def terminal_font_inputs(
-    setup_inputs: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
-) -> tuple[Path, Path]:
+def terminal_font_inputs(setup_inputs: tuple[Path, Path]) -> tuple[Path, Path]:
     """Admit the bitmap archive through its package checksum declaration."""
     root, context = setup_inputs
-    archive = root / ".cache/downloads/alpine/sources/terminus.tar.gz"
-    archive.parent.mkdir(parents=True)
-    archive.write_bytes(b"bitmap archive fixture\n")
+    archive = root / ".cache/downloads/sources/terminus/terminus.tar.gz"
     archive.with_name("unrelated.tar.gz").write_bytes(b"unrelated source\n")
-    aport = root / "alpine/aports/fplinux-font-terminus/APKBUILD"
-    aport.parent.mkdir(parents=True)
-    digest = hashlib.sha512(b"bitmap archive fixture\n").hexdigest()
-    aport.write_text(
-        'source="terminus.tar.gz::https://example.invalid/terminus.tar.gz"\n'
-        f'sha512sums="{digest}  terminus.tar.gz"\n'
-    )
-    monkeypatch.setattr(env_setup, "environment_inputs", terminus_font_environment_inputs)
     return root, context
 
 
@@ -207,7 +227,7 @@ def test_offline_staging_rejects_unavailable_terminal_font_archive(
 ) -> None:
     """A missing or mismatched font archive cannot reach offline installation."""
     root, context = terminal_font_inputs
-    archive = root / ".cache/downloads/alpine/sources/terminus.tar.gz"
+    archive = root / ".cache/downloads/sources/terminus/terminus.tar.gz"
     if available:
         archive.write_bytes(b"different archive\n")
     else:

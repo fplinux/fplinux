@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-alsa-lib
-pkgver=1.2.16.1
+pkgver=@version:aport_alsa_lib_1_2_16_1_tar_bz2@
 pkgrel=0
 pkgdesc="ALSA PCM and mixer library for FPLinux applications"
 url="https://www.alsa-project.org"
@@ -11,7 +11,9 @@ makedepends_build="clang22 lld22 make llvm22"
 makedepends_host="musl-dev linux-headers"
 subpackages="$pkgname-dev $pkgname-card-profiles:card_profiles:noarch"
 options="!check"
-source="https://alsa-project.org/files/pub/lib/alsa-lib-$pkgver.tar.bz2"
+source="
+	@source:aport_alsa_lib_1_2_16_1_tar_bz2@
+"
 builddir="$srcdir/alsa-lib-$pkgver"
 
 build() {
@@ -62,5 +64,4 @@ card_profiles() {
 }
 
 sha512sums="
-2ddc5eef7fafe73ba6d8e4f79640a5aaa6e27aac2c77075fda9ee8ae61727bddfcda661e257057d8cf2f1647897d33153703f9ba913574ae7f1fbec53db3fa22  alsa-lib-1.2.16.1.tar.bz2
 "

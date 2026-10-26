@@ -11,13 +11,14 @@ from typing import TYPE_CHECKING, Any
 from fplinux_cli import common
 from fplinux_cli.alpine import lock as alpine_lock
 from fplinux_cli.alpine.packages import _alpine_group_packages, alpine_sysroot_command
-from fplinux_cli.build import sources as sources_build
 from fplinux_cli.build.environment import SOURCE_DATE_EPOCH
 from fplinux_cli.build.workflow import ensure_build_directory
 from fplinux_cli.common import canonical_json_bytes, fail, relative_name, sha256_bytes
+from fplinux_cli.dependencies.inputs import acquire_inputs, alpine_package_input, source_input
 from fplinux_cli.environment import definition
 from fplinux_cli.environment import kern as environment_kern
 from fplinux_cli.environment import runtime as environment_runtime
+from fplinux_cli.manifests.source_catalog import acquire_source, resolve_source
 from fplinux_cli.reporting.run import RunReporter
 from fplinux_cli.workspace import build_inputs as workspace_inputs
 from fplinux_cli.workspace import capture as workspace_capture
@@ -124,6 +125,11 @@ def _prepare_sysroot(
         return sysroot
 
     with reporter.stage("sysroot-downloads"):
+        selected_inputs = [
+            source_input(resolve_source(common.ROOT, lock["minirootfs"]["source_id"])),
+            *(alpine_package_input(lock, records[name]) for name in lock["sysroot"]["packages"]),
+        ]
+        acquire_inputs(selected_inputs, cache, offline=False)
         packages = _alpine_group_packages(lock, records, "sysroot", cache=cache)
     downloads = cache / "downloads/alpine/packages"
     with tempfile.TemporaryDirectory(dir=sysroots, prefix=".prepare-") as temporary:
@@ -161,12 +167,7 @@ def _prepare_sysroot(
 def _prepare_keys(lock: dict[str, Any], destination: Path) -> Path:
     """Use the target release's signing keys, as the normal rootfs build does."""
     record = lock["minirootfs"]
-    archive = sources_build.fetch(
-        record["url"],
-        record["sha256"],
-        common.ROOT / ".cache/downloads/alpine",
-        f"alpine-minirootfs-{lock['release']}-{lock['arch']}.tar.gz",
-    )
+    archive = acquire_source(common.ROOT, record["source_id"], common.ROOT / ".cache")
     if archive.stat().st_size != record["bytes"]:
         fail("locked Alpine minirootfs size does not match its downloaded bytes")
     with tarfile.open(archive, "r:gz") as bundle:

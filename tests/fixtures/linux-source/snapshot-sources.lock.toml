@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-2.0-only
+[alpine_target]
+version = "3.24.1"
+name = "alpine-minirootfs.tar.gz"
+url = "https://example.invalid/alpine-minirootfs.tar.gz"
+algorithm = "sha256"
+checksum = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

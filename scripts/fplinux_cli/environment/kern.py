@@ -103,7 +103,7 @@ def install_kern(lock: dict[str, Any], *, offline: bool = False) -> str:
     archive = download_locked_file(
         kern_lock["archive_url"],
         kern_lock["archive_sha256"],
-        ROOT / ".cache/downloads/kern/kern.tar.gz",
+        ROOT / ".cache" / lock["kern"]["destination"],
         offline=offline,
     )
     destination = _kern_path()

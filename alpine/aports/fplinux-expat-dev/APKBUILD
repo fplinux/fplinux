@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-expat-dev
-pkgver=2.9.0
+pkgver=@version:aport_expat_2_9_0_tar_xz@
 pkgrel=0
 pkgdesc="Expat development headers for FPLinux"
 url="https://libexpat.github.io/"
@@ -8,7 +8,9 @@ arch="noarch"
 license="MIT"
 depends="libexpat=$pkgver-r0"
 options="!check"
-source="https://distfiles.alpinelinux.org/distfiles/v3.24/expat-$pkgver.tar.xz"
+source="
+	@source:aport_expat_2_9_0_tar_xz@
+"
 builddir="$srcdir/expat-$pkgver"
 
 package() {
@@ -28,5 +30,4 @@ package() {
 }
 
 sha512sums="
-677b5a39ea47aa238813412061eefba0ff2e819597efee69452eab7fd63b1387537eda0dfd4e5891b938be202dc87df4b5115bdae75c6b81643ac2363bb99b34  expat-2.9.0.tar.xz
 "

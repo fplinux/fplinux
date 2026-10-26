@@ -6,15 +6,17 @@ from __future__ import annotations
 import tomllib
 from typing import TYPE_CHECKING, Any
 
+from fplinux_cli import common
 from fplinux_cli.common import fail
-from fplinux_cli.manifests.values import exact_table, nonempty_string, relative_value, sha256_value
+from fplinux_cli.manifests.source_catalog import source_build_metadata
+from fplinux_cli.manifests.values import exact_table, nonempty_string, relative_value
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
     from pathlib import Path
 
 
-def load_asset_sources(path: Path) -> list[dict[str, Any]]:
+def load_asset_sources(path: Path, *, source_root: Path | None = None) -> list[dict[str, Any]]:
     """Read the platform's pinned first-stage RAM loader."""
     if path.is_symlink() or not path.is_file():
         fail(f"asset lock is missing or invalid: {path}")
@@ -23,28 +25,38 @@ def load_asset_sources(path: Path) -> list[dict[str, Any]]:
             document = tomllib.load(stream)
     except (OSError, tomllib.TOMLDecodeError) as error:
         fail(f"asset lock is invalid: {error}")
-    return resolve_asset_sources(document)
+    return resolve_asset_sources(document, source_root=source_root)
 
 
-def resolve_asset_sources(common_mapping: object) -> list[dict[str, Any]]:
+def resolve_asset_sources(
+    common_mapping: object,
+    *,
+    source_root: Path | None = None,
+    source_records: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     """Resolve the shared FDL1 source and its independently checked output."""
-    common = exact_table(common_mapping, {"fdl1"}, "asset lock")
-    source = exact_table(
-        common["fdl1"], {"url", "sha256", "cache_name", "license", "path"}, "asset fdl1"
-    )
-    url = nonempty_string(source["url"], "asset fdl1 url")
-    if not url.startswith("https://"):
-        fail("asset fdl1 url must use HTTPS")
-    sha256_value(source["sha256"], "asset fdl1 source")
-    relative_value(source["cache_name"], "asset fdl1 cache_name")
-    nonempty_string(source["license"], "asset fdl1 license")
-    relative_value(source["path"], "asset fdl1 path")
+    lock = exact_table(common_mapping, {"fdl1"}, "asset lock")
+    use = exact_table(lock["fdl1"], {"source", "path"}, "asset fdl1")
+    if source_root is None:
+        source_root = common.ROOT
+    if source_records is None:
+        source_records = common.load_toml(source_root / "sources.lock.toml")
+    source_id = nonempty_string(use["source"], "asset source")
+    metadata = source_build_metadata(source_id, source_records.get(source_id))
+    if metadata["algorithm"] != "sha256":
+        fail("asset fdl1 requires a SHA-256 source pin")
+    license_name = nonempty_string(metadata.get("license"), "asset fdl1 license")
+    relative_value(use["path"], "asset fdl1 path")
     return [
         {
             "id": "fdl1",
             "kind": "file",
-            **{field: source[field] for field in ("url", "sha256", "cache_name", "license")},
-            "output": [{"role": "fdl1", "path": source["path"], "sha256": source["sha256"]}],
+            "source_id": metadata["source_id"],
+            "url": metadata["url"],
+            "sha256": metadata["checksum"],
+            "cache_name": metadata["destination"].removeprefix("downloads/"),
+            "license": license_name,
+            "output": [{"role": "fdl1", "path": use["path"], "sha256": metadata["checksum"]}],
         }
     ]
 

@@ -1,18 +1,100 @@
 [kernel]
 version = "6.0"
 url = "https://example.invalid/linux.tar.xz"
-sha256 = "4444444444444444444444444444444444444444444444444444444444444444"
+name = "linux.tar.xz"
+algorithm = "sha256"
+checksum = "4444444444444444444444444444444444444444444444444444444444444444"
+
 [support]
-archive_url = "https://example.invalid/support.tar.gz"
-archive_sha256 = "5555555555555555555555555555555555555555555555555555555555555555"
+version = "1.0"
+name = "support.tar.gz"
+url = "https://example.invalid/support.tar.gz"
+algorithm = "sha256"
+checksum = "5555555555555555555555555555555555555555555555555555555555555555"
+
 [host]
-archive_url = "https://example.invalid/host.tar.gz"
-archive_sha256 = "6666666666666666666666666666666666666666666666666666666666666666"
+version = "1.0"
+name = "host.tar.gz"
+url = "https://example.invalid/host.tar.gz"
+algorithm = "sha256"
+checksum = "6666666666666666666666666666666666666666666666666666666666666666"
+
 [spreadtrum_flash]
-commit = "1111111111111111111111111111111111111111"
-archive_url = "https://example.invalid/spreadtrum-flash.tar.gz"
-archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+version = "1111111111111111111111111111111111111111"
+name = "spreadtrum_flash.tar.gz"
+url = "https://example.invalid/spreadtrum-flash.tar.gz"
+algorithm = "sha256"
+checksum = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
 [spreadtrum_flash.files]
 makefile_sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 spd_dump_c_sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 spd_cmd_h_sha256 = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+
+[linux_host_libusb]
+version = "1.0"
+name = "linux-libusb.tar.gz"
+url = "https://example.invalid/linux-libusb.tar.gz"
+algorithm = "sha256"
+checksum = "1111111111111111111111111111111111111111111111111111111111111111"
+
+[windows_host_llvm_mingw]
+version = "1.0"
+name = "toolchain.tar.xz"
+url = "https://example.invalid/toolchain.tar.xz"
+algorithm = "sha256"
+checksum = "2222222222222222222222222222222222222222222222222222222222222222"
+bytes = 123
+
+[windows_host_python]
+version = "3.14.0"
+name = "python.zip"
+url = "https://example.invalid/python.zip"
+algorithm = "sha256"
+checksum = "3333333333333333333333333333333333333333333333333333333333333333"
+bytes = 456
+
+[windows_driver_libwdi]
+version = "1.0"
+name = "libwdi.tar.gz"
+url = "https://example.invalid/libwdi.tar.gz"
+algorithm = "sha256"
+checksum = "4444444444444444444444444444444444444444444444444444444444444444"
+bytes = 789
+
+[loader]
+version = "1.0"
+name = "loader.bin"
+url = "https://example.invalid/loader.bin"
+algorithm = "sha256"
+checksum = "7777777777777777777777777777777777777777777777777777777777777777"
+license = "MIT"
+
+[alpine_target]
+version = "3.24.2"
+name = "target.tar.gz"
+url = "https://example.invalid/target.tar.gz"
+algorithm = "sha256"
+checksum = "2222222222222222222222222222222222222222222222222222222222222222"
+bytes = 2
+
+[kern]
+version = "1.0.0"
+name = "kern.tar.gz"
+url = "https://example.invalid/kern.tar.gz"
+algorithm = "sha256"
+checksum = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+[alpine_environment]
+version = "3.24.2"
+name = "alpine-minirootfs.tar.gz"
+url = "https://example.invalid/base.tar.gz"
+algorithm = "sha256"
+checksum = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+
+[tool_source]
+version = "2.0"
+name = "tool-2.0.tar.gz"
+url = "https://example.invalid/tool-2.0.tar.gz"
+algorithm = "sha256"
+checksum = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"

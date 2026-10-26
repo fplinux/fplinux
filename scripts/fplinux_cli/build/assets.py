@@ -6,10 +6,11 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+from fplinux_cli import common
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
-from fplinux_cli.build import sources as sources_build
 from fplinux_cli.common import fail, replace_file_atomically, sha256_bytes
+from fplinux_cli.manifests.source_catalog import acquire_source
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -51,12 +52,7 @@ def build_assets(
     """Fetch pinned assets and emit the resolved lock delivered beside them."""
     result: dict[str, tuple[str, str]] = {}
     for source in sources:
-        archive = sources_build.fetch(
-            source["url"],
-            source["sha256"],
-            inputs_build.CACHE / "downloads",
-            source["cache_name"],
-        )
+        archive = acquire_source(common.ROOT, source["source_id"], inputs_build.CACHE)
         for item in source["output"]:
             expected = item["sha256"]
             data = archive.read_bytes()

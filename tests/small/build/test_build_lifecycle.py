@@ -150,7 +150,10 @@ class BuildLifecycleTests:
     ) -> None:
         """Cache reuse requires every recorded payload byte and file mode to match."""
         identity = bundles_commands.BuildIdentity(
-            command_bundle.snapshot.recipe, "e" * 64, "a" * 64, command_bundle.signing_key
+            command_bundle.snapshot.recipe,
+            "e" * 64,
+            "a" * 64,
+            command_bundle.signing_key,
         )
         with mock.patch.object(common, "ROOT", command_bundle.root):
             source = command_bundle.bundle_path / relative
@@ -171,7 +174,10 @@ class BuildLifecycleTests:
     ) -> None:
         """Reuse a resolved generation only when its identity and image bytes match."""
         identity = bundles_commands.BuildIdentity(
-            command_bundle.snapshot.recipe, "e" * 64, "a" * 64, command_bundle.signing_key
+            command_bundle.snapshot.recipe,
+            "e" * 64,
+            "a" * 64,
+            command_bundle.signing_key,
         )
         with mock.patch.object(common, "ROOT", command_bundle.root):
             matched = bundles_commands.matching_target_bundle(
@@ -186,6 +192,7 @@ class BuildLifecycleTests:
         assert (bundle) == (command_bundle.bundle)
         assert (manifest) == (json.loads(command_bundle.bundle.manifest_bytes))
 
+
     @pytest.mark.parametrize(
         ("field", "changed"),
         [
@@ -199,11 +206,11 @@ class BuildLifecycleTests:
         self, command_bundle: CommandBundleContext, field: str, changed: str
     ) -> None:
         """Reject a generation when any host-visible causal identity changed."""
-        identity = replace(
-            bundles_commands.BuildIdentity(
-                "c" * 64, "e" * 64, "a" * 64, command_bundle.signing_key
-            ),
-            **{field: changed},
+        identity = bundles_commands.BuildIdentity(
+            changed if field == "workspace_digest" else "c" * 64,
+            changed if field == "environment_recipe" else "e" * 64,
+            changed if field == "environment_content" else "a" * 64,
+            changed if field == "apk_signing_key" else command_bundle.signing_key,
         )
         with mock.patch.object(common, "ROOT", command_bundle.root):
             assert (
@@ -250,6 +257,7 @@ class BuildLifecycleTests:
                 "stage_workspace_snapshot",
                 return_value=workspace,
             ),
+            mock.patch.object(build_commands, "captured_build_inputs", return_value=[]),
             mock.patch.object(workspace_staging, "discard_staged_workspace_snapshot") as discard,
             mock.patch.object(prune_operations, "discard_obsolete_rootfs") as rootfs_gc,
             mock.patch.object(prune_operations, "discard_obsolete_apks") as apks_gc,
@@ -321,6 +329,7 @@ class BuildLifecycleTests:
             mock.patch.object(
                 workspace_staging, "stage_workspace_snapshot", return_value=workspace
             ),
+            mock.patch.object(build_commands, "captured_build_inputs", return_value=[]),
             mock.patch.object(workspace_staging, "discard_staged_workspace_snapshot") as discard,
             mock.patch.object(output.Stage, "run", autospec=True, side_effect=fail_workload),
             pytest.raises(SystemExit) as raised,
@@ -333,7 +342,7 @@ class BuildLifecycleTests:
         assert stderr.count(hint) == int(status == 137)
         assert ("Increase build --memory-mib" in stderr) == (status == 137)
         assert "--jobs" not in stderr
-        log = (reporter.root / "02-container.log").read_text()
+        log = next(reporter.root.glob("*-container.log")).read_text()
         assert log.count(hint) == int(status == 137)
         discard.assert_called_once_with(command_bundle.snapshot, workspace)
 
@@ -397,6 +406,7 @@ class BuildLifecycleTests:
                 "stage_workspace_snapshot",
                 return_value=workspace,
             ),
+            mock.patch.object(build_commands, "captured_build_inputs", return_value=[]),
             mock.patch.object(workspace_staging, "discard_staged_workspace_snapshot") as discard,
             mock.patch.object(prune_operations, "discard_obsolete_rootfs") as rootfs_gc,
             mock.patch.object(prune_operations, "discard_obsolete_apks") as apks_gc,
@@ -498,7 +508,6 @@ class BuildLifecycleTests:
                 jobs=6,
                 memory_mib=2048,
                 environment_rootfs=command_bundle.cache / "environment/rootfs",
-                offline=False,
                 snapshot=command_bundle.snapshot,
                 **roots,
                 profile=None,
@@ -549,40 +558,5 @@ class BuildLifecycleTests:
             [("--target", "phone"), ("--build-type", "release"), ("--jobs", "6")]
         )
         assert (command[:2]) == (["/usr/bin/kern", "box"])
-        network = command.index("--network")
-        assert (command[network + 1]) == ("host")
-
-    def test_offline_build_argv_disables_container_network(
-        self, command_bundle: CommandBundleContext
-    ) -> None:
-        """Offline mode is an execution policy, not a separate build identity."""
-        roots = {
-            "workspace": command_bundle.root / "workspace",
-            "downloads": command_bundle.root / "cache/downloads",
-            "ccache": command_bundle.root / "cache/ccache",
-            "host_tools": command_bundle.root / "cache/host-tools",
-            "apk_signing": command_bundle.root / "cache/apk-signing",
-            "apks": command_bundle.root / "cache/apks",
-            "rootfs": command_bundle.root / "cache/rootfs",
-            "linux": command_bundle.root / "cache/linux",
-            "output": command_bundle.root / "cache/out",
-            "logs": command_bundle.root / "cache/logs/build/run",
-        }
-        command = build_commands._build_command(  # noqa: SLF001
-            "/usr/bin/kern",
-            target="phone",
-            jobs=6,
-            memory_mib=2048,
-            environment_rootfs=command_bundle.cache / "environment/rootfs",
-            offline=True,
-            snapshot=command_bundle.snapshot,
-            **roots,
-            profile=None,
-            build_type="release",
-            log_environment={"FPLINUX_LOG_ROOT": "/logs"},
-            environment_recipe="e" * 64,
-            environment_content="a" * 64,
-        )
-
         network = command.index("--network")
         assert (command[network + 1]) == ("none")

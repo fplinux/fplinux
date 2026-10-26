@@ -50,6 +50,15 @@ SPDX-FileCopyrightText = "2026 FPLinux contributors"
 SPDX-License-Identifier = "GPL-2.0-only"
 
 [[annotations]]
+path = [
+  "scripts/fplinux_cli/build/host_tools/inbox-winusb.patch",
+  "scripts/fplinux_cli/build/host_tools/source-date-epoch.patch",
+]
+precedence = "override"
+SPDX-FileCopyrightText = ["2010-2023 Pete Batard", "2026 FPLinux contributors"]
+SPDX-License-Identifier = "LGPL-3.0-or-later"
+
+[[annotations]]
 path = ["site/src/fonts/**", "site/public/fonts/OFL.txt"]
 precedence = "override"
 SPDX-FileCopyrightText = "2022 The Noto Project Authors"

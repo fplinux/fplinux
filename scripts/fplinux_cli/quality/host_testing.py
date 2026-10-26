@@ -69,10 +69,10 @@ def host_pytest_environment(
                 for item in environment_inputs(workspace)
                 if item.key
                 in {
-                    "environment:pytest",
-                    "environment:iniconfig",
-                    "environment:pluggy",
-                    "environment:pygments",
+                    "source:pytest",
+                    "source:iniconfig",
+                    "source:pluggy",
+                    "source:pygments",
                 }
                 or re.fullmatch(r"py3-packaging-\d.*\.apk", Path(item.destination).name)
             ]
@@ -85,6 +85,7 @@ def host_pytest_environment(
                     ROOT / ".cache" / item.destination,
                     algorithm=item.algorithm,
                     size=item.size,
+                    offline=True,
                 )
                 if archive.suffix == ".whl":
                     with zipfile.ZipFile(archive) as wheel:

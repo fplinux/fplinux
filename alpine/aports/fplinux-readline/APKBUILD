@@ -1,9 +1,8 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-readline
-pkgver=8.3.3
+pkgver=@version:aport_readline_8_3_tar_gz@.3
 pkgrel=0
 _readlinever=${pkgver%.*}
-_aport_commit=dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763
 pkgdesc="GNU Readline library linked with terminfo for FPLinux"
 url="https://tiswww.cwru.edu/php/chet/readline/rltop.html"
 arch="armv7"
@@ -15,11 +14,12 @@ makedepends_build="chrpath clang22 lld22 make llvm22"
 makedepends_host="musl-dev fplinux-ncurses-dev"
 subpackages="$pkgname-dev $pkgname-doc $pkgname-history:history"
 options="!check"
-source="https://ftp.gnu.org/gnu/readline/readline-$_readlinever.tar.gz
-	inputrc::https://raw.githubusercontent.com/alpinelinux/aports/$_aport_commit/main/readline/inputrc
-	readline83-001.patch::https://ftp.gnu.org/gnu/readline/readline-$_readlinever-patches/readline83-001
-	readline83-002.patch::https://ftp.gnu.org/gnu/readline/readline-$_readlinever-patches/readline83-002
-	readline83-003.patch::https://ftp.gnu.org/gnu/readline/readline-$_readlinever-patches/readline83-003
+source="
+	@source:aport_readline_8_3_tar_gz@
+	@source:aport_inputrc@
+	@source:aport_readline83_001_patch@
+	@source:aport_readline83_002_patch@
+	@source:aport_readline83_003_patch@
 "
 patch_args="-p0"
 builddir="$srcdir/readline-$_readlinever"
@@ -72,9 +72,4 @@ history() {
 	amove usr/lib/libhistory.so.*
 }
 sha512sums="
-513002753dcf5db9213dbbb61d51217245f6a40d33b1dd45238e8062dfa8eef0c890b87a5548e11db959e842724fb572c4d3d7fb433773762a63c30efe808344  readline-8.3.tar.gz
-5dbe872e94166aaed7ca2edec5a34ef9b13b254381e252cc6d851877b461579903cbb5b5dc588eabececcf1ebe636f6cb4da406cd01b64757f8c7e7f62e9a276  inputrc
-ced50af353ed527f6ec0eac5f65261f2ed208825ec72fe2acf5f0217f34f84f33dcbf01b895325f6b33664b5a426bac99506193e2ddb6eea8c79ccad37364b89  readline83-001.patch
-e45ad6443bd4e271ec8e8ab883de561b6420aec362b0b7f0256086cb5a023d946df55994ed99c76ceb191e8a25e8059ae9b553ef1d546626d671b80af292f04d  readline83-002.patch
-6b3ebffe994d0cd4d3466b15e3aee9a73613109283a4442f3bf10e28edcd1204df824c71356d66d01ac21014a806023a101fedf94526a19f6f590d9ffdc864cd  readline83-003.patch
 "

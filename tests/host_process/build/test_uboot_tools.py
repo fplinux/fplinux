@@ -17,9 +17,10 @@ from unittest import mock
 
 import pytest
 from fplinux_cli import common
-from fplinux_cli.build import sources as sources_build
+from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build.storage import stage as storage_build
 from fplinux_cli.build.storage import uboot as uboot_tools
+from fplinux_cli.manifests.source_catalog import source_build_metadata
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -37,22 +38,15 @@ def archive_synthetic_source(root: Path, source: Path) -> Path:
     return archive
 
 
-def full_uboot_config(archive: Path) -> dict[str, Any]:
+def full_uboot_config(root: Path) -> dict[str, Any]:
     """Bind the synthetic archive and a demo platform's required lines to the build."""
+    catalog = common.load_toml(root / "sources.lock.toml")
     return {
         "kind": "full",
         "source": "u-boot.lock.toml",
         "archive_prefix": "u-boot-2026.07",
         "required_config": ["CONFIG_TARGET_DEMO_BOARD=y", 'CONFIG_BOOTCOMMAND="demoboot"'],
-        "lock": {
-            "version": "2026.07",
-            "repository": "https://source.denx.de/u-boot/u-boot.git",
-            "tag": "v2026.07",
-            "commit": "e" * 40,
-            "archive_url": "https://example.invalid/u-boot.tar.bz2",
-            "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
-            "license": "GPL-2.0-only",
-        },
+        "lock": source_build_metadata("uboot_fixture", catalog["uboot_fixture"]),
     }
 
 
@@ -133,7 +127,16 @@ def uboot_inputs() -> Iterator[UbootInputs]:
             mock.patch.dict(os.environ, {"FPLINUX_TEST_BUILD_LOG": str(build_log)})
         )
         archive = archive_synthetic_source(root, source)
-        config = full_uboot_config(archive)
+        (root / "sources.lock.toml").write_text(
+            (UBOOT_FIXTURES / "source-catalog.txt.in")
+            .read_text(encoding="utf-8")
+            .format(
+                checksum=hashlib.sha256(archive.read_bytes()).hexdigest(),
+                size=archive.stat().st_size,
+            ),
+            encoding="utf-8",
+        )
+        config = full_uboot_config(root)
         work = root / "work"
         layout = full_uboot_layout()
         yield UbootInputs(
@@ -266,6 +269,10 @@ class UbootToolsTests:
         platform = uboot_inputs.root / "platforms/ums9117"
         (platform / "linux/overlay").mkdir(parents=True)
         shutil.copyfile(ROOT / "platforms/ums9117/platform.toml", platform / "platform.toml")
+        cache = uboot_inputs.root / "cache"
+        cached_archive = cache / "downloads/sources/uboot_fixture/source.tar.bz2"
+        cached_archive.parent.mkdir(parents=True)
+        shutil.copyfile(uboot_inputs.archive, cached_archive)
         for target, defconfig in (
             ("nokia-ta1618", "ta1618_defconfig"),
             ("inoi-240-modern-4g", "inoi240_defconfig"),
@@ -306,7 +313,7 @@ class UbootToolsTests:
             }
             with (
                 mock.patch.object(common, "ROOT", uboot_inputs.root),
-                mock.patch.object(sources_build, "fetch", return_value=uboot_inputs.archive),
+                mock.patch.object(inputs_build, "CACHE", cache),
                 mock.patch.dict(os.environ, {"FPLINUX_ENVIRONMENT_ARTIFACT_RECIPE": "a" * 64}),
             ):
                 built = storage_build.build_profile_uboot(

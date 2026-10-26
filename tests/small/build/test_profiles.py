@@ -35,6 +35,7 @@ class ProfileContext:
     def __init__(self, root: Path) -> None:
         """Provide two board manifests and real global boot-policy inputs."""
         self.root = root
+        shutil.copyfile(PROFILE_FIXTURES / "sources.lock.toml", self.root / "sources.lock.toml")
         shutil.copytree(ROOT / "profiles", self.root / "profiles")
         self.platform = common.load_toml(PROFILE_FIXTURES / "platform.toml")
         shared = self.root / "platforms/demo"

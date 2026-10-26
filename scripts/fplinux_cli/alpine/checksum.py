@@ -11,9 +11,16 @@ from fplinux_cli import common
 from fplinux_cli.alpine import lock as alpine_lock
 from fplinux_cli.alpine import selection as alpine_selection
 from fplinux_cli.alpine.aports import materialize_aport_sources
+from fplinux_cli.alpine.sources import (
+    aport_declaration,
+    aport_sources,
+    checksum_block,
+    replace_checksum_block,
+)
 from fplinux_cli.build import workflow as build_commands
 from fplinux_cli.build.environment import SOURCE_DATE_EPOCH
 from fplinux_cli.common import fail, replace_file_atomically
+from fplinux_cli.dependencies.inputs import acquire_inputs, aport_source_inputs
 from fplinux_cli.environment import kern as environment_kern
 from fplinux_cli.environment import runtime as environment_runtime
 from fplinux_cli.reporting.run import RunReporter
@@ -43,6 +50,15 @@ def _aport_checksum_snapshot(package: str) -> WorkspaceSnapshot:
     for source in alpine_selection.shared_aport_sources(package, root=common.ROOT):
         add_source_path(files, source)
     add_source_path(files, common.ROOT / "scripts/fplinux_cli/alpine/checksum")
+    add_source_path(files, common.ROOT / "sources.lock.toml")
+    for relative in (
+        "scripts/fplinux_cli/alpine/aports.py",
+        "scripts/fplinux_cli/alpine/sources.py",
+        "scripts/fplinux_cli/manifests/source_catalog.py",
+    ):
+        add_source_path(files, common.ROOT / relative)
+    if package == "fplinux-ui":
+        add_source_path(files, common.ROOT / "package-lock.json")
     return workspace_snapshot(sorted(files.items()))
 
 
@@ -81,12 +97,11 @@ def _checksum_block_only_changed(before: bytes, after: bytes, *, path: Path) -> 
         fail(f"abuild checksum changed recipe text outside sha512sums: {path}")
 
 
-def _checksum_container_command(  # noqa: PLR0913
+def _checksum_container_command(
     kern: str,
     *,
     package: str,
     rootfs: Path,
-    offline: bool,
     stage: Path,
     downloads: Path,
 ) -> list[str]:
@@ -100,7 +115,7 @@ def _checksum_container_command(  # noqa: PLR0913
         "--read-only",
         "--uid-range",
         "--network",
-        "none" if offline else "host",
+        "none",
         "--tmpfs",
         "/tmp:1g",  # noqa: S108 -- container tmpfs.
         "--volume",
@@ -120,7 +135,6 @@ def _checksum_container_command(  # noqa: PLR0913
         "/cache/downloads",
         package,
         SOURCE_DATE_EPOCH,
-        "offline" if offline else "online",
     ]
 
 
@@ -137,6 +151,8 @@ def checksum_aport(package: str, *, offline: bool = False) -> None:
     )
     cache = common.ROOT / ".cache"
     downloads = build_commands.ensure_build_directory(cache / "downloads")
+    with reporter.stage("source-inputs"):
+        acquire_inputs(aport_source_inputs(common.ROOT, (package,)), cache, offline=offline)
     with reporter.stage("workspace"):
         snapshot_root = staging.stage_workspace_snapshot(before_snapshot)
     checksum_root = build_commands.ensure_build_directory(cache / "checksum")
@@ -147,7 +163,10 @@ def checksum_aport(package: str, *, offline: bool = False) -> None:
         stage = Path(temporary_root)
         stage_aport = stage / "alpine/aports" / package
         stage_aport.parent.mkdir(parents=True)
-        materialize_aport_sources(package, snapshot_root, stage_aport)
+        materialize_aport_sources(
+            package, snapshot_root, stage_aport, cache=cache, verify_local=False
+        )
+        materialized_apkbuild = (stage_aport / "APKBUILD").read_bytes()
         shutil.copytree(snapshot_root / "scripts/fplinux_cli/alpine/checksum", stage / "checksum")
         with reporter.stage("container", passthrough=True, show_tail=False) as stage_report:
             stage_report.run(
@@ -155,7 +174,6 @@ def checksum_aport(package: str, *, offline: bool = False) -> None:
                     kern,
                     package=package,
                     rootfs=rootfs,
-                    offline=offline,
                     stage=stage,
                     downloads=downloads,
                 ),
@@ -165,6 +183,21 @@ def checksum_aport(package: str, *, offline: bool = False) -> None:
         if generated.is_symlink() or not generated.is_file():
             fail(f"abuild checksum did not leave a regular APKBUILD: {generated}")
         generated_apkbuild = generated.read_bytes()
+        _checksum_block_only_changed(materialized_apkbuild, generated_apkbuild, path=generated)
+        native = checksum_block(generated_apkbuild, path=generated)
+        if native is None:
+            fail(f"abuild checksum did not produce checksums: {package}")
+        originals = {source.name for source in aport_sources(snapshot_root, package)}
+        local_names = [
+            name
+            for name in aport_declaration(snapshot_root, package)["sources"]
+            if name not in originals
+        ]
+        if any(name not in native[2] for name in local_names):
+            fail(f"abuild checksum omitted a local source: {package}")
+        generated_apkbuild = replace_checksum_block(
+            before_apkbuild, {name: native[2][name] for name in local_names}, path=apkbuild
+        )
     if _aport_checksum_snapshot(package).recipe != before_snapshot.recipe:
         fail(f"Alpine aport source closure changed while checksums were generated: {package}")
     if apkbuild.is_symlink() or not apkbuild.is_file() or apkbuild.read_bytes() != before_apkbuild:

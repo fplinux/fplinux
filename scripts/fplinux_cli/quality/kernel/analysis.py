@@ -245,7 +245,7 @@ def check_one_context(
         inputs = context_inputs(target, target_config, platform)
         bindings = binding_paths(inputs, source)
         linux = source_lock_entry(sources, platform["linux"]["source_lock"])
-        archive = CACHE / "downloads/linux" / f"linux-{linux['version']}.tar.xz"
+        archive = CACHE / linux["destination"]
         config_paths = kernel_config_paths(target, target_config, platform)
         defconfig = compose_kernel_config(
             *config_paths, boot_font=target_config["display"]["boot_font"]

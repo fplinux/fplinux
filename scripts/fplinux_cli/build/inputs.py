@@ -22,6 +22,7 @@ _CORE_IMPLEMENTATION_SOURCES = (
     "scripts/fplinux_cli/build/process.py",
     "scripts/fplinux_cli/build/sources.py",
     "scripts/fplinux_cli/environment/downloads.py",
+    "scripts/fplinux_cli/manifests/source_catalog.py",
     "scripts/fplinux_cli/manifests/values.py",
 )
 _BOOTSTRAP_IMPLEMENTATION_SOURCES = (

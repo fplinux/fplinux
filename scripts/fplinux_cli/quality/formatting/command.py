@@ -8,13 +8,13 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from fplinux_cli.build.kernel.state import inspect_linux_base
-from fplinux_cli.build.sources import fetch
 from fplinux_cli.common import ROOT, fail, relative_name, replace_file_atomically
 from fplinux_cli.environment.kern import (
     kern_box_name,
     kern_environment,
 )
 from fplinux_cli.environment.runtime import environment_arguments, require_environment
+from fplinux_cli.manifests.source_catalog import resolve_source_record
 from fplinux_cli.quality.kernel_patches import linux_contexts
 from fplinux_cli.reporting.run import RunReporter
 from fplinux_cli.workspace.capture import WorkspaceSnapshot, workspace_snapshot
@@ -168,17 +168,17 @@ def format_sources(values: Sequence[str]) -> None:
     patches = frozenset(path for path in selected if Path(path).suffix == ".patch")
     contexts = linux_contexts(patches) if patches else ()
     snapshot = workspace_snapshot(inventory)
-    archives = ROOT / ".cache/downloads/linux"
+    archives = ROOT / ".cache/downloads"
     linux_cache = ROOT / ".cache/linux"
     fetched: set[str] = set()
     for context in contexts:
-        source = context.source
+        source = resolve_source_record(context.source["source_id"], context.source)
         if (
-            source["sha256"] not in fetched
-            and inspect_linux_base(ROOT / ".cache", source["sha256"]) is None
+            source.checksum not in fetched
+            and inspect_linux_base(ROOT / ".cache", source.checksum) is None
         ):
-            fetch(source["url"], source["sha256"], archives, f"linux-{source['version']}.tar.xz")
-            fetched.add(source["sha256"])
+            source.acquire(ROOT / ".cache", offline=False)
+            fetched.add(source.checksum)
     if patches:
         if linux_cache.is_symlink() or (linux_cache.exists() and not linux_cache.is_dir()):
             fail(f"invalid Linux cache directory: {linux_cache}")

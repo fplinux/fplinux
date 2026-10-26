@@ -101,7 +101,17 @@ class AnalyzerContext:
             mock.patch.object(kernel_analysis, "CACHE", self.cache),
             mock.patch.object(kernel_contexts, "CACHE", self.cache),
             mock.patch.object(
-                kernel_runtime, "load_sources", return_value={"linux": {"version": "fixture"}}
+                kernel_runtime,
+                "load_sources",
+                return_value={
+                    "linux": {
+                        "version": "fixture",
+                        "name": "linux-fixture.tar.xz",
+                        "url": "https://example.invalid/linux-fixture.tar.xz",
+                        "algorithm": "sha256",
+                        "checksum": "a" * 64,
+                    }
+                },
             ),
             mock.patch.object(kernel_contexts, "discover_targets", return_value=(self.target,)),
             mock.patch.object(

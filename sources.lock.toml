@@ -1,21 +1,1042 @@
-[linux]
-version = "7.2.9"
-url = "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.2.9.tar.xz"
-sha256 = "b4c5dfbe51a364a6c7f03869200f88c8e1f77403539005f14b7fc6bc91b8d8ba"
+# SPDX-License-Identifier: GPL-2.0-only
+[alpine_environment]
+version = "3.24.2"
+name = "alpine-minirootfs.tar.gz"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/x86_64/alpine-minirootfs-3.24.2-x86_64.tar.gz"
+algorithm = "sha256"
+checksum = "c5ca053cfe1d85c5b96dff8b9bc57045f7f184a30ffb6b65776409ca90388677"
+
+[alpine_target]
+version = "3.24.2"
+name = "alpine-minirootfs-3.24.2-armv7.tar.gz"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/armv7/alpine-minirootfs-3.24.2-armv7.tar.gz"
+algorithm = "sha256"
+checksum = "5552f1ef2398cee46ef2cf733f8f1258f39a77ad065dfd47282fc0df9fe1976c"
+bytes = 3180242
+
+[aport_0001_awk_fix_handling_of_literal_backslashes_in_replaceme_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0001-awk-fix-handling-of-literal-backslashes-in-replaceme.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0001-awk-fix-handling-of-literal-backslashes-in-replaceme.patch"
+algorithm = "sha512"
+checksum = "7165661f3972f1800faf8d263126e3f238bb26bb7891230dbaad2d085e49e2ababc555294ecefed9d8ff00d93c8c3963e786db796cf3d03d68bf9e0492305d0c"
+
+[aport_0001_blkdiscard_ship_link_to_sbin_instead_of_usr_bin_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0001-blkdiscard-ship-link-to-sbin-instead-of-usr-bin.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0001-blkdiscard-ship-link-to-sbin-instead-of-usr-bin.patch"
+algorithm = "sha512"
+checksum = "b8b408974dbcf803889786500d37970c3c3fc3ff7b651998616301691c29287e786ecca07a5b959ed31cf22b0c54b9da82385650c3961afb9f7c09233f46f864"
+
+[aport_0001_call_sbin_mkmntdirs_in_localmount_openrc_service_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0001-call-sbin-mkmntdirs-in-localmount-OpenRC-service.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/openrc/0001-call-sbin-mkmntdirs-in-localmount-OpenRC-service.patch"
+algorithm = "sha512"
+checksum = "3aaeb32ab7b0e56b9250cbf31fa35d160f49ba5febbd80ae61e320425d6c18673a69c1a8dffb2bcaec5f5c431f79ba7944e0dccd496216b970da00e6331e4032"
+
+[aport_0001_hexdump_fix_regression_with_n4_e_u_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0001-hexdump-fix-regression-with-n4-e-u.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0001-hexdump-fix-regression-with-n4-e-u.patch"
+algorithm = "sha512"
+checksum = "ac026f8b289d1431c46d51a8c512eb0184aa81de1c41971a87c99bcdc5c63c2d9abed412cad20d3032b480d87a52ee2602411149eb5f271fa9d051165a7b8188"
+
+[aport_0001_init_add_support_for_separate_reboot_action_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0001-init-add-support-for-separate-reboot-action.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0001-init-add-support-for-separate-reboot-action.patch"
+algorithm = "sha512"
+checksum = "211d8a70b7e40d885e2961bb1a1143af3666901dd81c79d1a5b1ddb1d3c069bd1083417188e35513f9a678791d9cd2a08373c6151596a5162904131e489baf46"
+
+[aport_0001_mount_fix_parsing_proc_mounts_with_long_lines_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0001-mount-fix-parsing-proc-mounts-with-long-lines.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0001-mount-fix-parsing-proc-mounts-with-long-lines.patch"
+algorithm = "sha512"
+checksum = "626078b2d05c5821e5d23e8cb35c7bb5ea8bd76b54aa49a00844ab698d4b88b7084381b30fe5ce2e3796aa5f3559db16f0cc6a949d70a8725b153f2090999889"
+
+[aport_0001_netstat_sanitize_process_names_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0001-netstat-sanitize-process-names.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0001-netstat-sanitize-process-names.patch"
+algorithm = "sha512"
+checksum = "bc6dcd9651f02da3d848e8c848b536fe412311f7bdc66ff65912a1aa175c96c8d5336e5a4e21f8a73b76438c9d1bae444736994ec460d5645917fa46273fff88"
+
+[aport_0001_tar_fix_16018_masking_of_potentially_malicious_tar_cpio_content_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0001-tar-fix-16018-masking-of-potentially-malicious-tar-cpio-content.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0001-tar-fix-16018-masking-of-potentially-malicious-tar-cpio-content.patch"
+algorithm = "sha512"
+checksum = "fa200c556a8b79506aa398e0d81eb2690726860ab15e48ba80c1680abab2a48e9093bf3c5a67dc5d8eef90a3e15e5a873a9eef1047cef0c031b233f8a211ee68"
+
+[aport_0001_tar_fix_toctou_symlink_race_condition_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0001-tar-fix-TOCTOU-symlink-race-condition.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0001-tar-fix-TOCTOU-symlink-race-condition.patch"
+algorithm = "sha512"
+checksum = "906d6c9ff1a9b911997f8ca9debfc07c48c7f5ac8eac51860b076e8483979ea175028f7207cbe878769e58213e8293ada155b03c9691077ce2f6a91820ab319a"
+
+[aport_0001_tunctl_fix_segfault_on_ioctl_failure_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0001-tunctl-fix-segfault-on-ioctl-failure.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0001-tunctl-fix-segfault-on-ioctl-failure.patch"
+algorithm = "sha512"
+checksum = "9548603cbadf690ab31354642ab3f7bef1b9f696df6b661ea644548fb831b2f78a47a9b09b5489aa43da7061dcc6808864d130d053906f44090983f5cb3dc169"
+
+[aport_0001_wget_add_header_accept_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0001-wget-add-header-Accept.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0001-wget-add-header-Accept.patch"
+algorithm = "sha512"
+checksum = "b148e37fc23d65ac011fa85142fcd645a55171593e889a86743b1557d9be05b6c39e8d0a798a536dfa29d17f71d6fb0b422f031128415b07ddec3c209ce93814"
+
+[aport_0002_adduser_default_to_sbin_nologin_as_shell_for_system_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0002-adduser-default-to-sbin-nologin-as-shell-for-system-.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0002-adduser-default-to-sbin-nologin-as-shell-for-system-.patch"
+algorithm = "sha512"
+checksum = "c725043253cae924b989cfba739d024b172b20a300de63acd26d4ec0624a13b5ea4b07f53cf991c4991cb611454c70ebe5bdb8e1a8e62d5d5d7e2e3823bed2bf"
+
+[aport_0002_fsck_don_t_add_c0_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0002-fsck-don-t-add-C0.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/openrc/0002-fsck-don-t-add-C0.patch"
+algorithm = "sha512"
+checksum = "bd332b920f6fbf19f55098f75b6df0148917293aad8fc8ca1d2691b00f883b5099975bc2070daf821150b20417532d9954fd2e552affb83d721c842efa66ea35"
+
+[aport_0003_ash_add_built_in_bb_ash_version_variable_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0003-ash-add-built-in-BB_ASH_VERSION-variable.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0003-ash-add-built-in-BB_ASH_VERSION-variable.patch"
+algorithm = "sha512"
+checksum = "e9ba4f56bd0841f6b998f79aaf73a09c4096fec0f817594be294c12a03ba712f1103fb8b0716fcf2fb04f5dc9efa04aa6dc9b61150b3df00b302ab6f9608d313"
+
+[aport_0003_rc_pull_in_sysinit_and_boot_as_stacked_levels_when_n_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0003-rc-pull-in-sysinit-and-boot-as-stacked-levels-when-n.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/openrc/0003-rc-pull-in-sysinit-and-boot-as-stacked-levels-when-n.patch"
+algorithm = "sha512"
+checksum = "77b058a70cab37ad662a57fa69411b6275853ac41423e0a799ba980578d8e18d3d2ae2c2a6f5a3ba5779aeec273d7c4c2a14e8fdb31d0a6b383f2e8a64a4ed2f"
+
+[aport_0005_libbb_sockaddr2str_ensure_only_printable_characters_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0005-libbb-sockaddr2str-ensure-only-printable-characters-.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0005-libbb-sockaddr2str-ensure-only-printable-characters-.patch"
+algorithm = "sha512"
+checksum = "0c4eba3a6690b4989ced7f40a2f2369fe8ca97caa226838bde6412031290722d380a27203c67f8a2bfb3319590c67a0a108f8d8a04cff9add54085bdea520c25"
+
+[aport_0006_modinfo_add_k_option_for_kernel_version_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0006-modinfo-add-k-option-for-kernel-version.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0006-modinfo-add-k-option-for-kernel-version.patch"
+algorithm = "sha512"
+checksum = "68637265f28f73e1538045bb23f6a585248a73d60eb81b1fb75a67e9946b9f3928ebb6d8794976f724a6f0e0324748e3eafbf1dff5e1c78254200cb3acbc51cd"
+
+[aport_0007_clean_up_staticroute_config_remove_irrelevant_parts_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0007-Clean-up-staticroute-config-remove-irrelevant-parts-.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/openrc/0007-Clean-up-staticroute-config-remove-irrelevant-parts-.patch"
+algorithm = "sha512"
+checksum = "431ac28808e684bea5511386bf5f06efe7f509f1dbe7e15ae6309563d813deae8f3edd872a0943ef8088e3cf778d7bc5ebd15a893dc4a08f4022b7a56bbafc63"
+
+[aport_0007_nologin_install_applet_to_sbin_instead_of_usr_sbin_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0007-nologin-Install-applet-to-sbin-instead-of-usr-sbin.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0007-nologin-Install-applet-to-sbin-instead-of-usr-sbin.patch"
+algorithm = "sha512"
+checksum = "6a0714d051dc29e39d62271c317455bb7d1b28117f60cdc3e887dddbb38df28ae5c17da8033b4250c1bed76f1e8e29b2c013e87f9d547a5bdf75c4b9433fc2bd"
+
+[aport_0008_pgrep_add_support_for_matching_against_uid_and_ruid_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0008-pgrep-add-support-for-matching-against-UID-and-RUID.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0008-pgrep-add-support-for-matching-against-UID-and-RUID.patch"
+algorithm = "sha512"
+checksum = "220da5e908ae3c6f836faf8549f5c610e74a76563103152f9d20e2b2ca1663ba7baf803067286684753a2c737427c5fcf317d7da60293412f601b4ca17e77e00"
+
+[aport_0009_properly_fix_wget_https_support_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0009-properly-fix-wget-https-support.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0009-properly-fix-wget-https-support.patch"
+algorithm = "sha512"
+checksum = "b4697696c2c44f5c2c2be167774784b87f45d7d1433db8ed040ae37a99d01275a2a0b79db7e6314636f76db0f7b69288f1f7d2fb96c097929524d49832ea0913"
+
+[aport_0010_fsck_resolve_label_uuid_spec_to_device_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0010-fsck-resolve-LABEL-.-UUID-.-spec-to-device.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0010-fsck-resolve-LABEL-.-UUID-.-spec-to-device.patch"
+algorithm = "sha512"
+checksum = "16e490902496cfe199551432dd3cce480d20d79b98056b6fd5086a5b5a16ace0cda8357d8fb7bdc3e758273c3ec91e416f926c3e54dbeb54136c6853ce23bc7e"
+
+[aport_0010_init_d_user_add_a_respawn_delay_value_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0010-init.d-user-add-a-respawn_delay-value.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/openrc/0010-init.d-user-add-a-respawn_delay-value.patch"
+algorithm = "sha512"
+checksum = "9614420468d0102e81de7147ebc88e380f0bfa547ce7c52151b7babfc7b05a1f49d3d8a24deeff15bf1e885af643dd73ac21e3a0877a884fe91585ef866e46de"
+
+[aport_0011_nslookup_sanitize_all_printed_strings_with_printable_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0011-nslookup-sanitize-all-printed-strings-with-printable.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0011-nslookup-sanitize-all-printed-strings-with-printable.patch"
+algorithm = "sha512"
+checksum = "6671165e7dc3546b42edc7cf3304ddb755c707a7c7976bc544f7da6ad974c09bfa5e7cc2e83a98ece8e919808ae73199b19930d390c8ac34527f58f28ba836b6"
+
+[aport_0012_ash_exec_busybox_static_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0012-ash-exec-busybox.static.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0012-ash-exec-busybox.static.patch"
+algorithm = "sha512"
+checksum = "f2a44cf6903d6ecac3bd226b2abb2fbd692f883dc0d296df0a8d2c34350673c51f18d68bc9819d7badbab0541839f4e91361d85f014159af8e0fab82e324f84e"
+
+[aport_0013_app_location_for_cpio_vi_and_lspci_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0013-app-location-for-cpio-vi-and-lspci.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0013-app-location-for-cpio-vi-and-lspci.patch"
+algorithm = "sha512"
+checksum = "9788eed96fc490ea393e760657b8d8d7a09696e24515e30099dffe8c3d534a6018ca2cf17e689e8740438b2fdcc0c3ed67dc841e6c03f39322d12b60edc66a97"
+
+[aport_0014_udhcpc_set_default_discover_retries_to_5_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0014-udhcpc-set-default-discover-retries-to-5.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0014-udhcpc-set-default-discover-retries-to-5.patch"
+algorithm = "sha512"
+checksum = "52094fb50723d924feeb31b86d8b71143505b8d66f6b881c43859c1a346d5a52ef8fb5aa7806f1f1892cbd083b03fc294d1181761eef01ffb564717e121a2300"
+
+[aport_0015_ping_make_ping_work_without_root_privileges_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0015-ping-make-ping-work-without-root-privileges.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0015-ping-make-ping-work-without-root-privileges.patch"
+algorithm = "sha512"
+checksum = "dae2f3a137edcbf31e0afb8565f372a549ba67997c391e755a9f29b4c986219a9516b1e1be589fddf81f136d6c7700c91fb83c46aed74c018a58ab06ea2d0567"
+
+[aport_0016_fbsplash_support_console_switching_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0016-fbsplash-support-console-switching.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0016-fbsplash-support-console-switching.patch"
+algorithm = "sha512"
+checksum = "6ede756c01ce7fdcd02a38188a86f4cacff4066eb5032bbb716edf8d4eb3e437de767f04cd0ed8a3e915ee10270465be59248f72d2e7a15abc3d865feba0a361"
+
+[aport_0017_fbsplash_support_image_and_bar_alignment_and_positio_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0017-fbsplash-support-image-and-bar-alignment-and-positio.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0017-fbsplash-support-image-and-bar-alignment-and-positio.patch"
+algorithm = "sha512"
+checksum = "85209a0fb5368dfbb831095d381ec135313c26030f3eb4c5df8a40051fa6932e6b49a91965ea745b670efbc7a8e32707a08bfde36c923912f5e67fe2d6bbb1a5"
+
+[aport_0018_depmod_support_generating_kmod_binary_index_files_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0018-depmod-support-generating-kmod-binary-index-files.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0018-depmod-support-generating-kmod-binary-index-files.patch"
+algorithm = "sha512"
+checksum = "67a21b4754534b5faceee3da1c24e037e8e259924fd415cdfd5aabfff6c2bea3d15d58cd32c29359bf5b311e666ad1ff01a1ec043be1051ba359c52921449c18"
+
+[aport_0019_add_flag_for_not_following_symlinks_when_recursing_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0019-Add-flag-for-not-following-symlinks-when-recursing.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0019-Add-flag-for-not-following-symlinks-when-recursing.patch"
+algorithm = "sha512"
+checksum = "b74cb8d9c635432f7a2205a91debf023cc4e5fcf5cf8b25e690711afaf24956f772aa70782f266a9b997e16069b828f993a015e93248842808a721e00a8530b7"
+
+[aport_0020_udhcpc_don_t_background_if_n_is_given_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0020-udhcpc-Don-t-background-if-n-is-given.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0020-udhcpc-Don-t-background-if-n-is-given.patch"
+algorithm = "sha512"
+checksum = "95b82ac5cd0367c15008dd3568ffb68f6489065618fe3f5d04c30650a5492d1314374a3d83b5aeea078b003b43c1b856a0a1b52434fdfe0e3eb299fd44d16a59"
+
+[aport_0021_tests_fix_tarball_creation_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0021-tests-fix-tarball-creation.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0021-tests-fix-tarball-creation.patch"
+algorithm = "sha512"
+checksum = "65a62f6013d2ee55e0ba32836adf48fd572fe7f931b50bb56bf778673a5ea6883d85c08bda0df4b87f5181433a3663bd15d805f75cdef3974e355a05f5b13c70"
+
+[aport_0022_tests_musl_doesn_t_seem_to_recognize_utc0_as_a_timez_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0022-tests-musl-doesn-t-seem-to-recognize-UTC0-as-a-timez.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0022-tests-musl-doesn-t-seem-to-recognize-UTC0-as-a-timez.patch"
+algorithm = "sha512"
+checksum = "99f3469a057040b38f4a66053109fb874bac7b4ec0481c515fe675c24ed8f99a89b756fce977ad122edff43aedf722ebdd7e7e475adb5edbae207fdcc4429b5d"
+
+[aport_0023_hackfix_to_disable_hw_acceleration_for_md5_sha1_on_x_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0023-Hackfix-to-disable-HW-acceleration-for-MD5-SHA1-on-x.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0023-Hackfix-to-disable-HW-acceleration-for-MD5-SHA1-on-x.patch"
+algorithm = "sha512"
+checksum = "d82c99af216d8f4a90cf7dae78ca73ad348fa1c70cd50a65376a768a6426e87071e1036cc9c3ab3606986cc99886b4a4f53685d4f26f3aec20c0cb07df5a936a"
+
+[aport_0024_umount_implement_o_option_to_unmount_by_mount_option_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0024-umount-Implement-O-option-to-unmount-by-mount-option.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0024-umount-Implement-O-option-to-unmount-by-mount-option.patch"
+algorithm = "sha512"
+checksum = "a67640383d0b02c1a1eb177543270776922c09bdf8ac442d5dfa16ba63b99cf31f105b8db4f5ca21413be1057e55cc4a42314143bea505027d3a36e7e7e786a9"
+
+[aport_0025_find_fix_xdev_depth_and_delete_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0025-find-fix-xdev-depth-and-delete.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0025-find-fix-xdev-depth-and-delete.patch"
+algorithm = "sha512"
+checksum = "e6aaa90843082ee01d4a0e14756399bbed386e6ff30ed853bb1420bc351a8a15b773be60d5f86f9a3ddbe5106e08e2b185b44e64a6ef210eb26b270dc32b211f"
+
+[aport_0026_awk_c_fix_cve_2023_42366_bug_15874_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0026-awk.c-fix-CVE-2023-42366-bug-15874.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0026-awk.c-fix-CVE-2023-42366-bug-15874.patch"
+algorithm = "sha512"
+checksum = "e2c6367162b886654d64a1988e383c05e2792183265c3542d68e535daa5a9509c3e6a42b9aad0367a872fd494089a7b3911e8a438c47db16fbf21b656b030382"
+
+[aport_0027_awk_mark_test_for_handling_of_start_of_word_pattern_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0027-awk-Mark-test-for-handling-of-start-of-word-pattern-.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0027-awk-Mark-test-for-handling-of-start-of-word-pattern-.patch"
+algorithm = "sha512"
+checksum = "82b203472b8cdb790c15dbdb5374de45dbe2fcf926c16910b890540278d4ff6bb843fed3a8840a0eb6d340e0eac27ced0c2a4103d37848b51c61e94a3f0436da"
+
+[aport_0028_od_skip_od_b_on_big_endian_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0028-od-Skip-od-B-on-big-endian.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0028-od-Skip-od-B-on-big-endian.patch"
+algorithm = "sha512"
+checksum = "711c92902f4d99863c0433e0670999a456c588cf8a1a4729678244d61607aa82269c1944942617650902ce242fbfe3f9d68593ae0a21e4c17bfc04470f4253ba"
+
+[aport_0029_ash_reject_unknown_long_options_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0029-ash-reject-unknown-long-options.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0029-ash-reject-unknown-long-options.patch"
+algorithm = "sha512"
+checksum = "d9625580bdfe7036e0a3e01c33ddffcc8c70737dfa031c9f97a5a45635910dbd5cf3ebb8d28256a10ee7a13efa1e396a93404099db7a5143adf924a953d4cbe7"
+
+[aport_0030_hexdump_skip_a_single_test_on_big_endian_systems_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0030-hexdump-Skip-a-single-test-on-big-endian-systems.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0030-hexdump-Skip-a-single-test-on-big-endian-systems.patch"
+algorithm = "sha512"
+checksum = "3b9542d3ec24d9d3fd12b69f60ca1014b49240b92d8517e4467f62b0e266102a73cdac784766a5548a909e08a497c577b1e880604d1859eee18ac455d8bc56b2"
+
+[aport_0031_syslogd_fix_wrong_opt_locallog_flag_detection_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0031-syslogd-fix-wrong-OPT_locallog-flag-detection.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0031-syslogd-fix-wrong-OPT_locallog-flag-detection.patch"
+algorithm = "sha512"
+checksum = "4c2b7d7c623b318087f20b0bef9140cfa3f83111bfc922bba50ddd16edb8844c848c8b93c5d31303b7f253673fbff8ccf3d4ab4b9dad52fde3e04744b0782170"
+
+[aport_0032_lineedit_fix_some_tab_completions_written_to_stdout_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0032-lineedit-fix-some-tab-completions-written-to-stdout.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0032-lineedit-fix-some-tab-completions-written-to-stdout.patch"
+algorithm = "sha512"
+checksum = "ac56a170a31f4329d00155a2a7d3950c4fe365e69e2e6b773a28fe3faa214a1330f0dd910bf0712453f033abc9e8465f9cec80f4e3e820a5d6ffafbf36e503e7"
+
+[aport_0033_lineedit_use_stdout_for_shell_history_builtin_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0033-lineedit-use-stdout-for-shell-history-builtin.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0033-lineedit-use-stdout-for-shell-history-builtin.patch"
+algorithm = "sha512"
+checksum = "82c328921c4034b561f31fe5da77fd1a03033911bb6f50383b59885b184e010bbf66065ce0d90e0bc138a7608a4a5b51cab5d3598f974ee600d06eb161d5b0c3"
+
+[aport_0034_adduser_remove_preconfigured_gecos_full_name_field_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0034-adduser-remove-preconfigured-GECOS-full-name-field.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0034-adduser-remove-preconfigured-GECOS-full-name-field.patch"
+algorithm = "sha512"
+checksum = "04ed80099092bf6cafa293d13039184307197d5b71e2052a7b5650eed4364845cca3910e701e01c67a23dff7c9552506b682d553d6bdd7dfcbc7724e98595c4d"
+
+[aport_0035_cpio_map_f_to_file_long_option_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0035-cpio-map-F-to-file-long-option.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0035-cpio-map-F-to-file-long-option.patch"
+algorithm = "sha512"
+checksum = "8ea1f59ad19c4dc42d95af3a1e590180483689536dbd6932fd500e1f6bcbc1eb12b50e81b6ea26ea93297ce527d1aa850fbe0b23210a3db79039409392935242"
+
+[aport_alsa_lib_1_2_16_1_tar_bz2]
+version = "1.2.16.1"
+name = "alsa-lib-1.2.16.1.tar.bz2"
+url = "https://alsa-project.org/files/pub/lib/alsa-lib-1.2.16.1.tar.bz2"
+algorithm = "sha512"
+checksum = "2ddc5eef7fafe73ba6d8e4f79640a5aaa6e27aac2c77075fda9ee8ae61727bddfcda661e257057d8cf2f1647897d33153703f9ba913574ae7f1fbec53db3fa22"
+
+[aport_alsa_utils_1_2_16_tar_bz2]
+version = "1.2.16"
+name = "alsa-utils-1.2.16.tar.bz2"
+url = "https://alsa-project.org/files/pub/utils/alsa-utils-1.2.16.tar.bz2"
+algorithm = "sha512"
+checksum = "288c042f5acb8a7cf1b0a0c25327c74e0bce126124253bdb2d0dc2630b8bc80b5e5d694de97738d031377fd82d887db32af1c4b27c6d940357b318d0a3ef02cf"
+
+[aport_apk_tools_v3_0_8_tar_gz]
+version = "3.0.8"
+name = "apk-tools-v3.0.8.tar.gz"
+url = "https://gitlab.alpinelinux.org/alpine/apk-tools/-/archive/v3.0.8/apk-tools-v3.0.8.tar.gz"
+algorithm = "sha512"
+checksum = "3616435508dead5240f8d9fe74e87e2aa93262f9e466f50af8f60100e166403393b1e491c115395864d4179b219699831ecb61dc60960b5dfb1f10816d75f95f"
+
+[aport_bash53_001]
+version = "5.3.1"
+name = "bash53-001"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-001"
+algorithm = "sha512"
+checksum = "66d0987f1a8951974c3a707a1980ef391a1f2a2938f0fa46adb77fcdcef6a3ca49e67182b9640ece3e59bb289e5b4a17eb870aa2a525a03e829a7be158d020a6"
+
+[aport_bash53_002]
+version = "5.3.2"
+name = "bash53-002"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-002"
+algorithm = "sha512"
+checksum = "05caea1c1f5a3d27f2aa351c24f324f9d544ded89db4183ae2872e0283dde62dd6166ca4e780304398935b4aa3fb4db77ecf57acd0f0e295d279ffe40b772158"
+
+[aport_bash53_003]
+version = "5.3.3"
+name = "bash53-003"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-003"
+algorithm = "sha512"
+checksum = "3d4004653cb3f2cba984e67b8e7ae54c19351e176b62bb415f88fdd482ae04be063dacf6303c8343ab6c8bf4f2388026c1742ac603a5cd5c330db22a4b76f4cb"
+
+[aport_bash53_004]
+version = "5.3.4"
+name = "bash53-004"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-004"
+algorithm = "sha512"
+checksum = "d3c7c83ae0742f2a4e1bc96e8fdb3f05c8c0a7e631d3473922ac245f83194925ae443e761269fa6a519298b1123ee4008bcbcdaf9180dff0a0df7fbe5e029bbb"
+
+[aport_bash53_005]
+version = "5.3.5"
+name = "bash53-005"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-005"
+algorithm = "sha512"
+checksum = "e81b43b084c1e9d59acd174d0792a93053780bdef61e7f4072d90b425d99a3fb7d35ef4c0ab79c4fb24bb6b38a8d9e99aad2fceac6efddf723a2cd123b32f0ea"
+
+[aport_bash53_006]
+version = "5.3.6"
+name = "bash53-006"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-006"
+algorithm = "sha512"
+checksum = "f7e303405571635e20c26507c46f9ae0a61ea1328fa0492f2eba2095d398f799e62c1dbf0c07b440c290244f2c54186691ef4aaa2d65f2de101f9888386e2391"
+
+[aport_bash53_007]
+version = "5.3.7"
+name = "bash53-007"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-007"
+algorithm = "sha512"
+checksum = "5f9419b34c759b92a29f25d97e5da3f02603b3138afc11523c7bd304139db0cd02ff82a093cf78a338a7f9d88cb50a880fa6a105be83f8ca85ea8ff7d5c5d80b"
+
+[aport_bash53_008]
+version = "5.3.8"
+name = "bash53-008"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-008"
+algorithm = "sha512"
+checksum = "094b7dc2abe6fc41c62494c6b69640fbd8c6bd93e7cde0618504bb8589fc51fec2fb1686b2729c37e430d336d93ec174233d78f23c82026aca49a240a00477c1"
+
+[aport_bash53_009]
+version = "5.3.9"
+name = "bash53-009"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-009"
+algorithm = "sha512"
+checksum = "07f37cee118e510ae58ea408f9d97b942017e1378532d4e3cd5a4d7405994ddadaba5d3ddb4bbda6b375760967faa51add7f46914ba919a27c14e7036f64f3be"
+
+[aport_bash53_010]
+version = "5.3.10"
+name = "bash53-010"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-010"
+algorithm = "sha512"
+checksum = "976e23a734fbc38b8bf705b36d74c1861e5d69e3f3fbde683210ad93b1c14f59c014b3fcd4aea0b0f5b1f35bc23770abb5a741a7a25a2081816ee22da7bdedad"
+
+[aport_bash53_011]
+version = "5.3.11"
+name = "bash53-011"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-011"
+algorithm = "sha512"
+checksum = "10da4ad156c83a18ce023845339399fd60f627292af15345612c88764a98259231f7f3a75f9d7820beea34ba6b25cb151d2abca8ce871d07e29e32dcee8adb64"
+
+[aport_bash53_012]
+version = "5.3.12"
+name = "bash53-012"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-012"
+algorithm = "sha512"
+checksum = "e178cd27f1db5d7607ec90bb4305059d996cf95486a1e5e3b4d76f37811a0320433a2a2900e50c5704b199fae946280edb50daedb8ab8aabed9ec83dc2540d2b"
+
+[aport_bash53_013]
+version = "5.3.13"
+name = "bash53-013"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-013"
+algorithm = "sha512"
+checksum = "a973b7d9c37dc1b271fe1efa3afe3b700c1bebbf9f72e6e4e6a72a8d1f50f7875d82ee26af335e26d20883376d89c78f14b1901a0a70a8f9a9b2418df40f71fc"
+
+[aport_bash53_014]
+version = "5.3.14"
+name = "bash53-014"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-014"
+algorithm = "sha512"
+checksum = "7beb4a1c39b126189a94deb12d5065b571196f27abdd8ae9c9b340ffccc1f52ed9fec31a475b72fed661097d081b1a93d088fabe53c45c8b2cc286b831c16977"
+
+[aport_bash53_015]
+version = "5.3.15"
+name = "bash53-015"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-015"
+algorithm = "sha512"
+checksum = "812fbffd1b755cc9bbf730a4632f68a573351c4eeb5a4f495fa8f2f4dd7dbe1587dd22aed0f9c4d5c941130489ecc3def96068c77cc142680326ba8785862432"
+
+[aport_bash53_016]
+version = "5.3.16"
+name = "bash53-016"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-016"
+algorithm = "sha512"
+checksum = "e18aed683aca1af8a92f955a0ad32a23ee22f982e1bec9ea4c078a8523b30e4848fd9dc4d863cb14d1fce25bf9fdbde2473d9c0686e8be25be113cb5a36cb462"
+
+[aport_bash53_017]
+version = "5.3.17"
+name = "bash53-017"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-017"
+algorithm = "sha512"
+checksum = "608245b580267e33ffa3ed02de7173a07594a9831e3b6a505bc6fa68570e3839663bad39552744ec61421179b000dc2584f48cbadb232fc2c1427871c899a1ad"
+
+[aport_bash53_018]
+version = "5.3.18"
+name = "bash53-018"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-018"
+algorithm = "sha512"
+checksum = "5a15dfb3dafddea9a62ef5d552660d425d0658a8254adabeed5c993264b6ac59f670e6a47e6847ef6598d60e553e834a08e09dfca3734ae119dcd7d36dca97d1"
+
+[aport_bash53_019]
+version = "5.3.19"
+name = "bash53-019"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-019"
+algorithm = "sha512"
+checksum = "fecb787bf5b0c6589d5c891c8df205e39a83330e36dcb685a01ff1e117074db5288b22e7dfd3d4e9096267cc80decefd16d6837e4dd99bae26fdf3b6f9814c7c"
+
+[aport_bash53_020]
+version = "5.3.20"
+name = "bash53-020"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-020"
+algorithm = "sha512"
+checksum = "64e34979fb20cab2e6b38bcd9ec470cb917de3ef2d53db7c96c71fb5245083e37d9c65a6c2935164da2b6dc97116e4210366b8253bdd7a201f618770a44135ab"
+
+[aport_bash_5_3_tar_gz]
+version = "5.3"
+name = "bash-5.3.tar.gz"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3.tar.gz"
+algorithm = "sha512"
+checksum = "426702c8b0fb9e0c9956259973ce5b657890fd47f4f807a64febf20077bb48d0b91474ed6e843d2ef277186b46c5fffa79b808da9b48d4ec027d5e2de1b28ed8"
+
+[aport_bash_noinfo_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "bash-noinfo.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/bash/bash-noinfo.patch"
+algorithm = "sha512"
+checksum = "9d8845491d0fe335bdd8e9a2bd98bda54bfed2ae3c35b2196c6d5a38bdf96c4d97572ba7d6b19ab605ef4e8f001f64cf3312f87dedebb9e37a95ad2c44e33cdb"
+
+[aport_bashrc]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "bashrc"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/bash/bashrc"
+algorithm = "sha512"
+checksum = "a9ff38b7a11c7a4935726dddcdde320a0d9616f50bae390f149e23d47bdf07a4c6e09ade2eea2dd9fa8dc449f3d1992a327e19cd57af1b8aad77b39d681c7dff"
+
+[aport_bluez_5_87_tar_xz]
+version = "5.87"
+name = "bluez-5.87.tar.xz"
+url = "https://www.kernel.org/pub/linux/bluetooth/bluez-5.87.tar.xz"
+algorithm = "sha512"
+checksum = "f1e3bede9b0bbc3b5cfe9fed5f7945be7cbcf7a299729b5f82f1cba4bbbd6c4d2e372c9685f61458dfc374c9dfee352b6c2933a2c0d7727b8171ff394055e169"
+
+[aport_bluez_alsa_5_0_0_tar_gz]
+version = "5.0.0"
+name = "bluez-alsa-5.0.0.tar.gz"
+url = "https://github.com/arkq/bluez-alsa/archive/refs/tags/v5.0.0/bluez-alsa-5.0.0.tar.gz"
+algorithm = "sha512"
+checksum = "045b6286535191df9a85c0a1a0b9f1d5e0d5e10c65ba8d10c75dff895eb902717a0a022b5479f23216b9c59f6b55f51ffc1a2d61ad9cfd74c730f3ab035434fc"
+
+[aport_busybox_1_37_0_tar_bz2]
+version = "1.37.0"
+name = "busybox-1.37.0.tar.bz2"
+url = "https://busybox.net/downloads/busybox-1.37.0.tar.bz2"
+algorithm = "sha512"
+checksum = "ad8fd06f082699774f990a53d7a73b189ed404fe0a2166aff13eae4d9d8ee5c9239493befe949c98801fe7897520dbff3ed0224faa7205854ce4fa975e18467e"
+
+[aport_cleanup_pkgconfig_ldflags_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "cleanup-pkgconfig-ldflags.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/ncurses/cleanup-pkgconfig-ldflags.patch"
+algorithm = "sha512"
+checksum = "201ef1876655101cedabc83a0ce46f75079b08f565ca8de4cf96fd69e41332a2d0597b77fe360dc58b10772586fa39bd52ac9ee670a912fef84840278356065a"
+
+[aport_dad_if_up]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "dad.if-up"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/dad.if-up"
+algorithm = "sha512"
+checksum = "afc27da5f95bec3e3ccb5b1fcb5bd80a8317d8753e6c70cc0750d0875313e44bf2e487472c8499d7bbe5afba3e583c75548ccdcff4dcadc94bb791f53fb77ba3"
+
+[aport_default_script]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "default.script"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/default.script"
+algorithm = "sha512"
+checksum = "6a34185447d48537317379181abc703f47f93f6a5399d8dcb33fcb0d9247c8659ef739b011ec9e16052505d9a5e4950d557d7f5a8236f5744be0b206390e9a10"
+
+[aport_dropbear_2026_94_tar_bz2]
+version = "2026.94"
+name = "dropbear-2026.94.tar.bz2"
+url = "https://matt.ucc.asn.au/dropbear/releases/dropbear-2026.94.tar.bz2"
+algorithm = "sha512"
+checksum = "f69017908533353740167450f678659990d28534a1524efca578ab378ab3ff03e43fe0f9a6f74d9acd4c7f16187c074373009f1cd231efe9865e337e03ce0d51"
+
+[aport_e2fsprogs_1_47_4_tar_xz]
+version = "1.47.4"
+name = "e2fsprogs-1.47.4.tar.xz"
+url = "https://www.kernel.org/pub/linux/kernel/people/tytso/e2fsprogs/v1.47.4/e2fsprogs-1.47.4.tar.xz"
+algorithm = "sha512"
+checksum = "c316ce38d73786fb45b3728cd31991fe81b14a1e61dae645f3471c3f35983c4394e4606b47194c3e607897b7ae5a5ef1d376adb204383afa8c4219db8617d970"
+
+[aport_expat_2_9_0_tar_xz]
+version = "2.9.0"
+name = "expat-2.9.0.tar.xz"
+url = "https://distfiles.alpinelinux.org/distfiles/v3.24/expat-2.9.0.tar.xz"
+algorithm = "sha512"
+checksum = "677b5a39ea47aa238813412061eefba0ff2e819597efee69452eab7fd63b1387537eda0dfd4e5891b938be202dc87df4b5115bdae75c6b81643ac2363bb99b34"
+
+[aport_ffmpeg_9_0_2_tar_xz]
+version = "9.0.2"
+name = "ffmpeg-9.0.2.tar.xz"
+url = "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz"
+algorithm = "sha512"
+checksum = "7756f8434371b9bc1d01cf578bf49014e058b0869c3c1df05030f5f4035f1def64b2e7dba3cf340da4dc8dd9239dd5f894530c9e45793ac27876807079aa546a"
+
+[aport_firstboot_initd]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "firstboot.initd"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/openrc/firstboot.initd"
+algorithm = "sha512"
+checksum = "990855f875513a85c2b737685ac5bfdfa86f8dadacf00c1826a456547f99b69d4ecf1b9a09c0ce002f1df618b44b1febabe53f95a2c0cd02b504d565bccb50c8"
+
+[aport_glib_2_88_1_tar_xz]
+version = "2.88.1"
+name = "glib-2.88.1.tar.xz"
+url = "https://download.gnome.org/sources/glib/2.88/glib-2.88.1.tar.xz"
+algorithm = "sha512"
+checksum = "74e6d6086081e5dfb5b7fd3b74f59171033be0c340ff2dd798fea9cb42e5f680e13b2ac3dde8dd423bceb9c6556103005f9542aeda166e9a3b89da8bacecca23"
+
+[aport_hwdrivers_initd]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "hwdrivers.initd"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/openrc/hwdrivers.initd"
+algorithm = "sha512"
+checksum = "9664588a69ee13d09ecea9c55918c5cd64176d58560bde92d33f8089e1002cd04f1fe4225376b4b092297f47f9b2290980e42a5595787bfc5079d174538f1d3c"
+
+[aport_inputrc]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "inputrc"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/readline/inputrc"
+algorithm = "sha512"
+checksum = "5dbe872e94166aaed7ca2edec5a34ef9b13b254381e252cc6d851877b461579903cbb5b5dc588eabececcf1ebe636f6cb4da406cd01b64757f8c7e7f62e9a276"
+
+[aport_libdrm_2_4_134_tar_xz]
+version = "2.4.134"
+name = "libdrm-2.4.134.tar.xz"
+url = "https://dri.freedesktop.org/libdrm/libdrm-2.4.134.tar.xz"
+algorithm = "sha512"
+checksum = "ef2abddea59d1e93c83a48de920431b839ab50d6071ef4da3cf126e7d64ba7b235f2e34e1169d49ad9de2937a0a18acd66bb8d324b067239b1136e0ddbe792a1"
+
+[aport_libffi_license]
+version = "3.5.2"
+name = "libffi-LICENSE"
+url = "https://raw.githubusercontent.com/libffi/libffi/v3.5.2/LICENSE"
+algorithm = "sha512"
+checksum = "7a1f749140afdc9550ec12b69df3b8c2bd6567bd38b0345fe728a32dd8552f4d2eb12a973c75d8aafe5a7d637a4d2332d7eee657c7b17d521cc8f90780d807c4"
+
+[aport_libjpeg_turbo_3_2_0_tar_gz]
+version = "3.2.0"
+name = "libjpeg-turbo-3.2.0.tar.gz"
+url = "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.0/libjpeg-turbo-3.2.0.tar.gz"
+algorithm = "sha512"
+checksum = "13536db56c16e5364690ae2d31343a203e3b653c853c1f5314d36c8eb06700e92342737f1381f0171b3eb0223384c5fbcde91b55a46576952c4e75dc049cd045"
+
+[aport_libudev_zero_1_0_5_tar_gz]
+version = "1.0.5"
+name = "libudev-zero-1.0.5.tar.gz"
+url = "https://github.com/illiliti/libudev-zero/archive/1.0.5.tar.gz"
+algorithm = "sha512"
+checksum = "f20a923cb04351ef9e02313ea3b94e261e01d3607bc1c4c626cb40593b2d60b0e59e017f394786bf9b068c8c4870ee26b50eb56aed60aa828f7629078e9d4fa2"
+
+[aport_libxkbcommon_1_13_2_tar_gz]
+version = "1.13.2"
+name = "libxkbcommon-1.13.2.tar.gz"
+url = "https://github.com/xkbcommon/libxkbcommon/archive/refs/tags/xkbcommon-1.13.2.tar.gz"
+algorithm = "sha512"
+checksum = "261af9e02ad533bb6560e2711171812c7d92094db8b54eaa19b477ab68270e6d62b315e18d42527ca9c944e87f36f063d003d74aeb4829b21ecb96ab1b0c1ce7"
+
+[aport_machine_id_initd]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "machine-id.initd"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/openrc/machine-id.initd"
+algorithm = "sha512"
+checksum = "a60129f4bed134a27773c61994d114b3a5d1ab9f20097b096956f5bb696c056f4a608577cabb34c32b51899c69dce3bd0d8ffa61f5b66fd00fc5085d1ebba54f"
+
+[aport_mbedtls_3_6_7_tar_bz2]
+version = "3.6.7"
+name = "mbedtls-3.6.7.tar.bz2"
+url = "https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.7/mbedtls-3.6.7.tar.bz2"
+algorithm = "sha512"
+checksum = "d37e23e804753a7fa51aeb901b45c7255e9618b987ffc680af49760d2a5b5d38998d58ecb29a68ecdf29f49e37b5b681b3046fb775426115f1365cfefae9e273"
+
+[aport_mesa_26_2_5_tar_xz]
+version = "26.2.5"
+name = "mesa-26.2.5.tar.xz"
+url = "https://archive.mesa3d.org/mesa-26.2.5.tar.xz"
+algorithm = "sha512"
+checksum = "08c7d7ea426ddfb0f7bc51b06e18c363a4d31cf1a8b203828bb455eda0189e41d2215eb9f627585ed11e0d0f231a6a8c9f0c7176238760cd76b62e20c35ccd6a"
+
+[aport_modloop_confd]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "modloop.confd"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/openrc/modloop.confd"
+algorithm = "sha512"
+checksum = "80e43ded522e2d48b876131c7c9997debd43f3790e0985801a8c1dd60bc6e09f625b35a127bf225eb45a65eec7808a50d1c08a5e8abceafc61726211e061e0a2"
+
+[aport_modloop_initd]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "modloop.initd"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/openrc/modloop.initd"
+algorithm = "sha512"
+checksum = "47bea7e48444fc15f30b1da168e3d33b124c7f3480e08adcf93c5d301504cc6e73d96b254833fe20e906e353053eba8e8f410f238a3d4cd65743718a800939e5"
+
+[aport_modules_initd]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "modules.initd"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/openrc/modules.initd"
+algorithm = "sha512"
+checksum = "bc152c2b5eb37a08035f289b21e85d41461914e8b1f3c6a6a87ba0dd0cfeb20c9a5e6d7dab132e345339245a7ae1ffcb741f5bfde76fb8e0c87e4de5e0b1faf0"
+
+[aport_networking_initd]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "networking.initd"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/openrc/networking.initd"
+algorithm = "sha512"
+checksum = "aa1dd3d31872d7ec308b534044e490136de47a3e72575a96522f60c5740ee3b953a17e05013359d27985ac16b048ff8fff76e8ac1103802a4fb75a31d2185d45"
+
+[aport_notosans_bold_2_015_ttf]
+version = "2.015"
+name = "NotoSans-Bold-2.015.ttf"
+url = "https://raw.githubusercontent.com/notofonts/notofonts.github.io/28b15b4b43b7bed62b5cf6e6b0b5ff5846270535/fonts/NotoSans/hinted/ttf/NotoSans-Bold.ttf"
+algorithm = "sha512"
+checksum = "0604b29154fd975f6b07493aa7fb3aa39bc2a9e97430b1306ede4dd136061076a2bbcb1a1487b5c801ebe1276ad2845951c87355675308db3d8a51c937471f14"
+
+[aport_notosans_condensed_2_015_ttf]
+version = "2.015"
+name = "NotoSans-Condensed-2.015.ttf"
+url = "https://raw.githubusercontent.com/notofonts/notofonts.github.io/28b15b4b43b7bed62b5cf6e6b0b5ff5846270535/fonts/NotoSans/hinted/ttf/NotoSans-Condensed.ttf"
+algorithm = "sha512"
+checksum = "a46c597e5ad58fb27ae2f919238f8c0351fc4b9b8dc3ad1332085ad02b3d6dfd814c88d821cc3d35d082de26ae6f123a53c6cd4bcc7469ef88f952347ed3aa62"
+
+[aport_notosans_ofl_2_015_txt]
+version = "2.015"
+name = "NotoSans-OFL-2.015.txt"
+url = "https://raw.githubusercontent.com/notofonts/latin-greek-cyrillic/NotoSans-v2.015/OFL.txt"
+algorithm = "sha512"
+checksum = "df9ec827d8c71a5566862223e195dccb6e835438c1df2756f887e19dd44cd6589c8cf6853ca47410607dd81599c87daaea698f803a2de5ca2248a67df94e23b0"
+
+[aport_notosans_regular_2_015_ttf]
+version = "2.015"
+name = "NotoSans-Regular-2.015.ttf"
+url = "https://raw.githubusercontent.com/notofonts/notofonts.github.io/28b15b4b43b7bed62b5cf6e6b0b5ff5846270535/fonts/NotoSans/hinted/ttf/NotoSans-Regular.ttf"
+algorithm = "sha512"
+checksum = "e56a55c162f87f80b5f3adad1d076b106b79b1fa28f2219a5b6d658d60500bbc9ef0c50df502ea2f6376269b33de59ceb72234c5ced85d0280f41f66773018b0"
+
+[aport_notosans_semicondensed_2_015_ttf]
+version = "2.015"
+name = "NotoSans-SemiCondensed-2.015.ttf"
+url = "https://raw.githubusercontent.com/notofonts/notofonts.github.io/28b15b4b43b7bed62b5cf6e6b0b5ff5846270535/fonts/NotoSans/hinted/ttf/NotoSans-SemiCondensed.ttf"
+algorithm = "sha512"
+checksum = "dd840968b919578ea5e9bf1ec908bfcca37cf34d0b21fd5ad667a0b04a39e1366868a951d263c9203176a261c06dd9a690d5442cd54156e0d1a4d6a6559c571b"
+
+[aport_notosans_semicondensedbold_2_015_ttf]
+version = "2.015"
+name = "NotoSans-SemiCondensedBold-2.015.ttf"
+url = "https://raw.githubusercontent.com/notofonts/notofonts.github.io/28b15b4b43b7bed62b5cf6e6b0b5ff5846270535/fonts/NotoSans/hinted/ttf/NotoSans-SemiCondensedBold.ttf"
+algorithm = "sha512"
+checksum = "6c4e0bb9f302b253735d746ad7efab8f43ba5b60d5098948163c8110d868ad518745b6e16c40f5afb8ab35a7816a8c6c5ef5912c046e4138e1ab6967b1335917"
+
+[aport_notosansmath_ofl_3_000_txt]
+version = "3.000"
+name = "NotoSansMath-OFL-3.000.txt"
+url = "https://raw.githubusercontent.com/notofonts/math/NotoSansMath-v3.000/OFL.txt"
+algorithm = "sha512"
+checksum = "a64454634a8c33caaadde3be7508971da56cf9a3eeb1d8b959f5c0ccbb914c2be1aa307538f1dbe8d7629aea78f7b9c3be19912626250003bdf64f0d0e1f64e2"
+
+[aport_notosansmath_regular_3_000_ttf]
+version = "3.000"
+name = "NotoSansMath-Regular-3.000.ttf"
+url = "https://raw.githubusercontent.com/notofonts/notofonts.github.io/28b15b4b43b7bed62b5cf6e6b0b5ff5846270535/fonts/NotoSansMath/hinted/ttf/NotoSansMath-Regular.ttf"
+algorithm = "sha512"
+checksum = "c64350b40561efba3c5fe9de0be3be27146d5423e4c403f6c12ac862bd0027937221adf16c0226acb822e4e23078c33bd56391fc97f6a61e9dd9372e91c67b8d"
+
+[aport_notosanssymbols2_ofl_2_008_txt]
+version = "2.008"
+name = "NotoSansSymbols2-OFL-2.008.txt"
+url = "https://raw.githubusercontent.com/notofonts/symbols/NotoSansSymbols2-v2.008/OFL.txt"
+algorithm = "sha512"
+checksum = "a20a22c0b75b7801ee79fd436a6e7f99e82906df9cc70119eff9ebe0a9a1efc6afdc17a514f8292ecccb86a64274a053aa5b38aa9174fe3c38e00bd698e4c509"
+
+[aport_notosanssymbols2_regular_2_008_ttf]
+version = "2.008"
+name = "NotoSansSymbols2-Regular-2.008.ttf"
+url = "https://raw.githubusercontent.com/notofonts/notofonts.github.io/28b15b4b43b7bed62b5cf6e6b0b5ff5846270535/fonts/NotoSansSymbols2/hinted/ttf/NotoSansSymbols2-Regular.ttf"
+algorithm = "sha512"
+checksum = "221a0d60655a2a976aa77c13571da6286521d44d37bce07e80e92f0584d9ade8e38320f8f95cca132f6b09b48330c7d5a53fb7ecf60387ec6ee8f3da319d5f2e"
+
+[aport_openrc_0_64_1_tar_gz]
+version = "0.64.1"
+name = "openrc-0.64.1.tar.gz"
+url = "https://github.com/OpenRC/openrc/archive/0.64.1.tar.gz"
+algorithm = "sha512"
+checksum = "f8d576b8181fb3fb40be1d1e3a437d83492d01d52777a8c12cae918fbda3d30582b57dd4ac693acc6cf514f2156114c7d59c3706dca1fca4c3abb57b4fc430fb"
+
+[aport_openrc_logrotate]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "openrc.logrotate"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/openrc/openrc.logrotate"
+algorithm = "sha512"
+checksum = "12bb6354e808fbf47bbab963de55ee7901738b4a912659982c57ef2777fff9a670e867fcb8ec316a76b151032c92dc89a950d7d1d835ef53f753a8f3b41d2cec"
+
+[aport_pcre2_licence]
+version = "10.48"
+name = "pcre2-LICENCE"
+url = "https://raw.githubusercontent.com/PCRE2Project/pcre2/pcre2-10.48/LICENCE.md"
+algorithm = "sha512"
+checksum = "afbc88ac86b6ddd56db8b4aed1197a13c15ec9cbb4db5f4d4324af5940f08cdccf4797c65f93212275993ce9b674ec0e8731b48e2bf64edf79f13b783806e48b"
+
+[aport_perf_7_1_0_tar_xz]
+version = "7.1.0"
+name = "perf-7.1.0.tar.xz"
+url = "https://cdn.kernel.org/pub/linux/kernel/tools/perf/v7.1.0/perf-7.1.0.tar.xz"
+algorithm = "sha512"
+checksum = "ce08606f52f5429cf23fb88c2aa8aeb9090d3b96c96f5a296ce9a65a66b1035c22afd1818136986512958552a024b6e4188e660c526387a7ee9c32adf2056899"
+
+[aport_profile_bashrc_sh]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "profile-bashrc.sh"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/bash/profile-bashrc.sh"
+algorithm = "sha512"
+checksum = "9b44e2fc4a37fb97bdd75f1563a7b472c3f1260f2da5542f8f063b7647cf751006e70c683c573d0eea4c4bd64863b90997472f5fbc3f9c1ee775cd662b6eab31"
+
+[aport_readline83_001_patch]
+version = "8.3.1"
+name = "readline83-001.patch"
+url = "https://ftp.gnu.org/gnu/readline/readline-8.3-patches/readline83-001"
+algorithm = "sha512"
+checksum = "ced50af353ed527f6ec0eac5f65261f2ed208825ec72fe2acf5f0217f34f84f33dcbf01b895325f6b33664b5a426bac99506193e2ddb6eea8c79ccad37364b89"
+
+[aport_readline83_002_patch]
+version = "8.3.2"
+name = "readline83-002.patch"
+url = "https://ftp.gnu.org/gnu/readline/readline-8.3-patches/readline83-002"
+algorithm = "sha512"
+checksum = "e45ad6443bd4e271ec8e8ab883de561b6420aec362b0b7f0256086cb5a023d946df55994ed99c76ceb191e8a25e8059ae9b553ef1d546626d671b80af292f04d"
+
+[aport_readline83_003_patch]
+version = "8.3.3"
+name = "readline83-003.patch"
+url = "https://ftp.gnu.org/gnu/readline/readline-8.3-patches/readline83-003"
+algorithm = "sha512"
+checksum = "6b3ebffe994d0cd4d3466b15e3aee9a73613109283a4442f3bf10e28edcd1204df824c71356d66d01ac21014a806023a101fedf94526a19f6f590d9ffdc864cd"
+
+[aport_readline_8_3_tar_gz]
+version = "8.3"
+name = "readline-8.3.tar.gz"
+url = "https://ftp.gnu.org/gnu/readline/readline-8.3.tar.gz"
+algorithm = "sha512"
+checksum = "513002753dcf5db9213dbbb61d51217245f6a40d33b1dd45238e8062dfa8eef0c890b87a5548e11db959e842724fb572c4d3d7fb433773762a63c30efe808344"
+
+[aport_sbc_2_2_tar_xz]
+version = "2.2"
+name = "sbc-2.2.tar.xz"
+url = "https://www.kernel.org/pub/linux/bluetooth/sbc-2.2.tar.xz"
+algorithm = "sha512"
+checksum = "1a0bd4629e5d0af768466ebfc2f9e71224888e3a877d74c368dea0dedb2f8523f37f45f784aa4650a5097ace276dea482b643adc1d924fbd6a6ffe6b6e41f488"
+
+[aport_seatd_0_9_3_tar_gz]
+version = "0.9.3"
+name = "seatd-0.9.3.tar.gz"
+url = "https://git.sr.ht/~kennylevinsen/seatd/archive/0.9.3.tar.gz"
+algorithm = "sha512"
+checksum = "8cb21cfbd9aa25966fe3f586de75d24a8625142ffb49e6ec357875c347d3e92d535467b817d79fdc704f80858a145f1107c488adbf22a1c337dbc6ccccc8b00a"
+
+[aport_securetty]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "securetty"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/securetty"
+algorithm = "sha512"
+checksum = "38d6ce0dfff65ce7ec644f5d7aca70de943f4d5fb8820c772f5d945926b678de280f19831d3f3d0dc0dcda16812841748b57eaa745b784a5e216a59657afbd71"
+
+[aport_skalibs_copying]
+version = "2.15.0.0"
+name = "skalibs-COPYING"
+url = "https://raw.githubusercontent.com/skarnet/skalibs/v2.15.0.0/COPYING"
+algorithm = "sha512"
+checksum = "699bae60cfe74dfd83ae9dcd49d617f993c491bee34c2b6b9ea77cf96e1ca4bca439193af496ef34e912b2aaed787fff1937abf72b18ad0a5f2b4b2d7817797a"
+
+[aport_supervise_daemon_defaults_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "supervise-daemon-defaults.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/openrc/supervise-daemon-defaults.patch"
+algorithm = "sha512"
+checksum = "86a2fb1564b8537f5dd7e06587a572ebefd110bf8bea049bc2254d4008ed3fed2296b4e9fde793ddbed7a66f70335b6c228f0b10fc0a6e7d106d3ad226fc0ba4"
+
+[aport_sysctl_initd]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "sysctl.initd"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/openrc/sysctl.initd"
+algorithm = "sha512"
+checksum = "2d5f9f6d41b7c0a8643cfdee1ce3c399bfe4ebff54421f33ab1e74c1c4c1b96a49e54b5cd69f0339a060342e4e5a11067bbff68c39fa487919259d73e8e46ed1"
+
+[aport_sysctl_readme_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "sysctl-readme.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/openrc/sysctl-readme.patch"
+algorithm = "sha512"
+checksum = "903ff555275a67ff08da91badb55d9fa6c6a2901e8ef09ca8366bd74d69757491c8336347f04551268ecf053c8ae974f50decd869926894dd94e382008e3e925"
+
+[aport_sysfsconf_initd]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "sysfsconf.initd"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/openrc/sysfsconf.initd"
+algorithm = "sha512"
+checksum = "d76c75c58e6f4b0801edac4e081b725ef3d50a9a8c9bbb5692bf4d0f804af7d383bf71a73d5d03ed348a89741ef0b2427eb6a7cbf5a9b9ff60a240639fa6ec88"
+
+[aport_tabler_icons_3_48_0_tgz]
+version = "3.48.0"
+name = "tabler-icons-3.48.0.tgz"
+url = "https://registry.npmjs.org/@tabler/icons/-/icons-3.48.0.tgz"
+algorithm = "sha512"
+checksum = "950934ea0547355067269d143a0b6d879e2671904933badd60ab00c4a38fae88f56db480c7eff18ae3967c7972be074bdccf98f88d0720dae31dadf2829f1e5d"
+
+[aport_terminus_font_4_49_1_tar_gz]
+version = "4.49.1"
+name = "terminus-font-4.49.1.tar.gz"
+url = "https://downloads.sourceforge.net/project/terminus-font/terminus-font-4.49/terminus-font-4.49.1.tar.gz"
+algorithm = "sha512"
+checksum = "2e3a99960c459a453b5879bebbebeb653f0a22060177bf75c67bbeb7d32cfe1acce9e74a88fdc42e299b6dc402e0708552487abd26e80e985c7d6059b0d445a8"
+
+[aport_tyrquake_0_71_tar_gz]
+version = "0.71"
+name = "tyrquake-0.71.tar.gz"
+url = "https://disenchant.net/files/engine/tyrquake-0.71.tar.gz"
+algorithm = "sha512"
+checksum = "ecceeecb43866c10c0669b4362ce2eda7a790c502764b3d644566e7637ffbde0548676c9dcea07963db0d91d83c248e3497603c0a3a2e1a12a1418a82c07179a"
+
+[aport_uclient_daad21fa2c17cae54d37149bf27bb3dd78e50a3f_tar_gz]
+version = "20260607"
+name = "uclient-daad21fa2c17cae54d37149bf27bb3dd78e50a3f.tar.gz"
+url = "https://github.com/openwrt/uclient/archive/daad21fa2c17cae54d37149bf27bb3dd78e50a3f.tar.gz"
+algorithm = "sha512"
+checksum = "c3f8bae4bf331fe8baaf2d071aac054c677f612880b2c0d5bc641a9776354ef4b20750c83a35aef84a5d14c59e5662df85be7a6a9c38dc2d4bacce8b607324f7"
+archive_prefix = "uclient-daad21fa2c17cae54d37149bf27bb3dd78e50a3f"
+
+[aport_udhcpc_conf]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "udhcpc.conf"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/udhcpc.conf"
+algorithm = "sha512"
+checksum = "5f9ff70f99a970e88460c0de81a6637d8a82252fba6715e259833f16ed8cbfc3440972b1fa454eb77dbbcd1e244774c96b4eef96f71a2b67a9039a0dd5e6fc1e"
+
+[aport_ustream_ssl_99f1c0db5a729f615bc5114b3b52fd8ac8083f34_tar_gz]
+version = "99f1c0db5a729f615bc5114b3b52fd8ac8083f34"
+name = "ustream-ssl-99f1c0db5a729f615bc5114b3b52fd8ac8083f34.tar.gz"
+url = "https://github.com/openwrt/ustream-ssl/archive/99f1c0db5a729f615bc5114b3b52fd8ac8083f34.tar.gz"
+algorithm = "sha512"
+checksum = "ebddae51ee1ba23fb01f1dac41bdb4aa5f351092fbafcaf569bad7cf648242979fcc00a83ef52bb9bf57de2fc9785e8d55bda8532f933384b60ac6327be17dc7"
+archive_prefix = "ustream-ssl-99f1c0db5a729f615bc5114b3b52fd8ac8083f34"
+
+[aport_utmps_copying]
+version = "0.1.3.3"
+name = "utmps-COPYING"
+url = "https://raw.githubusercontent.com/skarnet/utmps/v0.1.3.3/COPYING"
+algorithm = "sha512"
+checksum = "6d359da03022036299c5d0e8192b66d430bb1f830fc0e6c228aee9ec8388c34ee06161596c54a21c7b686d483c833b684878419451c30c810a513d887bd953d9"
+
+[aport_wayland_1_26_0_tar_xz]
+version = "1.26.0"
+name = "wayland-1.26.0.tar.xz"
+url = "https://gitlab.freedesktop.org/wayland/wayland/-/releases/1.26.0/downloads/wayland-1.26.0.tar.xz"
+algorithm = "sha512"
+checksum = "50861b0c40cedec5f31b49ff1e99fc135a299fa4a8e2ff50ff4bac3f42e2f3f7be38271929fd2f6e58d83d5df516f643946ceba7937cc199581487c082c7ec31"
+
+[aport_wayland_protocols_1_49_tar_xz]
+version = "1.49"
+name = "wayland-protocols-1.49.tar.xz"
+url = "https://gitlab.freedesktop.org/wayland/wayland-protocols/-/releases/1.49/downloads/wayland-protocols-1.49.tar.xz"
+algorithm = "sha512"
+checksum = "c6f58586c4e3046fb545f31959eb662426ddf94cab627a136bec905c3a1c75087ed2850d49e44964241a9158a3559ad02607647a19fb5f1c1fb254160b04806c"
+
+[aport_xkeyboard_config_2_48_tar_xz]
+version = "2.48"
+name = "xkeyboard-config-2.48.tar.xz"
+url = "https://www.x.org/releases/individual/data/xkeyboard-config/xkeyboard-config-2.48.tar.xz"
+algorithm = "sha512"
+checksum = "2c24f9cca97b8863ff2e71fc3780e9c3e22e4486c80d45022e2208d559bdb40824bdb8a4037e0d5690900b6e080ddef4eacfc8bff843e04ba5ab86940f1fb6ea"
+
+[aport_zlib_license]
+version = "1.3.2"
+name = "zlib-LICENSE"
+url = "https://raw.githubusercontent.com/madler/zlib/v1.3.2/LICENSE"
+algorithm = "sha512"
+checksum = "98fdcd0e962849a7d132c964745a8ff3b902ffc50d80c7af72378e848bc94228ad7a569f9d8a5b7c5484478709932a2c0988dba613e19a35cb208ad56a987f5f"
+
+[arm_trusted_firmware]
+version = "6bb37adc203567c2f9322dfbe34058a5f12d4c70"
+name = "arm_trusted_firmware.tar.gz"
+url = "https://codeload.github.com/ARM-software/arm-trusted-firmware/tar.gz/6bb37adc203567c2f9322dfbe34058a5f12d4c70"
+algorithm = "sha256"
+checksum = "129983ed471a29bd1dc125ec5147a4891731f6aa544818e7dec4fc11472bfdf3"
+repository = "https://github.com/ARM-software/arm-trusted-firmware"
+license = "BSD-3-Clause"
+archive_prefix = "arm-trusted-firmware-6bb37adc203567c2f9322dfbe34058a5f12d4c70"
+
+[bch]
+version = "8d0656ab8f37e734428635501738d360ad80eebd"
+name = "bch.tar.gz"
+url = "https://github.com/jkent/python-bchlib/archive/8d0656ab8f37e734428635501738d360ad80eebd.tar.gz"
+algorithm = "sha256"
+checksum = "0e17363a6a531b9b9450b42176fbe4334d178a8d96a0702830a9b1a2885e4f06"
+repository = "https://github.com/jkent/python-bchlib"
 license = "GPL-2.0-only"
 
+[bch.files]
+bch_c_sha256 = "d4ce0126a61c8f8e4cbdca958e31cdd778a59337fbeafd6032cc6e8bf5315603"
+bch_h_sha256 = "7df0b1891f5494eca70e756c9a8ba4b8fc75a4c6c8925b018151723a87a865a6"
+copying_sha256 = "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+
+[busybox_utmps_patch]
+version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
+name = "0004-Avoid-redefined-warnings-when-buiding-with-utmps.patch"
+url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763/main/busybox/0004-Avoid-redefined-warnings-when-buiding-with-utmps.patch"
+algorithm = "sha512"
+checksum = "c6acd1a4cbbc8b7b6c66b20c4cb958c12e887a43edbea35c0c4db3b4139afc5b4246058f503a5aaac0d05badffee93e6bf91111ad0cc856d9f5074baa7194df8"
+
+[dtschema]
+version = "2026.9"
+name = "dtschema-2026.9-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/32/59/e5fafef672bde12c0d237462e5e936650df55e2bfc46aac3164ad5d4e953/dtschema-2026.9-py3-none-any.whl"
+algorithm = "sha256"
+checksum = "defcbe1be176dec69c65b9700c9cd992cba3b409976a1404b9c0b5080aa5f4c1"
+bytes = 125946
+
 [fpdoom_bootstrap]
+version = "9695f3739639565dc1adb1797c14d8b381438c01"
+name = "fpdoom_bootstrap.tar.gz"
+url = "https://github.com/ilyakurdyukov/fpdoom/archive/9695f3739639565dc1adb1797c14d8b381438c01.tar.gz"
+algorithm = "sha256"
+checksum = "65fd6dc3eecc0c9746ee1137d2c7f4872a05ad6d075a8be522579df3a134daac"
 repository = "https://github.com/ilyakurdyukov/fpdoom"
-commit = "9695f3739639565dc1adb1797c14d8b381438c01"
-archive_url = "https://github.com/ilyakurdyukov/fpdoom/archive/9695f3739639565dc1adb1797c14d8b381438c01.tar.gz"
-archive_sha256 = "65fd6dc3eecc0c9746ee1137d2c7f4872a05ad6d075a8be522579df3a134daac"
 license = "Unlicense"
 
 [fpdoom_host]
+version = "3241bfb10c18567251c5745f2959d45e35525aa8"
+name = "fpdoom_host.tar.gz"
+url = "https://github.com/ilyakurdyukov/fpdoom/archive/3241bfb10c18567251c5745f2959d45e35525aa8.tar.gz"
+algorithm = "sha256"
+checksum = "aa67343c2458d9dd177700e257f2ec249ea960eb98c514dde4963fcc988a0ce2"
 repository = "https://github.com/ilyakurdyukov/fpdoom"
-commit = "3241bfb10c18567251c5745f2959d45e35525aa8"
-archive_url = "https://github.com/ilyakurdyukov/fpdoom/archive/3241bfb10c18567251c5745f2959d45e35525aa8.tar.gz"
-archive_sha256 = "aa67343c2458d9dd177700e257f2ec249ea960eb98c514dde4963fcc988a0ce2"
 license = "Unlicense"
 
 [fpdoom_host.files]
@@ -23,11 +1044,270 @@ cmd_def_h_sha256 = "9ccf3115cfb7a92e53165baa0d8ad350c616b74b5d6d8e718cd66e583ec8
 libc_server_c_sha256 = "4a0dc26108689b108701e3300835212c1933a1a710a5b1a6e6d24bd636c1b74b"
 makefile_sha256 = "451a96e66bfb3ccfd9808cb1385c0844cff00c2470c8ab2a170857f7f095bf5a"
 
+[gitleaks]
+version = "8.30.1"
+name = "gitleaks_8.30.1_linux_x64.tar.gz"
+url = "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz"
+algorithm = "sha256"
+checksum = "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+
+[iniconfig]
+version = "2.3.0"
+name = "iniconfig-2.3.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl"
+algorithm = "sha256"
+checksum = "f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12"
+bytes = 7484
+
+[kern]
+version = "0.33.0"
+name = "kern.tar.gz"
+url = "https://github.com/getkern/kern/releases/download/v0.33.0/kern-x86_64-unknown-linux-musl.tar.gz"
+algorithm = "sha256"
+checksum = "3cf562cce7645d8b6320baceb30508af094b083109132ee89ae5f7e81d27a633"
+bytes = 1084292
+
+[libtsm]
+version = "4.8.0"
+name = "v4.8.0.tar.gz"
+url = "https://github.com/kmscon/libtsm/archive/refs/tags/v4.8.0.tar.gz"
+algorithm = "sha256"
+checksum = "50811e9e94fc798eb5dcbaff20f81067c942ec47f329f91bbe4caeb35a61ff05"
+
+[libubox]
+version = "7dd127841e82eb1cfb61185da37dde7b9bd9ba6d"
+name = "libubox-7dd127841e82eb1cfb61185da37dde7b9bd9ba6d.tar.gz"
+url = "https://github.com/openwrt/libubox/archive/7dd127841e82eb1cfb61185da37dde7b9bd9ba6d.tar.gz"
+algorithm = "sha512"
+checksum = "fec5004aad55b3fa922c88b512431e8e2f4085bbcc9d9f232501dcf405832c8cbc9b8ecc79efcaf6413416e4a3b9f4e8f0a0828e3641c42c5436a703cb23333b"
+archive_prefix = "libubox-7dd127841e82eb1cfb61185da37dde7b9bd9ba6d"
+
+[linux]
+version = "7.2.9"
+name = "linux-7.2.9.tar.xz"
+url = "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.2.9.tar.xz"
+algorithm = "sha256"
+checksum = "b4c5dfbe51a364a6c7f03869200f88c8e1f77403539005f14b7fc6bc91b8d8ba"
+license = "GPL-2.0-only"
+
+[linux_host_bzip2]
+version = "1.0.8"
+name = "bzip2-1.0.8.tar.gz"
+url = "https://sourceware.org/pub/bzip2/bzip2-1.0.8.tar.gz"
+algorithm = "sha256"
+checksum = "ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269"
+
+[linux_host_expat]
+version = "2.8.5"
+name = "expat-2.8.5.tar.xz"
+url = "https://github.com/libexpat/libexpat/releases/download/R_2_8_5/expat-2.8.5.tar.xz"
+algorithm = "sha256"
+checksum = "1e727b8933ec51a77a9a9d9afcf8e688bce45d907c13e36ab7393fe36e703182"
+
+[linux_host_libedit]
+version = "20260508.3.1"
+name = "libedit-20260508-3.1.tar.gz"
+url = "https://www.thrysoee.dk/editline/libedit-20260508-3.1.tar.gz"
+algorithm = "sha256"
+checksum = "91f42d6571dd8d92faedd1341134ce5abca0c5d0b4b352814186d33f2b11272e"
+
+[linux_host_libffi]
+version = "3.5.2"
+name = "libffi-3.5.2.tar.gz"
+url = "https://github.com/libffi/libffi/releases/download/v3.5.2/libffi-3.5.2.tar.gz"
+algorithm = "sha256"
+checksum = "f3a3082a23b37c293a4fcd1053147b371f2ff91fa7ea1b2a52e335676bac82dc"
+
+[linux_host_libusb]
+version = "1.0.30"
+name = "libusb-1.0.30.tar.bz2"
+url = "https://github.com/libusb/libusb/releases/download/v1.0.30/libusb-1.0.30.tar.bz2"
+algorithm = "sha256"
+checksum = "fea36f34f9156400209595e300840767ab1a385ede1dc7ee893015aea9c6dbaf"
+
+[linux_host_mpdecimal]
+version = "4.0.1"
+name = "mpdecimal-4.0.1.tar.gz"
+url = "https://www.bytereef.org/software/mpdecimal/releases/mpdecimal-4.0.1.tar.gz"
+algorithm = "sha256"
+checksum = "96d33abb4bb0070c7be0fed4246cd38416188325f820468214471938545b1ac8"
+
+[linux_host_musl]
+version = "1.2.6"
+name = "musl-1.2.6.tar.gz"
+url = "https://musl.libc.org/releases/musl-1.2.6.tar.gz"
+algorithm = "sha256"
+checksum = "d585fd3b613c66151fc3249e8ed44f77020cb5e6c1e635a616d3f9f82460512a"
+
+[linux_host_ncurses]
+version = "6.6_p20260516"
+name = "ncurses-6.6-20260516.tgz"
+url = "https://distfiles.alpinelinux.org/distfiles/v3.24/ncurses-6.6-20260516.tgz"
+algorithm = "sha256"
+checksum = "933438009f594f54656c53c7bc347a7e0ff21881700fc3db811086f7a3fd3b60"
+
+[linux_host_openssh]
+version = "10.3_p1"
+name = "openssh-10.3p1.tar.gz"
+url = "https://ftp.openbsd.org/pub/OpenBSD/OpenSSH/portable/openssh-10.3p1.tar.gz"
+algorithm = "sha256"
+checksum = "56682a36bb92dcf4b4f016fd8ec8e74059b79a8de25c15d670d731e7d18e45f4"
+
+[linux_host_openssl]
+version = "3.5.9"
+name = "openssl-3.5.9.tar.gz"
+url = "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz"
+algorithm = "sha256"
+checksum = "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a"
+
+[linux_host_python3]
+version = "3.14.8"
+name = "Python-3.14.8.tar.xz"
+url = "https://www.python.org/ftp/python/3.14.8/Python-3.14.8.tar.xz"
+algorithm = "sha256"
+checksum = "c2215904f02b175596dc49351585104f4bc20341e1c47378b26a2c274360ce73"
+
+[linux_host_xz]
+version = "5.8.4"
+name = "xz-5.8.4.tar.gz"
+url = "https://github.com/tukaani-project/xz/archive/refs/tags/v5.8.4/xz-5.8.4.tar.gz"
+algorithm = "sha256"
+checksum = "b6b34c52e672e810d339db14e0c10b5b6f5f67a30d8d05cdac5d8cb4d82f78d5"
+
+[linux_host_zlib]
+version = "1.3.2"
+name = "zlib-1.3.2.tar.gz"
+url = "https://zlib.net/fossils/zlib-1.3.2.tar.gz"
+algorithm = "sha256"
+checksum = "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16"
+
+[lvgl]
+version = "9.6.0"
+name = "v9.6.0.tar.gz"
+url = "https://github.com/lvgl/lvgl/archive/refs/tags/v9.6.0.tar.gz"
+algorithm = "sha256"
+checksum = "b20ee3acc1bba13c62d854f9ebd62e4c51e0b443b1e0225892e86442defa84df"
+
+[mesa_headers]
+version = "26.1.6-r0"
+name = "mesa-dev-26.1.6-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/mesa-dev-26.1.6-r0.apk"
+algorithm = "sha256"
+checksum = "fcd8e3caf92e1945e3301e7e0c9b38655956d3bcb20add990f33d85aaff244a1"
+
+[node]
+version = "24.21.0"
+name = "node-v24.21.0-linux-x64-musl.tar.xz"
+url = "https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64-musl.tar.xz"
+algorithm = "sha256"
+checksum = "34ab095af8efe9018f21489d3dc19871fb5edd4f130a71469b69c05fd4e32a5e"
+
+[npm]
+version = "12.2.0"
+name = "npm-12.2.0.tgz"
+url = "https://registry.npmjs.org/npm/-/npm-12.2.0.tgz"
+algorithm = "sha512"
+checksum = "66c2632a94e796649738b2d7894d710c2cc2e1696893823066687f6b0d8a52e5f2b54eeaeaa32ffdc513ecca1e49ff794a5c2ec3f9515d879f1b3182b291cf35"
+
+[pluggy]
+version = "1.6.0"
+name = "pluggy-1.6.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl"
+algorithm = "sha256"
+checksum = "e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746"
+bytes = 20538
+
+[pygments]
+version = "2.21.0"
+name = "pygments-2.21.0-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl"
+algorithm = "sha256"
+checksum = "2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9"
+bytes = 1250147
+
+[pytest]
+version = "9.1.1"
+name = "pytest-9.1.1-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/24/25/1de2678b631f5a49215c6c96fff41ba892b0a34df68d6d80292b1b48aa7f/pytest-9.1.1-py3-none-any.whl"
+algorithm = "sha256"
+checksum = "37a86b45efb9a47a61a36449063e8e18d0cab3161329fc099eb21783169c4f0c"
+bytes = 386536
+
+[python_cachetools]
+version = "7.1.1"
+name = "cachetools-7.1.1-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/bf/0f/f897abe4ea0a8c408ae65c8c83bffab4936ad65d6032d4fb4cd35bbdc3ee/cachetools-7.1.1-py3-none-any.whl"
+algorithm = "sha256"
+checksum = "0335cd7a0952d2b22327441fb0628139e234c565559eeb91a8a4ac7551c5353d"
+bytes = 16775
+license = "MIT"
+
+[python_crcmod]
+version = "1.7"
+name = "crcmod-1.7.tar.gz"
+url = "https://files.pythonhosted.org/packages/6b/b0/e595ce2a2527e169c3bcd6c33d2473c1918e0b7f6826a043ca1245dd4e5b/crcmod-1.7.tar.gz"
+algorithm = "sha256"
+checksum = "dc7051a0db5f2bd48665a990d3ec1cc305a466a77358ca4492826f41f283601e"
+bytes = 89670
+license = "MIT"
+
+[python_ext4]
+version = "1.4.1"
+name = "ext4-1.4.1-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/e4/9b/32ffae636b8ad3a7568ec810ca4c106f4c9ba3d3bde1621a062d027155e0/ext4-1.4.1-py3-none-any.whl"
+algorithm = "sha256"
+checksum = "a92ce289160162d6e68a9ccc9c717184bfa65c1b547de6bd801b248bd98daede"
+bytes = 29633
+license = "MIT"
+
+[ruff]
+version = "0.16.10"
+name = "ruff-x86_64-unknown-linux-musl.tar.gz"
+url = "https://github.com/astral-sh/ruff/releases/download/0.16.10/ruff-x86_64-unknown-linux-musl.tar.gz"
+algorithm = "sha256"
+checksum = "ad1b2138407a0c53b936524df99d87211333f7bc40478d6860f42994597f7ff0"
+
+[site-node]
+version = "24.21.0"
+name = "node-v24.21.0-linux-x64.tar.xz"
+url = "https://nodejs.org/dist/v24.21.0/node-v24.21.0-linux-x64.tar.xz"
+algorithm = "sha256"
+checksum = "fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6"
+
+[sparse]
+version = "37156835e3d725b6d750f000be33ba3814bb2310"
+name = "sparse-37156835e3d725b6d750f000be33ba3814bb2310.tar.gz"
+url = "https://git.kernel.org/pub/scm/devel/sparse/sparse.git/snapshot/sparse-37156835e3d725b6d750f000be33ba3814bb2310.tar.gz"
+algorithm = "sha256"
+checksum = "feca4eb2f0cb61416f4946e0a537d20da8e5eb0d8064fb3f1323a19cb5738ffc"
+
+[sprd_chipram]
+version = "61fdb1f975457599839d91418706b83dacc41203"
+name = "sprd_chipram.tar.gz"
+url = "https://codeload.github.com/yonglongliu/chipram/tar.gz/61fdb1f975457599839d91418706b83dacc41203"
+algorithm = "sha256"
+checksum = "ff5e4398ba90727e0b292482dc8c46f846dd6fc95512b966bf6eda929d72f6c5"
+repository = "https://github.com/yonglongliu/chipram"
+license = "NOASSERTION"
+archive_prefix = "chipram-61fdb1f975457599839d91418706b83dacc41203"
+
+[sprd_u_boot]
+version = "b2abd80f0b1f872889ba857b8f9abce8c4dcf405"
+name = "sprd_u_boot.tar.gz"
+url = "https://codeload.github.com/yonglongliu/u-boot15/tar.gz/b2abd80f0b1f872889ba857b8f9abce8c4dcf405"
+algorithm = "sha256"
+checksum = "6dcf91a591442a93fe6f66857e58eb19ab8d5cab50060405c1e981696a100472"
+repository = "https://github.com/yonglongliu/u-boot15"
+license = "GPL-2.0-only"
+archive_prefix = "u-boot15-b2abd80f0b1f872889ba857b8f9abce8c4dcf405"
+
 [spreadtrum_flash]
+version = "08679125e29b9c339ce1d7ea3f20ce1ffa24b904"
+name = "spreadtrum_flash.tar.gz"
+url = "https://github.com/ilyakurdyukov/spreadtrum_flash/archive/08679125e29b9c339ce1d7ea3f20ce1ffa24b904.tar.gz"
+algorithm = "sha256"
+checksum = "d3012698aa785a5df3ef9cb9b53e889f264b7dc80d4f92b25fe35a99840226d5"
 repository = "https://github.com/ilyakurdyukov/spreadtrum_flash"
-commit = "08679125e29b9c339ce1d7ea3f20ce1ffa24b904"
-archive_url = "https://github.com/ilyakurdyukov/spreadtrum_flash/archive/08679125e29b9c339ce1d7ea3f20ce1ffa24b904.tar.gz"
-archive_sha256 = "d3012698aa785a5df3ef9cb9b53e889f264b7dc80d4f92b25fe35a99840226d5"
 license = "Unlicense"
 
 [spreadtrum_flash.files]
@@ -37,38 +1317,94 @@ makefile_sha256 = "8f1c677247a27f119c90c67748f9106a5b3f38be5c1f18e50ade075d59ac2
 spd_cmd_h_sha256 = "3784fee2ce9e4016bfd939049d0e8d8da9d9890c4dcc3f00300561eb120f1b1f"
 spd_dump_c_sha256 = "120ebb3d2d35bdf1fbd3cef3ca96fece12abc8f421ceaa57f8751aa3454cab88"
 
-[bch]
-repository = "https://github.com/jkent/python-bchlib"
-commit = "8d0656ab8f37e734428635501738d360ad80eebd"
-archive_url = "https://github.com/jkent/python-bchlib/archive/8d0656ab8f37e734428635501738d360ad80eebd.tar.gz"
-archive_sha256 = "0e17363a6a531b9b9450b42176fbe4334d178a8d96a0702830a9b1a2885e4f06"
-license = "GPL-2.0-only"
+[t117_fdl1]
+version = "1.20260403"
+name = "t117_fdl1.bin"
+url = "https://github.com/ilyakurdyukov/spreadtrum_flash/releases/download/1.20260403/t117_fdl1.bin"
+algorithm = "sha256"
+checksum = "062d5e1a298c0e378eeefcc67dddba6fd4d6be10a683511c849ec59c17fb7414"
+license = "Unlicense"
 
-[bch.files]
-bch_c_sha256 = "d4ce0126a61c8f8e4cbdca958e31cdd778a59337fbeafd6032cc6e8bf5315603"
-bch_h_sha256 = "7df0b1891f5494eca70e756c9a8ba4b8fc75a4c6c8925b018151723a87a865a6"
-copying_sha256 = "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+[tomlkit]
+version = "0.15.1"
+name = "tomlkit-0.15.1-py3-none-any.whl"
+url = "https://files.pythonhosted.org/packages/13/bc/8c13eb66537dce1d2bd3a57132902f38d0e7f5bb46fa9f4daed9fe9d76ee/tomlkit-0.15.1-py3-none-any.whl"
+algorithm = "sha256"
+checksum = "177a05aece5a8ca5266fd3c448abb47b8d352f09d477d3ca8332db4d89b24304"
+bytes = 49449
 
-[sprd_chipram]
-repository = "https://github.com/yonglongliu/chipram"
-commit = "61fdb1f975457599839d91418706b83dacc41203"
-archive_url = "https://codeload.github.com/yonglongliu/chipram/tar.gz/61fdb1f975457599839d91418706b83dacc41203"
-archive_sha256 = "ff5e4398ba90727e0b292482dc8c46f846dd6fc95512b966bf6eda929d72f6c5"
-archive_prefix = "chipram-61fdb1f975457599839d91418706b83dacc41203"
-license = "NOASSERTION"
+[typos]
+version = "1.50.3"
+name = "typos-v1.50.3-x86_64-unknown-linux-musl.tar.gz"
+url = "https://github.com/crate-ci/typos/releases/download/v1.50.3/typos-v1.50.3-x86_64-unknown-linux-musl.tar.gz"
+algorithm = "sha256"
+checksum = "aca6b5d546307092b8d0a8e0a89dd80f9da51f2f7617c5e45c5607c1684ffbf2"
 
-[sprd_u_boot]
-repository = "https://github.com/yonglongliu/u-boot15"
-commit = "b2abd80f0b1f872889ba857b8f9abce8c4dcf405"
-archive_url = "https://codeload.github.com/yonglongliu/u-boot15/tar.gz/b2abd80f0b1f872889ba857b8f9abce8c4dcf405"
-archive_sha256 = "6dcf91a591442a93fe6f66857e58eb19ab8d5cab50060405c1e981696a100472"
-archive_prefix = "u-boot15-b2abd80f0b1f872889ba857b8f9abce8c4dcf405"
-license = "GPL-2.0-only"
+[u_boot]
+version = "2026.07"
+name = "u-boot-2026.07.tar.bz2"
+url = "https://ftp.denx.de/pub/u-boot/u-boot-2026.07.tar.bz2"
+algorithm = "sha256"
+checksum = "78e8bfc382fe388f9b55aa1daf8c563522a037779b5d4c349d1415e381f1243e"
 
-[arm_trusted_firmware]
-repository = "https://github.com/ARM-software/arm-trusted-firmware"
-commit = "6bb37adc203567c2f9322dfbe34058a5f12d4c70"
-archive_url = "https://codeload.github.com/ARM-software/arm-trusted-firmware/tar.gz/6bb37adc203567c2f9322dfbe34058a5f12d4c70"
-archive_sha256 = "129983ed471a29bd1dc125ec5147a4891731f6aa544818e7dec4fc11472bfdf3"
-archive_prefix = "arm-trusted-firmware-6bb37adc203567c2f9322dfbe34058a5f12d4c70"
-license = "BSD-3-Clause"
+[vale_google]
+version = "0.7.0"
+name = "v0.7.0.tar.gz"
+url = "https://github.com/vale-cli/Google/archive/refs/tags/v0.7.0.tar.gz"
+algorithm = "sha256"
+checksum = "a4d6458fef518d51e5e7e84445a066ce73075ca5b8bb71f0feabb344258a4059"
+
+[weston]
+version = "16.0.0"
+name = "weston-16.0.0.tar.xz"
+url = "https://gitlab.freedesktop.org/wayland/weston/-/releases/16.0.0/downloads/weston-16.0.0.tar.xz"
+algorithm = "sha256"
+checksum = "dfb32e2bccabda957b94a8d0ec6075acd18c71c87ebc543ee3e618d294ca0f7f"
+
+[windows_driver_libwdi]
+version = "1.5.1"
+name = "libwdi-1.5.1.tar.gz"
+url = "https://codeload.github.com/pbatard/libwdi/tar.gz/refs/tags/v1.5.1"
+algorithm = "sha256"
+checksum = "a695e93db0977dfdc5c6a99a4ea91b22f9027547d0177b2a0f3075078643c929"
+bytes = 289593
+
+[windows_host_libusb]
+version = "1.0.29"
+name = "libusb-1.0.29.7z"
+url = "https://github.com/libusb/libusb/releases/download/v1.0.29/libusb-1.0.29.7z"
+algorithm = "sha256"
+checksum = "964a38152ca9a104cd00ec8d2f0617b89cd814f9b635e29763c68563d951521d"
+bytes = 4908465
+
+[windows_host_libusb_source]
+version = "1.0.29"
+name = "libusb-1.0.29.tar.bz2"
+url = "https://github.com/libusb/libusb/releases/download/v1.0.29/libusb-1.0.29.tar.bz2"
+algorithm = "sha256"
+checksum = "5977fc950f8d1395ccea9bd48c06b3f808fd3c2c961b44b0c2e6e29fc3a70a85"
+bytes = 645381
+
+[windows_host_llvm_mingw]
+version = "20260908"
+name = "llvm-mingw-20260908-ucrt-ubuntu-22.04-x86_64.tar.xz"
+url = "https://github.com/mstorsjo/llvm-mingw/releases/download/20260908/llvm-mingw-20260908-ucrt-ubuntu-22.04-x86_64.tar.xz"
+algorithm = "sha256"
+checksum = "2258c745e3155870c80793f3e8c80b28fbde11b9ff73c4c78783635b3440b092"
+bytes = 83887116
+
+[windows_host_openssh]
+version = "10.0.0.0p2-Preview"
+name = "OpenSSH-Win64-10.0.0.0p2-Preview.zip"
+url = "https://github.com/PowerShell/Win32-OpenSSH/releases/download/10.0.0.0p2-Preview/OpenSSH-Win64.zip"
+algorithm = "sha256"
+checksum = "23f50f3458c4c5d0b12217c6a5ddfde0137210a30fa870e98b29827f7b43aba5"
+bytes = 5704583
+
+[windows_host_python]
+version = "3.14.7"
+name = "python-3.14.7-embed-amd64.zip"
+url = "https://www.python.org/ftp/python/3.14.7/python-3.14.7-embed-amd64.zip"
+algorithm = "sha256"
+checksum = "d297e5ff019966817ad8502465176139f2d3d840fa4ed84b13bed399a6ab1f15"
+bytes = 12673227

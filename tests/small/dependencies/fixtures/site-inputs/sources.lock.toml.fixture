@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0-only
+[npm]
+version = "12.2.0"
+name = "npm.tgz"
+url = "https://example.invalid/npm.tgz"
+algorithm = "sha256"
+checksum = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
+[site-node]
+version = "24.21.0"
+name = "node.tar.xz"
+url = "https://example.invalid/node.tar.xz"
+algorithm = "sha256"
+checksum = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"

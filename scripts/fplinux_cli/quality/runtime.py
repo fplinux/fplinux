@@ -17,6 +17,8 @@ if TYPE_CHECKING:
     from fplinux_cli.reporting.run import Stage
 
 _QUALITY_COMMAND_TIMEOUT = 2 * 60 * 60
+# Artifact tests keep temporary images beside pytest and native image-tool memory.
+_QUALITY_MEMORY_MIB = 2048
 
 
 def run_quality_command(  # noqa: PLR0913 -- runtime, deadline and log ownership stay explicit.
@@ -28,6 +30,7 @@ def run_quality_command(  # noqa: PLR0913 -- runtime, deadline and log ownership
     rootfs: Path,
     timeout: float = _QUALITY_COMMAND_TIMEOUT,
     log_name: str | None = None,
+    downloads: Path | None = None,
 ) -> None:
     """Keep sources read-only, network disabled and full child logs in the run directory."""
     reporter = stage.reporter
@@ -46,6 +49,8 @@ def run_quality_command(  # noqa: PLR0913 -- runtime, deadline and log ownership
             kern_box_name(f"{reporter.label}-{name}"),
             *environment_arguments(rootfs),
             "--read-only",
+            "--memory",
+            f"{_QUALITY_MEMORY_MIB}m",
             "--uid-range",
             "--network",
             "none",
@@ -55,6 +60,7 @@ def run_quality_command(  # noqa: PLR0913 -- runtime, deadline and log ownership
             "/tmp:1g",  # noqa: S108 -- container tmpfs.
             "--volume",
             f"{workspace}:/workspace:ro",
+            *(["--volume", f"{downloads}:/cache/downloads:ro"] if downloads is not None else []),
             "--volume",
             f"{logs}:/logs",
             *log_arguments,

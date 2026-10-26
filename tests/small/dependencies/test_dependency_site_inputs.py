@@ -10,23 +10,23 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from fplinux_cli.cli.dependencies import restore_dependencies
 from fplinux_cli.dependencies.site_inputs import site_dependency_selection
 from fplinux_cli.dependencies.snapshots import preserve_inputs, publish_snapshot
+from fplinux_cli.cli.dependencies import restore_dependencies
 
 from tests.small.dependencies.snapshot_fixtures import selected_checkout
 
-_FIXTURES = Path(__file__).parents[2] / "fixtures/dependencies"
+_FIXTURES = Path(__file__).parent / "fixtures/site-inputs"
 
 
 @pytest.fixture
 def site_checkout(tmp_path: Path) -> Path:
-    """Declare a Pages runtime and small locked packages without installing Node.js."""
+    """Declare exact runtime originals and locked packages without installing Node.js."""
     root = tmp_path / "checkout"
     (root / "site").mkdir(parents=True)
-    workflow = root / ".github/workflows/pages.yml"
-    workflow.parent.mkdir(parents=True)
-    workflow.write_bytes((_FIXTURES / "pages-site.yml.fixture").read_bytes())
+    (root / "sources.lock.toml").write_bytes(
+        (_FIXTURES / "sources.lock.toml.fixture").read_bytes()
+    )
     (root / "package.json").write_text('{"engines":{"node":"24.21.0","npm":"12.2.0"}}\n')
     (root / "site/package-lock.json").write_text(
         json.dumps(
@@ -55,6 +55,14 @@ def site_checkout(tmp_path: Path) -> Path:
     return root
 
 
+@pytest.fixture
+def runtime_original(tmp_path: Path) -> Path:
+    """Supply the small verified bytes declared by both synthetic runtime originals."""
+    original = tmp_path / "runtime-original"
+    original.write_bytes(b"abc")
+    return original
+
+
 def test_locked_registry_inputs_keep_integrity_and_optional_platform_archives(
     site_checkout: Path,
 ) -> None:
@@ -72,54 +80,52 @@ def test_locked_registry_inputs_keep_integrity_and_optional_platform_archives(
     assert optional.url == "https://registry.example.invalid/windows-1.0.0.tgz"
     assert optional.sha256 == "22" * 32
     assert optional.algorithm == "sha256"
+    assert actual["source:site-node"].url == "https://example.invalid/node.tar.xz"
+    assert actual["source:site-node"].destination == "downloads/sources/site-node/node.tar.xz"
+    assert actual["source:npm"].url == "https://example.invalid/npm.tgz"
+    assert actual["source:npm"].destination == "downloads/sources/npm/npm.tgz"
     assert context["consumer"] == {
-        "runner": "ubuntu-24.04",
         "node": "24.21.0",
         "npm": "12.2.0",
         "platform": "linux",
         "arch": "x86_64",
         "libc": "glibc",
-        "libc_version": "2.39",
     }
     assert not (site_checkout / ".cache").exists()
 
 
-def test_context_ignores_json_order_and_workflow_comments(site_checkout: Path) -> None:
+def test_context_ignores_lock_mapping_order(site_checkout: Path) -> None:
     """Formatting leaves the declared external selection compatible with its snapshot."""
     before = site_dependency_selection(site_checkout)
     lock = site_checkout / "site/package-lock.json"
     lock.write_text(json.dumps(json.loads(lock.read_text()), sort_keys=True, indent=2))
-    workflow = site_checkout / ".github/workflows/pages.yml"
-    workflow.write_text(
-        workflow.read_text().replace(
-            'node-version: "24.21.0"', 'node-version: "24.21.0" # runtime'
-        )
-    )
     assert site_dependency_selection(site_checkout) == before
 
 
 @pytest.mark.parametrize(
-    ("old", "new", "message"),
+    ("engine", "version", "message"),
     [
-        ("ubuntu-24.04", "ubuntu-26.04", "supports Ubuntu 24.04"),
-        ("24.21.0", "24.22.0", "root package's exact Node.js and npm versions"),
-        ("npm@12.2.0", "npm@12.3.0", "root package's exact Node.js and npm versions"),
-        ("npm@12.2.0", "npm@latest", "must install one exact npm version"),
+        ("node", "24.22.0", "Node original must match the root package's exact version"),
+        ("npm", "12.3.0", "npm original must match the root package's exact version"),
+        ("node", ">=24", "root package must declare exact Node.js and npm versions"),
+        ("npm", "latest", "root package must declare exact Node.js and npm versions"),
     ],
-    ids=["runner", "node", "npm", "unpinned-npm"],
+    ids=["different-node", "different-npm", "unpinned-node", "unpinned-npm"],
 )
-def test_snapshot_selection_requires_the_pinned_pages_consumer(
-    site_checkout: Path, old: str, new: str, message: str
+def test_snapshot_selection_requires_engines_to_match_runtime_originals(
+    site_checkout: Path, engine: str, version: str, message: str
 ) -> None:
-    """A different runtime cannot silently reuse a snapshot selected for Pages."""
-    workflow = site_checkout / ".github/workflows/pages.yml"
-    workflow.write_text(workflow.read_text().replace(old, new))
+    """Declared engine versions cannot diverge from the preserved executable releases."""
+    package = site_checkout / "package.json"
+    declaration = json.loads(package.read_text())
+    declaration["engines"][engine] = version
+    package.write_text(json.dumps(declaration))
     with pytest.raises(SystemExit, match=message):
         site_dependency_selection(site_checkout)
 
 
 def test_snapshot_round_trip_restores_distinct_archives_with_the_same_filename(
-    site_checkout: Path, tmp_path: Path
+    site_checkout: Path, runtime_original: Path, tmp_path: Path
 ) -> None:
     """Native integrity checks and separated cache destinations preserve both original archives."""
     first = b"first registry archive\n"
@@ -161,21 +167,27 @@ def test_snapshot_round_trip_restores_distinct_archives_with_the_same_filename(
             snapshot,
             cache=site_checkout / ".cache",
             offline=True,
-            sources=[originals],
+            sources=[originals, runtime_original],
         )
         publish_snapshot(snapshot, manifest)
         with selected_checkout(restored_root, inputs, context):
             restore_dependencies(snapshot, inputs_only=True)
-    assert len({item.destination for item in inputs}) == 2
     by_key = {item.key: restored / item.destination for item in inputs}
     assert by_key["npm:site:node_modules/first"].read_bytes() == b"first registry archive\n"
     assert by_key["npm:site:node_modules/second"].read_bytes() == b"second registry archive\n"
-    assert all(path.is_relative_to(restored / "downloads/site/npm") for path in by_key.values())
+    assert by_key["npm:site:node_modules/first"] != by_key["npm:site:node_modules/second"]
+    assert all(
+        path.is_relative_to(restored / "downloads/site/npm")
+        for key, path in by_key.items()
+        if key.startswith("npm:site:")
+    )
+    assert (restored / "downloads/sources/site-node/node.tar.xz").read_bytes() == b"abc"
+    assert (restored / "downloads/sources/npm/npm.tgz").read_bytes() == b"abc"
     assert not (site_checkout / ".cache").exists()
 
 
 def test_changed_registry_integrity_rejects_a_saved_snapshot(
-    site_checkout: Path, tmp_path: Path
+    site_checkout: Path, runtime_original: Path, tmp_path: Path
 ) -> None:
     """A package declaration update cannot restore a previous original as the new input."""
     contents = b"original registry archive\n"
@@ -196,7 +208,7 @@ def test_changed_registry_integrity_rejects_a_saved_snapshot(
         snapshot,
         cache=site_checkout / ".cache",
         offline=True,
-        sources=[original],
+        sources=[original, runtime_original],
     )
     publish_snapshot(snapshot, manifest)
     package["integrity"] = "sha512-" + base64.b64encode(bytes.fromhex("33" * 64)).decode()

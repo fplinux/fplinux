@@ -15,7 +15,18 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
 _COPY_FIELDS = ("source", "destination")
-_SOURCE_FIELDS = ("repository", "commit", "archive_url", "archive_sha256", "license", "files")
+_SOURCE_FIELDS = (
+    "version",
+    "name",
+    "url",
+    "algorithm",
+    "checksum",
+    "bytes",
+    "repository",
+    "commit",
+    "license",
+    "files",
+)
 _FIRMWARE_FIELDS = ("source", "destination", "size", "sha256")
 
 _TARGET_ORDER = {
@@ -255,11 +266,12 @@ _ROOT_ORDERS: dict[str, dict[str, tuple[str, ...]]] = {
     },
     "environment.lock.toml": {
         "": ("kern", "base", "selection", "tools", "input"),
-        "kern": ("version", "archive_url", "archive_sha256", "binary_sha256"),
-        "base": ("release", "arch", "url", "sha256"),
+        "kern": ("source", "binary_sha256"),
+        "base": ("source", "arch"),
         "selection": ("arch", "apk_groups"),
         "input": (
             "key",
+            "source",
             "url",
             "sha256",
             "checksum",
@@ -270,13 +282,7 @@ _ROOT_ORDERS: dict[str, dict[str, tuple[str, ...]]] = {
             "arch",
         ),
     },
-    "sources.lock.toml": {
-        "": ("linux", "fpdoom_bootstrap", "fpdoom_host", "spreadtrum_flash"),
-        "linux": ("version", "url", "sha256", "license"),
-        "fpdoom_bootstrap": _SOURCE_FIELDS,
-        "fpdoom_host": _SOURCE_FIELDS,
-        "spreadtrum_flash": _SOURCE_FIELDS,
-    },
+    "sources.lock.toml": {},
     "alpine.lock.toml": {
         "": (
             "release",
@@ -290,7 +296,7 @@ _ROOT_ORDERS: dict[str, dict[str, tuple[str, ...]]] = {
             "package",
         ),
         "repositories": ("community", "main"),
-        "minirootfs": ("url", "sha256", "bytes"),
+        "minirootfs": ("source",),
         "runtime": ("packages", "additions"),
         "sysroot": ("packages",),
         "package": ("repository", "file", "sha256", "bytes"),
@@ -300,7 +306,7 @@ _ROOT_ORDERS: dict[str, dict[str, tuple[str, ...]]] = {
 
 _LEXICAL_TABLES = {
     "_typos.toml": {"default.extend-identifiers", "default.extend-words"},
-    "sources.lock.toml": {"fpdoom_host.files", "spreadtrum_flash.files"},
+    "sources.lock.toml": {"", "fpdoom_host.files", "spreadtrum_flash.files"},
     "alpine.lock.toml": {"runtime.additions"},
     "releases.lock.toml": {"verified"},
 }
@@ -332,19 +338,17 @@ def _policy(relative: str) -> Mapping[str, Sequence[str]]:  # noqa: PLR0911
     if relative.startswith("platforms/") and relative.endswith("/loader/assets.lock.toml"):
         return {
             "": ("fdl1",),
-            "fdl1": ("url", "sha256", "cache_name", "license", "path"),
+            "fdl1": ("source", "path"),
         }
     if relative.endswith("/release/manifest.toml"):
         return {"": ("image", "bundle_files", "runtime_files", "documents")}
     if path.name == "u-boot.lock.toml":
         return {
             "": (
-                "version",
+                "source",
                 "repository",
                 "tag",
                 "commit",
-                "archive_url",
-                "archive_sha256",
                 "license",
             )
         }
@@ -551,7 +555,9 @@ def _normalize_container(
         trailing = leading + trailing
     fields = order.get(path, ())
     if relative == "environment.lock.toml" and path.startswith("tools."):
-        fields = ("version", "commit", "input")
+        fields = ("source",)
+    if relative == "sources.lock.toml" and path and "." not in path:
+        fields = _SOURCE_FIELDS
     ranks = {key: index for index, key in enumerate(fields)}
     lexical = path in _LEXICAL_TABLES.get(relative, set())
     entries.sort(

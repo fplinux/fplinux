@@ -5,12 +5,27 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fplinux_cli.manifests.linux import discover_linux_targets
 
 from tests import ROOT
 from tests.fixtures import linux_inputs
+
+
+@pytest.fixture
+def linux_sources() -> dict[str, Any]:
+    """Declare one exact archive shared by the synthetic Linux platform consumers."""
+    return {
+        "base": {
+            "version": "test",
+            "name": "linux-test.tar.xz",
+            "url": "https://example.invalid/linux-test.tar.xz",
+            "algorithm": "sha256",
+            "checksum": "1" * 64,
+        }
+    }
 
 
 class LinuxManifestTests:
@@ -22,7 +37,7 @@ class LinuxManifestTests:
         [("", False), ("speaker_vibration = true\n", True)],
     )
     def test_peer_audio_profile_defaults_omitted_topology_flags_to_false(
-        tmp_path: Path, declaration: str, *, speaker_vibration: bool
+        tmp_path: Path, linux_sources: dict[str, Any], declaration: str, *, speaker_vibration: bool
     ) -> None:
         """Peer loading preserves false defaults and an explicitly declared vibration policy."""
         linux_inputs.platform(tmp_path, "demo", source_lock="base", arch="arm")
@@ -30,7 +45,7 @@ class LinuxManifestTests:
         with target.open("a", encoding="utf-8") as output:
             output.write("\n[audio_profile]\nfirmware = []\n" + declaration)
 
-        targets = discover_linux_targets(tmp_path, {"base": {"sha256": "1" * 64}}, "1" * 64)
+        targets = discover_linux_targets(tmp_path, linux_sources, "1" * 64)
 
         assert targets[0].config["audio_policy"] == {
             "headfree_headphones_only": False,
@@ -39,7 +54,9 @@ class LinuxManifestTests:
         }
 
     @staticmethod
-    def test_archive_digest_groups_distinct_platforms_and_architectures() -> None:
+    def test_archive_digest_groups_distinct_platforms_and_architectures(
+        linux_sources: dict[str, Any],
+    ) -> None:
         """Lock aliases and differing ARCH values share only their exact archive digest."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -50,9 +67,9 @@ class LinuxManifestTests:
             linux_inputs.target(root, "a-phone", platform_name="first")
             linux_inputs.target(root, "c-phone", platform_name="third")
             sources = {
-                "base": {"sha256": "1" * 64},
-                "alias": {"sha256": "1" * 64},
-                "different": {"sha256": "2" * 64},
+                "base": linux_sources["base"],
+                "alias": dict(linux_sources["base"]),
+                "different": {**linux_sources["base"], "checksum": "2" * 64},
             }
 
             targets = discover_linux_targets(root, sources, "1" * 64)
@@ -66,7 +83,9 @@ class LinuxManifestTests:
         assert (targets[0].config["identity"]["display_name"]) == ("Example a-phone")
 
     @staticmethod
-    def test_linux_projection_ignores_peer_bootstrap_and_asset_requirements() -> None:
+    def test_linux_projection_ignores_peer_bootstrap_and_asset_requirements(
+        linux_sources: dict[str, Any],
+    ) -> None:
         """A peer's unbuildable loader or userspace does not hide its declared Linux inputs."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -79,7 +98,7 @@ class LinuxManifestTests:
             with target.open("a", encoding="utf-8") as output:
                 output.write("\n[adapter]\nboot_instructions = false\n[bluetooth]\nfirmware = 5\n")
 
-            targets = discover_linux_targets(root, {"base": {"sha256": "1" * 64}}, "1" * 64)
+            targets = discover_linux_targets(root, linux_sources, "1" * 64)
 
         assert (len(targets)) == (1)
         assert {step["destination"] for step in targets[0].config["linux"]["copies"]} == {
@@ -88,7 +107,9 @@ class LinuxManifestTests:
         }
 
     @staticmethod
-    def test_profile_patch_inputs_are_retained_for_projection_conflict_checks() -> None:
+    def test_profile_patch_inputs_are_retained_for_projection_conflict_checks(
+        linux_sources: dict[str, Any],
+    ) -> None:
         """Source preparation can observe microSD patches even while building the RAM profile."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -101,13 +122,14 @@ class LinuxManifestTests:
                 encoding="utf-8",
             )
 
-            targets = discover_linux_targets(root, {"base": {"sha256": "1" * 64}}, "1" * 64)
+            targets = discover_linux_targets(root, linux_sources, "1" * 64)
 
         assert (targets[0].config["microsd"]["linux_patches"]) == (["linux/card.patch"])
 
     @staticmethod
     def test_captured_overlay_and_panel_discovery_uses_only_snapshot_inputs(
         tmp_path: Path,
+        linux_sources: dict[str, Any],
     ) -> None:
         """Later checkout changes cannot alter captured operations or generated panel inputs."""
         linux_inputs.platform(tmp_path, "demo", source_lock="base", arch="arm")
@@ -137,9 +159,7 @@ class LinuxManifestTests:
         manifest.write_text("not TOML\n")
         panel.write_text("not TOML\n")
 
-        discovered = discover_linux_targets(
-            tmp_path, {"base": {"sha256": "1" * 64}}, "1" * 64, captured=captured
-        )
+        discovered = discover_linux_targets(tmp_path, linux_sources, "1" * 64, captured=captured)
 
         assert discovered[0].config["display"]["width"] == 128
         assert discovered[0].config["display"]["height"] == 160

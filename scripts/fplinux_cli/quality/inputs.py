@@ -8,7 +8,9 @@ import tomllib
 from pathlib import Path, PurePath, PurePosixPath
 from typing import TYPE_CHECKING
 
-from fplinux_cli.common import fail
+from fplinux_cli.alpine.selection import shared_aport_sources
+from fplinux_cli.alpine.sources import aport_source_ids
+from fplinux_cli.common import canonical_json_bytes, fail
 from fplinux_cli.manifests.linux import linux_copy_steps
 from fplinux_cli.manifests.paths import normalize_profile
 from fplinux_cli.quality.formatting.source_formats import (
@@ -70,6 +72,8 @@ _MANIFEST_IMPLEMENTATION = frozenset(
         "scripts/fplinux_cli/manifests/identity.py",
         "scripts/fplinux_cli/manifests/kernel.py",
         "scripts/fplinux_cli/manifests/linux.py",
+        "scripts/fplinux_cli/manifests/loaders.py",
+        "scripts/fplinux_cli/manifests/source_catalog.py",
         "scripts/fplinux_cli/manifests/paths.py",
         "scripts/fplinux_cli/manifests/platforms.py",
         "scripts/fplinux_cli/manifests/profiles.py",
@@ -89,6 +93,10 @@ _CHECK_IMPLEMENTATION = _MANIFEST_IMPLEMENTATION | frozenset(
         "scripts/fplinux_cli/alpine/registration.py",
         "scripts/fplinux_cli/alpine/lock.py",
         "scripts/fplinux_cli/alpine/selection.py",
+        "scripts/fplinux_cli/alpine/aports.py",
+        "scripts/fplinux_cli/alpine/sources.py",
+        "scripts/fplinux_cli/alpine/recipes.py",
+        "scripts/fplinux_cli/build/inputs.py",
         "scripts/fplinux_cli/workspace/__init__.py",
         "scripts/fplinux_cli/workspace/capture.py",
         "scripts/fplinux_cli/environment/__init__.py",
@@ -388,6 +396,38 @@ def _kernel_scope_paths(
     return selected
 
 
+def _alpine_scope_entries(snapshot: WorkspaceSnapshot) -> list[tuple[str, bytes, int]]:
+    """Include materialized local sources and only the originals read by native lint."""
+    by_path = {file.path: file for file in snapshot.files}
+    selected = {file.path for file in snapshot.files if _source_scope_uses_file("alpine", file)}
+    source_ids: set[str] = set()
+    for file in snapshot.files:
+        path = PurePosixPath(file.path)
+        if path.parts[:2] != ("alpine", "aports"):
+            continue
+        selected.add(file.path)
+        if path.name == "APKBUILD":
+            source_ids.update(aport_source_ids(file.contents.decode()))
+            selected.update(
+                source.as_posix() for source in shared_aport_sources(path.parent.name, Path())
+            )
+    if "alpine/aports/fplinux-ui/APKBUILD" in by_path:
+        selected.add("package-lock.json")
+    entries = [
+        (file.path, file.contents, file.mode) for file in snapshot.files if file.path in selected
+    ]
+    if source_ids:
+        source_file = by_path.get("sources.lock.toml")
+        if source_file is None:
+            fail("native Alpine lint has no captured source catalogue")
+        sources = tomllib.loads(source_file.contents.decode())
+        records = {name: sources[name] for name in sorted(source_ids)}
+        entries.append(
+            ("sources.lock.toml#aports", canonical_json_bytes(records), source_file.mode)
+        )
+    return entries
+
+
 def check_scope_closure_digest(
     scope: str,
     snapshot: WorkspaceSnapshot,
@@ -396,6 +436,8 @@ def check_scope_closure_digest(
     build_type: str = "release",
 ) -> str:
     """Hash only captured files that can affect one exact check scope."""
+    if scope == "alpine":
+        return check_closure_entries_digest(_alpine_scope_entries(snapshot))
     if scope == "tests":
         selected = list(snapshot.files)
     elif scope == "kernel":

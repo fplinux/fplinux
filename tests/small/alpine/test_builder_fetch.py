@@ -11,6 +11,7 @@ from unittest import mock
 
 import pytest
 from fplinux_cli.alpine import packages as alpine_builder
+from fplinux_cli.dependencies.inputs import DependencyInput, acquire_inputs
 
 
 class AlpineArtifactFetchTests:
@@ -30,14 +31,28 @@ class AlpineArtifactFetchTests:
                 }
             }
             with mock.patch("urllib.request.urlopen", return_value=io.BytesIO(contents)):
+                acquire_inputs(
+                    [
+                        DependencyInput(
+                            "example",
+                            "https://example.invalid/main/example.apk",
+                            hashlib.sha256(contents).hexdigest(),
+                            len(contents),
+                            "downloads/alpine/packages/example.apk",
+                            "target-package",
+                        )
+                    ],
+                    cache,
+                    offline=False,
+                )
+            with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")):
                 package = alpine_builder._locked_alpine_artifact(  # noqa: SLF001
                     lock, records, "example.apk", cache=cache
                 )
-            assert (package.read_bytes()) == (contents)
-            with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")):
                 reused = alpine_builder._locked_alpine_artifact(  # noqa: SLF001
                     lock, records, "example.apk", cache=cache
                 )
+            assert (package.read_bytes()) == (contents)
             assert (reused) == (package)
 
             records["example.apk"]["bytes"] = 1

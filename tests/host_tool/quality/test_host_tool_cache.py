@@ -15,7 +15,6 @@ import pytest
 from fplinux_cli import common
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
-from fplinux_cli.build import sources as sources_build
 from fplinux_cli.build.host_tools import host as host_build
 
 FIXTURES = common.ROOT / "tests/fixtures/quality/host-tool/cache-build"
@@ -51,14 +50,16 @@ class HostToolCacheTests:
             def write_archive() -> None:
                 with tarfile.open(archive, "w:gz") as tar:
                     for name in ("Makefile", "bridge.S"):
-                        tar.add(upstream / name, arcname=f"bridge-deadbeef/{name}")
+                        tar.add(upstream / name, arcname=f"bridge-{'a' * 40}/{name}")
 
             def sources() -> dict[str, object]:
                 return {
                     "bridge-source": {
-                        "archive_url": "https://example.invalid/bridge.tar.gz",
-                        "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
-                        "commit": "deadbeef",
+                        "version": "a" * 40,
+                        "name": "bridge.tar.gz",
+                        "url": "https://example.invalid/bridge.tar.gz",
+                        "algorithm": "sha256",
+                        "checksum": hashlib.sha256(archive.read_bytes()).hexdigest(),
                         "files": {
                             "makefile_sha256": hashlib.sha256(makefile.read_bytes()).hexdigest(),
                             "bridge_s_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
@@ -109,7 +110,7 @@ class HostToolCacheTests:
                 nonlocal build_number
                 build_number += 1
                 result = host_build.build_host_tools(
-                    sources(), platform, root / f"work-{build_number}"
+                    sources(), platform, root / f"work-{build_number}", tools=("bridge",)
                 )
                 binary = result["bridge"]
                 assert (subprocess.check_output([str(binary)], text=True)) == (expected + "\n")
@@ -123,7 +124,7 @@ class HostToolCacheTests:
             with (
                 mock.patch.object(common, "ROOT", root),
                 mock.patch.object(inputs_build, "CACHE", cache),
-                mock.patch.object(sources_build, "fetch", return_value=archive),
+                mock.patch.object(host_build, "acquire_source", return_value=archive),
                 mock.patch.object(process_build, "run", side_effect=run),
                 mock.patch.dict(os.environ, environment, clear=True),
             ):

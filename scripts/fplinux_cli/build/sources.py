@@ -9,8 +9,9 @@ from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import process as process_build
-from fplinux_cli.common import fail, sha256_file
-from fplinux_cli.environment.downloads import transfer_verified_file
+from fplinux_cli.common import fail
+from fplinux_cli.environment.downloads import download_locked_file
+from fplinux_cli.manifests.source_catalog import source_build_metadata
 from fplinux_cli.manifests.values import relative_value, sha256_value
 
 if TYPE_CHECKING:
@@ -18,26 +19,12 @@ if TYPE_CHECKING:
 
 
 def fetch(url: object, expected: object, cache: Path, name: object) -> Path:
-    """Fetch one HTTPS resource into the validated shared download cache."""
+    """Verify one acquired native-lock artifact at its declared cache location."""
     if not isinstance(url, str) or not url.startswith("https://"):
         fail("source URL must be a non-empty HTTPS URL")
     digest = sha256_value(expected, f"{name} source")
     relative = relative_value(name, "download cache name")
-    cache.mkdir(parents=True, exist_ok=True)
-    destination = cache / relative
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination.exists() or destination.is_symlink():
-        if destination.is_symlink() or not destination.is_file():
-            fail(f"download cache destination is invalid: {destination}")
-        if sha256_file(destination) == digest:
-            return destination
-
-    def verify(path: Path) -> None:
-        actual = sha256_file(path)
-        if actual != digest:
-            fail(f"{name} SHA256 mismatch: expected {digest}, received {actual}")
-
-    return transfer_verified_file(url, destination, verify=verify)
+    return download_locked_file(url, digest, cache / relative, offline=True)
 
 
 def source_lock_entry(sources: dict[str, Any], name: object) -> dict[str, Any]:
@@ -47,7 +34,7 @@ def source_lock_entry(sources: dict[str, Any], name: object) -> dict[str, Any]:
     value = sources.get(name)
     if not isinstance(value, dict):
         fail(f"source lock entry is missing: {name}")
-    return value
+    return source_build_metadata(name, value)
 
 
 def write_generated_files(root: Path, files: dict[str, bytes], *, owner: str) -> None:

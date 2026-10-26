@@ -13,6 +13,7 @@ from fplinux_cli.build.inputs import selected_build_sources
 from fplinux_cli.build.runtime import runtime_source_files
 from fplinux_cli.device_data.inputs import capture_snapshot_device_data
 from fplinux_cli.workspace import build_inputs, staging
+from fplinux_cli.workspace.capture import snapshot_from_inventory
 
 from tests import ROOT
 from tests.small.device_data.firmware_fixtures import (
@@ -26,7 +27,7 @@ from tests.small.workspace.workspace_fixtures import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
     from fplinux_cli.workspace.capture import WorkspaceSnapshot
@@ -104,7 +105,16 @@ def declaration_checkout(tmp_path: Path) -> Iterator[SourceDeclarationCheckout]:
             "patches": [],
         },
         "host": {
-            "tools": [{"type": "make-archive", "source_lock": "host", "copies": [], "patches": []}]
+            "runtime_tools": {"loader": "loader"},
+            "tools": [
+                {
+                    "name": "loader",
+                    "type": "make-archive",
+                    "source_lock": "host",
+                    "copies": [],
+                    "patches": [],
+                }
+            ],
         },
     }
     checkout = SourceDeclarationCheckout(root, target_config, platform_config)
@@ -131,7 +141,9 @@ def declaration_checkout(tmp_path: Path) -> Iterator[SourceDeclarationCheckout]:
         workspace_root(root),
         empty_package_graph(),
         mock.patch.object(common, "ROOT", root),
-        mock.patch.object(build_inputs, "STAGED_BUILD_SOURCES", ("sources.lock.toml",)),
+        mock.patch.object(
+            build_inputs, "STAGED_BUILD_SOURCES", ("sources.lock.toml", "alpine.lock.toml")
+        ),
         mock.patch.object(build_inputs, "load_target", return_value=target_config),
         mock.patch.object(build_inputs, "load_platform", return_value=platform_config),
         mock.patch.object(build_inputs, "discover_linux_targets", return_value=()),
@@ -314,8 +326,8 @@ def test_sc_unused_bootstrap_archive_keeps_hit_and_selected_host_archive_misses(
         ("2" * 64, "8" * 64),
         ("a" * 64, "b" * 64),
         (
-            'archive_url = "https://example.invalid/host.tar.gz"',
-            'archive_url = "https://example.invalid/other-host.tar.gz"',
+            'url = "https://example.invalid/host.tar.gz"',
+            'url = "https://example.invalid/other-host.tar.gz"',
         ),
     ],
     ids=("linux-digest", "bootstrap-digest", "host-member-digest", "host-url"),
@@ -377,6 +389,150 @@ def test_unused_global_record_preserves_build_recipe_but_changes_staged_sources(
     assert (after_path / "sources.lock.toml").read_bytes() == changed
 
 
+@pytest.fixture
+def auxiliary_host_checkout(
+    declaration_checkout: SourceDeclarationCheckout,
+) -> SourceDeclarationCheckout:
+    """Declare report and ECC inputs beside the loader used by this synthetic runtime."""
+    checkout = declaration_checkout
+    for name in ("report", "ums9117-nand-ecc"):
+        patch = f"platforms/demo/host/{name}.patch"
+        source = checkout.root / patch
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(b"original tool patch\n")
+        checkout.platform_config["host"]["tools"].append(
+            {
+                "name": name,
+                "type": "make-archive",
+                "source_lock": "unused",
+                "copies": [],
+                "patches": [patch],
+            }
+        )
+        with (checkout.root / "platforms/demo/platform.toml").open("a") as manifest:
+            manifest.write(
+                f'\n[[host.tools]]\nname = "{name}"\ntype = "make-archive"\n'
+                f'source_lock = "unused"\ncopies = []\npatches = ["{patch}"]\n'
+            )
+    return checkout
+
+
+@pytest.mark.parametrize("tool", ["report", "ums9117-nand-ecc"])
+def test_unused_host_tool_patch_keeps_runtime_recipe_but_changes_explicit_tool_snapshot(
+    auxiliary_host_checkout: SourceDeclarationCheckout, tool: str
+) -> None:
+    """An ordinary build stays reusable while an explicit tool captures its own changed bytes."""
+    checkout = auxiliary_host_checkout
+    before = checkout.snapshot()
+    explicit_before = snapshot_from_inventory(
+        lambda: build_inputs.target_build_source_files("phone-a", host_tools=(tool,))
+    )
+    patch = checkout.root / f"platforms/demo/host/{tool}.patch"
+    patch.write_bytes(b"changed tool patch\n")
+
+    after = checkout.snapshot()
+    explicit_after = snapshot_from_inventory(
+        lambda: build_inputs.target_build_source_files("phone-a", host_tools=(tool,))
+    )
+
+    assert after.recipe == before.recipe
+    assert explicit_after.recipe != explicit_before.recipe
+    staged = staging.stage_workspace_snapshot(explicit_after)
+    assert (staged / f"platforms/demo/host/{tool}.patch").read_bytes() == b"changed tool patch\n"
+
+
+def test_selected_runtime_ecc_patch_invalidates_the_build_recipe(
+    auxiliary_host_checkout: SourceDeclarationCheckout,
+) -> None:
+    """A real RAM preparation consumer makes decoder inputs causal again."""
+    checkout = auxiliary_host_checkout
+    checkout.target_config["nand"] = {"ecc_format": "ums9117-bch12"}
+    checkout.target_config["device_data"] = {"groups": {"audio-profile": []}}
+    checkout.target_config["audio_policy"] = {}
+    sources = runtime_source_files("phone-a", checkout.target_config, root=checkout.root)
+    for source in sources.values():
+        if not source.exists():
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_bytes(b"preparation implementation\n")
+    before = checkout.snapshot()
+    patch = checkout.root / "platforms/demo/host/ums9117-nand-ecc.patch"
+    patch.write_bytes(b"changed decoder patch\n")
+
+    assert checkout.snapshot().recipe != before.recipe
+
+
+def test_minibase_catalog_change_misses_target_recipe_while_unrelated_record_keeps_hit(
+    declaration_checkout: SourceDeclarationCheckout,
+) -> None:
+    """The minirootfs reference binds its resolved original even when the lock is unchanged."""
+    checkout = declaration_checkout
+    before = checkout.snapshot()
+    lock = checkout.root / "sources.lock.toml"
+    original = lock.read_text()
+    lock.write_text(original.replace("4" * 64, "e" * 64))
+    assert checkout.snapshot().recipe == before.recipe
+    lock.write_text(original.replace("6" * 64, "b" * 64))
+    changed = checkout.snapshot()
+    assert changed.recipe != before.recipe
+    assert checkout.snapshot().recipe == changed.recipe
+
+
+@pytest.mark.parametrize("full_boot", [False, True], ids=["ram", "full-uboot"])
+def test_uboot_catalog_change_is_causal_only_when_profile_consumes_it(
+    declaration_checkout: SourceDeclarationCheckout, *, full_boot: bool
+) -> None:
+    """A full U-Boot profile follows its original pin without tying RAM boot to that record."""
+    checkout = declaration_checkout
+    if full_boot:
+        checkout.target_config["uboot"] = {
+            "kind": "full",
+            "source": "platforms/demo/uboot/u-boot.lock.toml",
+            "defconfig": "uboot/demo_defconfig",
+            "patches": [],
+            "copies": [],
+        }
+        lock = checkout.root / "platforms/demo/uboot/u-boot.lock.toml"
+        lock.parent.mkdir()
+        lock.write_text('source = "storage_boot"\n')
+        defconfig = checkout.root / "targets/phone-a/uboot/demo_defconfig"
+        defconfig.parent.mkdir()
+        defconfig.write_text("CONFIG_BOARD=y\n")
+        implementation = checkout.root / "scripts/fplinux_cli/build/storage/uboot.py"
+        implementation.parent.mkdir(parents=True, exist_ok=True)
+        implementation.write_text("build implementation fixture\n")
+    before = checkout.snapshot()
+    sources = checkout.root / "sources.lock.toml"
+    original = sources.read_text()
+    sources.write_text(original.replace("4" * 64, "e" * 64))
+    assert checkout.snapshot().recipe == before.recipe
+    sources.write_text(original.replace("7" * 64, "b" * 64))
+    changed = checkout.snapshot()
+    assert (changed.recipe != before.recipe) == full_boot
+    assert checkout.snapshot().recipe == changed.recipe
+
+
+def test_fdl1_catalog_resolution_uses_captured_bytes_after_live_catalog_edit(
+    declaration_checkout: SourceDeclarationCheckout,
+) -> None:
+    """Resolving an asset does not reread its source catalog after source capture."""
+    checkout = declaration_checkout
+    baseline = checkout.snapshot()
+    lock = checkout.root / "sources.lock.toml"
+    original = lock.read_text()
+
+    def capture_then_edit(
+        inventory_function: Callable[[], list[tuple[str, Path]]],
+    ) -> WorkspaceSnapshot:
+        snapshot = snapshot_from_inventory(inventory_function)
+        lock.write_text(original.replace("5" * 64, "b" * 64))
+        return snapshot
+
+    with mock.patch.object(build_inputs, "snapshot_from_inventory", side_effect=capture_then_edit):
+        captured = checkout.snapshot()
+    assert captured.recipe == baseline.recipe
+    assert checkout.snapshot().recipe != baseline.recipe
+
+
 def test_target_bootstrap_changes_only_its_build_recipe(
     declaration_checkout: SourceDeclarationCheckout,
 ) -> None:
@@ -396,7 +552,7 @@ def test_common_fdl1_pin_changes_every_consumer_build_recipe(
     """The shared first-stage loader is causal for every target that consumes it."""
     targets = ("phone-a", "phone-b", "phone-fdl")
     before = {target: declaration_checkout.snapshot(target) for target in targets}
-    lock = declaration_checkout.root / "platforms/demo/loader/assets.lock.toml"
+    lock = declaration_checkout.root / "sources.lock.toml"
     lock.write_text(lock.read_text(encoding="utf-8").replace("5" * 64, "9" * 64), encoding="utf-8")
 
     for target in targets:

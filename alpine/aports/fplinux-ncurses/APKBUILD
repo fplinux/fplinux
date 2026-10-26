@@ -1,9 +1,8 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-ncurses
-pkgver=6.6_p20260516
+pkgver=@version:linux_host_ncurses@
 pkgrel=0
 _ncursesver=${pkgver/_p/-}
-_aport_commit=dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763
 pkgdesc="Terminfo library for FPLinux"
 url="https://invisible-island.net/ncurses/"
 arch="armv7"
@@ -13,8 +12,9 @@ makedepends_build="clang22 lld22 make ncurses llvm22"
 makedepends_host="musl-dev"
 subpackages="$pkgname-dev $pkgname-curses:curses"
 options="!check"
-source="https://distfiles.alpinelinux.org/distfiles/v3.24/ncurses-$_ncursesver.tgz
-	cleanup-pkgconfig-ldflags.patch::https://raw.githubusercontent.com/alpinelinux/aports/$_aport_commit/main/ncurses/cleanup-pkgconfig-ldflags.patch
+source="
+	@source:linux_host_ncurses@
+	@source:aport_cleanup_pkgconfig_ldflags_patch@
 "
 builddir="$srcdir/ncurses-$_ncursesver"
 
@@ -77,6 +77,4 @@ curses() {
 		usr/lib/libmenuw.so.* usr/lib/libpanelw.so.* usr/lib/libtic.so.*
 }
 sha512sums="
-20ffc27f3266b078b410f712422db00d77f5fd497e398b7be252fd207ab70ebd72a2bdf8fd6c94e2a9e41bd2b64d1c6502240c0b8423c99add073bd1226f5859  ncurses-6.6-20260516.tgz
-201ef1876655101cedabc83a0ce46f75079b08f565ca8de4cf96fd69e41332a2d0597b77fe360dc58b10772586fa39bd52ac9ee670a912fef84840278356065a  cleanup-pkgconfig-ldflags.patch
 "

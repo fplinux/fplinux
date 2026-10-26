@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import tarfile
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from string import Template
 from textwrap import dedent
@@ -17,33 +19,30 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from fplinux_cli.build.host_tools.windows_environment import WindowsBuildEnvironment
 
-_SOURCE_DATE_PATCH = Path(__file__).with_name("source-date-epoch.patch")
+_PATCHES = tuple(
+    Path(__file__).with_name(name) for name in ("source-date-epoch.patch", "inbox-winusb.patch")
+)
 
 
-def _extract_redist(
-    archive: Path,
-    source: Path,
-    *,
-    environment: WindowsBuildEnvironment | None = None,
-) -> Path:
-    """Extract the licensed x64 coinstallers without running the MSI installer."""
-    extracted = source / "wdf-redistributables"
-    command = ["7z", "x", "-y", f"-o{extracted}", str(archive)]
-    if environment is None:
-        subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
-    else:
-        environment.run(command, cwd=source)
-    destination = source / "redist/wdf/x64"
-    destination.mkdir(parents=True, exist_ok=True)
-    redistributable_list = (extracted / "redist.txt.x64").read_text(encoding="utf-8")
-    for archived, name in (
-        ("_WdfCoInstaller01011.dll_00001", "WdfCoInstaller01011.dll"),
-        ("_winusbcoinstaller2.dll_00001", "winusbcoinstaller2.dll"),
-    ):
-        if f"redist\\wdf\\x64\\{name}".lower() not in redistributable_list.lower():
-            raise ValueError(f"Windows driver resource is not listed for redistribution: {name}")
-        shutil.copyfile(extracted / archived, destination / name)
-    return extracted
+def _configure_driver(source: Path, *, source_date_epoch: int) -> None:
+    """Give the inbox driver package the helper's source version and fixed UTC date."""
+    resource = (source / "libwdi/libwdi.rc").read_text(encoding="cp1252")
+    version = re.search(r"^\s*FILEVERSION\s+(\d+),(\d+),(\d+),(\d+)\s*$", resource, re.MULTILINE)
+    if version is None:
+        message = "libwdi resource lacks its file version"
+        raise ValueError(message)
+    driver_version = ".".join(version.groups())
+    driver_date = datetime.fromtimestamp(source_date_epoch, UTC).strftime("%m/%d/%Y")
+    (source / "config.h").write_text(
+        dedent("""\
+            #define OPT_M64
+            #define WINUSB_DRIVER_DATE "{driver_date}"
+            #define WINUSB_DRIVER_VERSION "{driver_version}"
+            #define ENABLE_LOGGING 1
+            #define _GNU_SOURCE 1
+            """).format(driver_date=driver_date, driver_version=driver_version),
+        encoding="utf-8",
+    )
 
 
 def _build_driver(
@@ -55,37 +54,28 @@ def _build_driver(
     environment: WindowsBuildEnvironment | None = None,
 ) -> Path:
     """Compile the timestamp-adjusted native embedder and static x64 helper."""
-    patch = source / "source-date-epoch.patch"
-    shutil.copyfile(_SOURCE_DATE_PATCH, patch)
+    patches = [source / path.name for path in _PATCHES]
+    for original, patch in zip(_PATCHES, patches, strict=True):
+        shutil.copyfile(original, patch)
     if environment is None:
-        subprocess.run(["patch", "--fuzz=0", "-p1", "-i", str(patch)], cwd=source, check=True)
+        for patch in patches:
+            subprocess.run(["patch", "--fuzz=0", "-p1", "-i", str(patch)], cwd=source, check=True)
     else:
-        environment.apply_patches(source, [patch])
+        environment.apply_patches(source, patches)
+    _configure_driver(source, source_date_epoch=source_date_epoch)
     compiler = toolchain / "bin/x86_64-w64-mingw32-gcc"
     windres = toolchain / "bin/x86_64-w64-mingw32-windres"
     flags = [
         "-O2",
         "-g0",
         "-std=gnu99",
-        "-DWINVER=0x0601",
-        "-D_WIN32_WINNT=0x0601",
+        "-DWINVER=0x0a00",
+        "-D_WIN32_WINNT=0x0a00",
         "-D_WIN32_IE=0x0700",
         "-DCOBJMACROS",
         "-static",
         "-Wl,--no-insert-timestamp",
     ]
-    (source / "config.h").write_text(
-        dedent("""\
-            #define OPT_M64
-            #define WDF_VER 1011
-            #define COINSTALLER_DIR "wdf"
-            #define X64_DIR "x64"
-            #define WDK_DIR ".."
-            #define ENABLE_LOGGING 1
-            #define _GNU_SOURCE 1
-            """),
-        encoding="utf-8",
-    )
     library = source / "libwdi"
     subprocess.run(
         [
@@ -174,40 +164,24 @@ def prepare_windows_driver(*, cache: Path, offline: bool) -> dict[str, Path]:
     from fplinux_cli.build.host_tools.windows_environment import (  # noqa: PLC0415
         WindowsBuildEnvironment,
     )
-    from fplinux_cli.environment.downloads import download_locked_file  # noqa: PLC0415
+    from fplinux_cli.manifests.source_catalog import (  # noqa: PLC0415
+        load_host_sources,
+        resolve_source,
+    )
 
     cache = cache.resolve()
     root = cache / "windows-driver"
-    lock = common.load_toml(common.ROOT / "windows-driver.lock.toml")
-    host_lock = common.load_toml(common.ROOT / "windows-host.lock.toml")
+    lock = load_host_sources(common.ROOT, "windows-driver.lock.toml")
+    host_lock = load_host_sources(common.ROOT, "windows-host.lock.toml")
     toolchain_entry = host_lock["llvm_mingw"]
-    downloads = root / "downloads"
     archives = {
-        name: download_locked_file(
-            entry["url"],
-            entry["sha256"],
-            downloads / entry["name"],
-            offline=offline,
-            size=entry["size"],
-        )
+        name: resolve_source(common.ROOT, entry["source_id"]).acquire(cache, offline=offline)
         for name, entry in lock.items()
     }
-    toolchain_download = downloads / toolchain_entry["name"]
-    existing_toolchain = cache / "windows-host/downloads" / toolchain_entry["name"]
-    if (
-        not toolchain_download.exists()
-        and existing_toolchain.is_file()
-        and existing_toolchain.stat().st_size == toolchain_entry["size"]
-        and common.sha256_file(existing_toolchain) == toolchain_entry["sha256"]
-    ):
-        shutil.copyfile(existing_toolchain, toolchain_download)
-    toolchain_archive = download_locked_file(
-        toolchain_entry["url"],
-        toolchain_entry["sha256"],
-        toolchain_download,
-        offline=offline,
-        size=toolchain_entry["size"],
+    toolchain_archive = resolve_source(common.ROOT, toolchain_entry["source_id"]).acquire(
+        cache, offline=offline
     )
+    root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=root, prefix=".build-") as temporary:
         work = Path(temporary)
         with tarfile.open(toolchain_archive) as archive:
@@ -220,7 +194,6 @@ def prepare_windows_driver(*, cache: Path, offline: bool) -> dict[str, Path]:
             work=work,
             inputs=[*archives.values(), toolchain_archive],
         )
-        redist = _extract_redist(archives["wdf"], source, environment=environment)
         package = work / "package"
         installer = _build_driver(
             toolchain=toolchain,
@@ -237,14 +210,13 @@ def prepare_windows_driver(*, cache: Path, offline: bool) -> dict[str, Path]:
         licenses.mkdir(parents=True)
         for name in ("COPYING", "COPYING-LGPL"):
             shutil.copyfile(source / name, licenses / f"libwdi-{name}.txt")
-        for name in ("License.rtf", "redist.txt.x64"):
-            shutil.copyfile(redist / name, licenses / name)
         copy_mingw_licenses(toolchain, licenses)
         sources = package / "sources/windows-driver"
         sources.mkdir(parents=True)
         shutil.copyfile(archives["libwdi"], sources / archives["libwdi"].name)
         shutil.copyfile(Path(__file__), sources / "build.py")
-        shutil.copyfile(_SOURCE_DATE_PATCH, sources / _SOURCE_DATE_PATCH.name)
+        for patch in _PATCHES:
+            shutil.copyfile(patch, sources / patch.name)
         for name in ("windows-driver.lock.toml", "windows-host.lock.toml"):
             shutil.copyfile(common.ROOT / name, sources / name)
         notice = {
@@ -271,11 +243,9 @@ def _main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--toolchain", required=True, type=Path)
     parser.add_argument("--source", required=True, type=Path)
-    parser.add_argument("--wdf", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--source-date-epoch", required=True, type=int)
     args = parser.parse_args()
-    _extract_redist(args.wdf.resolve(), args.source.resolve())
     _build_driver(
         toolchain=args.toolchain.resolve(),
         source=args.source.resolve(),

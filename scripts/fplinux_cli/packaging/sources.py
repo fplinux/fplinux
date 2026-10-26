@@ -5,13 +5,13 @@ from __future__ import annotations
 
 import io
 import re
-import subprocess
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import common
+import subprocess
 from fplinux_cli.common import canonical_json_bytes, fail
 from fplinux_cli.environment.downloads import download_locked_file
 
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
     from fplinux_cli.dependencies.inputs import DependencyInput
     from fplinux_cli.manifests.loaders import LoaderSource
+
 
 _PROJECT_DIRECTORIES = frozenset(
     {
@@ -37,6 +38,8 @@ _PROJECT_DIRECTORIES = frozenset(
         "targets",
     }
 )
+
+
 _PROJECT_ROOT_FILES = frozenset(
     {
         ".clang-format",
@@ -54,6 +57,8 @@ _PROJECT_ROOT_FILES = frozenset(
         "pyproject.toml",
     }
 )
+
+
 _PRIVATE_COMPONENTS = frozenset(
     {
         "__pycache__",
@@ -69,6 +74,8 @@ _PRIVATE_COMPONENTS = frozenset(
         "signing",
     }
 )
+
+
 _NON_SOURCE_SUFFIXES = frozenset(
     {
         ".apk",
@@ -85,15 +92,6 @@ _NON_SOURCE_SUFFIXES = frozenset(
         ".pyo",
     }
 )
-
-
-@dataclass(frozen=True)
-class SourcePayload:
-    """Source archive members, executable modes and notices for the runnable archive."""
-
-    files: dict[str, bytes]
-    executables: set[str]
-    notices: dict[str, bytes]
 
 
 def _git_paths(*arguments: str) -> set[str]:
@@ -120,6 +118,16 @@ def _project_source(relative: str) -> bool:
     if any(part.startswith(".") for part in path.parts):
         return False
     return path.parts[0] in _PROJECT_DIRECTORIES
+
+
+
+@dataclass(frozen=True)
+class SourcePayload:
+    """Source archive members, executable modes and notices for the runnable archive."""
+
+    files: dict[str, bytes]
+    executables: set[str]
+    notices: dict[str, bytes]
 
 
 def project_source_files() -> SourcePayload:
@@ -149,80 +157,6 @@ def project_source_files() -> SourcePayload:
     return SourcePayload(files, executables, {})
 
 
-def _archive_input(
-    *, name: str, entry: dict[str, Any], destination: str, purpose: str
-) -> DependencyInput:
-    from fplinux_cli.dependencies.inputs import DependencyInput  # noqa: PLC0415
-
-    return DependencyInput(
-        key=name,
-        url=entry["archive_url"] if "archive_url" in entry else entry["url"],
-        sha256=entry.get("archive_sha256", entry.get("sha256")),
-        size=None,
-        destination=destination,
-        purpose=purpose,
-    )
-
-
-def _build_sources(config: dict[str, Any], platform: dict[str, Any]) -> list[DependencyInput]:
-    from fplinux_cli.build.sources import source_lock_entry  # noqa: PLC0415
-    from fplinux_cli.dependencies.inputs import DependencyInput  # noqa: PLC0415
-    from fplinux_cli.device_data.prepare import NAND_ECC_TOOL  # noqa: PLC0415
-    from fplinux_cli.manifests.loaders import loader_sources  # noqa: PLC0415
-
-    sources = common.load_toml(common.ROOT / "sources.lock.toml")
-    linux = source_lock_entry(sources, platform["linux"]["source_lock"])
-    result = [
-        _archive_input(
-            name="linux",
-            entry=linux,
-            destination=f"downloads/linux/linux-{linux['version']}.tar.xz",
-            purpose="linux-source",
-        ),
-    ]
-    if platform["bootstrap"]["backend"] == "sc9820e":
-        result.extend(
-            DependencyInput(
-                key=f"loader:{source.role}",
-                url=source.url,
-                sha256=source.sha256,
-                size=None,
-                destination=f"downloads/{source.cache_name}",
-                purpose="loader-source",
-            )
-            for source in loader_sources(config["loader"]["build"], sources)
-        )
-    else:
-        bootstrap = platform["bootstrap"]
-        result.append(
-            _archive_input(
-                name="bootstrap",
-                entry=source_lock_entry(sources, bootstrap["vendor_source_lock"]),
-                destination=f"downloads/{bootstrap['vendor_cache_name']}",
-                purpose="bootstrap-source",
-            )
-        )
-    runtime_tools = platform["host"]["runtime_tools"]
-    selected = {runtime_tools[role] for role in ("loader", "bridge") if role in runtime_tools}
-    if (config.get("nand") or {}).get("ecc_format"):
-        selected.add(NAND_ECC_TOOL)
-    archive_tools = [
-        recipe
-        for recipe in platform["host"]["tools"]
-        if recipe["type"] == "make-archive" and recipe["name"] in selected
-    ]
-    result.extend(
-        _archive_input(
-            name=f"host:{recipe['name']}",
-            entry=source_lock_entry(sources, recipe["source_lock"]),
-            destination=f"downloads/{recipe['cache_name']}",
-            purpose="host-source",
-        )
-        for recipe in archive_tools
-    )
-    return result
-
-
 def _collect_archives(
     inputs: Sequence[DependencyInput], files: dict[str, bytes], *, offline: bool
 ) -> list[dict[str, object]]:
@@ -240,8 +174,10 @@ def _collect_archives(
             size=item.size,
         )
         member = f"upstream/{item.destination.removeprefix('downloads/')}"
-        if member not in files:
-            files[member] = path.read_bytes()
+        contents = path.read_bytes()
+        if member in files and files[member] != contents:
+            fail(f"conflicting corresponding source original: {member}")
+        files[member] = contents
         records.append(
             {
                 "component": item.key,
@@ -315,19 +251,20 @@ def collect_loader_license_notices(config: dict[str, Any]) -> dict[str, bytes]:
 def _linux_runtime_sources(
     files: dict[str, bytes], notices: dict[str, bytes], *, offline: bool
 ) -> list[dict[str, object]]:
-    lock = common.load_toml(common.ROOT / "linux-host.lock.toml")
+    from fplinux_cli.dependencies.inputs import source_input  # noqa: PLC0415
+    from fplinux_cli.manifests.source_catalog import (  # noqa: PLC0415
+        load_host_sources,
+        resolve_source,
+    )
+
+    lock = load_host_sources(common.ROOT, "linux-host.lock.toml")
     inputs = [
-        _archive_input(
-            name=f"linux-host:{name}",
-            entry=entry,
-            destination=f"linux-host/downloads/{entry['name']}",
-            purpose="host-runtime-source",
-        )
-        for name, entry in sorted(lock.items())
+        source_input(resolve_source(common.ROOT, entry["source_id"]))
+        for _name, entry in sorted(lock.items())
     ]
     records = _collect_archives(inputs, files, offline=offline)
     libusb = lock["libusb"]
-    member = f"upstream/linux-host/downloads/{libusb['name']}"
+    member = f"upstream/{libusb['destination'].removeprefix('downloads/')}"
     with tarfile.open(fileobj=io.BytesIO(files[member])) as archive:
         stream = archive.extractfile(libusb["licenses"][0])
         if stream is None:
@@ -355,9 +292,7 @@ def _package_source_channel(info: str, *, repository: str) -> dict[str, str]:
     }
 
 
-def _alpine_source_channels(
-    packages: Sequence[str], files: dict[str, bytes], *, offline: bool
-) -> None:
+def _alpine_source_channels(packages: Sequence[str], files: dict[str, bytes], *, offline: bool) -> None:
     from fplinux_cli.alpine.lock import load_alpine_lock, runtime_package_names  # noqa: PLC0415
 
     lock = load_alpine_lock(common.ROOT)
@@ -366,9 +301,7 @@ def _alpine_source_channels(
     base = download_locked_file(
         lock["minirootfs"]["url"],
         lock["minirootfs"]["sha256"],
-        common.ROOT
-        / ".cache/downloads/alpine"
-        / f"alpine-minirootfs-{lock['release']}-{lock['arch']}.tar.gz",
+        common.ROOT / ".cache" / lock["minirootfs"]["destination"],
         offline=offline,
         size=lock["minirootfs"]["bytes"],
     )
@@ -415,22 +348,21 @@ def _alpine_source_channels(
 def collect_source_files(config: dict[str, Any], *, host: str, offline: bool) -> SourcePayload:
     """Collect matching source material while the caller owns the project cache lock."""
     from fplinux_cli.alpine.selection import (  # noqa: PLC0415
-        aport_build_order,
+        bundle_packages,
         selected_packages,
     )
-    from fplinux_cli.dependencies.inputs import _apkbuild_declarations  # noqa: PLC0415
+    from fplinux_cli.dependencies.inputs import build_source_inputs  # noqa: PLC0415
     from fplinux_cli.manifests.platforms import load_platform  # noqa: PLC0415
 
     payload = project_source_files()
     platform = load_platform(config["platform"])
     rootfs = selected_packages(platform, config, common.ROOT)
-    packages = tuple(rootfs)
-    inputs = _build_sources(config, platform)
-    for producer in aport_build_order(packages):
-        _, source_inputs = _apkbuild_declarations(
-            common.ROOT / "alpine/aports" / producer / "APKBUILD"
-        )
-        inputs.extend(source_inputs)
+    packages = (*rootfs, *bundle_packages(platform, config, rootfs, root=common.ROOT))
+    inputs = [
+        item
+        for item in build_source_inputs(common.ROOT, platform, config)
+        if item.purpose == "source-original"
+    ]
     records = _collect_archives(inputs, payload.files, offline=offline)
     if platform["bootstrap"]["backend"] == "sc9820e":
         from fplinux_cli.manifests.loaders import loader_sources  # noqa: PLC0415
@@ -458,7 +390,9 @@ def _linux_build_instructions() -> bytes:
 
 
 def _windows_source_channels(files: dict[str, bytes]) -> None:
-    lock = common.load_toml(common.ROOT / "windows-host.lock.toml")
+    from fplinux_cli.manifests.source_catalog import load_host_sources  # noqa: PLC0415
+
+    lock = load_host_sources(common.ROOT, "windows-host.lock.toml")
     python = lock["python"]["version"]
     openssh = lock["openssh"]["version"]
     source_version = openssh.partition("p")[0]

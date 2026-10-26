@@ -9,7 +9,9 @@ import tempfile
 from pathlib import Path
 
 import pytest
+import tomlkit
 from fplinux_cli import common
+from fplinux_cli.alpine.sources import aport_sources
 from fplinux_cli.environment import definition
 
 
@@ -21,6 +23,7 @@ def recipe_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         *definition.ENVIRONMENT_RECIPE_INPUTS,
         "sources.lock.toml",
         "alpine/aports/fplinux-ui/APKBUILD",
+        "alpine/aports/fplinux-icons/APKBUILD",
     ):
         destination = tmp_path / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -87,14 +90,18 @@ def test_recipe_tracks_terminal_font_archive_and_package_build(
     aport = recipe_checkout / "alpine/aports/fplinux-font-terminus/APKBUILD"
     source = aport.read_text()
     original = definition.environment_recipe_digest()
-    if change == "url":
-        updated = source.replace("https://downloads.sourceforge.net/", "https://example.invalid/")
-    elif change == "checksum":
-        checksum = source.split('sha512sums="\n', 1)[1].split()[0]
-        updated = source.replace(checksum, "0" * 128)
+    if change in {"url", "checksum"}:
+        catalog_path = recipe_checkout / "sources.lock.toml"
+        catalog = tomlkit.parse(catalog_path.read_text())
+        original_source = aport_sources(recipe_checkout, "fplinux-font-terminus")[0]
+        record = catalog[original_source.id]
+        assert isinstance(record, tomlkit.items.Table)
+        record[change] = (
+            "https://example.invalid/terminus.tar.gz" if change == "url" else "0" * 128
+        )
+        catalog_path.write_text(tomlkit.dumps(catalog))
     else:
-        updated = source.replace("alt/dv1.diff", "alt/dv2.diff")
-    aport.write_text(updated)
+        aport.write_text(source.replace("alt/dv1.diff", "alt/dv2.diff"))
 
     assert definition.environment_recipe_digest() != original
 
@@ -106,20 +113,43 @@ def test_artifact_recipe_depends_on_actual_installed_content() -> None:
     ) != definition.environment_artifact_recipe_digest("a" * 64, "c" * 64)
 
 
+def test_recipe_tracks_icon_archive_but_not_glyph_definitions(
+    recipe_checkout: Path,
+) -> None:
+    """Pinned source changes require preparation; rendering uses checkout definitions."""
+    original = definition.environment_recipe_digest()
+    icons = recipe_checkout / "alpine/aports/fplinux-icons/icons.json"
+    icons.write_text('{"glyphs": {}}\n')
+    assert definition.environment_recipe_digest() == original
+    catalog_path = recipe_checkout / "sources.lock.toml"
+    catalog = tomlkit.parse(catalog_path.read_text())
+    source = aport_sources(recipe_checkout, "fplinux-icons")[0]
+    record = catalog[source.id]
+    assert isinstance(record, tomlkit.items.Table)
+    record["checksum"] = "0" * 128
+    catalog_path.write_text(tomlkit.dumps(catalog))
+    assert definition.environment_recipe_digest() != original
+
+
 def test_recipe_tracks_selected_ui_font_urls_and_checksums_without_local_package_inputs(
     recipe_checkout: Path,
 ) -> None:
     """Font admissions change the environment while target-only package edits remain hits."""
     aport = recipe_checkout / "alpine/aports/fplinux-ui/APKBUILD"
-    source = (
-        'source="face.ttf::https://example.invalid/face.ttf local.c"\n'
-        f'sha512sums="{"1" * 128}  face.ttf\n{"2" * 128}  local.c"\n'
-    )
+    source = 'source="@source:face@ local.c"\n' + f'sha512sums="{"2" * 128}  local.c"\n'
+    catalog = recipe_checkout / "sources.lock.toml"
+    with catalog.open("a") as stream:
+        stream.write(
+            '\n[face]\nversion="1"\nname="face.ttf"\nurl="https://example.invalid/face.ttf"\n'
+            f'algorithm="sha512"\nchecksum="{"1" * 128}"\n'
+        )
+    original_catalog = catalog.read_text()
     aport.write_text(source)
     original = definition.environment_recipe_digest()
-    aport.write_text(source.replace("/face.ttf", "/replacement.ttf"))
+    catalog.write_text(original_catalog.replace("/face.ttf", "/replacement.ttf"))
     assert definition.environment_recipe_digest() != original
-    aport.write_text(source.replace("1" * 128, "3" * 128))
+    catalog.write_text(original_catalog.replace("1" * 128, "3" * 128))
     assert definition.environment_recipe_digest() != original
+    catalog.write_text(original_catalog)
     aport.write_text(source.replace("2" * 128, "4" * 128))
     assert definition.environment_recipe_digest() == original

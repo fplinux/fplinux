@@ -1,11 +1,15 @@
 [vendor]
+version = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+name = "vendor.tar.gz"
+url = "https://example.invalid/vendor.tar.gz"
+algorithm = "sha256"
+checksum = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 repository = "https://example.invalid/vendor"
-commit = "abc123"
-archive_url = "https://example.invalid/vendor.tar.gz"
-archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 license = "Unlicense"
 
 [linux]
 version = "1.2.3"
+name = "linux-1.2.3.tar.xz"
 url = "https://example.invalid/linux.tar.xz"
-sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+algorithm = "sha256"
+checksum = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"

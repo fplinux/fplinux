@@ -12,11 +12,13 @@ from fplinux_cli.build import DEFAULT_BUILD_MEMORY_MIB
 from fplinux_cli.build import reuse as bundles_commands
 from fplinux_cli.cache.prune import operations as cache_prune
 from fplinux_cli.common import fail, sha256_file
+from fplinux_cli.dependencies.inputs import acquire_inputs, captured_build_inputs
 from fplinux_cli.environment import definition
 from fplinux_cli.environment import kern as environment_kern
 from fplinux_cli.environment import state as environment_states
 from fplinux_cli.environment.runtime import environment_arguments, require_environment
 from fplinux_cli.manifests import releases
+from fplinux_cli.manifests.source_catalog import resolve_source
 from fplinux_cli.reporting.process import silence_broken_pipe
 from fplinux_cli.reporting.run import RunReporter
 from fplinux_cli.workspace import build_inputs as workspace_build_inputs
@@ -50,7 +52,7 @@ def prepare_host_tool(  # noqa: PLR0913 -- operation inputs and environment poli
 ) -> None:
     """Build one cached host utility in the pinned environment without fitted device data."""
     snapshot = workspace_capture.workspace_snapshot(
-        workspace_build_inputs.target_build_source_files(target)
+        workspace_build_inputs.target_build_source_files(target, host_tools=(tool,))
     )
     kern, environment_rootfs, environment_state = require_environment(
         offline=offline, reporter=reporter
@@ -60,6 +62,15 @@ def prepare_host_tool(  # noqa: PLR0913 -- operation inputs and environment poli
     host_tools = ensure_build_directory(cache / "host-tools")
     workspace = workspace_staging.stage_workspace_snapshot(snapshot)
     try:
+        platform_config = common.load_toml(workspace / "platforms" / platform / "platform.toml")
+        recipe = next(
+            (item for item in platform_config["host"]["tools"] if item["name"] == tool), None
+        )
+        if recipe is None:
+            fail(f"platform host tool is not declared: {platform}: {tool}")
+        if recipe["type"] == "make-archive":
+            with reporter.stage("host-tool-inputs"):
+                resolve_source(workspace, recipe["source_lock"]).acquire(cache, offline=offline)
         container_logs = ensure_build_directory(reporter.root / "host-tools")
         log_environment = reporter.container_environment("/logs")
         log_environment["FPLINUX_LOG_DISPLAY_ROOT"] += "/host-tools"
@@ -72,7 +83,7 @@ def prepare_host_tool(  # noqa: PLR0913 -- operation inputs and environment poli
             "--uid-range",
             "--privileged",
             "--network",
-            "none" if offline else "host",
+            "none",
             "--tmpfs",
             "/tmp:1g",  # noqa: S108 -- container tmpfs.
             "--volume",
@@ -121,7 +132,6 @@ def _build_command(  # noqa: PLR0913
     target: str,
     jobs: int,
     environment_rootfs: Path,
-    offline: bool,
     snapshot: WorkspaceSnapshot,
     workspace: Path,
     downloads: Path,
@@ -157,7 +167,7 @@ def _build_command(  # noqa: PLR0913
         "--memory",
         f"{memory_mib}m",
         "--network",
-        "none" if offline else "host",
+        "none",
         "--tmpfs",
         "/tmp:8g",  # noqa: S108 -- container tmpfs.
         "--volume",
@@ -251,7 +261,10 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
         fail("--jobs must be positive")
     release = releases.load_release(target)
     snapshot = workspace_build_inputs.target_workspace_snapshot(
-        target, profile, build_type=build_type, include_device_data=include_device_data
+        target,
+        profile,
+        build_type=build_type,
+        include_device_data=include_device_data,
     )
     environment_lock = definition.load_environment_lock()
     environment_recipe = definition.environment_recipe_digest(environment_lock)
@@ -318,6 +331,12 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
     with reporter.stage("workspace"):
         workspace = workspace_staging.stage_workspace_snapshot(snapshot)
     try:
+        with reporter.stage("build-inputs"):
+            acquire_inputs(
+                captured_build_inputs(workspace, snapshot.source_declarations),
+                cache,
+                offline=offline,
+            )
         container_logs = ensure_build_directory(reporter.root / "container")
         log_environment = reporter.container_environment("/logs")
         log_environment["FPLINUX_LOG_DISPLAY_ROOT"] = (
@@ -334,7 +353,6 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
                         jobs=jobs,
                         memory_mib=memory_mib,
                         environment_rootfs=environment_rootfs,
-                        offline=offline,
                         snapshot=snapshot,
                         workspace=workspace,
                         downloads=downloads,

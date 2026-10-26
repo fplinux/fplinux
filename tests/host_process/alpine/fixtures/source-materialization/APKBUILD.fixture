@@ -1,0 +1,25 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-materialization-fixture
+pkgver=@version:main@.7
+pkgrel=0
+pkgdesc="Local source materialization fixture"
+url="https://example.invalid"
+arch="noarch"
+license="MIT"
+options="!check"
+_extraver=@version:extra@
+source="
+	@source:main@
+	@source:upstream_patch@
+	local.patch
+	@source:extra@
+"
+builddir="$srcdir/sample-${pkgver%.*}"
+
+package() {
+	install -Dm644 value.txt "$pkgdir/usr/share/materialization/value.txt"
+	install -Dm644 "$srcdir/extra-$_extraver/extra.txt" \
+		"$pkgdir/usr/share/materialization/extra.txt"
+}
+
+sha512sums=""

@@ -15,8 +15,10 @@ from typing import TYPE_CHECKING, Any
 from unittest import mock
 
 import pytest
+from fplinux_cli.alpine import aports as alpine_aports
 from fplinux_cli.alpine import packages as alpine_packages
 from fplinux_cli.alpine import recipes as alpine_recipes
+from fplinux_cli.alpine import selection as alpine_selection
 from fplinux_cli.workspace import (
     build_inputs as workspace_build_inputs,
 )
@@ -46,16 +48,20 @@ class RegistrationContext:
             self.root / "scripts/fplinux_cli",
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
         )
-        self.names = (
+        self.names: tuple[str, ...] = (
             "fplinux-package-a",
             "fplinux-package-b",
             "fplinux-library-c",
             "fplinux-library-d",
         )
-        self.selected = self.names[:2]
+        self.selected: tuple[str, ...] = self.names[:2]
         for name in self.names:
             self.write(f"alpine/aports/{name}/APKBUILD", f"pkgname={name}\n".encode())
-        self.write("alpine.lock.toml", b"fixture lock\n")
+        self.write("alpine.lock.toml", b'[minirootfs]\nsource = "alpine_target"\n')
+        self.write(
+            "sources.lock.toml",
+            (ROOT / "tests/fixtures/alpine/sources.lock.toml").read_bytes(),
+        )
         self.write("alpine/abuild.conf", b"fixture abuild\n")
         self.write("alpine/ramroot-init.sh", b"#!/bin/sh\nexit 0\n")
         self.registration = self.root / "scripts/fplinux_cli/alpine/registration.py"
@@ -129,6 +135,8 @@ def registered_sources(tmp_path: Path) -> Iterator[RegistrationContext]:
 
 class AlpineRegistrationTests:
     """Registration edits preserve unrelated APK receipts in isolated source trees."""
+
+
 
     def test_unrelated_registration_preserves_apk_recipe_and_receipt_hit(
         self, registered_sources: RegistrationContext

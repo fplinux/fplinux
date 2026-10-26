@@ -37,6 +37,32 @@ if TYPE_CHECKING:
 class AlpineRecipesTests:
     """Protect Alpine recipes behavior with controlled temporary inputs."""
 
+    def test_minibase_catalog_pin_invalidates_rootfs_receipt_and_preserves_apk_recipe(
+        self, alpine_source: AlpineSourceContext
+    ) -> None:
+        """Changing the composed base misses rootfs without rebuilding unchanged APKs."""
+        before = alpine_source.recipe()
+        package = alpine_recipes.alpine_package_recipe(
+            alpine_source.packages[0], "1" * 64, alpine_source.signing_key, alpine_source.root
+        )
+        output = alpine_source.root / "cached-rootfs"
+        output.mkdir()
+        (output / "rootfs.cpio").write_bytes(b"composed root filesystem\n")
+        alpine_rootfs_state.write_receipt(output, before)
+        sources = alpine_source.root / "sources.lock.toml"
+        original = sources.read_text()
+        sources.write_text(original.replace("d" * 64, "e" * 64))
+        assert alpine_rootfs_state.receipt_matches(output, alpine_source.recipe())
+        sources.write_text(original.replace("a" * 64, "b" * 64))
+        changed = alpine_source.recipe()
+        assert changed != before
+        assert not alpine_rootfs_state.receipt_matches(output, changed)
+        assert alpine_source.recipe() == changed
+        assert package == alpine_recipes.alpine_package_recipe(
+            alpine_source.packages[0], "1" * 64, alpine_source.signing_key, alpine_source.root
+        )
+
+
     def test_selected_aport_bytes_change_the_rootfs_recipe(
         self, alpine_source: AlpineSourceContext
     ) -> None:

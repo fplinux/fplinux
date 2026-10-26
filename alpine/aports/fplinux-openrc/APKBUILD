@@ -1,9 +1,7 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-openrc
-pkgver=0.64.1
+pkgver=@version:aport_openrc_0_64_1_tar_gz@
 pkgrel=0
-_aport_commit=dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763
-_aport_source="https://raw.githubusercontent.com/alpinelinux/aports/$_aport_commit/main/openrc"
 pkgdesc="OpenRC service management for FPLinux"
 url="https://github.com/OpenRC/openrc"
 arch="armv7"
@@ -16,29 +14,30 @@ makedepends_build="clang22 lld22 meson llvm22"
 makedepends_host="musl-dev bsd-compat-headers libcap-dev linux-headers"
 subpackages="$pkgname-dev $pkgname-doc $pkgname-init:init $pkgname-user:user"
 options="!check"
-source="openrc-$pkgver.tar.gz::https://github.com/OpenRC/openrc/archive/$pkgver.tar.gz
-	0001-call-sbin-mkmntdirs-in-localmount-OpenRC-service.patch::$_aport_source/0001-call-sbin-mkmntdirs-in-localmount-OpenRC-service.patch
-	0002-fsck-don-t-add-C0.patch::$_aport_source/0002-fsck-don-t-add-C0.patch
-	0003-rc-pull-in-sysinit-and-boot-as-stacked-levels-when-n.patch::$_aport_source/0003-rc-pull-in-sysinit-and-boot-as-stacked-levels-when-n.patch
+source="
+	@source:aport_openrc_0_64_1_tar_gz@
+	@source:aport_0001_call_sbin_mkmntdirs_in_localmount_openrc_service_patch@
+	@source:aport_0002_fsck_don_t_add_c0_patch@
+	@source:aport_0003_rc_pull_in_sysinit_and_boot_as_stacked_levels_when_n_patch@
 	0004-consolefont-busybox.patch
 	0005-early-keymap.patch
 	0006-service-vrf.patch
-	0007-Clean-up-staticroute-config-remove-irrelevant-parts-.patch::$_aport_source/0007-Clean-up-staticroute-config-remove-irrelevant-parts-.patch
+	@source:aport_0007_clean_up_staticroute_config_remove_irrelevant_parts_patch@
 	0008-keep-tmp-files.patch
 	0009-service-netns.patch
-	0010-init.d-user-add-a-respawn_delay-value.patch::$_aport_source/0010-init.d-user-add-a-respawn_delay-value.patch
-	supervise-daemon-defaults.patch::$_aport_source/supervise-daemon-defaults.patch
-	sysctl-readme.patch::$_aport_source/sysctl-readme.patch
-	openrc.logrotate::$_aport_source/openrc.logrotate
-	hwdrivers.initd::$_aport_source/hwdrivers.initd
-	modules.initd::$_aport_source/modules.initd
-	modloop.initd::$_aport_source/modloop.initd
-	networking.initd::$_aport_source/networking.initd
-	modloop.confd::$_aport_source/modloop.confd
-	sysfsconf.initd::$_aport_source/sysfsconf.initd
-	firstboot.initd::$_aport_source/firstboot.initd
-	sysctl.initd::$_aport_source/sysctl.initd
-	machine-id.initd::$_aport_source/machine-id.initd
+	@source:aport_0010_init_d_user_add_a_respawn_delay_value_patch@
+	@source:aport_supervise_daemon_defaults_patch@
+	@source:aport_sysctl_readme_patch@
+	@source:aport_openrc_logrotate@
+	@source:aport_hwdrivers_initd@
+	@source:aport_modules_initd@
+	@source:aport_modloop_initd@
+	@source:aport_networking_initd@
+	@source:aport_modloop_confd@
+	@source:aport_sysfsconf_initd@
+	@source:aport_firstboot_initd@
+	@source:aport_sysctl_initd@
+	@source:aport_machine_id_initd@
 "
 builddir="$srcdir/openrc-$pkgver"
 
@@ -155,27 +154,9 @@ doc() {
 	mv "$subpkgdir/usr/share/licenses" "$pkgdir/usr/share/"
 }
 sha512sums="
-f8d576b8181fb3fb40be1d1e3a437d83492d01d52777a8c12cae918fbda3d30582b57dd4ac693acc6cf514f2156114c7d59c3706dca1fca4c3abb57b4fc430fb  openrc-0.64.1.tar.gz
-3aaeb32ab7b0e56b9250cbf31fa35d160f49ba5febbd80ae61e320425d6c18673a69c1a8dffb2bcaec5f5c431f79ba7944e0dccd496216b970da00e6331e4032  0001-call-sbin-mkmntdirs-in-localmount-OpenRC-service.patch
-bd332b920f6fbf19f55098f75b6df0148917293aad8fc8ca1d2691b00f883b5099975bc2070daf821150b20417532d9954fd2e552affb83d721c842efa66ea35  0002-fsck-don-t-add-C0.patch
-77b058a70cab37ad662a57fa69411b6275853ac41423e0a799ba980578d8e18d3d2ae2c2a6f5a3ba5779aeec273d7c4c2a14e8fdb31d0a6b383f2e8a64a4ed2f  0003-rc-pull-in-sysinit-and-boot-as-stacked-levels-when-n.patch
 b7bdb7158b3c96db84d7faf4a6699f55d9f082aa82e6ff15bd11a630555d9e38ebd29bcf610240bebf943fcdbf822c996e84b16d28dc715699bd22e9387d68dd  0004-consolefont-busybox.patch
 82dd70c3bf0d50dc8aa6cfdaebb95fbbb0827264d860504f8be18d463fa54a9db00f4eb50dd7f6eca41aeeabaa43358e8e5223760fcc0137c909d20b458675d3  0005-early-keymap.patch
 bee65045576ac325d355338e97ed8ac1efc1265402bb3e3bced824068f95eee3ea76883353a3a2ffc8cb51b87e03fe55b5a6db52c2265b99b9e4950a734bc9a7  0006-service-vrf.patch
-431ac28808e684bea5511386bf5f06efe7f509f1dbe7e15ae6309563d813deae8f3edd872a0943ef8088e3cf778d7bc5ebd15a893dc4a08f4022b7a56bbafc63  0007-Clean-up-staticroute-config-remove-irrelevant-parts-.patch
 814121db3e952650bd913818c2ef126116f6d71e5ea6e39ab6e028475af3bf7ef05466e7f4146c2d539ec3bc743aa235bbc56bdfc1c372d008c680d948babfa7  0008-keep-tmp-files.patch
 162ae156591d731e74ac5148051b93e1a6303e51880d580d76d70aff813f4e8f1d329ebb3a18b62f05738d9e77ccd31726a2f6ad853decacd74f44304d67ef5b  0009-service-netns.patch
-9614420468d0102e81de7147ebc88e380f0bfa547ce7c52151b7babfc7b05a1f49d3d8a24deeff15bf1e885af643dd73ac21e3a0877a884fe91585ef866e46de  0010-init.d-user-add-a-respawn_delay-value.patch
-86a2fb1564b8537f5dd7e06587a572ebefd110bf8bea049bc2254d4008ed3fed2296b4e9fde793ddbed7a66f70335b6c228f0b10fc0a6e7d106d3ad226fc0ba4  supervise-daemon-defaults.patch
-903ff555275a67ff08da91badb55d9fa6c6a2901e8ef09ca8366bd74d69757491c8336347f04551268ecf053c8ae974f50decd869926894dd94e382008e3e925  sysctl-readme.patch
-12bb6354e808fbf47bbab963de55ee7901738b4a912659982c57ef2777fff9a670e867fcb8ec316a76b151032c92dc89a950d7d1d835ef53f753a8f3b41d2cec  openrc.logrotate
-9664588a69ee13d09ecea9c55918c5cd64176d58560bde92d33f8089e1002cd04f1fe4225376b4b092297f47f9b2290980e42a5595787bfc5079d174538f1d3c  hwdrivers.initd
-bc152c2b5eb37a08035f289b21e85d41461914e8b1f3c6a6a87ba0dd0cfeb20c9a5e6d7dab132e345339245a7ae1ffcb741f5bfde76fb8e0c87e4de5e0b1faf0  modules.initd
-47bea7e48444fc15f30b1da168e3d33b124c7f3480e08adcf93c5d301504cc6e73d96b254833fe20e906e353053eba8e8f410f238a3d4cd65743718a800939e5  modloop.initd
-aa1dd3d31872d7ec308b534044e490136de47a3e72575a96522f60c5740ee3b953a17e05013359d27985ac16b048ff8fff76e8ac1103802a4fb75a31d2185d45  networking.initd
-80e43ded522e2d48b876131c7c9997debd43f3790e0985801a8c1dd60bc6e09f625b35a127bf225eb45a65eec7808a50d1c08a5e8abceafc61726211e061e0a2  modloop.confd
-d76c75c58e6f4b0801edac4e081b725ef3d50a9a8c9bbb5692bf4d0f804af7d383bf71a73d5d03ed348a89741ef0b2427eb6a7cbf5a9b9ff60a240639fa6ec88  sysfsconf.initd
-990855f875513a85c2b737685ac5bfdfa86f8dadacf00c1826a456547f99b69d4ecf1b9a09c0ce002f1df618b44b1febabe53f95a2c0cd02b504d565bccb50c8  firstboot.initd
-2d5f9f6d41b7c0a8643cfdee1ce3c399bfe4ebff54421f33ab1e74c1c4c1b96a49e54b5cd69f0339a060342e4e5a11067bbff68c39fa487919259d73e8e46ed1  sysctl.initd
-a60129f4bed134a27773c61994d114b3a5d1ab9f20097b096956f5bb696c056f4a608577cabb34c32b51899c69dce3bd0d8ffa61f5b66fd00fc5085d1ebba54f  machine-id.initd
 "

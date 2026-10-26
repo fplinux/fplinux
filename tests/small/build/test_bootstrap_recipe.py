@@ -113,9 +113,9 @@ class BootstrapRecipeTests:
                 "patches/vendor.patch", b"changed vendor patch\n"
             ),
             "vendor-archive": lambda: bootstrap_context.sources["vendor"].update(
-                archive_sha256="b" * 64
+                checksum="b" * 64
             ),
-            "vendor-commit": lambda: bootstrap_context.sources["vendor"].update(commit="def456"),
+            "vendor-commit": lambda: bootstrap_context.sources["vendor"].update(version="b" * 40),
             "toolchain": lambda: bootstrap_context.platform["bootstrap"].update(
                 toolchain="arm-none-eabi-custom"
             ),
@@ -177,11 +177,9 @@ class BootstrapRecipeTests:
         assert (baseline) == (bootstrap_context.digest())
         bootstrap_context.sources["vendor"]["repository"] = "https://example.invalid/vendor"
 
-        bootstrap_context.sources["vendor"]["archive_url"] = "https://example.invalid/other.tar.gz"
+        bootstrap_context.sources["vendor"]["url"] = "https://example.invalid/other.tar.gz"
         assert (baseline) == (bootstrap_context.digest())
-        bootstrap_context.sources["vendor"]["archive_url"] = (
-            "https://example.invalid/vendor.tar.gz"
-        )
+        bootstrap_context.sources["vendor"]["url"] = "https://example.invalid/vendor.tar.gz"
 
         bootstrap_context.sources["vendor"]["license"] = "Other"
         assert (baseline) == (bootstrap_context.digest())
@@ -233,9 +231,9 @@ class BootstrapRecipeTests:
         bootstrap_context.sources["linux"]["url"] = "https://example.invalid/mirror.tar.xz"
         bootstrap_context.write("unrelated-font.c", b"int unrelated_font;\n")
         assert (baseline) == (bootstrap_context.digest())
-        bootstrap_context.sources["linux"]["sha256"] = "d" * 64
+        bootstrap_context.sources["linux"]["checksum"] = "d" * 64
         assert (baseline) != (bootstrap_context.digest())
-        bootstrap_context.sources["linux"]["sha256"] = "c" * 64
+        bootstrap_context.sources["linux"]["checksum"] = "c" * 64
         header = bootstrap_context.write(
             "bootstrap/fplinux-boot-screen/font.h", b"changed declarations\n"
         )
@@ -265,25 +263,29 @@ class BootstrapRecipeTests:
         expected: bytes,
     ) -> None:
         """The compiler receives the target bytes for either source tree, or the full fallback."""
-        archive = bootstrap_context.root / "cache/downloads/vendor.tar.gz"
+        archive = bootstrap_context.root / "cache/downloads/sources/vendor/vendor.tar.gz"
         archive.parent.mkdir(parents=True)
         with tarfile.open(archive, "w:gz") as output:
             for path, contents in (
                 ("pack_reloc/Makefile", b"all:\n\ttrue\n"),
                 ("runtime/lcd_config.h", b"complete porting table\n"),
             ):
-                member = tarfile.TarInfo(f"vendor-abc123/{path}")
+                member = tarfile.TarInfo(f"vendor-{'a' * 40}/{path}")
                 member.size = len(contents)
                 output.addfile(member, io.BytesIO(contents))
-        bootstrap_context.sources["vendor"]["archive_sha256"] = common.sha256_file(archive)
-        linux_archive = bootstrap_context.root / "cache/downloads/linux/linux-1.2.3.tar.xz"
+        bootstrap_context.sources["vendor"]["checksum"] = common.sha256_file(archive)
+        linux_archive = bootstrap_context.root / "cache/downloads/sources/linux/linux-1.2.3.tar.xz"
         linux_archive.parent.mkdir(parents=True)
         with tarfile.open(linux_archive, "w:xz") as output:
             contents = b"int unchanged_upstream_font;\n"
             member = tarfile.TarInfo("linux-1.2.3/lib/fonts/font_sample.c")
             member.size = len(contents)
             output.addfile(member, io.BytesIO(contents))
-        bootstrap_context.sources["linux"]["sha256"] = common.sha256_file(linux_archive)
+        bootstrap_context.sources["linux"]["checksum"] = common.sha256_file(linux_archive)
+        catalog = (BOOTSTRAP_FILES / "sources.lock.toml").read_text(encoding="utf-8")
+        catalog = catalog.replace("a" * 64, common.sha256_file(archive))
+        catalog = catalog.replace("c" * 64, common.sha256_file(linux_archive))
+        bootstrap_context.write("sources.lock.toml", catalog.encode("utf-8"))
         bootstrap_context.platform["bootstrap"]["patches"] = []
         bootstrap_context.write("targets/demo/bootstrap/lcd_config.h", b"single selected panel\n")
         bootstrap_context.write("targets/demo/bootstrap-microsd/Makefile", b"all:\n\ttrue\n")

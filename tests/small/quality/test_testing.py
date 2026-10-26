@@ -38,20 +38,72 @@ from tests import ROOT
 class SelectedTestRunTests:
     """A test result owns logs, never a full quality-check success receipt."""
 
+    @pytest.mark.parametrize(
+        ("names", "tier"),
+        [
+            pytest.param([], "artifact", id="tier"),
+            pytest.param(["tests/artifact"], None, id="directory"),
+            pytest.param(["tests.artifact.test_example"], None, id="module"),
+            pytest.param(["tests/artifact/test_example.py::test_example"], None, id="node"),
+        ],
+    )
+    def test_artifact_selection_forms_allow_memory_for_images_and_tools(
+        self, tmp_path: Path, names: list[str], tier: str | None
+    ) -> None:
+        """Each selection gives Kern room for image files, pytest and native image tools."""
+        module = tmp_path / "workspace/tests/artifact/test_example.py"
+        module.parent.mkdir(parents=True)
+        module.touch()
+        reporter = output.RunReporter(
+            "test", tmp_path / "logs", str(tmp_path / "logs"), verbose=False
+        )
+        with (
+            mock.patch.object(runtime, "kern_environment", return_value={}),
+            # Kern resource arguments are the external boundary under this test.
+            mock.patch.object(output.Stage, "run", autospec=True) as kern_process,
+        ):
+            testing.run_test_workload(
+                reporter,
+                tmp_path / "workspace",
+                kern="kern",
+                rootfs=Path("/environment/rootfs"),
+                names=names,
+                tier=tier,
+            )
+
+        kern_process.assert_called_once()
+        command = kern_process.call_args.args[1]
+        container_arguments = command[: command.index("--")]
+        assert container_arguments.count("--memory") == 1
+        assert container_arguments[container_arguments.index("--memory") + 1] == "2048m"
+        tmpfs = container_arguments[container_arguments.index("--tmpfs") + 1]
+        assert tmpfs == "/tmp:1g"  # noqa: S108 -- container tmpfs.
+
     @pytest.mark.parametrize("tier", [None, "host_tool"])
     def test_host_tool_selections_and_discovery_share_time_for_native_builds(
-        self, tier: str | None
+        self, tier: str | None, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Selecting native workloads retains the tier's ten-minute shared deadline."""
+        """More native selections share one declared budget instead of multiplying it."""
+        monkeypatch.setattr(
+            testing,
+            "TEST_TIERS",
+            {
+                "small": 7,
+                "host_process": 11,
+                "host_tool": 19,
+                "artifact": 13,
+                "public_workflow": 5,
+            },
+        )
         workloads = testing.pytest_commands([], tier=tier)
         full = {label: timeout for label, _command, timeout in workloads}
-        assert full["host_tool"] == 600
+        assert full["host_tool"] == 19
         if tier is None:
             assert {label: timeout for label, timeout in full.items() if label != "host_tool"} == {
-                "small": 90,
-                "host_process": 300,
-                "artifact": 300,
-                "public_workflow": 90,
+                "small": 7,
+                "host_process": 11,
+                "artifact": 13,
+                "public_workflow": 5,
             }
         for names in (
             ["tests.host_tool.gui.test_clocks_screens"],
@@ -64,7 +116,7 @@ class SelectedTestRunTests:
             ],
         ):
             [(_label, _command, selected_timeout)] = testing.pytest_commands(names)
-            assert selected_timeout == 600
+            assert selected_timeout == 19
 
     def test_directory_selection_uses_captured_workspace(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -213,9 +265,10 @@ class SelectedTestRunTests:
             rootfs: Path,
             timeout: float,
             log_name: str | None,
+            downloads: Path | None = None,
         ) -> None:
             nonlocal elapsed
-            del kern, rootfs, log_name
+            del kern, rootfs, log_name, downloads
             budgets.append(("container", timeout))
             elapsed += 110.0
 

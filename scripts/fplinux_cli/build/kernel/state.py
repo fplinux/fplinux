@@ -10,10 +10,11 @@ import tarfile
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from fplinux_cli import common
 from fplinux_cli.build import inputs as inputs_build
-from fplinux_cli.build import sources as sources_build
 from fplinux_cli.build.storage import layout as profile_layout
 from fplinux_cli.common import canonical_json_bytes, replace_file_atomically
+from fplinux_cli.manifests.source_catalog import acquire_source
 from fplinux_cli.manifests.values import relative_value
 from fplinux_cli.workspace.capture import WorkspaceFile
 
@@ -84,7 +85,10 @@ def ensure_linux_base(
     cache: Path, source_lock: dict[str, Any], *, archive: Path | None = None
 ) -> LinuxBase:
     """Extract one complete tree per upstream digest, shared by every Linux consumer."""
-    digest = _require_digest(source_lock.get("sha256"), "Linux source")
+    digest = _require_digest(source_lock.get("checksum"), "Linux source")
+    if source_lock.get("algorithm") != "sha256":
+        message = "Linux source requires a SHA-256 pin"
+        raise LinuxStateError(message)
     version = source_lock.get("version")
     if not isinstance(version, str) or not version:
         message = "Linux source version must be a non-empty string"
@@ -105,9 +109,7 @@ def ensure_linux_base(
         shutil.rmtree(staging)
     staging.mkdir()
     if archive is None:
-        archive = sources_build.fetch(
-            source_lock.get("url"), digest, cache / "downloads/linux", f"linux-{version}.tar.xz"
-        )
+        archive = acquire_source(common.ROOT, source_lock["source_id"], cache)
     try:
         if source.exists() or source.is_symlink():
             _require_directory(source, "shared Linux source")

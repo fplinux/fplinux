@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-tyrquake
-pkgver=0.71
+pkgver=@version:aport_tyrquake_0_71_tar_gz@
 pkgrel=0
 pkgdesc="TyrQuake native DRM/evdev port for FPLinux"
 url="https://disenchant.net/tyrquake/"
@@ -11,7 +11,7 @@ makedepends_build="clang22 lld22 make patch pkgconf llvm22"
 makedepends_host="musl-dev linux-headers gcc libevdev-dev eudev-dev fplinux-libdrm-dev fplinux-mesa-dev"
 options="!check"
 source="
-	tyrquake-$pkgver.tar.gz::https://disenchant.net/files/engine/tyrquake-$pkgver.tar.gz
+	@source:aport_tyrquake_0_71_tar_gz@
 	0001-FPLinux-add-native-runtime-support.patch
 	fplinux-quake.c
 	fplinux-quake-internal.h
@@ -102,7 +102,6 @@ package() {
 }
 
 sha512sums="
-ecceeecb43866c10c0669b4362ce2eda7a790c502764b3d644566e7637ffbde0548676c9dcea07963db0d91d83c248e3497603c0a3a2e1a12a1418a82c07179a  tyrquake-0.71.tar.gz
 c7a7c12608d9fffa61210224ba7ce267278e1201cd838c8e47c292b479fc2e229e5a267f775bc9b8151cca61e9f8a187752b515013d7d7707eb97876d9543feb  0001-FPLinux-add-native-runtime-support.patch
 81ca186e4a695583199352f013cd191cdda0a2f25870856616c07769ef28796f7c6d2d4cac1c5af0f996c9fc00ee90118035a587df784e01aa5d117c13314dec  fplinux-quake.c
 1ec65c06b2886423ad45ca0a5f0e03eb43cc75a0d71e5d6d0d6c079e0c9f22c462b5675e0e844acfa2507a01aa860da705b33cc5fa9fd00c0cf8531f61b10f77  fplinux-quake-internal.h

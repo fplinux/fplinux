@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from fplinux_cli import common
 from fplinux_cli.common import fail
+from fplinux_cli.manifests.source_catalog import resolve_source, source_build_metadata
 from fplinux_cli.manifests.values import sha256_value
 
 if TYPE_CHECKING:
@@ -30,6 +31,12 @@ ENVIRONMENT_RECIPE_INPUTS = (
     "scripts/fplinux_cli/environment/install_wheels.py",
     "scripts/fplinux_cli/common.py",
     "scripts/fplinux_cli/dependencies/inputs.py",
+    "scripts/fplinux_cli/manifests/source_catalog.py",
+    "scripts/fplinux_cli/alpine/sources.py",
+    "scripts/fplinux_cli/alpine/selection.py",
+    "scripts/fplinux_cli/alpine/registration.py",
+    "scripts/fplinux_cli/alpine/lock.py",
+    "scripts/fplinux_cli/alpine/aports.py",
     "scripts/fplinux_cli/build/host_tools/host.py",
     "package.json",
     "package-lock.json",
@@ -37,6 +44,59 @@ ENVIRONMENT_RECIPE_INPUTS = (
     "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",
     "alpine/aports/fplinux-font-terminus/APKBUILD",
 )
+
+
+def _resolve_environment_sources(lock: dict[str, Any], root: Path) -> dict[str, Any]:
+    """Resolve direct originals while preserving the native binary APK closure."""
+    kern = lock["kern"]
+    if not isinstance(kern, dict) or set(kern) != {"source", "binary_sha256"}:
+        fail("environment Kern must contain source and binary_sha256")
+    kern_source = resolve_source(root, kern["source"])
+    lock["kern"] = {
+        "version": kern_source.version,
+        "archive_url": kern_source.url,
+        "archive_sha256": kern_source.checksum,
+        "binary_sha256": kern["binary_sha256"],
+        "destination": kern_source.destination,
+    }
+    base = lock["base"]
+    if not isinstance(base, dict) or set(base) != {"source", "arch"}:
+        fail("environment base must contain source and arch")
+    base_source = resolve_source(root, base["source"])
+    lock["base"] = {
+        "release": base_source.version,
+        "arch": base["arch"],
+        "url": base_source.url,
+        "sha256": base_source.checksum,
+    }
+    records = {}
+    if not isinstance(lock["input"], list):
+        fail("environment inputs must be an array")
+    for record in lock["input"]:
+        if not isinstance(record, dict):
+            fail("environment input must be a table")
+        if "source" in record:
+            if set(record) != {"key", "source", "purpose", "arch"}:
+                fail("environment source input must contain key, source, purpose and arch")
+            source = resolve_source(root, record.pop("source"))
+            record.update(url=source.url, destination=source.destination)
+            if source.algorithm == "sha256":
+                record["sha256"] = source.checksum
+            else:
+                record.update(algorithm=source.algorithm, checksum=source.checksum)
+            if source.size is not None:
+                record["bytes"] = source.size
+            records[record["key"]] = source
+        elif record.get("purpose") != "environment-package":
+            fail("environment direct originals must use source references")
+    if not isinstance(lock["tools"], dict):
+        fail("environment tools must be a table")
+    for name, tool in lock["tools"].items():
+        if not isinstance(tool, dict) or set(tool) != {"input"} or tool["input"] not in records:
+            fail(f"environment tool must select a direct source input: {name}")
+        source = records[tool["input"]]
+        tool["commit" if name == "sparse" else "version"] = source.version
+    return lock
 
 
 def load_environment_lock(root: Path | None = None) -> dict[str, Any]:
@@ -47,6 +107,7 @@ def load_environment_lock(root: Path | None = None) -> dict[str, Any]:
     lock = common.load_toml(path)
     if set(lock) != {"kern", "base", "selection", "tools", "input"}:
         fail(f"environment lock must contain kern, base, selection, tools and input: {path}")
+    lock = _resolve_environment_sources(lock, root)
 
     kern = lock.get("kern")
     if not isinstance(kern, dict) or set(kern) != {
@@ -54,6 +115,7 @@ def load_environment_lock(root: Path | None = None) -> dict[str, Any]:
         "archive_url",
         "archive_sha256",
         "binary_sha256",
+        "destination",
     }:
         fail(f"environment lock must define one pinned Kern release: {path}")
     version = kern.get("version")
@@ -206,9 +268,9 @@ def file_recipe_digest(paths: list[Path], *, prefix: bytes = b"") -> str:
 
 def spreadtrum_flash_environment_source(root: Path) -> dict[str, Any]:
     """Select the pinned source files needed by the offline RAM uploader tests."""
-    source = common.load_toml(root / "sources.lock.toml").get("spreadtrum_flash")
-    if not isinstance(source, dict):
-        fail("quality environment requires the spreadtrum_flash source lock")
+    source = source_build_metadata(
+        "spreadtrum_flash", common.load_toml(root / "sources.lock.toml").get("spreadtrum_flash")
+    )
     commit = source.get("commit")
     if not isinstance(commit, str) or re.fullmatch(r"[0-9a-f]{40}", commit) is None:
         fail("quality environment spreadtrum_flash commit is invalid")
@@ -245,6 +307,7 @@ def environment_recipe_digest(lock: dict[str, Any] | None = None) -> str:
     from fplinux_cli.dependencies.inputs import (  # noqa: PLC0415
         terminus_font_environment_inputs,
         ui_font_environment_inputs,
+        ui_icon_environment_inputs,
     )
 
     if lock is None:
@@ -263,6 +326,10 @@ def environment_recipe_digest(lock: dict[str, Any] | None = None) -> str:
             + b"fplinux.quality-terminal-font-projection\0"
             + common.canonical_json_bytes(
                 [asdict(item) for item in terminus_font_environment_inputs(common.ROOT)]
+            )
+            + b"fplinux.quality-ui-icon-projection\0"
+            + common.canonical_json_bytes(
+                [asdict(item) for item in ui_icon_environment_inputs(common.ROOT)]
             )
         ),
     )

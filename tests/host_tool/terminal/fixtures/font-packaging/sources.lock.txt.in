@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+[aport_terminus_font_4_49_1_tar_gz]
+version = "4.49.1"
+name = "terminus-font-4.49.1.tar.gz"
+url = "https://example.invalid/terminus-font-4.49.1.tar.gz"
+algorithm = "sha512"
+checksum = "@CHECKSUM@"

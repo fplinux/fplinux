@@ -6,9 +6,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import common
+from fplinux_cli.common import fail
 from fplinux_cli.manifests.values import relative_value
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
     from pathlib import Path
 
 _RUNTIME_MODULES = (
@@ -105,3 +107,36 @@ def runtime_source_files(
             if relative is not None:
                 files[relative] = source_root / relative
     return files
+
+
+def runtime_host_tools(platform: dict[str, Any], *, nand_ecc: bool) -> dict[str, str]:
+    """Select the native tools required by the published runtime roles."""
+    tools = dict(platform["host"]["runtime_tools"])
+    if nand_ecc:
+        from fplinux_cli.device_data.prepare import NAND_ECC_TOOL  # noqa: PLC0415
+
+        tools["nand_ecc"] = NAND_ECC_TOOL
+    return tools
+
+
+
+def runtime_needs_nand_ecc(config: dict[str, Any]) -> bool:
+    """Require native ECC only for the selected RAM data-preparation path."""
+    return bool(
+        config["linux"]["root"]["kind"] == "initramfs"
+        and config.get("device_data", {}).get("groups")
+        and (config.get("nand") or {}).get("ecc_format")
+    )
+
+
+
+def selected_host_tool_recipes(
+    platform: dict[str, Any], tools: Collection[str]
+) -> list[dict[str, Any]]:
+    """Resolve every requested native tool before building or capturing its inputs."""
+    required = set(tools)
+    recipes = [recipe for recipe in platform["host"]["tools"] if recipe["name"] in required]
+    missing = required - {recipe["name"] for recipe in recipes}
+    if missing:
+        fail(f"platform host tools are not declared: {', '.join(sorted(missing))}")
+    return recipes

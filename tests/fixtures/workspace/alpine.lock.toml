@@ -1,0 +1,2 @@
+[minirootfs]
+source = "alpine_target"

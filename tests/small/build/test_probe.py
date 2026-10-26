@@ -13,8 +13,11 @@ from unittest import mock
 
 import pytest
 from fplinux_cli import common
+from fplinux_cli.alpine import lock as alpine_lock
 from fplinux_cli.build import probe
 from fplinux_cli.environment import kern
+from fplinux_cli.environment.state import EnvironmentState
+from fplinux_cli.manifests.source_catalog import acquire_source
 from fplinux_cli.reporting import run as output
 from fplinux_cli.reporting.run import RunReporter, Stage
 from fplinux_cli.workspace import build_inputs as workspace_inputs
@@ -22,6 +25,7 @@ from fplinux_cli.workspace import staging as workspace_staging
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from urllib.request import Request
 
 
 class ProbePublicationTests:
@@ -46,15 +50,22 @@ class ProbePublicationTests:
                 "release": "example",
                 "arch": "armv7",
                 "minirootfs": {
+                    "source_id": "alpine_target",
                     "url": "https://example.invalid/minirootfs.tar.gz",
                     "sha256": hashlib.sha256(contents).hexdigest(),
                     "bytes": len(contents),
                 },
             }
+            (root / "sources.lock.toml").write_text(
+                '[alpine_target]\nversion="example"\nname="minirootfs.tar.gz"\n'
+                'url="https://example.invalid/minirootfs.tar.gz"\nalgorithm="sha256"\n'
+                f'checksum="{hashlib.sha256(contents).hexdigest()}"\nbytes={len(contents)}\n'
+            )
             with (
                 mock.patch.object(common, "ROOT", root),
                 mock.patch("urllib.request.urlopen", return_value=io.BytesIO(contents)),
             ):
+                acquire_source(root, "alpine_target", root / ".cache", offline=False)
                 keys = probe._prepare_keys(lock, root / "first")  # noqa: SLF001
             assert ((keys / "release.pub").read_bytes()) == (b"release signing key\n")
             assert not ((root / "first/etc/irrelevant").exists())
@@ -64,6 +75,85 @@ class ProbePublicationTests:
             ):
                 keys = probe._prepare_keys(lock, root / "second")  # noqa: SLF001
             assert ((keys / "release.pub").read_bytes()) == (b"release signing key\n")
+
+    @staticmethod
+    def test_first_sysroot_acquires_only_its_base_and_selected_native_packages(
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A first probe acquires its exact inputs before offline APK installation."""
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode="w:gz") as bundle:
+            key = b"release signing key\n"
+            member = tarfile.TarInfo("etc/apk/keys/release.pub")
+            member.size = len(key)
+            bundle.addfile(member, io.BytesIO(key))
+        base = archive.getvalue()
+        package = b"selected sysroot package\n"
+        (tmp_path / "sources.lock.toml").write_text(
+            '[alpine_target]\nversion="fixture"\nname="minirootfs.tar.gz"\n'
+            'url="https://example.invalid/minirootfs.tar.gz"\nalgorithm="sha256"\n'
+            f'checksum="{hashlib.sha256(base).hexdigest()}"\nbytes={len(base)}\n'
+        )
+        lock = {
+            "arch": "armv7",
+            "repositories": {"main": "https://example.invalid/main"},
+            "minirootfs": {
+                "source_id": "alpine_target",
+                "bytes": len(base),
+                "url": "https://example.invalid/minirootfs.tar.gz",
+                "sha256": hashlib.sha256(base).hexdigest(),
+                "destination": "downloads/sources/alpine_target/minirootfs.tar.gz",
+            },
+            "sysroot": {"packages": ["sysroot.apk"]},
+            "runtime": {"packages": ["runtime.apk"], "additions": {}},
+            "package": [
+                {
+                    "file": "sysroot.apk",
+                    "repository": "main",
+                    "sha256": hashlib.sha256(package).hexdigest(),
+                    "bytes": len(package),
+                },
+                {"file": "runtime.apk", "repository": "main", "sha256": "d" * 64, "bytes": 100},
+            ],
+        }
+        payloads = {
+            "https://example.invalid/minirootfs.tar.gz": base,
+            "https://example.invalid/main/sysroot.apk": package,
+        }
+        requested: list[str] = []
+
+        def response(request: Request, **_kwargs: object) -> io.BytesIO:
+            requested.append(request.full_url)
+            return io.BytesIO(payloads[request.full_url])
+
+        def install(_stage: Stage, command: list[str], **_kwargs: object) -> None:
+            volumes = {
+                command[index + 1].split(":")[1]: Path(command[index + 1].split(":")[0])
+                for index, argument in enumerate(command[:-1])
+                if argument == "--volume"
+            }
+            assert (volumes["/packages"] / "sysroot.apk").read_bytes() == package
+            assert (volumes["/keys"] / "release.pub").read_bytes() == b"release signing key\n"
+            assert command[command.index("--network") + 1] == "none"
+            assert "--no-network" in command
+            (volumes["/sysroot"] / "installed").write_bytes(b"prepared sysroot\n")
+
+        monkeypatch.setattr(common, "ROOT", tmp_path)
+        monkeypatch.setattr(output, "ROOT", tmp_path)
+        monkeypatch.setattr(alpine_lock, "load_alpine_lock", lambda: lock)
+        monkeypatch.setattr(kern, "kern_environment", dict)
+        monkeypatch.setattr(Stage, "run", install)
+        state = EnvironmentState("a" * 64, "b" * 64, "c" * 64)
+        reporter = RunReporter.create("probe-build", target=None, verbose=False)
+        with mock.patch("urllib.request.urlopen", side_effect=response):
+            sysroot = probe._prepare_sysroot("kern", tmp_path / "rootfs", state, reporter)  # noqa: SLF001 -- probe preparation boundary.
+        assert set(requested) == set(payloads)
+        assert (sysroot / "installed").read_bytes() == b"prepared sysroot\n"
+        assert not (tmp_path / ".cache/downloads/alpine/packages/runtime.apk").exists()
+        with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")):
+            assert probe._prepare_sysroot("kern", tmp_path / "rootfs", state, reporter) == sysroot  # noqa: SLF001 -- cached preparation boundary.
+        reporter.finish()
 
     @staticmethod
     @pytest.mark.parametrize(

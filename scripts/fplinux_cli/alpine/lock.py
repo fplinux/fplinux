@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.common import ROOT, fail, is_sha256
+from fplinux_cli.manifests.source_catalog import resolve_source
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -87,8 +88,17 @@ def load_alpine_lock(root: Path = ROOT) -> dict[str, Any]:
         _https(url, f"{name} repository")
 
     minirootfs = raw.get("minirootfs")
-    if not isinstance(minirootfs, dict) or set(minirootfs) != {"url", "sha256", "bytes"}:
-        fail("minirootfs must contain exactly url, sha256 and bytes")
+    if not isinstance(minirootfs, dict) or set(minirootfs) != {"source"}:
+        fail("minirootfs must contain exactly source")
+    original = resolve_source(root, minirootfs["source"])
+    minirootfs = {
+        "url": original.url,
+        "sha256": original.checksum,
+        "bytes": original.size,
+        "destination": original.destination,
+        "source_id": original.id,
+    }
+    raw["minirootfs"] = minirootfs
     _https(minirootfs.get("url"), "minirootfs URL")
     _sha256(minirootfs.get("sha256"), "minirootfs")
     _positive_integer(minirootfs.get("bytes"), "minirootfs bytes")

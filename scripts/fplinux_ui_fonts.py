@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: GPL-2.0-only
 """Build the LVGL bitmap fonts compiled into libfplinux-ui.
 
-The fplinux-ui APKBUILD runs this script with the pinned sources of SOURCES
-downloaded into its source directory:
+The fplinux-ui APKBUILD runs this script with a resolved source manifest
+beside its verified originals in the source directory:
 
     python3 fplinux_ui_fonts.py --tokens fplinux-ui-profile.json --sources "$srcdir" --output fonts
 
@@ -14,14 +14,14 @@ fplinux_ui_builtin_font() for those ids, and fonts.log.
 
 Steps for each font:
 
-1. Every source face is checked against its pinned SHA-256.
+1. Every source face is checked against its declared checksum.
 2. Kerning follows the kerning-source rule (kerning_pairs()): a GPOS 'kern'
    feature, else a legacy 'kern' table, else none. The pairs between the
    requested code points are written as one legacy 'kern' format 0 table
    and GPOS is dropped, because lv_font_conv reads kerning through
    opentype.js, which skips GPOS extension lookups and stops at the first
    lookup that covers a glyph. Outlines, metrics and hinting are kept.
-3. lv_font_conv 1.5.3 rasterizes the face at 4 bpp, with --autohint-off for
+3. The pinned lv_font_conv rasterizes the face at 4 bpp, with --autohint-off for
    faces that carry TrueType hinting (the hinted Noto build) and its light
    autohinter for faces without it. Text fonts take U+2713 from Noto Sans
    Symbols 2 and U+2190-2193 from Noto Sans Math, which Noto Sans lacks.
@@ -64,91 +64,27 @@ from fontTools.ttLib.tables._k_e_r_n import KernTable_format_0  # type: ignore[i
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-LV_FONT_CONV_VERSION = "1.5.3"
 BPP = 4
-
-# Pinned font downloads and their release metadata.
-NOTO_FILES = (
-    "https://raw.githubusercontent.com/notofonts/notofonts.github.io/"
-    "28b15b4b43b7bed62b5cf6e6b0b5ff5846270535/fonts"
-)
-NOTO_SANS_RELEASE = (
-    "https://github.com/notofonts/latin-greek-cyrillic/releases/download/"
-    "NotoSans-v2.015/NotoSans-v2.015.zip"
-)
-SYMBOLS2_RELEASE = (
-    "https://github.com/notofonts/symbols/releases/download/"
-    "NotoSansSymbols2-v2.008/NotoSansSymbols2-v2.008.zip"
-)
-MATH_RELEASE = (
-    "https://github.com/notofonts/math/releases/download/NotoSansMath-v3.000/"
-    "NotoSansMath-v3.000.zip"
-)
 
 
 @dataclass(frozen=True)
 class Source:
-    """One pinned source file: download URL, SHA-256 and the release it is from."""
+    """One resolved original supplied by the source catalog."""
 
     url: str
-    sha256: str
-    release: str
+    algorithm: str
+    checksum: str
 
 
-# The file names are the APKBUILD's source names.
-SOURCES = {
-    "NotoSans-Regular-2.015.ttf": Source(
-        f"{NOTO_FILES}/NotoSans/hinted/ttf/NotoSans-Regular.ttf",
-        "478c558ea716033cd60c03438f628dfa75694dcf6b5f6d505a2f05fd2b4f3823",
-        NOTO_SANS_RELEASE,
-    ),
-    "NotoSans-Bold-2.015.ttf": Source(
-        f"{NOTO_FILES}/NotoSans/hinted/ttf/NotoSans-Bold.ttf",
-        "1df075a380fc7cb898acf64c1f7b3b4dd780de3caa860178bf929de35817a913",
-        NOTO_SANS_RELEASE,
-    ),
-    "NotoSans-SemiCondensed-2.015.ttf": Source(
-        f"{NOTO_FILES}/NotoSans/hinted/ttf/NotoSans-SemiCondensed.ttf",
-        "08197b0404ba2c8cec3c75ed58a94ee80f8101ceb358d976329a5e55499c30a4",
-        NOTO_SANS_RELEASE,
-    ),
-    "NotoSans-SemiCondensedBold-2.015.ttf": Source(
-        f"{NOTO_FILES}/NotoSans/hinted/ttf/NotoSans-SemiCondensedBold.ttf",
-        "39356e3bbeb467f7a6994b0c98d2ff0a5cdc3485b1654c14c2ee1b000589f37b",
-        NOTO_SANS_RELEASE,
-    ),
-    "NotoSans-Condensed-2.015.ttf": Source(
-        f"{NOTO_FILES}/NotoSans/hinted/ttf/NotoSans-Condensed.ttf",
-        "806816f70ef268abf388acdacf6b2e169f58f70c9f063515eef16a1f256eace6",
-        NOTO_SANS_RELEASE,
-    ),
-    # Symbols 2 has no hinted build: its hinted and unhinted files are equal.
-    "NotoSansSymbols2-Regular-2.008.ttf": Source(
-        f"{NOTO_FILES}/NotoSansSymbols2/hinted/ttf/NotoSansSymbols2-Regular.ttf",
-        "c4a0a80f0041ce4be81e2478faad22776d23edb98ae3f0d19bd37044820ecf9d",
-        SYMBOLS2_RELEASE,
-    ),
-    "NotoSansMath-Regular-3.000.ttf": Source(
-        f"{NOTO_FILES}/NotoSansMath/hinted/ttf/NotoSansMath-Regular.ttf",
-        "d51afd5739c7ba6c44fcab35a88160e25dfb69a2d4ad0bd99533f8d894af1f96",
-        MATH_RELEASE,
-    ),
-    "NotoSans-OFL-2.015.txt": Source(
-        "https://raw.githubusercontent.com/notofonts/latin-greek-cyrillic/NotoSans-v2.015/OFL.txt",
-        "cee9892f9f0cc8fe882c9e9537ee6a89621d86ee7ceaf70b02e2b2b1c25c061a",
-        NOTO_SANS_RELEASE,
-    ),
-    "NotoSansSymbols2-OFL-2.008.txt": Source(
-        "https://raw.githubusercontent.com/notofonts/symbols/NotoSansSymbols2-v2.008/OFL.txt",
-        "b118dd41337806a5d4797052c77caf3bd096aed783e5eb21b4d11154351e1ac0",
-        SYMBOLS2_RELEASE,
-    ),
-    "NotoSansMath-OFL-3.000.txt": Source(
-        "https://raw.githubusercontent.com/notofonts/math/NotoSansMath-v3.000/OFL.txt",
-        "c9c63b8ed6cf76b2ce0c58b241acfc1195c2c928334c989c7047cbdac58773d9",
-        MATH_RELEASE,
-    ),
-}
+def source_manifest(path: Path) -> tuple[str, dict[str, Source]]:
+    """Read selected pins and the converter version supplied by its npm owner."""
+    metadata = json.loads(path.read_text())
+    return metadata["converter_version"], {
+        name: Source(record["url"], record["algorithm"], record["checksum"])
+        for name, record in metadata["sources"].items()
+    }
+
+
 # Noto Sans faces by width and weight, as named in the token file.
 NOTO_FACES = {
     ("", False): "NotoSans-Regular-2.015.ttf",
@@ -256,25 +192,20 @@ class ParsedFont:
     kerning_format: str
 
 
-def sha256(path: Path) -> str:
-    """Return the SHA-256 of a file."""
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def source_path(sources: Path, name: str) -> Path:
-    """Return a pinned source file after checking its SHA-256."""
-    pinned = SOURCES.get(name)
+def source_path(sources: Path, name: str, originals: dict[str, Source]) -> Path:
+    """Return one local original only after checking its declared native checksum."""
+    pinned = originals.get(name)
     if pinned is None:
-        message = f"{name} is not a pinned source"
-        raise FontBuildError(message)
+        raise FontBuildError(f"{name} is not a pinned source")
     path = sources / name
     if not path.is_file():
-        message = f"missing source {path} (download {pinned.url})"
-        raise FontBuildError(message)
-    actual = sha256(path)
-    if actual != pinned.sha256:
-        message = f"SHA-256 of {path} is {actual}, pinned {pinned.sha256}"
-        raise FontBuildError(message)
+        raise FontBuildError(f"missing source {path} (download {pinned.url})")
+    if pinned.algorithm not in {"sha256", "sha512"}:
+        raise FontBuildError(f"unsupported source checksum: {pinned.algorithm}")
+    with path.open("rb") as stream:
+        actual = hashlib.file_digest(stream, pinned.algorithm).hexdigest()
+    if actual != pinned.checksum:
+        raise FontBuildError(f"{pinned.algorithm} of {path} is {actual}, pinned {pinned.checksum}")
     return path
 
 
@@ -826,19 +757,24 @@ def build(  # noqa: PLR0913 -- every input of the build is explicit.
     lv_font_conv: str,
     *,
     check_version: bool = True,
+    manifest: Path | None = None,
     report: list[str] | None = None,
 ) -> None:
     """Prepare the faces, convert, finish and verify each font into output."""
-    if check_version and tool_version(lv_font_conv) != LV_FONT_CONV_VERSION:
-        message = f"{lv_font_conv} is not lv_font_conv {LV_FONT_CONV_VERSION}"
-        raise FontBuildError(message)
+    expected_version, originals = source_manifest(
+        manifest or sources / "fplinux-font-sources.json"
+    )
+    if check_version and tool_version(lv_font_conv) != expected_version:
+        raise FontBuildError(f"{lv_font_conv} is not lv_font_conv {expected_version}")
+    for name in originals:
+        source_path(sources, name, originals)
     lines = report if report is not None else []
 
     def note(line: str) -> None:
         lines.append(line)
         log.info("%s", line)
 
-    note(f"lv_font_conv {LV_FONT_CONV_VERSION}, fontTools {fonttools_version}, {BPP} bpp")
+    note(f"lv_font_conv {expected_version}, fontTools {fonttools_version}, {BPP} bpp")
     requested: dict[str, set[int]] = {}
     for spec in fonts:
         for face, codes in spec.ranges:
@@ -851,7 +787,7 @@ def build(  # noqa: PLR0913 -- every input of the build is explicit.
         hinted: dict[str, bool] = {}
         faces: dict[str, Any] = {}
         for face in sorted(requested):
-            original = source_path(sources, face)
+            original = source_path(sources, face, originals)
             with TTFont(original, lazy=True) as font:
                 cmap = font.getBestCmap()
             absent = sorted(requested[face] - set(cmap))
@@ -892,14 +828,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--tokens", type=Path, help="fplinux-ui-profile.json")
     parser.add_argument("--sources", type=Path, help="directory with the pinned sources")
     parser.add_argument("--output", type=Path, help="directory for the C fonts")
+    parser.add_argument(
+        "--source-manifest", type=Path, help="resolved font originals and converter version"
+    )
     parser.add_argument("--lv-font-conv", default=shutil.which("lv_font_conv") or "lv_font_conv")
     parser.add_argument(
-        "--list-sources", action="store_true", help="print each source's name, URL and SHA-256"
+        "--list-sources", action="store_true", help="print each source's name, URL and checksum"
     )
     args = parser.parse_args(argv)
     if args.list_sources:
-        for name, pinned in SOURCES.items():
-            print(f"{name} {pinned.url} {pinned.sha256}")
+        if args.source_manifest is None and args.sources is None:
+            parser.error("--source-manifest or --sources is required")
+        _, originals = source_manifest(
+            args.source_manifest or args.sources / "fplinux-font-sources.json"
+        )
+        for name, pinned in originals.items():
+            print(f"{name} {pinned.url} {pinned.algorithm} {pinned.checksum}")
         return 0
     if args.tokens is None or args.sources is None or args.output is None:
         parser.error("--tokens, --sources and --output are required")
@@ -908,7 +852,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     report: list[str] = []
     try:
         fonts = plan(tokens)
-        build(fonts, args.sources, args.output, args.lv_font_conv, report=report)
+        build(
+            fonts,
+            args.sources,
+            args.output,
+            args.lv_font_conv,
+            manifest=args.source_manifest,
+            report=report,
+        )
     except (
         FontBuildError,
         fplinux_ui_profile.ProfileError,

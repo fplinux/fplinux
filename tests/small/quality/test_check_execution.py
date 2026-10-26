@@ -4,12 +4,20 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import io
+import tarfile
 import tempfile
 from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
+from fplinux_cli.build.kernel.state import ensure_linux_base
+from fplinux_cli.common import load_toml
+from fplinux_cli.environment.state import EnvironmentState, publish_environment_state
+from fplinux_cli.manifests.source_catalog import resolve_source, source_build_metadata
 from fplinux_cli.quality import checks
 from fplinux_cli.quality import runtime as quality_runtime
 from fplinux_cli.quality.receipts import (
@@ -19,8 +27,13 @@ from fplinux_cli.quality.receipts import (
 )
 from fplinux_cli.quality.scopes import resolve_check_scopes
 from fplinux_cli.reporting.run import RunReporter, Stage
+from fplinux_cli.workspace.capture import workspace_snapshot
 
+from tests.fixtures import linux_inputs
 from tests.small.quality.check_fixtures import _RecordingReporter
+
+if TYPE_CHECKING:
+    from urllib.request import Request
 
 
 class CheckScopeSelectionTests:
@@ -212,6 +225,109 @@ class RepositoryFastPathTests:
         reporter.finish.assert_called_once_with()
 
 
+class KernelInputAcquisitionTests:
+    """Acquire captured originals before their offline preparation process."""
+
+    def test_first_kernel_check_acquires_captured_sources_before_offline_preparation(
+        self, tmp_path: Path
+    ) -> None:
+        """Acquire selected originals before preparation, then reuse the success on the host."""
+        archive = io.BytesIO()
+        makefile = b"VERSION = fixture\n"
+        with tarfile.open(fileobj=archive, mode="w:gz") as bundle:
+            member = tarfile.TarInfo("linux-fixture/Makefile")
+            member.size = len(makefile)
+            bundle.addfile(member, io.BytesIO(makefile))
+        original = archive.getvalue()
+        checksum = hashlib.sha256(original).hexdigest()
+        workspace = tmp_path / "captured"
+        linux_inputs.platform(workspace, "ums9117", source_lock="linux-captured", arch="arm")
+        linux_inputs.platform(workspace, "sc9820e", source_lock="linux-skipped", arch="arm")
+        linux_inputs.target(workspace, "first", platform_name="ums9117")
+        linux_inputs.target(workspace, "second", platform_name="ums9117")
+        linux_inputs.target(workspace, "other-profile", platform_name="sc9820e")
+        catalog = (
+            Path(__file__).parent / "fixtures/kernel-inputs/source-catalog.txt.in"
+        ).read_text(encoding="utf-8") % {"checksum": checksum, "size": len(original)}
+        linux_inputs.write(workspace, "sources.lock.toml", catalog)
+        snapshot = workspace_snapshot(
+            [
+                (path.relative_to(workspace).as_posix(), path)
+                for path in workspace.rglob("*")
+                if path.is_file()
+            ]
+        )
+        root = tmp_path / "live"
+        cache = root / ".cache"
+        environment = EnvironmentState("b" * 64, "c" * 64, "d" * 64)
+        publish_environment_state(cache, environment)
+        requests: list[str] = []
+        commands: list[list[str]] = []
+
+        def serve_original(request: Request, **_kwargs: object) -> io.BytesIO:
+            requests.append(request.full_url)
+            assert request.full_url == "https://example.invalid/selected-linux.tar.gz"
+            return io.BytesIO(original)
+
+        def container_workload(_stage: Stage, command: list[str], **_kwargs: object) -> None:
+            assert command[command.index("--network") + 1] == "none"
+            assert f"{cache / 'downloads'}:/cache/downloads:ro" in command
+            commands.append(command)
+            workload = command[command.index("--") + 1 :]
+            if workload[3] == "prepare":
+                source = resolve_source(workspace, "linux-captured")
+                local_archive = source.acquire(cache, offline=True)
+                assert local_archive.read_bytes() == original
+                base = ensure_linux_base(
+                    cache,
+                    source_build_metadata(
+                        source.id, load_toml(workspace / "sources.lock.toml")[source.id]
+                    ),
+                    archive=local_archive,
+                )
+                assert (base.source / "Makefile").read_bytes() == makefile
+
+        def reporter_for_run(*_args: object, **_kwargs: object) -> RunReporter:
+            return RunReporter("check", tmp_path / f"logs-{len(commands)}", "logs", verbose=False)
+
+        with (
+            mock.patch.object(checks, "ROOT", root),
+            mock.patch.object(checks, "load_environment_lock", return_value={}),
+            mock.patch.object(
+                checks, "environment_recipe_digest", return_value=environment.recipe
+            ),
+            mock.patch.object(checks, "check_orchestration_recipe_digest", return_value="e" * 64),
+            mock.patch.object(checks, "quality_workspace_snapshot", return_value=snapshot),
+            mock.patch.object(
+                checks, "stage_quality_workspace_snapshot", return_value=workspace
+            ) as stage_workspace,
+            mock.patch.object(checks, "discard_staged_quality_workspace_snapshot"),
+            mock.patch.object(checks, "kern_environment", return_value={}),
+            mock.patch.object(
+                checks,
+                "require_environment",
+                return_value=("kern", root / "rootfs", environment),
+            ) as require_environment,
+            mock.patch.object(RunReporter, "create", side_effect=reporter_for_run),
+            mock.patch.object(Stage, "run", autospec=True, side_effect=container_workload),
+            mock.patch("urllib.request.urlopen", side_effect=serve_original),
+        ):
+            checks.check(["kernel"], profile="microsd-uboot")
+            assert requests == ["https://example.invalid/selected-linux.tar.gz"]
+            assert len(commands) == 2
+            with (
+                mock.patch.object(
+                    checks, "acquire_inputs", side_effect=AssertionError("acquisition")
+                ),
+                mock.patch.object(Stage, "run", side_effect=AssertionError("Kern")),
+                mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")),
+            ):
+                checks.check(["kernel"], profile="microsd-uboot", jobs=2)
+            stage_workspace.assert_called_once_with(snapshot)
+            require_environment.assert_called_once()
+        assert len(commands) == 2
+
+
 class KernelExecutionLimitTests:
     """Keep container memory explicit and worker limits on the analysis process."""
 
@@ -320,7 +436,7 @@ class KernelExecutionLimitTests:
             first_prepare, first_analysis, second_prepare, second_analysis = commands
             assert (f"{root / 'logs-1/containers'}:/logs") in (first_prepare)
             assert (f"{workspace}:/workspace:ro") in (first_prepare)
-            assert (f"{analyzer_cache['downloads']}:/cache/downloads") in (first_prepare)
+            assert (f"{analyzer_cache['downloads']}:/cache/downloads:ro") in (first_prepare)
             assert (f"{analyzer_cache['linux']}:/cache/linux") in (first_prepare)
             assert (f"{analyzer_cache['analysis']}:/cache/analysis") in (first_analysis)
             assert (f"{analyzer_cache['linux']}:/cache/linux:ro") in (first_analysis)

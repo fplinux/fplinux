@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import shutil
@@ -11,10 +12,18 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from fplinux_cli.alpine.aports import materialize_aport_sources
+from fplinux_cli.alpine.sources import font_source_manifest
 from fplinux_cli.build import DEFAULT_BUILD_MEMORY_MIB
 from fplinux_cli.build.host_tools.host import extract_host_members
 from fplinux_cli.common import ROOT, error_message, fail
-from fplinux_cli.dependencies.inputs import environment_inputs
+from fplinux_cli.dependencies.inputs import (
+    acquire_inputs,
+    environment_inputs,
+    terminus_font_environment_inputs,
+    ui_font_environment_inputs,
+    ui_icon_environment_inputs,
+)
 from fplinux_cli.reporting.run import RunReporter
 
 from .definition import (
@@ -23,7 +32,6 @@ from .definition import (
     load_environment_lock,
     spreadtrum_flash_environment_source,
 )
-from .downloads import download_locked_file
 from .git_hooks import install_git_hooks
 from .kern import ensure_project_directory, install_kern, kern_box_name, kern_environment
 from .runtime import (
@@ -51,21 +59,18 @@ def _stage_environment_inputs(context: Path, *, offline: bool) -> None:
         shutil.copy2(source, destination)
     input_directory = context / "inputs"
     input_directory.mkdir()
-    for item in environment_inputs(ROOT):
-        if item.purpose == "kern-runtime":
+    ui_fonts = {item.key for item in ui_font_environment_inputs(ROOT)}
+    terminal_fonts = {item.key for item in terminus_font_environment_inputs(ROOT)}
+    ui_icons = {item.key for item in ui_icon_environment_inputs(ROOT)}
+    inputs = environment_inputs(ROOT)
+    originals = acquire_inputs(
+        [item for item in inputs if item.key != "source:kern"], ROOT / ".cache", offline=offline
+    )
+    for item in inputs:
+        if item.key == "source:kern":
             continue
-        expected = item.checksum or item.sha256
-        if expected is None:
-            fail(f"environment input has no declared checksum: {item.key}")
-        source = download_locked_file(
-            item.url,
-            expected,
-            ROOT / ".cache" / item.destination,
-            offline=offline,
-            algorithm=item.algorithm,
-            size=item.size,
-        )
-        if item.purpose == "quality-source":
+        source = originals[item.key]
+        if item.key == "source:spreadtrum_flash":
             projection = spreadtrum_flash_environment_source(ROOT)
             extract_host_members(
                 source,
@@ -75,13 +80,18 @@ def _stage_environment_inputs(context: Path, *, offline: bool) -> None:
                 context / "quality/spreadtrum-flash",
             )
             continue
-        if item.key.startswith("aport:fplinux-ui:"):
+        if item.key in ui_fonts:
             destination = context / "quality/ui-fonts" / source.name
             destination.parent.mkdir(parents=True, exist_ok=True)
             os.link(source, destination)
             continue
-        if item.key.startswith("aport:fplinux-font-terminus:"):
+        if item.key in terminal_fonts:
             destination = context / "quality/terminus" / source.name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            os.link(source, destination)
+            continue
+        if item.key in ui_icons:
+            destination = context / "quality/ui-icons" / source.name
             destination.parent.mkdir(parents=True, exist_ok=True)
             os.link(source, destination)
             continue
@@ -93,6 +103,13 @@ def _stage_environment_inputs(context: Path, *, offline: bool) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
         if not destination.exists():
             os.link(source, destination)
+    (context / "quality/ui-fonts/fplinux-font-sources.json").write_text(
+        json.dumps(font_source_manifest(ROOT)) + "\n"
+    )
+    materialize_aport_sources(
+        "fplinux-font-terminus", ROOT, context / "quality/terminus-aport", cache=ROOT / ".cache"
+    )
+    (context / "environment-inputs.json").write_text(json.dumps(load_environment_lock()) + "\n")
 
 
 def _prepare_rootfs(  # noqa: PLR0913 -- captured inputs, receipt markers and reporting are distinct.
@@ -151,7 +168,7 @@ def _prepare_rootfs(  # noqa: PLR0913 -- captured inputs, receipt markers and re
                 "--",
                 "sh",
                 "/recipe/scripts/fplinux_cli/environment/install/prepare.sh",
-                "/recipe/environment.lock.toml",
+                "/recipe/environment-inputs.json",
                 "/inputs",
                 "/recipe",
                 recipe,

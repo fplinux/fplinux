@@ -1,0 +1,14 @@
+[loader]
+version = "1"
+name = "loader.bin"
+url = "https://example.invalid/loader.bin"
+algorithm = "sha256"
+checksum = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+license = "MIT"
+
+[u_boot]
+version = "2026.07"
+name = "u-boot.tar.bz2"
+url = "https://example.invalid/u-boot.tar.bz2"
+algorithm = "sha256"
+checksum = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"

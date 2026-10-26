@@ -1,6 +1,6 @@
 # Maintainer: FPLinux contributors <fplinux@example.invalid>
 pkgname=fplinux-sbc
-pkgver=2.2
+pkgver=@version:aport_sbc_2_2_tar_xz@
 pkgrel=0
 pkgdesc="SBC audio codec library for Bluetooth audio"
 url="https://www.bluez.org/"
@@ -10,7 +10,9 @@ makedepends_build="clang22 lld22 llvm22 make"
 makedepends_host="musl-dev"
 subpackages="$pkgname-dev"
 options="!check"
-source="https://www.kernel.org/pub/linux/bluetooth/sbc-$pkgver.tar.xz"
+source="
+	@source:aport_sbc_2_2_tar_xz@
+"
 builddir="$srcdir/sbc-$pkgver"
 
 build() {
@@ -35,5 +37,4 @@ package() {
 		"$pkgdir/usr/share/licenses/$pkgname/COPYING.LIB"
 }
 sha512sums="
-1a0bd4629e5d0af768466ebfc2f9e71224888e3a877d74c368dea0dedb2f8523f37f45f784aa4650a5097ace276dea482b643adc1d924fbd6a6ffe6b6e41f488  sbc-2.2.tar.xz
 "

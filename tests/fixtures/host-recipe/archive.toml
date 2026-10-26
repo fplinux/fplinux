@@ -1,7 +1,6 @@
 type = "make-archive"
 name = "bridge"
 source_lock = "bridge-source"
-cache_name = "bridge.tar.gz"
 archive_prefix = "bridge-{commit}/"
 source_directory = "bridge"
 binary = "bridge"

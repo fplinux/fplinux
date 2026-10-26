@@ -17,13 +17,13 @@ from fplinux_cli.environment.definition import (
     environment_recipe_digest,
     load_environment_lock,
 )
-from fplinux_cli.environment.downloads import download_locked_file
 from fplinux_cli.environment.kern import kern_box_name, kern_environment, require_kern
 from fplinux_cli.environment.runtime import (
     current_environment_state,
     environment_arguments,
     environment_rootfs,
 )
+from fplinux_cli.manifests.source_catalog import load_host_sources, resolve_source
 from fplinux_cli.templates import substitute_template
 
 
@@ -94,6 +94,8 @@ def _verify_python(package: Path) -> None:
 def prepare_linux_host(*, cache: Path, offline: bool) -> dict[str, Path]:
     """Collect runtime files while the caller owns the project cache lock."""
     cache = cache.resolve()
+    for entry in load_host_sources(common.ROOT, "linux-host.lock.toml").values():
+        resolve_source(common.ROOT, entry["source_id"]).acquire(cache, offline=offline)
     lock = load_environment_lock()
     recipe = environment_recipe_digest(lock)
     kern = require_kern(lock)
@@ -136,7 +138,7 @@ def prepare_linux_host(*, cache: Path, offline: bool) -> dict[str, Path]:
         with tarfile.open(archive) as source:
             source.extractall(package, filter="data")
         _write_launchers(package)
-        _copy_licenses(package, root / "downloads", offline=offline)
+        _copy_licenses(package, cache)
         files = {
             path.relative_to(package).as_posix(): path
             for path in package.rglob("*")
@@ -147,8 +149,8 @@ def prepare_linux_host(*, cache: Path, offline: bool) -> dict[str, Path]:
         return publish_host_package(package, root / "package", relative_paths=files)
 
 
-def _copy_licenses(package: Path, downloads: Path, *, offline: bool) -> None:
-    lock = common.load_toml(common.ROOT / "linux-host.lock.toml")
+def _copy_licenses(package: Path, cache: Path) -> None:
+    lock = load_host_sources(common.ROOT, "linux-host.lock.toml")
     packages = json.loads((package / "sources/linux-host-packages.json").read_text())
     for component in packages:
         origin = component["origin"]
@@ -160,9 +162,7 @@ def _copy_licenses(package: Path, downloads: Path, *, offline: bool) -> None:
     directory.mkdir(parents=True)
     notices = {}
     for name, entry in lock.items():
-        source = download_locked_file(
-            entry["url"], entry["sha256"], downloads / entry["name"], offline=offline
-        )
+        source = resolve_source(common.ROOT, entry["source_id"]).acquire(cache, offline=True)
         with tarfile.open(source) as archive:
             for member in entry["licenses"]:
                 stream = archive.extractfile(member)

@@ -2,8 +2,5 @@
 # RAM loader
 [fdl1]
 path = "stage.bin"
-license = "Unlicense"
 # Pinned loader
-sha256 = "loader-sha"
-cache_name = "stage.bin"
-url = "https://example.invalid/stage"
+source = "loader_stage"
