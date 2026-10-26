@@ -1,0 +1,63 @@
+---
+title: APK and desktop entry
+description: Package a graphical application and make it available in the phone's catalog.
+source:
+  - alpine/aports/fplinux-notes/APKBUILD
+  - lib/fplinux/fplinux-desktop-entry.c
+---
+
+A graphical application is an Alpine aport with a program, a desktop entry and any translations or images it needs. [Your first application](/fplinux/develop/app/first-app/) contains a complete small recipe. The system archive format has a separate [Packaging guide](/fplinux/develop/packaging/).
+
+## Build dependencies
+
+Declare `fplinux-ui` as a runtime dependency and `fplinux-ui-dev` as a target build dependency. The latter provides the installed headers and pkg-config metadata. Use `clang22 lld22 pkgconf` as build tools, plus `gettext` for translation catalogs. Use the target compiler and flags supplied to the aport, not the PC compiler.
+
+Before invoking pkg-config, set `PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"` and `PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"`. This selects the ARM libraries. Keep local library ordering in `LOCAL_BUILD_DEPENDENCIES` in `scripts/fplinux_cli/alpine/registration.py`; `makedepends_host` alone does not establish that ordering.
+
+The shared CLI is compiled into applications, not exported by `libfplinux-ui`. Register `CLI_SOURCES` in `SHARED_APORT_SOURCES`, list `fplinux-cli.c` and `fplinux-cli.h` in the recipe, and compile `fplinux-cli.c` with the application. Follow the [CLI contract](/fplinux/develop/code-style/c/#keep-command-line-parsing-consistent) before opening GUI resources.
+
+Keep `pkgrel=0` for project packages before the first release. Source changes invalidate build receipts; do not bump package versions for a local edit. Regenerate `sha512sums` with `./fplinux checksum <aport>`, never by editing the hashes. External originals belong in the declared [dependency system](/fplinux/guides/dependencies/).
+
+## Selecting the package
+
+Choose the owner that actually needs the application. A phone's `[bundle].packages` builds an optional APK beside that phone's image. Platform bundle packages serve all targets of that platform. Rootfs package selection installs the package in the image instead. Do not select the same package as both an optional bundle APK and a rootfs package.
+
+For a local tutorial, add its name to the selected phone's existing `[bundle]` list, preserving the other entries. Also register its shared sources and local build dependencies. The selected package list supplies the bundle's APK inventory; do not maintain a second list of APK filenames in release metadata.
+
+Run `./fplinux build <target>`. Its output directory contains `apks/<package>.apk`. The ordinary RAM ZIP omits these optional APKs; keep that distinction when distributing an application.
+
+## Application identity
+
+Use a distinct reverse-domain-style ID such as `org.example.counter`. It identifies the catalog entry, session connection, translations and private application state. The desktop filename is `<ID>.desktop`, and the program passes the same ID to `fplinux_ui_open()`.
+
+The program runs as the application user `fplinux`. It is not a root shell and must not open the display, evdev input or audio hardware directly. The runtime and session provide those services. Applications sharing this account are not isolated from each other's files by a per-application sandbox.
+
+## Desktop entry
+
+Install the file under `/usr/share/applications/` with mode `0644` and normal package ownership. The session refuses untrusted or writable catalog metadata. An ordinary application entry needs:
+
+| Key | Meaning |
+| --- | --- |
+| `Type=Application` | Identifies a launchable application |
+| `Name` | Default catalog name |
+| `Name[ru]` | Optional translated catalog name; other installed languages use their own code |
+| `Exec` | One absolute executable path, without arguments or field substitutions |
+| `X-FPLinux-Mode=integrated` | Start between the session's bars; `fullscreen` requests the whole display |
+| `Icon` | Optional simple icon name, without a path or extension |
+| `Categories` | Optional semicolon-separated categories used to group the entry |
+
+Install the executable with mode `0755`. Set `Exec` to the executable path alone; this entry does not support a shell command or command-line arguments. The `launcher` display mode belongs to the system launcher.
+
+## Icons
+
+Install PNG tiles as `/usr/share/icons/hicolor/<N>x<N>/apps/<Icon>.png`, with actual dimensions matching the directory. The catalog selects sizes for the current profile and can reduce a larger tile. Current profiles use tiles up to 60 pixels, so provide a sufficiently large source rather than assuming 48 pixels covers every screen.
+
+Without an icon, the application remains accessible with the catalog's generic image. Use a clear application-specific image; do not use a system action glyph or the FPLinux brand as its identity. Keep icon licenses with the package. See [layout and appearance](/fplinux/develop/app/design/#icons-and-images) for images inside the application.
+
+## Install, update and remove
+
+Use the shared [optional-package workflow](/fplinux/guides/packages/) to transfer and install the matching APK. Open the program from the catalog. A binary started directly in a shell has not been started by the session manager and cannot establish a normal GUI session; `--help` remains usable from a shell.
+
+Close the application before replacing or removing its package. A rebuilt APK can keep the same package version, so remove the installed package before installing its replacement. The catalog refreshes when installed entries change. Removing the package leaves its separately saved application data; storage lifetime follows [Keeping data](/fplinux/use/session/#keeping-data).
+
+Use [Logging](/fplinux/develop/logging/#phone-userspace) for application output and [Debugging](/fplinux/develop/debugging/) for diagnostics. Installation success alone does not establish GUI behavior on a physical phone.

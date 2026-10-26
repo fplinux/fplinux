@@ -21,7 +21,7 @@ Records identify their event before numeric fields; free-form `message` text com
 
 Public commands report progress through the shared stage reporter. New command paths add meaningful stages instead of printing an independent progress format. Keep documented machine-readable output stable.
 
-Diagnostics and progress go to standard error; results and machine-readable output go to standard output. Keep child-command streams and loader prompts in their established channels. Repository diagnostics use the shared error formatter and the `fplinux:` prefix; `common.fail()` ends an operation on a single error. Standalone runner and SSH errors use `fplinux run:` and `fplinux ssh:` without depending on the repository package.
+Diagnostics and progress go to standard error; results and machine-readable output go to standard output. Keep child-command streams and loader prompts in their established channels. Repository diagnostics use the shared error formatter and the `fplinux:` prefix; `common.fail()` ends an operation on a single error. Checkouts and standalone archives use the same `fplinux_cli.runtime` workflow. It reports errors to the user as `FPLinux: ...`; lower-level diagnostics in logs may retain the `fplinux run:` and `fplinux ssh:` prefixes.
 
 Report expected file and process failures with their cause, without a Python traceback. Ctrl+C terminates with shell status 130. Unexpected exceptions keep their traceback; a stage records it in its log. Do not hide a later error merely because an earlier one was reported. Nested stages restore the caller's reporting context, and a failed run cannot become successful when logs are closed.
 

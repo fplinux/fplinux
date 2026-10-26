@@ -108,7 +108,7 @@ Resource rules:
 
 - Stopping capture leaves image-codec streams running. Sensor power and clock are disabled through runtime PM; autosuspend can delay this after a stream stops. MMAP buffers stay allocated until the application unmaps and frees them with `VIDIOC_REQBUFS` count `0` or closes the device.
 - Another process cannot change the format while one process streams.
-- The camera and the [hardware JPEG codec](/fplinux/apps/image-tools/jpeg/) share hardware. Use concurrent capture and codec operation only for a combination qualified on your phone's page. A captured frame passed to the encoder needs dimensions accepted by both devices; separate codec jobs use their own supported geometry. Stop capture before using hardware image rotation unless that combination is qualified; the rotation tool also offers a CPU path.
+- The camera and the [hardware JPEG codec](/fplinux/apps/image-tools/jpeg/) share hardware. Use concurrent capture and codec operation only for a combination verified on your phone's page. A captured frame passed to the encoder needs dimensions accepted by both devices; separate codec jobs use their own supported geometry. Stop capture before using hardware image rotation unless that combination is verified; the rotation tool also offers a CPU path.
 
 ## FM radio
 

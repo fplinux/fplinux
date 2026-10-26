@@ -1,0 +1,43 @@
+---
+title: Text entry
+description: Reuse the shared keypad editor and choose the right field type instead of implementing input per application.
+source:
+  - include/fplinux/fplinux-ui-text.h
+  - include/fplinux/fplinux-ui-screen.h
+---
+
+Use the shared text field whenever the application asks for text. It owns multi-tap input, the pending character, cursor movement, symbol selection, Clear and external-keyboard text. This keeps input consistent between Notes, Settings and other applications.
+
+## Start with a form or text box
+
+A Form's text item is appropriate for a name, short value or numeric entry. A TextBox provides a full-screen multiline editor. These high-level screens route keys, draw the field and assign its commands. The application handles changes and decides when to accept or save the value.
+
+Choose the field type for the value being edited. Numeric, decimal, phone and password fields have different accepted input and display behavior; use the types declared in `fplinux-ui-text.h`. A password field masks committed characters but leaves the pending multi-tap character visible until it is committed. It does not provide protected storage or an application sandbox. Validate application-specific meaning when accepting a value, such as the valid range of a counter.
+
+Specify a character limit that matches the task. Read the value through the screen's getter, which includes pending text. Returned text is borrowed; copy it before retaining it beyond a field change or screen removal. A change callback reports an edit, not a successful save.
+
+## Shared keypad behavior
+
+The runtime handles repeated digit presses, holding a digit, mode switching, symbols and Clear. The [user guide](/fplinux/use/session/#type-text) owns the ordinary key instructions. Use the existing field instead of duplicating those gestures in a command callback.
+
+High-level screens manage field focus and activity. Opening Options, covering a screen or leaving it cancels held repeat and unfinished keypad gestures; returning requires a new press. Clear, digits, star and pound have their own field gestures. Do not start another key-repeat timer around the shared editor.
+
+Phone key roles and external keyboard input are distinct. The [Input contract](/fplinux/develop/input/) defines their sources, reserved keys and repeat policies. Test a key's source as well as its code when writing custom input; an external F13 key is not the phone's left soft key.
+
+## Languages and modes
+
+The interface language controls translations and formatting. The keypad input language selects the initial text-entry language independently. Use `fplinux_ui_locale()` and `fplinux_ui_input_locale()` for those different purposes. Installed language data supplies the multi-tap characters; do not copy a language's key tables into an application.
+
+External keyboards use the compositor's XKB layout. That is another input mechanism, not an application's keypad table. The [language guide](/fplinux/develop/app/languages/) explains translations and language packages.
+
+## A field in a custom screen
+
+Create a raw field with the functions in `fplinux-ui-text.h` only when a Form or TextBox cannot represent the layout. Position it using the current surface and theme, pass its accepted keys to `fplinux_ui_text_key()`, and set its focus with `fplinux_ui_text_set_focused()` when the owning screen changes. The raw field participates in shared navigation repeat when it receives the runtime's keys.
+
+The low-level field does not choose the application's Save/Back actions. Make those actions reachable while Clear is active. High-level screens already keep a displaced Back action in Options; a custom screen must deliberately provide its equivalent navigation.
+
+Cancel application-owned held gestures on `FPLINUX_UI_EVENT_INPUT_CANCEL`, before the synthetic releases arrive. Use [lifecycle and visibility](/fplinux/develop/app/lifecycle/) to stop input-related work when the screen is hidden. Do not submit an unfinished user action just because focus was lost.
+
+## Saving the result
+
+Keep a draft separate from the last confirmed value when the screen offers Save and Cancel. Cancelling returns to that value. Saving follows the [Application state contract](/fplinux/develop/application-state/): retain the draft after failure, distinguish an unpublished write from unconfirmed synchronization, and allow the user to decide before ordinary closing.

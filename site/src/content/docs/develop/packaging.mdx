@@ -3,86 +3,89 @@ title: Packaging
 description: Package a build as a standalone archive, inspect artifacts and measure image size.
 ---
 
-`./fplinux package` turns an existing build into a ZIP archive for a registered phone, without a source checkout on the user's PC. Users of the archive follow [Standalone archive](/fplinux/guides/standalone-archive/).
+`./fplinux package` turns an existing release build into an archive for one registered phone and PC operating system. Users follow [Standalone archive](/fplinux/guides/standalone-archive/).
 
-## Create a phone-test candidate
+## Create a RAM archive
 
-```sh title="PC"
-./fplinux build nokia-ta1618
-(cd site && npm run build:offline)
-./fplinux package nokia-ta1618 --candidate
-```
-
-```text title="Output"
-FPLinux release-candidate package: .cache/out/candidates/FPLinux-nokia-ta1618-release-candidate-linux-x86_64-….zip
-Archive SHA256: …
-Phone-test payload SHA256: …
-ramboot.bin SHA256: …
-```
-
-Packaging uses the current build and does not rebuild it. If the source has changed since that build, it stops and prints the `build` command to run. Pass the same profile and build type as the build.
-
-Ordinary Linux runner packaging also requires a current offline site export. Install the pinned site tools as described in [Contributing](/fplinux/develop/contributing/#preview-this-site), then run `npm run build:offline` from `site/`. After editing the site, export it again before packaging. Ordinary runner archives carry the generated site under `docs/`; the phone image does not include it.
-
-A candidate contains `CANDIDATE-NOTICE.txt` and is meant only for testing on the phone. Do not publish it as a release. Creating or checking a candidate does not show that the phone boots or that any feature works.
-
-For the Xiaomi Qin 1s+, select `xiaomi-qin-1s-plus` in the build and package commands. Its loader stages are compiled and included in both ordinary and autonomous Linux archives. Optional prepared phone data is part of an ordinary build image, so keep archives containing it private. Autonomous archives omit prepared phone data and open SSH on the first run without NAND preparation. Qin does not support native Windows execution.
-
-For a [microSD system card](/fplinux/guides/microsd-system-card/), build that profile and package it as a candidate; the archive then also contains `FPLINUX.img.xz`:
+Build the phone once, then package the hosts you need:
 
 ```sh title="PC"
-./fplinux build nokia-ta1618 --profile microsd-uboot
-./fplinux package nokia-ta1618 --boot microsd --candidate
+./fplinux build nokia-ta1618 --without-device-data
+./fplinux package nokia-ta1618
+./fplinux package nokia-ta1618 --host windows
 ```
 
-## Create an autonomous RAM archive
-
-For a supported UMS9117 target, build the phone once, then package it for either host:
-
-```sh title="PC"
-./fplinux build nokia-ta1618
-./fplinux package nokia-ta1618 --autonomous --host linux --candidate
-./fplinux package nokia-ta1618 --autonomous --host windows10 --candidate
-```
-
-The UMS9117 hosts are Linux x86-64 and Windows 10 or 11 x64. Both launchers invoke the archive's shared `fplinux.py run` runtime. The owner uses the same `Run.sh` or `Run.cmd` for preparation, loading and reconnecting: first to save and prepare required phone data, then, after a safe disconnect and restart, to load FPLinux with that data and open SSH. Headless targets without runtime data groups boot directly.
-
-For Qin, build without prepared personal data and select the Linux host:
+The default host is Linux x86-64. RAM archives can also be packaged for Windows 10 or 11 x64 through `--host windows`, including Xiaomi Qin 1s+:
 
 ```sh title="PC"
 ./fplinux build xiaomi-qin-1s-plus --without-device-data
-./fplinux package xiaomi-qin-1s-plus --autonomous --host linux --candidate
+./fplinux package xiaomi-qin-1s-plus
+./fplinux package xiaomi-qin-1s-plus --host windows
 ```
 
-`--without-device-data` keeps prepared data in the local cache but excludes it from the image. Qin autonomous packaging requires this build selection; it refuses an image containing prepared personal data. Its launcher loads FPLinux and opens SSH on the first run.
+USB loading and SSH from Windows have not been verified with Qin 1s+.
 
-Each archive contains only the selected phone's configuration, the selected host's Python and OpenSSH, a short README and licenses. UMS9117 archives also include extraction tools. Opening the same launcher again reconnects to the running phone. Only one launcher can run from the extracted directory at a time. Optional APKs and the offline site are omitted. Source and build material is written to a matching separate `*-sources.zip`. Keep both archives together when distributing them. Follow [Standalone archive](/fplinux/guides/standalone-archive/) for host requirements, connection order and current qualification limits.
+Packaging reads the current release build without rebuilding it. It rejects stale source context, changed built files and unsupported hosts. Debug remains a build option; `package` accepts release builds only. Host tools and corresponding sources are prepared from the saved local inputs. See [Dependency snapshots](/fplinux/guides/dependencies/) if an exact input is missing.
 
-Autonomous packaging supports the default RAM profile. Add `--offline` to use only dependencies already stored locally. Without `--autonomous`, packaging creates the ordinary Linux runner archive, which uses `python3.14 -I fplinux.py run` with host-installed Python and OpenSSH. UMS9117 RAM preparation and reconnect behavior are shared across both archive forms and source-checkout launches. Qin and system-card builds include any prepared data selected at build time; keep archives containing personal data private.
+The runnable ZIP includes the RAM image, phone loaders, the selected host's Python and OpenSSH, one launcher, `README.txt`, licenses, the build manifest and `SHA256SUMS`. It also includes the extraction tools needed by the selected phone. Optional APKs, the offline site, prepared phone data, private keys and session logs are excluded. RAM images receive personal phone data at launch, so publishing one does not publish the contents of your personal store.
 
-## Release archives
+Names use `FPLinux-<target>-<linux|windows>-x64-<release_id>.zip`. The same twelve-character build ID appears in every phone and host archive made from the same public source context and in Settings → About → Build. A clean checkout uses the first twelve characters of its Git commit. Changed public sources get a content-based ID. A matching `-sources.zip` accompanies a locally packaged runtime. `--output-directory PATH` selects the destination; the default is `.cache/out/releases/`. An existing name with different bytes is an error.
 
-A release archive needs a phone test of the exact executable payload: the runtime files and the bundled APKs. After a candidate passes on the phone, its `Phone-test payload SHA256` is recorded for that target in `releases.lock.toml`. Only then does `./fplinux package nokia-ta1618` (without `--candidate`) write a release archive below `.cache/out/releases/`; otherwise it refuses. Documentation, notices and checksums are outside the payload, so changing them does not need a new phone test, but any change to the payload does. No payload is recorded yet, so no release archive can be created. The microSD system card is packaged only as a candidate.
+The archive owner uses `Run.sh` or `Run.cmd` for preparation, loading and reconnecting. Phones with required runtime data reuse compatible inputs from the [personal store](/fplinux/guides/device-data/#where-phone-data-is-stored), reading the phone again only when needed. Packaging and a native launcher check without a phone do not establish USB loading or hardware operation. The [phone pages](/fplinux/phones/) give the current feature and power limits.
 
-An ordinary Linux runner archive contains the image, the host tools, the minimal runtime and its `fplinux.py` entry point, the optional APKs, the USB rules, a `README.txt` for the selected phone, license notices, the build manifest and `SHA256SUMS`. It contains no build trees, caches or kernel debug files. Runtime data and connection keys are kept in the extracted directory's `data/`; launch logs are under `logs/`.
+## Export a microSD system-card build
+
+Linux exports for an external root filesystem retain the selected profile, its system image, optional APKs, host-installed Python/OpenSSH and offline documentation:
+
+```sh title="PC"
+./fplinux build nokia-ta1618 --profile microsd-uboot
+(cd site && npm run build:offline)
+./fplinux package nokia-ta1618 --boot microsd
+```
+
+The filename includes the normalized profile, for example `FPLinux-nokia-ta1618-microsd-uboot-linux-x64-<release_id>.zip`. `--boot microsd` and `--profile microsd-uboot` select the same context. This export can contain prepared personal data selected by the build; keep it private. It is excluded from the public RAM release matrix. See [microSD system card](/fplinux/guides/microsd-system-card/) for card preparation and safe shutdown.
+
+Install the pinned site tools as described in [Contributing](/fplinux/develop/contributing/#preview-this-site) before creating the offline documentation. Regenerate it after changing its inputs. The export carries it under `docs/`; the phone image does not include it.
+
+## Complete releases
+
+The workflow in `.github/workflows/packages.yml` prepares one inputs-only dependency snapshot for the exact event commit and shares that artifact with the check, target-build and documentation jobs. Every target is built once, then packaged sequentially for its supported hosts. `./fplinux ci matrix` reports the current eight targets and sixteen runtime selections. Later setup, build and package steps use the restored originals offline.
+
+A complete Release contains the sixteen runnable ZIPs, one common source ZIP, dependency transport parts of at most 1 GiB, their `FPLinux-<release_id>-inputs.sha256` index, `DEPENDENCIES.json`, `RELEASE.json` and the outer `SHA256SUMS`. Each runtime README names the final common source ZIP. `DISTRIBUTION.json` inside that source ZIP binds each target, host and kernel identity to its final runtime hash. Shared source paths are stored once; variable host and target build material remains under `selections/<target>/<host>/`.
+
+To combine existing runtime/source pairs with the prepared input transport:
+
+```sh title="PC"
+./fplinux ci assemble --input-dir packages --inputs-dir inputs --output-dir distribution
+./fplinux inspect distribution distribution
+```
+
+Inspection checks the complete matrix, final manifest records, file modes, internal and outer checksums, source identity, runtime/source pairing and dependency transport. Native smoke jobs start and reopen every final runtime under ordinary Linux and Windows accounts without a phone. These checks cover launcher and storage initialization; USB driver installation and loading a real phone remain separate checks.
+
+Publication runs only for a canonical main push after the required check, build, assembly and native smoke jobs succeed. A manual workflow run checks the assets without publishing. The publisher uploads a private draft, verifies every remote asset's name, size and digest, then publishes an ordinary Release. A retry verifies an existing published set or uploads only missing matching draft assets. Release notes compare the current commit with the last actually published Release.
+
+## Prepare a main push
+
+Follow [Prepare an exact commit before pushing](/fplinux/guides/dependencies/#prepare-an-exact-commit-before-pushing) for the explicit clean-install command and local hook setup. The release pipeline independently acquires one complete input set for its event commit; publication depends on the resulting checks and final assets.
 
 ## Inspect artifacts
 
 ```sh title="PC"
 ./fplinux inspect bundle nokia-ta1618
-./fplinux inspect archive .cache/out/candidates/FPLinux-nokia-ta1618-….zip
+./fplinux inspect archive .cache/out/releases/FPLinux-nokia-ta1618-….zip
 ./fplinux inspect apk path/to/package.apk
 ```
 
 - `bundle` lists the current build's identity, files, sizes and SHA-256 hashes and checks them against its build manifest. It does not check whether the source has changed since that build.
-- `archive` lists a candidate or release ZIP and checks every file against its `SHA256SUMS`. This shows that the archive is internally consistent, not that it is authentic or works on a phone.
+- `archive` checks a runtime or corresponding-sources ZIP against its complete `SHA256SUMS` and manifest records. Source inspection also checks the source identity and selected build material. This establishes internal consistency, not authenticity or phone operation.
+- `distribution` checks the complete release directory, including its runtime/source/input association.
 - `apk` shows a package's metadata and file list. It does not install the package, run its scripts or verify its signature.
 
-None of them needs the build environment or a phone.
+These inspections need neither the build environment nor a phone.
 
 ## Measure image size
 
-`inspect footprint` measures the current build without rebuilding it. To see what a change does to the image, save a report before and after rebuilding, then compare them:
+`inspect footprint` measures the current build without rebuilding it. Save a report before and after a source change and rebuild, then compare them:
 
 ```sh title="PC"
 ./fplinux inspect footprint nokia-ta1618 --json > before.json
@@ -91,4 +94,4 @@ None of them needs the build environment or a phone.
 ./fplinux inspect footprint-diff before.json after.json
 ```
 
-The report lists the boot files, kernel, compressed and unpacked root filesystem, optional APKs and host debug files separately. These layers overlap, so their sum is not a meaningful total. A package's size counts the files it owns, not its dependencies, installed disk usage or RAM use. The diff also reports whether the root filesystem content is identical; a smaller compressed image alone does not mean less userspace or lower memory use.
+The report lists boot files, the kernel, compressed and unpacked root filesystem, optional APKs and host debug files separately. These layers overlap, so their sum is not a meaningful total. A package's size counts the files it owns, not its dependencies, installed disk usage or RAM use. The diff also reports whether root filesystem content is identical; a smaller compressed image alone does not establish lower userspace or memory use.

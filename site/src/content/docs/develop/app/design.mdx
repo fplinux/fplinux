@@ -1,0 +1,65 @@
+---
+title: Layout and appearance
+description: Use shared controls, sizes, fonts and colors to make one application fit every supported screen profile.
+source:
+  - include/fplinux/fplinux-ui.h
+  - lib/fplinux/fplinux-ui-profile.json
+  - include/fplinux/fplinux-ui-symbol-picker.h
+  - include/fplinux/fplinux-ui-screen.h
+---
+
+Build one APK that adapts to its surface. Do not select a layout by phone model or create a separate package for each display. The runtime chooses a screen profile and supplies its metrics, theme and fonts. Physical display support remains a property of the selected [phone](/fplinux/phones/).
+
+## Use the space you receive
+
+The profiles cover 128×128, 128×160, 176×220, 240×320 and landscape 320×240. The runtime selects the largest profile that fits; layout still uses the actual surface dimensions. Read `fplinux_ui_width()` and `fplinux_ui_height()`, and use `fplinux_ui_metrics()` for spacing and component sizes. Do not use the profile enum as a numeric size or copy a table of pixel values into the application.
+
+Profile dimensions and semantic palettes are owned by `lib/fplinux/fplinux-ui-profile.json`. Use `focus_width` for an outline, `frame_padding` inside a framed control and `divider_width` for a separator. A one-pixel caret, an image's aspect ratio and a game's logical grid remain properties of that content; they do not need a separate token for every number.
+
+An integrated application occupies the space between the session's status and soft-key bars. It must not draw another copy of those bars. A fullscreen application receives the whole display. A titled high-level screen reserves its own title area; use `fplinux_ui_screen_get_content_size()` for custom content within it.
+
+Prefer [Lists, Forms and TextBoxes](/fplinux/develop/app/screens/) for ordinary content. They already handle the profile, scrolling, focus, menus and translated labels. Use Canvas for a game board or other content that needs custom drawing.
+
+List rows fill the viewport. Content that overflows reserves a four-pixel area on the right: a two-pixel scroll indicator with one pixel of space on each side. Content that fits uses the full width. Moving the selection does not change the width; changes to the content or viewport recalculate it. There is no outer padding above the first row or below the last; text and icons keep their inner padding. Dividers span the row; the last logical item has no divider. The indicator stays visible while content overflows, with a one-pixel inset at each end of its track inside the viewport border.
+
+Scrolling text and forms keep their ordinary inner spacing on both sides. For a raw LVGL viewport, set its border and ordinary content padding, then apply `fplinux_ui_style_scrollbar()`. The shared viewport reserves `scrollbar_space` only when needed, before drawing; do not add that space to every child. Reapplying the helper is safe. A viewport with its scrollbar mode set to OFF reserves no indicator area.
+
+System action menus form a compact window directly above the soft-key bar. Left and right menus touch their respective surface edges; a centre menu is centred. The runtime measures all translated item labels, the shared icon column and an optional title, up to the full surface width. Internal text padding remains. Height fits whole rows; only an overflowing menu includes the scroll-indicator area. Width stays constant as the selection moves. Long labels keep the shared single-line ellipsis and focused-text scrolling behavior. The application supplies the opening side through the [menu API](/fplinux/develop/app/ui-api/#low-level-menus); the runtime owns sizing and resize. The underlying screen keeps its geometry and remains visible under a scrim.
+
+The shared symbol grid is centred in the application's modal area. Its position does not follow a field, caret or scroll offset. Integrated surfaces already exclude the system bars; fullscreen surfaces leave room for the modal soft-key bar. The application title remains under the scrim and does not reduce this area. Use the same picker for a custom input consumer; ordinary text fields provide it themselves.
+
+After RESIZE, recalculate raw object geometry from the new dimensions. For software frames, resize the buffer, obtain its new pixels and redraw the complete frame. Do not rotate portrait coordinates to approximate a landscape layout.
+
+## Typography and color
+
+Read fonts and semantic colors from `fplinux_ui_theme()`. Use the body font for ordinary text, the large font for emphasis and the clock font only for its supported numeric characters. The terminal's monospaced cell font is separate from these interface fonts.
+
+Measure translated text with the selected font. Character counts do not predict its width. Allow a control to scroll or wrap where that control supports it; use an ellipsis for a single-line summary and provide a way to read the full value. Do not reduce every label to fit a fixed width chosen for one phone.
+
+Use theme roles such as `foreground`, `surface`, `accent`, `warning` and `danger`. A selected row, warning and unavailable control must remain understandable in both themes and without relying only on color. Keep the active focus visible. The runtime owns theme and metric pointers; do not free or copy those structures.
+
+## Icons and images
+
+Use `fplinux_ui_glyph()` for a shared meaning such as Back, Save or Delete, with the size role appropriate to the location. The returned image belongs to the runtime. High-level commands provide standard glyphs for their built-in types; supply a row-sized glyph for an application-specific action or an override whose meaning differs from its type. List rows and low-level menu items receive their images explicitly. The [command contract](/fplinux/develop/app/screens/#commands-describe-actions) describes the defaults.
+
+An application's catalog icon is package-owned; the [desktop-entry guide](/fplinux/develop/app/packaging/#icons) describes its files. Pass an application tile to a List with `FPLINUX_UI_LIST_ICON_APP_TILE`; the shared row draws its selection ring. Use `FPLINUX_UI_LIST_ICON_IMAGE` for a glyph or an ordinary picture, which has no tile ring. Images inside the application must remain readable in light and dark themes. Give an image an intentional background or provide theme-specific variants. Avoid making an image the only explanation of an action.
+
+`fplinux_ui_image_load()` returns a drawing buffer that the application owns. Release it with `lv_draw_buf_destroy()` when its last consumer is finished. Do not delete a borrowed glyph with that function.
+
+## Commands and custom legend bars
+
+High-level screens choose the soft keys from command types and priority. Give commands short, translated action words, then let the runtime assign and fit their legends. A label is not a second keyboard handler.
+
+For a raw fullscreen screen, `fplinux_ui_softkey_bar_create()` and `fplinux_ui_softkey_bar_set()` draw a standard legend bar. They do not handle keys or send session legends. Reserve its height, update it after resize and keep its labels consistent with the actions your handler accepts. Built-in modal screens provide their own legends when used over fullscreen content.
+
+## Keep drawing and memory bounded
+
+The shared UI draws with LVGL into RGB565 surfaces. Use one UI thread and the runtime event loop; do not initialize a second LVGL display or run another `lv_timer_handler()` loop.
+
+Update objects whose content changed instead of rebuilding a whole screen for every key. Pause application timers while their work is not needed. Allocate large images deliberately and release them when their screen closes. Request `fplinux_ui_keep_screen_on()` only while visible content needs to keep the screen awake, and release it when that work ends.
+
+The shared GUI contract does not require a GPU. A phone's GPU support for separate rendering tools does not establish GPU rendering for a GUI application. Use the [software-frame API](/fplinux/develop/app/ui-api/#software-frames) for application-owned RGB565 content within the UI.
+
+## Check the interface
+
+Check compact, portrait and landscape layouts, both themes, long translated labels, focused and unavailable controls, menu return, and resize. The same APK should use the space available in each case. Native screenshots can establish layout; they do not establish physical panel colors, input timing or frame rate on a phone. Keep those [phone support results](/fplinux/phones/#support-status) separate.

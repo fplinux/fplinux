@@ -1,0 +1,66 @@
+---
+title: Application lifecycle
+description: Handle activation, visibility, resize and closing without losing work or leaving resources active.
+source:
+  - include/fplinux/fplinux-ui.h
+---
+
+The session starts an application from its installed desktop entry. `fplinux_ui_open()` connects it to the session and receives its initial configuration; `fplinux_ui_run()` processes events and draws the interface. Start graphical applications from the catalog, not by executing their binary from a shell. CLI help and argument errors must work before opening the runtime.
+
+Create the initial screen promptly. Do not block the UI thread with slow I/O or a long calculation before the first frame. Use short callbacks and the runtime's file-descriptor watch or application-owned timers for continuing work.
+
+## Activation and visibility
+
+| State or event | Meaning for the application |
+| --- | --- |
+| `FPLINUX_UI_FOREGROUND` | This is the selected application |
+| `FPLINUX_UI_BACKGROUND` | Its process is retained for later activation through Home or Tasks |
+| `FPLINUX_UI_CLOSING` | The application is leaving |
+| `FPLINUX_UI_EVENT_ACTIVATION` | The user opened the application from the catalog or selected its task |
+| `FPLINUX_UI_EVENT_VISIBILITY` | Its surface became visible or hidden |
+| `FPLINUX_UI_EVENT_RESIZE` | Surface geometry changed; size getters already contain the new values |
+| `FPLINUX_UI_EVENT_INPUT_CANCEL` | Held input from the named source was cancelled |
+
+Read `fplinux_ui_lifecycle()` when handling a lifecycle event. Hiding the display, locking the keypad or covering an application with a system notice changes visibility without necessarily changing its lifecycle. A background application can keep in-memory work, but that does not save it to storage.
+
+Read `event->activation` on `FPLINUX_UI_EVENT_ACTIVATION`. `FPLINUX_UI_ACTIVATION_OPEN` opens the application's main screen, including when its process is already running. `FPLINUX_UI_ACTIVATION_RESUME` returns to its current screen with its focus, scroll position and unfinished work. These actions do not depend on how long the application was in the background. Unlocking the phone is not a new activation.
+
+Create the initial view before calling `fplinux_ui_run()`. The activation callback runs inside that loop before the next frame is submitted. Prepare the main view, the retained view or a necessary save decision in the callback; the runtime confirms its new frame before the session reveals it. An application does not send a frame acknowledgement itself.
+
+Opening the main screen changes navigation, not application data. Keep the note, calculation, terminal process, game and active timers. Use the application's navigation and cleanup functions to leave child screens. Protect an edited form with its ordinary leave decision, and preserve an existing save error or pending operation. Returning to the main screen must not repeat a mutation or answer a confirmation for the user. A single-screen application's main view can already be its working document.
+
+The session localizes the default task name from the desktop entry. `fplinux_ui_set_title()` instead supplies an application-owned window and task title, such as a document name or an unsaved marker. That text is kept literally; it is not translated again when the interface language changes.
+
+Pause drawing and UI-related work when hidden. The runtime pauses its own screen activity and frame submission, but it does not pause every timer the application created. Keep the timer handle and pause, resume and delete it at the appropriate boundary. A software frame can manage a borrowed timer's visibility policy; see [software frames](/fplinux/develop/app/ui-api/#software-frames).
+
+The high-level screens handle their pending input and repeat cancellation. Custom gestures must stop on `INPUT_CANCEL`, which arrives before synthetic key releases. Do not interpret those releases as a completed user gesture. The [Input contract](/fplinux/develop/input/) owns key sources and repeat behavior.
+
+## Ordinary closing and unsaved work
+
+Use `fplinux_ui_back()` to request ordinary close to the catalog. `fplinux_ui_go_back()` does this from the first high-level screen. `fplinux_ui_home()` backgrounds the application instead. The session owns the red-key Home action and task switching; applications do not intercept it to add their own exit choice.
+
+Register a close handler when leaving may require a decision:
+
+- `FPLINUX_UI_CLOSE_READY` permits closing.
+- `FPLINUX_UI_CLOSE_CANCEL` leaves the application open.
+- `FPLINUX_UI_CLOSE_WAIT` keeps its decision interface active until `fplinux_ui_close_reply()` answers Ready or Cancel.
+
+The [Application state contract](/fplinux/develop/application-state/#closing-an-application) defines saving, retry and discard behavior. Keep the draft until the requested decision is resolved. Repeated ordinary Close keeps the pending decision. Forced termination and session shutdown can still end the application; WAIT does not prevent those paths.
+
+## Final cleanup
+
+`FPLINUX_UI_EVENT_CLOSE` is the final cleanup notification, not a place to open a save dialog or refuse closing. Save important state before reaching it. Connection and rendering failures can also end the event loop. Check `fplinux_ui_run()`'s result: normal closing returns zero; runtime failure returns a negative value.
+
+`fplinux_ui_quit()` stops the loop without generating a CLOSE event. Complete any required saving before calling it, then use the same cleanup after `run()` returns.
+
+Remove timers and release application-owned resources before closing the runtime. `fplinux_ui_close()` frees runtime-owned screens and sound streams. Separately allocated software-frame handles still need `fplinux_ui_frame_delete()`. Preference objects belong to the application and must be closed explicitly. Closing a preferences object does not save it.
+
+## Fullscreen and resize
+
+The desktop entry chooses the initial integrated or fullscreen mode. `fplinux_ui_set_fullscreen()` requests a change while running; do not assume the new dimensions immediately after sending it. On RESIZE, use the current width and height. The runtime has already laid out high-level controls, while the application must reposition raw LVGL objects and redraw Canvas content.
+
+Use the [same adaptive layout](/fplinux/develop/app/design/) for every phone. Display mode does not change the application's permissions or its responsibility to pause work while hidden.
+
+## Diagnosing a lifecycle problem
+
+Use the shared [session log](/fplinux/develop/logging/#phone-userspace) and [debugging workflow](/fplinux/develop/debugging/) to distinguish application exit, loss of the session connection and a program that fails to close. A host test of callbacks does not establish physical display or keypad behavior. Keep a native UI test, package build and phone observation distinct when reporting results.

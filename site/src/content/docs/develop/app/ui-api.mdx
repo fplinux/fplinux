@@ -1,0 +1,82 @@
+---
+title: UI runtime reference
+description: Find the installed application interfaces and their ownership, event-loop and resource contracts.
+source:
+  - include/fplinux/fplinux-ui.h
+  - include/fplinux/fplinux-ui-menu.h
+  - include/fplinux/fplinux-ui-frame.h
+  - include/fplinux/fplinux-ui-audio.h
+  - include/fplinux/fplinux-ui-vibration.h
+---
+
+Include the installed headers under `fplinux/` and link with `pkg-config --cflags --libs fplinux-ui`. Use the complete workflow in [Your first application](/fplinux/develop/app/first-app/) before adding custom rendering or media. Headers specify exact argument ranges, return values and error codes; the guides explain how to combine the interfaces.
+
+## Interface map
+
+| Header | Use |
+| --- | --- |
+| `fplinux-ui.h` | Runtime, events, geometry, theme, glyphs, images and session actions |
+| `fplinux-ui-screen.h` | Screens, commands, stack navigation, forms and Canvas |
+| `fplinux-ui-text.h` | Shared text field in a custom screen |
+| `fplinux-ui-menu.h` | A low-level popup menu for custom content |
+| `fplinux-ui-symbol-picker.h` | Shared centred symbol grid for a custom input consumer |
+| `fplinux-ui-prefs.h`, `fplinux-storage.h` | Preferences and explicit save outcomes |
+| `fplinux-ui-locale.h` | Localized date and number display |
+| `fplinux-ui-frame.h` | Owned RGB565 software frames |
+| `fplinux-ui-audio.h` | Playback streams managed by the system |
+| `fplinux-ui-vibration.h` | System-managed vibration patterns |
+
+Use high-level screens first. The low-level menu provides one popup, not a page history; [screen navigation](/fplinux/develop/app/screens/#open-return-and-finish) handles return to Options. The private session message transport is for system components, not an application-to-application API.
+
+## Runtime and borrowed data
+
+`fplinux_ui_open()` returns a runtime or null on failure. `fplinux_ui_run()` owns the event loop; `fplinux_ui_close()` releases it. Use UI, LVGL, frame and media functions from the UI thread. Do not start another LVGL event loop or access its objects from a worker thread.
+
+Events are borrowed for the callback. Read their current fields there; do not retain the event pointer. Ignore event types the application does not handle. Theme, metric and glyph pointers belong to the runtime; do not free them or depend on the size of their structures.
+
+Use `fplinux_ui_watch_fd()` for a nonblocking file descriptor that needs attention in the loop. There is one additional watched descriptor; a new watch replaces the old registration. The application owns the descriptor and must unregister it before closing it. Keep callbacks short. Application timers likewise belong to the application unless a helper explicitly documents ownership.
+
+The [lifecycle guide](/fplinux/develop/app/lifecycle/) owns activation, visibility, resize and closing. The [Application state contract](/fplinux/develop/application-state/) owns save results and close decisions; a successful `prefs_set` only changes memory.
+
+## Low-level menus
+
+For custom content, call `fplinux_ui_menu_open(ui, origin, title, items, count, callback, context)`. Supply `FPLINUX_UI_MENU_ORIGIN_LEFT`, `FPLINUX_UI_MENU_ORIGIN_CENTRE` or `FPLINUX_UI_MENU_ORIGIN_RIGHT`. Left and right origins touch the corresponding edge; centre is centred. OK chooses an item, and the right soft key or Escape means Back in every position. Pass null for an ordinary action menu's title, or a specific title when it helps identify the actions. Applications supply no popup coordinates or dimensions; [layout and appearance](/fplinux/develop/app/design/#use-the-space-you-receive) defines the shared sizing behavior.
+
+Only one low-level menu may be open; another open fails with `EBUSY`. Item texts are copied when it opens. While open, the menu owns input and legends, and the covered content receives no key presses. A release follows the owner of its press. The runtime closes the popup before calling its callback with the chosen action or `FPLINUX_UI_MENU_CANCELLED` for Back. A callback may open a replacement menu; pass the origin again to preserve its position. `fplinux_ui_menu_close()` closes without a callback. Use high-level [screen navigation](/fplinux/develop/app/screens/#open-return-and-finish) when a child page must return to Options and restore its selection.
+
+## Software frames
+
+A `fplinux_ui_frame` owns RGB565 pixel storage and an LVGL canvas. It is not a second window or screen stack. Use it for custom pixel drawing within the existing UI.
+
+- `DIRECT` uses one buffer: finish drawing and presenting without yielding or refreshing LVGL halfway through the paint.
+- `STAGED` uses separate drawing and published buffers, so drawing may span callbacks while the previous complete frame remains visible.
+
+Obtain pixels, finish the drawing, mark damage, then present. Stride is the width in pixels. Damage coordinates are inclusive and local to the frame; null damage marks the whole frame. Presenting while the UI is hidden returns an error with `EAGAIN` and retains the damage for a later presentation.
+
+After a geometry change, call `fplinux_ui_frame_resize()`, obtain the pixels again, redraw and mark the entire new frame. Do not retain an old pixel pointer across resize. Failed growth leaves the previous allocation intact; a successful geometry change clears the previous damage and staged image.
+
+`fplinux_ui_frame_object()` returns a borrowed canvas. You may position or reparent it inside the UI, but must not delete it directly. Deleting its parent or closing the UI deletes the canvas and detaches its timer; the frame handle and buffers still need `fplinux_ui_frame_delete()`.
+
+`fplinux_ui_frame_set_timer()` borrows an application-owned timer and pauses or resumes it according to UI visibility and the enabled flag. Detach that timer before deleting it. Covering a particular application screen is not the same as hiding the entire UI: disable work for an inactive Canvas explicitly. API Demos contains a complete software-frame consumer with resize and cleanup.
+
+## Sound
+
+Check `fplinux_ui_audio_supported()` before offering playback. Open a stream with its rate and channel count, write interleaved signed 16-bit native-endian frames, and close it when finished. Mono and stereo rates from 8 to 48 kHz are supported; the process can hold at most four streams. The system performs resampling and mixing. Applications do not open ALSA devices or change output routing through this API.
+
+`fplinux_ui_audio_write()` is nonblocking and may accept fewer frames than requested. Counts are frames, not individual channel samples or bytes. Keep unwritten frames for a later callback instead of busy-waiting. `EPIPE` means the stream has ended; close it and open a new one when appropriate.
+
+Hiding the application pauses its streams while keeping queued frames; showing it resumes them. Closing or crashing the application ends them. A busy output can hold playback until it becomes available. Background audio is not supported by the current runtime. Closing a stream discards its remaining queue, though a bounded tail already mixed into the output can remain.
+
+The capability check and successful writes do not prove that the physical speaker produced sound. Preserve the distinction between program results and [phone support](/fplinux/phones/#support-status).
+
+## Vibration
+
+Check `fplinux_ui_vibration_supported()`, then submit a bounded pattern through `fplinux_ui_vibration_play()`. Durations alternate pause, pulse, pause, pulse; `{0, 200}` requests an immediate 200 ms pulse. The installed header defines the accepted ranges and repetition rules. Use `fplinux_ui_vibration_stop()` when the visible operation ends.
+
+Vibration is available only to the visible foreground application. Hiding it stops the pattern; returning does not restart it. A vibration request does not wake the display or postpone dimming. Do not assume the phone has a separate motor: the session owns the hardware choice.
+
+A successful request means it was sent. Later execution errors can be reported by the session, and neither response measures a physical effect. An unavailable capability must leave the application's non-vibration actions usable.
+
+## Further examples
+
+[API Demos](/fplinux/apps/api-demos/) demonstrates these interfaces through current consumers. Use it to inspect controls, resize, frames, translations, input and resource cleanup. Its developer examples are supplementary to the contracts above, not permission to depend on internal headers or reproduce system policy in an application.

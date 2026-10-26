@@ -94,19 +94,25 @@ Choose the scope of the component that owns the change. Shared controls and navi
 
 ## Explore the application UI
 
-Install the optional [API Demos application](/fplinux/apps/api-demos/) to explore the shared UI controls. Its examples name the C functions they use; the installed headers in `fplinux-ui-dev` define the interfaces. Application packages depend on `fplinux-ui` and build against `fplinux-ui-dev`.
+Start with [Your first application](/fplinux/develop/app/first-app/) for the complete source-to-APK workflow. The [screens and commands guide](/fplinux/develop/app/screens/) explains how to use the common controls, and [layout and appearance](/fplinux/develop/app/design/) covers one application across phone screen sizes.
+
+Open the included [API Demos application](/fplinux/apps/api-demos/) from the launcher to explore the shared UI controls. Its examples name the C functions they use; the installed headers in `fplinux-ui-dev` define the interfaces. Application packages depend on `fplinux-ui` and build against `fplinux-ui-dev`.
 
 Follow the [application-state contract](/fplinux/develop/application-state/) when saving preferences, reporting storage errors and handling close decisions.
 
 ## Preview this site
 
-The documentation site lives in `site/` and uses Node.js `24.21.0` and npm `12.2.0`. Install the locked site tools once, then start a local preview that reloads as you edit:
+The documentation site lives in `site/` and uses the exact Node.js and npm versions declared by the root package. Acquire the locked inputs once, install the site tools from those originals, then start a local preview that reloads as you edit. Replace `/path/to/fplinux-inputs` with a folder outside `.cache/` on a disk with enough free space:
 
 ```sh title="PC"
+./fplinux dependencies create "/path/to/fplinux-inputs" --inputs-only
+./fplinux ci site-install
+export PATH="$PWD/.cache/site/node/bin:$PATH"
 cd site
-npm ci
 npm run dev
 ```
+
+If you already restored a matching [dependency snapshot](/fplinux/guides/dependencies/), start with `ci site-install`. The install uses the preserved Linux x86-64 glibc Node.js runtime, imports locked registry archives into its npm cache and runs `npm ci` offline. The runtime remains available at `.cache/site/node/bin` for subsequent site commands.
 
 Pages are in `site/src/content/docs/`. Run these commands from `site/` before submitting a documentation change:
 
@@ -119,4 +125,4 @@ npm run build:offline
 
 Ultracite supplies the Oxlint, Astro ESLint, Prettier and Stylelint presets. `format` formats site code, styles, MDX and JSON; it preserves code examples and asset files. `check` checks formatting and runs type-aware linting on JavaScript and TypeScript with Oxlint and on Astro components with ESLint. It also checks accessibility and CSS including component styles, then runs Astro's type checks. Unused rule-disable comments are errors. `check` also runs the site's behavior tests. `build` renders the pages and checks internal links. MDX content is parsed during formatting and the build.
 
-The site tools are separate from `./fplinux format` and `./fplinux check`. The source gate checks maintained Markdown and repository-local links; run `npm run check` and `npm run build` for the site components, sidebar and page links. `build:offline` exports the same pages to `.cache/out/site-offline/` in the checkout root. Open its `index.html` directly without a server. The export includes local assets and a simple word search; it does not use the hosted Pagefind search. Ordinary Linux runner archives include this generated site as `docs/` on the computer. [Dependency snapshots](/fplinux/guides/dependencies/) save the locked npm archives, but do not install Node.js, npm or `site/node_modules`.
+The site tools are separate from `./fplinux format` and `./fplinux check`. The source gate checks maintained Markdown and repository-local links; run `npm run check` and `npm run build` for the site components, sidebar and page links. `build:offline` exports the same pages to `.cache/out/site-offline/` in the checkout root. Open its `index.html` directly without a server. The export includes local assets and a simple word search; it does not use the hosted Pagefind search. Linux microSD system-card exports include this generated site as `docs/` on the computer.

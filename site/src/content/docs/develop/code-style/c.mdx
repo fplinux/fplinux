@@ -168,7 +168,7 @@ Host C is not phone C. It must not depend on a target memory map, target name or
 
 Keep error domains straight: a libusb status is not `errno`. Report the API that failed and translate only at a boundary that defines the translation. On every exit path, release claimed interfaces, reattach a detached driver when required, close evdev descriptors and release pressed keys.
 
-Linux host-tool recipes produce static executables. Autonomous Windows archives cross-build native x64 tools and deliver their required DLLs; Linux-only interfaces remain in the Linux tools. A Linux recipe that declares `self_test = true` runs the executable's `--self-test` before publication; recipes without that declaration are not claimed to self-test.
+Linux host-tool recipes produce static executables. Windows standalone archives cross-build native x64 tools and deliver their required DLLs; Linux-only interfaces remain in the Linux tools. A Linux recipe that declares `self_test = true` runs the executable's `--self-test` before publication; recipes without that declaration are not claimed to self-test.
 
 ## Code embedded into another project
 

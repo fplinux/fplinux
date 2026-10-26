@@ -1,0 +1,237 @@
+---
+title: Your first application
+description: Create a small graphical counter, build its APK and open it from the phone's catalog.
+---
+
+FPLinux graphical applications are native ARMv7 programs. The shared `fplinux-ui` runtime supplies screens, commands, input, themes and events; the session starts the application from its desktop entry. One APK uses the available screen size on every supported phone.
+
+This tutorial creates **Counter**, a form with Add, Reset and Back actions. The count runs from 0 to 99 and wraps to 0. Minimizing keeps the current process and count; closing and reopening starts from 0. It deliberately has no saved state. Add persistence using the separate [Application state contract](/fplinux/develop/application-state/).
+
+## Before you start
+
+Prepare a source checkout with [Build FPLinux](/fplinux/start/build/). Use a phone whose [graphical display and input support](/fplinux/phones/#support-status) suits the task. A [USB shell](/fplinux/use/connect/) installs the package and reads logs; the catalog starts the GUI application.
+
+Create these three files under `alpine/aports/fplinux-example-counter/`. The program and recipe below use GPL-2.0-only, as declared in the example, and the installed `fplinux-ui` API.
+
+## Program
+
+Save this complete program as `fplinux-example-counter.c`:
+
+```c title="fplinux-example-counter.c"
+/* SPDX-License-Identifier: GPL-2.0-only */
+#include "fplinux-cli.h"
+#include <fplinux/fplinux-ui.h>
+#include <fplinux/fplinux-ui-menu.h>
+#include <fplinux/fplinux-ui-screen.h>
+#include <libintl.h>
+#include <stdint.h>
+#include <stdio.h>
+
+#define APP_ID "org.example.counter"
+#define _(text) gettext(text)
+
+enum command {
+	COMMAND_ADD,
+	COMMAND_RESET,
+	COMMAND_BACK,
+};
+
+struct counter_app {
+	struct fplinux_ui *ui;
+	size_t count_item;
+	unsigned int count;
+	bool failed;
+};
+
+static void handle_command(struct fplinux_ui *ui,
+			   struct fplinux_ui_screen *form, int command_id,
+			   void *context)
+{
+	struct counter_app *app = context;
+	unsigned int next;
+	char value[4];
+
+	switch (command_id) {
+	case COMMAND_ADD:
+		next = (app->count + 1) % 100;
+		break;
+	case COMMAND_RESET:
+		next = 0;
+		break;
+	case COMMAND_BACK:
+		fplinux_ui_go_back(ui);
+		return;
+	default:
+		return;
+	}
+	snprintf(value, sizeof(value), "%u", next);
+	if (!fplinux_ui_form_set_string(form, app->count_item, value)) {
+		perror("fplinux-example-counter: update count");
+		app->failed = true;
+		fplinux_ui_quit(ui);
+		return;
+	}
+	app->count = next;
+}
+
+static bool create_form(struct counter_app *app)
+{
+	const struct fplinux_ui_command commands[] = {
+		{ .id = COMMAND_ADD,
+		  .type = FPLINUX_UI_COMMAND_OK,
+		  .label = _("Add") },
+		{ .id = COMMAND_RESET,
+		  .type = FPLINUX_UI_COMMAND_SCREEN,
+		  .label = _("Reset") },
+		{ .id = COMMAND_BACK,
+		  .type = FPLINUX_UI_COMMAND_BACK },
+	};
+	struct fplinux_ui_screen *form =
+		fplinux_ui_form_new(app->ui, _("Counter"));
+
+	if (!form)
+		return false;
+	app->count_item = fplinux_ui_form_append_string(form, _("Count"), "0");
+	if (app->count_item == SIZE_MAX)
+		return false;
+	for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); ++i)
+		if (!fplinux_ui_screen_add_command(form, &commands[i]))
+			return false;
+	fplinux_ui_screen_set_listener(form, handle_command, NULL, app);
+	fplinux_ui_push(app->ui, form);
+	return true;
+}
+
+static void handle_event(struct fplinux_ui *ui,
+			 const struct fplinux_ui_event *event, void *context)
+{
+	(void)context;
+	if (event->type == FPLINUX_UI_EVENT_ACTIVATION &&
+	    event->activation == FPLINUX_UI_ACTIVATION_OPEN)
+		fplinux_ui_menu_close(ui);
+}
+
+int main(int argc, char **argv)
+{
+	struct fplinux_cli cli = {
+		.program = "fplinux-example-counter",
+		.description = "Count from 0 to 99 with the phone keypad",
+	};
+	struct counter_app app = { 0 };
+	int result = fplinux_cli_parse(&cli, argc, argv);
+
+	if (result != FPLINUX_CLI_READY)
+		return result;
+	app.ui = fplinux_ui_open(APP_ID, handle_event, &app);
+	if (!app.ui) {
+		perror("fplinux-example-counter: open UI");
+		return 1;
+	}
+	if (!create_form(&app)) {
+		perror("fplinux-example-counter: create form");
+		fplinux_ui_close(app.ui);
+		return 1;
+	}
+	result = fplinux_ui_run(app.ui);
+	fplinux_ui_close(app.ui);
+	return result < 0 || app.failed;
+}
+```
+
+The Form owns the displayed text and the runtime owns the screen. `app` stays alive throughout the event loop as the listener's context. If construction fails, closing the runtime also frees screens that have not been pushed. There is no separate raw key handler: command types give Centre its Add action and the soft keys their Reset and Back actions.
+
+The CLI parser handles help and bad arguments before the program opens the UI. `gettext()` is ready after `fplinux_ui_open()` returns; without a translation catalog, the example uses its English strings.
+
+## Catalog entry
+
+Save `org.example.counter.desktop`:
+
+```ini title="org.example.counter.desktop"
+[Desktop Entry]
+Type=Application
+Name=Counter
+Exec=/usr/bin/fplinux-example-counter
+Categories=Utility;
+X-FPLinux-Mode=integrated
+```
+
+The filename's ID matches `APP_ID`. An icon is optional; this first example uses the catalog's generic image. The [packaging guide](/fplinux/develop/app/packaging/) explains translated names, icons and display modes.
+
+## Package recipe
+
+Save `APKBUILD`:
+
+```sh title="APKBUILD"
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-example-counter
+pkgver=1
+pkgrel=0
+pkgdesc="Small graphical counter for FPLinux"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="GPL-2.0-only"
+depends="fplinux-ui"
+makedepends_build="clang22 lld22 pkgconf"
+makedepends_host="musl-dev musl-libintl linux-headers fplinux-ui-dev"
+options="!check"
+source="fplinux-example-counter.c fplinux-cli.c fplinux-cli.h
+	org.example.counter.desktop"
+builddir="$srcdir"
+
+build() {
+	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
+	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		$(pkg-config --cflags fplinux-ui) \
+		fplinux-example-counter.c fplinux-cli.c \
+		$(pkg-config --libs fplinux-ui) $LDFLAGS \
+		-o fplinux-example-counter
+}
+
+package() {
+	install -Dm755 "$builddir/fplinux-example-counter" \
+		"$pkgdir/usr/bin/fplinux-example-counter"
+	install -Dm644 "$srcdir/org.example.counter.desktop" \
+		"$pkgdir/usr/share/applications/org.example.counter.desktop"
+}
+
+sha512sums="
+"
+```
+
+In `scripts/fplinux_cli/alpine/registration.py`, add these entries to the existing dictionaries, preserving the other entries:
+
+```python
+# SHARED_APORT_SOURCES
+"fplinux-example-counter": CLI_SOURCES,
+
+# LOCAL_BUILD_DEPENDENCIES
+"fplinux-example-counter": ("fplinux-ui",),
+```
+
+The first entry supplies the shared CLI files; do not copy them into the aport. The second makes the build produce the UI library and its development files before compiling Counter.
+
+Add `"fplinux-example-counter"` to the existing `[bundle].packages` list in your selected target's `target.toml`. This builds an optional APK without installing it into the normal image. Do not add a second APK filename declaration to release metadata.
+
+## Build and install
+
+From the checkout root, generate checksums and build the selected target:
+
+```sh title="PC"
+./fplinux checksum fplinux-example-counter
+./fplinux build nokia-ta1618
+```
+
+Replace `nokia-ta1618` with your selected phone. The directory printed after `output:` contains `apks/fplinux-example-counter.apk`. Start that build with the normal [run procedure](/fplinux/start/run/), then use [Optional packages](/fplinux/guides/packages/) to transfer and install this APK. That shared procedure owns the connection commands, profile selection and local-package installation flags.
+
+Open **Counter** from the application catalog. Add changes the count; Reset returns it to zero. Return Home and reopen it through Tasks to keep the same count. Back closes the application, and reopening begins at zero. Read application diagnostics through the [session log](/fplinux/develop/logging/#phone-userspace).
+
+For another edit, close Counter, regenerate its checksums and rebuild. Remove the installed package before installing the replacement APK with the same package version; do not bump `pkgrel` for the edit. A package build establishes compilation and packaging, not correct physical display or keypad operation.
+
+## Next steps
+
+- [Screens and commands](/fplinux/develop/app/screens/) adds lists, editors, dialogs and return paths.
+- [Lifecycle](/fplinux/develop/app/lifecycle/) and [Application state](/fplinux/develop/application-state/) cover background work, saving and close decisions.
+- [Layout and appearance](/fplinux/develop/app/design/) keeps the application usable across screen profiles.
+- [Languages and translations](/fplinux/develop/app/languages/) adds translated labels and formatting.
+- [UI runtime reference](/fplinux/develop/app/ui-api/) covers resources, frames, sound and vibration. [API Demos](/fplinux/apps/api-demos/) provides broader working examples.

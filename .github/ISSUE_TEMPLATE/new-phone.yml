@@ -57,7 +57,7 @@ body:
     id: board-report
     attributes:
       label: Board report
-      description: The `board-report.json` file whose path `./fplinux device-data prepare <target> --from-dump nand.bin` prints.
+      description: The `board-report.json` file whose path `./fplinux device-data report <target> --from-dump nand.bin` prints.
     validations:
       accept: ".json"
   - type: upload

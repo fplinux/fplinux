@@ -20,11 +20,10 @@ Document sections use this order; absent sections are skipped:
 | Target | `platform`, identity, NAND, display, display brightness, rootfs, bundle, Linux, bootstrap, adapter, device data, Bluetooth, audio profile, FM radio, WCN firmware, microSD |
 | Platform | identity, rootfs, bundle, U-Boot, Linux, bootstrap, runtime, host |
 | Profile | `name`, Linux root, rootfs, bootstrap, U-Boot, FIT, layout, storage, runtime |
-| Source lock | Linux, bootstrap source, host source and files, transfer source and files |
+| Source lock | Direct-original records in source-ID order |
 | Alpine lock | release/branch/architecture/triplet, repositories, minirootfs, runtime, runtime additions, sysroot, package catalogue |
 | Environment lock | Kern, Alpine base, package selection, tools, ordered inputs |
 | Loader asset lock | FDL1 |
-| Release manifest | image, bundle files, runtime files, documents |
 
 Target fields follow their consumer roles:
 
@@ -54,13 +53,13 @@ Platforms declare `linux.dt_config_checks` for shared hardware; targets may add 
 
 Profiles group root kind/filesystem/wait, package selection, boot kinds, resident and load ranges, storage partitions, then runtime transport and runnability. Their package arrays retain their order.
 
-The environment lock owns the pinned Kern release, Alpine base root filesystem, direct APK selection, tool metadata and exact downloaded inputs. The installation recipe contains actions; it reads package and tool selections from this lock. The npm-owned `package-lock.json` defines the host environment's npm dependency graph.
+`sources.lock.toml` owns direct originals. Each source record groups `version`, `name`, `url`, `algorithm`, `checksum` and optional `bytes`, followed by source-specific metadata. Consumer locks select a `source` ID and retain their usage fields. The [dependency guide](/fplinux/guides/dependencies/) describes acquisition and restoration; native npm and Alpine locks retain their exact dependency graphs.
 
-The environment lock's Kern section uses `version`, `archive_url`, `archive_sha256`, `binary_sha256`; its base section uses `release`, `arch`, `url`, `sha256`. Selection uses `arch`, `apk_groups`. Each named tool uses `version` or, for Sparse, `commit`, followed by `input`. Each input uses `key`, `url`, `sha256` or `checksum` and `algorithm`, optional `bytes`, then `destination`, `purpose`, `arch`. Input records, package groups and packages within those groups retain their order.
+The environment lock groups Kern, Alpine base, direct APK selection, tools and ordered inputs. Kern uses `source`, `binary_sha256`; the base uses `source`, `arch`. Selection uses `arch`, `apk_groups`. Named tools select an `input`; input records use `key`, `purpose`, `arch`, `source`. Input records, package groups and packages within those groups retain their order. The installation recipe reads these selections rather than repeating original URLs and checksums.
 
-The platform loader asset lock's `[fdl1]` uses `url`, `sha256`, `cache_name`, `license`, `path`. Generated standalone asset locks retain their resolved source/output form.
+The platform loader asset lock's `[fdl1]` uses `source`, `path`. Generated standalone asset locks retain their resolved source/output form.
 
-Independent source-file hash dictionaries, verified-release entries, spelling identifier/word dictionaries, Alpine repositories and runtime additions use case-sensitive lexical key order. The two reordered array families are target and platform rootfs/bundle package sets, which use package-name order, and Alpine package records, which use filename order. Other arrays, including profile packages and Alpine runtime/sysroot packages, retain their order.
+Source records, independent source-file hash dictionaries, spelling identifier/word dictionaries, Alpine repositories and runtime additions use case-sensitive lexical key order. The two reordered array families are target and platform rootfs/bundle package sets, which use package-name order, and Alpine package records, which use filename order. Other arrays, including profile packages and Alpine runtime/sysroot packages, retain their order.
 
 REUSE annotations retain their record and path order. Each annotation uses `path`, `precedence`, copyright, then license. Ruff configuration groups target version, line length, cache and exclusions, then lint and format settings. Mypy uses Python version, strictness, search path and cache path. Per-file lint rules retain their order.
 

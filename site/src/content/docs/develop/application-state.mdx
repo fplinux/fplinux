@@ -28,7 +28,9 @@ Keep application policy outside the file writer. An applied theme or font choice
 
 ## Storage errors
 
-Preserve working data and keep the relevant controls available after a write failure. A failed explicit Save leaves the editor open. Minimize keeps the process and its draft in memory; failed background saving must not prevent Home or create repeated modal messages. Show the unresolved state when the application returns.
+Preserve working data and keep the relevant controls available after a write failure. A failed explicit Save leaves the editor open. Home keeps the process and its draft in memory; failed background saving must not prevent Home or create repeated modal messages. Show the unresolved state when the application returns.
+
+An [OPEN activation from the catalog](/fplinux/develop/app/lifecycle/#activation-and-visibility) changes navigation without clearing the working data. Keep an unresolved save decision and protect a draft before removing its editor. A pending mutation remains one operation: a requested return to the main screen can follow its successful reply, while a failure keeps the draft and error available. RESUME from Tasks preserves the current screen. Neither action turns a failed save into a confirmed one.
 
 Use the shared storage-error text for the cause and select the outcome text separately. Insufficient space, a storage limit, read-only storage, denied access and an I/O error need different explanations. An error after publication means that saving is unconfirmed; it does not mean that the action was rejected. A short unsaved marker may remain until a successful save.
 
@@ -40,9 +42,9 @@ Report background failures on a change of error state and on recovery, following
 
 Register a close handler with `fplinux_ui_set_close_handler()` when ordinary closing needs a save decision. It runs before the final closing lifecycle and returns `FPLINUX_UI_CLOSE_READY`, `FPLINUX_UI_CLOSE_CANCEL` or `FPLINUX_UI_CLOSE_WAIT`. WAIT keeps the interface interactive; answer the pending request with `fplinux_ui_close_reply()` after the user's decision. Repeated delivery of the same request must not repeat the save operation.
 
-After a failed document save, offer Retry, Stay and Discard. Retry saves the current data; Stay returns to it; Discard explicitly permits closing without saving it. Configuration forms with a separate Save action retain their explicit-save contract: cancelling an unsaved alarm form must not create an alarm.
+After a failed document save, offer Retry and Stay, together with an explicit close action. Retry saves the current data; Stay returns to it. For UNPUBLISHED, Discard changes permits closing without writing the draft. For PUBLISHED_UNSYNCED, use Close anyway: the replacement is already visible, and closing does not restore the previous file. Configuration forms with a separate Save action retain their explicit-save contract: cancelling an unsaved alarm form must not create an alarm.
 
-The session brings a background task forward when it needs a decision. Close requests remain tied to that task's instance. A second explicit close can force termination of a waiting application; an unanswered request and a system restart also have bounded termination paths. The final CLOSE event is a last opportunity for best-effort cleanup, not an opportunity to open a dialog or veto termination. Do not promise preservation of unsaved data after forced termination.
+An explicit Close of a background task can bring it forward to present a decision. Home leaves that decision in the background, including when its reply arrives later. Close requests remain tied to the task's instance, and repeated ordinary Close preserves its pending decision. An unanswered preparation and system shutdown have bounded termination paths. The final CLOSE event is for best-effort cleanup, not opening a dialog or vetoing termination. Do not promise preservation of unsaved data after forced termination.
 
 ## Verification boundary
 

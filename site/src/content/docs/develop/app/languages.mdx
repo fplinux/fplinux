@@ -1,0 +1,70 @@
+---
+title: Languages and translations
+description: Translate an application's interface and add language data without duplicating input or formatting logic.
+source:
+  - include/fplinux/fplinux-ui-locale.h
+  - alpine/aports/fplinux-language
+---
+
+Application translations, system language data and external keyboard layouts serve different purposes. A translated application does not need its own keypad map or date formatter. Use the runtime's locale functions and the [shared text editor](/fplinux/develop/app/text-input/).
+
+## Translate an application
+
+English is the source text. Use `gettext()` from `<libintl.h>` for visible strings and `ngettext()` for plural forms. A conventional macro is:
+
+```c
+#define _(text) gettext(text)
+```
+
+`fplinux_ui_open(APP_ID, ...)` selects the session's interface language and binds the application's gettext domain. Build translated widgets after that call. Keep the application ID identical in the program, desktop-entry filename and installed catalog name.
+
+For Russian, keep translations in `ru.po`, add it to the aport's `source`, and add `gettext` to `makedepends_build`. Compile the catalog in `build()`:
+
+```sh
+msgfmt --check --output-file=ru.mo ru.po
+```
+
+Install it in `package()` with the application's actual ID:
+
+```sh
+install -Dm644 "$builddir/ru.mo" \
+  "$pkgdir/usr/share/locale/ru/LC_MESSAGES/org.example.counter.mo"
+```
+
+The `.po` header declares its language, UTF-8 encoding and plural rules. Preserve format placeholders in translations. Translate whole messages instead of assembling sentences from translated fragments. Missing translations fall back to the English source text.
+
+The launcher reads the desktop entry's `Name[ru]`; that title is separate from the program's gettext catalog. A command with a null label uses the runtime's standard translated action word. Do not copy the runtime's Back, Cancel and Options translations into every application.
+
+## Dates and numbers
+
+Use `fplinux_ui_format_date()` for long dates, short dates and the 24-hour clock, and `fplinux_ui_format_number()` for a number with a selected number of fractional digits. Check their result when supplying a buffer. `fplinux_ui_decimal_separator()` gives the interface language's separator.
+
+These are display formats. Keep protocol numbers and machine-readable files in their required format. Form decimal fields return a normalized `.` separator, while the raw text field returns the separator it displays; use the contract of the getter you call. Do not parse a localized label as application state.
+
+## Add a system or keypad language
+
+Language definitions live in `alpine/aports/fplinux-language/` and are installed as `/usr/share/fplinux/languages/<code>`. Use a two- or three-letter lowercase code. The current `en` and `ru` definitions are complete examples; their separate `fplinux-language-en` and `fplinux-language-ru` aports package them.
+
+The file uses UTF-8 `key=value` lines. Blank lines and lines beginning with `#` are ignored. Values are not trimmed: the leading space in `multitap.0= 0` is significant. Known keys cannot be repeated. Write a literal backslash as `\\`; values must not contain line breaks or other control characters.
+
+| Data | Purpose |
+| --- | --- |
+| `name` | Language name shown in Settings |
+| `system=yes` | Offer this language for the interface |
+| `lang`, `decimal`, `date.long`, `date.short` | Locale and number/date formatting for a system language |
+| `weekday.0` through `weekday.6` | Sunday through Saturday names |
+| `month.1` through `month.12`, `month.genitive.1` through `month.genitive.12` | Month names used by date patterns |
+| `input=yes` | Offer keypad input in this language |
+| `input.indicator.sentence`, `.lower`, `.upper` | Labels for the three letter modes |
+| `multitap.0` through `multitap.9` | Characters in each key's cycling order |
+| `xkb` | External keyboard layout name; its package is a separate dependency |
+
+A system language requires its locale, decimal separator, both date patterns and all weekday/month names. Date patterns use `{weekday}`, `{day}`, `{dd}`, `{month}`, `{month.genitive}`, `{mm}` and `{yyyy}`. An input language requires its mode indicators and usable multi-tap data. `system` and `input` are independent flags.
+
+Create a `noarch` language aport, register its shared definition file and select it through the normal [package ownership rules](/fplinux/develop/app/packaging/#selecting-the-package). Add the corresponding [XKB package](/fplinux/develop/input/#keyboard-layout-packages) dependency when needed. Do not fetch keyboard or font data directly from an APKBUILD; use the project's declared dependencies.
+
+Translate the runtime and system applications for a new system language, not just its Settings name. Confirm that the shipped fonts contain the required glyphs. Installing a language file does not add glyphs or script shaping by itself.
+
+## Check the language
+
+Build the affected catalogs with `msgfmt --check` through their aports and regenerate checksums after edits. Check long labels, plural messages, dates, decimals and the field's mode cycle on compact and landscape layouts. Check interface language and keypad language independently. External keyboard layout changes require restarting the graphical session; see [Input](/fplinux/develop/input/#keyboard-layout-packages).
