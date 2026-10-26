@@ -42,6 +42,7 @@
 #define FPLINUX_SESSION_CLOCK "org.fplinux.clock"
 #define FPLINUX_SESSION_PROGRESS_MS 200U
 #define FPLINUX_SESSION_PROCESS_TICK_MS 100U
+#define FPLINUX_SESSION_STARTUP_MS 10000U
 /* How long a swap waits for the launcher's frame; see hand_off(). */
 #define FPLINUX_SESSION_HANDOFF_MS 500U
 #define FPLINUX_SESSION_CHARGER_POLL_MS 2000U
@@ -63,10 +64,9 @@ struct process {
 	uint64_t closing_ms;
 	uint32_t close_serial;
 	uint64_t close_requested_ms;
-	/* WAIT acknowledges a user decision; only an explicit close can force it. */
+	/* WAIT keeps the client's decision open across Home and repeated Close. */
 	bool close_waiting;
 	bool close_activate;
-	bool close_home;
 	bool killed;
 	/* The control connection ended before the manager requested close. */
 	bool disconnected;
@@ -83,6 +83,8 @@ struct process {
 	bool visible;
 	/* The client has committed a buffer. */
 	bool drawn;
+	/* TITLE owns opaque application text; otherwise desktop metadata owns it. */
+	bool title_supplied;
 	/* A lost reply may retry the last successful mutation with its serial. */
 	uint32_t clock_serial;
 	struct clock_request clock_request;
@@ -132,9 +134,10 @@ struct wake_submission {
 
 enum held_scene {
 	HELD_SCENE_NONE,
-	HELD_SCENE_LAUNCH,
-	HELD_SCENE_HOME,
-	HELD_SCENE_APPEARANCE,
+	HELD_SCENE_LAUNCH = 1U << 0,
+	HELD_SCENE_HOME = 1U << 1,
+	HELD_SCENE_APPEARANCE = 1U << 2,
+	HELD_SCENE_CLOSE = 1U << 3,
 };
 
 struct fplinux_session {
@@ -151,12 +154,11 @@ struct fplinux_session {
 	struct process tasks[FPLINUX_UI_SESSION_TASK_MAX];
 	uint32_t next_task_token;
 	uint32_t next_close_serial;
-	uint32_t end_prompt_token;
-	bool end_prompt_drawn;
-	int end_frame_fd;
-	int end_frame_width;
-	int end_frame_height;
-	enum held_scene held_scene;
+	unsigned int held_scene;
+	pid_t close_pid;
+	uint32_t close_token;
+	uint32_t close_scene_serial;
+	bool close_frame_ready;
 	uint32_t visual_serial;
 	uint32_t redraw_serial;
 	pid_t redraw_pid;
@@ -176,6 +178,9 @@ struct fplinux_session {
 	/* BUSY(false) waits for the application's next usable committed buffer. */
 	bool app_busy_finishing;
 	uint32_t launch_generation;
+	enum fplinux_ui_session_activation launch_activation;
+	bool launch_retained;
+	bool activation_ready;
 	/* Last shell visibility, so crossing the delay requests a repaint. */
 	bool launch_shown;
 	/* Home notice code shown when no application is active. */
@@ -447,7 +452,8 @@ static bool app_in_foreground(const struct fplinux_session *session)
 static bool app_announced(const struct fplinux_session *session)
 {
 	return app_in_foreground(session) && session->app->drawn &&
-	       session->app->policy.ready;
+	       session->app->policy.ready &&
+	       (!session->launch_starting || session->activation_ready);
 }
 
 static bool is_running(const struct process *process)
@@ -461,34 +467,32 @@ static bool launch_in_progress(const struct fplinux_session *session)
 	       session->app_busy_finishing;
 }
 
-static bool end_prompt_active(const struct fplinux_session *session)
+static void release_scene(struct fplinux_session *session, unsigned int scenes)
 {
-	return session->end_prompt_token && app_in_foreground(session) &&
-	       session->app->policy.token == session->end_prompt_token &&
-	       session->app->policy.ready && session->app->policy.shown;
-}
+	unsigned int previous = session->held_scene;
 
-static void clear_end_prompt(struct fplinux_session *session)
-{
-	if (session->end_frame_fd >= 0)
-		close(session->end_frame_fd);
-	session->end_frame_fd = -1;
-	session->end_frame_width = 0;
-	session->end_frame_height = 0;
-	session->end_prompt_token = 0;
-	session->end_prompt_drawn = false;
+	session->held_scene &= ~scenes;
+	if (previous && !session->held_scene && session->options.hold_frame)
+		session->options.hold_frame(session->options.context, false);
+	if (scenes & HELD_SCENE_APPEARANCE) {
+		session->redraw_serial = 0;
+		session->redraw_pid = 0;
+		session->redraw_token = 0;
+		session->redraw_ready = false;
+	}
+	if (scenes & HELD_SCENE_CLOSE) {
+		session->close_pid = 0;
+		session->close_token = 0;
+		session->close_scene_serial = 0;
+		session->close_frame_ready = false;
+	}
 }
 
 static void clear_held_scene(struct fplinux_session *session)
 {
-	if (session->held_scene != HELD_SCENE_NONE &&
-	    session->options.hold_frame)
-		session->options.hold_frame(session->options.context, false);
-	session->held_scene = HELD_SCENE_NONE;
-	session->redraw_serial = 0;
-	session->redraw_pid = 0;
-	session->redraw_token = 0;
-	session->redraw_ready = false;
+	release_scene(session, HELD_SCENE_LAUNCH | HELD_SCENE_HOME |
+				       HELD_SCENE_APPEARANCE |
+				       HELD_SCENE_CLOSE);
 }
 
 static void hold_scene(struct fplinux_session *session, enum held_scene scene)
@@ -496,9 +500,9 @@ static void hold_scene(struct fplinux_session *session, enum held_scene scene)
 	if (session->power.locked ||
 	    session->power.display == FPLINUX_UI_SESSION_DISPLAY_OFF)
 		return;
-	if (session->held_scene != scene && session->options.hold_frame)
+	if (!session->held_scene && session->options.hold_frame)
 		session->options.hold_frame(session->options.context, true);
-	session->held_scene = scene;
+	session->held_scene |= scene;
 }
 
 /*
@@ -507,8 +511,7 @@ static void hold_scene(struct fplinux_session *session, enum held_scene scene)
  */
 static bool notice_due(const struct fplinux_session *session)
 {
-	return (session->battery_notice != FPLINUX_SESSION_BATTERY_ALERT_NONE ||
-		end_prompt_active(session)) &&
+	return session->battery_notice != FPLINUX_SESSION_BATTERY_ALERT_NONE &&
 	       !session->power.locked &&
 	       session->power.display != FPLINUX_UI_SESSION_DISPLAY_OFF;
 }
@@ -526,9 +529,7 @@ static bool notice_raises_launcher(const struct fplinux_session *session)
 	       (app_in_foreground(session) || launch_in_progress(session)) &&
 	       is_running(launcher) && launcher->control_fd >= 0 &&
 	       launcher->policy.ready && launcher->policy.framed &&
-	       (session->battery_notice == FPLINUX_SESSION_BATTERY_ALERT_NONE ||
-		session->battery_notice_drawn) &&
-	       (!end_prompt_active(session) || session->end_prompt_drawn);
+	       session->battery_notice_drawn;
 }
 
 /*
@@ -703,7 +704,6 @@ static bool start_process(struct fplinux_session *session,
 					  process->started_ms);
 	/* A new launcher's view is not placed yet and shows nothing. */
 	if (process == &session->launcher) {
-		session->end_prompt_drawn = false;
 		session->battery_notice_drawn = false;
 		session->clock_drawn_event = 0;
 		session->launcher_tasks_view = false;
@@ -872,13 +872,6 @@ static void send_active(struct fplinux_session *session)
 	clock_wire_ring_from_model(&session->clock.model, &ring);
 	clock_wire_ring_encode(&ring, ring.event.id, message.clock_data,
 			       sizeof(message.clock_data));
-	message.end_prompt = end_prompt_active(session);
-	if (message.end_prompt && session->end_frame_fd >= 0) {
-		message.has_frame = true;
-		message.frame_fd = session->end_frame_fd;
-		message.width = session->end_frame_width;
-		message.height = session->end_frame_height;
-	}
 	copy_value(message.notice, sizeof(message.notice),
 		   battery_notice_code(session->battery_notice));
 	copy_value(message.selected_id, sizeof(message.selected_id),
@@ -977,6 +970,21 @@ static void request_close(struct fplinux_session *session,
 	changed(session);
 }
 
+static void send_activation(struct fplinux_session *session,
+			    struct process *process)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_ACTIVATION,
+		.serial = session->launch_generation,
+		.activation = session->launch_activation,
+	};
+
+	if (process == session->app && session->launch_starting &&
+	    process->control_fd >= 0 &&
+	    !strcmp(process->policy.app_id, session->launch_id))
+		fplinux_ui_session_send(process->control_fd, &message);
+}
+
 static void send_config(struct fplinux_session *session,
 			struct process *process)
 {
@@ -1009,6 +1017,7 @@ static void send_config(struct fplinux_session *session,
 		};
 
 		fplinux_ui_session_send(process->control_fd, &lifecycle);
+		send_activation(session, process);
 	}
 	send_active(session);
 	if (process == &session->launcher)
@@ -1020,6 +1029,8 @@ static void finish_launch(struct fplinux_session *session)
 	bool active = launch_in_progress(session) || session->launch_id[0];
 
 	session->launch_starting = false;
+	session->launch_retained = false;
+	session->activation_ready = false;
 	session->app_busy = false;
 	session->app_busy_finishing = false;
 	session->launch_id[0] = '\0';
@@ -1034,12 +1045,25 @@ static void clear_pending_launch(struct fplinux_session *session)
 	session->pending_id[0] = '\0';
 }
 
+static bool leave_app(struct fplinux_session *session, bool retain);
+
+static void finish_activation(struct fplinux_session *session)
+{
+	if (!session->launch_starting || !session->activation_ready ||
+	    !session->app->policy.ready || !session->app->drawn)
+		return;
+	session->launch_starting = false;
+	if (!session->app_busy && !session->app_busy_finishing)
+		finish_launch(session);
+}
+
 void fplinux_session_cancel_launch(struct fplinux_session *session)
 {
 	struct itimerspec soon = { .it_value.tv_nsec = 1000000 };
 	bool owns_operation =
 		session->app && !session->pending_id[0] &&
 		!strcmp(session->app->policy.app_id, session->launch_id);
+	bool retained = session->launch_retained;
 
 	if (!launch_in_progress(session))
 		return;
@@ -1049,8 +1073,12 @@ void fplinux_session_cancel_launch(struct fplinux_session *session)
 	/* Before the fork, the selected record may still be an unrelated task
 	 * completing its Home handoff. Cancelling the new launch retains it. */
 	if (owns_operation) {
-		session->app->cancelled = true;
-		request_close(session, session->app);
+		if (retained) {
+			leave_app(session, true);
+		} else {
+			session->app->cancelled = true;
+			request_close(session, session->app);
+		}
 	}
 	finish_launch(session);
 	send_active(session);
@@ -1068,6 +1096,7 @@ static void set_busy(struct fplinux_session *session,
 		bool fresh = !launch_in_progress(session);
 
 		if (fresh) {
+			session->launch_retained = false;
 			session->launch_ms = now_ms(session);
 			if (!++session->launch_generation)
 				++session->launch_generation;
@@ -1121,9 +1150,8 @@ static bool leave_app(struct fplinux_session *session, bool retain)
 	struct process *app = session->app;
 
 	if (is_running(app) && app->policy.shown &&
-	    session->held_scene == HELD_SCENE_NONE)
+	    !(session->held_scene & HELD_SCENE_LAUNCH))
 		hold_scene(session, HELD_SCENE_HOME);
-	clear_end_prompt(session);
 	if (!is_running(app) || app->leaving)
 		return false;
 	if (!session->pending_id[0])
@@ -1154,6 +1182,7 @@ static bool leave_app(struct fplinux_session *session, bool retain)
 
 static bool begin_launch(struct fplinux_session *session,
 			 const struct fplinux_desktop_entry *entry,
+			 enum fplinux_ui_session_activation activation,
 			 int frame_fd, int width, int height)
 {
 	struct process *existing = task_for_id(session, entry->app_id);
@@ -1165,8 +1194,6 @@ static bool begin_launch(struct fplinux_session *session,
 		send_active(session);
 		return false;
 	}
-	if (existing == session->app && app_in_foreground(session))
-		return true;
 	clear_pending_launch(session);
 	copy_value(session->pending_id, sizeof(session->pending_id),
 		   entry->app_id);
@@ -1178,6 +1205,9 @@ static bool begin_launch(struct fplinux_session *session,
 		   entry->title);
 	session->launch_ms = now_ms(session);
 	session->launch_starting = true;
+	session->launch_activation = activation;
+	session->launch_retained = existing != NULL;
+	session->activation_ready = false;
 	session->app_busy = false;
 	session->app_busy_finishing = false;
 	if (!++session->launch_generation)
@@ -1198,7 +1228,8 @@ static bool begin_launch(struct fplinux_session *session,
 }
 
 static void launch(struct fplinux_session *session, const char *id,
-		   int frame_fd, int width, int height)
+		   enum fplinux_ui_session_activation activation, int frame_fd,
+		   int width, int height)
 {
 	struct fplinux_desktop_entry entry;
 
@@ -1213,63 +1244,67 @@ static void launch(struct fplinux_session *session, const char *id,
 		send_active(session);
 		return;
 	}
-	begin_launch(session, &entry, frame_fd, width, height);
+	begin_launch(session, &entry, activation, frame_fd, width, height);
 }
 
-static void return_home(struct fplinux_session *session, bool retain)
+static void return_home(struct fplinux_session *session)
 {
 	struct fplinux_ui_session_message message = {
 		.type = FPLINUX_UI_SESSION_HOME,
 	};
+	unsigned int i;
 
-	if (end_prompt_active(session))
-		hold_scene(session, HELD_SCENE_HOME);
 	clear_pending_launch(session);
 	finish_launch(session);
-	clear_end_prompt(session);
+	for (i = 0; i < FPLINUX_UI_SESSION_TASK_MAX; ++i)
+		session->tasks[i].close_activate = false;
+	/* Home preserves the decision, but no longer waits for its hidden frame. */
+	if (app_in_foreground(session) && session->app->policy.shown)
+		hold_scene(session, HELD_SCENE_HOME);
+	release_scene(session, HELD_SCENE_CLOSE);
 	/* The launcher shows its home view once the application is gone. */
 	if (session->launcher.control_fd >= 0)
 		fplinux_ui_session_send(session->launcher.control_fd, &message);
 	session->launcher_home_view = true;
 	session->launcher_tasks_view = false;
-	leave_app(session, retain);
+	leave_app(session, true);
 	send_active(session);
 }
 
 void fplinux_session_home(struct fplinux_session *session)
 {
-	return_home(session, true);
+	return_home(session);
 }
 
 static void finish_user_close(struct fplinux_session *session,
 			      struct process *process)
 {
-	bool home = process->close_home;
-
 	process->close_serial = 0;
 	process->close_waiting = false;
 	process->close_activate = false;
 	if (process != session->app) {
+		if (session->close_pid == process->policy.pid &&
+		    session->close_token == process->policy.token)
+			release_scene(session, HELD_SCENE_CLOSE);
 		request_close(session, process);
 		return;
 	}
 	process->park_on_leave = false;
-	if (home) {
-		/* Preparation may have already removed the launcher's END prompt. */
+	if (process->policy.shown)
 		hold_scene(session, HELD_SCENE_HOME);
-		return_home(session, false);
-	} else {
-		session->launcher_home_view = false;
-		if (process->leaving)
-			request_close(session, process);
-		else
-			leave_app(session, false);
-		send_active(session);
-	}
+	if (session->close_pid == process->policy.pid &&
+	    session->close_token == process->policy.token)
+		release_scene(session, HELD_SCENE_CLOSE);
+	session->launcher_home_view = false;
+	if (process->leaving)
+		request_close(session, process);
+	else
+		leave_app(session, false);
+	send_active(session);
 }
 
 static void prepare_user_close(struct fplinux_session *session,
-			       struct process *process, bool home)
+			       struct process *process)
 {
 	struct fplinux_ui_session_message message = {
 		.type = FPLINUX_UI_SESSION_PREPARE_CLOSE,
@@ -1277,25 +1312,23 @@ static void prepare_user_close(struct fplinux_session *session,
 
 	if (!is_running(process) || process->policy.closing)
 		return;
-	if (process->close_waiting) {
-		process->close_home = home;
-		finish_user_close(session, process);
+	if (process->close_serial && !process->close_waiting)
 		return;
+	if (!process->close_serial) {
+		if (!++session->next_close_serial)
+			++session->next_close_serial;
+		process->close_serial = session->next_close_serial;
+		process->close_requested_ms = now_ms(session);
 	}
-	if (process->close_serial)
-		return;
-	if (!++session->next_close_serial)
-		++session->next_close_serial;
-	process->close_serial = session->next_close_serial;
-	process->close_requested_ms = now_ms(session);
-	process->close_home = home;
+	/* Capture before PREPARE_CLOSE can replace a covering menu or dialog. */
+	hold_scene(session, HELD_SCENE_CLOSE);
+	session->close_pid = process->policy.pid;
+	session->close_token = process->policy.token;
+	session->close_scene_serial = process->close_serial;
+	session->close_frame_ready = false;
+	process->close_activate = process != session->app;
 	message.serial = process->close_serial;
-	copy_value(message.reason, sizeof(message.reason),
-		   home ? "home" : "exit");
-	if (process == session->app) {
-		clear_end_prompt(session);
-		send_active(session);
-	}
+	copy_value(message.reason, sizeof(message.reason), "exit");
 	if (process->control_fd < 0 ||
 	    !fplinux_ui_session_send(process->control_fd, &message))
 		finish_user_close(session, process);
@@ -1315,9 +1348,13 @@ static void close_reply(struct fplinux_session *session,
 		process->close_serial = 0;
 		process->close_waiting = false;
 		process->close_activate = false;
+		if (process != session->app &&
+		    session->close_pid == process->policy.pid &&
+		    session->close_token == process->policy.token)
+			release_scene(session, HELD_SCENE_CLOSE);
 	} else if (!strcmp(message->value, "wait")) {
 		process->close_waiting = true;
-		process->close_activate = process != session->app;
+		process->close_activate &= process != session->app;
 	}
 	changed(session);
 }
@@ -1983,6 +2020,21 @@ static void send_input_locale(struct fplinux_session *session,
 	send_active(session);
 }
 
+static void refresh_default_titles(struct fplinux_session *session)
+{
+	for (unsigned int i = 0; i <= FPLINUX_UI_SESSION_TASK_MAX; ++i) {
+		struct process *process = process_at(session, i);
+		struct fplinux_desktop_entry entry;
+
+		if (process->policy.pid && !process->title_supplied &&
+		    read_entry(session, process->policy.app_id, &entry))
+			copy_value(process->policy.title,
+				   sizeof(process->policy.title), entry.title);
+	}
+	send_active(session);
+	send_tasks(session);
+}
+
 static void handle_setting(struct fplinux_session *session,
 			   struct process *process,
 			   const struct fplinux_ui_session_message *message)
@@ -1992,6 +2044,7 @@ static void handle_setting(struct fplinux_session *session,
 	struct fplinux_session_settings next = session->settings;
 	char current[FPLINUX_UI_SESSION_TEXT_BYTES];
 	bool input_changed = false;
+	bool locale_changed = false;
 	uint32_t visual_serial = 0;
 
 	if (!strcmp(message->name, "brightness_preview")) {
@@ -2031,7 +2084,9 @@ static void handle_setting(struct fplinux_session *session,
 			session->redraw_ready = false;
 			close_for_restart(session, process);
 		}
-		if (strcmp(next.locale, session->settings.locale)) {
+		locale_changed =
+			strcmp(next.locale, session->settings.locale) != 0;
+		if (locale_changed) {
 			fprintf(stderr, "fplinux-session: locale %s\n",
 				next.locale);
 		}
@@ -2042,6 +2097,8 @@ static void handle_setting(struct fplinux_session *session,
 		input_changed = strcmp(next.input_locale,
 				       session->settings.input_locale) != 0;
 		session->settings = next;
+		if (locale_changed)
+			refresh_default_titles(session);
 		fplinux_session_power_configure(&session->power,
 						next.screen_off_seconds,
 						next.auto_lock_seconds,
@@ -2184,12 +2241,8 @@ static bool receive_message(struct fplinux_session *session, struct peer *peer,
 		if (!process->policy.ready && process->drawn)
 			process->handoff_ms = now_ms(session);
 		process->policy.ready = true;
-		if (process == session->app && process->drawn &&
-		    session->launch_starting) {
-			session->launch_starting = false;
-			if (!session->app_busy && !session->app_busy_finishing)
-				finish_launch(session);
-		}
+		if (process == session->app)
+			finish_activation(session);
 		send_active(session);
 		break;
 	case FPLINUX_UI_SESSION_LAUNCH:
@@ -2202,6 +2255,7 @@ static bool receive_message(struct fplinux_session *session, struct peer *peer,
 		/* Nothing starts behind the keyguard. */
 		if (!session->power.locked)
 			launch(session, message->app_id,
+			       FPLINUX_UI_SESSION_ACTIVATION_OPEN,
 			       message->has_frame ? message->frame_fd : -1,
 			       message->has_frame ? message->width : 0,
 			       message->has_frame ? message->height : 0);
@@ -2246,10 +2300,6 @@ static bool receive_message(struct fplinux_session *session, struct peer *peer,
 				    strlen(session->last_active.clock_data),
 				    &ring, &serial) == CLOCK_OK)
 				session->clock_drawn_event = ring.event.id;
-			if (session->last_active.end_prompt &&
-			    session->last_active.token ==
-				    session->end_prompt_token)
-				session->end_prompt_drawn = true;
 			if (session->battery_notice !=
 				    FPLINUX_SESSION_BATTERY_ALERT_NONE &&
 			    !strcmp(session->last_active.notice,
@@ -2271,7 +2321,26 @@ static bool receive_message(struct fplinux_session *session, struct peer *peer,
 		    message->serial == session->redraw_serial)
 			session->redraw_ready = true;
 		break;
+	case FPLINUX_UI_SESSION_ACTIVATION_ACK:
+		if (process == &session->launcher)
+			return false;
+		if (session->launch_starting && !session->pending_id[0] &&
+		    process == session->app && !process->policy.closing &&
+		    !strcmp(process->policy.app_id, session->launch_id) &&
+		    message->serial == session->launch_generation) {
+			session->activation_ready = true;
+			finish_activation(session);
+			send_active(session);
+		}
+		break;
+	case FPLINUX_UI_SESSION_CLOSE_ACK:
+		if (process->policy.pid == session->close_pid &&
+		    process->policy.token == session->close_token &&
+		    message->serial == session->close_scene_serial)
+			session->close_frame_ready = true;
+		break;
 	case FPLINUX_UI_SESSION_TITLE:
+		process->title_supplied = true;
 		copy_value(process->policy.title, sizeof(process->policy.title),
 			   message->title);
 		send_active(session);
@@ -2292,24 +2361,6 @@ static bool receive_message(struct fplinux_session *session, struct peer *peer,
 		if (process != session->app && process != &session->launcher)
 			break;
 		fplinux_session_home(session);
-		break;
-	case FPLINUX_UI_SESSION_END:
-		if (process != &session->launcher)
-			return false;
-		if (!end_prompt_active(session) || session->power.locked ||
-		    clock_due(session) ||
-		    message->token != session->end_prompt_token ||
-		    strcmp(message->app_id, session->app->policy.app_id))
-			break;
-		if (!strcmp(message->value, "cancel")) {
-			clear_end_prompt(session);
-			send_active(session);
-			changed(session);
-		} else if (!strcmp(message->value, "minimize")) {
-			return_home(session, true);
-		} else {
-			prepare_user_close(session, session->app, true);
-		}
 		break;
 	case FPLINUX_UI_SESSION_CANCEL:
 		if (process != &session->launcher)
@@ -2332,7 +2383,7 @@ static bool receive_message(struct fplinux_session *session, struct peer *peer,
 				process->failed = true;
 			request_close(session, process);
 		} else if (!process->policy.closing) {
-			prepare_user_close(session, process, false);
+			prepare_user_close(session, process);
 		}
 		break;
 	case FPLINUX_UI_SESSION_CLOSE_REPLY:
@@ -2428,9 +2479,10 @@ static bool receive_message(struct fplinux_session *session, struct peer *peer,
 			break;
 		}
 		if (message->type == FPLINUX_UI_SESSION_ACTIVATE) {
-			launch(session, message->app_id, -1, 0, 0);
+			launch(session, message->app_id,
+			       FPLINUX_UI_SESSION_ACTIVATION_RESUME, -1, 0, 0);
 		} else {
-			prepare_user_close(session, task, false);
+			prepare_user_close(session, task);
 		}
 		break;
 	}
@@ -2539,7 +2591,6 @@ static void reap_process(struct fplinux_session *session,
 	if (process == session->app && !session->pending_id[0])
 		finish_launch(session);
 	if (process == session->app) {
-		clear_end_prompt(session);
 		session->app = &session->idle_app;
 	}
 	initialize_process(process);
@@ -2569,6 +2620,12 @@ static void hand_off(struct fplinux_session *session, uint64_t time,
 	if (!is_running(app) || !app->drawn || !app->policy.ready ||
 	    (app->policy.shown && !app->leaving))
 		return;
+	/* An old buffer and the launcher timeout cannot acknowledge activation. */
+	if (!app->leaving && session->launch_starting &&
+	    !session->activation_ready) {
+		*needs_tick = true;
+		return;
+	}
 	/* Nothing to swap on screen; a hidden launcher does not draw either. */
 	if (launcher_on_top(session) ||
 	    session->power.display == FPLINUX_UI_SESSION_DISPLAY_OFF)
@@ -2679,8 +2736,16 @@ static void manage_processes(struct fplinux_session *session, uint64_t time,
 			continue;
 		if (!process->policy.ready || !process->policy.framed) {
 			*needs_tick = true;
-			if (time - process->started_ms >= 10000 &&
-			    !process->policy.closing) {
+			uint64_t started =
+				process == session->app &&
+						session->launch_starting ?
+					session->launch_ms :
+					process->started_ms;
+
+			if (time - started >= FPLINUX_SESSION_STARTUP_MS &&
+			    !process->policy.closing &&
+			    !(process == session->app &&
+			      session->launch_retained)) {
 				fprintf(stderr,
 					"fplinux-session: startup timed out for %s ready=%d frame=%d\n",
 					process->policy.app_id,
@@ -2711,17 +2776,28 @@ static void manage_processes(struct fplinux_session *session, uint64_t time,
 		if (process->pid_fd < 0)
 			*needs_tick = true;
 	}
+	if (session->launch_starting) {
+		*needs_tick = true;
+		if (time - session->launch_ms >= FPLINUX_SESSION_STARTUP_MS) {
+			fplinux_session_cancel_launch(session);
+			copy_value(session->error, sizeof(session->error),
+				   "app-start-failed");
+			send_active(session);
+		}
+	}
 	if (!session->destroying && !launch_in_progress(session) &&
 	    !session->power.locked && !notice_covers_app(session) &&
 	    !clock_due(session)) {
 		for (i = 0; i < FPLINUX_UI_SESSION_TASK_MAX; ++i) {
 			struct process *process = &session->tasks[i];
 
-			if (!process->close_activate || !is_running(process))
+			if (!process->close_activate ||
+			    !process->close_waiting || !is_running(process))
 				continue;
 			process->close_activate = false;
 			session->launcher_tasks_view = false;
-			launch(session, process->policy.app_id, -1, 0, 0);
+			launch(session, process->policy.app_id,
+			       FPLINUX_UI_SESSION_ACTIVATION_RESUME, -1, 0, 0);
 			break;
 		}
 	}
@@ -2730,8 +2806,16 @@ static void manage_processes(struct fplinux_session *session, uint64_t time,
 		struct process *existing =
 			task_for_id(session, session->pending_id);
 
-		if (!read_entry(session, session->pending_id, &entry) ||
-		    entry.mode == FPLINUX_UI_SESSION_LAUNCHER) {
+		if (session->launch_activation ==
+			    FPLINUX_UI_SESSION_ACTIVATION_RESUME &&
+		    (!existing || !is_running(existing))) {
+			reply(&session->launcher, FPLINUX_UI_SESSION_ERROR, "",
+			      "", "task-unavailable");
+			clear_pending_launch(session);
+			finish_launch(session);
+			send_tasks(session);
+		} else if (!read_entry(session, session->pending_id, &entry) ||
+			   entry.mode == FPLINUX_UI_SESSION_LAUNCHER) {
 			copy_value(session->error, sizeof(session->error),
 				   "app-unavailable");
 			clear_pending_launch(session);
@@ -2754,8 +2838,7 @@ static void manage_processes(struct fplinux_session *session, uint64_t time,
 				session->app->handoff_ms = time;
 				set_lifecycle(session, session->app,
 					      FPLINUX_UI_SESSION_FOREGROUND);
-				/* Its existing buffer still passes the launcher ACK barrier. */
-				finish_launch(session);
+				send_activation(session, session->app);
 				fplinux_session_power_activity(&session->power,
 							       false, time);
 				changed(session);
@@ -2769,6 +2852,7 @@ static void manage_processes(struct fplinux_session *session, uint64_t time,
 					finish_launch(session);
 				} else {
 					session->app = slot;
+					session->launch_retained = false;
 					if (!start_process(session, slot,
 							   &entry)) {
 						session->app =
@@ -2805,8 +2889,7 @@ static void manage_processes(struct fplinux_session *session, uint64_t time,
 	/* An unanswered notice keeps it, also while the display is off. */
 	if (!locked && app_in_foreground(session) && app_runs_alone(session) &&
 	    session->battery_notice == FPLINUX_SESSION_BATTERY_ALERT_NONE &&
-	    !end_prompt_active(session) && !clock_due(session) &&
-	    is_running(&session->launcher))
+	    !clock_due(session) && is_running(&session->launcher))
 		request_close(session, &session->launcher);
 	for (i = 0; i < FPLINUX_SESSION_PEERS; ++i) {
 		struct peer *peer = &session->peers[i];
@@ -2853,31 +2936,35 @@ static void settle_held_scene(struct fplinux_session *session)
 		clear_held_scene(session);
 		return;
 	}
-	if (session->held_scene == HELD_SCENE_APPEARANCE) {
+	if (session->held_scene & HELD_SCENE_APPEARANCE) {
 		requester = process_for_pid(session, session->redraw_pid);
 		if (!requester || !is_running(requester) ||
 		    requester->policy.token != session->redraw_token ||
-		    requester != session->app) {
-			clear_held_scene(session);
-			return;
-		}
-		if (session->redraw_ready &&
-		    (launcher_current || session->launcher_failures >= 3))
-			clear_held_scene(session);
-		return;
+		    requester != session->app || requester->leaving ||
+		    (session->redraw_ready &&
+		     (launcher_current || session->launcher_failures >= 3)))
+			release_scene(session, HELD_SCENE_APPEARANCE);
+	}
+	if (session->held_scene & HELD_SCENE_CLOSE) {
+		requester = process_for_pid(session, session->close_pid);
+		if (!requester || !is_running(requester) ||
+		    requester->policy.token != session->close_token ||
+		    (requester == session->app && requester->policy.shown &&
+		     session->close_frame_ready &&
+		     (requester->policy.mode == FPLINUX_UI_SESSION_FULLSCREEN ||
+		      launcher_current || session->launcher_failures >= 3)))
+			release_scene(session, HELD_SCENE_CLOSE);
 	}
 	if (launch_in_progress(session) || session->pending_id[0])
 		return;
-	if (session->held_scene == HELD_SCENE_LAUNCH &&
-	    app_in_foreground(session) && session->app->policy.shown) {
-		clear_held_scene(session);
-		return;
-	}
+	if ((session->held_scene & HELD_SCENE_LAUNCH) &&
+	    app_in_foreground(session) && session->app->policy.shown)
+		release_scene(session, HELD_SCENE_LAUNCH | HELD_SCENE_HOME);
 	if (((launcher_ready && !session->launcher_wait_serial &&
 	      !session->launcher_draws_app) ||
 	     session->launcher_failures >= 3) &&
 	    (!is_running(session->app) || !session->app->policy.shown))
-		clear_held_scene(session);
+		release_scene(session, HELD_SCENE_HOME | HELD_SCENE_LAUNCH);
 }
 
 static void advance(struct fplinux_session *session)
@@ -2905,15 +2992,8 @@ static void advance(struct fplinux_session *session)
 		save_settings(session);
 	clock_power(session, time);
 	manage_clock_signal(session, time, &needs_tick);
-	if (clock_due(session)) {
-		clear_end_prompt(session);
+	if (clock_due(session))
 		clear_held_scene(session);
-	}
-	if (session->end_prompt_token &&
-	    (session->power.locked || !end_prompt_active(session))) {
-		clear_end_prompt(session);
-		send_active(session);
-	}
 	poll_power(session, time);
 	manage_processes(session, time, &needs_tick);
 	settle_held_scene(session);
@@ -3085,7 +3165,6 @@ fplinux_session_create(const struct fplinux_session_options *options)
 	session->epoll_fd = -1;
 	session->listener_fd = -1;
 	session->timer_fd = -1;
-	session->end_frame_fd = -1;
 	session->clock_signal_fd = -1;
 	fplinux_session_vibrator_init(&session->vibrator);
 	fplinux_session_audio_init(&session->audio, NULL, -1);
@@ -3166,7 +3245,6 @@ void fplinux_session_destroy(struct fplinux_session *session)
 	session->destroying = true;
 	fplinux_session_vibration_stop(&session->vibration);
 	show_vibration(session, false);
-	clear_end_prompt(session);
 	clear_held_scene(session);
 	/* All clients get the same save window, independent of the session clock. */
 	started = system_ms();
@@ -3358,7 +3436,6 @@ void fplinux_session_output_resized(struct fplinux_session *session, int width,
 		width, height);
 	session->output_width = width;
 	session->output_height = height;
-	clear_end_prompt(session);
 	clear_held_scene(session);
 	session->profile = fplinux_ui_profile_spec(
 		fplinux_ui_profile_for_screen(width, height));
@@ -3425,24 +3502,23 @@ void fplinux_session_surface_committed(struct fplinux_session *session,
 		return;
 	bool placed = process == session->app &&
 		      place_app(session, width, height);
-	bool launch_finished =
-		process == session->app && process->policy.ready &&
-		(session->launch_starting || session->app_busy_finishing);
+	bool busy_finished = process == session->app && process->policy.ready &&
+			     session->app_busy_finishing;
 
 	if (process->wake_due)
 		process->wake_committed = true;
-	if (launch_finished) {
-		session->launch_starting = false;
+	if (busy_finished) {
 		session->app_busy_finishing = false;
-		if (!session->app_busy)
+		if (!session->app_busy && !session->launch_starting)
 			finish_launch(session);
 	}
 	if (process == session->app && !process->drawn) {
 		process->drawn = true;
 		process->handoff_ms = now_ms(session);
+		finish_activation(session);
 		/* The launcher may draw its bars now. */
 		send_active(session);
-	} else if (launch_finished) {
+	} else if (busy_finished) {
 		send_active(session);
 	} else if (!placed) {
 		return;
@@ -3626,27 +3702,7 @@ bool fplinux_session_key(struct fplinux_session *session, unsigned int code,
 		    !clock_due(session)) {
 			if (launch_in_progress(session))
 				fplinux_session_cancel_launch(session);
-			else if (end_prompt_active(session) ||
-				 (app_in_foreground(session) &&
-				  session->app->close_waiting))
-				prepare_user_close(session, session->app, true);
-			else if (app_in_foreground(session) &&
-				 session->app->policy.ready &&
-				 session->app->policy.shown &&
-				 !launcher_on_top(session)) {
-				clear_end_prompt(session);
-				session->end_prompt_token =
-					session->app->policy.token;
-				session->end_prompt_drawn = false;
-				if (session->options.capture_frame)
-					session->end_frame_fd =
-						session->options.capture_frame(
-							session->options.context,
-							&session->end_frame_width,
-							&session->end_frame_height);
-				send_active(session);
-				changed(session);
-			} else
+			else
 				fplinux_session_home(session);
 		}
 		if (clock_due(session) && !pressed)

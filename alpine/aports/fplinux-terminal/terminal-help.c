@@ -11,25 +11,26 @@ struct help_section {
 static const struct help_section sections[] = {
 	{
 		N_("Typing"),
-		N_("2–9: Press repeatedly to choose a letter. Pause or press another key to send it.\n"
+		N_("2–9: Press repeatedly to choose a letter. It stays highlighted until a pause or another key sends it.\n"
 		   "1: punctuation. 0: space.\n"
-		   "*: choose a symbol. #: cycle letter case, input languages and 123.\n"
+		   "*: choose a symbol. Hold * to change the input language.\n"
+		   "#: change letter case. Hold # to switch between letters and 123.\n"
 		   "Hold a digit to type the digit.\n"
 		   "OK: Enter. Dial: Tab completion.\n"
 		   "Clear: cancel a pending letter or the modifiers, otherwise erase. Hold to repeat.\n"
-		   "The line above the soft keys shows the input mode, such as abc or 123."),
+		   "The header shows the input mode on the right, such as abc or 123."),
 	},
 	{
 		N_("Options"),
-		N_("Modifiers: Mark Ctrl, Alt or Shift and choose Done. They apply to the next key or letter and stay visible above the soft keys until then. In scrollback, C, A and S stand for Ctrl, Alt and Shift when space is tight.\n"
-		   "Symbols and Special keys: type a symbol, Esc or F1–F12.\n"
-		   "Interrupt, End input and Search send Ctrl+C, Ctrl+D and Ctrl+R.\n"
+		N_("Modifiers: Mark Ctrl, Alt or Shift and choose Done. They apply to the next key or letter and stay visible in the header until then. When space is tight, C, A and S stand for Ctrl, Alt and Shift.\n"
+		   "Symbols and Special keys: type a symbol, Esc, Home, End, Delete, PageUp, PageDown or F1–F12. Special keys opens with Esc selected and shows armed modifiers in its header.\n"
+		   "Interrupt, End input and Search send exactly Ctrl+C, Ctrl+D and Ctrl+R, then clear unused modifiers. A pending letter is sent first with its modifiers.\n"
 		   "Font size: choose Compact (6×12) or Larger (8×16). The choice is saved."),
 	},
 	{
 		N_("Scrollback"),
-		N_("Options > Scrollback shows earlier output. Up/Down: scroll one line. Left/Right: scroll one page. The counter above the soft keys shows how many lines are above.\n"
-		   "Back or typing returns to live output.\n"
+		N_("Options > Scrollback shows earlier output. Up/Down: scroll one line. Left/Right: scroll one page. The header says Scrollback; its upward-arrow counter shows the distance from live output. At zero, the arrows still scroll.\n"
+		   "Back returns to the latest output. While the shell is running, typing returns too.\n"
 		   "At the Bash prompt, Up/Down choose earlier commands, and Search finds one."),
 	},
 	{
@@ -41,7 +42,8 @@ static const struct help_section sections[] = {
 	{
 		N_("Exit"),
 		N_("Options > Exit closes the terminal and its shell and returns to the app list. Save files first.\n"
-		   "The red key offers Minimize and Close. Minimize keeps the shell running; Close stops its programs. Tasks reopens a minimized terminal."),
+		   "The red key returns to Home and keeps the shell running. Reopen it from Tasks; Close app stops its programs.\n"
+		   "A successful shell exit closes Terminal. After an unsuccessful exit, read the final output or Scrollback, then choose Close."),
 	},
 };
 

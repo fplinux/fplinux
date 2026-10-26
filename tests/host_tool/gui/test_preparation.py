@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import fplinux_ui_profile
 import pytest
 
 from tests import ROOT
@@ -40,7 +41,28 @@ class PreparationBinaries:
 
 
 @pytest.fixture(scope="module")
-def preparation(tmp_path_factory: pytest.TempPathFactory) -> Iterator[PreparationBinaries]:
+def preparation_profile(request: pytest.FixtureRequest, palette_preparation_profile: Path) -> Path:
+    if getattr(request, "param", None) == "variant":
+        return palette_preparation_profile
+    return ROOT / "lib/fplinux/fplinux-ui-profile.c"
+
+
+@pytest.fixture(scope="module")
+def palette_preparation_profile(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    with c_build_directory(tmp_path_factory, "preparation-palette") as directory:
+        tokens = json.loads((ROOT / "lib/fplinux/fplinux-ui-profile.json").read_text())
+        tokens["themes"]["dark"] = json.loads(
+            (PEERS / "fixtures/raw-dark-palette.json").read_text()
+        )
+        source = directory / "profile.c"
+        source.write_text(fplinux_ui_profile.render(tokens))
+        yield source
+
+
+@pytest.fixture(scope="module")
+def preparation(
+    tmp_path_factory: pytest.TempPathFactory, preparation_profile: Path
+) -> Iterator[PreparationBinaries]:
     with c_build_directory(tmp_path_factory, "preparation") as directory:
         command = directory / "preparation"
         status = directory / "status"
@@ -83,6 +105,7 @@ def preparation(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Preparatio
                 str(ROOT / "lib/fplinux/fplinux-cli.c"),
                 str(ROOT / "lib/fplinux/fplinux-font.c"),
                 str(ROOT / "lib/fplinux/fplinux-utf8.c"),
+                str(preparation_profile),
                 str(PEERS / "preparation-session.c"),
                 "-Wl,--wrap=fopen,--wrap=fplinux_font_glyph",
                 *json_flags,
@@ -100,6 +123,43 @@ def preparation(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Preparatio
             name="compile preparation status reader",
         )
         yield PreparationBinaries(command, status, small_font, large_font)
+
+
+@pytest.mark.parametrize("preparation_profile", ["variant"], indirect=True)
+@pytest.mark.parametrize(("width", "height"), [(128, 160), (176, 220), (240, 320), (320, 240)])
+def test_dark_palette_tokens_reach_reading_pixels(
+    preparation: PreparationBinaries, tmp_path: Path, width: int, height: int
+) -> None:
+    status = tmp_path / "status.json"
+    update_status(preparation, status, "reading", "--completed", "33554432", "--total", "67108864")
+    environment = display_environment(preparation, tmp_path, width, height)
+
+    def inspect_palette(process: subprocess.Popen[str], deadline: float) -> None:
+        assert next_event(process, deadline) == "opened"
+        assert next_frame(process, deadline) == (
+            "FPLinuxFirststartPhonebackup50%32.0/64.0MiBKeepthephoneconnected."
+        )
+        pixels = struct.unpack(f"<{width * height}H", (tmp_path / "frame").read_bytes())
+        font_width, font_height = (6, 12) if width < 200 else (8, 16)
+        glyph_area = font_width * font_height
+        half_bar_area = (width - 2 * font_width) // 2 * (font_height // 2)
+        assert set(pixels) == {0x0000, 0x07E0, 0x001F, 0x8010, 0xF800}
+        assert pixels.count(0x07E0) == 18 * glyph_area
+        assert pixels.count(0x001F) == 44 * glyph_area
+        assert pixels.count(0x8010) == 3 * glyph_area + half_bar_area
+        assert pixels.count(0xF800) == half_bar_area
+        process.send_signal(signal.SIGTERM)
+
+    result = run_process(
+        [str(preparation.command), str(status)],
+        name=f"render generated dark palette on {width}x{height}",
+        timeout=5,
+        env=environment,
+        while_running=inspect_palette,
+    )
+    assert result.returncode == 143, result.stderr
+    assert result.stdout == "closed\n"
+    assert result.stderr == ""
 
 
 def update_status(
@@ -290,7 +350,7 @@ def display_environment(
     return {
         **os.environ,
         "FPLINUX_TEST_FONT": str(
-            preparation.small_font if width == 128 else preparation.large_font
+            preparation.small_font if width < 200 else preparation.large_font
         ),
         "FPLINUX_TEST_GEOMETRY": f"{width}x{height}",
         "FPLINUX_TEST_VT": str(vt),
@@ -323,19 +383,19 @@ def test_reading_renders_real_progress_and_complete_text(  # noqa: PLR0913 -- ge
         assert next_event(process, deadline) == "opened"
         assert next_frame(process, deadline) == expected
         pixels = struct.unpack(f"<{width * height}H", (tmp_path / "frame").read_bytes())
-        font_width, font_height = (6, 12) if width == 128 else (8, 16)
+        font_width, font_height = (6, 12) if width < 200 else (8, 16)
         bar_width = width - 2 * font_width
         filled = int(percent[:-1]) * bar_width // 100
         bar_rows = []
         for row in range(height):
             inside = pixels[row * width + font_width : (row + 1) * width - font_width]
-            if all(pixel in {0x5E9B, 0x29A9} for pixel in inside):
+            if all(pixel in {0xAE7B, 0x3A29} for pixel in inside):
                 bar_rows.append(inside)
         assert bar_rows
         assert all(
-            row == (0x5E9B,) * filled + (0x29A9,) * (bar_width - filled) for row in bar_rows
+            row == (0xAE7B,) * filled + (0x3A29,) * (bar_width - filled) for row in bar_rows
         )
-        assert sum(pixel != 0x0863 for pixel in pixels) == (
+        assert sum(pixel != 0x1082 for pixel in pixels) == (
             len(expected) * font_width * font_height + bar_width * (font_height // 2)
         )
         process.send_signal(signal.SIGTERM)
@@ -383,9 +443,9 @@ def test_stage_screens_fit_and_animate_only_busy_work(  # noqa: PLR0913 -- each 
         assert next_frame(process, deadline) == expected
         frame = (tmp_path / "frame").read_bytes()
         pixels = struct.unpack(f"<{width * height}H", frame)
-        font_width, font_height = (6, 12) if width == 128 else (8, 16)
+        font_width, font_height = (6, 12) if width < 200 else (8, 16)
         indicator_area = (width - 2 * font_width) * (font_height // 2) if animated else 0
-        assert sum(pixel != 0x0863 for pixel in pixels) == (
+        assert sum(pixel != 0x1082 for pixel in pixels) == (
             len(expected) * font_width * font_height + indicator_area
         )
         if animated:

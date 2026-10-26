@@ -46,12 +46,19 @@ static const char *const message_names[] = {
 	[FPLINUX_UI_SESSION_TASKS] = "TASKS",
 	[FPLINUX_UI_SESSION_ACTIVATE] = "ACTIVATE",
 	[FPLINUX_UI_SESSION_CLOSE_TASK] = "CLOSE_TASK",
-	[FPLINUX_UI_SESSION_END] = "END",
 	[FPLINUX_UI_SESSION_REDRAW_ACK] = "REDRAW_ACK",
 	[FPLINUX_UI_SESSION_CLOCK] = "clock",
 	[FPLINUX_UI_SESSION_VIBRATE] = "VIBRATE",
 	[FPLINUX_UI_SESSION_PREPARE_CLOSE] = "PREPARE_CLOSE",
 	[FPLINUX_UI_SESSION_CLOSE_REPLY] = "CLOSE_REPLY",
+	[FPLINUX_UI_SESSION_CLOSE_ACK] = "CLOSE_ACK",
+	[FPLINUX_UI_SESSION_ACTIVATION] = "ACTIVATION",
+	[FPLINUX_UI_SESSION_ACTIVATION_ACK] = "ACTIVATION_ACK",
+};
+
+static const char *const activation_names[] = {
+	[FPLINUX_UI_SESSION_ACTIVATION_OPEN] = "open",
+	[FPLINUX_UI_SESSION_ACTIVATION_RESUME] = "resume",
 };
 
 static const char *const lifecycle_names[] = {
@@ -85,16 +92,16 @@ static const char *const storage_names[] = {
 
 /* Every field a packet may carry; anything else makes it invalid. */
 static const char *const field_names[] = {
-	"type",		 "mode",	  "app_id",	   "active_id",
-	"selected_id",	 "title",	  "left",	   "centre",
-	"right",	 "reason",	  "width",	   "height",
-	"display",	 "locked",	  "visible",	   "enabled",
-	"locale",	 "input_locale",  "name",	   "value",
-	"battery",	 "charging",	  "notice",	   "screen_width",
-	"screen_height", "theme",	  "serial",	   "lifecycle",
-	"tasks",	 "token",	  "end_prompt",	   "clock",
-	"audio",	 "vibration",	  "pattern",	   "repeat",
-	"applied",	 "storage_state", "storage_error",
+	"type",		 "mode",	  "app_id",	"active_id",
+	"selected_id",	 "title",	  "left",	"centre",
+	"right",	 "reason",	  "width",	"height",
+	"display",	 "locked",	  "visible",	"enabled",
+	"locale",	 "input_locale",  "name",	"value",
+	"battery",	 "charging",	  "notice",	"screen_width",
+	"screen_height", "theme",	  "serial",	"lifecycle",
+	"tasks",	 "token",	  "clock",	"audio",
+	"vibration",	 "pattern",	  "repeat",	"applied",
+	"storage_state", "storage_error", "activation",
 };
 
 static void add_string(struct json_object *object, const char *name,
@@ -352,21 +359,33 @@ static bool get_task_fields(struct json_object *object, unsigned int type,
 	if (json_object_object_get_ex(object, "lifecycle", &field) &&
 	    type != FPLINUX_UI_SESSION_LIFECYCLE)
 		return false;
+	if (json_object_object_get_ex(object, "activation", &field) &&
+	    type != FPLINUX_UI_SESSION_ACTIVATION)
+		return false;
+	if (type == FPLINUX_UI_SESSION_ACTIVATION) {
+		unsigned int activation = ARRAY_SIZE(activation_names);
+
+		if (!get_choice(object, "activation", activation_names,
+				ARRAY_SIZE(activation_names),
+				ARRAY_SIZE(activation_names), &activation) ||
+		    activation >= ARRAY_SIZE(activation_names))
+			return false;
+		message->activation = activation;
+	}
 	if (json_object_object_get_ex(object, "tasks", &field) &&
 	    type != FPLINUX_UI_SESSION_TASKS)
 		return false;
 	if (json_object_object_get_ex(object, "token", &field) &&
 	    type != FPLINUX_UI_SESSION_ACTIVATE &&
 	    type != FPLINUX_UI_SESSION_CLOSE_TASK &&
-	    type != FPLINUX_UI_SESSION_END && type != FPLINUX_UI_SESSION_ACTIVE)
+	    type != FPLINUX_UI_SESSION_ACTIVE)
 		return false;
 	if (type == FPLINUX_UI_SESSION_LIFECYCLE)
 		return get_lifecycle(object, &message->lifecycle);
 	if (type == FPLINUX_UI_SESSION_TASKS)
 		return get_tasks(object, message);
 	if (type == FPLINUX_UI_SESSION_ACTIVATE ||
-	    type == FPLINUX_UI_SESSION_CLOSE_TASK ||
-	    type == FPLINUX_UI_SESSION_END)
+	    type == FPLINUX_UI_SESSION_CLOSE_TASK)
 		return task_id_valid(message->app_id) &&
 		       get_token(object, &message->token);
 	if (type == FPLINUX_UI_SESSION_ACTIVE &&
@@ -374,12 +393,6 @@ static bool get_task_fields(struct json_object *object, unsigned int type,
 		return task_id_valid(message->active_id) &&
 		       get_token(object, &message->token);
 	return true;
-}
-
-static bool end_action_valid(const char *value)
-{
-	return !strcmp(value, "minimize") || !strcmp(value, "close") ||
-	       !strcmp(value, "cancel");
 }
 
 static bool close_response_valid(const char *value)
@@ -521,9 +534,7 @@ frame_dimensions_valid(const struct fplinux_ui_session_message *message)
 static bool
 frame_message_valid(const struct fplinux_ui_session_message *message)
 {
-	return message->type == FPLINUX_UI_SESSION_LAUNCH ||
-	       (message->type == FPLINUX_UI_SESSION_ACTIVE &&
-		message->end_prompt);
+	return message->type == FPLINUX_UI_SESSION_LAUNCH;
 }
 
 static bool input_locale_valid(const char *locale)
@@ -571,24 +582,26 @@ bool fplinux_ui_session_send(int fd,
 	     message->type != FPLINUX_UI_SESSION_ACTIVE) ||
 	    (message->type == FPLINUX_UI_SESSION_LIFECYCLE &&
 	     (unsigned int)message->lifecycle >= ARRAY_SIZE(lifecycle_names)) ||
+	    (message->type == FPLINUX_UI_SESSION_ACTIVATION &&
+	     (unsigned int)message->activation >=
+		     ARRAY_SIZE(activation_names)) ||
+	    (message->type != FPLINUX_UI_SESSION_ACTIVATION &&
+	     message->activation != FPLINUX_UI_SESSION_ACTIVATION_OPEN) ||
 	    (message->type == FPLINUX_UI_SESSION_TASKS &&
 	     !tasks_valid(message)) ||
 	    ((message->type == FPLINUX_UI_SESSION_ACTIVATE ||
-	      message->type == FPLINUX_UI_SESSION_CLOSE_TASK ||
-	      message->type == FPLINUX_UI_SESSION_END) &&
+	      message->type == FPLINUX_UI_SESSION_CLOSE_TASK) &&
 	     (!task_id_valid(message->app_id) || !message->token)) ||
-	    (message->type == FPLINUX_UI_SESSION_END &&
-	     !end_action_valid(message->value)) ||
-	    (message->end_prompt &&
-	     (message->type != FPLINUX_UI_SESSION_ACTIVE || !message->token ||
-	      !task_id_valid(message->active_id))) ||
 	    (message->type == FPLINUX_UI_SESSION_ACTIVE && message->token &&
 	     !task_id_valid(message->active_id)) ||
 	    (message->has_frame &&
 	     (!frame_message_valid(message) || message->frame_fd < 0 ||
 	      !frame_dimensions_valid(message))) ||
 	    ((message->type == FPLINUX_UI_SESSION_ACTIVE_ACK ||
+	      message->type == FPLINUX_UI_SESSION_ACTIVATION ||
+	      message->type == FPLINUX_UI_SESSION_ACTIVATION_ACK ||
 	      message->type == FPLINUX_UI_SESSION_REDRAW_ACK ||
+	      message->type == FPLINUX_UI_SESSION_CLOSE_ACK ||
 	      message->type == FPLINUX_UI_SESSION_PREPARE_CLOSE ||
 	      message->type == FPLINUX_UI_SESSION_CLOSE_REPLY) &&
 	     !message->serial) ||
@@ -633,8 +646,11 @@ bool fplinux_ui_session_send(int fd,
 			json_object_new_boolean(message->repeat));
 	}
 	if ((message->type == FPLINUX_UI_SESSION_ACTIVE ||
+	     message->type == FPLINUX_UI_SESSION_ACTIVATION ||
+	     message->type == FPLINUX_UI_SESSION_ACTIVATION_ACK ||
 	     message->type == FPLINUX_UI_SESSION_ACTIVE_ACK ||
 	     message->type == FPLINUX_UI_SESSION_REDRAW_ACK ||
+	     message->type == FPLINUX_UI_SESSION_CLOSE_ACK ||
 	     message->type == FPLINUX_UI_SESSION_SETTING ||
 	     message->type == FPLINUX_UI_SESSION_ERROR ||
 	     message->type == FPLINUX_UI_SESSION_CLOCK ||
@@ -645,19 +661,17 @@ bool fplinux_ui_session_send(int fd,
 				       json_object_new_int64(message->serial));
 	add_string(object, "mode", mode_names[message->mode]);
 	add_string(object, "app_id", message->app_id);
+	if (message->type == FPLINUX_UI_SESSION_ACTIVATION)
+		add_string(object, "activation",
+			   activation_names[message->activation]);
 	if (message->type == FPLINUX_UI_SESSION_LIFECYCLE)
 		add_string(object, "lifecycle",
 			   lifecycle_names[message->lifecycle]);
 	if (message->type == FPLINUX_UI_SESSION_ACTIVATE ||
 	    message->type == FPLINUX_UI_SESSION_CLOSE_TASK ||
-	    message->type == FPLINUX_UI_SESSION_END ||
 	    (message->type == FPLINUX_UI_SESSION_ACTIVE && message->token))
 		json_object_object_add(object, "token",
 				       json_object_new_int64(message->token));
-	if (message->type == FPLINUX_UI_SESSION_ACTIVE)
-		json_object_object_add(
-			object, "end_prompt",
-			json_object_new_boolean(message->end_prompt));
 	if (message->type == FPLINUX_UI_SESSION_TASKS && message->has_tasks) {
 		struct json_object *tasks = json_object_new_array();
 
@@ -912,7 +926,6 @@ int fplinux_ui_session_receive(int fd,
 		get_bool(object, "locked", &message->locked) &&
 		get_bool(object, "visible", &message->visible) &&
 		get_bool(object, "enabled", &message->enabled) &&
-		get_bool(object, "end_prompt", &message->end_prompt) &&
 		get_int(object, "battery", &message->battery) &&
 		message->battery >= -1 && message->battery <= 100 &&
 		get_bool(object, "charging", &message->charging);
@@ -927,12 +940,6 @@ int fplinux_ui_session_receive(int fd,
 		valid = get_media_fields(object, type, message);
 	if (valid)
 		valid = get_storage_fields(object, type, message);
-	if (valid && json_object_object_get_ex(object, "end_prompt", &field))
-		valid = type == FPLINUX_UI_SESSION_ACTIVE;
-	if (valid && message->end_prompt)
-		valid = message->token && task_id_valid(message->active_id);
-	if (valid && type == FPLINUX_UI_SESSION_END)
-		valid = end_action_valid(message->value);
 	if (valid && type == FPLINUX_UI_SESSION_CLOSE_REPLY)
 		valid = close_response_valid(message->value);
 	if (valid && json_object_object_get_ex(object, "serial", &field)) {
@@ -949,7 +956,10 @@ int fplinux_ui_session_receive(int fd,
 	message->theme = theme;
 	json_object_put(object);
 	if (valid && (type == FPLINUX_UI_SESSION_ACTIVE_ACK ||
+		      type == FPLINUX_UI_SESSION_ACTIVATION ||
+		      type == FPLINUX_UI_SESSION_ACTIVATION_ACK ||
 		      type == FPLINUX_UI_SESSION_REDRAW_ACK ||
+		      type == FPLINUX_UI_SESSION_CLOSE_ACK ||
 		      type == FPLINUX_UI_SESSION_PREPARE_CLOSE ||
 		      type == FPLINUX_UI_SESSION_CLOSE_REPLY))
 		valid = message->serial != 0;

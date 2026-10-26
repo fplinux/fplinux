@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
@@ -93,11 +94,8 @@ struct gui_terminal {
 	struct fplinux_ui_symbol_picker *symbols;
 	/* The terminal screen, a canvas at the bottom of the screen stack. */
 	struct fplinux_ui_screen *screen;
+	struct fplinux_ui_screen *helper;
 	lv_obj_t *canvas;
-	lv_obj_t *status;
-	lv_obj_t *status_modifiers;
-	lv_obj_t *status_history;
-	lv_obj_t *status_mode;
 	lv_timer_t *timer;
 	bool failed;
 	bool closing;
@@ -114,6 +112,36 @@ static void close_symbol_picker(struct gui_terminal *app)
 	fplinux_ui_symbol_picker_delete(app->symbols);
 	app->symbols = NULL;
 	fplinux_text_input_close_picker(&app->terminal.input);
+}
+
+static void cancel_phone_holds(struct gui_terminal *app)
+{
+	size_t kept = 0;
+
+	for (size_t index = 0; index < app->pending_count; ++index) {
+		struct queued_input *input =
+			&app->pending_keys[(app->pending_start + index) %
+					   TERMINAL_PENDING_KEYS];
+		bool control_gesture =
+			(input->action == INPUT_KEY &&
+			 input->key.source == FPLINUX_UI_KEY_PHONE &&
+			 (input->key.code == KEY_NUMERIC_STAR ||
+			  input->key.code == KEY_NUMERIC_POUND)) ||
+			(input->action == INPUT_COMMAND &&
+			 input->value == FPLINUX_TERMINAL_COMMAND_SYMBOLS);
+
+		if (control_gesture)
+			continue;
+		if (input->action == INPUT_KEY &&
+		    input->key.source == FPLINUX_UI_KEY_PHONE)
+			input->hold_cancelled = true;
+		app->pending_keys[(app->pending_start + kept) %
+				  TERMINAL_PENDING_KEYS] = *input;
+		++kept;
+	}
+	app->pending_count = kept;
+	fplinux_terminal_cancel_held(&app->terminal);
+	close_symbol_picker(app);
 }
 
 /* The alert has already closed; EXIT asks the manager for a normal CLOSE. */
@@ -170,12 +198,39 @@ static void queue_input(struct gui_terminal *app,
 			const struct queued_input *input);
 static bool resize_terminal(struct gui_terminal *app);
 
+static void shell_finished(struct gui_terminal *app)
+{
+	app->redraw_ms = 0;
+	fplinux_ui_watch_fd(app->ui, -1, 0, NULL, NULL);
+	fplinux_terminal_pty_close(&app->pty);
+	if (!fplinux_terminal_session_result(&app->session)) {
+		fplinux_ui_quit(app->ui);
+		return;
+	}
+	app->terminal.stopped = true;
+	app->terminal.cursor_visible = false;
+	app->terminal.modifier = 0;
+	app->terminal.dirty = true;
+	app->pending_start = 0;
+	app->pending_count = 0;
+	close_symbol_picker(app);
+	fplinux_text_input_cancel(&app->terminal.input);
+	if (app->timer)
+		lv_timer_pause(app->timer);
+	/* Exit changes to Close after completion, even though its ID stays. */
+	fplinux_ui_screen_remove_command(app->screen,
+					 FPLINUX_TERMINAL_COMMAND_EXIT);
+	app->shown[FPLINUX_TERMINAL_COMMAND_EXIT] = false;
+}
+
 static bool dispatch_pty(struct gui_terminal *app, short events)
 {
 	size_t pending = app->terminal.output_size;
 
 	if (app->failed)
 		return false;
+	if (app->session.finished)
+		return true;
 	if (!fplinux_terminal_session_dispatch(&app->session, events)) {
 		fail(app,
 		     _("The shell connection was lost. Open Terminal again."));
@@ -186,10 +241,8 @@ static bool dispatch_pty(struct gui_terminal *app, short events)
 		app->redraw_ms = fplinux_ui_now_ms() + TERMINAL_INPUT_REDRAW_MS;
 	if (events & POLLIN)
 		app->redraw_ms = 0;
-	if (app->session.finished) {
-		app->redraw_ms = 0;
-		fplinux_ui_quit(app->ui);
-	}
+	if (app->session.finished)
+		shell_finished(app);
 	return true;
 }
 
@@ -209,6 +262,10 @@ static void update_watch(struct gui_terminal *app)
 {
 	if (app->failed)
 		return;
+	if (app->session.finished) {
+		fplinux_ui_watch_fd(app->ui, -1, 0, NULL, NULL);
+		return;
+	}
 	fplinux_ui_watch_fd(app->ui, fplinux_terminal_session_fd(&app->session),
 			    fplinux_terminal_session_events(&app->session),
 			    pty_event, app);
@@ -269,17 +326,6 @@ static void sync_commands(struct gui_terminal *app)
 		}
 }
 
-static int status_height(const struct gui_terminal *app)
-{
-	return fplinux_ui_width(app->ui) < 240 ? 18 : 22;
-}
-
-static void set_status_text(lv_obj_t *label, const char *text)
-{
-	if (strcmp(lv_label_get_text(label), text))
-		lv_label_set_text(label, text);
-}
-
 static void modifier_text(const struct fplinux_terminal *terminal,
 			  bool abbreviated, char *text, size_t capacity)
 {
@@ -299,45 +345,39 @@ static void modifier_text(const struct fplinux_terminal *terminal,
 
 static void update_status(struct gui_terminal *app)
 {
-	const struct fplinux_ui_metrics *metrics = fplinux_ui_metrics(app->ui);
-	const lv_font_t *font = fplinux_ui_theme(app->ui)->font;
 	const char *mode = fplinux_text_input_indicator(&app->terminal.input);
-	char modifiers[32] = "";
-	char history[16] = "";
-	lv_point_t modifier_size;
-	lv_point_t history_size;
-	lv_point_t mode_size;
-	int32_t text_width;
-	int gaps;
+	char indicator[FPLINUX_LANGUAGE_TEXT_BYTES];
+	char modifiers[32];
+	char full[sizeof(modifiers) + sizeof(indicator) + 2];
+	char compact[sizeof(full)];
 
 	if (app->terminal.history)
-		snprintf(history, sizeof(history), "↑%u",
+		snprintf(indicator, sizeof(indicator), "↑%u",
 			 fplinux_terminal_history_offset(&app->terminal));
+	else if (app->terminal.stopped)
+		snprintf(
+			indicator, sizeof(indicator),
+			WIFSIGNALED(app->session.child_status) ?
+				_("Signal %d") :
+				_("Exit %d"),
+			WIFSIGNALED(app->session.child_status) ?
+				WTERMSIG(app->session.child_status) :
+				fplinux_terminal_session_result(&app->session));
+	else
+		snprintf(indicator, sizeof(indicator), "%s", mode);
 	modifier_text(&app->terminal, false, modifiers, sizeof(modifiers));
-	lv_text_get_size(&modifier_size, modifiers, font, 0, 0, LV_COORD_MAX,
-			 LV_TEXT_FLAG_NONE);
-	lv_text_get_size(&history_size, history, font, 0, 0, LV_COORD_MAX,
-			 LV_TEXT_FLAG_NONE);
-	lv_text_get_size(&mode_size, mode, font, 0, 0, LV_COORD_MAX,
-			 LV_TEXT_FLAG_NONE);
-	gaps = (*modifiers && *history ? metrics->spacing : 0) +
-	       (*modifiers || *history ? metrics->spacing : 0);
-	text_width = modifier_size.x + history_size.x + mode_size.x + gaps;
-	/* Keep all three fields when scrollback and modifiers share a narrow band. */
-	if (app->terminal.history &&
-	    text_width > fplinux_ui_width(app->ui) - 2 * metrics->margin) {
-		modifier_text(&app->terminal, true, modifiers,
-			      sizeof(modifiers));
-		lv_text_get_size(&modifier_size, modifiers, font, 0, 0,
-				 LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-	}
-	set_status_text(app->status_modifiers, modifiers);
-	set_status_text(app->status_history, history);
-	set_status_text(app->status_mode, mode);
-	lv_obj_align(app->status_history, LV_ALIGN_LEFT_MID,
-		     metrics->margin + modifier_size.x +
-			     (*modifiers ? metrics->spacing : 0),
-		     0);
+	snprintf(full, sizeof(full), "%s%s%s", modifiers,
+		 *modifiers ? "  " : "", indicator);
+	modifier_text(&app->terminal, true, modifiers, sizeof(modifiers));
+	snprintf(compact, sizeof(compact), "%s%s%s", modifiers,
+		 *modifiers ? "  " : "", indicator);
+	if (fplinux_ui_screen_set_title(
+		    app->screen, app->terminal.history ? _("Scrollback") :
+				 app->terminal.stopped ? _("Terminal ended") :
+							 _("Terminal")) &&
+	    fplinux_ui_screen_set_header_status(app->screen, full, compact))
+		return;
+	fail(app, _("The screen could not be updated. Open Terminal again."));
 }
 
 static void sync_symbol_picker(struct gui_terminal *app)
@@ -352,8 +392,7 @@ static void sync_symbol_picker(struct gui_terminal *app)
 	if (!fplinux_ui_symbol_picker_is_open(app->symbols)) {
 		fplinux_ui_symbol_picker_delete(app->symbols);
 		app->symbols = fplinux_ui_symbol_picker_create(
-			app->ui, app->canvas, FPLINUX_UI_SYMBOL_PICKER_CENTERED,
-			input->picker_index);
+			app->ui, input->picker_index);
 		if (!app->symbols) {
 			fplinux_text_input_close_picker(input);
 			return;
@@ -394,6 +433,7 @@ static void special_command(struct fplinux_ui *ui,
 	struct gui_terminal *app = context;
 	size_t index = fplinux_ui_list_get_focused(screen);
 
+	app->helper = NULL;
 	if (command_id == FPLINUX_UI_SELECT_COMMAND) {
 		fplinux_ui_pop(ui);
 		queue_input(app,
@@ -423,9 +463,17 @@ static void open_special_keys(struct gui_terminal *app)
 {
 	struct fplinux_ui_screen *list = fplinux_ui_list_new(
 		app->ui, _("Special keys"), FPLINUX_UI_LIST_IMPLICIT);
+	char full[32], compact[32];
 
 	if (!list) {
 		perror("terminal: open list");
+		return;
+	}
+	modifier_text(&app->terminal, false, full, sizeof(full));
+	modifier_text(&app->terminal, true, compact, sizeof(compact));
+	if (!fplinux_ui_screen_set_header_status(list, full, compact)) {
+		fail(app,
+		     _("The screen could not be updated. Open Terminal again."));
 		return;
 	}
 	fplinux_ui_list_set_select_label(list, _("Send"));
@@ -436,6 +484,7 @@ static void open_special_keys(struct gui_terminal *app)
 	add_command(app->ui, list, COMMAND_SCREEN_BACK, FPLINUX_UI_COMMAND_BACK,
 		    NULL, "back", 0);
 	fplinux_ui_screen_set_listener(list, special_command, NULL, app);
+	app->helper = list;
 	fplinux_ui_navigate(app->ui, list);
 }
 
@@ -449,6 +498,7 @@ static void modifiers_command(struct fplinux_ui *ui,
 	for (size_t index = 0; index < FPLINUX_TERMINAL_MODIFIER_COUNT; ++index)
 		if (fplinux_ui_list_is_selected(screen, index))
 			modifiers |= fplinux_terminal_modifier_masks[index];
+	app->helper = NULL;
 	if (command_id == COMMAND_DONE) {
 		fplinux_ui_pop(ui);
 		queue_input(app,
@@ -484,24 +534,22 @@ static void open_modifiers(struct gui_terminal *app)
 	add_command(app->ui, list, COMMAND_SCREEN_BACK, FPLINUX_UI_COMMAND_BACK,
 		    NULL, "back", 1);
 	fplinux_ui_screen_set_listener(list, modifiers_command, NULL, app);
+	app->helper = list;
 	fplinux_ui_navigate(app->ui, list);
 }
 
-static void font_command(struct fplinux_ui *ui,
-			 struct fplinux_ui_screen *screen, int command_id,
+static void font_changed(struct fplinux_ui *ui,
+			 struct fplinux_ui_screen *screen, size_t index,
 			 void *context)
 {
 	struct gui_terminal *app = context;
-	size_t index = fplinux_ui_list_get_focused(screen);
 	struct fplinux_ui_screen *alert;
 	struct fplinux_storage_result saved;
 
-	if (command_id != FPLINUX_UI_SELECT_COMMAND ||
-	    index >= TERMINAL_FONT_COUNT) {
-		fplinux_ui_go_back(ui);
-		after_input(app);
+	(void)screen;
+	if (index >= TERMINAL_FONT_COUNT)
 		return;
-	}
+	app->helper = NULL;
 	fplinux_ui_pop(ui);
 	if (index != app->font_index) {
 		app->font_index = index;
@@ -536,10 +584,22 @@ static void font_command(struct fplinux_ui *ui,
 	after_input(app);
 }
 
+static void screen_back(struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
+			int command_id, void *context)
+{
+	struct gui_terminal *app = context;
+
+	(void)screen;
+	(void)command_id;
+	app->helper = NULL;
+	fplinux_ui_go_back(ui);
+	after_input(app);
+}
+
 static void open_font_size(struct gui_terminal *app)
 {
 	struct fplinux_ui_screen *list = fplinux_ui_list_new(
-		app->ui, _("Font size"), FPLINUX_UI_LIST_IMPLICIT);
+		app->ui, _("Font size"), FPLINUX_UI_LIST_EXCLUSIVE);
 
 	if (!list) {
 		perror("terminal: open font sizes");
@@ -548,21 +608,13 @@ static void open_font_size(struct gui_terminal *app)
 	for (size_t index = 0; index < TERMINAL_FONT_COUNT; ++index)
 		fplinux_ui_list_append(list, _(font_choices[index].label),
 				       NULL);
+	fplinux_ui_list_set_selected(list, app->font_index, true);
 	fplinux_ui_list_set_focused(list, app->font_index);
 	add_command(app->ui, list, COMMAND_SCREEN_BACK, FPLINUX_UI_COMMAND_BACK,
 		    NULL, "back", 0);
-	fplinux_ui_screen_set_listener(list, font_command, NULL, app);
+	fplinux_ui_screen_set_listener(list, screen_back, font_changed, app);
+	app->helper = list;
 	fplinux_ui_navigate(app->ui, list);
-}
-
-static void help_command(struct fplinux_ui *ui,
-			 struct fplinux_ui_screen *screen, int command_id,
-			 void *context)
-{
-	(void)screen;
-	(void)command_id;
-	fplinux_ui_go_back(ui);
-	after_input(context);
 }
 
 /* One read-only item per section; Up and Down scroll, Back returns. */
@@ -584,7 +636,8 @@ static void open_help(struct gui_terminal *app)
 	}
 	add_command(app->ui, form, COMMAND_SCREEN_BACK, FPLINUX_UI_COMMAND_BACK,
 		    NULL, "back", 0);
-	fplinux_ui_screen_set_listener(form, help_command, NULL, app);
+	fplinux_ui_screen_set_listener(form, screen_back, NULL, app);
+	app->helper = form;
 	fplinux_ui_navigate(app->ui, form);
 }
 
@@ -673,6 +726,8 @@ static void sync_input_pause(struct gui_terminal *app)
 		       fplinux_ui_menu_is_open(app->ui) ||
 		       fplinux_ui_current(app->ui) != app->screen;
 
+	if (covered && !app->terminal.paused)
+		cancel_phone_holds(app);
 	fplinux_terminal_pause(&app->terminal, covered, fplinux_ui_now_ms());
 	if (covered)
 		close_symbol_picker(app);
@@ -684,7 +739,8 @@ static void drain_keys(struct gui_terminal *app)
 		return;
 	sync_input_pause(app);
 	while (app->pending_count &&
-	       fplinux_terminal_session_can_input(&app->session)) {
+	       (app->terminal.stopped ||
+		fplinux_terminal_session_can_input(&app->session))) {
 		const struct queued_input *input =
 			&app->pending_keys[app->pending_start];
 		bool accepted = true;
@@ -721,7 +777,8 @@ static void queue_input(struct gui_terminal *app,
 {
 	size_t index;
 
-	if (app->failed || app->session.input_closed)
+	if (app->failed ||
+	    (app->session.input_closed && !app->terminal.stopped))
 		return;
 	/* Wayland keeps delivering keys while a child temporarily stops reading. */
 	if (app->pending_count == TERMINAL_PENDING_KEYS) {
@@ -746,10 +803,13 @@ static bool canvas_key(struct fplinux_ui *ui, struct fplinux_ui_screen *canvas,
 	if (!app->terminal.input.picker_open) {
 		if (key->source == FPLINUX_UI_KEY_PHONE &&
 		    (key->code == KEY_OK || fplinux_ui_is_softkey(key, true) ||
-		     key->code == KEY_POWER))
+		     key->code == KEY_POWER ||
+		     (app->terminal.stopped && !app->terminal.history &&
+		      fplinux_ui_is_softkey(key, false))))
 			return false;
 		if (key->source == FPLINUX_UI_KEY_KEYBOARD &&
-		    key->code == KEY_COMPOSE)
+		    (key->code == KEY_COMPOSE ||
+		     (app->terminal.stopped && key->code == KEY_ESC)))
 			return false;
 	}
 	queue_input(app,
@@ -763,7 +823,7 @@ static void tick(lv_timer_t *timer)
 	struct gui_terminal *app = lv_timer_get_user_data(timer);
 	uint64_t now;
 
-	if (app->failed)
+	if (app->failed || app->terminal.stopped)
 		return;
 	drain_keys(app);
 	now = fplinux_ui_now_ms();
@@ -787,8 +847,10 @@ static void set_visible(struct gui_terminal *app, bool visible)
 		return;
 	sync_input_pause(app);
 	sync_symbol_picker(app);
-	if (!visible) {
+	if (!visible || app->terminal.stopped) {
 		lv_timer_pause(app->timer);
+		if (visible)
+			update(app);
 		return;
 	}
 	lv_timer_resume(app->timer);
@@ -798,10 +860,9 @@ static void set_visible(struct gui_terminal *app, bool visible)
 	update(app);
 }
 
-static bool resize_terminal(struct gui_terminal *app)
+static bool terminal_size(const struct gui_terminal *app, struct winsize *size)
 {
 	const struct fplinux_terminal_grid *grid = &app->grids[app->font_index];
-	struct winsize size = { 0 };
 	int width;
 	int height;
 	unsigned int columns;
@@ -810,21 +871,27 @@ static bool resize_terminal(struct gui_terminal *app)
 	if (!fplinux_ui_screen_get_content_size(app->screen, &width, &height) ||
 	    width <= 0 || height <= 0)
 		return false;
-	height -= status_height(app);
-	if (height <= 0)
-		return false;
 	columns = (unsigned int)width / grid->cell_width;
 	rows = (unsigned int)height / grid->cell_height;
 	if (!columns || columns > USHRT_MAX || rows < 2 || rows > USHRT_MAX)
 		return false;
-	if (tsm_screen_resize(app->terminal.screen, columns, rows) < 0)
+	*size = (struct winsize){
+		.ws_col = (unsigned short)columns,
+		.ws_row = (unsigned short)rows,
+	};
+	return true;
+}
+
+static bool resize_terminal(struct gui_terminal *app)
+{
+	struct winsize size;
+
+	if (!terminal_size(app, &size) ||
+	    tsm_screen_resize(app->terminal.screen, size.ws_col, size.ws_row) <
+		    0)
 		return false;
-	size.ws_col = (unsigned short)columns;
-	size.ws_row = (unsigned short)rows;
-	if (ioctl(app->pty.fd, TIOCSWINSZ, &size) < 0)
+	if (!app->terminal.stopped && ioctl(app->pty.fd, TIOCSWINSZ, &size) < 0)
 		return false;
-	lv_obj_set_size(app->status, width, status_height(app));
-	lv_obj_align(app->status, LV_ALIGN_BOTTOM_MID, 0, 0);
 	app->terminal.dirty = true;
 	if (app->symbols && !fplinux_ui_symbol_picker_refresh(app->symbols))
 		close_symbol_picker(app);
@@ -832,50 +899,22 @@ static bool resize_terminal(struct gui_terminal *app)
 	return true;
 }
 
-static void cancel_phone_holds(struct gui_terminal *app)
-{
-	size_t kept = 0;
-
-	for (size_t index = 0; index < app->pending_count; ++index) {
-		struct queued_input *input =
-			&app->pending_keys[(app->pending_start + index) %
-					   TERMINAL_PENDING_KEYS];
-		bool opens_picker =
-			(input->action == INPUT_KEY &&
-			 input->key.source == FPLINUX_UI_KEY_PHONE &&
-			 input->key.code == KEY_NUMERIC_STAR) ||
-			(input->action == INPUT_COMMAND &&
-			 input->value == FPLINUX_TERMINAL_COMMAND_SYMBOLS);
-
-		if (opens_picker)
-			continue;
-		if (input->action == INPUT_KEY &&
-		    input->key.source == FPLINUX_UI_KEY_PHONE)
-			input->hold_cancelled = true;
-		app->pending_keys[(app->pending_start + kept) %
-				  TERMINAL_PENDING_KEYS] = *input;
-		++kept;
-	}
-	app->pending_count = kept;
-	fplinux_terminal_cancel_held(&app->terminal);
-	close_symbol_picker(app);
-}
-
-static void apply_status_theme(struct gui_terminal *app)
-{
-	const struct fplinux_ui_theme *theme = fplinux_ui_theme(app->ui);
-
-	lv_obj_set_style_bg_color(app->status, theme->surface, 0);
-	lv_obj_set_style_border_color(app->status, theme->border, 0);
-	lv_obj_set_style_text_color(app->status, theme->foreground, 0);
-}
-
 static void ui_event(struct fplinux_ui *ui,
 		     const struct fplinux_ui_event *event, void *data)
 {
 	struct gui_terminal *app = data;
 
-	if (event->type == FPLINUX_UI_EVENT_INPUT_CANCEL) {
+	if (event->type == FPLINUX_UI_EVENT_ACTIVATION &&
+	    event->activation == FPLINUX_UI_ACTIVATION_OPEN) {
+		fplinux_ui_menu_close(ui);
+		cancel_phone_holds(app);
+		/* Error alerts keep their decision; helpers own no shell state. */
+		if (app->helper && fplinux_ui_current(ui) == app->helper) {
+			app->helper = NULL;
+			fplinux_ui_pop(ui);
+		}
+		after_input(app);
+	} else if (event->type == FPLINUX_UI_EVENT_INPUT_CANCEL) {
 		if (event->key.source == FPLINUX_UI_KEY_PHONE)
 			cancel_phone_holds(app);
 	} else if (event->type == FPLINUX_UI_EVENT_CLOSE) {
@@ -885,8 +924,8 @@ static void ui_event(struct fplinux_ui *ui,
 		fplinux_ui_quit(ui);
 	} else if (event->type == FPLINUX_UI_EVENT_VISIBILITY)
 		set_visible(app, event->visible);
-	else if (event->type == FPLINUX_UI_EVENT_RESIZE && app->screen &&
-		 !resize_terminal(app))
+	else if (event->type == FPLINUX_UI_EVENT_RESIZE &&
+		 app->terminal.screen && !resize_terminal(app))
 		fail(app,
 		     _("The screen could not be updated. Open Terminal again."));
 }
@@ -894,60 +933,32 @@ static void ui_event(struct fplinux_ui *ui,
 static void draw_terminal(lv_event_t *event)
 {
 	struct gui_terminal *app = lv_event_get_user_data(event);
+	const struct fplinux_ui_theme *theme = fplinux_ui_theme(app->ui);
 	lv_area_t bounds;
 
 	lv_obj_get_coords(app->canvas, &bounds);
-	bounds.y2 -= status_height(app);
 	fplinux_terminal_render(&app->terminal, &app->grids[app->font_index],
-				lv_event_get_layer(event), &bounds);
-}
-
-static bool create_status(struct gui_terminal *app)
-{
-	const struct fplinux_ui_theme *theme = fplinux_ui_theme(app->ui);
-	const struct fplinux_ui_metrics *metrics = fplinux_ui_metrics(app->ui);
-
-	app->status = lv_obj_create(app->canvas);
-	if (!app->status)
-		return false;
-	lv_obj_remove_style_all(app->status);
-	lv_obj_set_scrollable(app->status, false);
-	lv_obj_set_size(app->status, fplinux_ui_width(app->ui),
-			status_height(app));
-	lv_obj_align(app->status, LV_ALIGN_BOTTOM_MID, 0, 0);
-	apply_status_theme(app);
-	lv_obj_set_style_bg_opa(app->status, LV_OPA_COVER, 0);
-	lv_obj_set_style_border_width(app->status, 1, 0);
-	lv_obj_set_style_border_side(app->status, LV_BORDER_SIDE_TOP, 0);
-	lv_obj_set_style_text_font(app->status, theme->font, 0);
-	app->status_modifiers = lv_label_create(app->status);
-	app->status_history = lv_label_create(app->status);
-	app->status_mode = lv_label_create(app->status);
-	if (!app->status_modifiers || !app->status_history || !app->status_mode)
-		return false;
-	lv_label_set_text(app->status_modifiers, "");
-	lv_label_set_text(app->status_history, "");
-	lv_label_set_text(app->status_mode, "");
-	lv_obj_align(app->status_modifiers, LV_ALIGN_LEFT_MID, metrics->margin,
-		     0);
-	lv_obj_align(app->status_mode, LV_ALIGN_RIGHT_MID, -metrics->margin, 0);
-	return true;
+				lv_event_get_layer(event), &bounds,
+				theme->accent, theme->accent_text);
 }
 
 static bool create_screen(struct gui_terminal *app)
 {
-	app->screen = fplinux_ui_canvas_new(app->ui, NULL);
+	app->screen = fplinux_ui_canvas_new(app->ui, _("Terminal"));
 	if (!app->screen)
 		return false;
 	app->canvas = fplinux_ui_canvas_object(app->screen);
 	if (!app->canvas)
 		return false;
 	lv_obj_set_scrollable(app->canvas, false);
-	if (!create_status(app))
-		return false;
+	return true;
+}
+
+static bool activate_screen(struct gui_terminal *app)
+{
 	lv_obj_add_event_cb(app->canvas, draw_terminal, LV_EVENT_DRAW_MAIN,
 			    app);
-	fplinux_ui_canvas_set_key_filter(app->screen, canvas_key, app);
+	fplinux_ui_screen_set_key_filter(app->screen, canvas_key, app);
 	fplinux_ui_canvas_set_key_repeat(app->screen,
 					 FPLINUX_UI_CANVAS_REPEAT_KEYMAP);
 	fplinux_ui_screen_set_listener(app->screen, canvas_command, NULL, app);
@@ -972,12 +983,9 @@ int main(int argc, char **argv)
 			 .owner_fd = -1,
 			 .status_fd = -1 },
 	};
-	unsigned int columns;
-	unsigned int rows;
-	int height;
+	struct winsize size;
 	const char *title;
 	const char *font_size;
-	const struct fplinux_terminal_grid *grid;
 	int result = fplinux_cli_parse(&cli, argc, argv);
 
 	if (result != FPLINUX_CLI_READY)
@@ -1014,24 +1022,19 @@ int main(int argc, char **argv)
 			goto done;
 		}
 	}
-	grid = &app.grids[app.font_index];
 	title = _("Terminal");
-	height = fplinux_ui_height(app.ui) - status_height(&app);
-	if (height <= 0 || fplinux_ui_width(app.ui) <= 0) {
+	if (!create_screen(&app)) {
+		perror("terminal: create the terminal screen");
+		goto done;
+	}
+	if (!terminal_size(&app, &size)) {
 		fprintf(stderr,
 			"fplinux-terminal: assigned viewport is too small\n");
 		goto done;
 	}
-	columns = (unsigned int)fplinux_ui_width(app.ui) / grid->cell_width;
-	rows = (unsigned int)height / grid->cell_height;
-	if (rows < 2 || rows > USHRT_MAX || !columns || columns > USHRT_MAX) {
-		fprintf(stderr,
-			"fplinux-terminal: assigned viewport is too small\n");
-		goto done;
-	}
-	if (!fplinux_terminal_init(&app.terminal, columns, rows) ||
-	    !fplinux_terminal_pty_open(&app.pty, columns, rows, "/bin/bash",
-				       TERMINAL_STARTUP_PATH)) {
+	if (!fplinux_terminal_init(&app.terminal, size.ws_col, size.ws_row) ||
+	    !fplinux_terminal_pty_open(&app.pty, size.ws_col, size.ws_row,
+				       "/bin/bash", TERMINAL_STARTUP_PATH)) {
 		perror("fplinux-terminal: start Bash PTY");
 		goto done;
 	}
@@ -1039,7 +1042,7 @@ int main(int argc, char **argv)
 					FPLINUX_LANGUAGE_DIRECTORY,
 					fplinux_ui_input_locale(app.ui));
 	fplinux_terminal_session_init(&app.session, &app.terminal, &app.pty);
-	if (!create_screen(&app)) {
+	if (!activate_screen(&app)) {
 		perror("terminal: create the terminal screen");
 		goto done;
 	}

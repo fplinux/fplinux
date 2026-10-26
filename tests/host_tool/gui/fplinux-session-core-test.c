@@ -12,7 +12,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -38,6 +37,7 @@ enum command_type {
 	COMMAND_EVENT,
 	COMMAND_DISCONNECTED,
 	COMMAND_HOLD_CLOSE,
+	COMMAND_HOLD_ACTIVATION,
 	COMMAND_CLOSE_DECISION,
 	COMMAND_CRASH,
 };
@@ -82,7 +82,9 @@ struct fixture {
 	bool frame_held;
 	unsigned int visible_frame;
 	unsigned int retained_frame;
-	unsigned int captures;
+	/* The controlled compositor's current composition and displayed pixels. */
+	uint16_t scene_pixels[4];
+	uint16_t presented_pixels[4];
 	char root[PATH_MAX];
 	char home[PATH_MAX];
 	char applications[PATH_MAX];
@@ -272,6 +274,7 @@ static int run_peer(void)
 	int channel = connect_at(getenv("FPLINUX_TEST_PEER_SOCKET"));
 	int session_fd = -1;
 	bool hold_close = false;
+	bool hold_activation = false;
 	char close_decision[8] = "ready";
 
 	peer_manager = getppid();
@@ -318,6 +321,11 @@ static int run_peer(void)
 				command.type = COMMAND_SENT;
 				send_command(channel, &command);
 				break;
+			case COMMAND_HOLD_ACTIVATION:
+				hold_activation = command.message.enabled;
+				command.type = COMMAND_SENT;
+				send_command(channel, &command);
+				break;
 			case COMMAND_CLOSE_DECISION:
 				CHECK(strlen(command.message.value) <
 				      sizeof(close_decision));
@@ -347,18 +355,19 @@ static int run_peer(void)
 				break;
 			}
 			command.type = COMMAND_EVENT;
-			if (command.message.has_frame) {
-				uint16_t first;
-
-				CHECK(command.message.type ==
-				      FPLINUX_UI_SESSION_ACTIVE);
-				CHECK(pread(command.message.frame_fd, &first,
-					    sizeof(first), 0) == sizeof(first));
-				CHECK(first == 0xf800);
-				close(command.message.frame_fd);
-				command.message.frame_fd = -1;
-			}
 			send_command(channel, &command);
+			/* This peer replaces the client frame boundary, tested separately. */
+			if (command.message.type ==
+				    FPLINUX_UI_SESSION_ACTIVATION &&
+			    !hold_activation) {
+				struct fplinux_ui_session_message response = {
+					.type = FPLINUX_UI_SESSION_ACTIVATION_ACK,
+					.serial = command.message.serial,
+				};
+
+				CHECK(fplinux_ui_session_send(session_fd,
+							      &response));
+			}
 			if (command.message.type ==
 				    FPLINUX_UI_SESSION_PREPARE_CLOSE &&
 			    close_decision[0]) {
@@ -463,23 +472,26 @@ static void hold_frame(void *context, bool enabled)
 	struct fixture *fixture = context;
 
 	fixture->frame_held = enabled;
-	if (enabled)
+	if (enabled) {
 		fixture->retained_frame = fixture->visible_frame;
+	} else {
+		memcpy(fixture->presented_pixels, fixture->scene_pixels,
+		       sizeof(fixture->presented_pixels));
+	}
 }
 
-static int capture_frame(void *context, int *width, int *height)
+static void present_scene(struct fixture *fixture, const uint16_t pixels[4])
 {
-	struct fixture *fixture = context;
-	uint16_t first = 0xf800;
-	int fd = memfd_create("session-scene", MFD_CLOEXEC);
+	memcpy(fixture->scene_pixels, pixels, sizeof(fixture->scene_pixels));
+	if (!fixture->frame_held)
+		memcpy(fixture->presented_pixels, pixels,
+		       sizeof(fixture->presented_pixels));
+}
 
-	CHECK(fd >= 0);
-	*width = fixture->width;
-	*height = fixture->height;
-	CHECK(ftruncate(fd, (off_t)*width * *height * 2) == 0);
-	CHECK(pwrite(fd, &first, sizeof(first), 0) == sizeof(first));
-	++fixture->captures;
-	return fd;
+static void expect_scene(struct fixture *fixture, const uint16_t pixels[4])
+{
+	CHECK(!memcmp(fixture->presented_pixels, pixels,
+		      sizeof(fixture->presented_pixels)));
 }
 
 static void add_entry(struct fixture *fixture, const char *id, const char *mode)
@@ -693,7 +705,6 @@ static struct fixture *create_fixture(const char *root, int width, int height,
 		.vibrate = media ? test_vibrate : NULL,
 		.changed = session_changed,
 		.hold_frame = hold_frame,
-		.capture_frame = capture_frame,
 		.context = fixture,
 	};
 	fixture->session = fplinux_session_create(&options);
@@ -1090,6 +1101,17 @@ static void answer_close(struct fixture *fixture, struct peer *peer,
 	issue(fixture, peer, &message);
 }
 
+static void acknowledge_close(struct fixture *fixture, struct peer *peer,
+			      uint32_t serial)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_CLOSE_ACK,
+		.serial = serial,
+	};
+
+	issue(fixture, peer, &message);
+}
+
 static void return_home(struct fixture *fixture, struct peer *launcher);
 static struct fplinux_ui_session_message query_tasks(struct fixture *fixture,
 						     struct peer *launcher);
@@ -1101,10 +1123,13 @@ static void task_action(struct fixture *fixture, struct peer *launcher,
 
 static void test_close_cancel_and_stale_reply(struct fixture *fixture)
 {
+	const uint16_t initial[] = { 0xf800, 0xf800, 0x0000, 0xffff };
+	const uint16_t restored[] = { 0x001f, 0x001f, 0xffff, 0x0000 };
 	struct peer *launcher = start_launcher(fixture);
 	struct peer *app = show_app(fixture, launcher, TEST_APP);
 	struct fplinux_ui_session_message ignored;
 
+	present_scene(fixture, initial);
 	set_close_decision(fixture, app, "");
 	send_type(fixture, app, FPLINUX_UI_SESSION_EXIT);
 	struct fplinux_ui_session_message first = wait_message(
@@ -1116,7 +1141,12 @@ static void test_close_cancel_and_stale_reply(struct fixture *fixture)
 
 	CHECK(process && !process->closing && process->shown);
 	CHECK(process->lifecycle == FPLINUX_UI_SESSION_FOREGROUND);
+	present_scene(fixture, restored);
+	expect_scene(fixture, initial);
 	answer_close(fixture, app, first.serial, "cancel");
+	expect_scene(fixture, initial);
+	acknowledge_close(fixture, app, first.serial);
+	expect_scene(fixture, restored);
 	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
 	CHECK(!take_message(app, FPLINUX_UI_SESSION_CLOSE, NULL, &ignored));
 	send_type(fixture, app, FPLINUX_UI_SESSION_EXIT);
@@ -1137,8 +1167,76 @@ static void test_close_cancel_and_stale_reply(struct fixture *fixture)
 	wait_reaped(fixture, app->pid);
 }
 
+static void test_close_ready_retains_scene_before_reply(struct fixture *fixture)
+{
+	const uint16_t covering[] = { 0xaaaa, 0xffff, 0xffff, 0xaaaa };
+	const uint16_t application[] = { 0xf800, 0x07e0, 0x001f, 0xffff };
+	const uint16_t destination[] = { 0x1111, 0x1111, 0x2222, 0x2222 };
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *app = show_app(fixture, launcher, TEST_APP);
+
+	present_scene(fixture, covering);
+	set_close_decision(fixture, app, "");
+	send_type(fixture, app, FPLINUX_UI_SESSION_EXIT);
+	struct fplinux_ui_session_message prepare = wait_message(
+		fixture, app, FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
+
+	/* Removing a covering view cannot publish the application's old frame. */
+	present_scene(fixture, application);
+	expect_scene(fixture, covering);
+	fixture->now_ms += 1000;
+	pump(fixture, 4);
+	expect_scene(fixture, covering);
+	answer_close(fixture, app, prepare.serial, "ready");
+	expect_scene(fixture, covering);
+	struct fplinux_ui_session_message active =
+		active_for(fixture, launcher, "");
+
+	present_scene(fixture, destination);
+	expect_scene(fixture, covering);
+	acknowledge(fixture, launcher, &active);
+	expect_scene(fixture, destination);
+	wait_message(fixture, app, FPLINUX_UI_SESSION_CLOSE, NULL);
+	wait_reaped(fixture, app->pid);
+}
+
 static void
-test_close_wait_allows_home_and_forced_close(struct fixture *fixture)
+test_close_wait_needs_decision_and_system_frames(struct fixture *fixture)
+{
+	const uint16_t initial[] = { 0xaaaa, 0xffff, 0xffff, 0xaaaa };
+	const uint16_t decision[] = { 0x0000, 0xffe0, 0xffe0, 0x0000 };
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *app = show_app(fixture, launcher, TEST_APP);
+	struct fplinux_ui_session_message legends = {
+		.type = FPLINUX_UI_SESSION_SOFTKEYS,
+		.left = "Leave",
+		.right = "Stay",
+	};
+
+	present_scene(fixture, initial);
+	set_close_decision(fixture, app, "");
+	send_type(fixture, app, FPLINUX_UI_SESSION_EXIT);
+	struct fplinux_ui_session_message prepare = wait_message(
+		fixture, app, FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
+
+	answer_close(fixture, app, prepare.serial, "wait");
+	issue(fixture, app, &legends);
+	struct fplinux_ui_session_message active =
+		active_for(fixture, launcher, TEST_APP);
+
+	present_scene(fixture, decision);
+	expect_scene(fixture, initial);
+	acknowledge_close(fixture, app, prepare.serial + 1);
+	expect_scene(fixture, initial);
+	acknowledge_close(fixture, app, prepare.serial);
+	expect_scene(fixture, initial);
+	acknowledge(fixture, launcher, &active);
+	expect_scene(fixture, decision);
+	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
+}
+
+static void
+test_close_wait_survives_home_and_repeated_close(struct fixture *fixture)
 {
 	struct peer *launcher = start_launcher(fixture);
 	struct peer *app = show_app(fixture, launcher, TEST_APP);
@@ -1146,7 +1244,8 @@ test_close_wait_allows_home_and_forced_close(struct fixture *fixture)
 
 	set_close_decision(fixture, app, "wait");
 	send_type(fixture, app, FPLINUX_UI_SESSION_EXIT);
-	wait_message(fixture, app, FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
+	struct fplinux_ui_session_message prepare = wait_message(
+		fixture, app, FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
 	pump(fixture, 10);
 	fixture->now_ms += 4000;
 	pump(fixture, 10);
@@ -1156,17 +1255,27 @@ test_close_wait_allows_home_and_forced_close(struct fixture *fixture)
 	CHECK(process && !process->closing && process->shown);
 	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
 	CHECK(!take_message(app, FPLINUX_UI_SESSION_CLOSE, NULL, &ignored));
+	acknowledge_close(fixture, app, prepare.serial);
 	return_home(fixture, launcher);
-	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
 	struct fplinux_ui_session_message tasks =
 		query_tasks(fixture, launcher);
 	uint32_t token = task_record(&tasks, TEST_APP)->token;
 
 	task_action(fixture, launcher, FPLINUX_UI_SESSION_CLOSE_TASK, TEST_APP,
 		    token);
-	wait_message(fixture, app, FPLINUX_UI_SESSION_CLOSE, NULL);
-	wait_reaped(fixture, app->pid);
-	CHECK(fplinux_session_focused_pid(fixture->session) == settings->pid);
+	struct fplinux_ui_session_message repeated = wait_message(
+		fixture, app, FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
+	struct fplinux_ui_session_message active =
+		active_for(fixture, launcher, TEST_APP);
+
+	CHECK(repeated.serial == prepare.serial);
+	acknowledge(fixture, launcher, &active);
+	acknowledge_close(fixture, app, prepare.serial);
+	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
+	CHECK(!fplinux_session_find_process(fixture->session, app->pid)
+		       ->closing);
+	CHECK(!take_message(app, FPLINUX_UI_SESSION_CLOSE, NULL, &ignored));
+	CHECK(fixture->peer_count == 2);
 }
 
 static void test_close_unanswered_has_bounded_timeout(struct fixture *fixture)
@@ -1189,6 +1298,29 @@ static void test_close_unanswered_has_bounded_timeout(struct fixture *fixture)
 	acknowledge(fixture, launcher, &active);
 	wait_message(fixture, app, FPLINUX_UI_SESSION_CLOSE, NULL);
 	wait_reaped(fixture, app->pid);
+}
+
+static void
+test_delayed_close_wait_after_home_stays_hidden(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *app = show_app(fixture, launcher, TEST_APP);
+
+	set_close_decision(fixture, app, "");
+	send_type(fixture, app, FPLINUX_UI_SESSION_EXIT);
+	struct fplinux_ui_session_message prepare = wait_message(
+		fixture, app, FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
+
+	return_home(fixture, launcher);
+	answer_close(fixture, app, prepare.serial, "wait");
+	pump(fixture, 10);
+	const struct fplinux_session_process *process =
+		fplinux_session_find_process(fixture->session, app->pid);
+
+	CHECK(process && !process->closing && !process->shown);
+	CHECK(process->lifecycle == FPLINUX_UI_SESSION_BACKGROUND);
+	CHECK(fplinux_session_focused_pid(fixture->session) == launcher->pid);
+	CHECK(!fixture->frame_held);
 }
 
 static void
@@ -1312,9 +1444,205 @@ static void return_home(struct fixture *fixture, struct peer *launcher)
 	acknowledge(fixture, launcher, &home);
 }
 
+static void hold_activation(struct fixture *fixture, struct peer *peer)
+{
+	struct command command = {
+		.type = COMMAND_HOLD_ACTIVATION,
+		.message.enabled = true,
+	};
+	unsigned int sent = peer->sent;
+	uint64_t deadline = real_ms() + 2000;
+
+	send_command(peer->fd, &command);
+	while (peer->sent == sent && real_ms() < deadline)
+		pump(fixture, 2);
+	CHECK(peer->sent > sent);
+}
+
+static void acknowledge_activation(struct fixture *fixture, struct peer *app,
+				   uint32_t serial)
+{
+	struct fplinux_ui_session_message ack = {
+		.type = FPLINUX_UI_SESSION_ACTIVATION_ACK,
+		.serial = serial,
+	};
+
+	issue(fixture, app, &ack);
+}
+
+static void test_activation_intent_and_frame_barrier(struct fixture *fixture)
+{
+	const uint16_t catalogue[] = { 0x1111, 0x2222, 0x3333, 0x4444 };
+	const uint16_t activated[] = { 0x07e0, 0xffff, 0xf800, 0x001f };
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *app = show_app(fixture, launcher, TEST_APP);
+	struct fplinux_ui_session_message cold =
+		wait_message(fixture, app, FPLINUX_UI_SESSION_ACTIVATION, NULL);
+	uint32_t token =
+		fplinux_session_find_process(fixture->session, app->pid)->token;
+	uint32_t previous_serial = cold.serial;
+
+	CHECK(cold.activation == FPLINUX_UI_SESSION_ACTIVATION_OPEN);
+	CHECK(cold.serial != 0);
+	hold_activation(fixture, app);
+	for (unsigned int i = 0; i < 4; ++i) {
+		bool resume = i % 2;
+
+		return_home(fixture, launcher);
+		clear_messages(fixture, launcher);
+		clear_messages(fixture, app);
+		/* Process age cannot select navigation or exhaust a new operation. */
+		fixture->now_ms += i >= 2 ? 3600000 : 1;
+		/* A user wakes the display before choosing an app after inactivity. */
+		fplinux_session_keyboard_key(fixture->session, KEY_F24, true);
+		fplinux_session_keyboard_key(fixture->session, KEY_F24, false);
+		present_scene(fixture, catalogue);
+		if (resume)
+			task_action(fixture, launcher,
+				    FPLINUX_UI_SESSION_ACTIVATE, TEST_APP,
+				    token);
+		else
+			CHECK(launch_app(fixture, launcher, TEST_APP) == app);
+		struct fplinux_ui_session_message activation = wait_message(
+			fixture, app, FPLINUX_UI_SESSION_ACTIVATION, NULL);
+		struct fplinux_ui_session_message other_ack = {
+			.type = FPLINUX_UI_SESSION_REDRAW_ACK,
+			.serial = activation.serial,
+		};
+		int x, y, width, height;
+
+		CHECK(activation.activation ==
+		      (resume ? FPLINUX_UI_SESSION_ACTIVATION_RESUME :
+				FPLINUX_UI_SESSION_ACTIVATION_OPEN));
+		CHECK(activation.serial &&
+		      activation.serial != previous_serial);
+		previous_serial = activation.serial;
+		CHECK(fplinux_session_find_process(fixture->session, app->pid)
+			      ->token == token);
+		fplinux_session_surface_box(fixture->session,
+					    FPLINUX_UI_SESSION_INTEGRATED, &x,
+					    &y, &width, &height);
+		fplinux_session_surface_committed(fixture->session, app->pid,
+						  width, height);
+		present_scene(fixture, activated);
+		issue(fixture, app, &other_ack);
+		other_ack.type = FPLINUX_UI_SESSION_CLOSE_ACK;
+		issue(fixture, app, &other_ack);
+		acknowledge_activation(fixture, app, activation.serial + 1);
+		/* The launcher's fallback may expire, but the app still owes ACK. */
+		fixture->now_ms += 600;
+		pump(fixture, 5);
+		expect_scene(fixture, catalogue);
+		CHECK(!fplinux_session_find_process(fixture->session, app->pid)
+			       ->shown);
+		CHECK(!fplinux_session_focused_pid(fixture->session));
+		acknowledge_activation(fixture, app, activation.serial);
+		struct fplinux_ui_session_message active =
+			active_for(fixture, launcher, TEST_APP);
+
+		acknowledge(fixture, launcher, &active);
+		expect_scene(fixture, activated);
+		CHECK(fplinux_session_focused_pid(fixture->session) ==
+		      app->pid);
+	}
+}
+
+static void test_resume_ended_task_during_handoff(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *app = show_app(fixture, launcher, TEST_APP);
+	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
+	struct fplinux_ui_session_message snapshot =
+		query_tasks(fixture, launcher);
+	uint32_t token = task_record(&snapshot, TEST_APP)->token;
+	struct command crash = { .type = COMMAND_CRASH };
+
+	task_action(fixture, launcher, FPLINUX_UI_SESSION_ACTIVATE, TEST_APP,
+		    token);
+	CHECK(fplinux_session_find_process(fixture->session, settings->pid)
+		      ->shown);
+	send_command(app->fd, &crash);
+	wait_reaped(fixture, app->pid);
+	struct fplinux_ui_session_message active;
+
+	/* Reaping publishes a newer view, whose serial owns the leaving handoff. */
+	do {
+		active = active_for(fixture, launcher, "");
+	} while (strcmp(active.reason, "app-crashed"));
+
+	acknowledge(fixture, launcher, &active);
+	struct fplinux_ui_session_message error =
+		wait_message(fixture, launcher, FPLINUX_UI_SESSION_ERROR, NULL);
+
+	CHECK(!strcmp(error.reason, "task-unavailable"));
+	snapshot = query_tasks(fixture, launcher);
+	CHECK(snapshot.task_count == 1);
+	CHECK(!strcmp(snapshot.tasks[0].app_id, TEST_SETTINGS));
+	CHECK(fixture->peer_count == 3);
+	CHECK(fplinux_session_focused_pid(fixture->session) == launcher->pid);
+}
+
+static void test_retained_activation_cancel(struct fixture *fixture,
+					    const char *operation)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *app = show_app(fixture, launcher, TEST_APP);
+	uint32_t token =
+		fplinux_session_find_process(fixture->session, app->pid)->token;
+
+	return_home(fixture, launcher);
+	clear_messages(fixture, app);
+	hold_activation(fixture, app);
+	CHECK(launch_app(fixture, launcher, TEST_APP) == app);
+	struct fplinux_ui_session_message activation =
+		wait_message(fixture, app, FPLINUX_UI_SESSION_ACTIVATION, NULL);
+
+	if (!strcmp(operation, "home")) {
+		send_type(fixture, launcher, FPLINUX_UI_SESSION_HOME);
+	} else if (!strcmp(operation, "timeout")) {
+		fixture->now_ms += 9999;
+		pump(fixture, 5);
+		CHECK(fplinux_session_find_process(fixture->session, app->pid)
+			      ->lifecycle == FPLINUX_UI_SESSION_FOREGROUND);
+		fixture->now_ms += 1;
+		pump(fixture, 5);
+	} else {
+		send_type(fixture, launcher, FPLINUX_UI_SESSION_CANCEL);
+	}
+	struct fplinux_ui_session_message active =
+		active_for(fixture, launcher, "");
+
+	acknowledge(fixture, launcher, &active);
+	acknowledge_activation(fixture, app, activation.serial);
+	const struct fplinux_session_process *process =
+		fplinux_session_find_process(fixture->session, app->pid);
+	struct fplinux_ui_session_message ignored;
+
+	CHECK(process && process->token == token && !process->closing);
+	CHECK(!process->shown &&
+	      process->lifecycle == FPLINUX_UI_SESSION_BACKGROUND);
+	CHECK(fplinux_session_focused_pid(fixture->session) == launcher->pid);
+	CHECK(!take_message(app, FPLINUX_UI_SESSION_CLOSE, NULL, &ignored));
+	clear_messages(fixture, launcher);
+	task_action(fixture, launcher, FPLINUX_UI_SESSION_ACTIVATE, TEST_APP,
+		    token);
+	struct fplinux_ui_session_message next =
+		wait_message(fixture, app, FPLINUX_UI_SESSION_ACTIVATION, NULL);
+
+	CHECK(next.serial != activation.serial);
+	acknowledge_activation(fixture, app, activation.serial);
+	CHECK(!fplinux_session_find_process(fixture->session, app->pid)->shown);
+	acknowledge_activation(fixture, app, next.serial);
+	active = active_for(fixture, launcher, TEST_APP);
+	acknowledge(fixture, launcher, &active);
+	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
+}
+
 static void
 test_close_background_wait_activates_same_instance(struct fixture *fixture)
 {
+	const uint16_t initial[] = { 0x1111, 0x2222, 0x3333, 0x4444 };
+	const uint16_t decision[] = { 0xffff, 0x0000, 0xf800, 0x07e0 };
 	struct peer *launcher = start_launcher(fixture);
 	struct peer *app = show_app(fixture, launcher, TEST_APP);
 	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
@@ -1322,6 +1650,7 @@ test_close_background_wait_activates_same_instance(struct fixture *fixture)
 		query_tasks(fixture, launcher);
 	uint32_t token = task_record(&tasks, TEST_APP)->token;
 
+	present_scene(fixture, initial);
 	set_close_decision(fixture, app, "wait");
 	task_action(fixture, launcher, FPLINUX_UI_SESSION_CLOSE_TASK, TEST_APP,
 		    token);
@@ -1335,6 +1664,21 @@ test_close_background_wait_activates_same_instance(struct fixture *fixture)
 		active_for(fixture, launcher, TEST_APP);
 
 	acknowledge(fixture, launcher, &active);
+	/* Becoming visible is allowed before the decision's frame acknowledgment. */
+	struct fplinux_ui_session_message visibility;
+
+	do {
+		visibility = wait_message(fixture, app,
+					  FPLINUX_UI_SESSION_VISIBILITY, NULL);
+	} while (!visibility.visible);
+	present_scene(fixture, decision);
+	expect_scene(fixture, initial);
+	acknowledge_close(fixture, settings, prepare.serial);
+	expect_scene(fixture, initial);
+	acknowledge_close(fixture, app, prepare.serial + 1);
+	expect_scene(fixture, initial);
+	acknowledge_close(fixture, app, prepare.serial);
+	expect_scene(fixture, decision);
 	CHECK(active.token == token);
 	CHECK(fixture->peer_count == 3);
 	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
@@ -1673,300 +2017,50 @@ static bool phone_gesture(struct fixture *fixture, unsigned int code)
 	return press && release;
 }
 
-static struct fplinux_ui_session_message
-open_end_prompt(struct fixture *fixture, struct peer *launcher,
-		struct peer *app)
+static void test_red_home_retains_task(struct fixture *fixture, bool fullscreen)
 {
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *app;
 	struct fplinux_ui_session_message ignored;
-	char saved[PATH_MAX];
-	unsigned int captures = fixture->captures;
+	pid_t pid;
 
-	clear_messages(fixture, launcher);
+	if (fullscreen) {
+		add_entry(fixture, TEST_APP, "fullscreen");
+		app = launch_app(fixture, launcher, TEST_APP);
+		struct fplinux_ui_session_message config =
+			authenticate(fixture, app, NULL);
+
+		commit_app(fixture, app, &config);
+		wait_reaped(fixture, launcher->pid);
+	} else {
+		app = show_app(fixture, launcher, TEST_APP);
+	}
+	pid = app->pid;
 	clear_messages(fixture, app);
 	CHECK(!phone_gesture(fixture, FPLINUX_KEY_POWER));
-	struct fplinux_ui_session_message active =
-		active_for(fixture, launcher, app->id);
-
-	CHECK(active.end_prompt && active.token);
-	CHECK(active.has_frame && active.width == fixture->width &&
-	      active.height == fixture->height &&
-	      fixture->captures == captures + 1);
-	CHECK(active.token ==
-	      fplinux_session_find_process(fixture->session, app->pid)->token);
-	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
-	CHECK(!fplinux_session_launcher_on_top(fixture->session));
-	CHECK(!take_message(app, FPLINUX_UI_SESSION_CLOSE, NULL, &ignored));
-	path_join(saved, fixture->home, app->id);
-	CHECK(access(saved, F_OK) == -1 && errno == ENOENT);
-	return active;
-}
-
-static void show_end_prompt(struct fixture *fixture, struct peer *launcher,
-			    struct peer *app,
-			    const struct fplinux_ui_session_message *active)
-{
-	acknowledge(fixture, launcher, active);
-	CHECK(fplinux_session_launcher_on_top(fixture->session));
-	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
-	fplinux_session_set_launcher_shown(fixture->session, true);
-	pump(fixture, 10);
-	CHECK(fplinux_session_focused_pid(fixture->session) == launcher->pid);
-	struct fplinux_ui_session_message visibility =
-		wait_message(fixture, app, FPLINUX_UI_SESSION_VISIBILITY, NULL);
-
-	CHECK(!visibility.visible);
-	CHECK(fplinux_session_find_process(fixture->session, app->pid)
-		      ->lifecycle == FPLINUX_UI_SESSION_FOREGROUND);
-}
-
-static void end_action(struct fixture *fixture, struct peer *launcher,
-		       const struct fplinux_ui_session_message *active,
-		       const char *action)
-{
-	struct fplinux_ui_session_message message = {
-		.type = FPLINUX_UI_SESSION_END,
-		.token = active->token,
-	};
-
-	strcpy(message.app_id, active->active_id);
-	strcpy(message.value, action);
-	issue(fixture, launcher, &message);
-}
-
-static void test_end_prompt_minimize_retains(struct fixture *fixture)
-{
-	struct peer *launcher = start_launcher(fixture);
-	struct peer *app = show_app(fixture, launcher, TEST_APP);
-	struct fplinux_ui_session_message active =
-		open_end_prompt(fixture, launcher, app);
-	pid_t pid = app->pid;
-
-	show_end_prompt(fixture, launcher, app, &active);
-	clear_messages(fixture, launcher);
-	end_action(fixture, launcher, &active, "minimize");
-	wait_message(fixture, launcher, FPLINUX_UI_SESSION_HOME, NULL);
-	active = active_for(fixture, launcher, "");
-	CHECK(!active.end_prompt && !active.token);
-	CHECK(!strcmp(active.value, "home"));
-	CHECK(fixture->frame_held);
-	acknowledge(fixture, launcher, &active);
-	CHECK(!fixture->frame_held);
-	const struct fplinux_session_process *process =
-		fplinux_session_find_process(fixture->session, pid);
-	struct fplinux_ui_session_message ignored;
-
-	CHECK(process && !process->closing && !process->shown);
-	CHECK(process->lifecycle == FPLINUX_UI_SESSION_BACKGROUND);
-	CHECK(!take_message(app, FPLINUX_UI_SESSION_CLOSE, NULL, &ignored));
-	fplinux_session_set_launcher_shown(fixture->session, false);
-	CHECK(launch_app(fixture, launcher, TEST_APP)->pid == pid);
-	active = active_for(fixture, launcher, TEST_APP);
-	acknowledge(fixture, launcher, &active);
-	CHECK(!active.end_prompt);
-	CHECK(fplinux_session_focused_pid(fixture->session) == pid);
-	CHECK(fplinux_session_find_process(fixture->session, pid)->shown);
-}
-
-static void test_end_prompt_close_saves(struct fixture *fixture, bool red)
-{
-	struct peer *launcher = start_launcher(fixture);
-	struct peer *app = show_app(fixture, launcher, TEST_APP);
-	struct fplinux_ui_session_message active =
-		open_end_prompt(fixture, launcher, app);
-	char saved[PATH_MAX];
-
-	if (!red)
-		show_end_prompt(fixture, launcher, app, &active);
-	clear_messages(fixture, launcher);
-	if (red)
-		CHECK(!phone_gesture(fixture, FPLINUX_KEY_POWER));
-	else
-		end_action(fixture, launcher, &active, "close");
-	wait_message(fixture, launcher, FPLINUX_UI_SESSION_HOME, NULL);
-	active = active_for(fixture, launcher, "");
-	CHECK(!active.end_prompt && !active.token);
-	CHECK(!strcmp(active.value, "home"));
-	CHECK(fixture->frame_held);
-	acknowledge(fixture, launcher, &active);
-	CHECK(!fixture->frame_held);
-	wait_message(fixture, app, FPLINUX_UI_SESSION_CLOSE, NULL);
-	wait_reaped(fixture, app->pid);
-	path_join(saved, fixture->home, TEST_APP);
-	expect_file(saved, "saved\n");
-	CHECK(fplinux_session_focused_pid(fixture->session) == launcher->pid);
-}
-
-static void test_end_prompt_cancel_restores(struct fixture *fixture)
-{
-	struct peer *launcher = start_launcher(fixture);
-	struct peer *app = show_app(fixture, launcher, TEST_APP);
-	struct fplinux_ui_session_message active =
-		open_end_prompt(fixture, launcher, app);
-	uint32_t token = active.token;
-	struct fplinux_ui_session_message ignored;
-
-	show_end_prompt(fixture, launcher, app, &active);
-	clear_messages(fixture, launcher);
-	clear_messages(fixture, app);
-	end_action(fixture, launcher, &active, "cancel");
-	struct fplinux_ui_session_message restored =
-		active_for(fixture, launcher, TEST_APP);
-
-	CHECK(!restored.end_prompt && restored.token == token);
-	CHECK(!strcmp(restored.value, active.value));
-	CHECK(!strcmp(restored.name, active.name));
-	CHECK(!strcmp(restored.selected_id, active.selected_id));
-	CHECK(!fplinux_session_launcher_on_top(fixture->session));
-	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
-	CHECK(!fixture->frame_held);
-	struct fplinux_ui_session_message visibility =
-		wait_message(fixture, app, FPLINUX_UI_SESSION_VISIBILITY, NULL);
-
-	CHECK(visibility.visible);
-	CHECK(!take_message(app, FPLINUX_UI_SESSION_CLOSE, NULL, &ignored));
-	CHECK(!take_message(launcher, FPLINUX_UI_SESSION_HOME, NULL, &ignored));
-	fplinux_session_set_launcher_shown(fixture->session, false);
-	active = open_end_prompt(fixture, launcher, app);
-	CHECK(!fplinux_session_key(fixture->session, FPLINUX_KEY_POWER, true,
-				   fixture->now_ms));
-	CHECK(!fplinux_session_key(fixture->session, FPLINUX_KEY_POWER, false,
-				   fixture->now_ms + 5000));
-	pump(fixture, 10);
-	CHECK(fplinux_session_find_process(fixture->session, app->pid));
-	CHECK(!take_message(app, FPLINUX_UI_SESSION_CLOSE, NULL, &ignored));
-	end_action(fixture, launcher, &active, "cancel");
-}
-
-static void test_end_prompt_stale_instance(struct fixture *fixture)
-{
-	struct peer *launcher = start_launcher(fixture);
-	struct peer *app = show_app(fixture, launcher, TEST_APP);
-	struct fplinux_ui_session_message old =
-		open_end_prompt(fixture, launcher, app);
-	struct command crash = { .type = COMMAND_CRASH };
-	pid_t old_pid = app->pid;
-
-	send_command(app->fd, &crash);
-	wait_reaped(fixture, old_pid);
+	if (fullscreen) {
+		launcher = wait_peer(fixture, TEST_LAUNCHER);
+		authenticate(fixture, launcher, NULL);
+		send_type(fixture, launcher, FPLINUX_UI_SESSION_READY);
+		fplinux_session_surface_committed(fixture->session,
+						  launcher->pid, fixture->width,
+						  fixture->height);
+		fplinux_session_frame(fixture->session, launcher->pid);
+	}
 	struct fplinux_ui_session_message active =
 		active_for(fixture, launcher, "");
 
-	CHECK(!active.end_prompt);
-	clear_messages(fixture, launcher);
-	app = show_app(fixture, launcher, TEST_APP);
-	CHECK(app->pid != old_pid);
-	active = open_end_prompt(fixture, launcher, app);
-	CHECK(active.token != old.token);
-	end_action(fixture, launcher, &old, "close");
-	const struct fplinux_session_process *process =
-		fplinux_session_find_process(fixture->session, app->pid);
-	struct fplinux_ui_session_message ignored;
-
-	CHECK(process && !process->closing && process->shown);
-	CHECK(!take_message(app, FPLINUX_UI_SESSION_CLOSE, NULL, &ignored));
-	CHECK(!phone_gesture(fixture, FPLINUX_KEY_POWER));
-	active = active_for(fixture, launcher, "");
+	CHECK(!strcmp(active.value, "home"));
 	acknowledge(fixture, launcher, &active);
-	wait_message(fixture, app, FPLINUX_UI_SESSION_CLOSE, NULL);
-	wait_reaped(fixture, app->pid);
-}
-
-static void test_end_prompt_lock_cancels(struct fixture *fixture)
-{
-	struct peer *launcher = start_launcher(fixture);
-	struct peer *app = show_app(fixture, launcher, TEST_SETTINGS);
-	struct fplinux_ui_session_message setting = {
-		.type = FPLINUX_UI_SESSION_SETTING,
-		.name = "auto_lock_seconds",
-		.value = "0",
-	};
-
-	issue(fixture, app, &setting);
-	wait_message(fixture, app, FPLINUX_UI_SESSION_SETTING,
-		     "auto_lock_seconds");
-	struct fplinux_ui_session_message active =
-		open_end_prompt(fixture, launcher, app);
-
-	show_end_prompt(fixture, launcher, app, &active);
-	clear_messages(fixture, launcher);
-	fixture->now_ms += 30000;
-	pump(fixture, 10);
-	CHECK(fplinux_session_is_locked(fixture->session));
-	struct fplinux_ui_session_message locked =
-		active_for(fixture, launcher, TEST_SETTINGS);
-
-	CHECK(locked.locked && !locked.end_prompt);
-	end_action(fixture, launcher, &active, "close");
 	const struct fplinux_session_process *process =
-		fplinux_session_find_process(fixture->session, app->pid);
-	struct fplinux_ui_session_message ignored;
+		fplinux_session_find_process(fixture->session, pid);
 
-	CHECK(process && !process->closing);
+	CHECK(process && !process->closing && !process->shown);
+	CHECK(process->lifecycle == FPLINUX_UI_SESSION_BACKGROUND);
+	CHECK(!take_message(app, FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL,
+			    &ignored));
 	CHECK(!take_message(app, FPLINUX_UI_SESSION_CLOSE, NULL, &ignored));
-}
-
-static void test_end_prompt_update_keeps_focus(struct fixture *fixture)
-{
-	struct peer *launcher = start_launcher(fixture);
-	struct peer *app = show_app(fixture, launcher, TEST_APP);
-	struct fplinux_ui_session_message active =
-		open_end_prompt(fixture, launcher, app);
-	struct fplinux_ui_session_message title = {
-		.type = FPLINUX_UI_SESSION_TITLE,
-		.title = "Current draft",
-	};
-
-	show_end_prompt(fixture, launcher, app, &active);
-	clear_messages(fixture, launcher);
-	issue(fixture, app, &title);
-	struct fplinux_ui_session_message update =
-		active_for(fixture, launcher, TEST_APP);
-
-	CHECK(update.end_prompt && update.serial != active.serial);
-	CHECK(!strcmp(update.title, "Current draft"));
-	/* The update has no ACK yet; the already drawn prompt keeps the keys. */
-	CHECK(fplinux_session_launcher_on_top(fixture->session));
 	CHECK(fplinux_session_focused_pid(fixture->session) == launcher->pid);
-	end_action(fixture, launcher, &active, "cancel");
-}
-
-static void
-test_end_prompt_fullscreen_restarts_launcher(struct fixture *fixture)
-{
-	struct peer *launcher = start_launcher(fixture);
-
-	add_entry(fixture, TEST_APP, "fullscreen");
-	struct peer *app = launch_app(fixture, launcher, TEST_APP);
-	struct fplinux_ui_session_message config =
-		authenticate(fixture, app, NULL);
-
-	commit_app(fixture, app, &config);
-	wait_reaped(fixture, launcher->pid);
-	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
-	clear_messages(fixture, app);
-	CHECK(!phone_gesture(fixture, FPLINUX_KEY_POWER));
-	launcher = wait_peer(fixture, TEST_LAUNCHER);
-	authenticate(fixture, launcher, NULL);
-	struct fplinux_ui_session_message active =
-		active_for(fixture, launcher, TEST_APP);
-
-	CHECK(active.end_prompt && active.token);
-	CHECK(!fplinux_session_launcher_on_top(fixture->session));
-	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
-	send_type(fixture, launcher, FPLINUX_UI_SESSION_READY);
-	fplinux_session_surface_committed(fixture->session, launcher->pid,
-					  fixture->width, fixture->height);
-	fplinux_session_frame(fixture->session, launcher->pid);
-	CHECK(!fplinux_session_launcher_on_top(fixture->session));
-	show_end_prompt(fixture, launcher, app, &active);
-	end_action(fixture, launcher, &active, "cancel");
-	wait_reaped(fixture, launcher->pid);
-	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
-	const struct fplinux_session_process *process =
-		fplinux_session_find_process(fixture->session, app->pid);
-
-	CHECK(process && process->shown && !process->closing);
-	CHECK(process->mode == FPLINUX_UI_SESSION_FULLSCREEN);
 }
 
 static void select_launcher_view(struct fixture *fixture, struct peer *launcher,
@@ -2154,6 +2248,106 @@ static void setting(struct fixture *fixture, struct peer *settings,
 	strcpy(message.name, name);
 	strcpy(message.value, value);
 	issue(fixture, settings, &message);
+}
+
+static void test_task_titles_follow_applied_locale(struct fixture *fixture,
+						   bool explicit_title,
+						   bool save_failed)
+{
+	char path[PATH_MAX];
+	char source[PATH_MAX];
+	FILE *file;
+
+	path_join(source, fixture->root, "system-language-en");
+	path_join(path, fixture->languages, "en");
+	CHECK(rename(source, path) == 0);
+	path_join(path, fixture->applications, TEST_SETTINGS ".desktop");
+	file = fopen(path, "a");
+	CHECK(file);
+	CHECK(fputs("Name=Settings\nName[ru]=Настройки\n", file) >= 0);
+	CHECK(fclose(file) == 0);
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
+	struct fplinux_ui_session_message snapshot =
+		query_tasks(fixture, launcher);
+	uint32_t token = task_record(&snapshot, TEST_SETTINGS)->token;
+
+	CHECK(!strcmp(task_record(&snapshot, TEST_SETTINGS)->title,
+		      "Настройки"));
+	if (explicit_title) {
+		struct fplinux_ui_session_message title = {
+			.type = FPLINUX_UI_SESSION_TITLE,
+			.title = "Настройки",
+		};
+
+		issue(fixture, settings, &title);
+	}
+	/* Queries, rejected values and keypad language do not rename the task. */
+	setting(fixture, settings, "locale", "");
+	struct fplinux_ui_session_message reply = wait_message(
+		fixture, settings, FPLINUX_UI_SESSION_SETTING, "locale");
+
+	CHECK(!reply.serial && !strcmp(reply.value, "ru"));
+	setting(fixture, settings, "locale", "xx");
+	reply = wait_message(fixture, settings, FPLINUX_UI_SESSION_ERROR,
+			     "locale");
+	CHECK(!reply.applied && !reply.serial);
+	setting(fixture, settings, "input_locale", "ru");
+	wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+		     "input_locale");
+	snapshot = query_tasks(fixture, launcher);
+	CHECK(!strcmp(task_record(&snapshot, TEST_SETTINGS)->title,
+		      "Настройки"));
+	for (unsigned int i = 0; i < 2; ++i) {
+		const char *locale = i ? "ru" : "en";
+		const char *title = explicit_title || i ? "Настройки" :
+							  "Settings";
+		pid_t old_launcher = launcher->pid;
+
+		clear_messages(fixture, settings);
+		sync_fails = save_failed;
+		setting(fixture, settings, "locale", locale);
+		reply = wait_message(fixture, settings,
+				     save_failed ? FPLINUX_UI_SESSION_ERROR :
+						   FPLINUX_UI_SESSION_SETTING,
+				     "locale");
+		sync_fails = false;
+		CHECK(reply.applied && reply.serial);
+		CHECK(!strcmp(reply.value, locale));
+		if (save_failed)
+			CHECK(!strcmp(reply.reason, "save-failed"));
+		wait_reaped(fixture, old_launcher);
+		launcher = wait_peer(fixture, TEST_LAUNCHER);
+		struct fplinux_ui_session_message config =
+			authenticate(fixture, launcher, NULL);
+
+		CHECK(!strcmp(config.locale, locale));
+		send_type(fixture, launcher, FPLINUX_UI_SESSION_READY);
+		fplinux_session_surface_committed(fixture->session,
+						  launcher->pid, fixture->width,
+						  fixture->height);
+		fplinux_session_frame(fixture->session, launcher->pid);
+		struct fplinux_ui_session_message active =
+			active_for(fixture, launcher, TEST_SETTINGS);
+		struct fplinux_ui_session_message redraw = {
+			.type = FPLINUX_UI_SESSION_REDRAW_ACK,
+			.serial = reply.serial,
+		};
+
+		acknowledge(fixture, launcher, &active);
+		issue(fixture, settings, &redraw);
+		CHECK(!strcmp(active.title, title) && active.token == token);
+		snapshot = query_tasks(fixture, launcher);
+		CHECK(!strcmp(task_record(&snapshot, TEST_SETTINGS)->title,
+			      title));
+		CHECK(task_record(&snapshot, TEST_SETTINGS)->token == token);
+		CHECK(fplinux_session_focused_pid(fixture->session) ==
+		      settings->pid);
+		struct fplinux_ui_session_message ignored;
+
+		CHECK(!take_message(settings, FPLINUX_UI_SESSION_ACTIVATION,
+				    NULL, &ignored));
+	}
 }
 
 static void test_key_routing(struct fixture *fixture)
@@ -2937,8 +3131,8 @@ static void test_appearance_waits_for_both_frames(struct fixture *fixture,
 	CHECK(!reply.serial && !strcmp(reply.value, "dark"));
 }
 
-static void test_appearance_end_keeps_visible_dialog(struct fixture *fixture,
-						     bool retain)
+static void test_appearance_leave_retains_scene(struct fixture *fixture,
+						bool retain)
 {
 	struct peer *launcher = start_launcher(fixture);
 	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
@@ -2960,13 +3154,12 @@ static void test_appearance_end_keeps_visible_dialog(struct fixture *fixture,
 
 	acknowledge(fixture, launcher, &active);
 	CHECK(fixture->frame_held);
-	active = open_end_prompt(fixture, launcher, settings);
-	show_end_prompt(fixture, launcher, settings, &active);
-	/* The controlled compositor now shows the END dialog above the old scene. */
-	fixture->visible_frame = 2;
 	if (!retain)
 		set_close_decision(fixture, settings, "");
-	end_action(fixture, launcher, &active, retain ? "minimize" : "close");
+	if (retain)
+		CHECK(!phone_gesture(fixture, FPLINUX_KEY_POWER));
+	else
+		send_type(fixture, settings, FPLINUX_UI_SESSION_EXIT);
 	if (!retain) {
 		struct fplinux_ui_session_message prepare =
 			wait_message(fixture, settings,
@@ -2980,9 +3173,51 @@ static void test_appearance_end_keeps_visible_dialog(struct fixture *fixture,
 		answer_close(fixture, settings, prepare.serial, "ready");
 	}
 	active = active_for(fixture, launcher, "");
-	CHECK(fixture->frame_held && fixture->retained_frame == 2);
+	CHECK(fixture->frame_held && fixture->retained_frame == 1);
 	acknowledge(fixture, launcher, &active);
 	CHECK(!fixture->frame_held);
+}
+
+static void
+test_close_and_appearance_require_separate_frames(struct fixture *fixture)
+{
+	const uint16_t initial[] = { 0x1111, 0x2222, 0x3333, 0x4444 };
+	const uint16_t decision[] = { 0xffff, 0x0000, 0xffe0, 0x0000 };
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
+	pid_t previous_launcher = launcher->pid;
+
+	present_scene(fixture, initial);
+	set_close_decision(fixture, settings, "wait");
+	send_type(fixture, settings, FPLINUX_UI_SESSION_EXIT);
+	struct fplinux_ui_session_message prepare = wait_message(
+		fixture, settings, FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
+
+	setting(fixture, settings, "theme", "dark");
+	struct fplinux_ui_session_message reply = wait_message(
+		fixture, settings, FPLINUX_UI_SESSION_SETTING, "theme");
+
+	wait_reaped(fixture, previous_launcher);
+	launcher = wait_peer(fixture, TEST_LAUNCHER);
+	authenticate(fixture, launcher, NULL);
+	send_type(fixture, launcher, FPLINUX_UI_SESSION_READY);
+	fplinux_session_surface_committed(fixture->session, launcher->pid,
+					  fixture->width, fixture->height);
+	fplinux_session_frame(fixture->session, launcher->pid);
+	struct fplinux_ui_session_message active =
+		active_for(fixture, launcher, TEST_SETTINGS);
+
+	acknowledge(fixture, launcher, &active);
+	present_scene(fixture, decision);
+	acknowledge_close(fixture, settings, prepare.serial);
+	expect_scene(fixture, initial);
+	struct fplinux_ui_session_message redraw = {
+		.type = FPLINUX_UI_SESSION_REDRAW_ACK,
+		.serial = reply.serial,
+	};
+
+	issue(fixture, settings, &redraw);
+	expect_scene(fixture, decision);
 }
 
 static void test_surface_box(struct fixture *fixture, int top, int app_height)
@@ -3841,7 +4076,7 @@ int main(int argc, char **argv)
 		keypad_max = 1;
 	fixture = create_fixture(
 		argv[2], width, height, brightness, keypad_max,
-		!strcmp(argv[1], "task-localized-title") ? "ru" : "en",
+		!strncmp(argv[1], "task-localized-", 15) ? "ru" : "en",
 		!strncmp(argv[1], "battery-notice-", 15) ? 80 :
 		!strncmp(argv[1], "battery-", 8)	 ? 3 :
 							   -1,
@@ -3881,10 +4116,16 @@ int main(int argc, char **argv)
 		test_home_retains_exit_saves(fixture);
 	else if (!strcmp(argv[1], "close-cancel-stale"))
 		test_close_cancel_and_stale_reply(fixture);
-	else if (!strcmp(argv[1], "close-wait-home-force"))
-		test_close_wait_allows_home_and_forced_close(fixture);
+	else if (!strcmp(argv[1], "close-ready-scenes"))
+		test_close_ready_retains_scene_before_reply(fixture);
+	else if (!strcmp(argv[1], "close-wait-scenes"))
+		test_close_wait_needs_decision_and_system_frames(fixture);
+	else if (!strcmp(argv[1], "close-wait-home-repeat"))
+		test_close_wait_survives_home_and_repeated_close(fixture);
 	else if (!strcmp(argv[1], "close-unanswered-timeout"))
 		test_close_unanswered_has_bounded_timeout(fixture);
+	else if (!strcmp(argv[1], "close-wait-after-home"))
+		test_delayed_close_wait_after_home_stays_hidden(fixture);
 	else if (!strcmp(argv[1], "close-background-wait"))
 		test_close_background_wait_activates_same_instance(fixture);
 	else if (!strcmp(argv[1], "settings-retry-latest"))
@@ -3904,24 +4145,28 @@ int main(int argc, char **argv)
 		test_task_controls(fixture);
 	else if (!strcmp(argv[1], "task-localized-title"))
 		test_task_localized_title(fixture);
+	else if (!strcmp(argv[1], "activation-intent-frame-barrier"))
+		test_activation_intent_and_frame_barrier(fixture);
+	else if (!strcmp(argv[1], "activation-ended-task"))
+		test_resume_ended_task_during_handoff(fixture);
+	else if (!strcmp(argv[1], "activation-cancel-retains"))
+		test_retained_activation_cancel(fixture, "cancel");
+	else if (!strcmp(argv[1], "activation-home-retains"))
+		test_retained_activation_cancel(fixture, "home");
+	else if (!strcmp(argv[1], "activation-timeout-retains"))
+		test_retained_activation_cancel(fixture, "timeout");
+	else if (!strcmp(argv[1], "task-localized-live"))
+		test_task_titles_follow_applied_locale(fixture, false, false);
+	else if (!strcmp(argv[1], "task-localized-live-save-fails"))
+		test_task_titles_follow_applied_locale(fixture, false, true);
+	else if (!strcmp(argv[1], "task-localized-explicit-default"))
+		test_task_titles_follow_applied_locale(fixture, true, false);
 	else if (!strcmp(argv[1], "task-stale-lock"))
 		test_task_stale_and_locked(fixture);
-	else if (!strcmp(argv[1], "end-prompt-minimize"))
-		test_end_prompt_minimize_retains(fixture);
-	else if (!strcmp(argv[1], "end-prompt-close"))
-		test_end_prompt_close_saves(fixture, false);
-	else if (!strcmp(argv[1], "end-prompt-red-close"))
-		test_end_prompt_close_saves(fixture, true);
-	else if (!strcmp(argv[1], "end-prompt-cancel"))
-		test_end_prompt_cancel_restores(fixture);
-	else if (!strcmp(argv[1], "end-prompt-stale-instance"))
-		test_end_prompt_stale_instance(fixture);
-	else if (!strcmp(argv[1], "end-prompt-lock"))
-		test_end_prompt_lock_cancels(fixture);
-	else if (!strcmp(argv[1], "end-prompt-updates"))
-		test_end_prompt_update_keeps_focus(fixture);
-	else if (!strcmp(argv[1], "end-prompt-fullscreen"))
-		test_end_prompt_fullscreen_restarts_launcher(fixture);
+	else if (!strcmp(argv[1], "red-home-retains"))
+		test_red_home_retains_task(fixture, false);
+	else if (!strcmp(argv[1], "red-home-fullscreen"))
+		test_red_home_retains_task(fixture, true);
 	else if (!strcmp(argv[1], "task-view-red-home"))
 		test_task_view_red_returns_home(fixture);
 	else if (!strcmp(argv[1], "task-view-back-home"))
@@ -3946,10 +4191,12 @@ int main(int argc, char **argv)
 		test_appearance_waits_for_both_frames(fixture, true, false);
 	else if (!strcmp(argv[1], "appearance-save-fails"))
 		test_appearance_waits_for_both_frames(fixture, false, true);
-	else if (!strcmp(argv[1], "appearance-end-minimize"))
-		test_appearance_end_keeps_visible_dialog(fixture, true);
-	else if (!strcmp(argv[1], "appearance-end-close"))
-		test_appearance_end_keeps_visible_dialog(fixture, false);
+	else if (!strcmp(argv[1], "appearance-home"))
+		test_appearance_leave_retains_scene(fixture, true);
+	else if (!strcmp(argv[1], "appearance-close"))
+		test_appearance_leave_retains_scene(fixture, false);
+	else if (!strcmp(argv[1], "close-appearance-independent"))
+		test_close_and_appearance_require_separate_frames(fixture);
 	else if (!strcmp(argv[1], "peer-authentication"))
 		test_peer_authentication(fixture);
 	else if (!strcmp(argv[1], "cancel-cleans-process"))

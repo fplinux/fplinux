@@ -199,8 +199,23 @@ static void test_detail_and_choices(void)
 	assert(!strcmp(detail, "03.10.2026"));
 }
 
-int main(void)
+static void test_os_release(const char *path)
 {
+	char value[64];
+
+	assert(fplinux_settings_read_os_name(path, value, sizeof(value)));
+	assert(!strcmp(value, "FPLinux 1"));
+	assert(fplinux_settings_read_os_field(path, "BUILD_ID", value,
+					      sizeof(value)));
+	assert(!strcmp(value, "012345abcdef"));
+	assert(!fplinux_settings_read_os_field(path, "BUILD_ID", value, 12));
+	assert(!fplinux_settings_read_os_field(path, "UNKNOWN", value,
+					       sizeof(value)));
+}
+
+int main(int argc, char **argv)
+{
+	assert(argc == 2);
 	assert(!setenv("TZ", "UTC0", 1));
 	tzset();
 	test_brightness();
@@ -209,6 +224,7 @@ int main(void)
 	test_save_uses_live_clock();
 	test_offered_years_reach_manager();
 	test_detail_and_choices();
+	test_os_release(argv[1]);
 	puts("settings-core: all checks passed");
 	return 0;
 }

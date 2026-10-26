@@ -64,11 +64,14 @@ static void decimal_and_sign(void)
 static void divide_by_zero_and_recovery(void)
 {
 	struct fplinux_calculator calculator = { 0 };
+	char saved[128];
 
 	type(&calculator, "8/0=");
 	assert(fplinux_calculator_get_state(&calculator) ==
 	       FPLINUX_CALCULATOR_ERROR);
 	expect_display(&calculator, '.', "");
+	fplinux_calculator_save(&calculator, saved, sizeof(saved));
+	assert(!strcmp(saved, "d n 0 "));
 	assert(!fplinux_calculator_can_evaluate(&calculator));
 	type(&calculator, "4+2=");
 	expect_display(&calculator, '.', "6");
@@ -83,6 +86,8 @@ static void divide_by_zero_and_recovery(void)
 static void overflow_and_recovery(void)
 {
 	struct fplinux_calculator calculator = { 0 };
+	struct fplinux_calculator restored;
+	char saved[128];
 
 	type(&calculator, "999999999999*");
 	for (unsigned int index = 0; index < 24; index++)
@@ -90,6 +95,11 @@ static void overflow_and_recovery(void)
 	type(&calculator, "999999999999=");
 	assert(fplinux_calculator_get_state(&calculator) ==
 	       FPLINUX_CALCULATOR_ERROR);
+	fplinux_calculator_save(&calculator, saved, sizeof(saved));
+	assert(!strcmp(saved, "o n 0 "));
+	assert(fplinux_calculator_restore(&restored, saved));
+	fplinux_calculator_save(&restored, saved, sizeof(saved));
+	assert(!strcmp(saved, "o n 0 "));
 	type(&calculator, "2+3=");
 	expect_display(&calculator, '.', "5");
 }
@@ -100,7 +110,7 @@ static void limits_delete_and_reset(void)
 
 	type(&calculator, "12345678901.2#");
 	expect_display(&calculator, '.', "-12345678901.2");
-	assert(!fplinux_calculator_input(&calculator, '3'));
+	assert(fplinux_calculator_input(&calculator, '3') == 2);
 	expect_display(&calculator, '.', "-12345678901.2");
 	type(&calculator, "<3");
 	expect_display(&calculator, '.', "-12345678901.3");

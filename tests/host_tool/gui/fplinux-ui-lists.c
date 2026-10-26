@@ -62,6 +62,14 @@ lv_draw_buf_t *fplinux_ui_image_decode(const void *src, int width, int height,
 }
 
 static unsigned int failures;
+static uint8_t draw_buffer[240 * 320 * 2];
+
+static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *pixels)
+{
+	(void)area;
+	(void)pixels;
+	lv_display_flush_ready(display);
+}
 
 static void check(bool condition, const char *description)
 {
@@ -105,25 +113,39 @@ static lv_obj_t *find_image(lv_obj_t *object)
 	return NULL;
 }
 
-static lv_area_t row_geometry(struct fplinux_ui_listview *list, int margin)
+static lv_area_t row_geometry(struct fplinux_ui_listview *list, int height,
+			      int padding, bool overflow)
 {
 	lv_obj_t *object = fplinux_ui_listview_object(list);
+	lv_obj_t *selected;
 	lv_area_t viewport, row;
 
-	lv_obj_update_layout(object);
+	lv_refr_now(lv_obj_get_display(object));
 	viewport = coords(object);
-	row = coords(fplinux_ui_listview_selected_row(list));
-	check(row.x1 - viewport.x1 == margin, "selected row left outer margin");
-	check(viewport.x2 - row.x2 == margin,
-	      "selected row right outer margin");
+	selected = fplinux_ui_listview_selected_row(list);
+	row = coords(selected);
+	check(lv_obj_get_style_pad_top(object, 0) == 0 &&
+		      lv_obj_get_style_pad_bottom(object, 0) == 0,
+	      "list has no outer vertical padding");
+	if (fplinux_ui_listview_selected(list) == 0)
+		check(row.y1 == viewport.y1,
+		      "first row starts at the viewport's top edge");
+	check(row.x1 == viewport.x1, "selected row starts at the left edge");
+	check(viewport.x2 - row.x2 == (overflow ? 4 : 0),
+	      "selected row reserves a scrollbar lane only while overflowing");
+	check(lv_area_get_height(&row) == height,
+	      "selected row keeps its full pitch");
+	check(lv_obj_get_style_pad_left(selected, 0) == padding &&
+		      lv_obj_get_style_pad_right(selected, 0) == padding,
+	      "row keeps its horizontal text padding");
 	return row;
 }
 
-static void scrollbar_geometry(lv_obj_t *object, int offset, bool overflow)
+static void scrollbar_geometry(lv_obj_t *object, int inset, bool overflow)
 {
 	lv_area_t horizontal, vertical, viewport;
 
-	lv_obj_update_layout(object);
+	lv_refr_now(lv_obj_get_display(object));
 	viewport = coords(object);
 	lv_obj_get_scrollbar_area(object, &horizontal, &vertical);
 	check(empty(horizontal), "viewport has no horizontal scrollbar");
@@ -139,49 +161,62 @@ static void scrollbar_geometry(lv_obj_t *object, int offset, bool overflow)
 		return;
 	check(contains(viewport, vertical), "thumb stays inside the viewport");
 	check(lv_area_get_width(&vertical) == 2, "thumb is two pixels wide");
-	if (viewport.x2 - vertical.x2 != offset)
-		fprintf(stderr, "thumb inset: expected %d, observed %d\n",
-			offset, (int)(viewport.x2 - vertical.x2));
-	check(viewport.x2 - vertical.x2 == offset,
-	      "thumb is centered in the right outer margin");
+	check(viewport.x2 - vertical.x2 == inset,
+	      "thumb has one pixel of space inside the right border");
+	if (lv_obj_get_scroll_y(object) == 0)
+		check(vertical.y1 - viewport.y1 == inset,
+		      "thumb starts one pixel inside the top border");
+	if (lv_obj_get_scroll_bottom(object) == 0)
+		check(viewport.y2 - vertical.y2 == inset,
+		      "thumb ends one pixel inside the bottom border");
 }
 
-static void thumb_geometry(struct fplinux_ui_listview *list, int offset,
-			   bool overflow)
+static void thumb_geometry(struct fplinux_ui_listview *list, bool overflow)
 {
 	lv_obj_t *object = fplinux_ui_listview_object(list);
 	lv_area_t horizontal, vertical;
-	lv_area_t row = coords(fplinux_ui_listview_selected_row(list));
+	lv_area_t row;
 
-	scrollbar_geometry(object, offset, overflow);
+	scrollbar_geometry(object, 1, overflow);
+	row = coords(fplinux_ui_listview_selected_row(list));
 	lv_obj_get_scrollbar_area(object, &horizontal, &vertical);
 	if (overflow && !empty(vertical))
-		check(vertical.x1 > row.x2, "thumb stays outside the row");
+		check(vertical.x1 - row.x2 - 1 == 1,
+		      "thumb has one pixel of space after the row");
 }
 
 static void check_native_viewport(struct fplinux_ui *ui, lv_obj_t *screen,
-				  int width, int height, int offset)
+				  int width, int height, bool bordered)
 {
 	lv_obj_t *object = lv_obj_create(screen);
 	lv_obj_t *content;
 
 	lv_obj_remove_style_all(object);
 	lv_obj_set_size(object, width, height);
+	if (bordered)
+		lv_obj_set_style_border_width(object, 2, 0);
 	lv_obj_set_scroll_dir(object, LV_DIR_VER);
 	lv_obj_set_scrollbar_mode(object, LV_SCROLLBAR_MODE_AUTO);
 	fplinux_ui_style_scrollbar(ui, object);
 	content = lv_obj_create(object);
 	lv_obj_remove_style_all(content);
 	lv_obj_set_size(content, 1, 1);
-	scrollbar_geometry(object, offset, false);
+	scrollbar_geometry(object, bordered ? 3 : 1, false);
 	lv_obj_set_height(content, height * 2);
-	scrollbar_geometry(object, offset, true);
+	scrollbar_geometry(object, bordered ? 3 : 1, true);
 	lv_obj_scroll_to_y(object, height / 2, LV_ANIM_OFF);
-	scrollbar_geometry(object, offset, true);
+	scrollbar_geometry(object, bordered ? 3 : 1, true);
+	lv_obj_scroll_to_y(object,
+			   lv_obj_get_scroll_y(object) +
+				   lv_obj_get_scroll_bottom(object),
+			   LV_ANIM_OFF);
+	check(lv_obj_get_scroll_bottom(object) == 0,
+	      "native viewport reaches the bottom scroll limit");
+	scrollbar_geometry(object, bordered ? 3 : 1, true);
 	lv_obj_set_height(content, 1);
 	lv_obj_update_layout(object);
 	lv_obj_readjust_scroll(object, LV_ANIM_OFF);
-	scrollbar_geometry(object, offset, false);
+	scrollbar_geometry(object, bordered ? 3 : 1, false);
 	lv_obj_delete(object);
 }
 
@@ -208,6 +243,92 @@ static bool virtual_row(struct fplinux_ui_listview *list, size_t index,
 	row->text = "Virtual row";
 	row->detail = "Description";
 	return true;
+}
+
+static void check_divider(struct fplinux_ui_listview *list, size_t index,
+			  bool expected)
+{
+	lv_obj_t *row;
+	bool has_divider;
+
+	fplinux_ui_listview_select(list, index);
+	fplinux_ui_listview_set_active(list, false);
+	row = fplinux_ui_listview_selected_row(list);
+	assert(row);
+	has_divider = lv_obj_get_style_border_width(row, 0) > 0 &&
+		      (lv_obj_get_style_border_side(row, 0) &
+		       LV_BORDER_SIDE_BOTTOM) &&
+		      lv_obj_get_style_border_opa(row, 0) != LV_OPA_TRANSP;
+	check(has_divider == expected,
+	      expected ? "non-final row has a bottom divider" :
+			 "actual final row has no bottom divider");
+	fplinux_ui_listview_set_active(list, true);
+}
+
+static void check_final_divider(struct fplinux_ui *ui, lv_obj_t *screen,
+				bool is_virtual)
+{
+	struct fplinux_ui_listview *list;
+	lv_obj_t *row;
+	lv_area_t selected;
+
+	if (is_virtual) {
+		list = fplinux_ui_listview_create_virtual(
+			ui, screen, FPLINUX_UI_LISTVIEW_PLAIN, 1, virtual_row,
+			NULL);
+		assert(list);
+		fplinux_ui_listview_set_active(list, true);
+	} else {
+		list = fplinux_ui_listview_create(ui, screen,
+						  FPLINUX_UI_LISTVIEW_PLAIN);
+		assert(list);
+		assert(fplinux_ui_listview_add(list, "First", NULL) == 0);
+	}
+	check_divider(list, 0, false);
+	if (is_virtual)
+		fplinux_ui_listview_rows_inserted(list, 1, 1);
+	else
+		assert(fplinux_ui_listview_add(list, "Second", NULL) == 1);
+	check_divider(list, 0, true);
+	check_divider(list, 1, false);
+	if (is_virtual)
+		fplinux_ui_listview_rows_inserted(list, 1, 1);
+	else
+		assert(fplinux_ui_listview_insert(list, 1, "Middle", NULL) ==
+		       1);
+	check_divider(list, 1, true);
+	check_divider(list, 2, false);
+	if (is_virtual)
+		fplinux_ui_listview_rows_deleted(list, 2, 1);
+	else
+		assert(fplinux_ui_listview_remove(list, 2));
+	check_divider(list, 1, false);
+	if (is_virtual)
+		fplinux_ui_listview_rows_inserted(list, 2, 38);
+	else
+		for (size_t index = 2; index < 40; ++index)
+			assert(fplinux_ui_listview_add(list, "Another", NULL) ==
+			       index);
+	check_divider(list, 5, true);
+	check_divider(list, 38, true);
+	check_divider(list, 39, false);
+	row = fplinux_ui_listview_selected_row(list);
+	lv_obj_update_layout(row);
+	selected = coords(row);
+	check(lv_obj_get_style_bg_opa(row, 0) == LV_OPA_COVER,
+	      "selected final row has an opaque background");
+	check(lv_color_to_u32(lv_obj_get_style_bg_color(row, 0)) == 0xff204060U,
+	      "selected final row uses the accent background");
+	check(lv_area_get_height(&selected) == (is_virtual ? 32 : 22),
+	      "selected final row retains its complete pitch");
+	if (is_virtual)
+		fplinux_ui_listview_rows_deleted(list, 1, 39);
+	else {
+		fplinux_ui_listview_clear(list);
+		assert(fplinux_ui_listview_add(list, "Refilled", NULL) == 0);
+	}
+	check_divider(list, 0, false);
+	lv_obj_clean(screen);
 }
 
 static void check_navigation(struct fplinux_ui *ui, lv_obj_t *screen,
@@ -238,8 +359,7 @@ static void check_navigation(struct fplinux_ui *ui, lv_obj_t *screen,
 	}
 	object = fplinux_ui_listview_object(list);
 	if (one_row)
-		lv_obj_set_height(owner, 2 * ui->spec->list_padding +
-						 ui->spec->row_height_detail);
+		lv_obj_set_height(owner, ui->spec->row_height_detail);
 	fplinux_ui_listview_set_active(list, true);
 	if (!one_row) {
 		press.code = KEY_UP;
@@ -386,28 +506,79 @@ static void check_text_update_keeps_scroll(struct fplinux_ui *ui,
 	lv_obj_clean(screen);
 }
 
+static void check_first_visible(struct fplinux_ui *ui, lv_obj_t *screen,
+				bool is_virtual)
+{
+	struct fplinux_ui_listview *list;
+	lv_obj_t *object;
+	int32_t pitch = is_virtual ? ui->spec->row_height_detail :
+				     ui->spec->row_height;
+
+	if (is_virtual) {
+		list = fplinux_ui_listview_create_virtual(
+			ui, screen, FPLINUX_UI_LISTVIEW_PLAIN, 40, virtual_row,
+			NULL);
+		assert(list);
+		fplinux_ui_listview_set_active(list, true);
+	} else {
+		list = fplinux_ui_listview_create(ui, screen,
+						  FPLINUX_UI_LISTVIEW_PLAIN);
+		assert(list);
+		check(fplinux_ui_listview_first_visible(list) == SIZE_MAX,
+		      "an empty list has no visible row");
+		for (size_t index = 0; index < 40; ++index)
+			assert(fplinux_ui_listview_add(list, "Row", NULL) ==
+			       index);
+	}
+	object = fplinux_ui_listview_object(list);
+	lv_obj_update_layout(object);
+	check(fplinux_ui_listview_first_visible(list) == 0,
+	      "the initial first row is visible");
+	lv_obj_scroll_to_y(object, pitch, LV_ANIM_OFF);
+	check(fplinux_ui_listview_first_visible(list) == 1,
+	      "an aligned scroll returns the first whole row");
+	lv_obj_scroll_to_y(object, pitch + 1, LV_ANIM_OFF);
+	check(fplinux_ui_listview_first_visible(list) == 2,
+	      "a clipped leading row is skipped");
+	lv_obj_set_height(object, pitch - 1);
+	lv_obj_update_layout(object);
+	lv_obj_scroll_to_y(object, pitch + 1, LV_ANIM_OFF);
+	check(fplinux_ui_listview_first_visible(list) == 1,
+	      "a short viewport returns its first intersecting row");
+	lv_obj_set_height(object, pitch);
+	lv_obj_update_layout(object);
+	lv_obj_scroll_to_y(object, pitch + 1, LV_ANIM_OFF);
+	check(fplinux_ui_listview_first_visible(list) == 1,
+	      "an unaligned single-row viewport returns its first intersecting row");
+	lv_obj_clean(screen);
+}
+
 int main(int argc, char **argv)
 {
 	struct fplinux_ui ui = { 0 };
 	struct fplinux_ui_listview *list;
 	lv_display_t *display;
 	lv_obj_t *screen, *object;
-	lv_area_t short_row, long_row;
+	lv_area_t short_row, long_row, shrunk_row;
 	bool is_virtual, details;
-	int width, height, margin, offset;
+	int width, height, row_height, padding;
 
 	if (argc != 6)
 		return 2;
 	width = atoi(argv[2]);
 	height = atoi(argv[3]);
-	margin = atoi(argv[4]);
-	offset = atoi(argv[5]);
+	row_height = atoi(argv[4]);
+	padding = atoi(argv[5]);
 	is_virtual = !strcmp(argv[1], "virtual");
 	details = is_virtual || !strcmp(argv[1], "detail") ||
 		  !strcmp(argv[1], "inline");
 	lv_init();
 	display = lv_display_create(width, height);
 	assert(display);
+	lv_display_set_color_format(display, LV_COLOR_FORMAT_RGB565);
+	lv_display_set_buffers(display, draw_buffer, NULL, sizeof(draw_buffer),
+			       LV_DISPLAY_RENDER_MODE_PARTIAL);
+	lv_display_set_flush_cb(display, flush);
 	screen = lv_display_get_screen_active(display);
 	lv_obj_remove_style_all(screen);
 	lv_obj_set_size(screen, width, height);
@@ -417,6 +588,11 @@ int main(int argc, char **argv)
 	ui.theme.accent = lv_color_hex(0x204060);
 	ui.theme.accent_text = lv_color_white();
 	ui.theme.focus = lv_color_hex(0x2468ac);
+	if (!strncmp(argv[1], "final-divider-", 14)) {
+		check_final_divider(&ui, screen,
+				    !strcmp(argv[1] + 14, "virtual"));
+		goto done;
+	}
 	if (!strncmp(argv[1], "navigation-", 11)) {
 		check_navigation(&ui, screen,
 				 strstr(argv[1], "virtual") != NULL,
@@ -434,6 +610,11 @@ int main(int argc, char **argv)
 	}
 	if (!strcmp(argv[1], "text-update")) {
 		check_text_update_keeps_scroll(&ui, screen);
+		goto done;
+	}
+	if (!strncmp(argv[1], "first-visible-", 14)) {
+		check_first_visible(&ui, screen,
+				    !strcmp(argv[1] + 14, "virtual"));
 		goto done;
 	}
 	if (is_virtual) {
@@ -457,13 +638,15 @@ int main(int argc, char **argv)
 				2, 2, LV_COLOR_FORMAT_A8, LV_STRIDE_AUTO);
 
 			assert(icon);
-			check(fplinux_ui_listview_set_icon(list, 0, icon),
+			check(fplinux_ui_listview_set_icon(
+				      list, 0, icon,
+				      FPLINUX_UI_LIST_ICON_IMAGE),
 			      "row accepts an owned icon");
 		}
 	}
 	object = fplinux_ui_listview_object(list);
-	short_row = row_geometry(list, margin);
-	thumb_geometry(list, offset, false);
+	short_row = row_geometry(list, row_height, padding, false);
+	thumb_geometry(list, false);
 	check_contents(&ui, short_row, details);
 	if (!strcmp(argv[1], "icon")) {
 		lv_obj_t *image =
@@ -483,12 +666,14 @@ int main(int argc, char **argv)
 						      details ? "Detail" :
 								NULL) == index,
 			      "overflow row is added");
-	long_row = row_geometry(list, margin);
-	check(short_row.x1 == long_row.x1 && short_row.x2 == long_row.x2,
-	      "overflow does not change the selected row's horizontal bounds");
-	thumb_geometry(list, offset, true);
-	if (!strcmp(argv[1], "scrollbar"))
-		check_native_viewport(&ui, screen, width, height, offset);
+	long_row = row_geometry(list, row_height, padding, true);
+	check(short_row.x1 == long_row.x1 && short_row.x2 - long_row.x2 == 4,
+	      "overflow adds only the four-pixel scrollbar lane");
+	thumb_geometry(list, true);
+	if (!strcmp(argv[1], "scrollbar")) {
+		check_native_viewport(&ui, screen, width, height, false);
+		check_native_viewport(&ui, screen, width, height, true);
+	}
 	key(list, KEY_DOWN);
 	check(fplinux_ui_listview_selected(list) == 1,
 	      "Down advances selection by one row");
@@ -496,16 +681,26 @@ int main(int argc, char **argv)
 		key(list, KEY_RIGHT);
 	check(fplinux_ui_listview_selected(list) == 39,
 	      "Right pages to the final row without wrapping");
-	long_row = row_geometry(list, margin);
+	long_row = row_geometry(list, row_height, padding, true);
 	check(contains(coords(object), long_row),
 	      "keypad scrolling fully reveals the selected final row");
 	check_contents(&ui, long_row, details);
 	check(lv_obj_get_scroll_y(object) > 0,
 	      "keypad navigation scrolls the list");
-	thumb_geometry(list, offset, true);
+	thumb_geometry(list, true);
 	key(list, KEY_UP);
 	check(fplinux_ui_listview_selected(list) == 38,
 	      "Up returns to the preceding row");
+	if (is_virtual)
+		fplinux_ui_listview_rows_deleted(list, 1, 39);
+	else
+		for (size_t index = 39; index > 0; --index)
+			check(fplinux_ui_listview_remove(list, index),
+			      "overflow row is removed");
+	shrunk_row = row_geometry(list, row_height, padding, false);
+	check(short_row.x1 == shrunk_row.x1 && short_row.x2 == shrunk_row.x2,
+	      "shrinking restores the full row width");
+	thumb_geometry(list, false);
 	lv_obj_clean(screen);
 done:
 	lv_display_delete(display);

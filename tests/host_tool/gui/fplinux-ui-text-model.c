@@ -35,6 +35,13 @@ static void taps(struct fplinux_ui_text_model *model, unsigned int code,
 		tap(model, code, time + 10 * index);
 }
 
+static void hold(struct fplinux_ui_text_model *model, unsigned int code,
+		 uint64_t time)
+{
+	phone(model, code, true, time);
+	phone(model, code, false, time + 500);
+}
+
 static enum fplinux_ui_text_model_result
 keyboard(struct fplinux_ui_text_model *model, unsigned int code,
 	 const char *text, bool shortcut)
@@ -72,7 +79,7 @@ static bool pending_at(const struct fplinux_ui_text_model *model, size_t index)
 /* Language files of the fixture directory: en and ru. */
 static const char *languages;
 
-/* Modes as # presses from the first, with English preferred for input. */
+/* Named starting states for the editing scenarios. */
 enum mode {
 	SENTENCE,
 	LOWER,
@@ -88,7 +95,16 @@ static void init(struct fplinux_ui_text_model *model, bool multiline,
 {
 	assert(fplinux_ui_text_model_init(model, multiline, limit, languages,
 					  "en"));
-	for (unsigned int press = 0; press < mode; ++press)
+	if (mode == NUMERIC) {
+		hold(model, KEY_NUMERIC_POUND, 0);
+		return;
+	}
+	if (mode >= RUSSIAN_SENTENCE)
+		hold(model, KEY_NUMERIC_STAR, 0);
+	if (mode == LOWER || mode == RUSSIAN_LOWER || mode == UPPER ||
+	    mode == RUSSIAN_UPPER)
+		tap(model, KEY_NUMERIC_POUND, 0);
+	if (mode == UPPER || mode == RUSSIAN_UPPER)
 		tap(model, KEY_NUMERIC_POUND, 0);
 }
 
@@ -179,12 +195,11 @@ static void verify_long_digit_press(void)
 
 	/* Digits need no long press in 123 mode. */
 	fplinux_ui_text_model_set_text(&model, "");
-	for (unsigned int press = 0; press < 4; ++press)
-		tap(&model, KEY_NUMERIC_POUND, 3000 + press);
+	hold(&model, KEY_NUMERIC_POUND, 3000);
 	assert(!strcmp(fplinux_ui_text_model_indicator(&model), "123"));
-	tap(&model, KEY_NUMERIC_0, 3100);
-	tap(&model, KEY_NUMERIC_1, 3110);
-	tap(&model, KEY_NUMERIC_1, 3120);
+	tap(&model, KEY_NUMERIC_0, 3600);
+	tap(&model, KEY_NUMERIC_1, 3610);
+	tap(&model, KEY_NUMERIC_1, 3620);
 	shows(&model, "011", 3);
 	assert(!pending_at(&model, 2));
 	fplinux_ui_text_model_cleanup(&model);
@@ -256,20 +271,26 @@ static void cycles_through(const char *directory, const char *preferred,
 	fplinux_ui_text_model_cleanup(&model);
 }
 
-/*
- * # steps through each input language's cases, the preferred language first and
- * the others by code, then 123; without language files only English remains.
- */
+/* # changes case only; language and numeric mode retain the selected case. */
 static void verify_mode_cycle_and_russian(void)
 {
 	static const char *const english_first[] = {
-		"Abc", "abc", "ABC", "Абв", "абв", "АБВ", "123", "Abc",
+		"Abc",
+		"abc",
+		"ABC",
+		"Abc",
 	};
 	static const char *const russian_first[] = {
-		"Абв", "абв", "АБВ", "Abc", "abc", "ABC", "123", "Абв",
+		"Абв",
+		"абв",
+		"АБВ",
+		"Абв",
 	};
 	static const char *const builtin[] = {
-		"Abc", "abc", "ABC", "123", "Abc",
+		"Abc",
+		"abc",
+		"ABC",
+		"Abc",
 	};
 	struct fplinux_ui_text_model model;
 
@@ -282,6 +303,15 @@ static void verify_mode_cycle_and_russian(void)
 		       sizeof(english_first) / sizeof(english_first[0]));
 	cycles_through("/nonexistent/fplinux", "ru", builtin,
 		       sizeof(builtin) / sizeof(builtin[0]));
+	assert(fplinux_ui_text_model_init(&model, false, 0,
+					  "/nonexistent/fplinux", "en"));
+	hold(&model, KEY_NUMERIC_STAR, 0);
+	assert(!strcmp(fplinux_ui_text_model_indicator(&model), "Abc"));
+	assert(!model.input.picker_open);
+	hold(&model, KEY_NUMERIC_POUND, 1000);
+	hold(&model, KEY_NUMERIC_STAR, 2000);
+	assert(!strcmp(fplinux_ui_text_model_indicator(&model), "Abc"));
+	fplinux_ui_text_model_cleanup(&model);
 
 	/* The first mode types the preferred input language in sentence case. */
 	assert(fplinux_ui_text_model_init(&model, false, 0, languages, "ru"));
@@ -301,9 +331,10 @@ static void verify_mode_cycle_and_russian(void)
 	taps(&model, KEY_NUMERIC_3, 3, 600);
 	shows(&model, "ЯдёЁ", 4);
 	/* Leaving Russian commits too; Latin follows. */
-	tap(&model, KEY_NUMERIC_POUND, 700);
-	tap(&model, KEY_NUMERIC_POUND, 710);
-	taps(&model, KEY_NUMERIC_7, 4, 800);
+	hold(&model, KEY_NUMERIC_STAR, 700);
+	tap(&model, KEY_NUMERIC_POUND, 1300);
+	tap(&model, KEY_NUMERIC_POUND, 1310);
+	taps(&model, KEY_NUMERIC_7, 4, 1400);
 	shows(&model, "ЯдёЁs", 5);
 	fplinux_ui_text_model_cleanup(&model);
 }
@@ -408,11 +439,8 @@ static void verify_character_limit_and_counter(void)
 	shows(&model, "аба", 3);
 	/* A deletion frees one character. */
 	tap(&model, KEY_F14, 1200);
-	tap(&model, KEY_NUMERIC_POUND, 1300);
-	tap(&model, KEY_NUMERIC_POUND, 1310);
-	tap(&model, KEY_NUMERIC_POUND, 1320);
-	tap(&model, KEY_NUMERIC_POUND, 1330);
-	tap(&model, KEY_NUMERIC_7, 1400);
+	hold(&model, KEY_NUMERIC_STAR, 1300);
+	tap(&model, KEY_NUMERIC_7, 1900);
 	shows(&model, "абp", 3);
 	fplinux_ui_text_model_status(&model, status, sizeof(status));
 	assert(!strcmp(status, "abc  3/3"));
@@ -502,6 +530,9 @@ static void verify_failed_picker_view(void)
 	assert(fplinux_ui_text_model_set_text(&model, "a"));
 	assert(phone(&model, KEY_NUMERIC_STAR, true, 10) ==
 	       FPLINUX_UI_TEXT_MODEL_CONSUMED);
+	assert(!model.input.picker_open);
+	assert(phone(&model, KEY_NUMERIC_STAR, false, 11) ==
+	       FPLINUX_UI_TEXT_MODEL_CONSUMED);
 	assert(model.input.picker_open);
 	revision = model.revision;
 	fplinux_ui_text_model_cancel_picker(&model);
@@ -509,9 +540,6 @@ static void verify_failed_picker_view(void)
 	assert(model.focused);
 	assert(model.revision != revision);
 	shows(&model, "a", 1);
-	/* Rollback preserves the routing of the press that opened the picker. */
-	assert(phone(&model, KEY_NUMERIC_STAR, false, 11) ==
-	       FPLINUX_UI_TEXT_MODEL_CONSUMED);
 	tap(&model, KEY_NUMERIC_3, 20);
 	shows(&model, "ad", 2);
 	revision = model.revision;
@@ -1201,7 +1229,9 @@ static void verify_number_and_phone_lines(void)
 static void verify_password_masking(void)
 {
 	static const char *const modes[] = {
-		"abc", "ABC", "абв", "АБВ", "123", "abc",
+		"abc",
+		"ABC",
+		"abc",
 	};
 	struct fplinux_ui_text_model model;
 
@@ -1214,23 +1244,23 @@ static void verify_password_masking(void)
 		tap(&model, KEY_NUMERIC_POUND, 10 * mode);
 	}
 	assert(!strcmp(fplinux_ui_text_model_indicator(&model), "ABC"));
-	tap(&model, KEY_NUMERIC_POUND, 100);
-	tap(&model, KEY_NUMERIC_POUND, 110);
-	tap(&model, KEY_NUMERIC_POUND, 120);
-	tap(&model, KEY_NUMERIC_POUND, 130);
+	hold(&model, KEY_NUMERIC_STAR, 100);
+	assert(!strcmp(fplinux_ui_text_model_indicator(&model), "АБВ"));
+	hold(&model, KEY_NUMERIC_STAR, 600);
+	tap(&model, KEY_NUMERIC_POUND, 1200);
 	assert(!strcmp(fplinux_ui_text_model_indicator(&model), "abc"));
 	shows_view(&model, "", "");
-	tap(&model, KEY_NUMERIC_2, 1000);
+	tap(&model, KEY_NUMERIC_2, 1300);
 	shows_view(&model, "a", "a");
-	fplinux_ui_text_model_tick(&model, 2000);
+	fplinux_ui_text_model_tick(&model, 2300);
 	shows_view(&model, "a", "•");
-	taps(&model, KEY_NUMERIC_3, 2, 2100);
+	taps(&model, KEY_NUMERIC_3, 2, 2400);
 	shows_view(&model, "ae", "•e");
-	tap(&model, KEY_RIGHT, 2200);
+	tap(&model, KEY_RIGHT, 2500);
 	shows_view(&model, "ae", "••");
 	/* In the middle of the text the indices of both strings match. */
-	tap(&model, KEY_LEFT, 2300);
-	tap(&model, KEY_NUMERIC_9, 2400);
+	tap(&model, KEY_LEFT, 2600);
+	tap(&model, KEY_NUMERIC_9, 2700);
 	shows_view(&model, "awe", "•w•");
 	assert(pending_at(&model, 1));
 	keyboard(&model, KEY_X, "X", false);
@@ -1313,8 +1343,9 @@ static void verify_shared_input_blocked_events_can_be_retried(void)
 	assert(sink.count == 1 && sink.characters[0] == 'a');
 	assert(fplinux_multitap_candidate(&input.compose) == 'd');
 	sink.blocked = true;
-	assert(fplinux_text_input_next_mode(&input, sink_character, &sink) ==
-	       FPLINUX_MULTITAP_BLOCKED);
+	fplinux_text_input_press(&input, '#', 200, sink_character, &sink);
+	assert(fplinux_text_input_release(&input, '#', 201, sink_character,
+					  &sink) == FPLINUX_MULTITAP_BLOCKED);
 	assert(!strcmp(fplinux_text_input_indicator(&input), "abc"));
 	assert(fplinux_multitap_candidate(&input.compose) == 'd');
 	assert(fplinux_text_input_open_picker(&input, sink_character, &sink) ==
@@ -1435,6 +1466,72 @@ static void verify_cancelled_hold_does_not_edit_on_synthetic_release(void)
 	fplinux_ui_text_model_cleanup(&model);
 }
 
+static void verify_control_gestures(void)
+{
+	struct fplinux_ui_text_model model;
+	uint64_t deadline;
+	unsigned int revision;
+
+	init(&model, false, 0, SENTENCE);
+	phone(&model, KEY_NUMERIC_POUND, true, 1000);
+	assert(!strcmp(fplinux_text_input_indicator(&model.input), "Abc"));
+	assert(fplinux_ui_text_model_deadline(&model, &deadline));
+	assert(deadline == 1500);
+	fplinux_ui_text_model_tick(&model, 1499);
+	assert(!strcmp(fplinux_text_input_indicator(&model.input), "Abc"));
+	phone(&model, KEY_NUMERIC_POUND, false, 1499);
+	assert(!strcmp(fplinux_text_input_indicator(&model.input), "abc"));
+	phone(&model, KEY_NUMERIC_STAR, true, 2000);
+	assert(!model.input.picker_open);
+	revision = model.revision;
+	fplinux_ui_text_model_tick(&model, 2500);
+	assert(model.revision != revision);
+	assert(!strcmp(fplinux_text_input_indicator(&model.input), "абв"));
+	assert(!model.input.picker_open);
+	phone(&model, KEY_NUMERIC_STAR, false, 2600);
+	assert(!model.input.picker_open);
+	phone(&model, KEY_NUMERIC_POUND, true, 3000);
+	phone(&model, KEY_NUMERIC_POUND, false, 3500);
+	assert(!strcmp(fplinux_text_input_indicator(&model.input), "123"));
+	fplinux_ui_text_model_tick(&model, 4000);
+	assert(!strcmp(fplinux_text_input_indicator(&model.input), "123"));
+	tap(&model, KEY_NUMERIC_POUND, 4100);
+	assert(!strcmp(fplinux_text_input_indicator(&model.input), "абв"));
+	tap(&model, KEY_NUMERIC_STAR, 4200);
+	assert(model.input.picker_open);
+	fplinux_ui_text_model_cancel_held(&model);
+	phone(&model, KEY_NUMERIC_STAR, true, 5000);
+	fplinux_ui_text_model_cancel_held(&model);
+	phone(&model, KEY_NUMERIC_STAR, false, 5600);
+	fplinux_ui_text_model_tick(&model, 6000);
+	assert(!strcmp(fplinux_text_input_indicator(&model.input), "абв"));
+	assert(!model.input.picker_open);
+	hold(&model, KEY_NUMERIC_POUND, 6100);
+	hold(&model, KEY_NUMERIC_STAR, 6700);
+	assert(!strcmp(fplinux_text_input_indicator(&model.input), "abc"));
+	phone(&model, KEY_NUMERIC_POUND, true, 7300);
+	fplinux_ui_text_model_set_read_only(&model, true);
+	phone(&model, KEY_NUMERIC_POUND, false, 7900);
+	fplinux_ui_text_model_set_read_only(&model, false);
+	fplinux_ui_text_model_tick(&model, 8000);
+	assert(!strcmp(fplinux_text_input_indicator(&model.input), "abc"));
+	phone(&model, KEY_NUMERIC_STAR, true, 8100);
+	fplinux_ui_text_model_set_focused(&model, false);
+	fplinux_ui_text_model_set_focused(&model, true);
+	phone(&model, KEY_NUMERIC_STAR, false, 8700);
+	fplinux_ui_text_model_tick(&model, 8800);
+	assert(!strcmp(fplinux_text_input_indicator(&model.input), "abc"));
+	assert(!model.input.picker_open);
+	phone(&model, KEY_NUMERIC_STAR, true, 8900);
+	assert(fplinux_ui_text_model_set_type(
+		&model, FPLINUX_UI_TEXT_MODEL_NUMERIC, '.'));
+	phone(&model, KEY_NUMERIC_STAR, false, 9500);
+	fplinux_ui_text_model_tick(&model, 9600);
+	assert(!strcmp(fplinux_text_input_indicator(&model.input), "123"));
+	assert(!model.input.picker_open);
+	fplinux_ui_text_model_cleanup(&model);
+}
+
 int main(int argc, char **argv)
 {
 	assert(argc == 2 || argc == 3);
@@ -1444,6 +1541,8 @@ int main(int argc, char **argv)
 			verify_overdue_digit_release();
 		else if (!strcmp(argv[2], "overdue-phone-zero-release"))
 			verify_overdue_phone_zero_release();
+		else if (!strcmp(argv[2], "control-gestures"))
+			verify_control_gestures();
 		else
 			assert(!"unknown text model scenario");
 		return 0;

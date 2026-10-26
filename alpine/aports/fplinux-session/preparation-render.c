@@ -1,14 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "preparation.h"
+#include "fplinux-ui-profile.h"
+#include "fplinux-ui-session.h"
 
 #include <stdio.h>
 #include <string.h>
-
-#define PREPARATION_BACKGROUND 0x0863
-#define PREPARATION_FOREGROUND 0xef7d
-#define PREPARATION_MUTED 0x9d35
-#define PREPARATION_ACCENT 0x5e9b
-#define PREPARATION_TRACK 0x29a9
 
 static void rectangle(const struct fplinux_preparation_surface *surface,
 		      unsigned int x, unsigned int y, unsigned int width,
@@ -113,6 +109,15 @@ void fplinux_preparation_render(
 	const struct fplinux_font *font,
 	const struct fplinux_preparation_status *status, unsigned int phase)
 {
+	const struct fplinux_ui_theme_spec *theme =
+		fplinux_ui_theme_spec(FPLINUX_UI_SESSION_THEME_DARK);
+	uint16_t background =
+		fplinux_ui_colour565(theme, FPLINUX_UI_COLOUR_BACKGROUND);
+	uint16_t foreground =
+		fplinux_ui_colour565(theme, FPLINUX_UI_COLOUR_FOREGROUND);
+	uint16_t muted = fplinux_ui_colour565(theme, FPLINUX_UI_COLOUR_MUTED);
+	uint16_t accent = fplinux_ui_colour565(theme, FPLINUX_UI_COLOUR_FOCUS);
+	uint16_t track = fplinux_ui_colour565(theme, FPLINUX_UI_COLOUR_BORDER);
 	const char *heading;
 	const char *detail;
 	unsigned int margin = font->width;
@@ -121,10 +126,9 @@ void fplinux_preparation_render(
 	unsigned int bar_height = font->height / 2;
 	char progress[80];
 
-	rectangle(surface, 0, 0, surface->width, surface->height,
-		  PREPARATION_BACKGROUND);
-	y = text(surface, font, y, "FPLinux", PREPARATION_FOREGROUND);
-	y = text(surface, font, y + 2, "First start", PREPARATION_MUTED);
+	rectangle(surface, 0, 0, surface->width, surface->height, background);
+	y = text(surface, font, y, "FPLinux", foreground);
+	y = text(surface, font, y + 2, "First start", muted);
 	y += font->height;
 	switch (status->stage) {
 	case FPLINUX_PREPARATION_READING:
@@ -153,7 +157,7 @@ void fplinux_preparation_render(
 		detail = "Keep the phone connected to the computer.";
 		break;
 	}
-	y = text(surface, font, y, heading, PREPARATION_FOREGROUND);
+	y = text(surface, font, y, heading, foreground);
 	y += font->height / 2;
 	if (status->stage == FPLINUX_PREPARATION_READING) {
 		unsigned int percent =
@@ -162,25 +166,22 @@ void fplinux_preparation_render(
 						      status->total, width);
 
 		snprintf(progress, sizeof(progress), "%u%%", percent);
-		y = text(surface, font, y, progress, PREPARATION_ACCENT);
-		rectangle(surface, margin, y + 3, width, bar_height,
-			  PREPARATION_TRACK);
-		rectangle(surface, margin, y + 3, filled, bar_height,
-			  PREPARATION_ACCENT);
+		y = text(surface, font, y, progress, accent);
+		rectangle(surface, margin, y + 3, width, bar_height, track);
+		rectangle(surface, margin, y + 3, filled, bar_height, accent);
 		y += bar_height + font->height;
 		snprintf(progress, sizeof(progress), "%.1Lf / %.1Lf MiB",
 			 (long double)status->completed / (1024 * 1024),
 			 (long double)status->total / (1024 * 1024));
-		y = text(surface, font, y, progress, PREPARATION_MUTED);
+		y = text(surface, font, y, progress, muted);
 	} else if (fplinux_preparation_is_busy(status->stage)) {
 		unsigned int segment = width / 4;
 		unsigned int offset = (phase % 12) * (width - segment) / 11;
 
-		rectangle(surface, margin, y + 3, width, bar_height,
-			  PREPARATION_TRACK);
+		rectangle(surface, margin, y + 3, width, bar_height, track);
 		rectangle(surface, margin + offset, y + 3, segment, bar_height,
-			  PREPARATION_ACCENT);
+			  accent);
 		y += bar_height + font->height;
 	}
-	text(surface, font, y + font->height / 2, detail, PREPARATION_MUTED);
+	text(surface, font, y + font->height / 2, detail, muted);
 }

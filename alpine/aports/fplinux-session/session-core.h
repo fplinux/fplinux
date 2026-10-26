@@ -65,8 +65,6 @@ struct fplinux_session_options {
 	void (*launch_frame)(void *context, int fd, int width, int height);
 	/* Retain the current rendered scene until its replacement is complete. */
 	void (*hold_frame)(void *context, bool enabled);
-	/* Return an owned close-on-exec RGB565 scene descriptor, or -1. */
-	int (*capture_frame)(void *context, int *width, int *height);
 	/* Optional vibrator boundary; false reports errno and loses the device. */
 	bool (*vibrate)(void *context, bool on);
 	void *context;

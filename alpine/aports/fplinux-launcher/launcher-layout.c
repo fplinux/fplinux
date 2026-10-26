@@ -137,10 +137,9 @@ fplinux_launcher_status_glyph(const struct fplinux_ui_profile_spec *spec)
 	};
 }
 
-size_t fplinux_launcher_columns(const struct fplinux_ui_profile_spec *spec,
-				bool grid)
+size_t fplinux_launcher_columns(const struct fplinux_ui_profile_spec *spec)
 {
-	return grid && spec->grid_columns > 0 ? (size_t)spec->grid_columns : 1;
+	return spec->grid_columns > 0 ? (size_t)spec->grid_columns : 1;
 }
 
 struct fplinux_launcher_rect
@@ -196,19 +195,10 @@ fplinux_launcher_first_visible_row(const struct fplinux_launcher_scroll *scroll,
 	return rows && row >= rows ? rows - 1 : row;
 }
 
-size_t fplinux_launcher_page_rows(const struct fplinux_launcher_scroll *scroll,
-				  int viewport_height)
-{
-	int room = viewport_height - 2 * scroll->padding - scroll->item;
-
-	return room > 0 ? (size_t)(room / scroll->pitch) + 1 : 1;
-}
-
 size_t fplinux_launcher_move(size_t selected, size_t count, size_t columns,
-			     size_t page, enum fplinux_launcher_move move)
+			     enum fplinux_launcher_move move)
 {
 	size_t last;
-	size_t step;
 
 	if (!count)
 		return 0;
@@ -217,7 +207,6 @@ size_t fplinux_launcher_move(size_t selected, size_t count, size_t columns,
 		selected = last;
 	if (!columns)
 		columns = 1;
-	step = columns > 1 || !page ? 1 : page;
 	switch (move) {
 	case FPLINUX_LAUNCHER_MOVE_UP:
 		if (selected >= columns)
@@ -230,9 +219,13 @@ size_t fplinux_launcher_move(size_t selected, size_t count, size_t columns,
 			return selected % columns;
 		return selected + columns < last ? selected + columns : last;
 	case FPLINUX_LAUNCHER_MOVE_LEFT:
-		return selected > step ? selected - step : 0;
+		if (!selected)
+			return last;
+		return selected - 1;
 	case FPLINUX_LAUNCHER_MOVE_RIGHT:
-		return last - selected > step ? selected + step : last;
+		if (selected == last)
+			return 0;
+		return selected + 1;
 	}
 	return selected;
 }
@@ -292,7 +285,7 @@ void fplinux_launcher_grid_cell(const struct fplinux_ui_profile_spec *spec,
 				size_t column, size_t row,
 				struct fplinux_launcher_cell *cell)
 {
-	int columns = (int)fplinux_launcher_columns(spec, true);
+	int columns = (int)fplinux_launcher_columns(spec);
 	int size = spec->app_icon_size;
 	int inset = spec->grid_tile_inset;
 
@@ -311,57 +304,15 @@ void fplinux_launcher_grid_cell(const struct fplinux_ui_profile_spec *spec,
 	cell->inset = inset;
 }
 
-void fplinux_launcher_list_row(const struct fplinux_ui_profile_spec *spec,
-			       int width, int line_height, size_t row,
-			       struct fplinux_launcher_row *layout)
-{
-	int pitch = spec->row_height;
-	/* The full pitch is filled on focus, including the bottom divider. */
-	int size = spec->row_icon_size;
-	int text_x = spec->row_padding + size + spec->row_gap;
-
-	layout->row = (struct fplinux_launcher_rect){
-		.x = spec->margin,
-		.y = spec->list_padding + (int)row * pitch,
-		.width = width - 2 * spec->margin,
-		.height = pitch,
-	};
-	layout->icon = (struct fplinux_launcher_shape){
-		.box = {
-			.x = spec->row_padding,
-			.y = fplinux_launcher_centre(pitch, size),
-			.width = size,
-			.height = size,
-		},
-		.radius = spec->row_tile_radius,
-	};
-	layout->ring = around(layout->icon, spec->list_tile_ring_gap +
-						    spec->list_tile_ring_width);
-	layout->text = (struct fplinux_launcher_rect){
-		.x = text_x,
-		.y = fplinux_launcher_centre(pitch, line_height),
-		.width = at_least(
-			layout->row.width - text_x - spec->row_padding, 0),
-		.height = line_height,
-	};
-}
-
 void fplinux_launcher_scroll_layout(const struct fplinux_ui_profile_spec *spec,
-				    int width, int viewport_height, bool grid,
+				    int width, int viewport_height,
 				    struct fplinux_launcher_scroll *scroll)
 {
 	int size = spec->app_icon_size;
 	int gap;
 
-	if (!grid) {
-		scroll->padding = spec->list_padding;
-		scroll->pitch = spec->row_height;
-		scroll->item = spec->row_height;
-		scroll->reveal_margin = spec->list_padding;
-		return;
-	}
 	gap = fplinux_launcher_grid_gap(
-		width, (int)fplinux_launcher_columns(spec, true), size);
+		width, (int)fplinux_launcher_columns(spec), size);
 	/* A clipped next row must be a useful hint, not a thin coloured strip. */
 	if (viewport_height > gap) {
 		int rows = (viewport_height - gap) / (size + gap);
@@ -408,17 +359,11 @@ void fplinux_launcher_notice_layout(const struct fplinux_ui_profile_spec *spec,
 				    int width, int body_height,
 				    struct fplinux_launcher_notice_box *box)
 {
-	int inset = spec->alert_padding + spec->alert_border -
-		    spec->scrollbar_width;
-
 	box->width = width - 2 * spec->alert_margin;
 	box->max_height = body_height - 2 * spec->alert_margin;
 	box->border = spec->alert_border;
 	box->padding = spec->alert_padding;
 	box->gap = spec->alert_gap;
-	if (inset > spec->scrollbar_offset)
-		inset = spec->scrollbar_offset;
-	box->scrollbar_inset = at_least(inset, 0);
 }
 
 size_t fplinux_launcher_icon_sizes(int sizes[], size_t capacity)

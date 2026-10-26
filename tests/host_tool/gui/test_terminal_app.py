@@ -65,6 +65,7 @@ def terminal_app(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 str(ROOT / "lib/fplinux/fplinux-text-input.c"),
                 str(ROOT / "lib/fplinux/fplinux-language.c"),
                 str(ROOT / "lib/fplinux/fplinux-ui-prefs.c"),
+                str(ROOT / "lib/fplinux/fplinux-ui-profile.c"),
                 str(ROOT / "lib/fplinux/fplinux-utf8.c"),
                 "-Wl,--wrap=fplinux_language_list",
                 "-Wl,--wrap=fplinux_language_load",
@@ -175,7 +176,7 @@ def _run_application(
     ("width", "height", "columns", "rows"),
     [(128, 128, 21, 9), (240, 268, 30, 15), (320, 196, 40, 10)],
 )
-def test_terminal_default_font_fills_the_grid_above_the_status_bar(
+def test_terminal_default_font_fills_the_titled_canvas(
     terminal_app: Path, width: int, height: int, columns: int, rows: int
 ) -> None:
     _run_application(terminal_app, "font-default", *map(str, (width, height, columns, rows)))
@@ -264,10 +265,16 @@ def test_terminal_starts_with_defaults_when_new_preferences_cannot_be_written(
     )
 
 
-def test_terminal_status_keeps_mode_modifiers_and_history_visible_on_a_narrow_screen(
+def test_terminal_header_distinguishes_scrollback_and_restores_input_mode_without_resizing(
     terminal_app: Path,
 ) -> None:
-    _run_application(terminal_app, "status")
+    _run_application(terminal_app, "header")
+
+
+def test_open_returns_from_helpers_without_changing_shell_or_scrollback_and_resume_stays(
+    terminal_app: Path,
+) -> None:
+    _run_application(terminal_app, "activation")
 
 
 def test_terminal_unreadable_preferences_show_an_alert_before_starting_a_shell(
@@ -278,3 +285,10 @@ def test_terminal_unreadable_preferences_show_an_alert_before_starting_a_shell(
         "prefs-open-failure",
         expected_error="terminal: load preferences: Permission denied\n",
     )
+
+
+@pytest.mark.parametrize("scenario", ["shell-success", "shell-failure", "shell-signal"])
+def test_terminal_shell_completion_closes_success_and_keeps_failed_output_readable(
+    terminal_app: Path, scenario: str
+) -> None:
+    _run_application(terminal_app, scenario)

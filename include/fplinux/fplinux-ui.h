@@ -55,12 +55,19 @@ enum fplinux_ui_event_type {
 	FPLINUX_UI_EVENT_LIFECYCLE,
 	/* Held input was cancelled; key.source identifies the affected seat type. */
 	FPLINUX_UI_EVENT_INPUT_CANCEL,
+	/* Catalogue OPEN or retained-task RESUME, before its next visible frame. */
+	FPLINUX_UI_EVENT_ACTIVATION,
 };
 
 enum fplinux_ui_lifecycle {
 	FPLINUX_UI_FOREGROUND,
 	FPLINUX_UI_BACKGROUND,
 	FPLINUX_UI_CLOSING,
+};
+
+enum fplinux_ui_activation {
+	FPLINUX_UI_ACTIVATION_OPEN,
+	FPLINUX_UI_ACTIVATION_RESUME,
 };
 
 /*
@@ -80,6 +87,8 @@ struct fplinux_ui_event {
 	 * frame descriptor is borrowed for this callback; the runtime closes it.
 	 */
 	const struct fplinux_ui_session_message *session;
+	/* ACTIVATION: the application owns navigation and preserves its data. */
+	enum fplinux_ui_activation activation;
 };
 
 typedef void (*fplinux_ui_event_cb)(struct fplinux_ui *ui,
@@ -163,7 +172,6 @@ struct fplinux_ui_metrics {
 	int softkey_height;
 	int header_height; /* fplinux_ui_header() and titled screens */
 	int margin; /* left inset of text and content */
-	int gutter; /* right inset of scrolling content */
 	int spacing; /* gap between items */
 	int gap_small; /* gap inside an item */
 	int row_height; /* list, menu and catalogue rows */
@@ -173,7 +181,9 @@ struct fplinux_ui_metrics {
 	int app_icon_size;
 	int grid_columns; /* the launcher grid, for app grids too */
 	int focus_width; /* focus ring and frame width */
+	int divider_width; /* line between adjacent panels */
 	int frame_padding; /* inside a framed control: gauge, clock face */
+	int scrollbar_space; /* indicator width plus both side gaps */
 };
 
 /* Open waits for manager CONFIG before creating any Wayland surface. */
@@ -210,9 +220,11 @@ const struct fplinux_ui_metrics *
 fplinux_ui_metrics(const struct fplinux_ui *ui);
 
 /*
- * Apply the system scrollbar's colour, width and inset to a raw LVGL
- * object. Scroll direction, visibility mode and vertical padding belong
- * to its viewport. The object and UI remain owned by the caller.
+ * Apply the system scrollbar's colour, width and insets inside a raw
+ * LVGL object's border. Set the border and ordinary content padding first.
+ * The viewport reserves space on the right only when its content overflows;
+ * OFF mode reserves none. Reapplying is safe. Scroll direction and visibility
+ * belong to the viewport. The object and UI remain owned by the caller.
  */
 void fplinux_ui_style_scrollbar(struct fplinux_ui *ui, lv_obj_t *object);
 

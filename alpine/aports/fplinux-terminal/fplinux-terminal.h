@@ -21,8 +21,9 @@
 
 /*
  * The commands of the terminal screen. The GUI attaches them to its canvas
- * and the runtime gives them their keys: OK is Enter, the right soft key
- * Clear in the live view and Back in the scrollback, and the left soft key
+ * and the runtime gives them their keys. While the shell runs, OK is Enter
+ * and the right soft key is Clear in the live view or Back in scrollback.
+ * After an unsuccessful shell exit, Close replaces Clear. The left soft key
  * opens the options menu with the rest in this order.
  */
 enum fplinux_terminal_command {
@@ -73,6 +74,8 @@ struct fplinux_terminal {
 	bool dirty;
 	bool history;
 	bool cursor_visible;
+	/* An unsuccessful shell exit leaves a read-only screen and scrollback. */
+	bool stopped;
 	/* Shared keypad modes, composition, physical holds and symbols. */
 	struct fplinux_text_input input;
 	/* Hidden, or covered by another screen or the options menu. */

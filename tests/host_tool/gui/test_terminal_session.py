@@ -70,6 +70,7 @@ def terminal_session_harness(
                 str(ROOT / "lib/fplinux/fplinux-multitap.c"),
                 str(ROOT / "lib/fplinux/fplinux-text-input.c"),
                 str(ROOT / "lib/fplinux/fplinux-language.c"),
+                str(ROOT / "lib/fplinux/fplinux-ui-profile.c"),
                 str(ROOT / "lib/fplinux/fplinux-utf8.c"),
                 "-ltsm",
                 *gettext_link_flags(),

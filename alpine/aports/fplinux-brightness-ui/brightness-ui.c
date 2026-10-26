@@ -1,13 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "brightness-ui.h"
 #include "fplinux-keypad.h"
+#include "fplinux-ui-profile.h"
+#include "fplinux-ui-session.h"
 
 #include <string.h>
-
-#define COLOR_BACKGROUND 0x1082U
-#define COLOR_SURFACE 0x3186U
-#define COLOR_DIM 0x6b4dU
-#define COLOR_TEXT 0xd6baU
 
 enum brightness_ui_action brightness_ui_key(unsigned int level,
 					    unsigned int code,
@@ -85,6 +82,16 @@ bool brightness_ui_render(const struct brightness_ui_surface *surface,
 			  const struct fplinux_font *font, unsigned int level,
 			  bool set_failed)
 {
+	const struct fplinux_ui_theme_spec *theme =
+		fplinux_ui_theme_spec(FPLINUX_UI_SESSION_THEME_DARK);
+	uint16_t background =
+		fplinux_ui_colour565(theme, FPLINUX_UI_COLOUR_BACKGROUND);
+	uint16_t unfilled =
+		fplinux_ui_colour565(theme, FPLINUX_UI_COLOUR_SURFACE);
+	uint16_t muted = fplinux_ui_colour565(theme, FPLINUX_UI_COLOUR_MUTED);
+	uint16_t foreground =
+		fplinux_ui_colour565(theme, FPLINUX_UI_COLOUR_FOREGROUND);
+	uint16_t filled = fplinux_ui_colour565(theme, FPLINUX_UI_COLOUR_FOCUS);
 	char value[6] = "0/10";
 	unsigned int margin;
 	unsigned int bar_y;
@@ -101,8 +108,7 @@ bool brightness_ui_render(const struct brightness_ui_surface *surface,
 	    surface->stride_bytes % sizeof(uint16_t))
 		return false;
 	for (unsigned int row = 0; row < surface->height; ++row)
-		rectangle(surface, 0U, row, surface->width, 1U,
-			  COLOR_BACKGROUND);
+		rectangle(surface, 0U, row, surface->width, 1U, background);
 	margin = surface->width / 16U;
 	title_scale = 20U * font->width <= surface->width ? 2U : 1U;
 	number_scale =
@@ -112,14 +118,14 @@ bool brightness_ui_render(const struct brightness_ui_surface *surface,
 	if (!number_scale)
 		number_scale = 1U;
 	label(surface, font, "BRIGHTNESS", surface->height / 11U, title_scale,
-	      COLOR_DIM);
+	      muted);
 	if (level == 10U)
 		memcpy(value, "10/10", sizeof("10/10"));
 	else
 		value[0] = '0' + (char)level;
 	label(surface, font, value,
 	      surface->height * 2U / 5U - font->height * number_scale / 2U,
-	      number_scale, COLOR_TEXT);
+	      number_scale, foreground);
 	bar_y = surface->height * 62U / 100U;
 	bar_width = surface->width - 2U * margin;
 	gap = surface->width >= 180U ? 4U : 2U;
@@ -127,14 +133,14 @@ bool brightness_ui_render(const struct brightness_ui_surface *surface,
 	for (unsigned int segment = 0; segment < 10U; ++segment)
 		rectangle(surface, margin + segment * (segment_width + gap),
 			  bar_y, segment_width, surface->height / 22U,
-			  segment < level ? COLOR_TEXT : COLOR_SURFACE);
+			  segment < level ? filled : unfilled);
 	if (set_failed)
 		label(surface, font, "SET FAILED", surface->height * 75U / 100U,
-		      1U, COLOR_TEXT);
+		      1U, foreground);
 	else
 		label(surface, font, "UP +  DOWN -",
-		      surface->height * 76U / 100U, 1U, COLOR_TEXT);
+		      surface->height * 76U / 100U, 1U, foreground);
 	label(surface, font, "RIGHT SOFT EXIT", surface->height * 88U / 100U,
-	      1U, COLOR_DIM);
+	      1U, muted);
 	return true;
 }

@@ -17,11 +17,16 @@ work=$1
 . "$screens_dir/ui-host-build.sh"
 ui_host_prepare "$root" "$work" "${2-}"
 
+mkdir -p "$work/locale/ru/LC_MESSAGES"
+msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/org.fplinux.calculator.mo" "$calculator/ru.po"
+msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/fplinux-ui.mo" "$root/alpine/aports/fplinux-ui/ru.po"
+
 ui_host_build_application -I"$calculator" \
 	"$calculator/fplinux-calculator.c" "$calculator/calculator.c" \
 	"$screens_dir/calculator-observer.c" \
 	-Wl,--wrap=lv_label_set_text -Wl,--wrap=fplinux_ui_prefs_save \
-	-Wl,--wrap=fplinux_ui_alert_new -o "$work/calculator"
+	-Wl,--wrap=fplinux_ui_alert_new -Wl,--wrap=libintl_bindtextdomain \
+	-Wl,--wrap=fplinux_language_load -o "$work/calculator"
 
 # shellcheck disable=SC2046
 ui_host_compile_lvgl -I"$calculator" \

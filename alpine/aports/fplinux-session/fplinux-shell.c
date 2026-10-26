@@ -346,23 +346,6 @@ static void hold_frame(void *context, bool enabled)
 	fplinux_launch_frame_clear(&shell->held_frame);
 }
 
-static int capture_frame(void *context, int *width, int *height)
-{
-	struct phone_shell *shell = context;
-	struct fplinux_launch_frame frame = { 0 };
-	int fd;
-
-	if (!capture_scene(shell, &frame))
-		return -1;
-	fd = fplinux_launch_frame_fd(&frame);
-	if (fd >= 0) {
-		*width = frame.width;
-		*height = frame.height;
-	}
-	fplinux_launch_frame_clear(&frame);
-	return fd;
-}
-
 static void hide_startup_surface(struct phone_shell *shell)
 {
 	destroy_launch_surface(&shell->startup_mark);
@@ -1369,7 +1352,6 @@ WL_EXPORT int wet_shell_init(struct weston_compositor *compositor, int *argc,
 		.changed = update_surfaces,
 		.launch_frame = receive_launch_frame,
 		.hold_frame = hold_frame,
-		.capture_frame = capture_frame,
 		.context = shell,
 	};
 	shell->manager = fplinux_session_create(&options);

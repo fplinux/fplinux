@@ -40,6 +40,9 @@ msgstr "О системе"
 msgid "Brightness"
 msgstr "Яркость"
 
+msgid "Build"
+msgstr "Сборка"
+
 msgid "Close"
 msgstr "Закрыть"
 
@@ -79,6 +82,9 @@ msgstr "Выйти"
 
 msgid "Leave without saving?"
 msgstr "Выйти без сохранения?"
+
+msgid "Return to the start without saving?"
+msgstr "Вернуться в начало без сохранения?"
 
 msgid "Left/Right: preview. Save keeps the level."
 msgstr "Влево/вправо: яркость. Сохранить — оставить."
@@ -142,8 +148,18 @@ msgstr "Настройка недоступна. Повторите позже."
 msgid "Check the date and time. Try again."
 msgstr "Проверьте дату и время. Повторите."
 
-msgid "Time"
-msgstr "Время"
+msgid "Time (UTC)"
+msgstr "Время (UTC)"
+
+msgid "Applying…"
+msgstr "Применение…"
+
+msgid "Saving…"
+msgstr "Сохранение…"
+
+#, c-format
+msgid "Current time (UTC): %s %s"
+msgstr "Текущее время (UTC): %s %s"
 
 msgid "Time & language"
 msgstr "Время и язык"

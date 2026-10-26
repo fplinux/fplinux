@@ -73,7 +73,8 @@ void fplinux_ui_listview_clear(struct fplinux_ui_listview *list);
  * the texts line up.
  */
 bool fplinux_ui_listview_set_icon(struct fplinux_ui_listview *list,
-				  size_t index, lv_draw_buf_t *icon);
+				  size_t index, lv_draw_buf_t *icon,
+				  enum fplinux_ui_list_icon_kind kind);
 size_t fplinux_ui_listview_count(const struct fplinux_ui_listview *list);
 
 /*
@@ -90,6 +91,9 @@ bool fplinux_ui_listview_is_marked(const struct fplinux_ui_listview *list,
 
 /* The focused row; SIZE_MAX for an empty list. */
 size_t fplinux_ui_listview_selected(const struct fplinux_ui_listview *list);
+/* First whole row in the actual viewport, or its first intersecting row. */
+size_t
+fplinux_ui_listview_first_visible(const struct fplinux_ui_listview *list);
 void fplinux_ui_listview_select(struct fplinux_ui_listview *list, size_t index);
 /* The focused row's object, or NULL. */
 lv_obj_t *fplinux_ui_listview_selected_row(struct fplinux_ui_listview *list);
@@ -115,8 +119,8 @@ void fplinux_ui_listview_set_callbacks(struct fplinux_ui_listview *list,
 				       void *context);
 
 /*
- * Up and Down move by a row and Left and Right by a visible page, without
- * wrapping, and are used at either end of a non-empty list; OK runs the
+ * Up and Down move by a row and wrap at the ends. Left and Right move by a
+ * visible page and stop at the ends. Both are used on a non-empty list; OK runs the
  * activate callback and is used only when one is set. A release is used
  * when its press was. Callbacks may delete the list.
  */

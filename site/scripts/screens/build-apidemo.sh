@@ -24,12 +24,13 @@ ui_host_build_application -I"$apidemo" \
 	"$apidemo"/*.c "$screens_dir/apidemo-observer.c" \
 	-Wl,--wrap=lv_label_set_text -Wl,--wrap=libintl_bindtextdomain \
 	-Wl,--wrap=lv_label_set_text_fmt -Wl,--wrap=fplinux_ui_text_set \
-	-Wl,--wrap=lv_textarea_create \
 	-Wl,--wrap=fplinux_language_load \
 	-Wl,--wrap=fplinux_ui_list_new -Wl,--wrap=fplinux_ui_list_new_virtual \
 	-Wl,--wrap=fplinux_ui_form_new -Wl,--wrap=fplinux_ui_alert_new \
+	-Wl,--wrap=fplinux_ui_text_box_new \
 	-Wl,--wrap=fplinux_ui_form_append_string -Wl,--wrap=fplinux_ui_form_set_string \
 	-Wl,--wrap=fplinux_ui_prefs_save \
+	-Wl,--wrap=open -Wl,--wrap=fplinux_ui_session_send \
 	-Wl,--wrap=fplinux_ui_canvas_new -o "$work/apidemo"
 
 # pkg-config emits flags for the pinned native peer libraries.

@@ -25,8 +25,9 @@ struct fplinux_ui_profile_spec {
 	/* Font slots: ids of fonts compiled into the runtime. */
 	const char *font_body, *font_title, *font_clock, *font_legend;
 	int status_height, softkey_height, header_height;
-	int margin, gutter, spacing, gap_small, content_padding, list_padding;
-	int scrollbar_width, scrollbar_offset, focus_width, divider_width;
+	int margin, spacing, gap_small, content_padding;
+	int scrollbar_width, scrollbar_offset, scrollbar_space;
+	int focus_width, divider_width;
 	int row_height, row_height_detail, row_padding, row_gap;
 	int row_icon_size, status_icon_size, app_icon_size;
 	int grid_columns;
@@ -41,7 +42,7 @@ struct fplinux_ui_profile_spec {
 	 * the background, inside the ring's gap.
 	 */
 	int grid_ring_width, grid_ring_gap, grid_tile_inset, grid_ring_colour;
-	int list_tile_ring_width, list_tile_ring_gap, list_tile_ring_colour;
+	int list_tile_ring_width, list_tile_ring_gap;
 	int frame_padding, field_padding, field_lines, text_box_padding;
 	/* The text field status sits right of the text, not below it. */
 	bool field_status_inline;
@@ -88,6 +89,17 @@ struct fplinux_ui_theme_spec {
 	/* Modal backdrop opacity, 0 transparent to 255 opaque. */
 	uint8_t scrim_opacity;
 };
+
+/* Raw display consumers encode the same roles without linking LVGL. */
+static inline uint16_t
+fplinux_ui_colour565(const struct fplinux_ui_theme_spec *theme,
+		     enum fplinux_ui_colour colour)
+{
+	uint32_t rgb = theme->rgb[colour];
+
+	return (uint16_t)(((rgb >> 8) & 0xf800U) | ((rgb >> 5) & 0x07e0U) |
+			  ((rgb >> 3) & 0x001fU));
+}
 
 /*
  * The largest pixel area with width <= width and height <= height; the

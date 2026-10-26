@@ -1,14 +1,8 @@
 /* SPDX-License-Identifier: 0BSD */
 /*
  * API Demos: a catalogue of small screens, each showing one part of the
- * FPLinux UI runtime (libfplinux-ui.so.1) or one LVGL widget, live.
- *
- * The start page is the raw LVGL screen (fplinux-example-apidemo.c). OK
- * opens the catalogue: a list of categories, each a list of demos. Every
- * category lives in its own file and describes itself with a struct
- * apidemo_category; a demo is one struct apidemo_entry whose open()
- * builds its screen and pushes it. The title of a demo screen says what it
- * demonstrates; the catalogue row shows the C names it uses.
+ * FPLinux UI runtime (libfplinux-ui.so.1), live. The permanent catalogue,
+ * search and examples share the runtime's screen stack.
  */
 #ifndef FPLINUX_APIDEMO_H
 #define FPLINUX_APIDEMO_H
@@ -41,6 +35,9 @@
 /* What every demo may use. The runtime owns metrics and theme. */
 struct apidemo {
 	struct fplinux_ui *ui;
+	struct fplinux_ui_screen *catalogue;
+	/* An existing confirmation or saving error still needs its answer. */
+	struct fplinux_ui_screen *decision;
 	/* The application's preferences, or NULL when they cannot be read. */
 	struct fplinux_ui_prefs *prefs;
 	const struct fplinux_ui_metrics *metrics;
@@ -62,18 +59,16 @@ typedef void (*apidemo_open_cb)(struct apidemo *app,
 struct apidemo_entry {
 	/* N_() text: the catalogue row and the title of the demo screen. */
 	const char *title;
-	/* The C names the demo shows, untranslated; the row's second line. */
+	/* C names for search and the focused example's Help command. */
 	const char *detail;
 	apidemo_open_cb open;
 	/* For entries that share one open function. */
 	int variant;
+	/* N_() text describing the result in the catalogue's second line. */
+	const char *description;
 };
 
 struct apidemo_category {
-	/* N_() text of the catalogue row. */
-	const char *title;
-	/* A "-symbolic.png" row icon in APIDEMO_IMAGE_DIR, or NULL. */
-	const char *icon;
 	const struct apidemo_entry *entries;
 	size_t count;
 	/* Optional hooks, NULL for none. The application was hidden or shown:
@@ -81,15 +76,16 @@ struct apidemo_category {
 	void (*visibility)(struct apidemo *app, bool visible);
 	/* CLOSE arrived: save what the user would not want to lose. */
 	void (*close)(struct apidemo *app);
-	/* Before fplinux_ui_close(): delete timers, stop watching descriptors,
-	 * delete LVGL input devices. Screens may still be on the stack. */
+	/* Before OPEN removes section screens or fplinux_ui_close(): delete
+	 * timers, stop watching descriptors, release input devices and forget
+	 * owned screen pointers. Screens may still be on the stack. */
 	void (*cleanup)(struct apidemo *app);
 	/* FPLINUX_UI_EVENT_RESIZE: the surface has a new size, the screen
 	 * stack is laid out again; lay out raw objects and canvases. */
 	void (*resize)(struct apidemo *app);
 };
 
-/* The categories, in catalogue order; one file each. */
+/* Example groups; each source file owns its resource hooks. */
 extern const struct apidemo_category apidemo_lists;
 extern const struct apidemo_category apidemo_forms;
 extern const struct apidemo_category apidemo_alerts;
@@ -101,7 +97,6 @@ extern const struct apidemo_category apidemo_frame;
 extern const struct apidemo_category apidemo_look;
 extern const struct apidemo_category apidemo_locale;
 extern const struct apidemo_category apidemo_lifecycle;
-extern const struct apidemo_category apidemo_lvgl;
 extern const struct apidemo_category apidemo_vibration;
 extern const struct apidemo_category apidemo_sound;
 
@@ -130,7 +125,7 @@ void apidemo_show(struct apidemo *app, const char *title, const char *text);
 void apidemo_showf(struct apidemo *app, const char *title, const char *format,
 		   ...) __attribute__((format(printf, 3, 4)));
 /* Logs "call: strerror(errno)" and shows it in an error alert. */
-void apidemo_error(struct apidemo *app, const char *call);
+struct fplinux_ui_screen *apidemo_error(struct apidemo *app, const char *call);
 /* The symbolic name of an errno value, such as "EINVAL". */
 const char *apidemo_errno_name(int error);
 /* A system glyph at the row size, or NULL for an unknown name. */
@@ -143,5 +138,8 @@ const void *apidemo_glyph(struct apidemo *app, const char *name);
 void apidemo_style_scroll(struct apidemo *app, lv_obj_t *object);
 /* A delayed manager error updates the request screen or opens an alert. */
 void apidemo_vibration_error(struct apidemo *app, const char *reason);
+/* Keep a saving failure visible until its explicit Close command. */
+void apidemo_protect_error(struct apidemo *app,
+			   struct fplinux_ui_screen *alert);
 
 #endif

@@ -30,6 +30,9 @@ static inline bool fplinux_ui_is_direction_key(const struct fplinux_ui_key *key)
 FPLINUX_UI_INTERNAL const struct fplinux_ui_profile_spec *
 fplinux_ui_spec(const struct fplinux_ui *ui);
 
+/* Complete a styled viewport's conditional inset before measuring content. */
+FPLINUX_UI_INTERNAL void fplinux_ui_scrollbar_layout(lv_obj_t *object);
+
 /*
  * CONFIG explicitly names Launcher mode. Its high-level screens use the
  * runtime's local legend bar; its Canvas keeps the launcher's own bars.
@@ -159,10 +162,10 @@ struct fplinux_ui_menu_position {
 };
 
 /* Draws the pop-up on the display's top layer; NULL with errno. */
-FPLINUX_UI_INTERNAL struct fplinux_ui_menu_view *
-fplinux_ui_menu_view_create(struct fplinux_ui *ui, const char *title,
-			    const struct fplinux_ui_menu_item *items,
-			    size_t count);
+FPLINUX_UI_INTERNAL struct fplinux_ui_menu_view *fplinux_ui_menu_view_create(
+	struct fplinux_ui *ui, enum fplinux_ui_menu_origin origin,
+	const char *title, const struct fplinux_ui_menu_item *items,
+	size_t count);
 /* Takes a press or release; true when the menu ends with *action. */
 FPLINUX_UI_INTERNAL bool
 fplinux_ui_menu_view_key(struct fplinux_ui_menu_view *view,

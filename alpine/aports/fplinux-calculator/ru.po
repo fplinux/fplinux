@@ -21,6 +21,15 @@ msgstr "Равно"
 msgid "Error"
 msgstr "Ошибка"
 
+msgid "Divide by zero"
+msgstr "Деление на ноль"
+
+msgid "Number too large"
+msgstr "Переполнение"
+
+msgid "Maximum 12 digits"
+msgstr "Не более 12 цифр"
+
 msgid "Reset"
 msgstr "Сброс"
 
@@ -39,5 +48,8 @@ msgstr "Повторить"
 msgid "Stay"
 msgstr "Остаться"
 
-msgid "Discard"
+msgid "Discard changes"
 msgstr "Не сохранять"
+
+msgid "Close anyway"
+msgstr "Всё равно закрыть"

@@ -2,7 +2,7 @@
 /*
  * Vibration: patterns for the vibrator. The session manager plays them only
  * while the application is visible and stops the vibrator when it is hidden
- * or leaves, so the application asks again after it is shown.
+ * or leaves. Returning never restarts a pattern without Play.
  */
 #include "apidemo.h"
 
@@ -14,12 +14,8 @@
 #include <string.h>
 
 #define TEXT_BYTES 256
-/* The pattern readout shows this many durations, then an ellipsis. */
-#define SHOWN_DURATIONS 18
-/* The most requests one screen offers. */
-#define REQUEST_LIMIT 8
 
-enum { COMMAND_STOP = 1 };
+enum { COMMAND_STOP = 1, COMMAND_PLAY };
 
 /*
  * A pattern alternates pauses and pulses in milliseconds, a pause first:
@@ -40,25 +36,16 @@ static const unsigned int sos[] = {
 /* With repeat, the last pause and the wait form the pause before the first
  * pulse comes again: 1.5 s on and 0.5 s off until stopped. */
 static const unsigned int on_off[] = { 0, 1500, 500 };
-/* A pulse lasts at most 3000 ms. */
-static const unsigned int too_long_pulse[] = { 0, 4000 };
-/* A pause between two pulses lasts at least 100 ms. */
-static const unsigned int too_short_pause[] = { 0, 100, 50, 100 };
-/* One duration more than a pattern takes; filled when the screen opens. */
-static unsigned int too_many[FPLINUX_UI_VIBRATION_PATTERN_MAX + 1];
-
 struct request {
 	/* N_() text of the choice. */
 	const char *name;
 	const unsigned int *pattern_ms;
 	size_t count;
 	bool repeat;
-	/* Played from the visibility hook once the application is hidden. */
-	bool when_hidden;
 };
 
 #define REQUEST(name, pattern, repeat) \
-	{ name, pattern, APIDEMO_COUNT(pattern), repeat, false }
+	{ name, pattern, APIDEMO_COUNT(pattern), repeat }
 
 static const struct request patterns[] = {
 	REQUEST(N_("100 ms pulse"), short_pulse, false),
@@ -69,49 +56,12 @@ static const struct request patterns[] = {
 	REQUEST(N_("Repeating"), on_off, true),
 };
 
-static const struct request errors[] = {
-	REQUEST(N_("4 s pulse"), too_long_pulse, false),
-	REQUEST(N_("50 ms pause"), too_short_pause, false),
-	REQUEST(N_("65 durations"), too_many, false),
-	REQUEST(N_("Valid pattern"), short_pulse, false),
-	{ N_("While hidden"), short_pulse, APIDEMO_COUNT(short_pulse), false,
-	  true },
-};
-
-enum { SCREEN_PATTERNS, SCREEN_ERRORS };
-
-static const struct {
-	/* N_() texts. */
-	const char *label;
-	const char *help;
-	const struct request *requests;
-	size_t count;
-	/* Offers the Stop command. */
-	bool stop;
-} screens[] = {
-	[SCREEN_PATTERNS] = { N_("Pattern"),
-			      N_("OK chooses a pattern and plays it. Stop, "
-				 "Back or hiding the application stops it. "
-				 "The system may pause a long repeat to "
-				 "spare the motor."),
-			      patterns, APIDEMO_COUNT(patterns), true },
-	[SCREEN_ERRORS] = { N_("Request"),
-			    N_("Checked in this order: EINVAL for a wrong "
-			       "pattern, ENOTSUP without a vibrator, EAGAIN "
-			       "while the application is hidden."),
-			    errors, APIDEMO_COUNT(errors), false },
-};
-
-/* The open patterns or errors screen; only one is on the stack at a time. */
+/* The pattern form owns its request and result until Back or cleanup. */
 static struct {
 	struct fplinux_ui_screen *form;
-	const struct request *requests;
-	size_t count;
 	size_t choice;
 	size_t result;
 	size_t pattern;
-	/* The request to play when the application is next hidden, or NULL. */
-	const struct request *armed;
 	/* A pattern was accepted since the last stop: Back, CLOSE and cleanup
 	 * stop the vibrator. */
 	bool started;
@@ -138,10 +88,6 @@ static void show_pattern(const struct request *request)
 	char text[TEXT_BYTES] = "{";
 
 	for (size_t i = 0; i < request->count; i++) {
-		if (i == SHOWN_DURATIONS) {
-			append(text, sizeof(text), ", …");
-			break;
-		}
 		append(text, sizeof(text), "%s%u", i ? ", " : "",
 		       request->pattern_ms[i]);
 	}
@@ -155,6 +101,29 @@ static void show_result(const char *text)
 	if (vibration_demo.form)
 		fplinux_ui_form_set_string(vibration_demo.form,
 					   vibration_demo.result, text);
+}
+
+static void set_commands(struct apidemo *app, bool playing)
+{
+	const struct fplinux_ui_command play_command = {
+		.id = COMMAND_PLAY,
+		.type = FPLINUX_UI_COMMAND_SCREEN,
+		.label = _("Play"),
+		.icon = apidemo_glyph(app, "play"),
+	};
+	const struct fplinux_ui_command stop_command = {
+		.id = COMMAND_STOP,
+		.type = FPLINUX_UI_COMMAND_SCREEN,
+		.label = _("Stop"),
+		.icon = apidemo_glyph(app, "stop"),
+	};
+
+	if (!vibration_demo.form)
+		return;
+	fplinux_ui_screen_remove_command(vibration_demo.form, COMMAND_PLAY);
+	fplinux_ui_screen_remove_command(vibration_demo.form, COMMAND_STOP);
+	fplinux_ui_screen_add_command(vibration_demo.form,
+				      playing ? &stop_command : &play_command);
 }
 
 /* "OK", or the errno name and its description. */
@@ -175,8 +144,10 @@ static bool play(struct apidemo *app, const struct request *request)
 	bool done = fplinux_ui_vibration_play(app->ui, request->pattern_ms,
 					      request->count, request->repeat);
 
-	if (done)
+	if (done) {
 		vibration_demo.started = true;
+		set_commands(app, true);
+	}
 	return done;
 }
 
@@ -185,8 +156,10 @@ static void stop(struct apidemo *app, bool show)
 	bool done = fplinux_ui_vibration_stop(app->ui);
 	int error = errno;
 
-	if (done)
+	if (done) {
 		vibration_demo.started = false;
+		set_commands(app, false);
+	}
 	if (!show)
 		return;
 	if (done)
@@ -195,68 +168,39 @@ static void stop(struct apidemo *app, bool show)
 		show_outcome(false, error);
 }
 
-/* Supported */
-
-static void open_supported(struct apidemo *app,
-			   const struct apidemo_entry *entry)
-{
-	struct fplinux_ui_screen *form =
-		fplinux_ui_form_new(app->ui, _(entry->title));
-
-	if (!form) {
-		apidemo_error(app, "fplinux_ui_form_new");
-		return;
-	}
-	fplinux_ui_form_append_string(
-		form, _("Vibrator"),
-		fplinux_ui_vibration_supported(app->ui) ? _("Yes") : _("No"));
-	fplinux_ui_form_append_string(
-		form, NULL,
-		_("Fixed for the process. Without a vibrator, every pattern "
-		  "fails with ENOTSUP."));
-	apidemo_add_back(form);
-	fplinux_ui_screen_set_listener(form, apidemo_back_listener, NULL, app);
-	fplinux_ui_push(app->ui, form);
-}
-
-/* Patterns and errors */
+/* Choose a pattern before explicitly playing it. */
 
 static void request_changed(struct fplinux_ui *ui,
 			    struct fplinux_ui_screen *form, size_t item,
 			    void *context)
 {
 	size_t index = fplinux_ui_form_get_choice(form, item);
-	const struct request *request;
-	bool done;
-
 	(void)ui;
-	if (item != vibration_demo.choice || index >= vibration_demo.count)
-		return;
-	request = &vibration_demo.requests[index];
-	show_pattern(request);
-	if (request->when_hidden) {
-		vibration_demo.armed = request;
-		show_result(_("Now lock the keypad."));
-		return;
-	}
-	vibration_demo.armed = NULL;
-	done = play(context, request);
-	show_outcome(done, errno);
+	(void)context;
+	if (item == vibration_demo.choice && index < APIDEMO_COUNT(patterns))
+		show_pattern(&patterns[index]);
 }
 
 static void request_command(struct fplinux_ui *ui,
 			    struct fplinux_ui_screen *form, int command_id,
 			    void *context)
 {
-	(void)form;
-	if (command_id == COMMAND_STOP) {
+	if (command_id == COMMAND_PLAY) {
+		size_t index =
+			fplinux_ui_form_get_choice(form, vibration_demo.choice);
+		bool done;
+
+		if (index >= APIDEMO_COUNT(patterns))
+			return;
+		done = play(context, &patterns[index]);
+		show_outcome(done, errno);
+	} else if (command_id == COMMAND_STOP) {
 		stop(context, true);
 	} else if (command_id == APIDEMO_COMMAND_BACK) {
 		/* Vibrate only while the user watches this screen. */
 		if (vibration_demo.started)
 			stop(context, false);
 		vibration_demo.form = NULL;
-		vibration_demo.armed = NULL;
 		fplinux_ui_go_back(ui);
 	}
 }
@@ -264,14 +208,7 @@ static void request_command(struct fplinux_ui *ui,
 static void open_requests(struct apidemo *app,
 			  const struct apidemo_entry *entry)
 {
-	const struct fplinux_ui_command stop_command = {
-		.id = COMMAND_STOP,
-		.type = FPLINUX_UI_COMMAND_SCREEN,
-		.label = _("Stop"),
-		.priority = 0,
-	};
-	const char *choices[REQUEST_LIMIT];
-	size_t count = screens[entry->variant].count;
+	const char *choices[APIDEMO_COUNT(patterns)];
 	struct fplinux_ui_screen *form =
 		fplinux_ui_form_new(app->ui, _(entry->title));
 
@@ -279,30 +216,25 @@ static void open_requests(struct apidemo *app,
 		apidemo_error(app, "fplinux_ui_form_new");
 		return;
 	}
-	for (size_t i = 0; i < APIDEMO_COUNT(too_many); i++)
-		too_many[i] = i ? 100 : 0;
-	if (count > REQUEST_LIMIT)
-		count = REQUEST_LIMIT;
-	for (size_t i = 0; i < count; i++)
-		choices[i] = _(screens[entry->variant].requests[i].name);
+	for (size_t i = 0; i < APIDEMO_COUNT(patterns); i++)
+		choices[i] = _(patterns[i].name);
 	vibration_demo.form = form;
-	vibration_demo.requests = screens[entry->variant].requests;
-	vibration_demo.count = count;
-	vibration_demo.armed = NULL;
-	/* A popup keeps the result below it in view on the smallest screen;
-	 * choosing plays at once, also the pattern already chosen. */
+	/* Changing the popup only selects the pattern; Play sends the request. */
 	vibration_demo.choice = fplinux_ui_form_append_choice(
-		form, _(screens[entry->variant].label), FPLINUX_UI_CHOICE_POPUP,
-		choices, count);
+		form, _("Pattern"), FPLINUX_UI_CHOICE_POPUP, choices,
+		APIDEMO_COUNT(patterns));
 	vibration_demo.result = fplinux_ui_form_append_string(
 		form, _("Result"), _("Nothing sent yet."));
 	vibration_demo.pattern =
 		fplinux_ui_form_append_string(form, "pattern_ms", NULL);
-	show_pattern(&vibration_demo.requests[0]);
-	fplinux_ui_form_append_string(form, NULL,
-				      _(screens[entry->variant].help));
-	if (screens[entry->variant].stop)
-		fplinux_ui_screen_add_command(form, &stop_command);
+	show_pattern(&patterns[0]);
+	fplinux_ui_form_append_string(
+		form, _("Vibration support"),
+		fplinux_ui_vibration_supported(app->ui) ? _("Yes") : _("No"));
+	fplinux_ui_form_append_string(
+		form, NULL,
+		_("Choose a pattern, then Play. Stop, Back or Home stops vibration."));
+	set_commands(app, false);
 	apidemo_add_back(form);
 	fplinux_ui_screen_set_listener(form, request_command, request_changed,
 				       app);
@@ -313,22 +245,13 @@ static void open_requests(struct apidemo *app,
 
 static void vibration_visibility(struct apidemo *app, bool visible)
 {
-	const struct request *armed = vibration_demo.armed;
-	bool done;
-
+	(void)app;
 	if (visible || !vibration_demo.form)
 		return;
-	/* The manager has stopped the vibrator: nothing resumes on show. */
+	/* The manager stops vibration; returning never starts it again. */
 	vibration_demo.started = false;
-	if (!armed) {
-		show_result(_("Vibration stopped while hidden"));
-		return;
-	}
-	/* The runtime counts the application as hidden before this hook; the
-	 * popup still names the request. */
-	vibration_demo.armed = NULL;
-	done = play(app, armed);
-	show_outcome(done, errno);
+	set_commands(app, false);
+	show_result(_("Vibration stopped while hidden"));
 }
 
 static void vibration_close(struct apidemo *app)
@@ -341,7 +264,6 @@ static void vibration_cleanup(struct apidemo *app)
 {
 	vibration_close(app);
 	vibration_demo.form = NULL;
-	vibration_demo.armed = NULL;
 }
 
 void apidemo_vibration_error(struct apidemo *app, const char *reason)
@@ -351,6 +273,7 @@ void apidemo_vibration_error(struct apidemo *app, const char *reason)
 	vibration_demo.started = false;
 	snprintf(text, sizeof(text), "%s: %s", _("Vibration request failed"),
 		 reason);
+	set_commands(app, false);
 	if (vibration_demo.form)
 		show_result(text);
 	else
@@ -358,17 +281,13 @@ void apidemo_vibration_error(struct apidemo *app, const char *reason)
 }
 
 static const struct apidemo_entry entries[] = {
-	{ N_("Supported"), "fplinux_ui_vibration_supported", open_supported,
-	  0 },
-	{ N_("Patterns"), "fplinux_ui_vibration_play · stop · repeat",
-	  open_requests, SCREEN_PATTERNS },
-	{ N_("Errors"), "fplinux_ui_vibration_play · EINVAL · ENOTSUP · EAGAIN",
-	  open_requests, SCREEN_ERRORS },
+	{ N_("Patterns"),
+	  "fplinux_ui_vibration_supported · "
+	  "fplinux_ui_vibration_play · fplinux_ui_vibration_stop",
+	  open_requests, 0, N_("Choose, play and stop a vibration pattern") },
 };
 
 const struct apidemo_category apidemo_vibration = {
-	.title = N_("Vibration"),
-	.icon = APIDEMO_IMAGE_DIR "vibration-symbolic.png",
 	.entries = entries,
 	.count = APIDEMO_COUNT(entries),
 	.visibility = vibration_visibility,

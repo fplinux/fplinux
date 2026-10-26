@@ -405,6 +405,146 @@
         "24": "outline"
       }
     },
+    "menu": {
+      "source": "tabler",
+      "name": "menu-2",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "view": {
+      "source": "tabler",
+      "name": "eye",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "hide": {
+      "source": "tabler",
+      "name": "eye-off",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "copy": {
+      "source": "tabler",
+      "name": "copy",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "call": {
+      "source": "tabler",
+      "name": "phone",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "mute": {
+      "source": "tabler",
+      "name": "volume-off",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "move-up": {
+      "source": "tabler",
+      "name": "arrow-up",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "move-down": {
+      "source": "tabler",
+      "name": "arrow-down",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "next": {
+      "source": "tabler",
+      "name": "arrow-right",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "image": {
+      "source": "tabler",
+      "name": "photo",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "fullscreen": {
+      "source": "tabler",
+      "name": "maximize",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "restore": {
+      "source": "tabler",
+      "name": "minimize",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "paint": {
+      "source": "tabler",
+      "name": "brush",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "erase": {
+      "source": "tabler",
+      "name": "eraser",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
     "no-sim": {
       "source": "project",
       "name": "no-sim",
@@ -416,7 +556,6 @@
       }
     }
   },
-  "tile_sizes": [16, 20, 24, 32, 40, 48, 56, 60],
   "tile_glyph": {
     "16": {
       "glyph": 12,

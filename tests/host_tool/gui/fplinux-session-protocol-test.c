@@ -73,7 +73,6 @@ static void check_launch_frame(int sender, int receiver)
 {
 	static const char *const invalid[] = {
 		"{\"type\":\"ACTIVE\",\"width\":2,\"height\":2}",
-		"{\"type\":\"ACTIVE\",\"end_prompt\":false,\"width\":2,\"height\":2}",
 		"{\"type\":\"LAUNCH\",\"width\":0,\"height\":2}",
 		"{\"type\":\"LAUNCH\",\"width\":321,\"height\":2}",
 		"{\"type\":\"LAUNCH\",\"width\":320,\"height\":241}",
@@ -84,9 +83,6 @@ static void check_launch_frame(int sender, int receiver)
 		"{\"type\":\"LAUNCH\",\"width\":2,\"height\":2,\"frame_fd\":4}",
 		"{\"type\":\"LAUNCH\",\"width\":2,\"height\":2,\"has_frame\":true}",
 		"{\"type\":\"LAUNCH\",\"width\":2,\"height\":2",
-		"{\"type\":\"ACTIVE\",\"end_prompt\":true,"
-		"\"active_id\":\"org.example.notes\",\"token\":17,"
-		"\"width\":2,\"height\":2,\"clock\":7}",
 	};
 	const char *launch = "{\"type\":\"LAUNCH\",\"width\":2,\"height\":2}";
 	const uint16_t pixels[] = { 0x1234, 0xffff, 0, 0xabcd };
@@ -129,36 +125,6 @@ static void check_launch_frame(int sender, int receiver)
 	}
 	check(open_descriptors() == baseline,
 	      "the caller closes its owned snapshot");
-	producer = memfd_create("session-prompt-test", MFD_CLOEXEC);
-	check(producer >= 0, "the prompt producer opens a memfd");
-	if (producer < 0)
-		return;
-	sent.type = FPLINUX_UI_SESSION_ACTIVE;
-	sent.end_prompt = true;
-	sent.token = 17;
-	strcpy(sent.active_id, "org.example.notes");
-	sent.frame_fd = producer;
-	strcpy(sent.clock_data, "{\"alarm\":{\"id\":7}}");
-	check(write(producer, pixels, sizeof(pixels)) == sizeof(pixels) &&
-		      fplinux_ui_session_send(sender, &sent),
-	      "an end prompt sends the visible scene");
-	close(producer);
-	check(fplinux_ui_session_receive(receiver, &received) == 1 &&
-		      received.has_frame && received.end_prompt &&
-		      received.width == 2 && received.height == 2 &&
-		      !strcmp(received.clock_data, "{\"alarm\":{\"id\":7}}") &&
-		      pread(received.frame_fd, copied, sizeof(copied), 0) ==
-			      sizeof(copied) &&
-		      !memcmp(copied, pixels, sizeof(pixels)),
-	      "the prompt scene outlives its producer and preserves pixels");
-	if (received.has_frame)
-		close(received.frame_fd);
-	check(open_descriptors() == baseline,
-	      "the caller closes its owned prompt scene");
-	sent.type = FPLINUX_UI_SESSION_LAUNCH;
-	sent.clock_data[0] = '\0';
-	sent.end_prompt = false;
-	sent.token = 0;
 	producer = memfd_create("session-launch-invalid", MFD_CLOEXEC);
 	check(producer >= 0, "the invalid-packet producer opens a memfd");
 	if (producer < 0)
@@ -532,61 +498,6 @@ static void check_state_packets(int sender, int receiver)
 	      "BUSY names the operation and explicit busy phase");
 }
 
-static void check_end_choice(int sender, int receiver)
-{
-	struct fplinux_ui_session_message received;
-	struct fplinux_ui_session_message sent = {
-		.type = FPLINUX_UI_SESSION_END,
-		.app_id = "org.example.notes",
-		.token = 17,
-	};
-	static const char *const actions[] = { "minimize", "close", "cancel" };
-	static const char *const invalid[] = {
-		"{\"type\":\"END\",\"app_id\":\"org.example.notes\","
-		"\"value\":\"close\"}",
-		"{\"type\":\"END\",\"app_id\":\"org.example.notes\","
-		"\"token\":0,\"value\":\"close\"}",
-		"{\"type\":\"END\",\"app_id\":\"org.example.notes\","
-		"\"token\":17,\"value\":\"exit\"}",
-		"{\"type\":\"END\",\"app_id\":\"../notes\","
-		"\"token\":17,\"value\":\"close\"}",
-		"{\"type\":\"ACTIVE\",\"end_prompt\":true}",
-		"{\"type\":\"ACTIVE\",\"end_prompt\":1}",
-		"{\"type\":\"HOME\",\"end_prompt\":true}",
-	};
-
-	check(receive_raw(sender, receiver,
-			  "{\"type\":\"ACTIVE\",\"end_prompt\":true,"
-			  "\"active_id\":\"org.example.notes\",\"token\":17}",
-			  &received) == 1 &&
-		      received.end_prompt && received.token == 17 &&
-		      !strcmp(received.active_id, "org.example.notes"),
-	      "literal prompt identifies its foreground application instance");
-	check(fplinux_ui_session_send(sender, &received) &&
-		      fplinux_ui_session_receive(receiver, &received) == 1 &&
-		      received.end_prompt && received.token == 17,
-	      "ACTIVE preserves the prompt and its instance");
-	for (size_t i = 0; i < sizeof(actions) / sizeof(actions[0]); ++i) {
-		strcpy(sent.value, actions[i]);
-		check(fplinux_ui_session_send(sender, &sent) &&
-			      fplinux_ui_session_receive(receiver, &received) ==
-				      1 &&
-			      received.type == FPLINUX_UI_SESSION_END &&
-			      !strcmp(received.value, actions[i]) &&
-			      !strcmp(received.app_id, "org.example.notes") &&
-			      received.token == 17,
-		      "each choice preserves the selected application instance");
-	}
-	strcpy(sent.value, "exit");
-	check(!fplinux_ui_session_send(sender, &sent) && errno == EINVAL,
-	      "serializer refuses an undefined end action");
-	for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
-		check(receive_raw(sender, receiver, invalid[i], &received) ==
-				      -1 &&
-			      errno == EPROTO,
-		      "invalid choice, identity or prompt field is rejected");
-}
-
 static void check_clock_packets(int sender, int receiver)
 {
 	static const char data[] =
@@ -871,6 +782,8 @@ static void check_close_preparation(int sender, int receiver)
 		"{\"type\":\"CLOSE_REPLY\",\"serial\":7}",
 		"{\"type\":\"CLOSE_REPLY\",\"serial\":7,\"value\":\"discard\"}",
 		"{\"type\":\"CLOSE_REPLY\",\"serial\":0,\"value\":\"ready\"}",
+		"{\"type\":\"CLOSE_ACK\"}",
+		"{\"type\":\"CLOSE_ACK\",\"serial\":0}",
 	};
 
 	check(receive_raw(sender, receiver,
@@ -881,6 +794,16 @@ static void check_close_preparation(int sender, int receiver)
 		      received.serial == 17 &&
 		      !strcmp(received.reason, "user-close"),
 	      "ordinary close preparation carries a nonzero attempt serial");
+	check(receive_raw(sender, receiver,
+			  "{\"type\":\"CLOSE_ACK\",\"serial\":17}",
+			  &received) == 1 &&
+		      received.type == FPLINUX_UI_SESSION_CLOSE_ACK &&
+		      received.serial == 17 &&
+		      fplinux_ui_session_send(sender, &received) &&
+		      fplinux_ui_session_receive(receiver, &received) == 1 &&
+		      received.type == FPLINUX_UI_SESSION_CLOSE_ACK &&
+		      received.serial == 17,
+	      "decision frame acknowledgment preserves its close attempt");
 	for (size_t i = 0; i < sizeof(replies) / sizeof(replies[0]); ++i) {
 		char packet[128];
 
@@ -954,6 +877,61 @@ static void check_storage_results(int sender, int receiver)
 		      "invalid storage facts and unrelated packet fields are rejected");
 }
 
+static void check_activation(int sender, int receiver)
+{
+	static const char *const invalid[] = {
+		"{\"type\":\"ACTIVATION\",\"serial\":1}",
+		"{\"type\":\"ACTIVATION\",\"activation\":\"open\"}",
+		"{\"type\":\"ACTIVATION\",\"serial\":0,\"activation\":\"open\"}",
+		"{\"type\":\"ACTIVATION\",\"serial\":1,\"activation\":\"restart\"}",
+		"{\"type\":\"ACTIVATION\",\"serial\":1,\"activation\":1}",
+		"{\"type\":\"ACTIVATION_ACK\"}",
+		"{\"type\":\"ACTIVATION_ACK\",\"serial\":0}",
+		"{\"type\":\"ACTIVATION_ACK\",\"serial\":1,\"activation\":\"open\"}",
+		"{\"type\":\"LIFECYCLE\",\"lifecycle\":\"foreground\",\"activation\":\"resume\"}",
+	};
+	struct fplinux_ui_session_message message;
+
+	check(receive_raw(
+		      sender, receiver,
+		      "{\"type\":\"ACTIVATION\",\"serial\":4294967295,\"activation\":\"open\"}",
+		      &message) == 1 &&
+		      message.type == FPLINUX_UI_SESSION_ACTIVATION &&
+		      message.activation ==
+			      FPLINUX_UI_SESSION_ACTIVATION_OPEN &&
+		      message.serial == UINT32_MAX,
+	      "OPEN carries a nonzero unsigned operation serial");
+	message.activation = FPLINUX_UI_SESSION_ACTIVATION_RESUME;
+	check(fplinux_ui_session_send(sender, &message) &&
+		      fplinux_ui_session_receive(receiver, &message) == 1 &&
+		      message.activation ==
+			      FPLINUX_UI_SESSION_ACTIVATION_RESUME &&
+		      message.serial == UINT32_MAX,
+	      "RESUME round-trips independently of lifecycle");
+	message = (struct fplinux_ui_session_message){
+		.type = FPLINUX_UI_SESSION_ACTIVATION_ACK,
+		.serial = UINT32_MAX,
+	};
+	check(fplinux_ui_session_send(sender, &message) &&
+		      fplinux_ui_session_receive(receiver, &message) == 1 &&
+		      message.type == FPLINUX_UI_SESSION_ACTIVATION_ACK &&
+		      message.serial == UINT32_MAX,
+	      "ACTIVATION_ACK retains its own message identity and serial");
+	message.serial = 0;
+	check(!fplinux_ui_session_send(sender, &message) && errno == EINVAL,
+	      "ACTIVATION_ACK requires an operation serial");
+	message.type = FPLINUX_UI_SESSION_ACTIVATION;
+	message.serial = 1;
+	message.activation = (enum fplinux_ui_session_activation)2;
+	check(!fplinux_ui_session_send(sender, &message) && errno == EINVAL,
+	      "only OPEN and RESUME can be sent");
+	for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
+		check(receive_raw(sender, receiver, invalid[i], &message) ==
+				      -1 &&
+			      errno == EPROTO,
+		      "activation requires its own intent and nonzero serial");
+}
+
 int main(void)
 {
 	static const char *const invalid[] = {
@@ -1004,11 +982,11 @@ int main(void)
 		return 1;
 	}
 	check_state_packets(pair[0], pair[1]);
-	check_end_choice(pair[0], pair[1]);
 	check_simple_packets(pair[0], pair[1]);
 	check_clock_packets(pair[0], pair[1]);
 	check_input_locales(pair[0], pair[1]);
 	check_lifecycle(pair[0], pair[1]);
+	check_activation(pair[0], pair[1]);
 	check_tasks(pair[0], pair[1]);
 	check_close_preparation(pair[0], pair[1]);
 	check_storage_results(pair[0], pair[1]);

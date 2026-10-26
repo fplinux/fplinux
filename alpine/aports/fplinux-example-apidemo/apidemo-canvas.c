@@ -4,7 +4,7 @@
  *
  * fplinux_ui_canvas_object() is the drawing area: below the title band, or
  * the whole surface without a title. The application lays it out from the
- * surface size and the metrics, colours it from the theme and redraws only
+ * content size and the metrics, colours it from the theme and redraws only
  * what changed. Commands still name and take the soft keys and OK; every
  * other key, press and release, goes to the key handler. A canvas may take
  * the whole display with fplinux_ui_set_fullscreen() and lays itself out
@@ -17,17 +17,10 @@
 #include <stdio.h>
 #include <string.h>
 
-/* The drawing area's height: below the title band, or the whole surface. */
-static int32_t area_height(struct apidemo *app, bool titled)
-{
-	return fplinux_ui_height(app->ui) -
-	       (titled ? app->metrics->header_height : 0);
-}
-
 /*
  * A text that may not fit: a label that wraps inside a container that
- * scrolls, with margin at the left and the gutter for the scroll indicator
- * at the right. Up and Down scroll it through fplinux_ui_scroll_key().
+ * scrolls with symmetric margins and the shared overflow indicator.
+ * Up and Down scroll it through fplinux_ui_scroll_key().
  */
 static lv_obj_t *scrolling_label(struct apidemo *app, lv_obj_t *parent,
 				 lv_obj_t **scroll)
@@ -38,7 +31,7 @@ static lv_obj_t *scrolling_label(struct apidemo *app, lv_obj_t *parent,
 	lv_obj_remove_style_all(box);
 	lv_obj_set_size(box, lv_pct(100), lv_pct(100));
 	lv_obj_set_style_pad_left(box, app->metrics->margin, 0);
-	lv_obj_set_style_pad_right(box, app->metrics->gutter, 0);
+	lv_obj_set_style_pad_right(box, app->metrics->margin, 0);
 	lv_obj_set_style_pad_ver(box, app->metrics->spacing, 0);
 	apidemo_style_scroll(app, box);
 	label = lv_label_create(box);
@@ -183,11 +176,6 @@ static void tester_deleted(lv_event_t *event)
 	tester.label = NULL;
 }
 
-/*
- * variant 1 turns on fplinux_ui_canvas_set_keyboard_keys(): an external
- * keyboard's Escape and Enter come to the handler instead of the right
- * soft key and OK. The phone's keys keep the commands either way.
- */
 static void open_tester(struct apidemo *app, const struct apidemo_entry *entry)
 {
 	struct fplinux_ui_screen *canvas =
@@ -203,16 +191,12 @@ static void open_tester(struct apidemo *app, const struct apidemo_entry *entry)
 	tester.pressed_code = 0;
 	lv_obj_add_event_cb(scroll, tester_deleted, LV_EVENT_DELETE, NULL);
 	lv_label_set_text(tester.label,
-			  entry->variant ?
-				  _("Press a key. Escape and Enter of a "
-				    "keyboard come here too.") :
-				  _("Press a key. Only Back has a command."));
+			  _("Press a key. Only Back has a command."));
 	/* Back takes the right soft key; the left one and OK come here. */
 	apidemo_add_back(canvas);
 	fplinux_ui_screen_set_listener(canvas, apidemo_back_listener, NULL,
 				       app);
 	fplinux_ui_canvas_set_key_handler(canvas, tester_key, NULL);
-	fplinux_ui_canvas_set_keyboard_keys(canvas, entry->variant);
 	apidemo_push(app, canvas, "fplinux_ui_canvas_new");
 }
 
@@ -274,21 +258,26 @@ static void open_whole(struct apidemo *app, const struct apidemo_entry *entry)
 	struct fplinux_ui_screen *canvas = fplinux_ui_canvas_new(app->ui, NULL);
 	lv_obj_t *area;
 	lv_obj_t *frame;
+	int width;
+	int height;
 
 	(void)entry;
 	if (!canvas) {
 		apidemo_error(app, "fplinux_ui_canvas_new");
 		return;
 	}
+	if (!fplinux_ui_screen_get_content_size(canvas, &width, &height)) {
+		apidemo_error(app, "fplinux_ui_screen_get_content_size");
+		return;
+	}
 	area = fplinux_ui_canvas_object(canvas);
 	/* A frame along the edges of the drawing area. */
 	frame = lv_obj_create(area);
 	lv_obj_remove_style_all(frame);
-	lv_obj_set_size(frame, fplinux_ui_width(app->ui),
-			area_height(app, false));
+	lv_obj_set_size(frame, width, height);
 	lv_obj_set_style_border_color(frame, app->theme->focus, 0);
 	lv_obj_set_style_border_width(frame, app->metrics->focus_width, 0);
-	lv_obj_set_style_pad_all(frame, app->metrics->focus_width, 0);
+	lv_obj_set_style_pad_all(frame, app->metrics->frame_padding, 0);
 	lv_obj_set_scrollable(frame, false);
 	whole.app = app;
 	whole.label = scrolling_label(app, frame, &whole.scroll);
@@ -363,6 +352,8 @@ static void open_objects(struct apidemo *app, const struct apidemo_entry *entry)
 	int32_t line = lv_font_get_line_height(theme->font);
 	int32_t frame_width;
 	int32_t frame_height;
+	int width;
+	int height;
 	lv_obj_t *area;
 	lv_obj_t *hint;
 	lv_obj_t *field;
@@ -371,11 +362,14 @@ static void open_objects(struct apidemo *app, const struct apidemo_entry *entry)
 		apidemo_error(app, "fplinux_ui_canvas_new");
 		return;
 	}
+	if (!fplinux_ui_screen_get_content_size(canvas, &width, &height)) {
+		apidemo_error(app, "fplinux_ui_screen_get_content_size");
+		return;
+	}
 	area = fplinux_ui_canvas_object(canvas);
 	hint = lv_label_create(area);
 	lv_obj_set_pos(hint, metrics->margin, metrics->spacing);
-	lv_obj_set_size(hint, fplinux_ui_width(app->ui) - 2 * metrics->margin,
-			line);
+	lv_obj_set_size(hint, width - 2 * metrics->margin, line);
 	lv_label_set_long_mode(hint, LV_LABEL_LONG_MODE_DOTS);
 	lv_obj_set_style_text_font(hint, theme->font, 0);
 	lv_obj_set_style_text_color(hint, theme->muted, 0);
@@ -385,7 +379,7 @@ static void open_objects(struct apidemo *app, const struct apidemo_entry *entry)
 	lv_obj_remove_style_all(field);
 	lv_obj_set_style_border_color(field, theme->border, 0);
 	lv_obj_set_style_border_width(field, metrics->focus_width, 0);
-	lv_obj_set_style_pad_all(field, metrics->focus_width, 0);
+	lv_obj_set_style_pad_all(field, metrics->frame_padding, 0);
 	lv_obj_set_scrollable(field, false);
 	/* LVGL places children inside both the border and the padding. */
 	frame_width = lv_obj_get_style_border_width(field, LV_PART_MAIN) * 2 +
@@ -396,11 +390,9 @@ static void open_objects(struct apidemo *app, const struct apidemo_entry *entry)
 		       lv_obj_get_style_pad_bottom(field, LV_PART_MAIN);
 	/* It fills the rest, a whole number of steps inside. */
 	mover.step = metrics->row_icon_size;
-	mover.columns = (fplinux_ui_width(app->ui) - 2 * metrics->margin -
-			 frame_width) /
-			mover.step;
-	mover.rows = (area_height(app, true) - line - 3 * metrics->spacing -
-		      frame_height) /
+	mover.columns =
+		(width - 2 * metrics->margin - frame_width) / mover.step;
+	mover.rows = (height - line - 3 * metrics->spacing - frame_height) /
 		     mover.step;
 	if (mover.columns < 1)
 		mover.columns = 1;
@@ -466,8 +458,8 @@ static void cell_area(int32_t x, int32_t y, lv_area_t *area)
 
 /*
  * The board's own background is drawn first; this adds the painted cells
- * in the foreground colour and the cursor as a frame in the focus colour,
- * a shape as well as a colour. LVGL calls it only for invalidated areas.
+ * in the foreground colour and a contrasting frame around the current cell.
+ * LVGL calls it only for invalidated areas.
  */
 static void draw_sketch(lv_event_t *event)
 {
@@ -488,7 +480,10 @@ static void draw_sketch(lv_event_t *event)
 		}
 	lv_draw_rect_dsc_init(&rectangle);
 	rectangle.bg_opa = LV_OPA_TRANSP;
-	rectangle.border_color = theme->focus;
+	rectangle.border_color =
+		sketch.painted[sketch.y * sketch.columns + sketch.x] ?
+			theme->background :
+			theme->foreground;
 	rectangle.border_width = sketch.app->metrics->focus_width;
 	rectangle.border_opa = LV_OPA_COVER;
 	cell_area(sketch.x, sketch.y, &area);
@@ -512,6 +507,7 @@ static void label_paint(void)
 		.id = COMMAND_PAINT,
 		.type = FPLINUX_UI_COMMAND_OK,
 		.label = erase ? _("Erase") : _("Paint"),
+		.icon = apidemo_glyph(sketch.app, erase ? "erase" : "paint"),
 	};
 
 	if (erase == sketch.erase)
@@ -595,14 +591,19 @@ static void open_sketch(struct apidemo *app, const struct apidemo_entry *entry)
 		.id = COMMAND_CLEAR,
 		.type = FPLINUX_UI_COMMAND_SCREEN,
 		.label = _("Clear all"),
+		.icon = apidemo_glyph(app, "delete"),
 	};
 	struct fplinux_ui_screen *canvas =
 		fplinux_ui_canvas_new(app->ui, _(entry->title));
-	int32_t width;
-	int32_t height;
+	int width;
+	int height;
 
 	if (!canvas) {
 		apidemo_error(app, "fplinux_ui_canvas_new");
+		return;
+	}
+	if (!fplinux_ui_screen_get_content_size(canvas, &width, &height)) {
+		apidemo_error(app, "fplinux_ui_screen_get_content_size");
 		return;
 	}
 	memset(&sketch, 0, sizeof(sketch));
@@ -610,8 +611,8 @@ static void open_sketch(struct apidemo *app, const struct apidemo_entry *entry)
 	sketch.canvas = canvas;
 	/* Half an icon box: about as many cells on every profile. */
 	sketch.cell = metrics->row_icon_size / 2;
-	width = fplinux_ui_width(app->ui) - 2 * metrics->margin;
-	height = area_height(app, true) - 2 * metrics->spacing;
+	width -= 2 * metrics->margin;
+	height -= 2 * metrics->spacing;
 	sketch.columns = width / sketch.cell;
 	sketch.rows = height / sketch.cell;
 	while (sketch.columns * sketch.rows > SKETCH_CELLS)
@@ -729,6 +730,8 @@ static void label_switch(bool fullscreen)
 		.id = COMMAND_MODE,
 		.type = FPLINUX_UI_COMMAND_SCREEN,
 		.label = fullscreen ? _("Normal view") : _("Full screen"),
+		.icon = apidemo_glyph(mode.app,
+				      fullscreen ? "restore" : "fullscreen"),
 	};
 
 	mode.fullscreen = fullscreen;
@@ -779,7 +782,7 @@ static void layout_mode(void)
 /*
  * fplinux_ui_screen_get_content_size() of the other kinds at the current
  * size: a list, a form and a text box with a title band, an alert's box,
- * and EINVAL for a NULL screen. A screen leaves only through the stack, so
+ * at the current surface size. A screen leaves only through the stack, so
  * each measured one is pushed and popped at once, before anything is
  * drawn; the alert measured last shows the results.
  */
@@ -796,7 +799,6 @@ static void show_sizes(struct apidemo *app)
 	int sizes[APIDEMO_COUNT(screens)][2] = { { 0 } };
 	bool measured = true;
 	char text[512];
-	int unused;
 
 	for (size_t i = 0; i < APIDEMO_COUNT(screens); i++) {
 		measured = measured && screens[i] &&
@@ -815,16 +817,12 @@ static void show_sizes(struct apidemo *app)
 		apidemo_error(app, "fplinux_ui_screen_get_content_size");
 		return;
 	}
-	errno = 0;
-	fplinux_ui_screen_get_content_size(NULL, &unused, &unused);
-	/* TRANSLATORS: widths × heights in pixels; %9$s an errno name. */
+	/* TRANSLATORS: widths × heights in pixels. */
 	snprintf(text, sizeof(text),
 		 _("List: %1$d × %2$d\u00a0px\nForm: %3$d × %4$d\u00a0px\n"
-		   "Text box: %5$d × %6$d\u00a0px\nAlert: %7$d × %8$d\u00a0px\n"
-		   "NULL screen: %9$s"),
+		   "Text box: %5$d × %6$d\u00a0px\nAlert: %7$d × %8$d\u00a0px"),
 		 sizes[0][0], sizes[0][1], sizes[1][0], sizes[1][1],
-		 sizes[2][0], sizes[2][1], sizes[3][0], sizes[3][1],
-		 apidemo_errno_name(errno));
+		 sizes[2][0], sizes[2][1], sizes[3][0], sizes[3][1]);
 	fplinux_ui_alert_set_text(screens[3], text);
 	fplinux_ui_push(app->ui, screens[3]);
 }
@@ -876,7 +874,6 @@ static void mode_resize(struct apidemo *app)
 		layout_mode();
 }
 
-/* variant 1 has no title band: the content area is the whole surface. */
 static void open_mode(struct apidemo *app, const struct apidemo_entry *entry)
 {
 	/* Second in Options, after the switch that layout_mode() adds. */
@@ -884,10 +881,11 @@ static void open_mode(struct apidemo *app, const struct apidemo_entry *entry)
 		.id = COMMAND_SIZES,
 		.type = FPLINUX_UI_COMMAND_SCREEN,
 		.label = _("Content sizes"),
+		.icon = apidemo_glyph(app, "about"),
 		.priority = 1,
 	};
-	struct fplinux_ui_screen *canvas = fplinux_ui_canvas_new(
-		app->ui, entry->variant ? NULL : _(entry->title));
+	struct fplinux_ui_screen *canvas =
+		fplinux_ui_canvas_new(app->ui, _(entry->title));
 	lv_obj_t *area;
 
 	if (!canvas) {
@@ -924,28 +922,22 @@ static void open_mode(struct apidemo *app, const struct apidemo_entry *entry)
 static const struct apidemo_entry entries[] = {
 	{ N_("Key tester"),
 	  "fplinux_ui_canvas_set_key_handler · fplinux_ui_is_softkey",
-	  open_tester, 0 },
-	{ N_("Escape and Enter"),
-	  "fplinux_ui_canvas_set_keyboard_keys(canvas, true)", open_tester, 1 },
-	{ N_("Whole surface"), "fplinux_ui_canvas_new(ui, NULL) · no commands",
-	  open_whole, 0 },
-	{ N_("LVGL objects"), "fplinux_ui_canvas_object · lv_obj_set_pos",
-	  open_objects, 0 },
+	  open_tester, 0, N_("See pressed keys and their source") },
+	{ N_("Whole surface"), "fplinux_ui_canvas_new", open_whole, 0,
+	  N_("Draw without a title and use Back") },
+	{ N_("Moving shapes"), "fplinux_ui_canvas_object · lv_obj_set_pos",
+	  open_objects, 0, N_("Move objects inside a Canvas") },
 	{ N_("Sketch pad"), "LV_EVENT_DRAW_MAIN · lv_obj_invalidate_area",
-	  open_sketch, 0 },
-	{ N_("Scrolling text"), "fplinux_ui_scroll_key", open_reader, 0 },
+	  open_sketch, 0, N_("Draw and clear cells with the keypad") },
+	{ N_("Scrolling text"), "fplinux_ui_scroll_key", open_reader, 0,
+	  N_("Scroll a custom viewport by line or page") },
 	{ N_("Full screen"),
 	  "fplinux_ui_set_fullscreen · FPLINUX_UI_EVENT_RESIZE · "
 	  "fplinux_ui_screen_get_content_size",
-	  open_mode, 0 },
-	{ N_("Full screen without a title"),
-	  "fplinux_ui_canvas_new(ui, NULL) · fplinux_ui_is_fullscreen",
-	  open_mode, 1 },
+	  open_mode, 0, N_("Resize drawing when display mode changes") },
 };
 
 const struct apidemo_category apidemo_canvas = {
-	.title = N_("Canvas"),
-	.icon = APIDEMO_IMAGE_DIR "canvas-symbolic.png",
 	.entries = entries,
 	.count = APIDEMO_COUNT(entries),
 	.resize = mode_resize,

@@ -7,6 +7,7 @@
 #include <fplinux/fplinux-ui-locale.h>
 #include <fplinux/fplinux-ui-screen.h>
 #include <libintl.h>
+#include <linux/input-event-codes.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -63,6 +64,7 @@ enum command_id {
 	CMD_STAY,
 	CMD_CLOSE,
 	CMD_RETRY,
+	CMD_CANCEL_SNOOZE,
 };
 
 enum confirmation {
@@ -71,6 +73,13 @@ enum confirmation {
 	CONFIRM_ACTIVE,
 	CONFIRM_LEAVE,
 	CONFIRM_RETRY,
+	CONFIRM_TIMER,
+};
+
+enum leave_destination {
+	LEAVE_BACK,
+	LEAVE_HOME,
+	LEAVE_CLOSE,
 };
 
 struct clock_screen {
@@ -129,7 +138,8 @@ struct clock_app {
 	lv_timer_t *poll_timer;
 	uint64_t last_poll_ms;
 	bool closing;
-	bool close_requested;
+	enum leave_destination leave_destination;
+	bool home_requested;
 };
 
 static void command(struct fplinux_ui *, struct fplinux_ui_screen *, int,
@@ -141,6 +151,8 @@ static void edit_accepted(struct fplinux_ui *, struct fplinux_ui_screen *,
 static void refresh_current(struct clock_app *);
 static void open_view(struct clock_app *, enum view_kind, uint64_t);
 static void submit(struct clock_app *, const struct clock_request *, bool);
+static void return_home(struct clock_app *);
+static void open_home(struct clock_app *);
 
 static struct clock_screen *top(struct clock_app *app)
 {
@@ -266,6 +278,8 @@ static void confirm(struct clock_app *app, const char *text,
 	app->confirmation_token = top(app) ? top(app)->token : 0;
 	if (action == CONFIRM_ACTIVE)
 		app->confirmation_draft_revision = app->pending_draft_revision;
+	else if (action == CONFIRM_TIMER)
+		app->confirmation_draft_revision = app->timer_draft_revision;
 	if (request)
 		app->confirmed_request = *request;
 	app->alert = fplinux_ui_alert_new(
@@ -335,9 +349,8 @@ static enum fplinux_ui_close_response prepare_close(struct fplinux_ui *ui,
 		app->confirmation = CONFIRM_NONE;
 	}
 	confirm(app, _("Leave without saving?"), NULL, CONFIRM_LEAVE);
-	app->close_requested = app->alert != NULL;
-	return app->close_requested ? FPLINUX_UI_CLOSE_WAIT :
-				      FPLINUX_UI_CLOSE_CANCEL;
+	app->leave_destination = LEAVE_CLOSE;
+	return app->alert ? FPLINUX_UI_CLOSE_WAIT : FPLINUX_UI_CLOSE_CANCEL;
 }
 
 static const char *request_error(enum clock_request_op op)
@@ -349,6 +362,8 @@ static const char *request_error(enum clock_request_op op)
 		return _("Could not save the alarm. Try again.");
 	case CLOCK_REQUEST_ALARM_DELETE:
 		return _("Could not delete the alarm. Try again.");
+	case CLOCK_REQUEST_ALARM_CANCEL_SNOOZE:
+		return _("Could not cancel the snooze. Try again.");
 	case CLOCK_REQUEST_TIMER_START:
 	case CLOCK_REQUEST_TIMER_RESTART:
 	case CLOCK_REQUEST_TIMER_RESUME:
@@ -500,6 +515,32 @@ static void pop_view(struct clock_app *app, bool back)
 	refresh_current(app);
 }
 
+static void return_home(struct clock_app *app)
+{
+	fplinux_ui_menu_close(app->ui);
+	while (app->depth > 1)
+		pop_view(app, false);
+	app->home_requested = false;
+}
+
+static void open_home(struct clock_app *app)
+{
+	if (app->alert)
+		return;
+	if (app->client.pending &&
+	    app->client.request.op != CLOCK_REQUEST_SNAPSHOT) {
+		app->home_requested = true;
+		return;
+	}
+	if (editor_dirty(app)) {
+		app->leave_destination = LEAVE_HOME;
+		confirm(app, _("Return to the start without saving?"), NULL,
+			CONFIRM_LEAVE);
+		return;
+	}
+	return_home(app);
+}
+
 static struct clock_screen *new_view(struct clock_app *app, enum view_kind kind,
 				     uint64_t subject, const char *title,
 				     int list_kind, bool canvas)
@@ -584,6 +625,8 @@ static void draft_capture(struct clock_app *app, struct clock_screen *view)
 	if (app->alarm.spec.schedule == CLOCK_ALARM_ONCE)
 		app->alarm.date =
 			fplinux_ui_form_get_date(view->screen, view->items[2]);
+	app->alarm.spec.enabled =
+		fplinux_ui_form_get_choice(view->screen, view->items[6]) == 1;
 }
 
 static void alarm_summary(struct clock_app *app, char *text, size_t capacity)
@@ -591,6 +634,12 @@ static void alarm_summary(struct clock_app *app, char *text, size_t capacity)
 	struct clock_alarm_spec spec;
 	int64_t due;
 	char day[100], time[32];
+
+	if (!app->alarm.spec.enabled) {
+		snprintf(text, capacity, "%s",
+			 _("Off. This alarm will not ring."));
+		return;
+	}
 
 	if (!draft_calendar(app, &spec) ||
 	    clock_model_alarm_next_due(&spec, model(app)->wall_utc, &due) !=
@@ -613,6 +662,8 @@ static void alarm_form_refresh(struct clock_app *app, struct clock_screen *view,
 	repeat_text(app->alarm.spec.repeat_days, repeat, sizeof(repeat));
 	alarm_summary(app, summary, sizeof(summary));
 	if (rebuild) {
+		const char *const states[] = { _("Disabled"), _("Enabled") };
+
 		fplinux_ui_form_delete_all(view->screen);
 		view->items[0] = fplinux_ui_form_append_date(view->screen,
 							     _("Time"),
@@ -631,6 +682,11 @@ static void alarm_form_refresh(struct clock_app *app, struct clock_screen *view,
 						       _("Alarm"));
 		item_command(app->ui, view, view->items[4], CMD_LABEL);
 		string_item(view, 5, NULL, app->feedback);
+		view->items[6] = fplinux_ui_form_append_choice(
+			view->screen, _("Alarm state"), FPLINUX_UI_CHOICE_POPUP,
+			states, COUNT(states));
+		fplinux_ui_form_set_choice(view->screen, view->items[6],
+					   app->alarm.spec.enabled ? 1 : 0);
 	} else {
 		fplinux_ui_form_set_string(view->screen, view->items[1],
 					   repeat);
@@ -731,6 +787,29 @@ static void lists_refresh(struct clock_app *app, struct clock_screen *view)
 			snprintf(detail[row], sizeof(detail[row]), "%s · %s",
 				 repeat,
 				 alarm->spec.enabled ? _("On") : _("Off"));
+			if (alarm->snoozed) {
+				uint64_t remaining_ms =
+					alarm->snooze_deadline_ms >
+							clock->monotonic_ms ?
+						alarm->snooze_deadline_ms -
+							clock->monotonic_ms :
+						0;
+
+				clock_presentation_time(
+					app->ui,
+					clock->wall_utc +
+						(int64_t)((remaining_ms + 999) /
+							  1000),
+					false, time, sizeof(time));
+				duration(remaining_ms, false, delta,
+					 sizeof(delta));
+				snprintf(text[row], sizeof(text[row]),
+					 _("Snoozed until %s"), time);
+				snprintf(detail[row], sizeof(detail[row]),
+					 _("%s left%s%s"), delta,
+					 alarm->spec.label[0] ? " · " : "",
+					 alarm->spec.label);
+			}
 		}
 	} else if (view->kind == VIEW_WORLD) {
 		count = clock->world_count + 1;
@@ -795,9 +874,10 @@ static void lists_refresh(struct clock_app *app, struct clock_screen *view)
 	}
 	list_update(view, count, ids, text, detail);
 	if (view->kind == VIEW_ALARMS || view->kind == VIEW_WORLD)
-		fplinux_ui_list_set_icon(
-			view->screen, 0,
-			fplinux_ui_glyph(app->ui, "add", FPLINUX_UI_GLYPH_ROW));
+		fplinux_ui_list_set_icon(view->screen, 0,
+					 fplinux_ui_glyph(app->ui, "add",
+							  FPLINUX_UI_GLYPH_ROW),
+					 FPLINUX_UI_LIST_ICON_IMAGE);
 	if (view->kind == VIEW_ALARMS && app->focus_alarm_id) {
 		for (size_t i = 1; i < count; ++i)
 			if (ids[i] == app->focus_alarm_id)
@@ -833,11 +913,25 @@ static void lists_refresh(struct clock_app *app, struct clock_screen *view)
 				.icon = fplinux_ui_glyph(app->ui, "delete",
 							 FPLINUX_UI_GLYPH_ROW),
 			};
+			const struct fplinux_ui_command cancel_snooze = {
+				.id = CMD_CANCEL_SNOOZE,
+				.type = FPLINUX_UI_COMMAND_SCREEN,
+				.label = _("Cancel snooze"),
+				.priority = -1,
+				.icon = fplinux_ui_glyph(app->ui, "cancel",
+							 FPLINUX_UI_GLYPH_ROW),
+			};
 
 			fplinux_ui_list_add_item_command(view->screen, i,
 							 &toggle);
 			fplinux_ui_list_add_item_command(view->screen, i,
 							 &remove);
+			if (alarm->snoozed)
+				fplinux_ui_list_add_item_command(
+					view->screen, i, &cancel_snooze);
+			else
+				fplinux_ui_screen_remove_item_command(
+					view->screen, i, CMD_CANCEL_SNOOZE);
 		}
 }
 
@@ -1043,7 +1137,7 @@ static void refresh_current(struct clock_app *app)
 {
 	struct clock_screen *view = top(app);
 	const struct clock_model *clock = model(app);
-	char time[64], date[140], relative[100], text[180];
+	char time[64], date[240], relative[100], text[180];
 
 	if (!view || !is_active(app) || fplinux_ui_menu_is_open(app->ui) ||
 	    fplinux_ui_current(app->ui) != view->screen)
@@ -1120,11 +1214,24 @@ static void refresh_current(struct clock_app *app)
 	case VIEW_STOPWATCH:
 		duration(clock_model_stopwatch_elapsed(clock), true, time,
 			 sizeof(time));
-		digits_refresh(app, view, time,
-			       !clock->stopwatch.running &&
-					       clock->stopwatch.elapsed_ms ?
-				       _("Paused") :
-				       "");
+		text[0] = '\0';
+		if (clock->stopwatch.lap_count) {
+			size_t last = clock->stopwatch.lap_count - 1;
+
+			duration(clock->stopwatch.laps[last].difference_ms,
+				 true, relative, sizeof(relative));
+			snprintf(text, sizeof(text), _("Lap %zu · %s"),
+				 last + 1, relative);
+		}
+		if (clock->stopwatch.running)
+			snprintf(date, sizeof(date), "%s%s%s", text,
+				 text[0] ? "\n" : "", _("Laps →"));
+		else if (clock->stopwatch.elapsed_ms)
+			snprintf(date, sizeof(date), "%s\n%s", _("Paused"),
+				 text);
+		else
+			snprintf(date, sizeof(date), "%s", text);
+		digits_refresh(app, view, time, date);
 		stopwatch_commands_refresh(app->ui, view, &clock->stopwatch);
 		break;
 	case VIEW_OFFSET_CHOICE:
@@ -1168,6 +1275,20 @@ static void refresh_current(struct clock_app *app)
 	default:
 		break;
 	}
+}
+
+static void stopwatch_key(struct fplinux_ui *ui,
+			  struct fplinux_ui_screen *screen,
+			  const struct fplinux_ui_key *key, void *context)
+{
+	struct clock_app *app = context;
+	struct clock_screen *view = top(app);
+
+	(void)ui;
+	if (key->pressed && key->code == KEY_RIGHT && view &&
+	    view->screen == screen && view->kind == VIEW_STOPWATCH &&
+	    model(app)->stopwatch.running)
+		open_view(app, VIEW_LAPS, 0);
 }
 
 static void open_alarm(struct clock_app *app, uint32_t id)
@@ -1253,7 +1374,8 @@ static void open_view(struct clock_app *app, enum view_kind kind,
 			fplinux_ui_list_set_icon(
 				view->screen, i,
 				fplinux_ui_glyph(app->ui, entries[i].glyph,
-						 FPLINUX_UI_GLYPH_ROW));
+						 FPLINUX_UI_GLYPH_ROW),
+				FPLINUX_UI_LIST_ICON_IMAGE);
 		}
 		add_command(app->ui, view, CMD_SHOW_FACE,
 			    FPLINUX_UI_COMMAND_SCREEN, _("Show clock"),
@@ -1273,6 +1395,9 @@ static void open_view(struct clock_app *app, enum view_kind kind,
 				kind == VIEW_TIMER ? _("Timer") :
 						     _("Stopwatch"),
 				0, true);
+		if (view && kind == VIEW_STOPWATCH)
+			fplinux_ui_canvas_set_key_handler(view->screen,
+							  stopwatch_key, app);
 		break;
 	case VIEW_ALARMS:
 	case VIEW_WORLD:
@@ -1411,14 +1536,14 @@ static void open_view(struct clock_app *app, enum view_kind kind,
 			return;
 		fplinux_ui_list_append(view->screen, _("Clock face"), NULL);
 		fplinux_ui_list_append(view->screen, _("Snooze"), NULL);
-		fplinux_ui_list_set_icon(
-			view->screen, 0,
-			fplinux_ui_glyph(app->ui, "date-time",
-					 FPLINUX_UI_GLYPH_ROW));
-		fplinux_ui_list_set_icon(
-			view->screen, 1,
-			fplinux_ui_glyph(app->ui, "snooze",
-					 FPLINUX_UI_GLYPH_ROW));
+		fplinux_ui_list_set_icon(view->screen, 0,
+					 fplinux_ui_glyph(app->ui, "date-time",
+							  FPLINUX_UI_GLYPH_ROW),
+					 FPLINUX_UI_LIST_ICON_IMAGE);
+		fplinux_ui_list_set_icon(view->screen, 1,
+					 fplinux_ui_glyph(app->ui, "snooze",
+							  FPLINUX_UI_GLYPH_ROW),
+					 FPLINUX_UI_LIST_ICON_IMAGE);
 		break;
 	case VIEW_FACE_CHOICE:
 	case VIEW_SNOOZE_CHOICE:
@@ -1458,7 +1583,7 @@ static void open_view(struct clock_app *app, enum view_kind kind,
 			_("Choose a time and date, or repeat on selected days. Save sets the alarm; Cancel leaves it unchanged."));
 		string_item(
 			view, 1, _("Timer and stopwatch"),
-			_("You can leave this screen while time is running."));
+			_("You can leave this screen while time is running. Right opens stopwatch laps without pausing."));
 		string_item(
 			view, 2, _("Power"),
 			_("Alarms ring while the phone is on. They cannot turn on a powered-off phone."));
@@ -1566,7 +1691,8 @@ static void save_editor(struct clock_app *app, struct clock_screen *view)
 			       _("Check the date, time and repeat days."));
 			return;
 		}
-		if (request.alarm.schedule == CLOCK_ALARM_ONCE &&
+		if (request.alarm.enabled &&
+		    request.alarm.schedule == CLOCK_ALARM_ONCE &&
 		    request.alarm.once_utc <= model(app)->wall_utc) {
 			app->feedback[0] = '\0';
 			fplinux_ui_form_set_focus(view->screen, view->items[2]);
@@ -1592,7 +1718,17 @@ static void save_editor(struct clock_app *app, struct clock_screen *view)
 						   app->feedback);
 			return;
 		}
+		if (request.seconds == model(app)->timer.duration_seconds) {
+			pop_view(app, false);
+			return;
+		}
 		request.op = CLOCK_REQUEST_TIMER_SET;
+		if (model(app)->timer.state != CLOCK_TIMER_STOPPED) {
+			confirm(app,
+				_("Replace the current countdown with this duration?"),
+				&request, CONFIRM_TIMER);
+			return;
+		}
 	} else
 		return;
 	submit(app, &request, true);
@@ -1736,30 +1872,44 @@ static void command(struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
 		request = app->confirmed_request;
 		app->alert = NULL;
 		app->confirmation = CONFIRM_NONE;
-		if (app->close_requested && action == CONFIRM_LEAVE) {
-			app->close_requested = false;
-			fplinux_ui_close_reply(app->ui,
-					       id == CMD_CONFIRM ?
-						       FPLINUX_UI_CLOSE_READY :
-						       FPLINUX_UI_CLOSE_CANCEL);
+		if (action == CONFIRM_LEAVE) {
+			enum leave_destination destination =
+				app->leave_destination;
+
+			app->leave_destination = LEAVE_BACK;
+			if (destination == LEAVE_CLOSE) {
+				fplinux_ui_close_reply(
+					app->ui,
+					id == CMD_CONFIRM ?
+						FPLINUX_UI_CLOSE_READY :
+						FPLINUX_UI_CLOSE_CANCEL);
+				return;
+			}
+			if (id == CMD_CONFIRM && view && view->token == token) {
+				if (destination == LEAVE_HOME)
+					return_home(app);
+				else
+					pop_view(app, true);
+			}
+			refresh_current(app);
 			return;
 		}
 		if (id == CMD_CONFIRM && view && view->token == token) {
-			if (action == CONFIRM_LEAVE)
-				pop_view(app, true);
-			else if (action == CONFIRM_RETRY &&
-				 mutation_pending(app)) {
+			if (action == CONFIRM_RETRY && mutation_pending(app)) {
 				clock_client_retry(&app->client, app->ui,
 						   fplinux_ui_now_ms());
 				app->waiting_retry = false;
 			} else if (action == CONFIRM_REQUEST ||
-				   action == CONFIRM_ACTIVE) {
+				   action == CONFIRM_ACTIVE ||
+				   action == CONFIRM_TIMER) {
 				request.cancel_active = action ==
 							CONFIRM_ACTIVE;
 				submit(app, &request,
-				       action == CONFIRM_ACTIVE &&
-					       app->pending_close);
-				if (action == CONFIRM_ACTIVE)
+				       action == CONFIRM_TIMER ||
+					       (action == CONFIRM_ACTIVE &&
+						app->pending_close));
+				if (action == CONFIRM_ACTIVE ||
+				    action == CONFIRM_TIMER)
 					app->pending_draft_revision = revision;
 			}
 		}
@@ -1836,7 +1986,12 @@ static void command(struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
 				&request, CONFIRM_REQUEST);
 		return;
 	}
-	if (id == CMD_TOGGLE) {
+	if (id == CMD_CANCEL_SNOOZE) {
+		request.op = CLOCK_REQUEST_ALARM_CANCEL_SNOOZE;
+		request.id = (uint32_t)selected_id(view);
+		if (!request.id)
+			return;
+	} else if (id == CMD_TOGGLE) {
 		const struct clock_alarm *alarm = clock_model_alarm_find(
 			clock, (uint32_t)selected_id(view));
 
@@ -1952,6 +2107,11 @@ static void event(struct fplinux_ui *ui, const struct fplinux_ui_event *event,
 	}
 	if (app->closing)
 		return;
+	if (event->type == FPLINUX_UI_EVENT_ACTIVATION) {
+		if (event->activation == FPLINUX_UI_ACTIVATION_OPEN)
+			open_home(app);
+		return;
+	}
 	if (event->type == FPLINUX_UI_EVENT_VISIBILITY ||
 	    event->type == FPLINUX_UI_EVENT_LIFECYCLE) {
 		if (app->poll_timer) {
@@ -2001,6 +2161,8 @@ static void event(struct fplinux_ui *ui, const struct fplinux_ui_event *event,
 			       !app->alert &&
 			       fplinux_ui_current(app->ui) == view->screen;
 
+		if (result == CLOCK_CLIENT_ERROR || status != CLOCK_OK)
+			app->home_requested = false;
 		if (result == CLOCK_CLIENT_ERROR || status != CLOCK_OK) {
 			bool accepted = result == CLOCK_CLIENT_SNAPSHOT &&
 					app->client.result.applied;
@@ -2107,6 +2269,11 @@ static void event(struct fplinux_ui *ui, const struct fplinux_ui_event *event,
 		}
 	}
 	refresh_current(app);
+	if (app->home_requested && request.op != CLOCK_REQUEST_SNAPSHOT &&
+	    result == CLOCK_CLIENT_SNAPSHOT && status == CLOCK_OK) {
+		app->home_requested = false;
+		open_home(app);
+	}
 }
 
 int main(int argc, char **argv)

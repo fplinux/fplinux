@@ -3,7 +3,7 @@
  * The options menu of the high-level screens while the application changes
  * the screen under it. The harness links lib/fplinux/fplinux-ui-screen.c
  * with stand-ins for LVGL and the enclosing runtime:
- * LVGL objects retain only geometry and visibility,
+ * LVGL objects retain geometry, text, visibility and title scroll state,
  * a list view keeps only its row count and focus, and the menu
  * records its items and callback. It opens Options with the left soft key,
  * changes the screen and checks what a choice fires. It also checks the
@@ -79,7 +79,11 @@ static max_align_t system_storage;
 struct object_geometry {
 	lv_obj_t *parent;
 	int width, height, x, y;
-	bool hidden;
+	int pad_right;
+	bool hidden, deleted, title_scrolling;
+	const lv_font_t *font;
+	const void *image_src;
+	lv_label_long_mode_t long_mode;
 	char text[256];
 };
 static struct object_geometry object_storage;
@@ -90,15 +94,25 @@ static struct fplinux_ui_text text_field;
 static const char *input_languages;
 static int legend_advance;
 static bool russian_labels;
+static int strdup_fail_after = -1;
+static bool fail_next_label;
 /* The session legends sent by the screen. */
 static struct {
 	char legends[3][64];
 } drawn;
-static const struct fplinux_ui_theme theme;
+static const lv_font_t header_font = { .line_height = 16 };
+static const lv_font_t body_font = { .line_height = 12 };
+static const struct fplinux_ui_theme theme = {
+	.font = &body_font,
+	.font_large = &header_font,
+};
 static const struct fplinux_ui_profile_spec spec = {
 	.width = 240,
 	.height = 320,
 	.header_height = 28,
+	.margin = 4,
+	.spacing = 4,
+	.scrollbar_space = 4,
 	.row_height = 30,
 	.row_height_detail = 44,
 	.alert_margin = 8,
@@ -117,6 +131,8 @@ static int surface_width = 240;
 /* The open menu, as fplinux_ui_menu_open() received it. */
 static struct {
 	bool open;
+	enum fplinux_ui_menu_origin origin;
+	bool titled;
 	fplinux_ui_menu_cb callback;
 	void *context;
 	size_t count;
@@ -139,6 +155,19 @@ static struct fired {
 } fired;
 
 /* LVGL */
+
+char *__real_strdup(const char *text);
+
+char *__wrap_strdup(const char *text)
+{
+	if (!strdup_fail_after) {
+		errno = ENOMEM;
+		return NULL;
+	}
+	if (strdup_fail_after > 0)
+		--strdup_fail_after;
+	return __real_strdup(text);
+}
 
 #define NOTHING(name, ...)     \
 	void name(__VA_ARGS__) \
@@ -172,7 +201,14 @@ OBJECT(lv_arc_create, lv_obj_t *parent)
 OBJECT(lv_bar_create, lv_obj_t *parent)
 OBJECT(lv_canvas_create, lv_obj_t *parent)
 OBJECT(lv_image_create, lv_obj_t *parent)
-OBJECT(lv_label_create, lv_obj_t *parent)
+lv_obj_t *lv_label_create(lv_obj_t *parent)
+{
+	if (fail_next_label) {
+		fail_next_label = false;
+		return NULL;
+	}
+	return new_object(parent);
+}
 OBJECT(lv_obj_create, lv_obj_t *parent)
 lv_obj_t *lv_obj_get_child(const lv_obj_t *obj, int32_t index)
 {
@@ -198,10 +234,23 @@ NOTHING(lv_draw_image, lv_layer_t *layer, const lv_draw_image_dsc_t *dsc,
 	const lv_area_t *coords)
 NOTHING(lv_draw_image_dsc_init, lv_draw_image_dsc_t *dsc)
 ZERO(void *, lv_event_get_user_data, lv_event_t *event)
-ZERO(int32_t, lv_font_get_line_height, const lv_font_t *font)
+int32_t lv_font_get_line_height(const lv_font_t *font)
+{
+	return font ? font->line_height : 0;
+}
 ZERO(lv_result_t, lv_image_decoder_get_info, const void *src,
      lv_image_header_t *header)
-NOTHING(lv_image_set_src, lv_obj_t *obj, const void *src)
+void lv_image_set_src(lv_obj_t *obj, const void *src)
+{
+	geometry(obj)->image_src = src;
+}
+
+const void *lv_image_get_src(lv_obj_t *obj)
+{
+	return geometry(obj)->image_src;
+}
+
+NOTHING(lv_image_set_inner_align, lv_obj_t *obj, lv_image_align_t align)
 ZERO(lv_image_src_t, lv_image_src_get_type, const void *src)
 unsigned int lodepng_decode32(unsigned char **out, unsigned int *width,
 			      unsigned int *height, const unsigned char *input,
@@ -210,16 +259,37 @@ unsigned int lodepng_decode32(unsigned char **out, unsigned int *width,
 	*out = NULL;
 	return 1;
 }
-NOTHING(lv_label_set_long_mode, lv_obj_t *obj, lv_label_long_mode_t mode)
+void lv_label_set_long_mode(lv_obj_t *obj, lv_label_long_mode_t mode)
+{
+	geometry(obj)->long_mode = mode;
+}
 NOTHING(lv_label_set_text_fmt, lv_obj_t *obj, const char *format, ...)
 NOTHING(lv_label_set_text_selection_end, lv_obj_t *obj, uint32_t index)
 NOTHING(lv_label_set_text_selection_start, lv_obj_t *obj, uint32_t index)
 ZERO(lv_event_dsc_t *, lv_obj_add_event_cb, lv_obj_t *obj,
      lv_event_cb_t callback, lv_event_code_t filter, void *data)
-NOTHING(lv_obj_align, lv_obj_t *obj, lv_align_t align, int32_t x, int32_t y)
+void lv_obj_align(lv_obj_t *obj, lv_align_t align, int32_t x, int32_t y)
+{
+	struct object_geometry *object = geometry(obj);
+	struct object_geometry *parent = geometry(object->parent);
+
+	object->x = x;
+	object->y = y;
+	if (align == LV_ALIGN_LEFT_MID || align == LV_ALIGN_RIGHT_MID)
+		object->y += (parent->height - object->height) / 2;
+	if (align == LV_ALIGN_RIGHT_MID)
+		object->x += parent->width - object->width;
+}
 NOTHING(lv_obj_center, lv_obj_t *obj)
 NOTHING(lv_obj_clean, lv_obj_t *obj)
-NOTHING(lv_obj_delete, lv_obj_t *obj)
+void lv_obj_delete(lv_obj_t *obj)
+{
+	geometry(obj)->deleted = true;
+	geometry(obj)->hidden = true;
+	for (size_t i = 0; i < object_count; ++i)
+		if (objects[i].parent == obj && !objects[i].deleted)
+			lv_obj_delete((lv_obj_t *)&objects[i]);
+}
 int32_t lv_obj_get_content_height(const lv_obj_t *obj)
 {
 	return geometry(obj)->height;
@@ -234,11 +304,28 @@ int32_t lv_obj_get_style_height(const lv_obj_t *obj, lv_part_t part)
 }
 ZERO(int32_t, lv_obj_get_style_pad_bottom, const lv_obj_t *obj, lv_part_t part)
 ZERO(int32_t, lv_obj_get_style_pad_top, const lv_obj_t *obj, lv_part_t part)
+int32_t lv_obj_get_style_pad_right(const lv_obj_t *obj, lv_part_t part)
+{
+	return geometry(obj)->pad_right;
+}
+ZERO(int32_t, lv_obj_get_style_text_letter_space, const lv_obj_t *obj,
+     lv_part_t part)
+const lv_font_t *lv_obj_get_style_text_font(const lv_obj_t *obj, lv_part_t part)
+{
+	const struct object_geometry *object = geometry(obj);
+
+	if (object->font || !object->parent)
+		return object->font;
+	return lv_obj_get_style_text_font(object->parent, part);
+}
 int32_t lv_obj_get_style_width(const lv_obj_t *obj, lv_part_t part)
 {
 	return geometry(obj)->width;
 }
-ZERO(bool, lv_obj_is_hidden, const lv_obj_t *obj)
+bool lv_obj_is_hidden(const lv_obj_t *obj)
+{
+	return geometry(obj)->hidden;
+}
 NOTHING(lv_obj_move_to_index, lv_obj_t *obj, int32_t index)
 NOTHING(lv_obj_remove_style_all, lv_obj_t *obj)
 NOTHING(lv_obj_scroll_by_bounded, lv_obj_t *obj, int32_t dx, int32_t dy,
@@ -257,6 +344,11 @@ NOTHING(lv_obj_set_parent, lv_obj_t *obj, lv_obj_t *parent)
 void lv_obj_set_pos(lv_obj_t *obj, int32_t x, int32_t y)
 {
 	geometry(obj)->x = x;
+	geometry(obj)->y = y;
+}
+
+void lv_obj_set_y(lv_obj_t *obj, int32_t y)
+{
 	geometry(obj)->y = y;
 }
 NOTHING(lv_obj_set_scrollable, lv_obj_t *obj, bool enable)
@@ -287,18 +379,29 @@ NOTHING(lv_obj_set_style_image_recolor, lv_obj_t *obj, lv_color_t value,
 	lv_style_selector_t selector)
 NOTHING(lv_obj_set_style_max_height, lv_obj_t *obj, int32_t value,
 	lv_style_selector_t selector)
-NOTHING(lv_obj_set_style_pad_all, lv_obj_t *obj, int32_t value,
+NOTHING(lv_obj_set_style_max_width, lv_obj_t *obj, int32_t value,
 	lv_style_selector_t selector)
+void lv_obj_set_style_pad_all(lv_obj_t *obj, int32_t value,
+			      lv_style_selector_t selector)
+{
+	geometry(obj)->pad_right = value;
+}
 NOTHING(lv_obj_set_style_pad_bottom, lv_obj_t *obj, int32_t value,
 	lv_style_selector_t selector)
 NOTHING(lv_obj_set_style_pad_column, lv_obj_t *obj, int32_t value,
 	lv_style_selector_t selector)
-NOTHING(lv_obj_set_style_pad_hor, lv_obj_t *obj, int32_t value,
-	lv_style_selector_t selector)
+void lv_obj_set_style_pad_hor(lv_obj_t *obj, int32_t value,
+			      lv_style_selector_t selector)
+{
+	geometry(obj)->pad_right = value;
+}
 NOTHING(lv_obj_set_style_pad_left, lv_obj_t *obj, int32_t value,
 	lv_style_selector_t selector)
-NOTHING(lv_obj_set_style_pad_right, lv_obj_t *obj, int32_t value,
-	lv_style_selector_t selector)
+void lv_obj_set_style_pad_right(lv_obj_t *obj, int32_t value,
+				lv_style_selector_t selector)
+{
+	geometry(obj)->pad_right = value;
+}
 NOTHING(lv_obj_set_style_radius, lv_obj_t *obj, int32_t value,
 	lv_style_selector_t selector)
 NOTHING(lv_obj_set_style_pad_row, lv_obj_t *obj, int32_t value,
@@ -311,11 +414,17 @@ NOTHING(lv_obj_set_style_text_color, lv_obj_t *obj, lv_color_t value,
 	lv_style_selector_t selector)
 NOTHING(lv_obj_set_style_text_decor, lv_obj_t *obj, lv_text_decor_t value,
 	lv_style_selector_t selector)
-NOTHING(lv_obj_set_style_text_font, lv_obj_t *obj, const lv_font_t *value,
-	lv_style_selector_t selector)
+void lv_obj_set_style_text_font(lv_obj_t *obj, const lv_font_t *value,
+				lv_style_selector_t selector)
+{
+	geometry(obj)->font = value;
+}
 NOTHING(lv_obj_set_style_width, lv_obj_t *obj, int32_t value,
 	lv_style_selector_t selector)
-NOTHING(lv_obj_set_width, lv_obj_t *obj, int32_t w)
+void lv_obj_set_width(lv_obj_t *obj, int32_t w)
+{
+	geometry(obj)->width = w;
+}
 NOTHING(lv_obj_update_layout, const lv_obj_t *obj)
 ZERO(lv_timer_t *, lv_timer_create, lv_timer_cb_t callback, uint32_t period,
      void *data)
@@ -330,6 +439,11 @@ int32_t lv_pct(int32_t x)
 void lv_label_set_text(lv_obj_t *obj, const char *text)
 {
 	snprintf(geometry(obj)->text, sizeof(geometry(obj)->text), "%s", text);
+}
+
+void lv_label_set_text_static(lv_obj_t *obj, const char *text)
+{
+	lv_label_set_text(obj, text);
 }
 
 char *lv_label_get_text(const lv_obj_t *obj)
@@ -357,7 +471,7 @@ void lv_text_get_size(lv_point_t *size, const char *text, const lv_font_t *font,
 	*size = (lv_point_t){ 0 };
 	for (; *text; ++text)
 		if (((unsigned char)*text & 0xc0) != 0x80)
-			size->x += legend_advance;
+			size->x += font == &header_font ? 8 : legend_advance;
 }
 
 /* The runtime around the screens */
@@ -388,9 +502,27 @@ lv_obj_t *fplinux_ui_screen(struct fplinux_ui *owner)
 	return (lv_obj_t *)&object_storage;
 }
 NOTHING(fplinux_ui_scrim_style, struct fplinux_ui *owner, lv_obj_t *root)
-NOTHING(fplinux_ui_title_hide, lv_obj_t *label)
-NOTHING(fplinux_ui_title_init, lv_obj_t *label, const lv_font_t *font)
-NOTHING(fplinux_ui_title_scroll, lv_obj_t *label)
+void fplinux_ui_title_hide(lv_obj_t *label)
+{
+	geometry(label)->title_scrolling = false;
+}
+void fplinux_ui_title_init(lv_obj_t *label, const lv_font_t *font)
+{
+	lv_obj_set_style_text_font(label, font, 0);
+	lv_obj_set_height(label, lv_font_get_line_height(font));
+	lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
+}
+void fplinux_ui_title_scroll(lv_obj_t *label)
+{
+	lv_point_t size;
+
+	lv_text_get_size(&size, lv_label_get_text(label), geometry(label)->font,
+			 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+	geometry(label)->title_scrolling = size.x > geometry(label)->width;
+	lv_label_set_long_mode(label, geometry(label)->title_scrolling ?
+					      LV_LABEL_LONG_MODE_SCROLL :
+					      LV_LABEL_LONG_MODE_DOTS);
+}
 NOTHING(fplinux_ui_text_canvas_active, lv_obj_t *canvas, bool active)
 bool fplinux_ui_text_is_empty(const struct fplinux_ui_text *field)
 {
@@ -399,6 +531,10 @@ bool fplinux_ui_text_is_empty(const struct fplinux_ui_text *field)
 bool fplinux_ui_text_is_picker_open(const struct fplinux_ui_text *field)
 {
 	return field->model.input.picker_open;
+}
+void fplinux_ui_text_cancel_picker(struct fplinux_ui_text *field)
+{
+	fplinux_ui_text_model_cancel_picker(&field->model);
 }
 ZERO(bool, fplinux_ui_text_is_read_only, const struct fplinux_ui_text *field)
 bool fplinux_ui_text_key(struct fplinux_ui_text *field,
@@ -456,7 +592,7 @@ NOTHING(fplinux_ui_listview_set_callbacks, struct fplinux_ui_listview *list,
 	fplinux_ui_listview_cb select, fplinux_ui_listview_cb activate,
 	void *context)
 ZERO(bool, fplinux_ui_listview_set_icon, struct fplinux_ui_listview *list,
-     size_t index, lv_draw_buf_t *icon)
+     size_t index, lv_draw_buf_t *icon, enum fplinux_ui_list_icon_kind kind)
 NOTHING(fplinux_ui_listview_set_inline_detail, struct fplinux_ui_listview *list,
 	bool inline_detail)
 NOTHING(fplinux_ui_listview_set_marked, struct fplinux_ui_listview *list,
@@ -489,6 +625,22 @@ void fplinux_ui_cancel_key_repeat(struct fplinux_ui *owner,
 const struct fplinux_ui_theme *fplinux_ui_theme(const struct fplinux_ui *owner)
 {
 	return &theme;
+}
+
+/* This command harness does not draw scroll indicators. */
+void fplinux_ui_style_scrollbar(struct fplinux_ui *owner, lv_obj_t *object)
+{
+}
+
+void fplinux_ui_scrollbar_layout(lv_obj_t *object)
+{
+}
+
+/* Alert colours are observed by the native widget tests. */
+lv_color_t fplinux_ui_alert_color(const struct fplinux_ui *owner,
+				  enum fplinux_ui_alert_kind kind)
+{
+	return theme.focus;
 }
 
 const struct fplinux_ui_profile_spec *
@@ -620,6 +772,11 @@ size_t fplinux_ui_listview_selected(const struct fplinux_ui_listview *list)
 	return list->selected;
 }
 
+size_t fplinux_ui_listview_first_visible(const struct fplinux_ui_listview *list)
+{
+	return list->count ? 0 : NONE;
+}
+
 void fplinux_ui_listview_select(struct fplinux_ui_listview *list, size_t index)
 {
 	if (index < list->count)
@@ -666,7 +823,8 @@ void fplinux_ui_listview_clear(struct fplinux_ui_listview *list)
 
 /* The options menu: fplinux-ui.c's contract, without a view. */
 
-bool fplinux_ui_menu_open(struct fplinux_ui *owner, const char *title,
+bool fplinux_ui_menu_open(struct fplinux_ui *owner,
+			  enum fplinux_ui_menu_origin origin, const char *title,
 			  const struct fplinux_ui_menu_item *items,
 			  size_t count, fplinux_ui_menu_cb callback,
 			  void *context)
@@ -676,6 +834,8 @@ bool fplinux_ui_menu_open(struct fplinux_ui *owner, const char *title,
 		return false;
 	}
 	menu.open = true;
+	menu.origin = origin;
+	menu.titled = title && title[0];
 	menu.callback = callback;
 	menu.context = context;
 	menu.count = count;
@@ -798,6 +958,7 @@ static void press_options(void)
 	key.pressed = false;
 	CHECK(fplinux_ui_screens_key(ui.screens, &key));
 	CHECK(menu.open);
+	CHECK(menu.origin == FPLINUX_UI_MENU_ORIGIN_LEFT && !menu.titled);
 	fired = (struct fired){ 0 };
 }
 
@@ -834,6 +995,8 @@ static void finish(void)
 	object_count = 0;
 	memset(objects, 0, sizeof(objects));
 	legend_advance = 0;
+	strdup_fail_after = -1;
+	fail_next_label = false;
 	russian_labels = false;
 	metrics.screen_width = 240;
 	surface_width = 240;
@@ -1130,8 +1293,8 @@ static void test_application_menu_kept(void)
 	struct fplinux_ui_screen *list = open_list_options();
 
 	fplinux_ui_menu_close(&ui);
-	CHECK(fplinux_ui_menu_open(&ui, "Own", &own, 1, application_chosen,
-				   NULL));
+	CHECK(fplinux_ui_menu_open(&ui, FPLINUX_UI_MENU_ORIGIN_RIGHT, "Own",
+				   &own, 1, application_chosen, NULL));
 	fplinux_ui_screen_remove_item_command(list, 1, DELETE_ID);
 	CHECK(fplinux_ui_list_delete(list, 0));
 	CHECK(menu.open && menu.callback == application_chosen);
@@ -1141,7 +1304,8 @@ static void test_application_menu_kept(void)
 /*
  * fplinux_ui_screen_get_content_size() follows the surface: below the title
  * band, the whole surface without one, an alert's box inside its margins,
- * border and padding; a resize with a menu open keeps the menu.
+ * border and padding; a resize with a menu open keeps the
+ * menu.
  */
 static void test_content_size(void)
 {
@@ -1181,6 +1345,211 @@ static void test_content_size(void)
 	finish();
 }
 
+/* Text and geometry are observed through the Canvas's public content object. */
+static lv_obj_t *find_header_text(struct fplinux_ui_screen *canvas,
+				  const char *text)
+{
+	lv_obj_t *root = geometry(fplinux_ui_canvas_object(canvas))->parent;
+
+	for (size_t i = 0; i < object_count; ++i) {
+		const struct object_geometry *object = &objects[i];
+
+		if (!object->deleted && object->parent &&
+		    geometry(object->parent)->parent == root &&
+		    !strcmp(object->text, text))
+			return (lv_obj_t *)object;
+	}
+	return NULL;
+}
+
+static lv_obj_t *header_text(struct fplinux_ui_screen *canvas, const char *text)
+{
+	lv_obj_t *label = find_header_text(canvas, text);
+
+	CHECK(label);
+	return label ? label : (lv_obj_t *)&object_storage;
+}
+
+static void test_header_status_fits_resizes_and_clears(void)
+{
+	struct fplinux_ui_screen *canvas =
+		fplinux_ui_canvas_new(&ui, "Terminal");
+	char full[] = "Ctrl+Alt+Shift  abc";
+	char compact[] = "C+A+S  abc";
+	lv_obj_t *title;
+	lv_obj_t *status;
+	lv_obj_t *content;
+	int width, height;
+
+	CHECK(canvas);
+	legend_advance = 6;
+	CHECK(fplinux_ui_screen_set_header_status(canvas, full, compact));
+	full[0] = compact[0] = '?';
+	fplinux_ui_push(&ui, canvas);
+	content = fplinux_ui_canvas_object(canvas);
+	title = header_text(canvas, "Terminal");
+	status = header_text(canvas, "Ctrl+Alt+Shift  abc");
+	CHECK(geometry(content)->y == 28 && geometry(content)->height == 292);
+	CHECK(geometry(title)->x == 4 && geometry(title)->width == 114);
+	CHECK(geometry(status)->x == 122 && geometry(status)->width == 114);
+	CHECK(geometry(status)->height == 12 && geometry(status)->y == 8);
+	CHECK(geometry(status)->long_mode == LV_LABEL_LONG_MODE_CLIP);
+	CHECK(geometry(title)->long_mode == LV_LABEL_LONG_MODE_DOTS);
+	CHECK(!geometry(title)->title_scrolling);
+	CHECK(fplinux_ui_screen_get_content_size(canvas, &width, &height));
+	CHECK(width == 240 && height == 292);
+
+	surface_width = 128;
+	fplinux_ui_screens_resize(ui.screens);
+	CHECK(!strcmp(lv_label_get_text(status), "C+A+S  abc"));
+	CHECK(geometry(title)->width == 56);
+	CHECK(geometry(status)->x == 64 && geometry(status)->width == 60);
+	CHECK(geometry(title)->x + geometry(title)->width + 4 ==
+	      geometry(status)->x);
+	CHECK(geometry(status)->x + geometry(status)->width == 124);
+	CHECK(fplinux_ui_screen_get_content_size(canvas, &width, &height));
+	CHECK(width == 128 && height == 292);
+	CHECK(geometry(content)->y == 28 && geometry(content)->height == 292);
+
+	surface_width = 240;
+	fplinux_ui_screens_resize(ui.screens);
+	CHECK(!strcmp(lv_label_get_text(status), "Ctrl+Alt+Shift  abc"));
+	CHECK(fplinux_ui_screen_set_title(
+		canvas, "An ordinary long title that needs more room"));
+	CHECK(!strcmp(lv_label_get_text(status), "C+A+S  abc"));
+	CHECK(!geometry(title)->title_scrolling);
+	CHECK(fplinux_ui_screen_set_header_status(canvas, "", NULL));
+	CHECK(!find_header_text(canvas, "C+A+S  abc"));
+	CHECK(geometry(title)->width == 232);
+	CHECK(geometry(title)->title_scrolling);
+	CHECK(geometry(content)->y == 28 && geometry(content)->height == 292);
+
+	CHECK(fplinux_ui_screen_set_header_status(canvas, "Ctrl", ""));
+	CHECK(geometry(title)->width == 232);
+	CHECK(!geometry(title)->title_scrolling);
+	CHECK(fplinux_ui_screen_set_header_status(canvas, NULL, "ignored"));
+	CHECK(geometry(title)->width == 232);
+	CHECK(geometry(title)->title_scrolling);
+	finish();
+}
+
+static void test_header_status_hidden_parent_keeps_child_header(void)
+{
+	const char *long_title = "An ordinary long title that needs more room";
+	struct fplinux_ui_screen *parent;
+	struct fplinux_ui_screen *child;
+	lv_obj_t *title;
+	lv_obj_t *status;
+	lv_obj_t *child_title;
+	lv_obj_t *parent_root;
+	lv_obj_t *child_root;
+
+	legend_advance = 6;
+	surface_width = 128;
+	parent = fplinux_ui_canvas_new(&ui, long_title);
+	child = fplinux_ui_canvas_new(&ui, "Child");
+	CHECK(parent && child);
+	fplinux_ui_push(&ui, parent);
+	title = header_text(parent, long_title);
+	CHECK(geometry(title)->title_scrolling);
+	CHECK(fplinux_ui_screen_set_header_status(parent, "Ctrl+Alt+Shift  abc",
+						  "C+A+S  abc"));
+	status = header_text(parent, "C+A+S  abc");
+	CHECK(!geometry(title)->title_scrolling);
+	fplinux_ui_push(&ui, child);
+	child_title = header_text(child, "Child");
+	parent_root = geometry(fplinux_ui_canvas_object(parent))->parent;
+	child_root = geometry(fplinux_ui_canvas_object(child))->parent;
+	CHECK(geometry(parent_root)->hidden && !geometry(child_root)->hidden);
+	CHECK(fplinux_ui_screen_set_title(parent, "Terminal"));
+	CHECK(fplinux_ui_current(&ui) == child);
+	CHECK(!strcmp(lv_label_get_text(child_title), "Child"));
+	CHECK(!strcmp(lv_label_get_text(status), "C+A+S  abc"));
+	surface_width = 240;
+	fplinux_ui_screens_resize(ui.screens);
+	CHECK(!strcmp(lv_label_get_text(status), "Ctrl+Alt+Shift  abc"));
+	CHECK(geometry(child_title)->width == 232);
+	CHECK(geometry(parent_root)->hidden && !geometry(child_root)->hidden);
+	CHECK(fplinux_ui_screen_set_title(parent, long_title));
+	CHECK(!strcmp(lv_label_get_text(status), "C+A+S  abc"));
+	CHECK(!strcmp(lv_label_get_text(child_title), "Child"));
+	CHECK(fplinux_ui_pop(&ui));
+	CHECK(fplinux_ui_current(&ui) == parent);
+	CHECK(!geometry(parent_root)->hidden);
+	CHECK(!geometry(title)->title_scrolling);
+	CHECK(geometry(title)->long_mode == LV_LABEL_LONG_MODE_DOTS);
+	CHECK(fplinux_ui_screen_set_header_status(parent, NULL, NULL));
+	CHECK(geometry(title)->title_scrolling);
+	finish();
+}
+
+static void test_header_status_without_title_and_allocation_failures(void)
+{
+	struct fplinux_ui_screen *canvas = fplinux_ui_canvas_new(&ui, NULL);
+	struct fplinux_ui_screen *alert = fplinux_ui_alert_new(
+		&ui, FPLINUX_UI_ALERT_INFO, "Note", "Text", 0);
+	lv_obj_t *content;
+	lv_obj_t *title;
+	lv_obj_t *status;
+	int width, height;
+
+	CHECK(canvas && alert);
+	legend_advance = 6;
+	content = fplinux_ui_canvas_object(canvas);
+	CHECK(fplinux_ui_screen_set_header_status(canvas, "Ready", "R"));
+	status = header_text(canvas, "Ready");
+	CHECK(geometry(geometry(status)->parent)->hidden);
+	CHECK(fplinux_ui_screen_get_content_size(canvas, &width, &height));
+	CHECK(width == 240 && height == 320);
+	CHECK(geometry(content)->y == 0 && geometry(content)->height == 320);
+	CHECK(fplinux_ui_screen_set_title(canvas, "Shell"));
+	fplinux_ui_push(&ui, canvas);
+	title = header_text(canvas, "Shell");
+	CHECK(!geometry(geometry(status)->parent)->hidden);
+	CHECK(geometry(title)->width == 198);
+
+	for (int fail_after = 0; fail_after <= 1; ++fail_after) {
+		strdup_fail_after = fail_after;
+		errno = 0;
+		CHECK(!fplinux_ui_screen_set_header_status(canvas, "Changed",
+							   "C"));
+		CHECK(errno == ENOMEM);
+		CHECK(!strcmp(lv_label_get_text(status), "Ready"));
+		CHECK(geometry(title)->width == 198);
+	}
+	strdup_fail_after = 0;
+	CHECK(fplinux_ui_screen_set_header_status(canvas, "Ready", "R"));
+	CHECK(fplinux_ui_screen_set_title(canvas, "Shell"));
+	strdup_fail_after = -1;
+	CHECK(fplinux_ui_screen_set_header_status(canvas, "Ready", NULL));
+	strdup_fail_after = 0;
+	CHECK(fplinux_ui_screen_set_header_status(canvas, "Ready", "Ready"));
+	CHECK(fplinux_ui_screen_set_header_status(canvas, NULL, NULL));
+	CHECK(geometry(title)->width == 232);
+	CHECK(!find_header_text(canvas, "Ready"));
+	strdup_fail_after = -1;
+	fail_next_label = true;
+	errno = 0;
+	CHECK(!fplinux_ui_screen_set_header_status(canvas, "New", NULL));
+	CHECK(errno == ENOMEM && geometry(title)->width == 232);
+	CHECK(!find_header_text(canvas, "New"));
+	CHECK(fplinux_ui_screen_set_title(canvas, NULL));
+	strdup_fail_after = 0;
+	CHECK(fplinux_ui_screen_set_title(canvas, NULL));
+	CHECK(fplinux_ui_screen_set_header_status(canvas, "", "ignored"));
+	CHECK(geometry(content)->y == 0 && geometry(content)->height == 320);
+	errno = 0;
+	CHECK(!fplinux_ui_screen_set_header_status(NULL, "Ready", NULL));
+	CHECK(errno == EINVAL);
+	errno = 0;
+	CHECK(!fplinux_ui_screen_set_header_status(alert, "Ready", NULL));
+	CHECK(errno == EINVAL);
+	errno = 0;
+	CHECK(!fplinux_ui_screen_set_header_status(alert, NULL, NULL));
+	CHECK(errno == EINVAL);
+	finish();
+}
+
 static void press(unsigned int code)
 {
 	struct fplinux_ui_key key = {
@@ -1199,6 +1568,102 @@ static bool legends_are(const char *left, const char *centre, const char *right)
 	return !strcmp(drawn.legends[0], left) &&
 	       !strcmp(drawn.legends[1], centre) &&
 	       !strcmp(drawn.legends[2], right);
+}
+
+/* Runtime image resources are outside this command/callback harness. */
+const void *fplinux_ui_glyph(struct fplinux_ui *owner, const char *name,
+			     enum fplinux_ui_glyph_size size)
+{
+	errno = ENOENT;
+	return NULL;
+}
+
+static void test_options_keeps_back_last_and_delivers_visible_actions(void)
+{
+	const struct fplinux_ui_command commands[] = {
+		{ .id = 30, .type = FPLINUX_UI_COMMAND_BACK, .priority = -50 },
+		{ .id = 31, .type = FPLINUX_UI_COMMAND_CANCEL, .priority = -40 },
+		{ .id = 32, .type = FPLINUX_UI_COMMAND_EXIT, .priority = -30 },
+		{ .id = 33, .type = FPLINUX_UI_COMMAND_STOP, .priority = -20 },
+		{ .id = 20,
+		  .type = FPLINUX_UI_COMMAND_SCREEN,
+		  .label = "Refresh" },
+		{ .id = 21,
+		  .type = FPLINUX_UI_COMMAND_SCREEN,
+		  .label = "Details" },
+		{ .id = 34, .type = FPLINUX_UI_COMMAND_HELP, .priority = 1 },
+	};
+	const char *const expected[] = {
+		"Cancel", "Exit", "Stop", "Refresh", "Details", "Help", "Back",
+	};
+	const int ids[] = { 31, 32, 33, 20, 21, 34, 30 };
+	struct fplinux_ui_screen *screen =
+		fplinux_ui_text_box_new(&ui, "Name", "abcdef", 32);
+
+	CHECK(screen);
+	for (size_t index = 0; index < sizeof(commands) / sizeof(commands[0]);
+	     ++index)
+		CHECK(fplinux_ui_screen_add_command(screen, &commands[index]));
+	fplinux_ui_screen_set_listener(screen, on_command, NULL, NULL);
+	fplinux_ui_push(&ui, screen);
+	CHECK(legends_are("Options", "", "Clear"));
+	for (size_t choice = 0; choice < sizeof(ids) / sizeof(ids[0]);
+	     ++choice) {
+		press_options();
+		CHECK(menu.count == sizeof(expected) / sizeof(expected[0]));
+		for (size_t row = 0; row < menu.count; ++row)
+			CHECK(!strcmp(menu.texts[row], expected[row]));
+		choose(expected[choice]);
+		CHECK(fired.commands == 1 && fired.command_id == ids[choice]);
+		CHECK(!strcmp(fplinux_ui_text_box_get(screen), "abcdef"));
+	}
+	press(KEY_F14);
+	CHECK(!strcmp(fplinux_ui_text_box_get(screen), "abcde"));
+	CHECK(fired.commands == 1);
+	finish();
+}
+
+static void test_options_distinguishes_synthetic_clear_from_back(bool back)
+{
+	const struct fplinux_ui_command cancel = {
+		.id = 31,
+		.type = FPLINUX_UI_COMMAND_CANCEL,
+		.keep_visible = true,
+		.priority = -100,
+	};
+	const struct fplinux_ui_command help = {
+		.id = 34,
+		.type = FPLINUX_UI_COMMAND_HELP,
+		.priority = 1,
+	};
+	struct fplinux_ui_command early_back = back_command;
+	struct fplinux_ui_screen *screen =
+		fplinux_ui_text_box_new(&ui, "Name", "abcdef", 32);
+
+	early_back.priority = -50;
+	CHECK(screen);
+	CHECK(fplinux_ui_screen_add_command(screen, &cancel));
+	if (back)
+		CHECK(fplinux_ui_screen_add_command(screen, &early_back));
+	CHECK(fplinux_ui_screen_add_command(screen, &refresh_command));
+	CHECK(fplinux_ui_screen_add_command(screen, &help));
+	fplinux_ui_screen_set_listener(screen, on_command, NULL, NULL);
+	fplinux_ui_push(&ui, screen);
+	CHECK(legends_are("Options", "", "Cancel"));
+	press_options();
+	CHECK(menu.count == (back ? 4 : 3));
+	CHECK(!strcmp(menu.texts[0], "Refresh"));
+	CHECK(!strcmp(menu.texts[1], "Help"));
+	CHECK(!strcmp(menu.texts[2], "Clear"));
+	if (back)
+		CHECK(!strcmp(menu.texts[3], "Back"));
+	choose("Clear");
+	CHECK(!fired.commands);
+	CHECK(!strcmp(fplinux_ui_text_box_get(screen), "abcde"));
+	press(KEY_F14);
+	CHECK(fired.commands == 1 && fired.command_id == 31);
+	CHECK(!strcmp(fplinux_ui_text_box_get(screen), "abcde"));
+	finish();
 }
 
 static bool has_text(const char *text)
@@ -1507,6 +1972,36 @@ static void test_form_get_focus_errors(void)
 	finish();
 }
 
+static void test_text_box_cancels_picker_without_replacing_the_note(void)
+{
+	struct fplinux_ui_screen *box =
+		fplinux_ui_text_box_new(&ui, "Note", "hello", 0);
+	struct fplinux_ui_key symbols = {
+		.source = FPLINUX_UI_KEY_PHONE,
+		.code = KEY_NUMERIC_STAR,
+		.pressed = true,
+	};
+
+	CHECK(box);
+	fplinux_ui_push(&ui, box);
+	fplinux_ui_text_model_set_caret(&text_field.model, 2);
+	CHECK(fplinux_ui_screens_key(ui.screens, &symbols));
+	symbols.pressed = false;
+	CHECK(fplinux_ui_screens_key(ui.screens, &symbols));
+	CHECK(fplinux_ui_text_is_picker_open(&text_field));
+	CHECK(fplinux_ui_text_box_cancel_picker(box));
+	CHECK(!fplinux_ui_text_is_picker_open(&text_field));
+	CHECK(!strcmp(fplinux_ui_text_box_get(box), "hello"));
+	CHECK(fplinux_ui_text_model_caret(&text_field.model) == 2);
+	CHECK(fplinux_ui_current(&ui) == box);
+	CHECK(fplinux_ui_text_box_cancel_picker(box));
+	CHECK(fplinux_ui_text_model_caret(&text_field.model) == 2);
+	errno = 0;
+	CHECK(!fplinux_ui_text_box_cancel_picker(NULL));
+	CHECK(errno == EINVAL);
+	finish();
+}
+
 static void test_hidden_text_box_stops_clear_repeat(void)
 {
 	struct fplinux_ui_screen *box =
@@ -1535,9 +2030,22 @@ static void test_hidden_text_box_stops_clear_repeat(void)
 
 int main(int argc, char *argv[])
 {
-	if (argc != 2)
+	if (argc != 2 && argc != 3)
 		return EXIT_FAILURE;
 	input_languages = argv[1];
+	if (argc == 3) {
+		if (!strcmp(argv[2], "back-last"))
+			test_options_keeps_back_last_and_delivers_visible_actions();
+		else if (!strcmp(argv[2], "synthetic-clear"))
+			test_options_distinguishes_synthetic_clear_from_back(
+				true);
+		else if (!strcmp(argv[2], "no-invented-back"))
+			test_options_distinguishes_synthetic_clear_from_back(
+				false);
+		else
+			return EXIT_FAILURE;
+		return failures ? EXIT_FAILURE : EXIT_SUCCESS;
+	}
 	test_navigation_restores_current_command_and_menu_position();
 	test_navigation_pop_and_plain_push_do_not_restore_options();
 	test_navigation_item_origin_follows_inserted_row();
@@ -1552,6 +2060,9 @@ int main(int argc, char *argv[])
 	test_screen_popped();
 	test_application_menu_kept();
 	test_content_size();
+	test_header_status_fits_resizes_and_clears();
+	test_header_status_hidden_parent_keeps_child_header();
+	test_header_status_without_title_and_allocation_failures();
 	test_duration_commits_or_cancels_without_changing_form_focus();
 	test_unchanged_date_done_reports_acceptance_without_change();
 	test_retained_save_stays_on_narrow_form_with_edit_and_cancel();
@@ -1559,6 +2070,7 @@ int main(int argc, char *argv[])
 	test_form_appearance();
 	test_form_get_focus_errors();
 	test_hidden_text_box_stops_clear_repeat();
+	test_text_box_cancels_picker_without_replacing_the_note();
 	if (failures)
 		return EXIT_FAILURE;
 	puts("screen commands: OK");

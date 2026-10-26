@@ -103,15 +103,18 @@ static void open_stack_screen(struct apidemo *app, int number, bool replace)
 		{ .id = COMMAND_PUSH,
 		  .type = FPLINUX_UI_COMMAND_OK,
 		  .label = _("Push"),
-		  .priority = 0 },
+		  .priority = 0,
+		  .icon = apidemo_glyph(app, "add") },
 		{ .id = COMMAND_REPLACE,
 		  .type = FPLINUX_UI_COMMAND_SCREEN,
 		  .label = _("Replace"),
-		  .priority = 1 },
+		  .priority = 1,
+		  .icon = apidemo_glyph(app, "refresh") },
 		{ .id = COMMAND_POP,
 		  .type = FPLINUX_UI_COMMAND_SCREEN,
 		  .label = _("Pop"),
-		  .priority = 2 },
+		  .priority = 2,
+		  .icon = apidemo_glyph(app, "back") },
 	};
 	/* The top screen now: the one that pushes, or the one replaced. */
 	struct fplinux_ui_screen *top = fplinux_ui_current(app->ui);
@@ -259,7 +262,8 @@ static void open_visibility(struct apidemo *app,
 	fplinux_ui_form_append_string(
 		form, NULL,
 		_("Lock the keypad, then return: the application stays foreground. "
-		  "Home keeps it in background; reopening restores this screen. "
+		  "Home keeps it in background; Open apps resumes this screen. "
+		  "Opening API Demos from the catalogue returns to its main list. "
 		  "While hidden, it draws nothing and should pause its UI timers."));
 	show_visibility(app);
 	apidemo_add_back(form);
@@ -470,13 +474,15 @@ static void timer_ready(struct fplinux_ui *ui, int fd, short events,
 				   text);
 }
 
-static void relabel_watch(void)
+static void relabel_watch(struct apidemo *app)
 {
 	const struct fplinux_ui_command toggle = {
 		.id = COMMAND_TOGGLE,
 		.type = FPLINUX_UI_COMMAND_OK,
 		.label = watch_demo.watching ? _("Stop") : _("Start"),
 		.priority = 0,
+		.icon = apidemo_glyph(app,
+				      watch_demo.watching ? "stop" : "play"),
 	};
 
 	/* Adding the same id again replaces the command and its legend. */
@@ -499,10 +505,10 @@ static void set_watching(struct apidemo *app, bool watching)
 /* Stop watching before closing: the descriptor stays the caller's. */
 static void close_watch(struct apidemo *app)
 {
-	if (watch_demo.fd < 0)
-		return;
-	set_watching(app, false);
-	close(watch_demo.fd);
+	if (watch_demo.fd >= 0) {
+		set_watching(app, false);
+		close(watch_demo.fd);
+	}
 	watch_demo.fd = -1;
 	watch_demo.form = NULL;
 }
@@ -513,7 +519,7 @@ static void watch_command(struct fplinux_ui *ui, struct fplinux_ui_screen *form,
 	(void)form;
 	if (command_id == COMMAND_TOGGLE) {
 		set_watching(context, !watch_demo.watching);
-		relabel_watch();
+		relabel_watch(context);
 	} else if (command_id == APIDEMO_COMMAND_BACK) {
 		close_watch(context);
 		fplinux_ui_go_back(ui);
@@ -552,7 +558,7 @@ static void open_watch(struct apidemo *app, const struct apidemo_entry *entry)
 		  "it to the event loop with POLLIN. Unlike LVGL timers, the "
 		  "watch keeps running while the application is hidden."));
 	set_watching(app, true);
-	relabel_watch();
+	relabel_watch(app);
 	apidemo_add_back(form);
 	fplinux_ui_screen_set_listener(form, watch_command, NULL, app);
 	fplinux_ui_push(app->ui, form);
@@ -562,44 +568,20 @@ static void open_watch(struct apidemo *app, const struct apidemo_entry *entry)
 
 enum { COMMAND_SEND = 1 };
 
-enum title_choice {
-	TITLE_NAME,
-	TITLE_LINE_BREAK,
-	TITLE_TOO_LONG,
-	TITLE_COUNT,
-};
-
 static struct {
 	struct fplinux_ui_screen *form;
-	size_t choice;
+	size_t field;
 	size_t result;
 } title_demo;
 
 /* Sends the chosen title and shows what fplinux_ui_set_title() returned. */
 static void send_title(struct fplinux_ui *ui)
 {
-	char title[TEXT_BYTES];
+	const char *title =
+		fplinux_ui_form_get_text(title_demo.form, title_demo.field);
 	char text[TEXT_BYTES];
-	bool sent;
+	bool sent = fplinux_ui_set_title(ui, title ? title : "");
 
-	switch (fplinux_ui_form_get_choice(title_demo.form,
-					   title_demo.choice)) {
-	case TITLE_LINE_BREAK:
-		/* Control characters are refused with EINVAL. */
-		snprintf(title, sizeof(title), "%s\n%s", _("API Demos"),
-			 _("API Demos"));
-		break;
-	case TITLE_TOO_LONG:
-		/* A title is shorter than 128 bytes: ENAMETOOLONG. */
-		memset(title, 'A', sizeof(title) - 1);
-		title[sizeof(title) - 1] = '\0';
-		break;
-	case TITLE_NAME:
-	default:
-		snprintf(title, sizeof(title), "%s", _("API Demos"));
-		break;
-	}
-	sent = fplinux_ui_set_title(ui, title);
 	snprintf(text, sizeof(text), "%s%s%s", sent ? "true" : "false",
 		 sent ? "" : ", ", sent ? "" : apidemo_errno_name(errno));
 	fplinux_ui_form_set_string(title_demo.form, title_demo.result, text);
@@ -627,11 +609,6 @@ static void open_title(struct apidemo *app, const struct apidemo_entry *entry)
 		.priority = 0,
 		.icon = apidemo_glyph(app, "send"),
 	};
-	const char *choices[TITLE_COUNT] = {
-		[TITLE_NAME] = _("API Demos"),
-		[TITLE_LINE_BREAK] = _("With a line break"),
-		[TITLE_TOO_LONG] = _("256 letters"),
-	};
 	struct fplinux_ui_screen *form =
 		fplinux_ui_form_new(app->ui, _(entry->title));
 
@@ -640,17 +617,15 @@ static void open_title(struct apidemo *app, const struct apidemo_entry *entry)
 		return;
 	}
 	title_demo.form = form;
-	title_demo.choice = fplinux_ui_form_append_choice(
-		form, _("Title"), FPLINUX_UI_CHOICE_EXCLUSIVE, choices,
-		TITLE_COUNT);
+	title_demo.field = fplinux_ui_form_append_text_field(
+		form, _("Title"), _("API Demos"), TITLE_CHARS,
+		FPLINUX_UI_TEXT_ANY);
 	title_demo.result = fplinux_ui_form_append_string(
 		form, "fplinux_ui_set_title()", _("Nothing sent yet."));
 	fplinux_ui_form_append_string(
 		form, NULL,
-		_("Choose a title with OK and send it with the left soft key. "
-		  "The title names the application's window for the system; "
-		  "version 1 does not draw it, the status bar shows the time "
-		  "and the battery."));
+		_("Edit the window title, then Send. The system receives the "
+		  "title; the application's own screen title stays separate."));
 	fplinux_ui_screen_add_command(form, &send);
 	apidemo_add_back(form);
 	fplinux_ui_screen_set_listener(form, title_command, NULL, app);
@@ -697,6 +672,7 @@ static void leave_command(struct fplinux_ui *ui,
 	struct apidemo *app = context;
 
 	(void)alert;
+	app->decision = NULL;
 	if (command_id != COMMAND_LEAVE)
 		return;
 	switch (leaving) {
@@ -729,6 +705,7 @@ static void leave_list_command(struct fplinux_ui *ui,
 		.type = FPLINUX_UI_COMMAND_OK,
 		.label = _("Leave"),
 		.priority = 0,
+		.icon = apidemo_glyph(context, "exit"),
 	};
 	const struct fplinux_ui_command stay = {
 		.id = COMMAND_STAY,
@@ -756,6 +733,7 @@ static void leave_list_command(struct fplinux_ui *ui,
 	fplinux_ui_screen_add_command(alert, &leave);
 	fplinux_ui_screen_add_command(alert, &stay);
 	fplinux_ui_screen_set_listener(alert, leave_command, NULL, context);
+	((struct apidemo *)context)->decision = alert;
 	fplinux_ui_push(ui, alert);
 }
 
@@ -802,6 +780,8 @@ static void lifecycle_cleanup(struct apidemo *app)
 {
 	stop_clock();
 	close_watch(app);
+	if (screen_on_demo.on)
+		set_screen_on(app, false);
 	visibility_demo.form = NULL;
 	screen_on_demo.form = NULL;
 	title_demo.form = NULL;
@@ -809,28 +789,27 @@ static void lifecycle_cleanup(struct apidemo *app)
 
 static const struct apidemo_entry entries[] = {
 	{ N_("Screen stack"),
-	  "fplinux_ui_push · replace · pop · go_back · current · "
-	  "screen_set_data · get_data",
-	  open_stack, 0 },
+	  "fplinux_ui_push · fplinux_ui_replace · fplinux_ui_pop · fplinux_ui_go_back",
+	  open_stack, 0, N_("Push, replace and return between screens") },
 	{ N_("Visibility"),
-	  "fplinux_ui_is_visible · lifecycle · FPLINUX_UI_EVENT_VISIBILITY",
-	  open_visibility, 0 },
+	  "fplinux_ui_is_visible · FPLINUX_UI_EVENT_VISIBILITY · "
+	  "FPLINUX_UI_EVENT_ACTIVATION · FPLINUX_UI_ACTIVATION_OPEN · "
+	  "FPLINUX_UI_ACTIVATION_RESUME",
+	  open_visibility, 0, N_("Observe Home and return to the task") },
 	{ N_("Keep the screen on"), "fplinux_ui_keep_screen_on", open_screen_on,
-	  0 },
+	  0, N_("Request wakefulness while visible") },
 	{ N_("Time and timers"), "fplinux_ui_now_ms · lv_timer · time",
-	  open_clock, 0 },
+	  open_clock, 0, N_("Pause updates while hidden") },
 	{ N_("Watched descriptor"), "fplinux_ui_watch_fd · timerfd · POLLIN",
-	  open_watch, 0 },
-	{ N_("Window title"), "fplinux_ui_set_title · EINVAL · ENAMETOOLONG",
-	  open_title, 0 },
+	  open_watch, 0, N_("Watch and release a timer descriptor") },
+	{ N_("Window title"), "fplinux_ui_set_title", open_title, 0,
+	  N_("Send a title to the system") },
 	{ N_("Leaving the application"),
-	  "fplinux_ui_back · fplinux_ui_home · fplinux_ui_quit", open_leave,
-	  0 },
+	  "fplinux_ui_back · fplinux_ui_home · fplinux_ui_quit", open_leave, 0,
+	  N_("Try Home, return and ordinary closing") },
 };
 
 const struct apidemo_category apidemo_lifecycle = {
-	.title = N_("Lifecycle"),
-	.icon = APIDEMO_IMAGE_DIR "lifecycle-symbolic.png",
 	.entries = entries,
 	.count = APIDEMO_COUNT(entries),
 	.visibility = lifecycle_visibility,

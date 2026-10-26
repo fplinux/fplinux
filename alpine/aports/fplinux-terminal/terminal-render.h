@@ -20,6 +20,7 @@ bool fplinux_terminal_grid_open(struct fplinux_terminal_grid *grid,
 void fplinux_terminal_grid_close(struct fplinux_terminal_grid *grid);
 void fplinux_terminal_render(struct fplinux_terminal *terminal,
 			     const struct fplinux_terminal_grid *grid,
-			     lv_layer_t *layer, const lv_area_t *bounds);
+			     lv_layer_t *layer, const lv_area_t *bounds,
+			     lv_color_t accent, lv_color_t accent_text);
 
 #endif

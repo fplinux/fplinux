@@ -25,7 +25,7 @@ capture() {
 		"$work/build/calculator" "$screens_dir/calculator-keyboard.xkb" \
 		"$work/session.sock" "$frames"
 	read -r frame_width frame_height <"$frames/frame-size"
-	for state in calculator-pending calculator-result calculator-number calculator-error calculator-menu; do
+	for state in calculator-pending calculator-result calculator-number calculator-error calculator-limit calculator-menu; do
 		python3 "$screens_dir/rgb565-png.py" "$frame_width" "$frame_height" \
 			"$frames/$state.rgb565" "$output/$state$suffix.png"
 	done

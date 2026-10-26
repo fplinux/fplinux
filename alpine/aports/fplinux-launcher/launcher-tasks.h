@@ -5,14 +5,20 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+#include "fplinux-ui-screen.h"
 #include "fplinux-ui-session.h"
 
 struct fplinux_ui;
-struct fplinux_ui_screen;
+
+struct fplinux_launcher_task_icon {
+	const void *source;
+	enum fplinux_ui_list_icon_kind kind;
+};
 
 struct fplinux_launcher_tasks_listener {
 	/* Borrowed image source; the List copies it into the row. */
-	const void *(*icon)(const char *app_id, void *context);
+	struct fplinux_launcher_task_icon (*icon)(const char *app_id,
+						  void *context);
 	void (*view_changed)(void *context);
 	void *context;
 };

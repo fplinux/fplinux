@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "fplinux-terminal.h"
+#include "fplinux-ui-profile.h"
+#include "fplinux-ui-session.h"
 
 #include <string.h>
 
@@ -17,9 +19,18 @@ static void queue_write(struct tsm_vte *vte, const char *bytes, size_t size,
 	terminal->output_size += size;
 }
 
+static void palette_rgb(uint8_t color[3], uint32_t rgb)
+{
+	color[0] = (uint8_t)(rgb >> 16);
+	color[1] = (uint8_t)(rgb >> 8);
+	color[2] = (uint8_t)rgb;
+}
+
 bool fplinux_terminal_init(struct fplinux_terminal *terminal,
 			   unsigned int columns, unsigned int rows)
 {
+	const struct fplinux_ui_theme_spec *dark =
+		fplinux_ui_theme_spec(FPLINUX_UI_SESSION_THEME_DARK);
 	/* Shell colours stay legible on the terminal's dark background. */
 	uint8_t palette[TSM_COLOR_NUM][3] = {
 		[TSM_COLOR_BLACK] = { 0x00, 0x00, 0x00 },
@@ -38,10 +49,12 @@ bool fplinux_terminal_init(struct fplinux_terminal *terminal,
 		[TSM_COLOR_LIGHT_MAGENTA] = { 0xff, 0x8e, 0xff },
 		[TSM_COLOR_LIGHT_CYAN] = { 0x63, 0xff, 0xff },
 		[TSM_COLOR_WHITE] = { 0xff, 0xff, 0xff },
-		[TSM_COLOR_FOREGROUND] = { 0xde, 0xdf, 0xde },
-		[TSM_COLOR_BACKGROUND] = { 0x10, 0x10, 0x10 },
 	};
 
+	palette_rgb(palette[TSM_COLOR_FOREGROUND],
+		    dark->rgb[FPLINUX_UI_COLOUR_FOREGROUND]);
+	palette_rgb(palette[TSM_COLOR_BACKGROUND],
+		    dark->rgb[FPLINUX_UI_COLOUR_BACKGROUND]);
 	memset(terminal, 0, sizeof(*terminal));
 	fplinux_text_input_init(&terminal->input, NULL, NULL, false);
 	if (!columns || !rows ||

@@ -12,6 +12,7 @@ struct row {
 	char text[128];
 	char detail[128];
 	const void *icon;
+	enum fplinux_ui_list_icon_kind icon_kind;
 };
 
 struct fplinux_ui_screen {
@@ -24,7 +25,8 @@ struct fplinux_ui_screen {
 	struct fplinux_ui_command commands[8];
 	size_t command_count;
 	fplinux_ui_command_cb command;
-	fplinux_ui_change_cb changed;
+	fplinux_ui_change_cb focused;
+	void *focus_context;
 	void *context;
 };
 
@@ -40,15 +42,34 @@ struct fplinux_ui {
 };
 
 static const unsigned char notes_icon, editor_icon, generic_icon;
+static const unsigned char close_glyph;
 
-static const void *task_icon(const char *app_id, void *context)
+const void *fplinux_ui_glyph(struct fplinux_ui *ui, const char *name,
+			     enum fplinux_ui_glyph_size size)
+{
+	assert(ui && name && !strcmp(name, "exit") &&
+	       size == FPLINUX_UI_GLYPH_ROW);
+	return &close_glyph;
+}
+
+static struct fplinux_launcher_task_icon task_icon(const char *app_id,
+						   void *context)
 {
 	(void)context;
 	if (!strcmp(app_id, "org.example.notes"))
-		return &notes_icon;
+		return (struct fplinux_launcher_task_icon){
+			.source = &notes_icon,
+			.kind = FPLINUX_UI_LIST_ICON_APP_TILE,
+		};
 	if (!strcmp(app_id, "org.example.editor"))
-		return &editor_icon;
-	return &generic_icon;
+		return (struct fplinux_launcher_task_icon){
+			.source = &editor_icon,
+			.kind = FPLINUX_UI_LIST_ICON_APP_TILE,
+		};
+	return (struct fplinux_launcher_task_icon){
+		.source = &generic_icon,
+		.kind = FPLINUX_UI_LIST_ICON_IMAGE,
+	};
 }
 
 static void view_changed(void *context)
@@ -128,8 +149,16 @@ void fplinux_ui_screen_set_listener(struct fplinux_ui_screen *screen,
 				    fplinux_ui_change_cb change, void *context)
 {
 	screen->command = command;
-	screen->changed = change;
+	assert(!change);
 	screen->context = context;
+}
+
+void fplinux_ui_list_set_focus_listener(struct fplinux_ui_screen *list,
+					fplinux_ui_change_cb focus,
+					void *context)
+{
+	list->focused = focus;
+	list->focus_context = context;
 }
 
 bool fplinux_ui_screen_add_command(struct fplinux_ui_screen *screen,
@@ -200,10 +229,12 @@ size_t fplinux_ui_list_append(struct fplinux_ui_screen *screen,
 }
 
 bool fplinux_ui_list_set_icon(struct fplinux_ui_screen *screen, size_t index,
-			      const void *icon)
+			      const void *icon,
+			      enum fplinux_ui_list_icon_kind kind)
 {
 	assert(index < screen->count);
 	screen->rows[index].icon = icon;
+	screen->rows[index].icon_kind = kind;
 	return true;
 }
 
@@ -254,8 +285,8 @@ static void focus_row(struct fplinux_ui *ui, size_t index)
 	struct fplinux_ui_screen *screen = fplinux_ui_current(ui);
 
 	fplinux_ui_list_set_focused(screen, index);
-	assert(screen->changed);
-	screen->changed(ui, screen, index, screen->context);
+	assert(screen->focused);
+	screen->focused(ui, screen, index, screen->focus_context);
 }
 
 static void snapshot(struct fplinux_launcher_tasks *tasks,
@@ -405,9 +436,14 @@ static void test_icons(struct fplinux_ui *ui,
 	fplinux_launcher_tasks_open(tasks);
 	snapshot(tasks, 202);
 	struct fplinux_ui_screen *list = fplinux_ui_current(ui);
+	const struct fplinux_ui_command *close_command =
+		find_command(list, FPLINUX_UI_COMMAND_SCREEN);
 
+	assert(close_command && close_command->icon == &close_glyph);
 	assert(list->rows[0].icon == &notes_icon);
 	assert(list->rows[1].icon == &editor_icon);
+	assert(list->rows[0].icon_kind == FPLINUX_UI_LIST_ICON_APP_TILE);
+	assert(list->rows[1].icon_kind == FPLINUX_UI_LIST_ICON_APP_TILE);
 	struct fplinux_ui_session_message message = {
 		.type = FPLINUX_UI_SESSION_TASKS,
 		.has_tasks = true,
@@ -424,6 +460,49 @@ static void test_icons(struct fplinux_ui *ui,
 	assert(!strcmp(list->rows[0].text, "Draft"));
 	assert(list->rows[0].icon == &editor_icon);
 	assert(list->rows[1].icon == &generic_icon);
+	assert(list->rows[0].icon_kind == FPLINUX_UI_LIST_ICON_APP_TILE);
+	assert(list->rows[1].icon_kind == FPLINUX_UI_LIST_ICON_IMAGE);
+}
+
+static void test_localized_names_keep_focus_and_reach_confirmation(
+	struct fplinux_ui *ui, struct fplinux_launcher_tasks *tasks)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_TASKS,
+		.has_tasks = true,
+		.task_count = 2,
+		.tasks = {
+			{ .app_id = "org.example.notes", .title = "Notes",
+			  .lifecycle = FPLINUX_UI_SESSION_BACKGROUND, .token = 101 },
+			{ .app_id = "org.fplinux.settings", .title = "Настройки",
+			  .lifecycle = FPLINUX_UI_SESSION_BACKGROUND, .token = 202 },
+		},
+	};
+
+	fplinux_launcher_tasks_open(tasks);
+	assert(fplinux_launcher_tasks_receive(tasks, &message));
+	focus_row(ui, 1);
+	struct fplinux_ui_screen *list = fplinux_ui_current(ui);
+
+	assert(!strcmp(list->rows[1].text, "Настройки"));
+	message.tasks[1] = message.tasks[0];
+	message.tasks[0] = (struct fplinux_ui_session_task){
+		.app_id = "org.fplinux.settings",
+		.title = "Settings",
+		.lifecycle = FPLINUX_UI_SESSION_BACKGROUND,
+		.token = 202,
+	};
+	assert(fplinux_launcher_tasks_receive(tasks, &message));
+	assert(list->focus == 0);
+	assert(!strcmp(list->rows[0].text, "Settings"));
+	invoke(ui, FPLINUX_UI_COMMAND_SCREEN);
+	assert(!strcmp(fplinux_ui_current(ui)->text,
+		       "Close Settings? Unsaved changes may be lost."));
+	alert_response(ui, FPLINUX_UI_COMMAND_OK);
+	assert(ui->sent_count == 3);
+	assert(ui->sent[1].type == FPLINUX_UI_SESSION_CLOSE_TASK);
+	assert(!strcmp(ui->sent[1].app_id, "org.fplinux.settings"));
+	assert(ui->sent[1].token == 202);
 }
 
 static void test_interruptions(struct fplinux_ui *ui,
@@ -480,6 +559,9 @@ int main(int argc, char **argv)
 		test_refresh(&ui, &tasks);
 	else if (!strcmp(argv[1], "icons"))
 		test_icons(&ui, &tasks);
+	else if (!strcmp(argv[1], "localized-names"))
+		test_localized_names_keep_focus_and_reach_confirmation(&ui,
+								       &tasks);
 	else if (!strcmp(argv[1], "interruptions"))
 		test_interruptions(&ui, &tasks);
 	else if (!strcmp(argv[1], "errors"))

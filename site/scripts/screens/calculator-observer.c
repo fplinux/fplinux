@@ -5,6 +5,8 @@
 #include <errno.h>
 #include <fplinux/fplinux-ui-prefs.h>
 #include <fplinux/fplinux-ui-screen.h>
+#include <fplinux/fplinux-utf8.h>
+#include <fplinux/fplinux-language.h>
 #include <lvgl/lvgl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -14,6 +16,16 @@
 
 void __real_lv_label_set_text(lv_obj_t *label, const char *text);
 
+static bool is_status(const char *text)
+{
+	return !strcmp(text, "Divide by zero") ||
+	       !strcmp(text, "Number too large") ||
+	       !strcmp(text, "Maximum 12 digits") ||
+	       !strcmp(text, "Деление на ноль") ||
+	       !strcmp(text, "Переполнение") ||
+	       !strcmp(text, "Не более 12 цифр");
+}
+
 /* Observe the real label after its text and font have reached LVGL. */
 void __wrap_lv_label_set_text(lv_obj_t *label, const char *text)
 {
@@ -22,10 +34,13 @@ void __wrap_lv_label_set_text(lv_obj_t *label, const char *text)
 	const lv_font_t *font;
 	lv_obj_t *parent;
 	lv_point_t size;
+	const unsigned char *next;
+	const unsigned char *end;
 
 	__real_lv_label_set_text(label, text);
 	if (!descriptor || !text || !text[0] ||
-	    (strcmp(text, "Error") &&
+	    (strcmp(text, "Error") && strcmp(text, "Ошибка") &&
+	     !is_status(text) &&
 	     strspn(text, "0123456789.,-eE") != strlen(text)))
 		return;
 	assert(strlen(text) < sizeof(observation.text));
@@ -33,16 +48,24 @@ void __wrap_lv_label_set_text(lv_obj_t *label, const char *text)
 	parent = lv_obj_get_parent(label);
 	font = lv_obj_get_style_text_font(label, LV_PART_MAIN);
 	assert(parent && font);
-	for (size_t index = 0; text[index]; ++index) {
+	next = (const unsigned char *)text;
+	end = next + strlen(text);
+	while (next < end) {
 		lv_font_glyph_dsc_t glyph;
+		uint32_t character;
 
-		assert(lv_font_get_glyph_dsc(font, &glyph,
-					     (unsigned char)text[index],
-					     (unsigned char)text[index + 1]));
+		assert(fplinux_utf8_next(&next, end, &character));
+		assert(lv_font_get_glyph_dsc(font, &glyph, character, 0));
 	}
 	lv_text_get_size(&size, text, font, 0, 0, LV_COORD_MAX,
 			 LV_TEXT_FLAG_NONE);
 	strcpy(observation.text, text);
+	observation.kind = is_status(text) ? CALCULATOR_STATUS :
+					     CALCULATOR_NUMBER;
+	if (lv_obj_get_child_count(parent) &&
+	    lv_obj_check_type(lv_obj_get_child(parent, 0), &lv_label_class))
+		snprintf(observation.detail, sizeof(observation.detail), "%s",
+			 lv_label_get_text(lv_obj_get_child(parent, 0)));
 	observation.width = lv_obj_get_width(label);
 	observation.height = lv_obj_get_height(label);
 	observation.text_width = size.x;
@@ -62,12 +85,49 @@ struct fplinux_storage_result
 __wrap_fplinux_ui_prefs_save(struct fplinux_ui_prefs *prefs)
 {
 	const char *gate = getenv("FPLINUX_CALCULATOR_SAVE_FAILURE");
+	FILE *file = gate ? fopen(gate, "r") : NULL;
+	int kind;
 
-	if (gate && access(gate, F_OK) == 0)
+	if (file) {
+		kind = fgetc(file);
+		assert(!fclose(file));
+		if (kind == 's') {
+			struct fplinux_storage_result saved =
+				__real_fplinux_ui_prefs_save(prefs);
+
+			assert(saved.state == FPLINUX_STORAGE_DURABLE);
+			return (struct fplinux_storage_result){
+				.state = FPLINUX_STORAGE_PUBLISHED_UNSYNCED,
+				.error = EIO,
+			};
+		}
 		return (struct fplinux_storage_result){
 			.state = FPLINUX_STORAGE_UNPUBLISHED, .error = ENOSPC
 		};
+	}
 	return __real_fplinux_ui_prefs_save(prefs);
+}
+
+char *__real_libintl_bindtextdomain(const char *domain, const char *directory);
+
+char *__wrap_libintl_bindtextdomain(const char *domain, const char *directory)
+{
+	const char *catalogues = getenv("FPLINUX_UI_LOCALE_DIRECTORY");
+
+	return __real_libintl_bindtextdomain(domain, catalogues ? catalogues :
+								  directory);
+}
+
+bool __real_fplinux_language_load(const char *directory, const char *code,
+				  struct fplinux_language *language);
+
+bool __wrap_fplinux_language_load(const char *directory, const char *code,
+				  struct fplinux_language *language)
+{
+	const char *languages = getenv("FPLINUX_CALCULATOR_LANGUAGE_DIRECTORY");
+
+	return __real_fplinux_language_load(languages ? languages : directory,
+					    code, language);
 }
 
 struct fplinux_ui_screen *

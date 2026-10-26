@@ -15,9 +15,7 @@
 #include <string.h>
 
 /*
- * Every documented base and modifier combination. The same table drives
- * TextBox and raw-field demos, so each API shows PASSWORD, UNEDITABLE and
- * both together for ANY, NUMERIC, DECIMAL and PHONE.
+ * Canvas fields can combine PASSWORD and UNEDITABLE with each base type.
  */
 static const struct {
 	enum fplinux_ui_text_constraint constraint;
@@ -71,23 +69,10 @@ static unsigned int count_characters(const char *text)
 enum {
 	COMMAND_SHOW = 1,
 	COMMAND_SAMPLE,
-	COMMAND_LONG,
-	COMMAND_TYPE,
-	COMMAND_LETTERS,
-	COMMAND_NUMBER,
-	COMMAND_CLEAR_TEXT,
 };
 
 /* The limit of the box with a counter. */
 #define BOX_LIMIT 160
-/* The limit of the box whose type changes. */
-#define TYPED_LIMIT 20
-
-/* The type of the box on show, for the listener. */
-static struct {
-	size_t type;
-} box_state;
-
 /* The string belongs to the box and changes with its text: copy to keep. */
 static void show_box_text(struct apidemo *app, struct fplinux_ui_screen *box)
 {
@@ -98,51 +83,6 @@ static void show_box_text(struct apidemo *app, struct fplinux_ui_screen *box)
 		      ngettext("%1$u character:\n%2$s",
 			       "%1$u characters:\n%2$s", count),
 		      count, text ? text : "");
-}
-
-/* One character too many: E2BIG, and the box keeps its text. */
-static void set_long_text(struct apidemo *app, struct fplinux_ui_screen *box)
-{
-	char text[BOX_LIMIT + 2];
-
-	memset(text, 'a', BOX_LIMIT + 1);
-	text[BOX_LIMIT + 1] = '\0';
-	if (fplinux_ui_text_box_set(box, text)) {
-		apidemo_show(app, _("Text set"), _("The box took the text."));
-		return;
-	}
-	apidemo_showf(app, _("Not set"),
-		      ngettext("%s: longer than the limit of %d character.",
-			       "%s: longer than the limit of %d characters.",
-			       BOX_LIMIT),
-		      apidemo_errno_name(errno), BOX_LIMIT);
-}
-
-/* A text that the box's type may refuse with EINVAL. */
-static void set_typed_text(struct apidemo *app, struct fplinux_ui_screen *box,
-			   const char *text)
-{
-	if (fplinux_ui_text_box_set(box, text))
-		return;
-	apidemo_showf(app, _("Not set"), _("%1$s: %2$s takes no “%3$s”."),
-		      apidemo_errno_name(errno), types[box_state.type].name,
-		      text);
-}
-
-/* The next type; a text that does not suit it keeps the old one. */
-static void next_box_type(struct apidemo *app, struct fplinux_ui_screen *box)
-{
-	size_t next = (box_state.type + 1) % APIDEMO_COUNT(types);
-
-	if (!fplinux_ui_text_box_set_constraint(box, types[next].constraint)) {
-		apidemo_showf(app, _("Type kept"),
-			      _("%1$s: the text does not suit %2$s. Clear it "
-				"and try again."),
-			      apidemo_errno_name(errno), types[next].name);
-		return;
-	}
-	box_state.type = next;
-	fplinux_ui_screen_set_title(box, types[next].name);
 }
 
 static void box_command(struct fplinux_ui *ui, struct fplinux_ui_screen *box,
@@ -163,32 +103,16 @@ static void box_command(struct fplinux_ui *ui, struct fplinux_ui_screen *box,
 				   "starts a new one.")))
 			apidemo_error(app, "fplinux_ui_text_box_set");
 		break;
-	case COMMAND_LONG:
-		set_long_text(app, box);
-		break;
-	case COMMAND_TYPE:
-		next_box_type(app, box);
-		break;
-	case COMMAND_LETTERS:
-		set_typed_text(app, box, "abc");
-		break;
-	case COMMAND_NUMBER:
-		set_typed_text(app, box, "-12.5");
-		break;
-	case COMMAND_CLEAR_TEXT:
-		/* The application can replace text even with UNEDITABLE set. */
-		if (!fplinux_ui_text_box_set(box, ""))
-			apidemo_error(app, "fplinux_ui_text_box_set");
-		break;
 	default:
 		break;
 	}
 }
 
-/* Adds SCREEN commands with these ids and labels, in priority order. */
-static void add_screen_commands(struct fplinux_ui_screen *screen,
+/* Adds SCREEN commands with their domain glyphs, in priority order. */
+static void add_screen_commands(struct apidemo *app,
+				struct fplinux_ui_screen *screen,
 				const int *ids, const char *const *labels,
-				size_t count)
+				const char *const *glyphs, size_t count)
 {
 	for (size_t i = 0; i < count; i++) {
 		const struct fplinux_ui_command command = {
@@ -196,62 +120,31 @@ static void add_screen_commands(struct fplinux_ui_screen *screen,
 			.type = FPLINUX_UI_COMMAND_SCREEN,
 			.label = _(labels[i]),
 			.priority = (int)i,
+			.icon = apidemo_glyph(app, glyphs[i]),
 		};
 
 		fplinux_ui_screen_add_command(screen, &command);
 	}
 }
 
-/*
- * variant is the limit: a counter such as "Abc 0/160" with one, none with 0.
- * While the box holds text the right soft key is Clear, else Back.
- */
+/* The editor has a 160-character counter and the runtime's Clear/Back. */
 static void open_box(struct apidemo *app, const struct apidemo_entry *entry)
 {
-	static const int ids[] = { COMMAND_SHOW, COMMAND_SAMPLE, COMMAND_LONG };
+	static const int ids[] = { COMMAND_SHOW, COMMAND_SAMPLE };
 	static const char *const labels[] = {
 		N_("Show"),
 		N_("Insert sample"),
-		N_("Set a long text"),
 	};
+	static const char *const glyphs[] = { "view", "add" };
 	struct fplinux_ui_screen *box = fplinux_ui_text_box_new(
-		app->ui, _(entry->title), NULL, (size_t)entry->variant);
+		app->ui, _(entry->title), NULL, BOX_LIMIT);
 
 	if (!box) {
 		apidemo_error(app, "fplinux_ui_text_box_new");
 		return;
 	}
 	apidemo_add_back(box);
-	/* Without a limit there is nothing to exceed: only Show besides Back.
-	 * While typing, the runtime offers both in Options. */
-	add_screen_commands(box, ids, labels,
-			    entry->variant ? APIDEMO_COUNT(ids) : 1);
-	fplinux_ui_screen_set_listener(box, box_command, NULL, app);
-	apidemo_push(app, box, "fplinux_ui_text_box_new");
-}
-
-/* The title names the box's type; Next type steps through all of them. */
-static void open_typed_box(struct apidemo *app,
-			   const struct apidemo_entry *entry)
-{
-	static const int ids[] = { COMMAND_TYPE, COMMAND_LETTERS,
-				   COMMAND_NUMBER, COMMAND_SHOW,
-				   COMMAND_CLEAR_TEXT };
-	static const char *const labels[] = {
-		N_("Next type"), N_("Insert letters"), N_("Insert a number"),
-		N_("Show"),	 N_("Clear text"),
-	};
-	struct fplinux_ui_screen *box = fplinux_ui_text_box_new(
-		app->ui, types[0].name, NULL, TYPED_LIMIT);
-
-	(void)entry;
-	if (!box) {
-		apidemo_error(app, "fplinux_ui_text_box_new");
-		return;
-	}
-	box_state.type = 0;
-	apidemo_add_back(box);
-	add_screen_commands(box, ids, labels, APIDEMO_COUNT(ids));
+	add_screen_commands(app, box, ids, labels, glyphs, APIDEMO_COUNT(ids));
 	fplinux_ui_screen_set_listener(box, box_command, NULL, app);
 	apidemo_push(app, box, "fplinux_ui_text_box_new");
 }
@@ -385,13 +278,15 @@ static void feed_key(struct fplinux_ui_text *field, unsigned int code)
 	fplinux_ui_text_key(field, &key);
 }
 
-static void add_screen_command(int id, const char *label, int priority)
+static void add_screen_command(int id, const char *label, int priority,
+			       const char *glyph)
 {
 	const struct fplinux_ui_command command = {
 		.id = id,
 		.type = FPLINUX_UI_COMMAND_SCREEN,
 		.label = label,
 		.priority = priority,
+		.icon = apidemo_glyph(edit.app, glyph),
 	};
 
 	fplinux_ui_screen_add_command(edit.canvas, &command);
@@ -426,12 +321,13 @@ static void sync_commands(void)
 			.label = right == RIGHT_CLEAR ? _("Clear") : NULL,
 			/* Clear/Cancel keeps RSK; a separate Back goes to Options. */
 			.priority = -2,
+			.icon = right == RIGHT_CLEAR ?
+					apidemo_glyph(edit.app, "backspace") :
+					NULL,
 		};
 		const struct fplinux_ui_command back = {
 			.id = APIDEMO_COMMAND_BACK,
 			.type = FPLINUX_UI_COMMAND_BACK,
-			/* First in Options, before the field demonstration actions. */
-			.priority = -1,
 		};
 
 		/* The same id: the command is replaced, not added. */
@@ -448,6 +344,8 @@ static void sync_commands(void)
 			.id = COMMAND_OK,
 			.type = FPLINUX_UI_COMMAND_OK,
 			.label = ok,
+			.icon = apidemo_glyph(edit.app,
+					      picker ? "add" : "enter"),
 		};
 
 		if (ok)
@@ -476,16 +374,21 @@ static void sync_commands(void)
 		if (!edit.options)
 			return;
 		if (edit.second)
-			add_screen_command(COMMAND_NEXT, _("Next field"), 0);
-		add_screen_command(COMMAND_FIELD_TYPE, _("Next type"), 1);
-		add_screen_command(COMMAND_FIELD_SAMPLE, _("Insert sample"), 2);
-		add_screen_command(COMMAND_FIELD_SHOW, _("Show"), 3);
+			add_screen_command(COMMAND_NEXT, _("Next field"), 0,
+					   "next");
+		add_screen_command(COMMAND_FIELD_TYPE, _("Next type"), 1,
+				   "keyboard");
+		add_screen_command(COMMAND_FIELD_SAMPLE, _("Insert sample"), 2,
+				   "add");
+		add_screen_command(COMMAND_FIELD_SHOW, _("Show"), 3, "view");
 		add_screen_command(COMMAND_SECOND,
 				   edit.second ? _("Remove second field") :
 						 _("Add second field"),
-				   4);
-		add_screen_command(COMMAND_FIELD_CLEAR, _("Clear text"), 5);
-		add_screen_command(COMMAND_FIELD_LIMIT, _("Toggle limit"), 6);
+				   4, edit.second ? "delete" : "add");
+		add_screen_command(COMMAND_FIELD_CLEAR, _("Clear text"), 5,
+				   "backspace");
+		add_screen_command(COMMAND_FIELD_LIMIT, _("Toggle limit"), 6,
+				   "text-size");
 	}
 }
 
@@ -694,19 +597,20 @@ static void edit_deleted(lv_event_t *event)
 static struct fplinux_ui_text *new_field(size_t index, size_t max_chars)
 {
 	const struct fplinux_ui_metrics *metrics = edit.app->metrics;
-	struct fplinux_ui_text *field = fplinux_ui_text_create(
-		edit.app->ui, edit.items[index], index == 1, max_chars);
+	struct fplinux_ui_text *field;
 	lv_obj_t *frame;
+	int width;
+	int height;
 
+	if (!fplinux_ui_screen_get_content_size(edit.canvas, &width, &height))
+		return NULL;
+	field = fplinux_ui_text_create(edit.app->ui, edit.items[index],
+				       index == 1, max_chars);
 	if (!field)
 		return NULL;
 	frame = fplinux_ui_text_object(field);
 	lv_obj_set_width(frame, lv_pct(100));
-	lv_obj_set_style_max_height(frame,
-				    fplinux_ui_height(edit.app->ui) -
-					    metrics->header_height -
-					    2 * metrics->spacing,
-				    0);
+	lv_obj_set_style_max_height(frame, height - 2 * metrics->spacing, 0);
 	/* A new field takes the focus: give it back until it is chosen. */
 	fplinux_ui_text_set_focused(field, false);
 	return field;
@@ -795,7 +699,7 @@ static void create_item(size_t index)
 
 /*
  * A column that scrolls when the fields do not fit, laid out from the
- * metrics as a form is: margin at the left, the gutter at the right for
+ * metrics as a form is: equal margins and room only when needed for
  * the scroll indicator, spacing between the parts.
  */
 static void open_fields(struct apidemo *app, const struct apidemo_entry *entry)
@@ -814,7 +718,7 @@ static void open_fields(struct apidemo *app, const struct apidemo_entry *entry)
 	lv_obj_remove_style_all(column);
 	lv_obj_set_size(column, lv_pct(100), lv_pct(100));
 	lv_obj_set_style_pad_left(column, metrics->margin, 0);
-	lv_obj_set_style_pad_right(column, metrics->gutter, 0);
+	lv_obj_set_style_pad_right(column, metrics->margin, 0);
 	lv_obj_set_style_pad_ver(column, metrics->spacing, 0);
 	lv_obj_set_style_pad_row(column, metrics->spacing, 0);
 	lv_obj_set_flex_flow(column, LV_FLEX_FLOW_COLUMN);
@@ -838,7 +742,7 @@ static void open_fields(struct apidemo *app, const struct apidemo_entry *entry)
 	}
 	/* RIGHT_NONE and options false: the first sync adds every command. */
 	fplinux_ui_screen_set_listener(canvas, edit_command, NULL, app);
-	fplinux_ui_canvas_set_key_filter(canvas, edit_filter, NULL);
+	fplinux_ui_screen_set_key_filter(canvas, edit_filter, NULL);
 	fplinux_ui_canvas_set_key_handler(canvas, edit_key, NULL);
 	fplinux_ui_canvas_set_key_repeat(canvas,
 					 FPLINUX_UI_CANVAS_REPEAT_KEYMAP);
@@ -849,25 +753,20 @@ static void open_fields(struct apidemo *app, const struct apidemo_entry *entry)
 }
 
 static const struct apidemo_entry entries[] = {
-	{ N_("Limited text box"),
-	  "fplinux_ui_text_box_new · max_chars 160 · _get · _set · E2BIG",
-	  open_box, BOX_LIMIT },
-	{ N_("Unlimited text box"), "fplinux_ui_text_box_new · max_chars 0",
-	  open_box, 0 },
-	{ N_("Text box types"),
-	  "fplinux_ui_text_box_set_constraint · FPLINUX_UI_TEXT_*",
-	  open_typed_box, 0 },
+	{ N_("Text editor"),
+	  "fplinux_ui_text_box_new · fplinux_ui_text_box_get · "
+	  "fplinux_ui_text_box_set · max_chars",
+	  open_box, 0, N_("Edit several lines with a character limit") },
 	{ N_("Read-only box"),
 	  "fplinux_ui_text_box_set_constraint · FPLINUX_UI_TEXT_UNEDITABLE",
-	  open_viewer, 0 },
+	  open_viewer, 0, N_("Read and scroll a document") },
 	{ N_("Canvas fields"),
-	  "fplinux_ui_text_create · _key · _set_focused · _delete", open_fields,
-	  0 },
+	  "fplinux_ui_text_create · fplinux_ui_text_key · "
+	  "fplinux_ui_text_set_focused · fplinux_ui_text_delete",
+	  open_fields, 0, N_("Handle text input on a Canvas") },
 };
 
 const struct apidemo_category apidemo_text = {
-	.title = N_("Text"),
-	.icon = APIDEMO_IMAGE_DIR "text-symbolic.png",
 	.entries = entries,
 	.count = APIDEMO_COUNT(entries),
 };

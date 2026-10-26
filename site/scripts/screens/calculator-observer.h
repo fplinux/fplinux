@@ -5,12 +5,14 @@
 enum calculator_observation_kind {
 	CALCULATOR_NUMBER,
 	CALCULATOR_ALERT,
+	CALCULATOR_STATUS,
 };
 
 struct calculator_number_observation {
 	enum calculator_observation_kind kind;
 	char text[256];
 	char title[128];
+	char detail[128];
 	int width;
 	int height;
 	int text_width;

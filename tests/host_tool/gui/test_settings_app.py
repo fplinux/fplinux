@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import gettext
+import os
 import platform
 import re
 from pathlib import Path
@@ -56,6 +57,7 @@ def settings_app(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 str(ROOT / "lib/fplinux/fplinux-cli.c"),
                 str(ROOT / "lib/fplinux/fplinux-ui-profile.c"),
                 str(app_object),
+                "-Wl,--wrap=fopen",
                 *gettext_link_flags(),
             ],
             name="link Settings application harness",
@@ -102,6 +104,10 @@ def assert_about_runtime_facts(output: str, scenario: str) -> None:
     system = platform.freedesktop_os_release()
     version = system.get("VERSION") or system.get("VERSION_ID")
     assert facts["System"] == system["NAME"] + (f" {version}" if version else "")
+    if system.get("BUILD_ID"):
+        assert facts["Build"] == system["BUILD_ID"]
+    else:
+        assert "Build" not in facts
     assert facts["Kernel"] == platform.release()
     alpine_release = Path("/etc/alpine-release")
     if alpine_release.exists():
@@ -121,6 +127,32 @@ def assert_about_runtime_facts(output: str, scenario: str) -> None:
     )
     total_kib = int(total_line.split()[1])
     assert total == float(f"{total_kib / 1024:.1f}")
+
+
+def test_settings_about_displays_build_id_separately_from_system_version(
+    settings_app: Path, tmp_path: Path
+) -> None:
+    """The whole About form displays the stamped release ID through the file reader."""
+    os_release = tmp_path / "os-release"
+    os_release.write_text('NAME=FPLinux\nVERSION_ID=1\nBUILD_ID="012345abcdef"\n')
+    environment = os.environ.copy()
+    environment["FPLINUX_TEST_OS_RELEASE"] = str(os_release)
+    result = run_process(
+        [
+            str(settings_app),
+            "about",
+            "0",
+            "light",
+            "/usr/share/fplinux/brand/mark-light-32.png",
+        ],
+        name="Settings About with a stamped build ID",
+        timeout=10,
+        env=environment,
+        check=True,
+    )
+    facts = dict(line.split(": ", 1) for line in result.stdout.splitlines()[:-1])
+    assert facts["System"] == "FPLinux 1"
+    assert facts["Build"] == "012345abcdef"
 
 
 def test_settings_about_keeps_runtime_facts_and_back_when_logo_is_missing(
@@ -156,6 +188,7 @@ def test_settings_russian_catalogue_translates_about_labels(tmp_path: Path) -> N
         russian = gettext.GNUTranslations(file)
     assert russian.gettext("About") == "О системе"  # noqa: RUF001 -- intentional Russian preposition.
     assert russian.gettext("System") == "Система"
+    assert russian.gettext("Build") == "Сборка"
     assert russian.gettext("Kernel") == "Ядро"
     assert russian.gettext("Free memory") == "Свободная память"
     assert russian.gettext("%s / %s\N{NO-BREAK SPACE}MiB") == "%s / %s\N{NO-BREAK SPACE}МиБ"
@@ -165,6 +198,21 @@ def test_settings_russian_catalogue_translates_about_labels(tmp_path: Path) -> N
     "scenario",
     [
         "errors",
+        "date-save-success",
+        "date-save-editing",
+        "date-save-failed",
+        "date-save-partial",
+        "date-save-not-foreground",
+        "date-close",
+        "activation-navigation",
+        "activation-date-draft",
+        "activation-date-pending-success",
+        "activation-date-pending-failed",
+        "activation-date-pending-changed",
+        "activation-choice-theme-success",
+        "activation-choice-theme-failed",
+        "activation-choice-locale-success",
+        "activation-choice-locale-failed",
         "preview-failure",
         "cancel",
         "save",

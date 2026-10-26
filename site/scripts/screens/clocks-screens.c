@@ -34,6 +34,8 @@ struct capture {
 	uint32_t redraw_serial;
 	uint32_t redraw_ack;
 	uint32_t close_serial;
+	uint32_t activation_serial;
+	uint32_t activation_ack;
 	char close_value[16];
 	unsigned int snapshots;
 	unsigned int retransmissions;
@@ -47,6 +49,7 @@ struct capture {
 
 static bool fail_directory_sync;
 static unsigned int directory_sync_failures;
+static void enter_alarm_hour(struct capture *capture, unsigned int digit);
 
 int __real_fsync(int fd);
 int __wrap_fsync(int fd);
@@ -160,6 +163,8 @@ static void pump(struct capture *capture)
 			strcpy(capture->right, message.right);
 		} else if (message.type == FPLINUX_UI_SESSION_REDRAW_ACK) {
 			capture->redraw_ack = message.serial;
+		} else if (message.type == FPLINUX_UI_SESSION_ACTIVATION_ACK) {
+			capture->activation_ack = message.serial;
 		} else if (message.type == FPLINUX_UI_SESSION_CLOSE_REPLY) {
 			assert(message.serial == capture->close_serial);
 			assert(strlen(message.value) <
@@ -255,6 +260,24 @@ static void press(struct capture *capture, unsigned int seat, unsigned int key)
 	fplinux_ui_frame_send_key(keyboard, key, true);
 	fplinux_ui_frame_send_key(keyboard, key, false);
 	pump(capture);
+}
+
+static void activate(struct capture *capture,
+		     enum fplinux_ui_session_activation activation)
+{
+	const struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_ACTIVATION,
+		.serial = ++capture->activation_serial,
+		.activation = activation,
+	};
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	assert(fplinux_ui_session_send(capture->session, &message));
+	while (capture->activation_ack != message.serial &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(capture->activation_ack == message.serial);
+	redraw(capture);
 }
 
 static void expect_request(struct capture *capture, enum clock_request_op op)
@@ -773,6 +796,240 @@ static void timer_save_acknowledgment(struct capture *capture, bool changed)
 	wait_legends(capture, "Edit", "Start", "Back");
 }
 
+static void activation_preserves_running_clocks(struct capture *capture)
+{
+	pid_t application = capture->application;
+	uint64_t timer_deadline = capture->owner.timer.deadline_ms;
+	uint64_t stopwatch_elapsed = capture->owner.stopwatch.elapsed_ms;
+	size_t laps = capture->owner.stopwatch.lap_count;
+
+	press(capture, 1, KEY_DOWN);
+	press(capture, 1, KEY_OK);
+	wait_label(capture, "00:01:29");
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_RESUME);
+	wait_label(capture, "00:01:29");
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
+	wait_label(capture, "Alarms");
+	wait_label(capture, "World clock");
+	press(capture, 1, KEY_F13);
+	wait_label(capture, "Show clock");
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_RESUME);
+	wait_label(capture, "Show clock");
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
+	wait_label_absent(capture, "Show clock");
+	assert(!capture->has_request);
+	assert(capture->application == application);
+	assert(capture->owner.timer.state == CLOCK_TIMER_RUNNING);
+	assert(capture->owner.timer.deadline_ms == timer_deadline);
+	assert(capture->owner.stopwatch.running);
+	assert(capture->owner.stopwatch.elapsed_ms == stopwatch_elapsed);
+	assert(capture->owner.stopwatch.lap_count == laps && laps == 1);
+	assert(clock_model_tick(&capture->owner, 1704067202, 3000) == CLOCK_OK);
+	/* The home keeps Timer focused, so the same row opens its ticking state. */
+	press(capture, 1, KEY_OK);
+	wait_label(capture, "00:01:28");
+	assert(capture->owner.timer.deadline_ms == timer_deadline);
+	puts("clocks-activation-navigation: OPEN returns home; RESUME keeps the timer; running clocks and laps survive");
+}
+
+static void activation_protects_alarm_draft(struct capture *capture)
+{
+	uint64_t focused;
+
+	press(capture, 1, KEY_OK);
+	press(capture, 1, KEY_OK);
+	wait_label(capture, "New alarm");
+	focus_form_item(capture, 0);
+	press(capture, 1, KEY_OK);
+	press(capture, 1, KEY_NUMERIC_0);
+	redraw(capture);
+	assert(capture->observed.editing);
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
+	wait_label(capture, "Return to the start without saving?");
+	press(capture, 1, KEY_OK);
+	wait_label_absent(capture, "Return to the start without saving?");
+	assert(capture->observed.editing &&
+	       capture->observed.focused_item == 0);
+	press(capture, 1, KEY_NUMERIC_8);
+	press(capture, 1, KEY_NUMERIC_0);
+	press(capture, 1, KEY_NUMERIC_0);
+	press(capture, 1, KEY_OK);
+	redraw(capture);
+	focused = capture->observed.focused_item;
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_RESUME);
+	assert(capture->observed.time_value == INT64_C(1704096000));
+	assert(capture->observed.focused_item == focused);
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
+	wait_label(capture, "Return to the start without saving?");
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_RESUME);
+	press(capture, 1, KEY_OK);
+	wait_label(capture, "New alarm");
+	wait_label_absent(capture, "Return to the start without saving?");
+	assert(capture->observed.time_value == INT64_C(1704096000));
+	assert(capture->observed.focused_item == focused);
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
+	press(capture, 1, KEY_F13);
+	wait_label(capture, "World clock");
+	assert(capture->owner.alarm_count == 0 && !capture->has_request);
+	puts("clocks-activation-draft: repeated OPEN keeps one Leave/Stay decision; Stay retains the draft and Leave opens home");
+}
+
+static void activation_waits_for_alarm_reply(struct capture *capture,
+					     bool failed, bool changed)
+{
+	struct fplinux_ui_session_message request;
+
+	press(capture, 1, KEY_OK);
+	press(capture, 1, KEY_OK);
+	wait_label(capture, "New alarm");
+	enter_alarm_hour(capture, KEY_NUMERIC_8);
+	press(capture, 1, KEY_F13);
+	expect_request(capture, CLOCK_REQUEST_ALARM_ADD);
+	request = capture->request;
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
+	wait_legends(capture, "Saving…", "Edit", "Cancel");
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
+	assert(capture->request.serial == request.serial);
+	assert(capture->retransmissions == 0);
+	assert(capture->observed.time_value == INT64_C(1704096000));
+	if (changed)
+		enter_alarm_hour(capture, KEY_NUMERIC_9);
+	if (failed) {
+		reply(capture, &capture->request, CLOCK_STORAGE_ERROR);
+		capture->has_request = false;
+		wait_label(capture, "Change not saved");
+		activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
+		wait_label(capture, "Change not saved");
+		press(capture, 1, KEY_F14);
+		wait_legends(capture, "Retry", "Edit", "Cancel");
+		redraw(capture);
+		wait_label(capture, "New alarm");
+		assert(capture->observed.time_fields == 1);
+		assert(capture->observed.time_value == INT64_C(1704096000));
+		assert(capture->owner.alarm_count == 0 &&
+		       !capture->has_request);
+		puts("clocks-activation-pending-failed: OPEN keeps the request and failed draft; the error remains until dismissed");
+	} else {
+		apply_request(capture);
+		assert(capture->owner.alarm_count == 1);
+		assert(capture->owner.alarms[0].spec.once_utc ==
+		       INT64_C(1704096000));
+		assert(!capture->has_request);
+		if (changed) {
+			wait_label(capture,
+				   "Return to the start without saving?");
+			press(capture, 1, KEY_OK);
+			wait_legends(capture, "Save", "Edit", "Cancel");
+			redraw(capture);
+			wait_label(capture, "Edit alarm");
+			assert(capture->observed.time_fields == 1);
+			assert(capture->observed.time_value ==
+			       INT64_C(1704099600));
+			puts("clocks-activation-pending-changed: successful older mutation keeps the newer draft behind Leave/Stay");
+		} else {
+			wait_label(capture, "World clock");
+			puts("clocks-activation-pending-success: OPEN defers home until one alarm mutation succeeds");
+		}
+	}
+}
+
+static void
+paused_timer_edit_preserves_or_replaces_countdown(struct capture *capture)
+{
+	const unsigned int nine_minutes[] = { KEY_NUMERIC_0, KEY_NUMERIC_0,
+					      KEY_NUMERIC_0, KEY_NUMERIC_9,
+					      KEY_NUMERIC_0, KEY_NUMERIC_0 };
+
+	press(capture, 1, KEY_DOWN);
+	press(capture, 1, KEY_OK);
+	wait_label(capture, "00:07:00");
+	for (unsigned int cancel = 0; cancel < 2; ++cancel) {
+		press(capture, 1, KEY_F13);
+		wait_label(capture, "Edit");
+		press(capture, 1, KEY_OK);
+		wait_label(capture, "Timer duration");
+		press(capture, 1, cancel ? KEY_F14 : KEY_F13);
+		wait_label(capture, "00:07:00");
+		assert(!capture->has_request);
+		assert(capture->owner.timer.state == CLOCK_TIMER_PAUSED);
+		assert(capture->owner.timer.remaining_ms == 420123);
+	}
+	press(capture, 1, KEY_F13);
+	press(capture, 1, KEY_OK);
+	wait_label(capture, "Timer duration");
+	enter_duration(capture, nine_minutes);
+	press(capture, 1, KEY_F13);
+	wait_label(capture,
+		   "Replace the current countdown with this duration?");
+	assert(!capture->has_request &&
+	       capture->owner.timer.remaining_ms == 420123);
+	press(capture, 1, KEY_F14);
+	wait_label(capture, "Timer duration");
+	press(capture, 1, KEY_F13);
+	wait_label(capture,
+		   "Replace the current countdown with this duration?");
+	press(capture, 1, KEY_F13);
+	expect_request(capture, CLOCK_REQUEST_TIMER_SET);
+	assert(capture->operation.seconds == 540);
+	apply_request(capture);
+	wait_label(capture, "00:09:00");
+	assert(capture->owner.timer.state == CLOCK_TIMER_STOPPED);
+	assert(capture->owner.timer.remaining_ms == 540000);
+	puts("clocks-paused-edit: unchanged Done and Cancel retain PAUSED 420123ms; replacement requires confirmation");
+}
+
+static void snoozed_alarm_and_disabled_draft(struct capture *capture,
+					     bool weekly)
+{
+	press(capture, 1, KEY_OK);
+	wait_label(capture, "Alarms");
+	wait_label(capture, "Snoozed until 00:06");
+	wait_label(capture, "00:05:00 left");
+	press(capture, 1, KEY_DOWN);
+	press(capture, 1, KEY_F13);
+	wait_label(capture, "Cancel snooze");
+	press(capture, 1, KEY_OK);
+	expect_request(capture, CLOCK_REQUEST_ALARM_CANCEL_SNOOZE);
+	assert(capture->operation.id == 1);
+	apply_request(capture);
+	wait_label_absent(capture, "Snoozed until 00:06");
+	assert(!capture->owner.alarms[0].snoozed);
+	assert(capture->owner.alarms[0].spec.enabled == weekly);
+	if (!weekly) {
+		press(capture, 1, KEY_OK);
+		wait_label(capture, "Edit alarm");
+		focus_form_item(capture, 6);
+		wait_label(capture, "Alarm state");
+		wait_label(capture, "Disabled");
+		wait_label(capture, "Off. This alarm will not ring.");
+		press(capture, 1, KEY_OK);
+		press(capture, 1, KEY_DOWN);
+		press(capture, 1, KEY_OK);
+		press(capture, 1, KEY_F14);
+		wait_label(capture, "Leave without saving?");
+		press(capture, 1, KEY_F13);
+		assert(!capture->owner.alarms[0].spec.enabled &&
+		       !capture->has_request);
+		press(capture, 1, KEY_OK);
+		wait_label(capture, "Edit alarm");
+		focus_form_item(capture, 0);
+		press(capture, 1, KEY_OK);
+		press(capture, 1, KEY_RIGHT);
+		press(capture, 1, KEY_DOWN);
+		press(capture, 1, KEY_OK);
+		press(capture, 1, KEY_F13);
+		expect_request(capture, CLOCK_REQUEST_ALARM_EDIT);
+		assert(!capture->operation.alarm.enabled);
+		assert(capture->operation.alarm.once_utc == 1704067200);
+		apply_request(capture);
+		assert(!capture->owner.alarms[0].spec.enabled);
+	}
+	puts(weekly ?
+		     "clocks-snooze-weekly: explicit cancellation retains next regular occurrence" :
+		     "clocks-snooze-once: pending reminder is visible; cancellation and disabled edits preserve Off");
+}
+
 static void prepare_missed_events(struct capture *capture)
 {
 	const struct clock_alarm_spec alarm = {
@@ -1013,6 +1270,8 @@ ordinary_close_keeps_or_discards_a_failed_draft(struct capture *capture)
 	wait_label(capture, "Change not saved");
 	wait_label(capture, "Storage input/output error");
 	prepare_ordinary_close(capture);
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
+	wait_label(capture, "Leave without saving?");
 	press(capture, 1, KEY_OK);
 	wait_close_response(capture, "cancel");
 	wait_label(capture, "New alarm");
@@ -1391,9 +1650,28 @@ static void stopwatch_actions(struct capture *capture)
 	redraw(capture);
 	press(capture, 1, KEY_F13);
 	expect_request(capture, CLOCK_REQUEST_STOPWATCH_LAP);
+	pump_for(capture, 100);
+	assert(!has_label(capture, "Lap 1 · 00:02.00"));
+	assert(capture->owner.stopwatch.lap_count == 0);
 	apply_request(capture);
 	assert(capture->owner.stopwatch.lap_count == 1);
 	assert(capture->owner.stopwatch.laps[0].elapsed_ms == 2000);
+	wait_label(capture, "Lap 1 · 00:02.00");
+	wait_label(capture, "Laps →");
+	wait_legends(capture, "Lap", "Pause", "Back");
+	press(capture, 1, KEY_RIGHT);
+	wait_label(capture, "Laps");
+	wait_label(capture, "1  00:02.00");
+	assert(capture->owner.stopwatch.running);
+	assert(!capture->has_request);
+	assert(clock_model_tick(&capture->owner, INT64_C(1704067223), 24500) ==
+	       CLOCK_OK);
+	press(capture, 1, KEY_F14);
+	wait_label(capture, "00:02.50");
+	wait_label(capture, "Lap 1 · 00:02.00");
+	wait_legends(capture, "Lap", "Pause", "Back");
+	assert(capture->owner.stopwatch.running &&
+	       capture->owner.stopwatch.lap_count == 1);
 	assert(clock_model_tick(&capture->owner, INT64_C(1704067223), 24750) ==
 	       CLOCK_OK);
 	press(capture, 1, KEY_OK);
@@ -1413,7 +1691,7 @@ static void stopwatch_actions(struct capture *capture)
 	press(capture, 1, KEY_F14);
 	wait_legends(capture, "", "Select", "Back");
 	press(capture, 1, KEY_F14);
-	puts("clocks-stopwatch: direct lap=2000ms; pause=2750ms; lap history");
+	puts("clocks-stopwatch: direct lap=2000ms; confirmed last lap; Right history keeps running; pause=2750ms");
 }
 
 static void choose_offset(struct capture *capture, unsigned int direction,
@@ -1708,6 +1986,11 @@ int main(int argc, char **argv)
 		bool localized = !strcmp(argv[7], "missed-timer-localized");
 		bool storage_controls = !strcmp(argv[7], "storage-controls");
 		bool storage_ring = !strcmp(argv[7], "storage-ring-retry");
+		bool paused_edit = !strcmp(argv[7], "paused-timer-edit");
+		bool activation_navigation =
+			!strcmp(argv[7], "activation-navigation");
+		bool snooze = !strncmp(argv[7], "snooze-", 7);
+		bool weekly = !strcmp(argv[7], "snooze-weekly");
 		bool active_confirmation =
 			!strcmp(argv[7], "active-confirm-late-ack") ||
 			!strcmp(argv[7], "active-confirm-unchanged-ack");
@@ -1716,6 +1999,46 @@ int main(int argc, char **argv)
 			prepare_missed_events(&capture);
 		if (active_confirmation)
 			prepare_confirmed_alarm(&capture);
+		if (activation_navigation) {
+			assert(clock_model_timer_set(&capture.owner, 90) ==
+			       CLOCK_OK);
+			assert(clock_model_timer_start(&capture.owner) ==
+			       CLOCK_OK);
+			assert(clock_model_stopwatch_start(&capture.owner) ==
+			       CLOCK_OK);
+			assert(clock_model_tick(&capture.owner, 1704067201,
+						2000) == CLOCK_OK);
+			assert(clock_model_stopwatch_lap(&capture.owner) ==
+			       CLOCK_OK);
+		}
+		if (paused_edit) {
+			assert(clock_model_timer_set(&capture.owner, 600) ==
+			       CLOCK_OK);
+			assert(clock_model_timer_start(&capture.owner) ==
+			       CLOCK_OK);
+			assert(clock_model_tick(&capture.owner, 1704067380,
+						180877) == CLOCK_OK);
+			assert(clock_model_timer_pause(&capture.owner) ==
+			       CLOCK_OK);
+			assert(capture.owner.timer.remaining_ms == 420123);
+		}
+		if (snooze) {
+			const struct clock_alarm_spec spec = {
+				.schedule = weekly ? CLOCK_ALARM_WEEKLY :
+						     CLOCK_ALARM_ONCE,
+				.once_utc = weekly ? 0 : 1704067260,
+				.minute = weekly ? 1 : 0,
+				.repeat_days = weekly ? 127 : 0,
+				.enabled = true,
+			};
+			assert(clock_model_alarm_add(&capture.owner, &spec,
+						     NULL) == CLOCK_OK);
+			assert(clock_model_tick(&capture.owner, 1704067260,
+						61000) == CLOCK_OK);
+			assert(clock_model_snooze(&capture.owner,
+						  capture.owner.active.id,
+						  5) == CLOCK_OK);
+		}
 		if (storage_controls || storage_ring) {
 			const struct clock_request request = {
 				.op = CLOCK_REQUEST_TIMER_SET,
@@ -1738,8 +2061,21 @@ int main(int argc, char **argv)
 			capture.owner = storage_owner.model;
 		}
 		start(&capture, argv, "Alarms");
-		if (localized)
+		if (activation_navigation)
+			activation_preserves_running_clocks(&capture);
+		else if (!strcmp(argv[7], "activation-draft"))
+			activation_protects_alarm_draft(&capture);
+		else if (!strncmp(argv[7], "activation-pending-", 19))
+			activation_waits_for_alarm_reply(
+				&capture, !strcmp(argv[7] + 19, "failed"),
+				!strcmp(argv[7] + 19, "changed"));
+		else if (localized)
 			localized_missed_events(&capture);
+		else if (paused_edit)
+			paused_timer_edit_preserves_or_replaces_countdown(
+				&capture);
+		else if (snooze)
+			snoozed_alarm_and_disabled_draft(&capture, weekly);
 		else if (active_confirmation)
 			active_confirmation_keeps_original_revision(
 				&capture,

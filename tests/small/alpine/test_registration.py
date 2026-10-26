@@ -136,7 +136,148 @@ def registered_sources(tmp_path: Path) -> Iterator[RegistrationContext]:
 class AlpineRegistrationTests:
     """Registration edits preserve unrelated APK receipts in isolated source trees."""
 
+    @pytest.mark.parametrize(
+        ("source", "affected", "staged_packages"),
+        [
+            pytest.param(
+                "alpine/aports/fplinux-libweston/presentation-completion.patch",
+                ("fplinux-libweston", "fplinux-libweston-gl"),
+                ("fplinux-libweston", "fplinux-libweston-gl"),
+                id="weston-abi-patch",
+            ),
+            pytest.param(
+                "include/fplinux/fplinux-weston-presentation.h",
+                ("fplinux-libweston", "fplinux-libweston-gl"),
+                ("fplinux-libweston", "fplinux-libweston-gl"),
+                id="weston-abi-header",
+            ),
+            pytest.param(
+                "alpine/aports/fplinux-mesa/neon-clang.patch",
+                (
+                    "fplinux-mesa",
+                    "fplinux-mesa-gbm",
+                    "fplinux-libweston",
+                    "fplinux-libweston-gl",
+                ),
+                (
+                    "fplinux-mesa",
+                    "fplinux-mesa-gbm",
+                    "fplinux-mesa-headers",
+                    "fplinux-mesa-gbm-dev",
+                ),
+                id="mesa-neon-patch",
+            ),
+        ],
+    )
+    def test_shared_graphics_edits_revoke_consumer_receipts_and_reach_aport_stages(
+        self,
+        registered_sources: RegistrationContext,
+        source: str,
+        affected: tuple[str, ...],
+        staged_packages: tuple[str, ...],
+    ) -> None:
+        """Shared graphics bytes reach both producers and invalidate only causal APKs."""
+        registered_sources.names = (
+            "fplinux-libweston",
+            "fplinux-libweston-gl",
+            "fplinux-mesa",
+            "fplinux-mesa-gbm",
+            "fplinux-present",
+        )
+        registered_sources.selected = registered_sources.names[:4]
+        for name in alpine_selection.aport_build_order(registered_sources.names):
+            registered_sources.write(
+                f"alpine/aports/{name}/APKBUILD", f"pkgname={name}\n".encode()
+            )
+            for shared in alpine_selection.shared_aport_sources(name, registered_sources.root):
+                registered_sources.write(
+                    shared.relative_to(registered_sources.root).as_posix(), b"shared input\n"
+                )
+        registered_sources.write(source, b"original graphics input\n")
+        before = registered_sources.seed_receipts()
 
+        registered_sources.write("README.md", b"updated documentation\n")
+        assert registered_sources.state() == before
+
+        changed_bytes = b"changed graphics input\n"
+        registered_sources.write(source, changed_bytes)
+        after = registered_sources.state()
+
+        for name in registered_sources.names:
+            if name in affected:
+                assert before["packages"][name]["recipe"] != after["packages"][name]["recipe"]
+                assert not after["packages"][name]["cache_hit"], name
+            else:
+                assert before["packages"][name] == after["packages"][name], name
+                assert after["packages"][name]["cache_hit"], name
+        for name in staged_packages:
+            stage = registered_sources.directory / "stages" / name
+            alpine_aports.materialize_aport_sources(name, registered_sources.root, stage)
+            assert (stage / Path(source).name).read_bytes() == changed_bytes, name
+            if name in {"fplinux-mesa-headers", "fplinux-mesa-gbm-dev"}:
+                assert (stage / "APKBUILD").read_bytes() == b"pkgname=fplinux-mesa-gbm\n"
+        assert before["rootfs"] != after["rootfs"]
+
+    @pytest.mark.parametrize(
+        ("source", "changed_bytes"),
+        [
+            pytest.param(
+                "lib/fplinux/fplinux-ui-profile.c",
+                b"unsigned int palette_background = 0x30343b;\n",
+                id="palette-source",
+            ),
+            pytest.param(
+                "include/fplinux/fplinux-ui-profile.h",
+                b"#define PROFILE_BACKGROUND 0x30343b\n",
+                id="palette-header",
+            ),
+        ],
+    )
+    def test_palette_edits_revoke_consumer_receipts_and_reach_aport_stages(
+        self, registered_sources: RegistrationContext, source: str, changed_bytes: bytes
+    ) -> None:
+        """Palette consumers stage new bytes and reject old APKs while unrelated APKs hit."""
+        consumers = (
+            "fplinux-terminal",
+            "fplinux-brightness-ui",
+            "fplinux-session",
+            "fplinux-ui",
+        )
+        unrelated = "fplinux-present"
+        registered_sources.names = (*consumers, unrelated)
+        registered_sources.selected = consumers
+        for name in alpine_selection.aport_build_order(registered_sources.names):
+            registered_sources.write(
+                f"alpine/aports/{name}/APKBUILD", f"pkgname={name}\n".encode()
+            )
+            for shared in alpine_selection.shared_aport_sources(name, registered_sources.root):
+                registered_sources.write(
+                    shared.relative_to(registered_sources.root).as_posix(), b"shared input\n"
+                )
+        registered_sources.write(
+            "lib/fplinux/fplinux-ui-profile.c",
+            b"unsigned int palette_background = 0x20242b;\n",
+        )
+        registered_sources.write(
+            "include/fplinux/fplinux-ui-profile.h", b"#define PROFILE_BACKGROUND 0x20242b\n"
+        )
+        before = registered_sources.seed_receipts()
+
+        registered_sources.write("README.md", b"updated documentation\n")
+        assert registered_sources.state() == before
+
+        registered_sources.write(source, changed_bytes)
+        after = registered_sources.state()
+
+        for name in consumers:
+            assert before["packages"][name]["recipe"] != after["packages"][name]["recipe"], name
+            assert not after["packages"][name]["cache_hit"], name
+            stage = registered_sources.directory / "stages" / name
+            alpine_aports.materialize_aport_sources(name, registered_sources.root, stage)
+            assert (stage / Path(source).name).read_bytes() == changed_bytes, name
+        assert before["packages"][unrelated] == after["packages"][unrelated]
+        assert after["packages"][unrelated]["cache_hit"]
+        assert before["rootfs"] != after["rootfs"]
 
     def test_unrelated_registration_preserves_apk_recipe_and_receipt_hit(
         self, registered_sources: RegistrationContext

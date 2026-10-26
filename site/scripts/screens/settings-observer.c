@@ -4,6 +4,7 @@
 
 #include <assert.h>
 #include <fplinux/fplinux-ui.h>
+#include <fplinux/fplinux-ui-screen.h>
 #include <libintl.h>
 #include <lvgl/lvgl.h>
 #include <stdlib.h>
@@ -101,6 +102,18 @@ void __wrap_lv_display_flush_ready(lv_display_t *display)
 	if (descriptor && application_ui && lv_display_flush_is_last(display)) {
 		observation.frame = ++completed_frames;
 		observation.theme = fplinux_ui_theme(application_ui)->kind;
+		struct fplinux_ui_screen *screen =
+			fplinux_ui_current(application_ui);
+
+		observation.date_value = fplinux_ui_form_get_date(screen, 0);
+		observation.time_value = fplinux_ui_form_get_date(screen, 1);
+		observation.focused_item = fplinux_ui_form_get_focus(screen);
+		observation.editing = fplinux_ui_form_is_editing(screen);
+		for (size_t index = 0; index < 16; ++index)
+			if (fplinux_ui_list_is_selected(
+				    fplinux_ui_current(application_ui), index))
+				observation.selection_mask |= UINT32_C(1)
+							      << index;
 		assert(strlen(fplinux_ui_locale(application_ui)) <
 		       sizeof(observation.locale));
 		strcpy(observation.locale, fplinux_ui_locale(application_ui));

@@ -11,6 +11,7 @@
  */
 {
 global:
+	fplinux_ui_alert_color;
 	fplinux_ui_alert_new;
 	fplinux_ui_alert_set_progress;
 	fplinux_ui_alert_set_text;
@@ -23,7 +24,7 @@ global:
 	fplinux_ui_back;
 	fplinux_ui_canvas_new;
 	fplinux_ui_canvas_object;
-	fplinux_ui_canvas_set_key_filter;
+	fplinux_ui_screen_set_key_filter;
 	fplinux_ui_canvas_set_key_handler;
 	fplinux_ui_canvas_set_key_repeat;
 	fplinux_ui_canvas_set_keyboard_keys;
@@ -90,6 +91,7 @@ global:
 	fplinux_ui_list_append;
 	fplinux_ui_list_delete;
 	fplinux_ui_list_delete_all;
+	fplinux_ui_list_get_first_visible;
 	fplinux_ui_list_get_focused;
 	fplinux_ui_list_insert;
 	fplinux_ui_list_invalidate;
@@ -100,6 +102,7 @@ global:
 	fplinux_ui_list_rows_inserted;
 	fplinux_ui_list_set;
 	fplinux_ui_list_set_focused;
+	fplinux_ui_list_set_focus_listener;
 	fplinux_ui_list_set_icon;
 	fplinux_ui_list_set_select_label;
 	fplinux_ui_list_set_selected;
@@ -134,6 +137,7 @@ global:
 	fplinux_ui_screen_remove_command;
 	fplinux_ui_screen_remove_item_command;
 	fplinux_ui_screen_set_data;
+	fplinux_ui_screen_set_header_status;
 	fplinux_ui_screen_set_item_listener;
 	fplinux_ui_screen_set_listener;
 	fplinux_ui_screen_set_title;
@@ -154,10 +158,12 @@ global:
 	fplinux_ui_symbol_picker_is_open;
 	fplinux_ui_symbol_picker_refresh;
 	fplinux_ui_symbol_picker_select;
+	fplinux_ui_text_box_cancel_picker;
 	fplinux_ui_text_box_get;
 	fplinux_ui_text_box_new;
 	fplinux_ui_text_box_set;
 	fplinux_ui_text_box_set_constraint;
+	fplinux_ui_text_cancel_picker;
 	fplinux_ui_text_create;
 	fplinux_ui_text_delete;
 	fplinux_ui_text_get;

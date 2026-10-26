@@ -35,6 +35,7 @@
 struct application {
 	int control;
 	bool closed;
+	bool initialized;
 	unsigned int close_requests;
 	lv_obj_t *softkeys;
 };
@@ -117,6 +118,23 @@ static void application_event(struct fplinux_ui *ui,
 		application->closed = true;
 		return;
 	}
+	if (event->type == FPLINUX_UI_EVENT_VISIBILITY) {
+		char visible = event->visible ? 'V' : 'H';
+
+		assert(write(application->control, &visible, 1) == 1);
+		return;
+	}
+	if (event->type == FPLINUX_UI_EVENT_ACTIVATION) {
+		assert(application->initialized);
+		assert(!event->session);
+		assert(event->activation == FPLINUX_UI_ACTIVATION_OPEN ||
+		       event->activation == FPLINUX_UI_ACTIVATION_RESUME);
+		paint(ui, event->activation == FPLINUX_UI_ACTIVATION_OPEN ?
+				  0x00ff00 :
+				  0x0000ff);
+		assert(write(application->control, "a", 1) == 1);
+		return;
+	}
 	if (event->type != FPLINUX_UI_EVENT_SESSION)
 		return;
 	if (event->session->type == FPLINUX_UI_SESSION_ACTIVE) {
@@ -164,9 +182,6 @@ static void create_softkeys(struct fplinux_ui *ui,
 	application->softkeys = fplinux_ui_softkey_bar_create(
 		ui, fplinux_ui_canvas_object(canvas));
 	assert(application->softkeys);
-	/* The launcher centres within the full bar, including its divider. */
-	lv_obj_set_style_pad_top(application->softkeys, -spec->divider_width,
-				 0);
 	assert(fplinux_ui_softkey_bar_set(ui, application->softkeys, "Tasks",
 					  "Menu", "Back"));
 	lv_obj_update_layout(application->softkeys);
@@ -187,6 +202,51 @@ static void create_softkeys(struct fplinux_ui *ui,
 	assert(labels[2].x2 == 231);
 }
 
+static void create_launcher_screens(struct fplinux_ui *ui,
+				    struct application *application)
+{
+	struct fplinux_ui_screen *canvas, *list, *alert;
+	lv_obj_t *status;
+	int width, height;
+
+	canvas = fplinux_ui_canvas_new(ui, NULL);
+	assert(canvas);
+	fplinux_ui_push(ui, canvas);
+	application->softkeys = fplinux_ui_softkey_bar_create(
+		ui, fplinux_ui_canvas_object(canvas));
+	assert(application->softkeys);
+	assert(fplinux_ui_softkey_bar_set(ui, application->softkeys, "Tasks",
+					  "Menu", "Back"));
+	status = lv_obj_create(fplinux_ui_canvas_object(canvas));
+	lv_obj_remove_style_all(status);
+	lv_obj_set_size(status, 240, 20);
+	lv_obj_set_style_bg_color(status, lv_color_hex(0x00ff00), 0);
+	lv_obj_set_style_bg_opa(status, LV_OPA_COVER, 0);
+	list = fplinux_ui_list_new(ui, "Open apps", FPLINUX_UI_LIST_IMPLICIT);
+	assert(list);
+	fplinux_ui_list_append(list, "Notes", NULL);
+	fplinux_ui_push(ui, list);
+	assert(fplinux_ui_screen_get_content_size(list, &width, &height));
+	/* Status 20, title 28, content 240 and legends 32 fill the display. */
+	assert(width == 240 && height == 240);
+	assert(lv_obj_is_visible(status));
+	alert = fplinux_ui_alert_new(ui, FPLINUX_UI_ALERT_ERROR, "Open apps",
+				     "Unable to close", 0);
+	assert(alert);
+	fplinux_ui_push(ui, alert);
+	assert(lv_obj_is_visible(status));
+	assert(fplinux_ui_pop(ui));
+	assert(fplinux_ui_current(ui) == list);
+	assert(lv_obj_is_visible(status));
+	assert(fplinux_ui_pop(ui));
+	assert(fplinux_ui_current(ui) == canvas);
+	assert(lv_obj_is_visible(status));
+	list = fplinux_ui_list_new(ui, "Open apps", FPLINUX_UI_LIST_IMPLICIT);
+	assert(list);
+	fplinux_ui_list_append(list, "Notes", NULL);
+	fplinux_ui_push(ui, list);
+}
+
 static void application_input(struct fplinux_ui *ui, int fd, short events,
 			      void *data)
 {
@@ -205,8 +265,18 @@ static void application_input(struct fplinux_ui *ui, int fd, short events,
 		assert(write(fd, &command, 1) == 1);
 		return;
 	}
-	if (command == 's' || command == 'u') {
-		if (command == 's')
+	if (command == 's' || command == 'u' || command == 't' ||
+	    command == 'v') {
+		if (command == 'v') {
+			struct fplinux_ui_screen *alert = fplinux_ui_alert_new(
+				ui, FPLINUX_UI_ALERT_ERROR, "Open apps",
+				"Unable to close", 0);
+
+			assert(alert);
+			fplinux_ui_push(ui, alert);
+		} else if (command == 't')
+			create_launcher_screens(ui, application);
+		else if (command == 's')
 			create_softkeys(ui, application);
 		else {
 			assert(application->softkeys);
@@ -254,8 +324,15 @@ static int run_application(int control, const char *scenario)
 	int result;
 
 	assert(ui);
-	if (!strcmp(scenario, "close-decisions") ||
-	    !strcmp(scenario, "close-forced")) {
+	if (!strcmp(scenario, "metrics")) {
+		const struct fplinux_ui_metrics *metrics =
+			fplinux_ui_metrics(ui);
+
+		assert(metrics->profile == FPLINUX_UI_PROFILE_240X320);
+		assert(metrics->margin == 8);
+		assert(metrics->scrollbar_space == 4);
+	}
+	if (!strncmp(scenario, "close-", 6)) {
 		assert(!fplinux_ui_close_reply(ui, FPLINUX_UI_CLOSE_READY) &&
 		       errno == EINVAL);
 		fplinux_ui_set_close_handler(ui, application_close,
@@ -266,6 +343,7 @@ static int run_application(int control, const char *scenario)
 	lv_refr_now(NULL);
 	fplinux_ui_watch_fd(ui, control, POLLIN, application_input,
 			    &application);
+	application.initialized = true;
 	result = fplinux_ui_run(ui);
 	fplinux_ui_close(ui);
 	assert(application.closed);
@@ -526,9 +604,9 @@ static void prepare_navigation(struct fplinux_ui *ui,
 				.text = labels[i],
 			};
 		}
-		assert(fplinux_ui_menu_open(ui, "Menu", items, 64,
-					    navigation_menu_chosen,
-					    application));
+		assert(fplinux_ui_menu_open(
+			ui, FPLINUX_UI_MENU_ORIGIN_LEFT, "Menu", items, 64,
+			navigation_menu_chosen, application));
 		break;
 	}
 	default:
@@ -657,7 +735,13 @@ static void repeat_application_input(struct fplinux_ui *ui, int fd,
 			.text = "Action",
 		};
 
-		assert(fplinux_ui_menu_open(ui, "Menu", &item, 1, NULL, NULL));
+		errno = 0;
+		assert(!fplinux_ui_menu_open(ui,
+					     (enum fplinux_ui_menu_origin) - 1,
+					     "Menu", &item, 1, NULL, NULL));
+		assert(errno == EINVAL && !fplinux_ui_menu_is_open(ui));
+		assert(fplinux_ui_menu_open(ui, FPLINUX_UI_MENU_ORIGIN_LEFT,
+					    "Menu", &item, 1, NULL, NULL));
 		break;
 	}
 	case 'B':
@@ -706,9 +790,7 @@ static void repeat_application_input(struct fplinux_ui *ui, int fd,
 		break;
 	case 'k':
 		assert(!application->picker);
-		application->picker = fplinux_ui_symbol_picker_create(
-			ui, fplinux_ui_canvas_object(canvas),
-			FPLINUX_UI_SYMBOL_PICKER_ANCHORED, 0);
+		application->picker = fplinux_ui_symbol_picker_create(ui, 0);
 		assert(application->picker);
 		assert(fplinux_ui_symbol_picker_is_open(application->picker));
 		break;
@@ -738,7 +820,7 @@ static void repeat_application_input(struct fplinux_ui *ui, int fd,
 			  .label = "Menu" },
 		};
 
-		fplinux_ui_canvas_set_key_filter(canvas, filter_canvas_key,
+		fplinux_ui_screen_set_key_filter(canvas, filter_canvas_key,
 						 application);
 		fplinux_ui_screen_set_listener(canvas, canvas_command, NULL,
 					       application);
@@ -1176,6 +1258,7 @@ static void start_keyboard_repeat(struct fplinux_ui_frame_peer *compositor,
 			    true, "a");
 	assert(initial.time_ms >= sent_at &&
 	       initial.time_ms <= repeated.time_ms);
+	assert(repeated.time_ms - initial.time_ms >= 80);
 	assert(repeated.time_ms <= fplinux_ui_frame_now_ms());
 }
 
@@ -1360,20 +1443,29 @@ static void check_phone_repeat(struct fplinux_ui_frame_peer *compositor,
 
 	application_command(compositor, control, 'e');
 	for (unsigned int i = 0; i < sizeof(arrows) / sizeof(arrows[0]); ++i) {
+		struct fplinux_ui_key previous;
+		struct fplinux_ui_key repeated;
+
 		fplinux_ui_frame_send_key(phone, arrows[i], true);
-		wait_key(compositor, control, FPLINUX_UI_KEY_PHONE, arrows[i],
-			 true, "");
-		wait_key(compositor, control, FPLINUX_UI_KEY_PHONE, arrows[i],
-			 true, "");
+		previous = wait_key(compositor, control, FPLINUX_UI_KEY_PHONE,
+				    arrows[i], true, "");
+		for (unsigned int repeat = 0; repeat < 3; ++repeat) {
+			repeated = wait_key(compositor, control,
+					    FPLINUX_UI_KEY_PHONE, arrows[i],
+					    true, "");
+			assert(repeated.time_ms - previous.time_ms >=
+			       (repeat ? 200U : 500U));
+			previous = repeated;
+		}
 		release_key(compositor, control, phone, FPLINUX_UI_KEY_PHONE,
 			    arrows[i], "");
-		assert_no_input(compositor, control, 120);
+		assert_no_input(compositor, control, 600);
 	}
 	for (unsigned int i = 0; i < sizeof(single) / sizeof(single[0]); ++i) {
 		fplinux_ui_frame_send_key(phone, single[i], true);
 		wait_key(compositor, control, FPLINUX_UI_KEY_PHONE, single[i],
 			 true, "");
-		assert_no_input(compositor, control, 240);
+		assert_no_input(compositor, control, 600);
 		fplinux_ui_frame_send_key(phone, single[i], false);
 		wait_key(compositor, control, FPLINUX_UI_KEY_PHONE, single[i],
 			 false, "");
@@ -1519,16 +1611,28 @@ static void check_repeat_cancellation(struct fplinux_ui_frame_peer *compositor,
 }
 
 static void check_repeat_pause(struct fplinux_ui_frame_peer *compositor,
-			       int control)
+			       int control, bool phone)
 {
 	struct observation observation;
 	unsigned int repeats = 0;
 	uint64_t deadline;
+	enum fplinux_ui_key_source source = phone ? FPLINUX_UI_KEY_PHONE :
+						    FPLINUX_UI_KEY_KEYBOARD;
+	unsigned int code = phone ? KEY_DOWN : KEY_A;
+	const char *text = phone ? "" : "a";
+	struct fplinux_ui_frame_keyboard *keyboard =
+		&compositor->keyboards[phone ? 1 : 0];
 
 	application_command(compositor, control, 'e');
-	start_keyboard_repeat(compositor, control);
+	if (phone) {
+		fplinux_ui_frame_send_key(keyboard, code, true);
+		wait_key(compositor, control, source, code, true, text);
+		wait_key(compositor, control, source, code, true, text);
+	} else {
+		start_keyboard_repeat(compositor, control);
+	}
 	application_command(compositor, control, 'z');
-	assert_no_input(compositor, control, 400);
+	assert_no_input(compositor, control, phone ? 800 : 400);
 	assert(write(control, "Z", 1) == 1);
 	assert(write(control, "n", 1) == 1);
 	wait_command(compositor, control, 'Z');
@@ -1538,19 +1642,16 @@ static void check_repeat_pause(struct fplinux_ui_frame_peer *compositor,
 		observation = wait_observation(compositor, control);
 		if (observation.type == OBSERVATION_COMMAND)
 			break;
-		assert_key(&observation, FPLINUX_UI_KEY_KEYBOARD, KEY_A, true,
-			   "a");
+		assert_key(&observation, source, code, true, text);
 		++repeats;
 	} while (true);
 	assert(observation.command == 'n');
-	/* Eight overdue intervals must not arrive as a catch-up burst. */
+	/* Overdue intervals must not arrive as a catch-up burst. */
 	assert(repeats <= 2);
 	if (!repeats)
-		wait_key(compositor, control, FPLINUX_UI_KEY_KEYBOARD, KEY_A,
-			 true, "a");
-	release_key(compositor, control, &compositor->keyboards[0],
-		    FPLINUX_UI_KEY_KEYBOARD, KEY_A, "a");
-	assert_no_input(compositor, control, 240);
+		wait_key(compositor, control, source, code, true, text);
+	release_key(compositor, control, keyboard, source, code, text);
+	assert_no_input(compositor, control, 600);
 }
 
 static void assert_text_key(struct fplinux_ui_frame_peer *compositor,
@@ -1612,9 +1713,9 @@ check_raw_text_cancellation(struct fplinux_ui_frame_peer *compositor,
 				if (y > bottom)
 					bottom = y;
 			}
-		/* TextBox stays at its field's Y, above the local soft-key bar. */
-		assert(left == 24 && top == 70 && right == 215 &&
-		       bottom == 249);
+		/* The 192x180 grid is centered in the launcher's 240x288 modal area. */
+		assert(left == 24 && top == 54 && right == 215 &&
+		       bottom == 233);
 		fplinux_ui_frame_send_key(phone, KEY_NUMERIC_STAR, true);
 		assert_text_key(compositor, control, KEY_NUMERIC_STAR, true,
 				"");
@@ -1752,7 +1853,7 @@ static void check_navigation_repeat(struct fplinux_ui_frame_peer *compositor,
 	       (kind == 'T' || kind == 'R' || kind == 'V' ? 64 : 0));
 	if (!strcmp(scenario, "repeat-raw-synthetic")) {
 		application_command(compositor, control, 'Y');
-		pump_duration(compositor, 240);
+		pump_duration(compositor, 600);
 		observation = application_command(compositor, control, 'q');
 		assert(observation.position == 63 && !observation.callbacks);
 		return;
@@ -1776,7 +1877,7 @@ static void check_navigation_repeat(struct fplinux_ui_frame_peer *compositor,
 	}
 	if (!strcmp(scenario, "repeat-raw-copy") ||
 	    !strcmp(scenario, "repeat-raw-pending-blur")) {
-		pump_duration(compositor, 240);
+		pump_duration(compositor, 600);
 		observation = application_command(compositor, control, 'q');
 		assert(observation.position == 63 &&
 		       observation.callbacks == 1);
@@ -1802,7 +1903,7 @@ static void check_navigation_repeat(struct fplinux_ui_frame_peer *compositor,
 	pump_duration(compositor, 120);
 	observation = application_command(compositor, control, 'q');
 	stopped = observation.position;
-	pump_duration(compositor, 200);
+	pump_duration(compositor, 600);
 	observation = application_command(compositor, control, 'q');
 	assert(observation.position == stopped);
 	if (kind == 'M') {
@@ -1816,7 +1917,7 @@ static void check_navigation_repeat(struct fplinux_ui_frame_peer *compositor,
 	    !strcmp(scenario, "repeat-raw-menu")) {
 		unsigned int callbacks = observation.callbacks;
 
-		pump_duration(compositor, 160);
+		pump_duration(compositor, 600);
 		observation = application_command(compositor, control, 'q');
 		assert(observation.callbacks == callbacks);
 		fplinux_ui_frame_send_key(phone, code, false);
@@ -1890,7 +1991,9 @@ static void check_repeat(struct fplinux_ui_frame_peer *compositor, int session,
 	else if (!strcmp(scenario, "repeat-phone"))
 		check_phone_repeat(compositor, control);
 	else if (!strcmp(scenario, "repeat-pause"))
-		check_repeat_pause(compositor, control);
+		check_repeat_pause(compositor, control, false);
+	else if (!strcmp(scenario, "repeat-phone-pause"))
+		check_repeat_pause(compositor, control, true);
 	else if (!strcmp(scenario, "repeat-text-cancel"))
 		check_raw_text_cancellation(compositor, session, control);
 	else if (!strcmp(scenario, "repeat-bounce"))
@@ -1929,6 +2032,27 @@ static void assert_colour(const struct fplinux_ui_frame_peer *compositor,
 		for (int x = 0; x < compositor->width; ++x)
 			assert(compositor->pixels[(size_t)y * compositor->width +
 						  x] == colour);
+}
+
+static void check_launcher_screens(struct fplinux_ui_frame_peer *compositor,
+				   int control)
+{
+	const char commands[] = { 't', 'v' };
+
+	for (size_t i = 0; i < sizeof(commands); ++i) {
+		unsigned int commits = compositor->commits;
+
+		fplinux_ui_frame_release_buffers(compositor);
+		assert(write(control, &commands[i], 1) == 1);
+		wait_input(compositor, control, 'a');
+		wait_commits(compositor, commits + 1);
+		/* Neither Tasks nor its alert scrim may cover the status bar. */
+		for (int y = 0; y < 20; ++y)
+			for (int x = 0; x < 240; ++x)
+				assert(compositor->pixels[(size_t)y * 240 + x] ==
+				       0x07e0);
+		assert(compositor->pixels[100 * 240] != 0x07e0);
+	}
 }
 
 static void check_exit(struct fplinux_ui_frame_peer *compositor, int session,
@@ -1974,6 +2098,16 @@ static void check_ack(struct fplinux_ui_frame_peer *compositor, int session,
 		strcpy(update.name, "grid");
 		update.battery = -1;
 		expected = FPLINUX_UI_SESSION_ACTIVE_ACK;
+	} else if (!strcmp(scenario, "activation-open") ||
+		   !strcmp(scenario, "activation-resume")) {
+		update.type = FPLINUX_UI_SESSION_ACTIVATION;
+		update.activation =
+			!strcmp(scenario, "activation-open") ?
+				FPLINUX_UI_SESSION_ACTIVATION_OPEN :
+				FPLINUX_UI_SESSION_ACTIVATION_RESUME;
+		expected = FPLINUX_UI_SESSION_ACTIVATION_ACK;
+		if (update.activation == FPLINUX_UI_SESSION_ACTIVATION_RESUME)
+			colour = 0x001f;
 	} else if (!strcmp(scenario, "error")) {
 		update.type = FPLINUX_UI_SESSION_ERROR;
 		strcpy(update.reason, "save-failed");
@@ -2317,6 +2451,7 @@ static void check_close_decisions(struct fplinux_ui_frame_peer *compositor,
 		.serial = 31,
 	};
 	int status;
+	unsigned int before;
 
 	/* A user's Back first holds the frame while the manager prepares close. */
 	assert(write(control, "b", 1) == 1);
@@ -2327,29 +2462,123 @@ static void check_close_decisions(struct fplinux_ui_frame_peer *compositor,
 	assert_close_reply(compositor, session, 31, "wait");
 	wait_commits(compositor, 2);
 	assert_colour(compositor, 0xffe0);
+	assert(wait_message(compositor, session, FPLINUX_UI_SESSION_CLOSE_ACK)
+		       .serial == 31);
 	assert(waitpid(child, &status, WNOHANG) == 0);
 	if (forced)
 		return;
 	/* A duplicate request must not save twice or stack another decision. */
+	before = compositor->commits;
 	assert(fplinux_ui_session_send(session, &prepare));
 	assert_close_reply(compositor, session, 31, "wait");
+	assert(wait_message(compositor, session, FPLINUX_UI_SESSION_CLOSE_ACK)
+		       .serial == 31);
+	wait_commits(compositor, before + 1);
 	assert(write(control, "c", 1) == 1);
 	wait_input(compositor, control, 'c');
 	assert_close_reply(compositor, session, 31, "cancel");
+	assert(wait_message(compositor, session, FPLINUX_UI_SESSION_CLOSE_ACK)
+		       .serial == 31);
+	before = compositor->commits;
 	assert(write(control, "p", 1) == 1);
 	wait_input(compositor, control, 'a');
-	wait_commits(compositor, 3);
+	wait_commits(compositor, before + 1);
 	assert_colour(compositor, 0x001f);
 	prepare.serial = 32;
+	before = compositor->commits;
 	assert(fplinux_ui_session_send(session, &prepare));
 	wait_input(compositor, control, 'w');
 	assert_close_reply(compositor, session, 32, "wait");
-	wait_commits(compositor, 4);
+	wait_commits(compositor, before + 1);
+	assert(wait_message(compositor, session, FPLINUX_UI_SESSION_CLOSE_ACK)
+		       .serial == 32);
 	assert_colour(compositor, 0xffe0);
 	assert(write(control, "r", 1) == 1);
 	wait_input(compositor, control, 'r');
 	assert_close_reply(compositor, session, 32, "ready");
 	assert(waitpid(child, &status, WNOHANG) == 0);
+}
+
+static void
+check_close_acknowledgments(struct fplinux_ui_frame_peer *compositor,
+			    int session, int control, const char *scenario)
+{
+	struct fplinux_ui_session_message prepare = {
+		.type = FPLINUX_UI_SESSION_PREPARE_CLOSE,
+		.serial = 31,
+	};
+	struct fplinux_ui_session_message appearance = {
+		.type = FPLINUX_UI_SESSION_SETTING,
+		.name = "theme",
+		.value = "dark",
+		.serial = 73,
+	};
+	struct fplinux_ui_session_message activation = {
+		.type = FPLINUX_UI_SESSION_ACTIVATION,
+		.activation = FPLINUX_UI_SESSION_ACTIVATION_OPEN,
+		.serial = 91,
+	};
+	bool appearance_first = !strcmp(scenario, "close-appearance-first");
+	bool hidden = !strcmp(scenario, "close-hidden");
+	bool activating = !strcmp(scenario, "close-activation-independent");
+	bool close_ack = false, redraw_ack = false, activation_ack = false;
+
+	compositor->release_frames = false;
+	assert(write(control, "p", 1) == 1);
+	wait_input(compositor, control, 'a');
+	wait_commits(compositor, 2);
+	assert_colour(compositor, 0x001f);
+	/* A completed old canvas must not acknowledge either new request. */
+	assert(write(control, "q", 1) == 1);
+	wait_input(compositor, control, 'a');
+	if (hidden)
+		send_visibility(compositor, session, control, false);
+	if (appearance_first)
+		assert(fplinux_ui_session_send(session, &appearance));
+	assert(fplinux_ui_session_send(session, &prepare));
+	if (!appearance_first && !hidden)
+		assert(fplinux_ui_session_send(session, &appearance));
+	if (activating)
+		assert(fplinux_ui_session_send(session, &activation));
+	if (appearance_first)
+		wait_input(compositor, control, 'a');
+	wait_input(compositor, control, 'w');
+	if (!appearance_first && !hidden)
+		wait_input(compositor, control, 'a');
+	if (activating)
+		wait_input(compositor, control, 'a');
+	assert_close_reply(compositor, session, 31, "wait");
+	assert_quiet(compositor, session, 2);
+	fplinux_ui_frame_release_buffers(compositor);
+	if (hidden) {
+		assert_quiet(compositor, session, 2);
+		send_visibility(compositor, session, control, true);
+	}
+	for (unsigned int i = 0; i < (hidden	 ? 1U :
+				      activating ? 3U :
+						   2U);
+	     ++i) {
+		struct fplinux_ui_session_message ack;
+
+		fplinux_ui_frame_wait_readable(compositor, session);
+		assert(fplinux_ui_session_receive(session, &ack) == 1);
+		if (ack.type == FPLINUX_UI_SESSION_CLOSE_ACK) {
+			assert(!close_ack && ack.serial == 31);
+			close_ack = true;
+		} else if (ack.type == FPLINUX_UI_SESSION_ACTIVATION_ACK) {
+			assert(activating && !activation_ack &&
+			       ack.serial == 91);
+			activation_ack = true;
+		} else {
+			assert(ack.type == FPLINUX_UI_SESSION_REDRAW_ACK);
+			assert(!redraw_ack && ack.serial == 73);
+			redraw_ack = true;
+		}
+	}
+	assert(close_ack && (hidden || redraw_ack));
+	assert(!activating || activation_ack);
+	assert(compositor->commits == 3);
+	assert_colour(compositor, appearance_first || hidden ? 0xffe0 : 0x07e0);
 }
 
 static void check_lazy_preferences(const char *directory)
@@ -2411,6 +2640,7 @@ int main(int argc, char **argv)
 	int audio_listener = -1;
 	pid_t child;
 	bool repeat, media, audio;
+	bool cold_activation;
 
 	assert(argc == 3 || argc == 4);
 	if (!strcmp(argv[1], "prefs-lazy")) {
@@ -2426,6 +2656,7 @@ int main(int argc, char **argv)
 	repeat = !strncmp(argv[1], "repeat-", 7);
 	media = !strncmp(argv[1], "media-", 6);
 	audio = !strncmp(argv[1], "media-audio-", 12);
+	cold_activation = !strcmp(argv[1], "activation-cold");
 	assert((repeat || audio) == (argc == 4));
 	if (repeat)
 		check_repeat_keymap(argv[3]);
@@ -2456,7 +2687,8 @@ int main(int argc, char **argv)
 	fplinux_ui_frame_init(&compositor, wayland[0], 240, 320,
 			      repeat ? argv[3] : NULL);
 	compositor.release_frames = repeat || media ||
-				    !strncmp(argv[1], "close-", 6);
+				    !strcmp(argv[1], "close-decisions") ||
+				    !strcmp(argv[1], "close-forced");
 	session = fplinux_ui_frame_accept_session(&compositor, listener);
 	wait_message(&compositor, session, FPLINUX_UI_SESSION_HELLO);
 	strcpy(config.locale, "en");
@@ -2464,13 +2696,28 @@ int main(int argc, char **argv)
 	config.audio = config.vibration =
 		media && strcmp(argv[1], "media-unsupported") != 0;
 	assert(fplinux_ui_session_send(session, &config));
+	if (cold_activation) {
+		struct fplinux_ui_session_message activation = {
+			.type = FPLINUX_UI_SESSION_ACTIVATION,
+			.activation = FPLINUX_UI_SESSION_ACTIVATION_OPEN,
+			.serial = 91,
+		};
+
+		assert(fplinux_ui_session_send(session, &activation));
+	}
 	wait_message(&compositor, session, FPLINUX_UI_SESSION_READY);
 	wait_commits(&compositor, 1);
-	assert_colour(&compositor, 0xf800);
+	assert_colour(&compositor, cold_activation ? 0x07e0 : 0xf800);
 	if (!strcmp(argv[1], "disconnect")) {
 		check_failed_exit(&compositor, session, control[0], child);
 	} else {
-		if (audio)
+		if (cold_activation) {
+			wait_input(&compositor, control[0], 'a');
+			assert(wait_message(&compositor, session,
+					    FPLINUX_UI_SESSION_ACTIVATION_ACK)
+				       .serial == 91);
+			assert(compositor.commits == 1);
+		} else if (audio)
 			check_media_audio(&compositor, audio_listener,
 					  control[0], &audio_peer,
 					  !strcmp(argv[1], "media-audio-hup"));
@@ -2480,10 +2727,13 @@ int main(int argc, char **argv)
 						      "media-lifecycle"));
 		else if (repeat)
 			check_repeat(&compositor, session, control[0], argv[1]);
-		else if (!strcmp(argv[1], "exit"))
+		else if (!strcmp(argv[1], "exit") ||
+			 !strcmp(argv[1], "metrics"))
 			check_exit(&compositor, session, control[0], child);
 		else if (!strcmp(argv[1], "softkeys"))
 			check_softkeys(&compositor, session, control[0]);
+		else if (!strcmp(argv[1], "launcher-screens"))
+			check_launcher_screens(&compositor, control[0]);
 		else if (!strcmp(argv[1], "prepare-close"))
 			check_prepare_close(&compositor, session, child);
 		else if (!strcmp(argv[1], "close-decisions") ||
@@ -2491,6 +2741,12 @@ int main(int argc, char **argv)
 			check_close_decisions(&compositor, session, control[0],
 					      child,
 					      !strcmp(argv[1], "close-forced"));
+		else if (!strcmp(argv[1], "close-ack-first") ||
+			 !strcmp(argv[1], "close-appearance-first") ||
+			 !strcmp(argv[1], "close-activation-independent") ||
+			 !strcmp(argv[1], "close-hidden"))
+			check_close_acknowledgments(&compositor, session,
+						    control[0], argv[1]);
 		else
 			check_ack(&compositor, session, control[0], argv[1]);
 		finish_application(&compositor, session, child);

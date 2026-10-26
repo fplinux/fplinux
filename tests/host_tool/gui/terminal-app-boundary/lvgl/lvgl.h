@@ -5,7 +5,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Only the object, text-measurement and timer boundary is needed here. */
+/* Only the Canvas drawing and timer boundary is needed here. */
 typedef uint32_t lv_color_t;
 typedef uint8_t lv_opa_t;
 typedef struct lv_font {
@@ -27,33 +27,8 @@ typedef struct lv_timer lv_timer_t;
 typedef void (*lv_event_cb_t)(lv_event_t *event);
 typedef void (*lv_timer_cb_t)(lv_timer_t *timer);
 
-#define LV_COORD_MAX 32767
-#define LV_TEXT_FLAG_NONE 0
 #define LV_EVENT_DRAW_MAIN 1
-#define LV_ALIGN_BOTTOM_MID 1
-#define LV_ALIGN_LEFT_MID 2
-#define LV_ALIGN_RIGHT_MID 3
-#define LV_OPA_COVER 255
-#define LV_BORDER_SIDE_TOP 1
 
-lv_obj_t *lv_obj_create(lv_obj_t *parent);
-lv_obj_t *lv_label_create(lv_obj_t *parent);
-void lv_obj_remove_style_all(lv_obj_t *object);
-void lv_obj_set_size(lv_obj_t *object, int width, int height);
-void lv_obj_align(lv_obj_t *object, int align, int x, int y);
-void lv_obj_set_style_bg_color(lv_obj_t *object, lv_color_t color,
-			       int selector);
-void lv_obj_set_style_bg_opa(lv_obj_t *object, lv_opa_t opacity, int selector);
-void lv_obj_set_style_border_color(lv_obj_t *object, lv_color_t color,
-				   int selector);
-void lv_obj_set_style_border_width(lv_obj_t *object, int width, int selector);
-void lv_obj_set_style_border_side(lv_obj_t *object, int side, int selector);
-void lv_obj_set_style_text_font(lv_obj_t *object, const lv_font_t *font,
-				int selector);
-void lv_obj_set_style_text_color(lv_obj_t *object, lv_color_t color,
-				 int selector);
-void lv_label_set_text(lv_obj_t *object, const char *text);
-const char *lv_label_get_text(const lv_obj_t *object);
 void lv_obj_set_scrollable(lv_obj_t *object, bool scrollable);
 void lv_obj_add_event_cb(lv_obj_t *object, lv_event_cb_t callback, int type,
 			 void *context);
@@ -61,8 +36,6 @@ void lv_obj_get_coords(lv_obj_t *object, lv_area_t *area);
 void lv_obj_invalidate(lv_obj_t *object);
 void *lv_event_get_user_data(lv_event_t *event);
 lv_layer_t *lv_event_get_layer(lv_event_t *event);
-void lv_text_get_size(lv_point_t *size, const char *text, const lv_font_t *font,
-		      int letter_space, int line_space, int width, int flags);
 lv_timer_t *lv_timer_create(lv_timer_cb_t callback, unsigned int period,
 			    void *context);
 void lv_timer_pause(lv_timer_t *timer);

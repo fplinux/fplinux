@@ -84,6 +84,8 @@ static void update_commands(struct fplinux_launcher_tasks *tasks)
 		.type = FPLINUX_UI_COMMAND_SCREEN,
 		.label = _("Close app"),
 		.priority = 1,
+		.icon = fplinux_ui_glyph(tasks->ui, "exit",
+					 FPLINUX_UI_GLYPH_ROW),
 	};
 
 	if (!tasks->list)
@@ -237,11 +239,14 @@ static void update_list(struct fplinux_launcher_tasks *tasks,
 		size_t row =
 			fplinux_ui_list_append(tasks->list, task->title, state);
 
-		if (tasks->listener.icon)
-			fplinux_ui_list_set_icon(
-				tasks->list, row,
+		if (tasks->listener.icon) {
+			struct fplinux_launcher_task_icon icon =
 				tasks->listener.icon(task->app_id,
-						     tasks->listener.context));
+						     tasks->listener.context);
+
+			fplinux_ui_list_set_icon(tasks->list, row, icon.source,
+						 icon.kind);
+		}
 		if (task->token == focused_token)
 			fplinux_ui_list_set_focused(tasks->list, i);
 	}
@@ -301,8 +306,8 @@ void fplinux_launcher_tasks_open(struct fplinux_launcher_tasks *tasks)
 	if (!tasks->list)
 		return;
 	fplinux_ui_screen_add_command(tasks->list, &back);
-	fplinux_ui_screen_set_listener(tasks->list, task_command, task_changed,
-				       tasks);
+	fplinux_ui_screen_set_listener(tasks->list, task_command, NULL, tasks);
+	fplinux_ui_list_set_focus_listener(tasks->list, task_changed, tasks);
 	update_list(tasks, 0);
 	fplinux_ui_push(tasks->ui, tasks->list);
 	view_changed(tasks);

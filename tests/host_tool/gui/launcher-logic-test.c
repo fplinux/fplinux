@@ -113,46 +113,39 @@ static void test_navigation(void)
 		.reveal_margin = 2,
 	};
 
-	check(fplinux_launcher_move(0, 10, 3, 2, FPLINUX_LAUNCHER_MOVE_UP) == 9,
+	check(fplinux_launcher_move(0, 10, 3, FPLINUX_LAUNCHER_MOVE_UP) == 9,
 	      "grid Up wraps from the first row into the last row");
-	check(fplinux_launcher_move(2, 10, 3, 2, FPLINUX_LAUNCHER_MOVE_UP) == 9,
+	check(fplinux_launcher_move(2, 10, 3, FPLINUX_LAUNCHER_MOVE_UP) == 9,
 	      "grid Up clamps a missing last-row column to the final app");
-	check(fplinux_launcher_move(1, 11, 3, 2, FPLINUX_LAUNCHER_MOVE_UP) ==
-		      10,
+	check(fplinux_launcher_move(1, 11, 3, FPLINUX_LAUNCHER_MOVE_UP) == 10,
 	      "grid Up preserves the column when it exists in the last row");
-	check(fplinux_launcher_move(9, 11, 3, 2, FPLINUX_LAUNCHER_MOVE_DOWN) ==
-		      0,
+	check(fplinux_launcher_move(9, 11, 3, FPLINUX_LAUNCHER_MOVE_DOWN) == 0,
 	      "grid Down wraps from the last row to the first column");
-	check(fplinux_launcher_move(10, 11, 3, 2, FPLINUX_LAUNCHER_MOVE_DOWN) ==
-		      1,
+	check(fplinux_launcher_move(10, 11, 3, FPLINUX_LAUNCHER_MOVE_DOWN) == 1,
 	      "grid Down wraps to the same first-row column");
-	check(fplinux_launcher_move(0, 10, 1, 4, FPLINUX_LAUNCHER_MOVE_UP) == 9,
-	      "list Up wraps to the final app");
-	check(fplinux_launcher_move(9, 10, 1, 4, FPLINUX_LAUNCHER_MOVE_DOWN) ==
-		      0,
-	      "list Down wraps to the first app");
-	check(fplinux_launcher_move(8, 10, 3, 2, FPLINUX_LAUNCHER_MOVE_DOWN) ==
-		      9,
+	check(fplinux_launcher_move(0, 10, 1, FPLINUX_LAUNCHER_MOVE_UP) == 9,
+	      "single-column grid Up wraps to the final app");
+	check(fplinux_launcher_move(9, 10, 1, FPLINUX_LAUNCHER_MOVE_DOWN) == 0,
+	      "single-column grid Down wraps to the first app");
+	check(fplinux_launcher_move(8, 10, 3, FPLINUX_LAUNCHER_MOVE_DOWN) == 9,
 	      "Down selects the final app in an incomplete row");
-	check(fplinux_launcher_move(2, 10, 3, 2, FPLINUX_LAUNCHER_MOVE_RIGHT) ==
-		      3,
+	check(fplinux_launcher_move(2, 10, 3, FPLINUX_LAUNCHER_MOVE_RIGHT) == 3,
 	      "grid Right advances across a row boundary");
-	check(fplinux_launcher_move(3, 10, 1, 4, FPLINUX_LAUNCHER_MOVE_RIGHT) ==
-		      7,
-	      "list Right advances one page");
-	check(fplinux_launcher_move(7, 10, 1, 4, FPLINUX_LAUNCHER_MOVE_LEFT) ==
-		      3,
-	      "list Left returns one page");
-	check(fplinux_launcher_move(0, 10, 1, 1, FPLINUX_LAUNCHER_MOVE_LEFT) ==
-		      0,
-	      "one-row list Left page stops at the first app");
-	check(fplinux_launcher_move(9, 10, 1, 1, FPLINUX_LAUNCHER_MOVE_RIGHT) ==
-		      9,
-	      "one-row list Right page stops at the final app");
-	check(fplinux_launcher_move(2, 3, 3, 2, FPLINUX_LAUNCHER_MOVE_UP) == 2,
+	for (unsigned int columns = 3; columns <= 4; ++columns) {
+		check(fplinux_launcher_move(0, 10, columns,
+					    FPLINUX_LAUNCHER_MOVE_LEFT) == 9,
+		      "grid Left wraps to the final app");
+		check(fplinux_launcher_move(9, 10, columns,
+					    FPLINUX_LAUNCHER_MOVE_RIGHT) == 0,
+		      "grid Right wraps to the first app");
+	}
+	check(fplinux_launcher_move(0, 10, 1, FPLINUX_LAUNCHER_MOVE_LEFT) == 9,
+	      "single-column grid Left wraps to the final app");
+	check(fplinux_launcher_move(9, 10, 1, FPLINUX_LAUNCHER_MOVE_RIGHT) == 0,
+	      "single-column grid Right wraps to the first app");
+	check(fplinux_launcher_move(2, 3, 3, FPLINUX_LAUNCHER_MOVE_UP) == 2,
 	      "a single grid row keeps its column on Up");
-	check(fplinux_launcher_move(2, 3, 3, 2, FPLINUX_LAUNCHER_MOVE_DOWN) ==
-		      2,
+	check(fplinux_launcher_move(2, 3, 3, FPLINUX_LAUNCHER_MOVE_DOWN) == 2,
 	      "a single grid row keeps its column on Down");
 	check(fplinux_launcher_digit_index(2, 3, 4, 10) == 9,
 	      "phone digits count from the first visible row");
@@ -178,10 +171,9 @@ static bool inside(struct fplinux_launcher_rect rect, int width, int height)
 
 static void test_geometry(void)
 {
-	static const int screens[][4] = {
-		{ 128, 128, 4, 120 }, { 128, 160, 4, 120 },
-		{ 176, 220, 6, 164 }, { 240, 320, 8, 224 },
-		{ 320, 240, 6, 308 },
+	static const int screens[][2] = {
+		{ 128, 128 }, { 128, 160 }, { 176, 220 },
+		{ 240, 320 }, { 320, 240 },
 	};
 
 	for (size_t i = 0; i < sizeof(screens) / sizeof(*screens); ++i) {
@@ -195,7 +187,6 @@ static void test_geometry(void)
 		struct fplinux_launcher_launch launch;
 		struct fplinux_launcher_scroll scroll;
 		struct fplinux_launcher_cell cell;
-		struct fplinux_launcher_row row;
 		struct fplinux_launcher_notice_box notice;
 
 		check(spec != NULL, "a supported screen has a layout profile");
@@ -212,27 +203,16 @@ static void test_geometry(void)
 			      inside(battery.cap, width, frame.status_height) &&
 			      inside(battery.bolt, width, frame.status_height),
 		      "battery and charging shapes stay in the status bar");
-		fplinux_launcher_scroll_layout(
-			spec, width, frame.viewport_height, true, &scroll);
-		for (size_t column = 0;
-		     column < fplinux_launcher_columns(spec, true); ++column) {
+		fplinux_launcher_scroll_layout(spec, width,
+					       frame.viewport_height, &scroll);
+		for (size_t column = 0; column < fplinux_launcher_columns(spec);
+		     ++column) {
 			fplinux_launcher_grid_cell(spec, width, &scroll, column,
 						   0, &cell);
 			check(inside(cell.tile.box, width,
 				     frame.viewport_height),
 			      "first-row tiles remain in the catalogue viewport");
 		}
-		fplinux_launcher_list_row(spec, width, 12, 0, &row);
-		check(row.row.x == screens[i][2] &&
-			      row.row.width == screens[i][3] &&
-			      width - row.row.x - row.row.width ==
-				      screens[i][2],
-		      "catalogue rows have equal left and right outer margins");
-		check(inside(row.row, width, frame.viewport_height) &&
-			      inside(row.icon.box, row.row.width,
-				     row.row.height) &&
-			      inside(row.text, row.row.width, row.row.height),
-		      "catalogue list contents remain within the row");
 		fplinux_launcher_launch_layout(spec, &frame, &launch);
 		check(inside(launch.icon, width, frame.body_height) &&
 			      inside(launch.spinner, width,

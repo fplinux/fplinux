@@ -30,7 +30,6 @@ packages = [
   "fplinux-bluez-libs",
   "fplinux-brightness-ui",
   "fplinux-charge",
-  "fplinux-example-apidemo",
   "fplinux-ffmpeg",
   "fplinux-ncurses-curses",
   "fplinux-sbc",

@@ -20,10 +20,11 @@ static void clear(struct fplinux_calculator *calculator)
 	*calculator = (struct fplinux_calculator){ 0 };
 }
 
-static void fail(struct fplinux_calculator *calculator)
+static void fail(struct fplinux_calculator *calculator,
+		 enum fplinux_calculator_error error)
 {
 	clear(calculator);
-	calculator->error = true;
+	calculator->error = error;
 }
 
 /* Results keep 12 significant digits, so 0.1 + 0.2 - 0.3 gives 0. */
@@ -55,14 +56,14 @@ static bool calculate(struct fplinux_calculator *calculator)
 		break;
 	default:
 		if (operand == 0) {
-			fail(calculator);
+			fail(calculator, FPLINUX_CALCULATOR_DIVIDE_BY_ZERO);
 			return false;
 		}
 		value /= operand;
 	}
 	value = round_digits(value);
 	if (!isfinite(value)) {
-		fail(calculator);
+		fail(calculator, FPLINUX_CALCULATOR_OVERFLOW);
 		return false;
 	}
 	calculator->accumulator = value;
@@ -70,7 +71,8 @@ static bool calculate(struct fplinux_calculator *calculator)
 	return true;
 }
 
-static bool type_digit(struct fplinux_calculator *calculator, char digit)
+static enum fplinux_calculator_input_result
+type_digit(struct fplinux_calculator *calculator, char digit)
 {
 	char *entry = calculator->entry;
 	size_t length;
@@ -80,18 +82,19 @@ static bool type_digit(struct fplinux_calculator *calculator, char digit)
 	length = strlen(entry);
 	if (!strcmp(entry, "0") || !strcmp(entry, "-0")) {
 		if (digit == '0')
-			return false;
+			return FPLINUX_CALCULATOR_IGNORED;
 		entry[length - 1] = digit;
-		return true;
+		return FPLINUX_CALCULATOR_CHANGED;
 	}
 	if (count_digits(entry) >= FPLINUX_CALCULATOR_DIGIT_COUNT)
-		return false;
+		return FPLINUX_CALCULATOR_DIGIT_LIMIT;
 	entry[length] = digit;
 	entry[length + 1] = '\0';
-	return true;
+	return FPLINUX_CALCULATOR_CHANGED;
 }
 
-static bool type_separator(struct fplinux_calculator *calculator)
+static enum fplinux_calculator_input_result
+type_separator(struct fplinux_calculator *calculator)
 {
 	char *entry = calculator->entry;
 	size_t digits;
@@ -99,10 +102,12 @@ static bool type_separator(struct fplinux_calculator *calculator)
 	if (calculator->result)
 		clear(calculator);
 	digits = count_digits(entry);
-	if (strchr(entry, '.') || digits >= FPLINUX_CALCULATOR_DIGIT_COUNT)
-		return false;
+	if (strchr(entry, '.'))
+		return FPLINUX_CALCULATOR_IGNORED;
+	if (digits >= FPLINUX_CALCULATOR_DIGIT_COUNT)
+		return FPLINUX_CALCULATOR_DIGIT_LIMIT;
 	strcat(entry, digits ? "." : "0.");
-	return true;
+	return FPLINUX_CALCULATOR_CHANGED;
 }
 
 static bool change_sign(struct fplinux_calculator *calculator)
@@ -197,18 +202,21 @@ static bool delete_character(struct fplinux_calculator *calculator)
 	return true;
 }
 
-bool fplinux_calculator_input(struct fplinux_calculator *calculator, char key)
+enum fplinux_calculator_input_result
+fplinux_calculator_input(struct fplinux_calculator *calculator, char key)
 {
 	bool starts_number = (key >= '0' && key <= '9') || key == '.';
+	bool changed;
 
 	if (!key || !strchr("0123456789.#+-*/=<C", key))
-		return false;
+		return FPLINUX_CALCULATOR_IGNORED;
 	if ((calculator->error && !starts_number) || key == 'C') {
-		bool changed = fplinux_calculator_get_state(calculator) !=
-			       FPLINUX_CALCULATOR_EMPTY;
+		changed = fplinux_calculator_get_state(calculator) !=
+			  FPLINUX_CALCULATOR_EMPTY;
 
 		clear(calculator);
-		return changed;
+		return changed ? FPLINUX_CALCULATOR_CHANGED :
+				 FPLINUX_CALCULATOR_IGNORED;
 	}
 	/* After an error a digit or separator starts a new number. */
 	if (calculator->error)
@@ -219,14 +227,20 @@ bool fplinux_calculator_input(struct fplinux_calculator *calculator, char key)
 	case '.':
 		return type_separator(calculator);
 	case '#':
-		return change_sign(calculator);
+		changed = change_sign(calculator);
+		break;
 	case '=':
-		return evaluate(calculator);
+		changed = evaluate(calculator);
+		break;
 	case '<':
-		return delete_character(calculator);
+		changed = delete_character(calculator);
+		break;
 	default:
-		return choose_operation(calculator, key);
+		changed = choose_operation(calculator, key);
+		break;
 	}
+	return changed ? FPLINUX_CALCULATOR_CHANGED :
+			 FPLINUX_CALCULATOR_IGNORED;
 }
 
 enum fplinux_calculator_state
@@ -310,11 +324,15 @@ void fplinux_calculator_format(double value, char separator, char *text,
 	snprintf(text, capacity, "%s", buffer);
 }
 
-/* "<mode> <operation> <accumulator> <entry>": mode i, r or e; operation n. */
+/* "<mode> <operation> <accumulator> <entry>": i, r, d or o; operation n. */
 void fplinux_calculator_save(const struct fplinux_calculator *calculator,
 			     char *text, size_t capacity)
 {
-	char mode = calculator->error ? 'e' : calculator->result ? 'r' : 'i';
+	char mode = calculator->error == FPLINUX_CALCULATOR_DIVIDE_BY_ZERO ?
+			    'd' :
+		    calculator->error == FPLINUX_CALCULATOR_OVERFLOW ? 'o' :
+		    calculator->result				     ? 'r' :
+								       'i';
 
 	snprintf(text, capacity, "%c %c %.17g %s", mode,
 		 calculator->operation ? calculator->operation : 'n',
@@ -350,10 +368,12 @@ bool fplinux_calculator_restore(struct fplinux_calculator *calculator,
 				entry[index] == '-' ? '#' : entry[index]);
 		if (strcmp(restored.entry, entry))
 			return false;
-	} else if ((text[0] == 'r' || text[0] == 'e') && text[2] == 'n' &&
-		   !entry[0]) {
+	} else if (strchr("rdo", text[0]) && text[2] == 'n' && !entry[0]) {
 		restored.result = text[0] == 'r';
-		restored.error = text[0] == 'e';
+		restored.error = text[0] == 'd' ?
+					 FPLINUX_CALCULATOR_DIVIDE_BY_ZERO :
+				 text[0] == 'o' ? FPLINUX_CALCULATOR_OVERFLOW :
+						  FPLINUX_CALCULATOR_NO_ERROR;
 		restored.accumulator = restored.result ? accumulator : 0;
 	} else {
 		return false;

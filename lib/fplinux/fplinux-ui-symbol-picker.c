@@ -9,9 +9,7 @@
 
 struct fplinux_ui_symbol_picker {
 	struct fplinux_ui *ui;
-	lv_obj_t *anchor;
 	lv_obj_t *view;
-	enum fplinux_ui_symbol_picker_placement placement;
 	unsigned int selected;
 	unsigned int columns;
 	bool modal_active;
@@ -49,7 +47,8 @@ static bool open_view(struct fplinux_ui_symbol_picker *picker)
 	const struct fplinux_ui_theme *theme = fplinux_ui_theme(picker->ui);
 	const struct fplinux_ui_profile_spec *spec =
 		fplinux_ui_spec(picker->ui);
-	lv_display_t *display = lv_obj_get_display(picker->anchor);
+	lv_display_t *display =
+		lv_obj_get_display(fplinux_ui_screen(picker->ui));
 	unsigned int count = (unsigned int)fplinux_text_input_symbol_count();
 	unsigned int columns = (unsigned int)spec->picker_columns;
 	unsigned int rows = (count + columns - 1) / columns;
@@ -59,15 +58,8 @@ static bool open_view(struct fplinux_ui_symbol_picker *picker)
 	int32_t width = (int32_t)columns * cell_width + 2 * inset;
 	int32_t height = (int32_t)rows * cell_height + 2 * inset;
 	int32_t line = lv_font_get_line_height(theme->font_large);
-	int32_t bottom = fplinux_ui_modal_height(picker->ui) - height;
-	lv_area_t anchor;
-	int32_t y;
+	int32_t y = (fplinux_ui_modal_height(picker->ui) - height) / 2;
 
-	lv_obj_update_layout(picker->anchor);
-	lv_obj_get_coords(picker->anchor, &anchor);
-	y = picker->placement == FPLINUX_UI_SYMBOL_PICKER_CENTERED ?
-		    bottom / 2 :
-		    (anchor.y1 < bottom ? anchor.y1 : bottom);
 	picker->view = lv_obj_create(lv_display_get_layer_top(display));
 	if (!picker->view)
 		return false;
@@ -115,18 +107,14 @@ fail:
 	return false;
 }
 
-struct fplinux_ui_symbol_picker *fplinux_ui_symbol_picker_create(
-	struct fplinux_ui *ui, lv_obj_t *anchor,
-	enum fplinux_ui_symbol_picker_placement placement,
-	unsigned int selected)
+struct fplinux_ui_symbol_picker *
+fplinux_ui_symbol_picker_create(struct fplinux_ui *ui, unsigned int selected)
 {
 	struct fplinux_ui_symbol_picker *picker = calloc(1, sizeof(*picker));
 
 	if (!picker)
 		return NULL;
 	picker->ui = ui;
-	picker->anchor = anchor;
-	picker->placement = placement;
 	picker->selected =
 		selected < fplinux_text_input_symbol_count() ? selected : 0;
 	if (!open_view(picker)) {

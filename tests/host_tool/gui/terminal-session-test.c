@@ -417,6 +417,11 @@ static void bash_readline(struct fplinux_terminal_session *session)
 	assert(!fclose(completion));
 	capture.fd = session->pty->fd;
 	wait_for_prompt(session);
+	type_text(terminal, "false");
+	enter(terminal);
+	wait_for_prompt(session);
+	assert(!session->finished &&
+	       fplinux_terminal_session_can_input(session));
 	type_text(
 		terminal,
 		"bind -x '\"\\e[98~\":printf \"<LINE:%s>\\n\" \"$READLINE_LINE\"'");

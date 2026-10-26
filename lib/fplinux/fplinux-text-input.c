@@ -51,7 +51,7 @@ void fplinux_text_input_reset_mode(struct fplinux_text_input *input,
 	input->language = 0;
 	input->letter_case = first_case(input);
 	input->numeric = numeric;
-	input->held_digit = 0;
+	fplinux_text_input_cancel_held(input);
 	fplinux_multitap_set_language(&input->compose,
 				      &input->languages.language[0]);
 }
@@ -89,32 +89,41 @@ fplinux_text_input_commit(struct fplinux_text_input *input,
 void fplinux_text_input_cancel(struct fplinux_text_input *input)
 {
 	input->held_digit = 0;
+	input->held_control = 0;
 	fplinux_multitap_cancel(&input->compose);
 }
 
-enum fplinux_multitap_result
-fplinux_text_input_next_mode(struct fplinux_text_input *input,
-			     fplinux_multitap_emit_fn emit, void *context)
+static enum fplinux_multitap_result
+control_action(struct fplinux_text_input *input, fplinux_multitap_emit_fn emit,
+	       void *context)
 {
-	enum fplinux_multitap_result result =
-		fplinux_text_input_commit(input, emit, context);
+	enum fplinux_multitap_result result;
 
+	if (input->held_control == '*' &&
+	    input->control_gesture == FPLINUX_TEXT_INPUT_TAP)
+		return fplinux_text_input_open_picker(input, emit, context);
+	result = fplinux_text_input_commit(input, emit, context);
 	if (result == FPLINUX_MULTITAP_BLOCKED)
 		return result;
-	if (input->numeric) {
-		input->numeric = false;
-		input->language = 0;
-		input->letter_case = first_case(input);
-	} else if (input->letter_case != FPLINUX_LANGUAGE_UPPER) {
-		++input->letter_case;
-	} else if (input->language + 1 < input->languages.count) {
-		++input->language;
-		input->letter_case = first_case(input);
+	if (input->held_control == '#') {
+		if (input->control_gesture == FPLINUX_TEXT_INPUT_HOLD)
+			input->numeric = !input->numeric;
+		else if (input->numeric)
+			input->numeric = false;
+		else
+			input->letter_case =
+				input->letter_case == FPLINUX_LANGUAGE_UPPER ?
+					first_case(input) :
+					input->letter_case + 1;
 	} else {
-		input->numeric = true;
+		input->language =
+			(input->language + 1) % input->languages.count;
+		input->numeric = false;
+		fplinux_multitap_set_language(
+			&input->compose,
+			&input->languages.language[input->language]);
 	}
-	fplinux_multitap_set_language(
-		&input->compose, &input->languages.language[input->language]);
+	input->held_control = 0;
 	return result;
 }
 
@@ -150,26 +159,34 @@ emitted(enum fplinux_multitap_emit_result result)
 }
 
 enum fplinux_multitap_result
-fplinux_text_input_press(struct fplinux_text_input *input, unsigned char digit,
+fplinux_text_input_press(struct fplinux_text_input *input, unsigned char key,
 			 uint64_t now_ms, fplinux_multitap_emit_fn emit,
 			 void *context)
 {
 	enum fplinux_multitap_result result;
 
-	if (!fplinux_multitap_handles(digit))
+	if (key == '#' || key == '*') {
+		input->held_control = key;
+		input->control_ms = now_ms;
+		input->control_gesture = FPLINUX_TEXT_INPUT_UNDECIDED;
+		input->held_digit = 0;
+		input->clearing = false;
+		return FPLINUX_MULTITAP_PENDING;
+	}
+	if (!fplinux_multitap_handles(key))
 		return FPLINUX_MULTITAP_IGNORED;
+	input->held_control = 0;
 	if (input->numeric) {
 		result = fplinux_text_input_commit(input, emit, context);
 		if (result == FPLINUX_MULTITAP_BLOCKED)
 			return result;
-		return emit ? emitted(emit(context, digit)) :
+		return emit ? emitted(emit(context, key)) :
 			      FPLINUX_MULTITAP_BLOCKED;
 	}
-	result =
-		fplinux_text_input_compose(input, digit, now_ms, emit, context);
+	result = fplinux_text_input_compose(input, key, now_ms, emit, context);
 	if (result != FPLINUX_MULTITAP_BLOCKED &&
 	    fplinux_multitap_pending(&input->compose)) {
-		input->held_digit = digit;
+		input->held_digit = key;
 		input->held_ms = now_ms;
 	}
 	return result;
@@ -192,13 +209,22 @@ static enum fplinux_multitap_result hold_digit(struct fplinux_text_input *input,
 }
 
 enum fplinux_multitap_result
-fplinux_text_input_release(struct fplinux_text_input *input,
-			   unsigned char digit, uint64_t now_ms,
-			   fplinux_multitap_emit_fn emit, void *context)
+fplinux_text_input_release(struct fplinux_text_input *input, unsigned char key,
+			   uint64_t now_ms, fplinux_multitap_emit_fn emit,
+			   void *context)
 {
 	enum fplinux_multitap_result result;
 
-	if (input->held_digit != digit)
+	if (input->held_control && input->held_control == key) {
+		if (input->control_gesture == FPLINUX_TEXT_INPUT_UNDECIDED)
+			input->control_gesture =
+				now_ms >= input->control_ms +
+							FPLINUX_TEXT_INPUT_HOLD_MS ?
+					FPLINUX_TEXT_INPUT_HOLD :
+					FPLINUX_TEXT_INPUT_TAP;
+		return control_action(input, emit, context);
+	}
+	if (!input->held_digit || input->held_digit != key)
 		return FPLINUX_MULTITAP_IGNORED;
 	result = hold_digit(input, now_ms, emit, context);
 	if (result != FPLINUX_MULTITAP_BLOCKED)
@@ -215,6 +241,7 @@ fplinux_text_input_clear_press(struct fplinux_text_input *input,
 
 	if (result != FPLINUX_MULTITAP_EMIT_BLOCKED) {
 		input->held_digit = 0;
+		input->held_control = 0;
 		input->clearing = result == FPLINUX_MULTITAP_EMIT_ACCEPTED;
 		input->clear_ms = now_ms + FPLINUX_TEXT_INPUT_HOLD_MS;
 	}
@@ -229,6 +256,7 @@ void fplinux_text_input_clear_release(struct fplinux_text_input *input)
 void fplinux_text_input_cancel_held(struct fplinux_text_input *input)
 {
 	input->held_digit = 0;
+	input->held_control = 0;
 	input->clearing = false;
 	input->picker_open = false;
 }
@@ -243,6 +271,14 @@ fplinux_text_input_tick(struct fplinux_text_input *input, uint64_t now_ms,
 
 	if (result == FPLINUX_MULTITAP_BLOCKED)
 		return result;
+	if (input->held_control &&
+	    now_ms >= input->control_ms + FPLINUX_TEXT_INPUT_HOLD_MS) {
+		if (input->control_gesture == FPLINUX_TEXT_INPUT_UNDECIDED)
+			input->control_gesture = FPLINUX_TEXT_INPUT_HOLD;
+		result = control_action(input, emit, context);
+		if (result == FPLINUX_MULTITAP_BLOCKED)
+			return result;
+	}
 	if (!input->held_digit && fplinux_multitap_pending(&input->compose) &&
 	    now_ms >= input->compose_ms + FPLINUX_TEXT_INPUT_COMMIT_MS) {
 		result = fplinux_text_input_commit(input, emit, context);
@@ -269,6 +305,9 @@ bool fplinux_text_input_deadline(const struct fplinux_text_input *input,
 		deadline = input->held_ms + FPLINUX_TEXT_INPUT_HOLD_MS;
 	else if (fplinux_multitap_pending(&input->compose))
 		deadline = input->compose_ms + FPLINUX_TEXT_INPUT_COMMIT_MS;
+	if (input->held_control &&
+	    input->control_ms + FPLINUX_TEXT_INPUT_HOLD_MS < deadline)
+		deadline = input->control_ms + FPLINUX_TEXT_INPUT_HOLD_MS;
 	if (input->clearing && input->clear_ms < deadline)
 		deadline = input->clear_ms;
 	if (deadline == UINT64_MAX)
@@ -285,6 +324,7 @@ fplinux_text_input_open_picker(struct fplinux_text_input *input,
 		fplinux_text_input_commit(input, emit, context);
 
 	if (result != FPLINUX_MULTITAP_BLOCKED) {
+		input->held_control = 0;
 		input->picker_open = true;
 		input->picker_index = 0;
 	}

@@ -12,6 +12,12 @@
 #define FPLINUX_TEXT_INPUT_PICKER_COLUMNS 6U
 #define FPLINUX_TEXT_INPUT_UTF8_BYTES 5U
 
+enum fplinux_text_input_gesture {
+	FPLINUX_TEXT_INPUT_UNDECIDED,
+	FPLINUX_TEXT_INPUT_TAP,
+	FPLINUX_TEXT_INPUT_HOLD,
+};
+
 struct fplinux_text_input {
 	struct fplinux_multitap_languages languages;
 	size_t language;
@@ -23,6 +29,10 @@ struct fplinux_text_input {
 	/* ASCII digit held by a physical phone key, or 0. */
 	unsigned char held_digit;
 	uint64_t held_ms;
+	/* # or *; the resolved gesture survives a blocked emission. */
+	unsigned char held_control;
+	uint64_t control_ms;
+	enum fplinux_text_input_gesture control_gesture;
 	bool clearing;
 	uint64_t clear_ms;
 	bool picker_open;
@@ -62,12 +72,9 @@ enum fplinux_multitap_result
 fplinux_text_input_commit(struct fplinux_text_input *input,
 			  fplinux_multitap_emit_fn emit, void *context);
 void fplinux_text_input_cancel(struct fplinux_text_input *input);
+/* Digits compose or emit; # and * wait for release or the hold deadline. */
 enum fplinux_multitap_result
-fplinux_text_input_next_mode(struct fplinux_text_input *input,
-			     fplinux_multitap_emit_fn emit, void *context);
-/* A numeric-mode digit is emitted immediately; a letter starts a hold. */
-enum fplinux_multitap_result
-fplinux_text_input_press(struct fplinux_text_input *input, unsigned char digit,
+fplinux_text_input_press(struct fplinux_text_input *input, unsigned char key,
 			 uint64_t now_ms, fplinux_multitap_emit_fn emit,
 			 void *context);
 /* Composition without a physical digit hold, for a field-owned key map. */
@@ -77,9 +84,9 @@ fplinux_text_input_compose(struct fplinux_text_input *input, unsigned char key,
 			   void *context);
 /* A normal release resolves an overdue hold; BLOCKED keeps it for retry. */
 enum fplinux_multitap_result
-fplinux_text_input_release(struct fplinux_text_input *input,
-			   unsigned char digit, uint64_t now_ms,
-			   fplinux_multitap_emit_fn emit, void *context);
+fplinux_text_input_release(struct fplinux_text_input *input, unsigned char key,
+			   uint64_t now_ms, fplinux_multitap_emit_fn emit,
+			   void *context);
 enum fplinux_multitap_emit_result fplinux_text_input_clear_press(
 	struct fplinux_text_input *input, uint64_t now_ms,
 	fplinux_text_input_erase_fn erase, void *context);

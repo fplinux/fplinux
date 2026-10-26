@@ -10,7 +10,6 @@ enum frame_command {
 	FRAME_FULL = 1,
 	FRAME_RUN,
 	FRAME_MODE,
-	FRAME_ERRORS,
 	FRAME_HELP,
 };
 
@@ -88,42 +87,6 @@ static void frame_tick(lv_timer_t *timer)
 	readout();
 }
 
-static void null_errors(struct apidemo *app)
-{
-	int errors[9];
-
-	fplinux_ui_frame_new(NULL, 1, 1, FPLINUX_UI_FRAME_DIRECT);
-	errors[0] = errno;
-	fplinux_ui_frame_object(NULL);
-	errors[1] = errno;
-	fplinux_ui_frame_pixels(NULL, NULL, NULL);
-	errors[2] = errno;
-	fplinux_ui_frame_resize(NULL, 1, 1);
-	errors[3] = errno;
-	fplinux_ui_frame_damage(NULL, NULL);
-	errors[4] = errno;
-	fplinux_ui_frame_present(NULL);
-	errors[5] = errno;
-	fplinux_ui_frame_set_timer(NULL, NULL, false);
-	errors[6] = errno;
-	fplinux_ui_frame_set_timer(software.frame, NULL, true);
-	errors[7] = errno;
-	fplinux_ui_frame_resize(software.frame, 0, 1);
-	errors[8] = errno;
-	fplinux_ui_frame_delete(NULL); /* The documented harmless variant. */
-	apidemo_showf(
-		app, _("Frame errors"),
-		_("NULL new: %1$s\nNULL object: %2$s\nNULL pixels: %3$s\n"
-		  "NULL resize: %4$s\nNULL damage: %5$s\nNULL present: %6$s\n"
-		  "NULL timer owner: %7$s\nNULL enabled timer: %8$s\n"
-		  "Zero width: %9$s\nNULL delete: OK"),
-		apidemo_errno_name(errors[0]), apidemo_errno_name(errors[1]),
-		apidemo_errno_name(errors[2]), apidemo_errno_name(errors[3]),
-		apidemo_errno_name(errors[4]), apidemo_errno_name(errors[5]),
-		apidemo_errno_name(errors[6]), apidemo_errno_name(errors[7]),
-		apidemo_errno_name(errors[8]));
-}
-
 static void frame_help(struct apidemo *app)
 {
 	struct fplinux_ui_screen *alert = fplinux_ui_alert_new(
@@ -155,6 +118,8 @@ static void label_run(void)
 		.type = FPLINUX_UI_COMMAND_SCREEN,
 		.label = software.enabled ? _("Pause animation") :
 					    _("Resume animation"),
+		.icon = apidemo_glyph(software.app,
+				      software.enabled ? "pause" : "play"),
 	};
 
 	fplinux_ui_screen_add_command(software.screen, &command);
@@ -178,8 +143,6 @@ static void frame_command(struct fplinux_ui *ui,
 		if (!fplinux_ui_set_fullscreen(ui,
 					       !fplinux_ui_is_fullscreen(ui)))
 			apidemo_error(app, "fplinux_ui_set_fullscreen");
-	} else if (id == FRAME_ERRORS) {
-		null_errors(app);
 	} else if (id == FRAME_HELP) {
 		frame_help(app);
 	} else if (id == APIDEMO_COMMAND_BACK) {
@@ -232,13 +195,12 @@ static void open_frame(struct apidemo *app, const struct apidemo_entry *entry)
 	const struct fplinux_ui_command commands[] = {
 		{ .id = FRAME_FULL,
 		  .type = FPLINUX_UI_COMMAND_SCREEN,
-		  .label = _("Full repaint") },
+		  .label = _("Full repaint"),
+		  .icon = apidemo_glyph(app, "refresh") },
 		{ .id = FRAME_MODE,
 		  .type = FPLINUX_UI_COMMAND_SCREEN,
-		  .label = _("Full screen / normal") },
-		{ .id = FRAME_ERRORS,
-		  .type = FPLINUX_UI_COMMAND_SCREEN,
-		  .label = _("Frame errors") },
+		  .label = _("Full screen / normal"),
+		  .icon = apidemo_glyph(app, "fullscreen") },
 		{ .id = FRAME_HELP,
 		  .type = FPLINUX_UI_COMMAND_HELP,
 		  .label = _("How to try frames") },
@@ -318,15 +280,21 @@ static void open_frame(struct apidemo *app, const struct apidemo_entry *entry)
 }
 
 static const struct apidemo_entry entries[] = {
-	{ N_("Direct drawing"), "fplinux_ui_frame_* · DIRECT · one buffer",
-	  open_frame, 0 },
+	{ N_("Direct drawing"),
+	  "fplinux_ui_frame_new · fplinux_ui_frame_pixels · "
+	  "fplinux_ui_frame_damage · fplinux_ui_frame_present · "
+	  "fplinux_ui_frame_resize · fplinux_ui_frame_set_timer · "
+	  "fplinux_ui_frame_delete · FPLINUX_UI_FRAME_DIRECT",
+	  open_frame, 0, N_("Draw directly into the visible buffer") },
 	{ N_("Interrupted painting"),
-	  "fplinux_ui_frame_* · STAGED · completed frames", open_frame, 1 },
+	  "fplinux_ui_frame_new · fplinux_ui_frame_pixels · "
+	  "fplinux_ui_frame_damage · fplinux_ui_frame_present · "
+	  "fplinux_ui_frame_resize · fplinux_ui_frame_set_timer · "
+	  "fplinux_ui_frame_delete · FPLINUX_UI_FRAME_STAGED",
+	  open_frame, 1, N_("Publish only completed software frames") },
 };
 
 const struct apidemo_category apidemo_frame = {
-	.title = N_("Software frames"),
-	.icon = APIDEMO_IMAGE_DIR "canvas-symbolic.png",
 	.entries = entries,
 	.count = APIDEMO_COUNT(entries),
 	.cleanup = frame_cleanup,

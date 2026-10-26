@@ -7,7 +7,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -28,7 +27,6 @@ int main(void)
 	const uint16_t expected[] = { 0xf800, 0x07e0, 0x001f, 0xffff };
 	uint16_t received[4] = { 0 };
 	struct stat status;
-	struct fplinux_launcher_backdrop backdrop = { 0 };
 	int fd = fplinux_launcher_launch_fd(rows, 3 * sizeof(*rows), 2, 2);
 
 	check(fd >= 0, "a padded RGB565 frame becomes an anonymous file");
@@ -77,53 +75,5 @@ int main(void)
 	      "an oversized portrait frame exceeds the same pixel budget");
 	check(fplinux_launcher_launch_fd(full_frame, 640, 320, 320) < 0,
 	      "individually bounded dimensions cannot enlarge retained storage");
-	{
-		const uint16_t backdrop_pixels[] = {
-			0xf800,
-			0x07e0,
-			0x001f,
-			0xffff,
-		};
-		int short_fd;
-
-		fd = fplinux_launcher_launch_fd(
-			backdrop_pixels, 2 * sizeof(*backdrop_pixels), 2, 2);
-		check(fd >= 0 && fplinux_launcher_backdrop_map(&backdrop, fd, 2,
-							       2),
-		      "an exact-size packed RGB565 file maps as a backdrop");
-		if (fd >= 0)
-			close(fd);
-		check(backdrop.pixels &&
-			      backdrop.bytes == sizeof(backdrop_pixels) &&
-			      backdrop.width == 2 && backdrop.height == 2 &&
-			      !memcmp(backdrop.pixels, backdrop_pixels,
-				      sizeof(backdrop_pixels)),
-		      "the read-only mapping retains literal pixels after fd close");
-		short_fd = memfd_create("launcher-short-backdrop", MFD_CLOEXEC);
-		check(short_fd >= 0 &&
-			      ftruncate(short_fd,
-					(off_t)(sizeof(backdrop_pixels) -
-						sizeof(uint16_t))) == 0,
-		      "a short regular file represents a truncated backdrop");
-		check(short_fd >= 0 && !fplinux_launcher_backdrop_map(
-					       &backdrop, short_fd, 2, 2),
-		      "a wrong-size backdrop is rejected");
-		check(!backdrop.pixels && !backdrop.bytes && !backdrop.width &&
-			      !backdrop.height,
-		      "a rejected replacement releases the previous mapping");
-		if (short_fd >= 0)
-			close(short_fd);
-		fd = fplinux_launcher_launch_fd(
-			backdrop_pixels, 2 * sizeof(*backdrop_pixels), 2, 2);
-		check(fd >= 0 && fplinux_launcher_backdrop_map(&backdrop, fd, 2,
-							       2),
-		      "a backdrop can be mapped again after rejection");
-		if (fd >= 0)
-			close(fd);
-		fplinux_launcher_backdrop_clear(&backdrop);
-		check(!backdrop.pixels && !backdrop.bytes && !backdrop.width &&
-			      !backdrop.height,
-		      "clearing a backdrop unmaps pixels and resets its dimensions");
-	}
 	return failures ? 1 : 0;
 }

@@ -27,6 +27,7 @@ struct capture {
 	uint32_t serial;
 	uint32_t redraw_ack;
 	unsigned int changes;
+	char close_value[16];
 	bool has_request;
 	char left[128];
 	char centre[128];
@@ -106,6 +107,8 @@ static void read_messages(struct capture *capture)
 			strcpy(capture->right, message.right);
 		} else if (message.type == FPLINUX_UI_SESSION_REDRAW_ACK) {
 			capture->redraw_ack = message.serial;
+		} else if (message.type == FPLINUX_UI_SESSION_CLOSE_REPLY) {
+			strcpy(capture->close_value, message.value);
 		}
 	}
 	assert(received == 0);
@@ -158,6 +161,12 @@ static void wait_legends(struct capture *capture, const char *left,
 		strcmp(capture->right, right)) &&
 	       fplinux_ui_frame_now_ms() < deadline)
 		pump(capture);
+	if (strcmp(capture->left, left) || strcmp(capture->centre, centre) ||
+	    strcmp(capture->right, right))
+		fprintf(stderr,
+			"Settings legends: [%s | %s | %s], expected [%s | %s | %s]\n",
+			capture->left, capture->centre, capture->right, left,
+			centre, right);
 	assert(!strcmp(capture->left, left) &&
 	       !strcmp(capture->centre, centre) &&
 	       !strcmp(capture->right, right));
@@ -394,6 +403,164 @@ static void open_theme(struct capture *capture, bool from_root)
 	wait_legends(capture, "", "Select", "Back");
 }
 
+static void pending_choice_retains_applied_marker(struct capture *capture,
+						  uint32_t selected)
+{
+	unsigned int changes = capture->changes;
+
+	pump_for(capture, 100);
+	assert(capture->observed.selection_mask == selected);
+	wait_legends(capture, "", "Applying…", "");
+	press(capture, KEY_UP);
+	press(capture, KEY_OK);
+	pump_for(capture, 100);
+	assert(capture->observed.selection_mask == selected);
+	press(capture, KEY_DOWN);
+	press(capture, KEY_OK);
+	press(capture, KEY_F14);
+	pump_for(capture, 100);
+	assert(capture->observed.selection_mask == selected);
+	assert(capture->changes == changes);
+	wait_legends(capture, "", "Applying…", "");
+}
+
+static void wait_time_request(struct capture *capture)
+{
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	while (!capture->has_request && fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(capture->has_request && !strcmp(capture->request.name, "time"));
+}
+
+static void home_and_resume_inline_edit(struct capture *capture, uint64_t item)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_LIFECYCLE,
+		.lifecycle = FPLINUX_UI_SESSION_BACKGROUND,
+	};
+	unsigned int frame;
+
+	pump_for(capture, 100);
+	assert(capture->observed.editing &&
+	       capture->observed.focused_item == item);
+	frame = capture->observed.frame;
+	assert(fplinux_ui_session_send(capture->session, &message));
+	message.type = FPLINUX_UI_SESSION_VISIBILITY;
+	message.visible = false;
+	assert(fplinux_ui_session_send(capture->session, &message));
+	pump_for(capture, 100);
+	message.type = FPLINUX_UI_SESSION_LIFECYCLE;
+	message.lifecycle = FPLINUX_UI_SESSION_FOREGROUND;
+	assert(fplinux_ui_session_send(capture->session, &message));
+	message.type = FPLINUX_UI_SESSION_VISIBILITY;
+	message.visible = true;
+	assert(fplinux_ui_session_send(capture->session, &message));
+	pump_for(capture, 100);
+	assert(capture->observed.frame > frame);
+	assert(capture->observed.editing &&
+	       capture->observed.focused_item == item);
+}
+
+static void
+date_draft_survives_pending_home_and_refusal(struct capture *capture)
+{
+	struct fplinux_ui_session_message message = { 0 };
+	struct fplinux_ui_session_message request;
+	const unsigned int date_digits[] = { KEY_NUMERIC_0, KEY_NUMERIC_2,
+					     KEY_NUMERIC_2, KEY_NUMERIC_9,
+					     KEY_NUMERIC_2, KEY_NUMERIC_0,
+					     KEY_NUMERIC_2, KEY_NUMERIC_4 };
+	const unsigned int time_digits[] = { KEY_NUMERIC_0, KEY_NUMERIC_8,
+					     KEY_NUMERIC_4, KEY_NUMERIC_5 };
+	int64_t date, time;
+	unsigned int changes;
+
+	press(capture, KEY_OK);
+	wait_label(capture, "Time (UTC)");
+	press(capture, KEY_OK);
+	for (size_t index = 0;
+	     index < sizeof(date_digits) / sizeof(date_digits[0]); ++index)
+		press(capture, date_digits[index]);
+	home_and_resume_inline_edit(capture, 0);
+	press(capture, KEY_OK);
+	press(capture, KEY_DOWN);
+	press(capture, KEY_OK);
+	for (size_t index = 0;
+	     index < sizeof(time_digits) / sizeof(time_digits[0]); ++index)
+		press(capture, time_digits[index]);
+	home_and_resume_inline_edit(capture, 1);
+	press(capture, KEY_OK);
+	pump_for(capture, 100);
+	assert(!capture->observed.editing &&
+	       capture->observed.focused_item == 1);
+	date = capture->observed.date_value;
+	time = capture->observed.time_value;
+	press(capture, KEY_F13);
+	wait_time_request(capture);
+	request = capture->request;
+	assert(!strcmp(request.value, "2024-02-29 08:45:00"));
+	changes = capture->changes;
+	wait_legends(capture, "Saving…", "Edit", "");
+	press(capture, KEY_F13);
+	pump_for(capture, 100);
+	assert(capture->changes == changes);
+	message.type = FPLINUX_UI_SESSION_LIFECYCLE;
+	message.lifecycle = FPLINUX_UI_SESSION_BACKGROUND;
+	assert(fplinux_ui_session_send(capture->session, &message));
+	message.type = FPLINUX_UI_SESSION_VISIBILITY;
+	message.visible = false;
+	assert(fplinux_ui_session_send(capture->session, &message));
+	message = request;
+	message.type = FPLINUX_UI_SESSION_ERROR;
+	strcpy(message.reason, "not-foreground");
+	capture->has_request = false;
+	assert(fplinux_ui_session_send(capture->session, &message));
+	pump_for(capture, 100);
+	message = (struct fplinux_ui_session_message){
+		.type = FPLINUX_UI_SESSION_LIFECYCLE,
+		.lifecycle = FPLINUX_UI_SESSION_FOREGROUND,
+	};
+	assert(fplinux_ui_session_send(capture->session, &message));
+	message.type = FPLINUX_UI_SESSION_VISIBILITY;
+	message.visible = true;
+	assert(fplinux_ui_session_send(capture->session, &message));
+	wait_label(capture, "The setting was not changed. Try again.");
+	press(capture, KEY_F14);
+	wait_legends(capture, "Save", "Edit", "Back");
+	pump_for(capture, 100);
+	assert(capture->observed.date_value == date);
+	assert(capture->observed.time_value == time);
+	assert(capture->observed.focused_item == 1);
+	message = (struct fplinux_ui_session_message){
+		.type = FPLINUX_UI_SESSION_PREPARE_CLOSE,
+		.serial = 800,
+	};
+	strcpy(message.reason, "user-close");
+	assert(fplinux_ui_session_send(capture->session, &message));
+	wait_label(capture, "Leave without saving?");
+	assert(!strcmp(capture->close_value, "wait"));
+	press(capture, KEY_F14);
+	wait_legends(capture, "Save", "Edit", "Back");
+	pump_for(capture, 100);
+	assert(!strcmp(capture->close_value, "cancel"));
+	assert(capture->observed.date_value == date &&
+	       capture->observed.time_value == time);
+	press(capture, KEY_F13);
+	expect_request(capture, "time", request.value);
+	message = request;
+	message.type = FPLINUX_UI_SESSION_SETTING;
+	message.applied = true;
+	/* The manager formats the live clock after setting it, rather than echoing input. */
+	assert(strlen(message.value) == 19);
+	message.value[18] = '1';
+	capture->has_request = false;
+	assert(fplinux_ui_session_send(capture->session, &message));
+	wait_label(capture, "Time & language");
+	wait_legends(capture, "", "Open", "Back");
+	puts("settings-date: real editors retain date, time and focus through pending Home, refusal and cancelled close; live-clock reply completes Save");
+}
+
 int main(int argc, char **argv)
 {
 	struct capture capture = { 0 };
@@ -418,6 +585,7 @@ int main(int argc, char **argv)
 	wait_label(&capture, warning);
 	press(&capture, KEY_F13);
 	expect_request(&capture, "theme", "light");
+	pending_choice_retains_applied_marker(&capture, 2);
 	reply_and_check_frame(&capture, "theme", "light",
 			      FPLINUX_STORAGE_DURABLE, 0, "en", "Display", NULL,
 			      false);
@@ -432,6 +600,7 @@ int main(int argc, char **argv)
 	wait_label(&capture, warning);
 	press(&capture, KEY_F13);
 	expect_request(&capture, "theme", "dark");
+	pending_choice_retains_applied_marker(&capture, 1);
 	reply_and_check_frame(&capture, "theme", "dark",
 			      FPLINUX_STORAGE_UNPUBLISHED, ENOSPC, "en",
 			      "Theme", theme_error, true);
@@ -450,6 +619,7 @@ int main(int argc, char **argv)
 	press(&capture, KEY_DOWN);
 	press(&capture, KEY_OK);
 	wait_label(&capture, "Time & language");
+	date_draft_survives_pending_home_and_refusal(&capture);
 	press(&capture, KEY_DOWN);
 	press(&capture, KEY_OK);
 	wait_label(&capture, "English");
@@ -459,6 +629,7 @@ int main(int argc, char **argv)
 	wait_label(&capture, warning);
 	press(&capture, KEY_F13);
 	expect_request(&capture, "locale", "ru");
+	pending_choice_retains_applied_marker(&capture, 1);
 	reply_and_check_frame(&capture, "locale", "ru",
 			      FPLINUX_STORAGE_PUBLISHED_UNSYNCED, EIO, "ru",
 			      "Язык", locale_error, true);
@@ -477,7 +648,7 @@ int main(int argc, char **argv)
 	assert(!has_label(&capture, locale_error));
 	expect_palette(&capture, true, false);
 	save_frame(&capture, "settings-locale-closed");
-	assert(capture.changes == 3);
+	assert(capture.changes == 5);
 	close_and_reap(&capture);
 	puts("settings-locale-error: applied Русский frame acknowledges EIO; rebuilt notice waits for Закрыть");
 	return 0;

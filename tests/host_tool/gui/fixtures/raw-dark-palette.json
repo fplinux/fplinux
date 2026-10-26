@@ -1,0 +1,19 @@
+{
+  "background": "#000000",
+  "surface": "#080000",
+  "foreground": "#00FF00",
+  "muted": "#0000FF",
+  "accent": "#FFFF00",
+  "accent_text": "#FF00FF",
+  "border": "#FF0000",
+  "popup": "#00FFFF",
+  "bar": "#FFFFFF",
+  "bar_text": "#101010",
+  "disabled": "#212021",
+  "focus": "#840084",
+  "warning": "#848200",
+  "danger": "#008284",
+  "tile_ring": "#840000",
+  "brand": "#008200",
+  "scrim": "#000084"
+}

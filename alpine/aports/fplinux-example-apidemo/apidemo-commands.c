@@ -9,7 +9,8 @@
  *   right soft key  the first BACK, CANCEL, EXIT or STOP command by priority;
  *   OK              the focused element's own action, else the first OK;
  *   left soft key   the one remaining command, else Options, which opens the
- *                   options menu with all the remaining ones by priority.
+ *                   options menu with the remaining actions by priority,
+ *                   followed by any Back command.
  *
  * Most demos here are forms of read-only notes, so that OK has no element
  * action of its own and the notes can explain what the keys show.
@@ -17,6 +18,7 @@
 #include "apidemo.h"
 
 #include <errno.h>
+#include <linux/input-event-codes.h>
 #include <stdio.h>
 
 /* A note of a demo form: a label, which may be NULL, and its text. */
@@ -111,6 +113,11 @@ static void open_types(struct apidemo *app, const struct apidemo_entry *entry)
 			.id = type,
 			.type = (enum fplinux_ui_command_type)type,
 			.label = type_label(type),
+			.icon = type == FPLINUX_UI_COMMAND_ITEM ?
+					apidemo_glyph(app, "app") :
+				type == FPLINUX_UI_COMMAND_SCREEN ?
+					apidemo_glyph(app, "display") :
+					NULL,
 		};
 
 		fplinux_ui_screen_add_command(form, &command);
@@ -121,15 +128,15 @@ static void open_types(struct apidemo *app, const struct apidemo_entry *entry)
 
 /* Options menu with icons */
 
-/* SCREEN commands with a system glyph; one has none. */
+/* SCREEN commands with a system glyph for each action. */
 static const struct {
 	const char *label;
 	const char *glyph;
 } icon_commands[] = {
-	{ N_("Save"), "save" }, { N_("Send"), "send" },
-	{ N_("Edit"), "edit" }, { N_("Search"), "search" },
-	{ N_("Add"), "add" },	{ N_("Delete"), "delete" },
-	{ N_("Rename"), NULL },
+	{ N_("Save"), "save" },	  { N_("Send"), "send" },
+	{ N_("Edit"), "edit" },	  { N_("Search"), "search" },
+	{ N_("Add"), "add" },	  { N_("Delete"), "delete" },
+	{ N_("Rename"), "edit" },
 };
 
 #define COMMAND_HELP 100
@@ -158,8 +165,8 @@ static void icon_command(struct fplinux_ui *ui,
 	else if (command_id == COMMAND_HELP)
 		navigate_help(app,
 			      _("Each command shows its glyph in the options "
-				"menu. Rename has none: its text still lines "
-				"up with the others."));
+				"menu. Rename uses the same editing glyph as "
+				"Edit."));
 	else if (command_id >= 1 &&
 		 (size_t)command_id <= APIDEMO_COUNT(icon_commands))
 		apidemo_showf(app, _(icon_commands[command_id - 1].label),
@@ -193,10 +200,7 @@ static void open_icons(struct apidemo *app, const struct apidemo_entry *entry)
 			.label = _(icon_commands[i].label),
 			.priority = (int)i,
 			/* The runtime decodes the icon now, at row size. */
-			.icon = icon_commands[i].glyph ?
-					apidemo_glyph(app,
-						      icon_commands[i].glyph) :
-					NULL,
+			.icon = apidemo_glyph(app, icon_commands[i].glyph),
 		};
 
 		fplinux_ui_screen_add_command(form, &command);
@@ -262,63 +266,13 @@ static void open_ranked(struct apidemo *app, const struct apidemo_entry *entry)
 			.type = FPLINUX_UI_COMMAND_SCREEN,
 			.label = _(ranked_labels[i]),
 			.priority = ranked_priorities[i],
+			.icon = apidemo_glyph(app, "list"),
 		};
 
 		fplinux_ui_screen_add_command(form, &command);
 	}
 	apidemo_add_back(form);
 	fplinux_ui_screen_set_listener(form, ranked_command, NULL, app);
-	apidemo_push(app, form, "fplinux_ui_form_new");
-}
-
-/* One left command: on the key when its legend fits, else in the menu */
-
-#define COMMAND_SAVE 1
-
-static void save_command(struct fplinux_ui *ui,
-			 struct fplinux_ui_screen *screen, int command_id,
-			 void *context)
-{
-	(void)screen;
-	if (command_id == APIDEMO_COMMAND_BACK)
-		fplinux_ui_go_back(ui);
-	else if (command_id == COMMAND_SAVE)
-		apidemo_show(context, _("Saved"),
-			     _("The command reached the listener as usual."));
-}
-
-static void open_left(struct apidemo *app, const struct apidemo_entry *entry)
-{
-	static const struct note fits[] = {
-		{ NULL,
-		  N_("A single remaining command goes on the left soft key "
-		     "itself when its legend fits beside the others.") },
-	};
-	static const struct note collapses[] = {
-		{ NULL,
-		  N_("This label is too long for the soft-key bar, so the "
-		     "left soft key shows Options and the command becomes "
-		     "the first item of the menu. Prefer a short word.") },
-	};
-	const struct fplinux_ui_command save = {
-		.id = COMMAND_SAVE,
-		.type = FPLINUX_UI_COMMAND_SCREEN,
-		.label =
-			entry->variant ?
-				_("Save the draft and send it to all contacts") :
-				_("Save"),
-	};
-	struct fplinux_ui_screen *form =
-		entry->variant ?
-			notes_form(app, entry, collapses,
-				   APIDEMO_COUNT(collapses)) :
-			notes_form(app, entry, fits, APIDEMO_COUNT(fits));
-
-	if (!form)
-		return;
-	apidemo_add_back(form);
-	fplinux_ui_screen_add_command(form, &save);
-	fplinux_ui_screen_set_listener(form, save_command, NULL, app);
 	apidemo_push(app, form, "fplinux_ui_form_new");
 }
 
@@ -371,12 +325,14 @@ static struct {
 } relabel;
 
 /* Adding a command with an id the screen has replaces it: a new label. */
-static void set_run_label(struct fplinux_ui_screen *form, bool running)
+static void set_run_label(struct apidemo *app, struct fplinux_ui_screen *form,
+			  bool running)
 {
 	const struct fplinux_ui_command run = {
 		.id = COMMAND_RUN,
 		.type = FPLINUX_UI_COMMAND_OK,
 		.label = running ? _("Pause") : _("Start"),
+		.icon = apidemo_glyph(app, running ? "pause" : "play"),
 	};
 
 	fplinux_ui_screen_add_command(form, &run);
@@ -387,12 +343,11 @@ static void set_run_label(struct fplinux_ui_screen *form, bool running)
 static void run_command(struct fplinux_ui *ui, struct fplinux_ui_screen *form,
 			int command_id, void *context)
 {
-	(void)context;
 	if (command_id == APIDEMO_COMMAND_BACK) {
 		fplinux_ui_go_back(ui);
 	} else if (command_id == COMMAND_RUN) {
 		relabel.running = !relabel.running;
-		set_run_label(form, relabel.running);
+		set_run_label(context, form, relabel.running);
 	}
 }
 
@@ -415,7 +370,7 @@ static void open_relabel(struct apidemo *app, const struct apidemo_entry *entry)
 	relabel.state = fplinux_ui_form_append_string(form, _("State"), "");
 	fplinux_ui_form_append_string(form, NULL, _(notes[0].text));
 	apidemo_add_back(form);
-	set_run_label(form, false);
+	set_run_label(app, form, false);
 	fplinux_ui_screen_set_listener(form, run_command, NULL, app);
 	apidemo_push(app, form, "fplinux_ui_form_new");
 }
@@ -431,12 +386,13 @@ static struct {
 	int count;
 } added;
 
-static void add_add_command(struct fplinux_ui_screen *form)
+static void add_add_command(struct apidemo *app, struct fplinux_ui_screen *form)
 {
 	const struct fplinux_ui_command add = {
 		.id = COMMAND_ADD,
 		.type = FPLINUX_UI_COMMAND_OK,
 		.label = _("Add"),
+		.icon = apidemo_glyph(app, "add"),
 	};
 
 	fplinux_ui_screen_add_command(form, &add);
@@ -457,7 +413,6 @@ static void count_commands(struct fplinux_ui_screen *form)
 static void added_command(struct fplinux_ui *ui, struct fplinux_ui_screen *form,
 			  int command_id, void *context)
 {
-	(void)context;
 	if (command_id == APIDEMO_COMMAND_BACK) {
 		fplinux_ui_go_back(ui);
 		return;
@@ -471,6 +426,7 @@ static void added_command(struct fplinux_ui *ui, struct fplinux_ui_screen *form,
 				.label = label,
 				/* By number, whenever it was added. */
 				.priority = i,
+				.icon = apidemo_glyph(context, "delete"),
 			};
 
 			if (added.present[i])
@@ -490,7 +446,7 @@ static void added_command(struct fplinux_ui *ui, struct fplinux_ui_screen *form,
 		fplinux_ui_screen_remove_command(form, command_id);
 		added.present[command_id - 1] = false;
 		added.count--;
-		add_add_command(form);
+		add_add_command(context, form);
 	}
 	count_commands(form);
 }
@@ -512,86 +468,13 @@ static void open_added(struct apidemo *app, const struct apidemo_entry *entry)
 		added.present[i] = false;
 	added.count = 0;
 	apidemo_add_back(form);
-	add_add_command(form);
+	add_add_command(app, form);
 	fplinux_ui_screen_set_listener(form, added_command, NULL, app);
 	apidemo_push(app, form, "fplinux_ui_form_new");
 }
 
-/* Commands that fplinux_ui_screen_add_command() refuses */
+/* Compact menus opened from a Canvas. */
 
-#define COMMAND_VALID 1
-
-static void valid_command(struct fplinux_ui *ui,
-			  struct fplinux_ui_screen *screen, int command_id,
-			  void *context)
-{
-	(void)screen;
-	if (command_id == APIDEMO_COMMAND_BACK)
-		fplinux_ui_go_back(ui);
-	else if (command_id == COMMAND_VALID)
-		apidemo_show(context, _("OK"),
-			     _("Only the valid command reached the screen."));
-}
-
-static void open_errors(struct apidemo *app, const struct apidemo_entry *entry)
-{
-	static const struct {
-		const char *label;
-		struct fplinux_ui_command command;
-	} cases[] = {
-		{ N_("ITEM without a label"),
-		  { .id = 2, .type = FPLINUX_UI_COMMAND_ITEM } },
-		{ N_("SCREEN without a label"),
-		  { .id = 3, .type = FPLINUX_UI_COMMAND_SCREEN } },
-		{ N_("The reserved select id"),
-		  { .id = FPLINUX_UI_SELECT_COMMAND,
-		    .type = FPLINUX_UI_COMMAND_OK } },
-		{ N_("Unknown type"),
-		  { .id = 4,
-		    .type = (enum fplinux_ui_command_type)99,
-		    .label = "99" } },
-		{ N_("A line break in the label"),
-		  { .id = 5,
-		    .type = FPLINUX_UI_COMMAND_SCREEN,
-		    .label = "Two\nlines" } },
-		{ N_("OK with a NULL label"),
-		  { .id = COMMAND_VALID, .type = FPLINUX_UI_COMMAND_OK } },
-	};
-	struct fplinux_ui_screen *form =
-		fplinux_ui_form_new(app->ui, _(entry->title));
-
-	if (!form) {
-		apidemo_error(app, "fplinux_ui_form_new");
-		return;
-	}
-	for (size_t i = 0; i < APIDEMO_COUNT(cases); i++) {
-		bool added_ok =
-			fplinux_ui_screen_add_command(form, &cases[i].command);
-		int error = errno;
-		char result[64];
-
-		if (added_ok)
-			snprintf(result, sizeof(result), "true");
-		else
-			snprintf(result, sizeof(result), "false, %s",
-				 apidemo_errno_name(error));
-		fplinux_ui_form_append_string(form, _(cases[i].label), result);
-	}
-	apidemo_add_back(form);
-	fplinux_ui_screen_set_listener(form, valid_command, NULL, app);
-	apidemo_push(app, form, "fplinux_ui_form_new");
-}
-
-/* The options menu on a canvas */
-
-/*
- * On its own screen an application opens the system options menu with
- * fplinux_ui_menu_open(). A canvas could leave the left soft key without a
- * command and open the menu from its key handler, but the screen stack
- * names the keys after the commands and would show no legend for it. So
- * the left soft key is a SCREEN command labelled Options, whose listener
- * opens the menu.
- */
 enum {
 	COMMAND_OPTIONS = 1,
 };
@@ -610,7 +493,7 @@ enum action {
 struct menu_entry {
 	enum action action;
 	const char *text;
-	/* A system glyph, or NULL for an item without an icon. */
+	/* A system glyph for the action. */
 	const char *glyph;
 };
 
@@ -620,7 +503,7 @@ static const struct menu_entry first_menu[] = {
 	{ ACTION_EDIT, N_("Edit"), "edit" },
 	{ ACTION_SEARCH, N_("Search"), "search" },
 	/* The callback replaces this popup with another menu. */
-	{ ACTION_OTHER_MENU, N_("Other menu"), NULL },
+	{ ACTION_OTHER_MENU, N_("Other menu"), "menu" },
 };
 
 static const struct menu_entry other_menu[] = {
@@ -629,58 +512,41 @@ static const struct menu_entry other_menu[] = {
 	{ ACTION_HELP, N_("Help"), "help" },
 };
 
-/* The timed variant closes the menu itself after MENU_MS. */
-#define MENU_MS 3000
-
 static struct {
 	struct apidemo *app;
 	/* The status label; NULL once the canvas is gone. */
 	lv_obj_t *status;
 	lv_obj_t *scroll;
-	lv_timer_t *timer;
-	bool timed;
+	enum fplinux_ui_menu_origin origin;
 	/* What happened, shown under the hint. */
 	char result[160];
-	char busy[160];
 } menu_demo;
-
-static void stop_menu_timer(void)
-{
-	if (menu_demo.timer)
-		lv_timer_delete(menu_demo.timer);
-	menu_demo.timer = NULL;
-}
 
 /* Draws only the label whose text changed. */
 static void show_menu_status(void)
 {
-	char text[512];
+	char text[768];
 
 	if (!menu_demo.status)
 		return;
 	/* The latest result first, where the smallest screen shows it. */
-	snprintf(
-		text, sizeof(text), "%s\n\n%s%s%s", menu_demo.result,
-		menu_demo.busy, menu_demo.busy[0] ? "\n\n" : "",
-		menu_demo.timed ?
-			_("Options opens a menu that the application closes "
-			  "after 3\u00a0s, unless you choose first.") :
-			_("Options opens the menu. Other menu replaces it from "
-			  "the callback; Back closes the current popup."));
+	snprintf(text, sizeof(text), "%s\n\n%s", menu_demo.result,
+		 _("Options opens on the left. For this API demo, 4/5/6 open "
+		   "on the left/centre/right. Other menu keeps that position. "
+		   "OK chooses; Back closes."));
 	lv_label_set_text(menu_demo.status, text);
 }
 
-static void open_menu(const char *title, const struct menu_entry *entries,
-		      size_t count);
+static void open_menu(enum fplinux_ui_menu_origin origin, const char *title,
+		      const struct menu_entry *entries, size_t count);
 
 /* The menu has closed before this call, so it may open another one. */
 static void menu_chosen(struct fplinux_ui *ui, int action, void *context)
 {
 	(void)ui;
 	(void)context;
-	stop_menu_timer();
 	if (action == ACTION_OTHER_MENU) {
-		open_menu(_("Other menu"), other_menu,
+		open_menu(menu_demo.origin, _("Other menu"), other_menu,
 			  APIDEMO_COUNT(other_menu));
 		return;
 	}
@@ -703,28 +569,12 @@ static void menu_chosen(struct fplinux_ui *ui, int action, void *context)
 	show_menu_status();
 }
 
-/* The timed variant: close the menu if it is still open. */
-static void menu_expired(lv_timer_t *timer)
-{
-	(void)timer;
-	stop_menu_timer();
-	if (!fplinux_ui_menu_is_open(menu_demo.app->ui))
-		return;
-	/* Closes without calling the callback. */
-	fplinux_ui_menu_close(menu_demo.app->ui);
-	snprintf(menu_demo.result, sizeof(menu_demo.result), "%s",
-		 _("Closed by fplinux_ui_menu_close(): no callback."));
-	show_menu_status();
-}
-
 /* The texts are copied and the icons decoded when the menu opens. */
-static void open_menu(const char *title, const struct menu_entry *entries,
-		      size_t count)
+static void open_menu(enum fplinux_ui_menu_origin origin, const char *title,
+		      const struct menu_entry *entries, size_t count)
 {
 	struct apidemo *app = menu_demo.app;
 	struct fplinux_ui_menu_item items[APIDEMO_COUNT(first_menu)];
-	bool again;
-	int error;
 
 	if (count > APIDEMO_COUNT(items))
 		count = APIDEMO_COUNT(items);
@@ -732,29 +582,14 @@ static void open_menu(const char *title, const struct menu_entry *entries,
 		items[i] = (struct fplinux_ui_menu_item){
 			.action = (int)entries[i].action,
 			.text = _(entries[i].text),
-			.icon = entries[i].glyph ?
-					apidemo_glyph(app, entries[i].glyph) :
-					NULL,
+			.icon = apidemo_glyph(app, entries[i].glyph),
 		};
-	if (!fplinux_ui_menu_open(app->ui, title, items, count, menu_chosen,
-				  NULL)) {
+	if (!fplinux_ui_menu_open(app->ui, origin, title, items, count,
+				  menu_chosen, NULL)) {
 		apidemo_error(app, "fplinux_ui_menu_open");
 		return;
 	}
-	/* Only one menu is open at a time: a second open fails. */
-	again = fplinux_ui_menu_open(app->ui, title, items, count, menu_chosen,
-				     NULL);
-	error = errno;
-	snprintf(menu_demo.busy, sizeof(menu_demo.busy),
-		 _("While it was open, fplinux_ui_menu_is_open() returned %s "
-		   "and a second open %s."),
-		 fplinux_ui_menu_is_open(app->ui) ? "true" : "false",
-		 again ? "true" : apidemo_errno_name(error));
-	if (menu_demo.timed) {
-		menu_demo.timer = lv_timer_create(menu_expired, MENU_MS, NULL);
-		if (menu_demo.timer && !app->visible)
-			lv_timer_pause(menu_demo.timer);
-	}
+	menu_demo.origin = origin;
 }
 
 static void menu_command(struct fplinux_ui *ui,
@@ -766,33 +601,54 @@ static void menu_command(struct fplinux_ui *ui,
 	if (command_id == APIDEMO_COMMAND_BACK)
 		fplinux_ui_go_back(ui);
 	else if (command_id == COMMAND_OPTIONS)
-		open_menu(_("Options"), first_menu, APIDEMO_COUNT(first_menu));
+		open_menu(FPLINUX_UI_MENU_ORIGIN_LEFT, NULL, first_menu,
+			  APIDEMO_COUNT(first_menu));
 }
 
-/* The status may not fit: Up and Down scroll it. */
+/* Digits demonstrate placement; ordinary navigation scrolls the status. */
 static void menu_key(struct fplinux_ui *ui, struct fplinux_ui_screen *canvas,
 		     const struct fplinux_ui_key *key, void *context)
 {
+	enum fplinux_ui_menu_origin origin;
+
 	(void)ui;
 	(void)canvas;
 	(void)context;
-	if (menu_demo.scroll)
-		fplinux_ui_scroll_key(menu_demo.scroll, key);
+	if (!key->pressed)
+		return;
+	switch (key->code) {
+	case KEY_4:
+	case KEY_NUMERIC_4:
+		origin = FPLINUX_UI_MENU_ORIGIN_LEFT;
+		break;
+	case KEY_5:
+	case KEY_NUMERIC_5:
+		origin = FPLINUX_UI_MENU_ORIGIN_CENTRE;
+		break;
+	case KEY_6:
+	case KEY_NUMERIC_6:
+		origin = FPLINUX_UI_MENU_ORIGIN_RIGHT;
+		break;
+	default:
+		if (menu_demo.scroll)
+			fplinux_ui_scroll_key(menu_demo.scroll, key);
+		return;
+	}
+	open_menu(origin, NULL, first_menu, APIDEMO_COUNT(first_menu));
 }
 
-/* The canvas went with its screen: forget its objects and the timer. */
+/* The canvas went with its screen: forget its objects. */
 static void menu_canvas_deleted(lv_event_t *event)
 {
 	(void)event;
-	stop_menu_timer();
 	menu_demo.status = NULL;
 	menu_demo.scroll = NULL;
 }
 
 /*
- * A scrolling text that fills a canvas below its title band: margin at the
- * left, gutter at the right for the scroll indicator, spacing above and
- * below. Returns the label; *scroll receives the container.
+ * A scrolling text that fills a canvas below its title band with symmetric
+ * margins and vertical spacing. Returns the label; *scroll receives the
+ * container.
  */
 static lv_obj_t *canvas_text(struct apidemo *app, lv_obj_t *area,
 			     lv_obj_t **scroll)
@@ -803,7 +659,7 @@ static lv_obj_t *canvas_text(struct apidemo *app, lv_obj_t *area,
 	lv_obj_remove_style_all(box);
 	lv_obj_set_size(box, lv_pct(100), lv_pct(100));
 	lv_obj_set_style_pad_left(box, app->metrics->margin, 0);
-	lv_obj_set_style_pad_right(box, app->metrics->gutter, 0);
+	lv_obj_set_style_pad_right(box, app->metrics->margin, 0);
 	lv_obj_set_style_pad_ver(box, app->metrics->spacing, 0);
 	apidemo_style_scroll(app, box);
 	label = lv_label_create(box);
@@ -822,6 +678,7 @@ static void open_canvas_menu(struct apidemo *app,
 		.id = COMMAND_OPTIONS,
 		.type = FPLINUX_UI_COMMAND_SCREEN,
 		.label = _("Options"),
+		.icon = apidemo_glyph(app, "menu"),
 	};
 	struct fplinux_ui_screen *canvas =
 		fplinux_ui_canvas_new(app->ui, _(entry->title));
@@ -830,16 +687,13 @@ static void open_canvas_menu(struct apidemo *app,
 		apidemo_error(app, "fplinux_ui_canvas_new");
 		return;
 	}
-	stop_menu_timer();
 	menu_demo.app = app;
-	menu_demo.timed = entry->variant;
 	menu_demo.status = canvas_text(app, fplinux_ui_canvas_object(canvas),
 				       &menu_demo.scroll);
 	lv_obj_add_event_cb(menu_demo.scroll, menu_canvas_deleted,
 			    LV_EVENT_DELETE, NULL);
 	snprintf(menu_demo.result, sizeof(menu_demo.result), "%s",
 		 _("Nothing chosen yet."));
-	menu_demo.busy[0] = '\0';
 	show_menu_status();
 	apidemo_add_back(canvas);
 	fplinux_ui_screen_add_command(canvas, &options);
@@ -850,53 +704,26 @@ static void open_canvas_menu(struct apidemo *app,
 
 static const struct apidemo_entry entries[] = {
 	{ N_("Command types"),
-	  "FPLINUX_UI_COMMAND_* · label NULL · fplinux_ui_screen_add_command",
-	  open_types, 0 },
+	  "FPLINUX_UI_COMMAND_* · fplinux_ui_screen_add_command", open_types, 0,
+	  N_("See how actions reach the soft keys") },
 	{ N_("Options menu with icons"),
-	  "fplinux_ui_command.icon · fplinux_ui_glyph", open_icons, 0 },
+	  "fplinux_ui_command.icon · fplinux_ui_glyph", open_icons, 0,
+	  N_("Choose an action and return through Help") },
 	{ N_("Priorities and ties"), "fplinux_ui_command.priority", open_ranked,
-	  0 },
-	{ N_("Left command that fits"), "FPLINUX_UI_COMMAND_SCREEN · left key",
-	  open_left, 0 },
-	{ N_("Long left command"), "FPLINUX_UI_COMMAND_SCREEN · into Options",
-	  open_left, 1 },
-	{ N_("Help command"), "FPLINUX_UI_COMMAND_HELP", open_help, 0 },
-	{ N_("Relabel a command"),
-	  "fplinux_ui_screen_add_command · the same id", open_relabel, 0 },
+	  0, N_("Order actions by priority") },
+	{ N_("Help command"), "FPLINUX_UI_COMMAND_HELP · fplinux_ui_navigate",
+	  open_help, 0, N_("Read Help and return to Options") },
+	{ N_("Relabel a command"), "fplinux_ui_screen_add_command",
+	  open_relabel, 0, N_("Switch one action between Run and Stop") },
 	{ N_("Add and remove"),
 	  "fplinux_ui_screen_remove_command · fplinux_ui_screen_set_title",
-	  open_added, 0 },
-	{ N_("Refused commands"), "fplinux_ui_screen_add_command · EINVAL",
-	  open_errors, 0 },
-	{ N_("Menu on a canvas"), "fplinux_ui_menu_open · _is_open · EBUSY",
-	  open_canvas_menu, 0 },
-	{ N_("Timed menu"), "fplinux_ui_menu_close · fplinux_ui_menu_is_open",
-	  open_canvas_menu, 1 },
+	  open_added, 0, N_("Change available actions while shown") },
+	{ N_("Menu on a canvas"),
+	  "fplinux_ui_menu_open · fplinux_ui_menu_is_open", open_canvas_menu, 0,
+	  N_("Open compact menus at three origins") },
 };
 
-/* The timed menu waits while the application is hidden. */
-static void commands_visibility(struct apidemo *app, bool visible)
-{
-	(void)app;
-	if (!menu_demo.timer)
-		return;
-	if (visible)
-		lv_timer_resume(menu_demo.timer);
-	else
-		lv_timer_pause(menu_demo.timer);
-}
-
-static void commands_cleanup(struct apidemo *app)
-{
-	(void)app;
-	stop_menu_timer();
-}
-
 const struct apidemo_category apidemo_commands = {
-	.title = N_("Commands and menus"),
-	.icon = APIDEMO_IMAGE_DIR "commands-symbolic.png",
 	.entries = entries,
 	.count = APIDEMO_COUNT(entries),
-	.visibility = commands_visibility,
-	.cleanup = commands_cleanup,
 };

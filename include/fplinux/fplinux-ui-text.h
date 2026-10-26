@@ -99,6 +99,8 @@ bool fplinux_ui_text_is_empty(const struct fplinux_ui_text *field);
 const char *fplinux_ui_text_indicator(const struct fplinux_ui_text *field);
 /* While the symbol picker is open, OK inserts and the right soft key cancels. */
 bool fplinux_ui_text_is_picker_open(const struct fplinux_ui_text *field);
+/* Cancels only symbol selection, keeping the text, caret and input mode. */
+void fplinux_ui_text_cancel_picker(struct fplinux_ui_text *field);
 /* An unfocused field commits pending input, hides its caret and takes no keys. */
 void fplinux_ui_text_set_focused(struct fplinux_ui_text *field, bool focused);
 

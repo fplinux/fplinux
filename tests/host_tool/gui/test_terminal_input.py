@@ -41,6 +41,7 @@ def terminal_input(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 str(ROOT / "lib/fplinux/fplinux-language.c"),
                 str(ROOT / "lib/fplinux/fplinux-utf8.c"),
                 str(ROOT / "lib/fplinux/fplinux-ui-screen-model.c"),
+                str(ROOT / "lib/fplinux/fplinux-ui-profile.c"),
                 "-ltsm",
                 *gettext_link_flags(),
             ],
@@ -50,7 +51,8 @@ def terminal_input(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
 
 
 @pytest.mark.parametrize(
-    "scenario", ["languages", "pause", "modifiers", "gestures", "blocked", "commands"]
+    "scenario",
+    ["languages", "pause", "modifiers", "shortcuts", "gestures", "blocked", "special", "commands"],
 )
 def test_terminal_input_keeps_pty_bytes_deadlines_and_gui_commands(
     terminal_input: Path, scenario: str

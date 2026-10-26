@@ -23,13 +23,24 @@ struct capture {
 	int observer;
 	pid_t application;
 	uint32_t serial;
+	uint32_t close_serial;
 	const char *directory;
 	const char *session_path;
 	unsigned int alerts;
+	unsigned int feedback;
+	const char *expected_reason;
 	char close_left[FPLINUX_UI_SESSION_TEXT_BYTES];
 	char close_centre[FPLINUX_UI_SESSION_TEXT_BYTES];
 	char close_right[FPLINUX_UI_SESSION_TEXT_BYTES];
 };
+
+static const char *locale = "en";
+static const char *appearance = "dark";
+
+static const char *translated(const char *english, const char *russian)
+{
+	return !strcmp(locale, "ru") ? russian : english;
+}
 
 static int dimension(const char *text)
 {
@@ -79,6 +90,8 @@ static void wait_number(struct capture *capture, const char *expected)
 			++capture->alerts;
 			continue;
 		}
+		if (observation.kind == CALCULATOR_STATUS)
+			++capture->feedback;
 		assert(observation.text_width > 0 &&
 		       observation.text_width <= observation.width);
 		assert(observation.text_height > 0 &&
@@ -90,6 +103,12 @@ static void wait_number(struct capture *capture, const char *expected)
 		       observation.parent_height);
 		if (strcmp(observation.text, expected))
 			continue;
+		if (capture->expected_reason &&
+		    observation.kind == CALCULATOR_NUMBER) {
+			assert(!strcmp(observation.detail,
+				       capture->expected_reason));
+			capture->expected_reason = NULL;
+		}
 		printf("calculator-number %dx%d %s: %dx%d within %dx%d\n",
 		       capture->peer.width, capture->peer.height, expected,
 		       observation.text_width, observation.text_height,
@@ -127,6 +146,8 @@ static void collect_observations(struct capture *capture)
 		assert(count == (ssize_t)sizeof(observation));
 		if (observation.kind == CALCULATOR_ALERT)
 			++capture->alerts;
+		if (observation.kind == CALCULATOR_STATUS)
+			++capture->feedback;
 	}
 	assert(count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK));
 }
@@ -168,7 +189,7 @@ static void redraw(struct capture *capture)
 	};
 
 	strcpy(setting.name, "theme");
-	strcpy(setting.value, "dark");
+	strcpy(setting.value, appearance);
 	assert(fplinux_ui_session_send(capture->session, &setting));
 	for (;;) {
 		struct fplinux_ui_session_message message =
@@ -178,6 +199,32 @@ static void redraw(struct capture *capture)
 		assert(message.type != FPLINUX_UI_SESSION_EXIT);
 		if (message.type == FPLINUX_UI_SESSION_REDRAW_ACK) {
 			assert(message.serial == setting.serial);
+			return;
+		}
+	}
+}
+
+static void activate(struct capture *capture,
+		     enum fplinux_ui_session_activation activation)
+{
+	const struct fplinux_ui_session_message request = {
+		.type = FPLINUX_UI_SESSION_ACTIVATION,
+		.serial = ++capture->serial,
+		.activation = activation,
+	};
+	unsigned int previous = capture->peer.commits;
+
+	assert(fplinux_ui_session_send(capture->session, &request));
+	for (;;) {
+		struct fplinux_ui_session_message reply =
+			fplinux_ui_frame_wait_message(&capture->peer,
+						      capture->session);
+
+		assert(reply.type != FPLINUX_UI_SESSION_EXIT);
+		assert(reply.type != FPLINUX_UI_SESSION_CLOSE_REPLY);
+		if (reply.type == FPLINUX_UI_SESSION_ACTIVATION_ACK) {
+			assert(reply.serial == request.serial);
+			assert(capture->peer.commits > previous);
 			return;
 		}
 	}
@@ -326,7 +373,9 @@ static void start(struct capture *capture, char **argv, const char *initial,
 	struct fplinux_ui_session_message config = {
 		.type = FPLINUX_UI_SESSION_CONFIG,
 		.mode = FPLINUX_UI_SESSION_INTEGRATED,
-		.theme = FPLINUX_UI_SESSION_THEME_DARK,
+		.theme = !strcmp(appearance, "light") ?
+				 FPLINUX_UI_SESSION_THEME_LIGHT :
+				 FPLINUX_UI_SESSION_THEME_DARK,
 		.screen_width = dimension(argv[1]),
 		.screen_height = dimension(argv[2]),
 	};
@@ -380,7 +429,7 @@ static void start(struct capture *capture, char **argv, const char *initial,
 	hello = fplinux_ui_frame_wait_message(&capture->peer, capture->session);
 	assert(hello.type == FPLINUX_UI_SESSION_HELLO);
 	assert(!strcmp(hello.app_id, "org.fplinux.calculator"));
-	strcpy(config.locale, "en");
+	strcpy(config.locale, locale);
 	strcpy(config.input_locale, "en");
 	assert(fplinux_ui_session_send(capture->session, &config));
 	wait_number(capture, initial);
@@ -433,6 +482,9 @@ static void capture_number_limit(struct capture *capture)
 	press(capture, 1, KEY_NUMERIC_POUND, NULL);
 	wait_number(capture, "-12345678901.2");
 	save_frame(capture, "calculator-number");
+	press(capture, 1, KEY_NUMERIC_3, NULL);
+	wait_number(capture, "Maximum 12 digits");
+	save_frame(capture, "calculator-limit");
 	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_F14, true);
 	wait_number(capture, "-12345678901.");
 	wait_number(capture, "0");
@@ -454,7 +506,7 @@ static void wait_close_reply(struct capture *capture, const char *expected)
 		}
 		if (reply.type != FPLINUX_UI_SESSION_CLOSE_REPLY)
 			continue;
-		assert(reply.serial == capture->serial);
+		assert(reply.serial == capture->close_serial);
 		assert(!strcmp(reply.value, expected));
 		return;
 	}
@@ -467,6 +519,7 @@ static void prepare_close(struct capture *capture, const char *expected)
 		.serial = ++capture->serial,
 	};
 
+	capture->close_serial = request.serial;
 	strcpy(request.reason, "user-close");
 	assert(fplinux_ui_session_send(capture->session, &request));
 	wait_close_reply(capture, expected);
@@ -488,7 +541,7 @@ static void storage_failure(struct capture *capture, char **argv)
 	expect_saved(capture, "", "9");
 	gate = fopen(failure_path, "wx");
 	assert(gate && !fclose(gate));
-	start(capture, argv, "9", "Back", "", "Clear");
+	start(capture, argv, "9", "Back", "", "Reset");
 	press(capture, 1, KEY_NUMERIC_4, "4");
 	send_lifecycle(capture, FPLINUX_UI_SESSION_BACKGROUND);
 	visibility(capture, false);
@@ -503,9 +556,12 @@ static void storage_failure(struct capture *capture, char **argv)
 	expect_saved(capture, "", "9");
 	prepare_close(capture, "wait");
 	wait_save_alert(capture);
-	assert(!strcmp(capture->close_left, "Discard"));
+	assert(!strcmp(capture->close_left, "Discard changes"));
 	assert(!strcmp(capture->close_centre, "Retry"));
 	assert(!strcmp(capture->close_right, "Stay"));
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_RESUME);
+	expect_saved(capture, "", "9");
 	press(capture, 1, KEY_F14, NULL);
 	wait_close_reply(capture, "cancel");
 	/* The alert's listener sends CANCEL before the base legends refresh. */
@@ -543,6 +599,160 @@ static void storage_failure(struct capture *capture, char **argv)
 	puts("calculator-storage: Home retained draft; Stay continued input; Retry saved; Discard reopened old state");
 }
 
+static void published_save_without_confirmation(struct capture *capture,
+						char **argv)
+{
+	struct calculator_number_observation observation;
+	char path[512];
+	FILE *gate;
+
+	start(capture, argv, "0", "", "", "Back");
+	press(capture, 1, KEY_NUMERIC_4, "4");
+	press(capture, 1, KEY_NUMERIC_2, "42");
+	assert(snprintf(path, sizeof(path), "%s/save-failure", argv[6]) <
+	       (int)sizeof(path));
+	gate = fopen(path, "wx");
+	assert(gate && fputs("s", gate) >= 0 && !fclose(gate));
+	prepare_close(capture, "wait");
+	for (;;) {
+		fplinux_ui_frame_wait_readable(&capture->peer,
+					       capture->observer);
+		assert(recv(capture->observer, &observation,
+			    sizeof(observation),
+			    0) == (ssize_t)sizeof(observation));
+		if (observation.kind == CALCULATOR_ALERT)
+			break;
+	}
+	assert(!strcmp(observation.title, "Saving not confirmed"));
+	assert(!strcmp(capture->close_left, "Close anyway"));
+	assert(!strcmp(capture->close_centre, "Retry"));
+	assert(!strcmp(capture->close_right, "Stay"));
+	expect_saved(capture, "", "42");
+	press(capture, 1, KEY_F14, NULL);
+	wait_close_reply(capture, "cancel");
+	press(capture, 1, KEY_NUMERIC_3, "423");
+	prepare_close(capture, "wait");
+	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_F13, true);
+	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_F13, false);
+	wait_close_reply(capture, "ready");
+	assert(unlink(path) == 0);
+	close_and_reap(capture);
+	expect_saved(capture, "", "423");
+	puts("calculator-storage-sync: Stay kept editing; Close anyway retained the published calculation");
+}
+
+static void feedback_states(struct capture *capture, char **argv)
+{
+	const unsigned int digits[] = {
+		KEY_NUMERIC_1, KEY_NUMERIC_2, KEY_NUMERIC_3, KEY_NUMERIC_4,
+		KEY_NUMERIC_5, KEY_NUMERIC_6, KEY_NUMERIC_7, KEY_NUMERIC_8,
+		KEY_NUMERIC_9, KEY_NUMERIC_0, KEY_NUMERIC_1, KEY_NUMERIC_2,
+	};
+	struct fplinux_calculator seed = { .accumulator = 1e308,
+					   .operation = '*' };
+	char saved[FPLINUX_CALCULATOR_SAVE_BYTES];
+	char path[512];
+	FILE *preferences;
+
+	start(capture, argv, "0", "", "", translated("Back", "Назад"));
+	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_NUMERIC_0,
+				  true);
+	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_NUMERIC_0,
+				  false);
+	press(capture, 1, KEY_NUMERIC_STAR, translated("0.", "0,"));
+	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_NUMERIC_STAR,
+				  true);
+	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_NUMERIC_STAR,
+				  false);
+	redraw(capture);
+	collect_observations(capture);
+	assert(!capture->feedback && !capture->alerts);
+	press(capture, 1, KEY_F14, "0");
+	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_F14, true);
+	fplinux_ui_frame_send_key(&capture->peer.keyboards[1], KEY_F14, false);
+	wait_legends(capture, "", "", translated("Back", "Назад"));
+	for (size_t index = 0; index < sizeof(digits) / sizeof(digits[0]);
+	     ++index)
+		press(capture, 1, digits[index], NULL);
+	wait_number(capture, "123456789012");
+	press(capture, 1, KEY_NUMERIC_3, NULL);
+	wait_number(capture,
+		    translated("Maximum 12 digits", "Не более 12 цифр"));
+	save_frame(capture, "calculator-limit");
+	press(capture, 1, KEY_F14, "12345678901");
+	press(capture, 1, KEY_NUMERIC_3, "123456789013");
+	close_and_reap(capture);
+	fplinux_calculator_save(&seed, saved, sizeof(saved));
+	assert(snprintf(path, sizeof(path),
+			"%s/state/fplinux/org.fplinux.calculator/preferences",
+			argv[6]) < (int)sizeof(path));
+	preferences = fopen(path, "w");
+	assert(preferences && fprintf(preferences, "state=%s\n", saved) > 0 &&
+	       !fclose(preferences));
+	start(capture, argv, "1e308", translated("Options", "Опции"), "",
+	      translated("Clear", "Стереть"));
+	press(capture, 1, KEY_NUMERIC_9, "9");
+	capture->expected_reason =
+		translated("Number too large", "Переполнение");
+	press(capture, 1, KEY_OK, translated("Error", "Ошибка"));
+	wait_legends(capture, translated("Back", "Назад"), "",
+		     translated("Reset", "Сброс"));
+	save_frame(capture, "calculator-overflow");
+	close_and_reap(capture);
+	capture->expected_reason =
+		translated("Number too large", "Переполнение");
+	start(capture, argv, translated("Error", "Ошибка"),
+	      translated("Back", "Назад"), "", translated("Reset", "Сброс"));
+	press(capture, 1, KEY_NUMERIC_8, "8");
+	press(capture, 1, KEY_RIGHT, NULL);
+	press(capture, 1, KEY_NUMERIC_0, "0");
+	capture->expected_reason =
+		translated("Divide by zero", "Деление на ноль");
+	press(capture, 1, KEY_OK, translated("Error", "Ошибка"));
+	save_frame(capture, "calculator-divide-zero");
+	press(capture, 1, KEY_F14, "0");
+	assert(!capture->alerts);
+	close_and_reap(capture);
+	printf("calculator-feedback %s: distinct saved errors; Reset; 13th digit rejected; delete resumes; zero/separator ignored\n",
+	       locale);
+}
+
+static void activation_preserves_calculation(struct capture *capture,
+					     char **argv)
+{
+	size_t bytes;
+	uint16_t *calculation;
+	uint16_t *menu;
+
+	start(capture, argv, "0", "", "", "Back");
+	press(capture, 1, KEY_NUMERIC_9, "9");
+	press(capture, 1, KEY_UP, NULL);
+	press(capture, 1, KEY_NUMERIC_4, "4");
+	redraw(capture);
+	bytes = (size_t)capture->peer.width * capture->peer.height *
+		sizeof(*capture->peer.pixels);
+	calculation = malloc(bytes);
+	menu = malloc(bytes);
+	assert(calculation && menu);
+	memcpy(calculation, capture->peer.pixels, bytes);
+	press(capture, 0, KEY_COMPOSE, NULL);
+	wait_legends(capture, "", "Select", "Back");
+	redraw(capture);
+	memcpy(menu, capture->peer.pixels, bytes);
+	assert(memcmp(menu, calculation, bytes));
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_RESUME);
+	assert(!memcmp(menu, capture->peer.pixels, bytes));
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
+	assert(!memcmp(calculation, capture->peer.pixels, bytes));
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
+	assert(!memcmp(calculation, capture->peer.pixels, bytes));
+	press(capture, 1, KEY_OK, "13");
+	free(menu);
+	free(calculation);
+	close_and_reap(capture);
+	puts("calculator-activation: Resume kept Options; Open kept 9 + 4 and returned 13");
+}
+
 int main(int argc, char **argv)
 {
 	struct capture capture = { 0 };
@@ -550,15 +760,30 @@ int main(int argc, char **argv)
 	char path[512];
 
 	assert(setvbuf(stdout, NULL, _IONBF, 0) == 0);
-	if (argc != 7 && argc != 8) {
+	if (argc != 7 && argc != 8 && argc != 9 && argc != 10) {
 		fprintf(stderr,
 			"usage: %s WIDTH HEIGHT CALCULATOR KEYMAP SESSION OUTPUT\n",
 			argv[0]);
 		return 2;
 	}
-	if (argc == 8) {
-		assert(!strcmp(argv[7], "storage-failure"));
-		storage_failure(&capture, argv);
+	if (argc >= 8) {
+		if (!strcmp(argv[7], "activation"))
+			activation_preserves_calculation(&capture, argv);
+		else if (!strcmp(argv[7], "storage-failure"))
+			storage_failure(&capture, argv);
+		else if (!strcmp(argv[7], "storage-sync-failure"))
+			published_save_without_confirmation(&capture, argv);
+		else {
+			assert(!strcmp(argv[7], "feedback") &&
+			       (argc == 9 || argc == 10));
+			locale = argv[8];
+			assert(!strcmp(locale, "en") || !strcmp(locale, "ru"));
+			if (argc == 10)
+				appearance = argv[9];
+			assert(!strcmp(appearance, "dark") ||
+			       !strcmp(appearance, "light"));
+			feedback_states(&capture, argv);
+		}
 		return 0;
 	}
 	start(&capture, argv, "0", "", "", "Back");
@@ -576,7 +801,7 @@ int main(int argc, char **argv)
 	wait_legends(&capture, "Options", "Equals", "Clear");
 	save_frame(&capture, "calculator-pending");
 	press(&capture, 1, KEY_OK, "5");
-	wait_legends(&capture, "Back", "", "Clear");
+	wait_legends(&capture, "Back", "", "Reset");
 	save_frame(&capture, "calculator-result");
 	press(&capture, 1, KEY_F14, "0");
 	wait_legends(&capture, "", "", "Back");
@@ -587,11 +812,12 @@ int main(int argc, char **argv)
 	press(&capture, 0, KEY_X, NULL);
 	press(&capture, 0, KEY_2, "2");
 	press(&capture, 0, KEY_ENTER, "3");
-	wait_legends(&capture, "Back", "", "Clear");
+	wait_legends(&capture, "Back", "", "Reset");
 	press(&capture, 1, KEY_F14, "0");
 	press(&capture, 1, KEY_NUMERIC_8, "8");
 	press(&capture, 1, KEY_RIGHT, NULL);
 	press(&capture, 1, KEY_NUMERIC_0, "0");
+	capture.expected_reason = "Divide by zero";
 	press(&capture, 1, KEY_OK, "Error");
 	wait_legends(&capture, "Back", "", "Reset");
 	save_frame(&capture, "calculator-error");
@@ -615,7 +841,7 @@ int main(int argc, char **argv)
 	close_and_reap(&capture);
 	start(&capture, argv, "45", "Options", "Equals", "Clear");
 	press(&capture, 1, KEY_OK, "54");
-	wait_legends(&capture, "Back", "", "Clear");
+	wait_legends(&capture, "Back", "", "Reset");
 	fplinux_ui_frame_send_key(&capture.peer.keyboards[1], KEY_F13, true);
 	for (;;) {
 		struct fplinux_ui_session_message message =

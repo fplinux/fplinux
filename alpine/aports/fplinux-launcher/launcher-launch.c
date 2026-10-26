@@ -5,45 +5,8 @@
 
 #include <errno.h>
 #include <stdint.h>
-#include <string.h>
 #include <sys/mman.h>
-#include <sys/stat.h>
 #include <unistd.h>
-
-void fplinux_launcher_backdrop_clear(struct fplinux_launcher_backdrop *backdrop)
-{
-	if (backdrop->pixels)
-		munmap(backdrop->pixels, backdrop->bytes);
-	memset(backdrop, 0, sizeof(*backdrop));
-}
-
-bool fplinux_launcher_backdrop_map(struct fplinux_launcher_backdrop *backdrop,
-				   int fd, int width, int height)
-{
-	struct stat metadata;
-	size_t bytes;
-	void *pixels;
-
-	fplinux_launcher_backdrop_clear(backdrop);
-	if (fd < 0 || width <= 0 || height <= 0 || width % 2 ||
-	    width > FPLINUX_UI_SESSION_FRAME_MAX_WIDTH ||
-	    height > FPLINUX_UI_SESSION_FRAME_MAX_HEIGHT ||
-	    (size_t)width * (size_t)height >
-		    FPLINUX_UI_SESSION_FRAME_MAX_PIXELS)
-		return false;
-	bytes = (size_t)width * (size_t)height * sizeof(uint16_t);
-	if (fstat(fd, &metadata) < 0 || !S_ISREG(metadata.st_mode) ||
-	    metadata.st_size != (off_t)bytes)
-		return false;
-	pixels = mmap(NULL, bytes, PROT_READ, MAP_PRIVATE, fd, 0);
-	if (pixels == MAP_FAILED)
-		return false;
-	backdrop->pixels = pixels;
-	backdrop->bytes = bytes;
-	backdrop->width = width;
-	backdrop->height = height;
-	return true;
-}
 
 int fplinux_launcher_launch_fd(const void *pixels, size_t stride, int width,
 			       int height)

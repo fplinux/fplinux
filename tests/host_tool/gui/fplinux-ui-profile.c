@@ -17,14 +17,15 @@ static void print_profile(const struct fplinux_ui_profile_spec *spec)
 	printf("{\"font_body\": \"%s\", \"width\": %d, \"height\": %d, "
 	       "\"status_height\": %d, \"softkey_height\": %d, "
 	       "\"header_height\": %d, \"margin\": %d, "
-	       "\"list_padding\": %d, \"row_height\": %d, "
+	       "\"scrollbar_space\": %d, "
+	       "\"row_height\": %d, "
 	       "\"app_icon_size\": %d, \"grid_columns\": %d, "
 	       "\"row_tile_radius\": %d, \"app_tile_radius\": %d, "
 	       "\"grid_ring_width\": %d, \"grid_ring_gap\": %d, "
 	       "\"grid_tile_inset\": %d}",
 	       spec->font_body, spec->width, spec->height, spec->status_height,
 	       spec->softkey_height, spec->header_height, spec->margin,
-	       spec->list_padding, spec->row_height, spec->app_icon_size,
+	       spec->scrollbar_space, spec->row_height, spec->app_icon_size,
 	       spec->grid_columns, spec->row_tile_radius, spec->app_tile_radius,
 	       spec->grid_ring_width, spec->grid_ring_gap,
 	       spec->grid_tile_inset);

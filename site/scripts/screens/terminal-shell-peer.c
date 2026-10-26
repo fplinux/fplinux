@@ -59,6 +59,35 @@ static void read_text(const char *path, char *bytes, size_t capacity)
 	bytes[size] = '\0';
 }
 
+static void render_sample(char request)
+{
+	struct winsize size;
+	char position[64];
+
+	assert(!ioctl(STDIN_FILENO, TIOCGWINSZ, &size));
+	assert(size.ws_col >= 6 && size.ws_row >= 2);
+	text("\033[0m\033[?7h\033[?25h\033[2J\033[H");
+	if (request == 'P') {
+		text("gpqy_Z\033[2;1H\033[?25l");
+	} else if (request == 'I') {
+		text("\033[7m \033[0m\033[H");
+	} else if (request == 'B') {
+		text("\033[107m \033[0m\033[H");
+	} else {
+		assert(request == 'E' || request == 'L');
+		if (request == 'L') {
+			text("gpqy_");
+			assert(snprintf(position, sizeof(position),
+					"\033[%u;1H",
+					size.ws_row) < (int)sizeof(position));
+			text(position);
+		}
+		for (unsigned int column = 1; column < size.ws_col; ++column)
+			text("W");
+		text("Z");
+	}
+}
+
 int main(void)
 {
 	const char *control_text = getenv("FPLINUX_SCREEN_CONTROL_FD");
@@ -118,7 +147,20 @@ int main(void)
 		if (!ready)
 			continue;
 		if (inputs[1].revents & POLLIN) {
-			assert(read(control, bytes, 1) == 1 && bytes[0] == 'H');
+			assert(read(control, bytes, 1) == 1);
+			if (strchr("PIBEL", bytes[0])) {
+				render_sample(bytes[0]);
+				write_all(control, bytes, 1);
+				continue;
+			}
+			if (bytes[0] == 'F' || bytes[0] == 'S') {
+				text("\r\nFINAL-SHELL-OUTPUT");
+				write_all(control, "Q", 1);
+				if (bytes[0] == 'S')
+					raise(SIGTERM);
+				return 37;
+			}
+			assert(bytes[0] == 'H');
 			for (unsigned int line = 0; line < 600; ++line)
 				text("history line\r\n");
 			write_all(control, "H", 1);

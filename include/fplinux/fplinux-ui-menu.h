@@ -33,10 +33,22 @@ struct fplinux_ui_menu_item {
 	const void *icon;
 };
 
+enum fplinux_ui_menu_origin {
+	FPLINUX_UI_MENU_ORIGIN_LEFT,
+	FPLINUX_UI_MENU_ORIGIN_CENTRE,
+	FPLINUX_UI_MENU_ORIGIN_RIGHT,
+};
+
 typedef void (*fplinux_ui_menu_cb)(struct fplinux_ui *ui, int action,
 				   void *context);
 
-bool fplinux_ui_menu_open(struct fplinux_ui *ui, const char *title,
+/*
+ * Aligns a content-sized window above the soft-key bar at origin's side.
+ * NULL or an empty title omits the title band. Origin does not change the
+ * menu's Select and Back keys. The size stays fixed while navigating.
+ */
+bool fplinux_ui_menu_open(struct fplinux_ui *ui,
+			  enum fplinux_ui_menu_origin origin, const char *title,
 			  const struct fplinux_ui_menu_item *items,
 			  size_t count, fplinux_ui_menu_cb callback,
 			  void *context);

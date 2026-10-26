@@ -58,6 +58,7 @@ struct calculator_app {
 	enum fplinux_calculator_state command_state;
 	bool commands_ready;
 	bool command_equals;
+	bool digit_limit;
 	lv_timer_t *hold_timer;
 	uint64_t clear_pressed_ms;
 	bool clear_held;
@@ -155,7 +156,10 @@ static bool show_save_error(struct calculator_app *app)
 					   FPLINUX_UI_GLYPH_ROW) },
 		{ .id = COMMAND_DISCARD,
 		  .type = FPLINUX_UI_COMMAND_SCREEN,
-		  .label = _("Discard"),
+		  .label = app->saved.state ==
+					   FPLINUX_STORAGE_PUBLISHED_UNSYNCED ?
+				   _("Close anyway") :
+				   _("Discard changes"),
 		  .icon = fplinux_ui_glyph(app->ui, "delete",
 					   FPLINUX_UI_GLYPH_ROW) },
 	};
@@ -243,15 +247,14 @@ static bool sync_commands(struct calculator_app *app)
 	enum fplinux_calculator_state state =
 		fplinux_calculator_get_state(&app->calculator);
 	bool equals = fplinux_calculator_can_evaluate(&app->calculator);
+	bool resets = state == FPLINUX_CALCULATOR_RESULT ||
+		      state == FPLINUX_CALCULATOR_ERROR;
 	const struct fplinux_ui_command clear = {
 		.id = COMMAND_CLEAR,
 		.type = FPLINUX_UI_COMMAND_BACK,
-		.label = state == FPLINUX_CALCULATOR_ERROR ? _("Reset") :
-							     _("Clear"),
+		.label = resets ? _("Reset") : _("Clear"),
 		.icon = fplinux_ui_glyph(app->ui,
-					 state == FPLINUX_CALCULATOR_ERROR ?
-						 "refresh" :
-						 "backspace",
+					 resets ? "refresh" : "backspace",
 					 FPLINUX_UI_GLYPH_ROW),
 	};
 	const struct fplinux_ui_command reset = {
@@ -332,19 +335,28 @@ static void refresh(struct calculator_app *app)
 	bool error = state == FPLINUX_CALCULATOR_ERROR;
 	char number[FPLINUX_CALCULATOR_TEXT_BYTES];
 	char first[FPLINUX_CALCULATOR_TEXT_BYTES];
-	char pending[FPLINUX_CALCULATOR_TEXT_BYTES + 8] = "";
+	char pending[128] = "";
 
 	fplinux_calculator_display(calculator, app->separator, number,
 				   sizeof(number));
-	show_number(app, error ? _("Error") : number,
-		    error ? theme->font_large : theme->font_clock);
-	if (state == FPLINUX_CALCULATOR_OPERATION) {
+	if (error) {
+		snprintf(pending, sizeof(pending), "%s",
+			 calculator->error ==
+					 FPLINUX_CALCULATOR_DIVIDE_BY_ZERO ?
+				 _("Divide by zero") :
+				 _("Number too large"));
+	} else if (app->digit_limit) {
+		snprintf(pending, sizeof(pending), "%s",
+			 _("Maximum 12 digits"));
+	} else if (state == FPLINUX_CALCULATOR_OPERATION) {
 		fplinux_calculator_format(calculator->accumulator,
 					  app->separator, first, sizeof(first));
 		snprintf(pending, sizeof(pending), "%s %s", first,
 			 operator_glyph(calculator->operation));
 	}
 	set_text(app->pending, pending);
+	show_number(app, error ? _("Error") : number,
+		    error ? theme->font_large : theme->font_clock);
 	if (calculator->operation != app->highlighted)
 		highlight_operation(app, calculator->operation);
 	if (!sync_commands(app))
@@ -353,10 +365,14 @@ static void refresh(struct calculator_app *app)
 
 static bool input(struct calculator_app *app, char key)
 {
-	if (!fplinux_calculator_input(&app->calculator, key))
+	enum fplinux_calculator_input_result result =
+		fplinux_calculator_input(&app->calculator, key);
+
+	if (result == FPLINUX_CALCULATOR_IGNORED)
 		return false;
+	app->digit_limit = result == FPLINUX_CALCULATOR_DIGIT_LIMIT;
 	refresh(app);
-	return true;
+	return result == FPLINUX_CALCULATOR_CHANGED;
 }
 
 static bool can_hold_clear(const struct calculator_app *app)
@@ -631,7 +647,11 @@ static void handle_event(struct fplinux_ui *ui,
 {
 	struct calculator_app *app = context;
 
-	if (event->type == FPLINUX_UI_EVENT_INPUT_CANCEL) {
+	if (event->type == FPLINUX_UI_EVENT_ACTIVATION &&
+	    event->activation == FPLINUX_UI_ACTIVATION_OPEN) {
+		stop_hold(app);
+		fplinux_ui_menu_close(ui);
+	} else if (event->type == FPLINUX_UI_EVENT_INPUT_CANCEL) {
 		if (event->key.source == FPLINUX_UI_KEY_PHONE)
 			stop_hold(app);
 	} else if (event->type == FPLINUX_UI_EVENT_CLOSE) {
@@ -673,7 +693,7 @@ static bool create_view(struct calculator_app *app)
 		return false;
 	fplinux_ui_screen_set_listener(app->screen, handle_command, NULL, app);
 	fplinux_ui_canvas_set_key_handler(app->screen, handle_key, app);
-	fplinux_ui_canvas_set_key_filter(app->screen, filter_key, app);
+	fplinux_ui_screen_set_key_filter(app->screen, filter_key, app);
 	if (!layout_view(app))
 		return false;
 	fplinux_ui_push(app->ui, app->screen);

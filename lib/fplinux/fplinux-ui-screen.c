@@ -159,6 +159,9 @@ struct fplinux_ui_screen {
 	bool stacked;
 	struct options_return options_return;
 	char *title;
+	char *header_full;
+	/* NULL uses header_full. */
+	char *header_compact;
 	struct command *commands;
 	size_t command_count;
 	size_t command_capacity;
@@ -181,10 +184,13 @@ struct fplinux_ui_screen {
 	lv_obj_t *root;
 	lv_obj_t *band;
 	lv_obj_t *band_label;
+	lv_obj_t *header_status;
 	lv_obj_t *content;
 
 	struct fplinux_ui_listview *list;
 	enum fplinux_ui_list_kind list_kind;
+	fplinux_ui_change_cb on_focus;
+	void *focus_context;
 	/* Only a form's popup choice retains and dims the screen below it. */
 	bool popup_choice;
 	char *select_label;
@@ -219,8 +225,10 @@ struct fplinux_ui_screen {
 
 	fplinux_ui_canvas_key_cb canvas_key;
 	void *canvas_context;
-	fplinux_ui_canvas_key_filter_cb canvas_filter;
-	void *canvas_filter_context;
+	fplinux_ui_screen_key_filter_cb key_filter;
+	void *key_filter_context;
+	/* A filter owns these releases, even when it has since been removed. */
+	unsigned char filtered[2][KEY_CNT / 8];
 	/* Keyboard Escape and Enter go to canvas_key, not to the commands. */
 	bool keyboard_raw;
 	enum fplinux_ui_canvas_repeat key_repeat;
@@ -233,6 +241,8 @@ struct fplinux_ui_screens {
 	struct fplinux_ui_screen *all;
 	/* Presses the runtime used for commands; their releases go nowhere. */
 	unsigned char used[2][KEY_CNT / 8];
+	/* Filter-owned keys are released to their original surviving screen. */
+	unsigned char filtered[2][KEY_CNT / 8];
 	bool visible;
 	bool closing;
 	char legends[3][FPLINUX_UI_SESSION_TEXT_BYTES];
@@ -345,13 +355,9 @@ spec_of(const struct fplinux_ui_screen *screen)
 /* The one scroll indicator: a thumb in focus, no track. */
 static void style_scrollbar(lv_obj_t *object, struct fplinux_ui *ui)
 {
-	const struct fplinux_ui_profile_spec *spec = fplinux_ui_spec(ui);
-
 	lv_obj_set_scroll_dir(object, LV_DIR_VER);
 	lv_obj_set_scrollbar_mode(object, LV_SCROLLBAR_MODE_AUTO);
 	fplinux_ui_style_scrollbar(ui, object);
-	lv_obj_set_style_pad_ver(object, spec->content_padding,
-				 LV_PART_SCROLLBAR);
 }
 
 static lv_obj_t *plain_object(lv_obj_t *parent)
@@ -370,11 +376,28 @@ static bool launcher_legend_bar(const struct fplinux_ui_screen *screen)
 	       screen->kind != SCREEN_CANVAS;
 }
 
+static int32_t screen_top(const struct fplinux_ui_screen *screen)
+{
+	return launcher_legend_bar(screen) ? spec_of(screen)->status_height : 0;
+}
+
 static int32_t screen_height(const struct fplinux_ui_screen *screen)
 {
 	return launcher_legend_bar(screen) ?
-		       fplinux_ui_modal_height(screen->ui) :
+		       fplinux_ui_modal_height(screen->ui) -
+			       screen_top(screen) :
 		       fplinux_ui_height(screen->ui);
+}
+
+static int32_t label_text_width(lv_obj_t *label, const char *text)
+{
+	lv_point_t size;
+
+	lv_text_get_size(
+		&size, text, lv_obj_get_style_text_font(label, LV_PART_MAIN),
+		lv_obj_get_style_text_letter_space(label, LV_PART_MAIN), 0,
+		LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+	return size.x;
 }
 
 /*
@@ -386,8 +409,10 @@ static void size_frame(struct fplinux_ui_screen *screen)
 	const struct fplinux_ui_profile_spec *spec = spec_of(screen);
 	int32_t top = screen->title ? spec->header_height : 0;
 	int32_t width = fplinux_ui_width(screen->ui);
-	int32_t height = screen->editing ? fplinux_ui_modal_height(screen->ui) :
+	int32_t height = screen->editing ? fplinux_ui_modal_height(screen->ui) -
+						   screen_top(screen) :
 					   screen_height(screen);
+	int32_t title_width;
 
 	if (screen->popup_choice) {
 		lv_obj_update_layout(screen->box);
@@ -395,7 +420,33 @@ static void size_frame(struct fplinux_ui_screen *screen)
 		height = lv_obj_get_content_height(screen->box);
 	}
 	lv_obj_set_size(screen->band, width, spec->header_height);
-	lv_obj_set_width(screen->band_label, width - 2 * spec->margin);
+	title_width = width - 2 * spec->margin;
+	if (screen->header_status) {
+		const char *text = screen->header_full;
+		int32_t status_width =
+			label_text_width(screen->header_status, text);
+		int32_t full_title_width =
+			screen->title ? label_text_width(screen->band_label,
+							 screen->title) :
+					0;
+		int32_t gap = full_title_width && status_width ? spec->spacing :
+								 0;
+
+		if (full_title_width + gap + status_width > title_width &&
+		    screen->header_compact) {
+			text = screen->header_compact;
+			status_width =
+				label_text_width(screen->header_status, text);
+			gap = full_title_width && status_width ? spec->spacing :
+								 0;
+		}
+		lv_label_set_text_static(screen->header_status, text);
+		lv_obj_set_width(screen->header_status, status_width);
+		lv_obj_align(screen->header_status, LV_ALIGN_RIGHT_MID,
+			     -spec->margin, 0);
+		title_width -= status_width + gap;
+	}
+	lv_obj_set_width(screen->band_label, title_width > 0 ? title_width : 0);
 	lv_obj_set_pos(screen->content, 0, top);
 	lv_obj_set_size(screen->content, width, height - top);
 }
@@ -408,10 +459,13 @@ static void layout_frame(struct fplinux_ui_screen *screen)
 	if (screen->title) {
 		lv_label_set_text(screen->band_label, screen->title);
 		/* A hidden screen's title scrolls once it shows. */
-		if (!lv_obj_is_hidden(screen->root))
+		if (!screen->header_status && !lv_obj_is_hidden(screen->root))
 			fplinux_ui_title_scroll(screen->band_label);
-		else
+		else {
 			fplinux_ui_title_hide(screen->band_label);
+			lv_label_set_long_mode(screen->band_label,
+					       LV_LABEL_LONG_MODE_DOTS);
+		}
 	} else if (screen->band_label) {
 		fplinux_ui_title_hide(screen->band_label);
 	}
@@ -421,7 +475,8 @@ static void layout_frame(struct fplinux_ui_screen *screen)
 static int32_t root_height(const struct fplinux_ui_screen *screen)
 {
 	return screen->kind == SCREEN_ALERT || screen->popup_choice ?
-		       fplinux_ui_modal_height(screen->ui) :
+		       fplinux_ui_modal_height(screen->ui) -
+			       screen_top(screen) :
 		       screen_height(screen);
 }
 
@@ -432,6 +487,7 @@ static void build_frame(struct fplinux_ui_screen *screen)
 	int32_t width = fplinux_ui_width(screen->ui);
 
 	screen->root = plain_object(fplinux_ui_screen(screen->ui));
+	lv_obj_set_y(screen->root, screen_top(screen));
 	lv_obj_set_size(screen->root, width, root_height(screen));
 	lv_obj_set_hidden(screen->root, true);
 	lv_obj_set_style_text_color(screen->root, theme->foreground, 0);
@@ -540,6 +596,32 @@ static const char *command_label(const struct fplinux_ui_screen *screen,
 	command = screen->candidates[index].command;
 	return command->label ? command->label :
 				word(screen, default_labels[command->type]);
+}
+
+/* Application images override the standard meaning of a command type. */
+static const void *command_icon(struct fplinux_ui_screen *screen,
+				const struct candidate *candidate)
+{
+	static const char *const glyphs[] = {
+		[FPLINUX_UI_COMMAND_BACK] = "back",
+		[FPLINUX_UI_COMMAND_CANCEL] = "cancel",
+		[FPLINUX_UI_COMMAND_EXIT] = "exit",
+		[FPLINUX_UI_COMMAND_STOP] = "stop",
+		[FPLINUX_UI_COMMAND_OK] = "check",
+		[FPLINUX_UI_COMMAND_ITEM] = NULL,
+		[FPLINUX_UI_COMMAND_SCREEN] = NULL,
+		[FPLINUX_UI_COMMAND_HELP] = "help",
+	};
+	const struct command *command = candidate->command;
+	const char *glyph;
+
+	if (command->icon)
+		return command->icon;
+	/* Synthetic Clear has no command type of its own. */
+	glyph = candidate->clear ? "backspace" : glyphs[command->type];
+	return glyph ? fplinux_ui_glyph(screen->ui, glyph,
+					FPLINUX_UI_GLYPH_ROW) :
+		       NULL;
 }
 
 static size_t find_command(const struct fplinux_ui_screen *screen, int id)
@@ -899,6 +981,9 @@ bool fplinux_ui_screen_set_title(struct fplinux_ui_screen *screen,
 		errno = EINVAL;
 		return false;
 	}
+	if ((!title && !screen->title) ||
+	    (title && screen->title && !strcmp(title, screen->title)))
+		return true;
 	if (title && !(copy = strdup(title)))
 		return false;
 	free(screen->title);
@@ -907,6 +992,70 @@ bool fplinux_ui_screen_set_title(struct fplinux_ui_screen *screen,
 		show_alert_title(screen);
 	else
 		layout_frame(screen);
+	return true;
+}
+
+bool fplinux_ui_screen_set_header_status(struct fplinux_ui_screen *screen,
+					 const char *full, const char *compact)
+{
+	char *full_copy = NULL;
+	char *compact_copy = NULL;
+	char *old_full;
+	char *old_compact;
+	lv_obj_t *label;
+
+	if (!screen || screen->kind == SCREEN_ALERT) {
+		errno = EINVAL;
+		return false;
+	}
+	if (!full || !full[0]) {
+		if (!screen->header_full)
+			return true;
+	} else {
+		if (!compact)
+			compact = full;
+		if (screen->header_full && !strcmp(screen->header_full, full) &&
+		    !strcmp(screen->header_compact ? screen->header_compact :
+						     screen->header_full,
+			    compact))
+			return true;
+		full_copy = strdup(full);
+		if (!full_copy)
+			return false;
+		if (strcmp(full, compact)) {
+			compact_copy = strdup(compact);
+			if (!compact_copy) {
+				free(full_copy);
+				return false;
+			}
+		}
+	}
+	label = screen->header_status;
+	if (full_copy && !label) {
+		const lv_font_t *font = fplinux_ui_theme(screen->ui)->font;
+
+		label = lv_label_create(screen->band);
+		if (!label) {
+			free(compact_copy);
+			free(full_copy);
+			errno = ENOMEM;
+			return false;
+		}
+		lv_obj_set_style_text_font(label, font, 0);
+		lv_obj_set_height(label, lv_font_get_line_height(font));
+		lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_CLIP);
+	} else if (!full_copy) {
+		lv_obj_delete(label);
+		label = NULL;
+	}
+	old_full = screen->header_full;
+	old_compact = screen->header_compact;
+	screen->header_full = full_copy;
+	screen->header_compact = compact_copy;
+	screen->header_status = label;
+	layout_frame(screen);
+	free(old_full);
+	free(old_compact);
 	return true;
 }
 
@@ -933,6 +1082,9 @@ static int32_t alert_box_width(struct fplinux_ui *ui)
 static int32_t alert_box_max_height(struct fplinux_ui *ui)
 {
 	return fplinux_ui_modal_height(ui) -
+	       (fplinux_ui_is_launcher(ui) ?
+			fplinux_ui_spec(ui)->status_height :
+			0) -
 	       2 * fplinux_ui_spec(ui)->alert_margin;
 }
 
@@ -957,7 +1109,10 @@ bool fplinux_ui_screen_get_content_size(const struct fplinux_ui_screen *screen,
 	if (screen->kind == SCREEN_ALERT) {
 		int32_t inset = 2 * (spec->alert_border + spec->alert_padding);
 
-		w = alert_box_width(screen->ui) - inset;
+		fplinux_ui_scrollbar_layout(screen->box);
+		w = alert_box_width(screen->ui) - inset -
+		    (lv_obj_get_style_pad_right(screen->box, 0) -
+		     spec->alert_padding);
 		h = alert_box_max_height(screen->ui) - inset;
 	} else if (screen->popup_choice) {
 		/* The runtime's list of a popup choice, inside its frame. */
@@ -1080,8 +1235,7 @@ static const char *element_action(const struct fplinux_ui_screen *screen)
 				screen,
 				&screen->item_commands[own_ok_command(screen)]
 					 .command);
-		if (screen->list_kind == FPLINUX_UI_LIST_IMPLICIT &&
-		    screen->select_label)
+		if (screen->select_label)
 			return screen->select_label;
 		return word(screen, FPLINUX_UI_LABEL_SELECT);
 	case SCREEN_FORM:
@@ -1792,13 +1946,20 @@ static void restack(struct fplinux_ui_screens *layer)
 
 	for (struct fplinux_ui_screen *screen = layer->top; screen;
 	     screen = screen->below) {
-		bool showing = shown && lv_obj_is_hidden(screen->root);
+		/* The launcher's base Canvas owns the persistent system bars. */
+		bool backdrop = !screen->below &&
+				screen->kind == SCREEN_CANVAS &&
+				fplinux_ui_is_launcher(screen->ui);
+		bool visible = shown || backdrop;
+		bool showing = visible && lv_obj_is_hidden(screen->root);
 
-		lv_obj_set_hidden(screen->root, !shown);
+		lv_obj_set_hidden(screen->root, !visible);
 		/* A long title scrolls once each time its screen shows. */
-		if (showing && screen->title && screen->band_label)
+		if (showing && screen->title && screen->band_label &&
+		    !screen->header_status)
 			fplinux_ui_title_scroll(screen->band_label);
-		else if (!shown && screen->band_label)
+		else if ((!visible || screen->header_status) &&
+			 screen->band_label)
 			fplinux_ui_title_hide(screen->band_label);
 		set_active(screen, screen == layer->top);
 		if (screen->kind != SCREEN_ALERT && !screen->popup_choice)
@@ -1862,6 +2023,8 @@ static void destroy_screen(struct fplinux_ui_screen *screen)
 	free(screen->order);
 	free(screen->select_label);
 	free(screen->title);
+	free(screen->header_full);
+	free(screen->header_compact);
 	free(screen);
 }
 
@@ -1986,6 +2149,8 @@ void fplinux_ui_go_back(struct fplinux_ui *ui)
 }
 
 /* Images */
+
+static void image_parent_resized(lv_event_t *event);
 
 static const uint8_t png_signature[8] = { 0x89, 'P',  'N',  'G',
 					  '\r', '\n', 0x1a, '\n' };
@@ -2590,10 +2755,26 @@ size_t fplinux_ui_list_get_focused(const struct fplinux_ui_screen *list)
 	return is_list(list) ? fplinux_ui_listview_selected(list->list) : NONE;
 }
 
+size_t fplinux_ui_list_get_first_visible(const struct fplinux_ui_screen *list)
+{
+	return is_list(list) ? fplinux_ui_listview_first_visible(list->list) :
+			       NONE;
+}
+
 void fplinux_ui_list_set_focused(struct fplinux_ui_screen *list, size_t index)
 {
 	if (is_list(list))
 		fplinux_ui_listview_select(list->list, index);
+}
+
+void fplinux_ui_list_set_focus_listener(struct fplinux_ui_screen *list,
+					fplinux_ui_change_cb focused,
+					void *context)
+{
+	if (!is_list(list))
+		return;
+	list->on_focus = focused;
+	list->focus_context = context;
 }
 
 /* An implicit list's selection is its focused row. */
@@ -2645,20 +2826,23 @@ bool fplinux_ui_list_set_select_label(struct fplinux_ui_screen *list,
 }
 
 bool fplinux_ui_list_set_icon(struct fplinux_ui_screen *list, size_t index,
-			      const void *src)
+			      const void *src,
+			      enum fplinux_ui_list_icon_kind kind)
 {
 	int size = 0;
 	lv_draw_buf_t *icon = NULL;
 
 	if (!is_stored_list(list) ||
-	    index >= fplinux_ui_listview_count(list->list)) {
+	    index >= fplinux_ui_listview_count(list->list) ||
+	    (kind != FPLINUX_UI_LIST_ICON_IMAGE &&
+	     kind != FPLINUX_UI_LIST_ICON_APP_TILE)) {
 		errno = EINVAL;
 		return false;
 	}
 	size = spec_of(list)->row_icon_size;
 	if (src && !(icon = fplinux_ui_image_decode(src, size, size, false)))
 		return false;
-	if (!fplinux_ui_listview_set_icon(list->list, index, icon)) {
+	if (!fplinux_ui_listview_set_icon(list->list, index, icon, kind)) {
 		if (icon)
 			lv_draw_buf_destroy(icon);
 		return false;
@@ -2762,7 +2946,7 @@ static struct form_item *add_item(struct fplinux_ui_screen *form,
 	lv_obj_set_flex_flow(item->box, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_style_pad_row(item->box, spec_of(form)->gap_small, 0);
 	lv_obj_set_style_pad_left(item->box, spec_of(form)->margin, 0);
-	lv_obj_set_style_pad_right(item->box, spec_of(form)->gutter, 0);
+	lv_obj_set_style_pad_right(item->box, spec_of(form)->margin, 0);
 	if (label)
 		item->label = muted_label(form, item->box, label);
 	form->items[form->item_count++] = item;
@@ -3016,7 +3200,6 @@ static bool make_choice_list(struct form_item *item, size_t rows,
 	if (!item->list)
 		return false;
 	fplinux_ui_listview_set_inline_detail(item->list, popup);
-	lv_obj_set_style_pad_ver(fplinux_ui_listview_object(item->list), 0, 0);
 	fplinux_ui_listview_set_selectable(item->list, false);
 	fplinux_ui_listview_set_callbacks(item->list, choice_selected, NULL,
 					  item);
@@ -3051,7 +3234,7 @@ size_t fplinux_ui_form_append_choice(struct fplinux_ui_screen *form,
 	if (item->label) {
 		lv_obj_set_style_pad_left(item->label, spec_of(form)->margin,
 					  0);
-		lv_obj_set_style_pad_right(item->label, spec_of(form)->gutter,
+		lv_obj_set_style_pad_right(item->label, spec_of(form)->margin,
 					   0);
 	}
 	if ((popup && !copy_choices(item, choices)) ||
@@ -3166,12 +3349,13 @@ static void popup_changed(struct fplinux_ui *ui,
 static void size_popup_choice(struct fplinux_ui_screen *list, size_t count)
 {
 	const struct fplinux_ui_profile_spec *spec = spec_of(list);
-	int32_t height =
-		fplinux_ui_modal_height(list->ui) - 2 * spec->alert_margin;
+	int32_t height = root_height(list) - 2 * spec->alert_margin;
 	int32_t title = list->title ? spec->header_height : 0;
-	int32_t inset = 2 * (spec->alert_border + spec->list_padding);
+	int32_t inset = 2 * spec->alert_border;
 
-	if (count < (size_t)((height - title - inset) / spec->row_height))
+	if (height >= title + inset &&
+	    count <=
+		    (size_t)(height - title - inset) / (size_t)spec->row_height)
 		height = title + inset + (int32_t)count * spec->row_height;
 	lv_obj_set_size(list->box,
 			fplinux_ui_width(list->ui) - 2 * spec->alert_margin,
@@ -3553,7 +3737,7 @@ static void image_limits(const struct fplinux_ui_screen *form, bool label,
 {
 	const struct fplinux_ui_profile_spec *spec = spec_of(form);
 
-	*width = fplinux_ui_width(form->ui) - spec->margin - spec->gutter;
+	*width = fplinux_ui_width(form->ui) - 2 * spec->margin;
 	*height = screen_height(form) - 2 * spec->content_padding -
 		  (form->title ? spec->header_height : 0) -
 		  (label ? lv_font_get_line_height(
@@ -3588,6 +3772,8 @@ size_t fplinux_ui_form_append_image(struct fplinux_ui_screen *form,
 	lv_obj_set_flex_align(item->box, LV_FLEX_ALIGN_START,
 			      LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	item->value = lv_image_create(item->box);
+	lv_obj_set_style_max_width(item->value, lv_pct(100), 0);
+	lv_image_set_inner_align(item->value, LV_IMAGE_ALIGN_CONTAIN);
 	/*
 	 * An alpha-only image (a glyph, a "-symbolic.png" file) is drawn in
 	 * the form's text colour, as row icons are; without a recolour
@@ -3598,6 +3784,8 @@ size_t fplinux_ui_form_append_image(struct fplinux_ui_screen *form,
 	lv_obj_add_event_cb(item->value, image_delete_cb, LV_EVENT_DELETE,
 			    buffer);
 	item->image = buffer;
+	lv_obj_add_event_cb(item->box, image_parent_resized,
+			    LV_EVENT_SIZE_CHANGED, item);
 	return appended(form, item);
 }
 
@@ -3908,29 +4096,64 @@ bool fplinux_ui_form_set_constraint(struct fplinux_ui_screen *form, size_t item,
 /* String and image items shown as links or buttons */
 
 /*
- * The picture that fits inside the box of a link or button: the decoded
- * one, or once a copy scaled down to the box's inside. Without memory for
- * the copy, the box clips the picture.
+ * The picture fits the actual item width, including a reserved scroll lane.
+ * Bind a replacement before releasing its old buffer: setting a source can
+ * run layout and deliver a parent-size callback again.
  */
-static const lv_draw_buf_t *boxed_image(struct form_item *item)
+static void show_image(struct form_item *item)
 {
 	const struct fplinux_ui_profile_spec *spec = spec_of(item->form);
 	int32_t inset = 2 * (spec->focus_width + spec->frame_padding);
-	int32_t width;
-	int32_t height;
+	lv_draw_buf_t *previous = item->fitted;
+	lv_draw_buf_t *fitted = NULL;
+	const lv_draw_buf_t *buffer = item->image;
 
-	if (item->fitted)
-		return item->fitted;
-	image_limits(item->form, item->label != NULL, &width, &height);
-	width -= inset;
-	height -= inset;
-	if (width <= 0 || height <= 0 ||
-	    ((int32_t)item->image->header.w <= width &&
-	     (int32_t)item->image->header.h <= height))
-		return item->image;
-	item->fitted =
-		fplinux_ui_image_decode(item->image, width, height, false);
-	return item->fitted ? item->fitted : item->image;
+	if (item->frame) {
+		int32_t width, height;
+		int32_t available = lv_obj_get_content_width(item->box);
+		uint32_t fitted_width, fitted_height;
+
+		image_limits(item->form, item->label != NULL, &width, &height);
+		if (available > 0 && available < width)
+			width = available;
+		width -= inset;
+		height -= inset;
+		if (width > 0 && height > 0) {
+			fit_size(&item->image->header, (uint32_t)width,
+				 (uint32_t)height, &fitted_width,
+				 &fitted_height);
+			if (fitted_width != item->image->header.w ||
+			    fitted_height != item->image->header.h) {
+				if (previous &&
+				    previous->header.w == fitted_width &&
+				    previous->header.h == fitted_height)
+					fitted = previous;
+				else
+					fitted = fplinux_ui_image_decode(
+						item->image, width, height,
+						false);
+				if (fitted)
+					buffer = fitted;
+			}
+		}
+	}
+	item->fitted = fitted;
+	/* A content-sized frame cannot size its child by percentages. */
+	lv_obj_set_style_max_width(
+		item->value,
+		item->frame ? (int32_t)buffer->header.w : lv_pct(100), 0);
+	if (lv_image_get_src(item->value) != buffer)
+		lv_image_set_src(item->value, buffer);
+	if (previous && previous != fitted)
+		lv_draw_buf_destroy(previous);
+}
+
+static void image_parent_resized(lv_event_t *event)
+{
+	struct form_item *item = lv_event_get_user_data(event);
+
+	if (item->frame)
+		show_image(item);
 }
 
 /*
@@ -3989,8 +4212,7 @@ static bool apply_appearance(struct form_item *item)
 		lv_obj_set_style_pad_bottom(frame, spec->frame_padding, 0);
 	}
 	if (image) {
-		lv_image_set_src(item->value,
-				 item->frame ? boxed_image(item) : item->image);
+		show_image(item);
 		lv_obj_set_style_image_recolor(
 			item->value, link ? theme->accent : theme->foreground,
 			0);
@@ -4177,6 +4399,16 @@ bool fplinux_ui_text_box_set(struct fplinux_ui_screen *box, const char *text)
 	return true;
 }
 
+bool fplinux_ui_text_box_cancel_picker(struct fplinux_ui_screen *box)
+{
+	if (!box || box->kind != SCREEN_TEXT_BOX) {
+		errno = EINVAL;
+		return false;
+	}
+	fplinux_ui_text_cancel_picker(box->items[0]->field);
+	return true;
+}
+
 bool fplinux_ui_text_box_set_constraint(
 	struct fplinux_ui_screen *box,
 	enum fplinux_ui_text_constraint constraint)
@@ -4214,7 +4446,6 @@ struct fplinux_ui_screen *fplinux_ui_alert_new(struct fplinux_ui *ui,
 	const struct fplinux_ui_theme *theme;
 	struct fplinux_ui_screen *alert;
 	lv_color_t colour;
-	int32_t inset;
 
 	if ((unsigned int)kind > FPLINUX_UI_ALERT_ERROR) {
 		errno = EINVAL;
@@ -4228,9 +4459,7 @@ struct fplinux_ui_screen *fplinux_ui_alert_new(struct fplinux_ui *ui,
 	alert->alert_kind = kind;
 	alert->timeout_ms = timeout_ms;
 	/* The kind shows in the frame and, for a warning or error, the title. */
-	colour = kind == FPLINUX_UI_ALERT_WARNING ? theme->warning :
-		 kind == FPLINUX_UI_ALERT_ERROR	  ? theme->danger :
-						    theme->focus;
+	colour = fplinux_ui_alert_color(ui, kind);
 	alert->box = plain_object(alert->root);
 	lv_obj_set_size(alert->box, alert_box_width(ui), LV_SIZE_CONTENT);
 	lv_obj_set_style_max_height(alert->box, alert_box_max_height(ui), 0);
@@ -4243,13 +4472,6 @@ struct fplinux_ui_screen *fplinux_ui_alert_new(struct fplinux_ui *ui,
 	lv_obj_set_style_border_width(alert->box, spec->alert_border, 0);
 	lv_obj_set_scrollable(alert->box, true);
 	style_scrollbar(alert->box, ui);
-	/* The scroll indicator stays inside the frame, clear of the text. */
-	inset = spec->alert_padding + spec->alert_border -
-		spec->scrollbar_width;
-	if (inset > spec->scrollbar_offset)
-		inset = spec->scrollbar_offset;
-	lv_obj_set_style_pad_right(alert->box, inset > 0 ? inset : 0,
-				   LV_PART_SCROLLBAR);
 	lv_obj_center(alert->box);
 	alert->box_title = lv_label_create(alert->box);
 	lv_obj_set_width(alert->box_title, lv_pct(100));
@@ -4365,14 +4587,14 @@ void fplinux_ui_canvas_set_key_handler(struct fplinux_ui_screen *canvas,
 	canvas->canvas_context = context;
 }
 
-void fplinux_ui_canvas_set_key_filter(struct fplinux_ui_screen *canvas,
-				      fplinux_ui_canvas_key_filter_cb filter,
+void fplinux_ui_screen_set_key_filter(struct fplinux_ui_screen *screen,
+				      fplinux_ui_screen_key_filter_cb filter,
 				      void *context)
 {
-	if (!canvas || canvas->kind != SCREEN_CANVAS)
+	if (!screen)
 		return;
-	canvas->canvas_filter = filter;
-	canvas->canvas_filter_context = context;
+	screen->key_filter = filter;
+	screen->key_filter_context = context;
 }
 
 void fplinux_ui_canvas_set_keyboard_keys(struct fplinux_ui_screen *canvas,
@@ -4403,6 +4625,7 @@ static void open_options(struct fplinux_ui_screen *screen,
 	struct fplinux_ui_menu_item *items = calloc(count, sizeof(*items));
 	struct menu_entry *entries =
 		realloc(layer->menu_entries, count * sizeof(*entries));
+	size_t visible = 0;
 
 	if (entries)
 		layer->menu_entries = entries;
@@ -4410,37 +4633,37 @@ static void open_options(struct fplinux_ui_screen *screen,
 		free(items);
 		return;
 	}
-	for (size_t i = 0; i < count; ++i) {
-		const struct candidate *candidate =
-			&screen->candidates[screen->order[i]];
+	/* Back ends the visible menu; key assignment keeps its own priority. */
+	for (unsigned int pass = 0; pass < 2; ++pass) {
+		for (size_t i = 0; i < count; ++i) {
+			const struct candidate *candidate =
+				&screen->candidates[screen->order[i]];
+			bool back = !candidate->clear &&
+				    candidate->command->type ==
+					    FPLINUX_UI_COMMAND_BACK;
 
-		entries[i] = (struct menu_entry){
-			.id = candidate->command->id,
-			.item = candidate->item,
-			.clear = candidate->clear,
-			.index = focused_index(screen),
-		};
-		items[i] = (struct fplinux_ui_menu_item){
-			.action = (int)i,
-			.text = command_label(screen, screen->order[i]),
-			.icon = candidate->command->icon,
-		};
+			if (back != (pass == 1))
+				continue;
+			entries[visible] = (struct menu_entry){
+				.id = candidate->command->id,
+				.item = candidate->item,
+				.clear = candidate->clear,
+				.index = focused_index(screen),
+			};
+			items[visible] = (struct fplinux_ui_menu_item){
+				.action = (int)visible,
+				.text = command_label(screen, screen->order[i]),
+				.icon = command_icon(screen, candidate),
+			};
+			++visible;
+		}
 	}
 	layer->menu_entry_count = count;
 	layer->menu_screen = screen;
-	if (!fplinux_ui_menu_open(screen->ui,
-				  word(screen, FPLINUX_UI_LABEL_OPTIONS), items,
-				  count, options_chosen, screen))
+	if (!fplinux_ui_menu_open(screen->ui, FPLINUX_UI_MENU_ORIGIN_LEFT, NULL,
+				  items, count, options_chosen, screen))
 		layer->menu_screen = NULL;
 	free(items);
-}
-
-static bool canvas_filter(struct fplinux_ui_screen *screen,
-			  const struct fplinux_ui_key *key)
-{
-	return screen->kind == SCREEN_CANVAS && screen->canvas_filter &&
-	       screen->canvas_filter(screen->ui, screen, key,
-				     screen->canvas_filter_context);
 }
 
 enum press_result {
@@ -4455,7 +4678,7 @@ static enum press_result canvas_result(const struct fplinux_ui_screen *screen,
 				       const struct fplinux_ui_key *key)
 {
 	if (!screen->canvas_active ||
-	    (!screen->canvas_key && !screen->canvas_filter))
+	    (!screen->canvas_key && !screen->key_filter))
 		return PRESS_ELEMENT;
 	if (screen->key_repeat == FPLINUX_UI_CANVAS_REPEAT_KEYMAP ||
 	    (screen->key_repeat == FPLINUX_UI_CANVAS_REPEAT_NAVIGATION &&
@@ -4497,7 +4720,6 @@ static enum press_result screen_press(struct fplinux_ui_screen *screen,
 				      const struct fplinux_ui_key *key)
 {
 	struct form_item *text = focused_text(screen);
-	enum press_result canvas = canvas_result(screen, key);
 	struct soft_keys soft;
 	bool navigation = fplinux_ui_is_direction_key(key);
 	bool taken;
@@ -4512,8 +4734,6 @@ static enum press_result screen_press(struct fplinux_ui_screen *screen,
 	      !fplinux_ui_text_is_picker_open(text->field)) &&
 	    fplinux_ui_text_key(text->field, key))
 		return PRESS_REPEATABLE;
-	if (canvas_filter(screen, key))
-		return canvas;
 	if (screen->keyboard_raw && key->source == FPLINUX_UI_KEY_KEYBOARD &&
 	    (key->code == KEY_ESC || is_ok_key(key)))
 		return canvas_key(screen, key);
@@ -4541,9 +4761,18 @@ static enum press_result screen_press(struct fplinux_ui_screen *screen,
 			return canvas_key(screen, key);
 		return PRESS_COMMAND;
 	}
-	if (screen->kind == SCREEN_LIST)
+	if (screen->kind == SCREEN_LIST) {
+		size_t before = fplinux_ui_listview_selected(screen->list);
+		size_t focused;
+		fplinux_ui_change_cb callback = screen->on_focus;
+		void *context = screen->focus_context;
+		struct fplinux_ui *ui = screen->ui;
+
 		taken = fplinux_ui_listview_key(screen->list, key);
-	else if (screen->kind == SCREEN_FORM)
+		focused = fplinux_ui_listview_selected(screen->list);
+		if (focused != before && callback)
+			callback(ui, screen, focused, context);
+	} else if (screen->kind == SCREEN_FORM)
 		taken = form_key(screen, key);
 	else if (screen->kind == SCREEN_ALERT)
 		taken = fplinux_ui_scroll_key(screen->box, key);
@@ -4557,14 +4786,44 @@ static void screen_release(struct fplinux_ui_screen *screen,
 {
 	struct form_item *text = focused_text(screen);
 
-	if (canvas_filter(screen, key))
-		return;
 	if (text)
 		fplinux_ui_text_key(text->field, key);
 	else if (screen->kind == SCREEN_LIST)
 		fplinux_ui_listview_key(screen->list, key);
 	else
 		canvas_key(screen, key);
+}
+
+static struct fplinux_ui_screen *filter_owner(struct fplinux_ui_screens *layer,
+					      bool keyboard, unsigned int code,
+					      unsigned char bit)
+{
+	for (struct fplinux_ui_screen *screen = layer->all; screen;
+	     screen = screen->next)
+		if (screen->filtered[keyboard][code / 8] & bit)
+			return screen;
+	return NULL;
+}
+
+/* Record ownership before the callback, which may replace its own screen. */
+static bool filter_press(struct fplinux_ui_screen *screen,
+			 const struct fplinux_ui_key *key, bool keyboard,
+			 unsigned char bit)
+{
+	struct fplinux_ui_screens *layer = screen->layer;
+
+	if (!screen->key_filter)
+		return false;
+	layer->filtered[keyboard][key->code / 8] |= bit;
+	screen->filtered[keyboard][key->code / 8] |= bit;
+	if (screen->key_filter(screen->ui, screen, key,
+			       screen->key_filter_context))
+		return true;
+	layer->filtered[keyboard][key->code / 8] &= (unsigned char)~bit;
+	if (is_alive(layer, screen))
+		screen->filtered[keyboard][key->code / 8] &=
+			(unsigned char)~bit;
+	return false;
 }
 
 enum fplinux_ui_key_route
@@ -4574,6 +4833,8 @@ fplinux_ui_screens_key(struct fplinux_ui_screens *layer,
 	bool keyboard = key->source == FPLINUX_UI_KEY_KEYBOARD;
 	unsigned char bit = (unsigned char)(1U << (key->code % 8));
 	unsigned char *used;
+	unsigned char *filtered;
+	struct fplinux_ui_screen *screen;
 	enum press_result result = PRESS_ELEMENT;
 
 	if (!layer || !layer->top)
@@ -4581,13 +4842,45 @@ fplinux_ui_screens_key(struct fplinux_ui_screens *layer,
 	if (key->code >= KEY_CNT)
 		return FPLINUX_UI_KEY_HANDLED;
 	used = &layer->used[keyboard][key->code / 8];
-	if (!key->pressed) {
+	filtered = &layer->filtered[keyboard][key->code / 8];
+	if (*filtered & bit) {
+		screen = filter_owner(layer, keyboard, key->code, bit);
+		if (!key->pressed) {
+			*filtered &= (unsigned char)~bit;
+			if (screen)
+				screen->filtered[keyboard][key->code / 8] &=
+					(unsigned char)~bit;
+		}
+		if (screen &&
+		    (!key->pressed || (screen == layer->top && layer->visible &&
+				       !fplinux_ui_menu_is_open(layer->ui)))) {
+			if (key->pressed)
+				result = canvas_result(screen, key);
+			if (screen->key_filter)
+				screen->key_filter(screen->ui, screen, key,
+						   screen->key_filter_context);
+		}
+	} else if (!key->pressed) {
 		if (*used & bit)
 			*used &= (unsigned char)~bit;
-		else
-			screen_release(layer->top, key);
+		else {
+			screen = layer->top;
+			if ((!screen->key_filter ||
+			     !screen->key_filter(layer->ui, screen, key,
+						 screen->key_filter_context)) &&
+			    layer->top == screen)
+				screen_release(screen, key);
+		}
 	} else {
-		result = screen_press(layer->top, key);
+		screen = layer->top;
+		result = canvas_result(screen, key);
+		if (!filter_press(screen, key, keyboard, bit))
+			result = layer->top == screen ?
+					 screen_press(screen, key) :
+					 PRESS_COMMAND;
+		else if (layer->top != screen || !layer->visible ||
+			 fplinux_ui_menu_is_open(layer->ui))
+			result = PRESS_ELEMENT;
 		if (result == PRESS_COMMAND ||
 		    result == PRESS_EDITOR_NAVIGATION)
 			*used |= bit;
@@ -4765,6 +5058,7 @@ static void resize_screen(struct fplinux_ui_screen *screen)
 {
 	struct fplinux_ui *ui = screen->ui;
 
+	lv_obj_set_y(screen->root, screen_top(screen));
 	lv_obj_set_size(screen->root, fplinux_ui_width(ui),
 			root_height(screen));
 	if (screen->kind == SCREEN_ALERT) {

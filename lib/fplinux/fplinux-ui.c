@@ -144,6 +144,21 @@ struct input_seat {
 	int32_t repeat_delay;
 };
 
+struct frame_ack {
+	struct fplinux_ui *ui;
+	enum fplinux_ui_session_message_type type;
+	uint32_t serial;
+	struct wl_callback *sync;
+};
+
+enum frame_ack_slot {
+	FRAME_ACK_ACTIVE,
+	FRAME_ACK_ACTIVATION,
+	FRAME_ACK_APPEARANCE,
+	FRAME_ACK_CLOSE,
+	FRAME_ACK_COUNT,
+};
+
 struct fplinux_ui {
 	int session_fd;
 	int width;
@@ -232,10 +247,8 @@ struct fplinux_ui {
 	bool dirty;
 	bool ready;
 	bool frame_submitted;
-	/* A complete redraw, then a server sync after its buffer commit. */
-	enum fplinux_ui_session_message_type frame_ack_type;
-	uint32_t frame_ack_serial;
-	struct wl_callback *frame_ack_sync;
+	/* Independent transitions may acknowledge the same complete committed view. */
+	struct frame_ack frame_acks[FRAME_ACK_COUNT];
 	/* Keep the submitted view until the manager completes an EXIT. */
 	bool exit_pending;
 	bool visible;
@@ -248,6 +261,10 @@ struct fplinux_ui {
 };
 
 static volatile sig_atomic_t stop_signal;
+
+static void queue_frame_ack(struct fplinux_ui *ui,
+			    enum fplinux_ui_session_message_type type,
+			    uint32_t serial);
 
 static void marquee_set_visible(struct fplinux_ui *ui, bool visible);
 static void marquee_restart(struct fplinux_ui *ui);
@@ -492,7 +509,12 @@ static bool prepare_close(struct fplinux_ui *ui, uint32_t serial)
 		};
 
 		strcpy(reply.value, close_response_names[ui->close_response]);
-		return fplinux_ui_session_send(ui->session_fd, &reply);
+		if (!fplinux_ui_session_send(ui->session_fd, &reply))
+			return false;
+		if (ui->close_response != FPLINUX_UI_CLOSE_READY)
+			queue_frame_ack(ui, FPLINUX_UI_SESSION_CLOSE_ACK,
+					serial);
+		return true;
 	}
 	ui->close_serial = serial;
 	ui->close_response = FPLINUX_UI_CLOSE_WAIT;
@@ -601,14 +623,28 @@ static void queue_frame_ack(struct fplinux_ui *ui,
 			    enum fplinux_ui_session_message_type type,
 			    uint32_t serial)
 {
-	if (ui->frame_ack_sync)
-		wl_callback_destroy(ui->frame_ack_sync);
-	ui->frame_ack_sync = NULL;
-	ui->frame_ack_type = type;
-	ui->frame_ack_serial = serial;
+	enum frame_ack_slot slot =
+		type == FPLINUX_UI_SESSION_ACTIVE_ACK ? FRAME_ACK_ACTIVE :
+		type == FPLINUX_UI_SESSION_ACTIVATION_ACK ?
+							FRAME_ACK_ACTIVATION :
+		type == FPLINUX_UI_SESSION_REDRAW_ACK ? FRAME_ACK_APPEARANCE :
+							FRAME_ACK_CLOSE;
+	struct frame_ack *ack = &ui->frame_acks[slot];
+
+	if (ack->sync)
+		wl_callback_destroy(ack->sync);
+	*ack = (struct frame_ack){ .ui = ui, .type = type, .serial = serial };
 	/* A previously queued canvas cannot acknowledge this new view. */
 	ui->dirty = false;
 	lv_obj_invalidate(lv_display_get_screen_active(ui->display));
+}
+
+static bool needs_frame_ack(const struct fplinux_ui *ui)
+{
+	for (unsigned int i = 0; i < FRAME_ACK_COUNT; ++i)
+		if (ui->frame_acks[i].serial && !ui->frame_acks[i].sync)
+			return true;
+	return false;
 }
 
 static bool receive_session(struct fplinux_ui *ui)
@@ -629,6 +665,7 @@ static bool receive_session(struct fplinux_ui *ui)
 
 		/* These requests travel only from client to manager. */
 		if (message.type == FPLINUX_UI_SESSION_LAUNCH ||
+		    message.type == FPLINUX_UI_SESSION_ACTIVATION_ACK ||
 		    message.type == FPLINUX_UI_SESSION_CLOSE_REPLY) {
 			if (message.has_frame)
 				close(message.frame_fd);
@@ -662,6 +699,21 @@ static bool receive_session(struct fplinux_ui *ui)
 		if (message.type == FPLINUX_UI_SESSION_PREPARE_CLOSE) {
 			if (!prepare_close(ui, message.serial))
 				return false;
+			continue;
+		}
+		if (message.type == FPLINUX_UI_SESSION_ACTIVATION) {
+			struct fplinux_ui_event activation = {
+				.type = FPLINUX_UI_EVENT_ACTIVATION,
+				.activation =
+					message.activation ==
+							FPLINUX_UI_SESSION_ACTIVATION_OPEN ?
+						FPLINUX_UI_ACTIVATION_OPEN :
+						FPLINUX_UI_ACTIVATION_RESUME,
+			};
+
+			dispatch_event(ui, &activation);
+			queue_frame_ack(ui, FPLINUX_UI_SESSION_ACTIVATION_ACK,
+					message.serial);
 			continue;
 		}
 		/*
@@ -725,16 +777,17 @@ static const struct wl_buffer_listener buffer_listener = {
 static void frame_ack_done(void *data, struct wl_callback *callback,
 			   uint32_t serial)
 {
-	struct fplinux_ui *ui = data;
+	struct frame_ack *pending = data;
+	struct fplinux_ui *ui = pending->ui;
 	struct fplinux_ui_session_message ack = {
-		.type = ui->frame_ack_type,
-		.serial = ui->frame_ack_serial,
+		.type = pending->type,
+		.serial = pending->serial,
 	};
 
 	(void)serial;
 	wl_callback_destroy(callback);
-	ui->frame_ack_sync = NULL;
-	ui->frame_ack_serial = 0;
+	pending->sync = NULL;
+	pending->serial = 0;
 	if (!fplinux_ui_session_send(ui->session_fd, &ack))
 		ui->failed = true;
 }
@@ -797,12 +850,16 @@ static bool submit_frame(struct fplinux_ui *ui)
 		ui->ack_pending = false;
 	}
 	wl_surface_commit(ui->surface);
-	if (ui->frame_ack_serial && !ui->frame_ack_sync) {
+	for (unsigned int i = 0; i < FRAME_ACK_COUNT; ++i) {
+		struct frame_ack *ack = &ui->frame_acks[i];
+
+		if (!ack->serial || ack->sync)
+			continue;
 		/* sync is ordered after this commit on the same Wayland connection. */
-		ui->frame_ack_sync = wl_display_sync(ui->wayland);
-		if (!ui->frame_ack_sync ||
-		    wl_callback_add_listener(ui->frame_ack_sync,
-					     &frame_ack_listener, ui) < 0)
+		ack->sync = wl_display_sync(ui->wayland);
+		if (!ack->sync ||
+		    wl_callback_add_listener(ack->sync, &frame_ack_listener,
+					     ack) < 0)
 			return false;
 	}
 	/* The previous size's buffers are no longer the surface's content. */
@@ -1128,7 +1185,9 @@ static void repeat_key(lv_timer_t *timer)
 	}
 	/* One event per wakeup; a delayed callback never catches up in a burst. */
 	if (seat->repeat_rate > 0) {
-		uint32_t period = 1000U / (uint32_t)seat->repeat_rate;
+		uint32_t period = seat->source == FPLINUX_UI_KEY_PHONE ?
+					  200U :
+					  1000U / (uint32_t)seat->repeat_rate;
 
 		lv_timer_set_period(timer, period ? period : 1);
 		lv_timer_reset(timer);
@@ -1142,7 +1201,9 @@ static void start_repeat(struct input_seat *seat, unsigned int code,
 
 	if (seat->repeat_rate <= 0)
 		return;
-	delay = seat->repeat_delay > 0 ? (uint32_t)seat->repeat_delay : 1;
+	delay = seat->source == FPLINUX_UI_KEY_PHONE ? 500U :
+		seat->repeat_delay > 0 ? (uint32_t)seat->repeat_delay :
+					 1;
 	if (!seat->repeat_timer) {
 		seat->repeat_timer = lv_timer_create(repeat_key, delay, seat);
 		if (!seat->repeat_timer) {
@@ -1579,7 +1640,6 @@ static void set_metrics(struct fplinux_ui *ui)
 		.softkey_height = spec->softkey_height,
 		.header_height = spec->header_height,
 		.margin = spec->margin,
-		.gutter = spec->gutter,
 		.spacing = spec->spacing,
 		.gap_small = spec->gap_small,
 		.row_height = spec->row_height,
@@ -1589,7 +1649,9 @@ static void set_metrics(struct fplinux_ui *ui)
 		.app_icon_size = spec->app_icon_size,
 		.grid_columns = spec->grid_columns,
 		.focus_width = spec->focus_width,
+		.divider_width = spec->divider_width,
 		.frame_padding = spec->frame_padding,
+		.scrollbar_space = spec->scrollbar_space,
 	};
 }
 
@@ -1855,8 +1917,7 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		if (!ui->visible)
 			hold_animations(ui);
 		timeout_ms = lv_timer_handler();
-		if (ui->frame_ack_serial && !ui->frame_ack_sync &&
-		    !ui->exit_pending)
+		if (needs_frame_ack(ui) && !ui->exit_pending)
 			lv_refr_now(ui->display);
 		if (!submit_frame(ui)) {
 			ui->failed = true;
@@ -1921,8 +1982,9 @@ void fplinux_ui_close(struct fplinux_ui *ui)
 	fplinux_ui_frames_set_visible(ui, false);
 	fplinux_audio_client_close(ui->audio_client);
 	ui->audio_client = NULL;
-	if (ui->frame_ack_sync)
-		wl_callback_destroy(ui->frame_ack_sync);
+	for (unsigned int i = 0; i < FRAME_ACK_COUNT; ++i)
+		if (ui->frame_acks[i].sync)
+			wl_callback_destroy(ui->frame_acks[i].sync);
 	/* The application is leaving: no callbacks, legends or marquees. */
 	ui->visible = false;
 	ui->modals = 0;
@@ -2004,6 +2066,9 @@ bool fplinux_ui_close_reply(struct fplinux_ui *ui,
 		return false;
 	ui->close_response = response;
 	ui->exit_pending = response == FPLINUX_UI_CLOSE_READY;
+	if (response != FPLINUX_UI_CLOSE_READY)
+		queue_frame_ack(ui, FPLINUX_UI_SESSION_CLOSE_ACK,
+				ui->close_serial);
 	return true;
 }
 
@@ -2141,6 +2206,8 @@ bool fplinux_ui_send(struct fplinux_ui *ui,
 		     const struct fplinux_ui_session_message *message)
 {
 	if (message->type == FPLINUX_UI_SESSION_LIFECYCLE ||
+	    message->type == FPLINUX_UI_SESSION_ACTIVATION ||
+	    message->type == FPLINUX_UI_SESSION_ACTIVATION_ACK ||
 	    message->type == FPLINUX_UI_SESSION_PREPARE_CLOSE) {
 		errno = EINVAL;
 		return false;
@@ -2997,6 +3064,8 @@ lv_obj_t *fplinux_ui_softkey_bar_create(struct fplinux_ui *ui, lv_obj_t *parent)
 	lv_obj_set_style_border_color(bar, ui->theme.border, 0);
 	lv_obj_set_style_border_width(bar, ui->spec->divider_width, 0);
 	lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_TOP, 0);
+	/* Centre legends in the full bar, including its top divider. */
+	lv_obj_set_style_pad_top(bar, -ui->spec->divider_width, 0);
 	for (int i = 0; i < 3; ++i) {
 		lv_obj_t *label = lv_label_create(bar);
 
@@ -3107,18 +3176,23 @@ int fplinux_ui_modal_height(const struct fplinux_ui *ui)
 }
 
 /* The system legends: nothing on the left, Select on OK, Back on the right. */
-bool fplinux_ui_menu_open(struct fplinux_ui *ui, const char *title,
+bool fplinux_ui_menu_open(struct fplinux_ui *ui,
+			  enum fplinux_ui_menu_origin origin, const char *title,
 			  const struct fplinux_ui_menu_item *items,
 			  size_t count, fplinux_ui_menu_cb callback,
 			  void *context)
 {
 	int error;
 
+	if ((unsigned int)origin > FPLINUX_UI_MENU_ORIGIN_RIGHT) {
+		errno = EINVAL;
+		return false;
+	}
 	if (ui->menu) {
 		errno = EBUSY;
 		return false;
 	}
-	ui->menu = fplinux_ui_menu_view_create(ui, title, items, count);
+	ui->menu = fplinux_ui_menu_view_create(ui, origin, title, items, count);
 	if (!ui->menu)
 		return false;
 	fplinux_ui_cancel_key_repeat(ui, NULL);

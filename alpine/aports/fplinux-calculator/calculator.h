@@ -23,6 +23,18 @@ enum fplinux_calculator_state {
 	FPLINUX_CALCULATOR_ERROR,
 };
 
+enum fplinux_calculator_error {
+	FPLINUX_CALCULATOR_NO_ERROR,
+	FPLINUX_CALCULATOR_DIVIDE_BY_ZERO,
+	FPLINUX_CALCULATOR_OVERFLOW,
+};
+
+enum fplinux_calculator_input_result {
+	FPLINUX_CALCULATOR_IGNORED,
+	FPLINUX_CALCULATOR_CHANGED,
+	FPLINUX_CALCULATOR_DIGIT_LIMIT,
+};
+
 /*
  * A keypad calculator: operations apply from left to right without
  * precedence. Numbers use '.' internally; display text takes the caller's
@@ -36,16 +48,18 @@ struct fplinux_calculator {
 	/* Pending '+', '-', '*' or '/', or '\0'. */
 	char operation;
 	bool result;
-	bool error;
+	enum fplinux_calculator_error error;
 };
 
 /*
  * Keys: '0'-'9', '.' decimal separator, '#' change sign, '+', '-', '*', '/',
  * '=' equals, '<' delete one character, 'C' clear all. In the error state a
  * digit or '.' starts a new number and every other key only clears. Returns
- * false when the key changed nothing.
+ * IGNORED when the key changed nothing, or DIGIT_LIMIT when a new digit or
+ * separator cannot fit. Repeated zero or separator is ignored.
  */
-bool fplinux_calculator_input(struct fplinux_calculator *calculator, char key);
+enum fplinux_calculator_input_result
+fplinux_calculator_input(struct fplinux_calculator *calculator, char key);
 enum fplinux_calculator_state
 fplinux_calculator_get_state(const struct fplinux_calculator *calculator);
 /* True when '=' computes: an operator is pending and a second number typed. */

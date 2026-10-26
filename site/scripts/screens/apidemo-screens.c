@@ -6,7 +6,12 @@
 #include "ui-frame-peer.h"
 
 #include <assert.h>
+#include <dirent.h>
+#include <errno.h>
+#include <json-c/json.h>
 #include <linux/input-event-codes.h>
+#include <lvgl/lvgl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,14 +21,18 @@
 
 struct capture {
 	struct fplinux_ui_frame_peer peer;
+	struct apidemo_frame_observation frame;
 	int listener;
 	int session;
 	int observer;
+	int frame_observer;
 	pid_t application;
 	uint32_t serial;
 	char **arguments;
 	const char *directory;
 	const char *locale;
+	const char *theme;
+	char left[FPLINUX_UI_SESSION_TEXT_BYTES];
 	char centre[FPLINUX_UI_SESSION_TEXT_BYTES];
 	char right[FPLINUX_UI_SESSION_TEXT_BYTES];
 	bool legends_seen;
@@ -64,13 +73,10 @@ wait_observation(struct capture *capture, enum apidemo_observation_kind kind,
 			    0) == (ssize_t)sizeof(observation));
 		if (observation.kind == APIDEMO_ALERT)
 			++capture->alerts;
-		text = kind == APIDEMO_LABEL || kind == APIDEMO_TEXTAREA ?
-			       observation.text :
-			       observation.title;
+		text = kind == APIDEMO_LABEL ? observation.text :
+					       observation.title;
 		if (observation.kind == kind &&
-		    (kind == APIDEMO_TEXTAREA ?
-			     !strcmp(text, expected) :
-		     kind == APIDEMO_LABEL && !expected[0] ?
+		    (kind == APIDEMO_LABEL && !expected[0] ?
 			     !strcmp(observation.title, "Raw text") &&
 				     !text[0] :
 			     strstr(text, expected) != NULL)) {
@@ -123,7 +129,7 @@ static void redraw(struct capture *capture)
 	};
 
 	strcpy(setting.name, "theme");
-	strcpy(setting.value, "dark");
+	strcpy(setting.value, capture->theme);
 	assert(fplinux_ui_session_send(capture->session, &setting));
 	for (;;) {
 		struct fplinux_ui_session_message message =
@@ -132,15 +138,158 @@ static void redraw(struct capture *capture)
 
 		assert(message.type != FPLINUX_UI_SESSION_EXIT);
 		if (message.type == FPLINUX_UI_SESSION_SOFTKEYS) {
+			strcpy(capture->left, message.left);
 			strcpy(capture->centre, message.centre);
 			strcpy(capture->right, message.right);
 			capture->legends_seen = true;
 		}
 		if (message.type == FPLINUX_UI_SESSION_REDRAW_ACK) {
 			assert(message.serial == setting.serial);
+			fplinux_ui_frame_wait_readable(&capture->peer,
+						       capture->frame_observer);
+			assert(recv(capture->frame_observer, &capture->frame,
+				    sizeof(capture->frame),
+				    0) == (ssize_t)sizeof(capture->frame));
+			assert(capture->frame.serial == setting.serial);
 			return;
 		}
 	}
+}
+
+static void activate(struct capture *capture,
+		     enum fplinux_ui_session_activation activation)
+{
+	const struct fplinux_ui_session_message request = {
+		.type = FPLINUX_UI_SESSION_ACTIVATION,
+		.serial = ++capture->serial,
+		.activation = activation,
+	};
+	unsigned int previous = capture->peer.commits;
+
+	assert(fplinux_ui_session_send(capture->session, &request));
+	for (;;) {
+		struct fplinux_ui_session_message reply =
+			fplinux_ui_frame_wait_message(&capture->peer,
+						      capture->session);
+
+		assert(reply.type != FPLINUX_UI_SESSION_EXIT);
+		if (reply.type == FPLINUX_UI_SESSION_SOFTKEYS) {
+			strcpy(capture->left, reply.left);
+			strcpy(capture->centre, reply.centre);
+			strcpy(capture->right, reply.right);
+			capture->legends_seen = true;
+		}
+		if (reply.type == FPLINUX_UI_SESSION_ACTIVATION_ACK) {
+			assert(reply.serial == request.serial);
+			assert(capture->peer.commits > previous);
+			return;
+		}
+	}
+}
+
+static struct json_object *rectangle_json(struct apidemo_rectangle rectangle)
+{
+	struct json_object *array = json_object_new_array();
+
+	json_object_array_add(array, json_object_new_int(rectangle.left));
+	json_object_array_add(array, json_object_new_int(rectangle.top));
+	json_object_array_add(array, json_object_new_int(rectangle.width));
+	json_object_array_add(array, json_object_new_int(rectangle.height));
+	return array;
+}
+
+static void save_geometry(struct capture *capture, const char *name)
+{
+	struct json_object *root = json_object_new_object();
+	struct json_object *images = json_object_new_array();
+	struct json_object *menu = json_object_new_array();
+	struct json_object *canvas_objects = json_object_new_array();
+	char path[512];
+
+	json_object_object_add(root, "picker",
+			       rectangle_json(capture->frame.picker));
+	for (size_t index = 0; index < capture->frame.image_count; ++index) {
+		const struct apidemo_image_observation *image =
+			&capture->frame.images[index];
+		struct json_object *entry = json_object_new_object();
+		struct json_object *source = json_object_new_array();
+
+		json_object_object_add(entry, "bounds",
+				       rectangle_json(image->bounds));
+		json_object_object_add(entry, "frame",
+				       rectangle_json(image->frame));
+		json_object_object_add(entry, "viewport",
+				       rectangle_json(image->viewport));
+		json_object_array_add(source,
+				      json_object_new_int(image->source_width));
+		json_object_array_add(
+			source, json_object_new_int(image->source_height));
+		json_object_object_add(entry, "source", source);
+		json_object_array_add(images, entry);
+	}
+	for (size_t index = 0; index < capture->frame.menu_count; ++index) {
+		const struct apidemo_menu_observation *row =
+			&capture->frame.menu[index];
+		struct json_object *entry = json_object_new_object();
+		char alpha[sizeof(row->alpha) * 2 + 1];
+		size_t pixels =
+			(size_t)row->icon_width * (size_t)row->icon_height;
+
+		for (size_t pixel = 0; pixel < pixels; ++pixel)
+			snprintf(alpha + 2 * pixel, 3, "%02x",
+				 row->alpha[pixel]);
+		alpha[2 * pixels] = '\0';
+
+		json_object_object_add(entry, "text",
+				       json_object_new_string(row->text));
+		json_object_object_add(entry, "bounds",
+				       rectangle_json(row->bounds));
+		json_object_object_add(entry, "icon",
+				       json_object_new_boolean(row->icon));
+		json_object_object_add(entry, "alpha",
+				       json_object_new_string(alpha));
+		json_object_array_add(menu, entry);
+	}
+	json_object_object_add(root, "images", images);
+	json_object_object_add(root, "menu", menu);
+	json_object_object_add(root, "canvas",
+			       rectangle_json(capture->frame.canvas));
+	for (size_t index = 0; index < capture->frame.canvas_object_count;
+	     ++index) {
+		const struct apidemo_canvas_object_observation *item =
+			&capture->frame.canvas_objects[index];
+		struct json_object *entry = json_object_new_object();
+		struct json_object *padding = json_object_new_array();
+
+		json_object_object_add(entry, "parent",
+				       json_object_new_int(item->parent));
+		json_object_object_add(entry, "bounds",
+				       rectangle_json(item->bounds));
+		json_object_object_add(entry, "content",
+				       rectangle_json(item->content));
+		json_object_object_add(entry, "border",
+				       json_object_new_int(item->border));
+		for (size_t side = 0; side < 4; ++side)
+			json_object_array_add(
+				padding,
+				json_object_new_int(item->padding[side]));
+		json_object_object_add(entry, "padding", padding);
+		json_object_object_add(entry, "scroll_y",
+				       json_object_new_int(item->scroll_y));
+		json_object_object_add(entry, "line_height",
+				       json_object_new_int(item->line_height));
+		json_object_object_add(entry, "max_height",
+				       json_object_new_int(item->max_height));
+		json_object_object_add(entry, "text",
+				       json_object_new_string(item->text));
+		json_object_array_add(canvas_objects, entry);
+	}
+	json_object_object_add(root, "canvas_objects", canvas_objects);
+	assert(snprintf(path, sizeof(path), "%s/%s.json", capture->directory,
+			name) < (int)sizeof(path));
+	assert(json_object_to_file_ext(path, root, JSON_C_TO_STRING_PRETTY) ==
+	       0);
+	json_object_put(root);
 }
 
 static void save_frame(struct capture *capture, const char *name)
@@ -155,6 +304,7 @@ static void save_frame(struct capture *capture, const char *name)
 				  capture->peer.width *
 					  sizeof(*capture->peer.pixels)));
 	printf("%s: %dx%d\n", name, capture->peer.width, capture->peer.height);
+	save_geometry(capture, name);
 }
 
 static void start(struct capture *capture)
@@ -171,17 +321,22 @@ static void start(struct capture *capture)
 		fplinux_ui_profile_for_screen(config.screen_width,
 					      config.screen_height));
 	struct fplinux_ui_session_message hello;
-	int wayland[2], observer[2];
+	int wayland[2], observer[2], frame_observer[2];
 	int buffer_bytes = 1024 * 1024;
 
 	assert(profile);
+	config.theme = !strcmp(capture->theme, "light") ?
+			       FPLINUX_UI_SESSION_THEME_LIGHT :
+			       FPLINUX_UI_SESSION_THEME_DARK;
 	capture->alerts = 0;
 	capture->centre[0] = '\0';
 	capture->right[0] = '\0';
 	capture->legends_seen = false;
+	capture->frame = (struct apidemo_frame_observation){ 0 };
 	capture->listener = fplinux_ui_frame_listen_session(arguments[5]);
 	fplinux_ui_frame_socketpair(wayland);
 	assert(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, observer) == 0);
+	assert(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, frame_observer) == 0);
 	assert(setsockopt(observer[1], SOL_SOCKET, SO_SNDBUF, &buffer_bytes,
 			  sizeof(buffer_bytes)) == 0);
 	capture->application = fork();
@@ -198,10 +353,14 @@ static void start(struct capture *capture)
 		close(capture->listener);
 		close(wayland[0]);
 		close(observer[0]);
+		close(frame_observer[0]);
 		fplinux_ui_frame_client_environment(wayland[1], arguments[5]);
 		snprintf(descriptor, sizeof(descriptor), "%d", observer[1]);
 		assert(setenv("FPLINUX_APIDEMO_OBSERVER_FD", descriptor, 1) ==
 		       0);
+		snprintf(descriptor, sizeof(descriptor), "%d",
+			 frame_observer[1]);
+		assert(setenv("FPLINUX_APIDEMO_FRAME_FD", descriptor, 1) == 0);
 		assert(snprintf(state, sizeof(state), "%s/state",
 				capture->directory) < (int)sizeof(state));
 		assert(snprintf(catalogues, sizeof(catalogues), "%.*s/locale",
@@ -209,6 +368,13 @@ static void start(struct capture *capture)
 				arguments[3]) < (int)sizeof(catalogues));
 		assert(setenv("FPLINUX_APIDEMO_LOCALE_DIR", catalogues, 1) ==
 		       0);
+		assert(snprintf(catalogues, sizeof(catalogues),
+				"%.*s/icons/usr/share/fplinux/glyphs",
+				(int)(slash - arguments[3]),
+				arguments[3]) < (int)sizeof(catalogues));
+		if (access(catalogues, R_OK) == 0)
+			assert(setenv("FPLINUX_NATIVE_GLYPHS", catalogues, 1) ==
+			       0);
 		assert(setenv("XDG_STATE_HOME", state, 1) == 0);
 		assert(snprintf(failure_path, sizeof(failure_path),
 				"%s/save-failure", capture->directory) <
@@ -223,7 +389,9 @@ static void start(struct capture *capture)
 	}
 	close(wayland[1]);
 	close(observer[1]);
+	close(frame_observer[1]);
 	capture->observer = observer[0];
+	capture->frame_observer = frame_observer[0];
 	fplinux_ui_frame_init(&capture->peer, wayland[0], config.screen_width,
 			      config.screen_height - profile->status_height -
 				      profile->softkey_height,
@@ -236,7 +404,7 @@ static void start(struct capture *capture)
 	strcpy(config.locale, capture->locale);
 	strcpy(config.input_locale, capture->locale);
 	assert(fplinux_ui_session_send(capture->session, &config));
-	wait_observation(capture, APIDEMO_LABEL,
+	wait_observation(capture, APIDEMO_LIST,
 			 !strcmp(capture->locale, "ru") ? "Демо API" :
 							  "API Demos");
 	wait_frame(capture, 0);
@@ -265,24 +433,47 @@ static void close_and_reap(struct capture *capture)
 	assert(finished == capture->application);
 	assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
 	close(capture->observer);
+	close(capture->frame_observer);
 	close(capture->session);
 	close(capture->listener);
 	fplinux_ui_frame_cleanup(&capture->peer);
 	assert(unlink(capture->arguments[5]) == 0);
 }
 
-static void open_search(struct capture *capture, const char *query,
-			const char *title, enum apidemo_observation_kind kind)
+static void search_query(struct capture *capture, const char *query,
+			 const char *title, enum apidemo_observation_kind kind)
 {
 	char results[128];
 
-	start(capture);
 	type_query(capture, query);
 	press(capture, 1, KEY_OK);
-	snprintf(results, sizeof(results), "Search: %s", query);
+	snprintf(results, sizeof(results),
+		 !strcmp(capture->locale, "ru") ? "Поиск: %s" : "Search: %s",
+		 query);
 	wait_observation(capture, APIDEMO_LIST, results);
 	press(capture, 1, KEY_OK);
 	wait_observation(capture, kind, title);
+}
+
+static void open_search(struct capture *capture, const char *query,
+			const char *title, enum apidemo_observation_kind kind)
+{
+	start(capture);
+	press(capture, 1, KEY_F13);
+	wait_observation(capture, APIDEMO_FORM,
+			 !strcmp(capture->locale, "ru") ? "Поиск" : "Search");
+	search_query(capture, query, title, kind);
+}
+
+/* The preceding demo has returned to its results; reuse the search editor. */
+static void next_demo(struct capture *capture, const char *previous_query,
+		      const char *query, const char *title,
+		      enum apidemo_observation_kind kind)
+{
+	press(capture, 1, KEY_F14);
+	for (size_t index = 0; index < strlen(previous_query); ++index)
+		press(capture, 0, KEY_BACKSPACE);
+	search_query(capture, query, title, kind);
 }
 
 static void catalogue_and_virtual(struct capture *capture)
@@ -290,38 +481,60 @@ static void catalogue_and_virtual(struct capture *capture)
 	struct apidemo_observation selected;
 
 	start(capture);
-	type_query(capture, "ZZZ");
-	press(capture, 1, KEY_OK);
-	wait_observation(capture, APIDEMO_LABEL, "No demo matches the search.");
-	save_frame(capture, "apidemo-no-results");
-	press(capture, 1, KEY_F13);
-	press(capture, 1, KEY_DOWN);
-	press(capture, 1, KEY_OK);
-	wait_observation(capture, APIDEMO_LABEL, "");
-	redraw(capture);
-	assert(capture->legends_seen && !strcmp(capture->centre, "Open") &&
-	       !strcmp(capture->right, "Back"));
-	press(capture, 1, KEY_OK);
-	wait_observation(capture, APIDEMO_LIST, "API Demos");
 	save_frame(capture, "apidemo-catalogue");
 	press(capture, 1, KEY_OK);
 	wait_observation(capture, APIDEMO_LIST, "Lists");
+	press(capture, 1, KEY_DOWN);
 	press(capture, 1, KEY_OK);
-	wait_observation(capture, APIDEMO_LIST, "Implicit list");
+	wait_observation(capture, APIDEMO_LIST, "Exclusive list");
+	press(capture, 1, KEY_F14);
+	/* Returning preserves the category's focused example. */
+	press(capture, 1, KEY_OK);
+	wait_observation(capture, APIDEMO_LIST, "Exclusive list");
 	press(capture, 1, KEY_F14);
 	press(capture, 1, KEY_F14);
+	/* Search remains available after browsing the catalogue. */
+	press(capture, 1, KEY_F13);
+	wait_observation(capture, APIDEMO_FORM, "Search");
+	type_query(capture, "ZZZ");
+	save_frame(capture, "apidemo-search");
+	press(capture, 1, KEY_OK);
+	wait_observation(capture, APIDEMO_LABEL, "No demo matches the search.");
+	save_frame(capture, "apidemo-no-results");
+	press(capture, 1, KEY_F14);
+	/* A nonempty field keeps Clear; Back is the sole Options action. */
+	press(capture, 1, KEY_F13);
+	press(capture, 1, KEY_OK);
+	press(capture, 1, KEY_F13);
+	wait_observation(capture, APIDEMO_FORM, "Search");
+	/* The query survived leaving and reopening the search screen. */
+	press(capture, 1, KEY_OK);
+	wait_observation(capture, APIDEMO_LABEL, "No demo matches the search.");
+	close_and_reap(capture);
+
+	open_search(capture, "LIST", "List actions", APIDEMO_LIST);
+	press(capture, 1, KEY_F14);
+	save_frame(capture, "apidemo-search-results");
+	press(capture, 1, KEY_DOWN);
+	press(capture, 1, KEY_OK);
+	wait_observation(capture, APIDEMO_LIST, "Exclusive list");
+	press(capture, 1, KEY_F14);
+	press(capture, 1, KEY_OK);
+	wait_observation(capture, APIDEMO_LIST, "Exclusive list");
+	press(capture, 1, KEY_F14);
+	press(capture, 1, KEY_F14);
+	press(capture, 1, KEY_OK);
+	wait_observation(capture, APIDEMO_LIST, "Search: LIST");
 	close_and_reap(capture);
 
 	open_search(capture, "VIRTUAL", "Virtual list", APIDEMO_LIST);
 	press(capture, 1, KEY_DOWN);
 	press(capture, 1, KEY_OK);
 	selected = wait_observation(capture, APIDEMO_ALERT, "Selected");
-	assert(strstr(selected.text, "Event 2:"));
+	assert(strstr(selected.text, "Index 1: Message 999."));
 	save_frame(capture, "apidemo-virtual-selection");
-	press(capture, 1, KEY_F14);
-	press(capture, 1, KEY_F14);
 	close_and_reap(capture);
-	puts("apidemo: Options Clear empties search with Open/Back; catalogue sections; virtual row 2 selected");
+	puts("apidemo: root and search remain available; category and result focus preserved; query reused; virtual row 2 selected");
 }
 
 static void form_choice(struct capture *capture)
@@ -405,6 +618,9 @@ static void preference_storage_failure(struct capture *capture)
 	wait_preference(capture, "Save result",
 			"FPLINUX_STORAGE_UNPUBLISHED, ENOSPC");
 	assert(capture->alerts == 1);
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_RESUME);
+	assert(!strcmp(capture->right, "Close"));
 	press(capture, 1, KEY_F14);
 	for (int attempt = 0; attempt < 2; ++attempt) {
 		visibility.visible = false;
@@ -545,14 +761,17 @@ static void frames_and_errors(struct capture *capture)
 		.type = FPLINUX_UI_SESSION_ERROR,
 	};
 
-	open_search(capture, "INTERRUPTED", "Interrupted painting",
-		    APIDEMO_CANVAS);
+	open_search(capture, "FRAME_PRESENT", "Direct drawing", APIDEMO_CANVAS);
+	press(capture, 1, KEY_F14);
+	press(capture, 1, KEY_DOWN);
+	press(capture, 1, KEY_OK);
+	wait_observation(capture, APIDEMO_CANVAS, "Interrupted painting");
 	save_frame(capture, "apidemo-frames");
 	press(capture, 1, KEY_F14);
 	close_and_reap(capture);
 
 	open_search(capture, "TONE", "Tone", APIDEMO_FORM);
-	press(capture, 1, KEY_F13);
+	send_press(capture, 1, KEY_F13);
 	wait_observation(capture, APIDEMO_LABEL, "ENOTSUP");
 	save_frame(capture, "apidemo-audio-unavailable");
 	press(capture, 1, KEY_F14);
@@ -575,6 +794,117 @@ static void expect_legends(struct capture *capture, const char *centre,
 	redraw(capture);
 	assert(capture->legends_seen && !strcmp(capture->centre, centre) &&
 	       !strcmp(capture->right, right));
+}
+
+static const char *word(const struct capture *capture, const char *english,
+			const char *russian)
+{
+	return !strcmp(capture->locale, "ru") ? russian : english;
+}
+
+static void picker_capture(struct capture *capture, const char *name)
+{
+	press(capture, 1, KEY_NUMERIC_STAR);
+	save_frame(capture, name);
+	assert(capture->frame.picker.width > 0);
+	expect_legends(capture, word(capture, "Insert", "Вставить"),
+		       word(capture, "Cancel", "Отмена"));
+	press(capture, 1, KEY_F14);
+	redraw(capture);
+	assert(capture->frame.picker.width == 0);
+}
+
+/* Real app routes share one process, including the two raw field owners. */
+static void popup_routes(struct capture *capture)
+{
+	struct apidemo_observation result;
+
+	open_search(capture, "TEXT EDITOR",
+		    word(capture, "Text editor", "Редактор текста"),
+		    APIDEMO_TEXT_BOX);
+	picker_capture(capture, "apidemo-picker-textbox");
+	type_query(capture, "A");
+	press(capture, 1, KEY_F13);
+	save_frame(capture, "apidemo-text-options");
+	press(capture, 1, KEY_OK);
+	result = wait_observation(capture, APIDEMO_ALERT,
+				  word(capture, "Text", "Текст"));
+	assert(!strcmp(result.text,
+		       word(capture, "1 character:\nA", "1 символ:\nA")));
+	press(capture, 1, KEY_F14);
+	press(capture, 1, KEY_F13);
+	press(capture, 1, KEY_DOWN);
+	press(capture, 1, KEY_DOWN);
+	/* The last Options row invokes the original screen's Back. */
+	press(capture, 1, KEY_OK);
+	next_demo(capture, "TEXT EDITOR", "TEXT FIELDS",
+		  word(capture, "Text fields", "Поля ввода"), APIDEMO_FORM);
+	picker_capture(capture, "apidemo-picker-form-top");
+	for (unsigned int index = 0; index < 4; ++index)
+		press(capture, 1, KEY_DOWN);
+	picker_capture(capture, "apidemo-picker-form-scrolled");
+	press(capture, 1, KEY_F14);
+	next_demo(capture, "TEXT FIELDS", "CANVAS FIELDS",
+		  word(capture, "Canvas fields", "Поля на холсте"),
+		  APIDEMO_CANVAS);
+	picker_capture(capture, "apidemo-picker-canvas-first");
+	press(capture, 1, KEY_DOWN);
+	picker_capture(capture, "apidemo-picker-canvas-second");
+	press(capture, 1, KEY_F14);
+	next_demo(capture, "CANVAS FIELDS", "LINKS AND BUTTONS",
+		  word(capture, "Links and buttons", "Ссылки и кнопки"),
+		  APIDEMO_FORM);
+	press(capture, 1, KEY_DOWN);
+	press(capture, 1, KEY_DOWN);
+	save_frame(capture, "apidemo-image-link");
+	press(capture, 1, KEY_DOWN);
+	save_frame(capture, "apidemo-image-button");
+	press(capture, 1, KEY_F13);
+	save_frame(capture, "apidemo-links-options");
+	press(capture, 1, KEY_F14);
+	press(capture, 1, KEY_OK);
+	result = wait_observation(capture, APIDEMO_ALERT,
+				  word(capture, "View", "Посмотреть"));
+	assert(!strcmp(
+		result.text,
+		word(capture, "Item 3 ran “View”.\nget_focus() = 3",
+		     "Элемент 3 выполнил «Посмотреть».\nget_focus() = 3")));
+	press(capture, 1, KEY_F14);
+	press(capture, 1, KEY_F14);
+	next_demo(capture, "LINKS AND BUTTONS", "OPTIONS MENU WITH ICONS",
+		  word(capture, "Options menu with icons", "Меню со значками"),
+		  APIDEMO_FORM);
+	press(capture, 1, KEY_F13);
+	save_frame(capture, "apidemo-long-options");
+	for (unsigned int index = 0; index < 6; ++index)
+		press(capture, 1, KEY_DOWN);
+	save_frame(capture, "apidemo-long-options-end");
+	press(capture, 1, KEY_OK);
+	result = wait_observation(capture, APIDEMO_ALERT,
+				  word(capture, "Rename", "Переименовать"));
+	assert(!strcmp(result.text, word(capture, "The listener received id 7.",
+					 "Обработчик получил id 7.")));
+	close_and_reap(capture);
+	puts("apidemo: real text, Form and both Canvas pickers; framed source images; Options icons and original callbacks");
+}
+
+static void compact_menu_layout(struct capture *capture)
+{
+	bool russian = !strcmp(capture->locale, "ru");
+
+	open_search(capture, "MENU ON A CANVAS",
+		    russian ? "Меню на холсте" : "Menu on a canvas",
+		    APIDEMO_CANVAS);
+	save_frame(capture, "apidemo-menu-before");
+	press(capture, 1, KEY_F13);
+	expect_legends(capture, russian ? "Выбрать" : "Select",
+		       russian ? "Назад" : "Back");
+	save_frame(capture, "apidemo-menu-open");
+	press(capture, 1, KEY_F14);
+	expect_legends(capture, "", russian ? "Назад" : "Back");
+	save_frame(capture, "apidemo-menu-after");
+	close_and_reap(capture);
+	puts("apidemo: compact menu keeps background placement and restores Canvas legends");
 }
 
 static void help_returns_to_options(struct capture *capture)
@@ -621,72 +951,47 @@ static void russian_search(struct capture *capture)
 				      KEY_F1, KEY_F4, KEY_F5 };
 
 	start(capture);
+	save_frame(capture, "apidemo-catalogue");
+	press(capture, 1, KEY_F13);
+	wait_observation(capture, APIDEMO_FORM, "Поиск");
 	for (size_t index = 0; index < sizeof(keys) / sizeof(keys[0]); ++index)
 		press(capture, 0, keys[index]);
+	save_frame(capture, "apidemo-search");
 	press(capture, 1, KEY_OK);
 	wait_observation(capture, APIDEMO_LIST, "Поиск: СПИСОК");
+	save_frame(capture, "apidemo-search-results");
 	press(capture, 1, KEY_OK);
-	wait_observation(capture, APIDEMO_LIST, "Простой список");
+	wait_observation(capture, APIDEMO_LIST, "Одиночный список");
 	save_frame(capture, "apidemo-russian-search");
 	close_and_reap(capture);
 	puts("apidemo: Cyrillic uppercase search found translated list title");
 }
 
-static void dates_error(struct capture *capture)
+static void duration_edit(struct capture *capture)
 {
-	open_search(capture, "FORMAT_DATE", "Dates", APIDEMO_FORM);
-	wait_observation(capture, APIDEMO_LABEL, "false, ERANGE");
-	close_and_reap(capture);
-	puts("apidemo: Dates small-buffer row reports false, ERANGE");
-}
+	struct apidemo_observation values;
 
-static void cyrillic_widget(struct capture *capture, bool keyboard)
-{
-	open_search(capture, keyboard ? "LV_KEYBOARD" : "TEXT AREA",
-		    keyboard ? "Keyboard" : "Text area", APIDEMO_CANVAS);
-	press(capture, 0, KEY_F1);
-	press(capture, 0, KEY_F2);
-	wait_observation(capture, APIDEMO_TEXTAREA, "СП");
-	press(capture, 0, KEY_BACKSPACE);
-	wait_observation(capture, APIDEMO_TEXTAREA, "С");
-	press(capture, 1, KEY_NUMERIC_2);
-	wait_observation(capture, APIDEMO_TEXTAREA, "С2");
-	save_frame(capture, keyboard ? "apidemo-keyboard-cyrillic" :
-				       "apidemo-textarea-cyrillic");
-	close_and_reap(capture);
-	puts(keyboard ?
-		     "apidemo: Keyboard types СП; Backspace leaves С; phone digit gives С2" :
-		     "apidemo: Text area types СП; Backspace leaves С; phone digit gives С2");
-}
-
-static void matrix_typed(struct capture *capture, const char *expected)
-{
-	struct apidemo_observation status =
-		wait_observation(capture, APIDEMO_LABEL, "Typed: ");
-
-	printf("apidemo matrix status=\"%s\"\n", status.text);
-	assert(!strcmp(status.text, expected));
-}
-
-static void buttonmatrix_keys(struct capture *capture)
-{
-	open_search(capture, "BUTTON MATRIX", "Button matrix", APIDEMO_CANVAS);
-	matrix_typed(capture, "Typed: ");
-	press(capture, 1, KEY_NUMERIC_2);
-	matrix_typed(capture, "Typed: 2");
-	/* U+0431 must leave both the typed text and selected key alone. */
-	send_press(capture, 0, KEY_F6);
+	open_search(capture, "APPEND_DURATION", "Dates and times",
+		    APIDEMO_FORM);
+	for (unsigned int index = 0; index < 3; index++)
+		press(capture, 1, KEY_DOWN);
 	press(capture, 1, KEY_OK);
-	matrix_typed(capture, "Typed: 22");
-	press(capture, 1, KEY_NUMERIC_1);
-	matrix_typed(capture, "Typed: 221");
-	press(capture, 1, KEY_NUMERIC_STAR);
-	matrix_typed(capture, "Typed: 221*");
-	press(capture, 1, KEY_NUMERIC_POUND);
-	matrix_typed(capture, "Typed: 221*#");
-	save_frame(capture, "apidemo-buttonmatrix-keys");
+	press(capture, 1, KEY_RIGHT);
+	press(capture, 1, KEY_UP);
+	press(capture, 1, KEY_OK);
+	wait_observation(capture, APIDEMO_LABEL, "Duration: 150 s");
+	press(capture, 1, KEY_F13);
+	press(capture, 1, KEY_DOWN);
+	press(capture, 1, KEY_DOWN);
+	press(capture, 1, KEY_OK);
+	press(capture, 1, KEY_F13);
+	press(capture, 1, KEY_DOWN);
+	press(capture, 1, KEY_OK);
+	values = wait_observation(capture, APIDEMO_ALERT, "Values");
+	assert(strstr(values.text, "Duration: 90 s"));
+	save_frame(capture, "apidemo-duration");
 	close_and_reap(capture);
-	puts("apidemo: Button matrix ignores б, preserves selected 2; ASCII 1/*/# type their keys");
+	puts("apidemo: Duration edits elapsed seconds and Reset restores 90 s");
 }
 
 static void numeric_field_legend(struct capture *capture)
@@ -717,6 +1022,117 @@ static void whole_surface_back(struct capture *capture, bool keyboard)
 			"apidemo: phone Back leaves Whole surface");
 }
 
+static void sketch_cursor(struct capture *capture)
+{
+	open_search(capture, "SKETCH", word(capture, "Sketch pad", "Рисунок"),
+		    APIDEMO_CANVAS);
+	expect_legends(capture, word(capture, "Paint", "Рисовать"),
+		       word(capture, "Back", "Назад"));
+	save_frame(capture, "apidemo-sketch-empty");
+	press(capture, 1, KEY_OK);
+	expect_legends(capture, word(capture, "Erase", "Стереть"),
+		       word(capture, "Back", "Назад"));
+	save_frame(capture, "apidemo-sketch-painted");
+	press(capture, 1, KEY_RIGHT);
+	expect_legends(capture, word(capture, "Paint", "Рисовать"),
+		       word(capture, "Back", "Назад"));
+	save_frame(capture, "apidemo-sketch-neighbour");
+	press(capture, 1, KEY_LEFT);
+	press(capture, 1, KEY_OK);
+	save_frame(capture, "apidemo-sketch-erased");
+	press(capture, 1, KEY_F14);
+	close_and_reap(capture);
+	puts("apidemo: Sketch Paint, move, return and Erase preserve the cursor frame");
+}
+
+static void preview_resize(struct capture *capture, bool fullscreen)
+{
+	int width = dimension(capture->arguments[1]);
+	int height = dimension(capture->arguments[2]);
+	const struct fplinux_ui_profile_spec *profile = fplinux_ui_profile_spec(
+		fplinux_ui_profile_for_screen(width, height));
+	unsigned int previous;
+	bool options;
+
+	redraw(capture);
+	options = !strcmp(capture->left, word(capture, "Options", "Опции"));
+	if (options) {
+		press(capture, 1, KEY_F13);
+		send_press(capture, 1, KEY_OK);
+	} else {
+		send_press(capture, 1, KEY_F13);
+	}
+
+	for (;;) {
+		struct fplinux_ui_session_message message =
+			fplinux_ui_frame_wait_message(&capture->peer,
+						      capture->session);
+
+		assert(message.type != FPLINUX_UI_SESSION_EXIT);
+		if (message.type != FPLINUX_UI_SESSION_MODE)
+			continue;
+		assert(message.mode == (fullscreen ?
+						FPLINUX_UI_SESSION_FULLSCREEN :
+						FPLINUX_UI_SESSION_INTEGRATED));
+		break;
+	}
+	redraw(capture);
+	previous = capture->peer.commits;
+	if (!fullscreen)
+		height -= profile->status_height + profile->softkey_height;
+	fplinux_ui_frame_configure(&capture->peer, width, height, fullscreen);
+	wait_frame(capture, previous);
+}
+
+static void softkey_preview(struct capture *capture)
+{
+	open_search(capture, "SOFTKEY_BAR_CREATE",
+		    word(capture, "Soft-key preview",
+			 "Просмотр подписей клавиш"),
+		    APIDEMO_CANVAS);
+	save_frame(capture, "apidemo-preview-top");
+	for (int index = 0; index < 12; ++index)
+		send_press(capture, 1, KEY_DOWN);
+	save_frame(capture, "apidemo-preview-end");
+	press(capture, 1, KEY_OK);
+	save_frame(capture, "apidemo-preview-changed");
+	preview_resize(capture, true);
+	save_frame(capture, "apidemo-preview-fullscreen");
+	preview_resize(capture, false);
+	save_frame(capture, "apidemo-preview-normal");
+	press(capture, 1, KEY_F14);
+	close_and_reap(capture);
+	puts("apidemo: Soft-key preview accepts navigation, changes legends and returns from full screen");
+}
+
+static void canvas_geometry(struct capture *capture)
+{
+	open_search(capture, "WHOLE SURFACE", "", APIDEMO_CANVAS);
+	save_frame(capture, "apidemo-whole-geometry");
+	close_and_reap(capture);
+	open_search(capture, "MOVING SHAPES",
+		    word(capture, "Moving shapes", "Перемещение фигур"),
+		    APIDEMO_CANVAS);
+	redraw(capture);
+	for (int index = 0; index < 32; ++index) {
+		send_press(capture, 1, KEY_LEFT);
+		send_press(capture, 1, KEY_UP);
+	}
+	save_frame(capture, "apidemo-moving-first");
+	for (int index = 0; index < 32; ++index) {
+		send_press(capture, 1, KEY_RIGHT);
+		send_press(capture, 1, KEY_DOWN);
+	}
+	save_frame(capture, "apidemo-moving-last");
+	close_and_reap(capture);
+	open_search(capture, "CANVAS FIELDS",
+		    word(capture, "Canvas fields", "Поля на холсте"),
+		    APIDEMO_CANVAS);
+	save_frame(capture, "apidemo-fields-geometry");
+	close_and_reap(capture);
+	puts("apidemo: titled and untitled Canvas bounds keep fields and Moving shapes inside");
+}
+
 static void canvas_field_clear_hold(struct capture *capture)
 {
 	uint64_t deadline;
@@ -743,33 +1159,144 @@ static void canvas_field_clear_hold(struct capture *capture)
 	puts("apidemo: held Clear empties Canvas field; release stays; next Back leaves");
 }
 
+static unsigned int timer_descriptors(pid_t application)
+{
+	char directory[64];
+	struct dirent *entry;
+	unsigned int count = 0;
+	DIR *descriptors;
+
+	assert(snprintf(directory, sizeof(directory), "/proc/%ld/fd",
+			(long)application) < (int)sizeof(directory));
+	descriptors = opendir(directory);
+	assert(descriptors);
+	while ((entry = readdir(descriptors))) {
+		char path[512];
+		char target[128];
+		ssize_t length;
+
+		if (entry->d_name[0] == '.')
+			continue;
+		assert(snprintf(path, sizeof(path), "%s/%s", directory,
+				entry->d_name) < (int)sizeof(path));
+		length = readlink(path, target, sizeof(target) - 1);
+		assert(length >= 0);
+		target[length] = '\0';
+		if (!strcmp(target, "anon_inode:[timerfd]"))
+			++count;
+	}
+	assert(!closedir(descriptors));
+	return count;
+}
+
+static void search_from_root(struct capture *capture, const char *previous,
+			     const char *query, const char *title,
+			     enum apidemo_observation_kind kind)
+{
+	redraw(capture);
+	assert(!strcmp(capture->left, "Search"));
+	assert(!strcmp(capture->centre, "Open"));
+	press(capture, 1, KEY_F13);
+	wait_observation(capture, APIDEMO_FORM, "Search");
+	for (size_t index = 0; index < strlen(previous); ++index)
+		press(capture, 0, KEY_BACKSPACE);
+	search_query(capture, query, title, kind);
+}
+
+static void activation_root_and_owned_resources(struct capture *capture)
+{
+	pid_t application;
+	size_t bytes;
+	uint16_t *confirmation;
+
+	open_search(capture, "WATCHED", "Watched descriptor", APIDEMO_FORM);
+	application = capture->application;
+	assert(timer_descriptors(application) == 1);
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_RESUME);
+	assert(timer_descriptors(application) == 1);
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
+	assert(timer_descriptors(application) == 0);
+	assert(capture->application == application &&
+	       kill(application, 0) == 0);
+	/* Keep the backdrop title short so its marquee cannot change pixels. */
+	search_from_root(capture, "WATCHED", "CONF", "Confirmation",
+			 APIDEMO_ALERT);
+	redraw(capture);
+	bytes = (size_t)capture->peer.width * capture->peer.height *
+		sizeof(*capture->peer.pixels);
+	confirmation = malloc(bytes);
+	assert(confirmation);
+	memcpy(confirmation, capture->peer.pixels, bytes);
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_RESUME);
+	assert(!memcmp(confirmation, capture->peer.pixels, bytes));
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
+	assert(!memcmp(confirmation, capture->peer.pixels, bytes));
+	free(confirmation);
+	press(capture, 1, KEY_OK);
+	wait_observation(capture, APIDEMO_ALERT, "Stay chosen");
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
+	search_from_root(capture, "CONF", "PREFERENCES", "Preferences",
+			 APIDEMO_FORM);
+	type_query(capture, "DRAFT");
+	press(capture, 1, KEY_DOWN);
+	press(capture, 1, KEY_RIGHT);
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
+	search_from_root(capture, "PREFERENCES", "PREFERENCES", "Preferences",
+			 APIDEMO_FORM);
+	wait_preference(capture, "In memory", "locale.count = 0");
+	wait_preference(capture, "Stored", "locale.count = 0");
+	send_press(capture, 1, KEY_OK);
+	wait_preference(capture, "In memory", "locale.count = 1");
+	wait_preference(capture, "Stored", "locale.name = \"DRAFT\"");
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
+	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
+	redraw(capture);
+	assert(!strcmp(capture->left, "Search") &&
+	       !strcmp(capture->centre, "Open"));
+	assert(capture->application == application &&
+	       kill(application, 0) == 0);
+	close_and_reap(capture);
+	puts("apidemo-activation: same process; Resume kept watcher; Open released timerfd; confirmation and preference draft survived");
+}
+
 int main(int argc, char **argv)
 {
 	struct capture capture = { .arguments = argv };
 
 	assert(setvbuf(stdout, NULL, _IONBF, 0) == 0);
-	if (argc != 9) {
+	if (argc != 9 && argc != 10) {
 		fprintf(stderr,
-			"usage: %s WIDTH HEIGHT APP KEYMAP SESSION OUTPUT LOCALE SCENARIO\n",
+			"usage: %s WIDTH HEIGHT APP KEYMAP SESSION OUTPUT LOCALE SCENARIO [THEME]\n",
 			argv[0]);
 		return 2;
 	}
 	capture.directory = argv[6];
 	capture.locale = argv[7];
+	capture.theme = argc == 10 ? argv[9] : "dark";
+	assert(!strcmp(capture.theme, "light") ||
+	       !strcmp(capture.theme, "dark"));
+	if (!strcmp(argv[8], "activation")) {
+		activation_root_and_owned_resources(&capture);
+		return 0;
+	}
+	if (!strcmp(argv[8], "navigation")) {
+		if (!strcmp(capture.locale, "ru"))
+			russian_search(&capture);
+		else
+			catalogue_and_virtual(&capture);
+		popup_routes(&capture);
+		return 0;
+	}
+	if (!strcmp(argv[8], "menu-layout")) {
+		compact_menu_layout(&capture);
+		return 0;
+	}
 	if (!strcmp(argv[8], "storage-failure")) {
 		preference_storage_failure(&capture);
 		return 0;
 	}
-	if (!strcmp(argv[8], "dates")) {
-		dates_error(&capture);
-		return 0;
-	}
-	if (!strcmp(argv[8], "keyboard") || !strcmp(argv[8], "textarea")) {
-		cyrillic_widget(&capture, !strcmp(argv[8], "keyboard"));
-		return 0;
-	}
-	if (!strcmp(argv[8], "buttonmatrix")) {
-		buttonmatrix_keys(&capture);
+	if (!strcmp(argv[8], "duration")) {
+		duration_edit(&capture);
 		return 0;
 	}
 	if (!strcmp(argv[8], "numeric")) {
@@ -783,6 +1310,18 @@ int main(int argc, char **argv)
 	}
 	if (!strcmp(argv[8], "canvas-clear-hold")) {
 		canvas_field_clear_hold(&capture);
+		return 0;
+	}
+	if (!strcmp(argv[8], "sketch-cursor")) {
+		sketch_cursor(&capture);
+		return 0;
+	}
+	if (!strcmp(argv[8], "softkey-preview")) {
+		softkey_preview(&capture);
+		return 0;
+	}
+	if (!strcmp(argv[8], "canvas-geometry")) {
+		canvas_geometry(&capture);
 		return 0;
 	}
 	assert(!strcmp(argv[8], "all"));

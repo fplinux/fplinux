@@ -27,7 +27,7 @@
 /* Preference keys of this category. */
 #define PREF_NAME "locale.name"
 #define PREF_COUNT "locale.count"
-#define PREF_WORD "locale.word"
+#define PREF_NAME_CHARS 24
 
 /*
  * musl has no pgettext(). One English text with two translations is looked
@@ -178,6 +178,7 @@ static void open_dates(struct apidemo *app, const struct apidemo_entry *entry)
 		.type = FPLINUX_UI_COMMAND_OK,
 		.label = _("Update"),
 		.priority = 0,
+		.icon = apidemo_glyph(app, "refresh"),
 	};
 	struct fplinux_ui_screen *form = new_form(app, entry);
 	time_t fixed = fixed_moment();
@@ -198,16 +199,6 @@ static void open_dates(struct apidemo *app, const struct apidemo_entry *entry)
 		format_date(app, fixed, date_styles[i], text, sizeof(text));
 		fplinux_ui_form_append_string(form, date_style_names[i], text);
 	}
-	/* Errors: a buffer too small, and a style that does not exist. */
-	if (!fplinux_ui_format_date(app->ui, fixed, FPLINUX_UI_DATE_LONG, text,
-				    4))
-		snprintf(text, sizeof(text), "false, %s",
-			 apidemo_errno_name(errno));
-	fplinux_ui_form_append_string(form, _("Into 4 bytes"), text);
-	format_date(app, fixed,
-		    (enum fplinux_ui_date_style)(FPLINUX_UI_DATE_CLOCK + 1),
-		    text, sizeof(text));
-	fplinux_ui_form_append_string(form, _("Unknown style"), text);
 	fplinux_ui_screen_add_command(form, &now_command);
 	apidemo_add_back(form);
 	fplinux_ui_screen_set_listener(form, dates_command, NULL, app);
@@ -262,7 +253,6 @@ static void open_numbers(struct apidemo *app, const struct apidemo_entry *entry)
 enum {
 	COMMAND_SAVE = 1,
 	COMMAND_REMOVE,
-	COMMAND_CHECK,
 };
 
 static struct {
@@ -272,6 +262,9 @@ static struct {
 	size_t stored;
 	size_t memory;
 	size_t result;
+	char draft_name[4 * PREF_NAME_CHARS + 1];
+	int draft_count;
+	bool has_draft;
 } prefs_demo;
 
 static struct fplinux_storage_result last_save = {
@@ -325,9 +318,12 @@ static void record_save_result(struct apidemo *app,
 	    (interactive || last_save.state != result.state ||
 	     last_save.error != result.error)) {
 		errno = result.error;
-		if (interactive)
-			apidemo_error(app, "fplinux_ui_prefs_save");
-		else
+		if (interactive) {
+			struct fplinux_ui_screen *alert =
+				apidemo_error(app, "fplinux_ui_prefs_save");
+
+			apidemo_protect_error(app, alert);
+		} else
 			perror("fplinux-example-apidemo: fplinux_ui_prefs_save");
 	} else if (result.state == FPLINUX_STORAGE_DURABLE && last_save.error) {
 		fputs("fplinux-example-apidemo: preferences saved\n", stderr);
@@ -378,42 +374,6 @@ static void remove_prefs(struct apidemo *app)
 	apidemo_save_prefs(app, true);
 }
 
-/*
- * The rules, tried out: an invalid key, a value that is not a whole number
- * for fplinux_ui_prefs_get_int(), and a second handle on the saved file.
- */
-static void check_prefs(struct apidemo *app)
-{
-	struct fplinux_ui_prefs *file;
-	bool bad_key;
-	int bad_key_error;
-	long long word;
-	char saved[TEXT_BYTES];
-
-	errno = 0;
-	bad_key = fplinux_ui_prefs_set(app->prefs, "no spaces", "x");
-	bad_key_error = errno;
-	fplinux_ui_prefs_set(app->prefs, PREF_WORD, "seven");
-	word = fplinux_ui_prefs_get_int(app->prefs, PREF_WORD, -1);
-	fplinux_ui_prefs_remove(app->prefs, PREF_WORD);
-	/* A new handle reads the file: only what was saved is there. */
-	file = fplinux_ui_prefs_open(APIDEMO_APP_ID);
-	if (file)
-		snprintf(saved, sizeof(saved), "\"%s\"",
-			 fplinux_ui_prefs_get(file, PREF_NAME, ""));
-	else
-		snprintf(saved, sizeof(saved), "NULL, %s",
-			 apidemo_errno_name(errno));
-	fplinux_ui_prefs_close(file);
-	apidemo_showf(app, _("Preference rules"),
-		      "fplinux_ui_prefs_set(\"no spaces\"): %s, %s\n"
-		      "fplinux_ui_prefs_get_int(\"seven\", -1): %lld\n"
-		      "%s: %s",
-		      bad_key ? "true" : "false",
-		      apidemo_errno_name(bad_key_error), word, _("In the file"),
-		      saved);
-}
-
 static void prefs_command(struct fplinux_ui *ui, struct fplinux_ui_screen *form,
 			  int command_id, void *context)
 {
@@ -427,11 +387,9 @@ static void prefs_command(struct fplinux_ui *ui, struct fplinux_ui_screen *form,
 	case COMMAND_REMOVE:
 		remove_prefs(app);
 		break;
-	case COMMAND_CHECK:
-		check_prefs(app);
-		break;
 	case APIDEMO_COMMAND_BACK:
 		prefs_demo.form = NULL;
+		prefs_demo.has_draft = false;
 		fplinux_ui_go_back(ui);
 		break;
 	default:
@@ -452,13 +410,10 @@ static void open_prefs(struct apidemo *app, const struct apidemo_entry *entry)
 		  .label = _("Remove"),
 		  .priority = 1,
 		  .icon = apidemo_glyph(app, "delete") },
-		{ .id = COMMAND_CHECK,
-		  .type = FPLINUX_UI_COMMAND_SCREEN,
-		  .label = _("Rules"),
-		  .priority = 2,
-		  .icon = apidemo_glyph(app, "help") },
 	};
 	struct fplinux_ui_screen *form;
+	const char *name;
+	int count;
 
 	if (!app->prefs) {
 		apidemo_show(app, _(entry->title),
@@ -469,13 +424,17 @@ static void open_prefs(struct apidemo *app, const struct apidemo_entry *entry)
 	if (!form)
 		return;
 	prefs_demo.form = form;
+	name = prefs_demo.has_draft ?
+		       prefs_demo.draft_name :
+		       fplinux_ui_prefs_get(app->prefs, PREF_NAME, "");
+	count = prefs_demo.has_draft ?
+			prefs_demo.draft_count :
+			(int)fplinux_ui_prefs_get_int(app->prefs, PREF_COUNT,
+						      0);
 	prefs_demo.name = fplinux_ui_form_append_text_field(
-		form, _("Name"),
-		fplinux_ui_prefs_get(app->prefs, PREF_NAME, ""), 24,
-		FPLINUX_UI_TEXT_ANY);
-	prefs_demo.count = fplinux_ui_form_append_gauge(
-		form, _("Count"), 0, 20,
-		(int)fplinux_ui_prefs_get_int(app->prefs, PREF_COUNT, 0), true);
+		form, _("Name"), name, PREF_NAME_CHARS, FPLINUX_UI_TEXT_ANY);
+	prefs_demo.count = fplinux_ui_form_append_gauge(form, _("Count"), 0, 20,
+							count, true);
 	prefs_demo.stored =
 		fplinux_ui_form_append_string(form, _("Stored"), NULL);
 	prefs_demo.memory =
@@ -639,27 +598,46 @@ static void open_state(struct apidemo *app, const struct apidemo_entry *entry)
 	fplinux_ui_push(app->ui, form);
 }
 
+static void locale_cleanup(struct apidemo *app)
+{
+	(void)app;
+	dates.form = NULL;
+	if (prefs_demo.form) {
+		const char *name = fplinux_ui_form_get_text(prefs_demo.form,
+							    prefs_demo.name);
+
+		/* OPEN keeps edits in memory without applying or saving them. */
+		snprintf(prefs_demo.draft_name, sizeof(prefs_demo.draft_name),
+			 "%s", name ? name : "");
+		prefs_demo.draft_count = fplinux_ui_form_get_value(
+			prefs_demo.form, prefs_demo.count);
+		prefs_demo.has_draft = true;
+	}
+	prefs_demo.form = NULL;
+	state_demo.form = NULL;
+}
+
 static const struct apidemo_entry entries[] = {
 	{ N_("System language"),
-	  "fplinux_ui_locale · gettext · ngettext · msgctxt", open_language,
-	  0 },
+	  "fplinux_ui_locale · gettext · ngettext · msgctxt", open_language, 0,
+	  N_("Use translated text and plurals") },
 	{ N_("Dates"),
-	  "fplinux_ui_format_date · LONG · SHORT · CLOCK · ERANGE · EINVAL",
-	  open_dates, 0 },
+	  "fplinux_ui_format_date · FPLINUX_UI_DATE_LONG · "
+	  "FPLINUX_UI_DATE_SHORT · FPLINUX_UI_DATE_CLOCK",
+	  open_dates, 0, N_("Format fixed and current dates") },
 	{ N_("Numbers"),
 	  "fplinux_ui_format_number · fplinux_ui_decimal_separator",
-	  open_numbers, 0 },
+	  open_numbers, 0, N_("Display numbers in the system language") },
 	{ N_("Preferences"),
-	  "fplinux_ui_prefs_open · get · get_int · set · set_int · remove · "
-	  "save · close",
-	  open_prefs, 0 },
+	  "fplinux_ui_prefs_open · fplinux_ui_prefs_get · fplinux_ui_prefs_set · "
+	  "fplinux_ui_prefs_save · fplinux_ui_prefs_close",
+	  open_prefs, 0, N_("Compare memory, the file and confirmed saving") },
 	{ N_("State directory"), "fplinux_ui_state_dir · fsync · rename",
-	  open_state, 0 },
+	  open_state, 0, N_("Write a private state file atomically") },
 };
 
 const struct apidemo_category apidemo_locale = {
-	.title = N_("Language and data"),
-	.icon = APIDEMO_IMAGE_DIR "locale-symbolic.png",
 	.entries = entries,
 	.count = APIDEMO_COUNT(entries),
+	.cleanup = locale_cleanup,
 };

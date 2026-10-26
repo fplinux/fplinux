@@ -168,6 +168,59 @@ def test_clocks_rejects_arguments_before_preferences_and_ui(
     ("scenario", "expected"),
     [
         (
+            "activation-navigation",
+            (
+                "clocks-activation-navigation: OPEN returns home; RESUME keeps the timer; "
+                "running clocks and laps survive\n"
+            ),
+        ),
+        (
+            "activation-draft",
+            (
+                "clocks-activation-draft: repeated OPEN keeps one Leave/Stay decision; "
+                "Stay retains the draft and Leave opens home\n"
+            ),
+        ),
+        (
+            "activation-pending-success",
+            (
+                "clocks-activation-pending-success: OPEN defers home "
+                "until one alarm mutation succeeds\n"
+            ),
+        ),
+        (
+            "activation-pending-failed",
+            (
+                "clocks-activation-pending-failed: OPEN keeps the request and failed draft; "
+                "the error remains until dismissed\n"
+            ),
+        ),
+        (
+            "activation-pending-changed",
+            (
+                "clocks-activation-pending-changed: successful older mutation keeps "
+                "the newer draft behind Leave/Stay\n"
+            ),
+        ),
+        (
+            "paused-timer-edit",
+            (
+                "clocks-paused-edit: unchanged Done and Cancel retain PAUSED 420123ms; "
+                "replacement requires confirmation\n"
+            ),
+        ),
+        (
+            "snooze-once",
+            (
+                "clocks-snooze-once: pending reminder is visible; "
+                "cancellation and disabled edits preserve Off\n"
+            ),
+        ),
+        (
+            "snooze-weekly",
+            "clocks-snooze-weekly: explicit cancellation retains next regular occurrence\n",
+        ),
+        (
             "timer-late-ack",
             (
                 "clocks-timer-late-ack: accepted 120s draft survives 90s ACK; "
@@ -230,6 +283,14 @@ def test_clocks_rejects_arguments_before_preferences_and_ui(
         ),
     ],
     ids=[
+        "activation-navigation",
+        "activation-draft",
+        "activation-pending-success",
+        "activation-pending-failed",
+        "activation-pending-changed",
+        "paused-timer-edit",
+        "snooze-once",
+        "snooze-weekly",
         "timer-late-ack",
         "timer-unchanged-ack",
         "active-confirm-late-ack",
@@ -293,7 +354,10 @@ def test_actual_clocks_forms_requests_lifecycle_and_rendering_at_each_profile(
             "keeps one alarm\n"
         ),
         "clocks-timer: one duration; 90s; pause, resume and stop\n",
-        "clocks-stopwatch: direct lap=2000ms; pause=2750ms; lap history\n",
+        (
+            "clocks-stopwatch: direct lap=2000ms; confirmed last lap; "
+            "Right history keeps running; pause=2750ms\n"
+        ),
         (
             "clocks-world: UTC default; +05:30; +05:45; -03:30 yesterday; "
             "-12:00 and +14:00 endpoints; duplicate rejected\n"

@@ -51,7 +51,17 @@ def launcher_tasks(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
 
 
 @pytest.mark.parametrize(
-    "scenario", ["confirm", "resume", "states", "refresh", "icons", "interruptions", "errors"]
+    "scenario",
+    [
+        "confirm",
+        "resume",
+        "states",
+        "refresh",
+        "icons",
+        "localized-names",
+        "interruptions",
+        "errors",
+    ],
 )
 def test_tasks_callbacks_preserve_instance_identity_and_visible_actions(
     launcher_tasks: Path, scenario: str

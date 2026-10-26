@@ -12,7 +12,7 @@ gives the tile colours, tile radii, selection geometry and the
 page colours of both themes. Outputs below ROOT:
 
     usr/share/fplinux/glyphs/<N>/<name>.png         N = glyph_sizes
-    usr/share/icons/hicolor/<N>x<N>/apps/<id>.png   N = tile_sizes, installed apps
+    usr/share/icons/hicolor/<N>x<N>/apps/<id>.png   N = profile tile_radius keys
 
 Glyphs are alpha masks (black RGBA, the runtime keeps only alpha); tiles are
 opaque colour squares with rounded corners and a white glyph. resvg draws the
@@ -229,17 +229,17 @@ def plan_glyphs(
     return jobs
 
 
-def _profile_radii(profile: dict[str, Any], sizes: list[int]) -> dict[int, int]:
+def _profile_radii(profile: dict[str, Any]) -> dict[int, int]:
     table = profile.get("tile_radius")
-    if not isinstance(table, dict):
+    if not isinstance(table, dict) or not table:
         message = "fplinux-ui-profile.json has no tile_radius"
         raise IconError(message)
-    if set(table) != {str(size) for size in sizes}:
-        message = f"tile_radius must list exactly the tile sizes {sizes}"
-        raise IconError(message)
     radii: dict[int, int] = {}
-    for size in sizes:
-        radius = table[str(size)]
+    for key, radius in table.items():
+        if not key.isdecimal() or int(key) <= 0 or key != str(int(key)):
+            message = f"tile_radius size {key!r} must be a positive integer"
+            raise IconError(message)
+        size = int(key)
         if isinstance(radius, bool) or not isinstance(radius, int) or not 0 < radius <= size // 2:
             message = f"tile_radius {size} must be an integer in 1..{size // 2}"
             raise IconError(message)
@@ -480,8 +480,7 @@ def build(arguments: argparse.Namespace) -> dict[str, Any]:
     profile = _load_json(arguments.profile)
     sources = Sources(arguments.tabler, arguments.project)
     template = string.Template(arguments.tile_template.read_text(encoding="utf-8"))
-    tile_sizes = _sizes(manifest, "tile_sizes")
-    radii = _profile_radii(profile, tile_sizes)
+    radii = _profile_radii(profile)
     contrast_rows = check_tile_contrast(manifest, profile)
     distance_rows = check_tile_distance(manifest, profile)
     selection_rows = check_selection(profile, radii)

@@ -34,12 +34,6 @@ msgstr "Значки"
 msgid "Close"
 msgstr "Закрыть"
 
-msgid "Minimize"
-msgstr "Свернуть"
-
-msgid "Minimize or close the application?"
-msgstr "Свернуть или закрыть приложение?"
-
 msgid "Unlock"
 msgstr "Разблокировать"
 
@@ -132,7 +126,7 @@ msgid "Too many open apps"
 msgstr "Слишком много открытых приложений"
 
 msgid "Close an application in Tasks, then try again. Your open applications were kept."
-msgstr "Закройте приложение в «Задачах» и попробуйте ещё раз. Открытые приложения сохранены."
+msgstr "Закройте приложение в «Задачах» и попробуйте ещё раз. Открытые приложения не закрыты."
 
 msgid "Alarm"
 msgstr "Будильник"

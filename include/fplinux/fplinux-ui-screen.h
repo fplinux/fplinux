@@ -26,10 +26,11 @@
  *
  * Legends follow the assignment and never repeat. While the stack holds a
  * screen, the runtime handles every key for it: the application receives
- * commands and item changes, not key events, except through a Canvas key
- * handler. VISIBILITY and CLOSE events still reach the fplinux_ui_open()
+ * commands and item changes, not key events, except through a screen key
+ * filter or a Canvas key handler. VISIBILITY and CLOSE events still reach the fplinux_ui_open()
  * callback. Screens are stacked: the top screen is shown, and the runtime
- * deletes a screen when it is popped or replaced.
+ * deletes a screen when it is popped or replaced. The launcher's base
+ * Canvas keeps its system bars visible behind ordinary screens.
  */
 struct fplinux_ui_screen;
 
@@ -45,8 +46,9 @@ enum fplinux_ui_command_type {
 };
 
 /*
- * id is the application's; a lower priority number comes first, ties keep the
- * order of addition. A NULL label uses the type's word in the system language
+ * id is the application's; a lower priority number chooses keys first, ties
+ * keep the order of addition. Options keeps that order with Back last.
+ * A NULL label uses the type's word in the system language
  * (Back, Cancel, Exit, Stop, OK, Help); ITEM and SCREEN commands need one.
  * Labels are printable text shorter than 128 bytes. HELP always goes to the
  * options menu. While the right soft key is Clear for a text field holding
@@ -59,8 +61,10 @@ struct fplinux_ui_command {
 	const char *label;
 	int priority;
 	/*
-	 * Optional image shown beside the command in the options menu, such as
-	 * fplinux_ui_glyph(ui, "delete", FPLINUX_UI_GLYPH_ROW); NULL for none.
+	 * Optional image shown in Options, such as a row-sized system glyph.
+	 * NULL uses the type's standard glyph for Back, Cancel, Exit, Stop, OK
+	 * and Help; ITEM and SCREEN have no default. Supply an image when a
+	 * custom label gives the action another meaning, such as Play or Clear.
 	 */
 	const void *icon;
 	/*
@@ -128,6 +132,17 @@ size_t
 fplinux_ui_screen_get_command_item(const struct fplinux_ui_screen *screen);
 bool fplinux_ui_screen_set_title(struct fplinux_ui_screen *screen,
 				 const char *title);
+/*
+ * One right-aligned status in the existing title band. Strings are copied;
+ * NULL or empty full clears it, and NULL compact uses full. Full is shown
+ * when it fits beside the whole title and the normal spacing; otherwise
+ * compact is shown and only the title may end with dots. The caller supplies
+ * a compact status that fits the band. Neither text scrolls while a status
+ * is set. A status does not create a band without a title. False with EINVAL
+ * for an alert or NULL screen; an allocation failure keeps the old status.
+ */
+bool fplinux_ui_screen_set_header_status(struct fplinux_ui_screen *screen,
+					 const char *full, const char *compact);
 /* The screen's data pointer for the application. */
 void fplinux_ui_screen_set_data(struct fplinux_ui_screen *screen, void *data);
 void *fplinux_ui_screen_get_data(const struct fplinux_ui_screen *screen);
@@ -206,16 +221,30 @@ bool fplinux_ui_list_set(struct fplinux_ui_screen *list, size_t index,
 void fplinux_ui_list_delete_all(struct fplinux_ui_screen *list);
 size_t fplinux_ui_list_size(const struct fplinux_ui_screen *list);
 /*
- * Up and Down move the focus by a row, Left and Right by a visible page,
- * without wrapping. An empty list has no focus: SIZE_MAX.
+ * Up and Down move the focus by a row and wrap at the ends. Left and Right
+ * move by a visible page and stop at the ends. An empty list has no focus:
+ * SIZE_MAX.
  */
 size_t fplinux_ui_list_get_focused(const struct fplinux_ui_screen *list);
+/*
+ * The first completely visible row; SIZE_MAX for an empty list or another
+ * screen. If no whole row fits, returns the first intersecting row.
+ */
+size_t fplinux_ui_list_get_first_visible(const struct fplinux_ui_screen *list);
 void fplinux_ui_list_set_focused(struct fplinux_ui_screen *list, size_t index);
+/*
+ * Reports a focus move made with the navigation keys, separately from the
+ * change listener for marked values. Programmatic focus and row edits stay
+ * quiet. NULL removes the listener; the callback may delete the list.
+ */
+void fplinux_ui_list_set_focus_listener(struct fplinux_ui_screen *list,
+					fplinux_ui_change_cb focused,
+					void *context);
 bool fplinux_ui_list_is_selected(const struct fplinux_ui_screen *list,
 				 size_t index);
 void fplinux_ui_list_set_selected(struct fplinux_ui_screen *list, size_t index,
 				  bool selected);
-/* The centre legend for OK on an IMPLICIT list; "Select" by default. */
+/* The centre legend for IMPLICIT/EXCLUSIVE lists; NULL restores "Select". */
 bool fplinux_ui_list_set_select_label(struct fplinux_ui_screen *list,
 				      const char *label);
 
@@ -229,14 +258,22 @@ bool fplinux_ui_list_set_select_label(struct fplinux_ui_screen *list,
  * EINVAL for an image that cannot be decoded, EFBIG above the limits.
  */
 
+enum fplinux_ui_list_icon_kind {
+	FPLINUX_UI_LIST_ICON_IMAGE,
+	FPLINUX_UI_LIST_ICON_APP_TILE,
+};
+
 /*
  * Shows src at the left of the row in a square box of the profile's
  * row_icon_size; NULL removes the icon. An alpha-only image (a system glyph
- * or a "-symbolic.png" file) is drawn in the row's text colour. Once a row
- * has an icon, the rows without one keep an empty box.
+ * or a "-symbolic.png" file) is drawn in the row's text colour. APP_TILE
+ * adds the theme's tile ring around a colour image while its row is focused.
+ * Once a row has an icon, the rows without one keep an empty box.
+ * An unknown kind fails with EINVAL.
  */
 bool fplinux_ui_list_set_icon(struct fplinux_ui_screen *list, size_t index,
-			      const void *src);
+			      const void *src,
+			      enum fplinux_ui_list_icon_kind kind);
 
 /*
  * Virtual list, for large data sets: a List whose rows are not stored. The
@@ -269,6 +306,8 @@ struct fplinux_ui_virtual_row {
 	const void *icon;
 	/* EXCLUSIVE and MULTIPLE lists. */
 	bool marked;
+	/* IMAGE by default; APP_TILE adds the focused tile ring. */
+	enum fplinux_ui_list_icon_kind icon_kind;
 };
 
 #define FPLINUX_UI_VIRTUAL_ROW_HAS(row, field)            \
@@ -465,6 +504,11 @@ struct fplinux_ui_screen *fplinux_ui_text_box_new(struct fplinux_ui *ui,
 const char *fplinux_ui_text_box_get(const struct fplinux_ui_screen *box);
 bool fplinux_ui_text_box_set(struct fplinux_ui_screen *box, const char *text);
 /*
+ * Cancels symbol selection without replacing the field.
+ * False with EINVAL for a screen that is not a TextBox.
+ */
+bool fplinux_ui_text_box_cancel_picker(struct fplinux_ui_screen *box);
+/*
  * As fplinux_ui_form_set_constraint() for the box's field. A read-only box
  * scrolls its text by a line with Up and Down and by a page with Left and
  * Right, and its right soft key keeps the screen's back command.
@@ -493,6 +537,10 @@ enum fplinux_ui_alert_kind {
 	FPLINUX_UI_ALERT_WARNING,
 	FPLINUX_UI_ALERT_ERROR,
 };
+
+/* The semantic frame colour for native and custom alert boxes. */
+lv_color_t fplinux_ui_alert_color(const struct fplinux_ui *ui,
+				  enum fplinux_ui_alert_kind kind);
 
 struct fplinux_ui_screen *fplinux_ui_alert_new(struct fplinux_ui *ui,
 					       enum fplinux_ui_alert_kind kind,
@@ -542,15 +590,15 @@ void fplinux_ui_canvas_set_key_handler(struct fplinux_ui_screen *canvas,
 				       fplinux_ui_canvas_key_cb handler,
 				       void *context);
 /*
- * The filter runs before Canvas commands and the ordinary key handler.
+ * The filter runs before screen commands and ordinary element key routing.
  * Returning true owns the key, including its release; false leaves it to
  * ordinary routing. This lets an input component handle a held soft key.
  */
-typedef bool (*fplinux_ui_canvas_key_filter_cb)(
-	struct fplinux_ui *ui, struct fplinux_ui_screen *canvas,
+typedef bool (*fplinux_ui_screen_key_filter_cb)(
+	struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
 	const struct fplinux_ui_key *key, void *context);
-void fplinux_ui_canvas_set_key_filter(struct fplinux_ui_screen *canvas,
-				      fplinux_ui_canvas_key_filter_cb filter,
+void fplinux_ui_screen_set_key_filter(struct fplinux_ui_screen *screen,
+				      fplinux_ui_screen_key_filter_cb filter,
 				      void *context);
 /*
  * With raw true, Escape and Enter of an external keyboard go to the key

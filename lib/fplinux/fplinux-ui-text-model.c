@@ -172,10 +172,9 @@ static enum fplinux_multitap_emit_result emit_character(void *context,
 static void commit_pending(struct fplinux_ui_text_model *model)
 {
 	model->phone_zero_held = false;
-	if (!fplinux_multitap_pending(&model->input.compose)) {
-		model->input.held_digit = 0;
+	fplinux_text_input_cancel_held(&model->input);
+	if (!fplinux_multitap_pending(&model->input.compose))
 		return;
-	}
 	fplinux_text_input_commit(&model->input, emit_character, model);
 	model->dirty = true;
 }
@@ -429,13 +428,6 @@ static void move_to_line_edge(struct fplinux_ui_text_model *model, bool end)
 	move_cursor(model, cursor);
 }
 
-static void open_picker(struct fplinux_ui_text_model *model)
-{
-	model->phone_zero_held = false;
-	fplinux_text_input_open_picker(&model->input, emit_character, model);
-	model->dirty = true;
-}
-
 static void close_picker(struct fplinux_ui_text_model *model, bool insert)
 {
 	if (insert)
@@ -502,41 +494,6 @@ insert_newline(struct fplinux_ui_text_model *model)
 	return FPLINUX_UI_TEXT_MODEL_CONSUMED;
 }
 
-/* Called with nothing pending. */
-static enum fplinux_ui_text_model_result
-pound_key(struct fplinux_ui_text_model *model)
-{
-	switch (model->type) {
-	case FPLINUX_UI_TEXT_MODEL_ANY:
-		fplinux_text_input_next_mode(&model->input, emit_character,
-					     model);
-		model->dirty = true;
-		return FPLINUX_UI_TEXT_MODEL_CONSUMED;
-	case FPLINUX_UI_TEXT_MODEL_PHONE:
-		insert_bytes(model, "#", 1);
-		return FPLINUX_UI_TEXT_MODEL_CONSUMED;
-	default:
-		return FPLINUX_UI_TEXT_MODEL_IGNORED;
-	}
-}
-
-static enum fplinux_ui_text_model_result
-star_key(struct fplinux_ui_text_model *model, uint64_t now_ms)
-{
-	switch (model->type) {
-	case FPLINUX_UI_TEXT_MODEL_NUMERIC:
-		toggle_minus(model);
-		break;
-	case FPLINUX_UI_TEXT_MODEL_DECIMAL:
-		decimal_star(model, now_ms);
-		break;
-	default:
-		open_picker(model);
-		break;
-	}
-	return FPLINUX_UI_TEXT_MODEL_CONSUMED;
-}
-
 static enum fplinux_ui_text_model_result
 phone_key(struct fplinux_ui_text_model *model, unsigned int code,
 	  uint64_t now_ms)
@@ -545,6 +502,13 @@ phone_key(struct fplinux_ui_text_model *model, unsigned int code,
 
 	if (model->input.picker_open)
 		return picker_phone_key(model, code);
+	if (model->type == FPLINUX_UI_TEXT_MODEL_ANY &&
+	    (code == KEY_NUMERIC_POUND || code == KEY_NUMERIC_STAR)) {
+		fplinux_text_input_press(&model->input,
+					 code == KEY_NUMERIC_POUND ? '#' : '*',
+					 now_ms, emit_character, model);
+		return FPLINUX_UI_TEXT_MODEL_CONSUMED;
+	}
 	if (code >= KEY_NUMERIC_0 && code <= KEY_NUMERIC_9) {
 		unsigned char digit =
 			(unsigned char)('0' + code - KEY_NUMERIC_0);
@@ -564,7 +528,7 @@ phone_key(struct fplinux_ui_text_model *model, unsigned int code,
 		return FPLINUX_UI_TEXT_MODEL_CONSUMED;
 	}
 	if (code == KEY_F14) {
-		model->input.held_digit = 0;
+		fplinux_text_input_cancel_held(&model->input);
 		model->phone_zero_held = false;
 		if (fplinux_ui_text_model_is_empty(model))
 			return FPLINUX_UI_TEXT_MODEL_IGNORED;
@@ -581,9 +545,16 @@ phone_key(struct fplinux_ui_text_model *model, unsigned int code,
 	commit_pending(model);
 	switch (code) {
 	case KEY_NUMERIC_POUND:
-		return pound_key(model);
+		if (model->type != FPLINUX_UI_TEXT_MODEL_PHONE)
+			return FPLINUX_UI_TEXT_MODEL_IGNORED;
+		insert_bytes(model, "#", 1);
+		return FPLINUX_UI_TEXT_MODEL_CONSUMED;
 	case KEY_NUMERIC_STAR:
-		return star_key(model, now_ms);
+		if (model->type == FPLINUX_UI_TEXT_MODEL_NUMERIC)
+			toggle_minus(model);
+		else
+			decimal_star(model, now_ms);
+		return FPLINUX_UI_TEXT_MODEL_CONSUMED;
 	case KEY_LEFT:
 		move_cursor(model,
 			    previous_boundary(model->text, model->cursor));
@@ -657,8 +628,8 @@ keyboard_key(struct fplinux_ui_text_model *model,
 		}
 		close_picker(model, false);
 	}
+	fplinux_text_input_cancel_held(&model->input);
 	if (key->code == KEY_BACKSPACE) {
-		model->input.held_digit = 0;
 		model->phone_zero_held = false;
 		if (fplinux_ui_text_model_is_empty(model))
 			return FPLINUX_UI_TEXT_MODEL_IGNORED;
@@ -726,6 +697,17 @@ static void release_key(struct fplinux_ui_text_model *model,
 
 	if (key->keyboard)
 		return;
+	if (model->type == FPLINUX_UI_TEXT_MODEL_ANY &&
+	    ((key->code == KEY_NUMERIC_POUND &&
+	      model->input.held_control == '#') ||
+	     (key->code == KEY_NUMERIC_STAR &&
+	      model->input.held_control == '*'))) {
+		fplinux_text_input_release(
+			&model->input,
+			key->code == KEY_NUMERIC_POUND ? '#' : '*', now_ms,
+			emit_character, model);
+		model->dirty = true;
+	}
 	if (key->code >= KEY_NUMERIC_0 && key->code <= KEY_NUMERIC_9)
 		fplinux_text_input_release(
 			&model->input,
@@ -810,11 +792,13 @@ void fplinux_ui_text_model_tick(struct fplinux_ui_text_model *model,
 				uint64_t now_ms)
 {
 	bool had_pending = fplinux_multitap_pending(&model->input.compose);
+	const char *indicator = fplinux_text_input_indicator(&model->input);
 
 	hold_phone_zero(model, now_ms);
 	fplinux_text_input_tick(&model->input, now_ms, emit_character,
 				erase_character, model);
-	if (had_pending != fplinux_multitap_pending(&model->input.compose))
+	if (had_pending != fplinux_multitap_pending(&model->input.compose) ||
+	    indicator != fplinux_text_input_indicator(&model->input))
 		model->dirty = true;
 	finish(model);
 }

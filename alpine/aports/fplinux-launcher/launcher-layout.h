@@ -78,13 +78,12 @@ void fplinux_launcher_battery_layout(const struct fplinux_ui_profile_spec *spec,
 struct fplinux_launcher_rect
 fplinux_launcher_status_glyph(const struct fplinux_ui_profile_spec *spec);
 
-/* Catalogue columns: grid_columns in the grid, one in the list. */
-size_t fplinux_launcher_columns(const struct fplinux_ui_profile_spec *spec,
-				bool grid);
+/* The grid's columns, at least one. */
+size_t fplinux_launcher_columns(const struct fplinux_ui_profile_spec *spec);
 
 /*
  * The catalogue viewport in body coordinates: the rest of the body below the
- * band, for the grid and the list alike. Rows that do not fit are cut at its
+ * band. Grid rows that do not fit are cut at its
  * edges, the hint that more follows.
  */
 struct fplinux_launcher_rect
@@ -107,10 +106,8 @@ int fplinux_launcher_grid_x(int width, int columns, int size, int column);
 int fplinux_launcher_grid_gap(int width, int columns, int size);
 
 /*
- * The catalogue viewport's content: item r, a grid row or a
- * list row, starts at padding + r x pitch and is item pixels high; the
- * content ends padding below the last item. The list's rows follow each
- * other (pitch = item = row_height) inside list_padding. The grid's rows of
+ * The grid viewport's content: row r starts at padding + r x pitch and is
+ * item pixels high; the content ends padding below the last item. Rows of
  * app_icon_size tiles use the adjusted vertical gap from scroll_layout as
  * both their spacing and padding from the band and the soft-key bar.
  */
@@ -123,7 +120,7 @@ struct fplinux_launcher_scroll {
 };
 
 void fplinux_launcher_scroll_layout(const struct fplinux_ui_profile_spec *spec,
-				    int width, int viewport_height, bool grid,
+				    int width, int viewport_height,
 				    struct fplinux_launcher_scroll *scroll);
 
 /* The height of rows items' content, 0 without items. */
@@ -145,13 +142,6 @@ fplinux_launcher_first_visible_row(const struct fplinux_launcher_scroll *scroll,
 				   size_t rows, int offset);
 
 /*
- * The list's page for Left and Right: the rows that fit wholly inside the
- * padding of a viewport_height viewport, at least one.
- */
-size_t fplinux_launcher_page_rows(const struct fplinux_launcher_scroll *scroll,
-				  int viewport_height);
-
-/*
  * The app that digit 1-9 selects: the digit-th app counted in reading order
  * from first_row, the first wholly visible row. count when there is no such
  * app or the digit is outside 1-9.
@@ -169,13 +159,11 @@ enum fplinux_launcher_move {
 /*
  * The selection after a D-pad key among count apps in columns. Up
  * and Down: the same column one row up or down; from a column the short last
- * row lacks, Down selects its last app. In the grid, Left and Right step in
- * reading order, so they continue on the previous or the next row. In the
- * list (one column) they move by page rows. Every move stops at the first
- * and the last app.
+ * row lacks, Down selects its last app. Left and Right step in reading order.
+ * Moves wrap at the grid's edges.
  */
 size_t fplinux_launcher_move(size_t selected, size_t count, size_t columns,
-			     size_t page, enum fplinux_launcher_move move);
+			     enum fplinux_launcher_move move);
 
 /*
  * A grid cell in viewport coordinates: the tile of
@@ -196,25 +184,6 @@ void fplinux_launcher_grid_cell(const struct fplinux_ui_profile_spec *spec,
 				const struct fplinux_launcher_scroll *scroll,
 				size_t column, size_t row,
 				struct fplinux_launcher_cell *cell);
-
-/*
- * A catalogue list row: row in viewport coordinates,
- * from margin to width - gutter and row_height high from list_padding, its
- * divider the bottom pixel. icon (row_icon_size), ring (the tile_ring shape
- * filled under a selected tile) and text (one line of line_height) are
- * relative to the row and centred over its full height in both states. row
- * counts from the catalogue's first row.
- */
-struct fplinux_launcher_row {
-	struct fplinux_launcher_rect row;
-	struct fplinux_launcher_shape icon;
-	struct fplinux_launcher_shape ring;
-	struct fplinux_launcher_rect text;
-};
-
-void fplinux_launcher_list_row(const struct fplinux_ui_profile_spec *spec,
-			       int width, int line_height, size_t row,
-			       struct fplinux_launcher_row *layout);
 
 /*
  * Home and the lock screen: the heights of the clock, the date and
@@ -239,8 +208,7 @@ int fplinux_launcher_text_width(const struct fplinux_ui_profile_spec *spec,
 
 /*
  * A notice: width - 2 x alert_margin
- * wide, at most body_height - 2 x alert_margin high, centred in the body;
- * scrollbar_inset keeps its scroll indicator inside the frame.
+ * wide, at most body_height - 2 x alert_margin high, centred in the body.
  */
 struct fplinux_launcher_notice_box {
 	int width;
@@ -248,7 +216,6 @@ struct fplinux_launcher_notice_box {
 	int border;
 	int padding;
 	int gap;
-	int scrollbar_inset;
 };
 
 void fplinux_launcher_notice_layout(const struct fplinux_ui_profile_spec *spec,

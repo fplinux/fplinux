@@ -92,7 +92,8 @@ static void render(struct fplinux_terminal *terminal, const lv_area_t *bounds)
 	assert(fplinux_terminal_grid_open(&grid, font_path));
 	assert(grid.cell_width == (unsigned int)cell_width &&
 	       grid.cell_height == (unsigned int)cell_height);
-	fplinux_terminal_render(terminal, &grid, &drawing_layer, bounds);
+	fplinux_terminal_render(terminal, &grid, &drawing_layer, bounds,
+				0xadcfde, 0x083442);
 	fplinux_terminal_grid_close(&grid);
 }
 
@@ -181,6 +182,156 @@ static void decorations_stay_in_their_cell(void)
 	fplinux_terminal_destroy(&terminal);
 }
 
+static void cursor_contrasts_with_resolved_backgrounds(void)
+{
+	static const struct {
+		const char *text;
+		lv_color_t marker;
+	} backgrounds[] = {
+		{ "\033[7m \033[0m\033[H", 0x101010 },
+		{ "\033[107m \033[0m\033[H", 0x101010 },
+		{ "\033[48;2;222;223;222m \033[0m\033[H", 0x101010 },
+		{ "\033[42m \033[0m\033[H", 0x101010 },
+		{ "\033[44m \033[0m\033[H", 0x101010 },
+		{ "\033[40m \033[0m\033[H", 0xdedfde },
+	};
+	const lv_area_t bounds = { 3, 7, 3 + 4 * cell_width - 1,
+				   7 + 2 * cell_height - 1 };
+	const lv_area_t marker = { 3, 7 + cell_height - 2, 3 + cell_width - 1,
+				   7 + cell_height - 1 };
+
+	for (size_t index = 0;
+	     index < sizeof(backgrounds) / sizeof(backgrounds[0]); ++index) {
+		struct fplinux_terminal terminal;
+
+		assert(fplinux_terminal_init(&terminal, 4, 2));
+		feed(&terminal, backgrounds[index].text);
+		render(&terminal, &bounds);
+		expect_background(&marker, backgrounds[index].marker);
+		terminal.cursor_visible = false;
+		render(&terminal, &bounds);
+		assert(background_at(3, 7 + cell_height - 1) !=
+		       backgrounds[index].marker);
+		fplinux_terminal_destroy(&terminal);
+	}
+}
+
+static void ansi_and_explicit_rgb_keep_their_resolved_colors(void)
+{
+	static const lv_color_t colors[] = {
+		0x000000, 0xf7595a, 0x39cb39, 0xd6be00, 0x5a86ff, 0xd65dd6,
+		0x00c3c6, 0xc6c7c6, 0x848684, 0xff8284, 0x73f373, 0xfff363,
+		0x8caeff, 0xff8eff, 0x63ffff, 0xffffff,
+	};
+	struct fplinux_terminal terminal;
+	const lv_area_t bounds = { 3, 7, 3 + 16 * cell_width - 1,
+				   7 + 2 * cell_height - 1 };
+	char sgr[32];
+
+	assert(fplinux_terminal_init(&terminal, 16, 2));
+	for (unsigned int index = 0; index < 16; ++index) {
+		unsigned int code = index < 8 ? 30 + index : 90 + index - 8;
+
+		assert(snprintf(sgr, sizeof(sgr), "\033[%umW", code) <
+		       (int)sizeof(sgr));
+		feed(&terminal, sgr);
+	}
+	feed(&terminal,
+	     "\033[0m\033[2;1H\033[38;2;17;34;51;48;2;68;85;102mW\033[?25l");
+	render(&terminal, &bounds);
+	assert(letter_count == 17);
+	for (unsigned int index = 0; index < 16; ++index)
+		expect_letter('W', 3 + (int32_t)index * cell_width, 7,
+			      colors[index]);
+	expect_letter('W', 3, 7 + cell_height, 0x112233);
+	expect_background(&(lv_area_t){ 3, 7 + cell_height, 3 + cell_width - 1,
+					bounds.y2 },
+			  0x445566);
+	fplinux_terminal_destroy(&terminal);
+}
+
+static void
+deferred_wrap_keeps_cursor_preview_and_committed_edge(bool bottom,
+						      bool alternate)
+{
+	struct fplinux_terminal terminal;
+	const lv_area_t bounds = { 3, 7, 3 + 4 * cell_width - 1,
+				   7 + 2 * cell_height - 1 };
+	unsigned int source_row = bottom ? 1 : 0;
+	const struct tsm_screen_cell *cells;
+	lv_area_t cursor = {
+		3 + 3 * cell_width,
+		7 + (int32_t)source_row * cell_height + cell_height - 2,
+		bounds.x2,
+		7 + (int32_t)source_row * cell_height + cell_height - 1,
+	};
+
+	assert(fplinux_terminal_init(&terminal, 4, 2));
+	if (alternate)
+		feed(&terminal, "\033[?1049h");
+	feed(&terminal, bottom ? "WWWW\r\nWШ_Z" : "WШ_Z");
+	assert(tsm_screen_get_cursor_x(terminal.screen) == 4);
+	assert(tsm_screen_get_cursor_y(terminal.screen) == source_row);
+	render(&terminal, &bounds);
+	expect_letter('Z', 3 + 3 * cell_width,
+		      7 + (int32_t)source_row * cell_height, 0xdedfde);
+	expect_background(&cursor, 0xdedfde);
+
+	fplinux_terminal_phone(&terminal, KEY_NUMERIC_2, true, 100);
+	fplinux_terminal_phone(&terminal, KEY_NUMERIC_2, false, 101);
+	render(&terminal, &bounds);
+	expect_letter('a', 3, 7 + cell_height, 0x083442);
+	/* Previewing a bottom-row wrap must not cover the last committed glyph. */
+	expect_letter('Z', 3 + 3 * cell_width, 7, 0xdedfde);
+	assert(!terminal.output_size);
+	assert(tsm_screen_get_cursor_x(terminal.screen) == 4);
+	assert(tsm_screen_get_cursor_y(terminal.screen) == source_row);
+	cells = tsm_screen_draw2(terminal.screen);
+	assert(cells[source_row * 4].ch == 'W');
+	assert(cells[source_row * 4 + 1].ch == 0x428);
+	assert(cells[source_row * 4 + 2].ch == '_');
+	assert(cells[source_row * 4 + 3].ch == 'Z');
+	if (bottom)
+		for (unsigned int index = 0; index < 4; ++index)
+			assert(cells[index].ch == 'W');
+
+	assert(fplinux_terminal_run(&terminal, FPLINUX_TERMINAL_COMMAND_CLEAR));
+	render(&terminal, &bounds);
+	assert(!fplinux_terminal_preedit(&terminal) && !terminal.output_size);
+	expect_letter('Z', 3 + 3 * cell_width,
+		      7 + (int32_t)source_row * cell_height, 0xdedfde);
+	expect_background(&cursor, 0xdedfde);
+	assert(letter_count == (bottom ? 8U : 4U));
+	fplinux_terminal_destroy(&terminal);
+}
+
+static void disabled_wrap_keeps_preedit_in_the_last_column(void)
+{
+	struct fplinux_terminal terminal;
+	const lv_area_t bounds = { 3, 7, 3 + 4 * cell_width - 1,
+				   7 + 2 * cell_height - 1 };
+	unsigned int cursor_x, cursor_y;
+
+	assert(fplinux_terminal_init(&terminal, 4, 2));
+	feed(&terminal, "\033[?7lWШ_Z");
+	assert(!(tsm_screen_get_flags(terminal.screen) & TSM_SCREEN_AUTO_WRAP));
+	cursor_x = tsm_screen_get_cursor_x(terminal.screen);
+	cursor_y = tsm_screen_get_cursor_y(terminal.screen);
+	fplinux_terminal_phone(&terminal, KEY_NUMERIC_2, true, 100);
+	fplinux_terminal_phone(&terminal, KEY_NUMERIC_2, false, 101);
+	render(&terminal, &bounds);
+	assert(letter_count == 4);
+	expect_letter('a', 3 + 3 * cell_width, 7, 0x083442);
+	assert(tsm_screen_get_cursor_x(terminal.screen) == cursor_x);
+	assert(tsm_screen_get_cursor_y(terminal.screen) == cursor_y);
+	assert(tsm_screen_draw2(terminal.screen)[3].ch == 'Z');
+	assert(!terminal.output_size);
+	assert(fplinux_terminal_run(&terminal, FPLINUX_TERMINAL_COMMAND_CLEAR));
+	render(&terminal, &bounds);
+	expect_letter('Z', 3 + 3 * cell_width, 7, 0xdedfde);
+	fplinux_terminal_destroy(&terminal);
+}
+
 static void preedit_replaces_the_cursor_cell_without_sending_bytes(void)
 {
 	struct fplinux_terminal terminal;
@@ -188,7 +339,7 @@ static void preedit_replaces_the_cursor_cell_without_sending_bytes(void)
 				   7 + 2 * cell_height - 1 };
 
 	assert(fplinux_terminal_init(&terminal, 4, 2));
-	feed(&terminal, "W");
+	feed(&terminal, "\033[4mW \033[0m\033[1;2H");
 	fplinux_terminal_phone(&terminal, KEY_NUMERIC_2, true, 100);
 	render(&terminal, &bounds);
 	assert(terminal.output_size == 0 && letter_count == 2);
@@ -196,12 +347,8 @@ static void preedit_replaces_the_cursor_cell_without_sending_bytes(void)
 	expect_letter('a', 3 + cell_width, 7, 0x083442);
 	expect_background(&(lv_area_t){ 3 + cell_width, 7,
 					3 + 2 * cell_width - 1,
-					7 + cell_height - 3 },
-			  0xadcfde);
-	expect_background(&(lv_area_t){ 3 + cell_width, 7 + cell_height - 2,
-					3 + 2 * cell_width - 1,
 					7 + cell_height - 1 },
-			  0xdedfde);
+			  0xadcfde);
 	assert(background_at(3 + cell_width - 1, 7) == 0x101010);
 	assert(background_at(3 + 2 * cell_width, 7) == 0x101010);
 	fplinux_terminal_destroy(&terminal);
@@ -397,6 +544,18 @@ int main(int argc, char **argv)
 		decorations_stay_in_their_cell();
 	else if (!strcmp(argv[1], "preedit"))
 		preedit_replaces_the_cursor_cell_without_sending_bytes();
+	else if (!strcmp(argv[1], "cursor-contrast"))
+		cursor_contrasts_with_resolved_backgrounds();
+	else if (!strcmp(argv[1], "palette"))
+		ansi_and_explicit_rgb_keep_their_resolved_colors();
+	else if (!strcmp(argv[1], "right-edge") ||
+		 !strcmp(argv[1], "bottom-edge") ||
+		 !strcmp(argv[1], "bottom-edge-alternate"))
+		deferred_wrap_keeps_cursor_preview_and_committed_edge(
+			strcmp(argv[1], "right-edge"),
+			!strcmp(argv[1], "bottom-edge-alternate"));
+	else if (!strcmp(argv[1], "no-wrap"))
+		disabled_wrap_keeps_preedit_in_the_last_column();
 	else if (!strcmp(argv[1], "hidden-cursor-underline") ||
 		 !strcmp(argv[1], "blinking-cursor-underline"))
 		underline_keeps_its_color_when_cursor_is_hidden(

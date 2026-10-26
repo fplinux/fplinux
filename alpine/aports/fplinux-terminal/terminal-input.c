@@ -48,9 +48,19 @@ static const struct {
 	[FPLINUX_TERMINAL_COMMAND_CANCEL] = { FPLINUX_TERMINAL_TYPE_CANCEL,
 					      N_("Cancel") },
 };
-static const char *const special_keys[] = {
-	"Esc", "F1", "F2", "F3",  "F4",	 "F5",	"F6",
-	"F7",  "F8", "F9", "F10", "F11", "F12",
+static const struct {
+	const char *label;
+	uint32_t keysym;
+} special_keys[] = {
+	{ "Esc", XKB_KEY_Escape },     { "Home", XKB_KEY_Home },
+	{ "End", XKB_KEY_End },	       { "Delete", XKB_KEY_Delete },
+	{ "PageUp", XKB_KEY_Page_Up }, { "PageDown", XKB_KEY_Page_Down },
+	{ "F1", XKB_KEY_F1 },	       { "F2", XKB_KEY_F2 },
+	{ "F3", XKB_KEY_F3 },	       { "F4", XKB_KEY_F4 },
+	{ "F5", XKB_KEY_F5 },	       { "F6", XKB_KEY_F6 },
+	{ "F7", XKB_KEY_F7 },	       { "F8", XKB_KEY_F8 },
+	{ "F9", XKB_KEY_F9 },	       { "F10", XKB_KEY_F10 },
+	{ "F11", XKB_KEY_F11 },	       { "F12", XKB_KEY_F12 },
 };
 
 void fplinux_terminal_load_languages(struct fplinux_terminal *terminal,
@@ -124,12 +134,15 @@ static void scroll(struct fplinux_terminal *terminal, uint32_t keysym)
 }
 
 static bool send_phone_key(struct fplinux_terminal *terminal, uint32_t keysym,
-			   uint32_t character, unsigned int modifiers)
+			   uint32_t character, unsigned int fixed_modifiers)
 {
+	unsigned int modifiers;
+
 	if (!commit_composition(terminal) || !can_send(terminal))
 		return false;
 	return_live(terminal);
-	modifiers |= terminal->modifier;
+	/* Named shortcuts supply their complete combination after pending text. */
+	modifiers = fixed_modifiers ? fixed_modifiers : terminal->modifier;
 	if (keysym == XKB_KEY_Tab && (modifiers & TSM_SHIFT_MASK))
 		keysym = XKB_KEY_ISO_Left_Tab;
 	tsm_vte_handle_keyboard(terminal->vte, keysym, character, modifiers,
@@ -161,6 +174,16 @@ bool fplinux_terminal_key(struct fplinux_terminal *terminal, uint32_t keysym,
 			  uint32_t ascii, unsigned int modifiers,
 			  uint32_t unicode)
 {
+	if (terminal->stopped) {
+		if ((modifiers & ~TSM_LOCK_MASK) == TSM_SHIFT_MASK &&
+		    (keysym == XKB_KEY_Page_Up || keysym == XKB_KEY_Page_Down))
+			scroll(terminal, keysym);
+		else if (terminal->history &&
+			 (keysym == XKB_KEY_Up || keysym == XKB_KEY_Down ||
+			  keysym == XKB_KEY_Left || keysym == XKB_KEY_Right))
+			scroll(terminal, keysym);
+		return true;
+	}
 	if (terminal->input.picker_open) {
 		switch (keysym) {
 		case XKB_KEY_Left:
@@ -187,6 +210,7 @@ bool fplinux_terminal_key(struct fplinux_terminal *terminal, uint32_t keysym,
 		scroll(terminal, keysym);
 		return true;
 	}
+	fplinux_text_input_cancel_held(&terminal->input);
 	if (!commit_composition(terminal) || !can_send(terminal))
 		return false;
 	return_live(terminal);
@@ -256,22 +280,33 @@ bool fplinux_terminal_phone(struct fplinux_terminal *terminal,
 			    unsigned int code, bool pressed, uint64_t now_ms)
 {
 	uint32_t keysym = phone_keysym(code);
+	unsigned char input_key =
+		code >= KEY_NUMERIC_0 && code <= KEY_NUMERIC_9 ?
+			(unsigned char)('0' + code - KEY_NUMERIC_0) :
+		code == KEY_NUMERIC_POUND ? '#' :
+		code == KEY_NUMERIC_STAR  ? '*' :
+					    0;
 
+	if (terminal->stopped) {
+		if (pressed && terminal->history) {
+			if (code == KEY_F14)
+				return_live(terminal);
+			else if (keysym != XKB_KEY_NoSymbol)
+				scroll(terminal, keysym);
+		}
+		return true;
+	}
 	if (!pressed) {
-		if (code >= KEY_NUMERIC_0 && code <= KEY_NUMERIC_9) {
-			unsigned char digit =
-				(unsigned char)('0' + code - KEY_NUMERIC_0);
-
+		if (input_key) {
 			enum fplinux_multitap_result result =
 				fplinux_text_input_release(&terminal->input,
-							   digit, now_ms,
+							   input_key, now_ms,
 							   send_character,
 							   terminal);
 
 			if (result == FPLINUX_MULTITAP_BLOCKED)
 				return false;
-			if (result != FPLINUX_MULTITAP_IGNORED)
-				terminal->dirty = true;
+			terminal->dirty = true;
 		}
 		if (code == KEY_F14)
 			fplinux_text_input_clear_release(&terminal->input);
@@ -290,22 +325,10 @@ bool fplinux_terminal_phone(struct fplinux_terminal *terminal,
 		return true;
 	}
 	return_live(terminal);
-	if (code >= KEY_NUMERIC_0 && code <= KEY_NUMERIC_9) {
+	if (input_key) {
 		if (fplinux_text_input_press(
-			    &terminal->input,
-			    (unsigned char)('0' + code - KEY_NUMERIC_0), now_ms,
-			    send_character,
+			    &terminal->input, input_key, now_ms, send_character,
 			    terminal) == FPLINUX_MULTITAP_BLOCKED)
-			return false;
-	} else if (code == KEY_NUMERIC_POUND) {
-		if (fplinux_text_input_next_mode(&terminal->input,
-						 send_character, terminal) ==
-		    FPLINUX_MULTITAP_BLOCKED)
-			return false;
-	} else if (code == KEY_NUMERIC_STAR) {
-		if (fplinux_text_input_open_picker(&terminal->input,
-						   send_character, terminal) ==
-		    FPLINUX_MULTITAP_BLOCKED)
 			return false;
 	} else if (code == KEY_F14) {
 		if (fplinux_text_input_clear_press(&terminal->input, now_ms,
@@ -313,6 +336,7 @@ bool fplinux_terminal_phone(struct fplinux_terminal *terminal,
 		    FPLINUX_MULTITAP_EMIT_BLOCKED)
 			return false;
 	} else if (keysym != XKB_KEY_NoSymbol) {
+		fplinux_text_input_cancel_held(&terminal->input);
 		if (!send_phone_key(terminal, keysym, TSM_VTE_INVALID, 0))
 			return false;
 	}
@@ -345,12 +369,16 @@ void fplinux_terminal_pause(struct fplinux_terminal *terminal, bool paused,
 void fplinux_terminal_tick(struct fplinux_terminal *terminal, uint64_t now_ms)
 {
 	bool pending = fplinux_multitap_pending(&terminal->input.compose);
+	const char *indicator = fplinux_text_input_indicator(&terminal->input);
+	bool picker = terminal->input.picker_open;
 
-	if (terminal->paused)
+	if (terminal->paused || terminal->stopped)
 		return;
 	fplinux_text_input_tick(&terminal->input, now_ms, send_character,
 				erase_character, terminal);
-	if (pending != fplinux_multitap_pending(&terminal->input.compose))
+	if (pending != fplinux_multitap_pending(&terminal->input.compose) ||
+	    indicator != fplinux_text_input_indicator(&terminal->input) ||
+	    picker != terminal->input.picker_open)
 		terminal->dirty = true;
 	if (!terminal->history && !terminal->input.picker_open &&
 	    !fplinux_multitap_pending(&terminal->input.compose) &&
@@ -383,6 +411,12 @@ bool fplinux_terminal_command(const struct fplinux_terminal *terminal,
 
 	if ((unsigned int)command >= FPLINUX_TERMINAL_COMMAND_COUNT)
 		return false;
+	if (terminal->stopped && command != FPLINUX_TERMINAL_COMMAND_LIVE &&
+	    command != FPLINUX_TERMINAL_COMMAND_SCROLLBACK &&
+	    command != FPLINUX_TERMINAL_COMMAND_FONT_SIZE &&
+	    command != FPLINUX_TERMINAL_COMMAND_HELP &&
+	    command != FPLINUX_TERMINAL_COMMAND_EXIT)
+		return false;
 	if (terminal->input.picker_open != picker_command)
 		return false;
 	/* The scrollback has Back for Clear and does not offer itself. */
@@ -394,6 +428,8 @@ bool fplinux_terminal_command(const struct fplinux_terminal *terminal,
 	info->type = commands[command].type;
 	info->label = commands[command].label ? _(commands[command].label) :
 						NULL;
+	if (terminal->stopped && command == FPLINUX_TERMINAL_COMMAND_EXIT)
+		info->label = _("Close");
 	/* The options menu follows the order of the commands. */
 	info->priority = (int)command;
 	return true;
@@ -402,6 +438,9 @@ bool fplinux_terminal_command(const struct fplinux_terminal *terminal,
 bool fplinux_terminal_run(struct fplinux_terminal *terminal,
 			  enum fplinux_terminal_command command)
 {
+	if (terminal->stopped && command != FPLINUX_TERMINAL_COMMAND_LIVE &&
+	    command != FPLINUX_TERMINAL_COMMAND_SCROLLBACK)
+		return true;
 	switch (command) {
 	case FPLINUX_TERMINAL_COMMAND_ENTER:
 		if (!send_phone_key(terminal, XKB_KEY_Return, TSM_VTE_INVALID,
@@ -459,6 +498,8 @@ bool fplinux_terminal_run(struct fplinux_terminal *terminal,
 void fplinux_terminal_set_modifiers(struct fplinux_terminal *terminal,
 				    unsigned int modifiers)
 {
+	if (terminal->stopped)
+		return;
 	terminal->modifier = modifiers &
 			     (TSM_CONTROL_MASK | TSM_ALT_MASK | TSM_SHIFT_MASK);
 	terminal->dirty = true;
@@ -471,18 +512,17 @@ size_t fplinux_terminal_special_count(void)
 
 const char *fplinux_terminal_special(size_t index)
 {
-	return index < fplinux_terminal_special_count() ? special_keys[index] :
-							  "";
+	return index < fplinux_terminal_special_count() ?
+		       special_keys[index].label :
+		       "";
 }
 
 bool fplinux_terminal_send_special(struct fplinux_terminal *terminal,
 				   size_t index)
 {
-	if (index >= fplinux_terminal_special_count())
+	if (terminal->stopped || index >= fplinux_terminal_special_count())
 		return true;
-	if (!send_phone_key(terminal,
-			    index ? XKB_KEY_F1 + (uint32_t)index - 1 :
-				    XKB_KEY_Escape,
+	if (!send_phone_key(terminal, special_keys[index].keysym,
 			    TSM_VTE_INVALID, 0))
 		return false;
 	terminal->dirty = true;

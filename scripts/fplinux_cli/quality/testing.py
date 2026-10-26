@@ -22,8 +22,8 @@ if TYPE_CHECKING:
 TEST_TIERS = {
     "small": 90,
     "host_process": 300,
-    # Native application builds and screen captures share this tier's budget.
-    "host_tool": 600,
+    # Native builds and five-profile application matrices share one deadline.
+    "host_tool": 20 * 60,
     "artifact": 300,
     "public_workflow": 90,
 }

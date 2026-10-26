@@ -23,6 +23,11 @@ trap 'exit 143' TERM
 
 build_application() {
 	ui_host_prepare "$root" "$work" "$prepared_inputs"
+	mkdir -p -- "$work/locale/ru/LC_MESSAGES"
+	msgfmt --check --output-file "$work/locale/ru/LC_MESSAGES/org.fplinux.terminal.mo" \
+		"$terminal/ru.po"
+	msgfmt --check --output-file "$work/locale/ru/LC_MESSAGES/fplinux-ui.mo" \
+		"$root/alpine/aports/fplinux-ui/ru.po"
 	ui_host_compile "$screens_dir/terminal-shell-peer.c" -o "$work/terminal-shell-peer"
 	ui_host_compile "$terminal/terminal-pty-supervisor.c" -o "$work/terminal-pty-supervisor"
 	# pkg-config emits compiler/linker arguments for the pinned libraries.
@@ -40,36 +45,43 @@ build_application() {
 		"$ui/fplinux-font.c" \
 		$(pkg-config --libs libtsm) -Wl,--wrap=fplinux_terminal_pty_open \
 		-Wl,--wrap=fplinux_language_list -Wl,--wrap=fplinux_language_load \
+		-Wl,--wrap=fplinux_ui_canvas_new -Wl,--wrap=fplinux_ui_close \
+		-Wl,--wrap=libintl_bindtextdomain \
+		-Wl,--wrap=fplinux_ui_list_new \
+		-Wl,--wrap=fplinux_ui_watch_fd -Wl,--wrap=fplinux_terminal_pty_close \
+		-Wl,--wrap=fplinux_terminal_render \
 		-Wl,--wrap=wl_display_flush \
 		-o "$work/terminal"
 	# shellcheck disable=SC2046
-	ui_host_compile_lvgl \
+	ui_host_compile -I"$root/include" -I"$root/include/fplinux" -I"$ui_host_inputs" \
 		$(pkg-config --cflags wayland-server xkbcommon json-c) \
 		"$screens_dir/terminal-screens.c" "$screens_dir/ui-frame-peer.c" \
 		"$screens_dir/screen-frame.c" "$ui/fplinux-ui-session.c" \
-		"$ui/fplinux-ui-profile.c" "$ui_host_inputs/xdg-shell-protocol.c" "$ui_host_inputs/fonts"/*.c \
-		"$ui_host_inputs/liblvgl.a" \
+		"$ui/fplinux-ui-profile.c" "$ui_host_inputs/xdg-shell-protocol.c" \
 		$(pkg-config --libs wayland-server xkbcommon json-c) \
-		-lm -o "$work/terminal-screens"
+		-o "$work/terminal-screens"
 }
 
 capture() {
 	width=$1
 	height=$2
 	suffix=$3
-	for theme in dark light; do
-		frames=$work/$width"x"$height-$theme
-		mkdir -- "$frames"
-		"$work/terminal-screens" "$width" "$height" "$work/terminal" \
-			"$screens_dir/keypad.xkb" "$work/session.sock" "$frames" \
-			"$root/alpine/aports/fplinux-base/issue" \
-			"$root/alpine/aports/fplinux-base/hostname" \
-			"$root/alpine/aports/fplinux-language" "$theme"
-		read -r frame_width frame_height <"$frames/frame-size"
-		for frame in "$frames"/*.rgb565; do
-			state=$(basename -- "$frame" .rgb565)
-			python3 "$screens_dir/rgb565-png.py" "$frame_width" "$frame_height" \
-				"$frame" "$output/$state$suffix.png"
+	for locale in en ru; do
+		for theme in dark light; do
+			frames=$work/$width"x"$height-$locale-$theme
+			mkdir -- "$frames"
+			"$work/terminal-screens" "$width" "$height" "$work/terminal" \
+				"$screens_dir/keypad.xkb" "$work/session.sock" "$frames" \
+				"$root/alpine/aports/fplinux-base/issue" \
+				"$root/alpine/aports/fplinux-base/hostname" \
+				"$root/alpine/aports/fplinux-language" "$theme" "$locale" "$work/locale"
+			read -r frame_width frame_height <"$frames/frame-size"
+			for frame in "$frames"/*.rgb565; do
+				state=$(basename -- "$frame" .rgb565)
+				python3 "$screens_dir/rgb565-png.py" "$frame_width" "$frame_height" \
+					"$frame" "$output/$state$suffix.png"
+				cp -- "$frames/$state.json" "$output/$state$suffix.json"
+			done
 		done
 	done
 }
@@ -77,6 +89,8 @@ capture() {
 mkdir -p -- "$output"
 build_application
 # Integrated surfaces exclude the manager's status and soft-key bars.
+capture 128 128 -128x128
 capture 128 160 -128x160
+capture 176 220 -176x220
 capture 240 320 ''
 capture 320 240 -320x240

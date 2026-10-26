@@ -102,6 +102,7 @@ def session_core_harness(tmp_path_factory: pytest.TempPathFactory) -> Path:
             *gettext_link_flags(),
             "-Wl,--wrap=clock_settime",
             "-Wl,--wrap=time",
+            "-Wl,--wrap=fopen",
             "-Wl,--wrap=fsync",
             "-Wl,--wrap=write",
             *json_flags.stdout.split(),
@@ -135,8 +136,11 @@ def session_core_harness(tmp_path_factory: pytest.TempPathFactory) -> Path:
         "startup-frame-before-ready",
         "home-retains-exit-saves",
         "close-cancel-stale",
-        "close-wait-home-force",
+        "close-ready-scenes",
+        "close-wait-scenes",
+        "close-wait-home-repeat",
         "close-unanswered-timeout",
+        "close-wait-after-home",
         "close-background-wait",
         "settings-retry-latest",
         "settings-retry-unchanged",
@@ -146,15 +150,17 @@ def session_core_harness(tmp_path_factory: pytest.TempPathFactory) -> Path:
         "shutdown-saves-bounded",
         "task-controls",
         "task-localized-title",
+        "activation-intent-frame-barrier",
+        "activation-ended-task",
+        "activation-cancel-retains",
+        "activation-home-retains",
+        "activation-timeout-retains",
+        "task-localized-live",
+        "task-localized-live-save-fails",
+        "task-localized-explicit-default",
         "task-stale-lock",
-        "end-prompt-minimize",
-        "end-prompt-close",
-        "end-prompt-red-close",
-        "end-prompt-cancel",
-        "end-prompt-stale-instance",
-        "end-prompt-lock",
-        "end-prompt-updates",
-        "end-prompt-fullscreen",
+        "red-home-retains",
+        "red-home-fullscreen",
         "task-view-red-home",
         "task-view-back-home",
         "task-view-query-home",
@@ -167,8 +173,9 @@ def session_core_harness(tmp_path_factory: pytest.TempPathFactory) -> Path:
         "appearance-launcher-first",
         "appearance-requester-first",
         "appearance-save-fails",
-        "appearance-end-minimize",
-        "appearance-end-close",
+        "appearance-home",
+        "appearance-close",
+        "close-appearance-independent",
         "peer-authentication",
         "cancel-cleans-process",
         "key-routing",
@@ -198,9 +205,17 @@ def session_core_harness(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def test_session_manager_host_behavior(session_core_harness: Path, scenario: str) -> None:
     # Unix pathname sockets require a short path independent of pytest's case name.
     with TemporaryDirectory(prefix="fplinux-session-") as scratch:
-        if scenario == "task-localized-title":
+        if scenario.startswith("task-localized-"):
             shutil.copyfile(
                 ROOT / "alpine/aports/fplinux-language/ru", Path(scratch) / "system-language"
+            )
+        if scenario in {
+            "task-localized-live",
+            "task-localized-live-save-fails",
+            "task-localized-explicit-default",
+        }:
+            shutil.copyfile(
+                ROOT / "alpine/aports/fplinux-language/en", Path(scratch) / "system-language-en"
             )
         result = run_process(
             [str(session_core_harness), scenario, scratch],

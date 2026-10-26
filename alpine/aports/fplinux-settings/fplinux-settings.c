@@ -6,6 +6,7 @@
 
 #include <fplinux/fplinux-ui.h>
 #include <fplinux/fplinux-ui-locale.h>
+#include <fplinux/fplinux-ui-menu.h>
 #include <fplinux/fplinux-ui-screen.h>
 #include <fplinux/fplinux-ui-session.h>
 #include <libintl.h>
@@ -57,6 +58,12 @@ enum display_row {
 enum time_language_row {
 	TIME_LANGUAGE_DATE_TIME,
 	TIME_LANGUAGE_LANGUAGE,
+};
+
+enum leave_destination {
+	LEAVE_BACK,
+	LEAVE_ROOT,
+	LEAVE_CLOSE,
 };
 
 /* A choice list: its title, the SETTING name, values and their labels. */
@@ -143,12 +150,20 @@ static const char *const notice_texts[] = {
 struct settings_app {
 	struct fplinux_ui *ui;
 	/* Screens in the stack that the application updates; NULL if not. */
+	struct fplinux_ui_screen *root;
+	struct fplinux_ui_screen *about;
 	struct fplinux_ui_screen *display;
 	struct fplinux_ui_screen *time_language;
 	struct fplinux_ui_screen *input;
 	struct fplinux_ui_screen *choice_list;
 	struct fplinux_ui_screen *brightness_form;
 	struct fplinux_ui_screen *date_form;
+	struct fplinux_ui_screen *leave_alert;
+	struct fplinux_ui_screen *change_alert;
+	struct fplinux_ui_screen *notice_screen;
+	struct fplinux_ui_screen *date_warning;
+	enum leave_destination leave_destination;
+	bool root_requested;
 	bool notice_open;
 	enum notice notice;
 	struct fplinux_storage_result notice_storage;
@@ -171,6 +186,7 @@ struct settings_app {
 	bool input_unavailable;
 	/* The theme the screens were built in; a new one rebuilds them. */
 	enum fplinux_ui_theme_kind theme;
+	char locale[FPLINUX_LANGUAGE_CODE_BYTES];
 	char languages[LANGUAGE_COUNT_MAX][FPLINUX_LANGUAGE_CODE_BYTES];
 	size_t language_count;
 
@@ -185,13 +201,20 @@ struct settings_app {
 	/* Date and time: an item follows the clock until the user edits it. */
 	size_t date_item;
 	size_t time_item;
+	size_t current_time_item;
+	bool date_show_current;
 	bool date_edited;
 	bool time_edited;
+	bool date_pending;
+	uint64_t date_revision;
+	uint64_t sent_date_revision;
+	char sent_time[FPLINUX_SETTINGS_TIME_BYTES];
 	/* Updates the form or the Date and time row at each new minute. */
 	lv_timer_t *clock_timer;
 };
 
 static void show_notice(struct settings_app *app);
+static void return_root(struct settings_app *app);
 
 static void add_back_command(struct settings_app *app,
 			     struct fplinux_ui_screen *screen)
@@ -205,7 +228,7 @@ static void add_back_command(struct settings_app *app,
 	fplinux_ui_screen_add_command(screen, &back);
 }
 
-static void send_setting(struct settings_app *app, const char *name,
+static bool send_setting(struct settings_app *app, const char *name,
 			 const char *value)
 {
 	struct fplinux_ui_session_message message = {
@@ -214,8 +237,11 @@ static void send_setting(struct settings_app *app, const char *name,
 
 	snprintf(message.name, sizeof(message.name), "%s", name);
 	snprintf(message.value, sizeof(message.value), "%s", value);
-	if (!fplinux_ui_send(app->ui, &message))
+	if (!fplinux_ui_send(app->ui, &message)) {
 		perror("fplinux-settings: send SETTING");
+		return false;
+	}
+	return true;
 }
 
 /* An empty value asks the manager for the current one. */
@@ -284,7 +310,8 @@ static void set_glyph(struct settings_app *app, struct fplinux_ui_screen *list,
 		fplinux_ui_glyph(app->ui, name, FPLINUX_UI_GLYPH_ROW);
 
 	if (glyph)
-		fplinux_ui_list_set_icon(list, index, glyph);
+		fplinux_ui_list_set_icon(list, index, glyph,
+					 FPLINUX_UI_LIST_ICON_IMAGE);
 }
 
 /* The current system language by its own name, as the language list shows. */
@@ -349,6 +376,31 @@ static struct fplinux_ui_screen *new_form(struct settings_app *app,
 
 /* Choice lists: the radio marker shows the current value. */
 
+static void show_choice_state(struct settings_app *app)
+{
+	size_t count = app->choice ? app->choice->count : app->language_count;
+	size_t current = app->choice ? choice_current(app, app->choice) : count;
+	const char *locale = app->input_language ?
+				     fplinux_ui_input_locale(app->ui) :
+				     fplinux_ui_locale(app->ui);
+
+	if (!app->choice_list)
+		return;
+	if (!app->choice)
+		for (size_t i = 0; i < count; ++i)
+			if (!strcmp(app->languages[i], locale))
+				current = i;
+	for (size_t i = 0; i < count; ++i)
+		fplinux_ui_list_set_selected(app->choice_list, i, i == current);
+	fplinux_ui_list_set_select_label(
+		app->choice_list, app->choice_pending ? _("Applying…") : NULL);
+	if (app->choice_pending)
+		fplinux_ui_screen_remove_command(app->choice_list,
+						 COMMAND_BACK);
+	else
+		add_back_command(app, app->choice_list);
+}
+
 static void change_command(struct fplinux_ui *ui,
 			   struct fplinux_ui_screen *alert, int command_id,
 			   void *context)
@@ -357,26 +409,22 @@ static void change_command(struct fplinux_ui *ui,
 
 	(void)ui;
 	(void)alert;
+	app->change_alert = NULL;
 	if (command_id == COMMAND_CHANGE) {
 		app->choice_pending = true;
-		send_setting(app, app->requested_setting, app->requested_value);
-	} else if (app->choice_list) {
+		if (!send_setting(app, app->requested_setting,
+				  app->requested_value))
+			app->choice_pending = false;
+	}
+	show_choice_state(app);
+	if (command_id != COMMAND_CHANGE && app->choice_list) {
 		size_t count = app->choice ? app->choice->count :
 					     app->language_count;
-		size_t current = app->choice ?
-					 choice_current(app, app->choice) :
-					 app->language_count;
 
-		if (!app->choice)
-			for (size_t i = 0; i < count; ++i)
-				if (!strcmp(app->languages[i],
-					    fplinux_ui_locale(app->ui)))
-					current = i;
 		for (size_t i = 0; i < count; ++i)
-			fplinux_ui_list_set_selected(app->choice_list, i,
-						     i == current);
-		if (current < count)
-			fplinux_ui_list_set_focused(app->choice_list, current);
+			if (fplinux_ui_list_is_selected(app->choice_list, i))
+				fplinux_ui_list_set_focused(app->choice_list,
+							    i);
 	}
 }
 
@@ -403,6 +451,7 @@ static void confirm_change(struct settings_app *app, const char *name,
 
 	if (!alert)
 		return;
+	app->change_alert = alert;
 	snprintf(app->requested_setting, sizeof(app->requested_setting), "%s",
 		 name);
 	snprintf(app->requested_value, sizeof(app->requested_value), "%s",
@@ -423,6 +472,7 @@ static void choice_changed(struct fplinux_ui *ui,
 
 	(void)ui;
 	(void)list;
+	show_choice_state(app);
 	if (app->choice_pending)
 		return;
 	/*
@@ -488,6 +538,7 @@ static void language_changed(struct fplinux_ui *ui,
 
 	(void)ui;
 	(void)list;
+	show_choice_state(app);
 	if (app->choice_pending)
 		return;
 	/* The reply switches the language; see apply_setting(). */
@@ -666,14 +717,25 @@ static void show_date_time_row(struct settings_app *app, time_t now)
 static void show_clock(struct settings_app *app)
 {
 	time_t now = time(NULL);
+	char date[48], clock[32], text[160];
 
 	show_date_time_row(app, now);
 	if (!app->date_form)
 		return;
-	if (!app->date_edited)
+	if (!app->date_edited && !app->date_pending)
 		fplinux_ui_form_set_date(app->date_form, app->date_item, now);
-	if (!app->time_edited)
+	if (!app->time_edited && !app->date_pending)
 		fplinux_ui_form_set_date(app->date_form, app->time_item, now);
+	if (app->date_show_current &&
+	    fplinux_ui_format_date(app->ui, now, FPLINUX_UI_DATE_SHORT, date,
+				   sizeof(date)) &&
+	    fplinux_ui_format_date(app->ui, now, FPLINUX_UI_DATE_CLOCK, clock,
+				   sizeof(clock))) {
+		snprintf(text, sizeof(text), _("Current time (UTC): %s %s"),
+			 date, clock);
+		fplinux_ui_form_set_string(app->date_form,
+					   app->current_time_item, text);
+	}
 }
 
 /*
@@ -684,7 +746,8 @@ static void show_clock(struct settings_app *app)
 static bool clock_shown(const struct settings_app *app)
 {
 	if (app->date_form)
-		return !app->date_edited || !app->time_edited;
+		return app->date_show_current || !app->date_edited ||
+		       !app->time_edited;
 	return app->time_language && !app->choice_list;
 }
 
@@ -713,32 +776,80 @@ static void clock_tick(lv_timer_t *timer)
 	schedule_clock(app);
 }
 
+static void date_commands(struct settings_app *app)
+{
+	const struct fplinux_ui_command save = {
+		.id = COMMAND_SAVE,
+		.type = FPLINUX_UI_COMMAND_SCREEN,
+		.label = app->date_pending ? _("Saving…") : _("Save"),
+		.icon = fplinux_ui_glyph(app->ui, "save", FPLINUX_UI_GLYPH_ROW),
+	};
+
+	if (!app->date_form)
+		return;
+	fplinux_ui_screen_add_command(app->date_form, &save);
+	if (app->date_pending)
+		fplinux_ui_screen_remove_command(app->date_form, COMMAND_BACK);
+	else
+		add_back_command(app, app->date_form);
+}
+
+static void date_warning_closed(struct fplinux_ui *ui,
+				struct fplinux_ui_screen *alert, int command_id,
+				void *context)
+{
+	struct settings_app *app = context;
+
+	(void)ui;
+	(void)alert;
+	(void)command_id;
+	app->date_warning = NULL;
+}
+
 /*
  * The edited items count; the others are read from the clock now, with its
- * seconds, so saving only a new date keeps the time running. False keeps the
- * form open with the user's values: the manager would refuse the year.
+ * seconds, so saving only a new date keeps the time running. The submitted
+ * values remain available until the manager confirms the change.
  */
-static bool save_date_time(struct settings_app *app)
+static void save_date_time(struct settings_app *app)
 {
 	time_t date = fplinux_ui_form_get_date(app->date_form, app->date_item);
 	time_t clock = fplinux_ui_form_get_date(app->date_form, app->time_item);
 	char value[FPLINUX_SETTINGS_TIME_BYTES];
 	struct fplinux_ui_screen *alert;
+	time_t now = time(NULL);
 
-	if (!fplinux_settings_save_time(
-		    time(NULL), app->date_edited ? &date : NULL,
-		    app->time_edited ? &clock : NULL, value, sizeof(value)))
-		return true;
+	if (app->sent_time[0] && app->sent_date_revision == app->date_revision)
+		snprintf(value, sizeof(value), "%s", app->sent_time);
+	else if (!fplinux_settings_save_time(now,
+					     app->date_edited ? &date : NULL,
+					     app->time_edited ? &clock : NULL,
+					     value, sizeof(value)))
+		return;
 	if (!fplinux_settings_time_in_range(value)) {
 		alert = fplinux_ui_alert_new(
 			app->ui, FPLINUX_UI_ALERT_WARNING, _("Date and time"),
 			_("Year must be between 1980 and 2099."), 0);
-		if (alert)
+		if (alert) {
+			app->date_warning = alert;
+			fplinux_ui_screen_set_listener(
+				alert, date_warning_closed, NULL, app);
 			fplinux_ui_push(app->ui, alert);
-		return false;
+		}
+		return;
 	}
-	send_setting(app, "time", value);
-	return true;
+	if (!send_setting(app, "time", value))
+		return;
+	app->date_pending = true;
+	app->sent_date_revision = app->date_revision;
+	snprintf(app->sent_time, sizeof(app->sent_time), "%s", value);
+	if (!app->date_edited)
+		fplinux_ui_form_set_date(app->date_form, app->date_item, now);
+	if (!app->time_edited)
+		fplinux_ui_form_set_date(app->date_form, app->time_item, now);
+	app->date_edited = true;
+	app->time_edited = true;
+	date_commands(app);
 }
 
 /*
@@ -753,8 +864,19 @@ static void leave_command(struct fplinux_ui *ui,
 
 	(void)ui;
 	(void)alert;
-	if (command_id == COMMAND_LEAVE)
-		close_screen(app, &app->date_form);
+	app->leave_alert = NULL;
+	if (app->leave_destination == LEAVE_CLOSE) {
+		fplinux_ui_close_reply(app->ui,
+				       command_id == COMMAND_LEAVE ?
+					       FPLINUX_UI_CLOSE_READY :
+					       FPLINUX_UI_CLOSE_CANCEL);
+	} else if (command_id == COMMAND_LEAVE) {
+		if (app->leave_destination == LEAVE_ROOT)
+			return_root(app);
+		else
+			close_screen(app, &app->date_form);
+	}
+	app->leave_destination = LEAVE_BACK;
 }
 
 static void confirm_leave(struct settings_app *app)
@@ -784,10 +906,14 @@ static void confirm_leave(struct settings_app *app)
 	};
 	struct fplinux_ui_screen *alert = fplinux_ui_alert_new(
 		app->ui, FPLINUX_UI_ALERT_CONFIRMATION, _("Date and time"),
-		_("Leave without saving?"), 0);
+		app->leave_destination == LEAVE_ROOT ?
+			_("Return to the start without saving?") :
+			_("Leave without saving?"),
+		0);
 
 	if (!alert)
 		return;
+	app->leave_alert = alert;
 	/*
 	 * OK keeps the changes on screen; discarding them takes the left soft
 	 * key, and the right one cancels the question.
@@ -797,6 +923,23 @@ static void confirm_leave(struct settings_app *app)
 	fplinux_ui_screen_add_command(alert, &cancel);
 	fplinux_ui_screen_set_listener(alert, leave_command, NULL, app);
 	fplinux_ui_push(app->ui, alert);
+}
+
+static enum fplinux_ui_close_response prepare_close(struct fplinux_ui *ui,
+						    void *context)
+{
+	struct settings_app *app = context;
+
+	(void)ui;
+	if (!app->date_form ||
+	    (!app->date_edited && !app->time_edited && !app->date_pending &&
+	     !fplinux_ui_form_is_editing(app->date_form)))
+		return FPLINUX_UI_CLOSE_READY;
+	if (!app->leave_alert)
+		confirm_leave(app);
+	app->leave_destination = LEAVE_CLOSE;
+	return app->leave_alert ? FPLINUX_UI_CLOSE_WAIT :
+				  FPLINUX_UI_CLOSE_CANCEL;
 }
 
 static void date_time_changed(struct fplinux_ui *ui,
@@ -811,6 +954,7 @@ static void date_time_changed(struct fplinux_ui *ui,
 		app->date_edited = true;
 	else if (index == app->time_item)
 		app->time_edited = true;
+	++app->date_revision;
 	schedule_clock(app);
 }
 
@@ -822,10 +966,13 @@ static void date_time_command(struct fplinux_ui *ui,
 
 	(void)ui;
 	(void)form;
+	if (app->date_pending)
+		return;
 	if (command_id == COMMAND_SAVE) {
-		if ((app->date_edited || app->time_edited) &&
-		    !save_date_time(app))
+		if (app->date_edited || app->time_edited) {
+			save_date_time(app);
 			return;
+		}
 		close_screen(app, &app->date_form);
 	} else if (command_id == COMMAND_BACK) {
 		if (app->date_edited || app->time_edited)
@@ -851,14 +998,18 @@ static void open_date_time(struct settings_app *app)
 		return;
 	app->date_item = fplinux_ui_form_append_date(form, _("Date"),
 						     FPLINUX_UI_DATE, now);
-	app->time_item = fplinux_ui_form_append_date(form, _("Time"),
+	app->time_item = fplinux_ui_form_append_date(form, _("Time (UTC)"),
 						     FPLINUX_UI_TIME, now);
+	app->current_time_item = fplinux_ui_form_append_string(form, NULL, "");
+	app->date_show_current = false;
 	fplinux_ui_screen_add_command(form, &save);
 	add_back_command(app, form);
 	fplinux_ui_screen_set_listener(form, date_time_command,
 				       date_time_changed, app);
 	app->date_edited = false;
 	app->time_edited = false;
+	app->date_pending = false;
+	app->sent_time[0] = '\0';
 	app->date_form = form;
 	fplinux_ui_push(app->ui, form);
 	schedule_clock(app);
@@ -1035,10 +1186,12 @@ static void open_input(struct settings_app *app)
 static void about_command(struct fplinux_ui *ui, struct fplinux_ui_screen *form,
 			  int command_id, void *context)
 {
+	struct settings_app *app = context;
+
+	(void)ui;
 	(void)form;
-	(void)context;
 	if (command_id == COMMAND_BACK)
-		fplinux_ui_pop(ui);
+		close_screen(app, &app->about);
 }
 
 static void append_memory(struct settings_app *app,
@@ -1088,6 +1241,9 @@ static void open_about(struct settings_app *app)
 	if (fplinux_settings_read_os_name("/etc/os-release", value,
 					  sizeof(value)))
 		fplinux_ui_form_append_string(form, _("System"), value);
+	if (fplinux_settings_read_os_field("/etc/os-release", "BUILD_ID", value,
+					   sizeof(value)))
+		fplinux_ui_form_append_string(form, _("Build"), value);
 	if (fplinux_settings_read_line("/etc/alpine-release", value,
 				       sizeof(value)))
 		fplinux_ui_form_append_string(form, "Alpine Linux", value);
@@ -1097,6 +1253,7 @@ static void open_about(struct settings_app *app)
 	append_memory(app, form);
 	add_back_command(app, form);
 	fplinux_ui_screen_set_listener(form, about_command, NULL, app);
+	app->about = form;
 	fplinux_ui_push(app->ui, form);
 }
 
@@ -1147,36 +1304,75 @@ static struct fplinux_ui_screen *create_root(struct settings_app *app)
 	return list;
 }
 
-/*
- * After a change of language or theme every screen is built again in it,
- * back on the list where the user chose it: Time & language or Display.
- */
-static void rebuild(struct settings_app *app, enum root_row group)
+static void return_root(struct settings_app *app)
+{
+	struct fplinux_ui_screen **children[] = {
+		&app->choice_list, &app->brightness_form, &app->date_form,
+		&app->about,	   &app->display,	  &app->time_language,
+		&app->input,
+	};
+
+	fplinux_ui_menu_close(app->ui);
+	end_preview(app);
+	for (size_t index = 0; index < ARRAY_SIZE(children); ++index)
+		if (*children[index])
+			close_screen(app, children[index]);
+	app->choice_requery = false;
+	app->root_requested = false;
+}
+
+static void open_root(struct settings_app *app)
+{
+	if (app->leave_alert || app->change_alert || app->notice_open ||
+	    app->date_warning)
+		return;
+	if (app->date_pending || app->choice_pending) {
+		app->root_requested = true;
+		return;
+	}
+	app->root_requested = false;
+	if (app->date_form && (app->date_edited || app->time_edited ||
+			       fplinux_ui_form_is_editing(app->date_form))) {
+		app->leave_destination = LEAVE_ROOT;
+		confirm_leave(app);
+		return;
+	}
+	return_root(app);
+}
+
+/* Appearance changes rebuild the current destination, including the root. */
+static void rebuild(struct settings_app *app)
 {
 	struct fplinux_ui_screen *root;
+	bool display = app->display != NULL;
+	bool time_language = app->time_language != NULL;
+	bool input = app->input != NULL;
+	bool about = app->about != NULL;
+	bool notice = app->notice_open;
+	bool root_requested = app->root_requested;
+	size_t focus = fplinux_ui_list_get_focused(app->root);
 
-	while (fplinux_ui_pop(app->ui))
-		;
-	app->display = NULL;
-	app->time_language = NULL;
-	app->input = NULL;
-	app->choice_list = NULL;
-	app->choice_pending = false;
-	app->choice_requery = false;
-	app->brightness_form = NULL;
-	app->date_form = NULL;
-	schedule_clock(app);
+	if (notice)
+		close_screen(app, &app->notice_screen);
+	return_root(app);
 	app->theme = theme_kind(app);
+	snprintf(app->locale, sizeof(app->locale), "%s",
+		 fplinux_ui_locale(app->ui));
 	root = create_root(app);
 	if (!root)
 		return;
-	fplinux_ui_list_set_focused(root, group);
+	fplinux_ui_list_set_focused(root, focus);
 	fplinux_ui_replace(app->ui, root);
-	if (group == ROOT_DISPLAY)
+	app->root = root;
+	if (!root_requested && display)
 		open_display(app, DISPLAY_THEME);
-	else
+	else if (!root_requested && time_language)
 		open_time_language(app, TIME_LANGUAGE_LANGUAGE);
-	if (app->notice_open)
+	else if (!root_requested && input)
+		open_input(app);
+	else if (!root_requested && about)
+		open_about(app);
+	if (notice)
 		show_notice(app);
 }
 
@@ -1199,7 +1395,10 @@ static void apply_setting(struct settings_app *app, const char *name,
 			FPLINUX_SETTINGS_AUTO_LOCK_COUNT, value);
 	} else if (!strcmp(name, "locale")) {
 		/* The runtime has taken the new language from this reply. */
-		rebuild(app, ROOT_TIME_LANGUAGE);
+		if (strcmp(app->locale, fplinux_ui_locale(app->ui)) ||
+		    (app->choice_pending && !app->choice &&
+		     !app->input_language))
+			rebuild(app);
 		return;
 	} else if (!strcmp(name, "input_locale")) {
 		app->input_unavailable = false;
@@ -1218,7 +1417,7 @@ static void apply_setting(struct settings_app *app, const char *name,
 		 */
 		if (theme_kind(app) != app->theme ||
 		    (app->choice_pending && app->choice == &theme_choice)) {
-			rebuild(app, ROOT_DISPLAY);
+			rebuild(app);
 			return;
 		}
 	} else {
@@ -1257,6 +1456,7 @@ static void notice_closed(struct fplinux_ui *ui,
 	(void)screen;
 	(void)command_id;
 	app->notice_open = false;
+	app->notice_screen = NULL;
 }
 
 static void show_notice(struct settings_app *app)
@@ -1288,6 +1488,7 @@ static void show_notice(struct settings_app *app)
 		fplinux_ui_screen_add_command(alert, &close);
 		fplinux_ui_screen_set_listener(alert, notice_closed, NULL, app);
 		app->notice_open = true;
+		app->notice_screen = alert;
 		fplinux_ui_push(app->ui, alert);
 	}
 }
@@ -1341,6 +1542,10 @@ static void show_error(struct settings_app *app,
 		 !strcmp(message->reason, "failed"))
 		/* The clock may be set before formatting the reply fails. */
 		notice = NOTICE_TIME_FAILED;
+	if (!strcmp(message->name, "time") && app->date_form) {
+		app->date_show_current = true;
+		show_clock(app);
+	}
 	if (app->notice_open)
 		fplinux_ui_pop(app->ui);
 	app->notice = notice;
@@ -1373,6 +1578,28 @@ static void handle_event(struct fplinux_ui *ui,
 
 	switch (event->type) {
 	case FPLINUX_UI_EVENT_SESSION:
+		if (message->type == FPLINUX_UI_SESSION_ERROR &&
+		    message->value[0])
+			app->root_requested = false;
+		/* Only one time mutation is outstanding; its reply reports current time. */
+		if (app->date_pending && !strcmp(message->name, "time") &&
+		    (message->type == FPLINUX_UI_SESSION_SETTING ||
+		     message->type == FPLINUX_UI_SESSION_ERROR)) {
+			app->date_pending = false;
+			date_commands(app);
+			if (message->type == FPLINUX_UI_SESSION_SETTING &&
+			    app->date_form &&
+			    app->date_revision == app->sent_date_revision) {
+				app->date_edited = false;
+				app->time_edited = false;
+				if (!fplinux_ui_form_is_editing(
+					    app->date_form) &&
+				    fplinux_ui_current(ui) == app->date_form)
+					close_screen(app, &app->date_form);
+			}
+			show_clock(app);
+			schedule_clock(app);
+		}
 		if (message->applied && strcmp(message->name, "time") &&
 		    strcmp(message->name, "brightness_preview"))
 			app->unsaved = message->storage_error != 0;
@@ -1384,6 +1611,14 @@ static void handle_event(struct fplinux_ui *ui,
 					      message->value);
 			show_error(app, message);
 		}
+		if (app->root_requested &&
+		    message->type == FPLINUX_UI_SESSION_SETTING &&
+		    !app->date_pending && !app->choice_pending)
+			open_root(app);
+		break;
+	case FPLINUX_UI_EVENT_ACTIVATION:
+		if (event->activation == FPLINUX_UI_ACTIVATION_OPEN)
+			open_root(app);
 		break;
 	case FPLINUX_UI_EVENT_LIFECYCLE:
 		if (fplinux_ui_lifecycle(ui) == FPLINUX_UI_BACKGROUND) {
@@ -1443,6 +1678,9 @@ int main(int argc, char **argv)
 	}
 	/* The theme came with CONFIG, as the language did. */
 	app.theme = theme_kind(&app);
+	snprintf(app.locale, sizeof(app.locale), "%s",
+		 fplinux_ui_locale(app.ui));
+	fplinux_ui_set_close_handler(app.ui, prepare_close, &app);
 	app.clock_timer = lv_timer_create(clock_tick, 60000, &app);
 	lv_timer_pause(app.clock_timer);
 	root = create_root(&app);
@@ -1452,6 +1690,7 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	fplinux_ui_push(app.ui, root);
+	app.root = root;
 	/* The language and theme came with CONFIG; the rest is asked for. */
 	query_setting(&app, "brightness");
 	query_setting(&app, "screen_off_seconds");

@@ -10,26 +10,18 @@
 
 struct fplinux_ui_symbol_picker;
 
-enum fplinux_ui_symbol_picker_placement {
-	FPLINUX_UI_SYMBOL_PICKER_ANCHORED,
-	FPLINUX_UI_SYMBOL_PICKER_CENTERED,
-};
-
 /*
- * Opens the shared symbol grid inside the UI's modal height: over anchor
- * for a text field, or centered in the available area for a terminal.
+ * Opens the shared symbol grid centered in the UI's modal area.
  * The caller owns selection, insertion and cancellation of input. Delete the
- * picker before anchor or ui. Returns NULL with errno set on failure.
+ * picker before ui. Returns NULL with errno set on failure.
  */
-struct fplinux_ui_symbol_picker *fplinux_ui_symbol_picker_create(
-	struct fplinux_ui *ui, lv_obj_t *anchor,
-	enum fplinux_ui_symbol_picker_placement placement,
-	unsigned int selected);
+struct fplinux_ui_symbol_picker *
+fplinux_ui_symbol_picker_create(struct fplinux_ui *ui, unsigned int selected);
 void fplinux_ui_symbol_picker_delete(struct fplinux_ui_symbol_picker *picker);
 void fplinux_ui_symbol_picker_select(struct fplinux_ui_symbol_picker *picker,
 				     unsigned int selected);
 /*
- * Recreates an open grid with the current theme, profile and anchor position.
+ * Recreates an open grid with the current theme, profile and modal area.
  * False means its view is closed; the caller cancels the input picker state.
  */
 bool fplinux_ui_symbol_picker_refresh(struct fplinux_ui_symbol_picker *picker);

@@ -112,9 +112,9 @@ static int check_render(unsigned int width, unsigned int height,
 	if (maximum_bright_runs(&surface) != 5U)
 		goto done;
 	/* Solid fixture glyphs must fit completely, including the exit hint. */
-	if (color_count(&surface, 0U, height / 4U, 0x6b4dU) !=
+	if (color_count(&surface, 0U, height / 4U, 0xbe39U) !=
 		    (width == 128U ? 2880U : 5120U) ||
-	    color_count(&surface, height * 88U / 100U, height, 0x6b4dU) !=
+	    color_count(&surface, height * 88U / 100U, height, 0xbe39U) !=
 		    (width == 128U ? 936U : 1664U))
 		goto done;
 	if (!brightness_ui_render(&surface, &font, 10U, true))
@@ -128,11 +128,50 @@ done:
 	return result;
 }
 
+static int write_frame(char **arguments)
+{
+	unsigned int width = (unsigned int)strtoul(arguments[0], NULL, 10);
+	unsigned int height = (unsigned int)strtoul(arguments[1], NULL, 10);
+	unsigned int level = (unsigned int)strtoul(arguments[3], NULL, 10);
+	struct fplinux_font font = { 0 };
+	uint16_t *pixels = calloc((size_t)width * height, sizeof(*pixels));
+	struct brightness_ui_surface surface = {
+		.pixels = pixels,
+		.width = width,
+		.height = height,
+		.stride_bytes = (size_t)width * sizeof(*pixels),
+	};
+	FILE *output = NULL;
+	int result = 1;
+
+	if (!pixels)
+		return 1;
+	if (!fplinux_font_open(&font, arguments[2]) ||
+	    !brightness_ui_render(&surface, &font, level,
+				  !strcmp(arguments[4], "1")))
+		goto done;
+	output = fopen(arguments[5], "wb");
+	if (!output)
+		goto done;
+	if (fwrite(pixels, sizeof(*pixels), (size_t)width * height, output) !=
+	    (size_t)width * height)
+		goto done;
+	result = 0;
+done:
+	if (output && fclose(output))
+		result = 1;
+	fplinux_font_close(&font);
+	free(pixels);
+	return result;
+}
+
 int main(int argc, char **argv)
 {
 	static const unsigned int sizes[][2] = { { 128U, 160U },
 						 { 240U, 320U } };
 
+	if (argc == 8 && !strcmp(argv[1], "--frame"))
+		return write_frame(argv + 2);
 	if (argc != 3) {
 		fprintf(stderr, "brightness UI host fonts required\n");
 		return 1;

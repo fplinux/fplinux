@@ -16,6 +16,8 @@
 #define ROW_SELECTED LV_STATE_USER_1
 /* A checked row of a check list, or the chosen row of a radio list. */
 #define ROW_MARKED LV_STATE_CHECKED
+/* The icon box carries its image role through stored row edits and reuse. */
+#define ICON_APP_TILE LV_STATE_USER_2
 
 /*
  * Each row is a child of the list object in index order: the marker box
@@ -307,15 +309,11 @@ fplinux_ui_listview_create(struct fplinux_ui *ui, lv_obj_t *parent,
 	list->object = object;
 	lv_obj_remove_style_all(object);
 	lv_obj_set_size(object, lv_pct(100), lv_pct(100));
-	lv_obj_set_style_pad_top(object, spec->list_padding, 0);
-	lv_obj_set_style_pad_bottom(object, spec->list_padding, 0);
-	lv_obj_set_style_pad_left(object, spec->margin, 0);
-	lv_obj_set_style_pad_right(object, spec->margin, 0);
+	lv_obj_set_style_pad_left(object, 0, 0);
 	lv_obj_set_style_text_font(object, list->theme->font, 0);
 	lv_obj_set_scroll_dir(object, LV_DIR_VER);
 	lv_obj_set_scrollbar_mode(object, LV_SCROLLBAR_MODE_AUTO);
 	fplinux_ui_style_scrollbar(ui, object);
-	lv_obj_set_style_pad_ver(object, spec->list_padding, LV_PART_SCROLLBAR);
 	lv_obj_add_event_cb(object, delete_cb, LV_EVENT_DELETE, list);
 	return list;
 }
@@ -342,6 +340,9 @@ static void set_row_state(const struct fplinux_ui_listview *list, lv_obj_t *row,
 		lv_obj_set_state(detail, ROW_SELECTED, selected);
 	if (icon)
 		lv_obj_set_state(icon, ROW_SELECTED, selected);
+	if (list->icons)
+		lv_obj_set_state(lv_obj_get_child(row, icon_slot(list)),
+				 ROW_SELECTED, selected);
 }
 
 /* Draws or clears the selection; a drawn selection is scrolled into view. */
@@ -464,6 +465,26 @@ static void set_detail(struct fplinux_ui_listview *list, lv_obj_t *row,
 	lv_label_set_text(label, detail);
 }
 
+static void tile_ring_draw(lv_event_t *event)
+{
+	const struct fplinux_ui_listview *list = lv_event_get_user_data(event);
+	lv_obj_t *box = lv_event_get_target_obj(event);
+	lv_draw_rect_dsc_t ring;
+	lv_area_t area;
+	int32_t reach = list->spec->list_tile_ring_gap +
+			list->spec->list_tile_ring_width;
+
+	if (!lv_obj_has_state(box, ICON_APP_TILE) ||
+	    !lv_obj_has_state(box, ROW_SELECTED))
+		return;
+	lv_obj_get_coords(box, &area);
+	lv_area_increase(&area, reach, reach);
+	lv_draw_rect_dsc_init(&ring);
+	ring.bg_color = list->theme->tile_ring;
+	ring.radius = list->spec->row_tile_radius + reach;
+	lv_draw_rect(lv_event_get_layer(event), &ring, &area);
+}
+
 static void add_icon_box(struct fplinux_ui_listview *list, lv_obj_t *row)
 {
 	lv_obj_t *box = lv_obj_create(row);
@@ -472,6 +493,12 @@ static void add_icon_box(struct fplinux_ui_listview *list, lv_obj_t *row)
 	lv_obj_set_size(box, list->spec->row_icon_size,
 			list->spec->row_icon_size);
 	lv_obj_set_scrollable(box, false);
+	lv_obj_set_overflow_visible(box, true);
+	lv_obj_set_ext_draw_size(box, list->spec->list_tile_ring_gap +
+					      list->spec->list_tile_ring_width);
+	lv_obj_add_event_cb(box, tile_ring_draw, LV_EVENT_DRAW_MAIN, list);
+	lv_obj_set_state(box, ROW_SELECTED,
+			 lv_obj_has_state(row, ROW_SELECTED));
 	lv_obj_move_to_index(box, icon_slot(list));
 }
 
@@ -501,12 +528,15 @@ static void icon_delete_cb(lv_event_t *event)
 
 /* Replaces the row's icon; icon belongs to the row afterwards. */
 static void show_icon(struct fplinux_ui_listview *list, lv_obj_t *row,
-		      lv_draw_buf_t *icon)
+		      lv_draw_buf_t *icon, enum fplinux_ui_list_icon_kind kind)
 {
 	lv_obj_t *box = lv_obj_get_child(row, icon_slot(list));
 	lv_obj_t *image;
 
 	lv_obj_clean(box);
+	lv_obj_set_state(box, ICON_APP_TILE,
+			 icon && icon->header.cf != LV_COLOR_FORMAT_A8 &&
+				 kind == FPLINUX_UI_LIST_ICON_APP_TILE);
 	if (!icon)
 		return;
 	image = lv_image_create(box);
@@ -520,9 +550,12 @@ static void show_icon(struct fplinux_ui_listview *list, lv_obj_t *row,
 }
 
 bool fplinux_ui_listview_set_icon(struct fplinux_ui_listview *list,
-				  size_t index, lv_draw_buf_t *icon)
+				  size_t index, lv_draw_buf_t *icon,
+				  enum fplinux_ui_list_icon_kind kind)
 {
-	if (list->is_virtual || index >= list->count) {
+	if (list->is_virtual || index >= list->count ||
+	    (kind != FPLINUX_UI_LIST_ICON_IMAGE &&
+	     kind != FPLINUX_UI_LIST_ICON_APP_TILE)) {
 		errno = EINVAL;
 		return false;
 	}
@@ -530,7 +563,7 @@ bool fplinux_ui_listview_set_icon(struct fplinux_ui_listview *list,
 		use_icons(list);
 	if (!list->icons)
 		return true;
-	show_icon(list, row_at(list, index), icon);
+	show_icon(list, row_at(list, index), icon, kind);
 	return true;
 }
 
@@ -593,6 +626,10 @@ size_t fplinux_ui_listview_add(struct fplinux_ui_listview *list,
 	}
 	row = make_row(list, text);
 	lv_obj_set_y(row, (int32_t)index * list->pitch);
+	if (index)
+		lv_obj_set_style_border_opa(row_at(list, index - 1),
+					    LV_OPA_COVER, 0);
+	lv_obj_set_style_border_opa(row, LV_OPA_TRANSP, 0);
 	++list->count;
 	set_detail(list, row, detail);
 	if (!index && list->marker == FPLINUX_UI_LISTVIEW_RADIO)
@@ -644,6 +681,9 @@ bool fplinux_ui_listview_remove(struct fplinux_ui_listview *list, size_t index)
 		show_selected(list, false);
 	lv_obj_delete(row_at(list, index));
 	--list->count;
+	if (list->count)
+		lv_obj_set_style_border_opa(row_at(list, list->count - 1),
+					    LV_OPA_TRANSP, 0);
 	place_rows(list, index);
 	list->selected =
 		fplinux_ui_focus_deleted(focus, index, 1, list->count + 1);
@@ -751,6 +791,24 @@ bool fplinux_ui_listview_is_marked(const struct fplinux_ui_listview *list,
 size_t fplinux_ui_listview_selected(const struct fplinux_ui_listview *list)
 {
 	return list->count ? list->selected : SIZE_MAX;
+}
+
+size_t fplinux_ui_listview_first_visible(const struct fplinux_ui_listview *list)
+{
+	int32_t top, height;
+	size_t first;
+
+	if (!list->count)
+		return SIZE_MAX;
+	lv_obj_update_layout(list->object);
+	top = lv_obj_get_scroll_y(list->object);
+	if (top < 0)
+		top = 0;
+	height = lv_obj_get_content_height(list->object);
+	first = (size_t)(top / list->pitch);
+	if (top % list->pitch && height >= 2 * list->pitch - top % list->pitch)
+		++first;
+	return first < list->count ? first : list->count - 1;
 }
 
 lv_obj_t *fplinux_ui_listview_selected_row(struct fplinux_ui_listview *list)
@@ -917,12 +975,13 @@ static void bind_slot(struct fplinux_ui_listview *list, size_t slot)
 		fplinux_ui_marquee_blur(list->ui, text);
 		lv_obj_set_hidden(row, true);
 		if (list->icons)
-			show_icon(list, row, NULL);
+			show_icon(list, row, NULL, FPLINUX_UI_LIST_ICON_IMAGE);
 		return;
 	}
 	if (!list->row_cb(list, index, &data, list->row_context) || !data.text)
 		data = (struct fplinux_ui_virtual_row){ .text = "" };
-	if (data.icon) {
+	if (data.icon && (data.icon_kind == FPLINUX_UI_LIST_ICON_IMAGE ||
+			  data.icon_kind == FPLINUX_UI_LIST_ICON_APP_TILE)) {
 		int size = list->spec->row_icon_size;
 
 		icon = fplinux_ui_image_decode(data.icon, size, size, false);
@@ -934,7 +993,7 @@ static void bind_slot(struct fplinux_ui_listview *list, size_t slot)
 	lv_label_set_text(text, data.text);
 	set_detail(list, row, data.detail);
 	if (list->icons)
-		show_icon(list, row, icon);
+		show_icon(list, row, icon, data.icon_kind);
 	if (list->marker != FPLINUX_UI_LISTVIEW_PLAIN)
 		mark(list, index, data.marked);
 	set_row_state(list, row, focused && list->selectable);
@@ -996,6 +1055,17 @@ static void apply_window(struct fplinux_ui_listview *list, size_t *rebind,
 	if (!list->started)
 		return;
 	bind_slots(list, rebind, count);
+	/* A count change can make an unchanged pooled row the last one. */
+	for (size_t slot = 0; slot < list->slot_count; ++slot) {
+		size_t index = window->bound[slot];
+
+		lv_obj_set_style_border_opa(
+			list->slots[slot],
+			index < list->count && index + 1 < list->count ?
+				LV_OPA_COVER :
+				LV_OPA_TRANSP,
+			0);
+	}
 	lv_obj_update_layout(list->object);
 	lv_obj_scroll_to_y(list->object, window->top, LV_ANIM_OFF);
 	if (window->focus != SIZE_MAX)

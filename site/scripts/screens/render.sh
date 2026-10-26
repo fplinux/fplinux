@@ -61,6 +61,7 @@ render_brightness() {
 	compile -I"$root/include/fplinux" -I"$brightness" -I"$screens_dir" \
 		"$screens_dir/brightness-screen.c" "$screens_dir/screen-frame.c" \
 		"$brightness/brightness-ui.c" "$root/lib/fplinux/fplinux-font.c" \
+		"$root/lib/fplinux/fplinux-ui-profile.c" \
 		-o "$work/brightness-screen"
 	"$work/brightness-screen" 7 "$work/ter-u16n.psf" \
 		"$work/brightness.rgb565"

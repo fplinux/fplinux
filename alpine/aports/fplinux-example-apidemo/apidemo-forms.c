@@ -25,7 +25,6 @@ enum {
 	COMMAND_CHANGE = 1,
 	COMMAND_REMOVE_TEXT,
 	COMMAND_SHOW,
-	COMMAND_TOP_UP,
 	COMMAND_CALL,
 	COMMAND_LOCK,
 	COMMAND_MASK,
@@ -33,12 +32,6 @@ enum {
 	COMMAND_NUMERIC,
 	COMMAND_DECIMAL,
 	COMMAND_PHONE,
-	COMMAND_NOT_A_FIELD,
-	COMMAND_READ,
-	COMMAND_SET_POINT,
-	COMMAND_SET_COMMA,
-	COMMAND_SET_LETTERS,
-	COMMAND_SET_LONG,
 	COMMAND_CHOOSE_ALL,
 	COMMAND_RESET,
 	COMMAND_START,
@@ -51,7 +44,6 @@ enum {
 	COMMAND_SHOW_HIDDEN,
 	COMMAND_FOCUS_LAST,
 	COMMAND_LIST_ITEMS,
-	COMMAND_OUT_OF_RANGE,
 	COMMAND_DELETE_ALL,
 	COMMAND_SEND,
 	COMMAND_TODAY,
@@ -198,9 +190,9 @@ static void open_strings(struct apidemo *app, const struct apidemo_entry *entry)
 		form, _("Set by the application"), _("Not changed yet."));
 	/* No item takes the focus, so OK runs the first OK command. */
 	add_command(form, COMMAND_CHANGE, FPLINUX_UI_COMMAND_OK, _("Change"), 0,
-		    NULL);
+		    apidemo_glyph(app, "edit"));
 	add_command(form, COMMAND_REMOVE_TEXT, FPLINUX_UI_COMMAND_SCREEN,
-		    _("Remove text"), 1, NULL);
+		    _("Remove text"), 1, apidemo_glyph(app, "backspace"));
 	apidemo_add_back(form);
 	fplinux_ui_screen_set_listener(form, strings_command, NULL, app);
 	apidemo_push(app, form, "fplinux_ui_form_new");
@@ -217,32 +209,22 @@ struct field {
 	enum fplinux_ui_text_constraint constraint;
 };
 
-static const struct field plain_fields[] = {
+static const struct field fields[] = {
 	{ N_("Any text"), NULL, 24, FPLINUX_UI_TEXT_ANY },
 	{ N_("Integer"), NULL, 6, FPLINUX_UI_TEXT_NUMERIC },
 	/* A DECIMAL field shows the language's separator: 9,99 in Russian. */
 	{ N_("Decimal number"), "9.99", 8, FPLINUX_UI_TEXT_DECIMAL },
 	{ N_("Phone number"), NULL, 20, FPLINUX_UI_TEXT_PHONE },
 	{ N_("Any text, no limit"), NULL, 0, FPLINUX_UI_TEXT_ANY },
-};
-
-/* PASSWORD can be added to every type; a PIN is a NUMERIC password. */
-static const struct field password_fields[] = {
 	{ N_("Password"), NULL, 16,
 	  FPLINUX_UI_TEXT_ANY | FPLINUX_UI_TEXT_PASSWORD },
 	{ N_("PIN"), NULL, 4,
 	  FPLINUX_UI_TEXT_NUMERIC | FPLINUX_UI_TEXT_PASSWORD },
-	{ N_("Hidden decimal"), NULL, 8,
-	  FPLINUX_UI_TEXT_DECIMAL | FPLINUX_UI_TEXT_PASSWORD },
-	{ N_("Hidden phone number"), NULL, 20,
-	  FPLINUX_UI_TEXT_PHONE | FPLINUX_UI_TEXT_PASSWORD },
+	{ N_("Read-only"), N_("This value cannot be edited."), 0,
+	  FPLINUX_UI_TEXT_ANY | FPLINUX_UI_TEXT_UNEDITABLE },
 };
 
-#define FIELDS_MAX 5
-
-static const struct field *fields;
-static size_t field_count;
-static size_t field_items[FIELDS_MAX];
+static size_t field_items[APIDEMO_COUNT(fields)];
 static size_t fields_status;
 
 /* A text field reports every edit; a password returns its real text. */
@@ -263,14 +245,14 @@ static void show_fields(struct apidemo *app, struct fplinux_ui_screen *form)
 {
 	char text[512] = "";
 
-	for (size_t i = 0; i < field_count; ++i) {
+	for (size_t i = 0; i < APIDEMO_COUNT(fields); ++i) {
 		const char *value =
 			fplinux_ui_form_get_text(form, field_items[i]);
 
 		append_text(text, sizeof(text), _("%s: “%s”"),
 			    _(fields[i].label), value ? value : "");
 		append_text(text, sizeof(text), "%s",
-			    i + 1 < field_count ? "\n" : "");
+			    i + 1 < APIDEMO_COUNT(fields) ? "\n" : "");
 	}
 	apidemo_show(app, _("Values"), text);
 }
@@ -285,7 +267,6 @@ static void fields_command(struct fplinux_ui *ui,
 		show_fields(context, form);
 }
 
-/* variant 0 shows the plain types, variant 1 the passwords. */
 static void open_fields(struct apidemo *app, const struct apidemo_entry *entry)
 {
 	struct fplinux_ui_screen *form =
@@ -295,98 +276,18 @@ static void open_fields(struct apidemo *app, const struct apidemo_entry *entry)
 		apidemo_error(app, "fplinux_ui_form_new");
 		return;
 	}
-	fields = entry->variant ? password_fields : plain_fields;
-	field_count = entry->variant ? APIDEMO_COUNT(password_fields) :
-				       APIDEMO_COUNT(plain_fields);
 	fields_status = append_status(form);
-	for (size_t i = 0; i < field_count; ++i)
+	for (size_t i = 0; i < APIDEMO_COUNT(fields); ++i)
 		field_items[i] = fplinux_ui_form_append_text_field(
-			form, _(fields[i].label), fields[i].text,
+			form, _(fields[i].label),
+			fields[i].text ? _(fields[i].text) : NULL,
 			fields[i].max_chars, fields[i].constraint);
 	/* A text field has no OK action of its own: OK runs Show. */
 	add_command(form, COMMAND_SHOW, FPLINUX_UI_COMMAND_OK, _("Show"), 0,
-		    NULL);
+		    apidemo_glyph(app, "view"));
 	apidemo_add_back(form);
 	fplinux_ui_screen_set_listener(form, fields_command, fields_changed,
 				       app);
-	apidemo_push(app, form, "fplinux_ui_form_new");
-}
-
-/* Read-only fields */
-
-static size_t read_only_phone;
-static size_t read_only_balance;
-
-/* The application still sets the text of a read-only field. */
-static void top_up(struct fplinux_ui_screen *form)
-{
-	const char *text = fplinux_ui_form_get_text(form, read_only_balance);
-	/* DECIMAL text comes with '.', as strtod() reads it. */
-	double balance = text ? strtod(text, NULL) : 0;
-	char value[32];
-
-	snprintf(value, sizeof(value), "%.2f", balance + 1.25);
-	fplinux_ui_form_set_text(form, read_only_balance, value);
-}
-
-static void read_only_command(struct fplinux_ui *ui,
-			      struct fplinux_ui_screen *form, int command_id,
-			      void *context)
-{
-	(void)context;
-	if (command_id == APIDEMO_COMMAND_BACK)
-		fplinux_ui_go_back(ui);
-	else if (command_id == COMMAND_TOP_UP)
-		top_up(form);
-}
-
-/* Call is the phone field's own OK command. */
-static void read_only_item(struct fplinux_ui *ui,
-			   struct fplinux_ui_screen *form, size_t index,
-			   int command_id, void *context)
-{
-	const char *number = fplinux_ui_form_get_text(form, index);
-
-	(void)ui;
-	if (command_id == COMMAND_CALL)
-		apidemo_showf(context, _("Call"), _("Calling %s."),
-			      number ? number : "");
-}
-
-static void open_read_only(struct apidemo *app,
-			   const struct apidemo_entry *entry)
-{
-	const struct fplinux_ui_command call = {
-		.id = COMMAND_CALL,
-		.type = FPLINUX_UI_COMMAND_OK,
-		.label = _("Call"),
-		.priority = 0,
-	};
-	struct fplinux_ui_screen *form =
-		fplinux_ui_form_new(app->ui, _(entry->title));
-
-	if (!form) {
-		apidemo_error(app, "fplinux_ui_form_new");
-		return;
-	}
-	/* Focusable, with no caret or counter; a long line scrolls in focus. */
-	fplinux_ui_form_append_text_field(
-		form, _("Note"),
-		_("A read-only field takes the focus, but no typing."), 0,
-		FPLINUX_UI_TEXT_ANY | FPLINUX_UI_TEXT_UNEDITABLE);
-	/* Unlike a string item, a read-only field can carry item commands. */
-	read_only_phone = fplinux_ui_form_append_text_field(
-		form, _("Phone number"), "+15551234567", 0,
-		FPLINUX_UI_TEXT_PHONE | FPLINUX_UI_TEXT_UNEDITABLE);
-	fplinux_ui_form_add_item_command(form, read_only_phone, &call);
-	read_only_balance = fplinux_ui_form_append_text_field(
-		form, _("Balance"), "12.50", 0,
-		FPLINUX_UI_TEXT_DECIMAL | FPLINUX_UI_TEXT_UNEDITABLE);
-	add_command(form, COMMAND_TOP_UP, FPLINUX_UI_COMMAND_SCREEN,
-		    _("Top up"), 1, NULL);
-	apidemo_add_back(form);
-	fplinux_ui_screen_set_listener(form, read_only_command, NULL, app);
-	fplinux_ui_screen_set_item_listener(form, read_only_item, app);
 	apidemo_push(app, form, "fplinux_ui_form_new");
 }
 
@@ -417,16 +318,16 @@ static void constraint_name(enum fplinux_ui_text_constraint constraint,
 }
 
 /* The labels of the two toggles follow the field's state. */
-static void show_toggles(struct fplinux_ui_screen *form)
+static void show_toggles(struct apidemo *app, struct fplinux_ui_screen *form)
 {
 	/* Adding a command id again replaces the command. */
 	add_command(form, COMMAND_LOCK, FPLINUX_UI_COMMAND_SCREEN,
 		    constraint_locked ? _("Make editable") :
 					_("Make read-only"),
-		    1, NULL);
+		    1, apidemo_glyph(app, constraint_locked ? "edit" : "lock"));
 	add_command(form, COMMAND_MASK, FPLINUX_UI_COMMAND_SCREEN,
 		    constraint_masked ? _("Show the text") : _("Hide the text"),
-		    2, NULL);
+		    2, apidemo_glyph(app, constraint_masked ? "view" : "hide"));
 }
 
 /*
@@ -434,7 +335,8 @@ static void show_toggles(struct fplinux_ui_screen *form)
  * when the text does not suit the type, such as letters for NUMERIC, and
  * the field keeps the type it had.
  */
-static void apply_constraint(struct fplinux_ui_screen *form,
+static void apply_constraint(struct apidemo *app,
+			     struct fplinux_ui_screen *form,
 			     enum fplinux_ui_text_constraint type, bool locked,
 			     bool masked)
 {
@@ -459,54 +361,40 @@ static void apply_constraint(struct fplinux_ui_screen *form,
 	constraint_type = type;
 	constraint_locked = locked;
 	constraint_masked = masked;
-	show_toggles(form);
+	show_toggles(app, form);
 }
 
 static void constraint_command(struct fplinux_ui *ui,
 			       struct fplinux_ui_screen *form, int command_id,
 			       void *context)
 {
-	char result[32];
-	bool done;
-
-	(void)context;
 	switch (command_id) {
 	case APIDEMO_COMMAND_BACK:
 		fplinux_ui_go_back(ui);
 		break;
 	case COMMAND_LOCK:
-		apply_constraint(form, constraint_type, !constraint_locked,
-				 constraint_masked);
+		apply_constraint(context, form, constraint_type,
+				 !constraint_locked, constraint_masked);
 		break;
 	case COMMAND_MASK:
-		apply_constraint(form, constraint_type, constraint_locked,
-				 !constraint_masked);
+		apply_constraint(context, form, constraint_type,
+				 constraint_locked, !constraint_masked);
 		break;
 	case COMMAND_ANY:
-		apply_constraint(form, FPLINUX_UI_TEXT_ANY, constraint_locked,
-				 constraint_masked);
+		apply_constraint(context, form, FPLINUX_UI_TEXT_ANY,
+				 constraint_locked, constraint_masked);
 		break;
 	case COMMAND_NUMERIC:
-		apply_constraint(form, FPLINUX_UI_TEXT_NUMERIC,
+		apply_constraint(context, form, FPLINUX_UI_TEXT_NUMERIC,
 				 constraint_locked, constraint_masked);
 		break;
 	case COMMAND_DECIMAL:
-		apply_constraint(form, FPLINUX_UI_TEXT_DECIMAL,
+		apply_constraint(context, form, FPLINUX_UI_TEXT_DECIMAL,
 				 constraint_locked, constraint_masked);
 		break;
 	case COMMAND_PHONE:
-		apply_constraint(form, FPLINUX_UI_TEXT_PHONE, constraint_locked,
-				 constraint_masked);
-		break;
-	case COMMAND_NOT_A_FIELD:
-		/* Only a text field has a constraint. */
-		errno = 0;
-		done = fplinux_ui_form_set_constraint(form, constraint_status,
-						      FPLINUX_UI_TEXT_ANY);
-		describe_result(result, sizeof(result), done, errno);
-		show_status(form, constraint_status,
-			    "fplinux_ui_form_set_constraint(%zu, ANY) = %s",
-			    constraint_status, result);
+		apply_constraint(context, form, FPLINUX_UI_TEXT_PHONE,
+				 constraint_locked, constraint_masked);
 		break;
 	default:
 		break;
@@ -530,108 +418,17 @@ static void open_constraint(struct apidemo *app,
 		form, _("Result"), _("Type letters, then choose a type."));
 	constraint_field = fplinux_ui_form_append_text_field(
 		form, _("Value"), "2024", 12, FPLINUX_UI_TEXT_ANY);
-	show_toggles(form);
+	show_toggles(app, form);
 	add_command(form, COMMAND_ANY, FPLINUX_UI_COMMAND_SCREEN, _("Any text"),
-		    3, NULL);
+		    3, apidemo_glyph(app, "keyboard"));
 	add_command(form, COMMAND_NUMERIC, FPLINUX_UI_COMMAND_SCREEN,
-		    _("Integer"), 4, NULL);
+		    _("Integer"), 4, apidemo_glyph(app, "keyboard"));
 	add_command(form, COMMAND_DECIMAL, FPLINUX_UI_COMMAND_SCREEN,
-		    _("Decimal number"), 5, NULL);
+		    _("Decimal number"), 5, apidemo_glyph(app, "keyboard"));
 	add_command(form, COMMAND_PHONE, FPLINUX_UI_COMMAND_SCREEN,
-		    _("Phone number"), 6, NULL);
-	add_command(form, COMMAND_NOT_A_FIELD, FPLINUX_UI_COMMAND_SCREEN,
-		    _("On a string item"), 7, NULL);
+		    _("Phone number"), 6, apidemo_glyph(app, "call"));
 	apidemo_add_back(form);
 	fplinux_ui_screen_set_listener(form, constraint_command, NULL, app);
-	apidemo_push(app, form, "fplinux_ui_form_new");
-}
-
-/* Getting and setting text */
-
-static size_t text_status;
-static size_t text_price;
-
-/* Shows what fplinux_ui_form_set_text() returned for text. */
-static void set_price(struct fplinux_ui_screen *form, size_t item,
-		      const char *text)
-{
-	char result[32];
-	bool done;
-
-	errno = 0;
-	done = fplinux_ui_form_set_text(form, item, text);
-	describe_result(result, sizeof(result), done, errno);
-	show_status(form, text_status,
-		    "fplinux_ui_form_set_text(%zu, \"%s\") = %s", item, text,
-		    result);
-}
-
-static void text_command(struct fplinux_ui *ui, struct fplinux_ui_screen *form,
-			 int command_id, void *context)
-{
-	const char *text;
-
-	(void)context;
-	switch (command_id) {
-	case APIDEMO_COMMAND_BACK:
-		fplinux_ui_go_back(ui);
-		break;
-	case COMMAND_READ:
-		/* "3.5" while the field shows 3,5 in Russian. */
-		text = fplinux_ui_form_get_text(form, text_price);
-		show_status(form, text_status,
-			    "fplinux_ui_form_get_text(%zu)\n= \"%s\"",
-			    text_price, text ? text : "");
-		break;
-	case COMMAND_SET_POINT:
-		set_price(form, text_price, "2.75");
-		break;
-	case COMMAND_SET_COMMA:
-		set_price(form, text_price, "1,25");
-		break;
-	case COMMAND_SET_LETTERS:
-		set_price(form, text_price, "abc");
-		break;
-	case COMMAND_SET_LONG:
-		/* More characters than max_chars: E2BIG. */
-		set_price(form, text_price, "1234567");
-		break;
-	case COMMAND_NOT_A_FIELD:
-		set_price(form, text_status, "1");
-		break;
-	default:
-		break;
-	}
-}
-
-static void open_text_calls(struct apidemo *app,
-			    const struct apidemo_entry *entry)
-{
-	struct fplinux_ui_screen *form =
-		fplinux_ui_form_new(app->ui, _(entry->title));
-
-	if (!form) {
-		apidemo_error(app, "fplinux_ui_form_new");
-		return;
-	}
-	text_status = fplinux_ui_form_append_string(form, _("Result"),
-						    _("OK reads the price."));
-	text_price = fplinux_ui_form_append_text_field(
-		form, _("Price"), "3.5", 6, FPLINUX_UI_TEXT_DECIMAL);
-	add_command(form, COMMAND_READ, FPLINUX_UI_COMMAND_OK, _("Read"), 0,
-		    NULL);
-	add_command(form, COMMAND_SET_POINT, FPLINUX_UI_COMMAND_SCREEN,
-		    _("Set 2.75"), 1, NULL);
-	add_command(form, COMMAND_SET_COMMA, FPLINUX_UI_COMMAND_SCREEN,
-		    _("Set 1,25"), 2, NULL);
-	add_command(form, COMMAND_SET_LETTERS, FPLINUX_UI_COMMAND_SCREEN,
-		    _("Set letters"), 3, NULL);
-	add_command(form, COMMAND_SET_LONG, FPLINUX_UI_COMMAND_SCREEN,
-		    _("Set 7 digits"), 4, NULL);
-	add_command(form, COMMAND_NOT_A_FIELD, FPLINUX_UI_COMMAND_SCREEN,
-		    _("On a string item"), 5, NULL);
-	apidemo_add_back(form);
-	fplinux_ui_screen_set_listener(form, text_command, NULL, app);
 	apidemo_push(app, form, "fplinux_ui_form_new");
 }
 
@@ -776,11 +573,11 @@ static void open_choices(struct apidemo *app, const struct apidemo_entry *entry)
 	fplinux_ui_form_set_chosen(form, choice_toppings, 0, true);
 	fplinux_ui_form_set_choice(form, choice_crust, 1);
 	add_command(form, COMMAND_SHOW, FPLINUX_UI_COMMAND_SCREEN,
-		    _("Show values"), 1, NULL);
+		    _("Show values"), 1, apidemo_glyph(app, "view"));
 	add_command(form, COMMAND_CHOOSE_ALL, FPLINUX_UI_COMMAND_SCREEN,
-		    _("Choose all toppings"), 2, NULL);
+		    _("Choose all toppings"), 2, apidemo_glyph(app, "check"));
 	add_command(form, COMMAND_RESET, FPLINUX_UI_COMMAND_SCREEN, _("Reset"),
-		    3, NULL);
+		    3, apidemo_glyph(app, "refresh"));
 	apidemo_add_back(form);
 	fplinux_ui_screen_set_listener(form, choices_command, choices_changed,
 				       app);
@@ -809,27 +606,28 @@ static void stop_progress(void)
 }
 
 /* OK starts or stops the progress bar; the label says which. */
-static void show_start(struct fplinux_ui_screen *form)
+static void show_start(struct apidemo *app, struct fplinux_ui_screen *form)
 {
 	add_command(form, COMMAND_START, FPLINUX_UI_COMMAND_OK,
-		    progress_timer ? _("Stop") : _("Start"), 0, NULL);
+		    progress_timer ? _("Stop") : _("Start"), 0,
+		    apidemo_glyph(app, progress_timer ? "stop" : "play"));
 }
 
 /* The bar stops at its maximum; the timer goes with it. */
 static void progress_step(lv_timer_t *timer)
 {
+	struct apidemo *app = lv_timer_get_user_data(timer);
 	int value = fplinux_ui_form_get_value(gauges_form, gauge_progress);
 
-	(void)timer;
 	fplinux_ui_form_set_value(gauges_form, gauge_progress,
 				  value + PROGRESS_STEP);
 	if (value + PROGRESS_STEP < PROGRESS_MAXIMUM)
 		return;
 	stop_progress();
-	show_start(gauges_form);
+	show_start(app, gauges_form);
 }
 
-static void toggle_progress(struct fplinux_ui_screen *form)
+static void toggle_progress(struct apidemo *app, struct fplinux_ui_screen *form)
 {
 	if (progress_timer) {
 		stop_progress();
@@ -838,9 +636,9 @@ static void toggle_progress(struct fplinux_ui_screen *form)
 		    PROGRESS_MAXIMUM)
 			fplinux_ui_form_set_value(form, gauge_progress, 0);
 		progress_timer =
-			lv_timer_create(progress_step, PROGRESS_STEP_MS, NULL);
+			lv_timer_create(progress_step, PROGRESS_STEP_MS, app);
 	}
-	show_start(form);
+	show_start(app, form);
 }
 
 /* An interactive gauge reports every step of Left and Right. */
@@ -866,7 +664,7 @@ static void gauges_command(struct fplinux_ui *ui,
 		fplinux_ui_go_back(ui);
 		break;
 	case COMMAND_START:
-		toggle_progress(form);
+		toggle_progress(context, form);
 		break;
 	case COMMAND_SHOW:
 		apidemo_showf(context, _("Values"),
@@ -880,10 +678,9 @@ static void gauges_command(struct fplinux_ui *ui,
 			      fplinux_ui_form_get_value(form, gauge_progress));
 		break;
 	case COMMAND_RESET:
-		/* A value out of range is clamped. */
 		fplinux_ui_form_set_value(form, gauge_small, 5);
 		fplinux_ui_form_set_value(form, gauge_large, 500);
-		fplinux_ui_form_set_value(form, gauge_progress, -1);
+		fplinux_ui_form_set_value(form, gauge_progress, 0);
 		break;
 	default:
 		break;
@@ -909,11 +706,11 @@ static void open_gauges(struct apidemo *app, const struct apidemo_entry *entry)
 	/* Not interactive: a progress bar that the application moves. */
 	gauge_progress = fplinux_ui_form_append_gauge(
 		form, _("Progress"), 0, PROGRESS_MAXIMUM, 0, false);
-	show_start(form);
+	show_start(app, form);
 	add_command(form, COMMAND_SHOW, FPLINUX_UI_COMMAND_SCREEN,
-		    _("Show values"), 1, NULL);
+		    _("Show values"), 1, apidemo_glyph(app, "view"));
 	add_command(form, COMMAND_RESET, FPLINUX_UI_COMMAND_SCREEN, _("Reset"),
-		    2, NULL);
+		    2, apidemo_glyph(app, "refresh"));
 	apidemo_add_back(form);
 	fplinux_ui_screen_set_listener(form, gauges_command, gauges_changed,
 				       app);
@@ -924,6 +721,7 @@ static void open_gauges(struct apidemo *app, const struct apidemo_entry *entry)
 
 static size_t dates_status;
 static size_t date_items[3];
+static size_t duration_item;
 
 /* 30 August 2026, 14:05 local time: the same value on every run. */
 static time_t sample_time(void)
@@ -948,6 +746,11 @@ static void dates_changed(struct fplinux_ui *ui, struct fplinux_ui_screen *form,
 	char clock[16];
 
 	(void)context;
+	if (index == duration_item) {
+		show_status(form, dates_status, _("Duration: %u s"),
+			    fplinux_ui_form_get_duration(form, duration_item));
+		return;
+	}
 	if (!fplinux_ui_format_date(ui, fplinux_ui_form_get_date(form, index),
 				    FPLINUX_UI_DATE_LONG, date, sizeof(date)) ||
 	    !fplinux_ui_format_date(ui, fplinux_ui_form_get_date(form, index),
@@ -972,8 +775,11 @@ static void dates_command(struct fplinux_ui *ui, struct fplinux_ui_screen *form,
 		for (size_t i = 0; i < APIDEMO_COUNT(date_items); ++i)
 			fplinux_ui_form_set_date(form, date_items[i], now);
 		break;
+	case COMMAND_RESET:
+		fplinux_ui_form_set_duration(form, duration_item, 90);
+		break;
 	case COMMAND_SHOW:
-		/* The value is a time_t, whatever the item shows of it. */
+		/* Calendar values and elapsed seconds have separate APIs. */
 		for (size_t i = 0; i < APIDEMO_COUNT(date_items); ++i)
 			append_text(text, sizeof(text),
 				    "get_date(%zu) =\n%lld%s", date_items[i],
@@ -981,6 +787,8 @@ static void dates_command(struct fplinux_ui *ui, struct fplinux_ui_screen *form,
 					    form, date_items[i]),
 				    i + 1 < APIDEMO_COUNT(date_items) ? "\n" :
 									"");
+		append_text(text, sizeof(text), "\nDuration: %u s",
+			    fplinux_ui_form_get_duration(form, duration_item));
 		apidemo_show(context, _("Values"), text);
 		break;
 	default:
@@ -1006,10 +814,14 @@ static void open_dates(struct apidemo *app, const struct apidemo_entry *entry)
 						    FPLINUX_UI_TIME, when);
 	date_items[2] = fplinux_ui_form_append_date(form, _("Date and time"),
 						    FPLINUX_UI_DATE_TIME, when);
+	duration_item =
+		fplinux_ui_form_append_duration(form, _("Duration"), 90);
+	add_command(form, COMMAND_RESET, FPLINUX_UI_COMMAND_SCREEN,
+		    _("Reset duration"), 3, apidemo_glyph(app, "refresh"));
 	add_command(form, COMMAND_NOW, FPLINUX_UI_COMMAND_SCREEN, _("Now"), 1,
-		    NULL);
+		    apidemo_glyph(app, "date-time"));
 	add_command(form, COMMAND_SHOW, FPLINUX_UI_COMMAND_SCREEN,
-		    _("Show values"), 2, NULL);
+		    _("Show values"), 2, apidemo_glyph(app, "view"));
 	apidemo_add_back(form);
 	fplinux_ui_screen_set_listener(form, dates_command, dates_changed, app);
 	apidemo_push(app, form, "fplinux_ui_form_new");
@@ -1017,25 +829,10 @@ static void open_dates(struct apidemo *app, const struct apidemo_entry *entry)
 
 /* Images */
 
-/*
- * A failed image adds no item and sets errno: the file's own error, or
- * EINVAL for a file that is not a picture.
- */
-static void append_failed_image(struct fplinux_ui_screen *form,
-				const char *name, const char *path, char *text,
-				size_t size)
-{
-	if (fplinux_ui_form_append_image(form, NULL, path) != SIZE_MAX)
-		return;
-	append_text(text, size, "%s%s: SIZE_MAX, %s", text[0] ? "\n" : "", name,
-		    apidemo_errno_name(errno));
-}
-
 static void open_images(struct apidemo *app, const struct apidemo_entry *entry)
 {
 	struct fplinux_ui_screen *form =
 		fplinux_ui_form_new(app->ui, _(entry->title));
-	char failures[128] = "";
 
 	if (!form) {
 		apidemo_error(app, "fplinux_ui_form_new");
@@ -1049,14 +846,6 @@ static void open_images(struct apidemo *app, const struct apidemo_entry *entry)
 				     APIDEMO_SHAPE);
 	fplinux_ui_form_append_image(form, _("A system glyph"),
 				     apidemo_glyph(app, "about"));
-	append_failed_image(form, "missing.png",
-			    APIDEMO_IMAGE_DIR "missing.png", failures,
-			    sizeof(failures));
-	append_failed_image(form, "apidemo.desktop",
-			    "/usr/share/applications/" APIDEMO_APP_ID
-			    ".desktop",
-			    failures, sizeof(failures));
-	fplinux_ui_form_append_string(form, _("Images that fail"), failures);
 	apidemo_add_back(form);
 	fplinux_ui_screen_set_listener(form, apidemo_back_listener, NULL, app);
 	apidemo_push(app, form, "fplinux_ui_form_new");
@@ -1080,15 +869,18 @@ static void add_item_commands(struct apidemo *app,
 		{ .id = COMMAND_MOVE_UP,
 		  .type = FPLINUX_UI_COMMAND_ITEM,
 		  .label = _("Move up"),
-		  .priority = 1 },
+		  .priority = 1,
+		  .icon = apidemo_glyph(app, "move-up") },
 		{ .id = COMMAND_MOVE_DOWN,
 		  .type = FPLINUX_UI_COMMAND_ITEM,
 		  .label = _("Move down"),
-		  .priority = 2 },
+		  .priority = 2,
+		  .icon = apidemo_glyph(app, "move-down") },
 		{ .id = COMMAND_HIDE,
 		  .type = FPLINUX_UI_COMMAND_ITEM,
 		  .label = _("Hide"),
-		  .priority = 3 },
+		  .priority = 3,
+		  .icon = apidemo_glyph(app, "hide") },
 		{ .id = COMMAND_DELETE,
 		  .type = FPLINUX_UI_COMMAND_ITEM,
 		  .label = _("Delete"),
@@ -1166,33 +958,6 @@ static void list_items(struct apidemo *app, struct fplinux_ui_screen *form)
 	apidemo_show(app, _("Items"), text);
 }
 
-/* Indices beyond the last item fail with EINVAL and change nothing. */
-static void items_out_of_range(struct apidemo *app,
-			       struct fplinux_ui_screen *form)
-{
-	char moved[32];
-	char deleted[32];
-	char hidden[32];
-	bool done;
-
-	errno = 0;
-	done = fplinux_ui_form_move_item(form, item_count, 0);
-	describe_result(moved, sizeof(moved), done, errno);
-	errno = 0;
-	done = fplinux_ui_form_delete(form, item_count);
-	describe_result(deleted, sizeof(deleted), done, errno);
-	errno = 0;
-	done = fplinux_ui_form_set_hidden(form, item_count, true);
-	describe_result(hidden, sizeof(hidden), done, errno);
-	apidemo_showf(app, _("Out of range"),
-		      "move_item(%zu, 0) = %s\ndelete(%zu) = %s\n"
-		      "set_hidden(%zu) = %s\nis_hidden(%zu) = %s",
-		      item_count, moved, item_count, deleted, item_count,
-		      hidden, item_count,
-		      fplinux_ui_form_is_hidden(form, item_count) ? "true" :
-								    "false");
-}
-
 static void items_command(struct fplinux_ui *ui, struct fplinux_ui_screen *form,
 			  int command_id, void *context)
 {
@@ -1224,9 +989,6 @@ static void items_command(struct fplinux_ui *ui, struct fplinux_ui_screen *form,
 	case COMMAND_LIST_ITEMS:
 		list_items(app, form);
 		break;
-	case COMMAND_OUT_OF_RANGE:
-		items_out_of_range(app, form);
-		break;
 	case COMMAND_DELETE_ALL:
 		/* An empty form has no focus. */
 		fplinux_ui_form_delete_all(form);
@@ -1253,13 +1015,11 @@ static void open_items(struct apidemo *app, const struct apidemo_entry *entry)
 	add_command(form, COMMAND_INSERT, FPLINUX_UI_COMMAND_SCREEN,
 		    _("Insert at the top"), 5, apidemo_glyph(app, "add"));
 	add_command(form, COMMAND_SHOW_HIDDEN, FPLINUX_UI_COMMAND_SCREEN,
-		    _("Show hidden"), 6, NULL);
+		    _("Show hidden"), 6, apidemo_glyph(app, "view"));
 	add_command(form, COMMAND_FOCUS_LAST, FPLINUX_UI_COMMAND_SCREEN,
-		    _("Focus the last"), 7, NULL);
+		    _("Focus the last"), 7, apidemo_glyph(app, "move-down"));
 	add_command(form, COMMAND_LIST_ITEMS, FPLINUX_UI_COMMAND_SCREEN,
-		    _("List the items"), 8, NULL);
-	add_command(form, COMMAND_OUT_OF_RANGE, FPLINUX_UI_COMMAND_SCREEN,
-		    _("Out of range"), 9, NULL);
+		    _("List the items"), 8, apidemo_glyph(app, "list"));
 	add_command(form, COMMAND_DELETE_ALL, FPLINUX_UI_COMMAND_SCREEN,
 		    _("Delete all"), 10, apidemo_glyph(app, "delete"));
 	apidemo_add_back(form);
@@ -1292,21 +1052,23 @@ static const struct fplinux_ui_command contact_call = {
 };
 
 /* Labels are translated on use; the runtime copies them. */
-static bool add_call(struct fplinux_ui_screen *form)
+static bool add_call(struct apidemo *app, struct fplinux_ui_screen *form)
 {
 	struct fplinux_ui_command call = contact_call;
 
 	call.label = _(contact_call.label);
+	call.icon = apidemo_glyph(app, "call");
 	return fplinux_ui_form_add_item_command(form, contact_phone, &call);
 }
 
-static void show_calls(struct fplinux_ui_screen *form)
+static void show_calls(struct apidemo *app, struct fplinux_ui_screen *form)
 {
 	add_command(form, COMMAND_CALLS, FPLINUX_UI_COMMAND_SCREEN,
-		    contact_calls ? _("Calls off") : _("Calls on"), 1, NULL);
+		    contact_calls ? _("Calls off") : _("Calls on"), 1,
+		    apidemo_glyph(app, contact_calls ? "cancel" : "call"));
 }
 
-/* What the item commands do, whichever listener receives them. */
+/* Actions attached to the contact's fields. */
 static void contact_action(struct apidemo *app, struct fplinux_ui_screen *form,
 			   size_t item, int command_id)
 {
@@ -1353,51 +1115,25 @@ static void contact_item(struct fplinux_ui *ui, struct fplinux_ui_screen *form,
 }
 
 /* Calls on and off: an item command can be removed and added again. */
-static void toggle_calls(struct fplinux_ui_screen *form)
+static void toggle_calls(struct apidemo *app, struct fplinux_ui_screen *form)
 {
 	if (contact_calls)
 		fplinux_ui_screen_remove_item_command(form, contact_phone,
 						      COMMAND_CALL);
 	else
-		add_call(form);
+		add_call(app, form);
 	contact_calls = !contact_calls;
-	show_calls(form);
+	show_calls(app, form);
 }
 
 static void contact_command(struct fplinux_ui *ui,
 			    struct fplinux_ui_screen *form, int command_id,
 			    void *context)
 {
-	(void)context;
 	if (command_id == APIDEMO_COMMAND_BACK)
 		fplinux_ui_go_back(ui);
 	else if (command_id == COMMAND_CALLS)
-		toggle_calls(form);
-}
-
-/*
- * Without an item listener, item commands reach the command listener;
- * fplinux_ui_screen_get_command_item() names their item, and returns
- * SIZE_MAX for a screen command such as Back or Calls off.
- */
-static void contact_any_command(struct fplinux_ui *ui,
-				struct fplinux_ui_screen *form, int command_id,
-				void *context)
-{
-	size_t item = fplinux_ui_screen_get_command_item(form);
-	const char *number = fplinux_ui_form_get_text(form, contact_phone);
-
-	if (command_id == APIDEMO_COMMAND_BACK)
-		fplinux_ui_go_back(ui);
-	else if (command_id == COMMAND_CALLS)
-		toggle_calls(form);
-	else if (command_id == COMMAND_CALL)
-		apidemo_showf(context, _("Call"),
-			      _("Calling %s.\n"
-				"fplinux_ui_screen_get_command_item() = %zu"),
-			      number ? number : "", item);
-	else if (item != SIZE_MAX)
-		contact_action(context, form, item, command_id);
+		toggle_calls(context, form);
 }
 
 static void open_item_commands(struct apidemo *app,
@@ -1422,12 +1158,14 @@ static void open_item_commands(struct apidemo *app,
 		.type = FPLINUX_UI_COMMAND_ITEM,
 		.label = _("Mute"),
 		.priority = 1,
+		.icon = apidemo_glyph(app, "mute"),
 	};
 	const struct fplinux_ui_command play = {
 		.id = COMMAND_PLAY,
 		.type = FPLINUX_UI_COMMAND_ITEM,
 		.label = _("Play"),
 		.priority = 1,
+		.icon = apidemo_glyph(app, "play"),
 	};
 	const char *ringtone_texts[APIDEMO_COUNT(ringtones)];
 	struct fplinux_ui_screen *form =
@@ -1449,23 +1187,16 @@ static void open_item_commands(struct apidemo *app,
 	contact_ringtone = fplinux_ui_form_append_choice(
 		form, _("Ringtone"), FPLINUX_UI_CHOICE_POPUP, ringtone_texts,
 		APIDEMO_COUNT(ringtone_texts));
-	contact_calls = add_call(form);
+	contact_calls = add_call(app, form);
 	fplinux_ui_form_add_item_command(form, contact_phone, &send);
 	/* A date's own OK is Edit: its item command goes to the left key. */
 	fplinux_ui_form_add_item_command(form, contact_birthday, &today);
 	fplinux_ui_form_add_item_command(form, contact_volume, &mute);
 	fplinux_ui_form_add_item_command(form, contact_ringtone, &play);
-	show_calls(form);
+	show_calls(app, form);
 	apidemo_add_back(form);
-	/* variant 0 has an item listener; variant 1 has none. */
-	if (entry->variant == 0) {
-		fplinux_ui_screen_set_listener(form, contact_command, NULL,
-					       app);
-		fplinux_ui_screen_set_item_listener(form, contact_item, app);
-	} else {
-		fplinux_ui_screen_set_listener(form, contact_any_command, NULL,
-					       app);
-	}
+	fplinux_ui_screen_set_listener(form, contact_command, NULL, app);
+	fplinux_ui_screen_set_item_listener(form, contact_item, app);
 	apidemo_push(app, form, "fplinux_ui_form_new");
 }
 
@@ -1499,14 +1230,17 @@ static const char *appearance_name(enum fplinux_ui_appearance appearance)
 }
 
 /* An item command's own label, translated on use; the runtime copies it. */
-static bool add_item_command(struct fplinux_ui_screen *form, size_t item,
-			     int id, const char *label, int priority)
+static bool add_item_command(struct apidemo *app,
+			     struct fplinux_ui_screen *form, size_t item,
+			     int id, const char *label, int priority,
+			     const char *glyph)
 {
 	const struct fplinux_ui_command command = {
 		.id = id,
 		.type = FPLINUX_UI_COMMAND_ITEM,
 		.label = label,
 		.priority = priority,
+		.icon = apidemo_glyph(app, glyph),
 	};
 
 	return fplinux_ui_form_add_item_command(form, item, &command);
@@ -1583,19 +1317,19 @@ static void change_button(struct fplinux_ui_screen *form)
  * it a link that takes the focus; losing its last command while it has the
  * focus passes the focus on, as deleting it would.
  */
-static void arm_link(struct fplinux_ui_screen *form)
+static void arm_link(struct apidemo *app, struct fplinux_ui_screen *form)
 {
 	if (links_armed)
 		fplinux_ui_screen_remove_item_command(form, links_waiting,
 						      COMMAND_OPEN);
 	else
-		add_item_command(form, links_waiting, COMMAND_OPEN, _("Open"),
-				 1);
+		add_item_command(app, form, links_waiting, COMMAND_OPEN,
+				 _("Open"), 1, "next");
 	links_armed = !links_armed;
 	add_command(form, COMMAND_ARM, FPLINUX_UI_COMMAND_SCREEN,
 		    links_armed ? _("Take its command") :
 				  _("Give it a command"),
-		    5, NULL);
+		    5, apidemo_glyph(app, links_armed ? "delete" : "add"));
 }
 
 static void links_command(struct fplinux_ui *ui, struct fplinux_ui_screen *form,
@@ -1617,7 +1351,7 @@ static void links_command(struct fplinux_ui *ui, struct fplinux_ui_screen *form,
 		change_button(form);
 		break;
 	case COMMAND_ARM:
-		arm_link(form);
+		arm_link(context, form);
 		break;
 	default:
 		break;
@@ -1638,30 +1372,32 @@ static void open_links(struct apidemo *app, const struct apidemo_entry *entry)
 	item = fplinux_ui_form_append_string(form, _("Website"), "fplinux.org");
 	fplinux_ui_form_set_appearance(form, item,
 				       FPLINUX_UI_APPEARANCE_HYPERLINK);
-	add_item_command(form, item, COMMAND_OPEN, _("Open"), 1);
-	add_item_command(form, item, COMMAND_COPY, _("Copy the address"), 2);
+	add_item_command(app, form, item, COMMAND_OPEN, _("Open"), 1, "next");
+	add_item_command(app, form, item, COMMAND_COPY, _("Copy the address"),
+			 2, "copy");
 	/* A button for one action, as a native application's form has it. */
 	links_button =
 		fplinux_ui_form_append_string(form, NULL, _("Call support"));
 	links_button_appearance = FPLINUX_UI_APPEARANCE_BUTTON;
 	fplinux_ui_form_set_appearance(form, links_button,
 				       links_button_appearance);
-	add_item_command(form, links_button, COMMAND_CALL, _("Call"), 1);
+	add_item_command(app, form, links_button, COMMAND_CALL, _("Call"), 1,
+			 "call");
 	/* Images take the same appearances; an alpha-only one takes colour. */
 	item = fplinux_ui_form_append_image(form, _("Image link"),
 					    APIDEMO_SHAPE);
 	fplinux_ui_form_set_appearance(form, item,
 				       FPLINUX_UI_APPEARANCE_HYPERLINK);
-	add_item_command(form, item, COMMAND_VIEW, _("View"), 1);
+	add_item_command(app, form, item, COMMAND_VIEW, _("View"), 1, "view");
 	item = fplinux_ui_form_append_image(form, _("Image button"),
 					    APIDEMO_PHOTO);
 	fplinux_ui_form_set_appearance(form, item,
 				       FPLINUX_UI_APPEARANCE_BUTTON);
-	add_item_command(form, item, COMMAND_VIEW, _("View"), 1);
+	add_item_command(app, form, item, COMMAND_VIEW, _("View"), 1, "view");
 	/* PLAIN, the default: read-only, its command never offered. */
 	item = fplinux_ui_form_append_string(form, _("PLAIN with a command"),
 					     _("It never takes the focus."));
-	add_item_command(form, item, COMMAND_OPEN, _("Open"), 1);
+	add_item_command(app, form, item, COMMAND_OPEN, _("Open"), 1, "next");
 	links_armed = false;
 	links_waiting = fplinux_ui_form_append_string(
 		form, _("HYPERLINK without commands"),
@@ -1673,79 +1409,14 @@ static void open_links(struct apidemo *app, const struct apidemo_entry *entry)
 		form, _("Item listener"),
 		_("OK runs the item's first command."));
 	add_command(form, COMMAND_SHOW_FOCUS, FPLINUX_UI_COMMAND_SCREEN,
-		    _("Show the focus"), 3, NULL);
+		    _("Show the focus"), 3, apidemo_glyph(app, "view"));
 	add_command(form, COMMAND_CHANGE_BUTTON, FPLINUX_UI_COMMAND_SCREEN,
-		    _("Change the button"), 4, NULL);
+		    _("Change the button"), 4, apidemo_glyph(app, "edit"));
 	add_command(form, COMMAND_ARM, FPLINUX_UI_COMMAND_SCREEN,
-		    _("Give it a command"), 5, NULL);
+		    _("Give it a command"), 5, apidemo_glyph(app, "add"));
 	apidemo_add_back(form);
 	fplinux_ui_screen_set_listener(form, links_command, NULL, app);
 	fplinux_ui_screen_set_item_listener(form, links_item, app);
-	apidemo_push(app, form, "fplinux_ui_form_new");
-}
-
-/* The result of one fplinux_ui_form_set_appearance() call, for the text. */
-static void appearance_result(char *text, size_t size,
-			      struct fplinux_ui_screen *screen, size_t item,
-			      enum fplinux_ui_appearance appearance)
-{
-	bool done;
-
-	errno = 0;
-	done = fplinux_ui_form_set_appearance(screen, item, appearance);
-	describe_result(text, size, done, errno);
-}
-
-/*
- * fplinux_ui_form_set_appearance() refuses another kind of item, an index
- * out of range, an unknown appearance and another screen with EINVAL, and
- * changes nothing. fplinux_ui_form_get_focus() returns SIZE_MAX with EINVAL
- * for a screen that is not a form.
- */
-static void open_appearance_errors(struct apidemo *app,
-				   const struct apidemo_entry *entry)
-{
-	/* The list that opened this demo is on top: not a form. */
-	struct fplinux_ui_screen *list = fplinux_ui_current(app->ui);
-	struct fplinux_ui_screen *form =
-		fplinux_ui_form_new(app->ui, _(entry->title));
-	char results[4][32];
-	char focus[48];
-	char text[320];
-	size_t gauge;
-	size_t index;
-	int error;
-
-	if (!form) {
-		apidemo_error(app, "fplinux_ui_form_new");
-		return;
-	}
-	errno = 0;
-	index = fplinux_ui_form_get_focus(list);
-	error = errno;
-	describe_index(focus, sizeof(focus), index);
-	append_text(focus, sizeof(focus), ", %s", apidemo_errno_name(error));
-	gauge = fplinux_ui_form_append_gauge(form, _("A gauge"), 0, 10, 5,
-					     false);
-	appearance_result(results[0], sizeof(results[0]), form, gauge,
-			  FPLINUX_UI_APPEARANCE_BUTTON);
-	appearance_result(results[1], sizeof(results[1]), form, 9,
-			  FPLINUX_UI_APPEARANCE_BUTTON);
-	appearance_result(results[2], sizeof(results[2]), form, gauge,
-			  (enum fplinux_ui_appearance)3);
-	appearance_result(results[3], sizeof(results[3]), list, 0,
-			  FPLINUX_UI_APPEARANCE_HYPERLINK);
-	snprintf(text, sizeof(text),
-		 "set_appearance(%zu, BUTTON) = %s\n"
-		 "set_appearance(9, BUTTON) = %s\n"
-		 "set_appearance(%zu, 3) = %s\n"
-		 "set_appearance(list) = %s\n"
-		 "get_focus(list) = %s",
-		 gauge, results[0], results[1], gauge, results[2], results[3],
-		 focus);
-	fplinux_ui_form_append_string(form, _("Results"), text);
-	apidemo_add_back(form);
-	fplinux_ui_screen_set_listener(form, apidemo_back_listener, NULL, app);
 	apidemo_push(app, form, "fplinux_ui_form_new");
 }
 
@@ -1770,103 +1441,43 @@ static void forms_cleanup(struct apidemo *app)
 }
 
 static const struct apidemo_entry entries[] = {
-	{
-		.title = N_("String items"),
-		.detail = "fplinux_ui_form_append_string · "
-			  "fplinux_ui_form_set_string",
-		.open = open_strings,
-	},
-	{
-		.title = N_("Text fields"),
-		.detail = "fplinux_ui_form_append_text_field · "
-			  "FPLINUX_UI_TEXT_ANY · NUMERIC · DECIMAL · PHONE",
-		.open = open_fields,
-		.variant = 0,
-	},
-	{
-		.title = N_("Passwords"),
-		.detail = "FPLINUX_UI_TEXT_PASSWORD · fplinux_ui_form_get_text",
-		.open = open_fields,
-		.variant = 1,
-	},
-	{
-		.title = N_("Read-only fields"),
-		.detail = "FPLINUX_UI_TEXT_UNEDITABLE · "
-			  "fplinux_ui_form_add_item_command",
-		.open = open_read_only,
-	},
-	{
-		.title = N_("Changing the type"),
-		.detail = "fplinux_ui_form_set_constraint",
-		.open = open_constraint,
-	},
-	{
-		.title = N_("Get and set text"),
-		.detail = "fplinux_ui_form_get_text · fplinux_ui_form_set_text",
-		.open = open_text_calls,
-	},
-	{
-		.title = N_("Choices"),
-		.detail = "fplinux_ui_form_append_choice · "
-			  "FPLINUX_UI_CHOICE_EXCLUSIVE · MULTIPLE · POPUP",
-		.open = open_choices,
-	},
-	{
-		.title = N_("Gauges"),
-		.detail = "fplinux_ui_form_append_gauge · "
-			  "fplinux_ui_form_set_value",
-		.open = open_gauges,
-	},
-	{
-		.title = N_("Dates and times"),
-		.detail = "fplinux_ui_form_append_date · FPLINUX_UI_DATE · "
-			  "TIME · DATE_TIME",
-		.open = open_dates,
-	},
-	{
-		.title = N_("Images"),
-		.detail = "fplinux_ui_form_append_image",
-		.open = open_images,
-	},
-	{
-		.title = N_("Changing items"),
-		.detail =
-			"fplinux_ui_form_move_item · fplinux_ui_form_delete · "
-			"fplinux_ui_form_set_hidden",
-		.open = open_items,
-	},
-	{
-		.title = N_("Item commands"),
-		.detail = "fplinux_ui_form_add_item_command · "
-			  "fplinux_ui_screen_set_item_listener",
-		.open = open_item_commands,
-		.variant = 0,
-	},
-	{
-		.title = N_("Without item listener"),
-		.detail = "fplinux_ui_form_add_item_command · "
-			  "fplinux_ui_screen_get_command_item",
-		.open = open_item_commands,
-		.variant = 1,
-	},
-	{
-		.title = N_("Links and buttons"),
-		.detail =
-			"fplinux_ui_form_set_appearance · HYPERLINK · BUTTON · "
-			"fplinux_ui_form_get_focus",
-		.open = open_links,
-	},
-	{
-		.title = N_("Appearance errors"),
-		.detail = "fplinux_ui_form_set_appearance · "
-			  "fplinux_ui_form_get_focus · EINVAL",
-		.open = open_appearance_errors,
-	},
+	{ N_("String items"),
+	  "fplinux_ui_form_append_string · fplinux_ui_form_set_string",
+	  open_strings, 0, N_("Change labels and explanatory text") },
+	{ N_("Text fields"),
+	  "fplinux_ui_form_append_text_field · FPLINUX_UI_TEXT_ANY · "
+	  "FPLINUX_UI_TEXT_NUMERIC · FPLINUX_UI_TEXT_DECIMAL · FPLINUX_UI_TEXT_PHONE · "
+	  "FPLINUX_UI_TEXT_PASSWORD · FPLINUX_UI_TEXT_UNEDITABLE",
+	  open_fields, 0, N_("Enter text, numbers, passwords and a PIN") },
+	{ N_("Changing the type"), "fplinux_ui_form_set_constraint",
+	  open_constraint, 0, N_("Change a field type, mask or editability") },
+	{ N_("Choices"),
+	  "fplinux_ui_form_append_choice · FPLINUX_UI_CHOICE_EXCLUSIVE · "
+	  "FPLINUX_UI_CHOICE_MULTIPLE · FPLINUX_UI_CHOICE_POPUP",
+	  open_choices, 0, N_("Choose size, toppings and crust") },
+	{ N_("Gauges"),
+	  "fplinux_ui_form_append_gauge · fplinux_ui_form_set_value",
+	  open_gauges, 0, N_("Adjust a value and run progress") },
+	{ N_("Dates and times"),
+	  "fplinux_ui_form_append_date · FPLINUX_UI_DATE · FPLINUX_UI_TIME · "
+	  "FPLINUX_UI_DATE_TIME · fplinux_ui_form_append_duration · "
+	  "fplinux_ui_form_get_duration · fplinux_ui_form_set_duration",
+	  open_dates, 0, N_("Edit a date, time and elapsed duration") },
+	{ N_("Form images"), "fplinux_ui_form_append_image", open_images, 0,
+	  N_("Fit photos, shapes and glyphs in a form") },
+	{ N_("Changing items"),
+	  "fplinux_ui_form_move_item · fplinux_ui_form_delete · fplinux_ui_form_set_hidden",
+	  open_items, 0, N_("Move, hide, insert and delete form items") },
+	{ N_("Item commands"),
+	  "fplinux_ui_form_add_item_command · fplinux_ui_screen_set_item_listener",
+	  open_item_commands, 0, N_("Use actions on a contact form") },
+	{ N_("Links and buttons"),
+	  "fplinux_ui_form_set_appearance · FPLINUX_UI_APPEARANCE_HYPERLINK · "
+	  "FPLINUX_UI_APPEARANCE_BUTTON",
+	  open_links, 0, N_("Activate links and change button actions") },
 };
 
 const struct apidemo_category apidemo_forms = {
-	.title = N_("Forms"),
-	.icon = APIDEMO_IMAGE_DIR "forms-symbolic.png",
 	.entries = entries,
 	.count = APIDEMO_COUNT(entries),
 	.visibility = forms_visibility,

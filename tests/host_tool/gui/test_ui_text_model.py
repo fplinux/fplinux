@@ -49,6 +49,20 @@ def test_text_model_modes_editing_and_deadlines(text_model: Path) -> None:
     )
 
 
+def test_phone_controls_distinguish_taps_holds_and_cancellation(text_model: Path) -> None:
+    """Case, language and numbers share gestures without a transient picker."""
+    run_process(
+        [
+            str(text_model),
+            str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
+            "control-gestures",
+        ],
+        name="run shared phone control gestures",
+        timeout=10,
+        check=True,
+    )
+
+
 @pytest.mark.parametrize("scenario", ["overdue-digit-release", "overdue-phone-zero-release"])
 def test_normal_release_resolves_overdue_hold_before_tick(text_model: Path, scenario: str) -> None:
     """A queued release preserves the held digit or phone prefix exactly once."""

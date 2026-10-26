@@ -52,12 +52,19 @@ enum fplinux_ui_session_message_type {
 	FPLINUX_UI_SESSION_TASKS,
 	FPLINUX_UI_SESSION_ACTIVATE,
 	FPLINUX_UI_SESSION_CLOSE_TASK,
-	FPLINUX_UI_SESSION_END,
 	FPLINUX_UI_SESSION_REDRAW_ACK,
 	FPLINUX_UI_SESSION_CLOCK,
 	FPLINUX_UI_SESSION_VIBRATE,
 	FPLINUX_UI_SESSION_PREPARE_CLOSE,
 	FPLINUX_UI_SESSION_CLOSE_REPLY,
+	FPLINUX_UI_SESSION_CLOSE_ACK,
+	FPLINUX_UI_SESSION_ACTIVATION,
+	FPLINUX_UI_SESSION_ACTIVATION_ACK,
+};
+
+enum fplinux_ui_session_activation {
+	FPLINUX_UI_SESSION_ACTIVATION_OPEN,
+	FPLINUX_UI_SESSION_ACTIVATION_RESUME,
 };
 
 enum fplinux_ui_session_lifecycle {
@@ -119,8 +126,9 @@ enum fplinux_ui_session_theme {
  * LIFECYCLE reports foreground, background or closing independently of surface
  * VISIBILITY. PREPARE_CLOSE(serial, reason) starts an ordinary user close.
  * CLOSE_REPLY returns the same serial with value ready, cancel or wait. Wait
- * leaves the application interactive for its decision; another explicit Close
- * may force it to exit. An unanswered preparation has a bounded timeout.
+ * leaves the application interactive for its decision. Repeated Close keeps
+ * that decision. CLOSE_ACK confirms the decision frame after its commit and
+ * following Wayland sync. An unanswered preparation has a bounded timeout.
  * CLOSE is final, including forced termination, and cannot be cancelled.
  * MODE requests integrated or fullscreen mode.
  * BUSY(enabled, title) extends launch progress through a blocking operation.
@@ -144,14 +152,11 @@ enum fplinux_ui_session_theme {
  * task has an app_id, title, lifecycle and nonzero instance token. Launcher
  * ACTIVATE and CLOSE_TASK carry app_id and token together, so a stale action
  * cannot affect a restarted application. CLOSE_TASK starts PREPARE_CLOSE;
- * repeating it while the client waits forces the final CLOSE lifecycle.
- *
- * ACTIVE.end_prompt asks the launcher to offer Minimize and Close for the
- * foreground active_id and token. Launcher END answers with that app_id and
- * token and value minimize, close or cancel. Repeated Red closes the same
- * foreground instance through the same close preparation and final lifecycle.
- * An ACTIVE end prompt may attach the current scene as bounded RGB565 pixels
- * using the same descriptor and dimensions as a LAUNCH frame.
+ * a waiting background task becomes visible to present its decision.
+ * LAUNCH requests OPEN; ACTIVATE and an internal close-decision return request
+ * RESUME. ACTIVATION(serial, activation) follows CONFIG on cold start. Its
+ * ACTIVATION_ACK follows a new application frame's commit and Wayland sync;
+ * an older retained buffer or the launcher's ACTIVE_ACK cannot reveal it.
  */
 struct fplinux_ui_session_message {
 	enum fplinux_ui_session_message_type type;
@@ -174,8 +179,6 @@ struct fplinux_ui_session_message {
 	bool locked;
 	bool visible;
 	bool enabled;
-	/* ACTIVE: the system's Minimize/Close choice covers the application. */
-	bool end_prompt;
 	char locale[FPLINUX_UI_SESSION_LOCALE_BYTES];
 	char input_locale[FPLINUX_UI_SESSION_LOCALE_BYTES];
 	char name[FPLINUX_UI_SESSION_NAME_BYTES];
@@ -183,14 +186,14 @@ struct fplinux_ui_session_message {
 	int battery;
 	bool charging;
 	char notice[FPLINUX_UI_SESSION_NAME_BYTES];
-	/* ACTIVE/ACK, CLOCK, applied settings/ACK or close preparation/reply. */
+	/* ACTIVE/ACK, ACTIVATION/ACK, CLOCK, settings/ACK or close preparation. */
 	uint32_t serial;
-	/* LAUNCH or ACTIVE end prompt: one tightly packed RGB565 SCM_RIGHTS fd. */
+	/* LAUNCH: one tightly packed RGB565 SCM_RIGHTS fd. */
 	bool has_frame;
 	int frame_fd;
 	/* LIFECYCLE only: independent of display visibility. */
 	enum fplinux_ui_session_lifecycle lifecycle;
-	/* ACTIVE: active_id's instance; ACTIVATE/CLOSE_TASK/END: app_id's. */
+	/* ACTIVE: active_id's instance; ACTIVATE/CLOSE_TASK: app_id's. */
 	uint32_t token;
 	/* TASKS: false queries; true supplies the complete snapshot. */
 	bool has_tasks;
@@ -209,6 +212,8 @@ struct fplinux_ui_session_message {
 	bool applied;
 	enum fplinux_storage_state storage_state;
 	int storage_error;
+	/* ACTIVATION only: independent of lifecycle and surface visibility. */
+	enum fplinux_ui_session_activation activation;
 };
 
 bool fplinux_ui_session_vibrate_valid(

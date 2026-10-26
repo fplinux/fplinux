@@ -16,22 +16,20 @@
 #include <locale.h>
 #include <limits.h>
 #include <poll.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
 
 struct lv_obj {
 	lv_event_cb_t draw;
 	void *context;
-	struct lv_obj *parent;
-	int width, height, x, y, align;
-	char text[64];
-	bool label;
 };
 
 struct lv_event {
@@ -47,19 +45,26 @@ struct lv_timer {
 };
 
 struct fplinux_ui_screen {
-	fplinux_ui_canvas_key_filter_cb filter;
+	fplinux_ui_screen_key_filter_cb filter;
 	void *filter_context;
 	fplinux_ui_canvas_key_cb key;
 	void *key_context;
 	fplinux_ui_command_cb command;
+	fplinux_ui_change_cb change;
 	void *command_context;
+	enum fplinux_ui_list_kind list_kind;
 	bool raw_keyboard;
 	char title[64];
-	char items[4][64];
-	bool selected[4];
+	char header_full[128];
+	char header_compact[128];
+	char select_label[64];
+	char items[64][64];
+	bool selected[64];
 	size_t count, focused;
 	int done_command;
 	int right_command;
+	bool commands[FPLINUX_TERMINAL_COMMAND_COUNT];
+	char exit_label[32];
 };
 
 struct fplinux_ui_symbol_picker {
@@ -84,21 +89,17 @@ struct fplinux_ui {
 static struct fplinux_ui ui = { .watched_fd = -1, .visible = true };
 static struct fplinux_ui_screen screen;
 static struct fplinux_ui_screen list_screen;
+static struct fplinux_ui_screen form_screen;
 static struct fplinux_ui_screen alert_screen;
 static struct lv_obj canvas;
-static struct lv_obj status_objects[4];
-static size_t status_object_count;
 static struct lv_timer timer;
 static const lv_font_t body_font = { .line_height = 12 };
 static const lv_font_t title_font = { .line_height = 16 };
 static const struct fplinux_ui_theme theme = {
+	.accent = 0xadcfde,
+	.accent_text = 0x083442,
 	.font = &body_font,
 	.font_large = &title_font,
-};
-static const struct fplinux_ui_metrics metrics = {
-	.header_height = 16,
-	.margin = 3,
-	.spacing = 2,
 };
 static const char *scenario;
 static uint64_t now_ms;
@@ -111,12 +112,32 @@ static unsigned int grid_opened;
 static unsigned int grid_closed;
 static unsigned int painted_frames;
 static char first_line[54];
+static char rendered_text[2048];
 static struct fplinux_ui_symbol_picker picker;
 static int app_width = 128, app_height = 128;
 static unsigned int expected_columns = 21, expected_rows = 9;
 static unsigned int reported_columns, reported_rows;
 static bool winsize_changed;
 static char alert_text[128];
+static char task_title[64];
+static unsigned int task_title_updates;
+static bool screen_created;
+static bool shell_finished;
+static int shell_status;
+
+/* The UI double supplies the titled content geometry of each screen profile. */
+static int header_height(void)
+{
+	return app_width < 240 ? 20 : app_width < 320 ? 28 : 26;
+}
+
+static void expect_header(const char *title, const char *full,
+			  const char *compact)
+{
+	assert(!strcmp(screen.title, title));
+	assert(!strcmp(screen.header_full, full));
+	assert(!strcmp(screen.header_compact, compact));
+}
 
 static void draw_frame(void)
 {
@@ -139,10 +160,14 @@ static void choose_font(size_t index)
 	assert(list_screen.count == 2);
 	assert(!strcmp(list_screen.items[0], "Compact (6×12)"));
 	assert(!strcmp(list_screen.items[1], "Larger (8×16)"));
+	assert(list_screen.list_kind == FPLINUX_UI_LIST_EXCLUSIVE);
 	assert(list_screen.focused == 0);
+	assert(list_screen.selected[0] && !list_screen.selected[1]);
 	list_screen.focused = index;
-	list_screen.command(&ui, &list_screen, FPLINUX_UI_SELECT_COMMAND,
-			    list_screen.command_context);
+	assert(list_screen.selected[0] && !list_screen.selected[1]);
+	assert(list_screen.change);
+	list_screen.change(&ui, &list_screen, index,
+			   list_screen.command_context);
 }
 
 int fplinux_terminal_main(int argc, char **argv);
@@ -153,6 +178,16 @@ static void event(enum fplinux_ui_event_type type, bool visible)
 		.type = type,
 		.key = { .source = FPLINUX_UI_KEY_PHONE },
 		.visible = visible,
+	};
+
+	ui.event(&ui, &notification, ui.context);
+}
+
+static void activate(enum fplinux_ui_activation activation)
+{
+	const struct fplinux_ui_event notification = {
+		.type = FPLINUX_UI_EVENT_ACTIVATION,
+		.activation = activation,
 	};
 
 	ui.event(&ui, &notification, ui.context);
@@ -467,13 +502,23 @@ static void input_backpressure(void)
 		phone(KEY_NUMERIC_2, true, 9000);
 	if (held)
 		phone(KEY_NUMERIC_2, false, 9600);
+	if (options || cancelled) {
+		phone(KEY_NUMERIC_POUND, true, 9700);
+		phone(KEY_NUMERIC_POUND, false, 10300);
+		phone(KEY_NUMERIC_STAR, true, 10400);
+		phone(KEY_NUMERIC_STAR, false, 10401);
+	}
 	keyboard(XKB_KEY_y, KEY_Y, 'y');
 	screen.command(&ui, &screen, FPLINUX_TERMINAL_COMMAND_ENTER,
 		       screen.command_context);
 	assert(!ui.quit && !pty_closed);
 	/* Open Options before a timer callback can observe the covered screen. */
-	if (options)
+	if (options) {
 		ui.menu_open = true;
+		pulse(10500);
+		ui.menu_open = false;
+		pulse(10600);
+	}
 	if (cancelled)
 		event(FPLINUX_UI_EVENT_INPUT_CANCEL, false);
 	if (hidden) {
@@ -512,6 +557,10 @@ static void input_backpressure(void)
 		assert(count == -1 && errno == EAGAIN);
 	}
 	assert(received == expected_size);
+	if (options || cancelled) {
+		expect_header("Terminal", "abc", "abc");
+		assert(!picker.open);
+	}
 	expect_shell_bytes("");
 	expect_quiet_watch();
 	if (hidden)
@@ -540,49 +589,67 @@ static void font_change_keeps_the_session_and_pending_input(void)
 			       !strcmp(scenario, "font-save-failure") ?
 				       "Storage is read-only" :
 				       "Storage input/output error"));
+		activate(FPLINUX_UI_ACTIVATION_OPEN);
+		activate(FPLINUX_UI_ACTIVATION_RESUME);
+		assert(ui.current == &alert_screen &&
+		       ui.watched_fd == original_fd && !pty_closed);
 		assert(fplinux_ui_pop(&ui));
+		assert(!strcmp(task_title, "Terminal (unsaved)"));
 	}
 	assert(ui.current == &screen);
+	command(FPLINUX_TERMINAL_COMMAND_FONT_SIZE);
+	assert(ui.current == &list_screen && list_screen.focused == 1);
+	assert(!list_screen.selected[0] && list_screen.selected[1]);
+	list_screen.focused = 0;
+	assert(!list_screen.selected[0] && list_screen.selected[1]);
+	list_screen.command(&ui, &list_screen, list_screen.right_command,
+			    list_screen.command_context);
+	assert(ui.current == &screen);
+	assert(reported_columns == 16 && reported_rows == 6);
 	draw_frame();
 	assert(!strncmp(first_line, "kept", 4));
 	pulse(1100);
 	expect_shell_bytes("");
 	pulse(2200);
 	expect_shell_bytes("a");
+	assert(!strcmp(task_title, !strcmp(scenario, "font-change") ?
+					   "Terminal" :
+					   "Terminal (unsaved)"));
 	keyboard(XKB_KEY_Return, KEY_ENTER, '\r');
 	expect_shell_bytes("\r");
 }
 
-static struct lv_obj *status_label(const char *text)
+static void set_modifiers(bool selected)
 {
-	for (size_t index = 0; index < status_object_count; ++index)
-		if (status_objects[index].label &&
-		    !strcmp(status_objects[index].text, text))
-			return &status_objects[index];
-	assert(false);
-	return NULL;
-}
-
-static void status_keeps_all_states_visible(void)
-{
-	struct lv_obj *mode = status_label("абв");
-	int right_edge = mode->parent->width + mode->x;
-	char lines[1200];
-	lv_area_t modifiers_area, history_area, mode_area;
-
-	assert(mode->align == LV_ALIGN_RIGHT_MID && right_edge == 125);
-	phone(KEY_NUMERIC_POUND, true, 100);
-	phone(KEY_NUMERIC_POUND, false, 101);
-	mode = status_label("АБВ");
-	assert(mode->parent->width + mode->x == right_edge);
 	command(FPLINUX_TERMINAL_COMMAND_MODIFIERS);
 	assert(ui.current == &list_screen && list_screen.count == 3);
+	assert(!strcmp(list_screen.title, "Modifiers"));
 	for (size_t index = 0; index < 3; ++index)
-		list_screen.selected[index] = true;
+		list_screen.selected[index] = selected;
 	list_screen.command(&ui, &list_screen, list_screen.done_command,
 			    list_screen.command_context);
 	assert(ui.current == &screen);
-	assert(status_label("Ctrl+Alt+Shift"));
+}
+
+static void header_distinguishes_input_from_scrollback(void)
+{
+	char lines[1200];
+	unsigned int original_title_updates = task_title_updates;
+
+	expect_header("Terminal", "абв", "абв");
+	command(FPLINUX_TERMINAL_COMMAND_SCROLLBACK);
+	expect_header("Scrollback", "↑0", "↑0");
+	phone(KEY_F14, true, 50);
+	phone(KEY_F14, false, 51);
+	expect_header("Terminal", "абв", "абв");
+	phone(KEY_NUMERIC_POUND, true, 100);
+	phone(KEY_NUMERIC_POUND, false, 101);
+	expect_header("Terminal", "АБВ", "АБВ");
+	command(FPLINUX_TERMINAL_COMMAND_SCROLLBACK);
+	set_modifiers(true);
+	expect_header("Scrollback", "Ctrl+Alt+Shift  ↑0", "C+A+S  ↑0");
+	command(FPLINUX_TERMINAL_COMMAND_LIVE);
+	expect_header("Terminal", "Ctrl+Alt+Shift  АБВ", "C+A+S  АБВ");
 	for (size_t index = 0; index < sizeof(lines); index += 2) {
 		lines[index] = '\r';
 		lines[index + 1] = '\n';
@@ -595,34 +662,179 @@ static void status_keeps_all_states_visible(void)
 		phone(KEY_LEFT, true, 200 + index * 2);
 		phone(KEY_LEFT, false, 201 + index * 2);
 	}
-	assert(status_label("↑512"));
-	lv_obj_get_coords(status_label("C+A+S"), &modifiers_area);
-	lv_obj_get_coords(status_label("↑512"), &history_area);
-	lv_obj_get_coords(mode, &mode_area);
-	assert(modifiers_area.x1 >= 0 && modifiers_area.x2 < history_area.x1);
-	assert(history_area.x2 < mode_area.x1 && mode_area.x2 < app_width);
-	assert(mode_area.x2 + 1 == right_edge);
-	assert(modifiers_area.y1 >= 110 && modifiers_area.y2 <= 127);
-	assert(history_area.y1 >= 110 && history_area.y2 <= 127);
-	assert(mode_area.y1 >= 110 && mode_area.y2 <= 127);
-	phone(KEY_F14, true, 400);
-	phone(KEY_F14, false, 401);
-	assert(status_label("Ctrl+Alt+Shift") && status_label(""));
-	phone(KEY_F14, true, 500);
-	phone(KEY_F14, false, 501);
-	assert(status_label("АБВ"));
-	phone(KEY_NUMERIC_POUND, true, 600);
-	phone(KEY_NUMERIC_POUND, false, 601);
-	assert(status_label("abc"));
-	phone(KEY_NUMERIC_POUND, true, 700);
-	phone(KEY_NUMERIC_POUND, false, 701);
-	assert(status_label("ABC"));
-	phone(KEY_NUMERIC_POUND, true, 800);
-	phone(KEY_NUMERIC_POUND, false, 801);
-	assert(status_label("123"));
+	expect_header("Scrollback", "Ctrl+Alt+Shift  ↑512", "C+A+S  ↑512");
+	command(FPLINUX_TERMINAL_COMMAND_HELP);
+	assert(ui.current == &form_screen &&
+	       !strcmp(form_screen.title, "Help"));
+	pulse(400);
+	assert(ui.current == &form_screen &&
+	       !strcmp(form_screen.title, "Help"));
+	expect_header("Scrollback", "Ctrl+Alt+Shift  ↑512", "C+A+S  ↑512");
+	form_screen.command(&ui, &form_screen, 0, form_screen.command_context);
+	assert(ui.current == &screen);
+	ui.visible = false;
+	event(FPLINUX_UI_EVENT_VISIBILITY, false);
+	assert(timer.paused);
+	ui.visible = true;
+	event(FPLINUX_UI_EVENT_VISIBILITY, true);
+	assert(!timer.paused);
+	expect_header("Scrollback", "Ctrl+Alt+Shift  ↑512", "C+A+S  ↑512");
+	for (unsigned int index = 0; index < 64; ++index) {
+		phone(KEY_RIGHT, true, 500 + index * 2);
+		phone(KEY_RIGHT, false, 501 + index * 2);
+	}
+	expect_header("Scrollback", "Ctrl+Alt+Shift  ↑0", "C+A+S  ↑0");
+	phone(KEY_F14, true, 700);
+	phone(KEY_F14, false, 701);
+	expect_header("Terminal", "Ctrl+Alt+Shift  АБВ", "C+A+S  АБВ");
+	set_modifiers(false);
+	command(FPLINUX_TERMINAL_COMMAND_SCROLLBACK);
+	digit_two(1000);
+	expect_header("Terminal", "АБВ", "АБВ");
+	pulse(2000);
+	expect_shell_bytes("А");
+	phone(KEY_NUMERIC_POUND, true, 2100);
+	phone(KEY_NUMERIC_POUND, false, 2101);
+	phone(KEY_NUMERIC_STAR, true, 2200);
+	phone(KEY_NUMERIC_STAR, false, 2700);
+	expect_header("Terminal", "abc", "abc");
+	phone(KEY_NUMERIC_POUND, true, 2800);
+	phone(KEY_NUMERIC_POUND, false, 2801);
+	expect_header("Terminal", "ABC", "ABC");
+	phone(KEY_NUMERIC_POUND, true, 2900);
+	phone(KEY_NUMERIC_POUND, false, 3400);
+	expect_header("Terminal", "123", "123");
+	command(FPLINUX_TERMINAL_COMMAND_SCROLLBACK);
+	expect_header("Scrollback", "↑0", "↑0");
+	phone(KEY_F14, true, 3500);
+	phone(KEY_F14, false, 3501);
+	expect_header("Terminal", "123", "123");
 	assert(!winsize_changed);
+	assert(!strcmp(task_title, "Terminal") &&
+	       task_title_updates == original_title_updates);
 	draw_frame();
 	expect_shell_bytes("");
+}
+
+static void activation_returns_to_the_same_terminal(void)
+{
+	const int helpers[] = {
+		FPLINUX_TERMINAL_COMMAND_HELP,
+		FPLINUX_TERMINAL_COMMAND_SPECIAL,
+		FPLINUX_TERMINAL_COMMAND_MODIFIERS,
+		FPLINUX_TERMINAL_COMMAND_FONT_SIZE,
+	};
+	const char output[] =
+		"first\r\nsecond\r\nthird\r\nfourth\r\nfifth\r\n"
+		"sixth\r\nseventh\r\neighth\r\nninth\r\ntenth\r\n";
+	char original_text[sizeof(rendered_text)];
+	int original_fd = ui.watched_fd;
+
+	assert(write(shell_peer, output, sizeof(output) - 1) ==
+	       (ssize_t)sizeof(output) - 1);
+	assert(dispatch_ready(1000));
+	command(FPLINUX_TERMINAL_COMMAND_SCROLLBACK);
+	phone(KEY_UP, true, 100);
+	phone(KEY_UP, false, 101);
+	expect_header("Scrollback", "↑1", "↑1");
+	draw_frame();
+	snprintf(original_text, sizeof(original_text), "%s", rendered_text);
+	for (size_t index = 0; index < sizeof(helpers) / sizeof(helpers[0]);
+	     ++index) {
+		struct fplinux_ui_screen *helper;
+
+		command(helpers[index]);
+		helper = ui.current;
+		assert(helper != &screen);
+		if (helpers[index] == FPLINUX_TERMINAL_COMMAND_SPECIAL) {
+			assert(helper == &list_screen);
+			assert(list_screen.list_kind ==
+			       FPLINUX_UI_LIST_IMPLICIT);
+			assert(!strcmp(list_screen.select_label, "Send"));
+			assert(list_screen.count > 2);
+			fplinux_ui_list_set_focused(helper, 2);
+		}
+		activate(FPLINUX_UI_ACTIVATION_RESUME);
+		assert(ui.current == helper);
+		if (helpers[index] == FPLINUX_TERMINAL_COMMAND_SPECIAL) {
+			assert(list_screen.focused == 2);
+			assert(!strcmp(list_screen.select_label, "Send"));
+		}
+		activate(FPLINUX_UI_ACTIVATION_OPEN);
+		assert(ui.current == &screen);
+		expect_header("Scrollback", "↑1", "↑1");
+		draw_frame();
+		assert(!strcmp(rendered_text, original_text));
+		assert(ui.watched_fd == original_fd && !pty_closed && !ui.quit);
+		expect_shell_bytes("");
+	}
+	ui.menu_open = true;
+	activate(FPLINUX_UI_ACTIVATION_RESUME);
+	assert(ui.menu_open);
+	activate(FPLINUX_UI_ACTIVATION_OPEN);
+	assert(!ui.menu_open && ui.current == &screen);
+	activate(FPLINUX_UI_ACTIVATION_OPEN);
+	expect_header("Scrollback", "↑1", "↑1");
+	assert(ui.watched_fd == original_fd && !pty_closed);
+	command(FPLINUX_TERMINAL_COMMAND_LIVE);
+	digit_two(1000);
+	expect_shell_bytes("");
+	command(FPLINUX_TERMINAL_COMMAND_HELP);
+	activate(FPLINUX_UI_ACTIVATION_OPEN);
+	expect_shell_bytes("");
+	pulse(1100);
+	expect_shell_bytes("");
+	pulse(2200);
+	expect_shell_bytes("a");
+}
+
+static void shell_completion_preserves_failed_output_until_close(void)
+{
+	static const char output[] =
+		"earlier line\r\n\r\n\r\n\r\n\r\n\r\n\r\n\r\n"
+		"FINAL-SHELL-OUTPUT";
+	unsigned int frames;
+
+	assert(write(shell_peer, output, sizeof(output) - 1) ==
+	       (ssize_t)sizeof(output) - 1);
+	shell_status = !strcmp(scenario, "shell-success") ? 0 :
+		       !strcmp(scenario, "shell-signal")  ? SIGTERM :
+							    37 << 8;
+	shell_finished = true;
+	assert(shutdown(shell_peer, SHUT_WR) == 0);
+	assert(dispatch_ready(1000));
+	if (!strcmp(scenario, "shell-success")) {
+		assert(ui.quit);
+		return;
+	}
+	assert(!ui.quit && ui.current == &screen);
+	assert(pty_closed && ui.watched_fd == -1 && !ui.fd_callback);
+	assert(!screen.commands[FPLINUX_TERMINAL_COMMAND_ENTER]);
+	assert(!screen.commands[FPLINUX_TERMINAL_COMMAND_CLEAR]);
+	assert(screen.commands[FPLINUX_TERMINAL_COMMAND_SCROLLBACK]);
+	assert(!strcmp(screen.exit_label, "Close"));
+	frames = painted_frames;
+	draw_frame();
+	assert(painted_frames == frames + 1);
+	assert(strstr(rendered_text, "FINAL-SHELL-OUTPUT"));
+	assert(!strcmp(screen.header_full, !strcmp(scenario, "shell-signal") ?
+						   "Signal 15" :
+						   "Exit 37"));
+	for (unsigned int index = 0; index < 160; ++index)
+		keyboard(XKB_KEY_x, KEY_X, 'x');
+	digit_two(1000);
+	pulse(3000);
+	assert(!ui.quit && pty_closed);
+	command(FPLINUX_TERMINAL_COMMAND_SCROLLBACK);
+	phone(KEY_LEFT, true, 3100);
+	phone(KEY_LEFT, false, 3101);
+	draw_frame();
+	assert(!strncmp(first_line, "earlier line", 12));
+	phone(KEY_F14, true, 3200);
+	phone(KEY_F14, false, 3201);
+	assert(!ui.quit);
+	phone(KEY_F14, true, 3300);
+	assert(ui.quit);
 }
 
 struct fplinux_ui *fplinux_ui_open(const char *app_id,
@@ -689,9 +901,14 @@ int fplinux_ui_run(struct fplinux_ui *instance)
 		   !strcmp(scenario, "font-save-failure") ||
 		   !strcmp(scenario, "font-sync-failure"))
 		font_change_keeps_the_session_and_pending_input();
-	else if (!strcmp(scenario, "status"))
-		status_keeps_all_states_visible();
-	else
+	else if (!strcmp(scenario, "header"))
+		header_distinguishes_input_from_scrollback();
+	else if (!strcmp(scenario, "activation"))
+		activation_returns_to_the_same_terminal();
+	else if (!strncmp(scenario, "shell-", 6)) {
+		shell_completion_preserves_failed_output_until_close();
+		return 0;
+	} else
 		hidden_input();
 	event(FPLINUX_UI_EVENT_CLOSE, false);
 	assert(ui.quit);
@@ -733,13 +950,6 @@ fplinux_ui_theme(const struct fplinux_ui *instance)
 	return &theme;
 }
 
-const struct fplinux_ui_metrics *
-fplinux_ui_metrics(const struct fplinux_ui *instance)
-{
-	assert(instance == &ui);
-	return &metrics;
-}
-
 uint64_t fplinux_ui_now_ms(void)
 {
 	return advancing_clock ? now_ms++ : now_ms;
@@ -748,7 +958,7 @@ uint64_t fplinux_ui_now_ms(void)
 const char *fplinux_ui_input_locale(const struct fplinux_ui *instance)
 {
 	assert(instance == &ui);
-	return !strcmp(scenario, "status") ? "ru" : "en";
+	return !strcmp(scenario, "header") ? "ru" : "en";
 }
 
 bool fplinux_ui_is_softkey(const struct fplinux_ui_key *key, bool left)
@@ -767,9 +977,17 @@ bool fplinux_ui_menu_is_open(const struct fplinux_ui *instance)
 	return instance->menu_open;
 }
 
+void fplinux_ui_menu_close(struct fplinux_ui *instance)
+{
+	instance->menu_open = false;
+}
+
 bool fplinux_ui_set_title(struct fplinux_ui *instance, const char *title)
 {
 	assert(instance == &ui && title && *title);
+	assert(snprintf(task_title, sizeof(task_title), "%s", title) <
+	       (int)sizeof(task_title));
+	++task_title_updates;
 	return true;
 }
 
@@ -790,7 +1008,7 @@ void fplinux_ui_push(struct fplinux_ui *instance,
 {
 	assert(instance == &ui &&
 	       (new_screen == &screen || new_screen == &list_screen ||
-		new_screen == &alert_screen));
+		new_screen == &form_screen || new_screen == &alert_screen));
 	instance->current = new_screen;
 }
 
@@ -816,7 +1034,12 @@ void fplinux_ui_go_back(struct fplinux_ui *instance)
 struct fplinux_ui_screen *fplinux_ui_canvas_new(struct fplinux_ui *instance,
 						const char *title)
 {
-	assert(instance == &ui && !title);
+	assert(instance == &ui && title && *title);
+	assert(!screen_created && !pty_opened && !canvas.draw &&
+	       !screen.command);
+	assert(snprintf(screen.title, sizeof(screen.title), "%s", title) <
+	       (int)sizeof(screen.title));
+	screen_created = true;
 	return &screen;
 }
 
@@ -834,8 +1057,8 @@ void fplinux_ui_canvas_set_key_handler(struct fplinux_ui_screen *instance,
 	instance->key_context = context;
 }
 
-void fplinux_ui_canvas_set_key_filter(struct fplinux_ui_screen *instance,
-				      fplinux_ui_canvas_key_filter_cb filter,
+void fplinux_ui_screen_set_key_filter(struct fplinux_ui_screen *instance,
+				      fplinux_ui_screen_key_filter_cb filter,
 				      void *context)
 {
 	instance->filter = filter;
@@ -855,13 +1078,11 @@ void fplinux_ui_canvas_set_key_repeat(struct fplinux_ui_screen *instance,
 	       policy == FPLINUX_UI_CANVAS_REPEAT_KEYMAP);
 }
 
-struct fplinux_ui_symbol_picker *fplinux_ui_symbol_picker_create(
-	struct fplinux_ui *instance, lv_obj_t *anchor,
-	enum fplinux_ui_symbol_picker_placement placement,
-	unsigned int selected)
+struct fplinux_ui_symbol_picker *
+fplinux_ui_symbol_picker_create(struct fplinux_ui *instance,
+				unsigned int selected)
 {
-	assert(instance == &ui && anchor == &canvas && !picker.open);
-	assert(placement == FPLINUX_UI_SYMBOL_PICKER_CENTERED);
+	assert(instance == &ui && !picker.open);
 	picker.open = true;
 	picker.selected = selected;
 	return &picker;
@@ -908,8 +1129,8 @@ void fplinux_ui_screen_set_listener(struct fplinux_ui_screen *instance,
 				    fplinux_ui_command_cb command,
 				    fplinux_ui_change_cb change, void *context)
 {
-	(void)change;
 	instance->command = command;
+	instance->change = change;
 	instance->command_context = context;
 }
 
@@ -924,9 +1145,16 @@ bool fplinux_ui_screen_add_command(struct fplinux_ui_screen *instance,
 				   const struct fplinux_ui_command *command)
 {
 	assert((instance == &screen || instance == &list_screen ||
-		instance == &alert_screen) &&
+		instance == &form_screen || instance == &alert_screen) &&
 	       command);
 	if (instance == &screen) {
+		assert(command->id >= 0 &&
+		       command->id < FPLINUX_TERMINAL_COMMAND_COUNT);
+		instance->commands[command->id] = true;
+		if (command->id == FPLINUX_TERMINAL_COMMAND_EXIT)
+			snprintf(instance->exit_label,
+				 sizeof(instance->exit_label), "%s",
+				 command->label ? command->label : "Exit");
 		if (command->id == FPLINUX_TERMINAL_COMMAND_SEARCH)
 			assert(command->icon &&
 			       !strcmp(command->icon, "search"));
@@ -938,9 +1166,14 @@ bool fplinux_ui_screen_add_command(struct fplinux_ui_screen *instance,
 	}
 	if (instance == &list_screen && command->type == FPLINUX_UI_COMMAND_OK)
 		instance->done_command = command->id;
+	if (instance == &list_screen &&
+	    command->type == FPLINUX_UI_COMMAND_BACK)
+		instance->right_command = command->id;
 	if (instance == &screen &&
 	    (command->id == FPLINUX_TERMINAL_COMMAND_CLEAR ||
-	     command->id == FPLINUX_TERMINAL_COMMAND_LIVE))
+	     command->id == FPLINUX_TERMINAL_COMMAND_LIVE ||
+	     (command->id == FPLINUX_TERMINAL_COMMAND_EXIT && command->label &&
+	      !strcmp(command->label, "Close"))))
 		instance->right_command = command->id;
 	return true;
 }
@@ -949,22 +1182,45 @@ void fplinux_ui_screen_remove_command(struct fplinux_ui_screen *instance,
 				      int id)
 {
 	assert(instance == &screen);
-	(void)id;
+	assert(id >= 0 && id < FPLINUX_TERMINAL_COMMAND_COUNT);
+	instance->commands[id] = false;
+	if (instance->commands[FPLINUX_TERMINAL_COMMAND_CLEAR])
+		instance->right_command = FPLINUX_TERMINAL_COMMAND_CLEAR;
+	else if (instance->commands[FPLINUX_TERMINAL_COMMAND_LIVE])
+		instance->right_command = FPLINUX_TERMINAL_COMMAND_LIVE;
+	else if (instance->commands[FPLINUX_TERMINAL_COMMAND_EXIT] &&
+		 !strcmp(instance->exit_label, "Close"))
+		instance->right_command = FPLINUX_TERMINAL_COMMAND_EXIT;
 }
 
 bool fplinux_ui_screen_set_title(struct fplinux_ui_screen *instance,
 				 const char *title)
 {
 	assert(instance == &screen && title && *title);
+	assert(snprintf(instance->title, sizeof(instance->title), "%s", title) <
+	       (int)sizeof(instance->title));
+	return true;
+}
+
+bool fplinux_ui_screen_set_header_status(struct fplinux_ui_screen *instance,
+					 const char *full, const char *compact)
+{
+	assert((instance == &screen || instance == &list_screen) && full &&
+	       compact);
+	assert(snprintf(instance->header_full, sizeof(instance->header_full),
+			"%s", full) < (int)sizeof(instance->header_full));
+	assert(snprintf(instance->header_compact,
+			sizeof(instance->header_compact), "%s",
+			compact) < (int)sizeof(instance->header_compact));
 	return true;
 }
 
 bool fplinux_ui_screen_get_content_size(
 	const struct fplinux_ui_screen *instance, int *width, int *height)
 {
-	assert(instance == &screen);
+	assert(instance == &screen && screen_created && *screen.title);
 	*width = app_width;
-	*height = app_height;
+	*height = app_height - header_height();
 	return true;
 }
 
@@ -974,8 +1230,10 @@ struct fplinux_ui_screen *fplinux_ui_list_new(struct fplinux_ui *instance,
 {
 	assert(instance == &ui && title && *title);
 	assert(kind == FPLINUX_UI_LIST_IMPLICIT ||
+	       kind == FPLINUX_UI_LIST_EXCLUSIVE ||
 	       kind == FPLINUX_UI_LIST_MULTIPLE);
 	memset(&list_screen, 0, sizeof(list_screen));
+	list_screen.list_kind = kind;
 	assert(snprintf(list_screen.title, sizeof(list_screen.title), "%s",
 			title) < (int)sizeof(list_screen.title));
 	return &list_screen;
@@ -984,10 +1242,11 @@ struct fplinux_ui_screen *fplinux_ui_list_new(struct fplinux_ui *instance,
 struct fplinux_ui_screen *fplinux_ui_form_new(struct fplinux_ui *instance,
 					      const char *title)
 {
-	(void)instance;
-	(void)title;
-	assert(false);
-	return NULL;
+	assert(instance == &ui && title && *title);
+	memset(&form_screen, 0, sizeof(form_screen));
+	assert(snprintf(form_screen.title, sizeof(form_screen.title), "%s",
+			title) < (int)sizeof(form_screen.title));
+	return &form_screen;
 }
 
 struct fplinux_ui_screen *fplinux_ui_alert_new(struct fplinux_ui *instance,
@@ -1011,7 +1270,9 @@ struct fplinux_ui_screen *fplinux_ui_alert_new(struct fplinux_ui *instance,
 size_t fplinux_ui_list_append(struct fplinux_ui_screen *list, const char *text,
 			      const char *detail)
 {
-	assert(list == &list_screen && list->count < 4 && !detail);
+	assert(list == &list_screen &&
+	       list->count < sizeof(list->items) / sizeof(list->items[0]) &&
+	       !detail);
 	assert(snprintf(list->items[list->count], sizeof(list->items[0]), "%s",
 			text) < (int)sizeof(list->items[0]));
 	return list->count++;
@@ -1020,10 +1281,10 @@ size_t fplinux_ui_list_append(struct fplinux_ui_screen *list, const char *text,
 bool fplinux_ui_list_set_select_label(struct fplinux_ui_screen *list,
 				      const char *label)
 {
-	(void)list;
-	(void)label;
-	assert(false);
-	return false;
+	assert(list == &list_screen);
+	assert(snprintf(list->select_label, sizeof(list->select_label), "%s",
+			label ? label : "") < (int)sizeof(list->select_label));
+	return true;
 }
 
 size_t fplinux_ui_list_get_focused(const struct fplinux_ui_screen *list)
@@ -1069,105 +1330,8 @@ void *fplinux_ui_screen_get_data(const struct fplinux_ui_screen *instance)
 size_t fplinux_ui_form_append_string(struct fplinux_ui_screen *form,
 				     const char *label, const char *text)
 {
-	(void)form;
-	(void)label;
-	(void)text;
-	assert(false);
-	return 0;
-}
-
-lv_obj_t *lv_obj_create(lv_obj_t *parent)
-{
-	struct lv_obj *object;
-
-	assert(parent && status_object_count < 4);
-	object = &status_objects[status_object_count++];
-	object->parent = parent;
-	return object;
-}
-
-lv_obj_t *lv_label_create(lv_obj_t *parent)
-{
-	lv_obj_t *object = lv_obj_create(parent);
-
-	object->label = true;
-	object->height = body_font.line_height;
-	return object;
-}
-
-void lv_obj_remove_style_all(lv_obj_t *object)
-{
-	assert(object->parent == &canvas);
-}
-
-void lv_obj_set_size(lv_obj_t *object, int width, int height)
-{
-	assert(object && width > 0 && height > 0);
-	object->width = width;
-	object->height = height;
-}
-
-void lv_obj_align(lv_obj_t *object, int align, int x, int y)
-{
-	assert(object && object != &canvas);
-	object->align = align;
-	object->x = x;
-	object->y = y;
-}
-
-void lv_obj_set_style_bg_color(lv_obj_t *object, lv_color_t color, int selector)
-{
-	assert(object && color == theme.surface && !selector);
-}
-
-void lv_obj_set_style_bg_opa(lv_obj_t *object, lv_opa_t opacity, int selector)
-{
-	assert(object && opacity == LV_OPA_COVER && !selector);
-}
-
-void lv_obj_set_style_border_color(lv_obj_t *object, lv_color_t color,
-				   int selector)
-{
-	assert(object && color == theme.border && !selector);
-}
-
-void lv_obj_set_style_border_width(lv_obj_t *object, int width, int selector)
-{
-	assert(object && width == 1 && !selector);
-}
-
-void lv_obj_set_style_border_side(lv_obj_t *object, int side, int selector)
-{
-	assert(object && side == LV_BORDER_SIDE_TOP && !selector);
-}
-
-void lv_obj_set_style_text_font(lv_obj_t *object, const lv_font_t *font,
-				int selector)
-{
-	assert(object && font == &body_font && !selector);
-}
-
-void lv_obj_set_style_text_color(lv_obj_t *object, lv_color_t color,
-				 int selector)
-{
-	assert(object && color == theme.foreground && !selector);
-}
-
-void lv_label_set_text(lv_obj_t *object, const char *text)
-{
-	lv_point_t size;
-
-	assert(object->label && strlen(text) < sizeof(object->text));
-	strcpy(object->text, text);
-	lv_text_get_size(&size, text, &body_font, 0, 0, LV_COORD_MAX,
-			 LV_TEXT_FLAG_NONE);
-	object->width = size.x;
-}
-
-const char *lv_label_get_text(const lv_obj_t *object)
-{
-	assert(object->label);
-	return object->text;
+	assert(form == &form_screen && label && *label && text && *text);
+	return form->count++;
 }
 
 void lv_obj_set_scrollable(lv_obj_t *object, bool scrollable)
@@ -1185,27 +1349,9 @@ void lv_obj_add_event_cb(lv_obj_t *object, lv_event_cb_t callback, int type,
 
 void lv_obj_get_coords(lv_obj_t *object, lv_area_t *area)
 {
-	int x = object->x;
-	int y = object->y;
-
-	if (object == &canvas) {
-		*area = (lv_area_t){ 0, 0, app_width - 1, app_height - 1 };
-		return;
-	}
-	assert(object->parent);
-	if (object->align == LV_ALIGN_BOTTOM_MID)
-		y += app_height - object->height;
-	else {
-		assert(object->parent->parent == &canvas);
-		y += app_height - object->parent->height +
-		     (object->parent->height - object->height) / 2;
-		if (object->align == LV_ALIGN_RIGHT_MID)
-			x += object->parent->width - object->width;
-		else
-			assert(object->align == LV_ALIGN_LEFT_MID);
-	}
-	*area = (lv_area_t){ x, y, x + object->width - 1,
-			     y + object->height - 1 };
+	assert(object == &canvas);
+	*area = (lv_area_t){ 0, header_height(), app_width - 1,
+			     app_height - 1 };
 }
 
 void lv_obj_invalidate(lv_obj_t *object)
@@ -1221,24 +1367,6 @@ void *lv_event_get_user_data(lv_event_t *draw)
 lv_layer_t *lv_event_get_layer(lv_event_t *draw)
 {
 	return &draw->layer;
-}
-
-void lv_text_get_size(lv_point_t *size, const char *text, const lv_font_t *font,
-		      int letter_space, int line_space, int width, int flags)
-{
-	int characters = 0;
-
-	assert(font == &body_font);
-	(void)letter_space;
-	(void)line_space;
-	(void)width;
-	(void)flags;
-	for (const unsigned char *byte = (const unsigned char *)text; *byte;
-	     ++byte)
-		if ((*byte & 0xc0) != 0x80)
-			++characters;
-	size->x = characters * 6;
-	size->y = font->line_height;
 }
 
 lv_timer_t *lv_timer_create(lv_timer_cb_t callback, unsigned int period,
@@ -1299,16 +1427,17 @@ void fplinux_terminal_grid_close(struct fplinux_terminal_grid *grid)
 
 void fplinux_terminal_render(struct fplinux_terminal *terminal,
 			     const struct fplinux_terminal_grid *grid,
-			     lv_layer_t *layer, const lv_area_t *bounds)
+			     lv_layer_t *layer, const lv_area_t *bounds,
+			     lv_color_t accent, lv_color_t accent_text)
 {
 	const struct tsm_screen_cell *cells =
 		tsm_screen_draw2(terminal->screen);
 
 	assert(grid_opened == 2 && !grid_closed && layer);
+	assert(accent == 0xadcfde && accent_text == 0x083442);
 	assert(grid == opened_grids[0] || grid == opened_grids[1]);
-	assert(bounds->x1 == 0 && bounds->y1 == 0);
-	assert(bounds->x2 == app_width - 1 &&
-	       bounds->y2 == app_height - (app_width < 240 ? 18 : 22) - 1);
+	assert(bounds->x1 == 0 && bounds->y1 == header_height());
+	assert(bounds->x2 == app_width - 1 && bounds->y2 == app_height - 1);
 	assert(cells &&
 	       tsm_screen_get_width(terminal->screen) == expected_columns);
 	assert(tsm_screen_get_height(terminal->screen) == expected_rows);
@@ -1316,6 +1445,21 @@ void fplinux_terminal_render(struct fplinux_terminal *terminal,
 		first_line[index] =
 			cells[index].ch < 128 ? (char)cells[index].ch : '?';
 	first_line[expected_columns] = '\0';
+	assert((expected_columns + 1) * expected_rows < sizeof(rendered_text));
+	for (size_t row = 0; row < expected_rows; ++row) {
+		for (size_t column = 0; column < expected_columns; ++column) {
+			uint32_t character =
+				cells[row * expected_columns + column].ch;
+
+			rendered_text[row * (expected_columns + 1) + column] =
+				character >= 32 && character < 128 ?
+					(char)character :
+					' ';
+		}
+		rendered_text[row * (expected_columns + 1) + expected_columns] =
+			'\n';
+	}
+	rendered_text[(expected_columns + 1) * expected_rows] = '\0';
 	++painted_frames;
 }
 
@@ -1325,6 +1469,8 @@ bool fplinux_terminal_pty_open(struct fplinux_terminal_pty *pty,
 {
 	int sockets[2];
 
+	assert(screen_created && !ui.current && !canvas.draw &&
+	       !screen.filter && !screen.command && !timer.callback);
 	assert(!pty_opened && columns == expected_columns &&
 	       rows == expected_rows);
 	reported_columns = columns;
@@ -1342,8 +1488,9 @@ bool fplinux_terminal_pty_finished(struct fplinux_terminal_pty *pty,
 				   int *status)
 {
 	assert(pty->fd >= 0 && !pty_closed);
-	(void)status;
-	return false;
+	if (shell_finished)
+		*status = shell_status;
+	return shell_finished;
 }
 
 void fplinux_terminal_pty_close(struct fplinux_terminal_pty *pty)
@@ -1370,7 +1517,7 @@ size_t __wrap_fplinux_language_list(const char *directory,
 	(void)directory;
 	(void)codes;
 	(void)capacity;
-	if (!strcmp(scenario, "status"))
+	if (!strcmp(scenario, "header"))
 		return __real_fplinux_language_list(
 			FPLINUX_TERMINAL_TEST_LANGUAGE_DIRECTORY, codes,
 			capacity);

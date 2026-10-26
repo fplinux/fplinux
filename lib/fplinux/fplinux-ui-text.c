@@ -55,9 +55,8 @@ static void render_picker(struct fplinux_ui_text *field)
 		field->picker = NULL;
 	}
 	if (!field->picker) {
-		field->picker = fplinux_ui_symbol_picker_create(
-			field->ui, field->frame,
-			FPLINUX_UI_SYMBOL_PICKER_ANCHORED, index);
+		field->picker =
+			fplinux_ui_symbol_picker_create(field->ui, index);
 		if (!field->picker)
 			fplinux_ui_text_model_cancel_picker(&field->model);
 		return;
@@ -292,19 +291,15 @@ static void frame_delete_cb(lv_event_t *event)
  */
 static void apply_read_only(struct fplinux_ui_text *field)
 {
-	const struct fplinux_ui_profile_spec *spec = field->spec;
 	bool read_only = field->model.read_only;
 
 	lv_obj_set_hidden(field->status, read_only);
 	if (field->model.multiline) {
-		fplinux_ui_style_scrollbar(field->ui, field->area);
-		lv_obj_set_style_pad_ver(field->area, spec->list_padding,
-					 LV_PART_SCROLLBAR);
-		lv_obj_set_style_pad_right(field->area,
-					   read_only ? spec->gutter : 0, 0);
+		lv_obj_set_style_pad_right(field->area, read_only ? 1 : 0, 0);
 		lv_obj_set_scrollbar_mode(field->area,
 					  read_only ? LV_SCROLLBAR_MODE_AUTO :
 						      LV_SCROLLBAR_MODE_OFF);
+		fplinux_ui_style_scrollbar(field->ui, field->area);
 		return;
 	}
 	if (!read_only && field->marquee) {
@@ -491,6 +486,14 @@ bool fplinux_ui_text_can_repeat(const struct fplinux_ui *ui,
 	       lv_obj_is_visible(field->frame);
 }
 
+void fplinux_ui_text_cancel_picker(struct fplinux_ui_text *field)
+{
+	if (!field)
+		return;
+	fplinux_ui_text_model_cancel_picker(&field->model);
+	update(field);
+}
+
 const char *fplinux_ui_text_get(const struct fplinux_ui_text *field)
 {
 	return field->model.display;
@@ -628,7 +631,7 @@ void fplinux_ui_text_menu_reclaim(struct fplinux_ui *ui)
 	}
 }
 
-/* An open grid is drawn again over its field, inside the new display. */
+/* An open grid is drawn again in the new modal area. */
 void fplinux_ui_text_resize(struct fplinux_ui *ui)
 {
 	for (struct fplinux_ui_text *field = fields; field;

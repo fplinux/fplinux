@@ -39,9 +39,8 @@ static void page_key(struct fplinux_ui *ui, struct fplinux_ui_screen *canvas,
 
 /*
  * A canvas whose drawing area holds one scrolling column. The column's
- * children take its width and stack with the profile's spacing; each
- * starts its content at the margin, as list rows do, and the gutter on the
- * right leaves room for the scroll indicator.
+ * children take its width and stack with the profile's spacing. The
+ * viewport owns both margins and the conditional scroll indicator.
  */
 static lv_obj_t *new_page(struct apidemo *app, const char *title,
 			  struct fplinux_ui_screen **canvas)
@@ -57,7 +56,7 @@ static lv_obj_t *new_page(struct apidemo *app, const char *title,
 	page = lv_obj_create(fplinux_ui_canvas_object(*canvas));
 	lv_obj_remove_style_all(page);
 	lv_obj_set_size(page, lv_pct(100), lv_pct(100));
-	lv_obj_set_style_pad_right(page, metrics->gutter, 0);
+	lv_obj_set_style_pad_hor(page, metrics->margin, 0);
 	lv_obj_set_style_pad_ver(page, metrics->spacing, 0);
 	lv_obj_set_style_pad_row(page, metrics->spacing, 0);
 	lv_obj_set_flex_flow(page, LV_FLEX_FLOW_COLUMN);
@@ -72,17 +71,14 @@ static lv_obj_t *new_page(struct apidemo *app, const char *title,
 }
 
 /*
- * A label as wide as its parent that wraps, in a font and a colour, its
- * text inset by the margin.
+ * A wrapping label fills the viewport's content width.
  */
-static lv_obj_t *add_text(struct apidemo *app, lv_obj_t *parent,
-			  const lv_font_t *font, lv_color_t color,
-			  const char *text)
+static lv_obj_t *add_text(lv_obj_t *parent, const lv_font_t *font,
+			  lv_color_t color, const char *text)
 {
 	lv_obj_t *label = lv_label_create(parent);
 
 	lv_obj_set_width(label, lv_pct(100));
-	lv_obj_set_style_pad_left(label, app->metrics->margin, 0);
 	lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_WRAP);
 	lv_obj_set_style_text_font(label, font, 0);
 	lv_obj_set_style_text_color(label, color, 0);
@@ -97,7 +93,6 @@ static lv_obj_t *add_row(struct apidemo *app, lv_obj_t *page)
 
 	lv_obj_remove_style_all(row);
 	lv_obj_set_size(row, lv_pct(100), LV_SIZE_CONTENT);
-	lv_obj_set_style_pad_left(row, app->metrics->margin, 0);
 	lv_obj_set_style_pad_column(row, app->metrics->spacing, 0);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
@@ -157,8 +152,7 @@ static void add_colour(struct apidemo *app, lv_obj_t *page,
 		name,
 		colour->background ? app->theme->foreground : colour->text, 0);
 	lv_label_set_text(name, colour->name);
-	add_text(app, page, app->theme->font, app->theme->muted,
-		 _(colour->role));
+	add_text(page, app->theme->font, app->theme->muted, _(colour->role));
 }
 
 static void open_colours(struct apidemo *app, const struct apidemo_entry *entry)
@@ -219,12 +213,12 @@ static void open_colours(struct apidemo *app, const struct apidemo_entry *entry)
 		kind = _("A theme this demo does not know.");
 		break;
 	}
-	add_text(app, page, theme->font, theme->foreground, kind);
+	add_text(page, theme->font, theme->foreground, kind);
 	for (size_t i = 0; i < APIDEMO_COUNT(colours); i++)
 		add_colour(app, page, &colours[i]);
 	snprintf(opacity, sizeof(opacity), "scrim_opacity: %u/255",
 		 (unsigned int)theme->scrim_opacity);
-	add_text(app, page, theme->font, theme->foreground, opacity);
+	add_text(page, theme->font, theme->foreground, opacity);
 	fplinux_ui_push(app->ui, canvas);
 }
 
@@ -235,11 +229,11 @@ static void add_font(struct apidemo *app, lv_obj_t *page, const char *name,
 {
 	char text[TEXT_BYTES];
 
-	add_text(app, page, font, app->theme->foreground, sample);
+	add_text(page, font, app->theme->foreground, sample);
 	/* TRANSLATORS: %1$s is a field of the theme, %2$d pixels. */
 	snprintf(text, sizeof(text), _("%1$s, lines of %2$d px"), name,
 		 (int)lv_font_get_line_height(font));
-	add_text(app, page, app->theme->font, app->theme->muted, text);
+	add_text(page, app->theme->font, app->theme->muted, text);
 }
 
 static void open_fonts(struct apidemo *app, const struct apidemo_entry *entry)
@@ -321,7 +315,7 @@ static void open_metrics(struct apidemo *app, const struct apidemo_entry *entry)
 	add_metric(form, "softkey_height", metrics->softkey_height);
 	add_metric(form, "header_height", metrics->header_height);
 	add_metric(form, "margin", metrics->margin);
-	add_metric(form, "gutter", metrics->gutter);
+	add_metric(form, "scrollbar_space", metrics->scrollbar_space);
 	add_metric(form, "spacing", metrics->spacing);
 	add_metric(form, "gap_small", metrics->gap_small);
 	add_metric(form, "row_height", metrics->row_height);
@@ -399,7 +393,7 @@ static void open_glyph_sizes(struct apidemo *app, const struct glyph *glyph)
 
 	if (!page)
 		return;
-	add_text(app, page, theme->font, theme->foreground, _(glyph->meaning));
+	add_text(page, theme->font, theme->foreground, _(glyph->meaning));
 	for (size_t i = 0; i < APIDEMO_COUNT(sizes); i++) {
 		/* The runtime keeps each glyph until fplinux_ui_close(). */
 		const void *image =
@@ -407,9 +401,9 @@ static void open_glyph_sizes(struct apidemo *app, const struct glyph *glyph)
 		lv_obj_t *row;
 		lv_obj_t *chip;
 
-		add_text(app, page, theme->font, theme->muted, size_names[i]);
+		add_text(page, theme->font, theme->muted, size_names[i]);
 		if (!image) {
-			add_text(app, page, theme->font, theme->danger,
+			add_text(page, theme->font, theme->danger,
 				 apidemo_errno_name(errno));
 			continue;
 		}
@@ -461,47 +455,13 @@ static void open_glyphs(struct apidemo *app, const struct apidemo_entry *entry)
 
 		if (row != SIZE_MAX)
 			fplinux_ui_list_set_icon(
-				list, row, apidemo_glyph(app, glyphs[i].name));
+				list, row, apidemo_glyph(app, glyphs[i].name),
+				FPLINUX_UI_LIST_ICON_IMAGE);
 	}
 	fplinux_ui_list_set_select_label(list, _("Open"));
 	apidemo_add_back(list);
 	fplinux_ui_screen_set_listener(list, glyph_command, NULL, app);
 	fplinux_ui_push(app->ui, list);
-}
-
-/* The errors of fplinux_ui_glyph(): NULL with errno. */
-static void open_glyph_errors(struct apidemo *app,
-			      const struct apidemo_entry *entry)
-{
-	const void *unknown;
-	const void *missing;
-	const void *size;
-	int unknown_error;
-	int missing_error;
-	int size_error;
-
-	errno = 0;
-	unknown = fplinux_ui_glyph(app->ui, "no-such-glyph",
-				   FPLINUX_UI_GLYPH_ROW);
-	unknown_error = errno;
-	errno = 0;
-	missing = fplinux_ui_glyph(app->ui, NULL, FPLINUX_UI_GLYPH_ROW);
-	missing_error = errno;
-	errno = 0;
-	size = fplinux_ui_glyph(
-		app->ui, "lock",
-		(enum fplinux_ui_glyph_size)(FPLINUX_UI_GLYPH_STATUS + 1));
-	size_error = errno;
-	apidemo_showf(app, _(entry->title),
-		      "fplinux_ui_glyph(\"no-such-glyph\"): %s, %s\n"
-		      "fplinux_ui_glyph(NULL): %s, %s\n"
-		      "fplinux_ui_glyph(\"lock\", %d): %s, %s",
-		      unknown ? "image" : "NULL",
-		      apidemo_errno_name(unknown_error),
-		      missing ? "image" : "NULL",
-		      apidemo_errno_name(missing_error),
-		      FPLINUX_UI_GLYPH_STATUS + 1, size ? "image" : "NULL",
-		      apidemo_errno_name(size_error));
 }
 
 /* Images */
@@ -525,13 +485,13 @@ static void add_image(struct apidemo *app, lv_obj_t *page, const char *call,
 	if (!buffer) {
 		snprintf(text, sizeof(text), "%s: NULL, %s", call,
 			 apidemo_errno_name(error));
-		add_text(app, page, app->theme->font, app->theme->muted, text);
+		add_text(page, app->theme->font, app->theme->muted, text);
 		return;
 	}
 	snprintf(text, sizeof(text), "%s: %u × %u", call,
 		 (unsigned int)buffer->header.w,
 		 (unsigned int)buffer->header.h);
-	add_text(app, page, app->theme->font, app->theme->muted, text);
+	add_text(page, app->theme->font, app->theme->muted, text);
 	image = lv_image_create(page);
 	lv_image_set_src(image, buffer);
 	lv_obj_add_event_cb(image, image_deleted, LV_EVENT_DELETE, buffer);
@@ -664,15 +624,9 @@ static void open_images(struct apidemo *app, const struct apidemo_entry *entry)
 	const struct fplinux_ui_theme *theme = app->theme;
 	struct fplinux_ui_screen *canvas;
 	lv_obj_t *page = new_page(app, _(entry->title), &canvas);
-	int width =
-		fplinux_ui_width(app->ui) - metrics->margin - metrics->gutter;
-	int height = fplinux_ui_height(app->ui) - metrics->header_height;
 
 	if (!page)
 		return;
-	/* Scaled down to the width with its proportions, never up. */
-	load_and_add(app, page, "photo.png", APIDEMO_PHOTO, width, height,
-		     NULL);
 	load_and_add(app, page, "photo.png, app_icon_size", APIDEMO_PHOTO,
 		     metrics->app_icon_size, metrics->app_icon_size, NULL);
 	load_and_add(app, page, "photo.png, row_icon_size", APIDEMO_PHOTO,
@@ -689,140 +643,28 @@ static void open_images(struct apidemo *app, const struct apidemo_entry *entry)
 		     metrics->app_icon_size, metrics->app_icon_size,
 		     &theme->danger);
 	add_png_data(app, page, metrics->app_icon_size, metrics->app_icon_size);
-	/* Failures: NULL with errno. */
-	load_and_add(app, page, "missing.png", APIDEMO_IMAGE_DIR "missing.png",
-		     width, height, NULL);
-	load_and_add(app, page, "os-release", "/etc/os-release", width, height,
-		     NULL);
-	load_and_add(app, page, "photo.png, 0 × 0", APIDEMO_PHOTO, 0, 0, NULL);
 	fplinux_ui_push(app->ui, canvas);
-}
-
-/* Text that does not fit */
-
-/* OK shows the focused row's whole text, which the row cuts. */
-static const struct glyph *long_rows;
-
-static void long_row_command(struct fplinux_ui *ui,
-			     struct fplinux_ui_screen *list, int command_id,
-			     void *context)
-{
-	size_t row = fplinux_ui_list_get_focused(list);
-
-	if (command_id == APIDEMO_COMMAND_BACK)
-		fplinux_ui_go_back(ui);
-	else if (command_id == FPLINUX_UI_SELECT_COMMAND && long_rows &&
-		 row < fplinux_ui_list_size(list))
-		apidemo_show(context, _(long_rows[row].name),
-			     _(long_rows[row].meaning));
-}
-
-/*
- * A title, rows and details too long for the profile: each ends with "…"
- * and scrolls once it has the focus, one text at a time, the title first.
- */
-static void open_long_rows(struct apidemo *app,
-			   const struct apidemo_entry *entry)
-{
-	static const struct glyph rows[] = {
-		{ N_("A row whose text is much longer than the screen is wide"),
-		  N_("And a detail line that is longer still, so that it "
-		     "scrolls after the text") },
-		{ N_("Short row"), N_("Short detail") },
-		{ N_("Another long row: the focus moves, the old row rests"),
-		  N_("Unfocused rows end with an ellipsis") },
-	};
-	struct fplinux_ui_screen *list;
-
-	(void)entry;
-	long_rows = rows;
-	list = fplinux_ui_list_new(app->ui,
-				   _("A title too long for the title band "
-				     "scrolls once when the screen opens"),
-				   FPLINUX_UI_LIST_IMPLICIT);
-	if (!list) {
-		apidemo_error(app, "fplinux_ui_list_new");
-		return;
-	}
-	for (size_t i = 0; i < APIDEMO_COUNT(rows); i++)
-		fplinux_ui_list_append(list, _(rows[i].name),
-				       _(rows[i].meaning));
-	fplinux_ui_list_set_select_label(list, _("Show"));
-	apidemo_add_back(list);
-	fplinux_ui_screen_set_listener(list, long_row_command, NULL, app);
-	fplinux_ui_push(app->ui, list);
-}
-
-/* One-line form items scroll their text while focused; labels wrap. */
-static void open_long_items(struct apidemo *app,
-			    const struct apidemo_entry *entry)
-{
-	static const char *const choices[] = {
-		N_("A choice whose text does not fit on its line"),
-		N_("Short choice"),
-	};
-	const char *translated[APIDEMO_COUNT(choices)];
-	struct fplinux_ui_screen *form =
-		fplinux_ui_form_new(app->ui, _(entry->title));
-
-	if (!form) {
-		apidemo_error(app, "fplinux_ui_form_new");
-		return;
-	}
-	for (size_t i = 0; i < APIDEMO_COUNT(choices); i++)
-		translated[i] = _(choices[i]);
-	fplinux_ui_form_append_string(
-		form, _("A string item's label wraps onto more lines"),
-		_("And so does its text, which never scrolls."));
-	fplinux_ui_form_append_choice(form, _("Popup"), FPLINUX_UI_CHOICE_POPUP,
-				      translated, APIDEMO_COUNT(translated));
-	fplinux_ui_form_append_gauge(form,
-				     _("A gauge whose label is too long for "
-				       "its line"),
-				     0, 10, 4, true);
-	fplinux_ui_form_append_text_field(
-		form, _("Read-only"),
-		_("A read-only text field scrolls its text while it has the "
-		  "focus"),
-		0, FPLINUX_UI_TEXT_ANY | FPLINUX_UI_TEXT_UNEDITABLE);
-	fplinux_ui_form_append_date(form,
-				    _("A date and time item with a long label"),
-				    FPLINUX_UI_DATE_TIME, time(NULL));
-	apidemo_add_back(form);
-	fplinux_ui_screen_set_listener(form, apidemo_back_listener, NULL, app);
-	fplinux_ui_push(app->ui, form);
 }
 
 static const struct apidemo_entry entries[] = {
 	{ N_("Theme colours"),
-	  "fplinux_ui_theme · background … scrim · scrim_opacity · kind",
-	  open_colours, 0 },
+	  "fplinux_ui_theme · background · surface · popup · accent · scrim",
+	  open_colours, 0, N_("Compare the current theme roles") },
 	{ N_("Theme fonts"),
-	  "font · font_large · font_clock · font_softkey · "
-	  "lv_font_get_line_height",
-	  open_fonts, 0 },
+	  "font · font_large · font_clock · font_softkey · lv_font_get_line_height",
+	  open_fonts, 0, N_("Read samples in each system font") },
 	{ N_("Metrics"),
 	  "fplinux_ui_metrics · fplinux_ui_width · fplinux_ui_height · profile",
-	  open_metrics, 0 },
+	  open_metrics, 0, N_("Inspect the active screen profile") },
 	{ N_("System glyphs"),
-	  "fplinux_ui_glyph · FPLINUX_UI_GLYPH_ROW · FPLINUX_UI_GLYPH_STATUS · "
-	  "image_recolor",
-	  open_glyphs, 0 },
-	{ N_("Glyph errors"), "fplinux_ui_glyph · ENOENT · EINVAL",
-	  open_glyph_errors, 0 },
+	  "fplinux_ui_glyph · FPLINUX_UI_GLYPH_ROW · FPLINUX_UI_GLYPH_STATUS",
+	  open_glyphs, 0, N_("View system icons at their supported sizes") },
 	{ N_("Images"),
-	  "fplinux_ui_image_load · -symbolic.png · LV_COLOR_FORMAT_A8 · "
-	  "lv_draw_buf_destroy",
-	  open_images, 0 },
-	{ N_("Long list rows"), "fplinux_ui_list_new · marquee · …",
-	  open_long_rows, 0 },
-	{ N_("Long form items"), "fplinux_ui_form_append_* · marquee · …",
-	  open_long_items, 0 },
+	  "fplinux_ui_image_load · LV_COLOR_FORMAT_A8 · lv_draw_buf_destroy",
+	  open_images, 0, N_("Load photos and recolour transparent shapes") },
 };
 
 const struct apidemo_category apidemo_look = {
-	.title = N_("Look"),
-	.icon = APIDEMO_IMAGE_DIR "look-symbolic.png",
 	.entries = entries,
 	.count = APIDEMO_COUNT(entries),
 };

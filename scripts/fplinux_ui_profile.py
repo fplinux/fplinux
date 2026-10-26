@@ -48,11 +48,9 @@ INT_FIELDS = (
     "softkey_height",
     "header_height",
     "margin",
-    "gutter",
     "spacing",
     "gap_small",
     "content_padding",
-    "list_padding",
     "scrollbar_width",
     "scrollbar_offset",
     "focus_width",
@@ -109,13 +107,12 @@ FIELD_ORDER = (
     "softkey_height",
     "header_height",
     "margin",
-    "gutter",
     "spacing",
     "gap_small",
     "content_padding",
-    "list_padding",
     "scrollbar_width",
     "scrollbar_offset",
+    "scrollbar_space",
     "focus_width",
     "divider_width",
     "row_height",
@@ -135,7 +132,6 @@ FIELD_ORDER = (
     "grid_ring_colour",
     "list_tile_ring_width",
     "list_tile_ring_gap",
-    "list_tile_ring_colour",
     "frame_padding",
     "field_padding",
     "field_lines",
@@ -328,10 +324,10 @@ def _selection(profile: str, value: object) -> dict[str, int | str | bool]:
             profile, f"{ring}_width", selection.get(f"{ring}_width")
         )
         fields[f"{ring}_gap"] = _integer(profile, f"{ring}_gap", selection.get(f"{ring}_gap"))
-        colour = selection.get(f"{ring}_colour")
-        if colour not in COLOURS:
-            raise ProfileError(f"{profile}: selection.{ring}_colour must name a colour token")
-        fields[f"{ring}_colour"] = f"FPLINUX_UI_COLOUR_{str(colour).upper()}"
+    colour = selection.get("grid_ring_colour")
+    if colour not in COLOURS:
+        raise ProfileError(f"{profile}: selection.grid_ring_colour must name a colour token")
+    fields["grid_ring_colour"] = f"FPLINUX_UI_COLOUR_{str(colour).upper()}"
     fields["grid_tile_inset"] = _integer(
         profile, "grid_tile_inset", selection.get("grid_tile_inset")
     )
@@ -350,8 +346,11 @@ def profile_fields(
     missing = (set(INT_FIELDS) | CONVERTED_KEYS) - set(profile)
     if missing:
         raise ProfileError(f"{name}: missing keys: {', '.join(sorted(missing))}")
+    integers = {key: _integer(name, key, profile[key]) for key in INT_FIELDS}
+    scrollbar_space = integers["scrollbar_width"] + 2 * integers["scrollbar_offset"]
     fields: dict[str, int | str | bool] = {
-        key: _integer(name, key, profile[key]) for key in INT_FIELDS
+        **integers,
+        "scrollbar_space": scrollbar_space,
     }
     if name != f"{fields['width']}x{fields['height']}":
         raise ProfileError(f"{name}: width and height disagree with the name")

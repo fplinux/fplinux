@@ -15,6 +15,18 @@ static void expect_output(struct fplinux_terminal *terminal,
 			  const char *expected, size_t size)
 {
 	assert(!terminal->failed);
+	if (terminal->output_size != size ||
+	    memcmp(terminal->output, expected, size)) {
+		fputs("expected PTY bytes:", stderr);
+		for (size_t index = 0; index < size; ++index)
+			fprintf(stderr, " %02x",
+				(unsigned char)expected[index]);
+		fputs("\nreceived PTY bytes:", stderr);
+		for (size_t index = 0; index < terminal->output_size; ++index)
+			fprintf(stderr, " %02x",
+				(unsigned char)terminal->output[index]);
+		fputc('\n', stderr);
+	}
 	assert(terminal->output_size == size);
 	assert(!memcmp(terminal->output, expected, size));
 	fplinux_terminal_consume(terminal, size);
@@ -33,6 +45,13 @@ static void phone_key(struct fplinux_terminal *terminal, unsigned int code,
 {
 	assert(fplinux_terminal_phone(terminal, code, true, now_ms));
 	assert(fplinux_terminal_phone(terminal, code, false, now_ms + 1));
+}
+
+static void hold_key(struct fplinux_terminal *terminal, unsigned int code,
+		     uint64_t now_ms)
+{
+	assert(fplinux_terminal_phone(terminal, code, true, now_ms));
+	assert(fplinux_terminal_phone(terminal, code, false, now_ms + 500));
 }
 
 static void
@@ -57,26 +76,30 @@ languages_cycle_without_erasing_and_emit_literal_utf8(const char *directory)
 	fplinux_terminal_tick(&terminal, 3400);
 	expect_output(&terminal, "A", 1);
 	phone_key(&terminal, KEY_NUMERIC_POUND, 3500);
-	digit(&terminal, 2, 3600);
-	digit(&terminal, 2, 3700);
-	fplinux_terminal_tick(&terminal, 4700);
+	hold_key(&terminal, KEY_NUMERIC_STAR, 3600);
+	digit(&terminal, 2, 4200);
+	digit(&terminal, 2, 4300);
+	fplinux_terminal_tick(&terminal, 5300);
 	expect_output(&terminal, "\xd0\xb1", 2);
-	phone_key(&terminal, KEY_NUMERIC_POUND, 4800);
-	digit(&terminal, 8, 4900);
-	fplinux_terminal_tick(&terminal, 5900);
+	phone_key(&terminal, KEY_NUMERIC_POUND, 5400);
+	digit(&terminal, 8, 5500);
+	fplinux_terminal_tick(&terminal, 6500);
 	expect_output(&terminal, "\xd0\xa8", 2);
-	phone_key(&terminal, KEY_NUMERIC_POUND, 6000);
-	digit(&terminal, 2, 6100);
+	hold_key(&terminal, KEY_NUMERIC_POUND, 6600);
+	digit(&terminal, 2, 7200);
 	expect_output(&terminal, "2", 1);
-	phone_key(&terminal, KEY_NUMERIC_POUND, 6200);
-	digit(&terminal, 2, 6300);
-	fplinux_terminal_tick(&terminal, 7300);
+	hold_key(&terminal, KEY_NUMERIC_POUND, 7300);
+	assert(!strcmp(fplinux_text_input_indicator(&terminal.input), "АБВ"));
+	hold_key(&terminal, KEY_NUMERIC_STAR, 7900);
+	phone_key(&terminal, KEY_NUMERIC_POUND, 8500);
+	digit(&terminal, 2, 8600);
+	fplinux_terminal_tick(&terminal, 9600);
 	expect_output(&terminal, "a", 1);
 	/* Shell input remains lowercase even at a new sentence boundary. */
 	fplinux_terminal_run(&terminal, FPLINUX_TERMINAL_COMMAND_ENTER);
 	expect_output(&terminal, "\r", 1);
-	digit(&terminal, 2, 7400);
-	fplinux_terminal_tick(&terminal, 8400);
+	digit(&terminal, 2, 9700);
+	fplinux_terminal_tick(&terminal, 10700);
 	expect_output(&terminal, "a", 1);
 	fplinux_terminal_destroy(&terminal);
 }
@@ -140,6 +163,55 @@ static void external_keyboard_keeps_its_modifiers_and_phone_oneshot(void)
 	fplinux_terminal_phone(&terminal, KEY_PICKUP_PHONE, true, 3200);
 	expect_output(&terminal, "\033[Z", 3);
 	assert(!terminal.modifier);
+	fplinux_terminal_destroy(&terminal);
+}
+
+static void named_control_shortcuts_ignore_unspent_phone_modifiers(void)
+{
+	static const struct {
+		enum fplinux_terminal_command command;
+		const char *bytes;
+	} shortcuts[] = {
+		{ FPLINUX_TERMINAL_COMMAND_INTERRUPT, "\003" },
+		{ FPLINUX_TERMINAL_COMMAND_END_INPUT, "\004" },
+		{ FPLINUX_TERMINAL_COMMAND_SEARCH, "\022" },
+	};
+	static const unsigned int modifiers[] = {
+		TSM_ALT_MASK,
+		TSM_SHIFT_MASK,
+		TSM_ALT_MASK | TSM_SHIFT_MASK,
+		TSM_CONTROL_MASK | TSM_ALT_MASK | TSM_SHIFT_MASK,
+	};
+	struct fplinux_terminal terminal;
+	uint64_t now_ms = 1000;
+
+	assert(fplinux_terminal_init(&terminal, 12, 4));
+	for (size_t shortcut = 0;
+	     shortcut < sizeof(shortcuts) / sizeof(shortcuts[0]); ++shortcut) {
+		for (size_t modifier = 0;
+		     modifier < sizeof(modifiers) / sizeof(modifiers[0]);
+		     ++modifier) {
+			fplinux_terminal_set_modifiers(&terminal,
+						       modifiers[modifier]);
+			assert(fplinux_terminal_run(
+				&terminal, shortcuts[shortcut].command));
+			expect_output(&terminal, shortcuts[shortcut].bytes, 1);
+			assert(!terminal.modifier);
+		}
+		/* A pending phone letter consumes its modifiers before the shortcut. */
+		fplinux_terminal_set_modifiers(&terminal,
+					       TSM_ALT_MASK | TSM_SHIFT_MASK);
+		digit(&terminal, 2, now_ms);
+		now_ms += 100;
+		assert(fplinux_terminal_run(&terminal,
+					    shortcuts[shortcut].command));
+		assert(terminal.output_size == 3);
+		assert(!memcmp(terminal.output, "\033A", 2));
+		assert(terminal.output[2] == shortcuts[shortcut].bytes[0]);
+		fplinux_terminal_consume(&terminal, terminal.output_size);
+		assert(!fplinux_terminal_preedit(&terminal) &&
+		       !terminal.modifier);
+	}
 	fplinux_terminal_destroy(&terminal);
 }
 
@@ -211,18 +283,78 @@ static void blocked_mode_change_preserves_pending_character_and_mode(void)
 	assert(accepted && accepted < 20000);
 	assert(!terminal.failed && terminal.output_size == accepted);
 	digit(&terminal, 2, 1000);
-	assert(!fplinux_terminal_phone(&terminal, KEY_NUMERIC_POUND, true,
-				       1100));
+	assert(fplinux_terminal_phone(&terminal, KEY_NUMERIC_POUND, true,
+				      1100));
+	assert(!fplinux_terminal_phone(&terminal, KEY_NUMERIC_POUND, false,
+				       1101));
+	fplinux_terminal_tick(&terminal, 2000);
+	assert(!strcmp(fplinux_text_input_indicator(&terminal.input), "abc"));
 	assert(fplinux_terminal_preedit(&terminal) == 'a');
 	for (size_t index = 0; index < terminal.output_size; ++index)
 		assert(terminal.output[index] == 'x');
 	fplinux_terminal_consume(&terminal, terminal.output_size);
-	assert(fplinux_terminal_phone(&terminal, KEY_NUMERIC_POUND, true,
-				      1100));
+	assert(fplinux_terminal_phone(&terminal, KEY_NUMERIC_POUND, false,
+				      1101));
 	expect_output(&terminal, "a", 1);
-	digit(&terminal, 2, 1200);
-	fplinux_terminal_tick(&terminal, 2200);
+	digit(&terminal, 2, 2100);
+	fplinux_terminal_tick(&terminal, 3100);
 	expect_output(&terminal, "A", 1);
+	fplinux_terminal_destroy(&terminal);
+}
+
+static size_t special_index(const char *label)
+{
+	for (size_t index = 0; index < fplinux_terminal_special_count();
+	     ++index)
+		if (!strcmp(fplinux_terminal_special(index), label))
+			return index;
+	assert(false);
+	return 0;
+}
+
+static void special_keys_encode_navigation_modifiers_and_pending_text(void)
+{
+	static const struct {
+		const char *label;
+		const char *bytes;
+	} cases[] = {
+		{ "Home", "\033[H" },	   { "End", "\033[F" },
+		{ "Delete", "\033[3~" },   { "PageUp", "\033[5~" },
+		{ "PageDown", "\033[6~" }, { "Esc", "\033" },
+		{ "F1", "\033OP" },
+	};
+	struct fplinux_terminal terminal;
+	size_t accepted = 0;
+
+	assert(fplinux_terminal_init(&terminal, 12, 4));
+	assert(!strcmp(fplinux_terminal_special(0), "Esc"));
+	for (size_t index = 0; index < sizeof(cases) / sizeof(cases[0]);
+	     ++index) {
+		assert(fplinux_terminal_send_special(
+			&terminal, special_index(cases[index].label)));
+		expect_output(&terminal, cases[index].bytes,
+			      strlen(cases[index].bytes));
+	}
+	fplinux_terminal_set_modifiers(&terminal, TSM_CONTROL_MASK);
+	assert(fplinux_terminal_send_special(&terminal, special_index("Home")));
+	expect_output(&terminal, "\033[H", 3);
+	assert(!terminal.modifier);
+	digit(&terminal, 2, 1000);
+	assert(fplinux_terminal_send_special(&terminal, special_index("End")));
+	expect_output(&terminal, "a\033[F", 4);
+	while (accepted < 20000 &&
+	       fplinux_terminal_key(&terminal, XKB_KEY_x, 'x', 0, 'x'))
+		++accepted;
+	assert(accepted && accepted < 20000);
+	fplinux_terminal_set_modifiers(&terminal, TSM_ALT_MASK);
+	assert(!fplinux_terminal_send_special(&terminal,
+					      special_index("Delete")));
+	assert(terminal.modifier == TSM_ALT_MASK);
+	fplinux_terminal_consume(&terminal, terminal.output_size);
+	assert(fplinux_terminal_send_special(&terminal,
+					     special_index("Delete")));
+	expect_output(&terminal, "\033\033[3~", 5);
+	assert(!terminal.modifier);
 	fplinux_terminal_destroy(&terminal);
 }
 
@@ -362,10 +494,14 @@ int main(int argc, char **argv)
 		covered_input_restarts_deadline_and_abandons_held_gestures();
 	else if (!strcmp(argv[1], "modifiers"))
 		external_keyboard_keeps_its_modifiers_and_phone_oneshot();
+	else if (!strcmp(argv[1], "shortcuts"))
+		named_control_shortcuts_ignore_unspent_phone_modifiers();
 	else if (!strcmp(argv[1], "gestures"))
 		digit_hold_symbols_and_clear_have_shared_timing();
 	else if (!strcmp(argv[1], "blocked"))
 		blocked_mode_change_preserves_pending_character_and_mode();
+	else if (!strcmp(argv[1], "special"))
+		special_keys_encode_navigation_modifiers_and_pending_text();
 	else {
 		assert(!strcmp(argv[1], "commands"));
 		screen_commands_assign_enter_clear_back_and_options();

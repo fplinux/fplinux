@@ -189,6 +189,9 @@ msgstr "Подтвердить"
 msgid "Leave without saving?"
 msgstr "Выйти без сохранения?"
 
+msgid "Return to the start without saving?"
+msgstr "Вернуться в начало без сохранения?"
+
 msgid "Delete this alarm?"
 msgstr "Удалить этот будильник?"
 
@@ -253,10 +256,10 @@ msgid "Lap history is full. Pause and reset to record more."
 msgstr "История кругов заполнена. Приостановите и сбросьте секундомер, чтобы записать новые."
 
 msgid "Could not apply the change. Try again."
-msgstr "Не удалось сохранить изменения. Повторите попытку."
+msgstr "Не удалось применить изменение. Повторите попытку."
 
 msgid "Could not confirm the change. Retry?"
-msgstr "Не удалось подтвердить сохранение. Повторить?"
+msgstr "Не удалось подтвердить изменение. Повторить?"
 
 msgid "Clocks are loading. Try again in a moment."
 msgstr "Часы загружаются. Повторите через несколько секунд."
@@ -358,11 +361,47 @@ msgstr "Выберите время и дату или повтор по дня�
 msgid "Timer and stopwatch"
 msgstr "Таймер и секундомер"
 
-msgid "You can leave this screen while time is running."
-msgstr "Во время отсчёта можно выйти из этого экрана."
+msgid "You can leave this screen while time is running. Right opens stopwatch laps without pausing."
+msgstr "Во время отсчёта можно выйти из этого экрана. Вправо открывает круги секундомера без паузы."
 
 msgid "Power"
 msgstr "Питание"
 
 msgid "Alarms ring while the phone is on. They cannot turn on a powered-off phone."
 msgstr "Будильники срабатывают, пока телефон включён. Они не включат выключенный телефон."
+
+msgid "Could not cancel the snooze. Try again."
+msgstr "Не удалось отменить повторный сигнал. Повторите."
+
+msgid "Off. This alarm will not ring."
+msgstr "Выключен. Будильник не сработает."
+
+msgid "Disabled"
+msgstr "Выключен"
+
+msgid "Enabled"
+msgstr "Включён"
+
+msgid "Alarm state"
+msgstr "Состояние будильника"
+
+#, c-format
+msgid "Snoozed until %s"
+msgstr "Отложен до %s"
+
+#, c-format
+msgid "%s left%s%s"
+msgstr "Осталось %s%s%s"
+
+msgid "Cancel snooze"
+msgstr "Отменить повторный сигнал"
+
+#, c-format
+msgid "Lap %zu · %s"
+msgstr "Круг %zu · %s"
+
+msgid "Laps →"
+msgstr "Круги →"
+
+msgid "Replace the current countdown with this duration?"
+msgstr "Заменить текущий отсчёт этой длительностью?"

@@ -51,15 +51,21 @@ def ui_lists(
 
 
 @pytest.mark.parametrize(
-    ("width", "height", "margin", "offset"),
-    [(128, 128, 4, 1), (128, 160, 4, 1), (176, 220, 6, 2), (240, 320, 8, 3), (320, 240, 6, 2)],
+    ("width", "height", "row_height", "padding"),
+    [
+        (128, 128, 20, 4),
+        (128, 160, 22, 4),
+        (176, 220, 26, 6),
+        (240, 320, 36, 8),
+        (320, 240, 30, 6),
+    ],
 )
-def test_list_rows_keep_symmetric_margins_with_and_without_overflow(
-    ui_lists: Path, width: int, height: int, margin: int, offset: int
+def test_list_rows_reserve_scrollbar_space_only_while_content_overflows(
+    ui_lists: Path, width: int, height: int, row_height: int, padding: int
 ) -> None:
-    """Selection width stays stable and the idle overflow thumb occupies the margin."""
+    """Growing adds the four-pixel lane; shrinking restores the whole width."""
     run_process(
-        [str(ui_lists), "geometry", str(width), str(height), str(margin), str(offset)],
+        [str(ui_lists), "geometry", str(width), str(height), str(row_height), str(padding)],
         name=f"native list geometry at {width}x{height}",
         timeout=10,
         check=True,
@@ -67,29 +73,50 @@ def test_list_rows_keep_symmetric_margins_with_and_without_overflow(
 
 
 @pytest.mark.parametrize(
-    ("width", "height", "margin", "offset"),
-    [(128, 128, 4, 1), (128, 160, 4, 1), (176, 220, 6, 2), (240, 320, 8, 3), (320, 240, 6, 2)],
+    ("width", "height", "row_height", "padding"),
+    [
+        (128, 128, 20, 4),
+        (128, 160, 22, 4),
+        (176, 220, 26, 6),
+        (240, 320, 36, 8),
+        (320, 240, 30, 6),
+    ],
 )
-def test_native_scrollbar_matches_list_inset_and_stays_visible_only_for_overflow(
-    ui_lists: Path, width: int, height: int, margin: int, offset: int
+def test_native_scrollbar_keeps_one_pixel_edge_insets_and_hides_when_content_fits(
+    ui_lists: Path, width: int, height: int, row_height: int, padding: int
 ) -> None:
     """The shared style keeps the same idle thumb after growing, scrolling and shrinking."""
     run_process(
-        [str(ui_lists), "scrollbar", str(width), str(height), str(margin), str(offset)],
+        [str(ui_lists), "scrollbar", str(width), str(height), str(row_height), str(padding)],
         name=f"native shared scrollbar appearance at {width}x{height}",
         timeout=10,
         check=True,
     )
 
 
-@pytest.mark.parametrize("presentation", ["icon", "detail", "inline", "virtual"])
+@pytest.mark.parametrize(
+    ("presentation", "row_height"), [("icon", 22), ("detail", 32), ("inline", 22), ("virtual", 32)]
+)
 def test_list_keypad_keeps_decorated_and_virtual_selection_visible(
-    ui_lists: Path, presentation: str
+    ui_lists: Path, presentation: str, row_height: int
 ) -> None:
     """Rows retain their text/detail/icon contents while native scrolling reveals focus."""
     run_process(
-        [str(ui_lists), presentation, "128", "160", "4", "1"],
+        [str(ui_lists), presentation, "128", "160", str(row_height), "4"],
         name=f"native {presentation} list keypad selection",
+        timeout=10,
+        check=True,
+    )
+
+
+@pytest.mark.parametrize("presentation", ["stored", "virtual"])
+def test_native_list_omits_only_actual_final_divider_after_row_changes(
+    ui_lists: Path, presentation: str
+) -> None:
+    """Append, insert, remove and refill update native borders without shortening focus."""
+    run_process(
+        [str(ui_lists), f"final-divider-{presentation}", "128", "160", "0", "0"],
+        name=f"native {presentation} final divider after row changes",
         timeout=10,
         check=True,
     )
@@ -140,6 +167,18 @@ def test_native_list_arrows_wrap_but_pages_clamp(
     run_process(
         [str(ui_lists), f"navigation-{presentation}-{viewport}", "128", "160", "0", "0"],
         name=f"native {presentation} selection with a {viewport} viewport",
+        timeout=10,
+        check=True,
+    )
+
+
+@pytest.mark.parametrize("presentation", ["stored", "virtual"])
+def test_native_list_first_visible_uses_scroll_and_whole_row_geometry(
+    ui_lists: Path, presentation: str
+) -> None:
+    run_process(
+        [str(ui_lists), f"first-visible-{presentation}", "240", "320", "0", "0"],
+        name=f"native {presentation} list first visible row",
         timeout=10,
         check=True,
     )

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import fplinux_ui_profile
@@ -71,6 +72,15 @@ def test_unknown_profile_and_theme_ids_return_no_entry(profile_table: dict[str, 
     assert profile_table["unknown"] == [True, True, True, True]
 
 
+def test_scrolling_content_exposes_separate_margin_and_scrollbar_lane(
+    profile_table: dict[str, Any],
+) -> None:
+    geometry = [
+        (profile["margin"], profile["scrollbar_space"]) for profile in profile_table["profiles"]
+    ]
+    assert geometry == [(4, 4), (4, 4), (6, 4), (8, 4), (6, 4)]
+
+
 def test_landscape_layout_preserves_horizontal_capacity(profile_table: dict[str, Any]) -> None:
     portrait, landscape = profile_table["profiles"][3:5]
     assert landscape["width"] > landscape["height"]
@@ -83,7 +93,7 @@ def test_landscape_layout_preserves_horizontal_capacity(profile_table: dict[str,
 def test_layout_holds_navigation_bands_and_three_rows(profile_table: dict[str, Any]) -> None:
     for profile in profile_table["profiles"]:
         bands = profile["status_height"] + profile["softkey_height"] + profile["header_height"]
-        assert bands + 2 * profile["list_padding"] + 3 * profile["row_height"] <= profile["height"]
+        assert bands + 3 * profile["row_height"] <= profile["height"]
         ring = profile["app_icon_size"] + 2 * (
             profile["grid_ring_gap"] + profile["grid_ring_width"] - profile["grid_tile_inset"]
         )
@@ -124,3 +134,38 @@ def test_token_changes_reach_the_compiled_consumer(tmp_path: Path) -> None:
     assert table["themes"][0]["background"] == 0xFFFFFF
     assert table["themes"][1]["foreground"] == 0xFFFFFF
     assert table["scrim_opacities"] == [73, 73]
+
+
+@dataclass(frozen=True)
+class ScrollbarGeometry:
+    """Independent profile inputs and expected compiled insets."""
+
+    margin: int
+    width: int
+    offset: int
+    expected_space: int
+
+
+@pytest.mark.parametrize(
+    "geometry",
+    [
+        ScrollbarGeometry(9, 2, 1, 4),
+        ScrollbarGeometry(4, 5, 1, 7),
+        ScrollbarGeometry(4, 2, 3, 8),
+    ],
+    ids=["margin", "thumb", "edge-gap"],
+)
+def test_scrollbar_geometry_inputs_reach_the_compiled_content_insets(
+    tmp_path: Path,
+    geometry: ScrollbarGeometry,
+) -> None:
+    tokens = json.loads((ROOT / "lib/fplinux/fplinux-ui-profile.json").read_text())
+    profile = tokens["profiles"]["128x128"]
+    profile["margin"] = geometry.margin
+    profile["scrollbar_width"] = geometry.width
+    profile["scrollbar_offset"] = geometry.offset
+    source = tmp_path / "profile.c"
+    source.write_text(fplinux_ui_profile.render(tokens))
+    compiled_profile = read_profile_table(source, tmp_path)["profiles"][0]
+    assert compiled_profile["scrollbar_space"] == geometry.expected_space
+    assert compiled_profile["margin"] == geometry.margin

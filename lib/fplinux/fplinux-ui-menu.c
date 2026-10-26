@@ -20,6 +20,9 @@ struct fplinux_ui_menu_view {
 	/* The title band's label, or NULL, and the box of the rows. */
 	lv_obj_t *title;
 	lv_obj_t *body;
+	enum fplinux_ui_menu_origin origin;
+	int32_t row_width;
+	int32_t title_width;
 	/* Where the rows start: below the edge and the band. */
 	int32_t top;
 	size_t count;
@@ -78,16 +81,22 @@ static void item_chosen(struct fplinux_ui_listview *list, size_t index,
 }
 
 /* An item without a usable image keeps an empty icon box. */
-static void add_icon(struct fplinux_ui_listview *list, size_t index,
+static bool add_icon(struct fplinux_ui_listview *list, size_t index,
 		     const void *src, int size)
 {
 	lv_draw_buf_t *icon;
 
 	if (!src)
-		return;
+		return false;
 	icon = fplinux_ui_image_decode(src, size, size, false);
-	if (icon && !fplinux_ui_listview_set_icon(list, index, icon))
+	if (!icon)
+		return false;
+	if (!fplinux_ui_listview_set_icon(list, index, icon,
+					  FPLINUX_UI_LIST_ICON_IMAGE)) {
 		lv_draw_buf_destroy(icon);
+		return false;
+	}
+	return true;
 }
 
 static lv_obj_t *add_box(lv_obj_t *parent, int32_t y, int32_t height)
@@ -113,46 +122,73 @@ static lv_obj_t *add_title(struct fplinux_ui *ui, lv_obj_t *popup,
 	lv_obj_set_style_border_width(band, spec->divider_width, 0);
 	lv_obj_set_style_border_side(band, LV_BORDER_SIDE_BOTTOM, 0);
 	fplinux_ui_title_init(label, theme->font_large);
-	lv_obj_set_width(label, fplinux_ui_width(ui) - 2 * spec->margin);
 	lv_label_set_text(label, title);
 	lv_obj_align(label, LV_ALIGN_LEFT_MID, spec->margin, 0);
-	fplinux_ui_title_scroll(label);
 	return label;
 }
 
-/*
- * Edge, band and rows, at most the whole surface above the legend bar of a
- * fullscreen application.
- */
-static int32_t popup_height(struct fplinux_ui *ui, int32_t top, size_t count)
+static int32_t text_width(const char *text, const lv_font_t *font)
 {
-	int32_t surface = fplinux_ui_modal_height(ui);
-	const struct fplinux_ui_profile_spec *spec = fplinux_ui_spec(ui);
-	int32_t row = spec->row_height;
-	int32_t inset = top + 2 * spec->list_padding;
-	int32_t height = surface;
+	lv_point_t size;
 
-	if (surface > inset && count <= (size_t)(surface - inset) / (size_t)row)
-		height = inset + (int32_t)count * row;
-	return height;
+	lv_text_get_size(&size, text, font, 0, 0, LV_COORD_MAX,
+			 LV_TEXT_FLAG_NONE);
+	return size.x;
+}
+
+/* The same content-sized window on creation and every surface resize. */
+static void layout(struct fplinux_ui_menu_view *view)
+{
+	const struct fplinux_ui_profile_spec *spec = fplinux_ui_spec(view->ui);
+	int32_t surface = fplinux_ui_modal_height(view->ui);
+	int32_t available_width = fplinux_ui_width(view->ui);
+	int32_t width;
+	int32_t height;
+	int32_t x = 0;
+	size_t rows = surface > view->top ?
+			      (size_t)(surface - view->top) / spec->row_height :
+			      0;
+
+	if (rows > view->count)
+		rows = view->count;
+	width = view->row_width +
+		(view->count > rows ? spec->scrollbar_space : 0);
+	if (width < view->title_width)
+		width = view->title_width;
+	if (width > available_width)
+		width = available_width;
+	height = view->top + (int32_t)rows * spec->row_height;
+	if (view->origin == FPLINUX_UI_MENU_ORIGIN_CENTRE)
+		x = (fplinux_ui_width(view->ui) - width) / 2;
+	else if (view->origin == FPLINUX_UI_MENU_ORIGIN_RIGHT)
+		x = fplinux_ui_width(view->ui) - width;
+	lv_obj_set_size(view->popup, width, height);
+	lv_obj_set_pos(view->popup, x, surface - height);
+	lv_obj_set_height(view->body, height - view->top);
+	if (view->title)
+		lv_obj_set_width(view->title, width - 2 * spec->margin);
+	lv_obj_update_layout(view->popup);
+	fplinux_ui_scrollbar_layout(fplinux_ui_listview_object(view->list));
+	if (view->title)
+		fplinux_ui_title_scroll(view->title);
 }
 
 /* Sized to its items up to the whole surface; the list scrolls beyond. */
-struct fplinux_ui_menu_view *
-fplinux_ui_menu_view_create(struct fplinux_ui *ui, const char *title,
-			    const struct fplinux_ui_menu_item *items,
-			    size_t count)
+struct fplinux_ui_menu_view *fplinux_ui_menu_view_create(
+	struct fplinux_ui *ui, enum fplinux_ui_menu_origin origin,
+	const char *title, const struct fplinux_ui_menu_item *items,
+	size_t count)
 {
 	const struct fplinux_ui_theme *theme = fplinux_ui_theme(ui);
 	const struct fplinux_ui_profile_spec *spec = fplinux_ui_spec(ui);
 	lv_display_t *display = lv_obj_get_display(fplinux_ui_screen(ui));
-	int32_t surface = fplinux_ui_modal_height(ui);
 	int32_t top = spec->menu_edge;
+	int32_t widest_text = 0;
 	struct fplinux_ui_menu_view *view;
 	lv_obj_t *popup;
 	lv_obj_t *edge;
 	lv_obj_t *body;
-	int32_t height;
+	bool icons = false;
 
 	if (!items || !count) {
 		errno = EINVAL;
@@ -167,6 +203,7 @@ fplinux_ui_menu_view_create(struct fplinux_ui *ui, const char *title,
 	if (!view)
 		return NULL;
 	view->ui = ui;
+	view->origin = origin;
 	view->actions = calloc(count, sizeof(*view->actions));
 	if (!view->actions) {
 		free(view);
@@ -174,7 +211,6 @@ fplinux_ui_menu_view_create(struct fplinux_ui *ui, const char *title,
 	}
 	if (title && title[0])
 		top += spec->header_height;
-	height = popup_height(ui, top, count);
 	view->top = top;
 	view->count = count;
 
@@ -183,8 +219,6 @@ fplinux_ui_menu_view_create(struct fplinux_ui *ui, const char *title,
 	lv_obj_add_event_cb(popup, popup_delete_cb, LV_EVENT_DELETE, view);
 	lv_obj_remove_style_all(popup);
 	lv_obj_set_scrollable(popup, false);
-	lv_obj_set_size(popup, fplinux_ui_width(ui), height);
-	lv_obj_set_pos(popup, 0, surface - height);
 	lv_obj_set_style_bg_color(popup, theme->popup, 0);
 	lv_obj_set_style_bg_opa(popup, LV_OPA_COVER, 0);
 	lv_obj_set_style_text_color(popup, theme->foreground, 0);
@@ -198,7 +232,7 @@ fplinux_ui_menu_view_create(struct fplinux_ui *ui, const char *title,
 	lv_obj_set_style_bg_opa(edge, LV_OPA_COVER, 0);
 	if (title && title[0])
 		view->title = add_title(ui, popup, title);
-	body = add_box(popup, top, height - top);
+	body = add_box(popup, top, 0);
 	view->body = body;
 	view->list =
 		fplinux_ui_listview_create(ui, body, FPLINUX_UI_LISTVIEW_PLAIN);
@@ -216,10 +250,22 @@ fplinux_ui_menu_view_create(struct fplinux_ui *ui, const char *title,
 	 */
 	fplinux_ui_listview_set_active(view->list, false);
 	for (size_t i = 0; i < count; ++i) {
+		int32_t width = text_width(items[i].text, theme->font);
+
+		if (width > widest_text)
+			widest_text = width;
 		view->actions[i] = items[i].action;
 		fplinux_ui_listview_add(view->list, items[i].text, NULL);
-		add_icon(view->list, i, items[i].icon, spec->row_icon_size);
+		if (add_icon(view->list, i, items[i].icon, spec->row_icon_size))
+			icons = true;
 	}
+	view->row_width = widest_text + 2 * spec->row_padding;
+	if (icons)
+		view->row_width += spec->row_icon_size + spec->row_gap;
+	if (view->title)
+		view->title_width =
+			text_width(title, theme->font_large) + 2 * spec->margin;
+	layout(view);
 	fplinux_ui_listview_set_active(view->list, true);
 	fplinux_ui_listview_set_callbacks(view->list, NULL, item_chosen, view);
 	fplinux_ui_text_menu_suspend(ui);
@@ -281,22 +327,9 @@ void fplinux_ui_menu_view_set_position(
 /* At the bottom of the new surface; the selected item stays in view. */
 void fplinux_ui_menu_view_resize(struct fplinux_ui_menu_view *view)
 {
-	const struct fplinux_ui_profile_spec *spec;
-	int32_t surface;
-	int32_t height;
-
 	if (!view || !view->popup)
 		return;
-	spec = fplinux_ui_spec(view->ui);
-	surface = fplinux_ui_modal_height(view->ui);
-	height = popup_height(view->ui, view->top, view->count);
-	lv_obj_set_size(view->popup, fplinux_ui_width(view->ui), height);
-	lv_obj_set_pos(view->popup, 0, surface - height);
-	if (view->title)
-		lv_obj_set_width(view->title,
-				 fplinux_ui_width(view->ui) - 2 * spec->margin);
-	lv_obj_set_height(view->body, height - view->top);
-	lv_obj_update_layout(view->popup);
+	layout(view);
 	reveal_selection(view);
 }
 

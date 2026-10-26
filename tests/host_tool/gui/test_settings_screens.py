@@ -65,6 +65,8 @@ def test_actual_settings_applied_storage_errors_commit_before_ack_and_keep_notic
         "settings-warning: Cancel leaves the live theme and sends no change\n"
         "settings-success: live Light widgets and pixels precede REDRAW_ACK\n"
         "settings-theme-error: applied Dark frame acknowledges ENOSPC; notice waits for Close\n"
+        "settings-date: real editors retain date, time and focus through pending Home, refusal "
+        "and cancelled close; live-clock reply completes Save\n"
         "settings-locale-error: applied Русский frame acknowledges EIO; "
         "rebuilt notice waits for Закрыть\n"
     )

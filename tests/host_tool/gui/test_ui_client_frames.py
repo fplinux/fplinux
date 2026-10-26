@@ -114,6 +114,19 @@ def test_successful_exit_retains_frame_until_manager_close(
     assert result.stdout.endswith("exit: ok\n")
 
 
+def test_runtime_metrics_expose_the_profile_content_insets(
+    client_frames: Path, tmp_path: Path
+) -> None:
+    """Real manager CONFIG selects the derived content insets exposed by the UI runtime."""
+    result = run_process(
+        [str(client_frames), "metrics", str(tmp_path / "session.sock")],
+        name="expose scrolling content metrics through the actual UI runtime",
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout.endswith("metrics: ok\n")
+
+
 def test_failed_exit_send_closes_client_without_waiting_for_manager(
     client_frames: Path, tmp_path: Path
 ) -> None:
@@ -138,6 +151,19 @@ def test_canvas_softkeys_keep_full_bar_alignment_without_redundant_frame(
         check=True,
     )
     assert result.stdout.endswith("softkeys: ok\n")
+
+
+def test_launcher_screens_keep_system_status_bar_visible(
+    client_frames: Path, tmp_path: Path
+) -> None:
+    """Tasks and alerts retain the launcher bars while using the intervening content area."""
+    result = run_process(
+        [str(client_frames), "launcher-screens", str(tmp_path / "session.sock")],
+        name="retain launcher status pixels through stacked native screens",
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout.endswith("launcher-screens: ok\n")
 
 
 def test_media_capabilities_reject_requests_before_visibility_guards(
@@ -197,7 +223,17 @@ def test_ui_runtime_dispatches_audio_service_hup_before_the_next_application_wri
 
 @pytest.mark.parametrize(
     "scenario",
-    ["active", "setting", "locale", "error", "applied-theme", "applied-locale", "unapplied-theme"],
+    [
+        "active",
+        "activation-open",
+        "activation-resume",
+        "setting",
+        "locale",
+        "error",
+        "applied-theme",
+        "applied-locale",
+        "unapplied-theme",
+    ],
 )
 def test_acknowledgement_waits_for_complete_new_frame(
     client_frames: Path, tmp_path: Path, scenario: str
@@ -252,6 +288,36 @@ def test_close_handler_keeps_wait_interactive_and_final_close_bounded(
     assert result.stdout.endswith(f"{scenario}: ok\n")
 
 
+@pytest.mark.parametrize(
+    "scenario",
+    ["close-ack-first", "close-appearance-first", "close-hidden", "close-activation-independent"],
+)
+def test_close_decision_ack_requires_its_frame_and_preserves_appearance_ack(
+    client_frames: Path, tmp_path: Path, scenario: str
+) -> None:
+    """Hidden and busy clients confirm a new decision only after a complete commit."""
+    result = run_process(
+        [str(client_frames), scenario, str(tmp_path / "session.sock")],
+        name=f"confirm close decision and appearance independently: {scenario}",
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout.endswith(f"{scenario}: ok\n")
+
+
+def test_cold_activation_runs_after_application_init_before_first_commit(
+    client_frames: Path, tmp_path: Path
+) -> None:
+    """CONFIG followed by OPEN presents the callback's view in the first real frame."""
+    result = run_process(
+        [str(client_frames), "activation-cold", str(tmp_path / "session.sock")],
+        name="dispatch cold activation after the application builds its screen",
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout.endswith("activation-cold: ok\n")
+
+
 def test_storage_errors_distinguish_capacity_access_and_io_failures(
     client_frames: Path, tmp_path: Path
 ) -> None:
@@ -274,7 +340,7 @@ def assert_repeat_scenario(client_frames: Path, tmp_path: Path, scenario: str) -
             str(ROOT / "tests/host_tool/gui/repeat-keymap.xkb"),
         ],
         name=f"exercise real Wayland UI repeat: {scenario}",
-        timeout=10,
+        timeout=20 if scenario == "phone" else 10,
         check=True,
     )
     assert result.stdout.endswith(f"repeat-{scenario}: ok\n")
@@ -345,11 +411,12 @@ def test_phone_canvas_repeat_accepts_only_direction_keys(
     assert_repeat_scenario(client_frames, tmp_path, "phone")
 
 
+@pytest.mark.parametrize("scenario", ["pause", "phone-pause"])
 def test_canvas_repeat_does_not_catch_up_after_a_blocked_application_callback(
-    client_frames: Path, tmp_path: Path
+    client_frames: Path, tmp_path: Path, scenario: str
 ) -> None:
     """A controlled pause leaves no burst of overdue key callbacks."""
-    assert_repeat_scenario(client_frames, tmp_path, "pause")
+    assert_repeat_scenario(client_frames, tmp_path, scenario)
 
 
 def test_raw_text_input_cancels_overdue_phone_gestures_before_synthetic_release(
