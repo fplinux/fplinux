@@ -1,0 +1,11 @@
+<!-- SPDX-License-Identifier: GPL-2.0-only -->
+<tinyalsa-audio>
+  <device name="builtin-mic">
+    <path name="on">
+      <ctl name="ADC LRCLK Select" val="invert" />
+      <ctl name="ADC1 LRCLK Select" val="invert" />
+      <ctl name="ADCL Mixer MainMICADCL Switch" val="1" />
+      <ctl name="Mic Function" val="1" />
+    </path>
+  </device>
+</tinyalsa-audio>

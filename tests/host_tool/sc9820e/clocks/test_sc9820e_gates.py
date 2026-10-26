@@ -48,7 +48,7 @@ def gate_component(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
 
 
 @pytest.mark.parametrize(
-    "provider", ["hwspinlock", "hs-spi", "gpio", "ap-dma", "efuse", "mailbox", "sdio"]
+    "provider", ["hwspinlock", "hs-spi", "gpio", "ap-dma", "efuse", "mailbox", "sdio", "emmc"]
 )
 def test_registered_gate_callbacks_preserve_registers_and_errors(
     gate_component: Path, provider: str

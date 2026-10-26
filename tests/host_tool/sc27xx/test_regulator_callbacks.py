@@ -71,9 +71,10 @@ def regulator_callbacks(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pa
 
 @pytest.mark.parametrize(
     "scenario",
-    ["sc2721", "sc2721-connectivity", "sc2731", "sc2720-fixed", "probe-errors"],
+    ["sc2721", "sc2721-emmc", "sc2721-connectivity", "sc2731", "sc2720-fixed", "probe-errors"],
     ids=[
         "sc2721-read-only-core-sd-voltage-and-default-probe",
+        "sc2721-emmc-3v-enable-register-preservation-and-errors",
         "sc2721-connectivity-voltage-range-enable-and-register-ownership",
         "sc2731-unlock-linear-voltage-and-async-probe",
         "sc2720-fixed-selectors-errors-and-sdio-delay",

@@ -164,7 +164,10 @@ SHARED_APORT_SOURCES = {
         *DRM_SESSION_SOURCES,
         *CLI_SOURCES,
     ),
-    "fplinux-qin1splus-mesa": ("targets/xiaomi-qin-1s-plus/rootfs/drirc",),
+    "fplinux-qin1splus-config": (
+        "targets/xiaomi-qin-1s-plus/rootfs/drirc",
+        "targets/xiaomi-qin-1s-plus/rootfs/alsa.conf",
+    ),
     "fplinux-rotate": (*DRM_SESSION_SOURCES, *CLI_SOURCES),
     "fplinux-session": (
         *UTF8_SOURCES,
@@ -339,7 +342,7 @@ LOCAL_BUILD_DEPENDENCIES = {
     "fplinux-notes": ("fplinux-ui",),
     "fplinux-readline": ("fplinux-ncurses",),
     "fplinux-present": ("fplinux-libdrm",),
-    "fplinux-qin1splus-mesa": ("fplinux-mesa",),
+    "fplinux-qin1splus-config": ("fplinux-audio", "fplinux-mesa"),
     "fplinux-rotate": ("fplinux-libdrm",),
     "fplinux-session": ("fplinux-libweston",),
     "fplinux-settings": ("fplinux-ui",),

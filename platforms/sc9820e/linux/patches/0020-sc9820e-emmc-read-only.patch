@@ -1,0 +1,202 @@
+diff --git a/drivers/mmc/core/block.c b/drivers/mmc/core/block.c
+index 54a923b..e1edc4d 100644
+--- a/drivers/mmc/core/block.c
++++ b/drivers/mmc/core/block.c
+@@ -2421,6 +2421,8 @@ enum mmc_issued mmc_blk_mq_issue_rq(struct mmc_queue *mq, struct request *req)
+ static inline int mmc_blk_readonly(struct mmc_card *card)
+ {
+ 	return mmc_card_readonly(card) ||
++	       (mmc_card_mmc(card) && card->host->ops->get_ro &&
++		card->host->ops->get_ro(card->host) > 0) ||
+ 	       !(card->csd.cmdclass & CCC_BLOCK_WRITE);
+ }
+
+@@ -2486,7 +2488,7 @@ static struct mmc_blk_data *mmc_blk_alloc_req(struct mmc_card *card,
+ 	struct mmc_blk_data *md;
+ 	int devidx, ret;
+ 	char cap_str[10];
+-	unsigned int features = 0;
++	blk_features_t features = 0;
+
+ 	devidx = ida_alloc_max(&mmc_blk_ida, max_devices - 1, GFP_KERNEL);
+ 	if (devidx < 0) {
+diff --git a/drivers/mmc/core/queue.c b/drivers/mmc/core/queue.c
+index 5d187e0..f781b5c 100644
+--- a/drivers/mmc/core/queue.c
++++ b/drivers/mmc/core/queue.c
+@@ -355,7 +355,8 @@ static const struct blk_mq_ops mmc_mq_ops = {
+ };
+
+ static struct gendisk *mmc_alloc_disk(struct mmc_queue *mq,
+-		struct mmc_card *card, unsigned int features)
++				      struct mmc_card *card,
++				      blk_features_t features)
+ {
+ 	struct mmc_host *host = card->host;
+ 	struct queue_limits lim = {
+@@ -430,7 +431,7 @@ static inline bool mmc_merge_capable(struct mmc_host *host)
+  * Initialise a MMC card request queue.
+  */
+ struct gendisk *mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card,
+-		unsigned int features)
++			       blk_features_t features)
+ {
+ 	struct mmc_host *host = card->host;
+ 	struct gendisk *disk;
+diff --git a/drivers/mmc/core/queue.h b/drivers/mmc/core/queue.h
+index dd7211e..2933e96 100644
+--- a/drivers/mmc/core/queue.h
++++ b/drivers/mmc/core/queue.h
+@@ -98,7 +98,7 @@ struct mmc_queue {
+ };
+
+ struct gendisk *mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card,
+-		unsigned int features);
++			       blk_features_t features);
+ extern void mmc_cleanup_queue(struct mmc_queue *);
+ extern void mmc_queue_suspend(struct mmc_queue *);
+ extern void mmc_queue_resume(struct mmc_queue *);
+diff --git a/drivers/mmc/host/sdhci-sprd.c b/drivers/mmc/host/sdhci-sprd.c
+index 891601b..aa1dcb5 100644
+--- a/drivers/mmc/host/sdhci-sprd.c
++++ b/drivers/mmc/host/sdhci-sprd.c
+@@ -23,6 +23,7 @@
+ #include <linux/suspend.h>
+
+ #include "sdhci-pltfm.h"
++#include "sdhci-sprd-emmc-ro.h"
+ #include "mmc_hsq.h"
+
+ /* SDHCI_ARGUMENT2 register high 16bit */
+@@ -108,6 +109,7 @@ struct sdhci_sprd_host {
+ 	int flags; /* backup of host attribute */
+ 	u32 phy_delay[MMC_TIMING_MMC_HS400 + 2];
+ 	bool is_r10;
++	bool emmc_read_only;
+ 	int clock_error;
+ 	int power_error;
+ 	int reset_error;
+@@ -1015,6 +1017,8 @@ static void sdhci_sprd_r10_set_power(struct sdhci_host *host,
+ 		ret = mmc_regulator_set_ocr(mmc, mmc->supply.vmmc, vdd);
+ 		if (ret)
+ 			goto out;
++		if (sprd_host->emmc_read_only)
++			goto out;
+ 		ret = regulator_set_voltage(mmc->supply.vqmmc,
+ 					    SDHCI_SPRD_R10_VOLTAGE_UV,
+ 					    SDHCI_SPRD_R10_VOLTAGE_UV);
+@@ -1036,6 +1040,8 @@ static int sdhci_sprd_r10_voltage_switch(struct mmc_host *mmc,
+ 		return sprd_host->reset_error;
+ 	if (ios->signal_voltage != MMC_SIGNAL_VOLTAGE_330)
+ 		return -EINVAL;
++	if (sprd_host->emmc_read_only)
++		return 0;
+
+ 	return regulator_set_voltage(mmc->supply.vqmmc,
+ 				     SDHCI_SPRD_R10_VOLTAGE_UV,
+@@ -1141,8 +1147,12 @@ static void sdhci_sprd_r10_request(struct mmc_host *mmc,
+ {
+ 	struct sdhci_host *host = mmc_priv(mmc);
+ 	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
+-	int ret = sprd_host->reset_error;
++	int ret = 0;
+
++	if (sprd_host->emmc_read_only)
++		ret = sc9820e_emmc_ro_request_check(mrq);
++	if (!ret)
++		ret = sprd_host->reset_error;
+ 	if (!ret)
+ 		ret = sprd_host->clock_error;
+ 	if (!ret)
+@@ -1162,6 +1172,13 @@ static void sdhci_sprd_r10_request(struct mmc_host *mmc,
+ 	sdhci_request(mmc, mrq);
+ }
+
++static unsigned int sdhci_sprd_r10_get_ro(struct sdhci_host *host)
++{
++	struct sdhci_sprd_host *sprd_host = TO_SPRD_HOST(host);
++
++	return sprd_host->emmc_read_only;
++}
++
+ static const struct sdhci_ops sdhci_sprd_r10_ops = {
+ 	.read_l = sdhci_sprd_r10_readl,
+ 	.write_l = sdhci_sprd_r10_writel,
+@@ -1175,7 +1192,7 @@ static const struct sdhci_ops sdhci_sprd_r10_ops = {
+ 	.reset = sdhci_sprd_r10_reset,
+ 	.set_uhs_signaling = sdhci_sprd_r10_set_uhs_signaling,
+ 	.get_max_timeout_count = sdhci_sprd_get_max_timeout_count,
+-	.get_ro = sdhci_sprd_get_ro,
++	.get_ro = sdhci_sprd_r10_get_ro,
+ 	.request_done = sdhci_sprd_r10_request_done,
+ };
+
+@@ -1208,6 +1225,8 @@ static int sdhci_sprd_r10_probe(struct platform_device *pdev)
+
+ 	sprd_host = TO_SPRD_HOST(host);
+ 	sprd_host->is_r10 = true;
++	sprd_host->emmc_read_only = of_device_is_compatible(
++		dev->of_node, "fplinux,sc9820e-emmc-ro");
+ 	host->dma_mask = DMA_BIT_MASK(32);
+ 	dev->dma_mask = &host->dma_mask;
+ 	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
+@@ -1217,9 +1236,22 @@ static int sdhci_sprd_r10_probe(struct platform_device *pdev)
+ 	ret = mmc_of_parse(host->mmc);
+ 	if (ret)
+ 		return ret;
+-	if (!mmc_card_is_removable(host->mmc) ||
+-	    !(host->mmc->caps2 & MMC_CAP2_NO_MMC) ||
+-	    !(host->mmc->caps2 & MMC_CAP2_NO_SDIO))
++	if (sprd_host->emmc_read_only) {
++		if (mmc_card_is_removable(host->mmc) ||
++		    host->mmc->caps & (MMC_CAP_4_BIT_DATA | MMC_CAP_8_BIT_DATA |
++				       MMC_CAP_HW_RESET) ||
++		    host->mmc->caps2 & MMC_CAP2_NO_MMC ||
++		    !(host->mmc->caps2 & MMC_CAP2_NO_SD) ||
++		    !(host->mmc->caps2 & MMC_CAP2_NO_SDIO))
++			return dev_err_probe(
++				dev, -EINVAL,
++				"r10 eMMC needs a non-removable 1-bit MMC bus\n");
++		host->quirks |= SDHCI_QUIRK_FORCE_1_BIT_DATA;
++		host->quirks2 |= SDHCI_QUIRK2_HOST_NO_CMD23;
++		host->mmc->caps2 |= MMC_CAP2_BOOTPART_NOACC;
++	} else if (!mmc_card_is_removable(host->mmc) ||
++		   !(host->mmc->caps2 & MMC_CAP2_NO_MMC) ||
++		   !(host->mmc->caps2 & MMC_CAP2_NO_SDIO))
+ 		return dev_err_probe(dev, -EINVAL,
+ 				     "r10 supports removable SD only\n");
+
+@@ -1232,10 +1264,20 @@ static int sdhci_sprd_r10_probe(struct platform_device *pdev)
+ 	}
+ 	host->mmc->supply.vqmmc = regulator_get_optional(dev, "vqmmc");
+ 	if (IS_ERR(host->mmc->supply.vqmmc)) {
++		if (sprd_host->emmc_read_only &&
++		    PTR_ERR(host->mmc->supply.vqmmc) == -ENODEV)
++			goto check_vmmc;
+ 		ret = dev_err_probe(dev, PTR_ERR(host->mmc->supply.vqmmc),
+ 				    "r10 needs vqmmc\n");
+ 		goto put_resources;
+ 	}
++	if (sprd_host->emmc_read_only) {
++		ret = dev_err_probe(
++			dev, -EINVAL,
++			"r10 eMMC inherits its signalling supply\n");
++		goto put_resources;
++	}
++check_vmmc:
+ 	ret = regulator_is_supported_voltage(host->mmc->supply.vmmc,
+ 					     SDHCI_SPRD_R10_VOLTAGE_UV,
+ 					     SDHCI_SPRD_R10_VOLTAGE_UV);
+@@ -1332,6 +1374,12 @@ static int sdhci_sprd_r10_probe(struct platform_device *pdev)
+ 	host->flags &= ~(SDHCI_AUTO_CMD12 | SDHCI_AUTO_CMD23);
+ 	host->mmc->caps &= ~(MMC_CAP_UHS | MMC_CAP_MMC_HIGHSPEED |
+ 			     MMC_CAP_SD_HIGHSPEED | MMC_CAP_SDIO_IRQ);
++	if (sprd_host->emmc_read_only) {
++		host->mmc->caps &= ~(MMC_CAP_DDR | MMC_CAP_HW_RESET);
++		host->mmc->caps2 &= ~(MMC_CAP2_HS200 | MMC_CAP2_HS400 |
++				      MMC_CAP2_HS400_ES | MMC_CAP2_CQE);
++		host->mmc->f_max = min(host->mmc->f_max, 13000000U);
++	}
+
+ 	ret = __sdhci_add_host(host);
+ 	if (ret)

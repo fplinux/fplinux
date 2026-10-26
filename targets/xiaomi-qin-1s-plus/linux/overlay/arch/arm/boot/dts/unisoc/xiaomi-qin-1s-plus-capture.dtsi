@@ -23,6 +23,7 @@
 	audio-capture@700 {
 		compatible = "fplinux,qin1splus-capture";
 		reg = <0x700>;
+		firmware-name = "qin1splus-audio-profile.bin";
 		interrupt-parent = <&pmic>;
 		interrupts = <6 IRQ_TYPE_LEVEL_HIGH>;
 		sprd,aon-syscon = <&aon_apb>;

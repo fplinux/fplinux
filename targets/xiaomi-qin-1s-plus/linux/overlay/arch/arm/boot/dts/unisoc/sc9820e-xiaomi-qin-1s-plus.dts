@@ -10,6 +10,7 @@
 #include "sc9820e-sc2721.dtsi"
 #include "fplinux-xiaomi-qin-1s-plus-identity.dtsi"
 #include "xiaomi-qin-1s-plus-foundation.dtsi"
+#include "xiaomi-qin-1s-plus-emmc.dtsi"
 #include "xiaomi-qin-1s-plus-cpu.dtsi"
 #include "xiaomi-qin-1s-plus-display.dtsi"
 #include "xiaomi-qin-1s-plus-capture.dtsi"

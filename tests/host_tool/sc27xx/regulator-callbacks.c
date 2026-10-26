@@ -239,7 +239,7 @@ static void check_sc2721(void)
 	assert(probe(driver, &pdev) == 0);
 	assert(map.writes == 1);
 	assert(map.cells[0xefc] == 0x6e7f);
-	assert(pdev.dev.num_resources == 5);
+	assert(pdev.dev.num_resources == 6);
 	core = find_regulator(&pdev, "vddcore");
 	desc = core->desc;
 	assert(!strcmp(desc->of_match, "dcdc@1"));
@@ -291,6 +291,44 @@ static void check_sc2721(void)
 	assert(desc->n_voltages == 256);
 	assert(desc->min_uV == 1200000 && desc->uV_step == 10000);
 	assert(desc->ops->list_voltage(sdio, 255) == 3750000);
+	release_resources(&pdev);
+}
+
+static void check_sc2721_emmc(void)
+{
+	struct platform_driver *driver = test_driver_sc2721_regulator_driver;
+	struct regmap map = {};
+	struct device parent = { .regmap = &map };
+	struct platform_device pdev = { .dev.parent = &parent };
+	struct regulator_dev *emmc;
+	const struct regulator_ops *ops;
+
+	match_variant(driver, &pdev, "sprd,sc2721-regulator");
+	assert(probe(driver, &pdev) == 0);
+	emmc = find_regulator(&pdev, "vddemmccore");
+	ops = emmc->desc->ops;
+	assert(!strcmp(emmc->desc->of_match, "ldo@10"));
+	assert(ops->map_voltage(emmc, 3000000, 3000000) == 180);
+	assert(ops->list_voltage(emmc, 180) == 3000000);
+	map.cells[0xcec] = 0xa500;
+	assert(ops->set_voltage_sel(emmc, 180) == 0);
+	assert(map.cells[0xcec] == 0xa5b4);
+	assert(ops->get_voltage_sel(emmc) == 180);
+	map.cells[0xce8] = 0x81;
+	assert(ops->enable(emmc) == 0);
+	assert(map.cells[0xce8] == 0x80);
+	assert(ops->is_enabled(emmc) == 1);
+	assert(ops->disable(emmc) == 0);
+	assert(map.cells[0xce8] == 0x81);
+	assert(ops->is_enabled(emmc) == 0);
+	assert(map.cells[0xcf4] == 0 && map.cells[0xcf8] == 0);
+	map.update_error = -EIO;
+	assert(ops->enable(emmc) == -EIO);
+	assert(map.cells[0xce8] == 0x81);
+	assert(ops->set_voltage_sel(emmc, 180) == -EIO);
+	map.read_error = -ETIMEDOUT;
+	map.read_error_reg = 0xcec;
+	assert(ops->get_voltage_sel(emmc) == -ETIMEDOUT);
 	release_resources(&pdev);
 }
 
@@ -493,7 +531,7 @@ static void check_probe_errors(void)
 
 	registration_failure = 0;
 	assert(probe(driver, &pdev) == 0);
-	assert(pdev.dev.num_resources == 5);
+	assert(pdev.dev.num_resources == 6);
 	release_resources(&pdev);
 }
 
@@ -502,6 +540,8 @@ int main(int argc, char **argv)
 	assert(argc == 2);
 	if (!strcmp(argv[1], "sc2721"))
 		check_sc2721();
+	else if (!strcmp(argv[1], "sc2721-emmc"))
+		check_sc2721_emmc();
 	else if (!strcmp(argv[1], "sc2721-connectivity"))
 		check_sc2721_connectivity();
 	else if (!strcmp(argv[1], "sc2731"))

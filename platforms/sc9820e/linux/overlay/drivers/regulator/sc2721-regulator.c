@@ -11,6 +11,8 @@
 #define SC2721_PWR_WR_PROT 0xefc
 #define SC2721_WR_UNLOCK_VALUE 0x6e7f
 
+#define SC2721_LDO_EMMCCORE_PD 0xce8
+#define SC2721_LDO_EMMCCORE_VSEL 0xcec
 #define SC2721_LDO_SDCORE_PD 0xcf4
 #define SC2721_LDO_SDCORE_VSEL 0xcf8
 #define SC2721_LDO_SDIO_PD 0xd00
@@ -69,6 +71,26 @@ static const struct sc27xx_regulator_desc sc2721_regulators[] = {
 			.enable_reg = SC2721_DCDC_PD,
 			.enable_mask = SC2721_DCDC_CORE_PD,
 			.enable_is_inverted = true,
+		},
+	},
+	{
+		.desc = {
+			.name = "vddemmccore",
+			.of_match = "ldo@10",
+			.of_match_full_name = true,
+			.regulators_node = "regulators",
+			.id = 10,
+			.ops = &sc27xx_regu_linear_ops,
+			.type = REGULATOR_VOLTAGE,
+			.owner = THIS_MODULE,
+			.n_voltages = 256,
+			.min_uV = 1200000,
+			.uV_step = 10000,
+			.enable_reg = SC2721_LDO_EMMCCORE_PD,
+			.enable_mask = BIT(0),
+			.enable_is_inverted = true,
+			.vsel_reg = SC2721_LDO_EMMCCORE_VSEL,
+			.vsel_mask = GENMASK(7, 0),
 		},
 	},
 	{
@@ -193,5 +215,5 @@ static struct platform_driver sc2721_regulator_driver = {
 };
 module_platform_driver(sc2721_regulator_driver);
 
-MODULE_DESCRIPTION("SC2721 core, SD and connectivity voltage regulators");
+MODULE_DESCRIPTION("SC2721 core, storage and connectivity voltage regulators");
 MODULE_LICENSE("GPL");

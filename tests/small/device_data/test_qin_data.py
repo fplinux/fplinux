@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import struct
 import sys
 from typing import TYPE_CHECKING
 
@@ -149,3 +150,138 @@ def test_preparation_rejects_a_full_partition_or_wrong_image_length(
 
     with pytest.raises(ValueError, match="exactly 1540096"):
         qin_parser.prepare_from_originals(originals)
+
+
+@pytest.fixture
+def qin_audio_originals() -> dict[str, bytes]:
+    """Supply synthetic route configurations and one independently assembled VBC file."""
+    directory = ROOT / "tests/small/device_data/fixtures/qin-audio"
+    originals = {
+        name: (directory / f"{name}.fixture").read_bytes()
+        for name in ("audio_para", "audio_hw.xml", "tiny_hw.xml", "codec_pga.xml")
+    }
+    words = [0] * 164
+    words[1] = 0xB7F
+    words[2:13] = [1, 2, 3, 4, 0xFFFFFFE2, 6, 7, 8, 9, 10, 11]
+    for section in range(6):
+        high = [4096, 16384, 16384, 0, 0, 0, 0]
+        if section == 0:
+            high = [2048, 100, 16384, -200, -300, 400, -500]
+        for coefficient, value in enumerate(high):
+            words[20 + 14 * section + 2 * coefficient] = value & 0xFFFFFFFF
+    words[104] = 2044
+    profile = struct.pack("<4s32s164I", b"VBEQ", b"Handsfree", *words)
+    originals["vbc_eq"] = struct.pack("<4s5I", b"VBEQ", 2, 4, 4, 0, 0) + bytes(3 * 692) + profile
+    return originals
+
+
+def test_audio_preparation_exports_only_consumed_gain_and_processing_fields(
+    qin_parser: ModuleType, qin_audio_originals: dict[str, bytes]
+) -> None:
+    """A normal speaker profile retains signed coefficients and the MainMIC gain."""
+    expected_originals = dict(qin_audio_originals)
+    group = qin_parser.prepare_from_originals(qin_audio_originals).groups["audio-profile"]
+    payload = group.prepared["qin1splus-audio-profile.bin"]
+
+    assert qin_audio_originals == expected_originals
+    assert group.originals == expected_originals
+    assert group.originals is not qin_audio_originals
+    assert len(payload) == 115
+    assert payload[:21] == b"FPLQINAU" + bytes.fromhex("44 ac 00 00 00 19 01 06 7f 01 01 fc 07")
+    assert struct.unpack_from("<11h", payload, 21) == (1, 2, 3, 4, -30, 6, 7, 8, 9, 10, 11)
+    assert struct.unpack_from("<6h", payload, 43) == (2048, 100, -200, -300, 400, -500)
+    assert struct.unpack_from("<6h", payload, 55) == (4096, 16384, 0, 0, 0, 0)
+
+
+def test_audio_preparation_uses_input_gains_without_importing_hp_user_volume(
+    qin_parser: ModuleType, qin_audio_originals: dict[str, bytes]
+) -> None:
+    """DAC, VBC and MainMIC settings come from originals; HP remains the user control."""
+    qin_audio_originals["audio_para"] = (
+        qin_audio_originals["audio_para"]
+        .replace(b"0x801902c6", b"0x801b01c7")
+        .replace(b"0x902e", b"0x902b")
+    )
+
+    group = qin_parser.prepare_from_originals(qin_audio_originals).groups["audio-profile"]
+
+    assert group.prepared["qin1splus-audio-profile.bin"][12:17] == bytes((1, 27, 1, 3, 127))
+
+
+@pytest.mark.parametrize(
+    ("word", "value", "error"),
+    [
+        (21, 1, "low word"),
+        (24, 16383, "EQ6 section"),
+        (20, 0, "EQ6 section"),
+        (32, 16384, "EQ6 section"),
+        (26, 0x0000FF38, "signed 16-bit"),
+        (104, 0, "output scale"),
+        (1, 0xF7F, "processing blocks"),
+        (1, 0xB80, "processing blocks"),
+        (16, 1, "routing"),
+    ],
+)
+def test_audio_preparation_rejects_processing_the_runtime_cannot_represent(
+    qin_parser: ModuleType,
+    qin_audio_originals: dict[str, bytes],
+    word: int,
+    value: int,
+    error: str,
+) -> None:
+    """Unsupported filters never turn into partially admitted device settings."""
+    processing = bytearray(qin_audio_originals["vbc_eq"])
+    struct.pack_into("<I", processing, 2136 + 4 * word, value)
+    qin_audio_originals["vbc_eq"] = bytes(processing)
+
+    with pytest.raises(ValueError, match=error):
+        qin_parser.prepare_from_originals(qin_audio_originals)
+
+
+def test_audio_preparation_rejects_a_truncated_profile(
+    qin_parser: ModuleType, qin_audio_originals: dict[str, bytes]
+) -> None:
+    """The selected output mode and complete coefficient extent define admission."""
+    qin_audio_originals["vbc_eq"] = qin_audio_originals["vbc_eq"][:-1]
+    with pytest.raises(ValueError, match="truncated"):
+        qin_parser.prepare_from_originals(qin_audio_originals)
+
+
+def test_audio_preparation_rejects_a_record_for_another_output_mode(
+    qin_parser: ModuleType, qin_audio_originals: dict[str, bytes]
+) -> None:
+    """A valid profile at the expected index must still belong to the speaker mode."""
+    processing = bytearray(qin_audio_originals["vbc_eq"])
+    processing[2104:2113] = b"Headphone"
+    qin_audio_originals["vbc_eq"] = bytes(processing)
+
+    with pytest.raises(ValueError, match="does not match its mode"):
+        qin_parser.prepare_from_originals(qin_audio_originals)
+
+
+def test_audio_preparation_rejects_a_route_the_driver_does_not_own(
+    qin_parser: ModuleType, qin_audio_originals: dict[str, bytes]
+) -> None:
+    """An analog gain is not enough to admit an unsupported microphone route."""
+    qin_audio_originals["tiny_hw.xml"] = qin_audio_originals["tiny_hw.xml"].replace(
+        b"MainMICADCL", b"AuxMICADCL"
+    )
+
+    with pytest.raises(ValueError, match="microphone route"):
+        qin_parser.prepare_from_originals(qin_audio_originals)
+
+
+@pytest.mark.parametrize("change", ["missing", "unknown", "mixed"])
+def test_qin_preparation_rejects_incomplete_or_mixed_original_sets(
+    qin_parser: ModuleType, qin_audio_originals: dict[str, bytes], change: str
+) -> None:
+    """The two supported acquisition flows never publish a partially selected group."""
+    if change == "missing":
+        del qin_audio_originals["vbc_eq"]
+    elif change == "unknown":
+        qin_audio_originals["other"] = b"unrelated"
+    else:
+        qin_audio_originals["wcnmodem-firmware.bin"] = b"unrelated"
+
+    with pytest.raises(ValueError, match="one complete audio or radio"):
+        qin_parser.prepare_from_originals(qin_audio_originals)

@@ -260,6 +260,27 @@
 		status = "disabled";
 	};
 
+	emmc_clk: clock-controller@21500090 {
+		compatible = "fplinux,sc9820e-emmc-clock";
+		reg = <0x21500090 4>;
+		#clock-cells = <1>;
+		clock-names = "ext1m", "ext26m";
+		clocks = <&ext1m>, <&ext26m>;
+		fplinux,ap-ahb-syscon = <&ap_ahb>;
+
+		status = "disabled";
+	};
+
+	emmc: mmc@20600000 {
+		compatible = "fplinux,sc9820e-emmc-ro", "sprd,sdhc-r10";
+		reg = <0x20600000 0x1000>;
+		clock-names = "sdio_clk", "sdio_clk_source", "sdio_ahb_enable";
+		clocks = <&emmc_clk 0>, <&ext26m>, <&emmc_clk 1>;
+		interrupts = <GIC_SPI 60 IRQ_TYPE_LEVEL_HIGH>;
+
+		status = "disabled";
+	};
+
 	usb: usb@20200000 {
 		reg = <0x20200000 0x2000>;
 		interrupt-names = "mc";

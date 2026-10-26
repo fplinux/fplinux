@@ -59,6 +59,7 @@ patches = [
   "platforms/sc9820e/linux/patches/0017-sc9820e-bindings.patch",
   "platforms/sc9820e/linux/patches/0018-sc9820e-s2idle.patch",
   "platforms/sc9820e/linux/patches/0019-sc9820e-spi32.patch",
+  "platforms/sc9820e/linux/patches/0020-sc9820e-emmc-read-only.patch",
 ]
 overlay = "platforms/sc9820e/linux/overlay"
 

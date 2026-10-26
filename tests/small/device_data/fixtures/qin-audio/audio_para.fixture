@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: GPL-2.0-only
+audio_arm\audio_arm\Handsfree\AudioStructure\app_config_info_set\app_config_info\app_config_info[0]\arm_volume\arm_volume[1]=0x801902c6
+audio_arm\audio_arm\Handsfree\AudioStructure\reserve\reserve[43]=0x902e

@@ -45,6 +45,7 @@
 #include <sound/pcm.h>
 
 #include "qin-capture-fifo.h"
+#include "qin-audio-profile.h"
 #include "qin-hp.h"
 #include "qin-playback.h"
 
@@ -94,7 +95,6 @@
 #define SC2721_AD_CLOCK_RESET BIT(10)
 #define SC2721_AD_CLOCK_ENABLE BIT(11)
 #define SC2721_ADL_GAIN_MASK GENMASK(11, 9)
-#define SC2721_ADL_GAIN (5U << 9)
 
 #define SC9820E_AUD_TOP 0x00
 #define SC9820E_AUD_IIS 0x08
@@ -194,6 +194,8 @@ struct qin_capture {
 	u32 playback_status[2];
 	struct qin_playback playback;
 	struct qin_hp hp;
+	struct qin_audio_profile profile;
+	struct qin_audio_processing_state processing;
 	struct aw87339 *amplifier;
 	unsigned int volume;
 	bool amplifier_pending;
@@ -235,8 +237,8 @@ static const struct snd_pcm_hardware qin_playback_hardware = {
 		SNDRV_PCM_INFO_MMAP | SNDRV_PCM_INFO_MMAP_VALID |
 		SNDRV_PCM_INFO_FIFO_IN_FRAMES | SNDRV_PCM_INFO_NO_REWINDS,
 	.formats = SNDRV_PCM_FMTBIT_S16_LE,
-	.rates = SNDRV_PCM_RATE_48000,
-	.rate_min = 48000,
+	.rates = SNDRV_PCM_RATE_44100 | SNDRV_PCM_RATE_48000,
+	.rate_min = 44100,
 	.rate_max = 48000,
 	.channels_min = 2,
 	.channels_max = 2,
@@ -605,6 +607,10 @@ static int stop_playback(struct qin_capture *capture)
 			return ret;
 		capture->playback_dac_active = false;
 	}
+	ret = qin_audio_processing_restore(capture->dev, capture->vbc,
+					   &capture->processing);
+	if (ret)
+		return ret;
 	if (!capture->playback_fifo_active)
 		return 0;
 	ret = capture_update(capture, QIN_CAPTURE_VBC, SC9820E_VBC_ENABLE,
@@ -1001,7 +1007,8 @@ static int start_producer(struct qin_capture *capture)
 	if (ret)
 		return ret;
 	ret = save_update(capture, QIN_CAPTURE_PMIC, SC2721_CDC1,
-			  SC2721_ADL_GAIN_MASK, SC2721_ADL_GAIN);
+			  SC2721_ADL_GAIN_MASK,
+			  (u32)capture->profile.mainmic_gain << 9);
 	if (ret)
 		return ret;
 	return save_update(capture, QIN_CAPTURE_AUD, SC9820E_AUD_TOP,
@@ -1138,11 +1145,23 @@ failed:
 	return ret;
 }
 
-static int prepare_playback(struct qin_capture *capture)
+static int prepare_playback(struct qin_capture *capture, unsigned int rate)
 {
 	struct qin_hp_io io = hp_io(capture);
+	bool processed = rate == capture->profile.processing_rate;
+	u32 gain_mask = GENMASK(17, 14);
+	u32 gain = 0;
+	u32 processing_mask = GENMASK(11, 9);
 	int ret, cleanup_ret;
 
+	if (processed) {
+		gain_mask |= GENMASK(13, 0);
+		gain = capture->profile.digital_gain |
+		       ((u32)capture->profile.digital_gain << 7);
+		if (capture->profile.digital_gain_enabled)
+			gain |= BIT(14) | BIT(15);
+		processing_mask |= BIT(13) | 0xff;
+	}
 	ret = shutdown_capture(capture);
 	if (ret)
 		return ret;
@@ -1163,7 +1182,7 @@ static int prepare_playback(struct qin_capture *capture)
 	if (ret)
 		goto failed;
 	ret = save_update(capture, QIN_CAPTURE_AUD, SC9820E_AUD_DAC,
-			  BIT(15) | 0xf, 1);
+			  BIT(15) | 0xf, processed ? 2 : 1);
 	if (ret)
 		goto failed;
 	ret = save_update(capture, QIN_CAPTURE_AUD, SC9820E_AUD_DAC_DC_LOW,
@@ -1206,11 +1225,11 @@ static int prepare_playback(struct qin_capture *capture)
 	if (ret)
 		goto failed;
 	ret = save_update(capture, QIN_CAPTURE_VBC, SC9820E_VBC_DAC_GAIN,
-			  GENMASK(17, 14), 0);
+			  gain_mask, gain);
 	if (ret)
 		goto failed;
 	ret = save_update(capture, QIN_CAPTURE_VBC, SC9820E_VBC_DAC_PROCESSING,
-			  GENMASK(11, 9), 0);
+			  processing_mask, 0);
 	if (ret)
 		goto failed;
 	ret = save_update(capture, QIN_CAPTURE_VBC, SC9820E_VBC_DAC_SRC, BIT(0),
@@ -1250,6 +1269,17 @@ static int prepare_playback(struct qin_capture *capture)
 	ret = qin_hp_prepare(&capture->hp, &io);
 	if (ret)
 		goto failed;
+	if (processed) {
+		ret = capture_update(capture, QIN_CAPTURE_PMIC, SC2721_PMU2,
+				     0x18, (u32)capture->profile.dac_gain << 3);
+		if (ret)
+			goto failed;
+		ret = qin_audio_processing_prepare(capture->dev, capture->vbc,
+						   &capture->profile,
+						   &capture->processing);
+		if (ret)
+			goto failed;
+	}
 	/* Keep both stereo channels audible through the single rear speaker. */
 	ret = save_update(capture, QIN_CAPTURE_VBC, SC9820E_VBC_DAC_MIXER, 0xff,
 			  0x12);
@@ -1542,7 +1572,7 @@ static int capture_prepare(struct snd_pcm_substream *substream)
 		goto out;
 	}
 	ret = substream->stream == SNDRV_PCM_STREAM_PLAYBACK ?
-		      prepare_playback(capture) :
+		      prepare_playback(capture, substream->runtime->rate) :
 		      prepare_hardware(capture);
 	if (ret)
 		goto out;
@@ -1961,6 +1991,9 @@ static int capture_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	capture->dev = dev;
 	capture->volume = 1;
+	ret = qin_audio_profile_load(dev, &capture->profile);
+	if (ret)
+		return ret;
 	capture->amplifier = devm_aw87339_get(dev, "fplinux,speaker-amplifier");
 	if (IS_ERR(capture->amplifier))
 		return dev_err_probe(dev, PTR_ERR(capture->amplifier),

@@ -32,6 +32,7 @@ struct gate_fixture {
 	unsigned int mux_register;
 	unsigned int diagnostics;
 	char diagnostic[160];
+	const char *mux_name;
 	int lookup_error;
 	int registration_error;
 	int provider_error;
@@ -173,7 +174,7 @@ struct clk_hw *devm_clk_hw_register_mux_parent_data_table(
 	const u32 *table, void *lock)
 {
 	(void)dev;
-	assert(strcmp(name, "sc9820e-sdio0-mux") == 0);
+	assert(strcmp(name, active->mux_name) == 0);
 	assert(num_parents == 2);
 	assert(strcmp(parents[0].fw_name, "ext1m") == 0);
 	assert(strcmp(parents[1].fw_name, "ext26m") == 0);
@@ -219,6 +220,9 @@ static void prepare_device(const struct gate_case *test,
 	struct device_node *node = device->dev.of_node;
 
 	active->other_regmap.status = 0xdeadbeef;
+	active->mux_name = strcmp(test->argument, "emmc") == 0 ?
+				   "sc9820e-emmc-mux" :
+				   "sc9820e-sdio0-mux";
 	if (strcmp(test->syscon_property, "fplinux,aon-syscon") == 0) {
 		node->regmap = &active->regmap;
 		node->ap_ahb_regmap = &active->other_regmap;
@@ -270,6 +274,9 @@ static void check_gate_callbacks(const struct gate_case *test)
 						   test->clock_name;
 	unsigned int unrelated = 0xa5a55a5a & ~test->mask;
 	unsigned int reads;
+
+	if (strcmp(test->argument, "emmc") == 0)
+		diagnostic_name = "eMMC AHB";
 
 	assert(ops->enable && ops->disable && ops->is_enabled);
 	assert(regmap->writes == 0 && regmap->reads == 0);
@@ -397,6 +404,9 @@ int main(int argc, char **argv)
 		{ "sdio", host_sc9820e_sdio_clock_driver,
 		  "fplinux,sc9820e-sdio-clock", "sc9820e-sdio0-ahb", 0x0,
 		  0x00000100, "fplinux,ap-ahb-syscon", true },
+		{ "emmc", host_sc9820e_sdio_clock_driver,
+		  "fplinux,sc9820e-emmc-clock", "sc9820e-emmc-ahb", 0x0,
+		  0x00000800, "fplinux,ap-ahb-syscon", true },
 	};
 	size_t index;
 

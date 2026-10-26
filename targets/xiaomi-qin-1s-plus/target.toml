@@ -7,6 +7,45 @@ product = "Qin 1s+"
 hardware_codes = []
 compatible = "xiaomi,qin1s-plus"
 
+[emmc]
+raw_device = "/dev/mmcblk1"
+files = [
+  { name = "audio_para", locations = [
+    [
+      "userdata",
+      "/local/media/audio_para",
+    ],
+    [
+      "system",
+      "/etc/audio_para",
+    ],
+  ], max_bytes = 1048576 },
+  { name = "audio_hw.xml", locations = [
+    [
+      "system",
+      "/etc/audio_hw.xml",
+    ],
+  ], max_bytes = 65536 },
+  { name = "tiny_hw.xml", locations = [
+    [
+      "system",
+      "/etc/tiny_hw.xml",
+    ],
+  ], max_bytes = 65536 },
+  { name = "codec_pga.xml", locations = [
+    [
+      "system",
+      "/etc/codec_pga.xml",
+    ],
+  ], max_bytes = 65536 },
+  { name = "vbc_eq", locations = [
+    [
+      "userdata",
+      "/local/media/vbc_eq",
+    ],
+  ], max_bytes = 65536 },
+]
+
 [display]
 panel = "display/panel.toml"
 boot_font = "7x14"
@@ -22,7 +61,7 @@ packages = [
   "fplinux-gpu-probe",
   "fplinux-libweston-gl",
   "fplinux-mesa",
-  "fplinux-qin1splus-mesa",
+  "fplinux-qin1splus-config",
 ]
 
 [bundle]
@@ -94,6 +133,11 @@ path = "/i2c@70700000/amplifier@59"
 compatible = "awinic,aw87339"
 config = "CONFIG_AW87339"
 
+[[linux.dt_config_checks]]
+path = "/mmc@20600000"
+compatible = "fplinux,sc9820e-emmc-ro"
+config = "CONFIG_MMC_SDHCI_SPRD"
+
 [bootstrap]
 image = "qin_linux_ramboot.bin"
 map = "qin_linux_ramboot.map"
@@ -115,6 +159,12 @@ boot_instructions = "Power the phone off, hold the call key, then connect USB wh
 
 [device_data]
 originals_parser = "qin1splus_device_data.py"
+required_groups = ["audio-profile"]
+
+[audio_profile]
+firmware = [
+  { source = "qin1splus-audio-profile.bin", destination = "qin1splus-audio-profile.bin", size = 115 },
+]
 
 [wcn_firmware]
 firmware = [

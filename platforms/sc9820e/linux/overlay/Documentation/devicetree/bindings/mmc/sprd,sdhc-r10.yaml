@@ -4,17 +4,46 @@
 $id: http://devicetree.org/schemas/mmc/sprd,sdhc-r10.yaml#
 $schema: http://devicetree.org/meta-schemas/core.yaml#
 
-title: Spreadtrum r10 removable SD controller
+title: Spreadtrum r10 SD and read-only eMMC controllers
 
 maintainers:
   - FPLinux <fplinux@users.noreply.github.com>
 
 allOf:
   - $ref: sdhci-common.yaml#
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: fplinux,sc9820e-emmc-ro
+    then:
+      properties:
+        bus-width:
+          const: 1
+        no-mmc: false
+        no-sd: true
+        non-removable: true
+        vqmmc-supply: false
+        cap-mmc-hw-reset: false
+      required:
+        - bus-width
+        - no-sd
+        - non-removable
+    else:
+      properties:
+        no-sd: false
+        non-removable: false
+      required:
+        - no-mmc
+        - vqmmc-supply
 
 properties:
   compatible:
-    const: sprd,sdhc-r10
+    oneOf:
+      - const: sprd,sdhc-r10
+      - items:
+          - const: fplinux,sc9820e-emmc-ro
+          - const: sprd,sdhc-r10
 
   reg:
     maxItems: 1
@@ -50,8 +79,8 @@ properties:
         - description: Maximum slot voltage in mV
           const: 3000
 
-  non-removable: false
-  no-sd: false
+  non-removable: true
+  no-sd: true
   no-mmc: true
   no-sdio: true
   no-1-8-v: true
@@ -65,10 +94,8 @@ required:
   - clocks
   - clock-names
   - max-frequency
-  - no-mmc
   - no-sdio
   - no-1-8-v
   - vmmc-supply
-  - vqmmc-supply
 
 unevaluatedProperties: false

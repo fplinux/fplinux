@@ -14,7 +14,10 @@ description: |
   This PCM controller exclusively owns the digital codec and VBC banks,
   borrows the shared AON, PMU and G6 syscons, and reads the clock status word.
   It provides 48 kHz, signed 16-bit little endian mono MainMIC capture and
-  mutually exclusive stereo playback. Playback preparation checks the analog
+  mutually exclusive stereo playback at 44.1 or 48 kHz. A prepared profile
+  supplies the microphone gain and 44.1 kHz speaker EQ6, ALC and base gains.
+  The 48 kHz playback path bypasses that processing. The card is unavailable
+  until the profile is supplied. Playback preparation checks the analog
   headphone path with both channel gains muted. Playback START enables the
   referenced speaker amplifier and applies the selected master volume.
 
@@ -27,6 +30,10 @@ properties:
 
   interrupts:
     maxItems: 1
+
+  firmware-name:
+    const: qin1splus-audio-profile.bin
+    description: Prepared normal speaker processing and MainMIC gain.
 
   fplinux,speaker-amplifier:
     $ref: /schemas/types.yaml#/definitions/phandle
@@ -60,6 +67,7 @@ required:
   - compatible
   - reg
   - interrupts
+  - firmware-name
   - fplinux,speaker-amplifier
   - sprd,aon-syscon
   - sprd,pmu-syscon

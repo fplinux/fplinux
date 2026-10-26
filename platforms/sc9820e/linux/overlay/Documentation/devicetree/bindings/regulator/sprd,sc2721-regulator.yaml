@@ -4,13 +4,13 @@
 $id: http://devicetree.org/schemas/regulator/sprd,sc2721-regulator.yaml#
 $schema: http://devicetree.org/meta-schemas/core.yaml#
 
-title: Unisoc SC2721 core, SD and connectivity voltage regulators
+title: Unisoc SC2721 core, storage and connectivity voltage regulators
 
 maintainers:
   - FPLinux <fplinux@users.noreply.github.com>
 
 description: |
-  The SC2721 SD core and I/O regulators have separate enable controls and
+  The SC2721 eMMC core, SD core and I/O regulators have separate enable controls and
   256 voltage selectors from 1.2 V to 3.75 V in 10 mV steps.
   The shared core regulator reports its inherited voltage and remains on.
   WIFIPA has 256 voltage selectors from 1.2 V to 3.75 V in 10 mV steps.
@@ -50,6 +50,18 @@ properties:
         required:
           - reg
           - regulator-always-on
+
+      ldo@10:
+        type: object
+        $ref: regulator.yaml#
+        unevaluatedProperties: false
+        properties:
+          reg:
+            const: 10
+          regulator-name:
+            const: vddemmccore
+        required:
+          - reg
 
       ldo@11:
         type: object

@@ -1,0 +1,9 @@
+<!-- SPDX-License-Identifier: GPL-2.0-only -->
+<audio>
+  <audiomode num="4">
+    <item name="Headset" index="0" />
+    <item name="Headfree" index="1" />
+    <item name="Handset" index="2" />
+    <item name="Handsfree" index="3" />
+  </audiomode>
+</audio>

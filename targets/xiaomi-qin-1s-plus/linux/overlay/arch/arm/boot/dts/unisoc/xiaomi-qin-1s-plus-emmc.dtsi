@@ -1,0 +1,35 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/ {
+	aliases {
+		mmc0 = &sdio0;
+		mmc1 = &emmc;
+	};
+};
+
+&pmic_regulators {
+	regulators {
+		vddemmccore: ldo@10 {
+			reg = <10>;
+			regulator-max-microvolt = <3000000>;
+			regulator-min-microvolt = <3000000>;
+			regulator-name = "vddemmccore";
+		};
+	};
+};
+
+&emmc_clk {
+	status = "okay";
+};
+
+&emmc {
+	bus-width = <1>;
+	max-frequency = <13000000>;
+	no-1-8-v;
+	no-sd;
+	no-sdio;
+	non-removable;
+	vmmc-supply = <&vddemmccore>;
+	voltage-ranges = <3000 3000>;
+
+	status = "okay";
+};

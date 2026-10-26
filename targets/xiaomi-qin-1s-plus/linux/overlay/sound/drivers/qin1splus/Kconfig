@@ -9,7 +9,10 @@ config SND_QIN1SPLUS_CAPTURE
 	  Capture the built-in MainMIC through SC2721 ADCL and SC9820E VBC
 	  ADC0 using programmed I/O. The stream is 48 kHz, S16_LE, mono.
 	  The fixed route owns the digital codec and VBC banks exclusively.
-	  Digital stereo playback uses the same banks at 48 kHz, S16_LE.
+	  Digital stereo playback uses the same banks at 44.1 or 48 kHz,
+	  S16_LE. Prepared speaker EQ6 and ALC apply at 44.1 kHz; the 48 kHz
+	  path bypasses those processing blocks. Audio requires a prepared
+	  target profile, including the built-in microphone gain.
 	  Capture and playback are mutually exclusive. Playback prepares the
 	  analog headphone path while muted and enables the external speaker
 	  amplifier at START. A master volume controls both headphone gains.

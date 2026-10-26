@@ -81,6 +81,8 @@ font and its notice.
 
 Linux archives include Python 3.14.8 and OpenSSH 10.3p1; Windows archives include Python 3.14.7 and Win32-OpenSSH 10.0.0.0p2-Preview. Their included license directories retain the notices for these runtimes and their libraries. The Windows driver helper uses libwdi 1.5.1 under LGPL-3.0-or-later and includes its GNU GPL and LGPL license texts. It installs the WinUSB driver included with Windows 10 and 11.
 
+Qin runtime archives include ext4 1.4.1, cachetools 7.1.1 and crcmod 1.7 for reading selected files from a saved eMMC image. These packages use the MIT license; their original notices are included under `licenses/phone-data/`, and their pinned originals are included in the matching source companion.
+
 The Git tree does not contain `spreadtrum_flash` source, `spd_dump`, `fphelper_t117` or `t117_fdl1.bin`.
 The local build downloads exact pinned inputs, verifies their hashes, and writes
 them only below `.cache/`.
