@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from fplinux_cli import common
 from fplinux_cli.build import reuse as cli_bundles
 from fplinux_cli.common import fail
@@ -16,6 +18,9 @@ from fplinux_cli.runtime.keyboard import forward_keyboard
 from fplinux_cli.runtime.runner import reconnect_bundle
 from fplinux_cli.workspace import build_inputs as workspaces
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 def console_target(  # noqa: PLR0913 -- public CLI modes remain explicit.
     target: str,
@@ -26,6 +31,7 @@ def console_target(  # noqa: PLR0913 -- public CLI modes remain explicit.
     exec_command: str | None,
     upload: list[str] | None,
     pull: list[str] | None,
+    phone_data: Path | None = None,
 ) -> None:
     """Open the SSH session, or forward one evdev keyboard over USB."""
     bundle, _manifest = runtime_bundle_session.resolve_target_bundle(
@@ -39,19 +45,28 @@ def console_target(  # noqa: PLR0913 -- public CLI modes remain explicit.
             exec_command=exec_command,
             upload=upload,
             pull=pull,
+            phone_data=phone_data,
         )
         return
     config = targets.load_target(target, profile, build_type=build_type)
-    forward_keyboard(bundle, target, config, keyboard, profile=profile)
+    forward_keyboard(bundle, target, config, keyboard, profile=profile, phone_data=phone_data)
 
 
-def verify_booted(target: str, *, profile: str | None = None, build_type: str = "release") -> None:
+def verify_booted(
+    target: str,
+    *,
+    profile: str | None = None,
+    build_type: str = "release",
+    phone_data: Path | None = None,
+) -> None:
     """Compare the running kernel identity with the current bundle."""
     profile = normalize_profile(profile)
     bundle, manifest = runtime_bundle_session.resolve_target_bundle(
         target, profile, build_type=build_type
     )
-    snapshot = workspaces.target_workspace_snapshot(target, profile, build_type=build_type)
+    snapshot = workspaces.target_workspace_snapshot(
+        target, profile, build_type=build_type, phone_data=phone_data
+    )
     environment_recipe = definition.environment_recipe_digest()
     environment_state = environment_states.load_environment_state(
         common.ROOT / ".cache", environment_recipe
@@ -60,7 +75,11 @@ def verify_booted(target: str, *, profile: str | None = None, build_type: str = 
     current = cli_bundles.manifest_matches_identity(manifest, identity)
     if not current:
         snapshot = workspaces.target_workspace_snapshot(
-            target, profile, build_type=build_type, include_device_data=False
+            target,
+            profile,
+            build_type=build_type,
+            include_device_data=False,
+            phone_data=phone_data,
         )
         identity = cli_bundles.build_identity(snapshot, environment_state, common.ROOT / ".cache")
         current = cli_bundles.manifest_matches_identity(manifest, identity)
@@ -72,5 +91,5 @@ def verify_booted(target: str, *, profile: str | None = None, build_type: str = 
             )
         )
     device_identity = _manifest_device_identity(manifest)
-    reconnect_bundle(bundle, target, profile=profile, exec_command="true")
+    reconnect_bundle(bundle, target, profile=profile, exec_command="true", phone_data=phone_data)
     print(f"verify: the phone runs the current {build_type} build ({device_identity[:16]})")

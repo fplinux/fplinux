@@ -7,11 +7,13 @@ import struct
 from collections import defaultdict
 
 from fplinux_cli.device_data.formats import (
+    PhysicalNand,
+    nv_checksum,
+)
+from fplinux_cli.device_data.nand_geometry import (
     BLOCK_MAIN_BYTES,
     PAGE_MAIN_BYTES,
     PAGES_PER_BLOCK,
-    PhysicalNand,
-    nv_checksum,
 )
 
 _SECTOR_BYTES = 1024

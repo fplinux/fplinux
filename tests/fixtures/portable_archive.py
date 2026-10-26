@@ -50,6 +50,21 @@ class PortableArchive:
     root: Path
     dump: Path
     manifest: dict[str, Any]
+    data_home: Path
+
+    def environment(self) -> dict[str, str]:
+        """Isolate both durable phone data and host configuration from the real account."""
+        environment = dict(os.environ)
+        environment.pop("PYTHONPATH", None)
+        environment.update(
+            {
+                "HOME": str(self.data_home.parent / "home"),
+                "XDG_DATA_HOME": str(self.data_home),
+                "LOCALAPPDATA": str(self.data_home.parent / "local-app-data"),
+                "PYTHONDONTWRITEBYTECODE": "1",
+            }
+        )
+        return environment
 
     def run(self, *arguments: str) -> subprocess.CompletedProcess[str]:
         """Run the same fixed-bundle entry without checkout imports."""
@@ -57,13 +72,10 @@ class PortableArchive:
 
     def run_entrypoint(self, filename: str, *arguments: str) -> subprocess.CompletedProcess[str]:
         """Run delivered bytes with isolated imports and no ambient Python path."""
-        environment = dict(os.environ)
-        environment.pop("PYTHONPATH", None)
-        environment["PYTHONDONTWRITEBYTECODE"] = "1"
         return subprocess.run(
             [sys.executable, "-I", str(self.root / filename), *arguments],
             cwd=self.root.parent,
-            env=environment,
+            env=self.environment(),
             capture_output=True,
             text=True,
             timeout=60,
@@ -72,7 +84,12 @@ class PortableArchive:
 
     def prepared_data(self) -> Path:
         """Return the selected flat phone store."""
-        return self.root / "data/phone"
+        return self.phone_store() / "phone"
+
+    def phone_store(self) -> Path:
+        """Return durable target data independently of the extracted archive location."""
+        runtime = json.loads((self.root / "runtime-manifest.json").read_text(encoding="utf-8"))
+        return self.data_home / "fplinux/phones" / str(runtime["target"])
 
 
 def refresh_archive(root: Path, runtime: dict[str, Any] | None = None) -> None:
@@ -108,6 +125,9 @@ def portable_archive(tmp_path: Path) -> Iterator[PortableArchive]:
         (archive / "windows-host.json").unlink()
         descriptor: dict[str, Any] = {
             "parser": "targets/nokia-ta1618/device_data.py",
+            "originals_parser": None,
+            "required_groups": ["bluetooth", "audio-profile", "fm-radio"],
+            "preparation_recipe": "b" * 64,
             "audio_policy": {
                 "speaker_vibration": False,
                 "speaker_from_headphones": False,
@@ -122,7 +142,12 @@ def portable_archive(tmp_path: Path) -> Iterator[PortableArchive]:
             },
             "ecc_module": None,
         }
-        nand = {"id": 0x21E5, "raw_page_bytes": 2112, "raw_device": "/dev/raw-nand"}
+        nand = {
+            "id": 0x21E5,
+            "raw_page_bytes": 2112,
+            "raw_device": "/dev/raw-nand",
+            "acquisition_recipe": "a" * 64,
+        }
         config = {
             "platform": "ums9117",
             "linux": {"root": {"kind": "initramfs"}},
@@ -159,4 +184,28 @@ def portable_archive(tmp_path: Path) -> Iterator[PortableArchive]:
         with dump.open("wb") as stream:
             stream.truncate(138412032)
             stream.write(b"radio")
-        yield PortableArchive(archive, dump, descriptor)
+        with dump.open("rb") as stream:
+            dump_digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        dump.with_name(f"{dump.name}.json").write_text(
+            json.dumps(
+                {
+                    "id_bytes": "e521",
+                    "chip": "controlled chip",
+                    "page_main_bytes": 2048,
+                    "oob_bytes": 64,
+                    "pages_per_block": 64,
+                    "block_count": 1024,
+                    "raw_bytes": 138412032,
+                    "sha256": dump_digest,
+                    "target": "nokia-ta1618",
+                    "acquisition_recipe": (
+                        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    ),
+                }
+            ),
+            encoding="utf-8",
+        )
+        data_home = workspace / "user-data"
+        for directory in (data_home, workspace / "home", workspace / "local-app-data"):
+            directory.mkdir()
+        yield PortableArchive(archive, dump, descriptor, data_home)

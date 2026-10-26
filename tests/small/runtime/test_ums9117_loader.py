@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from fplinux_cli.runtime.connection import SessionResumedError
 
 from tests.small.runtime.adapter_fixtures import (
     ADAPTER,
@@ -34,6 +35,7 @@ class LoaderArgumentsTests:
             Path("image.bin"),
             {"fdl1": 0x6200, "payload": 0x80100000},
             0x314D,
+            wait_seconds=0,
         )
         assert (arguments) == (
             [
@@ -51,7 +53,10 @@ class LoaderArgumentsTests:
             ]
         )
 
-    def test_zero_exec_distance_omits_setup_command(self) -> None:
+    @pytest.mark.parametrize(("wait_seconds", "wait_argument"), [(0, "0"), (20, "20")])
+    def test_zero_exec_distance_omits_setup_command(
+        self, wait_seconds: int, wait_argument: str
+    ) -> None:
         """Start directly with the RAM FDL load when the target requests zero."""
         arguments = ADAPTER.loader_arguments(
             Path("loader"),
@@ -59,12 +64,13 @@ class LoaderArgumentsTests:
             Path("image.bin"),
             {"fdl1": 0x6200, "payload": 0x80100000},
             0,
+            wait_seconds=wait_seconds,
         )
         assert (arguments) == (
             [
                 "loader",
                 "--wait",
-                "0",
+                wait_argument,
                 "fdl",
                 "fdl1.bin",
                 "0x6200",
@@ -122,6 +128,7 @@ class LoaderExecutionTests:
                     prepared_session(),
                     expected_device_identity="9" * 64,
                     loader_trace=loader_trace,
+                    on_wait=lambda: pytest.fail("an enumerated BootROM must be selected first"),
                 )
 
             assert loader.call_args.args[0] == [
@@ -149,6 +156,7 @@ class LoaderExecutionTests:
             devices[0].write_bytes(b"")
             transport_module = mock.Mock()
             loader_runs = 0
+            observations: list[str] = []
 
             def run_loader(
                 *_args: object, **_kwargs: object
@@ -162,7 +170,9 @@ class LoaderExecutionTests:
 
             with (
                 contextlib.redirect_stdout(io.StringIO()),
-                mock.patch.object(ADAPTER, "usb_device_path", side_effect=devices),
+                mock.patch.object(
+                    ADAPTER, "usb_device_path", side_effect=[None, devices[0], None, devices[1]]
+                ),
                 mock.patch.object(ADAPTER.subprocess, "run", side_effect=run_loader),
                 mock.patch.object(
                     ADAPTER.subprocess,
@@ -177,9 +187,44 @@ class LoaderExecutionTests:
                     bridge_runtime(),
                     prepared_session(),
                     expected_device_identity="9" * 64,
+                    on_wait=lambda: observations.append("waiting"),
                 )
 
         assert (loader_runs) == (2)
+        assert observations == ["waiting"]
+        transport_module.remove_personalized_image.assert_called_once()
+
+    def test_wait_callback_can_resume_previous_session_before_opening_bootrom(self) -> None:
+        """A reappeared Linux session cancels the prepared load before any USB transfer."""
+        previous = {"session_id": "previous"}
+
+        def resume_previous() -> None:
+            raise SessionResumedError(previous)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            transport_module = mock.Mock()
+            with (
+                contextlib.redirect_stdout(io.StringIO()),
+                mock.patch.object(ADAPTER, "usb_device_path", return_value=None),
+                mock.patch.object(ADAPTER, "require_usb_device_access") as open_bootrom,
+                mock.patch.object(ADAPTER.subprocess, "run") as loader,
+                mock.patch.object(ADAPTER.subprocess, "Popen") as bridge,
+                mock.patch.object(ADAPTER.shutil, "which", return_value="/usr/bin/stdbuf"),
+                mock.patch.object(ADAPTER, "ssh_transport", transport_module),
+                pytest.raises(SessionResumedError) as resumed,
+            ):
+                ADAPTER.run(
+                    Path(temporary),
+                    bridge_runtime(),
+                    prepared_session(),
+                    expected_device_identity="9" * 64,
+                    on_wait=resume_previous,
+                )
+
+        assert resumed.value.session == previous
+        open_bootrom.assert_not_called()
+        loader.assert_not_called()
+        bridge.assert_not_called()
         transport_module.remove_personalized_image.assert_called_once()
 
     def test_loader_stops_after_three_failed_fresh_devices(self) -> None:

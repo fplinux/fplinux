@@ -14,7 +14,7 @@ import re
 import shutil
 import sys
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -47,8 +47,10 @@ class RuntimeDelivery:
     bundle: Path
     checkout: Path
     data: Path
+    phone_store: Path
     logs: Path
     dump: Path
+    home_environment: dict[str, str]
 
     @property
     def boundary(self) -> Path:
@@ -71,6 +73,7 @@ class RuntimeDelivery:
             name=f"{self.mode} runtime lifecycle",
             cwd=self.bundle.parent,
             env={
+                **self.home_environment,
                 "PATH": str(self.bundle / "bin"),
                 "LANG": "C.UTF-8",
                 "PYTHONDONTWRITEBYTECODE": "1",
@@ -132,14 +135,14 @@ def _install_external_boundaries(root: Path) -> None:
     refresh_archive(root, runtime)
 
 
-def _extract_delivery_zip(root: Path) -> Path:
+def _extract_delivery_zip(root: Path, *, recipient_name: str = "recipient") -> Path:
     """Transport the controlled runtime through an actual ZIP, preserving Unix file modes."""
     archive = root.parent / "runtime.zip"
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as output:
         for path in sorted(root.rglob("*")):
             if path.is_file():
                 output.write(path, Path("runtime") / path.relative_to(root))
-    recipient = root.parent / "recipient"
+    recipient = root.parent / recipient_name
     with zipfile.ZipFile(archive) as source:
         source.extractall(recipient)
         for member in source.infolist():
@@ -153,6 +156,7 @@ def runtime_delivery(
 ) -> RuntimeDelivery:
     """Select one real bundle or extract its same delivery bytes without preparing phone data."""
     root = portable_archive.root
+    phone_store = portable_archive.phone_store()
     _install_external_boundaries(root)
     checkout = root.parent / "checkout"
     checkout.mkdir()
@@ -170,13 +174,22 @@ def runtime_delivery(
             ),
             encoding="utf-8",
         )
-        data = checkout / ".cache/device-data/nokia-ta1618"
+        data = checkout / ".cache/runtime/nokia-ta1618"
         logs = checkout / ".cache/logs/run/nokia-ta1618"
     else:
         bundle = _extract_delivery_zip(root)
         data = bundle / "data"
         logs = bundle / "logs"
-    return RuntimeDelivery(str(request.param), bundle, checkout, data, logs, portable_archive.dump)
+    return RuntimeDelivery(
+        mode=str(request.param),
+        bundle=bundle,
+        checkout=checkout,
+        data=data,
+        phone_store=phone_store,
+        logs=logs,
+        dump=portable_archive.dump,
+        home_environment=portable_archive.environment(),
+    )
 
 
 def _file_sha256(path: Path) -> str:
@@ -204,12 +217,12 @@ def test_first_prepare_then_boot_and_reconnect_share_the_selected_runtime(
     reader_clock_commands = clock_path.read_text().splitlines()
     assert len(reader_clock_commands) == 1
     assert re.fullmatch(r"fplinux-clock [1-9][0-9]*", reader_clock_commands[0])
-    backup = delivery.data / "nand.bin"
+    backup = delivery.phone_store / "nand.bin"
     backup_digest = _file_sha256(delivery.dump)
     assert backup.stat().st_size == 138412032
     assert _file_sha256(backup) == backup_digest
     backup_stat = backup.stat()
-    receipt_path = delivery.data / "nand.bin.json"
+    receipt_path = delivery.phone_store / "nand.bin.json"
     receipt = receipt_path.read_bytes()
     assert json.loads(receipt) == {
         "id_bytes": "e521",
@@ -221,8 +234,9 @@ def test_first_prepare_then_boot_and_reconnect_share_the_selected_runtime(
         "raw_bytes": 138412032,
         "sha256": backup_digest,
         "target": "nokia-ta1618",
+        "acquisition_recipe": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     }
-    phone = delivery.data / "phone"
+    phone = delivery.phone_store / "phone"
     assert (phone / "groups/bluetooth/radio.bin").read_bytes() == b"radio"
     assert (phone / "groups/audio-profile/audio.bin").read_bytes() == b"profile"
     assert (phone / "groups/fm-radio/fm.bin").read_bytes() == b"fm"
@@ -335,7 +349,119 @@ def test_first_prepare_then_boot_and_reconnect_share_the_selected_runtime(
     assert final_stat.st_mtime_ns == backup_stat.st_mtime_ns
     assert final_stat.st_ctime_ns == backup_stat.st_ctime_ns
     assert receipt_path.read_bytes() == receipt
-    assert list(delivery.data.rglob("nand.bin")) == [backup]
+    assert list(delivery.phone_store.rglob("nand.bin")) == [backup]
+    assert not (delivery.data / "nand.bin").exists()
+    assert not (delivery.data / "phone").exists()
     assert (delivery.boundary / "reader-commands").read_text() == reader_commands
     assert progress_path.read_text() == progress_commands
     assert (delivery.boundary / "ram-loads").read_text() == "loaded\nloaded\n"
+
+
+def test_two_extracted_archives_share_raw_backup_and_reprepare_only_for_changed_recipe(
+    portable_archive: PortableArchive,
+) -> None:
+    """Real ZIP entries share durable bytes while controlled processes replace the phone."""
+    source = portable_archive.root
+    _install_external_boundaries(source)
+    first_bundle = _extract_delivery_zip(source, recipient_name="first-recipient")
+    second_bundle = _extract_delivery_zip(source, recipient_name="second-recipient")
+    first = RuntimeDelivery(
+        mode="zip",
+        checkout=source.parent / "unused-checkout",
+        phone_store=portable_archive.phone_store(),
+        dump=portable_archive.dump,
+        home_environment=portable_archive.environment(),
+        bundle=first_bundle,
+        data=first_bundle / "data",
+        logs=first_bundle / "logs",
+    )
+    second = replace(
+        first,
+        bundle=second_bundle,
+        data=second_bundle / "data",
+        logs=second_bundle / "logs",
+    )
+
+    acquired = first.run()
+
+    assert acquired.returncode == 0, acquired.stderr
+    assert "Reading NAND:" in acquired.stdout
+    assert "Run the same launcher again" in acquired.stdout
+    backup = first.phone_store / "nand.bin"
+    before = backup.stat()
+    receipt = (first.phone_store / "nand.bin.json").read_bytes()
+    first_commands = (first.boundary / "reader-commands").read_text()
+    assert first_commands.splitlines() == [
+        "cat /sys/class/misc/raw-nand/device/geometry 3</dev/raw-nand",
+        "exec dd if=/dev/raw-nand bs=63360",
+    ]
+
+    reused = second.run()
+
+    assert reused.returncode == 0, reused.stderr
+    assert "Opening SSH." in reused.stdout
+    assert "Reading NAND:" not in reused.stdout
+    assert not (second.boundary / "reader-commands").exists()
+    assert capsule_files((second.boundary / "capsules/1.cpio").read_bytes()) == {
+        "lib/firmware/chip/radio.bin": b"radio",
+        "lib/firmware/chip/fm.bin": b"fm",
+        "lib/firmware/fplinux/audio.bin": b"profile",
+    }
+    assert first.data != second.data
+    assert not (first.data / "session").exists()
+    assert (second.data / "session/current/nokia-ta1618.json").is_file()
+    assert all(not (bundle / "data/nand.bin").exists() for bundle in (first_bundle, second_bundle))
+
+    # A changed delivered parser selects a new base recipe, using the retained raw bytes.
+    parser = second.bundle / "targets/nokia-ta1618/device_data.py"
+    parser.write_bytes(parser.read_bytes().replace(b'b"profile"', b'b"updated"'))
+    runtime_path = second.bundle / "runtime-manifest.json"
+    runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
+    runtime["device_data"]["preparation_recipe"] = (
+        "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    )
+    refresh_archive(second.bundle, runtime)
+    (second.boundary / "linux-usb").rmdir()
+    (second.boundary / "bootrom").touch()
+
+    reprepared = second.run()
+
+    assert reprepared.returncode == 0, reprepared.stderr
+    assert "Opening SSH." in reprepared.stdout
+    assert "Reading NAND:" not in reprepared.stdout
+    assert not (second.boundary / "reader-commands").exists()
+    assert (second.phone_store / "phone/groups/audio-profile/audio.bin").read_bytes() == b"updated"
+    assert capsule_files((second.boundary / "capsules/2.cpio").read_bytes()) == {
+        "lib/firmware/chip/radio.bin": b"radio",
+        "lib/firmware/chip/fm.bin": b"fm",
+        "lib/firmware/fplinux/audio.bin": b"updated",
+    }
+    after = backup.stat()
+    assert (after.st_ino, after.st_mtime_ns, after.st_ctime_ns) == (
+        before.st_ino,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    )
+    assert (second.phone_store / "nand.bin.json").read_bytes() == receipt
+    assert (first.boundary / "reader-commands").read_text() == first_commands
+
+    # Acquisition changes require a fresh reader even when prepared outputs are available.
+    runtime["nand"]["acquisition_recipe"] = (
+        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    )
+    refresh_archive(second.bundle, runtime)
+    (second.boundary / "linux-usb").rmdir()
+    (second.boundary / "bootrom").touch()
+
+    reacquired = second.run()
+
+    assert reacquired.returncode == 0, reacquired.stderr
+    assert "Reading NAND:" in reacquired.stdout
+    assert "Run the same launcher again" in reacquired.stdout
+    assert (second.boundary / "reader-commands").read_text() == first_commands
+    assert capsule_files((second.boundary / "capsules/3.cpio").read_bytes()) == {
+        "etc/fplinux/preparation": b"1\n"
+    }
+    assert json.loads((second.phone_store / "nand.bin.json").read_text())[
+        "acquisition_recipe"
+    ] == ("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")

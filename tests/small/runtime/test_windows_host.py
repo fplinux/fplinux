@@ -12,6 +12,7 @@ from fplinux_cli.runtime import windows_host
 from fplinux_cli.runtime.windows_host import bound_interface, exact_usb_devices
 
 from tests.windows_host_support import (
+    StubWindowsHost,
     admitted_windows,
     archive_files,
     endpoint_session,
@@ -41,6 +42,27 @@ def test_changed_native_tool_is_rejected_before_windows_discovery(tmp_path: Path
         admitted_windows(root)
 
 
+def test_sc9820e_archive_admits_its_compact_ram_image_without_a_bridge(tmp_path: Path) -> None:
+    bundle = admitted_windows(archive_files(tmp_path, platform="sc9820e"))
+
+    assert bundle.runtime["identity"]["platform"]["name"] == "sc9820e"
+    assert bundle.runtime["host_tools"] == {"loader": "tools/spd_dump.exe"}
+    assert "bridge" not in bundle.tools
+    assert not (tmp_path / "tools/libc_server.exe").exists()
+    assert (tmp_path / "image/ramboot.bin").read_bytes()[:8] == b"entry123"
+
+
+def test_sc9820e_windows_archive_requires_an_initramfs(tmp_path: Path) -> None:
+    bundle = admitted_windows(archive_files(tmp_path, platform="sc9820e"))
+    runtime = copy.deepcopy(bundle.runtime)
+    del runtime["adapter"]["regions"]["initramfs"]
+
+    with pytest.raises(SystemExit, match="Windows archives require a RAM root filesystem"):
+        windows_host.validate_archive(
+            tmp_path, runtime, generation=bundle.generation, device_identity=bundle.device_identity
+        )
+
+
 def test_exact_device_discovery_excludes_composite_interfaces() -> None:
     snapshot = {
         "devices": [
@@ -50,6 +72,25 @@ def test_exact_device_discovery_excludes_composite_interfaces() -> None:
         ]
     }
     assert exact_usb_devices(snapshot, 0x1782, 0x4D00) == ["USB\\VID_1782&PID_4D00\\phone-root"]
+
+
+@pytest.mark.parametrize(
+    ("usb_id", "present"),
+    [
+        ("USB\\VID_0525&PID_A4A6\\0123456789abcdef0123456789abcdef", True),
+        ("usb\\vid_0525&pid_a4a6&rev_0100\\0123456789ABCDEF0123456789ABCDEF", True),
+        ("USB\\VID_0525&PID_A4A6&MI_00\\0123456789abcdef0123456789abcdef", False),
+        ("USB\\VID_0525&PID_A4A6\\another-phone", False),
+        ("USB\\VID_1782&PID_4D00\\0123456789abcdef0123456789abcdef", False),
+    ],
+)
+def test_usb_presence_requires_the_saved_device_root_without_a_network_index(
+    tmp_path: Path, usb_id: str, *, present: bool
+) -> None:
+    host = StubWindowsHost({"devices": [{"id": usb_id}]})
+    transport = windows_host.WindowsTransport(host, admitted_windows(archive_files(tmp_path)))
+
+    assert transport.usb_present(endpoint_session(tmp_path / "session")) is present
 
 
 @pytest.mark.parametrize(

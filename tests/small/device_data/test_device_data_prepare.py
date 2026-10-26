@@ -17,11 +17,11 @@ from fplinux_cli.device_data import prepare
 from fplinux_cli.device_data.formats import (
     AudioProfileContext,
     DeviceDataPreparation,
-    NandGeometry,
     PhysicalNand,
     PreparedGroup,
 )
 from fplinux_cli.device_data.inputs import capture_phone_data
+from fplinux_cli.device_data.nand_geometry import NandGeometry
 from fplinux_cli.environment import definition
 from fplinux_cli.environment import runtime as environment_runtime
 from fplinux_cli.manifests import releases
@@ -65,6 +65,9 @@ def phone_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PhoneData:
     """Own short captured NAND and replace only complete-dump admission and parser loading."""
     backup = tmp_path / "nand.bin"
     backup.write_bytes(RAW_DUMP)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
     groups = {
         "bluetooth": PreparedGroup(
             originals={"radio-original.bin": b"fitted radio"}, prepared={"radio.bin": b"radio"}
@@ -90,6 +93,7 @@ def phone_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PhoneData:
             speaker_from_headphones=False,
             headfree_headphones_only=False,
         ),
+        preparation_recipe="a" * 64,
         nand=DECLARED_NAND,
     )
     monkeypatch.setattr(
@@ -279,12 +283,15 @@ def test_preparation_publishes_only_selected_independent_groups(
     assert {path.name for path in (phone_data.phone / "groups").iterdir()} == set(group_names)
 
 
-def test_saved_source_cli_uses_shared_phone_store_without_loading_or_copying_nand(
+@pytest.mark.parametrize("explicit", [False, True], ids=["default-store", "explicit-phone"])
+def test_saved_source_cli_imports_canonical_backup_without_loading_a_phone(
     phone_data: PhoneData,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    *,
+    explicit: bool,
 ) -> None:
-    """The checkout command chooses paths; the shared core owns extraction and admission."""
+    """The shared store retains the admitted source and prepared outputs for later launches."""
     monkeypatch.setattr(cli, "ROOT", phone_data.root)
     monkeypatch.setattr(reporting, "ROOT", phone_data.root)
     config: dict[str, Any] = {
@@ -299,6 +306,7 @@ def test_saved_source_cli_uses_shared_phone_store_without_loading_or_copying_nan
         "nand": DECLARED_NAND,
     }
     monkeypatch.setattr(cli, "load_target", lambda _target: config)
+    monkeypatch.setattr(cli, "preparation_recipe", lambda *_args, **_kwargs: "a" * 64)
 
     def reject_phone(*_arguments: object, **_options: object) -> None:
         pytest.fail("saved-source preparation must not build or load a phone")
@@ -306,16 +314,25 @@ def test_saved_source_cli_uses_shared_phone_store_without_loading_or_copying_nan
     for name in ("build", "prepare_target", "prepare_host_tool"):
         monkeypatch.setattr(cli, name, reject_phone)
 
-    cli.prepare_device_data(TARGET, from_dump=phone_data.backup, jobs=2, offline=True)
+    selected = phone_data.root / "other-phone" if explicit else None
+    cli.prepare_device_data(
+        TARGET, from_dump=phone_data.backup, jobs=2, offline=True, phone_data=selected
+    )
 
-    phone = phone_data.root / ".cache/device-data/demo-phone/phone"
+    default = phone_data.root / "data/fplinux/phones/demo-phone/phone"
+    phone = default if selected is None else selected / "phone"
     assert (phone / "groups/bluetooth/radio.bin").read_bytes() == b"radio"
     assert phone_data.backup.read_bytes() == RAW_DUMP
-    assert not (phone.parent / "nand.bin").exists()
+    assert (phone.parent / "nand.bin").read_bytes() == RAW_DUMP
+    assert (phone.parent / "nand.bin").stat().st_mode & 0o777 == 0o600
+    assert not (phone.parent / "nand.bin.json").exists()
     output = capsys.readouterr().out
     assert "./fplinux run demo-phone" in output
     assert "./fplinux build demo-phone" not in output
     assert "rebuild that card with its selected profile" in output
+    if selected is not None:
+        assert not default.exists()
+        assert f"./fplinux run demo-phone --phone-data {selected}" in output
 
 
 def test_offline_nested_build_failure_leaves_no_running_receipt(
@@ -326,6 +343,7 @@ def test_offline_nested_build_failure_leaves_no_running_receipt(
     """A real offline build rejection finishes preparation without loading a phone."""
     monkeypatch.setattr(common, "ROOT", phone_data.root)
     monkeypatch.setattr(cli, "ROOT", phone_data.root)
+    monkeypatch.setattr(cli, "preparation_recipe", lambda *_args, **_kwargs: "a" * 64)
     monkeypatch.setattr(reporting, "ROOT", phone_data.root)
     monkeypatch.setattr(
         cli,
@@ -377,6 +395,16 @@ def test_offline_nested_build_failure_leaves_no_running_receipt(
         (DECLARED_NAND, None, 2112),
         ({"id": 0xB1A1, "raw_page_bytes": 2176}, None, 2176),
         (None, NandGeometry("e521", "demo", 2048, 64, 64, 1024, 138412032), 2112),
+        (
+            {"raw_device": "/dev/ums9117-nand-raw"},
+            NandGeometry("e521", "DS35M1GA", 2048, 64, 64, 1024, 138412032),
+            2112,
+        ),
+        (
+            {"raw_device": "/dev/ums9117-nand-raw"},
+            NandGeometry("a1a5", "FM25LS01", 2048, 128, 64, 1024, 142606336),
+            2176,
+        ),
         (DECLARED_NAND, NandGeometry("e521", "demo", 2048, 64, 64, 1024, 138412032), 2112),
     ],
 )

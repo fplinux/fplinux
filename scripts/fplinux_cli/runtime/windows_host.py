@@ -24,20 +24,15 @@ from typing import TYPE_CHECKING, Any, NoReturn
 
 from . import bundle as bundle_runtime
 from . import ssh_transport
+from .connection import ConnectionLostError
+from .windows_tools import WINDOWS_TOOLS, windows_tool_paths
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from types import ModuleType
     from typing import BinaryIO
 
-WINDOWS_TOOLS = {
-    "loader": "tools/spd_dump.exe",
-    "bridge": "tools/libc_server.exe",
-    "ssh": "tools/openssh/ssh.exe",
-    "keygen": "tools/openssh/ssh-keygen.exe",
-    "keyscan": "tools/openssh/ssh-keyscan.exe",
-    "driver": "tools/driver/wdi-simple.exe",
-}
+_USB_READY_MARKERS = (b"FPLINUX_BOOTROM_READY\n", b"FPLINUX_BOOTROM_READY\r\n")
 
 
 def _console_creation_flags() -> int:
@@ -46,6 +41,92 @@ def _console_creation_flags() -> int:
 
 def fail(message: str) -> NoReturn:
     raise SystemExit(f"FPLinux: {message}")
+
+
+class BootromDriverRequiredError(Exception):
+    """The native loader could not open or claim an unsupported USB driver."""
+
+
+class _UsbProbeCancelledError(Exception):
+    """The owner stopped a read-only Windows device probe."""
+
+
+def _cancellable_discovery(
+    argv: list[str], *, timeout: float, cancelled: Callable[[], bool]
+) -> subprocess.CompletedProcess[str]:
+    """Stop and reap discovery when its USB observer no longer owns the result."""
+    if cancelled():
+        raise _UsbProbeCancelledError
+    process = subprocess.Popen(
+        argv,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        creationflags=_console_creation_flags(),
+    )
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            if cancelled():
+                raise _UsbProbeCancelledError
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(argv, timeout)
+            try:
+                stdout, stderr = process.communicate(timeout=min(0.1, remaining))
+            except subprocess.TimeoutExpired:
+                continue
+            return subprocess.CompletedProcess(argv, process.wait(), stdout, stderr)
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.communicate()
+
+
+def _wait_usb_loader(  # noqa: PLR0913 -- native progress and reconnect observers stay explicit.
+    process: subprocess.Popen[bytes],
+    *,
+    timeout: int,
+    log: Path,
+    offset: int,
+    on_usb_ready: Callable[[], None],
+    on_wait: Callable[[], None] | None,
+) -> int:
+    """Observe this child's USB acquisition without delaying its native discovery."""
+    deadline = time.monotonic() + timeout
+    pending = b""
+    suffix_length = max(len(marker) for marker in _USB_READY_MARKERS) - 1
+    with log.open("rb") as stream:
+        stream.seek(offset)
+        while True:
+            status = process.poll()
+            remaining = deadline - time.monotonic()
+            if status is None and remaining <= 0:
+                raise subprocess.TimeoutExpired(process.args, timeout)
+            chunk = stream.read(65536)
+            if chunk:
+                pending += chunk
+                if any(marker in pending for marker in _USB_READY_MARKERS):
+                    on_usb_ready()
+                    if process.stdin is None:
+                        fail("USB loader acknowledgement pipe is unavailable")
+                    with suppress(BrokenPipeError):
+                        process.stdin.write(b"\x06")
+                        process.stdin.flush()
+                    return process.wait(timeout=max(0, deadline - time.monotonic()))
+                pending = pending[-suffix_length:]
+                continue
+            if status is not None:
+                if status == 2:
+                    raise BootromDriverRequiredError
+                if status == 0:
+                    fail("The RAM loader exited without confirming its USB connection")
+                return status
+            if on_wait is not None:
+                on_wait()
+            with suppress(subprocess.TimeoutExpired):
+                process.wait(timeout=min(0.1, remaining))
 
 
 @dataclass(frozen=True)
@@ -68,23 +149,34 @@ def validate_archive(
     runner = bundle_runtime
     if runtime["transport"] != "usb-ncm":
         fail("This archive does not support the authenticated Linux endpoint")
-    if any(
-        runtime["host_tools"].get(role) != WINDOWS_TOOLS[role] for role in ("loader", "bridge")
-    ):
+    tool_paths = windows_tool_paths(runtime["host_tools"])
+    platform_name = runtime["identity"]["platform"]["name"]
+    native_roles = {"loader", "bridge"} if platform_name == "ums9117" else {"loader"}
+    if any(runtime["host_tools"].get(role) != WINDOWS_TOOLS[role] for role in native_roles):
         fail("The RAM runner does not select this archive's native Windows tools")
     adapter = runner.load_adapter(root / runner.adapter_path(runtime))
-    adapter.runtime_target_display_name(runtime)
-    adapter.adapter_config(runtime["adapter"])
+    if platform_name == "sc9820e":
+        adapter.validate_runtime(runtime)
+        if "initramfs" not in runtime["adapter"]["regions"]:
+            fail("Windows archives require a RAM root filesystem")
+    elif platform_name == "ums9117":
+        adapter.runtime_target_display_name(runtime)
+        adapter.adapter_config(runtime["adapter"])
+        with (root / runtime["image"]).open("rb") as stream:
+            if stream.read(4) != b"DHTB":
+                fail("The RAM payload does not have its required header")
+    else:
+        fail("This platform has no Windows RAM loader")
     ssh = ssh_transport
     try:
         windows = json.loads((root / "windows-host.json").read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         fail(f"Windows host manifest cannot be read: {error}")
     windows = runner.require_object(windows, {"host_tools", "sha256"}, "Windows host manifest")
-    if windows["host_tools"] != WINDOWS_TOOLS:
+    if windows["host_tools"] != tool_paths:
         fail("Windows host tools do not match this archive format")
     hashes = windows["sha256"]
-    required_files = {*WINDOWS_TOOLS.values()}
+    required_files = set(tool_paths.values())
     if not isinstance(hashes, dict) or not required_files.issubset({*runtime["sha256"], *hashes}):
         fail("Windows host manifest lacks native tool checksums")
     for relative, expected in hashes.items():
@@ -94,14 +186,10 @@ def validate_archive(
         runner.require_file(root / name)
         if runner.digest(root / name) != expected:
             fail(f"Windows file checksum differs: {name}")
-    with (root / runtime["image"]).open("rb") as stream:
-        header = stream.read(4)
-    if header != b"DHTB":
-        fail("The RAM payload does not have its required header")
     return WindowsBundle(
         root,
         runtime,
-        {role: root / relative for role, relative in WINDOWS_TOOLS.items()},
+        {role: root / relative for role, relative in tool_paths.items()},
         adapter,
         ssh,
         generation,
@@ -206,30 +294,40 @@ class WindowsHost:
         if not isinstance(self.sid, str) or re.fullmatch(r"S-1-5-[0-9-]+", self.sid) is None:
             fail("Cannot identify the current Windows user")
 
-    def ps(self, script: str, *arguments: str, timeout: float = 20) -> dict[str, Any]:
+    def ps(
+        self,
+        script: str,
+        *arguments: str,
+        timeout: float = 20,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> dict[str, Any]:
         """Run one packaged PowerShell file with literal arguments and JSON output."""
         source = Path(__file__).resolve().parents[3] / "common/windows" / script
         if not source.is_file():
             fail(f"Windows command file is missing: {source}")
-        result = subprocess.run(
-            [
-                str(self.powershell),
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(source),
-                *arguments,
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=timeout,
-            check=False,
-            creationflags=_console_creation_flags(),
-        )
+        argv = [
+            str(self.powershell),
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(source),
+            *arguments,
+        ]
+        if cancelled is None:
+            result = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=timeout,
+                check=False,
+                creationflags=_console_creation_flags(),
+            )
+        else:
+            result = _cancellable_discovery(argv, timeout=timeout, cancelled=cancelled)
         if result.returncode:
             fail("Windows discovery failed: " + result.stderr.strip()[-1000:])
         value = json.loads(result.stdout.lstrip("\ufeff"))
@@ -336,16 +434,21 @@ class WindowsHost:
         self.require_private(path)
 
     def runtime_root(self, directory: Path) -> Path:
-        """Open the caller's private reconnect and temporary loading storage."""
+        """Protect account-owned runtime storage before creating or reusing session files."""
         root = directory
-        if not root.exists():
-            root.mkdir(parents=True)
-            self.secure_new(root, directory=True)
+        if root.is_symlink() or root.is_junction():
+            fail(f"Private session path is a link: {root}")
+        if root.exists():
+            if not root.is_dir():
+                fail(f"Private session path is not a directory: {root}")
+            if self.ps("acl.ps1", "-Path", str(root))["owner"] != self.sid:
+                fail(f"Private session directory belongs to another Windows account: {root}")
         else:
-            self.require_private(root)
+            root.mkdir(mode=0o700, parents=True)
+        self.secure_new(root, directory=True)
         return root
 
-    def run_tool(
+    def run_tool(  # noqa: PLR0913 -- process inputs and optional USB progress stay explicit.
         self,
         argv: list[str],
         *,
@@ -353,26 +456,42 @@ class WindowsHost:
         cwd: Path,
         log: Path,
         environment: dict[str, str] | None = None,
+        on_usb_ready: Callable[[], None] | None = None,
+        on_wait: Callable[[], None] | None = None,
     ) -> None:
         """Run one loader process with a deadline and a retained diagnostic log."""
         child_environment = None
         if environment is not None:
             child_environment = {**os.environ, **environment}
         with log.open("ab") as output:
+            offset = output.tell()
             process = subprocess.Popen(
-                argv,
+                [argv[0], "--ready-ack", *argv[1:]] if on_usb_ready is not None else argv,
                 cwd=cwd,
-                stdin=subprocess.DEVNULL,
+                stdin=subprocess.PIPE if on_usb_ready is not None else subprocess.DEVNULL,
                 stdout=output,
                 stderr=subprocess.STDOUT,
                 creationflags=_console_creation_flags(),
                 env=child_environment,
             )
             try:
-                status = process.wait(timeout=timeout)
+                if on_usb_ready is None:
+                    status = process.wait(timeout=timeout)
+                else:
+                    status = _wait_usb_loader(
+                        process,
+                        timeout=timeout,
+                        log=log,
+                        offset=offset,
+                        on_usb_ready=on_usb_ready,
+                        on_wait=on_wait,
+                    )
             except subprocess.TimeoutExpired:
                 fail(f"{Path(argv[0]).name} exceeded its {timeout}s deadline; see {log}")
             finally:
+                if process.stdin is not None:
+                    with suppress(BrokenPipeError):
+                        process.stdin.close()
                 if process.poll() is None:
                     process.kill()
                     process.wait()
@@ -568,6 +687,27 @@ class WindowsTransport:
         ):
             fail("The exact phone USB network endpoint is no longer ready")
 
+    def usb_present(
+        self,
+        session: dict[str, Any],
+        *,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> bool:
+        """Observe the exact USB root independently of its current network interface."""
+        try:
+            snapshot = self.host.ps("devices.ps1", cancelled=cancelled)
+        except _UsbProbeCancelledError:
+            return False
+        devices = exact_usb_devices(snapshot, session["vendor_id"], session["product_id"])
+        matching = [
+            device
+            for device in devices
+            if device.rsplit("\\", 1)[-1].lower() == session["usb_serial"].lower()
+        ]
+        if len(matching) > 1:
+            fail("Multiple USB devices match this saved RAM session")
+        return bool(matching)
+
     def run_remote(
         self,
         session: dict[str, Any],
@@ -588,15 +728,28 @@ class WindowsTransport:
         )
 
     def run_shell(self, session: dict[str, Any]) -> int:
-        """Keep SSH on the current terminal and reap it when the caller is cancelled."""
+        """Retain terminal ownership and report SSH failure independently of USB discovery."""
         self._require_bound(session)
         if not os.isatty(0):
             fail("Interactive SSH requires a terminal")
         argv = self._ssh_arguments(session)
         argv[1:1] = ["-tt"]
         process = subprocess.Popen(argv, creationflags=0)
+        status: int | None = None
         try:
-            return process.wait()
+            while status is None:
+                try:
+                    status = process.wait(timeout=0.25)
+                except subprocess.TimeoutExpired:
+                    present = self.usb_present(
+                        session, cancelled=lambda: process.poll() is not None
+                    )
+                    status = process.poll()
+                    if status is None and not present:
+                        raise ConnectionLostError from None
+            if status == 255:
+                raise ConnectionLostError
+            return status
         finally:
             if process.poll() is None:
                 process.kill()
@@ -834,14 +987,7 @@ class WindowsTransport:
             self.host.require_private(path)
         return value
 
-    def load_live_session(
-        self,
-        target: str,
-        *,
-        session_root: Path,
-        prepared_data_sha256: str | None = None,
-    ) -> dict[str, Any] | None:
-        """Distinguish an absent saved phone from a present endpoint that cannot authenticate."""
+    def _saved_sessions(self, target: str, session_root: Path) -> list[dict[str, Any]]:
         if target != self.bundle.runtime["target"]:
             fail("The requested connection belongs to another target")
         root = self.host.runtime_root(session_root)
@@ -851,29 +997,31 @@ class WindowsTransport:
                 value = json.loads(state_path.read_text(encoding="utf-8"))
             except (OSError, ValueError) as error:
                 fail(f"Saved phone connection cannot be read: {error}")
+            if isinstance(value, dict) and value.get("status") == "prepared":
+                continue
             candidates.append(self._validate_saved_session(value, state_path.parent))
+        return candidates
+
+    def load_saved_session(
+        self,
+        target: str,
+        *,
+        session_root: Path,
+    ) -> dict[str, Any] | None:
+        """Read one ready binding without requiring a connected USB device or SSH peer."""
+        candidates = self._saved_sessions(target, session_root)
         if not candidates:
             return None
-        snapshot = self.host.ps("devices.ps1")
-        live: list[dict[str, Any]] = []
-        for session in candidates:
-            devices = exact_usb_devices(snapshot, session["vendor_id"], session["product_id"])
-            matching = [
-                device
-                for device in devices
-                if device.rsplit("\\", 1)[-1].lower() == session["usb_serial"].lower()
-            ]
-            if len(matching) > 1:
-                fail("Multiple USB devices match this saved RAM session")
-            if matching:
-                live.append(session)
-        if len(live) > 1:
-            fail("Multiple saved phone connections are live; keep only one phone connected")
-        if not live:
-            return None
-        session = live[0]
-        if session["prepared_data_sha256"] != prepared_data_sha256:
-            fail("The running phone uses different prepared phone data; shut it down first")
+        if len(candidates) > 1:
+            fail("Multiple saved phone connections cannot select one RAM session")
+        return candidates[0]
+
+    def reacquire_bound_session(
+        self, session: dict[str, Any], *, expected_device_identity: str
+    ) -> dict[str, Any]:
+        """Authenticate a reappearing RAM session against its existing pinned host key."""
+        if expected_device_identity != self.bundle.device_identity:
+            fail("The requested connection belongs to another kernel build identity")
         self.authenticate(
             session,
             timeout=self.bundle.runtime["usb"]["linux_gadget"]["wait_seconds"],
@@ -911,54 +1059,15 @@ class WindowsTransport:
                 directory.rmdir()
 
 
-def load_live_session(
-    bundle: WindowsBundle,
-    *,
-    session_root: Path,
-    prepared_data_sha256: str | None = None,
-) -> tuple[WindowsTransport, dict[str, Any]] | None:
-    """Reconnect the admitted native bundle without repeating closure validation."""
-    transport = WindowsTransport(WindowsHost(), bundle)
-    session = transport.load_live_session(
-        bundle.runtime["target"],
-        session_root=session_root,
-        prepared_data_sha256=prepared_data_sha256,
-    )
-    return (transport, session) if session is not None else None
-
-
-def _wait_bootrom(host: WindowsHost, usb: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-    deadline = time.monotonic() + usb["wait_seconds"]
-    while time.monotonic() < deadline:
-        snapshot = host.ps("devices.ps1")
-        devices = exact_usb_devices(snapshot, usb["vendor_id"], usb["product_id"])
-        if len(devices) > 1:
-            fail("Multiple BootROM phones are connected; keep only the selected phone connected")
-        if devices:
-            return devices[0], snapshot
-        time.sleep(0.2)
-    fail("The selected phone did not appear in BootROM mode before the deadline")
-
-
-def _bootrom_uses_winusb(snapshot: dict[str, Any], instance: str) -> bool:
-    matches = [item for item in snapshot["devices"] if item["id"].lower() == instance.lower()]
-    if len(matches) != 1:
-        fail("The selected BootROM phone is no longer present")
-    return str(matches[0].get("service", "")).lower() == "winusb"
-
-
-def _ensure_bootrom_driver(  # noqa: PLR0913 -- selected snapshot and driver setup stay explicit.
+def _setup_bootrom_driver(
     host: WindowsHost,
     bundle: WindowsBundle,
-    instance: str,
     directory: Path,
     *,
-    snapshot: dict[str, Any],
     events: Callable[[str], None] | None,
     log: Path | None = None,
 ) -> None:
-    if _bootrom_uses_winusb(snapshot, instance):
-        return
+    """Install after native driver refusal, then await a fresh physical connection."""
     usb = bundle.runtime["usb"]["bootrom"]
     if (usb["vendor_id"], usb["product_id"]) != (0x1782, 0x4D00):
         fail("Automatic USB driver setup is unavailable for this BootROM USB ID")
@@ -971,21 +1080,13 @@ def _ensure_bootrom_driver(  # noqa: PLR0913 -- selected snapshot and driver set
     if events is not None:
         events("driver-setup")
     host.install_bootrom_driver(bundle.tools["driver"], directory, log=log)
-    deadline = time.monotonic() + 20
-    while time.monotonic() < deadline:
-        snapshot = host.ps("devices.ps1")
-        present = exact_usb_devices(snapshot, usb["vendor_id"], usb["product_id"])
-        if len(present) > 1:
-            fail("Multiple BootROM phones are connected; keep only the selected phone connected")
-        if instance in present and _bootrom_uses_winusb(snapshot, instance):
-            if events is not None:
-                events("driver-ready")
-            return
+    if events is not None:
+        events("driver-reconnect")
+    deadline = time.monotonic() + usb["wait_seconds"]
+    while exact_usb_devices(host.ps("devices.ps1"), usb["vendor_id"], usb["product_id"]):
+        if time.monotonic() >= deadline:
+            fail("Disconnect the phone after USB driver setup, then restart Run.cmd")
         time.sleep(0.2)
-    fail(
-        "WinUSB did not become ready for the selected BootROM phone after setup. "
-        "Disconnect the phone and restart Run.cmd to retry"
-    )
 
 
 def boot_archive(  # noqa: PLR0913 -- native loading inputs have separate owners.
@@ -996,6 +1097,7 @@ def boot_archive(  # noqa: PLR0913 -- native loading inputs have separate owners
     log: Path | None = None,
     session_root: Path,
     prepared_data_sha256: str | None = None,
+    on_wait: Callable[[], None] | None = None,
 ) -> tuple[WindowsTransport, dict[str, Any]]:
     """Boot one selected archive with its external data capsule and return authenticated SSH."""
     if events is not None:
@@ -1025,69 +1127,104 @@ def boot_archive(  # noqa: PLR0913 -- native loading inputs have separate owners
     )
     directory = Path(session["directory"])
     image = Path(session["image"])
+    split_upload = bundle.runtime["identity"]["platform"]["name"] == "sc9820e"
     ready = False
     try:
-        print(adapter.runtime_target_display_name(bundle.runtime), flush=True)
-        print(config["boot_instructions"], flush=True)
-        if events is not None:
-            events("waiting-for-device")
-        bootrom, snapshot = _wait_bootrom(host, usb)
-        if events is not None:
-            events("device-found")
-        _ensure_bootrom_driver(
-            host, bundle, bootrom, directory, snapshot=snapshot, events=events, log=log
-        )
-        fdl = directory / "fdl1.bin"
-        shutil.copyfile(root / bundle.runtime["assets"]["fdl1"], fdl)
-        print("Loading the phone into RAM...", flush=True)
-        if events is not None:
-            events("ram-loader-start")
-        loader_arguments = adapter.loader_arguments(
-            bundle.tools["loader"],
-            Path("fdl1.bin"),
-            Path("image.bin"),
-            bundle.runtime["addresses"],
-            config["exec_distance"],
-        )
-        host.run_tool(
-            [loader_arguments[0], "--verbose", "1", *loader_arguments[1:]],
-            timeout=300,
-            cwd=directory,
-            log=log,
-            environment={"LIBUSB_DEBUG": "4"},
-        )
+        loader_directory = directory
+        if split_upload:
+            loader_directory = directory / "uploads"
+            loader_directory.mkdir()
+            host.secure_new(loader_directory, directory=True)
+            uploads = adapter.prepare_uploads(
+                root, bundle.runtime, session, loader_directory, device_data=device_data
+            )
+            loader_arguments = adapter.loader_arguments(
+                bundle.tools["loader"],
+                uploads,
+                config,
+                bus=None,
+                device=None,
+                wait_seconds=usb["wait_seconds"],
+                working_directory=loader_directory,
+            )
+        else:
+            shutil.copyfile(root / bundle.runtime["assets"]["fdl1"], directory / "fdl1.bin")
+            loader_arguments = adapter.loader_arguments(
+                bundle.tools["loader"],
+                Path("fdl1.bin"),
+                Path("image.bin"),
+                bundle.runtime["addresses"],
+                config["exec_distance"],
+                wait_seconds=usb["wait_seconds"],
+            )
+        driver_installed = False
+
+        def usb_ready() -> None:
+            if events is not None:
+                events("device-found")
+                if driver_installed:
+                    events("driver-ready")
+                events("ram-loader-start")
+
+        while True:
+            print(
+                f"{bundle.runtime['identity']['target']['display_name']} console RAM boot",
+                flush=True,
+            )
+            print(config["boot_instructions"], flush=True)
+            if events is not None:
+                events("waiting-for-device")
+            try:
+                host.run_tool(
+                    [loader_arguments[0], "--verbose", "1", *loader_arguments[1:]],
+                    timeout=300 + usb["wait_seconds"],
+                    cwd=loader_directory,
+                    log=log,
+                    environment={"LIBUSB_DEBUG": "4"},
+                    on_usb_ready=usb_ready,
+                    on_wait=on_wait,
+                )
+            except BootromDriverRequiredError:
+                if driver_installed:
+                    fail("WinUSB is still unavailable after setup; disconnect and restart Run.cmd")
+                _setup_bootrom_driver(host, bundle, directory, events=events, log=log)
+                driver_installed = True
+            else:
+                break
         if events is not None:
             events("ram-loader-complete")
-        fdl.unlink()
         image.unlink()
-        payload = directory / "payload"
-        payload.mkdir()
-        host.secure_new(payload, directory=True)
-        sources = adapter.loader_payload_sources(root, device_data=device_data)
-        for name, source in sources.items():
-            destination = payload / name
-            shutil.copyfile(source, destination)
-            host.secure_new(destination)
+        if split_upload:
+            shutil.rmtree(loader_directory)
+        else:
+            (directory / "fdl1.bin").unlink()
+            payload = directory / "payload"
+            payload.mkdir()
+            host.secure_new(payload, directory=True)
+            sources = adapter.loader_payload_sources(root, device_data=device_data)
+            for name, source in sources.items():
+                destination = payload / name
+                shutil.copyfile(source, destination)
+                host.secure_new(destination)
         print("Waiting for the authenticated Linux connection...", flush=True)
         if events is not None:
             events("linux-start")
-        host.run_tool(
-            [
-                str(bundle.tools["bridge"]),
-                "--fplinux-handoff",
-                session["session_id"],
-                "--",
-                *adapter.fpdoom_options(config),
-                config["session_name"],
-            ],
-            timeout=config["handoff_wait_seconds"],
-            cwd=payload,
-            log=log,
-        )
+        if not split_upload:
+            host.run_tool(
+                [
+                    str(bundle.tools["bridge"]),
+                    "--fplinux-handoff",
+                    session["session_id"],
+                    "--",
+                    *adapter.fpdoom_options(config),
+                    config["session_name"],
+                ],
+                timeout=config["handoff_wait_seconds"],
+                cwd=payload,
+                log=log,
+            )
         deadline = time.monotonic() + config["usb_release_wait_seconds"]
-        while bootrom in exact_usb_devices(
-            host.ps("devices.ps1"), usb["vendor_id"], usb["product_id"]
-        ):
+        while exact_usb_devices(host.ps("devices.ps1"), usb["vendor_id"], usb["product_id"]):
             if time.monotonic() >= deadline:
                 fail("The BootROM USB device did not release after the Linux transition")
             time.sleep(0.2)
@@ -1107,7 +1244,7 @@ def boot_archive(  # noqa: PLR0913 -- native loading inputs have separate owners
         try:
             for temporary in (image, directory / "fdl1.bin"):
                 temporary.unlink(missing_ok=True)
-            for stage in (directory / "payload", directory / "driver"):
+            for stage in (directory / "payload", directory / "uploads", directory / "driver"):
                 if stage.exists():
                     shutil.rmtree(stage)
             if not ready:

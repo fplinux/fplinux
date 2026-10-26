@@ -91,10 +91,12 @@ STAGED_BUILD_SOURCES = (
     "scripts/fplinux_cli/quality/source_gate.py",
     "scripts/fplinux_cli/device_data/__init__.py",
     "scripts/fplinux_cli/device_data/inputs.py",
+    "scripts/fplinux_cli/device_data/store.py",
     "scripts/fplinux_cli/reporting/__init__.py",
     "scripts/fplinux_cli/reporting/run.py",
     "scripts/fplinux_cli/reporting/process.py",
     "scripts/fplinux_cli/runtime/__init__.py",
+    "scripts/fplinux_cli/runtime/state.py",
     "scripts/fplinux_cli/runtime/ssh_transport.py",
     "scripts/fplinux_cli/workspace/__init__.py",
     "scripts/fplinux_cli/workspace/capture.py",
@@ -379,6 +381,7 @@ def target_workspace_snapshot(  # noqa: PLR0913 -- target, build context and per
     build_type: str = "release",
     include_device_data: bool = True,
     release_context: ReleaseContext | None = None,
+    phone_data: Path | None = None,
 ) -> WorkspaceSnapshot:
     """Capture selected sources and, by default, locally prepared device data."""
     if release_context is None:
@@ -422,10 +425,9 @@ def target_workspace_snapshot(  # noqa: PLR0913 -- target, build context and per
     device_data_groups = target_config["device_data"]["groups"]
     build_uses_device_data = firmware_inputs.rootfs_receives_firmware(
         root_kind=target_config["linux"]["root"]["kind"],
-        platform=target_config["platform"],
     )
     captured_groups = (
-        firmware_inputs.capture_external_device_data(target, device_data_groups, ROOT / ".cache")
+        firmware_inputs.capture_external_device_data(target, device_data_groups, root=phone_data)
         if include_device_data and build_uses_device_data
         else {}
     )

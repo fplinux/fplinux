@@ -25,9 +25,11 @@ from tests import ROOT
 from tests.bundle_support import file_record
 from tests.fixtures.executables import install_python_script
 from tests.fixtures.runtime_manifest import runtime_manifest
+from tests.host_process.runtime.sc9820e.fixtures import prepare_runtime
 from tests.small.runtime.adapter_fixtures import adapter_data
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 
@@ -104,9 +106,15 @@ class StubWindowsHost(WindowsHost):
         """Keep the supplied controlled PnP response."""
         self.snapshot = snapshot
 
-    def ps(self, script: str, *arguments: str, timeout: float = 20) -> dict[str, Any]:
+    def ps(
+        self,
+        script: str,
+        *arguments: str,
+        timeout: float = 20,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> dict[str, Any]:
         """Return a synthetic snapshot rather than execute PowerShell."""
-        del script, arguments, timeout
+        del script, arguments, timeout, cancelled
         return self.snapshot
 
     def require_private(self, path: Path) -> None:
@@ -117,6 +125,11 @@ class StubWindowsHost(WindowsHost):
         """Leave ACL handling at the explicitly replaced Windows boundary."""
         del directory
         assert path.exists()
+
+    def runtime_root(self, directory: Path) -> Path:
+        """Create fixture storage without claiming native directory-permission coverage."""
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        return directory
 
 
 def native_process_transport(directory: Path) -> WindowsTransport:
@@ -183,28 +196,53 @@ def session_preparation_bundle(directory: Path) -> WindowsBundle:
     return replace(bundle, runtime=runtime)
 
 
-def archive_files(directory: Path) -> Path:
+def archive_files(directory: Path, *, platform: str = "ums9117") -> Path:
     """Create a canonical synthetic archive and native file closure for its real consumer."""
     runtime = runtime_manifest()
-    runtime["adapter"] = adapter_data()
-    runtime["host_tools"] = {
-        "loader": "tools/spd_dump.exe",
-        "bridge": "tools/libc_server.exe",
-    }
-    runtime["sha256"].pop("host/loader")
+    files = {"tools/spd_dump.exe": b"synthetic native loader\n"}
+    runtime["host_tools"] = {"loader": "tools/spd_dump.exe"}
+    if platform == "sc9820e":
+        sc_runtime, _session, _assets = prepare_runtime(directory)
+        image_path = directory / "ramboot.bin"
+        image = bytearray(image_path.read_bytes())
+        image_path.unlink()
+        (directory / "runner").rmdir()
+        slot = sc_runtime["personalization"]["offset"]
+        image[slot : slot + 512] = bytes(512)
+        runtime.update(
+            {key: sc_runtime[key] for key in ("adapter", "assets", "addresses", "personalization")}
+        )
+        runtime["personalization"]["template_sha256"] = hashlib.sha256(bytes(512)).hexdigest()
+        runtime["identity"]["platform"] = {
+            "name": "sc9820e",
+            "vendor": "Unisoc",
+            "soc": "SC9820E",
+            "aliases": [],
+            "compatible": "sprd,sc9820e",
+            "display_name": "Unisoc SC9820E",
+        }
+        files["image/ramboot.bin"] = bytes(image)
+        for relative in runtime["assets"].values():
+            files[relative] = (directory / relative).read_bytes()
+    elif platform == "ums9117":
+        runtime["adapter"] = adapter_data()
+        runtime["host_tools"]["bridge"] = "tools/libc_server.exe"
+        files.update(
+            {
+                "image/ramboot.bin": b"DHTB synthetic image\n",
+                "assets/fdl1.bin": b"synthetic first stage\n",
+                "tools/libc_server.exe": b"synthetic native bridge\n",
+            }
+        )
+    else:
+        raise ValueError(platform)
     sources = runtime_source_files(
         "demo",
-        {"platform": "ums9117", "linux": {"root": {"kind": "initramfs"}}},
+        {"platform": platform, "linux": {"root": {"kind": "initramfs"}}},
     )
     runtime["device_data"] = None
     runtime["nand"] = None
     runtime["sha256"] = {}
-    files = {
-        "image/ramboot.bin": b"DHTB synthetic image\n",
-        "assets/fdl1.bin": b"synthetic first stage\n",
-        "tools/spd_dump.exe": b"synthetic native loader\n",
-        "tools/libc_server.exe": b"synthetic native bridge\n",
-    }
     for relative, source in sources.items():
         files[relative] = source.read_bytes()
     for relative, payload in files.items():
@@ -240,8 +278,7 @@ def archive_files(directory: Path) -> Path:
     manifest["generation"] = hashlib.sha256(canonical).hexdigest()
     (directory / "build-manifest.json").write_text(json.dumps(manifest))
     tools = {
-        "loader": "tools/spd_dump.exe",
-        "bridge": "tools/libc_server.exe",
+        **runtime["host_tools"],
         "ssh": "tools/openssh/ssh.exe",
         "keygen": "tools/openssh/ssh-keygen.exe",
         "keyscan": "tools/openssh/ssh-keyscan.exe",

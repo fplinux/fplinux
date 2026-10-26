@@ -21,7 +21,12 @@ from fplinux_cli.artifacts.bundles import (
 from fplinux_cli.artifacts.release import current_release_context
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build.identity import runtime_identity
-from fplinux_cli.build.runtime import device_data_descriptor, runtime_source_files
+from fplinux_cli.build.phone_data import acquisition_recipe, preparation_recipe
+from fplinux_cli.build.runtime import (
+    device_data_descriptor,
+    runtime_host_tools,
+    runtime_source_files,
+)
 from fplinux_cli.build.storage.stage import default_boot_artifacts
 from fplinux_cli.common import (
     canonical_json_bytes,
@@ -58,10 +63,13 @@ def runtime_manifest(  # noqa: PLR0913 -- each published artifact role stays exp
     target_config: dict[str, Any],
     platform: dict[str, Any],
     *,
+    linux_source: Path,
+    dtb: Path,
     image: str,
     asset_outputs: dict[str, tuple[str, str]],
     host_tools: dict[str, Path],
     personalization: dict[str, int | str],
+    phone_data_files: dict[str, Path],
     payload_regions: dict[str, PayloadRegion] | None = None,
 ) -> dict[str, Any]:
     """Create the generic runtime contract consumed by the common runner."""
@@ -69,16 +77,43 @@ def runtime_manifest(  # noqa: PLR0913 -- each published artifact role stays exp
         role: f"assets/{relative}" for role, (relative, _digest) in asset_outputs.items()
     }
 
-    platform_host = platform["host"]
     runtime = target_config["runtime"]
-    runtime_tools = {role: f"host/{name}" for role, name in platform_host["runtime_tools"].items()}
     device_data = device_data_descriptor(target, target_config)
-    if device_data is not None and device_data["ecc_module"] is not None:
-        from fplinux_cli.device_data.prepare import (  # noqa: PLC0415 -- selected ECC runtime.
-            NAND_ECC_TOOL,
+    runtime_tools = {
+        role: f"host/{name}"
+        for role, name in runtime_host_tools(
+            platform,
+            nand_ecc=device_data is not None and device_data["ecc_module"] is not None,
+        ).items()
+    }
+    if device_data is not None:
+        device_data["preparation_recipe"] = preparation_recipe(
+            target, target_config, source_root=release, source_catalog_root=common.ROOT
         )
-
-        runtime_tools["nand_ecc"] = f"host/{NAND_ECC_TOOL}"
+    nand = target_config.get("nand")
+    if nand is not None:
+        nand = {
+            **nand,
+            "acquisition_recipe": acquisition_recipe(
+                target_config,
+                source_root=release,
+                source_catalog_root=common.ROOT,
+                linux_source=linux_source,
+                dtb=dtb,
+            ),
+        }
+    emmc = target_config.get("emmc")
+    if emmc is not None:
+        emmc = {
+            **emmc,
+            "acquisition_recipe": acquisition_recipe(
+                target_config,
+                source_root=release,
+                source_catalog_root=common.ROOT,
+                linux_source=linux_source,
+                dtb=dtb,
+            ),
+        }
     for relative in runtime_tools.values():
         name = relative.removeprefix("host/")
         if name not in host_tools:
@@ -88,6 +123,10 @@ def runtime_manifest(  # noqa: PLR0913 -- each published artifact role stays exp
         **{
             relative: sha256_file(inputs_build.require_file(release / relative))
             for relative in runtime_source_files(target, target_config)
+        },
+        **{
+            relative: sha256_file(inputs_build.require_file(source))
+            for relative, source in phone_data_files.items()
         },
     }
     hashes.update(
@@ -130,7 +169,8 @@ def runtime_manifest(  # noqa: PLR0913 -- each published artifact role stays exp
         "assets": declared_assets,
         "adapter": adapter,
         "host_tools": runtime_tools,
-        "nand": target_config.get("nand"),
+        "nand": nand,
+        "emmc": emmc,
         "device_data": device_data,
         "sha256": hashes,
     }
@@ -145,6 +185,7 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
     release_manifest: dict[str, Any],
     work: Path,
     rootfs: Path,
+    linux_source: Path,
     kernel_output: Path,
     zimage: Path,
     dtb: Path,
@@ -201,6 +242,17 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
         copy_file(source, release / "host" / name, executable=True)
     for relative, source in runtime_source_files(target, target_config).items():
         copy_file(source, release / relative, executable=relative in {"fplinux.py", "Run.sh"})
+    phone_data_files: dict[str, Path] = {}
+    if target_config.get("emmc") is not None and device_data_descriptor(target, target_config):
+        from fplinux_cli.build.host_tools.phone_data import (  # noqa: PLC0415
+            prepare_python_modules,
+        )
+
+        phone_data_files = prepare_python_modules(
+            release, root=common.ROOT, cache=inputs_build.CACHE, offline=True
+        )
+        for source in phone_data_files.values():
+            source.chmod(0o644)
     copy_file(asset_lock_path, release / "assets.lock.toml")
     copy_file(common.ROOT / "THIRD_PARTY_NOTICES.md", release / "THIRD_PARTY_NOTICES.md")
     for package, source in sorted(bundle_apks.items()):
@@ -216,10 +268,13 @@ def _publish_staged_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay 
         target,
         target_config,
         platform,
+        linux_source=linux_source,
+        dtb=dtb,
         image=image_name,
         asset_outputs=asset_outputs,
         host_tools=host_tools,
         personalization=personalization,
+        phone_data_files=phone_data_files,
         payload_regions=payload_regions,
     )
     write_json(release / "runtime-manifest.json", runtime)
@@ -301,6 +356,7 @@ def publish_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay explicit
     release_manifest: dict[str, Any],
     work: Path,
     rootfs: Path,
+    linux_source: Path,
     kernel_output: Path,
     zimage: Path,
     dtb: Path,
@@ -339,6 +395,7 @@ def publish_bundle(  # noqa: PLR0913 -- artifact and receipt roles stay explicit
             release_manifest=release_manifest,
             work=work,
             rootfs=rootfs,
+            linux_source=linux_source,
             kernel_output=kernel_output,
             zimage=zimage,
             dtb=dtb,

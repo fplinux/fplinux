@@ -132,11 +132,21 @@ class SshTransportFakeToolTests:
             readiness = ssh_transport._network_ready("usb0", session)  # noqa: SLF001
             assert readiness == ready
 
+    @pytest.mark.parametrize("stalled_command", ["fplinux-session-id", "uname -r"])
     def test_reacquire_bounds_an_unresponsive_identity_command(
-        self, private_runtime: Path
+        self, private_runtime: Path, stalled_command: str
     ) -> None:
         """A stalled SSH probe cannot outlive the session reconnect deadline."""
         session = create_ready_session(private_runtime)
+
+        def local_ssh(_session: dict[str, Any], command: str, **_options: object) -> list[str]:
+            program = (
+                "import time; time.sleep(5)"
+                if command == stalled_command
+                else f"print({session['session_id']!r})"
+            )
+            return [sys.executable, "-c", program]
+
         # A sleeping local process replaces an SSH channel that never replies.
         # USB discovery is controlled; the process timeout and cleanup are real.
         with (
@@ -146,19 +156,24 @@ class SshTransportFakeToolTests:
             mock.patch.object(
                 ssh_transport,
                 "_ssh_argv",
-                return_value=[sys.executable, "-c", "import time; time.sleep(5)"],
+                side_effect=local_ssh,
             ),
         ):
             started = time.monotonic()
             with pytest.raises(SystemExit, match="did not reconnect before the deadline"):
-                ssh_transport.reacquire_bound_session(session)
+                ssh_transport.reacquire_bound_session(session, expected_device_identity="9" * 64)
             assert (time.monotonic() - started) < (3)
 
-    def test_initial_binding_retries_fake_ssh_tools_and_enforces_key_policy(
-        self, private_runtime: Path
+    @pytest.mark.parametrize(
+        "kernel_matches", [True, False], ids=["selected-kernel", "other-kernel"]
+    )
+    def test_initial_binding_retries_fake_ssh_tools_and_publishes_only_selected_kernel(
+        self, private_runtime: Path, *, kernel_matches: bool
     ) -> None:
         """Retry deterministic keyscan output before accepting a matching session id."""
-        state = create_ready_session(private_runtime, status="prepared")
+        previous = create_ready_session(private_runtime)
+        ssh_transport._mark_current(previous)  # noqa: SLF001 -- retain the prior reconnect record.
+        state = create_ready_session(private_runtime, status="prepared", session_id=b"n" * 32)
         Path(state["known_hosts"]).unlink()
         tool_directory = private_runtime.parent / "ssh-tools"
         tool_directory.mkdir()
@@ -186,15 +201,33 @@ class SshTransportFakeToolTests:
                     "FPLINUX_HOST_KEY": host_key,
                     "FPLINUX_SSH_ARGUMENTS": str(ssh_arguments),
                     "FPLINUX_SESSION_ID": state["session_id"],
+                    "FPLINUX_KERNEL_RELEASE": "6.18.42-fplinux-"
+                    + ("9" * 16 if kernel_matches else "8" * 16),
                 },
             ),
             mock.patch("builtins.print"),
         ):
-            ready = ssh_transport.wait_for_bound_session(state)
+            if kernel_matches:
+                ready = ssh_transport.wait_for_bound_session(
+                    state, expected_device_identity="9" * 64
+                )
+            else:
+                with pytest.raises(SystemExit, match="different kernel identity"):
+                    ssh_transport.wait_for_bound_session(state, expected_device_identity="9" * 64)
+                ssh_transport.finish_session(state)
 
-        assert (ready["status"]) == ("ready")
         assert (scan_count.read_text(encoding="ascii")) == ("2\n")
-        assert (host_key) in (Path(state["known_hosts"]).read_text(encoding="ascii"))
+        if kernel_matches:
+            assert ready["status"] == "ready"
+            assert host_key in Path(state["known_hosts"]).read_text(encoding="ascii")
+            assert not Path(previous["private_key"]).exists()
+            assert ssh_transport.load_saved_session("phone", runtime_root=private_runtime) == ready
+        else:
+            assert (
+                ssh_transport.load_saved_session("phone", runtime_root=private_runtime) == previous
+            )
+            assert Path(previous["private_key"]).read_bytes() == b"private\n"
+            assert not Path(state["private_key"]).parent.exists()
         arguments = set(ssh_arguments.read_text(encoding="ascii").splitlines())
         assert {
             "StrictHostKeyChecking=yes",

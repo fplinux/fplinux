@@ -89,11 +89,16 @@ def main() -> None:
     loader.chmod(0o700)
 
     def endpoint(
-        prepared: dict[str, Any], *, on_linux_usb: Callable[[], None] | None = None
+        prepared: dict[str, Any],
+        *,
+        expected_device_identity: str,
+        on_linux_usb: Callable[[], None] | None = None,
     ) -> dict[str, Any]:
         if on_linux_usb is not None:
             on_linux_usb()
-        return {**prepared, "status": "ready", "interface": "testncm0"}
+        ready = {**prepared, "status": "ready", "interface": "testncm0"}
+        ssh_transport.require_device_identity(ready, expected_device_identity)
+        return ready
 
     def ssh_argv(
         _session: dict[str, Any], command: str | None = None, **_options: object

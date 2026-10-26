@@ -47,11 +47,14 @@ def _verify_keyboard_session(
     target: str,
     *,
     profile: str | None,
+    phone_data: Path | None = None,
 ) -> None:
     """Verify as the session owner while keeping an explicitly sudoed keyboard privileged."""
     sudo_uid = os.environ.get("SUDO_UID")
     if os.geteuid() != 0 or sudo_uid is None or sudo_uid == "0":
-        reconnect_bundle(bundle, target, profile=profile, exec_command="true")
+        reconnect_bundle(
+            bundle, target, profile=profile, exec_command="true", phone_data=phone_data
+        )
         return
     if not sudo_uid.isascii() or not sudo_uid.isdecimal():
         fail("sudo keyboard verification requires a valid SUDO_UID")
@@ -68,7 +71,9 @@ def _verify_keyboard_session(
         "USER": account.pw_name,
         "LOGNAME": account.pw_name,
     }
-    command = bundle_runtime_command(bundle, "run", target=target, profile=profile)
+    command = bundle_runtime_command(
+        bundle, "run", target=target, profile=profile, phone_data=phone_data
+    )
     command.extend(["--reconnect", "--exec", "true"])
     try:
         result = subprocess.run(
@@ -85,16 +90,17 @@ def _verify_keyboard_session(
         raise SystemExit(result.returncode)
 
 
-def forward_keyboard(
+def forward_keyboard(  # noqa: PLR0913 -- the input device, bundle and phone selection are distinct.
     bundle: CurrentBundle,
     target: str,
     config: dict[str, Any],
     keyboard: str,
     *,
     profile: str | None,
+    phone_data: Path | None = None,
 ) -> None:
     """Replace this process with the keyboard bridge after authenticating its session."""
-    _verify_keyboard_session(bundle, target, profile=profile)
+    _verify_keyboard_session(bundle, target, profile=profile, phone_data=phone_data)
     client = _keyboard_client(bundle)
     arguments = [
         str(client),

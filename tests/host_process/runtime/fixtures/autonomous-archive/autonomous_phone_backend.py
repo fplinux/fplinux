@@ -145,7 +145,9 @@ def _phone_connection(
                         json.dumps(
                             {
                                 "arguments": arguments,
-                                "phone_data": (bundle / "data/phone").exists(),
+                                "phone_data": Path(
+                                    (bundle / "phone-prepared-path").read_text(encoding="utf-8")
+                                ).exists(),
                                 "storage_checked": (record / "storage-checks").exists(),
                             }
                         )

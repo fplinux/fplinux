@@ -31,7 +31,9 @@ def main() -> int:
         mock.patch.dict(os.environ, {"PATH": f"{tools}:{os.environ.get('PATH', '')}"}),
     ):
         if probe in {"ram-session", "both"}:
-            session = ssh_transport.reacquire_bound_session(session)
+            session = ssh_transport.reacquire_bound_session(
+                session, expected_device_identity="12" * 32
+            )
         if probe in {"kernel-identity", "both"}:
             ssh_transport.require_device_identity(session, "12" * 32)
         result = ssh_transport.run_remote(session, "receive-stdin", capture_output=capture_output)

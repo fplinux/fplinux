@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import json
+import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from fplinux_cli.common import fail, sha256_bytes
+from fplinux_cli.common import canonical_json_bytes, fail, replace_file_atomically, sha256_bytes
 from fplinux_cli.manifests.values import (
     basename_value,
     exact_table,
@@ -23,6 +25,7 @@ class OriginalFilesSource:
 
     manifest: bytes
     files: dict[str, bytes]
+    acquisition_recipe: str | None = None
 
 
 def _read_original(path: Path, description: str) -> bytes:
@@ -46,9 +49,10 @@ def read_original_files(target: str, manifest_path: Path) -> OriginalFilesSource
         value = json.loads(raw.decode("utf-8"))
     except ValueError as error:
         fail(f"device-data originals manifest is invalid JSON: {error}")
-    manifest = exact_table(
-        value, {"target", "directory", "files"}, "device-data originals manifest"
-    )
+    fields = {"target", "directory", "files"}
+    if isinstance(value, dict) and "acquisition_recipe" in value:
+        fields.add("acquisition_recipe")
+    manifest = exact_table(value, fields, "device-data originals manifest")
     if manifest["target"] != target:
         fail(f"device-data originals manifest must select target {target}")
     directory = Path(nonempty_string(manifest["directory"], "device-data originals directory"))
@@ -78,4 +82,48 @@ def read_original_files(target: str, manifest_path: Path) -> OriginalFilesSource
         if len(contents) != size or sha256_bytes(contents) != digest:
             fail(f"device-data original {name} does not match its manifest size and SHA-256")
         captured[name] = contents
-    return OriginalFilesSource(manifest=raw, files=captured)
+    recipe = manifest.get("acquisition_recipe")
+    if recipe is not None:
+        recipe = sha256_value(recipe, "device-data originals acquisition_recipe")
+    return OriginalFilesSource(manifest=raw, files=captured, acquisition_recipe=recipe)
+
+
+def save_original_files(
+    target: str,
+    originals: dict[str, bytes],
+    destination: Path,
+    *,
+    acquisition_recipe: str,
+) -> Path:
+    """Publish the complete selected source set under the caller's phone-store lock."""
+    from fplinux_cli.device_data.prepare import (  # noqa: PLC0415 -- shared atomic directory publication.
+        publish_phone_data,
+    )
+    from fplinux_cli.runtime.state import (  # noqa: PLC0415 -- private captured originals.
+        private_directory,
+    )
+
+    sha256_value(acquisition_recipe, "originals acquisition_recipe")
+    staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}-", dir=destination.parent))
+    try:
+        private_directory(staging)
+        records = []
+        for name, contents in sorted(originals.items()):
+            basename_value(name, "original filename")
+            if "\\" in name or "\x00" in name or not contents:
+                fail("original files require safe names and nonempty contents")
+            replace_file_atomically(staging / name, contents, 0o600)
+            records.append({"name": name, "size": len(contents), "sha256": sha256_bytes(contents)})
+        manifest = {
+            "target": target,
+            "directory": ".",
+            "files": records,
+            "acquisition_recipe": acquisition_recipe,
+        }
+        replace_file_atomically(staging / "manifest.json", canonical_json_bytes(manifest), 0o600)
+        read_original_files(target, staging / "manifest.json")
+        publish_phone_data(staging, destination, replace=destination.exists())
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+    return destination / "manifest.json"

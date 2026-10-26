@@ -254,6 +254,7 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
     verbose: bool = False,
     offline: bool = False,
     reporter: RunReporter | None = None,
+    phone_data: Path | None = None,
 ) -> None:
     """Build or reuse a bundle, leaving a supplied reporter to its caller."""
     own_reporter = reporter is None
@@ -265,6 +266,7 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
         profile,
         build_type=build_type,
         include_device_data=include_device_data,
+        phone_data=phone_data,
     )
     environment_lock = definition.load_environment_lock()
     environment_recipe = definition.environment_recipe_digest(environment_lock)

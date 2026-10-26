@@ -45,7 +45,7 @@ class QinFirmwareContext:
             reports={"summary.txt": report},
         )
         produced = {"wcn-firmware": group}
-        data = self.cache / "device-data" / self.target
+        data = self.root / "data/fplinux/phones" / self.target
         data.mkdir(parents=True, exist_ok=True)
         staging = Path(tempfile.mkdtemp(prefix=".phone-", dir=data))
         materialize_device_data(staging, produced, self.groups)
@@ -53,10 +53,13 @@ class QinFirmwareContext:
 
 
 @pytest.fixture
-def qin_firmware(tmp_path: Path) -> QinFirmwareContext:
+def qin_firmware(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> QinFirmwareContext:
     """Own complete synthetic input bytes; no phone data or ambient cache is read."""
     cache = tmp_path / ".cache"
     cache.mkdir()
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
     groups: dict[str, list[dict[str, Any]]] = {
         "wcn-firmware": [
             {"source": "wcnmodem.bin", "destination": "wcnmodem.bin", "size": 15},

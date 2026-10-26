@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.common import fail, sha256_bytes
 
+from .store import locked_phone_store, phone_store_directory
+
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
@@ -51,14 +53,9 @@ def rootfs_firmware_inputs(
     )
 
 
-def rootfs_receives_firmware(*, root_kind: str, platform: str) -> bool:
+def rootfs_receives_firmware(*, root_kind: str) -> bool:
     """Select built rootfs delivery where the loader has no supplemental capsule."""
-    return root_kind == "external" or platform == "sc9820e"
-
-
-def device_data_cache_directory(cache: Path, target: str) -> Path:
-    """Return the private phone, backup and session root used by one target."""
-    return cache / "device-data" / target
+    return root_kind == "external"
 
 
 def snapshot_device_data_group_directory(root: Path, target: str, group: str) -> Path:
@@ -74,17 +71,20 @@ def snapshot_device_data_path(target: str, group: str, destination: str) -> str:
 def capture_external_device_data(
     target: str,
     groups: Mapping[str, list[dict[str, Any]]],
-    cache: Path,
+    *,
+    root: Path | None = None,
 ) -> dict[str, tuple[FirmwareInput, ...]]:
-    """Capture prepared phone groups while allowing whole build inputs to be absent."""
+    """Snapshot shared prepared groups while no writer can replace their directory."""
     if not groups:
         return {}
-    directory = device_data_cache_directory(cache, target)
-    phone = directory / "phone"
-    if not phone.exists() and not phone.is_symlink():
+    store = phone_store_directory(target, root=root)
+    if not store.exists() and not store.is_symlink():
         return {}
-    _require_directory_chain((cache, cache / "device-data", directory))
-    return capture_phone_data(groups, phone, require_all=False)
+    with locked_phone_store(target, root=root) as directory:
+        phone = directory / "phone"
+        if not phone.exists() and not phone.is_symlink():
+            return {}
+        return capture_phone_data(groups, phone, require_all=False)
 
 
 def capture_phone_data(

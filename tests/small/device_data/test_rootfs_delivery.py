@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Firmware delivery into the SC9820E rootfs and unchanged capsule consumers."""
+"""External roots retain selected firmware while RAM roots receive a boot capsule."""
 
 from __future__ import annotations
 
@@ -22,21 +22,20 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.parametrize(
-    ("platform", "root_kind", "expected"),
+    ("root_kind", "expected"),
     [
-        ("sc9820e", "initramfs", True),
-        ("ums9117", "initramfs", False),
-        ("ums9117", "external", True),
+        ("initramfs", False),
+        ("external", True),
     ],
 )
 def test_delivery_respects_the_supported_loader_boundary(
-    platform: str, root_kind: str, *, expected: bool
+    root_kind: str, *, expected: bool
 ) -> None:
-    """SC9820E has one built rootfs while UMS9117 RAM boot retains its capsule."""
-    assert rootfs_receives_firmware(root_kind=root_kind, platform=platform) is expected
+    """RAM boot supplies phone data separately from the reusable built rootfs."""
+    assert rootfs_receives_firmware(root_kind=root_kind) is expected
 
 
-def test_qin_ram_rootfs_installs_payload_and_firmware_changes_recipe(tmp_path: Path) -> None:
+def test_external_rootfs_installs_payload_and_firmware_changes_recipe(tmp_path: Path) -> None:
     """Real firmware installation and recipe identity consume the selected radio bytes."""
     contents = b"Qin radio template\n" * 128
     firmware = FirmwareInput(
@@ -47,9 +46,7 @@ def test_qin_ram_rootfs_installs_payload_and_firmware_changes_recipe(tmp_path: P
     )
     groups = {"wcn-firmware": (firmware,)}
     captured = (
-        rootfs_firmware_inputs(groups)
-        if rootfs_receives_firmware(root_kind="initramfs", platform="sc9820e")
-        else ()
+        rootfs_firmware_inputs(groups) if rootfs_receives_firmware(root_kind="external") else ()
     )
     root = tmp_path / "root"
     root.mkdir()

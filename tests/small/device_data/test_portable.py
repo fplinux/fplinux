@@ -66,6 +66,7 @@ def shared_extraction(tmp_path: Path) -> SharedExtraction:
         stream.write(b"radio")
     spec = DeviceDataSpec(
         target="nokia-ta1618",
+        preparation_recipe="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         parser=parser,
         audio=AudioProfileContext(
             machine_compatible=b"nokia,ta1618",
@@ -139,6 +140,7 @@ def test_relocated_parser_publishes_all_groups_and_keeps_the_backup(
     if geometry_source == "receipt":
         receipt = {
             "target": "nokia-ta1618",
+            "acquisition_recipe": "a" * 64,
             "id_bytes": "e521",
             "chip": "controlled chip",
             "page_main_bytes": 2048,

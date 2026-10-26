@@ -8,7 +8,8 @@ import struct
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .formats import BLOCK_MAIN_BYTES, redundant_vbm_partitions
+from .formats import redundant_vbm_partitions
+from .nand_geometry import BLOCK_MAIN_BYTES
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

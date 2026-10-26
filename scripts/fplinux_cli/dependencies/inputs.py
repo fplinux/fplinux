@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from fplinux_cli.alpine import lock as alpine_lock
 from fplinux_cli.alpine import selection as alpine_selection
 from fplinux_cli.alpine.sources import aport_declaration, aport_sources
+from fplinux_cli.build.host_tools.phone_data import preparation_sources
 from fplinux_cli.build.runtime import (
     runtime_host_tools,
     runtime_needs_nand_ecc,
@@ -282,6 +283,8 @@ def build_source_inputs(
     for item in aport_source_inputs(root, packages):
         selected[item.key] = item
     source_ids = {platform["linux"]["source_lock"]}
+    if config.get("emmc") is not None:
+        source_ids.update(source.id for source in preparation_sources(root))
     bootstrap = platform["bootstrap"]
     if bootstrap["backend"] == "ums9117":
         source_ids.add(bootstrap["vendor_source_lock"])
@@ -468,6 +471,10 @@ def _inventory(root: Path) -> tuple[dict[str, object], list[DependencyInput]]:
             platform_context[name]["uboot"] = lock
     asset_context = {}
     for target, selection in targets.items():
+        if raw_targets[target].get("emmc") is not None:
+            for source in preparation_sources(root):
+                active_sources[source.id] = sources[source.id]
+                inputs.append(source_input(source))
         if platforms[selection["platform"]]["bootstrap"]["backend"] == "sc9820e":
             selected_loaders = loader_sources(raw_targets[target]["loader"]["build"], sources)
             asset_context[target] = [asdict(source) for source in selected_loaders]

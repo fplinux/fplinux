@@ -49,14 +49,12 @@ def _current_rootfs_recipes(cache: Path) -> frozenset[str] | None:
                 device_data = firmware_inputs.capture_external_device_data(
                     target,
                     device_data_groups,
-                    cache,
                 )
                 root_kind = target_config["linux"]["root"]["kind"]
                 firmware = (
                     firmware_inputs.rootfs_firmware_inputs(device_data)
                     if firmware_inputs.rootfs_receives_firmware(
                         root_kind=root_kind,
-                        platform=target_config["platform"],
                     )
                     else ()
                 )

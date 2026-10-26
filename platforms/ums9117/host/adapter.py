@@ -142,15 +142,17 @@ def adapter_config(value: object) -> dict[str, Any]:
     }
 
 
-def loader_arguments(
+def loader_arguments(  # noqa: PLR0913 -- loader images, addresses and wait policy are distinct inputs.
     loader: Path,
     fdl1: Path,
     image: Path,
     addresses: dict[str, int],
     exec_distance: int,
+    *,
+    wait_seconds: int,
 ) -> list[str]:
     """Build the RAM-only loader command for one target."""
-    arguments = [str(loader), "--wait", "0"]
+    arguments = [str(loader), "--wait", str(wait_seconds)]
     if exec_distance:
         arguments.extend(["t117_exec_dist", f"0x{exec_distance:x}"])
     arguments.extend(
@@ -292,9 +294,10 @@ def complete_linux_handoff(
             events("linux-usb")
 
     ready: dict[str, Any] = ssh_transport.wait_for_bound_session(
-        session, on_linux_usb=linux_usb_observed
+        session,
+        expected_device_identity=expected_device_identity,
+        on_linux_usb=linux_usb_observed,
     )
-    ssh_transport.require_device_identity(ready, expected_device_identity)
     if events is not None:
         events("ssh-ready")
     print("Private USB-NCM SSH session is ready.", flush=True)
@@ -311,6 +314,7 @@ def run(  # noqa: PLR0913 -- runtime, session, handoff, user data and output are
     device_data: Path | None = None,
     output: TextIO | None = None,
     loader_trace: bool = False,
+    on_wait: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Execute the fixed RAM-only UMS9117 sequence and authenticate its SSH session."""
     display_name = runtime_target_display_name(runtime)
@@ -345,6 +349,7 @@ def run(  # noqa: PLR0913 -- runtime, session, handoff, user data and output are
         image,
         addresses,
         config["exec_distance"],
+        wait_seconds=0,
     )
     if loader_trace:
         loader_argv[1:1] = ["--verbose", "1"]
@@ -381,11 +386,14 @@ def run(  # noqa: PLR0913 -- runtime, session, handoff, user data and output are
                 while bootrom_device is None:
                     if time.monotonic() >= deadline:
                         fail("BootROM USB was not detected")
+                    if on_wait is not None:
+                        on_wait()
                     time.sleep(0.01)
                     bootrom_device = usb_device_path(
                         bootrom_usb["vendor_id"],
                         bootrom_usb["product_id"],
                     )
+                on_wait = None
                 try:
                     require_usb_device_access(bootrom_device, bootrom_id)
                 except BootromDisconnectedError:

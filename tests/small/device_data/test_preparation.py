@@ -32,6 +32,8 @@ class PartitionPreparationTests:
     def _inputs(
         protected_address: bytes = b"A" * 8,
         protected_fm: bytes = bytes(range(128)),
+        *,
+        oob_bytes: int = 64,
     ) -> tuple[
         device_data.PhysicalNand,
         dict[int, tuple[int, int]],
@@ -53,7 +55,8 @@ class PartitionPreparationTests:
         )
         main = b"".join(payload.ljust(131072, b"\xff") for payload in payloads)
         raw = b"".join(
-            main[offset : offset + 2048] + b"\xff" * 64 for offset in range(0, len(main), 2048)
+            main[offset : offset + 2048] + b"\xff" * oob_bytes
+            for offset in range(0, len(main), 2048)
         )
         partitions = {
             0x10000018: (0, 131072),
@@ -61,22 +64,23 @@ class PartitionPreparationTests:
             0x1000000F: (262144, 131072),
             0x10000003: (393216, 131072),
         }
-        return device_data.PhysicalNand(raw, 2112), partitions
+        return device_data.PhysicalNand(raw, 2048 + oob_bytes), partitions
 
     @pytest.mark.parametrize(
-        ("target", "filename", "prefix"),
+        ("target", "filename", "prefix", "oob_bytes"),
         [
-            ("nokia-ta1618", "ta1618_device_data.py", "ta1618"),
-            ("inoi-240-modern-4g", "inoi240_device_data.py", "inoi240"),
-            ("inoi-244-modern-4g", "inoi244_device_data.py", "inoi244"),
-            ("maxvi-k15n-4g", "maxvi_device_data.py", "maxvi-k15n-4g"),
+            ("nokia-ta1618", "ta1618_device_data.py", "ta1618", 64),
+            ("inoi-240-modern-4g", "inoi240_device_data.py", "inoi240", 64),
+            ("inoi-244-modern-4g", "inoi244_device_data.py", "inoi244", 64),
+            ("inoi-244-modern-4g", "inoi244_device_data.py", "inoi244", 128),
+            ("maxvi-k15n-4g", "maxvi_device_data.py", "maxvi-k15n-4g", 64),
         ],
     )
     def test_target_parser_uses_the_selected_identity_and_speaker_policy(
-        self, target: str, filename: str, prefix: str
+        self, target: str, filename: str, prefix: str, oob_bytes: int
     ) -> None:
         """Target partition discovery retains the selected profile identity and topology."""
-        nand, _partitions = self._inputs()
+        nand, _partitions = self._inputs(oob_bytes=oob_bytes)
         table = vbm_table(
             (
                 (0x10000018, 0x100, 0, 0),
@@ -86,9 +90,10 @@ class PartitionPreparationTests:
             )
         ).ljust(131072, b"\xff")
         table_raw = b"".join(
-            table[offset : offset + 2048] + b"\xff" * 64 for offset in range(0, len(table), 2048)
+            table[offset : offset + 2048] + b"\xff" * oob_bytes
+            for offset in range(0, len(table), 2048)
         )
-        nand = device_data.PhysicalNand(nand.raw + table_raw * 2, 2112)
+        nand = device_data.PhysicalNand(nand.raw + table_raw * 2, 2048 + oob_bytes)
         spec = importlib.util.spec_from_file_location(
             f"test_{target.replace('-', '_')}_data", ROOT / "targets" / target / filename
         )
@@ -108,6 +113,12 @@ class PartitionPreparationTests:
         profile = result.groups["audio-profile"].prepared[f"{prefix}-audio-profile.bin"]
         assert profile[:32] == b"FPAUDIO\0example,phone" + b"\0" * 11
         assert profile[53:] == FITTED_HEADFREE_SECTION + FITTED_INOI_PROCESSING_SECTION
+        original = cm4_firmware()
+        expected_cm4 = (
+            original[:0x114] + b"\x08\xe0" + original[0x116:0x130] + b"\x2b\xe0" + original[0x132:]
+        )
+        assert result.groups["bluetooth"].originals[f"{prefix}-cm4.bin"] == original
+        assert result.groups["bluetooth"].prepared[f"{prefix}-cm4.bin"] == expected_cm4
 
     def test_shared_fitted_extraction_includes_fm_and_rejects_conflicting_copies(self) -> None:
         """Every fitted target needs the same admitted FM group from matching NV419 copies."""

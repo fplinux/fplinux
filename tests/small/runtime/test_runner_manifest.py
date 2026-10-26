@@ -73,8 +73,144 @@ def load_manifest(runtime_manifest_path: Path, manifest: dict[str, Any]) -> dict
     return RUNNER.validate_runtime_identity(runtime)
 
 
+@pytest.fixture
+def emmc_manifest() -> dict[str, Any]:
+    """Declare optional radio data alongside mandatory audio for one MMC reader."""
+    manifest = runtime_manifest()
+    manifest["identity"]["platform"] = {
+        "name": "sc9820e",
+        "vendor": "Unisoc",
+        "soc": "SC9820E",
+        "aliases": [],
+        "compatible": "sprd,sc9820e",
+        "display_name": "Unisoc SC9820E",
+    }
+    manifest["emmc"] = {
+        "raw_device": "/dev/mmcblk1",
+        "files": [
+            {"name": "audio_para", "locations": [["system", "/etc/audio_para"]], "max_bytes": 100}
+        ],
+        "acquisition_recipe": "a" * 64,
+    }
+    manifest["device_data"] = {
+        "parser": None,
+        "originals_parser": "targets/demo/phone_data.py",
+        "ecc_module": None,
+        "groups": {
+            "audio-profile": [{"source": "audio.bin", "destination": "audio.bin"}],
+            "wcn-firmware": [{"source": "wcn.bin", "destination": "wcn.bin"}],
+        },
+        "required_groups": ["audio-profile"],
+        "audio_policy": {
+            "speaker_vibration": False,
+            "speaker_from_headphones": False,
+            "headfree_headphones_only": False,
+        },
+        "preparation_recipe": "b" * 64,
+    }
+    for relative in (
+        "platforms/sc9820e/host/adapter.py",
+        "targets/demo/phone_data.py",
+        "scripts/fplinux_cli/device_data/emmc.py",
+        "scripts/fplinux_cli/device_data/emmc-files/read_files.py",
+        "scripts/fplinux_cli/runtime/emmc_files.py",
+        "scripts/fplinux_cli/runtime/emmc-files/collect.sh",
+        "scripts/ext4/__init__.py",
+        "scripts/cachetools/__init__.py",
+        "scripts/crcmod/__init__.py",
+        "licenses/phone-data/ext4-LICENSE.txt",
+        "licenses/phone-data/cachetools-LICENSE.txt",
+        "licenses/phone-data/crcmod-LICENSE.txt",
+    ):
+        manifest["sha256"][relative] = "c" * 64
+    return manifest
+
+
+def test_emmc_manifest_retains_optional_groups_without_requiring_them(
+    runtime_manifest_path: Path, emmc_manifest: dict[str, Any]
+) -> None:
+    loaded = load_manifest(runtime_manifest_path, emmc_manifest)
+    assert loaded["emmc"]["raw_device"] == "/dev/mmcblk1"
+    assert loaded["device_data"]["required_groups"] == ["audio-profile"]
+    assert "wcn-firmware" in loaded["device_data"]["groups"]
+
+
+@pytest.mark.parametrize("required", [[], ["unknown"], ["audio-profile", "audio-profile"], [1]])
+def test_emmc_manifest_rejects_invalid_required_groups(
+    runtime_manifest_path: Path, emmc_manifest: dict[str, Any], required: object
+) -> None:
+    emmc_manifest["device_data"]["required_groups"] = required
+    with pytest.raises(SystemExit, match="required_groups must be"):
+        load_manifest(runtime_manifest_path, emmc_manifest)
+
+
+@pytest.mark.parametrize(
+    "device", ["/dev/mmcblk1p1", "/dev/nand-raw", "/dev/mmcblk", "/outside/mmcblk1"]
+)
+def test_emmc_manifest_rejects_nonwhole_mmc_sources(
+    runtime_manifest_path: Path, emmc_manifest: dict[str, Any], device: str
+) -> None:
+    emmc_manifest["emmc"]["raw_device"] = device
+    with pytest.raises(SystemExit, match="whole /dev/mmcblkN"):
+        load_manifest(runtime_manifest_path, emmc_manifest)
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "targets/demo/phone_data.py",
+        "scripts/fplinux_cli/runtime/emmc-files/collect.sh",
+        "scripts/fplinux_cli/device_data/emmc-files/read_files.py",
+        "scripts/ext4/__init__.py",
+        "licenses/phone-data/crcmod-LICENSE.txt",
+    ],
+)
+def test_emmc_manifest_rejects_an_incomplete_preparation_closure(
+    runtime_manifest_path: Path, emmc_manifest: dict[str, Any], missing: str
+) -> None:
+    del emmc_manifest["sha256"][missing]
+    with pytest.raises(SystemExit, match="required runtime closure"):
+        load_manifest(runtime_manifest_path, emmc_manifest)
+
+
+def test_emmc_manifest_uses_the_shared_original_location_admission(
+    runtime_manifest_path: Path, emmc_manifest: dict[str, Any]
+) -> None:
+    emmc_manifest["emmc"]["files"][0]["locations"] = [["system", "/etc/../private"]]
+    with pytest.raises(SystemExit, match="unsafe source location"):
+        load_manifest(runtime_manifest_path, emmc_manifest)
+
+
+def test_emmc_manifest_rejects_a_reader_for_another_platform(
+    runtime_manifest_path: Path, emmc_manifest: dict[str, Any]
+) -> None:
+    emmc_manifest["identity"]["platform"]["name"] = "ums9117"
+    with pytest.raises(SystemExit, match="does not support the runtime eMMC reader"):
+        load_manifest(runtime_manifest_path, emmc_manifest)
+
+
 class RuntimeManifestTests:
     """The bundled runner accepts only its exact manifest contract."""
+
+    @pytest.mark.parametrize("recipe", [None, "", "a" * 63, "A" * 64, "g" * 64])
+    def test_rejects_nand_without_a_content_derived_acquisition_recipe(
+        self, runtime_manifest_path: Path, recipe: object
+    ) -> None:
+        """A runner cannot reuse a raw backup using an absent or malformed identity."""
+        manifest = runtime_manifest()
+        manifest["nand"] = {"raw_device": "/dev/raw-nand", "acquisition_recipe": recipe}
+        with pytest.raises(SystemExit, match="acquisition_recipe must be"):
+            load_manifest(runtime_manifest_path, manifest)
+
+    def test_accepts_nand_identity_without_preparation_groups(
+        self, runtime_manifest_path: Path
+    ) -> None:
+        """Raw backup support does not require a derived phone-data parser."""
+        manifest = runtime_manifest()
+        manifest["nand"] = {"raw_device": "/dev/raw-nand", "acquisition_recipe": "a" * 64}
+        loaded = load_manifest(runtime_manifest_path, manifest)
+        assert loaded["nand"]["acquisition_recipe"] == "a" * 64
+        assert loaded["device_data"] is None
 
     def test_accepts_the_exact_runtime_contract(self, runtime_manifest_path: Path) -> None:
         """Accept a complete manifest with explicit USB interfaces."""
@@ -83,6 +219,44 @@ class RuntimeManifestTests:
         assert (loaded["personalization"]["bytes"]) == (512)
         assert (loaded["usb"]["linux_gadget"]["keyboard_interface"]) == (1)
         assert (loaded["identity"]["target"]["display_name"]) == ("Demo Phone (D-1, D-2)")
+        assert loaded["release_id"] == "aaaaaaaaaaaa"
+        assert loaded["source_commit"] == "a" * 40
+        assert loaded["source_snapshot"] == "b" * 64
+
+    def test_accepts_a_source_archive_without_a_git_commit(
+        self, runtime_manifest_path: Path
+    ) -> None:
+        """A source snapshot remains explicit when its archive has no Git checkout."""
+        manifest = runtime_manifest()
+        manifest["release_id"] = "bbbbbbbbbbbb"
+        manifest["source_commit"] = None
+
+        loaded = load_manifest(runtime_manifest_path, manifest)
+
+        assert loaded["source_commit"] is None
+
+    @pytest.mark.parametrize("field", ["release_id", "source_commit", "source_snapshot"])
+    def test_rejects_a_runtime_without_its_complete_release_identity(
+        self, runtime_manifest_path: Path, field: str
+    ) -> None:
+        """Every release field is mandatory, including a nullable source commit."""
+        manifest = runtime_manifest()
+        del manifest[field]
+
+        with pytest.raises(SystemExit, match="runtime manifest must contain exactly"):
+            load_manifest(runtime_manifest_path, manifest)
+
+    @pytest.mark.parametrize("field", ["release_id", "source_commit", "source_snapshot"])
+    @pytest.mark.parametrize("value", ["", 1])
+    def test_rejects_an_empty_or_nonstring_release_identity(
+        self, runtime_manifest_path: Path, field: str, value: object
+    ) -> None:
+        """Present release fields cannot replace their source identity with empty data."""
+        manifest = runtime_manifest()
+        manifest[field] = value
+
+        with pytest.raises(SystemExit, match="must be a non-empty string"):
+            load_manifest(runtime_manifest_path, manifest)
 
     @pytest.mark.parametrize(
         ("build_type", "accepted"),

@@ -20,7 +20,7 @@ from unittest import mock
 import pytest
 from fplinux_cli import common
 from fplinux_cli.cli import nand
-from fplinux_cli.device_data.formats import NandGeometry
+from fplinux_cli.device_data.nand_geometry import NandGeometry
 from fplinux_cli.device_data.prepare import dump_page_bytes
 from fplinux_cli.runtime import bundle_session, nand_backup
 
@@ -97,10 +97,11 @@ class FakePhone:
     It cannot show that the phone kernel identifies a chip when its reader is opened.
     """
 
-    def __init__(self, geometry: str, payload: bytes) -> None:
+    def __init__(self, geometry: str, payload: bytes, *, repetitions: int = 1) -> None:
         """Keep the reader's report, the raw bytes and every remote command it receives."""
         self.geometry = geometry
         self.payload = payload
+        self.repetitions = repetitions
         self.commands: list[str] = []
 
     def stream_remote(
@@ -116,9 +117,9 @@ class FakePhone:
         del session, timeout
         self.commands.append(command)
         if command.startswith("exec dd "):
-            destination.write(self.payload)
+            destination.writelines(self.payload for _ in range(self.repetitions))
             if progress is not None:
-                progress(len(self.payload))
+                progress(len(self.payload) * self.repetitions)
         else:
             destination.write(self.geometry.encode("ascii"))
 
@@ -148,6 +149,7 @@ class NandDestination:
                 lambda: (phone, {"session_id": "selected"}),
                 self.destination,
                 target="demo-phone",
+                acquisition_recipe="a" * 64,
                 raw_device="/dev/ums9117-nand-raw",
                 declared_id=declared_id,
                 declared_raw_page_bytes=declared_raw_page_bytes,
@@ -156,10 +158,13 @@ class NandDestination:
 
 
 @pytest.fixture
-def nand_destination() -> Iterator[NandDestination]:
+def nand_destination(tmp_path: Path) -> Iterator[NandDestination]:
     """Own the destination tree and reporting root for one backup attempt."""
+    log_root = os.environ.get("FPLINUX_LOG_ROOT")
+    parent = Path(log_root) if log_root else tmp_path
+    parent.mkdir(parents=True, exist_ok=True)
     with contextlib.ExitStack() as resources:
-        temporary = tempfile.TemporaryDirectory()
+        temporary = tempfile.TemporaryDirectory(dir=parent, prefix="nand-backup-")
         resources.enter_context(temporary)
         directory = Path(temporary.name)
         resources.enter_context(mock.patch("fplinux_cli.reporting.run.ROOT", directory))
@@ -191,6 +196,7 @@ class NandBackupTests:
                 lambda: (phone, {"session_id": "selected"}),
                 nand_destination.destination,
                 target="demo-phone",
+                acquisition_recipe="a" * 64,
                 raw_device="/dev/ums9117-nand-raw",
                 progress=progress,
             )
@@ -229,6 +235,7 @@ class NandBackupTests:
                 "raw_bytes": 2176,
                 "sha256": digest,
                 "target": "demo-phone",
+                "acquisition_recipe": "a" * 64,
             }
         )
         assert (nand_destination.receipt.stat().st_mode & 0o777) == (0o600)
@@ -239,20 +246,58 @@ class NandBackupTests:
         assert ("verified") not in (output)
         assert (list(nand_destination.directory.glob(".nand.raw.*"))) == ([])
 
-    def test_target_without_declared_chip_takes_its_page_size_from_the_device(
-        self, nand_destination: NandDestination
+    @pytest.mark.parametrize(
+        ("id_bytes", "chip", "oob_bytes", "raw_bytes"),
+        [
+            pytest.param("e521", "DS35M1GA", 64, 138412032, id="ds35m1ga"),
+            pytest.param("a1a5", "FM25LS01", 128, 142606336, id="fm25ls01"),
+        ],
+    )
+    def test_optional_chip_backup_preserves_geometry(
+        self,
+        nand_destination: NandDestination,
+        id_bytes: str,
+        chip: str,
+        oob_bytes: int,
+        raw_bytes: int,
     ) -> None:
-        """A new target streams the reported 64-byte OOB page without padding it to 128."""
-        payload = b"M" * 2048 + bytes(range(64))
-        phone = FakePhone(ONE_PAGE_64_OOB, payload)
+        """Both fitted layouts retain their complete raw image and reader geometry."""
+        report = _geometry_report(
+            id_bytes=id_bytes,
+            chip=chip,
+            page_main_bytes=2048,
+            oob_bytes=oob_bytes,
+            pages_per_block=64,
+            block_count=1024,
+            raw_bytes=raw_bytes,
+        )
+        page = b"M" * 2048 + bytes(range(oob_bytes))
+        block = page * 64
+        phone = FakePhone(report, block, repetitions=1024)
 
         nand_destination.backup(phone)
 
-        assert (nand_destination.destination.read_bytes()) == (payload)
-        assert (len(phone.raw_reads())) == (1)
-        assert (json.loads(nand_destination.receipt.read_text(encoding="utf-8"))["raw_bytes"]) == (
-            2112
-        )
+        assert nand_destination.destination.stat().st_size == raw_bytes
+        with nand_destination.destination.open("rb") as stream:
+            assert stream.read(len(page)) == page
+            stream.seek(-len(page), os.SEEK_END)
+            assert stream.read() == page
+        digest = hashlib.sha256()
+        for _ in range(1024):
+            digest.update(block)
+        assert len(phone.raw_reads()) == 1
+        assert json.loads(nand_destination.receipt.read_bytes()) == {
+            "id_bytes": id_bytes,
+            "chip": chip,
+            "page_main_bytes": 2048,
+            "oob_bytes": oob_bytes,
+            "pages_per_block": 64,
+            "block_count": 1024,
+            "raw_bytes": raw_bytes,
+            "sha256": digest.hexdigest(),
+            "target": "demo-phone",
+            "acquisition_recipe": "a" * 64,
+        }
 
     def test_incomplete_stream_preserves_previous_output_and_receipt(
         self, nand_destination: NandDestination
@@ -388,6 +433,7 @@ class NandBackupTests:
                 connect,
                 missing_parent,
                 target="demo-phone",
+                acquisition_recipe="a" * 64,
                 raw_device="/dev/ums9117-nand-raw",
             )
 
@@ -434,7 +480,7 @@ class NandCommandSelectionTests:
         if action == "backup":
             assert arguments[5] == str(command_bundle.root / "selected-nand.bin")
         assert arguments[arguments.index("--data-root") + 1] == str(
-            command_bundle.root / ".cache/device-data/phone"
+            command_bundle.root / ".cache/runtime/phone"
         )
         assert child.call_args.kwargs == {"check": False}
 
@@ -473,12 +519,66 @@ def backup_receipt() -> Iterator[BackupReceipt]:
             "raw_bytes": 24,
             "sha256": hashlib.sha256(raw).hexdigest(),
             "target": "demo-phone",
+            "acquisition_recipe": "a" * 64,
         }
         yield BackupReceipt(directory, backup, raw, receipt, record)
 
 
 class BackupReceiptTests:
     """Bind a saved geometry receipt to the exact bytes it describes."""
+
+    def test_explicit_import_publishes_exact_bytes_and_current_compatibility_identity(
+        self, backup_receipt: BackupReceipt
+    ) -> None:
+        """An admitted import uses the same private raw publication and receipt contract."""
+        geometry = NandGeometry("e521", "demo-64", 4, 2, 2, 2, 24)
+        result = nand_backup.save_backup_bytes(
+            backup_receipt.backup,
+            backup_receipt.raw,
+            geometry,
+            target="demo-phone",
+            acquisition_recipe="b" * 64,
+        )
+        assert result == backup_receipt.backup
+        assert result.read_bytes() == backup_receipt.raw
+        assert result.stat().st_mode & 0o777 == 0o600
+        assert backup_receipt.receipt.stat().st_mode & 0o777 == 0o600
+        assert json.loads(backup_receipt.receipt.read_bytes()) == {
+            "id_bytes": "e521",
+            "chip": "demo-64",
+            "page_main_bytes": 4,
+            "oob_bytes": 2,
+            "pages_per_block": 2,
+            "block_count": 2,
+            "raw_bytes": 24,
+            "sha256": hashlib.sha256(backup_receipt.raw).hexdigest(),
+            "target": "demo-phone",
+            "acquisition_recipe": "b" * 64,
+        }
+        record = nand_backup.read_backup_record(result, backup_receipt.raw)
+        assert record is not None
+        assert record.geometry == geometry
+        assert record.acquisition_recipe == "b" * 64
+
+    def test_incomplete_import_preserves_the_previous_backup_and_receipt(
+        self, backup_receipt: BackupReceipt
+    ) -> None:
+        """The explicit import boundary cannot replace complete bytes with a short file."""
+        previous = b"previous backup"
+        backup_receipt.backup.write_bytes(previous)
+        backup_receipt.write(backup_receipt.record)
+        previous_receipt = backup_receipt.receipt.read_bytes()
+        with pytest.raises(SystemExit, match="expected 24 bytes, got 5"):
+            nand_backup.save_backup_bytes(
+                backup_receipt.backup,
+                b"short",
+                NandGeometry("e521", "demo-64", 4, 2, 2, 2, 24),
+                target="demo-phone",
+                acquisition_recipe="b" * 64,
+            )
+        assert backup_receipt.backup.read_bytes() == previous
+        assert backup_receipt.receipt.read_bytes() == previous_receipt
+        assert list(backup_receipt.directory.glob(".saved.bin.*")) == []
 
     def test_receipt_returns_the_recorded_geometry_or_nothing_when_absent(
         self, backup_receipt: BackupReceipt
@@ -501,6 +601,20 @@ class BackupReceiptTests:
                 raw_bytes=24,
             )
         )
+        record = nand_backup.read_backup_record(backup_receipt.backup, backup_receipt.raw)
+        assert record is not None
+        assert record.target == "demo-phone"
+        assert record.acquisition_recipe == "a" * 64
+        assert record.sha256 == hashlib.sha256(backup_receipt.raw).hexdigest()
+
+    @pytest.mark.parametrize("recipe", ["", "a" * 63, "A" * 64, "z" * 64, None])
+    def test_receipt_rejects_invalid_acquisition_identity(
+        self, backup_receipt: BackupReceipt, recipe: object
+    ) -> None:
+        """A saved physical image cannot claim compatibility without an exact recipe."""
+        backup_receipt.write({**backup_receipt.record, "acquisition_recipe": recipe})
+        with pytest.raises(SystemExit, match="acquisition_recipe must be"):
+            nand_backup.read_backup_record(backup_receipt.backup, backup_receipt.raw)
 
     @pytest.mark.parametrize(
         "case",
@@ -557,6 +671,7 @@ class BackupReceiptTests:
                 lambda: (FakePhone(ONE_PAGE_64_OOB, payload), {}),
                 backup_receipt.backup,
                 target="demo-phone",
+                acquisition_recipe="a" * 64,
                 raw_device="/dev/ums9117-nand-raw",
             )
 

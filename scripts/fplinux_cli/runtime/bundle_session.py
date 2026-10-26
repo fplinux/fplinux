@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any
 from fplinux_cli import common
 from fplinux_cli.artifacts.bundles import BundleStateError, resolve_current_bundle
 from fplinux_cli.common import fail
-from fplinux_cli.device_data.inputs import device_data_cache_directory
 from fplinux_cli.manifests.paths import normalize_profile
 
 if TYPE_CHECKING:
@@ -84,8 +83,8 @@ def resolve_target_bundle(
 
 
 def target_data_root(target: str) -> Path:
-    """Use the same personal store for every source-checkout runtime command."""
-    return device_data_cache_directory(common.ROOT / ".cache", target)
+    """Keep source-checkout sessions separate from persistent phone data."""
+    return common.ROOT / ".cache" / "runtime" / target
 
 
 def bundle_runtime_command(
@@ -94,6 +93,7 @@ def bundle_runtime_command(
     *arguments: str,
     target: str,
     profile: str | None,
+    phone_data: Path | None = None,
 ) -> list[str]:
     """Execute the selected bundle's entry point with isolated Python imports."""
     entry = bundle.path / "fplinux.py"
@@ -102,7 +102,7 @@ def bundle_runtime_command(
     logs = common.ROOT / ".cache/logs/run" / target
     if profile is not None:
         logs = logs / "profiles" / profile
-    return [
+    command = [
         sys.executable,
         "-I",
         str(entry),
@@ -115,6 +115,9 @@ def bundle_runtime_command(
         "--log-root",
         str(logs),
     ]
+    if phone_data is not None:
+        command.extend(("--phone-data", str(phone_data)))
+    return command
 
 
 def _manifest_device_identity(manifest: dict[str, Any]) -> str:

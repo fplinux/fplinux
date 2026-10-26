@@ -280,7 +280,10 @@ source_directory = "spd_dump"
 binary = "spd_dump"
 link = "static-libusb"
 copies = []
-patches = ["platforms/sc9820e/host/0001-spd-dump-selected-usb-final-exec.patch"]
+patches = [
+  "common/host/spd-dump-usb.patch",
+  "platforms/sc9820e/host/0001-spd-dump-final-exec.patch",
+]
 self_test = false
 
 [[host.tools.members]]

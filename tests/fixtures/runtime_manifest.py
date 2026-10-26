@@ -59,6 +59,7 @@ def runtime_manifest() -> dict[str, Any]:
         "adapter": {"kind": "demo"},
         "host_tools": {"loader": loader},
         "nand": None,
+        "emmc": None,
         "device_data": None,
         "sha256": {
             image: "a" * 64,

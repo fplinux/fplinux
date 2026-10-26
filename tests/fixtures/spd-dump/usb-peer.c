@@ -21,6 +21,7 @@ static libusb_device duplicate = { 7, 9 };
 static libusb_device *devices[] = { &other, &selected, &duplicate, NULL };
 static libusb_device_handle opened;
 static char scenario[64];
+static unsigned int enumeration_count;
 static FILE *plan;
 static FILE *log_file;
 
@@ -75,10 +76,16 @@ void libusb_exit(libusb_context *context)
 const char *libusb_error_name(int error)
 {
 	switch (error) {
+	case LIBUSB_ERROR_ACCESS:
+		return "LIBUSB_ERROR_ACCESS";
+	case LIBUSB_ERROR_BUSY:
+		return "LIBUSB_ERROR_BUSY";
 	case LIBUSB_ERROR_TIMEOUT:
 		return "LIBUSB_ERROR_TIMEOUT";
 	case LIBUSB_ERROR_NO_DEVICE:
 		return "LIBUSB_ERROR_NO_DEVICE";
+	case LIBUSB_ERROR_NOT_SUPPORTED:
+		return "LIBUSB_ERROR_NOT_SUPPORTED";
 	default:
 		return "LIBUSB_ERROR_IO";
 	}
@@ -89,8 +96,18 @@ ssize_t libusb_get_device_list(libusb_context *context, libusb_device ***list)
 	(void)context;
 	*list = devices;
 	record("list\n");
+	enumeration_count++;
 	if (!strcmp(scenario, "list-error"))
 		return LIBUSB_ERROR_IO;
+	if (!strcmp(scenario, "discovery-absent") ||
+	    (!strcmp(scenario, "discovery-delayed") && enumeration_count == 1))
+		return 0;
+	if (!strncmp(scenario, "discovery-", strlen("discovery-"))) {
+		if (!strcmp(scenario, "discovery-ambiguous") ||
+		    !strcmp(scenario, "discovery-unrelated-first"))
+			return 2;
+		return 1;
+	}
 	if (!strcmp(scenario, "absent"))
 		return 1;
 	return !strcmp(scenario, "ambiguous") ? 3 : 2;
@@ -115,9 +132,16 @@ uint8_t libusb_get_device_address(libusb_device *device)
 int libusb_get_device_descriptor(libusb_device *device,
 				 struct libusb_device_descriptor *descriptor)
 {
-	if (!strcmp(scenario, "descriptor-error"))
+	if (!strcmp(scenario, "descriptor-error") ||
+	    !strcmp(scenario, "discovery-descriptor-error"))
 		return LIBUSB_ERROR_IO;
 	descriptor->idVendor = 0x1782;
+	if (device == &other &&
+	    (!strcmp(scenario, "discovery-other-id") ||
+	     !strcmp(scenario, "discovery-unrelated-first"))) {
+		descriptor->idProduct = 0x4d01;
+		return 0;
+	}
 	descriptor->idProduct =
 		device == &selected && !strcmp(scenario, "wrong-id") ? 0x4002 :
 								       0x4d00;
@@ -127,6 +151,14 @@ int libusb_get_device_descriptor(libusb_device *device,
 int libusb_open(libusb_device *device, libusb_device_handle **handle)
 {
 	record("open %u:%u\n", device->bus, device->address);
+	if (!strcmp(scenario, "discovery-open-access"))
+		return LIBUSB_ERROR_ACCESS;
+	if (!strcmp(scenario, "discovery-open-busy"))
+		return LIBUSB_ERROR_BUSY;
+	if (!strcmp(scenario, "discovery-open-disconnected"))
+		return LIBUSB_ERROR_NO_DEVICE;
+	if (!strcmp(scenario, "discovery-open-driver-needed"))
+		return LIBUSB_ERROR_NOT_SUPPORTED;
 	if (!strcmp(scenario, "open-error"))
 		return LIBUSB_ERROR_IO;
 	opened.device = device;
@@ -138,12 +170,33 @@ libusb_device_handle *libusb_open_device_with_vid_pid(libusb_context *context,
 						      uint16_t vendor,
 						      uint16_t product)
 {
-	libusb_device_handle *handle;
+	libusb_device_handle *handle = NULL;
+	libusb_device **list;
+	struct libusb_device_descriptor descriptor;
+	ssize_t count, i;
 
-	(void)context;
 	if (vendor != 0x1782 || product != 0x4d00)
 		fail("unexpected VID/PID search");
 	record("default-open\n");
+	if (!strncmp(scenario, "discovery-", strlen("discovery-")) ||
+	    !strcmp(scenario, "list-error")) {
+		count = libusb_get_device_list(context, &list);
+		if (count < 0)
+			return NULL;
+		for (i = 0; i < count; i++) {
+			if (libusb_get_device_descriptor(list[i], &descriptor) <
+			    0)
+				break;
+			if (descriptor.idVendor != vendor ||
+			    descriptor.idProduct != product)
+				continue;
+			if (libusb_open(list[i], &handle) < 0)
+				handle = NULL;
+			break;
+		}
+		libusb_free_device_list(list, 1);
+		return handle;
+	}
 	if (libusb_open(&other, &handle))
 		return NULL;
 	return handle;
@@ -202,6 +255,14 @@ int libusb_claim_interface(libusb_device_handle *handle, int interface)
 {
 	record("claim %u:%u %d\n", handle->device->bus, handle->device->address,
 	       interface);
+	if (!strcmp(scenario, "discovery-claim-access"))
+		return LIBUSB_ERROR_ACCESS;
+	if (!strcmp(scenario, "discovery-claim-busy"))
+		return LIBUSB_ERROR_BUSY;
+	if (!strcmp(scenario, "discovery-claim-disconnected"))
+		return LIBUSB_ERROR_NO_DEVICE;
+	if (!strcmp(scenario, "discovery-claim-driver-needed"))
+		return LIBUSB_ERROR_NOT_SUPPORTED;
 	return 0;
 }
 
@@ -271,6 +332,8 @@ int libusb_bulk_transfer(libusb_device_handle *handle, unsigned char endpoint,
 	*transferred = (int)count;
 	if (!strcmp(operation, "error-out"))
 		return LIBUSB_ERROR_IO;
+	if (!strcmp(operation, "unsupported-out"))
+		return LIBUSB_ERROR_NOT_SUPPORTED;
 	*transferred = !strcmp(operation, "short-out") ? (int)count - 1 :
 							 (int)count;
 	return 0;

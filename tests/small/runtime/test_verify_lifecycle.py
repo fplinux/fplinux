@@ -53,8 +53,10 @@ class VerifyLifecycleTests:
             runtime_commands.verify_booted("phone")
 
         assert snapshot.call_args_list == [
-            mock.call("phone", None, build_type="release"),
-            mock.call("phone", None, build_type="release", include_device_data=False),
+            mock.call("phone", None, build_type="release", phone_data=None),
+            mock.call(
+                "phone", None, build_type="release", include_device_data=False, phone_data=None
+            ),
         ]
         assert reconnect.call_args.args[0][2] == str(path / "fplinux.py")
         assert reconnect.call_args.args[0][-3:] == ["--reconnect", "--exec", "true"]
@@ -134,7 +136,7 @@ class VerifyLifecycleTests:
             contextlib.redirect_stdout(io.StringIO()),
         ):
             runtime_commands.verify_booted("phone", profile=profile)
-        snapshot.assert_called_once_with("phone", profile, build_type="release")
+        snapshot.assert_called_once_with("phone", profile, build_type="release", phone_data=None)
         arguments = session.call_args.args[0]
         assert arguments[2] == str(path / "fplinux.py")
         assert arguments[9] == str(

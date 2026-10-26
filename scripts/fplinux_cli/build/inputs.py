@@ -77,6 +77,7 @@ _BUILD_STAGE_SOURCES = (
     "scripts/fplinux_cli/build/host_tools/host.py",
     "scripts/fplinux_cli/build/publish.py",
     "scripts/fplinux_cli/build/runtime.py",
+    "scripts/fplinux_cli/build/phone_data.py",
     "scripts/fplinux_cli/build/bootstrap/__init__.py",
     "scripts/fplinux_cli/build/bootstrap/verify.py",
     "scripts/fplinux_cli/build/kernel/__init__.py",
@@ -158,6 +159,8 @@ def selected_build_sources(target_config: dict[str, Any]) -> tuple[str, ...]:
         *_BUILD_STAGE_SOURCES,
         "scripts/fplinux_cli/build/bootstrap/result.py",
     }
+    if target_config.get("emmc") is not None:
+        sources.add("scripts/fplinux_cli/build/host_tools/phone_data.py")
     if target_config["bootstrap"].get("backend") == "sc9820e":
         sources.update(_SC9820E_BOOTSTRAP_IMPLEMENTATION_SOURCES)
         sources.add("scripts/fplinux_cli/build/loaders.py")

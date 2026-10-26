@@ -86,6 +86,20 @@ def adapter_config(value: object) -> dict[str, Any]:
     return value
 
 
+def validate_runtime(runtime: dict[str, Any]) -> dict[str, Any]:
+    """Require the fixed SC9820E RAM chain on either supported host."""
+    config = adapter_config(runtime["adapter"])
+    if runtime["identity"]["platform"]["name"] != "sc9820e" or runtime["transport"] != "usb-ncm":
+        fail("SC9820E RAM boot requires its platform identity and authenticated USB transport")
+    if runtime["assets"] != {
+        "fdl1": "assets/fdl1.bin",
+        "sml": "assets/sml.bin",
+        "fdl2": "assets/fdl2.bin",
+    } or set(runtime["host_tools"]) != {"loader"}:
+        fail("SC9820E runtime assets or host tools do not match the fixed RAM chain")
+    return config
+
+
 def _session_record(image: bytes, runtime: dict[str, Any], session: dict[str, Any]) -> bytes:
     slot = runtime["personalization"]
     offset = _integer(slot, "offset", minimum=512)
@@ -216,7 +230,13 @@ def _property_ranges(tree: bytes) -> dict[tuple[str, str], tuple[int, int]]:
     fail("SC9820E DTB structure is truncated")
 
 
-def personalize_dtb(tree: bytes, record: bytes, initrd: dict[str, int] | None) -> bytes:
+def personalize_dtb(
+    tree: bytes,
+    record: bytes,
+    initrd: dict[str, int] | None,
+    *,
+    initramfs_bytes: int | None = None,
+) -> bytes:
     """Replace four session properties while preserving the selected root handoff."""
     properties = _property_ranges(tree)
     replacements = (
@@ -254,6 +274,16 @@ def personalize_dtb(tree: bytes, record: bytes, initrd: dict[str, int] | None) -
     for path, name, _marker, replacement in replacements:
         offset, length = properties[path, name]
         result[offset : offset + length] = replacement
+    if initramfs_bytes is not None:
+        if (
+            initrd is None
+            or not initrd["size"] <= initramfs_bytes <= 0xFFFFFFFF - initrd["load_address"]
+        ):
+            fail("SC9820E supplemental initramfs has invalid RAM bounds")
+        offset, length = properties["/chosen", "linux,initrd-end"]
+        result[offset : offset + length] = struct.pack(
+            ">I", initrd["load_address"] + initramfs_bytes
+        )
     return bytes(result)
 
 
@@ -275,6 +305,8 @@ def prepare_uploads(
     runtime: dict[str, Any],
     session: dict[str, Any],
     directory: Path,
+    *,
+    device_data: Path | None = None,
 ) -> dict[str, Path]:
     """Extract bounded regions and bundled loaders in one private lifetime."""
     config = runtime["adapter"]
@@ -291,6 +323,19 @@ def prepare_uploads(
     record = _session_record(image, runtime, session)
     regions = config["regions"]
     roles = tuple(role for role in ROLES if role in regions)
+    capsule = b""
+    if device_data is not None:
+        if "initramfs" not in regions:
+            fail("SC9820E external root does not accept a supplemental initramfs")
+        if device_data.is_symlink() or not device_data.is_file():
+            fail("SC9820E supplemental initramfs is missing or is not a regular file")
+        capsule = device_data.read_bytes()
+        if not capsule:
+            fail("SC9820E supplemental initramfs is empty")
+    initramfs_bytes = None
+    if capsule:
+        size = regions["initramfs"]["size"]
+        initramfs_bytes = size + (-size % 4) + len(capsule)
     intervals = [
         (
             "session",
@@ -305,7 +350,14 @@ def prepare_uploads(
         if start % 64 or end > len(image) or region["load_address"] + region["size"] > 0x100000000:
             fail(f"SC9820E {role} region has invalid image or RAM bounds")
         intervals.append((role, start, end))
-        memory.append((role, region["load_address"], region["load_address"] + region["size"]))
+        uploaded_size = (
+            initramfs_bytes
+            if role == "initramfs" and initramfs_bytes is not None
+            else region["size"]
+        )
+        if region["load_address"] + uploaded_size > 0x100000000:
+            fail(f"SC9820E {role} exceeds the 32-bit RAM address range")
+        memory.append((role, region["load_address"], region["load_address"] + uploaded_size))
     _require_nonoverlapping(intervals)
     if runtime["addresses"] != {
         "fdl1": config["loader"]["fdl1_load"],
@@ -334,7 +386,11 @@ def prepare_uploads(
         region = regions[role]
         data = image[region["offset"] : region["offset"] + region["size"]]
         if role == "dtb":
-            data = personalize_dtb(data, record, regions.get("initramfs"))
+            data = personalize_dtb(
+                data, record, regions.get("initramfs"), initramfs_bytes=initramfs_bytes
+            )
+        elif role == "initramfs" and capsule:
+            data += bytes(-len(data) % 4) + capsule
         uploads[role] = directory / f"{role}.bin"
         _write_private(uploads[role], data)
     return uploads
@@ -358,7 +414,9 @@ def _usb_candidates(vendor: int, product: int) -> list[Path]:
     return matches
 
 
-def _select_bootrom(usb: dict[str, int], *, deadline: float) -> tuple[Path, int, int]:
+def _select_bootrom(
+    usb: dict[str, int], *, deadline: float, on_wait: Callable[[], None] | None = None
+) -> tuple[Path, int, int]:
     access_deadline: float | None = None
     while True:
         now = time.monotonic()
@@ -373,6 +431,7 @@ def _select_bootrom(usb: dict[str, int], *, deadline: float) -> tuple[Path, int,
         if len(matches) > 1:
             fail("more than one BootROM USB device is connected; leave only the selected phone")
         if matches:
+            on_wait = None
             device = matches[0]
             try:
                 bus = int((device / "busnum").read_text(encoding="ascii").strip())
@@ -398,6 +457,8 @@ def _select_bootrom(usb: dict[str, int], *, deadline: float) -> tuple[Path, int,
                 fail(f"cannot open selected BootROM USB device: {error}")
             else:
                 return device, bus, number
+        elif on_wait is not None:
+            on_wait()
         sleep_deadline = access_deadline if access_deadline is not None else deadline
         time.sleep(max(0.0, min(0.05, sleep_deadline - time.monotonic())))
 
@@ -407,24 +468,30 @@ def loader_arguments(  # noqa: PLR0913 -- payload, USB selection and tracing rem
     uploads: dict[str, Path],
     config: dict[str, Any],
     *,
-    bus: int,
-    device: int,
+    bus: int | None,
+    device: int | None,
+    wait_seconds: int = 0,
     loader_trace: bool = False,
+    working_directory: Path | None = None,
 ) -> list[str]:
-    """Construct the complete fixed RAM chain with an exact libusb selector."""
+    """Construct the RAM chain for exact selection or native unique-device discovery."""
     firmware = config["loader"]
+    names = {
+        role: str(path.relative_to(working_directory) if working_directory is not None else path)
+        for role, path in uploads.items()
+    }
+    if (bus is None) != (device is None):
+        fail("SC9820E USB bus and device must be selected together")
+    selector = [] if bus is None else ["--usb-bus", str(bus), "--usb-device", str(device)]
     argv = [
         str(loader),
         "--wait",
-        "0",
-        "--usb-bus",
-        str(bus),
-        "--usb-device",
-        str(device),
+        str(wait_seconds),
+        *selector,
         "keep_charge",
         "1",
         "fdl",
-        str(uploads["fdl1"]),
+        names["fdl1"],
         f"0x{firmware['fdl1_load']:x}",
     ]
     for role, address in (
@@ -441,12 +508,10 @@ def loader_arguments(  # noqa: PLR0913 -- payload, USB selection and tracing rem
                 f"0x{address:x}",
                 "0",
                 str(uploads[role].stat().st_size),
-                str(uploads[role]),
+                names[role],
             ]
         )
-    argv.extend(
-        ["timeout", "60000", "fdl_exec", str(uploads["fdl2"]), f"0x{firmware['fdl2_load']:x}"]
-    )
+    argv.extend(["timeout", "60000", "fdl_exec", names["fdl2"], f"0x{firmware['fdl2_load']:x}"])
     if loader_trace:
         argv[1:1] = ["--verbose", "1"]
     return argv
@@ -519,25 +584,18 @@ def run(  # noqa: PLR0913 -- shared runner inputs retain their standalone delive
     device_data: Path | None = None,
     output: TextIO | None = None,
     loader_trace: bool = False,
+    on_wait: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Upload once, observe the same USB connection and authenticate the Linux session."""
     from fplinux_cli.runtime import ssh_transport as transport  # noqa: PLC0415
 
     try:
-        config = adapter_config(runtime["adapter"])
+        config = validate_runtime(runtime)
         identity = runtime["identity"]
-        if identity["platform"]["name"] != "sc9820e" or runtime["transport"] != "usb-ncm":
-            fail("SC9820E RAM boot requires its platform identity and USB-NCM SSH transport")
-        if runtime["assets"] != {
-            "fdl1": "assets/fdl1.bin",
-            "sml": "assets/sml.bin",
-            "fdl2": "assets/fdl2.bin",
-        } or set(runtime["host_tools"]) != {"loader"}:
-            fail("SC9820E runtime assets or host tools do not match the fixed RAM chain")
-        if device_data is not None:
-            fail("SC9820E RAM boot does not accept a separate device-data capsule")
         with tempfile.TemporaryDirectory(prefix="fplinux-sc9820e-") as temporary:
-            uploads = prepare_uploads(bundle, runtime, session, Path(temporary))
+            uploads = prepare_uploads(
+                bundle, runtime, session, Path(temporary), device_data=device_data
+            )
             bootrom = runtime["usb"]["bootrom"]
             print(f"{identity['target']['display_name']} console RAM boot", flush=True)
             print(config["boot_instructions"], flush=True)
@@ -549,7 +607,7 @@ def run(  # noqa: PLR0913 -- shared runner inputs retain their standalone delive
             if events is not None:
                 events("waiting-for-device")
             selected, bus, number = _select_bootrom(
-                bootrom, deadline=time.monotonic() + bootrom["wait_seconds"]
+                bootrom, deadline=time.monotonic() + bootrom["wait_seconds"], on_wait=on_wait
             )
             if events is not None:
                 events("device-found")
@@ -584,10 +642,11 @@ def run(  # noqa: PLR0913 -- shared runner inputs retain their standalone delive
                     events("linux-usb")
 
             ready: dict[str, Any] = transport.wait_for_bound_session(
-                session, on_linux_usb=observed
+                session,
+                expected_device_identity=expected_device_identity,
+                on_linux_usb=observed,
             )
             _wait_linux_connection(selected, session, deadline=handoff_deadline)
-            transport.require_device_identity(ready, expected_device_identity)
             if events is not None:
                 events("ssh-ready")
             print("Private USB-NCM SSH session is ready.", flush=True)

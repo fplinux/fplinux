@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 
 import pytest
 from fplinux_cli.runtime import windows_host
@@ -13,6 +13,7 @@ from fplinux_cli.runtime import windows_host
 from tests.windows_host_support import StubWindowsHost, admitted_windows, archive_files
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 
@@ -22,23 +23,20 @@ class DriverHost(StubWindowsHost):
     def __init__(
         self,
         *,
-        service: str = "",
         consent: bool = True,
         setup_error: str | None = None,
-        binds: bool = True,
+        disconnects: bool = True,
     ) -> None:
         """Keep one selected synthetic BootROM and explicit user/setup outcomes."""
-        super().__init__(
-            {"devices": [{"id": "USB\\VID_1782&PID_4D00\\selected", "service": service}]}
-        )
+        super().__init__({"devices": [{"id": "USB\\VID_1782&PID_4D00\\selected"}]})
         self.consent = consent
         self.setup_error = setup_error
-        self.binds = binds
+        self.disconnects = disconnects
         self.effects: list[tuple[str, Any]] = []
 
     def confirm_driver_install(self) -> bool:
         """Model the native dialog result; this does not establish real GUI behavior."""
-        self.effects.append(("consent", True))
+        self.effects.append(("consent", None))
         return self.consent
 
     def install_bootrom_driver(
@@ -49,8 +47,8 @@ class DriverHost(StubWindowsHost):
         self.effects.append(("installer", (helper, directory)))
         if self.setup_error is not None:
             windows_host.fail(self.setup_error)
-        if self.binds:
-            self.snapshot["devices"][0]["service"] = "WinUSB"
+        if self.disconnects:
+            self.snapshot["devices"] = []
 
 
 def ensure_driver(host: DriverHost, root: Path, events: list[str]) -> None:
@@ -58,44 +56,33 @@ def ensure_driver(host: DriverHost, root: Path, events: list[str]) -> None:
     bundle = admitted_windows(archive_files(root))
     directory = root / "private-session"
     directory.mkdir()
-    windows_host._ensure_bootrom_driver(  # noqa: SLF001 -- selected host component boundary.
+    windows_host._setup_bootrom_driver(  # noqa: SLF001 -- selected host component boundary.
         host,
         bundle,
-        "USB\\VID_1782&PID_4D00\\selected",
         directory,
-        snapshot=host.snapshot,
         events=events.append,
     )
 
 
-def test_bound_winusb_needs_no_consent_or_installation(tmp_path: Path) -> None:
-    host = DriverHost(service="wInUsB")
-    events: list[str] = []
-    ensure_driver(host, tmp_path, events)
-    assert host.effects == []
-    assert events == []
-
-
-def test_declined_terms_stop_before_any_installer(tmp_path: Path) -> None:
+def test_declined_system_changes_stop_before_any_installer(tmp_path: Path) -> None:
     host = DriverHost(consent=False)
     events: list[str] = []
     with pytest.raises(SystemExit, match=r"setup was declined.*restart Run[.]cmd"):
         ensure_driver(host, tmp_path, events)
-    assert host.effects == [("consent", True)]
+    assert host.effects == [("consent", None)]
     assert events == []
 
 
-@pytest.mark.parametrize("service", ["", "OtherUsbDriver"])
-def test_accepted_setup_checks_live_binding_before_ready(tmp_path: Path, service: str) -> None:
-    host = DriverHost(service=service)
+def test_accepted_setup_waits_for_disconnect_without_claiming_usb_ready(tmp_path: Path) -> None:
+    host = DriverHost()
     events: list[str] = []
     ensure_driver(host, tmp_path, events)
     assert host.effects == [
-        ("consent", True),
+        ("consent", None),
         ("installer", (tmp_path / "tools/driver/wdi-simple.exe", tmp_path / "private-session")),
     ]
-    assert host.snapshot["devices"][0]["service"] == "WinUSB"
-    assert events == ["driver-setup", "driver-ready"]
+    assert host.snapshot["devices"] == []
+    assert events == ["driver-setup", "driver-reconnect"]
 
 
 @pytest.mark.parametrize("error", ["setup was not authorized", "setup failed with status 7"])
@@ -108,10 +95,10 @@ def test_cancelled_or_failed_setup_never_reports_ready(tmp_path: Path, error: st
     assert len([effect for effect in host.effects if effect[0] == "installer"]) == 1
 
 
-def test_success_status_without_winusb_binding_is_not_ready(
+def test_installed_driver_cannot_start_next_attempt_before_disconnect(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    host = DriverHost(binds=False)
+    host = DriverHost(disconnects=False)
     now = 0.0
 
     def advance_clock(delay: float) -> None:
@@ -121,10 +108,10 @@ def test_success_status_without_winusb_binding_is_not_ready(
     monkeypatch.setattr("fplinux_cli.runtime.windows_host.time.monotonic", lambda: now)
     monkeypatch.setattr("fplinux_cli.runtime.windows_host.time.sleep", advance_clock)
     events: list[str] = []
-    with pytest.raises(SystemExit, match=r"WinUSB did not become ready.*restart Run[.]cmd"):
+    with pytest.raises(SystemExit, match=r"Disconnect the phone after USB driver setup"):
         ensure_driver(host, tmp_path, events)
-    assert events == ["driver-setup"]
-    assert now >= 20
+    assert events == ["driver-setup", "driver-reconnect"]
+    assert now >= 30
 
 
 @pytest.mark.parametrize(
@@ -205,16 +192,18 @@ def test_uac_deadline_reports_retry_without_starting_another_installer(
     assert not requests[0].exists()
 
 
-def test_driver_license_checksum_is_required_before_windows_effects(tmp_path: Path) -> None:
+def test_driver_helper_checksum_is_required_before_windows_effects(tmp_path: Path) -> None:
     root = archive_files(tmp_path)
-    (root / "licenses/windows-driver/License.rtf").write_bytes(b"replaced terms")
-    with pytest.raises(SystemExit, match="Windows file checksum differs: licenses/windows-driver"):
+    (root / "tools/driver/wdi-simple.exe").write_bytes(b"replaced helper")
+    with pytest.raises(SystemExit, match="Windows file checksum differs: tools/driver"):
         admitted_windows(root)
 
 
-@pytest.mark.parametrize("consent", [True, False])
-def test_boot_invites_connection_then_requires_driver_before_loader(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, consent: bool
+@pytest.mark.parametrize(
+    "mode", ["ready", "setup", "declined", "still-unsupported", "transfer-failed"]
+)
+def test_native_usb_acquisition_controls_progress_and_driver_setup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:
     root = archive_files(tmp_path)
     capsule = tmp_path / "device-data.cpio"
@@ -229,12 +218,22 @@ def test_boot_invites_connection_then_requires_driver_before_loader(
         """Stop after the loader boundary; no real Windows process is run."""
 
     class BootHost(DriverHost):
-        """Connect the synthetic phone only after the observable invitation."""
+        """Model native acquisition and fail if PnP delays the first attempt."""
 
-        def ps(self, script: str, *arguments: str, timeout: float = 20) -> dict[str, Any]:
-            del script, arguments, timeout
-            return self.snapshot if "waiting-for-device" in events else {"devices": []}
+        attempts = 0
 
+        def ps(
+            self,
+            script: str,
+            *arguments: str,
+            timeout: float = 20,
+            cancelled: Callable[[], bool] | None = None,
+        ) -> dict[str, Any]:
+            del script, arguments, timeout, cancelled
+            assert "waiting-for-device" not in events or "driver-reconnect" in events
+            return self.snapshot if "driver-reconnect" in events else {"devices": []}
+
+        @override
         def run_tool(
             self,
             argv: list[str],
@@ -243,16 +242,29 @@ def test_boot_invites_connection_then_requires_driver_before_loader(
             cwd: Path,
             log: Path,
             environment: dict[str, str] | None = None,
+            on_usb_ready: Callable[[], None] | None = None,
+            on_wait: Callable[[], None] | None = None,
         ) -> None:
-            del timeout, cwd, log
+            del cwd, log, on_wait
+            self.attempts += 1
             self.effects.append(("loader", argv[0]))
-            assert self.snapshot["devices"][0]["service"] == "WinUSB"
-            assert events[-1] == "ram-loader-start"
+            assert events[-1] == "waiting-for-device"
+            assert argv[argv.index("--wait") + 1] == "30"
+            assert timeout == 330
             assert argv[1:3] == ["--verbose", "1"]
             assert environment == {"LIBUSB_DEBUG": "4"}
+            assert on_usb_ready is not None
+            if mode not in {"ready", "transfer-failed"} and (
+                self.attempts == 1 or mode == "still-unsupported"
+            ):
+                raise windows_host.BootromDriverRequiredError
+            on_usb_ready()
+            assert events[-1] == "ram-loader-start"
+            if mode == "transfer-failed":
+                windows_host.fail("native transfer failed")
             raise LoaderReachedError
 
-    host = BootHost(consent=consent)
+    host = BootHost(consent=mode != "declined")
     monkeypatch.setattr(windows_host, "WindowsHost", lambda: host)
 
     # Personalization is replaced to isolate boot orchestration from key generation.
@@ -268,7 +280,7 @@ def test_boot_invites_connection_then_requires_driver_before_loader(
         return {"directory": str(directory), "image": str(image)}
 
     monkeypatch.setattr(windows_host, "_prepare_session", prepared_session)
-    if consent:
+    if mode in {"ready", "setup"}:
         with pytest.raises(LoaderReachedError):
             windows_host.boot_archive(
                 admitted_windows(root),
@@ -276,23 +288,34 @@ def test_boot_invites_connection_then_requires_driver_before_loader(
                 session_root=root / "data/session",
                 events=events.append,
             )
-        assert host.effects[-1] == ("loader", str(root / "tools/spd_dump.exe"))
-        assert events == [
-            "host-preparation",
-            "waiting-for-device",
-            "device-found",
-            "driver-setup",
-            "driver-ready",
-            "ram-loader-start",
-        ]
+        prefix = ["host-preparation", "waiting-for-device"]
+        if mode == "setup":
+            prefix.extend(["driver-setup", "driver-reconnect", "waiting-for-device"])
+        prefix.append("device-found")
+        if mode == "setup":
+            prefix.append("driver-ready")
+        assert events == [*prefix, "ram-loader-start"]
+        assert host.attempts == (2 if mode == "setup" else 1)
+        assert len([effect for effect in host.effects if effect[0] == "installer"]) == (
+            1 if mode == "setup" else 0
+        )
     else:
-        with pytest.raises(SystemExit, match="setup was declined"):
+        error = {
+            "declined": "setup was declined",
+            "still-unsupported": "WinUSB is still unavailable",
+            "transfer-failed": "native transfer failed",
+        }[mode]
+        with pytest.raises(SystemExit, match=error):
             windows_host.boot_archive(
                 admitted_windows(root),
                 capsule,
                 session_root=root / "data/session",
                 events=events.append,
             )
-        assert all(effect[0] != "loader" for effect in host.effects)
-        assert events == ["host-preparation", "waiting-for-device", "device-found"]
+        assert host.attempts == (2 if mode == "still-unsupported" else 1)
+        assert len([effect for effect in host.effects if effect[0] == "installer"]) == (
+            1 if mode == "still-unsupported" else 0
+        )
+        if mode == "declined":
+            assert events == ["host-preparation", "waiting-for-device"]
     assert not image.exists()

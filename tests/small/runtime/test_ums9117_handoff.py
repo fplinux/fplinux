@@ -59,9 +59,14 @@ class HandoffTransportTests:
         rendered = io.StringIO()
 
         def bound_session(
-            _session: object, *, on_linux_usb: Callable[[], None], ready: object = ready
+            _session: object,
+            *,
+            expected_device_identity: str,
+            on_linux_usb: Callable[[], None],
+            ready: dict[str, str] = ready,
         ) -> object:
             on_linux_usb()
+            ssh_transport.require_device_identity(ready, expected_device_identity)
             return ready
 
         with (
@@ -102,9 +107,11 @@ class HandoffTransportTests:
         def bound_session(
             session: object,
             *,
+            expected_device_identity: str,
             on_linux_usb: Callable[[], None],
             failure: str | None = failure,
         ) -> object:
+            assert expected_device_identity == "9" * 64
             on_linux_usb()
             if failure == "authentication":
                 raise SystemExit(failure)

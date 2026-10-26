@@ -188,7 +188,10 @@ def run_bridge(  # noqa: PLR0913 -- each keyword replaces one external boundary.
         transport_module = mock.Mock()
         ready = {**prepared_session(), "status": "ready"}
 
-        def bound_session(_session: object, *, on_linux_usb: Callable[[], None]) -> dict[str, str]:
+        def bound_session(
+            _session: object, *, expected_device_identity: str, on_linux_usb: Callable[[], None]
+        ) -> dict[str, str]:
+            assert expected_device_identity == "9" * 64
             on_linux_usb()
             return ready
 

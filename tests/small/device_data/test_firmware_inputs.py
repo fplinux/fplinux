@@ -6,9 +6,7 @@ from __future__ import annotations
 import hashlib
 import lzma
 import shutil
-import tempfile
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
@@ -23,7 +21,7 @@ from fplinux_cli.workspace import staging as workspace_staging
 from tests.small.workspace.workspace_fixtures import empty_package_graph, write_source_lock_files
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from pathlib import Path
 
 
 def _declaration(
@@ -47,7 +45,6 @@ class FirmwareInputs:
     """Selected phone data and mutable declarations owned by one case."""
 
     root: Path
-    cache: Path
     phone: Path
     groups: dict[str, list[dict[str, object]]]
     target: str
@@ -65,37 +62,23 @@ class FirmwareInputs:
         return firmware_inputs.capture_external_device_data(
             self.target,
             self.groups,
-            self.cache,
         )
 
 
 @pytest.fixture
-def firmware_generation() -> Iterator[FirmwareInputs]:
+def firmware_generation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FirmwareInputs:
     """Own one isolated selected phone store until teardown."""
-    with tempfile.TemporaryDirectory() as temporary:
-        root = Path(temporary)
-        cache = root / ".cache"
-        target = "demo"
-        target_root = cache / "device-data" / target
-        phone = target_root / "phone"
-        (phone / "groups").mkdir(parents=True)
-        groups: dict[str, list[dict[str, object]]] = {
-            "bluetooth": [
-                _declaration(
-                    "controller.bin",
-                    "chip/controller.bin",
-                    8,
-                )
-            ],
-            "audio-profile": [
-                _declaration(
-                    "profile.bin",
-                    "fplinux/profile.bin",
-                    7,
-                )
-            ],
-        }
-        yield FirmwareInputs(root, cache, phone, groups, target)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    target = "demo"
+    phone = tmp_path / "data/fplinux/phones/demo/phone"
+    (phone / "groups").mkdir(parents=True)
+    groups: dict[str, list[dict[str, object]]] = {
+        "bluetooth": [_declaration("controller.bin", "chip/controller.bin", 8)],
+        "audio-profile": [_declaration("profile.bin", "fplinux/profile.bin", 7)],
+    }
+    return FirmwareInputs(tmp_path, phone, groups, target)
 
 
 class FirmwareInputTests:
@@ -157,25 +140,25 @@ class FirmwareInputTests:
         with pytest.raises(SystemExit, match=r"device-data group audio-profile:.*second.bin"):
             firmware_generation.capture()
 
-    def test_old_firmware_layout_is_a_cache_miss(
+    def test_checkout_local_phone_data_is_ignored_without_automatic_migration(
         self, firmware_generation: FirmwareInputs
     ) -> None:
-        """An obsolete generation cache is ignored without a compatibility reader."""
-        target_root = firmware_generation.cache / "device-data" / firmware_generation.target
+        """Only the persistent store supplies inputs; old checkout directories stay untouched."""
         shutil.rmtree(firmware_generation.phone)
-        old = target_root / "generations/generation-test/groups/bluetooth"
+        old = firmware_generation.root / ".cache/device-data/demo/phone/groups/bluetooth"
         old.mkdir(parents=True)
         (old / "controller.bin").write_bytes(b"firmware")
-        (target_root / "current").write_text("generation-test\n", encoding="ascii")
 
         assert (firmware_generation.capture()) == ({})
+        assert (old / "controller.bin").read_bytes() == b"firmware"
 
     @pytest.mark.parametrize(
         ("platform", "root_kind", "personal_data_is_build_input"),
         [
             pytest.param("ums9117", "initramfs", False, id="ums-ram-runtime-data"),
             pytest.param("ums9117", "external", True, id="ums-external-build-data"),
-            pytest.param("sc9820e", "initramfs", True, id="sc9820e-build-data"),
+            pytest.param("sc9820e", "initramfs", False, id="sc9820e-ram-runtime-data"),
+            pytest.param("sc9820e", "external", True, id="sc9820e-external-build-data"),
         ],
     )
     def test_profile_bytes_affect_only_builds_that_deliver_personal_data(
@@ -191,6 +174,7 @@ class FirmwareInputTests:
         audio = firmware_generation.write_group("audio-profile", {"profile.bin": b"profile"})
         target_config = {
             "platform": platform,
+            "uboot": {"kind": "none"},
             "linux": {"root": {"kind": root_kind}},
             "device_data": {"groups": firmware_generation.groups},
         }
@@ -233,9 +217,17 @@ class FirmwareInputTests:
             (audio / "profile.bin").write_bytes(b"changed")
             changed = workspace_module.target_workspace_snapshot(firmware_generation.target)
             staged = workspace_staging.stage_workspace_snapshot(first)
+            other_store = firmware_generation.root / "other-phone"
+            shutil.copytree(firmware_generation.phone.parent, other_store)
+            (other_store / "phone/groups/audio-profile/profile.bin").write_bytes(b"custom!")
+            other_phone = workspace_module.target_workspace_snapshot(
+                firmware_generation.target, phone_data=other_store
+            )
+            staged_other = workspace_staging.stage_workspace_snapshot(other_phone)
 
         assert (first.recipe) == (unrelated.recipe)
         assert (first.recipe != changed.recipe) is personal_data_is_build_input
+        assert (changed.recipe != other_phone.recipe) is personal_data_is_build_input
         staged_profile = staged / (
             ".fplinux-inputs/device-data/demo/groups/audio-profile/fplinux/profile.bin"
         )
@@ -243,6 +235,10 @@ class FirmwareInputTests:
             assert (staged_profile.read_bytes()) == (b"profile")
             assert (staged_profile.stat().st_mode & 0o777) == (0o600)
             assert (".cache") not in (staged_profile.relative_to(staged).parts)
+            assert (
+                staged_other
+                / ".fplinux-inputs/device-data/demo/groups/audio-profile/fplinux/profile.bin"
+            ).read_bytes() == b"custom!"
         else:
             assert not staged_profile.exists()
 

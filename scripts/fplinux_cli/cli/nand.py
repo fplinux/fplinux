@@ -34,11 +34,18 @@ def backup_target_nand(
     *,
     profile: str | None = None,
     build_type: str = "release",
+    phone_data: Path | None = None,
 ) -> Path:
     """Back up one supported target through its exact current-profile session."""
     bundle = _target_bundle(target, profile, build_type)
     arguments = bundle_session.bundle_runtime_command(
-        bundle, "nand", "backup", str(output.resolve()), target=target, profile=profile
+        bundle,
+        "nand",
+        "backup",
+        str(output.resolve()),
+        target=target,
+        profile=profile,
+        phone_data=phone_data,
     )
     result = subprocess.run(arguments, check=False)
     if result.returncode:
@@ -47,12 +54,16 @@ def backup_target_nand(
 
 
 def identify_target_nand(
-    target: str, *, profile: str | None = None, build_type: str = "release"
+    target: str,
+    *,
+    profile: str | None = None,
+    build_type: str = "release",
+    phone_data: Path | None = None,
 ) -> None:
     """Print the chip identity and geometry that the target's running NAND reader reports."""
     bundle = _target_bundle(target, profile, build_type)
     arguments = bundle_session.bundle_runtime_command(
-        bundle, "nand", "identify", target=target, profile=profile
+        bundle, "nand", "identify", target=target, profile=profile, phone_data=phone_data
     )
     result = subprocess.run(arguments, check=False)
     if result.returncode:

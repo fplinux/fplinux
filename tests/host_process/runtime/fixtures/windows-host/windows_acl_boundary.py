@@ -6,6 +6,6 @@ import os
 import sys
 from pathlib import Path
 
-assert Path(sys.argv[sys.argv.index("-Path") + 1]).is_file()
+assert Path(sys.argv[sys.argv.index("-Path") + 1]).exists()
 state = Path(os.environ["FPLINUX_TEST_ACL_STATE"])
 print(json.dumps(json.loads(state.read_text(encoding="utf-8"))))

@@ -4,8 +4,9 @@
 from __future__ import annotations
 
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from fplinux_cli.common import fail
 from fplinux_cli.quality.scopes import CHECK_SCOPES
 
 if TYPE_CHECKING:
@@ -33,14 +34,21 @@ def _setup_action(*, force: bool, offline: bool) -> None:
 
 
 def _nand_backup_action(
-    target: str, output: Path, *, profile: str | None, build_type: str
+    target: str,
+    output: Path,
+    *,
+    profile: str | None,
+    build_type: str,
+    phone_data: Path | None = None,
 ) -> None:
     """Save a complete NAND image through the selected running system."""
     from fplinux_cli.cli.nand import (  # noqa: PLC0415 -- backup-only backend.
         backup_target_nand,
     )
 
-    backup_target_nand(target, output, profile=profile, build_type=build_type)
+    backup_target_nand(
+        target, output, profile=profile, build_type=build_type, phone_data=phone_data
+    )
 
 
 def command_action(
@@ -307,4 +315,8 @@ def command_action(
         )
     else:
         raise AssertionError(f"unhandled command: {args.command}")
+    phone_data = getattr(args, "phone_data", None)
+    if phone_data is not None:
+        # This selector is exposed only by parsers whose backends accept it.
+        action = partial(cast("Callable[..., None]", action), phone_data=phone_data)
     return action

@@ -94,7 +94,7 @@ def linux_dt_config_checks(value: object, name: str) -> list[dict[str, str]]:
 
 
 def linux_storage_policy(
-    additional_config: object, additional_dtb_markers: object
+    additional_config: object, additional_dtb_markers: object, *, emmc_read_only: bool
 ) -> dict[str, list[str]]:
     """Combine the mandatory internal-storage exclusions with board restrictions."""
     return {
@@ -105,7 +105,11 @@ def linux_storage_policy(
             *_FORBIDDEN_STORAGE_CONFIG,
         ],
         "forbidden_dtb_markers": [
-            *_FORBIDDEN_STORAGE_DTB_MARKERS,
+            *(
+                marker
+                for marker in _FORBIDDEN_STORAGE_DTB_MARKERS
+                if marker != "emmc" or not emmc_read_only
+            ),
             *string_array(
                 additional_dtb_markers,
                 "target linux additional_forbidden_dtb_markers",

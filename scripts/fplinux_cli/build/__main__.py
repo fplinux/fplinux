@@ -20,6 +20,7 @@ from fplinux_cli.build.bootstrap.stage import build_bootstrap
 from fplinux_cli.build.host_tools import host as host_build
 from fplinux_cli.build.kernel.compile import build_kernel
 from fplinux_cli.build.kernel.prepare import prepare_linux
+from fplinux_cli.build.runtime import runtime_host_tools, runtime_needs_nand_ecc
 from fplinux_cli.build.storage import stage as storage_build
 from fplinux_cli.common import fail
 from fplinux_cli.device_data import inputs as firmware_inputs
@@ -64,7 +65,6 @@ def main() -> None:
         external_root = target_config["linux"]["root"]["kind"] == "external"
         rootfs_delivery = firmware_inputs.rootfs_receives_firmware(
             root_kind=target_config["linux"]["root"]["kind"],
-            platform=target_config["platform"],
         )
         firmware = firmware_inputs.rootfs_firmware_inputs(device_data) if rootfs_delivery else ()
         audio_profile_firmware = device_data.get("audio-profile") if external_root else None
@@ -209,7 +209,13 @@ def main() -> None:
                 target_config["loader_assets"], work / "assets", lock_output=asset_lock_path
             )
     with process_build.report_stage(reporter, "host-tools"):
-        host_tools = host_build.build_host_tools(sources, platform, work)
+        required_tools = runtime_host_tools(
+            platform,
+            nand_ecc=runtime_needs_nand_ecc(target_config),
+        )
+        host_tools = host_build.build_host_tools(
+            sources, platform, work, tools=required_tools.values()
+        )
     with process_build.report_stage(reporter, "publish"):
         publish_build.publish_bundle(
             args.target,
@@ -218,6 +224,7 @@ def main() -> None:
             release_manifest=release_manifest,
             work=work,
             rootfs=rootfs,
+            linux_source=linux_source,
             kernel_output=kernel_output,
             zimage=zimage,
             dtb=bootstrap.dtb or dtb,

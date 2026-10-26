@@ -257,6 +257,7 @@ def load_target(
             *({"wcn_firmware"} if "wcn_firmware" in raw else set()),
             *({"loader"} if "loader" in raw else set()),
             *({"nand"} if "nand" in raw else set()),
+            *({"emmc"} if "emmc" in raw else set()),
             *({"display_brightness"} if "display_brightness" in raw else set()),
             *({"display"} if "display" in raw else set()),
             "platform",
@@ -319,6 +320,21 @@ def load_target(
         fail(f"target {target} has invalid platform: {path}")
     platform = load_platform(platform_name)
     backend = platform["bootstrap"]["backend"]
+    if "emmc" in config:
+        from fplinux_cli.device_data.emmc import (  # noqa: PLC0415 -- selected storage source.
+            validate_file_selections,
+        )
+
+        emmc = exact_table(config["emmc"], {"raw_device", "files"}, "target emmc")
+        if backend != "sc9820e" or "nand" in config:
+            fail("read-only eMMC is supported only by the sc9820e backend without NAND")
+        raw_device = nonempty_string(emmc["raw_device"], "target emmc raw_device")
+        if re.fullmatch(r"/dev/mmcblk[0-9]+", raw_device) is None:
+            fail("target emmc raw_device must name one complete MMC block device")
+        try:
+            validate_file_selections(emmc["files"])
+        except ValueError as error:
+            fail(f"target emmc files: {error}")
     if backend == "sc9820e":
         if "nand" in config:
             fail("sc9820e targets must not declare NAND")
@@ -381,6 +397,7 @@ def load_target(
         linux_storage_policy(
             linux.pop("additional_forbidden_config"),
             linux.pop("additional_forbidden_dtb_markers"),
+            emmc_read_only="emmc" in config,
         )
     )
 
@@ -461,13 +478,32 @@ def load_target(
         if not isinstance(device_data, dict) or set(device_data) not in (
             {"parser"},
             {"originals_parser"},
+            {"originals_parser", "required_groups"},
         ):
-            fail("target device_data must contain exactly one of parser or originals_parser")
+            fail(
+                "target device_data requires one parser and optional original-data required_groups"
+            )
         source_field = "originals_parser" if "originals_parser" in device_data else "parser"
         parser = basename_value(device_data[source_field], f"target device_data {source_field}")
         if not parser.endswith(".py"):
             fail(f"target device_data {source_field} must be a Python filename")
-        config["device_data"] = {source_field: parser, "groups": device_data_groups}
+        required = device_data.get("required_groups", list(device_data_groups))
+        if (
+            not isinstance(required, list)
+            or not required
+            or any(
+                not isinstance(group, str) or group not in device_data_groups for group in required
+            )
+            or len(set(required)) != len(required)
+        ):
+            fail("target device_data required_groups must name unique declared groups")
+        if "emmc" in config and source_field != "originals_parser":
+            fail("eMMC preparation requires a named-original parser")
+        config["device_data"] = {
+            source_field: parser,
+            "groups": device_data_groups,
+            "required_groups": required,
+        }
     elif "device_data" in config:
         fail("target device_data requires a declared parser group")
     else:

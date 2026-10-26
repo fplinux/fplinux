@@ -144,6 +144,39 @@ def test_sc_target_without_microsd_inputs_refuses_the_external_root_profile() ->
         load_target("phone", "microsd-root")
 
 
+def test_read_only_emmc_declaration_selects_a_whole_card_and_its_storage_policy(
+    sc_checkout: Path,
+) -> None:
+    assert "emmc" in load_target("phone")["linux"]["forbidden_dtb_markers"]
+    manifest = sc_checkout / "targets/phone/target.toml"
+    declaration = (ROOT / "tests/fixtures/sc9820e-manifest/emmc.toml").read_text()
+    manifest.write_text(manifest.read_text() + "\n" + declaration)
+
+    config = load_target("phone")
+
+    assert config["emmc"] == {
+        "raw_device": "/dev/mmcblk1",
+        "files": [
+            {"name": "audio.conf", "locations": [["system", "/etc/audio.conf"]], "max_bytes": 32}
+        ],
+    }
+    assert "emmc" not in config["linux"]["forbidden_dtb_markers"]
+    assert "mtd" in config["linux"]["forbidden_dtb_markers"]
+    assert "CONFIG_MTD=y" in config["linux"]["forbidden_config"]
+
+
+@pytest.mark.parametrize("device", ["/dev/mmcblk1p1", "/dev/sda", "mmcblk1"])
+def test_emmc_source_rejects_a_partition_or_unrelated_device(
+    sc_checkout: Path, device: str
+) -> None:
+    manifest = sc_checkout / "targets/phone/target.toml"
+    declaration = (ROOT / "tests/fixtures/sc9820e-manifest/emmc.toml").read_text()
+    manifest.write_text(manifest.read_text() + "\n" + declaration.replace("/dev/mmcblk1", device))
+
+    with pytest.raises(SystemExit, match="complete MMC block device"):
+        load_target("phone")
+
+
 @pytest.mark.parametrize(
     ("original", "replacement", "message"),
     [
@@ -233,7 +266,16 @@ def test_sc_linux_discovery_keeps_native_identity_and_default_audio_policy(
     sc_checkout: Path,
 ) -> None:
     """The shared source consumer discovers SC inputs without opening the full loader contract."""
-    targets = discover_linux_targets(sc_checkout, {"linux": {"sha256": "a" * 64}}, "a" * 64)
+    sources = {
+        "linux": {
+            "version": "test",
+            "name": "linux-test.tar.xz",
+            "url": "https://example.invalid/linux-test.tar.xz",
+            "algorithm": "sha256",
+            "checksum": "a" * 64,
+        }
+    }
+    targets = discover_linux_targets(sc_checkout, sources, "a" * 64)
 
     assert len(targets) == 1
     assert targets[0].config["identity"]["compatible"] == "example,phone"
@@ -316,10 +358,10 @@ def test_named_original_manifest_preserves_its_preparer_and_payload_across_root_
 @pytest.mark.parametrize(
     ("source_declaration", "message"),
     [
-        ("", "must contain exactly one of parser or originals_parser"),
+        ("", "requires one parser"),
         (
             'parser = "nand.py"\noriginals_parser = "originals.py"',
-            "must contain exactly one of parser or originals_parser",
+            "requires one parser",
         ),
         ('originals_parser = "originals.txt"', "originals_parser must be a Python filename"),
         ('originals_parser = "../originals.py"', "normalized relative path"),

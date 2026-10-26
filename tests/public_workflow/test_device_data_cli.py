@@ -7,17 +7,20 @@ import hashlib
 import json
 import shutil
 from dataclasses import dataclass
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
-from fplinux_cli.runtime.workflow import launcher_lock
+from fplinux_cli.device_data.cache import current_backup
+from fplinux_cli.device_data.store import locked_phone_store
 
 from tests.cli_support import ROOT, prepare_cli_checkout
 from tests.process import run_process
 
 if TYPE_CHECKING:
     import subprocess
-    from pathlib import Path
+    from collections.abc import Iterator
 
 ORIGINALS = {
     "wcnmodem-firmware.bin": b"abc",
@@ -46,13 +49,16 @@ class DeviceDataCli:
 
     def phone(self) -> Path:
         """Locate the phone store consumed by builds and the runtime."""
-        return self.root / ".cache/device-data/example/phone"
+        return self.root / "data/fplinux/phones/example/phone"
 
 
 @pytest.fixture
-def device_data_cli(tmp_path: Path) -> DeviceDataCli:
+def device_data_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DeviceDataCli:
     """Own a minimal real SC9820E target with a synthetic named-original preparer."""
     prepare_cli_checkout(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
     for destination, source in (
         ("platforms/sc9820e/platform.toml", "tests/fixtures/sc9820e-manifest/platform.toml"),
         ("targets/example/target.toml", "tests/fixtures/sc9820e-manifest/target.toml"),
@@ -114,7 +120,6 @@ def test_public_original_import_retains_exact_source_originals_outputs_and_priva
     assert phone.stat().st_mode & 0o777 == 0o700
     assert not (device_data_cli.root / ".cache/kern").exists()
     assert not (device_data_cli.root / ".cache/out").exists()
-    assert "./fplinux build example" in result.stdout
     assert "./fplinux run example" in result.stdout
 
 
@@ -181,10 +186,10 @@ def test_public_original_import_materialization_failure_preserves_previous_phone
 
 
 @pytest.mark.parametrize("source", ["originals", "nand"])
-def test_public_saved_source_prepare_rejects_an_active_runtime_instance(
+def test_public_saved_source_prepare_rejects_an_active_store_writer(
     device_data_cli: DeviceDataCli, source: str
 ) -> None:
-    """The real public command shares the standalone launcher's data-instance lock."""
+    """A second process cannot replace phone data while another writer owns the store."""
     data = device_data_cli.phone().parent
     data.mkdir(parents=True)
     if source == "nand":
@@ -198,11 +203,11 @@ def test_public_saved_source_prepare_rejects_an_active_runtime_instance(
         arguments = ("--from-originals", str(device_data_cli.manifest))
     original_manifest = device_data_cli.manifest.read_bytes()
 
-    with launcher_lock(data):
+    with locked_phone_store("example"):
         result = device_data_cli.run(*arguments)
 
     assert result.returncode == 1, result.stderr
-    assert "already running" in result.stderr
+    assert "data is being updated" in result.stderr
     assert not device_data_cli.phone().exists()
     assert list(data.glob(".phone-*")) == []
     assert device_data_cli.manifest.read_bytes() == original_manifest
@@ -281,3 +286,115 @@ def test_public_nand_target_rejects_original_manifest_without_changing_its_sourc
     assert result.returncode == 1, result.stderr
     assert "requires physical NAND data and does not support --from-originals" in result.stderr
     assert not (device_data_cli.root / ".cache/device-data").exists()
+
+
+@pytest.fixture
+def nand_import_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """Release the full-size imported NAND files before the next public workflow."""
+    with TemporaryDirectory(dir=tmp_path) as directory:
+        root = Path(directory)
+        prepare_cli_checkout(root)
+        monkeypatch.setenv("HOME", str(root / "home"))
+        monkeypatch.setenv("XDG_DATA_HOME", str(root / "data"))
+        monkeypatch.setenv("LOCALAPPDATA", str(root / "local"))
+        yield root
+
+
+@pytest.mark.parametrize(
+    "with_receipt", [True, False], ids=["current-receipt", "unknown-acquisition"]
+)
+def test_public_nand_import_retains_canonical_source_and_only_known_acquisition_identity(
+    nand_import_root: Path, *, with_receipt: bool
+) -> None:
+    """The public saved-source command retains reusable acquisition evidence without hardware."""
+    root = nand_import_root
+    for relative in (
+        "platforms/ums9117/platform.toml",
+        "platforms/ums9117/loader/assets.lock.toml",
+        "sources.lock.toml",
+        "profiles/default/profile.toml",
+    ):
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / relative, path)
+    target = root / "targets/example/target.toml"
+    declaration = (ROOT / "tests/fixtures/profile-config/target.toml").read_text(encoding="utf-8")
+    declaration = (declaration % {"target": "example"}).replace(
+        'platform = "demo"', 'platform = "ums9117"'
+    )
+    target.write_text(
+        declaration
+        + '\n[nand]\nraw_device = "/dev/test-nand"\nid = 0x21e5\nraw_page_bytes = 2112\n',
+        encoding="utf-8",
+    )
+    shutil.copyfile(
+        ROOT / "tests/public_workflow/fixtures/device-data-import/parser.py",
+        root / "targets/example/radio_parser.py",
+    )
+    (root / "platforms/ums9117/linux/overlay").mkdir(parents=True)
+    (root / "targets/example/linux/overlay").mkdir(parents=True)
+    source = root / "external-nand.bin"
+    with source.open("wb") as stream:
+        stream.write(b"test")
+        stream.truncate(138412032)
+    with source.open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    receipt = source.with_name("external-nand.bin.json")
+    if with_receipt:
+        receipt.write_text(
+            json.dumps(
+                {
+                    "target": "example",
+                    "acquisition_recipe": "a" * 64,
+                    "id_bytes": "e521",
+                    "chip": "controlled chip",
+                    "page_main_bytes": 2048,
+                    "oob_bytes": 64,
+                    "pages_per_block": 64,
+                    "block_count": 1024,
+                    "raw_bytes": 138412032,
+                    "sha256": digest,
+                }
+            ),
+            encoding="utf-8",
+        )
+    source_receipt = receipt.read_bytes() if with_receipt else None
+
+    result = run_process(
+        [
+            str(root / "fplinux"),
+            "device-data",
+            "prepare",
+            "example",
+            "--from-dump",
+            str(source),
+            "--offline",
+        ],
+        name="public physical NAND import",
+        cwd=root,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    store = root / "data/fplinux/phones/example"
+    assert (store / "phone/groups/bluetooth/radio.bin").read_bytes() == b"test"
+    with (store / "nand.bin").open("rb") as stream:
+        assert hashlib.file_digest(stream, "sha256").hexdigest() == digest
+    with source.open("rb") as stream:
+        assert hashlib.file_digest(stream, "sha256").hexdigest() == digest
+    admitted = current_backup(
+        store / "nand.bin",
+        target="example",
+        nand={"id": 0x21E5, "raw_page_bytes": 2112, "acquisition_recipe": "a" * 64},
+    )
+    assert (admitted is not None) is with_receipt
+    if with_receipt:
+        assert json.loads((store / "nand.bin.json").read_bytes())["acquisition_recipe"] == "a" * 64
+        assert receipt.read_bytes() == source_receipt
+    else:
+        assert not (store / "nand.bin.json").exists()
+        assert not receipt.exists()
+    for path in store.rglob("*"):
+        assert path.stat().st_mode & 0o777 == (0o700 if path.is_dir() else 0o600)
+    assert store.stat().st_mode & 0o777 == 0o700
+    assert not (root / ".cache/out").exists()

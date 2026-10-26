@@ -97,7 +97,7 @@ class ConsoleLifecycleTests:
             "--bundle",
             str(path),
             "--data-root",
-            str(command_bundle.root / ".cache/device-data/phone"),
+            str(command_bundle.root / ".cache/runtime/phone"),
             "--log-root",
             str(command_bundle.root / ".cache/logs/run/phone/profiles/microsd-uboot"),
             "--reconnect",
@@ -221,7 +221,7 @@ class ConsoleLifecycleTests:
                 )
         arguments = authenticate.call_args.args[0]
         assert arguments[:4] == [sys.executable, "-I", str(path / "fplinux.py"), "run"]
-        assert arguments[7] == str(command_bundle.root / ".cache/device-data/phone")
+        assert arguments[7] == str(command_bundle.root / ".cache/runtime/phone")
         assert arguments[-3:] == ["--reconnect", "--exec", "true"]
         options = authenticate.call_args.kwargs
         assert (options["user"], options["group"], options["extra_groups"]) == (uid, gid, ())

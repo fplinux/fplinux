@@ -58,7 +58,7 @@ class RunLifecycleTests:
             "--bundle",
             str(command_bundle.bundle_path),
             "--data-root",
-            str(command_bundle.root / ".cache/device-data/phone"),
+            str(command_bundle.root / ".cache/runtime/phone"),
             "--log-root",
             str(command_bundle.root / ".cache/logs/run/phone"),
         ]
@@ -159,7 +159,7 @@ class RunLifecycleTests:
         arguments = execute.call_args.args[1]
         assert arguments[2] == str(profile_path / "fplinux.py")
         assert arguments[5] == str(profile_path)
-        assert arguments[7] == str(command_bundle.root / ".cache/device-data/phone")
+        assert arguments[7] == str(command_bundle.root / ".cache/runtime/phone")
         assert arguments[9] == str(
             command_bundle.root / ".cache/logs/run/phone/profiles/microsd-uboot"
         )

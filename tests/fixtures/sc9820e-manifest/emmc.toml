@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-only
+[emmc]
+raw_device = "/dev/mmcblk1"
+files = [
+  { name = "audio.conf", locations = [
+    [
+      "system",
+      "/etc/audio.conf",
+    ],
+  ], max_bytes = 32 },
+]

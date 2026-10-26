@@ -11,7 +11,7 @@ def main() -> None:
     """Replace native NTFS operations with persistent, controlled access rules."""
     state = Path(os.environ["FPLINUX_TEST_ACL_STATE"])
     acl = json.loads(state.read_text(encoding="utf-8"))
-    assert Path(sys.argv[1]).is_file()
+    assert Path(sys.argv[1]).exists()
     arguments = iter(sys.argv[2:])
     for argument in arguments:
         if argument == "/inheritance:r":
@@ -26,7 +26,7 @@ def main() -> None:
             continue
         elif argument.startswith("*"):
             sid, rights = argument.removeprefix("*").split(":", 1)
-            assert rights == "F"
+            assert rights in {"F", "(OI)(CI)F"}
             acl["rules"] = [
                 rule for rule in acl["rules"] if rule["sid"] != sid or rule["type"] != "Allow"
             ]

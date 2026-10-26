@@ -8,6 +8,7 @@ import json
 import os
 import secrets
 import signal
+import struct
 import subprocess
 import sys
 import threading
@@ -15,13 +16,18 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, override
 
 import pytest
-from fplinux_cli.runtime import windows_host
+from fplinux_cli.device_data.cpio import create_device_data_initramfs
+from fplinux_cli.runtime import state, windows_host
+from fplinux_cli.runtime.connection import ConnectionLostError, SessionResumedError
 
 from tests import ROOT
+from tests.fdt import binary_tree
 from tests.fixtures.executables import install_python_script
+from tests.fixtures.portable_archive import capsule_files, refresh_archive
 from tests.process import python_environment
 from tests.windows_host_support import (
     StubWindowsHost,
@@ -33,6 +39,9 @@ from tests.windows_host_support import (
     saved_connection,
     session_preparation_bundle,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 @pytest.mark.parametrize(
@@ -105,25 +114,12 @@ class WindowsAclBoundary:
 
 
 @pytest.fixture
-def explicit_public_key_acl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> WindowsAclBoundary:
-    """Model ssh-keygen's explicit Everyone grant using real boundary processes."""
-    path = tmp_path / "client-key.pub"
-    path.write_text("controlled public key\n", encoding="ascii")
+def windows_acl_processes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Callable[[Path, dict[str, Any]], WindowsAclBoundary]:
+    """Lend real processes and one ACL record in place of native Windows APIs."""
     state = tmp_path / "acl.json"
     sid = "S-1-5-21-100-200-300-1001"
-    state.write_text(
-        json.dumps(
-            {
-                "owner": sid,
-                "protected": True,
-                "rules": [
-                    {"sid": trustee, "type": "Allow", "inherited": False}
-                    for trustee in ("S-1-1-0", sid, "S-1-5-18", "S-1-5-32-544")
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
     monkeypatch.setenv("FPLINUX_TEST_ACL_STATE", str(state))
     icacls = tmp_path / "icacls.exe"
     powershell = tmp_path / "powershell.exe"
@@ -139,7 +135,123 @@ def explicit_public_key_acl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     host.sid = sid
     host.icacls = icacls
     host.powershell = powershell
-    return WindowsAclBoundary(host, path, state)
+
+    def bind(path: Path, acl: dict[str, Any]) -> WindowsAclBoundary:
+        state.write_text(json.dumps(acl), encoding="utf-8")
+        return WindowsAclBoundary(host, path, state)
+
+    return bind
+
+
+@pytest.fixture
+def explicit_public_key_acl(
+    tmp_path: Path,
+    windows_acl_processes: Callable[[Path, dict[str, Any]], WindowsAclBoundary],
+) -> WindowsAclBoundary:
+    """Model ssh-keygen's explicit Everyone grant using real boundary processes."""
+    path = tmp_path / "client-key.pub"
+    path.write_text("controlled public key\n", encoding="ascii")
+    return windows_acl_processes(
+        path,
+        {
+            "owner": "S-1-5-21-100-200-300-1001",
+            "protected": True,
+            "rules": [
+                {"sid": trustee, "type": "Allow", "inherited": False}
+                for trustee in (
+                    "S-1-1-0",
+                    "S-1-5-21-100-200-300-1001",
+                    "S-1-5-18",
+                    "S-1-5-32-544",
+                )
+            ],
+        },
+    )
+
+
+@pytest.mark.parametrize("entry", ["host", "workflow"])
+@pytest.mark.parametrize("existing", [False, True], ids=["new", "existing"])
+def test_runtime_directory_protects_inherited_access_and_keeps_data_on_reopen(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    windows_acl_processes: Callable[[Path, dict[str, Any]], WindowsAclBoundary],
+    entry: str,
+    *,
+    existing: bool,
+) -> None:
+    """Both runtime entries protect account-owned directories through simulated NTFS APIs."""
+    path = tmp_path / "data"
+    if existing:
+        path.mkdir()
+        (path / "retained.txt").write_bytes(b"existing phone data\n")
+    boundary = windows_acl_processes(
+        path,
+        {
+            "owner": "S-1-5-21-100-200-300-1001",
+            "protected": False,
+            "rules": [
+                {"sid": trustee, "type": "Allow", "inherited": True}
+                for trustee in ("S-1-5-32-544", "S-1-5-18", "S-1-5-11", "S-1-5-32-545")
+            ],
+        },
+    )
+    open_directory: Callable[[Path], Path] = boundary.host.runtime_root
+    if entry == "workflow":
+        monkeypatch.setattr(state, "os", SimpleNamespace(name="nt"))
+        monkeypatch.setattr(windows_host, "WindowsHost", lambda: boundary.host)
+        open_directory = state.private_directory
+
+    assert open_directory(path) == path
+    acl = json.loads(boundary.state.read_text(encoding="utf-8"))
+    assert acl["protected"] is True
+    assert acl["owner"] == "S-1-5-21-100-200-300-1001"
+    assert {rule["sid"] for rule in acl["rules"]} == {
+        "S-1-5-21-100-200-300-1001",
+        "S-1-5-18",
+        "S-1-5-32-544",
+    }
+    boundary.host.require_private(path)
+    if not existing:
+        (path / "retained.txt").write_bytes(b"existing phone data\n")
+    assert open_directory(path) == path
+    assert (path / "retained.txt").read_bytes() == b"existing phone data\n"
+
+
+@pytest.mark.parametrize("violation", ["owner", "explicit-allow", "deny"])
+def test_runtime_directory_does_not_admit_foreign_ownership_or_explicit_access(
+    tmp_path: Path,
+    windows_acl_processes: Callable[[Path, dict[str, Any]], WindowsAclBoundary],
+    violation: str,
+) -> None:
+    """Protecting a directory does not take ownership or accept another account's access."""
+    path = tmp_path / "data"
+    path.mkdir()
+    other = "S-1-5-21-900-901-902-1002"
+    acl: dict[str, Any] = {
+        "owner": other if violation == "owner" else "S-1-5-21-100-200-300-1001",
+        "protected": False,
+        "rules": [
+            {
+                "sid": other,
+                "type": "Deny" if violation == "deny" else "Allow",
+                "inherited": False,
+            }
+        ],
+    }
+    boundary = windows_acl_processes(path, acl)
+    before = boundary.state.read_bytes()
+    error = "another Windows account" if violation == "owner" else "Session path is not private"
+
+    with pytest.raises(SystemExit, match=error):
+        boundary.host.runtime_root(path)
+
+    if violation == "owner":
+        assert boundary.state.read_bytes() == before
+    else:
+        protected = json.loads(boundary.state.read_text(encoding="utf-8"))
+        assert acl["rules"][0] in protected["rules"]
+        with pytest.raises(SystemExit, match="Session path is not private"):
+            boundary.host.require_private(path)
 
 
 def test_new_public_key_loses_explicit_everyone_access_before_private_validation(
@@ -224,7 +336,7 @@ def test_binary_stream_progress_counts_overwrites_without_counting_the_existing_
     assert output.read_bytes() == b"keep\x00\r\n\xff\x80fgh"
 
 
-@pytest.mark.parametrize("status", [0, 7, 130])
+@pytest.mark.parametrize("status", [0, 7, 17, 130])
 def test_interactive_shell_inherits_terminal_output_and_preserves_exit_status(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], status: int
 ) -> None:
@@ -239,6 +351,42 @@ def test_interactive_shell_inherits_terminal_output_and_preserves_exit_status(
     captured = capfd.readouterr()
     assert captured.out == "controlled shell output\n"
     assert captured.err == "controlled shell diagnostic\n"
+
+
+@pytest.mark.parametrize("present", [False, True])
+def test_interactive_ssh_connection_failure_signals_loss_with_any_usb_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, present: bool
+) -> None:
+    """A completed real SSH child signals loss even while PnP still reports the phone."""
+    transport = native_process_transport(tmp_path)
+    session = endpoint_session(tmp_path / "session")
+    host = transport.host
+    assert isinstance(host, StubWindowsHost)
+    host.snapshot["devices"] = (
+        [{"id": "USB\\VID_0525&PID_A4A6\\0123456789abcdef0123456789abcdef"}] if present else []
+    )
+    monkeypatch.setattr(os, "isatty", lambda _descriptor: True)
+    monkeypatch.setenv("FPLINUX_TEST_SHELL_STATUS", "255")
+    native_popen = subprocess.Popen
+
+    def completed_ssh(
+        *arguments: Any,  # noqa: ANN401 -- preserve the real subprocess launch boundary.
+        **options: Any,  # noqa: ANN401 -- preserve the real subprocess launch boundary.
+    ) -> subprocess.Popen[Any]:
+        process = native_popen(*arguments, **options)
+        try:
+            assert process.wait(timeout=5) == 255
+        except BaseException:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+            raise
+        return process
+
+    monkeypatch.setattr(subprocess, "Popen", completed_ssh)
+
+    with pytest.raises(ConnectionLostError):
+        transport.run_shell(session)
 
 
 def test_interactive_shell_cancellation_reaps_the_owned_child(
@@ -268,6 +416,46 @@ def test_interactive_shell_cancellation_reaps_the_owned_child(
     finally:
         cancelled.set()
         trigger.join()
+
+    assert not (Path("/proc") / pid_file.read_text()).exists()
+
+
+def test_interactive_shell_usb_absence_reaps_ssh_with_stale_network_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unchanged DHCP snapshot cannot keep a disconnected phone's SSH child alive."""
+    transport = native_process_transport(tmp_path)
+    session = endpoint_session(tmp_path / "session")
+    host = transport.host
+    assert isinstance(host, StubWindowsHost)
+    host.snapshot["devices"] = []
+    pid_file = tmp_path / "shell.pid"
+    monkeypatch.setattr(os, "isatty", lambda _descriptor: True)
+    monkeypatch.setenv("FPLINUX_TEST_SHELL_PID", str(pid_file))
+
+    with pytest.raises(ConnectionLostError):
+        transport.run_shell(session)
+
+    assert not (Path("/proc") / pid_file.read_text()).exists()
+
+
+def test_cancelled_usb_presence_probe_reaps_its_owned_powershell_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cancelling a slow read-only PnP query does not wait for its ordinary 20s deadline."""
+    transport = native_process_transport(tmp_path)
+    session = endpoint_session(tmp_path / "session")
+    host = windows_host.WindowsHost.__new__(windows_host.WindowsHost)
+    host.powershell = tmp_path / "powershell.exe"
+    install_python_script(
+        ROOT / "tests/host_process/runtime/fixtures/windows-host/windows_discovery_timeout.py",
+        host.powershell,
+    )
+    transport.host = host
+    pid_file = tmp_path / "discovery.pid"
+    monkeypatch.setenv("FPLINUX_TEST_DISCOVERY_PID", str(pid_file))
+
+    assert transport.usb_present(session, cancelled=pid_file.exists) is False
 
     assert not (Path("/proc") / pid_file.read_text()).exists()
 
@@ -318,6 +506,165 @@ def test_loader_debug_environment_is_local_to_the_owned_child(
 
     assert json.loads(captured.read_text()) == {"LIBUSB_DEBUG": "4"}
     assert "LIBUSB_DEBUG" not in os.environ
+
+
+@pytest.mark.parametrize(
+    "scenario", ["ready", "ready-crlf", "driver-needed", "missing-ready", "transfer-error"]
+)
+def test_native_usb_progress_belongs_to_the_current_child_and_precedes_transfer(
+    tmp_path: Path, scenario: str
+) -> None:
+    loader = tmp_path / "loader.exe"
+    install_python_script(
+        ROOT / "tests/host_process/runtime/fixtures/windows-host/usb_loader.py", loader
+    )
+    log = tmp_path / "runtime.log"
+    log.write_text("FPLINUX_BOOTROM_READY\nprevious invocation\n")
+    host = StubWindowsHost({})
+    notifications: list[str] = []
+
+    def acquired() -> None:
+        notifications.append("acquired")
+        (tmp_path / "usb-acknowledged").write_text("ready\n")
+
+    def run() -> None:
+        host.run_tool(
+            [str(loader), scenario, str(tmp_path)],
+            timeout=15,
+            cwd=tmp_path,
+            log=log,
+            on_usb_ready=acquired,
+        )
+
+    if scenario == "driver-needed":
+        with pytest.raises(windows_host.BootromDriverRequiredError):
+            run()
+    elif scenario == "missing-ready":
+        with pytest.raises(SystemExit, match="without confirming its USB connection"):
+            run()
+    elif scenario == "transfer-error":
+        with pytest.raises(SystemExit, match="failed with status 2"):
+            run()
+    else:
+        run()
+
+    assert notifications == (
+        ["acquired"] if scenario in {"ready", "ready-crlf", "transfer-error"} else []
+    )
+    contents = log.read_text()
+    assert contents.startswith("FPLINUX_BOOTROM_READY\nprevious invocation\n")
+    assert "native discovery started\n" in contents
+    if scenario in {"ready", "ready-crlf", "transfer-error"}:
+        ending = b"\r\n" if scenario == "ready-crlf" else b"\n"
+        assert log.read_bytes().endswith(
+            b"FPLINUX_BOOTROM_READY" + ending + b"native transfer ended\n"
+        )
+    assert not (Path("/proc") / (tmp_path / "child.pid").read_text()).exists()
+
+
+@pytest.mark.parametrize("scenario", ["timeout", "cancel"])
+def test_native_usb_progress_preserves_timeout_and_cancellation_cleanup(
+    tmp_path: Path, scenario: str
+) -> None:
+    loader = tmp_path / "loader.exe"
+    install_python_script(
+        ROOT / "tests/host_process/runtime/fixtures/windows-host/usb_loader.py", loader
+    )
+    acquired: list[str] = []
+
+    def usb_ready() -> None:
+        acquired.append("ready")
+        if scenario == "cancel":
+            raise KeyboardInterrupt
+
+    host = StubWindowsHost({})
+    error = KeyboardInterrupt if scenario == "cancel" else SystemExit
+    with pytest.raises(error):
+        host.run_tool(
+            [str(loader), scenario, str(tmp_path)],
+            timeout=3,
+            cwd=tmp_path,
+            log=tmp_path / "runtime.log",
+            on_usb_ready=usb_ready,
+        )
+    assert acquired == ["ready"]
+    assert (tmp_path / "usb-transfer-started").exists() is (scenario == "timeout")
+    assert not (Path("/proc") / (tmp_path / "child.pid").read_text()).exists()
+
+
+def test_saved_session_reappearance_cancels_native_wait_before_any_transfer(
+    tmp_path: Path,
+) -> None:
+    loader = tmp_path / "loader.exe"
+    install_python_script(
+        ROOT / "tests/host_process/runtime/fixtures/windows-host/usb_loader.py", loader
+    )
+    saved = {"session_id": "previous authenticated session"}
+    host = StubWindowsHost({})
+    acquired: list[str] = []
+
+    def old_session_reappeared() -> None:
+        if (tmp_path / "usb-opened").exists():
+            raise SessionResumedError(saved)
+
+    with pytest.raises(SessionResumedError) as resumed:
+        host.run_tool(
+            [str(loader), "waiting", str(tmp_path)],
+            timeout=3,
+            cwd=tmp_path,
+            log=tmp_path / "runtime.log",
+            on_usb_ready=lambda: acquired.append("ready"),
+            on_wait=old_session_reappeared,
+        )
+
+    assert resumed.value.session is saved
+    assert acquired == []
+    assert not (tmp_path / "usb-transfer-started").exists()
+    assert not (Path("/proc") / (tmp_path / "child.pid").read_text()).exists()
+
+
+def test_old_usb_probe_completing_after_native_acquisition_cannot_cancel_transfer(
+    tmp_path: Path,
+) -> None:
+    loader = tmp_path / "loader.exe"
+    install_python_script(
+        ROOT / "tests/host_process/runtime/fixtures/windows-host/usb_loader.py", loader
+    )
+    host = StubWindowsHost({})
+    acquired = threading.Event()
+    probe_finished = threading.Event()
+    saved = {"session_id": "previous authenticated session"}
+
+    def delayed_old_usb_probe() -> bool:
+        assert acquired.wait(timeout=3)
+        probe_finished.set()
+        return True
+
+    with ThreadPoolExecutor(max_workers=1) as worker:
+        probe = worker.submit(delayed_old_usb_probe)
+
+        def on_wait() -> None:
+            if probe.done() and probe.result():
+                raise SessionResumedError(saved)
+            (tmp_path / "release-ready").write_text("continue\n")
+
+        def on_usb_ready() -> None:
+            assert not (tmp_path / "usb-transfer-started").exists()
+            acquired.set()
+            assert probe_finished.wait(timeout=3)
+
+        host.run_tool(
+            [str(loader), "waiting", str(tmp_path)],
+            timeout=3,
+            cwd=tmp_path,
+            log=tmp_path / "runtime.log",
+            on_usb_ready=on_usb_ready,
+            on_wait=on_wait,
+        )
+        assert probe.result(timeout=3) is True
+
+    assert (tmp_path / "usb-transfer-started").read_text() == "acknowledged\n"
+    assert not (Path("/proc") / (tmp_path / "child.pid").read_text()).exists()
 
 
 def test_failed_reader_reports_stderr_and_keeps_partial_bytes(tmp_path: Path) -> None:
@@ -394,17 +741,119 @@ def test_saved_connection_reuses_the_pinned_key_and_requires_live_identities(
         "6.12.0-fplinux-1212121212121212" if identity != "wrong-kernel" else "6.12.0-other",
     )
 
+    current = transport.load_saved_session("test-phone", session_root=tmp_path / "data/session")
+    assert current == saved
+    assert current is not None
+    assert transport.usb_present(current)
     if identity == "correct":
-        current = transport.load_live_session("test-phone", session_root=tmp_path / "data/session")
-        assert current == saved
+        assert (
+            transport.reacquire_bound_session(current, expected_device_identity="12" * 32) == saved
+        )
     else:
         with pytest.raises(
             SystemExit, match=r"another RAM session identity|another kernel build identity"
         ):
-            transport.load_live_session("test-phone", session_root=tmp_path / "data/session")
+            transport.reacquire_bound_session(current, expected_device_identity="12" * 32)
 
     assert known_hosts.read_bytes() == pinned
     assert not Path(saved["image"]).exists()
+
+
+def test_saved_ready_binding_and_keys_survive_absence_without_usb_or_ssh_discovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    transport = native_process_transport(tmp_path)
+    saved = saved_connection(transport)
+    host = transport.host
+    assert isinstance(host, StubWindowsHost)
+    state_path = Path(saved["directory"]) / "session.json"
+    original_state = state_path.read_bytes()
+    original_key = Path(saved["private_key"]).read_bytes()
+    pinned = Path(saved["known_hosts"]).read_bytes()
+
+    def unavailable_discovery(*_arguments: object, **_options: object) -> dict[str, Any]:
+        pytest.fail("Loading a saved binding must not query USB or network state")
+
+    monkeypatch.setattr(host, "ps", unavailable_discovery)
+    monkeypatch.setenv("FPLINUX_TEST_FORBID_KEYSCAN", "1")
+
+    current = transport.load_saved_session("test-phone", session_root=tmp_path / "data/session")
+
+    assert current == saved
+    assert state_path.read_bytes() == original_state
+    assert Path(saved["private_key"]).read_bytes() == original_key
+    assert Path(saved["known_hosts"]).read_bytes() == pinned
+
+
+def test_reappearing_ready_binding_authenticates_with_a_new_network_interface_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    transport = native_process_transport(tmp_path)
+    saved = saved_connection(transport)
+    host = transport.host
+    assert isinstance(host, StubWindowsHost)
+    host.snapshot["devices"] = [{"id": f"USB\\VID_0525&PID_A4A6\\{saved['usb_serial']}"}]
+    host.snapshot["adapters"][0]["index"] = 29
+    host.snapshot["routes"][0]["index"] = 29
+    state_path = Path(saved["directory"]) / "session.json"
+    original_state = state_path.read_bytes()
+    pinned = Path(saved["known_hosts"]).read_bytes()
+    monkeypatch.setenv("FPLINUX_TEST_FORBID_KEYSCAN", "1")
+    monkeypatch.setenv("FPLINUX_TEST_SESSION_ID", "ab" * 32)
+    monkeypatch.setenv("FPLINUX_TEST_KERNEL", "6.12.0-fplinux-1212121212121212")
+
+    assert transport.usb_present(saved) is True
+    current = transport.reacquire_bound_session(saved, expected_device_identity="12" * 32)
+
+    assert current is saved
+    assert state_path.read_bytes() == original_state
+    assert Path(saved["known_hosts"]).read_bytes() == pinned
+
+
+def test_ready_connection_reopens_while_an_owned_boot_candidate_is_prepared(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An ordinary candidate waiting for USB cannot hide the retained ready connection."""
+    bundle = session_preparation_bundle(tmp_path)
+    bundle.runtime["usb"]["linux_gadget"]["product_id"] = 0xA4A6
+    for role in ("ssh", "keyscan"):
+        install_python_script(
+            ROOT / "tests/fixtures/ssh_transport/windows_peer.py", bundle.tools[role]
+        )
+    transport = windows_host.WindowsTransport(StubWindowsHost({}), bundle)
+    saved = saved_connection(transport)
+    saved["target"] = "demo"
+    (Path(saved["directory"]) / "session.json").write_text(json.dumps(saved), encoding="utf-8")
+    host = transport.host
+    assert isinstance(host, StubWindowsHost)
+    candidate = windows_host._prepare_session(  # noqa: SLF001 -- exercise the ordinary producer.
+        host, bundle, session_root=tmp_path / "data/session"
+    )
+    candidate_directory = Path(candidate["directory"])
+    retained = {path.name: path.read_bytes() for path in candidate_directory.iterdir()}
+    host.snapshot["devices"] = [{"id": f"USB\\VID_0525&PID_A4A6\\{saved['usb_serial']}"}]
+    monkeypatch.setenv("FPLINUX_TEST_FORBID_KEYSCAN", "1")
+    monkeypatch.setenv("FPLINUX_TEST_SESSION_ID", "ab" * 32)
+    monkeypatch.setenv("FPLINUX_TEST_KERNEL", "6.12.0-fplinux-1212121212121212")
+
+    current = transport.load_saved_session("demo", session_root=tmp_path / "data/session")
+    assert current == saved
+    assert current is not None
+    assert transport.usb_present(current)
+    assert transport.reacquire_bound_session(current, expected_device_identity="12" * 32) == saved
+
+    assert candidate["status"] == "prepared"
+    assert {path.name: path.read_bytes() for path in candidate_directory.iterdir()} == retained
+
+
+def test_reacquiring_another_archive_identity_stops_before_ssh_authentication(
+    tmp_path: Path,
+) -> None:
+    transport = native_process_transport(tmp_path)
+    saved = saved_connection(transport)
+
+    with pytest.raises(SystemExit, match="another kernel build identity"):
+        transport.reacquire_bound_session(saved, expected_device_identity="34" * 32)
 
 
 def test_concurrent_ready_authentication_preserves_saved_session_and_pinned_keys(
@@ -424,9 +873,13 @@ def test_concurrent_ready_authentication_preserves_saved_session_and_pinned_keys
     pinned = Path(saved["known_hosts"]).read_bytes()
     barrier = threading.Barrier(2)
 
-    def reconnect() -> dict[str, Any] | None:
+    def reconnect() -> dict[str, Any]:
         barrier.wait(timeout=5)
-        return transport.load_live_session("test-phone", session_root=tmp_path / "data/session")
+        current = transport.load_saved_session(
+            "test-phone", session_root=tmp_path / "data/session"
+        )
+        assert current is not None
+        return transport.reacquire_bound_session(current, expected_device_identity="12" * 32)
 
     with state_path.open("rb") as original, ThreadPoolExecutor(max_workers=2) as workers:
         first = workers.submit(reconnect)
@@ -445,10 +898,10 @@ def test_concurrent_ready_authentication_preserves_saved_session_and_pinned_keys
 
 
 @pytest.mark.parametrize("present", [False, True])
-def test_saved_phone_absence_and_present_unready_endpoint_have_distinct_results(
+def test_saved_usb_presence_is_independent_of_network_readiness(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, present: bool
 ) -> None:
-    """PnP absence permits a boot; a present USB root with no DHCP fails readiness."""
+    """An exact USB root remains detectable while its network endpoint is unavailable."""
     transport = native_process_transport(tmp_path)
     saved = saved_connection(transport)
     host = transport.host
@@ -467,23 +920,22 @@ def test_saved_phone_absence_and_present_unready_endpoint_have_distinct_results(
     monkeypatch.setattr("fplinux_cli.runtime.windows_host.time.monotonic", lambda: now)
     monkeypatch.setattr("fplinux_cli.runtime.windows_host.time.sleep", advance_clock)
 
+    current = transport.load_saved_session("test-phone", session_root=tmp_path / "data/session")
+    assert current == saved
+    assert current is not None
+    assert transport.usb_present(current) is present
+    assert now == 0
     if present:
         with pytest.raises(SystemExit, match="did not become ready before the deadline"):
-            transport.load_live_session("test-phone", session_root=tmp_path / "data/session")
+            transport.reacquire_bound_session(current, expected_device_identity="12" * 32)
         assert now >= 3
-    else:
-        assert (
-            transport.load_live_session("test-phone", session_root=tmp_path / "data/session")
-            is None
-        )
-        assert now == 0
     assert Path(saved["known_hosts"]).read_bytes() == pinned
 
 
-def test_ambiguous_live_saved_phone_connections_stop_before_authentication(
+def test_ambiguous_saved_phone_connections_stop_before_authentication(
     tmp_path: Path,
 ) -> None:
-    """Two valid saved identities and two present USB roots cannot select one phone."""
+    """Two valid saved identities cannot select one retained RAM session."""
     transport = native_process_transport(tmp_path)
     saved = saved_connection(transport)
     second_id = "ef" * 32
@@ -502,15 +954,8 @@ def test_ambiguous_live_saved_phone_connections_stop_before_authentication(
         "image": str(directory / "image.bin"),
     }
     (directory / "session.json").write_text(json.dumps(second))
-    host = transport.host
-    assert isinstance(host, StubWindowsHost)
-    host.snapshot["devices"] = [
-        {"id": f"USB\\VID_0525&PID_A4A6\\{saved['usb_serial']}"},
-        {"id": f"USB\\VID_0525&PID_A4A6\\{serial}"},
-    ]
-
-    with pytest.raises(SystemExit, match="Multiple saved phone connections are live"):
-        transport.load_live_session("test-phone", session_root=tmp_path / "data/session")
+    with pytest.raises(SystemExit, match="Multiple saved phone connections cannot select"):
+        transport.load_saved_session("test-phone", session_root=tmp_path / "data/session")
 
 
 def test_session_network_avoids_host_routes_and_saved_sessions(
@@ -601,6 +1046,52 @@ def test_failed_key_generation_discards_only_the_new_session(
     assert list((archive / "data/session").iterdir()) == [previous.parent]
 
 
+def test_resuming_saved_session_discards_only_the_unstarted_windows_boot_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    bundle = session_preparation_bundle(archive)
+    install_python_script(
+        ROOT / "tests/host_process/runtime/fixtures/windows-host/windows_loader_output.py",
+        bundle.tools["loader"],
+    )
+    transport = windows_host.WindowsTransport(StubWindowsHost({}), bundle)
+    saved = saved_connection(transport)
+    saved["target"] = "demo"
+    state_path = Path(saved["directory"]) / "session.json"
+    state_path.write_text(json.dumps(saved), encoding="utf-8")
+    retained = {path.name: path.read_bytes() for path in state_path.parent.iterdir()}
+    host = transport.host
+    assert isinstance(host, StubWindowsHost)
+    host.snapshot["devices"] = []
+    monkeypatch.setattr(windows_host, "WindowsHost", lambda: host)
+    pid_file = tmp_path / "loader.pid"
+    monkeypatch.setenv("FPLINUX_TEST_PENDING_LOADER_PID", str(pid_file))
+    capsule = tmp_path / "device-data.cpio"
+    capsule.write_bytes(b"controlled phone data\n")
+    events: list[str] = []
+
+    def resumed() -> None:
+        if pid_file.exists():
+            raise SessionResumedError(saved)
+
+    with pytest.raises(SessionResumedError) as result:
+        windows_host.boot_archive(
+            bundle,
+            capsule,
+            session_root=archive / "data/session",
+            events=events.append,
+            on_wait=resumed,
+        )
+
+    assert result.value.session is saved
+    assert "ram-loader-start" not in events
+    assert list((archive / "data/session").iterdir()) == [state_path.parent]
+    assert {path.name: path.read_bytes() for path in state_path.parent.iterdir()} == retained
+    assert not (Path("/proc") / pid_file.read_text()).exists()
+
+
 @pytest.mark.parametrize(
     ("loader_status", "bridge_status", "capsule_layout"),
     [
@@ -679,9 +1170,42 @@ def test_windows_loader_processes_receive_private_capsule_and_retain_one_archive
             if not directory and path.parent.name == "payload":
                 protected_payload[path.name] = path.read_bytes()
 
-        def ps(self, script: str, *arguments: str, timeout: float = 20) -> dict[str, Any]:
-            del script, arguments, timeout
-            if "waiting-for-device" in events and not self.selected:
+        @override
+        def run_tool(
+            self,
+            argv: list[str],
+            *,
+            timeout: int,
+            cwd: Path,
+            log: Path,
+            environment: dict[str, str] | None = None,
+            on_usb_ready: Callable[[], None] | None = None,
+            on_wait: Callable[[], None] | None = None,
+        ) -> None:
+            """Retain native discovery time without consuming the upload's existing budget."""
+            if Path(argv[0]).name == "spd_dump.exe":
+                assert argv[argv.index("--wait") + 1] == "30"
+                assert timeout == 330
+            super().run_tool(
+                argv,
+                timeout=timeout,
+                cwd=cwd,
+                log=log,
+                environment=environment,
+                on_usb_ready=on_usb_ready,
+                on_wait=on_wait,
+            )
+
+        def ps(
+            self,
+            script: str,
+            *arguments: str,
+            timeout: float = 20,
+            cancelled: Callable[[], bool] | None = None,
+        ) -> dict[str, Any]:
+            del script, arguments, timeout, cancelled
+            assert "waiting-for-device" not in events or "ram-loader-start" in events
+            if "ram-loader-start" in events and not self.selected:
                 self.selected = True
                 return {
                     "devices": [{"id": "USB\\VID_1782&PID_4D00\\selected", "service": "WinUSB"}]
@@ -721,8 +1245,9 @@ def test_windows_loader_processes_receive_private_capsule_and_retain_one_archive
                 log=log,
             )
         invocations = 1 if loader_status else 2
-        assert log.read_text() == "earlier run diagnostics\n" + invocations * (
-            "controlled loader output\ncontrolled loader diagnostic\n"
+        assert log.read_text() == (
+            "earlier run diagnostics\nFPLINUX_BOOTROM_READY\n"
+            + invocations * "controlled loader output\ncontrolled loader diagnostic\n"
         )
         assert not Path(session["directory"]).exists()
         assert capsule.read_bytes() == b"controlled capsule"
@@ -750,6 +1275,7 @@ def test_windows_loader_processes_receive_private_capsule_and_retain_one_archive
     assert protected_payload == expected_payload
     assert log.read_text() == (
         "earlier run diagnostics\n"
+        "FPLINUX_BOOTROM_READY\n"
         "controlled loader output\ncontrolled loader diagnostic\n"
         "controlled loader output\ncontrolled loader diagnostic\n"
     )
@@ -805,8 +1331,14 @@ def test_two_boots_retain_one_ready_session_and_failed_next_boot_preserves_its_k
             super().__init__({})
             self.bootrom = False
 
-        def ps(self, script: str, *arguments: str, timeout: float = 20) -> dict[str, Any]:
-            del arguments, timeout
+        def ps(
+            self,
+            script: str,
+            *arguments: str,
+            timeout: float = 20,
+            cancelled: Callable[[], bool] | None = None,
+        ) -> dict[str, Any]:
+            del arguments, timeout, cancelled
             if script == "routes.ps1":
                 return {"routes": []}
             if script == "devices.ps1":
@@ -888,6 +1420,262 @@ def test_two_boots_retain_one_ready_session_and_failed_next_boot_preserves_its_k
     ]
     assert unrelated.read_text() == "unrelated user data\n"
     assert capsule.read_bytes() == b"controlled capsule"
+
+
+@dataclass(frozen=True)
+class Sc9820eWindowsBoot:
+    """Own one admitted RAM archive and its explicitly controlled Windows boundaries."""
+
+    bundle: windows_host.WindowsBundle
+    capsule: Path
+    trace: Path
+    canonical: dict[str, bytes]
+    events: list[str]
+    progress: Callable[[str], None]
+
+
+@pytest.fixture
+def sc9820e_windows_boot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sc9820eWindowsBoot:
+    """Run session, upload and SSH processes; substitute unavailable PnP and ACL APIs."""
+    archive = tmp_path / "Windows архив with spaces"
+    archive.mkdir()
+    archive_files(archive, platform="sc9820e")
+    windows_path = archive / "windows-host.json"
+    windows = json.loads(windows_path.read_text())
+    for role, source in {
+        "loader": "tests/host_process/runtime/fixtures/windows-host/sc9820e_loader.py",
+        "keygen": "tests/fixtures/runtime-tools/windows_keygen.py",
+        "ssh": "tests/fixtures/ssh_transport/windows_peer.py",
+        "keyscan": "tests/fixtures/ssh_transport/windows_peer.py",
+    }.items():
+        install_python_script(ROOT / source, archive / windows["host_tools"][role])
+    for relative in windows["sha256"]:
+        windows["sha256"][relative] = hashlib.sha256((archive / relative).read_bytes()).hexdigest()
+    windows_path.write_text(json.dumps(windows))
+    refresh_archive(archive)
+    bundle = admitted_windows(archive)
+    active = tmp_path / "active-session-path"
+    trace = tmp_path / "sc9820e-uploads.json"
+    monkeypatch.setenv("FPLINUX_TEST_ACTIVE_SESSION", str(active))
+    monkeypatch.setenv("FPLINUX_TEST_SC9820E_UPLOADS", str(trace))
+    monkeypatch.setenv("FPLINUX_TEST_KERNEL", "6.12.0-fplinux-1212121212121212")
+    events: list[str] = []
+
+    class ArchiveWindowsHost(StubWindowsHost):
+        """Supply the generated session's USB ancestry, DHCP lease and selected device."""
+
+        def __init__(self) -> None:
+            super().__init__({})
+            self.bootrom = False
+
+        def ps(
+            self,
+            script: str,
+            *arguments: str,
+            timeout: float = 20,
+            cancelled: Callable[[], bool] | None = None,
+        ) -> dict[str, Any]:
+            del arguments, timeout, cancelled
+            if script == "routes.ps1":
+                return {"routes": []}
+            if script == "devices.ps1":
+                devices = (
+                    [{"id": "USB\\VID_1782&PID_4D00\\selected", "service": "WinUSB"}]
+                    if self.bootrom
+                    else []
+                )
+                return {"devices": devices}
+            assert script == "network.ps1"
+            session = json.loads(Path(active.read_text()).read_text())
+            snapshot = endpoint_snapshot()
+            adapter = snapshot["adapters"][0]
+            adapter["mac"] = session["host_mac"]
+            adapter["lineage"][-1] = (
+                f"USB\\VID_{session['vendor_id']:04X}&PID_{session['product_id']:04X}\\"
+                f"{session['usb_serial']}"
+            )
+            adapter["addresses"][0]["address"] = session["host_address"]
+            snapshot["routes"][0]["prefix"] = session["network"]
+            return snapshot
+
+        def progress(self, stage: str) -> None:
+            events.append(stage)
+            if stage == "waiting-for-device":
+                self.bootrom = True
+            elif stage == "ram-loader-complete":
+                self.bootrom = False
+
+    host = ArchiveWindowsHost()
+    monkeypatch.setattr(windows_host, "WindowsHost", lambda: host)
+    capsule = archive / "data/phone/device-data.cpio"
+    capsule.parent.mkdir(parents=True)
+    capsule.write_bytes(create_device_data_initramfs({}, usb_transport="rndis"))
+    canonical = {
+        relative: (archive / relative).read_bytes()
+        for relative in (bundle.runtime["image"], *bundle.runtime["assets"].values())
+    }
+    return Sc9820eWindowsBoot(bundle, capsule, trace, canonical, events, host.progress)
+
+
+def test_sc9820e_windows_boot_uploads_the_ordered_ram_chain_and_authenticates(
+    sc9820e_windows_boot: Sc9820eWindowsBoot,
+) -> None:
+    """Exercise real child handshakes and bytes without claiming native PE or USB coverage."""
+    case = sc9820e_windows_boot
+    root = case.bundle.root
+    capsule = case.capsule.read_bytes()
+
+    _transport, session = windows_host.boot_archive(
+        case.bundle,
+        case.capsule,
+        session_root=root / "data/session",
+        events=case.progress,
+        log=root / "logs/run.log",
+        prepared_data_sha256=hashlib.sha256(capsule).hexdigest(),
+    )
+
+    observed = json.loads(case.trace.read_text())
+    uploads = {name: bytes.fromhex(contents) for name, contents in observed["files"].items()}
+    initramfs = b"root123\0" + capsule
+    image = bytes.fromhex(observed["image"])
+    slot = case.bundle.runtime["personalization"]["offset"]
+    record = image[slot : slot + 512]
+    expected_tree = binary_tree(
+        [("decoy", b"\xa1" * 64 + b"\xc3" * 32 + b"\xb2" * 68 + b"\xd4" * 256)],
+        [
+            (
+                "chosen",
+                [
+                    ("rng-seed", record[48:112]),
+                    ("linux,initrd-start", bytes.fromhex("85500000")),
+                    ("linux,initrd-end", struct.pack(">I", 0x85500000 + len(initramfs))),
+                ],
+                [],
+            ),
+            (
+                "fplinux-session",
+                [
+                    ("compatible", b"fplinux,ram-session\0"),
+                    ("fplinux,session-id", bytes.fromhex(session["session_id"])),
+                    ("fplinux,ssh-client-key", record[112:180]),
+                    ("fplinux,usb-session", record[180:436]),
+                ],
+                [],
+            ),
+        ],
+    )
+    assert uploads == {
+        "fdl1.bin": b"DHTBfirst-stage",
+        "sml.bin": b"secure-monitor",
+        "fdl2.bin": b"DHTBboard-initializer",
+        "entry.bin": b"entry123",
+        "kernel.bin": b"kernel123",
+        "dtb.bin": expected_tree,
+        "initramfs.bin": initramfs,
+    }
+    assert capsule_files(uploads["initramfs.bin"][8:]) == {"etc/fplinux/usb-transport": b"rndis\n"}
+    assert observed["argv"] == [
+        "--ready-ack",
+        "--verbose",
+        "1",
+        "--wait",
+        "30",
+        "keep_charge",
+        "1",
+        "fdl",
+        "fdl1.bin",
+        "0x5000",
+        "write_data",
+        "0x8e000000",
+        "0",
+        "14",
+        "sml.bin",
+        "write_data",
+        "0x81008000",
+        "0",
+        "9",
+        "kernel.bin",
+        "write_data",
+        "0x85400000",
+        "0",
+        str(len(expected_tree)),
+        "dtb.bin",
+        "write_data",
+        "0x85500000",
+        "0",
+        str(len(initramfs)),
+        "initramfs.bin",
+        "write_data",
+        "0x80002060",
+        "0",
+        "8",
+        "entry.bin",
+        "timeout",
+        "60000",
+        "fdl_exec",
+        "fdl2.bin",
+        "0x9efffe00",
+    ]
+    directory = Path(session["directory"])
+    assert Path(observed["cwd"]) == directory / "uploads"
+    assert session["status"] == "ready"
+    assert session["prepared_data_sha256"] == hashlib.sha256(capsule).hexdigest()
+    assert Path(session["private_key"]).read_bytes() == b"fixture private material\n"
+    assert Path(session["known_hosts"]).read_text().startswith(f"fplinux-{session['usb_serial']} ")
+    assert not (directory / "image.bin").exists()
+    assert not (directory / "uploads").exists()
+    assert not (directory / "payload").exists()
+    assert case.events[-3:] == ["linux-start", "linux-transition", "ssh-ready"]
+    assert (root / "logs/run.log").read_text() == (
+        "FPLINUX_BOOTROM_READY\nSC9820E RAM uploads acknowledged\n"
+    )
+    assert case.capsule.read_bytes() == capsule
+    for relative, contents in case.canonical.items():
+        assert (root / relative).read_bytes() == contents
+
+
+@pytest.mark.parametrize("failure", ["loader", "authentication", "cancellation"])
+def test_sc9820e_windows_boot_failure_reaps_the_loader_and_removes_session_material(
+    sc9820e_windows_boot: Sc9820eWindowsBoot,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    """A failed real loader, authenticated identity or owner cancellation leaves no keys."""
+    case = sc9820e_windows_boot
+    root = case.bundle.root
+    capsule = case.capsule.read_bytes()
+    error: type[BaseException] = SystemExit
+    message: str | None = None
+    if failure == "loader":
+        monkeypatch.setenv("FPLINUX_TEST_LOADER_STATUS", "7")
+        message = "spd_dump.exe failed with status 7"
+    elif failure == "authentication":
+        monkeypatch.setenv("FPLINUX_TEST_KERNEL", "6.12.0-fplinux-ffffffffffffffff")
+        message = "another kernel build identity"
+    else:
+        error = KeyboardInterrupt
+
+    def progress(stage: str) -> None:
+        case.progress(stage)
+        if failure == "cancellation" and stage == "ram-loader-start":
+            raise KeyboardInterrupt
+
+    with pytest.raises(error, match=message):
+        windows_host.boot_archive(
+            case.bundle,
+            case.capsule,
+            session_root=root / "data/session",
+            events=progress,
+            log=root / "logs/failed.log",
+        )
+
+    observed = json.loads(case.trace.read_text())
+    assert not (Path("/proc") / str(observed["pid"])).exists()
+    assert not Path(observed["cwd"]).parent.exists()
+    assert not list((root / "data/session").glob("*/session.json"))
+    assert case.capsule.read_bytes() == capsule
+    for relative, contents in case.canonical.items():
+        assert (root / relative).read_bytes() == contents
 
 
 def test_powershell_discovery_timeout_reaps_the_owned_process(

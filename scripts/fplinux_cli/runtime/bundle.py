@@ -207,6 +207,7 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
             "adapter",
             "host_tools",
             "nand",
+            "emmc",
             "device_data",
             "sha256",
         },
@@ -286,10 +287,13 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
         fail("runtime adapter must be an object")
     selected_adapter = adapter_path(root)
     root["nand"] = validate_nand(root["nand"], platform=root["identity"]["platform"]["name"])
+    root["emmc"] = validate_emmc(root["emmc"], platform=root["identity"]["platform"]["name"])
+    if root["nand"] is not None and root["emmc"] is not None:
+        fail("runtime must select one physical phone-data reader")
 
     root["device_data"] = validate_device_data(root["device_data"])
-    if root["device_data"] is not None and root["nand"] is None:
-        fail("runtime preparation requires a declared NAND reader")
+    if root["device_data"] is not None and root["nand"] is None and root["emmc"] is None:
+        fail("runtime preparation requires a declared physical reader")
     expected_paths = {
         root["image"],
         "fplinux.py",
@@ -305,9 +309,26 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
         ),
     }
     if root["device_data"] is not None:
-        for field in ("parser", "ecc_module"):
+        for field in ("parser", "originals_parser", "ecc_module"):
             if root["device_data"][field] is not None:
                 expected_paths.add(root["device_data"][field])
+    if root["emmc"] is not None:
+        expected_paths.update(
+            {
+                "scripts/fplinux_cli/device_data/emmc.py",
+                "scripts/fplinux_cli/runtime/emmc_files.py",
+                "scripts/fplinux_cli/runtime/emmc-files/collect.sh",
+            }
+        )
+        if root["device_data"] is not None:
+            if root["device_data"]["originals_parser"] is None:
+                fail("runtime eMMC preparation requires an originals_parser")
+            if root["device_data"]["ecc_module"] is not None:
+                fail("runtime eMMC preparation cannot use NAND ECC")
+            expected_paths.add("scripts/fplinux_cli/device_data/emmc-files/read_files.py")
+            for package in ("ext4", "cachetools", "crcmod"):
+                expected_paths.add(f"scripts/{package}/__init__.py")
+                expected_paths.add(f"licenses/phone-data/{package}-LICENSE.txt")
     hashes = root.get("sha256")
     if not isinstance(hashes, dict) or not expected_paths.issubset(hashes):
         fail("runtime hashes do not include the required runtime closure")
@@ -329,9 +350,20 @@ def validate_device_data(value: object) -> dict[str, Any] | None:
     from fplinux_cli.manifests.audio import validate_audio_policy  # noqa: PLC0415
 
     descriptor = require_object(
-        value, {"parser", "groups", "audio_policy", "ecc_module"}, "device data"
+        value,
+        {
+            "parser",
+            "originals_parser",
+            "groups",
+            "required_groups",
+            "audio_policy",
+            "ecc_module",
+            "preparation_recipe",
+        },
+        "device data",
     )
-    for field in ("parser", "ecc_module"):
+    require_recipe(descriptor["preparation_recipe"], "device data preparation_recipe")
+    for field in ("parser", "originals_parser", "ecc_module"):
         if descriptor[field] is not None:
             descriptor[field] = relative_name(descriptor[field], f"device data {field}")
     descriptor["audio_policy"] = validate_audio_policy(descriptor["audio_policy"])
@@ -345,20 +377,56 @@ def validate_device_data(value: object) -> dict[str, Any] | None:
                 fail(f"device data group {group} contains an invalid file")
             relative_name(entry["source"], f"device data {group} source")
             relative_name(entry["destination"], f"device data {group} destination")
+    required = descriptor["required_groups"]
+    if (
+        not isinstance(required, list)
+        or not required
+        or any(
+            not isinstance(group, str) or group not in descriptor["groups"] for group in required
+        )
+        or len(set(required)) != len(required)
+    ):
+        fail("device data required_groups must be a non-empty list of unique declared groups")
     return descriptor
+
+
+def validate_emmc(value: object, *, platform: str) -> dict[str, Any] | None:
+    """Admit one whole internal MMC card and the shared selected-original contract."""
+    if value is None:
+        return None
+    from fplinux_cli.device_data.emmc import (  # noqa: PLC0415
+        EmmcError,
+        validate_file_selections,
+    )
+
+    reader = require_object(value, {"raw_device", "files", "acquisition_recipe"}, "runtime eMMC")
+    if platform != "sc9820e":
+        fail("this platform does not support the runtime eMMC reader")
+    if (
+        not isinstance(reader["raw_device"], str)
+        or re.fullmatch(r"/dev/mmcblk[0-9]+", reader["raw_device"]) is None
+    ):
+        fail("runtime eMMC raw_device must name a whole /dev/mmcblkN card")
+    require_recipe(reader["acquisition_recipe"], "runtime eMMC acquisition_recipe")
+    try:
+        validate_file_selections(reader["files"])
+    except EmmcError as error:
+        fail(str(error))
+    return reader
 
 
 def validate_nand(value: object, *, platform: str) -> dict[str, Any] | None:
     """Admit the read-only reader contract even when no preparation is required."""
     if value is None:
         return None
-    fields = {"raw_device", "id", "raw_page_bytes"}
+    fields = {"raw_device", "id", "raw_page_bytes", "acquisition_recipe"}
     if not isinstance(value, dict) or set(value) not in (
-        {"raw_device"},
+        {"raw_device", "acquisition_recipe"},
         fields,
         fields | {"ecc_format"},
     ):
         fail("runtime NAND reader requires raw_device and optionally id with raw_page_bytes")
+    require_recipe(value["acquisition_recipe"], "runtime NAND acquisition_recipe")
     if platform != "ums9117":
         fail("this platform does not support the runtime NAND reader")
     if (
@@ -378,6 +446,13 @@ def validate_nand(value: object, *, platform: str) -> dict[str, Any] | None:
     return value
 
 
+def require_recipe(value: object, name: str) -> str:
+    """Require a content-derived compatibility identity."""
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        fail(f"{name} must be a lowercase SHA-256 digest")
+    return value
+
+
 def admit_bundle(bundle: Path) -> ValidatedBundle:
     """Reject incomplete or changed content before host setup or USB discovery."""
     windows_archive = (bundle / "windows-host.json").is_file()
@@ -387,6 +462,13 @@ def admit_bundle(bundle: Path) -> ValidatedBundle:
     runtime = load_runtime_manifest(bundle / "runtime-manifest.json")
     if not windows_archive and "60-fplinux.rules" not in runtime["sha256"]:
         fail("runtime hashes do not include the phone USB access rules")
+    if runtime["emmc"] is not None and runtime["device_data"] is not None:
+        for package in ("ext4", "cachetools", "crcmod"):
+            for source in (bundle / "scripts" / package).rglob("*"):
+                if source.is_dir() and not source.is_symlink():
+                    continue
+                if source.relative_to(bundle).as_posix() not in runtime["sha256"]:
+                    fail(f"runtime hashes omit a delivered eMMC reader file: {source.name}")
     for relative, expected in runtime["sha256"].items():
         path = bundle / relative
         require_file(

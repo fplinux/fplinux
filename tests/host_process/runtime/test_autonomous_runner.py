@@ -38,10 +38,17 @@ class AutonomousRunnerArchive:
     """Own an isolated delivery with real launcher and runner code."""
 
     root: Path
+    prepared: PortableArchive
+
+    @property
+    def phone(self) -> Path:
+        """Return the shared prepared data passed to this extracted runtime."""
+        return self.prepared.prepared_data()
 
     def environment(self) -> dict[str, str]:
         """Keep every controlled executable and USB endpoint inside this archive."""
         return {
+            **self.prepared.environment(),
             "PATH": str(self.root / "bin"),
             "LANG": "C.UTF-8",
             "PYTHONDONTWRITEBYTECODE": "1",
@@ -101,7 +108,7 @@ def _refresh_archive_closure(root: Path) -> None:
 def autonomous_runner_archive(portable_archive: PortableArchive) -> AutonomousRunnerArchive:
     """Prepare phone data, then replace only external discovery and tool boundaries."""
     archive = portable_archive
-    prepared = archive.run("--from-dump", str(archive.dump))
+    prepared = archive.run_entrypoint("fplinux.py", "prepare", "--from-dump", str(archive.dump))
     assert prepared.returncode == 0, prepared.stderr
     root = archive.root
     boundary = root / "boundary"
@@ -135,7 +142,7 @@ def autonomous_runner_archive(portable_archive: PortableArchive) -> AutonomousRu
     shutil.copyfile(runtime_tools / "stdbuf.sh", tools / "stdbuf")
     (tools / "stdbuf").chmod(0o755)
     _refresh_archive_closure(root)
-    return AutonomousRunnerArchive(root)
+    return AutonomousRunnerArchive(root, archive)
 
 
 def test_prepared_phone_data_reaches_bridge_with_owned_log_and_archive_session(
@@ -155,7 +162,7 @@ def test_prepared_phone_data_reaches_bridge_with_owned_log_and_archive_session(
     }
     assert not (received / "pinmap.bin").exists()
     assert not (received / "keymap.bin").exists()
-    assert not (archive.root / "data/phone/device-data.cpio").exists()
+    assert not (archive.phone / "device-data.cpio").exists()
     assert not list((archive.root / "data").glob(".boot-*"))
     assert (archive.root / "boundary/usb-access.rules").read_bytes() == (
         b'SUBSYSTEM=="usb", MODE="0660"\n'
@@ -187,7 +194,9 @@ def test_first_run_rejects_a_corrupted_ram_image_before_privileged_usb_setup(
 ) -> None:
     """A new archive's backup boot must admit its image before installing host rules."""
     archive = autonomous_runner_archive
-    shutil.rmtree(archive.root / "data/phone")
+    backup = archive.prepared.phone_store() / "nand.bin"
+    backup_stat = backup.stat()
+    shutil.rmtree(archive.phone)
     image = archive.root / "image/ramboot.bin"
     contents = bytearray(image.read_bytes())
     contents[-1] ^= 1
@@ -200,7 +209,7 @@ def test_first_run_rejects_a_corrupted_ram_image_before_privileged_usb_setup(
     assert not (archive.root / "boundary/usb-access.rules").exists()
     assert not (archive.root / "boundary/rules-reloaded").exists()
     assert not (archive.root / "boundary/ram-loads.txt").exists()
-    assert not (archive.root / "data/nand.bin").exists()
+    assert backup.stat() == backup_stat
     log = max((archive.root / "logs").rglob("*.log")).read_text()
     assert "usb-access-setup" not in log
     assert "Setting up USB access" not in result.stdout + log
@@ -248,7 +257,7 @@ def test_explicit_repreparation_refuses_the_previous_live_phone_without_another_
 
     prepared = archive.run_direct("prepare", "--replace", "--from-dump", str(backup))
     assert prepared.returncode == 0, prepared.stderr
-    assert (archive.root / "data/phone/groups/bluetooth/radio.bin").read_bytes() == b"other"
+    assert (archive.phone / "groups/bluetooth/radio.bin").read_bytes() == b"other"
 
     stopped = archive.run()
 

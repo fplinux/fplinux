@@ -12,6 +12,8 @@ def main() -> None:
     """Record this child and read the inherited terminal until EOF or cancellation."""
     Path(sys.argv[1]).write_text(str(os.getpid()), encoding="ascii")
     print("terminal peer ready", flush=True)
+    if len(sys.argv) > 2:
+        raise SystemExit(int(sys.argv[2]))
     for line in sys.stdin:
         print(f"peer received: {line.rstrip()}", flush=True)
     print("terminal peer EOF", flush=True)

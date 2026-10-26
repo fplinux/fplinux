@@ -8,6 +8,7 @@ import json
 import os
 import shlex
 import subprocess
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
@@ -19,15 +20,26 @@ from fplinux_cli.runtime import boot, windows_host, workflow
 from fplinux_cli.runtime import bundle as bundle_runtime
 from fplinux_cli.runtime.bundle import ValidatedBundle
 from fplinux_cli.runtime.events import RunLog
+from fplinux_cli.runtime.state import exclusive_lock, private_directory
 
 from tests.fixtures.portable_archive import capsule_files
 from tests.windows_host_support import StubWindowsHost, archive_files
 
 if TYPE_CHECKING:
     from _hashlib import HASH
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
     from io import BufferedReader
     from typing import BinaryIO
+
+
+@pytest.fixture
+def saved_backup_workspace(tmp_path: Path) -> Iterator[Path]:
+    """Own large imported images outside the quality runtime's memory-backed temporary root."""
+    log_root = os.environ.get("FPLINUX_LOG_ROOT")
+    parent = Path(log_root) if log_root else tmp_path
+    parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=parent, prefix="saved-backup-") as temporary:
+        yield Path(temporary)
 
 
 def test_unknown_nand_identify_reports_feature_bytes_without_reading_raw_pages(
@@ -72,6 +84,7 @@ def test_unknown_nand_identify_reports_feature_bytes_without_reading_raw_pages(
             log,
             action="identify",
             output=None,
+            phone_data=None,
         )
     finally:
         log.close("success")
@@ -85,7 +98,7 @@ def test_remote_command_can_use_a_live_shell_session_and_journals_its_own_result
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Explicit authenticated actions coexist with the instance lock held by a terminal."""
-    data = workflow.private_directory(tmp_path / "data")
+    data = private_directory(tmp_path / "data")
     commands = []
 
     class Phone:
@@ -104,7 +117,7 @@ def test_remote_command_can_use_a_live_shell_session_and_journals_its_own_result
     monkeypatch.setattr(boot, "reconnect_live_bundle", lambda *_args, **_kwargs: (Phone(), {}))
     runtime.update(target="phone", profile=None, build_type="release")
 
-    with workflow.launcher_lock(data):
+    with exclusive_lock(data / ".launcher.lock", message="launcher occupied"):
         result = workflow.run_phone(
             tmp_path, data, tmp_path / "logs", reconnect=True, exec_command="printf ready"
         )
@@ -156,7 +169,11 @@ def test_manual_nand_backup_preserves_user_display_and_writes_actual_reader_byte
         workflow._run_nand(  # noqa: SLF001 -- shared explicit NAND operation boundary.
             ValidatedBundle(
                 tmp_path,
-                {"target": "phone", "device_data": None, "nand": {"raw_device": "/dev/raw-nand"}},
+                {
+                    "target": "phone",
+                    "device_data": None,
+                    "nand": {"raw_device": "/dev/raw-nand", "acquisition_recipe": "a" * 64},
+                },
                 "a" * 64,
                 "b" * 64,
                 None,
@@ -165,6 +182,7 @@ def test_manual_nand_backup_preserves_user_display_and_writes_actual_reader_byte
             log,
             action="backup",
             output=output,
+            phone_data=None,
         )
     finally:
         log.close("success")
@@ -178,16 +196,40 @@ def test_manual_nand_backup_preserves_user_display_and_writes_actual_reader_byte
 
 @pytest.mark.parametrize("saved_input", ["canonical", "explicit"])
 def test_saved_backup_reconnects_reader_before_extraction_and_preserves_failed_preparation(
-    tmp_path: Path,
+    saved_backup_workspace: Path,
     monkeypatch: pytest.MonkeyPatch,
     saved_input: str,
 ) -> None:
     """Real orchestration resumes a saved backup while extraction and SSH are controlled."""
+    tmp_path = saved_backup_workspace
     data = tmp_path / "data"
     reader = data / "reader/session"
     reader.mkdir(parents=True)
-    saved = data / "nand.bin" if saved_input == "canonical" else tmp_path / "saved.bin"
-    saved.write_bytes(b"saved physical NAND input")
+    store = tmp_path / "phone-store"
+    store.mkdir()
+    saved = store / "nand.bin" if saved_input == "canonical" else tmp_path / "saved.bin"
+    with saved.open("wb") as writer:
+        writer.truncate(138412032)
+        writer.write(b"radio")
+    with saved.open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    saved.with_name(f"{saved.name}.json").write_text(
+        json.dumps(
+            {
+                "id_bytes": "e521",
+                "chip": "controlled chip",
+                "page_main_bytes": 2048,
+                "oob_bytes": 64,
+                "pages_per_block": 64,
+                "block_count": 1024,
+                "raw_bytes": 138412032,
+                "sha256": digest,
+                "target": "phone",
+                "acquisition_recipe": "a" * 64,
+            }
+        ),
+        encoding="utf-8",
+    )
     from_dump = None if saved_input == "canonical" else saved
     phases: list[str] = []
     extraction_phases: list[str] = []
@@ -217,7 +259,7 @@ def test_saved_backup_reconnects_reader_before_extraction_and_preserves_failed_p
                     raise SystemExit(message)
                 if phase == "ready":
                     assert checked_storage
-                    assert (data / "phone").is_dir()
+                    assert (store / "phone").is_dir()
                 return subprocess.CompletedProcess(command, 0, "", "")
             assert "FPLINUX_SWAPS" in command
             checked_storage = True
@@ -248,7 +290,7 @@ def test_saved_backup_reconnects_reader_before_extraction_and_preserves_failed_p
         *,
         replace: bool,
     ) -> Path:
-        assert backup == saved
+        assert backup == store / "nand.bin"
         assert not replace
         extraction_phases.append(phases[-1])
         if len(extraction_phases) == 1:
@@ -263,11 +305,15 @@ def test_saved_backup_reconnects_reader_before_extraction_and_preserves_failed_p
         "target": "phone",
         "identity": {"target": {"compatible": "test,phone"}},
         "host_tools": {},
-        "nand": {},
+        "nand": {"id": 0x21E5, "raw_page_bytes": 2112, "acquisition_recipe": "a" * 64},
+        "emmc": None,
         "device_data": {
+            "preparation_recipe": "b" * 64,
             "parser": None,
+            "originals_parser": None,
             "ecc_module": None,
             "groups": {"bluetooth": [{"source": "radio.bin", "destination": "radio.bin"}]},
+            "required_groups": ["bluetooth"],
             "audio_policy": {
                 "speaker_vibration": False,
                 "speaker_from_headphones": False,
@@ -289,34 +335,40 @@ def test_saved_backup_reconnects_reader_before_extraction_and_preserves_failed_p
                 data,
                 log,
                 lambda _stage: None,
+                store=store,
                 from_dump=from_dump,
                 replace=False,
                 loader_trace=False,
             )
         assert failed.value is original_error
         assert reader.is_dir()
-        assert not (data / "phone").exists()
-        workflow._prepare_phone_data(  # noqa: SLF001 -- resume the same saved reader and source.
+        assert not (store / "phone").exists()
+        reader_used = workflow._prepare_phone_data(  # noqa: SLF001 -- resume saved reader/source.
             admitted,
             data,
             log,
             lambda _stage: None,
+            store=store,
             from_dump=from_dump,
             replace=False,
             loader_trace=False,
         )
+        assert reader_used is True
     finally:
         log.close("success")
 
     assert extraction_phases == ["extracting", "extracting"]
     assert phases == ["waiting", "extracting", "error", "waiting", "extracting", "ready"]
     assert not (data / "reader").exists()
-    assert saved.read_bytes() == b"saved physical NAND input"
+    with saved.open("rb") as stream:
+        assert hashlib.file_digest(stream, "sha256").hexdigest() == digest
 
 
-def test_windows_headless_ums_boots_with_transport_only_and_reuses_its_content_identity(
+@pytest.mark.parametrize("platform_name", ["ums9117", "sc9820e"])
+def test_windows_direct_boot_reuses_its_transport_capsule_identity(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    platform_name: str,
 ) -> None:
     """Real capsule selection and staging use controlled native ACL, boot and SSH boundaries."""
     data = tmp_path / "data"
@@ -327,12 +379,12 @@ def test_windows_headless_ums_boots_with_transport_only_and_reuses_its_content_i
     runtime: dict[str, Any] = {
         "identity": {
             "target": {"display_name": "Headless phone"},
-            "platform": {"name": "ums9117"},
+            "platform": {"name": platform_name},
         },
         "device_data": None,
         "target": "phone",
         "transport": "usb-ncm",
-        "nand": {"raw_device": "/dev/raw-nand"},
+        "nand": {"raw_device": "/dev/raw-nand"} if platform_name == "ums9117" else None,
     }
     capsules: list[bytes] = []
     capsule_paths: list[Path] = []
@@ -343,14 +395,10 @@ def test_windows_headless_ums_boots_with_transport_only_and_reuses_its_content_i
     class WindowsAcl:
         """Replace unavailable native ACL calls while retaining real temporary directories."""
 
-        def secure_new(self, path: Path, *, directory: bool = False) -> None:
-            """Check that the workflow protects the staging directory it owns."""
-            assert directory
+        def runtime_root(self, path: Path) -> Path:
+            """Keep native permission preparation outside the capsule-selection scenario."""
             assert path.is_dir()
-
-        def require_private(self, path: Path) -> None:
-            """Keep permission inspection at the substituted native host boundary."""
-            assert path.is_dir()
+            return path
 
     class Phone:
         """Return only the explicit identification report through the real NAND reader."""
@@ -423,6 +471,7 @@ def test_windows_headless_ums_boots_with_transport_only_and_reuses_its_content_i
                 data,
                 log,
                 lambda _stage: None,
+                phone_data=None,
                 from_dump=None,
                 prepare_only=False,
                 replace=False,
@@ -442,32 +491,33 @@ def test_windows_headless_ums_boots_with_transport_only_and_reuses_its_content_i
         assert not capsule_paths[0].exists()
         expected_identity = hashlib.sha256(capsules[0]).hexdigest()
         assert boot_hashes == [expected_identity]
-        assert workflow.prepared_content_identity(tmp_path, runtime, data) == expected_identity
+        assert workflow.prepared_content_identity(tmp_path, runtime) == expected_identity
 
-        workflow._run_nand(  # noqa: SLF001 -- same identity on the explicit NAND consumer.
-            admitted,
-            data,
-            log,
-            action="identify",
-            output=None,
-        )
-        assert reconnect_hashes == [expected_identity, expected_identity, expected_identity]
-        assert commands == ["cat /sys/class/misc/raw-nand/device/geometry 3</dev/raw-nand"]
+        assert reconnect_hashes == [expected_identity, expected_identity]
+        if platform_name == "ums9117":
+            workflow._run_nand(  # noqa: SLF001 -- same identity on the explicit NAND consumer.
+                admitted,
+                data,
+                log,
+                action="identify",
+                output=None,
+                phone_data=None,
+            )
+            assert reconnect_hashes == [expected_identity, expected_identity, expected_identity]
+            assert commands == ["cat /sys/class/misc/raw-nand/device/geometry 3</dev/raw-nand"]
     finally:
         log.close("success")
 
 
-@pytest.mark.parametrize("host", ["posix", "nt"])
-def test_direct_qin_content_identity_does_not_add_a_transport_capsule(
+def test_linux_qin_content_identity_does_not_add_a_transport_capsule(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    host: str,
 ) -> None:
     """A direct SC9820E boot remains free of supplemental UMS transport data."""
-    monkeypatch.setattr(workflow, "os", SimpleNamespace(name=host))
+    monkeypatch.setattr(workflow, "os", SimpleNamespace(name="posix"))
     runtime = {"device_data": None, "identity": {"platform": {"name": "sc9820e"}}}
 
-    assert workflow.prepared_content_identity(tmp_path, runtime, tmp_path / "data") is None
+    assert workflow.prepared_content_identity(tmp_path, runtime) is None
 
 
 @pytest.mark.parametrize("host", ["posix", "nt"])

@@ -169,7 +169,14 @@ def archive_inputs(
         role: f"host/{name}" for role, name in platform["host"]["runtime_tools"].items()
     }
     runtime["device_data"] = device_data_descriptor(target, config)
-    runtime["nand"] = config.get("nand")
+    if runtime["device_data"] is not None:
+        runtime["device_data"]["preparation_recipe"] = "7" * 64
+    runtime["nand"] = (
+        {**config["nand"], "acquisition_recipe": "8" * 64} if config.get("nand") else None
+    )
+    runtime["emmc"] = (
+        {**config["emmc"], "acquisition_recipe": "9" * 64} if config.get("emmc") else None
+    )
     if runtime["device_data"] is not None and runtime["device_data"]["ecc_module"] is not None:
         runtime["host_tools"]["nand_ecc"] = "host/ums9117-nand-ecc"
         write_archive_file(bundle, "host/ums9117-nand-ecc", b"prepared BCH decoder", mode=0o755)

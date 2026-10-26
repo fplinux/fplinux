@@ -18,9 +18,9 @@ def create_ready_session(
     *,
     status: str = "ready",
     target: str = "phone",
+    session_id: bytes = b"session identity is exactly 32!!",
 ) -> dict[str, Any]:
     """Create one complete private session directory for a transport consumer."""
-    session_id = b"session identity is exactly 32!!"
     usb_serial = hashlib.sha256(session_id).hexdigest()[:32]
     directory = ssh_transport._session_directory(root, target, usb_serial)  # noqa: SLF001
     directory.mkdir(parents=True, mode=0o700)

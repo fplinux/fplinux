@@ -11,6 +11,7 @@ from unittest import mock
 
 import pytest
 from fplinux_cli.build.device_tree import all_path_properties
+from fplinux_cli.runtime.connection import SessionResumedError
 
 from tests import ROOT
 from tests.host_process.runtime.sc9820e.fixtures import (
@@ -62,11 +63,39 @@ def test_bootrom_selection_waits_for_node_access_after_enumeration(
         mock.patch.object(ADAPTER.time, "sleep", clock.sleep),
     ):
         result = ADAPTER._select_bootrom(  # noqa: SLF001 -- exercise USB selection before upload.
-            {"vendor_id": 0x1782, "product_id": 0x4D00}, deadline=300
+            {"vendor_id": 0x1782, "product_id": 0x4D00},
+            deadline=300,
+            on_wait=lambda: pytest.fail("an enumerated BootROM must be selected first"),
         )
 
     assert result == (bootrom_device, 3, 41)
     assert clock.now == pytest.approx(0.15)
+
+
+def test_bootrom_wait_can_resume_a_saved_session_without_opening_usb(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The old Linux device may cancel the candidate before the first BootROM open."""
+    usb = tmp_path / "usb"
+    usb.mkdir()
+    monkeypatch.setattr(ADAPTER, "USB_DEVICES", usb)
+    previous = {"session_id": "previous"}
+
+    def resume_previous() -> None:
+        raise SessionResumedError(previous)
+
+    with (
+        mock.patch.object(ADAPTER.os, "open") as open_bootrom,
+        pytest.raises(SessionResumedError) as resumed,
+    ):
+        ADAPTER._select_bootrom(  # noqa: SLF001 -- exercise selection before the first USB open.
+            {"vendor_id": 0x1782, "product_id": 0x4D00},
+            deadline=float("inf"),
+            on_wait=resume_previous,
+        )
+
+    assert resumed.value.session == previous
+    open_bootrom.assert_not_called()
 
 
 @pytest.mark.parametrize(("deadline", "elapsed"), [(300.0, 1.0), (0.12, 0.12)])
@@ -166,6 +195,45 @@ def test_prepare_uploads_extracts_private_regions_without_changing_the_session_i
     assert uploads["fdl1"].read_bytes() == b"DHTBfirst-stage"
     assert uploads["fdl2"].read_bytes() == b"DHTBboard-initializer"
     assert uploads["sml"].read_bytes() == b"secure-monitor"
+
+
+def test_supplemental_initramfs_updates_uploaded_extent_and_dtb(tmp_path: Path) -> None:
+    """Host transport configuration extends the private upload, not the canonical image."""
+    runtime, session, _assets = prepare_runtime(tmp_path)
+    original = Path(session["image"]).read_bytes()
+    capsule = tmp_path / "configuration.cpio"
+    capsule.write_bytes(b"supplemental archive")
+    output = tmp_path / "uploads"
+    output.mkdir()
+    uploads = ADAPTER.prepare_uploads(tmp_path, runtime, session, output, device_data=capsule)
+    assert uploads["initramfs"].read_bytes() == b"root123\0supplemental archive"
+    chosen = all_path_properties(uploads["dtb"].read_bytes())["/chosen"]
+    assert chosen["linux,initrd-start"] == bytes.fromhex("85500000")
+    assert chosen["linux,initrd-end"] == bytes.fromhex("8550001c")
+    assert Path(session["image"]).read_bytes() == original
+
+
+def test_supplemental_initramfs_cannot_overlap_another_upload(tmp_path: Path) -> None:
+    runtime, session, _assets = prepare_runtime(tmp_path)
+    runtime["adapter"]["loader"]["sml_load"] = 0x85500010
+    capsule = tmp_path / "configuration.cpio"
+    capsule.write_bytes(b"supplemental archive")
+    output = tmp_path / "uploads"
+    output.mkdir()
+    with pytest.raises(SystemExit, match="overlaps"):
+        ADAPTER.prepare_uploads(tmp_path, runtime, session, output, device_data=capsule)
+    assert not list(output.iterdir())
+
+
+def test_supplement_does_not_hide_an_incorrect_canonical_dtb_extent(tmp_path: Path) -> None:
+    runtime, session, _assets = prepare_runtime(tmp_path)
+    runtime["adapter"]["regions"]["initramfs"]["size"] = 8
+    capsule = tmp_path / "configuration.cpio"
+    capsule.write_bytes(b"supplemental archive")
+    output = tmp_path / "uploads"
+    output.mkdir()
+    with pytest.raises(SystemExit, match="DTB linux,initrd-end"):
+        ADAPTER.prepare_uploads(tmp_path, runtime, session, output, device_data=capsule)
 
 
 def test_external_root_uploads_personalize_the_same_session_without_an_initramfs(

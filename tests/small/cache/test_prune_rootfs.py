@@ -23,6 +23,15 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+@pytest.fixture
+def phone_store_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Keep selected firmware independent of the user's personal phone store."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    return tmp_path / "data/fplinux/phones/phone"
+
+
 class RootfsPruneTests:
     """Exercise prune planning and application on isolated cache trees."""
 
@@ -165,7 +174,9 @@ class RootfsPruneTests:
         assert ("rootfs recipes") in (plan.entries[0].reason)
 
     @staticmethod
-    def test_partial_device_data_group_protects_existing_rootfs(tmp_path: Path) -> None:
+    def test_partial_device_data_group_protects_existing_rootfs(
+        tmp_path: Path, phone_store_root: Path
+    ) -> None:
         """A selected but incomplete private group makes the current recipe unknown."""
         cache = tmp_path / ".cache"
         public_key = alpine_signing.signing_public_key(cache)
@@ -174,7 +185,7 @@ class RootfsPruneTests:
         publish_environment_state(cache, EnvironmentState("a" * 64, "b" * 64, "b" * 64))
         existing = cache / "rootfs" / ("1" * 64)
         existing.mkdir(parents=True)
-        phone = cache / "device-data/phone/phone"
+        phone = phone_store_root / "phone"
         bluetooth = phone / "groups/bluetooth"
         bluetooth.mkdir(parents=True)
         (bluetooth / "present.bin").write_bytes(b"present!")
@@ -220,7 +231,9 @@ class RootfsPruneTests:
         assert existing.exists()
 
     @staticmethod
-    def test_current_rootfs_recipes_include_each_declared_profile(tmp_path: Path) -> None:
+    def test_current_rootfs_recipes_include_each_declared_profile(
+        tmp_path: Path, phone_store_root: Path
+    ) -> None:
         """One profile-only rootfs remains protected even when default differs."""
         cache = tmp_path / ".cache"
         public_key = alpine_signing.signing_public_key(cache)
@@ -232,7 +245,7 @@ class RootfsPruneTests:
         clean_profile_recipe = "7" * 64
         for recipe in (default_recipe, profile_recipe, clean_profile_recipe):
             (cache / "rootfs" / recipe).mkdir(parents=True)
-        device_data = cache / "device-data/phone"
+        device_data = phone_store_root
         firmware_directory = device_data / "phone/groups/bluetooth"
         firmware_directory.mkdir(parents=True)
         (firmware_directory / "controller.bin").write_bytes(b"firmware")
@@ -366,7 +379,7 @@ class RootfsPruneTests:
     @staticmethod
     @pytest.mark.parametrize("root_kind", ["initramfs", "external"])
     def test_automatic_rootfs_cleanup_retains_normal_and_without_device_data_variants(
-        tmp_path: Path, root_kind: str
+        tmp_path: Path, phone_store_root: Path, root_kind: str
     ) -> None:
         """Cleanup retains a firmware-free root and the current rootfs radio delivery."""
         cache = tmp_path / ".cache"
@@ -381,7 +394,7 @@ class RootfsPruneTests:
             "fm-radio": [{"source": "radio.bin", "destination": "chip/radio.bin", "size": 5}],
             "audio-profile": [{"source": "audio.bin", "destination": "chip/audio.bin", "size": 5}],
         }
-        device_data = cache / "device-data/phone"
+        device_data = phone_store_root
         for group, filename, contents in (
             ("bluetooth", "bluetooth.bin", b"bluetooth"),
             ("fm-radio", "radio.bin", b"radio"),
@@ -390,7 +403,7 @@ class RootfsPruneTests:
             directory = device_data / "phone/groups" / group
             directory.mkdir(parents=True)
             (directory / filename).write_bytes(contents)
-        captured = firmware_inputs.capture_external_device_data("phone", groups, cache)
+        captured = firmware_inputs.capture_external_device_data("phone", groups)
         environment_recipe = environment_artifact_recipe_digest("a" * 64, "b" * 64)
         signing_key = alpine_signing.signing_key_identity(cache)
 

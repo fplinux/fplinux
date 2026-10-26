@@ -112,13 +112,17 @@ def main() -> None:
     manifest = runtime_manifest()
 
     def wait_for_session(
-        prepared: dict[str, Any], *, on_linux_usb: Callable[[], None]
+        prepared: dict[str, Any],
+        *,
+        expected_device_identity: str,
+        on_linux_usb: Callable[[], None],
     ) -> dict[str, Any]:
         on_linux_usb()
         if mode == "authentication-failure":
             message = "controlled authentication failure"
             raise SystemExit(message)
         ready = {**prepared, "status": "ready"}
+        ssh_transport.require_device_identity(ready, expected_device_identity)
         state = Path(ready["private_key"]).parent / "session.json"
         state.write_text(json.dumps(ready), encoding="utf-8")
         return ready

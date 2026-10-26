@@ -53,6 +53,7 @@ def report_input(tmp_path: Path) -> tuple[Path, Path, DeviceDataSpec]:
     (tools / "scenario.json").write_text(json.dumps(scenario), encoding="utf-8")
     spec = DeviceDataSpec(
         target="headless",
+        preparation_recipe="a" * 64,
         parser=None,
         groups={},
         audio=AudioProfileContext(
@@ -82,6 +83,7 @@ def test_board_report_needs_no_runtime_groups_and_keeps_selected_phone_data(
     if geometry_source == "receipt":
         receipt = {
             "target": "headless",
+            "acquisition_recipe": "a" * 64,
             "id_bytes": "e521",
             "chip": "controlled chip",
             "page_main_bytes": 2048,

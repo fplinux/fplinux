@@ -8,7 +8,6 @@ import shutil
 import subprocess
 import tempfile
 import time
-from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest import mock
@@ -222,11 +221,6 @@ class SshTransportOpenSshConfigTests:
             assert (effective["forwardagent"]) == ("no")
             assert ("proxycommand") not in (effective)
 
-            ssh_transport._cleanup_target_sessions(ssh_runtime, "phone")  # noqa: SLF001
-
-        assert not (path.exists())
-        assert not ((ssh_runtime / "current" / "phone.json").exists())
-
 
 class OpenSshServerLifecycleTests:
     """Observe ownership of the real daemon across a controlled readiness failure."""
@@ -397,10 +391,6 @@ class SshTransportOpenSshDirectTests:
         return loopback_ssh_argv
 
     @staticmethod
-    def _cleanup_session(root: Path, target: str = "phone") -> None:
-        ssh_transport._cleanup_target_sessions(root, target)  # noqa: SLF001
-
-    @staticmethod
     def _wait_until_process_absent(process_id: int) -> None:
         deadline = time.monotonic() + _PROCESS_EXIT_TIMEOUT_SECONDS
         process_path = Path(f"/proc/{process_id}")
@@ -421,7 +411,6 @@ class SshTransportOpenSshDirectTests:
         server = OpenSshServer(ssh_base / "server", Path(session["private_key"]))
         server.start()
         request.addfinalizer(server.stop)
-        request.addfinalizer(partial(self._cleanup_session, root, target))
         session, config = self._publish_loopback_session(
             root,
             server,
@@ -467,7 +456,6 @@ class SshTransportOpenSshDirectTests:
         server = OpenSshServer(ssh_base / "server", Path(session["private_key"]))
         server.start()
         request.addfinalizer(server.stop)
-        request.addfinalizer(partial(self._cleanup_session, root))
         session, _config = self._publish_loopback_session(
             root,
             server,
@@ -526,7 +514,6 @@ class SshTransportOpenSshDirectTests:
         server = OpenSshServer(ssh_base / "server", Path(session["private_key"]))
         server.start()
         request.addfinalizer(server.stop)
-        request.addfinalizer(partial(self._cleanup_session, root))
         session, config = self._publish_loopback_session(
             root,
             server,

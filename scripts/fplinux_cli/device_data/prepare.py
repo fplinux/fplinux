@@ -9,7 +9,7 @@ import os
 import shutil
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
@@ -19,18 +19,25 @@ from fplinux_cli.device_data.formats import (
     DeviceDataPreparation,
     PhysicalNand,
     PreparedGroup,
-    family_page_bytes,
 )
 from fplinux_cli.device_data.inputs import capture_phone_data
+from fplinux_cli.device_data.nand_geometry import family_page_bytes
 from fplinux_cli.device_data.original_files import read_original_files
-from fplinux_cli.runtime.nand_backup import read_backup_geometry, require_declared_chip
+from fplinux_cli.runtime.nand_backup import (
+    backup_receipt_path,
+    read_backup_geometry,
+    read_backup_record,
+    require_declared_chip,
+    save_backup_bytes,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from types import ModuleType
 
-    from fplinux_cli.device_data.formats import AudioProfileContext, NandGeometry
+    from fplinux_cli.device_data.formats import AudioProfileContext
     from fplinux_cli.device_data.inputs import FirmwareInput
+    from fplinux_cli.device_data.nand_geometry import NandGeometry
 
 NAND_ECC_TOOL = "ums9117-nand-ecc"
 NAND_ECC_MODULE = "host/nand_ecc.py"
@@ -44,9 +51,19 @@ class DeviceDataSpec:
     parser: Path | None
     groups: Mapping[str, list[dict[str, Any]]]
     audio: AudioProfileContext
+    preparation_recipe: str | None
     nand: Mapping[str, Any] | None = None
     originals_parser: Path | None = None
     ecc_module: Path | None = None
+    emmc: Mapping[str, Any] | None = None
+    required_groups: tuple[str, ...] | None = None
+
+    @property
+    def required_declarations(self) -> Mapping[str, list[dict[str, Any]]]:
+        """Select data needed for normal boot, leaving separately imported groups optional."""
+        if self.required_groups is None:
+            return self.groups
+        return {name: self.groups[name] for name in self.required_groups}
 
 
 @dataclass(frozen=True)
@@ -55,6 +72,7 @@ class DeviceDataTools:
 
     host_tools: Path | None = None
     protect_private: Callable[[Path], None] | None = None
+    python_modules: Path | None = None
 
 
 def _require_directory(path: Path, name: str) -> Path:
@@ -181,6 +199,56 @@ def read_physical_nand(spec: DeviceDataSpec, backup: Path, tools: DeviceDataTool
         fail(f"device-data extraction failed: {error}")
 
 
+def import_phone_backup(
+    spec: DeviceDataSpec,
+    tools: DeviceDataTools,
+    source: Path,
+    destination: Path,
+    *,
+    acquisition_recipe: str | None,
+) -> Path:
+    """Retain an explicitly admitted raw source without inventing its acquisition identity."""
+    from fplinux_cli.device_data.nand_geometry import (  # noqa: PLC0415 -- physical import only.
+        PAGE_MAIN_BYTES,
+        PAGES_PER_BLOCK,
+        PHYSICAL_PAGE_COUNT,
+        NandGeometry,
+    )
+
+    physical = read_physical_nand(spec, source, tools)
+    record = read_backup_record(source, physical.raw)
+    if record is not None:
+        if record.target != spec.target:
+            fail("The imported backup belongs to another phone target")
+        geometry = record.geometry
+        selected_recipe = acquisition_recipe or record.acquisition_recipe
+    elif acquisition_recipe is None:
+        replace_file_atomically(destination, physical.raw, 0o600)
+        backup_receipt_path(destination).unlink(missing_ok=True)
+        return destination
+    else:
+        declared_id = None if spec.nand is None else spec.nand.get("id")
+        if declared_id is None:
+            fail("Importing this phone's backup requires its NAND geometry receipt")
+        geometry = NandGeometry(
+            id_bytes=int(declared_id).to_bytes(2, "little").hex(),
+            chip="target-declared",
+            page_main_bytes=PAGE_MAIN_BYTES,
+            oob_bytes=physical.page_bytes - PAGE_MAIN_BYTES,
+            pages_per_block=PAGES_PER_BLOCK,
+            block_count=PHYSICAL_PAGE_COUNT // PAGES_PER_BLOCK,
+            raw_bytes=len(physical.raw),
+        )
+        selected_recipe = acquisition_recipe
+    return save_backup_bytes(
+        destination,
+        physical.raw,
+        geometry,
+        target=spec.target,
+        acquisition_recipe=selected_recipe,
+    )
+
+
 def _canonical_files(
     value: object,
     *,
@@ -266,7 +334,11 @@ def _extract_original_groups(
         fail(f"device-data preparation failed: {error}")
     if not isinstance(result, DeviceDataPreparation):
         fail("device-data originals parser returned an invalid preparation")
-    normalized = _normalize_groups(result.groups, spec.groups)
+    if not result.groups or not set(result.groups).issubset(spec.groups):
+        fail("device-data originals parser returned undeclared or empty groups")
+    normalized = _normalize_groups(
+        result.groups, {name: spec.groups[name] for name in result.groups}
+    )
     retained: dict[str, bytes] = {}
     for group in normalized.values():
         for name, contents in group.originals.items():
@@ -320,13 +392,15 @@ def materialize_device_data(
     return capture_phone_data(declarations, staging)
 
 
-def _write_receipt(
+def _write_receipt(  # noqa: PLR0913 -- source, geometry and prepared records have separate identities.
     staging: Path,
     *,
     source_kind: str,
     raw: bytes,
     groups: Mapping[str, PreparedGroup],
     admitted: Mapping[str, tuple[FirmwareInput, ...]],
+    preparation_recipe: str,
+    geometry: dict[str, Any] | None,
 ) -> None:
     """Record source and output identities without copying private source contents."""
     group_records: list[dict[str, Any]] = []
@@ -349,6 +423,8 @@ def _write_receipt(
     record = {
         "source": {"kind": source_kind, "size": len(raw), "sha256": sha256_bytes(raw)},
         "groups": group_records,
+        "preparation_recipe": preparation_recipe,
+        "geometry": geometry,
     }
     replace_file_atomically(staging / "receipt.json", canonical_json_bytes(record), 0o600)
 
@@ -397,6 +473,7 @@ def _materialize_and_publish(  # noqa: PLR0913 -- admitted source, output and ho
     raw: bytes,
     source_kind: str,
     replace: bool,
+    geometry: dict[str, Any] | None = None,
 ) -> Path:
     """Keep incomplete outputs private and expose them only after complete admission."""
     if os.name == "nt" and tools.protect_private is None:
@@ -405,8 +482,37 @@ def _materialize_and_publish(  # noqa: PLR0913 -- admitted source, output and ho
     try:
         if tools.protect_private is not None:
             tools.protect_private(staging)
-        admitted = materialize_device_data(staging, groups, spec.groups)
-        _write_receipt(staging, source_kind=source_kind, raw=raw, groups=groups, admitted=admitted)
+        selected = {name: spec.groups[name] for name in groups}
+        if destination.is_dir():
+            preserved = capture_phone_data(
+                {
+                    name: declarations
+                    for name, declarations in spec.groups.items()
+                    if name not in groups
+                },
+                destination,
+                require_all=False,
+            )
+            if preserved:
+                _require_directory(staging / "groups", "device-data group directory")
+            for name, files in preserved.items():
+                _publish_files(
+                    staging / "groups" / name,
+                    {firmware.source: firmware.contents for firmware in files},
+                    f"preserved device-data group {name}",
+                )
+        admitted = materialize_device_data(staging, groups, selected)
+        from .cache import preparation_identity  # noqa: PLC0415 -- receipt publication boundary.
+
+        _write_receipt(
+            staging,
+            source_kind=source_kind,
+            raw=raw,
+            groups=groups,
+            admitted=admitted,
+            preparation_recipe=preparation_identity(spec, tools),
+            geometry=geometry,
+        )
         return publish_phone_data(staging, destination, replace=replace)
     finally:
         if staging.exists():
@@ -426,6 +532,7 @@ def prepare_from_nand(
     if not spec.groups:
         fail(f"device-data preparation is not supported for target {spec.target}")
     nand = read_physical_nand(spec, backup, tools)
+    record = read_backup_record(backup, nand.raw)
     groups = _extract_groups(spec, nand)
     return _materialize_and_publish(
         spec,
@@ -435,6 +542,7 @@ def prepare_from_nand(
         raw=nand.raw,
         source_kind="physical-nand",
         replace=replace,
+        geometry=None if record is None else asdict(record.geometry),
     )
 
 

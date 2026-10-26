@@ -7,7 +7,6 @@ from functools import partial
 from typing import TYPE_CHECKING
 from unittest import mock
 
-import pytest
 from fplinux_cli.alpine import recipes, rootfs_state, signing
 from fplinux_cli.artifacts.release import ReleaseContext
 from fplinux_cli.cache.prune import alpine as prune_alpine
@@ -28,11 +27,11 @@ if TYPE_CHECKING:
     from tests.small.device_data.firmware_fixtures import QinFirmwareContext
 
 
-@pytest.mark.parametrize("root_kind", ["initramfs", "external"])
-def test_prune_retains_both_current_qin_rootfs_variants_and_expires_changed_inputs(
-    qin_firmware: QinFirmwareContext, alpine_source: AlpineSourceContext, root_kind: str
+def test_prune_retains_qin_system_root_variants_and_expires_changed_inputs(
+    qin_firmware: QinFirmwareContext, alpine_source: AlpineSourceContext
 ) -> None:
-    """Both build modes survive cleanup, while replaced firmware and source recipes expire."""
+    """System roots with and without private firmware remain available until inputs change."""
+    root_kind = "external"
     cache = qin_firmware.cache
     public_key = signing.signing_public_key(cache)
     public_key.parent.mkdir(parents=True)
@@ -48,7 +47,7 @@ def test_prune_retains_both_current_qin_rootfs_variants_and_expires_changed_inpu
     )
 
     def selected_recipe() -> str:
-        selected = capture_external_device_data(qin_firmware.target, qin_firmware.groups, cache)
+        selected = capture_external_device_data(qin_firmware.target, qin_firmware.groups)
         return rootfs_recipe(
             environment_recipe,
             signing_key,

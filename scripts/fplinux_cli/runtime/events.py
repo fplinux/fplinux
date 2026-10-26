@@ -144,8 +144,8 @@ class RunLog:
         self._write_journal()
         messages = {
             "host-preparation": "Checking the computer and USB access...",
-            "network-preparation": "Choosing the private USB connection...",
-            "session-preparation": "Creating secure access for this boot...",
+            "network-preparation": "Preparing the phone's USB network connection...",
+            "session-preparation": "Creating SSH keys for this boot...",
             "payload-preparation": "Preparing the RAM image...",
             "waiting-for-device": invitation,
             "device-found": "Phone detected...",
@@ -154,8 +154,17 @@ class RunLog:
             "linux-start": "Starting Linux...",
             "linux-transition": "Waiting for the phone's USB network and SSH...",
             "ssh-ready": "Secure phone connection is ready.",
+            "connection-lost": (
+                "SSH connection lost. Waiting for the running phone; "
+                "reconnect USB if needed. Press Ctrl+C to stop."
+            ),
+            "session-resumed": "The running phone is connected again.",
             "driver-setup": "Follow the Windows USB driver setup window.",
             "driver-ready": "Phone USB driver is ready.",
+            "driver-reconnect": (
+                "USB driver installed. Disconnect the phone and power it off; "
+                "wait for the next connection prompt."
+            ),
             "usb-access-setup": "Setting up USB access; Linux may ask for your password once.",
         }
         if stage in messages:

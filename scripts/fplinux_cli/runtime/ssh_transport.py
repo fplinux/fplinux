@@ -26,6 +26,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, NoReturn
 
 from fplinux_cli.artifacts.build_manifest import BUILD_MANIFEST_FIELDS
+from fplinux_cli.runtime.connection import ConnectionLostError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -473,21 +474,12 @@ def _remove_owned_session(directory: Path, target: str, usb_serial: str, *, root
     shutil.rmtree(directory)
 
 
-def _cleanup_target_sessions(root: Path, target: str) -> None:
-    """Invalidate the prior target pointer and remove only owned superseded sessions."""
-    current_directory = _private_directory(root / "current")
-    for suffix, label in ((".json", "session"), (".ssh-config", "configuration")):
-        current = current_directory / f"{target}{suffix}"
-        if current.is_symlink():
-            current.unlink()
-        elif current.exists() and current.is_dir():
-            fail(f"current SSH {label} path is a directory: {current}")
-        else:
-            current.unlink(missing_ok=True)
-
+def _retire_target_sessions(root: Path, target: str, *, current_serial: str) -> None:
+    """Remove owned superseded sessions after the replacement is ready."""
+    current = _session_directory(root, target, current_serial)
     sessions = _private_directory(root / "sessions")
     for directory in sessions.iterdir():
-        if directory.is_symlink() or not directory.is_dir():
+        if directory == current or directory.is_symlink() or not directory.is_dir():
             continue
         owner_path = directory / "owner.json"
         try:
@@ -518,7 +510,6 @@ def prepare_session(
     if TARGET_NAME.fullmatch(target) is None:
         fail(f"invalid target name: {target}")
     root = _selected_runtime_root(runtime_root)
-    _cleanup_target_sessions(root, target)
     for tool in ("ip", "ssh", "ssh-keygen", "ssh-keyscan"):
         _require_tool(tool)
     if set(personalization) != {"offset", "bytes", "template_sha256"}:
@@ -955,18 +946,26 @@ def _mark_current(session: dict[str, Any]) -> dict[str, Any]:
     expected = _session_directory(root, target, usb_serial)
     if directory != expected:
         fail("cannot publish a session outside its runtime directory")
+    previous = load_saved_session(target, runtime_root=root)
     current = _private_directory(root / "current")
     config_path = current / f"{target}.ssh-config"
+    config_published = False
     try:
         _write_json(directory / "session.json", session)
-        _write_json(current / f"{target}.json", session)
         _write_private_text(config_path, _ssh_config(session))
+        config_published = True
+        _write_json(current / f"{target}.json", session)
     except BaseException:
-        with contextlib.suppress(OSError):
-            (current / f"{target}.json").unlink(missing_ok=True)
-            config_path.unlink(missing_ok=True)
-        _remove_owned_session(directory, target, usb_serial, root=root)
+        if config_published:
+            with contextlib.suppress(OSError):
+                if previous is None:
+                    config_path.unlink(missing_ok=True)
+                else:
+                    _write_private_text(config_path, _ssh_config(previous))
+        if previous is None or previous["usb_serial"] != usb_serial:
+            _remove_owned_session(directory, target, usb_serial, root=root)
         raise
+    _retire_target_sessions(root, target, current_serial=usb_serial)
     return session
 
 
@@ -1000,11 +999,11 @@ def _retry_pause(deadline: float) -> None:
 def _wait_for_authenticated_endpoint(
     session: dict[str, Any],
     *,
+    deadline: float,
     scan_host_key: bool,
     on_linux_usb: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Wait for the exact USB path and an authenticated session-id response."""
-    deadline = time.monotonic() + session["wait_seconds"]
     announced_key = False
     announced_usb = False
     while time.monotonic() < deadline:
@@ -1020,8 +1019,8 @@ def _wait_for_authenticated_endpoint(
             _retry_pause(deadline)
             continue
 
-        remaining = max(1, math.ceil(deadline - time.monotonic()))
-        timeout = min(5, remaining)
+        remaining_seconds = max(1, math.ceil(deadline - time.monotonic()))
+        timeout = min(5, remaining_seconds)
         candidate = {**session, "interface": interface}
         if scan_host_key:
             if not _scan_host_key(candidate, timeout):
@@ -1038,7 +1037,7 @@ def _wait_for_authenticated_endpoint(
         if remaining <= 0:
             break
         try:
-            # ConnectTimeout cannot bound a channel opened on an existing master.
+            # ConnectTimeout bounds connection setup, not the remote identity command.
             result = subprocess.run(
                 _ssh_argv(candidate, "fplinux-session-id", connect_timeout=timeout),
                 stdin=subprocess.DEVNULL,
@@ -1056,17 +1055,54 @@ def _wait_for_authenticated_endpoint(
         actual = result.stdout.strip()
         if not hmac.compare_digest(actual, session["session_id"]):
             fail("SSH endpoint proved a different RAM session identity")
-        return _mark_current(candidate)
+        return {**candidate, "status": "ready"}
     if scan_host_key:
         fail("the exact USB-NCM SSH session did not become ready before the deadline")
     fail("the current USB-NCM SSH session did not reconnect before the deadline")
 
 
 def wait_for_bound_session(
-    session: dict[str, Any], *, on_linux_usb: Callable[[], None] | None = None
+    session: dict[str, Any],
+    *,
+    expected_device_identity: str,
+    on_linux_usb: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Wait for exact USB/NCM state, then bind the observed host key to this RAM run."""
-    return _wait_for_authenticated_endpoint(session, scan_host_key=True, on_linux_usb=on_linux_usb)
+    return _authenticate_bound_session(
+        session,
+        expected_device_identity=expected_device_identity,
+        scan_host_key=True,
+        on_linux_usb=on_linux_usb,
+    )
+
+
+def _authenticate_bound_session(
+    session: dict[str, Any],
+    *,
+    expected_device_identity: str,
+    scan_host_key: bool,
+    on_linux_usb: Callable[[], None] | None = None,
+) -> dict[str, Any]:
+    """Authenticate both identities and publish credentials only for a new RAM session."""
+    deadline = time.monotonic() + session["wait_seconds"]
+    candidate = _wait_for_authenticated_endpoint(
+        session, deadline=deadline, scan_host_key=scan_host_key, on_linux_usb=on_linux_usb
+    )
+    remaining = deadline - time.monotonic()
+    timeout_message = (
+        "the exact USB-NCM SSH session did not become ready before the deadline"
+        if scan_host_key
+        else "the current USB-NCM SSH session did not reconnect before the deadline"
+    )
+    if remaining <= 0:
+        fail(timeout_message)
+    try:
+        require_device_identity(candidate, expected_device_identity, timeout=remaining)
+    except subprocess.TimeoutExpired:
+        fail(timeout_message)
+    if scan_host_key:
+        return _mark_current(candidate)
+    return candidate
 
 
 def _validate_session(
@@ -1191,22 +1227,8 @@ def _read_current_session(path: Path, target: str, *, root: Path) -> dict[str, A
     return session
 
 
-def load_current_session(target: str, *, runtime_root: Path) -> dict[str, Any]:
-    """Load only the session that completed USB and private identity binding."""
-    if TARGET_NAME.fullmatch(target) is None:
-        fail(f"invalid target name: {target}")
-    root = _selected_runtime_root(runtime_root)
-    path = root / "current" / f"{target}.json"
-    if path.is_symlink() or not path.is_file():
-        fail(
-            f"no ready SSH session for {target}; "
-            "start the powered-off phone with the launcher first"
-        )
-    return _read_current_session(path, target, root=root)
-
-
-def load_live_session(target: str, *, runtime_root: Path) -> dict[str, Any] | None:
-    """Select a saved exact USB session; absence alone permits another RAM load."""
+def load_saved_session(target: str, *, runtime_root: Path) -> dict[str, Any] | None:
+    """Load an optional validated ready session without probing USB presence."""
     if TARGET_NAME.fullmatch(target) is None:
         fail(f"invalid target name: {target}")
     root = _selected_runtime_root(runtime_root)
@@ -1219,17 +1241,27 @@ def load_live_session(target: str, *, runtime_root: Path) -> dict[str, Any] | No
         fail(f"current SSH session state is invalid: {error}")
     if not stat.S_ISREG(metadata.st_mode):
         fail("current SSH session state is not a regular file")
-    session = _read_current_session(path, target, root=root)
+    return _read_current_session(path, target, root=root)
+
+
+def usb_present(session: dict[str, Any], *, cancelled: Callable[[], bool] | None = None) -> bool:
+    """Confirm exact USB presence; ambiguous or failed discovery remains an error."""
+    if cancelled is not None and cancelled():
+        return False
     devices = _usb_devices(session, require_absence_proof=True)
     if len(devices) > 1:
         fail("more than one USB device matches this RAM session")
-    return session if devices else None
+    return bool(devices)
 
 
-def reacquire_bound_session(session: dict[str, Any]) -> dict[str, Any]:
+def reacquire_bound_session(
+    session: dict[str, Any], *, expected_device_identity: str
+) -> dict[str, Any]:
     """Survive a physical replug without weakening USB, host-key or session binding."""
     session = _validate_session(session)
-    return _wait_for_authenticated_endpoint(session, scan_host_key=False)
+    return _authenticate_bound_session(
+        session, expected_device_identity=expected_device_identity, scan_host_key=False
+    )
 
 
 def run_shell(session: dict[str, Any]) -> int:
@@ -1257,7 +1289,8 @@ def run_shell(session: dict[str, Any]) -> int:
             try:
                 process.wait(timeout=0.25)
             except subprocess.TimeoutExpired:
-                continue
+                if interrupted is None and process.poll() is None and not usb_present(session):
+                    raise ConnectionLostError from None
     finally:
         try:
             if process.poll() is None:
@@ -1274,7 +1307,10 @@ def run_shell(session: dict[str, Any]) -> int:
         if interrupted == signal.SIGINT:
             raise KeyboardInterrupt
         raise SystemExit(128 + interrupted)
-    return process.wait()
+    status = process.wait()
+    if status == 255:
+        raise ConnectionLostError
+    return status
 
 
 def run_remote(
@@ -1283,6 +1319,7 @@ def run_remote(
     *,
     capture_output: bool = False,
     shared: bool = False,
+    timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a command; shared metadata operations leave caller input untouched."""
     session = _validate_session(session)
@@ -1291,15 +1328,18 @@ def run_remote(
         stdin=subprocess.DEVNULL if shared else None,
         capture_output=capture_output,
         text=True,
+        timeout=timeout,
         check=False,
     )
 
 
-def require_device_identity(session: dict[str, Any], device_identity: str) -> str:
+def require_device_identity(
+    session: dict[str, Any], device_identity: str, *, timeout: float | None = None
+) -> str:
     """Require the authenticated phone to expose the selected kernel identity."""
     if SHA256.fullmatch(device_identity) is None:
         fail("expected device identity is invalid")
-    result = run_remote(session, "uname -r", capture_output=True, shared=True)
+    result = run_remote(session, "uname -r", capture_output=True, shared=True, timeout=timeout)
     if result.returncode:
         detail = result.stderr.strip().splitlines()
         fail(

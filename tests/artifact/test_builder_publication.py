@@ -19,10 +19,12 @@ from fplinux_cli.artifacts.bundles import (
     create_bundle_staging,
     resolve_current_bundle,
 )
+from fplinux_cli.artifacts.release import ReleaseContext
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import publish as publish_build
 from fplinux_cli.build.bootstrap import verify as bootstrap_build
 from fplinux_cli.build.runtime import runtime_source_files
+from fplinux_cli.runtime.bundle import admit_bundle
 
 from tests.fdt import binary_tree
 
@@ -207,6 +209,7 @@ class PublicationInputs:
                 release_manifest=self.release_manifest,
                 work=self.work,
                 rootfs=self.rootfs,
+                linux_source=self.kernel,
                 kernel_output=self.kernel,
                 zimage=self.zimage,
                 dtb=self.dtb,
@@ -289,7 +292,42 @@ def publication_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Publi
     kernel = work / "kernel"
     kernel.mkdir()
     zimage = write("zImage", b"zimage\n", root=kernel)
-    dtb = write("demo.dtb", b"dtb\n", root=kernel)
+    dtb = write(
+        "demo.dtb",
+        binary_tree(
+            [],
+            [
+                (
+                    "nand-controller@21a00000",
+                    [
+                        ("compatible", b"fplinux,ums9117-nandc-ro\0"),
+                        ("reg", struct.pack(">II", 0x21A00000, 0x1000)),
+                        ("sprd,aon-apb", struct.pack(">I", 1)),
+                    ],
+                    [],
+                ),
+                (
+                    "syscon@402e0000",
+                    [
+                        ("compatible", b"sprd,ums9117-aon-apb\0syscon\0"),
+                        ("reg", struct.pack(">II", 0x402E0000, 0x1000)),
+                        ("phandle", struct.pack(">I", 1)),
+                    ],
+                    [],
+                ),
+            ],
+        ),
+        root=kernel,
+    )
+    for relative in (
+        "drivers/memory/ums9117/ums9117-nandc-ro.c",
+        "drivers/memory/ums9117/ums9117-nandc-chip.c",
+        "drivers/memory/ums9117/ums9117-nandc-chip.h",
+        "drivers/memory/ums9117/ums9117-nandc-feature.c",
+        "drivers/memory/ums9117/ums9117-nandc-feature.h",
+        "include/linux/soc/ums9117/mmio.h",
+    ):
+        write(relative, b"/* prepared reader input */\n", root=kernel)
     write("vmlinux", b"vmlinux\n", root=kernel)
     write("System.map", b"map\n", root=kernel)
     write(".config", b"CONFIG_TEST=y\n", root=kernel)
@@ -400,6 +438,43 @@ def publication_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Publi
 
 class BuilderPublicationTests:
     """Exercise builder-facing immutable bundle publication."""
+
+    @pytest.mark.parametrize(
+        "source_commit",
+        [None, "1234567890ab" + "0" * 28, "1234567890ab" + "0" * 52],
+        ids=["source-archive", "git-sha1", "git-sha256"],
+    )
+    def test_published_release_is_admitted_by_the_delivered_runtime_contract(
+        self,
+        publication_inputs: PublicationInputs,
+        monkeypatch: pytest.MonkeyPatch,
+        source_commit: str | None,
+    ) -> None:
+        """The publisher and runner agree before any host setup or USB operation."""
+        context = ReleaseContext("1234567890ab", source_commit, "1234567890ab" + "a" * 52)
+        monkeypatch.setattr(publish_build, "current_release_context", lambda: context)
+        config = publication_inputs.target_config
+        config["bootstrap"]["load_address"] = 0x80100000
+        config["runtime"]["fdl1_load_address"] = 0x6200
+        config["runtime"]["usb"] = {
+            "bootrom": {"vendor_id": 0x1782, "product_id": 0x4D00, "wait_seconds": 30},
+            "linux_gadget": {
+                "vendor_id": 0x0525,
+                "product_id": 0xA4A6,
+                "wait_seconds": 30,
+                "keyboard_interface": 1,
+            },
+        }
+
+        published = publication_inputs.publish()
+        admitted = admit_bundle(published)
+
+        assert admitted.root == published
+        assert admitted.generation == published.name
+        assert admitted.device_identity == "9" * 64
+        assert admitted.runtime["release_id"] == "1234567890ab"
+        assert admitted.runtime["source_commit"] == source_commit
+        assert admitted.runtime["source_snapshot"] == "1234567890ab" + "a" * 52
 
     def test_raw_image_regions_and_external_initramfs_have_actual_published_paths(
         self, publication_inputs: PublicationInputs
@@ -517,6 +592,7 @@ class BuilderPublicationTests:
                 "adapter",
                 "host_tools",
                 "nand",
+                "emmc",
                 "device_data",
                 "sha256",
             }
@@ -543,6 +619,7 @@ class BuilderPublicationTests:
         )
         assert runtime["device_data"] is None
         assert runtime["nand"] is None
+        assert runtime["emmc"] is None
         assert (published / "60-fplinux.rules").read_bytes() == b'SUBSYSTEM=="usb"\n'
         assert (
             runtime["sha256"]["60-fplinux.rules"]
@@ -574,7 +651,8 @@ class BuilderPublicationTests:
         assert (published / "device-data.cpio").exists() is (root_kind == "initramfs")
         runtime = json.loads((published / "runtime-manifest.json").read_bytes())
         assert runtime["device_data"] is None
-        assert runtime["nand"] == {"raw_device": "/dev/raw-nand"}
+        assert runtime["nand"]["raw_device"] == "/dev/raw-nand"
+        assert len(runtime["nand"]["acquisition_recipe"]) == 64
 
     def test_runtime_preparation_captures_the_declared_parser_without_board_maps(
         self, publication_inputs: PublicationInputs
@@ -603,6 +681,8 @@ class BuilderPublicationTests:
         descriptor = runtime["device_data"]
         assert descriptor == {
             "parser": "targets/demo/phone_data.py",
+            "originals_parser": None,
+            "required_groups": ["audio-profile"],
             "groups": {"audio-profile": [{"source": "audio.bin", "destination": "audio.bin"}]},
             "audio_policy": {
                 "speaker_vibration": False,
@@ -610,8 +690,11 @@ class BuilderPublicationTests:
                 "headfree_headphones_only": False,
             },
             "ecc_module": None,
+            "preparation_recipe": descriptor["preparation_recipe"],
         }
-        assert runtime["nand"] == {"raw_device": "/dev/raw-nand"}
+        assert len(descriptor["preparation_recipe"]) == 64
+        assert runtime["nand"]["raw_device"] == "/dev/raw-nand"
+        assert len(runtime["nand"]["acquisition_recipe"]) == 64
         parser = published / "targets/demo/phone_data.py"
         assert parser.read_bytes() == b"# declared preparation source\n"
         assert (

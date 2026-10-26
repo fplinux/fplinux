@@ -70,6 +70,16 @@ def _add_build_type_option(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_phone_data_option(parser: argparse.ArgumentParser) -> None:
+    """Select a separate persistent store for another phone of the same target."""
+    parser.add_argument(
+        "--phone-data",
+        type=Path,
+        metavar="PATH",
+        help="use this phone data directory instead of the user's shared target store",
+    )
+
+
 def _add_boot_profile_options(parser: argparse.ArgumentParser, verb: str) -> None:
     context = parser.add_mutually_exclusive_group()
     context.add_argument(
@@ -81,7 +91,7 @@ def _add_boot_profile_options(parser: argparse.ArgumentParser, verb: str) -> Non
         "--profile",
         type=_profile_name,
         metavar="NAME",
-        help=f"{verb} the selected global profile",
+        help=f"{verb} this build profile",
     )
 
 
@@ -100,6 +110,7 @@ def _add_device_data_commands(
         help="prepare all declared device data from one supported source",
     )
     prepare.add_argument("target", choices=targets)
+    _add_phone_data_option(prepare)
     source = prepare.add_mutually_exclusive_group()
     source.add_argument(
         "--events", type=Path, metavar="PATH", help="write loader events as JSON lines"
@@ -108,7 +119,7 @@ def _add_device_data_commands(
         "--from-dump",
         type=Path,
         metavar="PATH",
-        help="use an existing physical NAND backup without connecting the phone",
+        help="use a NAND or eMMC user-area backup without connecting the phone",
     )
     source.add_argument(
         "--from-originals",
@@ -121,12 +132,12 @@ def _add_device_data_commands(
         type=_positive_integer,
         default=_default_build_jobs(),
         metavar="N",
-        help="limit jobs when the read-only NAND loader must be built",
+        help="limit jobs when the read-only phone loader must be built",
     )
     prepare.add_argument(
         "--offline",
         action="store_true",
-        help="build the read-only NAND loader without network access",
+        help="build the read-only phone loader without network access",
     )
     report = commands.add_parser(
         "report", help="extract a board report from a saved NAND without selecting phone data"
@@ -136,6 +147,8 @@ def _add_device_data_commands(
     report.add_argument(
         "--offline", action="store_true", help="prepare the tool without network access"
     )
+
+
 
 
 def create_parser(
@@ -179,7 +192,7 @@ def create_parser(
     check_parser.add_argument(
         "--no-cache",
         action="store_true",
-        help="run every selected check even when an exact success receipt exists",
+        help="rerun selected checks even when unchanged inputs already passed",
     )
     check_parser.add_argument(
         "--jobs",
@@ -195,7 +208,7 @@ def create_parser(
         "--profile",
         type=_profile_name,
         metavar="NAME",
-        help="check the selected global profile (default: default)",
+        help="check this build profile (default: default)",
     )
     test_parser = commands.add_parser(
         "test", help="run selected pytest tests in the pinned environment"
@@ -212,7 +225,7 @@ def create_parser(
         "--profile",
         type=_profile_name,
         metavar="NAME",
-        help="inspect the selected global profile (default: default)",
+        help="inspect this build profile (default: default)",
     )
     footprint_parser = inspections.add_parser(
         "footprint", help="measure the current bundle's size and package composition"
@@ -223,7 +236,7 @@ def create_parser(
         "--profile",
         type=_profile_name,
         metavar="NAME",
-        help="measure the selected global profile (default: default)",
+        help="measure this build profile (default: default)",
     )
     footprint_parser.add_argument("--json", action="store_true", help="print the full size report")
     diff_parser = inspections.add_parser(
@@ -302,12 +315,13 @@ def create_parser(
     commit_message_parser.add_argument("message_file")
     build_parser = commands.add_parser("build", help="build a target in .cache/out")
     _add_build_type_option(build_parser)
+    _add_phone_data_option(build_parser)
     build_parser.add_argument("target", choices=targets)
     build_parser.add_argument(
         "--profile",
         type=_profile_name,
         metavar="NAME",
-        help="build one global profile (default: default)",
+        help="build this profile (default: default)",
     )
     build_parser.add_argument(
         "--without-device-data",
@@ -336,7 +350,7 @@ def create_parser(
     build_parser.add_argument(
         "--offline",
         action="store_true",
-        help="on a build miss, run the prepared build environment without network access",
+        help="build without downloads, using the prepared environment and saved inputs",
     )
     probe_parser = commands.add_parser(
         "probe-build", help="build one static ARMv7 hard-float musl C probe"
@@ -358,7 +372,7 @@ def create_parser(
     checksum_parser.add_argument(
         "--offline",
         action="store_true",
-        help="regenerate only from the prepared Alpine source cache without network access",
+        help="regenerate using only exact originals already stored locally",
     )
     package_parser = commands.add_parser(
         "package", help="package an existing build for standalone use"
@@ -388,7 +402,7 @@ def create_parser(
         help="prepare autonomous host dependencies only from the existing download cache",
     )
     prune_parser = commands.add_parser(
-        "prune", help="show a safe cache-prune inventory or apply it"
+        "prune", help="list disposable cached files, or remove them with --apply"
     )
     prune_parser.add_argument(
         "--apply",
@@ -400,12 +414,13 @@ def create_parser(
         "run", help="prepare phone data, start Linux or reopen its SSH connection"
     )
     _add_build_type_option(run_parser)
+    _add_phone_data_option(run_parser)
     run_parser.add_argument("target", choices=targets)
     run_parser.add_argument(
         "--from-dump",
         type=Path,
         metavar="PATH",
-        help="prepare the first run from an existing complete NAND backup",
+        help="prepare the first run from an existing NAND or eMMC user-area backup",
     )
     run_parser.add_argument(
         "--events", type=Path, metavar="PATH", help="write loader events as JSON lines"
@@ -419,12 +434,13 @@ def create_parser(
 
     console_parser = commands.add_parser("console", help="connect to a running target over USB")
     _add_build_type_option(console_parser)
+    _add_phone_data_option(console_parser)
     console_parser.add_argument("target", choices=targets)
     console_parser.add_argument(
         "--profile",
         type=_profile_name,
         metavar="NAME",
-        help="reconnect to a session started from the selected global profile",
+        help="reconnect to a session started with this build profile",
     )
     console_actions = console_parser.add_mutually_exclusive_group()
     console_actions.add_argument("--keyboard", metavar="EVDEV")
@@ -438,6 +454,7 @@ def create_parser(
         "backup", help="save a complete read-only NAND image"
     )
     _add_build_type_option(nand_backup_parser)
+    _add_phone_data_option(nand_backup_parser)
     nand_backup_parser.add_argument("target", choices=targets)
     nand_backup_parser.add_argument("output", type=Path)
     nand_backup_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
@@ -445,6 +462,7 @@ def create_parser(
         "identify", help="print the NAND chip identity and geometry reported by the phone"
     )
     _add_build_type_option(nand_identify_parser)
+    _add_phone_data_option(nand_identify_parser)
     nand_identify_parser.add_argument("target", choices=targets)
     nand_identify_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
 
@@ -482,6 +500,7 @@ def create_parser(
         "verify", help="check that the booted phone runs the current build"
     )
     _add_build_type_option(verify_parser)
+    _add_phone_data_option(verify_parser)
     verify_parser.add_argument("target", choices=targets)
     verify_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
     return parser, check_parser

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import shutil
 import signal
 import subprocess
@@ -48,6 +47,16 @@ class AutonomousArchive:
         """Return the owned delivery directory."""
         return self.prepared.root
 
+    @property
+    def phone(self) -> Path:
+        """Return prepared data in the shared target store."""
+        return self.prepared.prepared_data()
+
+    @property
+    def backup(self) -> Path:
+        """Return the complete backup in the shared target store."""
+        return self.prepared.phone_store() / "nand.bin"
+
     def run(self, *arguments: str) -> subprocess.CompletedProcess[str]:
         """Execute the fixed bundle runtime without checkout imports or its working directory."""
         return self.prepared.run_entrypoint("terminal.py", *arguments)
@@ -55,12 +64,10 @@ class AutonomousArchive:
     @contextmanager
     def running(self) -> Iterator[subprocess.Popen[str]]:
         """Own a real launcher process while a controlled phone boundary waits."""
-        environment = dict(os.environ)
-        environment.pop("PYTHONPATH", None)
         with subprocess.Popen(
             [sys.executable, "-I", str(self.root / "terminal.py")],
             cwd=self.root.parent,
-            env=environment,
+            env=self.prepared.environment(),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -100,6 +107,7 @@ def autonomous_archive(portable_archive: PortableArchive) -> AutonomousArchive:
             ).read_text()
         )
     (root / "phone-backup-path").write_text(str(archive.dump), encoding="utf-8")
+    (root / "phone-prepared-path").write_text(str(archive.prepared_data()), encoding="utf-8")
     shutil.copyfile(
         ROOT / "tests/fixtures/nand-geometry/autonomous.txt", root / "phone-geometry.txt"
     )
@@ -142,8 +150,8 @@ def test_first_run_with_ram_squashfs_and_zram_prepares_then_same_entry_boots_per
     assert "Nokia 105 4G (TA-1618)" in first.stdout
     assert "Connect the powered-off phone while holding *." in first.stdout
     assert "Checking the computer and USB access..." in first.stdout
-    assert "Choosing the private USB connection..." in first.stdout
-    assert "Creating secure access for this boot..." in first.stdout
+    assert "Preparing the phone's USB network connection..." in first.stdout
+    assert "Creating SSH keys for this boot..." in first.stdout
     assert "Preparing the RAM image..." in first.stdout
     assert "Phone detected..." in first.stdout
     assert "Loading the phone into RAM; keep USB connected..." in first.stdout
@@ -154,7 +162,7 @@ def test_first_run_with_ram_squashfs_and_zram_prepares_then_same_entry_boots_per
     assert "private backend details" not in first.stdout
     log = next((archive.root / "logs").rglob("*.log")).read_text(encoding="utf-8")
     assert log.index("private backend details") < log.index("native loader details")
-    saved = archive.root / "data/nand.bin"
+    saved = archive.backup
     with saved.open("rb") as stream:
         saved_digest = hashlib.file_digest(stream, "sha256").hexdigest()
     with archive.prepared.dump.open("rb") as stream:
@@ -208,7 +216,7 @@ def test_first_run_with_ram_squashfs_and_zram_prepares_then_same_entry_boots_per
         "cat /sys/class/misc/raw-nand/device/geometry 3</dev/raw-nand",
         "exec dd if=/dev/raw-nand bs=63360",
     ]
-    generation = archive.root / "data/phone"
+    generation = archive.phone
     assert not (generation / "originals").exists()
     assert not (generation / "source/nand.bin").exists()
     assert "Reading NAND:" in first.stdout
@@ -256,20 +264,22 @@ def test_first_run_with_ram_squashfs_and_zram_prepares_then_same_entry_boots_per
     assert len(list((archive.root / "logs").rglob("*.log"))) == 3
 
 
-def test_saved_dump_prepares_without_booting_or_replacing_the_input(
+def test_explicit_prepare_imports_saved_dump_without_booting_or_replacing_the_input(
     autonomous_archive: AutonomousArchive,
 ) -> None:
     archive = autonomous_archive
-    result = archive.run("--from-dump", str(archive.prepared.dump))
+    result = archive.prepared.run_entrypoint(
+        "fplinux.py", "prepare", "--from-dump", str(archive.prepared.dump)
+    )
 
     assert result.returncode == 0, result.stderr
     assert "Your phone data is ready in" in result.stdout
     assert not (archive.root / "data/loaded").exists()
     assert not (archive.root / "phone-probes").exists()
-    assert not (archive.root / "data/nand.bin").exists()
+    assert archive.backup.stat().st_size == 138412032
     with archive.prepared.dump.open("rb") as stream:
         assert stream.read(5) == b"radio"
-    generation = archive.root / "data/phone"
+    generation = archive.phone
     assert (generation / "groups/bluetooth/radio.bin").read_bytes() == b"radio"
     assert not (generation / "device-data.cpio").exists()
 
@@ -289,8 +299,8 @@ def test_unavailable_phone_progress_warns_once_and_keeps_preparation_successful(
     assert result.stdout.count("phone preparation progress is unavailable") == 1
     assert "Your phone data is ready in" in result.stdout
     assert "Run the same launcher again" in result.stdout
-    assert (archive.root / "data/nand.bin").stat().st_size == 138412032
-    assert (archive.root / "data/phone/groups/bluetooth/radio.bin").read_bytes() == b"radio"
+    assert archive.backup.stat().st_size == 138412032
+    assert (archive.phone / "groups/bluetooth/radio.bin").read_bytes() == b"radio"
     assert not (archive.root / "data/reader").exists()
     updates = (archive.root / "data/loaded/preparation-stages").read_text().splitlines()
     assert len(updates) == 1
@@ -319,9 +329,10 @@ def test_failed_nand_read_retains_access_and_its_original_diagnostic(
     assert "controlled NAND read failure" in result.stderr
     assert "phone progress connection unavailable" not in result.stderr
     assert (archive.root / "data/reader/session/session.json").exists()
-    assert not (archive.root / "data/nand.bin").exists()
-    assert not (archive.root / "data/phone").exists()
+    assert not archive.backup.exists()
+    assert not archive.phone.exists()
     assert not list((archive.root / "data").glob(".nand.bin.*"))
+    assert not list(archive.backup.parent.glob(".nand.bin.*"))
     stages = [
         json.loads(line)["arguments"][1]
         for line in (archive.root / "data/loaded/preparation-stages").read_text().splitlines()
@@ -347,9 +358,10 @@ def test_cancelled_nand_read_reports_cancelled_on_phone_and_preserves_reader_acc
     assert "Cancelled." in stdout
     assert not stderr
     assert (archive.root / "data/reader/session/session.json").exists()
-    assert not (archive.root / "data/nand.bin").exists()
-    assert not (archive.root / "data/phone").exists()
+    assert not archive.backup.exists()
+    assert not archive.phone.exists()
     assert not list((archive.root / "data").glob(".nand.bin.*"))
+    assert not list(archive.backup.parent.glob(".nand.bin.*"))
     stages = [
         json.loads(line)["arguments"][1]
         for line in (archive.root / "data/loaded/preparation-stages").read_text().splitlines()
@@ -377,7 +389,7 @@ def test_invalid_dump_preserves_existing_reader_when_the_phone_is_disconnected(
     assert result.returncode == 1
     assert "expected a complete 138412032-byte physical NAND backup" in result.stderr
     assert reader.read_bytes() == saved_keys
-    assert not (archive.root / "data/phone").exists()
+    assert not archive.phone.exists()
     assert len(list((archive.root / "data/loaded").glob("*.cpio"))) == 1
 
 
@@ -395,7 +407,7 @@ def test_reader_keys_survive_preparation_until_persistent_storage_is_released(
 
     assert first.returncode == 1
     assert "Persistent storage is still mounted" in first.stderr
-    assert (archive.root / "data/phone/groups/bluetooth/radio.bin").read_bytes() == b"radio"
+    assert (archive.phone / "groups/bluetooth/radio.bin").read_bytes() == b"radio"
     assert (archive.root / "data/reader/session/session.json").exists()
     stages = [
         json.loads(line)["arguments"][1]
@@ -452,7 +464,9 @@ def test_nand_identify_entrypoint_keeps_progress_off_the_report_stdout(
 ) -> None:
     """The shared CLI emits the raw geometry document unchanged after authenticated reconnect."""
     archive = autonomous_archive
-    prepared = archive.run("--from-dump", str(archive.prepared.dump))
+    prepared = archive.prepared.run_entrypoint(
+        "fplinux.py", "prepare", "--from-dump", str(archive.prepared.dump)
+    )
     assert prepared.returncode == 0, prepared.stderr
     booted = archive.run()
     assert booted.returncode == 0, booted.stderr
@@ -462,7 +476,7 @@ def test_nand_identify_entrypoint_keeps_progress_off_the_report_stdout(
     assert result.returncode == 0, result.stderr
     assert result.stdout == (archive.root / "phone-geometry.txt").read_text()
     assert "Log:" in result.stderr
-    assert not (archive.root / "data/nand.bin").exists()
+    assert archive.backup.stat().st_size == 138412032
 
 
 def test_target_selection_is_absent_from_the_archive_entry(
@@ -491,7 +505,7 @@ def test_corrupt_runtime_identity_is_logged_before_preparation(
     assert "compatible" in result.stderr
     journal = json.loads(next((archive.root / "logs").glob("*/run.json")).read_text())
     assert journal["status"] == "failed"
-    assert not (archive.root / "data/phone").exists()
+    assert not archive.phone.exists()
 
 
 def test_unusable_saved_dump_reports_the_owned_diagnostic_log(
@@ -499,6 +513,7 @@ def test_unusable_saved_dump_reports_the_owned_diagnostic_log(
 ) -> None:
     archive = autonomous_archive
     archive.prepared.dump.write_bytes(b"incomplete backup")
+    archive.prepared.dump.with_name(f"{archive.prepared.dump.name}.json").unlink()
     result = archive.run("--from-dump", str(archive.prepared.dump))
 
     assert result.returncode == 1
@@ -535,7 +550,7 @@ def test_startup_timeout_reports_the_log_without_exposing_the_command(
     assert "private-command-payload" in log
     assert "Connect the powered-off phone" not in result.stdout
     assert not (archive.root / "data/loaded").exists()
-    assert not (archive.root / "data/nand.bin").exists()
+    assert not archive.backup.exists()
 
 
 def test_prefixed_host_failure_reports_one_prefix_and_retains_the_log(
@@ -561,7 +576,7 @@ def test_prefixed_host_failure_reports_one_prefix_and_retains_the_log(
     assert "SystemExit: FPLinux: Session path is not private" in log
     assert "Connect the powered-off phone" not in result.stdout
     assert not (archive.root / "data/loaded").exists()
-    assert not (archive.root / "data/nand.bin").exists()
+    assert not archive.backup.exists()
 
 
 def test_cancelled_loader_preserves_signal_status_and_reports_cancellation(
@@ -577,7 +592,7 @@ def test_cancelled_loader_preserves_signal_status_and_reports_cancellation(
     assert "Cancelled." in result.stdout
     assert "FPLinux: 130" not in result.stderr
     assert "Traceback" not in result.stderr
-    assert not (archive.root / "data/nand.bin").exists()
+    assert not archive.backup.exists()
 
 
 @pytest.mark.parametrize("boundary", ["loader", "shell"])
@@ -588,7 +603,9 @@ def test_active_launcher_excludes_another_process_and_releases_its_lock(
     """Real Linux process locks cover waiting and SSH; the phone boundary remains controlled."""
     archive = autonomous_archive
     if boundary == "shell":
-        prepared = archive.run("--from-dump", str(archive.prepared.dump))
+        prepared = archive.prepared.run_entrypoint(
+            "fplinux.py", "prepare", "--from-dump", str(archive.prepared.dump)
+        )
         assert prepared.returncode == 0, prepared.stderr
     hold = archive.root / f"phone-hold-{boundary}"
     hold.touch()
@@ -607,7 +624,7 @@ def test_active_launcher_excludes_another_process_and_releases_its_lock(
         excluded = archive.run()
 
         assert excluded.returncode == 1
-        assert "This phone is already running." in excluded.stderr
+        assert "Another launcher is already open." in excluded.stderr
         assert "Connect the powered-off phone" not in excluded.stdout
         assert sorted((archive.root / "logs").rglob("*.log")) == logs
         assert sorted((archive.root / "data/loaded").glob("*.cpio")) == capsules
@@ -627,7 +644,7 @@ def test_active_launcher_excludes_another_process_and_releases_its_lock(
     reopened = archive.run()
 
     assert reopened.returncode == 0, reopened.stderr
-    assert "already running" not in reopened.stderr
+    assert "Another launcher is already open." not in reopened.stderr
     assert (archive.root / "data/.launcher.lock").is_file()
 
 
@@ -644,7 +661,9 @@ def test_reconnect_failure_stops_without_starting_another_boot(
 ) -> None:
     """The real launcher must preserve the controlled transport's safety failure."""
     archive = autonomous_archive
-    prepared = archive.run("--from-dump", str(archive.prepared.dump))
+    prepared = archive.prepared.run_entrypoint(
+        "fplinux.py", "prepare", "--from-dump", str(archive.prepared.dump)
+    )
     assert prepared.returncode == 0, prepared.stderr
     (archive.root / "phone-reconnect-failure").write_text(error, encoding="utf-8")
 
@@ -655,7 +674,7 @@ def test_reconnect_failure_stops_without_starting_another_boot(
     assert "Starting FPLinux" not in stopped.stdout
     assert "Connect the powered-off phone" not in stopped.stdout
     assert not (archive.root / "data/loaded").exists()
-    assert not (archive.root / "data/nand.bin").exists()
+    assert archive.backup.stat().st_size == 138412032
     (archive.root / "phone-reconnect-failure").unlink()
     reopened = archive.run()
     assert reopened.returncode == 0, reopened.stderr
@@ -677,7 +696,9 @@ def test_noninteractive_launch_keeps_the_ready_session_without_opening_a_shell(
 ) -> None:
     """The delivered command supports automation while retaining normal reconnect credentials."""
     archive = autonomous_archive
-    prepared = archive.run("--from-dump", str(archive.prepared.dump))
+    prepared = archive.prepared.run_entrypoint(
+        "fplinux.py", "prepare", "--from-dump", str(archive.prepared.dump)
+    )
     assert prepared.returncode == 0, prepared.stderr
 
     result = archive.prepared.run()
@@ -752,8 +773,8 @@ def test_sc9820e_first_run_boots_and_same_launcher_reconnects_without_nand_prepa
     assert (loaded / "shell-opened").read_text() == "opened\n"
     assert not list(loaded.glob("*.cpio"))
     assert not (loaded / "reader-commands").exists()
-    assert not (archive.root / "data/nand.bin").exists()
-    assert not (archive.root / "data/phone").exists()
+    assert not archive.backup.exists()
+    assert not archive.phone.exists()
     assert (archive.root / "data/session/session.json").is_file()
     assert "Preparing your phone data" not in first.stdout
 
@@ -781,7 +802,7 @@ def test_sc9820e_launcher_lock_covers_loading_and_ssh(
         _wait_for_file(marker, first)
         refused = archive.run()
         assert refused.returncode == 1
-        assert "This phone is already running." in refused.stderr
+        assert "Another launcher is already open." in refused.stderr
         hold.unlink()
         stdout, stderr = first.communicate(timeout=30)
         assert first.returncode == 0, (stdout, stderr)
@@ -806,10 +827,10 @@ def test_sc9820e_reconnect_identity_failure_does_not_start_another_load(
     assert (archive.root / "data/loaded/ram-loads").read_text() == "loaded\n"
 
 
-def test_sc9820e_archive_rejects_nand_preparation_arguments(
+def test_direct_boot_archive_rejects_preparation_arguments(
     sc9820e_archive: AutonomousArchive,
 ) -> None:
     result = sc9820e_archive.run("--from-dump", str(sc9820e_archive.prepared.dump))
     assert result.returncode == 1
-    assert "does not require NAND preparation" in result.stderr
-    assert not (sc9820e_archive.root / "data/phone").exists()
+    assert "does not require phone-data preparation" in result.stderr
+    assert not sc9820e_archive.phone.exists()

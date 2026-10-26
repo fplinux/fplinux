@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from fplinux_cli import common
 from fplinux_cli.common import fail
 from fplinux_cli.reporting.run import RunReporter, run_entrypoint
 
@@ -254,6 +255,22 @@ def run_test_workload(  # noqa: PLR0913 -- public selection and runtime inputs s
         if names
         else bool(host_modules) and tier in (None, "host_process")
     )
+    emmc_test = "tests/artifact/test_emmc_files.py"
+    needs_emmc = (workspace / emmc_test).is_file() and (
+        (not names and tier in (None, "artifact"))
+        or any(
+            node.partition("::")[0] == emmc_test or emmc_test.startswith(node + "/")
+            for node in selected
+        )
+    )
+    downloads = None
+    if needs_emmc:
+        from fplinux_cli.build.host_tools.phone_data import preparation_sources  # noqa: PLC0415
+
+        with reporter.stage("phone-data-inputs"):
+            for source in preparation_sources(workspace):
+                source.acquire(common.ROOT / ".cache", offline=False)
+        downloads = common.ROOT / ".cache/downloads"
     with ExitStack() as resources:
         host_python: Path | None = None
         host_environment: dict[str, str] | None = None
@@ -356,6 +373,7 @@ def run_test_workload(  # noqa: PLR0913 -- public selection and runtime inputs s
                             rootfs=rootfs,
                             timeout=remaining,
                             log_name=selected.log_name,
+                            downloads=downloads,
                         )
 
                 _run_invocations(invocations, execute, failfast=failfast, timeout=timeout)

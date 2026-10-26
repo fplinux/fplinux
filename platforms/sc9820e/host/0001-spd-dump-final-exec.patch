@@ -1,0 +1,25 @@
+--- a/spd_dump.c
++++ b/spd_dump.c
+@@ -1286,9 +1286,12 @@
+ 	io->verbose = verbose;
+ 
+ 	while (argc > 1) {
+-		if (!strcmp(argv[1], "fdl")) {
++		if (!strcmp(argv[1], "fdl") || !strcmp(argv[1], "fdl_exec")) {
+ 			const char *fn; uint32_t addr;
++			int final_exec = !strcmp(argv[1], "fdl_exec");
+ 			if (argc <= 3) ERR_EXIT("bad command\n");
++			if (final_exec && (!fdl_loaded || argc != 4 || end_data != 1))
++				ERR_EXIT("fdl_exec requires a loaded FDL, end_data 1 and no following command\n");
+ 
+ 			fn = argv[2];
+ 			addr = str_to_addr(argv[3], "ram", ram_addr);
+@@ -1379,6 +1382,8 @@
+ 
+ 				encode_msg(io, BSL_CMD_EXEC_DATA, NULL, 0);
+ 				send_msg(io);
++				/* Completion means transmission only; Linux must be checked separately. */
++				if (final_exec) break;
+ 				// Feature phones respond immediately,
+ 				// but it may take a second for a smartphone to respond.
+ 				ret = recv_msg_timeout(io, 15000);

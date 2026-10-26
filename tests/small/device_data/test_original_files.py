@@ -74,6 +74,8 @@ def test_original_preparation_publishes_the_complete_capture_when_source_paths_c
 
     for module in (cli_device_data, reporting):
         monkeypatch.setattr(module, "ROOT", tmp_path)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "user-data"))
+    monkeypatch.setattr(cli_device_data, "preparation_recipe", lambda *_args, **_kwargs: "a" * 64)
     monkeypatch.setattr(
         cli_device_data,
         "load_target",
@@ -106,7 +108,7 @@ def test_original_preparation_publishes_the_complete_capture_when_source_paths_c
         "example", from_dump=None, from_originals=manifest, jobs=1, offline=True
     )
 
-    target_root = cache / "device-data/example"
+    target_root = tmp_path / "user-data/fplinux/phones/example"
     phone = target_root / "phone"
     assert (phone / "groups/wcn-firmware/payload.bin").read_bytes() == b"abc"
     assert not (phone / "source").exists()
@@ -160,6 +162,7 @@ def test_original_preparer_cannot_drop_change_or_misdeclare_admitted_files(
         prepare._extract_original_groups(  # noqa: SLF001 -- exercise the parser-result boundary.
             prepare.DeviceDataSpec(
                 target="example",
+                preparation_recipe="a" * 64,
                 parser=None,
                 originals_parser=tmp_path / "controlled.py",
                 audio=AudioProfileContext(
