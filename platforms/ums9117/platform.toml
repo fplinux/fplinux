@@ -183,6 +183,14 @@ destination = "drivers/regulator/sc27xx-regulator-core.h"
 source = "platforms/shared/linux/overlay/include/linux/soc/sprd/vbc-fifo.h"
 destination = "include/linux/soc/sprd/vbc-fifo.h"
 
+[[linux.copies]]
+source = "platforms/shared/linux/overlay/include/linux/soc/sprd/vbc-eq6.h"
+destination = "include/linux/soc/sprd/vbc-eq6.h"
+
+[[linux.copies]]
+source = "platforms/shared/linux/overlay/include/linux/soc/sprd/vbc-eq6-io.h"
+destination = "include/linux/soc/sprd/vbc-eq6-io.h"
+
 [[linux.appends]]
 source = "platforms/ums9117/linux/fragments/lib/fm-wire.Kconfig"
 destination = "lib/Kconfig"

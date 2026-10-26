@@ -11,6 +11,7 @@
 #include <linux/property.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>
+#include <linux/soc/sprd/vbc-eq6-io.h>
 
 #include "ums9117-audio.h"
 
@@ -132,7 +133,6 @@
 #define UMS9117_VBC_DAC_HP_ALC_ENABLE BIT(11)
 /* Write-one clears of the EQ6 and EQ4 accumulators, which stock never sets. */
 #define UMS9117_VBC_DAC_HP_ACCUMULATOR_CLEAR GENMASK(15, 14)
-#define UMS9117_VBC_DAC_EQ6_COEF_H_VALUE GENMASK(15, 0)
 /*
  * Section k occupies COEF 7k to 7k + 6: its scale, then the six filter words
  * in register order. COEF42 is the output scale S6. Stock writes the 16-bit
@@ -351,49 +351,18 @@ static void write_eq6_coef(struct ums9117_audio *audio, unsigned int coef,
 	writel(0, audio->vbc + UMS9117_VBC_DAC_EQ6_COEF_L(coef));
 }
 
-static void eq6_filter_words(const struct ums9117_audio_eq_section *section,
-			     s16 words[UMS9117_VBC_DAC_EQ6_FILTER_WORDS])
-{
-	words[0] = section->b0;
-	words[1] = UMS9117_AUDIO_EQ_A0;
-	words[2] = section->b1;
-	words[3] = section->minus_a1;
-	words[4] = section->b2;
-	words[5] = section->minus_a2;
-}
-
 static int write_eq6_filters(struct ums9117_audio *audio,
-			     const struct ums9117_audio_eq_section *sections)
+			     const struct sprd_vbc_eq6_section *sections)
 {
-	s16 words[UMS9117_VBC_DAC_EQ6_FILTER_WORDS];
-	unsigned int section;
-	unsigned int word;
-	unsigned int coef;
-	u32 value;
+	struct sprd_vbc_eq6_mismatch mismatch;
+	int ret = sprd_vbc_eq6_write_filters(audio->vbc, sections, &mismatch);
 
-	for (section = 0; section < UMS9117_AUDIO_EQ_SECTION_COUNT; section++) {
-		eq6_filter_words(&sections[section], words);
-		for (word = 0; word < ARRAY_SIZE(words); word++)
-			write_eq6_coef(audio, eq6_filter_coef(section, word),
-				       words[word]);
-	}
-	/* A filter word that did not land can leave a section unstable. */
-	for (section = 0; section < UMS9117_AUDIO_EQ_SECTION_COUNT; section++) {
-		eq6_filter_words(&sections[section], words);
-		for (word = 0; word < ARRAY_SIZE(words); word++) {
-			coef = eq6_filter_coef(section, word);
-			value = readl(audio->vbc +
-				      UMS9117_VBC_DAC_EQ6_COEF_H(coef)) &
-				UMS9117_VBC_DAC_EQ6_COEF_H_VALUE;
-			if (value == (u16)words[word])
-				continue;
-			dev_err(audio->dev,
-				"EQ6 coefficient %u reads %#x, expected %#x\n",
-				coef, value, (u16)words[word]);
-			return -EIO;
-		}
-	}
-	return 0;
+	if (ret)
+		dev_err(audio->dev,
+			"EQ6 coefficient %u reads %#x, expected %#x\n",
+			mismatch.coefficient, mismatch.observed,
+			mismatch.expected);
+	return ret;
 }
 
 static void clear_eq6_filters(struct ums9117_audio *audio)
@@ -409,7 +378,7 @@ static void clear_eq6_filters(struct ums9117_audio *audio)
 
 /* Writes S0..S5 at step tenths of their targets; any zero scale is silent. */
 static void write_eq6_scales(struct ums9117_audio *audio,
-			     const struct ums9117_audio_eq_section *sections,
+			     const struct sprd_vbc_eq6_section *sections,
 			     int step)
 {
 	unsigned int section;
@@ -421,7 +390,7 @@ static void write_eq6_scales(struct ums9117_audio *audio,
 }
 
 static void ramp_eq6_scales(struct ums9117_audio *audio,
-			    const struct ums9117_audio_eq_section *sections,
+			    const struct sprd_vbc_eq6_section *sections,
 			    bool up)
 {
 	int step;
@@ -519,7 +488,7 @@ static void disable_eq6(struct ums9117_audio *audio)
 static int load_eq6(struct ums9117_audio *audio,
 		    const struct ums9117_audio_dac_processing *processing)
 {
-	const struct ums9117_audio_eq_section *sections =
+	const struct sprd_vbc_eq6_section *sections =
 		processing->section[audio->dac_rate];
 	bool live = audio->dac_running;
 	int ret;

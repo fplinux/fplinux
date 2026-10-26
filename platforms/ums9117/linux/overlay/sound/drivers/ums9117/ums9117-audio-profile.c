@@ -123,19 +123,10 @@ static s16 read_s16(const u8 **data)
  * speaker amplifier. With A0 as unity the quantized poles lie inside the unit
  * circle when |a2| < 1 and |a1| < 1 + a2.
  */
-static bool eq_section_valid(const struct ums9117_audio_eq_section *section)
-{
-	int minus_a1 = section->minus_a1;
-	int minus_a2 = section->minus_a2;
-
-	return section->scale > 0 && abs(minus_a2) < UMS9117_AUDIO_EQ_A0 &&
-	       abs(minus_a1) < UMS9117_AUDIO_EQ_A0 - minus_a2;
-}
-
 static int parse_dac_processing(const u8 *data,
 				struct ums9117_audio_dac_processing *processing)
 {
-	struct ums9117_audio_eq_section *section;
+	struct sprd_vbc_eq6_section *section;
 	unsigned int rate;
 	unsigned int i;
 	u8 alc_enabled;
@@ -159,7 +150,7 @@ static int parse_dac_processing(const u8 *data,
 			section->minus_a1 = read_s16(&data);
 			section->b2 = read_s16(&data);
 			section->minus_a2 = read_s16(&data);
-			if (!eq_section_valid(section))
+			if (!sprd_vbc_eq6_section_valid(section))
 				return -EINVAL;
 		}
 	}

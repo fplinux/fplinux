@@ -150,9 +150,8 @@ static void test_start_protocol(bool alc_enabled)
 	for (unsigned int rate = 0; rate < 3; rate++)
 		for (unsigned int section = 0; section < 6; section++)
 			processing.section[rate][section] =
-				(struct ums9117_audio_eq_section){
-					.scale = 4096, .b0 = 16384
-				};
+				(struct sprd_vbc_eq6_section){ .scale = 4096,
+							       .b0 = 16384 };
 	audio = ums9117_audio_create(&device);
 	CHECK(!IS_ERR(audio));
 	CHECK(ums9117_audio_set_dac_processing(audio, &processing, true,

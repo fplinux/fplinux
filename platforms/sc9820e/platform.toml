@@ -79,6 +79,14 @@ source = "platforms/shared/linux/overlay/include/linux/soc/sprd/vbc-fifo.h"
 destination = "include/linux/soc/sprd/vbc-fifo.h"
 
 [[linux.copies]]
+source = "platforms/shared/linux/overlay/include/linux/soc/sprd/vbc-eq6.h"
+destination = "include/linux/soc/sprd/vbc-eq6.h"
+
+[[linux.copies]]
+source = "platforms/shared/linux/overlay/include/linux/soc/sprd/vbc-eq6-io.h"
+destination = "include/linux/soc/sprd/vbc-eq6-io.h"
+
+[[linux.copies]]
 source = "include/fplinux/fplinux-keypad.h"
 destination = "include/dt-bindings/input/fplinux-keypad.h"
 

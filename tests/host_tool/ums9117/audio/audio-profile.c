@@ -79,7 +79,7 @@ check_processing(const struct ums9117_audio_dac_processing *processing,
 		CHECK(processing->alc[word] == alc_words[word]);
 	for (rate = 0; rate < 3; rate++) {
 		for (section = 0; section < 6; section++) {
-			const struct ums9117_audio_eq_section *eq =
+			const struct sprd_vbc_eq6_section *eq =
 				&processing->section[rate][section];
 
 			CHECK(eq->scale == 4096);
@@ -270,7 +270,7 @@ static void test_gain_and_processing_safety(void)
 	};
 	struct ums9117_audio_profile profile = {};
 	u8 bytes[822];
-	const struct ums9117_audio_eq_section *last;
+	const struct sprd_vbc_eq6_section *last;
 
 	check_invalid_fields(gain_fields,
 			     sizeof(gain_fields) / sizeof(gain_fields[0]));
