@@ -64,12 +64,22 @@ export default defineConfig({
 			plugins: [starlightLinksValidator(), starlightImageZoom()],
 			routeMiddleware: "./src/notices-route-data.ts",
 			sidebar: [
-				{ items: pages("start/build", "start/run"), label: "Get started" },
+				{
+					items: pages("guides/standalone-archive", "start/build", "start/run"),
+					label: "Get started",
+				},
+				{
+					items: pages(
+						"use/session",
+						"use/calculator",
+						"use/clocks",
+						"use/terminal"
+					),
+					label: "Graphical interface",
+				},
 				{
 					items: pages(
 						"features",
-						"use/session",
-						"use/terminal",
 						"use/connect",
 						"use/audio",
 						"use/fm-radio",
@@ -95,8 +105,7 @@ export default defineConfig({
 						"guides/device-data",
 						"guides/dependencies",
 						"guides/microsd-system-card",
-						"guides/packages",
-						"guides/standalone-archive"
+						"guides/packages"
 					),
 					label: "Guides",
 				},
@@ -112,17 +121,30 @@ export default defineConfig({
 						"apps/image-tools/jpeg",
 						"apps/image-tools/present"
 					),
-					label: "Applications",
+					label: "Applications and tools",
 				},
 				{
 					items: [
+						{
+							items: pages(
+								"develop/app/first-app",
+								"develop/app/screens",
+								"develop/app/lifecycle",
+								"develop/application-state",
+								"develop/app/text-input",
+								"develop/app/design",
+								"develop/app/languages",
+								"develop/app/packaging",
+								"develop/app/ui-api"
+							),
+							label: "Application development",
+						},
 						...pages(
 							"develop/contributing",
 							"develop/debugging",
 							"develop/packaging",
 							"develop/device-interfaces",
 							"develop/input",
-							"develop/application-state",
 							"develop/raw-image-formats",
 							"develop/logging"
 						),

@@ -82,7 +82,7 @@ A quarter turn of `nv16` keeps the 4:2:2 layout: it uses every second source chr
 
 NV12 rotates the luma grid and its half-size chroma grid separately, preserving the 4:2:0 layout.
 
-Use ROTA during [camera capture](/fplinux/use/camera/) only if that combination is qualified on your [phone page](/fplinux/phones/#support-status). Otherwise, stop capture first or use `--engine cpu`. Use the CPU path when ROTA is unavailable.
+Use ROTA during [camera capture](/fplinux/use/camera/) only if that combination is verified on your [phone page](/fplinux/phones/#support-status). Otherwise, stop capture first or use `--engine cpu`. Use the CPU path when ROTA is unavailable.
 
 ## If the accelerator fails
 
@@ -97,6 +97,13 @@ fplinux-rotate --engine rota --format rgb565 --width 320 --height 240 \
   --rotate 90 --input /run/input.raw --benchmark 20 --display
 ```
 
-Reported microsecond values are batch totals. Stages distinguish device setup, input copying, queue submission, waiting, output copying, teardown, CPU rotation and preview conversion/presentation. `total_us` measures the application engine call, including an optional preview, but excludes the separately reported guard-check time; input-file reading and final output-file writing are outside that call. Preview conversion is included within `full_framebuffer_us`, so those two fields must not be added together. Benchmark mode suppresses preview holds.
+The times are totals for each batch, not per-frame averages. They measure processing and presentation calls, not visible display latency or FPS. Benchmark mode skips the pauses used to hold previews on screen.
+
+<details>
+<summary>Timing fields and measurement boundaries</summary>
+
+Reported microsecond values are batch totals. Stages distinguish device setup, input copying, queue submission, waiting, output copying, teardown, CPU rotation and preview conversion/presentation. `total_us` measures the application engine call, including an optional preview, but excludes the separately reported guard-check time; input-file reading and final output-file writing are outside that call. Preview conversion is included within `full_framebuffer_us`, so those two fields must not be added together.
 
 `process_user_us` and `process_system_us` are process CPU time, not total system CPU load. The DRM preview includes conversion and atomic presentation; its aggregate timing is not an optical latency or FPS measurement.
+
+</details>

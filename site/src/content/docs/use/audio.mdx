@@ -19,7 +19,7 @@ The [SC9820E](/fplinux/platforms/sc9820e/) Xiaomi Qin 1s+ uses the rear speaker 
 
 ## Prepare device data first
 
-On supported UMS9117 targets, the speaker, full volume range and equalizer use [device data](/fplinux/guides/device-data/) prepared from the same phone before it is loaded. Without device data, headphones still play with a smaller volume range and the speaker controls are missing. Do not reuse device data from another phone, even of the same model. Follow the [device-data guide](/fplinux/guides/device-data/) for a source checkout or [standalone archive](/fplinux/guides/standalone-archive/) for a downloaded archive.
+Audio uses [device data](/fplinux/guides/device-data/) prepared from the same phone. On UMS9117, it enables the speaker, full volume range and equalizer; without it, headphones still play with a smaller volume range and the speaker controls are missing. Qin requires its prepared sound settings for both playback and recording. Do not reuse another phone's data. Follow the [device-data guide](/fplinux/guides/device-data/) for a source checkout or [standalone archive](/fplinux/guides/standalone-archive/) for a downloaded archive.
 
 ## Play a file
 
@@ -37,7 +37,7 @@ On Xiaomi Qin 1s+, stop recording before starting playback.
 
 </Steps>
 
-The default playback device converts any sample rate to 48 kHz, so ordinary WAV files play without preparation. Volume starts low after every boot; see [Volume](#volume) for your phone's controls and verified levels.
+The default playback device converts files to 48 kHz on UMS9117 and 44.1 kHz on Qin, so you do not need to convert ordinary WAV files yourself. Volume starts low after every boot; see [Volume](#volume) for your phone's controls and verified levels.
 
 ## Where the sound goes
 
@@ -64,7 +64,7 @@ To choose outputs only by hand until the next boot, stop automatic switching wit
 
 ### Xiaomi Qin 1s+
 
-`Master Playback Volume` accepts levels `0` to `7` and starts at `1` after boot. Level `0` mutes the speaker, and levels `1` to `7` produce audible output. Loudness and playback quality are uncalibrated; see the [phone-page limits](/fplinux/phones/xiaomi-qin-1s-plus/#audio) for simultaneous application use.
+`Master Playback Volume` accepts levels `0` to `7` and starts at `1` after boot. The default level produces audible output, and `0` mutes it. Loudness across the range and playback quality are uncalibrated; see the [phone-page limits](/fplinux/phones/xiaomi-qin-1s-plus/#audio) for simultaneous application use.
 
 ```sh title="Phone"
 amixer -c 0 cget name='Master Playback Volume'
@@ -89,6 +89,8 @@ With both outputs enabled, speaker level `0` silences only the speaker; the head
 Volume, output and equalizer settings last until the next boot.
 
 ## Equalizer and limiter
+
+Qin's default 44.1 kHz playback uses the equalizer and automatic level control from its saved speaker profile. Direct stereo S16_LE playback through `hw:0,0` also accepts 48 kHz, but bypasses that processing: the profile's coefficients are specific to 44.1 kHz. Qin has no separate equalizer or limiter switches. This does not establish that its loudness or sound quality matches the original system.
 
 On supported UMS9117 targets, device data enables the equalizer and automatic level control, which limits peaks near full volume. Loudness and dynamics have not been matched to stock playback. Both are on by default and apply to FM radio as well. The equalizer makes playback louder, most noticeably on the speaker. To turn them off:
 

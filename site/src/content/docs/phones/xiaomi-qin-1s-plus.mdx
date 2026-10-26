@@ -17,9 +17,11 @@ Each status applies to this phone and the conditions in its note. See [Support s
 
 ## Before you start
 
-Use a Linux PC and the shared [build](/fplinux/start/build/), [run](/fplinux/start/run/) and [connection](/fplinux/use/connect/) instructions, or a [Linux standalone archive](/fplinux/guides/standalone-archive/). The build supplies the three RAM-loading stages. No separate loader files or phone backup are needed. An autonomous archive starts Linux and opens SSH on its first run. Native Windows execution is unsupported.
+Use a Linux PC and the shared [build](/fplinux/start/build/), [run](/fplinux/start/run/) and [connection](/fplinux/use/connect/) instructions, or a [standalone archive](/fplinux/guides/standalone-archive/) for Linux or Windows. The build supplies the three RAM-loading stages. No separate loader files are needed. The first launch reads the phone's sound settings from eMMC and saves them on your PC; follow [phone-data preparation](/fplinux/guides/device-data/#prepare-data-from-the-phone), then run the same launcher again. USB loading and SSH from Windows have not been verified with this phone.
 
-Use USB power. Intermittent resets to BootROM under application load are unresolved. Operation with a connected battery, charging and wired headsets are not qualified. Every cold start requires the PC loader; internal eMMC remains disabled.
+Use USB power. Intermittent resets to BootROM under application load are unresolved. Operation with a connected battery, charging and wired headsets are not verified. Every cold start requires the PC loader; internal eMMC is available only for reading.
+
+Sound preparation needs the original `audio_para`, `audio_hw.xml`, `tiny_hw.xml` and `codec_pga.xml` settings, plus the `vbc_eq` profile created by the phone's original system. The launcher selects these files automatically. It stops with an error if a required file is missing or cannot be used; it does not replace it with guessed settings. A full eMMC backup is not required or created by this procedure.
 
 ## Radio data
 
@@ -33,7 +35,7 @@ Wi-Fi and Bluetooth are unsupported and stay off by default. Radio data is optio
 | `wcn-connectivity_configure.ini` | The complete WCN radio configuration |
 | `wcn-connectivity_calibration.ini` | The complete WCN radio calibration |
 
-FPLinux does not supply or extract these files from this phone. A whole storage dump or partition is not an accepted firmware image. Preparation retains both configuration/calibration pairs; rebuilding includes the prepared data in the system image. Keep images and archives containing this phone's data private. Preparing the data does not enable Wi-Fi or Bluetooth.
+FPLinux does not supply or automatically extract these radio files. A whole storage dump or partition is not an accepted radio firmware image. Preparation retains both configuration/calibration pairs. A fresh RAM launch includes the imported radio data; a microSD system card must be rebuilt to include it. Keep images and archives containing this phone's data private. Preparing the data does not enable Wi-Fi or Bluetooth.
 
 ## Boot key
 
@@ -57,7 +59,7 @@ The vibration motor supports on/off force-feedback effects with a five-second au
 
 The built-in microphone supports mono S16_LE recording at 48 kHz using the shared [recording command](/fplinux/use/audio/#record-from-the-microphone). Recording starts after about one second. Speech quality and sensitivity are uncalibrated.
 
-The rear speaker plays both channels of a stereo file. Use the Qin controls in [Volume](/fplinux/use/audio/#volume). Loudness and playback quality are uncalibrated, and stability under combined application and speaker load is not fully qualified. Stop playback before recording, and stop recording before playback. Wired-headphone playback, wired-headset recording and automatic audio routing are unsupported.
+The rear speaker plays both channels of a stereo file. Default playback uses the prepared sound profile at 44.1 kHz; direct 48 kHz playback bypasses its equalizer and level control. Use the Qin controls in [Volume](/fplinux/use/audio/#volume). Loudness and playback quality are uncalibrated, and stability under combined application and speaker load is not fully verified. Stop playback before recording, and stop recording before playback. Wired-headphone playback, wired-headset recording and automatic audio routing are unsupported.
 
 ## Applications
 
@@ -69,16 +71,16 @@ ARMADA and TyrQuake support [renderer selection](/fplinux/apps/#choose-a-rendere
 
 ## Storage and power
 
-Insert a microSD card before boot and keep it installed throughout the powered session; hot insertion and removal are unqualified. A 16 GB ext4 card supports persistent files. FAT32 data-file use is not verified. The `microsd-root` profile uses ext4 on the card as `/` and preserves installed packages and files across cold starts. Follow the shared [system-card procedure](/fplinux/guides/microsd-system-card/). Files in RAM, including `/tmp`, disappear when power is removed.
+Insert a microSD card before boot and keep it installed throughout the powered session; hot insertion and removal are unverified. A 16 GB ext4 card supports persistent files. FAT32 data-file use is not verified. The `microsd-root` profile uses ext4 on the card as `/` and preserves installed packages and files across cold starts. Follow the shared [system-card procedure](/fplinux/guides/microsd-system-card/). Files in RAM, including `/tmp`, disappear when power is removed.
 
-Before removing power in the RAM profile, [release data cards](/fplinux/use/power/#release-data-cards). With a system card, follow [shutdown on USB power](/fplinux/use/power/#shut-down-a-system-card-on-usb-power), including the read-only root check. Software `poweroff` stops Linux and turns the display off; USB can still supply power afterwards. Power-off with a connected battery and the physical power-key action are not verified. Reboot is unsupported. Every new Linux session requires the PC loader.
+Before removing power in the RAM profile, [unmount data cards](/fplinux/use/power/#unmount-data-cards). With a system card, follow [shutdown on USB power](/fplinux/use/power/#shut-down-a-system-card-on-usb-power), including the read-only root check. Software `poweroff` stops Linux and turns the display off; USB can still supply power afterwards. Power-off with a connected battery and the physical power-key action are not verified. Reboot is unsupported. Every new Linux session requires the PC loader.
 
-Suspend-to-idle (`s2idle`) and RTC alarm wake work on USB power in both profiles. Close playback and recording first. In the RAM profile, unmount data-card filesystems; in `microsd-root`, the ext4 system root can remain mounted read-write. Keep the card installed and use the shared [sleep](/fplinux/use/power/#sleep) and [clock alarm](/fplinux/use/power/#clock-and-alarms) commands. Graphical-session resume is not qualified. Deep suspend is unsupported. Wake through physical keys, battery-powered sleep and resume with other mounted card filesystems are not verified.
+Suspend-to-idle (`s2idle`) and RTC alarm wake work on USB power in both profiles. Close playback and recording first. In the RAM profile, unmount data-card filesystems; in `microsd-root`, the ext4 system root can remain mounted read-write. Keep the card installed and use the shared [sleep](/fplinux/use/power/#sleep) and [clock alarm](/fplinux/use/power/#clock-and-alarms) commands. Graphical-session resume is not verified. Deep suspend is unsupported. Wake through physical keys, battery-powered sleep and resume with other mounted card filesystems are not verified.
 
 The RTC supports reading and setting time, one-shot alarms while Linux is running and wake from `s2idle`. Long-term clock retention without power and alarm wake from power-off are not verified. Follow the shared [clock instructions](/fplinux/use/power/#clock-and-alarms); automatic system-time initialization from the RTC is disabled.
 
 The temperature reading comes from a board thermistor rather than the CPU. Board-sensor and supply-voltage readings are available through the [sensor interfaces](/fplinux/develop/device-interfaces/#sc9820e-readings). Absolute measurement accuracy, battery telemetry and charging are not verified.
 
-Internal eMMC is disabled and cannot be read or written through FPLinux.
+Internal eMMC is read-only. Phone-data preparation reads only the selected sound files; it does not erase, restore or write the original system or user data. FPLinux does not expose the eMMC boot partitions or RPMB.
 
 Wi-Fi, Bluetooth, mobile service, camera capture and FM radio are unsupported.

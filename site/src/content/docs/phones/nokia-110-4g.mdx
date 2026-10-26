@@ -7,7 +7,7 @@ import PhoneChecklist from "../../../components/PhoneChecklist.astro";
 
 <PhoneIdentity />
 
-The tested handset is the dual-SIM model sold as SKU `1GF018MPE1C01`. Other Nokia 110 4G generations and hardware variants are unqualified.
+The tested handset is the dual-SIM model sold as SKU `1GF018MPE1C01`. Other Nokia 110 4G generations and hardware variants are unverified.
 
 ## Support checklist
 
@@ -17,9 +17,9 @@ Each status applies to this handset and the conditions in its note. See [Support
 
 ## Before you start
 
-The RAM launcher prepares [device data](/fplinux/guides/device-data/) from this same handset for Bluetooth, FM radio and fitted audio. Do not use another phone's backup or prepared data.
+The RAM launcher prepares [device data](/fplinux/guides/device-data/) from this same handset for Bluetooth, FM radio and its audio settings. Do not use another phone's backup or prepared data.
 
-Use the authenticated USB shell described in [Connect from a computer](/fplinux/use/connect/) for command input. Display qualification covers the direct-display terminal; it does not establish graphical-session support. Physical keypad use, orientation and color accuracy are unqualified.
+Use the authenticated USB shell described in [Connect from a computer](/fplinux/use/connect/) for command input. Display testing covers the direct-display terminal; it does not establish graphical-session support. Physical keypad use, orientation and color accuracy are unverified.
 
 ## Boot key
 
@@ -31,8 +31,6 @@ Insert a microSD card before boot and leave it installed throughout the powered 
 
 ## Power and recovery
 
-Under USB power with a read-only microSD system root, an RTC alarm can resume `s2idle`. Deep suspend, battery operation, other wake sources and the physical power-key action are unqualified.
+Under USB power with a read-only microSD system root, an RTC alarm can resume `s2idle`. Deep suspend, battery operation, other wake sources and the physical power-key action are unverified.
 
 Before disconnecting USB or removing the battery, follow [End the session safely](/fplinux/use/power/#end-the-session-safely) for your RAM or system-card session. If the phone stays powered after safe shutdown, remove and reinsert its battery before booting normally. Follow [Run FPLinux](/fplinux/start/run/) to start a new session.
-
-Feature support does not establish release readiness. See [Standalone archives](/fplinux/guides/standalone-archive/).

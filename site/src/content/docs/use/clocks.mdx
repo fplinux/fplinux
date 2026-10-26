@@ -17,15 +17,15 @@ Open **Alarms**, choose **New** and set **Time**. For a one-time alarm, select i
 
 Choose **Save** to confirm the form. A time or date editor accepts digits directly; <Key>Left</Key> and <Key>Right</Key> select a part, while <Key>Up</Key> and <Key>Down</Key> change it. Cancelling an editor keeps its old value. An enabled one-time alarm must be in the future; a rejected save keeps the form available for correction.
 
-The alarm list shows the time, date or repeat days and whether the alarm is enabled. Select an alarm to edit it. A new alarm is enabled when saved; editing an existing alarm keeps its enabled or disabled state. **Options** provides **Enable**, **Disable** and **Delete** for the selected alarm. After a one-time alarm rings, its date remains visible and the alarm is disabled. Enabling an alarm whose date has passed opens its form with a proposed future date; choose **Save** to confirm it. Stopping a repeating alarm leaves its schedule enabled.
+The alarm list shows the time, date or repeat days and whether the alarm is enabled. Select an alarm to edit it. **Alarm state** changes the enabled or disabled state in the form; **Save** applies it and **Cancel** keeps the previous state. A new alarm starts enabled. Changing a disabled alarm's time keeps it disabled. **Options** provides **Enable**, **Disable** and **Delete** for the selected alarm. After a one-time alarm rings, its date remains visible and the alarm is disabled. Enabling an alarm whose date has passed opens its form with a proposed future date; choose **Save** to confirm it. Stopping a repeating alarm leaves its schedule enabled.
 
-When an alarm is due, the session lights the screen and shows its time, name and controls above the application or keyguard. **Stop** dismisses it; **Snooze** schedules another reminder after the configured number of minutes. Dismissing a reminder returns to the previous screen and keeps the keypad locked if it was locked. **Missed events** lists reminders which were not handled.
+When an alarm is due, the session lights the screen and shows its time, name and controls above the application or keyguard. **Stop** dismisses it; **Snooze** schedules another reminder after the interval shown in the alert. The alarm list shows when this reminder is due and how much time remains. **Cancel snooze** cancels that pending reminder and preserves the regular schedule. Dismissing a reminder returns to the previous screen and keeps the keypad locked if it was locked. **Missed alarms** lists reminders which were not handled.
 
 ## Timer and stopwatch
 
-In **Timer**, choose **Edit** and enter one duration as `HH:MM:SS`, then choose **Start**. The large number shows the remaining time. While it runs, <Key>Centre</Key> pauses it and **Stop** ends the countdown. On pause, <Key>Centre</Key> resumes it; **Options** can change the duration, restart or reset it. After completion, **Repeat** starts the same duration again. Its reminder has **Stop**, without Snooze. **Back** leaves the countdown running.
+In **Timer**, choose **Edit** and enter one duration as `HH:MM:SS`, then choose **Start**. The large number shows the remaining time. While it runs, <Key>Centre</Key> pauses it and **Stop** ends the countdown. On pause, <Key>Centre</Key> resumes it; **Options** can change the duration, restart or reset it. **Done** with an unchanged duration and **Cancel** preserve the paused countdown and its remaining time. A changed duration asks for confirmation before replacing an existing countdown. After completion, **Repeat** starts the same duration again. Its reminder has **Stop**, without Snooze. **Back** leaves the countdown running.
 
-In **Stopwatch**, choose **Start**. **Lap** records a lap while it runs; <Key>Centre</Key> pauses or continues it. While paused, **Options** opens the laps or resets the result. Resetting a nonzero result asks for confirmation. The lap list shows each lap and its total elapsed time. Leaving the page or closing Clock keeps the measurement running.
+In **Stopwatch**, choose **Start**. **Lap** records a lap while it runs; <Key>Centre</Key> pauses or continues it. The last confirmed lap and its time appear below the counter. While running, <Key>Right</Key> opens **Laps**; viewing the history keeps the measurement running. **Back** returns to the counter. While paused, **Options** opens laps or resets the result. Resetting a nonzero result asks for confirmation. The lap list shows each lap and its total elapsed time. Leaving the page or closing Clock keeps the measurement running.
 
 ## World clock
 
@@ -35,7 +35,7 @@ World clocks do not change the phone's time or alarm schedules. Set the system d
 
 ## Lifetime and sleep
 
-Closing Clock or using Home keeps confirmed alarms, the timer and the stopwatch with the running graphical session. Minimizing also keeps an open edit form; closing an unsaved form does not create an alarm.
+Closing Clock or using Home keeps confirmed alarms, the timer and the stopwatch with the running graphical session. Home also keeps an open edit form; closing an unsaved form asks whether to leave without saving.
 
 Confirmed alarms, saved UTC offsets, clock-face style, Snooze interval and the last timer duration survive a restart of the graphical service. A running timer, stopwatch, Snooze reminder and active signal do not resume after that restart. Past one-time alarms remain disabled, and repeating alarms wait for their next future occurrence.
 

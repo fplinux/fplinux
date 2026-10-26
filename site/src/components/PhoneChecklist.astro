@@ -15,8 +15,8 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 const guideLink = (slug: string) =>
 	`${base}/${slug.replace("#", "/#")}${slug.includes("#") ? "" : "/"}`;
 const defaultNote: Record<string, string> = {
-	unsupported: "No supported FPLinux path on this phone.",
-	untested: "No device result is recorded for this function.",
+	unsupported: "This function is not supported in FPLinux on this phone.",
+	untested: "This function has not been tested on this phone.",
 	verified: "Verified on this phone.",
 };
 const stockLabels = {

@@ -14,27 +14,42 @@ source:
 
 import Key from "../../../components/Key.astro";
 
-The standard image starts a Weston/Wayland session with a Home screen and an application catalog. It includes Settings, [Calculator](/fplinux/use/calculator/), [Clocks](/fplinux/use/clocks/), Notes, Snake and [Terminal](/fplinux/use/terminal/). The [USB shell](/fplinux/use/connect/) remains available alongside the interface. Check your [phone page](/fplinux/phones/) for physical display and keypad support; selecting the graphical session does not establish that every phone has been tested with it.
+The standard image starts a Weston/Wayland session with a Home screen and an application catalog. It includes Settings, [Calculator](/fplinux/use/calculator/), [Clocks](/fplinux/use/clocks/), Notes, Snake, [Terminal](/fplinux/use/terminal/) and [API Demos](/fplinux/apps/api-demos/). The [USB shell](/fplinux/use/connect/) remains available alongside the interface. Check your [phone page](/fplinux/phones/) for physical display and keypad support; selecting the graphical session does not establish that every phone has been tested with it.
 
 ## Home and applications
 
-From Home, press <Key>Centre</Key> to open the application catalog. Move with the D-pad and press <Key>Centre</Key> to open the selected application. The <Key>Left soft</Key> key switches the catalog between a grid and a list; <Key>Right soft</Key> returns to Home. Follow the labels at the bottom of the screen inside applications.
+From Home, press <Key>Centre</Key> to open the application catalog. Move with the D-pad and press <Key>Centre</Key> to open the selected application's main screen. This keeps its current work: opening Notes does not erase the note, and opening Terminal does not start another shell. An unfinished editor asks before leaving without saving. The <Key>Left soft</Key> key switches the catalog between a grid and a list; <Key>Right soft</Key> returns to Home. Follow the labels at the bottom of the screen inside applications.
 
-Hold a D-pad key to continue moving. In lists, <Key>Up</Key> from the first item goes to the last, and <Key>Down</Key> from the last goes to the first. The catalog grid wraps between its first and last rows. <Key>Left</Key> and <Key>Right</Key> move by pages in lists and long information screens; they stop at the ends. Inside an editable field, the D-pad moves the cursor instead.
+Hold a D-pad key to continue moving. In lists, <Key>Up</Key> from the first item goes to the last, and <Key>Down</Key> from the last goes to the first. The catalog grid wraps between its first and last rows; <Key>Left</Key> and <Key>Right</Key> also wrap between the first and last application. In lists and long information screens, <Key>Left</Key> and <Key>Right</Key> move by pages and stop at the ends. Inside an editable field, the D-pad moves the cursor instead.
 
 **Back** from a page opened through **Options** returns to the menu with its previous selection. Press **Back** again to close the menu. Confirming an action, such as **Send** or **Done**, completes it and returns to the application.
 
-A short press and release of <Key>Red</Key> in an application offers **Minimize** on <Key>Left soft</Key> and **Close** on <Key>Right soft</Key>. Press <Key>Red</Key> again to close it. Minimize keeps the application in the session and returns to Home; Close asks it to save and exit, then returns to Home. Press <Key>Centre</Key> (**Cancel**) or an external keyboard's <Key>Esc</Key> to dismiss the choice and return to the application. <Key>Ctrl</Key>+<Key>Esc</Key> returns directly to Home. From Tasks or the catalog, <Key>Red</Key> returns to Home.
+A short press and release of <Key>Red</Key> returns to Home and keeps the application open. <Key>Ctrl</Key>+<Key>Esc</Key> does the same on an external keyboard. To close an application, use its **Back** action from its first screen or choose **Close app** in Tasks.
 
-Press <Key>Left soft</Key> on Home to open **Tasks**, select a task to return to it, or choose **Close app** and confirm to close it. An application that needs a save decision returns to the foreground. See [saving and storage errors](#saving-and-storage-errors) before discarding changes or forcing an application to close.
+Press <Key>Left soft</Key> on Home to open **Tasks** and return to an application's previous screen, or choose **Close app** and confirm to close it. Unlike opening from the catalog, returning through Tasks keeps the current page, selection and scroll position. An application that needs a save decision returns to the foreground. See [saving and storage errors](#saving-and-storage-errors) before discarding changes.
 
 An external keyboard uses arrows, <Key>Enter</Key> and <Key>Esc</Key> for navigation. <Key>Tab</Key> opens Tasks from Home or switches the catalog view. Available Bluetooth and forwarded USB keyboards depend on the phone's [input support](/fplinux/use/connect/#type-with-your-computers-keyboard).
 
 ## Type text
 
-Text fields use multi-tap input on the phone keypad: press a digit repeatedly to choose a letter, then pause or press another digit to commit it. The field shows its input language and mode. <Key>#</Key> changes the text mode, and <Key>\*</Key> opens symbols. Use the D-pad to move the cursor and the on-screen **Clear**, **Options** and **Back** actions to edit or leave the field. An external keyboard types through the session's keyboard layout; <Key>Alt</Key>+<Key>Shift</Key> switches installed layouts.
+Text fields use multi-tap input on the phone keypad: press a digit repeatedly to choose a letter, then pause or press another digit to commit it. Hold a digit to type the digit. The field shows its input language and mode.
 
-Notes holds one note of up to 1,000 characters. **Options → Save** saves it and leaves the editor after confirmation. The application also attempts to save when it becomes hidden or closes. A failed save keeps the text available; follow the [save choices](#saving-and-storage-errors) before leaving it.
+| Key | Action |
+| --- | --- |
+| Press <Key>#</Key> | Change letter case; from `123`, return to letters |
+| Hold <Key>#</Key> | Switch between letters and `123`, keeping the language and case |
+| Press <Key>\*</Key> | Open symbols |
+| Hold <Key>\*</Key> | Select the next installed input language, keeping the case; from `123`, return to letters |
+
+Hold for half a second. **Settings → Input** chooses the initial language for new text fields; switching with <Key>\*</Key> affects only the field you are using. Numeric and phone-number fields keep their own keys for signs and number symbols.
+
+Use the D-pad to move the cursor and the on-screen **Clear**, **Options** and **Back** actions to edit or leave the field. An external keyboard types through the session's keyboard layout; <Key>Alt</Key>+<Key>Shift</Key> switches installed layouts.
+
+## Notes
+
+Open **Notes** from the catalog to edit your saved note, up to 1,000 characters. **Save** appears when there are changes or saving is not confirmed; it saves without leaving the editor or moving the cursor. While **Clear** occupies the right soft key, Save is in **Options**. **Back** saves and closes the note. Returning Home attempts to save and keeps the editor open; a failed save leaves the text and an unsaved marker available when you return. Follow the [save choices](#saving-and-storage-errors) before closing it.
+
+An untouched empty note creates no saved document. Clearing a previously saved note and saving replaces its text with an empty note. Notes stores one note, without a list of documents or file import.
 
 ## Settings
 
@@ -43,20 +58,29 @@ Open Settings from the catalog:
 - **Display** controls brightness from `1` to `10`, screen timeout, auto-lock and the light or dark theme.
 - **Time & language** changes the date and time in UTC and the interface language.
 - **Input** selects the keypad input language independently of the interface language.
+- **About** shows the system name, build ID, Alpine and kernel versions, and available memory. Include the build ID when reporting a problem.
 
-The available languages come from installed language packages. The standard image includes English and Russian. Changing a theme or interface language closes other graphical applications and reloads Home, so save your work first. See [Clock and alarms](/fplinux/use/power/#clock-and-alarms) for clock synchronization and battery-backed time.
+In **Display → Brightness**, use Left and Right to preview a level. **Save** keeps it; **Cancel** restores the previous level. Screen timeout and auto-lock are separate delays; see [Lock and screen timeout](#lock-and-screen-timeout).
 
-Settings are stored in `/etc/fplinux/session.conf`. Notes and application preferences are stored under `/home/fplinux/.local/state/fplinux/`; the session stores confirmed [Clock configuration](/fplinux/use/clocks/#lifetime-and-sleep) in `/var/lib/fplinux/clocks/`. Restarting the graphical session keeps these files. In the default RAM boot, they disappear when the phone powers off. They survive a reboot only on a supported [persistent system root](/fplinux/guides/microsd-system-card/). A data card alone does not make these paths persistent.
+In **Time & language → Date and time**, select Date or Time and press Centre to edit it. Enter digits directly, use Left and Right to select a part, and Up and Down to change it. Times are in UTC. Return to the form and choose **Save** to set the clock. The form stays open until the change is confirmed; a failed attempt keeps your entered values and shows the current clock. Leaving an edited form asks whether to stay or leave without saving. Returning Home keeps the draft.
+
+The available languages come from installed language packages. The standard image includes English and Russian. Changing a theme or interface language closes other graphical applications and reloads Home, so save your work first. The selection marker changes after confirmation; **Applying…** means the change is still pending. See [Clock and alarms](/fplinux/use/power/#clock-and-alarms) for clock synchronization and battery-backed time.
+
+## Keeping data
+
+Restarting the graphical session keeps saved settings and application data. In the default RAM boot, they disappear when the phone powers off. They survive a reboot only on a supported [persistent system root](/fplinux/guides/microsd-system-card/). A data card alone does not make them persistent.
+
+Settings use `/etc/fplinux/session.conf`. Notes and application preferences use `/home/fplinux/.local/state/fplinux/`; confirmed [Clock configuration](/fplinux/use/clocks/#lifetime-and-sleep) uses `/var/lib/fplinux/clocks/`.
 
 ## Saving and storage errors
 
-After a failed Save, keep the application open until the data is saved or you decide to discard it. Notes and Calculator offer **Retry**, **Stay** and **Discard** when closing requires a decision. Retry tries saving again, Stay returns to the current data and Discard closes without saving it. Home and Minimize keep the application and its current data in memory.
+After a failed Save, keep the application open until the data is saved or you decide to close without confirming it. Notes and Calculator offer **Retry** and **Stay** when closing requires a decision. Retry tries saving again; Stay returns to the current data. **Discard changes** closes when the new data was not written. **Close anyway** closes when the new file was published but its storage synchronization was not confirmed. Returning Home keeps the application and its current data in memory without opening a save question over Home.
 
-An unsaved marker means that saving is not confirmed. The error distinguishes insufficient space, unavailable write access and other storage failures. **Saving not confirmed** can also appear after a replacement file became visible but its synchronization failed. Do not assume that the previous saved value is unchanged.
+An unsaved marker means that saving is not confirmed. The error tells you whether storage is full, writing is denied or another problem occurred. **Saving not confirmed** means the app could not confirm that the data reached storage; the file may already contain the new value. Keep the app open and retry before closing it or removing power.
 
 Applied settings and a selected Terminal font can continue to work for the current session despite a save error. Confirmed Clock reminders and timer controls continue while the session retries its configuration. An unsaved alarm form remains a draft until Save is accepted.
 
-A second explicit close of an application waiting for a decision can force it to exit. Changing the interface theme or language restarts other applications after a warning; stopping the graphical service also closes them. Save important work before these actions. Forced termination and power-off can lose unsaved data.
+Repeating **Close app** preserves an outstanding save decision. Changing the interface theme or language restarts other applications after a warning; stopping the graphical service also closes them. Save important work before these actions. Forced termination and power-off can lose unsaved data.
 
 ## Lock and screen timeout
 
@@ -66,7 +90,9 @@ Locking prevents accidental keypad input; it is not a password lock. Screen time
 
 ## Snake
 
-Use the D-pad or <Key>2</Key>, <Key>4</Key>, <Key>6</Key> and <Key>8</Key> to steer. <Key>Centre</Key> starts or pauses play, and <Key>Right soft</Key> exits. Returning Home or locking pauses the game.
+Use the D-pad or <Key>2</Key>, <Key>4</Key>, <Key>6</Key> and <Key>8</Key> to steer. <Key>Centre</Key> starts or pauses play, and <Key>Right soft</Key> exits. The start, pause and game-over dialogs use the same controls as other applications: **Play**, **Resume** or **Restart** on Centre and **Back** on the right soft key. Returning Home or locking pauses the game.
+
+Collect food to increase the score. Hitting the wall or your own body ends the game; press **Restart** on Centre to play again. **Score** is the current result, **Best** is the highest result, and **Last score** appears while paused. Closing Snake saves the results, not the board: reopening starts a new game. Saved scores follow the [same storage lifetime as other application data](#keeping-data).
 
 ## Direct-display applications
 

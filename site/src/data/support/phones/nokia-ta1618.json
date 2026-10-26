@@ -16,7 +16,7 @@
     "stock": "available",
     "hardware": "present",
     "status": "partial",
-    "note": "System scale 0…10, raw range 0…20; visible spacing of the new intermediate levels is not fully qualified."
+    "note": "System scale 0…10, raw range 0…20; visible spacing of the new intermediate levels is not fully verified."
   },
   "keypad-backlight": {
     "stock": "unknown",
@@ -106,13 +106,13 @@
     "stock": "available",
     "hardware": "present",
     "status": "verified",
-    "note": "Stereo S16_LE playback with fitted gain levels and the stock equalizer and ALC."
+    "note": "Stereo S16_LE playback with volume levels, equalizer and automatic level control from this phone's saved audio profile."
   },
   "speaker-audio": {
     "stock": "available",
     "hardware": "present",
     "status": "verified",
-    "note": "One speaker above the display, alone or with the headphones, with fitted gains, stock equalizer and ALC."
+    "note": "One speaker above the display, alone or with headphones. Volume levels, equalizer and automatic level control come from this phone's saved audio profile."
   },
   "phone-microphone": {
     "stock": "available",
@@ -149,7 +149,7 @@
     "stock": "available",
     "hardware": "present",
     "status": "verified",
-    "note": "Rear GC2145; 800×600 and 1600×1200 NV16 through V4L2 in the RAM profile. Camera with a microSD system root is unqualified. Sensor rotation is 270° counterclockwise; capture leaves pixels unchanged. Hardware JPEG accepts 1600×1200, but not 800×600. At 800×600, capture and JPEG queues may stay enabled and take turns; codec jobs need their own supported geometry. Capture continues through display updates, blanking and wake. Stop capture before hardware rotation."
+    "note": "Rear GC2145; 800×600 and 1600×1200 NV16 through V4L2 in the RAM profile. Camera with a microSD system root is unverified. Sensor rotation is 270° counterclockwise; capture leaves pixels unchanged. Hardware JPEG accepts 1600×1200, but not 800×600. At 800×600, capture and JPEG queues may stay enabled and take turns; codec jobs need their own supported geometry. Capture continues through display updates, blanking and wake. Stop capture before hardware rotation."
   },
   "charger-status": {
     "hardware": "present",
@@ -268,17 +268,17 @@
   "mobile-calls": {
     "stock": "available",
     "status": "unsupported",
-    "note": "Calls have no supported FPLinux path."
+    "note": "Calls are not supported in FPLinux."
   },
   "sms": {
     "stock": "available",
     "status": "unsupported",
-    "note": "SMS has no supported FPLinux path."
+    "note": "SMS is not supported in FPLinux."
   },
   "mobile-data": {
     "stock": "available",
     "status": "unsupported",
-    "note": "Mobile data has no supported FPLinux path."
+    "note": "Mobile data is not supported in FPLinux."
   },
   "ffmpeg": {
     "status": "untested",
@@ -294,7 +294,7 @@
     "stock": "unknown",
     "stockNote": "The normal stock installation procedure powers the phone off; powered replacement is unconfirmed.",
     "status": "unsupported",
-    "note": "FPLinux has no supported cellular or SIM service path."
+    "note": "FPLinux does not support cellular service or SIM cards."
   },
   "flashlight": {
     "stock": "available",

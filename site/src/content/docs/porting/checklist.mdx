@@ -35,7 +35,7 @@ Use **Verified**, **Partial**, **Not tested** and **Unsupported** as defined in 
 
 For a result that depends on conditions, state those conditions: RAM or microSD profile, battery or USB power, internal or headset microphone, receiver type, camera mode or mounted filesystem. A check of one condition does not establish the others. Record what still needs checking under **Partial**.
 
-Use the [shared feature guides](/fplinux/features/) for supported operations and the [phone's safe shutdown rules](/fplinux/use/power/) between sessions. Do not use an unqualified persistent-write or power-off path to complete a checklist item.
+Use the [shared feature guides](/fplinux/features/) for supported operations and the [phone's safe shutdown rules](/fplinux/use/power/) between sessions. Do not use an unverified persistent-write or power-off path to complete a checklist item.
 
 ## Share the result
 
@@ -45,4 +45,4 @@ Update the website's support data with the result and its practical limits. Keep
 
 JSON uses machine-readable codes: hardware is `present`, `absent` or `unknown`; stock is `available`, `unavailable` or `unknown`; FPLinux results are `verified`, `partial`, `untested` or `unsupported`. Shared platform implementations use `implemented` or `unimplemented`. Keep explanations in `note` and stock-specific limits in `stockNote`; the interface supplies the readable labels. A target-specific implementation does not change the shared platform status or another phone's result.
 
-For the initial report, follow [Report a problem](/fplinux/help/report/) and the new-phone form. Do not attach the NAND backup or prepared phone firmware. Feature checks do not establish a release: an exact executable payload needs the separate [archive qualification](/fplinux/develop/packaging/#release-archives).
+For the initial report, follow [Report a problem](/fplinux/help/report/) and the new-phone form. Do not attach the NAND backup or prepared phone firmware.

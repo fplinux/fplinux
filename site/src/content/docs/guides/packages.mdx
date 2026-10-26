@@ -20,6 +20,8 @@ Before cutting power to a system card, shut it down as described in [Power](/fpl
 
 Copy the APK to the phone, then install it. This example installs ARMADA (`fplinux-showcase.apk`) on a Nokia 3210 4G.
 
+RAM ZIPs do not include optional APKs. Build the matching source revision on Linux and take the APK from the build's `apks/` directory, or ask the person who supplied your ZIP for that matching APK. Linux system-card exports already include an `apks/` directory. The transfer commands below require a Linux PC; the Windows launcher does not support file transfer.
+
 <Tabs syncKey="source">
 <TabItem label="Source checkout">
 
@@ -35,7 +37,19 @@ The APKs are in the `apks/` folder of the build directory that `./fplinux build`
 Use the target, profile and build type of the running session. For a microSD system card, pass the selected `--profile` to both commands; see [system-card profiles](/fplinux/guides/microsd-system-card/).
 
 </TabItem>
-<TabItem label="Linux runner archive">
+<TabItem label="Linux RAM ZIP">
+
+Run from the extracted archive. Replace the local path with the APK you obtained for this build:
+
+```sh title="PC"
+sh Run.sh --reconnect --upload \
+  /path/to/fplinux-showcase.apk /tmp/fplinux-showcase.apk
+sh Run.sh --reconnect --exec \
+  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-showcase.apk'
+```
+
+</TabItem>
+<TabItem label="Linux system-card export">
 
 Run the commands from the extracted archive directory:
 
@@ -61,7 +75,14 @@ Stop the application first. Remove it by its package name, without `.apk`:
 ```
 
 </TabItem>
-<TabItem label="Linux runner archive">
+<TabItem label="Linux RAM ZIP">
+
+```sh title="PC"
+sh Run.sh --reconnect --exec 'apk del fplinux-showcase'
+```
+
+</TabItem>
+<TabItem label="Linux system-card export">
 
 ```sh title="PC"
 python3.14 -I fplinux.py run --reconnect --exec 'apk del fplinux-showcase'

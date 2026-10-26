@@ -28,7 +28,7 @@ To report a UMS9117 phone that has no target yet, follow [Bring up a new phone](
    git status --short
    ```
 
-   For a standalone archive, give the archive's file name. For an autonomous launcher failure, include the relevant error from the log path printed by the launcher. Each launch creates a new file under `logs/`.
+   For a standalone archive, give the archive's file name. For a launcher failure, include the relevant error from the log path printed by the launcher. Each launch creates a new file under `logs/`.
 
 4. **The failed stage of a build, check or test.** If one of these commands failed, add the output of:
 
@@ -47,7 +47,7 @@ For a problem on a running phone, also add the output of `./fplinux verify` for 
 ## Never attach
 
 - The NAND backup `nand.bin` or any other copy of the phone's internal storage.
-- Prepared [device-data groups](/fplinux/guides/device-data/) or extracted firmware under `.cache/device-data/`.
+- Backups, prepared [device-data groups](/fplinux/guides/device-data/) or extracted firmware from your personal phone data store.
 - Images or archives built with device data.
 
 These contain your phone's own data and its firmware. If a problem only occurs with device data, say which group you prepared: Bluetooth, external radio firmware and calibration, FM radio or audio profile.

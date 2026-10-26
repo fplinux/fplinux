@@ -58,9 +58,9 @@ Builds use up to eight CPUs and run at a lower scheduling priority, so the deskt
 
 Each build has an 8 GiB memory limit. Add `--memory-mib N` to set a positive limit in MiB, for example `--memory-mib 4096` for 4 GiB on a host with less available RAM. Build processes use nice level 10, preserving an already lower scheduling priority.
 
-Where supported, Bluetooth, FM radio, the speaker and tuned audio levels need data from your own phone. UMS9117 RAM builds keep this data separate from the kernel and root filesystem: the first `run` prepares it, and the next `run` loads it without rebuilding. For a microSD system card or Qin's optional original-file import, prepare the data before building the image; see [Device data](/fplinux/guides/device-data/).
+Where supported, Bluetooth, FM radio, the speaker and tuned audio levels need data from your own phone. UMS9117 RAM builds keep this data separate from the kernel and root filesystem: `run` reuses compatible saved data or prepares it as needed without rebuilding. A live NAND backup requires a second launch. For a microSD system card or Qin's optional original-file import, prepare the data before building the image; see [Device data](/fplinux/guides/device-data/).
 
-Add `--without-device-data` to build without prepared personal data while keeping it in your local cache. A later build without this option includes the prepared data again. Use this option when building a Qin image for an autonomous archive; see [Packaging](/fplinux/develop/packaging/#create-an-autonomous-ram-archive).
+Add `--without-device-data` to build without prepared personal data while keeping it in your personal store. A later build without this option includes the selected prepared data again. Use this option when building a Qin image for a standalone RAM archive; see [Packaging](/fplinux/develop/packaging/#create-a-ram-archive).
 
 The [Xiaomi Qin 1s+](/fplinux/phones/xiaomi-qin-1s-plus/) build also compiles its RAM-loading stages and includes them in the bundle. Use `xiaomi-qin-1s-plus` with the same `build`, `run`, `console` and `verify` commands; no separate loader files or phone backup are needed to start it. Its standalone archives run on Linux x86-64.
 
@@ -71,7 +71,7 @@ Two choices change what you build:
 - **Boot mode.** The default build runs entirely from RAM and leaves nothing behind after power-off. Supported UMS9117 targets use `--profile microsd-uboot` for a microSD system card; the Xiaomi Qin 1s+ implementation uses `--profile microsd-root`, which loads Linux over USB and uses the card for the system root. Both require the PC at every start. See [microSD system card](/fplinux/guides/microsd-system-card/) for profile selection and the shared procedure, and check your phone's [support status](/fplinux/phones/#support-status) before selecting a profile.
 - **Build type.** `release` is the default. `--build-type debug` adds kernel diagnostics; see [Debugging](/fplinux/develop/debugging/).
 
-Use the same profile and build type in every command for that build. If you built with options, pass the same options to `run`, `console`, `verify`, `package` and `inspect`:
+Use the same profile and build type in every command for that build. If you built with options, pass the same options to `run`, `console`, `verify` and `inspect`. Packaging accepts release builds only:
 
 ```sh title="PC"
 ./fplinux build nokia-ta1618 --build-type debug
@@ -125,10 +125,10 @@ See [Debugging](/fplinux/develop/debugging/) for more ways to read logs.
 A build can reach its memory budget while the host still has free memory. In that case, increase the budget with `--memory-mib N`, choosing a value that fits the host's available RAM. For example:
 
 ```sh title="PC"
-./fplinux build nokia-ta1618 --memory-mib 4096
+./fplinux build nokia-ta1618 --memory-mib 12288
 ```
 
-If the host itself runs out of memory, limit parallel compilation:
+This raises the build limit from 8 GiB to 12 GiB; leave enough RAM for the rest of the PC. If the host itself runs out of memory, close other memory-heavy programs or reduce parallel compilation:
 
 ```sh title="PC"
 ./fplinux build nokia-ta1618 --jobs 1

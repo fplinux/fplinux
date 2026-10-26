@@ -35,7 +35,7 @@
   },
   "file-transfer": {
     "status": "verified",
-    "note": "RAM destinations are supported. Card destinations require qualified fixed-session initialization."
+    "note": "Transfer to RAM is supported. Card detection at boot has not been verified."
   },
   "host-keyboard-bridge": {
     "status": "verified",
@@ -90,12 +90,12 @@
     "stock": "unknown",
     "hardware": "present",
     "status": "partial",
-    "note": "The card stays installed from boot to shutdown; hot-swap is not supported. Fixed-session initialization has not been qualified on this phone."
+    "note": "The card stays installed from boot to shutdown; hot-swap is not supported. Card detection at boot has not been verified on this phone."
   },
   "removable-system-root": {
     "hardware": "present",
     "status": "partial",
-    "note": "FAT32 FIT plus ext4 system root; fixed-session card initialization is unqualified."
+    "note": "FAT32 boot files plus an ext4 system root; card initialization at boot is unverified."
   },
   "internal-phone-storage": {
     "hardware": "present",
@@ -106,13 +106,13 @@
     "stock": "unknown",
     "hardware": "present",
     "status": "verified",
-    "note": "Stereo S16_LE playback; the default device converts input to 48 kHz, and the fitted profile supplies stock-derived levels, equalizer and ALC."
+    "note": "Stereo S16_LE playback; the default device converts input to 48 kHz. Volume levels, equalizer and automatic level control come from this phone's saved audio profile."
   },
   "speaker-audio": {
     "stock": "unknown",
     "hardware": "present",
     "status": "verified",
-    "note": "Rear loudspeaker with fitted gains, stock equalizer and ALC."
+    "note": "Rear loudspeaker with volume levels, equalizer and automatic level control from this phone's saved audio profile."
   },
   "phone-microphone": {
     "stock": "unknown",
@@ -138,7 +138,7 @@
     "stock": "unknown",
     "hardware": "present",
     "status": "partial",
-    "note": "Pairing, OPP and PAN in both profiles; RAM A2DP/SBC output to a Linux PC sink. Physical Bluetooth headsets, keyboards and mice remain unqualified."
+    "note": "Pairing, OPP and PAN in both profiles; RAM A2DP/SBC output to a Linux PC sink. Physical Bluetooth headsets, keyboards and mice remain unverified."
   },
   "wi-fi": {
     "stock": "unknown",
@@ -151,7 +151,7 @@
     "stockNote": "The published camera listing belongs to the unconfirmed Plus variant.",
     "hardware": "present",
     "status": "verified",
-    "note": "BF30A2; 240×320 NV16 through V4L2 in the RAM profile. Camera with a microSD system root is unqualified. Sensor rotation is 0°; the native geometry is accepted by hardware JPEG. Capture and codec jobs may run concurrently at native size, including through display updates, blanking and wake."
+    "note": "BF30A2; 240×320 NV16 through V4L2 in the RAM profile. Camera with a microSD system root is unverified. Sensor rotation is 0°; the native geometry is accepted by hardware JPEG. Capture and codec jobs may run concurrently at native size, including through display updates, blanking and wake."
   },
   "charger-status": {
     "hardware": "present",
@@ -202,7 +202,7 @@
   },
   "suspend": {
     "status": "partial",
-    "note": "s2idle with RTC/red-handset wake and Bluetooth; mounted-card and card-backed-swap sleep is unqualified with fixed-session card initialization."
+    "note": "s2idle with RTC/red-handset wake and Bluetooth. Sleep with a mounted card or card-backed swap is unverified with the current card initialization at boot."
   },
   "reboot": {
     "status": "unsupported",
@@ -218,7 +218,7 @@
   },
   "tyrquake": {
     "status": "partial",
-    "note": "Game data can use RAM or ext4 microSD storage, including the system root; fixed-session card initialization is unqualified."
+    "note": "Game data supports RAM and ext4 paths, including the system root, but card initialization at boot is unverified on this phone."
   },
   "built-in-microphone": {
     "stock": "unknown",
@@ -271,17 +271,17 @@
   "mobile-calls": {
     "stock": "unknown",
     "status": "unsupported",
-    "note": "Calls have no supported FPLinux path."
+    "note": "Calls are not supported in FPLinux."
   },
   "sms": {
     "stock": "unknown",
     "status": "unsupported",
-    "note": "SMS has no supported FPLinux path."
+    "note": "SMS is not supported in FPLinux."
   },
   "mobile-data": {
     "stock": "unknown",
     "status": "unsupported",
-    "note": "Mobile data has no supported FPLinux path."
+    "note": "Mobile data is not supported in FPLinux."
   },
   "ffmpeg": {
     "status": "untested",
@@ -295,7 +295,7 @@
   "sim-hot-swap": {
     "stock": "unknown",
     "status": "unsupported",
-    "note": "FPLinux has no supported cellular or SIM service path."
+    "note": "FPLinux does not support cellular service or SIM cards."
   },
   "flashlight": {
     "stock": "unknown",

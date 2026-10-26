@@ -50,17 +50,17 @@
   "ap-dmaengine": {
     "hardware": "present",
     "status": "partial",
-    "note": "The fixed ROTA peripheral request works; general memory-copy use is unqualified."
+    "note": "The fixed ROTA peripheral request works; general memory-copy use is unverified."
   },
   "image-rotation-engine": {
     "hardware": "present",
     "status": "partial",
-    "note": "RGB565 and NV16 90-degree rotation, including native 640×476 camera frames. Capture with one buffer can overlap rotation of a separately saved native frame; other formats, rotations and sustained concurrency are unqualified."
+    "note": "RGB565 and NV16 90-degree rotation, including native 640×476 camera frames. Capture with one buffer can overlap rotation of a separately saved native frame; other formats, rotations and sustained concurrency are unverified."
   },
   "jpeg-engine": {
     "hardware": "present",
     "status": "partial",
-    "note": "320×240 NV16 encoding, full-size horizontal 4:2:2 decoding and 320×240→160×120 NV16 scaling. Other geometries and scaled decoding are unqualified."
+    "note": "320×240 NV16 encoding, full-size horizontal 4:2:2 decoding and 320×240→160×120 NV16 scaling. Other geometries and scaled decoding are unverified."
   },
   "native-image-output": {
     "hardware": "present",
@@ -73,11 +73,11 @@
   },
   "jpeg-codec-and-scaling": {
     "status": "partial",
-    "note": "Hardware 320×240 encode, horizontal 4:2:2 decode and 320×240→160×120 NV16 scaling. CPU JPEG also encodes native 640×476 frames; other scaling geometries are unqualified."
+    "note": "Hardware 320×240 encode, horizontal 4:2:2 decode and 320×240→160×120 NV16 scaling. CPU JPEG also encodes native 640×476 frames; other scaling geometries are unverified."
   },
   "native-image-presentation": {
     "status": "verified",
-    "note": "Native RGB565 and NV16 presentation; display appearance after sleep is unqualified."
+    "note": "Native RGB565 and NV16 presentation; display appearance after sleep is unverified."
   },
   "usb-host-mode": {
     "hardware": "unknown",
@@ -97,31 +97,31 @@
   "internal-phone-storage": {
     "hardware": "present",
     "status": "partial",
-    "note": "Read-only physical NAND backup and fitted-data preparation. No mounting, writing or restoration."
+    "note": "Read-only physical NAND backup and preparation of this phone's firmware and audio data. No mounting, writing or restoration."
   },
   "headphone-audio": {
     "stock": "available",
     "hardware": "present",
     "status": "partial",
-    "note": "24 and 48 kHz PCM with fitted EQ/ALC; four-contact headphones provide separate left/right speech and silence at volume 0. Jack insertion/removal is detected; other headset compatibility is unqualified."
+    "note": "24 and 48 kHz PCM with this phone's equalizer and automatic level control. Four-contact headphones provide separate left/right speech and silence at volume 0. Jack insertion/removal is detected; other headset compatibility is unverified."
   },
   "speaker-audio": {
     "stock": "available",
     "hardware": "present",
     "status": "verified",
-    "note": "PCM speaker output with fitted EQ/ALC. Calibrated gain and speaker-only headphone mute are unqualified."
+    "note": "PCM speaker output with this phone's equalizer and automatic level control. Volume calibration and headphone muting during speaker-only playback are unverified."
   },
   "phone-microphone": {
     "stock": "available",
     "hardware": "present",
     "status": "partial",
-    "note": "Built-in mono 48 kHz capture and recognizable speech replay, including simultaneous 48 kHz playback; wired-headset capture is unqualified."
+    "note": "Built-in mono 48 kHz capture and recognizable speech replay, including simultaneous 48 kHz playback; wired-headset capture is unverified."
   },
   "fm-radio": {
     "stock": "available",
     "hardware": "present",
     "status": "verified",
-    "note": "Recognizable station audio through wired headphones with fitted EQ/ALC; playback stops at the selected duration."
+    "note": "Recognizable station audio through wired headphones with this phone's equalizer and automatic level control; playback stops at the selected duration."
   },
   "modem-and-mobile-service": {
     "stock": "available",
@@ -133,34 +133,34 @@
     "stock": "available",
     "hardware": "present",
     "status": "partial",
-    "note": "RAM pairing, bidirectional OPP, PAN data and Internet ping, and short SBC A2DP playback to a Linux PC. Physical Bluetooth peripherals and sustained operation are unqualified."
+    "note": "RAM pairing, bidirectional OPP, PAN data and Internet ping, and short SBC A2DP playback to a Linux PC. Physical Bluetooth peripherals and sustained operation are unverified."
   },
   "wi-fi": {
     "stock": "available",
     "hardware": "present",
     "status": "partial",
-    "note": "This target supplies its own external-radio implementation. RAM station and access-point modes work with WPA2-PSK/CCMP, DHCP and file transfer in both directions. Station DNS and HTTP Internet access work through a shared PC connection; sustained throughput is unqualified. Updating a running access point's beacon and per-station signal statistics are unsupported."
+    "note": "This target supplies its own external-radio implementation. RAM station and access-point modes work with WPA2-PSK/CCMP, DHCP and file transfer in both directions. Station DNS and HTTP Internet access work through a shared PC connection; sustained throughput is unverified. Updating a running access point's beacon and per-station signal statistics are unsupported."
   },
   "camera": {
     "stock": "available",
     "hardware": "present",
     "status": "verified",
-    "note": "Native GC032A 640×476 NV16, rotation 0°, unrotated pixels and capture after RTC wake. CPU JPEG and hardware rotation accept saved native frames. JPEG may process a separate compatible input during capture; one-buffer capture can overlap rotation of a separately saved native frame. Live pipelines, sustained concurrency and absolute color accuracy are unqualified."
+    "note": "Native GC032A 640×476 NV16, rotation 0°, unrotated pixels and capture after RTC wake. CPU JPEG and hardware rotation accept saved native frames. JPEG may process a separate compatible input during capture; one-buffer capture can overlap rotation of a separately saved native frame. Live pipelines, sustained concurrency and absolute color accuracy are unverified."
   },
   "charger-status": {
     "hardware": "present",
     "status": "verified",
-    "note": "External-power detection and USB source classification work. Charging is unqualified."
+    "note": "External-power detection and USB source classification work. Charging is unverified."
   },
   "battery-telemetry": {
     "hardware": "present",
     "status": "partial",
-    "note": "Voltage, current and charge-counter interfaces are available. Battery measurements are unqualified; battery percentage is unavailable."
+    "note": "Voltage, current and charge-counter interfaces are available. Battery measurements are unverified; battery percentage is unavailable."
   },
   "soc-temperature": {
     "hardware": "present",
     "status": "partial",
-    "note": "SoC temperature readings respond; physical accuracy is unqualified."
+    "note": "SoC temperature readings respond; physical accuracy is unverified."
   },
   "auxiliary-adc": {
     "hardware": "unknown",
@@ -191,11 +191,11 @@
   },
   "power-off": {
     "status": "untested",
-    "note": "Battery-only power-off and powerbank output are unqualified."
+    "note": "Battery-only power-off and powerbank output are unverified."
   },
   "suspend": {
     "status": "partial",
-    "note": "USB-powered s2idle with RTC and red-call-key wake, readable display restoration, mounted ext4 storage and idle Bluetooth retaining its bond and post-wake transfer. Active-radio sleep is unqualified."
+    "note": "USB-powered s2idle with RTC and red-call-key wake, readable display restoration, mounted ext4 storage and idle Bluetooth retaining its bond and post-wake transfer. Active-radio sleep is unverified."
   },
   "reboot": {
     "status": "unsupported",
@@ -203,7 +203,7 @@
   },
   "fplinux-armada": {
     "status": "untested",
-    "note": "Application use on this phone is unqualified."
+    "note": "Application use on this phone is unverified."
   },
   "brightness-control": {
     "status": "untested",
@@ -223,7 +223,7 @@
     "stock": "unknown",
     "hardware": "unknown",
     "status": "untested",
-    "note": "Wired-headset recording is unqualified."
+    "note": "Wired-headset recording is unverified."
   },
   "automatic-audio-routing": {
     "stock": "unknown",
@@ -242,11 +242,11 @@
   },
   "bluetooth-pan-internet": {
     "status": "partial",
-    "note": "RAM PAN DHCP, bidirectional TCP transfer and external IPv4 ping work; DNS, HTTP and sustained operation over PAN are unqualified."
+    "note": "RAM PAN DHCP, bidirectional TCP transfer and external IPv4 ping work; DNS, HTTP and sustained operation over PAN are unverified."
   },
   "bluetooth-a2dp-linux-pc": {
     "status": "partial",
-    "note": "Short 48 kHz stereo SBC playback to a Linux PC in the RAM profile; long playback, reconnect and suspend are unqualified."
+    "note": "Short 48 kHz stereo SBC playback to a Linux PC in the RAM profile; long playback, reconnect and suspend are unverified."
   },
   "bluetooth-a2dp-headsets": {
     "stock": "unknown",
@@ -290,7 +290,7 @@
     "stock": "unavailable",
     "stockNote": "The normal stock procedure requires power-off and battery removal to reach the SIM slots.",
     "status": "unsupported",
-    "note": "FPLinux has no supported cellular or SIM service path."
+    "note": "FPLinux does not support cellular service or SIM cards."
   },
   "flashlight": {
     "stock": "available",

@@ -3,7 +3,7 @@
 	<!-- Platform -->
 	<rect x="8" y="8" width="704" height="154" rx="10" class="dg-box-primary" fill="#D3E5ED" stroke="#396475" stroke-width="1.5"/>
 	<text x="24" y="34" class="dg-text-strong" fill="#202D35" font-size="14" font-weight="700">UMS9117 platform provides</text>
-	<text x="226.14" y="34" class="dg-text-muted" fill="#6E797D" font-size="12">used by all current phones</text>
+	<text x="226.14" y="34" class="dg-text-muted" fill="#6E797D" font-size="12">shared implementations for UMS9117 targets</text>
 	<rect x="24" y="58" width="6" height="6" rx="1" class="dg-fill-primary" fill="#396475"/>
 	<text x="38" y="66" class="dg-text-small" fill="#202D35" font-size="12">CPU, interrupts and timers</text>
 	<rect x="24" y="84" width="6" height="6" rx="1" class="dg-fill-primary" fill="#396475"/>

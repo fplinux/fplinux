@@ -18,7 +18,7 @@ Stock-firmware details published under the **244 Modern Plus 4G** name are not c
 
 ## Before you start
 
-The RAM launcher prepares [device data](/fplinux/guides/device-data/) from this same handset for Bluetooth, FM radio and fitted audio. Do not substitute data from another phone.
+The RAM launcher prepares [device data](/fplinux/guides/device-data/) from this same handset for Bluetooth, FM radio and its audio settings. Do not substitute data from another phone.
 
 ## Boot key
 
@@ -38,16 +38,16 @@ See the shared keypad bindings and application keys in [Terminal](/fplinux/use/t
 ## Storage
 
 - The microSD slot is under the battery. Insert the card before you start FPLinux and leave it installed from boot to shutdown; hot-swap is not supported.
-- Fixed-session card initialization is unqualified for data storage and the [microSD system root](/fplinux/guides/microsd-system-card/).
-- File transfer from a PC works with RAM destinations. Card destinations are subject to the fixed-session initialization limit above.
+- Card detection at boot has not been verified for data storage or the [microSD system root](/fplinux/guides/microsd-system-card/).
+- File transfer from a PC works with RAM destinations. Transfer to a card requires it to be detected at boot, which is unverified here.
 
 ## Power
 
-Battery-only power-off has not been tested. Use the session-ending procedure below. A short press of <Key>Red</Key> or an RTC alarm wakes the phone from s2idle; see [Power](/fplinux/use/power/) for the shared controls. Sleep with a mounted card or card-backed swap is unqualified with the fixed-session card initialization.
+Battery-only power-off has not been tested. Use the session-ending procedure below. A short press of <Key>Red</Key> or an RTC alarm wakes the phone from s2idle; see [Power](/fplinux/use/power/) for the shared controls. Sleep with a mounted card or card-backed swap has not been verified with the current card initialization at boot.
 
 ## End the session
 
-In the default RAM profile, [release data cards](/fplinux/use/power/#release-data-cards) before disconnecting USB. If a battery is installed, remove it and put it back before booting the phone normally.
+In the default RAM profile, [unmount data cards](/fplinux/use/power/#unmount-data-cards) before disconnecting USB. If a battery is installed, remove it and put it back before booting the phone normally.
 
 :::caution
 

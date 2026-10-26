@@ -81,11 +81,11 @@ Never remove a mounted card or a card with active swap, and never remove a card 
 
 </Steps>
 
-For a phone with supported hot-swap, wait until `/dev/mmcblk0` has disappeared before you insert another card. A fixed-session card stays installed until shutdown, even after unmounting; start a new session after changing it.
+For a phone with supported hot-swap, wait until `/dev/mmcblk0` has disappeared before you insert another card. Without hot-swap support, leave the card installed until shutdown, even after unmounting; start a new session after changing it.
 
 ## Limitations
 
-- Internal storage cannot hold your files through FPLinux. Supported UMS9117 phones provide [read-only raw NAND backup](/fplinux/guides/device-data/#save-a-nand-backup); the SC9820E Xiaomi Qin 1s+ has no internal eMMC read, write or backup interface. Keep files on a supported card or copy them to your computer.
+- Internal storage cannot hold your files through FPLinux. Supported UMS9117 phones provide [read-only raw NAND backup](/fplinux/guides/device-data/#save-a-nand-backup); Qin reads selected sound files from its read-only eMMC. Keep files on a supported card or copy them to your computer.
 - Use hot swap only when the exact phone's checklist permits it. Otherwise insert the card before boot and leave it installed until shutdown, including when powered-on replacement is untested. Check the phone page for the supported profiles and filesystems.
-- Stock-firmware hot swap, a physically accessible slot and FPLinux hot swap are separate facts. Check the phone's **microSD hot swap** result; SIM hot swap is recorded separately and has no supported FPLinux path. Never remove a system card while Linux uses it as its root, even on a phone that supports data-card hot swap.
+- Stock-firmware hot swap, a physically accessible slot and FPLinux hot swap are separate facts. Check the phone's **microSD hot swap** result; SIM hot swap is recorded separately and is not supported in FPLinux. Never remove a system card while Linux uses it as its root, even on a phone that supports data-card hot swap.
 - Card detection has no fixed delay; wait for the device to appear or, on a hot-swap target, disappear.

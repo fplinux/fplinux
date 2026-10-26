@@ -61,9 +61,11 @@ Run the loader as your regular user, not as root.
 
 4. Only now hold your phone's boot key and connect the USB cable to the powered-off phone, keeping the key pressed. The Nokia example uses <Key>\*</Key>.
 
-5. On a UMS9117 target that needs device data, the first run saves a complete read-only NAND backup and prepares the required radio and audio data. The phone shows the bytes read and percentage, then preparation and its result, instead of the ordinary Home screen. The PC keeps the detailed log; if it cannot send progress updates to the phone, it warns and continues showing progress locally. Keep USB connected until the command confirms that storage is safe to disconnect and asks you to restart. Disconnect USB; if the phone stays powered, remove and reinsert its battery. Repeat from step 1 with the same command. No kernel or root-filesystem rebuild is needed for this RAM boot.
+5. Keep USB connected while the loader works. It reuses compatible saved phone data when available. Otherwise, UMS9117 phones make a complete read-only NAND backup, while Qin reads selected sound files from eMMC. During preparation, the phone shows its progress instead of Home; the PC keeps the detailed log.
 
-6. Wait for Linux and the SSH session. Qin and headless UMS9117 targets without required runtime data boot directly on their first run.
+6. After reading new data from the phone, wait for **`Disconnect USB.`** before disconnecting. If the phone stays on, briefly remove and reinsert its battery. Start again from step 1 with the same command. No rebuild is needed. With compatible saved inputs, the loader prepares data as needed and continues without this restart.
+
+7. Wait for Linux and the SSH session. Targets without required phone data boot directly on their first run.
 
 </Steps>
 
@@ -87,7 +89,7 @@ Use `console` when you require an existing session, run one command, copy files 
 
 ## Phone data and logs
 
-The checkout keeps the first backup as `.cache/device-data/<target>/nand.bin` with its geometry receipt `nand.bin.json`. Prepared data is under `phone/groups/`, preparation reports under `phone/reports/`, and private connection keys under `session/` in the same target directory. Keep this directory private and use it with the same physical phone. See [Device data](/fplinux/guides/device-data/) for saved backups and explicit preparation.
+The backup and prepared data use the [personal phone data store](/fplinux/guides/device-data/#where-phone-data-is-stored), shared with other checkouts and archives. Use each store with the same physical phone; `--phone-data PATH` selects a separate store. Private connection keys stay in `.cache/runtime/<target>/session/`, separate from the shared data.
 
 Each launch prints its log path. Its `runtime.log` and `run.json` are kept under `.cache/logs/run/<target>/`, with an additional `profiles/<profile>/` directory for a selected profile. Interactive SSH commands and terminal output are not recorded. Only one launcher can use the same target data directory at a time; close the active launcher before reopening it.
 
@@ -111,7 +113,7 @@ To end the session without losing data on a microSD card, follow [Power](/fplinu
 
 ### The loader keeps waiting for the phone
 
-The phone did not start in boot ROM mode. After 300 seconds the loader stops with `fplinux run: BootROM USB was not detected`. Power the phone off, disconnect USB, start the loader again and hold the selected phone's boot key before and while you connect USB.
+The phone did not start in boot ROM mode. The loader stops when its 300-second connection deadline expires. Power the phone off, disconnect USB, start the loader again and hold the selected phone's boot key before and while you connect USB.
 
 ### USB is visible but access is denied
 
@@ -119,7 +121,7 @@ Install the rules from [Allow USB access](#allow-usb-access), reload them, then 
 
 ### A loader attempt fails
 
-After a failed attempt, the loader asks you to disconnect the phone, power it off and reconnect it in boot ROM mode. After the third failed attempt it stops with `fplinux run: RAM loader failed after 3 attempts`. Read the `runtime.log` path printed at startup for the complete USB loader diagnostics.
+Follow the message printed by the loader. On Linux, the UMS9117 loader can request up to three attempts within one 300-second deadline; disconnect and power off the phone before reconnecting when prompted. The Qin loader stops on a failed upload. If the command has stopped, start it again before connecting the powered-off phone. Read the `runtime.log` path printed at startup for the complete USB loader diagnostics.
 
 ### The phone is already running FPLinux
 
@@ -143,4 +145,4 @@ Check that you passed the same profile and build type as the running session. If
 
 The file is overwritten. Each line is one JSON object with `event`, `target`, `profile`, `build_type` and a UTC `time`. A successful load writes these events in order: `waiting-for-device`, `device-found`, `ram-loader-start`, `ram-loader-complete`, `linux-start`, `linux-transition`, `linux-usb`, `ssh-ready` and `complete`. A loader retry can repeat `device-found` and `ram-loader-start`. A `failure` event adds the last `stage`, a short `cause` and the `exit_status`. `complete` is written before the interactive shell opens. The events contain no SSH credentials. The loader-first sequence above still applies.
 
-`linux-usb` records the first observation of the exact device bound to this load; `ssh-ready` records session authentication. First-run preparation ends after the backup and data are ready; a later launch performs the normal boot. Live device-data preparation and fresh standalone loads accept the same option. An invocation that only prepares a saved backup emits no loading milestones. `device-data prepare` rejects `--events` with `--from-dump`; standalone `--reconnect` also rejects `--events`.
+`linux-usb` records the first observation of the exact device bound to this load; `ssh-ready` records session authentication. Live NAND reading ends after the backup and data are ready; a later launch performs the normal boot. Reusing or preparing a saved compatible backup continues into the normal boot in the same invocation. Live device-data preparation and fresh standalone loads accept the same option. `device-data prepare` rejects `--events` with `--from-dump`; standalone `--reconnect` also rejects `--events`.

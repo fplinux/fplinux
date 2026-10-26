@@ -15,8 +15,8 @@ How you end a session depends on where your files are, how the phone is powered 
 
 | Situation | What to do |
 | --- | --- |
-| RAM boot, no battery | [Release data cards](#release-data-cards), then unplug USB. |
-| RAM boot, battery installed | Release data cards, then use the shutdown or battery-removal sequence on your [phone page](/fplinux/phones/). |
+| RAM boot, no battery | [Unmount data cards](#unmount-data-cards), then unplug USB. |
+| RAM boot, battery installed | Unmount data cards, then use the shutdown or battery-removal sequence on your [phone page](/fplinux/phones/). |
 | microSD system card, supported battery-only power-off | [Power off with the red key](#power-off-with-the-red-key). |
 | microSD system card, any other supported power setup | [Shut down while on USB power](#shut-down-a-system-card-on-usb-power). |
 
@@ -24,7 +24,7 @@ Without a battery, unplugging USB cuts power immediately. Do not assume that `po
 
 <Figure caption="Which way to end the session"><EndSession /></Figure>
 
-### Release data cards
+### Unmount data cards
 
 If a microSD card is mounted for data, stop the programs that use it, turn off any swap on it and unmount it, as described in [Remove the card safely](/fplinux/use/microsd/). Do not unplug USB or remove the battery while a data card is mounted.
 
@@ -36,7 +36,7 @@ Use this sequence only when your [phone page](/fplinux/phones/) lists battery-on
 
 <Steps>
 
-1. Release data cards as described above. With a microSD system card, skip this step; shutdown takes care of the system card.
+1. Unmount data cards as described above. With a microSD system card, skip this step; shutdown takes care of the system card.
 
 2. Unplug the USB cable and make sure no charger is connected. The phone refuses to power off while it detects charger power.
 
@@ -132,7 +132,7 @@ An alarm fires once. It keeps its absolute time if you change the clock, and an 
 <FeatureStatus feature="charger-status" />
 <FeatureStatus feature="battery-telemetry" />
 
-The interfaces and charge helper below apply to supported [UMS9117](/fplinux/platforms/ums9117/) phones. Charger status, battery telemetry and charging are not qualified on the [SC9820E Xiaomi Qin 1s+](/fplinux/platforms/sc9820e/); its board-temperature and ADC readings do not establish battery support.
+The interfaces and charge helper below apply to supported [UMS9117](/fplinux/platforms/ums9117/) phones. Charger status, battery telemetry and charging are not verified on the [SC9820E Xiaomi Qin 1s+](/fplinux/platforms/sc9820e/); its board-temperature and ADC readings do not establish battery support.
 
 Check whether charger power is connected (`1`) or not (`0`):
 

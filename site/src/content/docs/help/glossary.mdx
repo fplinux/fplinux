@@ -45,7 +45,7 @@ Radio firmware and calibration, Bluetooth records, FM settings and audio tuning 
 
 ### Loader
 
-The PC side of a start: `./fplinux run` in a source checkout, or `fplinux.py run` in a [standalone archive](/fplinux/guides/standalone-archive/). The shared runtime prepares required UMS9117 RAM data on first use, sends FPLinux over USB and opens SSH. Qin and headless UMS9117 targets without runtime data groups boot directly. Running the same command again reopens an authenticated live session. See [Run FPLinux](/fplinux/start/run/).
+The PC side of a start: `./fplinux run` in a source checkout, or `fplinux.py run` in a [standalone archive](/fplinux/guides/standalone-archive/). The shared runtime prepares required phone data on first use, sends FPLinux over USB and opens SSH. Targets without required phone data boot directly. Running the same command again reopens an authenticated live session. See [Run FPLinux](/fplinux/start/run/).
 
 ### Boot key
 
@@ -88,7 +88,3 @@ An application delivered as an APK file and installed on a running phone with `a
 ### Standalone archive
 
 A packaged FPLinux for one phone that runs without a source checkout or build tools. See [Standalone archive](/fplinux/guides/standalone-archive/).
-
-### Candidate
-
-A standalone archive packaged for testing whose exact executable payload has no recorded phone-tested release status. It is marked by `CANDIDATE-NOTICE.txt` and must not be published as a release. See [Packaging](/fplinux/develop/packaging/).

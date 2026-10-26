@@ -24,7 +24,7 @@ Use a profile only if your phone supports it. Check its [support status](/fplinu
 
 ## Build the card image
 
-Prepare any phone data you want in the system card before building it; see [Device data](/fplinux/guides/device-data/). UMS9117's automatic first-run preparation uses the default RAM build. After preparation, build the system-card profile explicitly. The RAM data capsule does not update firmware or the boot image on a card that is already written.
+Prepare any phone data you want in the system card from the checkout you will build; see [Device data](/fplinux/guides/device-data/). Another checkout may have refreshed the shared personal store with different preparation inputs. UMS9117's automatic preparation uses the default RAM build. Run `device-data prepare` in the selected checkout, then build the system-card profile explicitly. The RAM data capsule does not update firmware or the boot image on a card that is already written.
 
 For a supported UMS9117 phone, use its exact target in place of `nokia-ta1618`:
 
@@ -35,10 +35,8 @@ For a supported UMS9117 phone, use its exact target in place of `nokia-ta1618`:
 For the Xiaomi Qin 1s+, select its profile explicitly:
 
 ```sh title="PC — Xiaomi Qin 1s+"
-./fplinux build xiaomi-qin-1s-plus --profile microsd-root --memory-mib 8192
+./fplinux build xiaomi-qin-1s-plus --profile microsd-root
 ```
-
-The Qin example gives the build an 8 GiB memory budget. Adjust it to the host's available RAM as described in [Build FPLinux](/fplinux/start/build/).
 
 The build directory printed after `output:` contains `FPLINUX.img.xz`, a compressed image of a whole card. The build never writes to a card. To find the directory later, run `./fplinux inspect bundle` with the same target, profile and build type and read its `bundle:` line.
 

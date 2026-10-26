@@ -37,7 +37,21 @@ The phone is always the USB device on this cable. It cannot act as a USB host, s
 ```
 
     </TabItem>
-    <TabItem label="Linux runner archive">
+    <TabItem label="Linux RAM ZIP">
+
+```sh title="PC"
+sh Run.sh --reconnect
+```
+
+    </TabItem>
+    <TabItem label="Windows RAM ZIP">
+
+```bat title="PC"
+Run.cmd --reconnect
+```
+
+    </TabItem>
+    <TabItem label="Linux system-card export">
 
 ```sh title="PC"
 python3.14 -I fplinux.py run --reconnect
@@ -75,7 +89,21 @@ Use `--exec` when you do not need an interactive shell. The command runs on the 
 ```
 
     </TabItem>
-    <TabItem label="Linux runner archive">
+    <TabItem label="Linux RAM ZIP">
+
+```sh title="PC"
+sh Run.sh --reconnect --exec 'uname -r'
+```
+
+    </TabItem>
+    <TabItem label="Windows RAM ZIP">
+
+```bat title="PC"
+Run.cmd --reconnect --exec "uname -r"
+```
+
+    </TabItem>
+    <TabItem label="Linux system-card export">
 
 ```sh title="PC"
 python3.14 -I fplinux.py run --reconnect --exec 'uname -r'
@@ -91,7 +119,7 @@ Stopping the local `--exec` client can leave a silent command running on the pho
 
 <FeatureStatus feature="file-transfer" />
 
-Upload a file from your computer to the phone, or pull one from the phone:
+On a Linux PC, upload a file to the phone or pull one from it. The Windows launcher does not support file transfer.
 
 <Tabs syncKey="source">
 	<TabItem label="Source checkout">
@@ -102,7 +130,15 @@ Upload a file from your computer to the phone, or pull one from the phone:
 ```
 
     </TabItem>
-    <TabItem label="Linux runner archive">
+    <TabItem label="Linux RAM ZIP">
+
+```sh title="PC"
+sh Run.sh --reconnect --upload ./song.wav /tmp/song.wav
+sh Run.sh --reconnect --pull /tmp/recording.wav ./recording.wav
+```
+
+    </TabItem>
+    <TabItem label="Linux system-card export">
 
 ```sh title="PC"
 python3.14 -I fplinux.py run --reconnect --upload ./song.wav /tmp/song.wav
@@ -133,6 +169,8 @@ Limits:
 
 The bridge is available on supported [UMS9117](/fplinux/platforms/ums9117/) phones; use it only where your phone checklist lists support for the current profile. The [SC9820E Xiaomi Qin 1s+](/fplinux/platforms/sc9820e/) uses SSH for PC command input and does not support this bridge.
 
+The PC keyboard tool is supplied by a source build or a Linux system-card export. RAM ZIPs do not include it.
+
 The keyboard bridge forwards one keyboard from your computer to the phone. On the phone it behaves like any other keyboard: it controls the [graphical interface](/fplinux/use/session/) and types into its text fields, or into direct-display applications such as [TyrQuake](/fplinux/apps/tyrquake/) when the graphical session is stopped.
 
 :::caution[The forwarded keyboard is captured]
@@ -149,7 +187,7 @@ sudo timeout 60s ./fplinux console <target> --keyboard /dev/input/eventN
 ```
 
     </TabItem>
-    <TabItem label="Linux runner archive">
+    <TabItem label="Linux system-card export">
 
 ```sh title="PC"
 sudo timeout 60s ./host/fplinux-usb-keyboard \
@@ -169,7 +207,7 @@ The bridge can run alongside a shell, a single command or a file copy. If the ca
 From a source checkout, a ready session also has an OpenSSH configuration that works only for that session:
 
 ```sh title="PC"
-ssh -F ".cache/device-data/<target>/session/current/<target>.ssh-config" fplinux
+ssh -F ".cache/runtime/<target>/session/current/<target>.ssh-config" fplinux
 ```
 
-It pins the keys of the current session. Do not copy it to a later session or use it as a general phone login. The `./fplinux console` and `python3.14 -I fplinux.py run --reconnect` commands remain the supported way to reconnect, because they also check that the target and running image still match.
+It pins the keys of the current session. Do not copy it to a later session or use it as a general phone login. Use the [reconnect command for your checkout or archive](#open-a-shell) to check that the target and running image still match before opening SSH.

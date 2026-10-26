@@ -5,8 +5,8 @@ template: splash
 hero:
   tagline: 'Root on a keypad.<span class="sub">Open-source Linux for keypad phones.</span>'
   actions:
-    - text: Get started
-      link: /fplinux/start/build/
+    - text: Run a ZIP
+      link: /fplinux/guides/standalone-archive/
       icon: right-arrow
       variant: primary
     - text: Supported phones
@@ -30,14 +30,14 @@ FPLinux is an open-source Linux system for keypad phones built on the Unisoc UMS
 ## How it works
 
 <div class="fp-grid-3">
-<Card title="1. Build" icon="laptop">
+<Card title="1. Prepare" icon="laptop">
 
-Build FPLinux for your phone on a Linux PC. [Build FPLinux](/fplinux/start/build/)
+If you received a ZIP for your phone, [extract it and use its launcher](/fplinux/guides/standalone-archive/). To create your own image, [build from source on Linux](/fplinux/start/build/).
 
 </Card>
 <Card title="2. Start" icon="mobile-android">
 
-Start the loader, then connect the phone while holding its boot key. [Run FPLinux](/fplinux/start/run/)
+Start the launcher and wait for its instructions before connecting the powered-off phone with its boot key held. From a source checkout, use [Run FPLinux](/fplinux/start/run/).
 
 </Card>
 <Card title="3. Use" icon="seti:shell">
@@ -72,7 +72,7 @@ Headphones, speaker, microphone and FM radio, depending on the phone. [Sound](/f
 </Card>
 <Card title="Bluetooth" icon="link">
 
-Pairing, file transfer and Internet over Bluetooth. Optional SBC audio playback is qualified with a Linux PC receiver on selected phones. [Bluetooth](/fplinux/use/bluetooth/)
+Pairing, file transfer and Internet over Bluetooth. Optional SBC audio playback is verified with a Linux PC receiver on selected phones. [Bluetooth](/fplinux/use/bluetooth/)
 
 </Card>
 <Card title="microSD system card" icon="seti:folder">
@@ -100,7 +100,8 @@ These interface examples use a 240×320 display.
 ## What you need
 
 - One of the phones above and a USB data cable.
-- A Linux x86-64 PC with Python 3.14 and network access for the first build.
+- For a ready ZIP: a Linux x86-64 or Windows 10/11 x64 PC, as listed in its [requirements](/fplinux/guides/standalone-archive/#what-you-need). Windows USB loading and SSH remain unverified with Qin 1s+.
+- To build from source: a Linux x86-64 PC with Python 3.14 and network access for the first build.
 
 <CtaBand title="Your phone is not listed?">
 

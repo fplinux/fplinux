@@ -9,11 +9,11 @@ import Key from "../../../components/Key.astro";
 
 Open **Terminal** from the application catalog. It runs Bash alongside the other [phone applications](/fplinux/use/session/), with command editing, completion, history, reverse search and scrollback. The shell uses the application's account. Use the [USB shell](/fplinux/use/connect/) for commands that require administrative access or a full computer keyboard.
 
-Terminal displays shell text in a monospaced Terminus bitmap font and fits its rows and columns to the available screen. It starts with 6 × 12 pixel cells on a narrow screen and 8 × 16 pixel cells on wider screens. Choose **Options → Font size** to change the size; Terminal remembers your choice. Menus and other interface text use the shared interface font. A narrow screen shows fewer columns; long commands wrap. Terminal does not change the font of the Linux text console.
+Terminal displays shell text in a monospaced Terminus bitmap font and fits its rows and columns to the available screen. It starts with 6 × 12 pixel cells on a narrow screen and 8 × 16 pixel cells on wider screens. Choose **Options → Font size** to change the size; Terminal remembers your choice. The terminal text area stays dark in both system themes. Menus and other interface text use the system theme and shared interface font. A narrow screen shows fewer columns; long commands wrap. Terminal does not change the font of the Linux text console.
 
 ## Type with the keypad
 
-Press a digit repeatedly to choose a character, then pause or press another digit to send it. The pending character appears at the cursor. The lower status bar shows the input mode on the right and any modifiers armed for the next phone key on the left.
+Press a digit repeatedly to choose a character, then pause or press another digit to send it. The pending character stays highlighted at the cursor until sent. With line wrapping enabled, a pending character after a full row previews the next row; at the bottom, the view temporarily shifts up to keep both the pending character and the last output visible. **Clear** cancels the character and restores the output. The header shows the input mode on the right, preceded by any modifiers armed for the next phone key. When space is tight, `C`, `A` and `S` stand for Ctrl, Alt and Shift; the title shortens to leave the indicators visible.
 
 | Key | Action |
 | --- | --- |
@@ -22,7 +22,9 @@ Press a digit repeatedly to choose a character, then pause or press another digi
 | <Key>0</Key> | Space |
 | Hold a digit | Type that digit |
 | <Key>\*</Key> | Open the shared symbol grid |
-| <Key>#</Key> | Cycle letter case, input languages and `123` |
+| <Key>#</Key> | Change letter case; from `123`, return to letters |
+| Hold <Key>#</Key> | Switch between letters and `123` |
+| Hold <Key>\*</Key> | Select the next installed input language |
 | Clear | Cancel a pending letter or modifiers, otherwise Backspace; hold to repeat |
 | <Key>Centre</Key> | Enter |
 | <Key>Dial</Key> | Tab completion |
@@ -30,7 +32,7 @@ Press a digit repeatedly to choose a character, then pause or press another digi
 
 In the symbol grid, use the D-pad to choose a symbol and **Insert** to type it. **Cancel** or <Key>\*</Key> closes the grid without typing.
 
-The initial keypad language follows **Settings → Input**. As in Notes, <Key>#</Key> switches between the installed input languages and digits. Terminal starts with lowercase letters and omits automatic sentence capitalization because shell commands are case-sensitive.
+The initial keypad language follows **Settings → Input**. Terminal uses the same [keypad gestures as Notes](/fplinux/use/session/#type-text): hold <Key>\*</Key> for half a second to change language, or hold <Key>#</Key> to switch between letters and digits. Your language and case are kept when returning from `123`. Terminal starts with lowercase letters and omits automatic sentence capitalization because shell commands are case-sensitive.
 
 Holding a D-pad key repeats its arrow action. External keyboards repeat the keys allowed by their layout, using the graphical session's delay and rate. Opening Options, switching screens or hiding Terminal stops the held repeat; press the key again after returning.
 
@@ -40,10 +42,10 @@ Use the soft-key labels to open **Options**, move with <Key>Up</Key> and <Key>Do
 
 - **Modifiers** selects Ctrl, Alt and Shift for the next phone key or committed letter. Mark the required modifiers and choose **Done**; **Back** keeps the previous selection.
 - **Symbols** inserts a literal symbol.
-- **Special keys** sends Escape or F1–F12.
+- **Special keys** opens with Esc selected and sends Esc, Home, End, Delete, PageUp, PageDown or F1–F12 to the running program. Its header shows the armed modifiers. Home here moves within the terminal; it keeps Terminal open.
 - **Scrollback** shows earlier output.
 - **Font size** chooses compact 6 × 12 or larger 8 × 16 pixel cells. Changing the size keeps the shell running and preserves pending input.
-- **Interrupt Ctrl+C**, **End input Ctrl+D** and **Search Ctrl+R** send those shortcuts to the running program.
+- **Interrupt Ctrl+C**, **End input Ctrl+D** and **Search Ctrl+R** send exactly those shortcuts and clear unused one-shot modifiers. A pending letter is sent first with its armed modifiers.
 - **Help** explains the controls on the phone.
 - **Exit** closes the terminal and its shell.
 
@@ -53,17 +55,19 @@ A pending letter waits while a menu, another screen or the lock covers the termi
 
 ## Scrollback and history
 
-Choose **Options → Scrollback** to read earlier output. <Key>Up</Key> and <Key>Down</Key> move one line; <Key>Left</Key> and <Key>Right</Key> move one page. The lower status bar shows the number of lines above the live view. **Back** or typing returns to live output.
+Choose **Options → Scrollback** to read earlier output. <Key>Up</Key> and <Key>Down</Key> move one line; <Key>Left</Key> and <Key>Right</Key> move one page. The title changes to **Scrollback**. The counter on its right, such as `↑37`, shows the distance in lines from live output. At `↑0`, scrollback is still active and the arrows still move the view. **Back** or typing returns to live output while the shell is running. After the shell has ended, **Back** returns to its final output and typing remains disabled.
+
+While reading scrollback, the input-mode indicator is hidden, but your language and letter case are kept. Armed modifiers remain visible. Returning to live output restores the **Terminal** title and the current input indicator without changing the terminal's rows or columns.
 
 At the Bash prompt, <Key>Up</Key> and <Key>Down</Key> choose earlier commands; **Search Ctrl+R** searches command history. History is stored with the application's state. In a RAM boot it disappears when the phone powers off; a supported persistent system root can retain it.
 
 A failed history write leaves command input and the current shell's in-memory history available. Terminal reports an unsuccessful font save without stopping the shell; the selected font remains active. Follow the [storage-error guidance](/fplinux/use/session/#saving-and-storage-errors) before relying on a saved choice or history file.
 
-## Minimize, lock and close
+## Home, lock and close
 
-The [shared application controls](/fplinux/use/session/#home-and-applications) apply to Terminal. **Minimize** returns to Home and keeps the shell and its programs running. Open Terminal from **Tasks** to continue. Locking or turning off the screen also leaves programs running.
+The [shared application controls](/fplinux/use/session/#home-and-applications) apply to Terminal. The red key returns to Home and keeps the shell and its programs running. Open Terminal from **Tasks** to continue. Locking or turning off the screen also leaves programs running.
 
-**Close**, **Tasks → Close app** and **Options → Exit** terminate the shell and its terminal jobs. Save files before closing. Exiting Bash, including Ctrl+D at an empty prompt, closes Terminal. Returning Home alone does not end the shell.
+**Tasks → Close app** and **Options → Exit** terminate the shell and its terminal jobs. Save files before closing. A successful exit from Bash, including Ctrl+D at an empty prompt, closes Terminal. If the shell exits with an error or signal, Terminal keeps its final output and **Scrollback** available and shows the exit code or signal in the header. Input stops; choose **Close** when finished reading. An unsuccessful command inside a running Bash session leaves the shell available for the next command. Returning Home alone does not end the shell.
 
 ## Keyboards
 

@@ -13,7 +13,7 @@ This platform implements the [ROTA rotation engine](/fplinux/apps/image-tools/ro
 
 ## Storage and phone data
 
-The default system runs in RAM. The read-only NAND interface saves a backup for [phone-data preparation](/fplinux/guides/device-data/); it does not provide writable internal storage. An autonomous archive performs that preparation on first use.
+The default system runs in RAM. The read-only NAND interface saves a backup for [phone-data preparation](/fplinux/guides/device-data/); it does not provide writable internal storage. A standalone archive performs that preparation on first use when required by the phone.
 
 Targets offering a microSD system card use `microsd-uboot`: the PC loads U-Boot into RAM, then U-Boot starts Linux from the card. Follow the shared [system-card instructions](/fplinux/guides/microsd-system-card/). A data card used by the RAM profile is a separate option.
 

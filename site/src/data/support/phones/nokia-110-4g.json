@@ -1,7 +1,7 @@
 {
   "ram-boot": {
     "status": "verified",
-    "note": "USB RAM loading reaches the authenticated Linux session in the default profile. Physical keypad use is unqualified."
+    "note": "USB RAM loading reaches the authenticated Linux session in the default profile. Physical keypad use is unverified."
   },
   "persistent-boot": {
     "status": "unsupported",
@@ -9,19 +9,19 @@
   },
   "local-console": {
     "status": "partial",
-    "note": "Visible terminal output in RAM. Orientation, color accuracy and physical keypad input are unqualified."
+    "note": "Visible terminal output in RAM. Orientation, color accuracy and physical keypad input are unverified."
   },
   "lcd-backlight": {
     "stock": "available",
     "hardware": "present",
     "status": "partial",
-    "note": "The display is illuminated and the brightness service responds. Visible brightness changes and calibration are unqualified."
+    "note": "The display is illuminated and the brightness service responds. Visible brightness changes and calibration are unverified."
   },
   "keypad-backlight": {
     "stock": "unknown",
     "hardware": "present",
     "status": "partial",
-    "note": "Keypad illumination is visible. Software on/off transitions and automatic timing are unqualified."
+    "note": "Keypad illumination is visible. Software on/off transitions and automatic timing are unverified."
   },
   "usb-networking": {
     "status": "verified",
@@ -45,22 +45,22 @@
   },
   "manual-cpu-frequency-selection": {
     "status": "verified",
-    "note": "Selection between 768 MHz and 1 GHz in the microSD profile changes the observed execution speed; 1 GHz is the default. Voltage and sustained-load behavior are unqualified."
+    "note": "Selection between 768 MHz and 1 GHz in the microSD profile changes the observed execution speed; 1 GHz is the default. Voltage and sustained-load behavior are unverified."
   },
   "ap-dmaengine": {
     "hardware": "present",
     "status": "partial",
-    "note": "The rotation DMA route works in the microSD system-card profile. Other DMA routes are unqualified."
+    "note": "The rotation DMA route works in the microSD system-card profile. Other DMA routes are unverified."
   },
   "image-rotation-engine": {
     "hardware": "present",
     "status": "partial",
-    "note": "Hardware NV16 rotation by 90° works in the microSD system-card profile. Other formats and concurrent use are unqualified."
+    "note": "Hardware NV16 rotation by 90° works in the microSD system-card profile. Other formats and concurrent use are unverified."
   },
   "jpeg-engine": {
     "hardware": "present",
     "status": "partial",
-    "note": "Native 240×320 JPEG encode/decode work in RAM and microSD system-card profiles. Scaling a rotated 320×240 frame to 160×120 works with a microSD system root; other sizes and concurrent use are unqualified."
+    "note": "Native 240×320 JPEG encode/decode work in RAM and microSD system-card profiles. Scaling a rotated 320×240 frame to 160×120 works with a microSD system root; other sizes and concurrent use are unverified."
   },
   "native-image-output": {
     "hardware": "unknown",
@@ -69,7 +69,7 @@
   },
   "image-rotation": {
     "status": "partial",
-    "note": "NV16 rotation from 240×320 to 320×240 matches the CPU result in the microSD system-card profile. Other formats and concurrent use are unqualified."
+    "note": "NV16 rotation from 240×320 to 320×240 matches the CPU result in the microSD system-card profile. Other formats and concurrent use are unverified."
   },
   "jpeg-codec-and-scaling": {
     "status": "partial",
@@ -103,19 +103,19 @@
     "stock": "available",
     "hardware": "present",
     "status": "partial",
-    "note": "An inserted plug is detected and the wired output produces playback in RAM. Channel separation, accessory compatibility and plug insertion/removal are unqualified."
+    "note": "An inserted plug is detected and the wired output produces playback in RAM. Channel separation, accessory compatibility and plug insertion/removal are unverified."
   },
   "speaker-audio": {
     "stock": "available",
     "hardware": "present",
     "status": "untested",
-    "note": "The ALSA card is available; audible speaker playback is unqualified."
+    "note": "The ALSA card is available; audible speaker playback is unverified."
   },
   "phone-microphone": {
     "stock": "available",
     "hardware": "present",
     "status": "partial",
-    "note": "Internal capture produces PCM in the RAM profile. Speech quality, sensitivity and acoustic isolation are unqualified."
+    "note": "Internal capture produces PCM in the RAM profile. Speech quality, sensitivity and acoustic isolation are unverified."
   },
   "fm-radio": {
     "stock": "available",
@@ -133,19 +133,19 @@
     "stock": "available",
     "hardware": "present",
     "status": "partial",
-    "note": "The CM4 controller powers on and discovers devices in the microSD system-card profile. Pairing, connections and additional profiles are unqualified."
+    "note": "The CM4 controller powers on and discovers devices in the microSD system-card profile. Pairing, connections and additional profiles are unverified."
   },
   "wi-fi": {
     "stock": "unknown",
     "hardware": "unknown",
     "status": "unsupported",
-    "note": "No supported FPLinux path has been established; physical hardware presence is unknown."
+    "note": "This feature is not supported in FPLinux. Whether the phone has the hardware is unknown."
   },
   "camera": {
     "stock": "available",
     "hardware": "present",
     "status": "partial",
-    "note": "BF30A2; 240×320 NV16 capture through V4L2 in the RAM and microSD system-card profiles. Stop and restart work in RAM. Concurrent image jobs, controls and image quality are unqualified."
+    "note": "BF30A2; 240×320 NV16 capture through V4L2 in the RAM and microSD system-card profiles. Stop and restart work in RAM. Concurrent image jobs, controls and image quality are unverified."
   },
   "charger-status": {
     "hardware": "unknown",
@@ -160,7 +160,7 @@
   "soc-temperature": {
     "hardware": "present",
     "status": "partial",
-    "note": "Temperature readings are available in RAM and microSD profiles and resume after RTC sleep. Physical accuracy is unqualified."
+    "note": "Temperature readings are available in RAM and microSD profiles and resume after RTC sleep. Physical accuracy is unverified."
   },
   "auxiliary-adc": {
     "hardware": "unknown",
@@ -170,7 +170,7 @@
   "real-time-clock": {
     "hardware": "present",
     "status": "partial",
-    "note": "Clock initialization and a five-second alarm with s2idle resume work under USB power with a read-only microSD system root. Accuracy and battery-backed retention are unqualified."
+    "note": "Clock initialization and a five-second alarm with s2idle resume work under USB power with a read-only microSD system root. Accuracy and battery-backed retention are unverified."
   },
   "other-battery-functions": {
     "hardware": "unknown",
@@ -181,7 +181,7 @@
     "stock": "unknown",
     "hardware": "unknown",
     "status": "unsupported",
-    "note": "No force-feedback device is enabled. Physical vibration hardware is unqualified."
+    "note": "No force-feedback device is enabled. Physical vibration hardware is unverified."
   },
   "indicator-leds": {
     "stock": "unknown",
@@ -191,11 +191,11 @@
   },
   "power-off": {
     "status": "untested",
-    "note": "Battery-only power-off and the physical power-key action are unqualified."
+    "note": "Battery-only power-off and the physical power-key action are unverified."
   },
   "suspend": {
     "status": "partial",
-    "note": "s2idle resumes with an RTC alarm under USB power and a read-only microSD system root. Deep suspend, battery operation and other wake sources are unqualified."
+    "note": "s2idle resumes with an RTC alarm under USB power and a read-only microSD system root. Deep suspend, battery operation and other wake sources are unverified."
   },
   "reboot": {
     "status": "unsupported",
@@ -207,17 +207,17 @@
   },
   "brightness-control": {
     "status": "untested",
-    "note": "The brightness service responds; application use, physical keypad control and visible changes are unqualified."
+    "note": "The brightness service responds; application use, physical keypad control and visible changes are unverified."
   },
   "tyrquake": {
     "status": "partial",
-    "note": "Shareware demo playback with a microSD system root; the 320×256 render is downscaled to the 128×160 display. Physical game controls and full gameplay are unqualified; there is no game sound."
+    "note": "Shareware demo playback with a microSD system root; the 320×256 render is downscaled to the 128×160 display. Physical game controls and full gameplay are unverified; there is no game sound."
   },
   "built-in-microphone": {
     "stock": "available",
     "hardware": "present",
     "status": "partial",
-    "note": "Internal capture produces PCM in the RAM profile. Speech quality, sensitivity and acoustic isolation are unqualified."
+    "note": "Internal capture produces PCM in the RAM profile. Speech quality, sensitivity and acoustic isolation are unverified."
   },
   "headset-microphone": {
     "stock": "unknown",
@@ -228,7 +228,7 @@
   "automatic-audio-routing": {
     "stock": "unknown",
     "status": "partial",
-    "note": "The jack service runs with an inserted plug. Plug insertion/removal and automatic output switching are unqualified."
+    "note": "The jack service runs with an inserted plug. Plug insertion/removal and automatic output switching are unverified."
   },
   "bluetooth-pairing": {
     "stock": "unknown",
@@ -290,7 +290,7 @@
     "stock": "unknown",
     "stockNote": "The normal stock installation procedure powers the phone off; powered replacement is unconfirmed.",
     "status": "unsupported",
-    "note": "FPLinux has no supported cellular or SIM service path."
+    "note": "FPLinux does not support cellular service or SIM cards."
   },
   "flashlight": {
     "stock": "available",

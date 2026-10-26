@@ -1,7 +1,7 @@
 {
   "ram-boot": {
     "status": "verified",
-    "note": "The default RAM profile reaches an authenticated Linux session from a Linux PC. Builds and Linux archives include the loaders; no separate loader files or phone backup are needed. The autonomous Linux archive starts Linux and SSH on its first run and reconnects when reopened. Native Windows execution is unsupported. Use USB power; operation with a connected battery is not qualified."
+    "note": "The default RAM profile reaches an authenticated Linux session from a Linux PC. Builds and standalone archives include the loaders. The first launch reads and prepares selected sound files; the next launch reuses them and starts Linux. No pre-existing full backup is needed. USB loading and SSH from Windows have not been verified with this phone. Use USB power; operation with a connected battery is not verified."
   },
   "persistent-boot": {
     "status": "unsupported",
@@ -78,7 +78,7 @@
     "stock": "available",
     "hardware": "present",
     "status": "partial",
-    "note": "A 16 GB ext4 data card supports reads, writes and persistence across a power cycle after sync and unmount. FAT32 data-file use is not verified. Hot insertion/removal is unqualified; insert before boot and keep installed during the supported session."
+    "note": "A 16 GB ext4 data card supports reads, writes and persistence across a power cycle after sync and unmount. FAT32 data-file use is not verified. Hot insertion/removal is unverified; insert before boot and keep installed during the supported session."
   },
   "removable-system-root": {
     "status": "verified",
@@ -86,8 +86,8 @@
   },
   "internal-phone-storage": {
     "hardware": "present",
-    "status": "unsupported",
-    "note": "Internal eMMC is disabled; no read, write or backup interface is provided."
+    "status": "partial",
+    "note": "The eMMC user area and its partitions can be read. Sound preparation reads selected files with the storage protected against writes. Writing, restoring, boot-partition access, RPMB and a full-storage backup command are unsupported."
   },
   "headphone-audio": {
     "stock": "unknown",
@@ -99,7 +99,7 @@
     "stock": "available",
     "hardware": "present",
     "status": "partial",
-    "note": "Stereo S16_LE playback at 48 kHz mixes both channels into the rear speaker; default playback converts other rates and channel counts. Master Playback Volume 1–7 produces audible output; the default is 1 and 0 mutes it. Stop, restart and switching to microphone capture work. Playback and capture are mutually exclusive. Loudness and playback quality are uncalibrated; stability under combined application and speaker load is not fully qualified."
+    "note": "Stereo S16_LE playback mixes both channels into the rear speaker. Default playback uses the phone's prepared equalizer and level-control settings at 44.1 kHz; direct 48 kHz playback bypasses that processing. Sample-rate conversion, audible output at the default Master level 1, mute at 0, stop/restart and switching between playback and recording work. Playback and capture are mutually exclusive. Loudness and playback quality are uncalibrated; stability under combined application and speaker load is not fully verified."
   },
   "phone-microphone": {
     "stock": "available",
@@ -185,7 +185,7 @@
   },
   "suspend": {
     "status": "partial",
-    "note": "s2idle and RTC alarm wake work on USB power in default and microsd-root. Close audio streams first. Unmount data-card filesystems in the RAM profile; the ext4 system root may remain read-write in microsd-root. Direct-display output returns in both profiles; graphical-session resume is not qualified. Deep suspend is unsupported; physical-key wake, battery-powered sleep and other mounted-card filesystems are not verified."
+    "note": "s2idle and RTC alarm wake work on USB power in default and microsd-root. Close audio streams first. Unmount data-card filesystems in the RAM profile; the ext4 system root may remain read-write in microsd-root. Direct-display output returns in both profiles; graphical-session resume is not verified. Deep suspend is unsupported; physical-key wake, battery-powered sleep and other mounted-card filesystems are not verified."
   },
   "reboot": {
     "status": "unsupported",
@@ -278,12 +278,12 @@
   "microsd-hot-swap": {
     "stock": "unknown",
     "status": "untested",
-    "note": "Card detection is present, but hot insertion/removal is unqualified. Insert before boot and keep installed during the supported session."
+    "note": "Card detection is present, but hot insertion/removal is unverified. Insert before boot and keep installed during the supported session."
   },
   "sim-hot-swap": {
     "stock": "unknown",
     "status": "unsupported",
-    "note": "FPLinux has no supported cellular or SIM service path."
+    "note": "FPLinux does not support cellular service or SIM cards."
   },
   "flashlight": {
     "stock": "unknown",

@@ -1,12 +1,12 @@
 ---
 title: API Demos
-description: Interactive examples of the graphical interface and LVGL widgets.
+description: Interactive examples of the supported FPLinux application API.
 ---
 
-API Demos is an optional developer application in the graphical session. Install `fplinux-example-apidemo` with the [package workflow](/fplinux/guides/packages/), then open **API Demos** from the launcher.
+API Demos is included in the standard system image on every supported phone. Open **API Demos** from the launcher to explore the graphical interface.
 
-Press **OK** to browse the catalogue, or type a name to search. Search matches translated names, English names and the C API names shown beneath each example. **#** changes the phone input mode and **\*** opens the symbol picker. The soft-key labels show the actions available on each screen.
+The catalogue opens immediately. Choose a section with **OK**. **Back** from an example restores the section or search results with the same selection; **Back** from the catalogue closes the application. Use **Search** to open a search field. Search matches translated names, English names and C API names, and keeps the query when you return. It uses the shared [keypad text controls](/fplinux/use/session/#type-text). **Help** on a selected example explains its result and lists the APIs it uses.
 
-The examples cover lists, forms, alerts, text, commands, Canvas, software frames, soft keys, appearance, locale and preferences, lifecycle, LVGL widgets, vibration and sound. The virtual-list and form-choice examples use the same shared controls as other applications. Layout and fonts follow the screen profile.
+The eight sections cover lists; forms and text; commands and dialogs; graphics and input; appearance; data and language; lifecycle; sound and vibration. Examples combine related actions: change a list's rows, complete a form, edit a date or elapsed duration, cancel an operation, draw on a Canvas, or compare direct and staged software frames. Layout, controls and fonts follow the screen profile.
 
-Preferences are stored in the application's private state directory. The example distinguishes the values in memory, the file's visible contents and the result of saving; follow the [application-state contract](/fplinux/develop/application-state/) when using these APIs. The sound and vibration sections show capabilities, request results and errors. Sending a request or queueing audio frames does not establish that a physical effect occurred. Sound pauses while the application is hidden; vibration stops. Closing the relevant example releases its resources.
+Preferences are stored in the application's private state directory. The example distinguishes the values in memory, the file's visible contents and the result of saving; follow the [application-state contract](/fplinux/develop/application-state/) when using these APIs. Sound and vibration show availability before an explicit **Start** or **Play** command, then report request results and errors. Sending a request or queueing audio frames does not establish that a physical effect occurred. Sound pauses while the application is hidden; vibration stops. Closing the relevant example releases its resources.

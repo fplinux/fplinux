@@ -16,7 +16,7 @@
     "stock": "available",
     "hardware": "present",
     "status": "verified",
-    "note": "System levels 0…10; level 0 turns the light off. Visible step spacing is unqualified."
+    "note": "System levels 0…10; level 0 turns the light off. Visible step spacing is unverified."
   },
   "keypad-backlight": {
     "stock": "unknown",
@@ -67,7 +67,7 @@
   "native-image-output": {
     "hardware": "present",
     "status": "partial",
-    "note": "RGB565 and native NV16 presentation; color accuracy is unqualified."
+    "note": "RGB565 and native NV16 presentation; color accuracy is unverified."
   },
   "image-rotation": {
     "status": "partial",
@@ -75,11 +75,11 @@
   },
   "jpeg-codec-and-scaling": {
     "status": "partial",
-    "note": "Available within the qualified sizes and operations above."
+    "note": "Available within the verified sizes and operations above."
   },
   "native-image-presentation": {
     "status": "partial",
-    "note": "RGB565 and native NV16 presentation; color accuracy is unqualified."
+    "note": "RGB565 and native NV16 presentation; color accuracy is unverified."
   },
   "usb-host-mode": {
     "hardware": "unknown",
@@ -106,7 +106,7 @@
     "stock": "available",
     "hardware": "present",
     "status": "partial",
-    "note": "Stereo PCM and per-channel mute with three-contact TRS headphones; jack detection works, but automatic output routing is not supported. TRRS compatibility is unqualified."
+    "note": "Stereo PCM and per-channel mute with three-contact TRS headphones; jack detection works, but automatic output routing is not supported. TRRS compatibility is unverified."
   },
   "speaker-audio": {
     "stock": "available",
@@ -118,13 +118,13 @@
     "stock": "available",
     "hardware": "present",
     "status": "partial",
-    "note": "Built-in microphone recording and replay, mono S16_LE at 48 kHz and duplex capture; acoustic response and headset input are unqualified."
+    "note": "Built-in microphone recording and replay, mono S16_LE at 48 kHz and duplex capture; acoustic response and headset input are unverified."
   },
   "fm-radio": {
     "stock": "available",
     "hardware": "present",
     "status": "partial",
-    "note": "Seeking, tuning and headphone reception in the RAM profile, with or without the battery installed; speaker, stereo output and sensitivity are unqualified."
+    "note": "Seeking, tuning and headphone reception in the RAM profile, with or without the battery installed; speaker, stereo output and sensitivity are unverified."
   },
   "modem-and-mobile-service": {
     "stock": "available",
@@ -136,7 +136,7 @@
     "stock": "available",
     "hardware": "present",
     "status": "partial",
-    "note": "Pairing, OPP, PAN and SBC A2DP source with a Linux PC; physical headsets and HID are unqualified."
+    "note": "Pairing, OPP, PAN and SBC A2DP source with a Linux PC; physical headsets and HID are unverified."
   },
   "wi-fi": {
     "stock": "unavailable",
@@ -149,12 +149,12 @@
     "stock": "available",
     "hardware": "present",
     "status": "partial",
-    "note": "BF3A01; native 240×320 NV16, sensor rotation 270° and adjustable brightness. Brightness levels 0–6, initially 3, may change during capture and survive stream stops. Color accuracy and concurrent capture/codec use are unqualified."
+    "note": "BF3A01; native 240×320 NV16, sensor rotation 270° and adjustable brightness. Brightness levels 0–6, initially 3, may change during capture and survive stream stops. Color accuracy and concurrent capture/codec use are unverified."
   },
   "charger-status": {
     "hardware": "present",
     "status": "partial",
-    "note": "USB input detection; battery charging is unqualified."
+    "note": "USB input detection; battery charging is unverified."
   },
   "battery-telemetry": {
     "hardware": "unknown",
@@ -169,12 +169,12 @@
   "auxiliary-adc": {
     "hardware": "present",
     "status": "partial",
-    "note": "Raw readings are available; channel calibration is unqualified."
+    "note": "Raw readings are available; channel calibration is unverified."
   },
   "real-time-clock": {
     "hardware": "present",
     "status": "partial",
-    "note": "Read/write and alarm wake from s2idle; battery retention is unqualified."
+    "note": "Read/write and alarm wake from s2idle; battery retention is unverified."
   },
   "other-battery-functions": {
     "hardware": "unknown",
@@ -222,7 +222,7 @@
     "stock": "available",
     "hardware": "present",
     "status": "partial",
-    "note": "Built-in microphone recording and replay, mono S16_LE at 48 kHz and duplex capture; acoustic response is unqualified."
+    "note": "Built-in microphone recording and replay, mono S16_LE at 48 kHz and duplex capture; acoustic response is unverified."
   },
   "headset-microphone": {
     "stock": "unknown",
@@ -269,17 +269,17 @@
   "mobile-calls": {
     "stock": "available",
     "status": "unsupported",
-    "note": "Calls have no supported FPLinux path."
+    "note": "Calls are not supported in FPLinux."
   },
   "sms": {
     "stock": "unknown",
     "status": "unsupported",
-    "note": "SMS has no supported FPLinux path."
+    "note": "SMS is not supported in FPLinux."
   },
   "mobile-data": {
     "stock": "available",
     "status": "unsupported",
-    "note": "Mobile data has no supported FPLinux path."
+    "note": "Mobile data is not supported in FPLinux."
   },
   "ffmpeg": {
     "status": "untested",
@@ -293,7 +293,7 @@
   "sim-hot-swap": {
     "stock": "unknown",
     "status": "unsupported",
-    "note": "FPLinux has no supported cellular or SIM service path."
+    "note": "FPLinux does not support cellular service or SIM cards."
   },
   "flashlight": {
     "stock": "available",

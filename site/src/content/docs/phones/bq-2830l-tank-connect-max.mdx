@@ -15,7 +15,7 @@ Each status applies to this phone and the conditions in its note. See [Support s
 
 ## Before you start
 
-The RAM launcher prepares [device data](/fplinux/guides/device-data/) from this same handset for fitted audio and the external radio's firmware and configuration. Do not use another phone's data.
+The RAM launcher prepares [device data](/fplinux/guides/device-data/) from this same handset for its audio settings and the external radio's firmware and configuration. Do not use another phone's data.
 
 ## Boot key
 
@@ -31,7 +31,7 @@ Stop active radio connections before sleeping. Use the shared [Power](/fplinux/u
 
 ## End the RAM session
 
-[Release data cards](/fplinux/use/power/#release-data-cards) before disconnecting USB. If a battery is fitted, remove and reinsert it before booting normally.
+[Unmount data cards](/fplinux/use/power/#unmount-data-cards) before disconnecting USB. If a battery is fitted, remove and reinsert it before booting normally.
 
 ## Hardware controls and limits
 
@@ -42,5 +42,3 @@ The backlight is `/sys/class/backlight/bq-2830l-backlight`. Use [Display and lig
 Concurrent camera capture and hardware rotation require one capture buffer and a separately saved frame. Do not use rotation with two active capture buffers. See [Camera](/fplinux/use/camera/) for shared resource rules.
 
 :::
-
-Feature support does not establish release readiness. See [Standalone archives](/fplinux/guides/standalone-archive/).

@@ -22,7 +22,7 @@
   "microsd-hot-swap": "implemented",
   "sim-hot-swap": "unimplemented",
   "removable-system-root": "implemented",
-  "internal-phone-storage": "unimplemented",
+  "internal-phone-storage": "implemented",
   "headphone-audio": "unimplemented",
   "speaker-audio": "implemented",
   "phone-microphone": "implemented",

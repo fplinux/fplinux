@@ -5,13 +5,13 @@ description: SC9820E display, GPU, audio and storage implementations and their c
 
 import FeatureCatalog from '../../../components/FeatureCatalog.astro';
 
-The SC9820E platform currently has one target: [Xiaomi Qin 1s+](/fplinux/phones/xiaomi-qin-1s-plus/). Its checklist records the supported functions and remaining limits. Use USB power; operation with a connected battery and charging are not qualified.
+The SC9820E platform currently has one target: [Xiaomi Qin 1s+](/fplinux/phones/xiaomi-qin-1s-plus/). Its checklist records the supported functions and remaining limits. Use USB power; operation with a connected battery and charging are not verified.
 
 ## Display and images
 
 The display supports native-size RGB565 images. [Image presentation](/fplinux/apps/image-tools/present/) provides `--mode cpu-rgb565` for NV16 input. Native NV16 presentation is not verified.
 
-The UMS9117 ROTA and JPEG engines are separate implementations and do not apply to this platform. The rotation and JPEG applications have no supported SC9820E path. [FFmpeg](/fplinux/apps/ffmpeg/) provides software decoding; it does not supply a video player or hardware video decoding.
+The UMS9117 ROTA and JPEG engines are separate implementations and do not apply to this platform. The rotation and JPEG applications are not available for SC9820E. [FFmpeg](/fplinux/apps/ffmpeg/) provides software decoding; it does not supply a video player or hardware video decoding.
 
 ## GPU rendering
 
@@ -25,11 +25,11 @@ Manual CPU frequency selection, RTC alarms, suspend-to-idle, vibration and board
 
 ## Loading and storage
 
-Builds and Linux archives include the RAM-loading stages. No separate FDL1, FDL2, SML or phone backup is needed. The autonomous Linux archive starts Linux and SSH on its first run. Native Windows execution is unsupported.
+Builds and standalone archives for Linux and Windows include the RAM-loading stages. No separate FDL1, FDL2 or SML files are needed. Qin's first launch prepares its sound settings through the shared [phone-data workflow](/fplinux/guides/device-data/#prepare-data-from-the-phone). USB loading and SSH from Windows have not been verified with Qin 1s+.
 
-The default system runs in RAM. The `microsd-root` profile loads Linux over USB and mounts the system root from an ext4 microSD card. Follow the shared [system-card instructions](/fplinux/guides/microsd-system-card/). Both profiles need the PC loader at every cold start. Internal eMMC access is disabled.
+The default system runs in RAM. The `microsd-root` profile loads Linux over USB and mounts the system root from an ext4 microSD card. Follow the shared [system-card instructions](/fplinux/guides/microsd-system-card/). Both profiles need the PC loader at every cold start. Qin exposes its internal eMMC user area only for reading; the [phone page](/fplinux/phones/xiaomi-qin-1s-plus/#storage-and-power) gives the supported use and limits.
 
-Wi-Fi, Bluetooth, FM, camera capture and mobile service have no supported path. Preparing optional radio data does not enable them.
+Wi-Fi, Bluetooth, FM, camera capture and mobile service are not supported in FPLinux on this platform. Preparing optional radio data does not enable them.
 
 ## Implemented functions
 

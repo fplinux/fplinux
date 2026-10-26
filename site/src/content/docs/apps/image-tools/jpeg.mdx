@@ -54,6 +54,11 @@ A large image makes a large output file: a `2048×2048` JPEG decodes to 8 MiB (4
 
 ### Supported JPEG files
 
+Use a baseline YCbCr JPEG with 4:2:0 or horizontal 4:2:2 sampling, no larger than 2048×2048 pixels and 1 MiB. Progressive JPEG, grayscale, RGB and CMYK files are not supported. Exact restrictions for tools that produce these files follow below.
+
+<details>
+<summary>JPEG format reference</summary>
+
 The decoder accepts baseline JPEG with:
 
 - eight-bit samples, Huffman coding and one interleaved scan;
@@ -70,6 +75,8 @@ DC tables contain 1–12 unique categories from 0–11 and at most four symbols 
 It rejects progressive and extended JPEG, arithmetic coding, grayscale, 4:4:4, 4:1:1 and vertical 4:2:2 sampling, RGB, CMYK and YCCK files, multiple scans, 16-bit quantization tables, files without quantization tables, and data after the end of the image.
 
 A damaged file can pass the first checks and fail during decoding. Do not rely on a particular error for a particular defect.
+
+</details>
 
 ## Encode NV16 as JPEG
 
@@ -143,6 +150,11 @@ The input must be a non-empty regular file of at most 32 MiB. Raw input must con
 
 ## Timing reference
 
+Use `--timing` to inspect where the hardware command spends time. `fplinux-jpeg-cpu` always prints timing. These figures measure the command's work, not the time until an image becomes visible on the screen.
+
+<details>
+<summary>Timing fields and measurement boundaries</summary>
+
 Add `--timing` to `fplinux-jpeg` to print nanosecond wall-clock components, total process user and system CPU time in microseconds, peak resident memory, and page-fault counts. The wall fields have these boundaries:
 
 - `wall_input_ns` reads the input file;
@@ -155,3 +167,5 @@ Add `--timing` to `fplinux-jpeg` to print nanosecond wall-clock components, tota
 Queue and wait measurements are components inside the loop measurements, so they must not be added to `wall_loops_ns`. The warm fields are meaningful only when `--repeat` is greater than one. `user_total_us` and `sys_total_us` are this process's CPU time, not total system CPU load.
 
 The CPU tool always prints wall, user, system, and combined process CPU milliseconds for its input load, codec or filter work, batch, output write, and `measured_stages`. Operation-specific codec/conversion values are components of the batch and must not be added to it.
+
+</details>

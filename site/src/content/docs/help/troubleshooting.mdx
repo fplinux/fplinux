@@ -5,7 +5,7 @@ description: Find the cause of a problem from what you see, and the page that fi
 
 import Key from '../../../components/Key.astro';
 
-Find what you see below. Each entry names the likely cause and links to the page that owns the fix. Messages are quoted as the commands print them; `<target>` stands for your phone's target name, such as `nokia-ta1618`.
+Find what you see below. Each entry names the likely cause and links to the page that owns the fix. Messages may appear in the terminal or the detailed log. The launcher prefixes visible errors with `FPLinux:`; lower-level log entries may use `fplinux run:` or `fplinux ssh:`. `<target>` stands for your phone's target name, such as `nokia-ta1618`.
 
 ## Loading the phone
 
@@ -19,7 +19,7 @@ Find what you see below. Each entry names the likely cause and links to the page
 
 ### The loader keeps waiting for the phone
 
-The phone did not start in boot ROM mode. It was already on, the boot key was not held while you connected USB, or the cable does not carry data. After 300 seconds the loader stops with `fplinux run: BootROM USB was not detected`.
+The phone did not start in boot ROM mode. It was already on, the boot key was not held while you connected USB, or the cable does not carry data. The loader stops when its 300-second connection deadline expires.
 
 Disconnect USB, power the phone off, start the loader again and connect the phone only when it asks, holding the boot key from your [phone page](/fplinux/phones/). See [Run FPLinux](/fplinux/start/run/#the-loader-keeps-waiting-for-the-phone).
 
@@ -37,7 +37,7 @@ Install the USB rules from [Allow USB access](/fplinux/start/run/#allow-usb-acce
 
 ### A load attempt fails
 
-After a failed attempt the loader prints `RAM loader attempt N/3 exited with status …` and waits for a fresh connection. Disconnect the phone, power it off and connect it again in boot ROM mode. After the third failure the loader stops with `fplinux run: RAM loader failed after 3 attempts`. Keep the complete loader output for a [problem report](/fplinux/help/report/).
+Follow the loader's instructions. On Linux, the UMS9117 loader can print `RAM loader attempt N/3 exited with status …` and ask for a fresh connection. Disconnect the phone, power it off and reconnect in boot ROM mode when asked. These attempts share one deadline, so it can stop before all three are used. Qin and ordinary Windows upload failures stop the command instead; start the launcher again before connecting the powered-off phone. Keep the complete loader output for a [problem report](/fplinux/help/report/).
 
 ### The loader stops after the phone was loaded
 
@@ -61,9 +61,9 @@ See [Run FPLinux](/fplinux/start/run/#before-you-start) for the PC requirements.
 
 No load of this target has reached a ready session on this PC, or you passed a different target name. Select the same target, profile and build type. Start the phone with `./fplinux run <target>` if no session exists; this command also prepares required UMS9117 RAM data on first use. See [Run FPLinux](/fplinux/start/run/).
 
-### The launcher says the phone is already running
+### Another launcher is already open
 
-`This phone is already running. Close its existing launcher first.` means another launcher holds the data-directory lock. Exit its SSH shell and close that launcher, then use the same `run` command to reconnect. Exiting the shell leaves Linux running.
+`Another launcher is already open. Close it before starting this one.` means another copy is using the same local data directory. It may be waiting for a phone or serving an SSH shell. Close that launcher before starting another. Exiting an SSH shell leaves Linux running; use the same launcher to reconnect.
 
 ### Preparation asks you to keep the phone powered
 
@@ -105,7 +105,7 @@ Inspect `rc-service fplinux-session status` and `/var/log/fplinux-session.log` f
 
 ### Keys type digits or the wrong case
 
-In graphical text fields, <Key>#</Key> changes the text mode; see [Type text](/fplinux/use/session/#type-text). In Terminal, it cycles letter case, input languages and `123`; see [Type with the keypad](/fplinux/use/terminal/#type-with-the-keypad). Check the phone's input status if no keypad text appears; the [USB shell](/fplinux/use/connect/) remains available for control.
+Press <Key>#</Key> to change letter case or return from `123` to letters. Hold it to switch between letters and digits; hold <Key>\*</Key> to change the input language. These gestures work in graphical text fields and Terminal; see [Type text](/fplinux/use/session/#type-text). Check the phone's input status if no keypad text appears; the [USB shell](/fplinux/use/connect/) remains available for control.
 
 ### A keyboard layout is unavailable in Terminal
 
@@ -115,7 +115,7 @@ The graphical session loads installed keyboard layouts when it starts. Save your
 
 Check the output and automatic-routing entries in your [phone checklist](/fplinux/phones/) first.
 
-- **The volume is low.** Both outputs start at `1` after every boot. Raise them as shown in [Volume](/fplinux/use/audio/#volume).
+- **The volume is low.** UMS9117 headphone and speaker outputs start at `1` after every boot. Qin uses a single Master control. Follow the controls for your platform in [Volume](/fplinux/use/audio/#volume).
 - **Headphones are plugged in.** Where automatic routing is supported, any plug in the socket moves playback away from the speaker.
 - **The speaker controls are missing.** Check the phone's [device data](/fplinux/guides/device-data/) and audio support. UMS9117 RAM launches require all declared data; after explicitly replacing it, start a fresh RAM session. A system card must be rebuilt and written with the new data.
 - **FM radio is on.** A file cannot play while FM radio plays, and the other way round.
@@ -177,22 +177,24 @@ See [What you need](/fplinux/start/build/#what-you-need).
 
 ### setup or a build fails while downloading
 
-Check the network connection and run the command again. Show the failed part of the last run with:
+Show the failed part of the last run:
 
 ```sh title="PC"
 ./fplinux logs show latest --command setup --failed
 ./fplinux logs show latest --command build --failed
 ```
 
-A message such as `NAME SHA256 mismatch: expected …, received …` means the downloaded file differs from the pinned one; the file is not kept. If a repeated attempt fails the same way, [report it](/fplinux/help/report/).
+- **The host cannot be reached or the request times out.** Check the PC's connection and retry after the network or server recovers.
+- **An exact package URL returns 404.** The repository may have removed that package revision. Retrying cannot restore it. Restore the matching [dependency snapshot or release inputs](/fplinux/guides/dependencies/) if you have them; otherwise [report the missing URL](/fplinux/help/report/).
+- **`NAME SHA256 mismatch: expected …, received …`.** The downloaded bytes differ from the pinned input and are rejected. Restore a matching dependency snapshot or report the URL and expected/received hashes. Do not disable verification or substitute a different package version.
 
 ### An offline build stops
 
-`offline execution requires the current pinned environment; run ./fplinux setup online first`. Run `./fplinux setup` once with network access, then build offline again. See [Build without network access](/fplinux/start/build/#build-without-network-access).
+The command names the missing input or reports that the pinned environment is absent or out of date. With matching dependency inputs restored, run `./fplinux setup --offline` to prepare the environment without downloads. A complete local snapshot can also restore its saved environment. Without saved inputs, run `./fplinux setup` online; missing build inputs may then require an online build. See [Dependency snapshots](/fplinux/guides/dependencies/) and [Build without network access](/fplinux/start/build/#build-without-network-access).
 
 ### A build fails or the PC runs out of memory
 
-Read the failed stage with `./fplinux logs`, limit parallel jobs with `--jobs 1` or rebuild the build environment, as described in [Build FPLinux](/fplinux/start/build/#troubleshooting) and [Debugging](/fplinux/develop/debugging/#read-command-logs).
+Read the failed stage with `./fplinux logs` before changing settings. A build that reaches its own memory limit can fail while the PC still has free RAM: raise `--memory-mib` only when the host has enough room. If the whole PC is short of RAM, close other memory-heavy programs or reduce parallel jobs. Recreating the build environment does not fix either memory limit. See [Build FPLinux](/fplinux/start/build/#troubleshooting) and [Debugging](/fplinux/develop/debugging/#read-command-logs).
 
 ### The disk is filling up
 
