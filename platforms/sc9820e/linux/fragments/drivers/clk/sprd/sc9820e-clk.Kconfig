@@ -7,7 +7,8 @@ config SC9820E_GPU_CLOCK
 	depends on ARCH_SC9820E
 	depends on COMMON_CLK && OF && MFD_SYSCON && REGULATOR
 	help
-	  Prepare the GPU domain, AON gate and clock control for TWPLL/6.
+	  Prepare the GPU domain, AON gate and clock control for TWPLL/6,
+	  TWPLL/4 and TWPLL/3 (256, 384 and 512 MHz).
 	  Preserve the shared core voltage, PLL settings and inherited divider.
 	  Restore the owned fields when the consumer releases its clock.
 	  This clock is required by the board's Panfrost GPU device.

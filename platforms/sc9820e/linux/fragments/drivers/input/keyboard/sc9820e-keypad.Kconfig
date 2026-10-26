@@ -7,6 +7,6 @@ config KEYBOARD_SC9820E
 	select MFD_SYSCON
 	help
 	  Enable the SC9820E v1 hardware matrix keypad controller.
-	  The board supplies its matrix dimensions, hardware masks, debounce
-	  count and Linux keymap through the device tree. The controller uses
+	  The board supplies its matrix dimensions, debounce count and Linux
+	  keymap through the device tree. The controller uses
 	  atomic SET/CLEAR aliases for its AON reset and clock gate bits.

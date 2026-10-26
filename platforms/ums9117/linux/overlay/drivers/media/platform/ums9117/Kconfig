@@ -15,7 +15,7 @@ config VIDEO_UMS9117_ROTA
 	  the hardware's packed RGB, grayscale, and semiplanar YUV formats.
 
 config VIDEO_UMS9117_JPEG
-	bool "Unisoc UMS9117 JPEG decoder"
+	bool "Unisoc UMS9117 JPEG, scaling and camera engine"
 	depends on V4L_MEM2MEM_DRIVERS
 	depends on VIDEO_DEV
 	depends on ARCH_UMS9117 || COMPILE_TEST
