@@ -56,7 +56,7 @@ def test_emmc_workload_requires_exact_local_originals_without_downloads(
         3,
         "downloads/sources/python_ext4/ext4.whl",
     )
-    saved = tmp_path / ".cache/downloads/sources/python_ext4/ext4.whl"
+    saved = tmp_path / ".data/downloads/sources/python_ext4/ext4.whl"
     if original_state != "missing":
         saved.parent.mkdir(parents=True)
         saved.write_bytes(b"abc" if original_state == "ready" else b"bad")
@@ -68,7 +68,7 @@ def test_emmc_workload_requires_exact_local_originals_without_downloads(
     def run_workload(
         _stage: output.Stage, _workspace: Path, command: list[str], **options: object
     ) -> None:
-        assert options["downloads"] == tmp_path / ".cache/downloads"
+        assert options["downloads"] == tmp_path / ".data/downloads"
         commands.append(command)
 
     with (
@@ -249,7 +249,7 @@ class SelectedTestRunTests:
         """Success, failure and interruption preserve check evidence and release staged sources."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            cache = root / ".cache"
+            cache = root / ".data"
             recipes = [
                 CheckReceiptRecipe(scope, "a" * 64, "b" * 64, "c" * 64)
                 for scope in ("python", "tests")
@@ -266,6 +266,7 @@ class SelectedTestRunTests:
             with mock.patch.object(common, "ROOT", root):
                 snapshot = workspace.workspace_snapshot([("tests/small/test_example.py", fixture)])
             with (
+                mock.patch.object(common, "ROOT", root),
                 mock.patch.object(workspace_staging, "ROOT", root),
                 mock.patch.object(output, "ROOT", root),
                 mock.patch.object(
@@ -276,7 +277,7 @@ class SelectedTestRunTests:
                     "require_environment",
                     return_value=(
                         "kern",
-                        root / ".cache/environment/rootfs",
+                        root / ".data/environment/rootfs",
                         EnvironmentState("b" * 64, "c" * 64, "d" * 64),
                     ),
                 ),
@@ -359,7 +360,7 @@ class SelectedTestRunTests:
         module = tmp_path / "workspace/tests/host_process/cache/test_prune_rootfs_ownership.py"
         module.parent.mkdir(parents=True)
         module.touch()
-        cache = tmp_path / ".cache"
+        cache = tmp_path / ".data"
         original = CheckReceiptRecipe("tests", "a" * 64, "b" * 64, "c" * 64)
         changed = replace(original, closure_digest="d" * 64)
         python = replace(changed, scope="python")
@@ -415,7 +416,7 @@ class SelectedTestRunTests:
             tmp_path / "scripts/fplinux_cli",
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
         )
-        cache = tmp_path / ".cache"
+        cache = tmp_path / ".data"
         with mock.patch.object(common, "ROOT", tmp_path):
             original = CheckReceiptRecipe(
                 "tests", "a" * 64, check_orchestration_recipe_digest("b" * 64), "c" * 64

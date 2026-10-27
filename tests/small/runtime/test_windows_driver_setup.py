@@ -285,6 +285,7 @@ def test_native_usb_acquisition_controls_progress_and_driver_setup(
             windows_host.boot_archive(
                 admitted_windows(root),
                 capsule,
+                log=root / "logs/runtime.log",
                 session_root=root / "data/session",
                 events=events.append,
             )
@@ -309,6 +310,7 @@ def test_native_usb_acquisition_controls_progress_and_driver_setup(
             windows_host.boot_archive(
                 admitted_windows(root),
                 capsule,
+                log=root / "logs/runtime.log",
                 session_root=root / "data/session",
                 events=events.append,
             )

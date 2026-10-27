@@ -118,8 +118,8 @@ def test_public_original_import_retains_exact_source_originals_outputs_and_priva
     for path in phone.rglob("*"):
         assert path.stat().st_mode & 0o777 == (0o700 if path.is_dir() else 0o600)
     assert phone.stat().st_mode & 0o777 == 0o700
-    assert not (device_data_cli.root / ".cache/kern").exists()
-    assert not (device_data_cli.root / ".cache/out").exists()
+    assert not (device_data_cli.root / ".data/kern").exists()
+    assert not (device_data_cli.root / ".data/out").exists()
     assert "./fplinux run example" in result.stdout
 
 
@@ -158,7 +158,7 @@ def test_public_original_import_rejects_mismatched_or_incomplete_source_before_s
     assert result.returncode == 1, result.stderr
     assert message in result.stderr
     assert not device_data_cli.phone().exists()
-    assert not (device_data_cli.root / ".cache/out").exists()
+    assert not (device_data_cli.root / ".data/out").exists()
 
 
 def test_public_original_import_materialization_failure_preserves_previous_phone_data(
@@ -267,8 +267,8 @@ def test_public_original_target_rejects_unsupported_modes_before_source_or_loade
     assert result.returncode == status, result.stderr
     assert message in result.stderr
     assert "Traceback" not in result.stderr
-    assert not (device_data_cli.root / ".cache/device-data").exists()
-    assert not (device_data_cli.root / ".cache/out").exists()
+    assert not (device_data_cli.root / ".data/device-data").exists()
+    assert not (device_data_cli.root / ".data/out").exists()
     assert not (device_data_cli.root / "events.jsonl").exists()
 
 
@@ -286,7 +286,7 @@ def test_public_nand_target_rejects_original_manifest_without_changing_its_sourc
 
     assert result.returncode == 1, result.stderr
     assert "requires physical NAND data and does not support --from-originals" in result.stderr
-    assert not (device_data_cli.root / ".cache/device-data").exists()
+    assert not (device_data_cli.root / ".data/device-data").exists()
 
 
 @pytest.fixture
@@ -397,4 +397,4 @@ def test_public_nand_import_retains_canonical_source_and_only_known_acquisition_
     for path in store.rglob("*"):
         assert path.stat().st_mode & 0o777 == (0o700 if path.is_dir() else 0o600)
     assert store.stat().st_mode & 0o777 == 0o700
-    assert not (root / ".cache/out").exists()
+    assert not (root / ".data/out").exists()

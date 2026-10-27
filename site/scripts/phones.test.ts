@@ -145,3 +145,23 @@ void test("documentation receipts track phone sources and retain unrelated drive
 		writeFileSync(filename, contents);
 	}
 });
+
+void test("documentation receipts omit reserved private trees while keeping ordinary sources", async (context) => {
+	const root = mkdtempSync(path.join(tmpdir(), "fplinux-doc-data-"));
+	context.after(() => {
+		rmSync(root, { force: true, recursive: true });
+	});
+	phoneCheckout(root);
+	const original = await documentationDigest(root);
+	for (const relative of ["site/.data/command.log", "site/.private/probe.c"]) {
+		const filename = path.join(root, relative);
+		mkdirSync(path.dirname(filename), { recursive: true });
+		writeFileSync(filename, "local state\n");
+	}
+	assert.equal(await documentationDigest(root), original);
+	writeFileSync(
+		path.join(root, "site/working-data-guide.mdx"),
+		"# A public guide\n"
+	);
+	assert.notEqual(await documentationDigest(root), original);
+});

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fplinux_cli.common import ROOT, fail
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.environment.definition import environment_recipe_digest, load_environment_lock
 from fplinux_cli.environment.kern import kern_box_name, kern_environment, require_kern
 from fplinux_cli.environment.runtime import (
@@ -55,12 +56,13 @@ def check_commit_message(message_file: str) -> None:
     if config.is_symlink() or not config.is_file():
         fail("commitlint configuration is missing or invalid")
     environment_lock = load_environment_lock()
-    kern = require_kern(environment_lock)
+    cache = data_root(ROOT)
+    kern = require_kern(environment_lock, cache=cache)
     recipe = environment_recipe_digest(environment_lock)
-    environment_state = current_environment_state(kern, recipe)
+    environment_state = current_environment_state(kern, recipe, cache=cache)
     if environment_state is None:
         fail("commit hook requires the current build environment; run ./fplinux setup")
-    rootfs = environment_rootfs(ROOT / ".cache", environment_state)
+    rootfs = environment_rootfs(cache, environment_state)
     try:
         result = subprocess.run(
             [
@@ -89,7 +91,7 @@ def check_commit_message(message_file: str) -> None:
                 "commitlint < /message",
             ],
             cwd=ROOT,
-            env=kern_environment(),
+            env=kern_environment(cache=cache),
             check=False,
             timeout=_COMMIT_MESSAGE_TIMEOUT,
         )

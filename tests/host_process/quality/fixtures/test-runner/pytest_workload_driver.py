@@ -23,8 +23,11 @@ if TYPE_CHECKING:
 def prepared_host(
     workspace: Path,
     reporter: RunReporter,  # noqa: ARG001 -- retain the dependency preparation interface.
+    *,
+    cache: Path,
 ) -> Iterator[tuple[Path, dict[str, str]]]:
     """Reuse the executing pytest dependencies without installing a host environment."""
+    assert cache == workspace / ".data"
     environment = testing.pytest_environment()
     environment["FPLINUX_TEST_RUNTIME"] = "host"
     environment["PYTHONNOUSERSITE"] = "1"

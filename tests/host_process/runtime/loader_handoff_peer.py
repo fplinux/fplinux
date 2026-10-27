@@ -139,7 +139,9 @@ def main() -> None:
         ) as events,
     ):
         admitted = bundle_runtime.ValidatedBundle(root, manifest, "8" * 64, "9" * 64, None)
-        handoff = runner.run_bundle(admitted, events.emit, session_root=runtime_root)
+        handoff = runner.run_bundle(
+            admitted, events.emit, session_root=runtime_root, log=runtime_root / "runtime.log"
+        )
     transport, ready = handoff
     if mode == "noninteractive":
         print("No interactive terminal is attached; the loader is complete.", flush=True)

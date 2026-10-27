@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from fplinux_cli.build.phone_data import preparation_recipe
 from fplinux_cli.build.workflow import build, prepare_host_tool
 from fplinux_cli.common import ROOT, fail
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.device_data.board_report import BOARD_REPORT_MODULE, write_board_report
 from fplinux_cli.device_data.formats import AudioProfileContext
 from fplinux_cli.device_data.prepare import (
@@ -73,6 +74,7 @@ def _saved_source_tools(
     platform: str,
     *,
     reporter: RunReporter,
+    cache: Path,
     board_report: bool = False,
 ) -> Iterator[DeviceDataTools]:
     """Prepare only the native tools needed by this explicit saved-source command."""
@@ -82,10 +84,12 @@ def _saved_source_tools(
     if not required:
         yield DeviceDataTools()
         return
-    with tempfile.TemporaryDirectory(prefix="device-data-host-", dir=ROOT / ".cache") as temporary:
+    with tempfile.TemporaryDirectory(prefix="device-data-host-", dir=cache) as temporary:
         host_tools = Path(temporary)
         for tool in required:
-            prepare_host_tool(spec.target, platform, tool, host_tools, reporter=reporter)
+            prepare_host_tool(
+                spec.target, platform, tool, host_tools, reporter=reporter, cache=cache
+            )
         yield DeviceDataTools(host_tools=host_tools)
 
 
@@ -113,7 +117,10 @@ def prepare_device_data(  # noqa: PLR0913 -- explicit source, build and loader c
     elif declaration.get("originals_parser") is None and from_originals is not None:
         fail(f"target {target} requires physical NAND data and does not support --from-originals")
     spec = _target_spec(target, config)
-    reporter = RunReporter.create("device-data", target=target, verbose=False)
+    cache = data_root(ROOT)
+    reporter = RunReporter.create(
+        "device-data", target=target, verbose=False, selected_data_root=cache
+    )
     runtime_preparation = from_originals is None and (from_dump is None or "emmc" in config)
     if runtime_preparation:
         with reporter.stage("build", show_tail=False):
@@ -143,7 +150,9 @@ def prepare_device_data(  # noqa: PLR0913 -- explicit source, build and loader c
             )
     elif from_dump is not None:
         with (
-            _saved_source_tools(spec, str(config["platform"]), reporter=reporter) as tools,
+            _saved_source_tools(
+                spec, str(config["platform"]), reporter=reporter, cache=cache
+            ) as tools,
             locked_phone_store(target, root=phone_data) as store,
             reporter.stage("prepare"),
         ):
@@ -178,15 +187,20 @@ def report_device_data(target: str, *, from_dump: Path) -> None:
     if extractor.is_symlink() or not extractor.is_file():
         fail(f"board reports are not supported for platform {platform}")
     spec = _target_spec(target, config)
-    reporter = RunReporter.create("device-data", target=target, verbose=False)
-    cache = _require_directory(ROOT / ".cache", "cache directory")
+    cache = data_root(ROOT)
+    reporter = RunReporter.create(
+        "device-data", target=target, verbose=False, selected_data_root=cache
+    )
+    cache = _require_directory(cache, "managed data directory")
     diagnostics = _require_directory(cache / "diagnostics", "diagnostics directory")
     reports = _require_directory(diagnostics / "device-data", "device-data reports directory")
     target_reports = _require_directory(reports / target, f"board reports for {target}")
     destination = Path(tempfile.mkdtemp(prefix="report-", dir=target_reports))
     try:
         with (
-            _saved_source_tools(spec, platform, reporter=reporter, board_report=True) as tools,
+            _saved_source_tools(
+                spec, platform, reporter=reporter, cache=cache, board_report=True
+            ) as tools,
             reporter.stage("report"),
         ):
             report = write_board_report(spec, from_dump, destination, tools, extractor=extractor)

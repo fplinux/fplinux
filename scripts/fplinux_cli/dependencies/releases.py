@@ -10,6 +10,7 @@ from pathlib import Path
 from fplinux_cli import common
 from fplinux_cli.artifacts.release import capture_public_sources
 from fplinux_cli.common import fail
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.dependencies.distribution import DEPENDENCY_METADATA, dependency_metadata
 from fplinux_cli.dependencies.transport import transport_records
 from fplinux_cli.dependencies.workflow import import_dependencies, restore_dependencies
@@ -23,7 +24,7 @@ def restore_release(release_id: str) -> None:
     expected = capture_public_sources().release
     if expected.release_id != release_id:
         fail("selected release does not match this source checkout")
-    cache = common.ROOT / ".cache"
+    cache = data_root(common.ROOT)
     cache.mkdir(exist_ok=True)
     base = f"https://github.com/fplinux/fplinux/releases/download/{expected.tag}/"
     with tempfile.TemporaryDirectory(prefix=".release-download-", dir=cache) as temporary:

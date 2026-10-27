@@ -30,7 +30,7 @@ def test_ready_setup_finishes_its_reporter(tmp_path: Path) -> None:
         mock.patch.object(env_setup, "install_git_hooks"),
     ):
         env_setup.prepare_setup()
-    paths = list((tmp_path / ".cache/logs/setup").glob("*/run.json"))
+    paths = list((tmp_path / ".data/logs/setup").glob("*/run.json"))
     assert len(paths) == 1
     assert json.loads(paths[0].read_text())["status"] == "success"
 
@@ -59,6 +59,7 @@ def test_tool_installation_reserves_eight_gib_in_the_kern_command(tmp_path: Path
             recipe="a" * 64,
             generation="b" * 64,
             reporter=reporter,
+            cache=tmp_path / ".data",
         )
     commands = [
         call.args[0]

@@ -16,7 +16,24 @@ FPLinux is built from source on your PC. One command builds a complete image for
 
 Check the phone's [support status](/fplinux/phones/#support-status), boot key and storage limits before building. The examples below use `nokia-ta1618`; replace it with your phone's target.
 
-FPLinux keeps one prepared Alpine root filesystem inside the checkout and runs it with its pinned Kern runtime. Builds, source checks and formatting use this filesystem read-only, with writable files kept in their own working directories.
+FPLinux keeps one prepared Alpine root filesystem in its working data directory and runs it with its pinned Kern runtime. Builds, source checks and formatting use this filesystem read-only, with writable files kept in their own working directories.
+
+## Working data directory
+
+FPLinux keeps downloads, the prepared environment, build results, logs and connection state under `.data/` beside the checkout. Standalone archives also use `.data/` beside their launcher. Public commands manage this directory; keep your source files and experiments outside it.
+
+Set `FPLINUX_DATA_DIR` before setup to choose another location, for example a directory on a larger disk:
+
+```sh title="PC"
+export FPLINUX_DATA_DIR="$HOME/FPLinuxData"
+./fplinux data-path
+```
+
+The value can be an absolute path or a path relative to the checkout or extracted archive. It is independent of the terminal's current directory. `data-path` prints the selected absolute path without preparing the environment; `data-path --check` also checks that the location does not overlap source files or local private material. Keep checkout working data outside `site/`: its tools treat that whole directory as website input. An empty value is an error.
+
+Keep the same location while using or reconnecting to a running phone. Changing it selects another store; it does not move files or saved connections. Explicit file paths passed to commands keep their own meaning. Your [personal phone data store](/fplinux/guides/device-data/#where-phone-data-is-stored) remains separate, so replacing a checkout or archive does not require another compatible phone backup.
+
+Use [`prune`](#free-disk-space) to remove disposable files. Removing the entire working directory also removes the prepared environment and saved connection keys.
 
 ## Build your first image
 
@@ -48,7 +65,7 @@ FPLinux keeps one prepared Alpine root filesystem inside the checkout and runs i
 
    ```text title="Output"
    build nokia-ta1618 --build-type release: OK
-   output: .cache/out/nokia-ta1618/…
+   output: .data/out/nokia-ta1618/…
    ramboot.bin SHA256: …
    ```
 

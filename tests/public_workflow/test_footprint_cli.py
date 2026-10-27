@@ -52,7 +52,7 @@ class FootprintCli:
         initramfs_delivery: str | None = None,
     ) -> Path:
         """Publish independent archive fixtures with a complete current-bundle manifest."""
-        output = self.root / ".cache/out"
+        output = self.root / ".data/out"
         output.mkdir(parents=True, exist_ok=True)
         staging = create_bundle_staging(output, "example", profile, build_type=build_type)
         bundle = FootprintFixture(staging).bundle(
@@ -235,7 +235,7 @@ class FootprintCliTests:
         self, footprint_cli: FootprintCli
     ) -> None:
         """Individually valid artifacts cannot report the wrong embedded boot content."""
-        output = footprint_cli.root / ".cache/out"
+        output = footprint_cli.root / ".data/out"
         output.mkdir(parents=True)
         staging = create_bundle_staging(output, "example")
         fixture = FootprintFixture(staging)
@@ -290,7 +290,7 @@ class FootprintCliTests:
         assert (result.returncode) == (0), result.stderr
         assert ("Kernel zImage delta: 1,024 B (1.0 KiB)") in (result.stdout)
         assert ("changed: example") in (result.stdout)
-        assert not ((footprint_cli.root / ".cache").exists())
+        assert not ((footprint_cli.root / ".data").exists())
 
     @pytest.mark.parametrize(
         "name",
@@ -312,4 +312,4 @@ class FootprintCliTests:
         assert (result.returncode) == (1), result.stderr
         assert (result.stdout) == ("")
         assert ("Traceback") not in (result.stderr)
-        assert not ((footprint_cli.root / ".cache").exists())
+        assert not ((footprint_cli.root / ".data").exists())

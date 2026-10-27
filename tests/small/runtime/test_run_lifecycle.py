@@ -16,6 +16,7 @@ from fplinux_cli import common
 from fplinux_cli.artifacts.bundles import publish_current_bundle
 from fplinux_cli.manifests import targets
 from fplinux_cli.runtime import bundle_session, runner
+from fplinux_cli.runtime.data_paths import checkout_runtime_root
 
 from tests.small.build.command_fixtures import (
     command_bundle as command_bundle,  # noqa: PLC0414 -- pytest fixture export.
@@ -58,9 +59,9 @@ class RunLifecycleTests:
             "--bundle",
             str(command_bundle.bundle_path),
             "--data-root",
-            str(command_bundle.root / ".cache/runtime/phone"),
+            str(checkout_runtime_root(command_bundle.cache, command_bundle.root, "phone")),
             "--log-root",
-            str(command_bundle.root / ".cache/logs/run/phone"),
+            str(command_bundle.cache / "logs/run/phone"),
         ]
         if loader_trace:
             expected.append("--loader-trace")
@@ -159,10 +160,10 @@ class RunLifecycleTests:
         arguments = execute.call_args.args[1]
         assert arguments[2] == str(profile_path / "fplinux.py")
         assert arguments[5] == str(profile_path)
-        assert arguments[7] == str(command_bundle.root / ".cache/runtime/phone")
-        assert arguments[9] == str(
-            command_bundle.root / ".cache/logs/run/phone/profiles/microsd-uboot"
+        assert arguments[7] == str(
+            checkout_runtime_root(command_bundle.cache, command_bundle.root, "phone")
         )
+        assert arguments[9] == str(command_bundle.cache / "logs/run/phone/profiles/microsd-uboot")
 
     def test_stale_build_only_profile_bundle_remains_non_runnable(
         self, command_bundle: CommandBundleContext

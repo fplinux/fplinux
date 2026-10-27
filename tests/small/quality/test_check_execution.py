@@ -237,7 +237,7 @@ class KernelLocalInputTests:
             ]
         )
         root = tmp_path / "live"
-        cache = root / ".cache"
+        cache = root / ".data"
         environment = EnvironmentState("b" * 64, "c" * 64, "d" * 64)
         publish_environment_state(cache, environment)
         commands: list[list[str]] = []
@@ -304,7 +304,7 @@ class KernelLocalInputTests:
                 mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")),
             ):
                 checks.check(["kernel"], profile="microsd-uboot", jobs=2)
-            stage_workspace.assert_called_once_with(snapshot)
+            stage_workspace.assert_called_once_with(snapshot, selected_data_root=cache)
             require_environment.assert_called_once()
         assert len(commands) == 2
 

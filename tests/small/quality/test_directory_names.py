@@ -139,8 +139,8 @@ def test_scoped_inventory_bypasses_directory_policy_and_source_checks_binary_res
 ) -> None:
     """The source-wide gate includes resources and excludes ignored local files."""
     run_process(["git", "init", "--quiet", str(tmp_path)], name="source Git setup", timeout=10)
-    (tmp_path / ".gitignore").write_text(".cache/\nignored_dir/\n", encoding="utf-8")
-    for directory in ("resource_names", ".cache", "ignored_dir"):
+    (tmp_path / ".gitignore").write_text(".data/\nignored_dir/\n", encoding="utf-8")
+    for directory in ("resource_names", ".data", "ignored_dir"):
         path = tmp_path / directory / "image.png"
         path.parent.mkdir()
         path.write_bytes(b"\x89PNG\x00\xff")

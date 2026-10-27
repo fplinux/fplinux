@@ -16,7 +16,9 @@ from pathlib import Path, PurePosixPath
 
 from fplinux_cli import common
 from fplinux_cli.common import fail
+from fplinux_cli.data_paths import DATA_ENV, data_root
 from fplinux_cli.packaging.distribution import distribution_matrix, distribution_records
+from fplinux_cli.runtime.data_paths import archive_runtime_root
 
 
 def _require_ordinary_account(host: str) -> None:
@@ -86,15 +88,16 @@ def _stop_launcher(process: subprocess.Popen[bytes], host: str) -> None:
         fail("native launcher did not stop after the no-phone smoke")
 
 
-def _launch_to_invitation(root: Path, host: str, *, attempt: int) -> None:
-    events = root / f"smoke-events-{attempt}.jsonl"
-    output = root / f"smoke-output-{attempt}.txt"
+def _launch_to_invitation(root: Path, host: str, scope: Path, *, attempt: int) -> None:
+    events = scope / f"smoke-events-{attempt}.jsonl"
+    output = scope / f"smoke-output-{attempt}.txt"
     if host == "windows":
         command = ["cmd.exe", "/d", "/c", str(root / "Run.cmd"), "--events", str(events)]
     else:
         command = ["sh", str(root / "Run.sh"), "--events", str(events)]
     environment = os.environ.copy()
-    environment.update(TMP=str(root / "temp"), TEMP=str(root / "temp"))
+    environment[DATA_ENV] = str(data_root(root, environment={}))
+    environment.update(TMP=str(scope / "temp"), TEMP=str(scope / "temp"))
     creation_flags = 0
     if sys.platform == "win32":
         creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
@@ -132,7 +135,7 @@ def _launch_to_invitation(root: Path, host: str, *, attempt: int) -> None:
         if diagnostic:
             failure = f"{failure}:\n{diagnostic[-4096:]}"
         fail(failure)
-    if len(list((root / "logs").glob("*/runtime.log"))) != attempt:
+    if len(list((scope / "logs").glob("*/runtime.log"))) != attempt:
         fail("native launcher did not create a separate runtime log on each launch")
 
 
@@ -141,14 +144,15 @@ def _smoke_archive(archive: Path, workspace: Path, host: str) -> None:
     root.mkdir()
     _extract_archive(archive, root)
     runtime = json.loads((root / "runtime-manifest.json").read_bytes())
-    storage_paths = ["data", "logs", "data/session", "temp"]
+    scope = archive_runtime_root(data_root(root, environment={}), root)
+    storage_paths = [scope, scope / "logs", scope / "session", scope / "temp"]
     if runtime["device_data"] is not None:
-        storage_paths.append("data/reader/session")
-    for relative in storage_paths:
-        (root / relative).mkdir(parents=True, exist_ok=True)
+        storage_paths.append(scope / "reader/session")
+    for path in storage_paths:
+        path.mkdir(parents=True, exist_ok=True)
     storage_probe = Path(__file__).with_name("smoke") / "storage.py"
     for attempt in (1, 2):
-        _launch_to_invitation(root, host, attempt=attempt)
+        _launch_to_invitation(root, host, scope, attempt=attempt)
         result = subprocess.run(
             [
                 *_native_python(root, host),
@@ -156,7 +160,7 @@ def _smoke_archive(archive: Path, workspace: Path, host: str) -> None:
                 "-I",
                 str(storage_probe),
                 str(root),
-                *storage_paths,
+                *(str(path) for path in storage_paths),
             ],
             cwd=root,
             check=False,

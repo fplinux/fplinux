@@ -344,6 +344,7 @@ def inspect_distribution(directory: Path) -> None:
     )
     from fplinux_cli.packaging.distribution import (  # noqa: PLC0415 -- distribution backend.
         distribution_matrix,
+        require_public_runtime_files,
         source_distribution,
     )
 
@@ -423,13 +424,7 @@ def inspect_distribution(directory: Path) -> None:
                 if f"\n  {source.name}\n" not in readme:
                     fail(f"distribution runtime names another source companion: {runtime.name}")
                 members = {name.removeprefix(prefix) for name in files}
-                if members & {
-                    "device-data.cpio",
-                    "device-data-manifest.json",
-                    "pinmap.bin",
-                    "keymap.bin",
-                } or any(name.startswith(("data/", "logs/", ".cache/")) for name in members):
-                    fail(f"distribution runtime contains prepared personal data: {runtime.name}")
+                require_public_runtime_files(members, runtime.name)
             print(f"runtime: {runtime.name}; pairing: OK")
         for name in expected_names - {"SHA256SUMS"}:
             if (directory / name).stat().st_size >= 2 * 1024**3:

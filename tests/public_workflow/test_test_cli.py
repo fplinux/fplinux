@@ -32,7 +32,7 @@ class TestCommandCliTests:
         [
             ("--tier", "unknown"),
             ("tests.small.environment.test_common", "--tier", "small"),
-            (".cache.private_test",),
+            (".data.private_test",),
             ("tests.small.environment.test_common..method",),
             ("tests/small/../../private_test.py",),
             ("tests/small/../host_process",),

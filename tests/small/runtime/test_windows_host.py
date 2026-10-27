@@ -187,6 +187,7 @@ def test_host_preparation_progress_precedes_a_windows_discovery_timeout(
         windows_host.boot_archive(
             admitted_windows(root),
             capsule,
+            log=root / "logs/runtime.log",
             session_root=root / "data/session",
             events=events.append,
         )

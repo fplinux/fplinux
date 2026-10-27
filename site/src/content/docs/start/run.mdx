@@ -89,9 +89,9 @@ Use `console` when you require an existing session, run one command, copy files 
 
 ## Phone data and logs
 
-The backup and prepared data use the [personal phone data store](/fplinux/guides/device-data/#where-phone-data-is-stored), shared with other checkouts and archives. Use each store with the same physical phone; `--phone-data PATH` selects a separate store. Private connection keys stay in `.cache/runtime/<target>/session/`, separate from the shared data.
+The backup and prepared data use the [personal phone data store](/fplinux/guides/device-data/#where-phone-data-is-stored), shared with other checkouts and archives. Use each store with the same physical phone; `--phone-data PATH` selects a separate store. Private connection keys stay in the selected [working data directory](/fplinux/start/build/#working-data-directory), separate from the shared data and from other installations' sessions.
 
-Each launch prints its log path. Its `runtime.log` and `run.json` are kept under `.cache/logs/run/<target>/`, with an additional `profiles/<profile>/` directory for a selected profile. Interactive SSH commands and terminal output are not recorded. Only one launcher can use the same target data directory at a time; close the active launcher before reopening it.
+Each launch prints its log path. Its `runtime.log` and `run.json` are kept under `logs/run/<target>/` in the working data directory, with an additional `profiles/<profile>/` directory for a selected profile. Interactive SSH commands and terminal output are not recorded. Only one launcher can use the same target session directory at a time; close the active launcher before reopening it.
 
 ## Check which build is running
 

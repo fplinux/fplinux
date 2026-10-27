@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from fplinux_cli.build import DEFAULT_BUILD_MEMORY_MIB
 from fplinux_cli.cache.prune.operations import discard_superseded_profile_logs
 from fplinux_cli.common import ROOT, fail, load_toml
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.dependencies.inputs import acquire_inputs, aport_source_inputs, source_input
 from fplinux_cli.environment.definition import environment_recipe_digest, load_environment_lock
 from fplinux_cli.environment.kern import (
@@ -91,7 +92,7 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
             publish_success_receipt(cache, recipes[scope])
 
     if "tests" in missing:
-        run_test_workload(reporter, workspace, kern=kern, rootfs=rootfs, names=[])
+        run_test_workload(reporter, workspace, kern=kern, rootfs=rootfs, names=[], cache=cache)
         publish_success_receipt(cache, recipes["tests"])
 
     if "kernel" not in missing:
@@ -112,7 +113,7 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
             cache,
             offline=True,
         )
-    environment = kern_environment()
+    environment = kern_environment(cache=cache)
     log_mount = ["--volume", f"{container_logs}:/logs"]
     log_environment = reporter.container_environment("/logs/kernel")
     log_environment["FPLINUX_LOG_DISPLAY_ROOT"] = (
@@ -238,11 +239,13 @@ def check(  # noqa: PLR0913 -- public check options stay explicit.
     if jobs > 1 and verbose:
         fail("--verbose cannot be combined with --jobs greater than 1")
 
+    cache = data_root(ROOT)
     reporter = RunReporter.create(
         "check",
         target=None if profile is None else f"profiles/{profile}",
         build_type=build_type,
         verbose=verbose,
+        selected_data_root=cache,
     )
     if "repository" in selected:
         check_git_diff(reporter)
@@ -252,9 +255,10 @@ def check(  # noqa: PLR0913 -- public check options stay explicit.
         return
 
     with reporter.stage("workspace-snapshot"):
-        snapshot = quality_workspace_snapshot(enforce_source_policy="source" in selected)
+        snapshot = quality_workspace_snapshot(
+            enforce_source_policy="source" in selected, selected_data_root=cache
+        )
 
-    cache = ROOT / ".cache"
     cacheable_scopes = tuple(scope for scope in selected if scope != "repository")
     environment_lock = load_environment_lock()
     environment_recipe = environment_recipe_digest(environment_lock)
@@ -290,7 +294,7 @@ def check(  # noqa: PLR0913 -- public check options stay explicit.
             reporter.finish()
             return
 
-    kern, rootfs, current_environment = require_environment()
+    kern, rootfs, current_environment = require_environment(cache=cache)
 
     recipes = receipt_recipes(current_environment.generation)
     missing = tuple(
@@ -315,7 +319,7 @@ def check(  # noqa: PLR0913 -- public check options stay explicit.
         analyzer_cache[name] = source
 
     with reporter.stage("workspace"):
-        workspace = stage_quality_workspace_snapshot(snapshot)
+        workspace = stage_quality_workspace_snapshot(snapshot, selected_data_root=cache)
 
     try:
         _run_missing_checks(
@@ -332,7 +336,7 @@ def check(  # noqa: PLR0913 -- public check options stay explicit.
             jobs=jobs,
         )
     finally:
-        discard_staged_quality_workspace_snapshot(snapshot, workspace)
+        discard_staged_quality_workspace_snapshot(snapshot, workspace, selected_data_root=cache)
     print("check: OK")
     reporter.finish()
     if profile is not None:

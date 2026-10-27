@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from fplinux_cli import common
 from fplinux_cli.common import fail
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.reporting.run import RunReporter, run_entrypoint
 
 if TYPE_CHECKING:
@@ -172,7 +173,10 @@ def pytest_commands(  # noqa: PLR0913 -- selection, output and instrumentation p
     sanitize: bool = False,
 ) -> list[tuple[str, list[str], int]]:
     """Use one time budget per selected test tier and retain discovery order."""
-    cache_dir = Path(os.environ.get("FPLINUX_LOG_ROOT", ".cache")) / "pytest-cache"
+    log_root = os.environ.get("FPLINUX_LOG_ROOT")
+    cache_dir = (
+        Path(log_root) if log_root is not None else data_root(common.ROOT)
+    ) / "pytest-cache"
     budgets = TEST_TIERS | ({"host_tool": 2700, "host_process": 450} if sanitize else {})
 
     def command(nodes: list[str]) -> list[str]:
@@ -265,9 +269,12 @@ def run_test_workload(  # noqa: PLR0913 -- public selection and runtime inputs s
     verbose: bool = False,
     failfast: bool = False,
     sanitize: bool = False,
+    cache: Path | None = None,
 ) -> None:
     """Share tier budgets between the quality rootfs and real host namespaces."""
     from .runtime import run_quality_command  # noqa: PLC0415 -- workload-only dependency.
+
+    cache = data_root(common.ROOT) if cache is None else cache
 
     if sanitize:
         with reporter.stage("sanitizer-canaries") as stage:
@@ -307,8 +314,8 @@ def run_test_workload(  # noqa: PLR0913 -- public selection and runtime inputs s
 
         with reporter.stage("phone-data-inputs"):
             for source in preparation_sources(workspace):
-                source.acquire(common.ROOT / ".cache", offline=True)
-        downloads = common.ROOT / ".cache/downloads"
+                source.acquire(cache, offline=True)
+        downloads = cache / "downloads"
     with ExitStack() as resources:
         host_python: Path | None = None
         host_environment: dict[str, str] | None = None
@@ -318,7 +325,7 @@ def run_test_workload(  # noqa: PLR0913 -- public selection and runtime inputs s
             )
 
             host_python, host_environment = resources.enter_context(
-                host_pytest_environment(workspace, reporter)
+                host_pytest_environment(workspace, reporter, cache=cache)
             )
         workloads = pytest_commands(
             names,
@@ -444,12 +451,15 @@ def run_tests(
         stage_quality_workspace_snapshot,
     )
 
-    reporter = RunReporter.create("test", target=None, verbose=verbose)
+    cache = data_root(common.ROOT)
+    reporter = RunReporter.create("test", target=None, verbose=verbose, selected_data_root=cache)
     with reporter.stage("workspace-snapshot"):
-        snapshot = quality_workspace_snapshot(enforce_source_policy=False)
-    kern, rootfs, _state = require_environment()
+        snapshot = quality_workspace_snapshot(
+            enforce_source_policy=False, selected_data_root=cache
+        )
+    kern, rootfs, _state = require_environment(cache=cache)
     with reporter.stage("workspace"):
-        workspace = stage_quality_workspace_snapshot(snapshot)
+        workspace = stage_quality_workspace_snapshot(snapshot, selected_data_root=cache)
     try:
         run_test_workload(
             reporter,
@@ -461,9 +471,10 @@ def run_tests(
             verbose=verbose,
             failfast=failfast,
             sanitize=sanitize,
+            cache=cache,
         )
     finally:
-        discard_staged_quality_workspace_snapshot(snapshot, workspace)
+        discard_staged_quality_workspace_snapshot(snapshot, workspace, selected_data_root=cache)
     print("test: OK")
     reporter.finish()
 

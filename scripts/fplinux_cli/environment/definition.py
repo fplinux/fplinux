@@ -30,6 +30,7 @@ ENVIRONMENT_RECIPE_INPUTS = (
     "scripts/fplinux_cli/environment/image_content.py",
     "scripts/fplinux_cli/environment/install_wheels.py",
     "scripts/fplinux_cli/common.py",
+    "scripts/fplinux_cli/data_paths.py",
     "scripts/fplinux_cli/dependencies/inputs.py",
     "scripts/fplinux_cli/manifests/source_catalog.py",
     "scripts/fplinux_cli/alpine/sources.py",

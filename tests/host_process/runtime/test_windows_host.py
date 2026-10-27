@@ -1080,6 +1080,7 @@ def test_resuming_saved_session_discards_only_the_unstarted_windows_boot_candida
         windows_host.boot_archive(
             bundle,
             capsule,
+            log=tmp_path / "runtime.log",
             session_root=archive / "data/session",
             events=events.append,
             on_wait=resumed,

@@ -51,27 +51,27 @@ class ReleaseCheckout:
         """Create real inputs-only metadata, compression and content checksums."""
         declarations, _context = checkout_declarations()
         for declaration in declarations:
-            original = self.root / ".cache" / declaration.destination
+            original = self.root / ".data" / declaration.destination
             original.parent.mkdir(parents=True, exist_ok=True)
             original.write_bytes(b"abc")
         snapshot = output.parent / "snapshot"
         create_dependencies(snapshot, offline=True, sources=(), inputs_only=True)
         export_dependencies(snapshot, output)
-        shutil.rmtree(self.root / ".cache/downloads")
+        shutil.rmtree(self.root / ".data/downloads")
         return output, read_dependency_distribution(output).snapshot
 
     def assert_originals_restored(self) -> None:
         """Check the native source and APK consumer slots against literal originals."""
         assert (
-            self.root / ".cache/downloads/sources/support/support.tar.gz"
+            self.root / ".data/downloads/sources/support/support.tar.gz"
         ).read_bytes() == b"abc"
         assert (
-            self.root / ".cache/downloads/alpine/packages/runtime-1-r0.apk"
+            self.root / ".data/downloads/alpine/packages/runtime-1-r0.apk"
         ).read_bytes() == b"abc"
         assert (
-            self.root / ".cache/downloads/environment/apk/main/x86_64/tool-2.0-r0.apk"
+            self.root / ".data/downloads/environment/apk/main/x86_64/tool-2.0-r0.apk"
         ).read_bytes() == b"abc"
-        assert not (self.root / ".cache/environment").exists()
+        assert not (self.root / ".data/environment").exists()
 
 
 def make_release_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ReleaseCheckout:

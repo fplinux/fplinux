@@ -124,16 +124,16 @@ Dynamic probe definitions are shared between instances. Disable your probe in ea
 
 ## Build a test program for the phone
 
-`probe-build` compiles one C file from the checkout into a static ARMv7 hard-float musl program for the phone. Create the C source first. Both paths must be repository-relative and free of symlinks, and the output must be inside `.cache/tools/`:
+`probe-build` compiles one C file from the checkout into a static ARMv7 hard-float musl program for the phone. Create the C source first, outside the working data directory. Its path is relative to the checkout; the output must be inside the selected working directory's `tools/` and can be absolute:
 
 ```sh title="PC"
-./fplinux probe-build .cache/tools/diag.c --output .cache/tools/diag-arm
+./fplinux probe-build diag.c --output "$(./fplinux data-path)/tools/diag-arm"
 ```
 
 Copy it to a running phone and start it:
 
 ```sh title="PC"
-./fplinux console nokia-ta1618 --build-type debug --upload .cache/tools/diag-arm /tmp/diag-arm
+./fplinux console nokia-ta1618 --build-type debug --upload "$(./fplinux data-path)/tools/diag-arm" /tmp/diag-arm
 ./fplinux console nokia-ta1618 --build-type debug --exec 'chmod +x /tmp/diag-arm && /tmp/diag-arm'
 ```
 

@@ -9,6 +9,7 @@ import sys
 from typing import TYPE_CHECKING
 
 from fplinux_cli.common import ROOT, error_message
+from fplinux_cli.data_paths import data_root
 
 from .definition import environment_recipe_digest, load_environment_lock
 from .kern import (
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _kern_build_user_ready(kern: str, rootfs: Path) -> bool:
+def _kern_build_user_ready(kern: str, rootfs: Path, *, cache: Path | None = None) -> bool:
     """Return whether the host can map the environment's unprivileged package builder."""
     try:
         result = subprocess.run(
@@ -50,7 +51,7 @@ def _kern_build_user_ready(kern: str, rootfs: Path) -> bool:
                 ),
             ],
             cwd=ROOT,
-            env=kern_environment(),
+            env=kern_environment(cache=cache),
             capture_output=True,
             text=True,
             check=False,
@@ -62,6 +63,7 @@ def _kern_build_user_ready(kern: str, rootfs: Path) -> bool:
 
 
 def doctor() -> None:
+    cache = data_root(ROOT)
     problems: list[str] = []
     print(f"host:     {platform.system()} {platform.machine()}")
     if platform.system() != "Linux":
@@ -69,15 +71,15 @@ def doctor() -> None:
     if platform.machine() not in {"x86_64", "amd64"}:
         problems.append("the pinned build environment currently targets linux/amd64")
     lock = load_environment_lock()
-    if not kern_available(lock):
+    if not kern_available(lock, cache=cache):
         problems.append("Kern is not ready for this checkout; run ./fplinux setup")
     else:
-        kern = require_kern(lock)
+        kern = require_kern(lock, cache=cache)
         try:
             version = subprocess.run(
                 [kern, "--version"],
                 cwd=ROOT,
-                env=kern_environment(),
+                env=kern_environment(cache=cache),
                 capture_output=True,
                 text=True,
                 check=False,
@@ -95,7 +97,7 @@ def doctor() -> None:
             runtime = subprocess.run(
                 [kern, "doctor"],
                 cwd=ROOT,
-                env=kern_environment(),
+                env=kern_environment(cache=cache),
                 capture_output=True,
                 text=True,
                 check=False,
@@ -111,12 +113,12 @@ def doctor() -> None:
             else:
                 print("runtime:   ready")
         recipe = environment_recipe_digest(lock)
-        state = current_environment_state(kern, recipe)
+        state = current_environment_state(kern, recipe, cache=cache)
         readiness = "ready" if state is not None else "not prepared or stale"
         print(f"environment: {readiness}")
         if state is None:
             problems.append("the pinned build environment is not ready; run ./fplinux setup")
-        elif not _kern_build_user_ready(kern, environment_rootfs(ROOT / ".cache", state)):
+        elif not _kern_build_user_ready(kern, environment_rootfs(cache, state), cache=cache):
             problems.append(
                 "Kern cannot map the package builder; configure newuidmap/newgidmap "
                 "and subordinate UID/GID ranges"

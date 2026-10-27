@@ -7,6 +7,7 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from fplinux_cli import common
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.environment.definition import (
     environment_recipe_digest,
     load_environment_lock,
@@ -29,15 +30,16 @@ class WindowsBuildEnvironment:
         """Require the exact project runtime and its current build environment."""
         self.work = work.resolve()
         self.inputs = [path.resolve() for path in inputs]
+        self.cache = data_root(common.ROOT)
         lock = load_environment_lock()
-        self.kern = require_kern(lock)
+        self.kern = require_kern(lock, cache=self.cache)
         recipe = environment_recipe_digest(lock)
-        state = current_environment_state(self.kern, recipe)
+        state = current_environment_state(self.kern, recipe, cache=self.cache)
         if state is None:
             common.fail(
                 "Windows packaging requires the current pinned environment; run ./fplinux setup"
             )
-        self.rootfs = environment_rootfs(common.ROOT / ".cache", state)
+        self.rootfs = environment_rootfs(self.cache, state)
 
     def _command(
         self,
@@ -89,7 +91,7 @@ class WindowsBuildEnvironment:
         """Run a native compiler, resource embedder, extractor or patch operation."""
         subprocess.run(
             self._command(command, cwd=cwd, variables=variables),
-            env=kern_environment(),
+            env=kern_environment(cache=self.cache),
             check=True,
         )
 
@@ -97,7 +99,7 @@ class WindowsBuildEnvironment:
         """Inspect a PE file using the environment's native binutils without executing it."""
         return subprocess.run(
             self._command(["objdump", "-p", str(path)], cwd=self.work),
-            env=kern_environment(),
+            env=kern_environment(cache=self.cache),
             capture_output=True,
             text=True,
             check=False,

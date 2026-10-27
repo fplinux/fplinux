@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -18,6 +19,7 @@ from fplinux_cli.artifacts.release import (
     capture_public_sources,
 )
 from fplinux_cli.common import canonical_json_bytes, fail, is_sha256, replace_file_atomically
+from fplinux_cli.data_paths import DATA_ENV, data_root
 from fplinux_cli.dependencies.snapshots import read_snapshot
 from fplinux_cli.environment.state import EnvironmentState, environment_state_path
 
@@ -32,7 +34,7 @@ def preflight_receipt(root: Path, commit: str) -> Path:
     """Locate the completed preparation for an exact incoming source commit."""
     if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit) is None:
         fail("preflight requires a complete lowercase Git commit SHA")
-    return root / ".cache/preflight" / f"{commit}.json"
+    return data_root(root) / "preflight" / f"{commit}.json"
 
 
 def require_preflight(root: Path, commit: str) -> dict[str, Any]:
@@ -50,8 +52,11 @@ def require_preflight(root: Path, commit: str) -> dict[str, Any]:
     return receipt
 
 
-def _run_preflight_command(checkout: Path, *arguments: str) -> None:
-    result = subprocess.run([str(checkout / "fplinux"), *arguments], cwd=checkout, check=False)
+def _run_preflight_command(checkout: Path, *arguments: str, data_directory: Path) -> None:
+    environment = {**os.environ, DATA_ENV: str(data_directory)}
+    result = subprocess.run(
+        [str(checkout / "fplinux"), *arguments], cwd=checkout, env=environment, check=False
+    )
     if result.returncode:
         fail(f"clean preparation stopped: {' '.join(arguments)} (exit {result.returncode})")
 
@@ -62,7 +67,7 @@ def prepare_push(commit: str, directory: Path) -> None:
     directory = directory.absolute()
     if directory.exists() or directory.is_symlink():
         fail(f"clean preparation requires a new directory: {directory}")
-    if directory.resolve().is_relative_to((common.ROOT / ".cache").resolve()):
+    if directory.resolve().is_relative_to(data_root(common.ROOT)):
         fail("clean preparation must use a separate directory outside the working cache")
     directory.parent.mkdir(parents=True, exist_ok=True)
     available = shutil.disk_usage(directory.parent).free
@@ -94,12 +99,22 @@ def prepare_push(commit: str, directory: Path) -> None:
     release = ReleaseContext(commit[:12], commit, captured.release.source_snapshot)
     (checkout / SOURCE_IDENTITY_NAME).write_bytes(canonical_json_bytes(release.fields()))
     originals = directory / "originals"
-    _run_preflight_command(checkout, "dependencies", "create", str(originals), "--inputs-only")
-    _run_preflight_command(checkout, "setup", "--offline")
-    _run_preflight_command(checkout, "doctor")
-    _run_preflight_command(checkout, "dependencies", "verify", str(originals))
+    child_data = data_root(checkout, environment={})
+    _run_preflight_command(
+        checkout,
+        "dependencies",
+        "create",
+        str(originals),
+        "--inputs-only",
+        data_directory=child_data,
+    )
+    _run_preflight_command(checkout, "setup", "--offline", data_directory=child_data)
+    _run_preflight_command(checkout, "doctor", data_directory=child_data)
+    _run_preflight_command(
+        checkout, "dependencies", "verify", str(originals), data_directory=child_data
+    )
     manifest = read_snapshot(originals)
-    environment_path = environment_state_path(checkout / ".cache")
+    environment_path = environment_state_path(child_data)
     try:
         state = EnvironmentState(**json.loads(environment_path.read_bytes()))
     except (OSError, ValueError, TypeError) as error:

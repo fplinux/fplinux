@@ -127,6 +127,9 @@ def test_board_report_cli_prepares_pinned_tool_without_a_runtime_parser(
     shutil.copyfile(ROOT / "platforms/ums9117/host/stock_image.py", provider)
     monkeypatch.setattr(cli, "ROOT", tmp_path)
     monkeypatch.setattr(reporting, "ROOT", tmp_path)
+    monkeypatch.setenv("FPLINUX_DATA_DIR", str(tmp_path / ".data"))
+    user_data = tmp_path / "persistent-user-data"
+    monkeypatch.setenv("XDG_DATA_HOME", str(user_data))
     monkeypatch.setattr(
         cli,
         "load_target",
@@ -143,16 +146,18 @@ def test_board_report_cli_prepares_pinned_tool_without_a_runtime_parser(
         },
     )
 
-    def install_tool(
+    def install_tool(  # noqa: PLR0913 -- the tool boundary carries its output and captured store.
         target: str,
         platform: str,
         tool: str,
         output: Path,
         *,
         reporter: object,
+        cache: Path,
     ) -> None:
         del reporter
         assert (target, platform, tool) == ("headless", "ums9117", "fphelper_t117")
+        assert cache == tmp_path / ".data"
         shutil.copyfile(tools / "fphelper_t117", output / "fphelper_t117")
         (output / "fphelper_t117").chmod(0o755)
         shutil.copyfile(tools / "scenario.json", output / "scenario.json")
@@ -162,12 +167,12 @@ def test_board_report_cli_prepares_pinned_tool_without_a_runtime_parser(
     cli.report_device_data("headless", from_dump=saved)
 
     reports = list(
-        (tmp_path / ".cache/diagnostics/device-data/headless").glob("*/board-report.json")
+        (tmp_path / ".data/diagnostics/device-data/headless").glob("*/board-report.json")
     )
     assert len(reports) == 1
     assert json.loads(reports[0].read_bytes())["keypad"]["boot_key"]["key"] == "FPLINUX_KEY_STAR"
     assert f"Review {reports[0]}." in capsys.readouterr().out
-    assert not (tmp_path / ".cache/device-data").exists()
+    assert not user_data.exists()
 
 
 def test_board_report_extractor_selects_windows_executable_name(

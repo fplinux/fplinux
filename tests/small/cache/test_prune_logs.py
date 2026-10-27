@@ -25,7 +25,7 @@ def _cli_log(cache: Path, command: str, sequence: int, *, target: str | None = N
     (path / "run.json").write_text(
         json.dumps(
             {
-                "display_root": f".cache/{relative.as_posix()}",
+                "display_root": relative.as_posix(),
                 "label": label,
                 "parent": None,
             }

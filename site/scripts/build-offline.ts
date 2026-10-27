@@ -18,14 +18,16 @@ import { base as siteBase, site as siteURL } from "../config/site.mjs";
 import { compressFont } from "./offline-font.ts";
 import { indexText } from "./offline-search-index.ts";
 import { documentationDigest } from "./documentation-inputs.ts";
+import { managedDataRoot } from "./data-path.ts";
 import type { OfflineIcon } from "../src/scripts/offline-icons.ts";
 import type { SearchPage } from "../src/scripts/offline-search.ts";
 
 type Node = DefaultTreeAdapterMap["node"];
 type Element = DefaultTreeAdapterMap["element"];
 const site = fileURLToPath(new URL("../", import.meta.url));
-const raw = path.resolve(site, "../.cache/out/site-offline-raw");
-const output = path.resolve(site, "../.cache/out/site-offline");
+const data = managedDataRoot();
+const raw = path.join(data, "out/site-offline-raw");
+const output = path.join(data, "out/site-offline");
 const base = `${siteBase.replace(/\/$/u, "")}/`;
 const { origin } = new URL(siteURL);
 
@@ -443,7 +445,7 @@ const pruneUnusedFiles = async (pages: string[]): Promise<number> => {
 	return unused.length;
 };
 
-const inputsDigest = await documentationDigest();
+const inputsDigest = await documentationDigest(path.resolve(site, ".."));
 execFileSync(
 	process.execPath,
 	[path.join(site, "node_modules/.bin/astro"), "build", "--outDir", raw],
@@ -498,7 +500,7 @@ await writeFile(
 	`window.fplinuxOfflineIndex=${JSON.stringify(index)};\n`
 );
 const pruned = await pruneUnusedFiles(pages.map((page) => page.filename));
-if ((await documentationDigest()) !== inputsDigest) {
+if ((await documentationDigest(path.resolve(site, ".."))) !== inputsDigest) {
 	throw new Error(
 		"Site sources changed during the offline export; rebuild it."
 	);

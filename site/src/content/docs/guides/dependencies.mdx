@@ -25,7 +25,7 @@ The snapshot preserves the build inputs, not the host operating system. Use a Li
 
 ## Save a snapshot
 
-Prepare the build environment with [Build FPLinux](/fplinux/start/build/), then choose a folder outside `.cache/` on a disk with enough free space. Replace `/path/to/fplinux-inputs` in the examples below with that folder's path. Use the same path to verify or restore the snapshot:
+Prepare the build environment with [Build FPLinux](/fplinux/start/build/), then choose a folder outside the [working data directory](/fplinux/start/build/#working-data-directory) on a disk with enough free space. Replace `/path/to/fplinux-inputs` in the examples below with that folder's path. Use the same path to verify or restore the snapshot:
 
 ```sh title="PC"
 ./fplinux dependencies create "/path/to/fplinux-inputs"
@@ -84,7 +84,7 @@ To recreate the environment from those originals, restore only the inputs and re
 
 ## Install site tools
 
-The selected inputs include npm registry archives declared by the root and `site/package-lock.json`, including locked optional platform packages. The site uses the exact Node.js and npm versions declared by the root package, with a separate Linux x86-64 glibc Node.js original. Site registry archives are restored under `.cache/downloads/site/npm/`.
+The selected inputs include npm registry archives declared by the root and `site/package-lock.json`, including locked optional platform packages. The site uses the exact Node.js and npm versions declared by the root package, with a separate Linux x86-64 glibc Node.js original. Site registry archives are restored under `downloads/site/npm/` inside the selected working data directory.
 
 After restoring inputs, `./fplinux setup --site --offline` installs the pinned site runtime and runs `npm ci` offline using those originals. To acquire and install only site inputs directly, use `./fplinux setup --site`. Neither selection prepares Alpine or builds the offline site. Follow [Preview this site](/fplinux/develop/contributing/#preview-this-site) to select that runtime and run the site tools.
 

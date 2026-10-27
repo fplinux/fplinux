@@ -27,10 +27,10 @@ def prepared_environment(
     """Provide a previous published tree and a separately prepared replacement."""
     monkeypatch.setattr(runtime, "ROOT", tmp_path)
     previous = EnvironmentState("a" * 64, "b" * 64, "c" * 64)
-    rootfs = tmp_path / ".cache/environment" / f"rootfs-{'b' * 64}"
+    rootfs = tmp_path / ".data/environment" / f"rootfs-{'b' * 64}"
     rootfs.mkdir(parents=True)
     (rootfs / "old-tool").write_bytes(b"working\n")
-    publish_environment_state(tmp_path / ".cache", previous)
+    publish_environment_state(tmp_path / ".data", previous)
     candidate = rootfs.parent / "candidate-next"
     candidate.mkdir()
     (candidate / "new-tool").write_bytes(b"replacement\n")
@@ -42,7 +42,7 @@ def test_unverified_candidate_preserves_published_environment(
 ) -> None:
     """Preparation failure leaves the previous consumer receipt and working tree intact."""
     rootfs, previous, candidate = prepared_environment
-    monkeypatch.setattr(runtime, "probe_environment_state", lambda *_args: None)
+    monkeypatch.setattr(runtime, "probe_environment_state", lambda *_args, **_kwargs: None)
     with pytest.raises(SystemExit, match="installed-content check"):
         runtime.publish_environment(
             "kern", candidate, EnvironmentState("d" * 64, "e" * 64, "f" * 64)
@@ -58,7 +58,7 @@ def test_receipt_failure_retains_old_tree_and_returns_candidate(
     """A failed final receipt publication keeps the last-good environment addressable."""
     rootfs, previous, candidate = prepared_environment
     replacement = EnvironmentState("d" * 64, "e" * 64, "f" * 64)
-    monkeypatch.setattr(runtime, "probe_environment_state", lambda *_args: replacement)
+    monkeypatch.setattr(runtime, "probe_environment_state", lambda *_args, **_kwargs: replacement)
     with (
         mock.patch.object(runtime, "publish_environment_state", side_effect=OSError("no space")),
         pytest.raises(OSError, match="no space"),
@@ -79,10 +79,11 @@ def test_successful_publication_replaces_only_previous_known_rootfs(
     unrelated = rootfs.parent / "user-archive"
     unrelated.mkdir()
     (unrelated / "saved").write_bytes(b"keep\n")
-    monkeypatch.setattr(runtime, "probe_environment_state", lambda *_args: replacement)
+    monkeypatch.setattr(runtime, "probe_environment_state", lambda *_args, **_kwargs: replacement)
 
-    def remove_mapped_tree(path: Path) -> None:
+    def remove_mapped_tree(path: Path, *, cache: Path) -> None:
         assert load_environment_state(rootfs.parent.parent, replacement.recipe) == replacement
+        assert cache == rootfs.parent.parent
         assert path == rootfs
         shutil.rmtree(path)
 

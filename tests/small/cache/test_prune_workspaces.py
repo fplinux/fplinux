@@ -35,7 +35,7 @@ class WorkspacePruneTests:
         cache = tmp_path / ".cache"
         root = cache / "quality-workspaces"
         for value in "0123456789":
-            _workspace(root, value, quality=True)
+            _workspace(root, value)
         plan = plan_prune(cache)
 
         assert (len(plan.candidates)) == (10)

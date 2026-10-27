@@ -7,11 +7,14 @@ from typing import TYPE_CHECKING
 
 from fplinux_cli.cache.lock import cache_lock
 from fplinux_cli.common import ROOT
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.runtime.bundle_session import selected_context_profile
+from fplinux_cli.source_paths import validate_checkout_data_root
 
 if TYPE_CHECKING:
     import argparse
     from collections.abc import Callable
+    from pathlib import Path
 
 
 _EXCLUSIVE_CACHE_COMMANDS = frozenset(
@@ -50,9 +53,14 @@ def _cache_lock_exclusive(args: argparse.Namespace) -> bool | None:
     return None
 
 
-def execute_command(args: argparse.Namespace, action: Callable[[], None]) -> None:
+def execute_command(
+    args: argparse.Namespace, action: Callable[[], None], *, data_directory: Path | None = None
+) -> None:
     """Run exactly one dispatch action while its command-wide cache lock is held."""
     exclusive = _cache_lock_exclusive(args)
+    selected_root = data_root(ROOT) if data_directory is None else data_directory
+    if exclusive is not None:
+        validate_checkout_data_root(ROOT, selected_root)
     if exclusive is None:
         action()
         return
@@ -64,7 +72,7 @@ def execute_command(args: argparse.Namespace, action: Callable[[], None]) -> Non
         boot=getattr(args, "boot", None),
     )
     with cache_lock(
-        ROOT / ".cache",
+        selected_root,
         exclusive=exclusive,
         command=args.command,
         target=target if isinstance(target, str) else None,
@@ -73,10 +81,10 @@ def execute_command(args: argparse.Namespace, action: Callable[[], None]) -> Non
         try:
             action()
         finally:
-            _discard_profile_build_or_check_cache(args)
+            _discard_profile_build_or_check_cache(args, selected_root)
 
 
-def _discard_profile_build_or_check_cache(args: argparse.Namespace) -> None:
+def _discard_profile_build_or_check_cache(args: argparse.Namespace, cache: Path) -> None:
     """Bound one named profile's logs even when its command exits unsuccessfully."""
     profile = getattr(args, "profile", None)
     if not isinstance(profile, str) or args.command not in {"build", "check"}:
@@ -95,10 +103,10 @@ def _discard_profile_build_or_check_cache(args: argparse.Namespace) -> None:
             discard_obsolete_rootfs,
         )
 
-        discard_obsolete_rootfs(ROOT / ".cache")
-        discard_obsolete_apks(ROOT / ".cache")
+        discard_obsolete_rootfs(cache)
+        discard_obsolete_apks(cache)
     discard_superseded_profile_logs(
-        ROOT / ".cache",
+        cache,
         args.command,
         profile=profile,
         target=target if isinstance(target, str) else None,

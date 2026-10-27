@@ -214,12 +214,8 @@ Replace `/dev/input/eventN` with the input device of the keyboard to forward. On
 
 The bridge can run alongside a shell, a single command or a file copy. If the cable or the keyboard is disconnected, the phone releases all forwarded keys, so no modifier stays held. Stopping the bridge releases the keyboard on your computer.
 
-## Plain OpenSSH (advanced)
+## Saved connection files
 
-From a source checkout, a ready session also has an OpenSSH configuration that works only for that session:
+FPLinux keeps private keys and an OpenSSH configuration for the current session in its [working data directory](/fplinux/start/build/#working-data-directory). Use the [reconnect command for your checkout or archive](#open-a-shell) to select the right configuration and check that the target and running image still match.
 
-```sh title="PC"
-ssh -F ".cache/runtime/<target>/session/current/<target>.ssh-config" fplinux
-```
-
-It pins the keys of the current session. Do not copy it to a later session or use it as a general phone login. Use the [reconnect command for your checkout or archive](#open-a-shell) to check that the target and running image still match before opening SSH.
+Keep these files in place while the phone is running. They are specific to that session; copying them to another installation or a later session does not create a general phone login.

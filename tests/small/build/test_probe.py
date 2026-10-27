@@ -31,6 +31,25 @@ class ProbePublicationTests:
     """Check real file publication; the compiler stub provides no ARM evidence."""
 
     @staticmethod
+    def test_absolute_output_uses_the_selected_external_tools_namespace(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An external store owns probe outputs without creating it during validation."""
+        root = tmp_path / "checkout"
+        root.mkdir()
+        source = root / "probe.c"
+        source.write_bytes(b"int probe;\n")
+        external = tmp_path / "external space/данные"
+        monkeypatch.setenv("FPLINUX_DATA_DIR", str(external))
+
+        actual = probe.resolve_probe_paths("probe.c", str(external / "tools/probe"), root=root)
+
+        assert actual == (source, external / "tools/probe")
+        assert not external.exists()
+        with pytest.raises(SystemExit, match="managed tools directory"):
+            probe.resolve_probe_paths("probe.c", ".data/tools/probe", root=root)
+
+    @staticmethod
     def test_preparation_extracts_release_keys_from_verified_archive() -> None:
         """Probe preparation reuses verified minirootfs bytes and extracts only signing keys."""
         with tempfile.TemporaryDirectory() as directory:
@@ -64,7 +83,7 @@ class ProbePublicationTests:
                 mock.patch.object(common, "ROOT", root),
                 mock.patch("urllib.request.urlopen", return_value=io.BytesIO(contents)),
             ):
-                acquire_source(root, "alpine_target", root / ".cache", offline=False)
+                acquire_source(root, "alpine_target", root / ".data", offline=False)
                 keys = probe._prepare_keys(lock, root / "first")  # noqa: SLF001
             assert ((keys / "release.pub").read_bytes()) == (b"release signing key\n")
             assert not ((root / "first/etc/irrelevant").exists())
@@ -120,7 +139,7 @@ class ProbePublicationTests:
             ],
         }
         if original_present:
-            originals = tmp_path / ".cache/downloads"
+            originals = tmp_path / ".data/downloads"
             base_path = originals / "sources/alpine_target/minirootfs.tar.gz"
             base_path.parent.mkdir(parents=True)
             base_path.write_bytes(base)
@@ -154,11 +173,11 @@ class ProbePublicationTests:
                 with pytest.raises(SystemExit, match=r"minirootfs.tar.gz.*setup --all"):
                     probe._prepare_sysroot("kern", tmp_path / "rootfs", state, reporter)  # noqa: SLF001 -- probe preparation boundary.
                 assert installed == []
-                assert not list((tmp_path / ".cache/probe-build").glob("*/installed"))
+                assert not list((tmp_path / ".data/probe-build").glob("*/installed"))
                 return
             sysroot = probe._prepare_sysroot("kern", tmp_path / "rootfs", state, reporter)  # noqa: SLF001 -- probe preparation boundary.
         assert (sysroot / "installed").read_bytes() == b"prepared sysroot\n"
-        assert not (tmp_path / ".cache/downloads/alpine/packages/runtime.apk").exists()
+        assert not (tmp_path / ".data/downloads/alpine/packages/runtime.apk").exists()
         with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")):
             assert probe._prepare_sysroot("kern", tmp_path / "rootfs", state, reporter) == sysroot  # noqa: SLF001 -- cached preparation boundary.
         reporter.finish()
@@ -177,9 +196,9 @@ class ProbePublicationTests:
                 id="ordinary",
             ),
             pytest.param(
-                ".cache/tools/probe.c",
+                ".private/probes/probe.c",
                 b'#include "../../include/fplinux/probe.h"\nint probe;\n',
-                id="ignored",
+                id="explicit-private",
             ),
         ],
     )
@@ -198,10 +217,10 @@ class ProbePublicationTests:
             (header.parent / "probe-detail.h").write_bytes(b"#define DETAIL 1\n")
             sibling = source.with_name("local.h")
             sibling.write_bytes(b"#define LOCAL 2\n")
-            registry = root / ".cache/kern/registry"
+            registry = root / ".data/kern/registry"
             registry.parent.mkdir(parents=True)
             registry.write_bytes(b"private runtime state")
-            destination = root / ".cache/tools/probe"
+            destination = root / ".data/tools/probe"
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(b"previous executable")
             destination.chmod(0o751)
@@ -225,14 +244,9 @@ class ProbePublicationTests:
                 assert (workspace / "include/fplinux/probe-detail.h").read_bytes() == (
                     b"#define DETAIL 1\n"
                 )
-                if source_name.startswith(".cache/"):
-                    assert not (workspace / sibling.relative_to(root)).exists()
-                else:
-                    assert (workspace / sibling.relative_to(root)).read_bytes() == (
-                        b"#define LOCAL 2\n"
-                    )
-                assert not (workspace / ".cache/kern").exists()
-                assert not (workspace / ".cache/tools/probe").exists()
+                assert (workspace / sibling.relative_to(root)).read_bytes() == b"#define LOCAL 2\n"
+                assert not (workspace / ".data/kern").exists()
+                assert not (workspace / ".data/tools/probe").exists()
                 assert f"/workspace/{source_name}" in command
                 requested = Path(command[command.index("-o") + 1])
                 (destination.parent / requested.name).write_bytes(b"new executable")
@@ -270,9 +284,5 @@ class ProbePublicationTests:
                     assert destination.stat().st_mode & 0o777 == 0o751
                 assert staged_workspaces
                 assert all(not workspace.exists() for workspace in staged_workspaces)
-                assert sorted(path.name for path in destination.parent.iterdir()) == (
-                    ["local.h", "probe", "probe.c"]
-                    if source_name.startswith(".cache/")
-                    else ["probe"]
-                )
+                assert sorted(path.name for path in destination.parent.iterdir()) == ["probe"]
                 assert registry.read_bytes() == b"private runtime state"

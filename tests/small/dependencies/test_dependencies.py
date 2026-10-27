@@ -129,7 +129,7 @@ def snapshot_checkout() -> Iterator[SnapshotCheckout]:
     """Remove each scenario's archive and working caches as soon as it finishes."""
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
-        cache = root / "checkout/.cache"
+        cache = root / "checkout/.data"
         source = cache / "downloads/example.tar"
         source.parent.mkdir(parents=True)
         source.write_bytes(b"abc")
@@ -204,7 +204,7 @@ class DependencySnapshotTests:
         """A fresh cache receives only inputs that its matching declaration selects."""
         context: dict[str, object] = {"providers": ["example=1"]}
         snapshot_checkout.preserve([declared_input()], context)
-        new_cache = snapshot_checkout.root / "new-checkout/.cache"
+        new_cache = snapshot_checkout.root / "new-checkout/.data"
         unrelated = new_cache / "other/keep"
         unrelated.parent.mkdir(parents=True)
         unrelated.write_bytes(b"user data")
@@ -225,7 +225,7 @@ class DependencySnapshotTests:
         )
         objects = list((snapshot_checkout.snapshot / "objects/sha256").iterdir())
         assert ([path.name for path in objects]) == ([_ABC_SHA256])
-        new_cache = snapshot_checkout.root / "restored/.cache"
+        new_cache = snapshot_checkout.root / "restored/.data"
         snapshot_checkout.restore(
             [declared_input(), declared_input("another", "downloads/another.tar")],
             {},
@@ -267,7 +267,7 @@ class DependencySnapshotTests:
         """Shared package and loader downloads preserve every consumer's declaration."""
         inputs = [declared_input(), declared_input("another-consumer")]
         snapshot_checkout.preserve(inputs, {})
-        new_cache = snapshot_checkout.root / "new/.cache"
+        new_cache = snapshot_checkout.root / "new/.data"
         snapshot_checkout.restore(inputs, {}, new_cache)
         assert ((new_cache / "downloads/example.tar").read_bytes()) == (b"abc")
         assert (len(read_snapshot(snapshot_checkout.snapshot)["inputs"])) == (2)
@@ -316,7 +316,7 @@ class DependencySnapshotTests:
     ) -> None:
         """A snapshot cannot seed a checkout selecting a different provider."""
         snapshot_checkout.preserve([declared_input()], {"providers": ["example=1"]})
-        new_cache = snapshot_checkout.root / "new/.cache"
+        new_cache = snapshot_checkout.root / "new/.data"
         with pytest.raises(SystemExit, match="does not match"):
             snapshot_checkout.restore([declared_input()], {"providers": ["example=2"]}, new_cache)
         assert not (new_cache / "downloads").exists()
@@ -327,7 +327,7 @@ class DependencySnapshotTests:
         """Verification detects storage damage before restoration publishes cache inputs."""
         snapshot_checkout.preserve([declared_input()], {})
         (snapshot_checkout.snapshot / "objects/sha256" / _ABC_SHA256).write_bytes(b"bad")
-        new_cache = snapshot_checkout.root / "new/.cache"
+        new_cache = snapshot_checkout.root / "new/.data"
         with pytest.raises(SystemExit, match="object is missing or mismatched"):
             snapshot_checkout.restore([declared_input()], {}, new_cache)
         assert not (new_cache / "downloads").exists()
@@ -337,7 +337,7 @@ class DependencySnapshotTests:
     ) -> None:
         """Restoration leaves an existing file with different bytes available for inspection."""
         snapshot_checkout.preserve([declared_input()], {})
-        new_cache = snapshot_checkout.root / "new/.cache"
+        new_cache = snapshot_checkout.root / "new/.data"
         existing = new_cache / "downloads/example.tar"
         existing.parent.mkdir(parents=True)
         existing.write_bytes(b"keep this original")
@@ -345,11 +345,11 @@ class DependencySnapshotTests:
             snapshot_checkout.restore([declared_input()], {}, new_cache)
         assert (existing.read_bytes()) == (b"keep this original")
 
-    def test_snapshot_cannot_be_created_in_disposable_working_cache(
+    def test_snapshot_cannot_be_created_inside_managed_data(
         self, snapshot_checkout: SnapshotCheckout
     ) -> None:
-        """Preserved inputs stay outside the cache that normal working cleanup replaces."""
-        with pytest.raises(SystemExit, match="outside the working"):
+        """Preserved snapshots stay in a user-selected directory outside managed data."""
+        with pytest.raises(SystemExit, match="outside the managed data"):
             preserve_inputs(
                 [declared_input()],
                 {},
@@ -578,7 +578,7 @@ class DependencySnapshotTests:
         manifest = json.loads((snapshot_checkout.snapshot / "manifest.json").read_bytes())
         digest = manifest["environment"]["sha256"]
         (snapshot_checkout.snapshot / "objects/sha256" / digest).unlink()
-        new_cache = snapshot_checkout.root / "restored/.cache"
+        new_cache = snapshot_checkout.root / "restored/.data"
         with pytest.raises(SystemExit, match="environment object is missing"):
             snapshot_checkout.restore([declared_input()], {}, new_cache)
         assert not (new_cache / "downloads").exists()
@@ -614,7 +614,7 @@ class DependencySnapshotTests:
         manifest["environment"]["sha256"] = digest
         manifest["environment"]["bytes"] = len(archive_bytes)
         manifest_path.write_text(json.dumps(manifest))
-        new_cache = snapshot_checkout.root / "restored/.cache"
+        new_cache = snapshot_checkout.root / "restored/.data"
         with pytest.raises(
             SystemExit, match=r"archive (path is invalid|parent is not a directory)"
         ):

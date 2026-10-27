@@ -55,11 +55,12 @@ def preflight_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Pre
         text=True,
     ).stdout.strip()
     (root / "README.md").write_bytes(b"dirty source tree\n")
-    cached = root / ".cache/downloads/shared-original"
+    cached = root / ".data/downloads/shared-original"
     cached.parent.mkdir(parents=True)
     cached.write_bytes(b"existing cache must not enter clean preparation")
     report = tmp_path / "peer-results.jsonl"
     monkeypatch.setenv("FPLINUX_PREFLIGHT_TEST_REPORT", str(report))
+    monkeypatch.setenv("FPLINUX_DATA_DIR", str(root / ".data"))
     monkeypatch.setattr(common, "ROOT", root)
     return PreflightRepository(root, commit, report)
 
@@ -80,6 +81,9 @@ def test_explicit_preparation_archives_the_exact_commit_and_records_only_complet
         ["dependencies", "verify", str(destination / "originals")],
     ]
     assert all(record["checkout"] == str(destination / "checkout") for record in commands)
+    assert all(
+        record["data_directory"] == str(destination / "checkout/.data") for record in commands
+    )
     assert all(record["readme"] == "committed source tree\n" for record in commands)
     assert commands[0]["cache_files"] == []
     assert (repository.root / "README.md").read_bytes() == b"dirty source tree\n"
@@ -113,7 +117,7 @@ def test_failed_preparation_stops_following_commands_and_leaves_no_success_recei
         prepare_push(repository.commit, tmp_path / "failed-preparation")
 
     assert len(repository.commands()) == command_count
-    assert not (repository.root / ".cache/preflight" / f"{repository.commit}.json").exists()
+    assert not (repository.root / ".data/preflight" / f"{repository.commit}.json").exists()
     with pytest.raises(SystemExit, match="no completed clean preparation"):
         require_preflight(repository.root, repository.commit)
 

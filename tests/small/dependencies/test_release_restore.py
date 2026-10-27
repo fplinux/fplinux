@@ -52,7 +52,7 @@ def test_metadata_for_another_source_stops_before_download_of_its_index(
         restore_release(release_checkout.release_id)
 
     assert requested == ["DEPENDENCIES.json"]
-    assert not (release_checkout.root / ".cache/downloads").exists()
+    assert not (release_checkout.root / ".data/downloads").exists()
 
 
 @pytest.mark.parametrize("damage", ["index", "part"])
@@ -73,7 +73,7 @@ def test_release_checksum_failure_never_restores_originals(
 
     assert requested[-1] == damaged
     assert len(requested) == (2 if damage == "index" else 3)
-    assert not (release_checkout.root / ".cache/downloads").exists()
+    assert not (release_checkout.root / ".data/downloads").exists()
 
 
 @pytest.mark.usefixtures("release_checkout")

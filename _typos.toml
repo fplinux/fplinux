@@ -1,7 +1,8 @@
 [files]
 extend-exclude = [
   ".git/",
-  ".cache/",
+  ".data/",
+  ".private/",
   "node_modules/",
   "third-party-licenses/",
   "*.bin",

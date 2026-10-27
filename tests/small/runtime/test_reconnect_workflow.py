@@ -442,7 +442,10 @@ def test_normal_boot_discards_unloaded_candidate_before_reauthenticating_returni
 
     try:
         transport, session = boot.run_bundle(
-            admitted_bundle, events.append, session_root=session_root
+            admitted_bundle,
+            events.append,
+            session_root=session_root,
+            log=tmp_path / "runtime.log",
         )
     finally:
         usb_returned.set()

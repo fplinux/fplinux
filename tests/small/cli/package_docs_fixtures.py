@@ -19,6 +19,7 @@ def write_offline_export(
     text: str = "Current documentation",
     notices: bytes = b"Synthetic redistribution notice\n",
     phone_inputs: dict[str, bytes] | None = None,
+    selected_data_root: Path | None = None,
 ) -> dict[str, bytes]:
     """Stand in for the separate Node build, retaining real receipt and file collection."""
     source_bytes = f"# {text}\n".encode()
@@ -37,7 +38,9 @@ def write_offline_export(
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(data)
         destination.chmod(0o644)
-    output = root / ".cache/out/site-offline"
+    output = (
+        root / ".data" if selected_data_root is None else selected_data_root
+    ) / "out/site-offline"
     contents = {
         "index.html": f"<html><body>{text}</body></html>\n".encode(),
         "offline/runtime.js": b"window.offlineDocumentation = true;\n",

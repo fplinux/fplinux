@@ -20,6 +20,7 @@ from fplinux_cli.alpine.sources import (
 from fplinux_cli.build import workflow as build_commands
 from fplinux_cli.build.environment import SOURCE_DATE_EPOCH
 from fplinux_cli.common import fail, replace_file_atomically
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.dependencies.inputs import acquire_inputs, aport_source_inputs
 from fplinux_cli.environment import kern as environment_kern
 from fplinux_cli.environment import runtime as environment_runtime
@@ -140,19 +141,21 @@ def _checksum_container_command(
 
 def checksum_aport(package: str) -> None:
     """Regenerate one aport's SHA-512 block from its exact canonical source closure."""
+    cache = data_root(common.ROOT)
     aport = _canonical_aport(package)
     apkbuild = aport / "APKBUILD"
     before_snapshot = _aport_checksum_snapshot(package)
     before_apkbuild = apkbuild.read_bytes()
     mode = apkbuild.stat().st_mode & 0o777
-    reporter = RunReporter.create("checksum", target=package, verbose=False)
-    kern, rootfs, _state = environment_runtime.require_environment()
-    cache = common.ROOT / ".cache"
+    reporter = RunReporter.create(
+        "checksum", target=package, verbose=False, selected_data_root=cache
+    )
+    kern, rootfs, _state = environment_runtime.require_environment(cache=cache)
     downloads = build_commands.ensure_build_directory(cache / "downloads")
     with reporter.stage("source-inputs"):
         acquire_inputs(aport_source_inputs(common.ROOT, (package,)), cache, offline=True)
     with reporter.stage("workspace"):
-        snapshot_root = staging.stage_workspace_snapshot(before_snapshot)
+        snapshot_root = staging.stage_workspace_snapshot(before_snapshot, selected_data_root=cache)
     checksum_root = build_commands.ensure_build_directory(cache / "checksum")
     with tempfile.TemporaryDirectory(
         dir=checksum_root,
@@ -175,7 +178,7 @@ def checksum_aport(package: str) -> None:
                     stage=stage,
                     downloads=downloads,
                 ),
-                env=environment_kern.kern_environment(),
+                env=environment_kern.kern_environment(cache=cache),
             )
         generated = stage / "alpine/aports" / package / "APKBUILD"
         if generated.is_symlink() or not generated.is_file():

@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 ROOT = Path(__file__).resolve().parents[2]
 PUBLIC_COMMANDS = (
+    "data-path",
     "doctor",
     "check",
     "test",
@@ -168,7 +169,7 @@ class CheckCommandTests:
     ) -> None:
         """Check the source-wide naming policy through an isolated public checkout."""
         prepare_cli_checkout(tmp_path)
-        (tmp_path / ".gitignore").write_text(".cache/\n__pycache__/\n", encoding="utf-8")
+        (tmp_path / ".gitignore").write_text(".data/\n__pycache__/\n", encoding="utf-8")
         run_process(
             ["git", "init", "--quiet", str(tmp_path)],
             name="public source check Git setup",

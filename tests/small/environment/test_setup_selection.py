@@ -41,14 +41,14 @@ def ready_checkout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(env_setup, "load_environment_lock", dict)
     monkeypatch.setattr(env_setup, "install_kern", lambda *_args, **_kwargs: "kern")
     monkeypatch.setattr(env_setup, "environment_recipe_digest", lambda *_args: "a" * 64)
-    monkeypatch.setattr(env_setup, "current_environment_state", lambda *_args: state)
+    monkeypatch.setattr(env_setup, "current_environment_state", lambda *_args, **_kwargs: state)
     monkeypatch.setattr(env_setup, "install_git_hooks", lambda: None)
 
     def unexpected_rebuild(*_args: object, **_kwargs: object) -> None:
         pytest.fail("a ready shared environment must not be rebuilt for selected inputs")
 
     monkeypatch.setattr(env_setup, "_prepare_rootfs", unexpected_rebuild)
-    marker = tmp_path / ".cache/environment/active-generation"
+    marker = tmp_path / ".data/environment/active-generation"
     marker.parent.mkdir(parents=True)
     marker.write_bytes(b"shared generation\n")
     return tmp_path
@@ -70,15 +70,15 @@ def test_repeated_target_setup_acquires_updated_and_additional_inputs_without_re
         selected[:] = [item]
         with mock.patch("urllib.request.urlopen", return_value=io.BytesIO(contents)):
             env_setup.prepare_setup(target, host=host)
-        assert (ready_checkout / ".cache" / item.destination).read_bytes() == contents
+        assert (ready_checkout / ".data" / item.destination).read_bytes() == contents
 
-    assert (ready_checkout / ".cache/environment/active-generation").read_bytes() == (
+    assert (ready_checkout / ".data/environment/active-generation").read_bytes() == (
         b"shared generation\n"
     )
-    assert (ready_checkout / ".cache/downloads/sources/first/original.tar.gz").read_bytes() == (
+    assert (ready_checkout / ".data/downloads/sources/first/original.tar.gz").read_bytes() == (
         b"updated bytes\n"
     )
-    runs = list((ready_checkout / ".cache/logs/setup").glob("*/*/run.json"))
+    runs = list((ready_checkout / ".data/logs/setup").glob("*/*/run.json"))
     assert len(runs) == 4
     assert all(json.loads(path.read_text())["status"] == "success" for path in runs)
 
@@ -99,8 +99,8 @@ def test_offline_target_setup_names_its_missing_original_and_preparation_command
     ):
         env_setup.prepare_setup("first-phone", host="windows", offline=True)
 
-    assert not (ready_checkout / ".cache" / item.destination).exists()
-    assert (ready_checkout / ".cache/environment/active-generation").read_bytes() == (
+    assert not (ready_checkout / ".data" / item.destination).exists()
+    assert (ready_checkout / ".data/environment/active-generation").read_bytes() == (
         b"shared generation\n"
     )
 
@@ -140,12 +140,13 @@ def test_site_setup_acquires_exact_originals_and_installs_without_alpine(
 ) -> None:
     """The site consumer receives saved runtime and registry bytes in a site-only checkout."""
 
-    def install_saved_site() -> None:
-        node = site_checkout / ".cache/downloads/sources/site-node/node.tar.xz"
-        npm = site_checkout / ".cache/downloads/sources/npm/npm.tgz"
+    def install_saved_site(*, cache: Path) -> None:
+        assert cache == site_checkout / ".data"
+        node = cache / "downloads/sources/site-node/node.tar.xz"
+        npm = cache / "downloads/sources/npm/npm.tgz"
         assert node.read_bytes() == b"abc"
         assert npm.read_bytes() == b"abc"
-        registry = list((site_checkout / ".cache/downloads/site/npm").iterdir())
+        registry = list((cache / "downloads/site/npm").iterdir())
         assert len(registry) == 1
         assert registry[0].read_bytes() == b"abc"
         (site_checkout / "site/installed").write_bytes(b"installed from preserved originals\n")
@@ -162,8 +163,8 @@ def test_site_setup_acquires_exact_originals_and_installs_without_alpine(
     assert (
         site_checkout / "site/installed"
     ).read_bytes() == b"installed from preserved originals\n"
-    assert not (site_checkout / ".cache/environment").exists()
-    assert not (site_checkout / ".cache/dependencies").exists()
+    assert not (site_checkout / ".data/environment").exists()
+    assert not (site_checkout / ".data/dependencies").exists()
 
 
 def test_all_setup_acquires_complete_inventory_and_prepares_both_consumers(
@@ -173,8 +174,9 @@ def test_all_setup_acquires_complete_inventory_and_prepares_both_consumers(
     inputs = [original("linux", b"abc"), original("windows", b"abc"), original("site", b"abc")]
     monkeypatch.setattr(workflow, "checkout_declarations", lambda: (inputs, {}))
 
-    def install_saved_site() -> None:
-        contents = [(ready_checkout / ".cache" / item.destination).read_bytes() for item in inputs]
+    def install_saved_site(*, cache: Path) -> None:
+        assert cache == ready_checkout / ".data"
+        contents = [(cache / item.destination).read_bytes() for item in inputs]
         assert contents == [b"abc", b"abc", b"abc"]
         (ready_checkout / "site-installed").write_text("installed\n")
 
@@ -185,7 +187,7 @@ def test_all_setup_acquires_complete_inventory_and_prepares_both_consumers(
         env_setup.prepare_setup(all_inputs=True, offline=False)
 
     assert (ready_checkout / "site-installed").read_text() == "installed\n"
-    assert (ready_checkout / ".cache/environment/active-generation").read_bytes() == (
+    assert (ready_checkout / ".data/environment/active-generation").read_bytes() == (
         b"shared generation\n"
     )
-    assert not (ready_checkout / ".cache/dependencies").exists()
+    assert not (ready_checkout / ".data/dependencies").exists()

@@ -15,11 +15,13 @@ from typing import TYPE_CHECKING, cast
 from fplinux_cli import common
 from fplinux_cli.artifacts.release import release_context_from_fields
 from fplinux_cli.common import canonical_json_bytes, fail, is_sha256, sha256_bytes
+from fplinux_cli.data_paths import DATA_DIR_NAME, PRIVATE_DIR_NAME
 from fplinux_cli.manifests import targets
 from fplinux_cli.manifests.paths import discover_targets
 from fplinux_cli.packaging.hosts import runtime_hosts
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
     from typing import Any
 
 _MAX_ASSET_BYTES = 2 * 1024**3
@@ -27,6 +29,16 @@ _SELECTION_METADATA = {
     "upstream/downloads.json",
     "upstream/alpine-source-channels.json",
 }
+
+
+def require_public_runtime_files(files: Collection[str], archive_name: str) -> None:
+    """Keep installation state and prepared phone data out of a release payload."""
+    private = {"device-data.cpio", "device-data-manifest.json", "pinmap.bin", "keymap.bin"}
+    if private.intersection(files) or any(
+        PurePosixPath(name).parts[0] in {"data", "logs", ".cache", DATA_DIR_NAME, PRIVATE_DIR_NAME}
+        for name in files
+    ):
+        fail(f"distribution runtime contains prepared phone data: {archive_name}")
 
 
 def distribution_matrix() -> tuple[tuple[str, str], ...]:
@@ -187,16 +199,7 @@ def _final_runtime(
     finalize_runtime(files, manifest, executables)
     if files != original:
         fail(f"distribution runtime has an invalid build manifest: {archive.name}")
-    private = {
-        "device-data.cpio",
-        "device-data-manifest.json",
-        "pinmap.bin",
-        "keymap.bin",
-    }
-    if private & files.keys() or any(
-        name.startswith(("data/", "logs/", ".cache/")) for name in files
-    ):
-        fail(f"distribution runtime contains prepared phone data: {archive.name}")
+    require_public_runtime_files(files, archive.name)
     launcher = "Run.cmd" if record["host"] == "windows" else "Run.sh"
     if launcher not in files:
         fail(f"distribution runtime has no launcher: {archive.name}")

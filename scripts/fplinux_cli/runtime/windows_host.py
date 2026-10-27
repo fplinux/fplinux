@@ -1094,7 +1094,7 @@ def boot_archive(  # noqa: PLR0913 -- native loading inputs have separate owners
     device_data: Path,
     *,
     events: Callable[[str], None] | None = None,
-    log: Path | None = None,
+    log: Path,
     session_root: Path,
     prepared_data_sha256: str | None = None,
     on_wait: Callable[[], None] | None = None,
@@ -1114,9 +1114,6 @@ def boot_archive(  # noqa: PLR0913 -- native loading inputs have separate owners
         )
     adapter = bundle.adapter
     config = adapter.adapter_config(bundle.runtime["adapter"])
-    if log is None:
-        timestamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
-        log = root / "logs" / f"{timestamp}.{time.time_ns() % 1_000_000_000:09d}Z.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     session = _prepare_session(
         host,

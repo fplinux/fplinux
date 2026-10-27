@@ -12,6 +12,7 @@ from fplinux_cli.build import DEFAULT_BUILD_MEMORY_MIB
 from fplinux_cli.build import reuse as bundles_commands
 from fplinux_cli.cache.prune import operations as cache_prune
 from fplinux_cli.common import fail, sha256_file
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.dependencies.inputs import acquire_inputs, captured_build_inputs
 from fplinux_cli.environment import definition
 from fplinux_cli.environment import kern as environment_kern
@@ -41,23 +42,26 @@ def ensure_build_directory(path: Path) -> Path:
     return path
 
 
-def prepare_host_tool(
+def prepare_host_tool(  # noqa: PLR0913 -- tool identity, output, reporting and captured store are explicit.
     target: str,
     platform: str,
     tool: str,
     output: Path,
     *,
     reporter: RunReporter,
+    cache: Path | None = None,
 ) -> None:
     """Build one cached host utility in the pinned environment without fitted device data."""
+    cache = data_root(common.ROOT) if cache is None else cache
     snapshot = workspace_capture.workspace_snapshot(
-        workspace_build_inputs.target_build_source_files(target, host_tools=(tool,))
+        workspace_build_inputs.target_build_source_files(
+            target, host_tools=(tool,), selected_data_root=cache
+        )
     )
-    kern, environment_rootfs, environment_state = require_environment(target=target)
-    cache = common.ROOT / ".cache"
+    kern, environment_rootfs, environment_state = require_environment(target=target, cache=cache)
     downloads = ensure_build_directory(cache / "downloads")
     host_tools = ensure_build_directory(cache / "host-tools")
-    workspace = workspace_staging.stage_workspace_snapshot(snapshot)
+    workspace = workspace_staging.stage_workspace_snapshot(snapshot, selected_data_root=cache)
     try:
         platform_config = common.load_toml(workspace / "platforms" / platform / "platform.toml")
         recipe = next(
@@ -120,9 +124,11 @@ def prepare_host_tool(
             tool,
         ]
         with reporter.stage("host-tools", passthrough=True, show_tail=False) as stage:
-            stage.run(command, env=environment_kern.kern_environment())
+            stage.run(command, env=environment_kern.kern_environment(cache=cache))
     finally:
-        workspace_staging.discard_staged_workspace_snapshot(snapshot, workspace)
+        workspace_staging.discard_staged_workspace_snapshot(
+            snapshot, workspace, selected_data_root=cache
+        )
 
 
 def _build_command(  # noqa: PLR0913
@@ -236,7 +242,12 @@ def _print_build_result(  # noqa: PLR0913 -- result and selected build context s
         if profile is not None:
             label += f" --profile {profile}"
         print(f"{label}: OK{suffix}", flush=True)
-        print(f"output: {bundle.path.relative_to(common.ROOT)}", flush=True)
+        output = (
+            bundle.path.relative_to(common.ROOT)
+            if bundle.path.is_relative_to(common.ROOT)
+            else bundle.path
+        )
+        print(f"output: {output}", flush=True)
         print(f"ramboot.bin SHA256: {sha256_file(image)}", flush=True)
     except BrokenPipeError:
         silence_broken_pipe(sys.stdout)
@@ -256,6 +267,7 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
 ) -> None:
     """Build or reuse a bundle, leaving a supplied reporter to its caller."""
     own_reporter = reporter is None
+    cache = data_root(common.ROOT)
     if jobs < 1:
         fail("--jobs must be positive")
     release = releases.load_release(target)
@@ -265,10 +277,10 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
         build_type=build_type,
         include_device_data=include_device_data,
         phone_data=phone_data,
+        selected_data_root=cache,
     )
     environment_lock = definition.load_environment_lock()
     environment_recipe = definition.environment_recipe_digest(environment_lock)
-    cache = common.ROOT / ".cache"
     environment_state = environment_states.load_environment_state(cache, environment_recipe)
     identity = bundles_commands.build_identity(snapshot, environment_state, cache)
     current = bundles_commands.matching_target_bundle(
@@ -277,6 +289,7 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
         release["image"],
         profile,
         build_type=build_type,
+        cache=cache,
     )
     if current is not None:
         bundle, _manifest = current
@@ -295,6 +308,7 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
                 target=bundles_commands.profile_log_target(target, profile),
                 verbose=verbose,
                 build_type=build_type,
+                selected_data_root=cache,
             )
         _print_build_result(
             target, bundle, release, cached=True, profile=profile, build_type=build_type
@@ -316,8 +330,9 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
             target=bundles_commands.profile_log_target(target, profile),
             verbose=verbose,
             build_type=build_type,
+            selected_data_root=cache,
         )
-    kern, environment_rootfs, current_environment = require_environment(target=target)
+    kern, environment_rootfs, current_environment = require_environment(target=target, cache=cache)
     apk_signing = ensure_build_directory(cache / "apk-signing")
     downloads = ensure_build_directory(cache / "downloads")
     ccache = ensure_build_directory(cache / "ccache")
@@ -327,7 +342,7 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
     linux = ensure_build_directory(cache / "linux")
     output = ensure_build_directory(cache / "out")
     with reporter.stage("workspace"):
-        workspace = workspace_staging.stage_workspace_snapshot(snapshot)
+        workspace = workspace_staging.stage_workspace_snapshot(snapshot, selected_data_root=cache)
     try:
         with reporter.stage("build-inputs"):
             acquire_inputs(
@@ -367,7 +382,7 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
                         environment_recipe=current_environment.recipe,
                         environment_content=current_environment.content,
                     ),
-                    env=environment_kern.kern_environment(),
+                    env=environment_kern.kern_environment(cache=cache),
                 )
             except SystemExit as error:
                 if error.code == 137:
@@ -386,6 +401,7 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
             release["image"],
             profile,
             build_type=build_type,
+            cache=cache,
         )
         if current is None:
             fail("build completed without publishing an exact valid current bundle")
@@ -412,4 +428,6 @@ def build(  # noqa: PLR0913 -- CLI options and caller-owned reporting remain exp
                 target=target,
             )
     finally:
-        workspace_staging.discard_staged_workspace_snapshot(snapshot, workspace)
+        workspace_staging.discard_staged_workspace_snapshot(
+            snapshot, workspace, selected_data_root=cache
+        )

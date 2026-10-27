@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import tomllib
 from dataclasses import dataclass
+from functools import partial
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -27,6 +28,7 @@ from fplinux_cli.build.runtime import (
 )
 from fplinux_cli.build.sources import source_lock_entry
 from fplinux_cli.common import ROOT, canonical_json_bytes, fail
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.device_data import inputs as firmware_inputs
 from fplinux_cli.environment.definition import ENVIRONMENT_RECIPE_INPUTS
 from fplinux_cli.manifests.assets import resolve_asset_sources
@@ -45,6 +47,7 @@ from fplinux_cli.manifests.paths import (
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.targets import load_target
 from fplinux_cli.manifests.values import sha256_value
+from fplinux_cli.source_paths import source_path_excluded
 
 from .capture import (
     WorkspaceFile,
@@ -85,6 +88,8 @@ STAGED_BUILD_SOURCES = (
     "scripts/fplinux_cli/artifacts/bundles.py",
     "scripts/fplinux_cli/artifacts/release.py",
     "scripts/fplinux_cli/common.py",
+    "scripts/fplinux_cli/data_paths.py",
+    "scripts/fplinux_cli/source_paths.py",
     "scripts/fplinux_cli/manifests",
     "scripts/fplinux_cli/environment/__init__.py",
     "scripts/fplinux_cli/quality/__init__.py",
@@ -120,8 +125,13 @@ def is_python_cache(path: Path) -> bool:
     return "__pycache__" in relative.parts or path.suffix in {".pyc", ".pyo"}
 
 
-def add_source_path(files: dict[str, Path], path: Path) -> None:
+def add_source_path(
+    files: dict[str, Path], path: Path, *, selected_data_root: Path | None = None
+) -> None:
     """Add a regular file or a complete source directory to the closure."""
+    cache = data_root(ROOT) if selected_data_root is None else selected_data_root
+    if source_path_excluded(path, source_root=ROOT, selected_data_root=cache):
+        fail(f"required workspace input is inside an excluded data or private tree: {path}")
     if path.is_symlink():
         fail(f"workspace input must not be a symlink: {path}")
     if path.is_file():
@@ -131,25 +141,29 @@ def add_source_path(files: dict[str, Path], path: Path) -> None:
         return
     if not path.is_dir():
         fail(f"workspace input is missing or not a directory: {path}")
-    for child in sorted(path.rglob("*")):
+    for child in sorted(path.iterdir()):
+        if source_path_excluded(child, source_root=ROOT, selected_data_root=cache):
+            continue
         if is_python_cache(child):
             continue
         if child.is_symlink():
             fail(f"workspace input must not be a symlink: {child}")
         if child.is_dir():
+            add_source_path(files, child, selected_data_root=cache)
             continue
         if not child.is_file():
             fail(f"workspace input must be a regular file: {child}")
         files[child.relative_to(ROOT).as_posix()] = child
 
 
-def target_build_source_files(
+def target_build_source_files(  # noqa: PLR0913 -- target inputs and captured data placement are distinct.
     target: str,
     profile: str | None = None,
     *,
     build_type: str = "release",
     target_config: dict[str, Any] | None = None,
     host_tools: Collection[str] | None = None,
+    selected_data_root: Path | None = None,
 ) -> list[tuple[str, Path]]:
     """Resolve only the selected target/platform build closure."""
     if target_config is None:
@@ -157,6 +171,8 @@ def target_build_source_files(
     platform = load_platform(target_config["platform"])
     target_root = ROOT / "targets" / target
     files: dict[str, Path] = {}
+    cache = data_root(ROOT) if selected_data_root is None else selected_data_root
+    add_source = partial(add_source_path, files, selected_data_root=cache)
 
     implementation_sources = (
         *STAGED_BUILD_SOURCES,
@@ -164,9 +180,9 @@ def target_build_source_files(
         *_MATERIALIZED_BUILD_SOURCES,
     )
     for relative in implementation_sources:
-        add_source_path(files, ROOT / relative)
+        add_source(ROOT / relative)
     if target_config["linux"]["root"]["kind"] == "initramfs":
-        add_source_path(files, ROOT / "alpine/ramroot-init.sh")
+        add_source(ROOT / "alpine/ramroot-init.sh")
     rootfs_packages = selected_packages(platform, target_config, root=ROOT)
     selected_bundle_packages = bundle_packages(
         platform,
@@ -176,74 +192,74 @@ def target_build_source_files(
     )
     build_packages = aport_build_order((*rootfs_packages, *selected_bundle_packages))
     for package in build_packages:
-        add_source_path(files, ROOT / "alpine/aports" / package)
+        add_source(ROOT / "alpine/aports" / package)
     shared_sources = {
         source for package in build_packages for source in shared_aport_sources(package, root=ROOT)
     }
     for source in sorted(shared_sources):
-        add_source_path(files, source)
-    add_source_path(files, target_root / "target.toml")
-    add_source_path(files, target_release_manifest_path(target))
+        add_source(source)
+    add_source(target_root / "target.toml")
+    add_source(target_release_manifest_path(target))
     if platform["bootstrap"]["backend"] == "ums9117":
-        add_source_path(files, platform_asset_lock_path(target_config["platform"]))
+        add_source(platform_asset_lock_path(target_config["platform"]))
     display_source = target_config["display"]["source"]
     if display_source is not None:
-        add_source_path(files, target_root / display_source)
+        add_source(target_root / display_source)
     for path in kernel_config_paths(target, target_config, platform):
-        add_source_path(files, path)
+        add_source(path)
     selected_profile = target_config.get("profile")
-    add_source_path(files, profile_manifest_path(target, "default"))
+    add_source(profile_manifest_path(target, "default"))
     if selected_profile is not None:
-        add_source_path(files, profile_manifest_path(target, selected_profile))
+        add_source(profile_manifest_path(target, selected_profile))
     if target_config["uboot"]["kind"] == "full":
-        add_source_path(files, ROOT / target_config["uboot"]["source"])
-        add_source_path(files, target_root / target_config["uboot"]["defconfig"])
+        add_source(ROOT / target_config["uboot"]["source"])
+        add_source(target_root / target_config["uboot"]["defconfig"])
         for relative in target_config["uboot"]["patches"]:
-            add_source_path(files, ROOT / relative)
+            add_source(ROOT / relative)
         for step in target_config["uboot"]["copies"]:
-            add_source_path(files, ROOT / step["source"])
-    add_source_path(files, target_root / target_config["bootstrap"]["source"])
+            add_source(ROOT / step["source"])
+    add_source(target_root / target_config["bootstrap"]["source"])
     if platform["bootstrap"]["backend"] == "sc9820e":
-        add_source_path(files, target_root / target_config["loader"]["build"]["source"])
+        add_source(target_root / target_config["loader"]["build"]["source"])
     lcd_config = target_config["bootstrap"].get("lcd_config")
     if lcd_config is not None:
-        add_source_path(files, target_root / lcd_config)
+        add_source(target_root / lcd_config)
     for relative in target_config["linux"]["patches"]:
-        add_source_path(files, target_root / relative)
+        add_source(target_root / relative)
     for key in ("copies", "appends"):
         for step in target_config["linux"][key]:
-            add_source_path(files, target_root / step["source"])
+            add_source(target_root / step["source"])
 
     platform_root = ROOT / "platforms" / target_config["platform"]
-    add_source_path(files, platform_root / "platform.toml")
+    add_source(platform_root / "platform.toml")
     for relative in platform["linux"]["patches"]:
-        add_source_path(files, ROOT / relative)
+        add_source(ROOT / relative)
     for key in ("copies", "appends"):
         for step in platform["linux"][key]:
-            add_source_path(files, ROOT / step["source"])
+            add_source(ROOT / step["source"])
     if platform["bootstrap"]["backend"] == "sc9820e":
-        add_source_path(files, platform_root / "bootstrap")
+        add_source(platform_root / "bootstrap")
     else:
         for step in platform["bootstrap"]["shared_copies"]:
-            add_source_path(files, ROOT / step["source"])
+            add_source(ROOT / step["source"])
         for relative in platform["bootstrap"]["patches"]:
-            add_source_path(files, ROOT / relative)
+            add_source(ROOT / relative)
     if host_tools is None:
         host_tools = runtime_host_tools(
             platform, nand_ecc=runtime_needs_nand_ecc(target_config)
         ).values()
     for recipe in selected_host_tool_recipes(platform, host_tools):
         if recipe["type"] == "cc-libusb":
-            add_source_path(files, ROOT / recipe["source"])
+            add_source(ROOT / recipe["source"])
             for relative in CLI_SOURCES:
-                add_source_path(files, ROOT / relative)
+                add_source(ROOT / relative)
         elif recipe["type"] == "make-archive":
             for step in recipe["copies"]:
-                add_source_path(files, ROOT / step["source"])
+                add_source(ROOT / step["source"])
             for relative in recipe["patches"]:
-                add_source_path(files, ROOT / relative)
+                add_source(ROOT / relative)
     for path in runtime_source_files(target, target_config, root=ROOT).values():
-        add_source_path(files, path)
+        add_source(path)
     return sorted(files.items())
 
 
@@ -271,6 +287,7 @@ def shared_linux_source_files(
     sources: dict[str, Any],
     *,
     captured_files: Mapping[str, WorkspaceFile],
+    selected_data_root: Path | None = None,
 ) -> SharedLinuxSources:
     """Capture peer sources once and classify operations from those exact bytes."""
     platform_path = f"platforms/{target_config['platform']}/platform.toml"
@@ -280,15 +297,17 @@ def shared_linux_source_files(
     source_sha256 = sha256_value(source.get("sha256"), f"source {source_lock} sha256")
     targets = discover_linux_targets(ROOT, sources, source_sha256)
     files: dict[str, Path] = {}
+    cache = data_root(ROOT) if selected_data_root is None else selected_data_root
+    add_source = partial(add_source_path, files, selected_data_root=cache)
     for target in targets:
         target_root = ROOT / "targets" / target.name
-        add_source_path(files, target_root / "target.toml")
+        add_source(target_root / "target.toml")
         display_source = target.config["display"]["source"]
         if display_source is not None:
-            add_source_path(files, target_root / display_source)
-        add_source_path(files, ROOT / "platforms" / target.config["platform"] / "platform.toml")
+            add_source(target_root / display_source)
+        add_source(ROOT / "platforms" / target.config["platform"] / "platform.toml")
     for _operation, relative, _destination in _linux_source_operations(targets):
-        add_source_path(files, ROOT / relative)
+        add_source(ROOT / relative)
     captured = {
         relative: captured_files[relative]
         if relative in captured_files
@@ -382,10 +401,12 @@ def target_workspace_snapshot(  # noqa: PLR0913 -- target, build context and per
     include_device_data: bool = True,
     release_context: ReleaseContext | None = None,
     phone_data: Path | None = None,
+    selected_data_root: Path | None = None,
 ) -> WorkspaceSnapshot:
     """Capture selected sources and, by default, locally prepared device data."""
+    cache = data_root(ROOT) if selected_data_root is None else selected_data_root
     if release_context is None:
-        release_context = current_release_context(ROOT)
+        release_context = current_release_context(ROOT, selected_data_root=cache)
     target_config = load_target(target, profile, build_type=build_type)
     source_snapshot = snapshot_from_inventory(
         lambda: target_build_source_files(
@@ -393,6 +414,7 @@ def target_workspace_snapshot(  # noqa: PLR0913 -- target, build context and per
             profile,
             build_type=build_type,
             target_config=target_config,
+            selected_data_root=cache,
         )
     )
     causal_files = {source.path: source for source in source_snapshot.files}
@@ -405,7 +427,9 @@ def target_workspace_snapshot(  # noqa: PLR0913 -- target, build context and per
         ),
         nand_ecc=runtime_needs_nand_ecc(target_config),
     )
-    linux_sources = shared_linux_source_files(target_config, sources, captured_files=causal_files)
+    linux_sources = shared_linux_source_files(
+        target_config, sources, captured_files=causal_files, selected_data_root=cache
+    )
     materialized_sources = [
         *_MATERIALIZED_BUILD_SOURCES,
         "sources.lock.toml",

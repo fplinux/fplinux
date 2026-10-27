@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from fplinux_cli.build.kernel.state import inspect_linux_base
 from fplinux_cli.common import ROOT, fail, relative_name, replace_file_atomically
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.environment.kern import (
     kern_box_name,
     kern_environment,
@@ -164,28 +165,27 @@ def format_snapshot(
 
 def format_sources(values: Sequence[str]) -> None:
     """Format explicit sources in a private projection, then publish verified bytes."""
-    selected, inventory, groups = resolve_format_paths(values)
+    cache = data_root(ROOT)
+    inventory = quality_files(enforce_source_policy=False, selected_data_root=cache)
+    selected, inventory, groups = resolve_format_paths(values, inventory=inventory)
     patches = frozenset(path for path in selected if Path(path).suffix == ".patch")
     contexts = linux_contexts(patches) if patches else ()
     snapshot = workspace_snapshot(inventory)
-    archives = ROOT / ".cache/downloads"
-    linux_cache = ROOT / ".cache/linux"
+    archives = cache / "downloads"
+    linux_cache = cache / "linux"
     fetched: set[str] = set()
     for context in contexts:
         source = resolve_source_record(context.source["source_id"], context.source)
-        if (
-            source.checksum not in fetched
-            and inspect_linux_base(ROOT / ".cache", source.checksum) is None
-        ):
-            source.acquire(ROOT / ".cache", offline=True)
+        if source.checksum not in fetched and inspect_linux_base(cache, source.checksum) is None:
+            source.acquire(cache, offline=True)
             fetched.add(source.checksum)
     if patches:
         if linux_cache.is_symlink() or (linux_cache.exists() and not linux_cache.is_dir()):
             fail(f"invalid Linux cache directory: {linux_cache}")
         linux_cache.mkdir(parents=True, exist_ok=True)
-    kern, rootfs, _state = require_environment()
+    kern, rootfs, _state = require_environment(cache=cache)
 
-    reporter = RunReporter.create("format", target=None, verbose=False)
+    reporter = RunReporter.create("format", target=None, verbose=False, selected_data_root=cache)
     if patches:
         print(
             "format: Linux patches: C/H only; other file types retain their contents", flush=True
@@ -201,7 +201,7 @@ def format_sources(values: Sequence[str]) -> None:
                         workspace=projection,
                         formatter=command,
                     ),
-                    env=kern_environment(),
+                    env=kern_environment(cache=cache),
                     timeout=_FORMAT_TIMEOUT_SECONDS,
                 )
             if patches:
@@ -221,12 +221,14 @@ def format_sources(values: Sequence[str]) -> None:
                             *sorted(patches),
                         ],
                     ),
-                    env=kern_environment(),
+                    env=kern_environment(cache=cache),
                     timeout=_FORMAT_TIMEOUT_SECONDS,
                 )
 
         def current_snapshot() -> WorkspaceSnapshot:
-            return quality_workspace_snapshot(enforce_source_policy=False)
+            return quality_workspace_snapshot(
+                enforce_source_policy=False, selected_data_root=cache
+            )
 
         changed, unchanged = format_snapshot(
             snapshot,

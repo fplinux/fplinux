@@ -117,13 +117,13 @@ def archive_inputs(
         contents = resource.read_bytes()
         windows_scripts[relative] = contents
         write_archive_file(tmp_path, relative, contents)
-    public_key = signing.signing_public_key(tmp_path / ".cache")
+    public_key = signing.signing_public_key(tmp_path / ".data")
     write_archive_file(
         tmp_path, public_key.relative_to(tmp_path).as_posix(), b"test public signing key\n"
     )
     signing_digest = hashlib.sha256(public_key.read_bytes()).hexdigest()
     generation = "c" * 64
-    bundle = tmp_path / ".cache/out" / target / "builds/release/bundles" / generation
+    bundle = tmp_path / ".data/out" / target / "builds/release/bundles" / generation
     normalized = package.load_release_manifest(target, config)
     runtime_sources = runtime_source_files(target, config, root=source)
     if config.get("emmc") is not None and device_data_descriptor(target, config) is not None:
@@ -241,7 +241,7 @@ def archive_inputs(
         }
     )
     write_archive_file(bundle, "build-manifest.json", manifest)
-    publish_current_bundle(tmp_path / ".cache/out", target, bundle)
+    publish_current_bundle(tmp_path / ".data/out", target, bundle)
     native_files = {
         relative: write_archive_file(tmp_path / "prepared-native", relative, relative.encode())
         for relative in (
@@ -302,8 +302,14 @@ def archive_inputs(
         """Stand in for the exact pinned-environment runtime export boundary."""
         return dict(linux_files)
 
+    def prepared_release_context(*, selected_data_root: Path) -> ReleaseContext:
+        """Replace source identity capture while requiring the selected archive store."""
+        assert selected_data_root == tmp_path / ".data"
+        return context
+
     monkeypatch.setattr(common, "ROOT", tmp_path)
-    monkeypatch.setattr(package, "current_release_context", lambda: context)
+    monkeypatch.setenv("FPLINUX_DATA_DIR", str(tmp_path / ".data"))
+    monkeypatch.setattr(package, "current_release_context", prepared_release_context)
     monkeypatch.setattr(targets, "load_target", lambda *_args, **_kwargs: config)
     monkeypatch.setattr(releases, "load_release", lambda *_args, **_kwargs: release)
     monkeypatch.setattr(platforms, "load_platform", lambda *_args: platform)

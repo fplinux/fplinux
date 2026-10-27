@@ -53,9 +53,20 @@ class VerifyLifecycleTests:
             runtime_commands.verify_booted("phone")
 
         assert snapshot.call_args_list == [
-            mock.call("phone", None, build_type="release", phone_data=None),
             mock.call(
-                "phone", None, build_type="release", include_device_data=False, phone_data=None
+                "phone",
+                None,
+                build_type="release",
+                phone_data=None,
+                selected_data_root=command_bundle.cache,
+            ),
+            mock.call(
+                "phone",
+                None,
+                build_type="release",
+                include_device_data=False,
+                phone_data=None,
+                selected_data_root=command_bundle.cache,
             ),
         ]
         assert reconnect.call_args.args[0][2] == str(path / "fplinux.py")
@@ -136,12 +147,16 @@ class VerifyLifecycleTests:
             contextlib.redirect_stdout(io.StringIO()),
         ):
             runtime_commands.verify_booted("phone", profile=profile)
-        snapshot.assert_called_once_with("phone", profile, build_type="release", phone_data=None)
+        snapshot.assert_called_once_with(
+            "phone",
+            profile,
+            build_type="release",
+            phone_data=None,
+            selected_data_root=command_bundle.cache,
+        )
         arguments = session.call_args.args[0]
         assert arguments[2] == str(path / "fplinux.py")
-        assert arguments[9] == str(
-            command_bundle.root / ".cache/logs/run/phone/profiles/microsd-uboot"
-        )
+        assert arguments[9] == str(command_bundle.cache / "logs/run/phone/profiles/microsd-uboot")
 
     def test_verify_reports_the_manifest_identity_after_reconnect_accepts(
         self, command_bundle: CommandBundleContext

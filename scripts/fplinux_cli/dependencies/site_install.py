@@ -10,16 +10,17 @@ from pathlib import Path
 
 from fplinux_cli import common
 from fplinux_cli.common import canonical_json_bytes, fail, sha256_bytes, sha256_file
+from fplinux_cli.data_paths import DATA_ENV, data_root
 from fplinux_cli.dependencies.inputs import acquire_inputs
 from fplinux_cli.dependencies.site_inputs import site_dependency_selection
 from fplinux_cli.environment.install import install_node_runtime, populate_npm_cache
 from fplinux_cli.manifests.source_catalog import resolve_source
 
 
-def install_site() -> None:
+def install_site(*, cache: Path | None = None) -> None:
     """Prepare exact Node/npm and feed the site's native lock into an offline install."""
     root = common.ROOT
-    cache = root / ".cache"
+    cache = data_root(root) if cache is None else cache
     inputs, _context = site_dependency_selection(root)
     local = acquire_inputs(inputs, cache, offline=True)
     node = resolve_source(root, "site-node")
@@ -44,6 +45,7 @@ def install_site() -> None:
             prepared.rename(runtime)
     environment = {
         **os.environ,
+        DATA_ENV: str(cache),
         "PATH": str(runtime / "bin") + os.pathsep + os.environ.get("PATH", ""),
     }
     node_command, npm_command = runtime / "bin/node", runtime / "bin/npm"

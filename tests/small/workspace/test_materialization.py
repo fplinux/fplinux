@@ -101,7 +101,7 @@ class WorkspaceMaterializationTests:
         """The discard API cannot be redirected to another cache directory."""
         root = tmp_path
         snapshot = workspace_capture.workspace_snapshot([("source", write_source(root))])
-        wrong = root / ".cache/workspaces/not-the-snapshot"
+        wrong = root / ".data/workspaces/not-the-snapshot"
         wrong.mkdir(parents=True)
         with (
             mock.patch.object(workspace_staging, "ROOT", root),
@@ -117,7 +117,7 @@ class WorkspaceMaterializationTests:
         """A stale link or altered marker is not recognised as disposable cache state."""
         root = tmp_path
         snapshot = workspace_capture.workspace_snapshot([("source", write_source(root))])
-        expected = root / ".cache/workspaces" / snapshot.recipe
+        expected = root / ".data/workspaces" / snapshot.recipe
         external = root / "external"
         external.mkdir()
         expected.parent.mkdir(parents=True)
@@ -168,7 +168,7 @@ class WorkspaceMaterializationTests:
         sentinel = external / "sentinel"
         external.mkdir()
         sentinel.write_text("preserve\n", encoding="utf-8")
-        namespace = root / ".cache" / namespace_name
+        namespace = root / ".data" / namespace_name
         namespace.parent.mkdir(exist_ok=True)
         namespace.symlink_to(external, target_is_directory=True)
         expected = namespace / snapshot.recipe
@@ -185,29 +185,24 @@ class WorkspaceMaterializationTests:
 
         assert (sentinel.read_text(encoding="utf-8")) == ("preserve\n")
 
-    def test_stage_and_discard_refuse_a_symlinked_cache_root(self, tmp_path: Path) -> None:
-        """The namespace check also refuses a redirected `.cache` component."""
+    def test_stage_and_discard_use_the_canonical_selected_data_root(self, tmp_path: Path) -> None:
+        """The selected root resolves once to the same physical workspace namespace."""
         root = tmp_path
         snapshot = workspace_capture.workspace_snapshot([("source", write_source(root))])
         external = root / "external-cache"
         sentinel = external / "sentinel"
         external.mkdir()
         sentinel.write_text("preserve\n", encoding="utf-8")
-        cache = root / ".cache"
+        cache = root / ".data"
         cache.symlink_to(external, target_is_directory=True)
-        expected = cache / "workspaces" / snapshot.recipe
-        with (
-            mock.patch.object(workspace_staging, "ROOT", root),
-            pytest.raises(SystemExit, match="workspace cache root is missing or invalid"),
-        ):
-            workspace_staging.stage_workspace_snapshot(snapshot)
-        with (
-            mock.patch.object(workspace_staging, "ROOT", root),
-            pytest.raises(SystemExit, match="workspace cache root is missing or invalid"),
-        ):
-            workspace_staging.discard_staged_workspace_snapshot(snapshot, expected)
+        with mock.patch.object(workspace_staging, "ROOT", root):
+            workspace = workspace_staging.stage_workspace_snapshot(snapshot)
+            assert workspace == external / "workspaces" / snapshot.recipe
+            workspace_staging.discard_staged_workspace_snapshot(snapshot, workspace)
 
         assert (sentinel.read_text(encoding="utf-8")) == ("preserve\n")
+        assert cache.is_symlink()
+        assert not workspace.exists()
 
     def test_failed_materialization_removes_its_staging_directory(self, tmp_path: Path) -> None:
         """An injected write failure removes the private staging directory."""

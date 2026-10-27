@@ -33,27 +33,42 @@ def test_environment_admission_requires_exact_prepared_state_without_setup(
 ) -> None:
     """A matching receipt and fresh content probe admit work; every miss directs setup."""
     state = EnvironmentState("a" * 64, "b" * 64, "c" * 64)
-    cache = tmp_path / ".cache"
+    selected_root = tmp_path / ".data"
     if condition != "missing-receipt":
         recorded = (
             EnvironmentState("d" * 64, state.generation, state.content)
             if condition == "stale-recipe"
             else state
         )
-        publish_environment_state(cache, recorded)
+        publish_environment_state(selected_root, recorded)
+    monkeypatch.setenv("FPLINUX_DATA_DIR", str(selected_root))
     monkeypatch.setattr(runtime, "ROOT", tmp_path)
     monkeypatch.setattr(runtime, "load_environment_lock", dict)
     monkeypatch.setattr(runtime, "environment_recipe_digest", lambda _lock: state.recipe)
-    monkeypatch.setattr(runtime, "kern_available", lambda _lock: condition != "missing-runtime")
-    monkeypatch.setattr(runtime, "require_kern", lambda _lock: "prepared-kern")
-    monkeypatch.setattr(
-        runtime,
-        "probe_environment_state",
-        lambda _kern, _rootfs, _recipe: None if condition == "stale-content" else state,
-    )
+
+    def kern_available(_lock: object, *, cache: Path) -> bool:
+        assert cache == selected_root
+        return condition != "missing-runtime"
+
+    def require_kern(_lock: object, *, cache: Path) -> str:
+        assert cache == selected_root
+        return "prepared-kern"
+
+    def probe_environment_state(
+        kern: str, rootfs: Path, recipe: str, *, cache: Path
+    ) -> EnvironmentState | None:
+        assert cache == selected_root
+        assert kern == "prepared-kern"
+        assert rootfs == selected_root / "environment" / f"rootfs-{state.generation}"
+        assert recipe == state.recipe
+        return None if condition == "stale-content" else state
+
+    monkeypatch.setattr(runtime, "kern_available", kern_available)
+    monkeypatch.setattr(runtime, "require_kern", require_kern)
+    monkeypatch.setattr(runtime, "probe_environment_state", probe_environment_state)
     before = {
         path.relative_to(tmp_path): path.read_bytes()
-        for path in cache.rglob("*")
+        for path in selected_root.rglob("*")
         if path.is_file()
     }
     with (
@@ -63,7 +78,7 @@ def test_environment_admission_requires_exact_prepared_state_without_setup(
         if condition == "ready":
             assert runtime.require_environment(target=target) == (
                 "prepared-kern",
-                cache / "environment" / f"rootfs-{state.generation}",
+                selected_root / "environment" / f"rootfs-{state.generation}",
                 state,
             )
         else:
@@ -74,7 +89,7 @@ def test_environment_admission_requires_exact_prepared_state_without_setup(
                 runtime.require_environment(target=target)
     after = {
         path.relative_to(tmp_path): path.read_bytes()
-        for path in cache.rglob("*")
+        for path in selected_root.rglob("*")
         if path.is_file()
     }
     assert after == before

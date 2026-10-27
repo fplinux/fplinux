@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import common
 from fplinux_cli.common import canonical_json_bytes, fail, sha256_bytes
+from fplinux_cli.data_paths import DATA_DIR_NAME, PRIVATE_DIR_NAME, data_root
+from fplinux_cli.source_paths import git_source_excludes, source_path_excluded
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -68,6 +70,8 @@ _EXCLUDED_COMPONENTS = frozenset(
     {
         ".astro",
         ".cache",
+        DATA_DIR_NAME,
+        PRIVATE_DIR_NAME,
         ".git",
         ".pytest_cache",
         ".ruff_cache",
@@ -179,9 +183,17 @@ def _git(root: Path, *arguments: str) -> bytes:
     return result.stdout
 
 
-def _source_paths(root: Path, *, git_checkout: bool) -> tuple[str, ...]:
+def _source_paths(root: Path, *, git_checkout: bool, selected_data_root: Path) -> tuple[str, ...]:
     if git_checkout:
-        names = _git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+        names = _git(
+            root,
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            *git_source_excludes(source_root=root, selected_data_root=selected_data_root),
+        )
         paths = {os.fsdecode(name) for name in names.split(b"\0") if name}
     else:
         paths = set()
@@ -192,17 +204,26 @@ def _source_paths(root: Path, *, git_checkout: bool) -> tuple[str, ...]:
                 for child in children
                 if child not in _EXCLUDED_COMPONENTS
                 and (base != Path() or child in _SOURCE_DIRECTORIES)
+                and not source_path_excluded(
+                    root / base / child, source_root=root, selected_data_root=selected_data_root
+                )
             ]
             for filename in files:
                 paths.add((base / filename).as_posix())
     return tuple(
         relative
         for relative in sorted(paths)
-        if _public_source(relative) and (root / relative).exists()
+        if _public_source(relative)
+        and not source_path_excluded(
+            root / relative, source_root=root, selected_data_root=selected_data_root
+        )
+        and (root / relative).exists()
     )
 
 
-def _clean_commit(root: Path, files: tuple[WorkspaceFile, ...]) -> tuple[str, bool]:
+def _clean_commit(
+    root: Path, files: tuple[WorkspaceFile, ...], *, selected_data_root: Path
+) -> tuple[str, bool]:
     commit = _git(root, "rev-parse", "--verify", "HEAD").decode().strip()
     algorithm = _git(root, "rev-parse", "--show-object-format").decode().strip()
     tree = {}
@@ -212,7 +233,9 @@ def _clean_commit(root: Path, files: tuple[WorkspaceFile, ...]) -> tuple[str, bo
         properties, name = entry.split(b"\t", 1)
         mode, kind, object_hash = properties.split()
         relative = os.fsdecode(name)
-        if _public_source(relative):
+        if _public_source(relative) and not source_path_excluded(
+            root / relative, source_root=root, selected_data_root=selected_data_root
+        ):
             tree[relative] = (int(mode, 8) & 0o777, kind, object_hash.decode())
     if set(tree) != {source.path for source in files}:
         return commit, False
@@ -250,7 +273,9 @@ def public_source_digest(files: tuple[WorkspaceFile, ...]) -> str:
     return sha256_bytes(canonical_json_bytes(records))
 
 
-def capture_public_sources(root: Path | None = None) -> PublicSourceSnapshot:
+def capture_public_sources(
+    root: Path | None = None, *, selected_data_root: Path | None = None
+) -> PublicSourceSnapshot:
     """Capture one canonical inventory for both source export and the release ID."""
     from fplinux_cli.workspace.capture import (  # noqa: PLC0415 -- capture is not a metadata reader dependency.
         WorkspaceFile,
@@ -258,10 +283,13 @@ def capture_public_sources(root: Path | None = None) -> PublicSourceSnapshot:
     )
 
     root = common.ROOT if root is None else root
+    selected_data_root = data_root(root) if selected_data_root is None else selected_data_root
     git_checkout = (root / ".git").exists()
     captured = (
         read_source_file(relative, root / relative)
-        for relative in _source_paths(root, git_checkout=git_checkout)
+        for relative in _source_paths(
+            root, git_checkout=git_checkout, selected_data_root=selected_data_root
+        )
     )
     files = tuple(
         WorkspaceFile(source.path, source.contents, 0o755 if source.mode & 0o111 else 0o644)
@@ -270,7 +298,7 @@ def capture_public_sources(root: Path | None = None) -> PublicSourceSnapshot:
     digest = public_source_digest(files)
     commit = None
     if git_checkout:
-        commit, clean = _clean_commit(root, files)
+        commit, clean = _clean_commit(root, files, selected_data_root=selected_data_root)
         release = ReleaseContext(commit[:12] if clean else digest[:12], commit, digest)
     else:
         retained_path = root / SOURCE_IDENTITY_NAME
@@ -283,13 +311,15 @@ def capture_public_sources(root: Path | None = None) -> PublicSourceSnapshot:
     return PublicSourceSnapshot(files, release)
 
 
-def current_release_context(root: Path | None = None) -> ReleaseContext:
+def current_release_context(
+    root: Path | None = None, *, selected_data_root: Path | None = None
+) -> ReleaseContext:
     """Resolve a source export or the context already bound to a staged build."""
     root = common.ROOT if root is None else root
     staged = root / BUILD_IDENTITY_NAME
     if (root / ".fplinux-workspace").is_file() and staged.is_file():
         return _read_identity(staged)
-    return capture_public_sources(root).release
+    return capture_public_sources(root, selected_data_root=selected_data_root).release
 
 
 def source_identity_bytes(snapshot: PublicSourceSnapshot) -> bytes:

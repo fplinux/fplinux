@@ -8,6 +8,8 @@ export default [
 			"**/*.json",
 			"**/*.jsonc",
 			".astro/**",
+			"**/.data/**",
+			"**/.private/**",
 			"dist/**",
 			"public/**",
 			"src/assets/**",

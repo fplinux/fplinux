@@ -115,7 +115,14 @@ def test_release_rejects_incomplete_conflicting_private_or_unpaired_bytes(
     elif damage == "transport":
         next(transport.glob("*.part-00000")).write_bytes(b"changed original")
     else:
-        write_pair(packages, "nokia-ta1618", "linux", **{damage: True})
+        write_pair(
+            packages,
+            "nokia-ta1618",
+            "linux",
+            conflicting_source=damage == "conflicting_source",
+            private_runtime=damage == "private_runtime",
+            mismatched_pair=damage == "mismatched_pair",
+        )
     with pytest.raises(SystemExit, match=diagnostic):
         distribution.assemble_distribution(
             packages, tmp_path / "final", inputs_directory=transport
@@ -136,3 +143,20 @@ def test_source_distribution_parser_rejects_duplicate_runtime_selection() -> Non
         distribution.distribution_records(
             json_bytes({**release_fields(), "runtimes": [record, record]})
         )
+
+
+@pytest.mark.parametrize(
+    "member", [".data/runtime/session.json", ".private/retained.txt", ".data", ".private"]
+)
+def test_distribution_rejects_installation_data_and_private_work(
+    inputs: tuple[Path, Path], tmp_path: Path, member: str
+) -> None:
+    packages, transport = inputs
+    write_pair(packages, "nokia-ta1618", "linux", private_member=member)
+
+    with pytest.raises(SystemExit, match="prepared phone data"):
+        distribution.assemble_distribution(
+            packages, tmp_path / "final", inputs_directory=transport
+        )
+
+    assert not (tmp_path / "final").exists()

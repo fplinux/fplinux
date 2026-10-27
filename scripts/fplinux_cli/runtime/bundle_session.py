@@ -10,7 +10,10 @@ from typing import TYPE_CHECKING, Any
 from fplinux_cli import common
 from fplinux_cli.artifacts.bundles import BundleStateError, resolve_current_bundle
 from fplinux_cli.common import fail
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.manifests.paths import normalize_profile
+
+from .data_paths import checkout_runtime_root
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -69,7 +72,7 @@ def resolve_target_bundle(
     """Resolve the current bundle pointer exactly once."""
     try:
         bundle = resolve_current_bundle(
-            common.ROOT / ".cache/out",
+            data_root(common.ROOT) / "out",
             target,
             profile,
             build_type=build_type,
@@ -80,11 +83,6 @@ def resolve_target_bundle(
             "current build is missing or invalid; rebuild it: "
             f"{profile_command('build', target, profile, build_type=build_type)} ({error})"
         )
-
-
-def target_data_root(target: str) -> Path:
-    """Keep source-checkout sessions separate from persistent phone data."""
-    return common.ROOT / ".cache" / "runtime" / target
 
 
 def bundle_runtime_command(
@@ -99,7 +97,8 @@ def bundle_runtime_command(
     entry = bundle.path / "fplinux.py"
     if entry.is_symlink() or not entry.is_file():
         fail(f"current bundle has no valid runtime entry point: {entry}")
-    logs = common.ROOT / ".cache/logs/run" / target
+    managed_root = data_root(common.ROOT)
+    logs = managed_root / "logs/run" / target
     if profile is not None:
         logs = logs / "profiles" / profile
     command = [
@@ -111,7 +110,7 @@ def bundle_runtime_command(
         "--bundle",
         str(bundle.path),
         "--data-root",
-        str(target_data_root(target)),
+        str(checkout_runtime_root(managed_root, common.ROOT, target)),
         "--log-root",
         str(logs),
     ]

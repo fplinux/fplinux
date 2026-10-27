@@ -14,11 +14,11 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _workspace(root: Path, name: str, *, quality: bool = False) -> Path:
+def _workspace(root: Path, name: str) -> Path:
     digest = name * 64
     path = root / digest
     path.mkdir(parents=True)
-    marker = path / (".cache/.fplinux-workspace" if quality else ".fplinux-workspace")
+    marker = path / ".fplinux-workspace"
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(digest + "\n")
     (path / "payload").write_bytes(b"payload")

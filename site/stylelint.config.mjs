@@ -5,6 +5,8 @@ export default {
 	...config,
 	ignoreFiles: [
 		".astro/**",
+		"**/.data/**",
+		"**/.private/**",
 		"dist/**",
 		"node_modules/**",
 		"public/**",

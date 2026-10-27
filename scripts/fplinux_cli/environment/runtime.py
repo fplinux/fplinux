@@ -8,6 +8,7 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from fplinux_cli.common import ROOT, fail, read_json_object
+from fplinux_cli.data_paths import data_root
 
 from .definition import environment_recipe_digest, load_environment_lock
 from .kern import KERN_PROBE_TIMEOUT, kern_available, kern_box_name, kern_environment, require_kern
@@ -50,7 +51,9 @@ def environment_rootfs(cache_root: Path, state: EnvironmentState) -> Path:
     return cache_root / "environment" / f"rootfs-{state.generation}"
 
 
-def probe_environment_state(kern: str, rootfs: Path, recipe: str) -> EnvironmentState | None:
+def probe_environment_state(
+    kern: str, rootfs: Path, recipe: str, *, cache: Path | None = None
+) -> EnvironmentState | None:
     """Measure logical ownership and installed content through a ranged read-only box."""
     if rootfs.is_symlink() or not rootfs.is_dir():
         return None
@@ -75,7 +78,7 @@ def probe_environment_state(kern: str, rootfs: Path, recipe: str) -> Environment
                 (f"cat /etc/fplinux-environment-state; python3 -B {collector}"),
             ],
             cwd=ROOT,
-            env=kern_environment(),
+            env=kern_environment(cache=cache),
             capture_output=True,
             text=True,
             check=False,
@@ -95,19 +98,24 @@ def probe_environment_state(kern: str, rootfs: Path, recipe: str) -> Environment
         return None
 
 
-def current_environment_state(kern: str, recipe: str) -> EnvironmentState | None:
+def current_environment_state(
+    kern: str, recipe: str, *, cache: Path | None = None
+) -> EnvironmentState | None:
     """Require both the current receipt and a fresh exact installed-content match."""
-    cache_root = ROOT / ".cache"
+    cache_root = data_root(ROOT) if cache is None else cache
     state = load_environment_state(cache_root, recipe)
     if state is None:
         return None
-    observed = probe_environment_state(kern, environment_rootfs(cache_root, state), recipe)
+    observed = probe_environment_state(
+        kern, environment_rootfs(cache_root, state), recipe, cache=cache_root
+    )
     return state if observed == state else None
 
 
-def remove_environment_rootfs(path: Path) -> None:
+def remove_environment_rootfs(path: Path, *, cache: Path | None = None) -> None:
     """Remove one known candidate or superseded rootfs using its logical owner mapping."""
-    expected_parent = ROOT / ".cache/environment"
+    selected_root = data_root(ROOT) if cache is None else cache
+    expected_parent = selected_root / "environment"
     if (
         path.parent != expected_parent
         or path.is_symlink()
@@ -139,21 +147,23 @@ def _previous_state(cache_root: Path) -> EnvironmentState | None:
     return load_environment_state(cache_root, recipe) if isinstance(recipe, str) else None
 
 
-def publish_environment(kern: str, candidate: Path, state: EnvironmentState) -> EnvironmentState:
+def publish_environment(
+    kern: str, candidate: Path, state: EnvironmentState, *, cache: Path | None = None
+) -> EnvironmentState:
     """Publish a verified candidate before discarding the previous known working tree."""
-    cache_root = ROOT / ".cache"
+    cache_root = data_root(ROOT) if cache is None else cache
     directory = cache_root / "environment"
     if candidate.parent != directory or not candidate.name.startswith("candidate-"):
         fail(f"environment candidate is outside its preparation directory: {candidate}")
-    if probe_environment_state(kern, candidate, state.recipe) != state:
+    if probe_environment_state(kern, candidate, state.recipe, cache=cache_root) != state:
         fail("prepared environment failed its exact installed-content check")
     previous = _previous_state(cache_root)
     destination = environment_rootfs(cache_root, state)
     if destination.exists() or destination.is_symlink():
-        if probe_environment_state(kern, destination, state.recipe) != state:
+        if probe_environment_state(kern, destination, state.recipe, cache=cache_root) != state:
             fail("environment generation already exists with different installed content")
         publish_environment_state(cache_root, state)
-        remove_environment_rootfs(candidate)
+        remove_environment_rootfs(candidate, cache=cache_root)
     else:
         candidate.rename(destination)
         try:
@@ -162,19 +172,22 @@ def publish_environment(kern: str, candidate: Path, state: EnvironmentState) -> 
             destination.rename(candidate)
             raise
     if previous is not None and previous.generation != state.generation:
-        remove_environment_rootfs(environment_rootfs(cache_root, previous))
+        remove_environment_rootfs(environment_rootfs(cache_root, previous), cache=cache_root)
     return state
 
 
-def require_environment(*, target: str | None = None) -> tuple[str, Path, EnvironmentState]:
+def require_environment(
+    *, target: str | None = None, cache: Path | None = None
+) -> tuple[str, Path, EnvironmentState]:
     """Require the exact environment previously prepared by an explicit setup command."""
     lock = load_environment_lock()
+    selected_root = data_root(ROOT) if cache is None else cache
     recipe = environment_recipe_digest(lock)
-    if kern_available(lock):
-        kern = require_kern(lock)
-        current = current_environment_state(kern, recipe)
+    if kern_available(lock, cache=selected_root):
+        kern = require_kern(lock, cache=selected_root)
+        current = current_environment_state(kern, recipe, cache=selected_root)
         if current is not None:
-            return kern, environment_rootfs(ROOT / ".cache", current), current
+            return kern, environment_rootfs(selected_root, current), current
     selector = "--all" if target is None else target
     return fail(
         f"the current pinned environment is missing or stale; run ./fplinux setup {selector}"

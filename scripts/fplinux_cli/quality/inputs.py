@@ -89,6 +89,8 @@ _CHECK_IMPLEMENTATION = _MANIFEST_IMPLEMENTATION | frozenset(
         "scripts/fplinux_cli/quality/source.py",
         "scripts/fplinux_cli/__init__.py",
         "scripts/fplinux_cli/common.py",
+        "scripts/fplinux_cli/data_paths.py",
+        "scripts/fplinux_cli/source_paths.py",
         "scripts/fplinux_cli/alpine/__init__.py",
         "scripts/fplinux_cli/alpine/registration.py",
         "scripts/fplinux_cli/alpine/lock.py",
@@ -128,6 +130,7 @@ _KERNEL_IMPLEMENTATION = _MANIFEST_IMPLEMENTATION | frozenset(
     {
         "scripts/fplinux_cli/__init__.py",
         "scripts/fplinux_cli/common.py",
+        "scripts/fplinux_cli/data_paths.py",
         "scripts/fplinux_cli/templates.py",
         "scripts/fplinux_cli/build/__init__.py",
         "scripts/fplinux_cli/build/display.py",

@@ -41,6 +41,16 @@ class AutonomousRunnerArchive:
     prepared: PortableArchive
 
     @property
+    def data(self) -> Path:
+        """Return this installation's mutable runtime scope."""
+        return self.prepared.runtime_data
+
+    @property
+    def logs(self) -> Path:
+        """Return launch journals within the runtime scope."""
+        return self.prepared.logs
+
+    @property
     def phone(self) -> Path:
         """Return the shared prepared data passed to this extracted runtime."""
         return self.prepared.prepared_data()
@@ -53,6 +63,7 @@ class AutonomousRunnerArchive:
             "LANG": "C.UTF-8",
             "PYTHONDONTWRITEBYTECODE": "1",
             "FPLINUX_AUTONOMOUS_TEST_ROOT": str(self.root),
+            "FPLINUX_AUTONOMOUS_TEST_SESSION_ROOT": str(self.data / "session"),
         }
 
     def run(self, *arguments: str) -> subprocess.CompletedProcess[str]:
@@ -163,12 +174,12 @@ def test_prepared_phone_data_reaches_bridge_with_owned_log_and_archive_session(
     assert not (received / "pinmap.bin").exists()
     assert not (received / "keymap.bin").exists()
     assert not (archive.phone / "device-data.cpio").exists()
-    assert not list((archive.root / "data").glob(".boot-*"))
+    assert not list(archive.data.glob(".boot-*"))
     assert (archive.root / "boundary/usb-access.rules").read_bytes() == (
         b'SUBSYSTEM=="usb", MODE="0660"\n'
     )
     assert (archive.root / "boundary/rules-reloaded").read_text() == "reloaded\n"
-    session_root = archive.root / "data/session"
+    session_root = archive.data / "session"
     session = json.loads((session_root / "current/nokia-ta1618.json").read_text())
     assert session["runtime_root"] == str(session_root)
     assert Path(session["private_key"]).is_relative_to(session_root / "sessions")
@@ -176,7 +187,7 @@ def test_prepared_phone_data_reaches_bridge_with_owned_log_and_archive_session(
     assert not Path(session["image"]).exists()
     assert (archive.root / "boundary/handoff-session.txt").read_text() == session["session_id"]
     assert archive.shells() == [session]
-    log = max((archive.root / "logs").rglob("*.log")).read_text()
+    log = max(archive.logs.rglob("*.log")).read_text()
     for output in (
         "controlled RAM loader stdout",
         "controlled RAM loader stderr",
@@ -210,7 +221,7 @@ def test_first_run_rejects_a_corrupted_ram_image_before_privileged_usb_setup(
     assert not (archive.root / "boundary/rules-reloaded").exists()
     assert not (archive.root / "boundary/ram-loads.txt").exists()
     assert backup.stat() == backup_stat
-    log = max((archive.root / "logs").rglob("*.log")).read_text()
+    log = max(archive.logs.rglob("*.log")).read_text()
     assert "usb-access-setup" not in log
     assert "Setting up USB access" not in result.stdout + log
 

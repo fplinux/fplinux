@@ -43,7 +43,7 @@ Use each store with one physical phone. FPLinux selects it by target name and do
 ./fplinux run nokia-ta1618 --phone-data /path/to/my-phone
 ```
 
-Private connection keys remain separate: a checkout uses `.cache/runtime/<target>/session/`, while an archive uses `data/session/`. Reader-session keys use `reader/session/` beside that normal session directory. Keep these local directories while reconnecting to a running phone.
+Private connection keys remain separate in the selected [working data directory](/fplinux/start/build/#working-data-directory), under an installation-specific runtime directory. Normal and reader sessions stay together there. Keep the working directory and installation location unchanged while reconnecting to a running phone; changing them does not move the session or its keys.
 
 ## Prepare data from the phone
 
@@ -132,7 +132,7 @@ For UMS9117 bring-up, extract a report from a saved complete backup:
 ./fplinux device-data report <target> --from-dump nand.bin
 ```
 
-This developer command works independently of runtime firmware and audio groups. It prepares the required host tool from local inputs and writes `.cache/diagnostics/device-data/<target>/report-*/board-report.json`; it does not prepare runtime board maps. Use `./fplinux setup <target>` for missing dependencies. Keep the backup's geometry receipt beside it, especially for a new target with no declared chip geometry. See [Bring up a new phone](/fplinux/porting/bring-up/#prepare-the-board-report) for the complete workflow.
+This developer command works independently of runtime firmware and audio groups. It prepares the required host tool from local inputs and writes `diagnostics/device-data/<target>/report-*/board-report.json` inside the [working data directory](/fplinux/start/build/#working-data-directory); it does not prepare runtime board maps. Use `./fplinux setup <target>` for missing dependencies. Keep the backup's geometry receipt beside it, especially for a new target with no declared chip geometry. See [Bring up a new phone](/fplinux/porting/bring-up/#prepare-the-board-report) for the complete workflow.
 
 ## Save a NAND backup
 

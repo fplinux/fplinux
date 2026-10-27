@@ -25,7 +25,7 @@ def test_source_companion_keeps_active_sources_and_excludes_private_runtime_file
 ) -> None:
     """Use real Git discovery and current filesystem bytes, without a source-list snapshot."""
     subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True)
-    (tmp_path / ".gitignore").write_text("/.cache/\n/AGENTS.md\n")
+    (tmp_path / ".gitignore").write_text("/.data/\n/AGENTS.md\n")
     source = tmp_path / "common/boot.py"
     source.parent.mkdir()
     source.write_bytes(b"original tracked source\n")
@@ -52,8 +52,14 @@ def test_source_companion_keeps_active_sources_and_excludes_private_runtime_file
     (tmp_path / "common/id_ed25519.pem").write_bytes(b"private key\n")
     (tmp_path / "common/.env").write_bytes(b"private settings\n")
     (tmp_path / "common/cache.bin").write_bytes(b"personal phone image\n")
-    (tmp_path / ".cache").mkdir()
-    (tmp_path / ".cache/private.py").write_bytes(b"private evidence\n")
+    (tmp_path / ".data").mkdir()
+    (tmp_path / ".data/generated.py").write_bytes(b"managed generated data\n")
+    (tmp_path / ".private").mkdir()
+    (tmp_path / ".private/manual.py").write_bytes(b"private evidence\n")
+    selected = tmp_path / "common/generated"
+    selected.mkdir()
+    (selected / "runtime.py").write_bytes(b"selected managed data\n")
+    monkeypatch.setenv("FPLINUX_DATA_DIR", str(selected))
     (tmp_path / "AGENTS.md").write_bytes(b"private instructions\n")
     monkeypatch.setattr(common, "ROOT", tmp_path)
 
@@ -67,6 +73,8 @@ def test_source_companion_keeps_active_sources_and_excludes_private_runtime_file
     assert b"private settings" not in all_contents
     assert b"personal phone image" not in all_contents
     assert b"private evidence" not in all_contents
+    assert b"managed generated data" not in all_contents
+    assert b"selected managed data" not in all_contents
     assert b"private instructions" not in all_contents
 
 

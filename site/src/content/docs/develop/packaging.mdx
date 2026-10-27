@@ -33,7 +33,7 @@ Packaging reads the current release build without rebuilding it. It rejects stal
 
 The runnable ZIP includes the RAM image, phone loaders, the selected host's Python and OpenSSH, one launcher, `README.txt`, licenses, the build manifest and `SHA256SUMS`. It also includes the extraction tools needed by the selected phone. Optional APKs, the offline site, prepared phone data, private keys and session logs are excluded. RAM images receive personal phone data at launch, so publishing one does not publish the contents of your personal store.
 
-Names use `FPLinux-<target>-<linux|windows>-x64-<release_id>.zip`. The same twelve-character build ID appears in every phone and host archive made from the same public source context and in Settings → About → Build. A clean checkout uses the first twelve characters of its Git commit. Changed public sources get a content-based ID. A matching `-sources.zip` accompanies a locally packaged runtime. `--output-directory PATH` selects the destination; the default is `.cache/out/releases/`. An existing name with different bytes is an error.
+Names use `FPLinux-<target>-<linux|windows>-x64-<release_id>.zip`. The same twelve-character build ID appears in every phone and host archive made from the same public source context and in Settings → About → Build. A clean checkout uses the first twelve characters of its Git commit. Changed public sources get a content-based ID. A matching `-sources.zip` accompanies a locally packaged runtime. `--output-directory PATH` selects the destination; the default is `out/releases/` inside the [working data directory](/fplinux/start/build/#working-data-directory). An existing name with different bytes is an error.
 
 The archive owner uses `Run.sh` or `Run.cmd` for preparation, loading and reconnecting. Phones with required runtime data reuse compatible inputs from the [personal store](/fplinux/guides/device-data/#where-phone-data-is-stored), reading the phone again only when needed. Packaging and a native launcher check without a phone do not establish USB loading or hardware operation. The [phone pages](/fplinux/phones/) give the current feature and power limits.
 
@@ -76,7 +76,7 @@ Follow [Prepare an exact commit before pushing](/fplinux/guides/dependencies/#pr
 
 ```sh title="PC"
 ./fplinux inspect bundle nokia-ta1618
-./fplinux inspect archive .cache/out/releases/FPLinux-nokia-ta1618-….zip
+./fplinux inspect archive "$(./fplinux data-path)/out/releases/FPLinux-nokia-ta1618-….zip"
 ./fplinux inspect apk path/to/package.apk
 ```
 

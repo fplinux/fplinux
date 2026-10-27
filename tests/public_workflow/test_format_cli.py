@@ -48,7 +48,7 @@ class FormatCliWorkflowTests:
         shutil.copytree(
             ROOT,
             checkout,
-            ignore=shutil.ignore_patterns(".git", ".cache", "__pycache__"),
+            ignore=shutil.ignore_patterns(".git", ".data", "__pycache__"),
         )
         source = "targets/nokia-ta1618/release/EXTRA.txt"
         (checkout / source).write_text("Additional archive instructions.\n", encoding="utf-8")

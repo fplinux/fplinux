@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli.common import ROOT, fail, sha256_file
+from fplinux_cli.data_paths import DATA_ENV, data_root
 
 from .definition import load_environment_lock
 from .downloads import download_locked_file
@@ -57,10 +58,12 @@ def ensure_project_directory(path: Path) -> Path:
     return path
 
 
-def kern_environment() -> dict[str, str]:
+def kern_environment(*, cache: Path | None = None) -> dict[str, str]:
     """Confine persistent Kern state while retaining the host runtime directory."""
-    root = ensure_project_directory(ROOT / ".cache/kern")
+    selected_root = data_root(ROOT) if cache is None else cache
+    root = ensure_project_directory(selected_root / "kern")
     environment = os.environ.copy()
+    environment.pop(DATA_ENV, None)
     for variable, name in (
         ("XDG_CACHE_HOME", "cache"),
         ("XDG_DATA_HOME", "data"),
@@ -70,15 +73,16 @@ def kern_environment() -> dict[str, str]:
     return environment
 
 
-def _kern_path() -> Path:
-    return ROOT / ".cache/tools/kern/kern"
+def _kern_path(cache: Path) -> Path:
+    return cache / "tools/kern/kern"
 
 
-def kern_available(lock: dict[str, Any] | None = None) -> bool:
+def kern_available(lock: dict[str, Any] | None = None, *, cache: Path | None = None) -> bool:
     """Return whether the exact pinned Kern binary is already project-local."""
     if lock is None:
         lock = load_environment_lock()
-    executable = _kern_path()
+    selected_root = data_root(ROOT) if cache is None else cache
+    executable = _kern_path(selected_root)
     return (
         not executable.is_symlink()
         and executable.is_file()
@@ -86,27 +90,29 @@ def kern_available(lock: dict[str, Any] | None = None) -> bool:
     )
 
 
-def require_kern(lock: dict[str, Any] | None = None) -> str:
+def require_kern(lock: dict[str, Any] | None = None, *, cache: Path | None = None) -> str:
     """Return the exact project-local Kern binary."""
     if lock is None:
         lock = load_environment_lock()
-    if not kern_available(lock):
+    selected_root = data_root(ROOT) if cache is None else cache
+    if not kern_available(lock, cache=selected_root):
         fail("Kern is not ready for this checkout; run ./fplinux setup online first")
-    return str(_kern_path())
+    return str(_kern_path(selected_root))
 
 
-def install_kern(lock: dict[str, Any], *, offline: bool = False) -> str:
+def install_kern(lock: dict[str, Any], *, offline: bool = False, cache: Path | None = None) -> str:
     """Install the pinned static Kern binary under the project cache."""
-    if kern_available(lock):
-        return str(_kern_path())
+    selected_root = data_root(ROOT) if cache is None else cache
+    if kern_available(lock, cache=selected_root):
+        return str(_kern_path(selected_root))
     kern_lock = lock["kern"]
     archive = download_locked_file(
         kern_lock["archive_url"],
         kern_lock["archive_sha256"],
-        ROOT / ".cache" / lock["kern"]["destination"],
+        selected_root / lock["kern"]["destination"],
         offline=offline,
     )
-    destination = _kern_path()
+    destination = _kern_path(selected_root)
     ensure_project_directory(destination.parent)
     temporary: Path | None = None
     try:

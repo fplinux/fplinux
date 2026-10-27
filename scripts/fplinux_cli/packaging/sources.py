@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from fplinux_cli import common
 from fplinux_cli.artifacts.release import capture_public_sources, source_identity_bytes
 from fplinux_cli.common import canonical_json_bytes, fail
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.environment.downloads import download_locked_file
 
 if TYPE_CHECKING:
@@ -31,9 +32,9 @@ class SourcePayload:
     notices: dict[str, bytes]
 
 
-def project_source_files() -> SourcePayload:
+def project_source_files(*, selected_data_root: Path | None = None) -> SourcePayload:
     """Read active tracked and nonignored project source bytes, retaining executable modes."""
-    snapshot = capture_public_sources()
+    snapshot = capture_public_sources(selected_data_root=selected_data_root)
     files = {}
     executables = set()
     for source in snapshot.files:
@@ -46,7 +47,7 @@ def project_source_files() -> SourcePayload:
 
 
 def _collect_archives(
-    inputs: Sequence[DependencyInput], files: dict[str, bytes]
+    inputs: Sequence[DependencyInput], files: dict[str, bytes], *, cache: Path
 ) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     for item in inputs:
@@ -56,7 +57,7 @@ def _collect_archives(
         path = download_locked_file(
             item.url,
             digest,
-            common.ROOT / ".cache" / item.destination,
+            cache / item.destination,
             offline=True,
             algorithm=item.algorithm,
             size=item.size,
@@ -115,13 +116,16 @@ def _loader_license_notices(
     return notices
 
 
-def collect_loader_license_notices(config: dict[str, Any]) -> dict[str, bytes]:
+def collect_loader_license_notices(
+    config: dict[str, Any], *, cache: Path | None = None
+) -> dict[str, bytes]:
     """Read ordinary binary notices from the admitted cached loader archives."""
     from fplinux_cli.manifests.loaders import loader_sources  # noqa: PLC0415
 
     sources = loader_sources(
         config["loader"]["build"], common.load_toml(common.ROOT / "sources.lock.toml")
     )
+    cache = data_root(common.ROOT) if cache is None else cache
     archives = {}
     for source in sources:
         if source.role == "fdl1":
@@ -129,7 +133,7 @@ def collect_loader_license_notices(config: dict[str, Any]) -> dict[str, bytes]:
         path = download_locked_file(
             source.url,
             source.sha256,
-            common.ROOT / ".cache/downloads" / source.cache_name,
+            cache / "downloads" / source.cache_name,
             offline=True,
         )
         archives[f"upstream/{source.cache_name}"] = path.read_bytes()
@@ -137,7 +141,7 @@ def collect_loader_license_notices(config: dict[str, Any]) -> dict[str, bytes]:
 
 
 def _linux_runtime_sources(
-    files: dict[str, bytes], notices: dict[str, bytes]
+    files: dict[str, bytes], notices: dict[str, bytes], *, cache: Path
 ) -> list[dict[str, object]]:
     from fplinux_cli.dependencies.inputs import source_input  # noqa: PLC0415
     from fplinux_cli.manifests.source_catalog import (  # noqa: PLC0415
@@ -150,7 +154,7 @@ def _linux_runtime_sources(
         source_input(resolve_source(common.ROOT, entry["source_id"]))
         for _name, entry in sorted(lock.items())
     ]
-    records = _collect_archives(inputs, files)
+    records = _collect_archives(inputs, files, cache=cache)
     libusb = lock["libusb"]
     member = f"upstream/{libusb['destination'].removeprefix('downloads/')}"
     with tarfile.open(fileobj=io.BytesIO(files[member])) as archive:
@@ -180,7 +184,9 @@ def _package_source_channel(info: str, *, repository: str) -> dict[str, str]:
     }
 
 
-def _alpine_source_channels(packages: Sequence[str], files: dict[str, bytes]) -> None:
+def _alpine_source_channels(
+    packages: Sequence[str], files: dict[str, bytes], *, cache: Path
+) -> None:
     from fplinux_cli.alpine.lock import load_alpine_lock, runtime_package_names  # noqa: PLC0415
 
     lock = load_alpine_lock(common.ROOT)
@@ -189,7 +195,7 @@ def _alpine_source_channels(packages: Sequence[str], files: dict[str, bytes]) ->
     base = download_locked_file(
         lock["minirootfs"]["url"],
         lock["minirootfs"]["sha256"],
-        common.ROOT / ".cache" / lock["minirootfs"]["destination"],
+        cache / lock["minirootfs"]["destination"],
         offline=True,
         size=lock["minirootfs"]["bytes"],
     )
@@ -221,7 +227,7 @@ def _alpine_source_channels(packages: Sequence[str], files: dict[str, bytes]) ->
         path = download_locked_file(
             f"{lock['repositories'][repository]}/{entry['file']}",
             entry["sha256"],
-            common.ROOT / ".cache/downloads/alpine/packages" / entry["file"],
+            cache / "downloads/alpine/packages" / entry["file"],
             offline=True,
             size=entry["bytes"],
         )
@@ -233,7 +239,9 @@ def _alpine_source_channels(packages: Sequence[str], files: dict[str, bytes]) ->
     files["upstream/alpine-source-channels.json"] = canonical_json_bytes(records)
 
 
-def collect_source_files(config: dict[str, Any], *, host: str) -> SourcePayload:
+def collect_source_files(
+    config: dict[str, Any], *, host: str, cache: Path | None = None
+) -> SourcePayload:
     """Collect matching source material while the caller owns the project cache lock."""
     from fplinux_cli.alpine.selection import (  # noqa: PLC0415
         bundle_packages,
@@ -242,7 +250,8 @@ def collect_source_files(config: dict[str, Any], *, host: str) -> SourcePayload:
     from fplinux_cli.dependencies.inputs import build_source_inputs  # noqa: PLC0415
     from fplinux_cli.manifests.platforms import load_platform  # noqa: PLC0415
 
-    payload = project_source_files()
+    cache = data_root(common.ROOT) if cache is None else cache
+    payload = project_source_files(selected_data_root=cache)
     platform = load_platform(config["platform"])
     rootfs = selected_packages(platform, config, common.ROOT)
     packages = (*rootfs, *bundle_packages(platform, config, rootfs, root=common.ROOT))
@@ -251,7 +260,7 @@ def collect_source_files(config: dict[str, Any], *, host: str) -> SourcePayload:
         for item in build_source_inputs(common.ROOT, platform, config)
         if item.purpose == "source-original"
     ]
-    records = _collect_archives(inputs, payload.files)
+    records = _collect_archives(inputs, payload.files, cache=cache)
     if platform["bootstrap"]["backend"] == "sc9820e":
         from fplinux_cli.manifests.loaders import loader_sources  # noqa: PLC0415
 
@@ -262,10 +271,10 @@ def collect_source_files(config: dict[str, Any], *, host: str) -> SourcePayload:
             )
         )
     if host == "linux":
-        records.extend(_linux_runtime_sources(payload.files, payload.notices))
+        records.extend(_linux_runtime_sources(payload.files, payload.notices, cache=cache))
     else:
         _windows_source_channels(payload.files)
-    _alpine_source_channels(packages, payload.files)
+    _alpine_source_channels(packages, payload.files, cache=cache)
     payload.files["upstream/downloads.json"] = canonical_json_bytes(records)
     if host == "linux":
         payload.files["BUILD-LINUX.txt"] = _linux_build_instructions()

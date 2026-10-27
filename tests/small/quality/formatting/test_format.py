@@ -46,7 +46,7 @@ class FormatResolutionTests:
         ("paths", "message"),
         [
             (["../outside.py"], "format path must be a normalized relative path"),
-            ([".cache/generated.py"], "not a project source file"),
+            ([".data/generated.py"], "not a project source file"),
             (["node_modules/pkg/tool.py"], "not a project source file"),
             (["directory"], "must name a regular file"),
             (["link.py"], "must not use a symlink"),
@@ -133,7 +133,7 @@ class FormatContainerBoundaryTests:
         """Missing originals fail locally; verified saved bytes reach the formatter stage."""
         patch = tmp_path / "selected.patch"
         patch.write_bytes(b"patch fixture\n")
-        original = tmp_path / ".cache/downloads/sources/kernel/canonical.tar.xz"
+        original = tmp_path / ".data/downloads/sources/kernel/canonical.tar.xz"
         if original_present:
             original.parent.mkdir(parents=True)
             original.write_bytes(b"original archive\n")
@@ -168,7 +168,9 @@ class FormatContainerBoundaryTests:
         )
         monkeypatch.setattr(format_module, "linux_contexts", lambda _selected: (context,))
         monkeypatch.setattr(
-            format_module, "require_environment", lambda: ("kern", tmp_path / "rootfs", None)
+            format_module,
+            "require_environment",
+            lambda **_kwargs: ("kern", tmp_path / "rootfs", None),
         )
         monkeypatch.setattr(format_module, "kern_environment", dict)
         monkeypatch.setattr(reporting.Stage, "run", record_command)
@@ -183,9 +185,9 @@ class FormatContainerBoundaryTests:
 
         assert original.read_bytes() == b"original archive\n"
         assert patch.read_bytes() == b"patch fixture\n"
-        assert not (tmp_path / ".cache/downloads/linux").exists()
+        assert not (tmp_path / ".data/downloads/linux").exists()
         assert len(commands) == 1
-        assert f"{tmp_path / '.cache/downloads'}:/linux-archives:ro" in commands[0]
+        assert f"{tmp_path / '.data/downloads'}:/linux-archives:ro" in commands[0]
         assert commands[0][commands[0].index("--network") + 1] == "none"
 
 

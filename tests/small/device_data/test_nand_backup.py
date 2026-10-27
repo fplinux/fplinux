@@ -23,6 +23,7 @@ from fplinux_cli.cli import nand
 from fplinux_cli.device_data.nand_geometry import NandGeometry
 from fplinux_cli.device_data.prepare import dump_page_bytes
 from fplinux_cli.runtime import bundle_session, nand_backup
+from fplinux_cli.runtime.data_paths import checkout_runtime_root
 
 from tests.small.build.command_fixtures import (
     command_bundle as command_bundle,  # noqa: PLC0414 -- pytest fixture export.
@@ -480,7 +481,7 @@ class NandCommandSelectionTests:
         if action == "backup":
             assert arguments[5] == str(command_bundle.root / "selected-nand.bin")
         assert arguments[arguments.index("--data-root") + 1] == str(
-            command_bundle.root / ".cache/runtime/phone"
+            checkout_runtime_root(command_bundle.cache, command_bundle.root, "phone")
         )
         assert child.call_args.kwargs == {"check": False}
 

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from fplinux_cli.runtime.data_paths import archive_runtime_root, checkout_runtime_root
 
 from tests import ROOT
 from tests.fixtures.executables import install_python_script
@@ -163,7 +164,7 @@ def runtime_delivery(
     if request.param == "checkout":
         manifest = (root / "build-manifest.json").read_bytes()
         generation = json.loads(manifest)["generation"]
-        slot = checkout / ".cache/out/nokia-ta1618/builds/release"
+        slot = checkout / ".data/out/nokia-ta1618/builds/release"
         bundles = slot / "bundles"
         bundles.mkdir(parents=True)
         bundle = bundles / generation
@@ -174,12 +175,12 @@ def runtime_delivery(
             ),
             encoding="utf-8",
         )
-        data = checkout / ".cache/runtime/nokia-ta1618"
-        logs = checkout / ".cache/logs/run/nokia-ta1618"
+        data = checkout_runtime_root(checkout / ".data", checkout, "nokia-ta1618")
+        logs = checkout / ".data/logs/run/nokia-ta1618"
     else:
         bundle = _extract_delivery_zip(root)
-        data = bundle / "data"
-        logs = bundle / "logs"
+        data = archive_runtime_root(bundle / ".data", bundle)
+        logs = data / "logs"
     return RuntimeDelivery(
         mode=str(request.param),
         bundle=bundle,
@@ -365,21 +366,25 @@ def test_two_extracted_archives_share_raw_backup_and_reprepare_only_for_changed_
     _install_external_boundaries(source)
     first_bundle = _extract_delivery_zip(source, recipient_name="first-recipient")
     second_bundle = _extract_delivery_zip(source, recipient_name="second-recipient")
+    shared_data = source.parent / "shared runtime data"
     first = RuntimeDelivery(
         mode="zip",
         checkout=source.parent / "unused-checkout",
         phone_store=portable_archive.phone_store(),
         dump=portable_archive.dump,
-        home_environment=portable_archive.environment(),
+        home_environment={
+            **portable_archive.environment(),
+            "FPLINUX_DATA_DIR": str(shared_data),
+        },
         bundle=first_bundle,
-        data=first_bundle / "data",
-        logs=first_bundle / "logs",
+        data=archive_runtime_root(shared_data, first_bundle),
+        logs=archive_runtime_root(shared_data, first_bundle) / "logs",
     )
     second = replace(
         first,
         bundle=second_bundle,
-        data=second_bundle / "data",
-        logs=second_bundle / "logs",
+        data=archive_runtime_root(shared_data, second_bundle),
+        logs=archive_runtime_root(shared_data, second_bundle) / "logs",
     )
 
     acquired = first.run()
@@ -408,6 +413,10 @@ def test_two_extracted_archives_share_raw_backup_and_reprepare_only_for_changed_
         "lib/firmware/fplinux/audio.bin": b"profile",
     }
     assert first.data != second.data
+    assert first.logs != second.logs
+    assert (first.data / ".launcher.lock").is_file()
+    assert (second.data / ".launcher.lock").is_file()
+    assert all(not (bundle / ".data").exists() for bundle in (first_bundle, second_bundle))
     assert not (first.data / "session").exists()
     assert (second.data / "session/current/nokia-ta1618.json").is_file()
     assert all(not (bundle / "data/nand.bin").exists() for bundle in (first_bundle, second_bundle))

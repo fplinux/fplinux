@@ -8,6 +8,7 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from fplinux_cli.common import ROOT
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.manifests.values import TARGET_NAME
 
 from .alpine import apk_entries, rootfs_entries
@@ -28,7 +29,7 @@ def prune(
     apply: bool = False,
 ) -> None:
     """Print a dry run or remove its freshly recomputed candidates."""
-    cache_path = cache or ROOT / ".cache"
+    cache_path = data_root(ROOT) if cache is None else cache
     result = apply_prune(cache_path) if apply else plan_prune(cache_path)
     print(result.as_text(), end="")
 

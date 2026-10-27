@@ -71,7 +71,7 @@ Linux inputs follow the [shared integration contract](/fplinux/porting/linux-int
 
 ## Board data from the stock firmware
 
-Use `./fplinux device-data report <target> --from-dump nand.bin` to extract a board report from the stock firmware in the phone's saved NAND backup. It builds the required host extraction tool without a target bundle or phone connection and writes the report under `.cache/diagnostics/device-data/<target>/report-*/`. The report is separate from prepared runtime firmware and audio data; see [Device data](/fplinux/guides/device-data/#extract-a-board-report). It lists:
+Use `./fplinux device-data report <target> --from-dump nand.bin` to extract a board report from the stock firmware in the phone's saved NAND backup. It builds the required host extraction tool without a target bundle or phone connection and writes the report under `diagnostics/device-data/<target>/report-*/` inside the [working data directory](/fplinux/start/build/#working-data-directory). The report is separate from prepared runtime firmware and audio data; see [Device data](/fplinux/guides/device-data/#extract-a-board-report). It lists:
 
 - the keypad matrix with the phone key codes, the boot key and, when exactly one standard phone key is missing from the matrix, that key as the candidate for external-interrupt line 9 (`eic9_candidate`);
 - every panel in the firmware's LCD list: its 16-bit ID, the controller name when the firmware gives it, size, SPI or LCM interface, SPI clock or DBI timing, and the initialization commands and delays when they can be decoded;

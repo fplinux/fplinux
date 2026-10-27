@@ -20,6 +20,7 @@ from fplinux_cli.alpine import lock as alpine_lock
 from fplinux_cli.alpine import registration, selection
 from fplinux_cli.alpine.aports import materialize_aport_sources
 from fplinux_cli.common import ROOT, fail
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.manifests.paths import discover_targets
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.targets import load_target
@@ -31,6 +32,7 @@ from fplinux_cli.quality.formatting.canonical import (
 from fplinux_cli.quality.formatting.source_formats import classify_source_formats
 from fplinux_cli.quality.scopes import SOURCE_CHECK_SCOPES, is_project_c_source
 from fplinux_cli.reporting.run import RunReporter, current_stage, run_entrypoint
+from fplinux_cli.source_paths import source_path_excluded
 from fplinux_cli.workspace.capture import workspace_snapshot
 
 if TYPE_CHECKING:
@@ -156,16 +158,28 @@ def report_stage(reporter: RunReporter | None, name: str) -> Iterator[None]:
         yield
 
 
-def source_files(*, enforce_policy: bool) -> list[Path]:
-    files: list[Path] = []
-    for path in sorted(ROOT.rglob("*")):
+def _source_tree(directory: Path, selected_data_root: Path) -> Iterator[Path]:
+    """Prune generated and private trees before inspecting their contents."""
+    for path in sorted(directory.iterdir()):
         relative = path.relative_to(ROOT)
+        if source_path_excluded(path, source_root=ROOT, selected_data_root=selected_data_root):
+            continue
         if any(part in EXCLUDED_PARTS for part in relative.parts):
             continue
         if relative.parts[:2] in {("site", ".astro"), ("site", "dist")}:
             continue
         if path.name == ".fplinux-workspace":
             continue
+        yield path
+        if not path.is_symlink() and path.is_dir():
+            yield from _source_tree(path, selected_data_root)
+
+
+def source_files(*, enforce_policy: bool) -> list[Path]:
+    selected_data_root = data_root(ROOT)
+    files: list[Path] = []
+    for path in sorted(_source_tree(ROOT, selected_data_root)):
+        relative = path.relative_to(ROOT)
         if path.is_symlink():
             if enforce_policy:
                 fail(f"source symlink is not allowed: {relative}")

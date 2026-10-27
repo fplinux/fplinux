@@ -11,7 +11,12 @@ set -eu
 screens_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 root=$(CDPATH='' cd -- "$screens_dir/../../.." && pwd)
 aports=$root/alpine/aports
-sources=${FPLINUX_SOURCES:-$root/.cache/downloads/alpine/sources}
+if [ -n "${FPLINUX_SOURCES:-}" ]; then
+	sources=$FPLINUX_SOURCES
+else
+	data=$("$root/fplinux" data-path --check)
+	sources=$data/downloads/alpine/sources
+fi
 output=$root/site/src/assets/screens
 # 6 s and 22 s into the 38 s ARMADA loop, before the closing metrics card.
 armada_frame=180

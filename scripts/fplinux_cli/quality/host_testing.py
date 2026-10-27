@@ -15,6 +15,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from fplinux_cli.common import ROOT, fail
+from fplinux_cli.data_paths import DATA_ENV, data_root
 from fplinux_cli.dependencies.inputs import environment_inputs
 from fplinux_cli.environment.downloads import download_locked_file
 
@@ -48,11 +49,12 @@ def _extract_packaging(archive: Path, destination: Path) -> None:
 
 @contextmanager
 def host_pytest_environment(
-    workspace: Path, reporter: RunReporter
+    workspace: Path, reporter: RunReporter, *, cache: Path | None = None
 ) -> Iterator[tuple[Path, dict[str, str]]]:
     """Install declared pure Python inputs without pip or system-site packages."""
     if sys.version_info[:2] != (3, 14):
         fail("host namespace tests require Python 3.14")
+    cache = data_root(ROOT) if cache is None else cache
     with reporter.stage("host-namespace") as stage:
         stage.run(["unshare", "--map-auto", "--map-root-user", "--", "true"], timeout=30)
     with tempfile.TemporaryDirectory(
@@ -82,7 +84,7 @@ def host_pytest_environment(
                 archive = download_locked_file(
                     item.url,
                     item.checksum or item.sha256 or "",
-                    ROOT / ".cache" / item.destination,
+                    cache / item.destination,
                     algorithm=item.algorithm,
                     size=item.size,
                     offline=True,
@@ -111,6 +113,7 @@ def host_pytest_environment(
                 "PYTHONNOUSERSITE": "1",
                 "PYTHONDONTWRITEBYTECODE": "1",
                 "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+                DATA_ENV: str(cache),
             }
         )
         yield root / "bin/python", environment

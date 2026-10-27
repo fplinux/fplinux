@@ -245,7 +245,7 @@ class BuildLifecycleTests:
         self, command_bundle: CommandBundleContext
     ) -> None:
         """Container exit zero is insufficient without an exact published generation."""
-        workspace = command_bundle.root / ".cache/workspaces/current"
+        workspace = command_bundle.root / ".data/workspaces/current"
         workspace.mkdir(parents=True)
         old = command_bundle.create_generation("b" * 64)
         command_bundle.clear_current_bundle()
@@ -291,10 +291,12 @@ class BuildLifecycleTests:
 
         assert not (bundle_pointer(command_bundle.output, "phone").exists())
         assert old.exists()
-        discard.assert_called_once_with(command_bundle.snapshot, workspace)
+        discard.assert_called_once_with(
+            command_bundle.snapshot, workspace, selected_data_root=command_bundle.cache
+        )
         rootfs_gc.assert_not_called()
         apks_gc.assert_not_called()
-        metadata = next((command_bundle.root / ".cache/logs/build/phone").rglob("run.json"))
+        metadata = next((command_bundle.root / ".data/logs/build/phone").rglob("run.json"))
         assert (json.loads(metadata.read_text(encoding="utf-8"))["status"]) == ("failed")
 
     @pytest.mark.parametrize(
@@ -367,7 +369,9 @@ class BuildLifecycleTests:
         assert "--jobs" not in stderr
         log = next(reporter.root.glob("*-container.log")).read_text()
         assert log.count(hint) == int(status == 137)
-        discard.assert_called_once_with(command_bundle.snapshot, workspace)
+        discard.assert_called_once_with(
+            command_bundle.snapshot, workspace, selected_data_root=command_bundle.cache
+        )
 
     @pytest.mark.parametrize(
         ("memory_mib", "expected_memory", "build_type"),
@@ -384,7 +388,7 @@ class BuildLifecycleTests:
         build_type: str,
     ) -> None:
         """Retain old generations until the container result validates on the host."""
-        workspace = command_bundle.root / ".cache/workspaces/current"
+        workspace = command_bundle.root / ".data/workspaces/current"
         workspace.mkdir(parents=True)
         old = command_bundle.create_generation("b" * 64, build_type=build_type)
         command_bundle.clear_current_bundle()
@@ -451,10 +455,12 @@ class BuildLifecycleTests:
         assert (f"build phone --build-type {build_type}: OK") in (stdout.getvalue())
         assert (f"build phone --build-type {build_type}: OK (cached)") not in (stdout.getvalue())
         assert not (old.exists())
-        discard.assert_called_once_with(command_bundle.snapshot, workspace)
+        discard.assert_called_once_with(
+            command_bundle.snapshot, workspace, selected_data_root=command_bundle.cache
+        )
         rootfs_gc.assert_called_once_with(command_bundle.cache)
         apks_gc.assert_called_once_with(command_bundle.cache)
-        metadata = next((command_bundle.root / ".cache/logs/build/phone").rglob("run.json"))
+        metadata = next((command_bundle.root / ".data/logs/build/phone").rglob("run.json"))
         recorded = json.loads(metadata.read_text(encoding="utf-8"))
         assert recorded["status"] == "success"
         assert recorded["build_type"] == build_type

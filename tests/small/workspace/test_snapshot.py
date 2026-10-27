@@ -243,7 +243,7 @@ class WorkspaceSnapshotTests:
             workspace_capture.WorkspaceFile("nested/source", b"first", 0o751)
         )
         assert (len(snapshot.recipe)) == (64)
-        assert not ((root / ".cache").exists())
+        assert not ((root / ".data").exists())
 
     def test_declared_target_inputs_are_causal_and_unrelated_files_are_not(
         self, tmp_path: Path

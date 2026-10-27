@@ -53,6 +53,24 @@ class PruneApplySafetyTests:
         assert (plan_prune(cache).entries) == (())
 
     @staticmethod
+    def test_external_data_prune_preserves_persistent_and_unknown_namespaces(
+        tmp_path: Path,
+    ) -> None:
+        """Workspace removal does not grant deletion rights to adjacent data owners."""
+        cache = tmp_path / "external data"
+        workspace = _workspace(cache / "workspaces", "a")
+        preserved = []
+        for namespace in ("downloads", "environment", "runtime", "keys", ".private", "unknown"):
+            sentinel = cache / namespace / "keep"
+            sentinel.parent.mkdir(parents=True)
+            sentinel.write_bytes(b"persistent data\n")
+            preserved.append(sentinel)
+        result = apply_prune(cache)
+        assert result.removed == (f"workspaces/{'a' * 64}",)
+        assert not workspace.exists()
+        assert all(path.read_bytes() == b"persistent data\n" for path in preserved)
+
+    @staticmethod
     def test_apply_removes_disposable_workspaces(tmp_path: Path) -> None:
         """Apply removes exactly the freshly recalculated workspace candidates."""
         cache = tmp_path / ".cache"

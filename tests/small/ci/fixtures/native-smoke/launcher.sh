@@ -6,7 +6,8 @@ set -eu
 events=$2
 launch=${events##*/}
 launch=${launch%.jsonl}
-log_directory="logs/$launch"
+scope=${events%/*}
+log_directory="$scope/logs/$launch"
 mkdir "$log_directory"
 trap 'printf "stopped\n" >"$log_directory/stopped"; exit 0' TERM
 printf 'launcher initialized\n' >"$log_directory/runtime.log"

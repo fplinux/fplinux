@@ -18,20 +18,21 @@ from pathlib import Path
 from typing import Any
 
 
-def _ssh_session(root: Path) -> dict[str, Any]:
+def _ssh_session() -> dict[str, Any]:
     """Read only the session attached to the client key passed to this local peer."""
     option = next(argument for argument in sys.argv if argument.startswith("IdentityFile="))
     key = Path(shlex.split(option.partition("=")[2])[0])
-    if not key.is_relative_to(root / "data/session"):
+    session_root = Path(os.environ["FPLINUX_AUTONOMOUS_TEST_SESSION_ROOT"])
+    if not key.is_relative_to(session_root):
         message = "controlled SSH received a key outside the archive session"
         raise SystemExit(message)
     session: dict[str, Any] = json.loads(key.with_name("session.json").read_text(encoding="utf-8"))
     return session
 
 
-def _ssh(root: Path, boundary: Path) -> None:
+def _ssh(boundary: Path) -> None:
     """Return remote identity and clock responses, or record the interactive shell."""
-    session = _ssh_session(root)
+    session = _ssh_session()
     mode_path = boundary / "reconnect-mode"
     mode = mode_path.read_text(encoding="ascii") if mode_path.exists() else "ready"
     command = sys.argv[-1]
@@ -77,7 +78,8 @@ def main() -> None:
     tool = Path(sys.argv[0]).name
     if tool == "spd_dump.exe":
         image = Path(sys.argv[-2])
-        if not image.is_relative_to(root / "data/session"):
+        session_root = Path(os.environ["FPLINUX_AUTONOMOUS_TEST_SESSION_ROOT"])
+        if not image.is_relative_to(session_root):
             message = "controlled RAM loader received an image outside the archive session"
             raise SystemExit(message)
         shutil.copyfile(image, boundary / "loaded-image.bin")
@@ -97,7 +99,7 @@ def main() -> None:
         print("controlled bridge stdout", flush=True)
         print("controlled bridge stderr", file=sys.stderr, flush=True)
     elif tool == "ssh":
-        _ssh(root, boundary)
+        _ssh(boundary)
     elif tool == "ssh-keyscan":
         public_blob = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + b"k" * 32
         key_body = base64.b64encode(public_blob).decode("ascii")

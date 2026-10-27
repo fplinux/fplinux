@@ -91,7 +91,7 @@ def run_bundle(  # noqa: PLR0913 -- boot inputs and their resource destinations 
     output: TextIO | None = None,
     session_root: Path,
     loader_trace: bool = False,
-    log: Path | None = None,
+    log: Path,
 ) -> tuple[Any, dict[str, Any]]:
     """Select a returning Linux session or a positively detected fresh BootROM."""
     previous = saved_bundle_connection(admitted, session_root=session_root)
@@ -137,7 +137,7 @@ def _run_new_bundle(  # noqa: PLR0913 -- the waiting observer preserves the admi
     output: TextIO | None = None,
     session_root: Path,
     loader_trace: bool = False,
-    log: Path | None = None,
+    log: Path,
     on_wait: Callable[[], None] | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     """Load RAM and keep keys only when the authenticated handoff succeeds."""

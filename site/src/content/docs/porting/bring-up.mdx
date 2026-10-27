@@ -214,7 +214,7 @@ The board report lists the keypad, panel, pin and other board values found in th
 ./fplinux device-data report <target> --from-dump nand.bin
 ```
 
-The command reads `nand.bin` with its receipt `nand.bin.json`, prepares the host extraction tool from local inputs in the pinned build environment without a target bundle, and prints the location of `.cache/diagnostics/device-data/<target>/report-*/board-report.json`. A new target without declared NAND geometry needs the receipt; the command does not infer geometry from file length. Prepare missing dependencies with `./fplinux setup <target>`. The report is independent of runtime data groups and supplies no pin-map or keymap files to later boots.
+The command reads `nand.bin` with its receipt `nand.bin.json`, prepares the host extraction tool from local inputs in the pinned build environment without a target bundle, and prints the location of `diagnostics/device-data/<target>/report-*/board-report.json` inside the [working data directory](/fplinux/start/build/#working-data-directory). A new target without declared NAND geometry needs the receipt; the command does not infer geometry from file length. Prepare missing dependencies with `./fplinux setup <target>`. The report is independent of runtime data groups and supplies no pin-map or keymap files to later boots.
 
 [Board data from the stock firmware](/fplinux/porting/ums9117/#board-data-from-the-stock-firmware) describes what the report contains and which decisions it leaves to a person. [Device data](/fplinux/guides/device-data/) describes device-data preparation in general.
 

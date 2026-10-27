@@ -115,7 +115,9 @@ def test_environment_archive_retains_owners_links_and_modes_before_publication(
                 environment_archive, "current_environment_state", return_value=state
             ),
         ):
-            manifest["environment"] = environment_archive.save_environment(directory, reporter)
+            manifest["environment"] = environment_archive.save_environment(
+                directory, reporter, cache=source_checkout / ".cache"
+            )
         publish_snapshot(directory, manifest)
         environment = read_snapshot(directory)["environment"]
         assert environment["state"] == state.payload()
@@ -127,8 +129,12 @@ def test_environment_archive_retains_owners_links_and_modes_before_publication(
 
         restored_checkout = root / "restored"
         restored_checkout.mkdir()
+        restored_cache = restored_checkout / ".cache"
 
-        def probe(_kern: str, candidate: Path, _recipe: str) -> EnvironmentState | None:
+        def probe(
+            _kern: str, candidate: Path, _recipe: str, *, cache: Path
+        ) -> EnvironmentState | None:
+            assert cache == restored_cache
             assert _inspect(namespace, candidate) == _EXPECTED
             return state if content_matches else None
 
@@ -143,11 +149,14 @@ def test_environment_archive_retains_owners_links_and_modes_before_publication(
             mock.patch.object(runtime, "probe_environment_state", side_effect=probe),
         ):
             if content_matches:
-                environment_archive.restore_environment(directory, environment, reporter)
+                environment_archive.restore_environment(
+                    directory, environment, reporter, cache=restored_cache
+                )
             else:
                 with pytest.raises(SystemExit, match="installed-content check"):
-                    environment_archive.restore_environment(directory, environment, reporter)
-        restored_cache = restored_checkout / ".cache"
+                    environment_archive.restore_environment(
+                        directory, environment, reporter, cache=restored_cache
+                    )
         candidates = list((restored_cache / "environment").glob("candidate-*"))
         assert candidates == []
         if content_matches:

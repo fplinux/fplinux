@@ -131,11 +131,14 @@ def _readme(config: dict[str, Any], *, target: str, host: str, preparation: bool
             dedent("""\
                 Help and saved files
 
-                Each launch saves runtime.log in a new folder inside logs and
-                displays its exact path. Include that runtime.log when asking for
-                help. Private connection keys and details needed to reconnect are
-                saved in data/session; keep them private and keep this folder for
-                the same physical phone.
+                Launcher state, private connection keys and launch logs are saved
+                inside .data in the extracted folder. FPLINUX_DATA_DIR can select
+                another data directory; a relative value is resolved from this
+                folder. Keep this data private and use this folder for the same
+                physical phone.
+
+                Each launch saves runtime.log and displays its exact path. Include
+                that runtime.log when asking for help.
                 """).removesuffix("\n"),
         ]
     )
@@ -205,7 +208,7 @@ def _readme(config: dict[str, Any], *, target: str, host: str, preparation: bool
     return text.encode("utf-8")
 
 
-def _linux_ecc_sources(platform: str) -> dict[str, bytes]:
+def _linux_ecc_sources(platform: str, *, cache: Path) -> dict[str, bytes]:
     """Deliver the verified source projection and license for the NAND corrector."""
     from fplinux_cli.build.host_tools.host import (  # noqa: PLC0415
         copy_host_project_files,
@@ -220,7 +223,6 @@ def _linux_ecc_sources(platform: str) -> dict[str, bytes]:
     )
     sources = common.load_toml(common.ROOT / "sources.lock.toml")
     lock = source_lock_entry(sources, recipe["source_lock"])
-    cache = common.ROOT / ".cache"
     archive = acquire_source(common.ROOT, recipe["source_lock"], cache)
     payload = io.BytesIO()
     with tempfile.TemporaryDirectory(dir=cache, prefix=".autonomous-ecc-source-") as temporary:
@@ -245,6 +247,7 @@ def autonomous_payload(
     *,
     host: str,
     runtime: dict[str, Any],
+    cache: Path,
 ) -> AutonomousPayload:
     """Collect host dependencies; executable project code comes from the built bundle."""
     descriptor = runtime["device_data"]
@@ -262,10 +265,8 @@ def autonomous_payload(
             prepare_windows_driver,
         )
 
-        dependencies = prepare_windows_host(
-            cache=common.ROOT / ".cache", platform=platform, nand_ecc=has_ecc
-        )
-        dependencies.update(prepare_windows_driver(cache=common.ROOT / ".cache"))
+        dependencies = prepare_windows_host(cache=cache, platform=platform, nand_ecc=has_ecc)
+        dependencies.update(prepare_windows_driver(cache=cache))
         for relative, source in dependencies.items():
             if relative in files:
                 fail(f"duplicate Windows archive path: {relative}")
@@ -291,8 +292,8 @@ def autonomous_payload(
                 fail(f"host tool license is missing or invalid: {license_file}")
             files["licenses/host-tools/Unlicense.txt"] = license_file.read_bytes()
         if has_ecc:
-            files.update(_linux_ecc_sources(platform))
-        for relative, source in prepare_linux_host(cache=common.ROOT / ".cache").items():
+            files.update(_linux_ecc_sources(platform, cache=cache))
+        for relative, source in prepare_linux_host(cache=cache).items():
             if relative in files:
                 fail(f"duplicate Linux archive path: {relative}")
             files[relative] = source.read_bytes()

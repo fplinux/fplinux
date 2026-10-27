@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import common
 from fplinux_cli.common import fail, sha256_file
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.environment.definition import environment_recipe_digest, load_environment_lock
 from fplinux_cli.environment.kern import (
     ensure_project_directory,
@@ -35,12 +36,15 @@ _ENVIRONMENT_TIMEOUT = 2 * 60 * 60
 _MAPPED_ROOT = ["unshare", "--map-auto", "--map-root-user", "--"]
 
 
-def save_environment(directory: Path, reporter: RunReporter) -> dict[str, Any]:
+def save_environment(
+    directory: Path, reporter: RunReporter, *, cache: Path | None = None
+) -> dict[str, Any]:
     """Preserve logical owners, modes, links and installed bytes in one native archive."""
     lock = load_environment_lock()
-    kern = require_kern(lock)
+    cache = data_root(common.ROOT) if cache is None else cache
+    kern = require_kern(lock, cache=cache)
     recipe = environment_recipe_digest(lock)
-    state = current_environment_state(kern, recipe)
+    state = current_environment_state(kern, recipe, cache=cache)
     if state is None:
         fail("current build environment is unavailable; run ./fplinux setup first")
     manifest_path = directory / "manifest.json"
@@ -49,7 +53,7 @@ def save_environment(directory: Path, reporter: RunReporter) -> dict[str, Any]:
         if saved is not None:
             require_matching_environment(EnvironmentState(**saved["state"]), state)
             return saved
-    rootfs = environment_rootfs(common.ROOT / ".cache", state)
+    rootfs = environment_rootfs(cache, state)
     with tempfile.TemporaryDirectory(dir=directory, prefix=".environment-") as temporary:
         archive = Path(temporary) / "environment.tar.gz"
         with reporter.stage("environment-save") as stage:
@@ -67,11 +71,11 @@ def save_environment(directory: Path, reporter: RunReporter) -> dict[str, Any]:
                     ".",
                 ],
                 cwd=common.ROOT,
-                env=kern_environment(),
+                env=kern_environment(cache=cache),
                 timeout=_ENVIRONMENT_TIMEOUT,
             )
         require_rootfs_archive(archive)
-        if current_environment_state(kern, recipe) != state:
+        if current_environment_state(kern, recipe, cache=cache) != state:
             fail("source build environment changed during snapshot export")
         digest = sha256_file(archive)
         copy_verified(archive, object_path(directory, digest), digest)
@@ -79,18 +83,23 @@ def save_environment(directory: Path, reporter: RunReporter) -> dict[str, Any]:
 
 
 def restore_environment(
-    directory: Path, environment: dict[str, Any], reporter: RunReporter
+    directory: Path,
+    environment: dict[str, Any],
+    reporter: RunReporter,
+    *,
+    cache: Path | None = None,
 ) -> None:
     """Publish a restored rootfs only after archive and installed-content validation."""
     lock = load_environment_lock()
+    cache = data_root(common.ROOT) if cache is None else cache
     recipe = environment_recipe_digest(lock)
     state = EnvironmentState(**environment["state"])
     if state.recipe != recipe:
         fail("saved build environment does not match this checkout's exact environment recipe")
     archive = object_path(directory, environment["sha256"])
     require_rootfs_archive(archive)
-    kern = install_kern(lock, offline=True)
-    parent = ensure_project_directory(common.ROOT / ".cache/environment")
+    kern = install_kern(lock, offline=True, cache=cache)
+    parent = ensure_project_directory(cache / "environment")
     candidate = Path(tempfile.mkdtemp(dir=parent, prefix="candidate-"))
     try:
         with reporter.stage("environment-load") as stage:
@@ -109,10 +118,10 @@ def restore_environment(
                     str(candidate),
                 ],
                 cwd=common.ROOT,
-                env=kern_environment(),
+                env=kern_environment(cache=cache),
                 timeout=_ENVIRONMENT_TIMEOUT,
             )
-        publish_environment(kern, candidate, state)
+        publish_environment(kern, candidate, state, cache=cache)
     finally:
         if candidate.exists():
-            remove_environment_rootfs(candidate)
+            remove_environment_rootfs(candidate, cache=cache)

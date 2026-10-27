@@ -14,6 +14,7 @@ from fplinux_cli.alpine.packages import _alpine_group_packages, alpine_sysroot_c
 from fplinux_cli.build.environment import SOURCE_DATE_EPOCH
 from fplinux_cli.build.workflow import ensure_build_directory
 from fplinux_cli.common import canonical_json_bytes, fail, relative_name, sha256_bytes
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.dependencies.inputs import acquire_inputs, alpine_package_input, source_input
 from fplinux_cli.environment import kern as environment_kern
 from fplinux_cli.environment import runtime as environment_runtime
@@ -37,21 +38,34 @@ def _require_unlinked_path(root: Path, relative: str) -> Path:
     return path
 
 
-def resolve_probe_paths(source: str, output: str, *, root: Path) -> tuple[Path, Path]:
+def resolve_probe_paths(
+    source: str, output: str, *, root: Path, cache: Path | None = None
+) -> tuple[Path, Path]:
     """Validate explicit repository paths before loading any build environment."""
     source_name = relative_name(source, field="probe source")
-    output_name = relative_name(output, field="probe output")
     source_path = _require_unlinked_path(root, source_name)
+    cache = data_root(root) if cache is None else cache
+    if source_path.is_relative_to(cache):
+        fail("probe source must be outside the managed data directory")
     if source_path.suffix != ".c" or not source_path.is_file():
         fail(f"probe source must name a regular .c file: {source_name}")
-    output_parts = PurePosixPath(output_name).parts
-    if output_parts[:2] != (".cache", "tools") or len(output_parts) < 3:
-        fail("probe output must be inside .cache/tools")
-    output_path = _require_unlinked_path(root, output_name)
+    tools_root = cache / "tools"
+    requested_output = Path(output)
+    output_path = (
+        requested_output
+        if requested_output.is_absolute()
+        else root / relative_name(output, field="probe output")
+    )
+    if ".." in output_path.parts or not output_path.is_relative_to(tools_root):
+        fail("probe output must be inside the selected managed tools directory")
+    relative_output = output_path.relative_to(tools_root)
+    if not relative_output.parts or tools_root.is_symlink():
+        fail("probe output must name a file inside the selected managed tools directory")
+    output_path = _require_unlinked_path(tools_root, relative_output.as_posix())
     if output_path.exists() and not output_path.is_file():
-        fail(f"probe output must name a regular file: {output_name}")
+        fail(f"probe output must name a regular file: {output}")
     for parent in output_path.parents:
-        if parent == root:
+        if parent == tools_root.parent:
             break
         if parent.exists() and not parent.is_dir():
             fail(f"probe output parent must be a directory: {parent}")
@@ -99,7 +113,12 @@ def _container_command(
 
 
 def _prepare_sysroot(
-    kern: str, rootfs: Path, state: EnvironmentState, reporter: RunReporter
+    kern: str,
+    rootfs: Path,
+    state: EnvironmentState,
+    reporter: RunReporter,
+    *,
+    cache: Path | None = None,
 ) -> Path:
     lock = alpine_lock.load_alpine_lock()
     records = alpine_lock.package_records(lock)
@@ -114,7 +133,7 @@ def _prepare_sysroot(
             }
         )
     )
-    cache = common.ROOT / ".cache"
+    cache = data_root(common.ROOT) if cache is None else cache
     sysroots = ensure_build_directory(cache / "probe-build")
     sysroot = sysroots / identity
     if sysroot.is_symlink() or (sysroot.exists() and not sysroot.is_dir()):
@@ -135,7 +154,7 @@ def _prepare_sysroot(
         prepared = Path(temporary) / "sysroot"
         prepared.mkdir()
         with reporter.stage("sysroot-keys"):
-            keys = _prepare_keys(lock, Path(temporary))
+            keys = _prepare_keys(lock, Path(temporary), cache=cache)
         command = alpine_sysroot_command(
             lock,
             [Path("/packages") / package.name for package in packages],
@@ -156,17 +175,18 @@ def _prepare_sysroot(
                     prepare_sysroot=True,
                 ),
                 cwd=common.ROOT,
-                env=environment_kern.kern_environment(),
+                env=environment_kern.kern_environment(cache=cache),
                 timeout=5 * 60,
             )
         prepared.rename(sysroot)
     return sysroot
 
 
-def _prepare_keys(lock: dict[str, Any], destination: Path) -> Path:
+def _prepare_keys(lock: dict[str, Any], destination: Path, *, cache: Path | None = None) -> Path:
     """Use the target release's signing keys, as the normal rootfs build does."""
     record = lock["minirootfs"]
-    archive = acquire_source(common.ROOT, record["source_id"], common.ROOT / ".cache")
+    cache = data_root(common.ROOT) if cache is None else cache
+    archive = acquire_source(common.ROOT, record["source_id"], cache)
     if archive.stat().st_size != record["bytes"]:
         fail("locked Alpine minirootfs size does not match its downloaded bytes")
     with tarfile.open(archive, "r:gz") as bundle:
@@ -188,16 +208,19 @@ def _compile_probe(  # noqa: PLR0913 -- explicit compiler inputs and reporting b
     kern: str,
     rootfs: Path,
     reporter: RunReporter,
+    cache: Path | None = None,
 ) -> None:
     source_relative = source.relative_to(common.ROOT)
+    cache = data_root(common.ROOT) if cache is None else cache
     source_files = {source_relative.as_posix(): source}
-    workspace_inputs.add_source_path(source_files, common.ROOT / "include")
-    if source_relative.parts[0] != ".cache":
-        for header in sorted(source.parent.glob("*.h")):
-            if header.is_file():
-                workspace_inputs.add_source_path(source_files, header)
+    workspace_inputs.add_source_path(
+        source_files, common.ROOT / "include", selected_data_root=cache
+    )
+    for header in sorted(source.parent.glob("*.h")):
+        if header.is_file():
+            source_files[header.relative_to(common.ROOT).as_posix()] = header
     snapshot = workspace_capture.workspace_snapshot(list(source_files.items()))
-    workspace = workspace_staging.stage_workspace_snapshot(snapshot)
+    workspace = workspace_staging.stage_workspace_snapshot(snapshot, selected_data_root=cache)
     temporary: Path | None = None
     try:
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -235,7 +258,7 @@ def _compile_probe(  # noqa: PLR0913 -- explicit compiler inputs and reporting b
                     ],
                 ),
                 cwd=common.ROOT,
-                env=environment_kern.kern_environment(),
+                env=environment_kern.kern_environment(cache=cache),
                 timeout=5 * 60,
             )
         temporary.chmod(0o755)
@@ -246,15 +269,22 @@ def _compile_probe(  # noqa: PLR0913 -- explicit compiler inputs and reporting b
             if temporary is not None:
                 temporary.unlink(missing_ok=True)
         finally:
-            workspace_staging.discard_staged_workspace_snapshot(snapshot, workspace)
+            workspace_staging.discard_staged_workspace_snapshot(
+                snapshot, workspace, selected_data_root=cache
+            )
 
 
 def build_probe(source: str, *, output: str) -> None:
     """Publish one static ARMv7 probe only after the pinned compiler succeeds."""
-    source_path, output_path = resolve_probe_paths(source, output, root=common.ROOT)
-    kern, rootfs, state = environment_runtime.require_environment()
-    reporter = RunReporter.create("probe-build", target=None, verbose=False)
-    sysroot = _prepare_sysroot(kern, rootfs, state, reporter)
-    _compile_probe(source_path, output_path, sysroot, kern=kern, rootfs=rootfs, reporter=reporter)
+    cache = data_root(common.ROOT)
+    source_path, output_path = resolve_probe_paths(source, output, root=common.ROOT, cache=cache)
+    kern, rootfs, state = environment_runtime.require_environment(cache=cache)
+    reporter = RunReporter.create(
+        "probe-build", target=None, verbose=False, selected_data_root=cache
+    )
+    sysroot = _prepare_sysroot(kern, rootfs, state, reporter, cache=cache)
+    _compile_probe(
+        source_path, output_path, sysroot, kern=kern, rootfs=rootfs, reporter=reporter, cache=cache
+    )
     print(f"probe-build: {output}", flush=True)
     reporter.finish()

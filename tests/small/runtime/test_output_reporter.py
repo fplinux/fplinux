@@ -42,14 +42,14 @@ class RunReporterTests:
         """Publish invocation-derived state at creation, stage boundaries, and finish."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "run"
-            reporter = RunReporter("check", root, ".cache/logs/test", verbose=False)
+            reporter = RunReporter("check", root, "logs/test", verbose=False)
             initial = json.loads(reporter.metadata_path.read_text())
             assert (initial["label"]) == ("check")
             assert (initial["pid"]) == (os.getpid())
             assert (initial["status"]) == ("running")
             assert (initial["finished_at"]) is None
             assert (initial["stages"]) == ([])
-            assert (initial["display_root"]) == (".cache/logs/test")
+            assert (initial["display_root"]) == ("logs/test")
             assert (initial["parent"]) is None
             assert initial["build_type"] is None
             with reporter.stage("prepare"):
@@ -100,7 +100,7 @@ class RunReporterTests:
         """Keep a caught failed stage failed even if a caller later invokes finish."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "run"
-            reporter = RunReporter("check", root, ".cache/logs/test", verbose=False)
+            reporter = RunReporter("check", root, "logs/test", verbose=False)
             with pytest.raises(SystemExit), reporter.stage("failure"):
                 raise SystemExit(7)
             reporter.finish()
@@ -123,7 +123,7 @@ class RunReporterTests:
         """Concurrent readers never observe a missing or partial metadata document."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "run"
-            reporter = RunReporter("check", root, ".cache/logs/test", verbose=False)
+            reporter = RunReporter("check", root, "logs/test", verbose=False)
             stop = threading.Event()
             reader_ready = threading.Event()
             failures: list[BaseException] = []
@@ -174,7 +174,7 @@ class RunReporterTests:
         """Keep container subreports out of the host run's metadata writer domain."""
         with tempfile.TemporaryDirectory() as temporary:
             host_root = Path(temporary) / "host"
-            host = RunReporter("check", host_root, ".cache/logs/check/run", verbose=False)
+            host = RunReporter("check", host_root, "logs/check/run", verbose=False)
             environment = host.container_environment(str(host_root))
             with mock.patch.dict(os.environ, environment, clear=False):
                 nested = RunReporter.from_environment("check", "quality")
@@ -190,8 +190,8 @@ class RunReporterTests:
             assert (host_metadata["status"]) == ("running")
             assert (host_metadata["stages"]) == ([])
             assert (nested.root) == (host_root / "quality")
-            assert (nested_metadata["display_root"]) == (".cache/logs/check/run/quality")
-            assert (nested_metadata["parent"]) == (".cache/logs/check/run")
+            assert (nested_metadata["display_root"]) == ("logs/check/run/quality")
+            assert (nested_metadata["parent"]) == ("logs/check/run")
             assert (nested_metadata["status"]) == ("success")
 
     def test_entrypoint_marks_an_internal_reporter_successful(self) -> None:
@@ -200,7 +200,7 @@ class RunReporterTests:
             root = Path(temporary) / "run"
 
             def entrypoint() -> None:
-                reporter = RunReporter("check", root, ".cache/logs/test", verbose=False)
+                reporter = RunReporter("check", root, "logs/test", verbose=False)
                 with reporter.stage("container-work"):
                     pass
 
@@ -228,7 +228,7 @@ class RunReporterTests:
         """Retain a traceback when Python code fails inside a stage."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "run"
-            reporter = RunReporter("check", root, ".cache/logs/test", verbose=False)
+            reporter = RunReporter("check", root, "logs/test", verbose=False)
             terminal = io.StringIO()
             message = "internal failure"
             with (
@@ -245,7 +245,7 @@ class RunReporterTests:
         """Convert an already reported internal error to a quiet exit status."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "run"
-            reporter = RunReporter("check", root, ".cache/logs/test", verbose=False)
+            reporter = RunReporter("check", root, "logs/test", verbose=False)
             terminal = io.StringIO()
             message = "entrypoint failure"
 
@@ -262,7 +262,7 @@ class RunReporterTests:
         """Avoid printing a reported string exit again at interpreter shutdown."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "run"
-            reporter = RunReporter("check", root, ".cache/logs/test", verbose=False)
+            reporter = RunReporter("check", root, "logs/test", verbose=False)
             terminal = io.StringIO()
             message = "expected failure"
 
@@ -279,7 +279,7 @@ class RunReporterTests:
         """Suppress only the exact exception already written by a stage."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "run"
-            reporter = RunReporter("check", root, ".cache/logs/test", verbose=False)
+            reporter = RunReporter("check", root, "logs/test", verbose=False)
             terminal = io.StringIO()
             reported_message = "reported failure"
             later_message = "later failure"
@@ -361,7 +361,7 @@ class RunReporterTests:
             host = RunReporter(
                 "build target",
                 Path(temporary) / "host",
-                ".cache/logs/build/target/run",
+                "logs/build/target/run",
                 verbose=verbose,
             )
             mounted = Path(temporary) / "mounted"
@@ -371,5 +371,5 @@ class RunReporterTests:
 
             assert (nested) is not None
             assert (nested.root) == (mounted / "container")
-            assert (nested.display_root) == (".cache/logs/build/target/run/container")
+            assert (nested.display_root) == ("logs/build/target/run/container")
             assert (nested.verbose) is (verbose)

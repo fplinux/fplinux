@@ -41,6 +41,7 @@ class LogsCli:
             [str(self.root / "fplinux"), "logs", *arguments],
             name="public log reader",
             cwd=self.root,
+            env=os.environ | {"FPLINUX_DATA_DIR": str(self.logs.parent)},
             timeout=10,
             while_running=while_running,
         )
@@ -64,8 +65,8 @@ class LogsCli:
             "started_at": started,
             "finished_at": None if status == "running" else "2026-01-02T10:00:12+00:00",
             "status": status,
-            "parent": f".cache/logs/{parent}" if parent is not None else None,
-            "display_root": directory.relative_to(self.root).as_posix(),
+            "parent": f"logs/{parent}" if parent is not None else None,
+            "display_root": f"logs/{relative}",
             "stages": [
                 {"name": name, "log": f"{index:02d}-{name}.log", "status": state, "exit": None}
                 for index, (name, state) in enumerate(stages, 1)
@@ -83,7 +84,30 @@ class LogsCli:
 def logs_cli(tmp_path: Path) -> LogsCli:
     """Provide source imports but no Kern installation, cache or ambient run history."""
     prepare_cli_checkout(tmp_path)
-    return LogsCli(tmp_path, tmp_path / ".cache/logs")
+    return LogsCli(tmp_path, tmp_path / ".data/logs")
+
+
+def test_external_data_root_reads_parent_and_child_logs_without_creating_default_store(
+    tmp_path: Path,
+) -> None:
+    """The public reader selects the requested store and links relative log identities."""
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    prepare_cli_checkout(checkout)
+    logs = LogsCli(checkout, tmp_path / "external data/logs")
+    parent = logs.journal("build/example/run", stages=(("prepare", "success"),))
+    child = logs.journal(
+        "build/example/run/quality",
+        parent="build/example/run",
+        stages=(("source", "failed"),),
+    )
+    (parent / "01-prepare.log").write_text("parent output\n")
+    (child / "01-source.log").write_text("child output\n")
+    result = logs.run_logs("show", "--command", "build", "--tail", "2")
+    assert result.returncode == 0, result.stderr
+    assert "parent output" in result.stdout
+    assert "child output" in result.stdout
+    assert not (checkout / ".data").exists()
 
 
 def await_output(process: subprocess.Popen[str], deadline: float, marker: bytes) -> bytes:
@@ -346,7 +370,7 @@ class LogsCliTests:
         logs_cli.journal("build/example/run")
         before = sorted(path.relative_to(logs_cli.logs) for path in logs_cli.logs.rglob("*"))
         with cache_lock(
-            logs_cli.root / ".cache", exclusive=True, command="build", target="example"
+            logs_cli.root / ".data", exclusive=True, command="build", target="example"
         ):
             result = logs_cli.run_logs("list")
         assert (result.returncode) == (0), result.stderr

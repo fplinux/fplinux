@@ -71,7 +71,7 @@ class ChecksumAportContext:
                 "require_environment",
                 return_value=(
                     "/usr/bin/kern",
-                    self.root / ".cache/environment/rootfs",
+                    self.root / ".data/environment/rootfs",
                     EnvironmentState("e" * 64, "a" * 64, "b" * 64),
                 ),
             ),
@@ -184,7 +184,7 @@ class ChecksumAportTests:
             )
             assert command[command.index("--network") + 1] == "none"
             assert command[command.index("--rootfs") + 1] == str(
-                checksum_aport.root / ".cache/environment/rootfs"
+                checksum_aport.root / ".data/environment/rootfs"
             )
             assert "--read-only" in command
             assert "--uid-range" in command

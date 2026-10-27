@@ -1,8 +1,7 @@
 [tool.ruff]
 target-version = "py314"
 line-length = 99
-cache-dir = ".cache/ruff"
-extend-exclude = [".cache", "node_modules"]
+extend-exclude = [".data", ".private", "node_modules"]
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -61,4 +60,3 @@ norecursedirs = [
   "venv",
   "{arch}",
 ]
-cache_dir = ".cache/pytest"

@@ -100,6 +100,8 @@ def check_orchestration_recipe_digest(environment_recipe: str | None = None) -> 
     fixed = [
         common.ROOT / "scripts/fplinux_cli/__init__.py",
         common.ROOT / "scripts/fplinux_cli/common.py",
+        common.ROOT / "scripts/fplinux_cli/data_paths.py",
+        common.ROOT / "scripts/fplinux_cli/source_paths.py",
         common.ROOT / "scripts/fplinux_cli/alpine/__init__.py",
         common.ROOT / "scripts/fplinux_cli/alpine/registration.py",
         common.ROOT / "scripts/fplinux_cli/environment/__init__.py",

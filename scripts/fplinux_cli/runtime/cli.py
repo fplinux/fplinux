@@ -7,6 +7,10 @@ import argparse
 import os
 from pathlib import Path
 
+from fplinux_cli.common import fail
+from fplinux_cli.data_paths import data_root
+
+from .data_paths import archive_runtime_root
 from .workflow import run_phone
 
 
@@ -35,7 +39,7 @@ def arguments(bundle_root: Path) -> argparse.Namespace:
             "--data-root",
             type=Path,
             metavar="PATH",
-            help="keep launcher state and connection keys here (default: bundle/data)",
+            help="keep launcher state and connection keys here (default: installation data scope)",
         )
         command.add_argument(
             "--phone-data",
@@ -47,7 +51,7 @@ def arguments(bundle_root: Path) -> argparse.Namespace:
             "--log-root",
             type=Path,
             metavar="PATH",
-            help="keep launch logs here (default: bundle/logs)",
+            help="keep launch logs here (default: installation data scope/logs)",
         )
     for command in (run, prepare):
         command.add_argument(
@@ -105,8 +109,16 @@ def main(*, bundle_root: Path) -> None:
     """Invoke the same workflow from checkout selection and archive launchers."""
     options = arguments(bundle_root)
     bundle = options.bundle.resolve()
-    data = (options.data_root or bundle / "data").resolve()
-    logs = (options.log_root or bundle / "logs").resolve()
+    try:
+        if options.data_root is not None and options.log_root is not None:
+            data = options.data_root.resolve()
+            logs = options.log_root.resolve()
+        else:
+            scope = archive_runtime_root(data_root(bundle), bundle)
+            data = options.data_root.resolve() if options.data_root is not None else scope
+            logs = options.log_root.resolve() if options.log_root is not None else scope / "logs"
+    except (OSError, ValueError) as error:
+        fail(str(error))
     raise SystemExit(
         run_phone(
             bundle,

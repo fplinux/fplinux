@@ -73,11 +73,14 @@ To use FPLinux again after power-off, repeat the startup instructions.
 
 Help and saved files
 
-Each launch saves runtime.log in a new folder inside logs and
-displays its exact path. Include that runtime.log when asking for
-help. Private connection keys and details needed to reconnect are
-saved in data/session; keep them private and keep this folder for
-the same physical phone.
+Launcher state, private connection keys and launch logs are saved
+inside .data in the extracted folder. FPLINUX_DATA_DIR can select
+another data directory; a relative value is resolved from this
+folder. Keep this data private and use this folder for the same
+physical phone.
+
+Each launch saves runtime.log and displays its exact path. Include
+that runtime.log when asking for help.
 
 The phone's backup and prepared data are saved on the PC in:
   %LOCALAPPDATA%\FPLinux\phones\demo-phone

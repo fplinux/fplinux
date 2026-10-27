@@ -11,6 +11,8 @@ from fplinux_cli.artifacts.release import (
     current_release_context,
     source_identity_bytes,
 )
+from fplinux_cli.source_paths import validate_checkout_data_root
+from fplinux_cli.workspace import quality_inputs
 
 from tests.process import run_process
 
@@ -35,6 +37,7 @@ def source_checkout(tmp_path: Path) -> Path:
     root.mkdir()
     for relative, contents in (
         ("README.md", b"Project\n"),
+        ("scripts/main.py", b"print('source')\n"),
         ("targets/first/target.toml", b'platform = "first"\n'),
         ("targets/second/target.toml", b'platform = "second"\n'),
         ("tests/check.py", b"assert True\n"),
@@ -96,6 +99,77 @@ def test_group_write_mode_keeps_the_canonical_clean_git_identity(source_checkout
     clean = capture_public_sources(source_checkout)
     (source_checkout / "README.md").chmod(0o664)
     assert capture_public_sources(source_checkout) == clean
+
+
+@pytest.mark.parametrize("relative", [".data", ".private", "scripts/generated"])
+def test_managed_and_private_writes_preserve_git_and_exported_source_identity(
+    source_checkout: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: str
+) -> None:
+    """Data paths affect neither source bytes nor the clean-commit decision."""
+    selected = source_checkout / "scripts/generated"
+    monkeypatch.setenv("FPLINUX_DATA_DIR", str(selected))
+    clean = capture_public_sources(source_checkout)
+    generated = source_checkout / relative / "payload.py"
+    generated.parent.mkdir(parents=True, exist_ok=True)
+    generated.write_bytes(b"generated runtime data\n")
+    (generated.parent / "linked.py").symlink_to(generated)
+    assert capture_public_sources(source_checkout) == clean
+
+    exported = tmp_path / "export"
+    exported.mkdir()
+    for source in clean.files:
+        destination = exported / source.path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(source.contents)
+        destination.chmod(source.mode)
+    (exported / ".fplinux-release.json").write_bytes(source_identity_bytes(clean))
+    monkeypatch.setenv("FPLINUX_DATA_DIR", str(exported / "scripts/generated"))
+    unwanted = exported / relative / "payload.py"
+    unwanted.parent.mkdir(parents=True, exist_ok=True)
+    unwanted.write_bytes(b"different generated data\n")
+    assert capture_public_sources(exported) == clean
+
+
+@pytest.mark.parametrize("relative", ["tests", "README.md"])
+def test_checkout_placement_rejects_tracked_source_before_managed_writes(
+    source_checkout: Path, relative: str
+) -> None:
+    """An existing source directory or file cannot become a managed namespace."""
+    selected = source_checkout / relative
+    with pytest.raises(SystemExit, match="managed data root overlaps tracked source"):
+        validate_checkout_data_root(source_checkout, selected)
+
+
+def test_checkout_placement_accepts_a_new_nested_data_directory(source_checkout: Path) -> None:
+    """A generated subtree beside tracked sources remains a supported placement."""
+    selected = source_checkout / "scripts/generated"
+    validate_checkout_data_root(source_checkout, selected)
+    assert not selected.exists()
+
+
+@pytest.mark.parametrize("name", ["generated [data] ", "!state?*", "back\\slash"])
+def test_git_source_inventory_excludes_literal_data_paths_and_preserves_neighbor_sources(
+    source_checkout: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """Git pattern syntax in a directory name cannot hide neighboring public sources."""
+    selected = source_checkout / "scripts" / name
+    selected.mkdir()
+    (selected / "payload.py").write_bytes(b"generated data\n")
+    sibling = source_checkout / "scripts/generated d/source.py"
+    sibling.parent.mkdir()
+    sibling.write_bytes(b"public source\n")
+    monkeypatch.setenv("FPLINUX_DATA_DIR", str(selected))
+    monkeypatch.setattr(quality_inputs, "ROOT", source_checkout)
+
+    captured = capture_public_sources(source_checkout)
+    quality = dict(quality_inputs.quality_files(enforce_source_policy=False))
+
+    assert "scripts/generated d/source.py" in {source.path for source in captured.files}
+    assert quality["scripts/generated d/source.py"].read_bytes() == b"public source\n"
+    assert not any(source.path.startswith(f"scripts/{name}/") for source in captured.files)
+    assert not any(path.startswith(f"scripts/{name}/") for path in quality)
+    sibling.write_bytes(b"changed public source\n")
+    assert capture_public_sources(source_checkout).release != captured.release
 
 
 @pytest.mark.parametrize("dirty", [False, True], ids=["clean", "dirty"])

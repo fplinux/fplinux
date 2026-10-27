@@ -18,8 +18,8 @@ from fplinux_cli.runtime.bundle_session import PUBLIC_BOOT_MODES
 
 _CHECK_SCOPE_METAVAR = "{" + ",".join(CHECK_SCOPES) + "}"
 _PUBLIC_COMMAND_METAVAR = (
-    "{doctor,check,test,logs,inspect,format,setup,dependencies,ci,build,probe-build,checksum,package,prune,"
-    "run,console,nand,device-data,target,verify}"
+    "{data-path,doctor,check,test,logs,inspect,format,setup,dependencies,ci,build,probe-build,checksum,"
+    "package,prune,run,console,nand,device-data,target,verify}"
 )
 
 
@@ -180,6 +180,10 @@ def create_parser(
         required=True,
         metavar=_PUBLIC_COMMAND_METAVAR,
     )
+    data_parser = commands.add_parser("data-path", help="print the managed data directory")
+    data_parser.add_argument(
+        "--check", action="store_true", help="validate checkout placement before writing data"
+    )
     commands.add_parser("doctor", help="check the project-local build runtime")
     check_parser = commands.add_parser(
         "check",
@@ -322,7 +326,7 @@ def create_parser(
         dest="dependencies_command", required=True, metavar="{create,verify,restore,export,import}"
     )
     create_snapshot_parser = dependency_commands.add_parser(
-        "create", help="save a dependency snapshot outside .cache"
+        "create", help="save a dependency snapshot outside the managed data directory"
     )
     create_snapshot_parser.add_argument("directory", type=Path, metavar="DIRECTORY")
     create_snapshot_parser.add_argument(
@@ -380,7 +384,9 @@ def create_parser(
     commit_message_parser = commands.add_parser("_commit-msg")
     commit_message_parser.add_argument("message_file")
     commands.add_parser("_pre-push")
-    build_parser = commands.add_parser("build", help="build a target in .cache/out")
+    build_parser = commands.add_parser(
+        "build", help="build a target in the managed output directory"
+    )
     _add_build_type_option(build_parser)
     _add_phone_data_option(build_parser)
     build_parser.add_argument("target", choices=targets)
@@ -423,8 +429,8 @@ def create_parser(
     probe_parser.add_argument(
         "--output",
         required=True,
-        metavar=".cache/tools/NAME",
-        help="normalized repository-relative output path inside .cache/tools",
+        metavar="PATH",
+        help="output path inside the selected managed tools directory",
     )
     checksum_parser = commands.add_parser(
         "checksum",

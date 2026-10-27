@@ -17,6 +17,7 @@ from fplinux_cli.alpine.sources import font_source_manifest
 from fplinux_cli.build import DEFAULT_BUILD_MEMORY_MIB
 from fplinux_cli.build.host_tools.host import extract_host_members
 from fplinux_cli.common import ROOT, error_message, fail, load_toml
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.dependencies.inputs import (
     acquire_inputs,
     build_source_inputs,
@@ -79,7 +80,8 @@ def prepare_setup(  # noqa: PLR0913 -- public preparation selectors and environm
     offline: bool = False,
 ) -> None:
     """Prepare selected originals and their current local consumers without an export."""
-    reporter = RunReporter.create("setup", target=target, verbose=False)
+    cache = data_root(ROOT)
+    reporter = RunReporter.create("setup", target=target, verbose=False, selected_data_root=cache)
     if site or all_inputs:
         if all_inputs:
             from fplinux_cli.dependencies.workflow import (  # noqa: PLC0415 -- complete inventory only.
@@ -106,21 +108,22 @@ def prepare_setup(  # noqa: PLR0913 -- public preparation selectors and environm
         setup_command = "./fplinux setup"
     if inputs:
         with reporter.stage("setup-inputs"):
-            acquire_inputs(inputs, ROOT / ".cache", offline=offline, setup_command=setup_command)
+            acquire_inputs(inputs, cache, offline=offline, setup_command=setup_command)
     if not site:
-        setup(force=force, offline=offline, reporter=reporter)
+        setup(force=force, offline=offline, reporter=reporter, cache=cache)
     if site or all_inputs:
         from fplinux_cli.dependencies.site_install import (  # noqa: PLC0415 -- documentation consumer only.
             install_site,
         )
 
         with reporter.stage("site-install"):
-            install_site()
+            install_site(cache=cache)
     reporter.finish()
 
 
-def _stage_environment_inputs(context: Path, *, offline: bool) -> None:
+def _stage_environment_inputs(context: Path, *, offline: bool, cache: Path | None = None) -> None:
     """Capture the exact recipe and verified downloads without unrelated cache files."""
+    selected_root = data_root(ROOT) if cache is None else cache
     for relative in ENVIRONMENT_RECIPE_INPUTS:
         source = ROOT / relative
         if source.is_symlink() or not source.is_file():
@@ -135,7 +138,7 @@ def _stage_environment_inputs(context: Path, *, offline: bool) -> None:
     ui_icons = {item.key for item in ui_icon_environment_inputs(ROOT)}
     inputs = environment_inputs(ROOT)
     originals = acquire_inputs(
-        [item for item in inputs if item.key != "source:kern"], ROOT / ".cache", offline=offline
+        [item for item in inputs if item.key != "source:kern"], selected_root, offline=offline
     )
     for item in inputs:
         if item.key == "source:kern":
@@ -178,7 +181,7 @@ def _stage_environment_inputs(context: Path, *, offline: bool) -> None:
         json.dumps(font_source_manifest(ROOT)) + "\n"
     )
     materialize_aport_sources(
-        "fplinux-font-terminus", ROOT, context / "quality/terminus-aport", cache=ROOT / ".cache"
+        "fplinux-font-terminus", ROOT, context / "quality/terminus-aport", cache=selected_root
     )
     (context / "environment-inputs.json").write_text(json.dumps(load_environment_lock()) + "\n")
 
@@ -192,9 +195,10 @@ def _prepare_rootfs(  # noqa: PLR0913 -- captured inputs, receipt markers and re
     recipe: str,
     generation: str,
     reporter: RunReporter,
+    cache: Path,
 ) -> None:
     base = next(record for record in lock["input"] if record["purpose"] == "environment-base")
-    extraction_environment = kern_environment()
+    extraction_environment = kern_environment(cache=cache)
     extraction_environment["PYTHONPATH"] = str(ROOT / "scripts")
     with reporter.stage("environment-base") as stage:
         stage.run(
@@ -247,7 +251,7 @@ def _prepare_rootfs(  # noqa: PLR0913 -- captured inputs, receipt markers and re
                 *packages,
             ],
             cwd=ROOT,
-            env=kern_environment(),
+            env=kern_environment(cache=cache),
             timeout=_ENVIRONMENT_SETUP_TIMEOUT,
         )
 
@@ -257,18 +261,20 @@ def setup(
     force: bool = False,
     offline: bool = False,
     reporter: RunReporter,
+    cache: Path | None = None,
 ) -> EnvironmentState:
     """Reuse an exact environment or prepare a replacement while retaining the old tree."""
     lock = load_environment_lock()
-    kern = install_kern(lock, offline=offline)
+    selected_root = data_root(ROOT) if cache is None else cache
+    kern = install_kern(lock, offline=offline, cache=selected_root)
     environment_recipe = environment_recipe_digest(lock)
-    current = current_environment_state(kern, environment_recipe)
+    current = current_environment_state(kern, environment_recipe, cache=selected_root)
     if current is not None and not force:
         install_git_hooks()
         print("Build environment is ready")
         return current
 
-    directory = ensure_project_directory(ROOT / ".cache/environment")
+    directory = ensure_project_directory(selected_root / "environment")
     candidate = Path(tempfile.mkdtemp(dir=directory, prefix="candidate-"))
     generation = secrets.token_hex(32)
     failed = False
@@ -276,7 +282,7 @@ def setup(
         with tempfile.TemporaryDirectory(dir=directory, prefix="recipe-") as temporary:
             context = Path(temporary)
             with reporter.stage("environment-inputs"):
-                _stage_environment_inputs(context, offline=offline)
+                _stage_environment_inputs(context, offline=offline, cache=selected_root)
             _prepare_rootfs(
                 kern,
                 candidate,
@@ -285,20 +291,21 @@ def setup(
                 recipe=environment_recipe,
                 generation=generation,
                 reporter=reporter,
+                cache=selected_root,
             )
         if environment_recipe_digest(lock) != environment_recipe:
             fail("environment inputs changed while setup was running")
-        state = probe_environment_state(kern, candidate, environment_recipe)
+        state = probe_environment_state(kern, candidate, environment_recipe, cache=selected_root)
         if state is None or state.generation != generation:
             fail("environment preparation did not publish the exact requested generation")
-        state = publish_environment(kern, candidate, state)
+        state = publish_environment(kern, candidate, state, cache=selected_root)
     except BaseException:
         failed = True
         raise
     finally:
         if candidate.exists():
             try:
-                remove_environment_rootfs(candidate)
+                remove_environment_rootfs(candidate, cache=selected_root)
             except BaseException as error:
                 if not failed:
                     raise

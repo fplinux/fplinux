@@ -43,7 +43,10 @@ def run_bundle(  # noqa: PLR0913 -- match the delivered runner's loader boundary
     if (bundle / "phone-startup-cancel").is_file():
         emit("waiting-for-device")
         raise SystemExit(130)
-    record = bundle / "data" / "loaded"
+    data = session_root.parent
+    if data.name == "reader":
+        data = data.parent
+    record = data / "loaded"
     record.mkdir(exist_ok=True)
     number = len(list(record.glob("*.cpio"))) + 1
     emit("host-preparation")
@@ -106,7 +109,10 @@ def reconnect_live_bundle(
     if state["prepared_data_sha256"] != prepared_data_sha256:
         message = "The running phone uses different prepared phone data"
         raise SystemExit(message)
-    return _phone_connection(bundle, bundle / "data/loaded", session_root)
+    data = session_root.parent
+    if data.name == "reader":
+        data = data.parent
+    return _phone_connection(bundle, data / "loaded", session_root)
 
 
 def _phone_connection(

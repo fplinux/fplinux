@@ -10,7 +10,9 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from fplinux_cli.common import ROOT, fail
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.quality.source_gate import validate_directory_names
+from fplinux_cli.source_paths import git_source_excludes, source_path_excluded
 
 from .capture import WorkspaceSnapshot, snapshot_from_inventory
 
@@ -20,8 +22,11 @@ if TYPE_CHECKING:
 _GIT_INVENTORY_TIMEOUT = 60
 
 
-def quality_files(*, enforce_source_policy: bool) -> list[tuple[str, Path]]:
+def quality_files(
+    *, enforce_source_policy: bool, selected_data_root: Path | None = None
+) -> list[tuple[str, Path]]:
     """Return tracked and non-ignored untracked files used by quality checks."""
+    cache = data_root(ROOT) if selected_data_root is None else selected_data_root
     command = [
         "git",
         "-C",
@@ -31,6 +36,7 @@ def quality_files(*, enforce_source_policy: bool) -> list[tuple[str, Path]]:
         "--cached",
         "--others",
         "--exclude-standard",
+        *git_source_excludes(source_root=ROOT, selected_data_root=cache),
     ]
     try:
         result = subprocess.run(
@@ -55,6 +61,8 @@ def quality_files(*, enforce_source_policy: bool) -> list[tuple[str, Path]]:
         ):
             fail(f"Git returned an unsafe source path: {relative_text}")
         path = ROOT / relative_text
+        if source_path_excluded(path, source_root=ROOT, selected_data_root=cache):
+            continue
         try:
             metadata = path.lstat()
         except FileNotFoundError:
@@ -78,8 +86,13 @@ def quality_files(*, enforce_source_policy: bool) -> list[tuple[str, Path]]:
     return files
 
 
-def quality_workspace_snapshot(*, enforce_source_policy: bool) -> WorkspaceSnapshot:
+def quality_workspace_snapshot(
+    *, enforce_source_policy: bool, selected_data_root: Path | None = None
+) -> WorkspaceSnapshot:
     """Read the complete quality closure before deciding whether staging is needed."""
+    cache = data_root(ROOT) if selected_data_root is None else selected_data_root
     return snapshot_from_inventory(
-        lambda: quality_files(enforce_source_policy=enforce_source_policy)
+        lambda: quality_files(
+            enforce_source_policy=enforce_source_policy, selected_data_root=cache
+        )
     )

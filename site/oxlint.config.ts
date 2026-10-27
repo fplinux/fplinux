@@ -8,6 +8,8 @@ export default defineConfig({
 		// ESLint and Astro check own component templates and frontmatter.
 		"**/*.astro",
 		".astro/**",
+		"**/.data/**",
+		"**/.private/**",
 		"dist/**",
 		"public/**",
 		"src/assets/**",

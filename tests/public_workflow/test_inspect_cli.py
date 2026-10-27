@@ -49,7 +49,7 @@ class InspectCli:
         self, generation: str, profile: str | None = None, *, build_type: str = "release"
     ) -> Path:
         """Publish a normal fixture generation with independently described payload bytes."""
-        output = self.root / ".cache/out"
+        output = self.root / ".data/out"
         output.mkdir(parents=True, exist_ok=True)
         staging = create_bundle_staging(output, "example", profile, build_type=build_type)
         payload = staging / "payload.bin"
@@ -124,7 +124,7 @@ class InspectCliTests:
         self, inspect_cli: InspectCli
     ) -> None:
         """The public inspector reports only the requested type's current generation."""
-        output = inspect_cli.root / ".cache/out"
+        output = inspect_cli.root / ".data/out"
         release = inspect_cli.make_bundle("1" * 64)
         publish_current_bundle(output, "example", release)
         missing = inspect_cli.run_cli("inspect", "bundle", "example", "--build-type", "debug")
@@ -156,7 +156,7 @@ class InspectCliTests:
         self, inspect_cli: InspectCli, arguments: tuple[str, ...], generation: str, profile: str
     ) -> None:
         """A newer unselected generation must not replace the published selection."""
-        output = inspect_cli.root / ".cache/out"
+        output = inspect_cli.root / ".data/out"
         selected = inspect_cli.make_bundle("1" * 64)
         publish_current_bundle(output, "example", selected)
         inspect_cli.make_bundle("2" * 64)
@@ -184,7 +184,7 @@ class InspectCliTests:
         assert (f"3 {ABC_SHA256} payload.bin\n") in (result.stdout)
         assert ("SHA256SUMS: OK") in (result.stdout)
         assert not ((inspect_cli.root / "bundle").exists())
-        assert not ((inspect_cli.root / ".cache").exists())
+        assert not ((inspect_cli.root / ".data").exists())
         assert (archive.read_bytes()) == (original)
 
     @pytest.mark.parametrize(
@@ -246,7 +246,7 @@ class InspectCliTests:
         ):
             assert (expected) in (result.stdout)
         assert not ((inspect_cli.root / "usr").exists())
-        assert not ((inspect_cli.root / ".cache").exists())
+        assert not ((inspect_cli.root / ".data").exists())
 
     @pytest.mark.parametrize(
         ("kind", "name"),
@@ -265,4 +265,4 @@ class InspectCliTests:
         result = inspect_cli.run_cli("inspect", kind, name)
         assert (result.returncode) == (1), result.stderr
         assert ("Traceback") not in (result.stderr)
-        assert not ((inspect_cli.root / ".cache").exists())
+        assert not ((inspect_cli.root / ".data").exists())

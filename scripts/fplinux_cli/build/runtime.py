@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 _RUNTIME_MODULES = (
     "__init__.py",
     "common.py",
+    "data_paths.py",
     "artifacts/__init__.py",
     "artifacts/build_manifest.py",
     "device_data/__init__.py",
@@ -30,6 +31,7 @@ _RUNTIME_MODULES = (
     "manifests/values.py",
     "runtime/__init__.py",
     "runtime/cli.py",
+    "runtime/data_paths.py",
     "runtime/workflow.py",
     "runtime/bundle.py",
     "runtime/boot.py",

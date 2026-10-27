@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .astro/
+.data/
+.private/
 package-lock.json
 public/
 src/assets/

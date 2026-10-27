@@ -55,9 +55,11 @@ Python and OpenSSH are bundled; no separate installation is needed. On Linux, th
 
 </Steps>
 
-Private connection keys are kept in `data/session/` in the extracted directory. Backups and prepared data use the separate [personal store](/fplinux/guides/device-data/#where-phone-data-is-stored), which survives replacing the archive. Keep the extracted directory to reconnect to its running session. Use each store with one physical phone; FPLinux does not distinguish handsets of the same target automatically. Add `--phone-data PATH` to `sh Run.sh` or `Run.cmd` to select a separate store for another phone.
+Private connection keys and launcher logs are kept under `.data/` beside the extracted launcher. `FPLINUX_DATA_DIR` selects another [working data directory](/fplinux/start/build/#working-data-directory); relative values are anchored to the archive, not the terminal's current directory. Copies in different folders have separate sessions even when they share a working directory. Keep the archive location and selected directory unchanged while reconnecting.
 
-Each launch prints the path to its `logs/<launch-id>/runtime.log`, with `run.json` metadata beside it. The log includes launcher and USB loader diagnostics, but does not record your interactive SSH commands or terminal output. If preparation cannot verify that storage is safe to disconnect, it retains reader keys in `data/reader/session/`. Keep the phone powered and retain those keys. Run the launcher again to reconnect and repeat the storage check; do not remove power while storage safety is unresolved. `--reconnect` requires a normal session and cannot reopen this preparation session.
+Backups and prepared data use the separate [personal store](/fplinux/guides/device-data/#where-phone-data-is-stored), which survives replacing the archive. Use each store with one physical phone; FPLinux does not distinguish handsets of the same target automatically. Add `--phone-data PATH` to `sh Run.sh` or `Run.cmd` to select a separate store for another phone.
+
+Each launch prints the exact path to its `runtime.log`, with `run.json` metadata beside it. The log includes launcher and USB loader diagnostics, but does not record your interactive SSH commands or terminal output. If preparation cannot verify that storage is safe to disconnect, it retains reader-session keys in the same working data directory. Keep the phone powered and retain that directory. Run the launcher again to reconnect and repeat the storage check; do not remove power while storage safety is unresolved. `--reconnect` requires a normal session and cannot reopen this preparation session.
 
 ### Subsequent runs
 

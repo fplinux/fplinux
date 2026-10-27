@@ -98,6 +98,7 @@ def write_pair(  # noqa: PLR0913 -- each option selects a distinct archive-bound
     host: str,
     *,
     private_runtime: bool = False,
+    private_member: str | None = None,
     mismatched_pair: bool = False,
     conflicting_source: bool = False,
 ) -> None:
@@ -114,6 +115,8 @@ def write_pair(  # noqa: PLR0913 -- each option selects a distinct archive-bound
     }
     if private_runtime:
         files["device-data.cpio"] = b"prepared personal phone data"
+    if private_member is not None:
+        files[private_member] = b"private installation state"
     executables = {"Run.sh"} if host == "linux" else set()
     manifest: dict[str, Any] = {
         **release_fields(),

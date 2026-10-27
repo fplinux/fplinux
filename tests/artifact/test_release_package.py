@@ -47,7 +47,7 @@ class ReleaseArchiveInputs:
     def __init__(self, root: Path) -> None:
         """Replace compilation and dependency acquisition, retaining real ZIP assembly."""
         self.root = root
-        self.cache = root / ".cache"
+        self.cache = root / ".data"
         self.target = "nokia-ta1618"
         self.context = ReleaseContext("1234567890ab", "1234567890ab" + "0" * 28, "a" * 64)
         self.snapshot = WorkspaceSnapshot((), "a" * 64, release_context=self.context)
@@ -287,6 +287,7 @@ class ReleaseArchiveInputs:
         """Isolate host acquisition and checkout identity without replacing ZIP assembly."""
         return (
             mock.patch.object(common, "ROOT", self.root),
+            mock.patch.dict("os.environ", {"FPLINUX_DATA_DIR": str(self.cache)}),
             mock.patch.object(
                 package_commands, "current_release_context", return_value=self.context
             ),

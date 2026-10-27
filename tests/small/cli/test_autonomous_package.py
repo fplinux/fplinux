@@ -54,7 +54,7 @@ def ecc_source_download(archive_inputs: ArchiveInputs) -> dict[str, bytes]:
             item.size = len(data)
             archive.addfile(item, io.BytesIO(data))
     data = stream.getvalue()
-    write_archive_file(archive_inputs.root, ".cache/downloads/sources/bch/bch.tar.gz", data)
+    write_archive_file(archive_inputs.root, ".data/downloads/sources/bch/bch.tar.gz", data)
     write_archive_file(
         archive_inputs.root,
         "sources.lock.toml",
@@ -75,7 +75,7 @@ def ecc_source_download(archive_inputs: ArchiveInputs) -> dict[str, bytes]:
 def _archive(root: Path) -> tuple[Path, dict[str, bytes], dict[str, int]]:
     path = next(
         path
-        for path in (root / ".cache/out/releases").glob("*.zip")
+        for path in (root / ".data/out/releases").glob("*.zip")
         if not path.name.endswith("-sources.zip")
     )
     with zipfile.ZipFile(path) as archive:
@@ -160,7 +160,9 @@ def test_ready_archive_preserves_manifests_modes_sources_and_omits_personal_data
         & files.keys()
     )
     assert not any(
-        name.startswith(("data/", "logs/", ".cache/", "apks/", "docs/", "sources/"))
+        name.startswith(
+            ("data/", "logs/", ".cache/", ".data/", ".private/", "apks/", "docs/", "sources/")
+        )
         for name in files
     )
     assert b"BUILDER PERSONAL DATA MUST STAY PRIVATE" not in b"".join(files.values())
@@ -307,12 +309,14 @@ def test_declared_ecc_archive_delivers_corrector_license_and_rebuild_source(
 def test_package_rejects_a_stale_common_source_context_before_archive_publication(
     archive_inputs: ArchiveInputs, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(
-        package, "current_release_context", lambda: ReleaseContext("b" * 12, "b" * 40, "c" * 64)
-    )
+    def stale_release_context(*, selected_data_root: Path) -> ReleaseContext:
+        assert selected_data_root == archive_inputs.root / ".data"
+        return ReleaseContext("b" * 12, "b" * 40, "c" * 64)
+
+    monkeypatch.setattr(package, "current_release_context", stale_release_context)
     with pytest.raises(SystemExit, match="release context is stale"):
         package.package_target(archive_inputs.target)
-    assert not (archive_inputs.root / ".cache/out/releases").exists()
+    assert not (archive_inputs.root / ".data/out/releases").exists()
 
 
 def test_changed_native_bytes_cannot_overwrite_an_existing_release_name(
@@ -422,7 +426,7 @@ def test_sc9820e_windows_archive_rejects_external_root_before_collecting_inputs(
     config["linux"]["root"]["kind"] = "external"
     with pytest.raises(SystemExit, match="external-root exports support Linux x86-64 only"):
         package.package_target(archive_inputs.target, host="windows")
-    assert not (archive_inputs.root / ".cache/out/releases").exists()
+    assert not (archive_inputs.root / ".data/out/releases").exists()
 
 
 @pytest.mark.parametrize("archive_inputs", ["xiaomi-qin-1s-plus"], indirect=True)

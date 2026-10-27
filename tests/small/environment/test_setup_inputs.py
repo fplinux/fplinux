@@ -29,10 +29,10 @@ def setup_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path,
     root.mkdir()
     context = tmp_path / "context"
     context.mkdir()
-    source = root / ".cache/downloads/environment/tool/tool.tar.gz"
+    source = root / ".data/downloads/environment/tool/tool.tar.gz"
     source.parent.mkdir(parents=True)
     source.write_bytes(b"exact source\n")
-    private = root / ".cache/private/phone-state"
+    private = root / ".private/phone-state"
     private.parent.mkdir()
     private.write_bytes(b"private\n")
     recipe = root / "install.py"
@@ -64,7 +64,7 @@ def setup_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path,
         ("terminus", "terminus.tar.gz", b"bitmap archive fixture\n"),
         ("tabler", "tabler.tgz", b"icon archive fixture\n"),
     ):
-        original = root / ".cache/downloads/sources" / name / filename
+        original = root / ".data/downloads/sources" / name / filename
         original.parent.mkdir(parents=True)
         original.write_bytes(data)
         catalog.append(
@@ -93,7 +93,7 @@ def test_offline_staging_contains_declared_bytes_and_preserves_recipe_mode(
 ) -> None:
     """Installation receives verified files and no unrelated cached phone state."""
     root, context = setup_inputs
-    archive = root / ".cache/downloads/sources/terminus/terminus.tar.gz"
+    archive = root / ".data/downloads/sources/terminus/terminus.tar.gz"
     archive.with_name("unrelated.tar.gz").write_bytes(b"unrelated source\n")
     with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")):
         env_setup._stage_environment_inputs(context, offline=True)  # noqa: SLF001 -- test the host staging boundary.
@@ -103,7 +103,7 @@ def test_offline_staging_contains_declared_bytes_and_preserves_recipe_mode(
     assert (context / "install.py").read_bytes() == b"recipe fixture\n"
     assert (context / "install.py").stat().st_mode & 0o777 == 0o755
     assert not (context / "inputs/private").exists()
-    assert (root / ".cache/private/phone-state").read_bytes() == b"private\n"
+    assert (root / ".private/phone-state").read_bytes() == b"private\n"
     assert (context / "quality/ui-icons/tabler.tgz").read_bytes() == b"icon archive fixture\n"
     assert not (context / "inputs/downloads/sources/tabler/tabler.tgz").exists()
     assert (context / "quality/ui-fonts/face.ttf").read_bytes() == b"font fixture\n"
@@ -120,7 +120,7 @@ def test_offline_missing_input_reports_its_url_without_downloading(
 ) -> None:
     """Missing original bytes stop before an incomplete installation can start."""
     root, context = setup_inputs
-    (root / ".cache/downloads/environment/tool/tool.tar.gz").unlink()
+    (root / ".data/downloads/environment/tool/tool.tar.gz").unlink()
     with (
         mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")),
         pytest.raises(
@@ -136,7 +136,7 @@ def test_online_staging_downloads_and_checks_missing_original_bytes(
 ) -> None:
     """The online host fetch supplies the same exact local input to the installer."""
     root, context = setup_inputs
-    source = root / ".cache/downloads/environment/tool/tool.tar.gz"
+    source = root / ".data/downloads/environment/tool/tool.tar.gz"
     source.unlink()
     with mock.patch("urllib.request.urlopen", return_value=io.BytesIO(b"exact source\n")):
         env_setup._stage_environment_inputs(context, offline=False)  # noqa: SLF001 -- test the host staging boundary.
@@ -149,7 +149,7 @@ def test_online_staging_downloads_and_checks_missing_original_bytes(
 def test_mismatched_download_leaves_previous_cached_input(setup_inputs: tuple[Path, Path]) -> None:
     """A bad response cannot overwrite saved source bytes or reach installation."""
     root, context = setup_inputs
-    source = root / ".cache/downloads/environment/tool/tool.tar.gz"
+    source = root / ".data/downloads/environment/tool/tool.tar.gz"
     source.write_bytes(b"previous cached source\n")
     with (
         mock.patch("urllib.request.urlopen", return_value=io.BytesIO(b"wrong source\n")),
@@ -173,7 +173,7 @@ def test_offline_staging_rejects_unavailable_ui_font_original(
 ) -> None:
     """Missing or mismatched originals stop setup instead of silently omitting UI fonts."""
     root, context = ui_font_inputs
-    font = root / ".cache/downloads/sources/face/face.ttf"
+    font = root / ".data/downloads/sources/face/face.ttf"
     if available:
         font.write_bytes(b"different font\n")
     else:
@@ -190,7 +190,7 @@ def test_offline_staging_rejects_unavailable_ui_font_original(
 def terminal_font_inputs(setup_inputs: tuple[Path, Path]) -> tuple[Path, Path]:
     """Admit the bitmap archive through its package checksum declaration."""
     root, context = setup_inputs
-    archive = root / ".cache/downloads/sources/terminus/terminus.tar.gz"
+    archive = root / ".data/downloads/sources/terminus/terminus.tar.gz"
     archive.with_name("unrelated.tar.gz").write_bytes(b"unrelated source\n")
     return root, context
 
@@ -201,7 +201,7 @@ def test_offline_staging_rejects_unavailable_terminal_font_archive(
 ) -> None:
     """A missing or mismatched font archive cannot reach offline installation."""
     root, context = terminal_font_inputs
-    archive = root / ".cache/downloads/sources/terminus/terminus.tar.gz"
+    archive = root / ".data/downloads/sources/terminus/terminus.tar.gz"
     if available:
         archive.write_bytes(b"different archive\n")
     else:

@@ -15,6 +15,7 @@ import pytest
 from fplinux_cli import common
 from fplinux_cli.artifacts.bundles import publish_current_bundle
 from fplinux_cli.manifests import targets
+from fplinux_cli.runtime.data_paths import checkout_runtime_root
 
 from tests.small.build.command_fixtures import (
     command_bundle as command_bundle,  # noqa: PLC0414 -- pytest fixture export.
@@ -97,9 +98,9 @@ class ConsoleLifecycleTests:
             "--bundle",
             str(path),
             "--data-root",
-            str(command_bundle.root / ".cache/runtime/phone"),
+            str(checkout_runtime_root(command_bundle.cache, command_bundle.root, "phone")),
             "--log-root",
-            str(command_bundle.root / ".cache/logs/run/phone/profiles/microsd-uboot"),
+            str(command_bundle.cache / "logs/run/phone/profiles/microsd-uboot"),
             "--reconnect",
             *action,
         ]
@@ -221,7 +222,9 @@ class ConsoleLifecycleTests:
                 )
         arguments = authenticate.call_args.args[0]
         assert arguments[:4] == [sys.executable, "-I", str(path / "fplinux.py"), "run"]
-        assert arguments[7] == str(command_bundle.root / ".cache/runtime/phone")
+        assert arguments[7] == str(
+            checkout_runtime_root(command_bundle.cache, command_bundle.root, "phone")
+        )
         assert arguments[-3:] == ["--reconnect", "--exec", "true"]
         options = authenticate.call_args.kwargs
         assert (options["user"], options["group"], options["extra_groups"]) == (uid, gid, ())

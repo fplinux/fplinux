@@ -35,7 +35,7 @@ def prepare_directory(path: Path) -> None:
 def _snapshot_directory(directory: Path, cache: Path) -> Path:
     path = directory.absolute()
     if path.resolve().is_relative_to(cache.resolve()):
-        fail("dependency snapshots must be stored outside the working .cache directory")
+        fail("dependency snapshots must be stored outside the managed data directory")
     prepare_directory(path)
     return path
 

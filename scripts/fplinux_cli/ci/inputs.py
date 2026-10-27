@@ -10,6 +10,7 @@ from pathlib import Path
 from fplinux_cli import common
 from fplinux_cli.artifacts.release import capture_public_sources
 from fplinux_cli.common import fail, is_sha256
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.dependencies.distribution import read_dependency_distribution
 from fplinux_cli.dependencies.workflow import (
     create_dependencies,
@@ -48,7 +49,7 @@ def restore_inputs(directory: Path, *, snapshot: str) -> None:
         fail("release input artifact differs from the prepared snapshot")
     if distribution.release != capture_public_sources().release:
         fail("release input artifact belongs to another source release")
-    cache = common.ROOT / ".cache"
+    cache = data_root(common.ROOT)
     cache.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".release-inputs-", dir=cache) as temporary:
         restored = Path(temporary) / "snapshot"

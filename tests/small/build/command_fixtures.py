@@ -29,7 +29,7 @@ class CommandBundleContext:
     def __init__(self, root: Path) -> None:
         """Create a published generation and the signing input it claims."""
         self.root = root
-        self.cache = self.root / ".cache"
+        self.cache = self.root / ".data"
         self.output = self.cache / "out"
         self.target_config: dict[str, object] = {}
         self.release = {"image": "image/ramboot.bin"}
@@ -119,6 +119,7 @@ class CommandBundleContext:
 
 
 @pytest.fixture
-def command_bundle(tmp_path: Path) -> CommandBundleContext:
+def command_bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> CommandBundleContext:
     """Supply one case's independently owned published bundle and mutable inputs."""
+    monkeypatch.setenv("FPLINUX_DATA_DIR", str(tmp_path / ".data"))
     return CommandBundleContext(tmp_path)

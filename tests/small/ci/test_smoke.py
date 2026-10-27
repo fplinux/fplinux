@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from fplinux_cli.ci import smoke
+from fplinux_cli.runtime.data_paths import archive_runtime_root
 
 from tests.distribution_support import (
     RELEASE_ID,
@@ -64,12 +65,13 @@ def test_native_smoke_extracts_under_prepared_permissions_and_cleans_up(
     original_files = set(distribution.iterdir())
     launched_roots: list[Path] = []
 
-    def launch(root: Path, host: str, *, attempt: int) -> None:
+    def launch(root: Path, host: str, scope: Path, *, attempt: int) -> None:
         assert host == "windows"
         assert attempt in (1, 2)
         assert (root / "README.txt").read_bytes() == b"native smoke archive\n"
-        for relative in ("data", "logs", "data/session", "data/reader/session", "temp"):
-            assert (root / relative).is_dir()
+        assert scope == archive_runtime_root(root / ".data", root)
+        for relative in (".", "logs", "session", "reader/session", "temp"):
+            assert (scope / relative).is_dir()
         launched_roots.append(root)
 
     def run_storage(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
@@ -100,9 +102,9 @@ def test_native_smoke_extracts_under_prepared_permissions_and_cleans_up(
     [
         (
             {},
-            ("data", "logs", "data/session", "temp", "data/reader/session"),
+            (".", "logs", "session", "temp", "reader/session"),
         ),
-        (None, ("data", "logs", "data/session", "temp")),
+        (None, (".", "logs", "session", "temp")),
     ],
     ids=["preparation", "direct-boot"],
 )
@@ -122,24 +124,27 @@ def test_native_smoke_runs_relative_distribution_launchers_twice_and_cleans_up(
     def run_storage(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         root = kwargs["cwd"]
         assert isinstance(root, Path)
+        scope = archive_runtime_root(root / ".data", root)
         for relative in storage_paths:
-            assert (root / relative).is_dir()
-        assert (root / "data/reader").exists() == ("data/reader/session" in storage_paths)
-        assert tuple(command[command.index(str(root)) + 1 :]) == storage_paths
+            assert (scope / relative).is_dir()
+        assert (scope / "reader").exists() == ("reader/session" in storage_paths)
+        assert tuple(command[command.index(str(root)) + 1 :]) == tuple(
+            str(scope / relative) for relative in storage_paths
+        )
         storage_roots.append(root)
         attempt = storage_roots.count(root)
         assert (
-            sorted(path.parent.name for path in (root / "logs").glob("*/runtime.log"))
+            sorted(path.parent.name for path in (scope / "logs").glob("*/runtime.log"))
             == [
                 "smoke-events-1",
                 "smoke-events-2",
             ][:attempt]
         )
         for index in range(1, attempt + 1):
-            assert (root / f"smoke-events-{index}.jsonl").read_bytes() == (
+            assert (scope / f"smoke-events-{index}.jsonl").read_bytes() == (
                 b'{"event":"waiting-for-device"}\n'
             )
-            log_directory = root / f"logs/smoke-events-{index}"
+            log_directory = scope / f"logs/smoke-events-{index}"
             assert (log_directory / "runtime.log").read_bytes() == b"launcher initialized\n"
             assert (log_directory / "stopped").read_bytes() == b"stopped\n"
         return subprocess.CompletedProcess(command, 0)

@@ -14,6 +14,7 @@ from fplinux_cli import common
 from fplinux_cli.cli import nand, runtime
 from fplinux_cli.environment import definition
 from fplinux_cli.manifests import targets
+from fplinux_cli.runtime.data_paths import checkout_runtime_root
 from fplinux_cli.workspace import build_inputs
 
 from tests.small.build.command_fixtures import (
@@ -74,7 +75,7 @@ def test_source_session_consumers_forward_the_selected_phone_to_the_bundled_runt
     selector = arguments.index("--phone-data")
     assert arguments[selector : selector + 2] == ["--phone-data", str(selected)]
     assert arguments[arguments.index("--data-root") + 1] == str(
-        command_bundle.root / ".cache/runtime/phone"
+        checkout_runtime_root(command_bundle.cache, command_bundle.root, "phone")
     )
     if action == "sudo-keyboard":
         assert child.call_args.kwargs["user"] == 1234
@@ -97,7 +98,13 @@ def test_verify_selects_the_same_phone_for_build_inputs_and_authenticated_reconn
     ):
         runtime.verify_booted("phone", phone_data=selected)
 
-    assert capture.call_args == mock.call("phone", None, build_type="release", phone_data=selected)
+    assert capture.call_args == mock.call(
+        "phone",
+        None,
+        build_type="release",
+        phone_data=selected,
+        selected_data_root=command_bundle.cache,
+    )
     arguments = child.call_args.args[0]
     selector = arguments.index("--phone-data")
     assert arguments[selector : selector + 2] == ["--phone-data", str(selected)]

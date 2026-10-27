@@ -52,7 +52,7 @@ def test_prepare_exports_exact_originals_once_and_passes_snapshot_to_following_j
     assert workflow_output.read_text() == (
         f"snapshot={distribution.snapshot}\nrelease_id={release_checkout.release_id}\n"
     )
-    assert not (release_checkout.root / ".cache/environment").exists()
+    assert not (release_checkout.root / ".data/environment").exists()
 
 
 def test_local_workflow_artifact_restores_native_originals_without_network(
@@ -73,7 +73,7 @@ def test_another_workflow_snapshot_is_rejected_before_restoration(
     with pytest.raises(SystemExit, match="differs from the prepared snapshot"):
         restore_inputs(parts, snapshot="a" * 64)
 
-    assert not (release_checkout.root / ".cache/downloads").exists()
+    assert not (release_checkout.root / ".data/downloads").exists()
 
 
 def test_changed_checkout_rejects_the_artifact_before_restoration(
@@ -86,4 +86,4 @@ def test_changed_checkout_rejects_the_artifact_before_restoration(
     with pytest.raises(SystemExit, match="belongs to another source release"):
         restore_inputs(parts, snapshot=snapshot)
 
-    assert not (release_checkout.root / ".cache/downloads").exists()
+    assert not (release_checkout.root / ".data/downloads").exists()

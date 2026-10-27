@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from fplinux_cli import common
 from fplinux_cli.artifacts.release import capture_public_sources
 from fplinux_cli.common import fail
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.dependencies.distribution import (
     read_dependency_distribution,
     write_dependency_distribution,
@@ -48,7 +49,10 @@ def create_dependencies(
     directory: Path, *, offline: bool, sources: Sequence[Path], inputs_only: bool
 ) -> None:
     directory = directory.absolute()
-    reporter = RunReporter.create("dependencies", target=None, verbose=False)
+    cache = data_root(common.ROOT)
+    reporter = RunReporter.create(
+        "dependencies", target=None, verbose=False, selected_data_root=cache
+    )
     with reporter.stage("dependency-selection"):
         inputs, context = checkout_declarations()
     with reporter.stage("preserve-inputs") as stage:
@@ -64,13 +68,13 @@ def create_dependencies(
             inputs,
             context,
             directory,
-            cache=common.ROOT / ".cache",
+            cache=cache,
             offline=offline,
             sources=sources,
             on_download=report_download,
         )
     if not inputs_only:
-        manifest["environment"] = save_environment(directory, reporter)
+        manifest["environment"] = save_environment(directory, reporter, cache=cache)
     current_inputs, current_context = checkout_declarations()
     if current_inputs != inputs or current_context != context:
         fail("external dependency declarations changed while the snapshot was being created")
@@ -94,12 +98,15 @@ def verify_dependencies(directory: Path) -> None:
 
 def restore_dependencies(directory: Path, *, inputs_only: bool) -> None:
     directory = directory.absolute()
-    reporter = RunReporter.create("dependencies", target=None, verbose=False)
+    cache = data_root(common.ROOT)
+    reporter = RunReporter.create(
+        "dependencies", target=None, verbose=False, selected_data_root=cache
+    )
     with reporter.stage("restore-inputs"):
         manifest = read_snapshot(directory)
         inputs, context = checkout_declarations()
         require_checkout(manifest, inputs, context)
-        restore_manifest_inputs(directory, manifest, common.ROOT / ".cache")
+        restore_manifest_inputs(directory, manifest, cache)
     if not inputs_only:
         environment = manifest["environment"]
         if environment is None:
@@ -107,7 +114,7 @@ def restore_dependencies(directory: Path, *, inputs_only: bool) -> None:
                 "snapshot has no saved build environment; "
                 "use --inputs-only to restore its external inputs"
             )
-        restore_environment(directory, environment, reporter)
+        restore_environment(directory, environment, reporter, cache=cache)
     reporter.finish()
     print(f"Restored dependency snapshot: {manifest['snapshot']}")
 

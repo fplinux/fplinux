@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fplinux_cli.common import ROOT, fail
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.reporting.process import silence_broken_pipe
 
 if TYPE_CHECKING:
@@ -293,7 +294,7 @@ def _show_run(run: LogRun, args: argparse.Namespace) -> None:
 
 def read_logs(args: argparse.Namespace) -> None:
     """Read existing journals without cache locks, runtime setup or new receipts."""
-    root = ROOT / ".cache/logs"
+    root = data_root(ROOT) / "logs"
     runs = []
     for run in discover_runs(root):
         details = run_details(run, root)

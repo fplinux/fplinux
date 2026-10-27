@@ -4,7 +4,7 @@ SPDX-PackageSupplier = "FPLinux contributors"
 
 [[annotations]]
 path = [
-  ".cache/.fplinux-workspace",
+  ".fplinux-workspace",
   ".clang-format",
   ".editorconfig",
   ".gitattributes",

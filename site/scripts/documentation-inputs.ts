@@ -8,7 +8,10 @@ const siteFiles = async (directory: string): Promise<string[]> => {
 	const selected = await Promise.all(
 		entries
 			.filter(
-				(entry) => !["node_modules", "dist", ".astro"].includes(entry.name)
+				(entry) =>
+					!["node_modules", "dist", ".astro", ".data", ".private"].includes(
+						entry.name
+					)
 			)
 			.map(async (entry) => {
 				const filename = path.join(directory, entry.name);

@@ -61,13 +61,14 @@ class MockedCheckReceiptOrchestrationTests:
     ) -> tuple[Any, ...]:
         """Describe the controlled environment and workspace boundaries for a scenario."""
 
-        def prepare_environment(**_kwargs: object) -> tuple[str, Path, EnvironmentState]:
+        def prepare_environment(*, cache: Path) -> tuple[str, Path, EnvironmentState]:
+            assert cache == root / ".data"
             if exact_hit_guard:
                 message = "exact check hit must not prepare the environment"
                 raise AssertionError(message)
             state = EnvironmentState("b" * 64, "c" * 64, "e" * 64)
-            publish_environment_state(root / ".cache", state)
-            return "kern", root / ".cache/environment/rootfs", state
+            publish_environment_state(cache, state)
+            return "kern", cache / "environment/rootfs", state
 
         return (
             mock.patch.object(checks, "ROOT", root),
@@ -163,16 +164,20 @@ class MockedCheckReceiptOrchestrationTests:
             self._execute_check(scopes, no_cache=no_cache, patches=patches, jobs=jobs)
         except RuntimeError:
             if not exact_hit_guard:
-                discard_workspace.assert_called_once_with(snapshot, workspace)
+                discard_workspace.assert_called_once_with(
+                    snapshot, workspace, selected_data_root=root / ".data"
+                )
             raise
         if exact_hit_guard:
             discard_workspace.assert_not_called()
         else:
-            discard_workspace.assert_called_once_with(snapshot, workspace)
+            discard_workspace.assert_called_once_with(
+                snapshot, workspace, selected_data_root=root / ".data"
+            )
 
     def test_default_gate_runs_analyzers_every_test_tier_and_kernel(self, tmp_path: Path) -> None:
         """The omitted-scope entry point retains the full workload and reusable successes."""
-        (tmp_path / ".cache").mkdir()
+        (tmp_path / ".data").mkdir()
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         commands: list[list[str]] = []
@@ -229,7 +234,7 @@ class MockedCheckReceiptOrchestrationTests:
         """Return a verified scope hit before workspace materialization."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / ".cache").mkdir()
+            (root / ".data").mkdir()
             workspace = root / "workspace"
             workspace.mkdir()
             commands: list[list[str]] = []
@@ -252,7 +257,7 @@ class MockedCheckReceiptOrchestrationTests:
         """Reuse a kernel success when only --jobs changes between check runs."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / ".cache").mkdir()
+            (root / ".data").mkdir()
             workspace = root / "workspace"
             workspace.mkdir()
             commands: list[list[str]] = []
@@ -286,7 +291,7 @@ class MockedCheckReceiptOrchestrationTests:
         """Execute the checker when the caller explicitly ignores receipts."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / ".cache").mkdir()
+            (root / ".data").mkdir()
             workspace = root / "workspace"
             workspace.mkdir()
             commands: list[list[str]] = []
@@ -299,7 +304,7 @@ class MockedCheckReceiptOrchestrationTests:
         """Avoid rerunning a hit when another selected scope is missing."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / ".cache").mkdir()
+            (root / ".data").mkdir()
             workspace = root / "workspace"
             workspace.mkdir()
             commands: list[list[str]] = []
@@ -318,7 +323,7 @@ class MockedCheckReceiptOrchestrationTests:
         """Invalidate analysis and test results when a covered C input changes."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / ".cache").mkdir()
+            (root / ".data").mkdir()
             workspace = root / "workspace"
             workspace.mkdir()
             commands: list[list[str]] = []
@@ -336,7 +341,7 @@ class MockedCheckReceiptOrchestrationTests:
         """A failed forced rerun leaves the previous exact success usable."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / ".cache").mkdir()
+            (root / ".data").mkdir()
             workspace = root / "workspace"
             workspace.mkdir()
             commands: list[list[str]] = []

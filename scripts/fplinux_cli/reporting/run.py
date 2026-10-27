@@ -17,6 +17,7 @@ from typing import IO, TYPE_CHECKING, NoReturn, Self
 from urllib.error import HTTPError
 
 from fplinux_cli.common import ROOT, error_message, replace_file_atomically
+from fplinux_cli.data_paths import data_root
 
 from .process import exit_status, run_process
 
@@ -146,26 +147,33 @@ class RunReporter:
 
     @classmethod
     def create(
-        cls, command: str, *, target: str | None, verbose: bool, build_type: str | None = None
+        cls,
+        command: str,
+        *,
+        target: str | None,
+        verbose: bool,
+        build_type: str | None = None,
+        selected_data_root: Path | None = None,
     ) -> Self:
         """Create a collision-resistant host-side log directory."""
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         run_id = f"{timestamp}-p{os.getpid()}"
-        relative = Path(".cache/logs") / command
+        cache = data_root(ROOT) if selected_data_root is None else selected_data_root
+        relative = Path("logs") / command
         label = command
         if target is not None:
             relative /= target
             label = f"{command} {target}"
         relative /= run_id
-        root = ROOT / relative
+        root = cache / relative
         suffix = 1
         while root.exists():
-            root = ROOT / f"{relative}-{suffix}"
+            root = cache / f"{relative}-{suffix}"
             suffix += 1
         return cls(
             label,
             root,
-            root.relative_to(ROOT).as_posix(),
+            root.relative_to(cache).as_posix(),
             verbose=verbose,
             build_type=build_type,
         )

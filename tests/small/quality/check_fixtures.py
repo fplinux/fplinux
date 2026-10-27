@@ -50,7 +50,7 @@ class _RecordingReporter:
     def container_environment(self, mounted_root: str) -> dict[str, str]:
         return {
             "FPLINUX_LOG_ROOT": mounted_root,
-            "FPLINUX_LOG_DISPLAY_ROOT": ".cache/logs/test",
+            "FPLINUX_LOG_DISPLAY_ROOT": "logs/test",
         }
 
     def finish(self) -> None:

@@ -44,7 +44,7 @@ class PushRepository:
 
     def receipt(self, *, commit: str | None = None) -> Path:
         """Publish a controlled successful preparation for one selected source commit."""
-        path = self.root / ".cache/preflight" / f"{self.commit}.json"
+        path = self.root / ".data/preflight" / f"{self.commit}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(
@@ -132,8 +132,8 @@ def test_local_main_push_rejects_missing_or_another_commit_preparation(
     assert repository.commit in pushed.stderr
     assert not repository.marker.exists()
     assert (repository.root / "fplinux").read_bytes() == entry_before
-    assert not (repository.root / ".cache/downloads").exists()
-    assert not (repository.root / ".cache/environment").exists()
+    assert not (repository.root / ".data/downloads").exists()
+    assert not (repository.root / ".data/environment").exists()
     refs = subprocess.run(
         ["git", "--git-dir", str(repository.remote), "show-ref", "--verify", "refs/heads/main"],
         capture_output=True,
@@ -164,13 +164,13 @@ def test_local_main_push_accepts_matching_receipt_without_executing_incoming_cod
     assert receipt.read_bytes() == receipt_before
     assert index.read_bytes() == index_before
     assert not repository.marker.exists()
-    assert not (repository.root / ".cache/downloads").exists()
-    assert not (repository.root / ".cache/environment").exists()
+    assert not (repository.root / ".data/downloads").exists()
+    assert not (repository.root / ".data/environment").exists()
 
 
 def test_unrelated_ref_push_needs_no_preparation(push_repository: PushRepository) -> None:
     pushed = push_repository.push("topic")
 
     assert pushed.returncode == 0, pushed.stderr
-    assert not (push_repository.root / ".cache").exists()
+    assert not (push_repository.root / ".data").exists()
     assert not push_repository.marker.exists()

@@ -339,6 +339,8 @@ def test_unprepared_environment_nested_build_failure_leaves_no_running_receipt(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A missing environment finishes preparation without loading a phone."""
+    cache = phone_data.root / ".data"
+    monkeypatch.setenv("FPLINUX_DATA_DIR", str(cache))
     monkeypatch.setattr(common, "ROOT", phone_data.root)
     monkeypatch.setattr(cli, "ROOT", phone_data.root)
     monkeypatch.setattr(cli, "preparation_recipe", lambda *_args, **_kwargs: "a" * 64)
@@ -368,7 +370,12 @@ def test_unprepared_environment_nested_build_failure_leaves_no_running_receipt(
     monkeypatch.setattr(definition, "environment_recipe_digest", lambda _lock: "e" * 64)
     monkeypatch.setattr(environment_runtime, "load_environment_lock", dict)
     monkeypatch.setattr(environment_runtime, "environment_recipe_digest", lambda _lock: "e" * 64)
-    monkeypatch.setattr(environment_runtime, "kern_available", lambda _lock: False)
+
+    def missing_kern(_lock: object, *, cache: Path) -> bool:
+        assert cache == phone_data.root / ".data"
+        return False
+
+    monkeypatch.setattr(environment_runtime, "kern_available", missing_kern)
 
     def reject_load(*_args: object, **_kwargs: object) -> None:
         pytest.fail("a failed build must not load a phone")
@@ -380,7 +387,7 @@ def test_unprepared_environment_nested_build_failure_leaves_no_running_receipt(
 
     assert raised.value.code == 1
     assert capsys.readouterr().err.count("run ./fplinux setup demo-phone") == 1
-    receipts = list((phone_data.root / ".cache/logs").rglob("run.json"))
+    receipts = list((cache / "logs").rglob("run.json"))
     assert receipts
     assert all(json.loads(receipt.read_bytes())["status"] == "failed" for receipt in receipts)
 

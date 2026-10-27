@@ -13,8 +13,8 @@ sys.path.insert(0, str(root / "scripts"))
 
 from fplinux_cli.runtime.state import private_directory  # noqa: E402 -- delivered imports.
 
-for relative in sys.argv[2:]:
-    directory = private_directory(root / relative)
+for selected in sys.argv[2:]:
+    directory = private_directory(Path(selected))
     probe = directory / "smoke-reopen.txt"
     with probe.open("a", encoding="ascii") as stream:
         stream.write("reopened\n")

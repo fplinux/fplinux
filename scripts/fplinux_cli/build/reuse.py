@@ -15,6 +15,7 @@ from fplinux_cli.artifacts.bundles import (
     resolve_current_bundle,
     validate_bundle_files,
 )
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.runtime.bundle_session import bundle_manifest
 
 if TYPE_CHECKING:
@@ -76,18 +77,19 @@ def required_boot_artifacts(manifest: dict[str, Any]) -> tuple[str, ...]:
     return tuple(normalized)
 
 
-def matching_target_bundle(
+def matching_target_bundle(  # noqa: PLR0913 -- identity and release selection use the captured store.
     target: str,
     identity: BuildIdentity | None,
     image_relative: str,
     profile: str | None = None,
     *,
     build_type: str = "release",
+    cache: Path | None = None,
 ) -> tuple[CurrentBundle, dict[str, Any]] | None:
     """Return only a fully valid current generation for the exact causal inputs."""
     try:
         bundle = resolve_current_bundle(
-            common.ROOT / ".cache/out",
+            (data_root(common.ROOT) if cache is None else cache) / "out",
             target,
             profile,
             build_type=build_type,

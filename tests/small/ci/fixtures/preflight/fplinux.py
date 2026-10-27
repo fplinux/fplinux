@@ -15,8 +15,9 @@ report = Path(os.environ["FPLINUX_PREFLIGHT_TEST_REPORT"])
 record = {
     "arguments": arguments,
     "checkout": str(root),
+    "data_directory": os.environ.get("FPLINUX_DATA_DIR"),
     "readme": (root / "README.md").read_text(),
-    "cache_files": sorted(str(path.relative_to(root)) for path in (root / ".cache").rglob("*")),
+    "cache_files": sorted(str(path.relative_to(root)) for path in (root / ".data").rglob("*")),
 }
 with report.open("a") as stream:
     stream.write(json.dumps(record) + "\n")
@@ -34,7 +35,7 @@ if arguments[:2] == ["dependencies", "create"]:
     }
     (originals / "manifest.json").write_text(json.dumps(manifest))
 elif arguments == ["setup", "--offline"]:
-    state = root / ".cache/environment/state.json"
+    state = root / ".data/environment/state.json"
     state.parent.mkdir(parents=True)
     state.write_text(json.dumps({"recipe": "a" * 64, "generation": "b" * 64, "content": "c" * 64}))
 elif arguments != ["doctor"] and arguments[:2] != ["dependencies", "verify"]:

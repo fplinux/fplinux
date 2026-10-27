@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
+import os
 import sys
 import tempfile
 from contextlib import contextmanager
@@ -22,11 +23,19 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-def dispatch_root() -> Iterator[Path]:
+def cli_environment() -> Iterator[None]:
+    """Restore the environment selected by the in-process command entrypoint."""
+    with mock.patch.dict(os.environ):
+        yield
+
+
+@pytest.fixture
+def dispatch_root(monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """Provide a disposable source root for each dispatch test."""
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary) / "source"
         root.mkdir()
+        monkeypatch.setenv("FPLINUX_DATA_DIR", str(root / ".data"))
         yield root
 
 
@@ -55,9 +64,8 @@ def run_dispatch(
     with (
         mock.patch.object(sys, "argv", ["fplinux", *arguments]),
         mock.patch.object(lifecycle, "ROOT", dispatch_root),
-        mock.patch.object(
-            cli,
-            "discover_targets",
+        mock.patch(
+            "fplinux_cli.manifests.paths.discover_targets",
             return_value=("target", "nokia-ta1618"),
         ),
         mock.patch.object(lifecycle, "cache_lock", side_effect=record_lock),
@@ -67,6 +75,7 @@ def run_dispatch(
     return events, callback
 
 
+@pytest.mark.usefixtures("cli_environment")
 class CliCacheLockTests:
     """Keep lock-mode selection at the in-process command dispatcher."""
 
@@ -107,7 +116,7 @@ class CliCacheLockTests:
         )
 
         assert events == [
-            ("lock", dispatch_root / ".cache", True, "setup", target, None),
+            ("lock", dispatch_root / ".data", True, "setup", target, None),
             "command",
             "unlock",
         ]
@@ -133,7 +142,7 @@ class CliCacheLockTests:
         """Incompatible preparation scopes cannot acquire the writer lock or modify the cache."""
         with (
             mock.patch.object(sys, "argv", ["fplinux", *arguments]),
-            mock.patch.object(cli, "discover_targets", return_value=("target",)),
+            mock.patch("fplinux_cli.manifests.paths.discover_targets", return_value=("target",)),
             mock.patch.object(
                 lifecycle, "cache_lock", side_effect=AssertionError("unexpected cache access")
             ),
@@ -159,7 +168,7 @@ class CliCacheLockTests:
         """Only explicit preparation commands expose a choice about downloading originals."""
         with (
             mock.patch.object(sys, "argv", ["fplinux", *arguments]),
-            mock.patch.object(cli, "discover_targets", return_value=("target",)),
+            mock.patch("fplinux_cli.manifests.paths.discover_targets", return_value=("target",)),
             mock.patch.object(
                 lifecycle, "cache_lock", side_effect=AssertionError("unexpected cache access")
             ),
@@ -247,7 +256,7 @@ class CliCacheLockTests:
             ],
             "fplinux_cli.packaging.archive.package_target",
         )
-        assert events[0] == ("lock", dispatch_root / ".cache", True, "package", "target", None)
+        assert events[0] == ("lock", dispatch_root / ".data", True, "package", "target", None)
         assert package.call_args.kwargs["host"] == "windows"
         assert package.call_args.kwargs["output_directory"] == Path("archives")
 
@@ -275,7 +284,7 @@ class CliCacheLockTests:
         events, _callback = run_dispatch(dispatch_root, arguments, callback_name)
         if locked:
             assert events == [
-                ("lock", dispatch_root / ".cache", True, "ci", None, None),
+                ("lock", dispatch_root / ".data", True, "ci", None, None),
                 "command",
                 "unlock",
             ]
@@ -298,7 +307,7 @@ class CliCacheLockTests:
         )
 
         assert events == [
-            ("lock", dispatch_root / ".cache", True, "build", "target", None),
+            ("lock", dispatch_root / ".data", True, "build", "target", None),
             "command",
             "unlock",
         ]
@@ -345,7 +354,7 @@ class CliCacheLockTests:
                 None,
             ),
             (
-                ["probe-build", "probe.c", "--output", ".cache/tools/probe"],
+                ["probe-build", "probe.c", "--output", ".data/tools/probe"],
                 "fplinux_cli.build.probe.build_probe",
                 True,
                 None,
@@ -430,7 +439,7 @@ class CliCacheLockTests:
         events, callback = run_dispatch(dispatch_root, arguments, callback_name)
         assert (events) == (
             [
-                ("lock", dispatch_root / ".cache", exclusive, arguments[0], target, profile),
+                ("lock", dispatch_root / ".data", exclusive, arguments[0], target, profile),
                 "command",
                 "unlock",
             ]
@@ -471,7 +480,7 @@ class CliCacheLockTests:
         )
 
         assert events == [
-            ("lock", dispatch_root / ".cache", True, "device-data", "target", None),
+            ("lock", dispatch_root / ".data", True, "device-data", "target", None),
             "command",
             "unlock",
         ]
@@ -549,7 +558,7 @@ class CliCacheLockTests:
         with (
             mock.patch.object(sys, "argv", ["fplinux", "build", "target", "--memory-mib", value]),
             mock.patch.object(lifecycle, "ROOT", dispatch_root),
-            mock.patch.object(cli, "discover_targets", return_value=("target",)),
+            mock.patch("fplinux_cli.manifests.paths.discover_targets", return_value=("target",)),
             mock.patch.object(
                 lifecycle,
                 "cache_lock",
@@ -562,7 +571,7 @@ class CliCacheLockTests:
 
         assert stopped.value.code == 2
         lock.assert_not_called()
-        assert not (dispatch_root / ".cache").exists()
+        assert not (dispatch_root / ".data").exists()
 
     @pytest.mark.parametrize(
         ("arguments", "callback_name"),
@@ -615,7 +624,7 @@ class CliCacheLockTests:
         """An unsupported kernel type cannot reach build or device actions."""
         with (
             mock.patch.object(sys, "argv", ["fplinux", "run", "target", "--build-type", "other"]),
-            mock.patch.object(cli, "discover_targets", return_value=("target",)),
+            mock.patch("fplinux_cli.manifests.paths.discover_targets", return_value=("target",)),
             mock.patch.object(
                 lifecycle, "cache_lock", side_effect=AssertionError("invalid type must not lock")
             ),
@@ -643,7 +652,9 @@ class CliCacheLockTests:
         with (
             mock.patch.object(sys, "argv", ["fplinux", *arguments, *extra]),
             mock.patch.object(lifecycle, "ROOT", dispatch_root),
-            mock.patch.object(cli, "discover_targets", return_value=("nokia-ta1618",)),
+            mock.patch(
+                "fplinux_cli.manifests.paths.discover_targets", return_value=("nokia-ta1618",)
+            ),
             mock.patch("fplinux_cli.cli.target_new.create_target", callback),
         ):
             cli.main()
@@ -667,7 +678,9 @@ class CliCacheLockTests:
                 ["fplinux", "device-data", "prepare", "nokia-ta1618", "--jobs", "0"],
             ),
             mock.patch.object(lifecycle, "ROOT", dispatch_root),
-            mock.patch.object(cli, "discover_targets", return_value=("nokia-ta1618",)),
+            mock.patch(
+                "fplinux_cli.manifests.paths.discover_targets", return_value=("nokia-ta1618",)
+            ),
             mock.patch.object(
                 lifecycle,
                 "cache_lock",
@@ -680,7 +693,7 @@ class CliCacheLockTests:
 
         assert (stopped.value.code) == (2)
         lock.assert_not_called()
-        assert not ((dispatch_root / ".cache").exists())
+        assert not ((dispatch_root / ".data").exists())
 
     def test_check_forwards_the_kernel_worker_limit_without_changing_its_lock(
         self, dispatch_root: Path
@@ -692,7 +705,7 @@ class CliCacheLockTests:
 
         assert (events) == (
             [
-                ("lock", dispatch_root / ".cache", True, "check", None, None),
+                ("lock", dispatch_root / ".data", True, "check", None, None),
                 "command",
                 "unlock",
             ]
@@ -759,7 +772,7 @@ class CliCacheLockTests:
             [
                 (
                     "lock",
-                    dispatch_root / ".cache",
+                    dispatch_root / ".data",
                     True,
                     "build",
                     "target",
@@ -803,7 +816,7 @@ class CliCacheLockTests:
             [
                 (
                     "lock",
-                    dispatch_root / ".cache",
+                    dispatch_root / ".data",
                     arguments[0] == "package",
                     arguments[0],
                     "target",
@@ -838,7 +851,7 @@ class CliCacheLockTests:
         )
 
         assert events == [
-            ("lock", dispatch_root / ".cache", True, "package", "target", None),
+            ("lock", dispatch_root / ".data", True, "package", "target", None),
             "command",
             "unlock",
         ]
@@ -896,7 +909,7 @@ class CliCacheLockTests:
             [
                 (
                     "lock",
-                    dispatch_root / ".cache",
+                    dispatch_root / ".data",
                     command == "package",
                     command,
                     target,
@@ -920,7 +933,7 @@ class CliCacheLockTests:
                 ["fplinux", command, "target", "--boot", "microsd", "--profile", "microsd-uboot"],
             ),
             mock.patch.object(lifecycle, "ROOT", dispatch_root),
-            mock.patch.object(cli, "discover_targets", return_value=("target",)),
+            mock.patch("fplinux_cli.manifests.paths.discover_targets", return_value=("target",)),
             mock.patch.object(
                 lifecycle,
                 "cache_lock",
@@ -933,7 +946,7 @@ class CliCacheLockTests:
 
         assert (stopped.value.code) == (2)
         lock.assert_not_called()
-        assert not ((dispatch_root / ".cache").exists())
+        assert not ((dispatch_root / ".data").exists())
 
     @pytest.mark.parametrize(
         ("command", "callback"),
@@ -980,7 +993,7 @@ class CliCacheLockTests:
         )
         assert (events) == (
             [
-                ("lock", dispatch_root / ".cache", False, "verify", "target", "microsd-uboot"),
+                ("lock", dispatch_root / ".data", False, "verify", "target", "microsd-uboot"),
                 "command",
                 "unlock",
             ]
@@ -1034,7 +1047,7 @@ class CliCacheLockTests:
         with (
             mock.patch.object(sys, "argv", ["fplinux", *arguments]),
             mock.patch.object(lifecycle, "ROOT", dispatch_root),
-            mock.patch.object(cli, "discover_targets", return_value=("target",)),
+            mock.patch("fplinux_cli.manifests.paths.discover_targets", return_value=("target",)),
             mock.patch.object(
                 lifecycle,
                 "cache_lock",
@@ -1056,16 +1069,17 @@ class CliCacheLockTests:
         lock.assert_not_called()
         rootfs_gc.assert_not_called()
         logs_gc.assert_not_called()
-        assert not ((dispatch_root / ".cache").exists())
+        assert not ((dispatch_root / ".data").exists())
 
     @pytest.mark.parametrize(
         ("command", "target", "expected_build_cleanup"),
         [("build", "nokia", True), ("check", None, False)],
         ids=["build", "check"],
     )
-    def test_failed_profile_commands_run_selected_cache_cleanup_in_finally(
+    def test_failed_profile_commands_keep_the_initial_data_root_for_cleanup(
         self,
         dispatch_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
         *,
         command: str,
         target: str | None,
@@ -1073,14 +1087,20 @@ class CliCacheLockTests:
     ) -> None:
         """A failed action still reaches the cleanup boundary with its selected context."""
         profile = "microsd-uboot"
-        cache = dispatch_root / ".cache"
+        cache = dispatch_root / ".data"
         arguments = argparse.Namespace(
             command=command,
             target=target,
             profile=profile,
             list_scopes=False,
         )
-        action = mock.Mock(side_effect=SystemExit("forced profile failure"))
+
+        def fail_after_changing_environment() -> None:
+            monkeypatch.setenv("FPLINUX_DATA_DIR", str(dispatch_root / "different-data"))
+            message = "forced profile failure"
+            raise SystemExit(message)
+
+        action = mock.Mock(side_effect=fail_after_changing_environment)
         with (
             mock.patch.object(lifecycle, "ROOT", dispatch_root),
             mock.patch.object(
@@ -1108,6 +1128,7 @@ class CliCacheLockTests:
         assert (log_cleanup.call_args) == (
             mock.call(cache, command, profile=profile, target=target)
         )
+        assert not (dispatch_root / "different-data").exists()
 
     @pytest.mark.parametrize(
         ("arguments", "prune_arguments"),
@@ -1126,7 +1147,7 @@ class CliCacheLockTests:
         with (
             mock.patch.object(sys, "argv", ["fplinux", *arguments]),
             mock.patch.object(lifecycle, "ROOT", dispatch_root),
-            mock.patch.object(cli, "discover_targets", return_value=("target",)),
+            mock.patch("fplinux_cli.manifests.paths.discover_targets", return_value=("target",)),
             mock.patch.object(
                 lifecycle,
                 "cache_lock",
@@ -1139,4 +1160,4 @@ class CliCacheLockTests:
         lock.assert_not_called()
         if prune_arguments is not None:
             prune.assert_called_once_with(apply=prune_arguments)
-        assert not ((dispatch_root / ".cache").exists())
+        assert not ((dispatch_root / ".data").exists())

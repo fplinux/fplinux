@@ -21,6 +21,7 @@ from fplinux_cli.common import (
     sha256_bytes,
     sha256_file,
 )
+from fplinux_cli.data_paths import data_root
 from fplinux_cli.environment import definition
 from fplinux_cli.environment import state as environment_states
 from fplinux_cli.manifests import platforms, releases, targets
@@ -273,6 +274,7 @@ def package_target(
     host: str = "linux",
     output_directory: Path | None = None,
 ) -> None:
+    cache = data_root(common.ROOT)
     if host not in {"linux", "windows"}:
         fail("package host must be linux or windows")
     build_type = "release"
@@ -285,9 +287,9 @@ def package_target(
         fail(f"runtime archives do not support host {host} for this target")
     if not ready_runtime and host != "linux":
         fail("external-root exports support Linux x86-64 only")
-    release_context = current_release_context()
+    release_context = current_release_context(selected_data_root=cache)
     release = load_release_manifest(target, config)
-    documentation = {} if ready_runtime else offline_documentation()
+    documentation = {} if ready_runtime else offline_documentation(selected_data_root=cache)
     bundle, manifest = runtime_bundle_session.resolve_target_bundle(
         target, selected_profile, build_type=build_type
     )
@@ -296,24 +298,28 @@ def package_target(
     without_device_data = ready_runtime and config["platform"] == "sc9820e"
     if without_device_data:
         snapshot = workspaces.target_workspace_snapshot(
-            target, selected_profile, build_type=build_type, include_device_data=False
+            target,
+            selected_profile,
+            build_type=build_type,
+            include_device_data=False,
+            selected_data_root=cache,
         )
     else:
         snapshot = workspaces.target_workspace_snapshot(
-            target, selected_profile, build_type=build_type
+            target, selected_profile, build_type=build_type, selected_data_root=cache
         )
     environment_recipe = definition.environment_recipe_digest()
-    environment_state = environment_states.load_environment_state(
-        common.ROOT / ".cache", environment_recipe
-    )
-    identity = cli_bundles.build_identity(snapshot, environment_state, common.ROOT / ".cache")
+    environment_state = environment_states.load_environment_state(cache, environment_recipe)
+    identity = cli_bundles.build_identity(snapshot, environment_state, cache)
     if not cli_bundles.manifest_matches_identity(manifest, identity):
         clean_snapshot = workspaces.target_workspace_snapshot(
-            target, selected_profile, build_type=build_type, include_device_data=False
+            target,
+            selected_profile,
+            build_type=build_type,
+            include_device_data=False,
+            selected_data_root=cache,
         )
-        identity = cli_bundles.build_identity(
-            clean_snapshot, environment_state, common.ROOT / ".cache"
-        )
+        identity = cli_bundles.build_identity(clean_snapshot, environment_state, cache)
     files_table = manifest.get("files")
     runtime_path = bundle.path / "runtime-manifest.json"
     if runtime_path.is_symlink() or not runtime_path.is_file():
@@ -392,7 +398,7 @@ def package_target(
                 collect_loader_license_notices,
             )
 
-            files.update(collect_loader_license_notices(config))
+            files.update(collect_loader_license_notices(config, cache=cache))
     source_files: dict[str, bytes] = {}
     source_executables: set[str] = set()
     if ready_runtime:
@@ -409,7 +415,7 @@ def package_target(
         for relative in omitted:
             files.pop(relative)
         executables.difference_update(omitted)
-        additions = autonomous_payload(config, host=host, runtime=runtime)
+        additions = autonomous_payload(config, host=host, runtime=runtime, cache=cache)
         collisions = (set(additions.files) & set(files)) - {"README.txt"}
         if collisions:
             fail(f"duplicate runtime archive path: {min(collisions)}")
@@ -417,7 +423,7 @@ def package_target(
         executables.update(additions.executables)
         from fplinux_cli.packaging.sources import collect_source_files  # noqa: PLC0415
 
-        sources = collect_source_files(config, host=host)
+        sources = collect_source_files(config, host=host, cache=cache)
         source_files.update(sources.files)
         source_executables.update(sources.executables)
         files.update(sources.notices)
@@ -442,9 +448,7 @@ def package_target(
         files["README.txt"] = append_source_companion(files["README.txt"], source_stem)
     finalize_runtime(files, manifest, executables)
     stem = f"{base_stem}-{release_context.release_id}"
-    destination = (
-        output_directory if output_directory is not None else common.ROOT / ".cache/out/releases"
-    )
+    destination = output_directory if output_directory is not None else cache / "out/releases"
     archive = _write_archive(
         destination,
         stem,

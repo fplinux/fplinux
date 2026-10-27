@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from fplinux_cli.build.runtime import runtime_source_files
+from fplinux_cli.runtime.data_paths import archive_runtime_root
 
 from tests import ROOT
 from tests.bundle_support import file_record
@@ -52,10 +53,21 @@ class PortableArchive:
     manifest: dict[str, Any]
     data_home: Path
 
+    @property
+    def runtime_data(self) -> Path:
+        """Locate this delivery's default mutable state for process observations."""
+        return archive_runtime_root(self.root / ".data", self.root)
+
+    @property
+    def logs(self) -> Path:
+        """Locate the delivered launcher's per-run logs."""
+        return self.runtime_data / "logs"
+
     def environment(self) -> dict[str, str]:
         """Isolate both durable phone data and host configuration from the real account."""
         environment = dict(os.environ)
         environment.pop("PYTHONPATH", None)
+        environment.pop("FPLINUX_DATA_DIR", None)
         environment.update(
             {
                 "HOME": str(self.data_home.parent / "home"),

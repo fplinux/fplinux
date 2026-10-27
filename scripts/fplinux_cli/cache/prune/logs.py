@@ -33,7 +33,7 @@ def _log_run_matches(path: Path, *, label: str, identity: str) -> bool:
         return False
     return (
         isinstance(decoded, dict)
-        and decoded.get("display_root") == f".cache/{identity}"
+        and decoded.get("display_root") == identity
         and decoded.get("label") == label
         and decoded.get("parent") is None
     )

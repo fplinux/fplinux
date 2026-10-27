@@ -91,7 +91,7 @@ def test_locked_registry_inputs_keep_integrity_and_optional_platform_archives(
         "arch": "x86_64",
         "libc": "glibc",
     }
-    assert not (site_checkout / ".cache").exists()
+    assert not (site_checkout / ".data").exists()
 
 
 def test_context_ignores_lock_mapping_order(site_checkout: Path) -> None:
@@ -159,13 +159,13 @@ def test_snapshot_round_trip_restores_distinct_archives_with_the_same_filename(
     (originals / "two.tgz").write_bytes(second)
     snapshot = tmp_path / "snapshot"
     restored_root = tmp_path / "restored-checkout"
-    restored = restored_root / ".cache"
+    restored = restored_root / ".data"
     with patch("urllib.request.urlopen", side_effect=AssertionError("unexpected network")):
         manifest = preserve_inputs(
             inputs,
             context,
             snapshot,
-            cache=site_checkout / ".cache",
+            cache=site_checkout / ".data",
             offline=True,
             sources=[originals, runtime_original],
         )
@@ -183,7 +183,7 @@ def test_snapshot_round_trip_restores_distinct_archives_with_the_same_filename(
     )
     assert (restored / "downloads/sources/site-node/node.tar.xz").read_bytes() == b"abc"
     assert (restored / "downloads/sources/npm/npm.tgz").read_bytes() == b"abc"
-    assert not (site_checkout / ".cache").exists()
+    assert not (site_checkout / ".data").exists()
 
 
 def test_changed_registry_integrity_rejects_a_saved_snapshot(
@@ -206,7 +206,7 @@ def test_changed_registry_integrity_rejects_a_saved_snapshot(
         inputs,
         context,
         snapshot,
-        cache=site_checkout / ".cache",
+        cache=site_checkout / ".data",
         offline=True,
         sources=[original, runtime_original],
     )
@@ -220,4 +220,4 @@ def test_changed_registry_integrity_rejects_a_saved_snapshot(
         pytest.raises(SystemExit, match="does not match this checkout"),
     ):
         restore_dependencies(snapshot, inputs_only=True)
-    assert not (restored_root / ".cache/downloads").exists()
+    assert not (restored_root / ".data/downloads").exists()

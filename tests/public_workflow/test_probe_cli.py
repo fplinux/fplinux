@@ -34,9 +34,10 @@ class ProbeCli:
 
 
 @pytest.fixture
-def probe_cli(tmp_path: Path) -> ProbeCli:
+def probe_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ProbeCli:
     """Provide one source and no ambient build environment or cache."""
     prepare_cli_checkout(tmp_path)
+    monkeypatch.setenv("FPLINUX_DATA_DIR", str(tmp_path / ".data"))
     (tmp_path / "probe.c").write_text("int main(void) { return 0; }\n")
     return ProbeCli(tmp_path)
 
@@ -50,10 +51,10 @@ class ProbeCliTests:
             pytest.param((), id="missing-source"),
             pytest.param(("probe.c",), id="missing-output"),
             pytest.param(
-                ("probe.c", "probe.c", "--output", ".cache/tools/probe"), id="extra-source"
+                ("probe.c", "probe.c", "--output", ".data/tools/probe"), id="extra-source"
             ),
             pytest.param(
-                ("probe.c", "--output", ".cache/tools/probe", "-static"), id="compiler-flag"
+                ("probe.c", "--output", ".data/tools/probe", "-static"), id="compiler-flag"
             ),
         ],
     )
@@ -64,7 +65,7 @@ class ProbeCliTests:
         help_result = probe_cli.run_probe("--help")
         assert (help_result.returncode) == (0), help_result.stderr
         assert ("SOURCE.c") in (help_result.stdout)
-        assert ("--output .cache/tools/NAME") in (help_result.stdout)
+        assert ("--output PATH") in (help_result.stdout)
         result = probe_cli.run_probe(*arguments)
         assert (result.returncode) == (2), result.stderr
 
@@ -72,26 +73,24 @@ class ProbeCliTests:
         ("source", "output", "message"),
         [
             pytest.param(
-                "../probe.c", ".cache/tools/probe", "normalized relative path", id="outside-source"
+                "../probe.c", ".data/tools/probe", "normalized relative path", id="outside-source"
             ),
             pytest.param(
                 "./probe.c",
-                ".cache/tools/probe",
+                ".data/tools/probe",
                 "normalized relative path",
                 id="unnormalized-source",
             ),
             pytest.param(
-                None, ".cache/tools/probe", "normalized relative path", id="absolute-source"
+                None, ".data/tools/probe", "normalized relative path", id="absolute-source"
             ),
-            pytest.param(
-                "missing.c", ".cache/tools/probe", "regular .c file", id="missing-source"
-            ),
-            pytest.param("fplinux", ".cache/tools/probe", "regular .c file", id="non-c-source"),
-            pytest.param("probe.c", "probe", "inside .cache/tools", id="outside-output"),
-            pytest.param("probe.c", ".cache/tools", "inside .cache/tools", id="tools-root"),
+            pytest.param("missing.c", ".data/tools/probe", "regular .c file", id="missing-source"),
+            pytest.param("fplinux", ".data/tools/probe", "regular .c file", id="non-c-source"),
+            pytest.param("probe.c", "probe", "managed tools directory", id="outside-output"),
+            pytest.param("probe.c", ".data/tools", "managed tools directory", id="tools-root"),
             pytest.param(
                 "probe.c",
-                ".cache/tools/../probe",
+                ".data/tools/../probe",
                 "normalized relative path",
                 id="unnormalized-output",
             ),
@@ -112,16 +111,16 @@ class ProbeCliTests:
         ("source", "output", "message"),
         [
             pytest.param(
-                "link.c", ".cache/tools/probe", "must not use a symlink", id="source-symlink"
+                "link.c", ".data/tools/probe", "must not use a symlink", id="source-symlink"
             ),
             pytest.param(
                 "probe.c",
-                ".cache/tools/link/probe",
+                ".data/tools/link/probe",
                 "must not use a symlink",
                 id="output-parent-symlink",
             ),
             pytest.param(
-                "probe.c", ".cache/tools/directory", "regular file", id="output-directory"
+                "probe.c", ".data/tools/directory", "regular file", id="output-directory"
             ),
         ],
     )
@@ -129,7 +128,7 @@ class ProbeCliTests:
         self, probe_cli: ProbeCli, source: str, output: str, message: str
     ) -> None:
         """Neither a source link nor a linked output parent can redirect the command."""
-        tools = probe_cli.root / ".cache/tools"
+        tools = probe_cli.root / ".data/tools"
         tools.mkdir(parents=True)
         (probe_cli.root / "link.c").symlink_to("probe.c")
         (tools / "link").symlink_to(probe_cli.root, target_is_directory=True)
@@ -138,7 +137,7 @@ class ProbeCliTests:
         assert (result.returncode) == (1), result.stderr
         assert (message) in (result.stderr)
 
-    def test_ignored_source_reaches_the_explicit_setup_requirement(
+    def test_explicit_private_source_reaches_the_setup_requirement(
         self, probe_cli: ProbeCli
     ) -> None:
         """An ignored local probe is accepted, but missing Kern never triggers setup."""
@@ -155,13 +154,26 @@ class ProbeCliTests:
             destination = probe_cli.root / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(ROOT / relative, destination)
-        tools = probe_cli.root / ".cache/tools"
-        tools.mkdir(parents=True)
-        source = tools / "local.c"
+        source = probe_cli.root / ".private/local.c"
+        source.parent.mkdir()
         source.write_text("int main(void) { return 0; }\n")
-        result = probe_cli.run_probe(".cache/tools/local.c", "--output", ".cache/tools/local")
+        result = probe_cli.run_probe(".private/local.c", "--output", ".data/tools/local")
 
         assert (result.returncode) == (1), result.stderr
         assert ("./fplinux setup") in (result.stderr)
-        assert not ((tools / "local").exists())
-        assert not ((probe_cli.root / ".cache/kern").exists())
+        assert not ((probe_cli.root / ".data/tools/local").exists())
+        assert not ((probe_cli.root / ".data/kern").exists())
+
+    def test_source_inside_managed_data_is_rejected_before_loading_the_environment(
+        self, probe_cli: ProbeCli
+    ) -> None:
+        """Managed output cannot become the source of a new probe build."""
+        source = probe_cli.root / ".data/tools/local.c"
+        source.parent.mkdir(parents=True)
+        source.write_text("int probe;\n")
+
+        result = probe_cli.run_probe(".data/tools/local.c", "--output", ".data/tools/local")
+
+        assert result.returncode == 1
+        assert "probe source must be outside the managed data directory" in result.stderr
+        assert not source.with_suffix("").exists()

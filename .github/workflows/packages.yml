@@ -12,6 +12,9 @@ concurrency:
   queue: max
   cancel-in-progress: false
 
+env:
+  FPLINUX_DATA_DIR: ${{ github.workspace }}/.data
+
 jobs:
   prepare-inputs:
     if: github.repository == 'fplinux/fplinux'
@@ -96,15 +99,15 @@ jobs:
       - run: ./fplinux build "$FPLINUX_TARGET" --without-device-data
       - run: |
           for host in $FPLINUX_PACKAGE_HOSTS; do
-            ./fplinux package "$FPLINUX_TARGET" --host "$host" --output-directory .cache/ci/packages
+            ./fplinux package "$FPLINUX_TARGET" --host "$host" --output-directory "$FPLINUX_DATA_DIR/ci/packages"
           done
-          for archive in .cache/ci/packages/*.zip; do
+          for archive in "$FPLINUX_DATA_DIR"/ci/packages/*.zip; do
             ./fplinux inspect archive "$archive"
           done
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: packages-${{ matrix.target }}
-          path: .cache/ci/packages/*.zip
+          path: ${{ env.FPLINUX_DATA_DIR }}/ci/packages/*.zip
           if-no-files-found: error
           compression-level: 0
           retention-days: 2
@@ -126,16 +129,16 @@ jobs:
         with:
           pattern: packages-*
           merge-multiple: true
-          path: .cache/ci/intermediate
+          path: ${{ env.FPLINUX_DATA_DIR }}/ci/intermediate
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
         with:
           name: dependency-inputs
           path: ${{ runner.temp }}/fplinux-inputs
-      - run: ./fplinux ci assemble --input-dir .cache/ci/intermediate --inputs-dir "$RUNNER_TEMP/fplinux-inputs" --output-dir .cache/ci/distribution
+      - run: ./fplinux ci assemble --input-dir "$FPLINUX_DATA_DIR/ci/intermediate" --inputs-dir "$RUNNER_TEMP/fplinux-inputs" --output-dir "$FPLINUX_DATA_DIR/ci/distribution"
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: distribution
-          path: .cache/ci/distribution/*
+          path: ${{ env.FPLINUX_DATA_DIR }}/ci/distribution/*
           if-no-files-found: error
           compression-level: 0
           retention-days: 2
@@ -156,10 +159,10 @@ jobs:
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
         with:
           name: distribution
-          path: .cache/ci/distribution
+          path: ${{ env.FPLINUX_DATA_DIR }}/ci/distribution
       - run: sudo apt-get update && sudo apt-get install --no-install-recommends -y udev iproute2
       - run: sudo install -m 0644 common/60-fplinux.rules /etc/udev/rules.d/60-fplinux.rules
-      - run: ./fplinux ci smoke --directory .cache/ci/distribution --host linux
+      - run: ./fplinux ci smoke --directory "$FPLINUX_DATA_DIR/ci/distribution" --host linux
 
   smoke-windows:
     needs: assemble
@@ -198,8 +201,8 @@ jobs:
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
         with:
           name: distribution
-          path: .cache/ci/distribution
-      - run: ./fplinux ci publish --directory .cache/ci/distribution --commit "$GITHUB_SHA"
+          path: ${{ env.FPLINUX_DATA_DIR }}/ci/distribution
+      - run: ./fplinux ci publish --directory "$FPLINUX_DATA_DIR/ci/distribution" --commit "$GITHUB_SHA"
         env:
           GH_TOKEN: ${{ github.token }}
 
