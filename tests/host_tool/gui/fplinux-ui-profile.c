@@ -14,7 +14,9 @@ static const char *boolean(bool value)
 
 static void print_profile(const struct fplinux_ui_profile_spec *spec)
 {
-	printf("{\"font_body\": \"%s\", \"width\": %d, \"height\": %d, "
+	printf("{\"font_body\": \"%s\", \"font_title\": \"%s\", "
+	       "\"font_legend\": \"%s\", \"font_clock\": \"%s\", "
+	       "\"width\": %d, \"height\": %d, "
 	       "\"status_height\": %d, \"softkey_height\": %d, "
 	       "\"header_height\": %d, \"margin\": %d, "
 	       "\"scrollbar_space\": %d, "
@@ -23,7 +25,8 @@ static void print_profile(const struct fplinux_ui_profile_spec *spec)
 	       "\"row_tile_radius\": %d, \"app_tile_radius\": %d, "
 	       "\"grid_ring_width\": %d, \"grid_ring_gap\": %d, "
 	       "\"grid_tile_inset\": %d}",
-	       spec->font_body, spec->width, spec->height, spec->status_height,
+	       spec->font_body, spec->font_title, spec->font_legend,
+	       spec->font_clock, spec->width, spec->height, spec->status_height,
 	       spec->softkey_height, spec->header_height, spec->margin,
 	       spec->scrollbar_space, spec->row_height, spec->app_icon_size,
 	       spec->grid_columns, spec->row_tile_radius, spec->app_tile_radius,

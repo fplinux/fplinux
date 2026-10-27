@@ -119,9 +119,7 @@ class FontSplitTests:
             selected_font = child / "usr/share/fplinux/fonts" / filename
             assert selected_font.read_bytes() == b"fixture selected PSF\n"
             assert selected_font.stat().st_mode & 0o777 == 0o644
-            default = child / "usr/share/fplinux/fonts/default.psf"
-            assert default.is_symlink()
-            assert (default.read_bytes()) == (b"fixture selected PSF\n")
+            assert set(selected_font.parent.iterdir()) == {selected_font}
             installed_license = (
                 child / "usr/share/licenses" / f"fplinux-font-terminus-{cell}" / "Terminus-OFL.txt"
             )

@@ -1,5 +1,5 @@
 {
-  "description": "UI screen profiles in physical pixels, with Noto Sans bitmap fonts and RGB565-exact theme colours.",
+  "description": "UI screen profiles in physical pixels, with Galmuri and Noto Sans bitmap fonts and RGB565-exact theme colours.",
   "selection_rule": "largest pixel area with profile.width <= screen.width and profile.height <= screen.height; earlier profile wins equal-area ties; smaller screens use 128x128 (unsupported, logged); geometry uses the real screen size",
   "tile_radius": {
     "16": 3,
@@ -16,34 +16,30 @@
       "width": 128,
       "height": 128,
       "fonts": {
-        "body": "NotoSans SemiCondensed 12 4bpp",
-        "title": "NotoSans SemiCondensed Bold 13 4bpp",
+        "body": "Galmuri9 10 4bpp",
+        "title": "Galmuri11 FauxBold 12 4bpp",
         "clock": "NotoSans Bold 24 4bpp digits",
-        "softkey": "NotoSans Condensed 12 4bpp",
+        "softkey": "Galmuri9 10 4bpp",
         "metrics": {
           "body": {
-            "line": 15,
-            "advance": 6
+            "line": 14
           },
           "title": {
-            "line": 18,
-            "advance": 7
+            "line": 17
           },
           "clock": {
-            "line": 20,
-            "advance": 14
+            "line": 20
           },
           "softkey": {
-            "line": 15,
-            "advance": 6
+            "line": 14
           }
         },
         "build": {
           "bpp": 4,
-          "hinting": "TrueType hinting; lv_font_conv --autohint-off",
+          "hinting": "Galmuri pixel grid and TrueType hinting; lv_font_conv --autohint-off",
           "kerning": "GPOS pairs converted to a legacy kern table",
-          "symbols": "U+2713 from Noto Sans Symbols 2 v2.008; U+2190-2193 from Noto Sans Math v3.000",
-          "digits": "tabular"
+          "symbols": "U+2713 from Noto Sans Symbols 2 v2.008; native Galmuri arrows",
+          "digits": "tabular; Galmuri digits centered on whole pixels"
         }
       },
       "status_height": 16,
@@ -66,8 +62,8 @@
       "field_lines": 3,
       "text_box_padding": 2,
       "field_status_inline": false,
-      "picker_columns": 9,
-      "picker_cell": [13, 18],
+      "picker_columns": 8,
+      "picker_cell": [15, 18],
       "picker_border": 1,
       "picker_padding": 2,
       "alert_margin": 2,
@@ -76,7 +72,7 @@
       "spinner_size": 16,
       "spinner_width": 2,
       "bar_height": 4,
-      "legend_margin": 2,
+      "legend_margin": 4,
       "legend_gap": 4,
       "battery": {
         "body": [16, 8],
@@ -111,34 +107,30 @@
       "width": 128,
       "height": 160,
       "fonts": {
-        "body": "NotoSans SemiCondensed 12 4bpp",
-        "title": "NotoSans SemiCondensed Bold 13 4bpp",
+        "body": "Galmuri9 10 4bpp",
+        "title": "Galmuri11 FauxBold 12 4bpp",
         "clock": "NotoSans Bold 24 4bpp digits",
-        "softkey": "NotoSans Condensed 12 4bpp",
+        "softkey": "Galmuri9 10 4bpp",
         "metrics": {
           "body": {
-            "line": 15,
-            "advance": 6
+            "line": 14
           },
           "title": {
-            "line": 18,
-            "advance": 7
+            "line": 17
           },
           "clock": {
-            "line": 20,
-            "advance": 14
+            "line": 20
           },
           "softkey": {
-            "line": 15,
-            "advance": 6
+            "line": 14
           }
         },
         "build": {
           "bpp": 4,
-          "hinting": "TrueType hinting; lv_font_conv --autohint-off",
+          "hinting": "Galmuri pixel grid and TrueType hinting; lv_font_conv --autohint-off",
           "kerning": "GPOS pairs converted to a legacy kern table",
-          "symbols": "U+2713 from Noto Sans Symbols 2 v2.008; U+2190-2193 from Noto Sans Math v3.000",
-          "digits": "tabular"
+          "symbols": "U+2713 from Noto Sans Symbols 2 v2.008; native Galmuri arrows",
+          "digits": "tabular; Galmuri digits centered on whole pixels"
         }
       },
       "status_height": 16,
@@ -161,8 +153,8 @@
       "field_lines": 3,
       "text_box_padding": 2,
       "field_status_inline": false,
-      "picker_columns": 9,
-      "picker_cell": [13, 18],
+      "picker_columns": 8,
+      "picker_cell": [15, 18],
       "picker_border": 1,
       "picker_padding": 2,
       "alert_margin": 2,
@@ -171,7 +163,7 @@
       "spinner_size": 16,
       "spinner_width": 2,
       "bar_height": 4,
-      "legend_margin": 2,
+      "legend_margin": 4,
       "legend_gap": 4,
       "battery": {
         "body": [16, 8],
@@ -212,20 +204,16 @@
         "softkey": "NotoSans 13 4bpp",
         "metrics": {
           "body": {
-            "line": 15,
-            "advance": 8
+            "line": 15
           },
           "title": {
-            "line": 21,
-            "advance": 10
+            "line": 21
           },
           "clock": {
-            "line": 25,
-            "advance": 16
+            "line": 25
           },
           "softkey": {
-            "line": 15,
-            "advance": 8
+            "line": 15
           }
         },
         "build": {
@@ -307,20 +295,16 @@
         "softkey": "NotoSans 14 4bpp",
         "metrics": {
           "body": {
-            "line": 18,
-            "advance": 8
+            "line": 18
           },
           "title": {
-            "line": 22,
-            "advance": 11
+            "line": 22
           },
           "clock": {
-            "line": 27,
-            "advance": 19
+            "line": 27
           },
           "softkey": {
-            "line": 18,
-            "advance": 8
+            "line": 18
           }
         },
         "build": {
@@ -402,20 +386,16 @@
         "softkey": "NotoSans 14 4bpp",
         "metrics": {
           "body": {
-            "line": 18,
-            "advance": 8
+            "line": 18
           },
           "title": {
-            "line": 22,
-            "advance": 11
+            "line": 22
           },
           "clock": {
-            "line": 27,
-            "advance": 19
+            "line": 27
           },
           "softkey": {
-            "line": 18,
-            "advance": 8
+            "line": 18
           }
         },
         "build": {

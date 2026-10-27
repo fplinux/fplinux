@@ -72,6 +72,16 @@ def test_unknown_profile_and_theme_ids_return_no_entry(profile_table: dict[str, 
     assert profile_table["unknown"] == [True, True, True, True]
 
 
+def test_small_profiles_select_pixel_text_fonts_and_keep_the_numeric_clock(
+    profile_table: dict[str, Any],
+) -> None:
+    for profile in profile_table["profiles"][:2]:
+        assert profile["font_body"] == "galmuri9-10"
+        assert profile["font_title"] == "galmuri11-fauxbold-12"
+        assert profile["font_legend"] == "galmuri9-10"
+        assert profile["font_clock"] == "noto-sans-bold-24-digits"
+
+
 def test_scrolling_content_exposes_separate_margin_and_scrollbar_lane(
     profile_table: dict[str, Any],
 ) -> None:

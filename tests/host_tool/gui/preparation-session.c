@@ -18,7 +18,8 @@ static char text[1024];
 FILE *__real_fopen(const char *path, const char *mode);
 FILE *__wrap_fopen(const char *path, const char *mode)
 {
-	if (!strcmp(path, "/usr/share/fplinux/fonts/default.psf"))
+	if (!strcmp(path, "/usr/share/fplinux/fonts/ter-u12n.psf") ||
+	    !strcmp(path, "/usr/share/fplinux/fonts/ter-u16n.psf"))
 		path = getenv("FPLINUX_TEST_FONT");
 	return __real_fopen(path, mode);
 }

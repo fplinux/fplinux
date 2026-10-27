@@ -118,7 +118,9 @@ bool fplinux_font_open_default(struct fplinux_font *font,
 			       unsigned int display_width, char *error,
 			       size_t error_size)
 {
-	const char *path = "/usr/share/fplinux/fonts/default.psf";
+	const char *path = display_width < 200 ?
+				   "/usr/share/fplinux/fonts/ter-u12n.psf" :
+				   "/usr/share/fplinux/fonts/ter-u16n.psf";
 	unsigned int width = display_width < 200 ? 6 : 8;
 	unsigned int height = display_width < 200 ? 12 : 16;
 

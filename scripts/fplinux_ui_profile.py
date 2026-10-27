@@ -37,6 +37,7 @@ FONT_SLOTS = (
     ("font_legend", "softkey"),
 )
 _NOTO = re.compile(r"NotoSans( Condensed| SemiCondensed)?( Bold)? ([0-9]+) 4bpp( digits)?")
+_GALMURI = re.compile(r"(Galmuri9|Galmuri11 FauxBold) ([0-9]+) 4bpp")
 # Keys of a profile's fonts object; metrics and build notes are for checks.
 FONT_KEYS = frozenset({"body", "title", "clock", "softkey", "metrics", "build"})
 
@@ -268,6 +269,10 @@ def font_id(profile: str, description: object) -> str:
         raise ProfileError(f"{profile}: a font slot must be a string")
     noto = _NOTO.fullmatch(description)
     if noto is None:
+        galmuri = _GALMURI.fullmatch(description)
+        if galmuri is not None:
+            family = galmuri.group(1).lower().replace(" ", "-")
+            return f"{family}-{galmuri.group(2)}"
         raise ProfileError(f"{profile}: unknown font {description!r}")
     width = noto.group(1).strip().lower() if noto.group(1) else ""
     stretch = f"-{width}" if width else ""

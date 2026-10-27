@@ -609,6 +609,27 @@ url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8
 algorithm = "sha512"
 checksum = "990855f875513a85c2b737685ac5bfdfa86f8dadacf00c1826a456547f99b69d4ecf1b9a09c0ce002f1df618b44b1febabe53f95a2c0cd02b504d565bccb50c8"
 
+[aport_galmuri11_2_40_4_ttf]
+version = "2.40.4"
+name = "Galmuri11-2.40.4.ttf"
+url = "https://raw.githubusercontent.com/quiple/galmuri/v2.40.4/dist/Galmuri11.ttf"
+algorithm = "sha512"
+checksum = "daef798eb372c7497701b6a8ef6caf2f2d43284d12fd7875f95be8b4e897e0fd19865d66096dd8ff7cd1a3f76adc6c3bb4cd49e350e7e7aa57fb6ea2ca183730"
+
+[aport_galmuri9_2_40_4_ttf]
+version = "2.40.4"
+name = "Galmuri9-2.40.4.ttf"
+url = "https://raw.githubusercontent.com/quiple/galmuri/v2.40.4/dist/Galmuri9.ttf"
+algorithm = "sha512"
+checksum = "2872495503d9fd62ee0b79a4720e0222af37ada51cefb36e08da2edbfb792381660ee28ec784268406310baf9c52f2252565e18f94070803dd13ab52e61ea1f0"
+
+[aport_galmuri_ofl_2_40_4_txt]
+version = "2.40.4"
+name = "Galmuri-OFL-2.40.4.txt"
+url = "https://raw.githubusercontent.com/quiple/galmuri/v2.40.4/ofl.md"
+algorithm = "sha512"
+checksum = "b8293eeb5b4cb753de905fa16309d4208be676f681f0366cb4cf196f44d65d5e53c3e0bfc2dbc2b240aaae591877369e8c95b99b1b5c62297250e998767e1e01"
+
 [aport_glib_2_88_1_tar_xz]
 version = "2.88.1"
 name = "glib-2.88.1.tar.xz"

@@ -21,10 +21,13 @@ Steps for each font:
    and GPOS is dropped, because lv_font_conv reads kerning through
    opentype.js, which skips GPOS extension lookups and stops at the first
    lookup that covers a glyph. Outlines, metrics and hinting are kept.
-3. The pinned lv_font_conv rasterizes the face at 4 bpp, with --autohint-off for
-   faces that carry TrueType hinting (the hinted Noto build) and its light
-   autohinter for faces without it. Text fonts take U+2713 from Noto Sans
-   Symbols 2 and U+2190-2193 from Noto Sans Math, which Noto Sans lacks.
+3. Galmuri keeps its integer pixel grid: FauxBold adds a copy shifted right
+   by one design pixel, and digits are centered in one shared advance
+   without digit-to-digit kerning.
+   The pinned lv_font_conv rasterizes at 4 bpp, with --autohint-off for
+   Galmuri and faces that carry TrueType hinting. Text fonts take U+2713
+   from Noto Sans Symbols 2. Noto Sans also takes U+2190-2193 from Noto Sans
+   Math; Galmuri supplies its own arrows.
 4. The C font gets the cap_height and x_height fields that lv_font_conv
    leaves at 0 (LVGL's leading-trim styles use them).
 5. The C font is read back and checked: every requested code point is
@@ -58,6 +61,9 @@ from typing import TYPE_CHECKING, Any, cast
 
 import fplinux_ui_profile
 from fontTools import version as fonttools_version  # type: ignore[import-untyped]
+from fontTools.pens.recordingPen import DecomposingRecordingPen  # type: ignore[import-untyped]
+from fontTools.pens.transformPen import TransformPen  # type: ignore[import-untyped]
+from fontTools.pens.ttGlyphPen import TTGlyphPen  # type: ignore[import-untyped]
 from fontTools.ttLib import TTFont, newTable  # type: ignore[import-untyped]
 from fontTools.ttLib.tables._k_e_r_n import KernTable_format_0  # type: ignore[import-untyped]
 
@@ -97,6 +103,22 @@ SYMBOLS2 = "NotoSansSymbols2-Regular-2.008.ttf"
 MATH = "NotoSansMath-Regular-3.000.ttf"
 
 
+@dataclass(frozen=True)
+class PixelFace:
+    """One source face and its native pixel-grid preparation."""
+
+    name: str
+    size: int
+    faux_bold: bool = False
+
+
+GALMURI_FACES = {
+    "Galmuri9": PixelFace("Galmuri9-2.40.4.ttf", 10),
+    "Galmuri11 FauxBold": PixelFace("Galmuri11-2.40.4.ttf", 12, faux_bold=True),
+}
+PIXEL_FACES = {face.name: face for face in GALMURI_FACES.values()}
+
+
 def _codes(*spans: tuple[int, int] | int) -> tuple[int, ...]:
     codes: list[int] = []
     for span in spans:
@@ -118,7 +140,8 @@ TEXT = _codes(
     0x2122,
     0x2212,
 )
-MERGED = ((SYMBOLS2, (0x2713,)), (MATH, (0x2190, 0x2191, 0x2192, 0x2193)))
+ARROWS = (0x2190, 0x2191, 0x2192, 0x2193)
+MERGED = ((SYMBOLS2, (0x2713,)), (MATH, ARROWS))
 CLOCK = tuple(sorted(ord(character) for character in " +,-.0123456789:Ee"))
 DIGITS = tuple(range(0x30, 0x3A))
 
@@ -126,6 +149,7 @@ _SLOT = re.compile(
     r"NotoSans(?: (?P<width>Condensed|SemiCondensed))?(?P<bold> Bold)? "
     r"(?P<size>[0-9]+) (?P<bpp>[0-9]+)bpp(?P<digits> digits)?"
 )
+_PIXEL_SLOT = re.compile(r"(?P<family>Galmuri9|Galmuri11 FauxBold) (?P<size>[0-9]+) 4bpp")
 _METRIC_SLOTS = dict(fplinux_ui_profile.FONT_SLOTS)
 
 # GPOS value record bits: XAdvance is the only one a pair kern can carry.
@@ -148,7 +172,7 @@ class FontSpec:
     face: str
     size: int
     digits: bool
-    # (face, code points) per source, the Noto Sans face first.
+    # (face, code points) per source, the main text face first.
     ranges: tuple[tuple[str, tuple[int, ...]], ...]
     # Expected line heights from fonts.metrics, by "profile slot".
     lines: dict[str, int] = field(default_factory=dict, compare=False)
@@ -214,6 +238,18 @@ def source_path(sources: Path, name: str, originals: dict[str, Source]) -> Path:
 
 def font_spec(description: str) -> FontSpec:
     """Return the font of one slot string, such as "NotoSans Bold 16 4bpp"."""
+    pixel = _PIXEL_SLOT.fullmatch(description)
+    if pixel is not None:
+        source = GALMURI_FACES[pixel["family"]]
+        if int(pixel["size"]) != source.size:
+            raise FontBuildError(f"{description!r}: pixel face requires size {source.size}")
+        return FontSpec(
+            fplinux_ui_profile.font_id("fonts", description),
+            source.name,
+            source.size,
+            digits=False,
+            ranges=((source.name, (*TEXT, *ARROWS)), (SYMBOLS2, (0x2713,))),
+        )
     match = _SLOT.fullmatch(description)
     if match is None:
         message = f"unknown font {description!r}"
@@ -434,7 +470,44 @@ def kerning_pairs(font: Any, codes: Sequence[int]) -> Kerning:  # noqa: ANN401
     return Kerning("none", {})
 
 
-def prepare_face(source: Path, codes: Sequence[int], destination: Path) -> Kerning:
+def prepare_pixel_face(font: Any, codes: Sequence[int], pixel: PixelFace) -> None:  # noqa: ANN401
+    """Keep faux-bold outlines and tabular digits on the face's whole-pixel grid."""
+    step, remainder = divmod(font["head"].unitsPerEm, pixel.size)
+    if remainder:
+        raise FontBuildError(f"{pixel.name}: one design pixel is not an integer font unit")
+    cmap = font.getBestCmap()
+    digits = {cmap[code] for code in DIGITS}
+    metrics = font["hmtx"].metrics
+    extra = step if pixel.faux_bold else 0
+    digit_advance = max(metrics[name][0] for name in digits) + extra
+    glyphs = font.getGlyphSet()
+    replacements: dict[str, Any] = {}
+    for name in sorted({cmap[code] for code in codes}):
+        advance, bearing = metrics[name]
+        offset = (digit_advance - advance - extra) // (2 * step) * step if name in digits else 0
+        outline = DecomposingRecordingPen(glyphs)
+        glyphs[name].draw(outline)
+        pen = TTGlyphPen(None)
+        outline.replay(TransformPen(pen, (1, 0, 0, 1, offset, 0)))
+        if pixel.faux_bold:
+            outline.replay(TransformPen(pen, (1, 0, 0, 1, offset + step, 0)))
+        replacements[name] = pen.glyph()
+        if name in digits:
+            advance = digit_advance
+        elif advance:
+            advance += extra
+        metrics[name] = advance, bearing + offset
+    for name, glyph in replacements.items():
+        font["glyf"][name] = glyph
+    font.recalcBBoxes = True
+    for name in ("hdmx", "LTSH", "VDMX"):
+        if name in font:
+            del font[name]
+
+
+def prepare_face(
+    source: Path, codes: Sequence[int], destination: Path, *, pixel: PixelFace | None = None
+) -> Kerning:
     """Write a copy of a face whose kerning is one 'kern' format 0 table.
 
     The table holds the kerning_pairs() between the code points; GPOS is
@@ -442,6 +515,16 @@ def prepare_face(source: Path, codes: Sequence[int], destination: Path) -> Kerni
     """
     font = TTFont(io.BytesIO(source.read_bytes()), recalcTimestamp=False, recalcBBoxes=False)
     kerning = kerning_pairs(font, codes)
+    if pixel is not None:
+        cmap = font.getBestCmap()
+        digit_glyphs = {cmap[code] for code in DIGITS}
+        # A following digit must not change a tabular digit's advance.
+        kerning.pairs = {
+            pair: value
+            for pair, value in kerning.pairs.items()
+            if not (pair[0] in digit_glyphs and pair[1] in digit_glyphs)
+        }
+        prepare_pixel_face(font, codes, pixel)
     if len(kerning.pairs) > 0xFFFF:
         message = f"{source.name}: {len(kerning.pairs)} pairs exceed one format 0 table"
         raise FontBuildError(message)
@@ -486,13 +569,13 @@ def has_hinting(path: Path) -> bool:
 
 
 def conversion_command(
-    spec: FontSpec, lv_font_conv: str, faces: dict[str, Path], hinted: dict[str, bool]
+    spec: FontSpec, lv_font_conv: str, faces: dict[str, Path], autohint_off: dict[str, bool]
 ) -> list[str]:
     """Return the lv_font_conv command line, with file names in its directory."""
     command = [lv_font_conv]
     for face, codes in spec.ranges:
         command += ["--font", faces[face].name, "-r", _ranges(codes)]
-        if hinted[face]:
+        if autohint_off[face]:
             command.append("--autohint-off")
     return [
         *command,
@@ -685,11 +768,18 @@ def finish_c_font(source: str, spec: FontSpec, parsed: ParsedFont) -> str:
         message = f"{spec.font_id}: unexpected lv_font_conv output"
         raise FontBuildError(message)
     insert = f"    {_CAP_X_MARK}\n    .cap_height = {cap},\n    .x_height = {x_height},\n"
+    if spec.face in PIXEL_FACES:
+        attribution = (
+            "Galmuri and Noto Sans Symbols 2;\n"
+            " * Copyright 2019-2025 Lee Minseo; Copyright 2022 The Noto Project Authors."
+        )
+    else:
+        attribution = "Noto Sans;\n * Copyright 2022 The Noto Project Authors."
     header = (
         "/* SPDX-License-Identifier: OFL-1.1 */\n"
-        f"/* {spec.font_id}: generated by fplinux_ui_fonts.py from Noto Sans, a\n"
-        " * Modified Version under the SIL Open Font License 1.1; Copyright 2022\n"
-        " * The Noto Project Authors. Do not edit. */\n"
+        f"/* {spec.font_id}: Modified Version under the SIL Open Font License 1.1.\n"
+        f" * {attribution}\n"
+        " * Generated by fplinux_ui_fonts.py. Do not edit. */\n"
     )
     return header + source[: anchor.end()] + insert + source[anchor.end() :]
 
@@ -784,7 +874,7 @@ def build(  # noqa: PLR0913 -- every input of the build is explicit.
         work = Path(scratch)
         prepared: dict[str, Path] = {}
         kernings: dict[str, Kerning] = {}
-        hinted: dict[str, bool] = {}
+        autohint_off: dict[str, bool] = {}
         faces: dict[str, Any] = {}
         for face in sorted(requested):
             original = source_path(sources, face, originals)
@@ -795,17 +885,24 @@ def build(  # noqa: PLR0913 -- every input of the build is explicit.
                 message = f"{face} lacks {_ranges(absent)}"
                 raise FontBuildError(message)
             prepared[face] = work / re.sub(r"-[0-9.]+\.ttf$", ".ttf", face)
-            kernings[face] = prepare_face(original, sorted(requested[face]), prepared[face])
-            hinted[face] = has_hinting(original)
+            pixel = PIXEL_FACES.get(face)
+            kernings[face] = prepare_face(
+                original, sorted(requested[face]), prepared[face], pixel=pixel
+            )
+            autohint_off[face] = pixel is not None or has_hinting(original)
             faces[face] = TTFont(io.BytesIO(prepared[face].read_bytes()))
             kerning = kernings[face]
+            hinting = "no hinting, light autohint"
+            if autohint_off[face]:
+                hinting = (
+                    "pixel grid, --autohint-off" if pixel is not None else "hinted, --autohint-off"
+                )
             note(
                 f"face {face}: kerning source {kerning.source}, {len(kerning.pairs)} pairs"
-                f"{''.join('; ' + item for item in kerning.notes)}; "
-                + ("hinted, --autohint-off" if hinted[face] else "no hinting, light autohint")
+                f"{''.join('; ' + item for item in kerning.notes)}; " + hinting
             )
         for spec in fonts:
-            command = conversion_command(spec, lv_font_conv, prepared, hinted)
+            command = conversion_command(spec, lv_font_conv, prepared, autohint_off)
             subprocess.run(command, cwd=work, check=True, capture_output=True, timeout=300)
             text = (work / spec.c_name).read_text(encoding="utf-8")
             parsed = parse_c_font(text)

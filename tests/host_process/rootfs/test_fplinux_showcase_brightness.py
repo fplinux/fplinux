@@ -125,7 +125,9 @@ class ShowcaseScene:
             if font_error == "wrong-size":
                 assert ("default font is 8x16; 128-pixel display requires 6x12") in (result.stderr)
             else:
-                assert ("cannot load font /usr/share/fplinux/fonts/default.psf") in (result.stderr)
+                assert ("cannot load font /usr/share/fplinux/fonts/ter-u12n.psf") in (
+                    result.stderr
+                )
             assert (result.stdout) == ("")
         elif gpu_init_failure and renderer == "gpu":
             assert result.returncode == 1, result.stderr

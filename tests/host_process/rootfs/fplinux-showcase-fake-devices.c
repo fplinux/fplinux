@@ -174,7 +174,9 @@ FILE *__wrap_fopen(const char *path, const char *mode)
 {
 	const char *font_path = getenv("SHOWCASE_FONT_PATH");
 
-	if (font_path && !strcmp(path, "/usr/share/fplinux/fonts/default.psf"))
+	if (font_path &&
+	    (!strcmp(path, "/usr/share/fplinux/fonts/ter-u12n.psf") ||
+	     !strcmp(path, "/usr/share/fplinux/fonts/ter-u16n.psf")))
 		path = font_path;
 	return __real_fopen(path, mode);
 }

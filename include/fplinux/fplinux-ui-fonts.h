@@ -2,7 +2,7 @@
 /*
  * The LVGL bitmap fonts compiled into libfplinux-ui; not installed and not
  * exported. While the package is built, scripts/fplinux_ui_fonts.py
- * rasterizes Noto Sans for exactly the font ids that the profile table of
+ * rasterizes Galmuri and Noto Sans for the font ids that the profile table of
  * fplinux-ui-profile.c names and generates fplinux-ui-fonts.c with this
  * function. The fonts are shared read-only data: no loader and no heap.
  */

@@ -36,7 +36,6 @@ _font() {
 	depends=""
 	provides="fplinux-font-terminus-data"
 	amove "usr/share/fplinux/fonts/$2"
-	ln -s "$2" "$subpkgdir/usr/share/fplinux/fonts/default.psf"
 	install -Dm644 "$srcdir/terminus-font-$pkgver/OFL.TXT" \
 		"$subpkgdir/usr/share/licenses/$subpkgname/Terminus-OFL.txt"
 }

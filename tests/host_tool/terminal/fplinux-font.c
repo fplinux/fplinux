@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
+#define _POSIX_C_SOURCE 200809L
 #include "fplinux-font.h"
 
 #include <assert.h>
@@ -15,15 +16,26 @@ static void verify_empty(const struct fplinux_font *font)
 }
 
 static const char *default_fixture;
+static const char *installed_path;
+static const char *installed_directory;
 
 FILE *__real_fopen(const char *path, const char *mode);
 
 /* Replace only the installed-file boundary with a case-owned PSF2 file. */
 FILE *__wrap_fopen(const char *path, const char *mode)
 {
+	char fixture_path[PATH_MAX];
+	int length;
+
 	if (default_fixture) {
-		assert(!strcmp(path, "/usr/share/fplinux/fonts/default.psf"));
+		assert(!strcmp(path, installed_path));
 		path = default_fixture;
+	} else if (installed_directory) {
+		assert(!strncmp(path, "/usr/share/fplinux/fonts/", 25));
+		length = snprintf(fixture_path, sizeof(fixture_path), "%s/%s",
+				  installed_directory, path + 25);
+		assert(length > 0 && (size_t)length < sizeof(fixture_path));
+		path = fixture_path;
 	}
 	return __real_fopen(path, mode);
 }
@@ -73,8 +85,14 @@ int main(int argc, char **argv)
 	int index;
 
 	assert(argc >= 2);
-	if (!strcmp(argv[1], "--default")) {
+	if (!strcmp(argv[1], "--installed")) {
 		assert(argc == 4);
+		installed_directory = argv[3];
+		return inspect_default(argv[2], NULL);
+	}
+	if (!strcmp(argv[1], "--default")) {
+		assert(argc == 5);
+		installed_path = argv[4];
 		return inspect_default(argv[2], argv[3]);
 	}
 	fplinux_font_close(&font);

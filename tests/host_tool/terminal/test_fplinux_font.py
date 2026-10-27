@@ -86,13 +86,21 @@ class FontTests:
             )
             return result.stdout
 
-    def inspect_default(self, executable: Path, payload: bytes, display_width: int) -> str:
-        """Redirect only the installed default file to a controlled real PSF2 payload."""
+    def inspect_default(
+        self, executable: Path, payload: bytes, display_width: int, installed_path: str
+    ) -> str:
+        """Redirect the display's installed font path to a controlled real PSF2 payload."""
         with tempfile.TemporaryDirectory() as directory:
             font = Path(directory) / "font.psf"
             font.write_bytes(payload)
             result = run_process(
-                [str(executable), "--default", str(display_width), str(font)],
+                [
+                    str(executable),
+                    "--default",
+                    str(display_width),
+                    str(font),
+                    installed_path,
+                ],
                 name="load installed default font for a display width",
                 timeout=10,
                 check=True,
@@ -100,16 +108,18 @@ class FontTests:
             return result.stdout
 
     @pytest.mark.parametrize(
-        ("width", "small_expected", "large_expected"),
+        ("width", "installed_path", "small_expected", "large_expected"),
         [
             pytest.param(
                 199,
+                "/usr/share/fplinux/fonts/ter-u12n.psf",
                 "6 12\n",
                 "default font is 8x16; 199-pixel display requires 6x12\n",
                 id="small-boundary-199",
             ),
             pytest.param(
                 200,
+                "/usr/share/fplinux/fonts/ter-u16n.psf",
                 "default font is 6x12; 200-pixel display requires 8x16\n",
                 "8 16\n",
                 id="large-boundary-200",
@@ -117,25 +127,51 @@ class FontTests:
         ],
     )
     def test_default_font_metrics_match_the_actual_display_width(
-        self, font_executable: Path, width: int, small_expected: str, large_expected: str
+        self,
+        font_executable: Path,
+        width: int,
+        installed_path: str,
+        small_expected: str,
+        large_expected: str,
     ) -> None:
         """The installed payload must be 6x12 below 200 pixels wide and 8x16 otherwise."""
         small = psf2((b"\x80" * 12,), (b"A",), 6, 12)
         large = psf2((b"\x80" * 16,), (b"A",), 8, 16)
-        assert self.inspect_default(font_executable, small, width) == small_expected
-        assert self.inspect_default(font_executable, large, width) == large_expected
+        assert (
+            self.inspect_default(font_executable, small, width, installed_path) == small_expected
+        )
+        assert (
+            self.inspect_default(font_executable, large, width, installed_path) == large_expected
+        )
 
     def test_default_font_rejects_a_wrong_height_or_unreadable_payload(
         self, font_executable: Path
     ) -> None:
         """Matching width alone is insufficient, and malformed files report the default path."""
         wrong_height = psf2((b"\x80" * 16,), (b"A",), 6, 16)
-        assert (self.inspect_default(font_executable, wrong_height, 128)) == (
-            "default font is 6x16; 128-pixel display requires 6x12\n"
-        )
-        assert (self.inspect_default(font_executable, b"not a PSF font", 240)) == (
-            "cannot load font /usr/share/fplinux/fonts/default.psf\n"
-        )
+        assert self.inspect_default(
+            font_executable, wrong_height, 128, "/usr/share/fplinux/fonts/ter-u12n.psf"
+        ) == ("default font is 6x16; 128-pixel display requires 6x12\n")
+        assert self.inspect_default(
+            font_executable, b"not a PSF font", 240, "/usr/share/fplinux/fonts/ter-u16n.psf"
+        ) == ("cannot load font /usr/share/fplinux/fonts/ter-u16n.psf\n")
+
+    def test_phone_and_guest_load_their_font_when_both_sizes_are_installed(
+        self, font_executable: Path, tmp_path: Path
+    ) -> None:
+        """A small phone's font and the fixed 240-pixel guest font coexist without an alias."""
+        small = tmp_path / "ter-u12n.psf"
+        large = tmp_path / "ter-u16n.psf"
+        small.write_bytes(psf2((b"\x80" * 12,), (b"A",), 6, 12))
+        large.write_bytes(psf2((b"\x80" * 16,), (b"A",), 8, 16))
+        for width, expected in ((128, "6 12\n"), (240, "8 16\n")):
+            result = run_process(
+                [str(font_executable), "--installed", str(width), str(tmp_path)],
+                name="load coexisting phone and guest fonts",
+                timeout=10,
+                check=True,
+            )
+            assert result.stdout == expected
 
     def test_unicode_aliases_sequences_and_replacement_keep_bitmap_rows(
         self, font_executable: Path
