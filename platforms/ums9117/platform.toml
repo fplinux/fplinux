@@ -31,6 +31,7 @@ packages = [
   "fplinux-brightness-ui",
   "fplinux-charge",
   "fplinux-ffmpeg",
+  "fplinux-mre",
   "fplinux-ncurses-curses",
   "fplinux-phoneme",
   "fplinux-sbc",

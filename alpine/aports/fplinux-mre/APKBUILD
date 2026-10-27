@@ -1,0 +1,180 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-mre
+pkgver=1
+pkgrel=0
+pkgdesc="MRE runtime for native ARM VXP applications"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="GPL-2.0-only AND 0BSD AND MIT AND Zlib AND libpng-2.0 AND IJG AND BSD-3-Clause"
+depends="fplinux-ui fplinux-font-terminus-8x16 libcurl"
+makedepends_build="clang22 lld22 pkgconf cmake samurai gettext"
+makedepends_host="musl-dev musl-libintl linux-headers gcc zlib-dev zlib-static libpng-dev libpng-static curl-dev openssl-dev fplinux-ui-dev"
+options="!check"
+source="
+	@source:mre_gif@
+	@source:mre_gif_license@
+	@source:mre_png_license@
+	@source:aport_libjpeg_turbo_3_2_0_tar_gz@
+	subblock-length.patch
+	fplinux-mre.c
+	runtime-paths.c
+	runtime-paths.h
+	text-codec.c
+	text-codec.h
+	vfs-broker.c
+	vfs-broker.h
+	http-broker.c
+	http-broker.h
+	mre-http.h
+	mre-ipc.h
+	org.fplinux.mre.desktop
+	ru.po
+	fplinux-font.c
+	fplinux-font.h
+	fplinux-utf8.c
+	fplinux-utf8.h
+	fplinux-cli.c
+	fplinux-cli.h
+	fplinux-keypad.h
+	fplinux-multitap.h
+	fplinux-language.h
+	LICENSE
+	0BSD.txt
+"
+builddir="$srcdir"
+
+prepare() {
+	# abuild links loose downloads into srcdir. Patch an owned regular copy,
+	# keeping the checksum-verified cache member unchanged.
+	cp -L "$srcdir/gif.h" "$srcdir/gif.h.prepared"
+	mv -f "$srcdir/gif.h.prepared" "$srcdir/gif.h"
+	default_prepare
+	# The UI and the engine use project headers outside the public UI ABI.
+	install -Dm644 fplinux-font.h include/fplinux/fplinux-font.h
+	install -Dm644 fplinux-keypad.h include/fplinux/fplinux-keypad.h
+	install -Dm644 fplinux-multitap.h include/fplinux/fplinux-multitap.h
+	install -Dm644 fplinux-language.h include/fplinux/fplinux-language.h
+}
+
+build() {
+	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
+	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		-I"$srcdir/include" -I"$startdir" $(pkg-config --cflags fplinux-ui libcurl) \
+		fplinux-mre.c runtime-paths.c text-codec.c vfs-broker.c http-broker.c fplinux-cli.c \
+		$(pkg-config --libs fplinux-ui libcurl libcrypto) $LDFLAGS \
+		-o fplinux-mre
+	msgfmt --check --output-file=ru.mo ru.po
+
+	# ARM SIMD dispatch can open /proc/cpuinfo inside the sandboxed engine.
+	# Build a separate portable JPEG library from the pinned upstream source.
+	: "${CC:?missing target CC}" \
+		"${CHOST:?missing target CHOST}" "${CBUILDROOT:?missing target sysroot}"
+	local jpeg_ar
+	jpeg_ar="$(command -v "$CHOST-ar")"
+	cmake -S "$srcdir/libjpeg-turbo-3.2.0" -B jpeg-build -G Ninja \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=armv7 \
+		-DCMAKE_C_COMPILER="$CC" -DCMAKE_ASM_COMPILER="$CC" \
+		-DCMAKE_C_COMPILER_TARGET="$CHOST" -DCMAKE_ASM_COMPILER_TARGET="$CHOST" \
+		-DCMAKE_C_FLAGS="$CPPFLAGS $CFLAGS -marm" \
+		-DCMAKE_AR="$jpeg_ar" -DCMAKE_SYSROOT="$CBUILDROOT" \
+		-DCMAKE_FIND_ROOT_PATH="$CBUILDROOT" \
+		-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+		-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+		-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+		-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY \
+		-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY \
+		-DENABLE_SHARED=OFF -DENABLE_STATIC=ON -DWITH_SIMD=OFF \
+		-DWITH_JPEG8=OFF -DWITH_JPEG7=OFF \
+		-DWITH_TURBOJPEG=OFF -DWITH_TOOLS=OFF -DWITH_TESTS=OFF
+	cmake --build jpeg-build --target jpeg-static --parallel "${JOBS:-1}"
+
+	mkdir -p engine-objects
+	local unit
+	for unit in engine/engine ads/ads_image memory/mre-memory gif/resize-image text-codec; do
+		"$CC" $CPPFLAGS $CFLAGS -marm -std=c11 -Wall -Wextra -Werror \
+			-I"$srcdir/include" -I"$srcdir" -I"$startdir" \
+			-c "$startdir/$unit.c" -o "engine-objects/${unit##*/}.o"
+	done
+	"$CC" $CPPFLAGS $CFLAGS -marm -std=c11 -Wall -Wextra -Werror \
+		-I"$srcdir/libjpeg-turbo-3.2.0/src" -Ijpeg-build \
+		$(pkg-config --cflags libpng) \
+		-c "$startdir/image/image-decode.c" -o engine-objects/image-decode.o
+	# The unchanged upstream header contains unused static helper functions.
+	# This suppression applies only to the decoder translation unit.
+	"$CC" $CPPFLAGS $CFLAGS -marm -std=c11 -Wall -Wextra -Werror \
+		-Wno-unused-function -I"$srcdir" \
+		-c "$startdir/gif/gif-image.c" -o engine-objects/gif-image.o
+	"$CC" $CPPFLAGS $CFLAGS -marm -std=c11 -Wall -Wextra -Werror \
+		-I"$srcdir" -c fplinux-font.c -o engine-objects/fplinux-font.o
+	"$CC" $CPPFLAGS $CFLAGS -marm -std=c11 -Wall -Wextra -Werror \
+		-I"$srcdir" -c fplinux-utf8.c -o engine-objects/fplinux-utf8.o
+	for unit in engine/guest_call engine/ads-host ads/ads_call; do
+		"$CC" $CPPFLAGS $CFLAGS -marm -Wa,-I"$startdir/ads" \
+			-c "$startdir/$unit.S" -o "engine-objects/${unit##*/}.o"
+	done
+	"$CC" $CFLAGS -marm -static \
+		engine-objects/engine.o \
+		engine-objects/text-codec.o \
+		engine-objects/ads_image.o engine-objects/fplinux-font.o \
+		engine-objects/fplinux-utf8.o \
+		engine-objects/mre-memory.o engine-objects/gif-image.o \
+		engine-objects/resize-image.o engine-objects/image-decode.o \
+		engine-objects/guest_call.o engine-objects/ads-host.o \
+		engine-objects/ads_call.o jpeg-build/libjpeg.a \
+		"$CBUILDROOT/usr/lib/libpng.a" "$CBUILDROOT/usr/lib/libz.a" -lm \
+		$LDFLAGS -o mre-engine
+}
+
+package() {
+	install -Dm755 "$builddir/fplinux-mre" "$pkgdir/usr/bin/fplinux-mre"
+	install -Dm755 "$builddir/mre-engine" \
+		"$pkgdir/usr/libexec/fplinux/mre-engine"
+	install -Dm644 "$srcdir/org.fplinux.mre.desktop" \
+		"$pkgdir/usr/share/applications/org.fplinux.mre.desktop"
+	install -Dm644 "$builddir/ru.mo" \
+		"$pkgdir/usr/share/locale/ru/LC_MESSAGES/org.fplinux.mre.mo"
+	install -Dm644 "$srcdir/LICENSE" \
+		"$pkgdir/usr/share/licenses/$pkgname/GPL-2.0-only.txt"
+	install -Dm644 "$srcdir/0BSD.txt" \
+		"$pkgdir/usr/share/licenses/$pkgname/0BSD.txt"
+	install -Dm644 "$srcdir/TurboStitchGIF-LICENSE.txt" \
+		"$pkgdir/usr/share/licenses/$pkgname/TurboStitchGIF-MIT.txt"
+	install -Dm644 "$startdir/gif/LICENSE-adapter" \
+		"$pkgdir/usr/share/licenses/$pkgname/GIF-adapter-0BSD.txt"
+	install -Dm644 "$srcdir/libpng-LICENSE.txt" \
+		"$pkgdir/usr/share/licenses/$pkgname/libpng-LICENSE.txt"
+	install -Dm644 "$srcdir/libjpeg-turbo-3.2.0/LICENSE.md" \
+		"$pkgdir/usr/share/licenses/$pkgname/libjpeg-turbo-LICENSE.md"
+	install -Dm644 "$srcdir/libjpeg-turbo-3.2.0/README.ijg" \
+		"$pkgdir/usr/share/licenses/$pkgname/README.ijg"
+}
+
+sha512sums="
+f199f96b30558ca3fa5b5b218d224519c74acf507a967d3ad45a2ac4195d090cb5edfd0d2184ed5f514df935b7accee8a28f71b86e59017ecd26347a0ef796c7  subblock-length.patch
+05667d67241704f2f39e5a5a48cf933b4a4d4b63d624e48567c5fe361375bef4016dc23ff94631e9e746989581af63b37f578d8f668da6481ef3e813193db2c8  fplinux-mre.c
+e99d763df51f4a2511efd4843c112788109b0fca7327315ccab42a33ca2a09d68bed2e66b53be3a75827991c80c6cf611b0e9db9f1f70e5d243644faf20ccee3  runtime-paths.c
+eb8bca600ed03a7d6835284ca0855b8b8270f80ee6c362a5f972321b2c8bf5baa8f134557c9a026a1c6e3d85f965a73acf5dc9c679342c797f29965afe22c002  runtime-paths.h
+8aaf5bca33329d275f83e0dc119089c30fc886382efac18c857006412b57cb25db38d8a9682afce6c5c5adcaad83bc0b8a42cb3bd71e493a1722b254b0184a76  text-codec.c
+9164e5eb748e6b4f2e419514ba97f0ff665a3d24c52fbebbf98847d38618af831bf9073633507dd2dadc52f29472ab5a05d79cda03d91df0153827ea0f6bf510  text-codec.h
+8c274b9f7bc52caf5b1ba83d338af6640c96f217de2a49f4b4e7003cc902946b46b6d97e8be03b11ff6e3eedbf4a7d1918e42536ba441a3bb8980996c45115c0  vfs-broker.c
+0ab30311abbc542a02635cddaaa5441cb15b7803a80ebf6d67225281cf9de1a0314023896d67aa946198ae9e50a256cb966a23421125745f04bfdbc4296ed820  vfs-broker.h
+07c06e46ef9a7a245ee86f27ba7c1aa412115caf08f366ce1bf2d6a29a0814bd58a0eba5c313862ab1e52dc11dbdc700a219ebb17a91c49383c598465744e8c6  http-broker.c
+74848dd43cee256504ff0bd0c1b74a6cdd18672fe5ef489c0845f4f09b60240f1b2ca174ad4a9c8238d284d6dc22a24e6ef47b35e2622c573582d88dcf9842cd  http-broker.h
+3bf8fae90d15989ff2602d13665bf91d57540964deaaf5de965e5d4cd4adb1b28a06fef16e2af2a1ac7bc5dc901f84eaa9889a3304f55cd25ced8f9dbe0432e9  mre-http.h
+9af30ad09a86654d35ed0f032c2b56437f5fbb039161c6a00c4b3d756cc9e0850eed2c85cbaa6c163ea8942c05ba396d7633d96ac74302f4d63c932700721f47  mre-ipc.h
+e153754b94653432a1e4526d9d203de08318d3f6341d680c66505848fae231ce3b8ae987d872538192172686fb0a08d3f8ad63d0dc67cee3a13bb90794c2aafb  org.fplinux.mre.desktop
+bb6927bc8d21a243f149827c7ec391fef7fe22ed14bc396739e5906b7b27a1893468d054b3616527b749eb3866191d882859d2545b1e67e6bbc43ce8d759fe41  ru.po
+ea1b7d5a48c7c0f6a06693e843620cc87a0553e0a1ea70604d4162bec7b44384e53d6eb946310f58a51fee453e4c3978dfd862cf22370bfd8ff5e87de807bf09  fplinux-font.c
+62ed7c5f099fdbc896254fe700e0722e1f1894ca494f4cec368e77866f9ae59f58b3bef727fffd8cff1d6ad66c6956743a4a052efb394c73b0b47f79f8510be7  fplinux-font.h
+0ded6f822b59d68de21ce64d03e892f27e2f190366ff39f154b88a73b0c7c3627c2787ddf37817ad85cc8206a20243b3f3c13b039d3d06955392a6b5a70e1bcd  fplinux-utf8.c
+8143f656608c63e42016da2003174d6fb2ac043daaad07e63e006bf3dc76544e76e820ae52a9c50f5559d58757c44aeded2b1cd4b01b4665938a7e88b4bc1d43  fplinux-utf8.h
+60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
+9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
+0a6d41b98223953b0b890be3041fba31e7878e6752094ed439b1e1e7e9240b2c7bf175ae671d05485ee25fa9ae74e45ddc63e9592768bd5d19e6e4ae6765a978  fplinux-keypad.h
+0cccc5788f6a878ae1d48ae3af22fd0902e63e7fa7b06e7f00fb815aa51bbbaff88ba0b92bba917fd868dfdf8436e6977827231decb416d7cd15115f7ad845d4  fplinux-multitap.h
+e3e550c2f07726b0f20d49f30300e88c862b3cac031c29b4a89c282719634fea22a5cc6a491c081d95c6381c05cbae6a50b09a579e0d219cf2fab9f29ff63898  fplinux-language.h
+260c02ff0a3e04ff0c2a95a936494b6a114a0a22121557059591d44af5fab5644ab8484be61eb33c12a6c9eef2170a108d51e2972adaef942568d94ae0d4ec83  LICENSE
+92021662bd640a211de47c97c9811f654924b849f4dd412e12eacac42cf1409014703e4182539c03eb443801f8428607ab4e39d02d793149f47237d2373e0c54  0BSD.txt
+"

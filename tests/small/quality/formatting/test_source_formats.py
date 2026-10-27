@@ -26,6 +26,9 @@ class SourceFormatClassificationTests:
             "target.toml": "name='demo'\n",
             "driver.c": "int value;\n",
             "driver.h": "int value;\n",
+            "alpine/aports/fplinux-mre/engine/native-vfs.inc": "static int value;\n",
+            "alpine/aports/fplinux-mre/ads/ads_api.inc": ".macro WRAPPER\n.endm\n",
+            "unknown.inc": "unknown language\n",
             "script.sh": "#!/bin/sh\necho ok\n",
             "script.sh.in": "#!/bin/sh\nprintf '%s\\n' '@NAME@'\n",
             "service.initd": "#!/sbin/openrc-run\n",
@@ -44,6 +47,7 @@ class SourceFormatClassificationTests:
             "other.JSON": "{}\n",
         }
         for relative, text in contents.items():
+            (root / relative).parent.mkdir(parents=True, exist_ok=True)
             (root / relative).write_text(text, encoding="utf-8")
 
         formats = classify_source_formats(
@@ -57,11 +61,21 @@ class SourceFormatClassificationTests:
         assert (formats.toml) == (("target.toml", "target.toml.in"))
         assert (formats.posix_shell) == (("script.sh", "script.sh.in", "service.initd"))
         assert (formats.bash) == (("helper", "terminal.bashrc"))
-        assert (formats.c) == (("driver.c", "driver.h"))
+        assert formats.c == (
+            "alpine/aports/fplinux-mre/engine/native-vfs.inc",
+            "driver.c",
+            "driver.h",
+        )
         assert ("package-lock.json") not in (formats.supported())
         assert (formats.yaml) == (("binding.yaml",))
         assert (formats.devicetree) == (("phone.dts.in",))
-        assert (formats.text) == ((".editorconfig", "Kconfig.in", "Makefile.in"))
+        assert formats.text == (
+            ".editorconfig",
+            "Kconfig.in",
+            "Makefile.in",
+            "alpine/aports/fplinux-mre/ads/ads_api.inc",
+        )
+        assert "unknown.inc" not in formats.supported()
         assert ("notes.txt") not in (formats.supported())
         assert ("other.conf") not in (formats.supported())
         assert ("other.mjs") not in (formats.supported())

@@ -56,6 +56,7 @@ _LVGL_APORTS = frozenset(
         "fplinux-example-apidemo",
         "fplinux-files",
         "fplinux-launcher",
+        "fplinux-mre",
         "fplinux-phoneme",
         "fplinux-settings",
         "fplinux-snake",

@@ -74,6 +74,12 @@ def source_format_kind(relative: str) -> str | None:  # noqa: PLR0911 -- distinc
         return "yaml"
     if suffix in {".c", ".h"}:
         return "c"
+    if suffix == ".inc":
+        # Included C bodies and assembler macros need different formatters.
+        if path.parent == PurePosixPath("alpine/aports/fplinux-mre/engine"):
+            return "c"
+        if path.parent == PurePosixPath("alpine/aports/fplinux-mre/ads"):
+            return "text"
     if suffix in {".dts", ".dtsi"}:
         return "devicetree"
     if is_javascript_source(relative):

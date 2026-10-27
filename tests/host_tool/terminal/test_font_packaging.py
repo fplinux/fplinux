@@ -23,25 +23,25 @@ class FontSplitTests:
     """A child payload keeps its selected font and license outside the source directory."""
 
     @pytest.mark.parametrize(
-        ("target", "expected"),
+        ("target", "expected", "optional_font"),
         [
-            ("inoi-240-modern-4g", "fplinux-font-terminus-6x12"),
-            ("inoi-244-modern-4g", "fplinux-font-terminus-8x16"),
-            ("nokia-ta1618", "fplinux-font-terminus-8x16"),
+            ("inoi-240-modern-4g", "fplinux-font-terminus-6x12", "fplinux-font-terminus-8x16"),
+            ("inoi-244-modern-4g", "fplinux-font-terminus-8x16", None),
+            ("nokia-ta1618", "fplinux-font-terminus-8x16", None),
         ],
         ids=["inoi-240-modern-4g", "inoi-244-modern-4g", "nokia-ta1618"],
     )
-    def test_phone_package_selection_has_one_font_and_no_bundle_font(
-        self, target: str, expected: str
+    def test_phone_package_selection_keeps_guest_font_optional_when_not_preinstalled(
+        self, target: str, expected: str, optional_font: str | None
     ) -> None:
-        """Phone package selections contain one rootfs font and no bundled font."""
+        """Small phones retain their 6x12 rootfs while MRE receives its required 8x16 APK."""
         font_packages = {"fplinux-font-terminus-6x12", "fplinux-font-terminus-8x16"}
         config = targets.load_target(target)
         platform = platforms.load_platform(config["platform"])
         selected = alpine_state.selected_packages(platform, config)
         bundle = alpine_state.bundle_packages(platform, config, selected)
         assert (set(selected) & font_packages) == ({expected})
-        assert (set(bundle) & font_packages) == (set())
+        assert (set(bundle) & font_packages) == ({optional_font} if optional_font else set())
 
     @pytest.mark.parametrize(
         ("cell", "filename"),

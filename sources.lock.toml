@@ -1216,6 +1216,27 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/mesa-dev-26.1.6-r
 algorithm = "sha256"
 checksum = "fcd8e3caf92e1945e3301e7e0c9b38655956d3bcb20add990f33d85aaff244a1"
 
+[mre_gif]
+version = "9107c33bc082fd79056ce200b1e9c9dc2786ea6f"
+name = "gif.h"
+url = "https://raw.githubusercontent.com/Ferki-git-creator/TurboStitchGIF-HeaderOnly-Fast-ZeroAllocation-PlatformIndependent-Embedded-C-GIF-Decoder/9107c33bc082fd79056ce200b1e9c9dc2786ea6f/gif.h"
+algorithm = "sha512"
+checksum = "029d0e365d5358b268e92d252231926de864cb803b927a926ef5ee53281990ae8fa8c0bf20e9f95cfac2c38143790644e1b08c1f3efa10af49253d84d7092a2e"
+
+[mre_gif_license]
+version = "9107c33bc082fd79056ce200b1e9c9dc2786ea6f"
+name = "TurboStitchGIF-LICENSE.txt"
+url = "https://raw.githubusercontent.com/Ferki-git-creator/TurboStitchGIF-HeaderOnly-Fast-ZeroAllocation-PlatformIndependent-Embedded-C-GIF-Decoder/9107c33bc082fd79056ce200b1e9c9dc2786ea6f/LICENSE"
+algorithm = "sha512"
+checksum = "d95f8522955fc5ece6289967a7e47b9e7aa09812281a948d41a4bb85f75283012350852ba9e98fa3db4c676052e852f81d80cc506a42a0f25f20d61d037cd587"
+
+[mre_png_license]
+version = "1.6.59"
+name = "libpng-LICENSE.txt"
+url = "https://raw.githubusercontent.com/pnggroup/libpng/v1.6.59/LICENSE"
+algorithm = "sha512"
+checksum = "6ad87a12db6a012ec2874a960604d85c42fa6210737318d771fc73543bea17de4dcf98212aa41e3d309387341e416418f8e4376fbd7aa658b7d2887de641f943"
+
 [node]
 version = "24.21.0"
 name = "node-v24.21.0-linux-x64-musl.tar.xz"

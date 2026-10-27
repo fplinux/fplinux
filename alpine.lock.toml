@@ -59,6 +59,19 @@ fplinux-microsd-root = [
   "partx-2.42.3-r1.apk",
   "sfdisk-2.42.3-r1.apk",
 ]
+fplinux-mre = [
+  "brotli-libs-1.2.1-r0.apk",
+  "c-ares-1.34.8-r0.apk",
+  "ca-certificates-bundle-20260909-r0.apk",
+  "libcrypto3-3.5.9-r0.apk",
+  "libcurl-8.22.0-r0.apk",
+  "libidn2-2.3.8-r0.apk",
+  "libpsl-0.21.5-r3.apk",
+  "libssl3-3.5.9-r0.apk",
+  "libunistring-1.4.2-r0.apk",
+  "nghttp2-libs-1.70.0-r0.apk",
+  "zstd-libs-1.5.7-r2.apk",
+]
 fplinux-ncurses = ["ncurses-terminfo-base-6.6_p20260516-r0.apk"]
 fplinux-session = ["json-c-0.18-r1.apk"]
 fplinux-uclient = ["ca-certificates-bundle-20260909-r0.apk"]
@@ -79,14 +92,23 @@ fplinux-wifi = [
 
 [sysroot]
 packages = [
+  "brotli-1.2.1-r0.apk",
+  "brotli-dev-1.2.1-r0.apk",
+  "c-ares-dev-1.34.8-r0.apk",
+  "libidn2-dev-2.3.8-r0.apk",
+  "libpsl-dev-0.21.5-r3.apk",
+  "libpsl-utils-0.21.5-r3.apk",
+  "nghttp2-dev-1.70.0-r0.apk",
+  "openssl-dev-3.5.9-r0.apk",
   "binutils-2.45.1-r1.apk",
-  "brotli-libs-1.2.0-r1.apk",
+  "brotli-libs-1.2.1-r0.apk",
   "bsd-compat-headers-0.7.2-r6.apk",
   "busybox-1.37.0-r31.apk",
   "busybox-binsh-1.37.0-r31.apk",
   "c-ares-1.34.8-r0.apk",
   "ca-certificates-bundle-20260909-r0.apk",
   "dbus-1.16.2-r2.apk",
+  "curl-dev-8.22.0-r0.apk",
   "dbus-dev-1.16.2-r2.apk",
   "dbus-libs-1.16.2-r2.apk",
   "e2fsprogs-libs-1.47.4-r0.apk",
@@ -131,6 +153,9 @@ packages = [
   "libncurses++-6.6_p20260516-r0.apk",
   "libncursesw-6.6_p20260516-r0.apk",
   "libpanelw-6.6_p20260516-r0.apk",
+  "libpng-1.6.59-r0.apk",
+  "libpng-dev-1.6.59-r0.apk",
+  "libpng-static-1.6.59-r0.apk",
   "libpcre2-16-10.49-r0.apk",
   "libpcre2-32-10.49-r0.apk",
   "libpsl-0.21.5-r3.apk",
@@ -185,9 +210,21 @@ bytes = 2805659
 
 [[package]]
 repository = "main"
-file = "brotli-libs-1.2.0-r1.apk"
-sha256 = "eb9af260fcb67dca8595dad7c76ff861725a0e95ee617cba1d9a701cd08b4572"
-bytes = 383502
+file = "brotli-1.2.1-r0.apk"
+sha256 = "3dd5f10c95814eebb8ad35bbd4cf3bd4c633741687b1479b3fb6c7470c8a7e45"
+bytes = 12059
+
+[[package]]
+repository = "main"
+file = "brotli-dev-1.2.1-r0.apk"
+sha256 = "e2de224d60610c4716781bb1793698a1abe8b91f7743a47f36ac5ac4f37f5a36"
+bytes = 14452
+
+[[package]]
+repository = "main"
+file = "brotli-libs-1.2.1-r0.apk"
+sha256 = "6fbd0db184ced5aee0d86a9da6dac6af5b56f6d1a4fa21d62d50b3cfc81ec7ae"
+bytes = 383535
 
 [[package]]
 repository = "main"
@@ -221,6 +258,12 @@ bytes = 88689
 
 [[package]]
 repository = "main"
+file = "c-ares-dev-1.34.8-r0.apk"
+sha256 = "1f2dbd1a877cfc2d3bc9c438406be8fba381f91bee9af286066e2d9719e654f1"
+bytes = 826462
+
+[[package]]
+repository = "main"
 file = "ca-certificates-bundle-20260909-r0.apk"
 sha256 = "a7940ce710d590e3f840aa9303a03d981d23f33cb11c2d9710d409a3f5a555a8"
 bytes = 108525
@@ -230,6 +273,12 @@ repository = "community"
 file = "cloud-utils-growpart-0.33-r1.apk"
 sha256 = "e3e284edbbe0e0ea8dab836ba3301cc7e10537e0e33340fcae487787a9fccad7"
 bytes = 11871
+
+[[package]]
+repository = "main"
+file = "curl-dev-8.22.0-r0.apk"
+sha256 = "3f91a8a9456bc1c0161b7497be497e7e7ee95dcdf7208a1c545d3337411101e4"
+bytes = 67288
 
 [[package]]
 repository = "main"
@@ -502,6 +551,12 @@ sha256 = "8dc90ddd918c88641fe07ead0412f4465a11aa1ca58e94a36bbecb29c4425c67"
 bytes = 100529
 
 [[package]]
+repository = "main"
+file = "libidn2-dev-2.3.8-r0.apk"
+sha256 = "9bfa09d64cf213d663cc538a844936db2737170c7d3dbdc677f81fcba1eb78de"
+bytes = 6102
+
+[[package]]
 repository = "community"
 file = "libinput-dev-1.31.3-r0.apk"
 sha256 = "d7b58b1d0bd68f78d3f8ff49f4fc7e0923c0d42494c8fc0842de6a817f08add3"
@@ -557,9 +612,39 @@ bytes = 234672
 
 [[package]]
 repository = "main"
+file = "libpng-1.6.59-r0.apk"
+sha256 = "25684c0d5d245cb33ce3a8fc238c967c94be58adcf7da3bdcaa6e2c2ddc23b7b"
+bytes = 81235
+
+[[package]]
+repository = "main"
+file = "libpng-dev-1.6.59-r0.apk"
+sha256 = "c0d98891702d0db468b0632892b068f270c617b8df1ab27d81e8422657c4ee26"
+bytes = 52480
+
+[[package]]
+repository = "main"
+file = "libpng-static-1.6.59-r0.apk"
+sha256 = "b26654cd2dfb1952f76634a9f7a5495e6b519e4a9f40ded39d07b6cbb68cf005"
+bytes = 101067
+
+[[package]]
+repository = "main"
 file = "libpsl-0.21.5-r3.apk"
 sha256 = "739212850992304e5504705852c192a094f97b11c59d499a4a21786f05e869b3"
 bytes = 53639
+
+[[package]]
+repository = "main"
+file = "libpsl-dev-0.21.5-r3.apk"
+sha256 = "f497f5f98b4794a4b371bba92ec3626f16df0f8ffa9d173f63b8146951e76e93"
+bytes = 4109
+
+[[package]]
+repository = "main"
+file = "libpsl-utils-0.21.5-r3.apk"
+sha256 = "0cfc2fe2a6271c30a27a0369b38906c9b8923522a75b5897f04162612ac24e98"
+bytes = 13206
 
 [[package]]
 repository = "main"
@@ -677,6 +762,12 @@ bytes = 22170
 
 [[package]]
 repository = "main"
+file = "nghttp2-dev-1.70.0-r0.apk"
+sha256 = "a3bb91c6dab755b1e94e02e6509e0a2ea60f70b905a4f6a8250338f76a796f23"
+bytes = 42783
+
+[[package]]
+repository = "main"
 file = "nghttp2-libs-1.70.0-r0.apk"
 sha256 = "d162d69667b1334ee62b7794b6f1ccd08c79361bb745105cc5a52472eeffc2bc"
 bytes = 56920
@@ -686,6 +777,12 @@ repository = "main"
 file = "openssh-sftp-server-10.3_p1-r1.apk"
 sha256 = "ece9cdb6d116665a7a6e8a2c29163b4f20099dce62cbb38853b1f13cd7b9f2e2"
 bytes = 56329
+
+[[package]]
+repository = "main"
+file = "openssl-dev-3.5.9-r0.apk"
+sha256 = "fab70bde31f64e37aa3759452e44873a54700ef1ed634ebfaccd082acd4e3c3c"
+bytes = 366016
 
 [[package]]
 repository = "main"

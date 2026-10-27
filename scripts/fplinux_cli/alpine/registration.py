@@ -162,6 +162,16 @@ SHARED_APORT_SOURCES = {
         "LICENSE",
     ),
     "fplinux-lvgl": ("LICENSE",),
+    "fplinux-mre": (
+        *CLI_SOURCES,
+        *UTF8_SOURCES,
+        *FONT_SOURCES,
+        *KEYPAD_CODE_SOURCES,
+        "include/fplinux/fplinux-multitap.h",
+        "include/fplinux/fplinux-language.h",
+        "LICENSE",
+        "LICENSES/0BSD.txt",
+    ),
     "fplinux-mesa-gbm": (
         "alpine/aports/fplinux-mesa/neon-clang.patch",
         "alpine/aports/fplinux-mesa/NOTICE",
@@ -343,6 +353,7 @@ LOCAL_BUILD_DEPENDENCIES = {
     "fplinux-launcher": ("fplinux-ui",),
     "fplinux-mesa": ("fplinux-expat-dev", "fplinux-libdrm", "fplinux-mesa-gbm"),
     "fplinux-mesa-gbm": ("fplinux-libdrm",),
+    "fplinux-mre": ("fplinux-ui", "fplinux-font-terminus"),
     "fplinux-libweston": (
         "fplinux-wayland",
         "fplinux-libdrm",

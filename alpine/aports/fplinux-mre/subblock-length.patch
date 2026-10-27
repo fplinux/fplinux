@@ -1,0 +1,37 @@
+--- a/gif.h
++++ b/gif.h
+@@ -1269,16 +1269,7 @@
+       goto out;
+     }
+ 
+-    // *guard* ... if we accidentally hit a GIF block marker, stop stream
+-    if (sz == GIF_TRAILER || sz == GIF_IMAGE_SEP || sz == GIF_EXT_INTRO) {
+-      if (ctx->pos != 0u) {
+-        ctx->pos -= 1u;
+-      }
+-      ctx->sub_ended = 1u;
+-      rc = 0;
+-      goto out;
+-    }
+-
++    // A sub-block length may be any value 1..255, including marker bytes.
+     if (sz == 0u) {
+       ctx->sub_ended = 1u;
+       rc = 0;
+@@ -1321,15 +1312,7 @@
+     goto out;
+   }
+ 
+-  // *guard* ... avoid eating next block when terminator already consumed
+-  if (ctx->pos < ctx->size) {
+-    gif_u8 nb;
+-    nb = ctx->data[ctx->pos];
+-    if (nb == GIF_TRAILER || nb == GIF_IMAGE_SEP || nb == GIF_EXT_INTRO) {
+-      goto out;
+-    }
+-  }
+-
++  // sub_ended records the zero terminator; a nonzero byte is a block length.
+   while (rc == GIF_SUCCESS && ctx->sub_ended == 0u) {
+     int r;
+     r = gif_lzw_stream_read_byte(ctx, &b);

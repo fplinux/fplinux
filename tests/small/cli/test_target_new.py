@@ -14,6 +14,7 @@ from unittest import mock
 
 import pytest
 from fplinux_cli import common
+from fplinux_cli.alpine import selection
 from fplinux_cli.cli import target_new
 from fplinux_cli.manifests import paths, platforms, targets
 from fplinux_cli.packaging import archive as package
@@ -162,12 +163,13 @@ class NewTargetTests:
         assert "A configuration file alone does not mean the phone has been tested." in prose
 
     @pytest.mark.usefixtures("target_checkout")
-    def test_new_target_release_carries_every_declared_bundle_apk(self) -> None:
-        """The generated release includes exactly the platform and target bundle packages."""
+    def test_new_target_release_carries_declared_apks_and_required_runtime_font(self) -> None:
+        """The release adds MRE's guest font while the phone's 6x12 font stays in rootfs."""
         create_target("hammer-horizon-lte")
         config = targets.load_target("hammer-horizon-lte")
         platform = platforms.load_platform(config["platform"])
         release = package.load_release_manifest("hammer-horizon-lte", config)
+        rootfs_packages = selection.selected_packages(platform, config, root=common.ROOT)
 
         declared_apks = {
             f"apks/{name}.apk"
@@ -178,7 +180,9 @@ class NewTargetTests:
             for relative in release["bundle_files"]
             if relative.startswith("apks/") and relative.endswith(".apk")
         }
-        assert (release_apks) == (declared_apks)
+        assert release_apks == declared_apks | {"apks/fplinux-font-terminus-8x16.apk"}
+        assert "fplinux-font-terminus-6x12" in rootfs_packages
+        assert "apks/fplinux-font-terminus-6x12.apk" not in release_apks
 
     @pytest.mark.usefixtures("target_checkout")
     @pytest.mark.parametrize(

@@ -1,0 +1,105 @@
+# Russian translation of fplinux-mre.
+# SPDX-License-Identifier: 0BSD
+msgid ""
+msgstr ""
+"Project-Id-Version: fplinux-mre\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "Application error"
+msgstr "Ошибка приложения"
+
+msgid "Not enough memory."
+msgstr "Недостаточно памяти."
+
+msgid "Opening…"
+msgstr "Открываю…"
+
+msgid "Open a VXP file from Files."
+msgstr "Откройте файл VXP через «Файлы»."
+
+msgid "The application did not respond."
+msgstr "Приложение не ответило."
+
+msgid "Cannot display the application's screen."
+msgstr "Не могу показать экран приложения."
+
+msgid "Close"
+msgstr "Закрыть"
+
+msgid "Cancel"
+msgstr "Отмена"
+
+msgid "Clear"
+msgstr "Удалить"
+
+msgid "The text contains unsupported characters or is too long."
+msgstr "Текст содержит неподдерживаемые символы или слишком длинный."
+
+msgid "Done"
+msgstr "Готово"
+
+msgid "Cancel input"
+msgstr "Отменить ввод"
+
+msgid "Select"
+msgstr "Выбрать"
+
+msgid "Cannot read the folder."
+msgstr "Не могу прочитать папку."
+
+msgid "No matching files."
+msgstr "Подходящих файлов нет."
+
+msgid "Parent folder"
+msgstr "На уровень выше"
+
+msgid "VXP folder"
+msgstr "Файлы рядом с VXP"
+
+msgid "Application files"
+msgstr "Файлы приложения"
+
+msgid "Invalid application response."
+msgstr "Некорректный ответ приложения."
+
+msgid "Cannot read the application's response."
+msgstr "Не могу прочитать ответ приложения."
+
+msgid "The application ended with an incomplete response."
+msgstr "Приложение завершилось с неполным ответом."
+
+msgid "The application's response is too long."
+msgstr "Ответ приложения слишком длинный."
+
+msgid "Cannot open or start this VXP."
+msgstr "Не могу открыть или запустить этот VXP."
+
+msgid "Close application?"
+msgstr "Закрыть приложение?"
+
+msgid "The current program will close. Open the new VXP?"
+msgstr "Текущая программа будет закрыта. Открыть новый VXP?"
+
+msgid "Close the current program?"
+msgstr "Закрыть текущую программу?"
+
+msgid "Checking VXP…"
+msgstr "Проверяю VXP…"
+
+msgid "The application closed its input channel."
+msgstr "Приложение закрыло канал ввода."
+
+msgid "The VXP ended without a frame."
+msgstr "VXP завершился без изображения."
+
+#, c-format
+msgid "The application stopped (signal %d)."
+msgstr "Приложение остановлено (сигнал %d)."
+
+#, c-format
+msgid "The application ended with an error (code %d)."
+msgstr "Приложение завершилось с ошибкой (код %d)."

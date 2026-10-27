@@ -73,6 +73,7 @@ apk_groups = [
     "clang22-analyzer=22.1.3-r2",
     "clang22-dev=22.1.3-r2",
     "clang22-extra-tools=22.1.3-r2",
+    "curl-dev=8.22.0-r0",
     "dtc=1.7.2-r1",
     "elfutils-dev=0.195-r0",
     "eudev-dev=3.2.14-r6",
@@ -416,6 +417,24 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
+key = "environment:apk:x86_64:brotli-1.2.0-r1.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/brotli-1.2.0-r1.apk"
+sha256 = "f84d068fb8bfd245a847f4cf6618106a84b6e8513a5b5803506f0fb9137c1873"
+bytes = 12842
+destination = "downloads/environment/apk/main/x86_64/brotli-1.2.0-r1.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
+key = "environment:apk:x86_64:brotli-dev-1.2.0-r1.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/brotli-dev-1.2.0-r1.apk"
+sha256 = "cf308f9562a6864a739f5eddedd8a21ea57bf9df6f7313d12089a294872a7180"
+bytes = 14490
+destination = "downloads/environment/apk/main/x86_64/brotli-dev-1.2.0-r1.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
 key = "environment:apk:x86_64:brotli-libs-1.2.0-r1.apk"
 url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/brotli-libs-1.2.0-r1.apk"
 sha256 = "f0823de7c6d45859aeb6a7facfc5cfbf2dadb83ad4f27c794cb6ecc74e578cee"
@@ -484,6 +503,15 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/c-ares-1.34.8-r0.
 sha256 = "123fdeadc5ec884b897787f98d865492bf70402697b251cd1f3591a00b8c9d73"
 bytes = 110689
 destination = "downloads/environment/apk/main/x86_64/c-ares-1.34.8-r0.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
+key = "environment:apk:x86_64:c-ares-dev-1.34.8-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/c-ares-dev-1.34.8-r0.apk"
+sha256 = "bfd852e49915db5029ab6160638c468aa34613abf9de38abfed549f9f23e2b4d"
+bytes = 1003498
+destination = "downloads/environment/apk/main/x86_64/c-ares-dev-1.34.8-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -628,6 +656,15 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/curl-8.22.0-r0.ap
 sha256 = "9262352e6341bb87e3047d1ca0b4051b2a9f4011409df25e4190e6be0334b860"
 bytes = 178668
 destination = "downloads/environment/apk/main/x86_64/curl-8.22.0-r0.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
+key = "environment:apk:x86_64:curl-dev-8.22.0-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/curl-dev-8.22.0-r0.apk"
+sha256 = "051c551fe7fb635a002c3529a021cc80d49af42803a36601f27a3cb036ed95b5"
+bytes = 67345
+destination = "downloads/environment/apk/main/x86_64/curl-dev-8.22.0-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -1352,6 +1389,15 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
+key = "environment:apk:x86_64:libidn2-dev-2.3.8-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libidn2-dev-2.3.8-r0.apk"
+sha256 = "37fc2c7f245df0464239d1a99b218abe2e5757552f641349d9fa1dc531c77f5e"
+bytes = 6118
+destination = "downloads/environment/apk/main/x86_64/libidn2-dev-2.3.8-r0.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
 key = "environment:apk:x86_64:libinput-dev-1.31.3-r0.apk"
 url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/libinput-dev-1.31.3-r0.apk"
 sha256 = "03e0a2c7f58b0d2223b610f1cc189741046454d6e5dbcc4f4c9fba38fa6c5f17"
@@ -1519,6 +1565,24 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libpsl-0.21.5-r3.
 sha256 = "ec665a344b6e887f00f0a47015cc732c3a281b69e84641dc8662ea234fde6cdb"
 bytes = 54692
 destination = "downloads/environment/apk/main/x86_64/libpsl-0.21.5-r3.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
+key = "environment:apk:x86_64:libpsl-dev-0.21.5-r3.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libpsl-dev-0.21.5-r3.apk"
+sha256 = "ed01191a16eddf755b3e7f1b3a96fab83f0600eaf6a44789c9398eac72d8557d"
+bytes = 4125
+destination = "downloads/environment/apk/main/x86_64/libpsl-dev-0.21.5-r3.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
+key = "environment:apk:x86_64:libpsl-utils-0.21.5-r3.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libpsl-utils-0.21.5-r3.apk"
+sha256 = "2bf00bbfb67e173187d8fd43f7114a8cb2244f6c7a83344977bd967cff8e8deb"
+bytes = 13137
+destination = "downloads/environment/apk/main/x86_64/libpsl-utils-0.21.5-r3.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -1996,6 +2060,15 @@ url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/community/x86_64/newlib-arm-n
 sha256 = "8e9c43dccb239daf0df91b559e5ee64f7d3095f402f815a9a6131d6af4c784cb"
 bytes = 20375255
 destination = "downloads/environment/apk/community/x86_64/newlib-arm-none-eabi-4.6.0.20260123-r0.apk"
+purpose = "environment-package"
+arch = "x86_64"
+
+[[input]]
+key = "environment:apk:x86_64:nghttp2-dev-1.70.0-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/nghttp2-dev-1.70.0-r0.apk"
+sha256 = "6cf749f5dd79f7d92311e095e0527b3bcc171f6793e9fd7e623ef497b0abc90f"
+bytes = 42795
+destination = "downloads/environment/apk/main/x86_64/nghttp2-dev-1.70.0-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 

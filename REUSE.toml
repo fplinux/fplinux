@@ -172,3 +172,24 @@ SPDX-FileCopyrightText = [
   "2026 FPLinux contributors",
 ]
 SPDX-License-Identifier = "GPL-2.0-only"
+
+[[annotations]]
+path = [
+  "alpine/aports/fplinux-mre/fplinux-mre.c",
+  "alpine/aports/fplinux-mre/mre-ipc.h",
+  "alpine/aports/fplinux-mre/engine/*",
+  "alpine/aports/fplinux-mre/ads/*",
+  "alpine/aports/fplinux-mre/memory/*",
+  "alpine/aports/fplinux-mre/gif/*.c",
+  "alpine/aports/fplinux-mre/gif/*.h",
+  "alpine/aports/fplinux-mre/gif/LICENSE-adapter",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 FPLinux contributors"
+SPDX-License-Identifier = "0BSD"
+
+[[annotations]]
+path = "alpine/aports/fplinux-mre/subblock-length.patch"
+precedence = "override"
+SPDX-FileCopyrightText = ["2025 Ferki", "2026 FPLinux contributors"]
+SPDX-License-Identifier = "MIT"

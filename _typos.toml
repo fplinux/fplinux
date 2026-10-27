@@ -56,9 +56,13 @@ parm = "parm"
 # This spelling is part of Linux's power_supply_desc interface.
 property_is_writeable = "property_is_writeable"
 secur32 = "secur32"
+# The spelling is part of the MRE guest ABI.
+vm_get_removeable_driver = "vm_get_removeable_driver"
 
 [default.extend-words]
 MIS = "MIS"
+# ELF relocation records with explicit addends.
+RELA = "RELA"
 THM = "THM"
 # XCB library and protocol names use this extension abbreviation.
 dbe = "dbe"

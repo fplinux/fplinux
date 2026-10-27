@@ -17,7 +17,7 @@ packages = [
 ]
 
 [bundle]
-packages = ["fplinux-phoneme"]
+packages = ["fplinux-mre", "fplinux-phoneme"]
 
 [linux]
 source_lock = "linux"

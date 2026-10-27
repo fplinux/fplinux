@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+NoDisplay=true
+Name=MRE
+Name[ru]=MRE
+Exec=/usr/bin/fplinux-mre
+Icon=org.fplinux.mre
+Categories=Game;
+X-FPLinux-Mode=integrated
+X-FPLinux-FileExtensions=vxp;
