@@ -1,0 +1,43 @@
+---
+title: Java and MRE applications
+description: Open JAR and VXP files from Files and understand where their data is kept.
+source:
+  - alpine/aports/fplinux-phoneme
+  - alpine/aports/fplinux-mre
+---
+
+Java and MRE support come as optional packages. Follow [Packages](/fplinux/guides/packages/) to install the package for your files, together with its required APKs from the same build. MRE also needs `fplinux-font-terminus-8x16.apk` when that font is not already installed on the phone.
+
+| Files | Package | Application |
+| --- | --- | --- |
+| Java MIDlet `.jar` | `fplinux-phoneme.apk` | phoneME |
+| MRE `.vxp` | `fplinux-mre.apk` | MRE |
+
+Open [Files](/fplinux/use/files/), choose **My files** or a connected memory card, and transfer your program to that folder. For uploads to My files, follow the [ownership step](/fplinux/use/connect/#files-for-graphical-applications) before opening it. Then select the program to start it. These runtimes do not add tiles to the application catalog. Keep any companion files beside the program when it expects them there.
+
+Use the [shared application controls](/fplinux/use/session/#home-and-applications) to return Home, resume a program from Tasks or close it. Closing a program opened from Files returns to its folder. Close programs using a memory card before [safely ejecting it](/fplinux/use/microsd/#remove-the-card-safely).
+
+## Java programs
+
+Open the JAR itself. When it contains several MIDlets, choose the one to run. Opening another JAR asks to close the current program; cancel to keep it running.
+
+**Java record stores are temporary.** They are removed when phoneME closes, including on a persistent system card. Returning Home keeps the current program and its record stores alive. Do not rely on Java programs to retain saved games or other records after closing them.
+
+## MRE programs
+
+MRE programs can use two drive names:
+
+| Drive | Location |
+| --- | --- |
+| `E:` | The folder containing the VXP and its companion files |
+| `C:` | Private files for that program in your home directory |
+
+`E:` can be on a memory card or in My files. `C:` follows the [home directory's lifetime](/fplinux/use/files/): it is lost at power-off in a RAM boot. Renaming or moving the VXP gives it a different private store; replacing the program at the same path retains that store.
+
+Opening another VXP asks before replacing the running program. Cancel keeps the current program and its pending input. MRE graphics use a 240×320 surface scaled to fit the phone's display.
+
+MRE currently ends a program after 15 minutes, or after it uses two minutes of CPU time. Save through the program's own controls before closing it; closing the runtime does not save unfinished work for the program.
+
+## Compatibility
+
+Support depends on the APIs each program uses. A JAR or VXP extension alone does not establish compatibility. A program that needs unsupported APIs can fail to open or stop while running. Neither runtime installs or modifies the phone's original firmware.
