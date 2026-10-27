@@ -42,6 +42,10 @@ msgstr "Играть"
 msgid "Resume"
 msgstr "Продолжить"
 
+msgctxt "short command"
+msgid "Resume"
+msgstr "Дальше"
+
 msgid "Restart"
 msgstr "Заново"
 
@@ -49,8 +53,16 @@ msgstr "Заново"
 msgid "Score %u"
 msgstr "Счёт %u"
 
-msgid "You won!"
-msgstr "Победа!"
+msgid "✓ You won!"
+msgstr "✓ Победа!"
+
+#, c-format
+msgid ""
+"Board complete!\n"
+"Score %u"
+msgstr ""
+"Поле заполнено!\n"
+"Счёт %u"
 
 msgid "Scores not saved"
 msgstr "Счёт не сохранён"

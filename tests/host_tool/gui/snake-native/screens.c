@@ -85,6 +85,13 @@ static bool has_label(const struct capture *capture, const char *text)
 	return strstr(capture->observed.labels, line) != NULL;
 }
 
+static bool has_action(const struct capture *capture, const char *action)
+{
+	return !strcmp(capture->centre, action) ||
+	       (capture->russian && !strcmp(action, "Продолжить") &&
+		!strcmp(capture->centre, "Дальше"));
+}
+
 static void wait_state(struct capture *capture, bool canvas, const char *action,
 		       const char *title)
 {
@@ -96,14 +103,13 @@ static void wait_state(struct capture *capture, bool canvas, const char *action,
 		if (capture->observed.frame &&
 		    capture->observed.canvas == canvas &&
 		    capture->observed.paused != canvas &&
-		    capture->kept_on == canvas &&
-		    !strcmp(capture->centre, action) &&
+		    capture->kept_on == canvas && has_action(capture, action) &&
 		    !strcmp(capture->right, back) &&
 		    (!title || has_label(capture, title)))
 			break;
 	} while (fplinux_ui_frame_now_ms() < deadline);
 	if (capture->observed.canvas != canvas ||
-	    strcmp(capture->centre, action) ||
+	    !has_action(capture, action) ||
 	    (title && !has_label(capture, title)))
 		fprintf(stderr, "Snake expected %s [%s], got [%s], labels:%s\n",
 			canvas ? "Canvas" : "Alert", action, capture->centre,
@@ -111,8 +117,7 @@ static void wait_state(struct capture *capture, bool canvas, const char *action,
 	assert(capture->observed.frame && capture->observed.canvas == canvas);
 	assert(capture->observed.paused != canvas &&
 	       capture->kept_on == canvas);
-	assert(!strcmp(capture->centre, action) &&
-	       !strcmp(capture->right, back));
+	assert(has_action(capture, action) && !strcmp(capture->right, back));
 	assert(!title || has_label(capture, title));
 	assert(capture->observed.canvases == 1 && capture->exits == 0);
 }
@@ -319,14 +324,14 @@ int main(int argc, char **argv)
 		assert(capture.observed.starts == 2 && !capture.observed.dead);
 		assert(send(capture.observer, "w", 1, MSG_NOSIGNAL) == 1);
 		wait_state(&capture, false, word(&capture, "Restart", "Заново"),
-			   word(&capture, "You won!", "Победа!"));
+			   word(&capture, "✓ You won!", "✓ Победа!"));
 		assert(capture.observed.won && !capture.observed.dead);
 		save_frame(&capture, "snake-win");
 		space_to(&capture, true);
 		assert(capture.observed.starts == 3 && !capture.observed.won);
 		assert(send(capture.observer, "w", 1, MSG_NOSIGNAL) == 1);
 		wait_state(&capture, false, word(&capture, "Restart", "Заново"),
-			   word(&capture, "You won!", "Победа!"));
+			   word(&capture, "✓ You won!", "✓ Победа!"));
 		back_closes(&capture);
 	}
 	close_and_reap(&capture);

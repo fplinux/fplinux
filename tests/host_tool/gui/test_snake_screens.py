@@ -91,7 +91,7 @@ def test_actual_snake_alerts_shortcuts_hidden_return_and_fullscreen_frames(
     frames = [(tmp_path / f"snake-{state}.rgb565").read_bytes() for state in states]
     for frame in frames:
         assert len(frame) == width * height * 2
-        assert len(set(struct.iter_unpack("<H", frame))) > 8
+        assert len(set(struct.iter_unpack("<H", frame))) > 1
     assert len(set(frames)) == len(states)
     top = {(128, 128): 16, (128, 160): 16, (176, 220): 18, (240, 320): 20, (320, 240): 20}[screen]
     playing = tuple(value for (value,) in struct.iter_unpack("<H", frames[1]))

@@ -2,6 +2,7 @@
 #include "snake.h"
 #include "fplinux-cli.h"
 
+#include <fplinux/fplinux-gettext.h>
 #include <fplinux/fplinux-ui.h>
 #include <fplinux/fplinux-ui-prefs.h>
 #include <fplinux/fplinux-ui-screen.h>
@@ -17,6 +18,7 @@
 /* About as many cells across every screen; the rows fill the height. */
 #define CELLS_ACROSS 20
 #define _(text) gettext(text)
+#define NC_(context, text) context "\004" text
 
 enum command {
 	COMMAND_PLAY,
@@ -153,6 +155,12 @@ static struct fplinux_ui_command play_command(const struct snake_app *app)
 		.id = COMMAND_PLAY,
 		.type = FPLINUX_UI_COMMAND_OK,
 		.label = play_label(app),
+		.short_label = app->snake.paused && app->played &&
+					       !app->snake.dead &&
+					       !app->snake.won ?
+				       fplinux_gettext_context(
+					       NC_("short command", "Resume")) :
+				       NULL,
 	};
 }
 
@@ -174,8 +182,9 @@ static void refresh(struct snake_app *app)
 	snprintf(message, sizeof(message), _("Best %u"), app->snake.best);
 	lv_label_set_text(app->best, message);
 	fplinux_ui_screen_add_command(app->canvas, &play);
-	fplinux_ui_softkey_bar_set(app->ui, app->softkey_bar, "", play.label,
-				   _("Back"));
+	fplinux_ui_softkey_bar_set(
+		app->ui, app->softkey_bar, "",
+		play.short_label ? play.short_label : play.label, _("Back"));
 	lv_obj_invalidate(app->board);
 	if (playing)
 		lv_timer_resume(app->timer);
@@ -255,8 +264,10 @@ static void show_pause(struct snake_app *app)
 	if (app->closing || !app->canvas || !app->snake.paused)
 		return;
 	if (app->snake.dead || app->snake.won) {
-		title = app->snake.dead ? _("Game over") : _("You won!");
-		snprintf(message, sizeof(message), _("Score %u"),
+		title = app->snake.dead ? _("Game over") : _("✓ You won!");
+		snprintf(message, sizeof(message),
+			 app->snake.won ? _("Board complete!\nScore %u") :
+					  _("Score %u"),
 			 app->snake.score);
 	} else {
 		title = app->played ? _("Paused") : _("Snake");
