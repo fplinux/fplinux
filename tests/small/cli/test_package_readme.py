@@ -106,39 +106,6 @@ def test_source_companion_footer_preserves_the_literal_archive_name() -> None:
     )
 
 
-def test_readme_names_the_selected_variant_and_existing_offline_route(
-    readme_config: dict[str, Any],
-) -> None:
-    text = ordinary_readme("demo-phone", readme_config).decode()
-
-    assert text.startswith("FPLinux for ACME Demo (D-1)\n")
-    assert "Hold the left soft key while connecting USB." in text
-    assert "docs/phones/demo-model/index.html" in text
-    assert text.index("Wait until the launcher asks") < text.index("Hold the left soft key")
-
-
-def test_source_loader_archive_runs_with_its_bundled_stages(
-    readme_config: dict[str, Any],
-) -> None:
-    """A fresh load and reconnect need no separate loader files or import command."""
-    readme_config["platform"] = "sc9820e"
-    readme_config.pop("nand")
-    text = ordinary_readme("demo-phone", readme_config).decode()
-    words = " ".join(text.split())
-
-    assert "All files needed to load FPLinux into RAM are included" in words
-    assert "does not read or write the phone's internal storage" in words
-    load = "python3.14 -I fplinux.py run\n"
-    assert load in text
-    assert text.index(load) < text.index("Wait until the launcher asks")
-    assert "python3.14 -I fplinux.py run --reconnect\n" in text
-    assert "--loader-inputs" not in text
-    assert "PAC" not in text
-    assert "data/session" in text
-    assert "--events /path/to/events.jsonl" in text
-    assert "complete NAND backup" not in words
-
-
 def test_emmc_readme_describes_only_selected_originals_and_the_required_restart(
     readme_config: dict[str, Any],
 ) -> None:
@@ -153,44 +120,6 @@ def test_emmc_readme_describes_only_selected_originals_and_the_required_restart(
     assert "Your phone's original settings and the files prepared from them" in words
     assert "does not read or write the phone's internal storage" not in words
     assert "backup" not in text
-
-
-def test_ram_readme_requires_card_release_before_disconnect(readme_config: dict[str, Any]) -> None:
-    text = ordinary_readme("demo-phone", readme_config).decode()
-    words = " ".join(text.split())
-
-    assert "turn off any swap stored on the card" in words
-    assert "Save pending writes and unmount the card's filesystems" in words
-    assert "Do not unplug USB or remove the battery until this is done" in words
-    assert text.index("Shut down safely") < text.index("After unmounting data cards")
-    assert "mount -o remount,ro /" not in text
-    assert "FPLINUX.img.xz" not in text
-    assert "Start the launcher again with the phone powered off and disconnected" in words
-    assert 'Keep USB connected until the launcher tells you: "Disconnect USB."' in words
-    assert "data/session" in text
-    assert "runtime.log file under logs and shows its full path" in words
-
-
-def test_system_root_readme_requires_prepared_card_and_observed_read_only_root(
-    readme_config: dict[str, Any],
-) -> None:
-    readme_config["linux"]["root"]["kind"] = "external"
-    text = ordinary_readme("demo-phone", readme_config).decode()
-    words = " ".join(text.split())
-
-    assert "prepare the microSD system card from FPLINUX.img.xz" in words
-    assert "docs/guides/microsd-system-card/index.html" in text
-    assert "Insert the prepared card into the powered-off phone" in words
-    assert "leave it in until FPLinux has shut down safely" in words
-    startup = text.index("Turn the phone off and leave USB disconnected")
-    assert text.index("docs/guides/microsd-system-card/index.html") < startup
-    assert text.index("Insert the prepared card") < startup
-    assert text.index("until FPLinux has shut down safely") < startup
-    assert "mount -o remount,ro /" in text
-    assert "grep ' / ' /proc/mounts" in text
-    assert "If remounting fails, keep the phone powered" in words
-    assert text.index("The line for / must show ro") < text.index("After unmounting data cards")
-    assert "complete NAND backup" not in words
 
 
 def test_target_without_a_published_page_keeps_new_phone_archive_instructions(

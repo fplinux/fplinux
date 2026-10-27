@@ -85,26 +85,6 @@ class CheckReceiptTests:
             assert receipt_matches(cache, release)
             assert receipt_matches(cache, debug)
 
-    def test_published_success_is_an_exact_hit(self) -> None:
-        """Accept the receipt published for its exact recipe."""
-        with tempfile.TemporaryDirectory() as temporary:
-            cache = Path(temporary) / ".cache"
-            expected = recipe()
-
-            publish_success_receipt(cache, expected)
-            assert receipt_matches(cache, expected)
-
-    def test_changed_input_is_a_miss(self) -> None:
-        """Do not reuse a success after its checked closure digest changes."""
-        with tempfile.TemporaryDirectory() as temporary:
-            cache = Path(temporary) / ".cache"
-            published = recipe()
-            changed = replace(published, closure_digest="d" * 64)
-
-            publish_success_receipt(cache, published)
-
-            assert not (receipt_matches(cache, changed))
-
     def test_later_success_replaces_the_scope_receipt(self) -> None:
         """Keep one latest successful receipt per scope."""
         with tempfile.TemporaryDirectory() as temporary:

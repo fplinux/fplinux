@@ -400,13 +400,13 @@ class SshTransportOpenSshDirectTests:
             time.sleep(0.02)
         raise AssertionError(f"timed-out remote stream process is still running: {process_id}")
 
-    @pytest.mark.parametrize("target", ["inoi-244-modern-4g", "bq-2830l-tank-connect-max"])
     def test_generated_config_exec_and_sftp_preserve_results_and_close_each_connection(
-        self, ssh_base: Path, request: pytest.FixtureRequest, target: str
+        self, ssh_base: Path, request: pytest.FixtureRequest
     ) -> None:
         """Published config preserves exit status and SFTP bytes without background clients."""
         root = ssh_base / ("long-session-root-" * 8)
         root.mkdir(mode=0o700)
+        target = "bq-2830l-tank-connect-max"
         session = create_ready_session(root, target=target)
         server = OpenSshServer(ssh_base / "server", Path(session["private_key"]))
         server.start()

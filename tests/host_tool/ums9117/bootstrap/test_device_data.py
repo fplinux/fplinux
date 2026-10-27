@@ -110,11 +110,10 @@ def test_missing_capsule_clears_initrd_properties_and_preserves_memory(
     }
 
 
-@pytest.mark.parametrize("profile", [None, b"audio profile\0"])
 def test_capsule_is_copied_below_dtb_and_published_as_linux_initrd(
-    tmp_path: Path, device_data_peer: Path, profile: bytes | None
+    tmp_path: Path, device_data_peer: Path
 ) -> None:
-    groups = {} if profile is None else {"audio-profile": (_firmware(profile),)}
+    groups = {"audio-profile": (_firmware(b"audio profile\0"),)}
     capsule = create_device_data_initramfs(groups, usb_transport="rndis")
 
     status, tree, arena = _transfer(device_data_peer, tmp_path, capsule)

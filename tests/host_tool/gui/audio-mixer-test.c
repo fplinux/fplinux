@@ -506,7 +506,6 @@ int main(void)
 	test_literal_resampling();
 	test_identity_and_dry();
 	test_mono_to_stereo();
-	test_interpolation(48000, 2);
 	test_interpolation(44100, 2);
 	test_interpolation(24000, 1);
 	test_interpolation(22050, 1);

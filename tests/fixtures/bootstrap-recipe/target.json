@@ -15,6 +15,7 @@
   },
   "bootstrap": {
     "kind": "linux",
+    "toolchain": "arm-none-eabi",
     "source": "bootstrap",
     "image": "ramboot.bin",
     "map": "obj/ramboot.map",

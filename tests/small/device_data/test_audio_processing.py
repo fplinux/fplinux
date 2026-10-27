@@ -18,16 +18,14 @@ from tests.small.device_data.audio_expected import (
     PROCESSING_ROUTE_SIZE,
     processing_route,
 )
-from tests.small.device_data.audio_fixtures import inoi_audio_records, nokia_audio_records
+from tests.small.device_data.audio_fixtures import nokia_audio_records
 
 
 class PlaybackProcessingTests:
     """Protect the stock EQ6, output scale and ALC settings designed from fitted EQ sets."""
 
     @staticmethod
-    def _profile(
-        records: tuple[dict[int, bytes], dict[int, bytes]], *, speaker_vibration: bool = False
-    ) -> bytes:
+    def _profile(records: tuple[dict[int, bytes], dict[int, bytes]]) -> bytes:
         """Prepare a profile from DownloadedNV and ProtectNV audio records."""
         downloaded, protected = records
         result = audio_profile.prepare_headset_gain_profile(
@@ -35,7 +33,6 @@ class PlaybackProcessingTests:
             protected,
             prefix="phone",
             machine_compatible=b"vendor,phone",
-            speaker_vibration=speaker_vibration,
         )
         return result.prepared["phone-audio-profile.bin"]
 
@@ -108,45 +105,6 @@ class PlaybackProcessingTests:
         for rate_index, expected in enumerate(expected_sections):
             offset = PROCESSING_OFFSET + PROCESSING_ROUTE_SIZE + 25 + rate_index * 72 + 12
             assert struct.unpack_from("<6h", profile, offset) == expected
-
-    def test_fitted_route_words_match_independent_stock_values(self) -> None:
-        """S6, ALC and coefficient words sit at their wire offsets with the stock values."""
-        profiles = {
-            "Nokia": self._profile(nokia_audio_records()),
-            "INOI": self._profile(inoi_audio_records(), speaker_vibration=True),
-        }
-        route_values = (
-            ("Nokia", 0, 0x05A6, 26398),
-            ("Nokia", 1, 0x0A0C, 26398),
-            ("Nokia", 2, 0x071D, 26398),
-            ("INOI", 0, 0x071D, 26398),
-            ("INOI", 1, 0x0CA6, 26398),
-            ("INOI", 2, 0x0400, 26214),
-        )
-        for phone, route, output_scale, alc_ratio in route_values:
-            offset = PROCESSING_OFFSET + route * PROCESSING_ROUTE_SIZE
-            assert struct.unpack_from("<HB", profiles[phone], offset) == (
-                output_scale,
-                1,
-            ), f"{phone} route {route} output scale and ALC enable"
-            assert struct.unpack_from("<h", profiles[phone], offset + 13)[0] == alc_ratio, (
-                f"{phone} route {route} ALC ratio"
-            )
-
-        # The stock register image of INOI Handsfree at 48 kHz, sections 0..3,
-        # and of the Nokia Headset 100 Hz band at 48 kHz.
-        section_values = (
-            ("INOI", 1, 0, (4096, 16024, -28232, 28148, 12232, -11953)),
-            ("INOI", 1, 1, (4096, 15861, -31712, 31712, 15861, -15338)),
-            ("INOI", 1, 2, (4096, 18695, 25902, -25902, 8125, -10437)),
-            ("INOI", 1, 3, (4096, 17052, -28507, 28507, 12460, -13128)),
-            ("Nokia", 0, 1, (4096, 16345, -32528, 32528, 16185, -16147)),
-        )
-        for phone, route, section, words in section_values:
-            rate_48k = PROCESSING_OFFSET + route * PROCESSING_ROUTE_SIZE + 25 + 2 * 72
-            assert struct.unpack_from("<6h", profiles[phone], rate_48k + 12 * section) == words, (
-                f"{phone} route {route} section {section}"
-            )
 
     def test_eq_sets_are_selected_by_mode_index_not_by_position(self) -> None:
         """Moving sets in NV440 changes nothing when the modes select their new positions."""

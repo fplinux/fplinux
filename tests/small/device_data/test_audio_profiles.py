@@ -85,23 +85,6 @@ class HeadsetGainProfileTests:
                 id="inoi240",
             ),
             pytest.param(
-                "inoi244",
-                b"inoi,244-modern-4g",
-                inoi_audio_records,
-                True,
-                (
-                    b"FPAUDIO\0"
-                    b"inoi,244-modern-4g\0\0\0\0\0\0"
-                    b"\x07\x6c\x61\x56\x4b\x41\x37\x2d\x23\x1b"
-                    b"\x1a\x00\x39\x35\x31\x2d\x29\x21\x1d\x19\x17"
-                    b"\x1a\x00\x07\x4e\x47\x3b\x35\x2f\x2a\x24\x1f\x1a"
-                )
-                + FITTED_INOI_PROCESSING_SECTION
-                + INOI_VIBRATE_TONE_SECTION,
-                822,
-                id="inoi244",
-            ),
-            pytest.param(
                 "ta1618",
                 b"nokia,ta-1618",
                 nokia_audio_records,
@@ -188,55 +171,6 @@ class HeadsetGainProfileTests:
         assert protected == original_protected
 
     @pytest.mark.parametrize(
-        ("mode_offset", "analog", "all_levels", "error"),
-        [
-            pytest.param(
-                0, 6, False, "Headset PGA levels 1..9 differ", id="headset-differing-pga-first"
-            ),
-            pytest.param(
-                0,
-                8,
-                True,
-                "Headset PGA level is outside supported range 2..7",
-                id="headset-out-of-range-pga-first",
-            ),
-            pytest.param(
-                3 * 1072,
-                1,
-                False,
-                "Handsfree digital gain exceeds 127",
-                id="handsfree-digital-first",
-            ),
-            pytest.param(
-                1072,
-                0x71,
-                True,
-                "Headfree digital gain exceeds 127",
-                id="headfree-digital-first",
-            ),
-        ],
-    )
-    def test_modes_keep_the_first_gain_error_when_analog_and_digital_are_invalid(
-        self, mode_offset: int, analog: int, *, all_levels: bool, error: str
-    ) -> None:
-        """Headset validates its PGA first; speaker modes validate their digital gain first."""
-        downloaded, protected = inoi_audio_records()
-        for records in (downloaded, protected):
-            arm = bytearray(records[426])
-            for level in range(9 if all_levels else 1):
-                struct.pack_into("<H", arm, mode_offset + 68 + 4 * level, analog)
-            struct.pack_into("<H", arm, mode_offset + 70, 128)
-            records[426] = bytes(arm)
-
-        with pytest.raises(ValueError, match=error):
-            audio_profile.prepare_headset_gain_profile(
-                downloaded,
-                protected,
-                prefix="phone",
-                machine_compatible=b"example,phone",
-            )
-
-    @pytest.mark.parametrize(
         ("offset", "replacement", "change_both", "error"),
         [
             pytest.param(
@@ -292,6 +226,12 @@ class HeadsetGainProfileTests:
             ),
             pytest.param(
                 {1072 + 62: b"\x08\x00"}, True, "Headfree app 0 has 8", id="wrong-level-count"
+            ),
+            pytest.param(
+                {1072 + 70: b"\x80\x00"},
+                True,
+                "Headfree digital gain exceeds 127",
+                id="oversized-digital-gain",
             ),
             pytest.param(
                 {1072 + 74: b"\x4f\x00"}, True, "Headfree digital", id="increasing-digital-gain"

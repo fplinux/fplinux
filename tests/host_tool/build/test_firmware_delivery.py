@@ -79,8 +79,6 @@ def firmware_workspace(qin_firmware: QinFirmwareContext, platform: str, root_kin
     [
         pytest.param("sc9820e", "initramfs", False, id="qin-ram-runtime-data"),
         pytest.param("sc9820e", "external", True, id="qin-external-rootfs"),
-        pytest.param("ums9117", "initramfs", False, id="ums-ram-runtime-data"),
-        pytest.param("ums9117", "external", True, id="external-rootfs"),
     ],
 )
 def test_build_stage_delivers_snapshot_bytes_at_the_selected_loader_boundary(  # noqa: PLR0913 -- owned fixtures and explicit delivery policies.

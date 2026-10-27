@@ -3,11 +3,17 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from fplinux_cli.device_data import inputs, store
-from fplinux_cli.runtime.state import exclusive_lock, private_directory
+from fplinux_cli.device_data.formats import AudioProfileContext
+from fplinux_cli.device_data.original_files import save_original_files
+from fplinux_cli.device_data.prepare import DeviceDataSpec, DeviceDataTools, prepare_from_originals
+from fplinux_cli.runtime import boot, workflow
+from fplinux_cli.runtime.bundle import ValidatedBundle
+
+from tests import ROOT
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -131,11 +137,96 @@ def test_build_capture_rejects_a_store_writer_and_then_reads_the_complete_group(
 
 def test_launcher_and_store_locks_can_have_independent_lifetimes(
     isolated_user_paths: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """An interactive session's local lock does not prevent prepared-data snapshots."""
-    runtime = private_directory(isolated_user_paths / "runtime/phone")
-    with (
-        exclusive_lock(runtime / ".launcher.lock", message="launcher busy"),
-        store.locked_phone_store("phone") as directory,
-    ):
-        assert directory == isolated_user_paths / "data/fplinux/phones/phone"
+    """The real launcher admits snapshots during its controlled authenticated shell."""
+    groups: dict[str, list[dict[str, Any]]] = {
+        "audio-profile": [{"source": "audio.bin", "destination": "audio.bin", "size": 23}]
+    }
+    audio_policy = {
+        "speaker_vibration": False,
+        "speaker_from_headphones": False,
+        "headfree_headphones_only": False,
+    }
+    parser = "tests/fixtures/original-files/audio_parser.py"
+    spec = DeviceDataSpec(
+        target="phone",
+        parser=None,
+        originals_parser=ROOT / parser,
+        groups=groups,
+        audio=AudioProfileContext(b"test,phone", **audio_policy),
+        preparation_recipe="b" * 64,
+    )
+    with store.locked_phone_store("phone") as directory:
+        manifest = save_original_files(
+            "phone",
+            {"audio.conf": b"source settings"},
+            directory / "originals",
+            acquisition_recipe="a" * 64,
+        )
+        prepare_from_originals(spec, manifest, directory / "phone", DeviceDataTools())
+    runtime: dict[str, Any] = {
+        "target": "phone",
+        "profile": None,
+        "build_type": "release",
+        "identity": {"target": {"display_name": "Test phone", "compatible": "test,phone"}},
+        "host_tools": {},
+        "nand": None,
+        "emmc": {
+            "acquisition_recipe": "a" * 64,
+            "files": [
+                {
+                    "name": "audio.conf",
+                    "locations": [["system", "/etc/audio.conf"]],
+                    "max_bytes": 64,
+                }
+            ],
+        },
+        "device_data": {
+            "parser": None,
+            "originals_parser": parser,
+            "ecc_module": None,
+            "groups": groups,
+            "required_groups": ["audio-profile"],
+            "preparation_recipe": "b" * 64,
+            "audio_policy": audio_policy,
+        },
+    }
+    admitted = ValidatedBundle(ROOT, runtime, "a" * 64, "b" * 64, None)
+    data = isolated_user_paths / "runtime/phone"
+    logs = isolated_user_paths / "logs"
+    sessions: list[dict[str, Any]] = []
+
+    class Phone:
+        """Run assertions at the interactive endpoint while real host locks are active."""
+
+        def run_shell(self, session: dict[str, Any]) -> int:
+            """Capture prepared bytes while this terminal retains its launcher lock."""
+            sessions.append(session)
+            assert sessions == [{"status": "ready"}]
+            captured = inputs.capture_external_device_data("phone", groups)
+            assert captured["audio-profile"][0].contents == b"encoded:source settings"
+            assert workflow.run_phone(ROOT, data, logs, reconnect=True) == 1
+            assert "Another launcher is already open" in capsys.readouterr().err
+            return 0
+
+    def connect(
+        selected: ValidatedBundle,
+        *,
+        session_root: Path,
+        prepared_data_sha256: str | None,
+        required: bool = False,
+    ) -> tuple[Phone, dict[str, Any]]:
+        assert selected is admitted
+        assert session_root == data / "session"
+        assert prepared_data_sha256 is not None
+        assert required
+        return Phone(), {"status": "ready"}
+
+    monkeypatch.setattr(workflow, "admit_bundle", lambda _bundle: admitted)
+    monkeypatch.setattr(workflow, "host_preflight", lambda: None)
+    monkeypatch.setattr(boot, "reconnect_live_bundle", connect)
+
+    assert workflow.run_phone(ROOT, data, logs, reconnect=True) == 0
+    assert sessions == [{"status": "ready"}]

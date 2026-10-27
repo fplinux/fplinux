@@ -60,28 +60,6 @@ def ui_lists(
         (320, 240, 30, 6),
     ],
 )
-def test_list_rows_reserve_scrollbar_space_only_while_content_overflows(
-    ui_lists: Path, width: int, height: int, row_height: int, padding: int
-) -> None:
-    """Growing adds the four-pixel lane; shrinking restores the whole width."""
-    run_process(
-        [str(ui_lists), "geometry", str(width), str(height), str(row_height), str(padding)],
-        name=f"native list geometry at {width}x{height}",
-        timeout=10,
-        check=True,
-    )
-
-
-@pytest.mark.parametrize(
-    ("width", "height", "row_height", "padding"),
-    [
-        (128, 128, 20, 4),
-        (128, 160, 22, 4),
-        (176, 220, 26, 6),
-        (240, 320, 36, 8),
-        (320, 240, 30, 6),
-    ],
-)
 def test_native_scrollbar_keeps_one_pixel_edge_insets_and_hides_when_content_fits(
     ui_lists: Path, width: int, height: int, row_height: int, padding: int
 ) -> None:

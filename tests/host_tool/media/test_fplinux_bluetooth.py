@@ -46,9 +46,6 @@ class BluetoothTools:
 def bluetooth_tools(tmp_path_factory: pytest.TempPathFactory) -> Iterator[BluetoothTools]:
     """Build the real client and the test-owned fake through pkg-config."""
     with ExitStack() as cleanup:
-        if shutil.which("dbus-daemon") is None:
-            message = "dbus-daemon is required for Bluetooth host tests"
-            pytest.skip(message)
         try:
             cflags = run_process(
                 ["pkg-config", "--cflags", "dbus-1"],
@@ -103,7 +100,7 @@ def bluetooth_tools(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Blueto
 
 @dataclass
 class BluetoothContext:
-    """Own one private bus and any service processes started for its scenario."""
+    """Own one isolated file tree, bus address and any service processes."""
 
     tools: BluetoothTools
     root: Path
@@ -113,7 +110,7 @@ class BluetoothContext:
 
     @property
     def driver_directory(self) -> Path:
-        """Return the synthetic device-discovery directory for this bus."""
+        """Return the synthetic device-discovery directory for this scenario."""
         return self.root / "platform-driver"
 
     @property
@@ -137,7 +134,7 @@ class BluetoothContext:
             process.communicate()
 
     def child_environment(self) -> dict[str, str]:
-        """Pass the private address only to the client and its fake service."""
+        """Pass the isolated address only to the client and its fake service."""
         environment = os.environ.copy()
         environment["DBUS_SYSTEM_BUS_ADDRESS"] = self.address
         environment["DBUS_SESSION_BUS_ADDRESS"] = self.address
@@ -169,7 +166,7 @@ class BluetoothContext:
         pytest.fail("Bluetooth fake did not publish readiness")
 
     def run_client(self, *arguments: str) -> subprocess.CompletedProcess[str]:
-        """Invoke the production client on this test's isolated system bus."""
+        """Invoke the production client with this test's isolated bus address."""
         return run_process(
             [str(self.tools.client), *arguments],
             name="run FPLinux Bluetooth client",
@@ -186,9 +183,22 @@ class BluetoothContext:
 
 
 @pytest.fixture
+def bluetooth_without_bus(bluetooth_tools: BluetoothTools) -> Iterator[BluetoothContext]:
+    """Reject any bus connection through an absent socket in an owned directory."""
+    with ExitStack() as cleanup:
+        temporary = cleanup.enter_context(tempfile.TemporaryDirectory())
+        root = Path(temporary)
+        address = f"unix:path={root / 'absent-bus'}"
+        yield BluetoothContext(bluetooth_tools, root, address, cleanup)
+
+
+@pytest.fixture
 def bluetooth_case(bluetooth_tools: BluetoothTools) -> Iterator[BluetoothContext]:
     """Create and stop a private daemon separately for every scenario."""
     with ExitStack() as cleanup:
+        if shutil.which("dbus-daemon") is None:
+            message = "dbus-daemon is required for Bluetooth private-bus tests"
+            pytest.skip(message)
         temporary = cleanup.enter_context(tempfile.TemporaryDirectory())
         root = Path(temporary)
         configuration = root / "bus.conf"
@@ -216,20 +226,20 @@ def bluetooth_case(bluetooth_tools: BluetoothTools) -> Iterator[BluetoothContext
 
 
 class FplinuxBluetoothHostToolTests:
-    """Exercise the client against a controlled D-Bus BlueZ/obexd fake."""
+    """Exercise local admission and controlled D-Bus BlueZ/obexd behavior."""
 
     def test_enable_writes_one_start_without_a_bus_service(
-        self, bluetooth_case: BluetoothContext
+        self, bluetooth_without_bus: BluetoothContext
     ) -> None:
         """A bound controller receives the start request without BlueZ running."""
-        directory = bluetooth_case.prepare_driver_directory()
+        directory = bluetooth_without_bus.prepare_driver_directory()
         device = directory / "400a0000.bluetooth"
         device.mkdir()
         start = device / "start"
         start.write_bytes(b"")
         (directory / "uevent").write_text("", encoding="ascii")
 
-        result = bluetooth_case.run_client("enable")
+        result = bluetooth_without_bus.run_client("enable")
 
         assert (result.returncode) == (0), result.stderr
         assert (start.read_bytes()) == (b"1\n")
@@ -261,16 +271,16 @@ class FplinuxBluetoothHostToolTests:
         ],
     )
     def test_help_leaves_a_bound_controller_stopped(
-        self, bluetooth_case: BluetoothContext, arguments: tuple[str, ...]
+        self, bluetooth_without_bus: BluetoothContext, arguments: tuple[str, ...]
     ) -> None:
         """Root and subcommand help cannot write the synthetic start control."""
-        directory = bluetooth_case.prepare_driver_directory()
+        directory = bluetooth_without_bus.prepare_driver_directory()
         device = directory / "400a0000.bluetooth"
         device.mkdir()
         start = device / "start"
         start.write_bytes(b"")
 
-        result = bluetooth_case.run_client(*arguments)
+        result = bluetooth_without_bus.run_client(*arguments)
 
         assert (result.returncode) == (0), result.stderr
         assert ("Usage:") in (result.stdout)
@@ -310,31 +320,31 @@ class FplinuxBluetoothHostToolTests:
         ],
     )
     def test_invalid_command_arguments_are_diagnosed_without_bluez(
-        self, bluetooth_case: BluetoothContext, arguments: tuple[str, ...]
+        self, bluetooth_without_bus: BluetoothContext, arguments: tuple[str, ...]
     ) -> None:
         """Syntax and value errors are diagnosed with no running BlueZ service."""
-        result = bluetooth_case.run_client(*arguments)
+        result = bluetooth_without_bus.run_client(*arguments)
 
         assert (result.returncode) == (2), result.stderr
         assert (result.stdout) == ("")
         assert ("--help") in (result.stderr)
 
     def test_enable_missing_board_is_optional_only_when_requested(
-        self, bluetooth_case: BluetoothContext
+        self, bluetooth_without_bus: BluetoothContext
     ) -> None:
         """Boot may omit an unsupported controller; explicit enable must explain it."""
-        result = bluetooth_case.run_client("enable")
+        result = bluetooth_without_bus.run_client("enable")
         assert (result.returncode) != (0)
         assert ("not configured") in (result.stderr)
 
-        optional = bluetooth_case.run_client("enable", "--if-present")
+        optional = bluetooth_without_bus.run_client("enable", "--if-present")
         assert (optional.returncode) == (0), optional.stderr
 
     def test_enable_ambiguous_controller_does_not_start_either(
-        self, bluetooth_case: BluetoothContext
+        self, bluetooth_without_bus: BluetoothContext
     ) -> None:
         """An ambiguous discovery result cannot initialize an arbitrary controller."""
-        directory = bluetooth_case.prepare_driver_directory()
+        directory = bluetooth_without_bus.prepare_driver_directory()
         controls = []
         for name in ("controller-a", "controller-b"):
             device = directory / name
@@ -343,7 +353,7 @@ class FplinuxBluetoothHostToolTests:
             start.write_bytes(b"")
             controls.append(start)
 
-        result = bluetooth_case.run_client("enable", "--if-present")
+        result = bluetooth_without_bus.run_client("enable", "--if-present")
 
         assert (result.returncode) != (0)
         assert ("multiple Bluetooth controllers") in (result.stderr)
@@ -382,13 +392,13 @@ class FplinuxBluetoothHostToolTests:
 
     @pytest.mark.parametrize("source_kind", ["missing", "directory"])
     def test_send_missing_or_nonregular_file_is_rejected_before_contacting_obexd(
-        self, bluetooth_case: BluetoothContext, source_kind: str
+        self, bluetooth_without_bus: BluetoothContext, source_kind: str
     ) -> None:
         """Invalid file inputs are diagnosed even without an obexd service."""
         if source_kind == "directory":
-            (bluetooth_case.root / "invalid-payload").mkdir()
+            (bluetooth_without_bus.root / "invalid-payload").mkdir()
 
-        result = bluetooth_case.run_client("send", PEER, "invalid-payload")
+        result = bluetooth_without_bus.run_client("send", PEER, "invalid-payload")
 
         assert result.returncode == 1
         assert result.stdout == ""

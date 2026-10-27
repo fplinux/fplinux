@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import shutil
 from typing import TYPE_CHECKING
 
 import pytest
@@ -127,11 +126,3 @@ def test_source_export_retains_identity_without_git_until_public_sources_change(
     assert changed.release_id != captured.release.release_id
     assert changed.release_id == changed.source_snapshot[:12]
     assert changed.source_commit == captured.release.source_commit
-
-
-def test_removing_git_alone_preserves_public_inventory(source_checkout: Path) -> None:
-    """Filesystem inventory includes the same dotfiles, workflows and source modes."""
-    captured = capture_public_sources(source_checkout)
-    (source_checkout / ".fplinux-release.json").write_bytes(source_identity_bytes(captured))
-    shutil.rmtree(source_checkout / ".git")
-    assert capture_public_sources(source_checkout) == captured

@@ -122,20 +122,15 @@ class CheckCommandTests:
         assert (result.returncode) != (0)
         assert ("--jobs cannot be combined with --list") in (result.stderr)
 
-    def test_help_text_states_the_kernel_worker_default_and_verbose_fallback(self) -> None:
-        """Help names the default kernel worker count and the serial verbose fallback."""
+    def test_help_states_full_scope_defaults_build_types_and_kernel_worker_policy(self) -> None:
+        """Help explains default workloads, build types and kernel execution limits."""
         result = self.run_check("--help")
 
         assert (result.returncode) == (0), result.stderr
         help_text = " ".join(result.stdout.split())
         assert "default: 3 with kernel, 1 without kernel or with --verbose" in help_text
         assert "incompatible with --jobs greater than 1" in help_text
-
-    def test_help_explains_full_defaults_and_separate_python_and_tests_scopes(self) -> None:
-        """Help makes the default full gate and each Python workload explicit."""
-        result = self.run_check("--help")
-
-        assert result.returncode == 0, result.stderr
+        assert "--build-type {release,debug}" in result.stdout
         assert "Run every quality scope by default." in result.stdout
         assert re.search(r"python scope runs Python\s+analyzers", result.stdout) is not None
         assert re.search(r"tests scope runs all five test\s+tiers", result.stdout) is not None

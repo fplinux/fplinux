@@ -75,6 +75,7 @@ def test_gpu_frames_preserve_engine_geometry_state_and_transfer_contents(
     )
     assert "-> DMA-BUF -> DRM" in result.stdout
     assert "resources: output=0 gpu=0 display=0 input=0 signal_default=1\n" in result.stdout
+    assert set(timing_values(result.stdout).values()) == {0}
 
 
 def test_desktop_gl_dispatch_preserves_types_and_maps_only_pbuffer_color_buffers(
@@ -239,17 +240,6 @@ def test_normal_quit_reports_video_close_failure_after_host_cleanup(
 def timing_values(stdout: str) -> dict[str, int]:
     line = next(line for line in stdout.splitlines() if line.startswith("gpu-timing: "))
     return {name: int(value) for name, value in (field.split("=") for field in line.split()[1:])}
-
-
-def test_disabled_gpu_statistics_never_probe_or_allocate_queries(quake_gpu_video: Path) -> None:
-    result = run_process(
-        [str(quake_gpu_video), "stats-disabled"],
-        name="render native GPU frames with timing disabled",
-        timeout=5,
-        check=True,
-    )
-
-    assert set(timing_values(result.stdout).values()) == {0}
 
 
 def test_gpu_statistics_report_completed_scene_time_in_nanoseconds(quake_gpu_video: Path) -> None:

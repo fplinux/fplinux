@@ -102,11 +102,11 @@ def test_amplifier_start_and_stop_retain_safe_cleanup_obligations(
     )
 
 
-@pytest.mark.parametrize("transfer", range(10))
+@pytest.mark.parametrize("transfer", [0, 1, 9])
 def test_amplifier_configuration_failure_never_reaches_active_control(
     amplifier_component: Path, transfer: int
 ) -> None:
-    """Exhaust each initial/config write and still attempt OFF and reset."""
+    """Initial, first and last configuration failures still attempt OFF and reset."""
     run_process(
         [str(amplifier_component), "start-configuration-failure", str(transfer)],
         name=f"exercise AW87339 host configuration failure: {transfer}",

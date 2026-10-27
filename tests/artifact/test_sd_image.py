@@ -77,12 +77,8 @@ class SdInputs:
 
 
 @pytest.fixture
-def sd_inputs() -> Iterator[SdInputs]:
-    """Own the large source and expanded card images for one scenario."""
-    required = ("genimage", "mcopy", "mdir", "mke2fs", "mkdosfs", "xz")
-    missing = [name for name in required if shutil.which(name) is None]
-    if missing:
-        pytest.fail("quality image lacks required image tools: " + ", ".join(missing))
+def sd_files() -> Iterator[SdInputs]:
+    """Own regular input files and promptly release any large image outputs."""
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         fit = root / "FPLINUX.ITB"
@@ -91,23 +87,33 @@ def sd_inputs() -> Iterator[SdInputs]:
         fit.write_bytes(b"FPLINUX FIT test payload\n")
         with rootfs.open("wb") as stream:
             stream.truncate(ROOT_SIZE)
-        subprocess.run(
-            [
-                "mke2fs",
-                "-q",
-                "-F",
-                "-t",
-                "ext4",
-                "-U",
-                "042681b5-d000-5b78-9c16-8e8b2944594e",
-                "-L",
-                "FPLROOT",
-                str(rootfs),
-            ],
-            check=True,
-            timeout=120,
-        )
         yield SdInputs(root, fit, rootfs, output)
+
+
+@pytest.fixture
+def sd_inputs(sd_files: SdInputs) -> SdInputs:
+    """Format a real ext4 input for cases that produce or inspect a card image."""
+    required = ("genimage", "mcopy", "mdir", "mke2fs", "mkdosfs", "xz")
+    missing = [name for name in required if shutil.which(name) is None]
+    if missing:
+        pytest.fail("quality image lacks required image tools: " + ", ".join(missing))
+    subprocess.run(
+        [
+            "mke2fs",
+            "-q",
+            "-F",
+            "-t",
+            "ext4",
+            "-U",
+            "042681b5-d000-5b78-9c16-8e8b2944594e",
+            "-L",
+            "FPLROOT",
+            str(sd_files.rootfs),
+        ],
+        check=True,
+        timeout=120,
+    )
+    return sd_files
 
 
 class SdImageTests:
@@ -142,12 +148,22 @@ class SdImageTests:
         assert (extracted.read_bytes()) == (sd_inputs.fit.read_bytes())
 
     def test_fit_content_is_causal(self, sd_inputs: SdInputs) -> None:
-        """Changing the prebuilt FIT changes the one published image."""
+        """Changed FIT bytes replace the old image with the exact fresh-build result."""
         sd_inputs.build()
         before = sha256_file(sd_inputs.output)
         sd_inputs.fit.write_bytes(b"FPLINUX altered FIT payload\n")
         sd_inputs.build()
         assert (before) != (sha256_file(sd_inputs.output))
+        reference = sd_inputs.root / "changed-fit-reference" / "FPLINUX.img.xz"
+        assert not reference.parent.exists()
+        sd_image.build(
+            sd_inputs.fit,
+            sd_inputs.rootfs,
+            reference,
+            fit_spec=FIT_SPEC,
+            storage=STORAGE,
+        )
+        assert sd_inputs.output.read_bytes() == reference.read_bytes()
 
     def test_ram_linux_profile_contains_exact_ext4_root_and_an_empty_fat_partition(
         self, sd_inputs: SdInputs
@@ -177,59 +193,58 @@ class SdImageTests:
 
     @pytest.mark.parametrize("with_fit", [False, True], ids=["missing-fit", "unexpected-fit"])
     def test_fit_bytes_and_specification_must_be_selected_together(
-        self, sd_inputs: SdInputs, *, with_fit: bool
+        self, sd_files: SdInputs, *, with_fit: bool
     ) -> None:
-        """A profile mismatch fails before replacing the previously published card image."""
-        sd_inputs.build()
-        before = sd_inputs.output.read_bytes()
+        """A profile mismatch fails before replacing the previous output bytes."""
+        before = b"previous published output\n"
+        sd_files.output.write_bytes(before)
         with pytest.raises(sd_image.SdImageError, match="selected together"):
             sd_image.build(
-                sd_inputs.fit if with_fit else None,
-                sd_inputs.rootfs,
-                sd_inputs.output,
+                sd_files.fit if with_fit else None,
+                sd_files.rootfs,
+                sd_files.output,
                 fit_spec=None if with_fit else FIT_SPEC,
                 storage=STORAGE,
             )
-        assert sd_inputs.output.read_bytes() == before
+        assert sd_files.output.read_bytes() == before
 
     def test_rebuild_from_unchanged_inputs_is_byte_reproducible(self, sd_inputs: SdInputs) -> None:
         """Rebuilding the same FIT and ext4 bytes publishes an identical compressed image."""
         sd_inputs.build()
         before = sha256_file(sd_inputs.output)
-        sd_inputs.build()
-        assert (before) == (sha256_file(sd_inputs.output))
+        second = sd_inputs.root / "second-build" / "FPLINUX.img.xz"
+        assert not second.parent.exists()
+        sd_image.build(
+            sd_inputs.fit,
+            sd_inputs.rootfs,
+            second,
+            fit_spec=FIT_SPEC,
+            storage=STORAGE,
+        )
+        assert before == sha256_file(second)
 
-    def test_missing_or_empty_input_is_rejected(self, sd_inputs: SdInputs) -> None:
-        """An absent or empty input cannot replace a good image."""
-        sd_inputs.build()
-        before = sha256_file(sd_inputs.output)
-        sd_inputs.fit.write_bytes(b"")
+    def test_missing_or_empty_input_is_rejected(self, sd_files: SdInputs) -> None:
+        """An absent or empty input cannot replace previous output bytes."""
+        before = b"previous published output\n"
+        sd_files.output.write_bytes(before)
+        sd_files.fit.write_bytes(b"")
         with pytest.raises(sd_image.SdImageError, match="is empty"):
-            sd_inputs.build()
-        assert (before) == (sha256_file(sd_inputs.output))
+            sd_files.build()
+        assert sd_files.output.read_bytes() == before
         with pytest.raises(sd_image.SdImageError, match="missing or invalid"):
             sd_image.build(
-                sd_inputs.root / "missing.itb",
-                sd_inputs.rootfs,
-                sd_inputs.output,
+                sd_files.root / "missing.itb",
+                sd_files.rootfs,
+                sd_files.output,
                 fit_spec=FIT_SPEC,
                 storage=STORAGE,
             )
+        assert sd_files.output.read_bytes() == before
 
-    def test_success_replaces_tampered_output(self, sd_inputs: SdInputs) -> None:
-        """A complete rebuild replaces output bytes changed after publication."""
-        sd_inputs.build()
-        expected = sd_inputs.output.read_bytes()
-        sd_inputs.output.write_bytes(b"tampered\n")
-
-        sd_inputs.build()
-
-        assert (sd_inputs.output.read_bytes()) == (expected)
-
-    def test_failed_build_preserves_prior_published_image(self, sd_inputs: SdInputs) -> None:
-        """An injected genimage failure cannot replace an already complete image."""
-        sd_inputs.build()
-        before = sha256_file(sd_inputs.output)
+    def test_failed_build_preserves_previous_output(self, sd_files: SdInputs) -> None:
+        """An injected genimage failure cannot replace previous output bytes."""
+        before = b"previous published output\n"
+        sd_files.output.write_bytes(before)
         failed = subprocess.CompletedProcess(
             ["genimage"], returncode=2, stderr="injected genimage failure\n"
         )
@@ -237,5 +252,5 @@ class SdImageTests:
             mock.patch("fplinux_cli.build.storage.sd.subprocess.run", return_value=failed),
             pytest.raises(sd_image.SdImageError, match="injected genimage failure"),
         ):
-            sd_inputs.build()
-        assert (before) == (sha256_file(sd_inputs.output))
+            sd_files.build()
+        assert sd_files.output.read_bytes() == before

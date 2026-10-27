@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import shutil
 import subprocess
 from typing import TYPE_CHECKING, Any
@@ -123,21 +125,61 @@ def test_first_emmc_preparation_reads_once_and_next_launch_reuses_originals(
             store / "phone/groups/audio-profile/audio.bin"
         ).read_bytes() == b"encoded:source settings"
         assert not (data / "reader").exists()
+        destination = store / "phone"
+        receipt = destination / "receipt.json"
+        initial_receipt = receipt.read_bytes()
+        initial_inode = destination.stat().st_ino
 
-        for recipe in ("b" * 64, "c" * 64):
-            runtime["device_data"]["preparation_recipe"] = recipe
-            assert not workflow._prepare_phone_data(  # noqa: SLF001 -- repeated normal preparation.
-                admitted,
-                data,
-                log,
-                lambda _stage: None,
-                store=store,
-                from_dump=None,
-                replace=False,
-                loader_trace=False,
-            )
+        assert not workflow._prepare_phone_data(  # noqa: SLF001 -- unchanged preparation reuses the publication.
+            admitted,
+            data,
+            log,
+            lambda _stage: None,
+            store=store,
+            from_dump=None,
+            replace=False,
+            loader_trace=False,
+        )
+        assert destination.stat().st_ino == initial_inode
+        assert receipt.read_bytes() == initial_receipt
+        assert (destination / "groups/audio-profile/audio.bin").read_bytes() == (
+            b"encoded:source settings"
+        )
+
+        shutil.copyfile(
+            ROOT / "tests/small/runtime/fixtures/emmc-preparation/refreshed_audio_parser.py",
+            tmp_path / "refreshed_parser.py",
+        )
+        runtime["device_data"]["originals_parser"] = "refreshed_parser.py"
+        runtime["device_data"]["preparation_recipe"] = "c" * 64
+        assert not workflow._prepare_phone_data(  # noqa: SLF001 -- changed preparation retains the acquisition.
+            admitted,
+            data,
+            log,
+            lambda _stage: None,
+            store=store,
+            from_dump=None,
+            replace=False,
+            loader_trace=False,
+        )
+        assert (destination / "groups/audio-profile/audio.bin").read_bytes() == (
+            b"refreshed:source settings"
+        )
+        refreshed_receipt = json.loads(receipt.read_bytes())
+        previous_receipt = json.loads(initial_receipt)
+        assert refreshed_receipt["preparation_recipe"] != previous_receipt["preparation_recipe"]
+        assert refreshed_receipt["source"] == previous_receipt["source"]
+        assert refreshed_receipt["groups"][0]["prepared"] == [
+            {
+                "source": "audio.bin",
+                "destination": "audio.bin",
+                "size": 25,
+                "sha256": hashlib.sha256(b"refreshed:source settings").hexdigest(),
+            }
+        ]
         assert reads == ["/dev/mmcblk1"]
         assert len(boots) == 1
         assert (store / "originals/audio.conf").read_bytes() == b"source settings"
+        assert not (data / "reader").exists()
     finally:
         log.close("success")

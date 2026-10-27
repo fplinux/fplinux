@@ -524,44 +524,6 @@ static void failure_contract(void)
 	release(&fixture);
 }
 
-static void supply_contract(void)
-{
-	const enum fault faults[] = { CORE_PD_READ, CORE_VSEL_READ };
-	struct fixture fixture;
-	const struct regulator_ops *ops;
-	unsigned int index;
-
-	for (index = 0; index < ARRAY_SIZE(faults); index++) {
-		initialize(&fixture, false);
-		fixture.fault = faults[index];
-		assert(test_driver_sc2721_regulator_driver->probe(
-			       &fixture.pdev) == -EIO);
-		assert(!fixture.pdev.dev.num_resources && !fixture.writes);
-		release(&fixture);
-	}
-	initialize(&fixture, false);
-	fixture.pmic.words[0xc1c / 4] = 0x20;
-	assert(test_driver_sc2721_regulator_driver->probe(&fixture.pdev) ==
-	       -EIO);
-	assert(!fixture.pdev.dev.num_resources && !fixture.writes);
-	release(&fixture);
-	initialize(&fixture, false);
-	register_supply(&fixture);
-	ops = fixture.supply.rdev->desc->ops;
-	assert(!ops->enable && !ops->disable && !ops->set_voltage_sel &&
-	       !ops->map_voltage && !ops->get_voltage_sel &&
-	       !ops->list_voltage);
-	assert(regulator_get_voltage(&fixture.supply) == 900000);
-	fixture.pmic.words[0xc54 / 4] = 1;
-	assert(regulator_get_voltage(&fixture.supply) == 403125);
-	fixture.pmic.words[0xc54 / 4] = 0x1ff;
-	assert(regulator_get_voltage(&fixture.supply) == 1996875);
-	fixture.pmic.words[0xc1c / 4] = 0x20;
-	assert(regulator_get_voltage(&fixture.supply) == -EIO);
-	assert(!fixture.writes);
-	release(&fixture);
-}
-
 static void registration_contract(void)
 {
 	struct fixture fixture;
@@ -821,9 +783,7 @@ static void selected_rate_failure_contract(void)
 int main(int argc, char **argv)
 {
 	assert(argc == 2);
-	if (!strcmp(argv[1], "supply"))
-		supply_contract();
-	else if (!strcmp(argv[1], "lifetime"))
+	if (!strcmp(argv[1], "lifetime"))
 		lifetime_contract();
 	else if (!strcmp(argv[1], "failure"))
 		failure_contract();

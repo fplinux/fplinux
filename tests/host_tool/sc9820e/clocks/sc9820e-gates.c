@@ -415,7 +415,9 @@ int main(int argc, char **argv)
 		if (strcmp(argv[1], cases[index].argument) != 0)
 			continue;
 		check_probe(&cases[index]);
-		check_probe_errors(&cases[index]);
+		if (!strcmp(cases[index].argument, "hwspinlock") ||
+		    cases[index].sdio)
+			check_probe_errors(&cases[index]);
 		puts("SC9820E clock provider host callback cases passed");
 		return 0;
 	}

@@ -254,7 +254,7 @@ def test_public_original_import_rejects_linked_sources(
         (
             ("--from-dump", "missing.bin", "--events", "events.jsonl"),
             2,
-            "not allowed with argument",
+            "--events: not allowed with argument --from-dump",
         ),
     ],
 )
@@ -266,6 +266,7 @@ def test_public_original_target_rejects_unsupported_modes_before_source_or_loade
 
     assert result.returncode == status, result.stderr
     assert message in result.stderr
+    assert "Traceback" not in result.stderr
     assert not (device_data_cli.root / ".cache/device-data").exists()
     assert not (device_data_cli.root / ".cache/out").exists()
     assert not (device_data_cli.root / "events.jsonl").exists()

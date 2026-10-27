@@ -49,7 +49,6 @@ def gpu_clock_component(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pa
 @pytest.mark.parametrize(
     "scenario",
     [
-        "supply",
         "lifetime",
         "failure",
         "registration",

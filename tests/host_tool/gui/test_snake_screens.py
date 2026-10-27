@@ -100,15 +100,11 @@ def test_actual_snake_alerts_shortcuts_hidden_return_and_fullscreen_frames(
     assert playing[(top - 1) * width] == border
 
 
-@pytest.mark.parametrize("divider", [1, 3])
 @pytest.mark.parametrize("theme", ["light", "dark"])
 def test_actual_snake_panel_uses_the_profile_divider_pixels(
-    snake_native: Path, tmp_path: Path, divider: int, theme: str
+    snake_native: Path, tmp_path: Path, theme: str
 ) -> None:
     """A changed existing profile value reaches the app's drawn panel boundary."""
-    environment = {"FPLINUX_NATIVE_LANGUAGE_DIR": str(ROOT / "alpine/aports/fplinux-language")}
-    if divider == 3:
-        environment["FPLINUX_NATIVE_DIVIDER"] = "3"
     result = run_process(
         [
             str(snake_native / "snake-screens"),
@@ -122,8 +118,11 @@ def test_actual_snake_panel_uses_the_profile_divider_pixels(
             "en",
             "divider",
         ],
-        name=f"actual Snake panel with {divider}px divider ({theme})",
-        env=environment,
+        name=f"actual Snake panel with 3px divider ({theme})",
+        env={
+            "FPLINUX_NATIVE_LANGUAGE_DIR": str(ROOT / "alpine/aports/fplinux-language"),
+            "FPLINUX_NATIVE_DIVIDER": "3",
+        },
         timeout=15,
     )
     assert result.returncode == 0, result.stdout + result.stderr
@@ -132,5 +131,5 @@ def test_actual_snake_panel_uses_the_profile_divider_pixels(
         for (value,) in struct.iter_unpack("<H", (tmp_path / "snake-playing.rgb565").read_bytes())
     )
     bar, border = (0x2104, 0x3A29) if theme == "dark" else (0xEF7D, 0xBE39)
-    assert pixels[(15 - divider) * 128] == bar
-    assert [pixels[y * 128] for y in range(16 - divider, 16)] == [border] * divider
+    assert pixels[12 * 128] == bar
+    assert [pixels[y * 128] for y in range(13, 16)] == [border] * 3

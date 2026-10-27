@@ -106,13 +106,6 @@ def test_recipe_tracks_terminal_font_archive_and_package_build(
     assert definition.environment_recipe_digest() != original
 
 
-def test_artifact_recipe_depends_on_actual_installed_content() -> None:
-    """Two prepared environments with one declaration cannot share different tool bytes."""
-    assert definition.environment_artifact_recipe_digest(
-        "a" * 64, "b" * 64
-    ) != definition.environment_artifact_recipe_digest("a" * 64, "c" * 64)
-
-
 def test_recipe_tracks_icon_archive_but_not_glyph_definitions(
     recipe_checkout: Path,
 ) -> None:

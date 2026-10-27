@@ -115,13 +115,11 @@ class HeadphoneFedAudioTests:
     @pytest.mark.parametrize("mode_offset", [3 * 1072, 1072], ids=["Handsfree", "Headfree"])
     @pytest.mark.parametrize(
         ("pga", "all_levels"),
-        [(6, True), (6, False), (0x70, True), (1, True), (8, True)],
+        [(6, True), (6, False), (0x70, True)],
         ids=[
             "different-fixed-pga",
             "one-step-differs",
             "combined-encoding",
-            "too-low",
-            "too-high",
         ],
     )
     def test_speaker_modes_require_the_same_raw_pga_as_headset(

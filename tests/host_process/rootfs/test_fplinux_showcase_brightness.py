@@ -320,6 +320,7 @@ class FplinuxShowcaseBrightnessTests:
 
         assert (requests[0]) == ("CLAIM")
         assert requests[1].startswith("SHOW ")
+        assert int(requests[1].split()[1]) in range(6, 11)
         assert (requests[2]) == ("RELEASE")
         assert (len(requests)) == (3)
 
@@ -347,16 +348,6 @@ class FplinuxShowcaseBrightnessTests:
     ) -> None:
         """An installed 8x16 default cannot silently render on the 128-pixel display."""
         assert (scene.run_showcase(font_error="wrong-size")) == (["CLAIM", "RELEASE"])
-
-    def test_scene_previews_logical_level_and_releases_on_exit(self, scene: ShowcaseScene) -> None:
-        """An active scene previews a logical level and gives back its lease."""
-        requests = scene.run_showcase()
-
-        assert (requests[0]) == ("CLAIM")
-        assert (len(requests)) == (3)
-        assert requests[1].startswith("SHOW ")
-        assert (int(requests[1].split()[1])) in (range(6, 11))
-        assert (requests[2]) == ("RELEASE")
 
     def test_unchanged_scene_level_is_not_resent_each_frame(self, scene: ShowcaseScene) -> None:
         """Two adjacent frames with the same level send only one preview."""

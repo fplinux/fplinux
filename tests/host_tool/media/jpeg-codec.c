@@ -377,6 +377,7 @@ static int expect_mutation_error(size_t offset, u8 value, int error,
 
 static int test_semantic_rejections(void)
 {
+	u8 oversubscribed[sizeof(jpeg_420)];
 	u8 trailing[sizeof(jpeg_420) + 1];
 	struct ums9117_jpeg_frame frame;
 	int failed = 0;
@@ -394,8 +395,14 @@ static int test_semantic_rejections(void)
 	failed |= expect_mutation_error(
 		293, 0x00, -EINVAL,
 		"different Cb/Cr Huffman tables were accepted");
-	failed |= expect_mutation_error(
-		227, 0x03, -EINVAL, "oversubscribed Huffman tree was accepted");
+	memcpy(oversubscribed, jpeg_420, sizeof(oversubscribed));
+	oversubscribed[227] = 3;
+	oversubscribed[228] = 0;
+	oversubscribed[229] = 0;
+	failed |= expect(ums9117_jpeg_parse(oversubscribed,
+					    sizeof(oversubscribed),
+					    &frame) == -EINVAL,
+			 "oversubscribed Huffman tree was accepted");
 	failed |= expect_mutation_error(198, 0x0c, -EINVAL,
 					"out-of-domain DC symbol was accepted");
 	failed |= expect_mutation_error(221, 0x0b, -EINVAL,

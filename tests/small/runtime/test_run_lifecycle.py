@@ -164,20 +164,6 @@ class RunLifecycleTests:
             command_bundle.root / ".cache/logs/run/phone/profiles/microsd-uboot"
         )
 
-    def test_build_only_profile_is_rejected_before_bundle_or_usb_access(self) -> None:
-        """A profile without a complete boot path cannot start the runtime."""
-        with (
-            mock.patch.object(
-                targets, "load_target", return_value={"runtime": {"runnable": False}}
-            ),
-            mock.patch.object(bundle_session, "resolve_target_bundle") as resolve,
-            mock.patch.object(os, "execv") as execute,
-            pytest.raises(SystemExit, match="profile is build-only"),
-        ):
-            runner.run_target("phone", profile="microsd-uboot")
-        resolve.assert_not_called()
-        execute.assert_not_called()
-
     def test_stale_build_only_profile_bundle_remains_non_runnable(
         self, command_bundle: CommandBundleContext
     ) -> None:

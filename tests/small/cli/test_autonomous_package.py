@@ -23,7 +23,6 @@ from fplinux_cli.cli.parser import create_parser
 from fplinux_cli.manifests import targets
 from fplinux_cli.packaging import archive as package
 from fplinux_cli.packaging import autonomous as autonomous_package
-from fplinux_cli.packaging.readme import append_source_companion
 from fplinux_cli.runtime import bundle as bundle_runtime
 from fplinux_cli.workspace import build_inputs
 from fplinux_cli.workspace.capture import WorkspaceSnapshot
@@ -90,7 +89,7 @@ def _archive(root: Path) -> tuple[Path, dict[str, bytes], dict[str, int]]:
 
 
 @pytest.mark.parametrize("host", ["linux", "windows"])
-def test_archive_readme_preserves_host_instructions_and_source_footer(host: str) -> None:
+def test_archive_readme_preserves_the_complete_host_instructions(host: str) -> None:
     config = {
         "identity": {"brand": "ACME", "product": "Demo", "hardware_codes": ["D-1"]},
         "adapter": {"boot_instructions": "Hold the left soft key while connecting USB."},
@@ -101,11 +100,6 @@ def test_archive_readme_preserves_host_instructions_and_source_footer(host: str)
     )
     documents = ROOT / "tests/small/cli/fixtures/package-readme"
     assert readme == (documents / f"autonomous-initramfs-{host}.txt").read_bytes()
-    source = f"FPLinux-demo-phone-{host}-x64-1234567890ab-sources"
-    assert (
-        append_source_companion(readme, source)
-        == (documents / f"autonomous-initramfs-{host}-sources.txt").read_bytes()
-    )
 
 
 @pytest.mark.parametrize(
@@ -196,6 +190,8 @@ def test_ready_archive_preserves_manifests_modes_sources_and_omits_personal_data
             f"%LOCALAPPDATA%\\FPLinux\\phones\\{inputs.target}\n".encode() in files["README.txt"]
         )
         assert "Run.cmd" in files
+        assert "common/windows/driver-consent.ps1" in files
+        assert "common/windows/driver-elevate.ps1" in files
         assert "Run.sh" not in files
         assert not any(name.startswith("host/") for name in files)
         windows = json.loads(files["windows-host.json"])
@@ -511,12 +507,6 @@ def test_headless_archive_imports_and_creates_an_empty_transport_capsule(
     } == {"etc/fplinux/usb-transport": b"rndis\n"}
 
 
-def test_package_parser_defaults_to_linux_and_accepts_windows() -> None:
-    parser, _check = create_parser(("nokia-ta1618",))
-    assert parser.parse_args(["package", "nokia-ta1618"]).host == "linux"
-    assert parser.parse_args(["package", "nokia-ta1618", "--host", "windows"]).host == "windows"
-
-
 def test_runtime_device_data_descriptor_records_the_selected_audio_parameters() -> None:
     config = {
         "platform": "ums9117",
@@ -558,12 +548,23 @@ def test_runtime_device_data_descriptor_records_the_selected_audio_parameters() 
 
 
 @pytest.mark.parametrize(
-    "option", ["--autonomous", "--candidate", "--offline", "--build-id", "--build-type"]
+    "arguments",
+    [
+        pytest.param(["--autonomous"], id="autonomous"),
+        pytest.param(["--candidate"], id="candidate"),
+        pytest.param(["--offline"], id="offline"),
+        pytest.param(["--build-id", "1234567890ab"], id="build-id"),
+        pytest.param(["--build-type", "release"], id="build-type"),
+    ],
 )
-def test_package_parser_rejects_removed_options(option: str) -> None:
+def test_package_parser_rejects_removed_options(
+    arguments: list[str], capsys: pytest.CaptureFixture[str]
+) -> None:
     parser, _check = create_parser(("nokia-ta1618",))
-    with pytest.raises(SystemExit):
-        parser.parse_args(["package", "nokia-ta1618", option])
+    with pytest.raises(SystemExit) as rejected:
+        parser.parse_args(["package", "nokia-ta1618", *arguments])
+    assert rejected.value.code == 2
+    assert f"unrecognized arguments: {' '.join(arguments)}" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(

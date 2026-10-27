@@ -132,7 +132,7 @@ def test_session_descriptor_preserves_offset_size_and_zero_template(ums_image: U
     """Both build modes publish the same fixed slot ABI without altering the image."""
     before = ums_image.image.read_bytes()
 
-    assert ums_image.verify() == {
+    assert ums_image.verify(payload_limit=0x80100000 + len(before) + 1) == {
         "offset": ums_image.slot,
         "bytes": 512,
         "template_sha256": hashlib.sha256(bytes(512)).hexdigest(),
@@ -140,7 +140,7 @@ def test_session_descriptor_preserves_offset_size_and_zero_template(ums_image: U
     assert ums_image.image.read_bytes() == before
 
 
-@pytest.mark.parametrize("contents", [b"DHTB", b"no header"])
+@pytest.mark.parametrize("contents", [b"DHTB", b"NOPE" + bytes(508)])
 def test_image_rejects_an_incomplete_dhtb_header(ums_image: UmsImage, contents: bytes) -> None:
     """The declared-size field is never read from a partial or foreign image."""
     ums_image.image.write_bytes(contents)
@@ -203,10 +203,11 @@ def test_session_slot_rejects_a_truncated_zero_template(ums_image: UmsImage) -> 
         ums_image.verify()
 
 
-def test_session_slot_rejects_existing_personalization(ums_image: UmsImage) -> None:
+@pytest.mark.parametrize("offset", [0, 511], ids=("first-byte", "last-byte"))
+def test_session_slot_rejects_existing_personalization(ums_image: UmsImage, offset: int) -> None:
     """Built artifacts must never carry a previous session's private bytes."""
     image = bytearray(ums_image.image.read_bytes())
-    image[ums_image.slot + 511] = 1
+    image[ums_image.slot + offset] = 1
     ums_image.image.write_bytes(image)
 
     with pytest.raises(SystemExit, match="slot is not all zero"):

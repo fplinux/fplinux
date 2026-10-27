@@ -20,27 +20,14 @@ class ManifestErrorWorkflowTests:
         """A contributor gets the filename and syntax location, not a Python stack."""
         checkout = tmp_path
         shutil.copy2(ROOT / "fplinux", checkout / "fplinux")
-        for name in (
-            "scripts",
-            "targets",
-            "platforms",
-            "profiles",
-            "alpine",
-            "bootstrap",
-            "common",
-            "include",
-            "lib",
-        ):
-            shutil.copytree(
-                ROOT / name,
-                checkout / name,
-                ignore=shutil.ignore_patterns("__pycache__"),
-            )
-        for path in ROOT.glob("*.toml"):
-            shutil.copy2(path, checkout / path.name)
-        for name in ("THIRD_PARTY_NOTICES.md",):
-            shutil.copy2(ROOT / name, checkout / name)
+        shutil.copytree(
+            ROOT / "scripts",
+            checkout / "scripts",
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
         target = checkout / "targets/nokia-ta1618"
+        (target / "release").mkdir(parents=True)
+        shutil.copy2(ROOT / "targets/nokia-ta1618/target.toml", target / "target.toml")
         (target / "release/manifest.toml").write_text("image = [\n", encoding="utf-8")
         result = run_process(
             [str(checkout / "fplinux"), "build", "nokia-ta1618"],

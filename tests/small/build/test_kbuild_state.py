@@ -226,18 +226,6 @@ class KernelOutputStateTests:
         assert (kernel_output.output) == (kernel_output.work / "kernel")
         assert (retained.read_bytes()) == (b"keep\n")
 
-    def test_outputs_without_success_receipt_are_a_miss(
-        self, kernel_output: KernelOutputContext
-    ) -> None:
-        """Populated output paths alone cannot become a cache hit."""
-        plan = kernel_output.plan()
-        kbuild_state.prepare_output(kernel_output.work, kernel_output.output)
-        kbuild_state.materialize_initramfs_input(kernel_output.work, kernel_output.initramfs, plan)
-        kernel_output.write_outputs(b"partial")
-
-        assert not ((kernel_output.work / kbuild_state.RECEIPT_NAME).exists())
-        assert not (kbuild_state.cache_hit(kernel_output.work, kernel_output.output, plan))
-
     def test_success_receipt_publishes_complete_outputs_as_a_hit(
         self, kernel_output: KernelOutputContext
     ) -> None:
@@ -247,6 +235,7 @@ class KernelOutputStateTests:
         kbuild_state.materialize_initramfs_input(kernel_output.work, kernel_output.initramfs, plan)
         kernel_output.write_outputs(b"complete")
 
+        assert not (kernel_output.work / kbuild_state.RECEIPT_NAME).exists()
         assert not (kbuild_state.cache_hit(kernel_output.work, kernel_output.output, plan))
         kbuild_state.publish_success(kernel_output.work, kernel_output.output, plan)
         assert kbuild_state.cache_hit(kernel_output.work, kernel_output.output, plan)

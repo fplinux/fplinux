@@ -338,13 +338,15 @@ class RuntimeManifestTests:
         with pytest.raises(SystemExit, match="runtime transport must be usb-ncm"):
             load_manifest(runtime_manifest_path, manifest)
 
+    @pytest.mark.parametrize(
+        "missing_key", ["profile", "transport"], ids=["missing-profile", "missing-transport"]
+    )
     def test_rejects_a_runtime_manifest_missing_required_fields(
-        self, runtime_manifest_path: Path
+        self, runtime_manifest_path: Path, missing_key: str
     ) -> None:
         """Omitted profile and transport fields are rejected rather than defaulted."""
         manifest = runtime_manifest()
-        del manifest["profile"]
-        del manifest["transport"]
+        del manifest[missing_key]
 
         with pytest.raises(SystemExit, match="runtime manifest must contain exactly"):
             load_manifest(runtime_manifest_path, manifest)

@@ -648,18 +648,11 @@ def test_active_launcher_excludes_another_process_and_releases_its_lock(
     assert (archive.root / "data/.launcher.lock").is_file()
 
 
-@pytest.mark.parametrize(
-    "error",
-    [
-        "SSH endpoint proved a different RAM session identity",
-        "more than one USB device matches this RAM session",
-        "the current USB-NCM SSH session did not reconnect before the deadline",
-    ],
-)
 def test_reconnect_failure_stops_without_starting_another_boot(
-    autonomous_archive: AutonomousArchive, error: str
+    autonomous_archive: AutonomousArchive,
 ) -> None:
     """The real launcher must preserve the controlled transport's safety failure."""
+    error = "SSH endpoint proved a different RAM session identity"
     archive = autonomous_archive
     prepared = archive.prepared.run_entrypoint(
         "fplinux.py", "prepare", "--from-dump", str(archive.prepared.dump)

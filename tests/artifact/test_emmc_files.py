@@ -35,9 +35,10 @@ class SavedPhone:
     userdata: Path
 
 
-@pytest.fixture
-def saved_phone(tmp_path: Path) -> SavedPhone:
-    """Create real ext4 filesystems with different base and override audio originals."""
+@pytest.fixture(scope="module")
+def saved_phone_template(tmp_path_factory: pytest.TempPathFactory) -> SavedPhone:
+    """Create shared ext4 inputs with different base and override audio originals."""
+    tmp_path = tmp_path_factory.mktemp("saved-phone-template")
     if shutil.which("mke2fs") is None:
         pytest.fail("quality environment lacks mke2fs")
     partitions = []
@@ -67,6 +68,19 @@ def saved_phone(tmp_path: Path) -> SavedPhone:
     delivery = tmp_path / "reader"
     prepare_python_modules(delivery, root=ROOT, cache=Path("/cache"))
     return SavedPhone(image, delivery / "scripts", partitions[0][1], partitions[1][1])
+
+
+@pytest.fixture
+def saved_phone(tmp_path: Path, saved_phone_template: SavedPhone) -> SavedPhone:
+    """Give each reader its own image while borrowing the pinned module input."""
+    image = tmp_path / "phone.bin"
+    shutil.copyfile(saved_phone_template.image, image)
+    return SavedPhone(
+        image,
+        saved_phone_template.modules,
+        saved_phone_template.system,
+        saved_phone_template.userdata,
+    )
 
 
 def test_isolated_ext4_reader_uses_phone_override_before_system_default(

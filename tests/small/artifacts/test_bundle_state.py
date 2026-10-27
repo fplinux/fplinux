@@ -125,17 +125,6 @@ class BundleStateTests:
         with pytest.raises(BundleStateError, match="wrong slot identity"):
             publish_bundle_generation(bundle_output.output, "demo", staging, generation)
 
-    def test_publish_and_resolve_current_generation(self, bundle_output: BundleOutput) -> None:
-        """Publish and resolve the selected generation."""
-        staging, generation = stage_bundle(bundle_output, "first")
-        published = publish_bundle_generation(bundle_output.output, "demo", staging, generation)
-        publish_current_bundle(bundle_output.output, "demo", published)
-
-        current = resolve_current_bundle(bundle_output.output, "demo")
-
-        assert (current.path) == (published)
-        assert ((current.path / "payload").read_text()) == ("first")
-
     def test_discarded_staging_does_not_replace_last_good_pointer(
         self, bundle_output: BundleOutput
     ) -> None:

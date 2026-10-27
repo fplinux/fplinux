@@ -49,13 +49,12 @@ class BootScreenFontTests:
                 )
             yield MappingProxyType(executables)
 
-    @pytest.mark.parametrize("font", [6, 7])
     def test_uninitialized_screen_updates_leave_state_unchanged(
-        self, executables: Mapping[int, Path], font: int
+        self, executables: Mapping[int, Path]
     ) -> None:
         """A caller without a display can report boot stages without initializing a canvas."""
         result = run_process(
-            [str(executables[font]), "--uninitialized"],
+            [str(executables[6]), "--uninitialized"],
             name="update uninitialized boot screen",
             timeout=10,
         )

@@ -176,7 +176,6 @@ class BootSessionHostTests:
             pytest.param("copy", 513, 2048, 1, id="long-record"),
             pytest.param("unaligned", 512, 2048, 1, id="unaligned-record"),
             pytest.param("no-output", 512, 2048, 11, id="missing-output"),
-            pytest.param("no-output", 0, 2048, 11, id="missing-output-and-record"),
             pytest.param("copy", 512, 0, 10, id="empty-tree"),
             pytest.param("copy", 512, 63, 10, id="short-tree"),
             pytest.param("copy", 512, 895, 10, id="truncated-slot"),

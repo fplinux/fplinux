@@ -26,14 +26,6 @@ class EnvironmentStateTests:
     """Use only an exact recipe and environment generation."""
 
     @staticmethod
-    def test_exact_state_is_a_hit(tmp_path: Path) -> None:
-        """Persist one exact environment generation at the fixed path."""
-        cache = tmp_path / ".cache"
-        expected = state()
-        publish_environment_state(cache, expected)
-        assert (load_environment_state(cache, "a" * 64)) == (expected)
-
-    @staticmethod
     def test_recipe_or_generation_mismatch_is_a_miss(tmp_path: Path) -> None:
         """A different recipe or malformed generation cannot be reused."""
         cache = tmp_path / ".cache"

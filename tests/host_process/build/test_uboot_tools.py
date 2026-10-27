@@ -276,7 +276,6 @@ class UbootToolsTests:
         for target, defconfig in (
             ("nokia-ta1618", "ta1618_defconfig"),
             ("inoi-240-modern-4g", "inoi240_defconfig"),
-            ("inoi-244-modern-4g", "inoi244_defconfig"),
         ):
             source = uboot_inputs.root / "targets" / target / "uboot" / defconfig
             source.parent.mkdir(parents=True)
@@ -323,4 +322,4 @@ class UbootToolsTests:
                     pytest.fail("configured U-Boot build did not produce an artifact")
                 assert (built.dtb.read_bytes().strip()) == (f'"{target}"'.encode("ascii"))
                 receipts.append(built.receipt["recipe"])
-        assert (len(set(receipts))) == (3)
+        assert (len(set(receipts))) == (2)

@@ -313,31 +313,3 @@ class FootprintCliTests:
         assert (result.stdout) == ("")
         assert ("Traceback") not in (result.stderr)
         assert not ((footprint_cli.root / ".cache").exists())
-
-    @pytest.mark.parametrize(
-        "arguments",
-        [
-            pytest.param(("run",), id="run"),
-            pytest.param(("device-data", "prepare"), id="device-data-prepare"),
-        ],
-    )
-    def test_events_help_and_saved_dump_rejection_are_available_without_phone(
-        self, footprint_cli: FootprintCli, arguments: tuple[str, ...]
-    ) -> None:
-        """Both loader commands expose event output and offline extraction rejects it."""
-        result = footprint_cli.run_cli(*arguments, "--help")
-        assert (result.returncode) == (0), result.stderr
-        assert ("--events PATH") in (result.stdout)
-        result = footprint_cli.run_cli(
-            "device-data",
-            "prepare",
-            "example",
-            "--from-dump",
-            "saved.bin",
-            "--events",
-            "events.jsonl",
-        )
-        assert result.returncode == 2, result.stderr
-        assert "--events: not allowed with argument --from-dump" in result.stderr
-        assert "Traceback" not in result.stderr
-        assert not ((footprint_cli.root / "events.jsonl").exists())

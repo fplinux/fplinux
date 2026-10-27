@@ -20,7 +20,8 @@ ZIMAGE = b"FPLinux test zImage payload\n"
 DTB = b"FPLinux test DTB payload\n"
 
 
-def _installed_tools() -> tuple[Path, Path]:
+@pytest.fixture(scope="module")
+def installed_fit_tools() -> tuple[Path, Path]:
     """Resolve the two required FIT tools from the pinned quality image."""
     resolved: list[Path] = []
     for name in ("mkimage", "dumpimage"):
@@ -114,10 +115,10 @@ class FitInputs:
 
 
 @pytest.fixture
-def fit_inputs(tmp_path: Path) -> FitInputs:
+def fit_inputs(tmp_path: Path, installed_fit_tools: tuple[Path, Path]) -> FitInputs:
     """Copy declared U-Boot tools and create isolated FIT inputs."""
     root = tmp_path
-    source_mkimage, source_dumpimage = _installed_tools()
+    source_mkimage, source_dumpimage = installed_fit_tools
     mkimage = _copy_declared_tool(root, source_mkimage)
     dumpimage = _copy_declared_tool(root, source_dumpimage)
     zimage = root / "zImage"

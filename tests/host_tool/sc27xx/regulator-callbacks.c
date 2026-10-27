@@ -18,6 +18,7 @@ struct regmap {
 	int update_error;
 	u32 update_error_reg;
 	unsigned int writes;
+	unsigned int updates;
 	u32 last_update_reg;
 	unsigned int sdcore_pd_updates;
 };
@@ -100,6 +101,7 @@ int regmap_update_bits(struct regmap *map, unsigned int reg, unsigned int mask,
 		       unsigned int value)
 {
 	assert(reg < ARRAY_SIZE(map->cells));
+	map->updates++;
 	map->last_update_reg = reg;
 	if (reg == 0xd00)
 		map->sdcore_pd_updates++;
@@ -238,19 +240,30 @@ static void check_sc2721(void)
 	match_variant(driver, &pdev, "sprd,sc2721-regulator");
 	assert(probe(driver, &pdev) == 0);
 	assert(map.writes == 1);
+	assert(map.updates == 0);
 	assert(map.cells[0xefc] == 0x6e7f);
+	map.writes = 0;
 	assert(pdev.dev.num_resources == 6);
 	core = find_regulator(&pdev, "vddcore");
 	desc = core->desc;
 	assert(!strcmp(desc->of_match, "dcdc@1"));
 	assert(desc->ops->enable == NULL && desc->ops->disable == NULL);
 	assert(desc->ops->set_voltage_sel == NULL);
+	assert(desc->ops->map_voltage == NULL);
+	assert(desc->ops->get_voltage_sel == NULL);
+	assert(desc->ops->list_voltage == NULL);
+	assert(desc->ops->is_enabled(core) == 1);
 	assert(desc->ops->get_voltage(core) == 400000);
+	map.cells[0xc54] = 0x5a0000a0;
+	assert(desc->ops->get_voltage(core) == 900000);
+	map.cells[0xc54] = 1;
+	assert(desc->ops->get_voltage(core) == 403125);
 	map.cells[0xc54] = 0xa5ff;
 	assert(desc->ops->get_voltage(core) == 1996875);
 	map.cells[0xc1c] = 0x20;
 	assert(desc->ops->is_enabled(core) == 0);
 	assert(desc->ops->get_voltage(core) == -EIO);
+	assert(map.writes == 0 && map.updates == 0);
 	map.cells[0xc1c] = 0;
 	sdcore = find_regulator(&pdev, "vddsdcore");
 	sdio = find_regulator(&pdev, "vddsdio");
@@ -489,25 +502,41 @@ static void check_sc2720_fixed(void)
 
 static void check_probe_errors(void)
 {
+	const struct {
+		u32 reg;
+		int error;
+	} read_errors[] = {
+		{ 0xc1c, -ETIMEDOUT },
+		{ 0xc54, -EIO },
+	};
 	struct platform_driver *driver = test_driver_sc2721_regulator_driver;
 	struct regmap map = {};
 	struct device parent = { .regmap = &map };
 	struct platform_device pdev = { .dev.parent = &parent };
+	size_t index;
 
 	assert(probe(driver, &pdev) == -EINVAL);
-	assert(map.writes == 0 && registration_attempts == 0);
+	assert(map.writes == 0 && map.updates == 0);
+	assert(registration_attempts == 0 && pdev.dev.num_resources == 0);
 	match_variant(driver, &pdev, "sprd,sc2721-regulator");
 	parent.regmap = NULL;
 	assert(probe(driver, &pdev) == -ENODEV);
-	assert(map.writes == 0 && registration_attempts == 0);
+	assert(map.writes == 0 && map.updates == 0);
+	assert(registration_attempts == 0 && pdev.dev.num_resources == 0);
 	parent.regmap = &map;
 	map.cells[0xc1c] = 0x20;
 	assert(probe(driver, &pdev) == -EIO);
-	assert(map.writes == 0 && registration_attempts == 0);
+	assert(map.writes == 0 && map.updates == 0);
+	assert(registration_attempts == 0 && pdev.dev.num_resources == 0);
 	map.cells[0xc1c] = 0;
-	map.read_error = -ETIMEDOUT;
-	assert(probe(driver, &pdev) == -ETIMEDOUT);
-	assert(map.writes == 0 && registration_attempts == 0);
+	for (index = 0; index < ARRAY_SIZE(read_errors); index++) {
+		map.read_error_reg = read_errors[index].reg;
+		map.read_error = read_errors[index].error;
+		assert(probe(driver, &pdev) == read_errors[index].error);
+		assert(map.writes == 0 && map.updates == 0);
+		assert(registration_attempts == 0 &&
+		       pdev.dev.num_resources == 0);
+	}
 	map.read_error = 0;
 	map.write_error = -ETIMEDOUT;
 	assert(probe(driver, &pdev) == -ETIMEDOUT);

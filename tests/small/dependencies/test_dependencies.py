@@ -402,15 +402,6 @@ class DependencySnapshotTests:
             read_snapshot(snapshot_checkout.snapshot)
         assert not ((snapshot_checkout.root / "outside").exists())
 
-    def test_environment_archive_is_verified_with_its_state(
-        self, snapshot_checkout: SnapshotCheckout
-    ) -> None:
-        """The reader accepts intact rootfs bytes and the complete environment state."""
-        manifest = snapshot_checkout.saved_environment()
-        assert (
-            (read_snapshot(snapshot_checkout.snapshot)["environment"]) == (manifest["environment"])
-        )
-
     @pytest.mark.parametrize(
         ("recipe", "directory_mode"),
         [

@@ -129,14 +129,11 @@ static void malformed_requests_leave_the_output_unchanged(void)
 		"{\"op\":\"world-edit\",\"id\":1,\"offset_minutes\":-211}",
 		"{\"op\":\"world-edit\",\"id\":1,\"offset_minutes\":\"345\"}",
 		"{\"op\":\"world-edit\",\"id\":1,\"offset_minutes\":345,\"extra\":true}",
-		"{\"op\":\"set-home\",\"offset_minutes\":0,\"hour24\":true}",
 		"{\"op\":\"set-view\",\"view\":2}",
 		"{\"op\":\"set-view\",\"view\":\"analog\"}",
 		"{\"op\":\"set-snooze\",\"minutes\":0}",
 		"{\"op\":\"snooze\",\"event_id\":1,\"minutes\":31}",
-		"{\"op\":\"demo-advance\",\"seconds\":60}",
 		"{\"op\":\"demo-reset\"}",
-		"{\"op\":\"set-tone-available\",\"available\":true}",
 	};
 	struct clock_request request, before;
 

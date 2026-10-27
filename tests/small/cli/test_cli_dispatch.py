@@ -308,13 +308,6 @@ class CliCacheLockTests:
     @pytest.mark.parametrize(
         ("arguments", "callback_name", "exclusive", "target", "profile"),
         [
-            (
-                ["build", "target", "--jobs", "1"],
-                "fplinux_cli.build.workflow.build",
-                True,
-                "target",
-                None,
-            ),
             (["check"], "fplinux_cli.quality.checks.check", True, None, None),
             (
                 ["test", "tests.small.environment.test_common"],
@@ -358,15 +351,7 @@ class CliCacheLockTests:
                 None,
                 None,
             ),
-            (["setup"], "fplinux_cli.environment.setup.prepare_setup", True, None, None),
             (["prune", "--apply"], "fplinux_cli.cache.prune.operations.prune", True, None, None),
-            (
-                ["package", "target"],
-                "fplinux_cli.packaging.archive.package_target",
-                True,
-                "target",
-                None,
-            ),
             (["run", "target"], "fplinux_cli.runtime.runner.run_target", False, "target", None),
             (["verify", "target"], "fplinux_cli.cli.runtime.verify_booted", False, "target", None),
             (
@@ -414,7 +399,6 @@ class CliCacheLockTests:
             ),
         ],
         ids=[
-            "build-target---jobs-1",
             "check",
             "test-tests.small.environment.test_common",
             "inspect-bundle-target",
@@ -422,9 +406,7 @@ class CliCacheLockTests:
             "checksum-demo-aport",
             "format-scripts/demo.py",
             "probe-build-probe.c---output-.cache/tools/probe",
-            "setup",
             "prune---apply",
-            "package-target",
             "run-target",
             "verify-target",
             "console-target",

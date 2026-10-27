@@ -251,6 +251,12 @@ class TyrQuakeLauncherCliTests:
 
         assert (result.returncode) == (0), result.stderr
         assert ("Usage:") in (result.stdout)
+        assert "--heapsize" in result.stdout
+        assert "32768" in result.stdout
+        assert "--renderer" in result.stdout
+        assert "auto|software|gpu" in result.stdout
+        assert "default auto" in result.stdout
+        assert "--stats" in result.stdout
         assert (result.stderr) == ("")
         assert not (tmp_path / "resources-opened").exists()
 
@@ -310,18 +316,6 @@ class TyrQuakeLauncherCliTests:
         assert (result.stdout) == ("")
         assert ("--heapsize") in (result.stderr)
 
-    def test_help_lists_the_heap_size_and_its_default(self, quake_launcher: Path) -> None:
-        """The size is part of the published interface, not a hidden constant."""
-        result = run_process(
-            [str(quake_launcher), "--help"],
-            name="run TyrQuake launcher help",
-            timeout=5,
-        )
-
-        assert (result.returncode) == (0), result.stderr
-        assert ("--heapsize") in (result.stdout)
-        assert ("32768") in (result.stdout)
-
     @pytest.mark.parametrize("value", ["", "invalid", "GPU", "auto,software", "--help"])
     def test_invalid_renderer_is_refused_before_resources_are_opened(
         self,
@@ -343,20 +337,6 @@ class TyrQuakeLauncherCliTests:
         assert "--renderer" in result.stderr
         assert not (tmp_path / "resources-opened").exists()
         assert not (tmp_path / "engine-report").exists()
-
-    def test_help_lists_renderer_choices_and_the_auto_default(self, quake_launcher: Path) -> None:
-        """Renderer selection is discoverable through the launcher interface."""
-        result = run_process(
-            [str(quake_launcher), "--help"],
-            name="run TyrQuake renderer help",
-            timeout=5,
-        )
-
-        assert result.returncode == 0, result.stderr
-        assert "--renderer" in result.stdout
-        assert "auto|software|gpu" in result.stdout
-        assert "default auto" in result.stdout
-        assert "--stats" in result.stdout
 
 
 class TyrQuakeLauncherProcessTests:

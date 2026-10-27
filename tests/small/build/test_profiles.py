@@ -77,9 +77,9 @@ class GlobalProfileTests:
 
     @staticmethod
     @pytest.mark.usefixtures("profile_context")
-    @pytest.mark.parametrize("target", ["first", "second"])
-    def test_default_alias_has_the_same_identity_and_configuration(target: str) -> None:
+    def test_default_alias_has_the_same_identity_and_configuration() -> None:
         """Spelling default explicitly does not create a second build context."""
+        target = "first"
         implicit = targets.load_target(target)
         explicit = targets.load_target(target, "default")
         assert (implicit) == (explicit)
@@ -89,9 +89,9 @@ class GlobalProfileTests:
 
     @staticmethod
     @pytest.mark.usefixtures("profile_context")
-    @pytest.mark.parametrize("target", ["first", "second"])
-    def test_both_boards_share_boot_policy_and_keep_their_own_boot_sources(target: str) -> None:
+    def test_root_selection_keeps_feature_policy_and_board_boot_sources() -> None:
         """MicroSD changes root placement but keeps feature and firmware inputs."""
+        target = "first"
         ram = targets.load_target(target)
         card = targets.load_target(target, "microsd-uboot")
         assert (paths.discover_profiles(target)) == (("default", "microsd-uboot"))
@@ -507,11 +507,17 @@ class RepositoryProfileCompressionTests:
     """Admit prepared Kconfig files only for the selected compressor policy."""
 
     @staticmethod
-    @pytest.mark.parametrize(("target", "profile"), REPOSITORY_PROFILES)
-    def test_each_profile_rejects_the_opposite_prepared_compressor(
+    @pytest.mark.parametrize(
+        ("target", "profile"),
+        [
+            pytest.param("nokia-ta1618", "default", id="initramfs"),
+            pytest.param("xiaomi-qin-1s-plus", "microsd-root", id="external"),
+        ],
+    )
+    def test_root_kind_rejects_the_opposite_prepared_compressor(
         tmp_path: Path, target: str, profile: str
     ) -> None:
-        """RAM admits ZSTD and microSD admits LZO-RLE for every target offering them."""
+        """RAM admits ZSTD and an external root admits LZO-RLE."""
         prepared_configs = {
             "initramfs": {
                 "correct": (

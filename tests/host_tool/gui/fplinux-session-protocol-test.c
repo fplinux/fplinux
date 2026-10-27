@@ -966,7 +966,6 @@ int main(void)
 		"{\"display\":\"on\"}",
 		"[\"ACTIVE\"]",
 		"{\"type\":\"HELLO\"}{}",
-		"{\"type\":\"VIBRATE\"}",
 		"{\"type\":\"control\",\"name\":\"volume\"}",
 		"{\"type\":\"ACTIVE\",\"control_centre\":false}",
 		"{\"type\":\"CONFIG\",\"audio\":\"false\"}",

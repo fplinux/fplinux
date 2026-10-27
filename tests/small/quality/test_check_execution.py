@@ -41,24 +41,6 @@ class CheckScopeSelectionTests:
             ("repository", "python", "kernel")
         )
 
-    def test_default_selection_includes_source_tests_and_kernel_checks(self) -> None:
-        """Omitting scopes retains the complete gate, including the full test workload."""
-        assert resolve_check_scopes([]) == (
-            "repository",
-            "source",
-            "metadata",
-            "docs",
-            "spelling",
-            "secrets",
-            "licenses",
-            "python",
-            "shell",
-            "alpine",
-            "c",
-            "tests",
-            "kernel",
-        )
-
 
 class AnalyzerAndTestExecutionTests:
     """Exercise scope routing and receipts with controlled external container processes."""

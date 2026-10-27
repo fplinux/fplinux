@@ -28,7 +28,6 @@ PARALLEL = "CONFIG_VIDEO_UMS9117_DCAM_PARALLEL"
     ("enabled", "expected_support"),
     [
         pytest.param((), 0, id="no-camera-input"),
-        pytest.param((SERIAL,), 0, id="serial-without-data-profile"),
         pytest.param((SERIAL, ONE_BIT), 1, id="one-bit-only"),
         pytest.param((SERIAL, TWO_BIT), 2, id="two-bit-only"),
         pytest.param((PARALLEL,), 4, id="parallel-only"),

@@ -85,19 +85,42 @@ class KernelCommandPeer:
 
 
 @pytest.mark.parametrize(
-    ("boot_font", "font_symbol"),
-    [("6x8", "CONFIG_FONT_6x8"), ("7x14", "CONFIG_FONT_7x14")],
-)
-@pytest.mark.parametrize(
-    ("target", "delivery", "make_target", "additional_forbidden"),
+    ("target", "delivery", "make_target", "additional_forbidden", "boot_font", "font_symbol"),
     [
-        pytest.param("nokia-110-4g", "embedded", "zImage", (), id="ums-embedded"),
-        pytest.param("xiaomi-qin-1s-plus", "external", "Image", (), id="qin-external-ram"),
+        pytest.param(
+            "nokia-110-4g",
+            "embedded",
+            "zImage",
+            (),
+            "6x8",
+            "CONFIG_FONT_6x8",
+            id="ums-embedded-native-font",
+        ),
+        pytest.param(
+            "nokia-110-4g",
+            "embedded",
+            "zImage",
+            (),
+            "7x14",
+            "CONFIG_FONT_7x14",
+            id="ums-embedded-alternate-font",
+        ),
+        pytest.param(
+            "xiaomi-qin-1s-plus",
+            "external",
+            "Image",
+            (),
+            "7x14",
+            "CONFIG_FONT_7x14",
+            id="qin-external-ram",
+        ),
         pytest.param(
             "inoi-240-modern-4g",
             "embedded",
             "zImage",
             _BOARD_STORAGE_EXCLUSIONS,
+            "6x8",
+            "CONFIG_FONT_6x8",
             id="inoi-240-storage-guards",
         ),
         pytest.param(
@@ -105,6 +128,8 @@ class KernelCommandPeer:
             "embedded",
             "zImage",
             _BOARD_STORAGE_EXCLUSIONS,
+            "7x14",
+            "CONFIG_FONT_7x14",
             id="inoi-244-storage-guards",
         ),
         pytest.param(
@@ -112,6 +137,8 @@ class KernelCommandPeer:
             "embedded",
             "zImage",
             _BOARD_STORAGE_EXCLUSIONS,
+            "7x14",
+            "CONFIG_FONT_7x14",
             id="maxvi-storage-guards",
         ),
     ],

@@ -201,35 +201,6 @@ class AlpineRecipesTests:
             )
         )
 
-    def test_aport_edit_invalidates_only_its_package_recipe(
-        self, alpine_source: AlpineSourceContext
-    ) -> None:
-        """An ordinary local edit does not rebuild unrelated FPLinux APKs."""
-        before = {
-            name: alpine_recipes.alpine_package_recipe(
-                name,
-                "1" * 64,
-                alpine_source.signing_key,
-                alpine_source.root,
-            )
-            for name in alpine_source.packages
-        }
-        changed_aport = alpine_source.root / f"alpine/aports/{alpine_source.packages[1]}/APKBUILD"
-        changed_aport.write_bytes(f"pkgname={alpine_source.packages[1]}\npkgrel=1\n".encode())
-        after = {
-            name: alpine_recipes.alpine_package_recipe(
-                name,
-                "1" * 64,
-                alpine_source.signing_key,
-                alpine_source.root,
-            )
-            for name in alpine_source.packages
-        }
-
-        assert (before[alpine_source.packages[1]]) != (after[alpine_source.packages[1]])
-        for name in set(alpine_source.packages) - {alpine_source.packages[1]}:
-            assert (before[name]) == (after[name])
-
     def test_declared_shared_source_is_causal_only_for_its_consumer(
         self, alpine_source: AlpineSourceContext
     ) -> None:

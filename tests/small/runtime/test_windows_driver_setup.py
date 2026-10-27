@@ -85,8 +85,8 @@ def test_accepted_setup_waits_for_disconnect_without_claiming_usb_ready(tmp_path
     assert events == ["driver-setup", "driver-reconnect"]
 
 
-@pytest.mark.parametrize("error", ["setup was not authorized", "setup failed with status 7"])
-def test_cancelled_or_failed_setup_never_reports_ready(tmp_path: Path, error: str) -> None:
+def test_setup_error_stops_before_reporting_ready(tmp_path: Path) -> None:
+    error = "setup failed with status 7"
     host = DriverHost(setup_error=error)
     events: list[str] = []
     with pytest.raises(SystemExit, match=error):

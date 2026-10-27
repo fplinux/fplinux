@@ -93,6 +93,8 @@ def test_offline_staging_contains_declared_bytes_and_preserves_recipe_mode(
 ) -> None:
     """Installation receives verified files and no unrelated cached phone state."""
     root, context = setup_inputs
+    archive = root / ".cache/downloads/sources/terminus/terminus.tar.gz"
+    archive.with_name("unrelated.tar.gz").write_bytes(b"unrelated source\n")
     with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")):
         env_setup._stage_environment_inputs(context, offline=True)  # noqa: SLF001 -- test the host staging boundary.
     assert (
@@ -102,17 +104,15 @@ def test_offline_staging_contains_declared_bytes_and_preserves_recipe_mode(
     assert (context / "install.py").stat().st_mode & 0o777 == 0o755
     assert not (context / "inputs/private").exists()
     assert (root / ".cache/private/phone-state").read_bytes() == b"private\n"
-
-
-def test_offline_staging_captures_the_icon_packages_declared_archive(
-    setup_inputs: tuple[Path, Path],
-) -> None:
-    """The same verified package original reaches the offline native renderer."""
-    _root, context = setup_inputs
-    with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")):
-        env_setup._stage_environment_inputs(context, offline=True)  # noqa: SLF001 -- test the host staging boundary.
     assert (context / "quality/ui-icons/tabler.tgz").read_bytes() == b"icon archive fixture\n"
     assert not (context / "inputs/downloads/sources/tabler/tabler.tgz").exists()
+    assert (context / "quality/ui-fonts/face.ttf").read_bytes() == b"font fixture\n"
+    assert (context / "quality/ui-fonts/OFL.txt").read_bytes() == b"font license\n"
+    assert not (context / "quality/ui-fonts/local.c").exists()
+    assert (
+        context / "quality/terminus/terminus.tar.gz"
+    ).read_bytes() == b"bitmap archive fixture\n"
+    assert not (context / "quality/terminus/unrelated.tar.gz").exists()
 
 
 def test_offline_missing_input_reports_its_url_without_downloading(
@@ -167,18 +167,6 @@ def ui_font_inputs(setup_inputs: tuple[Path, Path]) -> tuple[Path, Path]:
     return root, context
 
 
-def test_offline_staging_captures_ui_font_and_license_originals(
-    ui_font_inputs: tuple[Path, Path],
-) -> None:
-    """Offline rendering receives exact package originals without unrelated aport files."""
-    _root, context = ui_font_inputs
-    with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")):
-        env_setup._stage_environment_inputs(context, offline=True)  # noqa: SLF001 -- test the host staging boundary.
-    assert (context / "quality/ui-fonts/face.ttf").read_bytes() == b"font fixture\n"
-    assert (context / "quality/ui-fonts/OFL.txt").read_bytes() == b"font license\n"
-    assert not (context / "quality/ui-fonts/local.c").exists()
-
-
 @pytest.mark.parametrize("available", [False, True], ids=("missing", "wrong-checksum"))
 def test_offline_staging_rejects_unavailable_ui_font_original(
     ui_font_inputs: tuple[Path, Path], *, available: bool
@@ -205,20 +193,6 @@ def terminal_font_inputs(setup_inputs: tuple[Path, Path]) -> tuple[Path, Path]:
     archive = root / ".cache/downloads/sources/terminus/terminus.tar.gz"
     archive.with_name("unrelated.tar.gz").write_bytes(b"unrelated source\n")
     return root, context
-
-
-def test_offline_staging_captures_exact_terminal_font_archive(
-    terminal_font_inputs: tuple[Path, Path],
-) -> None:
-    """The installer receives its verified archive without unrelated source-cache bytes."""
-    _root, context = terminal_font_inputs
-    with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")):
-        env_setup._stage_environment_inputs(context, offline=True)  # noqa: SLF001 -- test the host staging boundary.
-
-    assert (
-        context / "quality/terminus/terminus.tar.gz"
-    ).read_bytes() == b"bitmap archive fixture\n"
-    assert not (context / "quality/terminus/unrelated.tar.gz").exists()
 
 
 @pytest.mark.parametrize("available", [False, True], ids=("missing", "wrong-checksum"))

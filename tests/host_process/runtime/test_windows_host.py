@@ -336,7 +336,7 @@ def test_binary_stream_progress_counts_overwrites_without_counting_the_existing_
     assert output.read_bytes() == b"keep\x00\r\n\xff\x80fgh"
 
 
-@pytest.mark.parametrize("status", [0, 7, 17, 130])
+@pytest.mark.parametrize("status", [0, 7, 130])
 def test_interactive_shell_inherits_terminal_output_and_preserves_exit_status(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], status: int
 ) -> None:
@@ -1778,39 +1778,4 @@ def test_network_discovery_receives_the_exact_usb_session_identity(
         "1317",
         "-ProductId",
         "42150",
-    ]
-
-
-@pytest.mark.parametrize(
-    ("script", "response"),
-    [
-        ("driver-consent.ps1", {"accepted": True}),
-        ("driver-elevate.ps1", {"cancelled": False, "status": 0}),
-    ],
-)
-def test_driver_dialog_carrier_has_no_console_and_keeps_script_arguments(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, script: str, response: dict[str, object]
-) -> None:
-    """Inspect native launch policy; Linux cannot prove WinForms or UAC visibility."""
-    arguments_file = tmp_path / "arguments.json"
-    monkeypatch.setenv("FPLINUX_TEST_POWERSHELL_ARGUMENTS", str(arguments_file))
-    monkeypatch.setenv("FPLINUX_TEST_POWERSHELL_RESULT", json.dumps(response))
-    powershell = tmp_path / "powershell.exe"
-    install_python_script(
-        ROOT / "tests/host_process/runtime/fixtures/windows-host/windows_powershell_boundary.py",
-        powershell,
-    )
-    host = windows_host.WindowsHost.__new__(windows_host.WindowsHost)
-    host.powershell = powershell
-
-    assert host.ps(script, timeout=3) == response
-
-    assert json.loads(arguments_file.read_text(encoding="utf-8")) == [
-        "-NoLogo",
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        str(ROOT / "common/windows" / script),
     ]

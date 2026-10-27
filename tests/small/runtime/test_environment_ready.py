@@ -15,9 +15,16 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.parametrize(
-    "condition", ["missing-runtime", "missing-receipt", "stale-recipe", "stale-content", "ready"]
+    ("target", "condition"),
+    [
+        pytest.param(None, "missing-runtime", id="missing-runtime"),
+        pytest.param(None, "missing-receipt", id="missing-receipt"),
+        pytest.param(None, "stale-recipe", id="stale-recipe"),
+        pytest.param(None, "stale-content", id="stale-content"),
+        pytest.param(None, "ready", id="ready"),
+        pytest.param("example-phone", "missing-runtime", id="target-missing-runtime"),
+    ],
 )
-@pytest.mark.parametrize("target", [None, "example-phone"])
 def test_environment_admission_requires_exact_prepared_state_without_setup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

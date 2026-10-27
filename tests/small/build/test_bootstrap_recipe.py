@@ -116,9 +116,6 @@ class BootstrapRecipeTests:
                 checksum="b" * 64
             ),
             "vendor-commit": lambda: bootstrap_context.sources["vendor"].update(version="b" * 40),
-            "toolchain": lambda: bootstrap_context.platform["bootstrap"].update(
-                toolchain="arm-none-eabi-custom"
-            ),
             "build-targets": lambda: bootstrap_context.platform["bootstrap"].update(
                 build_targets=["clean", "all"]
             ),
@@ -154,7 +151,11 @@ class BootstrapRecipeTests:
             ),
         }
         baseline = bootstrap_context.digest()
-        changes[changed_input]()
+        if changed_input == "toolchain":
+            bootstrap_context.platform["bootstrap"]["toolchain"] = "arm-none-eabi-custom"
+            bootstrap_context.target_config["bootstrap"]["toolchain"] = "arm-none-eabi-custom"
+        else:
+            changes[changed_input]()
         assert (baseline) != (bootstrap_context.digest())
 
     def test_host_and_docs_are_outside_the_bootstrap_closure(
