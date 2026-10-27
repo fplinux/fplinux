@@ -79,7 +79,7 @@ static max_align_t system_storage;
 struct object_geometry {
 	lv_obj_t *parent;
 	int width, height, x, y;
-	int pad_right;
+	int pad_right, pad_row;
 	bool hidden, deleted, title_scrolling;
 	const lv_font_t *font;
 	const void *image_src;
@@ -138,6 +138,7 @@ static struct {
 	size_t count;
 	int actions[MENU_ITEMS];
 	char texts[MENU_ITEMS][32];
+	bool separators[MENU_ITEMS];
 	struct fplinux_ui_menu_position position;
 } menu;
 
@@ -214,6 +215,7 @@ lv_obj_t *lv_obj_get_child(const lv_obj_t *obj, int32_t index)
 {
 	return (lv_obj_t *)&object_storage;
 }
+ZERO(int32_t, lv_obj_get_index, const lv_obj_t *obj)
 NOTHING(lv_arc_set_angles, lv_obj_t *obj, lv_value_precise_t start,
 	lv_value_precise_t end)
 NOTHING(lv_arc_set_bg_angles, lv_obj_t *obj, lv_value_precise_t start,
@@ -294,6 +296,10 @@ int32_t lv_obj_get_content_height(const lv_obj_t *obj)
 {
 	return geometry(obj)->height;
 }
+int32_t lv_obj_get_height(const lv_obj_t *obj)
+{
+	return geometry(obj)->height;
+}
 int32_t lv_obj_get_content_width(const lv_obj_t *obj)
 {
 	return geometry(obj)->width;
@@ -307,6 +313,10 @@ ZERO(int32_t, lv_obj_get_style_pad_top, const lv_obj_t *obj, lv_part_t part)
 int32_t lv_obj_get_style_pad_right(const lv_obj_t *obj, lv_part_t part)
 {
 	return geometry(obj)->pad_right;
+}
+int32_t lv_obj_get_style_pad_row(const lv_obj_t *obj, lv_part_t part)
+{
+	return geometry(obj)->pad_row;
 }
 ZERO(int32_t, lv_obj_get_style_text_letter_space, const lv_obj_t *obj,
      lv_part_t part)
@@ -404,8 +414,11 @@ void lv_obj_set_style_pad_right(lv_obj_t *obj, int32_t value,
 }
 NOTHING(lv_obj_set_style_radius, lv_obj_t *obj, int32_t value,
 	lv_style_selector_t selector)
-NOTHING(lv_obj_set_style_pad_row, lv_obj_t *obj, int32_t value,
-	lv_style_selector_t selector)
+void lv_obj_set_style_pad_row(lv_obj_t *obj, int32_t value,
+			      lv_style_selector_t selector)
+{
+	geometry(obj)->pad_row = value;
+}
 NOTHING(lv_obj_set_style_pad_ver, lv_obj_t *obj, int32_t value,
 	lv_style_selector_t selector)
 NOTHING(lv_obj_set_style_text_align, lv_obj_t *obj, lv_text_align_t value,
@@ -593,6 +606,10 @@ NOTHING(fplinux_ui_listview_set_callbacks, struct fplinux_ui_listview *list,
 	void *context)
 ZERO(bool, fplinux_ui_listview_set_icon, struct fplinux_ui_listview *list,
      size_t index, lv_draw_buf_t *icon, enum fplinux_ui_list_icon_kind kind)
+ZERO(bool, fplinux_ui_listview_set_emphasis, struct fplinux_ui_listview *list,
+     size_t index, bool emphasis)
+ZERO(bool, fplinux_ui_listview_set_trailing_icon,
+     struct fplinux_ui_listview *list, size_t index, const void *source)
 NOTHING(fplinux_ui_listview_set_inline_detail, struct fplinux_ui_listview *list,
 	bool inline_detail)
 NOTHING(fplinux_ui_listview_set_marked, struct fplinux_ui_listview *list,
@@ -842,6 +859,7 @@ bool fplinux_ui_menu_open(struct fplinux_ui *owner,
 	menu.position = (struct fplinux_ui_menu_position){ 0 };
 	for (size_t i = 0; i < count; ++i) {
 		menu.actions[i] = items[i].action;
+		menu.separators[i] = items[i].separator_before;
 		snprintf(menu.texts[i], sizeof(menu.texts[i]), "%s",
 			 items[i].text);
 	}
@@ -1582,21 +1600,32 @@ static void test_options_keeps_back_last_and_delivers_visible_actions(void)
 {
 	const struct fplinux_ui_command commands[] = {
 		{ .id = 30, .type = FPLINUX_UI_COMMAND_BACK, .priority = -50 },
-		{ .id = 31, .type = FPLINUX_UI_COMMAND_CANCEL, .priority = -40 },
+		{ .id = 31,
+		  .type = FPLINUX_UI_COMMAND_CANCEL,
+		  .priority = -40,
+		  .separator_before = true },
 		{ .id = 32, .type = FPLINUX_UI_COMMAND_EXIT, .priority = -30 },
 		{ .id = 33, .type = FPLINUX_UI_COMMAND_STOP, .priority = -20 },
 		{ .id = 20,
 		  .type = FPLINUX_UI_COMMAND_SCREEN,
-		  .label = "Refresh" },
+		  .label = "Refresh",
+		  .short_label = "R",
+		  .separator_before = true },
 		{ .id = 21,
 		  .type = FPLINUX_UI_COMMAND_SCREEN,
 		  .label = "Details" },
-		{ .id = 34, .type = FPLINUX_UI_COMMAND_HELP, .priority = 1 },
+		{ .id = 34,
+		  .type = FPLINUX_UI_COMMAND_HELP,
+		  .priority = 1,
+		  .separator_before = true },
 	};
 	const char *const expected[] = {
 		"Cancel", "Exit", "Stop", "Refresh", "Details", "Help", "Back",
 	};
 	const int ids[] = { 31, 32, 33, 20, 21, 34, 30 };
+	const bool separators[] = {
+		true, false, false, true, false, true, false
+	};
 	struct fplinux_ui_screen *screen =
 		fplinux_ui_text_box_new(&ui, "Name", "abcdef", 32);
 
@@ -1611,8 +1640,10 @@ static void test_options_keeps_back_last_and_delivers_visible_actions(void)
 	     ++choice) {
 		press_options();
 		CHECK(menu.count == sizeof(expected) / sizeof(expected[0]));
-		for (size_t row = 0; row < menu.count; ++row)
+		for (size_t row = 0; row < menu.count; ++row) {
 			CHECK(!strcmp(menu.texts[row], expected[row]));
+			CHECK(menu.separators[row] == separators[row]);
+		}
 		choose(expected[choice]);
 		CHECK(fired.commands == 1 && fired.command_id == ids[choice]);
 		CHECK(!strcmp(fplinux_ui_text_box_get(screen), "abcdef"));

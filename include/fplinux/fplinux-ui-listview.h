@@ -75,6 +75,14 @@ void fplinux_ui_listview_clear(struct fplinux_ui_listview *list);
 bool fplinux_ui_listview_set_icon(struct fplinux_ui_listview *list,
 				  size_t index, lv_draw_buf_t *icon,
 				  enum fplinux_ui_list_icon_kind kind);
+/* Stored rows only; emphasis uses the title face and a status icon is borrowed. */
+bool fplinux_ui_listview_set_emphasis(struct fplinux_ui_listview *list,
+				      size_t index, bool emphasis);
+bool fplinux_ui_listview_set_trailing_icon(struct fplinux_ui_listview *list,
+					   size_t index, const void *source);
+/* Stored rows only; draws a group boundary without changing row geometry. */
+bool fplinux_ui_listview_set_separator_before(struct fplinux_ui_listview *list,
+					      size_t index, bool separator);
 size_t fplinux_ui_listview_count(const struct fplinux_ui_listview *list);
 
 /*

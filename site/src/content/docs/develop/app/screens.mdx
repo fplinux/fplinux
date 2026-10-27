@@ -19,7 +19,13 @@ Use the high-level screens in `fplinux/fplinux-ui-screen.h` for ordinary applica
 
 Use an implicit List for navigation, an exclusive List for one selected value, and a multiple List for independent selections. Forms already provide field editors; do not create a second keypad editor inside them. [Text entry](/fplinux/develop/app/text-input/) explains field types and pending input.
 
-Lists can also use a virtual data source when creating every row would waste memory. The callbacks supply the current rows; keep their context alive and notify the list when its data changes. API Demos includes ordinary and virtual lists, forms and item commands.
+Form images keep their proportions inside the available width, including space for the scroll indicator. Their height leaves room for the complete multiline caption and any link or button frame. The runtime fits them again when the view changes size; the application can release the source after appending the image.
+
+For settings-style rows, call `fplinux_ui_list_set_value_details()` on an empty stored List before adding rows, then supply each current value as its detail. The runtime uses a shared right-aligned value column on landscape profiles and a second line on the other profiles. Ordinary descriptive details keep their usual layout. Calling it after adding rows returns `EBUSY`; another screen kind or a virtual List returns `EINVAL`.
+
+Stored rows can emphasize their primary text with `fplinux_ui_list_set_emphasis()` and show a status image at the right with `fplinux_ui_list_set_trailing_icon()`. The latter borrows its image until replaced or the row is deleted; a runtime-owned glyph remains valid until the UI closes. Use these row properties for a time and its status rather than drawing a separate list in the application.
+
+Lists can also use a virtual data source when creating every row would waste memory. The runtime passes a full zeroed `fplinux_ui_virtual_row`; the synchronous provider fills its fields. Keep its context alive and notify the list when its data changes. Strings and icons must remain valid after the provider returns, until another row request or application callback; a local array is too short-lived. Providers only supply data: they must not mutate lists, delete objects or close the runtime, and navigation returns `EBUSY` while they run. API Demos includes ordinary and virtual lists, forms and item commands.
 
 Use `fplinux_ui_list_set_focus_listener()` to follow the row the user reaches with navigation keys. It is separate from the screen's change listener, which reports value changes such as marking a choice. Moving focus programmatically does not call either listener.
 
@@ -27,13 +33,17 @@ For a page-relative shortcut, `fplinux_ui_list_get_first_visible()` returns the 
 
 ## Commands describe actions
 
-Add `struct fplinux_ui_command` values with application-owned IDs, a command type and a short translated label. The runtime chooses their placement:
+Add `struct fplinux_ui_command` values with application-owned IDs, a command type and a full translated label. The runtime chooses their placement:
 
 - The right soft key takes the first Back, Cancel, Exit or Stop action by priority.
 - Centre activates the focused control, such as a list row or editable field, then falls back to the screen's OK command.
 - Remaining actions use the left soft key or **Options**. Help goes into Options.
 
 Lower priority numbers choose keys first; equal priorities retain insertion order. A command attached to the focused item wins a tie with a screen command. Inside Options, Back comes last; the other commands keep their priority order. Back appears there when another action occupies its key, such as Clear in a nonempty text field. A screen with Back already on a soft key does not need another Back row. Reusing an ID on the same screen replaces that command. Labels are copied; callback context remains yours.
+
+An optional `short_label` gives a command a compact soft-key legend. The runtime first tries full labels, then the supplied short labels, then the ordinary Options assignment. Options keeps the full label. Both strings are copied; shortening does not change the command ID, priority or `keep_visible` behavior.
+
+Set `separator_before` on the first command of an Options group to draw a boundary above its row. The first menu row has no boundary. Grouping does not add selectable rows, change command priority or alter soft-key assignment.
 
 Use `fplinux_ui_list_set_select_label()` to name the centre action of an IMPLICIT or EXCLUSIVE List. Passing null restores the standard Select label. A MULTIPLE List keeps its Mark or Unmark action. The label does not disable input or change the selection policy; the application must handle any operation already in progress.
 
@@ -51,11 +61,14 @@ Options opens a compact menu touching the left edge above the soft-key bar, with
 | `fplinux_ui_navigate()` | Open a child; from an Options callback, retain that menu for Back |
 | `fplinux_ui_go_back()` | Return to the parent, restoring its Options selection when appropriate; from the first screen, request application close |
 | `fplinux_ui_pop()` | Finish an action and remove the top screen without reopening Options; returns false for the only screen |
+| `fplinux_ui_pop_to()` | Remove every screen above a retained application screen |
 | `fplinux_ui_replace()` | Replace the current screen and discard it |
 
 Use `navigate()` for an Options item that opens Help or another page. Use `go_back()` for its Back action. Use `pop()` after a completed action such as Send or Done. This gives the user the same return path across applications without an application-owned menu stack.
 
-These operations transfer or release screen ownership. Constructors register screens with the runtime, including screens not yet pushed; `fplinux_ui_close()` frees them. Do not free a screen yourself or use its pointer after it has been popped or replaced. Keep application context alive until all screens and callbacks that borrow it are gone. Text getters return borrowed text; copy it before keeping it across changes to the field or removal of the screen.
+Constructors register screens with the runtime, including screens not yet pushed; `fplinux_ui_close()` frees them. Navigation changes their position. `push()`, `navigate()` and `replace()` return a boolean: `EINVAL` means a null argument, `ENOENT` means the target does not belong to this runtime, and `EBUSY` means the target is already shown or navigation is in progress. A virtual row provider also makes navigation busy. Failure leaves the stack and runtime choice intact; a constructed screen remains owned by the runtime and may be used in a later navigation. `pop_to()` returns `ENOENT` when its target is absent from the application stack. `pop()` returns `ENOENT` when there is no parent. Do not free a screen yourself or use its pointer after it has been popped or replaced. Keep application context alive until all screens and callbacks that borrow it are gone. Text getters return borrowed text; copy it before keeping it across changes to the field or removal of the screen.
+
+Form choices and Open with occupy a private runtime slot above the application stack. `fplinux_ui_current()` returns the application screen under that choice. Input, focus and legends follow the choice; successful application navigation cancels it before changing the stack. Cancelling a Form choice retains its previous value without a change callback, and deleting its field closes it. Hiding the application preserves a choice for Resume; Open follows the application's ordinary initial navigation.
 
 Handle [opening and restoring an application](/fplinux/develop/app/lifecycle/#activation-and-visibility) through the same application-owned navigation. Before removing a child screen, release its timers, watches and other borrowed resources and clear retained pointers. A TextBox can cancel its symbol grid with `fplinux_ui_text_box_cancel_picker()` without replacing the field or changing its text, caret or input mode. Use `fplinux_ui_menu_close()` for an ordinary Options menu; a save decision remains owned by its application.
 
@@ -64,6 +77,8 @@ Handle [opening and restoring an application](/fplinux/develop/app/lifecycle/#ac
 An Alert displays over the previous screen and temporarily prevents interaction with it. On a command, the runtime removes the Alert from the stack before calling its listener, then deletes it after the listener returns. The listener may read the Alert during that call, but must not pop it, update it or retain its pointer. It may open a new screen.
 
 A timed notice closes without calling the command listener. For a busy or progress Alert, cancellation is an ordinary command with the same lifetime rule. Cancelling the Alert does not cancel application work by itself; the listener must stop the operation it owns.
+
+A long message scrolls while the title, progress indicator and footer stay visible. Use `fplinux_ui_alert_set_text()` when the message changes; replacing it starts reading from the top, while setting the same text keeps its position. Update a progress caption separately with `fplinux_ui_alert_set_footer()` to preserve that reading position. A zero maximum in `fplinux_ui_alert_set_progress()` shows a spinner; a positive maximum shows determinate progress. Keep the numerical caption accurate even when a very small nonzero amount needs a minimum visible segment.
 
 Use the common [storage-error and close-decision contract](/fplinux/develop/application-state/) for unsaved data. Do not invent a separate meaning for Retry, Stay or Discard.
 
@@ -76,5 +91,7 @@ A titled screen can show a short status on the right through `fplinux_ui_screen_
 The Canvas key handler receives keys not consumed by its commands. Any high-level screen can use `fplinux_ui_screen_set_key_filter()` to consume an application-specific key before ordinary command handling. Leave standard navigation and soft keys to the screen. Enable external-keyboard key handling only when the embedded content needs ordinary Enter or Escape, as a terminal does; phone commands remain available.
 
 Canvas key repeat defaults to none. Choose navigation repeat for a long readable surface, or keymap repeat for content that accepts keyboard text. Use the existing policies described in [Input](/fplinux/develop/input/#wayland-applications), rather than a second repeat timer.
+
+Register `fplinux_ui_canvas_set_active_listener()` before pushing a Canvas to follow its actual activation and suspension by visibility, menus and covering screens. The callback runs after the active state changes and can pause or rearm application timers and adjust child objects. It must not navigate, delete the Canvas or close the runtime. Registration and final runtime cleanup do not call it.
 
 Use the raw LVGL screen only when the high-level screens cannot represent the interface. In that case the application owns key routing, focus, legends and layout; [layout and appearance](/fplinux/develop/app/design/) and the [runtime reference](/fplinux/develop/app/ui-api/) describe those responsibilities.

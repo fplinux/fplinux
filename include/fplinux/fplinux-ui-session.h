@@ -6,7 +6,9 @@
 #include <stdint.h>
 
 #include "fplinux-storage.h"
+#include "fplinux-ui-document.h"
 #include "fplinux-ui-vibration.h"
+#include "fplinux-volumes.h"
 
 #define FPLINUX_UI_SESSION_SOCKET "/run/fplinux-gui/control.sock"
 /* The logical Wayland seat assigned to the phone's built-in keypad. */
@@ -25,6 +27,8 @@
 #define FPLINUX_UI_SESSION_FRAME_MAX_PIXELS (240U * 320U)
 #define FPLINUX_UI_SESSION_TASK_MAX 4
 #define FPLINUX_UI_SESSION_PATTERN FPLINUX_UI_VIBRATION_PATTERN_MAX
+#define FPLINUX_UI_SESSION_PATH_BYTES 4096
+#define FPLINUX_UI_SESSION_DOCUMENT_CHOICE_MAX 32
 
 /* Each packet is one JSON object on a Unix SOCK_SEQPACKET connection. */
 enum fplinux_ui_session_message_type {
@@ -60,6 +64,19 @@ enum fplinux_ui_session_message_type {
 	FPLINUX_UI_SESSION_CLOSE_ACK,
 	FPLINUX_UI_SESSION_ACTIVATION,
 	FPLINUX_UI_SESSION_ACTIVATION_ACK,
+	FPLINUX_UI_SESSION_OPEN_FILE,
+	FPLINUX_UI_SESSION_DOCUMENT_CHOICES,
+	FPLINUX_UI_SESSION_DOCUMENT_CHOICE,
+	FPLINUX_UI_SESSION_DOCUMENT,
+	FPLINUX_UI_SESSION_DOCUMENT_RESULT,
+	FPLINUX_UI_SESSION_STORAGE_REQUEST,
+	FPLINUX_UI_SESSION_STORAGE_RESULT,
+};
+
+struct fplinux_ui_session_document_choice {
+	char app_id[FPLINUX_UI_SESSION_ID_BYTES];
+	char title[FPLINUX_UI_SESSION_TEXT_BYTES];
+	char icon[FPLINUX_UI_SESSION_TEXT_BYTES];
 };
 
 enum fplinux_ui_session_activation {
@@ -96,6 +113,18 @@ enum fplinux_ui_session_mode {
 enum fplinux_ui_session_theme {
 	FPLINUX_UI_SESSION_THEME_LIGHT,
 	FPLINUX_UI_SESSION_THEME_DARK,
+};
+
+struct fplinux_ui_session_clock_presentation {
+	bool analog;
+	/* The nearest alarm uses UTC, or a monotonic snooze deadline. */
+	int64_t alarm_utc;
+	uint64_t snooze_deadline_ms;
+	char alarm_label[FPLINUX_UI_SESSION_TEXT_BYTES + 1];
+	/* Running and paused timers are mutually exclusive; zero means absent. */
+	uint64_t timer_deadline_ms;
+	uint64_t timer_remaining_ms;
+	uint64_t missed_total;
 };
 
 /*
@@ -157,6 +186,16 @@ enum fplinux_ui_session_theme {
  * RESUME. ACTIVATION(serial, activation) follows CONFIG on cold start. Its
  * ACTIVATION_ACK follows a new application frame's commit and Wayland sync;
  * an older retained buffer or the launcher's ACTIVE_ACK cannot reveal it.
+ *
+ * OPEN_FILE(serial, path) belongs to the foreground application instance.
+ * DOCUMENT_CHOICES returns installed candidates; DOCUMENT_CHOICE selects one
+ * app_id or cancels with an empty app_id. Cold and retained handlers receive
+ * DOCUMENT after CONFIG, independently of OPEN and RESUME. DOCUMENT_RESULT
+ * carries accepted, wait, cancelled, error (with positive document_error), or
+ * restart-required. WAIT's decision frame uses ACTIVATION_ACK; only the UI
+ * runtime sends accepted after the new document frame's commit and sync.
+ * The manager translates handler serials to the origin's request serial.
+ * restart-required uses one ordinary close decision and at most one restart.
  */
 struct fplinux_ui_session_message {
 	enum fplinux_ui_session_message_type type;
@@ -201,6 +240,8 @@ struct fplinux_ui_session_message {
 	struct fplinux_ui_session_task tasks[FPLINUX_UI_SESSION_TASK_MAX];
 	/* CLOCK or ACTIVE: control-free text interpreted by the clock owner. */
 	char clock_data[FPLINUX_UI_SESSION_CLOCK_BYTES];
+	/* ACTIVE: stable Home state; countdowns use CLOCK_MONOTONIC locally. */
+	struct fplinux_ui_session_clock_presentation clock_presentation;
 	/* CONFIG: capabilities available to this application. */
 	bool audio;
 	bool vibration;
@@ -214,22 +255,23 @@ struct fplinux_ui_session_message {
 	int storage_error;
 	/* ACTIVATION only: independent of lifecycle and surface visibility. */
 	enum fplinux_ui_session_activation activation;
+	/* Document serials name the request on their respective connection. */
+	char path[FPLINUX_UI_SESSION_PATH_BYTES];
+	enum fplinux_ui_document_status document_status;
+	int document_error;
+	unsigned int document_choice_count;
+	struct fplinux_ui_session_document_choice
+		document_choices[FPLINUX_UI_SESSION_DOCUMENT_CHOICE_MAX];
+	/* Storage requests contain an opaque ID; only results contain paths. */
+	enum fplinux_volume_operation volume_operation;
+	uint32_t volume_id;
+	struct fplinux_volume_result volume_result;
 };
 
-bool fplinux_ui_session_vibrate_valid(
-	const struct fplinux_ui_session_message *message);
+struct fplinux_ui;
 
-/* connect sends HELLO and returns a nonblocking, close-on-exec descriptor. */
-int fplinux_ui_session_connect(const char *app_id);
-int fplinux_ui_session_connect_at(const char *path, const char *app_id);
-bool fplinux_ui_session_send(int fd,
-			     const struct fplinux_ui_session_message *message);
-/*
- * Returns 1 for a packet, 0 for EAGAIN, -1 for a disconnect or invalid packet.
- * A successful packet with has_frame transfers frame_fd ownership to the
- * caller. Rejected packets close every attached descriptor internally.
- */
-int fplinux_ui_session_receive(int fd,
-			       struct fplinux_ui_session_message *message);
+/* Raw system-app requests; ordinary applications use the typed UI APIs. */
+bool fplinux_ui_send(struct fplinux_ui *ui,
+		     const struct fplinux_ui_session_message *message);
 
 #endif

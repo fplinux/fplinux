@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "fplinux-ui-prefs.h"
+#include "fplinux-ui-session.h"
 
 #define CLOCK_RETRY_INITIAL_MS 1000U
 #define CLOCK_RETRY_MAX_MS 30000U
@@ -279,13 +280,73 @@ fplinux_session_clock_deadline(const struct fplinux_session_clock *clock,
 
 		if (alarm->snoozed)
 			consider(&earliest, alarm->snooze_deadline_ms, mono_ms);
-		if (alarm->spec.enabled && alarm->next_due_utc)
-			consider(&earliest,
-				 mono_ms > UINT64_MAX - 1000 ? UINT64_MAX :
-							       mono_ms + 1000,
-				 mono_ms);
 	}
 	return earliest;
+}
+
+int64_t
+fplinux_session_clock_alarm_deadline(const struct fplinux_session_clock *clock)
+{
+	int64_t earliest = 0;
+
+	for (size_t i = 0; i < clock->model.alarm_count; ++i) {
+		const struct clock_alarm *alarm = &clock->model.alarms[i];
+
+		if (alarm->spec.enabled && alarm->next_due_utc &&
+		    (!earliest || alarm->next_due_utc < earliest))
+			earliest = alarm->next_due_utc;
+	}
+	return earliest;
+}
+
+void fplinux_session_clock_presentation(
+	const struct fplinux_session_clock *clock,
+	struct fplinux_ui_session_clock_presentation *presentation)
+{
+	const struct clock_model *model = &clock->model;
+	uint64_t nearest_ms = UINT64_MAX;
+
+	memset(presentation, 0, sizeof(*presentation));
+	presentation->analog = model->view == CLOCK_VIEW_ANALOG;
+	presentation->missed_total = model->missed_total;
+	if (model->timer.state == CLOCK_TIMER_RUNNING)
+		presentation->timer_deadline_ms = model->timer.deadline_ms;
+	else if (model->timer.state == CLOCK_TIMER_PAUSED)
+		presentation->timer_remaining_ms = model->timer.remaining_ms;
+	for (size_t i = 0; i < model->alarm_count; ++i) {
+		const struct clock_alarm *alarm = &model->alarms[i];
+		uint64_t remaining_ms;
+
+		if (alarm->spec.enabled && alarm->next_due_utc) {
+			remaining_ms = alarm->next_due_utc > model->wall_utc ?
+					       (uint64_t)(alarm->next_due_utc -
+							  model->wall_utc) *
+						       1000 :
+					       0;
+			if (remaining_ms < nearest_ms) {
+				nearest_ms = remaining_ms;
+				presentation->alarm_utc = alarm->next_due_utc;
+				presentation->snooze_deadline_ms = 0;
+				memcpy(presentation->alarm_label,
+				       alarm->spec.label,
+				       sizeof(presentation->alarm_label));
+			}
+		}
+		if (!alarm->snoozed)
+			continue;
+		remaining_ms = alarm->snooze_deadline_ms > model->monotonic_ms ?
+				       alarm->snooze_deadline_ms -
+					       model->monotonic_ms :
+				       0;
+		if (remaining_ms < nearest_ms) {
+			nearest_ms = remaining_ms;
+			presentation->alarm_utc = 0;
+			presentation->snooze_deadline_ms =
+				alarm->snooze_deadline_ms;
+			memcpy(presentation->alarm_label, alarm->spec.label,
+			       sizeof(presentation->alarm_label));
+		}
+	}
 }
 
 bool fplinux_session_clock_ringing(const struct fplinux_session_clock *clock)

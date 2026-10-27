@@ -1,15 +1,18 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #define _GNU_SOURCE
-#include "fplinux-ui-session.h"
+#include "fplinux-ui-session-internal.h"
+#include "fplinux-utf8.h"
 
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <json-c/json.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -20,6 +23,62 @@
 #define VIBRATION_PULSE_MAX_MS 3000
 #define VIBRATION_PAUSE_MIN_MS 100
 #define VIBRATION_PAUSE_MAX_MS 60000
+
+int fplinux_ui_session_document_path_error(const char *path)
+{
+	char copy[FPLINUX_UI_SESSION_PATH_BYTES];
+	char *save = NULL;
+	char *component;
+	int directory;
+	int error = 0;
+	const unsigned char *cursor, *end;
+	uint32_t scalar;
+
+	if (!path || path[0] != '/' || strlen(path) >= sizeof(copy))
+		return EINVAL;
+	/* JSON paths must remain valid text; reject before sending a packet. */
+	cursor = (const unsigned char *)path;
+	end = cursor + strlen(path);
+	while (cursor != end)
+		if (!fplinux_utf8_next(&cursor, end, &scalar))
+			return EILSEQ;
+	strcpy(copy, path);
+	directory = open("/", O_PATH | O_DIRECTORY | O_CLOEXEC);
+	if (directory < 0)
+		return errno;
+	component = strtok_r(copy, "/", &save);
+	if (!component)
+		error = EISDIR;
+	while (component && !error) {
+		char *next = strtok_r(NULL, "/", &save);
+		struct stat status;
+		int fd;
+
+		if (!strcmp(component, ".") || !strcmp(component, "..")) {
+			error = EINVAL;
+			break;
+		}
+		fd = openat(directory, component,
+			    O_PATH | O_NOFOLLOW | O_CLOEXEC);
+		if (fd < 0) {
+			error = errno;
+			break;
+		}
+		if (fstat(fd, &status) < 0)
+			error = errno;
+		else if (S_ISLNK(status.st_mode))
+			error = ELOOP;
+		else if (next && !S_ISDIR(status.st_mode))
+			error = ENOTDIR;
+		else if (!next && !S_ISREG(status.st_mode))
+			error = S_ISDIR(status.st_mode) ? EISDIR : ENOTSUP;
+		close(directory);
+		directory = fd;
+		component = next;
+	}
+	close(directory);
+	return error;
+}
 
 static const char *const message_names[] = {
 	[FPLINUX_UI_SESSION_HELLO] = "HELLO",
@@ -54,6 +113,27 @@ static const char *const message_names[] = {
 	[FPLINUX_UI_SESSION_CLOSE_ACK] = "CLOSE_ACK",
 	[FPLINUX_UI_SESSION_ACTIVATION] = "ACTIVATION",
 	[FPLINUX_UI_SESSION_ACTIVATION_ACK] = "ACTIVATION_ACK",
+	[FPLINUX_UI_SESSION_OPEN_FILE] = "OPEN_FILE",
+	[FPLINUX_UI_SESSION_DOCUMENT_CHOICES] = "DOCUMENT_CHOICES",
+	[FPLINUX_UI_SESSION_DOCUMENT_CHOICE] = "DOCUMENT_CHOICE",
+	[FPLINUX_UI_SESSION_DOCUMENT] = "DOCUMENT",
+	[FPLINUX_UI_SESSION_DOCUMENT_RESULT] = "DOCUMENT_RESULT",
+	[FPLINUX_UI_SESSION_STORAGE_REQUEST] = "STORAGE_REQUEST",
+	[FPLINUX_UI_SESSION_STORAGE_RESULT] = "STORAGE_RESULT",
+};
+
+static const char *const volume_operation_names[] = {
+	[FPLINUX_VOLUME_REFRESH] = "refresh",
+	[FPLINUX_VOLUME_CONNECT] = "connect",
+	[FPLINUX_VOLUME_EJECT] = "eject",
+};
+
+static const char *const document_status_names[] = {
+	[FPLINUX_UI_DOCUMENT_ACCEPTED] = "accepted",
+	[FPLINUX_UI_DOCUMENT_WAIT] = "wait",
+	[FPLINUX_UI_DOCUMENT_CANCELLED] = "cancelled",
+	[FPLINUX_UI_DOCUMENT_ERROR] = "error",
+	[FPLINUX_UI_DOCUMENT_RESTART_REQUIRED] = "restart-required",
 };
 
 static const char *const activation_names[] = {
@@ -92,16 +172,55 @@ static const char *const storage_names[] = {
 
 /* Every field a packet may carry; anything else makes it invalid. */
 static const char *const field_names[] = {
-	"type",		 "mode",	  "app_id",	"active_id",
-	"selected_id",	 "title",	  "left",	"centre",
-	"right",	 "reason",	  "width",	"height",
-	"display",	 "locked",	  "visible",	"enabled",
-	"locale",	 "input_locale",  "name",	"value",
-	"battery",	 "charging",	  "notice",	"screen_width",
-	"screen_height", "theme",	  "serial",	"lifecycle",
-	"tasks",	 "token",	  "clock",	"audio",
-	"vibration",	 "pattern",	  "repeat",	"applied",
-	"storage_state", "storage_error", "activation",
+	"type",
+	"mode",
+	"app_id",
+	"active_id",
+	"selected_id",
+	"title",
+	"left",
+	"centre",
+	"right",
+	"reason",
+	"width",
+	"height",
+	"display",
+	"locked",
+	"visible",
+	"enabled",
+	"locale",
+	"input_locale",
+	"name",
+	"value",
+	"battery",
+	"charging",
+	"notice",
+	"screen_width",
+	"screen_height",
+	"theme",
+	"serial",
+	"lifecycle",
+	"tasks",
+	"token",
+	"clock",
+	"clock_presentation",
+	"audio",
+	"vibration",
+	"pattern",
+	"repeat",
+	"applied",
+	"storage_state",
+	"storage_error",
+	"activation",
+	"path",
+	"document_status",
+	"document_error",
+	"document_choices",
+	"volume_operation",
+	"volume_id",
+	"volume_error",
+	"home_persistent",
+	"volumes",
 };
 
 static void add_string(struct json_object *object, const char *name,
@@ -189,6 +308,122 @@ static bool get_bool(struct json_object *object, const char *name, bool *value)
 	if (!json_object_is_type(field, json_type_boolean))
 		return false;
 	*value = json_object_get_boolean(field);
+	return true;
+}
+
+static bool
+clock_presentation_valid(const struct fplinux_ui_session_message *message)
+{
+	const struct fplinux_ui_session_clock_presentation *clock =
+		&message->clock_presentation;
+	size_t length = strnlen(clock->alarm_label, sizeof(clock->alarm_label));
+
+	if (length == sizeof(clock->alarm_label) || clock->alarm_utc < 0 ||
+	    (clock->alarm_utc && clock->snooze_deadline_ms) ||
+	    (clock->timer_deadline_ms && clock->timer_remaining_ms) ||
+	    (length && !clock->alarm_utc && !clock->snooze_deadline_ms))
+		return false;
+	for (size_t i = 0; i < length; ++i)
+		if ((unsigned char)clock->alarm_label[i] < 0x20 ||
+		    clock->alarm_label[i] == 0x7f)
+			return false;
+	return message->type == FPLINUX_UI_SESSION_ACTIVE ||
+	       (!clock->analog && !clock->alarm_utc &&
+		!clock->snooze_deadline_ms && !length &&
+		!clock->timer_deadline_ms && !clock->timer_remaining_ms &&
+		!clock->missed_total);
+}
+
+/* Decimal strings retain the entire uint64 range without JSON saturation. */
+static void add_clock_number(struct json_object *object, const char *name,
+			     uint64_t value)
+{
+	char text[21];
+
+	if (!value)
+		return;
+	snprintf(text, sizeof(text), "%" PRIu64, value);
+	add_string(object, name, text);
+}
+
+static bool get_clock_number(struct json_object *object, const char *name,
+			     uint64_t *value)
+{
+	struct json_object *field;
+	char text[21], *end;
+	unsigned long long parsed;
+
+	if (!json_object_object_get_ex(object, name, &field))
+		return true;
+	if (!get_string(object, name, text, sizeof(text)) || text[0] < '0' ||
+	    text[0] > '9')
+		return false;
+	errno = 0;
+	parsed = strtoull(text, &end, 10);
+	if (errno || *end)
+		return false;
+	*value = parsed;
+	return true;
+}
+
+static void add_clock_presentation(
+	struct json_object *object,
+	const struct fplinux_ui_session_clock_presentation *clock)
+{
+	struct json_object *state = json_object_new_object();
+
+	json_object_object_add(state, "analog",
+			       json_object_new_boolean(clock->analog));
+	add_clock_number(state, "alarm_utc", clock->alarm_utc);
+	add_clock_number(state, "snooze_deadline_ms",
+			 clock->snooze_deadline_ms);
+	add_string(state, "alarm_label", clock->alarm_label);
+	add_clock_number(state, "timer_deadline_ms", clock->timer_deadline_ms);
+	add_clock_number(state, "timer_remaining_ms",
+			 clock->timer_remaining_ms);
+	add_clock_number(state, "missed_total", clock->missed_total);
+	json_object_object_add(object, "clock_presentation", state);
+}
+
+static bool get_clock_presentation(struct json_object *object,
+				   unsigned int type,
+				   struct fplinux_ui_session_message *message)
+{
+	struct fplinux_ui_session_clock_presentation *clock =
+		&message->clock_presentation;
+	struct json_object *state;
+	uint64_t alarm_utc = 0;
+
+	if (!json_object_object_get_ex(object, "clock_presentation", &state))
+		return true;
+	if (type != FPLINUX_UI_SESSION_ACTIVE ||
+	    !json_object_is_type(state, json_type_object))
+		return false;
+	json_object_object_foreach(state, name, field)
+	{
+		(void)field;
+		if (strcmp(name, "analog") && strcmp(name, "alarm_utc") &&
+		    strcmp(name, "snooze_deadline_ms") &&
+		    strcmp(name, "alarm_label") &&
+		    strcmp(name, "timer_deadline_ms") &&
+		    strcmp(name, "timer_remaining_ms") &&
+		    strcmp(name, "missed_total"))
+			return false;
+	}
+	if (!get_bool(state, "analog", &clock->analog) ||
+	    !get_clock_number(state, "alarm_utc", &alarm_utc) ||
+	    alarm_utc > INT64_MAX ||
+	    !get_clock_number(state, "snooze_deadline_ms",
+			      &clock->snooze_deadline_ms) ||
+	    !get_string(state, "alarm_label", clock->alarm_label,
+			sizeof(clock->alarm_label)) ||
+	    !get_clock_number(state, "timer_deadline_ms",
+			      &clock->timer_deadline_ms) ||
+	    !get_clock_number(state, "timer_remaining_ms",
+			      &clock->timer_remaining_ms) ||
+	    !get_clock_number(state, "missed_total", &clock->missed_total))
+		return false;
+	clock->alarm_utc = alarm_utc;
 	return true;
 }
 
@@ -401,6 +636,327 @@ static bool close_response_valid(const char *value)
 	       !strcmp(value, "wait");
 }
 
+static bool volume_text_valid(const char *text, size_t capacity)
+{
+	size_t length = strnlen(text, capacity);
+
+	if (length == capacity)
+		return false;
+	for (size_t i = 0; i < length; ++i)
+		if ((unsigned char)text[i] < 0x20 || text[i] == 0x7f)
+			return false;
+	return true;
+}
+
+static bool volume_valid(const struct fplinux_volume *volume)
+{
+	if (!volume->id ||
+	    (unsigned int)volume->state > FPLINUX_VOLUME_PROTECTED ||
+	    (unsigned int)volume->protection > FPLINUX_VOLUME_OTHER_MOUNT ||
+	    !volume->label[0] ||
+	    !volume_text_valid(volume->label, sizeof(volume->label)) ||
+	    !volume_text_valid(volume->path, sizeof(volume->path)))
+		return false;
+	if ((volume->state == FPLINUX_VOLUME_PROTECTED) !=
+	    (volume->protection != FPLINUX_VOLUME_UNPROTECTED))
+		return false;
+	return volume->state == FPLINUX_VOLUME_MOUNTED ?
+		       volume->path[0] == '/' && volume->mount_id :
+		       !volume->path[0] && !volume->mount_id;
+}
+
+static bool
+volume_fields_valid(const struct fplinux_ui_session_message *message)
+{
+	const struct fplinux_volume_result *result = &message->volume_result;
+
+	if (message->type == FPLINUX_UI_SESSION_STORAGE_REQUEST)
+		return message->serial &&
+		       (unsigned int)message->volume_operation <
+			       ARRAY_SIZE(volume_operation_names) &&
+		       (message->volume_operation == FPLINUX_VOLUME_REFRESH ?
+				!message->volume_id :
+				message->volume_id != 0) &&
+		       !result->request_id && !result->error &&
+		       !result->snapshot.count &&
+		       !result->snapshot.home_persistent;
+	if (message->volume_id || message->volume_operation)
+		return false;
+	if (message->type != FPLINUX_UI_SESSION_STORAGE_RESULT)
+		return !result->request_id && !result->error &&
+		       !result->snapshot.count &&
+		       !result->snapshot.home_persistent;
+	if (!message->serial || result->request_id != message->serial ||
+	    result->error < 0 || result->snapshot.count > FPLINUX_VOLUME_MAX)
+		return false;
+	for (size_t i = 0; i < result->snapshot.count; ++i) {
+		if (!volume_valid(&result->snapshot.volumes[i]))
+			return false;
+		for (size_t j = 0; j < i; ++j)
+			if (result->snapshot.volumes[i].id ==
+			    result->snapshot.volumes[j].id)
+				return false;
+	}
+	return true;
+}
+
+static bool get_volume_id(struct json_object *object, const char *name,
+			  uint32_t *id)
+{
+	struct json_object *field;
+	int64_t number;
+
+	if (!json_object_object_get_ex(object, name, &field) ||
+	    !json_object_is_type(field, json_type_int))
+		return false;
+	number = json_object_get_int64(field);
+	if (number < 0 || number > UINT32_MAX)
+		return false;
+	*id = (uint32_t)number;
+	return true;
+}
+
+static bool get_volume(struct json_object *object,
+		       struct fplinux_volume *volume)
+{
+	static const char *const fields[] = {
+		"id",	     "mount_id", "state", "protection",
+		"read_only", "label",	 "path",
+	};
+	struct json_object *field;
+	int state = 0, protection = 0;
+
+	if (!json_object_is_type(object, json_type_object) ||
+	    (size_t)json_object_object_length(object) != ARRAY_SIZE(fields))
+		return false;
+	for (size_t i = 0; i < ARRAY_SIZE(fields); ++i)
+		if (!json_object_object_get_ex(object, fields[i], &field))
+			return false;
+	if (!get_volume_id(object, "id", &volume->id) ||
+	    !get_volume_id(object, "mount_id", &volume->mount_id) ||
+	    !get_int(object, "state", &state) ||
+	    !get_int(object, "protection", &protection) ||
+	    !get_bool(object, "read_only", &volume->read_only) ||
+	    !get_string(object, "label", volume->label,
+			sizeof(volume->label)) ||
+	    !get_string(object, "path", volume->path, sizeof(volume->path)))
+		return false;
+	volume->state = state;
+	volume->protection = protection;
+	return volume_valid(volume);
+}
+
+static bool get_volume_fields(struct json_object *object, unsigned int type,
+			      struct fplinux_ui_session_message *message)
+{
+	static const char *const fields[] = {
+		"volume_operation", "volume_id", "volume_error",
+		"home_persistent",  "volumes",
+	};
+	struct json_object *field, *array;
+	struct fplinux_volume_result *result = &message->volume_result;
+
+	for (size_t i = 0; i < ARRAY_SIZE(fields); ++i) {
+		bool present =
+			json_object_object_get_ex(object, fields[i], &field);
+		bool required =
+			type == FPLINUX_UI_SESSION_STORAGE_REQUEST ? i < 2 :
+			type == FPLINUX_UI_SESSION_STORAGE_RESULT  ? i >= 2 :
+								     false;
+
+		if (present != required)
+			return false;
+	}
+	if (type == FPLINUX_UI_SESSION_STORAGE_REQUEST) {
+		unsigned int operation = ARRAY_SIZE(volume_operation_names);
+
+		if (!get_choice(
+			    object, "volume_operation", volume_operation_names,
+			    ARRAY_SIZE(volume_operation_names),
+			    ARRAY_SIZE(volume_operation_names), &operation) ||
+		    operation >= ARRAY_SIZE(volume_operation_names) ||
+		    !get_volume_id(object, "volume_id", &message->volume_id))
+			return false;
+		message->volume_operation = operation;
+	}
+	if (type != FPLINUX_UI_SESSION_STORAGE_RESULT)
+		return true;
+	if (!get_int(object, "volume_error", &result->error) ||
+	    !get_bool(object, "home_persistent",
+		      &result->snapshot.home_persistent) ||
+	    !json_object_object_get_ex(object, "volumes", &array) ||
+	    !json_object_is_type(array, json_type_array))
+		return false;
+	result->snapshot.count = json_object_array_length(array);
+	if (result->snapshot.count > FPLINUX_VOLUME_MAX)
+		return false;
+	for (size_t i = 0; i < result->snapshot.count; ++i)
+		if (!get_volume(json_object_array_get_idx(array, i),
+				&result->snapshot.volumes[i]))
+			return false;
+	return true;
+}
+
+static void add_volume_result(struct json_object *object,
+			      const struct fplinux_volume_result *result)
+{
+	struct json_object *array = json_object_new_array();
+
+	json_object_object_add(object, "volume_error",
+			       json_object_new_int(result->error));
+	json_object_object_add(
+		object, "home_persistent",
+		json_object_new_boolean(result->snapshot.home_persistent));
+	for (size_t i = 0; i < result->snapshot.count; ++i) {
+		const struct fplinux_volume *volume =
+			&result->snapshot.volumes[i];
+		struct json_object *entry = json_object_new_object();
+
+		json_object_object_add(entry, "id",
+				       json_object_new_int64(volume->id));
+		json_object_object_add(entry, "mount_id",
+				       json_object_new_int64(volume->mount_id));
+		json_object_object_add(entry, "state",
+				       json_object_new_int(volume->state));
+		json_object_object_add(entry, "protection",
+				       json_object_new_int(volume->protection));
+		json_object_object_add(
+			entry, "read_only",
+			json_object_new_boolean(volume->read_only));
+		json_object_object_add(entry, "label",
+				       json_object_new_string(volume->label));
+		json_object_object_add(entry, "path",
+				       json_object_new_string(volume->path));
+		json_object_array_add(array, entry);
+	}
+	json_object_object_add(object, "volumes", array);
+}
+
+static bool is_document_type(unsigned int type)
+{
+	return type >= FPLINUX_UI_SESSION_OPEN_FILE &&
+	       type <= FPLINUX_UI_SESSION_DOCUMENT_RESULT;
+}
+
+static bool document_fields_valid(const struct fplinux_ui_session_message *m)
+{
+	if (!is_document_type(m->type))
+		return !m->path[0] && !m->document_error &&
+		       !m->document_status && !m->document_choice_count;
+	if (!m->serial ||
+	    m->document_choice_count > FPLINUX_UI_SESSION_DOCUMENT_CHOICE_MAX)
+		return false;
+	if (m->type != FPLINUX_UI_SESSION_DOCUMENT_RESULT &&
+	    (m->document_status || m->document_error))
+		return false;
+	if (m->type != FPLINUX_UI_SESSION_DOCUMENT_CHOICES &&
+	    m->document_choice_count)
+		return false;
+	if (m->type != FPLINUX_UI_SESSION_OPEN_FILE &&
+	    m->type != FPLINUX_UI_SESSION_DOCUMENT && m->path[0])
+		return false;
+	if (m->type == FPLINUX_UI_SESSION_OPEN_FILE ||
+	    m->type == FPLINUX_UI_SESSION_DOCUMENT)
+		return m->path[0] == '/' &&
+		       strnlen(m->path, sizeof(m->path)) < sizeof(m->path);
+	if (m->type == FPLINUX_UI_SESSION_DOCUMENT_RESULT)
+		return (unsigned int)m->document_status <
+			       ARRAY_SIZE(document_status_names) &&
+		       (m->document_status == FPLINUX_UI_DOCUMENT_ERROR ?
+				m->document_error > 0 :
+				!m->document_error);
+	if (m->type == FPLINUX_UI_SESSION_DOCUMENT_CHOICE)
+		return !m->app_id[0] || task_id_valid(m->app_id);
+	if (!m->document_choice_count)
+		return false;
+	for (unsigned int i = 0; i < m->document_choice_count; ++i)
+		if (!task_id_valid(m->document_choices[i].app_id) ||
+		    !m->document_choices[i].title[0])
+			return false;
+	return true;
+}
+
+static bool get_document_path(struct json_object *object, char *path,
+			      size_t capacity)
+{
+	struct json_object *field;
+	const char *value;
+	size_t bytes;
+
+	if (!json_object_object_get_ex(object, "path", &field))
+		return true;
+	if (!json_object_is_type(field, json_type_string))
+		return false;
+	value = json_object_get_string(field);
+	bytes = json_object_get_string_len(field);
+	if (bytes >= capacity || strlen(value) != bytes)
+		return false;
+	/* File names remain data; unlike labels they may contain control bytes. */
+	memcpy(path, value, bytes + 1);
+	return true;
+}
+
+static bool get_document_fields(struct json_object *object, unsigned int type,
+				struct fplinux_ui_session_message *m)
+{
+	struct json_object *array;
+	struct json_object *field;
+	unsigned int status = 0;
+
+	if (!is_document_type(type))
+		return !json_object_object_get_ex(object, "path", &field) &&
+		       !json_object_object_get_ex(object, "document_status",
+						  &field) &&
+		       !json_object_object_get_ex(object, "document_error",
+						  &field) &&
+		       !json_object_object_get_ex(object, "document_choices",
+						  &field);
+	if ((json_object_object_get_ex(object, "path", &field) &&
+	     type != FPLINUX_UI_SESSION_OPEN_FILE &&
+	     type != FPLINUX_UI_SESSION_DOCUMENT) ||
+	    ((json_object_object_get_ex(object, "document_status", &field) ||
+	      json_object_object_get_ex(object, "document_error", &field)) &&
+	     type != FPLINUX_UI_SESSION_DOCUMENT_RESULT) ||
+	    (type == FPLINUX_UI_SESSION_DOCUMENT_RESULT &&
+	     !json_object_object_get_ex(object, "document_status", &field)))
+		return false;
+	if (!get_document_path(object, m->path, sizeof(m->path)) ||
+	    !get_int(object, "document_error", &m->document_error) ||
+	    !get_choice(object, "document_status", document_status_names,
+			ARRAY_SIZE(document_status_names), 0, &status))
+		return false;
+	m->document_status = status;
+	if (json_object_object_get_ex(object, "document_choices", &array)) {
+		size_t count;
+
+		if (type != FPLINUX_UI_SESSION_DOCUMENT_CHOICES ||
+		    !json_object_is_type(array, json_type_array))
+			return false;
+		count = json_object_array_length(array);
+		if (count > FPLINUX_UI_SESSION_DOCUMENT_CHOICE_MAX)
+			return false;
+		m->document_choice_count = count;
+		for (size_t i = 0; i < count; ++i) {
+			struct json_object *entry =
+				json_object_array_get_idx(array, i);
+			struct fplinux_ui_session_document_choice *choice =
+				&m->document_choices[i];
+
+			if (!json_object_is_type(entry, json_type_object) ||
+			    json_object_object_length(entry) != 3 ||
+			    !get_string(entry, "app_id", choice->app_id,
+					sizeof(choice->app_id)) ||
+			    !get_string(entry, "title", choice->title,
+					sizeof(choice->title)) ||
+			    !get_string(entry, "icon", choice->icon,
+					sizeof(choice->icon)))
+				return false;
+		}
+	}
+	m->type = type;
+	return true;
+}
+
 static bool
 storage_result_valid(const struct fplinux_ui_session_message *message)
 {
@@ -567,7 +1123,9 @@ bool fplinux_ui_session_send(int fd,
 	    (unsigned int)message->theme >= ARRAY_SIZE(theme_names) ||
 	    !input_locale_valid(message->input_locale) ||
 	    !clock_data_valid(message->clock_data) ||
-	    !storage_result_valid(message) ||
+	    !clock_presentation_valid(message) ||
+	    !storage_result_valid(message) || !document_fields_valid(message) ||
+	    !volume_fields_valid(message) ||
 	    ((message->audio || message->vibration) &&
 	     message->type != FPLINUX_UI_SESSION_CONFIG) ||
 	    ((message->pattern_count || message->repeat) &&
@@ -614,7 +1172,61 @@ bool fplinux_ui_session_send(int fd,
 	if (!object)
 		return false;
 	add_string(object, "clock", message->clock_data);
+	if (message->type == FPLINUX_UI_SESSION_ACTIVE)
+		add_clock_presentation(object, &message->clock_presentation);
 	add_string(object, "type", message_names[message->type]);
+	if (message->type == FPLINUX_UI_SESSION_STORAGE_REQUEST ||
+	    message->type == FPLINUX_UI_SESSION_STORAGE_RESULT) {
+		json_object_object_add(object, "serial",
+				       json_object_new_int64(message->serial));
+		if (message->type == FPLINUX_UI_SESSION_STORAGE_REQUEST) {
+			add_string(object, "volume_operation",
+				   volume_operation_names
+					   [message->volume_operation]);
+			json_object_object_add(
+				object, "volume_id",
+				json_object_new_int64(message->volume_id));
+		} else {
+			add_volume_result(object, &message->volume_result);
+		}
+	}
+	if (is_document_type(message->type)) {
+		add_string(object, "path", message->path);
+		json_object_object_add(object, "serial",
+				       json_object_new_int64(message->serial));
+		if (message->type == FPLINUX_UI_SESSION_DOCUMENT_RESULT) {
+			add_string(
+				object, "document_status",
+				document_status_names[message->document_status]);
+			json_object_object_add(
+				object, "document_error",
+				json_object_new_int(message->document_error));
+		}
+		if (message->type == FPLINUX_UI_SESSION_DOCUMENT_CHOICES) {
+			struct json_object *choices = json_object_new_array();
+
+			for (unsigned int i = 0;
+			     i < message->document_choice_count; ++i) {
+				const struct fplinux_ui_session_document_choice
+					*choice = &message->document_choices[i];
+				struct json_object *entry =
+					json_object_new_object();
+
+				json_object_object_add(
+					entry, "app_id",
+					json_object_new_string(choice->app_id));
+				json_object_object_add(
+					entry, "title",
+					json_object_new_string(choice->title));
+				json_object_object_add(
+					entry, "icon",
+					json_object_new_string(choice->icon));
+				json_object_array_add(choices, entry);
+			}
+			json_object_object_add(object, "document_choices",
+					       choices);
+		}
+	}
 	if (message->applied || message->storage_state ||
 	    message->storage_error) {
 		json_object_object_add(
@@ -937,9 +1549,15 @@ int fplinux_ui_session_receive(int fd,
 	if (valid)
 		valid = get_clock(object, type, message->clock_data);
 	if (valid)
+		valid = get_clock_presentation(object, type, message);
+	if (valid)
 		valid = get_media_fields(object, type, message);
 	if (valid)
 		valid = get_storage_fields(object, type, message);
+	if (valid)
+		valid = get_document_fields(object, type, message);
+	if (valid)
+		valid = get_volume_fields(object, type, message);
 	if (valid && type == FPLINUX_UI_SESSION_CLOSE_REPLY)
 		valid = close_response_valid(message->value);
 	if (valid && json_object_object_get_ex(object, "serial", &field)) {
@@ -954,6 +1572,14 @@ int fplinux_ui_session_receive(int fd,
 	message->mode = mode;
 	message->display = display;
 	message->theme = theme;
+	if (valid)
+		valid = clock_presentation_valid(message);
+	if (type == FPLINUX_UI_SESSION_STORAGE_RESULT)
+		message->volume_result.request_id = message->serial;
+	if (valid)
+		valid = document_fields_valid(message);
+	if (valid)
+		valid = volume_fields_valid(message);
 	json_object_put(object);
 	if (valid && (type == FPLINUX_UI_SESSION_ACTIVE_ACK ||
 		      type == FPLINUX_UI_SESSION_ACTIVATION ||

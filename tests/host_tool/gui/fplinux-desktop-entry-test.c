@@ -31,7 +31,16 @@ int main(int argc, char **argv)
 	printf("id_valid=%d\nvalid=%d\nextra_fields=%u\n",
 	       fplinux_desktop_entry_valid_id(argv[2]), valid, extra_fields);
 	if (valid)
-		printf("app_id=%s\ntitle=%s\nexecutable=%s\nmode=%d\n",
-		       entry.app_id, entry.title, entry.executable, entry.mode);
+		printf("app_id=%s\ntitle=%s\nexecutable=%s\nmode=%d\n"
+		       "hidden=%d\nno_display=%d\nicon=%s\nicon_valid=%d\n"
+		       "jar=%d\nvxp=%d\ntext=%d\n",
+		       entry.app_id, entry.title, entry.executable, entry.mode,
+		       entry.hidden, entry.no_display, entry.icon,
+		       entry.icon_valid,
+		       fplinux_desktop_entry_handles(&entry,
+						     "/tmp/Игра one.JaR"),
+		       fplinux_desktop_entry_handles(&entry, "/tmp/other.VXP"),
+		       fplinux_desktop_entry_handles(&entry,
+						     "/tmp/readme.txt"));
 	return 0;
 }

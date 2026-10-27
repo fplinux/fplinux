@@ -29,7 +29,6 @@ struct fplinux_ui_menu_view {
 	struct fplinux_ui_listview *list;
 	int *actions;
 	bool chosen;
-	bool suspended;
 };
 
 /* Lines for Up and Down, pages for Left and Right; never animated. */
@@ -256,6 +255,9 @@ struct fplinux_ui_menu_view *fplinux_ui_menu_view_create(
 			widest_text = width;
 		view->actions[i] = items[i].action;
 		fplinux_ui_listview_add(view->list, items[i].text, NULL);
+		if (items[i].separator_before)
+			fplinux_ui_listview_set_separator_before(view->list, i,
+								 true);
 		if (add_icon(view->list, i, items[i].icon, spec->row_icon_size))
 			icons = true;
 	}
@@ -270,7 +272,6 @@ struct fplinux_ui_menu_view *fplinux_ui_menu_view_create(
 	fplinux_ui_listview_set_callbacks(view->list, NULL, item_chosen, view);
 	fplinux_ui_text_menu_suspend(ui);
 	fplinux_ui_screens_suspend(*fplinux_ui_screens_slot(ui));
-	view->suspended = true;
 	return view;
 }
 
@@ -339,8 +340,6 @@ void fplinux_ui_menu_view_delete(struct fplinux_ui_menu_view *view)
 		return;
 	if (view->popup)
 		lv_obj_delete(view->popup);
-	if (view->suspended)
-		fplinux_ui_text_menu_reclaim(view->ui);
 	free(view->actions);
 	free(view);
 }

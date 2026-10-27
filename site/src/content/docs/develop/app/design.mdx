@@ -34,6 +34,8 @@ After RESIZE, recalculate raw object geometry from the new dimensions. For softw
 
 Read fonts and semantic colors from `fplinux_ui_theme()`. Use the body font for ordinary text, the large font for emphasis and the clock font only for its supported numeric characters. The terminal's monospaced cell font is separate from these interface fonts.
 
+Use `control_border` for an unfocused interactive frame and `focus` for its focused state. Keep `border` for decorative dividers and tracks. The `brand` color is a decorative accent, not a text color.
+
 Measure translated text with the selected font. Character counts do not predict its width. Allow a control to scroll or wrap where that control supports it; use an ellipsis for a single-line summary and provide a way to read the full value. Do not reduce every label to fit a fixed width chosen for one phone.
 
 Use theme roles such as `foreground`, `surface`, `accent`, `warning` and `danger`. A selected row, warning and unavailable control must remain understandable in both themes and without relying only on color. Keep the active focus visible. The runtime owns theme and metric pointers; do not free or copy those structures.

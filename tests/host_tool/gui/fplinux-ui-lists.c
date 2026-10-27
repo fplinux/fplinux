@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "fplinux-ui-internal.h"
 #include "fplinux-ui-listview.h"
+#include "fplinux-ui-fonts.h"
 
 #include <assert.h>
 #include <linux/input-event-codes.h>
@@ -553,6 +554,101 @@ static void check_first_visible(struct fplinux_ui *ui, lv_obj_t *screen,
 	lv_obj_clean(screen);
 }
 
+static void status_row_geometry(lv_obj_t *row, lv_obj_t *text, lv_obj_t *image,
+				const char *phase)
+{
+	lv_obj_t *column = lv_obj_get_parent(text);
+	lv_obj_t *detail = column == row ? NULL : lv_obj_get_child(column, 1);
+	lv_area_t row_bounds = coords(row), primary = coords(text);
+	lv_area_t status = coords(image);
+
+	fprintf(stderr,
+		"Status row %s: row=[%d,%d..%d,%d] primary=[%d,%d..%d,%d] status=[%d,%d..%d,%d]\n",
+		phase, row_bounds.x1, row_bounds.y1, row_bounds.x2,
+		row_bounds.y2, primary.x1, primary.y1, primary.x2, primary.y2,
+		status.x1, status.y1, status.x2, status.y2);
+	check(contains(row_bounds, primary), "status primary fits its row");
+	check(contains(row_bounds, status), "status image fits its row");
+	check(primary.x2 < status.x1, "status image follows the primary text");
+	if (detail) {
+		lv_area_t secondary = coords(detail);
+
+		fprintf(stderr, "Status detail: [%d,%d..%d,%d]\n", secondary.x1,
+			secondary.y1, secondary.x2, secondary.y2);
+		check(contains(row_bounds, secondary),
+		      "status detail fits its row");
+		check(primary.y2 < secondary.y1,
+		      "status detail sits below the primary text");
+		check(secondary.x2 < status.x1,
+		      "status image follows the detail column");
+	}
+}
+
+static void check_status_row(struct fplinux_ui *ui, lv_obj_t *screen)
+{
+	struct fplinux_ui_listview *list;
+	lv_draw_buf_t *icon =
+		lv_draw_buf_create(2, 2, LV_COLOR_FORMAT_A8, LV_STRIDE_AUTO);
+	lv_obj_t *row, *text, *image;
+	lv_area_t without, with;
+
+	ui->theme.font = fplinux_ui_builtin_font(ui->spec->font_body);
+	ui->theme.font_large = fplinux_ui_builtin_font(ui->spec->font_title);
+	assert(ui->theme.font && ui->theme.font_large);
+	list = fplinux_ui_listview_create(ui, screen,
+					  FPLINUX_UI_LISTVIEW_PLAIN);
+	assert(list && icon);
+	assert(fplinux_ui_listview_add(list, "07:30", NULL) == 0);
+	row = fplinux_ui_listview_selected_row(list);
+	text = lv_obj_get_child(row, 0);
+	lv_obj_update_layout(screen);
+	without = coords(text);
+	assert(fplinux_ui_listview_set_trailing_icon(list, 0, icon));
+	lv_obj_update_layout(screen);
+	image = find_image(row);
+	assert(image);
+	status_row_geometry(row, text, image, "trailing before detail");
+	with = coords(text);
+	assert(with.x2 < coords(image).x1 && with.x2 < without.x2);
+	assert(fplinux_ui_listview_set_emphasis(list, 0, true));
+	assert(lv_obj_get_style_text_font(text, 0) == ui->theme.font_large);
+	/* Adding a first detail keeps the trailing image outside the text column. */
+	assert(fplinux_ui_listview_set_text(list, 0, "07:30", "Wake up"));
+	lv_obj_update_layout(screen);
+	status_row_geometry(row, text, image, "emphasis before first detail");
+	assert(coords(lv_obj_get_parent(text)).x2 < coords(image).x1);
+	assert(!strcmp(
+		lv_label_get_text(lv_obj_get_child(lv_obj_get_parent(text), 1)),
+		"Wake up"));
+	assert(fplinux_ui_listview_set_emphasis(list, 0, false));
+	assert(lv_obj_get_style_text_font(text, 0) == ui->theme.font);
+	assert(fplinux_ui_listview_set_trailing_icon(list, 0, NULL));
+	lv_obj_update_layout(screen);
+	assert(!find_image(row));
+	assert(coords(lv_obj_get_parent(text)).x2 > with.x2);
+	lv_obj_clean(screen);
+
+	/* A row can also have its detail before emphasis and a status are set. */
+	list = fplinux_ui_listview_create(ui, screen,
+					  FPLINUX_UI_LISTVIEW_PLAIN);
+	assert(list);
+	assert(fplinux_ui_listview_add(list, "08:45", "Wake up") == 0);
+	row = fplinux_ui_listview_selected_row(list);
+	text = lv_obj_get_child(lv_obj_get_child(row, 0), 0);
+	assert(fplinux_ui_listview_set_emphasis(list, 0, true));
+	assert(fplinux_ui_listview_set_trailing_icon(list, 0, icon));
+	lv_obj_update_layout(screen);
+	image = find_image(row);
+	assert(image);
+	status_row_geometry(row, text, image,
+			    "detail before emphasis and trailing");
+	check(fplinux_ui_listview_selected_row(list) == row,
+	      "status changes retain the selected row object");
+	lv_obj_clean(screen);
+	/* The caller retains the borrowed status image after removal and cleanup. */
+	lv_draw_buf_destroy(icon);
+}
+
 int main(int argc, char **argv)
 {
 	struct fplinux_ui ui = { 0 };
@@ -588,6 +684,10 @@ int main(int argc, char **argv)
 	ui.theme.accent = lv_color_hex(0x204060);
 	ui.theme.accent_text = lv_color_white();
 	ui.theme.focus = lv_color_hex(0x2468ac);
+	if (!strcmp(argv[1], "status-row")) {
+		check_status_row(&ui, screen);
+		goto done;
+	}
 	if (!strncmp(argv[1], "final-divider-", 14)) {
 		check_final_divider(&ui, screen,
 				    !strcmp(argv[1] + 14, "virtual"));

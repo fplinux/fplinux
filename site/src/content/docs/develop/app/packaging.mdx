@@ -8,6 +8,8 @@ source:
 
 A graphical application is an Alpine aport with a program, a desktop entry and any translations or images it needs. [Your first application](/fplinux/develop/app/first-app/) contains a complete small recipe. The system archive format has a separate [Packaging guide](/fplinux/develop/packaging/).
 
+Distribute optional application APKs from the same FPLinux build as the system. Rebuild them together when the UI interface changes; an APK built against another system build has no binary compatibility guarantee.
+
 ## Build dependencies
 
 Declare `fplinux-ui` as a runtime dependency and `fplinux-ui-dev` as a target build dependency. The latter provides the installed headers and pkg-config metadata. Use `clang22 lld22 pkgconf` as build tools, plus `gettext` for translation catalogs. Use the target compiler and flags supplied to the aport, not the PC compiler.
@@ -45,8 +47,21 @@ Install the file under `/usr/share/applications/` with mode `0644` and normal pa
 | `X-FPLinux-Mode=integrated` | Start between the session's bars; `fullscreen` requests the whole display |
 | `Icon` | Optional simple icon name, without a path or extension |
 | `Categories` | Optional semicolon-separated categories used to group the entry |
+| `X-FPLinux-FileExtensions` | Optional semicolon-terminated extension list, such as `jar;`; matching ignores ASCII letter case |
+| `NoDisplay=true` | Hide the catalog entry while allowing it to open registered file types |
+| `Hidden=true` | Disable both catalog launch and file handling |
 
 Install the executable with mode `0755`. Set `Exec` to the executable path alone; this entry does not support a shell command or command-line arguments. The `launcher` display mode belongs to the system launcher.
+
+## Opening documents
+
+An application requests an open with `fplinux_ui_open_file(ui, absolute_path)`. The path must be valid UTF-8 and name a readable regular file without symbolic links. A nonzero return value is the request ID, not success: observe `FPLINUX_UI_EVENT_DOCUMENT_RESULT` for acceptance, cancellation or an error. Only one request can be pending for a UI. The request uses the existing application permissions and does not grant root access.
+
+A handler installs a callback with `fplinux_ui_set_document_handler()`. Both a new process and an existing task receive the document through that callback; `Exec` stays unchanged and carries no file argument. The callback's path is borrowed for its duration. Copy it before returning `FPLINUX_UI_DOCUMENT_WAIT` for asynchronous work or a decision dialog, then answer with `fplinux_ui_document_reply()`.
+
+Return `FPLINUX_UI_DOCUMENT_ACCEPTED` after accepting the file and preparing its screen. The UI runtime sends that result after the new frame is committed and synchronized; the previous application frame cannot acknowledge a new document. WAIT allows a decision dialog to appear without declaring success. Cancel preserves the handler's existing work. After a successful open, ordinary foreground Close resumes the live initiating task; Home keeps its usual meaning.
+
+`FPLINUX_UI_DOCUMENT_RESTART_REQUIRED` serves handlers whose execution engine cannot be reused in the same process. It enters the existing [close handshake](/fplinux/develop/app/lifecycle/): Cancel keeps the task, while Ready closes it and starts the same installed handler with the pending document. A request can restart the handler once. Do not use this response to bypass a save or close decision.
 
 ## Icons
 

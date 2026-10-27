@@ -80,8 +80,8 @@ FPLINUX_UI_INTERNAL int fplinux_ui_modal_height(const struct fplinux_ui *ui);
  * label (one line high, LV_LABEL_LONG_MODE_DOTS at rest) whose text does
  * not fit scrolls only when the controller gives it a turn: a title makes
  * its one pass first (fplinux_ui_title_scroll()), then the focused
- * element's labels take turns, each scrolling to its end and back, for as
- * long as the element keeps focus. One label moves at a time and nothing
+ * element's labels take one turn each, scrolling to the end and back,
+ * then resting until their text or focus changes. One label moves at a time and nothing
  * moves while the application is hidden.
  *
  * fplinux_ui_marquee_focus() names the focused element's labels, first and
@@ -149,6 +149,8 @@ FPLINUX_UI_INTERNAL void fplinux_ui_text_menu_suspend(struct fplinux_ui *ui);
 FPLINUX_UI_INTERNAL void fplinux_ui_text_menu_reclaim(struct fplinux_ui *ui);
 /* The surface changed size: an open symbol grid takes its place again. */
 FPLINUX_UI_INTERNAL void fplinux_ui_text_resize(struct fplinux_ui *ui);
+/* Visibility changes stop or restart the discrete caret deadline. */
+FPLINUX_UI_INTERNAL void fplinux_ui_text_set_visible(struct fplinux_ui *ui);
 
 /*
  * The options menu pop-up drawn by fplinux-ui-menu.c. fplinux-ui.c keeps the
@@ -220,6 +222,16 @@ fplinux_ui_cancel_key_repeat(struct fplinux_ui *ui,
 /* fplinux-ui.c: where the stack lives; NULL until the first screen. */
 FPLINUX_UI_INTERNAL struct fplinux_ui_screens **
 fplinux_ui_screens_slot(struct fplinux_ui *ui);
+/* Input and repeats follow the runtime choice, otherwise the app's top. */
+FPLINUX_UI_INTERNAL struct fplinux_ui_screen *
+fplinux_ui_screens_active(const struct fplinux_ui_screens *screens);
+/* One private choice; leaving it calls cancel once, except at final close. */
+FPLINUX_UI_INTERNAL bool fplinux_ui_screens_show_transient(
+	struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
+	void (*cancel)(struct fplinux_ui *ui, void *context), void *context);
+FPLINUX_UI_INTERNAL void
+fplinux_ui_screens_close_transient(struct fplinux_ui *ui,
+				   struct fplinux_ui_screen *screen);
 /* Takes every key while a screen is stacked; false when none is. */
 FPLINUX_UI_INTERNAL enum fplinux_ui_key_route
 fplinux_ui_screens_key(struct fplinux_ui_screens *screens,

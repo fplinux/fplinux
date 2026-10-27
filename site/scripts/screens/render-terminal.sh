@@ -57,6 +57,7 @@ build_application() {
 		$(pkg-config --cflags wayland-server xkbcommon json-c) \
 		"$screens_dir/terminal-screens.c" "$screens_dir/ui-frame-peer.c" \
 		"$screens_dir/screen-frame.c" "$ui/fplinux-ui-session.c" \
+		"$ui/fplinux-utf8.c" \
 		"$ui/fplinux-ui-profile.c" "$ui_host_inputs/xdg-shell-protocol.c" \
 		$(pkg-config --libs wayland-server xkbcommon json-c) \
 		-o "$work/terminal-screens"

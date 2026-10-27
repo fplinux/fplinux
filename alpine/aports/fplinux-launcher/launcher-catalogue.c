@@ -2,7 +2,6 @@
 #include "launcher-catalogue.h"
 #include "fplinux-desktop-entry.h"
 
-#include <ctype.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -10,25 +9,7 @@
 
 struct display_fields {
 	struct fplinux_launcher_entry *entry;
-	bool hidden;
 };
-
-static bool copy_text(char *destination, size_t capacity, const char *text)
-{
-	if (strlen(text) >= capacity)
-		return false;
-	strcpy(destination, text);
-	return true;
-}
-
-static bool has_name_characters(const char *text)
-{
-	for (; *text; ++text)
-		if (!isalnum((unsigned char)*text) && *text != '.' &&
-		    *text != '_' && *text != '-')
-			return false;
-	return true;
-}
 
 static bool read_display_field(void *context, const char *key,
 			       const char *value)
@@ -38,15 +19,6 @@ static bool read_display_field(void *context, const char *key,
 
 	if (!strcmp(key, "Categories"))
 		entry->group = fplinux_launcher_group_from_categories(value);
-	else if (!strcmp(key, "Icon"))
-		/* A plain name below the icon directories, never a path. */
-		entry->icon_valid =
-			copy_text(entry->icon, sizeof(entry->icon), value) &&
-			entry->icon[0] && entry->icon[0] != '.' &&
-			has_name_characters(entry->icon);
-	else if ((!strcmp(key, "NoDisplay") || !strcmp(key, "Hidden")) &&
-		 !strcmp(value, "true"))
-		fields->hidden = true;
 	return true;
 }
 
@@ -68,9 +40,12 @@ bool fplinux_launcher_read_entry(const char *directory, const char *filename,
 	if (!fplinux_desktop_entry_read(directory, entry->id, locale,
 					metadata_uid, &desktop,
 					read_display_field, &fields) ||
-	    fields.hidden || desktop.mode == FPLINUX_UI_SESSION_LAUNCHER)
+	    desktop.hidden || desktop.no_display ||
+	    desktop.mode == FPLINUX_UI_SESSION_LAUNCHER)
 		return false;
 	strcpy(entry->name, desktop.title);
+	strcpy(entry->icon, desktop.icon);
+	entry->icon_valid = desktop.icon_valid;
 	return true;
 }
 

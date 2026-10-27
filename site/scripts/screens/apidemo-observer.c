@@ -9,7 +9,7 @@
 #include <fplinux/fplinux-ui-menu.h>
 #include <fplinux/fplinux-ui-prefs.h>
 #include <fplinux/fplinux-ui-screen.h>
-#include <fplinux/fplinux-ui-session.h>
+#include <fplinux/fplinux-ui-session-internal.h>
 #include <libintl.h>
 #include <stdarg.h>
 #include <stdio.h>

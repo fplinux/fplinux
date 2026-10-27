@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "clock-wire.h"
 #include "session-clock.h"
+#include "fplinux-ui-session.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -24,6 +25,7 @@ static void literal_requests_drive_the_session_owner(const char *directory)
 {
 	struct fplinux_session_clock clock;
 	struct clock_request request;
+	struct fplinux_ui_session_clock_presentation presentation;
 	char json[256];
 	static const char large_id[] =
 		"{\"op\":\"dismiss\",\"event_id\":9223372036854775817}";
@@ -36,9 +38,15 @@ static void literal_requests_drive_the_session_owner(const char *directory)
 	apply(&clock, "{\"op\":\"timer-set\",\"seconds\":2}", 1704067200, 1000);
 	apply(&clock, "{\"op\":\"timer-start\"}", 1704067200, 1000);
 	assert(fplinux_session_clock_deadline(&clock, 1000) == 3000);
+	fplinux_session_clock_presentation(&clock, &presentation);
+	assert(presentation.timer_deadline_ms == 3000);
+	assert(!presentation.timer_remaining_ms);
 	apply(&clock, "{\"op\":\"timer-pause\"}", 1704153600, 1500);
 	assert(clock.model.timer.remaining_ms == 1500);
 	assert(fplinux_session_clock_deadline(&clock, 1500) == 0);
+	fplinux_session_clock_presentation(&clock, &presentation);
+	assert(!presentation.timer_deadline_ms);
+	assert(presentation.timer_remaining_ms == 1500);
 	apply(&clock, "{\"op\":\"timer-resume\"}", 1704067200, 2000);
 	assert(fplinux_session_clock_deadline(&clock, 2000) == 3500);
 	assert(fplinux_session_clock_tick(&clock, 1704067200, 3500).status ==
@@ -63,7 +71,15 @@ static void literal_requests_drive_the_session_owner(const char *directory)
 	       clock.model.world[0].offset_minutes == 345);
 	assert(!strcmp(clock.model.alarms[0].spec.label, "Чай \"утром\""));
 	assert(clock.model.alarms[0].next_due_utc == 1704067260);
-	assert(fplinux_session_clock_deadline(&clock, 3500) == 4500);
+	assert(fplinux_session_clock_deadline(&clock, 3500) == 0);
+	assert(fplinux_session_clock_alarm_deadline(&clock) == 1704067260);
+	fplinux_session_clock_presentation(&clock, &presentation);
+	assert(presentation.analog);
+	assert(presentation.alarm_utc == 1704067260);
+	assert(!presentation.snooze_deadline_ms);
+	assert(!strcmp(presentation.alarm_label, "Чай \"утром\""));
+	assert(!presentation.timer_deadline_ms &&
+	       !presentation.timer_remaining_ms);
 	assert(clock_wire_request_decode(large_id, sizeof(large_id) - 1,
 					 &request) == CLOCK_OK);
 	assert(request.event_id == UINT64_C(9223372036854775817));

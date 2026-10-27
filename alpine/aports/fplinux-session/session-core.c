@@ -3,6 +3,7 @@
 #include "session-core.h"
 
 #include <errno.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <grp.h>
 #include <limits.h>
@@ -33,6 +34,7 @@
 #include "session-clock.h"
 #include "session-power.h"
 #include "session-settings.h"
+#include "session-storage.h"
 #include "session-vibration.h"
 #include "session-vibrator.h"
 
@@ -85,6 +87,8 @@ struct process {
 	bool drawn;
 	/* TITLE owns opaque application text; otherwise desktop metadata owns it. */
 	bool title_supplied;
+	/* A live task instance to resume after ordinary foreground close. */
+	uint32_t return_origin;
 	/* A lost reply may retry the last successful mutation with its serial. */
 	uint32_t clock_serial;
 	struct clock_request clock_request;
@@ -132,6 +136,19 @@ struct wake_submission {
 	bool ready;
 };
 
+struct document_request {
+	uint32_t request_id;
+	uint32_t serial;
+	uint32_t origin_token;
+	uint32_t handler_token;
+	char handler_id[FPLINUX_UI_SESSION_ID_BYTES];
+	char path[FPLINUX_UI_SESSION_PATH_BYTES];
+	bool waiting;
+	bool restarted;
+	bool restarting;
+	bool detached;
+};
+
 enum held_scene {
 	HELD_SCENE_NONE,
 	HELD_SCENE_LAUNCH = 1U << 0,
@@ -149,11 +166,19 @@ struct fplinux_session {
 	int epoll_fd;
 	int listener_fd;
 	int timer_fd;
+	int alarm_fd;
+	int64_t alarm_due_utc;
 	struct process launcher;
 	/* Stable records preserve peer and pidfd ownership across activation. */
 	struct process tasks[FPLINUX_UI_SESSION_TASK_MAX];
 	uint32_t next_task_token;
 	uint32_t next_close_serial;
+	struct document_request document;
+	struct fplinux_session_storage *storage;
+	struct fplinux_volume_snapshot storage_snapshot;
+	uint32_t storage_origin_token;
+	int storage_origin_fd;
+	uint32_t return_token;
 	unsigned int held_scene;
 	pid_t close_pid;
 	uint32_t close_token;
@@ -348,7 +373,8 @@ static bool read_entry(struct fplinux_session *session, const char *id,
 	return fplinux_desktop_entry_read(session->options.applications, id,
 					  session->settings.locale,
 					  session->options.metadata_uid, entry,
-					  NULL, NULL);
+					  NULL, NULL) &&
+	       !entry->hidden;
 }
 
 static struct process *process_for_pid(struct fplinux_session *session,
@@ -384,6 +410,151 @@ static struct process *free_task(struct fplinux_session *session)
 		if (!session->tasks[i].policy.pid)
 			return &session->tasks[i];
 	return NULL;
+}
+
+static struct process *task_for_token(struct fplinux_session *session,
+				      uint32_t token)
+{
+	for (unsigned int i = 0; token && i < FPLINUX_UI_SESSION_TASK_MAX; ++i)
+		if (session->tasks[i].policy.pid &&
+		    session->tasks[i].policy.token == token)
+			return &session->tasks[i];
+	return NULL;
+}
+
+static bool app_in_foreground(const struct fplinux_session *session);
+
+static void storage_reply(struct process *process, uint32_t request_id,
+			  int error,
+			  const struct fplinux_volume_snapshot *snapshot)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_STORAGE_RESULT,
+		.serial = request_id,
+		.volume_result = {
+			.request_id = request_id,
+			.error = error,
+			.snapshot = *snapshot,
+		},
+	};
+
+	if (process && process->control_fd >= 0 && !process->policy.closing)
+		fplinux_ui_session_send(process->control_fd, &message);
+}
+
+static bool ensure_storage(struct fplinux_session *session)
+{
+	struct fplinux_session_storage_config config = { 0 };
+	int error;
+
+	if (session->storage)
+		return true;
+	if (session->options.storage)
+		config = *session->options.storage;
+	config.uid = session->options.app_uid;
+	config.gid = session->options.app_gid;
+	config.home_path = session->options.home;
+	session->storage = fplinux_session_storage_create(&config);
+	if (!session->storage)
+		return false;
+	if (add_fd(session, fplinux_session_storage_fd(session->storage)))
+		return true;
+	error = errno;
+	fplinux_session_storage_destroy(session->storage);
+	session->storage = NULL;
+	errno = error;
+	return false;
+}
+
+static void storage_request(struct fplinux_session *session,
+			    struct process *process,
+			    const struct fplinux_ui_session_message *message)
+{
+	int error = 0;
+
+	if (process->policy.closing ||
+	    (message->volume_operation != FPLINUX_VOLUME_REFRESH &&
+	     (process != session->app || !app_in_foreground(session) ||
+	      session->power.locked)))
+		error = EPERM;
+	else if (!ensure_storage(session) ||
+		 fplinux_session_storage_request(
+			 session->storage, message->volume_operation,
+			 message->volume_id, message->serial) < 0)
+		error = errno;
+	if (error) {
+		storage_reply(process, message->serial, error,
+			      &session->storage_snapshot);
+		return;
+	}
+	session->storage_origin_token = process->policy.token;
+	session->storage_origin_fd = process->control_fd;
+}
+
+static void dispatch_storage(struct fplinux_session *session)
+{
+	struct fplinux_volume_result result;
+	struct process *origin;
+
+	if (!session->storage ||
+	    fplinux_session_storage_take_result(session->storage, &result) != 1)
+		return;
+	session->storage_snapshot = result.snapshot;
+	origin = task_for_token(session, session->storage_origin_token);
+	if (origin && origin->control_fd == session->storage_origin_fd)
+		storage_reply(origin, result.request_id, result.error,
+			      &result.snapshot);
+	session->storage_origin_token = 0;
+	session->storage_origin_fd = -1;
+}
+
+static void document_result(struct fplinux_session *session,
+			    enum fplinux_ui_document_status status, int error)
+{
+	struct document_request *request = &session->document;
+	struct process *origin = task_for_token(session, request->origin_token);
+	/* The idle slot owns the handoff until a handler has been started. */
+	struct process *handler =
+		request->handler_token ?
+			task_for_token(session, request->handler_token) :
+			&session->idle_app;
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_DOCUMENT_RESULT,
+		.serial = request->request_id,
+		.document_status = status,
+		.document_error = error,
+	};
+
+	if (!request->request_id)
+		return;
+	if (origin && origin->control_fd >= 0 && !origin->policy.closing)
+		fplinux_ui_session_send(origin->control_fd, &message);
+	if (status == FPLINUX_UI_DOCUMENT_WAIT)
+		return;
+	if (status != FPLINUX_UI_DOCUMENT_ACCEPTED && origin &&
+	    ((session->app == handler && origin != session->app) ||
+	     (session->launch_starting && request->serial &&
+	      request->serial == session->launch_generation)))
+		session->return_token = origin->policy.token;
+	memset(request, 0, sizeof(*request));
+}
+
+static void document_launch_result(struct fplinux_session *session,
+				   enum fplinux_ui_document_status status,
+				   int error)
+{
+	if (session->document.request_id && session->document.serial &&
+	    session->document.serial == session->launch_generation &&
+	    !strcmp(session->document.handler_id, session->launch_id))
+		document_result(session, status, error);
+}
+
+static bool document_delivered(struct fplinux_session *session)
+{
+	struct process *handler =
+		task_for_token(session, session->document.handler_token);
+
+	return handler && handler->connected;
 }
 
 /* The launcher is separate from the bounded application registry. */
@@ -687,6 +858,10 @@ static bool start_process(struct fplinux_session *session,
 		if (!++session->next_task_token)
 			++session->next_task_token;
 		process->policy.token = session->next_task_token;
+		if (session->document.request_id &&
+		    session->document.serial == session->launch_generation &&
+		    !strcmp(entry->app_id, session->document.handler_id))
+			session->document.handler_token = process->policy.token;
 	}
 	/* Each start begins in the declared mode. */
 	process->policy.mode = entry->mode;
@@ -872,6 +1047,8 @@ static void send_active(struct fplinux_session *session)
 	clock_wire_ring_from_model(&session->clock.model, &ring);
 	clock_wire_ring_encode(&ring, ring.event.id, message.clock_data,
 			       sizeof(message.clock_data));
+	fplinux_session_clock_presentation(&session->clock,
+					   &message.clock_presentation);
 	copy_value(message.notice, sizeof(message.notice),
 		   battery_notice_code(session->battery_notice));
 	copy_value(message.selected_id, sizeof(message.selected_id),
@@ -979,6 +1156,17 @@ static void send_activation(struct fplinux_session *session,
 		.activation = session->launch_activation,
 	};
 
+	if (session->document.request_id &&
+	    session->document.serial == session->launch_generation &&
+	    !strcmp(process->policy.app_id, session->document.handler_id) &&
+	    process == session->app && session->launch_starting) {
+		message.type = FPLINUX_UI_SESSION_DOCUMENT;
+		message.activation = FPLINUX_UI_SESSION_ACTIVATION_OPEN;
+		message.serial = session->document.serial;
+		copy_value(message.path, sizeof(message.path),
+			   session->document.path);
+		session->document.handler_token = process->policy.token;
+	}
 	if (process == session->app && session->launch_starting &&
 	    process->control_fd >= 0 &&
 	    !strcmp(process->policy.app_id, session->launch_id))
@@ -1067,6 +1255,7 @@ void fplinux_session_cancel_launch(struct fplinux_session *session)
 
 	if (!launch_in_progress(session))
 		return;
+	document_launch_result(session, FPLINUX_UI_DOCUMENT_CANCELLED, 0);
 	clear_pending_launch(session);
 	session->launcher_home_view = false;
 	session->error[0] = '\0';
@@ -1244,7 +1433,133 @@ static void launch(struct fplinux_session *session, const char *id,
 		send_active(session);
 		return;
 	}
+	if (activation == FPLINUX_UI_SESSION_ACTIVATION_OPEN) {
+		struct process *existing = task_for_id(session, id);
+
+		if (existing)
+			existing->return_origin = 0;
+		if (existing &&
+		    session->document.handler_token == existing->policy.token)
+			session->document.detached = true;
+	}
 	begin_launch(session, &entry, activation, frame_fd, width, height);
+}
+
+static void open_document_with(struct fplinux_session *session, const char *id)
+{
+	struct fplinux_desktop_entry entry;
+	struct document_request *request = &session->document;
+	int error = fplinux_ui_session_document_path_error(request->path);
+
+	if (error || !read_entry(session, id, &entry) ||
+	    entry.mode == FPLINUX_UI_SESSION_LAUNCHER ||
+	    !fplinux_desktop_entry_handles(&entry, request->path)) {
+		document_result(session, FPLINUX_UI_DOCUMENT_ERROR,
+				error ? error : ENOENT);
+		return;
+	}
+	if (!task_for_id(session, id) && !free_task(session)) {
+		document_result(session, FPLINUX_UI_DOCUMENT_ERROR, EUSERS);
+		return;
+	}
+	copy_value(request->handler_id, sizeof(request->handler_id), id);
+	if (!begin_launch(session, &entry, FPLINUX_UI_SESSION_ACTIVATION_OPEN,
+			  -1, 0, 0)) {
+		document_result(session, FPLINUX_UI_DOCUMENT_ERROR, EBUSY);
+		return;
+	}
+	request->serial = session->launch_generation;
+}
+
+static int compare_document_choices(const void *first, const void *second)
+{
+	const struct fplinux_ui_session_document_choice *left = first;
+	const struct fplinux_ui_session_document_choice *right = second;
+	int order = strcmp(left->title, right->title);
+
+	return order ? order : strcmp(left->app_id, right->app_id);
+}
+
+static void open_document(struct fplinux_session *session,
+			  struct process *origin,
+			  const struct fplinux_ui_session_message *message)
+{
+	struct fplinux_ui_session_message choices = {
+		.type = FPLINUX_UI_SESSION_DOCUMENT_CHOICES,
+		.serial = message->serial,
+	};
+	DIR *directory;
+	struct dirent *item;
+	int error = 0;
+
+	if (origin != session->app || !app_in_foreground(session) ||
+	    session->power.locked || session->document.request_id ||
+	    launch_in_progress(session)) {
+		struct fplinux_ui_session_message busy = {
+			.type = FPLINUX_UI_SESSION_DOCUMENT_RESULT,
+			.serial = message->serial,
+			.document_status = FPLINUX_UI_DOCUMENT_ERROR,
+			.document_error = EBUSY,
+		};
+
+		fplinux_ui_session_send(origin->control_fd, &busy);
+		return;
+	}
+	session->document.request_id = message->serial;
+	session->document.origin_token = origin->policy.token;
+	copy_value(session->document.path, sizeof(session->document.path),
+		   message->path);
+	error = fplinux_ui_session_document_path_error(message->path);
+	if (error) {
+		document_result(session, FPLINUX_UI_DOCUMENT_ERROR, error);
+		return;
+	}
+	directory = opendir(session->options.applications);
+	if (!directory) {
+		document_result(session, FPLINUX_UI_DOCUMENT_ERROR, errno);
+		return;
+	}
+	while ((item = readdir(directory))) {
+		struct fplinux_desktop_entry entry;
+		struct fplinux_ui_session_document_choice *choice;
+		char id[FPLINUX_UI_SESSION_ID_BYTES];
+		size_t bytes = strlen(item->d_name);
+
+		if (bytes <= 8 || bytes - 8 >= sizeof(id) ||
+		    strcmp(item->d_name + bytes - 8, ".desktop"))
+			continue;
+		memcpy(id, item->d_name, bytes - 8);
+		id[bytes - 8] = '\0';
+		if (!read_entry(session, id, &entry) ||
+		    entry.mode == FPLINUX_UI_SESSION_LAUNCHER ||
+		    !fplinux_desktop_entry_handles(&entry, message->path))
+			continue;
+		if (choices.document_choice_count ==
+		    FPLINUX_UI_SESSION_DOCUMENT_CHOICE_MAX) {
+			error = EOVERFLOW;
+			break;
+		}
+		choice = &choices.document_choices
+				  [choices.document_choice_count++];
+		copy_value(choice->app_id, sizeof(choice->app_id),
+			   entry.app_id);
+		copy_value(choice->title, sizeof(choice->title), entry.title);
+		if (entry.icon_valid)
+			copy_value(choice->icon, sizeof(choice->icon),
+				   entry.icon);
+	}
+	closedir(directory);
+	if (error || !choices.document_choice_count)
+		document_result(session, FPLINUX_UI_DOCUMENT_ERROR,
+				error ? error : ENOEXEC);
+	else if (choices.document_choice_count == 1)
+		open_document_with(session, choices.document_choices[0].app_id);
+	else {
+		qsort(choices.document_choices, choices.document_choice_count,
+		      sizeof(choices.document_choices[0]),
+		      compare_document_choices);
+		fplinux_ui_session_send(origin->control_fd, &choices);
+	}
 }
 
 static void return_home(struct fplinux_session *session)
@@ -1254,6 +1569,9 @@ static void return_home(struct fplinux_session *session)
 	};
 	unsigned int i;
 
+	if (session->document.handler_id[0] && !document_delivered(session))
+		document_result(session, FPLINUX_UI_DOCUMENT_CANCELLED, 0);
+	session->return_token = 0;
 	clear_pending_launch(session);
 	finish_launch(session);
 	for (i = 0; i < FPLINUX_UI_SESSION_TASK_MAX; ++i)
@@ -1343,8 +1661,18 @@ static void close_reply(struct fplinux_session *session,
 	    process->close_serial != message->serial || process->policy.closing)
 		return;
 	if (!strcmp(message->value, "ready")) {
-		finish_user_close(session, process);
+		if (session->document.restarting &&
+		    session->document.handler_token == process->policy.token) {
+			release_scene(session, HELD_SCENE_CLOSE);
+			request_close(session, process);
+		} else {
+			finish_user_close(session, process);
+		}
 	} else if (!strcmp(message->value, "cancel")) {
+		if (session->document.restarting &&
+		    session->document.handler_token == process->policy.token)
+			document_result(session, FPLINUX_UI_DOCUMENT_CANCELLED,
+					0);
 		process->close_serial = 0;
 		process->close_waiting = false;
 		process->close_activate = false;
@@ -1356,6 +1684,61 @@ static void close_reply(struct fplinux_session *session,
 		process->close_waiting = true;
 		process->close_activate &= process != session->app;
 	}
+	changed(session);
+}
+
+static void
+handler_document_result(struct fplinux_session *session,
+			struct process *process,
+			const struct fplinux_ui_session_message *message)
+{
+	struct document_request *request = &session->document;
+	bool owns_launch = session->launch_starting &&
+			   request->serial == session->launch_generation &&
+			   process == session->app;
+
+	if (!request->request_id || request->serial != message->serial ||
+	    request->handler_token != process->policy.token ||
+	    process->policy.closing)
+		return;
+	if (message->document_status == FPLINUX_UI_DOCUMENT_RESTART_REQUIRED) {
+		if (request->restarted) {
+			document_result(session, FPLINUX_UI_DOCUMENT_ERROR,
+					ENOTSUP);
+			if (owns_launch)
+				finish_launch(session);
+			return;
+		}
+		request->restarted = true;
+		request->restarting = true;
+		request->waiting = true;
+		/* The existing close callback owns the only ready/cancel/wait decision. */
+		if (owns_launch)
+			finish_launch(session);
+		prepare_user_close(session, process);
+		return;
+	}
+	if (message->document_status == FPLINUX_UI_DOCUMENT_WAIT) {
+		request->waiting = true;
+		document_result(session, FPLINUX_UI_DOCUMENT_WAIT, 0);
+		return;
+	}
+	if (message->document_status == FPLINUX_UI_DOCUMENT_ACCEPTED) {
+		process->return_origin =
+			request->detached || request->origin_token ==
+						     process->policy.token ?
+				0 :
+				request->origin_token;
+		if (owns_launch) {
+			session->activation_ready = true;
+			finish_activation(session);
+		}
+	} else if (owns_launch) {
+		finish_launch(session);
+	}
+	document_result(session, message->document_status,
+			message->document_error);
+	send_active(session);
 	changed(session);
 }
 
@@ -2237,6 +2620,31 @@ static bool receive_message(struct fplinux_session *session, struct peer *peer,
 		return true;
 	}
 	switch (message->type) {
+	case FPLINUX_UI_SESSION_STORAGE_REQUEST:
+		if (process == &session->launcher)
+			return false;
+		storage_request(session, process, message);
+		break;
+	case FPLINUX_UI_SESSION_OPEN_FILE:
+		if (process == &session->launcher)
+			return false;
+		open_document(session, process, message);
+		break;
+	case FPLINUX_UI_SESSION_DOCUMENT_CHOICE:
+		if (process->policy.token != session->document.origin_token ||
+		    message->serial != session->document.request_id)
+			break;
+		if (!message->app_id[0])
+			document_result(session, FPLINUX_UI_DOCUMENT_CANCELLED,
+					0);
+		else
+			open_document_with(session, message->app_id);
+		break;
+	case FPLINUX_UI_SESSION_DOCUMENT_RESULT:
+		if (process == &session->launcher)
+			return false;
+		handler_document_result(session, process, message);
+		break;
 	case FPLINUX_UI_SESSION_READY:
 		if (!process->policy.ready && process->drawn)
 			process->handoff_ms = now_ms(session);
@@ -2442,14 +2850,13 @@ static bool receive_message(struct fplinux_session *session, struct peer *peer,
 		}
 		break;
 	case FPLINUX_UI_SESSION_MODE:
-		if (process != session->app && process != &session->launcher)
-			break;
-		if (process != session->app ||
+		if (process == &session->launcher ||
 		    (message->mode != FPLINUX_UI_SESSION_INTEGRATED &&
 		     message->mode != FPLINUX_UI_SESSION_FULLSCREEN))
 			return false;
-		/* switch_mode() applies it; a leaving application ignores it. */
-		if (app_in_foreground(session) &&
+		/* switch_mode() applies retained requests when the task returns. */
+		if (!process->policy.closing &&
+		    process->policy.lifecycle != FPLINUX_UI_SESSION_CLOSING &&
 		    message->mode != process->requested_mode) {
 			process->requested_mode = message->mode;
 			process->mode_ms = now_ms(session);
@@ -2528,6 +2935,10 @@ static void disconnect_peer(struct fplinux_session *session, struct peer *peer)
 {
 	struct process *process = process_for_pid(session, peer->pid);
 
+	if (peer->fd == session->storage_origin_fd) {
+		session->storage_origin_token = 0;
+		session->storage_origin_fd = -1;
+	}
 	if (process && process->control_fd == peer->fd) {
 		if (!process->policy.closing)
 			process->disconnected = true;
@@ -2547,12 +2958,40 @@ static void reap_process(struct fplinux_session *session,
 	pid_t pid = process->policy.pid;
 	pid_t reaped;
 	unsigned int i;
+	bool restart_document;
 
 	if (!pid)
 		return;
 	reaped = waitpid(pid, &status, WNOHANG);
 	if (reaped != pid && !(reaped < 0 && errno == ECHILD))
 		return;
+	if (session->document.request_id &&
+	    session->document.origin_token == process->policy.token) {
+		bool delivered = document_delivered(session);
+		bool owns_launch = session->launch_starting &&
+				   session->document.serial ==
+					   session->launch_generation;
+
+		memset(&session->document, 0, sizeof(session->document));
+		if (owns_launch) {
+			if (delivered)
+				finish_launch(session);
+			else
+				fplinux_session_cancel_launch(session);
+		}
+	}
+	restart_document =
+		session->document.request_id && session->document.restarting &&
+		session->document.handler_token == process->policy.token;
+	if (session->document.request_id &&
+	    session->document.handler_token == process->policy.token &&
+	    !restart_document)
+		document_result(session, FPLINUX_UI_DOCUMENT_ERROR,
+				process->failed ? ETIMEDOUT : EIO);
+	if (!restart_document && process == session->app &&
+	    process->policy.closing && !process->failed &&
+	    !process->disconnected && process->return_origin)
+		session->return_token = process->return_origin;
 	/* Descendants cannot outlive the application process group. */
 	kill(-pid, SIGKILL);
 	/*
@@ -2594,6 +3033,10 @@ static void reap_process(struct fplinux_session *session,
 		session->app = &session->idle_app;
 	}
 	initialize_process(process);
+	if (restart_document) {
+		session->document.waiting = false;
+		session->document.handler_token = 0;
+	}
 	fplinux_session_power_activity(&session->power, false, now_ms(session));
 	send_active(session);
 	send_tasks(session);
@@ -2744,6 +3187,9 @@ static void manage_processes(struct fplinux_session *session, uint64_t time,
 
 			if (time - started >= FPLINUX_SESSION_STARTUP_MS &&
 			    !process->policy.closing &&
+			    !(session->document.waiting &&
+			      session->document.handler_token ==
+				      process->policy.token) &&
 			    !(process == session->app &&
 			      session->launch_retained)) {
 				fprintf(stderr,
@@ -2776,14 +3222,31 @@ static void manage_processes(struct fplinux_session *session, uint64_t time,
 		if (process->pid_fd < 0)
 			*needs_tick = true;
 	}
-	if (session->launch_starting) {
+	if (session->launch_starting && !session->document.waiting) {
 		*needs_tick = true;
 		if (time - session->launch_ms >= FPLINUX_SESSION_STARTUP_MS) {
+			document_launch_result(
+				session, FPLINUX_UI_DOCUMENT_ERROR, ETIMEDOUT);
 			fplinux_session_cancel_launch(session);
 			copy_value(session->error, sizeof(session->error),
 				   "app-start-failed");
 			send_active(session);
 		}
+	}
+	if (session->return_token && !launch_in_progress(session) &&
+	    !session->power.locked && !clock_due(session)) {
+		struct process *origin =
+			task_for_token(session, session->return_token);
+
+		session->return_token = 0;
+		if (origin && is_running(origin) && !origin->policy.closing)
+			launch(session, origin->policy.app_id,
+			       FPLINUX_UI_SESSION_ACTIVATION_RESUME, -1, 0, 0);
+	}
+	if (session->document.restarting && !session->document.handler_token &&
+	    !launch_in_progress(session)) {
+		session->document.restarting = false;
+		open_document_with(session, session->document.handler_id);
 	}
 	if (!session->destroying && !launch_in_progress(session) &&
 	    !session->power.locked && !notice_covers_app(session) &&
@@ -2816,6 +3279,8 @@ static void manage_processes(struct fplinux_session *session, uint64_t time,
 			send_tasks(session);
 		} else if (!read_entry(session, session->pending_id, &entry) ||
 			   entry.mode == FPLINUX_UI_SESSION_LAUNCHER) {
+			document_launch_result(
+				session, FPLINUX_UI_DOCUMENT_ERROR, ENOENT);
 			copy_value(session->error, sizeof(session->error),
 				   "app-unavailable");
 			clear_pending_launch(session);
@@ -2846,6 +3311,10 @@ static void manage_processes(struct fplinux_session *session, uint64_t time,
 				struct process *slot = free_task(session);
 
 				if (!slot) {
+					document_launch_result(
+						session,
+						FPLINUX_UI_DOCUMENT_ERROR,
+						EUSERS);
 					copy_value(session->error,
 						   sizeof(session->error),
 						   "tasks-full");
@@ -2855,6 +3324,10 @@ static void manage_processes(struct fplinux_session *session, uint64_t time,
 					session->launch_retained = false;
 					if (!start_process(session, slot,
 							   &entry)) {
+						document_launch_result(
+							session,
+							FPLINUX_UI_DOCUMENT_ERROR,
+							errno ? errno : EIO);
 						session->app =
 							&session->idle_app;
 						copy_value(
@@ -2967,9 +3440,28 @@ static void settle_held_scene(struct fplinux_session *session)
 		release_scene(session, HELD_SCENE_HOME | HELD_SCENE_LAUNCH);
 }
 
+static void arm_alarm(struct fplinux_session *session)
+{
+	int64_t due = fplinux_session_clock_alarm_deadline(&session->clock);
+	struct itimerspec timer = { 0 };
+
+	if (due == session->alarm_due_utc)
+		return;
+	timer.it_value.tv_sec = due;
+	if (timerfd_settime(session->alarm_fd,
+			    TFD_TIMER_ABSTIME | TFD_TIMER_CANCEL_ON_SET, &timer,
+			    NULL) < 0) {
+		fprintf(stderr, "fplinux-session: cannot arm alarm: %s\n",
+			strerror(errno));
+		return;
+	}
+	session->alarm_due_utc = due;
+}
+
 static void advance(struct fplinux_session *session)
 {
 	struct itimerspec timer = { 0 };
+	struct fplinux_ui_session_clock_presentation clock_presentation;
 	uint64_t time = now_ms(session);
 	uint64_t earliest = 0;
 	bool needs_tick = false;
@@ -2988,6 +3480,9 @@ static void advance(struct fplinux_session *session)
 		fplinux_session_clock_tick(&session->clock, wall_utc(session),
 					   time);
 	}
+	arm_alarm(session);
+	fplinux_session_clock_presentation(&session->clock,
+					   &clock_presentation);
 	if (session->settings_retry_ms && time >= session->settings_retry_ms)
 		save_settings(session);
 	clock_power(session, time);
@@ -3030,6 +3525,9 @@ static void advance(struct fplinux_session *session)
 	}
 	if (old_clock_event != session->clock.model.active.id ||
 	    old_clock_missed != session->clock.model.missed_total ||
+	    memcmp(&clock_presentation,
+		   &session->last_active.clock_presentation,
+		   sizeof(clock_presentation)) ||
 	    !session->active_known ||
 	    session->active_display != session->power.display ||
 	    session->active_locked != session->power.locked ||
@@ -3077,6 +3575,10 @@ void fplinux_session_dispatch(struct fplinux_session *session)
 	epoll_wait(session->epoll_fd, events,
 		   sizeof(events) / sizeof(events[0]), 0);
 	read(session->timer_fd, &ticks, sizeof(ticks));
+	if (read(session->alarm_fd, &ticks, sizeof(ticks)) < 0 &&
+	    errno == ECANCELED)
+		/* The next advance reticks wall alarms and rearms the same UTC. */
+		session->alarm_due_utc = -1;
 	accept_peers(session);
 	for (i = 0; i < FPLINUX_SESSION_PEERS; ++i) {
 		struct peer *peer = &session->peers[i];
@@ -3103,6 +3605,7 @@ void fplinux_session_dispatch(struct fplinux_session *session)
 			}
 		}
 	}
+	dispatch_storage(session);
 	advance(session);
 }
 
@@ -3133,6 +3636,7 @@ fplinux_session_create(const struct fplinux_session_options *options)
 	const struct fplinux_ui_profile_spec *profile;
 	struct fplinux_session *session;
 	unsigned int i;
+	int error;
 
 	if (!options || options->width <= 0 || options->height <= 0 ||
 	    strlen(options->socket_path) >= sizeof(address.sun_path)) {
@@ -3165,6 +3669,8 @@ fplinux_session_create(const struct fplinux_session_options *options)
 	session->epoll_fd = -1;
 	session->listener_fd = -1;
 	session->timer_fd = -1;
+	session->alarm_fd = -1;
+	session->storage_origin_fd = -1;
 	session->clock_signal_fd = -1;
 	fplinux_session_vibrator_init(&session->vibrator);
 	fplinux_session_audio_init(&session->audio, NULL, -1);
@@ -3193,8 +3699,10 @@ fplinux_session_create(const struct fplinux_session_options *options)
 		AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
 	session->timer_fd =
 		timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
+	session->alarm_fd =
+		timerfd_create(CLOCK_REALTIME, TFD_CLOEXEC | TFD_NONBLOCK);
 	if (session->epoll_fd < 0 || session->listener_fd < 0 ||
-	    session->timer_fd < 0)
+	    session->timer_fd < 0 || session->alarm_fd < 0)
 		goto fail;
 	strcpy(address.sun_path, options->socket_path);
 	if (bind(session->listener_fd, (struct sockaddr *)&address,
@@ -3206,7 +3714,8 @@ fplinux_session_create(const struct fplinux_session_options *options)
 				     options->app_gid) < 0) ||
 	    listen(session->listener_fd, FPLINUX_SESSION_PEERS) < 0 ||
 	    !add_fd(session, session->listener_fd) ||
-	    !add_fd(session, session->timer_fd))
+	    !add_fd(session, session->timer_fd) ||
+	    !add_fd(session, session->alarm_fd))
 		goto fail;
 	open_keypad_light(session);
 	session->has_audio = options->audio_socket && options->audio_service &&
@@ -3231,7 +3740,9 @@ fplinux_session_create(const struct fplinux_session_options *options)
 	advance(session);
 	return session;
 fail:
+	error = errno;
 	fplinux_session_destroy(session);
+	errno = error;
 	return NULL;
 }
 
@@ -3312,10 +3823,16 @@ void fplinux_session_destroy(struct fplinux_session *session)
 	}
 	for (i = 0; i < FPLINUX_SESSION_PEERS; ++i)
 		remove_fd(session, session->peers[i].fd);
-	remove_fd(session, session->listener_fd);
+	remove_fd(session, session->alarm_fd);
 	remove_fd(session, session->timer_fd);
+	remove_fd(session, session->listener_fd);
 	remove_fd(session, session->clock_signal_fd);
 	fplinux_session_audio_close(&session->audio);
+	if (session->storage) {
+		epoll_ctl(session->epoll_fd, EPOLL_CTL_DEL,
+			  fplinux_session_storage_fd(session->storage), NULL);
+		fplinux_session_storage_destroy(session->storage);
+	}
 	fplinux_session_clock_cleanup(&session->clock);
 	if (!fplinux_session_vibrator_close(&session->vibrator))
 		fprintf(stderr, "fplinux-session: cannot close vibrator: %s\n",

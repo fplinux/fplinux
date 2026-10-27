@@ -40,6 +40,7 @@ def ui_frame(
                 str(ROOT / "tests/host_tool/gui/fplinux-ui-frame.c"),
                 str(ROOT / "lib/fplinux/fplinux-ui-frame.c"),
                 str(archive),
+                "-Wl,--wrap=calloc",
                 "-lm",
             ],
             name="link software frames with native LVGL canvases and timers",

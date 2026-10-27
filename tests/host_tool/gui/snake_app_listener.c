@@ -357,11 +357,12 @@ bool fplinux_ui_alert_set_text(struct fplinux_ui_screen *alert,
 	return true;
 }
 
-void fplinux_ui_push(struct fplinux_ui *instance,
+bool fplinux_ui_push(struct fplinux_ui *instance,
 		     struct fplinux_ui_screen *pushed)
 {
 	pushed->below = instance->current;
 	instance->current = pushed;
+	return true;
 }
 
 bool fplinux_ui_pop(struct fplinux_ui *instance)

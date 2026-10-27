@@ -176,6 +176,7 @@ COLOURS = (
     "accent",
     "accent_text",
     "border",
+    "control_border",
     "popup",
     "bar",
     "bar_text",

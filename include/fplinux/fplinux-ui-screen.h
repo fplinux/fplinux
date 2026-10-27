@@ -28,8 +28,10 @@
  * screen, the runtime handles every key for it: the application receives
  * commands and item changes, not key events, except through a screen key
  * filter or a Canvas key handler. VISIBILITY and CLOSE events still reach the fplinux_ui_open()
- * callback. Screens are stacked: the top screen is shown, and the runtime
- * deletes a screen when it is popped or replaced. The launcher's base
+ * callback. A successful constructor registers its screen with the runtime,
+ * including before navigation and after a refused navigation. The runtime
+ * deletes a screen when it is popped or replaced, and every remaining
+ * screen at close. The launcher's base
  * Canvas keeps its system bars visible behind ordinary screens.
  */
 struct fplinux_ui_screen;
@@ -75,6 +77,10 @@ struct fplinux_ui_command {
 	 * priority or move commands out of Options.
 	 */
 	bool keep_visible;
+	/* Optional copied legend used when full legends do not fit; Options uses label. */
+	const char *short_label;
+	/* Optional boundary before this Options row; ignored for the first row. */
+	bool separator_before;
 };
 
 /* An implicit List reports OK on a row with this reserved command id. */
@@ -88,7 +94,7 @@ typedef void (*fplinux_ui_change_cb)(struct fplinux_ui *ui,
 				     struct fplinux_ui_screen *screen,
 				     size_t index, void *context);
 
-/* Labels are copied. Adding a command id twice replaces it. */
+/* Labels and short labels are copied. Adding a command id twice replaces it. */
 bool fplinux_ui_screen_add_command(struct fplinux_ui_screen *screen,
 				   const struct fplinux_ui_command *command);
 void fplinux_ui_screen_remove_command(struct fplinux_ui_screen *screen, int id);
@@ -156,20 +162,30 @@ void *fplinux_ui_screen_get_data(const struct fplinux_ui_screen *screen);
 bool fplinux_ui_screen_get_content_size(const struct fplinux_ui_screen *screen,
 					int *width, int *height);
 
-/* The screen stack. push, navigate and replace take ownership of the screen. */
-void fplinux_ui_push(struct fplinux_ui *ui, struct fplinux_ui_screen *screen);
+/*
+ * Application navigation. The runtime already owns a constructed screen;
+ * these calls change its place, not its ownership. Success cancels a runtime
+ * choice above the stack. Failure preserves both the stack and that choice:
+ * EINVAL for a NULL argument, ENOENT for a screen outside this runtime, EBUSY
+ * for a screen already shown or while a row provider/navigation is running.
+ * A refused screen remains available for a later navigation or final close.
+ */
+bool fplinux_ui_push(struct fplinux_ui *ui, struct fplinux_ui_screen *screen);
 /*
  * Opens a child. During a high-level Options command callback, Back from
  * this child also restores that owner's Options, with the selected command
  * and scroll position. Other calls act like push. The command's type does
  * not establish navigation: SCREEN and HELP still describe its key scope.
  */
-void fplinux_ui_navigate(struct fplinux_ui *ui,
+bool fplinux_ui_navigate(struct fplinux_ui *ui,
 			 struct fplinux_ui_screen *screen);
-void fplinux_ui_replace(struct fplinux_ui *ui,
+bool fplinux_ui_replace(struct fplinux_ui *ui,
 			struct fplinux_ui_screen *screen);
-/* Completes an action without restoring Options; false for the only screen. */
+/* False with ENOENT for the only screen; EBUSY during a row provider/navigation. */
 bool fplinux_ui_pop(struct fplinux_ui *ui);
+/* Deletes screens above target; ENOENT if target is not in this app stack. */
+bool fplinux_ui_pop_to(struct fplinux_ui *ui, struct fplinux_ui_screen *target);
+/* The application's top screen, excluding runtime Form/Open with choices. */
 struct fplinux_ui_screen *fplinux_ui_current(const struct fplinux_ui *ui);
 /*
  * Returns to the immediate parent, restoring its current Options after a
@@ -196,7 +212,8 @@ struct fplinux_ui_screen *fplinux_ui_list_new(struct fplinux_ui *ui,
 					      enum fplinux_ui_list_kind kind);
 /*
  * detail, which may be NULL, is shown on a second line under the text; the
- * first detail gives every row of the list the taller detail pitch.
+ * first detail gives every row of the list the taller detail pitch. A list
+ * configured with fplinux_ui_list_set_value_details() may use a right column.
  */
 size_t fplinux_ui_list_append(struct fplinux_ui_screen *list, const char *text,
 			      const char *detail);
@@ -247,6 +264,13 @@ void fplinux_ui_list_set_selected(struct fplinux_ui_screen *list, size_t index,
 /* The centre legend for IMPLICIT/EXCLUSIVE lists; NULL restores "Select". */
 bool fplinux_ui_list_set_select_label(struct fplinux_ui_screen *list,
 				      const char *label);
+/*
+ * Current values: a right-aligned inline column in landscape, a second line
+ * otherwise. Longer values use the normal focused-row marquee. Call before
+ * adding rows: EBUSY for a populated list, EINVAL for another screen or a
+ * virtual list. Ordinary descriptive details keep their second line.
+ */
+bool fplinux_ui_list_set_value_details(struct fplinux_ui_screen *list);
 
 /*
  * Images take an LVGL image source: the path of a PNG file, or a pointer to
@@ -274,6 +298,16 @@ enum fplinux_ui_list_icon_kind {
 bool fplinux_ui_list_set_icon(struct fplinux_ui_screen *list, size_t index,
 			      const void *src,
 			      enum fplinux_ui_list_icon_kind kind);
+/* Stored rows: use the title font for the primary text; EINVAL for other rows. */
+bool fplinux_ui_list_set_emphasis(struct fplinux_ui_screen *list, size_t index,
+				  bool emphasis);
+/*
+ * Stored rows: an optional trailing status image, drawn in the text colour.
+ * Borrows src until replaced or the row is deleted; NULL removes it. A
+ * runtime-owned glyph stays valid until close. EINVAL for another row/list.
+ */
+bool fplinux_ui_list_set_trailing_icon(struct fplinux_ui_screen *list,
+				       size_t index, const void *src);
 
 /*
  * Virtual list, for large data sets: a List whose rows are not stored. The
@@ -286,18 +320,16 @@ bool fplinux_ui_list_set_icon(struct fplinux_ui_screen *list, size_t index,
  * _is_selected(), _set_selected() and _set_icon() fail with EINVAL on a
  * virtual list; focus and item commands work by index.
  *
- * struct fplinux_ui_virtual_row is allocated and zeroed by the runtime
- * before each call. size is the number of bytes the runtime allocated:
- * write a field only when FPLINUX_UI_VIRTUAL_ROW_HAS(row, field) is true,
- * so that an application built against a newer header runs on an older
- * runtime. Later versions append fields. The runtime copies the strings
+ * The runtime supplies a full zeroed struct fplinux_ui_virtual_row before
+ * each call. The provider synchronously fills data only; navigation returns
+ * EBUSY until it returns. It must not mutate lists, delete objects or close
+ * the runtime. The runtime copies the strings
  * and decodes the icon after the callback returns, so they must stay valid
  * until the runtime calls the row callback again or the application's code
  * runs again: point them at the application's data or at a static buffer,
  * never at a local array of the callback.
  */
 struct fplinux_ui_virtual_row {
-	size_t size;
 	/* Required. */
 	const char *text;
 	/* NULL for none; a second line as in every list. */
@@ -309,11 +341,6 @@ struct fplinux_ui_virtual_row {
 	/* IMAGE by default; APP_TILE adds the focused tile ring. */
 	enum fplinux_ui_list_icon_kind icon_kind;
 };
-
-#define FPLINUX_UI_VIRTUAL_ROW_HAS(row, field)            \
-	(offsetof(struct fplinux_ui_virtual_row, field) + \
-		 sizeof((row)->field) <=                  \
-	 (row)->size)
 
 /* Fills row for index; returns false to show an empty row. */
 typedef bool (*fplinux_ui_virtual_row_cb)(struct fplinux_ui *ui,
@@ -403,6 +430,11 @@ size_t fplinux_ui_form_append_image(struct fplinux_ui_screen *form,
 
 bool fplinux_ui_form_set_string(struct fplinux_ui_screen *form, size_t item,
 				const char *text);
+/*
+ * Borrows the text until the item changes or the screen is deleted. Repeated
+ * reads keep the result valid. Returns NULL for an invalid item, or with
+ * ENOMEM if a DECIMAL field's normalized result cannot be prepared.
+ */
 const char *fplinux_ui_form_get_text(const struct fplinux_ui_screen *form,
 				     size_t item);
 bool fplinux_ui_form_set_text(struct fplinux_ui_screen *form, size_t item,
@@ -569,6 +601,12 @@ bool fplinux_ui_alert_set_progress(struct fplinux_ui_screen *alert, int value,
  */
 bool fplinux_ui_alert_set_text(struct fplinux_ui_screen *alert,
 			       const char *text);
+/*
+ * A fixed caption below the progress indicator. Updating it preserves the
+ * message's scroll position; NULL or "" removes it. EINVAL for another screen.
+ */
+bool fplinux_ui_alert_set_footer(struct fplinux_ui_screen *alert,
+				 const char *text);
 
 /*
  * Canvas: a screen the application draws itself with LVGL below the title
@@ -589,6 +627,19 @@ lv_obj_t *fplinux_ui_canvas_object(struct fplinux_ui_screen *canvas);
 void fplinux_ui_canvas_set_key_handler(struct fplinux_ui_screen *canvas,
 				       fplinux_ui_canvas_key_cb handler,
 				       void *context);
+/*
+ * Reports actual focus changes after updating the Canvas state: visibility,
+ * screen navigation and menus activate or suspend it. Register before push
+ * for the initial activation. Registration and final close do not call it.
+ * The callback may adjust its own timers and child objects; it must not
+ * navigate, delete the Canvas or close the runtime.
+ */
+typedef void (*fplinux_ui_canvas_active_cb)(struct fplinux_ui *ui,
+					    struct fplinux_ui_screen *canvas,
+					    bool active, void *context);
+void fplinux_ui_canvas_set_active_listener(struct fplinux_ui_screen *canvas,
+					   fplinux_ui_canvas_active_cb callback,
+					   void *context);
 /*
  * The filter runs before screen commands and ordinary element key routing.
  * Returning true owns the key, including its release; false leaves it to

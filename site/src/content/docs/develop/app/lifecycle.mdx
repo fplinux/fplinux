@@ -7,7 +7,11 @@ source:
 
 The session starts an application from its installed desktop entry. `fplinux_ui_open()` connects it to the session and receives its initial configuration; `fplinux_ui_run()` processes events and draws the interface. Start graphical applications from the catalog, not by executing their binary from a shell. CLI help and argument errors must work before opening the runtime.
 
+`fplinux_ui_open()` does not call application callbacks. If the compositor closes the surface while it is being created, the first `fplinux_ui_run()` delivers the closing lifecycle notification and final CLOSE after the application has received its UI handle. The runtime borrows the process's SIGINT and SIGTERM handlers and restores their previous dispositions in `fplinux_ui_close()`, including cleanup after a failed open.
+
 Create the initial screen promptly. Do not block the UI thread with slow I/O or a long calculation before the first frame. Use short callbacks and the runtime's file-descriptor watch or application-owned timers for continuing work.
+
+`fplinux_ui_watch_fd()` borrows one descriptor and requires a callback for a nonnegative fd; use `fd=-1` to remove it. A replacement registration receives only readiness observed for that registration. Readiness for a previous descriptor or callback is discarded, including when a new descriptor reuses the same number.
 
 ## Activation and visibility
 
@@ -47,9 +51,15 @@ Register a close handler when leaving may require a decision:
 
 The [Application state contract](/fplinux/develop/application-state/#closing-an-application) defines saving, retry and discard behavior. Keep the draft until the requested decision is resolved. Repeated ordinary Close keeps the pending decision. Forced termination and session shutdown can still end the application; WAIT does not prevent those paths.
 
+Return the handler's initial answer. Call `fplinux_ui_close_reply()` only after the handler has returned WAIT; replying from inside the handler fails with `EINVAL`. A repeated request reuses the current answer and keeps a WAIT or CANCEL interface interactive without calling the handler again. Calling `fplinux_ui_quit()` from the handler permits closing and returns normally from the loop.
+
+Document handlers follow the same return-then-reply rule: return the initial result, and use `fplinux_ui_document_reply()` later if it was WAIT. A reply from inside the handler fails with `EINVAL`. Calling `fplinux_ui_quit()` from a document handler answers the request with ERROR and `ECANCELED`, then ends the loop normally. An invalid handler result is reported as a runtime error.
+
 ## Final cleanup
 
 `FPLINUX_UI_EVENT_CLOSE` is the final cleanup notification, not a place to open a save dialog or refuse closing. Save important state before reaching it. Connection and rendering failures can also end the event loop. Check `fplinux_ui_run()`'s result: normal closing returns zero; runtime failure returns a negative value.
+
+The runtime enters its final closing state before delivering CLOSE. It delivers no later ordinary callbacks, runs no further application timers and submits no further frames. `fplinux_ui_close()` releases runtime resources without application callbacks.
 
 `fplinux_ui_quit()` stops the loop without generating a CLOSE event. Complete any required saving before calling it, then use the same cleanup after `run()` returns.
 

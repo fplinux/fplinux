@@ -34,6 +34,7 @@ ui_host_compile_lvgl -I"$calculator" \
 	"$screens_dir/calculator-screens.c" "$calculator/calculator.c" \
 	"$screens_dir/ui-frame-peer.c" "$screens_dir/screen-frame.c" \
 	"$ui/fplinux-ui-session.c" "$ui/fplinux-ui-profile.c" \
+	"$ui/fplinux-utf8.c" \
 	"$ui_host_inputs/xdg-shell-protocol.c" \
 	$(pkg-config --libs wayland-server xkbcommon json-c) \
 	-lm -o "$work/calculator-screens"

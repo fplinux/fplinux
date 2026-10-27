@@ -30,6 +30,7 @@ ui_host_compile -I"$root/include/fplinux" -I"$ui_host_inputs" -I"$screens_dir" \
 	$(pkg-config --cflags wayland-server xkbcommon json-c) \
 	"$root/tests/host_tool/gui/launcher-screens.c" "$screens_dir/ui-frame-peer.c" \
 	"$screens_dir/screen-frame.c" "$ui_host_ui/fplinux-ui-session.c" \
+	"$ui_host_ui/fplinux-utf8.c" \
 	"$ui_host_inputs/xdg-shell-protocol.c" \
 	$(pkg-config --libs wayland-server xkbcommon json-c) \
 	-o "$work/launcher-screens"

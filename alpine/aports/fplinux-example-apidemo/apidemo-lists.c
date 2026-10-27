@@ -715,7 +715,7 @@ static const struct apidemo_entry entries[] = {
 	  "fplinux_ui_list_insert · fplinux_ui_list_delete · fplinux_ui_list_delete_all",
 	  open_rows, 0, N_("Insert and delete without losing focus") },
 	{ N_("Virtual list"),
-	  "fplinux_ui_list_new_virtual · FPLINUX_UI_VIRTUAL_ROW_HAS · "
+	  "fplinux_ui_list_new_virtual · "
 	  "fplinux_ui_list_rows_inserted · fplinux_ui_list_rows_deleted",
 	  open_virtual_changes, 0, N_("Browse and change a large inbox") },
 	{ N_("Item commands"),

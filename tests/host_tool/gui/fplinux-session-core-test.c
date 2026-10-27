@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
 #include "session-core.h"
+#include "session-storage.h"
 #include "settings-session-boundary.h"
 
 #include <errno.h>
@@ -14,6 +15,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/timerfd.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -102,6 +104,10 @@ struct fixture {
 	char power_supply[PATH_MAX];
 	char battery_capacity[PATH_MAX];
 	char charger_online[PATH_MAX];
+	struct fplinux_session_storage_config storage;
+	char storage_blocks[PATH_MAX];
+	char storage_mountinfo[PATH_MAX];
+	char storage_swaps[PATH_MAX];
 };
 
 static struct fixture *active_fixture;
@@ -111,6 +117,13 @@ static bool sync_fails;
 static bool directory_sync_fails;
 static unsigned int sync_calls;
 static pid_t peer_manager;
+static int alarm_timer_fd = -1;
+static int monotonic_timer_fd = -1;
+static struct itimerspec alarm_timer;
+static struct itimerspec monotonic_timer;
+static unsigned int alarm_arm_count;
+static int alarm_timer_flags;
+static bool cancel_alarm_timer;
 
 static void fail(const char *expression, int line)
 {
@@ -142,6 +155,48 @@ time_t __wrap_time(time_t *destination)
 	if (destination)
 		*destination = current_time;
 	return current_time;
+}
+
+int __real_timerfd_create(clockid_t clock, int flags);
+int __real_timerfd_settime(int fd, int flags, const struct itimerspec *value,
+			   struct itimerspec *previous);
+ssize_t __real_read(int fd, void *buffer, size_t count);
+
+/* Wall time is controlled above; these wraps replace only its kernel timer. */
+int __wrap_timerfd_create(clockid_t clock, int flags)
+{
+	int fd = __real_timerfd_create(clock, flags);
+
+	if (clock == CLOCK_REALTIME)
+		alarm_timer_fd = fd;
+	else if (clock == CLOCK_MONOTONIC)
+		monotonic_timer_fd = fd;
+	return fd;
+}
+
+int __wrap_timerfd_settime(int fd, int flags, const struct itimerspec *value,
+			   struct itimerspec *previous)
+{
+	if (fd == alarm_timer_fd) {
+		CHECK(!previous);
+		alarm_timer = *value;
+		alarm_timer_flags = flags;
+		++alarm_arm_count;
+		return 0;
+	}
+	if (fd == monotonic_timer_fd)
+		monotonic_timer = *value;
+	return __real_timerfd_settime(fd, flags, value, previous);
+}
+
+ssize_t __wrap_read(int fd, void *buffer, size_t count)
+{
+	if (fd == alarm_timer_fd && cancel_alarm_timer) {
+		cancel_alarm_timer = false;
+		errno = ECANCELED;
+		return -1;
+	}
+	return __real_read(fd, buffer, count);
 }
 
 int __real_fsync(int fd);
@@ -672,6 +727,20 @@ static struct fixture *create_fixture(const char *root, int width, int height,
 		write_file(fixture->charger_online, "0\n");
 	}
 	path_join(fixture->clock_preferences, root, "clocks");
+	if (getenv("FPLINUX_TEST_STORAGE")) {
+		path_join(fixture->storage_blocks, root, "storage-blocks");
+		path_join(fixture->storage_mountinfo, root,
+			  "storage-mountinfo");
+		path_join(fixture->storage_swaps, root, "storage-swaps");
+		CHECK(mkdir(fixture->storage_blocks, 0700) == 0);
+		write_file(fixture->storage_mountinfo,
+			   "1 0 0:1 / / rw - tmpfs tmpfs rw\n");
+		write_file(fixture->storage_swaps,
+			   "Filename Type Size Used Priority\n");
+		fixture->storage.sys_block = fixture->storage_blocks;
+		fixture->storage.mountinfo = fixture->storage_mountinfo;
+		fixture->storage.swaps = fixture->storage_swaps;
+	}
 	if (media) {
 		path_join(fixture->audio_socket, root, "audio.sock");
 		fixture->audio_listener = listen_at(fixture->audio_socket);
@@ -682,6 +751,8 @@ static struct fixture *create_fixture(const char *root, int width, int height,
 		.socket_path = fixture->socket_path,
 		.user = account->pw_name,
 		.home = fixture->home,
+		.storage = getenv("FPLINUX_TEST_STORAGE") ? &fixture->storage :
+							    NULL,
 		.app_uid = getuid(),
 		.app_gid = getgid(),
 		.metadata_uid = getuid(),
@@ -1442,6 +1513,57 @@ static void return_home(struct fixture *fixture, struct peer *launcher)
 		active_for(fixture, launcher, "");
 
 	acknowledge(fixture, launcher, &home);
+}
+
+static void test_background_mode_applies_on_resume(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *app = show_app(fixture, launcher, TEST_APP);
+	struct fplinux_ui_session_message mode = {
+		.type = FPLINUX_UI_SESSION_MODE,
+		.mode = FPLINUX_UI_SESSION_FULLSCREEN,
+	};
+	const struct fplinux_session_process *process;
+	struct fplinux_ui_session_message active;
+
+	return_home(fixture, launcher);
+	clear_messages(fixture, launcher);
+	issue(fixture, app, &mode);
+	process = fplinux_session_find_process(fixture->session, app->pid);
+	CHECK(process && !process->shown && !process->closing);
+	CHECK(process->configured_mode == FPLINUX_UI_SESSION_INTEGRATED);
+	CHECK(fplinux_session_focused_pid(fixture->session) == launcher->pid);
+	CHECK(launch_app(fixture, launcher, TEST_APP) == app);
+	active = active_for(fixture, launcher, TEST_APP);
+	acknowledge(fixture, launcher, &active);
+	CHECK(process->configured_mode == FPLINUX_UI_SESSION_FULLSCREEN);
+	CHECK(process->mode == FPLINUX_UI_SESSION_INTEGRATED);
+	fplinux_session_surface_committed(fixture->session, app->pid,
+					  fixture->width, fixture->height);
+	CHECK(process->mode == FPLINUX_UI_SESSION_FULLSCREEN);
+	CHECK(process->shown && !app->disconnected);
+
+	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
+
+	clear_messages(fixture, launcher);
+	mode.mode = FPLINUX_UI_SESSION_INTEGRATED;
+	issue(fixture, app, &mode);
+	CHECK(process->configured_mode == FPLINUX_UI_SESSION_FULLSCREEN);
+	CHECK(fplinux_session_focused_pid(fixture->session) == settings->pid);
+	CHECK(launch_app(fixture, launcher, TEST_APP) == app);
+	active = active_for(fixture, launcher, TEST_APP);
+	acknowledge(fixture, launcher, &active);
+	CHECK(process->configured_mode == FPLINUX_UI_SESSION_INTEGRATED);
+	CHECK(process->mode == FPLINUX_UI_SESSION_FULLSCREEN);
+	int x, y, width, height;
+
+	fplinux_session_surface_box(fixture->session,
+				    FPLINUX_UI_SESSION_INTEGRATED, &x, &y,
+				    &width, &height);
+	fplinux_session_surface_committed(fixture->session, app->pid, width,
+					  height);
+	CHECK(process->mode == FPLINUX_UI_SESSION_INTEGRATED);
+	CHECK(process->shown && !app->disconnected);
 }
 
 static void hold_activation(struct fixture *fixture, struct peer *peer)
@@ -3498,6 +3620,185 @@ clock_active(struct fixture *fixture, struct peer *launcher,
 	return message;
 }
 
+static void test_clock_home_presentation(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *clocks = show_app(fixture, launcher, TEST_CLOCK);
+	struct fplinux_ui_session_message active;
+	struct clock_ring ring;
+
+	clear_messages(fixture, launcher);
+	clock_request(fixture, clocks, "set-view",
+		      "{\"op\":\"set-view\",\"view\":1}", 1);
+	active = wait_message(fixture, launcher, FPLINUX_UI_SESSION_ACTIVE,
+			      NULL);
+	CHECK(active.clock_presentation.analog);
+	acknowledge(fixture, launcher, &active);
+	clock_request(
+		fixture, clocks, "alarm-add",
+		"{\"op\":\"alarm-add\",\"alarm\":{\"label\":\"Later\",\"schedule\":0,"
+		"\"once_utc\":1735690200,\"hour\":0,\"minute\":0,\"repeat_days\":0,\"enabled\":true}}",
+		2);
+	active = wait_message(fixture, launcher, FPLINUX_UI_SESSION_ACTIVE,
+			      NULL);
+	CHECK(active.clock_presentation.alarm_utc == 1735690200);
+	CHECK(!strcmp(active.clock_presentation.alarm_label, "Later"));
+	acknowledge(fixture, launcher, &active);
+	clock_request(
+		fixture, clocks, "alarm-add",
+		"{\"op\":\"alarm-add\",\"alarm\":{\"label\":\"Near\",\"schedule\":0,"
+		"\"once_utc\":1735689660,\"hour\":0,\"minute\":0,\"repeat_days\":0,\"enabled\":true}}",
+		3);
+	active = wait_message(fixture, launcher, FPLINUX_UI_SESSION_ACTIVE,
+			      NULL);
+	CHECK(active.clock_presentation.alarm_utc == 1735689660);
+	CHECK(!strcmp(active.clock_presentation.alarm_label, "Near"));
+	acknowledge(fixture, launcher, &active);
+	clock_request(fixture, clocks, "timer-set",
+		      "{\"op\":\"timer-set\",\"seconds\":120}", 4);
+	clear_messages(fixture, launcher);
+	clock_request(fixture, clocks, "timer-start",
+		      "{\"op\":\"timer-start\"}", 5);
+	active = wait_message(fixture, launcher, FPLINUX_UI_SESSION_ACTIVE,
+			      NULL);
+	CHECK(active.clock_presentation.alarm_utc == 1735689660);
+	CHECK(active.clock_presentation.timer_deadline_ms == 121000);
+	CHECK(!active.clock_presentation.timer_remaining_ms);
+	acknowledge(fixture, launcher, &active);
+	clock_request(fixture, clocks, "timer-pause",
+		      "{\"op\":\"timer-pause\"}", 6);
+	active = wait_message(fixture, launcher, FPLINUX_UI_SESSION_ACTIVE,
+			      NULL);
+	CHECK(!active.clock_presentation.timer_deadline_ms);
+	CHECK(active.clock_presentation.timer_remaining_ms == 120000);
+	acknowledge(fixture, launcher, &active);
+	clock_request(fixture, clocks, "timer-resume",
+		      "{\"op\":\"timer-resume\"}", 7);
+	active = wait_message(fixture, launcher, FPLINUX_UI_SESSION_ACTIVE,
+			      NULL);
+	CHECK(active.clock_presentation.timer_deadline_ms == 121000);
+	CHECK(!active.clock_presentation.timer_remaining_ms);
+	acknowledge(fixture, launcher, &active);
+	return_home(fixture, launcher);
+	clear_messages(fixture, launcher);
+	current_time += 5;
+	fixture->now_ms += 5000;
+	pump(fixture, 6);
+	CHECK(!take_message(launcher, FPLINUX_UI_SESSION_ACTIVE, NULL,
+			    &active));
+	current_time += 55;
+	fixture->now_ms += 55000;
+	pump(fixture, 4);
+	active = clock_active(fixture, launcher, CLOCK_EVENT_ALARM, &ring);
+	CHECK(ring.event.id == 1 && !strcmp(ring.event.label, "Near"));
+	CHECK(active.clock_presentation.alarm_utc == 1735690200);
+	CHECK(active.clock_presentation.timer_deadline_ms == 121000);
+	acknowledge(fixture, launcher, &active);
+	clock_request(fixture, launcher, "snooze",
+		      "{\"op\":\"snooze\",\"event_id\":1,\"minutes\":2}", 8);
+	active = wait_message(fixture, launcher, FPLINUX_UI_SESSION_ACTIVE,
+			      NULL);
+	CHECK(!active.clock_presentation.alarm_utc);
+	CHECK(active.clock_presentation.snooze_deadline_ms == 181000);
+	CHECK(!strcmp(active.clock_presentation.alarm_label, "Near"));
+	CHECK(active.clock_presentation.timer_deadline_ms == 121000);
+	acknowledge(fixture, launcher, &active);
+	current_time += 60;
+	fixture->now_ms += 60000;
+	pump(fixture, 4);
+	active = clock_active(fixture, launcher, CLOCK_EVENT_TIMER, &ring);
+	CHECK(ring.event.id == 2);
+	CHECK(!active.clock_presentation.timer_deadline_ms);
+	CHECK(!active.clock_presentation.timer_remaining_ms);
+	CHECK(active.clock_presentation.snooze_deadline_ms == 181000);
+	acknowledge(fixture, launcher, &active);
+	current_time += 60;
+	fixture->now_ms += 60000;
+	pump(fixture, 4);
+	active = clock_active(fixture, launcher, CLOCK_EVENT_ALARM, &ring);
+	CHECK(ring.event.id == 3 && ring.event.snoozed);
+	CHECK(active.clock_presentation.alarm_utc == 1735690200);
+	CHECK(!active.clock_presentation.snooze_deadline_ms);
+	CHECK(active.clock_presentation.missed_total == 1);
+	acknowledge(fixture, launcher, &active);
+}
+
+static void test_clock_realtime_alarm(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *clocks = show_app(fixture, launcher, TEST_CLOCK);
+	struct fplinux_ui_session_message active;
+	struct clock_model model;
+	struct clock_ring ring;
+	unsigned int armed;
+
+	clock_request(fixture, clocks, "timer-set",
+		      "{\"op\":\"timer-set\",\"seconds\":10}", 1);
+	clock_request(fixture, clocks, "timer-start",
+		      "{\"op\":\"timer-start\"}", 2);
+	clear_messages(fixture, launcher);
+	clock_request(
+		fixture, clocks, "alarm-add",
+		"{\"op\":\"alarm-add\",\"alarm\":{\"label\":\"Wake\",\"schedule\":0,"
+		"\"once_utc\":1735689660,\"hour\":0,\"minute\":0,\"repeat_days\":0,\"enabled\":true}}",
+		3);
+	active = wait_message(fixture, launcher, FPLINUX_UI_SESSION_ACTIVE,
+			      NULL);
+	acknowledge(fixture, launcher, &active);
+	CHECK(alarm_timer_fd >= 0);
+	CHECK(fcntl(alarm_timer_fd, F_GETFD) & FD_CLOEXEC);
+	CHECK(fcntl(alarm_timer_fd, F_GETFL) & O_NONBLOCK);
+	CHECK(alarm_timer_flags ==
+	      (TFD_TIMER_ABSTIME | TFD_TIMER_CANCEL_ON_SET));
+	CHECK(alarm_timer.it_value.tv_sec == 1735689660);
+	CHECK(!alarm_timer.it_value.tv_nsec);
+	CHECK(!alarm_timer.it_interval.tv_sec &&
+	      !alarm_timer.it_interval.tv_nsec);
+	CHECK(monotonic_timer.it_value.tv_sec == 10);
+	CHECK(!monotonic_timer.it_value.tv_nsec);
+	armed = alarm_arm_count;
+	pump(fixture, 4);
+	CHECK(alarm_arm_count == armed);
+	current_time -= 120;
+	cancel_alarm_timer = true;
+	pump(fixture, 4);
+	CHECK(!cancel_alarm_timer && alarm_arm_count == armed + 1);
+	CHECK(alarm_timer.it_value.tv_sec == 1735689660);
+	model = clock_snapshot(fixture, clocks, 4);
+	CHECK(model.active.kind == CLOCK_EVENT_NONE);
+	CHECK(model.timer.state == CLOCK_TIMER_RUNNING);
+	CHECK(model.timer.deadline_ms == 11000);
+	current_time = 1735689659;
+	cancel_alarm_timer = true;
+	pump(fixture, 4);
+	CHECK(!cancel_alarm_timer && alarm_arm_count == armed + 2);
+	CHECK(alarm_timer.it_value.tv_sec == 1735689660);
+	clear_messages(fixture, launcher);
+	struct pollfd ready = {
+		.fd = fplinux_session_get_fd(fixture->session),
+		.events = POLLIN,
+	};
+	struct itimerspec delivery = { .it_value.tv_nsec = 1 };
+
+	CHECK(poll(&ready, 1, 0) == 0);
+	/* Deliver a real timerfd event without changing the host's wall clock. */
+	CHECK(__real_timerfd_settime(alarm_timer_fd, 0, &delivery, NULL) == 0);
+	CHECK(poll(&ready, 1, 100) == 1 && (ready.revents & POLLIN));
+	current_time = 1735689660;
+	pump(fixture, 4);
+	active = clock_active(fixture, launcher, CLOCK_EVENT_ALARM, &ring);
+	CHECK(ring.event.id == 1 && ring.event.due_wall_utc == 1735689660);
+	CHECK(!alarm_timer.it_value.tv_sec && !alarm_timer.it_value.tv_nsec);
+	CHECK(active.clock_presentation.timer_deadline_ms == 11000);
+	CHECK(!active.clock_presentation.alarm_utc);
+	acknowledge(fixture, launcher, &active);
+	int descriptor = alarm_timer_fd;
+
+	fplinux_session_destroy(fixture->session);
+	fixture->session = NULL;
+	CHECK(fcntl(descriptor, F_GETFD) == -1 && errno == EBADF);
+}
+
 static void test_clock_survives_home_close(struct fixture *fixture)
 {
 	struct peer *launcher = start_launcher(fixture);
@@ -4041,6 +4342,574 @@ static void test_clock_signal_lifetime(struct fixture *fixture)
 	CHECK(waitpid(final_pid, NULL, WNOHANG) == -1 && errno == ECHILD);
 }
 
+static void register_document_handler(struct fixture *fixture, const char *id,
+				      const char *fields)
+{
+	char path[PATH_MAX], name[160];
+	FILE *file;
+
+	add_entry(fixture, id, "integrated");
+	CHECK(snprintf(name, sizeof(name), "%s.desktop", id) <
+	      (int)sizeof(name));
+	path_join(path, fixture->applications, name);
+	file = fopen(path, "a");
+	CHECK(file);
+	CHECK(fprintf(file, "X-FPLinux-FileExtensions=jar;\n%s", fields) > 0);
+	CHECK(fclose(file) == 0);
+}
+
+static void request_document(struct fixture *fixture, struct peer *origin,
+			     uint32_t serial)
+{
+	struct fplinux_ui_session_message request = {
+		.type = FPLINUX_UI_SESSION_OPEN_FILE,
+		.serial = serial,
+	};
+
+	path_join(request.path, fixture->home, "Игра one 'quoted'.JaR");
+	write_file(request.path, "document bytes\n");
+	issue(fixture, origin, &request);
+}
+
+static void expect_document_busy(struct fixture *fixture, struct peer *origin,
+				 uint32_t serial)
+{
+	request_document(fixture, origin, serial);
+	struct fplinux_ui_session_message result = wait_message(
+		fixture, origin, FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL);
+
+	CHECK(result.serial == serial);
+	CHECK(result.document_status == FPLINUX_UI_DOCUMENT_ERROR);
+	CHECK(result.document_error == EBUSY);
+	CHECK(!origin->disconnected);
+	CHECK(!take_message(origin, FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL,
+			    &result));
+}
+
+static void test_document_locked_returns_busy(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *settings = show_app(fixture, launcher, TEST_SETTINGS);
+
+	setting(fixture, settings, "auto_lock_seconds", "0");
+	wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+		     "auto_lock_seconds");
+	struct peer *origin = show_app(fixture, launcher, TEST_APP);
+
+	fixture->now_ms += 30000;
+	pump(fixture, 4);
+	CHECK(fplinux_session_is_locked(fixture->session));
+	expect_document_busy(fixture, origin, 81);
+	expect_document_busy(fixture, origin, 82);
+	const struct fplinux_session_process *process =
+		fplinux_session_find_process(fixture->session, origin->pid);
+
+	CHECK(process && !process->closing);
+}
+
+static void test_document_background_returns_busy(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *origin = show_app(fixture, launcher, TEST_APP);
+
+	return_home(fixture, launcher);
+	expect_document_busy(fixture, origin, 81);
+	struct peer *foreground = show_app(fixture, launcher, TEST_SETTINGS);
+
+	expect_document_busy(fixture, origin, 82);
+	CHECK(fplinux_session_focused_pid(fixture->session) == foreground->pid);
+	CHECK(launch_app(fixture, launcher, TEST_APP) == origin);
+	struct fplinux_ui_session_message active =
+		active_for(fixture, launcher, TEST_APP);
+
+	acknowledge(fixture, launcher, &active);
+	request_document(fixture, origin, 83);
+	struct fplinux_ui_session_message result = wait_message(
+		fixture, origin, FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL);
+
+	CHECK(result.serial == 83);
+	CHECK(result.document_status == FPLINUX_UI_DOCUMENT_ERROR);
+	CHECK(result.document_error == ENOEXEC);
+	CHECK(!origin->disconnected);
+}
+
+static void test_document_closing_returns_busy(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *origin = show_app(fixture, launcher, TEST_APP);
+	struct command hold = { .type = COMMAND_HOLD_CLOSE };
+	unsigned int sent = origin->sent;
+	uint64_t deadline = real_ms() + 2000;
+
+	send_command(origin->fd, &hold);
+	while (origin->sent == sent && real_ms() < deadline)
+		pump(fixture, 2);
+	CHECK(origin->sent > sent);
+	send_type(fixture, origin, FPLINUX_UI_SESSION_EXIT);
+	struct fplinux_ui_session_message active =
+		active_for(fixture, launcher, "");
+	const struct fplinux_session_process *process =
+		fplinux_session_find_process(fixture->session, origin->pid);
+
+	CHECK(process && process->lifecycle == FPLINUX_UI_SESSION_CLOSING);
+	CHECK(!process->closing);
+	expect_document_busy(fixture, origin, 81);
+	acknowledge(fixture, launcher, &active);
+	wait_message(fixture, origin, FPLINUX_UI_SESSION_CLOSE, NULL);
+	CHECK(process->closing);
+	expect_document_busy(fixture, origin, 82);
+	CHECK(fplinux_session_focused_pid(fixture->session) == launcher->pid);
+}
+
+static void test_document_launcher_is_unauthorized(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct fplinux_ui_session_message result;
+
+	request_document(fixture, launcher, 81);
+	wait_reaped(fixture, launcher->pid);
+	CHECK(!take_message(launcher, FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL,
+			    &result));
+}
+
+static void answer_document(struct fixture *fixture, struct peer *handler,
+			    uint32_t serial,
+			    enum fplinux_ui_document_status status, int error)
+{
+	struct fplinux_ui_session_message response = {
+		.type = FPLINUX_UI_SESSION_DOCUMENT_RESULT,
+		.serial = serial,
+		.document_status = status,
+		.document_error = error,
+	};
+
+	issue(fixture, handler, &response);
+}
+
+static void test_document_candidates(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *origin = show_app(fixture, launcher, TEST_APP);
+	struct fplinux_ui_session_message result;
+
+	request_document(fixture, origin, 41);
+	result = wait_message(fixture, origin,
+			      FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL);
+	CHECK(result.serial == 41 &&
+	      result.document_status == FPLINUX_UI_DOCUMENT_ERROR &&
+	      result.document_error == ENOEXEC);
+	register_document_handler(
+		fixture, "org.example.first",
+		"NoDisplay=true\nName[ru]=Первая\nIcon=first\n");
+	register_document_handler(fixture, "org.example.second",
+				  "Name=Second\n");
+	register_document_handler(fixture, "org.example.hidden",
+				  "Hidden=true\n");
+	request_document(fixture, origin, 42);
+	result = wait_message(fixture, origin,
+			      FPLINUX_UI_SESSION_DOCUMENT_CHOICES, NULL);
+	CHECK(result.serial == 42 && result.document_choice_count == 2);
+	bool first = false, second = false;
+	for (unsigned int i = 0; i < result.document_choice_count; ++i) {
+		const struct fplinux_ui_session_document_choice *choice =
+			&result.document_choices[i];
+
+		if (!strcmp(choice->app_id, "org.example.first")) {
+			CHECK(!strcmp(choice->icon, "first"));
+			first = true;
+		} else if (!strcmp(choice->app_id, "org.example.second")) {
+			CHECK(!strcmp(choice->title, "Second"));
+			second = true;
+		}
+	}
+	CHECK(first && second);
+	CHECK(fplinux_session_focused_pid(fixture->session) == origin->pid);
+	result = (struct fplinux_ui_session_message){
+		.type = FPLINUX_UI_SESSION_DOCUMENT_CHOICE,
+		.serial = 42,
+	};
+	issue(fixture, origin, &result);
+	result = wait_message(fixture, origin,
+			      FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL);
+	CHECK(result.serial == 42 &&
+	      result.document_status == FPLINUX_UI_DOCUMENT_CANCELLED);
+}
+
+static struct peer *
+open_cold_document(struct fixture *fixture, struct peer *launcher,
+		   struct peer *origin,
+		   struct fplinux_ui_session_message *document)
+{
+	struct fplinux_ui_session_message active;
+	struct fplinux_ui_session_message config;
+	struct fplinux_ui_session_message ignored;
+	struct peer *handler;
+
+	register_document_handler(fixture, "org.example.handler",
+				  "NoDisplay=true\n");
+	clear_messages(fixture, launcher);
+	request_document(fixture, origin, 71);
+	active = active_for(fixture, launcher, "");
+	acknowledge(fixture, launcher, &active);
+	handler = wait_peer(fixture, "org.example.handler");
+	config = authenticate(fixture, handler, NULL);
+	*document = wait_message(fixture, handler, FPLINUX_UI_SESSION_DOCUMENT,
+				 NULL);
+	CHECK(strstr(document->path, "Игра one 'quoted'.JaR"));
+	CHECK(!take_message(handler, FPLINUX_UI_SESSION_ACTIVATION, NULL,
+			    &ignored));
+	commit_app(fixture, handler, &config);
+	CHECK(!take_message(origin, FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL,
+			    &ignored));
+	/* A commit alone cannot replace the handler's document decision. */
+	CHECK(!fplinux_session_find_process(fixture->session, handler->pid)
+		       ->shown);
+	return handler;
+}
+
+static void test_document_cold_return(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *origin = show_app(fixture, launcher, TEST_APP);
+	struct fplinux_ui_session_message document, result, active;
+	struct peer *handler =
+		open_cold_document(fixture, launcher, origin, &document);
+
+	answer_document(fixture, handler, document.serial + 1,
+			FPLINUX_UI_DOCUMENT_ACCEPTED, 0);
+	CHECK(!take_message(origin, FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL,
+			    &result));
+	answer_document(fixture, handler, document.serial,
+			FPLINUX_UI_DOCUMENT_ACCEPTED, 0);
+	result = wait_message(fixture, origin,
+			      FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL);
+	CHECK(result.serial == 71 &&
+	      result.document_status == FPLINUX_UI_DOCUMENT_ACCEPTED);
+	active = active_for(fixture, launcher, "org.example.handler");
+	acknowledge(fixture, launcher, &active);
+	clear_messages(fixture, launcher);
+	clear_messages(fixture, origin);
+	send_type(fixture, handler, FPLINUX_UI_SESSION_EXIT);
+	active = active_for(fixture, launcher, "");
+	acknowledge(fixture, launcher, &active);
+	wait_reaped(fixture, handler->pid);
+	document = wait_message(fixture, origin, FPLINUX_UI_SESSION_ACTIVATION,
+				NULL);
+	CHECK(document.activation == FPLINUX_UI_SESSION_ACTIVATION_RESUME);
+	active = active_for(fixture, launcher, TEST_APP);
+	acknowledge(fixture, launcher, &active);
+	CHECK(fplinux_session_focused_pid(fixture->session) == origin->pid);
+}
+
+static void test_document_wait_restart(struct fixture *fixture, bool restart)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *origin = show_app(fixture, launcher, TEST_APP);
+	struct fplinux_ui_session_message document, result, active;
+	struct peer *handler =
+		open_cold_document(fixture, launcher, origin, &document);
+	pid_t original_pid = handler->pid;
+
+	answer_document(fixture, handler, document.serial,
+			FPLINUX_UI_DOCUMENT_WAIT, 0);
+	result = wait_message(fixture, origin,
+			      FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL);
+	CHECK(result.serial == 71 &&
+	      result.document_status == FPLINUX_UI_DOCUMENT_WAIT);
+	struct fplinux_ui_session_message ack = {
+		.type = FPLINUX_UI_SESSION_ACTIVATION_ACK,
+		.serial = document.serial,
+	};
+	issue(fixture, handler, &ack);
+	active = active_for(fixture, launcher, "org.example.handler");
+	acknowledge(fixture, launcher, &active);
+	fixture->now_ms += 20000;
+	pump(fixture, 20);
+	CHECK(!fplinux_session_find_process(fixture->session, handler->pid)
+		       ->closing);
+	if (!restart) {
+		answer_document(fixture, handler, document.serial,
+				FPLINUX_UI_DOCUMENT_ERROR, EINVAL);
+		result = wait_message(fixture, origin,
+				      FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL);
+		CHECK(result.serial == 71 &&
+		      result.document_status == FPLINUX_UI_DOCUMENT_ERROR &&
+		      result.document_error == EINVAL);
+		return;
+	}
+	set_close_decision(fixture, handler, "wait");
+	answer_document(fixture, handler, document.serial,
+			FPLINUX_UI_DOCUMENT_RESTART_REQUIRED, 0);
+	result = wait_message(fixture, handler,
+			      FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
+	pump(fixture, 20);
+	CHECK(!fplinux_session_find_process(fixture->session, original_pid)
+		       ->closing);
+	answer_close(fixture, handler, result.serial, "ready");
+	wait_reaped(fixture, original_pid);
+	handler = wait_peer(fixture, "org.example.handler");
+	CHECK(handler->pid != original_pid);
+	struct fplinux_ui_session_message config =
+		authenticate(fixture, handler, NULL);
+	document = wait_message(fixture, handler, FPLINUX_UI_SESSION_DOCUMENT,
+				NULL);
+	commit_app(fixture, handler, &config);
+	answer_document(fixture, handler, document.serial,
+			FPLINUX_UI_DOCUMENT_RESTART_REQUIRED, 0);
+	result = wait_message(fixture, origin,
+			      FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL);
+	CHECK(result.serial == 71 &&
+	      result.document_status == FPLINUX_UI_DOCUMENT_ERROR &&
+	      result.document_error == ENOTSUP);
+}
+
+static void test_document_warm_cancel(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *origin = show_app(fixture, launcher, TEST_APP);
+	struct fplinux_ui_session_message document, result, active;
+	struct peer *handler =
+		open_cold_document(fixture, launcher, origin, &document);
+	pid_t handler_pid = handler->pid;
+
+	answer_document(fixture, handler, document.serial,
+			FPLINUX_UI_DOCUMENT_ACCEPTED, 0);
+	wait_message(fixture, origin, FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL);
+	active = active_for(fixture, launcher, "org.example.handler");
+	acknowledge(fixture, launcher, &active);
+	return_home(fixture, launcher);
+	CHECK(launch_app(fixture, launcher, TEST_APP)->pid == origin->pid);
+	active = active_for(fixture, launcher, TEST_APP);
+	acknowledge(fixture, launcher, &active);
+	clear_messages(fixture, origin);
+	clear_messages(fixture, handler);
+	clear_messages(fixture, launcher);
+	request_document(fixture, origin, 72);
+	active = active_for(fixture, launcher, "");
+	acknowledge(fixture, launcher, &active);
+	document = wait_message(fixture, handler, FPLINUX_UI_SESSION_DOCUMENT,
+				NULL);
+	CHECK(handler->pid == handler_pid);
+	CHECK(!take_message(handler, FPLINUX_UI_SESSION_ACTIVATION, NULL,
+			    &result));
+	answer_document(fixture, handler, document.serial,
+			FPLINUX_UI_DOCUMENT_CANCELLED, 0);
+	result = wait_message(fixture, origin,
+			      FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL);
+	CHECK(result.serial == 72 &&
+	      result.document_status == FPLINUX_UI_DOCUMENT_CANCELLED);
+	CHECK(!fplinux_session_find_process(fixture->session, handler_pid)
+		       ->closing);
+}
+
+static void test_document_wait_home(struct fixture *fixture, bool resume)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *origin = show_app(fixture, launcher, TEST_APP);
+	struct fplinux_ui_session_message document, result, active;
+	struct peer *handler =
+		open_cold_document(fixture, launcher, origin, &document);
+	struct fplinux_ui_session_message ack = {
+		.type = FPLINUX_UI_SESSION_ACTIVATION_ACK,
+		.serial = document.serial,
+	};
+
+	answer_document(fixture, handler, document.serial,
+			FPLINUX_UI_DOCUMENT_WAIT, 0);
+	wait_message(fixture, origin, FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL);
+	issue(fixture, handler, &ack);
+	active = active_for(fixture, launcher, "org.example.handler");
+	acknowledge(fixture, launcher, &active);
+	return_home(fixture, launcher);
+	if (!resume) {
+		answer_document(fixture, handler, document.serial,
+				FPLINUX_UI_DOCUMENT_ERROR, ENOEXEC);
+		result = wait_message(fixture, origin,
+				      FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL);
+		CHECK(result.serial == 71 &&
+		      result.document_status == FPLINUX_UI_DOCUMENT_ERROR &&
+		      result.document_error == ENOEXEC);
+		pump(fixture, 20);
+		CHECK(fplinux_session_focused_pid(fixture->session) ==
+		      launcher->pid);
+		return;
+	}
+	struct fplinux_ui_session_message tasks =
+		query_tasks(fixture, launcher);
+	const struct fplinux_ui_session_task *task =
+		task_record(&tasks, "org.example.handler");
+
+	CHECK(task);
+	clear_messages(fixture, handler);
+	task_action(fixture, launcher, FPLINUX_UI_SESSION_ACTIVATE,
+		    "org.example.handler", task->token);
+	result = wait_message(fixture, handler, FPLINUX_UI_SESSION_ACTIVATION,
+			      NULL);
+	CHECK(result.activation == FPLINUX_UI_SESSION_ACTIVATION_RESUME);
+	CHECK(!take_message(handler, FPLINUX_UI_SESSION_DOCUMENT, NULL,
+			    &result));
+	active = active_for(fixture, launcher, "org.example.handler");
+	acknowledge(fixture, launcher, &active);
+	answer_document(fixture, handler, document.serial,
+			FPLINUX_UI_DOCUMENT_ACCEPTED, 0);
+	result = wait_message(fixture, origin,
+			      FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL);
+	CHECK(result.serial == 71 &&
+	      result.document_status == FPLINUX_UI_DOCUMENT_ACCEPTED);
+}
+
+static void test_document_tasks_full(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *origin;
+	struct fplinux_ui_session_message result;
+
+	show_app(fixture, launcher, TEST_APP);
+	show_app(fixture, launcher, TEST_SETTINGS);
+	show_app(fixture, launcher, TEST_CLOCK);
+	add_entry(fixture, "org.example.fourth", "integrated");
+	origin = show_app(fixture, launcher, "org.example.fourth");
+	register_document_handler(fixture, "org.example.handler",
+				  "NoDisplay=true\n");
+	request_document(fixture, origin, 73);
+	result = wait_message(fixture, origin,
+			      FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL);
+	CHECK(result.serial == 73 &&
+	      result.document_status == FPLINUX_UI_DOCUMENT_ERROR &&
+	      result.document_error == EUSERS);
+	CHECK(fplinux_session_focused_pid(fixture->session) == origin->pid);
+	result = query_tasks(fixture, launcher);
+	CHECK(result.task_count == 4);
+}
+
+static void test_document_child_exits_before_hello(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *origin = show_app(fixture, launcher, TEST_APP);
+	struct fplinux_ui_session_message result, active;
+
+	register_document_handler(fixture, "org.example.handler",
+				  "Exec=/bin/false\n");
+	clear_messages(fixture, launcher);
+	clear_messages(fixture, origin);
+	request_document(fixture, origin, 74);
+	active = active_for(fixture, launcher, "");
+	acknowledge(fixture, launcher, &active);
+	result = wait_message(fixture, origin,
+			      FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL);
+	CHECK(result.serial == 74 &&
+	      result.document_status == FPLINUX_UI_DOCUMENT_ERROR &&
+	      result.document_error == EIO);
+	result = wait_message(fixture, origin, FPLINUX_UI_SESSION_ACTIVATION,
+			      NULL);
+	CHECK(result.activation == FPLINUX_UI_SESSION_ACTIVATION_RESUME);
+	active = active_for(fixture, launcher, TEST_APP);
+	acknowledge(fixture, launcher, &active);
+	register_document_handler(fixture, "org.example.handler", "");
+	clear_messages(fixture, launcher);
+	request_document(fixture, origin, 75);
+	active = active_for(fixture, launcher, "");
+	acknowledge(fixture, launcher, &active);
+	struct peer *handler = wait_peer(fixture, "org.example.handler");
+
+	authenticate(fixture, handler, NULL);
+	result = wait_message(fixture, handler, FPLINUX_UI_SESSION_DOCUMENT,
+			      NULL);
+	answer_document(fixture, handler, result.serial,
+			FPLINUX_UI_DOCUMENT_CANCELLED, 0);
+	result = wait_message(fixture, origin,
+			      FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL);
+	CHECK(result.serial == 75 &&
+	      result.document_status == FPLINUX_UI_DOCUMENT_CANCELLED);
+}
+
+static void request_storage(struct fixture *fixture, struct peer *app,
+			    uint32_t serial,
+			    enum fplinux_volume_operation operation,
+			    uint32_t volume_id)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_STORAGE_REQUEST,
+		.serial = serial,
+		.volume_operation = operation,
+		.volume_id = volume_id,
+	};
+
+	issue(fixture, app, &message);
+}
+
+static void test_storage_no_card(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *app = show_app(fixture, launcher, TEST_APP);
+	struct fplinux_ui_session_message result;
+
+	request_storage(fixture, app, 41, FPLINUX_VOLUME_REFRESH, 0);
+	result = wait_message(fixture, app, FPLINUX_UI_SESSION_STORAGE_RESULT,
+			      NULL);
+	CHECK(result.serial == 41 && result.volume_result.request_id == 41);
+	CHECK(!result.volume_result.error &&
+	      !result.volume_result.snapshot.count &&
+	      !result.volume_result.snapshot.home_persistent);
+	request_storage(fixture, app, 42, FPLINUX_VOLUME_CONNECT, 999);
+	result = wait_message(fixture, app, FPLINUX_UI_SESSION_STORAGE_RESULT,
+			      NULL);
+	CHECK(result.serial == 42 && result.volume_result.error == ESTALE);
+	CHECK(fplinux_session_focused_pid(fixture->session) == app->pid);
+}
+
+static void test_storage_busy_survives_home_and_discards_dead_origin(
+	struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *app = show_app(fixture, launcher, TEST_APP);
+	struct fplinux_ui_session_message result;
+	struct command crash = { .type = COMMAND_CRASH };
+	uint64_t deadline;
+	int writer = -1;
+
+	/* A FIFO holds only the worker's mount-table read, not manager dispatch. */
+	CHECK(unlink(fixture->storage_mountinfo) == 0);
+	CHECK(mkfifo(fixture->storage_mountinfo, 0600) == 0);
+	request_storage(fixture, app, 71, FPLINUX_VOLUME_REFRESH, 0);
+	request_storage(fixture, app, 72, FPLINUX_VOLUME_REFRESH, 0);
+	result = wait_message(fixture, app, FPLINUX_UI_SESSION_STORAGE_RESULT,
+			      NULL);
+	CHECK(result.serial == 72 && result.volume_result.error == EBUSY);
+	return_home(fixture, launcher);
+	CHECK(fplinux_session_focused_pid(fixture->session) == launcher->pid);
+	send_command(app->fd, &crash);
+	wait_reaped(fixture, app->pid);
+	app = show_app(fixture, launcher, TEST_APP);
+	request_storage(fixture, app, 71, FPLINUX_VOLUME_REFRESH, 0);
+	result = wait_message(fixture, app, FPLINUX_UI_SESSION_STORAGE_RESULT,
+			      NULL);
+	CHECK(result.serial == 71 && result.volume_result.error == EBUSY);
+	deadline = real_ms() + 2000;
+	while (writer < 0 && real_ms() < deadline) {
+		writer = open(fixture->storage_mountinfo,
+			      O_WRONLY | O_NONBLOCK | O_CLOEXEC);
+		if (writer < 0) {
+			CHECK(errno == ENXIO);
+			pump(fixture, 2);
+		}
+	}
+	CHECK(writer >= 0);
+	static const char mount[] = "1 0 0:1 / / rw - tmpfs tmpfs rw\n";
+	CHECK(write(writer, mount, sizeof(mount) - 1) ==
+	      (ssize_t)sizeof(mount) - 1);
+	CHECK(close(writer) == 0);
+	CHECK(unlink(fixture->storage_mountinfo) == 0);
+	write_file(fixture->storage_mountinfo, mount);
+	pump(fixture, 30);
+	CHECK(!take_message(app, FPLINUX_UI_SESSION_STORAGE_RESULT, NULL,
+			    &result));
+	request_storage(fixture, app, 73, FPLINUX_VOLUME_REFRESH, 0);
+	result = wait_message(fixture, app, FPLINUX_UI_SESSION_STORAGE_RESULT,
+			      NULL);
+	CHECK(result.serial == 73 && !result.volume_result.error);
+}
+
 int main(int argc, char **argv)
 {
 	if (getenv("FPLINUX_APP_ID"))
@@ -4048,6 +4917,8 @@ int main(int argc, char **argv)
 	if (argc == 1 && getenv("FPLINUX_TEST_CLOCK_SIGNAL_FILE"))
 		return run_clock_signal_peer();
 	CHECK(argc == 3 || argc == 7);
+	if (!strncmp(argv[1], "storage-", 8))
+		CHECK(setenv("FPLINUX_TEST_STORAGE", "1", 1) == 0);
 	CHECK(atexit(cleanup) == 0);
 	bool brightness = !strcmp(argv[1], "brightness-home") ||
 			  !strcmp(argv[1], "brightness-crash") ||
@@ -4082,7 +4953,12 @@ int main(int argc, char **argv)
 							   -1,
 		!strncmp(argv[1], "media-", 6));
 
-	if (!strcmp(argv[1], "media-home-resume-close"))
+	if (!strcmp(argv[1], "storage-no-card"))
+		test_storage_no_card(fixture);
+	else if (!strcmp(argv[1], "storage-busy-lifecycle"))
+		test_storage_busy_survives_home_and_discards_dead_origin(
+			fixture);
+	else if (!strcmp(argv[1], "media-home-resume-close"))
 		test_media_home_resume_close(fixture);
 	else if (!strcmp(argv[1], "media-lock-crash"))
 		test_media_lock_crash(fixture);
@@ -4096,6 +4972,10 @@ int main(int argc, char **argv)
 		test_clock_signal_lifetime(fixture);
 	else if (!strcmp(argv[1], "clock-launcher-restart"))
 		test_clock_restart_needs_new_ring_frame(fixture);
+	else if (!strcmp(argv[1], "clock-home-presentation"))
+		test_clock_home_presentation(fixture);
+	else if (!strcmp(argv[1], "clock-realtime-alarm"))
+		test_clock_realtime_alarm(fixture);
 	else if (!strcmp(argv[1], "clock-survives-home-close"))
 		test_clock_survives_home_close(fixture);
 	else if (!strcmp(argv[1], "clock-foreign-peer"))
@@ -4114,6 +4994,8 @@ int main(int argc, char **argv)
 		test_startup_frame_before_ready(fixture);
 	else if (!strcmp(argv[1], "home-retains-exit-saves"))
 		test_home_retains_exit_saves(fixture);
+	else if (!strcmp(argv[1], "background-mode-resume"))
+		test_background_mode_applies_on_resume(fixture);
 	else if (!strcmp(argv[1], "close-cancel-stale"))
 		test_close_cancel_and_stale_reply(fixture);
 	else if (!strcmp(argv[1], "close-ready-scenes"))
@@ -4145,6 +5027,32 @@ int main(int argc, char **argv)
 		test_task_controls(fixture);
 	else if (!strcmp(argv[1], "task-localized-title"))
 		test_task_localized_title(fixture);
+	else if (!strcmp(argv[1], "document-candidates"))
+		test_document_candidates(fixture);
+	else if (!strcmp(argv[1], "document-locked-busy"))
+		test_document_locked_returns_busy(fixture);
+	else if (!strcmp(argv[1], "document-background-busy"))
+		test_document_background_returns_busy(fixture);
+	else if (!strcmp(argv[1], "document-closing-busy"))
+		test_document_closing_returns_busy(fixture);
+	else if (!strcmp(argv[1], "document-launcher-unauthorized"))
+		test_document_launcher_is_unauthorized(fixture);
+	else if (!strcmp(argv[1], "document-cold-return"))
+		test_document_cold_return(fixture);
+	else if (!strcmp(argv[1], "document-wait-error"))
+		test_document_wait_restart(fixture, false);
+	else if (!strcmp(argv[1], "document-restart-bounded"))
+		test_document_wait_restart(fixture, true);
+	else if (!strcmp(argv[1], "document-warm-cancel"))
+		test_document_warm_cancel(fixture);
+	else if (!strcmp(argv[1], "document-wait-home-resume"))
+		test_document_wait_home(fixture, true);
+	else if (!strcmp(argv[1], "document-wait-home-error"))
+		test_document_wait_home(fixture, false);
+	else if (!strcmp(argv[1], "document-tasks-full"))
+		test_document_tasks_full(fixture);
+	else if (!strcmp(argv[1], "document-child-exits-before-hello"))
+		test_document_child_exits_before_hello(fixture);
 	else if (!strcmp(argv[1], "activation-intent-frame-barrier"))
 		test_activation_intent_and_frame_barrier(fixture);
 	else if (!strcmp(argv[1], "activation-ended-task"))

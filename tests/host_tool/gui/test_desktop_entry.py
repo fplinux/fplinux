@@ -274,6 +274,36 @@ def test_reader_accepts_crlf_and_unterminated_final_line(
 
 
 @pytest.mark.parametrize(
+    ("fields", "jar", "vxp"),
+    [
+        ("X-FPLinux-FileExtensions=JAR;vXp;\nNoDisplay=true\n", "1", "1"),
+        ("X-FPLinux-FileExtensions=jar;\nHidden=true\n", "0", "0"),
+        ("X-FPLinux-FileExtensions=vxp;\n", "0", "1"),
+        ("", "0", "0"),
+    ],
+)
+def test_document_registration_uses_extensions_and_preserves_no_display_handler(
+    desktop_reader: Path, tmp_path: Path, fields: str, jar: str, vxp: str
+) -> None:
+    write_entry(tmp_path, desktop_reader, fields=fields + "Icon=game-symbolic\n")
+    result = read_entry(desktop_reader, tmp_path)
+    assert result["valid"] == "1"
+    assert result["jar"] == jar
+    assert result["vxp"] == vxp
+    assert result["text"] == "0"
+    assert result["icon"] == "game-symbolic"
+    assert result["icon_valid"] == "1"
+
+
+@pytest.mark.parametrize("extensions", ["*;", ".jar;", "a/b;", "a\\b;", "jar;;", "jar"])
+def test_document_registration_rejects_patterns_and_path_syntax(
+    desktop_reader: Path, tmp_path: Path, extensions: str
+) -> None:
+    write_entry(tmp_path, desktop_reader, fields=f"X-FPLinux-FileExtensions={extensions}\n")
+    assert read_entry(desktop_reader, tmp_path)["valid"] == "0"
+
+
+@pytest.mark.parametrize(
     "trailing_field",
     ["Name=Injected", "Exec=/bin/false", "X-FPLinux-Mode=fullscreen", "Extra=injected"],
     ids=["title", "command", "mode", "callback"],

@@ -11,10 +11,18 @@
  */
 {
 global:
+	fplinux_ui_open_file;
+	fplinux_ui_set_storage_handler;
+	fplinux_ui_storage_request;
+	fplinux_utf8_contains_casefold;
+	fplinux_utf8_next;
+	fplinux_ui_set_document_handler;
+	fplinux_ui_document_reply;
 	fplinux_ui_alert_color;
 	fplinux_ui_alert_new;
 	fplinux_ui_alert_set_progress;
 	fplinux_ui_alert_set_text;
+	fplinux_ui_alert_set_footer;
 	fplinux_ui_audio_background_supported;
 	fplinux_ui_audio_close;
 	fplinux_ui_audio_open;
@@ -26,6 +34,7 @@ global:
 	fplinux_ui_canvas_object;
 	fplinux_ui_screen_set_key_filter;
 	fplinux_ui_canvas_set_key_handler;
+	fplinux_ui_canvas_set_active_listener;
 	fplinux_ui_canvas_set_key_repeat;
 	fplinux_ui_canvas_set_keyboard_keys;
 	fplinux_ui_close;
@@ -104,7 +113,10 @@ global:
 	fplinux_ui_list_set_focused;
 	fplinux_ui_list_set_focus_listener;
 	fplinux_ui_list_set_icon;
+	fplinux_ui_list_set_emphasis;
+	fplinux_ui_list_set_trailing_icon;
 	fplinux_ui_list_set_select_label;
+	fplinux_ui_list_set_value_details;
 	fplinux_ui_list_set_selected;
 	fplinux_ui_list_size;
 	fplinux_ui_locale;
@@ -115,6 +127,7 @@ global:
 	fplinux_ui_now_ms;
 	fplinux_ui_open;
 	fplinux_ui_pop;
+	fplinux_ui_pop_to;
 	fplinux_ui_prefs_close;
 	fplinux_ui_prefs_get;
 	fplinux_ui_prefs_get_int;

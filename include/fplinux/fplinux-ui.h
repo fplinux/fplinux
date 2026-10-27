@@ -8,6 +8,7 @@
 #include <lvgl/lvgl.h>
 
 #include "fplinux-storage.h"
+#include "fplinux-ui-document.h"
 
 struct fplinux_ui;
 /* The session protocol of fplinux-ui-session.h, for system components. */
@@ -57,6 +58,7 @@ enum fplinux_ui_event_type {
 	FPLINUX_UI_EVENT_INPUT_CANCEL,
 	/* Catalogue OPEN or retained-task RESUME, before its next visible frame. */
 	FPLINUX_UI_EVENT_ACTIVATION,
+	FPLINUX_UI_EVENT_DOCUMENT_RESULT,
 };
 
 enum fplinux_ui_lifecycle {
@@ -89,6 +91,8 @@ struct fplinux_ui_event {
 	const struct fplinux_ui_session_message *session;
 	/* ACTIVATION: the application owns navigation and preserves its data. */
 	enum fplinux_ui_activation activation;
+	/* DOCUMENT_RESULT: WAIT is intermediate; other results finish the request. */
+	struct fplinux_ui_document_result document_result;
 };
 
 typedef void (*fplinux_ui_event_cb)(struct fplinux_ui *ui,
@@ -105,6 +109,10 @@ enum fplinux_ui_close_response {
 
 typedef enum fplinux_ui_close_response (*fplinux_ui_close_cb)(
 	struct fplinux_ui *ui, void *context);
+
+typedef struct fplinux_ui_document_result (*fplinux_ui_document_cb)(
+	struct fplinux_ui *ui,
+	const struct fplinux_ui_document_request *request, void *context);
 
 enum fplinux_ui_theme_kind {
 	FPLINUX_UI_THEME_LIGHT,
@@ -124,7 +132,8 @@ struct fplinux_ui_theme {
 	lv_color_t muted; /* secondary text: details, labels, hints */
 	lv_color_t accent; /* selected row or cell, pending character */
 	lv_color_t accent_text; /* text and glyphs on accent */
-	lv_color_t border; /* dividers, unfocused frames, tracks */
+	lv_color_t border; /* decorative dividers and tracks */
+	lv_color_t control_border; /* unfocused interactive frames */
 	const lv_font_t *font; /* body; size follows the profile */
 	const lv_font_t *font_large; /* titles and emphasis, never smaller */
 	/* Large clocks and numbers: digits, space and + , - . : E e only. */
@@ -186,9 +195,14 @@ struct fplinux_ui_metrics {
 	int scrollbar_space; /* indicator width plus both side gaps */
 };
 
-/* Open waits for manager CONFIG before creating any Wayland surface. */
+/*
+ * Open waits for manager CONFIG before creating any Wayland surface and never
+ * calls application callbacks. An early CLOSE is delivered by the first run.
+ * SIGINT/SIGTERM dispositions are borrowed until close, then restored.
+ */
 struct fplinux_ui *fplinux_ui_open(const char *app_id,
 				   fplinux_ui_event_cb callback, void *context);
+/* Releases the runtime without application callbacks. */
 void fplinux_ui_close(struct fplinux_ui *ui);
 /* Run returns 0 after normal CLOSE/quit, -1 on a connection/rendering error. */
 int fplinux_ui_run(struct fplinux_ui *ui);
@@ -199,16 +213,41 @@ void fplinux_ui_quit(struct fplinux_ui *ui);
  * interactive until close_reply(). Without a handler the runtime is ready.
  * Forced CLOSE, signals and connection failure still deliver EVENT_CLOSE
  * and exit without waiting. The handler does not replace that final event.
+ * Return the initial answer; close_reply() is only for a returned WAIT.
+ * Calling quit() from the handler permits closing and ends run normally.
  */
 void fplinux_ui_set_close_handler(struct fplinux_ui *ui,
 				  fplinux_ui_close_cb callback, void *context);
 /* Answers the current WAIT; false with EINVAL when none is pending. */
 bool fplinux_ui_close_reply(struct fplinux_ui *ui,
 			    enum fplinux_ui_close_response response);
+
+/*
+ * Open an absolute, readable regular file without following symbolic links.
+ * The path must be UTF-8 (EILSEQ otherwise). One pending request per UI;
+ * zero with errno means it was not sent. Completion is a DOCUMENT_RESULT
+ * event, not a successful send. The callback may return WAIT and reply later.
+ */
+uint32_t fplinux_ui_open_file(struct fplinux_ui *ui, const char *absolute_path);
+void fplinux_ui_set_document_handler(struct fplinux_ui *ui,
+				     fplinux_ui_document_cb callback,
+				     void *context);
+/*
+ * Reply only after the document handler returned WAIT, not from that handler.
+ * ACCEPTED follows the new document frame's commit and server sync.
+ * A handler calling quit() ends normally and answers ERROR with ECANCELED.
+ */
+bool fplinux_ui_document_reply(struct fplinux_ui *ui, uint32_t request_id,
+			       enum fplinux_ui_document_status status,
+			       int error);
 /* Translated errno cause; the application presents publication state separately. */
 /* Empty for DURABLE, including an unchanged save. */
 const char *fplinux_ui_storage_error(struct fplinux_storage_result result);
-/* One optional descriptor; fd ownership stays with the caller. */
+/*
+ * One optional descriptor; fd ownership stays with the caller. A nonnegative
+ * fd requires a callback; fd=-1 removes the watch. Replacing a registration
+ * discards old readiness, including when its descriptor number is reused.
+ */
 void fplinux_ui_watch_fd(struct fplinux_ui *ui, int fd, short events,
 			 fplinux_ui_fd_cb callback, void *context);
 
@@ -252,9 +291,6 @@ const void *fplinux_ui_glyph(struct fplinux_ui *ui, const char *name,
  */
 lv_draw_buf_t *fplinux_ui_image_load(const void *src, int width, int height);
 uint64_t fplinux_ui_now_ms(void);
-/* A raw private session message, also used for system-app loading phases. */
-bool fplinux_ui_send(struct fplinux_ui *ui,
-		     const struct fplinux_ui_session_message *message);
 bool fplinux_ui_set_title(struct fplinux_ui *ui, const char *title);
 /* Legends for the left soft key, OK and the right soft key; "" for none. */
 bool fplinux_ui_set_softkeys(struct fplinux_ui *ui, const char *left,

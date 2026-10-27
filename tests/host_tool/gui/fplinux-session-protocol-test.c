@@ -4,15 +4,17 @@
  * Host test of the session packet format over a real SOCK_SEQPACKET pair.
  * Raw packets are literal JSON written by the test, not by the serializer.
  */
-#include "fplinux-ui-session.h"
+#include "fplinux-ui-session-internal.h"
 
 #include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 static unsigned int failures;
@@ -498,6 +500,78 @@ static void check_state_packets(int sender, int receiver)
 	      "BUSY names the operation and explicit busy phase");
 }
 
+static void check_clock_presentation(int sender, int receiver)
+{
+	static const char *const invalid[] = {
+		"{\"type\":\"HOME\",\"clock_presentation\":{}}",
+		"{\"type\":\"ACTIVE\",\"clock_presentation\":[]}",
+		"{\"type\":\"ACTIVE\",\"clock_presentation\":{\"analog\":1}}",
+		"{\"type\":\"ACTIVE\",\"clock_presentation\":{\"timer_deadline_ms\":1000}}",
+		"{\"type\":\"ACTIVE\",\"clock_presentation\":{\"timer_deadline_ms\":\"-1\"}}",
+		"{\"type\":\"ACTIVE\",\"clock_presentation\":{\"missed_total\":\"18446744073709551616\"}}",
+		"{\"type\":\"ACTIVE\",\"clock_presentation\":{\"alarm_utc\":\"9223372036854775808\"}}",
+		"{\"type\":\"ACTIVE\",\"clock_presentation\":{\"alarm_label\":\"orphan\"}}",
+		"{\"type\":\"ACTIVE\",\"clock_presentation\":{\"alarm_utc\":\"1735689660\",\"snooze_deadline_ms\":\"1000\"}}",
+		"{\"type\":\"ACTIVE\",\"clock_presentation\":{\"timer_deadline_ms\":\"1000\",\"timer_remaining_ms\":\"500\"}}",
+		"{\"type\":\"ACTIVE\",\"clock_presentation\":{\"stopwatch\":true}}",
+	};
+	struct fplinux_ui_session_message received;
+	struct fplinux_ui_session_message sent = {
+		.type = FPLINUX_UI_SESSION_ACTIVE,
+		.clock_presentation = {
+			.analog = true,
+			.snooze_deadline_ms = UINT64_C(9223372036854775817),
+			.alarm_label = "Чай \"утром\"",
+			.timer_remaining_ms = 1500,
+			.missed_total = UINT64_MAX,
+		},
+	};
+
+	check(receive_raw(
+		      sender, receiver,
+		      "{\"type\":\"ACTIVE\",\"clock_presentation\":{\"analog\":true,\"alarm_utc\":\"1735689660\",\"alarm_label\":\"Утро\",\"timer_deadline_ms\":\"9223372036854775817\",\"missed_total\":\"18446744073709551615\"}}",
+		      &received) == 1 &&
+		      received.clock_presentation.analog &&
+		      received.clock_presentation.alarm_utc == 1735689660 &&
+		      !strcmp(received.clock_presentation.alarm_label,
+			      "Утро") &&
+		      received.clock_presentation.timer_deadline_ms ==
+			      UINT64_C(9223372036854775817) &&
+		      received.clock_presentation.missed_total == UINT64_MAX,
+	      "literal Home state carries an alarm and timer with exact uint64 values");
+	check(fplinux_ui_session_send(sender, &sent) &&
+		      fplinux_ui_session_receive(receiver, &received) == 1 &&
+		      received.clock_presentation.analog &&
+		      !received.clock_presentation.alarm_utc &&
+		      received.clock_presentation.snooze_deadline_ms ==
+			      UINT64_C(9223372036854775817) &&
+		      !strcmp(received.clock_presentation.alarm_label,
+			      "Чай \"утром\"") &&
+		      received.clock_presentation.timer_remaining_ms == 1500 &&
+		      received.clock_presentation.missed_total == UINT64_MAX,
+	      "snoozed alarms and paused timers retain their independent states");
+	check(receive_raw(
+		      sender, receiver,
+		      "{\"type\":\"ACTIVE\",\"clock_presentation\":{\"analog\":false}}",
+		      &received) == 1 &&
+		      !received.clock_presentation.analog &&
+		      !received.clock_presentation.alarm_utc &&
+		      !received.clock_presentation.snooze_deadline_ms &&
+		      !received.clock_presentation.timer_deadline_ms &&
+		      !received.clock_presentation.timer_remaining_ms &&
+		      !received.clock_presentation.missed_total &&
+		      !received.clock_presentation.alarm_label[0],
+	      "an empty Home state clears all previous events");
+	for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
+		check(receive_raw(sender, receiver, invalid[i], &received) ==
+				      -1 &&
+			      errno == EPROTO,
+		      "Home clock state rejects invalid types, bounds and conflicting deadlines");
+	sent.type = FPLINUX_UI_SESSION_HOME;
+	check(!fplinux_ui_session_send(sender, &sent) && errno == EINVAL,
+	      "only ACTIVE publishes Home clock state");
+}
+
 static void check_clock_packets(int sender, int receiver)
 {
 	static const char data[] =
@@ -932,6 +1006,174 @@ static void check_activation(int sender, int receiver)
 		      "activation requires its own intent and nonzero serial");
 }
 
+static void check_documents(int sender, int receiver)
+{
+	static const char *const invalid[] = {
+		"{\"type\":\"OPEN_FILE\",\"path\":\"/tmp/game.jar\"}",
+		"{\"type\":\"OPEN_FILE\",\"serial\":1,\"path\":\"game.jar\"}",
+		"{\"type\":\"DOCUMENT_RESULT\",\"serial\":1}",
+		"{\"type\":\"DOCUMENT_RESULT\",\"serial\":1,\"document_status\":\"error\"}",
+		"{\"type\":\"DOCUMENT_RESULT\",\"serial\":1,\"document_status\":\"accepted\",\"document_error\":5}",
+		"{\"type\":\"HOME\",\"path\":\"/tmp/game.jar\"}",
+		"{\"type\":\"DOCUMENT_CHOICES\",\"serial\":1,\"document_choices\":[]}",
+	};
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_OPEN_FILE,
+		.serial = 17,
+	};
+	struct fplinux_ui_session_message received;
+	char directory[] = "/tmp/fplinux-document-XXXXXX";
+	char path[256], link[256], child[256];
+	int fd;
+
+	strcpy(message.path, "/tmp/Игра one 'quoted'.JaR");
+	check(fplinux_ui_session_send(sender, &message) &&
+		      fplinux_ui_session_receive(receiver, &received) == 1 &&
+		      received.type == FPLINUX_UI_SESSION_OPEN_FILE &&
+		      received.serial == 17 &&
+		      !strcmp(received.path, message.path),
+	      "document path retains spaces, Unicode and quotes as data");
+	strcpy(message.path, "/tmp/name\nwith\ttabs.jar");
+	check(fplinux_ui_session_send(sender, &message) &&
+		      fplinux_ui_session_receive(receiver, &received) == 1 &&
+		      !strcmp(received.path, "/tmp/name\nwith\ttabs.jar"),
+	      "raw file-name controls are preserved without becoming UI labels");
+	check(receive_raw(
+		      sender, receiver,
+		      "{\"type\":\"DOCUMENT_CHOICES\",\"serial\":17,\"document_choices\":[{\"app_id\":\"org.example.game\",\"title\":\"Игра\",\"icon\":\"game\"}]}",
+		      &received) == 1 &&
+		      received.document_choice_count == 1 &&
+		      !strcmp(received.document_choices[0].title, "Игра") &&
+		      !strcmp(received.document_choices[0].icon, "game"),
+	      "chooser uses the installed application's localized title and icon");
+	for (unsigned int status = FPLINUX_UI_DOCUMENT_ACCEPTED;
+	     status <= FPLINUX_UI_DOCUMENT_RESTART_REQUIRED; ++status) {
+		message = (struct fplinux_ui_session_message){
+			.type = FPLINUX_UI_SESSION_DOCUMENT_RESULT,
+			.serial = 19,
+			.document_status = status,
+			.document_error =
+				status == FPLINUX_UI_DOCUMENT_ERROR ? EIO : 0,
+		};
+		check(fplinux_ui_session_send(sender, &message) &&
+			      fplinux_ui_session_receive(receiver, &received) ==
+				      1 &&
+			      received.serial == 19 &&
+			      received.document_status == status &&
+			      received.document_error == message.document_error,
+		      "typed document decisions survive transport with their request serial");
+	}
+	for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
+		check(receive_raw(sender, receiver, invalid[i], &received) ==
+				      -1 &&
+			      errno == EPROTO,
+		      "document packets require a typed decision and nonzero request");
+	check(mkdtemp(directory) != NULL, "create owned document directory");
+	snprintf(path, sizeof(path), "%s/game.jar", directory);
+	snprintf(link, sizeof(link), "%s/linked", directory);
+	snprintf(child, sizeof(child), "%s/linked/game.jar", directory);
+	fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+	check(fd >= 0, "create regular document");
+	if (fd >= 0)
+		close(fd);
+	check(fplinux_ui_session_document_path_error(path) == 0,
+	      "regular absolute document is admitted");
+	snprintf(child, sizeof(child), "%s/raw-\xff.jar", directory);
+	fd = open(child, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+	check(fd >= 0, "create a regular document with a non-UTF-8 name");
+	if (fd >= 0)
+		close(fd);
+	check(fplinux_ui_session_document_path_error(child) == EILSEQ,
+	      "an unrepresentable file name fails locally without breaking the session");
+	check(unlink(child) == 0, "remove the raw-name document");
+	snprintf(child, sizeof(child), "%s/linked/game.jar", directory);
+	check(fplinux_ui_session_document_path_error(directory) == EISDIR,
+	      "directory is not a document");
+	check(symlink(directory, link) == 0, "create owned directory symlink");
+	check(fplinux_ui_session_document_path_error(child) == ELOOP,
+	      "document resolution does not traverse a directory symlink");
+	check(unlink(link) == 0 && symlink(path, link) == 0,
+	      "replace owned directory link with file link");
+	check(fplinux_ui_session_document_path_error(link) == ELOOP,
+	      "document resolution does not follow the final symlink");
+	check(unlink(link) == 0 && unlink(path) == 0 && rmdir(directory) == 0,
+	      "release owned document fixtures");
+}
+
+static void check_volumes(int sender, int receiver)
+{
+	static const char *const invalid[] = {
+		"{\"type\":\"STORAGE_REQUEST\",\"serial\":1,\"volume_operation\":\"connect\",\"volume_id\":0}",
+		"{\"type\":\"STORAGE_REQUEST\",\"serial\":1,\"volume_operation\":\"refresh\",\"volume_id\":7}",
+		"{\"type\":\"STORAGE_REQUEST\",\"volume_operation\":\"refresh\",\"volume_id\":0}",
+		"{\"type\":\"STORAGE_REQUEST\",\"serial\":1,\"volume_operation\":\"format\",\"volume_id\":7}",
+		"{\"type\":\"STORAGE_REQUEST\",\"serial\":1,\"volume_operation\":\"eject\",\"volume_id\":4294967296}",
+		"{\"type\":\"STORAGE_REQUEST\",\"serial\":1,\"volume_operation\":\"connect\",\"volume_id\":7,\"path\":\"/dev/mmcblk0\"}",
+		"{\"type\":\"STORAGE_RESULT\",\"serial\":1,\"volume_error\":0,\"home_persistent\":false,\"volumes\":[{},{},{},{},{}]}",
+		"{\"type\":\"STORAGE_RESULT\",\"serial\":1,\"volume_error\":-1,\"home_persistent\":false,\"volumes\":[]}",
+		"{\"type\":\"STORAGE_RESULT\",\"serial\":1,\"volume_error\":0,\"volumes\":[]}",
+		"{\"type\":\"READY\",\"volumes\":[]}",
+	};
+	struct fplinux_ui_session_message message;
+	struct fplinux_ui_session_message sent = {
+		.type = FPLINUX_UI_SESSION_STORAGE_RESULT,
+		.serial = 42,
+		.volume_result = {
+			.request_id = 42,
+			.error = EBUSY,
+			.snapshot = {
+				.count = 1,
+				.home_persistent = true,
+				.volumes = {{
+					.id = UINT32_MAX,
+					.mount_id = 31,
+					.state = FPLINUX_VOLUME_MOUNTED,
+					.label = "Карта one 'quoted'",
+					.path = "/mnt/card",
+				}},
+			},
+		},
+	};
+
+	check(receive_raw(
+		      sender, receiver,
+		      "{\"type\":\"STORAGE_REQUEST\",\"serial\":9,\"volume_operation\":\"connect\",\"volume_id\":4294967295}",
+		      &message) == 1 &&
+		      message.serial == 9 &&
+		      message.volume_operation == FPLINUX_VOLUME_CONNECT &&
+		      message.volume_id == UINT32_MAX,
+	      "storage accepts the entire opaque ID range without raw device paths");
+	check(fplinux_ui_session_send(sender, &sent) &&
+		      fplinux_ui_session_receive(receiver, &message) == 1 &&
+		      message.volume_result.request_id == 42 &&
+		      message.volume_result.error == EBUSY &&
+		      message.volume_result.snapshot.home_persistent &&
+		      message.volume_result.snapshot.count == 1 &&
+		      message.volume_result.snapshot.volumes[0].id ==
+			      UINT32_MAX &&
+		      message.volume_result.snapshot.volumes[0].mount_id ==
+			      31 &&
+		      !strcmp(message.volume_result.snapshot.volumes[0].label,
+			      "Карта one 'quoted'") &&
+		      !strcmp(message.volume_result.snapshot.volumes[0].path,
+			      "/mnt/card"),
+	      "a busy result retains the complete mounted volume snapshot");
+	check(receive_raw(
+		      sender, receiver,
+		      "{\"type\":\"STORAGE_RESULT\",\"serial\":10,\"volume_error\":0,\"home_persistent\":false,\"volumes\":[]}",
+		      &message) == 1 &&
+		      !message.volume_result.snapshot.count,
+	      "no card is a successful empty snapshot");
+	for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
+		check(receive_raw(sender, receiver, invalid[i], &message) ==
+				      -1 &&
+			      errno == EPROTO,
+		      "storage rejects invalid operations, IDs and data in the wrong direction");
+	sent.volume_result.snapshot.volumes[0].state = FPLINUX_VOLUME_AVAILABLE;
+	check(!fplinux_ui_session_send(sender, &sent) && errno == EINVAL,
+	      "an unmounted volume cannot expose the empty mount directory");
+}
+
 int main(void)
 {
 	static const char *const invalid[] = {
@@ -983,9 +1225,12 @@ int main(void)
 	check_state_packets(pair[0], pair[1]);
 	check_simple_packets(pair[0], pair[1]);
 	check_clock_packets(pair[0], pair[1]);
+	check_clock_presentation(pair[0], pair[1]);
 	check_input_locales(pair[0], pair[1]);
 	check_lifecycle(pair[0], pair[1]);
 	check_activation(pair[0], pair[1]);
+	check_documents(pair[0], pair[1]);
+	check_volumes(pair[0], pair[1]);
 	check_tasks(pair[0], pair[1]);
 	check_close_preparation(pair[0], pair[1]);
 	check_storage_results(pair[0], pair[1]);

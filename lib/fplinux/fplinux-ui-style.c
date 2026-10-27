@@ -85,6 +85,8 @@ static void scrollbar_event(lv_event_t *event)
 	if (code == LV_EVENT_DELETE) {
 		lv_display_remove_event_cb_with_user_data(
 			layout->display, scrollbar_refresh, layout);
+		lv_obj_remove_event_cb_with_user_data(layout->object,
+						      scrollbar_event, layout);
 		free(layout);
 		return;
 	}

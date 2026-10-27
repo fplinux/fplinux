@@ -88,6 +88,7 @@ def client_frames(
             f"-I{ROOT / 'site/scripts/screens'}",
             f"-I{directory}",
             str(ROOT / "tests/host_tool/gui/ui-client-frames.c"),
+            str(ROOT / "tests/host_tool/gui/ui-screen-navigation.c"),
             str(ROOT / "site/scripts/screens/ui-frame-peer.c"),
             *(str(ROOT / "lib/fplinux" / source) for source in sources),
             str(directory / "xdg-shell-protocol.c"),
@@ -95,10 +96,161 @@ def client_frames(
             *flags,
             *gettext_link_flags(),
             "-lm",
+            "-Wl,--wrap=strdup",
+            "-Wl,--wrap=fplinux_language_load",
         ],
         name="link the complete UI client and test compositor",
     )
     return executable
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "provider",
+        "cancel",
+        "replace",
+        "delete",
+        "resume",
+        "open",
+        "openwith",
+        "short-label",
+        "canvas",
+    ],
+)
+def test_runtime_navigation_preserves_application_ownership_and_runtime_choices(
+    client_frames: Path, tmp_path: Path, scenario: str
+) -> None:
+    """Real runtime/LVGL and Wayland input preserve stack, choice and callback contracts."""
+    result = run_process(
+        [
+            str(client_frames),
+            f"stack-{scenario}",
+            str(tmp_path / "session.sock"),
+            str(ROOT / "tests/host_tool/gui/repeat-keymap.xkb"),
+        ],
+        name=f"exercise actual UI screen ownership and navigation: {scenario}",
+        timeout=15,
+        check=True,
+    )
+    assert result.stdout.endswith(f"stack-{scenario}: ok\n")
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "early-close",
+        "final-close",
+        "signals",
+        "failed-open",
+        "close-quit",
+        "close-invalid",
+        "close-self-reply",
+        "document-quit",
+        "document-invalid",
+        "document-self-reply",
+        "watch-replace",
+        "watch-reuse",
+    ],
+)
+def test_runtime_lifecycle_delivers_only_constructed_active_callbacks(
+    client_frames: Path, tmp_path: Path, scenario: str
+) -> None:
+    """Real UI closing, signal ownership and watch replacement keep their contracts."""
+    result = run_process(
+        [str(client_frames), f"runtime-{scenario}", str(tmp_path / "session.sock")],
+        name=f"exercise actual UI runtime lifecycle: {scenario}",
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout.endswith(f"runtime-{scenario}: ok\n")
+    if scenario == "close-invalid":
+        assert "close handler returned an invalid response" in result.stderr
+    elif scenario == "document-invalid":
+        assert "document handler returned an invalid result" in result.stderr
+    elif scenario == "close-self-reply":
+        assert "close reply requires a pending decision outside its handler" in result.stderr
+    elif scenario == "document-self-reply":
+        assert "document reply requires a pending request and a valid result" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        "list-plain",
+        "list-scrolled",
+        "menu-reclaim",
+        "menu-reentrant",
+        "menu-final-close",
+    ],
+)
+def test_lists_and_editor_menus_release_resources_and_preserve_editing(
+    client_frames: Path, tmp_path: Path, scenario: str
+) -> None:
+    """Real LVGL objects delete normally, and final cleanup never calls the editor."""
+    result = run_process(
+        [str(client_frames), f"lifetime-{scenario}", str(tmp_path / "session.sock")],
+        name=f"exercise actual UI list and editor lifetime: {scenario}",
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout.endswith(f"lifetime-{scenario}: ok\n")
+
+
+@pytest.mark.parametrize("scenario", ["list", "read-only"])
+def test_focused_marquee_finishes_once_restarts_on_action_and_stops_while_hidden(
+    client_frames: Path, tmp_path: Path, scenario: str
+) -> None:
+    """Real LVGL labels finish in order and leave the renderer idle until an action."""
+    result = run_process(
+        [str(client_frames), f"marquee-{scenario}", str(tmp_path / "session.sock")],
+        name=f"exercise actual UI single-pass marquee: {scenario}",
+        timeout=20,
+        check=True,
+    )
+    assert result.stdout.endswith(f"marquee-{scenario}: ok\n")
+
+
+def test_raw_text_callback_normalizes_once_and_keeps_independent_changes(
+    client_frames: Path, tmp_path: Path
+) -> None:
+    """A nested setter applies without recursion or a deferred duplicate notification."""
+    result = run_process(
+        [str(client_frames), "text-normalize", str(tmp_path / "session.sock")],
+        name="normalize a real text field from its own callback",
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout.endswith("text-normalize: ok\n")
+
+
+@pytest.mark.parametrize("scenario", ["dot", "comma", "password", "uneditable", "any"])
+def test_form_decimal_getter_keeps_borrowed_text_valid_between_reads(
+    client_frames: Path, tmp_path: Path, scenario: str
+) -> None:
+    """Decimal reads normalize '.', preserve modifiers, and refresh after an edit."""
+    result = run_process(
+        [str(client_frames), f"text-decimal-{scenario}", str(tmp_path / "session.sock")],
+        env={"FPLINUX_TEST_LANGUAGE_DIRECTORY": str(ROOT / "alpine/aports/fplinux-language")},
+        name=f"read stable real form text through repeated getters: {scenario}",
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout.endswith(f"text-decimal-{scenario}: ok\n")
+
+
+def test_form_decimal_getter_reports_allocation_failure_and_retries(
+    client_frames: Path, tmp_path: Path
+) -> None:
+    """Failed normalization returns NULL/ENOMEM, and a retry returns canonical text."""
+    result = run_process(
+        [str(client_frames), "text-decimal-allocation", str(tmp_path / "session.sock")],
+        env={"FPLINUX_TEST_LANGUAGE_DIRECTORY": str(ROOT / "alpine/aports/fplinux-language")},
+        name="fail and retry allocation of the real normalized decimal result",
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout.endswith("text-decimal-allocation: ok\n")
 
 
 def test_successful_exit_retains_frame_until_manager_close(
@@ -190,6 +342,18 @@ def test_media_lifecycle_updates_frame_timers_before_callbacks_and_sends_vibrati
         check=True,
     )
     assert result.stdout.endswith("media-lifecycle: ok\n")
+
+
+def test_storage_request_callback_ignores_stale_results(
+    client_frames: Path, tmp_path: Path
+) -> None:
+    result = run_process(
+        [str(client_frames), "storage-api", str(tmp_path / "session.sock")],
+        name="deliver a storage snapshot through the actual UI request callback",
+        timeout=15,
+        check=True,
+    )
+    assert result.stdout.endswith("storage-api: ok\n")
 
 
 def assert_media_audio_scenario(client_frames: Path, tmp_path: Path, scenario: str) -> None:
@@ -316,6 +480,20 @@ def test_cold_activation_runs_after_application_init_before_first_commit(
         check=True,
     )
     assert result.stdout.endswith("activation-cold: ok\n")
+
+
+@pytest.mark.parametrize("scenario", ["document-accepted", "document-wait"])
+def test_document_result_waits_for_new_document_frame_and_server_sync(
+    client_frames: Path, tmp_path: Path, scenario: str
+) -> None:
+    """Busy buffers retain the previous canvas until the accepted document is committed."""
+    result = run_process(
+        [str(client_frames), scenario, str(tmp_path / "session.sock")],
+        name=f"confirm actual runtime document frame barrier: {scenario}",
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout.endswith(f"{scenario}: ok\n")
 
 
 def test_storage_errors_distinguish_capacity_access_and_io_failures(

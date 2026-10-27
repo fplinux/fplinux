@@ -226,6 +226,26 @@ static void test_geometry(void)
 			      notice.max_height <= frame.body_height,
 		      "notice bounds fit the body");
 	}
+	{
+		const struct fplinux_ui_profile_spec *spec =
+			fplinux_ui_profile_spec(
+				fplinux_ui_profile_for_screen(320, 240));
+		struct fplinux_launcher_scroll scroll;
+		struct fplinux_launcher_cell cell;
+
+		fplinux_launcher_scroll_layout(spec, 320, 170, &scroll);
+		check(fplinux_launcher_content_height(&scroll, 2) == 170,
+		      "two landscape rows fill the viewport without overflow");
+		fplinux_launcher_grid_cell(spec, 320, &scroll, 0, 0, &cell);
+		check(cell.tile.box.x == 16 && cell.tile.box.y == 17,
+		      "landscape first tile has balanced horizontal and vertical margins");
+		fplinux_launcher_grid_cell(spec, 320, &scroll, 3, 1, &cell);
+		check(cell.tile.box.x == 244 && cell.tile.box.y == 93 &&
+			      cell.tile.box.y + cell.tile.box.height == 153,
+		      "landscape final tile leaves the same 17 pixel vertical margin");
+		check(fplinux_launcher_content_height(&scroll, 3) > 170,
+		      "larger catalogues still overflow and scroll");
+	}
 }
 
 static void test_catalogue(const char *directory)

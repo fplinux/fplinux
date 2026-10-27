@@ -39,6 +39,7 @@ ui_host_compile_lvgl \
 	$(pkg-config --cflags wayland-server xkbcommon json-c) \
 	"$screens_dir/apidemo-screens.c" "$screens_dir/ui-frame-peer.c" \
 	"$screens_dir/screen-frame.c" "$ui_host_ui/fplinux-ui-session.c" \
+	"$ui_host_ui/fplinux-utf8.c" \
 	"$ui_host_ui/fplinux-ui-profile.c" "$ui_host_inputs/xdg-shell-protocol.c" \
 	$(pkg-config --libs wayland-server xkbcommon json-c) \
 	-o "$work/apidemo-screens"

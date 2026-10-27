@@ -13,8 +13,9 @@
 #include "fplinux-ui-screen.h"
 #include "fplinux-ui-profile.h"
 #include "fplinux-ui-screen-model.h"
-#include "fplinux-ui-session.h"
+#include "fplinux-ui-session-internal.h"
 #include "fplinux-ui-softkey-layout.h"
+#include "fplinux-ui-storage.h"
 #include "fplinux-ui-vibration.h"
 #include "xdg-shell-client-protocol.h"
 
@@ -89,10 +90,12 @@ struct marquee {
 	bool armed;
 	/* labels[turn] has been measured since it was armed. */
 	bool checked;
-	/* Bits of the labels found to fit since the element took focus. */
-	unsigned int fitting;
+	/* Labels that fit or have completed their one pass since focus. */
+	unsigned int finished;
 	/* A pass of the focused element has completed since then. */
 	bool passed;
+	/* Surface hiding deactivates screens without changing their selection. */
+	bool hiding;
 };
 
 struct frame_buffer {
@@ -156,6 +159,7 @@ enum frame_ack_slot {
 	FRAME_ACK_ACTIVATION,
 	FRAME_ACK_APPEARANCE,
 	FRAME_ACK_CLOSE,
+	FRAME_ACK_DOCUMENT,
 	FRAME_ACK_COUNT,
 };
 
@@ -167,10 +171,24 @@ struct fplinux_ui {
 	short watch_events;
 	fplinux_ui_fd_cb watch_callback;
 	void *watch_context;
+	uint64_t watch_generation;
 	fplinux_ui_event_cb callback;
 	void *context;
 	fplinux_ui_close_cb close_callback;
 	void *close_context;
+	fplinux_ui_document_cb document_callback;
+	void *document_context;
+	uint32_t document_serial;
+	uint32_t next_document_request;
+	uint32_t open_file_request;
+	fplinux_ui_storage_cb storage_callback;
+	void *storage_context;
+	uint32_t next_storage_request;
+	uint32_t storage_request;
+	unsigned int document_choice_count;
+	struct fplinux_ui_screen *document_choice_screen;
+	struct fplinux_ui_session_document_choice
+		document_choices[FPLINUX_UI_SESSION_DOCUMENT_CHOICE_MAX];
 	uint32_t close_serial;
 	enum fplinux_ui_close_response close_response;
 	struct wl_display *wayland;
@@ -256,8 +274,13 @@ struct fplinux_ui {
 	bool vibration;
 	struct fplinux_audio_client *audio_client;
 	enum fplinux_ui_lifecycle lifecycle;
+	/* A compositor may close the surface before open returns to the caller. */
+	bool close_pending;
 	bool quit;
 	bool failed;
+	bool signals_saved;
+	struct sigaction saved_sigint;
+	struct sigaction saved_sigterm;
 };
 
 static volatile sig_atomic_t stop_signal;
@@ -426,6 +449,8 @@ static struct repeat_owner dispatch_event(struct fplinux_ui *ui,
 {
 	struct repeat_owner owner = { 0 };
 
+	if (!ui->display || (ui->quit && event->type != FPLINUX_UI_EVENT_CLOSE))
+		return owner;
 	if (event->type == FPLINUX_UI_EVENT_INPUT_CANCEL)
 		fplinux_ui_text_cancel_input(ui, event->key.source);
 	if (event->type == FPLINUX_UI_EVENT_KEY) {
@@ -442,7 +467,7 @@ static struct repeat_owner dispatch_event(struct fplinux_ui *ui,
 				};
 			return owner;
 		}
-		screen = fplinux_ui_current(ui);
+		screen = fplinux_ui_screens_active(ui->screens);
 		route = fplinux_ui_screens_key(ui->screens, &event->key);
 		if (route != FPLINUX_UI_KEY_UNHANDLED) {
 			if (route == FPLINUX_UI_KEY_REPEATABLE)
@@ -490,33 +515,45 @@ static void request_close(struct fplinux_ui *ui)
 
 	if (ui->quit)
 		return;
+	if (!ui->display) {
+		ui->close_pending = true;
+		return;
+	}
 	fplinux_ui_cancel_key_repeat(ui, NULL);
 	set_lifecycle(ui, FPLINUX_UI_CLOSING);
-	dispatch_event(ui, &event);
 	ui->quit = true;
+	dispatch_event(ui, &event);
 }
 
 static const char *const close_response_names[] = { "ready", "cancel", "wait" };
+
+static bool send_close_reply(struct fplinux_ui *ui,
+			     enum fplinux_ui_close_response response)
+{
+	struct fplinux_ui_session_message reply = {
+		.type = FPLINUX_UI_SESSION_CLOSE_REPLY,
+		.serial = ui->close_serial,
+	};
+
+	strcpy(reply.value, close_response_names[response]);
+	if (!fplinux_ui_session_send(ui->session_fd, &reply))
+		return false;
+	ui->close_response = response;
+	ui->exit_pending = response == FPLINUX_UI_CLOSE_READY;
+	if (response != FPLINUX_UI_CLOSE_READY)
+		queue_frame_ack(ui, FPLINUX_UI_SESSION_CLOSE_ACK,
+				ui->close_serial);
+	return true;
+}
 
 static bool prepare_close(struct fplinux_ui *ui, uint32_t serial)
 {
 	enum fplinux_ui_close_response response;
 
-	if (ui->close_serial == serial) {
-		struct fplinux_ui_session_message reply = {
-			.type = FPLINUX_UI_SESSION_CLOSE_REPLY,
-			.serial = serial,
-		};
-
-		strcpy(reply.value, close_response_names[ui->close_response]);
-		if (!fplinux_ui_session_send(ui->session_fd, &reply))
-			return false;
-		if (ui->close_response != FPLINUX_UI_CLOSE_READY)
-			queue_frame_ack(ui, FPLINUX_UI_SESSION_CLOSE_ACK,
-					serial);
-		return true;
-	}
-	ui->close_serial = serial;
+	if (ui->close_serial == serial)
+		return send_close_reply(ui, ui->close_response);
+	/* A handler returns its answer; only a returned WAIT may reply later. */
+	ui->close_serial = 0;
 	ui->close_response = FPLINUX_UI_CLOSE_WAIT;
 	/* Back held the last frame; a save decision must be visible and usable. */
 	ui->exit_pending = false;
@@ -524,7 +561,15 @@ static bool prepare_close(struct fplinux_ui *ui, uint32_t serial)
 	response = ui->close_callback ?
 			   ui->close_callback(ui, ui->close_context) :
 			   FPLINUX_UI_CLOSE_READY;
-	return fplinux_ui_close_reply(ui, response);
+	ui->close_serial = serial;
+	if ((unsigned int)response > FPLINUX_UI_CLOSE_WAIT) {
+		fprintf(stderr,
+			"fplinux-ui: close handler returned an invalid response\n");
+		errno = EINVAL;
+		return false;
+	}
+	return send_close_reply(ui,
+				ui->quit ? FPLINUX_UI_CLOSE_READY : response);
 }
 
 /* [a-z]{2,3}, the name of a file in FPLINUX_LANGUAGE_DIRECTORY. */
@@ -614,7 +659,10 @@ static void set_visible(struct fplinux_ui *ui, bool visible)
 		lv_obj_invalidate(lv_display_get_screen_active(ui->display));
 	/* Without animations the timer stays paused: no idle wake-ups. */
 	hold_animations(ui);
+	ui->marquee.hiding = !visible;
 	fplinux_ui_screens_set_visible(ui->screens, visible);
+	fplinux_ui_text_set_visible(ui);
+	ui->marquee.hiding = false;
 	marquee_set_visible(ui, visible);
 	dispatch_event(ui, &event);
 }
@@ -628,6 +676,8 @@ static void queue_frame_ack(struct fplinux_ui *ui,
 		type == FPLINUX_UI_SESSION_ACTIVATION_ACK ?
 							FRAME_ACK_ACTIVATION :
 		type == FPLINUX_UI_SESSION_REDRAW_ACK ? FRAME_ACK_APPEARANCE :
+		type == FPLINUX_UI_SESSION_DOCUMENT_RESULT ?
+							FRAME_ACK_DOCUMENT :
 							FRAME_ACK_CLOSE;
 	struct frame_ack *ack = &ui->frame_acks[slot];
 
@@ -647,6 +697,93 @@ static bool needs_frame_ack(const struct fplinux_ui *ui)
 	return false;
 }
 
+static void cancel_document_choice(struct fplinux_ui *ui, void *context)
+{
+	struct fplinux_ui_session_message choice = {
+		.type = FPLINUX_UI_SESSION_DOCUMENT_CHOICE,
+		.serial = ui->open_file_request,
+	};
+
+	(void)context;
+	ui->document_choice_screen = NULL;
+	if (!ui->document_choice_count)
+		return;
+	ui->document_choice_count = 0;
+	if (choice.serial && !fplinux_ui_session_send(ui->session_fd, &choice))
+		ui->failed = true;
+}
+
+static void document_choice_command(struct fplinux_ui *ui,
+				    struct fplinux_ui_screen *screen,
+				    int command, void *context)
+{
+	struct fplinux_ui_session_message choice = {
+		.type = FPLINUX_UI_SESSION_DOCUMENT_CHOICE,
+		.serial = ui->open_file_request,
+	};
+	size_t index = fplinux_ui_list_get_focused(screen);
+
+	(void)context;
+	if (command == FPLINUX_UI_SELECT_COMMAND &&
+	    index < ui->document_choice_count)
+		strcpy(choice.app_id, ui->document_choices[index].app_id);
+	ui->document_choice_count = 0;
+	fplinux_ui_screens_close_transient(ui, screen);
+	if (!fplinux_ui_session_send(ui->session_fd, &choice))
+		ui->failed = true;
+}
+
+static bool document_choices(struct fplinux_ui *ui,
+			     const struct fplinux_ui_session_message *message)
+{
+	const struct fplinux_ui_command cancel = {
+		.id = 0,
+		.type = FPLINUX_UI_COMMAND_CANCEL,
+	};
+	struct fplinux_ui_screen *screen;
+
+	if (message->serial != ui->open_file_request ||
+	    ui->document_choice_screen)
+		return true;
+	screen = fplinux_ui_list_new(
+		ui, dgettext(FPLINUX_UI_TEXT_DOMAIN, "Open with"),
+		FPLINUX_UI_LIST_IMPLICIT);
+	if (!screen)
+		return false;
+	ui->document_choice_count = message->document_choice_count;
+	memcpy(ui->document_choices, message->document_choices,
+	       sizeof(ui->document_choices));
+	for (unsigned int i = 0; i < message->document_choice_count; ++i) {
+		const struct fplinux_ui_session_document_choice *choice =
+			&message->document_choices[i];
+		char icon[PATH_MAX];
+		int size = ui->metrics.app_icon_size;
+		bool has_icon = false;
+
+		fplinux_ui_list_append(screen, choice->title, NULL);
+		if (choice->icon[0] &&
+		    snprintf(icon, sizeof(icon),
+			     "/usr/share/icons/hicolor/%dx%d/apps/%s.png", size,
+			     size, choice->icon) < (int)sizeof(icon))
+			has_icon = fplinux_ui_list_set_icon(
+				screen, i, icon, FPLINUX_UI_LIST_ICON_APP_TILE);
+		if (!has_icon)
+			fplinux_ui_list_set_icon(
+				screen, i,
+				fplinux_ui_glyph(ui, "app",
+						 FPLINUX_UI_GLYPH_ROW),
+				FPLINUX_UI_LIST_ICON_IMAGE);
+	}
+	fplinux_ui_screen_add_command(screen, &cancel);
+	fplinux_ui_screen_set_listener(screen, document_choice_command, NULL,
+				       ui);
+	if (!fplinux_ui_screens_show_transient(ui, screen,
+					       cancel_document_choice, NULL))
+		return false;
+	ui->document_choice_screen = screen;
+	return true;
+}
+
 static bool receive_session(struct fplinux_ui *ui)
 {
 	struct fplinux_ui_session_message message;
@@ -654,10 +791,10 @@ static bool receive_session(struct fplinux_ui *ui)
 		.type = FPLINUX_UI_EVENT_SESSION,
 		.session = &message,
 	};
-	int received;
+	int received = 0;
 
-	while ((received = fplinux_ui_session_receive(ui->session_fd,
-						      &message)) > 0) {
+	while (!ui->quit && (received = fplinux_ui_session_receive(
+				     ui->session_fd, &message)) > 0) {
 		bool setting_reply =
 			message.type == FPLINUX_UI_SESSION_SETTING ||
 			(message.type == FPLINUX_UI_SESSION_ERROR &&
@@ -665,6 +802,9 @@ static bool receive_session(struct fplinux_ui *ui)
 
 		/* These requests travel only from client to manager. */
 		if (message.type == FPLINUX_UI_SESSION_LAUNCH ||
+		    message.type == FPLINUX_UI_SESSION_OPEN_FILE ||
+		    message.type == FPLINUX_UI_SESSION_DOCUMENT_CHOICE ||
+		    message.type == FPLINUX_UI_SESSION_STORAGE_REQUEST ||
 		    message.type == FPLINUX_UI_SESSION_ACTIVATION_ACK ||
 		    message.type == FPLINUX_UI_SESSION_CLOSE_REPLY) {
 			if (message.has_frame)
@@ -699,6 +839,80 @@ static bool receive_session(struct fplinux_ui *ui)
 		if (message.type == FPLINUX_UI_SESSION_PREPARE_CLOSE) {
 			if (!prepare_close(ui, message.serial))
 				return false;
+			continue;
+		}
+		if (message.type == FPLINUX_UI_SESSION_DOCUMENT_CHOICES) {
+			if (!document_choices(ui, &message))
+				return false;
+			continue;
+		}
+		if (message.type == FPLINUX_UI_SESSION_STORAGE_RESULT) {
+			if (message.serial != ui->storage_request)
+				continue;
+			ui->storage_request = 0;
+			if (ui->storage_callback)
+				ui->storage_callback(ui, &message.volume_result,
+						     ui->storage_context);
+			continue;
+		}
+		if (message.type == FPLINUX_UI_SESSION_DOCUMENT) {
+			struct fplinux_ui_document_request request = {
+				.request_id = message.serial,
+				.path = message.path,
+			};
+			struct fplinux_ui_document_result result = {
+				.status = FPLINUX_UI_DOCUMENT_ERROR,
+				.error = ENOTSUP,
+			};
+
+			ui->document_serial = 0;
+			if (ui->document_callback)
+				result = ui->document_callback(
+					ui, &request, ui->document_context);
+			ui->document_serial = message.serial;
+			if ((unsigned int)result.status >
+				    FPLINUX_UI_DOCUMENT_RESTART_REQUIRED ||
+			    (result.status == FPLINUX_UI_DOCUMENT_ERROR ?
+				     result.error <= 0 :
+				     result.error != 0)) {
+				fprintf(stderr,
+					"fplinux-ui: document handler returned an invalid result\n");
+				errno = EINVAL;
+				return false;
+			}
+			if (ui->quit)
+				result = (struct fplinux_ui_document_result){
+					.status = FPLINUX_UI_DOCUMENT_ERROR,
+					.error = ECANCELED,
+				};
+			if (!fplinux_ui_document_reply(ui, message.serial,
+						       result.status,
+						       result.error))
+				return false;
+			continue;
+		}
+		if (message.type == FPLINUX_UI_SESSION_DOCUMENT_RESULT) {
+			struct fplinux_ui_event result = {
+				.type = FPLINUX_UI_EVENT_DOCUMENT_RESULT,
+				.document_result = { .request_id =
+							     message.serial,
+						     .status =
+							     message.document_status,
+						     .error =
+							     message.document_error },
+			};
+
+			if (message.serial != ui->open_file_request)
+				continue;
+			if (message.document_status !=
+			    FPLINUX_UI_DOCUMENT_WAIT) {
+				ui->open_file_request = 0;
+				ui->document_choice_count = 0;
+				if (ui->document_choice_screen)
+					fplinux_ui_screens_close_transient(
+						ui, ui->document_choice_screen);
+			}
+			dispatch_event(ui, &result);
 			continue;
 		}
 		if (message.type == FPLINUX_UI_SESSION_ACTIVATION) {
@@ -759,7 +973,7 @@ static bool receive_session(struct fplinux_ui *ui)
 		if (message.has_frame)
 			close(message.frame_fd);
 	}
-	return received >= 0;
+	return ui->quit || received >= 0;
 }
 
 static void buffer_release(void *data, struct wl_buffer *buffer)
@@ -782,12 +996,15 @@ static void frame_ack_done(void *data, struct wl_callback *callback,
 	struct fplinux_ui_session_message ack = {
 		.type = pending->type,
 		.serial = pending->serial,
+		.document_status = FPLINUX_UI_DOCUMENT_ACCEPTED,
 	};
 
 	(void)serial;
 	wl_callback_destroy(callback);
 	pending->sync = NULL;
 	pending->serial = 0;
+	if (ui->quit)
+		return;
 	if (!fplinux_ui_session_send(ui->session_fd, &ack))
 		ui->failed = true;
 }
@@ -814,7 +1031,7 @@ static bool submit_frame(struct fplinux_ui *ui)
 	size_t pixels = (size_t)ui->width * ui->height;
 
 	/* The first frame is still submitted: READY depends on it. */
-	if (ui->exit_pending || !ui->dirty || !ui->configured ||
+	if (ui->quit || ui->exit_pending || !ui->dirty || !ui->configured ||
 	    (!ui->visible && ui->frame_submitted))
 		return true;
 	for (unsigned int i = 0; i < FPLINUX_UI_BUFFER_COUNT; ++i)
@@ -920,6 +1137,8 @@ static void surface_configure(void *data, struct xdg_surface *surface,
 	bool fullscreen = ui->configure_has_state ? ui->configure_fullscreen :
 						    ui->fullscreen;
 
+	if (ui->quit)
+		return;
 	if (width <= 0 || height <= 0 || width > ui->metrics.screen_width ||
 	    height > ui->metrics.screen_height) {
 		/* Unacknowledged, it binds nothing that is committed. */
@@ -1138,9 +1357,10 @@ static bool repeat_owner_current(struct fplinux_ui *ui,
 	case REPEAT_MENU:
 		return ui->menu == owner->menu;
 	case REPEAT_SCREEN:
-		return !ui->menu && fplinux_ui_current(ui) == owner->screen;
+		return !ui->menu &&
+		       fplinux_ui_screens_active(ui->screens) == owner->screen;
 	case REPEAT_RAW_TEXT:
-		return !ui->menu && !fplinux_ui_current(ui) &&
+		return !ui->menu && !fplinux_ui_screens_active(ui->screens) &&
 		       fplinux_ui_text_can_repeat(ui, owner->field);
 	case REPEAT_NONE:
 		return false;
@@ -1669,6 +1889,8 @@ static void set_theme(struct fplinux_ui *ui)
 	theme->accent = token(palette, FPLINUX_UI_COLOUR_ACCENT);
 	theme->accent_text = token(palette, FPLINUX_UI_COLOUR_ACCENT_TEXT);
 	theme->border = token(palette, FPLINUX_UI_COLOUR_BORDER);
+	theme->control_border =
+		token(palette, FPLINUX_UI_COLOUR_CONTROL_BORDER);
 	theme->popup = token(palette, FPLINUX_UI_COLOUR_POPUP);
 	theme->bar = token(palette, FPLINUX_UI_COLOUR_BAR);
 	theme->bar_text = token(palette, FPLINUX_UI_COLOUR_BAR_TEXT);
@@ -1748,6 +1970,7 @@ struct fplinux_ui *fplinux_ui_open(const char *app_id,
 				   fplinux_ui_event_cb callback, void *context)
 {
 	struct fplinux_ui *ui = calloc(1, sizeof(*ui));
+	struct sigaction action = { .sa_handler = stop_handler };
 	lv_obj_t *screen;
 	int error = EIO;
 
@@ -1866,8 +2089,17 @@ struct fplinux_ui *fplinux_ui_open(const char *app_id,
 	lv_obj_set_style_text_font(screen, ui->theme.font, 0);
 	lv_obj_set_scrollable(screen, false);
 	stop_signal = 0;
-	signal(SIGINT, stop_handler);
-	signal(SIGTERM, stop_handler);
+	sigemptyset(&action.sa_mask);
+	if (sigaction(SIGINT, &action, &ui->saved_sigint) < 0) {
+		error = errno;
+		goto fail;
+	}
+	if (sigaction(SIGTERM, &action, &ui->saved_sigterm) < 0) {
+		error = errno;
+		sigaction(SIGINT, &ui->saved_sigint, NULL);
+		goto fail;
+	}
+	ui->signals_saved = true;
 	return ui;
 fail:
 	fplinux_ui_close(ui);
@@ -1894,6 +2126,10 @@ static bool read_wayland(struct fplinux_ui *ui)
 
 int fplinux_ui_run(struct fplinux_ui *ui)
 {
+	if (ui->close_pending) {
+		ui->close_pending = false;
+		request_close(ui);
+	}
 	while (!ui->quit && !ui->failed) {
 		struct pollfd descriptors[4] = {
 			{ .fd = wl_display_get_fd(ui->wayland),
@@ -1903,6 +2139,9 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 			{ .fd = -1, .events = POLLIN },
 		};
 		uint32_t timeout_ms;
+		uint64_t watch_generation;
+		fplinux_ui_fd_cb watch_callback;
+		void *watch_context;
 		int received;
 
 		if (stop_signal) {
@@ -1910,13 +2149,17 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 			break;
 		}
 		if (wl_display_dispatch_pending(ui->wayland) < 0 ||
-		    !receive_session(ui)) {
+		    (!ui->quit && !receive_session(ui))) {
 			ui->failed = true;
 			break;
 		}
+		if (ui->quit)
+			break;
 		if (!ui->visible)
 			hold_animations(ui);
 		timeout_ms = lv_timer_handler();
+		if (ui->quit)
+			break;
 		if (needs_frame_ack(ui) && !ui->exit_pending)
 			lv_refr_now(ui->display);
 		if (!submit_frame(ui)) {
@@ -1945,6 +2188,11 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 				"fplinux-ui: READY sent after first Wayland flush\n");
 		}
 		/* LVGL refresh timers sleep between frames; no fixed busy polling. */
+		descriptors[2].fd = ui->watch_fd;
+		descriptors[2].events = ui->watch_events;
+		watch_generation = ui->watch_generation;
+		watch_callback = ui->watch_callback;
+		watch_context = ui->watch_context;
 		descriptors[3].fd = fplinux_audio_client_fd(ui->audio_client);
 		received = poll(
 			descriptors, 4,
@@ -1962,13 +2210,15 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		}
 		if ((descriptors[0].revents & POLLIN) && !read_wayland(ui))
 			ui->failed = true;
+		if (ui->quit || ui->failed)
+			break;
 		if (descriptors[3].revents)
 			fplinux_audio_client_dispatch(ui->audio_client,
 						      descriptors[3].revents);
-		if (descriptors[2].revents && ui->watch_callback)
-			ui->watch_callback(ui, ui->watch_fd,
-					   descriptors[2].revents,
-					   ui->watch_context);
+		if (!ui->quit && descriptors[2].revents && watch_callback &&
+		    watch_generation == ui->watch_generation)
+			watch_callback(ui, descriptors[2].fd,
+				       descriptors[2].revents, watch_context);
 	}
 	if (ui->failed)
 		request_close(ui);
@@ -1977,8 +2227,11 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 
 void fplinux_ui_close(struct fplinux_ui *ui)
 {
+	struct fplinux_ui_menu_view *menu;
+
 	if (!ui)
 		return;
+	ui->quit = true;
 	fplinux_ui_frames_set_visible(ui, false);
 	fplinux_audio_client_close(ui->audio_client);
 	ui->audio_client = NULL;
@@ -1988,8 +2241,11 @@ void fplinux_ui_close(struct fplinux_ui *ui)
 	/* The application is leaving: no callbacks, legends or marquees. */
 	ui->visible = false;
 	ui->modals = 0;
-	fplinux_ui_menu_view_delete(ui->menu);
+	menu = ui->menu;
 	ui->menu = NULL;
+	ui->menu_callback = NULL;
+	ui->menu_context = NULL;
+	fplinux_ui_menu_view_delete(menu);
 	fplinux_ui_screens_delete(ui->screens);
 	ui->screens = NULL;
 	ui->marquee = (struct marquee){ 0 };
@@ -2031,14 +2287,18 @@ void fplinux_ui_close(struct fplinux_ui *ui)
 	}
 	if (ui->session_fd >= 0)
 		close(ui->session_fd);
+	if (ui->signals_saved) {
+		sigaction(SIGTERM, &ui->saved_sigterm, NULL);
+		sigaction(SIGINT, &ui->saved_sigint, NULL);
+	}
 	free(ui);
 }
 
 void fplinux_ui_quit(struct fplinux_ui *ui)
 {
 	fplinux_ui_cancel_key_repeat(ui, NULL);
-	ui->quit = true;
 	set_lifecycle(ui, FPLINUX_UI_CLOSING);
+	ui->quit = true;
 }
 
 void fplinux_ui_set_close_handler(struct fplinux_ui *ui,
@@ -2051,24 +2311,128 @@ void fplinux_ui_set_close_handler(struct fplinux_ui *ui,
 bool fplinux_ui_close_reply(struct fplinux_ui *ui,
 			    enum fplinux_ui_close_response response)
 {
-	struct fplinux_ui_session_message reply = {
-		.type = FPLINUX_UI_SESSION_CLOSE_REPLY,
-		.serial = ui->close_serial,
-	};
-
 	if (!ui->close_serial || ui->close_response != FPLINUX_UI_CLOSE_WAIT ||
 	    (unsigned int)response > FPLINUX_UI_CLOSE_WAIT || ui->quit) {
+		fprintf(stderr,
+			"fplinux-ui: close reply requires a pending decision outside its handler\n");
 		errno = EINVAL;
 		return false;
 	}
-	strcpy(reply.value, close_response_names[response]);
-	if (!fplinux_ui_session_send(ui->session_fd, &reply))
+	return send_close_reply(ui, response);
+}
+
+uint32_t fplinux_ui_open_file(struct fplinux_ui *ui, const char *absolute_path)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_OPEN_FILE,
+	};
+	int error;
+
+	if (ui->lifecycle != FPLINUX_UI_FOREGROUND || ui->quit ||
+	    ui->config_mode == FPLINUX_UI_SESSION_LAUNCHER) {
+		errno = EPERM;
+		return 0;
+	}
+	if (ui->open_file_request) {
+		errno = EBUSY;
+		return 0;
+	}
+	error = fplinux_ui_session_document_path_error(absolute_path);
+	if (error || access(absolute_path, R_OK) < 0) {
+		if (error)
+			errno = error;
+		return 0;
+	}
+	if (!++ui->next_document_request)
+		++ui->next_document_request;
+	message.serial = ui->next_document_request;
+	strcpy(message.path, absolute_path);
+	if (!fplinux_ui_session_send(ui->session_fd, &message))
+		return 0;
+	ui->open_file_request = message.serial;
+	return message.serial;
+}
+
+void fplinux_ui_set_storage_handler(struct fplinux_ui *ui,
+				    fplinux_ui_storage_cb callback,
+				    void *context)
+{
+	ui->storage_callback = callback;
+	ui->storage_context = context;
+}
+
+uint32_t fplinux_ui_storage_request(struct fplinux_ui *ui,
+				    enum fplinux_volume_operation operation,
+				    uint32_t volume_id)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_STORAGE_REQUEST,
+		.volume_operation = operation,
+		.volume_id = volume_id,
+	};
+
+	if (!ui || ui->quit || ui->config_mode == FPLINUX_UI_SESSION_LAUNCHER) {
+		errno = EPERM;
+		return 0;
+	}
+	if ((unsigned int)operation > FPLINUX_VOLUME_EJECT ||
+	    (operation == FPLINUX_VOLUME_REFRESH ? volume_id != 0 :
+						   !volume_id)) {
+		errno = EINVAL;
+		return 0;
+	}
+	if (ui->storage_request) {
+		errno = EBUSY;
+		return 0;
+	}
+	if (!++ui->next_storage_request)
+		++ui->next_storage_request;
+	message.serial = ui->next_storage_request;
+	if (!fplinux_ui_session_send(ui->session_fd, &message))
+		return 0;
+	ui->storage_request = message.serial;
+	return message.serial;
+}
+
+void fplinux_ui_set_document_handler(struct fplinux_ui *ui,
+				     fplinux_ui_document_cb callback,
+				     void *context)
+{
+	ui->document_callback = callback;
+	ui->document_context = context;
+}
+
+bool fplinux_ui_document_reply(struct fplinux_ui *ui, uint32_t request_id,
+			       enum fplinux_ui_document_status status,
+			       int error)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_DOCUMENT_RESULT,
+		.serial = request_id,
+		.document_status = status,
+		.document_error = error,
+	};
+
+	if (!request_id || ui->document_serial != request_id ||
+	    (unsigned int)status > FPLINUX_UI_DOCUMENT_RESTART_REQUIRED ||
+	    (status == FPLINUX_UI_DOCUMENT_ERROR ? error <= 0 : error != 0)) {
+		fprintf(stderr,
+			"fplinux-ui: document reply requires a pending request and a valid result\n");
+		errno = EINVAL;
 		return false;
-	ui->close_response = response;
-	ui->exit_pending = response == FPLINUX_UI_CLOSE_READY;
-	if (response != FPLINUX_UI_CLOSE_READY)
-		queue_frame_ack(ui, FPLINUX_UI_SESSION_CLOSE_ACK,
-				ui->close_serial);
+	}
+	if (status == FPLINUX_UI_DOCUMENT_ACCEPTED) {
+		queue_frame_ack(ui, FPLINUX_UI_SESSION_DOCUMENT_RESULT,
+				request_id);
+	} else {
+		if (!fplinux_ui_session_send(ui->session_fd, &message))
+			return false;
+		if (status == FPLINUX_UI_DOCUMENT_WAIT)
+			queue_frame_ack(ui, FPLINUX_UI_SESSION_ACTIVATION_ACK,
+					request_id);
+	}
+	if (status != FPLINUX_UI_DOCUMENT_WAIT)
+		ui->document_serial = 0;
 	return true;
 }
 
@@ -2112,6 +2476,7 @@ void fplinux_ui_watch_fd(struct fplinux_ui *ui, int fd, short events,
 	ui->watch_events = events;
 	ui->watch_callback = callback;
 	ui->watch_context = context;
+	++ui->watch_generation;
 }
 
 lv_obj_t *fplinux_ui_screen(struct fplinux_ui *ui)
@@ -2208,7 +2573,11 @@ bool fplinux_ui_send(struct fplinux_ui *ui,
 	if (message->type == FPLINUX_UI_SESSION_LIFECYCLE ||
 	    message->type == FPLINUX_UI_SESSION_ACTIVATION ||
 	    message->type == FPLINUX_UI_SESSION_ACTIVATION_ACK ||
-	    message->type == FPLINUX_UI_SESSION_PREPARE_CLOSE) {
+	    message->type == FPLINUX_UI_SESSION_PREPARE_CLOSE ||
+	    message->type == FPLINUX_UI_SESSION_STORAGE_REQUEST ||
+	    message->type == FPLINUX_UI_SESSION_STORAGE_RESULT ||
+	    (message->type >= FPLINUX_UI_SESSION_OPEN_FILE &&
+	     message->type <= FPLINUX_UI_SESSION_DOCUMENT_RESULT)) {
 		errno = EINVAL;
 		return false;
 	}
@@ -2228,7 +2597,7 @@ bool fplinux_ui_send(struct fplinux_ui *ui,
 	return true;
 }
 
-/* The session protocol rejects control characters in every text field. */
+/* Visible labels are printable; raw document paths have their own contract. */
 static bool has_control_character(const char *text)
 {
 	for (; *text; ++text)
@@ -2421,12 +2790,12 @@ static void unwatch(struct fplinux_ui *ui, lv_obj_t *label)
  * every label fits.
  */
 static unsigned int next_turn(const struct marquee *marquee, unsigned int start,
-			      unsigned int fitting)
+			      unsigned int finished)
 {
 	for (unsigned int n = 0; n < marquee->count; ++n) {
 		unsigned int turn = (start + n) % marquee->count;
 
-		if (!(fitting & 1U << turn))
+		if (!(finished & 1U << turn))
 			return turn;
 	}
 	return marquee->count;
@@ -2435,7 +2804,7 @@ static unsigned int next_turn(const struct marquee *marquee, unsigned int start,
 static void start_turn(struct fplinux_ui *ui, unsigned int start)
 {
 	struct marquee *marquee = &ui->marquee;
-	unsigned int turn = next_turn(marquee, start, marquee->fitting);
+	unsigned int turn = next_turn(marquee, start, marquee->finished);
 
 	if (marquee->armed && turn != marquee->turn)
 		rest(marquee->labels[marquee->turn]);
@@ -2455,7 +2824,6 @@ static void begin(struct fplinux_ui *ui)
 
 	if (!ui->visible || marquee->title || !marquee->count)
 		return;
-	marquee->fitting = 0;
 	marquee->passed = false;
 	start_turn(ui, 0);
 }
@@ -2491,6 +2859,7 @@ static void turn_done(lv_anim_t *animation)
 		return;
 	}
 	marquee->passed = true;
+	marquee->finished |= 1U << marquee->turn;
 	start_turn(ui, marquee->turn + 1);
 }
 
@@ -2513,7 +2882,7 @@ static void layout_done(lv_event_t *event)
 		return;
 	marquee->checked = true;
 	if (text_fits(label, width)) {
-		marquee->fitting |= 1U << marquee->turn;
+		marquee->finished |= 1U << marquee->turn;
 		start_turn(ui, marquee->turn + 1);
 	}
 }
@@ -2564,12 +2933,10 @@ void fplinux_ui_marquee_focus(struct fplinux_ui *ui, lv_obj_t *first,
 	lv_obj_t *labels[2] = { first ? first : second, first ? second : NULL };
 	unsigned int count = labels[1] ? 2 : labels[0] ? 1 : 0;
 
+	init_passes();
 	if (count == marquee->count &&
 	    (!count || labels[0] == marquee->labels[0]) &&
 	    (count < 2 || labels[1] == marquee->labels[1])) {
-		/* Still the focus: a resting marquee measures again. */
-		if (!marquee->armed)
-			begin(ui);
 		return;
 	}
 	for (unsigned int i = 0; i < marquee->count; ++i) {
@@ -2585,6 +2952,7 @@ void fplinux_ui_marquee_focus(struct fplinux_ui *ui, lv_obj_t *first,
 	marquee->labels[0] = labels[0];
 	marquee->labels[1] = labels[1];
 	marquee->count = count;
+	marquee->finished = 0;
 	marquee->armed = false;
 	if (count > 1)
 		rest(labels[1]);
@@ -2602,6 +2970,7 @@ void fplinux_ui_marquee_changed(struct fplinux_ui *ui, lv_obj_t *first,
 		return;
 	fplinux_ui_marquee_focus(ui, first, second);
 	pause_focus(marquee);
+	marquee->finished = 0;
 	begin(ui);
 }
 
@@ -2609,11 +2978,15 @@ void fplinux_ui_marquee_blur(struct fplinux_ui *ui, lv_obj_t *label)
 {
 	struct marquee *marquee = &ui->marquee;
 
-	if (is_focus_label(marquee, label))
+	if (!is_focus_label(marquee, label))
+		return;
+	if (marquee->hiding)
+		pause_focus(marquee);
+	else
 		forget_focus(ui, NULL);
 }
 
-/* Hidden: nothing moves. Shown again: every marquee starts over. */
+/* Hidden: nothing moves. Shown again: unfinished labels resume their turns. */
 static void marquee_set_visible(struct fplinux_ui *ui, bool visible)
 {
 	struct marquee *marquee = &ui->marquee;
@@ -2633,6 +3006,7 @@ static void marquee_set_visible(struct fplinux_ui *ui, bool visible)
 static void marquee_restart(struct fplinux_ui *ui)
 {
 	pause_focus(&ui->marquee);
+	ui->marquee.finished = 0;
 	begin(ui);
 }
 
@@ -3203,10 +3577,7 @@ bool fplinux_ui_menu_open(struct fplinux_ui *ui,
 			  word(FPLINUX_UI_LABEL_BACK)))
 		return true;
 	error = errno;
-	fplinux_ui_menu_view_delete(ui->menu);
-	ui->menu = NULL;
-	fplinux_ui_modal_set(ui, FPLINUX_UI_MODAL_MENU, false);
-	fplinux_ui_screens_reclaim(ui->screens);
+	fplinux_ui_menu_close(ui);
 	errno = error;
 	return false;
 }
@@ -3226,16 +3597,19 @@ void fplinux_ui_menu_set_position(
 /* A failed legend update surfaces as a session error in the main loop. */
 void fplinux_ui_menu_close(struct fplinux_ui *ui)
 {
-	if (!ui->menu)
+	struct fplinux_ui_menu_view *menu = ui->menu;
+
+	if (!menu)
 		return;
 	fplinux_ui_cancel_key_repeat(ui, NULL);
-	fplinux_ui_menu_view_delete(ui->menu);
 	ui->menu = NULL;
 	ui->menu_callback = NULL;
 	ui->menu_context = NULL;
+	fplinux_ui_menu_view_delete(menu);
 	fplinux_ui_modal_set(ui, FPLINUX_UI_MODAL_MENU, false);
 	fplinux_ui_screens_reclaim(ui->screens);
 	send_softkeys(ui, ui->softkeys[0], ui->softkeys[1], ui->softkeys[2]);
+	fplinux_ui_text_menu_reclaim(ui);
 }
 
 struct fplinux_ui_screens **fplinux_ui_screens_slot(struct fplinux_ui *ui)

@@ -25,8 +25,11 @@ Include the installed headers under `fplinux/` and link with `pkg-config --cflag
 | `fplinux-ui-frame.h` | Owned RGB565 software frames |
 | `fplinux-ui-audio.h` | Playback streams managed by the system |
 | `fplinux-ui-vibration.h` | System-managed vibration patterns |
+| `fplinux-ui-session.h` | System application messages and raw `fplinux_ui_send()` |
 
 Use high-level screens first. The low-level menu provides one popup, not a page history; [screen navigation](/fplinux/develop/app/screens/#open-return-and-finish) handles return to Options. The private session message transport is for system components, not an application-to-application API.
+
+The system, UI library and optional application APKs use the headers and ABI from the same FPLinux build. Rebuild current clients together when that interface changes. Transport helpers used to implement the session protocol belong to the internal header and are not installed or exported as application APIs.
 
 ## Runtime and borrowed data
 

@@ -13,4 +13,9 @@
 bool fplinux_utf8_next(const unsigned char **cursor, const unsigned char *end,
 		       uint32_t *value);
 
+/* Substring search folding ASCII and Russian letters, including Ё/ё.
+ * Other scalars and invalid bytes compare unchanged. NULL never matches.
+ */
+bool fplinux_utf8_contains_casefold(const char *text, const char *query);
+
 #endif

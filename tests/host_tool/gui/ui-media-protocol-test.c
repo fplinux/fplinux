@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-#include "fplinux-ui-session.h"
+#include "fplinux-ui-session-internal.h"
 
 #include <errno.h>
 #include <json-c/json.h>

@@ -424,7 +424,7 @@ static void verify_character_limit_and_counter(void)
 	assert(fplinux_ui_text_model_set_text(&model, "абв"));
 	assert(fplinux_ui_text_model_set_text(&model, "аб"));
 	fplinux_ui_text_model_status(&model, status, sizeof(status));
-	assert(!strcmp(status, "абв  2/3"));
+	assert(!strcmp(status, "абв"));
 	/* The pending character counts toward the limit and the counter. */
 	tap(&model, KEY_NUMERIC_2, 0);
 	shows(&model, "аба", 3);
@@ -444,6 +444,23 @@ static void verify_character_limit_and_counter(void)
 	shows(&model, "абp", 3);
 	fplinux_ui_text_model_status(&model, status, sizeof(status));
 	assert(!strcmp(status, "abc  3/3"));
+	fplinux_ui_text_model_cleanup(&model);
+
+	init(&model, false, 10, RUSSIAN_LOWER);
+	assert(fplinux_ui_text_model_set_text(&model, "12345678"));
+	fplinux_ui_text_model_status(&model, status, sizeof(status));
+	assert(!strcmp(status, "абв"));
+	/* The ninth, still pending character reaches the 90 percent threshold. */
+	tap(&model, KEY_NUMERIC_2, 0);
+	fplinux_ui_text_model_status(&model, status, sizeof(status));
+	assert(!strcmp(status, "абв  9/10"));
+	fplinux_ui_text_model_tick(&model, 1000);
+	tap(&model, KEY_F14, 1100);
+	fplinux_ui_text_model_status(&model, status, sizeof(status));
+	assert(!strcmp(status, "абв"));
+	assert(fplinux_ui_text_model_set_text(&model, "1234567890"));
+	fplinux_ui_text_model_status(&model, status, sizeof(status));
+	assert(!strcmp(status, "абв  10/10"));
 	fplinux_ui_text_model_cleanup(&model);
 }
 
@@ -567,6 +584,11 @@ static void verify_picker_columns(void)
 	picks(9, up, 1, "`");
 	picks(9, left_up, 2, "\\");
 	picks(9, down_4, 4, "`");
+	/* Eight columns end with six symbols; Up keeps a reachable column. */
+	picks(8, right_down, 2, "@");
+	picks(8, up, 1, "—");
+	picks(8, left_up, 2, "|");
+	picks(8, down_4, 4, "—");
 	/* One row: Up and Down stay; one column: they move as Left and Right. */
 	picks(38, down, 1, ".");
 	picks(1, down, 1, ",");

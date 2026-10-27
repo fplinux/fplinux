@@ -7,10 +7,11 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#include "fplinux-ui-session.h"
+#include "fplinux-ui-session-internal.h"
 #include "session-power.h"
 
 struct fplinux_session;
+struct fplinux_session_storage_config;
 
 /*
  * Applications and the launcher run as user (app_uid, app_gid) with home;
@@ -36,6 +37,8 @@ struct fplinux_session_options {
 	const char *socket_path;
 	const char *user;
 	const char *home;
+	/* Optional storage IO roots; NULL selects the runtime Linux paths. */
+	const struct fplinux_session_storage_config *storage;
 	uid_t app_uid;
 	gid_t app_gid;
 	uid_t metadata_uid;

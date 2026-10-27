@@ -6,6 +6,7 @@
   "accent": "#FFFF00",
   "accent_text": "#FF00FF",
   "border": "#FF0000",
+  "control_border": "#424142",
   "popup": "#00FFFF",
   "bar": "#FFFFFF",
   "bar_text": "#101010",

@@ -249,9 +249,10 @@ struct fplinux_ui_screen *fplinux_ui_alert_new(struct fplinux_ui *ui,
 	return alert;
 }
 
-void fplinux_ui_push(struct fplinux_ui *ui, struct fplinux_ui_screen *screen)
+bool fplinux_ui_push(struct fplinux_ui *ui, struct fplinux_ui_screen *screen)
 {
 	ui->current = screen;
+	return true;
 }
 
 struct fplinux_ui_screen *fplinux_ui_current(const struct fplinux_ui *ui)

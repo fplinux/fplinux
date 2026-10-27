@@ -1003,19 +1003,20 @@ struct fplinux_ui_screen *fplinux_ui_current(const struct fplinux_ui *instance)
 	return instance->current;
 }
 
-void fplinux_ui_push(struct fplinux_ui *instance,
+bool fplinux_ui_push(struct fplinux_ui *instance,
 		     struct fplinux_ui_screen *new_screen)
 {
 	assert(instance == &ui &&
 	       (new_screen == &screen || new_screen == &list_screen ||
 		new_screen == &form_screen || new_screen == &alert_screen));
 	instance->current = new_screen;
+	return true;
 }
 
-void fplinux_ui_navigate(struct fplinux_ui *instance,
+bool fplinux_ui_navigate(struct fplinux_ui *instance,
 			 struct fplinux_ui_screen *new_screen)
 {
-	fplinux_ui_push(instance, new_screen);
+	return fplinux_ui_push(instance, new_screen);
 }
 
 bool fplinux_ui_pop(struct fplinux_ui *instance)

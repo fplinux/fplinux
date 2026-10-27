@@ -2,7 +2,7 @@
 #ifndef FPLINUX_UI_FRAME_PEER_H
 #define FPLINUX_UI_FRAME_PEER_H
 
-#include "fplinux-ui-session.h"
+#include "fplinux-ui-session-internal.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -32,7 +32,10 @@ struct fplinux_ui_frame_peer {
 	uint16_t *pixels;
 	bool configured;
 	bool configure_pending;
+	bool configure_acked;
 	uint32_t configure_serial;
+	int configure_width;
+	int configure_height;
 	bool release_frames;
 	const char *keymap_path;
 	struct fplinux_ui_frame_keyboard keyboards[2];
@@ -43,7 +46,7 @@ void fplinux_ui_frame_client_environment(int socket, const char *session_path);
 void fplinux_ui_frame_init(struct fplinux_ui_frame_peer *peer, int socket,
 			   int width, int height, const char *keymap_path);
 void fplinux_ui_frame_cleanup(struct fplinux_ui_frame_peer *peer);
-/* Drain prior frame traffic before applying a sequential size/state change. */
+/* The proposed geometry becomes current with its first acknowledged commit. */
 void fplinux_ui_frame_configure(struct fplinux_ui_frame_peer *peer, int width,
 				int height, bool fullscreen);
 uint64_t fplinux_ui_frame_now_ms(void);

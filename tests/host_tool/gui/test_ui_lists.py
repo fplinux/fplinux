@@ -18,7 +18,9 @@ if TYPE_CHECKING:
 
 @pytest.fixture(scope="module")
 def ui_lists(
-    tmp_path_factory: pytest.TempPathFactory, lvgl_library: tuple[Path, Path]
+    tmp_path_factory: pytest.TempPathFactory,
+    lvgl_library: tuple[Path, Path],
+    ui_host_inputs: Path,
 ) -> Iterator[Path]:
     """Replace the application context and marquee, retaining native layout/scroll."""
     headers, archive = lvgl_library
@@ -42,12 +44,26 @@ def ui_lists(
                 str(ROOT / "lib/fplinux/fplinux-ui-style.c"),
                 str(ROOT / "lib/fplinux/fplinux-ui-screen-model.c"),
                 str(ROOT / "lib/fplinux/fplinux-ui-profile.c"),
+                *(str(path) for path in sorted((ui_host_inputs / "fonts").glob("*.c"))),
                 str(archive),
                 "-lm",
             ],
             name="link production lists with the native LVGL layout and scrollbar",
         )
         yield executable
+
+
+@pytest.mark.parametrize("screen", [(128, 160), (240, 320), (320, 240)])
+def test_stored_status_row_keeps_emphasis_detail_and_borrowed_icon_inside_viewport(
+    ui_lists: Path, screen: tuple[int, int]
+) -> None:
+    width, height = screen
+    run_process(
+        [str(ui_lists), "status-row", str(width), str(height), "0", "0"],
+        name=f"native emphasized status row at {width}x{height}",
+        timeout=10,
+        check=True,
+    )
 
 
 @pytest.mark.parametrize(

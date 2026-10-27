@@ -1031,19 +1031,18 @@ void fplinux_ui_text_model_status(const struct fplinux_ui_text_model *model,
 				  char *status, size_t size)
 {
 	const char *indicator = fplinux_ui_text_model_indicator(model);
+	size_t count =
+		model->characters +
+		(fplinux_multitap_pending(&model->input.compose) ? 1 : 0);
 
 	if (model->read_only) {
 		if (size)
 			status[0] = '\0';
 		return;
 	}
-	if (!model->limit) {
+	if (!model->limit || count < model->limit - model->limit / 10) {
 		snprintf(status, size, "%s", indicator);
 		return;
 	}
-	snprintf(status, size, "%s  %zu/%zu", indicator,
-		 model->characters +
-			 (fplinux_multitap_pending(&model->input.compose) ? 1 :
-									    0),
-		 model->limit);
+	snprintf(status, size, "%s  %zu/%zu", indicator, count, model->limit);
 }

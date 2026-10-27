@@ -57,10 +57,11 @@ struct fplinux_ui_screen *fplinux_ui_current(const struct fplinux_ui *ui)
 	return ui->stack[ui->depth - 1];
 }
 
-void fplinux_ui_push(struct fplinux_ui *ui, struct fplinux_ui_screen *screen)
+bool fplinux_ui_push(struct fplinux_ui *ui, struct fplinux_ui_screen *screen)
 {
 	assert(ui->depth < 4);
 	ui->stack[ui->depth++] = screen;
+	return true;
 }
 
 bool fplinux_ui_pop(struct fplinux_ui *ui)

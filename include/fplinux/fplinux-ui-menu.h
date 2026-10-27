@@ -31,6 +31,8 @@ struct fplinux_ui_menu_item {
 	const char *text;
 	/* Optional image at the left of the item; NULL for none. */
 	const void *icon;
+	/* Optional group boundary; the first item never has one. */
+	bool separator_before;
 };
 
 enum fplinux_ui_menu_origin {

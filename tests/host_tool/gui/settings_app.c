@@ -1447,10 +1447,11 @@ bool fplinux_ui_send(struct fplinux_ui *ui,
 	return true;
 }
 
-void fplinux_ui_push(struct fplinux_ui *ui, struct fplinux_ui_screen *screen)
+bool fplinux_ui_push(struct fplinux_ui *ui, struct fplinux_ui_screen *screen)
 {
 	assert(ui->depth < 8);
 	ui->stack[ui->depth++] = screen;
+	return true;
 }
 
 bool fplinux_ui_pop(struct fplinux_ui *ui)
@@ -1461,11 +1462,12 @@ bool fplinux_ui_pop(struct fplinux_ui *ui)
 	return true;
 }
 
-void fplinux_ui_replace(struct fplinux_ui *ui, struct fplinux_ui_screen *screen)
+bool fplinux_ui_replace(struct fplinux_ui *ui, struct fplinux_ui_screen *screen)
 {
 	assert(ui->depth);
 	free(ui->stack[ui->depth - 1]);
 	ui->stack[ui->depth - 1] = screen;
+	return true;
 }
 
 void fplinux_ui_go_back(struct fplinux_ui *ui)

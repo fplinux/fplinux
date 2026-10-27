@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
-#include "fplinux-ui-session.h"
+#include "fplinux-ui-session-internal.h"
 
 #include <assert.h>
 #include <errno.h>

@@ -31,5 +31,6 @@ ui_host_compile -I"$root/include/fplinux" -I"$ui_host_inputs" -I"$screens" \
 	$(pkg-config --cflags wayland-server xkbcommon json-c) \
 	"$peer/screens.c" "$screens/ui-frame-peer.c" "$screens/screen-frame.c" \
 	"$ui_host_ui/fplinux-ui-session.c" "$ui_host_ui/fplinux-ui-profile.c" \
+	"$ui_host_ui/fplinux-utf8.c" \
 	"$ui_host_inputs/xdg-shell-protocol.c" \
 	$(pkg-config --libs wayland-server xkbcommon json-c) -o "$work/notes-screens"

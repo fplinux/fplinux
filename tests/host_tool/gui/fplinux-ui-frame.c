@@ -5,8 +5,22 @@
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <sys/resource.h>
+
+static bool fail_next_allocation;
+
+void *__real_calloc(size_t count, size_t size);
+
+void *__wrap_calloc(size_t count, size_t size)
+{
+	if (fail_next_allocation) {
+		fail_next_allocation = false;
+		errno = ENOMEM;
+		return NULL;
+	}
+	return __real_calloc(count, size);
+}
 
 struct fplinux_ui {
 	lv_display_t *display;
@@ -197,7 +211,6 @@ static void test_resize(struct display *output)
 				       0xffff, 0x0000, 0xffe0 };
 	struct fplinux_ui_frame *frame = fplinux_ui_frame_new(
 		&output->ui, 4, 3, FPLINUX_UI_FRAME_STAGED);
-	struct rlimit original, limited;
 	uint16_t *pixels;
 	bool resized;
 	int error;
@@ -224,14 +237,10 @@ static void test_resize(struct display *output)
 	assert(!fplinux_ui_frame_resize(frame, 0, 2) && errno == EINVAL);
 	assert(!fplinux_ui_frame_resize(frame, 4097, 2) && errno == EINVAL);
 	expect_canvas(frame, 3, 2, repainted);
-	/* A 32 MiB buffer cannot fit under this temporary 1 MiB limit. */
-	assert(getrlimit(RLIMIT_AS, &original) == 0);
-	limited = original;
-	limited.rlim_cur = 1024 * 1024;
-	assert(setrlimit(RLIMIT_AS, &limited) == 0);
+	fail_next_allocation = true;
 	resized = fplinux_ui_frame_resize(frame, 4096, 4096);
 	error = errno;
-	assert(setrlimit(RLIMIT_AS, &original) == 0);
+	assert(!fail_next_allocation);
 	assert(!resized && error == ENOMEM);
 	assert(fplinux_ui_frame_pixels(frame, &width, &height) == pixels);
 	assert(width == 3 && height == 2);

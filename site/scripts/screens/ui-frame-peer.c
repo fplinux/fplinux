@@ -69,8 +69,9 @@ static void configure_surface(struct fplinux_ui_frame_peer *peer,
 	}
 	peer->configure_serial = wl_display_next_serial(peer->display);
 	peer->configure_pending = true;
-	xdg_toplevel_send_configure(peer->toplevel, peer->width, peer->height,
-				    &states);
+	peer->configure_acked = false;
+	xdg_toplevel_send_configure(peer->toplevel, peer->configure_width,
+				    peer->configure_height, &states);
 	xdg_surface_send_configure(peer->shell, peer->configure_serial);
 	wl_array_release(&states);
 	peer->configured = true;
@@ -79,18 +80,12 @@ static void configure_surface(struct fplinux_ui_frame_peer *peer,
 void fplinux_ui_frame_configure(struct fplinux_ui_frame_peer *peer, int width,
 				int height, bool fullscreen)
 {
-	uint16_t *pixels;
-
 	assert(peer->configured && !peer->configure_pending);
 	assert(width > 0 && width <= INT_MAX / (int)sizeof(uint16_t));
 	assert(height > 0);
 	assert((size_t)width <= SIZE_MAX / sizeof(uint16_t) / (size_t)height);
-	pixels = malloc((size_t)width * (size_t)height * sizeof(*pixels));
-	assert(pixels);
-	free(peer->pixels);
-	peer->pixels = pixels;
-	peer->width = width;
-	peer->height = height;
+	peer->configure_width = width;
+	peer->configure_height = height;
 	configure_surface(peer, fullscreen ? XDG_TOPLEVEL_STATE_FULLSCREEN :
 					     XDG_TOPLEVEL_STATE_MAXIMIZED);
 }
@@ -102,24 +97,39 @@ static void commit_surface(struct wl_client *client,
 		wl_resource_get_user_data(surface);
 	struct wl_shm_buffer *buffer;
 	uint16_t *pixels;
-	int stride;
+	int width, height, stride;
 
 	(void)client;
 	if (!compositor->configured) {
 		configure_surface(compositor, 0);
 		return;
 	}
-	assert(!compositor->configure_pending);
+	/* Initial mapping needs ACK; later commits can still use the old size. */
+	assert(compositor->commits || compositor->configure_acked);
+	width = compositor->configure_acked ? compositor->configure_width :
+					      compositor->width;
+	height = compositor->configure_acked ? compositor->configure_height :
+					       compositor->height;
 	assert(compositor->pending);
 	buffer = wl_shm_buffer_get(compositor->pending);
 	assert(buffer);
 	assert(wl_shm_buffer_get_format(buffer) == WL_SHM_FORMAT_RGB565);
-	assert(wl_shm_buffer_get_width(buffer) == compositor->width);
-	assert(wl_shm_buffer_get_height(buffer) == compositor->height);
+	assert(wl_shm_buffer_get_width(buffer) == width);
+	assert(wl_shm_buffer_get_height(buffer) == height);
 	stride = wl_shm_buffer_get_stride(buffer);
-	assert(stride >= compositor->width * (int)sizeof(uint16_t));
+	assert(stride >= width * (int)sizeof(uint16_t));
 	assert(stride % (int)sizeof(uint16_t) == 0);
 	stride /= (int)sizeof(uint16_t);
+	if (width != compositor->width || height != compositor->height) {
+		uint16_t *snapshot =
+			malloc((size_t)width * height * sizeof(*snapshot));
+
+		assert(snapshot);
+		free(compositor->pixels);
+		compositor->pixels = snapshot;
+		compositor->width = width;
+		compositor->height = height;
+	}
 	wl_shm_buffer_begin_access(buffer);
 	pixels = wl_shm_buffer_get_data(buffer);
 	for (int y = 0; y < compositor->height; ++y)
@@ -127,6 +137,10 @@ static void commit_surface(struct wl_client *client,
 		       pixels + (size_t)y * stride,
 		       (size_t)compositor->width * sizeof(uint16_t));
 	wl_shm_buffer_end_access(buffer);
+	if (compositor->configure_acked) {
+		compositor->configure_pending = false;
+		compositor->configure_acked = false;
+	}
 	if (compositor->release_frames)
 		wl_buffer_send_release(compositor->pending);
 	else if (!compositor->held[0])
@@ -210,8 +224,9 @@ static void ack_configure(struct wl_client *client,
 		wl_resource_get_user_data(resource);
 
 	(void)client;
-	assert(peer->configure_pending && serial == peer->configure_serial);
-	peer->configure_pending = false;
+	assert(peer->configure_pending && !peer->configure_acked &&
+	       serial == peer->configure_serial);
+	peer->configure_acked = true;
 }
 
 static const struct xdg_surface_interface shell_surface_interface = {
@@ -411,6 +426,8 @@ void fplinux_ui_frame_init(struct fplinux_ui_frame_peer *peer, int socket,
 	*peer = (struct fplinux_ui_frame_peer){
 		.width = width,
 		.height = height,
+		.configure_width = width,
+		.configure_height = height,
 		.release_frames = true,
 		.keymap_path = keymap_path,
 	};

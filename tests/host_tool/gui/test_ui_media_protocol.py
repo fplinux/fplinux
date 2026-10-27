@@ -31,6 +31,7 @@ def test_ui_media_capabilities_and_vibration_packets(tmp_path: Path) -> None:
             str(ROOT / "include/fplinux"),
             str(Path(__file__).with_name("ui-media-protocol-test.c")),
             str(ROOT / "lib/fplinux/fplinux-ui-session.c"),
+            str(ROOT / "lib/fplinux/fplinux-utf8.c"),
             *shlex.split(flags.stdout),
         ],
         name="compile UI media protocol harness",

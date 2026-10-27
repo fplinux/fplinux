@@ -31,7 +31,7 @@ struct fplinux_ui_text;
  * UNEDITABLE may be added too: the field shows its text, still focusable,
  * without caret, mode, counter or symbol picker, and takes no typing, Clear
  * or OK, so the right soft key stays the application's (Back). A single line
- * that does not fit scrolls while focused; a multi-line field scrolls by a
+ * that does not fit makes one scrolling pass on focus or text change; a multi-line field scrolls by a
  * line with Up and Down and by a page with Left and Right. The text can still
  * be set.
  */
@@ -63,7 +63,10 @@ struct fplinux_ui_text *fplinux_ui_text_create(struct fplinux_ui *ui,
 void fplinux_ui_text_delete(struct fplinux_ui_text *field);
 /* The frame object, for size and position; its children are private. */
 lv_obj_t *fplinux_ui_text_object(struct fplinux_ui_text *field);
-/* The callback must not delete the field. NULL removes it. */
+/*
+ * The callback may set text or other field state without another notification
+ * for those changes. It must not delete the field. NULL removes it.
+ */
 void fplinux_ui_text_set_change_cb(struct fplinux_ui_text *field,
 				   fplinux_ui_text_change_cb callback,
 				   void *context);

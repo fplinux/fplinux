@@ -16,6 +16,10 @@ Choose the field type for the value being edited. Numeric, decimal, phone and pa
 
 Specify a character limit that matches the task. Read the value through the screen's getter, which includes pending text. Returned text is borrowed; copy it before retaining it beyond a field change or screen removal. A change callback reports an edit, not a successful save.
 
+The input mode stays visible while editing. A limited field adds its character count when it reaches 90% of the limit and removes it again below that threshold. A change callback may normalize the text with a setter; that edit is applied without a nested or deferred duplicate notification. Do not delete the field from its own change callback.
+
+Add `FPLINUX_UI_TEXT_UNEDITABLE` for a readable field without editing controls. In a multiline field, Up and Down move by one complete line; Left and Right move by whole lines with overlap between pages. A small bottom inset keeps the last line readable when the view height is not a multiple of the line spacing.
+
 ## Shared keypad behavior
 
 The runtime handles repeated digit presses, holding a digit, mode switching, symbols and Clear. The [user guide](/fplinux/use/session/#type-text) owns the ordinary key instructions. Use the existing field instead of duplicating those gestures in a command callback.

@@ -10,13 +10,22 @@
 #include "fplinux-ui-session.h"
 
 #define FPLINUX_DESKTOP_LAUNCHER_ID "org.fplinux.launcher"
+#define FPLINUX_DESKTOP_EXTENSIONS_BYTES 256
 
 struct fplinux_desktop_entry {
 	char app_id[FPLINUX_UI_SESSION_ID_BYTES];
 	char title[FPLINUX_UI_SESSION_TEXT_BYTES];
 	char executable[PATH_MAX];
+	char icon[FPLINUX_UI_SESSION_TEXT_BYTES];
+	char extensions[FPLINUX_DESKTOP_EXTENSIONS_BYTES];
+	bool icon_valid;
+	bool hidden;
+	bool no_display;
 	enum fplinux_ui_session_mode mode;
 };
+
+bool fplinux_desktop_entry_handles(const struct fplinux_desktop_entry *entry,
+				   const char *path);
 
 /* Nonempty ASCII ID, shorter than FPLINUX_UI_SESSION_ID_BYTES. */
 __attribute__((visibility("hidden"))) bool

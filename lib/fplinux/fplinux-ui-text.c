@@ -33,8 +33,12 @@ struct fplinux_ui_text {
 	struct fplinux_ui_symbol_picker *picker;
 	/* Paused whenever the model has no deadline. */
 	lv_timer_t *timer;
+	uint64_t caret_deadline_ms;
+	bool caret_shown;
+	bool read_only_fitting;
 	unsigned int rendered;
 	unsigned int notified;
+	bool notifying;
 	fplinux_ui_text_change_cb callback;
 	void *context;
 };
@@ -86,6 +90,48 @@ static void finish_scroll(lv_obj_t *area)
 	lv_obj_scroll_to(area, end.x, end.y, LV_ANIM_OFF);
 }
 
+static int32_t read_only_line_height(struct fplinux_ui_text *field)
+{
+	lv_obj_t *label = lv_textarea_get_label(field->area);
+
+	return lv_font_get_line_height(lv_obj_get_style_text_font(label, 0)) +
+	       lv_obj_get_style_text_line_space(label, 0);
+}
+
+/* A final whole line needs padding when the viewport has a partial row. */
+static void fit_read_only(struct fplinux_ui_text *field)
+{
+	lv_obj_t *area = field->area;
+	lv_obj_t *label = lv_textarea_get_label(area);
+	int32_t line, height, padding = 0;
+
+	if (!field->model.read_only || !field->model.multiline ||
+	    field->read_only_fitting)
+		return;
+	line = read_only_line_height(field);
+	if (line <= 0)
+		return;
+	field->read_only_fitting = true;
+	height = lv_obj_get_content_height(area) +
+		 lv_obj_get_style_pad_bottom(area, 0);
+	if (lv_obj_get_height(label) > height) {
+		padding = (height - lv_obj_get_height(label)) % line;
+		if (padding < 0)
+			padding += line;
+	}
+	if (lv_obj_get_style_pad_bottom(area, 0) != padding)
+		lv_obj_set_style_pad_bottom(area, padding, 0);
+	lv_obj_readjust_scroll(area, LV_ANIM_OFF);
+	lv_obj_scroll_to_y(area, lv_obj_get_scroll_y(area) / line * line,
+			   LV_ANIM_OFF);
+	field->read_only_fitting = false;
+}
+
+static void read_only_size_cb(lv_event_t *event)
+{
+	fit_read_only(lv_event_get_user_data(event));
+}
+
 /*
  * A new size scrolls the textarea to its caret: at once, too. A larger size
  * also gives back the scroll that it no longer needs. LVGL does that only at
@@ -99,6 +145,14 @@ static void area_size_cb(lv_event_t *event)
 
 	finish_scroll(area);
 	lv_obj_readjust_scroll(area, LV_ANIM_OFF);
+	fit_read_only(lv_event_get_user_data(event));
+}
+
+static void render_caret(struct fplinux_ui_text *field)
+{
+	lv_obj_set_style_border_opa(
+		field->area, field->caret_shown ? LV_OPA_COVER : LV_OPA_TRANSP,
+		LV_PART_CURSOR);
 }
 
 static void render(struct fplinux_ui_text *field)
@@ -111,7 +165,6 @@ static void render(struct fplinux_ui_text *field)
 				 0 :
 				 (uint32_t)fplinux_ui_text_model_caret(model);
 	bool caret_visible;
-	uint32_t caret_duration;
 	const char *view = fplinux_ui_text_model_view(model);
 	bool reset = false;
 	size_t pending;
@@ -119,7 +172,7 @@ static void render(struct fplinux_ui_text *field)
 
 	render_picker(field);
 	caret_visible = model->focused && !model->input.picker_open &&
-			!model->read_only;
+			!model->read_only && fplinux_ui_is_visible(field->ui);
 	/* Unchanged text and caret keep the textarea's Up/Down column. */
 	if (strcmp(lv_textarea_get_text(field->area), view)) {
 		lv_textarea_set_text(field->area, view);
@@ -148,20 +201,17 @@ static void render(struct fplinux_ui_text *field)
 	else
 		render_selection(label, LV_DRAW_LABEL_NO_TXT_SEL,
 				 LV_DRAW_LABEL_NO_TXT_SEL);
-	lv_obj_set_style_border_opa(
-		field->area, caret_visible ? LV_OPA_COVER : LV_OPA_TRANSP,
-		LV_PART_CURSOR);
-	caret_duration = caret_visible ? 500 : 0;
-	if (lv_obj_get_style_anim_duration(field->area, LV_PART_CURSOR) !=
-	    caret_duration) {
-		lv_obj_set_style_anim_duration(field->area, caret_duration,
-					       LV_PART_CURSOR);
-		/* Refresh the label too, so the textarea starts or stops blinking. */
-		lv_obj_refresh_style(field->area, LV_PART_CURSOR,
-				     LV_STYLE_PROP_ANY);
+	if (!caret_visible) {
+		field->caret_deadline_ms = 0;
+		field->caret_shown = false;
+	} else if (reset || !field->caret_deadline_ms) {
+		field->caret_deadline_ms = fplinux_ui_now_ms() + 500;
+		field->caret_shown = true;
 	}
+	render_caret(field);
 	lv_obj_set_style_border_color(
-		field->frame, model->focused ? theme->focus : theme->border, 0);
+		field->frame,
+		model->focused ? theme->focus : theme->control_border, 0);
 	fplinux_ui_text_model_status(model, status, sizeof(status));
 	if (strcmp(lv_label_get_text(field->status), status))
 		lv_label_set_text(field->status, status);
@@ -173,7 +223,15 @@ static void schedule(struct fplinux_ui_text *field)
 	uint64_t now_ms;
 	uint64_t delay_ms;
 
-	if (!fplinux_ui_text_model_deadline(&field->model, &deadline_ms)) {
+	bool pending =
+		fplinux_ui_text_model_deadline(&field->model, &deadline_ms);
+
+	if (field->caret_deadline_ms &&
+	    (!pending || field->caret_deadline_ms < deadline_ms)) {
+		deadline_ms = field->caret_deadline_ms;
+		pending = true;
+	}
+	if (!pending) {
 		lv_timer_pause(field->timer);
 		return;
 	}
@@ -197,12 +255,22 @@ static void sync_view(struct fplinux_ui_text *field)
 static void update(struct fplinux_ui_text *field)
 {
 	sync_view(field);
+	if (field->caret_deadline_ms &&
+	    field->caret_deadline_ms <= fplinux_ui_now_ms()) {
+		field->caret_shown = !field->caret_shown;
+		field->caret_deadline_ms = fplinux_ui_now_ms() + 500;
+		render_caret(field);
+	}
 	schedule(field);
 	if (field->notified == field->model.revision)
 		return;
+	/* A callback's edits are rendered and consumed without another report. */
 	field->notified = field->model.revision;
-	if (field->callback)
-		field->callback(field, field->context);
+	if (!field->callback || field->notifying)
+		return;
+	field->notifying = true;
+	field->callback(field, field->context);
+	field->notifying = false;
 }
 
 static void timer_cb(lv_timer_t *timer)
@@ -276,6 +344,9 @@ static void frame_delete_cb(lv_event_t *event)
 		link = &(*link)->next;
 	*link = field->next;
 	/* The children still exist; the label goes with the frame. */
+	lv_obj_remove_event_cb_with_user_data(field->area, area_size_cb, field);
+	lv_obj_remove_event_cb_with_user_data(
+		lv_textarea_get_label(field->area), read_only_size_cb, field);
 	if (field->marquee)
 		fplinux_ui_marquee_blur(field->ui, field->label);
 	fplinux_ui_symbol_picker_delete(field->picker);
@@ -295,11 +366,14 @@ static void apply_read_only(struct fplinux_ui_text *field)
 
 	lv_obj_set_hidden(field->status, read_only);
 	if (field->model.multiline) {
+		lv_obj_set_style_pad_bottom(field->area, 0, 0);
 		lv_obj_set_style_pad_right(field->area, read_only ? 1 : 0, 0);
 		lv_obj_set_scrollbar_mode(field->area,
 					  read_only ? LV_SCROLLBAR_MODE_AUTO :
 						      LV_SCROLLBAR_MODE_OFF);
 		fplinux_ui_style_scrollbar(field->ui, field->area);
+		lv_obj_update_layout(field->frame);
+		fit_read_only(field);
 		return;
 	}
 	if (!read_only && field->marquee) {
@@ -356,7 +430,7 @@ static void create_view(struct fplinux_ui_text *field, lv_obj_t *parent)
 		lv_obj_set_flex_grow(field->area, 1);
 	lv_obj_set_scrollbar_mode(field->area, LV_SCROLLBAR_MODE_OFF);
 	lv_obj_add_event_cb(field->area, area_size_cb, LV_EVENT_SIZE_CHANGED,
-			    NULL);
+			    field);
 	lv_obj_set_style_anim_duration(field->area, 0, LV_PART_CURSOR);
 	lv_obj_set_style_border_color(field->area, theme->foreground,
 				      LV_PART_CURSOR);
@@ -364,6 +438,8 @@ static void create_view(struct fplinux_ui_text *field, lv_obj_t *parent)
 	lv_obj_set_style_border_side(field->area, LV_BORDER_SIDE_LEFT,
 				     LV_PART_CURSOR);
 	label = lv_textarea_get_label(field->area);
+	lv_obj_add_event_cb(label, read_only_size_cb, LV_EVENT_SIZE_CHANGED,
+			    field);
 	lv_obj_set_style_bg_color(label, theme->accent, LV_PART_SELECTED);
 	lv_obj_set_style_text_color(label, theme->accent_text,
 				    LV_PART_SELECTED);
@@ -450,6 +526,37 @@ void fplinux_ui_text_set_change_cb(struct fplinux_ui_text *field,
 	field->context = context;
 }
 
+static bool scroll_read_only(struct fplinux_ui_text *field,
+			     const struct fplinux_ui_key *key)
+{
+	lv_obj_t *area = field->area;
+	int32_t line, step;
+
+	if (!fplinux_ui_is_direction_key(key))
+		return false;
+	fplinux_ui_scrollbar_layout(area);
+	fit_read_only(field);
+	if (lv_obj_get_scroll_top(area) <= 0 &&
+	    lv_obj_get_scroll_bottom(area) <= 0)
+		return false;
+	if (!key->pressed)
+		return true;
+	line = read_only_line_height(field);
+	if (line <= 0)
+		return false;
+	step = line;
+	if (key->code == KEY_LEFT || key->code == KEY_RIGHT) {
+		int32_t rows = lv_obj_get_content_height(area) / line;
+
+		if (rows > 1)
+			step = (rows - 1) * line;
+	}
+	if (key->code == KEY_DOWN || key->code == KEY_RIGHT)
+		step = -step;
+	lv_obj_scroll_by_bounded(area, 0, step, LV_ANIM_OFF);
+	return true;
+}
+
 bool fplinux_ui_text_key(struct fplinux_ui_text *field,
 			 const struct fplinux_ui_key *key)
 {
@@ -471,7 +578,7 @@ bool fplinux_ui_text_key(struct fplinux_ui_text *field,
 	/* A read-only text that overflows scrolls by line and by page. */
 	else if (!consumed && field->model.read_only &&
 		 field->model.multiline && field->model.focused)
-		consumed = fplinux_ui_scroll_key(field->area, key);
+		consumed = scroll_read_only(field, key);
 	if (consumed && key->pressed &&
 	    fplinux_ui_text_can_repeat(field->ui, field))
 		fplinux_ui_claim_text_key(field->ui, field, key);
@@ -505,7 +612,7 @@ bool fplinux_ui_text_set(struct fplinux_ui_text *field, const char *text)
 		return false;
 	update(field);
 	/* A focused read-only line scrolls its new text from the start. */
-	if (field->marquee)
+	if (field->label && field->model.read_only)
 		fplinux_ui_marquee_changed(field->ui, field->label, NULL);
 	return true;
 }
@@ -642,6 +749,17 @@ void fplinux_ui_text_resize(struct fplinux_ui *ui)
 			fplinux_ui_text_model_cancel_picker(&field->model);
 			update(field);
 		}
+	}
+}
+
+void fplinux_ui_text_set_visible(struct fplinux_ui *ui)
+{
+	for (struct fplinux_ui_text *field = fields; field;
+	     field = field->next) {
+		if (field->ui != ui)
+			continue;
+		render(field);
+		schedule(field);
 	}
 }
 

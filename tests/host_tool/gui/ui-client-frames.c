@@ -1,19 +1,24 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
 #include "fplinux-audio-protocol.h"
+#include "fplinux-language.h"
 #include "fplinux-ui-audio.h"
 #include "fplinux-ui-fonts.h"
 #include "fplinux-ui-frame.h"
+#include "fplinux-ui-locale.h"
 #include "fplinux-ui-menu.h"
 #include "fplinux-ui-prefs.h"
 #include "fplinux-ui-profile.h"
 #include "fplinux-ui-screen.h"
-#include "fplinux-ui-session.h"
+#include "fplinux-ui-session-internal.h"
+#include "fplinux-ui-storage.h"
 #include "fplinux-ui-symbol-picker.h"
 #include "fplinux-ui-text.h"
 #include "fplinux-ui-vibration.h"
 #include "fplinux-ui.h"
 #include "ui-frame-peer.h"
+#include "ui-screen-navigation.h"
+#include "xdg-shell-server-protocol.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -21,6 +26,7 @@
 #include <json-c/json.h>
 #include <linux/input-event-codes.h>
 #include <poll.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,7 +43,15 @@ struct application {
 	bool closed;
 	bool initialized;
 	unsigned int close_requests;
+	uint32_t storage_request;
+	unsigned int storage_callbacks;
+	uint32_t document_request;
+	bool document_wait;
 	lv_obj_t *softkeys;
+	struct fplinux_ui *ui;
+	bool final_cleanup;
+	bool close_menu_on_change;
+	unsigned int menu_choices;
 };
 
 enum observation_type {
@@ -89,6 +103,34 @@ struct media_application {
 	struct fplinux_ui_frame *frame;
 	lv_timer_t *timer;
 };
+
+static bool fail_next_strdup;
+
+char *__real_strdup(const char *text);
+bool __real_fplinux_language_load(const char *directory, const char *code,
+				  struct fplinux_language *language);
+
+char *__wrap_strdup(const char *text)
+{
+	if (fail_next_strdup) {
+		fail_next_strdup = false;
+		errno = ENOMEM;
+		return NULL;
+	}
+	return __real_strdup(text);
+}
+
+/* Language parsing stays real; the test owns the installed resource path. */
+bool __wrap_fplinux_language_load(const char *directory, const char *code,
+				  struct fplinux_language *language)
+{
+	const char *resources = getenv("FPLINUX_TEST_LANGUAGE_DIRECTORY");
+
+	if (resources && directory &&
+	    !strcmp(directory, FPLINUX_LANGUAGE_DIRECTORY))
+		directory = resources;
+	return __real_fplinux_language_load(directory, code, language);
+}
 
 /* Generated package fonts are outside the frame/transport boundary. */
 const lv_font_t *fplinux_ui_builtin_font(const char *id)
@@ -247,6 +289,217 @@ static void create_launcher_screens(struct fplinux_ui *ui,
 	fplinux_ui_push(ui, list);
 }
 
+static void lifetime_field_changed(struct fplinux_ui_text *field, void *context)
+{
+	struct application *application = context;
+
+	(void)field;
+	assert(!application->final_cleanup);
+	if (application->close_menu_on_change)
+		fplinux_ui_menu_close(application->ui);
+}
+
+static void lifetime_menu_chosen(struct fplinux_ui *ui, int action,
+				 void *context)
+{
+	struct application *application = context;
+
+	(void)ui;
+	(void)action;
+	++application->menu_choices;
+}
+
+static void check_list_lifetime(struct fplinux_ui *ui, bool scrolled)
+{
+	struct fplinux_ui_screen *base = fplinux_ui_current(ui);
+
+	assert(base);
+	for (unsigned int attempt = 0; attempt < 2; ++attempt) {
+		struct fplinux_ui_screen *list = fplinux_ui_list_new(
+			ui, "Items", FPLINUX_UI_LIST_IMPLICIT);
+
+		assert(list);
+		for (size_t i = 0; i < 32; ++i)
+			assert(fplinux_ui_list_append(list, "Item", NULL) == i);
+		fplinux_ui_push(ui, list);
+		if (scrolled)
+			fplinux_ui_list_set_focused(list, 31);
+		lv_refr_now(NULL);
+		assert(fplinux_ui_list_get_focused(list) ==
+		       (scrolled ? 31 : 0));
+		assert((fplinux_ui_list_get_first_visible(list) > 0) ==
+		       scrolled);
+		assert(fplinux_ui_pop(ui));
+		assert(fplinux_ui_current(ui) == base);
+	}
+}
+
+static void check_menu_lifetime(struct fplinux_ui *ui,
+				struct application *application, char command)
+{
+	static const struct fplinux_ui_menu_item item = {
+		.action = 17,
+		.text = "Cancel input",
+	};
+	struct fplinux_ui_screen *canvas = fplinux_ui_canvas_new(ui, "Editor");
+	struct fplinux_ui_text *field;
+	struct fplinux_ui_key key = {
+		.source = FPLINUX_UI_KEY_PHONE,
+		.code = KEY_NUMERIC_2,
+		.pressed = true,
+	};
+
+	assert(canvas);
+	fplinux_ui_push(ui, canvas);
+	field = fplinux_ui_text_create(ui, fplinux_ui_canvas_object(canvas),
+				       true, 0);
+	assert(field);
+	assert(fplinux_ui_text_set_constraint(field, FPLINUX_UI_TEXT_NUMERIC));
+	fplinux_ui_text_set_change_cb(field, lifetime_field_changed,
+				      application);
+	assert(fplinux_ui_menu_open(ui, FPLINUX_UI_MENU_ORIGIN_LEFT, NULL,
+				    &item, 1, lifetime_menu_chosen,
+				    application));
+	assert(fplinux_ui_menu_is_open(ui));
+	if (command == 'F')
+		return;
+	application->close_menu_on_change = command == 'R';
+	fplinux_ui_menu_close(ui);
+	assert(!fplinux_ui_menu_is_open(ui));
+	assert(!application->menu_choices);
+	assert(fplinux_ui_text_key(field, &key));
+	key.pressed = false;
+	assert(fplinux_ui_text_key(field, &key));
+	assert(!strcmp(fplinux_ui_text_get(field), "2"));
+	application->close_menu_on_change = false;
+	assert(fplinux_ui_pop(ui));
+}
+
+struct text_change_state {
+	const char *expected;
+	const char *normalized;
+	unsigned int callbacks;
+	bool notifying;
+};
+
+static void normalize_text(struct fplinux_ui_text *field, void *context)
+{
+	struct text_change_state *state = context;
+
+	assert(!state->notifying);
+	state->notifying = true;
+	++state->callbacks;
+	assert(!strcmp(fplinux_ui_text_get(field), state->expected));
+	if (state->normalized)
+		assert(fplinux_ui_text_set(field, state->normalized));
+	state->notifying = false;
+}
+
+static void check_text_notifications(struct fplinux_ui *ui)
+{
+	struct fplinux_ui_screen *canvas = fplinux_ui_canvas_new(ui, "Editor");
+	struct text_change_state state = {
+		.expected = "code",
+		.normalized = "CODE",
+	};
+	struct fplinux_ui_key key = {
+		.source = FPLINUX_UI_KEY_KEYBOARD,
+		.code = KEY_X,
+		.pressed = false,
+		.text = "x",
+	};
+	struct fplinux_ui_text *field;
+
+	assert(canvas);
+	fplinux_ui_push(ui, canvas);
+	field = fplinux_ui_text_create(ui, fplinux_ui_canvas_object(canvas),
+				       false, 0);
+	assert(field);
+	fplinux_ui_text_set_change_cb(field, normalize_text, &state);
+	assert(fplinux_ui_text_set(field, "code"));
+	assert(state.callbacks == 1);
+	assert(!strcmp(fplinux_ui_text_get(field), "CODE"));
+	assert(!fplinux_ui_text_is_empty(field));
+	assert(!fplinux_ui_text_key(field, &key));
+	assert(state.callbacks == 1);
+	state.expected = "CODEx";
+	state.normalized = "CODEX";
+	key.pressed = true;
+	assert(fplinux_ui_text_key(field, &key));
+	assert(state.callbacks == 2);
+	assert(!strcmp(fplinux_ui_text_get(field), "CODEX"));
+	key.pressed = false;
+	assert(fplinux_ui_text_key(field, &key));
+	assert(state.callbacks == 2);
+	state.expected = "CODEX";
+	state.normalized = "CODEX";
+	key.code = KEY_LEFT;
+	key.pressed = true;
+	assert(fplinux_ui_text_key(field, &key));
+	assert(state.callbacks == 3);
+	key.pressed = false;
+	assert(fplinux_ui_text_key(field, &key));
+	assert(state.callbacks == 3);
+	state.expected = "";
+	state.normalized = NULL;
+	assert(fplinux_ui_text_set(field, ""));
+	assert(state.callbacks == 4 && fplinux_ui_text_is_empty(field));
+	assert(fplinux_ui_text_set_constraint(field, FPLINUX_UI_TEXT_NUMERIC));
+	assert(state.callbacks == 5);
+	assert(!strcmp(fplinux_ui_text_indicator(field), "123"));
+	fplinux_ui_text_set_change_cb(field, NULL, NULL);
+	assert(fplinux_ui_pop(ui));
+}
+
+static void check_decimal_text(struct fplinux_ui *ui, char command)
+{
+	struct fplinux_ui_screen *form = fplinux_ui_form_new(ui, "Amount");
+	enum fplinux_ui_text_constraint constraint = FPLINUX_UI_TEXT_DECIMAL;
+	const char *initial = command == 'D' ? "1.5" : "1,5";
+	const char *expected = command == 'A' ? "1,5" : "1.5";
+	const char *first, *second;
+	size_t item;
+
+	assert(form);
+	assert(fplinux_ui_decimal_separator(ui) ==
+	       (command == 'D' || command == 'A' ? '.' : ','));
+	if (command == 'P')
+		constraint |= FPLINUX_UI_TEXT_PASSWORD;
+	else if (command == 'U')
+		constraint |= FPLINUX_UI_TEXT_UNEDITABLE;
+	else if (command == 'A')
+		constraint = FPLINUX_UI_TEXT_ANY;
+	item = fplinux_ui_form_append_text_field(form, "Amount", initial, 10,
+						 constraint);
+	assert(item != SIZE_MAX);
+	fplinux_ui_push(ui, form);
+	if (command == 'E') {
+		fail_next_strdup = true;
+		errno = 0;
+		assert(!fplinux_ui_form_get_text(form, item));
+		assert(errno == ENOMEM && !fail_next_strdup);
+	}
+	first = fplinux_ui_form_get_text(form, item);
+	assert(first && !strcmp(first, expected));
+	second = fplinux_ui_form_get_text(form, item);
+	assert(second && !strcmp(second, expected));
+	assert(!strcmp(first, expected));
+	assert(fplinux_ui_form_set_text(form, item, "2,75"));
+	if (command == 'E') {
+		fail_next_strdup = true;
+		errno = 0;
+		assert(!fplinux_ui_form_get_text(form, item));
+		assert(errno == ENOMEM && !fail_next_strdup);
+	}
+	expected = command == 'A' ? "2,75" : "2.75";
+	first = fplinux_ui_form_get_text(form, item);
+	assert(first && !strcmp(first, expected));
+	second = fplinux_ui_form_get_text(form, item);
+	assert(second && !strcmp(second, expected));
+	assert(!strcmp(first, expected));
+	assert(fplinux_ui_pop(ui));
+}
+
 static void application_input(struct fplinux_ui *ui, int fd, short events,
 			      void *data)
 {
@@ -256,6 +509,65 @@ static void application_input(struct fplinux_ui *ui, int fd, short events,
 
 	assert(events == POLLIN);
 	assert(read(fd, &command, 1) == 1);
+	if (command == 'N' || command == 'D' || command == 'C' ||
+	    command == 'P' || command == 'U' || command == 'A' ||
+	    command == 'E') {
+		struct fplinux_ui_screen *base =
+			fplinux_ui_canvas_new(ui, NULL);
+
+		assert(base);
+		fplinux_ui_push(ui, base);
+		if (command == 'N')
+			check_text_notifications(ui);
+		else
+			check_decimal_text(ui, command);
+		lv_refr_now(NULL);
+		assert(write(fd, &command, 1) == 1);
+		return;
+	}
+	if (command == 'L' || command == 'S' || command == 'M' ||
+	    command == 'R' || command == 'F') {
+		struct fplinux_ui_screen *base =
+			fplinux_ui_canvas_new(ui, NULL);
+
+		assert(base);
+		fplinux_ui_push(ui, base);
+		if (command == 'L' || command == 'S')
+			check_list_lifetime(ui, command == 'S');
+		else
+			check_menu_lifetime(ui, application, command);
+		lv_refr_now(NULL);
+		assert(write(fd, &command, 1) == 1);
+		return;
+	}
+	if (command == 'g') {
+		struct fplinux_ui_session_message raw = {
+			.type = FPLINUX_UI_SESSION_STORAGE_REQUEST,
+			.serial = 1,
+		};
+
+		assert(!fplinux_ui_send(ui, &raw) && errno == EINVAL);
+		application->storage_request = fplinux_ui_storage_request(
+			ui, FPLINUX_VOLUME_REFRESH, 0);
+		assert(application->storage_request);
+		assert(!fplinux_ui_storage_request(ui, FPLINUX_VOLUME_REFRESH,
+						   0) &&
+		       errno == EBUSY);
+		assert(write(fd, "a", 1) == 1);
+		return;
+	}
+	if (command == 'd') {
+		paint(ui, 0x00ff00);
+		assert(fplinux_ui_document_reply(
+			ui, application->document_request,
+			FPLINUX_UI_DOCUMENT_ACCEPTED, 0));
+		assert(!fplinux_ui_document_reply(
+			       ui, application->document_request,
+			       FPLINUX_UI_DOCUMENT_ACCEPTED, 0) &&
+		       errno == EINVAL);
+		assert(write(fd, "d", 1) == 1);
+		return;
+	}
 	if (command == 'c' || command == 'r') {
 		assert(!application->closed);
 		assert(fplinux_ui_lifecycle(ui) != FPLINUX_UI_CLOSING);
@@ -316,6 +628,52 @@ static enum fplinux_ui_close_response application_close(struct fplinux_ui *ui,
 	return FPLINUX_UI_CLOSE_WAIT;
 }
 
+static struct fplinux_ui_document_result
+application_document(struct fplinux_ui *ui,
+		     const struct fplinux_ui_document_request *request,
+		     void *data)
+{
+	struct application *application = data;
+
+	assert(application->initialized && request->request_id == 73);
+	assert(!strcmp(request->path, "/tmp/Игра one 'quoted'.jar"));
+	struct fplinux_ui_session_message bypass = {
+		.type = FPLINUX_UI_SESSION_DOCUMENT_RESULT,
+		.serial = request->request_id,
+		.document_status = FPLINUX_UI_DOCUMENT_ACCEPTED,
+	};
+
+	assert(!fplinux_ui_send(ui, &bypass) && errno == EINVAL);
+	application->document_request = request->request_id;
+	paint(ui, application->document_wait ? 0xffff00 : 0x00ff00);
+	assert(write(application->control, "a", 1) == 1);
+	return (struct fplinux_ui_document_result){
+		.status = application->document_wait ?
+				  FPLINUX_UI_DOCUMENT_WAIT :
+				  FPLINUX_UI_DOCUMENT_ACCEPTED,
+	};
+}
+
+static void application_storage(struct fplinux_ui *ui,
+				const struct fplinux_volume_result *result,
+				void *context)
+{
+	struct application *application = context;
+	const struct fplinux_volume *volume = &result->snapshot.volumes[0];
+	(void)ui;
+
+	assert(result->request_id == application->storage_request);
+	assert(result->error == EBUSY && result->snapshot.count == 1);
+	assert(result->snapshot.home_persistent);
+	assert(volume->id == UINT32_MAX &&
+	       volume->state == FPLINUX_VOLUME_MOUNTED);
+	assert(volume->mount_id == 31);
+	assert(!strcmp(volume->label, "Карта") &&
+	       !strcmp(volume->path, "/mnt/card"));
+	++application->storage_callbacks;
+	assert(write(application->control, "s", 1) == 1);
+}
+
 static int run_application(int control, const char *scenario)
 {
 	struct application application = { .control = control };
@@ -324,6 +682,15 @@ static int run_application(int control, const char *scenario)
 	int result;
 
 	assert(ui);
+	application.ui = ui;
+	if (!strcmp(scenario, "storage-api"))
+		fplinux_ui_set_storage_handler(ui, application_storage,
+					       &application);
+	if (!strncmp(scenario, "document-", 9)) {
+		application.document_wait = !strcmp(scenario, "document-wait");
+		fplinux_ui_set_document_handler(ui, application_document,
+						&application);
+	}
 	if (!strcmp(scenario, "metrics")) {
 		const struct fplinux_ui_metrics *metrics =
 			fplinux_ui_metrics(ui);
@@ -345,13 +712,424 @@ static int run_application(int control, const char *scenario)
 			    &application);
 	application.initialized = true;
 	result = fplinux_ui_run(ui);
+	application.final_cleanup = true;
 	fplinux_ui_close(ui);
 	assert(application.closed);
+	if (!strcmp(scenario, "storage-api"))
+		assert(application.storage_callbacks == 1);
 	if (!strcmp(scenario, "close-decisions"))
 		assert(application.close_requests == 2);
 	else if (!strcmp(scenario, "close-forced"))
 		assert(application.close_requests == 1);
 	return result;
+}
+
+struct marquee_observation {
+	bool scrolling[2];
+	bool animated[2];
+	bool timer_paused;
+	uint16_t animations;
+};
+
+struct marquee_application {
+	struct application application;
+	struct fplinux_ui_screen *list;
+	struct fplinux_ui_text *field;
+	lv_obj_t *labels[2];
+};
+
+static uint32_t marquee_time_ms;
+
+static uint32_t marquee_tick(void)
+{
+	return marquee_time_ms;
+}
+
+static lv_obj_t *find_label(lv_obj_t *root, const char *prefix)
+{
+	if (!lv_obj_is_visible(root))
+		return NULL;
+	if (lv_obj_check_type(root, &lv_label_class) &&
+	    !strncmp(lv_label_get_text(root), prefix, strlen(prefix)))
+		return root;
+	for (uint32_t i = 0; i < lv_obj_get_child_count(root); ++i) {
+		lv_obj_t *label = find_label(lv_obj_get_child(root, i), prefix);
+
+		if (label)
+			return label;
+	}
+	return NULL;
+}
+
+static void marquee_application_input(struct fplinux_ui *ui, int fd,
+				      short events, void *context)
+{
+	struct marquee_application *application = context;
+	struct marquee_observation observation = { 0 };
+	char command;
+
+	assert(events == POLLIN);
+	assert(read(fd, &command, 1) == 1);
+	switch (command) {
+	case 'L':
+		application->list =
+			fplinux_ui_list_new(ui, NULL, FPLINUX_UI_LIST_IMPLICIT);
+		assert(application->list);
+		assert(fplinux_ui_list_append(
+			       application->list,
+			       "Main text whose long ending must become readable in this list row",
+			       "Detail text whose different long ending must also become readable") ==
+		       0);
+		assert(fplinux_ui_list_append(
+			       application->list, "Short",
+			       "Second detail with a long ending after a short primary line") ==
+		       1);
+		assert(fplinux_ui_push(ui, application->list));
+		application->labels[0] =
+			find_label(fplinux_ui_screen(ui), "Main");
+		application->labels[1] =
+			find_label(fplinux_ui_screen(ui), "Detail");
+		assert(application->labels[0] && application->labels[1]);
+		break;
+	case 'R': {
+		struct fplinux_ui_screen *canvas =
+			fplinux_ui_canvas_new(ui, NULL);
+
+		assert(canvas && fplinux_ui_push(ui, canvas));
+		application->field = fplinux_ui_text_create(
+			ui, fplinux_ui_canvas_object(canvas), false, 0);
+		assert(application->field);
+		assert(fplinux_ui_text_set_constraint(
+			application->field, FPLINUX_UI_TEXT_UNEDITABLE));
+		assert(fplinux_ui_text_set(
+			application->field,
+			"Read only text whose long ending must become readable in this field"));
+		application->labels[0] =
+			find_label(fplinux_ui_text_object(application->field),
+				   "Read only");
+		assert(application->labels[0]);
+		break;
+	}
+	case 'F':
+		assert(application->list);
+		fplinux_ui_list_set_focused(application->list, 1);
+		application->labels[0] =
+			find_label(fplinux_ui_screen(ui), "Short");
+		application->labels[1] =
+			find_label(fplinux_ui_screen(ui), "Second");
+		assert(application->labels[0] && application->labels[1]);
+		break;
+	case 'S':
+		if (application->list)
+			fplinux_ui_list_set_focused(
+				application->list,
+				fplinux_ui_list_get_focused(application->list));
+		else
+			fplinux_ui_text_set_focused(application->field, true);
+		break;
+	case 'T':
+		if (application->list)
+			assert(fplinux_ui_list_set(
+				application->list, 1, "Short",
+				"Updated detail whose new long ending must become readable"));
+		else
+			assert(fplinux_ui_text_set(
+				application->field,
+				"Changed read only text whose new long ending must become readable"));
+		break;
+	case 'U':
+		if (application->list)
+			assert(fplinux_ui_list_set(
+				application->list, 1, "Short",
+				"Hidden update with another long ending to read after returning"));
+		else
+			assert(fplinux_ui_text_set(
+				application->field,
+				"Hidden read only update with a long ending to read after returning"));
+		break;
+	case 'B':
+		assert(application->field);
+		fplinux_ui_text_set_focused(application->field, false);
+		break;
+	case 't':
+		marquee_time_ms += 1000;
+		break;
+	case 'i':
+		marquee_time_ms += 60000;
+		break;
+	default:
+		assert(command == 'q');
+	}
+	/* Only the clock is controlled; the real LVGL timers draw every step. */
+	lv_timer_handler();
+	lv_refr_now(NULL);
+	for (size_t i = 0; i < 2; ++i) {
+		if (!application->labels[i])
+			continue;
+		observation.scrolling[i] =
+			lv_label_get_long_mode(application->labels[i]) ==
+			LV_LABEL_LONG_MODE_SCROLL;
+		observation.animated[i] =
+			lv_anim_get(application->labels[i], NULL) != NULL;
+	}
+	observation.animations = lv_anim_count_running();
+	observation.timer_paused = lv_timer_get_paused(lv_anim_get_timer());
+	assert(write(fd, &observation, sizeof(observation)) ==
+	       (ssize_t)sizeof(observation));
+}
+
+static int run_marquee_application(int control)
+{
+	struct marquee_application application = {
+		.application = { .control = control },
+	};
+	struct fplinux_ui *ui = fplinux_ui_open("org.fplinux.marquee-test",
+						application_event,
+						&application.application);
+	int result;
+
+	assert(ui);
+	application.application.ui = ui;
+	marquee_time_ms = lv_tick_get();
+	lv_tick_set_cb(marquee_tick);
+	paint(ui, 0xff0000);
+	lv_refr_now(NULL);
+	fplinux_ui_watch_fd(ui, control, POLLIN, marquee_application_input,
+			    &application);
+	application.application.initialized = true;
+	result = fplinux_ui_run(ui);
+	fplinux_ui_close(ui);
+	assert(application.application.closed);
+	return result;
+}
+
+struct runtime_application {
+	struct fplinux_ui *ui;
+	const char *scenario;
+	int control;
+	int watched[2];
+	int replacement[2];
+	lv_timer_t *timer;
+	bool closed;
+	bool replacement_registered;
+	unsigned int close_requests;
+	unsigned int documents;
+	unsigned int lifecycle_events;
+};
+
+static void borrowed_signal_handler(int number)
+{
+	(void)number;
+}
+
+static void check_borrowed_signals(void)
+{
+	struct sigaction action;
+
+	assert(sigaction(SIGINT, NULL, &action) == 0);
+	assert(action.sa_handler == borrowed_signal_handler);
+	assert(action.sa_flags & SA_RESTART);
+	assert(sigismember(&action.sa_mask, SIGUSR1) == 1);
+	assert(sigaction(SIGTERM, NULL, &action) == 0);
+	assert(action.sa_handler == borrowed_signal_handler);
+	assert(!(action.sa_flags & SA_RESTART));
+	assert(sigismember(&action.sa_mask, SIGUSR2) == 1);
+}
+
+static void runtime_watch(struct fplinux_ui *ui, int fd, short events,
+			  void *context)
+{
+	struct runtime_application *application = context;
+	char value;
+
+	assert(!application->closed && application->replacement_registered);
+	assert(events == POLLIN);
+	assert(fd == application->replacement[0]);
+	/* An old poll result must never call a new, still-empty registration. */
+	assert(read(fd, &value, 1) == 1 && value == 'n');
+	fplinux_ui_quit(ui);
+}
+
+static void runtime_timer(lv_timer_t *timer)
+{
+	struct runtime_application *application = lv_timer_get_user_data(timer);
+	char value;
+
+	assert(!application->closed);
+	lv_timer_pause(timer);
+	if (application->replacement_registered) {
+		assert(write(application->replacement[1], "n", 1) == 1);
+		return;
+	}
+	assert(write(application->watched[1], "o", 1) == 1);
+	assert(write(application->control, "w", 1) == 1);
+	assert(read(application->control, &value, 1) == 1 && value == 'g');
+}
+
+static void register_replacement(struct runtime_application *application)
+{
+	if (!strcmp(application->scenario, "runtime-watch-reuse")) {
+		int old_fd = application->watched[0];
+
+		assert(close(old_fd) == 0);
+		application->watched[0] = -1;
+		assert(dup2(application->replacement[0], old_fd) == old_fd);
+		assert(close(application->replacement[0]) == 0);
+		application->replacement[0] = old_fd;
+	}
+	application->replacement_registered = true;
+	fplinux_ui_watch_fd(application->ui, application->replacement[0],
+			    POLLIN, runtime_watch, application);
+	lv_timer_set_period(application->timer, 20);
+	lv_timer_reset(application->timer);
+	lv_timer_resume(application->timer);
+}
+
+static void runtime_event(struct fplinux_ui *ui,
+			  const struct fplinux_ui_event *event, void *context)
+{
+	struct runtime_application *application = context;
+
+	/* Open must return before even the closing lifecycle notification. */
+	assert(application->ui == ui);
+	assert(fplinux_ui_screen(ui));
+	assert(!application->closed);
+	if (event->type == FPLINUX_UI_EVENT_CLOSE) {
+		application->closed = true;
+		if (!strcmp(application->scenario, "runtime-final-close")) {
+			paint(ui, 0x00ff00);
+			lv_timer_ready(application->timer);
+			lv_timer_resume(application->timer);
+		}
+	} else if (event->type == FPLINUX_UI_EVENT_LIFECYCLE) {
+		++application->lifecycle_events;
+	} else if (event->type == FPLINUX_UI_EVENT_RESIZE &&
+		   !strncmp(application->scenario, "runtime-watch-", 14)) {
+		register_replacement(application);
+	} else if (event->type == FPLINUX_UI_EVENT_SESSION &&
+		   event->session->type == FPLINUX_UI_SESSION_ERROR &&
+		   !strcmp(event->session->reason, "watch-ready")) {
+		lv_timer_ready(application->timer);
+		lv_timer_resume(application->timer);
+	}
+}
+
+static enum fplinux_ui_close_response runtime_close(struct fplinux_ui *ui,
+						    void *context)
+{
+	struct runtime_application *application = context;
+
+	assert(++application->close_requests == 1);
+	if (!strcmp(application->scenario, "runtime-close-quit"))
+		fplinux_ui_quit(ui);
+	else if (!strcmp(application->scenario, "runtime-close-invalid"))
+		return (enum fplinux_ui_close_response) - 1;
+	else {
+		assert(!strcmp(application->scenario,
+			       "runtime-close-self-reply"));
+		assert(!fplinux_ui_close_reply(ui, FPLINUX_UI_CLOSE_READY));
+		assert(errno == EINVAL);
+	}
+	return FPLINUX_UI_CLOSE_WAIT;
+}
+
+static struct fplinux_ui_document_result
+runtime_document(struct fplinux_ui *ui,
+		 const struct fplinux_ui_document_request *request,
+		 void *context)
+{
+	struct runtime_application *application = context;
+
+	assert(++application->documents == 1 && request->request_id == 73);
+	if (!strcmp(application->scenario, "runtime-document-quit"))
+		fplinux_ui_quit(ui);
+	else if (!strcmp(application->scenario, "runtime-document-invalid"))
+		return (struct fplinux_ui_document_result){
+			.status = (enum fplinux_ui_document_status) - 1,
+		};
+	else {
+		assert(!strcmp(application->scenario,
+			       "runtime-document-self-reply"));
+		assert(!fplinux_ui_document_reply(ui, request->request_id,
+						  FPLINUX_UI_DOCUMENT_ACCEPTED,
+						  0));
+		assert(errno == EINVAL);
+	}
+	return (struct fplinux_ui_document_result){
+		.status = FPLINUX_UI_DOCUMENT_WAIT,
+	};
+}
+
+static int run_runtime_application(int control, const char *scenario)
+{
+	struct runtime_application application = {
+		.control = control,
+		.scenario = scenario,
+		.watched = { -1, -1 },
+		.replacement = { -1, -1 },
+	};
+	struct sigaction action = { .sa_handler = borrowed_signal_handler };
+	struct sigaction saved_int, saved_term;
+	int result;
+
+	sigemptyset(&action.sa_mask);
+	sigaddset(&action.sa_mask, SIGUSR1);
+	action.sa_flags = SA_RESTART;
+	assert(sigaction(SIGINT, &action, &saved_int) == 0);
+	sigemptyset(&action.sa_mask);
+	sigaddset(&action.sa_mask, SIGUSR2);
+	action.sa_flags = 0;
+	assert(sigaction(SIGTERM, &action, &saved_term) == 0);
+	application.ui = fplinux_ui_open("org.fplinux.runtime-test",
+					 runtime_event, &application);
+	if (!strcmp(scenario, "runtime-failed-open")) {
+		assert(!application.ui);
+		check_borrowed_signals();
+		assert(sigaction(SIGTERM, &saved_term, NULL) == 0);
+		assert(sigaction(SIGINT, &saved_int, NULL) == 0);
+		return 0;
+	}
+	assert(application.ui);
+	paint(application.ui, 0xff0000);
+	application.timer = lv_timer_create(runtime_timer, 1000, &application);
+	assert(application.timer);
+	lv_timer_pause(application.timer);
+	if (!strncmp(scenario, "runtime-close-", 14))
+		fplinux_ui_set_close_handler(application.ui, runtime_close,
+					     &application);
+	if (!strncmp(scenario, "runtime-document-", 17))
+		fplinux_ui_set_document_handler(application.ui,
+						runtime_document, &application);
+	if (!strncmp(scenario, "runtime-watch-", 14)) {
+		assert(pipe2(application.watched, O_CLOEXEC | O_NONBLOCK) == 0);
+		assert(pipe2(application.replacement, O_CLOEXEC | O_NONBLOCK) ==
+		       0);
+		fplinux_ui_watch_fd(application.ui, application.watched[0],
+				    POLLIN, runtime_watch, &application);
+	}
+	result = fplinux_ui_run(application.ui);
+	lv_timer_delete(application.timer);
+	fplinux_ui_close(application.ui);
+	check_borrowed_signals();
+	assert(sigaction(SIGTERM, &saved_term, NULL) == 0);
+	assert(sigaction(SIGINT, &saved_int, NULL) == 0);
+	for (unsigned int i = 0; i < 2; ++i) {
+		if (application.watched[i] >= 0)
+			assert(close(application.watched[i]) == 0);
+		if (application.replacement[i] >= 0)
+			assert(close(application.replacement[i]) == 0);
+	}
+	if (strstr(scenario, "-invalid")) {
+		assert(result == -1 && application.closed);
+	} else {
+		assert(result == 0);
+		if (strstr(scenario, "-quit") || strstr(scenario, "-watch-"))
+			assert(!application.closed);
+		else
+			assert(application.closed);
+	}
+	assert(application.lifecycle_events == 1);
+	return 0;
 }
 
 static void send_observation(int control, const struct observation *observation)
@@ -2108,6 +2886,15 @@ static void check_ack(struct fplinux_ui_frame_peer *compositor, int session,
 		expected = FPLINUX_UI_SESSION_ACTIVATION_ACK;
 		if (update.activation == FPLINUX_UI_SESSION_ACTIVATION_RESUME)
 			colour = 0x001f;
+	} else if (!strcmp(scenario, "document-accepted") ||
+		   !strcmp(scenario, "document-wait")) {
+		update.type = FPLINUX_UI_SESSION_DOCUMENT;
+		strcpy(update.path, "/tmp/Игра one 'quoted'.jar");
+		expected = !strcmp(scenario, "document-wait") ?
+				   FPLINUX_UI_SESSION_ACTIVATION_ACK :
+				   FPLINUX_UI_SESSION_DOCUMENT_RESULT;
+		if (expected == FPLINUX_UI_SESSION_ACTIVATION_ACK)
+			colour = 0xffe0;
 	} else if (!strcmp(scenario, "error")) {
 		update.type = FPLINUX_UI_SESSION_ERROR;
 		strcpy(update.reason, "save-failed");
@@ -2143,6 +2930,12 @@ static void check_ack(struct fplinux_ui_frame_peer *compositor, int session,
 	    strcmp(scenario, "unapplied-theme"))
 		assert(fplinux_ui_session_send(session, &update));
 	wait_input(compositor, control, 'a');
+	if (!strcmp(scenario, "document-wait")) {
+		ack = wait_message(compositor, session,
+				   FPLINUX_UI_SESSION_DOCUMENT_RESULT);
+		assert(ack.serial == 73 &&
+		       ack.document_status == FPLINUX_UI_DOCUMENT_WAIT);
+	}
 	assert_quiet(compositor, session, 2);
 	fplinux_ui_frame_release_buffers(compositor);
 	{
@@ -2155,6 +2948,19 @@ static void check_ack(struct fplinux_ui_frame_peer *compositor, int session,
 	assert(ack.serial == 73);
 	assert(compositor->commits == 3);
 	assert_colour(compositor, colour);
+	if (!strcmp(scenario, "document-accepted"))
+		assert(ack.document_status == FPLINUX_UI_DOCUMENT_ACCEPTED);
+	if (!strcmp(scenario, "document-wait")) {
+		fplinux_ui_frame_release_buffers(compositor);
+		assert(write(control, "d", 1) == 1);
+		wait_input(compositor, control, 'd');
+		ack = wait_message(compositor, session,
+				   FPLINUX_UI_SESSION_DOCUMENT_RESULT);
+		assert(ack.serial == 73 &&
+		       ack.document_status == FPLINUX_UI_DOCUMENT_ACCEPTED);
+		assert(compositor->commits == 4);
+		assert_colour(compositor, 0x07e0);
+	}
 }
 
 static void wait_application(struct fplinux_ui_frame_peer *compositor,
@@ -2225,6 +3031,119 @@ static void send_visibility(struct fplinux_ui_frame_peer *compositor,
 
 	assert(fplinux_ui_session_send(session, &message));
 	wait_input(compositor, control, visible ? 'V' : 'H');
+}
+
+static struct marquee_observation
+marquee_command(struct fplinux_ui_frame_peer *compositor, int control,
+		char command)
+{
+	struct marquee_observation observation;
+
+	assert(write(control, &command, 1) == 1);
+	fplinux_ui_frame_wait_readable(compositor, control);
+	assert(read(control, &observation, sizeof(observation)) ==
+	       (ssize_t)sizeof(observation));
+	return observation;
+}
+
+static void assert_marquee_idle(struct marquee_observation observation)
+{
+	assert(!observation.scrolling[0] && !observation.scrolling[1]);
+	assert(!observation.animated[0] && !observation.animated[1]);
+	assert(!observation.animations && observation.timer_paused);
+}
+
+static void finish_marquee_pass(struct fplinux_ui_frame_peer *compositor,
+				int session, int control,
+				struct marquee_observation observation,
+				bool primary, bool detail)
+{
+	unsigned int commits = compositor->commits;
+	bool saw_primary = false;
+	bool saw_detail = false;
+
+	for (unsigned int step = 0; step < 64; ++step) {
+		assert(observation.scrolling[0] == observation.animated[0]);
+		assert(observation.scrolling[1] == observation.animated[1]);
+		assert(!(observation.animated[0] && observation.animated[1]));
+		if (saw_detail)
+			assert(!observation.animated[0]);
+		saw_primary |= observation.animated[0];
+		saw_detail |= observation.animated[1];
+		if (!observation.animations)
+			break;
+		observation = marquee_command(compositor, control, 't');
+	}
+	assert(saw_primary == primary && saw_detail == detail);
+	assert_marquee_idle(observation);
+	/* Drain the final native frame before measuring the settled renderer. */
+	pump_duration(compositor, 20);
+	assert(compositor->commits > commits);
+	commits = compositor->commits;
+	assert_marquee_idle(marquee_command(compositor, control, 'i'));
+	assert_quiet(compositor, session, commits);
+}
+
+static void check_marquee(struct fplinux_ui_frame_peer *compositor, int session,
+			  int control, bool list)
+{
+	struct marquee_observation observation =
+		marquee_command(compositor, control, list ? 'L' : 'R');
+	unsigned int commits;
+
+	/* A newly pushed screen first reports its normal soft-key legends. */
+	wait_message(compositor, session, FPLINUX_UI_SESSION_SOFTKEYS);
+	finish_marquee_pass(compositor, session, control, observation, true,
+			    list);
+	assert_marquee_idle(marquee_command(compositor, control, 'S'));
+	commits = compositor->commits;
+	assert_marquee_idle(marquee_command(compositor, control, 'i'));
+	assert_quiet(compositor, session, commits);
+	/* Visibility alone does not grant a completed row another pass. */
+	send_visibility(compositor, session, control, false);
+	assert_marquee_idle(marquee_command(compositor, control, 'i'));
+	send_visibility(compositor, session, control, true);
+	assert_marquee_idle(marquee_command(compositor, control, 'q'));
+	pump_duration(compositor, 20);
+	commits = compositor->commits;
+	assert_marquee_idle(marquee_command(compositor, control, 'i'));
+	assert_quiet(compositor, session, commits);
+	if (list) {
+		/* The short primary gives its turn immediately to the long detail. */
+		observation = marquee_command(compositor, control, 'F');
+		finish_marquee_pass(compositor, session, control, observation,
+				    false, true);
+		assert_marquee_idle(marquee_command(compositor, control, 'S'));
+	}
+	commits = compositor->commits;
+	send_visibility(compositor, session, control, false);
+	assert_marquee_idle(marquee_command(compositor, control, 'U'));
+	assert_marquee_idle(marquee_command(compositor, control, 'i'));
+	assert_quiet(compositor, session, commits);
+	send_visibility(compositor, session, control, true);
+	observation = marquee_command(compositor, control, 'q');
+	finish_marquee_pass(compositor, session, control, observation, !list,
+			    list);
+	observation = marquee_command(compositor, control, 'T');
+	assert(observation.animated[list ? 1 : 0]);
+	observation = marquee_command(compositor, control, 't');
+	assert(observation.animated[list ? 1 : 0]);
+	send_visibility(compositor, session, control, false);
+	assert_marquee_idle(marquee_command(compositor, control, 'q'));
+	commits = compositor->commits;
+	assert_marquee_idle(marquee_command(compositor, control, 'i'));
+	assert_marquee_idle(marquee_command(compositor, control, 'U'));
+	assert_quiet(compositor, session, commits);
+	send_visibility(compositor, session, control, true);
+	observation = marquee_command(compositor, control, 'q');
+	finish_marquee_pass(compositor, session, control, observation, !list,
+			    list);
+	if (!list) {
+		assert_marquee_idle(marquee_command(compositor, control, 'B'));
+		observation = marquee_command(compositor, control, 'S');
+		finish_marquee_pass(compositor, session, control, observation,
+				    true, false);
+	}
 }
 
 static void assert_vibration_packet(struct fplinux_ui_frame_peer *compositor,
@@ -2469,6 +3388,9 @@ static void check_close_decisions(struct fplinux_ui_frame_peer *compositor,
 		return;
 	/* A duplicate request must not save twice or stack another decision. */
 	before = compositor->commits;
+	assert(write(control, "b", 1) == 1);
+	wait_input(compositor, control, 'b');
+	wait_message(compositor, session, FPLINUX_UI_SESSION_EXIT);
 	assert(fplinux_ui_session_send(session, &prepare));
 	assert_close_reply(compositor, session, 31, "wait");
 	assert(wait_message(compositor, session, FPLINUX_UI_SESSION_CLOSE_ACK)
@@ -2484,6 +3406,16 @@ static void check_close_decisions(struct fplinux_ui_frame_peer *compositor,
 	wait_input(compositor, control, 'a');
 	wait_commits(compositor, before + 1);
 	assert_colour(compositor, 0x001f);
+	/* A repeated Back may arrive after the pending decision was cancelled. */
+	before = compositor->commits;
+	assert(write(control, "b", 1) == 1);
+	wait_input(compositor, control, 'b');
+	wait_message(compositor, session, FPLINUX_UI_SESSION_EXIT);
+	assert(fplinux_ui_session_send(session, &prepare));
+	assert_close_reply(compositor, session, 31, "cancel");
+	assert(wait_message(compositor, session, FPLINUX_UI_SESSION_CLOSE_ACK)
+		       .serial == 31);
+	wait_commits(compositor, before + 1);
 	prepare.serial = 32;
 	before = compositor->commits;
 	assert(fplinux_ui_session_send(session, &prepare));
@@ -2581,6 +3513,41 @@ check_close_acknowledgments(struct fplinux_ui_frame_peer *compositor,
 	assert_colour(compositor, appearance_first || hidden ? 0xffe0 : 0x07e0);
 }
 
+static void check_storage_api(struct fplinux_ui_frame_peer *compositor,
+			      int session, int control)
+{
+	struct fplinux_ui_session_message request;
+	struct fplinux_ui_session_message result = {
+		.type = FPLINUX_UI_SESSION_STORAGE_RESULT,
+		.volume_result = {
+			.error = EBUSY,
+			.snapshot = {
+				.count = 1,
+				.home_persistent = true,
+				.volumes = {{
+					.id = UINT32_MAX,
+					.mount_id = 31,
+					.state = FPLINUX_VOLUME_MOUNTED,
+					.label = "Карта",
+					.path = "/mnt/card",
+				}},
+			},
+		},
+	};
+
+	assert(write(control, "g", 1) == 1);
+	wait_input(compositor, control, 'a');
+	request = wait_message(compositor, session,
+			       FPLINUX_UI_SESSION_STORAGE_REQUEST);
+	assert(request.volume_operation == FPLINUX_VOLUME_REFRESH &&
+	       !request.volume_id);
+	result.serial = result.volume_result.request_id = request.serial + 1;
+	assert(fplinux_ui_session_send(session, &result));
+	result.serial = result.volume_result.request_id = request.serial;
+	assert(fplinux_ui_session_send(session, &result));
+	wait_input(compositor, control, 's');
+}
+
 static void check_lazy_preferences(const char *directory)
 {
 	struct fplinux_ui_prefs *prefs;
@@ -2625,10 +3592,110 @@ static void check_storage_errors(void)
 		       ""));
 }
 
+struct early_close_request {
+	struct fplinux_ui_frame_peer *compositor;
+	bool sent;
+};
+
+static void close_during_open(void *context,
+			      enum wl_protocol_logger_type direction,
+			      const struct wl_protocol_logger_message *message)
+{
+	struct early_close_request *request = context;
+
+	if (request->sent || direction != WL_PROTOCOL_LOGGER_EVENT ||
+	    strcmp(wl_resource_get_class(message->resource), "xdg_surface") ||
+	    strcmp(message->message->name, "configure"))
+		return;
+	request->sent = true;
+	/* CLOSE precedes the initial configure in open's Wayland roundtrip. */
+	xdg_toplevel_send_close(request->compositor->toplevel);
+}
+
+static void check_runtime(struct fplinux_ui_frame_peer *compositor, int session,
+			  int control, pid_t child, const char *scenario)
+{
+	struct fplinux_ui_session_message request = { .serial = 73 };
+
+	if (!strncmp(scenario, "runtime-watch-", 14)) {
+		request.type = FPLINUX_UI_SESSION_ERROR;
+		strcpy(request.reason, "watch-ready");
+		assert(fplinux_ui_session_send(session, &request));
+		wait_input(compositor, control, 'w');
+		fplinux_ui_frame_configure(compositor, 240, 288, false);
+		wl_display_flush_clients(compositor->display);
+		assert(write(control, "g", 1) == 1);
+		wait_application(compositor, child, 0);
+		return;
+	}
+	if (!strncmp(scenario, "runtime-close-", 14)) {
+		request.type = FPLINUX_UI_SESSION_PREPARE_CLOSE;
+		assert(fplinux_ui_session_send(session, &request));
+		if (!strcmp(scenario, "runtime-close-quit"))
+			assert_close_reply(compositor, session, 73, "ready");
+		else if (!strcmp(scenario, "runtime-close-self-reply")) {
+			assert_close_reply(compositor, session, 73, "wait");
+			assert(wait_message(compositor, session,
+					    FPLINUX_UI_SESSION_CLOSE_ACK)
+				       .serial == 73);
+			finish_application(compositor, session, child);
+			return;
+		}
+		wait_application(compositor, child, 0);
+		return;
+	}
+	if (!strncmp(scenario, "runtime-document-", 17)) {
+		request.type = FPLINUX_UI_SESSION_DOCUMENT;
+		strcpy(request.path, "/tmp/runtime-test.txt");
+		assert(fplinux_ui_session_send(session, &request));
+		if (!strcmp(scenario, "runtime-document-quit")) {
+			struct fplinux_ui_session_message result = wait_message(
+				compositor, session,
+				FPLINUX_UI_SESSION_DOCUMENT_RESULT);
+
+			assert(result.serial == 73);
+			assert(result.document_status ==
+			       FPLINUX_UI_DOCUMENT_ERROR);
+			assert(result.document_error == ECANCELED);
+		} else if (!strcmp(scenario, "runtime-document-self-reply")) {
+			struct fplinux_ui_session_message result = wait_message(
+				compositor, session,
+				FPLINUX_UI_SESSION_DOCUMENT_RESULT);
+
+			assert(result.serial == 73);
+			assert(result.document_status ==
+			       FPLINUX_UI_DOCUMENT_WAIT);
+			assert(wait_message(compositor, session,
+					    FPLINUX_UI_SESSION_ACTIVATION_ACK)
+				       .serial == 73);
+			finish_application(compositor, session, child);
+			return;
+		}
+		wait_application(compositor, child, 0);
+		return;
+	}
+	if (!strcmp(scenario, "runtime-final-close")) {
+		unsigned int before = compositor->commits;
+
+		request.type = FPLINUX_UI_SESSION_CLOSE;
+		assert(fplinux_ui_session_send(session, &request));
+		request.type = FPLINUX_UI_SESSION_VISIBILITY;
+		request.visible = false;
+		assert(fplinux_ui_session_send(session, &request));
+		wait_application(compositor, child, 0);
+		assert(compositor->commits == before);
+		return;
+	}
+	assert(!strcmp(scenario, "runtime-signals"));
+	finish_application(compositor, session, child);
+}
+
 int main(int argc, char **argv)
 {
 	struct fplinux_ui_frame_peer compositor = { 0 };
 	struct media_audio_peer audio_peer = { .fd = -1 };
+	struct early_close_request early_close = { .compositor = &compositor };
+	struct wl_protocol_logger *protocol_logger = NULL;
 	struct fplinux_ui_session_message config = {
 		.type = FPLINUX_UI_SESSION_CONFIG,
 		.mode = FPLINUX_UI_SESSION_LAUNCHER,
@@ -2639,7 +3706,7 @@ int main(int argc, char **argv)
 	int listener, session;
 	int audio_listener = -1;
 	pid_t child;
-	bool repeat, media, audio;
+	bool repeat, media, audio, navigation, marquee;
 	bool cold_activation;
 
 	assert(argc == 3 || argc == 4);
@@ -2656,9 +3723,11 @@ int main(int argc, char **argv)
 	repeat = !strncmp(argv[1], "repeat-", 7);
 	media = !strncmp(argv[1], "media-", 6);
 	audio = !strncmp(argv[1], "media-audio-", 12);
+	navigation = !strncmp(argv[1], "stack-", 6);
+	marquee = !strncmp(argv[1], "marquee-", 8);
 	cold_activation = !strcmp(argv[1], "activation-cold");
-	assert((repeat || audio) == (argc == 4));
-	if (repeat)
+	assert((repeat || audio || navigation) == (argc == 4));
+	if (repeat || navigation)
 		check_repeat_keymap(argv[3]);
 	if (audio)
 		audio_listener = fplinux_ui_frame_listen_session(argv[3]);
@@ -2679,23 +3748,53 @@ int main(int argc, char **argv)
 		fplinux_ui_frame_client_environment(wayland[1], argv[2]);
 		if (media)
 			return run_media_application(control[1], argv[1]);
+		if (navigation)
+			return fplinux_ui_test_navigation_client(control[1],
+								 argv[1]);
+		if (!strncmp(argv[1], "runtime-", 8))
+			return run_runtime_application(control[1], argv[1]);
+		if (marquee)
+			return run_marquee_application(control[1]);
 		return repeat ? run_repeat_application(control[1]) :
 				run_application(control[1], argv[1]);
 	}
 	close(wayland[1]);
 	close(control[1]);
 	fplinux_ui_frame_init(&compositor, wayland[0], 240, 320,
-			      repeat ? argv[3] : NULL);
-	compositor.release_frames = repeat || media ||
+			      repeat || navigation ? argv[3] : NULL);
+	if (!strcmp(argv[1], "runtime-early-close")) {
+		protocol_logger = wl_display_add_protocol_logger(
+			compositor.display, close_during_open, &early_close);
+		assert(protocol_logger);
+	}
+	compositor.release_frames = repeat || media || navigation || marquee ||
+				    !strncmp(argv[1], "runtime-", 8) ||
 				    !strcmp(argv[1], "close-decisions") ||
 				    !strcmp(argv[1], "close-forced");
 	session = fplinux_ui_frame_accept_session(&compositor, listener);
 	wait_message(&compositor, session, FPLINUX_UI_SESSION_HELLO);
+	if (!strcmp(argv[1], "runtime-failed-open")) {
+		assert(close(session) == 0);
+		wait_application(&compositor, child, 0);
+		goto cleanup;
+	}
 	strcpy(config.locale, "en");
+	if (!strncmp(argv[1], "text-decimal-", 13) &&
+	    strcmp(argv[1], "text-decimal-dot") &&
+	    strcmp(argv[1], "text-decimal-any"))
+		strcpy(config.locale, "ru");
+	if (!strcmp(argv[1], "storage-api") || navigation)
+		config.mode = FPLINUX_UI_SESSION_INTEGRATED;
 	strcpy(config.input_locale, "en");
 	config.audio = config.vibration =
 		media && strcmp(argv[1], "media-unsupported") != 0;
 	assert(fplinux_ui_session_send(session, &config));
+	if (!strcmp(argv[1], "runtime-early-close")) {
+		wait_application(&compositor, child, 0);
+		assert(early_close.sent && compositor.commits == 0);
+		assert(close(session) == 0);
+		goto cleanup;
+	}
 	if (cold_activation) {
 		struct fplinux_ui_session_message activation = {
 			.type = FPLINUX_UI_SESSION_ACTIVATION,
@@ -2708,6 +3807,11 @@ int main(int argc, char **argv)
 	wait_message(&compositor, session, FPLINUX_UI_SESSION_READY);
 	wait_commits(&compositor, 1);
 	assert_colour(&compositor, cold_activation ? 0x07e0 : 0xf800);
+	if (!strncmp(argv[1], "runtime-", 8)) {
+		check_runtime(&compositor, session, control[0], child, argv[1]);
+		assert(close(session) == 0);
+		goto cleanup;
+	}
 	if (!strcmp(argv[1], "disconnect")) {
 		check_failed_exit(&compositor, session, control[0], child);
 	} else {
@@ -2717,7 +3821,10 @@ int main(int argc, char **argv)
 					    FPLINUX_UI_SESSION_ACTIVATION_ACK)
 				       .serial == 91);
 			assert(compositor.commits == 1);
-		} else if (audio)
+		} else if (navigation)
+			fplinux_ui_test_navigation_check(&compositor, session,
+							 control[0], argv[1]);
+		else if (audio)
 			check_media_audio(&compositor, audio_listener,
 					  control[0], &audio_peer,
 					  !strcmp(argv[1], "media-audio-hup"));
@@ -2727,11 +3834,16 @@ int main(int argc, char **argv)
 						      "media-lifecycle"));
 		else if (repeat)
 			check_repeat(&compositor, session, control[0], argv[1]);
+		else if (marquee)
+			check_marquee(&compositor, session, control[0],
+				      !strcmp(argv[1], "marquee-list"));
 		else if (!strcmp(argv[1], "exit") ||
 			 !strcmp(argv[1], "metrics"))
 			check_exit(&compositor, session, control[0], child);
 		else if (!strcmp(argv[1], "softkeys"))
 			check_softkeys(&compositor, session, control[0]);
+		else if (!strcmp(argv[1], "storage-api"))
+			check_storage_api(&compositor, session, control[0]);
 		else if (!strcmp(argv[1], "launcher-screens"))
 			check_launcher_screens(&compositor, control[0]);
 		else if (!strcmp(argv[1], "prepare-close"))
@@ -2747,7 +3859,47 @@ int main(int argc, char **argv)
 			 !strcmp(argv[1], "close-hidden"))
 			check_close_acknowledgments(&compositor, session,
 						    control[0], argv[1]);
-		else
+		else if (!strncmp(argv[1], "lifetime-", 9)) {
+			char command;
+
+			if (!strcmp(argv[1], "lifetime-list-plain"))
+				command = 'L';
+			else if (!strcmp(argv[1], "lifetime-list-scrolled"))
+				command = 'S';
+			else if (!strcmp(argv[1], "lifetime-menu-reclaim"))
+				command = 'M';
+			else if (!strcmp(argv[1], "lifetime-menu-reentrant"))
+				command = 'R';
+			else {
+				assert(!strcmp(argv[1],
+					       "lifetime-menu-final-close"));
+				command = 'F';
+			}
+			assert(write(control[0], &command, 1) == 1);
+			wait_input(&compositor, control[0], command);
+		} else if (!strncmp(argv[1], "text-", 5)) {
+			char command;
+
+			if (!strcmp(argv[1], "text-normalize"))
+				command = 'N';
+			else if (!strcmp(argv[1], "text-decimal-dot"))
+				command = 'D';
+			else if (!strcmp(argv[1], "text-decimal-comma"))
+				command = 'C';
+			else if (!strcmp(argv[1], "text-decimal-password"))
+				command = 'P';
+			else if (!strcmp(argv[1], "text-decimal-uneditable"))
+				command = 'U';
+			else if (!strcmp(argv[1], "text-decimal-any"))
+				command = 'A';
+			else {
+				assert(!strcmp(argv[1],
+					       "text-decimal-allocation"));
+				command = 'E';
+			}
+			assert(write(control[0], &command, 1) == 1);
+			wait_input(&compositor, control[0], command);
+		} else
 			check_ack(&compositor, session, control[0], argv[1]);
 		finish_application(&compositor, session, child);
 		if (audio)
@@ -2756,6 +3908,9 @@ int main(int argc, char **argv)
 			check_repeat_closed(&compositor, control[0], argv[1]);
 		close(session);
 	}
+cleanup:
+	if (protocol_logger)
+		wl_protocol_logger_destroy(protocol_logger);
 	close(control[0]);
 	close(listener);
 	if (audio) {

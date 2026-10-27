@@ -110,6 +110,7 @@ def caret_consumer(
     "scenario",
     [
         "blink",
+        "idle-caret",
         "transitions",
         "scroll",
         "vertical-scroll",
@@ -159,6 +160,28 @@ def test_native_viewport_releases_scrollbar_space_when_text_fits(
             str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
         ],
         name="resize real wrapped text through fit, overflow and fit again",
+        timeout=10,
+        check=True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("width", "height"),
+    [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)],
+)
+def test_native_menu_groups_draw_boundaries_without_changing_rows_or_actions(
+    caret_consumer: Path, width: int, height: int
+) -> None:
+    """Real menu pixels separate groups while focus wraps through actual actions."""
+    run_process(
+        [
+            str(caret_consumer),
+            "menu-groups",
+            str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
+            str(width),
+            str(height),
+        ],
+        name=f"native menu group boundaries and navigation at {width}x{height}",
         timeout=10,
         check=True,
     )
@@ -558,8 +581,8 @@ def test_list_focus_listener_distinguishes_navigation_from_marked_values(
 @pytest.mark.parametrize(
     ("lcd", "surface_height", "bounds"),
     [
-        pytest.param((128, 128), 96, (2, 0, 123, 96), id="128x128"),
-        pytest.param((128, 160), 128, (2, 16, 123, 96), id="128x160"),
+        pytest.param((128, 128), 96, (1, 0, 126, 96), id="128x128"),
+        pytest.param((128, 160), 128, (1, 16, 126, 96), id="128x160"),
         pytest.param((176, 220), 178, (5, 7, 166, 164), id="176x220"),
         pytest.param((240, 320), 268, (24, 44, 192, 180), id="240x320"),
         pytest.param((320, 240), 196, (20, 33, 280, 130), id="320x240"),
@@ -615,6 +638,43 @@ def test_native_framed_form_image_fits_the_actual_scrolling_viewport(
             str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
         ],
         name="native framed image inside an overflowing Form viewport",
+        timeout=10,
+        check=True,
+    )
+
+
+@pytest.mark.parametrize("format_name", ["colour", "mask"])
+@pytest.mark.parametrize(
+    ("width", "height"),
+    [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)],
+)
+def test_native_form_image_resizes_below_its_measured_caption(
+    caret_consumer: Path, format_name: str, width: int, height: int
+) -> None:
+    """Owned image pixels fit a multiline caption, the scrollbar and each resized view."""
+    run_process(
+        [
+            str(caret_consumer),
+            f"form-image-caption-{format_name}",
+            str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
+            str(width),
+            str(height),
+        ],
+        name=f"native {format_name} Form image and caption at {width}x{height}",
+        timeout=10,
+        check=True,
+    )
+
+
+def test_native_read_only_text_pages_and_resizes_on_whole_lines(caret_consumer: Path) -> None:
+    """Native line origins stay aligned through paging, both limits and viewport changes."""
+    run_process(
+        [
+            str(caret_consumer),
+            "read-only-whole-lines",
+            str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
+        ],
+        name="native read-only whole-line scrolling and resize",
         timeout=10,
         check=True,
     )

@@ -34,6 +34,75 @@ static bool copy_value(char *destination, size_t capacity, const char *value)
 	return true;
 }
 
+static bool icon_valid(const char *icon)
+{
+	if (!icon[0] || icon[0] == '.')
+		return false;
+	for (const unsigned char *p = (const unsigned char *)icon; *p; ++p)
+		if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+		      (*p >= '0' && *p <= '9') || *p == '.' || *p == '_' ||
+		      *p == '-'))
+			return false;
+	return true;
+}
+
+static bool read_extensions(char *destination, const char *value)
+{
+	bool character = false;
+
+	if (!copy_value(destination, FPLINUX_DESKTOP_EXTENSIONS_BYTES, value))
+		return false;
+	for (char *p = destination; *p; ++p) {
+		if (*p == ';') {
+			if (!character)
+				return false;
+			character = false;
+		} else if ((*p >= 'a' && *p <= 'z') ||
+			   (*p >= 'A' && *p <= 'Z') ||
+			   (*p >= '0' && *p <= '9') || *p == '_' || *p == '-') {
+			if (*p >= 'A' && *p <= 'Z')
+				*p += 'a' - 'A';
+			character = true;
+		} else {
+			return false;
+		}
+	}
+	return !character;
+}
+
+bool fplinux_desktop_entry_handles(const struct fplinux_desktop_entry *entry,
+				   const char *path)
+{
+	const char *name = strrchr(path, '/');
+	const char *basename = name ? name + 1 : path;
+	const char *extension = strrchr(basename, '.');
+	size_t bytes;
+
+	if (entry->hidden || !extension || extension == basename ||
+	    !extension[1])
+		return false;
+	++extension;
+	bytes = strlen(extension);
+	for (const char *p = entry->extensions; *p;) {
+		const char *end = strchr(p, ';');
+		bool matches = end && (size_t)(end - p) == bytes;
+
+		if (!end)
+			return false;
+		for (size_t i = 0; matches && i < bytes; ++i) {
+			unsigned char c = extension[i];
+
+			if (c >= 'A' && c <= 'Z')
+				c += 'a' - 'A';
+			matches = c == (unsigned char)p[i];
+		}
+		if (matches)
+			return true;
+		p = end + 1;
+	}
+	return false;
+}
+
 bool fplinux_desktop_entry_read(const char *directory, const char *id,
 				const char *locale, uid_t metadata_uid,
 				struct fplinux_desktop_entry *entry,
@@ -54,6 +123,7 @@ bool fplinux_desktop_entry_read(const char *directory, const char *id,
 	int fd;
 
 	memset(entry, 0, sizeof(*entry));
+	entry->icon_valid = true;
 	if (!fplinux_desktop_entry_valid_id(id) ||
 	    (locale && snprintf(name_key, sizeof(name_key), "Name[%s]",
 				locale) >= (int)sizeof(name_key)) ||
@@ -104,6 +174,17 @@ bool fplinux_desktop_entry_read(const char *directory, const char *id,
 		else if (!strcmp(line, "Exec"))
 			valid &= copy_value(entry->executable,
 					    sizeof(entry->executable), value);
+		else if (!strcmp(line, "Icon")) {
+			entry->icon_valid = copy_value(entry->icon,
+						       sizeof(entry->icon),
+						       value) &&
+					    icon_valid(entry->icon);
+		} else if (!strcmp(line, "Hidden"))
+			entry->hidden = !strcmp(value, "true");
+		else if (!strcmp(line, "NoDisplay"))
+			entry->no_display = !strcmp(value, "true");
+		else if (!strcmp(line, "X-FPLinux-FileExtensions"))
+			valid &= read_extensions(entry->extensions, value);
 		else if (!strcmp(line, "X-FPLinux-Mode")) {
 			has_mode = true;
 			if (!strcmp(value, "launcher"))

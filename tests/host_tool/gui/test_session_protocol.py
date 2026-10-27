@@ -30,6 +30,7 @@ def run_harness(tmp_path: Path, source: str, *, wraps: tuple[str, ...] = ()) -> 
             str(ROOT / "include/fplinux"),
             str(Path(__file__).with_name(source)),
             str(ROOT / "lib/fplinux/fplinux-ui-session.c"),
+            str(ROOT / "lib/fplinux/fplinux-utf8.c"),
             *(f"-Wl,--wrap={name}" for name in wraps),
             *shlex.split(flags.stdout),
         ],
