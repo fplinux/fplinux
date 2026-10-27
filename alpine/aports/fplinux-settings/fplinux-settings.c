@@ -1285,18 +1285,41 @@ static void root_command(struct fplinux_ui *ui, struct fplinux_ui_screen *list,
 	}
 }
 
+static void show_root(struct settings_app *app)
+{
+	char value[FPLINUX_LANGUAGE_TEXT_BYTES];
+
+	if (!app->root)
+		return;
+	fplinux_ui_list_set(app->root, ROOT_DISPLAY, _("Display"),
+			    choice_label(&theme_choice, theme_kind(app)));
+	language_name(fplinux_ui_locale(app->ui), value, sizeof(value));
+	fplinux_ui_list_set(app->root, ROOT_TIME_LANGUAGE, _("Time & language"),
+			    value);
+	language_name(fplinux_ui_input_locale(app->ui), value, sizeof(value));
+	fplinux_ui_list_set(app->root, ROOT_INPUT, _("Input"),
+			    app->input_unavailable ? _("Unavailable") : value);
+}
+
 static struct fplinux_ui_screen *create_root(struct settings_app *app)
 {
 	struct fplinux_ui_screen *list = new_list(app, _("Settings"),
 						  FPLINUX_UI_LIST_IMPLICIT,
 						  root_command, NULL);
+	char value[128];
 
 	if (!list)
 		return NULL;
+	fplinux_ui_list_set_value_details(list);
 	fplinux_ui_list_append(list, _("Display"), NULL);
 	fplinux_ui_list_append(list, _("Time & language"), NULL);
 	fplinux_ui_list_append(list, _("Input"), NULL);
-	fplinux_ui_list_append(list, _("About"), NULL);
+	fplinux_ui_list_append(list, _("About"),
+			       fplinux_settings_read_os_name("/etc/os-release",
+							     value,
+							     sizeof(value)) ?
+				       value :
+				       NULL);
 	set_glyph(app, list, ROOT_DISPLAY, "display");
 	set_glyph(app, list, ROOT_TIME_LANGUAGE, "date-time");
 	set_glyph(app, list, ROOT_INPUT, "keyboard");
@@ -1364,6 +1387,7 @@ static void rebuild(struct settings_app *app)
 	fplinux_ui_list_set_focused(root, focus);
 	fplinux_ui_replace(app->ui, root);
 	app->root = root;
+	show_root(app);
 	if (!root_requested && display)
 		open_display(app, DISPLAY_THEME);
 	else if (!root_requested && time_language)
@@ -1403,6 +1427,7 @@ static void apply_setting(struct settings_app *app, const char *name,
 	} else if (!strcmp(name, "input_locale")) {
 		app->input_unavailable = false;
 		show_input(app);
+		show_root(app);
 		return;
 	} else if (!strcmp(name, "time")) {
 		/* The clock is set: show it and wait for its next minute. */
@@ -1424,6 +1449,7 @@ static void apply_setting(struct settings_app *app, const char *name,
 		return;
 	}
 	show_display(app);
+	show_root(app);
 }
 
 /* Known setting names are product labels, never protocol identifiers. */
@@ -1531,6 +1557,7 @@ static void show_error(struct settings_app *app,
 		} else if (!strcmp(message->name, "input_locale")) {
 			app->input_unavailable = true;
 			show_input(app);
+			show_root(app);
 		}
 		return;
 	}
@@ -1691,6 +1718,7 @@ int main(int argc, char **argv)
 	}
 	fplinux_ui_push(app.ui, root);
 	app.root = root;
+	show_root(&app);
 	/* The language and theme came with CONFIG; the rest is asked for. */
 	query_setting(&app, "brightness");
 	query_setting(&app, "screen_off_seconds");

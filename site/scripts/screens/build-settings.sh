@@ -23,8 +23,12 @@ ui_host_build_application -I"$settings" \
 	"$settings/fplinux-settings.c" "$settings/settings-core.c" \
 	"$ui_host_ui/fplinux-settings-values.c" \
 	"$screens_dir/settings-observer.c" \
+	"$screens_dir/list-values-observer.c" \
+	"$screens_dir/native-glyph-resources.c" \
+	-Wl,--wrap=open \
 	-Wl,--wrap=fplinux_ui_open -Wl,--wrap=lv_display_flush_ready \
 	-Wl,--wrap=libintl_bindtextdomain \
+	-Wl,--wrap=fplinux_settings_read_os_name \
 	-Wl,--wrap=fplinux_language_load -Wl,--wrap=fplinux_language_list \
 	-o "$work/settings"
 

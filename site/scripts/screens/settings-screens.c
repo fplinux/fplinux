@@ -32,6 +32,7 @@ struct capture {
 	char left[128];
 	char centre[128];
 	char right[128];
+	char input_locale[FPLINUX_UI_SESSION_LOCALE_BYTES];
 	const char *directory;
 	const char *session_path;
 };
@@ -76,7 +77,7 @@ static void answer_query(struct capture *capture,
 		value = "0";
 	else {
 		assert(!strcmp(query->name, "input_locale"));
-		value = "en";
+		value = capture->input_locale;
 	}
 	strcpy(reply.name, query->name);
 	strcpy(reply.value, value);
@@ -297,15 +298,22 @@ static void save_frame(struct capture *capture, const char *name)
 
 static void start(struct capture *capture, char **arguments)
 {
+	const char *width = getenv("FPLINUX_SETTINGS_TEST_WIDTH");
+	const char *height = getenv("FPLINUX_SETTINGS_TEST_HEIGHT");
+	const char *locale = getenv("FPLINUX_SETTINGS_TEST_LOCALE");
+	const char *theme = getenv("FPLINUX_SETTINGS_TEST_THEME");
 	struct fplinux_ui_session_message config = {
 		.type = FPLINUX_UI_SESSION_CONFIG,
 		.mode = FPLINUX_UI_SESSION_INTEGRATED,
-		.theme = FPLINUX_UI_SESSION_THEME_DARK,
-		.screen_width = 240,
-		.screen_height = 320,
+		.theme = theme && !strcmp(theme, "light") ?
+				 FPLINUX_UI_SESSION_THEME_LIGHT :
+				 FPLINUX_UI_SESSION_THEME_DARK,
+		.screen_width = width ? (unsigned int)atoi(width) : 240,
+		.screen_height = height ? (unsigned int)atoi(height) : 320,
 	};
 	const struct fplinux_ui_profile_spec *profile = fplinux_ui_profile_spec(
-		fplinux_ui_profile_for_screen(240, 320));
+		fplinux_ui_profile_for_screen(config.screen_width,
+					      config.screen_height));
 	struct fplinux_ui_session_message hello;
 	int wayland[2], observer[2];
 
@@ -334,6 +342,13 @@ static void start(struct capture *capture, char **arguments)
 				arguments[1]) < (int)sizeof(catalogues));
 		assert(setenv("FPLINUX_SETTINGS_LOCALE_DIR", catalogues, 1) ==
 		       0);
+		assert(snprintf(catalogues, sizeof(catalogues),
+				"%.*s/icons/usr/share/fplinux/glyphs",
+				(int)(slash - arguments[1]),
+				arguments[1]) < (int)sizeof(catalogues));
+		if (access(catalogues, R_OK) == 0)
+			assert(setenv("FPLINUX_NATIVE_GLYPHS", catalogues, 1) ==
+			       0);
 		assert(setenv("FPLINUX_SETTINGS_LANGUAGE_DIR", arguments[5],
 			      1) == 0);
 		assert(setenv("LANG", "en_US.UTF-8", 1) == 0);
@@ -345,8 +360,8 @@ static void start(struct capture *capture, char **arguments)
 	close(wayland[1]);
 	close(observer[1]);
 	capture->observer = observer[0];
-	fplinux_ui_frame_init(&capture->peer, wayland[0], 240,
-			      320 - profile->status_height -
+	fplinux_ui_frame_init(&capture->peer, wayland[0], config.screen_width,
+			      config.screen_height - profile->status_height -
 				      profile->softkey_height,
 			      arguments[2]);
 	capture->session = fplinux_ui_frame_accept_session(&capture->peer,
@@ -354,11 +369,15 @@ static void start(struct capture *capture, char **arguments)
 	hello = fplinux_ui_frame_wait_message(&capture->peer, capture->session);
 	assert(hello.type == FPLINUX_UI_SESSION_HELLO);
 	assert(!strcmp(hello.app_id, "org.fplinux.settings"));
-	strcpy(config.locale, "en");
-	strcpy(config.input_locale, "en");
+	strcpy(config.locale, locale ? locale : "en");
+	strcpy(config.input_locale, config.locale);
+	strcpy(capture->input_locale, config.input_locale);
 	assert(fplinux_ui_session_send(capture->session, &config));
-	wait_label(capture, "Settings");
-	wait_legends(capture, "", "Open", "Back");
+	wait_label(capture,
+		   !strcmp(config.locale, "ru") ? "Настройки" : "Settings");
+	wait_legends(capture, "",
+		     !strcmp(config.locale, "ru") ? "Открыть" : "Open",
+		     !strcmp(config.locale, "ru") ? "Назад" : "Back");
 	assert(capture->peer.keyboards[1].keyboard);
 	fplinux_ui_frame_focus_keyboard(&capture->peer.keyboards[1]);
 	pump_for(capture, 100);
@@ -561,12 +580,95 @@ date_draft_survives_pending_home_and_refusal(struct capture *capture)
 	puts("settings-date: real editors retain date, time and focus through pending Home, refusal and cancelled close; live-clock reply completes Save");
 }
 
+static void root_values_fit_and_follow_current_settings(struct capture *capture)
+{
+	bool russian = !strcmp(capture->observed.locale, "ru");
+	bool landscape = atoi(getenv("FPLINUX_SETTINGS_TEST_WIDTH")) >
+			 atoi(getenv("FPLINUX_SETTINGS_TEST_HEIGHT"));
+	const char *expected[3] = {
+		capture->observed.theme ? (russian ? "Тёмная" : "Dark") :
+					  (russian ? "Светлая" : "Light"),
+		russian ? "Русский" : "English",
+		russian ? "Русский" : "English",
+	};
+	int column_right = 0;
+	uint64_t deadline;
+	struct fplinux_ui_session_message reply = {
+		.type = FPLINUX_UI_SESSION_SETTING,
+		.applied = true,
+		.storage_state = FPLINUX_STORAGE_DURABLE,
+	};
+
+	for (size_t index = 0; index < 4; ++index) {
+		const struct list_value_observation *row;
+
+		if (index)
+			press(capture, KEY_DOWN);
+		pump_for(capture, 80);
+		row = &capture->observed.root_values[index];
+		screen_check_list_value(row, landscape);
+		if (landscape && index)
+			assert(row->value_right == column_right);
+		column_right = row->value_right;
+		if (index < 3) {
+			if (strcmp(row->value, expected[index]))
+				fprintf(stderr,
+					"Settings root row %zu: actual [%s], expected [%s]\n",
+					index, row->value, expected[index]);
+			assert(!strcmp(row->value, expected[index]));
+			assert(row->value_text_width <=
+			       row->value_right - row->value_left + 1);
+		}
+		save_frame(capture, index == 0 ? "settings-root-display" :
+				    index == 1 ? "settings-root-language" :
+				    index == 2 ? "settings-root-input" :
+						 "settings-root-about");
+	}
+	deadline = fplinux_ui_frame_now_ms() + 5000;
+	while (!capture->observed.root_values[3].value_scrolling &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(capture->observed.root_values[3].value_scrolling);
+	assert(!strcmp(capture->observed.root_values[3].value,
+		       getenv("FPLINUX_SETTINGS_TEST_SYSTEM_NAME")));
+	assert(capture->observed.root_values[3].value_text_width >
+	       capture->observed.root_values[3].value_right -
+		       capture->observed.root_values[3].value_left + 1);
+	for (size_t index = 0; index < 3; ++index)
+		press(capture, KEY_UP);
+	strcpy(reply.name, "theme");
+	strcpy(reply.value, capture->observed.theme ? "light" : "dark");
+	assert(fplinux_ui_session_send(capture->session, &reply));
+	wait_label(capture, !strcmp(reply.value, "light") ?
+				    (russian ? "Светлая" : "Light") :
+				    (russian ? "Тёмная" : "Dark"));
+	press(capture, KEY_DOWN);
+	press(capture, KEY_DOWN);
+	strcpy(reply.name, "input_locale");
+	strcpy(reply.value, russian ? "en" : "ru");
+	strcpy(capture->input_locale, reply.value);
+	assert(fplinux_ui_session_send(capture->session, &reply));
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	while (strcmp(capture->observed.root_values[2].value,
+		      russian ? "English" : "Русский") &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(!strcmp(capture->observed.root_values[2].value,
+		       russian ? "English" : "Русский"));
+	puts("settings-root-values: real glyphs and current values fit; landscape shares a right column; long system name scrolls; replies refresh retained values");
+}
+
 int main(int argc, char **argv)
 {
 	struct capture capture = { 0 };
 
-	assert(argc == 6);
+	assert(argc == 6 || (argc == 7 && !strcmp(argv[6], "root-values")));
 	start(&capture, argv);
+	if (argc == 7) {
+		root_values_fit_and_follow_current_settings(&capture);
+		close_and_reap(&capture);
+		return 0;
+	}
 	open_theme(&capture, true);
 	press(&capture, KEY_UP);
 	press(&capture, KEY_OK);

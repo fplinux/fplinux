@@ -1537,6 +1537,12 @@ bool fplinux_ui_list_set_select_label(struct fplinux_ui_screen *list,
 	return true;
 }
 
+bool fplinux_ui_list_set_value_details(struct fplinux_ui_screen *list)
+{
+	assert(list && !list->is_form && !list->count);
+	return true;
+}
+
 bool fplinux_ui_list_set_icon(struct fplinux_ui_screen *list, size_t index,
 			      const void *src,
 			      enum fplinux_ui_list_icon_kind kind)

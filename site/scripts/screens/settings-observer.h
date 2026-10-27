@@ -2,6 +2,8 @@
 #ifndef FPLINUX_SETTINGS_OBSERVER_H
 #define FPLINUX_SETTINGS_OBSERVER_H
 
+#include "list-values-observer.h"
+
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -15,6 +17,7 @@ struct settings_frame_observation {
 	bool editing;
 	char locale[4];
 	char labels[8192];
+	struct list_value_observation root_values[4];
 };
 
 #endif

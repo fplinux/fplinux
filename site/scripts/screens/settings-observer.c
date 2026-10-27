@@ -8,6 +8,7 @@
 #include <libintl.h>
 #include <lvgl/lvgl.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
 
@@ -34,6 +35,19 @@ char *__wrap_libintl_bindtextdomain(const char *domain, const char *directory)
 
 	return __real_libintl_bindtextdomain(domain, catalogues ? catalogues :
 								  directory);
+}
+
+bool __real_fplinux_settings_read_os_name(const char *path, char *value,
+					  size_t size);
+
+bool __wrap_fplinux_settings_read_os_name(const char *path, char *value,
+					  size_t size)
+{
+	const char *name = getenv("FPLINUX_SETTINGS_TEST_SYSTEM_NAME");
+
+	if (!name)
+		return __real_fplinux_settings_read_os_name(path, value, size);
+	return snprintf(value, size, "%s", name) < (int)size;
 }
 
 static const char *language_directory(const char *directory)
@@ -77,6 +91,19 @@ static void collect_labels(lv_obj_t *object,
 	if (lv_obj_check_type(object, &lv_label_class)) {
 		const char *text = lv_label_get_text(object);
 		size_t length = strlen(text);
+		static const char *const roots[4][2] = {
+			{ "Display", "Экран" },
+			{ "Time & language", "Время и язык" },
+			{ "Input", "Ввод" },
+			{ "About", "О системе" },
+		};
+
+		for (size_t index = 0; index < 4; ++index)
+			if (!strcmp(text, roots[index][0]) ||
+			    !strcmp(text, roots[index][1]))
+				screen_observe_list_value(
+					object,
+					&observation->root_values[index]);
 
 		assert(*used + length + 2 < sizeof(observation->labels));
 		memcpy(observation->labels + *used, text, length);

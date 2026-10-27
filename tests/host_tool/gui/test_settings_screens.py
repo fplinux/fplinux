@@ -22,7 +22,7 @@ SCREENS = ROOT / "site/scripts/screens"
 
 @pytest.fixture(scope="module")
 def settings_native(
-    tmp_path_factory: pytest.TempPathFactory, ui_host_inputs: Path
+    tmp_path_factory: pytest.TempPathFactory, ui_host_inputs: Path, ui_icon_resources: Path
 ) -> Iterator[Path]:
     """Build the real app and peer against the shared native UI inputs."""
     with c_build_directory(tmp_path_factory, "settings-native") as directory:
@@ -32,6 +32,7 @@ def settings_native(
             timeout=180,
             check=True,
         )
+        (directory / "icons").symlink_to(ui_icon_resources, target_is_directory=True)
         yield directory
 
 
@@ -76,3 +77,54 @@ def test_actual_settings_applied_storage_errors_commit_before_ack_and_keep_notic
     ]
     assert all(len(frame) == 240 * 268 * 2 for frame in frames)
     assert len(set(frames)) == 4
+
+
+@pytest.mark.parametrize(
+    "screen",
+    [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)],
+    ids=["128-128", "128-160", "176-220", "240-320", "320-240"],
+)
+@pytest.mark.parametrize("locale", ["en", "ru"])
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_actual_settings_root_values_fit_scroll_and_follow_current_replies(
+    settings_native: Path, tmp_path: Path, screen: tuple[int, int], locale: str, theme: str
+) -> None:
+    """Actual glyph rows keep values readable and refresh after live setting replies."""
+    width, height = screen
+    result = run_process(
+        [
+            str(settings_native / "settings-screens"),
+            str(settings_native / "settings"),
+            str(SCREENS / "keypad.xkb"),
+            str(tmp_path / "session.sock"),
+            str(tmp_path),
+            str(ROOT / "alpine/aports/fplinux-language"),
+            "root-values",
+        ],
+        name=f"measure actual Settings root values at {width}x{height} in {locale}/{theme}",
+        env={
+            "FPLINUX_SETTINGS_TEST_WIDTH": str(width),
+            "FPLINUX_SETTINGS_TEST_HEIGHT": str(height),
+            "FPLINUX_SETTINGS_TEST_LOCALE": locale,
+            "FPLINUX_SETTINGS_TEST_THEME": theme,
+            "FPLINUX_SETTINGS_TEST_SYSTEM_NAME": (
+                "FPLinux release with a long system name that must remain readable "
+                "in every profile"
+            ),
+        },
+        timeout=20,
+    )
+    (tmp_path / "capture.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+    log_root = os.environ.get("FPLINUX_LOG_ROOT")
+    if log_root:
+        shutil.copytree(
+            tmp_path,
+            Path(log_root) / f"settings-root-values-{width}x{height}-{locale}-{theme}",
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("session.sock"),
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "settings-root-values: real glyphs and current values fit; landscape shares a right "
+        "column; long system name scrolls; replies refresh retained values\n"
+    )
