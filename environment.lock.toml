@@ -1110,11 +1110,11 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:libarchive-3.8.7-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libarchive-3.8.7-r0.apk"
-sha256 = "4b90cf43fdc4666015b7849f9459b9daf0ed4c81b17a533dc10eacdd361532e2"
-bytes = 318904
-destination = "downloads/environment/apk/main/x86_64/libarchive-3.8.7-r0.apk"
+key = "environment:apk:x86_64:libarchive-3.8.10-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/libarchive-3.8.10-r0.apk"
+sha256 = "cbdf763a628f0c2cfbb77696ec08bc3c7e9e121c7bf9058a26b4045791c8af38"
+bytes = 325236
+destination = "downloads/environment/apk/main/x86_64/libarchive-3.8.10-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -2001,20 +2001,20 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:musl-1.2.6-r2.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/musl-1.2.6-r2.apk"
-sha256 = "573712e2f49c15bfc20a2699f204acdfc74c772722b15e7353d768057fae0e71"
-bytes = 415475
-destination = "downloads/environment/apk/main/x86_64/musl-1.2.6-r2.apk"
+key = "environment:apk:x86_64:musl-1.2.6-r3.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/musl-1.2.6-r3.apk"
+sha256 = "e142255d0fa397f14318996bc10378093dcc069dc3dd1b6818c8f28a789c21da"
+bytes = 415466
+destination = "downloads/environment/apk/main/x86_64/musl-1.2.6-r3.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:musl-dev-1.2.6-r2.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/musl-dev-1.2.6-r2.apk"
-sha256 = "6831e8b9e4821dae2c9121f0641f81e543f4ac27c03144c4876980ee84e6988f"
-bytes = 3421233
-destination = "downloads/environment/apk/main/x86_64/musl-dev-1.2.6-r2.apk"
+key = "environment:apk:x86_64:musl-dev-1.2.6-r3.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/musl-dev-1.2.6-r3.apk"
+sha256 = "310b51cff12e1d5ce5f135c558a82e2550427da5465bbd16c9ff9b05e63ee3d9"
+bytes = 3422063
+destination = "downloads/environment/apk/main/x86_64/musl-dev-1.2.6-r3.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
