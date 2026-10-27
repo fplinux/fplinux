@@ -4,6 +4,7 @@
 #include "fplinux-cli.h"
 
 #include <fplinux/fplinux-ui-session.h>
+#include <fplinux/fplinux-utf8.h>
 
 #include <errno.h>
 #include <stdarg.h>
@@ -15,7 +16,7 @@
 #define PROGRAM "fplinux-example-apidemo"
 /* The longest search the field takes, in characters. */
 #define SEARCH_CHARS 24
-/* Room for a search folded to lower case: UTF-8 takes up to 4 bytes. */
+/* UTF-8 storage for the retained query, including its terminator. */
 #define SEARCH_BYTES (4 * SEARCH_CHARS + 1)
 #define MESSAGE_BYTES 1024
 
@@ -381,55 +382,6 @@ static struct fplinux_ui_screen *new_catalogue(struct apidemo_main *main_app)
 
 /* Search */
 
-/*
- * Copies text in lower case for a search that ignores case: ASCII and the
- * Russian alphabet, the letters the installed input languages type.
- */
-static void fold(const char *text, char *out, size_t size)
-{
-	const unsigned char *in = (const unsigned char *)text;
-	size_t used = 0;
-
-	while (*in && used + 2 < size) {
-		unsigned char first = in[0];
-		unsigned char second = in[1];
-
-		if (first >= 'A' && first <= 'Z') {
-			out[used++] = (char)(first - 'A' + 'a');
-			in++;
-		} else if (first == 0xd0 && second >= 0x90 && second <= 0x9f) {
-			/* А to П: U+0410 to U+041F become U+0430 to U+043F. */
-			out[used++] = (char)0xd0;
-			out[used++] = (char)(second + 0x20);
-			in += 2;
-		} else if (first == 0xd0 && second >= 0xa0 && second <= 0xaf) {
-			/* Р to Я: U+0420 to U+042F become U+0440 to U+044F. */
-			out[used++] = (char)0xd1;
-			out[used++] = (char)(second - 0x20);
-			in += 2;
-		} else if (first == 0xd0 && second == 0x81) {
-			/* Ё, U+0401, becomes ё, U+0451. */
-			out[used++] = (char)0xd1;
-			out[used++] = (char)0x91;
-			in += 2;
-		} else {
-			out[used++] = (char)first;
-			in++;
-		}
-	}
-	out[used] = '\0';
-}
-
-static bool matches(const char *text, const char *query)
-{
-	char folded[MESSAGE_BYTES];
-
-	if (!text)
-		return false;
-	fold(text, folded, sizeof(folded));
-	return strstr(folded, query) != NULL;
-}
-
 static void search_command(struct fplinux_ui *ui,
 			   struct fplinux_ui_screen *list, int command_id,
 			   void *context)
@@ -456,10 +408,8 @@ static struct fplinux_ui_screen *new_results(struct apidemo_main *main_app,
 {
 	struct apidemo *app = &main_app->demo;
 	struct fplinux_ui_screen *list;
-	char query[SEARCH_BYTES];
 	char title[MESSAGE_BYTES];
 
-	fold(search, query, sizeof(query));
 	main_app->found_count = 0;
 	for (size_t i = 0; i < APIDEMO_COUNT(categories); i++) {
 		for (size_t j = 0; j < categories[i]->count; j++) {
@@ -467,9 +417,12 @@ static struct fplinux_ui_screen *new_results(struct apidemo_main *main_app,
 				&categories[i]->entries[j];
 
 			if (main_app->found_count < ENTRY_LIMIT &&
-			    (matches(_(entry->title), query) ||
-			     matches(entry->title, query) ||
-			     matches(entry->detail, query)))
+			    (fplinux_utf8_contains_casefold(_(entry->title),
+							    search) ||
+			     fplinux_utf8_contains_casefold(entry->title,
+							    search) ||
+			     fplinux_utf8_contains_casefold(entry->detail,
+							    search)))
 				main_app->found[main_app->found_count++] =
 					entry;
 		}

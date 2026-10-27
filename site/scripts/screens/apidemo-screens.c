@@ -52,10 +52,12 @@ static void wait_frame(struct capture *capture, unsigned int previous)
 {
 	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
 
-	while (capture->peer.commits <= previous &&
+	while ((capture->peer.commits <= previous ||
+		capture->peer.configure_pending) &&
 	       fplinux_ui_frame_now_ms() < deadline)
 		fplinux_ui_frame_pump(&capture->peer);
-	assert(capture->peer.commits > previous);
+	assert(capture->peer.commits > previous &&
+	       !capture->peer.configure_pending);
 }
 
 static struct apidemo_observation
@@ -1114,14 +1116,17 @@ static void canvas_geometry(struct capture *capture)
 		    word(capture, "Moving shapes", "Перемещение фигур"),
 		    APIDEMO_CANVAS);
 	redraw(capture);
+	/* Drain each pair before the next: edge presses need no new frame. */
 	for (int index = 0; index < 32; ++index) {
 		send_press(capture, 1, KEY_LEFT);
 		send_press(capture, 1, KEY_UP);
+		redraw(capture);
 	}
 	save_frame(capture, "apidemo-moving-first");
 	for (int index = 0; index < 32; ++index) {
 		send_press(capture, 1, KEY_RIGHT);
 		send_press(capture, 1, KEY_DOWN);
+		redraw(capture);
 	}
 	save_frame(capture, "apidemo-moving-last");
 	close_and_reap(capture);

@@ -22,6 +22,7 @@ msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/fplinux-ui.mo" "$root/
 ui_host_build_application -I"$apidemo" \
 	-DAPIDEMO_IMAGE_DIR="\"$apidemo/\"" \
 	"$apidemo"/*.c "$screens_dir/apidemo-observer.c" \
+	"$screens_dir/native-glyph-resources.c" \
 	-Wl,--wrap=lv_label_set_text -Wl,--wrap=libintl_bindtextdomain \
 	-Wl,--wrap=lv_label_set_text_fmt -Wl,--wrap=fplinux_ui_text_set \
 	-Wl,--wrap=fplinux_language_load \

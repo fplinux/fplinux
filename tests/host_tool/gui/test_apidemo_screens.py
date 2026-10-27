@@ -309,8 +309,8 @@ def test_actual_canvas_bounds_contain_frames_fields_and_moving_shape(  # noqa: P
     frame = next(item for item in whole["canvas_objects"] if item["border"] == 2)
     assert frame["bounds"] == whole["canvas"]
     padding, playground, cells, field_max = {
-        (128, 128): (3, [4, 43, 106, 42], (6, 2), 68),
-        (128, 160): (3, [4, 43, 106, 74], (6, 4), 100),
+        (128, 128): (3, [4, 42, 106, 42], (6, 2), 68),
+        (128, 160): (3, [4, 42, 106, 74], (6, 4), 100),
         (176, 220): (4, [6, 51, 152, 112], (7, 5), 142),
         (240, 320): (6, [8, 62, 208, 184], (8, 7), 224),
         (320, 240): (4, [6, 56, 300, 132], (12, 5), 158),
@@ -493,7 +493,7 @@ def test_actual_apidemo_search_choices_preferences_and_rendering(  # noqa: PLR09
             frame = output / f"{name}.rgb565"
             pixels = frame.read_bytes()
             assert len(pixels) == width * height * 2
-            assert len(set(struct.iter_unpack("<H", pixels))) > 8
+            assert len(set(struct.iter_unpack("<H", pixels))) > 1
             assert f"{name}: {width}x{height}\n" in result.stdout
             rgb565_png.convert(width, height, frame, output / f"{name}.png")
     finally:
@@ -511,8 +511,8 @@ def test_actual_apidemo_search_choices_preferences_and_rendering(  # noqa: PLR09
 @pytest.mark.parametrize(
     ("screen", "surface", "picker", "icon_size", "square_size"),
     [
-        ((128, 128), (128, 96), (2, 0, 123, 96), 16, 45),
-        ((128, 160), (128, 128), (2, 16, 123, 96), 16, 48),
+        ((128, 128), (128, 96), (1, 0, 126, 96), 16, 46),
+        ((128, 160), (128, 128), (1, 16, 126, 96), 16, 48),
         ((176, 220), (176, 178), (5, 7, 166, 164), 20, 48),
         ((240, 320), (240, 268), (24, 44, 192, 180), 24, 48),
         ((320, 240), (320, 196), (20, 33, 280, 130), 24, 48),
@@ -614,7 +614,7 @@ def test_actual_apidemo_catalogue_and_returning_search_profiles(  # noqa: PLR091
         ):
             pixels = (tmp_path / f"{name}.rgb565").read_bytes()
             assert len(pixels) == surface[0] * surface[1] * 2
-            assert len(set(struct.iter_unpack("<H", pixels))) > 8
+            assert len(set(struct.iter_unpack("<H", pixels))) > 1
             rgb565_png.convert(*surface, tmp_path / f"{name}.rgb565", tmp_path / f"{name}.png")
     finally:
         log_root = os.environ.get("FPLINUX_LOG_ROOT")

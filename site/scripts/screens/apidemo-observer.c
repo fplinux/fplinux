@@ -5,7 +5,6 @@
 
 #include <assert.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <fplinux/fplinux-ui-menu.h>
 #include <fplinux/fplinux-ui-prefs.h>
 #include <fplinux/fplinux-ui-screen.h>
@@ -27,34 +26,6 @@ static const char *const preference_labels[] = {
 	"In memory",
 	"Save result",
 };
-
-int __real_open(const char *path, int flags, ...);
-
-/* Preserve resource lookup and decoding; the capture owns the installed tree. */
-int __wrap_open(const char *path, int flags, ...)
-{
-	static const char prefix[] = "/usr/share/fplinux/glyphs/";
-	const char *root = getenv("FPLINUX_NATIVE_GLYPHS");
-	char mapped[1024];
-	mode_t mode = 0;
-	va_list arguments;
-
-	if (root && !strncmp(path, prefix, sizeof(prefix) - 1)) {
-		if (snprintf(mapped, sizeof(mapped), "%s/%s", root,
-			     path + sizeof(prefix) - 1) >=
-		    (int)sizeof(mapped)) {
-			errno = ENAMETOOLONG;
-			return -1;
-		}
-		path = mapped;
-	}
-	if ((flags & O_CREAT) || (flags & O_TMPFILE) == O_TMPFILE) {
-		va_start(arguments, flags);
-		mode = va_arg(arguments, mode_t);
-		va_end(arguments);
-	}
-	return __real_open(path, flags, mode);
-}
 
 static struct apidemo_rectangle rectangle(lv_obj_t *object)
 {
