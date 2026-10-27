@@ -112,7 +112,7 @@ static int check_render(unsigned int width, unsigned int height,
 	if (maximum_bright_runs(&surface) != 5U)
 		goto done;
 	/* Solid fixture glyphs must fit completely, including the exit hint. */
-	if (color_count(&surface, 0U, height / 4U, 0xbe39U) !=
+	if (color_count(&surface, 0U, height * 3U / 10U, 0xbe39U) !=
 		    (width == 128U ? 2880U : 5120U) ||
 	    color_count(&surface, height * 88U / 100U, height, 0xbe39U) !=
 		    (width == 128U ? 936U : 1664U))
@@ -167,8 +167,10 @@ done:
 
 int main(int argc, char **argv)
 {
-	static const unsigned int sizes[][2] = { { 128U, 160U },
-						 { 240U, 320U } };
+	static const unsigned int sizes[][2] = {
+		{ 128U, 128U }, { 128U, 160U }, { 176U, 220U },
+		{ 240U, 320U }, { 320U, 240U },
+	};
 
 	if (argc == 8 && !strcmp(argv[1], "--frame"))
 		return write_frame(argv + 2);
@@ -183,7 +185,7 @@ int main(int argc, char **argv)
 	for (size_t index = 0; index < sizeof(sizes) / sizeof(sizes[0]);
 	     ++index) {
 		if (check_render(sizes[index][0], sizes[index][1],
-				 argv[index + 1U])) {
+				 sizes[index][0] == 128U ? argv[1] : argv[2])) {
 			fprintf(stderr, "brightness UI render %ux%u failed\n",
 				sizes[index][0], sizes[index][1]);
 			return 1;

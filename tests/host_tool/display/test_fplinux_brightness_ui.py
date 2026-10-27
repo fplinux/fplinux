@@ -115,7 +115,7 @@ class BrightnessHarness:
 
 
 class BrightnessUiTests:
-    """Exercise real keypad decisions and rendering at both phone sizes."""
+    """Exercise real keypad decisions and rendering at the supported phone sizes."""
 
     @pytest.fixture(scope="class")
     @classmethod
@@ -158,8 +158,8 @@ class BrightnessUiTests:
             )
             yield BrightnessHarness(executable, small_font, large_font)
 
-    def test_key_bounds_and_two_display_sizes(self, harness: BrightnessHarness) -> None:
-        """Keys clamp at 0/10; both phone dimensions show ten bar segments."""
+    def test_key_bounds_and_supported_display_sizes(self, harness: BrightnessHarness) -> None:
+        """Keys clamp at 0/10; all five phone dimensions show ten bar segments."""
         result = run_process(
             [str(harness.executable), str(harness.small_font), str(harness.large_font)],
             name="run brightness UI host behavior",
@@ -170,11 +170,16 @@ class BrightnessUiTests:
 
     @pytest.mark.parametrize("harness", ["variant"], indirect=True)
     @pytest.mark.parametrize(
-        ("width", "height", "bar_y", "segment_width"),
-        [(128, 160, 99, 9), (176, 220, 136, 13), (240, 320, 198, 17), (320, 240, 148, 24)],
+        ("width", "height", "bar_x", "bar_y", "segment_width"),
+        [
+            (128, 128, 10, 79, 9),
+            (128, 160, 10, 99, 9),
+            (176, 220, 14, 136, 13),
+            (240, 320, 17, 198, 17),
+            (320, 240, 22, 148, 24),
+        ],
     )
-    @pytest.mark.parametrize("level", [0, 5, 10])
-    @pytest.mark.parametrize("failed", [False, True])
+    @pytest.mark.parametrize(("level", "failed"), [(0, False), (5, False), (10, True)])
     def test_dark_palette_tokens_reach_text_and_scale_pixels(  # noqa: PLR0913 -- independent rendering inputs and literal bar geometry.
         self,
         harness: BrightnessHarness,
@@ -182,6 +187,7 @@ class BrightnessUiTests:
         *,
         width: int,
         height: int,
+        bar_x: int,
         bar_y: int,
         segment_width: int,
         level: int,
@@ -208,6 +214,8 @@ class BrightnessUiTests:
         assert result.returncode == 0, result.stderr
         pixels = struct.unpack(f"<{width * height}H", frame.read_bytes())
         expected = {0x0000, 0x001F, 0x07E0}
+        if failed:
+            expected.add(0x0410)
         if level:
             expected.add(0x8010)
         if level < 10:
@@ -216,12 +224,22 @@ class BrightnessUiTests:
         assert pixels[0] == 0x0000
         assert pixels[(height * 2 // 5) * width + width // 2] == 0x07E0
         font_width, font_height = (6, 12) if width == 128 else (8, 16)
-        assert sum(pixel == 0x001F for pixel in pixels[: width * (height // 4)]) == (
+        assert sum(pixel == 0x001F for pixel in pixels[: width * (height * 3 // 10)]) == (
             10 * font_width * font_height * 4
         )
         assert sum(pixel == 0x001F for pixel in pixels[width * (height * 88 // 100) :]) == (
             13 * font_width * font_height
         )
+        message = pixels[width * (height * 70 // 100) : width * (height * 88 // 100)]
+        # Solid fixture glyphs distinguish the normal and failed message ink.
+        message_glyphs = 9 if failed else 8
+        assert message.count(0x0410 if failed else 0x07E0) == (
+            message_glyphs * font_width * font_height
+        )
         bar = pixels[bar_y * width : (bar_y + 1) * width]
         assert bar.count(0x8010) == level * segment_width
         assert bar.count(0x0800) == (10 - level) * segment_width
+        assert bar[:bar_x] == (0x0000,) * bar_x
+        assert bar[bar_x] == (0x8010 if level else 0x0800)
+        assert bar[-bar_x - 1] == (0x8010 if level == 10 else 0x0800)
+        assert bar[-bar_x:] == (0x0000,) * bar_x

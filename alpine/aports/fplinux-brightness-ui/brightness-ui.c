@@ -92,10 +92,12 @@ bool brightness_ui_render(const struct brightness_ui_surface *surface,
 	uint16_t foreground =
 		fplinux_ui_colour565(theme, FPLINUX_UI_COLOUR_FOREGROUND);
 	uint16_t filled = fplinux_ui_colour565(theme, FPLINUX_UI_COLOUR_FOCUS);
+	uint16_t danger = fplinux_ui_colour565(theme, FPLINUX_UI_COLOUR_DANGER);
 	char value[6] = "0/10";
 	unsigned int margin;
 	unsigned int bar_y;
 	unsigned int bar_width;
+	unsigned int bar_x;
 	unsigned int segment_width;
 	unsigned int gap;
 	unsigned int number_scale;
@@ -103,7 +105,7 @@ bool brightness_ui_render(const struct brightness_ui_surface *surface,
 
 	if (!surface || !surface->pixels || !font || !font->bitmap ||
 	    !font->width || !font->height || level > 10U ||
-	    surface->width < 100U || surface->height < 130U ||
+	    surface->width < 100U || surface->height < 128U ||
 	    surface->stride_bytes < (size_t)surface->width * sizeof(uint16_t) ||
 	    surface->stride_bytes % sizeof(uint16_t))
 		return false;
@@ -130,13 +132,15 @@ bool brightness_ui_render(const struct brightness_ui_surface *surface,
 	bar_width = surface->width - 2U * margin;
 	gap = surface->width >= 180U ? 4U : 2U;
 	segment_width = (bar_width - 9U * gap) / 10U;
+	bar_width = 10U * segment_width + 9U * gap;
+	bar_x = (surface->width - bar_width) / 2U;
 	for (unsigned int segment = 0; segment < 10U; ++segment)
-		rectangle(surface, margin + segment * (segment_width + gap),
+		rectangle(surface, bar_x + segment * (segment_width + gap),
 			  bar_y, segment_width, surface->height / 22U,
 			  segment < level ? filled : unfilled);
 	if (set_failed)
 		label(surface, font, "SET FAILED", surface->height * 75U / 100U,
-		      1U, foreground);
+		      1U, danger);
 	else
 		label(surface, font, "UP +  DOWN -",
 		      surface->height * 76U / 100U, 1U, foreground);
