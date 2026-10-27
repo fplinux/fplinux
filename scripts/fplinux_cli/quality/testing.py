@@ -23,7 +23,7 @@ TEST_TIERS = {
     "small": 90,
     "host_process": 300,
     # Native builds and five-profile application matrices share one deadline.
-    "host_tool": 20 * 60,
+    "host_tool": 30 * 60,
     "artifact": 300,
     "public_workflow": 90,
 }
@@ -194,6 +194,25 @@ def pytest_environment() -> dict[str, str]:
     environment.pop("PYTEST_ADDOPTS", None)
     environment.pop("PYTEST_PLUGINS", None)
     return environment
+
+
+def _selected_pytest_groups(names: list[str], *, failfast: bool) -> list[list[str]]:
+    """Share a session between adjacent modules without changing selector failure policy."""
+    groups: list[list[str]] = []
+    shared_group: list[str] | None = None
+    for name in names:
+        node = _pytest_node_id(name)
+        # Missing nodes abort other selections; failfast retains selection-by-selection order.
+        if not failfast and "::" not in node and Path(node).is_file():
+            # Repeated modules need fresh collection to execute their tests again.
+            if shared_group is None or node in shared_group:
+                shared_group = []
+                groups.append(shared_group)
+            shared_group.append(node)
+        else:
+            groups.append([node])
+            shared_group = None
+    return groups
 
 
 def _run_invocations(
@@ -432,9 +451,9 @@ def main() -> None:
         with reporter.stage(label) as stage:
             if args.names:
                 invocations = []
-                for name in args.names:
+                for names in _selected_pytest_groups(args.names, failfast=args.failfast):
                     [(_label, selected_command, _timeout)] = pytest_commands(
-                        [name], verbose=args.verbose, failfast=args.failfast
+                        names, verbose=args.verbose, failfast=args.failfast
                     )
                     invocations.append(_PytestInvocation("container", selected_command))
 

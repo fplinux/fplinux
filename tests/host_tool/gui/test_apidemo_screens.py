@@ -12,8 +12,6 @@ import json
 import os
 import shutil
 import struct
-import sys
-import tarfile
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -70,7 +68,7 @@ CANVAS_GEOMETRY = (
 
 @pytest.fixture(scope="module")
 def apidemo_native(
-    tmp_path_factory: pytest.TempPathFactory, ui_host_inputs: Path
+    tmp_path_factory: pytest.TempPathFactory, ui_host_inputs: Path, ui_icon_resources: Path
 ) -> Iterator[Path]:
     """Build the real app and peer against the shared native UI inputs."""
     with c_build_directory(tmp_path_factory, "apidemo-native") as directory:
@@ -80,27 +78,7 @@ def apidemo_native(
             timeout=180,
             check=True,
         )
-        archives = list(Path("/opt/quality/src/ui-icons").iterdir())
-        assert len(archives) == 1
-        sources = directory / "icon-sources"
-        with tarfile.open(archives[0]) as archive:
-            archive.extractall(sources, filter="data")
-        run_process(
-            [
-                sys.executable,
-                str(ROOT / "alpine/aports/fplinux-icons/generate-icons.py"),
-                "--tabler",
-                str(sources / "package/icons"),
-                "--profile",
-                str(ROOT / "lib/fplinux/fplinux-ui-profile.json"),
-                "--out",
-                str(directory / "icons"),
-            ],
-            name="generate actual pinned system glyphs for native API Demos",
-            timeout=60,
-            env=os.environ | {"NODE_PATH": "/opt/quality/node-tools/node_modules"},
-            check=True,
-        )
+        (directory / "icons").symlink_to(ui_icon_resources, target_is_directory=True)
         yield directory
 
 
@@ -456,9 +434,10 @@ def test_actual_apidemo_preferences_distinguish_memory_file_and_confirmed_save(
         ((240, 320), (240, 268), "ru"),
     ],
 )
-def test_actual_apidemo_search_choices_preferences_and_rendering(
+def test_actual_apidemo_search_choices_preferences_and_rendering(  # noqa: PLR0913, PLR0917 -- native inputs and diagnostic converter are independent resources.
     apidemo_native: Path,
     tmp_path_factory: pytest.TempPathFactory,
+    rgb565_png: ModuleType,
     screen: tuple[int, int],
     surface: tuple[int, int],
     locale: str,
@@ -516,19 +495,7 @@ def test_actual_apidemo_search_choices_preferences_and_rendering(
             assert len(pixels) == width * height * 2
             assert len(set(struct.iter_unpack("<H", pixels))) > 8
             assert f"{name}: {width}x{height}\n" in result.stdout
-            run_process(
-                [
-                    "python3",
-                    str(SCREENS / "rgb565-png.py"),
-                    str(width),
-                    str(height),
-                    str(frame),
-                    str(output / f"{name}.png"),
-                ],
-                name=f"encode actual API Demos capture {name}",
-                timeout=10,
-                check=True,
-            )
+            rgb565_png.convert(width, height, frame, output / f"{name}.png")
     finally:
         log_root = os.environ.get("FPLINUX_LOG_ROOT")
         if log_root:
@@ -564,6 +531,7 @@ def test_actual_apidemo_catalogue_and_returning_search_profiles(  # noqa: PLR091
     theme: str,
     locale: str,
     glyph_reader: ModuleType,
+    rgb565_png: ModuleType,
 ) -> None:
     """Use real app navigation, popup routes and generated action glyph pixels."""
     result = run_process(
@@ -647,18 +615,7 @@ def test_actual_apidemo_catalogue_and_returning_search_profiles(  # noqa: PLR091
             pixels = (tmp_path / f"{name}.rgb565").read_bytes()
             assert len(pixels) == surface[0] * surface[1] * 2
             assert len(set(struct.iter_unpack("<H", pixels))) > 8
-            run_process(
-                [
-                    "python3",
-                    str(SCREENS / "rgb565-png.py"),
-                    *map(str, surface),
-                    str(tmp_path / f"{name}.rgb565"),
-                    str(tmp_path / f"{name}.png"),
-                ],
-                name=f"encode actual API Demos navigation {name}",
-                timeout=10,
-                check=True,
-            )
+            rgb565_png.convert(*surface, tmp_path / f"{name}.rgb565", tmp_path / f"{name}.png")
     finally:
         log_root = os.environ.get("FPLINUX_LOG_ROOT")
         if log_root:
@@ -693,9 +650,10 @@ class MenuCaptureGeometry:
 )
 @pytest.mark.parametrize("theme", ["light", "dark"])
 @pytest.mark.parametrize("locale", ["en", "ru"])
-def test_actual_apidemo_compact_menu_pixels_preserve_background_and_legends(
+def test_actual_apidemo_compact_menu_pixels_preserve_background_and_legends(  # noqa: PLR0913, PLR0917 -- native inputs and diagnostic converter are independent resources.
     apidemo_native: Path,
     tmp_path: Path,
+    rgb565_png: ModuleType,
     geometry: MenuCaptureGeometry,
     theme: str,
     locale: str,
@@ -727,19 +685,7 @@ def test_actual_apidemo_compact_menu_pixels_preserve_background_and_legends(
             data = frame.read_bytes()
             assert len(data) == width * height * 2
             frames[phase] = [value for (value,) in struct.iter_unpack("<H", data)]
-            run_process(
-                [
-                    "python3",
-                    str(SCREENS / "rgb565-png.py"),
-                    str(width),
-                    str(height),
-                    str(frame),
-                    str(tmp_path / f"apidemo-menu-{phase}.png"),
-                ],
-                name=f"encode actual compact menu {phase}",
-                timeout=10,
-                check=True,
-            )
+            rgb565_png.convert(width, height, frame, tmp_path / f"apidemo-menu-{phase}.png")
         opened = frames["open"]
         menu_top = height - geometry.menu_height
         line_start = menu_top * width

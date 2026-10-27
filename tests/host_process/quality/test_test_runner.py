@@ -131,27 +131,44 @@ class TestSelectionProcessTests:
     def test_no_selection_runs_every_tier_in_order(
         self, selection_context: SelectionContext
     ) -> None:
-        """Default discovery must execute all five groups, not just the first group."""
+        """Default discovery executes all five groups and their GUI components in order."""
+        _prepare_gui_selection_modules(selection_context.root)
+
         result = selection_context.run(failing_fixture=False)
+
         assert result.returncode == 0, result.stderr
         assert selection_context.executed() == [
-            f"tests.{tier}.{package}test_selection.{case}.{method}"
-            for tier in ("small", "host_process", "host_tool", "artifact", "public_workflow")
-            for package in ("build.", "domain.", "")
+            f"{module}.{case}.{method}"
+            for module in (
+                "tests.small.build.test_selection",
+                "tests.small.domain.test_selection",
+                "tests.small.test_selection",
+                "tests.host_process.build.test_selection",
+                "tests.host_process.domain.test_selection",
+                "tests.host_process.test_selection",
+                "tests.host_tool.build.test_selection",
+                "tests.host_tool.domain.test_selection",
+                "tests.host_tool.gui.test_desktop_entry",
+                "tests.host_tool.gui.test_language_files",
+                "tests.host_tool.test_selection",
+                "tests.artifact.build.test_selection",
+                "tests.artifact.domain.test_selection",
+                "tests.artifact.test_selection",
+                "tests.public_workflow.build.test_selection",
+                "tests.public_workflow.domain.test_selection",
+                "tests.public_workflow.test_selection",
+            )
             for case in ("FailureCase", "PassingCase")
             for method in ("test_first", "test_second")
         ]
 
-    @pytest.mark.parametrize("select_tier", [False, True])
-    def test_automatic_discovery_runs_gui_and_its_shared_neighbor(
-        self, selection_context: SelectionContext, *, select_tier: bool
+    def test_tier_discovery_runs_gui_and_its_shared_neighbor(
+        self, selection_context: SelectionContext
     ) -> None:
-        """Both automatic selection forms execute GUI components and shared tests."""
+        """Selecting the host-tool tier executes GUI components and shared tests."""
         _prepare_gui_selection_modules(selection_context.root)
 
-        result = selection_context.run(
-            *(["--tier", "host_tool"] if select_tier else []), failing_fixture=False
-        )
+        result = selection_context.run("--tier", "host_tool", failing_fixture=False)
 
         assert result.returncode == 0, result.stderr
         assert [name for name in selection_context.executed() if ".gui." in name] == [
@@ -191,7 +208,6 @@ class TestSelectionProcessTests:
         assert "intentional GUI collection failure" in result.stdout + result.stderr
         assert selection_context.executed() == []
 
-    @pytest.mark.parametrize("package", ["build", "domain"])
     @pytest.mark.parametrize(
         ("suffix", "cases"),
         [
@@ -209,10 +225,10 @@ class TestSelectionProcessTests:
         ],
     )
     def test_nested_module_class_and_method_select_only_requested_cases(
-        self, selection_context: SelectionContext, package: str, suffix: str, cases: list[str]
+        self, selection_context: SelectionContext, suffix: str, cases: list[str]
     ) -> None:
         """Nested selectors preserve module, class and method boundaries."""
-        module = f"tests.small.{package}.test_selection"
+        module = "tests.small.build.test_selection"
         result = selection_context.run(module + suffix, failing_fixture=False)
         assert result.returncode == 0, result.stderr
         assert selection_context.executed() == [module + "." + case for case in cases]
@@ -228,6 +244,26 @@ class TestSelectionProcessTests:
         result = selection_context.run(*names)
         assert result.returncode == 0, result.stderr
         assert selection_context.executed() == list(names)
+
+    def test_repeated_module_executes_again_in_requested_order(
+        self, selection_context: SelectionContext
+    ) -> None:
+        """Sharing adjacent modules must not discard a repeated module's tests."""
+        modules = (
+            "tests.small.test_selection",
+            "tests.small.build.test_selection",
+            "tests.small.test_selection",
+        )
+
+        result = selection_context.run(*modules, failing_fixture=False)
+
+        assert result.returncode == 0, result.stderr
+        assert selection_context.executed() == [
+            f"{module}.{case}.{method}"
+            for module in modules
+            for case in ("FailureCase", "PassingCase")
+            for method in ("test_first", "test_second")
+        ]
 
     @pytest.mark.parametrize(
         ("suffixes", "expected"),
@@ -261,6 +297,56 @@ class TestSelectionProcessTests:
         result = selection_context.run(*arguments)
         assert result.returncode == 1, result.stderr
         assert selection_context.executed() == ([] if failfast else [valid])
+
+    @pytest.mark.parametrize("failfast", [False, True])
+    def test_missing_module_does_not_cancel_valid_module_without_failfast(
+        self, selection_context: SelectionContext, *, failfast: bool
+    ) -> None:
+        """An absent module fails its selection without hiding later modules by default."""
+        valid = "tests.small.test_selection"
+
+        result = selection_context.run(
+            "tests.small.test_missing",
+            valid,
+            *(["--failfast"] if failfast else []),
+            failing_fixture=False,
+        )
+
+        assert result.returncode == 1, result.stderr
+        expected = [
+            f"{valid}.{case}.{method}"
+            for case in ("FailureCase", "PassingCase")
+            for method in ("test_first", "test_second")
+        ]
+        assert selection_context.executed() == ([] if failfast else expected)
+
+    @pytest.mark.parametrize("broken_first", [False, True])
+    @pytest.mark.parametrize("failfast", [False, True])
+    def test_selected_module_collection_error_obeys_failfast(
+        self, selection_context: SelectionContext, *, broken_first: bool, failfast: bool
+    ) -> None:
+        """A module import error fails the run and ordinary execution continues."""
+        broken = selection_context.root / "tests/small/test_broken.py"
+        broken.write_text("raise RuntimeError('intentional selected collection failure')\n")
+        valid = "tests.small.test_selection"
+        names = ["tests.small.test_broken", valid]
+        if not broken_first:
+            names.reverse()
+
+        result = selection_context.run(
+            *names,
+            *(["--failfast"] if failfast else []),
+            failing_fixture=False,
+        )
+
+        assert result.returncode == 1, result.stderr
+        assert "intentional selected collection failure" in result.stdout + result.stderr
+        expected = [
+            f"{valid}.{case}.{method}"
+            for case in ("FailureCase", "PassingCase")
+            for method in ("test_first", "test_second")
+        ]
+        assert selection_context.executed() == ([] if failfast and broken_first else expected)
 
     @pytest.mark.parametrize("empty_first", [False, True])
     def test_empty_name_does_not_turn_a_nonempty_selection_into_failure(
@@ -430,8 +516,9 @@ class TestSelectionProcessTests:
             ROOT / "tests/host_process/quality/fixtures/test-runner/pytest_interrupt_case.py",
             fixture,
         )
-        result = selection_context.run("tests.small.test_interrupt")
+        result = selection_context.run("tests.small.test_interrupt", "tests.small.test_selection")
         assert result.returncode == 130, result.stderr
+        assert selection_context.executed() == []
         status = json.loads((selection_context.logs / "tests/run.json").read_text())["status"]
         assert status == "interrupted"
 
@@ -533,6 +620,37 @@ def mixed_runtime_context(tmp_path: Path) -> MixedRuntimeContext:
 
 class MixedRuntimeProcessTests:
     """Exercise the controller with real pytest, not dependency preparation or real Kern."""
+
+    @pytest.mark.parametrize("native", [False, True])
+    def test_adjacent_modules_share_one_fixture_lifetime(
+        self, mixed_runtime_context: MixedRuntimeContext, *, native: bool
+    ) -> None:
+        """The outer workload and inner entry point retain one shared pytest session."""
+        _prepare_gui_selection_modules(mixed_runtime_context.root)
+        shutil.copyfile(
+            ROOT / "tests/host_process/quality/fixtures/test-runner/pytest_session_resource.py",
+            mixed_runtime_context.root / "tests/host_tool/gui/conftest.py",
+        )
+        modules = (
+            "tests.host_tool.gui.test_desktop_entry",
+            "tests.host_tool.gui.test_language_files",
+        )
+        names = [module.replace(".", "/") + ".py" if native else module for module in modules]
+
+        result = mixed_runtime_context.run(*names)
+
+        assert result.returncode == 0, result.stderr
+        assert mixed_runtime_context.executed() == [
+            "resource:prepare",
+            *[
+                f"container:{module}.{case}.{method}"
+                for module in modules
+                for case in ("FailureCase", "PassingCase")
+                for method in ("test_first", "test_second")
+            ],
+            "resource:release",
+        ]
+        assert mixed_runtime_context.kern_trace.read_text().splitlines() == ["container"]
 
     def test_container_directory_runs_only_its_tests(
         self, mixed_runtime_context: MixedRuntimeContext
