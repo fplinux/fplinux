@@ -6,6 +6,7 @@ enum calculator_observation_kind {
 	CALCULATOR_NUMBER,
 	CALCULATOR_ALERT,
 	CALCULATOR_STATUS,
+	CALCULATOR_HEADER,
 };
 
 struct calculator_number_observation {

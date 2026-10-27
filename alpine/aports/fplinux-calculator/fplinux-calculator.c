@@ -2,6 +2,7 @@
 #include "calculator.h"
 #include "fplinux-cli.h"
 
+#include <fplinux/fplinux-gettext.h>
 #include <fplinux/fplinux-ui.h>
 #include <fplinux/fplinux-ui-locale.h>
 #include <fplinux/fplinux-ui-menu.h>
@@ -16,6 +17,7 @@
 #define APP_ID "org.fplinux.calculator"
 #define CLEAR_HOLD_MS 500U
 #define _(text) gettext(text)
+#define NC_(context, text) context "\004" text
 
 enum command {
 	COMMAND_BACK,
@@ -107,10 +109,11 @@ static bool save_state(struct calculator_app *app)
 	}
 	app->saved = result;
 	if (app->screen)
-		fplinux_ui_screen_set_title(
-			app->screen, result.state == FPLINUX_STORAGE_DURABLE ?
-					     _("Calculator") :
-					     _("Calculator (unsaved)"));
+		fplinux_ui_screen_set_header_status(
+			app->screen,
+			result.state == FPLINUX_STORAGE_DURABLE ? NULL :
+								  _("Unsaved"),
+			"*");
 	return result.state == FPLINUX_STORAGE_DURABLE;
 }
 
@@ -147,6 +150,8 @@ static bool show_save_error(struct calculator_app *app)
 		{ .id = COMMAND_RETRY,
 		  .type = FPLINUX_UI_COMMAND_OK,
 		  .label = _("Retry"),
+		  .short_label = fplinux_gettext_context(
+			  NC_("short command", "Retry")),
 		  .icon = fplinux_ui_glyph(app->ui, "refresh",
 					   FPLINUX_UI_GLYPH_ROW) },
 		{ .id = COMMAND_STAY,

@@ -24,7 +24,8 @@ msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/fplinux-ui.mo" "$root/
 ui_host_build_application -I"$calculator" \
 	"$calculator/fplinux-calculator.c" "$calculator/calculator.c" \
 	"$screens_dir/calculator-observer.c" \
-	-Wl,--wrap=lv_label_set_text -Wl,--wrap=fplinux_ui_prefs_save \
+	-Wl,--wrap=lv_label_set_text -Wl,--wrap=lv_display_flush_ready \
+	-Wl,--wrap=fplinux_ui_prefs_save \
 	-Wl,--wrap=fplinux_ui_alert_new -Wl,--wrap=libintl_bindtextdomain \
 	-Wl,--wrap=fplinux_language_load -o "$work/calculator"
 

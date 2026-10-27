@@ -33,8 +33,8 @@ msgstr "Не более 12 цифр"
 msgid "Reset"
 msgstr "Сброс"
 
-msgid "Calculator (unsaved)"
-msgstr "Калькулятор (не сохранено)"
+msgid "Unsaved"
+msgstr "Не сохранено"
 
 msgid "Calculation not saved"
 msgstr "Расчёт не сохранён"
@@ -44,6 +44,10 @@ msgstr "Сохранение не подтверждено"
 
 msgid "Retry"
 msgstr "Повторить"
+
+msgctxt "short command"
+msgid "Retry"
+msgstr "Повтор"
 
 msgid "Stay"
 msgstr "Остаться"

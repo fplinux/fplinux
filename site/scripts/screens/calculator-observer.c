@@ -16,6 +16,65 @@
 
 void __real_lv_label_set_text(lv_obj_t *label, const char *text);
 
+static void collect_header(lv_obj_t *object,
+			   struct calculator_number_observation *observation)
+{
+	if (!lv_obj_is_visible(object))
+		return;
+	if (lv_obj_check_type(object, &lv_label_class)) {
+		const char *text = lv_label_get_text(object);
+
+		if (!strcmp(text, "Calculator") ||
+		    !strcmp(text, "Калькулятор")) {
+			snprintf(observation->title, sizeof(observation->title),
+				 "%s", text);
+		} else if (!strcmp(text, "Unsaved") ||
+			   !strcmp(text, "Не сохранено") ||
+			   !strcmp(text, "*")) {
+			lv_obj_t *parent = lv_obj_get_parent(object);
+			lv_point_t size;
+
+			lv_text_get_size(&size, text,
+					 lv_obj_get_style_text_font(object, 0),
+					 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+			snprintf(observation->text, sizeof(observation->text),
+				 "%s", text);
+			observation->width = lv_obj_get_width(object);
+			observation->height = lv_obj_get_height(object);
+			observation->text_width = size.x;
+			observation->text_height = size.y;
+			observation->left = lv_obj_get_x(object);
+			observation->top = lv_obj_get_y(object);
+			observation->parent_width = lv_obj_get_width(parent);
+			observation->parent_height = lv_obj_get_height(parent);
+		}
+	}
+	for (uint32_t index = 0; index < lv_obj_get_child_count(object);
+	     ++index)
+		collect_header(lv_obj_get_child(object, (int32_t)index),
+			       observation);
+}
+
+void __real_lv_display_flush_ready(lv_display_t *display);
+
+void __wrap_lv_display_flush_ready(lv_display_t *display)
+{
+	const char *descriptor = getenv("FPLINUX_CALCULATOR_OBSERVER_FD");
+	struct calculator_number_observation observation = {
+		.kind = CALCULATOR_HEADER,
+	};
+
+	if (descriptor && lv_display_flush_is_last(display)) {
+		collect_header(lv_display_get_screen_active(display),
+			       &observation);
+		collect_header(lv_display_get_layer_top(display), &observation);
+		collect_header(lv_display_get_layer_sys(display), &observation);
+		assert(send(atoi(descriptor), &observation, sizeof(observation),
+			    MSG_NOSIGNAL) == (ssize_t)sizeof(observation));
+	}
+	__real_lv_display_flush_ready(display);
+}
+
 static bool is_status(const char *text)
 {
 	return !strcmp(text, "Divide by zero") ||

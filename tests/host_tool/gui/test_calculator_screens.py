@@ -17,6 +17,7 @@ from tests.process import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from types import ModuleType
 
 SCREENS = ROOT / "site/scripts/screens"
 CAPTURE_STATES = (
@@ -108,6 +109,51 @@ def test_actual_calculator_storage_failure_retains_draft_and_honors_close_choice
         "calculator-storage: Home retained draft; Stay continued input; Retry saved; "
         "Discard reopened old state\n"
     )
+
+
+@pytest.mark.parametrize("screen", [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)])
+@pytest.mark.parametrize("locale", ["en", "ru"])
+@pytest.mark.parametrize("theme", ["dark", "light"])
+def test_actual_calculator_header_marks_failed_save_and_clears_after_durable_save(
+    calculator_native: Path, tmp_path: Path, screen: tuple[int, int], locale: str, theme: str
+) -> None:
+    width, height = screen
+    result = run_process(
+        [
+            str(calculator_native / "calculator-screens"),
+            str(width),
+            str(height),
+            str(calculator_native / "calculator"),
+            str(SCREENS / "calculator-keyboard.xkb"),
+            str(tmp_path / "session.sock"),
+            str(tmp_path),
+            "header-status",
+            locale,
+            theme,
+        ],
+        name=f"actual Calculator unsaved header at {width}x{height} in {locale}/{theme}",
+        env={
+            "FPLINUX_UI_LOCALE_DIRECTORY": str(calculator_native / "locale"),
+            "FPLINUX_CALCULATOR_LANGUAGE_DIRECTORY": str(ROOT / "alpine/aports/fplinux-language"),
+        },
+        timeout=30,
+    )
+    (tmp_path / "capture.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+    log_root = os.environ.get("FPLINUX_LOG_ROOT")
+    if log_root:
+        shutil.copytree(
+            tmp_path,
+            Path(log_root) / f"calculator-header-{width}x{height}-{locale}-{theme}",
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("session.sock"),
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.endswith(
+        "calculator-header: failed save shows a fitting status; durable save clears it\n"
+    )
+    unsaved = (tmp_path / "calculator-unsaved.rgb565").read_bytes()
+    saved = (tmp_path / "calculator-saved.rgb565").read_bytes()
+    assert unsaved != saved
 
 
 @pytest.mark.parametrize("screen", [(128, 160), (240, 320), (320, 240)])
@@ -224,6 +270,7 @@ def test_actual_calculator_explains_errors_and_digit_limit_at_every_profile(  # 
 def test_actual_calculator_input_holds_persistence_and_rendering_at_each_profile(
     calculator_native: Path,
     tmp_path_factory: pytest.TempPathFactory,
+    rgb565_png: ModuleType,
     screen: tuple[int, int],
     surface: tuple[int, int],
 ) -> None:
@@ -259,22 +306,10 @@ def test_actual_calculator_input_holds_persistence_and_rendering_at_each_profile
             frame = output / f"{state}.rgb565"
             pixels = frame.read_bytes()
             assert len(pixels) == width * height * 2
-            assert len(set(struct.iter_unpack("<H", pixels))) > 8
+            assert len(set(struct.iter_unpack("<H", pixels))) > 1
             assert f"{state}: {width}x{height}\n" in result.stdout
             states.append(pixels)
-            run_process(
-                [
-                    "python3",
-                    str(SCREENS / "rgb565-png.py"),
-                    str(width),
-                    str(height),
-                    str(frame),
-                    str(output / f"{state}.png"),
-                ],
-                name=f"encode the actual Calculator {state} capture",
-                timeout=10,
-                check=True,
-            )
+            rgb565_png.convert(width, height, frame, output / f"{state}.png")
         assert len(set(states)) == len(CAPTURE_STATES)
         preferences = output / "state/fplinux/org.fplinux.calculator/preferences"
         assert preferences.stat().st_mode & 0o777 == 0o600

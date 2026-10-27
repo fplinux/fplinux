@@ -28,6 +28,7 @@ struct capture {
 	const char *session_path;
 	unsigned int alerts;
 	unsigned int feedback;
+	struct calculator_number_observation header;
 	const char *expected_reason;
 	char close_left[FPLINUX_UI_SESSION_TEXT_BYTES];
 	char close_centre[FPLINUX_UI_SESSION_TEXT_BYTES];
@@ -86,6 +87,10 @@ static void wait_number(struct capture *capture, const char *expected)
 		assert(recv(capture->observer, &observation,
 			    sizeof(observation),
 			    0) == (ssize_t)sizeof(observation));
+		if (observation.kind == CALCULATOR_HEADER) {
+			capture->header = observation;
+			continue;
+		}
 		if (observation.kind == CALCULATOR_ALERT) {
 			++capture->alerts;
 			continue;
@@ -127,6 +132,8 @@ static void wait_save_alert(struct capture *capture)
 		assert(recv(capture->observer, &observation,
 			    sizeof(observation),
 			    0) == (ssize_t)sizeof(observation));
+		if (observation.kind == CALCULATOR_HEADER)
+			capture->header = observation;
 		if (observation.kind != CALCULATOR_ALERT)
 			continue;
 		++capture->alerts;
@@ -144,6 +151,8 @@ static void collect_observations(struct capture *capture)
 	while ((count = recv(capture->observer, &observation,
 			     sizeof(observation), MSG_DONTWAIT)) > 0) {
 		assert(count == (ssize_t)sizeof(observation));
+		if (observation.kind == CALCULATOR_HEADER)
+			capture->header = observation;
 		if (observation.kind == CALCULATOR_ALERT)
 			++capture->alerts;
 		if (observation.kind == CALCULATOR_STATUS)
@@ -242,6 +251,27 @@ static void save_frame(struct capture *capture, const char *name)
 				  capture->peer.width *
 					  sizeof(*capture->peer.pixels)));
 	printf("%s: %dx%d\n", name, capture->peer.width, capture->peer.height);
+}
+
+static void check_header(struct capture *capture, bool unsaved)
+{
+	const struct calculator_number_observation *header = &capture->header;
+
+	redraw(capture);
+	collect_observations(capture);
+	assert(!strcmp(header->title, translated("Calculator", "Калькулятор")));
+	if (!unsaved) {
+		assert(!header->text[0]);
+		return;
+	}
+	assert(!strcmp(header->text, translated("Unsaved", "Не сохранено")) ||
+	       !strcmp(header->text, "*"));
+	assert(header->text_width > 0 && header->text_width <= header->width);
+	assert(header->text_height > 0 &&
+	       header->text_height <= header->height);
+	assert(header->left >= 0 && header->top >= 0);
+	assert(header->left + header->width <= header->parent_width);
+	assert(header->top + header->height <= header->parent_height);
 }
 
 static void visibility(struct capture *capture, bool visible)
@@ -599,6 +629,36 @@ static void storage_failure(struct capture *capture, char **argv)
 	puts("calculator-storage: Home retained draft; Stay continued input; Retry saved; Discard reopened old state");
 }
 
+static void header_status(struct capture *capture, char **argv)
+{
+	char failure_path[512];
+	FILE *gate;
+
+	assert(snprintf(failure_path, sizeof(failure_path), "%s/save-failure",
+			argv[6]) < (int)sizeof(failure_path));
+	start(capture, argv, "0", "", "", translated("Back", "Назад"));
+	check_header(capture, false);
+	press(capture, 1, KEY_NUMERIC_4, "4");
+	gate = fopen(failure_path, "wx");
+	assert(gate && !fclose(gate));
+	send_lifecycle(capture, FPLINUX_UI_SESSION_BACKGROUND);
+	visibility(capture, false);
+	send_lifecycle(capture, FPLINUX_UI_SESSION_FOREGROUND);
+	visibility(capture, true);
+	check_header(capture, true);
+	save_frame(capture, "calculator-unsaved");
+	assert(unlink(failure_path) == 0);
+	send_lifecycle(capture, FPLINUX_UI_SESSION_BACKGROUND);
+	visibility(capture, false);
+	send_lifecycle(capture, FPLINUX_UI_SESSION_FOREGROUND);
+	visibility(capture, true);
+	check_header(capture, false);
+	save_frame(capture, "calculator-saved");
+	expect_saved(capture, "", "4");
+	close_and_reap(capture);
+	puts("calculator-header: failed save shows a fitting status; durable save clears it");
+}
+
 static void published_save_without_confirmation(struct capture *capture,
 						char **argv)
 {
@@ -774,7 +834,8 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[7], "storage-sync-failure"))
 			published_save_without_confirmation(&capture, argv);
 		else {
-			assert(!strcmp(argv[7], "feedback") &&
+			assert((!strcmp(argv[7], "feedback") ||
+				!strcmp(argv[7], "header-status")) &&
 			       (argc == 9 || argc == 10));
 			locale = argv[8];
 			assert(!strcmp(locale, "en") || !strcmp(locale, "ru"));
@@ -782,7 +843,10 @@ int main(int argc, char **argv)
 				appearance = argv[9];
 			assert(!strcmp(appearance, "dark") ||
 			       !strcmp(appearance, "light"));
-			feedback_states(&capture, argv);
+			if (!strcmp(argv[7], "header-status"))
+				header_status(&capture, argv);
+			else
+				feedback_states(&capture, argv);
 		}
 		return 0;
 	}
