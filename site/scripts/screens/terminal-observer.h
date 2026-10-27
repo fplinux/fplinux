@@ -4,6 +4,15 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
+
+struct terminal_idle_observation {
+	uint64_t elapsed_ms;
+	uint64_t cpu_us;
+	unsigned int poll_wakeups;
+	unsigned int timeout_wakeups;
+	unsigned int terminal_ticks;
+};
 
 struct terminal_label_observation {
 	char text[1024];

@@ -157,6 +157,12 @@ void fplinux_terminal_render(struct fplinux_terminal *terminal,
 	unsigned int cursor_y = tsm_screen_get_cursor_y(terminal->screen);
 	unsigned int flags = tsm_screen_get_flags(terminal->screen);
 	unsigned int source_offset = 0;
+	int32_t left =
+		bounds->x1 +
+		((bounds->x2 - bounds->x1 + 1) % (int32_t)grid->cell_width) / 2;
+	int32_t top = bounds->y1 + ((bounds->y2 - bounds->y1 + 1) %
+				    (int32_t)grid->cell_height) /
+					   2;
 	struct tsm_screen_attr defaults;
 	lv_color_t foreground, background;
 	uint32_t preedit =
@@ -187,10 +193,9 @@ void fplinux_terminal_render(struct fplinux_terminal *terminal,
 					       column] :
 					NULL;
 			lv_area_t area = {
-				.x1 = bounds->x1 +
+				.x1 = left +
 				      (int32_t)(column * grid->cell_width),
-				.y1 = bounds->y1 +
-				      (int32_t)(row * grid->cell_height),
+				.y1 = top + (int32_t)(row * grid->cell_height),
 			};
 			lv_color_t text = foreground, fill = background;
 			uint32_t character = 0;

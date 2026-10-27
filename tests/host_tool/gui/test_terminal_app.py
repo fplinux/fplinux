@@ -130,7 +130,7 @@ def test_opening_options_cancels_a_queued_hold_before_pty_writes_resume(
     _run_application(terminal_app, "backpressure-options")
 
 
-def test_resuming_covered_input_samples_expiration_time_after_unpause(terminal_app: Path) -> None:
+def test_resuming_covered_input_retains_its_commit_delay(terminal_app: Path) -> None:
     _run_application(terminal_app, "resume-clock")
 
 

@@ -50,6 +50,7 @@ build_application() {
 		-Wl,--wrap=fplinux_ui_list_new \
 		-Wl,--wrap=fplinux_ui_watch_fd -Wl,--wrap=fplinux_terminal_pty_close \
 		-Wl,--wrap=fplinux_terminal_render \
+		-Wl,--wrap=fplinux_terminal_tick -Wl,--wrap=poll \
 		-Wl,--wrap=wl_display_flush \
 		-o "$work/terminal"
 	# shellcheck disable=SC2046

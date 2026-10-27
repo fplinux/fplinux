@@ -104,7 +104,11 @@ bool fplinux_terminal_key(struct fplinux_terminal *terminal, uint32_t keysym,
 /* Returns false only when output is blocked and the event must be retried. */
 bool fplinux_terminal_phone(struct fplinux_terminal *terminal,
 			    unsigned int code, bool pressed, uint64_t now_ms);
-void fplinux_terminal_tick(struct fplinux_terminal *terminal, uint64_t now_ms);
+void fplinux_terminal_tick(struct fplinux_terminal *terminal, uint64_t now_ms,
+			   bool can_input);
+/* Backpressure suspends input deadlines until the PTY can accept bytes. */
+bool fplinux_terminal_deadline(const struct fplinux_terminal *terminal,
+			       bool can_input, uint64_t *deadline_ms);
 /*
  * A pending letter waits while the terminal is hidden or covered by another
  * screen or the options menu and gets a fresh timeout when it is shown and

@@ -62,10 +62,10 @@ languages_cycle_without_erasing_and_emit_literal_utf8(const char *directory)
 	assert(fplinux_terminal_init(&terminal, 12, 4));
 	fplinux_terminal_load_languages(&terminal, directory, "en");
 	digit(&terminal, 2, 1000);
-	fplinux_terminal_tick(&terminal, 1999);
+	fplinux_terminal_tick(&terminal, 1999, true);
 	assert(terminal.output_size == 0);
 	assert(fplinux_terminal_preedit(&terminal) == 'a');
-	fplinux_terminal_tick(&terminal, 2000);
+	fplinux_terminal_tick(&terminal, 2000, true);
 	expect_output(&terminal, "a", 1);
 
 	digit(&terminal, 2, 2100);
@@ -73,17 +73,17 @@ languages_cycle_without_erasing_and_emit_literal_utf8(const char *directory)
 	phone_key(&terminal, KEY_NUMERIC_POUND, 2300);
 	expect_output(&terminal, "b", 1);
 	digit(&terminal, 2, 2400);
-	fplinux_terminal_tick(&terminal, 3400);
+	fplinux_terminal_tick(&terminal, 3400, true);
 	expect_output(&terminal, "A", 1);
 	phone_key(&terminal, KEY_NUMERIC_POUND, 3500);
 	hold_key(&terminal, KEY_NUMERIC_STAR, 3600);
 	digit(&terminal, 2, 4200);
 	digit(&terminal, 2, 4300);
-	fplinux_terminal_tick(&terminal, 5300);
+	fplinux_terminal_tick(&terminal, 5300, true);
 	expect_output(&terminal, "\xd0\xb1", 2);
 	phone_key(&terminal, KEY_NUMERIC_POUND, 5400);
 	digit(&terminal, 8, 5500);
-	fplinux_terminal_tick(&terminal, 6500);
+	fplinux_terminal_tick(&terminal, 6500, true);
 	expect_output(&terminal, "\xd0\xa8", 2);
 	hold_key(&terminal, KEY_NUMERIC_POUND, 6600);
 	digit(&terminal, 2, 7200);
@@ -93,13 +93,13 @@ languages_cycle_without_erasing_and_emit_literal_utf8(const char *directory)
 	hold_key(&terminal, KEY_NUMERIC_STAR, 7900);
 	phone_key(&terminal, KEY_NUMERIC_POUND, 8500);
 	digit(&terminal, 2, 8600);
-	fplinux_terminal_tick(&terminal, 9600);
+	fplinux_terminal_tick(&terminal, 9600, true);
 	expect_output(&terminal, "a", 1);
 	/* Shell input remains lowercase even at a new sentence boundary. */
 	fplinux_terminal_run(&terminal, FPLINUX_TERMINAL_COMMAND_ENTER);
 	expect_output(&terminal, "\r", 1);
 	digit(&terminal, 2, 9700);
-	fplinux_terminal_tick(&terminal, 10700);
+	fplinux_terminal_tick(&terminal, 10700, true);
 	expect_output(&terminal, "a", 1);
 	fplinux_terminal_destroy(&terminal);
 }
@@ -111,32 +111,78 @@ static void covered_input_restarts_deadline_and_abandons_held_gestures(void)
 	assert(fplinux_terminal_init(&terminal, 12, 4));
 	digit(&terminal, 2, 1000);
 	fplinux_terminal_pause(&terminal, true, 1300);
-	fplinux_terminal_tick(&terminal, 4000);
+	fplinux_terminal_tick(&terminal, 4000, true);
 	assert(!terminal.output_size &&
 	       fplinux_terminal_preedit(&terminal) == 'a');
 	fplinux_terminal_pause(&terminal, false, 5000);
-	fplinux_terminal_tick(&terminal, 5999);
+	fplinux_terminal_tick(&terminal, 5999, true);
 	assert(!terminal.output_size);
-	fplinux_terminal_tick(&terminal, 6000);
+	fplinux_terminal_tick(&terminal, 6000, true);
 	expect_output(&terminal, "a", 1);
 
 	fplinux_terminal_phone(&terminal, KEY_NUMERIC_2, true, 6100);
 	fplinux_terminal_pause(&terminal, true, 6200);
-	fplinux_terminal_tick(&terminal, 7000);
+	fplinux_terminal_tick(&terminal, 7000, true);
 	fplinux_terminal_pause(&terminal, false, 8000);
 	fplinux_terminal_phone(&terminal, KEY_NUMERIC_2, false, 8001);
-	fplinux_terminal_tick(&terminal, 8999);
+	fplinux_terminal_tick(&terminal, 8999, true);
 	expect_output(&terminal, "", 0);
-	fplinux_terminal_tick(&terminal, 9000);
+	fplinux_terminal_tick(&terminal, 9000, true);
 	expect_output(&terminal, "a", 1);
 	fplinux_terminal_phone(&terminal, KEY_F14, true, 9100);
 	expect_output(&terminal, "\177", 1);
 	fplinux_terminal_pause(&terminal, true, 9200);
-	fplinux_terminal_tick(&terminal, 10000);
+	fplinux_terminal_tick(&terminal, 10000, true);
 	fplinux_terminal_pause(&terminal, false, 11000);
 	fplinux_terminal_phone(&terminal, KEY_F14, false, 11001);
 	expect_output(&terminal, "", 0);
 
+	fplinux_terminal_destroy(&terminal);
+}
+
+static void deadlines_keep_cursor_input_and_backpressure_independent(void)
+{
+	struct fplinux_terminal terminal;
+	uint64_t deadline;
+
+	assert(fplinux_terminal_init(&terminal, 12, 4));
+	terminal.cursor_ms = 1000;
+	assert(fplinux_terminal_deadline(&terminal, true, &deadline));
+	assert(deadline == 1500);
+	fplinux_terminal_tick(&terminal, 1499, true);
+	assert(terminal.cursor_visible);
+	fplinux_terminal_tick(&terminal, 1500, false);
+	assert(!terminal.cursor_visible && !terminal.output_size);
+	assert(fplinux_terminal_deadline(&terminal, false, &deadline));
+	assert(deadline == 2000);
+	digit(&terminal, 2, 1700);
+	assert(fplinux_terminal_deadline(&terminal, true, &deadline));
+	assert(deadline == 2700);
+	assert(!fplinux_terminal_deadline(&terminal, false, &deadline));
+	fplinux_terminal_tick(&terminal, 2700, false);
+	assert(!terminal.output_size &&
+	       fplinux_terminal_preedit(&terminal) == 'a');
+	fplinux_terminal_tick(&terminal, 2700, true);
+	expect_output(&terminal, "a", 1);
+	assert(fplinux_terminal_phone(&terminal, KEY_F14, true, 3000));
+	expect_output(&terminal, "\177", 1);
+	assert(fplinux_terminal_deadline(&terminal, true, &deadline));
+	assert(deadline == 3500);
+	fplinux_terminal_tick(&terminal, 3500, true);
+	expect_output(&terminal, "\177", 1);
+	assert(fplinux_terminal_deadline(&terminal, true, &deadline));
+	assert(deadline == 3600);
+	fplinux_terminal_pause(&terminal, true, 3550);
+	assert(!fplinux_terminal_deadline(&terminal, true, &deadline));
+	fplinux_terminal_pause(&terminal, false, 4000);
+	fplinux_terminal_feed(&terminal, "\033[?25l", 6);
+	assert(!fplinux_terminal_deadline(&terminal, true, &deadline));
+	fplinux_terminal_feed(&terminal, "\033[?25h", 6);
+	terminal.history = true;
+	assert(!fplinux_terminal_deadline(&terminal, true, &deadline));
+	terminal.history = false;
+	terminal.stopped = true;
+	assert(!fplinux_terminal_deadline(&terminal, true, &deadline));
 	fplinux_terminal_destroy(&terminal);
 }
 
@@ -153,11 +199,11 @@ static void external_keyboard_keeps_its_modifiers_and_phone_oneshot(void)
 	expect_output(&terminal, "\003", 1);
 	assert(terminal.modifier == TSM_CONTROL_MASK);
 	digit(&terminal, 2, 1000);
-	fplinux_terminal_tick(&terminal, 2000);
+	fplinux_terminal_tick(&terminal, 2000, true);
 	expect_output(&terminal, "\001", 1);
 	assert(!terminal.modifier);
 	digit(&terminal, 2, 2100);
-	fplinux_terminal_tick(&terminal, 3100);
+	fplinux_terminal_tick(&terminal, 3100, true);
 	expect_output(&terminal, "a", 1);
 	fplinux_terminal_set_modifiers(&terminal, TSM_SHIFT_MASK);
 	fplinux_terminal_phone(&terminal, KEY_PICKUP_PHONE, true, 3200);
@@ -221,17 +267,17 @@ static void digit_hold_symbols_and_clear_have_shared_timing(void)
 
 	assert(fplinux_terminal_init(&terminal, 12, 4));
 	assert(fplinux_terminal_phone(&terminal, KEY_NUMERIC_2, true, 1000));
-	fplinux_terminal_tick(&terminal, 1499);
+	fplinux_terminal_tick(&terminal, 1499, true);
 	expect_output(&terminal, "", 0);
 	assert(fplinux_terminal_preedit(&terminal) == 'a');
-	fplinux_terminal_tick(&terminal, 1500);
+	fplinux_terminal_tick(&terminal, 1500, true);
 	expect_output(&terminal, "2", 1);
 	assert(fplinux_terminal_phone(&terminal, KEY_NUMERIC_2, false, 1600));
 	assert(fplinux_terminal_phone(&terminal, KEY_NUMERIC_2, true, 1700));
 	/* Queued physical events can arrive without an intervening timer tick. */
 	assert(fplinux_terminal_phone(&terminal, KEY_NUMERIC_2, false, 2200));
 	expect_output(&terminal, "2", 1);
-	fplinux_terminal_tick(&terminal, 2600);
+	fplinux_terminal_tick(&terminal, 2600, true);
 	expect_output(&terminal, "", 0);
 
 	digit(&terminal, 2, 3000);
@@ -242,7 +288,7 @@ static void digit_hold_symbols_and_clear_have_shared_timing(void)
 	phone_key(&terminal, KEY_OK, 3300);
 	expect_output(&terminal, "\xe2\x82\xac", 3);
 	digit(&terminal, 2, 3400);
-	fplinux_terminal_tick(&terminal, 4400);
+	fplinux_terminal_tick(&terminal, 4400, true);
 	expect_output(&terminal, "a", 1);
 	phone_key(&terminal, KEY_NUMERIC_STAR, 4500);
 	for (unsigned int index = 0; index < 36; ++index)
@@ -257,16 +303,16 @@ static void digit_hold_symbols_and_clear_have_shared_timing(void)
 
 	assert(fplinux_terminal_phone(&terminal, KEY_F14, true, 5000));
 	expect_output(&terminal, "\177", 1);
-	fplinux_terminal_tick(&terminal, 5499);
+	fplinux_terminal_tick(&terminal, 5499, true);
 	expect_output(&terminal, "", 0);
-	fplinux_terminal_tick(&terminal, 5500);
+	fplinux_terminal_tick(&terminal, 5500, true);
 	expect_output(&terminal, "\177", 1);
-	fplinux_terminal_tick(&terminal, 5599);
+	fplinux_terminal_tick(&terminal, 5599, true);
 	expect_output(&terminal, "", 0);
-	fplinux_terminal_tick(&terminal, 5600);
+	fplinux_terminal_tick(&terminal, 5600, true);
 	expect_output(&terminal, "\177", 1);
 	assert(fplinux_terminal_phone(&terminal, KEY_F14, false, 5601));
-	fplinux_terminal_tick(&terminal, 6000);
+	fplinux_terminal_tick(&terminal, 6000, true);
 	expect_output(&terminal, "", 0);
 	fplinux_terminal_destroy(&terminal);
 }
@@ -287,7 +333,7 @@ static void blocked_mode_change_preserves_pending_character_and_mode(void)
 				      1100));
 	assert(!fplinux_terminal_phone(&terminal, KEY_NUMERIC_POUND, false,
 				       1101));
-	fplinux_terminal_tick(&terminal, 2000);
+	fplinux_terminal_tick(&terminal, 2000, true);
 	assert(!strcmp(fplinux_text_input_indicator(&terminal.input), "abc"));
 	assert(fplinux_terminal_preedit(&terminal) == 'a');
 	for (size_t index = 0; index < terminal.output_size; ++index)
@@ -297,7 +343,7 @@ static void blocked_mode_change_preserves_pending_character_and_mode(void)
 				      1101));
 	expect_output(&terminal, "a", 1);
 	digit(&terminal, 2, 2100);
-	fplinux_terminal_tick(&terminal, 3100);
+	fplinux_terminal_tick(&terminal, 3100, true);
 	expect_output(&terminal, "A", 1);
 	fplinux_terminal_destroy(&terminal);
 }
@@ -443,7 +489,7 @@ static void screen_commands_assign_enter_clear_back_and_options(void)
 	assert(terminal.history);
 	phone_key(&terminal, KEY_F14, 1000);
 	assert(!terminal.history);
-	fplinux_terminal_tick(&terminal, 2000);
+	fplinux_terminal_tick(&terminal, 2000, true);
 	expect_output(&terminal, "", 0);
 	expect_command_keys(&terminal, "Clear", live, 10);
 	fplinux_terminal_run(&terminal, FPLINUX_TERMINAL_COMMAND_ENTER);
@@ -492,6 +538,8 @@ int main(int argc, char **argv)
 		languages_cycle_without_erasing_and_emit_literal_utf8(argv[2]);
 	else if (!strcmp(argv[1], "pause"))
 		covered_input_restarts_deadline_and_abandons_held_gestures();
+	else if (!strcmp(argv[1], "deadlines"))
+		deadlines_keep_cursor_input_and_backpressure_independent();
 	else if (!strcmp(argv[1], "modifiers"))
 		external_keyboard_keeps_its_modifiers_and_phone_oneshot();
 	else if (!strcmp(argv[1], "shortcuts"))

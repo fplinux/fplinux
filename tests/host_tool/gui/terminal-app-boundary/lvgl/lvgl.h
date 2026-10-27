@@ -40,6 +40,8 @@ lv_timer_t *lv_timer_create(lv_timer_cb_t callback, unsigned int period,
 			    void *context);
 void lv_timer_pause(lv_timer_t *timer);
 void lv_timer_resume(lv_timer_t *timer);
+void lv_timer_set_period(lv_timer_t *timer, uint32_t period);
+void lv_timer_reset(lv_timer_t *timer);
 void lv_timer_delete(lv_timer_t *timer);
 void *lv_timer_get_user_data(lv_timer_t *timer);
 

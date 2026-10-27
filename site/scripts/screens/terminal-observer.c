@@ -7,10 +7,12 @@
 #include <errno.h>
 #include <fplinux/fplinux-ui-screen.h>
 #include <lvgl/lvgl.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/resource.h>
 #include <wayland-client.h>
 
 enum capture_phase {
@@ -32,6 +34,71 @@ static bool pty_watched;
 static bool final_output_visible;
 static struct terminal_frame_observation terminal_observation;
 static lv_timer_t *observer_timer;
+static bool measuring_idle;
+static uint64_t idle_start_ms;
+static struct rusage idle_start_usage;
+static struct terminal_idle_observation idle_observation;
+
+int __real_poll(struct pollfd *descriptors, nfds_t count, int timeout);
+
+int __wrap_poll(struct pollfd *descriptors, nfds_t count, int timeout)
+{
+	int result = __real_poll(descriptors, count, timeout);
+
+	if (measuring_idle) {
+		++idle_observation.poll_wakeups;
+		if (!result)
+			++idle_observation.timeout_wakeups;
+	}
+	return result;
+}
+
+void __real_fplinux_terminal_tick(struct fplinux_terminal *terminal,
+				  uint64_t now_ms, bool can_input);
+
+void __wrap_fplinux_terminal_tick(struct fplinux_terminal *terminal,
+				  uint64_t now_ms, bool can_input)
+{
+	if (measuring_idle)
+		++idle_observation.terminal_ticks;
+	__real_fplinux_terminal_tick(terminal, now_ms, can_input);
+}
+
+static uint64_t usage_us(const struct rusage *usage)
+{
+	return (uint64_t)usage->ru_utime.tv_sec * 1000000U +
+	       (uint64_t)usage->ru_utime.tv_usec +
+	       (uint64_t)usage->ru_stime.tv_sec * 1000000U +
+	       (uint64_t)usage->ru_stime.tv_usec;
+}
+
+static void measure_idle(char request)
+{
+	if (request == 'M') {
+		assert(!measuring_idle);
+		lv_timer_pause(observer_timer);
+		idle_observation = (struct terminal_idle_observation){ 0 };
+		idle_start_ms = fplinux_ui_now_ms();
+		assert(!getrusage(RUSAGE_SELF, &idle_start_usage));
+		measuring_idle = true;
+		assert(send(observer, &request, 1, 0) == 1);
+	} else {
+		struct rusage usage;
+
+		assert(request == 'E' && measuring_idle);
+		measuring_idle = false;
+		idle_observation.elapsed_ms =
+			fplinux_ui_now_ms() - idle_start_ms;
+		assert(!getrusage(RUSAGE_SELF, &usage));
+		idle_observation.cpu_us =
+			usage_us(&usage) - usage_us(&idle_start_usage);
+		lv_timer_reset(observer_timer);
+		lv_timer_resume(observer_timer);
+		assert(send(observer, &idle_observation,
+			    sizeof(idle_observation),
+			    0) == (ssize_t)sizeof(idle_observation));
+	}
+}
 
 static void observer_tick(lv_timer_t *timer)
 {
@@ -300,6 +367,11 @@ int __wrap_wl_display_flush(struct wl_display *display)
 		else {
 			lv_display_t *lv_display = lv_display_get_default();
 
+			if (received == 1 &&
+			    (request == 'M' || request == 'E')) {
+				measure_idle(request);
+				return __real_wl_display_flush(display);
+			}
 			assert(received == 1 && request == 'F' && lv_display);
 			if (!render_observation) {
 				render_observation = lv_display_add_event_cb(

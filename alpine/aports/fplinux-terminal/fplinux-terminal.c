@@ -36,8 +36,6 @@
 #ifndef TERMINAL_FONT_DIRECTORY
 #define TERMINAL_FONT_DIRECTORY "/usr/share/fplinux/fonts"
 #endif
-/* The tick drives multi-tap, held keys, the cursor and repaints. */
-#define TERMINAL_TICK_MS 16U
 #define TERMINAL_INPUT_REDRAW_MS 20U
 #define TERMINAL_PENDING_KEYS 128U
 #define TERMINAL_FONT_COUNT 2U
@@ -102,6 +100,7 @@ struct gui_terminal {
 	/* The commands the canvas has now. */
 	bool shown[FPLINUX_TERMINAL_COMMAND_COUNT];
 	uint64_t redraw_ms;
+	uint64_t scheduled_ms;
 	struct queued_input pending_keys[TERMINAL_PENDING_KEYS];
 	size_t pending_start;
 	size_t pending_count;
@@ -166,6 +165,9 @@ static void fail(struct gui_terminal *app, const char *text)
 	if (app->failed)
 		return;
 	app->failed = true;
+	if (app->timer)
+		lv_timer_pause(app->timer);
+	app->scheduled_ms = 0;
 	close_symbol_picker(app);
 	/* No more shell input or output while the error is being read. */
 	fplinux_ui_watch_fd(app->ui, -1, 0, NULL, NULL);
@@ -197,6 +199,7 @@ static void drain_keys(struct gui_terminal *app);
 static void queue_input(struct gui_terminal *app,
 			const struct queued_input *input);
 static bool resize_terminal(struct gui_terminal *app);
+static void arm_timer(struct gui_terminal *app);
 
 static void shell_finished(struct gui_terminal *app)
 {
@@ -217,6 +220,7 @@ static void shell_finished(struct gui_terminal *app)
 	fplinux_text_input_cancel(&app->terminal.input);
 	if (app->timer)
 		lv_timer_pause(app->timer);
+	app->scheduled_ms = 0;
 	/* Exit changes to Close after completion, even though its ID stays. */
 	fplinux_ui_screen_remove_command(app->screen,
 					 FPLINUX_TERMINAL_COMMAND_EXIT);
@@ -414,9 +418,44 @@ static void update(struct gui_terminal *app)
 	if (app->failed || !app->terminal.dirty ||
 	    !fplinux_ui_is_visible(app->ui) ||
 	    fplinux_ui_current(app->ui) != app->screen ||
-	    fplinux_ui_now_ms() < app->redraw_ms)
+	    fplinux_ui_now_ms() < app->redraw_ms) {
+		arm_timer(app);
 		return;
+	}
 	lv_obj_invalidate(app->canvas);
+	arm_timer(app);
+}
+
+static void arm_timer(struct gui_terminal *app)
+{
+	uint64_t deadline = UINT64_MAX;
+	uint64_t now = fplinux_ui_now_ms();
+	uint64_t delay;
+
+	if (!app->timer)
+		return;
+	if (!app->failed && !app->terminal.paused) {
+		fplinux_terminal_deadline(
+			&app->terminal,
+			fplinux_terminal_session_can_input(&app->session),
+			&deadline);
+		if (app->terminal.dirty && app->redraw_ms > now &&
+		    app->redraw_ms < deadline)
+			deadline = app->redraw_ms;
+	}
+	if (deadline == UINT64_MAX) {
+		lv_timer_pause(app->timer);
+		app->scheduled_ms = 0;
+		return;
+	}
+	if (deadline == app->scheduled_ms)
+		return;
+	delay = deadline > now ? deadline - now : 1;
+	lv_timer_set_period(app->timer,
+			    delay > UINT32_MAX ? UINT32_MAX : (uint32_t)delay);
+	lv_timer_reset(app->timer);
+	lv_timer_resume(app->timer);
+	app->scheduled_ms = deadline;
 }
 
 static void after_input(struct gui_terminal *app)
@@ -823,6 +862,8 @@ static void tick(lv_timer_t *timer)
 	struct gui_terminal *app = lv_timer_get_user_data(timer);
 	uint64_t now;
 
+	lv_timer_pause(timer);
+	app->scheduled_ms = 0;
 	if (app->failed || app->terminal.stopped)
 		return;
 	drain_keys(app);
@@ -832,8 +873,9 @@ static void tick(lv_timer_t *timer)
 		     _("The shell connection was lost. Open Terminal again."));
 		return;
 	}
-	if (fplinux_terminal_session_can_input(&app->session))
-		fplinux_terminal_tick(&app->terminal, now);
+	fplinux_terminal_tick(
+		&app->terminal, now,
+		fplinux_terminal_session_can_input(&app->session));
 	after_input(app);
 }
 
@@ -847,17 +889,28 @@ static void set_visible(struct gui_terminal *app, bool visible)
 		return;
 	sync_input_pause(app);
 	sync_symbol_picker(app);
-	if (!visible || app->terminal.stopped) {
-		lv_timer_pause(app->timer);
-		if (visible)
-			update(app);
-		return;
-	}
-	lv_timer_resume(app->timer);
-	app->terminal.dirty = true;
-	if (app->symbols && !fplinux_ui_symbol_picker_refresh(app->symbols))
+	if (visible)
+		app->terminal.dirty = true;
+	if (visible && app->symbols &&
+	    !fplinux_ui_symbol_picker_refresh(app->symbols))
 		close_symbol_picker(app);
 	update(app);
+}
+
+static void canvas_active(struct fplinux_ui *ui,
+			  struct fplinux_ui_screen *screen, bool active,
+			  void *context)
+{
+	struct gui_terminal *app = context;
+
+	(void)ui;
+	(void)screen;
+	if (!active)
+		cancel_phone_holds(app);
+	fplinux_terminal_pause(&app->terminal, !active, fplinux_ui_now_ms());
+	if (active)
+		app->terminal.dirty = true;
+	arm_timer(app);
 }
 
 static bool terminal_size(const struct gui_terminal *app, struct winsize *size)
@@ -959,6 +1012,7 @@ static bool activate_screen(struct gui_terminal *app)
 	lv_obj_add_event_cb(app->canvas, draw_terminal, LV_EVENT_DRAW_MAIN,
 			    app);
 	fplinux_ui_screen_set_key_filter(app->screen, canvas_key, app);
+	fplinux_ui_canvas_set_active_listener(app->screen, canvas_active, app);
 	fplinux_ui_canvas_set_key_repeat(app->screen,
 					 FPLINUX_UI_CANVAS_REPEAT_KEYMAP);
 	fplinux_ui_screen_set_listener(app->screen, canvas_command, NULL, app);
@@ -1042,6 +1096,11 @@ int main(int argc, char **argv)
 					FPLINUX_LANGUAGE_DIRECTORY,
 					fplinux_ui_input_locale(app.ui));
 	fplinux_terminal_session_init(&app.session, &app.terminal, &app.pty);
+	app.terminal.paused = true;
+	app.timer = lv_timer_create(tick, 1, &app);
+	if (!app.timer)
+		goto done;
+	lv_timer_pause(app.timer);
 	if (!activate_screen(&app)) {
 		perror("terminal: create the terminal screen");
 		goto done;
@@ -1049,11 +1108,7 @@ int main(int argc, char **argv)
 	if (!fplinux_ui_set_title(app.ui, title))
 		goto done;
 	update_watch(&app);
-	app.timer = lv_timer_create(tick, TERMINAL_TICK_MS, &app);
-	if (!app.timer)
-		goto done;
-	if (!fplinux_ui_is_visible(app.ui))
-		lv_timer_pause(app.timer);
+	arm_timer(&app);
 	result = fplinux_ui_run(app.ui) == 0 && !app.failed ? EXIT_SUCCESS :
 							      EXIT_FAILURE;
 	if (!result && !app.closing && app.session.finished)

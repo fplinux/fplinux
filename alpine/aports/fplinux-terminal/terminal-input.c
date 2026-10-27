@@ -4,7 +4,7 @@
 #include <linux/input-event-codes.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
 
-#define FPLINUX_TERMINAL_CURSOR_MS 600U
+#define FPLINUX_TERMINAL_CURSOR_MS 500U
 
 const unsigned int fplinux_terminal_modifier_masks[] = {
 	TSM_CONTROL_MASK,
@@ -366,7 +366,8 @@ void fplinux_terminal_pause(struct fplinux_terminal *terminal, bool paused,
 	terminal->dirty = true;
 }
 
-void fplinux_terminal_tick(struct fplinux_terminal *terminal, uint64_t now_ms)
+void fplinux_terminal_tick(struct fplinux_terminal *terminal, uint64_t now_ms,
+			   bool can_input)
 {
 	bool pending = fplinux_multitap_pending(&terminal->input.compose);
 	const char *indicator = fplinux_text_input_indicator(&terminal->input);
@@ -374,8 +375,10 @@ void fplinux_terminal_tick(struct fplinux_terminal *terminal, uint64_t now_ms)
 
 	if (terminal->paused || terminal->stopped)
 		return;
-	fplinux_text_input_tick(&terminal->input, now_ms, send_character,
-				erase_character, terminal);
+	if (can_input)
+		fplinux_text_input_tick(&terminal->input, now_ms,
+					send_character, erase_character,
+					terminal);
 	if (pending != fplinux_multitap_pending(&terminal->input.compose) ||
 	    indicator != fplinux_text_input_indicator(&terminal->input) ||
 	    picker != terminal->input.picker_open)
@@ -389,6 +392,27 @@ void fplinux_terminal_tick(struct fplinux_terminal *terminal, uint64_t now_ms)
 		terminal->cursor_ms = now_ms;
 		terminal->dirty = true;
 	}
+}
+
+bool fplinux_terminal_deadline(const struct fplinux_terminal *terminal,
+			       bool can_input, uint64_t *deadline_ms)
+{
+	uint64_t deadline = UINT64_MAX;
+
+	if (terminal->paused || terminal->stopped)
+		return false;
+	if (can_input)
+		fplinux_text_input_deadline(&terminal->input, &deadline);
+	if (!terminal->history && !terminal->input.picker_open &&
+	    !fplinux_multitap_pending(&terminal->input.compose) &&
+	    !(tsm_screen_get_flags(terminal->screen) &
+	      TSM_SCREEN_HIDE_CURSOR) &&
+	    terminal->cursor_ms + FPLINUX_TERMINAL_CURSOR_MS < deadline)
+		deadline = terminal->cursor_ms + FPLINUX_TERMINAL_CURSOR_MS;
+	if (deadline == UINT64_MAX)
+		return false;
+	*deadline_ms = deadline;
+	return true;
 }
 
 uint32_t fplinux_terminal_preedit(const struct fplinux_terminal *terminal)

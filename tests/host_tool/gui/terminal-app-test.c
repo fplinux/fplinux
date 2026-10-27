@@ -42,6 +42,8 @@ struct lv_timer {
 	void *context;
 	bool paused;
 	bool deleted;
+	uint32_t period;
+	uint64_t due_ms;
 };
 
 struct fplinux_ui_screen {
@@ -49,6 +51,9 @@ struct fplinux_ui_screen {
 	void *filter_context;
 	fplinux_ui_canvas_key_cb key;
 	void *key_context;
+	fplinux_ui_canvas_active_cb active_callback;
+	void *active_context;
+	bool active;
 	fplinux_ui_command_cb command;
 	fplinux_ui_change_cb change;
 	void *command_context;
@@ -103,7 +108,6 @@ static const struct fplinux_ui_theme theme = {
 };
 static const char *scenario;
 static uint64_t now_ms;
-static bool advancing_clock;
 static int shell_peer = -1;
 static bool pty_opened;
 static bool pty_closed;
@@ -124,6 +128,24 @@ static unsigned int task_title_updates;
 static bool screen_created;
 static bool shell_finished;
 static int shell_status;
+
+static void update_canvas_active(void)
+{
+	bool active = ui.visible && !ui.menu_open && ui.current == &screen;
+
+	if (screen.active == active)
+		return;
+	screen.active = active;
+	if (screen.active_callback)
+		screen.active_callback(&ui, &screen, active,
+				       screen.active_context);
+}
+
+static void set_menu(bool open)
+{
+	ui.menu_open = open;
+	update_canvas_active();
+}
 
 /* The UI double supplies the titled content geometry of each screen profile. */
 static int header_height(void)
@@ -180,6 +202,8 @@ static void event(enum fplinux_ui_event_type type, bool visible)
 		.visible = visible,
 	};
 
+	if (type == FPLINUX_UI_EVENT_VISIBILITY)
+		update_canvas_active();
 	ui.event(&ui, &notification, ui.context);
 }
 
@@ -245,7 +269,7 @@ static void dispatch_key(const struct fplinux_ui_key *key)
 		     key->code == KEY_F13) ||
 		    (key->source == FPLINUX_UI_KEY_KEYBOARD &&
 		     key->code == KEY_COMPOSE)) {
-			ui.menu_open = true;
+			set_menu(true);
 			return;
 		}
 		if (key->code == KEY_F14 || key->code == KEY_OK) {
@@ -283,8 +307,10 @@ static void digit_two(uint64_t time_ms)
 static void pulse(uint64_t time_ms)
 {
 	now_ms = time_ms;
-	if (!timer.paused)
+	if (!timer.paused && now_ms >= timer.due_ms) {
+		timer.due_ms = now_ms + timer.period;
 		timer.callback(&timer);
+	}
 }
 
 static void cover(bool covered, uint64_t time_ms)
@@ -295,9 +321,8 @@ static void cover(bool covered, uint64_t time_ms)
 		event(FPLINUX_UI_EVENT_VISIBILITY, ui.visible);
 		assert(timer.paused == covered);
 	} else {
-		ui.menu_open = covered;
-		pulse(time_ms);
-		assert(!timer.paused);
+		set_menu(covered);
+		assert(timer.paused == covered);
 	}
 	assert(!pty_closed && !ui.quit);
 }
@@ -359,15 +384,14 @@ static void keyboard(uint32_t keysym, unsigned int code, uint32_t character)
 static void resumed_input_uses_time_after_unpause(void)
 {
 	digit_two(1000);
-	ui.menu_open = true;
-	pulse(1300);
+	now_ms = 1300;
+	set_menu(true);
 	expect_shell_bytes("");
-	ui.menu_open = false;
-	/* Pause synchronization reads the clock before tick's expiration sample. */
-	advancing_clock = true;
+	/* The pending character keeps its full commit delay after uncovering. */
+	now_ms = 5000;
+	set_menu(false);
 	pulse(5000);
 	expect_shell_bytes("");
-	advancing_clock = false;
 	pulse(5999);
 	expect_shell_bytes("");
 	pulse(6000);
@@ -514,9 +538,9 @@ static void input_backpressure(void)
 	assert(!ui.quit && !pty_closed);
 	/* Open Options before a timer callback can observe the covered screen. */
 	if (options) {
-		ui.menu_open = true;
+		set_menu(true);
 		pulse(10500);
-		ui.menu_open = false;
+		set_menu(false);
 		pulse(10600);
 	}
 	if (cancelled)
@@ -677,7 +701,8 @@ static void header_distinguishes_input_from_scrollback(void)
 	assert(timer.paused);
 	ui.visible = true;
 	event(FPLINUX_UI_EVENT_VISIBILITY, true);
-	assert(!timer.paused);
+	/* Scrollback has neither a blinking cursor nor a pending input deadline. */
+	assert(timer.paused);
 	expect_header("Scrollback", "Ctrl+Alt+Shift  ↑512", "C+A+S  ↑512");
 	for (unsigned int index = 0; index < 64; ++index) {
 		phone(KEY_RIGHT, true, 500 + index * 2);
@@ -768,7 +793,7 @@ static void activation_returns_to_the_same_terminal(void)
 		assert(ui.watched_fd == original_fd && !pty_closed && !ui.quit);
 		expect_shell_bytes("");
 	}
-	ui.menu_open = true;
+	set_menu(true);
 	activate(FPLINUX_UI_ACTIVATION_RESUME);
 	assert(ui.menu_open);
 	activate(FPLINUX_UI_ACTIVATION_OPEN);
@@ -952,7 +977,7 @@ fplinux_ui_theme(const struct fplinux_ui *instance)
 
 uint64_t fplinux_ui_now_ms(void)
 {
-	return advancing_clock ? now_ms++ : now_ms;
+	return now_ms;
 }
 
 const char *fplinux_ui_input_locale(const struct fplinux_ui *instance)
@@ -979,7 +1004,8 @@ bool fplinux_ui_menu_is_open(const struct fplinux_ui *instance)
 
 void fplinux_ui_menu_close(struct fplinux_ui *instance)
 {
-	instance->menu_open = false;
+	assert(instance == &ui);
+	set_menu(false);
 }
 
 bool fplinux_ui_set_title(struct fplinux_ui *instance, const char *title)
@@ -1010,6 +1036,7 @@ bool fplinux_ui_push(struct fplinux_ui *instance,
 	       (new_screen == &screen || new_screen == &list_screen ||
 		new_screen == &form_screen || new_screen == &alert_screen));
 	instance->current = new_screen;
+	update_canvas_active();
 	return true;
 }
 
@@ -1024,6 +1051,7 @@ bool fplinux_ui_pop(struct fplinux_ui *instance)
 	assert(instance == &ui);
 	assert(instance->current != &screen);
 	instance->current = &screen;
+	update_canvas_active();
 	return true;
 }
 
@@ -1048,6 +1076,15 @@ lv_obj_t *fplinux_ui_canvas_object(struct fplinux_ui_screen *instance)
 {
 	assert(instance == &screen);
 	return &canvas;
+}
+
+void fplinux_ui_canvas_set_active_listener(struct fplinux_ui_screen *instance,
+					   fplinux_ui_canvas_active_cb callback,
+					   void *context)
+{
+	assert(instance == &screen);
+	instance->active_callback = callback;
+	instance->active_context = context;
 }
 
 void fplinux_ui_canvas_set_key_handler(struct fplinux_ui_screen *instance,
@@ -1376,6 +1413,8 @@ lv_timer_t *lv_timer_create(lv_timer_cb_t callback, unsigned int period,
 	assert(period > 0);
 	timer.callback = callback;
 	timer.context = context;
+	timer.period = period;
+	timer.due_ms = now_ms + period;
 	return &timer;
 }
 
@@ -1387,6 +1426,17 @@ void lv_timer_pause(lv_timer_t *instance)
 void lv_timer_resume(lv_timer_t *instance)
 {
 	instance->paused = false;
+}
+
+void lv_timer_set_period(lv_timer_t *instance, uint32_t period)
+{
+	assert(period);
+	instance->period = period;
+}
+
+void lv_timer_reset(lv_timer_t *instance)
+{
+	instance->due_ms = now_ms + instance->period;
 }
 
 void lv_timer_delete(lv_timer_t *instance)

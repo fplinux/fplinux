@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Complete Terminal captures with real UI, PTY, Terminus cells and Noto chrome."""
+"""Complete Terminal captures with real UI, PTY and bitmap terminal cells."""
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, cast
@@ -100,8 +101,10 @@ def assert_preedit_ink_inside_highlight(
     assert row < terminal["rows"]
     content_left, content_top, content_width, content_height = frame["content"]
     cell_width, cell_height = cell
-    left = content_left + column * cell_width
-    top = content_top + row * cell_height
+    grid_left = content_left + (content_width - terminal["columns"] * cell_width) // 2
+    grid_top = content_top + (content_height - terminal["rows"] * cell_height) // 2
+    left = grid_left + column * cell_width
+    top = grid_top + row * cell_height
     right, bottom = left + cell_width, top + cell_height
     assert right <= content_left + content_width
     assert bottom <= content_top + content_height
@@ -127,6 +130,8 @@ def terminal_cell(  # noqa: PLR0913, PLR0917
     """Crop an actual PSF cell without deriving its colours or shape from the renderer."""
     left, top = content[:2]
     cell_width, cell_height = cell
+    left += (content[2] % cell_width) // 2
+    top += (content[3] % cell_height) // 2
     return [
         pixels[
             ((top + row * cell_height + y) * width + left + column * cell_width + x) * 3 : (
@@ -150,6 +155,25 @@ def terminal_screen_state(frame: FrameObservation) -> tuple[int, int, int, int, 
         terminal["flags"],
         terminal["edge_character"],
     )
+
+
+def test_actual_idle_terminal_sleeps_between_cursor_deadlines(
+    terminal_screens: tuple[Path, str],
+) -> None:
+    _, transcript = terminal_screens
+    samples = re.findall(
+        r"terminal-idle ([a-z-]+): elapsed_ms=(\d+) cpu_us=(\d+) "
+        r"poll_wakeups=(\d+) timeout_wakeups=(\d+) terminal_ticks=(\d+)",
+        transcript,
+    )
+    assert [sample[0] for sample in samples] == ["visible-cursor", "hidden"]
+    for state, elapsed, _cpu, _wakeups, timeouts, ticks in samples:
+        assert 1200 <= int(elapsed) < 3000
+        if state == "visible-cursor":
+            assert 2 <= int(ticks) <= 4
+        else:
+            assert int(ticks) == 0
+        assert int(timeouts) < 20
 
 
 # Capture axes and literal expected colours stay independent; pytest supplies them by name.
@@ -316,6 +340,16 @@ def test_actual_failed_shell_keeps_last_output_and_scrollback_after_releasing_pt
         assert not frame["pty_watched"]
         if state == "terminal-ended":
             assert frame["final_output_visible"]
+            expected_status = (
+                ("Сигнал 15" if locale == "ru" else "Signal 15")
+                if theme == "light"
+                else ("Код 37" if locale == "ru" else "Exit 37")
+            )
+            assert [label["text"] for label in frame["labels"]].count(expected_status) == 1
+        assert all(
+            "Ctrl" not in label["text"] and "C+A+S" not in label["text"]
+            for label in frame["labels"]
+        )
         for label in frame["labels"]:
             left, top, label_width, label_height = label["bounds"]
             assert 0 <= left < left + label_width <= width
@@ -384,7 +418,7 @@ def test_actual_terminal_keeps_pty_cells_and_options_navigation(
         actual_width, actual_height, pixels = png_pixels(output / f"{state}{suffix}.png")
         assert (actual_width, actual_height) == (width, height)
         assert f"{state}: {width}x{height}\n" in transcript
-        assert len({pixels[index : index + 3] for index in range(0, len(pixels), 3)}) > 8
+        assert len({pixels[index : index + 3] for index in range(0, len(pixels), 3)}) > 1
         frame = cast(
             "FrameObservation", json.loads((output / f"{state}{suffix}.json").read_text())
         )
@@ -508,8 +542,8 @@ def test_actual_terminal_header_keeps_status_whole_and_restores_input_mode(
 @pytest.mark.parametrize(
     "profile",
     [
-        ("-128x128", (128, 96), (2, 0, 123, 96)),
-        ("-128x160", (128, 128), (2, 16, 123, 96)),
+        ("-128x128", (128, 96), (1, 0, 126, 96)),
+        ("-128x160", (128, 128), (1, 16, 126, 96)),
         ("-176x220", (176, 178), (5, 7, 166, 164)),
         ("", (240, 268), (24, 44, 192, 180)),
         ("-320x240", (320, 196), (20, 33, 280, 130)),

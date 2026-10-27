@@ -54,6 +54,54 @@ static void external_escape(struct fplinux_ui_frame_peer *peer)
 	fplinux_ui_frame_send_key(&peer->keyboards[0], KEY_ESC, false);
 }
 
+static void measure_idle(struct fplinux_ui_frame_peer *peer, int observer,
+			 const char *state, bool cursor)
+{
+	struct terminal_idle_observation measured;
+	uint64_t until;
+	char request = 'M';
+
+	assert(send(observer, &request, 1, 0) == 1);
+	fplinux_ui_frame_wait_readable(peer, observer);
+	assert(recv(observer, &request, 1, 0) == 1 && request == 'M');
+	until = fplinux_ui_frame_now_ms() + 1200;
+	while (fplinux_ui_frame_now_ms() < until)
+		fplinux_ui_frame_pump(peer);
+	request = 'E';
+	assert(send(observer, &request, 1, 0) == 1);
+	/* Wake the real Wayland connection without adding PTY input. */
+	fplinux_ui_frame_send_key(&peer->keyboards[0], KEY_LEFTSHIFT, true);
+	fplinux_ui_frame_send_key(&peer->keyboards[0], KEY_LEFTSHIFT, false);
+	fplinux_ui_frame_wait_readable(peer, observer);
+	assert(recv(observer, &measured, sizeof(measured), 0) ==
+	       (ssize_t)sizeof(measured));
+	assert(measured.elapsed_ms >= 1200 && measured.elapsed_ms < 3000);
+	assert(cursor ? measured.terminal_ticks >= 2 &&
+				measured.terminal_ticks <= 4 :
+			!measured.terminal_ticks);
+	printf("terminal-idle %s: elapsed_ms=%llu cpu_us=%llu poll_wakeups=%u timeout_wakeups=%u terminal_ticks=%u\n",
+	       state, (unsigned long long)measured.elapsed_ms,
+	       (unsigned long long)measured.cpu_us, measured.poll_wakeups,
+	       measured.timeout_wakeups, measured.terminal_ticks);
+}
+
+static void measure_idle_states(struct fplinux_ui_frame_peer *peer, int session,
+				int observer)
+{
+	struct fplinux_ui_session_message visibility = {
+		.type = FPLINUX_UI_SESSION_VISIBILITY,
+		.visible = false,
+	};
+
+	wait_frame(peer, observer);
+	measure_idle(peer, observer, "visible-cursor", true);
+	assert(fplinux_ui_session_send(session, &visibility));
+	measure_idle(peer, observer, "hidden", false);
+	visibility.visible = true;
+	assert(fplinux_ui_session_send(session, &visibility));
+	wait_frame(peer, observer);
+}
+
 static void hold(struct fplinux_ui_frame_peer *peer, int observer,
 		 unsigned int code)
 {
@@ -129,6 +177,27 @@ static void wait_legends(struct fplinux_ui_frame_peer *peer, int session,
 		    !strcmp(message.centre, legend(centre)) &&
 		    !strcmp(message.right, legend(right)))
 			return;
+		assert(message.type != FPLINUX_UI_SESSION_EXIT);
+	}
+}
+
+static bool wait_modifier_legends(struct fplinux_ui_frame_peer *peer,
+				  int session, bool selected)
+{
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	for (;;) {
+		struct fplinux_ui_session_message message =
+			fplinux_ui_frame_wait_message(peer, session);
+		bool options = !strcmp(message.left, legend("Options"));
+
+		assert(fplinux_ui_frame_now_ms() < deadline);
+		if (message.type == FPLINUX_UI_SESSION_SOFTKEYS &&
+		    (options || !strcmp(message.left, legend("Done"))) &&
+		    !strcmp(message.centre,
+			    legend(selected ? "Unmark" : "Mark")) &&
+		    !strcmp(message.right, legend("Back")))
+			return options;
 		assert(message.type != FPLINUX_UI_SESSION_EXIT);
 	}
 }
@@ -406,6 +475,20 @@ static void open_option(struct fplinux_ui_frame_peer *peer, int session,
 	press(peer, observer, KEY_OK);
 }
 
+static void apply_modifiers(struct fplinux_ui_frame_peer *peer, int session,
+			    int observer, bool options)
+{
+	press(peer, observer, KEY_F13);
+	if (options) {
+		wait_legends(peer, session, "", "Select", "Back");
+		press(peer, observer, KEY_OK);
+	}
+	wait_legends(peer, session, "Options", "Enter", "Clear");
+	if (options)
+		printf("terminal-modifiers %dx%d %s: Done through Options\n",
+		       peer->width, peer->height, russian ? "ru" : "en");
+}
+
 static void expect_font_selection(size_t focused, size_t selected)
 {
 	assert(observation.list_count == 2);
@@ -446,19 +529,31 @@ static void capture_header(struct fplinux_ui_frame_peer *peer, int session,
 			   const char *prefix)
 {
 	struct pollfd input = { .fd = control, .events = POLLIN };
+	bool modifiers_in_options;
 
 	save_state(peer, observer, directory, prefix, "live");
 	/* Clear composition before arming one-shot modifiers. */
 	press(peer, observer, KEY_F14);
 	open_option(peer, session, observer, 0);
-	wait_legends(peer, session, "Done", "Mark", "Back");
+	modifiers_in_options = wait_modifier_legends(peer, session, false);
+	if (modifiers_in_options) {
+		/* A narrow translated legend still exposes Done through Options. */
+		apply_modifiers(peer, session, observer, true);
+		open_option(peer, session, observer, 0);
+		modifiers_in_options =
+			wait_modifier_legends(peer, session, false);
+	}
 	for (unsigned int index = 0; index < 3; ++index) {
 		press(peer, observer, KEY_OK);
-		if (index != 2)
+		modifiers_in_options =
+			wait_modifier_legends(peer, session, true);
+		if (index != 2) {
 			press(peer, observer, KEY_DOWN);
+			modifiers_in_options =
+				wait_modifier_legends(peer, session, false);
+		}
 	}
-	press(peer, observer, KEY_F13);
-	wait_legends(peer, session, "Options", "Enter", "Clear");
+	apply_modifiers(peer, session, observer, modifiers_in_options);
 	save_state(peer, observer, directory, prefix, "armed");
 	open_option(peer, session, observer, 2);
 	wait_legends(peer, session, "", "Send", "Back");
@@ -781,6 +876,8 @@ int main(int argc, char **argv)
 	assert(peer.keyboards[0].keyboard && peer.keyboards[1].keyboard);
 	fplinux_ui_frame_focus_keyboard(&peer.keyboards[0]);
 	fplinux_ui_frame_focus_keyboard(&peer.keyboards[1]);
+	if (showcase && config.screen_width == 240)
+		measure_idle_states(&peer, session, observer[0]);
 	if (showcase) {
 		capture_symbols(&peer, session, observer[0], control[0],
 				argv[6]);
