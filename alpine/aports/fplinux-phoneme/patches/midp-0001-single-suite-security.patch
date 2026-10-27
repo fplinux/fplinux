@@ -1,0 +1,39 @@
+Purpose: Initialize MIDP security for one MIDlet suite without the AMS suite
+ store, permission dialog and push registry, and trust the fplinux-phoneme
+ launcher (org.fplinux.phoneme.Runner$SecurityTrusted) to request the
+ internal security token.
+
+--- a/midp/src/security/internal_api_protection/reference/classes/com/sun/midp/security/SecurityInitializer.jpp
++++ b/midp/src/security/internal_api_protection/reference/classes/com/sun/midp/security/SecurityInitializer.jpp
+@@ -113,17 +113,10 @@
+      * should request for security token on their own.
+      */
+     public static void initSystem() {
+-        SecurityToken internalSecurityToken =
+-            impl.internalSecurityToken;
+-
+-        com.sun.midp.security.SecurityHandler.initSecurityToken(
+-            internalSecurityToken);
+-        com.sun.midp.midletsuite.MIDletSuiteStorage.initSecurityToken(
+-            internalSecurityToken);
+-// #ifndef ENABLE_CDC
+-        com.sun.midp.io.j2me.push.PushRegistryInternal.initSecurityToken(
+-            internalSecurityToken);
+-// #endif ENABLE_CDC
++        // fplinux-phoneme runs one suite without the AMS suite store,
++        // permission dialogs or push registry, so none of their classes is
++        // selected. Classes that need the internal token request it
++        // through requestToken().
+     }
+
+     /**
+@@ -149,6 +142,9 @@
+         // initialization over SecurityToken request
+         "com.sun.midp.main.AbstractMIDletSuiteLoader$SecurityTrusted",
+
++        // The fplinux-phoneme launcher boots the single suite.
++        "org.fplinux.phoneme.Runner$SecurityTrusted",
++
+ // #ifdef ENABLE_CDC
+         "com.sun.midp.jump.isolate.MIDletContainer$SecurityTrusted",
+ // #endif ENABLE_CDC

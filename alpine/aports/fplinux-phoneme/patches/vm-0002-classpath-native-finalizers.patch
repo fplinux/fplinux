@@ -1,0 +1,41 @@
+Clear the unresolved-finalizer flag once static native binding succeeds.
+
+With ROMIZING=false the product VM marks a class's native finalizer as
+unresolved before registering the static natives, and then rejects CLDC
+startup with "UnsatisfiedLinkError: finalize".
+
+--- a/cldc/src/vm/share/handles/JavaClass.hpp
++++ b/cldc/src/vm/share/handles/JavaClass.hpp
+@@ -330,14 +330,12 @@
+     return access_flags().has_vanilla_constructor();
+   }
+
+-#if ENABLE_DYNAMIC_NATIVE_METHODS
+   void clear_has_unresolved_finalizer(void) {
+     ClassInfo::Raw info = class_info();
+     AccessFlags flags = info().access_flags();
+     flags.clear_has_unresolved_finalizer();
+     info().set_access_flags(flags);
+   }
+-#endif
+
+ #if ENABLE_ROM_GENERATOR
+   int generate_fieldmap(TypeArray* field_map);
+--- a/cldc/src/vm/share/runtime/ClassFileParser.cpp
++++ b/cldc/src/vm/share/runtime/ClassFileParser.cpp
+@@ -1989,6 +1989,15 @@
+   if (has_native_methods || !UseROM) {
+     Natives::register_natives_for(&this_class JVM_CHECK_0);
+   }
++#if !USE_SOURCE_IMAGE_GENERATOR
++  // Static binding can resolve a finalizer marked before native registration.
++  if (this_class().has_unresolved_finalizer()) {
++    const Method::Raw fm = this_class().lookup_finalizer();
++    if (fm().get_native_code() != (address)Java_void_unimplemented) {
++      this_class().clear_has_unresolved_finalizer();
++    }
++  }
++#endif
+
+   // Check if this klass has a vanilla default constructor
+   if (!ROMIZED_PRODUCT && super_class.is_null()) {

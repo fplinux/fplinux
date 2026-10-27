@@ -1,0 +1,45 @@
+Build the CLDC preverifier with musl and current compilers.
+
+The Linux typedefs predate <stdint.h> and clash with musl's uint32_t, and
+<asm/byteorder.h> is not the portable source of ntohl(). The K&R-era code also
+needs gnu89 semantics, common symbols and relaxed diagnostics.
+
+--- a/preverifier/build/linux/Makefile
++++ b/preverifier/build/linux/Makefile
+@@ -49,7 +49,9 @@
+ 	-DUNIX -DLINUX \
+ 	-DJAVAVERIFY \
+ 	-DTRIMMED \
+-	-D$(ARCH) $(EXTRACFLAGS)
++	-D$(ARCH) -std=gnu89 -fcommon \
++	-Wno-implicit-int -Wno-implicit-function-declaration \
++	-Wno-int-conversion -Wno-incompatible-pointer-types $(EXTRACFLAGS)
+
+ CC = gcc
+ LD = gcc
+--- a/preverifier/src/typedefs_md.h
++++ b/preverifier/src/typedefs_md.h
+@@ -52,12 +52,8 @@
+ #endif /* SOLARIS2 */
+
+ #ifdef LINUX
+-#ifndef       _UINT64_T
+-#define       _UINT64_T
+-typedef unsigned long long uint64_t;
+-#define _UINT32_T
+-typedef unsigned long uint32_t;
+-#endif
++#include <stdint.h>
++typedef unsigned int uint_t;
+ #endif /* LINUX */
+
+ #ifdef DARWIN
+@@ -150,7 +146,7 @@
+ #endif
+
+ #ifdef LINUX
+-#include <asm/byteorder.h>
++#include <arpa/inet.h>
+ #endif
+
+ #ifdef DARWIN

@@ -1,0 +1,251 @@
+Purpose: Use PCSL BSD client sockets with nonblocking DNS and the FPLinux
+ slave-mode readiness adapter. Ignore SIGPIPE and validate setup errors.
+ Socket close never blocks the GUI for SO_LINGER. The single-suite Runner
+ owns pause/destroy; do not import the upstream AMS SuspendSystem.
+ Expose the existing suite access context to the FPLinux launcher.
+
+--- a/pcsl/network/bsd/pcsl_network.c
++++ b/pcsl/network/bsd/pcsl_network.c
+@@ -60,6 +60,7 @@
+ #include <pcsl_network.h>
+ #include <pcsl_network_na.h>
+ #include <pcsl_network_notifier.h>
++#include <fplinux-pm-network.h>
+ 
+ int lastError; /* For pcsl_network_error use. */
+ 
+@@ -89,33 +90,8 @@
+ 	void **pHandle,
+ 	void **pContext)
+ {
+-    struct hostent *hp;
+-    int realLen;
+-
+-    (void)pHandle;
+-    (void)pContext;
+-
+-    hp = gethostbyname(hostname);
+-    lastError = errno;
+-    if (NULL == hp) {
+-        return PCSL_NET_IOERROR;
+-    }
+-
+-    if (hp->h_addrtype == AF_INET) {
+-        realLen = 4;	/* IPv4 */
+-    } else if (hp->h_addrtype == AF_INET6) {
+-        realLen = 16;   /* IMPL NOTE - IPv6 not supported, yet. */
+-    } else {
+-        return PCSL_NET_IOERROR;
+-    }
+-
+-    if (realLen > maxLen) {
+-        return PCSL_NET_INVALID;
+-    }
+-
+-    memcpy(pAddress, hp->h_addr_list[0], realLen);
+-    *pLen = realLen;
+-    return PCSL_NET_SUCCESS;
++    return fplinux_pm_network_lookup_start(hostname, pAddress, maxLen,
++                                          pLen, pHandle, pContext);
+ }
+ 
+ /**
+@@ -131,13 +107,8 @@
+ 	void *handle,
+ 	void *context)
+ {
+-    /*
+-     * DEBUG:
+-     * printf("pcsl_socket_gethostbyname_finish called!\n");
+-     */
+-    (void)handle;
+-    (void)context;
+-    return PCSL_NET_INVALID;
++    return fplinux_pm_network_lookup_finish(pAddress, maxLen, pLen,
++                                           handle, context);
+ }
+ 
+ /**
+@@ -295,6 +266,7 @@
+  */
+ int pcsl_network_finalize_start(PCSL_NET_CALLBACK pcsl_network_callback) {
+     (void)pcsl_network_callback;
++    fplinux_pm_network_cleanup();
+     return PCSL_NET_SUCCESS;
+ }
+ 
+--- a/pcsl/network/bsd/pcsl_socket.c
++++ b/pcsl/network/bsd/pcsl_socket.c
+@@ -77,7 +77,9 @@
+     int status;
+     int flags;
+ 
+-    fd = socket(AF_INET, SOCK_STREAM, 0);
++    *pHandle = NULL;
++    *pContext = NULL;
++    fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+     lastError = errno;
+     if (fd == INVALID_SOCKET) {
+         return PCSL_NET_IOERROR;
+@@ -102,7 +104,11 @@
+     memcpy(&addr.sin_addr.s_addr, ipBytes, sizeof(addr.sin_addr.s_addr));
+ 
+     flags = fcntl(fd, F_GETFL, 0);
+-    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
++    if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) {
++        lastError = errno;
++        close(fd);
++        return PCSL_NET_IOERROR;
++    }
+     status = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
+     lastError = errno;
+ 
+@@ -114,6 +120,10 @@
+ 
+     if (status == 0) {
+         *pHandle = na_create(fd);
++        if (*pHandle == NULL) {
++            close(fd);
++            return PCSL_NET_IOERROR;
++        }
+         return PCSL_NET_SUCCESS;
+     }
+ 
+@@ -121,6 +131,10 @@
+         (errno == EINPROGRESS || errno == EALREADY)) {
+         *pContext = NULL;
+         *pHandle = na_create(fd);
++        if (*pHandle == NULL) {
++            close(fd);
++            return PCSL_NET_IOERROR;
++        }
+         na_register_for_write(*pHandle);
+         return PCSL_NET_WOULDBLOCK;
+     }
+@@ -137,7 +151,7 @@
+ 	void *handle,
+ 	void *context)
+ {
+-    int err;
++    int err = 0;
+     socklen_t err_size = sizeof(err);
+ 
+     int fd = na_get_fd(handle);
+@@ -148,6 +162,9 @@
+      * printf( "pcsl_socket_open_finish::handle=%d err=%d\n", fd, err);
+      */
+ 
++    if (status < 0) {
++        err = errno;
++    }
+     lastError = err;
+ 
+     if (err == 0) {
+@@ -292,7 +309,7 @@
+ 
+     fd = na_get_fd(handle);
+ 
+-    status = send(fd, pData, len, 0);
++    status = send(fd, pData, len, MSG_NOSIGNAL);
+     lastError = errno;
+ 
+     if (SOCKET_ERROR == status) {
+@@ -416,6 +433,11 @@
+      * printf("closing fd: %d\n", fd);
+      */
+ 
++    /* The GUI thread must never wait for a positive SO_LINGER timeout. */
++    {
++        struct linger immediate = {0, 0};
++        setsockopt(fd, SOL_SOCKET, SO_LINGER, &immediate, sizeof(immediate));
++    }
+     status = close(fd);
+     lastError = errno;
+ 
+--- a/midp/src/protocol/socket/reference/classes/com/sun/midp/io/j2me/socket/Protocol.java
++++ b/midp/src/protocol/socket/reference/classes/com/sun/midp/io/j2me/socket/Protocol.java
+@@ -47,13 +47,10 @@
+ import com.sun.midp.security.SecurityToken;
+ import com.sun.midp.security.ImplicitlyTrustedClass;
+ import com.sun.midp.security.SecurityInitializer;
+-import com.sun.midp.suspend.NetworkSubsystem;
+-import com.sun.midp.suspend.Subsystem;
+-import com.sun.midp.suspend.StateTransitionException;
+ 
+ /** Connection to the J2ME socket API. */
+ public class Protocol extends NetworkConnectionBase
+-        implements SocketConnection, Subsystem {
++        implements SocketConnection {
+ 
+     /** TCP client permission name. */
+     private static final String CLIENT_PERMISSION_NAME =
+@@ -200,7 +197,6 @@
+             throw new IllegalArgumentException("Malformed address");
+         }
+ 
+-        NetworkSubsystem.getInstance(classSecurityToken).ensureActive();
+ 
+         host = url.host;
+         port = url.port;
+@@ -282,8 +278,6 @@
+ 
+         open0(ipBytes, port);
+ 
+-        NetworkSubsystem.getInstance(classSecurityToken).
+-                registerSubsystem(this);
+     }
+ 
+     /**
+@@ -419,8 +413,6 @@
+             // ignore
+         }
+ 
+-        NetworkSubsystem.getInstance(classSecurityToken).
+-                unregisterSubsystem(this);
+     }
+ 
+     /**
+@@ -667,23 +659,6 @@
+     }
+ 
+     /**
+-     * Perform actions required on system resume. Makes nothing.
+-     * @throws StateTransitionException
+-     */
+-    public void resume() throws StateTransitionException {}
+-
+-    /**
+-     * Disconnects connection within system suspend procedure.
+-     */
+-    public void suspend() {
+-        try {
+-            disconnect();
+-        } catch (IOException e) {
+-            // ignoring to proceed system pause
+-        }
+-    }
+-
+-    /**
+      * Opens a TCP connection to a server.
+      *
+      * @param szIpBytes  raw IPv4 address of host
+--- a/midp/src/ams/ams_base_cldc/reference/classes/com/sun/midp/main/CldcAccessControlContext.java
++++ b/midp/src/ams/ams_base_cldc/reference/classes/com/sun/midp/main/CldcAccessControlContext.java
+@@ -33,7 +33,7 @@
+ 
+ import com.sun.midp.security.Permissions;
+ 
+-class CldcAccessControlContext extends AccessControlContextAdapter {
++public class CldcAccessControlContext extends AccessControlContextAdapter {
+ 
+     /** Reference to the current MIDlet suite. */
+     private MIDletSuite midletSuite;
+@@ -43,7 +43,7 @@
+      *
+      * @param suite current MIDlet suite
+      */
+-    CldcAccessControlContext(MIDletSuite suite) {
++    public CldcAccessControlContext(MIDletSuite suite) {
+         midletSuite = suite;
+     }
+ 

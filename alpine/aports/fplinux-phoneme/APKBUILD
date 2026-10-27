@@ -1,0 +1,256 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-phoneme
+_commit=@version:phoneme@
+pkgver=0_git20240529
+pkgrel=0
+pkgdesc="phoneME Feature CLDC-HI VM and MIDP 2.0 for MIDlets"
+url="https://github.com/magicus/phoneME"
+arch="armv7"
+license="GPL-2.0-only"
+depends="fplinux-ui"
+makedepends_build="clang22 lld22 llvm22 binutils make patch pkgconf python3 gettext"
+makedepends_host="musl-dev musl-libintl linux-headers gcc zlib-dev fplinux-ui-dev"
+options="!check"
+
+# CLDC generators require ILP32; JDK 8 produces their input class files.
+_muslver=@version:phoneme_host_musl@
+_gccver=@version:phoneme_host_libstdcpp@
+_llvmver=@version:phoneme_host_compiler_rt@
+_qemuver=@version:phoneme_qemu_i386@
+_jdkver=@version:phoneme_jdk@
+source="
+	fplinux-cli.c
+	fplinux-cli.h
+	@source:phoneme@
+	@source:phoneme_host_musl@
+	@source:phoneme_host_libstdcpp@
+	@source:phoneme_host_compiler_rt@
+	@source:phoneme_host_unwind@
+	@source:phoneme_qemu_i386@
+	@source:phoneme_qemu_arm@
+	@source:phoneme_jdk@
+	@source:phoneme_jre@
+	@source:phoneme_jre_classes@
+"
+builddir="$srcdir/phoneME-$_commit"
+
+# The runtime uses the interpreter.
+_jit=false
+
+_unpack_tool() {
+	mkdir -p "$2"
+	tar -xzf "$srcdir/$1" -C "$2" --exclude='.*' 2>/dev/null
+}
+
+prepare() {
+	default_prepare
+	# Local trees (patches/, vm/, midp/, port/) are read from the aport;
+	# the package recipe digest covers every file in it.
+	local patch
+	for patch in "$startdir"/patches/*.patch; do
+		msg "${patch##*/}"
+		# Upstream trailing spaces are normalized in the project patches.
+		patch --ignore-whitespace -p1 -i "$patch"
+	done
+
+	_unpack_tool x86-musl-dev-$_muslver.apk "$srcdir/i386-root"
+	_unpack_tool x86-libstdc++-dev-$_gccver.apk "$srcdir/i386-root"
+	_unpack_tool x86-compiler-rt-$_llvmver.apk "$srcdir/i386-root"
+	_unpack_tool x86-llvm-libunwind-static-$_llvmver.apk "$srcdir/i386-root"
+	_unpack_tool x86_64-qemu-i386-$_qemuver.apk "$srcdir/qemu"
+	_unpack_tool x86_64-qemu-arm-$_qemuver.apk "$srcdir/qemu"
+	local jdk
+	for jdk in jdk jre-base jre-lib; do
+		_unpack_tool x86_64-openjdk8-$jdk-$_jdkver.apk "$srcdir/jdk"
+	done
+}
+
+_setup_tools() {
+	_jdk="$srcdir/jdk/usr/lib/jvm/java-1.8-openjdk"
+	_hostbin="$srcdir/host-tools"
+	_armtools="$srcdir/arm-tools"
+
+	# clang looks up the i586 compiler-rt files under its resource
+	# directory with per-target names.
+	local resource="$srcdir/i386-resource"
+	local runtime="$srcdir/i386-root/usr/lib/llvm22/lib/clang/22/lib/i586-alpine-linux-musl"
+	mkdir -p "$resource/lib/i586-alpine-linux-musl"
+	ln -sfn /usr/lib/llvm22/lib/clang/22/include "$resource/include"
+	ln -sf "$runtime/libclang_rt.builtins-i386.a" \
+		"$resource/lib/i586-alpine-linux-musl/libclang_rt.builtins.a"
+	ln -sf "$runtime/clang_rt.crtbegin-i386.o" \
+		"$resource/lib/i586-alpine-linux-musl/clang_rt.crtbegin.o"
+	ln -sf "$runtime/clang_rt.crtend-i386.o" \
+		"$resource/lib/i586-alpine-linux-musl/clang_rt.crtend.o"
+
+	local tool
+	mkdir -p "$_hostbin" "$_armtools/bin"
+	for tool in gcc g++ cc c++ as ar; do
+		ln -sf "$startdir/vm/host-cc.sh" "$_hostbin/$tool"
+	done
+	for tool in gcc g++ as ar nm ranlib strip; do
+		ln -sf "$startdir/vm/target-cc.sh" "$_armtools/bin/$tool"
+	done
+
+	export FPLINUX_PM_I386_ROOT="$srcdir/i386-root"
+	export FPLINUX_PM_I386_RESOURCE_DIR="$resource"
+	export FPLINUX_PM_QEMU_I386="$srcdir/qemu/usr/bin/qemu-i386"
+	export FPLINUX_PM_PRE_UAL_SED="$startdir/vm/pre-ual.sed"
+	export PATH="$_hostbin:$PATH"
+	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
+	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+}
+
+_build_cldc() {
+	mkdir -p "$srcdir/cldc-build"
+	# The top-level CLDC targets share outputs: run them in order and
+	# parallelize only inside each one (PARALLEL_ARGS).
+	MAKEFLAGS= JVMWorkSpace="$builddir/cldc" JVMBuildSpace="$srcdir/cldc-build" \
+		make -j1 -C cldc/build/linux_arm_vfp \
+		JDK_DIR="$_jdk" \
+		PREVERIFY_ORIGINAL="$builddir/preverifier/build/linux/preverify" \
+		GNU_TOOLS_DIR="$_armtools" \
+		host_arch=i386 host_os=linux \
+		ENABLE_COMPILATION_WARNINGS=true \
+		ENABLE_COMPILER="$_jit" \
+		ENABLE_JNI=false \
+		ENABLE_STATIC_LINK=true \
+		ROMIZING=false \
+		SUPPORTS_MONOTONIC_CLOCK=true \
+		USER_CFLAGS="-fno-delete-null-pointer-checks" \
+		PARALLEL_ARGS="-j${JOBS:-1}" \
+		product
+}
+
+# CLDC + MIDP system classes and the C sources generated from them.
+_build_midp_java() {
+	local cldc="$srcdir/cldc-build/linux_arm_vfp"
+	python3 "$startdir/midp/build-midp-java.py" \
+		--src "$builddir" \
+		--cldc-classes "$srcdir/cldc-build/classes.zip" \
+		--jdk "$_jdk" \
+		--preverify "$builddir/preverifier/build/linux/preverify" \
+		--natives-table-gen "$cldc/dist/bin/NativesTableGen.jar" \
+		--extra-java "$startdir/vm/java" \
+		--lf "$startdir/midp/lf" \
+		--out "$srcdir/midp-build"
+	# MIDP natives read object layouts from ROMStructs.h even without a
+	# romized image; the generated ROM image itself is not used.
+	mkdir -p "$srcdir/romstructs"
+	(
+		cd "$srcdir/romstructs"
+		"$cldc/dist/bin/romgen" =HeapCapacity256M \
+			-cp "$srcdir/midp-build/classes.zip" +GenerateROMStructs -romize
+	)
+	cp "$srcdir/romstructs/ROMStructs.h" "$srcdir/midp-build/c/"
+}
+
+_build_vm() {
+	local cldc="$srcdir/cldc-build/linux_arm_vfp"
+	# Every port/<area>/ except the app shell holds VM natives (ARM code
+	# that may call libfplinux-ui and fplinux-pm-app.h).
+	local area native_dirs=""
+	for area in "$startdir"/port/*/; do
+		[ "$area" = "$startdir/port/app/" ] && continue
+		native_dirs="$native_dirs --source-dir $area"
+	done
+	# shellcheck disable=SC2046,SC2086 # word lists without spaces
+	python3 "$startdir/vm/build-native.py" \
+		--natives "$startdir/midp/natives.toml" \
+		--src "$builddir" \
+		--generated "$srcdir/midp-build/c" \
+		--sysroot "$CBUILDROOT" \
+		--include "$startdir/vm" \
+		--include "$cldc/dist/include" \
+		--extra-source "$startdir/vm/fplinux-pm-vm.c" \
+		--extra-source "$startdir/vm/fplinux-pm-jar.c" \
+		$native_dirs \
+		$(pkg-config --cflags fplinux-ui | sed 's/[^ ][^ ]*/--cflag=&/g') \
+		--jobs "${JOBS:-1}" \
+		--out "$srcdir/vm-objects"
+	# Main_linux.o of the CLDC build is the standalone launcher; ours is
+	# the headless runner here and the app shell in _build_app. The
+	# runner links the same natives and libfplinux-ui without opening a
+	# runtime connection: port/lf-screens/ gives it a NULL app shell.
+	"$CC" $CPPFLAGS $CFLAGS -std=c11 -Wall -Wextra -Werror \
+		-I"$startdir/vm" -I"$srcdir" -c "$startdir/vm/fplinux-pm-headless.c" \
+		-o "$srcdir/fplinux-pm-headless.o"
+	"$CC" $CPPFLAGS $CFLAGS -std=c11 -Wall -Wextra -Werror \
+		-I"$srcdir" -c "$srcdir/fplinux-cli.c" -o "$srcdir/fplinux-cli.o"
+	# shellcheck disable=SC2046 # pkg-config flags and one object path per line
+	"$CC" $LDFLAGS -no-pie -o "$srcdir/fplinux-phoneme-headless" \
+		"$srcdir/fplinux-pm-headless.o" \
+		"$srcdir/fplinux-cli.o" \
+		$(cat "$srcdir/vm-objects/objects.txt") \
+		"$cldc/target/product/jvmspi.o" \
+		"$cldc/target/product/ROMImage.o" \
+		-Wl,--start-group \
+		"$cldc/dist/lib/libcldc_vmx.a" \
+		"$cldc/dist/lib/libcldc_vmtest.a" \
+		"$cldc/dist/lib/libcldc_vm.a" \
+		-Wl,--end-group \
+		$(pkg-config --libs fplinux-ui) -lz -lm
+	if readelf -d "$srcdir/fplinux-phoneme-headless" | grep -q TEXTREL; then
+		die "the VM needs text relocations, which musl cannot load"
+	fi
+}
+
+# The app shell (port/app/) with the VM: /usr/bin/fplinux-phoneme.
+_build_app() {
+	local cldc="$srcdir/cldc-build/linux_arm_vfp"
+	# shellcheck disable=SC2046 # pkg-config flags and one object path per line
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
+		$(pkg-config --cflags fplinux-ui) -I"$startdir/port/app" -I"$srcdir" \
+		"$startdir/port/app/fplinux-pm-app.c" \
+		"$startdir/port/app/fplinux-pm-lifecycle.c" \
+		"$srcdir/fplinux-cli.o" \
+		$(cat "$srcdir/vm-objects/objects.txt") \
+		"$cldc/target/product/jvmspi.o" \
+		"$cldc/target/product/ROMImage.o" \
+		-Wl,--start-group \
+		"$cldc/dist/lib/libcldc_vmx.a" \
+		"$cldc/dist/lib/libcldc_vmtest.a" \
+		"$cldc/dist/lib/libcldc_vm.a" \
+		-Wl,--end-group \
+		$(pkg-config --libs fplinux-ui) -lz -lm \
+		$LDFLAGS -no-pie -o "$srcdir/fplinux-phoneme"
+	msgfmt --check --output-file="$srcdir/ru.mo" "$startdir/port/app/ru.po"
+}
+
+build() {
+	_setup_tools
+	make -C preverifier/build/linux
+	_build_cldc
+	_build_midp_java
+	_build_vm
+	_build_app
+
+	local cldc="$srcdir/cldc-build/linux_arm_vfp"
+	FPLINUX_PM_JDK="$_jdk" \
+	FPLINUX_PM_PREVERIFY="$builddir/preverifier/build/linux/preverify" \
+	FPLINUX_PM_QEMU_ARM="$srcdir/qemu/usr/bin/qemu-arm" \
+	FPLINUX_PM_CLASSES="$srcdir/midp-build/classes.zip" \
+	FPLINUX_PM_CLDC_VM="$cldc/dist/bin/cldc_vm" \
+	FPLINUX_PM_HEADLESS="$srcdir/fplinux-phoneme-headless" \
+	FPLINUX_PM_SYSROOT="$CBUILDROOT" \
+		sh "$startdir/vm/selftest/run.sh" "$srcdir/selftest"
+}
+
+package() {
+	install -Dm755 "$srcdir/fplinux-phoneme" "$pkgdir/usr/bin/fplinux-phoneme"
+	install -Dm644 "$startdir/port/app/org.fplinux.phoneme.desktop" \
+		"$pkgdir/usr/share/applications/org.fplinux.phoneme.desktop"
+	install -Dm644 "$srcdir/ru.mo" \
+		"$pkgdir/usr/share/locale/ru/LC_MESSAGES/org.fplinux.phoneme.mo"
+	install -Dm644 "$srcdir/midp-build/classes.zip" \
+		"$pkgdir/usr/share/fplinux-phoneme/classes.zip"
+	local notice
+	for notice in license.txt copyright.txt thirdpartylicensereadme.txt; do
+		install -Dm644 "$builddir/legal/$notice" \
+			"$pkgdir/usr/share/licenses/$pkgname/$notice"
+	done
+}
+sha512sums="
+60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
+9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
+"

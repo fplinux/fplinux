@@ -1,0 +1,49 @@
+PM-LFSCREENS start
+[lf] stack: #1 app "suite" | #3 list "Menu"
+[lf] rows #3 implicit: >Pick, Multi, Gauge
+[lf] keys #3: left=Options[Help, Info, Edit, Drop] ok=Open right=Exit
+PM-LFSCREENS command Open on Menu
+PM-LFSCREENS select 0 Pick
+[lf] stack: #1 app "suite" | #4 list "Pick"
+[lf] rows #4 exclusive: A, B, >*C
+[lf] keys #4: left=Done ok=Select right=Back
+PM-LFSCREENS command Done on Pick
+PM-LFSCREENS selected 0
+[lf] stack: #1 app "suite" | #5 list "Menu" | #6 alert "Picked"
+[lf] alert #6 info text="selected 0"
+[lf] keys #6: left=- ok=- right=Close
+[lf] stack: #1 app "suite" | #5 list "Menu"
+[lf] rows #5 implicit: >Pick, Multi, Gauge
+[lf] keys #5: left=Options[Help, Info, Edit, Drop] ok=Open right=Exit
+PM-LFSCREENS command Open on Menu
+PM-LFSCREENS select 1 Multi
+[lf] stack: #1 app "suite" | #7 list "Multi"
+[lf] rows #7 multiple: *X, Y, >*Z
+[lf] keys #7: left=Done ok=Unmark right=Back
+PM-LFSCREENS command Done on Multi
+PM-LFSCREENS flags 1 0 1
+PM-LFSCREENS command Open on Menu
+PM-LFSCREENS select 2 Gauge
+[lf] stack: #1 app "suite" | #8 list "Menu" | #10 alert "Gauge"
+[lf] alert #10 info text="Two of five" busy
+[lf] keys #10: left=- ok=- right=Close
+PM-LFSCREENS command Info on Menu
+[lf] stack: #1 app "suite" | #8 list "Menu" | #11 alert "Info"
+[lf] alert #11 confirmation text="First"
+[lf] keys #11: left=Again ok=OK right=-
+PM-LFSCREENS command Again on Info
+[lf] stack: #1 app "suite" | #8 list "Menu" | #12 alert "Info 2"
+[lf] alert #12 confirmation text="Second"
+[lf] keys #12: left=Again ok=OK right=-
+PM-LFSCREENS command OK on Info 2
+PM-LFSCREENS command Edit on Menu
+PM-LFSCREENS rows 4 selected 3
+[lf] stack: #1 app "suite" | #8 list "Menu"
+[lf] rows #8 implicit: Top, Pick, Multi*, >Gauge
+[lf] keys #8: left=Options[Help, Info, Edit, Drop] ok=Open right=Exit
+PM-LFSCREENS command Drop on Menu
+PM-LFSCREENS rows 3 selected 2
+[lf] stack: #1 app "suite" | #8 list "Menu"
+[lf] rows #8 implicit: Pick, Multi*, >Gauge
+[lf] keys #8: left=Options[Help, Info, Edit, Drop] ok=Open right=Exit
+PM-LFSCREENS command Exit on Menu

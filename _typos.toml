@@ -18,6 +18,8 @@ extend-ignore-re = [
 ]
 
 [default.extend-identifiers]
+# Names required by the phoneME native interface.
+AncBacklightState = "AncBacklightState"
 # Keep the spelling required by TyrQuake's C interface.
 COM_CheckParm = "COM_CheckParm"
 # This field name is part of the phone's original radio configuration.
@@ -37,6 +39,13 @@ SC2720_AUD_CLK_PN_VALUE = "SC2720_AUD_CLK_PN_VALUE"
 UMS9117 = "UMS9117"
 WIPHY_FLAG_HAVE_AP_SME = "WIPHY_FLAG_HAVE_AP_SME"
 _paeth = "_paeth"
+anc_indicators = "anc_indicators"
+anc_show_backlight = "anc_show_backlight"
+anc_show_trusted_indicator = "anc_show_trusted_indicator"
+anc_start_vibrate = "anc_start_vibrate"
+anc_stop_vibrate = "anc_stop_vibrate"
+anc_toggle_home_icon = "anc_toggle_home_icon"
+anc_vibrate = "anc_vibrate"
 # ARM AND instruction that updates condition flags.
 ands = "ands"
 gl_pathc = "gl_pathc"

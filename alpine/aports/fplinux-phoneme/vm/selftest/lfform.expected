@@ -1,0 +1,242 @@
+PM-LFFORM show form shown
+PM-LFFORM si.text [Text]
+PM-LFFORM si.label [Label]
+PM-LFFORM si.mode 0 1 2
+PM-LFFORM button.label null
+PM-LFFORM si.settext [Line A\nLine B]
+PM-LFFORM si.settextnull null
+PM-LFFORM si.setlabel [New label]
+PM-LFFORM si.setlabelnull null
+PM-LFFORM si.badmode IAE
+PM-LFFORM link.commands ok
+PM-LFFORM link.addnull NPE
+PM-LFFORM img.mutable true 8x6
+PM-LFFORM img.immutable false 8x6
+PM-LFFORM img.rgb false 4x3
+PM-LFFORM img.immutable.graphics ISE
+PM-LFFORM ii.image true true
+PM-LFFORM ii.alt [alt]
+PM-LFFORM ii.mode 0
+PM-LFFORM ii.setrgb true
+PM-LFFORM ii.setmutable true
+PM-LFFORM ii.setnull true
+PM-LFFORM ii.badmode IAE
+PM-LFFORM tf.any.init [Hello]
+PM-LFFORM tf.any.size 5
+PM-LFFORM tf.any.max 10
+PM-LFFORM tf.any.constraints 0
+PM-LFFORM tf.any.set [abc def]
+PM-LFFORM tf.any.insert3 [abcXY def]
+PM-LFFORM tf.any.insertneg [<abcXY def]
+PM-LFFORM tf.any.insertfull IAE
+PM-LFFORM tf.any.after [<abcXY def]
+PM-LFFORM tf.any.delete [<XY def]
+PM-LFFORM tf.any.deletebad SIOOBE
+PM-LFFORM tf.any.chars [23456]
+PM-LFFORM tf.any.charsbig IAE
+PM-LFFORM tf.any.charsbad AIOOBE
+PM-LFFORM tf.any.charsnull []
+PM-LFFORM tf.any.set3 [abc]
+PM-LFFORM tf.any.getchars 3 [abc]
+PM-LFFORM tf.any.getcharssmall AIOOBE
+PM-LFFORM tf.any.caret 3
+PM-LFFORM tf.any.setnull []
+PM-LFFORM tf.any.set6 [abcdef]
+PM-LFFORM tf.any.setmax4 4 [abcd]
+PM-LFFORM tf.any.setmax0 IAE
+PM-LFFORM tf.any.max4 4
+PM-LFFORM tf.num.init [42]
+PM-LFFORM tf.num.setneg [-123]
+PM-LFFORM tf.num.setalpha IAE
+PM-LFFORM tf.num.setfrac IAE
+PM-LFFORM tf.num.setminus IAE
+PM-LFFORM tf.num.after [-123]
+PM-LFFORM tf.num.setempty []
+PM-LFFORM tf.num.set42 [42]
+PM-LFFORM tf.num.insminus0 [-42]
+PM-LFFORM tf.num.insminus1 IAE
+PM-LFFORM tf.num.insend [-427]
+PM-LFFORM tf.num.delminus IAE
+PM-LFFORM tf.num.after2 [-427]
+PM-LFFORM tf.num.del0 [427]
+PM-LFFORM tf.num.chars [12345]
+PM-LFFORM tf.num.charsbig IAE
+PM-LFFORM tf.num.insfull IAE
+PM-LFFORM tf.num.constraints 2
+PM-LFFORM tf.num.setneg5 [-5]
+PM-LFFORM tf.num.setmax1 IAE
+PM-LFFORM tf.dec.init []
+PM-LFFORM tf.dec.set [-12.50]
+PM-LFFORM tf.dec.setfrac [.5]
+PM-LFFORM tf.dec.settrail [5.]
+PM-LFFORM tf.dec.settwodots IAE
+PM-LFFORM tf.dec.setcomma IAE
+PM-LFFORM tf.dec.setdot IAE
+PM-LFFORM tf.dec.setminusdot IAE
+PM-LFFORM tf.dec.setexp IAE
+PM-LFFORM tf.dec.after [5.]
+PM-LFFORM tf.dec.setpi [3.14]
+PM-LFFORM tf.dec.insminus [-3.14]
+PM-LFFORM tf.dec.insdot IAE
+PM-LFFORM tf.dec.delwhole [-.14]
+PM-LFFORM tf.dec.delfrac IAE
+PM-LFFORM tf.dec.constraints 5
+PM-LFFORM tf.phone.set [5551234]
+PM-LFFORM tf.phone.setsym [+4930*31#]
+PM-LFFORM tf.phone.setalpha IAE
+PM-LFFORM tf.phone.constraints 3
+PM-LFFORM tf.pass.init [pw]
+PM-LFFORM tf.pass.set [s3cret]
+PM-LFFORM tf.pass.toolong IAE
+PM-LFFORM tf.pass.constraints 65536
+PM-LFFORM tf.pin.set [1234]
+PM-LFFORM tf.pin.setalpha IAE
+PM-LFFORM tf.pin.constraints 65538
+PM-LFFORM tf.ro.init [Fixed text]
+PM-LFFORM tf.ro.set [changed]
+PM-LFFORM tf.ro.ins [unchanged]
+PM-LFFORM tf.ro.constraints 131072
+PM-LFFORM tf.mail.set [user@example.org]
+PM-LFFORM tf.mail.constraints 1
+PM-LFFORM tf.url.set [http://example.org/a?b=1]
+PM-LFFORM tf.url.constraints 4
+PM-LFFORM tf.caps.set [hello world]
+PM-LFFORM tf.caps.constraints 2097152
+PM-LFFORM tf.cons.any2num [] 2
+PM-LFFORM tf.cons.set12 [12]
+PM-LFFORM tf.cons.num2dec [12] 5
+PM-LFFORM tf.cons.dec2any [12] 0
+PM-LFFORM tf.cons.bad IAE 0
+PM-LFFORM tf.new.badtext IAE
+PM-LFFORM tf.new.max0 IAE
+PM-LFFORM tf.new.toolong IAE
+PM-LFFORM tf.new.badcons IAE
+PM-LFFORM tf.new.ok [-7]
+PM-LFFORM cg.ex.init size=3 count=1
+PM-LFFORM cg.ex.sel2 size=3 sel=2 flags=001 count=1
+PM-LFFORM cg.ex.unsel0 size=3 sel=2 flags=001 count=1
+PM-LFFORM cg.ex.issel true false
+PM-LFFORM cg.ex.insert0 size=4 sel=3 flags=0001 count=1
+PM-LFFORM cg.ex.append 4
+PM-LFFORM cg.ex.afterappend size=5 sel=3 flags=00010 count=1
+PM-LFFORM cg.ex.delete0 size=4 sel=2 flags=0010 count=1
+PM-LFFORM cg.ex.set [CC] 2
+PM-LFFORM cg.ex.bigflags 1 001000
+PM-LFFORM cg.ex.smallflags IAE
+PM-LFFORM cg.ex.getbad IOOBE
+PM-LFFORM cg.ex.selbad IOOBE
+PM-LFFORM cg.ex.setflags size=4 sel=1 flags=0100 count=1
+PM-LFFORM cg.ex.setflagsnone size=4 sel=0 flags=1000 count=1
+PM-LFFORM cg.ex.delsel size=3 count=1
+PM-LFFORM cg.ex.image 3 true
+PM-LFFORM cg.ex.deleteall size=0 sel=-1 flags= count=0
+PM-LFFORM cg.ex.only size=1 sel=0 flags=1 count=1
+PM-LFFORM cg.implicit IAE
+PM-LFFORM cg.empty size=0 sel=-1 flags= count=0
+PM-LFFORM cg.mu.init size=4 sel=-1 flags=0000 count=0
+PM-LFFORM cg.mu.sel02 size=4 sel=-1 flags=1010 count=2
+PM-LFFORM cg.mu.unsel0 size=4 sel=-1 flags=0010 count=1
+PM-LFFORM cg.mu.insert1 size=5 sel=-1 flags=10010 count=2
+PM-LFFORM cg.mu.append size=6 sel=-1 flags=100100 count=2
+PM-LFFORM cg.mu.delete0 size=5 sel=-1 flags=00100 count=1
+PM-LFFORM cg.mu.set [CC] true
+PM-LFFORM cg.mu.setflags size=5 sel=-1 flags=11001 count=3
+PM-LFFORM cg.mu.deleteall size=0 sel=-1 flags= count=0
+PM-LFFORM cg.mu.appendempty size=1 sel=-1 flags=0 count=0
+PM-LFFORM cg.po.init size=3 count=1
+PM-LFFORM cg.po.sel1 size=3 sel=1 flags=010 count=1
+PM-LFFORM cg.po.unsel2 size=3 sel=1 flags=010 count=1
+PM-LFFORM cg.po.insert0 size=4 sel=2 flags=0010 count=1
+PM-LFFORM cg.po.delete0 size=3 sel=1 flags=010 count=1
+PM-LFFORM cg.po.delsel size=2 count=1
+PM-LFFORM cg.po.only size=1 sel=0 flags=1 count=1
+PM-LFFORM g.int.init v=5 max=10 interactive=true
+PM-LFFORM g.int.set12 v=10 max=10
+PM-LFFORM g.int.setneg v=0 max=10
+PM-LFFORM g.int.set7 v=7 max=10
+PM-LFFORM g.int.max4 v=4 max=4
+PM-LFFORM g.int.max20 v=4 max=20
+PM-LFFORM g.int.max0 IAE
+PM-LFFORM g.int.maxindef IAE
+PM-LFFORM g.int.after v=4 max=20 interactive=true
+PM-LFFORM g.new.int0 IAE
+PM-LFFORM g.new.clamphi v=10 max=10 interactive=true
+PM-LFFORM g.new.clamplo v=0 max=10 interactive=false
+PM-LFFORM g.new.indefbad IAE
+PM-LFFORM g.new.indefint IAE
+PM-LFFORM g.prog.init v=0 max=20 interactive=false
+PM-LFFORM g.prog.set25 v=20 max=20
+PM-LFFORM g.prog.set13 v=13 max=20
+PM-LFFORM g.prog.maxindef v=0 max=-1
+PM-LFFORM g.prog.running v=2 max=-1
+PM-LFFORM g.prog.set5 IAE
+PM-LFFORM g.prog.updating v=3 max=-1
+PM-LFFORM g.prog.maxindef2 v=3 max=-1
+PM-LFFORM g.prog.max8 v=0 max=8
+PM-LFFORM g.indef.init v=2 max=-1 interactive=false
+PM-LFFORM g.indef.incidle v=1 max=-1
+PM-LFFORM g.indef.contidle v=0 max=-1
+PM-LFFORM g.indef.setneg IAE
+PM-LFFORM g.indef.set4 IAE
+PM-LFFORM g.indef.running v=2 max=-1
+PM-LFFORM df.date.init null
+PM-LFFORM df.modes 1 2 3
+PM-LFFORM df.date.set 999993600000
+PM-LFFORM df.time.set 49020000
+PM-LFFORM df.time.setbeyondday null
+PM-LFFORM df.datetime.set 999999960000
+PM-LFFORM df.datetime.setnull null
+PM-LFFORM df.datetime.epoch 0
+PM-LFFORM df.badmode IAE
+PM-LFFORM df.new.badmode IAE
+PM-LFFORM spacer.append 23
+PM-LFFORM custom.append 24
+PM-LFFORM spacer.label ISE
+PM-LFFORM spacer.command ISE
+PM-LFFORM spacer.new.neg IAE
+PM-LFFORM ticker.form true [Tick]
+PM-LFFORM ticker.set [Tock]
+PM-LFFORM ticker.box true
+PM-LFFORM ticker.new.null NPE
+PM-LFFORM form.size 25
+PM-LFFORM form.get true true
+PM-LFFORM form.insert0 26 true true
+PM-LFFORM form.delete0 25 true
+PM-LFFORM form.reappend 25
+PM-LFFORM form.set1 25 true
+PM-LFFORM form.set.oldfree 0
+PM-LFFORM form.set.back true
+PM-LFFORM form.append.owned ISE
+PM-LFFORM form.insert.bad IOOBE
+PM-LFFORM form.get.bad IOOBE
+PM-LFFORM form.delete.bad IOOBE
+PM-LFFORM form.appendstr 25 true [plain string]
+PM-LFFORM form.appendimg 26 true
+PM-LFFORM form.appendnull NPE
+PM-LFFORM form.ctor 2
+PM-LFFORM form.deleteall 0
+PM-LFFORM form.rebuild 25 true true
+PM-LFFORM form.title [Check 2]
+PM-LFFORM display.item.unowned ISE
+PM-LFFORM display.item form shown
+PM-LFFORM switch1 textbox shown
+PM-LFFORM tb.init [Line 1\nLine 2]
+PM-LFFORM tb.size 13
+PM-LFFORM tb.max 100
+PM-LFFORM tb.title [Box]
+PM-LFFORM tb.constraints 0
+PM-LFFORM tb.setmax5 5 [Line ]
+PM-LFFORM tb.cons.num [] 2
+PM-LFFORM tb.cons.any [2024] 0
+PM-LFFORM tb.insert [2024x]
+PM-LFFORM tb.insertfull IAE
+PM-LFFORM tb.delete [24x]
+PM-LFFORM tb.chars [ell]
+PM-LFFORM tb.caret 3
+PM-LFFORM tb.setnull [] 0
+PM-LFFORM tb.new.badtext IAE
+PM-LFFORM tb.new.max0 IAE
+PM-LFFORM switch2 form shown
+PM-LFFORM switch3 textbox shown
+PM-LFFORM switch4 form shown
+PM-LFFORM done

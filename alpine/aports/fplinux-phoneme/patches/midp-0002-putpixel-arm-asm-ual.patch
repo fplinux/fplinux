@@ -1,0 +1,16 @@
+Purpose: Let clang's integrated assembler build the ARM fast_pixel_set(): use
+ the unified-syntax conditional halfword stores (strhne/strhlt) instead of
+ the pre-UAL spellings strneh/strlth.
+
+--- a/midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_graphics_asm.c
++++ b/midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_graphics_asm.c
+@@ -114,3 +114,3 @@
+    "cmp     r1, #0\n\t"
+-   "strneh  r3, [r0], #2\n\t"
++   "strhne  r3, [r0], #2\n\t"
+    "subne   r2, r2, #1\n\t"
+@@ -135,3 +135,3 @@
+    "cmp    r0, r2\n\t"
+-   "strlth r3, [r0], #2\n\t"
++   "strhlt r3, [r0], #2\n\t"
+    "blt    loop2\n\t"

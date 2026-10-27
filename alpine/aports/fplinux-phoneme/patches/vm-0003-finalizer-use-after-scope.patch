@@ -1,0 +1,22 @@
+Call a native finalizer while its receiver handle is in scope.
+
+run_finalizer() points _kni_parameter_base at a block-local handle and called
+the finalizer after the block ended; clang -O2 reuses that stack slot, so the
+finalizer saw a garbage receiver (SIGSEGV in FileDescriptor.finalize at exit).
+
+--- a/cldc/src/vm/share/memory/FinalizerConsDesc.cpp
++++ b/cldc/src/vm/share/memory/FinalizerConsDesc.cpp
+@@ -59,8 +59,12 @@
+     GUARANTEE(native_finalizer != (void (*)())NULL &&
+               native_finalizer != (void (*)())Java_void_unimplemented,
+               "Finalizer must be valid at this point");
++
++    // Call while 'r' is still in scope: _kni_parameter_base points at r._obj,
++    // and an optimizing compiler may reuse the slot once the block ends
++    // (clang -O2 stack coloring -> finalizer saw a garbage receiver).
++    (*native_finalizer)();
+   }
+
+-  (*native_finalizer)();
+   _kni_parameter_base = remember_kni_parameter_base;
+ }

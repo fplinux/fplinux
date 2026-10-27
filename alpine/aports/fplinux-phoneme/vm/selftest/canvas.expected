@@ -1,0 +1,40 @@
+PM-CANVAS start
+PM-CANVAS shown size=240x240
+PM-CANVAS key -1 action=1 name=Up
+PM-CANVAS key -2 action=6 name=Down
+PM-CANVAS key -3 action=2 name=Left
+PM-CANVAS key -4 action=5 name=Right
+PM-CANVAS key -5 action=8 name=Select
+PM-CANVAS key -6 action=0 name=SOFT1
+PM-CANVAS key -7 action=0 name=SOFT2
+PM-CANVAS key 48 action=0 name=0
+PM-CANVAS key 49 action=9 name=1
+PM-CANVAS key 50 action=1 name=2
+PM-CANVAS key 51 action=10 name=3
+PM-CANVAS key 52 action=2 name=4
+PM-CANVAS key 53 action=8 name=5
+PM-CANVAS key 54 action=5 name=6
+PM-CANVAS key 55 action=11 name=7
+PM-CANVAS key 56 action=6 name=8
+PM-CANVAS key 57 action=12 name=9
+PM-CANVAS key 42 action=0 name=*
+PM-CANVAS key 35 action=0 name=#
+PM-CANVAS code UP -1
+PM-CANVAS code DOWN -2
+PM-CANVAS code LEFT -3
+PM-CANVAS code RIGHT -4
+PM-CANVAS code FIRE -5
+PM-CANVAS code GAME_A 49
+PM-CANVAS code GAME_B 51
+PM-CANVAS code GAME_C 55
+PM-CANVAS code GAME_D 57
+PM-CANVAS hasRepeatEvents true
+PM-CANVAS hasPointerEvents false
+PM-CANVAS isDoubleBuffered true
+PM-CANVAS fullscreen size=240x320 sizeChanged=240x320
+PM-CANVAS normal size=240x240 sizeChanged=240x240
+PM-CANVAS hide count=1
+PM-CANVAS game size=240x320 flushed=10 keyStates=0
+PM-CANVAS shownotify full size=240x320 clip=320
+PM-CANVAS font height=true width=true substring=true
+PM-CANVAS done

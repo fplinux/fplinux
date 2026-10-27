@@ -1,0 +1,237 @@
+# MIDP native selection for fplinux-phoneme: every native of the generated
+# NativesTable.cpp that the CLDC libraries do not define, plus the MIDP and
+# PCSL support code those natives call.
+#
+# Path roots:
+#   [include].upstream, [sources].upstream  relative to the patched upstream
+#                                            tree root (build-midp-java.py --src)
+#   [include].project, [sources].project    relative to this midp/ directory
+#   [sources].generated                      relative to <out>/c of
+#                                            build-midp-java.py
+# Extra include directories the build adds, in this order after the lists
+# below: <out>/c (generated headers), the romgen output directory holding
+# ROMStructs.h for the same classes.zip, and the CLDC dist/include (kni.h,
+# jvm.h, jvmspi.h, sni.h, jvmconfig.h, NativesTable.hpp).
+#
+# Compile every C source with the common target flags (clang
+# --target=armv7-alpine-linux-musleabihf -march=armv7-a -mfpu=vfpv3-d16
+# -mfloat-abi=hard -marm -fno-pie -O2 -fno-delete-null-pointer-checks
+# -fno-strict-aliasing) plus -std=<c_std>, c_extra and defines; C++ sources
+# (*.cpp) get cxx_extra and defines instead. -marm is required: the CLDC ARM
+# interpreter calls KNI natives with "mov pc". Link the objects before
+# jvmspi.o, ROMImage.o and the CLDC libraries; no -lz is needed.
+[flags]
+c_std = "gnu99"
+c_extra = []
+cxx_extra = ["-std=gnu++98", "-fno-rtti", "-fno-exceptions"]
+# MIDP configuration: single VM, no CDC, no native AMS/RMS/PTI, no caches, JPEG
+# on, MIDP memory pool off (plain malloc), PRODUCT.
+defines = [
+  "-DPRODUCT",
+  "-DUNIX",
+  "-DLINUX",
+  "-DPROJECT_NAME=\"fplinux-phoneme\"",
+  "-DENABLE_CDC=0",
+  "-DENABLE_CLDC_11=1",
+  "-DENABLE_JPEG=1",
+  "-DENABLE_MIDP_MALLOC=0",
+  "-DENABLE_IMAGE_CACHE=0",
+  "-DENABLE_FONT_CACHE=0",
+  "-DENABLE_ICON_CACHE=0",
+  "-DENABLE_I3_TEST=0",
+  "-DENABLE_NUTS_FRAMEWORK=0",
+  "-DENABLE_NETWORK_INDICATOR=0",
+  "-DENABLE_MULTIPLE_ISOLATES=0",
+  "-DENABLE_MULTIPLE_DISPLAYS=0",
+  "-DENABLE_JAVA_DEBUGGER=0",
+  "-DENABLE_NATIVE_APP_MANAGER=0",
+  "-DENABLE_NATIVE_INSTALLER=0",
+  "-DENABLE_NATIVE_SUITE_STORAGE=0",
+  "-DENABLE_NATIVE_RMS=0",
+  "-DENABLE_NATIVE_PTI=0",
+  "-DENABLE_MESSAGE_STRINGS=0",
+  "-DENABLE_VM_PROFILES=0",
+  "-DENABLE_MONET=0",
+  "-DENABLE_SERVER_SOCKET=0",
+  "-DENABLE_DIRECT_DRAW=0",
+  "-DENABLE_FILE_SYSTEM=1",
+  "-DENABLE_ON_DEVICE_DEBUG=0",
+  "-DENABLE_WTK_DEBUG=0",
+  "-DENABLE_AMS_FOLDERS=0",
+  "-DENABLE_OCSP=0",
+  "-DENABLE_PUBLIC_AMS_API=0",
+  "-DENABLE_DYNAMIC_COMPONENTS=0",
+  "-DENABLE_32BITS_PIXEL_FORMAT=0",
+]
+
+[include]
+upstream = [
+  "midp/src/core/kni_util/include",
+  "midp/src/core/libc_ext/include",
+  "midp/src/core/memory/include",
+  "midp/src/core/string/include",
+  "midp/src/core/storage/include",
+  "midp/src/core/global_status/include",
+  "midp/src/core/vm_services/include",
+  "midp/src/core/resource_manager/include",
+  "midp/src/core/timezone/include",
+  "midp/src/core/log_base/include",
+  "midp/src/core/jarutil/include",
+  "midp/src/ams/ams_base/include",
+  "midp/src/ams/suitestore/common_api/include",
+  "midp/src/ams/suitestore/recordstore_api/include",
+  "midp/src/configuration/properties_port/include",
+  "midp/src/events/eventqueue/include",
+  "midp/src/events/eventqueue_port/include",
+  "midp/src/events/eventsystem/include",
+  "midp/src/highlevelui/lcdlf/include",
+  "midp/src/highlevelui/keymap/include",
+  "midp/src/highlevelui/annunciator/include",
+  "midp/src/lowlevelui/graphics/include",
+  "midp/src/lowlevelui/graphics/gx_putpixel/include",
+  "midp/src/lowlevelui/graphics/gx_putpixel/native",
+  "midp/src/lowlevelui/graphics_api/include",
+  "midp/src/lowlevelui/graphics_api/gxapi_native/native",
+  "midp/src/lowlevelui/image/include",
+  "midp/src/lowlevelui/image/img_putpixel/native",
+  "midp/src/lowlevelui/image_api/include",
+  "midp/src/lowlevelui/image_decode/include",
+  "midp/src/lowlevelui/image_decode/reference/native",
+  "midp/src/lowlevelui/putpixel_port/include",
+  "midp/src/i18n/i18n_port/include",
+  "midp/src/rms/rms_base/include",
+  "midp/src/rms/record_store/include",
+  "midp/src/security/midp_permissions/reference/native",
+  "pcsl/memory",
+  "pcsl/memory/malloc",
+  "pcsl/memory/memory_port",
+  "pcsl/memory/memory_port/malloc",
+  "pcsl/string",
+  "pcsl/string/utf16",
+  "pcsl/string/util",
+  "pcsl/file",
+  "pcsl/file/util",
+  "pcsl/print",
+  "pcsl/network",
+  "pcsl/network/bsd",
+  "midp/src/push/push_server/include",
+  "pcsl/escfilenames",
+  "pcsl/escfilenames/radix41",
+  "pcsl/types",
+  "pcsl/types/linux_arm_gcc",
+  "jpeg",
+]
+# pcsl_config.h and the fplinux-pm-*.h headers.
+project = ["port"]
+
+[sources]
+upstream = [
+  # KNI natives of the selected Java classes
+  "midp/src/lowlevelui/graphics_api/gxapi_native/native/gxapi_graphics_kni.c",
+  "midp/src/lowlevelui/graphics_api/gxapi_native/native/gxapi_font_kni.c",
+  "midp/src/lowlevelui/graphics_api/gxapi_native/native/gxapi_anchor.c",
+  "midp/src/lowlevelui/image/img_putpixel/native/imgj_imagedatafactory_kni.c",
+  "midp/src/lowlevelui/image/img_putpixel/native/imgj_imagedata_kni.c",
+  "midp/src/lowlevelui/image_cache/reference/native/imgch_suiteimagecache_kni.c",
+  "midp/src/highlevelui/lcdui/reference/native/lcdui_display.c",
+  "midp/src/highlevelui/lcdui/reference/native/lcdui_input.c",
+  "midp/src/highlevelui/lcdui/reference/native/lcdui_game.c",
+  "midp/src/highlevelui/lcdui/reference/native/lcdui_indicators.c",
+  "midp/src/highlevelui/lcdui/reference/native/lcdui_vibrate.c",
+  "midp/src/events/eventqueue/reference/native/midpEvents.c",
+  "midp/src/rms/rms_api/reference/native/recordStoreFile.c",
+  "midp/src/rms/rms_api/reference/native/rms_shared_db_header_kni.c",
+  "midp/src/rms/rms_api/reference/native/rms_shared_db_header.c",
+  "midp/src/rms/rms_base/reference/native/recordStoreUtil.c",
+  "midp/src/protocol/file/reference/native/RandomAccessStream.c",
+  "midp/src/protocol/file/reference/native/storageFile.c",
+  "midp/src/security/midp_permissions/reference/native/LoadPolicy_kni.c",
+  "midp/src/security/midp_permissions/reference/native/generic_policy_load.c",
+  "midp/src/i18n/i18n_main/reference/native/conv.c",
+  "midp/src/core/resource_handler/file_based/native/resource_handler_kni.c",
+  "midp/src/core/log_base/reference/native/midp_logging_kni.c",
+  "midp/src/configuration/properties/reference/native/properties_kni.c",
+  "midp/src/protocol/socket/reference/native/socketProtocol.c",
+  "midp/src/push/push_server/stubs/native/push_server.c",
+  # RMS record stores as files below the storage root (storage_dir)
+  "midp/src/rms/record_store/file_based/native/rms.c",
+  "midp/src/rms/record_store/file_based/native/midp_file_cache.c",
+  "midp/src/rms/record_store/file_based/native/rms_file_lock.c",
+  # MIDP core services
+  "midp/src/configuration/properties_port/static/native/midp_properties_static.c",
+  "midp/src/core/kni_util/reference/native/kni_globals.c",
+  "midp/src/core/kni_util/reference/native/midpException.c",
+  "midp/src/core/kni_util/reference/native/midpUtilKni.c",
+  "midp/src/core/libc_ext/reference/native/midp_libc_ext.c",
+  "midp/src/core/string/reference/native/midpString.c",
+  "midp/src/core/storage/reference/native/midpStorage.c",
+  "midp/src/core/vm_services/cldc_vm/native/midpServices.c",
+  "midp/src/core/vm_services/cldc_vm/native/midp_thread.c",
+  "midp/src/core/resource_manager/reference/native/midpResourceLimit.c",
+  "midp/src/ams/ams_base/reference/native/midpInflate.c",
+  "midp/src/i18n/i18n_port/default/native/defaultGenConv.c",
+  # putpixel graphics into the memory screen buffer, PNG and JPEG decoding
+  "midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_screen_buffer.c",
+  "midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_font_bitmap.c",
+  "midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_graphics_asm.c",
+  "midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_graphics.c",
+  "midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_image.c",
+  "midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_putpixel.c",
+  "midp/src/lowlevelui/graphics/gx_putpixel/native/gxj_text.c",
+  "midp/src/lowlevelui/image_decode/reference/native/imgdcd_image.c",
+  "midp/src/lowlevelui/image_decode/reference/native/imgdcd_image_decode.c",
+  "midp/src/lowlevelui/image_decode/reference/native/imgdcd_image_util.c",
+  "midp/src/lowlevelui/image_decode/reference/native/imgdcd_png_decode.c",
+  "jpeg/jcomapi.c",
+  "jpeg/jdapimin.c",
+  "jpeg/jdapistd.c",
+  "jpeg/jdcoefct.c",
+  "jpeg/jdcolor.c",
+  "jpeg/jddctmgr.c",
+  "jpeg/jdhuff.c",
+  "jpeg/jdinput.c",
+  "jpeg/jdmainct.c",
+  "jpeg/jdmarker.c",
+  "jpeg/jdmaster.c",
+  "jpeg/jdmerge.c",
+  "jpeg/jdphuff.c",
+  "jpeg/jdpostct.c",
+  "jpeg/jdsample.c",
+  "jpeg/jerror.c",
+  "jpeg/jidctfst.c",
+  "jpeg/jidctred.c",
+  "jpeg/jmemmgr.c",
+  "jpeg/jmemnobs.c",
+  "jpeg/jpegdecoder.c",
+  "jpeg/jquant1.c",
+  "jpeg/jquant2.c",
+  "jpeg/jutils.c",
+  # PCSL: malloc memory, UTF-16 strings, POSIX files, radix41 file names
+  "pcsl/memory/malloc/pcsl_memory.c",
+  "pcsl/memory/memory_port/malloc/pcsl_memory_port.c",
+  "pcsl/string/utf16/pcsl_string.c",
+  "pcsl/string/util/utf.c",
+  "pcsl/escfilenames/pcsl_esc.c",
+  "pcsl/file/posix/pcsl_posix.c",
+  "pcsl/file/util/pcsl_util_filelist.c",
+  # BSD nonblocking client TCP; the project supplies its notification adapter
+  # and asynchronous DNS lookup through the build-applied Linux port patch.
+  "pcsl/network/bsd/pcsl_socket.c",
+  "pcsl/network/bsd/pcsl_network.c",
+]
+# Headless port owned by fplinux-phoneme. The display port (lcdlf_*, the
+# screen buffer, foreground display id) and the annunciator are Canvas
+# natives in port/canvas/, which the APKBUILD compiles as a source dir.
+project = [
+  "port/fplinux-pm-midp.c",   # fplinux_pm_midp_init/cleanup, properties
+  "port/fplinux-pm-keymap.c", # keymap_* with 2/4/6/8/5 game actions
+  "port/fplinux-pm-log.c",    # REPORT_* and pcsl_print to stderr
+  "port/fplinux-pm-system.c", # event queue lock, callouts, CLDC fallback off
+]
+# Written by build-midp-java.py into <out>/c.
+generated = [
+  "LocalizedStringsBase.c",
+  "midp_constants_data.c",
+  "properties_static_data.c",
+  "NativesTable.cpp",
+]

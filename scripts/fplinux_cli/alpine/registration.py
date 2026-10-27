@@ -167,6 +167,7 @@ SHARED_APORT_SOURCES = {
         "alpine/aports/fplinux-mesa/NOTICE",
     ),
     "fplinux-notes": CLI_SOURCES,
+    "fplinux-phoneme": CLI_SOURCES,
     "fplinux-present": (
         *DRM_SESSION_SOURCES,
         *CLI_SOURCES,
@@ -357,6 +358,7 @@ LOCAL_BUILD_DEPENDENCIES = {
         "fplinux-mesa-gbm",
     ),
     "fplinux-notes": ("fplinux-ui",),
+    "fplinux-phoneme": ("fplinux-ui",),
     "fplinux-readline": ("fplinux-ncurses",),
     "fplinux-present": ("fplinux-libdrm",),
     "fplinux-qin1splus-config": ("fplinux-audio", "fplinux-mesa"),

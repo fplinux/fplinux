@@ -1,0 +1,27 @@
+Build the i386 host ROM generator with musl and current GNU as.
+
+musl has no <fpu_control.h>, so use the inline x87 control-word path, and
+declare the x87 extension that current GNU as no longer implies for i486.
+
+--- a/cldc/src/vm/cpu/c/FloatSupport_c.cpp
++++ b/cldc/src/vm/cpu/c/FloatSupport_c.cpp
+@@ -30,7 +30,7 @@
+ #if ENABLE_FLOAT
+
+ #if defined(LINUX) && PROCESSOR_ARCHITECTURE_X86
+-#if defined(DARWIN)
++#if defined(DARWIN) || !defined(__GLIBC__) /* musl has no fpu_control.h */
+
+ #define _FPU_DEFAULT  0x037f
+
+--- a/cldc/src/vm/cpu/c/AsmStubs_i386.s
++++ b/cldc/src/vm/cpu/c/AsmStubs_i386.s
+@@ -25,6 +25,8 @@
+ #
+
+ .arch i486
++# Modern GAS needs the x87 extension declared explicitly (host romgen C-interpreter stubs).
++.arch .387
+ .text
+ .align 16
+

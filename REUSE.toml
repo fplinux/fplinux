@@ -163,3 +163,12 @@ SPDX-FileCopyrightText = [
   "2018 Linaro Ltd.",
 ]
 SPDX-License-Identifier = "GPL-2.0-only"
+
+[[annotations]]
+path = "alpine/aports/fplinux-phoneme/patches/*.patch"
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "1990-2009 Sun Microsystems, Inc.",
+  "2026 FPLinux contributors",
+]
+SPDX-License-Identifier = "GPL-2.0-only"

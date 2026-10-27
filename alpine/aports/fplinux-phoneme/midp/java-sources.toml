@@ -1,0 +1,109 @@
+# MIDP 2.0 core Java selection for fplinux-phoneme (read by build-midp-java.py).
+#
+# Paths under [configuration].upstream and [java] are relative to the patched
+# upstream tree root (--src); [configuration].project paths are relative to
+# this midp/ directory. Chameleon, its virtual keyboard and predictive text
+# are omitted. The LCDUI look and feel comes from the --lf directory.
+[configuration]
+# Configurator inputs use single-VM CLDC without MONET, verify-once,
+# extended attributes or Chameleon skin configuration. Later property entries win
+# at run time (the static properties port replaces an existing key), so the
+# project file comes last.
+upstream = [
+  "midp/src/configuration/configuration_xml/share/constants.xml",
+  "midp/src/configuration/configuration_xml/share/i18n_constants.xml",
+  "midp/src/configuration/configuration_xml/share/alert_type_constants.xml",
+  "midp/src/configuration/configuration_xml/share/suitestore_constants.xml",
+  "midp/src/configuration/configuration_xml/share/ams_cldc/storage_constants.xml",
+  "midp/src/configuration/configuration_xml/share/finger_touch_disabled.xml",
+  "midp/src/configuration/configuration_xml/share/l10n/en-US.xml",
+  "midp/src/configuration/configuration_xml/share/l10n/project_en-US.xml",
+  "midp/src/configuration/configuration_xml/linux_gci/constants_open.xml",
+  "midp/src/configuration/configuration_xml/linux_gci/properties.xml",
+  "midp/src/configuration/configuration_xml/share/monet_disabled.xml",
+  "midp/src/configuration/configuration_xml/share/verify_once_disabled.xml",
+  "midp/src/configuration/configuration_xml/share/extended_attrs_disabled.xml",
+  "midp/src/configuration/configuration_xml/share/properties.xml",
+  "midp/src/security/midp_permissions/reference/config/properties_security.xml",
+]
+# config/fplinux-constants.xml replaces linux_gci/constants.xml (Canvas key
+# repeat on, no pointer); constants cannot be overridden by a later file.
+project = ["config/fplinux-constants.xml", "config/fplinux-properties.xml"]
+
+[java]
+# Every *.java and *.jpp below these directories, except excluded names.
+roots = [
+  "midp/src/lowlevelui/graphics_api/gxapi_native/classes",
+  "midp/src/lowlevelui/image_api/reference/classes",
+  "midp/src/lowlevelui/image/img_putpixel/classes",
+  "midp/src/lowlevelui/image/classes",
+  "midp/src/lowlevelui/image_cache/classes",
+  "midp/src/lowlevelui/image_cache/reference/classes",
+  "midp/src/highlevelui/lcdui/reference/classes",
+  "midp/src/highlevelui/lcdlf/classes",
+  "midp/src/events/eventqueue/classes",
+  "midp/src/events/eventqueue/reference/classes",
+  "midp/src/ams/ams_api/reference/classes",
+  "midp/src/rms/rms_api/reference/classes",
+  "midp/src/rms/rms_api/classes",
+  "midp/src/rms/rms_base/classes",
+  "midp/src/rms/rms_base/reference/classes",
+  "midp/src/rms/rms_exc/reference/classes",
+  "midp/src/rms/rms_registry/classes",
+  "midp/src/rms/rms_registry/stubs/classes",
+  "midp/src/rms/record_index/linear_index/classes",
+  "midp/src/rms/record_store_lock/classes",
+  "midp/src/rms/record_store_lock/stubs/classes",
+  "midp/src/media/reference/classes",
+  "midp/src/mmapi/classes",
+  "midp/src/security/internal_api_protection/reference/classes",
+  "midp/src/security/midp_permissions/reference/classes",
+  "midp/src/security/access_controller_cldc_port/classes",
+  "midp/src/core/log/static/classes",
+  "midp/src/core/log_base/reference/classes",
+  "midp/src/core/javautil/reference/classes",
+  "midp/src/core/resource_handler/file_based/classes",
+  "midp/src/protocol/file/reference/classes",
+  "midp/src/i18n/i18n_main/reference/classes",
+  "midp/src/i18n/i18n_main/classes",
+  "midp/src/configuration/properties/reference/classes",
+  "midp/src/protocol/gcf/reference/classes",
+  "midp/src/protocol/http/reference/classes/com/sun/midp/io/j2me/http",
+]
+# Only the *.java directly below and inside these directories, minus
+# narrow_exclude_names (JSR permission classes for absent JSRs).
+narrow_roots = [
+  "abstractions/src/cldc_application/classes/com/sun/j2me/io",
+  "abstractions/src/cldc_application/classes/com/sun/j2me/security",
+  "midp/src/protocol/http/classes/javax/microedition/io",
+]
+narrow_exclude_names = [
+  "AMMSPermission.java",
+  "BluetoothPermission.java",
+  "ContactlessPermission.java",
+  "LocationPermission.java",
+  "MMAPIPermission.java",
+  "OBEXPermission.java",
+  "PIMPermission.java",
+  "SatsaPermission.java",
+  "SIPPermission.java",
+  "WMAPermission.java",
+]
+# Single files outside the roots. CLDC classes come from classes.zip.
+files = [
+  "midp/src/ams/ams_base_cldc/reference/classes/com/sun/midp/main/CldcAccessControlContext.java",
+  "midp/src/protocol/socket/reference/classes/com/sun/midp/io/j2me/socket/Protocol.java",
+  "midp/src/protocol/socket/classes/com/sun/midp/io/j2me/socket/ServerSocket.java",
+  "midp/src/protocol/socket/classes/javax/microedition/io/SocketConnection.java",
+]
+# Path components that exclude a file anywhere below a root.
+exclude_dirs = ["i3test", "cdc"]
+# File names excluded below the roots: EventSpyingQueue is a test helper;
+# LayoutManager is the Java Form layout of the upstream look and feels
+# (only their FormLFImpl uses it, through ItemLFImpl internals); our LF has
+# no Java layout.
+exclude_names = ["EventSpyingQueue.java", "LayoutManager.java"]
+# Jpp -D symbols. Empty on purpose: no ENABLE_CHAMELEON, no ENABLE_CDC, no
+# JSRs, no ENABLE_DIRECT_DRAW (GameCanvas.flushGraphics draws into the screen
+# buffer and calls refresh, which the headless port handles).
+jpp_defines = []

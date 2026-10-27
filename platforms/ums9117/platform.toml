@@ -32,6 +32,7 @@ packages = [
   "fplinux-charge",
   "fplinux-ffmpeg",
   "fplinux-ncurses-curses",
+  "fplinux-phoneme",
   "fplinux-sbc",
   "fplinux-showcase",
   "fplinux-tyrquake",

@@ -1,0 +1,22 @@
+Keep the soft-float call convention for VM float helpers on armhf.
+
+The interpreter and the JIT pass float and double values in core registers to
+jvm_fadd, jvm_sin and the other helpers declared with JVM_SOFTFP_LINKAGE.
+Upstream only has soft-float ARM configurations; on the hard-float EABI the
+helpers must use the base AAPCS explicitly.
+
+--- a/cldc/src/vm/share/natives/kni.h
++++ b/cldc/src/vm/share/natives/kni.h
+@@ -400,6 +400,12 @@
+  * values.
+  */
+ #define JVM_SOFTFP_LINKAGE __softfp
++#elif defined(__ARM_PCS_VFP)
++/*
++ * ARM EABI hard-float (armhf): the interpreter/JIT pass float and double
++ * values in core registers, so these C routines must use the base AAPCS.
++ */
++#define JVM_SOFTFP_LINKAGE __attribute__((pcs("aapcs")))
+ #else
+ /*
+  * Change this if your C/C++ compiler uses a special keyword to indicate

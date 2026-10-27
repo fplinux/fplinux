@@ -18,7 +18,7 @@ Downloaded sources keep their own style. A project-owned adapter compiled inside
 | `alpine/aports/` | musl/Linux on the phone | C11 or the GNU dialect selected by the APKBUILD, POSIX and Linux UAPI |
 | `lib/fplinux/`, `include/fplinux/` | Shared host and phone components | The component's declared C dialect and runtime interfaces |
 | `common/host/` | Linux x86-64 host | C11, POSIX, Linux UAPI and libusb |
-| Sources marked `fplinux-check: package-embedded` | TyrQuake build tree | Destination project's dialect and external ABI |
+| Sources marked `fplinux-check: package-embedded` | Package build with generated headers or target ABI | Destination project's dialect and external ABI |
 | C harnesses under `tests/host_tool/` | Host-only harness | The dialect selected by the test that compiles it |
 
 Do not move an API or language assumption from one row to another. `errno`, file descriptors and signals do not belong in the bootstrap. Kernel code does not use libc types or POSIX calls. A successful host compile does not prove that ARM, musl, bootstrap or kernel code builds.
@@ -176,7 +176,7 @@ An adapter compiled inside TyrQuake or the bootstrap closure keeps the names and
 
 Keep required names at the boundary. Use normal project-style `static` helpers for separable operations inside the adapter, but do not force a naturally stateful upstream entry point into a one-line wrapper.
 
-Do not reformat downloaded source. A patch follows the destination project's style. The `fplinux-check: package-embedded` marker tells the standalone host analyzer that the file needs its upstream compile context; it does not exempt the file from project formatting. The corresponding APK build is the compile proof.
+Do not reformat downloaded source. A patch follows the destination project's style. The `fplinux-check: package-embedded` marker tells the standalone host analyzer that the file needs generated upstream headers or its package's ARM ABI context; it does not exempt the file from project formatting. Use it on the translation units that require that context. The corresponding APK build is the compile proof.
 
 ## C test harnesses
 

@@ -1,0 +1,58 @@
+Use ARM EABI Linux conventions in generated ARM code.
+
+The cache flush stub used the OABI system call (swi 0x9F0002) and breakpoints
+used swi 0x9f0001; EABI kernels without OABI_COMPAT raise SIGILL for both.
+The disassembler printed raw branches as "pc + N", which GNU syntax and the
+LLVM assembler read as a symbol named pc; ". + N" is the same target.
+
+--- a/cldc/src/vm/cpu/arm/Assembler_arm.hpp
++++ b/cldc/src/vm/cpu/arm/Assembler_arm.hpp
+@@ -602,16 +602,12 @@
+     // use a different method of breakpoints. Make sure the fix works
+     // with cross compilation -- remember the loop generator is compiled
+     // with the host compiler!
+-#ifdef UNDER_CE
+     // bkpt instruction does not support condition codes, so we emit
+-    // a conditional branch around it
++    // a conditional branch around it (OABI 'swi 0x9f0001' is gone on EABI kernels)
+     if (cond != al) {
+       emit(not_cond(cond) << 28 | 0x5 << 25);
+     }
+     emit(0xe1200070);
+-#else
+-    swi(0x9f0001, cond);
+-#endif
+   }
+ #endif /* !PRODUCT || ENABLE_COMPILER */
+ };
+--- a/cldc/src/vm/cpu/arm/SharedStubs_arm.cpp
++++ b/cldc/src/vm/cpu/arm/SharedStubs_arm.cpp
+@@ -810,7 +810,14 @@
+     // On Linux 2.6 and newer, r2 must be zet to zero. r2's value
+     // used to be ignored on previous versions of Linux.
+     mov(r2, imm(0));
+-    swi(0x9F0002);
++    // EABI cacheflush: syscall number __ARM_NR_cacheflush (0xF0002) in r7, swi 0.
++    // The OABI form (swi 0x9F0002) raises SIGILL on kernels without OABI_COMPAT.
++    // Linux preserves r1-r14 across syscalls, so r12 holds r7 (callee-saved).
++    mov(r12, reg(r7));
++    mov(r7, imm(0xF0000));
++    add(r7, r7, imm(2));
++    swi(0);
++    mov(r7, reg(r12));
+     jmpx(lr);
+
+   bind(flush_loop);
+--- a/cldc/src/vm/cpu/arm/Disassembler_arm.cpp
++++ b/cldc/src/vm/cpu/arm/Disassembler_arm.cpp
+@@ -615,7 +615,9 @@
+           stream()->put('l');
+         }
+         stream()->print("%s\t", condition_name(cond));
+-        stream()->print("pc + %d\t", offset + 8);
++        // GNU as has no 'pc' symbol in expressions; '.' is the address of
++        // this instruction, so '. + (offset + 8)' is the same branch target.
++        stream()->print(GenerateGNUCode ? ". + %d\t" : "pc + %d\t", offset + 8);
+         if (addr != NULL || instr_offset != NO_OFFSET) {
+           stream()->print(GenerateGNUCode & !GenerateROMImage ? "/* " : "; ");
+           if (addr != NULL && VerbosePointers) {

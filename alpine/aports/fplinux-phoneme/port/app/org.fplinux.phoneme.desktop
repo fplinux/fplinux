@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+NoDisplay=true
+Name=phoneME
+Name[ru]=phoneME
+Exec=/usr/bin/fplinux-phoneme
+Icon=org.fplinux.phoneme
+Categories=Game;
+X-FPLinux-Mode=integrated
+X-FPLinux-FileExtensions=jar;

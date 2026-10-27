@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-License-Identifier: GPL-2.0-only
+  fplinux-phoneme overrides of the upstream MIDP properties. This file is the
+  last Configurator input, so its entries follow the upstream ones in the
+  generated static property tables and replace them at run time.
+  fplinux_pm_midp_init() copies every system-scope property into the VM
+  (JVMSPI_SetSystemProperty); it may replace microedition.locale from the
+  process locale.
+-->
+<configuration>
+<properties>
+  <property Key="microedition.platform"
+            Value="FPLinux"
+            Scope="system"
+            Comment="Platform name."/>
+  <property Key="microedition.profiles"
+            Value="MIDP-2.0"
+            Scope="system"
+            Comment="Profile information."/>
+  <property Key="microedition.configuration"
+            Value="CLDC-1.1"
+            Scope="system"
+            Comment="Configuration information."/>
+  <property Key="microedition.locale"
+            Value="en-US"
+            Scope="system"
+            Comment="Default locale; replaced from LC_ALL/LC_MESSAGES/LANG when set."/>
+  <property Key="microedition.encoding"
+            Value="UTF-8"
+            Scope="system"
+            Comment="Default character encoding: System.out and default readers and writers (CLDC default ISO8859_1 prints Cyrillic as ?)."/>
+  <property Key="microedition.commports"
+            Value=""
+            Scope="system"
+            Comment="No serial ports."/>
+</properties>
+</configuration>
