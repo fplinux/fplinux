@@ -2,6 +2,8 @@
 #ifndef FPLINUX_CLOCKS_OBSERVER_H
 #define FPLINUX_CLOCKS_OBSERVER_H
 
+#include "list-values-observer.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -19,7 +21,24 @@ struct clocks_time_observation {
 
 struct clocks_frame_observation {
 	char labels[8192];
+	struct list_value_observation root_values[4];
 	struct clocks_time_observation time;
+	struct clocks_time_observation fraction;
+	unsigned int poll_callbacks;
+	unsigned int poll_period_ms;
+	int alarm_detail_height;
+	int alarm_status_left;
+	int alarm_status_right;
+	int alarm_status_top;
+	int alarm_status_bottom;
+	int alarm_primary_left;
+	int alarm_primary_right;
+	int alarm_primary_top;
+	int alarm_primary_bottom;
+	int alarm_row_left;
+	int alarm_row_right;
+	int alarm_row_top;
+	int alarm_row_bottom;
 	unsigned int time_fields;
 	unsigned int date_fields;
 	unsigned int duration_fields;
@@ -28,6 +47,9 @@ struct clocks_frame_observation {
 	unsigned int duration_seconds;
 	uint64_t focused_item;
 	bool editing;
+	bool timer_only;
+	bool poll_paused;
+	bool alarm_status_found;
 };
 
 #endif

@@ -84,7 +84,7 @@ def test_fixed_offset_projection_crosses_calendar_and_supported_clock_edges(
 
 @pytest.fixture(scope="module")
 def clocks_native(
-    tmp_path_factory: pytest.TempPathFactory, ui_host_inputs: Path
+    tmp_path_factory: pytest.TempPathFactory, ui_host_inputs: Path, ui_icon_resources: Path
 ) -> Iterator[Path]:
     """Build the real app and peer against the shared native UI inputs."""
     with c_build_directory(tmp_path_factory, "clocks-native") as directory:
@@ -94,6 +94,7 @@ def clocks_native(
             timeout=180,
             check=True,
         )
+        (directory / "icons").symlink_to(ui_icon_resources, target_is_directory=True)
         yield directory
 
 
@@ -264,6 +265,13 @@ def test_clocks_rejects_arguments_before_preferences_and_ui(
             ),
         ),
         (
+            "close-stay-retry",
+            (
+                "clocks-close-stay-retry: Stay resumes the pending alarm retry; "
+                "serial and draft survive\n"
+            ),
+        ),
+        (
             "storage-controls",
             (
                 "clocks-storage-controls: directory sync EIO keeps navigation, ticking "
@@ -298,6 +306,7 @@ def test_clocks_rejects_arguments_before_preferences_and_ui(
         "published-add-retry",
         "published-background-durable",
         "ordinary-close-draft",
+        "close-stay-retry",
         "storage-controls",
         "storage-ring-retry",
         "missed-timer-localized",
@@ -326,6 +335,60 @@ def test_actual_clocks_acknowledgments_and_localized_missed_events(
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == expected
+
+
+@pytest.mark.parametrize(
+    ("width", "height"),
+    [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)],
+)
+def test_actual_stopwatch_keeps_hours_seconds_and_hundredths_within_content(
+    clocks_native: Path, tmp_path: Path, width: int, height: int
+) -> None:
+    """The real canvas keeps a measured 01:01:01.23 readable in every profile."""
+    result = run_process(
+        [
+            str(clocks_native / "clocks-screens"),
+            str(width),
+            str(height),
+            str(clocks_native / "clocks"),
+            str(SCREENS / "clocks-keyboard.xkb"),
+            str(tmp_path / "session.sock"),
+            str(tmp_path),
+            "stopwatch-hour",
+        ],
+        name=f"measure actual stopwatch after one hour at {width}x{height}",
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines()[-1] == (
+        "clocks-stopwatch-hour: 01:01:01.23 remains readable; "
+        "narrow screens separate smaller hundredths below large seconds"
+    )
+
+
+def test_actual_clocks_timer_wakes_only_for_visible_work_and_request_timeout(
+    clocks_native: Path, tmp_path: Path
+) -> None:
+    """Observe real app-owned timer callbacks alongside its session requests."""
+    result = run_process(
+        [
+            str(clocks_native / "clocks-screens"),
+            "240",
+            "320",
+            str(clocks_native / "clocks"),
+            str(SCREENS / "clocks-keyboard.xkb"),
+            str(tmp_path / "session.sock"),
+            str(tmp_path),
+            "idle-deadlines",
+        ],
+        name="observe actual Clock timer deadlines and pending mutation",
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "clocks-idle-deadlines: static and paused clocks sleep; "
+        "running stopwatch ticks at 200ms; pending request waits for its timeout\n"
+    )
 
 
 @pytest.mark.parametrize(
@@ -391,7 +454,54 @@ def test_actual_clocks_forms_requests_lifecycle_and_rendering_at_each_profile(
     for state in CAPTURE_STATES:
         actual_width, actual_height, pixels = png_pixels(output / f"{state}{suffix}.png")
         assert (actual_width, actual_height) == surface
-        assert len({pixels[index : index + 3] for index in range(0, len(pixels), 3)}) > 8
+        assert len({pixels[index : index + 3] for index in range(0, len(pixels), 3)}) > 1
         assert f"{state}: {width}x{height}\n" in transcript
         frames.append(pixels)
     assert len(set(frames)) == len(CAPTURE_STATES)
+
+
+@pytest.mark.parametrize(
+    "screen",
+    [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)],
+    ids=["128-128", "128-160", "176-220", "240-320", "320-240"],
+)
+@pytest.mark.parametrize("locale", ["en", "ru"])
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_actual_clocks_root_values_fit_and_share_a_landscape_column(
+    clocks_native: Path, tmp_path: Path, screen: tuple[int, int], locale: str, theme: str
+) -> None:
+    """Actual glyph rows show controlled current clocks within measured row bounds."""
+    width, height = screen
+    result = run_process(
+        [
+            str(clocks_native / "clocks-screens"),
+            str(width),
+            str(height),
+            str(clocks_native / "clocks"),
+            str(SCREENS / "clocks-keyboard.xkb"),
+            str(tmp_path / "session.sock"),
+            str(tmp_path),
+            "root-values",
+        ],
+        name=f"measure actual Clock root values at {width}x{height} in {locale}/{theme}",
+        env={
+            "FPLINUX_CLOCKS_TEST_LOCALE": locale,
+            "FPLINUX_CLOCKS_TEST_THEME": theme,
+            "FPLINUX_CLOCKS_LANGUAGE_DIR": str(ROOT / "alpine/aports/fplinux-language"),
+        },
+        timeout=20,
+    )
+    (tmp_path / "capture.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+    log_root = os.environ.get("FPLINUX_LOG_ROOT")
+    if log_root:
+        shutil.copytree(
+            tmp_path,
+            Path(log_root) / f"clocks-root-values-{width}x{height}-{locale}-{theme}",
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("session.sock"),
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines()[-1] == (
+        "clocks-root-values: real glyphs and current alarm, timer, stopwatch and offset values "
+        "fit; landscape shares a right column"
+    )

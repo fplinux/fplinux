@@ -162,6 +162,24 @@ msgstr "Повторить сохранение"
 msgid "Edit"
 msgstr "Изменить"
 
+msgctxt "short command"
+msgid "Edit"
+msgstr "Правка"
+
+msgctxt "short command"
+msgid "Resume"
+msgstr "Дальше"
+
+msgctxt "short command"
+msgid "Retry"
+msgstr "Повтор"
+
+msgid "Restart"
+msgstr "Заново"
+
+msgid "Add"
+msgstr "Добавить"
+
 msgid "Delete"
 msgstr "Удалить"
 
@@ -319,7 +337,7 @@ msgid "Reset the stopwatch and delete laps?"
 msgstr "Сбросить секундомер и удалить круги?"
 
 msgid "Add UTC offset"
-msgstr "Добавить пояс"
+msgstr "Добавить смещение UTC"
 
 msgid "UTC offset"
 msgstr "Смещение UTC"
@@ -336,8 +354,8 @@ msgstr "Цифровой"
 msgid "Analog"
 msgstr "Стрелочный"
 
-msgid "Snooze"
-msgstr "Отложить"
+msgid "Snooze duration"
+msgstr "Отложить на"
 
 #, c-format
 msgid "%u min"
@@ -371,7 +389,7 @@ msgid "Alarms ring while the phone is on. They cannot turn on a powered-off phon
 msgstr "Будильники срабатывают, пока телефон включён. Они не включат выключенный телефон."
 
 msgid "Could not cancel the snooze. Try again."
-msgstr "Не удалось отменить повторный сигнал. Повторите."
+msgstr "Не удалось отменить отложенный сигнал. Повторите."
 
 msgid "Off. This alarm will not ring."
 msgstr "Выключен. Будильник не сработает."
@@ -386,15 +404,11 @@ msgid "Alarm state"
 msgstr "Состояние будильника"
 
 #, c-format
-msgid "Snoozed until %s"
-msgstr "Отложен до %s"
-
-#, c-format
-msgid "%s left%s%s"
-msgstr "Осталось %s%s%s"
+msgid "%s · %s left"
+msgstr "%s · осталось %s"
 
 msgid "Cancel snooze"
-msgstr "Отменить повторный сигнал"
+msgstr "Отменить отложенный сигнал"
 
 #, c-format
 msgid "Lap %zu · %s"
@@ -405,3 +419,19 @@ msgstr "Круги →"
 
 msgid "Replace the current countdown with this duration?"
 msgstr "Заменить текущий отсчёт этой длительностью?"
+
+msgid "No alarms"
+msgstr "Нет будильников"
+
+msgid "All off"
+msgstr "Все выключены"
+
+msgid "No UTC offsets"
+msgstr "Нет смещений UTC"
+
+#, c-format
+msgid "%zu offset"
+msgid_plural "%zu offsets"
+msgstr[0] "%zu смещение"
+msgstr[1] "%zu смещения"
+msgstr[2] "%zu смещений"

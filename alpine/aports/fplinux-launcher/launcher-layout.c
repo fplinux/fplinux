@@ -310,18 +310,28 @@ void fplinux_launcher_scroll_layout(const struct fplinux_ui_profile_spec *spec,
 {
 	int size = spec->app_icon_size;
 	int gap;
+	int padding;
 
 	gap = fplinux_launcher_grid_gap(
 		width, (int)fplinux_launcher_columns(spec), size);
+	padding = gap;
 	/* A clipped next row must be a useful hint, not a thin coloured strip. */
 	if (viewport_height > gap) {
 		int rows = (viewport_height - gap) / (size + gap);
 		int visible = viewport_height - gap - rows * (size + gap);
 
-		if (visible > 0 && 3 * visible < size)
-			gap += (visible + rows) / (rows + 1);
+		if (rows > 0 && visible > 0 && 3 * visible < size) {
+			int adjusted = gap + (visible + rows) / (rows + 1);
+			int fitting =
+				(viewport_height - rows * size) / (rows + 1);
+
+			gap = adjusted < fitting ? adjusted : fitting;
+			padding = (viewport_height - rows * size -
+				   (rows - 1) * gap) /
+				  2;
+		}
 	}
-	scroll->padding = gap;
+	scroll->padding = padding;
 	scroll->pitch = size + gap;
 	scroll->item = size;
 	scroll->reveal_margin = spec->grid_ring_gap + spec->grid_ring_width -

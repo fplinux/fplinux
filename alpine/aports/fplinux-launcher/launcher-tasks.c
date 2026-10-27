@@ -21,12 +21,10 @@ static void task_command(struct fplinux_ui *ui,
 
 void fplinux_launcher_tasks_init(
 	struct fplinux_launcher_tasks *tasks, struct fplinux_ui *ui,
-	struct fplinux_ui_screen *base,
 	const struct fplinux_launcher_tasks_listener *listener)
 {
 	memset(tasks, 0, sizeof(*tasks));
 	tasks->ui = ui;
-	tasks->base = base;
 	if (listener)
 		tasks->listener = *listener;
 }
@@ -44,15 +42,19 @@ static void view_changed(struct fplinux_launcher_tasks *tasks)
 
 void fplinux_launcher_tasks_close(struct fplinux_launcher_tasks *tasks)
 {
+	struct fplinux_ui_screen *list = tasks->list;
+	struct fplinux_ui_screen *alert = tasks->alert;
+
 	if (!tasks->list && !tasks->alert)
 		return;
 	tasks->list = NULL;
 	tasks->alert = NULL;
 	tasks->querying = false;
 	memset(&tasks->confirmed, 0, sizeof(tasks->confirmed));
-	while (fplinux_ui_current(tasks->ui) != tasks->base)
-		if (!fplinux_ui_pop(tasks->ui))
-			break;
+	if (alert && fplinux_ui_current(tasks->ui) == alert)
+		fplinux_ui_pop(tasks->ui);
+	if (list && fplinux_ui_current(tasks->ui) == list)
+		fplinux_ui_pop(tasks->ui);
 	view_changed(tasks);
 }
 
@@ -83,6 +85,7 @@ static void update_commands(struct fplinux_launcher_tasks *tasks)
 		.id = TASK_COMMAND_CLOSE,
 		.type = FPLINUX_UI_COMMAND_SCREEN,
 		.label = _("Close app"),
+		.short_label = _("Close"),
 		.priority = 1,
 		.icon = fplinux_ui_glyph(tasks->ui, "exit",
 					 FPLINUX_UI_GLYPH_ROW),
@@ -205,7 +208,7 @@ static void task_command(struct fplinux_ui *ui,
 		};
 
 		snprintf(text, sizeof(text),
-			 _("Close %s? Unsaved changes may be lost."),
+			 _("Close “%s”? Unsaved changes may be lost."),
 			 task->title);
 		tasks->alert =
 			fplinux_ui_alert_new(ui, FPLINUX_UI_ALERT_CONFIRMATION,

@@ -25,7 +25,6 @@ struct fplinux_launcher_tasks_listener {
 
 struct fplinux_launcher_tasks {
 	struct fplinux_ui *ui;
-	struct fplinux_ui_screen *base;
 	struct fplinux_ui_screen *list;
 	struct fplinux_ui_screen *alert;
 	struct fplinux_launcher_tasks_listener listener;
@@ -41,7 +40,6 @@ struct fplinux_launcher_tasks {
 
 void fplinux_launcher_tasks_init(
 	struct fplinux_launcher_tasks *tasks, struct fplinux_ui *ui,
-	struct fplinux_ui_screen *base,
 	const struct fplinux_launcher_tasks_listener *listener);
 bool fplinux_launcher_tasks_is_open(const struct fplinux_launcher_tasks *tasks);
 void fplinux_launcher_tasks_open(struct fplinux_launcher_tasks *tasks);

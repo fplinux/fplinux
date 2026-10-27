@@ -10,14 +10,33 @@ msgstr ""
 "n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
 
 #, c-format
-msgid "Starting %s…"
-msgstr "Запуск %s…"
+msgid "Starting “%s”…"
+msgstr "Запуск «%s»…"
 
 msgid "Cancel"
 msgstr "Отмена"
 
 msgid "Menu"
 msgstr "Меню"
+
+msgid "Clock"
+msgstr "Часы"
+
+#, c-format
+msgid "Alarm %s"
+msgstr "Будильник %s"
+
+#, c-format
+msgid "Snooze %s"
+msgstr "Отложен %s"
+
+#, c-format
+msgid "Timer: %s"
+msgstr "Таймер: %s"
+
+#, c-format
+msgid "Paused: %s"
+msgstr "Пауза: %s"
 
 msgid "Open"
 msgstr "Открыть"
@@ -107,8 +126,8 @@ msgid "Close app"
 msgstr "Закрыть приложение"
 
 #, c-format
-msgid "Close %s? Unsaved changes may be lost."
-msgstr "Закрыть %s? Несохранённые изменения могут быть потеряны."
+msgid "Close “%s”? Unsaved changes may be lost."
+msgstr "Закрыть «%s»? Несохранённые изменения могут быть потеряны."
 
 msgid "Cannot close the application. Try again."
 msgstr "Не удалось закрыть приложение. Попробуйте ещё раз."
@@ -145,7 +164,7 @@ msgstr "Отложить"
 
 #, c-format
 msgid "Snooze: %u min"
-msgstr "Повтор: %u мин"
+msgstr "Отложить на %u мин"
 
 #, c-format
 msgid "Missed: %llu"

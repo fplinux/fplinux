@@ -14,6 +14,8 @@ source="
 	fplinux-clocks.c
 	clock-client.c
 	clock-client.h
+	clock-face.c
+	clock-face.h
 	clock-model.c
 	clock-model.h
 	clock-presentation.c
@@ -35,7 +37,7 @@ build() {
 	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
 		$(pkg-config --cflags fplinux-ui json-c) \
-		fplinux-clocks.c clock-client.c clock-model.c \
+		fplinux-clocks.c clock-client.c clock-face.c clock-model.c \
 		clock-presentation.c clock-wire.c fplinux-cli.c fplinux-utf8.c \
 		$(pkg-config --libs fplinux-ui json-c) -lm $LDFLAGS \
 		-flto=thin -Wl,--thinlto-jobs=2 -Wl,--icf=safe -o fplinux-clocks
@@ -50,9 +52,11 @@ package() {
 		"$pkgdir/usr/share/locale/ru/LC_MESSAGES/org.fplinux.clock.mo"
 }
 sha512sums="
-006ba98c332e2f781807526c2e91646953c5c5b6afcf8c7fd30b49019283aac2723db56fa3da2d95737259e8bb93b39be67a3680a14ccecc8d075eff1f3c9b33  fplinux-clocks.c
+1fd0fbc1e1f36784b026cc325ce9be268ebcac7e3f1d0a3e403cb030e8d95f750684da3eb771f7e9b4953ac9c3753106e2e855207b18e8a74c4a30e3472bcb6f  fplinux-clocks.c
 b8d35f6abf36c08267563115db4df3c25039a62a1f1f0100ad2ec72c1551e9ce6ab4d096ef23a17966936c1febff498ec77868a9dd6cbd040e67459ef7418655  clock-client.c
 a4facecfaa615d838493c6f0a8598cd60fddce18f15d9034db2fea703a84107d54c8ab803df8bd99fc0b2f7d81e799b1a2ad7bd04d0a30d5f445bd6340f0e818  clock-client.h
+d01ea613cd40b2bb6a3fe2df72d375c99f9b918189666382380e5676c946dc3f3d8b847182cc300ede37c2445288ea7dde16862280004339a14a40fa3f97968f  clock-face.c
+610411b3c21eb05835a22912b9b8478f4943bad4c74251a36bfc6176e2f1f37bbc89746ad87c20506fbe3a2af8b89c832b4e57bb521e31e9debc381e3c7c7bb4  clock-face.h
 c08ea4ebc64c0df062966e80a96710307713f38a88e1b03ef31e0f2676d5f78ee54711a90cf2285282bfa04c41f23484d203a6a7c4b65b1e55f1276c71da74bc  clock-model.c
 31328653c49f42692a6ad2f000664c29305d2e11d45d50d53c9a2725349f895c06b4d4c889e46705228d3e46be7b7138f9b3cfbbeb650a2d31d64a9915bd4634  clock-model.h
 e33cea0608b552655a1386e3f3ca0f5111ff7a73736770a695c6238a81beb6d1c69a8e56ece56de34ba039a1cfed0cf217c2dc6c12c4032c791242864a5bfdfb  clock-presentation.c
@@ -65,5 +69,5 @@ c2a1a77ae236231200f2b037f320a513380957aaf44396c9b6fa889e1a6d249324e2b270cef18359
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
 17229ff2f9bc1e0f82253c0122f5e0f29479a51ffbbf072c6bf572bf06b063e655468ab3e30ec879a3c2256466383f332ebe3095f2e5c4bfbcc2c54fa350b491  org.fplinux.clock.desktop
-37169bdf4de8eb53bc9a46560437fe100250bbe6e998886999e553e0bc334ff5ff33b3b8de4244e56306c0c59ca970fd49385ce63cffaee28ff78d9416a5f68a  ru.po
+81e41cc4ed005df3cf7d641acc80dfaff2f1ea2430e6318d73d8d807958617a648a5d306d26706714f4068dc4f848b14567b80cd3869ea4ffc4dec9f74283c57  ru.po
 "

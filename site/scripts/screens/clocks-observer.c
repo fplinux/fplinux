@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "clocks-observer.h"
+#include "fplinux-language.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -9,6 +10,107 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+
+static void *application_context;
+static lv_timer_t *application_timer;
+static lv_timer_cb_t application_tick;
+static unsigned int poll_callbacks;
+static unsigned int poll_period_ms;
+
+char *__real_libintl_bindtextdomain(const char *domain, const char *directory);
+
+char *__wrap_libintl_bindtextdomain(const char *domain, const char *directory)
+{
+	const char *catalogues = getenv("FPLINUX_CLOCKS_LOCALE_DIR");
+
+	return __real_libintl_bindtextdomain(domain, catalogues ? catalogues :
+								  directory);
+}
+
+bool __real_fplinux_language_load(const char *directory, const char *code,
+				  struct fplinux_language *language);
+
+bool __wrap_fplinux_language_load(const char *directory, const char *code,
+				  struct fplinux_language *language)
+{
+	const char *languages = getenv("FPLINUX_CLOCKS_LANGUAGE_DIR");
+
+	return __real_fplinux_language_load(
+		languages && !strcmp(directory, FPLINUX_LANGUAGE_DIRECTORY) ?
+			languages :
+			directory,
+		code, language);
+}
+
+struct fplinux_ui *__real_fplinux_ui_open(const char *app_id,
+					  fplinux_ui_event_cb callback,
+					  void *context);
+lv_timer_t *__real_lv_timer_create(lv_timer_cb_t callback, uint32_t period,
+				   void *context);
+void __real_lv_timer_set_period(lv_timer_t *timer, uint32_t period);
+void __real_lv_timer_delete(lv_timer_t *timer);
+
+static void send_observation(struct clocks_frame_observation *observation)
+{
+	const char *descriptor = getenv("FPLINUX_CLOCKS_OBSERVER_FD");
+	ssize_t sent;
+
+	if (!descriptor)
+		return;
+	observation->poll_callbacks = poll_callbacks;
+	observation->poll_period_ms = poll_period_ms;
+	observation->poll_paused = application_timer &&
+				   lv_timer_get_paused(application_timer);
+	sent = send(atoi(descriptor), observation, sizeof(*observation),
+		    MSG_DONTWAIT | MSG_NOSIGNAL);
+	assert(sent == (ssize_t)sizeof(*observation) ||
+	       (sent == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)));
+}
+
+static void observe_application_tick(lv_timer_t *timer)
+{
+	struct clocks_frame_observation observation = { .timer_only = true };
+
+	++poll_callbacks;
+	application_tick(timer);
+	send_observation(&observation);
+}
+
+struct fplinux_ui *__wrap_fplinux_ui_open(const char *app_id,
+					  fplinux_ui_event_cb callback,
+					  void *context)
+{
+	application_context = context;
+	return __real_fplinux_ui_open(app_id, callback, context);
+}
+
+/* Observe the timer owned by the application's lifecycle context. */
+lv_timer_t *__wrap_lv_timer_create(lv_timer_cb_t callback, uint32_t period,
+				   void *context)
+{
+	if (context != application_context)
+		return __real_lv_timer_create(callback, period, context);
+	assert(!application_timer);
+	application_tick = callback;
+	poll_period_ms = period;
+	application_timer = __real_lv_timer_create(observe_application_tick,
+						   period, context);
+	return application_timer;
+}
+
+void __wrap_lv_timer_set_period(lv_timer_t *timer, uint32_t period)
+{
+	if (timer == application_timer)
+		poll_period_ms = period;
+	__real_lv_timer_set_period(timer, period);
+}
+
+void __wrap_lv_timer_delete(lv_timer_t *timer)
+{
+	if (timer == application_timer)
+		application_timer = NULL;
+	__real_lv_timer_delete(timer);
+}
 
 /* Keep native localization deterministic without installing system catalogs. */
 char *gettext(const char *text)
@@ -149,14 +251,16 @@ static void observe_fields(struct clocks_frame_observation *observation)
 			fields->form, fields->duration_item);
 }
 
-static void measure_time(lv_obj_t *label, struct clocks_time_observation *time)
+static void measure_time(lv_obj_t *label, struct clocks_time_observation *time,
+			 bool fraction)
 {
 	const char *text = lv_label_get_text(label);
 	const lv_font_t *font = lv_obj_get_style_text_font(label, LV_PART_MAIN);
 	lv_obj_t *parent = lv_obj_get_parent(label);
 	lv_point_t size;
 
-	if (!strchr(text, ':') || strlen(text) >= sizeof(time->text) ||
+	if ((fraction ? text[0] != '.' : !strchr(text, ':')) ||
+	    strlen(text) >= sizeof(time->text) ||
 	    strspn(text, "0123456789:.") != strlen(text))
 		return;
 	assert(parent && font);
@@ -182,6 +286,55 @@ static void measure_time(lv_obj_t *label, struct clocks_time_observation *time)
 	time->parent_height = lv_obj_get_height(parent);
 }
 
+static void measure_alarm_row(lv_obj_t *label,
+			      struct clocks_frame_observation *observation)
+{
+	const char *text = lv_label_get_text(label);
+	lv_obj_t *column = lv_obj_get_parent(label);
+	lv_obj_t *row = column ? lv_obj_get_parent(column) : NULL;
+	lv_area_t primary, row_bounds;
+
+	if (strlen(text) != 5 || text[2] != ':' ||
+	    strspn(text, "0123456789:") != 5 || !row)
+		return;
+	lv_obj_get_coords(label, &primary);
+	lv_obj_get_coords(row, &row_bounds);
+	observation->alarm_primary_left = primary.x1;
+	observation->alarm_primary_right = primary.x2;
+	observation->alarm_primary_top = primary.y1;
+	observation->alarm_primary_bottom = primary.y2;
+	observation->alarm_row_left = row_bounds.x1;
+	observation->alarm_row_right = row_bounds.x2;
+	observation->alarm_row_top = row_bounds.y1;
+	observation->alarm_row_bottom = row_bounds.y2;
+	for (uint32_t index = 0; index < lv_obj_get_child_count(column);
+	     ++index) {
+		lv_obj_t *detail = lv_obj_get_child(column, (int32_t)index);
+
+		if (detail != label &&
+		    lv_obj_check_type(detail, &lv_label_class))
+			observation->alarm_detail_height =
+				lv_font_get_line_height(
+					lv_obj_get_style_text_font(
+						detail, LV_PART_MAIN));
+	}
+	for (uint32_t index = 0; index < lv_obj_get_child_count(row); ++index) {
+		lv_obj_t *image = lv_obj_get_child(row, (int32_t)index);
+		lv_area_t status;
+
+		if (!lv_obj_check_type(image, &lv_image_class) ||
+		    !lv_obj_is_visible(image))
+			continue;
+		lv_obj_get_coords(image, &status);
+		observation->alarm_status_left = status.x1;
+		observation->alarm_status_right = status.x2;
+		observation->alarm_status_top = status.y1;
+		observation->alarm_status_bottom = status.y2;
+		observation->alarm_status_found = true;
+		break;
+	}
+}
+
 static void collect_labels(lv_obj_t *object,
 			   struct clocks_frame_observation *observation,
 			   size_t *used)
@@ -191,13 +344,28 @@ static void collect_labels(lv_obj_t *object,
 	if (lv_obj_check_type(object, &lv_label_class)) {
 		const char *text = lv_label_get_text(object);
 		size_t length = strlen(text);
+		static const char *const roots[4][2] = {
+			{ "Alarms", "Будильники" },
+			{ "Timer", "Таймер" },
+			{ "Stopwatch", "Секундомер" },
+			{ "World clock", "Мировое время" },
+		};
+
+		for (size_t index = 0; index < 4; ++index)
+			if (!strcmp(text, roots[index][0]) ||
+			    !strcmp(text, roots[index][1]))
+				screen_observe_list_value(
+					object,
+					&observation->root_values[index]);
 
 		assert(*used + length + 2 < sizeof(observation->labels));
 		memcpy(observation->labels + *used, text, length);
 		*used += length;
 		observation->labels[(*used)++] = '\n';
 		observation->labels[*used] = '\0';
-		measure_time(object, &observation->time);
+		measure_time(object, &observation->time, false);
+		measure_time(object, &observation->fraction, true);
+		measure_alarm_row(object, observation);
 	}
 	for (uint32_t index = 0; index < lv_obj_get_child_count(object);
 	     ++index)
@@ -208,15 +376,14 @@ static void collect_labels(lv_obj_t *object,
 /* Observe the actual visible widget tree of each completed LVGL frame. */
 void __wrap_lv_display_flush_ready(lv_display_t *display)
 {
-	const char *descriptor = getenv("FPLINUX_CLOCKS_OBSERVER_FD");
 	struct clocks_frame_observation observation = {
 		.labels = "\n",
 		.focused_item = UINT64_MAX,
 	};
 	size_t used = 1;
-	ssize_t sent;
 
-	if (descriptor && lv_display_flush_is_last(display)) {
+	if (getenv("FPLINUX_CLOCKS_OBSERVER_FD") &&
+	    lv_display_flush_is_last(display)) {
 		observe_fields(&observation);
 		collect_labels(lv_display_get_screen_active(display),
 			       &observation, &used);
@@ -224,11 +391,7 @@ void __wrap_lv_display_flush_ready(lv_display_t *display)
 			       &used);
 		collect_labels(lv_display_get_layer_sys(display), &observation,
 			       &used);
-		sent = send(atoi(descriptor), &observation, sizeof(observation),
-			    MSG_DONTWAIT | MSG_NOSIGNAL);
-		assert(sent == (ssize_t)sizeof(observation) ||
-		       (sent == -1 &&
-			(errno == EAGAIN || errno == EWOULDBLOCK)));
+		send_observation(&observation);
 	}
 	__real_lv_display_flush_ready(display);
 }

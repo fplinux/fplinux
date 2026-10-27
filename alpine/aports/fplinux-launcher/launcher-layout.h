@@ -108,8 +108,9 @@ int fplinux_launcher_grid_gap(int width, int columns, int size);
 /*
  * The grid viewport's content: row r starts at padding + r x pitch and is
  * item pixels high; the content ends padding below the last item. Rows of
- * app_icon_size tiles use the adjusted vertical gap from scroll_layout as
- * both their spacing and padding from the band and the soft-key bar.
+ * app_icon_size tiles use the adjusted vertical gap from scroll_layout.
+ * When a thin next-row strip is removed, the complete rows are centred with
+ * equal top and bottom padding to the nearest pixel.
  */
 struct fplinux_launcher_scroll {
 	int padding;

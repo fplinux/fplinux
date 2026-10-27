@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
+#include "clock-face.h"
 #include "fplinux-cli.h"
 #include "fplinux-ui-locale.h"
 #include "fplinux-ui-menu.h"
@@ -134,11 +135,20 @@ struct launcher {
 	lv_obj_t *body;
 	lv_obj_t *softkeys;
 	lv_obj_t *clock;
+	lv_obj_t *clock_accent;
 	lv_obj_t *date;
 	lv_obj_t *hint;
+	lv_obj_t *events;
+	lv_obj_t *alarm;
+	lv_obj_t *timer;
+	lv_obj_t *missed;
+	struct fplinux_clock_face face;
+	struct fplinux_ui_session_clock_presentation clock_presentation;
 	/* The shown notice dialog, which Up and Down scroll. */
 	lv_obj_t *notice_box;
 	lv_anim_t title_animation;
+	char marquee_app[FPLINUX_UI_SESSION_ID_BYTES];
+	char marquee_text[FPLINUX_UI_SESSION_TEXT_BYTES];
 	const char *desktop_dir;
 	int inotify_fd;
 	bool watching;
@@ -188,6 +198,7 @@ static void render(struct launcher *launcher);
 static void activate_selected(struct launcher *launcher);
 static void dismiss_battery_notice(struct launcher *launcher);
 static void resize_view(struct launcher *launcher);
+static void schedule_clock(struct launcher *launcher);
 
 /* The theme's colour of a profile table colour token. */
 static lv_color_t token_colour(const struct fplinux_ui_theme *theme, int colour)
@@ -651,8 +662,14 @@ static void clear_view(struct launcher *launcher)
 {
 	lv_obj_clean(launcher->body);
 	launcher->clock = NULL;
+	launcher->clock_accent = NULL;
 	launcher->date = NULL;
 	launcher->hint = NULL;
+	launcher->events = NULL;
+	launcher->alarm = NULL;
+	launcher->timer = NULL;
+	launcher->missed = NULL;
+	launcher->face = (struct fplinux_clock_face){ 0 };
 	launcher->notice_box = NULL;
 }
 
@@ -768,7 +785,15 @@ static void create_battery_icon(struct launcher *launcher, lv_obj_t *bar)
 	icon->bolt = lv_line_create(bar);
 	lv_obj_remove_style_all(icon->bolt);
 	lv_obj_set_pos(icon->bolt, layout->bolt.x, layout->bolt.y);
+#if defined(__GNUC__) && !defined(__clang__) && defined(__SANITIZE_ADDRESS__)
+	/* GCC's instrumented object-size analysis can mistake a coordinate for the array. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic warning "-Wstringop-overread"
+#endif
 	lv_line_set_points(icon->bolt, icon->bolt_points, (uint32_t)points);
+#if defined(__GNUC__) && !defined(__clang__) && defined(__SANITIZE_ADDRESS__)
+#pragma GCC diagnostic pop
+#endif
 	lv_obj_set_style_line_width(icon->bolt, layout->bolt_line_width, 0);
 	lv_obj_set_style_line_color(icon->bolt, ink, 0);
 	icon->body = outline(bar, layout->body, layout->outline_radius,
@@ -837,15 +862,24 @@ static void format_home_date(struct launcher *launcher, time_t now, char *date,
 		date[0] = '\0';
 }
 
-/* Centres the clock, date and hint stack in the body. */
-static void place_home(struct launcher *launcher)
+static int event_height(const struct launcher *launcher)
+{
+	int count = (launcher->alarm != NULL) + (launcher->timer != NULL) +
+		    (launcher->missed != NULL);
+
+	return count ? count * lv_font_get_line_height(launcher->theme->font) +
+			       (count - 1) * launcher->spec->gap_small :
+		       0;
+}
+
+/* Centres the stack and returns the clock height before LVGL's next layout. */
+static int place_home(struct launcher *launcher)
 {
 	const struct fplinux_ui_theme *theme = launcher->theme;
 	int width = fplinux_launcher_text_width(launcher->spec,
 						launcher->frame.width);
 	/* Sizes from the fonts: the layout has not run on new labels yet. */
-	int clock = lv_font_get_line_height(
-		lv_obj_get_style_text_font(launcher->clock, LV_PART_MAIN));
+	int clock;
 	int date = launcher->date ?
 			   text_height(lv_label_get_text(launcher->date),
 				       theme->font, width) :
@@ -853,17 +887,116 @@ static void place_home(struct launcher *launcher)
 	int hint = launcher->hint ?
 			   text_height(lv_label_get_text(launcher->hint),
 				       theme->font, width) :
-			   0;
+			   event_height(launcher);
 	struct fplinux_launcher_home home;
+	bool analog = launcher->face.dial != NULL;
+
+	if (analog) {
+		clock = launcher->frame.body_height - date - hint -
+			(date > 0 ? launcher->spec->home_gap : 0) -
+			(hint > 0 ? launcher->spec->home_gap : 0);
+		if (clock > width)
+			clock = width;
+		clock = clock / 2 * 2;
+		lv_obj_set_size(launcher->clock, clock, clock);
+		lv_obj_set_x(launcher->clock,
+			     fplinux_launcher_centre(launcher->frame.width,
+						     clock));
+	} else {
+		clock = lv_font_get_line_height(lv_obj_get_style_text_font(
+			launcher->clock, LV_PART_MAIN));
+	}
 
 	fplinux_launcher_home_layout(launcher->spec,
 				     launcher->frame.body_height, clock, date,
 				     hint, &home);
 	lv_obj_set_y(launcher->clock, home.clock_y);
+	if (launcher->clock_accent)
+		lv_obj_set_y(launcher->clock_accent,
+			     home.clock_y + clock -
+				     launcher->spec->divider_width);
 	if (launcher->date)
 		lv_obj_set_y(launcher->date, home.date_y);
 	if (launcher->hint)
 		lv_obj_set_y(launcher->hint, home.hint_y);
+	if (launcher->events) {
+		lv_obj_set_y(launcher->events, home.hint_y);
+		lv_obj_set_height(launcher->events, hint);
+	}
+	return clock;
+}
+
+static uint64_t monotonic_ms(void)
+{
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (uint64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+}
+
+static uint64_t remaining_ms(uint64_t deadline, uint64_t now)
+{
+	return deadline > now ? deadline - now : 0;
+}
+
+static void format_countdown(uint64_t remaining, char *text, size_t capacity)
+{
+	uint64_t seconds = remaining / 1000 + (remaining % 1000 != 0);
+
+	if (seconds >= 3600)
+		snprintf(text, capacity, "%" PRIu64 ":%02" PRIu64 ":%02" PRIu64,
+			 seconds / 3600, seconds / 60 % 60, seconds % 60);
+	else
+		snprintf(text, capacity, "%02" PRIu64 ":%02" PRIu64,
+			 seconds / 60, seconds % 60);
+}
+
+static void update_home_events(struct launcher *launcher)
+{
+	const struct fplinux_ui_session_clock_presentation *clock =
+		&launcher->clock_presentation;
+	uint64_t now = monotonic_ms();
+	char value[48], text[2 * FPLINUX_UI_SESSION_TEXT_BYTES];
+
+	if (launcher->alarm) {
+		if (clock->snooze_deadline_ms) {
+			format_countdown(remaining_ms(clock->snooze_deadline_ms,
+						      now),
+					 value, sizeof(value));
+			snprintf(text, sizeof(text), _("Snooze %s"), value);
+		} else {
+			if (!fplinux_ui_format_date(launcher->ui,
+						    (time_t)clock->alarm_utc,
+						    FPLINUX_UI_DATE_CLOCK,
+						    value, sizeof(value)))
+				snprintf(value, sizeof(value), "--:--");
+			snprintf(text, sizeof(text), _("Alarm %s"), value);
+		}
+		if (clock->alarm_label[0]) {
+			size_t used = strlen(text);
+
+			snprintf(text + used, sizeof(text) - used, " · %s",
+				 clock->alarm_label);
+		}
+		set_label(launcher->alarm, text);
+	}
+	if (launcher->timer) {
+		format_countdown(clock->timer_deadline_ms ?
+					 remaining_ms(clock->timer_deadline_ms,
+						      now) :
+					 clock->timer_remaining_ms,
+				 value, sizeof(value));
+		snprintf(text, sizeof(text),
+			 clock->timer_deadline_ms ? _("Timer: %s") :
+						    _("Paused: %s"),
+			 value);
+		set_label(launcher->timer, text);
+	}
+	if (launcher->missed) {
+		snprintf(text, sizeof(text), _("Missed: %llu"),
+			 (unsigned long long)clock->missed_total);
+		set_label(launcher->missed, text);
+	}
 }
 
 /* The clock in the status bar, centred on the full width at its own width. */
@@ -889,6 +1022,7 @@ static void update_clock(struct launcher *launcher)
 	bool clock_ready = fplinux_launcher_clock_is_ready(now);
 	char clock_text[16] = "--:--";
 	char date[128] = "";
+	int clock_height;
 
 	if (clock_ready &&
 	    !fplinux_ui_format_date(launcher->ui, now, FPLINUX_UI_DATE_CLOCK,
@@ -897,15 +1031,33 @@ static void update_clock(struct launcher *launcher)
 	set_status_clock(launcher, status_clock ? clock_text : "");
 	if (!launcher->clock)
 		return;
-	set_label(launcher->clock, clock_text);
+	if (fplinux_ui_current(launcher->ui) != launcher->canvas)
+		return;
+	if ((launcher->clock_presentation.analog && clock_ready) !=
+	    (launcher->face.dial != NULL)) {
+		render(launcher);
+		return;
+	}
+	if (!launcher->face.dial)
+		set_label(launcher->clock, clock_text);
 	if (launcher->date) {
 		if (clock_ready)
 			format_home_date(launcher, now, date, sizeof(date));
-		if (!strcmp(lv_label_get_text(launcher->date), date))
-			return;
 		set_label(launcher->date, date);
 	}
-	place_home(launcher);
+	update_home_events(launcher);
+	clock_height = place_home(launcher);
+	if (launcher->face.dial) {
+		struct tm local;
+
+		lv_obj_set_hidden(launcher->face.dial, !clock_ready);
+		if (clock_ready && localtime_r(&now, &local))
+			fplinux_clock_face_refresh(&launcher->face,
+						   launcher->body, launcher->ui,
+						   clock_height / 2,
+						   local.tm_hour, local.tm_min,
+						   local.tm_sec);
+	}
 }
 
 static void tasks_view_changed(void *context)
@@ -919,6 +1071,7 @@ static void tasks_view_changed(void *context)
 	};
 
 	update_clock(launcher);
+	schedule_clock(launcher);
 	if (!launcher->session_known || open == launcher->reported_tasks)
 		return;
 	if (fplinux_ui_send(launcher->ui, &message))
@@ -928,24 +1081,56 @@ static void tasks_view_changed(void *context)
 static void schedule_clock(struct launcher *launcher)
 {
 	struct timespec now = { 0 };
+	const struct fplinux_ui_session_clock_presentation *clock =
+		&launcher->clock_presentation;
+	uint32_t delay;
+	bool home = launcher->clock &&
+		    fplinux_ui_current(launcher->ui) == launcher->canvas;
 
 	clock_gettime(CLOCK_REALTIME, &now);
-	lv_timer_set_period(launcher->clock_timer,
-			    fplinux_launcher_clock_delay(&now));
+	delay = fplinux_launcher_clock_delay(&now);
+	if (home && launcher->face.dial)
+		delay = 1000 - now.tv_nsec / 1000000;
+	if (home && launcher->events &&
+	    (clock->timer_deadline_ms || clock->snooze_deadline_ms)) {
+		uint64_t current = monotonic_ms();
+		uint64_t deadlines[] = { clock->timer_deadline_ms,
+					 clock->snooze_deadline_ms };
+
+		for (size_t i = 0; i < 2; ++i) {
+			uint64_t remaining =
+				remaining_ms(deadlines[i], current);
+			uint32_t next =
+				remaining ?
+					(uint32_t)((remaining - 1) % 1000 + 1) :
+					1000;
+
+			if (deadlines[i] && next < delay)
+				delay = next;
+		}
+	}
+	lv_timer_set_period(launcher->clock_timer, delay);
 	lv_timer_reset(launcher->clock_timer);
 }
 
 /*
  * A focused text that does not fit scrolls to its end and back after
- * 400 ms, with 1 s pauses, while it keeps focus; a paused launcher keeps it
- * still.
+ * 400 ms, with a 1 s pause, once per selected app or changed name.
  */
 static void set_marquee(struct launcher *launcher, lv_obj_t *name)
 {
-	if (launcher->paused) {
+	const char *text = lv_label_get_text(name);
+	bool same = !strcmp(launcher->marquee_app, selected_id(launcher)) &&
+		    !strcmp(launcher->marquee_text, text);
+
+	if (launcher->paused || same) {
 		lv_label_set_long_mode(name, LV_LABEL_LONG_MODE_CLIP);
 		return;
 	}
+	snprintf(launcher->marquee_app, sizeof(launcher->marquee_app), "%s",
+		 selected_id(launcher));
+	snprintf(launcher->marquee_text, sizeof(launcher->marquee_text), "%s",
+		 text);
 	lv_obj_set_style_anim(name, &launcher->title_animation, 0);
 	lv_obj_set_style_anim_duration(
 		name,
@@ -956,10 +1141,27 @@ static void set_marquee(struct launcher *launcher, lv_obj_t *name)
 	lv_label_set_long_mode(name, LV_LABEL_LONG_MODE_SCROLL);
 }
 
-/*
- * Clock, date and, on the lock screen, the unlock hint, centred one under
- * the other; where the profile says so the hint takes the date's place.
- */
+static lv_obj_t *home_event(struct launcher *launcher, int *y)
+{
+	lv_obj_t *object =
+		label(launcher->events,
+		      (struct fplinux_launcher_rect){
+			      .y = *y,
+			      .width = fplinux_launcher_text_width(
+				      launcher->spec, launcher->frame.width),
+			      .height = lv_font_get_line_height(
+				      launcher->theme->font),
+		      },
+		      launcher->theme->font, launcher->theme->foreground, "");
+
+	lv_label_set_long_mode(object, LV_LABEL_LONG_MODE_DOTS);
+	lv_obj_set_style_text_align(object, LV_TEXT_ALIGN_CENTER, 0);
+	*y += lv_font_get_line_height(launcher->theme->font) +
+	      launcher->spec->gap_small;
+	return object;
+}
+
+/* The smallest profile gives the date's space to events or the unlock hint. */
 static void draw_clock_face(struct launcher *launcher)
 {
 	const struct fplinux_ui_theme *theme = launcher->theme;
@@ -973,17 +1175,30 @@ static void draw_clock_face(struct launcher *launcher)
 	enum fplinux_launcher_notice hint = launcher->hint_notice;
 	bool hinted = current_screen(launcher) == SCREEN_LOCK &&
 		      hint != FPLINUX_LAUNCHER_NOTICE_NONE;
+	const struct fplinux_ui_session_clock_presentation *clock =
+		&launcher->clock_presentation;
+	bool events = current_screen(launcher) == SCREEN_HOME &&
+		      (clock->alarm_utc || clock->snooze_deadline_ms ||
+		       clock->timer_deadline_ms || clock->timer_remaining_ms ||
+		       clock->missed_total);
 
-	launcher->clock =
-		label(launcher->body,
-		      (struct fplinux_launcher_rect){
-			      .x = text.x,
-			      .width = text.width,
-			      .height = lv_font_get_line_height(clock_font),
-		      },
-		      clock_font, theme->foreground, "");
-	lv_obj_set_style_text_align(launcher->clock, LV_TEXT_ALIGN_CENTER, 0);
-	if (!hinted || !launcher->spec->home_hint_replaces_date) {
+	if (clock->analog && fplinux_launcher_clock_is_ready(time(NULL))) {
+		fplinux_clock_face_refresh(&launcher->face, launcher->body,
+					   launcher->ui, 8, 0, 0, 0);
+		launcher->clock = launcher->face.dial;
+	} else {
+		launcher->clock = label(
+			launcher->body,
+			(struct fplinux_launcher_rect){
+				.x = text.x,
+				.width = text.width,
+				.height = lv_font_get_line_height(clock_font),
+			},
+			clock_font, theme->foreground, "");
+		lv_obj_set_style_text_align(launcher->clock,
+					    LV_TEXT_ALIGN_CENTER, 0);
+	}
+	if (!(hinted || events) || !launcher->spec->home_hint_replaces_date) {
 		launcher->date = label(launcher->body, text, theme->font,
 				       theme->foreground, "");
 		lv_label_set_long_mode(launcher->date, LV_LABEL_LONG_MODE_WRAP);
@@ -998,6 +1213,28 @@ static void draw_clock_face(struct launcher *launcher)
 		lv_obj_set_style_text_align(launcher->hint,
 					    LV_TEXT_ALIGN_CENTER, 0);
 	}
+	if (events) {
+		int y = 0;
+
+		launcher->events = plain(launcher->body, text);
+		if (clock->alarm_utc || clock->snooze_deadline_ms)
+			launcher->alarm = home_event(launcher, &y);
+		if (clock->timer_deadline_ms || clock->timer_remaining_ms)
+			launcher->timer = home_event(launcher, &y);
+		if (clock->missed_total)
+			launcher->missed = home_event(launcher, &y);
+	}
+	if (current_screen(launcher) == SCREEN_HOME)
+		launcher->clock_accent =
+			fill(launcher->body,
+			     (struct fplinux_launcher_rect){
+				     .x = fplinux_launcher_centre(
+					     launcher->frame.width,
+					     2 * launcher->spec->gap_small),
+				     .width = 2 * launcher->spec->gap_small,
+				     .height = launcher->spec->divider_width,
+			     },
+			     0, theme->brand);
 	place_home(launcher);
 }
 
@@ -1454,6 +1691,12 @@ static void render(struct launcher *launcher)
 	enum fplinux_launcher_notice notice = shown_notice(launcher);
 	const char *legends[FPLINUX_LAUNCHER_LEGEND_COUNT] = { "", "", "" };
 
+	if (!launcher->paused &&
+	    (screen != SCREEN_CATALOGUE ||
+	     launcher->view != FPLINUX_LAUNCHER_VIEW_GRID ||
+	     notice != FPLINUX_LAUNCHER_NOTICE_NONE))
+		launcher->marquee_app[0] = '\0';
+
 	/* Remove the clock's own finished modal before changing the base view. */
 	if (!fplinux_launcher_clock_is_ringing(&launcher->ringing))
 		fplinux_launcher_clock_render(&launcher->ringing);
@@ -1483,6 +1726,13 @@ static void render(struct launcher *launcher)
 		draw_clock_face(launcher);
 		legends[FPLINUX_LAUNCHER_LEGEND_LEFT] = _("Tasks");
 		legends[FPLINUX_LAUNCHER_LEGEND_CENTRE] = _("Menu");
+		for (size_t i = 0; i < launcher->app_count; ++i)
+			if (!strcmp(launcher->apps[i].id,
+				    "org.fplinux.clock")) {
+				legends[FPLINUX_LAUNCHER_LEGEND_RIGHT] =
+					_("Clock");
+				break;
+			}
 		break;
 	case SCREEN_CATALOGUE:
 		if (launcher->view == FPLINUX_LAUNCHER_VIEW_GRID ||
@@ -1515,6 +1765,7 @@ static void render(struct launcher *launcher)
 				   legends[FPLINUX_LAUNCHER_LEGEND_CENTRE],
 				   legends[FPLINUX_LAUNCHER_LEGEND_RIGHT]);
 	fplinux_launcher_clock_render(&launcher->ringing);
+	schedule_clock(launcher);
 }
 
 static void clock_view_changed(void *context)
@@ -1543,7 +1794,7 @@ static void activate_selected(struct launcher *launcher)
 	clear_view(launcher);
 	draw_tile(launcher, launcher->body, app->tile, layout.icon,
 		  launcher->theme->foreground);
-	snprintf(text, sizeof(text), _("Starting %s…"), app->name);
+	snprintf(text, sizeof(text), _("Starting “%s”…"), app->name);
 	name = label(launcher->body, layout.text, launcher->theme->font,
 		     launcher->theme->foreground, text);
 	lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
@@ -1662,6 +1913,17 @@ static void handle_key(struct launcher *launcher,
 	} else if (screen == SCREEN_HOME) {
 		if (left || key->code == KEY_TAB) {
 			fplinux_launcher_tasks_open(&launcher->tasks);
+			return;
+		}
+		if (fplinux_ui_is_softkey(key, false)) {
+			for (size_t i = 0; i < launcher->app_count; ++i)
+				if (!strcmp(launcher->apps[i].id,
+					    "org.fplinux.clock")) {
+					launcher->selected = i;
+					report_view(launcher, false);
+					activate_selected(launcher);
+					return;
+				}
 			return;
 		}
 		if (!confirm)
@@ -1788,6 +2050,7 @@ static void receive_active(struct launcher *launcher,
 	launcher->session_known = true;
 	launcher->active = message->active_id[0] != '\0';
 	launcher->locked = message->locked;
+	launcher->clock_presentation = message->clock_presentation;
 	copy_message_text(launcher->active_title, message->title);
 	launcher->display = message->display;
 	copy_message_text(launcher->active_left, message->left);
@@ -1965,8 +2228,7 @@ static void create_view(struct launcher *launcher)
 				  FPLINUX_LAUNCHER_MARQUEE_PAUSE_MS);
 	lv_anim_set_repeat_delay(&launcher->title_animation,
 				 FPLINUX_LAUNCHER_MARQUEE_PAUSE_MS);
-	lv_anim_set_repeat_count(&launcher->title_animation,
-				 LV_ANIM_REPEAT_INFINITE);
+	lv_anim_set_repeat_count(&launcher->title_animation, 1);
 
 	/* The left slot shows the lock glyph while locked. */
 	if (lock)
@@ -2083,7 +2345,7 @@ int main(int argc, char **argv)
 	fplinux_ui_canvas_set_keyboard_keys(launcher.canvas, true);
 	fplinux_ui_push(launcher.ui, launcher.canvas);
 	fplinux_launcher_tasks_init(
-		&launcher.tasks, launcher.ui, launcher.canvas,
+		&launcher.tasks, launcher.ui,
 		&(const struct fplinux_launcher_tasks_listener){
 			.icon = task_icon,
 			.view_changed = tasks_view_changed,

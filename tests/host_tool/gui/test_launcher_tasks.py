@@ -55,6 +55,7 @@ def launcher_tasks(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
     [
         "confirm",
         "resume",
+        "late-error",
         "states",
         "refresh",
         "icons",

@@ -139,6 +139,8 @@ SHARED_APORT_SOURCES = {
         *CLI_SOURCES,
         *DESKTOP_ENTRY_SOURCES,
         *UI_PROFILE_SOURCES,
+        "alpine/aports/fplinux-clocks/clock-face.c",
+        "alpine/aports/fplinux-clocks/clock-face.h",
         "include/fplinux/fplinux-settings-values.h",
     ),
     "fplinux-libweston": (

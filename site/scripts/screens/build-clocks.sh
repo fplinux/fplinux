@@ -18,11 +18,25 @@ work=$1
 . "$screens_dir/ui-host-build.sh"
 ui_host_prepare "$root" "$work" "${2-}"
 
+mkdir -p "$work/locale/ru/LC_MESSAGES"
+msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/org.fplinux.clock.mo" "$clocks/ru.po"
+msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/fplinux-ui.mo" "$root/alpine/aports/fplinux-ui/ru.po"
+
 ui_host_build_application -I"$clocks" \
 	"$clocks/fplinux-clocks.c" "$clocks/clock-client.c" \
+	"$clocks/clock-face.c" \
 	"$clocks/clock-model.c" "$clocks/clock-wire.c" \
 	"$clocks/clock-presentation.c" \
 	"$screens_dir/clocks-observer.c" \
+	"$screens_dir/list-values-observer.c" \
+	"$screens_dir/native-glyph-resources.c" \
+	-Wl,--wrap=open \
+	-Wl,--wrap=fplinux_ui_open \
+	-Wl,--wrap=libintl_bindtextdomain \
+	-Wl,--wrap=fplinux_language_load \
+	-Wl,--wrap=lv_timer_create \
+	-Wl,--wrap=lv_timer_set_period \
+	-Wl,--wrap=lv_timer_delete \
 	-Wl,--wrap=lv_display_flush_ready \
 	-Wl,--wrap=fplinux_ui_form_new \
 	-Wl,--wrap=fplinux_ui_form_delete_all \

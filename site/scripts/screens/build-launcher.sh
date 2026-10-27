@@ -17,11 +17,22 @@ work=$1
 . "$screens_dir/ui-host-build.sh"
 ui_host_prepare "$root" "$work" "$2"
 
+mkdir -p "$work/locale/ru/LC_MESSAGES"
+msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/org.fplinux.launcher.mo" "$launcher/ru.po"
+msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/fplinux-ui.mo" "$root/alpine/aports/fplinux-ui/ru.po"
+
 ui_host_build_application -I"$launcher" -I"$clocks" \
 	"$launcher"/*.c "$clocks/clock-model.c" "$clocks/clock-wire.c" \
+	"$clocks/clock-face.c" \
 	"$ui_host_ui/fplinux-desktop-entry.c" \
 	"$root/tests/host_tool/gui/launcher-resources.c" \
+	"$root/tests/host_tool/gui/launcher-observer.c" \
 	-Wl,--wrap=open -Wl,--wrap=inotify_add_watch \
+	-Wl,--wrap=fplinux_ui_open -Wl,--wrap=lv_timer_create \
+	-Wl,--wrap=lv_timer_set_period -Wl,--wrap=lv_timer_delete \
+	-Wl,--wrap=lv_display_flush_ready -Wl,--wrap=libintl_bindtextdomain \
+	-Wl,--wrap=fplinux_language_load -Wl,--wrap=time \
+	-Wl,--wrap=clock_gettime \
 	-o "$work/launcher"
 
 # pkg-config emits compiler and linker arguments for the pinned peer libraries.

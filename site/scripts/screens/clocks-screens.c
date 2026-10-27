@@ -40,6 +40,7 @@ struct capture {
 	unsigned int snapshots;
 	unsigned int retransmissions;
 	bool has_request;
+	bool drop_snapshot;
 	char left[128];
 	char centre[128];
 	char right[128];
@@ -123,7 +124,14 @@ static void pump(struct capture *capture)
 	while ((bytes = recv(capture->observer, &observation,
 			     sizeof(observation), MSG_DONTWAIT)) > 0) {
 		assert(bytes == (ssize_t)sizeof(observation));
-		capture->observed = observation;
+		if (observation.timer_only) {
+			capture->observed.poll_callbacks =
+				observation.poll_callbacks;
+			capture->observed.poll_period_ms =
+				observation.poll_period_ms;
+			capture->observed.poll_paused = observation.poll_paused;
+		} else
+			capture->observed = observation;
 	}
 	assert(bytes == -1 && (errno == EAGAIN || errno == EWOULDBLOCK));
 	while ((received = fplinux_ui_session_receive(capture->session,
@@ -140,7 +148,10 @@ static void pump(struct capture *capture)
 				       clock_wire_request_name(operation.op)));
 			if (operation.op == CLOCK_REQUEST_SNAPSHOT) {
 				++capture->snapshots;
-				reply(capture, &message, CLOCK_OK);
+				if (capture->drop_snapshot)
+					capture->drop_snapshot = false;
+				else
+					reply(capture, &message, CLOCK_OK);
 			} else {
 				if (capture->has_request) {
 					assert(message.serial ==
@@ -280,6 +291,25 @@ static void activate(struct capture *capture,
 	redraw(capture);
 }
 
+static void refresh_snapshot(struct capture *capture)
+{
+	struct fplinux_ui_session_message visibility = {
+		.type = FPLINUX_UI_SESSION_VISIBILITY,
+		.visible = false,
+	};
+	unsigned int snapshots = capture->snapshots;
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	assert(fplinux_ui_session_send(capture->session, &visibility));
+	visibility.visible = true;
+	assert(fplinux_ui_session_send(capture->session, &visibility));
+	while (capture->snapshots == snapshots &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(capture->snapshots > snapshots);
+	redraw(capture);
+}
+
 static void expect_request(struct capture *capture, enum clock_request_op op)
 {
 	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
@@ -356,10 +386,14 @@ static void save_frame(struct capture *capture, const char *name)
 
 static void start(struct capture *capture, char **argv, const char *time)
 {
+	const char *locale = getenv("FPLINUX_CLOCKS_TEST_LOCALE");
+	const char *theme = getenv("FPLINUX_CLOCKS_TEST_THEME");
 	struct fplinux_ui_session_message config = {
 		.type = FPLINUX_UI_SESSION_CONFIG,
 		.mode = FPLINUX_UI_SESSION_INTEGRATED,
-		.theme = FPLINUX_UI_SESSION_THEME_DARK,
+		.theme = theme && !strcmp(theme, "light") ?
+				 FPLINUX_UI_SESSION_THEME_LIGHT :
+				 FPLINUX_UI_SESSION_THEME_DARK,
 		.screen_width = dimension(argv[1]),
 		.screen_height = dimension(argv[2]),
 	};
@@ -381,7 +415,8 @@ static void start(struct capture *capture, char **argv, const char *time)
 	capture->application = fork();
 	assert(capture->application >= 0);
 	if (!capture->application) {
-		char descriptor[32], state_directory[512];
+		char descriptor[32], state_directory[512], catalogues[512];
+		const char *slash = strrchr(argv[3], '/');
 
 		close(capture->listener);
 		close(wayland[0]);
@@ -394,6 +429,18 @@ static void start(struct capture *capture, char **argv, const char *time)
 				"%s/state",
 				argv[6]) < (int)sizeof(state_directory));
 		assert(setenv("XDG_STATE_HOME", state_directory, 1) == 0);
+		assert(slash);
+		assert(snprintf(catalogues, sizeof(catalogues), "%.*s/locale",
+				(int)(slash - argv[3]),
+				argv[3]) < (int)sizeof(catalogues));
+		assert(setenv("FPLINUX_CLOCKS_LOCALE_DIR", catalogues, 1) == 0);
+		assert(snprintf(catalogues, sizeof(catalogues),
+				"%.*s/icons/usr/share/fplinux/glyphs",
+				(int)(slash - argv[3]),
+				argv[3]) < (int)sizeof(catalogues));
+		if (access(catalogues, R_OK) == 0)
+			assert(setenv("FPLINUX_NATIVE_GLYPHS", catalogues, 1) ==
+			       0);
 		assert(setenv("LC_ALL", "C", 1) == 0);
 		assert(setenv("TZ", "UTC", 1) == 0);
 		execl(argv[3], argv[3], (char *)NULL);
@@ -411,8 +458,8 @@ static void start(struct capture *capture, char **argv, const char *time)
 	hello = fplinux_ui_frame_wait_message(&capture->peer, capture->session);
 	assert(hello.type == FPLINUX_UI_SESSION_HELLO);
 	assert(!strcmp(hello.app_id, "org.fplinux.clock"));
-	strcpy(config.locale, "en");
-	strcpy(config.input_locale, "en");
+	strcpy(config.locale, locale ? locale : "en");
+	strcpy(config.input_locale, config.locale);
 	assert(fplinux_ui_session_send(capture->session, &config));
 	wait_label(capture, time);
 	assert(capture->peer.keyboards[0].keyboard &&
@@ -466,6 +513,19 @@ static void focus_form_item(struct capture *capture, size_t item)
 		redraw(capture);
 	}
 	assert(capture->observed.focused_item == item);
+}
+
+static void add_alarm(struct capture *capture)
+{
+	press(capture, 1, KEY_F13);
+	wait_label(capture, "New alarm");
+	redraw(capture);
+	if (!capture->observed.time_fields) {
+		press(capture, 1, KEY_OK);
+		wait_label(capture, "Time");
+	}
+	redraw(capture);
+	assert(capture->observed.time_fields == 1);
 }
 
 static void save_label(struct capture *capture)
@@ -546,8 +606,8 @@ static void alarm_editor(struct capture *capture)
 	struct fplinux_ui_session_message mismatched, previous;
 
 	press(capture, 1, KEY_OK);
-	wait_label(capture, "New alarm");
-	press(capture, 1, KEY_OK);
+	wait_label(capture, "Alarms");
+	add_alarm(capture);
 	wait_label(capture, "New alarm");
 	redraw(capture);
 	assert(capture->observed.time_fields == 1);
@@ -657,7 +717,45 @@ static void alarm_editor(struct capture *capture)
 	assert(capture->operation.alarm.once_utc == INT64_C(1709196300));
 	apply_request(capture);
 	assert(capture->owner.alarm_count == 1);
-	wait_label(capture, "08:45  wake");
+	wait_label(capture, "08:45");
+	wait_label(capture, "wake · 02/29/2024");
+	redraw(capture);
+	expect_time_bounds(capture, "08:45");
+	assert(capture->observed.time.text_height >
+	       capture->observed.alarm_detail_height);
+	assert(capture->observed.alarm_detail_height > 0);
+	fprintf(stderr,
+		"Clock alarm geometry: row=[%d,%d..%d,%d] primary=[%d,%d..%d,%d] status found=%d [%d,%d..%d,%d]\n",
+		capture->observed.alarm_row_left,
+		capture->observed.alarm_row_top,
+		capture->observed.alarm_row_right,
+		capture->observed.alarm_row_bottom,
+		capture->observed.alarm_primary_left,
+		capture->observed.alarm_primary_top,
+		capture->observed.alarm_primary_right,
+		capture->observed.alarm_primary_bottom,
+		capture->observed.alarm_status_found,
+		capture->observed.alarm_status_left,
+		capture->observed.alarm_status_top,
+		capture->observed.alarm_status_right,
+		capture->observed.alarm_status_bottom);
+	assert(capture->observed.alarm_status_found);
+	assert(capture->observed.alarm_primary_left >=
+	       capture->observed.alarm_row_left);
+	assert(capture->observed.alarm_primary_top >=
+	       capture->observed.alarm_row_top);
+	assert(capture->observed.alarm_primary_bottom <=
+	       capture->observed.alarm_row_bottom);
+	assert(capture->observed.alarm_status_left >
+	       capture->observed.alarm_primary_right);
+	assert(capture->observed.alarm_status_right >
+	       capture->observed.alarm_status_left);
+	assert(capture->observed.alarm_status_right <=
+	       capture->observed.alarm_row_right);
+	assert(capture->observed.alarm_status_top >=
+	       capture->observed.alarm_row_top);
+	assert(capture->observed.alarm_status_bottom <=
+	       capture->observed.alarm_row_bottom);
 	save_frame(capture, "clocks-alarms");
 	puts("clocks-alarm: one TIME and DATE; 2024-02-29 08:45 UTC; visible Save; stale replies ignored; storage retry retains draft");
 	puts("clocks-retry: one automatic retry; bounded silence; explicit retry retains serial and payload; one alarm");
@@ -666,8 +764,6 @@ static void alarm_editor(struct capture *capture)
 
 static void timer_actions(struct capture *capture)
 {
-	unsigned int snapshots;
-
 	press(capture, 1, KEY_F14);
 	press(capture, 1, KEY_DOWN);
 	press(capture, 1, KEY_OK);
@@ -681,11 +777,10 @@ static void timer_actions(struct capture *capture)
 	press(capture, 1, KEY_F13);
 	wait_label(capture, "Enter a duration greater than zero.");
 	assert(!capture->has_request);
-	snapshots = capture->snapshots;
-	pump_for(capture, 1200);
-	redraw(capture);
-	assert(capture->snapshots > snapshots);
+	refresh_snapshot(capture);
 	assert(has_label(capture, "Enter a duration greater than zero."));
+	assert(capture->observed.duration_fields == 1);
+	assert(capture->observed.duration_seconds == 0);
 	press(capture, 1, KEY_OK);
 	press(capture, 1, KEY_NUMERIC_0);
 	press(capture, 1, KEY_NUMERIC_0);
@@ -837,7 +932,8 @@ static void activation_protects_alarm_draft(struct capture *capture)
 	uint64_t focused;
 
 	press(capture, 1, KEY_OK);
-	press(capture, 1, KEY_OK);
+	wait_label(capture, "Alarms");
+	add_alarm(capture);
 	wait_label(capture, "New alarm");
 	focus_form_item(capture, 0);
 	press(capture, 1, KEY_OK);
@@ -881,14 +977,16 @@ static void activation_waits_for_alarm_reply(struct capture *capture,
 	struct fplinux_ui_session_message request;
 
 	press(capture, 1, KEY_OK);
-	press(capture, 1, KEY_OK);
+	wait_label(capture, "Alarms");
+	add_alarm(capture);
 	wait_label(capture, "New alarm");
 	enter_alarm_hour(capture, KEY_NUMERIC_8);
 	press(capture, 1, KEY_F13);
 	expect_request(capture, CLOCK_REQUEST_ALARM_ADD);
 	request = capture->request;
 	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
-	wait_legends(capture, "Saving…", "Edit", "Cancel");
+	wait_label(capture, "Saving…");
+	wait_legends(capture, "", "Edit", "Cancel");
 	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
 	assert(capture->request.serial == request.serial);
 	assert(capture->retransmissions == 0);
@@ -984,16 +1082,16 @@ static void snoozed_alarm_and_disabled_draft(struct capture *capture,
 {
 	press(capture, 1, KEY_OK);
 	wait_label(capture, "Alarms");
-	wait_label(capture, "Snoozed until 00:06");
-	wait_label(capture, "00:05:00 left");
-	press(capture, 1, KEY_DOWN);
+	wait_label(capture, "00:06");
+	wait_label(capture, "Alarm · 00:05:00 left");
 	press(capture, 1, KEY_F13);
 	wait_label(capture, "Cancel snooze");
+	press(capture, 1, KEY_DOWN);
 	press(capture, 1, KEY_OK);
 	expect_request(capture, CLOCK_REQUEST_ALARM_CANCEL_SNOOZE);
 	assert(capture->operation.id == 1);
 	apply_request(capture);
-	wait_label_absent(capture, "Snoozed until 00:06");
+	wait_label_absent(capture, "Alarm · 00:05:00 left");
 	assert(!capture->owner.alarms[0].snoozed);
 	assert(capture->owner.alarms[0].spec.enabled == weekly);
 	if (!weekly) {
@@ -1101,7 +1199,8 @@ static void published_add_retries_accepted_identity(struct capture *capture)
 	uint32_t serial;
 
 	press(capture, 1, KEY_OK);
-	press(capture, 1, KEY_OK);
+	wait_label(capture, "Alarms");
+	add_alarm(capture);
 	wait_label(capture, "New alarm");
 	press(capture, 1, KEY_F13);
 	expect_request(capture, CLOCK_REQUEST_ALARM_ADD);
@@ -1145,17 +1244,10 @@ static void published_add_retries_accepted_identity(struct capture *capture)
 
 static void deliver_background_durable_snapshot(struct capture *capture)
 {
-	unsigned int snapshots = capture->snapshots;
-	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
-
 	capture->storage = (struct fplinux_storage_result){
 		.state = FPLINUX_STORAGE_DURABLE,
 	};
-	while (capture->snapshots == snapshots &&
-	       fplinux_ui_frame_now_ms() < deadline)
-		pump(capture);
-	assert(capture->snapshots > snapshots);
-	redraw(capture);
+	refresh_snapshot(capture);
 }
 
 static void
@@ -1172,7 +1264,8 @@ background_durable_retains_accepted_revision(struct capture *capture)
 	struct clock_model before;
 
 	press(capture, 1, KEY_OK);
-	press(capture, 1, KEY_OK);
+	wait_label(capture, "Alarms");
+	add_alarm(capture);
 	wait_label(capture, "New alarm");
 	press(capture, 1, KEY_F13);
 	expect_request(capture, CLOCK_REQUEST_ALARM_ADD);
@@ -1196,7 +1289,7 @@ background_durable_retains_accepted_revision(struct capture *capture)
 	apply_request(capture);
 	assert(!memcmp(&capture->owner, &before, sizeof(before)));
 	wait_label_absent(capture, "Edit alarm");
-	wait_label(capture, "07:00  Alarm");
+	wait_label(capture, "07:00");
 	press(capture, 1, KEY_OK);
 	wait_label(capture, "Edit alarm");
 	enter_alarm_hour(capture, KEY_NUMERIC_8);
@@ -1260,7 +1353,8 @@ ordinary_close_keeps_or_discards_a_failed_draft(struct capture *capture)
 	int status;
 
 	press(capture, 1, KEY_OK);
-	press(capture, 1, KEY_OK);
+	wait_label(capture, "Alarms");
+	add_alarm(capture);
 	wait_label(capture, "New alarm");
 	enter_alarm_hour(capture, KEY_NUMERIC_8);
 	press(capture, 1, KEY_F13);
@@ -1287,7 +1381,7 @@ ordinary_close_keeps_or_discards_a_failed_draft(struct capture *capture)
 	expect_request(capture, CLOCK_REQUEST_ALARM_ADD);
 	assert(capture->operation.alarm.once_utc == INT64_C(1704096000));
 	apply_request(capture);
-	wait_label(capture, "08:00  Alarm");
+	wait_label(capture, "08:00");
 	press(capture, 1, KEY_OK);
 	wait_label(capture, "Edit alarm");
 	enter_alarm_hour(capture, KEY_NUMERIC_9);
@@ -1298,6 +1392,33 @@ ordinary_close_keeps_or_discards_a_failed_draft(struct capture *capture)
 	assert(capture->owner.alarm_count == 1 &&
 	       capture->owner.alarms[0].spec.once_utc == INT64_C(1704096000));
 	puts("clocks-ordinary-close: failed draft survives Stay and Save retry; Leave permits final close and discards newer draft");
+}
+
+static void close_stay_resumes_pending_alarm_retry(struct capture *capture)
+{
+	uint32_t serial;
+
+	press(capture, 1, KEY_OK);
+	wait_label(capture, "Alarms");
+	add_alarm(capture);
+	enter_alarm_hour(capture, KEY_NUMERIC_8);
+	press(capture, 1, KEY_F13);
+	expect_request(capture, CLOCK_REQUEST_ALARM_ADD);
+	serial = capture->request.serial;
+	assert(capture->operation.alarm.once_utc == INT64_C(1704096000));
+	prepare_ordinary_close(capture);
+	press(capture, 1, KEY_OK);
+	wait_close_response(capture, "cancel");
+	wait_label(capture, "New alarm");
+	assert(!capture->retransmissions);
+	wait_retransmissions(capture, 1);
+	assert(capture->request.serial == serial);
+	assert(capture->operation.alarm.once_utc == INT64_C(1704096000));
+	apply_request(capture);
+	wait_label(capture, "08:00");
+	wait_label(capture, "Alarm · Today");
+	assert(capture->owner.alarm_count == 1);
+	puts("clocks-close-stay-retry: Stay resumes the pending alarm retry; serial and draft survive");
 }
 
 static void timer_controls_and_snapshots_survive_directory_sync_failure(
@@ -1381,7 +1502,8 @@ static void saving_a_ringing_checkpoint_preserves_event_and_generation(
 
 	assert(capture->storage_owner);
 	press(capture, 1, KEY_OK);
-	press(capture, 1, KEY_OK);
+	wait_label(capture, "Alarms");
+	add_alarm(capture);
 	wait_label(capture, "New alarm");
 	focus_form_item(capture, 0);
 	press(capture, 1, KEY_OK);
@@ -1443,7 +1565,6 @@ static void active_confirmation_keeps_original_revision(struct capture *capture,
 {
 	press(capture, 1, KEY_OK);
 	wait_label(capture, "Alarms");
-	press(capture, 1, KEY_DOWN);
 	press(capture, 1, KEY_OK);
 	wait_label(capture, "Edit alarm");
 	enter_alarm_hour(capture, KEY_NUMERIC_8);
@@ -1485,7 +1606,8 @@ static void active_confirmation_keeps_original_revision(struct capture *capture,
 		puts("clocks-active-unchanged-ack: unchanged 08:00 draft closes after confirmation ACK");
 	}
 	wait_label_absent(capture, "Edit alarm");
-	wait_label(capture, changed ? "09:00  Wake" : "08:00  Wake");
+	wait_label(capture, changed ? "09:00" : "08:00");
+	wait_label(capture, "Wake · Daily");
 }
 
 static void localized_missed_events(struct capture *capture)
@@ -1558,7 +1680,8 @@ static void repeat_schedule(struct capture *capture)
 	assert(capture->operation.alarm.once_utc == 0);
 	apply_request(capture);
 	assert(capture->owner.alarms[0].next_due_utc == INT64_C(1704185100));
-	wait_label(capture, "08:45  wake");
+	wait_label(capture, "08:45");
+	wait_label(capture, "wake · Tue Thu Sat");
 	press(capture, 1, KEY_OK);
 	wait_label(capture, "Edit alarm");
 	press(capture, 1, KEY_DOWN);
@@ -1583,7 +1706,7 @@ static void repeat_schedule(struct capture *capture)
 	wait_label(capture, "Leave without saving?");
 	wait_legends(capture, "Leave", "Stay", "Cancel");
 	press(capture, 1, KEY_F13);
-	wait_label(capture, "08:45  wake");
+	wait_label(capture, "08:45");
 	assert(capture->owner.alarms[0].spec.repeat_days == 0x2a);
 	assert(!capture->has_request);
 	puts("clocks-repeat: Tue Thu Sat; hidden once date; cancelled draft unchanged");
@@ -1615,6 +1738,101 @@ static void expect_quiet(struct capture *capture, const char *scenario)
 	assert(elapsed < UINT64_C(100000000));
 	printf("clocks-idle %s: no frames or requests; CPU under 100ms in 1200ms\n",
 	       scenario);
+}
+
+static void expect_static_poll_deadline(struct capture *capture)
+{
+	unsigned int callbacks, snapshots;
+
+	redraw(capture);
+	assert(capture->observed.poll_period_ms > 50000);
+	assert(!capture->observed.poll_paused);
+	callbacks = capture->observed.poll_callbacks;
+	snapshots = capture->snapshots;
+	pump_for(capture, 1200);
+	assert(capture->observed.poll_callbacks == callbacks);
+	assert(capture->snapshots == snapshots);
+}
+
+static void idle_deadlines_follow_visible_clock_state(struct capture *capture)
+{
+	unsigned int callbacks, snapshots;
+	uint32_t serial;
+	uint64_t deadline;
+
+	wait_label(capture, "No alarms");
+	wait_label(capture, "0 offsets");
+	expect_static_poll_deadline(capture);
+	repeat_key(capture, KEY_DOWN, 2);
+	press(capture, 1, KEY_OK);
+	wait_label(capture, "00:00.00");
+	expect_static_poll_deadline(capture);
+	press(capture, 1, KEY_OK);
+	expect_request(capture, CLOCK_REQUEST_STOPWATCH_START);
+	serial = capture->request.serial;
+	redraw(capture);
+	assert(capture->observed.poll_period_ms > 2000);
+	assert(capture->observed.poll_period_ms <= 3000);
+	callbacks = capture->observed.poll_callbacks;
+	press(capture, 1, KEY_OK);
+	pump_for(capture, 1200);
+	assert(capture->request.serial == serial);
+	assert(!capture->retransmissions);
+	assert(capture->observed.poll_callbacks == callbacks);
+	apply_request(capture);
+	wait_label(capture, "Laps →");
+	callbacks = capture->observed.poll_callbacks;
+	snapshots = capture->snapshots;
+	pump_for(capture, 1200);
+	assert(capture->observed.poll_callbacks >= callbacks + 4);
+	assert(capture->observed.poll_callbacks <= callbacks + 7);
+	assert(capture->snapshots >= snapshots + 4);
+	press(capture, 1, KEY_OK);
+	expect_request(capture, CLOCK_REQUEST_STOPWATCH_PAUSE);
+	apply_request(capture);
+	wait_label_absent(capture, "Laps →");
+	expect_static_poll_deadline(capture);
+	press(capture, 1, KEY_F14);
+	wait_label(capture, "World clock");
+	press(capture, 1, KEY_DOWN);
+	press(capture, 1, KEY_OK);
+	wait_label(capture, "No UTC offsets");
+	expect_static_poll_deadline(capture);
+	capture->drop_snapshot = true;
+	refresh_snapshot(capture);
+	snapshots = capture->snapshots;
+	deadline = fplinux_ui_frame_now_ms() + 4000;
+	while (capture->snapshots == snapshots &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(capture->snapshots > snapshots);
+	puts("clocks-idle-deadlines: static and paused clocks sleep; running stopwatch ticks at 200ms; pending request waits for its timeout");
+}
+
+static void stopwatch_hour_preserves_large_seconds(struct capture *capture)
+{
+	bool narrow = capture->peer.width == 128;
+	const struct clocks_time_observation *time = &capture->observed.time;
+	const struct clocks_time_observation *fraction =
+		&capture->observed.fraction;
+
+	repeat_key(capture, KEY_DOWN, 2);
+	press(capture, 1, KEY_OK);
+	wait_label(capture, narrow ? "01:01:01" : "01:01:01.23");
+	redraw(capture);
+	expect_time_bounds(capture, narrow ? "01:01:01" : "01:01:01.23");
+	if (narrow) {
+		assert(!strcmp(fraction->text, ".23"));
+		assert(fraction->text_width <= fraction->width);
+		assert(fraction->text_height <= fraction->height);
+		assert(fraction->top >= time->top + time->height);
+		assert(fraction->top + fraction->height <=
+		       fraction->parent_height);
+		assert(fraction->text_height < time->text_height);
+	} else
+		assert(!fraction->text[0]);
+	save_frame(capture, "clocks-stopwatch-hour");
+	puts("clocks-stopwatch-hour: 01:01:01.23 remains readable; narrow screens separate smaller hundredths below large seconds");
 }
 
 static void stopwatch_actions(struct capture *capture)
@@ -1697,8 +1915,12 @@ static void stopwatch_actions(struct capture *capture)
 static void choose_offset(struct capture *capture, unsigned int direction,
 			  size_t steps, int offset_minutes)
 {
-	repeat_key(capture, KEY_LEFT, CLOCK_WORLD_LIMIT);
-	press(capture, 1, KEY_OK);
+	press(capture, 1, KEY_F13);
+	redraw(capture);
+	if (!has_label(capture, "UTC offset")) {
+		wait_label(capture, "Add UTC offset");
+		press(capture, 1, KEY_OK);
+	}
 	wait_label(capture, "UTC offset");
 	wait_label(capture, "UTC+00:00");
 	repeat_key(capture, direction, steps);
@@ -1734,16 +1956,9 @@ static void open_selected_offset(struct capture *capture, const char *name,
 static void set_world_time(struct capture *capture, int64_t wall_utc,
 			   uint64_t monotonic_ms)
 {
-	unsigned int snapshots = capture->snapshots;
-	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
-
 	assert(clock_model_tick(&capture->owner, wall_utc, monotonic_ms) ==
 	       CLOCK_OK);
-	while (capture->snapshots == snapshots &&
-	       fplinux_ui_frame_now_ms() < deadline)
-		pump(capture);
-	assert(capture->snapshots > snapshots);
-	redraw(capture);
+	refresh_snapshot(capture);
 }
 
 static void world_late_acknowledgments(struct capture *capture)
@@ -1792,7 +2007,7 @@ static void world_edit(struct capture *capture, uint32_t id)
 	size_t count = capture->owner.world_count;
 
 	repeat_key(capture, KEY_LEFT, CLOCK_WORLD_LIMIT);
-	repeat_key(capture, KEY_DOWN, 2);
+	press(capture, 1, KEY_DOWN);
 	open_selected_offset(capture, "UTC+05:30", "05:30",
 			     "Monday, January 1");
 	press(capture, 1, KEY_OK);
@@ -1874,7 +2089,7 @@ static void world_view(struct capture *capture)
 	press(capture, 1, KEY_DOWN);
 	press(capture, 1, KEY_OK);
 	wait_label(capture, "World clock");
-	press(capture, 1, KEY_OK);
+	press(capture, 1, KEY_F13);
 	wait_label(capture, "UTC offset");
 	wait_label(capture, "UTC+00:00");
 	save_frame(capture, "clocks-offset-picker");
@@ -1926,7 +2141,7 @@ static void world_view(struct capture *capture)
 	world_edit(capture, half_hour_id);
 	world_late_acknowledgments(capture);
 	repeat_key(capture, KEY_LEFT, CLOCK_WORLD_LIMIT);
-	repeat_key(capture, KEY_DOWN, 3);
+	repeat_key(capture, KEY_DOWN, 2);
 	open_selected_offset(capture, "UTC+05:45", "05:45",
 			     "Monday, January 1");
 	set_world_time(capture, INT64_C(1706744700), 25000);
@@ -1949,8 +2164,7 @@ static void world_view(struct capture *capture)
 static void reopened_state(struct capture *capture)
 {
 	press(capture, 1, KEY_OK);
-	press(capture, 1, KEY_DOWN);
-	wait_label(capture, "08:45  wake");
+	wait_label(capture, "08:45");
 	press(capture, 1, KEY_F14);
 	press(capture, 1, KEY_DOWN);
 	press(capture, 1, KEY_OK);
@@ -1962,6 +2176,39 @@ static void reopened_state(struct capture *capture)
 	wait_label(capture, "00:02.75");
 	wait_label_absent(capture, "1/20");
 	puts("clocks-reopen: owner retains alarm, paused timer and stopwatch lap");
+}
+
+static void root_values_share_a_column(struct capture *capture, bool landscape,
+				       bool russian)
+{
+	const char *expected[] = {
+		"08:45",
+		"00:01:30",
+		"00:00:00",
+		russian ? "0 смещений" : "0 offsets",
+	};
+	int column_right = 0;
+
+	for (size_t index = 0; index < 4; ++index) {
+		const struct list_value_observation *row;
+
+		if (index)
+			press(capture, 1, KEY_DOWN);
+		redraw(capture);
+		row = &capture->observed.root_values[index];
+		screen_check_list_value(row, landscape);
+		assert(!strcmp(row->value, expected[index]));
+		assert(row->value_text_width <=
+		       row->value_right - row->value_left + 1);
+		if (landscape && index)
+			assert(row->value_right == column_right);
+		column_right = row->value_right;
+		save_frame(capture, index == 0 ? "clocks-root-alarms" :
+				    index == 1 ? "clocks-root-timer" :
+				    index == 2 ? "clocks-root-stopwatch" :
+						 "clocks-root-world");
+	}
+	puts("clocks-root-values: real glyphs and current alarm, timer, stopwatch and offset values fit; landscape shares a right column");
 }
 
 int main(int argc, char **argv)
@@ -1994,11 +2241,36 @@ int main(int argc, char **argv)
 		bool active_confirmation =
 			!strcmp(argv[7], "active-confirm-late-ack") ||
 			!strcmp(argv[7], "active-confirm-unchanged-ack");
+		bool stopwatch_hour = !strcmp(argv[7], "stopwatch-hour");
+		bool root_values = !strcmp(argv[7], "root-values");
+		bool russian =
+			getenv("FPLINUX_CLOCKS_TEST_LOCALE") &&
+			!strcmp(getenv("FPLINUX_CLOCKS_TEST_LOCALE"), "ru");
 
+		if (root_values) {
+			const struct clock_alarm_spec alarm = {
+				.schedule = CLOCK_ALARM_ONCE,
+				.once_utc = 1704098700,
+				.enabled = true,
+			};
+
+			assert(clock_model_alarm_add(&capture.owner, &alarm,
+						     NULL) == CLOCK_OK);
+			assert(clock_model_timer_set(&capture.owner, 90) ==
+			       CLOCK_OK);
+		}
 		if (localized)
 			prepare_missed_events(&capture);
 		if (active_confirmation)
 			prepare_confirmed_alarm(&capture);
+		if (stopwatch_hour) {
+			assert(clock_model_stopwatch_start(&capture.owner) ==
+			       CLOCK_OK);
+			assert(clock_model_tick(&capture.owner, 1704070861,
+						3662230) == CLOCK_OK);
+			assert(clock_model_stopwatch_pause(&capture.owner) ==
+			       CLOCK_OK);
+		}
 		if (activation_navigation) {
 			assert(clock_model_timer_set(&capture.owner, 90) ==
 			       CLOCK_OK);
@@ -2060,8 +2332,18 @@ int main(int argc, char **argv)
 			capture.storage_owner = &storage_owner;
 			capture.owner = storage_owner.model;
 		}
-		start(&capture, argv, "Alarms");
-		if (activation_navigation)
+		start(&capture, argv,
+		      root_values && russian ? "Будильники" : "Alarms");
+		if (root_values)
+			root_values_share_a_column(&capture,
+						   dimension(argv[1]) >
+							   dimension(argv[2]),
+						   russian);
+		else if (!strcmp(argv[7], "idle-deadlines"))
+			idle_deadlines_follow_visible_clock_state(&capture);
+		else if (stopwatch_hour)
+			stopwatch_hour_preserves_large_seconds(&capture);
+		else if (activation_navigation)
 			activation_preserves_running_clocks(&capture);
 		else if (!strcmp(argv[7], "activation-draft"))
 			activation_protects_alarm_draft(&capture);
@@ -2087,6 +2369,8 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[7], "ordinary-close-draft"))
 			ordinary_close_keeps_or_discards_a_failed_draft(
 				&capture);
+		else if (!strcmp(argv[7], "close-stay-retry"))
+			close_stay_resumes_pending_alarm_retry(&capture);
 		else if (storage_controls)
 			timer_controls_and_snapshots_survive_directory_sync_failure(
 				&capture);

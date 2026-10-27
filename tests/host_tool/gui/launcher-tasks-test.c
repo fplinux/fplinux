@@ -325,7 +325,7 @@ static void test_confirm(struct fplinux_ui *ui,
 	invoke(ui, FPLINUX_UI_COMMAND_SCREEN);
 	assert(!strcmp(fplinux_ui_current(ui)->title, "Close app"));
 	assert(!strcmp(fplinux_ui_current(ui)->text,
-		       "Close Editor? Unsaved changes may be lost."));
+		       "Close “Editor”? Unsaved changes may be lost."));
 	/* A replacement arrives while the old instance's confirmation is open. */
 	snapshot(tasks, 303);
 	alert_response(ui, FPLINUX_UI_COMMAND_OK);
@@ -368,6 +368,33 @@ static void test_resume(struct fplinux_ui *ui,
 	alert_response(ui, FPLINUX_UI_COMMAND_BACK);
 	assert(ui->depth == 1);
 	assert(!ui->tasks_open);
+}
+
+static void
+test_late_error_preserves_catalogue(struct fplinux_ui *ui,
+				    struct fplinux_launcher_tasks *tasks)
+{
+	struct fplinux_ui_session_message error = {
+		.type = FPLINUX_UI_SESSION_ERROR,
+		.reason = "task-unavailable",
+	};
+	struct fplinux_ui_screen *catalogue;
+
+	fplinux_launcher_tasks_open(tasks);
+	snapshot(tasks, 202);
+	focus_row(ui, 1);
+	select_row(ui);
+	assert(ui->depth == 1 && !ui->tasks_open);
+	catalogue = new_screen("Apps");
+	fplinux_ui_push(ui, catalogue);
+	assert(fplinux_launcher_tasks_receive(tasks, &error));
+	assert(ui->depth == 3 && ui->tasks_open);
+	fplinux_launcher_tasks_close(tasks);
+	assert(ui->depth == 2 && !ui->tasks_open);
+	assert(fplinux_ui_current(ui) == catalogue);
+	assert(!strcmp(fplinux_ui_current(ui)->title, "Apps"));
+	assert(fplinux_ui_pop(ui));
+	assert(ui->depth == 1);
 }
 
 static void test_states(struct fplinux_ui *ui,
@@ -498,7 +525,7 @@ static void test_localized_names_keep_focus_and_reach_confirmation(
 	assert(!strcmp(list->rows[0].text, "Settings"));
 	invoke(ui, FPLINUX_UI_COMMAND_SCREEN);
 	assert(!strcmp(fplinux_ui_current(ui)->text,
-		       "Close Settings? Unsaved changes may be lost."));
+		       "Close “Settings”? Unsaved changes may be lost."));
 	alert_response(ui, FPLINUX_UI_COMMAND_OK);
 	assert(ui->sent_count == 3);
 	assert(ui->sent[1].type == FPLINUX_UI_SESSION_CLOSE_TASK);
@@ -544,7 +571,7 @@ int main(int argc, char **argv)
 	ui.stack[0] = &ui.base;
 	ui.tasks = &tasks;
 	fplinux_launcher_tasks_init(
-		&tasks, &ui, &ui.base,
+		&tasks, &ui,
 		&(const struct fplinux_launcher_tasks_listener){
 			.icon = task_icon,
 			.view_changed = view_changed,
@@ -554,6 +581,8 @@ int main(int argc, char **argv)
 		test_confirm(&ui, &tasks);
 	else if (!strcmp(argv[1], "resume"))
 		test_resume(&ui, &tasks);
+	else if (!strcmp(argv[1], "late-error"))
+		test_late_error_preserves_catalogue(&ui, &tasks);
 	else if (!strcmp(argv[1], "states"))
 		test_states(&ui, &tasks);
 	else if (!strcmp(argv[1], "refresh"))
