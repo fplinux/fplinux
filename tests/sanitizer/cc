@@ -1,0 +1,26 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+# Instrument native test code, including libraries built by CMake and shell peers.
+set -eu
+
+link=yes
+for argument; do
+	case "$argument" in
+	-E | -M | -MM | -S | -fsyntax-only | -static | -static-pie | -nostdlib | -nostartfiles | -ffreestanding | -fno-sanitize=all)
+		exec /usr/bin/gcc "$@"
+		;;
+	-c | -r) link=no ;;
+	esac
+done
+
+set -- -fsanitize=address,undefined -fno-sanitize-recover=all \
+	-fno-omit-frame-pointer -g1 "$@"
+if [ "$link" = yes ]; then
+	sanitizer_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+	set -- "$@" "$sanitizer_dir/runtime.c" \
+		-Wl,--export-dynamic-symbol=__asan_default_options \
+		-Wl,--export-dynamic-symbol=__ubsan_default_options \
+		-Wl,--export-dynamic-symbol=__ubsan_on_report \
+		"-DFPLINUX_SANITIZER_REPORT_PATH=\"${FPLINUX_SANITIZER_LOG_ROOT:?}/report\""
+fi
+exec /usr/bin/gcc "$@"

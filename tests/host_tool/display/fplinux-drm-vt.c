@@ -183,8 +183,8 @@ int main(int argc, char **argv)
 	step = "unknown mode";
 	selection_mode = fplinux_drm_selection_setup(argv[1]);
 	if (!selection_mode) {
-		if (!strcmp(argv[1], "segv"))
-			failure_signal = SIGSEGV;
+		if (!strcmp(argv[1], "abort"))
+			failure_signal = SIGABRT;
 		else if (!strcmp(argv[1], "kill"))
 			failure_signal = SIGKILL;
 		else if (!strcmp(argv[1], "killall"))

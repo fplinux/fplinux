@@ -144,8 +144,8 @@ class DrmVtGuardianTests:
 
     @pytest.mark.parametrize(
         "mode",
-        ["normal", "segv", "kill", "killall", "exec-fail"],
-        ids=["normal", "segv", "kill", "killall", "exec-fail"],
+        ["normal", "abort", "kill", "killall", "exec-fail"],
+        ids=["normal", "abort", "kill", "killall", "exec-fail"],
     )
     def test_failed_open_and_process_death_restore_previous_vt(
         self, harness: GuardianHarness, mode: str

@@ -247,6 +247,31 @@ void usleep_range(unsigned long minimum, unsigned long maximum)
 {
 }
 
+/* These boundaries must stay outside the initialization scenarios. */
+int ums9117_drm_lcm_dcs(struct ums9117_drm *udrm, u8 command, const u8 *data,
+			size_t length)
+{
+	assert(!"unexpected panel command");
+	return -22;
+}
+
+void msleep(unsigned int delay)
+{
+	assert(!"unexpected millisecond sleep");
+}
+
+void *bl_get_data(struct backlight_device *backlight)
+{
+	assert(!"unexpected backlight callback");
+	return NULL;
+}
+
+int backlight_get_brightness(struct backlight_device *backlight)
+{
+	assert(!"unexpected backlight callback");
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	struct ums9117_drm display = { .profile = &profile };

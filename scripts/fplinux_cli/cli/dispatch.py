@@ -201,7 +201,12 @@ def command_action(
         from fplinux_cli.quality.testing import run_tests  # noqa: PLC0415 -- selected backend.
 
         action = partial(
-            run_tests, args.names, tier=args.tier, verbose=args.verbose, failfast=args.failfast
+            run_tests,
+            args.names,
+            tier=args.tier,
+            verbose=args.verbose,
+            failfast=args.failfast,
+            sanitize=args.sanitize,
         )
     elif args.command == "format":
         from fplinux_cli.quality.formatting.command import (  # noqa: PLC0415 -- selected backend.

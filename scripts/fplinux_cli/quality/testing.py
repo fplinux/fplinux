@@ -138,6 +138,11 @@ def add_test_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--failfast", action="store_true", help="stop on the first failure or error"
     )
+    parser.add_argument(
+        "--sanitize",
+        action="store_true",
+        help="check native tests with GCC ASan and fatal UBSan (no leak checks)",
+    )
 
 
 def _pytest_command(
@@ -157,23 +162,25 @@ def _pytest_command(
     return [*prefix, *options, *nodes]
 
 
-def pytest_commands(
+def pytest_commands(  # noqa: PLR0913 -- selection, output and instrumentation policies stay explicit.
     names: list[str],
     *,
     tier: str | None = None,
     verbose: bool = False,
     failfast: bool = False,
     workspace: Path = Path(),
+    sanitize: bool = False,
 ) -> list[tuple[str, list[str], int]]:
     """Use one time budget per selected test tier and retain discovery order."""
     cache_dir = Path(os.environ.get("FPLINUX_LOG_ROOT", ".cache")) / "pytest-cache"
+    budgets = TEST_TIERS | ({"host_tool": 2700, "host_process": 450} if sanitize else {})
 
     def command(nodes: list[str]) -> list[str]:
         return _pytest_command(nodes, verbose=verbose, failfast=failfast, cache_dir=cache_dir)
 
     if names:
         selected_tiers = {name.split("/" if "/" in name else ".")[1] for name in names}
-        timeout = sum(TEST_TIERS[value] for value in selected_tiers)
+        timeout = sum(budgets[value] for value in selected_tiers)
         nodes = [_pytest_node_id(name, workspace) for name in names]
         return [("selected", command(nodes), timeout)]
     tiers = (tier,) if tier is not None else tuple(TEST_TIERS)
@@ -181,7 +188,7 @@ def pytest_commands(
         (
             name,
             command([f"tests/{name}"]),
-            TEST_TIERS[name],
+            budgets[name],
         )
         for name in tiers
     ]
@@ -257,10 +264,22 @@ def run_test_workload(  # noqa: PLR0913 -- public selection and runtime inputs s
     tier: str | None = None,
     verbose: bool = False,
     failfast: bool = False,
+    sanitize: bool = False,
 ) -> None:
     """Share tier budgets between the quality rootfs and real host namespaces."""
     from .runtime import run_quality_command  # noqa: PLC0415 -- workload-only dependency.
 
+    if sanitize:
+        with reporter.stage("sanitizer-canaries") as stage:
+            run_quality_command(
+                stage,
+                workspace,
+                ["python3", "-m", "fplinux_cli.quality.sanitizing"],
+                kern=kern,
+                rootfs=rootfs,
+                timeout=180,
+                sanitize=True,
+            )
     selected = [_pytest_node_id(name, workspace) for name in names]
     host_modules = [module for module in HOST_TEST_MODULES if (workspace / module).is_file()]
     selected_host_nodes = [
@@ -302,7 +321,12 @@ def run_test_workload(  # noqa: PLR0913 -- public selection and runtime inputs s
                 host_pytest_environment(workspace, reporter)
             )
         workloads = pytest_commands(
-            names, tier=tier, verbose=verbose, failfast=failfast, workspace=workspace
+            names,
+            tier=tier,
+            verbose=verbose,
+            failfast=failfast,
+            workspace=workspace,
+            sanitize=sanitize,
         )
         for label, _command, timeout in workloads:
             with reporter.stage(label, passthrough=True, show_tail=False) as stage:
@@ -360,6 +384,7 @@ def run_test_workload(  # noqa: PLR0913 -- public selection and runtime inputs s
                                 *nodes,
                                 *(["--verbose"] if verbose else []),
                                 *(["--failfast"] if failfast else []),
+                                *(["--sanitize"] if sanitize else []),
                             ]
                             invocations.append(
                                 _PytestInvocation("container", command, f"{label}-{index}")
@@ -393,13 +418,19 @@ def run_test_workload(  # noqa: PLR0913 -- public selection and runtime inputs s
                             timeout=remaining,
                             log_name=selected.log_name,
                             downloads=downloads,
+                            sanitize=sanitize,
                         )
 
                 _run_invocations(invocations, execute, failfast=failfast, timeout=timeout)
 
 
 def run_tests(
-    names: list[str], *, tier: str | None = None, verbose: bool = False, failfast: bool = False
+    names: list[str],
+    *,
+    tier: str | None = None,
+    verbose: bool = False,
+    failfast: bool = False,
+    sanitize: bool = False,
 ) -> None:
     """Run selected tests without reading or publishing successful check receipts."""
     from fplinux_cli.environment.runtime import (  # noqa: PLC0415 -- test-only dependency.
@@ -429,6 +460,7 @@ def run_tests(
             tier=tier,
             verbose=verbose,
             failfast=failfast,
+            sanitize=sanitize,
         )
     finally:
         discard_staged_quality_workspace_snapshot(snapshot, workspace)
@@ -446,14 +478,21 @@ def main() -> None:
         fail("use ./fplinux test to run tests in the pinned environment")
     environment = pytest_environment()
     for label, command, timeout in pytest_commands(
-        args.names, tier=args.tier, verbose=args.verbose, failfast=args.failfast
+        args.names,
+        tier=args.tier,
+        verbose=args.verbose,
+        failfast=args.failfast,
+        sanitize=args.sanitize,
     ):
         with reporter.stage(label) as stage:
             if args.names:
                 invocations = []
                 for names in _selected_pytest_groups(args.names, failfast=args.failfast):
                     [(_label, selected_command, _timeout)] = pytest_commands(
-                        names, verbose=args.verbose, failfast=args.failfast
+                        names,
+                        verbose=args.verbose,
+                        failfast=args.failfast,
+                        sanitize=args.sanitize,
                     )
                     invocations.append(_PytestInvocation("container", selected_command))
 

@@ -46,6 +46,7 @@ def rtc_callbacks(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
             executable,
             [
                 "-std=gnu11",
+                "-fno-strict-overflow",  # Match the kernel's signed-arithmetic contract.
                 "-Wall",
                 "-Wextra",
                 "-Werror",

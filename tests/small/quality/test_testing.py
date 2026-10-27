@@ -321,14 +321,10 @@ class SelectedTestRunTests:
             _workspace: Path,
             _command: list[str],
             *,
-            kern: str,
-            rootfs: Path,
             timeout: float,
-            log_name: str | None,
-            downloads: Path | None = None,
+            **_options: object,
         ) -> None:
             nonlocal elapsed
-            del kern, rootfs, log_name, downloads
             budgets.append(("container", timeout))
             elapsed += 110.0
 

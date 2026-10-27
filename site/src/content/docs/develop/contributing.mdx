@@ -68,6 +68,10 @@ A selected run always executes and does not refresh a successful `check` result 
 
 Pytest rejects unknown markers and configuration options. Each run reports skipped and expected-failure cases and the 20 slowest setup, call or teardown durations. Use those measurements before changing fixture lifetimes to optimize test time.
 
+Add `--sanitize` to a test selection to instrument native GCC builds, including LVGL, with AddressSanitizer and fatal UndefinedBehaviorSanitizer. Leak checking is disabled (`detect_leaks=0`). The command first checks fatal undefined-behavior reports in the pinned runtime. It retains complete reports with the command logs and treats findings as failures even when pytest expects a child to fail. ARM cross builds, freestanding code, static ABI probes and the MRE engine peer with its real address-space limit remain outside native instrumentation.
+
+Sanitizer workloads use a 3 GiB memory cap, 2 GiB of temporary space, and budgets of 2700 seconds for `host_tool` and 450 seconds for `host_process`. Ordinary tests and `check` keep their existing limits.
+
 ## Update Alpine package checksums
 
 After you change a source file of an Alpine package under `alpine/aports/`, regenerate its checksums:
