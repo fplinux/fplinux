@@ -54,6 +54,7 @@ _LVGL_APORTS = frozenset(
         "fplinux-calculator",
         "fplinux-clocks",
         "fplinux-example-apidemo",
+        "fplinux-files",
         "fplinux-launcher",
         "fplinux-settings",
         "fplinux-snake",

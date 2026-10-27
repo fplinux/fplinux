@@ -514,6 +514,7 @@
     }
   },
   "tiles": {
+    "files": "#6B51A5",
     "clock": "#186973",
     "calculator": "#C65100",
     "settings": "#4A5D73",

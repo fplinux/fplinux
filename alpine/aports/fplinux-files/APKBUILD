@@ -1,0 +1,57 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-files
+pkgver=1
+pkgrel=0
+pkgdesc="File manager for the FPLinux graphical session"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="0BSD AND GPL-2.0-only"
+depends="fplinux-ui"
+makedepends_build="clang22 lld22 pkgconf gettext"
+makedepends_host="musl-dev musl-libintl linux-headers fplinux-ui-dev"
+options="!check"
+source="
+	fplinux-files.c
+	files-core.c
+	files-core.h
+	files-job.c
+	files-job.h
+	fplinux-cli.c
+	fplinux-cli.h
+	fplinux-storage.h
+	org.fplinux.files.desktop
+	ru.po
+"
+builddir="$srcdir"
+
+build() {
+	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
+	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror -pthread \
+		$(pkg-config --cflags fplinux-ui) \
+		fplinux-files.c files-core.c files-job.c fplinux-cli.c \
+		$(pkg-config --libs fplinux-ui) $LDFLAGS \
+		-Wl,--gc-sections -o fplinux-files
+	msgfmt --check --output-file=ru.mo ru.po
+}
+
+package() {
+	install -Dm755 "$builddir/fplinux-files" "$pkgdir/usr/bin/fplinux-files"
+	install -Dm644 "$srcdir/org.fplinux.files.desktop" \
+		"$pkgdir/usr/share/applications/org.fplinux.files.desktop"
+	install -Dm644 "$builddir/ru.mo" \
+		"$pkgdir/usr/share/locale/ru/LC_MESSAGES/org.fplinux.files.mo"
+}
+
+sha512sums="
+023761af92efeaf04c70e4ceef909a41b9a45f24172229f83fc20c716d42dbcdbd4412ff993a07bec59dee7c9b97c0a4ef37b23b06e196502b570ac8ceb9a2fa  fplinux-files.c
+4ed37242a8ce3db07a41a1aee6e5bee21b6fc98eddfddcd326dcb8e4a226e26a39ef0edb7a85b4169485a2cad3d287edc1a8b15cf12011fd4da4c27bb7d51db9  files-core.c
+b798d651e3e2e8975c63ff21a04d906f179fc505d3597353284ae9ef156cc79bb52d2c2bacc56d2fd48843351387b18ea6f483cbc0008cd9280fc2b022272ab0  files-core.h
+4f9a54186474205c3d7ea220c6a2522cfb33c5d03c13dcda6ed820d934126a06e423901bc776520887de70f35191c8ab83df0b84a04785128d15141fd60bac4e  files-job.c
+51b32493ea1d543ec4ca7738d82a181578d9a22de3cd0dac55facc9b47177ecf905b6a95adb5f86f4379808cb665ebbcfe4b3a803f5fe7d021182d08d3e321bc  files-job.h
+60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
+9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
+c2a1a77ae236231200f2b037f320a513380957aaf44396c9b6fa889e1a6d249324e2b270cef183593134d55d5a3fef36ddce2485d6e759512f4888058d52839b  fplinux-storage.h
+82242d24937f7d87a48c087a77670b4892d170e1f5b26ab074cb5c248cb4020a8ad664b0de8db38485ee8d1bd198b38f64ed68560f21592a578db97b11d2ece2  org.fplinux.files.desktop
+e7cacfd99584d962a28993a9b3fa0790ff39cab3c9e978c434ed18e35e613888a38e3873b8e99711aed0c5d7fc0f22db452b48af4443b20c6e093f2b43616f0a  ru.po
+"

@@ -4,6 +4,36 @@
   "glyph_sizes": [12, 16, 20, 24],
   "filled_max_size": 16,
   "glyphs": {
+    "folder": {
+      "source": "tabler",
+      "name": "folder",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "file": {
+      "source": "tabler",
+      "name": "file",
+      "styles": {
+        "12": "filled",
+        "16": "filled",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "card": {
+      "source": "tabler",
+      "name": "device-sd-card",
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
     "app": {
       "source": "tabler",
       "name": "app-window",
@@ -596,6 +626,11 @@
     "tile_distance": 10
   },
   "apps": {
+    "org.fplinux.files": {
+      "tile": "files",
+      "glyph": "folder",
+      "install": true
+    },
     "org.fplinux.clock": {
       "tile": "clock",
       "glyph": "clock",

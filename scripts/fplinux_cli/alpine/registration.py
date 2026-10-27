@@ -123,6 +123,7 @@ SHARED_APORT_SOURCES = {
     "fplinux-cpuclock": CLI_SOURCES,
     "fplinux-debug-tools": (*DRM_SESSION_SOURCES, *CLI_SOURCES, *GPU_OUTPUT_SOURCES),
     "fplinux-example-apidemo": CLI_SOURCES,
+    "fplinux-files": (*CLI_SOURCES, "include/fplinux/fplinux-storage.h"),
     "fplinux-fm": CLI_SOURCES,
     "fplinux-gpu-probe": (*CLI_SOURCES, *GPU_SOURCES),
     "fplinux-icons": (
@@ -293,6 +294,7 @@ COMMON_PACKAGES = (
     "fplinux-calculator",
     "fplinux-clocks",
     "fplinux-example-apidemo",
+    "fplinux-files",
     "fplinux-font-terminus",
     "fplinux-icons",
     "fplinux-language-en",
@@ -333,6 +335,7 @@ LOCAL_BUILD_DEPENDENCIES = {
     "fplinux-clocks": ("fplinux-ui",),
     "fplinux-debug-tools": ("fplinux-libdrm", "fplinux-mesa-headers"),
     "fplinux-example-apidemo": ("fplinux-ui",),
+    "fplinux-files": ("fplinux-ui",),
     "fplinux-fm": ("fplinux-alsa-lib",),
     "fplinux-gpu-probe": ("fplinux-mesa", "fplinux-libdrm"),
     "fplinux-jack": ("fplinux-alsa-lib",),

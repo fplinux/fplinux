@@ -18,43 +18,15 @@ To run the whole system from a card instead, see [microSD system card](/fplinux/
 
 Follow the slot and insertion instructions on your [phone page](/fplinux/phones/). If the slot is under the battery, insert the card before starting the phone. Insert or remove a card while Linux runs only when the phone page permits it, and only while it is unmounted.
 
-After inserting a card, wait until its device appears:
-
-```sh title="Phone"
-ls /dev/mmcblk0*
-```
+After inserting a supported data card, open [Files](/fplinux/use/files/) and choose **Options → Refresh**. The places list shows **Memory card** when it is detected. Detection has no fixed delay.
 
 ## Mount the card
 
-Check what is on the card before you mount it. Never format a card just to read existing data. Use the first partition if there is one, otherwise the whole card:
+Select **Memory card** in Files to connect it, then select it again to browse. Files uses the first partition, or the whole card when it has no partition table. It accepts FAT32 and ext4 on phones that support them. An unsupported format is reported without formatting or changing the card.
 
-```sh title="Phone"
-card=/dev/mmcblk0p1
-[ -b "$card" ] || card=/dev/mmcblk0
-mkdir -p /mnt/card
-```
+The connected card is available at `/mnt/card` for [file transfers](/fplinux/use/connect/) and shell commands. FAT32 is connected with access for the application user. An ext4 card keeps its existing ownership and permissions, so some directories may be readable but not writable by applications. A read-only card is marked as such.
 
-Run only the command for the card's filesystem, and only if that filesystem is listed as supported on your phone.
-
-For FAT32:
-
-```sh title="Phone"
-mount -t vfat -o rw "$card" /mnt/card
-```
-
-For ext4:
-
-```sh title="Phone"
-mount -t ext4 -o rw "$card" /mnt/card
-```
-
-To mount FAT32 read-only:
-
-```sh title="Phone"
-mount -t vfat -o ro,nodev,nosuid,noexec,utf8=1 "$card" /mnt/card
-```
-
-Copy files to and from `/mnt/card` with the [file copy commands](/fplinux/use/connect/) or from a shell on the phone.
+A system card, a card with active swap or a card mounted elsewhere cannot be disconnected through Files. Internal eMMC is not selected as a data card.
 
 ## Remove the card safely
 
@@ -66,22 +38,17 @@ Never remove a mounted card or a card with active swap, and never remove a card 
 
 <Steps>
 
-1. Stop programs that use the card.
+1. Close applications and shell sessions that use files on the card.
 
-2. If you enabled swap on the card, turn it off with `swapoff`.
+2. If you enabled swap on the data card, turn it off with `swapoff`. Never remove a card that supplies the running system root.
 
-3. Write pending data and unmount the card:
-
-   ```sh title="Phone"
-   sync
-   umount /mnt/card
-   ```
+3. Return to **Places** in Files, select **Memory card**, then choose **Options → Safely eject**. Wait until its description changes to **Select to connect**. If it is busy, close the application using it and try again. Files does not force an unmount.
 
 4. Remove the card only as allowed on your phone page. If accessing the slot requires removing the battery, [end the session safely](/fplinux/use/power/) first.
 
 </Steps>
 
-For a phone with supported hot-swap, wait until `/dev/mmcblk0` has disappeared before you insert another card. Without hot-swap support, leave the card installed until shutdown, even after unmounting; start a new session after changing it.
+For a phone with supported hot swap, refresh Places after removing the disconnected card before inserting another one. Without hot-swap support, leave the card installed until shutdown, even after disconnecting it in Files; start a new session after changing it.
 
 ## Limitations
 

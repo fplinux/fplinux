@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: GPL-2.0-only
+xkb_keymap {
+    xkb_keycodes "files" {
+        minimum = 8;
+        maximum = 255;
+        <AB01> = 52;
+        <RTRN> = 36;
+        <ESC> = 9;
+        <MENU> = 135;
+    };
+    xkb_types "files" {
+        type "ONE_LEVEL" {
+            modifiers = None;
+            map[None] = Level1;
+        };
+    };
+    xkb_compatibility "files" {};
+    xkb_symbols "files" {
+        key <AB01> { [ z ], repeat = No };
+        key <RTRN> { [ Return ], repeat = No };
+        key <ESC> { [ Escape ], repeat = No };
+        key <MENU> { [ Menu ], repeat = No };
+    };
+};

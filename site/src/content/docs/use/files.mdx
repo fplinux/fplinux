@@ -1,0 +1,36 @@
+---
+title: Files
+description: Browse folders, copy files and open them with installed applications.
+source:
+  - alpine/aports/fplinux-files
+---
+
+import Key from '../../../components/Key.astro';
+
+Open **Files** from the [application catalog](/fplinux/use/session/#home-and-applications). The first screen lists the places you can use. **My files** works without a memory card and stores files in `/home/fplinux/Files`.
+
+To copy documents from a Linux PC, follow [Files for graphical applications](/fplinux/use/connect/#files-for-graphical-applications), including the ownership step after uploading.
+
+In a RAM boot, **My files** is temporary: its contents disappear when the phone powers off. With a [microSD system card](/fplinux/guides/microsd-system-card/), the home directory stays on that card. A separate [data card](/fplinux/use/microsd/) appears as **Memory card**. Internal factory storage is not a place for saving files.
+
+## Browse and open
+
+Press <Key>Centre</Key> to open a folder or file. **Back** returns to the parent folder and keeps your previous selection. At the top of a place, **Back** returns to the places list. <Key>Left</Key> and <Key>Right</Key> scroll a page; holding a direction repeats navigation.
+
+Files opens a document with an installed application that supports its extension. When several applications support it, choose one from **Open with**. Closing that application returns to your folder; returning Home uses the [shared application controls](/fplinux/use/session/#home-and-applications).
+
+A file with no available application stays visible. You can still inspect, copy, move, rename or delete it. **Options → Details** shows its full name, path, size and modification time. Symbolic links and special files can be inspected but are not followed.
+
+## Find a name
+
+Choose **Options → Find in folder**, enter part of a name, then choose **Find**. Search covers the current folder and ignores letter case in English and Russian. **Back** from the results returns to your query; another **Back** returns to the folder. See [text input](/fplinux/use/session/#type-text) for editing and the commands available while a field contains text.
+
+## Copy, move and rename
+
+Select a file and choose **Options → Copy** or **Move**. Choose a destination place, open the folder you want and press the left soft key to copy or move there. **Cancel** returns to the source folder. Progress shows the current file; you can cancel before it finishes.
+
+An existing file is never overwritten. Choose **Another name** to change the destination name or **Cancel** to leave the existing file alone. A failed operation explains what was completed and what remains. For example, a move may leave a complete copy while the source could not be removed. **Retry** finishes the remaining step.
+
+Use **Options → New folder**, **Rename** or **Delete** for other changes. Delete asks for confirmation. This application copies and moves single files; it deletes folders only when they are empty. **Options → System files** provides a read-only view of accessible system folders.
+
+You can return Home during a copy and resume it from Tasks. Closing Files during an operation asks whether to stop it or continue. Safely disconnect a card as described in [microSD card](/fplinux/use/microsd/#remove-the-card-safely).

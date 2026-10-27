@@ -15,6 +15,7 @@ Open these applications from the [phone interface's catalog](/fplinux/use/sessio
 | --- | --- |
 | [Settings](/fplinux/use/session/#settings) | Brightness, screen timeout, locking, theme, date, languages and system information |
 | [Notes](/fplinux/use/session/#notes) | Write and save one note |
+| [Files](/fplinux/use/files/) | Browse folders, manage files and open them with installed applications |
 | [Calculator](/fplinux/use/calculator/) | Calculate with the keypad |
 | [Clocks](/fplinux/use/clocks/) | Alarms, timer, stopwatch and world clocks |
 | [Snake](/fplinux/use/session/#snake) | Play with the D-pad or digit keys |
@@ -118,4 +119,4 @@ The FPLinux image tools, brightness application, ARMADA and Quake launcher follo
 
 ## Where to keep files
 
-Keep inputs and outputs in `/run` or `/tmp`. Both are RAM filesystems: they are always writable, but they use phone memory and are emptied when the phone shuts down. Copy files between the PC and the phone as described in [Connect from a PC](/fplinux/use/connect/). To keep files across boots, use a [microSD card](/fplinux/use/microsd/).
+The [Files application](/fplinux/use/files/) provides **My files** in `/home/fplinux/Files`. Files in the home directory last until power-off in a RAM boot; a microSD system card keeps them across boots. `/run` and `/tmp` remain temporary RAM storage in every profile. Copy files between the PC and the phone as described in [Connect from a PC](/fplinux/use/connect/). A supported [microSD data card](/fplinux/use/microsd/) also keeps files across boots.

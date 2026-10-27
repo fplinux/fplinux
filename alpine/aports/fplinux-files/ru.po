@@ -1,0 +1,313 @@
+# Russian translation of fplinux-files.
+# SPDX-License-Identifier: GPL-2.0-only
+msgid ""
+msgstr ""
+"Project-Id-Version: fplinux-files 1\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "Files"
+msgstr "Файлы"
+
+msgid "Help"
+msgstr "Справка"
+
+msgid "Access denied. Choose another folder."
+msgstr "Нет доступа. Выберите другую папку."
+
+msgid "The file or storage is no longer available. Refresh Places."
+msgstr "Файл или накопитель недоступен. Обновите список мест."
+
+msgid "This storage is read-only."
+msgstr "Накопитель доступен только для чтения."
+
+msgid "The file name is not valid text. Rename it before opening."
+msgstr "Имя файла содержит недопустимые символы. Переименуйте файл перед открытием."
+
+msgid "That name already exists. Nothing was overwritten."
+msgstr "Такое имя уже есть. Файл не перезаписан."
+
+msgid "The folder is not empty. Only empty folders can be deleted."
+msgstr "Папка не пуста. Можно удалить только пустую папку."
+
+msgid "Not enough free space. Free some space and try again."
+msgstr "Недостаточно места. Освободите место и повторите."
+
+msgid "The name is too long. The limit is 255 bytes."
+msgstr "Слишком длинное имя. Допустимо не более 255 байт."
+
+msgid "Enter a name without / or line breaks, other than . or .. ."
+msgstr "Введите имя без / и перевода строки, кроме . и .. ."
+
+msgid "Symbolic links can be inspected but are not followed."
+msgstr "Можно посмотреть сведения о ссылке, но перейти по ней нельзя."
+
+msgid "This operation is not supported by the storage or file type."
+msgstr "Операция не поддерживается накопителем или типом файла."
+
+msgid "Copy and move are available for files only."
+msgstr "Копирование и перенос доступны только для файлов."
+
+msgid "This folder has more than 4096 entries."
+msgstr "В папке больше 4096 записей."
+
+msgid "Operation cancelled."
+msgstr "Операция отменена."
+
+msgid "Storage is busy. Close applications using it and try again."
+msgstr "Накопитель занят. Закройте использующие его приложения и повторите."
+
+msgid "Not enough memory. Close and try again."
+msgstr "Недостаточно памяти. Закройте приложение и повторите."
+
+msgid "The operation failed. Check the storage and try again."
+msgstr "Операция не выполнена. Проверьте накопитель и повторите."
+
+msgid "Open folders and files with the centre key. Back returns to the parent. Left and Right scroll a page."
+msgstr "Центральная клавиша открывает папки и файлы. Назад — в родительскую папку. Влево и вправо — прокрутка на страницу."
+
+msgid "Options offers file actions and Find in folder. Copy and move select a destination first. Existing files are never replaced."
+msgstr "В меню «Опции» доступны действия с файлами и поиск в папке. Для копирования и переноса выберите папку назначения. Существующие файлы не перезаписываются."
+
+msgid "My files are in your home directory. Safely eject a memory card from Places before removing it."
+msgstr "«Мои файлы» находятся в домашней папке. Перед извлечением карты выберите безопасное извлечение в списке мест."
+
+msgid "Details"
+msgstr "Сведения"
+
+msgid "Copy"
+msgstr "Копировать"
+
+msgid "Move"
+msgstr "Переместить"
+
+msgid "Rename"
+msgstr "Переименовать"
+
+msgid "Delete"
+msgstr "Удалить"
+
+msgid "Move here"
+msgstr "Перенести сюда"
+
+msgid "Copy here"
+msgstr "Копировать сюда"
+
+msgid "Places"
+msgstr "Места"
+
+msgid "Refresh"
+msgstr "Обновить"
+
+msgid "Find in folder"
+msgstr "Найти в папке"
+
+msgid "New folder"
+msgstr "Новая папка"
+
+msgid "My files"
+msgstr "Мои файлы"
+
+msgid "System files"
+msgstr "Системные файлы"
+
+msgid "No subfolders. Select this folder with the left key."
+msgstr "Подпапок нет. Выберите эту папку левой клавишей."
+
+msgid "This folder is empty."
+msgstr "Папка пуста."
+
+msgid "Open"
+msgstr "Открыть"
+
+msgid "Reading folder"
+msgstr "Чтение папки"
+
+msgid "Please wait…"
+msgstr "Подождите…"
+
+msgid "Folder"
+msgstr "Папка"
+
+msgid "File"
+msgstr "Файл"
+
+msgid "Symbolic link"
+msgstr "Символическая ссылка"
+
+msgid "Special file"
+msgstr "Специальный файл"
+
+#, c-format
+msgid "%jd byte"
+msgid_plural "%jd bytes"
+msgstr[0] "%jd байт"
+msgstr[1] "%jd байта"
+msgstr[2] "%jd байт"
+
+#, c-format
+msgid "%.1f KiB"
+msgstr "%.1f КиБ"
+
+#, c-format
+msgid "%.1f MiB"
+msgstr "%.1f МиБ"
+
+msgid "Here"
+msgstr "Сюда"
+
+msgid "Stop"
+msgstr "Стоп"
+
+msgid "Name"
+msgstr "Имя"
+
+msgid "Type"
+msgstr "Тип"
+
+msgid "Path"
+msgstr "Путь"
+
+msgid "Size"
+msgstr "Размер"
+
+msgid "Modified"
+msgstr "Изменён"
+
+msgid "Search results"
+msgstr "Результаты поиска"
+
+msgid "No matching names. Go back to change the search."
+msgstr "Совпадений нет. Вернитесь назад, чтобы изменить запрос."
+
+msgid "Find"
+msgstr "Найти"
+
+msgid "Another name"
+msgstr "Другое имя"
+
+msgid "Create"
+msgstr "Создать"
+
+msgid "Save"
+msgstr "Сохранить"
+
+msgid "Done"
+msgstr "Готово"
+
+#, c-format
+msgid "Delete %s?"
+msgstr "Удалить %s?"
+
+msgid "Stopping"
+msgstr "Остановка"
+
+msgid "Copying"
+msgstr "Копирование"
+
+msgid "Moving"
+msgstr "Перемещение"
+
+msgid "Working"
+msgstr "Выполнение"
+
+msgid "Operation failed"
+msgstr "Операция не выполнена"
+
+msgid "Finishing not confirmed"
+msgstr "Завершение не подтверждено"
+
+msgid "The source is no longer visible. Its removal has not been synchronized. Retry to finish."
+msgstr "Исходный файл уже не виден. Его удаление не синхронизировано. Повторите для завершения."
+
+msgid "The file was copied. The source was not removed. Retry to finish the move."
+msgstr "Файл скопирован. Исходный файл не удалён. Повторите для завершения переноса."
+
+msgid "The copy is visible but not synchronized. The source was kept. Retry to finish."
+msgstr "Копия видна, но не синхронизирована. Исходный файл сохранён. Повторите для завершения."
+
+msgid "The change is visible but not synchronized. Retry to finish."
+msgstr "Изменение видно, но не синхронизировано. Повторите для завершения."
+
+msgid "Retry"
+msgstr "Повторить"
+
+msgctxt "short command"
+msgid "Retry"
+msgstr "Повтор"
+
+msgid "Finishing writes…"
+msgstr "Завершение записи…"
+
+#, c-format
+msgid "%d%% · %s / %s"
+msgstr "%d%% · %s / %s"
+
+msgid "Safely eject"
+msgstr "Безопасно извлечь"
+
+msgid "Eject"
+msgstr "Извлечь"
+
+msgid "Move to"
+msgstr "Переместить в"
+
+msgid "Copy to"
+msgstr "Копировать в"
+
+msgid "Home directory"
+msgstr "Домашняя папка"
+
+msgid "Temporary: lost after reboot"
+msgstr "Временно: до перезагрузки"
+
+msgid "Select to connect"
+msgstr "Выберите для подключения"
+
+msgid "Unsupported format"
+msgstr "Неподдерживаемый формат"
+
+msgid "Used by the system"
+msgstr "Используется системой"
+
+msgid "Read-only"
+msgstr "Только чтение"
+
+msgid "Connected"
+msgstr "Подключена"
+
+msgid "Memory card"
+msgstr "Карта памяти"
+
+msgid "Cancel"
+msgstr "Отмена"
+
+msgid "Close Files?"
+msgstr "Закрыть «Файлы»?"
+
+msgid "An operation is running. Stop it and close Files?"
+msgstr "Выполняется операция. Остановить её и закрыть «Файлы»?"
+
+msgid "Stop and close"
+msgstr "Остановить и закрыть"
+
+msgid "Continue"
+msgstr "Продолжить"
+
+msgid "Resume"
+msgstr "Дальше"
+
+msgid "Open file"
+msgstr "Открытие файла"
+
+msgid "No application can open this file type."
+msgstr "Для этого типа файлов нет приложения."
+
+msgid "Too many applications are open. Close an application and try again."
+msgstr "Открыто слишком много приложений. Закройте одно из них и повторите."
+
+msgid "The application could not open this file."
+msgstr "Приложение не смогло открыть файл."

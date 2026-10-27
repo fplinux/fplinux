@@ -72,6 +72,7 @@ export default defineConfig({
 					items: pages(
 						"use/session",
 						"use/calculator",
+						"use/files",
 						"use/clocks",
 						"use/terminal"
 					),

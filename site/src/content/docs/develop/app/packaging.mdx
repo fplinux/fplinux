@@ -55,6 +55,8 @@ Install the executable with mode `0755`. Set `Exec` to the executable path alone
 
 ## Opening documents
 
+Declare only formats that the application can actually read. The session uses extensions to select a handler; the handler must validate the file contents. An unrecognized file stays available for ordinary operations in [Files](/fplinux/use/files/). Several matching applications produce an **Open with** choice using their localized desktop names and icons.
+
 An application requests an open with `fplinux_ui_open_file(ui, absolute_path)`. The path must be valid UTF-8 and name a readable regular file without symbolic links. A nonzero return value is the request ID, not success: observe `FPLINUX_UI_EVENT_DOCUMENT_RESULT` for acceptance, cancellation or an error. Only one request can be pending for a UI. The request uses the existing application permissions and does not grant root access.
 
 A handler installs a callback with `fplinux_ui_set_document_handler()`. Both a new process and an existing task receive the document through that callback; `Exec` stays unchanged and carries no file argument. The callback's path is borrowed for its duration. Copy it before returning `FPLINUX_UI_DOCUMENT_WAIT` for asynchronous work or a decision dialog, then answer with `fplinux_ui_document_reply()`.

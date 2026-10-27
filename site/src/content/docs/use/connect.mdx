@@ -163,6 +163,18 @@ Limits:
 - Only regular files can be copied, not directories or raw devices.
 - A destination in RAM, such as `/tmp`, uses the phone's limited memory and disappears when the phone powers off. To keep files, copy them to a mounted [microSD card](/fplinux/use/microsd/).
 
+### Files for graphical applications
+
+Open **Files → My files** on the phone first to create its folder. Upload your file to `/home/fplinux/Files/`, using its full destination path, such as `/home/fplinux/Files/program.jar`.
+
+Uploads belong to `root`, while graphical applications use the `fplinux` account. After uploading, run this command in the phone's SSH shell so the application can read and update the file:
+
+```sh title="Phone SSH"
+chown fplinux:fplinux /home/fplinux/Files/program.jar
+```
+
+Replace `program.jar` with your file's name and repeat this step for any companion files you uploaded. Then open the file in [Files](/fplinux/use/files/).
+
 ## Type with your computer's keyboard
 
 <FeatureStatus feature="host-keyboard-bridge" />
