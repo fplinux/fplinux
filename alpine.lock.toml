@@ -62,7 +62,7 @@ fplinux-microsd-root = [
 fplinux-mre = [
   "brotli-libs-1.2.1-r0.apk",
   "c-ares-1.34.8-r0.apk",
-  "ca-certificates-bundle-20260909-r0.apk",
+  "ca-certificates-bundle-20261020-r0.apk",
   "libcrypto3-3.5.9-r0.apk",
   "libcurl-8.22.0-r0.apk",
   "libidn2-2.3.8-r0.apk",
@@ -74,7 +74,7 @@ fplinux-mre = [
 ]
 fplinux-ncurses = ["ncurses-terminfo-base-6.6_p20260516-r0.apk"]
 fplinux-session = ["json-c-0.18-r1.apk"]
-fplinux-uclient = ["ca-certificates-bundle-20260909-r0.apk"]
+fplinux-uclient = ["ca-certificates-bundle-20261020-r0.apk"]
 fplinux-ui = ["json-c-0.18-r1.apk"]
 fplinux-wayland = ["libffi-3.5.2-r1.apk"]
 fplinux-wifi = [
@@ -106,7 +106,7 @@ packages = [
   "busybox-1.37.0-r31.apk",
   "busybox-binsh-1.37.0-r31.apk",
   "c-ares-1.34.8-r0.apk",
-  "ca-certificates-bundle-20260909-r0.apk",
+  "ca-certificates-bundle-20261020-r0.apk",
   "dbus-1.16.2-r2.apk",
   "curl-dev-8.22.0-r0.apk",
   "dbus-dev-1.16.2-r2.apk",
@@ -170,10 +170,10 @@ packages = [
   "mpfr4-4.2.2-r0.apk",
   "mtdev-1.1.7-r0.apk",
   "mtdev-dev-1.1.7-r0.apk",
-  "musl-1.2.6-r2.apk",
-  "musl-dev-1.2.6-r2.apk",
+  "musl-1.2.6-r3.apk",
+  "musl-dev-1.2.6-r3.apk",
   "musl-fts-1.2.7-r7.apk",
-  "musl-libintl-1.2.6-r2.apk",
+  "musl-libintl-1.2.6-r3.apk",
   "ncurses-dev-6.6_p20260516-r0.apk",
   "ncurses-terminfo-base-6.6_p20260516-r0.apk",
   "nghttp2-libs-1.70.0-r0.apk",
@@ -264,9 +264,9 @@ bytes = 826462
 
 [[package]]
 repository = "main"
-file = "ca-certificates-bundle-20260909-r0.apk"
-sha256 = "a7940ce710d590e3f840aa9303a03d981d23f33cb11c2d9710d409a3f5a555a8"
-bytes = 108525
+file = "ca-certificates-bundle-20261020-r0.apk"
+sha256 = "b4abcbc5e111976c8d36509d3cf02f0d0a6f45bc597fffbc9e74b09e4531b23e"
+bytes = 107101
 
 [[package]]
 repository = "community"
@@ -726,15 +726,15 @@ bytes = 8734
 
 [[package]]
 repository = "main"
-file = "musl-1.2.6-r2.apk"
-sha256 = "84a62250f10aa1c5b7687f21f3a0f19ec17b561176d67c4c797123ed8f98555c"
-bytes = 390064
+file = "musl-1.2.6-r3.apk"
+sha256 = "9fca75b09538f9788b1ca800d56cd93dd4d584fac76a57c959666a9a0b93d397"
+bytes = 390078
 
 [[package]]
 repository = "main"
-file = "musl-dev-1.2.6-r2.apk"
-sha256 = "11eef6d1aa6129c8403d826b58cbaf40e13a67e330f8108db6f0db0e61277cd1"
-bytes = 2296118
+file = "musl-dev-1.2.6-r3.apk"
+sha256 = "f088a30a2ce46fc3ad4f108465a9399b668a99ee3d167cd805f6826a961d072e"
+bytes = 2296735
 
 [[package]]
 repository = "main"
@@ -744,9 +744,9 @@ bytes = 6558
 
 [[package]]
 repository = "main"
-file = "musl-libintl-1.2.6-r2.apk"
-sha256 = "79bf3e2d9fc3ea46c8b50b9d5d60241dcc5cb9d7b29e64466a905b9a358758e4"
-bytes = 1806
+file = "musl-libintl-1.2.6-r3.apk"
+sha256 = "2b469aa730e66b9ce3d6ffbeb5ea26c16ce0b10a40605657d6eae88b58319632"
+bytes = 1802
 
 [[package]]
 repository = "main"

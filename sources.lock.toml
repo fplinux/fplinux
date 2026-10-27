@@ -367,7 +367,7 @@ checksum = "288c042f5acb8a7cf1b0a0c25327c74e0bce126124253bdb2d0dc2630b8bc80b5e5d
 [aport_apk_tools_v3_0_8_tar_gz]
 version = "3.0.8"
 name = "apk-tools-v3.0.8.tar.gz"
-url = "https://gitlab.alpinelinux.org/alpine/apk-tools/-/archive/v3.0.8/apk-tools-v3.0.8.tar.gz"
+url = "https://distfiles.alpinelinux.org/distfiles/v3.24/apk-tools-v3.0.8.tar.gz"
 algorithm = "sha512"
 checksum = "3616435508dead5240f8d9fe74e87e2aa93262f9e466f50af8f60100e166403393b1e491c115395864d4179b219699831ecb61dc60960b5dfb1f10816d75f95f"
 
@@ -598,7 +598,7 @@ checksum = "677b5a39ea47aa238813412061eefba0ff2e819597efee69452eab7fd63b1387537e
 [aport_ffmpeg_9_0_2_tar_xz]
 version = "9.0.2"
 name = "ffmpeg-9.0.2.tar.xz"
-url = "https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz"
+url = "https://distfiles.alpinelinux.org/distfiles/edge/ffmpeg-9.0.2.tar.xz"
 algorithm = "sha512"
 checksum = "7756f8434371b9bc1d01cf578bf49014e058b0869c3c1df05030f5f4035f1def64b2e7dba3cf340da4dc8dd9239dd5f894530c9e45793ac27876807079aa546a"
 
@@ -1119,11 +1119,11 @@ algorithm = "sha256"
 checksum = "ab5a03176ee106d3f0fa90e381da478ddae405918153cca248e682cd0c4a2269"
 
 [linux_host_expat]
-version = "2.8.5"
-name = "expat-2.8.5.tar.xz"
-url = "https://github.com/libexpat/libexpat/releases/download/R_2_8_5/expat-2.8.5.tar.xz"
+version = "2.9.0"
+name = "expat-2.9.0.tar.xz"
+url = "https://github.com/libexpat/libexpat/releases/download/R_2_9_0/expat-2.9.0.tar.xz"
 algorithm = "sha256"
-checksum = "1e727b8933ec51a77a9a9d9afcf8e688bce45d907c13e36ab7393fe36e703182"
+checksum = "1e6371862cc31999b368c3b89b49994f0677e1bab5f1b2b85ae3741f5d803051"
 
 [linux_host_libedit]
 version = "20260508.3.1"

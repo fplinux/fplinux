@@ -6,8 +6,8 @@ version = "1.0.8-r6"
 
 [expat]
 source = "linux_host_expat"
-licenses = ["expat-2.8.5/COPYING"]
-version = "2.8.5-r0"
+licenses = ["expat-2.9.0/COPYING"]
+version = "2.9.0-r0"
 
 [libffi]
 source = "linux_host_libffi"
