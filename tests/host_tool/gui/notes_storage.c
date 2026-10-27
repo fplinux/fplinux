@@ -114,11 +114,11 @@ void fplinux_ui_screen_remove_command(struct fplinux_ui_screen *screen, int id)
 	screen->has_save = false;
 }
 
-bool fplinux_ui_screen_set_title(struct fplinux_ui_screen *screen,
-				 const char *title)
+bool fplinux_ui_screen_set_header_status(struct fplinux_ui_screen *screen,
+					 const char *full, const char *compact)
 {
-	assert(screen &&
-	       (!strcmp(title, "Notes") || !strcmp(title, "Notes (unsaved)")));
+	assert(screen && (!full || !strcmp(full, "Unsaved")));
+	assert(compact && !strcmp(compact, "*"));
 	return true;
 }
 

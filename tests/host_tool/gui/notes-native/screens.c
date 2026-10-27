@@ -79,17 +79,18 @@ static bool has_label(const struct capture *capture, const char *text)
 static void wait_view(struct capture *capture, const char *text, bool dirty,
 		      bool menu)
 {
-	const char *title = dirty ? word(capture, "Notes (unsaved)",
-					 "Заметки (не сохранено)") :
-				    word(capture, "Notes", "Заметки");
+	const char *title = word(capture, "Notes", "Заметки");
+	const char *unsaved = word(capture, "Unsaved", "Не сохранено");
 	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+	bool status;
 
 	do {
 		pump(capture);
+		status = has_label(capture, unsaved) || has_label(capture, "*");
 		if (capture->observed.frame && capture->observed.editor &&
 		    capture->observed.menu == menu &&
 		    !strcmp(capture->observed.text, text) &&
-		    has_label(capture, title))
+		    has_label(capture, title) && status == dirty)
 			break;
 	} while (fplinux_ui_frame_now_ms() < deadline);
 	if (strcmp(capture->observed.text, text) || !has_label(capture, title))
@@ -101,6 +102,7 @@ static void wait_view(struct capture *capture, const char *text, bool dirty,
 	assert(capture->observed.menu == menu && !capture->exits);
 	assert(!strcmp(capture->observed.text, text) &&
 	       has_label(capture, title));
+	assert(status == dirty);
 	assert(capture->observed.editors == 1);
 }
 

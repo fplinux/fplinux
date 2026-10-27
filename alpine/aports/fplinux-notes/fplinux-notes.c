@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: 0BSD */
 #define _POSIX_C_SOURCE 200809L
 #include "fplinux-cli.h"
+#include <fplinux/fplinux-gettext.h>
 #include <fplinux/fplinux-ui.h>
 #include <fplinux/fplinux-ui-menu.h>
 #include <fplinux/fplinux-ui-prefs.h>
@@ -14,6 +15,7 @@
 #define APP_ID "org.fplinux.notes"
 #define NOTE_CHARS 1000
 #define _(text) gettext(text)
+#define NC_(context, text) context "\004" text
 
 enum command {
 	COMMAND_SAVE,
@@ -47,6 +49,7 @@ static void refresh_commands(struct notes_app *app)
 		.id = COMMAND_SAVE,
 		.type = FPLINUX_UI_COMMAND_SCREEN,
 		.label = _("Save"),
+		.short_label = _("Done"),
 		.icon = fplinux_ui_glyph(app->ui, "save", FPLINUX_UI_GLYPH_ROW),
 	};
 	bool unsaved = needs_save(app);
@@ -55,8 +58,8 @@ static void refresh_commands(struct notes_app *app)
 		fplinux_ui_screen_add_command(app->box, &save);
 	else
 		fplinux_ui_screen_remove_command(app->box, COMMAND_SAVE);
-	fplinux_ui_screen_set_title(app->box, unsaved ? _("Notes (unsaved)") :
-							_("Notes"));
+	fplinux_ui_screen_set_header_status(app->box,
+					    unsaved ? _("Unsaved") : NULL, "*");
 }
 
 /* The preferences keep the note in memory; save writes it to the file. */
@@ -137,6 +140,8 @@ static bool show_save_error(struct notes_app *app)
 		{ .id = COMMAND_RETRY,
 		  .type = FPLINUX_UI_COMMAND_OK,
 		  .label = _("Retry"),
+		  .short_label = fplinux_gettext_context(
+			  NC_("short command", "Retry")),
 		  .icon = fplinux_ui_glyph(app->ui, "refresh",
 					   FPLINUX_UI_GLYPH_ROW) },
 		{ .id = COMMAND_STAY,

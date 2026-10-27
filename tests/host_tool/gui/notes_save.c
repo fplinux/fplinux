@@ -13,6 +13,8 @@
 struct fplinux_ui_screen {
 	char text[4097];
 	char title[128];
+	char status[128];
+	char compact_status[8];
 	fplinux_ui_command_cb listener;
 	fplinux_ui_change_cb changed;
 	void *context;
@@ -211,11 +213,14 @@ void fplinux_ui_screen_remove_command(struct fplinux_ui_screen *screen, int id)
 	screen->has_save = false;
 }
 
-bool fplinux_ui_screen_set_title(struct fplinux_ui_screen *screen,
-				 const char *title)
+bool fplinux_ui_screen_set_header_status(struct fplinux_ui_screen *screen,
+					 const char *full, const char *compact)
 {
-	assert(screen && title && *title);
-	snprintf(screen->title, sizeof(screen->title), "%s", title);
+	assert(screen);
+	snprintf(screen->status, sizeof(screen->status), "%s",
+		 full ? full : "");
+	snprintf(screen->compact_status, sizeof(screen->compact_status), "%s",
+		 compact ? compact : "");
 	return true;
 }
 
@@ -342,6 +347,8 @@ static void check_failed_save(struct fplinux_ui *ui, const char *draft)
 	assert(ui->exits == 0);
 	assert(!strcmp(preferences.saved, "Earlier note"));
 	assert(!strcmp(ui->editor->text, draft));
+	assert(!strcmp(ui->editor->title, "Notes"));
+	assert(!strcmp(ui->editor->status, "Unsaved"));
 	if (ui->fail_alert) {
 		assert(ui->current == ui->editor);
 	} else {
@@ -357,6 +364,7 @@ static void check_failed_save(struct fplinux_ui *ui, const char *draft)
 	assert(ui->exits == 0);
 	assert(!strcmp(preferences.saved, draft));
 	assert(!ui->editor->has_save);
+	assert(!ui->editor->status[0]);
 }
 
 static void edit(struct fplinux_ui *ui, const char *text, bool notify)
@@ -374,6 +382,8 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 	const char *draft = "Call at 18:00\nBring the book";
 
 	assert(!ui->editor->has_save);
+	assert(!strcmp(ui->editor->title, "Notes"));
+	assert(!ui->editor->status[0]);
 	if (!strcmp(scenario, "clean_empty") ||
 	    !strcmp(scenario, "clean_loaded")) {
 		assert(!strcmp(ui->editor->text,
@@ -395,7 +405,9 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 	edit(ui, draft, strcmp(scenario, "last_key_home") != 0);
 	if (strcmp(scenario, "last_key_home")) {
 		assert(ui->editor->has_save);
-		assert(!strcmp(ui->editor->title, "Notes (unsaved)"));
+		assert(!strcmp(ui->editor->title, "Notes"));
+		assert(!strcmp(ui->editor->status, "Unsaved"));
+		assert(!strcmp(ui->editor->compact_status, "*"));
 	}
 	if (!strcmp(scenario, "activation")) {
 		struct fplinux_ui_screen *alert;
@@ -436,6 +448,7 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		assert(ui->current == ui->editor);
 		assert(!ui->editor->has_save);
 		assert(!strcmp(ui->editor->title, "Notes"));
+		assert(!ui->editor->status[0]);
 		assert(ui->editor->cursor == strlen(draft));
 		choose(ui, ui->editor->back_command);
 		send_event(ui, FPLINUX_UI_EVENT_CLOSE, false);
@@ -508,7 +521,8 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		assert(!strcmp(ui->current->text,
 			       "Storage input/output error"));
 		assert(ui->editor->has_save);
-		assert(!strcmp(ui->editor->title, "Notes (unsaved)"));
+		assert(!strcmp(ui->editor->title, "Notes"));
+		assert(!strcmp(ui->editor->status, "Unsaved"));
 		if (!strcmp(scenario, "unsynced_close")) {
 			assert(!strcmp(ui->current->discard_label,
 				       "Close anyway"));
@@ -521,6 +535,7 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		choose(ui, ui->current->retry_command);
 		assert(ui->exits == 0 && !strcmp(preferences.saved, draft));
 		assert(!ui->editor->has_save);
+		assert(!ui->editor->status[0]);
 	} else if (!strcmp(scenario, "save_retry")) {
 		preferences.fail_save = true;
 		choose(ui, ui->editor->save_command);
@@ -534,6 +549,7 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		edit(ui, "Earlier note", true);
 		assert(!ui->editor->has_save);
 		assert(!strcmp(ui->editor->title, "Notes"));
+		assert(!ui->editor->status[0]);
 		choose(ui, ui->editor->back_command);
 		assert(ui->exits == 1 && preferences.writes == 0);
 	} else {

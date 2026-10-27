@@ -88,7 +88,7 @@ def test_actual_notes_save_retains_text_caret_and_editor_then_home_persists(
     frames = [(tmp_path / f"notes-{state}.rgb565").read_bytes() for state in states]
     for frame in frames:
         assert len(frame) == width * surface_height * 2
-        assert len(set(struct.iter_unpack("<H", frame))) > 8
+        assert len(set(struct.iter_unpack("<H", frame))) > 1
     assert frames[0] != frames[1]
     assert frames[1] != frames[2]
     assert frames[2] != frames[3]

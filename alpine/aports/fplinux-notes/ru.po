@@ -15,8 +15,11 @@ msgstr "Заметки"
 msgid "Save"
 msgstr "Сохранить"
 
-msgid "Notes (unsaved)"
-msgstr "Заметки (не сохранено)"
+msgid "Done"
+msgstr "Готово"
+
+msgid "Unsaved"
+msgstr "Не сохранено"
 
 msgid "Note not saved"
 msgstr "Заметка не сохранена"
@@ -27,11 +30,15 @@ msgstr "Сохранение не подтверждено"
 msgid "Retry"
 msgstr "Повторить"
 
+msgctxt "short command"
+msgid "Retry"
+msgstr "Повтор"
+
 msgid "Stay"
 msgstr "Остаться"
 
 msgid "Discard changes"
-msgstr "Отбросить изменения"
+msgstr "Не сохранять"
 
 msgid "Close anyway"
-msgstr "Закрыть всё равно"
+msgstr "Всё равно закрыть"
