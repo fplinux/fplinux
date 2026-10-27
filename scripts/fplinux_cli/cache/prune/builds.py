@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from fplinux_cli.common import ROOT, load_toml, read_json_object
 from fplinux_cli.manifests.paths import discover_platforms
+from fplinux_cli.manifests.source_catalog import resolve_source_record
 from fplinux_cli.manifests.values import nonempty_string, sha256_value
 
 from .model import InventoryEntry
@@ -80,7 +81,8 @@ def _current_linux_sources() -> frozenset[str] | None:
             source_lock = nonempty_string(
                 config["linux"]["source_lock"], f"platform {platform} Linux source lock"
             )
-            current.add(sha256_value(sources[source_lock]["sha256"], source_lock))
+            source = resolve_source_record(source_lock, sources[source_lock])
+            current.add(sha256_value(source.checksum, source_lock))
     except KeyError, OSError, TypeError, ValueError, SystemExit:
         return None
     return frozenset(current)

@@ -17,9 +17,15 @@ if TYPE_CHECKING:
 def _linux_declarations(root: Path) -> None:
     """Declare two independent platform archives and an unused source lock."""
     (root / "sources.lock.toml").write_text(
-        f'[linux_a]\nsha256 = "{"a" * 64}"\n'
-        f'[linux_b]\nsha256 = "{"b" * 64}"\n'
-        f'[retired]\nsha256 = "{"c" * 64}"\n'
+        "".join(
+            f"[{source}]\n"
+            'version = "1.0"\n'
+            f'name = "{source}.tar.xz"\n'
+            f'url = "https://example.invalid/{source}.tar.xz"\n'
+            'algorithm = "sha256"\n'
+            f'checksum = "{letter * 64}"\n'
+            for source, letter in (("linux_a", "a"), ("linux_b", "b"), ("retired", "c"))
+        )
     )
     for platform, source in (("first", "linux_a"), ("second", "linux_b")):
         directory = root / "platforms" / platform
