@@ -20,6 +20,8 @@ Before cutting power to a system card, shut it down as described in [Power](/fpl
 
 Copy the APK to the phone, then install it. This example installs ARMADA (`fplinux-showcase.apk`) on a Nokia 3210 4G.
 
+Applications can also require other packages, such as libraries or fonts. Copy their APKs from the same build and pass them alongside the application in the same `apk add` command; the phone resolves these dependencies without downloading anything. Request all required APKs when someone supplies you with an application.
+
 RAM ZIPs do not include optional APKs. Build the matching source revision on Linux and take the APK from the build's `apks/` directory, or ask the person who supplied your ZIP for that matching APK. Linux system-card exports already include an `apks/` directory. The transfer commands below require a Linux PC; the Windows launcher does not support file transfer.
 
 <Tabs syncKey="source">
@@ -97,4 +99,4 @@ python3.14 -I fplinux.py run --reconnect --exec 'apk del fplinux-showcase'
 
 ## Package sources
 
-Install only the APKs built with your image. The install command above uses local APK files and disables network access. The phone also has `wget` with a certificate bundle for HTTP and HTTPS downloads; a download over HTTPS does not make an APK trusted.
+Install only the APKs supplied for your image. The install command above uses local APK files and disables network access. The phone also has `wget` with a certificate bundle for HTTP and HTTPS downloads; a download over HTTPS does not make an APK trusted.

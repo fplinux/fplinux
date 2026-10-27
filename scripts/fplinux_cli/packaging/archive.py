@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from fplinux_cli import common
+from fplinux_cli.alpine.lock import bundle_runtime_packages, load_alpine_lock
 from fplinux_cli.alpine.selection import bundle_packages, selected_packages
 from fplinux_cli.artifacts.release import current_release_context
 from fplinux_cli.build import reuse as cli_bundles
@@ -108,7 +109,13 @@ def load_release_manifest(target: str, config: dict[str, Any]) -> dict[str, Any]
     platform = platforms.load_platform(config["platform"])
     rootfs_packages = selected_packages(platform, config, root=common.ROOT)
     selected_bundle_packages = bundle_packages(platform, config, rootfs_packages, root=common.ROOT)
-    manifest = releases.load_release(target, bundle_packages=selected_bundle_packages)
+    bundle_apk_packages = (
+        *selected_bundle_packages,
+        *bundle_runtime_packages(
+            load_alpine_lock(common.ROOT), rootfs_packages, selected_bundle_packages
+        ),
+    )
+    manifest = releases.load_release(target, bundle_packages=bundle_apk_packages)
     image = manifest["image"]
     bundle_files = manifest["bundle_files"]
     runtime_files = manifest["runtime_files"]

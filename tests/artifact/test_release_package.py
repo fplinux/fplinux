@@ -293,6 +293,11 @@ class ReleaseArchiveInputs:
             mock.patch.object(targets, "load_target", return_value=self.target_config),
             mock.patch.object(releases, "load_release", return_value=self.release_manifest),
             mock.patch.object(platforms, "load_platform", return_value=self.platform),
+            mock.patch.object(
+                package_commands,
+                "load_alpine_lock",
+                return_value={"runtime": {"packages": [], "additions": {}}},
+            ),
             mock.patch.object(workspaces, "target_workspace_snapshot", return_value=self.snapshot),
             mock.patch.object(
                 definition, "environment_recipe_digest", return_value=self.environment_recipe

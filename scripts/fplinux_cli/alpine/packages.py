@@ -14,7 +14,7 @@ from fplinux_cli.build.sources import fetch
 from fplinux_cli.common import fail, replace_file_atomically, sha256_file
 from fplinux_cli.manifests.values import sha256_value
 
-from .lock import PACKAGE_ID, runtime_package_names
+from .lock import PACKAGE_ID, bundle_runtime_packages, runtime_package_names
 from .recipes import alpine_package_recipe
 
 PACKAGE_CACHE_DIRECTORY = "apks"
@@ -72,6 +72,27 @@ def _alpine_runtime_packages(
         _locked_alpine_artifact(lock, records, filename)
         for filename in runtime_package_names(lock, packages)
     ]
+
+
+def _bundle_apk_outputs(
+    lock: dict[str, Any],
+    records: dict[str, dict[str, object]],
+    packages: tuple[str, ...],
+    bundle_packages: tuple[str, ...],
+    local_packages: dict[str, Path],
+) -> dict[str, Path]:
+    """Collect optional local APKs and their additional locked Alpine runtime closure."""
+    try:
+        outputs = {name: local_packages[name] for name in bundle_packages}
+    except KeyError as error:
+        fail(f"bundle aport did not produce its declared package: {error.args[0]}")
+    outputs.update(
+        {
+            name: _locked_alpine_artifact(lock, records, filename)
+            for name, filename in bundle_runtime_packages(lock, packages, bundle_packages).items()
+        }
+    )
+    return outputs
 
 
 def _cached_package_files(repository: Path, names: set[str]) -> list[Path] | None:

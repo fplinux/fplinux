@@ -58,7 +58,9 @@ def ecc_source_download(archive_inputs: ArchiveInputs) -> dict[str, bytes]:
     write_archive_file(
         archive_inputs.root,
         "sources.lock.toml",
-        (
+        (archive_inputs.root / "sources.lock.toml").read_bytes()
+        + (
+            "\n"
             f'[bch]\nversion = "{revision}"\nname = "bch.tar.gz"\n'
             'url = "https://example.invalid/bch.tar.gz"\nalgorithm = "sha256"\n'
             f'checksum = "{hashlib.sha256(data).hexdigest()}"\n[bch.files]\n'

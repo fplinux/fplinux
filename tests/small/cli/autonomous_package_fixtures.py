@@ -107,6 +107,8 @@ def archive_inputs(
             source_files.append(f"targets/{target}/{parser}")
     for relative in source_files:
         write_archive_file(tmp_path, relative, (source / relative).read_bytes())
+    for name in ("alpine.lock.toml", "sources.lock.toml"):
+        write_archive_file(tmp_path, name, (source / "tests/fixtures/alpine" / name).read_bytes())
     shutil.copytree(source / "scripts/fplinux_cli", tmp_path / "scripts/fplinux_cli")
     shutil.copytree(source / "alpine/aports", tmp_path / "alpine/aports")
     windows_scripts = {}

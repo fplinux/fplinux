@@ -639,6 +639,29 @@ class BuilderPublicationTests:
 
         publication_inputs.assert_old_current_and_no_staging(current)
 
+    def test_publish_preserves_optional_external_apk_bytes_and_binds_the_manifest(
+        self, publication_inputs: PublicationInputs
+    ) -> None:
+        """An external dependency uses the same APK delivery and integrity contract as apps."""
+        source = publication_inputs.work / "packages/feature-runtime-2-r0.apk"
+        source.write_bytes(b"external runtime apk\n")
+        publication_inputs.bundle_apks["feature-runtime"] = source
+        publication_inputs.release_manifest["bundle_files"].append("apks/feature-runtime.apk")
+
+        published = publication_inputs.publish()
+
+        delivered = published / "apks/feature-runtime.apk"
+        manifest = json.loads((published / BUILD_MANIFEST_NAME).read_text())
+        runtime = json.loads((published / "runtime-manifest.json").read_text())
+        assert delivered.read_bytes() == b"external runtime apk\n"
+        assert delivered.stat().st_mode & 0o777 == 0o644
+        assert manifest["files"]["apks/feature-runtime.apk"] == {
+            "mode": 0o644,
+            "size": 21,
+            "sha256": hashlib.sha256(b"external runtime apk\n").hexdigest(),
+        }
+        assert "apks/feature-runtime.apk" not in runtime["sha256"]
+
     def test_publish_rejects_release_manifest_apks_outside_the_declared_set(
         self, publication_inputs: PublicationInputs
     ) -> None:

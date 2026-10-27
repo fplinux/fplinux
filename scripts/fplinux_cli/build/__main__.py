@@ -7,6 +7,7 @@ import argparse
 import os
 
 from fplinux_cli import common
+from fplinux_cli.alpine.lock import bundle_runtime_packages, load_alpine_lock
 from fplinux_cli.alpine.rootfs import build_rootfs
 from fplinux_cli.alpine.selection import bundle_packages, selected_packages
 from fplinux_cli.artifacts.bundles import bundle_slot
@@ -57,6 +58,12 @@ def main() -> None:
         platform = load_platform(target_config["platform"])
         rootfs_packages = selected_packages(platform, target_config)
         selected_bundle_packages = bundle_packages(platform, target_config, rootfs_packages)
+        bundle_apk_packages = (
+            *selected_bundle_packages,
+            *bundle_runtime_packages(
+                load_alpine_lock(), rootfs_packages, selected_bundle_packages
+            ),
+        )
         device_data = firmware_inputs.capture_snapshot_device_data(
             args.target,
             target_config["device_data"]["groups"],
@@ -75,7 +82,7 @@ def main() -> None:
             ),
             "Linux source",
         )
-        release_manifest = load_release(args.target, bundle_packages=selected_bundle_packages)
+        release_manifest = load_release(args.target, bundle_packages=bundle_apk_packages)
 
         profile = inputs_build.selected_profile(target_config)
         work = (
@@ -240,7 +247,7 @@ def main() -> None:
             rootfs_output=rootfs_output,
             rootfs_recipe=rootfs_recipe,
             kbuild_receipt=kbuild_receipt,
-            bundle_packages=selected_bundle_packages,
+            bundle_packages=bundle_apk_packages,
             bundle_apks=bundle_apk_outputs,
             boot_files=boot_files,
             boot_artifacts=boot_artifacts,

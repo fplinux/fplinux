@@ -27,6 +27,7 @@ from .aports import _build_alpine_composition_repository, _build_fplinux_apks
 from .packages import (
     _alpine_group_packages,
     _alpine_runtime_packages,
+    _bundle_apk_outputs,
     _cached_aport_packages,
     _prepare_alpine_sysroot,
 )
@@ -189,6 +190,8 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
 
     with _open_rootfs_build_lock(rootfs_directory) as lock_stream:
         fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
+        lock = alpine_lock.load_alpine_lock()
+        records = alpine_lock.package_records(lock)
         rootfs_hit = rootfs_state.receipt_matches(output, recipe)
         if external_image is not None and external_output is not None and rootfs_hit:
             from fplinux_cli.build.storage import ext4 as ext4_root_module  # noqa: PLC0415
@@ -213,20 +216,21 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
                 break
             cached_outputs.update(outputs)
         if rootfs_hit and cached_outputs and ext4_hit:
+            bundle_outputs = _bundle_apk_outputs(
+                lock, records, packages, bundle_packages, cached_outputs
+            )
             _require_cached_bundle_packages_installable(
                 output / rootfs_state.ROOTFS_NAME,
-                tuple(cached_outputs[name] for name in bundle_packages),
+                tuple(bundle_outputs.values()),
             )
             process_build.log_message(f"Alpine rootfs causal receipt hit: {recipe[:16]}")
             return (
                 require_file(output / rootfs_state.ROOTFS_NAME),
                 output,
                 recipe,
-                {name: cached_outputs[name] for name in bundle_packages},
+                bundle_outputs,
             )
 
-        lock = alpine_lock.load_alpine_lock()
-        records = alpine_lock.package_records(lock)
         minirootfs_record = lock["minirootfs"]
         minirootfs = acquire_source(ROOT, minirootfs_record["source_id"], CACHE)
         if minirootfs.stat().st_size != minirootfs_record.get("bytes"):
@@ -236,7 +240,6 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
 
         staging = Path(tempfile.mkdtemp(dir=output.parent, prefix=f".{recipe[:16]}-"))
         staging.chmod(0o755)
-        bundle_outputs: dict[str, Path] = {}
         try:
             root = staging / "root"
             sysroot = staging / "sysroot"
@@ -260,14 +263,13 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
                 public_key=signing_public_key,
                 build_packages=build_packages,
             )
-            try:
-                bundle_outputs = {name: local_packages[name] for name in bundle_packages}
-            except KeyError as error:
-                fail(f"bundle aport did not produce its declared package: {error.args[0]}")
+            bundle_outputs = _bundle_apk_outputs(
+                lock, records, packages, bundle_packages, local_packages
+            )
             if rootfs_hit and ext4_hit:
                 _require_cached_bundle_packages_installable(
                     output / rootfs_state.ROOTFS_NAME,
-                    tuple(bundle_outputs[name] for name in bundle_packages),
+                    tuple(bundle_outputs.values()),
                 )
                 process_build.log_message(f"Alpine rootfs causal receipt hit: {recipe[:16]}")
                 return (
@@ -317,7 +319,7 @@ def build_rootfs(  # noqa: PLR0913 -- rootfs content and optional image output s
                 bundle_packages,
                 firmware,
                 runtime_packages=alpine_lock.runtime_package_names(lock, packages),
-                bundle_apks=tuple(bundle_outputs[name] for name in bundle_packages),
+                bundle_apks=tuple(bundle_outputs.values()),
                 display_brightness=display_brightness,
             )
             _normalize_rootfs(root)

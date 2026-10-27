@@ -418,12 +418,17 @@ class AlpineCacheTests:
         rootfs_package, bundle_package = alpine_source.packages
         base_apk = alpine_source.write(f"built/{rootfs_package}.apk", b"base\n")
         bundle_apk = alpine_source.write(f"built/{bundle_package}.apk", b"bundle\n")
+        runtime_apk = alpine_source.write("downloads/feature-runtime-1-r0.apk", b"runtime\n")
         extracted = mock.MagicMock()
         archive_context = mock.MagicMock()
         archive_context.__enter__.return_value = extracted
         lock = {
             "release": "3.24.1",
             "arch": "armv7",
+            "runtime": {
+                "packages": ["base-1-r0.apk"],
+                "additions": {bundle_package: ["feature-runtime-1-r0.apk"]},
+            },
             "minirootfs": {
                 "source_id": "alpine_target",
                 "url": "https://example.invalid",
@@ -438,6 +443,9 @@ class AlpineCacheTests:
             error_status: int = solver_status,
             **_kwargs: object,
         ) -> subprocess.CompletedProcess[str]:
+            if "--simulate" in command:
+                assert str(bundle_apk) in command
+                assert str(runtime_apk) in command
             status = error_status if "--simulate" in command else 0
             detail = "missing runtime dependency" if status else ""
             return subprocess.CompletedProcess(command, status, "", detail)
@@ -460,6 +468,9 @@ class AlpineCacheTests:
             ),
             mock.patch.object(alpine_lock, "load_alpine_lock", return_value=lock),
             mock.patch.object(alpine_lock, "package_records", return_value={}),
+            mock.patch.object(
+                alpine_packages, "_locked_alpine_artifact", return_value=runtime_apk
+            ),
             mock.patch.object(alpine_rootfs, "acquire_source", return_value=archive),
             mock.patch.object(alpine_rootfs, "_alpine_runtime_packages", return_value=[]),
             mock.patch.object(alpine_rootfs, "_alpine_group_packages", return_value=[]),
@@ -488,7 +499,10 @@ class AlpineCacheTests:
             else:
                 actual = alpine_rootfs.build_rootfs(2, (rootfs_package,), (bundle_package,))
                 assert (actual[:3]) == ((rootfs, output, "9" * 64))
-                assert (actual[3]) == ({bundle_package: bundle_apk})
+                assert actual[3] == {
+                    bundle_package: bundle_apk,
+                    "feature-runtime": runtime_apk,
+                }
             assert (rootfs.read_bytes()) == (b"rootfs\n")
 
     def test_mocked_rootfs_cache_hits_reuse_cached_outputs(
@@ -513,6 +527,11 @@ class AlpineCacheTests:
                 ),
                 mock.patch.object(alpine_rootfs, "alpine_rootfs_recipe", return_value=recipe),
                 mock.patch.object(alpine_rootfs_state, "receipt_matches", return_value=True),
+                mock.patch.object(
+                    alpine_lock,
+                    "load_alpine_lock",
+                    return_value={"runtime": {"packages": [], "additions": {}}, "package": []},
+                ),
                 mock.patch.object(
                     alpine_rootfs,
                     "_cached_aport_packages",

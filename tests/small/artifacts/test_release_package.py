@@ -15,6 +15,8 @@ from fplinux_cli.alpine import selection as alpine_state
 from fplinux_cli.manifests import platforms, releases, targets
 from fplinux_cli.packaging import archive as package_commands
 
+from tests import ROOT
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -72,6 +74,8 @@ def release_inputs(tmp_path: Path) -> ReleaseInputs:
     readme = root / "targets" / target / "release/EXTRA.txt"
     readme.parent.mkdir(parents=True)
     readme.write_text("phone instructions\n", encoding="utf-8")
+    for name in ("alpine.lock.toml", "sources.lock.toml"):
+        (root / name).write_bytes((ROOT / "tests/fixtures/alpine" / name).read_bytes())
     for package in (*registration.COMMON_PACKAGES, "demo"):
         apkbuild = root / "alpine/aports" / package / "APKBUILD"
         apkbuild.parent.mkdir(parents=True)
@@ -240,6 +244,52 @@ class ReleaseManifestPolicyTests:
         assert release["runtime_files"] == release_inputs.release_manifest["runtime_files"]
         assert release["documents"] == ["release/EXTRA.txt"]
         assert no_optional_apks["bundle_files"] == source_manifest["bundle_files"]
+
+    def test_archive_manifest_includes_optional_runtime_apks_only_until_preinstalled(
+        self, release_inputs: ReleaseInputs
+    ) -> None:
+        """The archive carries the app's external closure when it is absent from the rootfs."""
+        source_manifest = {
+            **release_inputs.release_manifest,
+            "bundle_files": [
+                relative
+                for relative in release_inputs.release_manifest["bundle_files"]
+                if not relative.startswith("apks/")
+            ],
+        }
+        (release_inputs.readme.parent / "manifest.toml").write_text(
+            "\n".join(f"{key} = {json.dumps(value)}" for key, value in source_manifest.items())
+            + "\n",
+            encoding="utf-8",
+        )
+        lock = {
+            "runtime": {
+                "packages": ["base-1-r0.apk"],
+                "additions": {"demo": ["feature-runtime-2-r0.apk"]},
+            }
+        }
+        profile = {
+            **release_inputs.target_config,
+            "rootfs": {"base_packages": [], "packages": ["demo"]},
+        }
+
+        with (
+            mock.patch.object(common, "ROOT", release_inputs.root),
+            mock.patch.object(platforms, "load_platform", return_value=release_inputs.platform),
+            mock.patch.object(package_commands, "load_alpine_lock", return_value=lock),
+        ):
+            optional = package_commands.load_release_manifest(
+                release_inputs.target, release_inputs.target_config
+            )
+            installed = package_commands.load_release_manifest(release_inputs.target, profile)
+
+        assert optional["bundle_files"] == [
+            *source_manifest["bundle_files"],
+            "apks/demo.apk",
+            "apks/feature-runtime.apk",
+        ]
+        assert installed["bundle_files"] == source_manifest["bundle_files"]
+        assert optional["runtime_files"] == installed["runtime_files"]
 
     def test_release_manifest_rejects_a_second_apk_inventory(
         self, release_inputs: ReleaseInputs

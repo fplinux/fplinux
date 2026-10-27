@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from fplinux_cli.common import fail
 from fplinux_cli.manifests.source_catalog import ResolvedSource, resolve_source
 
+from .lock import PACKAGE_ID
 from .selection import aport_producer
 
 if TYPE_CHECKING:
@@ -98,6 +99,31 @@ def _expand(value: str, variables: dict[str, str], *, package: str) -> str:
     return result
 
 
+def _declaration_variables(template: str) -> dict[str, str]:
+    variables: dict[str, str] = {}
+    for match in _ASSIGNMENT.finditer(template.replace("\\\n", "")):
+        value = match[2]
+        variables[match[1]] = (
+            value[1:-1] if value.startswith(("'", '"')) else value.split(" #", 1)[0].rstrip()
+        )
+    return variables
+
+
+def aport_runtime_dependencies(root: Path, package: str) -> tuple[str, ...]:
+    """Read main-package runtime names without resolving unrelated original source pins."""
+    variables = _declaration_variables(_template(root, package))
+    dependencies = _expand(variables.get("depends", ""), variables, package=package)
+    return tuple(
+        sorted(
+            {
+                match.group(0)
+                for dependency in dependencies.split()
+                if (match := PACKAGE_ID.match(dependency)) is not None
+            }
+        )
+    )
+
+
 def aport_declaration(root: Path, package: str) -> dict[str, Any]:
     """Bind the package template to only the source records it actually consumes."""
     text = _template(root, package)
@@ -105,12 +131,7 @@ def aport_declaration(root: Path, package: str) -> dict[str, Any]:
     native = _REFERENCE.sub(lambda match: _reference_value(selected[match[2]], match[1]), text)
     if "@source:" in native or "@version:" in native:
         fail(f"unresolved Alpine source reference: {package}")
-    variables = {}
-    for match in _ASSIGNMENT.finditer(native.replace("\\\n", "")):
-        value = match[2]
-        variables[match[1]] = (
-            value[1:-1] if value.startswith(("'", '"')) else value.split(" #", 1)[0].rstrip()
-        )
+    variables = _declaration_variables(native)
     context: dict[str, Any] = {
         "sources": _expand(variables.get("source", ""), variables, package=package).split(),
         "originals": {key: asdict(source) for key, source in selected.items()},

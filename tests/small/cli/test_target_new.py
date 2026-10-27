@@ -51,6 +51,7 @@ def target_checkout() -> Iterator[TargetCheckout]:
         shutil.copytree(REPOSITORY / "alpine/aports", root / "alpine/aports")
         shutil.copytree(REPOSITORY / "profiles", root / "profiles")
         shutil.copy2(REPOSITORY / "sources.lock.toml", root)
+        shutil.copy2(REPOSITORY / "tests/fixtures/alpine/alpine.lock.toml", root)
         target_directory = root / "targets"
         target_directory.mkdir()
         with mock.patch.object(common, "ROOT", root):

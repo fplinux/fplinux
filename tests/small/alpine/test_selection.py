@@ -16,6 +16,9 @@ from fplinux_cli.alpine import (
 from fplinux_cli.alpine import (
     selection as alpine_selection,
 )
+from fplinux_cli.alpine import (
+    sources as alpine_sources,
+)
 
 from tests.small.alpine.fixtures import (
     alpine_source as alpine_source,  # noqa: PLC0414 -- pytest fixture export.
@@ -200,6 +203,31 @@ class AlpineSelectionTests:
             ("base-1-r0.apk", "feature-dependency-1-r0.apk")
         )
 
+    def test_optional_runtime_delivery_excludes_rootfs_and_unselected_dependencies(self) -> None:
+        """Optional apps share extra APKs without bundling installed or unrelated closures."""
+        lock = {
+            "runtime": {
+                "packages": ["base-1-r0.apk"],
+                "additions": {
+                    "fplinux-core": ["shared-2-r0.apk"],
+                    "fplinux-feature": ["shared-2-r0.apk", "feature-runtime-3-r1.apk"],
+                    "fplinux-other": ["feature-runtime-3-r1.apk", "other-runtime-4-r0.apk"],
+                    "fplinux-unselected": ["unused-5-r0.apk"],
+                },
+            }
+        }
+
+        assert alpine_lock.bundle_runtime_packages(
+            lock, ("fplinux-core",), ("fplinux-feature", "fplinux-other")
+        ) == {
+            "feature-runtime": "feature-runtime-3-r1.apk",
+            "other-runtime": "other-runtime-4-r0.apk",
+        }
+        assert alpine_lock.bundle_runtime_packages(
+            lock, ("fplinux-core", "fplinux-feature"), ("fplinux-other",)
+        ) == {"other-runtime": "other-runtime-4-r0.apk"}
+        assert alpine_lock.bundle_runtime_packages(lock, ("fplinux-core",), ()) == {}
+
     def test_bundle_subpackages_use_existing_aports_without_selecting_their_parents(
         self, alpine_source: AlpineSourceContext
     ) -> None:
@@ -222,6 +250,89 @@ class AlpineSelectionTests:
         )
 
         assert (actual) == (optional)
+
+    @pytest.mark.parametrize(
+        ("rootfs_packages", "expected"),
+        [
+            pytest.param(
+                ("fplinux-package-a",),
+                ("fplinux-data-child", "fplinux-package-b", "fplinux-runtime"),
+                id="runtime-data-is-optional",
+            ),
+            pytest.param(
+                ("fplinux-package-a", "fplinux-data-child"),
+                ("fplinux-package-b", "fplinux-runtime"),
+                id="installed-runtime-data-stays-rootfs-owned",
+            ),
+        ],
+    )
+    def test_bundle_delivers_transitive_local_runtime_dependencies(
+        self,
+        alpine_source: AlpineSourceContext,
+        rootfs_packages: tuple[str, ...],
+        expected: tuple[str, ...],
+    ) -> None:
+        """Deliver an optional app's required data without its producer or build-only APKs."""
+        alpine_source.write(
+            "alpine/aports/fplinux-package-b/APKBUILD",
+            b'pkgname=fplinux-package-b\ndepends="fplinux-package-a>=1 fplinux-runtime"\n',
+        )
+        alpine_source.write(
+            "alpine/aports/fplinux-runtime/APKBUILD",
+            b'pkgname=fplinux-runtime\ndepends="fplinux-data-child=2-r0 external-runtime"\n',
+        )
+        alpine_source.write(
+            "alpine/aports/fplinux-data/APKBUILD",
+            b'pkgname=fplinux-data\ndepends="fplinux-build-only"\n',
+        )
+        alpine_source.write(
+            "alpine/aports/fplinux-build-only/APKBUILD", b"pkgname=fplinux-build-only\n"
+        )
+        with (
+            mock.patch.dict(
+                alpine_registration.SUBPACKAGE_APORTS, {"fplinux-data-child": "fplinux-data"}
+            ),
+            mock.patch.dict(
+                alpine_registration.LOCAL_BUILD_DEPENDENCIES,
+                {"fplinux-package-b": ("fplinux-build-only",)},
+            ),
+        ):
+            actual = alpine_selection.bundle_packages(
+                {"bundle": {"packages": ["fplinux-package-b"]}},
+                {"bundle": {"packages": []}},
+                rootfs_packages,
+                alpine_source.root,
+            )
+
+        assert actual == expected
+
+    def test_bundle_selection_does_not_resolve_unrelated_external_source_pins(
+        self, alpine_source: AlpineSourceContext
+    ) -> None:
+        """Runtime names need no external source record; full materialization still requires it."""
+        alpine_source.write(
+            "alpine/aports/fplinux-package-b/APKBUILD",
+            b"pkgname=fplinux-package-b\n"
+            b"pkgver=@version:optional_original@\n"
+            b"pkgrel=0\n"
+            b'depends="$pkgname-helper=$pkgver-r$pkgrel"\n'
+            b'source="@source:optional_original@"\n',
+        )
+        alpine_source.write(
+            "alpine/aports/fplinux-package-b-helper/APKBUILD",
+            b"pkgname=fplinux-package-b-helper\n",
+        )
+
+        actual = alpine_selection.bundle_packages(
+            {"bundle": {"packages": ["fplinux-package-b"]}},
+            {"bundle": {"packages": []}},
+            ("fplinux-package-a",),
+            alpine_source.root,
+        )
+
+        assert actual == ("fplinux-package-b", "fplinux-package-b-helper")
+        with pytest.raises(SystemExit, match="source lock entry is missing: optional_original"):
+            alpine_sources.aport_declaration(alpine_source.root, "fplinux-package-b")
 
     def test_package_cannot_be_selected_and_bundle_published(
         self, alpine_source: AlpineSourceContext

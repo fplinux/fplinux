@@ -125,13 +125,36 @@ def selected_packages(
     return _canonical_packages(tuple(owners), root)
 
 
+def _bundle_runtime_closure(
+    packages: Sequence[str], rootfs_packages: Sequence[str], root: Path
+) -> tuple[str, ...]:
+    """Extend optional main APKs with dependencies backed by current local aports."""
+    from .sources import aport_runtime_dependencies  # noqa: PLC0415 -- resolves producers here.
+
+    rootfs = set(rootfs_packages)
+    resolved = set(packages)
+    pending = list(packages)
+    while pending:
+        package = pending.pop()
+        if aport_producer(package) != package:
+            continue
+        for name in aport_runtime_dependencies(root, package):
+            if name in rootfs or name in resolved:
+                continue
+            aport = root / "alpine/aports" / aport_producer(name) / "APKBUILD"
+            if aport.is_file():
+                resolved.add(name)
+                pending.append(name)
+    return _canonical_packages(tuple(resolved), root)
+
+
 def bundle_packages(
     platform_config: Mapping[str, object],
     target_config: Mapping[str, object],
     rootfs_packages: Sequence[str],
     root: Path = ROOT,
 ) -> tuple[str, ...]:
-    """Resolve platform and target APKs published alongside, not in, the rootfs."""
+    """Resolve optional APKs and their declared local runtime dependencies."""
     owners: dict[str, str] = {}
     for owner, packages in (
         ("platform", _declared_packages(platform_config, "platform", "bundle")),
@@ -155,7 +178,7 @@ def bundle_packages(
             "packages cannot be both rootfs-selected and bundle-published: "
             + ", ".join(sorted(overlap))
         )
-    return result
+    return _bundle_runtime_closure(result, rootfs_packages, root)
 
 
 def shared_aport_sources(package: str, root: Path = ROOT) -> tuple[Path, ...]:

@@ -178,3 +178,15 @@ def runtime_package_names(lock: dict[str, Any], packages: Sequence[str]) -> tupl
     for package in packages:
         names.extend(additions.get(package, ()))
     return tuple(dict.fromkeys(names))
+
+
+def bundle_runtime_packages(
+    lock: dict[str, Any], packages: Sequence[str], bundle_packages: Sequence[str]
+) -> dict[str, str]:
+    """Map optional runtime APK identities to locked files absent from the rootfs closure."""
+    rootfs_runtime = set(runtime_package_names(lock, packages))
+    return {
+        filename.rsplit("-", 2)[0]: filename
+        for filename in runtime_package_names(lock, bundle_packages)
+        if filename not in rootfs_runtime
+    }
