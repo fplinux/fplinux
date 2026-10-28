@@ -7,6 +7,7 @@ import hashlib
 import shutil
 import tempfile
 import urllib.request
+from http.client import IncompleteRead
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -81,11 +82,20 @@ def transfer_verified_file(
                 url,
                 headers={"User-Agent": "FPLinux"},
             )
-            with urllib.request.urlopen(  # noqa: S310 -- callers require HTTPS before transfer.
-                request,
-                timeout=60,
-            ) as response:
-                shutil.copyfileobj(response, output)
+            for attempt in range(1, 4):
+                try:
+                    with urllib.request.urlopen(  # noqa: S310 -- callers require HTTPS.
+                        request,
+                        timeout=60,
+                    ) as response:
+                        shutil.copyfileobj(response, output)
+                    break
+                except IncompleteRead as error:
+                    if attempt == 3:
+                        message = "HTTP response interrupted after 3 attempts"
+                        raise OSError(message) from error
+                    output.seek(0)
+                    output.truncate()
         verify(temporary)
         temporary.replace(destination)
         temporary = None

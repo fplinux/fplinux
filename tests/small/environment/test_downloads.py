@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import io
 import urllib.error
+from email.message import Message
+from http.client import IncompleteRead
 from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
 from fplinux_cli.build.sources import fetch
-from fplinux_cli.environment.downloads import download_locked_file
+from fplinux_cli.environment.downloads import download_locked_file, transfer_verified_file
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -21,6 +23,90 @@ _ABC_SHA512 = (
     "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a"
     "2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"
 )
+
+
+class _InterruptedResponse(io.BytesIO):
+    """Deliver a prefix before the controlled HTTPS response breaks."""
+
+    def read(self, size: int | None = -1) -> bytes:
+        if self.tell():
+            partial = b"incomplete chunk"
+            raise IncompleteRead(partial)
+        return super().read(size)
+
+
+@pytest.mark.parametrize("interruptions", [1, 2])
+def test_interrupted_download_restarts_before_verifying_and_publishing(
+    tmp_path: Path, interruptions: int
+) -> None:
+    destination = tmp_path / "locked.bin"
+    destination.write_bytes(b"previous declaration")
+    destination.chmod(0o640)
+    responses = [
+        *(_InterruptedResponse(b"longer unverified prefix") for _ in range(interruptions)),
+        io.BytesIO(b"abc"),
+    ]
+    with mock.patch("urllib.request.urlopen", side_effect=responses) as request:
+        assert download_locked_file(_URL, _ABC_SHA256, destination) == destination
+
+    assert request.call_count == interruptions + 1
+    assert all(response.closed for response in responses)
+    assert destination.read_bytes() == b"abc"
+    assert destination.stat().st_mode & 0o777 == 0o600
+    assert list(tmp_path.iterdir()) == [destination]
+
+
+def test_repeatedly_interrupted_download_stops_and_preserves_previous_bytes(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "locked.bin"
+    destination.write_bytes(b"previous declaration")
+    destination.chmod(0o640)
+    responses = [_InterruptedResponse(b"unverified prefix") for _ in range(3)]
+    with (
+        mock.patch("urllib.request.urlopen", side_effect=responses) as request,
+        pytest.raises(SystemExit, match="HTTP response interrupted after 3 attempts"),
+    ):
+        download_locked_file(_URL, _ABC_SHA256, destination)
+
+    assert request.call_count == 3
+    assert all(response.closed for response in responses)
+    assert destination.read_bytes() == b"previous declaration"
+    assert destination.stat().st_mode & 0o777 == 0o640
+    assert list(tmp_path.iterdir()) == [destination]
+
+
+def test_interrupted_metadata_transfer_reports_an_os_error_without_publishing(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "metadata.json"
+    destination.write_bytes(b"previous metadata")
+    responses = [_InterruptedResponse(b"unverified metadata") for _ in range(3)]
+    with (
+        mock.patch("urllib.request.urlopen", side_effect=responses) as request,
+        pytest.raises(OSError, match="HTTP response interrupted after 3 attempts"),
+    ):
+        transfer_verified_file(
+            _URL, destination, verify=lambda _path: pytest.fail("incomplete bytes were verified")
+        )
+
+    assert request.call_count == 3
+    assert all(response.closed for response in responses)
+    assert destination.read_bytes() == b"previous metadata"
+    assert list(tmp_path.iterdir()) == [destination]
+
+
+def test_missing_http_input_is_not_retried(tmp_path: Path) -> None:
+    destination = tmp_path / "locked.bin"
+    error = urllib.error.HTTPError(_URL, 404, "Not Found", Message(), None)
+    with (
+        mock.patch("urllib.request.urlopen", side_effect=error) as request,
+        pytest.raises(SystemExit, match="HTTP Error 404: Not Found"),
+    ):
+        download_locked_file(_URL, _ABC_SHA256, destination)
+
+    request.assert_called_once()
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_verified_refresh_publishes_complete_private_bytes_and_reuses_them(tmp_path: Path) -> None:
@@ -41,10 +127,13 @@ def test_checksum_failure_preserves_old_bytes_and_removes_failed_temporary(tmp_p
     destination.write_bytes(b"previous declaration")
     destination.chmod(0o640)
     with (
-        mock.patch("urllib.request.urlopen", return_value=io.BytesIO(b"unverified response")),
+        mock.patch(
+            "urllib.request.urlopen", return_value=io.BytesIO(b"unverified response")
+        ) as request,
         pytest.raises(SystemExit, match="SHA256 mismatch"),
     ):
         download_locked_file(_URL, _ABC_SHA256, destination)
+    request.assert_called_once()
     assert destination.read_bytes() == b"previous declaration"
     assert destination.stat().st_mode & 0o777 == 0o640
     assert list(tmp_path.iterdir()) == [destination]
@@ -55,10 +144,11 @@ def test_network_failure_preserves_old_bytes_and_the_consumer_error(tmp_path: Pa
     destination.write_bytes(b"previous declaration")
     error = urllib.error.URLError("controlled network failure")
     with (
-        mock.patch("urllib.request.urlopen", side_effect=error),
+        mock.patch("urllib.request.urlopen", side_effect=error) as request,
         pytest.raises(SystemExit) as failure,
     ):
         download_locked_file(_URL, _ABC_SHA256, destination)
+    request.assert_called_once()
     assert str(failure.value) == (
         "fplinux: locked download failed: https://example.invalid/locked.bin: "
         "<urlopen error controlled network failure>"
