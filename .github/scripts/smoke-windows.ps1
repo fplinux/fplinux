@@ -32,7 +32,7 @@ try {
     $program = Join-Path $workspace 'smoke.py'
     Copy-Item (Join-Path $Checkout '.github/scripts/smoke-normal-user.py') $program
     Start-Service seclogon
-    $process = Start-Process -FilePath $Python -ArgumentList @('-B', '-I', ('"' + $program + '"')) -Credential $credential -LoadUserProfile -WorkingDirectory $workspace -RedirectStandardOutput (Join-Path $workspace 'stdout.log') -RedirectStandardError (Join-Path $workspace 'stderr.log') -PassThru -Wait
+    $process = Start-Process -FilePath $Python -ArgumentList @('-B', '-I', ('"' + $program + '"')) -Credential $credential -LoadUserProfile -UseNewEnvironment -WorkingDirectory $workspace -RedirectStandardOutput (Join-Path $workspace 'stdout.log') -RedirectStandardError (Join-Path $workspace 'stderr.log') -PassThru -Wait
     Get-Content (Join-Path $workspace 'stdout.log')
     Get-Content (Join-Path $workspace 'stderr.log')
     if ($process.ExitCode -ne 0) { throw "Ordinary-user archive smoke failed with status $($process.ExitCode)" }
