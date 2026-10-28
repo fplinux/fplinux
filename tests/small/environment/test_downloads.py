@@ -28,22 +28,31 @@ _ABC_SHA512 = (
 class _InterruptedResponse(io.BytesIO):
     """Deliver a prefix before the controlled HTTPS response breaks."""
 
+    def __init__(self, value: bytes, *, failure: Exception) -> None:
+        super().__init__(value)
+        self.failure = failure
+
     def read(self, size: int | None = -1) -> bytes:
         if self.tell():
-            partial = b"incomplete chunk"
-            raise IncompleteRead(partial)
+            raise self.failure
         return super().read(size)
 
 
+@pytest.mark.parametrize(
+    "failure_type", [IncompleteRead, TimeoutError], ids=["truncated", "timeout"]
+)
 @pytest.mark.parametrize("interruptions", [1, 2])
 def test_interrupted_download_restarts_before_verifying_and_publishing(
-    tmp_path: Path, interruptions: int
+    tmp_path: Path, interruptions: int, failure_type: type[Exception]
 ) -> None:
     destination = tmp_path / "locked.bin"
     destination.write_bytes(b"previous declaration")
     destination.chmod(0o640)
     responses = [
-        *(_InterruptedResponse(b"longer unverified prefix") for _ in range(interruptions)),
+        *(
+            _InterruptedResponse(b"longer unverified prefix", failure=failure_type(b"interrupted"))
+            for _ in range(interruptions)
+        ),
         io.BytesIO(b"abc"),
     ]
     with mock.patch("urllib.request.urlopen", side_effect=responses) as request:
@@ -56,13 +65,19 @@ def test_interrupted_download_restarts_before_verifying_and_publishing(
     assert list(tmp_path.iterdir()) == [destination]
 
 
+@pytest.mark.parametrize(
+    "failure_type", [IncompleteRead, TimeoutError], ids=["truncated", "timeout"]
+)
 def test_repeatedly_interrupted_download_stops_and_preserves_previous_bytes(
-    tmp_path: Path,
+    tmp_path: Path, failure_type: type[Exception]
 ) -> None:
     destination = tmp_path / "locked.bin"
     destination.write_bytes(b"previous declaration")
     destination.chmod(0o640)
-    responses = [_InterruptedResponse(b"unverified prefix") for _ in range(3)]
+    responses = [
+        _InterruptedResponse(b"unverified prefix", failure=failure_type(b"interrupted"))
+        for _ in range(3)
+    ]
     with (
         mock.patch("urllib.request.urlopen", side_effect=responses) as request,
         pytest.raises(SystemExit, match="HTTP response interrupted after 3 attempts"),
@@ -76,12 +91,18 @@ def test_repeatedly_interrupted_download_stops_and_preserves_previous_bytes(
     assert list(tmp_path.iterdir()) == [destination]
 
 
+@pytest.mark.parametrize(
+    "failure_type", [IncompleteRead, TimeoutError], ids=["truncated", "timeout"]
+)
 def test_interrupted_metadata_transfer_reports_an_os_error_without_publishing(
-    tmp_path: Path,
+    tmp_path: Path, failure_type: type[Exception]
 ) -> None:
     destination = tmp_path / "metadata.json"
     destination.write_bytes(b"previous metadata")
-    responses = [_InterruptedResponse(b"unverified metadata") for _ in range(3)]
+    responses = [
+        _InterruptedResponse(b"unverified metadata", failure=failure_type(b"interrupted"))
+        for _ in range(3)
+    ]
     with (
         mock.patch("urllib.request.urlopen", side_effect=responses) as request,
         pytest.raises(OSError, match="HTTP response interrupted after 3 attempts"),

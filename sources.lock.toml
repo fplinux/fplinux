@@ -1198,7 +1198,7 @@ checksum = "b6b34c52e672e810d339db14e0c10b5b6f5f67a30d8d05cdac5d8cb4d82f78d5"
 [linux_host_zlib]
 version = "1.3.2"
 name = "zlib-1.3.2.tar.gz"
-url = "https://zlib.net/fossils/zlib-1.3.2.tar.gz"
+url = "https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.gz"
 algorithm = "sha256"
 checksum = "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16"
 

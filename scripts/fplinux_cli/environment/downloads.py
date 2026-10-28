@@ -90,7 +90,7 @@ def transfer_verified_file(
                     ) as response:
                         shutil.copyfileobj(response, output)
                     break
-                except IncompleteRead as error:
+                except (IncompleteRead, TimeoutError) as error:
                     if attempt == 3:
                         message = "HTTP response interrupted after 3 attempts"
                         raise OSError(message) from error
