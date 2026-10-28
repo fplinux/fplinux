@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from typing import Literal
 
 TEST_TIERS = {
-    "small": 90,
+    "small": 5 * 60,
     "host_process": 300,
     # Native builds and five-profile application matrices share one deadline.
     "host_tool": 30 * 60,

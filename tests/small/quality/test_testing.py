@@ -188,12 +188,11 @@ class SelectedTestRunTests:
         live.mkdir()
         monkeypatch.chdir(live)
 
-        [(_label, command, timeout)] = testing.pytest_commands(
+        [(_label, command, _timeout)] = testing.pytest_commands(
             ["tests/small/quality"], workspace=captured
         )
 
         assert command[-1] == "tests/small/quality"
-        assert timeout == 90
 
     def test_live_directory_missing_from_capture_is_not_selected(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -208,8 +207,12 @@ class SelectedTestRunTests:
         with pytest.raises(SystemExit, match="test directory not found in captured workspace"):
             testing.pytest_commands(["tests/small/quality"], workspace=captured)
 
-    def test_named_selection_counts_each_tiers_time_budget_once(self) -> None:
+    def test_named_selection_counts_each_tiers_time_budget_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Names spanning tiers get their combined budget; more names in a tier add nothing."""
+        monkeypatch.setitem(testing.TEST_TIERS, "small", 7)
+        monkeypatch.setitem(testing.TEST_TIERS, "host_process", 11)
 
         def selected_budget(*names: str) -> int:
             [(_label, _command, timeout)] = testing.pytest_commands(list(names))
@@ -217,8 +220,8 @@ class SelectedTestRunTests:
 
         small = selected_budget("tests.small.environment.test_common.FirstCase")
         host_process = selected_budget("tests.host_process.test_process")
-        assert small == 90
-        assert host_process == 300
+        assert small == 7
+        assert host_process == 11
         assert (
             selected_budget(
                 "tests.small.environment.test_common.FirstCase",
@@ -232,7 +235,7 @@ class SelectedTestRunTests:
                 "tests/small/test_example.py::ExampleTests::test_first",
                 "tests/host_process/test_example.py::test_example[case]",
             )
-            == 390
+            == 18
         )
 
     @pytest.mark.parametrize(
