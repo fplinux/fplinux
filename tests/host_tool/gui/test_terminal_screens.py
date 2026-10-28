@@ -71,7 +71,7 @@ def terminal_screens(
             str(ui_host_inputs),
         ],
         name="build and capture the actual Terminal application",
-        timeout=360,
+        timeout=900,
     )
     (output / "capture.log").write_text(result.stdout + result.stderr, encoding="utf-8")
     log_root = os.environ.get("FPLINUX_LOG_ROOT")

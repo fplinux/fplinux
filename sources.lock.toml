@@ -1182,11 +1182,11 @@ algorithm = "sha256"
 checksum = "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a"
 
 [linux_host_python3]
-version = "3.14.8"
-name = "Python-3.14.8.tar.xz"
-url = "https://www.python.org/ftp/python/3.14.8/Python-3.14.8.tar.xz"
+version = "3.14.10"
+name = "Python-3.14.10.tar.xz"
+url = "https://www.python.org/ftp/python/3.14.10/Python-3.14.10.tar.xz"
 algorithm = "sha256"
-checksum = "c2215904f02b175596dc49351585104f4bc20341e1c47378b26a2c274360ce73"
+checksum = "de414a57119abef52784d8993e341d53aed635fc2b05c2607d9f98a2c5b72032"
 
 [linux_host_xz]
 version = "5.8.4"
@@ -1273,11 +1273,11 @@ algorithm = "sha512"
 checksum = "774744b9b0ea69f641ad073616a822c2649194f9b9b840296575528485e6fb8809b3342af5ee64512991389027cea9056c8e4a273d08ba2dbb3318c36e6c80ea"
 
 [phoneme_host_musl]
-version = "1.2.6-r2"
-name = "x86-musl-dev-1.2.6-r2.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86/musl-dev-1.2.6-r2.apk"
+version = "1.2.6-r3"
+name = "x86-musl-dev-1.2.6-r3.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86/musl-dev-1.2.6-r3.apk"
 algorithm = "sha512"
-checksum = "c54a3a74356f440df495917c93d1d82fb64b339fc652361a8c4f2445b720258b196e0a7ed2abdbec670c0890ccd2dfed2d430857eed7bec91bd5f8d95d7cd344"
+checksum = "88086bf4b3182074cf4847127c292b7e10101c55e294a542ed832ddc9418c30b4d7d6ec55198ccb8ba0733f8e290ada5e3baf45b9047d824261ef187daa5d04f"
 
 [phoneme_host_unwind]
 version = "22.1.3-r0"

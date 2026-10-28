@@ -101,8 +101,8 @@ apk_groups = [
     "py3-mako=1.3.12-r0",
     "py3-mypy=1.19.1-r2",
     "py3-ruamel.yaml=0.19.1-r0",
-    "python3-dev=3.14.8-r0",
-    "python3=3.14.8-r0",
+    "python3-dev=3.14.10-r1",
+    "python3=3.14.10-r1",
     "reuse=6.2.0-r0",
     "shellcheck=0.11.0-r1",
     "shfmt=3.13.1-r3",
@@ -309,11 +309,11 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:alpine-release-3.24.2-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/alpine-release-3.24.2-r0.apk"
-sha256 = "cdeb2b79bc63abe70a90007db9cfad8630f1c24db354c8de7a574953f784feab"
-bytes = 2095
-destination = "downloads/environment/apk/main/x86_64/alpine-release-3.24.2-r0.apk"
+key = "environment:apk:x86_64:alpine-release-3.24.3-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/alpine-release-3.24.3-r0.apk"
+sha256 = "439127256d34c9d51da3b90f9d68d4bf43342de994576a4c0e968d8228bd2f8c"
+bytes = 2087
+destination = "downloads/environment/apk/main/x86_64/alpine-release-3.24.3-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -498,20 +498,20 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:c-ares-1.34.8-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/c-ares-1.34.8-r0.apk"
-sha256 = "123fdeadc5ec884b897787f98d865492bf70402697b251cd1f3591a00b8c9d73"
-bytes = 110689
-destination = "downloads/environment/apk/main/x86_64/c-ares-1.34.8-r0.apk"
+key = "environment:apk:x86_64:c-ares-1.34.9-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/c-ares-1.34.9-r0.apk"
+sha256 = "3539a3e11c1ef1516117d8179a546ac882086e94e0d78ad51d687b3fa2b3b5f2"
+bytes = 113179
+destination = "downloads/environment/apk/main/x86_64/c-ares-1.34.9-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:c-ares-dev-1.34.8-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/c-ares-dev-1.34.8-r0.apk"
-sha256 = "bfd852e49915db5029ab6160638c468aa34613abf9de38abfed549f9f23e2b4d"
-bytes = 1003498
-destination = "downloads/environment/apk/main/x86_64/c-ares-dev-1.34.8-r0.apk"
+key = "environment:apk:x86_64:c-ares-dev-1.34.9-r0.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/c-ares-dev-1.34.9-r0.apk"
+sha256 = "8402b157bfd6e39edc1e0c62f4a0dd8eced8f7a40442eb02cfa1391c0380c983"
+bytes = 1044344
+destination = "downloads/environment/apk/main/x86_64/c-ares-dev-1.34.9-r0.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
@@ -2775,47 +2775,47 @@ purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:pyc-3.14.8-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/pyc-3.14.8-r0.apk"
-sha256 = "45894c74dcf5229c373b5693045df60b90c671639103fd43a37eaefb0961557f"
-bytes = 1268
-destination = "downloads/environment/apk/main/x86_64/pyc-3.14.8-r0.apk"
+key = "environment:apk:x86_64:pyc-3.14.10-r1.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/pyc-3.14.10-r1.apk"
+sha256 = "8b1678559e6c29db978a923b611cd21a8bfda26d4814edefbb2d62a903bf7df8"
+bytes = 1269
+destination = "downloads/environment/apk/main/x86_64/pyc-3.14.10-r1.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:python3-3.14.8-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/python3-3.14.8-r0.apk"
-sha256 = "802caff00b3398c01bb227cd925c8f9e33585ff19f58f0f25295a761ff2509cd"
-bytes = 8388442
-destination = "downloads/environment/apk/main/x86_64/python3-3.14.8-r0.apk"
+key = "environment:apk:x86_64:python3-3.14.10-r1.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/python3-3.14.10-r1.apk"
+sha256 = "32ae9c446a79f965f942ae704c5121fa4744c5fee76ec86955fe0fc9a6e6c412"
+bytes = 8414398
+destination = "downloads/environment/apk/main/x86_64/python3-3.14.10-r1.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:python3-dev-3.14.8-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/python3-dev-3.14.8-r0.apk"
-sha256 = "cfe80ada6f167775e90791baa62a6bea21a606c27725f4846ee71fb386412f55"
-bytes = 58725777
-destination = "downloads/environment/apk/main/x86_64/python3-dev-3.14.8-r0.apk"
+key = "environment:apk:x86_64:python3-dev-3.14.10-r1.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/python3-dev-3.14.10-r1.apk"
+sha256 = "4d4e9929557405c2cf2695ac2b0ea526e45f50dceeec10ca5ac21e9cf5a42bd1"
+bytes = 58987071
+destination = "downloads/environment/apk/main/x86_64/python3-dev-3.14.10-r1.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:python3-pyc-3.14.8-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/python3-pyc-3.14.8-r0.apk"
-sha256 = "f3784543adb738ac7e3816ab55bbab057f4301b545a83044ebfa21cc822fbf56"
-bytes = 1314
-destination = "downloads/environment/apk/main/x86_64/python3-pyc-3.14.8-r0.apk"
+key = "environment:apk:x86_64:python3-pyc-3.14.10-r1.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/python3-pyc-3.14.10-r1.apk"
+sha256 = "bc63349707d5658ee2d852e415846246b8d71ece5007120b1d2aee85b4a2ad0a"
+bytes = 1316
+destination = "downloads/environment/apk/main/x86_64/python3-pyc-3.14.10-r1.apk"
 purpose = "environment-package"
 arch = "x86_64"
 
 [[input]]
-key = "environment:apk:x86_64:python3-pycache-pyc0-3.14.8-r0.apk"
-url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/python3-pycache-pyc0-3.14.8-r0.apk"
-sha256 = "14fb0adaa0db1d73c6d925d05134571b5cd0d7be26fbe6ccec552b6dd613bf4b"
-bytes = 4489386
-destination = "downloads/environment/apk/main/x86_64/python3-pycache-pyc0-3.14.8-r0.apk"
+key = "environment:apk:x86_64:python3-pycache-pyc0-3.14.10-r1.apk"
+url = "https://dl-cdn.alpinelinux.org/alpine/v3.24/main/x86_64/python3-pycache-pyc0-3.14.10-r1.apk"
+sha256 = "19a814d76898adbf90ec0f33ff1fd85fb8454be8615f4993fba0b69b7b978926"
+bytes = 4495572
+destination = "downloads/environment/apk/main/x86_64/python3-pycache-pyc0-3.14.10-r1.apk"
 purpose = "environment-package"
 arch = "x86_64"
 

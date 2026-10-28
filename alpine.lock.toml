@@ -61,7 +61,7 @@ fplinux-microsd-root = [
 ]
 fplinux-mre = [
   "brotli-libs-1.2.1-r0.apk",
-  "c-ares-1.34.8-r0.apk",
+  "c-ares-1.34.9-r0.apk",
   "ca-certificates-bundle-20261020-r0.apk",
   "libcrypto3-3.5.9-r0.apk",
   "libcurl-8.23.0-r0.apk",
@@ -94,7 +94,7 @@ fplinux-wifi = [
 packages = [
   "brotli-1.2.1-r0.apk",
   "brotli-dev-1.2.1-r0.apk",
-  "c-ares-dev-1.34.8-r0.apk",
+  "c-ares-dev-1.34.9-r0.apk",
   "libidn2-dev-2.3.8-r0.apk",
   "libpsl-dev-0.21.5-r3.apk",
   "libpsl-utils-0.21.5-r3.apk",
@@ -105,7 +105,7 @@ packages = [
   "bsd-compat-headers-0.7.2-r6.apk",
   "busybox-1.37.0-r31.apk",
   "busybox-binsh-1.37.0-r31.apk",
-  "c-ares-1.34.8-r0.apk",
+  "c-ares-1.34.9-r0.apk",
   "ca-certificates-bundle-20261020-r0.apk",
   "dbus-1.16.2-r2.apk",
   "curl-dev-8.23.0-r0.apk",
@@ -252,15 +252,15 @@ bytes = 1303
 
 [[package]]
 repository = "main"
-file = "c-ares-1.34.8-r0.apk"
-sha256 = "57cd8a73403e2da11d96183b15d54ed9f695803357614bde8239ea88d16d555e"
-bytes = 88689
+file = "c-ares-1.34.9-r0.apk"
+sha256 = "5530ad14c0c20aa6321bafbb99902aa23879548ec858a236061be75a27f5309e"
+bytes = 90830
 
 [[package]]
 repository = "main"
-file = "c-ares-dev-1.34.8-r0.apk"
-sha256 = "1f2dbd1a877cfc2d3bc9c438406be8fba381f91bee9af286066e2d9719e654f1"
-bytes = 826462
+file = "c-ares-dev-1.34.9-r0.apk"
+sha256 = "441c65343400b95f7950958141ca3358885bd4d31104853c0334415545c07faa"
+bytes = 868021
 
 [[package]]
 repository = "main"
