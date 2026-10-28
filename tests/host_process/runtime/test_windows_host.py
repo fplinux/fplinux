@@ -1751,6 +1751,40 @@ def test_powershell_file_arguments_remain_literal_and_json_result_is_checked(
     assert (ROOT / "common/windows/acl.ps1").is_file()
 
 
+@pytest.mark.parametrize("module_path_name", ["PSModulePath", "PSMODULEPATH", "psmodulepath"])
+@pytest.mark.parametrize("cancellable", [False, True], ids=["synchronous", "cancellable"])
+def test_powershell_child_omits_inherited_module_path_and_preserves_other_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    module_path_name: str,
+    *,
+    cancellable: bool,
+) -> None:
+    """Observe the real child environment without executing native PowerShell modules."""
+    environment_file = tmp_path / "environment.json"
+    monkeypatch.setenv("FPLINUX_TEST_POWERSHELL_ARGUMENTS", str(tmp_path / "arguments.json"))
+    monkeypatch.setenv("FPLINUX_TEST_POWERSHELL_ENVIRONMENT", str(environment_file))
+    monkeypatch.setenv("FPLINUX_TEST_POWERSHELL_RESULT", '{"protected": true}')
+    monkeypatch.setenv("FPLINUX_TEST_POWERSHELL_SENTINEL", "ordinary environment remains")
+    monkeypatch.setenv(module_path_name, "C:\\Program Files\\PowerShell\\7\\Modules")
+    parent_environment = dict(os.environ)
+    powershell = tmp_path / "powershell.exe"
+    install_python_script(
+        ROOT / "tests/host_process/runtime/fixtures/windows-host/windows_powershell_boundary.py",
+        powershell,
+    )
+    host = windows_host.WindowsHost.__new__(windows_host.WindowsHost)
+    host.powershell = powershell
+
+    result = host.ps("acl.ps1", timeout=3, cancelled=(lambda: False) if cancellable else None)
+
+    assert result == {"protected": True}
+    assert json.loads(environment_file.read_text(encoding="utf-8")) == {
+        "FPLINUX_TEST_POWERSHELL_SENTINEL": "ordinary environment remains"
+    }
+    assert dict(os.environ) == parent_environment
+
+
 def test_network_discovery_receives_the_exact_usb_session_identity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

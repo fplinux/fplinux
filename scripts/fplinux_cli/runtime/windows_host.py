@@ -52,7 +52,7 @@ class _UsbProbeCancelledError(Exception):
 
 
 def _cancellable_discovery(
-    argv: list[str], *, timeout: float, cancelled: Callable[[], bool]
+    argv: list[str], *, environment: dict[str, str], timeout: float, cancelled: Callable[[], bool]
 ) -> subprocess.CompletedProcess[str]:
     """Stop and reap discovery when its USB observer no longer owns the result."""
     if cancelled():
@@ -63,6 +63,7 @@ def _cancellable_discovery(
         stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
+        env=environment,
         creationflags=_console_creation_flags(),
     )
     deadline = time.monotonic() + timeout
@@ -316,18 +317,24 @@ class WindowsHost:
             str(source),
             *arguments,
         ]
+        environment = {
+            name: value for name, value in os.environ.items() if name.upper() != "PSMODULEPATH"
+        }
         if cancelled is None:
             result = subprocess.run(
                 argv,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
+                env=environment,
                 timeout=timeout,
                 check=False,
                 creationflags=_console_creation_flags(),
             )
         else:
-            result = _cancellable_discovery(argv, timeout=timeout, cancelled=cancelled)
+            result = _cancellable_discovery(
+                argv, environment=environment, timeout=timeout, cancelled=cancelled
+            )
         if result.returncode:
             fail("Windows discovery failed: " + result.stderr.strip()[-1000:])
         value = json.loads(result.stdout.lstrip("\ufeff"))
