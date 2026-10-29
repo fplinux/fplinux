@@ -458,3 +458,40 @@ def test_actual_launcher_marquee_finishes_and_restarts_on_focus(
     retain_capture(tmp_path, "launcher-marquee-128x128-light-en")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "one complete pass; idle stays still; new focus restarts; hiding stops" in result.stdout
+
+
+def test_actual_launcher_answered_ring_stays_until_the_owner_replies(
+    launcher_native: Path, launcher_catalogue: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """Stop keeps the ring until its result; a slow reply covers it, a new ring replaces it."""
+    applications, icons = launcher_catalogue
+    result = run_process(
+        [
+            str(launcher_native / "launcher-screens"),
+            "176",
+            "220",
+            str(launcher_native / "launcher"),
+            str(SCREENS / "keypad.xkb"),
+            str(tmp_path / "session.sock"),
+            str(tmp_path),
+            str(applications),
+            str(icons),
+            "light",
+            "1",
+            "ring",
+            "en",
+        ],
+        name="actual Launcher answers ring actions through the owner",
+        timeout=30,
+    )
+    (tmp_path / "capture.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+    retain_capture(tmp_path, "launcher-ring-176x220-light-en")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert [line.split(":", 1)[0] for line in result.stdout.splitlines()] == [
+        "launcher-ring-fast",
+        "launcher-ring-slow",
+        "launcher-ring-failed",
+        "launcher-ring-slow-failed",
+        "launcher-ring-superseded-early",
+        "launcher-ring-superseded-late",
+    ]

@@ -38,10 +38,10 @@ ui_host_build_application -I"$launcher" -I"$clocks" \
 # pkg-config emits compiler and linker arguments for the pinned peer libraries.
 # shellcheck disable=SC2046
 ui_host_compile -I"$root/include/fplinux" -I"$ui_host_inputs" -I"$screens_dir" \
-	$(pkg-config --cflags wayland-server xkbcommon json-c) \
+	-I"$clocks" $(pkg-config --cflags wayland-server xkbcommon json-c) \
 	"$root/tests/host_tool/gui/launcher-screens.c" "$screens_dir/ui-frame-peer.c" \
 	"$screens_dir/screen-frame.c" "$ui_host_ui/fplinux-ui-session.c" \
-	"$ui_host_ui/fplinux-utf8.c" \
+	"$ui_host_ui/fplinux-utf8.c" "$clocks/clock-model.c" "$clocks/clock-wire.c" \
 	"$ui_host_inputs/xdg-shell-protocol.c" \
 	$(pkg-config --libs wayland-server xkbcommon json-c) \
 	-o "$work/launcher-screens"

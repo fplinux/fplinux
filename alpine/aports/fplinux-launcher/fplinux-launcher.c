@@ -1574,6 +1574,9 @@ static void sync_catalogue(struct launcher *launcher)
 		.label = _("Close"),
 	};
 
+	/* The ring's wait keeps its screen; the render after it catches up. */
+	if (fplinux_launcher_clock_is_waiting(&launcher->ringing))
+		return;
 	if (launcher->catalogue_notice &&
 	    (!wanted || notice != launcher->catalogue_notice_kind)) {
 		if (fplinux_ui_current(launcher->ui) !=

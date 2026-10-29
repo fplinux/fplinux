@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
+#include "clock-wire.h"
 #include "launcher-observer.h"
 #include "screen-frame.h"
 #include "ui-frame-peer.h"
@@ -18,6 +19,7 @@
 struct capture {
 	struct fplinux_ui_frame_peer peer;
 	struct fplinux_ui_session_message request;
+	struct fplinux_ui_session_message clock_request;
 	pid_t application;
 	int listener;
 	int session;
@@ -26,10 +28,17 @@ struct capture {
 	uint32_t serial;
 	uint32_t redraw_ack;
 	uint32_t active_ack;
+	unsigned int softkeys;
+	/* Rendered frames that show the ring's busy alert. */
+	unsigned int waiting_frames;
+	/* What successive distinct frames showed since reset_frames(). */
+	char frames[256];
+	char frame[32];
 	bool ready;
 	bool tasks_open;
 	bool task_closed;
 	bool has_request;
+	bool has_clock_request;
 	const char *directory;
 	const char *session_path;
 	const char *theme;
@@ -102,6 +111,7 @@ static void read_messages(struct capture *capture)
 			}
 			break;
 		case FPLINUX_UI_SESSION_SOFTKEYS:
+			++capture->softkeys;
 			strcpy(capture->left, message.left);
 			strcpy(capture->centre, message.centre);
 			strcpy(capture->right, message.right);
@@ -119,14 +129,78 @@ static void read_messages(struct capture *capture)
 			capture->request = message;
 			capture->has_request = true;
 			break;
+		case FPLINUX_UI_SESSION_CLOCK:
+			assert(!capture->has_clock_request);
+			capture->clock_request = message;
+			capture->has_clock_request = true;
+			break;
 		default:
 			assert(!message.has_frame);
 			assert(message.type != FPLINUX_UI_SESSION_EXIT);
-			assert(message.type != FPLINUX_UI_SESSION_CLOCK);
 			break;
 		}
 	}
 	assert(received == 0);
+}
+
+static bool shows_waiting(const struct launcher_frame_observation *observation)
+{
+	for (unsigned int i = 0; i < observation->label_count; ++i)
+		if (!strcmp(observation->labels[i].text, "Waiting…"))
+			return true;
+	return false;
+}
+
+/* Waiting over a ring, a ring by its event and status, or the view below. */
+static void frame_name(const struct launcher_frame_observation *observation,
+		       char *name, size_t capacity)
+{
+	if (shows_waiting(observation)) {
+		snprintf(name, capacity, "wait");
+		return;
+	}
+	for (unsigned int i = 0; i < observation->label_count; ++i) {
+		const char *text = observation->labels[i].text;
+		const char *ring = strstr(text, "Ring ");
+
+		if (ring) {
+			snprintf(name, capacity, "ring%c%s", ring[5],
+				 strstr(text, "Action failed") ? "-failed" :
+								 "");
+			return;
+		}
+	}
+	snprintf(name, capacity, "view");
+}
+
+static void note_frame(struct capture *capture)
+{
+	char name[sizeof(capture->frame)];
+	size_t length = strlen(capture->frames);
+
+	frame_name(&capture->observed, name, sizeof(name));
+	if (!strcmp(name, capture->frame))
+		return;
+	strcpy(capture->frame, name);
+	assert(length + 1 + strlen(name) < sizeof(capture->frames));
+	snprintf(capture->frames + length, sizeof(capture->frames) - length,
+		 "%s%s", length ? " " : "", name);
+}
+
+/* Starts the record with what the latest frame shows. */
+static void reset_frames(struct capture *capture)
+{
+	capture->frames[0] = '\0';
+	capture->frame[0] = '\0';
+	note_frame(capture);
+}
+
+static void assert_frames(const struct capture *capture, const char *expected)
+{
+	if (strcmp(capture->frames, expected))
+		fprintf(stderr, "Launcher frames: [%s]; expected [%s]\n",
+			capture->frames, expected);
+	assert(!strcmp(capture->frames, expected));
 }
 
 static void pump(struct capture *capture)
@@ -149,6 +223,9 @@ static void pump(struct capture *capture)
 			capture->observed.animations = observation.animations;
 		} else {
 			capture->observed = observation;
+			if (shows_waiting(&observation))
+				++capture->waiting_frames;
+			note_frame(capture);
 		}
 	}
 }
@@ -760,6 +837,235 @@ static void task_overlay(struct capture *capture)
 	puts("launcher-tasks: Home opens Tasks; Cancel keeps app; Close and Open target exact instances");
 }
 
+static void ring_data(char *data, size_t capacity, uint64_t event_id)
+{
+	struct clock_ring ring = { .snooze_minutes = 5 };
+
+	assert(event_id < 10);
+	if (event_id) {
+		ring.event = (struct clock_event){
+			.id = event_id,
+			.kind = CLOCK_EVENT_ALARM,
+			.source_id = 42,
+			.generation = 1,
+			.due_wall_utc = 1793086200,
+		};
+		/* Each event names itself in the drawn ring. */
+		snprintf(ring.event.label, sizeof(ring.event.label), "Ring %u",
+			 (unsigned int)event_id);
+	}
+	assert(clock_wire_ring_encode(&ring, event_id, data, capacity) ==
+	       CLOCK_OK);
+}
+
+/* The manager names the ringing event in ACTIVE; its ACK means drawn. */
+static void ring_active(struct capture *capture, uint64_t event_id)
+{
+	struct fplinux_ui_session_message active = {
+		.type = FPLINUX_UI_SESSION_ACTIVE,
+		.serial = ++capture->serial,
+		.battery = -1,
+		.visible = true,
+		.value = "catalogue",
+		.name = "list",
+	};
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	strcpy(active.locale, capture->locale);
+	strcpy(active.input_locale, capture->locale);
+	active.theme = !strcmp(capture->theme, "dark") ?
+			       FPLINUX_UI_SESSION_THEME_DARK :
+			       FPLINUX_UI_SESSION_THEME_LIGHT;
+	ring_data(active.clock_data, sizeof(active.clock_data), event_id);
+	assert(fplinux_ui_session_send(capture->session, &active));
+	while (capture->active_ack != active.serial &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(capture->active_ack == active.serial);
+	wait_legends(capture, "Snooze", "", "Stop");
+}
+
+static uint32_t stop_ring(struct capture *capture, uint64_t event_id)
+{
+	char expected[FPLINUX_UI_SESSION_CLOCK_BYTES];
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	press(capture, KEY_F14);
+	while (!capture->has_clock_request &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(capture->has_clock_request);
+	capture->has_clock_request = false;
+	snprintf(expected, sizeof(expected),
+		 "{\"op\":\"dismiss\",\"event_id\":%llu}",
+		 (unsigned long long)event_id);
+	assert(!strcmp(capture->clock_request.name, "dismiss"));
+	assert(!strcmp(capture->clock_request.clock_data, expected));
+	return capture->clock_request.serial;
+}
+
+static void clock_reply(struct capture *capture, uint32_t serial,
+			uint64_t event_id, const char *reason)
+{
+	struct fplinux_ui_session_message reply = {
+		.type = FPLINUX_UI_SESSION_CLOCK,
+		.serial = serial,
+		.name = "dismiss",
+	};
+
+	snprintf(reply.reason, sizeof(reply.reason), "%s", reason);
+	ring_data(reply.clock_data, sizeof(reply.clock_data), event_id);
+	assert(fplinux_ui_session_send(capture->session, &reply));
+}
+
+static void settle(struct capture *capture, unsigned int duration_ms)
+{
+	uint64_t deadline = fplinux_ui_frame_now_ms() + duration_ms;
+
+	while (fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+}
+
+static void wait_busy(struct capture *capture, bool shown)
+{
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	while (shows_waiting(&capture->observed) != shown &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(shows_waiting(&capture->observed) == shown);
+}
+
+static void wait_frame(struct capture *capture, const char *name)
+{
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	while (strcmp(capture->frame, name) &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	if (strcmp(capture->frame, name))
+		fprintf(stderr, "Launcher frames: [%s]; waited for [%s]\n",
+			capture->frames, name);
+	assert(!strcmp(capture->frame, name));
+}
+
+/*
+ * The answered ring stays, without input, until the owner replies; its
+ * result is the next step. The pause before an immediate reply lets a
+ * frame of the view below show if the ring left early.
+ */
+static void ring_answers(struct capture *capture)
+{
+	const struct fplinux_ui_session_message home = {
+		.type = FPLINUX_UI_SESSION_HOME,
+	};
+	unsigned int softkeys;
+	uint32_t first;
+
+	wait_legends(capture, "Icons", "Open", "Back");
+	/* An immediate success: the list returns in one step, never busy. */
+	ring_active(capture, 1);
+	reset_frames(capture);
+	softkeys = capture->softkeys;
+	first = stop_ring(capture, 1);
+	settle(capture, 150);
+	assert_frames(capture, "ring1");
+	assert(capture->softkeys == softkeys);
+	clock_reply(capture, first, 0, "");
+	wait_legends(capture, "Icons", "Open", "Back");
+	settle(capture, 1200);
+	assert_frames(capture, "ring1 view");
+	assert(capture->softkeys == softkeys + 1 && !capture->waiting_frames);
+	puts("launcher-ring-fast: the ring stays until the reply, then the list returns without a busy alert");
+
+	/*
+	 * A slow success shows the busy alert over the ring. HOME during the
+	 * wait leaves the list, the screen below, in place until the ring goes.
+	 */
+	ring_active(capture, 2);
+	reset_frames(capture);
+	first = stop_ring(capture, 2);
+	assert(!capture->waiting_frames);
+	assert(fplinux_ui_session_send(capture->session, &home));
+	wait_selection(capture, "home", "list", 1);
+	wait_busy(capture, true);
+	wait_legends(capture, "", "", "");
+	clock_reply(capture, first, 0, "");
+	wait_busy(capture, false);
+	settle(capture, 300);
+	assert_frames(capture, "ring2 wait view");
+	/* Home took the list's place: OK opens the list again. */
+	press(capture, KEY_OK);
+	wait_selection(capture, "catalogue", "list", 1);
+	wait_legends(capture, "Icons", "Open", "Back");
+	puts("launcher-ring-slow: the busy alert covers the ring; HOME applies once the ring goes");
+
+	/* An immediate failure changes the ring's text in place. */
+	capture->waiting_frames = 0;
+	ring_active(capture, 3);
+	reset_frames(capture);
+	softkeys = capture->softkeys;
+	first = stop_ring(capture, 3);
+	settle(capture, 150);
+	clock_reply(capture, first, 3, "clock-failed");
+	wait_frame(capture, "ring3-failed");
+	settle(capture, 300);
+	assert_frames(capture, "ring3 ring3-failed");
+	assert(capture->softkeys == softkeys && !capture->waiting_frames);
+	puts("launcher-ring-failed: the ring stays with Stop and Snooze and shows the error");
+
+	/* A slow failure: the busy alert leaves the failed ring again. */
+	reset_frames(capture);
+	first = stop_ring(capture, 3);
+	wait_busy(capture, true);
+	clock_reply(capture, first, 3, "clock-failed");
+	wait_busy(capture, false);
+	wait_legends(capture, "Snooze", "", "Stop");
+	settle(capture, 300);
+	assert_frames(capture, "ring3-failed wait ring3-failed");
+	puts("launcher-ring-slow-failed: the busy alert returns to the failed ring");
+
+	/*
+	 * A new ring before the busy alert replaces the answered one at once
+	 * and is acknowledged; the old reply changes nothing.
+	 */
+	reset_frames(capture);
+	first = stop_ring(capture, 3);
+	settle(capture, 150);
+	ring_active(capture, 4);
+	clock_reply(capture, first, 0, "");
+	settle(capture, 1200);
+	assert_frames(capture, "ring3-failed ring4");
+	clock_reply(capture, stop_ring(capture, 4), 0, "");
+	wait_legends(capture, "Icons", "Open", "Back");
+	puts("launcher-ring-superseded-early: a new ring replaces the answered one at once");
+
+	/* A new ring after the busy alert replaces both at once. */
+	capture->waiting_frames = 0;
+	ring_active(capture, 5);
+	reset_frames(capture);
+	first = stop_ring(capture, 5);
+	wait_busy(capture, true);
+	ring_active(capture, 6);
+	clock_reply(capture, first, 0, "");
+	softkeys = capture->softkeys;
+	settle(capture, 1200);
+	assert_frames(capture, "ring5 wait ring6");
+	assert(capture->softkeys == softkeys);
+	clock_reply(capture, stop_ring(capture, 6), 0, "");
+	wait_legends(capture, "Icons", "Open", "Back");
+	settle(capture, 300);
+	assert_frames(capture, "ring5 wait ring6 view");
+	/* The catalogue follows its view again: Tab changes its presentation. */
+	press(capture, KEY_TAB);
+	wait_selection(capture, "catalogue", "grid", 1);
+	press(capture, KEY_TAB);
+	wait_selection(capture, "catalogue", "list", 1);
+	wait_legends(capture, "Icons", "Open", "Back");
+	select_key(capture, KEY_DOWN, 2);
+	puts("launcher-ring-superseded-late: a new ring replaces the busy alert and the answered ring; the catalogue follows its view again");
+}
+
 static void catalogue_marquee(struct capture *capture)
 {
 	struct fplinux_ui_session_message visibility = {
@@ -816,6 +1122,8 @@ int main(int argc, char **argv)
 		save_observation(&capture, "launcher-grid-fit");
 	} else if (!strcmp(capture.scenario, "marquee")) {
 		catalogue_marquee(&capture);
+	} else if (!strcmp(capture.scenario, "ring")) {
+		ring_answers(&capture);
 	} else {
 		save_frame(&capture, "launcher-list-first");
 		catalogue_navigation(&capture, number(argv[10]));

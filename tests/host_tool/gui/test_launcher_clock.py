@@ -64,10 +64,13 @@ def launcher_clock(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         yield executable
 
 
-@pytest.mark.parametrize("scenario", ["alarm", "timer", "stale", "errors", "visibility"])
-def test_ring_actions_wait_for_owner_and_preserve_event_identity(
+@pytest.mark.parametrize(
+    "scenario", ["alarm", "timer", "stale", "superseded", "errors", "visibility"]
+)
+def test_answered_ring_stays_until_the_owner_replies_and_a_new_event_replaces_it(
     launcher_clock: Path, scenario: str
 ) -> None:
+    """Stop and Snooze keep the ring current; a newer ring takes its place at once."""
     result = run_process(
         [str(launcher_clock), scenario],
         name=f"launcher ring {scenario}",
