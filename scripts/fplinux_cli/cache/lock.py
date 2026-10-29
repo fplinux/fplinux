@@ -7,6 +7,7 @@ import errno
 import fcntl
 import os
 import sys
+import time
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -40,13 +41,14 @@ def _write_owner(descriptor: int, owner: str) -> None:
 
 
 @contextmanager
-def cache_lock(
+def cache_lock(  # noqa: PLR0913 -- ownership and wait policy are distinct lock inputs.
     cache_root: Path,
     *,
     exclusive: bool,
     command: str,
     target: str | None,
     profile: str | None = None,
+    timeout: float | None = None,
 ) -> Iterator[None]:
     """Hold the global cache flock and report one blocking owner, if any."""
     cache_root.mkdir(parents=True, exist_ok=True)
@@ -57,19 +59,43 @@ def cache_lock(
     )
     operation = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
     waited = False
+    acquired = False
     try:
         try:
             fcntl.flock(descriptor, operation | fcntl.LOCK_NB)
+            acquired = True
         except OSError as error:
             if error.errno not in {errno.EACCES, errno.EAGAIN}:
                 raise
-            print(
-                f"fplinux: cache is held by {_read_owner(descriptor)}; waiting...",
-                file=sys.stderr,
-                flush=True,
-            )
-            fcntl.flock(descriptor, operation)
-            waited = True
+            owner = _read_owner(descriptor)
+            if timeout is None or timeout > 0:
+                print(
+                    f"fplinux: cache is held by {owner}; waiting...", file=sys.stderr, flush=True
+                )
+            if timeout is None:
+                fcntl.flock(descriptor, operation)
+                acquired = True
+                waited = True
+            else:
+                deadline = time.monotonic() + timeout
+                while not acquired:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        print(
+                            f"fplinux: cache is held by {_read_owner(descriptor)}; "
+                            "lock wait timed out",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+                        raise SystemExit(75) from None
+                    time.sleep(min(0.1, remaining))
+                    try:
+                        fcntl.flock(descriptor, operation | fcntl.LOCK_NB)
+                        acquired = True
+                        waited = True
+                    except OSError as retry_error:
+                        if retry_error.errno not in {errno.EACCES, errno.EAGAIN}:
+                            raise
 
         _write_owner(descriptor, _owner_text(command, target, profile))
         if not exclusive:
@@ -80,5 +106,6 @@ def cache_lock(
             print("fplinux: cache released; continuing.", file=sys.stderr, flush=True)
         yield
     finally:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        if acquired:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
         os.close(descriptor)

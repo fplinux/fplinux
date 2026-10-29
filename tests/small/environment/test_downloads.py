@@ -12,7 +12,11 @@ from unittest import mock
 
 import pytest
 from fplinux_cli.build.sources import fetch
-from fplinux_cli.environment.downloads import download_locked_file, transfer_verified_file
+from fplinux_cli.environment.downloads import (
+    download_locked_file,
+    locked_file_status,
+    transfer_verified_file,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -141,6 +145,37 @@ def test_verified_refresh_publishes_complete_private_bytes_and_reuses_them(tmp_p
     assert list(tmp_path.iterdir()) == [destination]
     with mock.patch("urllib.request.urlopen", side_effect=AssertionError("unexpected network")):
         assert download_locked_file(_URL, _ABC_SHA256, destination) == destination
+
+
+def test_download_progress_precedes_transfer_and_cache_hits_are_quiet(tmp_path: Path) -> None:
+    destination = tmp_path / "locked.bin"
+    events: list[str] = []
+
+    def open_response(*_args: object, **_kwargs: object) -> io.BytesIO:
+        assert events == ["starting"]
+        return io.BytesIO(b"abc")
+
+    with mock.patch("urllib.request.urlopen", side_effect=open_response):
+        download_locked_file(
+            _URL, _ABC_SHA256, destination, on_download=lambda: events.append("starting")
+        )
+    with mock.patch("urllib.request.urlopen", side_effect=AssertionError("unexpected network")):
+        download_locked_file(
+            _URL, _ABC_SHA256, destination, on_download=lambda: events.append("unexpected")
+        )
+    assert events == ["starting"]
+
+
+def test_locked_input_status_reports_missing_mismatch_and_exact_bytes(tmp_path: Path) -> None:
+    path = tmp_path / "not-created" / "input.bin"
+    assert locked_file_status(path, _ABC_SHA256, size=3) == "missing"
+    assert not path.parent.exists()
+    path.parent.mkdir()
+    path.write_bytes(b"bad")
+    assert locked_file_status(path, _ABC_SHA256, size=3) == "mismatched"
+    path.write_bytes(b"abc")
+    assert locked_file_status(path, _ABC_SHA256, size=3) == "present"
+    assert locked_file_status(path, _ABC_SHA256, size=4) == "mismatched"
 
 
 def test_checksum_failure_preserves_old_bytes_and_removes_failed_temporary(tmp_path: Path) -> None:

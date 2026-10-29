@@ -33,6 +33,13 @@ from fplinux_cli.workspace.capture import WorkspaceSnapshot, workspace_snapshot
 def _canonical_aport(package: str) -> Path:
     """Return one regular canonical aport selected by a package identifier."""
     if alpine_lock.PACKAGE_ID.fullmatch(package) is None:
+        parts = Path(package).parts
+        if (
+            len(parts) == 3
+            and parts[:2] == ("alpine", "aports")
+            and alpine_lock.PACKAGE_ID.fullmatch(parts[2]) is not None
+        ):
+            fail(f"use the package name: ./fplinux checksum {parts[2]}")
         fail(f"invalid Alpine package identifier: {package}")
     aport = common.ROOT / "alpine/aports" / package
     if aport.is_symlink() or not aport.is_dir():

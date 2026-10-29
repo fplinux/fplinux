@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 from pathlib import Path
 
@@ -19,7 +20,7 @@ from fplinux_cli.runtime.bundle_session import PUBLIC_BOOT_MODES
 _CHECK_SCOPE_METAVAR = "{" + ",".join(CHECK_SCOPES) + "}"
 _PUBLIC_COMMAND_METAVAR = (
     "{data-path,doctor,check,test,logs,inspect,format,setup,dependencies,ci,build,probe-build,checksum,"
-    "package,prune,run,console,nand,device-data,target,verify}"
+    "package,prune,run,console,nand,device-data,target,verify,site}"
 )
 
 
@@ -42,6 +43,17 @@ def _positive_integer(value: str) -> int:
         message = "must be a positive integer"
         raise argparse.ArgumentTypeError(message)
     return number
+
+
+def _lock_timeout(value: str) -> float:
+    message = "must be a finite non-negative number"
+    try:
+        seconds = float(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(message) from error
+    if not math.isfinite(seconds) or seconds < 0:
+        raise argparse.ArgumentTypeError(message)
+    return seconds
 
 
 def _default_build_jobs() -> int:
@@ -77,6 +89,27 @@ def _add_phone_data_option(parser: argparse.ArgumentParser) -> None:
         type=Path,
         metavar="PATH",
         help="use this phone data directory instead of the user's shared target store",
+    )
+
+
+def _add_input_selection(parser: argparse.ArgumentParser, targets: tuple[str, ...]) -> None:
+    """Select the same target, site or complete input closure as setup."""
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument(
+        "target",
+        nargs="?",
+        choices=targets,
+        metavar="TARGET",
+        help="select every supported profile and build type for this target",
+    )
+    selection.add_argument("--site", action="store_true", help="select documentation inputs")
+    selection.add_argument(
+        "--all", dest="all_inputs", action="store_true", help="select all inputs"
+    )
+    parser.add_argument(
+        "--host",
+        choices=("linux", "windows"),
+        help="select the target's archive host (default: linux; requires TARGET)",
     )
 
 
@@ -241,6 +274,9 @@ def create_parser(
     add_log_arguments(logs_parser)
     inspect_parser = commands.add_parser("inspect", help="inspect a built bundle, ZIP or APK")
     inspections = inspect_parser.add_subparsers(dest="inspect_kind", required=True)
+    input_parser = inspections.add_parser("inputs", help="inspect locally available setup inputs")
+    _add_input_selection(input_parser, targets)
+    inspections.add_parser("source", help="show the current public source identity")
     bundle_parser = inspections.add_parser("bundle", help="inspect the current target bundle")
     _add_build_type_option(bundle_parser)
     bundle_parser.add_argument("target", choices=targets)
@@ -249,6 +285,21 @@ def create_parser(
         type=_profile_name,
         metavar="NAME",
         help="inspect this build profile (default: default)",
+    )
+    bundle_parser.add_argument(
+        "--current-source",
+        action="store_true",
+        help="compare the bundle with current build inputs",
+    )
+    bundle_data = bundle_parser.add_mutually_exclusive_group()
+    bundle_data.add_argument(
+        "--phone-data", type=Path, metavar="PATH", help="compare with this phone data"
+    )
+    bundle_data.add_argument(
+        "--without-device-data",
+        dest="include_device_data",
+        action="store_false",
+        help="compare with a build that excludes prepared phone data",
     )
     footprint_parser = inspections.add_parser(
         "footprint", help="measure the current bundle's size and package composition"
@@ -280,35 +331,26 @@ def create_parser(
     )
     format_parser.add_argument(
         "paths",
-        nargs="+",
+        nargs="*",
         metavar="PATH",
         help="normalized repository-relative source path or declared Linux patch",
+    )
+    format_parser.add_argument(
+        "--plan", action="store_true", help="show tool ownership without writing"
+    )
+    format_parser.add_argument(
+        "--changed", action="store_true", help="select changed and untracked sources"
+    )
+    site_parser = commands.add_parser("site", help="run the site's prepared tooling")
+    site_parser.add_argument(
+        "site_action",
+        choices=("format", "check", "build", "build-offline"),
+        help="run the selected whole-site operation using prepared tools",
     )
     setup_parser = commands.add_parser(
         "setup", help="prepare the build environment or selected exact external inputs"
     )
-    setup_selection = setup_parser.add_mutually_exclusive_group()
-    setup_selection.add_argument(
-        "target",
-        nargs="?",
-        choices=targets,
-        metavar="TARGET",
-        help="prepare every supported profile and build type for this target",
-    )
-    setup_selection.add_argument(
-        "--site", action="store_true", help="prepare and install documentation tooling only"
-    )
-    setup_selection.add_argument(
-        "--all",
-        dest="all_inputs",
-        action="store_true",
-        help="prepare the environment, all checkout inputs and documentation tooling",
-    )
-    setup_parser.add_argument(
-        "--host",
-        choices=("linux", "windows"),
-        help="prepare this target's archive host originals (default: linux; requires TARGET)",
-    )
+    _add_input_selection(setup_parser, targets)
     setup_parser.add_argument(
         "--offline",
         action="store_true",
@@ -436,7 +478,9 @@ def create_parser(
         "checksum",
         help="regenerate one Alpine aport sha512sums block in the pinned build environment",
     )
-    checksum_parser.add_argument("aport")
+    checksum_parser.add_argument(
+        "aport", metavar="APORT", help="package name, for example fplinux-ui"
+    )
     package_parser = commands.add_parser(
         "package", help="package an existing build for standalone use"
     )
@@ -553,4 +597,31 @@ def create_parser(
     _add_phone_data_option(verify_parser)
     verify_parser.add_argument("target", choices=targets)
     verify_parser.add_argument("--profile", type=_profile_name, metavar="NAME")
+    for name in (
+        "build",
+        "check",
+        "checksum",
+        "ci",
+        "console",
+        "dependencies",
+        "device-data",
+        "format",
+        "inspect",
+        "nand",
+        "package",
+        "probe-build",
+        "prune",
+        "run",
+        "setup",
+        "site",
+        "test",
+        "verify",
+    ):
+        commands.choices[name].add_argument(
+            "--lock-timeout",
+            type=_lock_timeout,
+            default=argparse.SUPPRESS,
+            metavar="SECONDS",
+            help="limit cache-lock waiting; 0 fails immediately (exit 75)",
+        )
     return parser, check_parser

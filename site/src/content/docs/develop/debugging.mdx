@@ -38,9 +38,12 @@ A debug image that boots does not show that a feature works on the phone.
 
 - `logs list` shows recorded runs, newest first, with their command, target, profile, status, start time and duration.
 - `logs show` prints the last 40 lines of each stage of one run. `--failed` limits it to failed stages, `--stage NAME` to one stage, and `--tail N` changes the number of lines.
+- `logs show --summary` lists stage IDs, status and exit codes without printing their output. `--max-bytes N` limits log content across selected stages and reports truncation; `logs list --limit N` limits the number of recent runs.
 - `logs follow` keeps printing new output until that run finishes. <Key>Ctrl</Key>+<Key>C</Key> stops only the reader.
 
 Filters such as `--command`, `--target`, `--profile` and `--status` work with all three. A run's status describes the command's result, not the phone's health. Run `./fplinux logs show --help` for all options.
+
+Commands that use the shared working-data lock wait by default. Add `--lock-timeout SECONDS`, such as `./fplinux console nokia-ta1618 --lock-timeout 0`, to limit that wait; zero returns immediately if the lock is busy. Timeout reports the recorded owner and exits with status 75 without stopping the holder or contacting the phone.
 
 Messages from the kernel, loader and phone programs follow the [logging contract](/fplinux/develop/logging/).
 

@@ -13,7 +13,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, cast
 
 from fplinux_cli.artifacts.footprint import FootprintError, compare_footprints, inspect_footprint
-from fplinux_cli.artifacts.release import release_context_from_fields
+from fplinux_cli.artifacts.release import current_release_context, release_context_from_fields
 from fplinux_cli.common import canonical_json_bytes, display_text, fail, sha256_bytes, sha256_file
 from fplinux_cli.runtime.bundle_session import resolve_target_bundle
 
@@ -21,10 +21,16 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 
-def _print_identity(manifest: Mapping[str, object]) -> None:
-    """Show the identity recorded in the inspected build, not the current source checkout."""
+def _print_release(manifest: Mapping[str, object]) -> None:
     release = release_context_from_fields(manifest)
     print(f"release_id: {release.release_id}")
+    print(f"source_commit: {release.source_commit or '-'}")
+    print(f"source_snapshot: {release.source_snapshot}")
+
+
+def _print_identity(manifest: Mapping[str, object]) -> None:
+    """Show the identity recorded in the inspected build, not the current source checkout."""
+    _print_release(manifest)
     for key in ("target", "profile", "build_type", "generation"):
         value = manifest.get(key)
         if key == "profile" and value is None:
@@ -34,10 +40,23 @@ def _print_identity(manifest: Mapping[str, object]) -> None:
         print(f"{key}: {value}")
 
 
-def inspect_bundle(
-    target: str, *, profile: str | None = None, build_type: str = "release"
+def inspect_source() -> None:
+    """Report current public source identity without preparing a build."""
+    _print_release(current_release_context().fields())
+
+
+def inspect_bundle(  # noqa: PLR0913 -- build context and phone data selection stay explicit.
+    target: str,
+    *,
+    profile: str | None = None,
+    build_type: str = "release",
+    current_source: bool = False,
+    include_device_data: bool = True,
+    phone_data: Path | None = None,
 ) -> None:
     """Read the selected current generation and compare its files to its build manifest."""
+    if not current_source and (not include_device_data or phone_data is not None):
+        fail("--phone-data and --without-device-data require --current-source")
     bundle, manifest = resolve_target_bundle(target, profile, build_type=build_type)
     files = manifest.get("files")
     if not isinstance(files, dict) or not files:
@@ -57,6 +76,81 @@ def inspect_bundle(
             fail(f"bundle file differs from its build manifest: {relative}")
         print(f"{size} {digest} {relative}")
     print(f"files: {len(files)}; build-manifest checksums: OK")
+    if current_source:
+        _compare_current_bundle(
+            manifest,
+            target,
+            profile=profile,
+            build_type=build_type,
+            include_device_data=include_device_data,
+            phone_data=phone_data,
+        )
+
+
+def _compare_current_bundle(  # noqa: PLR0913 -- build context and phone selection remain explicit.
+    manifest: dict[str, object],
+    target: str,
+    *,
+    profile: str | None,
+    build_type: str,
+    include_device_data: bool,
+    phone_data: Path | None,
+) -> None:
+    from fplinux_cli.alpine.signing import signing_key_identity  # noqa: PLC0415
+    from fplinux_cli.build.reuse import build_identity, manifest_matches_identity  # noqa: PLC0415
+    from fplinux_cli.common import ROOT  # noqa: PLC0415
+    from fplinux_cli.data_paths import data_root  # noqa: PLC0415
+    from fplinux_cli.environment.definition import (  # noqa: PLC0415
+        environment_recipe_digest,
+        load_environment_lock,
+    )
+    from fplinux_cli.environment.runtime import environment_rootfs  # noqa: PLC0415
+    from fplinux_cli.environment.state import load_environment_state  # noqa: PLC0415
+    from fplinux_cli.workspace.build_inputs import target_workspace_snapshot  # noqa: PLC0415
+
+    cache = data_root(ROOT)
+    release = current_release_context(selected_data_root=cache)
+    snapshot = target_workspace_snapshot(
+        target,
+        profile,
+        build_type=build_type,
+        include_device_data=include_device_data,
+        release_context=release,
+        phone_data=phone_data,
+        selected_data_root=cache,
+    )
+    lock = load_environment_lock()
+    state = load_environment_state(cache, environment_recipe_digest(lock))
+    if state is not None and not environment_rootfs(cache, state).is_dir():
+        state = None
+    try:
+        signing = signing_key_identity(cache)
+    except SystemExit:
+        signing = None
+    comparisons = {
+        "source": all(manifest.get(key) == value for key, value in release.fields().items()),
+        "workspace": manifest.get("workspace_digest") == snapshot.recipe,
+        "environment": None
+        if state is None
+        else (
+            manifest.get("environment_recipe") == state.recipe
+            and manifest.get("environment_content") == state.content
+        ),
+        "signing": None if signing is None else manifest.get("apk_signing_key") == signing,
+    }
+    for name, matches in comparisons.items():
+        print(f"{name}: {'unavailable' if matches is None else 'current' if matches else 'stale'}")
+    identity = build_identity(snapshot, state, cache)
+    if False in comparisons.values():
+        result = "stale"
+    elif None in comparisons.values():
+        result = "unavailable"
+    elif manifest_matches_identity(manifest, identity):
+        result = "current"
+    else:
+        result = "stale"
+    print("environment identity uses the saved receipt; installed content was not probed")
+    print(f"bundle freshness: {result}")
 
 
 def _byte_size(value: int) -> str:
@@ -320,6 +414,7 @@ def inspect_archive(path: Path) -> None:
             if prefix + "DISTRIBUTION.json" in files:
                 records = _source_records(archive, prefix, checksums)
                 print("kind: corresponding-sources")
+                _print_release(json.loads(archive.read(prefix + "DISTRIBUTION.json")))
                 for record in records:
                     print(f"runtime: {record['archive']} {record['sha256']}")
             else:

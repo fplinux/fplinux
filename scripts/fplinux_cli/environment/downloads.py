@@ -15,7 +15,20 @@ from fplinux_cli.common import fail, sha256_file
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from typing import NoReturn
+    from typing import Literal, NoReturn
+
+
+def locked_file_status(
+    path: Path, digest: str, *, algorithm: str = "sha256", size: int | None = None
+) -> Literal["present", "missing", "mismatched"]:
+    """Inspect a locked input without creating its parent or accessing the network."""
+    if path.is_symlink():
+        return "mismatched"
+    if not path.exists():
+        return "missing"
+    if not path.is_file() or (size is not None and path.stat().st_size != size):
+        return "mismatched"
+    return "present" if _locked_file_digest(path, algorithm=algorithm) == digest else "mismatched"
 
 
 def download_locked_file(  # noqa: PLR0913 -- checksum, size and offline policy are distinct inputs.
@@ -27,6 +40,7 @@ def download_locked_file(  # noqa: PLR0913 -- checksum, size and offline policy 
     algorithm: str = "sha256",
     size: int | None = None,
     setup_command: str = "./fplinux setup --all",
+    on_download: Callable[[], None] | None = None,
 ) -> Path:
     """Fetch one declared checksum match atomically, or require saved bytes offline."""
     if not url.startswith("https://"):
@@ -34,17 +48,15 @@ def download_locked_file(  # noqa: PLR0913 -- checksum, size and offline policy 
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.is_symlink() or (destination.exists() and not destination.is_file()):
         fail(f"invalid locked download path: {destination}")
-    if (
-        destination.is_file()
-        and (size is None or destination.stat().st_size == size)
-        and _locked_file_digest(destination, algorithm=algorithm) == digest
-    ):
+    if locked_file_status(destination, digest, algorithm=algorithm, size=size) == "present":
         return destination
     if offline:
         fail(
             f"offline locked input is missing or mismatched: {url}: {destination}; "
             f"run {setup_command}"
         )
+    if on_download is not None:
+        on_download()
 
     def verify(path: Path) -> None:
         actual = _locked_file_digest(path, algorithm=algorithm)

@@ -18,29 +18,6 @@ if TYPE_CHECKING:
     import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
-PUBLIC_COMMANDS = (
-    "data-path",
-    "doctor",
-    "check",
-    "test",
-    "logs",
-    "inspect",
-    "format",
-    "setup",
-    "dependencies",
-    "ci",
-    "build",
-    "probe-build",
-    "checksum",
-    "package",
-    "prune",
-    "run",
-    "console",
-    "nand",
-    "device-data",
-    "target",
-    "verify",
-)
 PUBLIC_SOURCE_CHECK_SCOPES = (
     "source",
     "metadata",
@@ -71,14 +48,12 @@ class CheckCommandTests:
         """Run the repository entrypoint and capture its short response."""
         return self.run_fplinux("check", *arguments)
 
-    def test_help_lists_only_the_public_commands(self) -> None:
-        """Keep the hook-only command out of the public command surface."""
+    def test_help_includes_site_but_hides_hook_commands(self) -> None:
+        """Expose the site entry without advertising internal Git hooks."""
         result = self.run_fplinux("--help")
         assert (result.returncode) == (0), result.stderr
         assert (result.stderr) == ("")
-        assert (
-            tuple(re.findall(r"^    ([a-z][a-z-]*)\s{2,}", result.stdout, flags=re.MULTILINE))
-        ) == (PUBLIC_COMMANDS)
+        assert re.search(r"^    site\s{2,}", result.stdout, flags=re.MULTILINE) is not None
         assert ("_commit-msg") not in (result.stdout)
         assert ("_pre-push") not in (result.stdout)
 

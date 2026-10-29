@@ -273,7 +273,7 @@ def test_explicit_repreparation_refuses_the_previous_live_phone_without_another_
     stopped = archive.run()
 
     assert stopped.returncode == 1
-    assert "different runtime or prepared phone data" in stopped.stderr
+    assert "different prepared phone data" in stopped.stderr
     assert archive.shells() == [saved_session]
     assert (archive.root / "boundary/ram-loads.txt").read_text() == "RAM load\n"
 

@@ -48,15 +48,18 @@ def run_dispatch(
     events: list[object] = []
 
     @contextmanager
-    def record_lock(
+    def record_lock(  # noqa: PLR0913 -- the fixture accepts the real lock boundary.
         cache_root: Path,
         *,
         exclusive: bool,
         command: str,
         target: str | None,
         profile: str | None = None,
+        timeout: float | None = None,
     ) -> Iterator[None]:
         events.append(("lock", cache_root, exclusive, command, target, profile))
+        if timeout is not None:
+            events.append(("timeout", timeout))
         yield
         events.append("unlock")
 
@@ -78,6 +81,20 @@ def run_dispatch(
 @pytest.mark.usefixtures("cli_environment")
 class CliCacheLockTests:
     """Keep lock-mode selection at the in-process command dispatcher."""
+
+    def test_console_forwards_the_explicit_lock_timeout(self, dispatch_root: Path) -> None:
+        """The waiting limit reaches the same shared lock that protects the action."""
+        events, _console = run_dispatch(
+            dispatch_root,
+            ["console", "target", "--lock-timeout", "1.5"],
+            "fplinux_cli.cli.runtime.console_target",
+        )
+        assert events == [
+            ("lock", dispatch_root / ".data", False, "console", "target", None),
+            ("timeout", 1.5),
+            "command",
+            "unlock",
+        ]
 
     @pytest.mark.parametrize(
         ("arguments", "target", "host", "site", "all_inputs", "force", "offline"),
@@ -348,7 +365,7 @@ class CliCacheLockTests:
             ),
             (
                 ["format", "scripts/demo.py"],
-                "fplinux_cli.quality.formatting.command.format_sources",
+                "fplinux_cli.quality.formatting.command.format_command",
                 True,
                 None,
                 None,
@@ -494,10 +511,12 @@ class CliCacheLockTests:
         _events, formatter = run_dispatch(
             dispatch_root,
             ["format", "scripts/tool.py", "README.md"],
-            "fplinux_cli.quality.formatting.command.format_sources",
+            "fplinux_cli.quality.formatting.command.format_command",
         )
 
-        formatter.assert_called_once_with(["scripts/tool.py", "README.md"])
+        formatter.assert_called_once_with(
+            ["scripts/tool.py", "README.md"], changed=False, plan=False
+        )
 
     @pytest.mark.parametrize(
         ("arguments", "callback_name"),

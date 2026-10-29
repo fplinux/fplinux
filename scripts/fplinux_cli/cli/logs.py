@@ -32,6 +32,7 @@ class LogStage:
     name: str
     path: Path
     status: str
+    exit_code: int | None = None
     unfinished_parent_status: str | None = None
 
 
@@ -66,7 +67,10 @@ def read_run(path: Path) -> LogRun | None:
             filename = stage["log"]
             if Path(filename).name != filename or not filename.endswith(".log"):
                 return None
-            stages.append(LogStage(stage["name"], path / filename, stage["status"]))
+            exit_code = stage.get("exit")
+            if exit_code is not None and type(exit_code) is not int:
+                return None
+            stages.append(LogStage(stage["name"], path / filename, stage["status"], exit_code))
         build_type = data.get("build_type")
         return LogRun(
             path,
@@ -150,7 +154,11 @@ def add_log_arguments(parser: argparse.ArgumentParser) -> None:
             "--build-type", choices=_BUILD_TYPES, help="filter by recorded build/check type"
         )
         child.add_argument("--status", choices=_STATUSES, help="filter by recorded run status")
-        if action != "list":
+        if action == "list":
+            child.add_argument(
+                "--limit", type=_tail_count, metavar="N", help="show at most N newest runs"
+            )
+        else:
             child.add_argument(
                 "run", nargs="?", default="latest", help="run ID or latest (default)"
             )
@@ -163,6 +171,17 @@ def add_log_arguments(parser: argparse.ArgumentParser) -> None:
                 help="last N lines per stage initially (default: 40; 0: none)",
             )
             if action == "show":
+                child.add_argument(
+                    "--summary",
+                    action="store_true",
+                    help="show stage status and exit without logs",
+                )
+                child.add_argument(
+                    "--max-bytes",
+                    type=_tail_count,
+                    metavar="N",
+                    help="limit log content bytes across all selected stages",
+                )
                 child.add_argument(
                     "--failed",
                     action="store_true",
@@ -210,15 +229,39 @@ def _stage_id(stage: LogStage, run: LogRun) -> str:
     return (parent / stage.name).as_posix()
 
 
-def _copy_log(path: Path, offset: int | None, tail: int) -> int:
+def _copy_log(
+    path: Path, offset: int | None, tail: int, *, budget: int | None
+) -> tuple[int, int, bool]:
     """Print the initial tail or only newly appended bytes, retaining no complete log in memory."""
     with path.open("rb") as stream:
+        written = 0
+        truncated = False
         if offset is None:
-            if tail:
+            if not tail:
+                stream.seek(0, os.SEEK_END)
+            elif budget is None:
                 for line in deque(stream, maxlen=tail):
-                    sys.stdout.buffer.write(line)
+                    written += sys.stdout.buffer.write(line)
             else:
                 stream.seek(0, os.SEEK_END)
+                size = stream.tell()
+                available = min(size, budget)
+                stream.seek(size - available)
+                data = stream.read(available)
+                lines = data.split(b"\n") if data else []
+                if data.endswith(b"\n"):
+                    lines.pop()
+                selected = b"\n".join(lines[-tail:])
+                if data.endswith(b"\n") and lines:
+                    selected += b"\n"
+                truncated = available < size and len(lines) <= tail
+                if truncated and len(lines) == tail:
+                    stream.seek(size - available - 1)
+                    truncated = stream.read(1) != b"\n"
+                    stream.seek(size)
+                if truncated:
+                    selected = selected.lstrip(bytes(range(0x80, 0xC0)))
+                written = sys.stdout.buffer.write(selected)
         else:
             stream.seek(offset)
             # Limit this pass to the current file size so a busy writer cannot starve others.
@@ -227,10 +270,10 @@ def _copy_log(path: Path, offset: int | None, tail: int) -> int:
                 chunk = stream.read(min(remaining, 64 * 1024))
                 if not chunk:
                     break
-                sys.stdout.buffer.write(chunk)
+                written += sys.stdout.buffer.write(chunk)
                 remaining -= len(chunk)
         sys.stdout.buffer.flush()
-        return stream.tell()
+        return stream.tell(), written, truncated
 
 
 def _show_run(run: LogRun, args: argparse.Namespace) -> None:
@@ -238,11 +281,15 @@ def _show_run(run: LogRun, args: argparse.Namespace) -> None:
     matched = False
     last_path = None
     initial = True
+    budget = args.max_bytes if args.logs_action == "show" else None
+    truncated = False
     while True:
         current = read_run(run.path)
         if current is None:
             fail(f"run journal is no longer available: {run.path}")
         stages = _stage_logs(current)
+        if args.logs_action == "show" and args.summary:
+            print("STAGE STATUS EXIT")
         for stage in stages:
             identity = _stage_id(stage, current)
             if args.stage is not None and args.stage not in {stage.name, identity}:
@@ -254,6 +301,13 @@ def _show_run(run: LogRun, args: argparse.Namespace) -> None:
             ):
                 continue
             matched = True
+            if args.logs_action == "show" and args.summary:
+                status = stage.status
+                if stage.unfinished_parent_status is not None:
+                    status += f"; unfinished; parent {stage.unfinished_parent_status}"
+                exit_code = "-" if stage.exit_code is None else str(stage.exit_code)
+                print(f"{identity} {status} {exit_code}")
+                continue
             offset = offsets.get(stage.path)
             if offset is None and not initial:
                 offset = 0
@@ -265,7 +319,13 @@ def _show_run(run: LogRun, args: argparse.Namespace) -> None:
                         status += f"; unfinished; parent {stage.unfinished_parent_status}"
                     print(f"\n==> {identity} [{status}] <==", flush=True)
                     last_path = stage.path
-                offsets[stage.path] = _copy_log(stage.path, offset, args.tail)
+                position, written, clipped = _copy_log(
+                    stage.path, offset, args.tail, budget=budget
+                )
+                offsets[stage.path] = position
+                if budget is not None:
+                    budget -= written
+                truncated = truncated or clipped
         if args.logs_action != "follow" or current.status != "running":
             if args.stage is not None and not matched:
                 available = "\n".join(f"  {_stage_id(stage, current)}" for stage in stages)
@@ -275,6 +335,8 @@ def _show_run(run: LogRun, args: argparse.Namespace) -> None:
                 )
             if getattr(args, "failed", False) and not matched:
                 print("no failed or interrupted stages in this run", flush=True)
+            if truncated:
+                print("log content truncated by --max-bytes; omit it to see the selected tails")
             if args.logs_action == "follow":
                 print(f"run finished: {current.status}", flush=True)
             return
@@ -313,7 +375,8 @@ def read_logs(args: argparse.Namespace) -> None:
     try:
         if args.logs_action == "list":
             print("RUN COMMAND TARGET PROFILE BUILD_TYPE STATUS STARTED DURATION")
-            for _run, details in runs:
+            selected_runs = runs if args.limit is None else runs[: args.limit]
+            for _run, details in selected_runs:
                 row = []
                 for key in (
                     "id",

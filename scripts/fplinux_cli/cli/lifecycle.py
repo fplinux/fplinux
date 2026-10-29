@@ -28,6 +28,7 @@ _EXCLUSIVE_CACHE_COMMANDS = frozenset(
         "package",
         "probe-build",
         "setup",
+        "site",
         "test",
     }
 )
@@ -37,7 +38,7 @@ _SHARED_CACHE_COMMANDS = frozenset({"console", "nand", "run", "verify"})
 
 def _cache_lock_exclusive(args: argparse.Namespace) -> bool | None:
     """Return the command-wide cache-lock mode, if this invocation needs one."""
-    if args.command == "check" and args.list_scopes:
+    if (args.command == "check" and args.list_scopes) or (args.command == "format" and args.plan):
         return None
     if args.command == "prune":
         return True if args.prune_apply else None
@@ -77,6 +78,7 @@ def execute_command(
         command=args.command,
         target=target if isinstance(target, str) else None,
         profile=profile,
+        timeout=getattr(args, "lock_timeout", None),
     ):
         try:
             action()

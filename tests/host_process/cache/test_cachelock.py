@@ -9,8 +9,11 @@ import fcntl
 import io
 import multiprocessing
 import os
+import selectors
+import signal
 import sys
 import tempfile
+import threading
 import time
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -21,8 +24,10 @@ import pytest
 from fplinux_cli.cache.lock import _LOCK_FILENAME, cache_lock
 
 from tests import ROOT
+from tests.process import run_process
 
 if TYPE_CHECKING:
+    import subprocess
     from collections.abc import Iterator
     from multiprocessing.context import SpawnContext, SpawnProcess
     from multiprocessing.queues import Queue
@@ -212,6 +217,112 @@ def cache_lock_case() -> Iterator[CacheLockContext]:
 
 class CacheLockTests:
     """Check the cache flock only through separate operating-system processes."""
+
+    @pytest.mark.parametrize("timeout", [0.0, 0.2])
+    def test_timeout_reports_owner_without_releasing_holder(
+        self, cache_lock_case: CacheLockContext, capsys: pytest.CaptureFixture[str], timeout: float
+    ) -> None:
+        """A busy lock times out without disturbing its actual holder."""
+        owner, _, release = cache_lock_case.start_holder(exclusive=True)
+        started = time.monotonic()
+        with (
+            pytest.raises(SystemExit) as failure,
+            cache_lock(
+                cache_lock_case.cache_root,
+                exclusive=False,
+                command="console",
+                target="demo-target",
+                timeout=timeout,
+            ),
+        ):
+            pytest.fail("a timed-out waiter acquired the lock")
+        assert failure.value.code == 75
+        assert time.monotonic() - started < 2
+        assert owner.is_alive()
+        assert not cache_lock_case.exclusive_lock_available()
+        assert "command=build" in capsys.readouterr().err
+        cache_lock_case.stop(owner, release)
+
+    def test_waiter_acquires_after_release_before_deadline(
+        self, cache_lock_case: CacheLockContext
+    ) -> None:
+        """A bounded waiter continues when the holder releases in time."""
+        owner, _, release = cache_lock_case.start_holder(exclusive=True)
+        timer = threading.Timer(0.1, release.set)
+        timer.start()
+        try:
+            with cache_lock(
+                cache_lock_case.cache_root,
+                exclusive=False,
+                command="console",
+                target="demo-target",
+                timeout=3,
+            ):
+                assert not cache_lock_case.exclusive_lock_available()
+        finally:
+            timer.join()
+            cache_lock_case.stop(owner, release)
+
+    def test_console_timeout_stops_before_phone_access(
+        self, cache_lock_case: CacheLockContext
+    ) -> None:
+        """A busy lock stops the public console before any phone operation."""
+        owner, _, release = cache_lock_case.start_holder(exclusive=True)
+        result = run_process(
+            [
+                str(ROOT / "fplinux"),
+                "console",
+                "nokia-ta1618",
+                "--lock-timeout",
+                "0",
+                "--exec",
+                "true",
+            ],
+            name="console with busy data lock",
+            cwd=ROOT,
+            env=os.environ | {"FPLINUX_DATA_DIR": str(cache_lock_case.cache_root)},
+            timeout=10,
+        )
+        assert result.returncode == 75
+        assert "command=build" in result.stderr
+        assert "lock wait timed out" in result.stderr
+        assert owner.is_alive()
+        cache_lock_case.stop(owner, release)
+
+    def test_interrupting_bounded_console_wait_leaves_holder_running(
+        self, cache_lock_case: CacheLockContext
+    ) -> None:
+        """Ctrl+C interrupts the waiting CLI without contacting the phone or its holder."""
+        owner, _, release = cache_lock_case.start_holder(exclusive=True)
+
+        def interrupt_waiter(process: subprocess.Popen[str], deadline: float) -> None:
+            assert process.stderr is not None
+            with selectors.DefaultSelector() as selector:
+                selector.register(process.stderr, selectors.EVENT_READ)
+                assert selector.select(max(0, deadline - time.monotonic()))
+                assert b"waiting" in os.read(process.stderr.fileno(), 4096)
+            process.send_signal(signal.SIGINT)
+
+        result = run_process(
+            [
+                str(ROOT / "fplinux"),
+                "console",
+                "nokia-ta1618",
+                "--lock-timeout",
+                "10",
+                "--exec",
+                "true",
+            ],
+            name="interrupt console lock wait",
+            cwd=ROOT,
+            env=os.environ | {"FPLINUX_DATA_DIR": str(cache_lock_case.cache_root)},
+            timeout=15,
+            while_running=interrupt_waiter,
+        )
+        assert result.returncode == 130
+        assert owner.is_alive()
+        assert not cache_lock_case.exclusive_lock_available()
+        cache_lock_case.stop(owner, release)
 
     def test_shared_invocations_run_together(self, cache_lock_case: CacheLockContext) -> None:
         """Shared cache-lock modes do not block one another."""

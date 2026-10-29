@@ -59,3 +59,26 @@ class TestCommandCliTests:
         assert (result.stdout) == ("")
         assert ("workspace") not in (result.stderr)
         assert ("Traceback") not in (result.stderr)
+
+    @pytest.mark.parametrize(
+        ("selection", "hint"),
+        [
+            ("tests.public_workflow", "use --tier public_workflow or tests/public_workflow"),
+            (
+                "tests.small.quality::test_example",
+                "use a file path for a pytest node: tests/<tier>/<module>.py::<node>",
+            ),
+        ],
+    )
+    def test_invalid_selection_explains_the_supported_form(
+        self, selection: str, hint: str
+    ) -> None:
+        """Suggest a supported selector without expanding the test selection."""
+        result = run_process(
+            [str(ROOT / "fplinux"), "test", selection],
+            name="test selection hint",
+            timeout=10,
+            cwd=ROOT,
+        )
+        assert result.returncode == 2
+        assert hint in result.stderr

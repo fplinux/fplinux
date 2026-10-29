@@ -75,12 +75,15 @@ Follow [Prepare an exact commit before pushing](/fplinux/guides/dependencies/#pr
 ## Inspect artifacts
 
 ```sh title="PC"
+./fplinux inspect source
 ./fplinux inspect bundle nokia-ta1618
+./fplinux inspect bundle nokia-ta1618 --current-source
 ./fplinux inspect archive "$(./fplinux data-path)/out/releases/FPLinux-nokia-ta1618-….zip"
 ./fplinux inspect apk path/to/package.apk
 ```
 
-- `bundle` lists the current build's identity, files, sizes and SHA-256 hashes and checks them against its build manifest. It does not check whether the source has changed since that build.
+- `source` shows the current public source snapshot and release identity without building.
+- `bundle` lists the selected build's identity, files, sizes and SHA-256 hashes and checks them against its build manifest. Add `--current-source` to compare source, target workspace, environment receipt and signing identity separately. The receipt comparison does not probe installed environment content. Use `--without-device-data` or `--phone-data PATH` when the build used that selection. A stale bundle remains inspectable without the comparison.
 - `archive` checks a runtime or corresponding-sources ZIP against its complete `SHA256SUMS` and manifest records. Source inspection also checks the source identity and selected build material. This establishes internal consistency, not authenticity or phone operation.
 - `distribution` checks the complete release directory, including its runtime/source/input association.
 - `apk` shows a package's metadata and file list. It does not install the package, run its scripts or verify its signature.

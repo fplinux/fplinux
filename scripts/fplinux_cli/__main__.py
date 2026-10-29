@@ -55,6 +55,8 @@ def _host_main(selected_root: Path) -> None:
     targets = discover_targets()
     parser, check_parser = create_parser(targets)
     args = parser.parse_args()
+    if args.command == "format" and not args.paths and not args.changed:
+        parser.error("format requires PATH or --changed")
     if hasattr(args, "profile") and not (args.command == "check" and args.list_scopes):
         args.profile = normalize_profile(args.profile)
     execute_command(args, command_action(args, check_parser), data_directory=selected_root)

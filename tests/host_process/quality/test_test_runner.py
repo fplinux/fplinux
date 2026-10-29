@@ -846,6 +846,11 @@ class MixedRuntimeProcessTests:
             failing_fixture=True,
         )
         assert result.returncode == 1, result.stderr
+        assert "test: unsuccessful groups:" in result.stderr
+        assert failing_runtime + ":" in result.stderr
+        assert "FailureCase" in result.stderr
+        assert "(exit 1)" in result.stderr
+        assert "log:" in result.stderr
         expected = [f"{failing_runtime}:{failing}.FailureCase.test_first"]
         if not failfast:
             expected.extend(
@@ -896,3 +901,24 @@ class MixedRuntimeProcessTests:
         assert mixed_runtime_context.executed() == []
         status = json.loads((mixed_runtime_context.logs / "tests/run.json").read_text())["status"]
         assert status == "interrupted"
+
+    def test_interrupt_after_failure_reports_the_previous_group(
+        self, mixed_runtime_context: MixedRuntimeContext
+    ) -> None:
+        """The interrupt status stays 130 while an earlier failed group remains visible."""
+        failing = "tests/host_process/cache/test_prune_rootfs_ownership.py"
+        interrupted = "tests/host_process/domain/test_selection.py"
+        shutil.copyfile(
+            ROOT / "tests/host_process/quality/fixtures/test-runner/pytest_interrupt_case.py",
+            mixed_runtime_context.root / interrupted,
+        )
+        result = mixed_runtime_context.run(
+            failing + "::FailureCase::test_first",
+            interrupted + "::test_interrupt",
+            failing_fixture=True,
+        )
+
+        assert result.returncode == 130
+        assert "test: unsuccessful groups:" in result.stderr
+        assert failing in result.stderr
+        assert "(exit 1)" in result.stderr

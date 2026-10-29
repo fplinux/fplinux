@@ -20,6 +20,8 @@ from .definition import load_environment_lock
 from .downloads import download_locked_file
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from fplinux_cli.reporting.run import Stage
 
 KERN_PROBE_TIMEOUT = 60
@@ -100,7 +102,13 @@ def require_kern(lock: dict[str, Any] | None = None, *, cache: Path | None = Non
     return str(_kern_path(selected_root))
 
 
-def install_kern(lock: dict[str, Any], *, offline: bool = False, cache: Path | None = None) -> str:
+def install_kern(
+    lock: dict[str, Any],
+    *,
+    offline: bool = False,
+    cache: Path | None = None,
+    on_download: Callable[[], None] | None = None,
+) -> str:
     """Install the pinned static Kern binary under the project cache."""
     selected_root = data_root(ROOT) if cache is None else cache
     if kern_available(lock, cache=selected_root):
@@ -111,6 +119,7 @@ def install_kern(lock: dict[str, Any], *, offline: bool = False, cache: Path | N
         kern_lock["archive_sha256"],
         selected_root / lock["kern"]["destination"],
         offline=offline,
+        on_download=on_download,
     )
     destination = _kern_path(selected_root)
     ensure_project_directory(destination.parent)

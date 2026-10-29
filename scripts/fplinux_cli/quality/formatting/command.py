@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import os
 import stat
+import subprocess
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
@@ -28,6 +31,141 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
 _FORMAT_TIMEOUT_SECONDS = 15 * 60
+
+
+@dataclass(frozen=True)
+class FormatDecision:
+    """One selected path and the tool that owns its formatting."""
+
+    path: str
+    kind: str
+    reason: str
+
+
+def _site_format_path(relative: str, root: Path) -> bool:
+    path = PurePosixPath(relative)
+    if path.parts[:1] != ("site",) or path.suffix not in {
+        ".astro",
+        ".css",
+        ".js",
+        ".json",
+        ".jsonc",
+        ".md",
+        ".mdx",
+        ".mjs",
+        ".ts",
+        ".yaml",
+        ".yml",
+    }:
+        return False
+    name = path.relative_to("site").as_posix()
+    ignore = root / "site/.prettierignore"
+    for raw in ignore.read_text().splitlines():
+        rule = raw.strip().rstrip("/")
+        if rule and not rule.startswith("#") and (name == rule or name.startswith(rule + "/")):
+            return False
+    return True
+
+
+def plan_format_paths(values: Sequence[str]) -> list[FormatDecision]:
+    """Classify all requested paths without starting a formatter or writing data."""
+    files = quality_files(enforce_source_policy=False)
+    by_path = dict(files)
+    supported = classify_source_formats([path for _, path in files], root=ROOT).supported()
+    decisions = []
+    seen: set[str] = set()
+    for value in values:
+        try:
+            relative = relative_name(value, field="format path")
+        except SystemExit as error:
+            decisions.append(FormatDecision(value, "invalid", str(error)))
+            continue
+        if relative in seen:
+            decisions.append(FormatDecision(relative, "invalid", "duplicate path"))
+            continue
+        seen.add(relative)
+        if _path_uses_symlink(ROOT, relative):
+            decisions.append(
+                FormatDecision(relative, "invalid", "format path must not use a symlink")
+            )
+        elif relative not in by_path:
+            reason = (
+                "format path must name a regular file"
+                if (ROOT / relative).is_dir()
+                else "format path is not a project source file"
+            )
+            decisions.append(FormatDecision(relative, "invalid", reason))
+        elif relative in supported:
+            decisions.append(FormatDecision(relative, "format", "project formatter"))
+        elif relative.endswith(".patch"):
+            try:
+                linux_contexts(frozenset({relative}))
+            except SystemExit as error:
+                if "not a declared Linux patch:" not in str(error):
+                    raise
+                decisions.append(
+                    FormatDecision(relative, "unsupported", "not a declared Linux patch")
+                )
+            else:
+                decisions.append(FormatDecision(relative, "format", "declared Linux patch"))
+        elif _site_format_path(relative, ROOT):
+            decisions.append(
+                FormatDecision(relative, "site", "use ./fplinux site format (whole site)")
+            )
+        else:
+            decisions.append(
+                FormatDecision(relative, "unsupported", "no project formatter is defined for")
+            )
+    return decisions
+
+
+def _changed_format_paths() -> list[str]:
+    paths: set[str] = set()
+    for arguments in (
+        ("diff", "--name-only", "--diff-filter=ACMR", "-z"),
+        ("diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z"),
+        ("ls-files", "--others", "--exclude-standard", "-z"),
+    ):
+        result = subprocess.run(
+            ["git", *arguments, "--"], cwd=ROOT, capture_output=True, check=False, timeout=30
+        )
+        if result.returncode:
+            fail(f"cannot select changed files: {result.stderr.decode(errors='replace').strip()}")
+        paths.update(os.fsdecode(path) for path in result.stdout.split(b"\0") if path)
+    return sorted(paths)
+
+
+def format_command(values: Sequence[str], *, changed: bool, plan: bool) -> None:
+    """Plan explicit or changed paths and format only the selected project sources."""
+    if not values and not changed:
+        fail("format requires PATH or --changed")
+    selected = list(values)
+    if changed:
+        filters = [relative_name(value, field="format path") for value in values]
+        if any(_path_uses_symlink(ROOT, value) for value in filters):
+            fail("format path must not use a symlink")
+        selected = [
+            path
+            for path in _changed_format_paths()
+            if not filters
+            or "." in filters
+            or any(path == value or path.startswith(value + "/") for value in filters)
+        ]
+    decisions = plan_format_paths(selected)
+    for item in decisions:
+        if plan or (changed and item.kind != "format"):
+            print(f"{item.kind}: {item.path}: {item.reason}")
+    if plan:
+        return
+    problems = [item for item in decisions if item.kind != "format"]
+    if problems and not changed:
+        details = "\n".join(f"  {item.reason}: {item.path}" for item in problems)
+        fail("format selection includes unsupported or invalid paths:\n" + details)
+    paths = [item.path for item in decisions if item.kind == "format"]
+    if not paths:
+        print("format: no selected project sources")
+        return
+    format_sources(paths)
 
 
 def _path_uses_symlink(root: Path, relative: str) -> bool:

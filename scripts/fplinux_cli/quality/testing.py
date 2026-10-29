@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 import time
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -14,7 +15,7 @@ from typing import TYPE_CHECKING
 from fplinux_cli import common
 from fplinux_cli.common import fail
 from fplinux_cli.data_paths import data_root
-from fplinux_cli.reporting.run import RunReporter, run_entrypoint
+from fplinux_cli.reporting.run import RunReporter, current_stage, run_entrypoint
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -43,12 +44,16 @@ class _PytestInvocation:
     runtime: Literal["container", "host"]
     command: list[str]
     log_name: str | None = None
+    selectors: tuple[str, ...] = ()
 
 
 def test_name(value: str) -> str:
     """Validate repository selections without importing test modules on the host."""
     if "/" in value or "::" in value:
         path, separator, selected = value.partition("::")
+        if separator and "/" not in path:
+            message = "use a file path for a pytest node: tests/<tier>/<module>.py::<node>"
+            raise argparse.ArgumentTypeError(message)
         identifiers, bracket, parameter = selected.partition("[")
         nodes = identifiers.split("::") if separator else []
         if bracket:
@@ -77,6 +82,9 @@ def test_name(value: str) -> str:
         message = "use tests/<tier>[/<directory>] or tests/<tier>/<module>.py[::<node>]"
         raise argparse.ArgumentTypeError(message)
     parts = value.split(".")
+    if len(parts) == 2 and parts[0] == "tests" and parts[1] in TEST_TIERS:
+        message = f"use --tier {parts[1]} or tests/{parts[1]} for a whole tier"
+        raise argparse.ArgumentTypeError(message)
     if (
         len(parts) < 3
         or parts[0] != "tests"
@@ -226,6 +234,23 @@ def _selected_pytest_groups(names: list[str], *, failfast: bool) -> list[list[st
     return groups
 
 
+def _report_unsuccessful_groups(
+    failures: list[tuple[_PytestInvocation, int | str | None]],
+) -> None:
+    if not failures:
+        return
+    stage = current_stage()
+    entries = []
+    for invocation, code in failures:
+        selectors = ", ".join(invocation.selectors) or "selected tests"
+        entries.append(f"  {invocation.runtime}: {selectors} (exit {code})")
+    log = f"\n  log: {stage.display_path}" if stage is not None else ""
+    summary = "test: unsuccessful groups:\n" + "\n".join(entries) + log
+    if stage is not None:
+        stage.write((summary + "\n").encode())
+    print(summary, file=sys.stderr, flush=True)
+
+
 def _run_invocations(
     invocations: list[_PytestInvocation],
     execute: Callable[[_PytestInvocation, float], None],
@@ -236,25 +261,32 @@ def _run_invocations(
     """Retain subprocess order and results within one shared workload deadline."""
     deadline = time.monotonic() + timeout
     status = 5
-    for invocation in invocations:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            fail(f"tests timed out after {timeout}s")
-        try:
-            execute(invocation, remaining)
-        except SystemExit as error:
-            if error.code in (2, 130):
-                raise KeyboardInterrupt from None
-            if isinstance(error.code, int) and error.code >= 128:
-                raise
-            if error.code != 5:
-                status = 1
-                if failfast:
-                    break
-        else:
-            if status != 1:
-                status = 0
+    failures: list[tuple[_PytestInvocation, int | str | None]] = []
+    try:
+        for invocation in invocations:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                fail(f"tests timed out after {timeout}s")
+            try:
+                execute(invocation, remaining)
+            except SystemExit as error:
+                if error.code in (2, 130):
+                    raise KeyboardInterrupt from None
+                if isinstance(error.code, int) and error.code >= 128:
+                    raise
+                failures.append((invocation, error.code))
+                if error.code != 5:
+                    status = 1
+                    if failfast:
+                        break
+            else:
+                if status != 1:
+                    status = 0
+    except BaseException:
+        _report_unsuccessful_groups(failures)
+        raise
     if status:
+        _report_unsuccessful_groups(failures)
         raise SystemExit(status)
 
 
@@ -349,7 +381,14 @@ def run_test_workload(  # noqa: PLR0913 -- public selection and runtime inputs s
                     command = _pytest_command(
                         nodes, verbose=verbose, failfast=failfast, cache_dir=cache_dir
                     )
-                    return _PytestInvocation("host" if host else "container", command, log_name)
+                    selectors = (
+                        tuple(nodes[: nodes.index("--ignore")])
+                        if "--ignore" in nodes
+                        else tuple(nodes)
+                    )
+                    return _PytestInvocation(
+                        "host" if host else "container", command, log_name, selectors
+                    )
 
                 if names:
                     groups: list[tuple[Literal["container", "host"], list[str], bool]] = []
@@ -394,7 +433,9 @@ def run_test_workload(  # noqa: PLR0913 -- public selection and runtime inputs s
                                 *(["--sanitize"] if sanitize else []),
                             ]
                             invocations.append(
-                                _PytestInvocation("container", command, f"{label}-{index}")
+                                _PytestInvocation(
+                                    "container", command, f"{label}-{index}", tuple(nodes)
+                                )
                             )
                 else:
                     nodes = [f"tests/{label}"]
@@ -505,7 +546,9 @@ def main() -> None:
                         failfast=args.failfast,
                         sanitize=args.sanitize,
                     )
-                    invocations.append(_PytestInvocation("container", selected_command))
+                    invocations.append(
+                        _PytestInvocation("container", selected_command, selectors=tuple(names))
+                    )
 
                 def execute(selected: _PytestInvocation, remaining: float) -> None:
                     stage.run(selected.command, env=environment, timeout=remaining)

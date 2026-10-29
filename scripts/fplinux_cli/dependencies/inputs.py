@@ -7,7 +7,9 @@ import base64
 import binascii
 import json
 import re
+import sys
 from dataclasses import asdict, dataclass
+from functools import partial
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
@@ -33,9 +35,10 @@ from fplinux_cli.manifests.loaders import loader_sources
 from fplinux_cli.manifests.paths import declared_boot_profiles
 from fplinux_cli.manifests.source_catalog import ResolvedSource, load_host_sources, resolve_source
 from fplinux_cli.manifests.values import sha256_value
+from fplinux_cli.reporting.run import current_stage
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 
 @dataclass(frozen=True)
@@ -228,10 +231,11 @@ def acquire_inputs(
     *,
     offline: bool,
     setup_command: str = "./fplinux setup --all",
+    on_download: Callable[[DependencyInput, int, int], None] | None = None,
 ) -> dict[str, Path]:
     """Acquire selected originals once before their consumers use only local files."""
     result = {}
-    for item in inputs:
+    for position, item in enumerate(inputs, start=1):
         expected = item.checksum or item.sha256
         if expected is None:
             fail(f"dependency input has no checksum: {item.key}")
@@ -243,8 +247,20 @@ def acquire_inputs(
             algorithm=item.algorithm,
             size=item.size,
             setup_command=setup_command,
+            on_download=partial(on_download, item, position, len(inputs)) if on_download else None,
         )
     return result
+
+
+def report_input_download(
+    input_file: DependencyInput, position: int, total: int, *, label: str
+) -> None:
+    """Show each actual transfer and retain the same progress in the active stage."""
+    message = f"{label}: download {position}/{total}: {input_file.key}: {input_file.url}"
+    stage = current_stage()
+    if stage is not None:
+        stage.write((message + "\n").encode())
+    print(message, file=sys.stderr, flush=True)
 
 
 def alpine_package_input(lock: dict[str, Any], record: dict[str, Any]) -> DependencyInput:

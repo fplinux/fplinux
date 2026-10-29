@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-import sys
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from fplinux_cli import common
@@ -15,7 +15,11 @@ from fplinux_cli.dependencies.distribution import (
     write_dependency_distribution,
 )
 from fplinux_cli.dependencies.environment_archive import restore_environment, save_environment
-from fplinux_cli.dependencies.inputs import DependencyInput, dependency_selection
+from fplinux_cli.dependencies.inputs import (
+    DependencyInput,
+    dependency_selection,
+    report_input_download,
+)
 from fplinux_cli.dependencies.site_inputs import site_dependency_selection
 from fplinux_cli.dependencies.snapshots import (
     preserve_inputs,
@@ -55,15 +59,7 @@ def create_dependencies(
     )
     with reporter.stage("dependency-selection"):
         inputs, context = checkout_declarations()
-    with reporter.stage("preserve-inputs") as stage:
-
-        def report_download(input_file: DependencyInput, position: int, total: int) -> None:
-            message = (
-                f"dependencies: download {position}/{total}: {input_file.key}: {input_file.url}"
-            )
-            stage.write((message + "\n").encode())
-            print(message, file=sys.stderr, flush=True)
-
+    with reporter.stage("preserve-inputs"):
         manifest = preserve_inputs(
             inputs,
             context,
@@ -71,7 +67,7 @@ def create_dependencies(
             cache=cache,
             offline=offline,
             sources=sources,
-            on_download=report_download,
+            on_download=partial(report_input_download, label="dependencies"),
         )
     if not inputs_only:
         manifest["environment"] = save_environment(directory, reporter, cache=cache)

@@ -7,6 +7,7 @@ import gzip
 import hashlib
 import io
 import json
+import os
 import tarfile
 import zipfile
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ from fplinux_cli.artifacts.bundles import (
     publish_current_bundle,
 )
 
+from tests import ROOT
 from tests.bundle_support import file_record
 from tests.cli_support import prepare_cli_checkout
 from tests.process import run_process
@@ -28,6 +30,23 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 ABC_SHA256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
+
+def test_site_inputs_inspection_does_not_create_an_empty_data_root(tmp_path: Path) -> None:
+    root = tmp_path / "not-created"
+    result = run_process(
+        [str(ROOT / "fplinux"), "inspect", "inputs", "--site"],
+        name="inspect unavailable site inputs",
+        cwd=ROOT,
+        env=os.environ | {"FPLINUX_DATA_DIR": str(root)},
+        timeout=30,
+    )
+
+    assert result.returncode == 1
+    assert "missing: source:site-node:" in result.stdout
+    assert "site tooling: unavailable" in result.stdout
+    assert "prepare inputs with: ./fplinux setup --site" in result.stdout
+    assert not root.exists()
 
 
 @dataclass(frozen=True)
@@ -46,16 +65,21 @@ class InspectCli:
         )
 
     def make_bundle(
-        self, generation: str, profile: str | None = None, *, build_type: str = "release"
+        self,
+        generation: str,
+        profile: str | None = None,
+        *,
+        build_type: str = "release",
+        target: str = "example",
     ) -> Path:
         """Publish a normal fixture generation with independently described payload bytes."""
         output = self.root / ".data/out"
         output.mkdir(parents=True, exist_ok=True)
-        staging = create_bundle_staging(output, "example", profile, build_type=build_type)
+        staging = create_bundle_staging(output, target, profile, build_type=build_type)
         payload = staging / "payload.bin"
         payload.write_bytes(b"abc")
         manifest: dict[str, object] = {
-            "target": "example",
+            "target": target,
             "profile": profile,
             "build_type": build_type,
             "generation": generation,
@@ -76,7 +100,7 @@ class InspectCli:
         }
         (staging / "build-manifest.json").write_text(json.dumps(manifest))
         return publish_bundle_generation(
-            output, "example", staging, generation, profile, build_type=build_type
+            output, target, staging, generation, profile, build_type=build_type
         )
 
     def make_archive(self, *, damaged: bool = False, extra: bool = False) -> Path:
@@ -115,6 +139,75 @@ def inspect_cli(tmp_path: Path) -> InspectCli:
     """Keep every inspected artifact and process inside a disposable checkout."""
     prepare_cli_checkout(tmp_path)
     return InspectCli(tmp_path)
+
+
+def test_bundle_comparison_reports_stale_source_and_unavailable_environment(
+    tmp_path: Path,
+) -> None:
+    cache = tmp_path / ".data"
+    inspector = InspectCli(tmp_path)
+    bundle = inspector.make_bundle("1" * 64, target="nokia-ta1618")
+    publish_current_bundle(cache / "out", "nokia-ta1618", bundle)
+
+    result = run_process(
+        [
+            str(ROOT / "fplinux"),
+            "inspect",
+            "bundle",
+            "nokia-ta1618",
+            "--current-source",
+            "--without-device-data",
+        ],
+        name="compare saved bundle with current source",
+        cwd=ROOT,
+        env=os.environ | {"FPLINUX_DATA_DIR": str(cache)},
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "build-manifest checksums: OK" in result.stdout
+    assert "source: stale" in result.stdout
+    assert "workspace: stale" in result.stdout
+    assert "environment: unavailable" in result.stdout
+    assert "signing: unavailable" in result.stdout
+    assert "bundle freshness: stale" in result.stdout
+
+    card_bundle = inspector.make_bundle("2" * 64, "microsd-uboot", target="nokia-ta1618")
+    publish_current_bundle(cache / "out", "nokia-ta1618", card_bundle, "microsd-uboot")
+    phone = tmp_path / "selected-phone"
+    phone.mkdir()
+    (phone / "phone").write_text("not a prepared directory")
+    selected = run_process(
+        [
+            str(ROOT / "fplinux"),
+            "inspect",
+            "bundle",
+            "nokia-ta1618",
+            "--profile",
+            "microsd-uboot",
+            "--current-source",
+            "--phone-data",
+            str(phone),
+        ],
+        name="compare using selected phone data",
+        cwd=ROOT,
+        env=os.environ
+        | {"FPLINUX_DATA_DIR": str(cache), "XDG_DATA_HOME": str(tmp_path / "other")},
+        timeout=30,
+    )
+    assert selected.returncode == 1
+    assert str(phone / "phone") in selected.stderr
+    assert "declared input directory is missing or invalid" in selected.stderr
+
+    rejected = run_process(
+        [str(ROOT / "fplinux"), "inspect", "bundle", "nokia-ta1618", "--phone-data", str(phone)],
+        name="reject unused phone data selector",
+        cwd=ROOT,
+        env=os.environ | {"FPLINUX_DATA_DIR": str(cache)},
+        timeout=30,
+    )
+    assert rejected.returncode == 1
+    assert "require --current-source" in rejected.stderr
 
 
 class InspectCliTests:
@@ -180,6 +273,8 @@ class InspectCliTests:
         assert (result.returncode) == (0), result.stderr
         assert ("kind: runtime\n") in (result.stdout)
         assert "release_id: aaaaaaaaaaaa\n" in result.stdout
+        assert "source_commit: " + "a" * 40 + "\n" in result.stdout
+        assert "source_snapshot: " + "b" * 64 + "\n" in result.stdout
         assert ("target: example\n") in (result.stdout)
         assert (f"3 {ABC_SHA256} payload.bin\n") in (result.stdout)
         assert ("SHA256SUMS: OK") in (result.stdout)

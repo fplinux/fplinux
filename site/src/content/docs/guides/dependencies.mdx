@@ -7,6 +7,8 @@ A dependency snapshot keeps the pinned external inputs and build environment out
 
 `sources.lock.toml` owns direct source, tool, font, runtime and loader originals. Environment, platform, host and package declarations select those records by source ID. Native npm locks and Alpine package locks retain their dependency graphs and exact package checksums. A snapshot collects the inputs selected by all supported targets, profiles and build types, including debug tools and Linux, Windows and site dependencies.
 
+Use `./fplinux inspect inputs`, `./fplinux inspect inputs nokia-ta1618 --host windows`, `./fplinux inspect inputs --site` or `./fplinux inspect inputs --all` to check locally stored originals without downloading or installing anything. The command reports counts and lists missing or mismatched inputs, then exits with status 1 if any selected original is unavailable. Target selection covers every supported profile and build type. Environment and site-tooling status only report local receipts and files; they do not execute or verify the installed tools.
+
 ## Restore a release's inputs
 
 Use the matching source revision and the twelve-character build ID shown in the release name, runtime ZIP filename or the phone's **Settings → About → Build** row. Replace `<release-id>` below with that ID:

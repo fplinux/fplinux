@@ -982,12 +982,16 @@ def require_prepared_content(
     session: dict[str, Any], *, bundle_generation: str, prepared_data_sha256: str | None
 ) -> None:
     """Refuse to reconnect after the selected bundle or personal contents changed."""
+    if session.get("bundle_generation") != bundle_generation:
+        fail("the running phone uses a different build; shut it down before starting this build")
     if (
-        session.get("bundle_generation") != bundle_generation
-        or "prepared_data_sha256" not in session
+        "prepared_data_sha256" not in session
         or session["prepared_data_sha256"] != prepared_data_sha256
     ):
-        fail("the running phone uses different runtime or prepared phone data; shut it down first")
+        fail(
+            "the running phone uses different prepared phone data; "
+            "shut it down before using this data"
+        )
 
 
 def _retry_pause(deadline: float) -> None:

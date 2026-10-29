@@ -17,12 +17,8 @@ from fplinux_cli.environment.install import install_node_runtime, populate_npm_c
 from fplinux_cli.manifests.source_catalog import resolve_source
 
 
-def install_site(*, cache: Path | None = None) -> None:
-    """Prepare exact Node/npm and feed the site's native lock into an offline install."""
-    root = common.ROOT
-    cache = data_root(root) if cache is None else cache
-    inputs, _context = site_dependency_selection(root)
-    local = acquire_inputs(inputs, cache, offline=True)
+def site_runtime(root: Path, cache: Path) -> Path:
+    """Resolve the runtime owned by the current Node and npm declarations."""
     node = resolve_source(root, "site-node")
     npm = resolve_source(root, "npm")
     recipe = sha256_bytes(
@@ -35,9 +31,20 @@ def install_site(*, cache: Path | None = None) -> None:
             }
         )
     )
+    return cache / "site/runtime" / recipe
+
+
+def install_site(*, cache: Path | None = None) -> None:
+    """Prepare exact Node/npm and feed the site's native lock into an offline install."""
+    root = common.ROOT
+    cache = data_root(root) if cache is None else cache
+    inputs, _context = site_dependency_selection(root)
+    local = acquire_inputs(inputs, cache, offline=True)
+    node = resolve_source(root, "site-node")
+    npm = resolve_source(root, "npm")
     runtimes = cache / "site/runtime"
     runtimes.mkdir(parents=True, exist_ok=True)
-    runtime = runtimes / recipe
+    runtime = site_runtime(root, cache)
     if not runtime.exists():
         with tempfile.TemporaryDirectory(dir=runtimes, prefix=".node-") as temporary:
             prepared = Path(temporary) / "runtime"
@@ -82,7 +89,7 @@ def install_site(*, cache: Path | None = None) -> None:
         fail(f"documentation dependency installation failed (exit {installed.returncode})")
     with tempfile.TemporaryDirectory(dir=cache / "site", prefix=".node-link-") as temporary:
         link = Path(temporary) / "node"
-        link.symlink_to(Path("runtime") / recipe)
+        link.symlink_to(Path("runtime") / runtime.name)
         link.replace(cache / "site/node")
     workflow_path = os.environ.get("GITHUB_PATH")
     if workflow_path:

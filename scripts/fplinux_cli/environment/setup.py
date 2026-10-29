@@ -24,6 +24,7 @@ from fplinux_cli.dependencies.inputs import (
     deduplicate_inputs,
     environment_inputs,
     host_inputs,
+    report_input_download,
     terminus_font_environment_inputs,
     ui_font_environment_inputs,
     ui_icon_environment_inputs,
@@ -32,7 +33,7 @@ from fplinux_cli.manifests.identity import BUILD_TYPES
 from fplinux_cli.manifests.paths import declared_boot_profiles, target_directory
 from fplinux_cli.manifests.platforms import load_platform
 from fplinux_cli.manifests.targets import load_target
-from fplinux_cli.reporting.run import RunReporter
+from fplinux_cli.reporting.run import RunReporter, current_stage
 
 from .definition import (
     ENVIRONMENT_RECIPE_INPUTS,
@@ -68,6 +69,29 @@ def target_setup_inputs(target: str, *, host: str = "linux") -> list[DependencyI
             config = load_target(target, profile, build_type=build_type)
             inputs.extend(build_source_inputs(ROOT, platform, config))
     return deduplicate_inputs(inputs)
+
+
+def _acquire_setup_inputs(
+    inputs: list[DependencyInput], cache: Path, *, offline: bool, setup_command: str
+) -> dict[str, Path]:
+    downloaded = 0
+
+    def report(input_file: DependencyInput, position: int, total: int) -> None:
+        nonlocal downloaded
+        downloaded += 1
+        report_input_download(input_file, position, total, label="setup")
+
+    paths = acquire_inputs(
+        inputs, cache, offline=offline, setup_command=setup_command, on_download=report
+    )
+    summary = (
+        f"setup: inputs: {len(inputs) - downloaded} cached, {downloaded} downloaded, 0 missing"
+    )
+    stage = current_stage()
+    if stage is not None:
+        stage.write((summary + "\n").encode())
+    print(summary, file=sys.stderr, flush=True)
+    return paths
 
 
 def prepare_setup(  # noqa: PLR0913 -- public preparation selectors and environment policy stay explicit.
@@ -108,7 +132,7 @@ def prepare_setup(  # noqa: PLR0913 -- public preparation selectors and environm
         setup_command = "./fplinux setup"
     if inputs:
         with reporter.stage("setup-inputs"):
-            acquire_inputs(inputs, cache, offline=offline, setup_command=setup_command)
+            _acquire_setup_inputs(inputs, cache, offline=offline, setup_command=setup_command)
     if not site:
         setup(force=force, offline=offline, reporter=reporter, cache=cache)
     if site or all_inputs:
@@ -137,8 +161,11 @@ def _stage_environment_inputs(context: Path, *, offline: bool, cache: Path | Non
     terminal_fonts = {item.key for item in terminus_font_environment_inputs(ROOT)}
     ui_icons = {item.key for item in ui_icon_environment_inputs(ROOT)}
     inputs = environment_inputs(ROOT)
-    originals = acquire_inputs(
-        [item for item in inputs if item.key != "source:kern"], selected_root, offline=offline
+    originals = _acquire_setup_inputs(
+        [item for item in inputs if item.key != "source:kern"],
+        selected_root,
+        offline=offline,
+        setup_command="./fplinux setup --all",
     )
     for item in inputs:
         if item.key == "source:kern":
@@ -266,7 +293,13 @@ def setup(
     """Reuse an exact environment or prepare a replacement while retaining the old tree."""
     lock = load_environment_lock()
     selected_root = data_root(ROOT) if cache is None else cache
-    kern = install_kern(lock, offline=offline, cache=selected_root)
+
+    def report_kern() -> None:
+        kern_input = next(item for item in environment_inputs(ROOT) if item.key == "source:kern")
+        report_input_download(kern_input, 1, 1, label="setup")
+
+    with reporter.stage("kern"):
+        kern = install_kern(lock, offline=offline, cache=selected_root, on_download=report_kern)
     environment_recipe = environment_recipe_digest(lock)
     current = current_environment_state(kern, environment_recipe, cache=selected_root)
     if current is not None and not force:

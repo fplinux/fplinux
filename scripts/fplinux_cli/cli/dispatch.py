@@ -55,13 +55,38 @@ def command_action(
 
         action = partial(read_logs, args)
     elif args.command == "inspect":
-        if args.inspect_kind == "bundle":
+        if args.inspect_kind == "inputs":
+            if args.host is not None and args.target is None:
+                fail("inspect inputs --host requires TARGET")
+            from fplinux_cli.dependencies.inspection import (  # noqa: PLC0415 -- selected backend.
+                inspect_inputs,
+            )
+
+            action = partial(
+                inspect_inputs,
+                args.target,
+                host=args.host or "linux",
+                site=args.site,
+                all_inputs=args.all_inputs,
+            )
+        elif args.inspect_kind == "source":
+            from fplinux_cli.cli.inspect import (  # noqa: PLC0415 -- selected backend.
+                inspect_source,
+            )
+
+            action = inspect_source
+        elif args.inspect_kind == "bundle":
             from fplinux_cli.cli.inspect import (  # noqa: PLC0415 -- selected backend.
                 inspect_bundle,
             )
 
             action = partial(
-                inspect_bundle, args.target, profile=args.profile, build_type=args.build_type
+                inspect_bundle,
+                args.target,
+                profile=args.profile,
+                build_type=args.build_type,
+                current_source=args.current_source,
+                include_device_data=args.include_device_data,
             )
         elif args.inspect_kind == "archive":
             from fplinux_cli.cli.inspect import (  # noqa: PLC0415 -- selected backend.
@@ -210,10 +235,14 @@ def command_action(
         )
     elif args.command == "format":
         from fplinux_cli.quality.formatting.command import (  # noqa: PLC0415 -- selected backend.
-            format_sources,
+            format_command,
         )
 
-        action = partial(format_sources, args.paths)
+        action = partial(format_command, args.paths, changed=args.changed, plan=args.plan)
+    elif args.command == "site":
+        from fplinux_cli.cli.site import run_site  # noqa: PLC0415 -- selected backend.
+
+        action = partial(run_site, args.site_action)
     elif args.command == "_commit-msg":
         from fplinux_cli.quality.git import (  # noqa: PLC0415 -- selected backend.
             check_commit_message,

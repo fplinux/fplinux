@@ -23,6 +23,26 @@ from tests.bundle_support import file_record
 from tests.ssh_transport_support import create_ready_session
 
 
+@pytest.mark.parametrize(
+    ("session", "message"),
+    [
+        ({"bundle_generation": "old", "prepared_data_sha256": "data"}, "different build"),
+        (
+            {"bundle_generation": "current", "prepared_data_sha256": "old"},
+            "different prepared phone data",
+        ),
+        ({"bundle_generation": "current"}, "different prepared phone data"),
+    ],
+)
+def test_reconnect_reports_which_saved_binding_differs(
+    session: dict[str, str], message: str
+) -> None:
+    with pytest.raises(SystemExit, match=message):
+        ssh_transport.require_prepared_content(
+            session, bundle_generation="current", prepared_data_sha256="data"
+        )
+
+
 def ieee_crc32(data: bytes) -> int:
     """Compute the Ethernet CRC-32 independently of the transport implementation."""
     remainder = 0xFFFFFFFF

@@ -126,6 +126,91 @@ def await_output(process: subprocess.Popen[str], deadline: float, marker: bytes)
     return observed
 
 
+def test_summary_reports_nested_stage_exits_without_log_contents(logs_cli: LogsCli) -> None:
+    """A failed run remains readable without exposing command output in the summary."""
+    run = logs_cli.journal("check/example", status="failed", stages=(("source", "failed"),))
+    child = logs_cli.journal(
+        "check/example/containers/source",
+        status="failed",
+        parent="check/example/containers",
+        stages=(("python", "failed"),),
+    )
+    payload = json.loads((child / "run.json").read_text())
+    payload["stages"][0]["exit"] = 17
+    (child / "run.json").write_text(json.dumps(payload))
+    (run / "01-source.log").write_text("long command output\n")
+    (child / "01-python.log").write_text("private diagnostic output\n")
+
+    result = logs_cli.run_logs("show", "check/example", "--summary")
+
+    assert result.returncode == 0, result.stderr
+    assert "check/example: failed" in result.stdout
+    assert "STAGE STATUS EXIT\n" in result.stdout
+    assert "source failed -\n" in result.stdout
+    assert "containers/source/python failed 17\n" in result.stdout
+    assert "long command output" not in result.stdout
+    assert "private diagnostic output" not in result.stdout
+
+
+def test_list_limit_uses_recorded_start_order(logs_cli: LogsCli) -> None:
+    logs_cli.journal("test/old", started="2026-01-02T10:00:00+00:00")
+    logs_cli.journal("test/new", started="2026-01-02T10:00:01+00:00")
+
+    result = logs_cli.run_logs("list", "--limit", "1")
+
+    assert result.returncode == 0, result.stderr
+    assert "test/new" in result.stdout
+    assert "test/old" not in result.stdout
+
+
+def test_show_limits_content_across_stages_and_reports_truncation(logs_cli: LogsCli) -> None:
+    run = logs_cli.journal("test/example", stages=(("one", "success"), ("two", "success")))
+    (run / "01-one.log").write_text("ABCDE\n")
+    (run / "02-two.log").write_text("FGHIJ\n")
+
+    result = logs_cli.run_logs("show", "test/example", "--tail", "5", "--max-bytes", "8")
+
+    assert result.returncode == 0, result.stderr
+    assert "ABCDE\n" in result.stdout
+    assert "J\n" in result.stdout
+    assert "FGHI" not in result.stdout
+    assert "log content truncated by --max-bytes" in result.stdout
+
+
+def test_show_budget_does_not_emit_partial_utf8_character(logs_cli: LogsCli) -> None:
+    run = logs_cli.journal("test/example", stages=(("output", "success"),))
+    (run / "01-output.log").write_text("€")
+
+    result = logs_cli.run_logs("show", "test/example", "--max-bytes", "1")
+
+    assert result.returncode == 0, result.stderr
+    assert "log content truncated by --max-bytes" in result.stdout
+
+
+def test_show_budget_does_not_claim_truncation_for_an_exact_tail(logs_cli: LogsCli) -> None:
+    run = logs_cli.journal("test/example", stages=(("output", "success"),))
+    (run / "01-output.log").write_text("first\nsecond\n")
+
+    result = logs_cli.run_logs("show", "test/example", "--tail", "1", "--max-bytes", "7")
+
+    assert result.returncode == 0, result.stderr
+    assert "second\n" in result.stdout
+    assert "first\n" not in result.stdout
+    assert "truncated by --max-bytes" not in result.stdout
+
+
+def test_show_budget_keeps_carriage_return_progress_in_the_same_line(logs_cli: LogsCli) -> None:
+    run = logs_cli.journal("test/example", stages=(("output", "success"),))
+    (run / "01-output.log").write_bytes(b"first\nprogress one\rprogress two\n")
+
+    result = logs_cli.run_logs("show", "test/example", "--tail", "1", "--max-bytes", "100")
+
+    assert result.returncode == 0, result.stderr
+    assert "progress one\nprogress two\n" in result.stdout
+    assert "first\n" not in result.stdout
+    assert "truncated by --max-bytes" not in result.stdout
+
+
 class LogsCliTests:
     """Use controlled reporter-format inputs, real files and the real public parser."""
 

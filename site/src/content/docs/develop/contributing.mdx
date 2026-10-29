@@ -17,6 +17,8 @@ The source is on [GitHub](https://github.com/fplinux/fplinux). Phone, applicatio
 
 Pass each file you edited as a path relative to the checkout. The command does not walk directories. It refuses files that have no project formatter instead of guessing one. Tracked and non-ignored untracked sources are accepted. Selected files are formatted together; if any formatter fails, the command leaves them unchanged. The [source-format contract](/fplinux/develop/code-style/formats/) describes ordering, templates and format-specific limits.
 
+Use `./fplinux format --plan PATH...` to see which tool owns each path without preparing the environment or changing files. `./fplinux format --changed` selects staged, unstaged and non-ignored untracked files; append paths to limit that selection. Add `--plan` to inspect the selection without formatting. Unsupported and site-owned files are listed and skipped when selecting changes.
+
 Declared Linux patches are accepted too. Their affected C and header regions use the pinned Linux formatting tools; other patch contents are retained. This needs the pinned Linux source archive prepared by setup for the affected target. Ordinary plain text and other patch series have no formatter and are rejected.
 
 ## Run the quality gate
@@ -117,15 +119,15 @@ npm run dev
 
 If you already restored a matching [dependency snapshot](/fplinux/guides/dependencies/), use `./fplinux setup --site --offline`. Setup installs the pinned Linux x86-64 glibc Node.js runtime, imports locked registry archives into its npm cache and runs `npm ci` offline. It does not prepare the Alpine environment. The runtime remains available under `site/node/bin` in the [working data directory](/fplinux/start/build/#working-data-directory) for subsequent site commands.
 
-Pages are in `site/src/content/docs/`. Run these commands from `site/` before submitting a documentation change:
+Pages are in `site/src/content/docs/`. Run these commands from the checkout root before submitting a documentation change; the site command selects its own working directory:
 
 ```sh title="PC"
-npm run format
-npm run check
-npm run build
-npm run build:offline
+./fplinux site format
+./fplinux site check
+./fplinux site build
+./fplinux site build-offline
 ```
 
 Ultracite supplies the Oxlint, Astro ESLint, Prettier and Stylelint presets. `format` formats site code, styles, MDX and JSON; it preserves code examples and asset files. `check` checks formatting and runs type-aware linting on JavaScript and TypeScript with Oxlint and on Astro components with ESLint. It also checks accessibility and CSS including component styles, then runs Astro's type checks. Unused rule-disable comments are errors. `check` also runs the site's behavior tests. `build` renders the pages and checks internal links. MDX content is parsed during formatting and the build.
 
-The site tools are separate from `./fplinux format` and `./fplinux check`. The source gate checks maintained Markdown and repository-local links; run `npm run check` and `npm run build` for the site components, sidebar and page links. `build:offline` exports the same pages to `out/site-offline/` inside the selected working data directory. Open its `index.html` directly without a server. The export includes local assets and a simple word search; it does not use the hosted Pagefind search. Linux microSD system-card exports include this generated site as `docs/` on the computer.
+The site tools are separate from `./fplinux format` and `./fplinux check`; `site format` formats the whole site. The source gate checks maintained Markdown and repository-local links; run `site check` and `site build` for the site components, sidebar and page links. `site build-offline` exports the same pages to `out/site-offline/` inside the selected working data directory. Open its `index.html` directly without a server. The export includes local assets and a simple word search; it does not use the hosted Pagefind search. Linux microSD system-card exports include this generated site as `docs/` on the computer.
