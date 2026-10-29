@@ -96,11 +96,13 @@ static void receive_configure(struct protocol_client *client, uint32_t previous)
 		assert(wl_display_dispatch(client->display) >= 0);
 }
 
-static void send_frame(struct protocol_client *client,
-		       struct fplinux_ui_frame_peer *peer, int width,
-		       int height, uint16_t colour)
+static void commit_image(struct protocol_client *client,
+			 struct fplinux_ui_frame_peer *peer, int width,
+			 int height, const uint16_t *image,
+			 const struct fplinux_ui_frame_rect *damage,
+			 size_t damage_count)
 {
-	size_t bytes = (size_t)width * height * sizeof(uint16_t);
+	size_t bytes = (size_t)width * height * sizeof(*image);
 	int fd = memfd_create("frame-peer", MFD_CLOEXEC);
 	struct wl_shm_pool *pool;
 	struct wl_buffer *buffer;
@@ -109,8 +111,7 @@ static void send_frame(struct protocol_client *client,
 	assert(fd >= 0 && ftruncate(fd, (off_t)bytes) == 0);
 	pixels = mmap(NULL, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 	assert(pixels != MAP_FAILED);
-	for (size_t i = 0; i < bytes / sizeof(*pixels); ++i)
-		pixels[i] = colour;
+	memcpy(pixels, image, bytes);
 	pool = wl_shm_create_pool(client->shm, fd, (int)bytes);
 	buffer = wl_shm_pool_create_buffer(pool, 0, width, height,
 					   width * sizeof(*pixels),
@@ -118,10 +119,56 @@ static void send_frame(struct protocol_client *client,
 	wl_shm_pool_destroy(pool);
 	assert(munmap(pixels, bytes) == 0 && close(fd) == 0);
 	wl_surface_attach(client->surface, buffer, 0, 0);
-	wl_surface_damage(client->surface, 0, 0, width, height);
+	for (size_t i = 0; i < damage_count; ++i)
+		wl_surface_damage(client->surface, damage[i].x, damage[i].y,
+				  damage[i].width, damage[i].height);
 	wl_surface_commit(client->surface);
 	wl_buffer_destroy(buffer);
 	send_requests(client, peer);
+}
+
+static void fill(uint16_t *image, int width, struct fplinux_ui_frame_rect area,
+		 uint16_t colour)
+{
+	for (int y = area.y; y < area.y + area.height; ++y)
+		for (int x = area.x; x < area.x + area.width; ++x)
+			image[(size_t)y * width + x] = colour;
+}
+
+static void send_frame(struct protocol_client *client,
+		       struct fplinux_ui_frame_peer *peer, int width,
+		       int height, uint16_t colour)
+{
+	struct fplinux_ui_frame_rect whole = { 0, 0, width, height };
+	uint16_t *image = malloc((size_t)width * height * sizeof(*image));
+
+	assert(image);
+	fill(image, width, whole, colour);
+	commit_image(client, peer, width, height, image, &whole, 1);
+	free(image);
+}
+
+/* Two damaged rectangles of one commit; a stale frame changes one more pixel. */
+static void send_damaged_frame(struct protocol_client *client,
+			       struct fplinux_ui_frame_peer *peer, bool stale)
+{
+	const struct fplinux_ui_frame_rect damage[] = {
+		{ 10, 20, 30, 5 },
+		{ 100, 90, 4, 6 },
+	};
+	uint16_t image[128 * 128];
+
+	fill(image, 128, (struct fplinux_ui_frame_rect){ 0, 0, 128, 128 },
+	     0xf800);
+	fill(image, 128, damage[0], 0x07e0);
+	fill(image, 128, damage[1], 0x001f);
+	if (stale)
+		image[127 * 128 + 127] = 0x07e0;
+	commit_image(client, peer, 128, 128, image, damage, 2);
+	assert(peer->commits == 2);
+	assert(peer->damage.x == 10 && peer->damage.y == 20);
+	assert(peer->damage.width == 94 && peer->damage.height == 76);
+	assert(!memcmp(peer->pixels, image, sizeof(image)));
 }
 
 static void assert_frame(struct fplinux_ui_frame_peer *peer, int width,
@@ -136,6 +183,21 @@ static void invalid_scenario(const char *scenario)
 {
 	printf("invalid: %s\n", scenario);
 	assert(fflush(stdout) == 0);
+}
+
+static void disconnect(struct protocol_client *client,
+		       struct fplinux_ui_frame_peer *peer)
+{
+	xdg_toplevel_destroy(client->toplevel);
+	xdg_surface_destroy(client->shell);
+	wl_surface_destroy(client->surface);
+	xdg_wm_base_destroy(client->wm);
+	wl_shm_destroy(client->shm);
+	wl_compositor_destroy(client->compositor);
+	wl_registry_destroy(client->registry);
+	send_requests(client, peer);
+	wl_display_disconnect(client->display);
+	fplinux_ui_frame_cleanup(peer);
 }
 
 int main(int argc, char **argv)
@@ -186,6 +248,17 @@ int main(int argc, char **argv)
 	send_frame(&client, &peer, 128, 128, 0xf800);
 	assert(peer.commits == 1);
 	assert_frame(&peer, 128, 128, 0xf800);
+	if (!strcmp(scenario, "stale")) {
+		invalid_scenario(scenario);
+		send_damaged_frame(&client, &peer, true);
+		return 1;
+	}
+	if (!strcmp(scenario, "damage")) {
+		send_damaged_frame(&client, &peer, false);
+		disconnect(&client, &peer);
+		puts("damage: bounding damage and frame checked");
+		return 0;
+	}
 	serial = client.serial;
 	fplinux_ui_frame_configure(&peer, 176, 178, true);
 	if (!strcmp(scenario, "pre-ack-dimensions")) {
@@ -215,16 +288,7 @@ int main(int argc, char **argv)
 	send_frame(&client, &peer, 176, 178, 0x07e0);
 	assert(peer.commits == 3 && !peer.configure_pending);
 	assert_frame(&peer, 176, 178, 0x07e0);
-	xdg_toplevel_destroy(client.toplevel);
-	xdg_surface_destroy(client.shell);
-	wl_surface_destroy(client.surface);
-	xdg_wm_base_destroy(client.wm);
-	wl_shm_destroy(client.shm);
-	wl_compositor_destroy(client.compositor);
-	wl_registry_destroy(client.registry);
-	send_requests(&client, &peer);
-	wl_display_disconnect(client.display);
-	fplinux_ui_frame_cleanup(&peer);
+	disconnect(&client, &peer);
 	puts("resize: old frame, resize ACK and new frame checked");
 	return 0;
 }

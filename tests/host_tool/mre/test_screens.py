@@ -80,6 +80,7 @@ def test_actual_mre_first_frame_home_replace_cancel_and_close(
             "FPLINUX_UI_LOCALE_DIRECTORY": str(mre_native / "locale"),
             "FPLINUX_MRE_TEST_ENGINE": str(mre_native / "engine-peer"),
             "FPLINUX_MRE_ENGINE_RECORD": str(record),
+            "FPLINUX_MRE_FRAME_RECORD": str(tmp_path / "frames.log"),
             "XDG_STATE_HOME": str(tmp_path / "state"),
         },
         timeout=30,
@@ -143,6 +144,26 @@ def test_actual_mre_idle_timer_sleeps_resumes_validation_and_reaps_hidden_guest(
     run_first_modal(mre_native, tmp_path, (240, 320), locale, first_ui=("idle-background", "P"))
 
 
+def test_actual_mre_slow_open_shows_one_busy_alert_until_the_first_frame(
+    mre_native: Path, tmp_path: Path
+) -> None:
+    """Cancel, Back and Home during a slow check; the alert spans the check and the start."""
+    run_first_modal(mre_native, tmp_path, (240, 320), "en", first_ui=("slow", "W"))
+
+
+def test_actual_mre_replaced_editor_keeps_its_legends_until_the_new_frame(
+    mre_native: Path, tmp_path: Path
+) -> None:
+    """Replacing a running editor waits on the editor's legends, not on its released commands."""
+    run_first_modal(mre_native, tmp_path, (240, 320), "en", first_ui=("replace-editor", "I"))
+
+
+def test_actual_mre_failure_after_the_first_frame_shows_the_error_after_the_alert(
+    mre_native: Path, tmp_path: Path
+) -> None:
+    run_first_modal(mre_native, tmp_path, (240, 320), "en", first_ui=("failed-start", "F"))
+
+
 def run_first_modal(
     mre_native: Path,
     directory: Path,
@@ -155,6 +176,8 @@ def run_first_modal(
     (directory / "first.vxp").write_bytes(program.encode() + b" first-modal fixture")
     (directory / "second.vxp").write_bytes(b"B execution-peer fixture")
     (directory / "invalid.vxp").write_bytes(b"- rejected by execution peer")
+    (directory / "slow.vxp").write_bytes(b"W slow-check fixture")
+    (directory / "failing.vxp").write_bytes(b"F failing-start fixture")
     record = directory / "engine.log"
     result = run_process(
         [
@@ -177,6 +200,7 @@ def run_first_modal(
             "FPLINUX_MRE_ENGINE_RELEASE": str(directory / "release"),
             "FPLINUX_MRE_ENGINE_END": str(directory / "end"),
             "FPLINUX_MRE_TICK_RECORD": str(directory / "ticks.log"),
+            "FPLINUX_MRE_FRAME_RECORD": str(directory / "frames.log"),
             "XDG_STATE_HOME": str(directory / "state"),
         },
         timeout=30,
@@ -184,7 +208,10 @@ def run_first_modal(
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == "mre-ui: first modal document lifecycle checked\n"
     records = [line.split()[:2] for line in record.read_text().splitlines()]
-    assert [entry for entry in records if entry[0] == "S"] == [["S", program]]
+    started = [program] + (["B"] if scenario == "replace-editor" else [])
+    assert [entry for entry in records if entry[0] == "S"] == [["S", name] for name in started]
+    if scenario in {"slow", "failed-start", "replace-editor"}:
+        return
     if scenario == "idle-background":
         assert ["H", "P"] in records
         assert ["N", "P"] in records

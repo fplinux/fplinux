@@ -87,9 +87,6 @@ msgstr "Текущая программа будет закрыта. Откры�
 msgid "Close the current program?"
 msgstr "Закрыть текущую программу?"
 
-msgid "Checking VXP…"
-msgstr "Проверяю VXP…"
-
 msgid "The application closed its input channel."
 msgstr "Приложение закрыло канал ввода."
 

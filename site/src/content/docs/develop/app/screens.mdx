@@ -31,6 +31,8 @@ Use `fplinux_ui_list_set_focus_listener()` to follow the row the user reaches wi
 
 For a page-relative shortcut, `fplinux_ui_list_get_first_visible()` returns the first fully visible row, or the first intersecting row when a row is taller than the viewport; an empty list returns `SIZE_MAX`. Keep row navigation with the List rather than calculating its scroll position in the application.
 
+To show a rebuilt list where the old one stood, set its focus first and then `fplinux_ui_list_set_first_visible()` with the old first row. The list scrolls only as far as its content allows and keeps the focused row in view; a virtual list that has not been shown yet applies the row when it appears.
+
 ## Commands describe actions
 
 Add `struct fplinux_ui_command` values with application-owned IDs, a command type and a full translated label. The runtime chooses their placement:
@@ -81,6 +83,12 @@ A timed notice closes without calling the command listener. For a busy or progre
 A long message scrolls while the title, progress indicator and footer stay visible. Use `fplinux_ui_alert_set_text()` when the message changes; replacing it starts reading from the top, while setting the same text keeps its position. Update a progress caption separately with `fplinux_ui_alert_set_footer()` to preserve that reading position. A zero maximum in `fplinux_ui_alert_set_progress()` shows a spinner; a positive maximum shows determinate progress. Keep the numerical caption accurate even when a very small nonzero amount needs a minimum visible segment.
 
 Use the common [storage-error and close-decision contract](/fplinux/develop/application-state/) for unsaved data. Do not invent a separate meaning for Retry, Stay or Discard.
+
+## Waiting for work
+
+Use `fplinux_ui_wait_begin()` for work that usually ends quickly but may take longer, such as reading a folder. The current screen stays as it is, keeps the soft-key legends it had when the wait began, even if the application removes its commands meanwhile, and ignores keys; Back calls the cancel callback once, or is ignored without one. Only work that lasts longer than half a second shows a busy Alert with the given title and text, and a shown Alert stays at least half a second. Until the wait ends, the application may update the returned Alert's title, text, footer and progress, but must not add commands to it or navigate to it.
+
+`fplinux_ui_wait_end()` calls its callback later from the runtime's loop, with the original screen current again: push the next screen, replace the original one or push an error Alert there, and the result appears in one step. A question the application pushed meanwhile, such as a close decision, stays until it is answered, and the callback waits for it. Navigation that removes the original screen ends the wait without either callback.
 
 ## Canvas and custom input
 

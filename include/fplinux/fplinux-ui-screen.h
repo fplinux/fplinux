@@ -248,6 +248,15 @@ size_t fplinux_ui_list_get_focused(const struct fplinux_ui_screen *list);
  * screen. If no whole row fits, returns the first intersecting row.
  */
 size_t fplinux_ui_list_get_first_visible(const struct fplinux_ui_screen *list);
+/*
+ * Scrolls row index to the top of the view as far as the list scrolls: the
+ * last page stops at the end of the list, an index past the end shows that
+ * page, and the focused row stays wholly visible. To restore a view, set the
+ * focus first, then the first visible row. Nothing changes for an empty list
+ * or another screen, and a list already showing that row is not redrawn.
+ */
+void fplinux_ui_list_set_first_visible(struct fplinux_ui_screen *list,
+				       size_t index);
 void fplinux_ui_list_set_focused(struct fplinux_ui_screen *list, size_t index);
 /*
  * Reports a focus move made with the navigation keys, separately from the
@@ -607,6 +616,57 @@ bool fplinux_ui_alert_set_text(struct fplinux_ui_screen *alert,
  */
 bool fplinux_ui_alert_set_footer(struct fplinux_ui_screen *alert,
 				 const char *text);
+
+/*
+ * Waiting for work that keeps the current screen, such as reading a folder.
+ *
+ * fplinux_ui_wait_begin() shows nothing at first: the application's top
+ * screen, the origin, keeps its content but takes no input. It shows the
+ * legends it had when the wait began, also when the application changes its
+ * commands meanwhile.
+ * Back, the right soft key, calls cancel once; without cancel, Back is
+ * ignored like every other key. Like navigation, beginning closes an open
+ * options menu or runtime choice. Screens that the application pushes above
+ * the origin while it waits, such as a question, work as usual.
+ *
+ * Work that lasts longer than half a second gets a busy alert over the
+ * origin with title and text above a spinner; a screen above the origin
+ * holds the alert back until the origin is on top again. Once shown, the
+ * alert stays at least half a second, so that it never flashes. It offers
+ * Cancel until cancel has been called; a Cancel after fplinux_ui_wait_end()
+ * does nothing, so that the legends change only when the alert goes. Until
+ * fplinux_ui_wait_end(), the application may change the alert's title,
+ * text, footer and progress and give it a key filter, for example for a
+ * system key; it must not add commands to it, navigate to it
+ * or use it afterwards.
+ *
+ * fplinux_ui_wait_end() finishes from the runtime's loop, after the call
+ * returns, once a shown alert has had its time and no application screen is
+ * above the origin or the alert: the alert goes and done runs with the
+ * origin as the current screen. done presents the result with ordinary
+ * navigation, such as pushing the next screen, replacing the origin or
+ * pushing an error alert, in the same frame; NULL leaves the origin as it
+ * is. Input reaches the origin again before done runs.
+ *
+ * One wait runs at a time. Navigation that removes the origin or the alert
+ * ends the wait without calling cancel or done. Each callback receives the
+ * context given with it.
+ */
+typedef void (*fplinux_ui_wait_cb)(struct fplinux_ui *ui, void *context);
+
+/*
+ * Returns the busy alert, or NULL with errno: EINVAL for a NULL ui, ENOENT
+ * without a screen, EBUSY during another wait or while a row provider or
+ * navigation runs, or the error of creating the alert.
+ */
+struct fplinux_ui_screen *fplinux_ui_wait_begin(struct fplinux_ui *ui,
+						const char *title,
+						const char *text,
+						fplinux_ui_wait_cb cancel,
+						void *context);
+/* False with EINVAL for a NULL ui, ENOENT when no wait is left to end. */
+bool fplinux_ui_wait_end(struct fplinux_ui *ui, fplinux_ui_wait_cb done,
+			 void *context);
 
 /*
  * Canvas: a screen the application draws itself with LVGL below the title

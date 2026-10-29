@@ -161,6 +161,32 @@ static void read_shell_size(struct fplinux_ui_frame_peer *peer, int control,
 	       peer->height, size.ws_col, size.ws_row);
 }
 
+/*
+ * The legends that the session holds. The application reports them after the
+ * frame that shows them and only when they change, so a screen change that
+ * keeps them sends nothing; after a frame observation, the received legends
+ * belong to the observed screen.
+ */
+static char received_legends[3][FPLINUX_UI_SESSION_TEXT_BYTES];
+
+static void receive_legends(struct fplinux_ui_frame_peer *peer, int session)
+{
+	struct fplinux_ui_session_message message;
+	int received;
+
+	fplinux_ui_frame_pump(peer);
+	while ((received = fplinux_ui_session_receive(session, &message)) ==
+	       1) {
+		assert(message.type != FPLINUX_UI_SESSION_EXIT);
+		if (message.type != FPLINUX_UI_SESSION_SOFTKEYS)
+			continue;
+		strcpy(received_legends[0], message.left);
+		strcpy(received_legends[1], message.centre);
+		strcpy(received_legends[2], message.right);
+	}
+	assert(received == 0);
+}
+
 static void wait_legends(struct fplinux_ui_frame_peer *peer, int session,
 			 const char *left, const char *centre,
 			 const char *right)
@@ -168,16 +194,12 @@ static void wait_legends(struct fplinux_ui_frame_peer *peer, int session,
 	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
 
 	for (;;) {
-		struct fplinux_ui_session_message message =
-			fplinux_ui_frame_wait_message(peer, session);
-
-		assert(fplinux_ui_frame_now_ms() < deadline);
-		if (message.type == FPLINUX_UI_SESSION_SOFTKEYS &&
-		    !strcmp(message.left, legend(left)) &&
-		    !strcmp(message.centre, legend(centre)) &&
-		    !strcmp(message.right, legend(right)))
+		receive_legends(peer, session);
+		if (!strcmp(received_legends[0], legend(left)) &&
+		    !strcmp(received_legends[1], legend(centre)) &&
+		    !strcmp(received_legends[2], legend(right)))
 			return;
-		assert(message.type != FPLINUX_UI_SESSION_EXIT);
+		assert(fplinux_ui_frame_now_ms() < deadline);
 	}
 }
 
@@ -187,18 +209,16 @@ static bool wait_modifier_legends(struct fplinux_ui_frame_peer *peer,
 	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
 
 	for (;;) {
-		struct fplinux_ui_session_message message =
-			fplinux_ui_frame_wait_message(peer, session);
-		bool options = !strcmp(message.left, legend("Options"));
+		bool options;
 
-		assert(fplinux_ui_frame_now_ms() < deadline);
-		if (message.type == FPLINUX_UI_SESSION_SOFTKEYS &&
-		    (options || !strcmp(message.left, legend("Done"))) &&
-		    !strcmp(message.centre,
+		receive_legends(peer, session);
+		options = !strcmp(received_legends[0], legend("Options"));
+		if ((options || !strcmp(received_legends[0], legend("Done"))) &&
+		    !strcmp(received_legends[1],
 			    legend(selected ? "Unmark" : "Mark")) &&
-		    !strcmp(message.right, legend("Back")))
+		    !strcmp(received_legends[2], legend("Back")))
 			return options;
-		assert(message.type != FPLINUX_UI_SESSION_EXIT);
+		assert(fplinux_ui_frame_now_ms() < deadline);
 	}
 }
 

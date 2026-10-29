@@ -292,7 +292,16 @@ const void *fplinux_ui_glyph(struct fplinux_ui *ui, const char *name,
 lv_draw_buf_t *fplinux_ui_image_load(const void *src, int width, int height);
 uint64_t fplinux_ui_now_ms(void);
 bool fplinux_ui_set_title(struct fplinux_ui *ui, const char *title);
-/* Legends for the left soft key, OK and the right soft key; "" for none. */
+/*
+ * Legends for the left soft key, OK and the right soft key; "" for none.
+ * Strings must be shorter than 128 bytes and contain no control characters:
+ * false with ENAMETOOLONG/EINVAL, leaving the legends unchanged. An open
+ * menu keeps its own legends until it closes. fplinux_ui_run() reports the
+ * legends in effect to the session at most once per loop pass, after any
+ * frame that the pass commits has been flushed to the compositor, and only
+ * when they differ from the legends the session has; a failed report ends
+ * fplinux_ui_run() with an error.
+ */
 bool fplinux_ui_set_softkeys(struct fplinux_ui *ui, const char *left,
 			     const char *centre, const char *right);
 /*

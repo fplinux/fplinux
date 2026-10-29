@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""The screenshot compositor preserves acknowledged xdg-shell geometry."""
+"""The screenshot compositor preserves acknowledged xdg-shell geometry and damaged frames."""
 
 from __future__ import annotations
 
@@ -77,6 +77,26 @@ def test_frame_peer_keeps_old_frames_until_resize_ack_and_new_commit(frame_peer:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == "resize: old frame, resize ACK and new frame checked\n"
+
+
+def test_frame_peer_records_the_bounding_damage_of_one_commit(frame_peer: Path) -> None:
+    result = run_process(
+        [str(frame_peer), "damage"],
+        name="join two damaged rectangles of one commit",
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == "damage: bounding damage and frame checked\n"
+
+
+def test_frame_peer_rejects_a_frame_changed_outside_its_damage(frame_peer: Path) -> None:
+    result = run_process(
+        [str(frame_peer), "stale"],
+        name="reject a frame whose undamaged pixel differs from the shown frame",
+        timeout=10,
+    )
+    assert result.stdout == "invalid: stale\n"
+    assert result.returncode == -signal.SIGABRT, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize(

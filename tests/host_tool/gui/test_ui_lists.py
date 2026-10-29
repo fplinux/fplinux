@@ -176,3 +176,16 @@ def test_native_list_first_visible_uses_scroll_and_whole_row_geometry(
         timeout=10,
         check=True,
     )
+
+
+@pytest.mark.parametrize("presentation", ["stored", "virtual"])
+def test_native_list_set_first_visible_restores_view_and_keeps_focus_visible(
+    ui_lists: Path, presentation: str
+) -> None:
+    """A saved first row returns, clamps to the content and never hides the focus."""
+    run_process(
+        [str(ui_lists), f"set-first-visible-{presentation}", "240", "320", "0", "0"],
+        name=f"native {presentation} list restores its first visible row",
+        timeout=10,
+        check=True,
+    )

@@ -102,6 +102,14 @@ size_t fplinux_ui_listview_selected(const struct fplinux_ui_listview *list);
 /* First whole row in the actual viewport, or its first intersecting row. */
 size_t
 fplinux_ui_listview_first_visible(const struct fplinux_ui_listview *list);
+/*
+ * Scrolls row index, or the last row past the end, to the top within the
+ * content; a drawn selection then scrolls the least back into view. A
+ * virtual list not yet started scrolls when it starts and its rows have set
+ * the pitch.
+ */
+void fplinux_ui_listview_set_first_visible(struct fplinux_ui_listview *list,
+					   size_t index);
 void fplinux_ui_listview_select(struct fplinux_ui_listview *list, size_t index);
 /* The focused row's object, or NULL. */
 lv_obj_t *fplinux_ui_listview_selected_row(struct fplinux_ui_listview *list);

@@ -68,6 +68,8 @@ struct fplinux_ui_listview {
 	bool is_virtual;
 	/* row_cb runs only once the list has been active (on top). */
 	bool started;
+	/* A first row set before the start, when the rows fix the pitch. */
+	size_t start_first;
 	fplinux_ui_listview_row_cb row_cb;
 	void *row_context;
 	struct fplinux_ui_virtual_window window;
@@ -933,6 +935,37 @@ size_t fplinux_ui_listview_first_visible(const struct fplinux_ui_listview *list)
 	return first < list->count ? first : list->count - 1;
 }
 
+static void apply_window(struct fplinux_ui_listview *list, size_t *rebind,
+			 size_t count);
+
+void fplinux_ui_listview_set_first_visible(struct fplinux_ui_listview *list,
+					   size_t index)
+{
+	size_t rebind[FPLINUX_UI_VIRTUAL_SLOTS_MAX];
+	int32_t top;
+	size_t count;
+
+	if (!list->count)
+		return;
+	if (index >= list->count)
+		index = list->count - 1;
+	if (list->is_virtual && !list->started) {
+		list->start_first = index;
+		return;
+	}
+	if (list->is_virtual) {
+		top = list->window.top;
+		count = fplinux_ui_virtual_set_top(&list->window, index,
+						   rebind);
+		if (list->window.top != top)
+			apply_window(list, rebind, count);
+		return;
+	}
+	lv_obj_update_layout(list->object);
+	keep_focus(list, lv_obj_get_scroll_y(list->object) -
+				 (int32_t)index * list->pitch);
+}
+
 lv_obj_t *fplinux_ui_listview_selected_row(struct fplinux_ui_listview *list)
 {
 	return list->count ? row_at(list, list->selected) : NULL;
@@ -1206,6 +1239,12 @@ static void start_virtual(struct fplinux_ui_listview *list)
 	for (size_t slot = 0; slot < list->window.slots; ++slot)
 		rebind[slot] = slot;
 	apply_window(list, rebind, list->window.slots);
+	if (list->start_first != SIZE_MAX) {
+		size_t first = list->start_first;
+
+		list->start_first = SIZE_MAX;
+		fplinux_ui_listview_set_first_visible(list, first);
+	}
 }
 
 static void virtual_focus(struct fplinux_ui_listview *list, size_t index)
@@ -1258,6 +1297,7 @@ fplinux_ui_listview_create_virtual(struct fplinux_ui *ui, lv_obj_t *parent,
 	if (!list)
 		return NULL;
 	list->is_virtual = true;
+	list->start_first = SIZE_MAX;
 	/* Its screen activates it once on top; that starts it. */
 	list->active = false;
 	list->row_cb = row;

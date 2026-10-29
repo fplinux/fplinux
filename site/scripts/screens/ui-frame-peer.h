@@ -18,6 +18,14 @@ struct fplinux_ui_frame_keyboard {
 	const char *name;
 };
 
+/* Surface pixels from (x, y); empty when width is 0. */
+struct fplinux_ui_frame_rect {
+	int x;
+	int y;
+	int width;
+	int height;
+};
+
 struct fplinux_ui_frame_peer {
 	struct wl_display *display;
 	struct wl_event_loop *loop;
@@ -26,10 +34,20 @@ struct fplinux_ui_frame_peer {
 	struct wl_resource *toplevel;
 	struct wl_resource *pending;
 	struct wl_resource *held[2];
+	/* The SHM format that clients have to use, RGB565 or XRGB8888. */
+	uint32_t format;
 	unsigned int commits;
 	int width;
 	int height;
+	/*
+	 * The RGB565 image rebuilt only from the damaged pixels of each commit.
+	 * A commit aborts unless its buffer equals this image everywhere:
+	 * outside the damage, it must still hold the previous frame.
+	 */
 	uint16_t *pixels;
+	/* Bounding rectangles of the requested and the last committed damage. */
+	struct fplinux_ui_frame_rect pending_damage;
+	struct fplinux_ui_frame_rect damage;
 	bool configured;
 	bool configure_pending;
 	bool configure_acked;
@@ -45,6 +63,10 @@ void fplinux_ui_frame_socketpair(int sockets[2]);
 void fplinux_ui_frame_client_environment(int socket, const char *session_path);
 void fplinux_ui_frame_init(struct fplinux_ui_frame_peer *peer, int socket,
 			   int width, int height, const char *keymap_path);
+/* A compositor without RGB565, whose clients have to present XRGB8888. */
+void fplinux_ui_frame_init_xrgb8888(struct fplinux_ui_frame_peer *peer,
+				    int socket, int width, int height,
+				    const char *keymap_path);
 void fplinux_ui_frame_cleanup(struct fplinux_ui_frame_peer *peer);
 /* The proposed geometry becomes current with its first acknowledged commit. */
 void fplinux_ui_frame_configure(struct fplinux_ui_frame_peer *peer, int width,

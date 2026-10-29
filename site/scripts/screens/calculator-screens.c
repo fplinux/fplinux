@@ -30,9 +30,6 @@ struct capture {
 	unsigned int feedback;
 	struct calculator_number_observation header;
 	const char *expected_reason;
-	char close_left[FPLINUX_UI_SESSION_TEXT_BYTES];
-	char close_centre[FPLINUX_UI_SESSION_TEXT_BYTES];
-	char close_right[FPLINUX_UI_SESSION_TEXT_BYTES];
 };
 
 static const char *locale = "en";
@@ -529,11 +526,6 @@ static void wait_close_reply(struct capture *capture, const char *expected)
 			fplinux_ui_frame_wait_message(&capture->peer,
 						      capture->session);
 
-		if (reply.type == FPLINUX_UI_SESSION_SOFTKEYS) {
-			strcpy(capture->close_left, reply.left);
-			strcpy(capture->close_centre, reply.centre);
-			strcpy(capture->close_right, reply.right);
-		}
 		if (reply.type != FPLINUX_UI_SESSION_CLOSE_REPLY)
 			continue;
 		assert(reply.serial == capture->close_serial);
@@ -586,9 +578,8 @@ static void storage_failure(struct capture *capture, char **argv)
 	expect_saved(capture, "", "9");
 	prepare_close(capture, "wait");
 	wait_save_alert(capture);
-	assert(!strcmp(capture->close_left, "Discard changes"));
-	assert(!strcmp(capture->close_centre, "Retry"));
-	assert(!strcmp(capture->close_right, "Stay"));
+	/* The alert's legends follow its frame, after the close reply. */
+	wait_legends(capture, "Discard changes", "Retry", "Stay");
 	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_OPEN);
 	activate(capture, FPLINUX_UI_SESSION_ACTIVATION_RESUME);
 	expect_saved(capture, "", "9");
@@ -684,9 +675,8 @@ static void published_save_without_confirmation(struct capture *capture,
 			break;
 	}
 	assert(!strcmp(observation.title, "Saving not confirmed"));
-	assert(!strcmp(capture->close_left, "Close anyway"));
-	assert(!strcmp(capture->close_centre, "Retry"));
-	assert(!strcmp(capture->close_right, "Stay"));
+	/* The alert's legends follow its frame, after the close reply. */
+	wait_legends(capture, "Close anyway", "Retry", "Stay");
 	expect_saved(capture, "", "42");
 	press(capture, 1, KEY_F14, NULL);
 	wait_close_reply(capture, "cancel");

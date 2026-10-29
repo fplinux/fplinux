@@ -27,6 +27,17 @@
 #define DATE_VALUE_BYTES 128
 /* A popup choice's private Back command. */
 #define POPUP_BACK_COMMAND (-3)
+/* A wait alert's private Cancel command. */
+#define WAIT_CANCEL_COMMAND (-4)
+/*
+ * A wait shows its alert only for work longer than this, which most folder
+ * reads and file changes stay under, yet early enough that the ignored keys
+ * do not look like a stalled phone. A shown alert stays at least the same
+ * time, so that it can be read rather than flash, which bounds the delay it
+ * adds to work that ends just after it appears.
+ */
+#define WAIT_ALERT_DELAY_MS 500U
+#define WAIT_ALERT_MINIMUM_MS 500U
 /* A busy alert's spinner: a quarter ring stepping round eight times a turn. */
 #define SPINNER_ARC_DEGREES 90
 #define SPINNER_STEP_DEGREES 45
@@ -243,6 +254,26 @@ struct fplinux_ui_screen {
 	bool canvas_active;
 };
 
+/* From fplinux_ui_wait_begin() until done runs or the wait is dropped. */
+struct screen_wait {
+	/* The application's top screen at the start; NULL without a wait. */
+	struct fplinux_ui_screen *origin;
+	/* Stacked directly above the origin while shown. */
+	struct fplinux_ui_screen *alert;
+	/* The next step: showing the alert or finishing. */
+	lv_timer_t *timer;
+	uint32_t begun_ms;
+	uint32_t shown_ms;
+	/* What the origin showed at the start, whatever its commands become. */
+	char legends[3][FPLINUX_UI_SESSION_TEXT_BYTES];
+	bool shown;
+	bool ending;
+	fplinux_ui_wait_cb cancel;
+	void *cancel_context;
+	fplinux_ui_wait_cb done;
+	void *done_context;
+};
+
 struct fplinux_ui_screens {
 	struct fplinux_ui *ui;
 	struct fplinux_ui_screen *top;
@@ -251,6 +282,7 @@ struct fplinux_ui_screens {
 	struct fplinux_ui_screen *transient;
 	void (*cancel_transient)(struct fplinux_ui *ui, void *context);
 	void *transient_context;
+	struct screen_wait wait;
 	unsigned int row_provider_depth;
 	bool navigating;
 	/* Presses the runtime used for commands; their releases go nowhere. */
@@ -298,6 +330,10 @@ static bool entry_current(const struct fplinux_ui_screen *screen,
 			  const struct menu_entry *entry);
 static void restore_options(struct fplinux_ui_screens *layer,
 			    const struct options_return *origin);
+static void cancel_wait(struct fplinux_ui_screens *layer);
+static void drop_wait(struct fplinux_ui_screens *layer,
+		      const struct fplinux_ui_screen *deleted);
+static void wait_stack_changed(struct fplinux_ui_screens *layer);
 
 /* In the language that fplinux_ui_open() selected for messages. */
 static const char *word(const struct fplinux_ui_screen *screen,
@@ -1484,7 +1520,10 @@ static void refresh(struct fplinux_ui_screens *layer)
 		if (screen->editing)
 			keep_focus_visible(screen);
 	}
-	if (screen->editing) {
+	if (screen == layer->wait.origin) {
+		for (int i = 0; i < 3; ++i)
+			legends[i] = layer->wait.legends[i];
+	} else if (screen->editing) {
 		legends[1] = word(screen, FPLINUX_UI_LABEL_DONE);
 		legends[2] = word(screen, FPLINUX_UI_LABEL_CANCEL);
 	} else if (text && fplinux_ui_text_is_picker_open(text->field)) {
@@ -1590,6 +1629,7 @@ static void dismiss_alert(struct fplinux_ui_screen *alert, const int *id)
 	if (layer->top) {
 		refresh(layer);
 		restore_options(layer, &origin);
+		wait_stack_changed(layer);
 		return;
 	}
 	/* Nothing is left to name the keys while the application leaves. */
@@ -1601,7 +1641,10 @@ static void dismiss_alert(struct fplinux_ui_screen *alert, const int *id)
 
 static void fire(struct fplinux_ui_screen *screen, int id)
 {
-	if (screen->kind == SCREEN_ALERT)
+	/* A wait's alert stays until its work ends; Cancel asks it to stop. */
+	if (screen == screen->layer->wait.alert)
+		cancel_wait(screen->layer);
+	else if (screen->kind == SCREEN_ALERT)
 		dismiss_alert(screen, &id);
 	else
 		notify_command(screen, id);
@@ -2123,6 +2166,8 @@ static void delete_screen(struct fplinux_ui_screen *screen)
 		layer->menu_screen = NULL;
 		fplinux_ui_menu_close(screen->ui);
 	}
+	if (screen == layer->wait.origin || screen == layer->wait.alert)
+		drop_wait(layer, screen);
 	destroy_screen(screen);
 }
 
@@ -2197,6 +2242,7 @@ static void finish_navigation(struct fplinux_ui_screens *layer)
 	restack(layer);
 	refresh(layer);
 	layer->navigating = false;
+	wait_stack_changed(layer);
 }
 
 static void push_screen(struct fplinux_ui_screens *layer,
@@ -2237,6 +2283,7 @@ void fplinux_ui_screens_close_transient(struct fplinux_ui *ui,
 	close_transient(layer);
 	restack(layer);
 	refresh(layer);
+	wait_stack_changed(layer);
 }
 
 bool fplinux_ui_push(struct fplinux_ui *ui, struct fplinux_ui_screen *screen)
@@ -2371,6 +2418,208 @@ void fplinux_ui_go_back(struct fplinux_ui *ui)
 		fplinux_ui_back(ui);
 	else if (fplinux_ui_pop(ui))
 		restore_options(layer, &origin);
+}
+
+/* Waiting */
+
+static void wait_step(lv_timer_t *timer);
+
+/* Steps run from the loop's timers, never inside an application call. */
+static void schedule_wait(struct fplinux_ui_screens *layer, uint32_t delay_ms)
+{
+	stop_timer(&layer->wait.timer);
+	layer->wait.timer = lv_timer_create(wait_step, delay_ms, layer);
+}
+
+/* The origin, or its shown alert, is current: no other screen is above. */
+static bool wait_on_top(const struct fplinux_ui_screens *layer)
+{
+	const struct screen_wait *wait = &layer->wait;
+
+	return !layer->transient &&
+	       (layer->top == wait->origin ||
+		(wait->shown && layer->top == wait->alert));
+}
+
+static void show_wait_alert(struct fplinux_ui_screens *layer)
+{
+	struct screen_wait *wait = &layer->wait;
+
+	begin_navigation(layer);
+	push_screen(layer, wait->alert);
+	wait->shown = true;
+	wait->shown_ms = lv_tick_get();
+	finish_navigation(layer);
+}
+
+/*
+ * The alert leaves without its own frame: done's navigation, or the origin
+ * when done changes nothing, is what the next frame shows.
+ */
+static void finish_wait(struct fplinux_ui_screens *layer)
+{
+	struct screen_wait wait = layer->wait;
+
+	layer->wait = (struct screen_wait){ 0 };
+	stop_timer(&wait.timer);
+	if (layer->top == wait.alert) {
+		fplinux_ui_cancel_key_repeat(layer->ui, NULL);
+		layer->top = wait.alert->below;
+		wait.alert->below = NULL;
+		wait.alert->stacked = false;
+	}
+	delete_screen(wait.alert);
+	if (wait.done)
+		wait.done(layer->ui, wait.done_context);
+	restack(layer);
+	refresh(layer);
+}
+
+static void wait_step(lv_timer_t *timer)
+{
+	struct fplinux_ui_screens *layer = lv_timer_get_user_data(timer);
+	struct screen_wait *wait = &layer->wait;
+	uint32_t elapsed;
+
+	stop_timer(&wait->timer);
+	if (layer->closing)
+		return;
+	if (wait->ending && wait->shown) {
+		elapsed = lv_tick_elaps(wait->shown_ms);
+		if (elapsed < WAIT_ALERT_MINIMUM_MS) {
+			schedule_wait(layer, WAIT_ALERT_MINIMUM_MS - elapsed);
+			return;
+		}
+	} else if (!wait->ending && !wait->shown) {
+		elapsed = lv_tick_elaps(wait->begun_ms);
+		if (elapsed < WAIT_ALERT_DELAY_MS) {
+			schedule_wait(layer, WAIT_ALERT_DELAY_MS - elapsed);
+			return;
+		}
+	}
+	/* Otherwise wait_stack_changed() steps again once nothing is above. */
+	if (!wait_on_top(layer))
+		return;
+	if (wait->ending)
+		finish_wait(layer);
+	else if (!wait->shown)
+		show_wait_alert(layer);
+}
+
+/* A step that waited for the origin to be current may run now. */
+static void wait_stack_changed(struct fplinux_ui_screens *layer)
+{
+	struct screen_wait *wait = &layer->wait;
+
+	if (wait->origin && !wait->timer && (wait->ending || !wait->shown) &&
+	    wait_on_top(layer))
+		schedule_wait(layer, 0);
+}
+
+static void cancel_wait(struct fplinux_ui_screens *layer)
+{
+	struct screen_wait *wait = &layer->wait;
+	fplinux_ui_wait_cb cancel = wait->cancel;
+
+	if (!cancel)
+		return;
+	wait->cancel = NULL;
+	fplinux_ui_screen_remove_command(wait->alert, WAIT_CANCEL_COMMAND);
+	cancel(layer->ui, wait->cancel_context);
+}
+
+/* Navigation deleted the origin or the alert: the wait ends unfinished. */
+static void drop_wait(struct fplinux_ui_screens *layer,
+		      const struct fplinux_ui_screen *deleted)
+{
+	struct fplinux_ui_screen *alert = layer->wait.alert;
+
+	stop_timer(&layer->wait.timer);
+	layer->wait = (struct screen_wait){ 0 };
+	if (alert != deleted && !alert->stacked)
+		delete_screen(alert);
+}
+
+struct fplinux_ui_screen *fplinux_ui_wait_begin(struct fplinux_ui *ui,
+						const char *title,
+						const char *text,
+						fplinux_ui_wait_cb cancel,
+						void *context)
+{
+	const struct fplinux_ui_command stop = {
+		.id = WAIT_CANCEL_COMMAND,
+		.type = FPLINUX_UI_COMMAND_CANCEL,
+	};
+	struct fplinux_ui_screens *layer = navigation_layer(ui);
+	struct fplinux_ui_screen *alert;
+
+	if (!layer)
+		return NULL;
+	if (layer->wait.origin) {
+		errno = EBUSY;
+		return NULL;
+	}
+	/* First, as in navigation: a closed choice's callback may navigate. */
+	fplinux_ui_cancel_key_repeat(ui, NULL);
+	if (fplinux_ui_menu_is_open(ui)) {
+		layer->menu_screen = NULL;
+		fplinux_ui_menu_close(ui);
+	}
+	if (layer->transient)
+		fplinux_ui_screens_close_transient(ui, layer->transient);
+	if (!layer->top || layer->wait.origin) {
+		errno = layer->top ? EBUSY : ENOENT;
+		return NULL;
+	}
+	alert = fplinux_ui_alert_new(ui, FPLINUX_UI_ALERT_INFO, title, text, 0);
+	if (!alert)
+		return NULL;
+	if (!fplinux_ui_alert_set_progress(alert, 0, 0) ||
+	    (cancel && !fplinux_ui_screen_add_command(alert, &stop))) {
+		int error = errno;
+
+		delete_screen(alert);
+		errno = error;
+		return NULL;
+	}
+	/*
+	 * The origin's own legends, also in an alert's listener, which runs
+	 * before the screen below the alert has them back.
+	 */
+	refresh(layer);
+	layer->wait = (struct screen_wait){
+		.origin = layer->top,
+		.alert = alert,
+		.begun_ms = lv_tick_get(),
+		.cancel = cancel,
+		.cancel_context = context,
+	};
+	memcpy(layer->wait.legends, layer->legends, sizeof(layer->legends));
+	schedule_wait(layer, WAIT_ALERT_DELAY_MS);
+	return alert;
+}
+
+bool fplinux_ui_wait_end(struct fplinux_ui *ui, fplinux_ui_wait_cb done,
+			 void *context)
+{
+	struct fplinux_ui_screens *layer;
+
+	if (!ui) {
+		errno = EINVAL;
+		return false;
+	}
+	layer = *fplinux_ui_screens_slot(ui);
+	if (!layer || !layer->wait.origin || layer->wait.ending) {
+		errno = ENOENT;
+		return false;
+	}
+	layer->wait.ending = true;
+	/* The work is over: a late Cancel has nothing left to stop. */
+	layer->wait.cancel = NULL;
+	layer->wait.done = done;
+	layer->wait.done_context = context;
+	schedule_wait(layer, 0);
+	return true;
 }
 
 /* Images */
@@ -3019,6 +3268,13 @@ size_t fplinux_ui_list_get_first_visible(const struct fplinux_ui_screen *list)
 {
 	return is_list(list) ? fplinux_ui_listview_first_visible(list->list) :
 			       NONE;
+}
+
+void fplinux_ui_list_set_first_visible(struct fplinux_ui_screen *list,
+				       size_t index)
+{
+	if (is_list(list))
+		fplinux_ui_listview_set_first_visible(list->list, index);
 }
 
 void fplinux_ui_list_set_focused(struct fplinux_ui_screen *list, size_t index)
@@ -5274,6 +5530,11 @@ fplinux_ui_screens_key(struct fplinux_ui_screens *layer,
 			    fplinux_ui_screens_active(layer) == screen)
 				screen_release(screen, key);
 		}
+	} else if (fplinux_ui_screens_active(layer) == layer->wait.origin) {
+		/* A waiting origin takes only Back, which cancels the work. */
+		if (is_right_key(key))
+			cancel_wait(layer);
+		*used |= bit;
 	} else {
 		screen = fplinux_ui_screens_active(layer);
 		result = canvas_result(screen, key);
@@ -5505,6 +5766,7 @@ void fplinux_ui_screens_delete(struct fplinux_ui_screens *layer)
 	layer->closing = true;
 	layer->menu_screen = NULL;
 	layer->transient = NULL;
+	stop_timer(&layer->wait.timer);
 	layer->all = NULL;
 	while (screen) {
 		struct fplinux_ui_screen *next = screen->next;

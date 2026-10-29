@@ -25,7 +25,56 @@ struct capture {
 	unsigned int accepted;
 	char centre[128];
 	char right[128];
+	/* The labels of the last presented frame, each between bars. */
+	FILE *frames;
+	char labels[2048];
+	/* Changes of the labels and legend messages while recording. */
+	bool recording;
+	unsigned int screens, legends;
+	char first_centre[128];
+	char first_right[128];
 };
+
+static void read_frames(struct capture *capture)
+{
+	const char *path = getenv("FPLINUX_MRE_FRAME_RECORD");
+	char line[sizeof(capture->labels) - 1];
+	char *newline;
+	long start;
+
+	if (!capture->frames)
+		capture->frames = fopen(path, "r");
+	if (!capture->frames)
+		return;
+	for (;;) {
+		start = ftell(capture->frames);
+		if (!fgets(line, sizeof(line), capture->frames)) {
+			clearerr(capture->frames);
+			return;
+		}
+		newline = strchr(line, '\n');
+		if (!newline) {
+			/* The application has not finished writing it. */
+			assert(strlen(line) < sizeof(line) - 1);
+			assert(fseek(capture->frames, start, SEEK_SET) == 0);
+			return;
+		}
+		*newline = 0;
+		if (strcmp(capture->labels + 1, line)) {
+			snprintf(capture->labels, sizeof(capture->labels),
+				 "|%s", line);
+			capture->screens += capture->recording;
+		}
+	}
+}
+
+static bool has_label(const struct capture *capture, const char *text)
+{
+	char label[256];
+
+	snprintf(label, sizeof(label), "|%s|", text);
+	return strstr(capture->labels, label) != NULL;
+}
 
 static void pump(struct capture *capture)
 {
@@ -59,6 +108,10 @@ static void pump(struct capture *capture)
 		} else if (message.type == FPLINUX_UI_SESSION_SOFTKEYS) {
 			strcpy(capture->centre, message.centre);
 			strcpy(capture->right, message.right);
+			if (capture->recording && !capture->legends++) {
+				strcpy(capture->first_centre, message.centre);
+				strcpy(capture->first_right, message.right);
+			}
 		} else if (message.type == FPLINUX_UI_SESSION_HOME) {
 			capture->homes++;
 		} else if (message.type == FPLINUX_UI_SESSION_EXIT) {
@@ -71,6 +124,7 @@ static void pump(struct capture *capture)
 		}
 	}
 	assert(received == 0);
+	read_frames(capture);
 }
 
 static void pump_for(struct capture *capture, unsigned int milliseconds)
@@ -131,6 +185,62 @@ static void wait_centre(struct capture *capture, const char *label)
 	assert(false);
 }
 
+static void wait_label(struct capture *capture, const char *text)
+{
+	uint64_t until = fplinux_ui_frame_now_ms() + 5000;
+
+	do {
+		pump(capture);
+		if (has_label(capture, text))
+			return;
+	} while (fplinux_ui_frame_now_ms() < until);
+	fprintf(stderr, "expected label %s, actual labels %s\n", text,
+		capture->labels);
+	assert(false);
+}
+
+static void wait_labels(struct capture *capture, const char *labels)
+{
+	uint64_t until = fplinux_ui_frame_now_ms() + 5000;
+
+	do {
+		pump(capture);
+		if (!strcmp(capture->labels, labels))
+			return;
+	} while (fplinux_ui_frame_now_ms() < until);
+	fprintf(stderr, "expected labels %s, actual labels %s\n", labels,
+		capture->labels);
+	assert(false);
+}
+
+/* Counts the screens and legends that one user step shows. */
+static void begin_recording(struct capture *capture)
+{
+	pump_for(capture, 100);
+	capture->recording = true;
+	capture->screens = capture->legends = 0;
+}
+
+/* Ends the recording of a step that showed this many changes. */
+static void end_recording(struct capture *capture, unsigned int screens,
+			  unsigned int legends)
+{
+	pump_for(capture, 100);
+	capture->recording = false;
+	if (capture->screens == screens && capture->legends == legends)
+		return;
+	fprintf(stderr, "expected %u screens and %u legends, saw %u and %u\n",
+		screens, legends, capture->screens, capture->legends);
+	assert(false);
+}
+
+static void create(const char *path)
+{
+	int fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+
+	assert(fd >= 0 && close(fd) == 0);
+}
+
 static void decision(struct capture *capture, const char *locale)
 {
 	wait_centre(capture, !strcmp(locale, "ru") ? "Закрыть" : "Close");
@@ -158,6 +268,23 @@ static void assert_frame(struct capture *capture, uint16_t expected)
 		assert(row[left - 1] == 0 && row[0] == 0);
 }
 
+/* The editor keeps its legends from Replace until the new VXP's frame. */
+static void replace_editor(struct capture *capture, const char *centre,
+			   const char *right)
+{
+	begin_recording(capture);
+	press(capture, KEY_ENTER);
+	wait_result(capture, 3, FPLINUX_UI_DOCUMENT_ACCEPTED);
+	assert_frame(capture, 0x001f);
+	capture->recording = false;
+	if (capture->legends && !strcmp(capture->first_centre, centre) &&
+	    !strcmp(capture->first_right, right))
+		return;
+	fprintf(stderr, "expected editor legends %s/%s, saw %s/%s first\n",
+		centre, right, capture->first_centre, capture->first_right);
+	assert(false);
+}
+
 static void first_guest_ui(struct capture *capture, const char *directory,
 			   const char *locale, const char *scenario)
 {
@@ -169,6 +296,8 @@ static void first_guest_ui(struct capture *capture, const char *directory,
 	const char *actual_label = !strcmp(scenario, "selector") ?
 					   capture->centre :
 					   capture->right;
+	char editor_centre[sizeof(capture->centre)];
+	char editor_right[sizeof(capture->right)];
 	uint64_t until;
 	unsigned int commits;
 	int fd;
@@ -194,13 +323,13 @@ static void first_guest_ui(struct capture *capture, const char *directory,
 		assert(capture->result.document_error == EIO &&
 		       !capture->accepted);
 	} else {
-		until = fplinux_ui_frame_now_ms() + 5000;
-		while (strcmp(actual_label, label) &&
-		       fplinux_ui_frame_now_ms() < until)
-			pump(capture);
-		assert(!strcmp(actual_label, label));
+		/* The guest UI is drawn; its legends wait for its commit. */
+		wait_label(capture, !strcmp(scenario, "selector") ?
+					    "E:\\" :
+					    "Input expression");
 		pump_for(capture, 100);
 		assert(capture->peer.commits == commits &&
+		       strcmp(actual_label, label) &&
 		       capture->result.document_status ==
 			       FPLINUX_UI_DOCUMENT_WAIT &&
 		       !capture->accepted);
@@ -209,8 +338,18 @@ static void first_guest_ui(struct capture *capture, const char *directory,
 	fplinux_ui_frame_release_buffers(&capture->peer);
 	if (!strcmp(scenario, "malformed"))
 		return;
-	/* A queued commit cannot acknowledge the view before its Wayland sync. */
+	/*
+	 * The legends follow the commit at once, while a queued commit cannot
+	 * acknowledge the view before its Wayland sync.
+	 */
 	struct pollfd descriptor = { .fd = capture->session, .events = POLLIN };
+	struct fplinux_ui_session_message legends;
+	assert(poll(&descriptor, 1, 3000) == 1);
+	assert(fplinux_ui_session_receive(capture->session, &legends) == 1 &&
+	       legends.type == FPLINUX_UI_SESSION_SOFTKEYS);
+	strcpy(capture->centre, legends.centre);
+	strcpy(capture->right, legends.right);
+	assert(!strcmp(actual_label, label));
 	assert(poll(&descriptor, 1, 100) == 0);
 	wait_result(capture, 1, FPLINUX_UI_DOCUMENT_ACCEPTED);
 	assert(capture->peer.commits > commits && capture->accepted == 1);
@@ -251,14 +390,88 @@ static void first_guest_ui(struct capture *capture, const char *directory,
 	document(capture, directory, "invalid.vxp", 2);
 	wait_result(capture, 2, FPLINUX_UI_DOCUMENT_ERROR);
 	assert(capture->result.document_error == ENOEXEC);
+	strcpy(editor_centre, capture->centre);
+	strcpy(editor_right, capture->right);
 	document(capture, directory, "second.vxp", 3);
 	decision(capture, locale);
+	if (!strcmp(scenario, "replace-editor")) {
+		replace_editor(capture, editor_centre, editor_right);
+		return;
+	}
 	press(capture, KEY_ESC);
 	wait_result(capture, 3, FPLINUX_UI_DOCUMENT_CANCELLED);
 	assert(!strcmp(actual_label, label) && capture->accepted == 1);
 	press(capture, !strcmp(scenario, "selector") ? KEY_ESC : KEY_ENTER);
 	assert_frame(capture, 0x001f);
 	assert(capture->accepted == 1);
+}
+
+/*
+ * Checking slow.vxp waits for the release file and its first frame for the
+ * end file. Bounds leave room for a loaded host.
+ */
+static void slow_open(struct capture *capture, const char *directory)
+{
+	char before[sizeof(capture->labels)];
+	uint64_t sent, shown;
+
+	/* Cancel on the busy alert stops the check; the screen stays. */
+	begin_recording(capture);
+	strcpy(before, capture->labels);
+	sent = fplinux_ui_frame_now_ms();
+	document(capture, directory, "slow.vxp", 1);
+	wait_label(capture, "slow.vxp");
+	shown = fplinux_ui_frame_now_ms();
+	assert(shown - sent >= 300);
+	assert(has_label(capture, "Opening…") &&
+	       !strcmp(capture->right, "Cancel"));
+	press(capture, KEY_HOME);
+	assert(capture->homes == 1);
+	press(capture, KEY_ESC);
+	wait_result(capture, 1, FPLINUX_UI_DOCUMENT_CANCELLED);
+	/* The alert stays long enough to be read, then the screen returns. */
+	wait_labels(capture, before);
+	assert(fplinux_ui_frame_now_ms() - shown >= 300);
+	/* Cancel, once used, leaves the alert's legends until it goes. */
+	end_recording(capture, 2, 3);
+
+	/* Back before the alert stops it without one. */
+	begin_recording(capture);
+	document(capture, directory, "slow.vxp", 2);
+	wait_result(capture, 2, FPLINUX_UI_DOCUMENT_WAIT);
+	press(capture, KEY_ESC);
+	wait_result(capture, 2, FPLINUX_UI_DOCUMENT_CANCELLED);
+	pump_for(capture, 700);
+	end_recording(capture, 0, 0);
+
+	/* One alert from the check until the engine's first frame. */
+	begin_recording(capture);
+	document(capture, directory, "slow.vxp", 3);
+	wait_label(capture, "slow.vxp");
+	create(getenv("FPLINUX_MRE_ENGINE_RELEASE"));
+	pump_for(capture, 700);
+	assert(has_label(capture, "slow.vxp") && capture->screens == 1);
+	assert(capture->result.document_status == FPLINUX_UI_DOCUMENT_WAIT);
+	create(getenv("FPLINUX_MRE_ENGINE_END"));
+	wait_result(capture, 3, FPLINUX_UI_DOCUMENT_ACCEPTED);
+	assert_frame(capture, 0x001f);
+	end_recording(capture, 2, 2);
+}
+
+/*
+ * failing.vxp fails once its first frame, which already ended the wait, is
+ * acknowledged: the error, not the frame, follows the busy alert.
+ */
+static void failed_start(struct capture *capture, const char *directory)
+{
+	begin_recording(capture);
+	document(capture, directory, "failing.vxp", 1);
+	wait_label(capture, "failing.vxp");
+	create(getenv("FPLINUX_MRE_ENGINE_RELEASE"));
+	wait_result(capture, 1, FPLINUX_UI_DOCUMENT_ERROR);
+	assert(capture->result.document_error == EIO);
+	wait_label(capture, "Application error");
+	end_recording(capture, 2, 2);
 }
 
 static void close_application(struct capture *capture, const char *session_path)
@@ -279,6 +492,8 @@ static void close_application(struct capture *capture, const char *session_path)
 	       WEXITSTATUS(status) == 0);
 	close(capture->session);
 	close(capture->listener);
+	if (capture->frames)
+		assert(fclose(capture->frames) == 0);
 	fplinux_ui_frame_cleanup(&capture->peer);
 	assert(unlink(session_path) == 0);
 }
@@ -419,15 +634,22 @@ int main(int argc, char **argv)
 	if (argc == 9) {
 		if (!strcmp(argv[8], "idle-background"))
 			idle_and_background_completion(&capture, argv[4]);
+		else if (!strcmp(argv[8], "slow"))
+			slow_open(&capture, argv[4]);
+		else if (!strcmp(argv[8], "failed-start"))
+			failed_start(&capture, argv[4]);
 		else
 			first_guest_ui(&capture, argv[4], argv[7], argv[8]);
 		close_application(&capture, argv[3]);
 		puts("mre-ui: first modal document lifecycle checked");
 		return 0;
 	}
+	/* A quick open goes from the current screen straight to the frame. */
+	begin_recording(&capture);
 	document(&capture, argv[4], "first.vxp", 1);
 	wait_result(&capture, 1, FPLINUX_UI_DOCUMENT_ACCEPTED);
 	assert_frame(&capture, 0xf800);
+	end_recording(&capture, 1, 1);
 	press(&capture, KEY_ENTER);
 	press(&capture, KEY_HOME);
 	assert(capture.homes == 1);
@@ -452,9 +674,11 @@ int main(int argc, char **argv)
 	message.serial = 5;
 	assert(fplinux_ui_session_send(capture.session, &message));
 	assert_frame(&capture, 0xf800);
+	begin_recording(&capture);
 	document(&capture, argv[4], "invalid.vxp", 2);
 	wait_result(&capture, 2, FPLINUX_UI_DOCUMENT_ERROR);
 	assert_frame(&capture, 0xf800);
+	end_recording(&capture, 0, 0);
 	document(&capture, argv[4], "second.vxp", 3);
 	decision(&capture, argv[7]);
 	assert(capture.result.serial != 3 ||
@@ -463,11 +687,16 @@ int main(int argc, char **argv)
 	wait_result(&capture, 3, FPLINUX_UI_DOCUMENT_CANCELLED);
 	assert_frame(&capture, 0xf800);
 	press(&capture, KEY_ENTER);
+	/* The question follows the frame, and the new frame the question. */
+	begin_recording(&capture);
 	document(&capture, argv[4], "second.vxp", 4);
 	decision(&capture, argv[7]);
+	end_recording(&capture, 1, 1);
+	begin_recording(&capture);
 	press(&capture, KEY_ENTER);
 	wait_result(&capture, 4, FPLINUX_UI_DOCUMENT_ACCEPTED);
 	assert_frame(&capture, 0x001f);
+	end_recording(&capture, 1, 1);
 	message = (struct fplinux_ui_session_message){
 		.type = FPLINUX_UI_SESSION_PREPARE_CLOSE,
 		.serial = 90,

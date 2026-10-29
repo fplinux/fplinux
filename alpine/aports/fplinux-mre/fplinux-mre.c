@@ -103,6 +103,11 @@ struct app {
 	uint32_t document_id;
 	bool replacing, close_pending;
 	struct fplinux_ui_screen *decision;
+	/* From fplinux_ui_wait_begin() until its outcome runs. */
+	bool waiting, wait_ending;
+	void (*wait_outcome)(struct app *app);
+	/* An error that the end of the wait shows. */
+	char error[PROTOCOL_LIMIT / 2U + 1U];
 	struct mre_vfs *vfs;
 	uint32_t vfs_sequence;
 	struct mre_http_broker *http;
@@ -125,6 +130,7 @@ static void finish_document(struct app *app,
 			    enum fplinux_ui_document_status status, int error);
 static void remove_decision(struct app *app);
 static void restore_guest_ui(struct app *app);
+static void guest_ready(struct app *app);
 static void screen_command(struct fplinux_ui *ui,
 			   struct fplinux_ui_screen *screen, int id,
 			   void *context);
@@ -270,24 +276,79 @@ static void stop_engine(struct app *app)
 	release_runtime(app);
 }
 
-static void show_error(struct app *app, const char *message)
+static void cancel_open(struct fplinux_ui *ui, void *context);
+
+/*
+ * The current screen stays while the VXP is checked and its engine starts;
+ * the outcome replaces it in one step, after a busy alert only for longer
+ * work.
+ */
+static bool begin_wait(struct app *app)
+{
+	struct fplinux_ui_screen *busy =
+		fplinux_ui_wait_begin(app->ui, app->pending_document.name,
+				      _("Opening…"), cancel_open, app);
+
+	if (!busy)
+		return false;
+	/* The waiting screen ignores Home; the shown alert takes it. */
+	fplinux_ui_screen_set_key_filter(busy, shortcut_key, NULL);
+	app->waiting = true;
+	return true;
+}
+
+static void wait_ended(struct fplinux_ui *ui, void *context)
+{
+	struct app *app = context;
+	void (*outcome)(struct app *app) = app->wait_outcome;
+
+	(void)ui;
+	app->waiting = app->wait_ending = false;
+	app->wait_outcome = NULL;
+	if (outcome)
+		outcome(app);
+}
+
+/* The latest outcome wins, so that an error replaces a pending screen. */
+static void end_wait(struct app *app, void (*outcome)(struct app *app))
+{
+	if (!app->waiting)
+		return;
+	app->wait_outcome = outcome;
+	if (app->wait_ending)
+		return;
+	app->wait_ending = true;
+	if (!fplinux_ui_wait_end(app->ui, wait_ended, app))
+		wait_ended(app->ui, app);
+}
+
+static void present_error(struct app *app)
 {
 	struct fplinux_ui_screen *screen;
-	/* message may point into the shared mapping being released. */
-	char copy[PROTOCOL_LIMIT / 2U + 1U];
-	snprintf(copy, sizeof(copy), "%s", message);
-	remove_decision(app);
-	finish_document(app, FPLINUX_UI_DOCUMENT_ERROR, EIO);
-	stop_engine(app);
+
 	fplinux_ui_set_fullscreen(app->ui, false);
 	screen = fplinux_ui_form_new(app->ui, _("Application error"));
 	if (!screen) {
 		fplinux_ui_quit(app->ui);
 		return;
 	}
-	fplinux_ui_form_append_string(screen, app->filename, copy);
+	fplinux_ui_form_append_string(screen, app->filename, app->error);
 	add_command(screen, CMD_BACK, FPLINUX_UI_COMMAND_BACK, NULL, 0);
 	replace_screen(app, screen, VIEW_ERROR);
+}
+
+/* The program stops at once; during a wait, its end shows the error. */
+static void show_error(struct app *app, const char *message)
+{
+	/* message may point into the shared mapping being released. */
+	snprintf(app->error, sizeof(app->error), "%s", message);
+	remove_decision(app);
+	finish_document(app, FPLINUX_UI_DOCUMENT_ERROR, EIO);
+	stop_engine(app);
+	if (app->waiting)
+		end_wait(app, present_error);
+	else
+		present_error(app);
 }
 
 static void show_wait(struct app *app)
@@ -1234,7 +1295,9 @@ static void protocol_line(struct app *app, char *line)
 		snprintf(ack, sizeof(ack), "ACK\t%u\n", number);
 		if (!send_line(app, ack))
 			goto malformed;
-		if (!app->modal && !app->decision) {
+		if (app->waiting) {
+			guest_ready(app);
+		} else if (!app->modal && !app->decision) {
 			if (!show_native(app))
 				return;
 			lv_obj_invalidate(app->canvas);
@@ -1244,8 +1307,9 @@ static void protocol_line(struct app *app, char *line)
 	}
 	if (!strcmp(line, "INPUT") && app->shared && !app->modal) {
 		__atomic_thread_fence(__ATOMIC_ACQUIRE);
-		if (app->decision) {
+		if (app->decision || app->waiting) {
 			app->deferred_modal = VIEW_INPUT;
+			guest_ready(app);
 			return;
 		}
 		if (!pause_pointer(app))
@@ -1269,10 +1333,12 @@ static void protocol_line(struct app *app, char *line)
 				 app->shared->selector_folder :
 				 "E:\\");
 		app->selector_type = app->shared->selector_type;
-		if (app->decision)
+		if (app->decision || app->waiting) {
 			app->deferred_modal = VIEW_SELECTOR;
-		else
+			guest_ready(app);
+		} else {
 			show_selector(app);
+		}
 		return;
 	}
 	if (!strncmp(line, "SNAPSHOT\t", 9) && app->shared) {
@@ -1422,10 +1488,12 @@ static void start_engine_document(struct app *app)
 	int incoming[2] = { -1, -1 }, outgoing[2] = { -1, -1 };
 	struct rlimit limit;
 	pid_t parent = getpid();
+	/* The waiting screen keeps the legends it had while the runtime lived. */
+	bool waiting = app->waiting || begin_wait(app);
 	stop_engine(app);
 	snprintf(app->filename, sizeof(app->filename), "%s",
 		 app->pending_document.name);
-	if (getrlimit(RLIMIT_NOFILE, &limit) < 0)
+	if (!waiting || getrlimit(RLIMIT_NOFILE, &limit) < 0)
 		goto failed;
 	card = app->pending_document.directory_fd;
 	original = app->pending_document.snapshot_fd;
@@ -1501,7 +1569,6 @@ static void start_engine_document(struct app *app)
 		goto failed;
 	app->saw_end = false;
 	update_tick(app);
-	show_wait(app);
 	if (app->child > 0)
 		fplinux_ui_watch_fd(app->ui, app->output_fd, POLLIN,
 				    engine_output, app);
@@ -1537,12 +1604,13 @@ static void restore_guest_ui(struct app *app)
 	enum view pending = app->deferred_modal;
 
 	app->deferred_modal = VIEW_IDLE;
-	if (pending == VIEW_INPUT)
-		show_editor(app);
-	else if (pending == VIEW_SELECTOR)
+	if (pending == VIEW_INPUT) {
+		if (!show_editor(app))
+			show_error(app, _("Invalid application response."));
+	} else if (pending == VIEW_SELECTOR) {
 		show_selector(app);
-	else if (!app->modal && (app->native || app->picture_retained) &&
-		 app->has_frame) {
+	} else if (!app->modal && (app->native || app->picture_retained) &&
+		   app->has_frame) {
 		show_native(app);
 		accept_document_ui(app);
 	}
@@ -1568,6 +1636,25 @@ static void finish_document(struct app *app,
 	update_tick(app);
 }
 
+/* Back or Cancel stops the check, or leaves while the engine starts. */
+static void cancel_open(struct fplinux_ui *ui, void *context)
+{
+	struct app *app = context;
+	bool checking = app->validator > 0;
+
+	finish_document(app, FPLINUX_UI_DOCUMENT_CANCELLED, 0);
+	end_wait(app, checking ? restore_guest_ui : NULL);
+	if (!checking)
+		fplinux_ui_back(ui);
+}
+
+/* While the engine starts, its first screen ends the wait. */
+static void guest_ready(struct app *app)
+{
+	if (!app->validator && !app->replacing)
+		end_wait(app, restore_guest_ui);
+}
+
 static bool show_decision(struct app *app, bool replace)
 {
 	struct fplinux_ui_screen *screen = fplinux_ui_alert_new(
@@ -1586,6 +1673,12 @@ static bool show_decision(struct app *app, bool replace)
 	app->decision = screen;
 	fplinux_ui_push(app->ui, screen);
 	return true;
+}
+
+static void ask_replace(struct app *app)
+{
+	if (!show_decision(app, true))
+		finish_document(app, FPLINUX_UI_DOCUMENT_ERROR, ENOMEM);
 }
 
 static bool begin_validation(struct app *app)
@@ -1628,15 +1721,6 @@ static bool begin_validation(struct app *app)
 	}
 	app->validation_started = fplinux_ui_now_ms();
 	update_tick(app);
-	struct fplinux_ui_screen *screen = fplinux_ui_alert_new(
-		app->ui, FPLINUX_UI_ALERT_INFO, "MRE", _("Checking VXP…"), 0);
-	if (!screen)
-		return false;
-	fplinux_ui_alert_set_progress(screen, 0, 0);
-	add_command(screen, CMD_CANCEL, FPLINUX_UI_COMMAND_CANCEL, NULL, 0);
-	fplinux_ui_screen_set_listener(screen, screen_command, NULL, app);
-	app->decision = screen;
-	fplinux_ui_push(app->ui, screen);
 	return true;
 }
 
@@ -1672,7 +1756,7 @@ document_received(struct fplinux_ui *ui,
 	}
 	mre_vfs_destroy(preflight);
 	app->document_id = request->request_id;
-	if (!begin_validation(app)) {
+	if (!begin_validation(app) || !begin_wait(app)) {
 		result.error = errno ? errno : ENOMEM;
 		if (app->validator > 0) {
 			kill(app->validator, SIGKILL);
@@ -1697,7 +1781,8 @@ static enum fplinux_ui_close_response prepare_close(struct fplinux_ui *ui,
 	struct app *app = context;
 	(void)ui;
 
-	if (app->decision)
+	/* A new VXP's check and replacement question come first. */
+	if (app->decision || app->validator > 0 || app->replacing)
 		return FPLINUX_UI_CLOSE_CANCEL;
 	if (app->child <= 0)
 		return FPLINUX_UI_CLOSE_READY;
@@ -1722,27 +1807,26 @@ static void validation_tick(struct app *app)
 	if (ended == 0 &&
 	    fplinux_ui_now_ms() - app->validation_started < 12000U)
 		return;
-	remove_decision(app);
 	if (ended > 0)
 		app->validator = 0;
 	if (ended <= 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
 		finish_document(app, FPLINUX_UI_DOCUMENT_ERROR, ENOEXEC);
-		restore_guest_ui(app);
+		end_wait(app, restore_guest_ui);
 		return;
 	}
 	app->validator = 0;
 	if (app->child > 0 || app->picture_retained) {
 		app->replacing = true;
-		if (!show_decision(app, true))
-			finish_document(app, FPLINUX_UI_DOCUMENT_ERROR, ENOMEM);
+		end_wait(app, ask_replace);
 	} else {
+		/* The same wait goes on until the engine's first screen. */
 		start_engine_document(app);
 	}
 }
 
 static void accept_document_ui(struct app *app)
 {
-	if (!app->document_id || app->decision)
+	if (!app->document_id || app->decision || app->waiting)
 		return;
 	bool fullscreen = fplinux_ui_is_fullscreen(app->ui);
 	bool native_ready = app->view == VIEW_NATIVE && app->has_frame &&
@@ -1805,7 +1889,7 @@ static void poll_children(struct app *app)
 	if (normal) {
 		if (retain) {
 			app->picture_retained = app->has_frame = true;
-			if (!app->decision) {
+			if (!app->decision && !app->waiting) {
 				show_native(app);
 				accept_document_ui(app);
 			}
@@ -1845,9 +1929,7 @@ static void screen_command(struct fplinux_ui *ui,
 	struct app *app = context;
 	if (app->decision == screen) {
 		app->decision = NULL;
-		if (app->validator > 0) {
-			finish_document(app, FPLINUX_UI_DOCUMENT_CANCELLED, 0);
-		} else if (app->replacing) {
+		if (app->replacing) {
 			app->replacing = false;
 			if (id == CMD_REPLACE)
 				start_engine_document(app);

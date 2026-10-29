@@ -18,6 +18,7 @@
 #include "fplinux-ui.h"
 #include "ui-frame-peer.h"
 #include "ui-screen-navigation.h"
+#include "ui-screen-wait.h"
 #include "xdg-shell-server-protocol.h"
 
 #include <assert.h>
@@ -242,6 +243,64 @@ static void create_softkeys(struct fplinux_ui *ui,
 	assert(labels[0].x1 == 8);
 	assert(abs(labels[1].x1 + labels[1].x2 - 239) <= 1);
 	assert(labels[2].x2 == 231);
+}
+
+/* A Canvas has no element action: its commands alone name the three keys. */
+static void push_legend_canvas(struct fplinux_ui *ui, const char *item,
+			       const char *ok,
+			       enum fplinux_ui_command_type back)
+{
+	const struct fplinux_ui_command commands[] = {
+		{ .id = 1, .type = FPLINUX_UI_COMMAND_ITEM, .label = item },
+		{ .id = 2, .type = FPLINUX_UI_COMMAND_OK, .label = ok },
+		{ .id = 3, .type = back },
+	};
+	struct fplinux_ui_screen *canvas = fplinux_ui_canvas_new(ui, NULL);
+
+	assert(canvas);
+	for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); ++i)
+		assert(fplinux_ui_screen_add_command(canvas, &commands[i]));
+	assert(fplinux_ui_push(ui, canvas));
+}
+
+/* Each command is one handler; only its final legends may reach the session. */
+static void change_legends(struct fplinux_ui *ui, char command)
+{
+	static const struct fplinux_ui_menu_item item = {
+		.action = 1,
+		.text = "Rename",
+	};
+	char long_legend[FPLINUX_UI_SESSION_TEXT_BYTES + 1];
+
+	switch (command) {
+	case 'm':
+		assert(fplinux_ui_menu_open(ui, FPLINUX_UI_MENU_ORIGIN_LEFT,
+					    NULL, &item, 1, NULL, NULL));
+		break;
+	case 'n':
+		/* Closing restores the covered legends before the next screen. */
+		fplinux_ui_menu_close(ui);
+		push_legend_canvas(ui, "Open", "Run",
+				   FPLINUX_UI_COMMAND_CANCEL);
+		break;
+	case 'o':
+		push_legend_canvas(ui, "Edit", "Go", FPLINUX_UI_COMMAND_BACK);
+		assert(fplinux_ui_pop(ui));
+		memset(long_legend, 'x', sizeof(long_legend) - 1);
+		long_legend[sizeof(long_legend) - 1] = '\0';
+		errno = 0;
+		assert(!fplinux_ui_set_softkeys(ui, long_legend, "", "") &&
+		       errno == ENAMETOOLONG);
+		errno = 0;
+		assert(!fplinux_ui_set_softkeys(ui, "", "Line\nbreak", "") &&
+		       errno == EINVAL);
+		assert(fplinux_ui_set_softkeys(ui, "Open", "Run", "Cancel"));
+		break;
+	default:
+		assert(command == 'k');
+		assert(fplinux_ui_pop(ui));
+		break;
+	}
 }
 
 static void create_launcher_screens(struct fplinux_ui *ui,
@@ -540,6 +599,20 @@ static void application_input(struct fplinux_ui *ui, int fd, short events,
 		assert(write(fd, &command, 1) == 1);
 		return;
 	}
+	if (command == 'j') {
+		/* Without a due refresh timer, only the loop draws this screen. */
+		push_legend_canvas(ui, "Open", "Run",
+				   FPLINUX_UI_COMMAND_CANCEL);
+		assert(write(fd, &command, 1) == 1);
+		return;
+	}
+	if (command == 'k' || command == 'm' || command == 'n' ||
+	    command == 'o') {
+		change_legends(ui, command);
+		lv_refr_now(NULL);
+		assert(write(fd, &command, 1) == 1);
+		return;
+	}
 	if (command == 'g') {
 		struct fplinux_ui_session_message raw = {
 			.type = FPLINUX_UI_SESSION_STORAGE_REQUEST,
@@ -707,6 +780,8 @@ static int run_application(int control, const char *scenario)
 	}
 	lv_tick_set_cb(paused_tick);
 	paint(ui, 0xff0000);
+	if (!strcmp(scenario, "legends"))
+		push_legend_canvas(ui, "Edit", "Go", FPLINUX_UI_COMMAND_BACK);
 	lv_refr_now(NULL);
 	fplinux_ui_watch_fd(ui, control, POLLIN, application_input,
 			    &application);
@@ -1882,6 +1957,89 @@ static int run_media_application(int control, const char *scenario)
 	return result;
 }
 
+/* The compositor asks for one rectangle of the frame in one colour. */
+struct damage_paint {
+	struct fplinux_ui_frame_rect area;
+	uint16_t colour;
+};
+
+struct damage_application {
+	struct fplinux_ui_frame *frame;
+	bool closed;
+};
+
+static void damage_application_event(struct fplinux_ui *ui,
+				     const struct fplinux_ui_event *event,
+				     void *data)
+{
+	struct damage_application *application = data;
+
+	(void)ui;
+	if (event->type == FPLINUX_UI_EVENT_CLOSE)
+		application->closed = true;
+}
+
+static void damage_application_input(struct fplinux_ui *ui, int fd,
+				     short events, void *data)
+{
+	struct damage_application *application = data;
+	struct damage_paint paint;
+	lv_area_t area;
+	uint16_t *pixels;
+	int width;
+
+	(void)ui;
+	assert(events == POLLIN);
+	assert(read(fd, &paint, sizeof(paint)) == (ssize_t)sizeof(paint));
+	area = (lv_area_t){
+		.x1 = paint.area.x,
+		.y1 = paint.area.y,
+		.x2 = paint.area.x + paint.area.width - 1,
+		.y2 = paint.area.y + paint.area.height - 1,
+	};
+	pixels = fplinux_ui_frame_pixels(application->frame, &width, NULL);
+	for (int y = area.y1; y <= area.y2; ++y)
+		for (int x = area.x1; x <= area.x2; ++x)
+			pixels[(size_t)y * width + x] = paint.colour;
+	assert(fplinux_ui_frame_damage(application->frame, &area));
+	assert(fplinux_ui_frame_present(application->frame));
+	assert(write(fd, "p", 1) == 1);
+}
+
+static int run_damage_application(int control, const char *scenario)
+{
+	struct damage_application application = { 0 };
+	enum fplinux_ui_frame_mode mode = !strcmp(scenario, "damage-direct") ?
+						  FPLINUX_UI_FRAME_DIRECT :
+						  FPLINUX_UI_FRAME_STAGED;
+	struct fplinux_ui *ui = fplinux_ui_open("org.fplinux.damage-test",
+						damage_application_event,
+						&application);
+	uint16_t *pixels;
+	int result;
+
+	assert(ui);
+	/*
+	 * Unlike the other applications, this one keeps the real clock: the
+	 * LVGL refresh timer redraws the surface at a new size. An opaque frame
+	 * over the whole 240x320 surface shows its own pixels.
+	 */
+	application.frame = fplinux_ui_frame_new(ui, 240, 320, mode);
+	assert(application.frame);
+	pixels = fplinux_ui_frame_pixels(application.frame, NULL, NULL);
+	for (size_t i = 0; i < 240 * 320; ++i)
+		pixels[i] = 0xf800;
+	assert(fplinux_ui_frame_damage(application.frame, NULL));
+	assert(fplinux_ui_frame_present(application.frame));
+	fplinux_ui_watch_fd(ui, control, POLLIN, damage_application_input,
+			    &application);
+	result = fplinux_ui_run(ui);
+	fplinux_ui_close(ui);
+	assert(application.closed);
+	fplinux_ui_frame_delete(application.frame);
+	return result;
+}
+
 static void wait_commits(struct fplinux_ui_frame_peer *compositor,
 			 unsigned int count)
 {
@@ -2802,6 +2960,57 @@ static void check_softkeys(struct fplinux_ui_frame_peer *compositor,
 	assert_quiet(compositor, session, 2);
 }
 
+/*
+ * The next session message, which must be SOFTKEYS. The compositor runs only
+ * while the session socket is empty, without blocking in a dispatch, so a
+ * commit that the client sent before the legends is already readable when
+ * they arrive, while a later commit is not.
+ */
+static void wait_legends_after(struct fplinux_ui_frame_peer *compositor,
+			       int session, unsigned int commits,
+			       const char *left, const char *centre,
+			       const char *right)
+{
+	struct pollfd descriptors[2] = {
+		{ .fd = session, .events = POLLIN },
+		{ .fd = wl_event_loop_get_fd(compositor->loop),
+		  .events = POLLIN },
+	};
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+	struct fplinux_ui_session_message legends;
+
+	for (;;) {
+		assert(fplinux_ui_frame_now_ms() < deadline);
+		assert(poll(descriptors, 2, 100) >= 0);
+		if (descriptors[0].revents)
+			break;
+		if (descriptors[1].revents) {
+			assert(wl_event_loop_dispatch(compositor->loop, 0) >=
+			       0);
+			wl_display_flush_clients(compositor->display);
+		}
+	}
+	assert(fplinux_ui_session_receive(session, &legends) == 1);
+	assert(legends.type == FPLINUX_UI_SESSION_SOFTKEYS);
+	assert(!strcmp(legends.left, left) && !strcmp(legends.centre, centre) &&
+	       !strcmp(legends.right, right));
+	assert(wl_event_loop_dispatch(compositor->loop, 0) >= 0);
+	wl_display_flush_clients(compositor->display);
+	assert(compositor->commits == commits);
+}
+
+static void assert_no_message(struct fplinux_ui_frame_peer *compositor,
+			      int session)
+{
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 100;
+	struct fplinux_ui_session_message message;
+
+	while (fplinux_ui_frame_now_ms() < deadline) {
+		fplinux_ui_frame_pump(compositor);
+		assert(fplinux_ui_session_receive(session, &message) == 0);
+	}
+}
+
 static void assert_colour(const struct fplinux_ui_frame_peer *compositor,
 			  uint16_t colour)
 {
@@ -3033,6 +3242,61 @@ static void send_visibility(struct fplinux_ui_frame_peer *compositor,
 	wait_input(compositor, control, visible ? 'V' : 'H');
 }
 
+static void check_legends(struct fplinux_ui_frame_peer *compositor, int session,
+			  int control)
+{
+	unsigned int commits;
+
+	/* Legends set before the loop follow the first frame and precede READY. */
+	wait_legends_after(compositor, session, 1, "Edit", "Go", "Back");
+	wait_message(compositor, session, FPLINUX_UI_SESSION_READY);
+	assert_quiet(compositor, session, 1);
+	assert(write(control, "m", 1) == 1);
+	wait_legends_after(compositor, session, 2, "", "Select", "Back");
+	wait_input(compositor, control, 'm');
+	assert_quiet(compositor, session, 2);
+	/* The legends restored by closing the menu never leave the handler. */
+	assert(write(control, "n", 1) == 1);
+	wait_legends_after(compositor, session, 3, "Open", "Run", "Cancel");
+	wait_input(compositor, control, 'n');
+	assert_quiet(compositor, session, 3);
+	/* Other legends and back, rejected ones and a repeat send nothing. */
+	assert(write(control, "o", 1) == 1);
+	wait_input(compositor, control, 'o');
+	assert_no_message(compositor, session);
+	/* A hidden application commits no frame but still reports its legends. */
+	send_visibility(compositor, session, control, false);
+	assert(write(control, "k", 1) == 1);
+	wait_legends_after(compositor, session, compositor->commits, "Edit",
+			   "Go", "Back");
+	wait_input(compositor, control, 'k');
+	send_visibility(compositor, session, control, true);
+	assert_no_message(compositor, session);
+	commits = compositor->commits;
+	/* Navigation between refreshes still draws before its legends. */
+	assert(write(control, "j", 1) == 1);
+	wait_legends_after(compositor, session, ++commits, "Open", "Run",
+			   "Cancel");
+	wait_input(compositor, control, 'j');
+	/* Legends wait until a busy compositor takes the frame showing them. */
+	compositor->release_frames = false;
+	assert(write(control, "k", 1) == 1);
+	wait_legends_after(compositor, session, ++commits, "Edit", "Go",
+			   "Back");
+	wait_input(compositor, control, 'k');
+	assert(write(control, "j", 1) == 1);
+	wait_legends_after(compositor, session, ++commits, "Open", "Run",
+			   "Cancel");
+	wait_input(compositor, control, 'j');
+	assert(write(control, "k", 1) == 1);
+	wait_input(compositor, control, 'k');
+	assert_quiet(compositor, session, commits);
+	compositor->release_frames = true;
+	fplinux_ui_frame_release_buffers(compositor);
+	wait_legends_after(compositor, session, ++commits, "Edit", "Go",
+			   "Back");
+}
+
 static struct marquee_observation
 marquee_command(struct fplinux_ui_frame_peer *compositor, int control,
 		char command)
@@ -3215,6 +3479,140 @@ static void check_media_lifecycle(struct fplinux_ui_frame_peer *compositor,
 	wait_input(compositor, control, 'x');
 	wait_message(compositor, session, FPLINUX_UI_SESSION_EXIT);
 	assert_quiet(compositor, session, compositor->commits);
+}
+
+/* The literal 240x320 frame that the damage application starts with. */
+static uint16_t *new_expected_frame(void)
+{
+	uint16_t *expected = malloc(240 * 320 * sizeof(*expected));
+
+	assert(expected);
+	for (size_t i = 0; i < 240 * 320; ++i)
+		expected[i] = 0xf800;
+	return expected;
+}
+
+static void paint_frame(struct fplinux_ui_frame_peer *compositor, int control,
+			uint16_t *expected, struct fplinux_ui_frame_rect area,
+			uint16_t colour)
+{
+	struct damage_paint paint = { .area = area, .colour = colour };
+
+	assert(write(control, &paint, sizeof(paint)) == (ssize_t)sizeof(paint));
+	wait_input(compositor, control, 'p');
+	for (int y = area.y; y < area.y + area.height; ++y)
+		for (int x = area.x; x < area.x + area.width; ++x)
+			expected[(size_t)y * 240 + x] = colour;
+}
+
+/*
+ * The last commit damaged exactly area, and the image rebuilt from damaged
+ * pixels shows the top rows of the expected frame. The peer has checked that
+ * the whole committed buffer equals that image.
+ */
+static void assert_damaged_frame(const struct fplinux_ui_frame_peer *compositor,
+				 struct fplinux_ui_frame_rect area,
+				 const uint16_t *expected)
+{
+	assert(compositor->damage.x == area.x &&
+	       compositor->damage.y == area.y);
+	assert(compositor->damage.width == area.width &&
+	       compositor->damage.height == area.height);
+	assert(compositor->width == 240 && compositor->height <= 320);
+	assert(!memcmp(compositor->pixels, expected,
+		       (size_t)240 * compositor->height * sizeof(*expected)));
+}
+
+static void check_damage_frames(struct fplinux_ui_frame_peer *compositor,
+				int session, int control)
+{
+	uint16_t *expected = new_expected_frame();
+	struct wl_resource *first = compositor->held[0];
+	struct wl_resource *second;
+
+	assert_damaged_frame(compositor,
+			     (struct fplinux_ui_frame_rect){ 0, 0, 240, 320 },
+			     expected);
+	paint_frame(compositor, control, expected,
+		    (struct fplinux_ui_frame_rect){ 10, 20, 40, 16 }, 0x07e0);
+	wait_commits(compositor, 2);
+	second = compositor->held[1];
+	assert(first && second && second != first);
+	assert_damaged_frame(compositor,
+			     (struct fplinux_ui_frame_rect){ 10, 20, 40, 16 },
+			     expected);
+	/* From now on, each buffer has missed the other's last frame. */
+	fplinux_ui_frame_release_buffers(compositor);
+	paint_frame(compositor, control, expected,
+		    (struct fplinux_ui_frame_rect){ 100, 200, 20, 10 }, 0x001f);
+	wait_commits(compositor, 3);
+	assert(compositor->held[0] == first);
+	assert_damaged_frame(compositor,
+			     (struct fplinux_ui_frame_rect){ 100, 200, 20, 10 },
+			     expected);
+	paint_frame(compositor, control, expected,
+		    (struct fplinux_ui_frame_rect){ 0, 300, 240, 20 }, 0xffe0);
+	wait_commits(compositor, 4);
+	assert(compositor->held[1] == second);
+	assert_damaged_frame(compositor,
+			     (struct fplinux_ui_frame_rect){ 0, 300, 240, 20 },
+			     expected);
+	/* Two frames drawn while both buffers are busy share the next commit. */
+	paint_frame(compositor, control, expected,
+		    (struct fplinux_ui_frame_rect){ 30, 40, 10, 10 }, 0xffff);
+	paint_frame(compositor, control, expected,
+		    (struct fplinux_ui_frame_rect){ 200, 100, 5, 5 }, 0x0000);
+	assert_quiet(compositor, session, 4);
+	fplinux_ui_frame_release_buffers(compositor);
+	wait_commits(compositor, 5);
+	assert(compositor->held[0] == first);
+	assert_damaged_frame(compositor,
+			     (struct fplinux_ui_frame_rect){ 30, 40, 175, 65 },
+			     expected);
+	paint_frame(compositor, control, expected,
+		    (struct fplinux_ui_frame_rect){ 5, 5, 1, 1 }, 0x07e0);
+	wait_commits(compositor, 6);
+	assert(compositor->held[1] == second);
+	assert_damaged_frame(compositor,
+			     (struct fplinux_ui_frame_rect){ 5, 5, 1, 1 },
+			     expected);
+	free(expected);
+}
+
+static void check_damage_resize(struct fplinux_ui_frame_peer *compositor,
+				int control)
+{
+	uint16_t *expected = new_expected_frame();
+
+	assert_damaged_frame(compositor,
+			     (struct fplinux_ui_frame_rect){ 0, 0, 240, 320 },
+			     expected);
+	paint_frame(compositor, control, expected,
+		    (struct fplinux_ui_frame_rect){ 10, 20, 40, 16 }, 0x07e0);
+	wait_commits(compositor, 2);
+	/* The old buffers are destroyed once the new size is committed. */
+	fplinux_ui_frame_release_buffers(compositor);
+	fplinux_ui_frame_configure(compositor, 240, 288, false);
+	wl_display_flush_clients(compositor->display);
+	wait_commits(compositor, 3);
+	assert(compositor->height == 288);
+	assert_damaged_frame(compositor,
+			     (struct fplinux_ui_frame_rect){ 0, 0, 240, 288 },
+			     expected);
+	paint_frame(compositor, control, expected,
+		    (struct fplinux_ui_frame_rect){ 10, 280, 20, 8 }, 0x001f);
+	wait_commits(compositor, 4);
+	assert_damaged_frame(compositor,
+			     (struct fplinux_ui_frame_rect){ 10, 280, 20, 8 },
+			     expected);
+	fplinux_ui_frame_release_buffers(compositor);
+	paint_frame(compositor, control, expected,
+		    (struct fplinux_ui_frame_rect){ 100, 0, 30, 4 }, 0xffe0);
+	wait_commits(compositor, 5);
+	assert_damaged_frame(compositor,
+			     (struct fplinux_ui_frame_rect){ 100, 0, 30, 4 },
+			     expected);
+	free(expected);
 }
 
 /* Only the external audio service is replaced; UI transport remains real. */
@@ -3706,7 +4104,7 @@ int main(int argc, char **argv)
 	int listener, session;
 	int audio_listener = -1;
 	pid_t child;
-	bool repeat, media, audio, navigation, marquee;
+	bool repeat, media, audio, navigation, waiting, marquee, damage;
 	bool cold_activation;
 
 	assert(argc == 3 || argc == 4);
@@ -3723,8 +4121,10 @@ int main(int argc, char **argv)
 	repeat = !strncmp(argv[1], "repeat-", 7);
 	media = !strncmp(argv[1], "media-", 6);
 	audio = !strncmp(argv[1], "media-audio-", 12);
-	navigation = !strncmp(argv[1], "stack-", 6);
+	waiting = !strncmp(argv[1], "wait-", 5);
+	navigation = !strncmp(argv[1], "stack-", 6) || waiting;
 	marquee = !strncmp(argv[1], "marquee-", 8);
+	damage = !strncmp(argv[1], "damage-", 7);
 	cold_activation = !strcmp(argv[1], "activation-cold");
 	assert((repeat || audio || navigation) == (argc == 4));
 	if (repeat || navigation)
@@ -3748,6 +4148,8 @@ int main(int argc, char **argv)
 		fplinux_ui_frame_client_environment(wayland[1], argv[2]);
 		if (media)
 			return run_media_application(control[1], argv[1]);
+		if (waiting)
+			return fplinux_ui_test_wait_client(control[1], argv[1]);
 		if (navigation)
 			return fplinux_ui_test_navigation_client(control[1],
 								 argv[1]);
@@ -3755,13 +4157,19 @@ int main(int argc, char **argv)
 			return run_runtime_application(control[1], argv[1]);
 		if (marquee)
 			return run_marquee_application(control[1]);
+		if (damage)
+			return run_damage_application(control[1], argv[1]);
 		return repeat ? run_repeat_application(control[1]) :
 				run_application(control[1], argv[1]);
 	}
 	close(wayland[1]);
 	close(control[1]);
-	fplinux_ui_frame_init(&compositor, wayland[0], 240, 320,
-			      repeat || navigation ? argv[3] : NULL);
+	if (!strcmp(argv[1], "damage-xrgb8888"))
+		fplinux_ui_frame_init_xrgb8888(&compositor, wayland[0], 240,
+					       320, NULL);
+	else
+		fplinux_ui_frame_init(&compositor, wayland[0], 240, 320,
+				      repeat || navigation ? argv[3] : NULL);
 	if (!strcmp(argv[1], "runtime-early-close")) {
 		protocol_logger = wl_display_add_protocol_logger(
 			compositor.display, close_during_open, &early_close);
@@ -3769,6 +4177,7 @@ int main(int argc, char **argv)
 	}
 	compositor.release_frames = repeat || media || navigation || marquee ||
 				    !strncmp(argv[1], "runtime-", 8) ||
+				    !strcmp(argv[1], "legends") ||
 				    !strcmp(argv[1], "close-decisions") ||
 				    !strcmp(argv[1], "close-forced");
 	session = fplinux_ui_frame_accept_session(&compositor, listener);
@@ -3783,7 +4192,8 @@ int main(int argc, char **argv)
 	    strcmp(argv[1], "text-decimal-dot") &&
 	    strcmp(argv[1], "text-decimal-any"))
 		strcpy(config.locale, "ru");
-	if (!strcmp(argv[1], "storage-api") || navigation)
+	if (!strcmp(argv[1], "storage-api") || !strcmp(argv[1], "legends") ||
+	    navigation)
 		config.mode = FPLINUX_UI_SESSION_INTEGRATED;
 	strcpy(config.input_locale, "en");
 	config.audio = config.vibration =
@@ -3804,6 +4214,12 @@ int main(int argc, char **argv)
 
 		assert(fplinux_ui_session_send(session, &activation));
 	}
+	if (!strcmp(argv[1], "legends")) {
+		check_legends(&compositor, session, control[0]);
+		finish_application(&compositor, session, child);
+		close(session);
+		goto cleanup;
+	}
 	wait_message(&compositor, session, FPLINUX_UI_SESSION_READY);
 	wait_commits(&compositor, 1);
 	assert_colour(&compositor, cold_activation ? 0x07e0 : 0xf800);
@@ -3821,7 +4237,10 @@ int main(int argc, char **argv)
 					    FPLINUX_UI_SESSION_ACTIVATION_ACK)
 				       .serial == 91);
 			assert(compositor.commits == 1);
-		} else if (navigation)
+		} else if (waiting)
+			fplinux_ui_test_wait_check(&compositor, session,
+						   control[0], argv[1]);
+		else if (navigation)
 			fplinux_ui_test_navigation_check(&compositor, session,
 							 control[0], argv[1]);
 		else if (audio)
@@ -3837,6 +4256,10 @@ int main(int argc, char **argv)
 		else if (marquee)
 			check_marquee(&compositor, session, control[0],
 				      !strcmp(argv[1], "marquee-list"));
+		else if (!strcmp(argv[1], "damage-resize"))
+			check_damage_resize(&compositor, control[0]);
+		else if (damage)
+			check_damage_frames(&compositor, session, control[0]);
 		else if (!strcmp(argv[1], "exit") ||
 			 !strcmp(argv[1], "metrics"))
 			check_exit(&compositor, session, control[0], child);

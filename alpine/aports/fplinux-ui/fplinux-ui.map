@@ -110,6 +110,7 @@ global:
 	fplinux_ui_list_rows_deleted;
 	fplinux_ui_list_rows_inserted;
 	fplinux_ui_list_set;
+	fplinux_ui_list_set_first_visible;
 	fplinux_ui_list_set_focused;
 	fplinux_ui_list_set_focus_listener;
 	fplinux_ui_list_set_icon;
@@ -193,6 +194,8 @@ global:
 	fplinux_ui_vibration_play;
 	fplinux_ui_vibration_stop;
 	fplinux_ui_vibration_supported;
+	fplinux_ui_wait_begin;
+	fplinux_ui_wait_end;
 	fplinux_ui_watch_fd;
 	fplinux_ui_width;
 local:

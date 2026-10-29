@@ -53,7 +53,7 @@ FPLINUX_UI_INTERNAL bool fplinux_ui_scrim_attach(struct fplinux_ui *ui,
 /*
  * fplinux-ui.c: the runtime's own modal elements. A fullscreen application
  * has no system bars, so while one of them is up the runtime shows a
- * soft-key bar with the last session legends at the bottom of the surface,
+ * soft-key bar with the current legends at the bottom of the surface,
  * on the sys layer; the elements keep above it with
  * fplinux_ui_modal_height().
  */

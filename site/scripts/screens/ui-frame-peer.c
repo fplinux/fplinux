@@ -46,12 +46,52 @@ static void damage_surface(struct wl_client *client,
 			   struct wl_resource *surface, int32_t x, int32_t y,
 			   int32_t width, int32_t height)
 {
+	struct fplinux_ui_frame_peer *compositor =
+		wl_resource_get_user_data(surface);
+	struct fplinux_ui_frame_rect *damage = &compositor->pending_damage;
+	int right, bottom;
+
 	(void)client;
-	(void)surface;
-	(void)x;
-	(void)y;
-	(void)width;
-	(void)height;
+	/* UI clients damage only nonempty rectangles of their surface. */
+	assert(x >= 0 && y >= 0 && width > 0 && height > 0);
+	assert(width <= INT_MAX - x && height <= INT_MAX - y);
+	if (!damage->width) {
+		*damage = (struct fplinux_ui_frame_rect){ x, y, width, height };
+		return;
+	}
+	right = damage->x + damage->width;
+	bottom = damage->y + damage->height;
+	if (x + width > right)
+		right = x + width;
+	if (y + height > bottom)
+		bottom = y + height;
+	if (x < damage->x)
+		damage->x = x;
+	if (y < damage->y)
+		damage->y = y;
+	damage->width = right - damage->x;
+	damage->height = bottom - damage->y;
+}
+
+/* Row y of an SHM buffer in RGB565: XRGB8888 keeps each channel's top bits. */
+static void read_row(const struct fplinux_ui_frame_peer *compositor,
+		     const unsigned char *data, int stride, int y,
+		     uint16_t *row)
+{
+	const unsigned char *line = data + (size_t)y * stride;
+
+	if (compositor->format == WL_SHM_FORMAT_RGB565) {
+		memcpy(row, line, (size_t)compositor->width * sizeof(*row));
+		return;
+	}
+	for (int x = 0; x < compositor->width; ++x) {
+		uint32_t pixel;
+
+		memcpy(&pixel, line + (size_t)x * sizeof(pixel), sizeof(pixel));
+		row[x] = (uint16_t)(((pixel >> 8) & 0xf800) |
+				    ((pixel >> 5) & 0x07e0) |
+				    ((pixel >> 3) & 0x001f));
+	}
 }
 
 static void configure_surface(struct fplinux_ui_frame_peer *peer,
@@ -95,8 +135,11 @@ static void commit_surface(struct wl_client *client,
 {
 	struct fplinux_ui_frame_peer *compositor =
 		wl_resource_get_user_data(surface);
+	struct fplinux_ui_frame_rect damage = compositor->pending_damage;
+	int pixel_bytes = compositor->format == WL_SHM_FORMAT_RGB565 ? 2 : 4;
 	struct wl_shm_buffer *buffer;
-	uint16_t *pixels;
+	const unsigned char *data;
+	uint16_t *row;
 	int width, height, stride;
 
 	(void)client;
@@ -113,13 +156,19 @@ static void commit_surface(struct wl_client *client,
 	assert(compositor->pending);
 	buffer = wl_shm_buffer_get(compositor->pending);
 	assert(buffer);
-	assert(wl_shm_buffer_get_format(buffer) == WL_SHM_FORMAT_RGB565);
+	assert(wl_shm_buffer_get_format(buffer) == compositor->format);
 	assert(wl_shm_buffer_get_width(buffer) == width);
 	assert(wl_shm_buffer_get_height(buffer) == height);
 	stride = wl_shm_buffer_get_stride(buffer);
-	assert(stride >= width * (int)sizeof(uint16_t));
-	assert(stride % (int)sizeof(uint16_t) == 0);
-	stride /= (int)sizeof(uint16_t);
+	assert(stride % pixel_bytes == 0 && stride / pixel_bytes >= width);
+	/* Each UI commit presents a changed frame within its buffer. */
+	assert(damage.width && damage.x + damage.width <= width &&
+	       damage.y + damage.height <= height);
+	/* No previous image of this size can supply undamaged pixels. */
+	if (!compositor->commits || width != compositor->width ||
+	    height != compositor->height)
+		assert(damage.x == 0 && damage.y == 0 &&
+		       damage.width == width && damage.height == height);
 	if (width != compositor->width || height != compositor->height) {
 		uint16_t *snapshot =
 			malloc((size_t)width * height * sizeof(*snapshot));
@@ -130,13 +179,24 @@ static void commit_surface(struct wl_client *client,
 		compositor->width = width;
 		compositor->height = height;
 	}
+	row = malloc((size_t)width * sizeof(*row));
+	assert(row);
 	wl_shm_buffer_begin_access(buffer);
-	pixels = wl_shm_buffer_get_data(buffer);
-	for (int y = 0; y < compositor->height; ++y)
-		memcpy(compositor->pixels + (size_t)y * compositor->width,
-		       pixels + (size_t)y * stride,
-		       (size_t)compositor->width * sizeof(uint16_t));
+	data = wl_shm_buffer_get_data(buffer);
+	for (int y = 0; y < height; ++y) {
+		uint16_t *image = compositor->pixels + (size_t)y * width;
+
+		read_row(compositor, data, stride, y, row);
+		if (y >= damage.y && y < damage.y + damage.height)
+			memcpy(image + damage.x, row + damage.x,
+			       (size_t)damage.width * sizeof(*row));
+		/* Outside its damage, a buffer still holds the previous frame. */
+		assert(!memcmp(image, row, (size_t)width * sizeof(*row)));
+	}
 	wl_shm_buffer_end_access(buffer);
+	free(row);
+	compositor->damage = damage;
+	compositor->pending_damage = (struct fplinux_ui_frame_rect){ 0 };
 	if (compositor->configure_acked) {
 		compositor->configure_pending = false;
 		compositor->configure_acked = false;
@@ -417,13 +477,14 @@ void fplinux_ui_frame_client_environment(int socket, const char *session_path)
 	assert(setenv("FPLINUX_UI_SESSION_SOCKET", session_path, 1) == 0);
 }
 
-void fplinux_ui_frame_init(struct fplinux_ui_frame_peer *peer, int socket,
-			   int width, int height, const char *keymap_path)
+static void init_peer(struct fplinux_ui_frame_peer *peer, int socket, int width,
+		      int height, const char *keymap_path, uint32_t format)
 {
 	assert(width > 0 && width <= INT_MAX / (int)sizeof(uint16_t));
 	assert(height > 0);
 	assert((size_t)width <= SIZE_MAX / sizeof(uint16_t) / (size_t)height);
 	*peer = (struct fplinux_ui_frame_peer){
+		.format = format,
 		.width = width,
 		.height = height,
 		.configure_width = width,
@@ -436,8 +497,11 @@ void fplinux_ui_frame_init(struct fplinux_ui_frame_peer *peer, int socket,
 	peer->display = wl_display_create();
 	assert(peer->display);
 	peer->loop = wl_display_get_event_loop(peer->display);
+	/* libwayland always offers ARGB8888 and XRGB8888. */
 	assert(wl_display_init_shm(peer->display) == 0);
-	assert(wl_display_add_shm_format(peer->display, WL_SHM_FORMAT_RGB565));
+	if (format == WL_SHM_FORMAT_RGB565)
+		assert(wl_display_add_shm_format(peer->display,
+						 WL_SHM_FORMAT_RGB565));
 	assert(wl_global_create(peer->display, &wl_compositor_interface, 4,
 				peer, bind_compositor));
 	assert(wl_global_create(peer->display, &xdg_wm_base_interface, 1, peer,
@@ -445,6 +509,21 @@ void fplinux_ui_frame_init(struct fplinux_ui_frame_peer *peer, int socket,
 	if (keymap_path)
 		add_keyboards(peer);
 	assert(wl_client_create(peer->display, socket));
+}
+
+void fplinux_ui_frame_init(struct fplinux_ui_frame_peer *peer, int socket,
+			   int width, int height, const char *keymap_path)
+{
+	init_peer(peer, socket, width, height, keymap_path,
+		  WL_SHM_FORMAT_RGB565);
+}
+
+void fplinux_ui_frame_init_xrgb8888(struct fplinux_ui_frame_peer *peer,
+				    int socket, int width, int height,
+				    const char *keymap_path)
+{
+	init_peer(peer, socket, width, height, keymap_path,
+		  WL_SHM_FORMAT_XRGB8888);
 }
 
 void fplinux_ui_frame_cleanup(struct fplinux_ui_frame_peer *peer)

@@ -554,6 +554,80 @@ static void check_first_visible(struct fplinux_ui *ui, lv_obj_t *screen,
 	lv_obj_clean(screen);
 }
 
+static unsigned int invalidations;
+
+static void count_invalidation(lv_event_t *event)
+{
+	(void)event;
+	++invalidations;
+}
+
+/* Forty rows, focus 20 and row 19 at the top, as a saved view restores. */
+static struct fplinux_ui_listview *
+restored_list(struct fplinux_ui *ui, lv_obj_t *screen, bool is_virtual)
+{
+	struct fplinux_ui_listview *list;
+
+	if (is_virtual) {
+		list = fplinux_ui_listview_create_virtual(
+			ui, screen, FPLINUX_UI_LISTVIEW_PLAIN, 40, virtual_row,
+			NULL);
+		assert(list);
+	} else {
+		list = fplinux_ui_listview_create(ui, screen,
+						  FPLINUX_UI_LISTVIEW_PLAIN);
+		assert(list);
+		fplinux_ui_listview_set_first_visible(list, 3);
+		check(fplinux_ui_listview_first_visible(list) == SIZE_MAX,
+		      "an empty list keeps no first row");
+		for (size_t index = 0; index < 40; ++index)
+			assert(fplinux_ui_listview_add(list, "Row", NULL) ==
+			       index);
+	}
+	fplinux_ui_listview_select(list, 20);
+	fplinux_ui_listview_set_first_visible(list, 19);
+	/* A virtual list starts once shown and then takes the saved view. */
+	fplinux_ui_listview_set_active(list, true);
+	lv_obj_update_layout(fplinux_ui_listview_object(list));
+	return list;
+}
+
+static void check_set_first_visible(struct fplinux_ui *ui, lv_obj_t *screen,
+				    bool is_virtual)
+{
+	struct fplinux_ui_listview *list =
+		restored_list(ui, screen, is_virtual);
+	lv_obj_t *object = fplinux_ui_listview_object(list);
+	int32_t pitch = is_virtual ? ui->spec->row_height_detail :
+				     ui->spec->row_height;
+	size_t page = (size_t)(lv_obj_get_content_height(object) / pitch);
+
+	assert(page >= 2 && page < 20);
+	check(fplinux_ui_listview_first_visible(list) == 19 &&
+		      fplinux_ui_listview_selected(list) == 20,
+	      "the saved first row and focus are restored");
+	lv_refr_now(lv_obj_get_display(object));
+	lv_display_add_event_cb(lv_obj_get_display(object), count_invalidation,
+				LV_EVENT_INVALIDATE_AREA, NULL);
+	fplinux_ui_listview_set_first_visible(list, 19);
+	check(!invalidations, "an unchanged view is not redrawn");
+	fplinux_ui_listview_set_first_visible(list, 25);
+	check(invalidations > 0, "a new first row is redrawn");
+	check(fplinux_ui_listview_first_visible(list) == 20 &&
+		      fplinux_ui_listview_selected(list) == 20,
+	      "a first row below the focus keeps the focus in view");
+	fplinux_ui_listview_select(list, 39);
+	fplinux_ui_listview_set_first_visible(list, 1000);
+	check(fplinux_ui_listview_first_visible(list) == 40 - page,
+	      "a row past the end shows the last page");
+	fplinux_ui_listview_select(list, 0);
+	fplinux_ui_listview_set_first_visible(list, 39);
+	check(fplinux_ui_listview_first_visible(list) == 0 &&
+		      fplinux_ui_listview_selected(list) == 0,
+	      "the first row keeps a focus at the top in view");
+	lv_obj_clean(screen);
+}
+
 static void status_row_geometry(lv_obj_t *row, lv_obj_t *text, lv_obj_t *image,
 				const char *phase)
 {
@@ -715,6 +789,11 @@ int main(int argc, char **argv)
 	if (!strncmp(argv[1], "first-visible-", 14)) {
 		check_first_visible(&ui, screen,
 				    !strcmp(argv[1] + 14, "virtual"));
+		goto done;
+	}
+	if (!strncmp(argv[1], "set-first-visible-", 18)) {
+		check_set_first_visible(&ui, screen,
+					!strcmp(argv[1] + 18, "virtual"));
 		goto done;
 	}
 	if (is_virtual) {

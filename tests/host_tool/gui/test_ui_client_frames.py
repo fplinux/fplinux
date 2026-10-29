@@ -89,6 +89,7 @@ def client_frames(
             f"-I{directory}",
             str(ROOT / "tests/host_tool/gui/ui-client-frames.c"),
             str(ROOT / "tests/host_tool/gui/ui-screen-navigation.c"),
+            str(ROOT / "tests/host_tool/gui/ui-screen-wait.c"),
             str(ROOT / "site/scripts/screens/ui-frame-peer.c"),
             *(str(ROOT / "lib/fplinux" / source) for source in sources),
             str(directory / "xdg-shell-protocol.c"),
@@ -134,6 +135,25 @@ def test_runtime_navigation_preserves_application_ownership_and_runtime_choices(
         check=True,
     )
     assert result.stdout.endswith(f"stack-{scenario}: ok\n")
+
+
+@pytest.mark.parametrize("scenario", ["fast", "slow", "cancel", "question", "legends"])
+def test_wait_keeps_origin_and_shows_busy_alert_only_for_long_work(
+    client_frames: Path, tmp_path: Path, scenario: str
+) -> None:
+    """Real runtime/LVGL frames: delayed alert; Back cancels; questions and origin legends stay."""
+    result = run_process(
+        [
+            str(client_frames),
+            f"wait-{scenario}",
+            str(tmp_path / "session.sock"),
+            str(ROOT / "tests/host_tool/gui/repeat-keymap.xkb"),
+        ],
+        name=f"exercise actual UI wait for work: {scenario}",
+        timeout=15,
+        check=True,
+    )
+    assert result.stdout.endswith(f"wait-{scenario}: ok\n")
 
 
 @pytest.mark.parametrize(
@@ -303,6 +323,46 @@ def test_canvas_softkeys_keep_full_bar_alignment_without_redundant_frame(
         check=True,
     )
     assert result.stdout.endswith("softkeys: ok\n")
+
+
+def test_session_receives_only_changed_final_legends_after_the_pass_frame(
+    client_frames: Path, tmp_path: Path
+) -> None:
+    """Real handlers' final legends follow the commit showing them, also behind busy buffers."""
+    result = run_process(
+        [str(client_frames), "legends", str(tmp_path / "session.sock")],
+        name="report actual UI legends once after the committed client frame",
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout.endswith("legends: ok\n")
+
+
+@pytest.mark.parametrize("scenario", ["staged", "direct", "xrgb8888"])
+def test_partial_frames_damage_only_their_change_and_both_buffers_catch_up(
+    client_frames: Path, tmp_path: Path, scenario: str
+) -> None:
+    """Real software-frame changes commit their rectangle through alternating SHM buffers."""
+    result = run_process(
+        [str(client_frames), f"damage-{scenario}", str(tmp_path / "session.sock")],
+        name=f"commit partial client frames through alternating SHM buffers: {scenario}",
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout.endswith(f"damage-{scenario}: ok\n")
+
+
+def test_first_frame_and_new_size_damage_the_whole_surface(
+    client_frames: Path, tmp_path: Path
+) -> None:
+    """A configured size replaces the surface before partial damage resumes in new buffers."""
+    result = run_process(
+        [str(client_frames), "damage-resize", str(tmp_path / "session.sock")],
+        name="damage the whole surface on the first frame and on a new size",
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout.endswith("damage-resize: ok\n")
 
 
 def test_launcher_screens_keep_system_status_bar_visible(

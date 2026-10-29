@@ -443,6 +443,8 @@ ZERO(lv_timer_t *, lv_timer_create, lv_timer_cb_t callback, uint32_t period,
      void *data)
 NOTHING(lv_timer_delete, lv_timer_t *timer)
 ZERO(void *, lv_timer_get_user_data, lv_timer_t *timer)
+ZERO(uint32_t, lv_tick_get, void)
+ZERO(uint32_t, lv_tick_elaps, uint32_t prev_tick)
 
 int32_t lv_pct(int32_t x)
 {
@@ -793,6 +795,9 @@ size_t fplinux_ui_listview_first_visible(const struct fplinux_ui_listview *list)
 {
 	return list->count ? 0 : NONE;
 }
+
+NOTHING(fplinux_ui_listview_set_first_visible, struct fplinux_ui_listview *list,
+	size_t index)
 
 void fplinux_ui_listview_select(struct fplinux_ui_listview *list, size_t index)
 {

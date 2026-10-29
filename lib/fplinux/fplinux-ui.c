@@ -102,6 +102,12 @@ struct frame_buffer {
 	struct wl_buffer *buffer;
 	void *pixels;
 	size_t bytes;
+	/*
+	 * The bounding rectangle of the canvas changes committed since this
+	 * buffer was last filled; outside it, the buffer holds the surface's
+	 * last committed frame. A new buffer is stale everywhere.
+	 */
+	lv_area_t stale;
 	bool busy;
 };
 
@@ -236,6 +242,12 @@ struct fplinux_ui {
 	uint32_t ack_serial;
 	lv_display_t *display;
 	uint16_t *canvas;
+	/*
+	 * The bounding rectangle of the canvas drawn since the last commit,
+	 * which the next commit damages. Every flush extends it, also one
+	 * whose frame queue_frame_ack() withholds: the canvas changed anyway.
+	 */
+	lv_area_t damage;
 	void *draw_buffer;
 	const lv_font_t *fonts[FONT_SLOTS];
 	const struct fplinux_ui_profile_spec *spec;
@@ -247,8 +259,15 @@ struct fplinux_ui {
 	char input_locale[FPLINUX_UI_SESSION_LOCALE_BYTES];
 	/* The legends the application set last; an open menu shows its own. */
 	char softkeys[3][FPLINUX_UI_SESSION_TEXT_BYTES];
-	/* The legends sent last, which the modal legend bar shows. */
+	/* The legends in effect, which the modal legend bar shows. */
 	char legends[3][FPLINUX_UI_SESSION_TEXT_BYTES];
+	/*
+	 * The legends the session has, valid once legends_sent; legends_pending
+	 * when the legends in effect changed after the loop last reported them.
+	 */
+	char sent_legends[3][FPLINUX_UI_SESSION_TEXT_BYTES];
+	bool legends_sent;
+	bool legends_pending;
 	/* enum fplinux_ui_modal bits of the modal elements that are up. */
 	unsigned int modals;
 	/* The soft-key bar of a fullscreen application's modals, or NULL. */
@@ -375,22 +394,50 @@ static void stop_handler(int signal_number)
 	stop_signal = signal_number;
 }
 
-static bool send_softkeys(struct fplinux_ui *ui, const char *left,
-			  const char *centre, const char *right)
+/*
+ * The modal legend bar shows new legends in the frame being drawn; the
+ * session hears them from flush_legends() once that frame is committed.
+ */
+static void set_legends(struct fplinux_ui *ui, const char *left,
+			const char *centre, const char *right)
+{
+	/* A translated legend is catalogue data: cut rather than overflow. */
+	snprintf(ui->legends[0], sizeof(ui->legends[0]), "%s", left);
+	snprintf(ui->legends[1], sizeof(ui->legends[1]), "%s", centre);
+	snprintf(ui->legends[2], sizeof(ui->legends[2]), "%s", right);
+	ui->legends_pending = true;
+	show_legend_bar(ui);
+}
+
+/*
+ * Once per main loop pass, after the compositor has received the pass's
+ * frame: the session hears the legends that the handlers left in effect,
+ * never their intermediate ones, and nothing that it already has. While a
+ * drawn frame is not committed yet, for example for want of a free buffer,
+ * its legends wait with it.
+ */
+static bool flush_legends(struct fplinux_ui *ui)
 {
 	struct fplinux_ui_session_message message = {
 		.type = FPLINUX_UI_SESSION_SOFTKEYS,
 	};
+	bool known = ui->legends_sent;
 
-	/* A translated legend is catalogue data: cut rather than overflow. */
-	snprintf(message.left, sizeof(message.left), "%s", left);
-	snprintf(message.centre, sizeof(message.centre), "%s", centre);
-	snprintf(message.right, sizeof(message.right), "%s", right);
-	strcpy(ui->legends[0], message.left);
-	strcpy(ui->legends[1], message.centre);
-	strcpy(ui->legends[2], message.right);
-	show_legend_bar(ui);
-	return fplinux_ui_send(ui, &message);
+	if (!ui->legends_pending || ui->dirty)
+		return true;
+	for (int i = 0; known && i < 3; ++i)
+		known = !strcmp(ui->legends[i], ui->sent_legends[i]);
+	if (!known) {
+		strcpy(message.left, ui->legends[0]);
+		strcpy(message.centre, ui->legends[1]);
+		strcpy(message.right, ui->legends[2]);
+		if (!fplinux_ui_session_send(ui->session_fd, &message))
+			return false;
+		memcpy(ui->sent_legends, ui->legends, sizeof(ui->legends));
+		ui->legends_sent = true;
+	}
+	ui->legends_pending = false;
+	return true;
 }
 
 /* The callback runs after the menu closed, so that it may open another. */
@@ -1024,11 +1071,77 @@ static void destroy_buffers(struct frame_buffer *buffers)
 	}
 }
 
+static const lv_area_t no_area = { .x1 = 0, .y1 = 0, .x2 = -1, .y2 = -1 };
+
+static bool area_is_empty(const lv_area_t *area)
+{
+	return area->x2 < area->x1 || area->y2 < area->y1;
+}
+
+/* Extends a bounding rectangle to cover area as well. */
+static void join_area(lv_area_t *bounds, const lv_area_t *area)
+{
+	if (area_is_empty(area))
+		return;
+	if (area_is_empty(bounds)) {
+		*bounds = *area;
+		return;
+	}
+	bounds->x1 = LV_MIN(bounds->x1, area->x1);
+	bounds->y1 = LV_MIN(bounds->y1, area->y1);
+	bounds->x2 = LV_MAX(bounds->x2, area->x2);
+	bounds->y2 = LV_MAX(bounds->y2, area->y2);
+}
+
+/* The next commit replaces the surface: its first frame or a new size. */
+static void damage_whole_surface(struct fplinux_ui *ui)
+{
+	ui->damage = (lv_area_t){
+		.x1 = 0,
+		.y1 = 0,
+		.x2 = ui->width - 1,
+		.y2 = ui->height - 1,
+	};
+}
+
+static uint32_t xrgb8888(uint16_t pixel)
+{
+	uint32_t red = (pixel >> 11) & 31;
+	uint32_t green = (pixel >> 5) & 63;
+	uint32_t blue = pixel & 31;
+
+	return 0xff000000U | ((red * 255 / 31) << 16) |
+	       ((green * 255 / 63) << 8) | (blue * 255 / 31);
+}
+
+/* Copies a canvas area to the same place in an SHM buffer of its size. */
+static void copy_canvas(const struct fplinux_ui *ui, struct frame_buffer *frame,
+			const lv_area_t *area)
+{
+	size_t columns = (size_t)lv_area_get_width(area);
+
+	for (int32_t y = area->y1; y <= area->y2; ++y) {
+		size_t start = (size_t)y * ui->width + area->x1;
+		const uint16_t *source = ui->canvas + start;
+
+		if (ui->has_rgb565) {
+			memcpy((uint16_t *)frame->pixels + start, source,
+			       columns * sizeof(*source));
+		} else {
+			uint32_t *destination =
+				(uint32_t *)frame->pixels + start;
+
+			for (size_t x = 0; x < columns; ++x)
+				destination[x] = xrgb8888(source[x]);
+		}
+	}
+}
+
 static bool submit_frame(struct fplinux_ui *ui)
 {
 	struct frame_buffer *buffers = ui->buffer_sets[ui->buffer_set];
 	struct frame_buffer *frame = NULL;
-	size_t pixels = (size_t)ui->width * ui->height;
+	lv_area_t copy;
 
 	/* The first frame is still submitted: READY depends on it. */
 	if (ui->quit || ui->exit_pending || !ui->dirty || !ui->configured ||
@@ -1041,26 +1154,25 @@ static bool submit_frame(struct fplinux_ui *ui)
 		}
 	if (!frame)
 		return true;
-	if (ui->has_rgb565) {
-		memcpy(frame->pixels, ui->canvas, pixels * sizeof(uint16_t));
-	} else {
-		uint32_t *destination = frame->pixels;
-
-		for (size_t i = 0; i < pixels; ++i) {
-			uint16_t pixel = ui->canvas[i];
-			uint32_t red = (pixel >> 11) & 31;
-			uint32_t green = (pixel >> 5) & 63;
-			uint32_t blue = pixel & 31;
-
-			destination[i] =
-				0xff000000U | ((red * 255 / 31) << 16) |
-				((green * 255 / 63) << 8) | (blue * 255 / 31);
-		}
-	}
+	/* The whole buffer becomes the canvas; the other one misses this frame. */
+	copy = frame->stale;
+	join_area(&copy, &ui->damage);
+	copy_canvas(ui, frame, &copy);
+	frame->stale = no_area;
+	for (unsigned int i = 0; i < FPLINUX_UI_BUFFER_COUNT; ++i)
+		if (&buffers[i] != frame)
+			join_area(&buffers[i].stale, &ui->damage);
 	frame->busy = true;
 	ui->dirty = false;
 	wl_surface_attach(ui->surface, frame->buffer, 0, 0);
-	wl_surface_damage(ui->surface, 0, 0, ui->width, ui->height);
+	/*
+	 * wl_compositor version 3 has only surface-coordinate damage; at
+	 * buffer scale 1 without a transform these are the buffer's pixels.
+	 */
+	wl_surface_damage(ui->surface, ui->damage.x1, ui->damage.y1,
+			  lv_area_get_width(&ui->damage),
+			  lv_area_get_height(&ui->damage));
+	ui->damage = no_area;
 	/* The first buffer of a new size acknowledges its configure. */
 	if (ui->ack_pending) {
 		xdg_surface_ack_configure(ui->xdg_surface, ui->ack_serial);
@@ -1106,6 +1218,7 @@ static void flush_display(lv_display_t *display, const lv_area_t *area,
 		       row_pixels * sizeof(*source));
 		source += stride;
 	}
+	join_area(&ui->damage, area);
 	if (lv_display_flush_is_last(display))
 		ui->dirty = true;
 	lv_display_flush_ready(display);
@@ -1658,6 +1771,12 @@ static int create_buffers(struct fplinux_ui *ui, struct frame_buffer *buffers,
 		int error;
 
 		frame->bytes = (size_t)stride * height;
+		frame->stale = (lv_area_t){
+			.x1 = 0,
+			.y1 = 0,
+			.x2 = width - 1,
+			.y2 = height - 1,
+		};
 		if (fd < 0)
 			return errno;
 		if (ftruncate(fd, frame->bytes) < 0) {
@@ -1751,6 +1870,7 @@ static void resize(struct fplinux_ui *ui, int width, int height,
 	ui->fullscreen = fullscreen;
 	/* A frame drawn at the old size is not submitted any more. */
 	ui->dirty = false;
+	damage_whole_surface(ui);
 	lv_display_set_resolution(ui->display, width, height);
 	if (draw_buffer) {
 		lv_display_set_buffers(ui->display, draw_buffer, NULL,
@@ -2065,6 +2185,7 @@ struct fplinux_ui *fplinux_ui_open(const char *app_id,
 	if (error)
 		goto fail;
 	ui->canvas = calloc((size_t)ui->width * ui->height, sizeof(uint16_t));
+	damage_whole_surface(ui);
 	ui->draw_buffer = malloc((size_t)ui->width * FPLINUX_UI_DRAW_ROWS *
 				 sizeof(uint16_t));
 	ui->display = lv_display_create(ui->width, ui->height);
@@ -2160,7 +2281,9 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		timeout_ms = lv_timer_handler();
 		if (ui->quit)
 			break;
-		if (needs_frame_ack(ui) && !ui->exit_pending)
+		/* Pending legends name content that this pass has to draw. */
+		if ((needs_frame_ack(ui) || ui->legends_pending) &&
+		    !ui->exit_pending)
 			lv_refr_now(ui->display);
 		if (!submit_frame(ui)) {
 			ui->failed = true;
@@ -2174,7 +2297,16 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 				break;
 			}
 			descriptors[0].events |= POLLOUT;
-		} else if (!ui->ready && ui->frame_submitted) {
+		} else if (!flush_legends(ui)) {
+			/*
+			 * The session announces a READY application with the
+			 * legends sent before it. Like READY, a failed update
+			 * ends the loop instead of waiting for a retry.
+			 */
+			ui->failed = true;
+			break;
+		} else if (!ui->ready && ui->frame_submitted &&
+			   !ui->legends_pending) {
 			struct fplinux_ui_session_message ready = {
 				.type = FPLINUX_UI_SESSION_READY,
 			};
@@ -2643,9 +2775,9 @@ bool fplinux_ui_set_softkeys(struct fplinux_ui *ui, const char *left,
 	strcpy(ui->softkeys[1], centre);
 	strcpy(ui->softkeys[2], right);
 	/* An open menu keeps its legends; closing it shows these. */
-	if (ui->menu)
-		return true;
-	return send_softkeys(ui, left, centre, right);
+	if (!ui->menu)
+		set_legends(ui, left, centre, right);
+	return true;
 }
 
 lv_obj_t *fplinux_ui_header(struct fplinux_ui *ui, const char *title)
@@ -3556,8 +3688,6 @@ bool fplinux_ui_menu_open(struct fplinux_ui *ui,
 			  size_t count, fplinux_ui_menu_cb callback,
 			  void *context)
 {
-	int error;
-
 	if ((unsigned int)origin > FPLINUX_UI_MENU_ORIGIN_RIGHT) {
 		errno = EINVAL;
 		return false;
@@ -3573,13 +3703,9 @@ bool fplinux_ui_menu_open(struct fplinux_ui *ui,
 	ui->menu_callback = callback;
 	ui->menu_context = context;
 	fplinux_ui_modal_set(ui, FPLINUX_UI_MODAL_MENU, true);
-	if (send_softkeys(ui, "", word(FPLINUX_UI_LABEL_SELECT),
-			  word(FPLINUX_UI_LABEL_BACK)))
-		return true;
-	error = errno;
-	fplinux_ui_menu_close(ui);
-	errno = error;
-	return false;
+	set_legends(ui, "", word(FPLINUX_UI_LABEL_SELECT),
+		    word(FPLINUX_UI_LABEL_BACK));
+	return true;
 }
 
 bool fplinux_ui_menu_is_open(const struct fplinux_ui *ui)
@@ -3594,7 +3720,6 @@ void fplinux_ui_menu_set_position(
 		fplinux_ui_menu_view_set_position(ui->menu, position);
 }
 
-/* A failed legend update surfaces as a session error in the main loop. */
 void fplinux_ui_menu_close(struct fplinux_ui *ui)
 {
 	struct fplinux_ui_menu_view *menu = ui->menu;
@@ -3608,7 +3733,7 @@ void fplinux_ui_menu_close(struct fplinux_ui *ui)
 	fplinux_ui_menu_view_delete(menu);
 	fplinux_ui_modal_set(ui, FPLINUX_UI_MODAL_MENU, false);
 	fplinux_ui_screens_reclaim(ui->screens);
-	send_softkeys(ui, ui->softkeys[0], ui->softkeys[1], ui->softkeys[2]);
+	set_legends(ui, ui->softkeys[0], ui->softkeys[1], ui->softkeys[2]);
 	fplinux_ui_text_menu_reclaim(ui);
 }
 

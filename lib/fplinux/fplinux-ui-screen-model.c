@@ -262,6 +262,17 @@ size_t fplinux_ui_virtual_set_focus(struct fplinux_ui_virtual_window *window,
 	return bind(window, 0, 0, rebind);
 }
 
+size_t fplinux_ui_virtual_set_top(struct fplinux_ui_virtual_window *window,
+				  size_t row, size_t *rebind)
+{
+	if (!window->count)
+		return 0;
+	if (row >= window->count)
+		row = window->count - 1;
+	show_focus(window, (int64_t)row * window->pitch);
+	return bind(window, 0, 0, rebind);
+}
+
 size_t fplinux_ui_virtual_inserted(struct fplinux_ui_virtual_window *window,
 				   size_t at, size_t count, size_t *rebind)
 {

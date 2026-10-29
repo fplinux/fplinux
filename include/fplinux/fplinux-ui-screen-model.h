@@ -150,6 +150,12 @@ size_t fplinux_ui_virtual_init(struct fplinux_ui_virtual_window *window,
 size_t fplinux_ui_virtual_set_focus(struct fplinux_ui_virtual_window *window,
 				    size_t focus, size_t *rebind);
 /*
+ * Scrolls row, or the last row past the end, to the top of the view within
+ * the content, then the least that keeps the focused row wholly visible.
+ */
+size_t fplinux_ui_virtual_set_top(struct fplinux_ui_virtual_window *window,
+				  size_t row, size_t *rebind);
+/*
  * count rows were inserted before at, or deleted from at, in the data. The
  * focus follows the index rules above and keeps its place in the view when
  * the list can scroll there, else the list scrolls the least needed. An
