@@ -7,6 +7,7 @@
 #include <fplinux/fplinux-ui-menu.h>
 #include <fplinux/fplinux-ui-screen.h>
 #include <assert.h>
+#include <dirent.h>
 #include <libintl.h>
 #include <stdlib.h>
 #include <string.h>
@@ -86,6 +87,26 @@ ssize_t __wrap_write(int descriptor, const void *data, size_t size)
 	    S_ISREG(metadata.st_mode))
 		usleep(20000);
 	return __real_write(descriptor, data, size);
+}
+
+/*
+ * A read of the named folder waits for one byte on the test's descriptor,
+ * as a slow memory card would keep the worker, until the test releases it.
+ */
+DIR *__real_fdopendir(int descriptor);
+
+DIR *__wrap_fdopendir(int descriptor)
+{
+	const char *directory = getenv("FPLINUX_FILES_SLOW_DIRECTORY");
+	const char *gate = getenv("FPLINUX_FILES_READ_GATE_FD");
+	struct stat opened, slow;
+	char byte;
+
+	if (directory && gate && fstat(descriptor, &opened) == 0 &&
+	    stat(directory, &slow) == 0 && opened.st_dev == slow.st_dev &&
+	    opened.st_ino == slow.st_ino)
+		assert(read(atoi(gate), &byte, 1) == 1);
+	return __real_fdopendir(descriptor);
 }
 
 static void collect(lv_obj_t *object, size_t *used, bool menu)

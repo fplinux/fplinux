@@ -26,7 +26,7 @@ Select **Memory card** in Files to connect it, then select it again to browse. F
 
 The connected card is available at `/mnt/card` for [file transfers](/fplinux/use/connect/) and shell commands. FAT32 is connected with access for the application user. An ext4 card keeps its existing ownership and permissions, so some directories may be readable but not writable by applications. A read-only card is marked as such.
 
-A system card, a card with active swap or a card mounted elsewhere cannot be disconnected through Files. Internal eMMC is not selected as a data card.
+Files does not list a system card, a card with active swap or a card mounted elsewhere, and cannot disconnect it. Internal eMMC is not selected as a data card.
 
 ## Remove the card safely
 

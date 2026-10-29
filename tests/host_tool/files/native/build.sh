@@ -24,7 +24,8 @@ ui_host_build_application -pthread -I"$aport" \
 	"$peer/observer.c" "$screens/native-glyph-resources.c" \
 	-Wl,--wrap=fplinux_ui_open -Wl,--wrap=fplinux_ui_menu_open \
 	-Wl,--wrap=fplinux_language_load -Wl,--wrap=libintl_bindtextdomain \
-	-Wl,--wrap=lv_display_flush_ready -Wl,--wrap=write -Wl,--wrap=open -o "$work/files"
+	-Wl,--wrap=lv_display_flush_ready -Wl,--wrap=write -Wl,--wrap=open \
+	-Wl,--wrap=fdopendir -o "$work/files"
 
 # pkg-config emits compiler and linker arguments for the pinned peer libraries.
 # shellcheck disable=SC2046

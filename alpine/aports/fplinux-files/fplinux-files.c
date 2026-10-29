@@ -40,7 +40,6 @@ enum command {
 	COMMAND_PASTE,
 	COMMAND_SAVE_NAME,
 	COMMAND_CANCEL,
-	COMMAND_CANCEL_JOB,
 	COMMAND_SEARCH,
 	COMMAND_FIND,
 	COMMAND_HELP,
@@ -53,6 +52,27 @@ enum command {
 };
 
 enum naming_action { NAMING_MKDIR, NAMING_RENAME, NAMING_DESTINATION };
+
+/* Where a folder appears once it has been read. */
+enum folder_target {
+	/* Above the current screen: a subfolder or a place. */
+	FOLDER_CHILD,
+	/* Instead of the current folder: its parent, after Back. */
+	FOLDER_PARENT,
+	/* Instead of the current folder, read again; Find results close. */
+	FOLDER_REFRESH,
+	/* Instead of the current folder after its change; Find stays. */
+	FOLDER_CHANGED,
+	/* After copy or move: return to the source and keep Find. */
+	FOLDER_RETURN,
+};
+
+/* A list's focus by name, else by row, and its first row in view. */
+struct list_position {
+	char name[FPLINUX_FILES_NAME_MAX + 1];
+	size_t row;
+	size_t first;
+};
 
 struct files_app;
 
@@ -69,7 +89,8 @@ struct files_folder {
 	bool system;
 	char path[FPLINUX_FILES_PATH_MAX];
 	char root[FPLINUX_FILES_PATH_MAX];
-	char focus[FPLINUX_FILES_NAME_MAX + 1];
+	/* Where its list opens; SIZE_MAX rows keep the list's default. */
+	struct list_position position;
 	size_t *rows;
 	size_t count;
 	size_t *matches;
@@ -83,13 +104,24 @@ struct files_app {
 	struct fplinux_ui *ui;
 	struct fplinux_ui_screen *places;
 	struct fplinux_ui_screen *picker_places;
+	/* The wait's busy alert, until the end of the wait. */
 	struct fplinux_ui_screen *busy;
 	struct fplinux_ui_screen *name_box;
 	struct fplinux_ui_screen *decision;
 	struct files_folder *folder;
 	struct files_folder *origin;
+	/* The folder being read, shown at its target when the wait ends. */
+	struct files_folder *pending;
+	enum folder_target target;
+	/* Presents the work's outcome when its wait ends. */
+	void (*outcome)(struct files_app *app);
+	/* The error that the outcome reports, or zero. */
+	int error;
 	struct fplinux_files_job job;
 	struct fplinux_volume_snapshot volumes;
+	/* The rows in the current Places list, including while it is covered. */
+	struct fplinux_volume_snapshot places_volumes;
+	lv_timer_t *places_update;
 	uint32_t storage_request;
 	enum fplinux_volume_operation storage_operation;
 	uint32_t document_request;
@@ -98,6 +130,14 @@ struct files_app {
 	bool closing;
 	bool stop_and_close;
 	bool reading;
+	/* From fplinux_ui_wait_begin() until the outcome. */
+	bool waiting;
+	/* Cancelled work: the busy alert says Stopping and ignores progress. */
+	bool stopping;
+	/* The pending storage request ends the wait. */
+	bool storage_waiting;
+	/* A failed card read waits for its storage snapshot before reporting. */
+	bool read_storage_waiting;
 	enum naming_action naming;
 	char home[FPLINUX_FILES_PATH_MAX];
 	char selected[FPLINUX_FILES_PATH_MAX];
@@ -109,13 +149,16 @@ struct files_app {
 static void folder_command(struct fplinux_ui *, struct fplinux_ui_screen *, int,
 			   void *);
 static void show_places(struct files_app *app);
-static void refresh_folder(struct files_app *app, const char *focus);
+static void refresh_places(struct files_app *app);
+static bool places_current(const struct files_app *app);
+static void refresh_places_later(lv_timer_t *timer);
+static void refresh_folder(struct files_app *app);
 static void show_name(struct files_app *app, enum naming_action action,
 		      const char *raw_name);
 static void start_mutation(struct files_app *app,
 			   enum fplinux_files_action action, const char *source,
 			   const char *destination);
-static void request_storage(struct files_app *app,
+static bool request_storage(struct files_app *app,
 			    enum fplinux_volume_operation operation,
 			    uint32_t id);
 
@@ -172,8 +215,7 @@ static const char *error_message(int error)
 	case ENOTDIR:
 	case ENODEV:
 	case ESTALE:
-		return _(
-			"The file or storage is no longer available. Refresh Places.");
+		return _("The file or storage is no longer available.");
 	case EROFS:
 		return _("This storage is read-only.");
 	case EILSEQ:
@@ -317,6 +359,74 @@ static void show_error(struct files_app *app, int error)
 		fplinux_ui_push(app->ui, alert);
 }
 
+/* Cancel during work stops it; the alert, once shown, says so. */
+static void stop_work(struct files_app *app)
+{
+	fplinux_files_job_cancel(&app->job);
+	if (app->reading || !app->busy || app->stopping)
+		return;
+	app->stopping = true;
+	fplinux_ui_screen_set_title(app->busy, _("Stopping"));
+	fplinux_ui_alert_set_text(app->busy, _("Please wait…"));
+	fplinux_ui_alert_set_footer(app->busy, NULL);
+	fplinux_ui_alert_set_progress(app->busy, 0, 0);
+}
+
+static void cancel_work(struct fplinux_ui *ui, void *context)
+{
+	struct files_app *app = context;
+
+	(void)ui;
+	/* The change is complete: only the folder that shows it is read. */
+	if (app->reading &&
+	    (app->target == FOLDER_CHANGED || app->target == FOLDER_RETURN))
+		return;
+	stop_work(app);
+}
+
+/*
+ * The current screen stays while the work runs; its outcome appears in one
+ * step when the wait ends, after a busy alert only for longer work.
+ */
+static bool begin_wait(struct files_app *app, const char *title,
+		       const char *text, bool cancellable)
+{
+	app->busy = fplinux_ui_wait_begin(
+		app->ui, title, text, cancellable ? cancel_work : NULL, app);
+	if (!app->busy)
+		return false;
+	app->waiting = true;
+	app->stopping = false;
+	return true;
+}
+
+static void wait_ended(struct fplinux_ui *ui, void *context)
+{
+	struct files_app *app = context;
+	void (*outcome)(struct files_app *app) = app->outcome;
+
+	(void)ui;
+	app->waiting = false;
+	app->outcome = NULL;
+	if (outcome)
+		outcome(app);
+}
+
+static void end_wait(struct files_app *app,
+		     void (*outcome)(struct files_app *app))
+{
+	app->busy = NULL;
+	app->outcome = outcome;
+	if (!fplinux_ui_wait_end(app->ui, wait_ended, app))
+		wait_ended(app->ui, app);
+}
+
+static void show_wait_error(struct files_app *app)
+{
+	if (app->error)
+		show_error(app, app->error);
+}
+
 static void back_command(struct fplinux_ui *ui,
 			 struct fplinux_ui_screen *screen, int id,
 			 void *context)
@@ -426,7 +536,11 @@ static void focused(struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
 	if (app->picker || index == SIZE_MAX)
 		return;
 	entry = &folder->directory.entries[index];
-	add_item(app, screen, row, COMMAND_DETAILS, FPLINUX_UI_COMMAND_ITEM,
+	add_item(app, screen, row, COMMAND_DETAILS,
+		 entry->kind == FPLINUX_FILES_KIND_FILE ||
+				 entry->kind == FPLINUX_FILES_KIND_DIRECTORY ?
+			 FPLINUX_UI_COMMAND_ITEM :
+			 FPLINUX_UI_COMMAND_OK,
 		 _("Details"), 10);
 	if (entry->kind == FPLINUX_FILES_KIND_FILE && !folder->system)
 		add_item(app, screen, row, COMMAND_COPY,
@@ -523,7 +637,43 @@ static void attach_folder_commands(struct files_folder *folder,
 	fplinux_ui_screen_set_listener(screen, folder_command, NULL, app);
 }
 
-static bool build_folder(struct files_folder *folder)
+/* Focuses the saved name, else the saved row: a deleted row's neighbour. */
+static void restore_position(struct files_folder *folder,
+			     struct fplinux_ui_screen *screen,
+			     const size_t *entries, size_t count,
+			     const struct list_position *position)
+{
+	size_t focus = SIZE_MAX;
+
+	for (size_t row = 0; row < count && focus == SIZE_MAX; row++) {
+		if (!strcmp(folder->directory.entries[entries[row]].name,
+			    position->name))
+			focus = row;
+	}
+	if (focus == SIZE_MAX && position->row != SIZE_MAX)
+		focus = position->row < count ? position->row : count - 1;
+	if (focus != SIZE_MAX)
+		fplinux_ui_list_set_focused(screen, focus);
+	if (position->first != SIZE_MAX)
+		fplinux_ui_list_set_first_visible(screen, position->first);
+}
+
+/* Keeps a given name, else takes the focused one, with the list's view. */
+static void save_position(struct files_folder *folder,
+			  struct fplinux_ui_screen *screen,
+			  struct list_position *position)
+{
+	size_t row = fplinux_ui_list_get_focused(screen);
+	size_t index = entry_index(folder, screen, row);
+
+	if (!position->name[0] && index != SIZE_MAX)
+		snprintf(position->name, sizeof(position->name), "%s",
+			 folder->directory.entries[index].name);
+	position->row = row;
+	position->first = fplinux_ui_list_get_first_visible(screen);
+}
+
+static struct fplinux_ui_screen *build_folder(struct files_folder *folder)
 {
 	struct files_app *app = folder->app;
 	struct fplinux_ui_screen *screen;
@@ -531,14 +681,16 @@ static bool build_folder(struct files_folder *folder)
 	const char *label =
 		!strcmp(folder->path, app->home) ? _("My files") :
 		!strcmp(folder->path, "/")	 ? _("System files") :
-						   base_name(folder->path);
+		folder->volume_id && !strcmp(folder->path, folder->root) ?
+					     _("Memory card") :
+					     base_name(folder->path);
 
 	free(folder->rows);
 	folder->rows =
 		calloc(folder->directory.count ? folder->directory.count : 1,
 		       sizeof(*folder->rows));
 	if (!folder->rows)
-		return false;
+		return NULL;
 	folder->count = 0;
 	for (size_t i = 0; i < folder->directory.count; i++) {
 		if (!app->picker || folder->directory.entries[i].kind ==
@@ -561,131 +713,125 @@ static bool build_folder(struct files_folder *folder)
 					_("This folder is empty."));
 	}
 	if (!screen)
-		return false;
+		return NULL;
 	folder->command_screen = NULL;
 	folder->results_screen = NULL;
 	attach_folder_commands(folder, screen);
 	if (folder->count) {
 		fplinux_ui_list_set_select_label(screen, _("Open"));
-		for (size_t row = 0; row < folder->count; row++) {
-			if (!strcmp(folder->directory.entries[folder->rows[row]]
-					    .name,
-				    folder->focus))
-				fplinux_ui_list_set_focused(screen, row);
-		}
+		restore_position(folder, screen, folder->rows, folder->count,
+				 &folder->position);
 		fplinux_ui_list_set_focus_listener(screen, focused, folder);
 		focused(app->ui, screen, fplinux_ui_list_get_focused(screen),
 			folder);
 	}
 	folder->screen = screen;
-	fplinux_ui_replace(app->ui, screen);
-	return true;
+	return screen;
 }
 
-static void start_folder(struct files_app *app, const char *path,
-			 const char *root, uint32_t volume_id, bool read_only,
-			 bool system, const char *focus)
+static const struct fplinux_volume *mounted_volume(const struct files_app *app,
+						   uint32_t id)
 {
-	struct files_folder *folder = calloc(1, sizeof(*folder));
-	struct fplinux_ui_screen *screen;
+	for (size_t i = 0; i < app->volumes.count; i++) {
+		const struct fplinux_volume *volume = &app->volumes.volumes[i];
+
+		if (volume->id == id && volume->state == FPLINUX_VOLUME_MOUNTED)
+			return volume;
+	}
+	return NULL;
+}
+
+/* Starts reading path for target; the current wait presents the folder. */
+static bool read_folder(struct files_app *app, const char *path,
+			const char *root, uint32_t volume_id, bool read_only,
+			bool system, const char *focus,
+			enum folder_target target)
+{
+	struct files_folder *folder;
 	uint32_t mount_id = 0;
 
 	if (volume_id) {
-		for (size_t i = 0; i < app->volumes.count; i++) {
-			const struct fplinux_volume *volume =
-				&app->volumes.volumes[i];
+		const struct fplinux_volume *volume =
+			mounted_volume(app, volume_id);
 
-			if (volume->id == volume_id &&
-			    volume->state == FPLINUX_VOLUME_MOUNTED)
-				mount_id = volume->mount_id;
-		}
+		if (volume)
+			mount_id = volume->mount_id;
 		if (!mount_id) {
-			free(folder);
-			show_error(app, ENODEV);
-			return;
+			errno = ENODEV;
+			return false;
 		}
 	}
-
-	if (!folder) {
-		show_error(app, ENOMEM);
-		return;
-	}
+	folder = calloc(1, sizeof(*folder));
+	if (!folder)
+		return false;
 	folder->app = app;
-	folder->parent = app->folder;
 	folder->descriptor = -1;
 	folder->volume_id = volume_id;
 	folder->read_only = read_only;
 	folder->system = system;
 	snprintf(folder->path, sizeof(folder->path), "%s", path);
 	snprintf(folder->root, sizeof(folder->root), "%s", root);
-	snprintf(folder->focus, sizeof(folder->focus), "%s",
+	snprintf(folder->position.name, sizeof(folder->position.name), "%s",
 		 focus ? focus : "");
-	screen = fplinux_ui_form_new(app->ui, _("Reading folder"));
-	if (!screen) {
-		free_folder(folder);
-		show_error(app, ENOMEM);
-		return;
-	}
-	fplinux_ui_form_append_string(screen, NULL, _("Please wait…"));
-	add_command(app, screen, COMMAND_CANCEL_JOB, FPLINUX_UI_COMMAND_CANCEL,
-		    NULL, 0);
-	fplinux_ui_screen_set_listener(screen, folder_command, NULL, app);
-	folder->screen = screen;
+	folder->position.row = SIZE_MAX;
+	folder->position.first = SIZE_MAX;
 	if (fplinux_files_job_read(&app->job, path, !strcmp(path, app->home),
 				   mount_id) < 0) {
-		fplinux_ui_push(app->ui, screen);
-		fplinux_ui_pop(app->ui);
+		int error = errno;
+
 		free_folder(folder);
+		errno = error;
+		return false;
+	}
+	app->pending = folder;
+	app->target = target;
+	app->reading = true;
+	return true;
+}
+
+static void open_folder(struct files_app *app, const char *path,
+			const char *root, uint32_t volume_id, bool read_only,
+			bool system, const char *focus,
+			enum folder_target target)
+{
+	if (!begin_wait(app, _("Reading folder"), _("Please wait…"), true)) {
 		show_error(app, errno);
 		return;
 	}
-	app->folder = folder;
-	app->reading = true;
-	fplinux_ui_push(app->ui, screen);
+	if (!read_folder(app, path, root, volume_id, read_only, system, focus,
+			 target)) {
+		app->error = errno;
+		end_wait(app, show_wait_error);
+	}
 }
 
-static void refresh_folder(struct files_app *app, const char *focus)
+static void refresh_folder(struct files_app *app)
 {
 	struct files_folder *folder = app->folder;
-	char path[FPLINUX_FILES_PATH_MAX];
-	char root[FPLINUX_FILES_PATH_MAX];
-	uint32_t id = folder->volume_id;
-	bool read_only = folder->read_only;
-	bool system = folder->system;
 
-	snprintf(path, sizeof(path), "%s", folder->path);
-	snprintf(root, sizeof(root), "%s", folder->root);
-	pop_to(app, folder->screen);
-	fplinux_ui_pop(app->ui);
-	app->folder = folder->parent;
-	free_folder(folder);
-	start_folder(app, path, root, id, read_only, system, focus);
+	open_folder(app, folder->path, folder->root, folder->volume_id,
+		    folder->read_only, folder->system, NULL, FOLDER_REFRESH);
 }
 
 static void leave_folder(struct files_app *app)
 {
 	struct files_folder *folder = app->folder;
 	char parent[FPLINUX_FILES_PATH_MAX];
-	char root[FPLINUX_FILES_PATH_MAX];
-	char focus[FPLINUX_FILES_NAME_MAX + 1];
-	uint32_t id = folder->volume_id;
-	bool read_only = folder->read_only;
-	bool system = folder->system;
-	bool load_parent = !folder->parent &&
-			   strcmp(folder->path, folder->root);
 
-	if (load_parent) {
+	/* A folder opened without its parents reads the parent when left. */
+	if (!folder->parent && strcmp(folder->path, folder->root)) {
 		fplinux_files_parent_path(folder->path, parent, sizeof(parent));
-		snprintf(root, sizeof(root), "%s", folder->root);
-		snprintf(focus, sizeof(focus), "%s", base_name(folder->path));
+		open_folder(app, parent, folder->root, folder->volume_id,
+			    folder->read_only, folder->system,
+			    base_name(folder->path), FOLDER_PARENT);
+		return;
 	}
-
 	pop_to(app, folder->screen);
 	fplinux_ui_pop(app->ui);
 	app->folder = folder->parent;
 	free_folder(folder);
-	if (load_parent)
-		start_folder(app, parent, root, id, read_only, system, focus);
+	if (!app->folder)
+		refresh_places(app);
 }
 
 static void format_size(off_t value, char *text, size_t capacity)
@@ -742,6 +888,58 @@ static void show_details(struct files_app *app, size_t index)
 	fplinux_ui_navigate(app->ui, screen);
 }
 
+/* The folder's rows matching query; position, if given, opens the list. */
+static struct fplinux_ui_screen *
+build_results(struct files_folder *folder, const char *query,
+	      const struct list_position *position)
+{
+	struct files_app *app = folder->app;
+	struct fplinux_ui_screen *results;
+
+	free(folder->matches);
+	folder->matches = calloc(folder->count ? folder->count : 1,
+				 sizeof(*folder->matches));
+	if (!folder->matches)
+		return NULL;
+	folder->match_count = 0;
+	for (size_t row = 0; row < folder->count; row++) {
+		size_t index = folder->rows[row];
+
+		if (fplinux_utf8_contains_casefold(
+			    folder->directory.entries[index].name, query))
+			folder->matches[folder->match_count++] = index;
+	}
+	results = folder->match_count ?
+			  fplinux_ui_list_new_virtual(app->ui,
+						      _("Search results"),
+						      FPLINUX_UI_LIST_IMPLICIT,
+						      folder->match_count,
+						      filtered_row, folder) :
+			  fplinux_ui_form_new(app->ui, _("Search results"));
+	if (!results)
+		return NULL;
+	folder->results_screen = results;
+	if (folder->match_count) {
+		attach_folder_commands(folder, results);
+		fplinux_ui_screen_remove_command(results, COMMAND_SEARCH);
+		if (position)
+			restore_position(folder, results, folder->matches,
+					 folder->match_count, position);
+		fplinux_ui_list_set_focus_listener(results, focused, folder);
+		focused(app->ui, results, fplinux_ui_list_get_focused(results),
+			folder);
+	} else {
+		fplinux_ui_form_append_string(
+			results, NULL,
+			_("No matching names. Go back to change the search."));
+		add_command(app, results, COMMAND_BACK, FPLINUX_UI_COMMAND_BACK,
+			    NULL, 0);
+		fplinux_ui_screen_set_listener(results, folder_command, NULL,
+					       app);
+	}
+	return results;
+}
+
 static void search_command(struct fplinux_ui *ui,
 			   struct fplinux_ui_screen *screen, int id,
 			   void *context)
@@ -749,7 +947,6 @@ static void search_command(struct fplinux_ui *ui,
 	struct files_app *app = context;
 	struct files_folder *folder = app->folder;
 	struct fplinux_ui_screen *results;
-	const char *query;
 
 	if (id == COMMAND_BACK) {
 		folder->search_screen = NULL;
@@ -762,62 +959,51 @@ static void search_command(struct fplinux_ui *ui,
 	}
 	if (id != COMMAND_FIND)
 		return;
-	query = fplinux_ui_text_box_get(screen);
-	free(folder->matches);
-	folder->matches = calloc(folder->count ? folder->count : 1,
-				 sizeof(*folder->matches));
-	if (!folder->matches) {
+	results = build_results(folder, fplinux_ui_text_box_get(screen), NULL);
+	if (results)
+		fplinux_ui_push(ui, results);
+	else
 		show_error(app, ENOMEM);
-		return;
-	}
-	folder->match_count = 0;
-	for (size_t row = 0; row < folder->count; row++) {
-		size_t index = folder->rows[row];
-
-		if (fplinux_utf8_contains_casefold(
-			    folder->directory.entries[index].name, query))
-			folder->matches[folder->match_count++] = index;
-	}
-	results = folder->match_count ?
-			  fplinux_ui_list_new_virtual(ui, _("Search results"),
-						      FPLINUX_UI_LIST_IMPLICIT,
-						      folder->match_count,
-						      filtered_row, folder) :
-			  fplinux_ui_form_new(ui, _("Search results"));
-	if (!results)
-		return;
-	folder->results_screen = results;
-	if (folder->match_count) {
-		attach_folder_commands(folder, results);
-		fplinux_ui_screen_remove_command(results, COMMAND_SEARCH);
-		fplinux_ui_list_set_focus_listener(results, focused, folder);
-		focused(ui, results, 0, folder);
-	} else {
-		fplinux_ui_form_append_string(
-			results, NULL,
-			_("No matching names. Go back to change the search."));
-		add_command(app, results, COMMAND_BACK, FPLINUX_UI_COMMAND_BACK,
-			    NULL, 0);
-		fplinux_ui_screen_set_listener(results, folder_command, NULL,
-					       app);
-	}
-	fplinux_ui_push(ui, results);
 }
 
-static void show_search(struct files_app *app)
+static struct fplinux_ui_screen *new_search_box(struct files_app *app,
+						const char *query)
 {
 	struct fplinux_ui_screen *screen = fplinux_ui_text_box_new(
-		app->ui, _("Find in folder"), "", FPLINUX_FILES_NAME_MAX);
+		app->ui, _("Find in folder"), query, FPLINUX_FILES_NAME_MAX);
 
 	if (!screen)
-		return;
+		return NULL;
 	app->folder->search_screen = screen;
 	add_command(app, screen, COMMAND_FIND, FPLINUX_UI_COMMAND_SCREEN,
 		    _("Find"), 0);
 	add_command(app, screen, COMMAND_BACK, FPLINUX_UI_COMMAND_BACK, NULL,
 		    0);
 	fplinux_ui_screen_set_listener(screen, search_command, NULL, app);
-	fplinux_ui_navigate(app->ui, screen);
+	return screen;
+}
+
+static void show_search(struct files_app *app)
+{
+	struct fplinux_ui_screen *screen = new_search_box(app, "");
+
+	if (screen)
+		fplinux_ui_navigate(app->ui, screen);
+}
+
+/* After a change from Search results: the same query over the new rows. */
+static void show_search_again(struct files_app *app, const char *query,
+			      const struct list_position *position)
+{
+	struct fplinux_ui_screen *search = new_search_box(app, query);
+	struct fplinux_ui_screen *results;
+
+	if (!search)
+		return;
+	fplinux_ui_push(app->ui, search);
+	results = build_results(app->folder, query, position);
+	if (results)
+		fplinux_ui_push(app->ui, results);
 }
 
 static void name_command(struct fplinux_ui *ui,
@@ -925,59 +1111,34 @@ static void confirm_delete(struct files_app *app, const char *raw_name)
 	fplinux_ui_navigate(app->ui, screen);
 }
 
-static void busy_command(struct fplinux_ui *ui,
-			 struct fplinux_ui_screen *screen, int id,
-			 void *context)
+static bool begin_busy(struct files_app *app, enum fplinux_files_action action,
+		       const char *source, const char *destination)
 {
-	struct files_app *app = context;
-
-	(void)ui;
-	(void)screen;
-	app->busy = NULL;
-	if (id != COMMAND_CANCEL_JOB)
-		return;
-	fplinux_files_job_cancel(&app->job);
-	app->busy = fplinux_ui_alert_new(app->ui, FPLINUX_UI_ALERT_INFO,
-					 _("Stopping"), _("Please wait…"), 0);
-	if (app->busy) {
-		fplinux_ui_alert_set_progress(app->busy, 0, 0);
-		fplinux_ui_push(app->ui, app->busy);
-	}
-}
-
-static void show_busy(struct files_app *app)
-{
-	const char *title =
-		app->job.action == FPLINUX_FILES_COPY ? _("Copying") :
-		app->job.action == FPLINUX_FILES_MOVE ? _("Moving") :
-							_("Working");
+	const char *title = action == FPLINUX_FILES_COPY ? _("Copying") :
+			    action == FPLINUX_FILES_MOVE ? _("Moving") :
+							   _("Working");
 	char name[96];
 
-	display_text(base_name(app->job.source[0] ? app->job.source :
-						    app->job.destination),
+	display_text(base_name(source && source[0] ? source : destination),
 		     name, sizeof(name));
-	app->busy = fplinux_ui_alert_new(app->ui, FPLINUX_UI_ALERT_INFO, title,
-					 name, 0);
-	if (!app->busy)
-		return;
-	fplinux_ui_alert_set_progress(app->busy, 0, 0);
-	add_command(app, app->busy, COMMAND_CANCEL_JOB,
-		    FPLINUX_UI_COMMAND_CANCEL, NULL, 0);
-	fplinux_ui_screen_set_listener(app->busy, busy_command, NULL, app);
-	fplinux_ui_push(app->ui, app->busy);
+	return begin_wait(app, title, name, true);
 }
 
 static void start_mutation(struct files_app *app,
 			   enum fplinux_files_action action, const char *source,
 			   const char *destination)
 {
-	if (fplinux_files_job_mutate(&app->job, action, source, destination) <
-	    0) {
+	if (!begin_busy(app, action, source, destination)) {
 		show_error(app, errno);
 		return;
 	}
+	if (fplinux_files_job_mutate(&app->job, action, source, destination) <
+	    0) {
+		app->error = errno;
+		end_wait(app, show_wait_error);
+		return;
+	}
 	app->reading = false;
-	show_busy(app);
 }
 
 static void operation_error_command(struct fplinux_ui *ui,
@@ -985,15 +1146,22 @@ static void operation_error_command(struct fplinux_ui *ui,
 				    void *context)
 {
 	struct files_app *app = context;
+	bool published = app->job.operation.result.state !=
+			 FPLINUX_STORAGE_UNPUBLISHED;
 
 	(void)ui;
 	(void)screen;
 	app->decision = NULL;
 	if (id == COMMAND_RETRY) {
-		if (fplinux_files_job_retry(&app->job) < 0)
+		if (!begin_busy(app, app->job.action, app->job.source,
+				app->job.destination)) {
 			show_error(app, errno);
-		else
-			show_busy(app);
+		} else if (fplinux_files_job_retry(&app->job) < 0) {
+			app->error = errno;
+			end_wait(app, show_wait_error);
+		} else {
+			app->reading = false;
+		}
 	} else if (id == COMMAND_OTHER_NAME) {
 		if (app->name_box)
 			pop_to(app, app->name_box);
@@ -1004,8 +1172,9 @@ static void operation_error_command(struct fplinux_ui *ui,
 		fplinux_files_job_reset(&app->job);
 		if (app->picker && id == COMMAND_CANCEL)
 			cancel_picker(app);
-		else if (app->folder && !app->name_box)
-			refresh_folder(app, NULL);
+		/* An unpublished failure changed nothing to read again. */
+		else if (published && app->folder && !app->name_box)
+			refresh_folder(app);
 	}
 }
 
@@ -1052,6 +1221,178 @@ static void show_operation_error(struct files_app *app, int error)
 	fplinux_ui_push(app->ui, screen);
 }
 
+static void show_failed_operation(struct files_app *app)
+{
+	show_operation_error(app, app->error);
+}
+
+/* Stopping on request leaves nothing to report. */
+static void show_cancelled_operation(struct files_app *app)
+{
+	fplinux_files_job_reset(&app->job);
+	if (app->picker)
+		cancel_picker(app);
+}
+
+static void show_read_error(struct files_app *app)
+{
+	if (app->target == FOLDER_RETURN)
+		cancel_picker(app);
+	if (app->folder && app->folder->volume_id &&
+	    !mounted_volume(app, app->folder->volume_id))
+		show_places(app);
+	if (!app->folder)
+		refresh_places(app);
+	show_wait_error(app);
+}
+
+static void show_read_folder(struct files_app *app)
+{
+	struct files_folder *folder = app->pending;
+	struct files_folder *old = app->folder;
+	struct fplinux_ui_screen *screen;
+	struct list_position results = { .row = SIZE_MAX, .first = SIZE_MAX };
+	char query[FPLINUX_FILES_NAME_MAX * 4 + 1] = "";
+	bool keep_search = false;
+
+	app->pending = NULL;
+	if (app->target == FOLDER_RETURN) {
+		cancel_picker(app);
+		old = app->folder;
+	}
+	if (app->target == FOLDER_REFRESH || app->target == FOLDER_CHANGED ||
+	    app->target == FOLDER_RETURN) {
+		keep_search = app->target != FOLDER_REFRESH &&
+			      old->search_screen && old->results_screen;
+		if (keep_search) {
+			snprintf(query, sizeof(query), "%s",
+				 fplinux_ui_text_box_get(old->search_screen));
+			snprintf(results.name, sizeof(results.name), "%s",
+				 folder->position.name);
+			save_position(old, old->results_screen, &results);
+		}
+		save_position(old, old->screen, &folder->position);
+	}
+	folder->parent = app->target == FOLDER_CHILD ? old :
+			 old			     ? old->parent :
+						       NULL;
+	screen = build_folder(folder);
+	if (!screen) {
+		free_folder(folder);
+		show_error(app, ENOMEM);
+		return;
+	}
+	app->folder = folder;
+	if (!old || app->target == FOLDER_CHILD) {
+		fplinux_ui_push(app->ui, screen);
+		return;
+	}
+	pop_to(app, old->screen);
+	fplinux_ui_replace(app->ui, screen);
+	free_folder(old);
+	app->name_box = NULL;
+	if (keep_search)
+		show_search_again(app, query, &results);
+}
+
+static void read_finished(struct files_app *app, int error)
+{
+	struct files_folder *folder = app->pending;
+
+	app->reading = false;
+	if (error) {
+		bool card = folder->volume_id != 0;
+
+		app->pending = NULL;
+		free_folder(folder);
+		fplinux_files_job_reset(&app->job);
+		app->error = error == ECANCELED ? 0 : error;
+		if (card && error != ECANCELED) {
+			app->read_storage_waiting = true;
+			if (app->storage_request ||
+			    request_storage(app, FPLINUX_VOLUME_REFRESH, 0))
+				return;
+			app->read_storage_waiting = false;
+		}
+		end_wait(app, show_read_error);
+		if (!card && error != ECANCELED)
+			request_storage(app, FPLINUX_VOLUME_REFRESH, 0);
+		return;
+	}
+	folder->directory = app->job.directory;
+	app->job.directory = (struct fplinux_files_directory){ 0 };
+	folder->descriptor = app->job.directory_fd;
+	app->job.directory_fd = -1;
+	end_wait(app, show_read_folder);
+}
+
+static void mutation_finished(struct files_app *app, int error)
+{
+	const struct fplinux_files_operation *operation = &app->job.operation;
+	struct files_folder *folder = app->picker ? app->origin : app->folder;
+	bool stopped = error == ECANCELED &&
+		       operation->result.state == FPLINUX_STORAGE_UNPUBLISHED;
+
+	if (error) {
+		app->error = error;
+		end_wait(app, stopped ? show_cancelled_operation :
+					show_failed_operation);
+		if (!stopped)
+			request_storage(app, FPLINUX_VOLUME_REFRESH, 0);
+		return;
+	}
+	/* The same wait goes on until the changed folder is shown. */
+	if (app->picker ?
+		    read_folder(app, folder->path, folder->root,
+				folder->volume_id, folder->read_only,
+				folder->system, base_name(app->source),
+				FOLDER_RETURN) :
+		    read_folder(app, folder->path, folder->root,
+				folder->volume_id, folder->read_only,
+				folder->system, operation->destination_name,
+				FOLDER_CHANGED))
+		return;
+	app->error = errno;
+	app->target = app->picker ? FOLDER_RETURN : FOLDER_CHANGED;
+	end_wait(app, show_read_error);
+}
+
+static void show_progress(struct files_app *app,
+			  const struct fplinux_files_job_status *status)
+{
+	char text[160], bytes[64], total[64];
+	char name[FPLINUX_FILES_NAME_MAX * 4 + 1];
+
+	display_text(base_name(app->job.source[0] ? app->job.source :
+						    app->job.destination),
+		     name, sizeof(name));
+	if (status->syncing) {
+		fplinux_ui_alert_set_text(app->busy, _("Finishing writes…"));
+		fplinux_ui_alert_set_progress(app->busy, 0, 0);
+		fplinux_ui_alert_set_footer(app->busy, NULL);
+	} else if (status->total > 0) {
+		int percentage = status->bytes >= status->total ?
+					 100 :
+					 (int)((long double)status->bytes *
+					       100 / status->total);
+
+		int progress = status->bytes >= status->total ?
+				       INT_MAX :
+				       (int)((long double)status->bytes *
+					     INT_MAX / status->total);
+
+		if (status->bytes > 0 && !progress)
+			progress = 1;
+		format_size(status->bytes, bytes, sizeof(bytes));
+		format_size(status->total, total, sizeof(total));
+		snprintf(text, sizeof(text), _("%d%% · %s / %s"), percentage,
+			 bytes, total);
+		fplinux_ui_alert_set_text(app->busy, name);
+		fplinux_ui_alert_set_footer(app->busy, text);
+		fplinux_ui_alert_set_progress(app->busy, progress, INT_MAX);
+	}
+}
+
 static void job_event(struct fplinux_ui *ui, int fd, short events,
 		      void *context)
 {
@@ -1062,126 +1403,43 @@ static void job_event(struct fplinux_ui *ui, int fd, short events,
 	(void)fd;
 	(void)events;
 	if (!status.done) {
-		if (app->busy) {
-			char text[160], bytes[64], total[64];
-			char name[FPLINUX_FILES_NAME_MAX * 4 + 1];
-
-			display_text(base_name(app->job.source[0] ?
-						       app->job.source :
-						       app->job.destination),
-				     name, sizeof(name));
-			if (status.syncing) {
-				fplinux_ui_alert_set_text(
-					app->busy, _("Finishing writes…"));
-				fplinux_ui_alert_set_progress(app->busy, 0, 0);
-				fplinux_ui_alert_set_footer(app->busy, NULL);
-			} else if (status.total > 0) {
-				int percentage =
-					status.bytes >= status.total ?
-						100 :
-						(int)((long double)status.bytes *
-						      100 / status.total);
-
-				int progress =
-					status.bytes >= status.total ?
-						INT_MAX :
-						(int)((long double)status.bytes *
-						      INT_MAX / status.total);
-
-				if (status.bytes > 0 && !progress)
-					progress = 1;
-				format_size(status.bytes, bytes, sizeof(bytes));
-				format_size(status.total, total, sizeof(total));
-				snprintf(text, sizeof(text),
-					 _("%d%% · %s / %s"), percentage, bytes,
-					 total);
-				fplinux_ui_alert_set_text(app->busy, name);
-				fplinux_ui_alert_set_footer(app->busy, text);
-				fplinux_ui_alert_set_progress(
-					app->busy, progress, INT_MAX);
-			}
-		}
+		if (app->busy && !app->reading && !app->stopping)
+			show_progress(app, &status);
 		return;
-	}
-	if (app->closing && app->decision) {
-		pop_to(app, app->decision);
-		fplinux_ui_pop(ui);
-		app->decision = NULL;
-	}
-	if (app->busy) {
-		pop_to(app, app->busy);
-		fplinux_ui_pop(ui);
-		app->busy = NULL;
 	}
 	if (app->stop_and_close) {
 		app->closing = false;
+		end_wait(app, NULL);
 		fplinux_ui_close_reply(ui, FPLINUX_UI_CLOSE_READY);
 		return;
 	}
-	if (app->closing) {
-		app->closing = false;
-		fplinux_ui_close_reply(ui, FPLINUX_UI_CLOSE_CANCEL);
-	}
-	if (app->reading) {
-		struct files_folder *folder = app->folder;
-
-		app->reading = false;
-		if (status.error) {
-			leave_folder(app);
-			fplinux_files_job_reset(&app->job);
-			if (status.error != ECANCELED)
-				show_error(app, status.error);
-			request_storage(app, FPLINUX_VOLUME_REFRESH, 0);
-			return;
-		}
-		folder->directory = app->job.directory;
-		app->job.directory = (struct fplinux_files_directory){ 0 };
-		folder->descriptor = app->job.directory_fd;
-		app->job.directory_fd = -1;
-		if (!build_folder(folder)) {
-			leave_folder(app);
-			show_error(app, ENOMEM);
-		}
-		return;
-	}
-	if (status.error) {
-		show_operation_error(app, status.error);
-		request_storage(app, FPLINUX_VOLUME_REFRESH, 0);
-		return;
-	}
-	app->name_box = NULL;
-	if (app->picker) {
-		struct files_folder *folder = app->folder;
-		char path[FPLINUX_FILES_PATH_MAX];
-		char root[FPLINUX_FILES_PATH_MAX];
-		char focus[FPLINUX_FILES_NAME_MAX + 1];
-		uint32_t id = folder->volume_id;
-
-		snprintf(path, sizeof(path), "%s", folder->path);
-		snprintf(root, sizeof(root), "%s", folder->root);
-		snprintf(focus, sizeof(focus), "%s", app->destination_name);
-		app->picker = false;
-		show_places(app);
-		start_folder(app, path, root, id, false, false, focus);
-	} else {
-		char focus[FPLINUX_FILES_NAME_MAX + 1];
-
-		snprintf(focus, sizeof(focus), "%s",
-			 app->job.operation.destination_name);
-		refresh_folder(app, focus);
-	}
+	if (app->reading)
+		read_finished(app, status.error);
+	else
+		mutation_finished(app, status.error);
 }
 
-static const struct fplinux_volume *volume_at(struct files_app *app, size_t row)
+/* The system's own cards can be neither opened nor connected nor ejected. */
+static bool shows_volume(const struct files_app *app,
+			 const struct fplinux_volume *volume)
+{
+	if (volume->state == FPLINUX_VOLUME_PROTECTED)
+		return false;
+	return !app->picker ||
+	       (volume->state == FPLINUX_VOLUME_MOUNTED && !volume->read_only);
+}
+
+static const struct fplinux_volume *
+place_volume(const struct files_app *app,
+	     const struct fplinux_volume_snapshot *snapshot, size_t row)
 {
 	if (!row)
 		return NULL;
 	row--;
-	for (size_t i = 0; i < app->volumes.count; i++) {
-		const struct fplinux_volume *volume = &app->volumes.volumes[i];
+	for (size_t i = 0; i < snapshot->count; i++) {
+		const struct fplinux_volume *volume = &snapshot->volumes[i];
 
-		if (app->picker && (volume->state != FPLINUX_VOLUME_MOUNTED ||
-				    volume->read_only))
+		if (!shows_volume(app, volume))
 			continue;
 		if (!row--)
 			return volume;
@@ -1189,17 +1447,70 @@ static const struct fplinux_volume *volume_at(struct files_app *app, size_t row)
 	return NULL;
 }
 
-static void request_storage(struct files_app *app,
+static const struct fplinux_volume *volume_at(struct files_app *app, size_t row)
+{
+	return place_volume(app, &app->places_volumes, row);
+}
+
+static size_t place_row(struct files_app *app, uint32_t id)
+{
+	const struct fplinux_volume *volume;
+
+	for (size_t row = 1; (volume = volume_at(app, row)); row++) {
+		if (volume->id == id)
+			return row;
+	}
+	return 0;
+}
+
+/* My files lie on the memory card that holds the system, if it does. */
+static const char *home_detail(const struct fplinux_volume_snapshot *snapshot)
+{
+	if (!snapshot->home_persistent)
+		return _("Temporary: lost after reboot");
+	for (size_t i = 0; i < snapshot->count; i++) {
+		if (snapshot->volumes[i].protection ==
+		    FPLINUX_VOLUME_SYSTEM_ROOT)
+			return _("On the memory card");
+	}
+	return _("Home directory");
+}
+
+static const char *volume_detail(const struct fplinux_volume *volume)
+{
+	return volume->state == FPLINUX_VOLUME_AVAILABLE ?
+		       _("Select to connect") :
+	       volume->state == FPLINUX_VOLUME_UNSUPPORTED ?
+		       _("Unsupported format") :
+	       volume->read_only ? _("Read-only") :
+				   _("Connected");
+}
+
+static bool request_storage(struct files_app *app,
 			    enum fplinux_volume_operation operation,
 			    uint32_t id)
 {
 	if (app->storage_request)
-		return;
+		return false;
 	app->storage_request =
 		fplinux_ui_storage_request(app->ui, operation, id);
 	app->storage_operation = operation;
 	if (!app->storage_request && errno != EOPNOTSUPP)
 		show_error(app, errno);
+	return app->storage_request != 0;
+}
+
+/* Connecting and ejecting keep Places until the session answers. */
+static void change_volume(struct files_app *app,
+			  enum fplinux_volume_operation operation, uint32_t id)
+{
+	if (!request_storage(app, operation, id))
+		return;
+	app->storage_waiting = begin_wait(app, _("Memory card"),
+					  operation == FPLINUX_VOLUME_EJECT ?
+						  _("Ejecting…") :
+						  _("Connecting…"),
+					  false);
 }
 
 static void places_command(struct fplinux_ui *ui,
@@ -1220,24 +1531,24 @@ static void places_command(struct fplinux_ui *ui,
 	} else if (id == COMMAND_REFRESH) {
 		request_storage(app, FPLINUX_VOLUME_REFRESH, 0);
 	} else if (id == COMMAND_SYSTEM && !app->picker) {
-		start_folder(app, "/", "/", 0, true, true, NULL);
+		open_folder(app, "/", "/", 0, true, true, NULL, FOLDER_CHILD);
 	} else if ((id == COMMAND_EJECT || id == COMMAND_CONNECT) && volume) {
-		request_storage(app,
-				id == COMMAND_EJECT ? FPLINUX_VOLUME_EJECT :
-						      FPLINUX_VOLUME_CONNECT,
-				volume->id);
+		change_volume(app,
+			      id == COMMAND_EJECT ? FPLINUX_VOLUME_EJECT :
+						    FPLINUX_VOLUME_CONNECT,
+			      volume->id);
 	} else if (id == FPLINUX_UI_SELECT_COMMAND) {
 		if (!row) {
-			start_folder(app, app->home, app->home, 0, false, false,
-				     NULL);
+			open_folder(app, app->home, app->home, 0, false, false,
+				    NULL, FOLDER_CHILD);
 		} else if (volume) {
 			if (volume->state == FPLINUX_VOLUME_MOUNTED)
-				start_folder(app, volume->path, volume->path,
-					     volume->id, volume->read_only,
-					     false, NULL);
+				open_folder(app, volume->path, volume->path,
+					    volume->id, volume->read_only,
+					    false, NULL, FOLDER_CHILD);
 			else if (volume->state == FPLINUX_VOLUME_AVAILABLE)
-				request_storage(app, FPLINUX_VOLUME_CONNECT,
-						volume->id);
+				change_volume(app, FPLINUX_VOLUME_CONNECT,
+					      volume->id);
 			else
 				show_error(app, EOPNOTSUPP);
 		}
@@ -1257,9 +1568,49 @@ static void places_focused(struct fplinux_ui *ui,
 						      COMMAND_CONNECT);
 		fplinux_ui_screen_remove_item_command(screen, i, COMMAND_EJECT);
 	}
-	if (!app->picker && volume && volume->state == FPLINUX_VOLUME_MOUNTED)
+	if (app->picker || !volume)
+		return;
+	/* The row's own OK command replaces Open on a card to connect. */
+	if (volume->state == FPLINUX_VOLUME_AVAILABLE)
+		add_item(app, screen, row, COMMAND_CONNECT,
+			 FPLINUX_UI_COMMAND_OK, _("Connect"), 0);
+	else if (volume->state == FPLINUX_VOLUME_MOUNTED)
 		add_item(app, screen, row, COMMAND_EJECT,
 			 FPLINUX_UI_COMMAND_ITEM, _("Safely eject"), 0);
+}
+
+static void set_place(struct files_app *app, struct fplinux_ui_screen *screen,
+		      size_t row, const char *text, const char *detail,
+		      const char *icon)
+{
+	if (row < fplinux_ui_list_size(screen)) {
+		fplinux_ui_list_set(screen, row, text, detail);
+		return;
+	}
+	fplinux_ui_list_append(screen, text, detail);
+	fplinux_ui_list_set_icon(screen, row,
+				 fplinux_ui_glyph(app->ui, icon,
+						  FPLINUX_UI_GLYPH_ROW),
+				 FPLINUX_UI_LIST_ICON_IMAGE);
+}
+
+static void fill_places(struct files_app *app, struct fplinux_ui_screen *screen)
+{
+	size_t row = 1;
+
+	set_place(app, screen, 0, _("My files"), home_detail(&app->volumes),
+		  "folder");
+	for (size_t i = 0; i < app->volumes.count; i++) {
+		const struct fplinux_volume *volume = &app->volumes.volumes[i];
+
+		if (!shows_volume(app, volume))
+			continue;
+		set_place(app, screen, row++, _("Memory card"),
+			  volume_detail(volume), "card");
+	}
+	while (fplinux_ui_list_size(screen) > row)
+		fplinux_ui_list_delete(screen, row);
+	app->places_volumes = app->volumes;
 }
 
 static struct fplinux_ui_screen *new_places(struct files_app *app)
@@ -1272,36 +1623,7 @@ static struct fplinux_ui_screen *new_places(struct files_app *app)
 
 	if (!screen)
 		return NULL;
-	fplinux_ui_list_append(screen, _("My files"),
-			       app->volumes.home_persistent ?
-				       _("Home directory") :
-				       _("Temporary: lost after reboot"));
-	fplinux_ui_list_set_icon(screen, 0,
-				 fplinux_ui_glyph(app->ui, "folder",
-						  FPLINUX_UI_GLYPH_ROW),
-				 FPLINUX_UI_LIST_ICON_IMAGE);
-	for (size_t i = 0; i < app->volumes.count; i++) {
-		const struct fplinux_volume *volume = &app->volumes.volumes[i];
-		const char *detail;
-		size_t row;
-
-		if (app->picker && (volume->state != FPLINUX_VOLUME_MOUNTED ||
-				    volume->read_only))
-			continue;
-		detail = volume->state == FPLINUX_VOLUME_AVAILABLE ?
-				 _("Select to connect") :
-			 volume->state == FPLINUX_VOLUME_UNSUPPORTED ?
-				 _("Unsupported format") :
-			 volume->state == FPLINUX_VOLUME_PROTECTED ?
-				 _("Used by the system") :
-			 volume->read_only ? _("Read-only") :
-					     _("Connected");
-		row = fplinux_ui_list_append(screen, _("Memory card"), detail);
-		fplinux_ui_list_set_icon(screen, row,
-					 fplinux_ui_glyph(app->ui, "card",
-							  FPLINUX_UI_GLYPH_ROW),
-					 FPLINUX_UI_LIST_ICON_IMAGE);
-	}
+	fill_places(app, screen);
 	if (!app->picker) {
 		add_command(app, screen, COMMAND_SYSTEM,
 			    FPLINUX_UI_COMMAND_SCREEN, _("System files"), 11);
@@ -1321,6 +1643,14 @@ static struct fplinux_ui_screen *new_places(struct files_app *app)
 static void show_places(struct files_app *app)
 {
 	struct fplinux_ui_screen *screen;
+	const struct fplinux_volume *volume =
+		app->folder ?
+			NULL :
+			volume_at(app,
+				  fplinux_ui_list_get_focused(app->places));
+	uint32_t focus = app->folder ? app->folder->volume_id :
+			 volume	     ? volume->id :
+				       0;
 
 	if (app->places)
 		pop_to(app, app->places);
@@ -1336,10 +1666,92 @@ static void show_places(struct files_app *app)
 	if (!screen)
 		return;
 	app->places = screen;
+	fplinux_ui_list_set_focused(screen, place_row(app, focus));
+	places_focused(app->ui, screen, fplinux_ui_list_get_focused(screen),
+		       app);
 	if (fplinux_ui_current(app->ui))
 		fplinux_ui_replace(app->ui, screen);
 	else
 		fplinux_ui_push(app->ui, screen);
+}
+
+static bool places_unchanged(struct files_app *app)
+{
+	if (strcmp(home_detail(&app->places_volumes),
+		   home_detail(&app->volumes)))
+		return false;
+	for (size_t row = 1;; row++) {
+		const struct fplinux_volume *old = volume_at(app, row);
+		const struct fplinux_volume *next =
+			place_volume(app, &app->volumes, row);
+
+		if (!old || !next)
+			return old == next;
+		if (old->id != next->id ||
+		    strcmp(volume_detail(old), volume_detail(next)))
+			return false;
+	}
+}
+
+/* Keep the screen and menu; focus follows the volume ID or the old row. */
+static void refresh_places(struct files_app *app)
+{
+	struct fplinux_ui_screen *screen = app->picker ? app->picker_places :
+							 app->places;
+	size_t row = fplinux_ui_list_get_focused(screen);
+	const struct fplinux_volume *volume = volume_at(app, row);
+	uint32_t focus = volume ? volume->id : 0;
+	size_t first = fplinux_ui_list_get_first_visible(screen);
+	size_t selected;
+
+	if (!screen)
+		return;
+	if (places_unchanged(app)) {
+		app->places_volumes = app->volumes;
+		return;
+	}
+	/* Item-command changes would dismiss a menu still using those rows. */
+	if (fplinux_ui_menu_is_open(app->ui)) {
+		if (!app->places_update)
+			app->places_update =
+				lv_timer_create(refresh_places_later, 25, app);
+		return;
+	}
+	fill_places(app, screen);
+	selected = place_row(app, focus);
+	if (!selected)
+		selected = row < fplinux_ui_list_size(screen) ?
+				   row :
+				   fplinux_ui_list_size(screen) - 1;
+	fplinux_ui_list_set_focused(screen, selected);
+	fplinux_ui_list_set_first_visible(screen, first);
+	places_focused(app->ui, screen, fplinux_ui_list_get_focused(screen),
+		       app);
+}
+
+static bool places_current(const struct files_app *app)
+{
+	return !app->folder &&
+	       fplinux_ui_current(app->ui) ==
+		       (app->picker ? app->picker_places : app->places);
+}
+
+static void refresh_places_later(lv_timer_t *timer)
+{
+	struct files_app *app = lv_timer_get_user_data(timer);
+
+	if (fplinux_ui_menu_is_open(app->ui))
+		return;
+	app->places_update = NULL;
+	lv_timer_delete(timer);
+	refresh_places(app);
+}
+
+static void show_volume_result(struct files_app *app)
+{
+	if (places_current(app))
+		refresh_places(app);
+	show_wait_error(app);
 }
 
 static void storage_result(struct fplinux_ui *ui,
@@ -1347,47 +1759,35 @@ static void storage_result(struct fplinux_ui *ui,
 			   void *context)
 {
 	struct files_app *app = context;
-	struct fplinux_ui_screen *screen;
 
+	(void)ui;
 	if (result->request_id != app->storage_request)
 		return;
 	app->storage_request = 0;
 	app->volumes = result->snapshot;
+	if (app->read_storage_waiting) {
+		app->read_storage_waiting = false;
+		end_wait(app, show_read_error);
+		return;
+	}
+	if (app->storage_waiting) {
+		app->storage_waiting = false;
+		app->error = result->error == EOPNOTSUPP ? 0 : result->error;
+		end_wait(app, show_volume_result);
+		return;
+	}
+	/* A wait keeps its screens until its own outcome. */
+	if (app->waiting)
+		return;
 	if (app->folder && app->folder->volume_id && !app->job.active) {
-		bool present = false;
-
-		for (size_t i = 0; i < app->volumes.count; i++) {
-			if (app->volumes.volumes[i].id ==
-				    app->folder->volume_id &&
-			    app->volumes.volumes[i].state ==
-				    FPLINUX_VOLUME_MOUNTED)
-				present = true;
-		}
-		if (!present) {
+		if (!mounted_volume(app, app->folder->volume_id)) {
 			show_places(app);
 			show_error(app, ENODEV);
 			return;
 		}
 	}
-	if (!app->folder &&
-	    fplinux_ui_current(ui) ==
-		    (app->picker ? app->picker_places : app->places)) {
-		size_t row =
-			fplinux_ui_list_get_focused(fplinux_ui_current(ui));
-
-		screen = new_places(app);
-		if (screen) {
-			if (app->picker)
-				app->picker_places = screen;
-			else
-				app->places = screen;
-			fplinux_ui_list_set_focused(screen, row);
-			places_focused(ui, screen,
-				       fplinux_ui_list_get_focused(screen),
-				       app);
-			fplinux_ui_replace(ui, screen);
-		}
-	}
+	if (places_current(app))
+		refresh_places(app);
 	if (result->error && result->error != EOPNOTSUPP)
 		show_error(app, result->error);
 }
@@ -1403,11 +1803,7 @@ static void folder_command(struct fplinux_ui *ui,
 	const struct fplinux_files_entry *entry;
 	char path[FPLINUX_FILES_PATH_MAX];
 
-	if (id == COMMAND_CANCEL_JOB) {
-		fplinux_files_job_cancel(&app->job);
-		return;
-	}
-	if (app->job.active)
+	if (app->job.active || app->waiting)
 		return;
 	if (id == COMMAND_BACK) {
 		if (screen == folder->results_screen) {
@@ -1424,7 +1820,7 @@ static void folder_command(struct fplinux_ui *ui,
 		return;
 	}
 	if (id == COMMAND_REFRESH) {
-		refresh_folder(app, NULL);
+		refresh_folder(app);
 		request_storage(app, FPLINUX_VOLUME_REFRESH, 0);
 		return;
 	}
@@ -1467,8 +1863,9 @@ static void folder_command(struct fplinux_ui *ui,
 	switch (id) {
 	case FPLINUX_UI_SELECT_COMMAND:
 		if (entry->kind == FPLINUX_FILES_KIND_DIRECTORY)
-			start_folder(app, path, folder->root, folder->volume_id,
-				     folder->read_only, folder->system, NULL);
+			open_folder(app, path, folder->root, folder->volume_id,
+				    folder->read_only, folder->system, NULL,
+				    FOLDER_CHILD);
 		else if (entry->kind == FPLINUX_FILES_KIND_FILE) {
 			if (!app->document_request) {
 				app->document_request =
@@ -1521,12 +1918,15 @@ static void close_command(struct fplinux_ui *ui,
 
 	(void)screen;
 	app->decision = NULL;
-	if (id == COMMAND_CLOSE_STOP) {
+	if (id == COMMAND_CLOSE_STOP && app->job.active) {
 		app->stop_and_close = true;
-		fplinux_files_job_cancel(&app->job);
+		stop_work(app);
 	} else {
+		/* Work that ended while the question was open needs no stop. */
 		app->closing = false;
-		fplinux_ui_close_reply(ui, FPLINUX_UI_CLOSE_CANCEL);
+		fplinux_ui_close_reply(ui, id == COMMAND_CLOSE_STOP ?
+						   FPLINUX_UI_CLOSE_READY :
+						   FPLINUX_UI_CLOSE_CANCEL);
 	}
 }
 
@@ -1536,7 +1936,8 @@ static enum fplinux_ui_close_response prepare_close(struct fplinux_ui *ui,
 	struct files_app *app = context;
 	struct fplinux_ui_screen *screen;
 
-	if (!app->job.active)
+	/* Reading a folder changes nothing: it stops as Files closes. */
+	if (!app->job.active || app->reading)
 		return FPLINUX_UI_CLOSE_READY;
 	if (app->closing)
 		return FPLINUX_UI_CLOSE_WAIT;
@@ -1575,8 +1976,8 @@ static void app_event(struct fplinux_ui *ui,
 		fplinux_ui_quit(ui);
 	} else if (event->type == FPLINUX_UI_EVENT_ACTIVATION) {
 		if (event->activation == FPLINUX_UI_ACTIVATION_OPEN &&
-		    !app->job.active && !app->name_box && !app->decision &&
-		    !app->picker && !app->document_request &&
+		    !app->job.active && !app->waiting && !app->name_box &&
+		    !app->decision && !app->picker && !app->document_request &&
 		    !has_pending_search(app->folder))
 			show_places(app);
 		request_storage(app, FPLINUX_VOLUME_REFRESH, 0);
@@ -1595,7 +1996,7 @@ static void app_event(struct fplinux_ui *ui,
 				event->document_result.error == ENOENT ||
 						event->document_result.error ==
 							ENODEV ?
-					_("The file or storage is no longer available. Refresh Places.") :
+					_("The file or storage is no longer available.") :
 					_("The application could not open this file."),
 				0);
 
@@ -1643,8 +2044,11 @@ int main(int argc, char **argv)
 	result = fplinux_ui_run(app.ui);
 	fplinux_ui_watch_fd(app.ui, -1, 0, NULL, NULL);
 	fplinux_files_job_close(&app.job);
+	if (app.places_update)
+		lv_timer_delete(app.places_update);
 	fplinux_ui_close(app.ui);
 	free_folders(app.folder);
 	free_folders(app.origin);
+	free_folder(app.pending);
 	return result < 0;
 }

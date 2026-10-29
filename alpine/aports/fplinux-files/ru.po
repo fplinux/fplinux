@@ -18,8 +18,8 @@ msgstr "Справка"
 msgid "Access denied. Choose another folder."
 msgstr "Нет доступа. Выберите другую папку."
 
-msgid "The file or storage is no longer available. Refresh Places."
-msgstr "Файл или накопитель недоступен. Обновите список мест."
+msgid "The file or storage is no longer available."
+msgstr "Файл или накопитель недоступен."
 
 msgid "This storage is read-only."
 msgstr "Накопитель доступен только для чтения."
@@ -252,6 +252,15 @@ msgstr "Безопасно извлечь"
 msgid "Eject"
 msgstr "Извлечь"
 
+msgid "Connect"
+msgstr "Подключить"
+
+msgid "Connecting…"
+msgstr "Подключение…"
+
+msgid "Ejecting…"
+msgstr "Извлечение…"
+
 msgid "Move to"
 msgstr "Переместить в"
 
@@ -264,14 +273,14 @@ msgstr "Домашняя папка"
 msgid "Temporary: lost after reboot"
 msgstr "Временно: до перезагрузки"
 
+msgid "On the memory card"
+msgstr "На карте памяти"
+
 msgid "Select to connect"
 msgstr "Выберите для подключения"
 
 msgid "Unsupported format"
 msgstr "Неподдерживаемый формат"
-
-msgid "Used by the system"
-msgstr "Используется системой"
 
 msgid "Read-only"
 msgstr "Только чтение"
