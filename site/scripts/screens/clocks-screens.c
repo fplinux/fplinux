@@ -1740,6 +1740,21 @@ static void expect_quiet(struct capture *capture, const char *scenario)
 	       scenario);
 }
 
+/*
+ * Showing a view asks the owner for one snapshot from the application's next
+ * timer pass, which can follow the frames that show the view; until the reply
+ * the timer keeps that request's deadline.
+ */
+static void wait_view_snapshot(struct capture *capture, unsigned int before)
+{
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	while (capture->snapshots == before &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(capture->snapshots == before + 1);
+}
+
 static void expect_static_poll_deadline(struct capture *capture)
 {
 	unsigned int callbacks, snapshots;
@@ -1762,10 +1777,14 @@ static void idle_deadlines_follow_visible_clock_state(struct capture *capture)
 
 	wait_label(capture, "No alarms");
 	wait_label(capture, "0 offsets");
+	/* Launch asks once; showing the home view asks once more. */
+	wait_view_snapshot(capture, 1);
 	expect_static_poll_deadline(capture);
+	snapshots = capture->snapshots;
 	repeat_key(capture, KEY_DOWN, 2);
 	press(capture, 1, KEY_OK);
 	wait_label(capture, "00:00.00");
+	wait_view_snapshot(capture, snapshots);
 	expect_static_poll_deadline(capture);
 	press(capture, 1, KEY_OK);
 	expect_request(capture, CLOCK_REQUEST_STOPWATCH_START);
@@ -1792,11 +1811,15 @@ static void idle_deadlines_follow_visible_clock_state(struct capture *capture)
 	apply_request(capture);
 	wait_label_absent(capture, "Laps →");
 	expect_static_poll_deadline(capture);
+	snapshots = capture->snapshots;
 	press(capture, 1, KEY_F14);
 	wait_label(capture, "World clock");
+	wait_view_snapshot(capture, snapshots);
+	snapshots = capture->snapshots;
 	press(capture, 1, KEY_DOWN);
 	press(capture, 1, KEY_OK);
 	wait_label(capture, "No UTC offsets");
+	wait_view_snapshot(capture, snapshots);
 	expect_static_poll_deadline(capture);
 	capture->drop_snapshot = true;
 	refresh_snapshot(capture);
