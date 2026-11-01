@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import errno
 import io
+import ssl
 import urllib.error
 from email.message import Message
-from http.client import IncompleteRead
-from typing import TYPE_CHECKING
+from http.client import IncompleteRead, RemoteDisconnected
+from typing import TYPE_CHECKING, cast
 from unittest import mock
 
 import pytest
@@ -59,7 +61,10 @@ def test_interrupted_download_restarts_before_verifying_and_publishing(
         ),
         io.BytesIO(b"abc"),
     ]
-    with mock.patch("urllib.request.urlopen", side_effect=responses) as request:
+    with (
+        mock.patch("urllib.request.urlopen", side_effect=responses) as request,
+        mock.patch("fplinux_cli.environment.downloads.time.sleep"),
+    ):
         assert download_locked_file(_URL, _ABC_SHA256, destination) == destination
 
     assert request.call_count == interruptions + 1
@@ -84,6 +89,7 @@ def test_repeatedly_interrupted_download_stops_and_preserves_previous_bytes(
     ]
     with (
         mock.patch("urllib.request.urlopen", side_effect=responses) as request,
+        mock.patch("fplinux_cli.environment.downloads.time.sleep"),
         pytest.raises(SystemExit, match="HTTP response interrupted after 3 attempts"),
     ):
         download_locked_file(_URL, _ABC_SHA256, destination)
@@ -109,6 +115,7 @@ def test_interrupted_metadata_transfer_reports_an_os_error_without_publishing(
     ]
     with (
         mock.patch("urllib.request.urlopen", side_effect=responses) as request,
+        mock.patch("fplinux_cli.environment.downloads.time.sleep"),
         pytest.raises(OSError, match="HTTP response interrupted after 3 attempts"),
     ):
         transfer_verified_file(
@@ -118,6 +125,97 @@ def test_interrupted_metadata_transfer_reports_an_os_error_without_publishing(
     assert request.call_count == 3
     assert all(response.closed for response in responses)
     assert destination.read_bytes() == b"previous metadata"
+    assert list(tmp_path.iterdir()) == [destination]
+
+
+@pytest.fixture(
+    params=[
+        RemoteDisconnected("Remote end closed connection without response"),
+        urllib.error.URLError(ssl.SSLEOFError("TLS EOF")),
+        urllib.error.URLError(OSError(errno.ENETUNREACH, "Network is unreachable")),
+    ],
+    ids=["remote-disconnected", "tls-eof", "network-unreachable"],
+)
+def connection_error(request: pytest.FixtureRequest) -> Exception:
+    return cast("Exception", request.param)
+
+
+@pytest.mark.parametrize("interruptions", [1, 2])
+def test_connection_interruptions_retry_then_publish(
+    tmp_path: Path, connection_error: Exception, interruptions: int
+) -> None:
+    destination = tmp_path / "locked.bin"
+    destination.write_bytes(b"previous declaration")
+    destination.chmod(0o640)
+    response = io.BytesIO(b"abc")
+    with (
+        mock.patch(
+            "urllib.request.urlopen", side_effect=[*([connection_error] * interruptions), response]
+        ) as request,
+        mock.patch("fplinux_cli.environment.downloads.time.sleep") as delay,
+    ):
+        assert download_locked_file(_URL, _ABC_SHA256, destination) == destination
+
+    assert request.call_count == interruptions + 1
+    if interruptions == 1:
+        assert delay.call_args_list == [mock.call(1)]
+    else:
+        assert delay.call_args_list == [mock.call(1), mock.call(2)]
+    assert response.closed
+    assert destination.read_bytes() == b"abc"
+    assert destination.stat().st_mode & 0o777 == 0o600
+    assert list(tmp_path.iterdir()) == [destination]
+
+
+def test_repeated_connection_interruptions_preserve_previous_file(
+    tmp_path: Path, connection_error: Exception
+) -> None:
+    destination = tmp_path / "locked.bin"
+    destination.write_bytes(b"previous declaration")
+    destination.chmod(0o640)
+    with (
+        mock.patch("urllib.request.urlopen", side_effect=connection_error) as request,
+        mock.patch("fplinux_cli.environment.downloads.time.sleep") as delay,
+        pytest.raises(SystemExit, match="HTTP response interrupted after 3 attempts"),
+    ):
+        download_locked_file(_URL, _ABC_SHA256, destination)
+
+    assert request.call_count == 3
+    assert delay.call_args_list == [mock.call(1), mock.call(2)]
+    assert destination.read_bytes() == b"previous declaration"
+    assert destination.stat().st_mode & 0o777 == 0o640
+    assert list(tmp_path.iterdir()) == [destination]
+
+
+def test_certificate_verification_failure_is_not_retried(tmp_path: Path) -> None:
+    destination = tmp_path / "locked.bin"
+    error = urllib.error.URLError(ssl.SSLCertVerificationError("certificate verify failed"))
+    with (
+        mock.patch("urllib.request.urlopen", side_effect=error) as request,
+        mock.patch("fplinux_cli.environment.downloads.time.sleep") as delay,
+        pytest.raises(SystemExit, match="certificate verify failed"),
+    ):
+        download_locked_file(_URL, _ABC_SHA256, destination)
+    request.assert_called_once()
+    delay.assert_not_called()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_local_write_failure_is_not_retried(tmp_path: Path) -> None:
+    destination = tmp_path / "locked.bin"
+    destination.write_bytes(b"previous declaration")
+    destination.chmod(0o640)
+    with (
+        mock.patch("urllib.request.urlopen", return_value=io.BytesIO(b"abc")) as request,
+        mock.patch("shutil.copyfileobj", side_effect=PermissionError("write failed")),
+        mock.patch("fplinux_cli.environment.downloads.time.sleep") as delay,
+        pytest.raises(SystemExit, match="write failed"),
+    ):
+        download_locked_file(_URL, _ABC_SHA256, destination)
+    request.assert_called_once()
+    delay.assert_not_called()
+    assert destination.read_bytes() == b"previous declaration"
+    assert destination.stat().st_mode & 0o777 == 0o640
     assert list(tmp_path.iterdir()) == [destination]
 
 

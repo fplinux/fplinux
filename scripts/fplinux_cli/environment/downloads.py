@@ -3,11 +3,15 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import shutil
+import ssl
 import tempfile
+import time
+import urllib.error
 import urllib.request
-from http.client import IncompleteRead
+from http.client import IncompleteRead, RemoteDisconnected
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -102,12 +106,15 @@ def transfer_verified_file(
                     ) as response:
                         shutil.copyfileobj(response, output)
                     break
-                except (IncompleteRead, TimeoutError) as error:
+                except (IncompleteRead, OSError) as error:
+                    if not _retryable_transfer_error(error):
+                        raise
                     if attempt == 3:
                         message = "HTTP response interrupted after 3 attempts"
                         raise OSError(message) from error
                     output.seek(0)
                     output.truncate()
+                    time.sleep(attempt)
         verify(temporary)
         temporary.replace(destination)
         temporary = None
@@ -119,6 +126,17 @@ def transfer_verified_file(
         if temporary is not None:
             temporary.unlink(missing_ok=True)
     return destination
+
+
+def _retryable_transfer_error(error: Exception) -> bool:
+    if isinstance(error, urllib.error.HTTPError):
+        return False
+    if isinstance(error, urllib.error.URLError):
+        reason = error.reason
+        return isinstance(reason, ssl.SSLEOFError) or (
+            isinstance(reason, OSError) and reason.errno == errno.ENETUNREACH
+        )
+    return isinstance(error, (IncompleteRead, TimeoutError, RemoteDisconnected))
 
 
 def _locked_file_digest(path: Path, *, algorithm: str) -> str:
