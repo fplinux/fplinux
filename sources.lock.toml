@@ -703,7 +703,7 @@ checksum = "d37e23e804753a7fa51aeb901b45c7255e9618b987ffc680af49760d2a5b5d38998d
 [aport_mesa_26_2_5_tar_xz]
 version = "26.2.5"
 name = "mesa-26.2.5.tar.xz"
-url = "https://archive.mesa3d.org/mesa-26.2.5.tar.xz"
+url = "https://distfiles.alpinelinux.org/distfiles/edge/mesa-26.2.5.tar.xz"
 algorithm = "sha512"
 checksum = "08c7d7ea426ddfb0f7bc51b06e18c363a4d31cf1a8b203828bb455eda0189e41d2215eb9f627585ed11e0d0f231a6a8c9f0c7176238760cd76b62e20c35ccd6a"
 
