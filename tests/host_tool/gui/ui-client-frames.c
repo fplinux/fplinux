@@ -1957,10 +1957,14 @@ static int run_media_application(int control, const char *scenario)
 	return result;
 }
 
-/* The compositor asks for one rectangle of the frame in one colour. */
+/*
+ * The compositor asks for one rectangle of the frame in one colour, after
+ * the application asks for full screen when fullscreen is set.
+ */
 struct damage_paint {
 	struct fplinux_ui_frame_rect area;
 	uint16_t colour;
+	bool fullscreen;
 };
 
 struct damage_application {
@@ -1988,9 +1992,10 @@ static void damage_application_input(struct fplinux_ui *ui, int fd,
 	uint16_t *pixels;
 	int width;
 
-	(void)ui;
 	assert(events == POLLIN);
 	assert(read(fd, &paint, sizeof(paint)) == (ssize_t)sizeof(paint));
+	if (paint.fullscreen)
+		assert(fplinux_ui_set_fullscreen(ui, true));
 	area = (lv_area_t){
 		.x1 = paint.area.x,
 		.y1 = paint.area.y,
@@ -3615,6 +3620,53 @@ static void check_damage_resize(struct fplinux_ui_frame_peer *compositor,
 	free(expected);
 }
 
+/*
+ * A frame drawn after a MODE request belongs to the requested size: it waits
+ * for that configure. A manager that never sends one gets it after the 1 s
+ * hold, at the size the surface still has. The first frame was not held.
+ */
+static void check_mode_hold(struct fplinux_ui_frame_peer *compositor,
+			    int session, int control)
+{
+	uint16_t *expected = new_expected_frame();
+	struct damage_paint paint = {
+		.area = { 10, 20, 40, 16 },
+		.colour = 0x07e0,
+		.fullscreen = true,
+	};
+	struct fplinux_ui_session_message message;
+	uint64_t requested;
+	uint64_t committed;
+
+	assert_damaged_frame(compositor,
+			     (struct fplinux_ui_frame_rect){ 0, 0, 240, 320 },
+			     expected);
+	requested = fplinux_ui_frame_now_ms();
+	assert(write(control, &paint, sizeof(paint)) == (ssize_t)sizeof(paint));
+	wait_input(compositor, control, 'p');
+	do
+		message = fplinux_ui_frame_wait_message(compositor, session);
+	while (message.type != FPLINUX_UI_SESSION_MODE);
+	assert(message.mode == FPLINUX_UI_SESSION_FULLSCREEN);
+	while (fplinux_ui_frame_now_ms() < requested + 800) {
+		fplinux_ui_frame_pump(compositor);
+		assert(compositor->commits == 1);
+	}
+	wait_commits(compositor, 2);
+	committed = fplinux_ui_frame_now_ms();
+	fprintf(stderr, "held frame committed after %llu ms\n",
+		(unsigned long long)(committed - requested));
+	assert(committed - requested >= 950 && committed - requested < 2000);
+	for (int y = 20; y < 36; ++y)
+		for (int x = 10; x < 50; ++x)
+			expected[(size_t)y * 240 + x] = 0x07e0;
+	assert(compositor->width == 240 && compositor->height == 320);
+	assert_damaged_frame(compositor,
+			     (struct fplinux_ui_frame_rect){ 10, 20, 40, 16 },
+			     expected);
+	free(expected);
+}
+
 /* Only the external audio service is replaced; UI transport remains real. */
 struct media_audio_peer {
 	int fd;
@@ -4193,7 +4245,7 @@ int main(int argc, char **argv)
 	    strcmp(argv[1], "text-decimal-any"))
 		strcpy(config.locale, "ru");
 	if (!strcmp(argv[1], "storage-api") || !strcmp(argv[1], "legends") ||
-	    navigation)
+	    !strcmp(argv[1], "damage-mode-hold") || navigation)
 		config.mode = FPLINUX_UI_SESSION_INTEGRATED;
 	strcpy(config.input_locale, "en");
 	config.audio = config.vibration =
@@ -4258,6 +4310,8 @@ int main(int argc, char **argv)
 				      !strcmp(argv[1], "marquee-list"));
 		else if (!strcmp(argv[1], "damage-resize"))
 			check_damage_resize(&compositor, control[0]);
+		else if (!strcmp(argv[1], "damage-mode-hold"))
+			check_mode_hold(&compositor, session, control[0]);
 		else if (damage)
 			check_damage_frames(&compositor, session, control[0]);
 		else if (!strcmp(argv[1], "exit") ||

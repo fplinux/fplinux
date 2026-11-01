@@ -41,6 +41,8 @@
 /* LVGL draws in partial mode into a buffer of this many surface rows. */
 #define FPLINUX_UI_DRAW_ROWS 32
 #define FPLINUX_UI_CONFIG_TIMEOUT_MS 5000
+/* How long frames wait for the configure that a MODE request asked for. */
+#define FPLINUX_UI_MODE_HOLD_MS 1000
 /* The largest display side that CONFIG may report. */
 #define FPLINUX_UI_SCREEN_MAX 4096
 /* Catalogues: <directory>/<language>/LC_MESSAGES/<domain>.mo */
@@ -240,6 +242,11 @@ struct fplinux_ui {
 	 */
 	bool ack_pending;
 	uint32_t ack_serial;
+	/*
+	 * Until this time, or the configure of the requested mode, no frame is
+	 * committed: what a command drew after MODE belongs to the new size.
+	 */
+	uint64_t mode_hold_until_ms;
 	lv_display_t *display;
 	uint16_t *canvas;
 	/*
@@ -1147,6 +1154,10 @@ static bool submit_frame(struct fplinux_ui *ui)
 	if (ui->quit || ui->exit_pending || !ui->dirty || !ui->configured ||
 	    (!ui->visible && ui->frame_submitted))
 		return true;
+	if (ui->mode_hold_until_ms && ui->frame_submitted &&
+	    fplinux_ui_now_ms() < ui->mode_hold_until_ms)
+		return true;
+	ui->mode_hold_until_ms = 0;
 	for (unsigned int i = 0; i < FPLINUX_UI_BUFFER_COUNT; ++i)
 		if (!buffers[i].busy) {
 			frame = &buffers[i];
@@ -1270,6 +1281,8 @@ static void surface_configure(void *data, struct xdg_surface *surface,
 		ui->configured = true;
 		return;
 	}
+	if (fullscreen == (ui->requested_mode == FPLINUX_UI_SESSION_FULLSCREEN))
+		ui->mode_hold_until_ms = 0;
 	if (width != ui->width || height != ui->height) {
 		ui->ack_pending = true;
 		ui->ack_serial = serial;
@@ -2279,6 +2292,19 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		if (!ui->visible)
 			hold_animations(ui);
 		timeout_ms = lv_timer_handler();
+		/* A held frame is committed once the hold expires. */
+		if (ui->mode_hold_until_ms && ui->dirty) {
+			uint64_t now = fplinux_ui_now_ms();
+			uint32_t left =
+				now < ui->mode_hold_until_ms ?
+					(uint32_t)(ui->mode_hold_until_ms -
+						   now) :
+					0;
+
+			if (timeout_ms == LV_NO_TIMER_READY ||
+			    left < timeout_ms)
+				timeout_ms = left;
+		}
 		if (ui->quit)
 			break;
 		/* Pending legends name content that this pass has to draw. */
@@ -3368,6 +3394,11 @@ bool fplinux_ui_set_fullscreen(struct fplinux_ui *ui, bool fullscreen)
 	if (!fplinux_ui_send(ui, &message))
 		return false;
 	ui->requested_mode = message.mode;
+	/* A request taken back before its configure leaves the size as it is. */
+	ui->mode_hold_until_ms =
+		fullscreen == ui->fullscreen ?
+			0 :
+			fplinux_ui_now_ms() + FPLINUX_UI_MODE_HOLD_MS;
 	return true;
 }
 

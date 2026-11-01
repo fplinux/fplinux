@@ -365,6 +365,19 @@ def test_first_frame_and_new_size_damage_the_whole_surface(
     assert result.stdout.endswith("damage-resize: ok\n")
 
 
+def test_frame_after_mode_request_waits_for_its_configure_at_most_one_second(
+    client_frames: Path, tmp_path: Path
+) -> None:
+    """Without the requested configure, the held frame commits after about 1 s at the old size."""
+    result = run_process(
+        [str(client_frames), "damage-mode-hold", str(tmp_path / "session.sock")],
+        name="hold a frame drawn after MODE until the 1 s hold expires",
+        timeout=15,
+        check=True,
+    )
+    assert result.stdout.endswith("damage-mode-hold: ok\n")
+
+
 def test_launcher_screens_keep_system_status_bar_visible(
     client_frames: Path, tmp_path: Path
 ) -> None:
