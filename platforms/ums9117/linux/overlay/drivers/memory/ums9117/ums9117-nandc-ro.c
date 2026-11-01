@@ -101,6 +101,7 @@
 #define UMS9117_NANDC_SPI_BUSY BIT(1)
 #define UMS9117_NANDC_WAIT_TIMEOUT_MS 100U
 #define UMS9117_NANDC_PAGE_READY_TIMEOUT_MS 10U
+#define UMS9117_NANDC_BUSY_POLL_COUNT 2U
 #define UMS9117_NANDC_INSTRUCTION_WORDS 8U
 #define UMS9117_NANDC_PINMUX_COUNT 17U
 #define UMS9117_NANDC_PINCONF_COUNT 16U
@@ -507,11 +508,23 @@ static void ums9117_nandc_abort_command(struct ums9117_nandc *nandc)
 	readl(regs + UMS9117_NANDC_INT);
 }
 
+/* Short operations need not sleep for a whole millisecond clock tick. */
+static void ums9117_nandc_poll_delay(unsigned int *busy_polls)
+{
+	if (*busy_polls) {
+		--*busy_polls;
+		udelay(50);
+	} else {
+		usleep_range(50, 100);
+	}
+}
+
 static int ums9117_nandc_wait(struct ums9117_nandc *nandc)
 {
 	void __iomem *regs = nandc->regs[UMS9117_NANDC_RES_NANDC];
 	unsigned long deadline =
 		jiffies + msecs_to_jiffies(UMS9117_NANDC_WAIT_TIMEOUT_MS);
+	unsigned int busy_polls = UMS9117_NANDC_BUSY_POLL_COUNT;
 	u32 raw;
 	u32 spi_status;
 
@@ -534,7 +547,7 @@ static int ums9117_nandc_wait(struct ums9117_nandc *nandc)
 		}
 		if (time_after_eq(jiffies, deadline))
 			break;
-		usleep_range(50, 100);
+		ums9117_nandc_poll_delay(&busy_polls);
 	}
 	ums9117_nandc_abort_command(nandc);
 	return -ETIMEDOUT;
@@ -728,6 +741,7 @@ static int ums9117_nandc_wait_page_ready(struct ums9117_nandc *nandc)
 	void __iomem *regs = nandc->regs[UMS9117_NANDC_RES_NANDC];
 	ktime_t deadline =
 		ktime_add_ms(ktime_get(), UMS9117_NANDC_PAGE_READY_TIMEOUT_MS);
+	unsigned int busy_polls = UMS9117_NANDC_BUSY_POLL_COUNT;
 	u32 status;
 	bool final_poll = false;
 	int ret;
@@ -750,7 +764,7 @@ static int ums9117_nandc_wait_page_ready(struct ums9117_nandc *nandc)
 		if (ktime_compare(ktime_get(), deadline) >= 0)
 			final_poll = true;
 		else
-			usleep_range(50, 100);
+			ums9117_nandc_poll_delay(&busy_polls);
 	}
 }
 
