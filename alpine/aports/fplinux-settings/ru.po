@@ -83,6 +83,9 @@ msgstr "Выйти"
 msgid "Leave without saving?"
 msgstr "Выйти без сохранения?"
 
+msgid "Model"
+msgstr "Модель"
+
 msgid "Return to the start without saving?"
 msgstr "Вернуться в начало без сохранения?"
 

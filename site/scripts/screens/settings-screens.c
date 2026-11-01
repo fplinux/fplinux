@@ -634,8 +634,13 @@ static void root_values_fit_and_follow_current_settings(struct capture *capture)
 	assert(capture->observed.root_values[3].value_text_width >
 	       capture->observed.root_values[3].value_right -
 		       capture->observed.root_values[3].value_left + 1);
-	for (size_t index = 0; index < 3; ++index)
+	for (size_t index = 3; index-- > 0;) {
 		press(capture, KEY_UP);
+		pump_for(capture, 80);
+		save_frame(capture, index == 0 ? "settings-root-up-display" :
+				    index == 1 ? "settings-root-up-language" :
+						 "settings-root-up-input");
+	}
 	strcpy(reply.name, "theme");
 	strcpy(reply.value, capture->observed.theme ? "light" : "dark");
 	assert(fplinux_ui_session_send(capture->session, &reply));
@@ -658,14 +663,51 @@ static void root_values_fit_and_follow_current_settings(struct capture *capture)
 	puts("settings-root-values: real glyphs and current values fit; landscape shares a right column; long system name scrolls; replies refresh retained values");
 }
 
+static void about_reading_edges(struct capture *capture)
+{
+	int previous = -1;
+
+	for (int index = 0; index < 3; ++index)
+		press(capture, KEY_DOWN);
+	press(capture, KEY_OK);
+	pump_for(capture, 200);
+	for (int index = 0; index < 100; ++index) {
+		const struct settings_frame_observation *view =
+			&capture->observed;
+		int clipped;
+
+		press(capture, KEY_DOWN);
+		pump_for(capture, 80);
+		assert(view->about_memory_found && view->about_line_height > 0);
+		clipped = view->about_memory_bottom - view->about_view_bottom;
+		printf("about down %d: y=%d remaining=%d clipped=%d line=%d\n",
+		       index + 1, view->about_scroll_y,
+		       view->about_scroll_bottom, clipped,
+		       view->about_line_height);
+		if (index == 4)
+			save_frame(capture, "settings-about-five-down");
+		assert(clipped <= 0 || clipped >= view->about_line_height);
+		if (view->about_scroll_y == previous)
+			break;
+		previous = view->about_scroll_y;
+	}
+	assert(capture->observed.about_scroll_bottom == 0);
+	puts("settings-about: last text line is whole on every downward step");
+}
+
 int main(int argc, char **argv)
 {
 	struct capture capture = { 0 };
 
-	assert(argc == 6 || (argc == 7 && !strcmp(argv[6], "root-values")));
+	assert(setvbuf(stdout, NULL, _IONBF, 0) == 0);
+	assert(argc == 6 || (argc == 7 && (!strcmp(argv[6], "root-values") ||
+					   !strcmp(argv[6], "about-edges"))));
 	start(&capture, argv);
 	if (argc == 7) {
-		root_values_fit_and_follow_current_settings(&capture);
+		if (!strcmp(argv[6], "about-edges"))
+			about_reading_edges(&capture);
+		else
+			root_values_fit_and_follow_current_settings(&capture);
 		close_and_reap(&capture);
 		return 0;
 	}

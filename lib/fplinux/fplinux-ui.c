@@ -2033,6 +2033,8 @@ static void set_theme(struct fplinux_ui *ui)
 	theme->danger = token(palette, FPLINUX_UI_COLOUR_DANGER);
 	theme->tile_ring = token(palette, FPLINUX_UI_COLOUR_TILE_RING);
 	theme->brand = token(palette, FPLINUX_UI_COLOUR_BRAND);
+	theme->brand_foreground =
+		token(palette, FPLINUX_UI_COLOUR_BRAND_FOREGROUND);
 	theme->scrim = token(palette, FPLINUX_UI_COLOUR_SCRIM);
 	theme->scrim_opacity = palette->scrim_opacity;
 }
@@ -2832,7 +2834,8 @@ lv_obj_t *fplinux_ui_header(struct fplinux_ui *ui, const char *title)
 	lv_obj_set_style_text_color(label, ui->theme.foreground, 0);
 	lv_obj_set_width(label, ui->width - 2 * spec->margin);
 	lv_label_set_text(label, title);
-	lv_obj_align(label, LV_ALIGN_LEFT_MID, spec->margin, 0);
+	lv_obj_set_pos(label, spec->margin,
+		       fplinux_ui_band_line_y(spec, ui->theme.font_large));
 	fplinux_ui_title_scroll(label);
 	return band;
 }
@@ -3558,18 +3561,35 @@ static int32_t font_text_width(const char *text, const lv_font_t *font)
 	return size.x;
 }
 
-static int measure_legend(const char *text, void *context)
-{
-	const lv_font_t *font = *(const lv_font_t **)context;
-
-	return font_text_width(text, font);
-}
-
 static void legend_bar_deleted(lv_event_t *event)
 {
 	struct fplinux_ui *ui = lv_event_get_user_data(event);
 
 	ui->legend_bar = NULL;
+}
+
+/*
+ * A bar's whole legends: a label that ends in dots holds them in its text,
+ * over the letters they hide, so it cannot tell its legend.
+ */
+struct legend_texts {
+	char text[3][FPLINUX_UI_SESSION_TEXT_BYTES];
+};
+
+static void legend_texts_deleted(lv_event_t *event)
+{
+	free(lv_event_get_user_data(event));
+}
+
+static struct legend_texts *legend_texts(lv_obj_t *bar)
+{
+	for (uint32_t i = 0; i < lv_obj_get_event_count(bar); ++i) {
+		lv_event_dsc_t *event = lv_obj_get_event_dsc(bar, i);
+
+		if (lv_event_dsc_get_cb(event) == legend_texts_deleted)
+			return lv_event_dsc_get_user_data(event);
+	}
+	return NULL;
 }
 
 /* Bar fill, a divider on top and legends in bar_text. */
@@ -3581,14 +3601,26 @@ lv_obj_t *fplinux_ui_softkey_bar_create(struct fplinux_ui *ui, lv_obj_t *parent)
 		LV_TEXT_ALIGN_RIGHT,
 	};
 	const lv_font_t *font = ui->theme.font_softkey;
+	struct legend_texts *texts;
 	lv_obj_t *bar;
 
 	if (!parent) {
 		errno = EINVAL;
 		return NULL;
 	}
+	texts = calloc(1, sizeof(*texts));
+	if (!texts)
+		return NULL;
 	bar = lv_obj_create(parent);
 	if (!bar) {
+		free(texts);
+		errno = ENOMEM;
+		return NULL;
+	}
+	if (!lv_obj_add_event_cb(bar, legend_texts_deleted, LV_EVENT_DELETE,
+				 texts)) {
+		lv_obj_delete(bar);
+		free(texts);
 		errno = ENOMEM;
 		return NULL;
 	}
@@ -3615,8 +3647,8 @@ lv_obj_t *fplinux_ui_softkey_bar_create(struct fplinux_ui *ui, lv_obj_t *parent)
 		lv_obj_set_style_text_color(label, ui->theme.bar_text, 0);
 		lv_obj_set_style_text_align(label, aligns[i], 0);
 		lv_obj_set_height(label, lv_font_get_line_height(font));
-		/* Legends never move; softkey_bar_set() shortens them. */
-		lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_CLIP);
+		/* Legends never move; one too long for its slot ends in dots. */
+		lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
 		lv_label_set_text(label, "");
 	}
 	return bar;
@@ -3632,10 +3664,15 @@ bool fplinux_ui_softkey_bar_set(struct fplinux_ui *ui, lv_obj_t *bar,
 		right ? right : "",
 	};
 	const lv_font_t *font = ui->theme.font_softkey;
+	struct legend_texts *texts = legend_texts(bar);
 	struct fplinux_softkey_box boxes[3];
 	int widths[3];
 	int height = ui->metrics.softkey_height;
 
+	if (!texts) {
+		errno = EINVAL;
+		return false;
+	}
 	for (int i = 0; i < 3; ++i) {
 		if (strlen(legends[i]) >= FPLINUX_UI_SESSION_TEXT_BYTES) {
 			errno = ENAMETOOLONG;
@@ -3651,19 +3688,17 @@ bool fplinux_ui_softkey_bar_set(struct fplinux_ui *ui, lv_obj_t *bar,
 	fplinux_softkey_layout(lv_obj_get_width(bar), ui->spec->legend_margin,
 			       ui->spec->legend_gap, widths, boxes);
 	for (int i = 0; i < 3; ++i) {
-		char text[FPLINUX_UI_SESSION_TEXT_BYTES + 4];
 		lv_obj_t *label = lv_obj_get_child(bar, i);
-		const char *shown;
+		const char *shown = boxes[i].width ? legends[i] : "";
 
-		fplinux_softkey_fit_text(legends[i], boxes[i].width,
-					 measure_legend, &font, text,
-					 sizeof(text));
 		lv_obj_set_pos(label, boxes[i].x,
 			       (height - lv_font_get_line_height(font)) / 2);
 		lv_obj_set_width(label, boxes[i].width);
-		shown = boxes[i].width ? text : "";
-		if (strcmp(lv_label_get_text(label), shown))
+		if (strcmp(texts->text[i], shown)) {
+			snprintf(texts->text[i], sizeof(texts->text[i]), "%s",
+				 shown);
 			lv_label_set_text(label, shown);
+		}
 	}
 	return true;
 }

@@ -308,10 +308,10 @@ def test_actual_deferred_wrap_previews_the_next_cell_and_cancel_restores_the_vie
     ("suffix", "size"),
     [
         ("-128x128", (128, 96)),
-        ("-128x160", (128, 128)),
-        ("-176x220", (176, 178)),
+        ("-128x160", (128, 126)),
+        ("-176x220", (176, 177)),
         ("", (240, 268)),
-        ("-320x240", (320, 196)),
+        ("-320x240", (320, 199)),
     ],
 )
 @pytest.mark.parametrize("locale", ["en", "ru"])
@@ -359,7 +359,7 @@ def test_actual_failed_shell_keeps_last_output_and_scrollback_after_releasing_pt
         assert png_pixels(output / f"{name}.png")[:2] == size
 
 
-@pytest.mark.parametrize("size", [(128, 96), (128, 128), (176, 178), (240, 268), (320, 196)])
+@pytest.mark.parametrize("size", [(128, 96), (128, 126), (176, 177), (240, 268), (320, 199)])
 def test_actual_special_key_menu_sends_navigation_after_pending_text(
     terminal_screens: tuple[Path, str], size: tuple[int, int]
 ) -> None:
@@ -370,7 +370,7 @@ def test_actual_special_key_menu_sends_navigation_after_pending_text(
     ) in transcript
 
 
-@pytest.mark.parametrize("size", [(128, 128), (240, 268), (320, 196)])
+@pytest.mark.parametrize("size", [(128, 126), (240, 268), (320, 199)])
 def test_actual_terminal_font_mark_stays_on_current_choice_until_ok(
     terminal_screens: tuple[Path, str], size: tuple[int, int]
 ) -> None:
@@ -389,9 +389,9 @@ def test_actual_terminal_font_mark_stays_on_current_choice_until_ok(
 @pytest.mark.parametrize(
     ("suffix", "size", "layout", "other_layout"),
     [
-        ("-128x160", (128, 128), ((21, 9), (6, 12)), ((16, 6), (8, 16))),
+        ("-128x160", (128, 126), ((21, 8), (6, 12)), ((16, 6), (8, 16))),
         ("", (240, 268), ((30, 15), (8, 16)), ((40, 20), (6, 12))),
-        ("-320x240", (320, 196), ((40, 10), (8, 16)), ((53, 14), (6, 12))),
+        ("-320x240", (320, 199), ((40, 10), (8, 16)), ((53, 14), (6, 12))),
     ],
 )
 def test_actual_terminal_keeps_pty_cells_and_options_navigation(
@@ -433,9 +433,9 @@ def test_actual_terminal_keeps_pty_cells_and_options_navigation(
 @pytest.mark.parametrize(
     "profile",
     [
-        ("-128x160", (128, 128), [0, 20, 128, 108], 124),
+        ("-128x160", (128, 126), [0, 22, 128, 104], 124),
         ("", (240, 268), [0, 28, 240, 240], 232),
-        ("-320x240", (320, 196), [0, 26, 320, 170], 314),
+        ("-320x240", (320, 199), [0, 28, 320, 171], 314),
     ],
 )
 @pytest.mark.parametrize(
@@ -543,10 +543,10 @@ def test_actual_terminal_header_keeps_status_whole_and_restores_input_mode(
     "profile",
     [
         ("-128x128", (128, 96), (1, 0, 126, 96)),
-        ("-128x160", (128, 128), (1, 16, 126, 96)),
-        ("-176x220", (176, 178), (5, 7, 166, 164)),
+        ("-128x160", (128, 126), (1, 15, 126, 96)),
+        ("-176x220", (176, 177), (5, 6, 166, 164)),
         ("", (240, 268), (24, 44, 192, 180)),
-        ("-320x240", (320, 196), (20, 33, 280, 130)),
+        ("-320x240", (320, 199), (20, 34, 280, 130)),
     ],
 )
 @pytest.mark.parametrize("locale", ["en", "ru"])

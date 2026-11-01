@@ -18,13 +18,12 @@ int main(int argc, char **argv)
 		.height = SCREEN_HEIGHT,
 		.stride_bytes = SCREEN_WIDTH * sizeof(pixels[0]),
 	};
-	struct fplinux_font font;
 	char *end;
 	unsigned long level;
 	bool rendered;
 
-	if (argc != 4) {
-		fprintf(stderr, "usage: %s LEVEL FONT.psf OUTPUT\n", argv[0]);
+	if (argc != 3) {
+		fprintf(stderr, "usage: %s LEVEL OUTPUT\n", argv[0]);
 		return EXIT_FAILURE;
 	}
 	level = strtoul(argv[1], &end, 10);
@@ -32,18 +31,12 @@ int main(int argc, char **argv)
 		fprintf(stderr, "invalid brightness level %s\n", argv[1]);
 		return EXIT_FAILURE;
 	}
-	if (!fplinux_font_open(&font, argv[2])) {
-		fprintf(stderr, "cannot load font %s\n", argv[2]);
-		return EXIT_FAILURE;
-	}
-	rendered = brightness_ui_render(&surface, &font, (unsigned int)level,
-					false);
-	fplinux_font_close(&font);
+	rendered = brightness_ui_render(&surface, (unsigned int)level, false);
 	if (!rendered) {
 		fprintf(stderr, "cannot render brightness level %s\n", argv[1]);
 		return EXIT_FAILURE;
 	}
-	return screen_frame_write(argv[3], pixels, surface.width,
+	return screen_frame_write(argv[2], pixels, surface.width,
 				  surface.height, surface.stride_bytes) ?
 		       EXIT_SUCCESS :
 		       EXIT_FAILURE;

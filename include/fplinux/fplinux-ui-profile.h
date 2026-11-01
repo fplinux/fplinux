@@ -53,9 +53,9 @@ struct fplinux_ui_profile_spec {
 	int legend_margin, legend_gap, home_gap;
 	/* The lock screen's unlock hint replaces the date instead of following it. */
 	bool home_hint_replaces_date;
-	int battery_width, battery_height, battery_cap_width,
-		battery_cap_height, battery_bar_width, battery_bar_height,
-		bolt_height;
+	/* The bar size sets the battery body's; see the launcher layout. */
+	int battery_cap_width, battery_cap_height, battery_bar_width,
+		battery_bar_height, bolt_height;
 	/* Brand marks are square; About shows a lockup or the mark alone. */
 	int splash_mark, about_logo_width;
 	bool about_lockup;
@@ -80,6 +80,7 @@ enum fplinux_ui_colour {
 	FPLINUX_UI_COLOUR_DANGER,
 	FPLINUX_UI_COLOUR_TILE_RING,
 	FPLINUX_UI_COLOUR_BRAND,
+	FPLINUX_UI_COLOUR_BRAND_FOREGROUND,
 	FPLINUX_UI_COLOUR_SCRIM,
 	FPLINUX_UI_COLOUR_COUNT,
 };

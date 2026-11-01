@@ -28,8 +28,8 @@ Steps for each font:
    Galmuri and faces that carry TrueType hinting. Text fonts take U+2713
    from Noto Sans Symbols 2. Noto Sans also takes U+2190-2193 from Noto Sans
    Math; Galmuri supplies its own arrows.
-4. The C font gets the cap_height and x_height fields that lv_font_conv
-   leaves at 0 (LVGL's leading-trim styles use them).
+4. The ellipsis is aligned with the period, and the C font gets the
+   cap_height and x_height fields that lv_font_conv leaves at 0.
 5. The C font is read back and checked: every requested code point is
    mapped, the digits have one advance, the line height is the token file's
    fonts.metrics line, and every kerning pair equals the fontTools
@@ -144,6 +144,7 @@ ARROWS = (0x2190, 0x2191, 0x2192, 0x2193)
 MERGED = ((SYMBOLS2, (0x2713,)), (MATH, ARROWS))
 CLOCK = tuple(sorted(ord(character) for character in " +,-.0123456789:Ee"))
 DIGITS = tuple(range(0x30, 0x3A))
+STATUS_CODES = (*range(0x20, 0x7F), *ARROWS)
 
 _SLOT = re.compile(
     r"NotoSans(?: (?P<width>Condensed|SemiCondensed))?(?P<bold> Bold)? "
@@ -203,6 +204,18 @@ class Kerning:
 
 
 @dataclass
+class ParsedGlyph:
+    """One glyph descriptor and its uncompressed 4-bpp bitmap."""
+
+    bitmap: bytes
+    advance: int
+    box_w: int
+    box_h: int
+    ofs_x: int
+    ofs_y: int
+
+
+@dataclass
 class ParsedFont:
     """What an LVGL C font holds, read back from lv_font_conv's output."""
 
@@ -214,6 +227,7 @@ class ParsedFont:
     # Stored 4.4 kerning values by code point pair; zero pairs are absent.
     kerning: dict[tuple[int, int], int]
     kerning_format: str
+    glyphs: dict[int, ParsedGlyph]
 
 
 def source_path(sources: Path, name: str, originals: dict[str, Source]) -> Path:
@@ -606,8 +620,8 @@ _ARRAY = re.compile(
 )
 _GLYPH = re.compile(r"/\* U\+([0-9A-F]+) ")
 _DSC = re.compile(
-    r"\{\.bitmap_index = \d+, \.adv_w = (\d+), \.box_w = \d+, \.box_h = (\d+), "
-    r"\.ofs_x = -?\d+, \.ofs_y = (-?\d+)\}"
+    r"\{\.bitmap_index = (\d+), \.adv_w = (\d+), \.box_w = (\d+), \.box_h = (\d+), "
+    r"\.ofs_x = (-?\d+), \.ofs_y = (-?\d+)\}"
 )
 _CMAP = re.compile(
     r"\.range_start = (\d+), \.range_length = (\d+), \.glyph_id_start = (\d+),\s*"
@@ -663,8 +677,16 @@ def parse_c_font(source: str) -> ParsedFont:
     if {code: glyph for glyph, code in by_id.items()} != glyph_ids:
         message = "the character maps differ from the glyph order"
         raise FontBuildError(message)
-    advances = {code: descriptors[glyph][0] for glyph, code in by_id.items()}
-    tops = {code: descriptors[glyph][2] + descriptors[glyph][1] for glyph, code in by_id.items()}
+    bitmap = bytes(arrays["glyph_bitmap"])
+    glyphs = {}
+    for glyph, code in by_id.items():
+        offset, advance, width, height, ofs_x, ofs_y = descriptors[glyph]
+        size = (width * height + 1) // 2
+        glyphs[code] = ParsedGlyph(
+            bitmap[offset : offset + size], advance, width, height, ofs_x, ofs_y
+        )
+    advances = {code: glyph.advance for code, glyph in glyphs.items()}
+    tops = {code: glyph.ofs_y + glyph.box_h for code, glyph in glyphs.items()}
     kerning: dict[tuple[int, int], int] = {}
     if "kern_class_values" in arrays:
         left, right = arrays["kern_left_class_mapping"], arrays["kern_right_class_mapping"]
@@ -692,7 +714,28 @@ def parse_c_font(source: str) -> ParsedFont:
         kern_scale=_field(source, "kern_scale"),
         kerning=kerning,
         kerning_format=kerning_format,
+        glyphs=glyphs,
     )
+
+
+def align_ellipsis(source: str, spec: FontSpec) -> str:
+    """Place the bottom of the ellipsis at the period's bottom."""
+    if 0x2026 not in spec.codes:
+        return source
+    head, separator, tail = source.partition("glyph_dsc[] = {")
+    order = [int(code, 16) for code in _GLYPH.findall(head)]
+    descriptors = list(_DSC.finditer(tail))
+    if (
+        not separator
+        or len(descriptors) != len(order) + 1
+        or 0x2E not in order
+        or 0x2026 not in order
+    ):
+        raise FontBuildError(f"{spec.font_id}: cannot align ellipsis")
+    dot = descriptors[order.index(0x2E) + 1]
+    ellipsis = descriptors[order.index(0x2026) + 1]
+    start, end = ellipsis.span(6)
+    return head + separator + tail[:start] + dot.group(6) + tail[end:]
 
 
 def expected_kerning(
@@ -829,6 +872,97 @@ def resolver_source(fonts: Sequence[FontSpec]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def status_source(tokens: dict[str, Any], source_dir: Path, profile: str | None) -> str:
+    """Export the early-screen subset of already converted UI fonts."""
+    names = fplinux_ui_profile.PROFILES if profile is None else (profile,)
+    if any(name not in fplinux_ui_profile.PROFILES for name in names):
+        raise FontBuildError(f"unknown profile {profile!r}")
+    selected: dict[str, FontSpec] = {}
+    for name in names:
+        slots = fplinux_ui_profile.font_slots(name, tokens["profiles"][name]["fonts"])
+        for role in ("font_body", "font_title", "font_legend"):
+            spec = font_spec(slots[role])
+            selected[spec.font_id] = spec
+    lines = [
+        "/* SPDX-License-Identifier: OFL-1.1 */",
+        "/* Modified fonts under the SIL Open Font License 1.1.",
+        " * Copyright 2019-2025 Lee Minseo; Copyright 2022 The Noto Project Authors.",
+        " * Generated by fplinux_ui_fonts.py. Do not edit. */",
+        '#include "fplinux-status-font.h"',
+        "",
+        "#include <stddef.h>",
+        "",
+    ]
+    for number, (font_id, spec) in enumerate(sorted(selected.items())):
+        parsed = parse_c_font((source_dir / spec.c_name).read_text(encoding="utf-8"))
+        missing = set(STATUS_CODES) - parsed.glyphs.keys()
+        if missing:
+            raise FontBuildError(f"{font_id}: status glyphs missing {_ranges(missing)}")
+        bitmap = bytearray()
+        glyph_lines = []
+        for code in STATUS_CODES:
+            glyph = parsed.glyphs[code]
+            expected_size = (glyph.box_w * glyph.box_h + 1) // 2
+            if len(glyph.bitmap) != expected_size:
+                raise FontBuildError(f"{font_id}: incomplete bitmap for U+{code:04X}")
+            glyph_lines.append(
+                f"\t{{ {len(bitmap)}, {glyph.advance}, {glyph.box_w}, {glyph.box_h}, "
+                f"{glyph.ofs_x}, {glyph.ofs_y} }},"
+            )
+            bitmap.extend(glyph.bitmap)
+        indices = {code: index for index, code in enumerate(STATUS_CODES)}
+        kern = [
+            (indices[left], indices[right], value * parsed.kern_scale // 16)
+            for (left, right), value in sorted(parsed.kerning.items())
+            if left in indices and right in indices and value * parsed.kern_scale // 16
+        ]
+        lines += [f"/* {font_id} */", f"static const uint8_t bitmap_{number}[] = {{"]
+        lines += [
+            "\t" + ", ".join(f"0x{value:02x}" for value in bitmap[offset : offset + 12]) + ","
+            for offset in range(0, len(bitmap), 12)
+        ]
+        lines += ["};", f"static const struct fplinux_status_glyph glyphs_{number}[] = {{"]
+        lines += glyph_lines
+        lines.append("};")
+        if kern:
+            lines.append(f"static const struct fplinux_status_kern kern_{number}[] = {{")
+            lines += [f"\t{{ {left}, {right}, {value} }}," for left, right, value in kern]
+            lines.append("};")
+        lines += [
+            f"static const struct fplinux_status_font font_{number} = {{",
+            f"\tbitmap_{number}, glyphs_{number}, {f'kern_{number}' if kern else 'NULL'},",
+            f"\t{len(kern)}, {parsed.line_height}, {parsed.base_line},",
+            "};",
+            "",
+        ]
+    lines += [
+        "static const struct {",
+        "\tconst char *id;",
+        "\tconst struct fplinux_status_font *font;",
+        "} fonts[] = {",
+        *(f'\t{{ "{font_id}", &font_{i} }},' for i, font_id in enumerate(sorted(selected))),
+        "};",
+        "",
+        "const struct fplinux_status_font *fplinux_status_font_by_id(const char *id)",
+        "{",
+        "\tif (!id)",
+        "\t\treturn NULL;",
+        "\tfor (size_t i = 0; i < sizeof(fonts) / sizeof(fonts[0]); ++i) {",
+        "\t\tconst char *a = id, *b = fonts[i].id;",
+        "",
+        "\t\twhile (*a && *a == *b) {",
+        "\t\t\t++a;",
+        "\t\t\t++b;",
+        "\t\t}",
+        "\t\tif (*a == *b)",
+        "\t\t\treturn fonts[i].font;",
+        "\t}",
+        "\treturn NULL;",
+        "}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 # REUSE-IgnoreEnd
 
 
@@ -905,6 +1039,7 @@ def build(  # noqa: PLR0913 -- every input of the build is explicit.
             command = conversion_command(spec, lv_font_conv, prepared, autohint_off)
             subprocess.run(command, cwd=work, check=True, capture_output=True, timeout=300)
             text = (work / spec.c_name).read_text(encoding="utf-8")
+            text = align_ellipsis(text, spec)
             parsed = parse_c_font(text)
             pairs = verify_font(spec, parsed, faces, kernings)
             (output / spec.c_name).write_text(
@@ -925,6 +1060,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--tokens", type=Path, help="fplinux-ui-profile.json")
     parser.add_argument("--sources", type=Path, help="directory with the pinned sources")
     parser.add_argument("--output", type=Path, help="directory for the C fonts")
+    parser.add_argument("--status-from", type=Path, help="directory of converted UI C fonts")
+    parser.add_argument("--status-output", type=Path, help="write early-screen font C source")
+    parser.add_argument(
+        "--profile", choices=fplinux_ui_profile.PROFILES, help="export one profile"
+    )
     parser.add_argument(
         "--source-manifest", type=Path, help="resolved font originals and converter version"
     )
@@ -941,6 +1081,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         for name, pinned in originals.items():
             print(f"{name} {pinned.url} {pinned.algorithm} {pinned.checksum}")
+        return 0
+    if args.status_from is not None or args.status_output is not None or args.profile is not None:
+        if args.tokens is None or args.status_from is None or args.status_output is None:
+            parser.error("status export requires --tokens, --status-from and --status-output")
+        try:
+            tokens = cast("dict[str, Any]", json.loads(args.tokens.read_text(encoding="utf-8")))
+            output = status_source(tokens, args.status_from, args.profile)
+            args.status_output.write_text(output, encoding="utf-8")
+        except (OSError, ValueError, FontBuildError) as error:
+            print(f"fplinux_ui_fonts: {error}", file=sys.stderr)
+            return 1
         return 0
     if args.tokens is None or args.sources is None or args.output is None:
         parser.error("--tokens, --sources and --output are required")

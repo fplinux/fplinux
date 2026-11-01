@@ -1244,6 +1244,9 @@ static void open_about(struct settings_app *app)
 	if (fplinux_settings_read_os_field("/etc/os-release", "BUILD_ID", value,
 					   sizeof(value)))
 		fplinux_ui_form_append_string(form, _("Build"), value);
+	if (fplinux_settings_read_line("/proc/device-tree/model", value,
+				       sizeof(value)))
+		fplinux_ui_form_append_string(form, _("Model"), value);
 	if (fplinux_settings_read_line("/etc/alpine-release", value,
 				       sizeof(value)))
 		fplinux_ui_form_append_string(form, "Alpine Linux", value);

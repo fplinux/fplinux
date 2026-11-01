@@ -549,6 +549,25 @@ def run_userspace_analysis(output: Path, sources: list[tuple[str, bool]]) -> Non
     output.mkdir(parents=True, exist_ok=True)
     if any(source == _UI_RUNTIME_SOURCE for source, _libusb in sources):
         generate_ui_protocol_header(output / "xdg-shell-client-protocol.h")
+    activity = "lib/fplinux/fplinux-activity.c"
+    activity_consumers: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+        (activity, "fplinux-activity-masks.h", ()),
+        ("lib/fplinux/fplinux-ui-screen.c", "fplinux-ui-activity.h", ("--lvgl",)),
+    )
+    for consumer, header, options in activity_consumers:
+        if not any(source == consumer for source, _libusb in sources):
+            continue
+        run(
+            [
+                "python3",
+                "scripts/fplinux_activity.py",
+                "--tokens",
+                "lib/fplinux/fplinux-ui-profile.json",
+                "--output",
+                str(output / header),
+                *options,
+            ]
+        )
     common_flags = [
         "-std=c11",
         "-O2",
@@ -574,7 +593,7 @@ def run_userspace_analysis(output: Path, sources: list[tuple[str, bool]]) -> Non
     ]
     for index, (source, requires_libusb) in enumerate(sources):
         flags = [*common_flags, *userspace_c_include_flags(source)]
-        if source == _UI_RUNTIME_SOURCE:
+        if source in {_UI_RUNTIME_SOURCE, activity, "lib/fplinux/fplinux-ui-screen.c"}:
             flags.extend(("-I", str(output)))
         if requires_libusb:
             flags.extend(libusb_flags)

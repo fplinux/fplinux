@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _POSIX_C_SOURCE 200809L
 #include "fplinux-drm-session.h"
-#include "fplinux-font.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -12,29 +11,6 @@
 #include <unistd.h>
 
 static unsigned int frames;
-static unsigned int text_size;
-static char text[1024];
-
-FILE *__real_fopen(const char *path, const char *mode);
-FILE *__wrap_fopen(const char *path, const char *mode)
-{
-	if (!strcmp(path, "/usr/share/fplinux/fonts/ter-u12n.psf") ||
-	    !strcmp(path, "/usr/share/fplinux/fonts/ter-u16n.psf"))
-		path = getenv("FPLINUX_TEST_FONT");
-	return __real_fopen(path, mode);
-}
-
-const unsigned char *__real_fplinux_font_glyph(const struct fplinux_font *font,
-					       uint32_t codepoint);
-const unsigned char *__wrap_fplinux_font_glyph(const struct fplinux_font *font,
-					       uint32_t codepoint)
-{
-	assert(text_size + 1 < sizeof(text));
-	text[text_size++] = (char)codepoint;
-	text[text_size] = '\0';
-	return __real_fplinux_font_glyph(font, codepoint);
-}
-
 bool fplinux_drm_session_open(struct fplinux_drm_session *session,
 			      const char *drm_path, const char *tty_path,
 			      uint32_t format, char *error, size_t error_size)
@@ -100,7 +76,7 @@ bool fplinux_drm_session_wait_present(struct fplinux_drm_session *session)
 bool fplinux_drm_session_present(struct fplinux_drm_session *session,
 				 unsigned int page)
 {
-	FILE *frame = __real_fopen(getenv("FPLINUX_TEST_FRAME"), "wb");
+	FILE *frame = fopen(getenv("FPLINUX_TEST_FRAME"), "wb");
 	unsigned char *pixels = session->mapping + page * session->page_bytes;
 
 	assert(frame && session->active && page < session->pages);
@@ -115,9 +91,7 @@ bool fplinux_drm_session_present(struct fplinux_drm_session *session,
 	for (size_t byte = session->size; byte < session->size + 32; ++byte)
 		assert(session->mapping[byte] == 0xa5);
 	session->shown_page = page;
-	printf("frame %u %s\n", ++frames, text);
-	text_size = 0;
-	text[0] = '\0';
+	printf("frame %u\n", ++frames);
 	fflush(stdout);
 	return true;
 }

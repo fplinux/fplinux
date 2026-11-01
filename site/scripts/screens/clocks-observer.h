@@ -39,6 +39,10 @@ struct clocks_frame_observation {
 	int alarm_row_right;
 	int alarm_row_top;
 	int alarm_row_bottom;
+	int time_frame_left;
+	int time_frame_top;
+	int time_frame_right;
+	int time_frame_bottom;
 	unsigned int time_fields;
 	unsigned int date_fields;
 	unsigned int duration_fields;

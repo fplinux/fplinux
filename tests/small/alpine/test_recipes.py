@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import py_compile
 import shutil
+from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest import mock
 
@@ -228,48 +229,65 @@ class AlpineRecipesTests:
         assert (before[alpine_source.packages[1]]) == (after[alpine_source.packages[1]])
 
     @pytest.mark.parametrize(
-        "consumer",
+        ("consumer", "source_path", "header_path", "unrelated"),
         [
-            pytest.param("fplinux-brightness-ui", id="brightness-ui"),
-            pytest.param("fplinux-showcase", id="showcase"),
+            pytest.param(
+                "fplinux-brightness-ui",
+                "lib/fplinux/fplinux-status-screen.c",
+                "include/fplinux/fplinux-status-screen.h",
+                "fplinux-showcase",
+                id="status-renderer",
+            ),
+            pytest.param(
+                "fplinux-showcase",
+                "lib/fplinux/fplinux-font.c",
+                "include/fplinux/fplinux-font.h",
+                "fplinux-brightness-ui",
+                id="psf-reader",
+            ),
         ],
     )
-    def test_font_source_changes_only_text_consumers_and_is_staged_for_each(
-        self, alpine_source: AlpineSourceContext, consumer: str
+    def test_text_renderer_changes_only_its_consumer_and_reaches_aport_stage(
+        self,
+        alpine_source: AlpineSourceContext,
+        *,
+        consumer: str,
+        source_path: str,
+        header_path: str,
+        unrelated: str,
     ) -> None:
-        """A font-reader edit reaches the direct-display text consumers' aport stages."""
+        """Each display's selected text implementation is causal and reaches its stage."""
         consumers = ("fplinux-brightness-ui", "fplinux-showcase")
-        unrelated = "fplinux-present"
-        for name in (
+        packages = (
             *consumers,
-            unrelated,
+            "fplinux-present",
             "fplinux-expat-dev",
             "fplinux-font-terminus",
             "fplinux-libdrm",
             "fplinux-libtsm",
             "fplinux-libxkbcommon",
             "fplinux-mesa-gbm",
-        ):
-            alpine_source.write(f"alpine/aports/{name}/APKBUILD", f"pkgname={name}\n".encode())
-        repository = ROOT
-        for directory in ("lib/fplinux", "include/fplinux"):
-            shutil.copytree(repository / directory, alpine_source.root / directory)
-        for source in alpine_selection.shared_aport_sources(
-            "fplinux-mesa-gbm", alpine_source.root
-        ):
-            alpine_source.write(source.relative_to(alpine_source.root).as_posix(), b"GBM input\n")
-        font_source = alpine_source.write(
-            "lib/fplinux/fplinux-font.c", b"fixture original font reader\n"
         )
-        alpine_source.write("include/fplinux/fplinux-font.h", b"fixture font interface\n")
+        for name in packages:
+            alpine_source.write(f"alpine/aports/{name}/APKBUILD", f"pkgname={name}\n".encode())
+        for name in packages:
+            for source in alpine_selection.shared_aport_sources(name, alpine_source.root):
+                relative = source.relative_to(alpine_source.root)
+                original = ROOT / relative
+                if original.is_dir():
+                    shutil.copytree(original, source, dirs_exist_ok=True)
+                else:
+                    alpine_source.write(relative.as_posix(), original.read_bytes())
+        font_source = alpine_source.write(source_path, b"fixture original text renderer\n")
+        alpine_source.write(header_path, b"fixture text interface\n")
         before = {
             name: alpine_recipes.alpine_package_recipe(
                 name, "1" * 64, alpine_source.signing_key, alpine_source.root
             )
-            for name in (*consumers, unrelated)
+            for name in consumers
         }
 
-        font_source.write_bytes(b"fixture changed font reader\n")
+        font_source.write_bytes(b"fixture changed text renderer\n")
 
         after = alpine_recipes.alpine_package_recipe(
             consumer, "1" * 64, alpine_source.signing_key, alpine_source.root
@@ -277,8 +295,8 @@ class AlpineRecipesTests:
         assert (before[consumer]) != (after)
         stage = alpine_source.root / "stages" / consumer
         alpine_aports.materialize_aport_sources(consumer, alpine_source.root, stage)
-        assert ((stage / "fplinux-font.c").read_bytes()) == (b"fixture changed font reader\n")
-        assert ((stage / "fplinux-font.h").read_bytes()) == (b"fixture font interface\n")
+        assert (stage / Path(source_path).name).read_bytes() == b"fixture changed text renderer\n"
+        assert (stage / Path(header_path).name).read_bytes() == b"fixture text interface\n"
         assert (before[unrelated]) == (
             alpine_recipes.alpine_package_recipe(
                 unrelated, "1" * 64, alpine_source.signing_key, alpine_source.root

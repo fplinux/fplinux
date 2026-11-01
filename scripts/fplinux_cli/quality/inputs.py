@@ -227,7 +227,11 @@ def _source_scope_uses_file(  # noqa: PLR0911
         return (
             name in {".clang-format", ".clang-format-ignore", "_clang-format"}
             or file.path
-            in {"lib/fplinux/fplinux-ui-profile.json", "scripts/fplinux_ui_profile.py"}
+            in {
+                "lib/fplinux/fplinux-ui-profile.json",
+                "scripts/fplinux_ui_profile.py",
+                "scripts/fplinux_activity.py",
+            }
             or (len(parts) == 3 and parts[0] == "targets" and name == "target.toml")
             or (len(parts) == 3 and parts[0] == "platforms" and name == "platform.toml")
         )

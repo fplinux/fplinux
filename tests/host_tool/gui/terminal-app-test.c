@@ -119,7 +119,7 @@ static char first_line[54];
 static char rendered_text[2048];
 static struct fplinux_ui_symbol_picker picker;
 static int app_width = 128, app_height = 128;
-static unsigned int expected_columns = 21, expected_rows = 9;
+static unsigned int expected_columns = 21, expected_rows = 8;
 static unsigned int reported_columns, reported_rows;
 static bool winsize_changed;
 static char alert_text[128];
@@ -150,7 +150,9 @@ static void set_menu(bool open)
 /* The UI double supplies the titled content geometry of each screen profile. */
 static int header_height(void)
 {
-	return app_width < 240 ? 20 : app_width < 320 ? 28 : 26;
+	if (app_width < 176)
+		return app_height < 126 ? 25 : 22;
+	return app_width < 240 ? 26 : 28;
 }
 
 static void expect_header(const char *title, const char *full,

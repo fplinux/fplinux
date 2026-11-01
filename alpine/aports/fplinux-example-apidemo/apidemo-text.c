@@ -403,12 +403,17 @@ static void field_changed(struct fplinux_ui_text *field, void *context)
 /*
  * Scrolls the focused item, caption and field, into view, and then at least
  * the whole frame: its parent, the item, does not scroll, the column does.
+ * The column ends at its edge rather than a sliver before it.
  */
 static void reveal_focus(void)
 {
+	int32_t from = lv_obj_get_scroll_y(edit.column);
+
 	lv_obj_scroll_to_view(edit.items[edit.focus], LV_ANIM_OFF);
 	lv_obj_scroll_to_view_recursive(
 		fplinux_ui_text_object(edit.fields[edit.focus]), LV_ANIM_OFF);
+	fplinux_ui_scroll_settle(edit.column, from,
+				 edit.app->metrics->row_height);
 }
 
 /* An unfocused field commits pending input and takes no keys. */

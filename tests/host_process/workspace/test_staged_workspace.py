@@ -107,10 +107,10 @@ class StagedWorkspaceTests:
         assert (imported.returncode) == (0), imported.stderr
 
     @pytest.mark.parametrize("profile", [None, "microsd-uboot"], ids=["ram", "microsd"])
-    def test_staged_bootstrap_reads_panel_and_font_inputs_for_ram_and_sd(
+    def test_staged_bootstrap_reads_status_screen_inputs_for_ram_and_sd(
         self, profile: str | None
     ) -> None:
-        """The staged consumer reads its full recipe and reacts to its font interface."""
+        """The staged recipe follows status renderer changes for both boot paths."""
         sources = common.load_toml(common.ROOT / "sources.lock.toml")
         target = targets.load_target("nokia-ta1618", profile)
         platform = load_platform(target["platform"])
@@ -150,6 +150,6 @@ class StagedWorkspaceTests:
             assert (staged_digest(command, profile, staged)) == (expected)
             (staged / "unrelated.c").write_bytes(b"int unrelated;\n")
             assert (staged_digest(command, profile, staged)) == (expected)
-            header = staged / "bootstrap/fplinux-boot-screen/font.h"
-            header.write_bytes(header.read_bytes() + b"\n/* Changed compile interface. */\n")
+            renderer = staged / "lib/fplinux/fplinux-status-screen.c"
+            renderer.write_bytes(renderer.read_bytes() + b"\n/* Changed renderer. */\n")
             assert (staged_digest(command, profile, staged)) != (expected)

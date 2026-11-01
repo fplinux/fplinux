@@ -10,22 +10,35 @@
 #include <sys/inotify.h>
 #include <sys/types.h>
 
-static const char icon_prefix[] = "/usr/share/icons/hicolor/";
+static const struct {
+	const char *prefix;
+	const char *variable;
+} trees[] = {
+	{ "/usr/share/icons/hicolor/", "FPLINUX_LAUNCHER_CAPTURE_ICONS" },
+	{ "/usr/share/fplinux/glyphs/", "FPLINUX_NATIVE_GLYPHS" },
+};
 
-/* The app keeps its resource policy; only its external icon tree is owned here. */
+/*
+ * The app keeps its resource policy; only its external icon and glyph trees
+ * are owned here, each by the capture that sets its variable.
+ */
 static const char *resource_path(const char *path, char *buffer,
 				 size_t capacity)
 {
-	const char *root = getenv("FPLINUX_LAUNCHER_CAPTURE_ICONS");
+	for (size_t i = 0; i < sizeof(trees) / sizeof(*trees); ++i) {
+		const char *root = getenv(trees[i].variable);
+		size_t length = strlen(trees[i].prefix);
 
-	if (!root || strncmp(path, icon_prefix, sizeof(icon_prefix) - 1))
-		return path;
-	if (snprintf(buffer, capacity, "%s/%s", root,
-		     path + sizeof(icon_prefix) - 1) >= (int)capacity) {
-		errno = ENAMETOOLONG;
-		return NULL;
+		if (!root || strncmp(path, trees[i].prefix, length))
+			continue;
+		if (snprintf(buffer, capacity, "%s/%s", root, path + length) >=
+		    (int)capacity) {
+			errno = ENAMETOOLONG;
+			return NULL;
+		}
+		return buffer;
 	}
-	return buffer;
+	return path;
 }
 
 int __real_open(const char *path, int flags, ...);

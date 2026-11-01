@@ -178,66 +178,37 @@ bool fplinux_launch_frame_load(struct fplinux_launch_frame *frame,
 	return loaded;
 }
 
-/* Clockwise octants, beginning with the segment just right of twelve. */
-static unsigned int spinner_segment(int x, int y)
-{
-	if (y < 0) {
-		if (x >= 0)
-			return x < -y ? 0U : 1U;
-		return -x < -y ? 7U : 6U;
-	}
-	if (x >= 0)
-		return x > y ? 2U : 3U;
-	return -x > y ? 5U : 4U;
-}
-
 bool fplinux_launch_spinner_draw(uint32_t pixels[FPLINUX_LAUNCH_SPINNER_PIXELS],
 				 int size, int line_width, unsigned int phase,
-				 uint32_t rgb)
+				 uint32_t rgb, uint32_t track_rgb)
 {
-	static const unsigned char alphas[FPLINUX_LAUNCH_SPINNER_PHASES] = {
-		255, 216, 176, 136, 96, 64, 40, 24,
-	};
-	uint32_t colours[FPLINUX_LAUNCH_SPINNER_PHASES];
-	int inner_radius;
-	int inner_squared;
-	int outer_squared;
-	unsigned int segment;
-	int y;
+	const struct fplinux_status_mask *mask;
 
 	memset(pixels, 0, FPLINUX_LAUNCH_SPINNER_PIXELS * sizeof(*pixels));
-	if (size < 4 || size > FPLINUX_LAUNCH_SPINNER_MAX_SIZE ||
-	    line_width <= 0 || line_width >= size / 2)
+	if (size <= 0 || size > FPLINUX_LAUNCH_SPINNER_MAX_SIZE ||
+	    line_width <= 0)
 		return false;
-	/* Doubled pixel centres avoid floating point and fractional radii. */
-	inner_radius = size - 2 * line_width;
-	inner_squared = inner_radius * inner_radius;
-	outer_squared = size * size;
-	phase %= FPLINUX_LAUNCH_SPINNER_PHASES;
-	for (segment = 0; segment < FPLINUX_LAUNCH_SPINNER_PHASES; ++segment) {
-		unsigned int alpha =
-			alphas[(phase + FPLINUX_LAUNCH_SPINNER_PHASES - segment) %
-			       FPLINUX_LAUNCH_SPINNER_PHASES];
-		uint32_t red = (((rgb >> 16) & 255U) * alpha + 127U) / 255U;
-		uint32_t green = (((rgb >> 8) & 255U) * alpha + 127U) / 255U;
-		uint32_t blue = ((rgb & 255U) * alpha + 127U) / 255U;
+	mask = fplinux_activity_mask((unsigned int)size,
+				     (unsigned int)line_width, phase);
+	if (!mask)
+		return false;
+	for (int i = 0; i < size * size; ++i) {
+		unsigned int front = mask->alpha[i];
+		unsigned int back =
+			((unsigned int)mask->track[i] * (255U - front) + 127U) /
+			255U;
+		unsigned int alpha = front + back;
+		unsigned int red = (((rgb >> 16) & 255U) * front +
+				    ((track_rgb >> 16) & 255U) * back + 127U) /
+				   255U;
+		unsigned int green = (((rgb >> 8) & 255U) * front +
+				      ((track_rgb >> 8) & 255U) * back + 127U) /
+				     255U;
+		unsigned int blue = ((rgb & 255U) * front +
+				     (track_rgb & 255U) * back + 127U) /
+				    255U;
 
-		colours[segment] = (alpha << 24) | (red << 16) | (green << 8) |
-				   blue;
-	}
-	for (y = 0; y < size; ++y) {
-		int x;
-		int dy = 2 * y + 1 - size;
-
-		for (x = 0; x < size; ++x) {
-			int dx = 2 * x + 1 - size;
-			int radius_squared = dx * dx + dy * dy;
-
-			if (radius_squared < inner_squared ||
-			    radius_squared > outer_squared)
-				continue;
-			pixels[y * size + x] = colours[spinner_segment(dx, dy)];
-		}
+		pixels[i] = (alpha << 24) | (red << 16) | (green << 8) | blue;
 	}
 	return true;
 }

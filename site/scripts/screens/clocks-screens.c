@@ -252,10 +252,13 @@ static void redraw(struct capture *capture)
 		.type = FPLINUX_UI_SESSION_SETTING,
 		.serial = ++capture->redraw_serial,
 	};
+	const char *theme = getenv("FPLINUX_CLOCKS_TEST_THEME");
 	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
 
+	/* Repeat the configured theme, so that the fence changes no colour. */
 	strcpy(setting.name, "theme");
-	strcpy(setting.value, "dark");
+	strcpy(setting.value,
+	       theme && !strcmp(theme, "light") ? "light" : "dark");
 	assert(fplinux_ui_session_send(capture->session, &setting));
 	while (capture->redraw_ack != setting.serial &&
 	       fplinux_ui_frame_now_ms() < deadline)
@@ -526,6 +529,34 @@ static void add_alarm(struct capture *capture)
 	}
 	redraw(capture);
 	assert(capture->observed.time_fields == 1);
+}
+
+static void alarm_focus_frames(struct capture *capture)
+{
+	press(capture, 1, KEY_OK);
+	wait_label(capture, "Alarms");
+	add_alarm(capture);
+	assert(capture->observed.focused_item == 0);
+	assert(!capture->observed.editing);
+	save_frame(capture, "alarm-time-focused");
+	printf("time-frame: %d %d %d %d\n", capture->observed.time_frame_left,
+	       capture->observed.time_frame_top,
+	       capture->observed.time_frame_right,
+	       capture->observed.time_frame_bottom);
+	press(capture, 1, KEY_DOWN);
+	redraw(capture);
+	assert(capture->observed.focused_item == 1);
+	assert(!capture->observed.editing);
+	save_frame(capture, "alarm-time-unfocused");
+	press(capture, 1, KEY_UP);
+	redraw(capture);
+	assert(capture->observed.focused_item == 0);
+	press(capture, 1, KEY_OK);
+	redraw(capture);
+	assert(capture->observed.focused_item == 0);
+	assert(capture->observed.editing);
+	save_frame(capture, "alarm-time-editing");
+	puts("alarm-focus: Time receives OK; Repeat receives Down");
 }
 
 static void save_label(struct capture *capture)
@@ -2266,6 +2297,7 @@ int main(int argc, char **argv)
 			!strcmp(argv[7], "active-confirm-unchanged-ack");
 		bool stopwatch_hour = !strcmp(argv[7], "stopwatch-hour");
 		bool root_values = !strcmp(argv[7], "root-values");
+		bool analog_face = !strcmp(argv[7], "analog-face");
 		bool russian =
 			getenv("FPLINUX_CLOCKS_TEST_LOCALE") &&
 			!strcmp(getenv("FPLINUX_CLOCKS_TEST_LOCALE"), "ru");
@@ -2362,6 +2394,10 @@ int main(int argc, char **argv)
 						   dimension(argv[1]) >
 							   dimension(argv[2]),
 						   russian);
+		else if (!strcmp(argv[7], "alarm-focus"))
+			alarm_focus_frames(&capture);
+		else if (analog_face)
+			clock_face(&capture);
 		else if (!strcmp(argv[7], "idle-deadlines"))
 			idle_deadlines_follow_visible_clock_state(&capture);
 		else if (stopwatch_hour)

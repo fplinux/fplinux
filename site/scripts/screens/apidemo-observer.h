@@ -60,6 +60,17 @@ struct apidemo_canvas_object_observation {
 
 struct apidemo_frame_observation {
 	uint32_t serial;
+	struct {
+		bool present;
+		struct apidemo_rectangle bounds;
+		int line_height;
+		int text_width;
+		int long_mode;
+		bool animated;
+		bool reverse;
+		int animation_value;
+		char text[128];
+	} confirmation_title;
 	struct apidemo_rectangle picker;
 	size_t image_count;
 	struct apidemo_image_observation images[16];

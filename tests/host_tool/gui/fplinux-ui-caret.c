@@ -234,19 +234,32 @@ void fplinux_ui_marquee_changed(struct fplinux_ui *context, lv_obj_t *first,
 	(void)second;
 }
 
+static lv_obj_t *last_title_scrolled;
+static lv_obj_t *last_title_hidden;
+static lv_obj_t *active_title;
+static unsigned int title_scrolls;
+static unsigned int title_hides;
+
 void fplinux_ui_title_init(lv_obj_t *label, const lv_font_t *font)
 {
 	lv_obj_set_style_text_font(label, font, 0);
+	lv_obj_set_height(label, lv_font_get_line_height(font));
+	lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
 }
 
 void fplinux_ui_title_scroll(lv_obj_t *label)
 {
-	(void)label;
+	last_title_scrolled = label;
+	active_title = label;
+	++title_scrolls;
 }
 
 void fplinux_ui_title_hide(lv_obj_t *label)
 {
-	(void)label;
+	last_title_hidden = label;
+	if (active_title == label)
+		active_title = NULL;
+	++title_hides;
 }
 
 bool fplinux_ui_set_softkeys(struct fplinux_ui *context, const char *left,
@@ -480,7 +493,7 @@ static void test_transitions(void)
 	assert(lv_obj_get_style_border_opa(area, LV_PART_CURSOR) ==
 	       LV_OPA_TRANSP);
 	resting = snapshot(lv_obj_get_parent(area));
-	assert(changed_columns(editing, resting) == 0);
+	assert(changed_columns(editing, resting) > 1);
 	lv_draw_buf_destroy(resting);
 	lv_draw_buf_destroy(editing);
 	fplinux_ui_text_set_focused(field, true);
@@ -829,9 +842,9 @@ static void test_form_pages(void)
 			   lv_obj_get_scroll_bottom(content) <= 0))
 		content = lv_obj_get_parent(content);
 	assert(content && lv_obj_get_scroll_y(content) == 0);
-	/* A page of the owned face leaves one visible line of overlap. */
+	/* A page of whole lines of the owned face keeps the last one in view. */
 	line = lv_font_get_line_height(ui.theme.font);
-	page = lv_obj_get_content_height(content) - line;
+	page = (lv_obj_get_content_height(content) / line - 1) * line;
 	assert(page > line);
 	screen_key(KEY_RIGHT);
 	assert(lv_obj_get_scroll_y(content) == page);
@@ -1077,7 +1090,7 @@ static void test_alert_style(void)
 		advance(0);
 		title = label_with_text(ui.root, "To");
 		assert(title);
-		box = lv_obj_get_parent(title);
+		box = lv_obj_get_parent(lv_obj_get_parent(title));
 		assert(lv_color_to_u32(lv_obj_get_style_border_color(box, 0)) ==
 		       cases[i].frame);
 		assert(lv_color_to_u32(lv_obj_get_style_text_color(title, 0)) ==
@@ -1107,7 +1120,7 @@ static void test_alert_text(void)
 	advance(0);
 	title = label_with_text(ui.root, "To");
 	assert(title);
-	box = lv_obj_get_parent(title);
+	box = lv_obj_get_parent(lv_obj_get_parent(title));
 	message = label_with_text(box, "");
 	assert(message && lv_obj_is_hidden(message));
 	viewport = lv_obj_get_parent(message);
@@ -1178,6 +1191,75 @@ static void test_alert_text(void)
 	errno = 0;
 	assert(!fplinux_ui_alert_set_text(NULL, "AV"));
 	assert(errno == EINVAL);
+}
+
+static void test_alert_activity_pixels(void)
+{
+	struct fplinux_ui_screen *below, *alert;
+	lv_draw_buf_t *first, *phase, *progress, *frame;
+
+	ui.theme.background = lv_color_hex(0x101820);
+	ui.theme.surface = lv_color_hex(0x202830);
+	ui.theme.popup = lv_color_hex(0x303840);
+	ui.theme.border = lv_color_hex(0x708090);
+	ui.theme.focus = lv_color_hex(0xf08020);
+	below = fplinux_ui_form_new(&ui, NULL);
+	alert = fplinux_ui_alert_new(&ui, FPLINUX_UI_ALERT_INFO, "First", "AV",
+				     0);
+	assert(below && alert);
+	assert(fplinux_ui_push(&ui, below));
+	assert(fplinux_ui_push(&ui, alert));
+	assert(fplinux_ui_alert_set_progress(alert, 0, 0));
+	advance(0);
+	first = snapshot(ui.root);
+	advance(124);
+	frame = snapshot(ui.root);
+	assert(changed_columns(first, frame) == 0);
+	lv_draw_buf_destroy(frame);
+	advance(1);
+	phase = snapshot(ui.root);
+	assert(changed_columns(first, phase) > 0);
+	lv_draw_buf_destroy(first);
+
+	assert(fplinux_ui_alert_set_progress(alert, 50, 100));
+	advance(0);
+	progress = snapshot(ui.root);
+	assert(changed_columns(phase, progress) > 0);
+	advance(250);
+	frame = snapshot(ui.root);
+	assert(changed_columns(progress, frame) == 0);
+	lv_draw_buf_destroy(frame);
+	assert(lv_timer_handler() == LV_NO_TIMER_READY);
+	lv_draw_buf_destroy(progress);
+	assert(fplinux_ui_alert_set_progress(alert, 0, 0));
+	advance(0);
+	frame = snapshot(ui.root);
+	assert(changed_columns(phase, frame) == 0);
+	lv_draw_buf_destroy(frame);
+
+	ui.visible = false;
+	fplinux_ui_screens_set_visible(ui.screens, false);
+	advance(0);
+	assert(lv_timer_handler() == LV_NO_TIMER_READY);
+	advance(500);
+	ui.visible = true;
+	fplinux_ui_screens_set_visible(ui.screens, true);
+	advance(0);
+	frame = snapshot(ui.root);
+	assert(changed_columns(phase, frame) == 0);
+	lv_draw_buf_destroy(frame);
+	advance(125);
+	frame = snapshot(ui.root);
+	assert(changed_columns(phase, frame) > 0);
+	lv_draw_buf_destroy(frame);
+	lv_draw_buf_destroy(phase);
+
+	assert(fplinux_ui_pop(&ui));
+	advance(0);
+	assert(lv_timer_handler() == LV_NO_TIMER_READY);
+	advance(500);
+	assert(fplinux_ui_current(&ui) == below);
+	assert(lv_timer_handler() == LV_NO_TIMER_READY);
 }
 
 static void item_changed(struct fplinux_ui *context,
@@ -1337,17 +1419,35 @@ static void test_choice_ownership(enum fplinux_ui_choice_kind kind)
 	fplinux_ui_form_delete_all(form);
 }
 
+/* The thumb reaches the channel's ends at either end of the scroll. */
+static void expect_popup_thumb_ends(lv_obj_t *list)
+{
+	lv_area_t horizontal, vertical, view;
+
+	advance(0);
+	lv_obj_get_coords(list, &view);
+	lv_obj_get_scrollbar_area(list, &horizontal, &vertical);
+	assert(lv_obj_get_scroll_y(list) == 0);
+	assert(vertical.y1 == view.y1);
+	for (int index = 0; index < 8; ++index)
+		screen_key(KEY_DOWN);
+	lv_obj_get_scrollbar_area(list, &horizontal, &vertical);
+	assert(lv_obj_get_scroll_bottom(list) <= 0);
+	assert(vertical.y2 == view.y2);
+}
+
 static void test_popup_choice_height(bool overflow)
 {
-	const char *choices[] = { "First", "Second", "Third", "Fourth",
-				  "Fifth", "Sixth",  "Last",  "Read only" };
+	const char *choices[] = { "First",  "Second",	 "Third",
+				  "Fourth", "Fifth",	 "Sixth",
+				  "Last",   "Read only", "Beyond" };
 	struct fplinux_ui_screen *form = fplinux_ui_form_new(&ui, "AV");
 	lv_obj_t *popup, *row, *content, *box;
 	lv_area_t row_area, content_area, box_area;
 
 	assert(fplinux_ui_form_append_choice(form, "To",
 					     FPLINUX_UI_CHOICE_POPUP, choices,
-					     overflow ? 8 : 7) == 0);
+					     overflow ? 9 : 7) == 0);
 	fplinux_ui_push(&ui, form);
 	screen_key(KEY_OK);
 	assert(fplinux_ui_current(&ui) == form);
@@ -1359,9 +1459,13 @@ static void test_popup_choice_height(bool overflow)
 	lv_obj_get_coords(row, &row_area);
 	lv_obj_get_coords(content, &content_area);
 	lv_obj_get_coords(box, &box_area);
-	assert(lv_area_get_height(&box_area) == (overflow ? 304 : 284));
+	/*
+	 * The frame takes the final divider: seven rows need 230 px, and an
+	 * overflowing choice fits eight whole rows in 263 px below the title.
+	 */
+	assert(lv_area_get_height(&box_area) == (overflow ? 295 : 262));
 	assert(row_area.y1 == content_area.y1);
-	assert(lv_area_get_height(&content_area) == (overflow ? 272 : 252));
+	assert(lv_area_get_height(&content_area) == (overflow ? 263 : 230));
 	assert(content_area.y2 == box_area.y2 - 2);
 	if (!overflow) {
 		lv_obj_t *last =
@@ -1369,8 +1473,71 @@ static void test_popup_choice_height(bool overflow)
 		lv_area_t last_area;
 
 		lv_obj_get_coords(last, &last_area);
-		assert(last_area.y2 == content_area.y2);
+		assert(last_area.y2 == content_area.y2 + 1);
+		return;
 	}
+	expect_popup_thumb_ends(lv_obj_get_parent(row));
+}
+
+static void expect_popup_bottom(lv_obj_t *box, unsigned int colour)
+{
+	lv_draw_buf_t *image = snapshot(box);
+	int32_t border = lv_obj_get_style_border_width(box, 0);
+	uint32_t y = image->header.h - (uint32_t)border - 1;
+	const uint8_t *pixel;
+
+	/* Before every row's text/marker, just inside the frame. */
+	pixel = lv_draw_buf_goto_xy(image, (uint32_t)border + 1, y);
+	assert(pixel[0] == (colour & 0xff));
+	assert(pixel[1] == ((colour >> 8) & 0xff));
+	assert(pixel[2] == ((colour >> 16) & 0xff));
+	for (++y; y < image->header.h; ++y) {
+		pixel = lv_draw_buf_goto_xy(image, (uint32_t)border + 1, y);
+		assert(pixel[0] == 0xaa && pixel[1] == 0x99 &&
+		       pixel[2] == 0x88);
+	}
+	lv_draw_buf_destroy(image);
+}
+
+static void test_popup_choice_edges(bool overflow)
+{
+	const char *choices[] = { "First",  "Second",	 "Third",
+				  "Fourth", "Fifth",	 "Sixth",
+				  "Last",   "Read only", "Beyond" };
+	struct fplinux_ui_screen *form;
+	lv_obj_t *popup, *first, *row, *view, *box;
+	lv_area_t row_area, view_area;
+	size_t count = overflow ? 9 : 2;
+
+	ui.theme.popup = lv_color_hex(0x112233);
+	ui.theme.border = lv_color_hex(0x556677);
+	ui.theme.focus = lv_color_hex(0x8899aa);
+	ui.theme.accent = lv_color_hex(0x204060);
+	ui.theme.accent_text = lv_color_white();
+	form = fplinux_ui_form_new(&ui, "AV");
+	assert(form);
+	assert(fplinux_ui_form_append_choice(form, "To",
+					     FPLINUX_UI_CHOICE_POPUP, choices,
+					     count) == 0);
+	fplinux_ui_push(&ui, form);
+	screen_key(KEY_OK);
+	popup = lv_obj_get_child(ui.root, -1);
+	first = label_with_text(popup, "First");
+	assert(first);
+	row = lv_obj_get_parent(first);
+	view = lv_obj_get_parent(row);
+	box = lv_obj_get_parent(lv_obj_get_parent(view));
+	lv_obj_update_layout(box);
+	lv_obj_get_coords(row, &row_area);
+	lv_obj_get_coords(view, &view_area);
+	assert(row_area.y1 == view_area.y1);
+	/* At the start, no extra divider is drawn inside the bottom frame. */
+	expect_popup_bottom(box, 0x112233);
+	for (size_t index = 1; index < count; ++index)
+		screen_key(KEY_DOWN);
+	assert(lv_obj_get_scroll_bottom(view) <= 0);
+	/* The final highlight reaches the frame, without a background stripe. */
+	expect_popup_bottom(box, 0x204060);
 }
 
 static lv_obj_t *image_under(lv_obj_t *object)
@@ -1847,23 +2014,255 @@ static void test_list_focus_listener(void)
 	assert(fplinux_ui_current(&ui) != list);
 }
 
+/* Whether a snapshot pixel, stored blue first, is colour. */
+static bool pixel_is(const lv_draw_buf_t *frame, int32_t x, int32_t y,
+		     uint32_t colour)
+{
+	const uint8_t *pixel =
+		lv_draw_buf_goto_xy(frame, (uint32_t)x, (uint32_t)y);
+
+	return pixel[0] == (colour & 0xffU) &&
+	       pixel[1] == (colour >> 8 & 0xffU) &&
+	       pixel[2] == (colour >> 16 & 0xffU);
+}
+
+static void test_modal_edges(bool choice, bool light)
+{
+	const char *choices[30];
+	char text[256] = "";
+	uint32_t border = light ? 0x708090U : 0x556677U;
+	uint32_t focus = light ? 0x2468acU : 0x8899aaU;
+	struct fplinux_ui_screen *screen;
+	lv_obj_t *label, *band, *view, *box;
+	lv_area_t frame_area, band_area, view_area, horizontal, thumb;
+
+	ui.theme.popup = lv_color_hex(light ? 0xf7f7f7U : 0x112233U);
+	ui.theme.border = lv_color_hex(border);
+	ui.theme.focus = lv_color_hex(focus);
+	ui.theme.accent = lv_color_hex(light ? 0x405060U : 0x204060U);
+	ui.theme.accent_text = lv_color_white();
+	for (size_t i = 0; i < 30; ++i) {
+		choices[i] = "AV";
+		strcat(text, "AV\n");
+	}
+	if (choice) {
+		screen = fplinux_ui_form_new(&ui, "First");
+		assert(screen);
+		assert(fplinux_ui_form_append_choice(screen, "First",
+						     FPLINUX_UI_CHOICE_POPUP,
+						     choices, 30) == 0);
+		fplinux_ui_push(&ui, screen);
+		screen_key(KEY_OK);
+		box = lv_obj_get_child(ui.root, -1);
+		label = label_with_text(box, "AV");
+		assert(label);
+		view = lv_obj_get_parent(lv_obj_get_parent(label));
+		box = lv_obj_get_parent(lv_obj_get_parent(view));
+	} else {
+		screen = fplinux_ui_alert_new(&ui, FPLINUX_UI_ALERT_INFO,
+					      "First", text, 0);
+		assert(screen);
+		fplinux_ui_push(&ui, screen);
+		label = label_with_text(ui.root, text);
+		assert(label);
+		view = lv_obj_get_parent(label);
+		box = lv_obj_get_parent(view);
+	}
+	advance(0);
+	band = lv_obj_get_child(box, 0);
+	lv_obj_get_coords(box, &frame_area);
+	lv_obj_get_coords(band, &band_area);
+	lv_obj_get_coords(view, &view_area);
+	assert(view_area.y1 == band_area.y2 + 1);
+	assert(view_area.y2 == frame_area.y2 - 2);
+	for (int end = 0; end < 2; ++end) {
+		lv_draw_buf_t *image;
+		int32_t x = view_area.x2 - frame_area.x1 - 1;
+		int32_t y = (end ? view_area.y2 : view_area.y1) - frame_area.y1;
+
+		lv_obj_scroll_to_y(view, end ? LV_COORD_MAX : 0, LV_ANIM_OFF);
+		advance(0);
+		lv_obj_get_scrollbar_area(view, &horizontal, &thumb);
+		assert(thumb.x2 >= thumb.x1);
+		assert((end ? thumb.y2 : thumb.y1) ==
+		       (end ? view_area.y2 : view_area.y1));
+		image = snapshot(box);
+		assert(pixel_is(image, x, y, focus));
+		assert(pixel_is(image, x, band_area.y2 - frame_area.y1,
+				border));
+		assert(pixel_is(image, x, view_area.y2 + 1 - frame_area.y1,
+				focus));
+		lv_draw_buf_destroy(image);
+	}
+	if (!choice) {
+		lv_draw_buf_t *image;
+		int32_t x, y;
+
+		assert(fplinux_ui_alert_set_progress(screen, 1, 100));
+		advance(0);
+		lv_obj_scroll_to_y(view, LV_COORD_MAX, LV_ANIM_OFF);
+		advance(0);
+		lv_obj_get_coords(box, &frame_area);
+		lv_obj_get_coords(view, &view_area);
+		lv_obj_get_scrollbar_area(view, &horizontal, &thumb);
+		assert(thumb.y2 == view_area.y2 - 1);
+		x = thumb.x2 - frame_area.x1;
+		y = view_area.y2 - frame_area.y1;
+		image = snapshot(box);
+		assert(pixel_is(image, x, y, border));
+		assert(pixel_is(image, x, y - 1, focus));
+		lv_draw_buf_destroy(image);
+	}
+}
+
+static void test_alert_title_lifecycle(void)
+{
+	const char *long_title = "FirstSecondThirdFourthFifthSixthLast";
+	struct fplinux_ui_screen *below = fplinux_ui_form_new(&ui, NULL);
+	struct fplinux_ui_screen *alert = fplinux_ui_alert_new(
+		&ui, FPLINUX_UI_ALERT_CONFIRMATION, long_title, "AV", 0);
+	lv_obj_t *label;
+	unsigned int calls;
+
+	assert(below && alert);
+	fplinux_ui_push(&ui, below);
+	fplinux_ui_push(&ui, alert);
+	label = active_title;
+	assert(label && !strncmp(lv_label_get_text(label), "First", 5));
+	advance(0);
+	assert(last_title_scrolled == label);
+	assert(lv_obj_get_height(label) ==
+	       lv_font_get_line_height(ui.theme.font_large));
+	assert(lv_label_get_long_mode(label) == LV_LABEL_LONG_MODE_DOTS);
+	calls = title_hides;
+	fplinux_ui_screens_set_visible(ui.screens, false);
+	assert(title_hides > calls && last_title_hidden == label);
+	calls = title_scrolls;
+	fplinux_ui_screens_set_visible(ui.screens, true);
+	assert(title_scrolls > calls && last_title_scrolled == label);
+	calls = title_scrolls;
+	assert(fplinux_ui_screen_set_title(alert, "Second"));
+	assert(title_scrolls > calls && last_title_scrolled == label);
+	calls = title_scrolls;
+	lv_display_set_resolution(ui.display, 128, 128);
+	fplinux_ui_screens_resize(ui.screens);
+	assert(title_scrolls > calls && last_title_scrolled == label);
+	calls = title_hides;
+	assert(fplinux_ui_pop(&ui));
+	assert(title_hides > calls && last_title_hidden == label);
+}
+
+static void test_stacked_title_ownership(void)
+{
+	struct fplinux_ui_screen *form, *alert, *nested, *cover;
+	lv_obj_t *form_title, *alert_title, *nested_title, *cover_title;
+	unsigned int calls;
+
+	form = fplinux_ui_form_new(&ui, "FirstSecondThirdFourthFifthSixthLast");
+	assert(form);
+	assert(fplinux_ui_push(&ui, form));
+	form_title = active_title;
+	assert(form_title &&
+	       !strncmp(lv_label_get_text(form_title), "First", 5));
+	assert(active_title == form_title);
+	alert = fplinux_ui_alert_new(&ui, FPLINUX_UI_ALERT_CONFIRMATION,
+				     "SecondThirdFourthFifthSixthLast", "AV",
+				     0);
+	assert(alert);
+	assert(fplinux_ui_push(&ui, alert));
+	alert_title = active_title;
+	assert(alert_title &&
+	       !strncmp(lv_label_get_text(alert_title), "Second", 6));
+	assert(active_title == alert_title);
+	calls = title_scrolls;
+	assert(fplinux_ui_screen_set_title(form, "FirstFourthFifthSixthLast"));
+	assert(active_title == alert_title && title_scrolls == calls);
+	lv_display_set_resolution(ui.display, 128, 128);
+	fplinux_ui_screens_resize(ui.screens);
+	assert(active_title == alert_title);
+
+	nested = fplinux_ui_alert_new(&ui, FPLINUX_UI_ALERT_INFO,
+				      "ThirdFourthFifthSixthLast", "AV", 0);
+	assert(nested);
+	assert(fplinux_ui_push(&ui, nested));
+	nested_title = active_title;
+	assert(nested_title &&
+	       !strncmp(lv_label_get_text(nested_title), "Third", 5));
+	assert(active_title == nested_title);
+	cover = fplinux_ui_canvas_new(&ui, "FourthFifthSixthLast");
+	assert(cover);
+	assert(fplinux_ui_push(&ui, cover));
+	cover_title = active_title;
+	assert(cover_title &&
+	       !strncmp(lv_label_get_text(cover_title), "Fourth", 6));
+	assert(active_title == cover_title);
+	assert(fplinux_ui_pop(&ui));
+	assert(active_title == nested_title);
+	assert(fplinux_ui_pop(&ui));
+	assert(active_title == alert_title);
+	assert(fplinux_ui_pop(&ui));
+	assert(active_title == form_title);
+}
+
+/*
+ * A borderless viewport's right four columns: with overflow, a channel in
+ * the border colour 0x708090 over its whole height whose two middle columns
+ * may show the focus thumb instead; without, no channel.
+ */
+static void expect_channel(lv_obj_t *object, bool overflow)
+{
+	lv_draw_buf_t *frame = snapshot(object);
+	int32_t outside =
+		((int32_t)frame->header.w - lv_obj_get_width(object)) / 2;
+	int32_t right = (int32_t)frame->header.w - 1 - outside;
+	int32_t bottom = (int32_t)frame->header.h - 1 - outside;
+	unsigned int lines = (unsigned int)(bottom - outside + 1);
+	/* Border-coloured lines in the columns right - 4 .. right. */
+	unsigned int border[5] = { 0 }, focus = 0;
+
+	for (int32_t y = outside; y <= bottom; ++y)
+		for (int32_t x = right - 4; x <= right; ++x) {
+			if (pixel_is(frame, x, y, 0x708090U))
+				++border[x - right + 4];
+			else if ((x == right - 2 || x == right - 1) &&
+				 pixel_is(frame, x, y, 0x2468acU))
+				++focus;
+		}
+	lv_draw_buf_destroy(frame);
+	if (!overflow) {
+		assert(border[4] < lines);
+		return;
+	}
+	assert(border[1] == lines && border[4] == lines);
+	assert(border[2] + border[3] + focus == 2 * lines);
+	assert(focus > 0);
+	assert(border[0] < lines);
+}
+
 static unsigned int visible_scrollbars(lv_obj_t *object)
 {
 	lv_area_t horizontal, vertical, viewport;
 	unsigned int count = 0;
+	bool overflow;
 
 	if (!lv_obj_is_visible(object))
 		return 0;
 	lv_obj_get_scrollbar_area(object, &horizontal, &vertical);
 	assert(horizontal.x2 < horizontal.x1);
-	if (vertical.x2 >= vertical.x1 && vertical.y2 >= vertical.y1) {
+	overflow = vertical.x2 >= vertical.x1 && vertical.y2 >= vertical.y1;
+	/* Only the shared style gives a scrollbar this focus colour. */
+	if (lv_color_to_u32(lv_obj_get_style_bg_color(
+		    object, LV_PART_SCROLLBAR)) == 0xff2468acU &&
+	    lv_obj_get_height(object) > 0)
+		expect_channel(object, overflow);
+	if (overflow) {
 		lv_obj_get_coords(object, &viewport);
 		assert(lv_area_get_width(&vertical) == 2);
 		assert(viewport.x2 - vertical.x2 == 1);
 		if (lv_obj_get_scroll_y(object) == 0)
-			assert(vertical.y1 - viewport.y1 == 1);
+			assert(vertical.y1 == viewport.y1);
 		if (lv_obj_get_scroll_bottom(object) == 0)
-			assert(viewport.y2 - vertical.y2 == 1);
+			assert(vertical.y2 == viewport.y2);
 		assert(lv_color_to_u32(lv_obj_get_style_bg_color(
 			       object, LV_PART_SCROLLBAR)) == 0xff2468acU);
 		assert(lv_obj_get_style_bg_opa(object, LV_PART_SCROLLBAR) ==
@@ -1881,7 +2280,7 @@ static void expect_scrollbars(unsigned int expected)
 {
 	unsigned int count;
 
-	lv_obj_update_layout(ui.root);
+	advance(0);
 	count = visible_scrollbars(ui.root);
 	count += visible_scrollbars(lv_display_get_layer_top(ui.display));
 	if (count != expected)
@@ -1892,12 +2291,13 @@ static void expect_scrollbars(unsigned int expected)
 
 static void test_scrollbars(void)
 {
-	struct fplinux_ui_screen *screen;
+	struct fplinux_ui_screen *screen, *alert;
 	struct fplinux_ui_menu_item items[40];
 	struct fplinux_ui_text *field;
 	char text[256] = "";
 
 	ui.theme.focus = lv_color_hex(0x2468ac);
+	ui.theme.border = lv_color_hex(0x708090);
 	screen = fplinux_ui_list_new(&ui, NULL, FPLINUX_UI_LIST_IMPLICIT);
 	assert(screen);
 	assert(fplinux_ui_list_append(screen, "AV", NULL) == 0);
@@ -1959,6 +2359,14 @@ static void test_scrollbars(void)
 	assert(fplinux_ui_text_set(field, "AV"));
 	expect_scrollbars(0);
 	fplinux_ui_text_delete(field);
+
+	alert = fplinux_ui_alert_new(&ui, FPLINUX_UI_ALERT_INFO, NULL, text, 0);
+	assert(alert);
+	fplinux_ui_push(&ui, alert);
+	expect_scrollbars(1);
+	assert(fplinux_ui_alert_set_text(alert, "AV"));
+	expect_scrollbars(0);
+	assert(fplinux_ui_pop(&ui));
 }
 
 static void expect_label_insets(lv_obj_t *label, lv_obj_t *viewport, int left,
@@ -2150,7 +2558,7 @@ static void test_form_image_shape(bool mask, bool overflow)
 	expect_form_image(image, width, height, mask, true);
 	assert(fplinux_ui_form_set_appearance(form, 0,
 					      FPLINUX_UI_APPEARANCE_BUTTON));
-	expect_form_image(image, width, height, mask, false);
+	expect_form_image(image, width, height, mask, true);
 	assert(fplinux_ui_form_set_appearance(form, 0,
 					      FPLINUX_UI_APPEARANCE_PLAIN));
 	assert(lv_obj_get_parent(image) == box);
@@ -2294,6 +2702,22 @@ static void expect_read_only_line_origin(lv_obj_t *area, int32_t pitch)
 		assert(text.y2 <= view.y2);
 }
 
+static void expect_page_move(lv_obj_t *view, int32_t previous, int32_t page,
+			     int32_t line, bool forward)
+{
+	int32_t position = lv_obj_get_scroll_y(view);
+	int32_t last = position + lv_obj_get_scroll_bottom(view);
+	int32_t remaining = forward ? last - previous : previous;
+	int32_t distance = remaining < page ? remaining : page;
+	int32_t height = lv_obj_get_content_height(view);
+
+	assert(position >= 0 && position <= last);
+	assert(position == previous + (forward ? distance : -distance));
+	assert(page > 0 && page <= height);
+	if (height >= 2 * line)
+		assert(page <= height - line);
+}
+
 static void test_read_only_whole_lines(void)
 {
 	struct fplinux_ui_text *field = new_field(
@@ -2315,14 +2739,33 @@ static void test_read_only_whole_lines(void)
 			unsigned int code = direction ? KEY_LEFT : KEY_RIGHT;
 
 			for (int page = 0; page < 20; ++page) {
+				int32_t before = lv_obj_get_scroll_y(area);
+				int32_t height =
+					lv_obj_get_content_height(area);
+				int32_t rows = height / pitch;
+				int32_t distance =
+					rows > 1 ? (rows - 1) * pitch : pitch;
+
+				if (distance > height)
+					distance = height;
+
 				key(field, FPLINUX_UI_KEY_PHONE, code, true,
 				    NULL);
 				key(field, FPLINUX_UI_KEY_PHONE, code, false,
 				    NULL);
-				expect_read_only_line_origin(area, pitch);
+				expect_page_move(area, before, distance, pitch,
+						 !direction);
 			}
 			assert(direction ? !lv_obj_get_scroll_y(area) :
 					   !lv_obj_get_scroll_bottom(area));
+			if (!direction) {
+				lv_area_t view, text;
+
+				lv_obj_get_content_coords(area, &view);
+				lv_obj_get_coords(lv_textarea_get_label(area),
+						  &text);
+				assert(text.y2 <= view.y2);
+			}
 		}
 		key(field, FPLINUX_UI_KEY_PHONE, KEY_DOWN, true, NULL);
 		assert(lv_obj_get_scroll_y(area) == pitch);
@@ -2392,7 +2835,7 @@ static void test_alert_content_insets(int margin, int padding,
 		&ui, FPLINUX_UI_ALERT_INFO, "First", "AV", 0);
 	lv_obj_t *title, *message, *box, *viewport;
 	lv_area_t view, text, horizontal, vertical, footer;
-	int width, height, title_y, surface_height;
+	int width, height, title_y, surface_height, line;
 
 	assert(alert);
 	fplinux_ui_push(&ui, alert);
@@ -2400,13 +2843,14 @@ static void test_alert_content_insets(int margin, int padding,
 	title = label_with_text(ui.root, "First");
 	message = label_with_text(ui.root, "AV");
 	assert(title && message);
-	box = lv_obj_get_parent(title);
+	box = lv_obj_get_parent(lv_obj_get_parent(title));
 	viewport = lv_obj_get_parent(message);
 	lv_obj_get_coords(box, &view);
 	assert(view.x1 == margin);
 	assert(lv_area_get_width(&view) == fplinux_ui_width(&ui) - 2 * margin);
 	assert(lv_obj_get_style_border_width(box, 0) == 2);
-	expect_label_insets(title, box, 2 + padding, 2 + padding);
+	expect_label_insets(title, box, 2 + ui.spec->margin,
+			    2 + ui.spec->margin);
 	expect_label_insets(message, box, 2 + padding, 2 + padding);
 	assert(fplinux_ui_screen_get_content_size(alert, &width, &height));
 	assert(width == fplinux_ui_width(&ui) - 2 * margin - 2 * (2 + padding));
@@ -2418,7 +2862,8 @@ static void test_alert_content_insets(int margin, int padding,
 
 	assert(fplinux_ui_alert_set_text(alert, long_text));
 	advance(0);
-	expect_label_insets(title, box, 2 + padding, 2 + padding);
+	expect_label_insets(title, box, 2 + ui.spec->margin,
+			    2 + ui.spec->margin);
 	expect_label_insets(message, box, 2 + padding, 2 + padding + 4);
 	lv_obj_get_coords(viewport, &view);
 	lv_obj_get_content_coords(message, &text);
@@ -2436,7 +2881,7 @@ static void test_alert_content_insets(int margin, int padding,
 	assert(fplinux_ui_alert_set_footer(alert, "Second"));
 	advance(0);
 	lv_obj_get_coords(box, &view);
-	lv_obj_get_coords(label_with_text(box, "Second"), &footer);
+	lv_obj_get_content_coords(label_with_text(box, "Second"), &footer);
 	assert(footer.y2 <= view.y2 - 2 - padding);
 	assert(lv_obj_get_y(title) == title_y);
 	surface_height = fplinux_ui_height(&ui);
@@ -2444,9 +2889,13 @@ static void test_alert_content_insets(int margin, int padding,
 				  surface_height - 16);
 	fplinux_ui_screens_resize(ui.screens);
 	advance(0);
-	assert(lv_obj_get_height(box) == surface_height - 16 - 2 * margin);
+	/* The box keeps whole message lines, within a line of the surface. */
+	line = lv_font_get_line_height(lv_obj_get_style_text_font(message, 0));
+	assert(lv_obj_get_height(box) <= surface_height - 16 - 2 * margin);
+	assert(lv_obj_get_height(box) >
+	       surface_height - 16 - 2 * margin - line);
 	lv_obj_get_coords(box, &view);
-	lv_obj_get_coords(label_with_text(box, "Second"), &footer);
+	lv_obj_get_content_coords(label_with_text(box, "Second"), &footer);
 	assert(footer.y2 <= view.y2 - 2 - padding);
 	lv_display_set_resolution(ui.display, fplinux_ui_width(&ui),
 				  surface_height);
@@ -2557,9 +3006,11 @@ static void expect_menu_geometry(int row_height, int band, int width, int x,
 	lv_obj_t *last_label = label_with_text(layer, "Third");
 	lv_obj_t *first, *last, *popup = menu_popup("Second");
 	lv_area_t first_area, last_area, popup_area;
+	/* The clipped surfaces here take the whole height below the edge. */
 	int top = 2 + (titled ? band : 0);
 	int surface = fplinux_ui_modal_height(&ui);
-	int height = top + (clipped ? 2 : 3) * row_height;
+	/* The last row's 1 px divider lies under the soft-key bar's line. */
+	int height = top + (clipped ? 2 : 3) * row_height - 1;
 
 	assert(first_label && last_label);
 	first = lv_obj_get_parent(first_label);
@@ -2576,12 +3027,12 @@ static void expect_menu_geometry(int row_height, int band, int width, int x,
 	assert(popup_area.x2 - first_area.x2 == (clipped ? 4 : 0));
 	assert(lv_area_get_height(&first_area) == row_height);
 	if (!clipped)
-		assert(popup_area.y2 == last_area.y2);
+		assert(popup_area.y2 + 1 == last_area.y2);
 }
 
 static void test_menu_geometry(int margin, int row_height, int band, int width,
 			       enum fplinux_ui_menu_origin origin, int x,
-			       bool titled)
+			       int title_top, bool titled)
 {
 	const struct fplinux_ui_menu_item items[] = {
 		{ .action = 1, .text = "First" },
@@ -2596,11 +3047,6 @@ static void test_menu_geometry(int margin, int row_height, int band, int width,
 	lv_area_t last_area, viewport;
 	lv_obj_t *last;
 	int action;
-	int clipped_width = width + (titled ? 0 : 4);
-	int clipped_x = x - (titled				     ? 0 :
-			     origin == FPLINUX_UI_MENU_ORIGIN_CENTRE ? 2 :
-			     origin == FPLINUX_UI_MENU_ORIGIN_RIGHT  ? 4 :
-								       0);
 
 	menu_fonts();
 	assert(fplinux_ui_menu_open(&ui, origin, titled ? "AAAAA" : NULL, items,
@@ -2611,15 +3057,19 @@ static void test_menu_geometry(int margin, int row_height, int band, int width,
 			lv_display_get_layer_top(ui.display), "AAAAA");
 
 		assert(title && lv_obj_get_width(title) == width - 2 * margin);
+		assert(lv_obj_get_y(title) == title_top);
 	}
+	/* The scroll-indicator area fits in the space after these labels. */
+	/*
+	 * Two rows fit below the edge, fewer than the three a title band's
+	 * height above them would need: the menu takes the whole surface.
+	 */
 	ui.modal_height = 2 + (titled ? band : 0) + 2 * row_height;
 	fplinux_ui_menu_view_resize(ui.menu);
-	expect_menu_geometry(row_height, band, clipped_width, clipped_x, titled,
-			     true);
+	expect_menu_geometry(row_height, band, width, x, titled, true);
 	ui.modal_height += row_height / 2;
 	fplinux_ui_menu_view_resize(ui.menu);
-	expect_menu_geometry(row_height, band, clipped_width, clipped_x, titled,
-			     true);
+	expect_menu_geometry(row_height, band, width, x, titled, true);
 	assert(!fplinux_ui_menu_view_key(ui.menu, &down, &action));
 	assert(!fplinux_ui_menu_view_key(ui.menu, &down, &action));
 	advance(0);
@@ -2627,9 +3077,9 @@ static void test_menu_geometry(int margin, int row_height, int band, int width,
 		label_with_text(lv_display_get_layer_top(ui.display), "Third"));
 	lv_obj_get_coords(last, &last_area);
 	lv_obj_get_coords(lv_obj_get_parent(last), &viewport);
-	assert(viewport.y2 == last_area.y2);
+	assert(viewport.y2 + 1 == last_area.y2);
 	assert(last_area.y1 >= viewport.y1);
-	assert(lv_obj_get_width(menu_popup("Second")) == clipped_width);
+	assert(lv_obj_get_width(menu_popup("Second")) == width);
 	ui.modal_height = 0;
 	fplinux_ui_menu_view_resize(ui.menu);
 	expect_menu_geometry(row_height, band, width, x, titled, false);
@@ -2638,8 +3088,9 @@ static void test_menu_geometry(int margin, int row_height, int band, int width,
 
 static void test_menu_width(const char *scenario, int width)
 {
+	/* Sixty six-pixel letters, wider than every profile's surface. */
 	static const char long_text[] =
-		"АААААААААААААААААААААААААААААААААААААААА";
+		"АААААААААААААААААААААААААААААААААААААААААААААААААААААААААААА";
 	lv_color32_t pixels[2 * 2] = {
 		{ .red = 0xd0, .green = 0x30, .blue = 0x50, .alpha = 0xff },
 		{ .red = 0xd0, .green = 0x30, .blue = 0x50, .alpha = 0xff },
@@ -2677,7 +3128,9 @@ static void test_menu_width(const char *scenario, int width)
 	} else if (!strcmp(scenario, "long")) {
 		/* The widest item is initially offscreen, not the selected label. */
 		items[2].text = long_text;
-		ui.modal_height = 74;
+		ui.modal_height = 2 * ui.spec->row_height;
+	} else if (!strcmp(scenario, "near-edge")) {
+		items[1].text = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 	} else if (!strcmp(scenario, "icons")) {
 		items[1].icon = &image;
 	} else {
@@ -2722,27 +3175,76 @@ static void test_menu_width(const char *scenario, int width)
 	fplinux_ui_menu_close(&ui);
 }
 
-static void test_menu_groups(void)
+/*
+ * A menu longer than the surface shows whole rows below its brand edge. It
+ * starts below the surface's title band, at most one row lower, or fills
+ * the surface to within a row of the top.
+ */
+static void test_menu_band(int surface, int band, int row_height,
+			   const int rows[2], const bool reserves[2])
 {
-	struct fplinux_ui_menu_item items[] = {
+	struct fplinux_ui_menu_item items[40];
+
+	menu_fonts();
+	ui.theme.brand = lv_color_hex(0xd03050);
+	ui.modal_height = surface;
+	for (size_t index = 0; index < 40; ++index)
+		items[index] = (struct fplinux_ui_menu_item){
+			.action = (int)index,
+			.text = "AV",
+		};
+	for (int titled = 0; titled < 2; ++titled) {
+		int top = 2 + (titled ? band : 0);
+		int height = top + rows[titled] * row_height - 1;
+		lv_draw_buf_t *frame;
+		const uint8_t *pixel;
+		lv_obj_t *popup;
+		int y;
+
+		assert(fplinux_ui_menu_open(&ui, FPLINUX_UI_MENU_ORIGIN_LEFT,
+					    titled ? "AV" : NULL, items, 40,
+					    NULL, NULL));
+		popup = menu_popup("AV");
+		y = lv_obj_get_y(popup);
+		if (lv_obj_get_height(popup) != height)
+			fprintf(stderr,
+				"menu height: expected %d, observed %d\n",
+				height, (int)lv_obj_get_height(popup));
+		assert(lv_obj_get_height(popup) == height);
+		assert(y == surface - height);
+		assert(reserves[titled] ? y >= band && y < band + row_height :
+					  y < row_height);
+		frame = snapshot(popup);
+		pixel = lv_draw_buf_goto_xy(frame, 0, 0);
+		assert(pixel[2] == 0xd0 && pixel[1] == 0x30 &&
+		       pixel[0] == 0x50);
+		lv_draw_buf_destroy(frame);
+		fplinux_ui_menu_close(&ui);
+	}
+	ui.modal_height = 0;
+}
+
+static void test_menu_dividers(void)
+{
+	const struct fplinux_ui_menu_item items[] = {
 		{ .action = 11, .text = "First" },
 		{ .action = 22, .text = "Second" },
 		{ .action = 33, .text = "Third" },
 	};
-	const uint8_t colours[][3] = {
-		{ 0x60, 0x50, 0x40 },
-		{ 0x90, 0x80, 0x70 },
-		{ 0x30, 0x20, 0x10 },
-	};
+	/* Blue, green, red: the snapshot's RGB888 byte order. */
+	const uint8_t popup_colour[3] = { 0x30, 0x20, 0x10 };
+	const uint8_t accent[3] = { 0x60, 0x50, 0x40 };
+	const uint8_t border[3] = { 0x90, 0x80, 0x70 };
 	struct fplinux_ui_key key = {
 		.source = FPLINUX_UI_KEY_PHONE,
 		.code = KEY_DOWN,
 		.pressed = true,
 	};
 	struct fplinux_ui_menu_position position;
-	lv_area_t original[3], original_popup, popup_area;
+	lv_area_t first_area, popup_area;
 	lv_obj_t *popup;
 	lv_draw_buf_t *frame;
+	int32_t row_height, column;
 	int action;
 
 	menu_fonts();
@@ -2752,53 +3254,34 @@ static void test_menu_groups(void)
 	assert(fplinux_ui_menu_open(&ui, FPLINUX_UI_MENU_ORIGIN_LEFT, NULL,
 				    items, 3, NULL, NULL));
 	popup = menu_popup("First");
-	lv_obj_get_coords(popup, &original_popup);
-	for (size_t i = 0; i < 3; ++i) {
-		lv_obj_t *label = label_with_text(popup, items[i].text);
-
-		assert(label);
-		lv_obj_get_coords(lv_obj_get_parent(label), &original[i]);
-	}
-	fplinux_ui_menu_close(&ui);
-	items[0].separator_before = true;
-	items[1].separator_before = true;
-	assert(fplinux_ui_menu_open(&ui, FPLINUX_UI_MENU_ORIGIN_LEFT, NULL,
-				    items, 3, NULL, NULL));
-	popup = menu_popup("First");
 	lv_obj_get_coords(popup, &popup_area);
-	assert(original_popup.x1 == popup_area.x1 &&
-	       original_popup.y1 == popup_area.y1 &&
-	       original_popup.x2 == popup_area.x2 &&
-	       original_popup.y2 == popup_area.y2);
+	lv_obj_get_coords(lv_obj_get_parent(label_with_text(popup, "First")),
+			  &first_area);
+	row_height = lv_area_get_height(&first_area);
+	/* The third row's divider lies under the soft-key bar's line. */
+	assert(popup_area.y2 - first_area.y1 + 1 == 3 * row_height - 1);
 	frame = snapshot(popup);
-	for (size_t i = 0; i < 3; ++i) {
-		lv_obj_t *row = lv_obj_get_parent(
-			label_with_text(popup, items[i].text));
-		lv_area_t area;
-		const uint8_t *pixel;
+	/* The right edge is past every label: only fills and lines remain. */
+	column = lv_area_get_width(&popup_area) - 1;
+	for (int32_t y = first_area.y1; y <= popup_area.y2; ++y) {
+		int32_t offset = (y - first_area.y1) % row_height;
+		int32_t row = (y - first_area.y1) / row_height;
+		const uint8_t *expected = offset == row_height - 1 ? border :
+					  row == 0 ? accent :
+						     popup_colour;
+		const uint8_t *pixel = lv_draw_buf_goto_xy(
+			frame, (uint32_t)column, (uint32_t)(y - popup_area.y1));
 
-		assert(lv_obj_get_child_count(lv_obj_get_parent(row)) == 3);
-		lv_obj_get_coords(row, &area);
-		assert(original[i].x1 == area.x1 && original[i].y1 == area.y1 &&
-		       original[i].x2 == area.x2 && original[i].y2 == area.y2);
-		pixel = lv_draw_buf_goto_xy(frame, area.x1 - popup_area.x1,
-					    area.y1 - popup_area.y1);
-		/* The first boundary is omitted; only Second gets a top stroke. */
-		assert(!memcmp(pixel, colours[i], 3));
+		if (memcmp(pixel, expected, 3)) {
+			fprintf(stderr, "menu row %d line %d: %02x%02x%02x\n",
+				row, offset, pixel[2], pixel[1], pixel[0]);
+			abort();
+		}
 	}
 	lv_draw_buf_destroy(frame);
 	assert(!fplinux_ui_menu_view_key(ui.menu, &key, &action));
 	fplinux_ui_menu_view_get_position(ui.menu, &position);
 	assert(position.selected == 1);
-	frame = snapshot(popup);
-	{
-		const uint8_t *pixel = lv_draw_buf_goto_xy(
-			frame, original[1].x1 - popup_area.x1,
-			original[1].y1 - popup_area.y1);
-
-		assert(!memcmp(pixel, colours[1], 3));
-	}
-	lv_draw_buf_destroy(frame);
 	key.code = KEY_ENTER;
 	assert(fplinux_ui_menu_view_key(ui.menu, &key, &action));
 	assert(action == 22);
@@ -2831,11 +3314,12 @@ static void expect_menu_selection(size_t selected, const char *text, int width,
 	lv_obj_update_layout(popup);
 	lv_obj_get_coords(row, &row_area);
 	lv_obj_get_coords(lv_obj_get_parent(row), &viewport);
-	assert(row_area.y1 >= viewport.y1 && row_area.y2 <= viewport.y2);
+	/* The row's 1 px divider may lie under the soft-key bar's line. */
+	assert(row_area.y1 >= viewport.y1 && row_area.y2 <= viewport.y2 + 1);
 	assert(lv_obj_get_width(popup) == width);
 	assert(lv_obj_get_x(popup) == x);
 	assert(lv_obj_get_height(popup) == height);
-	assert(lv_area_get_height(&viewport) % 36 == 0);
+	assert((lv_area_get_height(&viewport) + 1) % 33 == 0);
 }
 
 static void test_menu_resize(void)
@@ -2858,28 +3342,30 @@ static void test_menu_resize(void)
 			.text = labels[index],
 		};
 	}
-	items[10].text = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+	/* 156 px of text, insets, the scroll area and 24 px: 200 of 240 px. */
+	items[10].text = "AAAAAAAAAAAAAAAAAAAAAAAAAA";
 	assert(fplinux_ui_menu_open(&ui, FPLINUX_UI_MENU_ORIGIN_RIGHT, NULL,
 				    items, 20, NULL, NULL));
-	expect_menu_selection(0, labels[0], 200, 40, 290);
+	expect_menu_selection(0, labels[0], 200, 40, 265);
 	key.code = KEY_RIGHT;
 	assert(!fplinux_ui_menu_view_key(ui.menu, &key, &action));
-	expect_menu_selection(8, labels[8], 200, 40, 290);
+	/* Eight of 20 rows fit below the title band: Right shows the next page. */
+	expect_menu_selection(8, labels[8], 200, 40, 265);
 	key.code = KEY_DOWN;
 	for (unsigned int index = 0; index < 11; ++index)
 		assert(!fplinux_ui_menu_view_key(ui.menu, &key, &action));
-	expect_menu_selection(19, labels[19], 200, 40, 290);
+	expect_menu_selection(19, labels[19], 200, 40, 265);
 	lv_display_set_resolution(ui.display, 128, 128);
 	fplinux_ui_menu_view_resize(ui.menu);
-	expect_menu_selection(19, labels[19], 128, 0, 110);
+	expect_menu_selection(19, labels[19], 128, 0, 100);
 	lv_display_set_resolution(ui.display, 240, 320);
 	fplinux_ui_menu_view_resize(ui.menu);
-	expect_menu_selection(19, labels[19], 200, 40, 290);
+	expect_menu_selection(19, labels[19], 200, 40, 265);
 	assert(!fplinux_ui_menu_view_key(ui.menu, &key, &action));
-	expect_menu_selection(0, labels[0], 200, 40, 290);
+	expect_menu_selection(0, labels[0], 200, 40, 265);
 	key.code = KEY_UP;
 	assert(!fplinux_ui_menu_view_key(ui.menu, &key, &action));
-	expect_menu_selection(19, labels[19], 200, 40, 290);
+	expect_menu_selection(19, labels[19], 200, 40, 265);
 	fplinux_ui_menu_close(&ui);
 }
 
@@ -2935,18 +3421,579 @@ static void test_menu_position(void)
 	fplinux_ui_menu_close(&ui);
 }
 
+/*
+ * Walk a scrolling view between its ends. Text moves by meaningful lines
+ * or overlapping pages; list and form selection retain their own settling.
+ */
+struct scroll_walk {
+	lv_obj_t *view;
+	int32_t unit;
+	int32_t line;
+	void (*press)(unsigned int code);
+	bool form;
+	/* A wrapping view's presses from one end to the other, or 0. */
+	int presses;
+};
+
+static void menu_press(unsigned int code)
+{
+	struct fplinux_ui_key input = {
+		.source = FPLINUX_UI_KEY_PHONE,
+		.code = code,
+		.pressed = true,
+	};
+	int action;
+
+	assert(!fplinux_ui_menu_view_key(ui.menu, &input, &action));
+	input.pressed = false;
+	fplinux_ui_menu_view_key(ui.menu, &input, &action);
+	advance(0);
+}
+
+static struct fplinux_ui_text *walked_field;
+
+static void field_press(unsigned int code)
+{
+	key(walked_field, FPLINUX_UI_KEY_PHONE, code, true, NULL);
+	key(walked_field, FPLINUX_UI_KEY_PHONE, code, false, NULL);
+}
+
+static void expect_settled(const struct scroll_walk *walk, int32_t previous,
+			   unsigned int code)
+{
+	int32_t position = lv_obj_get_scroll_y(walk->view);
+	int32_t last = position + lv_obj_get_scroll_bottom(walk->view);
+	int32_t moved = position > previous ? position - previous :
+					      previous - position;
+
+	if (walk->form) {
+		assert(position >= 0 && position <= last);
+		return;
+	}
+	if (walk->line && (code == KEY_LEFT || code == KEY_RIGHT)) {
+		expect_page_move(walk->view, previous, walk->unit, walk->line,
+				 code == KEY_RIGHT);
+		return;
+	}
+	if (walk->line) {
+		assert(position >= 0 && position <= last);
+		if (code == KEY_DOWN) {
+			assert(position >= previous);
+			assert(previous == last || moved >= walk->line ||
+			       last < walk->line);
+		} else {
+			assert(position <= previous);
+			assert(!previous || moved >= walk->line ||
+			       last < walk->line);
+		}
+		assert(moved < 2 * walk->line);
+		assert(position == 0 || position == last ||
+		       (!(position % walk->line) && position >= walk->line &&
+			last - position >= walk->line));
+		return;
+	}
+	if (!(position == 0 || position == last ||
+	      (4 * position >= walk->unit &&
+	       4 * (last - position) >= walk->unit)) ||
+	    (moved && 4 * moved < walk->unit))
+		fprintf(stderr, "scroll %d -> %d of %d, unit %d, line %d\n",
+			(int)previous, (int)position, (int)last,
+			(int)walk->unit, (int)walk->line);
+	assert(position >= 0 && position <= last);
+	assert(position == 0 || position == last ||
+	       (4 * position >= walk->unit &&
+		4 * (last - position) >= walk->unit));
+	assert(!moved || 4 * moved >= walk->unit);
+}
+
+/*
+ * Returns the steps taken; three idle presses, or a wrapping view's
+ * presses, end the walk at its edge.
+ */
+static int walk_scroll(const struct scroll_walk *walk, unsigned int code)
+{
+	bool down = code == KEY_DOWN || code == KEY_RIGHT;
+	int limit = walk->presses ? walk->presses : 400;
+	int steps = 0;
+	int idle = 0;
+
+	for (int press = 0; press < limit && (walk->presses || idle < 3);
+	     ++press) {
+		int32_t before = lv_obj_get_scroll_y(walk->view);
+
+		walk->press(code);
+		lv_obj_update_layout(walk->view);
+		expect_settled(walk, before, code);
+		if (lv_obj_get_scroll_y(walk->view) == before) {
+			++idle;
+		} else {
+			idle = 0;
+			++steps;
+		}
+	}
+	assert(walk->presses || idle == 3);
+	assert(down ? lv_obj_get_scroll_bottom(walk->view) <= 0 :
+		      lv_obj_get_scroll_y(walk->view) == 0);
+	return steps;
+}
+
+/*
+ * Lines both ways, then pages, which never wrap, of the page unit both
+ * ways; each walk starts at an edge.
+ */
+static void walk_both_ways(struct scroll_walk *walk, int32_t page)
+{
+	int32_t unit = walk->unit;
+	int presses = walk->presses;
+
+	lv_obj_update_layout(walk->view);
+	assert(lv_obj_get_scroll_y(walk->view) == 0);
+	assert(lv_obj_get_scroll_bottom(walk->view) > 0);
+	assert(walk_scroll(walk, KEY_DOWN) > 1);
+	assert(walk_scroll(walk, KEY_UP) > 1);
+	if (!page)
+		return;
+	walk->unit = page;
+	walk->presses = 0;
+	assert(walk_scroll(walk, KEY_RIGHT) > 0);
+	assert(walk_scroll(walk, KEY_LEFT) > 0);
+	walk->unit = unit;
+	walk->presses = presses;
+}
+
+static lv_obj_t *scrolling_parent(lv_obj_t *object)
+{
+	while (object && (!lv_obj_is_scrollable(object) ||
+			  lv_obj_get_scroll_bottom(object) <= 0))
+		object = lv_obj_get_parent(object);
+	assert(object);
+	return object;
+}
+
+static int32_t view_line(lv_obj_t *object)
+{
+	return lv_font_get_line_height(
+		       lv_obj_get_style_text_font(object, LV_PART_MAIN)) +
+	       lv_obj_get_style_text_line_space(object, LV_PART_MAIN);
+}
+
+/* A whole number of lines less one: the overlap a page leaves. */
+static int32_t line_page(lv_obj_t *object, int32_t line)
+{
+	return (lv_obj_get_content_height(object) / line - 1) * line;
+}
+
+static void test_form_focus_pixels(bool dark)
+{
+	static const char *const names[] = {
+		"Time", "Duration", "Text", "Gauge", "Choice", "Action",
+	};
+	const char *choices[] = { "First", "Second" };
+	const struct fplinux_ui_command open = {
+		.id = 20,
+		.type = FPLINUX_UI_COMMAND_OK,
+		.label = "Open",
+	};
+
+	ui.theme.background = lv_color_hex(dark ? 0x101418 : 0xf7f7f7);
+	ui.theme.surface = lv_color_hex(dark ? 0x29343a : 0xffffff);
+	ui.theme.foreground = lv_color_hex(dark ? 0xe7e7e7 : 0x102020);
+	ui.theme.muted = lv_color_hex(dark ? 0xadb5b5 : 0x526060);
+	ui.theme.control_border = lv_color_hex(dark ? 0x848e94 : 0x6b797b);
+	ui.theme.accent = lv_color_hex(dark ? 0xadcfde : 0x396173);
+	ui.theme.accent_text = lv_color_hex(dark ? 0x083442 : 0xffffff);
+	ui.theme.focus = ui.theme.accent;
+	for (size_t kind = 0; kind < sizeof(names) / sizeof(names[0]); ++kind) {
+		struct fplinux_ui_screen *form = fplinux_ui_form_new(&ui, NULL);
+		lv_draw_buf_t *focused, *unfocused;
+		lv_obj_t *box;
+		size_t first;
+
+		assert(form);
+		switch (kind) {
+		case 0:
+			first = fplinux_ui_form_append_date(
+				form, names[kind], FPLINUX_UI_TIME, 1704096000);
+			break;
+		case 1:
+			first = fplinux_ui_form_append_duration(
+				form, names[kind], 90);
+			break;
+		case 2:
+			first = fplinux_ui_form_append_text_field(
+				form, names[kind], "abc", 20,
+				FPLINUX_UI_TEXT_ANY);
+			break;
+		case 3:
+			first = fplinux_ui_form_append_gauge(form, names[kind],
+							     0, 10, 5, true);
+			break;
+		case 4:
+			first = fplinux_ui_form_append_choice(
+				form, names[kind], FPLINUX_UI_CHOICE_POPUP,
+				choices, 2);
+			break;
+		default:
+			first = fplinux_ui_form_append_string(form, NULL,
+							      names[kind]);
+			assert(fplinux_ui_form_set_appearance(
+				form, first, FPLINUX_UI_APPEARANCE_BUTTON));
+			assert(fplinux_ui_form_add_item_command(form, first,
+								&open));
+			break;
+		}
+		assert(first == 0);
+		assert(fplinux_ui_form_append_date(
+			       form, "Next", FPLINUX_UI_TIME, 1704096000) == 1);
+		if (kind)
+			assert(fplinux_ui_replace(&ui, form));
+		else
+			assert(fplinux_ui_push(&ui, form));
+		advance(0);
+		assert(fplinux_ui_form_get_focus(form) == 0);
+		box = label_with_text(ui.root, names[kind]);
+		assert(box);
+		while (lv_obj_get_parent(box) &&
+		       !lv_obj_is_scrollable(lv_obj_get_parent(box)))
+			box = lv_obj_get_parent(box);
+		assert(lv_obj_get_parent(box));
+		focused = snapshot(box);
+		screen_key(KEY_DOWN);
+		assert(fplinux_ui_form_get_focus(form) == 1);
+		unfocused = snapshot(box);
+		assert(changed_columns(focused, unfocused) > 10);
+		lv_draw_buf_destroy(focused);
+		lv_draw_buf_destroy(unfocused);
+		screen_key(KEY_UP);
+		assert(fplinux_ui_form_get_focus(form) == 0);
+	}
+}
+
+static void test_form_reading_edges(void)
+{
+	struct fplinux_ui_screen *form = fplinux_ui_form_new(&ui, "Reading");
+	lv_obj_t *lines[17];
+	lv_obj_t *first, *last, *view;
+	int32_t line;
+
+	assert(form);
+	assert(fplinux_ui_form_append_string(form, NULL, "First line") == 0);
+	for (size_t index = 1; index < 16; ++index) {
+		char text[32];
+
+		snprintf(text, sizeof(text), "First %02zu", index);
+		assert(fplinux_ui_form_append_string(form, NULL, text) ==
+		       index);
+	}
+	assert(fplinux_ui_form_append_string(form, NULL, "Last line") == 16);
+	assert(fplinux_ui_push(&ui, form));
+	advance(0);
+	first = label_with_text(ui.root, "First line");
+	last = label_with_text(ui.root, "Last line");
+	assert(first && last);
+	lines[0] = first;
+	lines[16] = last;
+	for (size_t index = 1; index < 16; ++index) {
+		char text[32];
+
+		snprintf(text, sizeof(text), "First %02zu", index);
+		lines[index] = label_with_text(ui.root, text);
+		assert(lines[index]);
+	}
+	view = lv_obj_get_parent(lv_obj_get_parent(first));
+	line = lv_font_get_line_height(lv_obj_get_style_text_font(last, 0));
+	assert(line > 0);
+	for (int direction = 0; direction < 2; ++direction) {
+		for (int steps = 0; steps < 100; ++steps) {
+			lv_area_t text, visible;
+			int32_t previous = lv_obj_get_scroll_y(view);
+			int32_t clipped;
+
+			if (direction ? previous == 0 :
+					lv_obj_get_scroll_bottom(view) <= 0)
+				break;
+			screen_key(direction ? KEY_UP : KEY_DOWN);
+			lv_obj_update_layout(view);
+			lv_obj_get_content_coords(view, &visible);
+			lv_obj_get_coords(direction ? first : last, &text);
+			clipped = direction ? visible.y1 - text.y1 :
+					      text.y2 - visible.y2;
+			assert(clipped <= 0 || clipped >= line);
+			assert(lv_obj_get_scroll_y(view) != previous);
+		}
+		assert(direction ? lv_obj_get_scroll_y(view) == 0 :
+				   lv_obj_get_scroll_bottom(view) <= 0);
+	}
+	for (int direction = 0; direction < 2; ++direction) {
+		bool seen[17] = { false };
+
+		for (int steps = 0; steps < 100; ++steps) {
+			lv_area_t visible;
+			int32_t previous = lv_obj_get_scroll_y(view);
+			int32_t moved;
+
+			lv_obj_update_layout(view);
+			lv_obj_get_content_coords(view, &visible);
+			for (size_t index = 0; index < 17; ++index) {
+				lv_area_t text;
+
+				lv_obj_get_coords(lines[index], &text);
+				if (text.y1 >= visible.y1 &&
+				    text.y2 <= visible.y2)
+					seen[index] = true;
+			}
+			if (direction ? previous == 0 :
+					lv_obj_get_scroll_bottom(view) <= 0)
+				break;
+			screen_key(direction ? KEY_LEFT : KEY_RIGHT);
+			moved = lv_obj_get_scroll_y(view) - previous;
+			if (moved < 0)
+				moved = -moved;
+			assert(moved > 0 &&
+			       moved <= lv_obj_get_content_height(view));
+		}
+		assert(direction ? lv_obj_get_scroll_y(view) == 0 :
+				   lv_obj_get_scroll_bottom(view) <= 0);
+		for (size_t index = 0; index < 17; ++index)
+			assert(seen[index]);
+	}
+}
+
+/* An Images form with captions at both ends and ordinary text between. */
+static void test_form_image_reading_edges(void)
+{
+	static uint8_t pixels[40 * 70];
+	const lv_image_dsc_t source = {
+		.header = { .magic = LV_IMAGE_HEADER_MAGIC,
+			    .cf = LV_COLOR_FORMAT_A8,
+			    .w = 40,
+			    .h = 70,
+			    .stride = 40 },
+		.data_size = sizeof(pixels),
+		.data = pixels,
+	};
+	struct fplinux_ui_screen *form = fplinux_ui_form_new(&ui, "Images");
+	lv_obj_t *images[2], *view;
+	const char *captions[] = { "First", "Last" };
+
+	memset(pixels, 255, sizeof(pixels));
+	assert(form);
+	assert(fplinux_ui_form_append_image(form, captions[0], &source) == 0);
+	for (size_t index = 1; index < 9; ++index)
+		assert(fplinux_ui_form_append_string(form, NULL, "Second") ==
+		       index);
+	assert(fplinux_ui_form_append_image(form, captions[1], &source) == 9);
+	assert(fplinux_ui_push(&ui, form));
+	advance(0);
+	for (size_t index = 0; index < 2; ++index) {
+		lv_obj_t *caption = label_with_text(ui.root, captions[index]);
+
+		assert(caption);
+		images[index] = image_under(lv_obj_get_parent(caption));
+		assert(images[index]);
+	}
+	view = scrolling_parent(images[0]);
+	for (int direction = 0; direction < 2; ++direction) {
+		bool seen[2][70] = { { false } };
+		int32_t heights[2] = { 0 };
+
+		for (int steps = 0; steps < 100; ++steps) {
+			lv_area_t visible;
+			int32_t previous = lv_obj_get_scroll_y(view);
+
+			lv_obj_update_layout(view);
+			lv_obj_get_content_coords(view, &visible);
+			for (size_t index = 0; index < 2; ++index) {
+				lv_area_t picture;
+
+				lv_obj_get_coords(images[index], &picture);
+				heights[index] = lv_area_get_height(&picture);
+				assert(heights[index] > 0 &&
+				       heights[index] <= 70);
+				for (int32_t row = 0; row < heights[index];
+				     ++row)
+					if (picture.y1 + row >= visible.y1 &&
+					    picture.y1 + row <= visible.y2)
+						seen[index][row] = true;
+			}
+			if (direction ? previous == 0 :
+					lv_obj_get_scroll_bottom(view) <= 0)
+				break;
+			screen_key(direction ? KEY_UP : KEY_DOWN);
+			assert(lv_obj_get_scroll_y(view) != previous);
+		}
+		assert(direction ? lv_obj_get_scroll_y(view) == 0 :
+				   lv_obj_get_scroll_bottom(view) <= 0);
+		for (size_t index = 0; index < 2; ++index)
+			for (int32_t row = 0; row < heights[index]; ++row)
+				assert(seen[index][row]);
+		{
+			lv_area_t visible, picture;
+
+			lv_obj_get_content_coords(view, &visible);
+			lv_obj_get_coords(images[direction ? 0 : 1], &picture);
+			assert(picture.y1 >= visible.y1 &&
+			       picture.y2 <= visible.y2);
+		}
+	}
+}
+
+static void test_scroll_edges(const char *kind)
+{
+	static const char text[] =
+		"First Second Third Fourth Fifth Sixth Last First Second "
+		"Third Fourth Fifth Sixth Last\nFirst\nSecond\nThird\nFourth\n"
+		"Fifth\nSixth\nLast\nFirst Second Third Fourth Fifth Sixth "
+		"Last\nFirst\nSecond\nThird\nFourth\nFifth\nSixth\nLast";
+	static const uint8_t pixels[40 * 70];
+	const lv_image_dsc_t source = {
+		.header = {
+			.magic = LV_IMAGE_HEADER_MAGIC,
+			.cf = LV_COLOR_FORMAT_A8,
+			.w = 40,
+			.h = 70,
+			.stride = 40,
+		},
+		.data_size = sizeof(pixels),
+		.data = pixels,
+	};
+	const char *choices[] = { "AV", "To", "Ab" };
+	struct scroll_walk walk = { .press = screen_key };
+	struct fplinux_ui_screen *screen = NULL;
+
+	/* An integrated application's surface between the system bars. */
+	lv_display_set_resolution(ui.display, fplinux_ui_width(&ui),
+				  fplinux_ui_height(&ui) -
+					  ui.spec->status_height -
+					  ui.spec->softkey_height);
+	if (!strcmp(kind, "alert")) {
+		lv_obj_t *message;
+		lv_area_t label, view;
+
+		screen = fplinux_ui_alert_new(&ui, FPLINUX_UI_ALERT_INFO,
+					      "Help", text, 0);
+		assert(screen);
+		fplinux_ui_push(&ui, screen);
+		advance(0);
+		message = label_with_text(ui.root, text);
+		walk.view = scrolling_parent(message);
+		walk.unit = walk.line = view_line(walk.view);
+		/* The message shows whole lines at every position. */
+		assert(!((lv_obj_get_content_height(walk.view) +
+			  lv_obj_get_style_text_line_space(walk.view, 0)) %
+			 walk.line));
+		walk_both_ways(&walk, line_page(walk.view, walk.line));
+		assert(walk_scroll(&walk, KEY_DOWN) > 1);
+		lv_obj_get_coords(message, &label);
+		lv_obj_get_content_coords(walk.view, &view);
+		assert(label.y2 <= view.y2);
+	} else if (!strcmp(kind, "read-only")) {
+		lv_obj_t *frame;
+
+		walked_field = new_field(true, text);
+		frame = fplinux_ui_text_object(walked_field);
+		assert(fplinux_ui_text_set_constraint(
+			walked_field, FPLINUX_UI_TEXT_UNEDITABLE));
+		/* Not a whole number of lines high. */
+		lv_obj_set_height(frame, fplinux_ui_height(&ui) / 2 + 3);
+		advance(0);
+		walk.view = area_at(0);
+		walk.press = field_press;
+		walk.unit = walk.line =
+			view_line(lv_textarea_get_label(walk.view));
+		walk_both_ways(&walk,
+			       line_page(walk.view, walk.line) > walk.line ?
+				       line_page(walk.view, walk.line) :
+				       walk.line);
+		fplinux_ui_text_delete(walked_field);
+		return;
+	} else if (!strcmp(kind, "form")) {
+		screen = fplinux_ui_form_new(&ui, "First");
+		assert(screen);
+		assert(fplinux_ui_form_append_string(screen, "First", text) ==
+		       0);
+		assert(fplinux_ui_form_append_text_field(
+			       screen, "Second", "AV", 20,
+			       FPLINUX_UI_TEXT_ANY) == 1);
+		assert(fplinux_ui_form_append_image(screen, "Third", &source) ==
+		       2);
+		assert(fplinux_ui_form_append_choice(
+			       screen, "Fourth", FPLINUX_UI_CHOICE_EXCLUSIVE,
+			       choices, 3) == 3);
+		assert(fplinux_ui_form_append_text_field(
+			       screen, "Fifth", "To", 20,
+			       FPLINUX_UI_TEXT_ANY) == 4);
+		assert(fplinux_ui_form_append_string(screen, "Sixth", text) ==
+		       5);
+		assert(fplinux_ui_form_append_gauge(screen, "Last", 0, 10, 5,
+						    true) == 6);
+		fplinux_ui_push(&ui, screen);
+		advance(0);
+		walk.view =
+			scrolling_parent(label_with_text(ui.root, "Second"));
+		walk.unit = ui.spec->row_height;
+		walk.form = true;
+		walk_both_ways(&walk, 0);
+	} else if (!strcmp(kind, "list")) {
+		screen = fplinux_ui_list_new(&ui, "First",
+					     FPLINUX_UI_LIST_IMPLICIT);
+		assert(screen);
+		for (size_t row = 0; row < 30; ++row)
+			assert(fplinux_ui_list_append(screen, row ? "AV" : "To",
+						      NULL) == row);
+		fplinux_ui_push(&ui, screen);
+		advance(0);
+		walk.view = scrolling_parent(label_with_text(ui.root, "To"));
+		walk.unit = ui.spec->row_height;
+		/* Rows wrap at either end; pages move whole rows. */
+		walk.presses = 29;
+		walk_both_ways(&walk, ui.spec->row_height);
+	} else if (!strcmp(kind, "menu")) {
+		struct fplinux_ui_menu_item items[30];
+
+		for (size_t index = 0; index < 30; ++index)
+			items[index] = (struct fplinux_ui_menu_item){
+				.action = (int)index,
+				.text = index ? "AV" : "To",
+			};
+		assert(fplinux_ui_menu_open(&ui, FPLINUX_UI_MENU_ORIGIN_LEFT,
+					    "First", items, 30, NULL, NULL));
+		advance(0);
+		walk.view = scrolling_parent(label_with_text(
+			lv_display_get_layer_top(ui.display), "To"));
+		walk.press = menu_press;
+		walk.unit = ui.spec->row_height;
+		/* The selection wraps at either end. */
+		walk.presses = 29;
+		walk_both_ways(&walk, 0);
+		fplinux_ui_menu_close(&ui);
+		return;
+	} else {
+		abort();
+	}
+}
+
 int main(int argc, char **argv)
 {
 	int width = 240, height = 320;
 
-	assert(argc == 3 || argc == 4 || argc == 5 || argc == 9 || argc == 10 ||
-	       argc == 11);
+	assert(argc == 3 || argc == 4 || argc == 5 || argc == 6 || argc == 9 ||
+	       argc == 10 || argc == 11 || argc == 12);
 	if (argc >= 5) {
 		width = atoi(argv[3]);
 		height = atoi(argv[4]);
 		if (argc == 5)
 			assert(!strcmp(argv[1], "scrollbars") ||
-			       !strcmp(argv[1], "menu-groups") ||
+			       !strncmp(argv[1], "modal-edges-", 12) ||
+			       !strcmp(argv[1], "alert-title-lifecycle") ||
+			       !strcmp(argv[1], "alert-activity-pixels") ||
+			       !strcmp(argv[1], "stacked-title-ownership") ||
+			       !strcmp(argv[1], "menu-dividers") ||
+			       !strncmp(argv[1], "choice-edge-", 12) ||
+			       !strncmp(argv[1], "scroll-edges-", 13) ||
+			       !strncmp(argv[1], "form-focus-", 11) ||
+			       !strcmp(argv[1], "form-reading-edges") ||
+			       !strcmp(argv[1], "form-image-reading-edges") ||
 			       !strncmp(argv[1], "form-image-caption-", 19));
 		assert(width > 0 && height > 0 && width * height <= 240 * 320);
 	}
@@ -2967,6 +4014,8 @@ int main(int argc, char **argv)
 	lv_obj_set_style_bg_opa(ui.root, LV_OPA_COVER, 0);
 	lv_obj_set_style_bg_color(ui.root, lv_color_black(), 0);
 	ui.theme.foreground = lv_color_white();
+	ui.theme.accent = lv_color_hex(0x395f70);
+	ui.theme.accent_text = lv_color_white();
 	ui.theme.font = fplinux_ui_builtin_font("caret-14");
 	ui.theme.font_large = ui.theme.font;
 	ui.theme.font_softkey = ui.theme.font;
@@ -2984,6 +4033,14 @@ int main(int argc, char **argv)
 		test_vertical_scroll();
 	else if (!strcmp(argv[1], "form-pages"))
 		test_form_pages();
+	else if (!strncmp(argv[1], "form-focus-", 11))
+		test_form_focus_pixels(!strcmp(argv[1] + 11, "dark"));
+	else if (!strcmp(argv[1], "form-reading-edges"))
+		test_form_reading_edges();
+	else if (!strcmp(argv[1], "form-image-reading-edges"))
+		test_form_image_reading_edges();
+	else if (!strcmp(argv[1], "alert-activity-pixels"))
+		test_alert_activity_pixels();
 	else if (!strncmp(argv[1], "symbols-", 8)) {
 		assert(argc == 10);
 		test_symbol_context(argv[1] + 8, atoi(argv[5]), atoi(argv[6]),
@@ -3031,6 +4088,15 @@ int main(int argc, char **argv)
 		test_popup_choice_height(false);
 	else if (!strcmp(argv[1], "choice-height-overflow"))
 		test_popup_choice_height(true);
+	else if (!strncmp(argv[1], "choice-edge-", 12))
+		test_popup_choice_edges(!strcmp(argv[1] + 12, "overflow"));
+	else if (!strncmp(argv[1], "modal-edges-", 12))
+		test_modal_edges(strstr(argv[1], "choice") != NULL,
+				 strstr(argv[1], "light") != NULL);
+	else if (!strcmp(argv[1], "alert-title-lifecycle"))
+		test_alert_title_lifecycle();
+	else if (!strcmp(argv[1], "stacked-title-ownership"))
+		test_stacked_title_ownership();
 	else if (!strcmp(argv[1], "list-icons-stored"))
 		test_list_icons(false);
 	else if (!strcmp(argv[1], "list-icons-virtual"))
@@ -3063,18 +4129,28 @@ int main(int argc, char **argv)
 		test_menu_position();
 	else if (!strcmp(argv[1], "menu-resize"))
 		test_menu_resize();
-	else if (!strcmp(argv[1], "menu-groups"))
-		test_menu_groups();
-	else if (!strncmp(argv[1], "menu-width-", 11)) {
-		assert(argc == 4);
-		test_menu_width(argv[1] + 11, atoi(argv[3]));
+	else if (!strcmp(argv[1], "menu-dividers"))
+		test_menu_dividers();
+	else if (!strncmp(argv[1], "scroll-edges-", 13))
+		test_scroll_edges(argv[1] + 13);
+	else if (!strcmp(argv[1], "menu-band")) {
+		const int rows[2] = { atoi(argv[8]), atoi(argv[10]) };
+		const bool reserves[2] = { !strcmp(argv[9], "band"),
+					   !strcmp(argv[11], "band") };
+
+		assert(argc == 12);
+		test_menu_band(atoi(argv[5]), atoi(argv[6]), atoi(argv[7]),
+			       rows, reserves);
+	} else if (!strncmp(argv[1], "menu-width-", 11)) {
+		assert(argc == 6);
+		test_menu_width(argv[1] + 11, atoi(argv[5]));
 	} else if (!strcmp(argv[1], "menu-insets") ||
 		   !strcmp(argv[1], "menu-title-insets")) {
-		assert(argc == 11);
+		assert(argc == 12);
 		test_menu_geometry(atoi(argv[5]), atoi(argv[6]), atoi(argv[7]),
 				   atoi(argv[8]),
 				   (enum fplinux_ui_menu_origin)atoi(argv[9]),
-				   atoi(argv[10]),
+				   atoi(argv[10]), atoi(argv[11]),
 				   !strcmp(argv[1], "menu-title-insets"));
 	} else
 		abort();

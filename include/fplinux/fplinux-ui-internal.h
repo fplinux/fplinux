@@ -34,6 +34,21 @@ fplinux_ui_spec(const struct fplinux_ui *ui);
 FPLINUX_UI_INTERNAL void fplinux_ui_scrollbar_layout(lv_obj_t *object);
 
 /*
+ * fplinux-ui-style.c: scrolls object step pixels down (negative: up), never
+ * animated, using the line policy of fplinux_ui_line_scroll().
+ */
+FPLINUX_UI_INTERNAL void fplinux_ui_scroll_lines(lv_obj_t *object, int32_t step,
+						 int32_t line);
+
+/* One viewport of whole lines, retaining the last line as overlap. */
+FPLINUX_UI_INTERNAL void fplinux_ui_scroll_page(lv_obj_t *object, int32_t line,
+						bool forward);
+
+/* Shared chrome of a framed control; its editor owns range/cursor selection. */
+FPLINUX_UI_INTERNAL void
+fplinux_ui_control_focus(struct fplinux_ui *ui, lv_obj_t *frame, bool focused);
+
+/*
  * CONFIG explicitly names Launcher mode. Its high-level screens use the
  * runtime's local legend bar; its Canvas keeps the launcher's own bars.
  */
@@ -188,6 +203,20 @@ fplinux_ui_menu_set_position(struct fplinux_ui *ui,
 			     const struct fplinux_ui_menu_position *position);
 
 /*
+ * The top of a line of font in a header_height title band: centred in the
+ * rows above the band's bottom divider, an odd remainder below, as a list
+ * row centres its text in its cell.
+ */
+static inline int32_t
+fplinux_ui_band_line_y(const struct fplinux_ui_profile_spec *spec,
+		       const lv_font_t *font)
+{
+	return (spec->header_height - spec->divider_width -
+		lv_font_get_line_height(font)) /
+	       2;
+}
+
+/*
  * fplinux-ui.c: a title label in font, one line high so that a longer title
  * ends with dots, as in fplinux_ui_header().
  */
@@ -200,6 +229,10 @@ FPLINUX_UI_INTERNAL void fplinux_ui_title_init(lv_obj_t *label,
 FPLINUX_UI_INTERNAL void fplinux_ui_title_scroll(lv_obj_t *label);
 /* The title's screen is hidden: a pass it makes ends with dots. */
 FPLINUX_UI_INTERNAL void fplinux_ui_title_hide(lv_obj_t *label);
+
+/* Keep the channel visible at viewport ends without a neighboring line. */
+FPLINUX_UI_INTERNAL void fplinux_ui_scrollbar_caps(lv_obj_t *object, bool top,
+						   bool bottom);
 
 /*
  * The screen stack of fplinux-ui-screen.c, kept in the runtime: an open

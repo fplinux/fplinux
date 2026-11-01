@@ -18,7 +18,7 @@
 #define ROW_MARKED LV_STATE_CHECKED
 /* The icon box carries its image role through stored row edits and reuse. */
 #define ICON_APP_TILE LV_STATE_USER_2
-/* Stored rows can append a status image after the text/detail body. */
+/* Stored rows can append a trailing object after the text/detail body. */
 #define ROW_TRAILING LV_STATE_USER_3
 
 /*
@@ -78,6 +78,42 @@ struct fplinux_ui_listview {
 	size_t slot_count;
 };
 
+/*
+ * A whole-pixel check inside the box's inner square of side inner: each
+ * column is a run of stroke pixels, one row higher or lower than its
+ * neighbour, so both arms are exact 45-degree steps. The long arm spans
+ * half the inner side and the short arm the largest odd column count up to
+ * half of that; with the inner side a multiple of four (12, 16 and 20 px in
+ * the profiles) the check's width and height are even, so it is centred
+ * with whole-pixel margins of at least 1 px on every side.
+ */
+static void draw_check(lv_layer_t *layer, const lv_area_t *box, int32_t inner,
+		       int32_t stroke, lv_color_t colour)
+{
+	int32_t long_arm = inner / 2;
+	int32_t short_arm = (long_arm / 2 - 1) | 1;
+	int32_t width = short_arm + long_arm + 1;
+	int32_t left = box->x1 + stroke + (inner - width) / 2;
+	int32_t top = box->y1 + stroke + (inner - long_arm - stroke) / 2;
+	lv_draw_rect_dsc_t run;
+
+	lv_draw_rect_dsc_init(&run);
+	run.bg_color = colour;
+	run.bg_opa = LV_OPA_COVER;
+	for (int32_t column = 0; column < width; ++column) {
+		int32_t step = column < short_arm ? short_arm - column :
+						    column - short_arm;
+		lv_area_t area = {
+			.x1 = left + column,
+			.y1 = top + long_arm - step,
+			.x2 = left + column,
+			.y2 = top + long_arm - step + stroke - 1,
+		};
+
+		lv_draw_rect(layer, &run, &area);
+	}
+}
+
 static void marker_draw(lv_event_t *event)
 {
 	const struct fplinux_ui_listview *list = lv_event_get_user_data(event);
@@ -118,23 +154,7 @@ static void marker_draw(lv_event_t *event)
 		outline.border_width = 0;
 		lv_draw_rect(layer, &outline, &box);
 	} else {
-		lv_draw_line_dsc_t check;
-
-		/* The check stays within the middle half of the square. */
-		lv_draw_line_dsc_init(&check);
-		check.color = colour;
-		check.width = stroke;
-		check.round_start = true;
-		check.round_end = true;
-		check.p1 = (lv_point_precise_t){ box.x1 + size / 4,
-						 box.y1 + size / 2 };
-		check.p2 = (lv_point_precise_t){ box.x1 + 7 * size / 16,
-						 box.y1 + 3 * size / 4 };
-		lv_draw_line(layer, &check);
-		check.p1 = check.p2;
-		check.p2 = (lv_point_precise_t){ box.x1 + 3 * size / 4,
-						 box.y1 + size / 4 };
-		lv_draw_line(layer, &check);
+		draw_check(layer, &box, size - 2 * stroke, stroke, colour);
 	}
 }
 
@@ -205,8 +225,6 @@ static void init_styles(struct fplinux_ui_listview *list)
 	lv_style_set_height(&list->row_style, list->pitch);
 	lv_style_set_pad_hor(&list->row_style, spec->row_padding);
 	lv_style_set_pad_column(&list->row_style, spec->row_gap);
-	lv_style_set_bg_color(&list->row_style, theme->accent);
-	lv_style_set_bg_opa(&list->row_style, LV_OPA_TRANSP);
 	lv_style_set_border_color(&list->row_style, theme->border);
 	lv_style_set_border_width(&list->row_style, spec->divider_width);
 	lv_style_set_border_side(&list->row_style, LV_BORDER_SIDE_BOTTOM);
@@ -216,10 +234,8 @@ static void init_styles(struct fplinux_ui_listview *list)
 	lv_style_set_flex_cross_place(&list->row_style, LV_FLEX_ALIGN_CENTER);
 	lv_style_set_flex_track_place(&list->row_style, LV_FLEX_ALIGN_CENTER);
 
-	/* The selected row is inverted over its full pitch, divider included. */
+	/* highlight_draw() inverts the selected row's cell. */
 	lv_style_init(&list->selected_style);
-	lv_style_set_bg_opa(&list->selected_style, LV_OPA_COVER);
-	lv_style_set_border_color(&list->selected_style, theme->accent);
 	lv_style_set_text_color(&list->selected_style, theme->accent_text);
 
 	/* Both kinds reserve the icon-size square in either mark state. */
@@ -324,6 +340,13 @@ fplinux_ui_listview_create(struct fplinux_ui *ui, lv_obj_t *parent,
 	lv_obj_remove_style_all(object);
 	lv_obj_set_size(object, lv_pct(100), lv_pct(100));
 	lv_obj_set_style_pad_left(object, 0, 0);
+	/*
+	 * The line below the list, such as the soft-key bar's, is its last
+	 * divider: the view extends that far under it, so a row ending at the
+	 * bottom fits whole and neither its divider nor the last row's
+	 * transparent one shows above that line.
+	 */
+	lv_obj_set_style_pad_bottom(object, -spec->divider_width, 0);
 	lv_obj_set_style_text_font(object, list->theme->font, 0);
 	lv_obj_set_scroll_dir(object, LV_DIR_VER);
 	lv_obj_set_scrollbar_mode(object, LV_SCROLLBAR_MODE_AUTO);
@@ -343,19 +366,24 @@ void fplinux_ui_listview_set_inline_detail(struct fplinux_ui_listview *list,
 	list->inline_detail = inline_detail;
 }
 
-static void set_row_state(const struct fplinux_ui_listview *list, lv_obj_t *row,
+static void update_level_hint(struct fplinux_ui_listview *list, lv_obj_t *row);
+
+static void set_row_state(struct fplinux_ui_listview *list, lv_obj_t *row,
 			  bool selected)
 {
 	lv_obj_t *detail = row_detail(list, row);
 	lv_obj_t *icon = row_icon(list, row);
 
 	lv_obj_set_state(row, ROW_SELECTED, selected);
+	/* The drawn highlight is no style: the cell is redrawn explicitly. */
+	lv_obj_invalidate(row);
 	if (detail)
 		lv_obj_set_state(detail, ROW_SELECTED, selected);
 	if (icon)
 		lv_obj_set_state(icon, ROW_SELECTED, selected);
 	if (row_trailing(row))
 		lv_obj_set_state(row_trailing(row), ROW_SELECTED, selected);
+	update_level_hint(list, row);
 	if (list->icons)
 		lv_obj_set_state(lv_obj_get_child(row, icon_slot(list)),
 				 ROW_SELECTED, selected);
@@ -429,6 +457,11 @@ static void add_column(struct fplinux_ui_listview *list, lv_obj_t *row,
 		column,
 		lv_font_get_line_height(lv_obj_get_style_text_font(text, 0)) +
 			lv_font_get_line_height(list->theme->font));
+	if (row_trailing(row) &&
+	    lv_obj_check_type(row_trailing(row), &lv_label_class))
+		lv_obj_set_height(column,
+				  lv_font_get_line_height(
+					  lv_obj_get_style_text_font(text, 0)));
 }
 
 /*
@@ -442,8 +475,23 @@ static void use_details(struct fplinux_ui_listview *list)
 	for (size_t i = 0; i < rows; ++i) {
 		lv_obj_t *row = list->is_virtual ? list->slots[i] :
 						   row_at(list, i);
+		lv_obj_t *detail = row_detail(list, row);
 
 		add_column(list, row, row_text(list, row));
+		if (detail) {
+			lv_obj_set_parent(detail, row_body(list, row));
+			lv_obj_remove_style(detail, &list->detail_style, 0);
+			lv_obj_add_style(detail, &list->detail_line_style, 0);
+			lv_obj_set_height(
+				row_body(list, row),
+				lv_font_get_line_height(
+					lv_obj_get_style_text_font(
+						lv_obj_get_child(
+							row_body(list, row), 0),
+						0)) +
+					lv_font_get_line_height(
+						list->theme->font));
+		}
 	}
 	list->details = true;
 	set_pitch(list, list->spec->row_height_detail);
@@ -485,6 +533,23 @@ static void set_detail(struct fplinux_ui_listview *list, lv_obj_t *row,
 				 lv_obj_has_state(row, ROW_SELECTED));
 	}
 	lv_label_set_text(label, detail);
+}
+
+static void update_level_hint(struct fplinux_ui_listview *list, lv_obj_t *row)
+{
+	lv_obj_t *bar = row_trailing(row);
+	lv_obj_t *detail;
+
+	if (!bar || !lv_obj_check_type(bar, &lv_bar_class))
+		return;
+	detail = row_detail(list, row);
+	if (!detail) {
+		set_detail(list, row, "0");
+		detail = row_detail(list, row);
+	}
+	lv_label_set_text_fmt(
+		detail, lv_obj_has_state(row, ROW_SELECTED) ? "← %d →" : "%d",
+		(int)lv_bar_get_value(bar));
 }
 
 static void tile_ring_draw(lv_event_t *event)
@@ -609,11 +674,36 @@ bool fplinux_ui_listview_set_emphasis(struct fplinux_ui_listview *list,
 	lv_obj_set_style_text_font(text, font, 0);
 	lv_obj_set_height(text, line);
 	if (list->details)
-		lv_obj_set_height(
-			row_body(list, row),
-			line + lv_font_get_line_height(list->theme->font));
+		lv_obj_set_height(row_body(list, row),
+				  line + ((row_trailing(row) &&
+					   lv_obj_check_type(row_trailing(row),
+							     &lv_label_class) &&
+					   !row_detail(list, row)) ?
+						  0 :
+						  lv_font_get_line_height(
+							  list->theme->font)));
 	fplinux_ui_marquee_changed(list->ui, text, row_detail(list, row));
 	return true;
+}
+
+static void keep_focus(struct fplinux_ui_listview *list, int32_t dy);
+
+static void clear_trailing(struct fplinux_ui_listview *list, lv_obj_t *row)
+{
+	lv_obj_t *trailing = row_trailing(row);
+
+	if (!trailing)
+		return;
+	if (lv_obj_check_type(trailing, &lv_bar_class))
+		set_detail(list, row, NULL);
+	lv_obj_remove_state(row, ROW_TRAILING);
+	lv_obj_delete(trailing);
+	if (list->details)
+		lv_obj_set_height(
+			row_body(list, row),
+			lv_font_get_line_height(lv_obj_get_style_text_font(
+				row_text(list, row), 0)) +
+				lv_font_get_line_height(list->theme->font));
 }
 
 bool fplinux_ui_listview_set_trailing_icon(struct fplinux_ui_listview *list,
@@ -627,12 +717,11 @@ bool fplinux_ui_listview_set_trailing_icon(struct fplinux_ui_listview *list,
 	}
 	row = row_at(list, index);
 	image = row_trailing(row);
-	if (!source) {
-		if (image) {
-			lv_obj_remove_state(row, ROW_TRAILING);
-			lv_obj_delete(image);
-		}
-	} else {
+	if (image && (!source || !lv_obj_check_type(image, &lv_image_class))) {
+		clear_trailing(list, row);
+		image = NULL;
+	}
+	if (source) {
 		if (!image) {
 			image = lv_image_create(row);
 			if (!image) {
@@ -656,39 +745,134 @@ bool fplinux_ui_listview_set_trailing_icon(struct fplinux_ui_listview *list,
 	return true;
 }
 
-static void separator_draw(lv_event_t *event)
+bool fplinux_ui_listview_set_trailing_value(struct fplinux_ui_listview *list,
+					    size_t index, const char *value)
 {
-	const struct fplinux_ui_listview *list = lv_event_get_user_data(event);
-	lv_obj_t *row = lv_event_get_target_obj(event);
-	lv_draw_rect_dsc_t separator;
-	lv_area_t area;
-
-	if (!lv_obj_get_index(row))
-		return;
-	lv_obj_get_coords(row, &area);
-	area.y2 = area.y1 + list->spec->divider_width - 1;
-	lv_draw_rect_dsc_init(&separator);
-	separator.bg_color = list->theme->border;
-	separator.bg_opa = LV_OPA_COVER;
-	lv_draw_rect(lv_event_get_layer(event), &separator, &area);
-}
-
-bool fplinux_ui_listview_set_separator_before(struct fplinux_ui_listview *list,
-					      size_t index, bool separator)
-{
-	lv_obj_t *row;
+	lv_obj_t *row, *label;
 
 	if (list->is_virtual || index >= list->count) {
 		errno = EINVAL;
 		return false;
 	}
 	row = row_at(list, index);
-	lv_obj_remove_event_cb(row, separator_draw);
-	if (separator)
-		lv_obj_add_event_cb(row, separator_draw, LV_EVENT_DRAW_MAIN_END,
-				    list);
-	lv_obj_invalidate(row);
+	label = row_trailing(row);
+	if (label && (!value || !lv_obj_check_type(label, &lv_label_class))) {
+		clear_trailing(list, row);
+		label = NULL;
+	}
+	if (value) {
+		if (!label) {
+			label = lv_label_create(row);
+			if (!label) {
+				errno = ENOMEM;
+				return false;
+			}
+			lv_obj_add_state(row, ROW_TRAILING);
+			lv_obj_add_style(label, &list->detail_style, 0);
+			lv_obj_add_style(label, &list->detail_selected_style,
+					 ROW_SELECTED);
+			lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
+			lv_obj_set_state(label, ROW_SELECTED,
+					 lv_obj_has_state(row, ROW_SELECTED));
+		}
+		lv_label_set_text(label, value);
+		if (list->details && !row_detail(list, row))
+			lv_obj_set_height(
+				row_body(list, row),
+				lv_font_get_line_height(
+					lv_obj_get_style_text_font(
+						row_text(list, row), 0)));
+	}
+	fplinux_ui_marquee_changed(list->ui, row_text(list, row),
+				   row_detail(list, row));
 	return true;
+}
+
+bool fplinux_ui_listview_set_level(struct fplinux_ui_listview *list,
+				   size_t index, int32_t minimum,
+				   int32_t maximum, int32_t value)
+{
+	lv_obj_t *row, *bar;
+	bool had_details;
+
+	if (list->is_virtual || index >= list->count || minimum >= maximum ||
+	    (int64_t)maximum - minimum > INT32_MAX || value < minimum ||
+	    value > maximum) {
+		errno = EINVAL;
+		return false;
+	}
+	had_details = list->details;
+	if (!had_details)
+		use_details(list);
+	row = row_at(list, index);
+	bar = row_trailing(row);
+	if (bar && !lv_obj_check_type(bar, &lv_bar_class)) {
+		clear_trailing(list, row);
+		bar = NULL;
+	}
+	if (!bar) {
+		bar = lv_bar_create(row);
+		if (!bar) {
+			errno = ENOMEM;
+			return false;
+		}
+		lv_obj_add_state(row, ROW_TRAILING);
+		lv_obj_remove_style_all(bar);
+		lv_obj_set_size(bar, 2 * list->spec->row_icon_size,
+				list->spec->bar_height);
+		lv_obj_set_style_bg_color(bar, list->theme->border,
+					  LV_PART_MAIN);
+		lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN);
+		lv_obj_set_style_bg_color(bar, list->theme->focus,
+					  LV_PART_INDICATOR);
+		lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_INDICATOR);
+		lv_obj_set_style_bg_color(bar, list->theme->accent,
+					  LV_PART_MAIN | ROW_SELECTED);
+		lv_obj_set_style_border_color(bar, list->theme->accent_text,
+					      LV_PART_MAIN | ROW_SELECTED);
+		lv_obj_set_style_border_opa(bar, LV_OPA_COVER,
+					    LV_PART_MAIN | ROW_SELECTED);
+		lv_obj_set_style_border_width(bar, list->spec->divider_width,
+					      LV_PART_MAIN | ROW_SELECTED);
+		lv_obj_set_style_bg_color(bar, list->theme->accent_text,
+					  LV_PART_INDICATOR | ROW_SELECTED);
+		lv_obj_set_state(bar, ROW_SELECTED,
+				 lv_obj_has_state(row, ROW_SELECTED));
+	}
+	lv_bar_set_range(bar, minimum, maximum);
+	lv_bar_set_value(bar, value, LV_ANIM_OFF);
+	update_level_hint(list, row);
+	fplinux_ui_marquee_changed(list->ui, row_text(list, row),
+				   row_detail(list, row));
+	if (!had_details)
+		keep_focus(list, 0);
+	return true;
+}
+
+/*
+ * A row's cell is its pitch less the divider at its bottom, and the selected
+ * row inverts exactly that cell: its own divider stays a divider, and the
+ * last row's transparent one stays background. Unselected content between
+ * two dividers and selected content within the highlight are then centred
+ * alike: an icon, marker, tile ring or text line keeps equal space above and
+ * below when its height and the cell share parity, and otherwise one pixel
+ * more below.
+ */
+static void highlight_draw(lv_event_t *event)
+{
+	const struct fplinux_ui_listview *list = lv_event_get_user_data(event);
+	lv_obj_t *row = lv_event_get_target_obj(event);
+	lv_draw_rect_dsc_t highlight;
+	lv_area_t cell;
+
+	if (!lv_obj_has_state(row, ROW_SELECTED))
+		return;
+	lv_obj_get_coords(row, &cell);
+	cell.y2 -= list->spec->divider_width;
+	lv_draw_rect_dsc_init(&highlight);
+	highlight.bg_color = list->theme->accent;
+	highlight.bg_opa = LV_OPA_COVER;
+	lv_draw_rect(lv_event_get_layer(event), &highlight, &cell);
 }
 
 /* A new row with its text at the end of parent's children. */
@@ -701,6 +885,7 @@ static lv_obj_t *make_row(struct fplinux_ui_listview *list, const char *text)
 	lv_obj_add_style(row, &list->row_style, 0);
 	lv_obj_add_style(row, &list->selected_style, ROW_SELECTED);
 	lv_obj_set_scrollable(row, false);
+	lv_obj_add_event_cb(row, highlight_draw, LV_EVENT_DRAW_MAIN, list);
 	if (list->marker != FPLINUX_UI_LISTVIEW_PLAIN) {
 		lv_obj_t *marker = lv_obj_create(row);
 
@@ -842,6 +1027,17 @@ bool fplinux_ui_listview_set_text(struct fplinux_ui_listview *list,
 	row = row_at(list, index);
 	lv_label_set_text(row_text(list, row), text);
 	set_detail(list, row, detail);
+	update_level_hint(list, row);
+	if (list->details && row_trailing(row) &&
+	    lv_obj_check_type(row_trailing(row), &lv_label_class))
+		lv_obj_set_height(
+			row_body(list, row),
+			lv_font_get_line_height(lv_obj_get_style_text_font(
+				row_text(list, row), 0)) +
+				(row_detail(list, row) ?
+					 lv_font_get_line_height(
+						 list->theme->font) :
+					 0));
 	/* A focused row's marquee starts over with the new text. */
 	fplinux_ui_marquee_changed(list->ui, row_text(list, row),
 				   row_detail(list, row));
@@ -1052,9 +1248,8 @@ static bool move(struct fplinux_ui_listview *list, long rows,
 	if (!list->selectable) {
 		if (!overflows(list->object))
 			return false;
-		lv_obj_scroll_by_bounded(list->object, 0,
-					 (int32_t)-rows * list->pitch,
-					 LV_ANIM_OFF);
+		fplinux_ui_scroll_lines(
+			list->object, (int32_t)rows * list->pitch, list->pitch);
 		return true;
 	}
 	index = fplinux_ui_focus_step(list->selected, list->count, rows,

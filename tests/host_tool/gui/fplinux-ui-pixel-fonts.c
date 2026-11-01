@@ -3,6 +3,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 
 static unsigned int advance(const lv_font_t *font, uint32_t character,
 			    uint32_t next)
@@ -96,10 +97,22 @@ int main(int argc, char **argv)
 	lv_font_glyph_dsc_t one = { 0 }, h = { 0 }, checkmark = { 0 };
 	unsigned int glyphs = 0, partial;
 
-	assert(argc == 2);
+	assert(argc == 2 || argc == 3);
 	lv_init();
 	font = fplinux_ui_builtin_font(argv[1]);
 	assert(font);
+	if (argc == 3 && !strcmp(argv[2], "baseline")) {
+		lv_font_glyph_dsc_t dot = { 0 }, ellipsis = { 0 };
+
+		assert(lv_font_get_glyph_dsc(font, &dot, '.', 0));
+		assert(lv_font_get_glyph_dsc(font, &ellipsis, 0x2026, 0));
+		assert(!dot.is_placeholder && !ellipsis.is_placeholder);
+		assert(dot.box_w && dot.box_h && ellipsis.box_w &&
+		       ellipsis.box_h);
+		printf("%d %d\n", dot.ofs_y, ellipsis.ofs_y);
+		lv_deinit();
+		return 0;
+	}
 	partial = own_alpha(font, &glyphs);
 	assert(lv_font_get_glyph_dsc(font, &one, '1', 0));
 	assert(lv_font_get_glyph_dsc(font, &h, 'H', 0));

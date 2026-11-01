@@ -15,6 +15,7 @@ source="
 	lv_conf.h
 	shared-abi.patch
 	canvas-cache-drop.patch
+	label-dots-fit.patch
 	LICENSE
 "
 builddir="$srcdir/lvgl-$pkgver"
@@ -81,5 +82,6 @@ sha512sums="
 80baa9d9b4ade59adf39fa8b7c5d6978cfc595d28650556320efadc2b357504fc9b7a8baec1248ea45ae390f6d93cc198519746e559654a30ba2865b548b2b52  lv_conf.h
 76b89727220ebffcab26505e4aef915999b1a1eb0a190f2a1f126e0ed654ab9eb7e7cde762e6fc9f2ae1d9a9c7809c97d561b602624ae5e5210350b26d6098f8  shared-abi.patch
 7147e3735f8e4c1bef4009c0a76a3a8939402b9fc5b7fe96c7ab0db6564cf494322d0787c86ae8c3b87686759cafdc09fb49f49d047ca0e3f925e710537f0353  canvas-cache-drop.patch
+b4a5e39c0bbd4fe290af63698760e59952aa3db162cec2030ce1ad0c48f5e1dfceaeb6ae9eb6ee48d9e57d85c6e508af03a6cf7677848a16a772cd33b212dcc8  label-dots-fit.patch
 260c02ff0a3e04ff0c2a95a936494b6a114a0a22121557059591d44af5fab5644ab8484be61eb33c12a6c9eef2170a108d51e2972adaef942568d94ae0d4ec83  LICENSE
 "

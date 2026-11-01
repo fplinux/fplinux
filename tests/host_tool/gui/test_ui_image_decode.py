@@ -20,7 +20,9 @@ if TYPE_CHECKING:
 
 @pytest.fixture(scope="module")
 def ui_image_decode(
-    tmp_path_factory: pytest.TempPathFactory, lvgl_library: tuple[Path, Path]
+    tmp_path_factory: pytest.TempPathFactory,
+    lvgl_library: tuple[Path, Path],
+    ui_activity_masks: Path,
 ) -> Iterator[Path]:
     """Link the image API as a separate object, retaining native decoder and canvas."""
     headers, archive = lvgl_library
@@ -42,6 +44,7 @@ def ui_image_decode(
                 "-DLV_LVGL_H_INCLUDE_SYSTEM",
                 f'-DLV_CONF_PATH="{ROOT / "alpine/aports/fplinux-lvgl/lv_conf.h"}"',
                 f"-I{ROOT / 'include/fplinux'}",
+                f"-I{ui_activity_masks}",
                 str(ROOT / "tests/host_tool/gui/fplinux-ui-image-decode.c"),
                 str(ROOT / "lib/fplinux/fplinux-ui-screen.c"),
                 str(archive),

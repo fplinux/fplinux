@@ -12,6 +12,7 @@ import pytest
 
 from tests import ROOT
 from tests.c_harness import c_build_directory
+from tests.host_tool.gui.list_rows import ListArea, frame_pixels, sequence_faults
 from tests.process import run_process
 
 if TYPE_CHECKING:
@@ -99,12 +100,36 @@ def test_files_navigation_search_copy_and_lifecycle_on_actual_ui(
     assert (files / "large.bin").read_bytes() == contents
     assert (files / "b-dir/large.bin").read_bytes() == contents
     assert not list((files / "b-dir").glob(".fplinux-copy-*"))
-    bar_heights = {(128, 128): 32, (128, 160): 32, (176, 220): 42, (240, 320): 52, (320, 240): 44}
+    bar_heights = {(128, 128): 32, (128, 160): 34, (176, 220): 43, (240, 320): 52, (320, 240): 41}
     expected_bytes = width * (height - bar_heights[screen]) * 2
     states = ["directory", "menu", "input", "results", "destination", "progress", "system-menu"]
     frames = [(tmp_path / f"files-{state}.rgb565").read_bytes() for state in states]
     assert all(len(frame) == expected_bytes for frame in frames)
     assert len(set(frames)) == len(states)
+    # The folder's rows lie below its title band at the ordinary row pitch.
+    band, pitch = {
+        (128, 128): (25, 24),
+        (128, 160): (22, 23),
+        (176, 220): (26, 27),
+        (240, 320): (28, 33),
+        (320, 240): (28, 32),
+    }[screen]
+    area = ListArea(
+        width=width,
+        top=band,
+        bottom=height - bar_heights[screen],
+        pitch=pitch,
+        edge=(0, 2),
+        divider=0xBE39 if theme == "light" else 0x3A29,
+        highlight=0x3B0E if theme == "light" else 0xAE7B,
+    )
+    names = ["files-directory"]
+    names += [f"files-rows-down-{row:02}" for row in range(1, 24)]
+    names += [f"files-rows-up-{row:02}" for row in range(22, -1, -1)]
+    rows = {
+        name: frame_pixels((tmp_path / f"{name}.rgb565").read_bytes(), width) for name in names
+    }
+    assert sequence_faults(rows, area) == []
 
 
 def test_files_stop_and_close_waits_for_worker_cleanup(

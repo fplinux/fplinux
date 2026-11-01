@@ -827,7 +827,7 @@ int main(int argc, char **argv)
 	assert(profile);
 	if (config.screen_width == 128) {
 		columns = 21;
-		rows = config.screen_height == 128 ? 6 : 9;
+		rows = config.screen_height == 128 ? 5 : 8;
 		other_columns = 16;
 		other_rows = config.screen_height == 128 ? 4 : 6;
 	} else if (config.screen_width == 176) {

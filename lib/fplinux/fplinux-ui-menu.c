@@ -13,6 +13,8 @@
  * The options menu: a brand edge line, an optional title
  * band like fplinux_ui_header() and a plain list with optional glyphs, at
  * the bottom of the application surface just above the soft-key legends.
+ * A menu that would show too few rows below a free title band's height
+ * takes the whole surface.
  */
 struct fplinux_ui_menu_view {
 	struct fplinux_ui *ui;
@@ -23,15 +25,18 @@ struct fplinux_ui_menu_view {
 	enum fplinux_ui_menu_origin origin;
 	int32_t row_width;
 	int32_t title_width;
-	/* Where the rows start: below the edge and the band. */
-	int32_t top;
+	/* The title band's height, or 0. */
+	int32_t band;
 	size_t count;
 	struct fplinux_ui_listview *list;
 	int *actions;
 	bool chosen;
 };
 
-/* Lines for Up and Down, pages for Left and Right; never animated. */
+/*
+ * Lines for Up and Down, pages with one-line overlap for Left and Right;
+ * never animated.
+ */
 bool fplinux_ui_scroll_key(lv_obj_t *object, const struct fplinux_ui_key *key)
 {
 	int32_t line;
@@ -48,15 +53,16 @@ bool fplinux_ui_scroll_key(lv_obj_t *object, const struct fplinux_ui_key *key)
 	line = lv_font_get_line_height(
 		       lv_obj_get_style_text_font(object, LV_PART_MAIN)) +
 	       lv_obj_get_style_text_line_space(object, LV_PART_MAIN);
+	if (line <= 0)
+		return false;
 	step = line;
 	if (key->code == KEY_LEFT || key->code == KEY_RIGHT) {
-		step = lv_obj_get_content_height(object) - line;
-		if (step < line)
-			step = line;
+		fplinux_ui_scroll_page(object, line, key->code == KEY_RIGHT);
+		return true;
 	}
-	if (key->code == KEY_DOWN || key->code == KEY_RIGHT)
+	if (key->code == KEY_UP)
 		step = -step;
-	lv_obj_scroll_by_bounded(object, 0, step, LV_ANIM_OFF);
+	fplinux_ui_scroll_lines(object, step, line);
 	return true;
 }
 
@@ -122,7 +128,8 @@ static lv_obj_t *add_title(struct fplinux_ui *ui, lv_obj_t *popup,
 	lv_obj_set_style_border_side(band, LV_BORDER_SIDE_BOTTOM, 0);
 	fplinux_ui_title_init(label, theme->font_large);
 	lv_label_set_text(label, title);
-	lv_obj_align(label, LV_ALIGN_LEFT_MID, spec->margin, 0);
+	lv_obj_set_pos(label, spec->margin,
+		       fplinux_ui_band_line_y(spec, theme->font_large));
 	return label;
 }
 
@@ -135,35 +142,59 @@ static int32_t text_width(const char *text, const lv_font_t *font)
 	return size.x;
 }
 
-/* The same content-sized window on creation and every surface resize. */
+/* The whole rows in space, the last one's divider under the line below. */
+static size_t fitting_rows(const struct fplinux_ui_profile_spec *spec,
+			   int32_t space)
+{
+	space += spec->divider_width;
+	return space > 0 ? (size_t)space / spec->row_height : 0;
+}
+
+/*
+ * The same content-sized window on creation and every surface resize. It
+ * ends on the soft-key bar, whose top line takes the last row's divider,
+ * and leaves a title band's height of the surface above it uncovered. When
+ * that leaves fewer than three rows (or all, if fewer), the window takes
+ * the whole surface height, still below its edge line.
+ * One icon size of space follows the widest content, and the window is at
+ * least three rows wide. Less than an icon size of surface left beside it
+ * would look like a mistake, so the window then takes the whole width.
+ */
 static void layout(struct fplinux_ui_menu_view *view)
 {
 	const struct fplinux_ui_profile_spec *spec = fplinux_ui_spec(view->ui);
 	int32_t surface = fplinux_ui_modal_height(view->ui);
 	int32_t available_width = fplinux_ui_width(view->ui);
+	size_t wanted = view->count < 3 ? view->count : 3;
+	int32_t top = spec->menu_edge + view->band;
 	int32_t width;
 	int32_t height;
 	int32_t x = 0;
-	size_t rows = surface > view->top ?
-			      (size_t)(surface - view->top) / spec->row_height :
-			      0;
+	size_t rows = fitting_rows(spec, surface - spec->header_height - top);
 
+	if (rows < wanted)
+		rows = fitting_rows(spec, surface - top);
 	if (rows > view->count)
 		rows = view->count;
 	width = view->row_width +
 		(view->count > rows ? spec->scrollbar_space : 0);
 	if (width < view->title_width)
 		width = view->title_width;
-	if (width > available_width)
+	width += spec->row_icon_size;
+	if (width < 3 * spec->row_height)
+		width = 3 * spec->row_height;
+	if (available_width - width < spec->row_icon_size)
 		width = available_width;
-	height = view->top + (int32_t)rows * spec->row_height;
+	height = top + (rows ? (int32_t)rows * spec->row_height -
+					spec->divider_width :
+			       0);
 	if (view->origin == FPLINUX_UI_MENU_ORIGIN_CENTRE)
 		x = (fplinux_ui_width(view->ui) - width) / 2;
 	else if (view->origin == FPLINUX_UI_MENU_ORIGIN_RIGHT)
 		x = fplinux_ui_width(view->ui) - width;
 	lv_obj_set_size(view->popup, width, height);
 	lv_obj_set_pos(view->popup, x, surface - height);
-	lv_obj_set_height(view->body, height - view->top);
+	lv_obj_set_height(view->body, height - top);
 	if (view->title)
 		lv_obj_set_width(view->title, width - 2 * spec->margin);
 	lv_obj_update_layout(view->popup);
@@ -181,7 +212,6 @@ struct fplinux_ui_menu_view *fplinux_ui_menu_view_create(
 	const struct fplinux_ui_theme *theme = fplinux_ui_theme(ui);
 	const struct fplinux_ui_profile_spec *spec = fplinux_ui_spec(ui);
 	lv_display_t *display = lv_obj_get_display(fplinux_ui_screen(ui));
-	int32_t top = spec->menu_edge;
 	int32_t widest_text = 0;
 	struct fplinux_ui_menu_view *view;
 	lv_obj_t *popup;
@@ -209,8 +239,7 @@ struct fplinux_ui_menu_view *fplinux_ui_menu_view_create(
 		return NULL;
 	}
 	if (title && title[0])
-		top += spec->header_height;
-	view->top = top;
+		view->band = spec->header_height;
 	view->count = count;
 
 	popup = lv_obj_create(lv_display_get_layer_top(display));
@@ -231,7 +260,7 @@ struct fplinux_ui_menu_view *fplinux_ui_menu_view_create(
 	lv_obj_set_style_bg_opa(edge, LV_OPA_COVER, 0);
 	if (title && title[0])
 		view->title = add_title(ui, popup, title);
-	body = add_box(popup, top, 0);
+	body = add_box(popup, spec->menu_edge + view->band, 0);
 	view->body = body;
 	view->list =
 		fplinux_ui_listview_create(ui, body, FPLINUX_UI_LISTVIEW_PLAIN);
@@ -255,9 +284,6 @@ struct fplinux_ui_menu_view *fplinux_ui_menu_view_create(
 			widest_text = width;
 		view->actions[i] = items[i].action;
 		fplinux_ui_listview_add(view->list, items[i].text, NULL);
-		if (items[i].separator_before)
-			fplinux_ui_listview_set_separator_before(view->list, i,
-								 true);
 		if (add_icon(view->list, i, items[i].icon, spec->row_icon_size))
 			icons = true;
 	}

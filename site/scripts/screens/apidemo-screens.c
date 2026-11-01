@@ -539,6 +539,36 @@ static void catalogue_and_virtual(struct capture *capture)
 	puts("apidemo: root and search remain available; category and result focus preserved; query reused; virtual row 2 selected");
 }
 
+/* Frames of each focus step down count rows of the shown list and back. */
+static void list_steps(struct capture *capture, const char *prefix,
+		       unsigned int count)
+{
+	char name[64];
+
+	for (unsigned int row = 0; row < count; ++row) {
+		if (row)
+			press(capture, 1, KEY_DOWN);
+		snprintf(name, sizeof(name), "%s-down-%02u", prefix, row);
+		save_frame(capture, name);
+	}
+	for (unsigned int row = count - 1; row-- > 0;) {
+		press(capture, 1, KEY_UP);
+		snprintf(name, sizeof(name), "%s-up-%02u", prefix, row);
+		save_frame(capture, name);
+	}
+}
+
+static void list_rows(struct capture *capture)
+{
+	start(capture);
+	list_steps(capture, "apidemo-rows-catalogue", 8);
+	close_and_reap(capture);
+	open_search(capture, "VIRTUAL", "Virtual list", APIDEMO_LIST);
+	list_steps(capture, "apidemo-rows-virtual", 12);
+	close_and_reap(capture);
+	puts("apidemo-rows: catalogue and virtual inbox focus moved down and back");
+}
+
 static void form_choice(struct capture *capture)
 {
 	open_search(capture, "FORM_APPEND_CHOICE", "Choices", APIDEMO_FORM);
@@ -687,11 +717,34 @@ static void profile_metrics(struct capture *capture)
 	printf("apidemo: Metrics reports %s\n", expected);
 }
 
-static void configure_mode(struct capture *capture, bool fullscreen, int width,
-			   int height, int content_height)
+/*
+ * The sizes of a full-screen and an integrated surface of this capture's
+ * screen.
+ */
+static void mode_size(const struct capture *capture, bool fullscreen,
+		      int *width, int *height)
 {
-	unsigned int previous;
-	char expected[192];
+	const struct fplinux_ui_profile_spec *profile;
+
+	*width = dimension(capture->arguments[1]);
+	*height = dimension(capture->arguments[2]);
+	profile = fplinux_ui_profile_spec(
+		fplinux_ui_profile_for_screen(*width, *height));
+	if (!fullscreen)
+		*height -= profile->status_height + profile->softkey_height;
+}
+
+/*
+ * The key pressed after commit number previous asked for a mode. Nothing is
+ * committed from then until the peer configures that mode, even a while
+ * after the request, and the first frame then has the new size.
+ */
+static void expect_mode_frame(struct capture *capture, unsigned int previous,
+			      bool fullscreen)
+{
+	uint64_t quiet;
+	int width;
+	int height;
 
 	for (;;) {
 		struct fplinux_ui_session_message message =
@@ -706,11 +759,29 @@ static void configure_mode(struct capture *capture, bool fullscreen, int width,
 						FPLINUX_UI_SESSION_INTEGRATED));
 		break;
 	}
-	/* Retire every old-size frame before the peer applies the requested size. */
-	redraw(capture);
-	previous = capture->peer.commits;
+	quiet = fplinux_ui_frame_now_ms() + 300;
+	while (fplinux_ui_frame_now_ms() < quiet) {
+		fplinux_ui_frame_pump(&capture->peer);
+		assert(capture->peer.commits == previous);
+	}
+	mode_size(capture, fullscreen, &width, &height);
 	fplinux_ui_frame_configure(&capture->peer, width, height, fullscreen);
 	wait_frame(capture, previous);
+	assert(capture->peer.width == width && capture->peer.height == height);
+}
+
+/* Options' mode command, chosen after the menu has shown. */
+static void configure_mode(struct capture *capture, bool fullscreen, int width,
+			   int height, int content_height)
+{
+	unsigned int previous;
+	char expected[192];
+
+	press(capture, 1, KEY_F13);
+	previous = capture->peer.commits;
+	send_press(capture, 1, KEY_OK);
+	expect_mode_frame(capture, previous, fullscreen);
+	assert(capture->peer.width == width && capture->peer.height == height);
 	snprintf(expected, sizeof(expected),
 		 "Surface: %d × %d\u00a0px\nFull screen: %s\n"
 		 "Content area: %d × %d\u00a0px",
@@ -728,9 +799,9 @@ static void fullscreen_canvas(struct capture *capture)
 		int normal_content;
 		int fullscreen_content;
 	} geometry[] = {
-		{ 128, 128, 96, 76, 108 },   { 128, 160, 128, 108, 140 },
-		{ 176, 220, 178, 154, 196 }, { 240, 320, 268, 240, 292 },
-		{ 320, 240, 196, 170, 214 },
+		{ 128, 128, 96, 71, 103 },   { 128, 160, 126, 104, 138 },
+		{ 176, 220, 177, 151, 194 }, { 240, 320, 268, 240, 292 },
+		{ 320, 240, 199, 171, 212 },
 	};
 	int width = dimension(capture->arguments[1]);
 	int height = dimension(capture->arguments[2]);
@@ -742,13 +813,9 @@ static void fullscreen_canvas(struct capture *capture)
 			break;
 	assert(index < sizeof(geometry) / sizeof(geometry[0]));
 	open_search(capture, "FULL SCREEN", "Full screen", APIDEMO_CANVAS);
-	press(capture, 1, KEY_F13);
-	press(capture, 1, KEY_OK);
 	configure_mode(capture, true, width, height,
 		       geometry[index].fullscreen_content);
 	save_frame(capture, "apidemo-fullscreen");
-	press(capture, 1, KEY_F13);
-	press(capture, 1, KEY_OK);
 	configure_mode(capture, false, width, geometry[index].normal_height,
 		       geometry[index].normal_content);
 	save_frame(capture, "apidemo-normal-view");
@@ -969,6 +1036,65 @@ static void russian_search(struct capture *capture)
 	puts("apidemo: Cyrillic uppercase search found translated list title");
 }
 
+static void confirmation_title_pass(struct capture *capture)
+{
+	uint64_t deadline;
+	bool reverse = false;
+	bool moved = false;
+	int first_value;
+
+	open_search(capture, "CONFIRMATION", "Подтверждение", APIDEMO_ALERT);
+	save_frame(capture, "apidemo-confirmation-title-scroll");
+	assert(capture->frame.confirmation_title.present);
+	assert(capture->frame.confirmation_title.bounds.height ==
+	       capture->frame.confirmation_title.line_height);
+	assert(capture->frame.confirmation_title.text_width >
+	       capture->frame.confirmation_title.bounds.width);
+	assert(!strcmp(capture->frame.confirmation_title.text,
+		       "Подтверждение"));
+	assert(capture->frame.confirmation_title.long_mode ==
+	       LV_LABEL_LONG_MODE_SCROLL);
+	assert(capture->frame.confirmation_title.animated);
+	first_value = capture->frame.confirmation_title.animation_value;
+	deadline = fplinux_ui_frame_now_ms() + 20000;
+	while (fplinux_ui_frame_now_ms() < deadline) {
+		uint64_t sample = fplinux_ui_frame_now_ms() + 50;
+
+		while (fplinux_ui_frame_now_ms() < sample)
+			fplinux_ui_frame_pump(&capture->peer);
+		redraw(capture);
+		assert(capture->frame.confirmation_title.present);
+		assert(capture->frame.confirmation_title.bounds.height ==
+		       capture->frame.confirmation_title.line_height);
+		if (capture->frame.confirmation_title.long_mode ==
+		    LV_LABEL_LONG_MODE_DOTS)
+			break;
+		assert(capture->frame.confirmation_title.long_mode ==
+		       LV_LABEL_LONG_MODE_SCROLL);
+		assert(capture->frame.confirmation_title.animated);
+		if (reverse)
+			assert(capture->frame.confirmation_title.reverse);
+		reverse |= capture->frame.confirmation_title.reverse;
+		moved |= capture->frame.confirmation_title.animation_value !=
+			 first_value;
+	}
+	assert(reverse && moved);
+	assert(capture->frame.confirmation_title.long_mode ==
+	       LV_LABEL_LONG_MODE_DOTS);
+	assert(!capture->frame.confirmation_title.animated);
+	assert(strstr(capture->frame.confirmation_title.text, "..."));
+	save_frame(capture, "apidemo-confirmation-title-dots");
+	deadline = fplinux_ui_frame_now_ms() + 1500;
+	while (fplinux_ui_frame_now_ms() < deadline)
+		fplinux_ui_frame_pump(&capture->peer);
+	redraw(capture);
+	assert(capture->frame.confirmation_title.long_mode ==
+	       LV_LABEL_LONG_MODE_DOTS);
+	assert(!capture->frame.confirmation_title.animated);
+	close_and_reap(capture);
+	puts("apidemo: Russian confirmation title scrolls once and rests with dots");
+}
+
 static void duration_edit(struct capture *capture)
 {
 	struct apidemo_observation values;
@@ -1047,43 +1173,34 @@ static void sketch_cursor(struct capture *capture)
 	puts("apidemo: Sketch Paint, move, return and Erase preserve the cursor frame");
 }
 
+/* The screen's mode command, on the left key or in Options. */
 static void preview_resize(struct capture *capture, bool fullscreen)
 {
-	int width = dimension(capture->arguments[1]);
-	int height = dimension(capture->arguments[2]);
-	const struct fplinux_ui_profile_spec *profile = fplinux_ui_profile_spec(
-		fplinux_ui_profile_for_screen(width, height));
 	unsigned int previous;
-	bool options;
 
 	redraw(capture);
-	options = !strcmp(capture->left, word(capture, "Options", "Опции"));
-	if (options) {
+	if (!strcmp(capture->left, word(capture, "Options", "Опции"))) {
 		press(capture, 1, KEY_F13);
+		previous = capture->peer.commits;
 		send_press(capture, 1, KEY_OK);
 	} else {
+		previous = capture->peer.commits;
 		send_press(capture, 1, KEY_F13);
 	}
+	expect_mode_frame(capture, previous, fullscreen);
+}
 
-	for (;;) {
-		struct fplinux_ui_session_message message =
-			fplinux_ui_frame_wait_message(&capture->peer,
-						      capture->session);
+/*
+ * The application's Back in full screen: the integrated mode returns with
+ * its surface size and the same screen.
+ */
+static void back_from_fullscreen(struct capture *capture)
+{
+	unsigned int previous = capture->peer.commits;
 
-		assert(message.type != FPLINUX_UI_SESSION_EXIT);
-		if (message.type != FPLINUX_UI_SESSION_MODE)
-			continue;
-		assert(message.mode == (fullscreen ?
-						FPLINUX_UI_SESSION_FULLSCREEN :
-						FPLINUX_UI_SESSION_INTEGRATED));
-		break;
-	}
-	redraw(capture);
-	previous = capture->peer.commits;
-	if (!fullscreen)
-		height -= profile->status_height + profile->softkey_height;
-	fplinux_ui_frame_configure(&capture->peer, width, height, fullscreen);
-	wait_frame(capture, previous);
+	send_press(capture, 1, KEY_F14);
+	expect_mode_frame(capture, previous, false);
+	save_frame(capture, "apidemo-preview-back");
 }
 
 static void softkey_preview(struct capture *capture)
@@ -1096,15 +1213,27 @@ static void softkey_preview(struct capture *capture)
 	for (int index = 0; index < 12; ++index)
 		send_press(capture, 1, KEY_DOWN);
 	save_frame(capture, "apidemo-preview-end");
-	press(capture, 1, KEY_OK);
+	/* Only the system bar's OK legend changes: no new frame is due. */
+	send_press(capture, 1, KEY_OK);
 	save_frame(capture, "apidemo-preview-changed");
 	preview_resize(capture, true);
 	save_frame(capture, "apidemo-preview-fullscreen");
 	preview_resize(capture, false);
 	save_frame(capture, "apidemo-preview-normal");
+	/*
+	 * Back in the integrated screen returns to the results, which show
+	 * again without a new observation; OK opens the example once more.
+	 */
 	press(capture, 1, KEY_F14);
+	save_frame(capture, "apidemo-preview-results");
+	press(capture, 1, KEY_OK);
+	wait_observation(capture, APIDEMO_CANVAS,
+			 word(capture, "Soft-key preview",
+			      "Просмотр подписей клавиш"));
+	preview_resize(capture, true);
+	back_from_fullscreen(capture);
 	close_and_reap(capture);
-	puts("apidemo: Soft-key preview accepts navigation, changes legends and returns from full screen");
+	puts("apidemo: Soft-key preview accepts navigation, changes legends, leaves full screen by its mode and by Back");
 }
 
 static void canvas_geometry(struct capture *capture)
@@ -1136,6 +1265,65 @@ static void canvas_geometry(struct capture *capture)
 	save_frame(capture, "apidemo-fields-geometry");
 	close_and_reap(capture);
 	puts("apidemo: titled and untitled Canvas bounds keep fields and Moving shapes inside");
+}
+
+static void canvas_scroll_observation(struct capture *capture, const char *name)
+{
+	redraw(capture);
+	for (size_t index = 0; index < capture->frame.canvas_object_count;
+	     ++index) {
+		const struct apidemo_canvas_object_observation *label =
+			&capture->frame.canvas_objects[index];
+		const struct apidemo_canvas_object_observation *viewport;
+
+		if (!label->text[0] || label->parent < 0)
+			continue;
+		viewport = &capture->frame.canvas_objects[label->parent];
+		printf("%s %d %d %d %d\n", name, viewport->scroll_y,
+		       viewport->content.height, label->bounds.height,
+		       label->line_height);
+		return;
+	}
+	assert(!"Scrolling canvas label missing");
+}
+
+static void whole_scroll(struct capture *capture)
+{
+	open_search(capture, "WHOLE SURFACE", "", APIDEMO_CANVAS);
+	canvas_scroll_observation(capture, "whole-scroll");
+	for (int index = 0; index < 8; ++index) {
+		send_press(capture, 1, KEY_DOWN);
+		canvas_scroll_observation(capture, "whole-scroll");
+	}
+	for (int index = 0; index < 8; ++index) {
+		send_press(capture, 1, KEY_UP);
+		canvas_scroll_observation(capture, "whole-scroll");
+	}
+	for (int index = 0; index < 2; ++index) {
+		send_press(capture, 1, KEY_RIGHT);
+		canvas_scroll_observation(capture, "whole-scroll");
+	}
+	for (int index = 0; index < 2; ++index) {
+		send_press(capture, 1, KEY_LEFT);
+		canvas_scroll_observation(capture, "whole-scroll");
+	}
+	close_and_reap(capture);
+}
+
+static void reader_pages(struct capture *capture)
+{
+	open_search(capture, "SCROLLING TEXT", "Scrolling text",
+		    APIDEMO_CANVAS);
+	canvas_scroll_observation(capture, "reader-page");
+	for (int direction = 0; direction < 2; ++direction) {
+		unsigned int code = direction ? KEY_LEFT : KEY_RIGHT;
+
+		for (int index = 0; index < 24; ++index) {
+			send_press(capture, 1, code);
+			canvas_scroll_observation(capture, "reader-page");
+		}
+	}
+	close_and_reap(capture);
 }
 
 static void canvas_field_clear_hold(struct capture *capture)
@@ -1284,12 +1472,20 @@ int main(int argc, char **argv)
 		activation_root_and_owned_resources(&capture);
 		return 0;
 	}
+	if (!strcmp(argv[8], "confirmation-title")) {
+		confirmation_title_pass(&capture);
+		return 0;
+	}
 	if (!strcmp(argv[8], "navigation")) {
 		if (!strcmp(capture.locale, "ru"))
 			russian_search(&capture);
 		else
 			catalogue_and_virtual(&capture);
 		popup_routes(&capture);
+		return 0;
+	}
+	if (!strcmp(argv[8], "rows")) {
+		list_rows(&capture);
 		return 0;
 	}
 	if (!strcmp(argv[8], "menu-layout")) {
@@ -1327,6 +1523,14 @@ int main(int argc, char **argv)
 	}
 	if (!strcmp(argv[8], "canvas-geometry")) {
 		canvas_geometry(&capture);
+		return 0;
+	}
+	if (!strcmp(argv[8], "whole-scroll")) {
+		whole_scroll(&capture);
+		return 0;
+	}
+	if (!strcmp(argv[8], "reader-pages")) {
+		reader_pages(&capture);
 		return 0;
 	}
 	assert(!strcmp(argv[8], "all"));

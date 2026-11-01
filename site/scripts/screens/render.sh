@@ -63,12 +63,18 @@ build_fonts() {
 
 render_brightness() {
 	brightness=$aports/fplinux-brightness-ui
+	python3 "$root/scripts/fplinux_status_assets.py" \
+		--tokens "$root/lib/fplinux/fplinux-ui-profile.json" \
+		--sources /opt/quality/src/ui-fonts --output "$work/status" \
+		--lv-font-conv /opt/quality/node-tools/node_modules/.bin/lv_font_conv
 	compile -I"$root/include/fplinux" -I"$brightness" -I"$screens_dir" \
+		-I"$work/status" \
 		"$screens_dir/brightness-screen.c" "$screens_dir/screen-frame.c" \
-		"$brightness/brightness-ui.c" "$root/lib/fplinux/fplinux-font.c" \
+		"$brightness/brightness-ui.c" "$root/lib/fplinux/fplinux-status-screen.c" \
+		"$root/lib/fplinux/fplinux-activity.c" "$work/status/fplinux-status-fonts.c" \
 		"$root/lib/fplinux/fplinux-ui-profile.c" \
 		-o "$work/brightness-screen"
-	"$work/brightness-screen" 7 "$work/ter-u16n.psf" \
+	"$work/brightness-screen" 7 \
 		"$work/brightness.rgb565"
 	png 240 320 "$work/brightness.rgb565" brightness.png
 }

@@ -207,10 +207,10 @@ def test_actual_calculator_unconfirmed_save_closes_without_claiming_a_rollback(
     ("screen", "surface"),
     [
         ((128, 128), (128, 96)),
-        ((128, 160), (128, 128)),
-        ((176, 220), (176, 178)),
+        ((128, 160), (128, 126)),
+        ((176, 220), (176, 177)),
         ((240, 320), (240, 268)),
-        ((320, 240), (320, 196)),
+        ((320, 240), (320, 199)),
     ],
 )
 @pytest.mark.parametrize("locale", ["en", "ru"])
@@ -265,7 +265,7 @@ def test_actual_calculator_explains_errors_and_digit_limit_at_every_profile(  # 
 
 @pytest.mark.parametrize(
     ("screen", "surface"),
-    [((128, 160), (128, 128)), ((240, 320), (240, 268)), ((320, 240), (320, 196))],
+    [((128, 160), (128, 126)), ((240, 320), (240, 268)), ((320, 240), (320, 199))],
 )
 def test_actual_calculator_input_holds_persistence_and_rendering_at_each_profile(
     calculator_native: Path,

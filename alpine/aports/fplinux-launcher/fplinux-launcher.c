@@ -84,10 +84,8 @@ enum launcher_screen {
 };
 
 struct battery_icon {
-	lv_obj_t *bolt;
-	/* lv_line keeps a pointer to its points. */
-	lv_point_precise_t bolt_points[4];
-	lv_obj_t *body;
+	lv_obj_t *bolt_rows[FPLINUX_LAUNCHER_BOLT_ROWS_MAX];
+	lv_obj_t *edges[4];
 	lv_obj_t *cap;
 	lv_obj_t *bars[FPLINUX_LAUNCHER_BATTERY_STEP_COUNT];
 	lv_obj_t *low_stem;
@@ -105,8 +103,9 @@ struct launcher {
 	/* The base Canvas owns the system bars and the custom Grid/Home views. */
 	struct fplinux_ui_screen *canvas;
 	struct fplinux_ui_screen *catalogue;
-	struct fplinux_ui_screen *catalogue_notice;
-	enum fplinux_launcher_notice catalogue_notice_kind;
+	struct fplinux_ui_screen *notice_alert;
+	struct fplinux_ui_screen *notice_parent;
+	enum fplinux_launcher_notice alert_notice;
 	bool catalogue_dirty;
 	struct fplinux_launcher_tasks tasks;
 	struct fplinux_launcher_clock ringing;
@@ -135,7 +134,6 @@ struct launcher {
 	lv_obj_t *body;
 	lv_obj_t *softkeys;
 	lv_obj_t *clock;
-	lv_obj_t *clock_accent;
 	lv_obj_t *date;
 	lv_obj_t *hint;
 	lv_obj_t *events;
@@ -143,9 +141,8 @@ struct launcher {
 	lv_obj_t *timer;
 	lv_obj_t *missed;
 	struct fplinux_clock_face face;
+	struct fplinux_clock_digits clock_digits;
 	struct fplinux_ui_session_clock_presentation clock_presentation;
-	/* The shown notice dialog, which Up and Down scroll. */
-	lv_obj_t *notice_box;
 	lv_anim_t title_animation;
 	char marquee_app[FPLINUX_UI_SESSION_ID_BYTES];
 	char marquee_text[FPLINUX_UI_SESSION_TEXT_BYTES];
@@ -188,10 +185,10 @@ struct launcher {
 	bool charging;
 };
 
-enum catalogue_command {
+enum launcher_command {
 	CATALOGUE_COMMAND_ICONS = 200,
 	CATALOGUE_COMMAND_BACK,
-	CATALOGUE_COMMAND_NOTICE_CLOSE,
+	NOTICE_COMMAND_CLOSE,
 };
 
 static void render(struct launcher *launcher);
@@ -662,7 +659,6 @@ static void clear_view(struct launcher *launcher)
 {
 	lv_obj_clean(launcher->body);
 	launcher->clock = NULL;
-	launcher->clock_accent = NULL;
 	launcher->date = NULL;
 	launcher->hint = NULL;
 	launcher->events = NULL;
@@ -670,7 +666,7 @@ static void clear_view(struct launcher *launcher)
 	launcher->timer = NULL;
 	launcher->missed = NULL;
 	launcher->face = (struct fplinux_clock_face){ 0 };
-	launcher->notice_box = NULL;
+	launcher->clock_digits = (struct fplinux_clock_digits){ 0 };
 }
 
 /* Callers redraw with render() after the catalogue has been replaced. */
@@ -775,29 +771,11 @@ static void create_battery_icon(struct launcher *launcher, lv_obj_t *bar)
 		&launcher->battery_layout;
 	lv_color_t ink = launcher->theme->bar_text;
 	lv_color_t danger = launcher->theme->danger;
-	size_t points = sizeof(icon->bolt_points) / sizeof(*icon->bolt_points);
 
-	for (size_t i = 0; i < points; ++i)
-		icon->bolt_points[i] = (lv_point_precise_t){
-			.x = layout->bolt_points[i][0],
-			.y = layout->bolt_points[i][1],
-		};
-	icon->bolt = lv_line_create(bar);
-	lv_obj_remove_style_all(icon->bolt);
-	lv_obj_set_pos(icon->bolt, layout->bolt.x, layout->bolt.y);
-#if defined(__GNUC__) && !defined(__clang__) && defined(__SANITIZE_ADDRESS__)
-	/* GCC's instrumented object-size analysis can mistake a coordinate for the array. */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic warning "-Wstringop-overread"
-#endif
-	lv_line_set_points(icon->bolt, icon->bolt_points, (uint32_t)points);
-#if defined(__GNUC__) && !defined(__clang__) && defined(__SANITIZE_ADDRESS__)
-#pragma GCC diagnostic pop
-#endif
-	lv_obj_set_style_line_width(icon->bolt, layout->bolt_line_width, 0);
-	lv_obj_set_style_line_color(icon->bolt, ink, 0);
-	icon->body = outline(bar, layout->body, layout->outline_radius,
-			     layout->outline_width, ink);
+	for (int i = 0; i < layout->bolt_row_count; ++i)
+		icon->bolt_rows[i] = fill(bar, layout->bolt_rows[i], 0, ink);
+	for (int i = 0; i < 4; ++i)
+		icon->edges[i] = fill(bar, layout->edges[i], 0, ink);
 	icon->cap = fill(bar, layout->cap, 0, ink);
 	for (int i = 0; i < FPLINUX_LAUNCHER_BATTERY_STEP_COUNT; ++i)
 		icon->bars[i] = fill(bar, layout->bars[i], 0, ink);
@@ -819,15 +797,18 @@ static void update_battery_icon(struct launcher *launcher)
 	if (icon->drawn && icon->shown == shown && icon->steps == steps &&
 	    icon->low == low && icon->charging == charging)
 		return;
-	lv_obj_set_hidden(icon->body, !shown);
+	for (int i = 0; i < 4; ++i) {
+		lv_obj_set_hidden(icon->edges[i], !shown);
+		lv_obj_set_style_bg_color(icon->edges[i], ink, 0);
+	}
 	lv_obj_set_hidden(icon->cap, !shown);
-	lv_obj_set_hidden(icon->bolt, !charging);
+	lv_obj_set_style_bg_color(icon->cap, ink, 0);
+	for (int i = 0; i < launcher->battery_layout.bolt_row_count; ++i)
+		lv_obj_set_hidden(icon->bolt_rows[i], !charging);
 	lv_obj_set_hidden(icon->low_stem, !low);
 	lv_obj_set_hidden(icon->low_dot, !low);
 	for (int i = 0; i < FPLINUX_LAUNCHER_BATTERY_STEP_COUNT; ++i)
 		lv_obj_set_hidden(icon->bars[i], i >= steps);
-	lv_obj_set_style_border_color(icon->body, ink, 0);
-	lv_obj_set_style_bg_color(icon->cap, ink, 0);
 	icon->drawn = true;
 	icon->shown = shown;
 	icon->steps = steps;
@@ -892,12 +873,10 @@ static int place_home(struct launcher *launcher)
 	bool analog = launcher->face.dial != NULL;
 
 	if (analog) {
-		clock = launcher->frame.body_height - date - hint -
-			(date > 0 ? launcher->spec->home_gap : 0) -
-			(hint > 0 ? launcher->spec->home_gap : 0);
-		if (clock > width)
-			clock = width;
-		clock = clock / 2 * 2;
+		clock = fplinux_launcher_home_dial(launcher->spec,
+						   launcher->frame.width,
+						   launcher->frame.body_height,
+						   date, hint);
 		lv_obj_set_size(launcher->clock, clock, clock);
 		lv_obj_set_x(launcher->clock,
 			     fplinux_launcher_centre(launcher->frame.width,
@@ -911,10 +890,6 @@ static int place_home(struct launcher *launcher)
 				     launcher->frame.body_height, clock, date,
 				     hint, &home);
 	lv_obj_set_y(launcher->clock, home.clock_y);
-	if (launcher->clock_accent)
-		lv_obj_set_y(launcher->clock_accent,
-			     home.clock_y + clock -
-				     launcher->spec->divider_width);
 	if (launcher->date)
 		lv_obj_set_y(launcher->date, home.date_y);
 	if (launcher->hint)
@@ -1038,8 +1013,16 @@ static void update_clock(struct launcher *launcher)
 		render(launcher);
 		return;
 	}
-	if (!launcher->face.dial)
+	if (!launcher->face.dial) {
 		set_label(launcher->clock, clock_text);
+		fplinux_clock_digits_refresh(
+			&launcher->clock_digits, launcher->clock, clock_text,
+			lv_obj_get_style_text_font(launcher->clock,
+						   LV_PART_MAIN),
+			fplinux_launcher_text_width(launcher->spec,
+						    launcher->frame.width),
+			launcher->theme);
+	}
 	if (launcher->date) {
 		if (clock_ready)
 			format_home_date(launcher, now, date, sizeof(date));
@@ -1224,17 +1207,6 @@ static void draw_clock_face(struct launcher *launcher)
 		if (clock->missed_total)
 			launcher->missed = home_event(launcher, &y);
 	}
-	if (current_screen(launcher) == SCREEN_HOME)
-		launcher->clock_accent =
-			fill(launcher->body,
-			     (struct fplinux_launcher_rect){
-				     .x = fplinux_launcher_centre(
-					     launcher->frame.width,
-					     2 * launcher->spec->gap_small),
-				     .width = 2 * launcher->spec->gap_small,
-				     .height = launcher->spec->divider_width,
-			     },
-			     0, theme->brand);
 	place_home(launcher);
 }
 
@@ -1256,7 +1228,7 @@ static void draw_band(struct launcher *launcher, const char *title,
 		(struct fplinux_launcher_rect){
 			.x = spec->margin,
 			.y = fplinux_launcher_centre(
-				height,
+				height - spec->divider_width,
 				lv_font_get_line_height(theme->font_large)),
 			.width = fplinux_launcher_text_width(spec, width),
 			.height = lv_font_get_line_height(theme->font_large),
@@ -1349,6 +1321,7 @@ static void draw_grid(struct launcher *launcher, bool focus)
 	struct fplinux_launcher_rect area = fplinux_launcher_viewport(frame);
 	struct fplinux_launcher_scroll scroll;
 	lv_obj_t *viewport;
+	int previous;
 	int content;
 	int width;
 
@@ -1405,10 +1378,13 @@ static void draw_grid(struct launcher *launcher, bool focus)
 				.width = 1,
 				.height = 1,
 			});
+	previous = launcher->scroll_offset;
 	launcher->scroll_offset = fplinux_launcher_scroll_offset(
 		&scroll, total_rows, area.height, launcher->scroll_offset,
 		launcher->selected / columns);
 	lv_obj_scroll_to_y(viewport, launcher->scroll_offset, LV_ANIM_OFF);
+	fplinux_ui_scroll_settle(viewport, previous, scroll.pitch);
+	launcher->scroll_offset = lv_obj_get_scroll_y(viewport);
 }
 
 static enum fplinux_ui_alert_kind
@@ -1535,20 +1511,21 @@ static void update_catalogue(struct launcher *launcher)
 		fplinux_ui_list_set_focused(list, launcher->selected);
 }
 
-static void catalogue_notice_closed(struct fplinux_ui *ui,
-				    struct fplinux_ui_screen *alert,
-				    int command_id, void *context)
+static void notice_closed(struct fplinux_ui *ui,
+			  struct fplinux_ui_screen *alert, int command_id,
+			  void *context)
 {
 	struct launcher *launcher = context;
-	enum fplinux_launcher_notice notice = launcher->catalogue_notice_kind;
+	enum fplinux_launcher_notice notice = launcher->alert_notice;
 
 	(void)ui;
 	(void)command_id;
-	if (alert != launcher->catalogue_notice)
+	if (alert != launcher->notice_alert)
 		return;
 	/* Native Alerts leave the stack before calling their command listener. */
-	launcher->catalogue_notice = NULL;
-	launcher->catalogue_notice_kind = FPLINUX_LAUNCHER_NOTICE_NONE;
+	launcher->notice_alert = NULL;
+	launcher->notice_parent = NULL;
+	launcher->alert_notice = FPLINUX_LAUNCHER_NOTICE_NONE;
 	if (notice == launcher->battery_notice)
 		dismiss_battery_notice(launcher);
 	else if (notice == launcher->notice)
@@ -1556,36 +1533,41 @@ static void catalogue_notice_closed(struct fplinux_ui *ui,
 	render(launcher);
 }
 
-/* A ringing Alert may cover these owned screens; never pop through it. */
+static bool wants_catalogue(const struct launcher *launcher)
+{
+	return current_screen(launcher) == SCREEN_CATALOGUE &&
+	       launcher->view == FPLINUX_LAUNCHER_VIEW_LIST &&
+	       launcher->app_count;
+}
+
+/* A ring or its wait may cover the notice; never pop through it. */
+static bool hide_stale_notice(struct launcher *launcher)
+{
+	bool list_parent = launcher->notice_parent == launcher->catalogue &&
+			   launcher->catalogue;
+
+	if (!launcher->notice_alert ||
+	    (shown_notice(launcher) == launcher->alert_notice &&
+	     wants_catalogue(launcher) == list_parent))
+		return true;
+	if (fplinux_ui_current(launcher->ui) != launcher->notice_alert)
+		return false;
+	launcher->notice_alert = NULL;
+	launcher->notice_parent = NULL;
+	launcher->alert_notice = FPLINUX_LAUNCHER_NOTICE_NONE;
+	fplinux_ui_pop(launcher->ui);
+	return true;
+}
+
 static void sync_catalogue(struct launcher *launcher)
 {
-	bool wanted = current_screen(launcher) == SCREEN_CATALOGUE &&
-		      launcher->view == FPLINUX_LAUNCHER_VIEW_LIST &&
-		      launcher->app_count;
-	enum fplinux_launcher_notice notice = shown_notice(launcher);
+	bool wanted = wants_catalogue(launcher);
 	const struct fplinux_ui_command back = {
 		.id = CATALOGUE_COMMAND_BACK,
 		.type = FPLINUX_UI_COMMAND_BACK,
 		.label = _("Back"),
 	};
-	const struct fplinux_ui_command close = {
-		.id = CATALOGUE_COMMAND_NOTICE_CLOSE,
-		.type = FPLINUX_UI_COMMAND_BACK,
-		.label = _("Close"),
-	};
 
-	/* The ring's wait keeps its screen; the render after it catches up. */
-	if (fplinux_launcher_clock_is_waiting(&launcher->ringing))
-		return;
-	if (launcher->catalogue_notice &&
-	    (!wanted || notice != launcher->catalogue_notice_kind)) {
-		if (fplinux_ui_current(launcher->ui) !=
-		    launcher->catalogue_notice)
-			return;
-		launcher->catalogue_notice = NULL;
-		launcher->catalogue_notice_kind = FPLINUX_LAUNCHER_NOTICE_NONE;
-		fplinux_ui_pop(launcher->ui);
-	}
 	if (!wanted) {
 		if (launcher->catalogue &&
 		    fplinux_ui_current(launcher->ui) == launcher->catalogue) {
@@ -1614,78 +1596,35 @@ static void sync_catalogue(struct launcher *launcher)
 	} else {
 		update_catalogue(launcher);
 	}
-	if (notice == FPLINUX_LAUNCHER_NOTICE_NONE ||
-	    launcher->catalogue_notice ||
-	    fplinux_ui_current(launcher->ui) != launcher->catalogue)
+}
+
+static void show_notice(struct launcher *launcher)
+{
+	enum fplinux_launcher_notice notice = shown_notice(launcher);
+	struct fplinux_ui_screen *parent = wants_catalogue(launcher) ?
+						   launcher->catalogue :
+						   launcher->canvas;
+	const struct fplinux_ui_command close = {
+		.id = NOTICE_COMMAND_CLOSE,
+		.type = FPLINUX_UI_COMMAND_BACK,
+		.label = _("Close"),
+	};
+
+	if (notice == FPLINUX_LAUNCHER_NOTICE_NONE || launcher->notice_alert ||
+	    !parent || fplinux_ui_current(launcher->ui) != parent)
 		return;
-	launcher->catalogue_notice = fplinux_ui_alert_new(
+	launcher->notice_alert = fplinux_ui_alert_new(
 		launcher->ui, notice_kind(notice),
 		_(fplinux_launcher_notice_title(notice)),
 		_(fplinux_launcher_notice_body(notice)), 0);
-	if (!launcher->catalogue_notice)
+	if (!launcher->notice_alert)
 		return;
-	launcher->catalogue_notice_kind = notice;
-	fplinux_ui_screen_add_command(launcher->catalogue_notice, &close);
-	fplinux_ui_screen_set_listener(launcher->catalogue_notice,
-				       catalogue_notice_closed, NULL, launcher);
-	fplinux_ui_push(launcher->ui, launcher->catalogue_notice);
-}
-
-static void draw_dialog(struct launcher *launcher, const char *heading,
-			const char *text, enum fplinux_ui_alert_kind kind)
-{
-	const struct fplinux_ui_theme *theme = launcher->theme;
-	const struct fplinux_ui_profile_spec *spec = launcher->spec;
-	lv_color_t colour = fplinux_ui_alert_color(launcher->ui, kind);
-	struct fplinux_launcher_notice_box box;
-	/* The notice owns a static body-only scrim; bars remain readable. */
-	lv_obj_t *scrim = plain(launcher->body,
-				(struct fplinux_launcher_rect){
-					.width = launcher->frame.width,
-					.height = launcher->frame.body_height,
-				});
-	lv_obj_t *dialog = lv_obj_create(scrim);
-	lv_obj_t *title;
-	lv_obj_t *body;
-
-	lv_obj_set_style_bg_color(scrim, theme->scrim, 0);
-	lv_obj_set_style_bg_opa(scrim, theme->scrim_opacity, 0);
-	fplinux_launcher_notice_layout(spec, launcher->frame.width,
-				       launcher->frame.body_height, &box);
-	lv_obj_remove_style_all(dialog);
-	lv_obj_set_size(dialog, box.width, LV_SIZE_CONTENT);
-	lv_obj_set_style_max_height(dialog, box.max_height, 0);
-	lv_obj_set_flex_flow(dialog, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_style_pad_all(dialog, box.padding, 0);
-	lv_obj_set_style_pad_row(dialog, box.gap, 0);
-	lv_obj_set_style_bg_color(dialog, theme->popup, 0);
-	lv_obj_set_style_bg_opa(dialog, LV_OPA_COVER, 0);
-	lv_obj_set_style_border_color(dialog, colour, 0);
-	lv_obj_set_style_border_width(dialog, box.border, 0);
-	lv_obj_set_style_text_font(dialog, theme->font, 0);
-	lv_obj_set_scrollable(dialog, true);
-	lv_obj_set_scroll_dir(dialog, LV_DIR_VER);
-	lv_obj_set_scrollbar_mode(dialog, LV_SCROLLBAR_MODE_AUTO);
-	fplinux_ui_style_scrollbar(launcher->ui, dialog);
-	title = lv_label_create(dialog);
-	lv_obj_set_width(title, lv_pct(100));
-	lv_obj_set_style_text_font(title, theme->font_large, 0);
-	lv_obj_set_style_text_color(
-		title,
-		kind == FPLINUX_UI_ALERT_WARNING ||
-				kind == FPLINUX_UI_ALERT_ERROR ?
-			colour :
-			theme->foreground,
-		0);
-	lv_label_set_long_mode(title, LV_LABEL_LONG_MODE_WRAP);
-	lv_label_set_text(title, heading);
-	body = lv_label_create(dialog);
-	lv_obj_set_width(body, lv_pct(100));
-	lv_obj_set_style_text_color(body, theme->foreground, 0);
-	lv_label_set_long_mode(body, LV_LABEL_LONG_MODE_WRAP);
-	lv_label_set_text(body, text);
-	lv_obj_center(dialog);
-	launcher->notice_box = dialog;
+	launcher->notice_parent = parent;
+	launcher->alert_notice = notice;
+	fplinux_ui_screen_add_command(launcher->notice_alert, &close);
+	fplinux_ui_screen_set_listener(launcher->notice_alert, notice_closed,
+				       NULL, launcher);
+	fplinux_ui_push(launcher->ui, launcher->notice_alert);
 }
 
 static void render(struct launcher *launcher)
@@ -1693,6 +1632,7 @@ static void render(struct launcher *launcher)
 	enum launcher_screen screen = current_screen(launcher);
 	enum fplinux_launcher_notice notice = shown_notice(launcher);
 	const char *legends[FPLINUX_LAUNCHER_LEGEND_COUNT] = { "", "", "" };
+	bool base_ready;
 
 	if (!launcher->paused &&
 	    (screen != SCREEN_CATALOGUE ||
@@ -1708,7 +1648,9 @@ static void render(struct launcher *launcher)
 		(screen != SCREEN_HOME && screen != SCREEN_CATALOGUE) ||
 			notice != FPLINUX_LAUNCHER_NOTICE_NONE ||
 			fplinux_launcher_clock_is_ringing(&launcher->ringing));
-	sync_catalogue(launcher);
+	base_ready = hide_stale_notice(launcher);
+	if (base_ready)
+		sync_catalogue(launcher);
 	clear_view(launcher);
 	if (launcher->lock_glyph)
 		lv_obj_set_hidden(launcher->lock_glyph, screen != SCREEN_LOCK);
@@ -1753,20 +1695,13 @@ static void render(struct launcher *launcher)
 		legends[FPLINUX_LAUNCHER_LEGEND_RIGHT] = _("Back");
 		break;
 	}
-	/* The page's texts are final before a notice covers part of them. */
 	update_clock(launcher);
-	if (notice != FPLINUX_LAUNCHER_NOTICE_NONE && !launcher->catalogue) {
-		draw_dialog(launcher, _(fplinux_launcher_notice_title(notice)),
-			    _(fplinux_launcher_notice_body(notice)),
-			    notice_kind(notice));
-		legends[FPLINUX_LAUNCHER_LEGEND_LEFT] = "";
-		legends[FPLINUX_LAUNCHER_LEGEND_CENTRE] = "";
-		legends[FPLINUX_LAUNCHER_LEGEND_RIGHT] = _("Close");
-	}
 	fplinux_ui_softkey_bar_set(launcher->ui, launcher->softkeys,
 				   legends[FPLINUX_LAUNCHER_LEGEND_LEFT],
 				   legends[FPLINUX_LAUNCHER_LEGEND_CENTRE],
 				   legends[FPLINUX_LAUNCHER_LEGEND_RIGHT]);
+	if (base_ready)
+		show_notice(launcher);
 	fplinux_launcher_clock_render(&launcher->ringing);
 	schedule_clock(launcher);
 }
@@ -1901,17 +1836,9 @@ static void handle_key(struct launcher *launcher,
 		return;
 	if (fplinux_ui_current(launcher->ui) != launcher->canvas)
 		return;
-	if (notice != FPLINUX_LAUNCHER_NOTICE_NONE) {
-		if (!back) {
-			/* A long notice scrolls; nothing else reacts. */
-			fplinux_ui_scroll_key(launcher->notice_box, key);
-			return;
-		}
-		if (notice == launcher->battery_notice)
-			dismiss_battery_notice(launcher);
-		else
-			launcher->notice = FPLINUX_LAUNCHER_NOTICE_NONE;
-	} else if (screen != SCREEN_HOME && screen != SCREEN_CATALOGUE) {
+	if (notice != FPLINUX_LAUNCHER_NOTICE_NONE)
+		return;
+	if (screen != SCREEN_HOME && screen != SCREEN_CATALOGUE) {
 		return;
 	} else if (screen == SCREEN_HOME) {
 		if (left || key->code == KEY_TAB) {
@@ -2206,6 +2133,30 @@ static bool watch_icon_directories(struct launcher *launcher)
 	return watched;
 }
 
+/*
+ * The status clock's line, placed so that its digits are the status-bar
+ * item: the ink of a 0, not the font's line box, which has more room above
+ * the digits than below them.
+ */
+static struct fplinux_launcher_rect status_clock_line(struct launcher *launcher)
+{
+	const lv_font_t *font = launcher->theme->font;
+	int line = lv_font_get_line_height(font);
+	int ink_top = 0;
+	int ink_height = line;
+	lv_font_glyph_dsc_t digit;
+
+	if (lv_font_get_glyph_dsc(font, &digit, '0', 0)) {
+		ink_height = digit.box_h;
+		ink_top = line - font->base_line - digit.ofs_y - digit.box_h;
+	}
+	return (struct fplinux_launcher_rect){
+		.y = fplinux_launcher_status_y(launcher->spec, ink_height) -
+		     ink_top,
+		.height = line,
+	};
+}
+
 static void create_view(struct launcher *launcher)
 {
 	lv_obj_t *screen = fplinux_ui_canvas_object(launcher->canvas);
@@ -2238,15 +2189,8 @@ static void create_view(struct launcher *launcher)
 		launcher->lock_glyph = glyph(
 			status_bar, lock, fplinux_launcher_status_glyph(spec),
 			theme->bar_text);
-	launcher->status_clock =
-		label(status_bar,
-		      (struct fplinux_launcher_rect){
-			      .y = fplinux_launcher_centre(
-				      frame->status_height,
-				      lv_font_get_line_height(theme->font)),
-			      .height = lv_font_get_line_height(theme->font),
-		      },
-		      theme->font, theme->bar_text, "");
+	launcher->status_clock = label(status_bar, status_clock_line(launcher),
+				       theme->font, theme->bar_text, "");
 	lv_label_set_long_mode(launcher->status_clock, LV_LABEL_LONG_MODE_CLIP);
 	create_battery_icon(launcher, status_bar);
 	fill(screen,

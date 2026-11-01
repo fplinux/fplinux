@@ -110,15 +110,17 @@ global:
 	fplinux_ui_list_rows_deleted;
 	fplinux_ui_list_rows_inserted;
 	fplinux_ui_list_set;
+	fplinux_ui_list_set_emphasis;
 	fplinux_ui_list_set_first_visible;
 	fplinux_ui_list_set_focused;
 	fplinux_ui_list_set_focus_listener;
 	fplinux_ui_list_set_icon;
-	fplinux_ui_list_set_emphasis;
-	fplinux_ui_list_set_trailing_icon;
+	fplinux_ui_list_set_level;
 	fplinux_ui_list_set_select_label;
-	fplinux_ui_list_set_value_details;
 	fplinux_ui_list_set_selected;
+	fplinux_ui_list_set_trailing_icon;
+	fplinux_ui_list_set_trailing_value;
+	fplinux_ui_list_set_value_details;
 	fplinux_ui_list_size;
 	fplinux_ui_locale;
 	fplinux_ui_menu_close;
@@ -156,6 +158,7 @@ global:
 	fplinux_ui_screen_set_listener;
 	fplinux_ui_screen_set_title;
 	fplinux_ui_scroll_key;
+	fplinux_ui_scroll_settle;
 	fplinux_ui_send;
 	fplinux_ui_set_close_handler;
 	fplinux_ui_set_fullscreen;

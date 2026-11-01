@@ -221,7 +221,8 @@ static void test_spinner_profile(int size, int line_width)
 
 		memset(image.pixels, 0xff, sizeof(image.pixels));
 		check(fplinux_launch_spinner_draw(image.pixels, size,
-						  line_width, phase, 0x804020),
+						  line_width, phase, 0x804020,
+						  0x202020),
 		      "each normative profile's spinner geometry is accepted");
 		check(image.before == 0x12345678 && image.after == 0x87654321,
 		      "drawing never writes outside the tiny storage capacity");
@@ -232,7 +233,7 @@ static void test_spinner_profile(int size, int line_width)
 
 			if (alpha)
 				++visible;
-			if (alpha == 255)
+			if (pixel == 0xff804020U)
 				++bright;
 			check(((pixel >> 16) & 255) <= alpha &&
 				      ((pixel >> 8) & 255) <= alpha &&
@@ -259,10 +260,31 @@ static void test_spinner_profile(int size, int line_width)
 			      "animation advances without changing the card pixels");
 	}
 	check(fplinux_launch_spinner_draw(image.pixels, size, line_width, 8,
-					  0x804020),
+					  0x804020, 0x202020),
 	      "the completed cycle is accepted");
 	check(memcmp(first, image.pixels, sizeof(first)) == 0,
 	      "spinner wraps after eight phases");
+	for (phase = 0; phase < 8; ++phase) {
+		uint32_t later[FPLINUX_LAUNCH_SPINNER_PIXELS];
+		bool turned = true;
+		int x, y;
+
+		check(fplinux_launch_spinner_draw(image.pixels, size,
+						  line_width, phase, 0x804020,
+						  0x202020) &&
+			      fplinux_launch_spinner_draw(later, size,
+							  line_width, phase + 2,
+							  0x804020, 0x202020),
+		      "both phases of a quarter turn are drawn");
+		/* A clockwise quarter turn moves (x, y) to (size-1-y, x). */
+		for (y = 0; y < size; ++y)
+			for (x = 0; x < size; ++x)
+				turned = turned &&
+					 image.pixels[y * size + x] ==
+						 later[x * size + size - 1 - y];
+		check(turned,
+		      "two phases on, the ring is the same ring a quarter turn on");
+	}
 }
 
 static void test_spinner(void)
@@ -288,7 +310,7 @@ static void test_spinner(void)
 		memset(pixels, 0xff, sizeof(pixels));
 		check(!fplinux_launch_spinner_draw(pixels, invalid[index][0],
 						   invalid[index][1], 0,
-						   0xffffff),
+						   0xffffff, 0x202020),
 		      "invalid spinner geometry rejects without allocating");
 		for (pixel = 0; pixel < FPLINUX_LAUNCH_SPINNER_PIXELS; ++pixel)
 			check(!pixels[pixel],

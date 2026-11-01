@@ -2,8 +2,6 @@
 #ifndef FPLINUX_BRIGHTNESS_UI_H
 #define FPLINUX_BRIGHTNESS_UI_H
 
-#include "fplinux-font.h"
-
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -25,7 +23,6 @@ enum brightness_ui_action brightness_ui_key(unsigned int level,
 					    unsigned int code,
 					    unsigned int *requested);
 bool brightness_ui_render(const struct brightness_ui_surface *surface,
-			  const struct fplinux_font *font, unsigned int level,
-			  bool set_failed);
+			  unsigned int level, bool set_failed);
 
 #endif

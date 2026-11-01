@@ -97,9 +97,59 @@ static void focus_follows_items_with_explicit_edge_behavior(void)
 	       0);
 	assert(fplinux_ui_focus_step(SIZE_MAX, 0, 1, FPLINUX_UI_FOCUS_WRAP) ==
 	       SIZE_MAX);
-	assert(fplinux_ui_reveal_scroll(10, 109, 5, 20) == 5);
-	assert(fplinux_ui_reveal_scroll(10, 109, 95, 120) == -11);
-	assert(fplinux_ui_reveal_scroll(10, 109, 25, 40) == 0);
+	assert(fplinux_ui_reveal_scroll(10, 109, 5, 20, 20) == 5);
+	assert(fplinux_ui_reveal_scroll(10, 109, 95, 120, 20) == -11);
+	assert(fplinux_ui_reveal_scroll(10, 109, 25, 40, 20) == 0);
+	/* Less than a quarter step goes on to a step while the span is seen. */
+	assert(fplinux_ui_reveal_scroll(10, 109, 8, 20, 20) == 20);
+	assert(fplinux_ui_reveal_scroll(10, 109, 90, 112, 20) == -20);
+	assert(fplinux_ui_reveal_scroll(10, 109, 8, 100, 20) == 9);
+	assert(fplinux_ui_reveal_scroll(10, 109, 21, 112, 20) == -11);
+	assert(fplinux_ui_reveal_scroll(10, 109, 5, 105, 20) == 5);
+	assert(fplinux_ui_reveal_scroll(10, 109, 8, 120, 20) == 2);
+	/* A move stops at an edge or at least a quarter step from it. */
+	assert(fplinux_ui_settle_scroll(0, 12, 100, 12) == 12);
+	assert(fplinux_ui_settle_scroll(84, 96, 100, 12) == 96);
+	assert(fplinux_ui_settle_scroll(86, 98, 100, 12) == 100);
+	assert(fplinux_ui_settle_scroll(14, 3, 100, 12) == 3);
+	assert(fplinux_ui_settle_scroll(14, 2, 100, 12) == 0);
+	assert(fplinux_ui_settle_scroll(90, 130, 100, 12) == 100);
+	assert(fplinux_ui_settle_scroll(5, -20, 100, 12) == 0);
+	assert(fplinux_ui_settle_scroll(50, 50, 52, 12) == 50);
+	assert(fplinux_ui_settle_scroll(0, 0, -5, 12) == 0);
+	/* Lines of 12 px to an end at 50, off the grid, and back. */
+	assert(fplinux_ui_line_scroll(0, 12, 50, 12) == 12);
+	assert(fplinux_ui_line_scroll(24, 12, 50, 12) == 36);
+	assert(fplinux_ui_line_scroll(36, 12, 50, 12) == 50);
+	assert(fplinux_ui_line_scroll(50, -12, 50, 12) == 36);
+	assert(fplinux_ui_line_scroll(36, -12, 50, 12) == 24);
+	assert(fplinux_ui_line_scroll(12, -12, 50, 12) == 0);
+	assert(fplinux_ui_line_scroll(48, 12, 54, 12) == 54);
+	assert(fplinux_ui_line_scroll(54, -12, 54, 12) == 36);
+	assert(fplinux_ui_line_scroll(5, 12, 100, 12) == 24);
+	assert(fplinux_ui_line_scroll(0, 36, 100, 12) == 36);
+	assert(fplinux_ui_line_scroll(0, 30, 100, 12) == 30);
+	assert(fplinux_ui_line_scroll(0, 12, 2, 12) == 2);
+	assert(fplinux_ui_line_scroll(7, 5, 100, 1) == 12);
+	assert(fplinux_ui_line_scroll(84, 14, 102, 14) == 102);
+	assert(fplinux_ui_line_scroll(102, -14, 102, 14) == 84);
+	assert(fplinux_ui_line_scroll(14, -14, 102, 14) == 0);
+	assert(fplinux_ui_line_scroll(0, 84, 102, 14) == 84);
+	assert(fplinux_ui_line_scroll(84, -84, 102, 14) == 0);
+	assert(fplinux_ui_line_scroll(84, 84, 102, 14) == 102);
+	assert(fplinux_ui_line_scroll(102, -84, 102, 14) == 18);
+	/* Multiple pages cover the whole range with no edge magnet. */
+	assert(fplinux_ui_line_scroll(0, 84, 290, 14) == 84);
+	assert(fplinux_ui_line_scroll(84, 84, 290, 14) == 168);
+	assert(fplinux_ui_line_scroll(168, 84, 290, 14) == 252);
+	assert(fplinux_ui_line_scroll(252, 84, 290, 14) == 290);
+	assert(fplinux_ui_line_scroll(290, -84, 290, 14) == 206);
+	assert(fplinux_ui_line_scroll(206, -84, 290, 14) == 122);
+	assert(fplinux_ui_line_scroll(122, -84, 290, 14) == 38);
+	assert(fplinux_ui_line_scroll(38, -84, 290, 14) == 0);
+	assert(fplinux_ui_line_scroll(INT32_MAX - 1, INT32_MAX, INT32_MAX,
+				      14) == INT32_MAX);
+	assert(fplinux_ui_line_scroll(1, INT32_MIN, INT32_MAX, 14) == 0);
 }
 
 static void virtual_focus_moves_scroll_and_survives_row_changes(void)

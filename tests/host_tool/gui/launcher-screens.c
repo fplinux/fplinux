@@ -39,6 +39,7 @@ struct capture {
 	bool task_closed;
 	bool has_request;
 	bool has_clock_request;
+	char dismissed_notice[FPLINUX_UI_SESSION_NAME_BYTES];
 	const char *directory;
 	const char *session_path;
 	const char *theme;
@@ -55,6 +56,7 @@ struct capture {
 static void wait_request(struct capture *capture,
 			 enum fplinux_ui_session_message_type type,
 			 const char *id, uint32_t token);
+static void wait_no_label(struct capture *capture, const char *text);
 
 static int number(const char *text)
 {
@@ -133,6 +135,11 @@ static void read_messages(struct capture *capture)
 			assert(!capture->has_clock_request);
 			capture->clock_request = message;
 			capture->has_clock_request = true;
+			break;
+		case FPLINUX_UI_SESSION_DISMISS:
+			snprintf(capture->dismissed_notice,
+				 sizeof(capture->dismissed_notice), "%s",
+				 message.notice);
 			break;
 		default:
 			assert(!message.has_frame);
@@ -273,8 +280,10 @@ static void wait_legends(struct capture *capture, const char *left,
 		pump(capture);
 	if (strcmp(capture->left, left) || strcmp(capture->centre, centre) ||
 	    strcmp(capture->right, right))
-		fprintf(stderr, "Launcher legends: [%s] [%s] [%s]\n",
-			capture->left, capture->centre, capture->right);
+		fprintf(stderr,
+			"Launcher legends: [%s] [%s] [%s]; expected [%s] [%s] [%s]\n",
+			capture->left, capture->centre, capture->right, left,
+			centre, right);
 	assert(!strcmp(capture->left, left));
 	assert(!strcmp(capture->centre, centre));
 	assert(!strcmp(capture->right, right));
@@ -652,9 +661,11 @@ static void start(struct capture *capture, char **arguments)
 	strcpy(config.input_locale, capture->locale);
 	strcpy(active.locale, capture->locale);
 	strcpy(active.input_locale, capture->locale);
-	if (!strcmp(capture->scenario, "home"))
+	if (!strcmp(capture->scenario, "home") ||
+	    !strcmp(capture->scenario, "notice-home"))
 		strcpy(active.value, "home");
 	else if (!strcmp(capture->scenario, "grid") ||
+		 !strcmp(capture->scenario, "notice-grid") ||
 		 !strcmp(capture->scenario, "marquee"))
 		strcpy(active.name, "grid");
 	capture->listener =
@@ -767,6 +778,25 @@ static void catalogue_navigation(struct capture *capture, int page_rows)
 	wait_selection(capture, "catalogue", "list", 2);
 	wait_legends(capture, "Icons", "Open", "Back");
 	puts("launcher-navigation: arrows, pages and digits 1-9 select; Tab preserves app 02");
+}
+
+/* Each focused app of List, down to the last of twelve and back up. */
+static void catalogue_rows(struct capture *capture)
+{
+	char name[64];
+
+	for (int index = 1; index <= 12; ++index) {
+		if (index > 1)
+			select_key(capture, KEY_DOWN, index);
+		snprintf(name, sizeof(name), "launcher-rows-down-%02d", index);
+		save_frame(capture, name);
+	}
+	for (int index = 11; index >= 1; --index) {
+		select_key(capture, KEY_UP, index);
+		snprintf(name, sizeof(name), "launcher-rows-up-%02d", index);
+		save_frame(capture, name);
+	}
+	puts("launcher-rows: List focus moved down to app 12 and back to app 01");
 }
 
 static void launch_and_notice(struct capture *capture)
@@ -1066,6 +1096,112 @@ static void ring_answers(struct capture *capture)
 	puts("launcher-ring-superseded-late: a new ring replaces the busy alert and the answered ring; the catalogue follows its view again");
 }
 
+static void notice_battery_active(struct capture *capture, const char *notice)
+{
+	struct fplinux_ui_session_message active = {
+		.type = FPLINUX_UI_SESSION_ACTIVE,
+		.serial = ++capture->serial,
+		.battery = 5,
+		.visible = true,
+		.value = "home",
+		.name = "list",
+	};
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	snprintf(active.notice, sizeof(active.notice), "%s", notice);
+	strcpy(active.locale, capture->locale);
+	strcpy(active.input_locale, capture->locale);
+	active.theme = !strcmp(capture->theme, "dark") ?
+			       FPLINUX_UI_SESSION_THEME_DARK :
+			       FPLINUX_UI_SESSION_THEME_LIGHT;
+	assert(fplinux_ui_session_send(capture->session, &active));
+	while (capture->active_ack != active.serial &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(capture->active_ack == active.serial);
+}
+
+static void system_notice(struct capture *capture)
+{
+	const struct fplinux_ui_session_message error = {
+		.type = FPLINUX_UI_SESSION_ERROR,
+		.reason = "tasks-full",
+	};
+	const struct fplinux_ui_session_message home = {
+		.type = FPLINUX_UI_SESSION_HOME,
+	};
+	bool on_home = !strcmp(capture->scenario, "notice-home");
+	bool on_grid = !strcmp(capture->scenario, "notice-grid");
+	uint64_t deadline;
+	uint32_t serial;
+
+	save_frame(capture, "notice-before");
+	assert(fplinux_ui_session_send(capture->session, &error));
+	wait_label(capture, "Too many open apps");
+	wait_label(
+		capture,
+		"Close an application in Tasks, then try again. Your open applications were kept.");
+	wait_legends(capture, "", "", "Close");
+	save_observation(capture, "notice-shown");
+	press(capture, KEY_DOWN);
+	press(capture, KEY_DOWN);
+	press(capture, KEY_DOWN);
+	press(capture, KEY_TAB);
+	press(capture, KEY_PICKUP_PHONE);
+	redraw(capture);
+	assert(!capture->tasks_open);
+	press(capture, KEY_F14);
+	wait_no_label(capture, "Too many open apps");
+	if (on_home) {
+		wait_label(capture, "Tasks");
+		wait_label(capture, "Menu");
+	} else if (on_grid) {
+		wait_label(capture, "List");
+		wait_label(capture, "Open");
+		wait_label(capture, "Back");
+	} else {
+		wait_legends(capture, "Icons", "Open", "Back");
+	}
+	save_frame(capture, "notice-closed");
+	if (on_home) {
+		notice_battery_active(capture, "battery-low");
+		wait_label(capture, "Battery low");
+		press(capture, KEY_F14);
+		deadline = fplinux_ui_frame_now_ms() + 3000;
+		while (!capture->dismissed_notice[0] &&
+		       fplinux_ui_frame_now_ms() < deadline)
+			pump(capture);
+		assert(!strcmp(capture->dismissed_notice, "battery-low"));
+		notice_battery_active(capture, "battery-low");
+		redraw(capture);
+		assert(!find_label(capture, "Battery low"));
+		notice_battery_active(capture, "");
+		notice_battery_active(capture, "battery-low");
+		wait_label(capture, "Battery low");
+		press(capture, KEY_F14);
+		wait_no_label(capture, "Battery low");
+		wait_label(capture, "Tasks");
+		wait_label(capture, "Menu");
+	} else if (!on_grid) {
+		assert(fplinux_ui_session_send(capture->session, &error));
+		wait_label(capture, "Too many open apps");
+		ring_active(capture, 1);
+		serial = stop_ring(capture, 1);
+		wait_busy(capture, true);
+		assert(fplinux_ui_session_send(capture->session, &home));
+		redraw(capture);
+		assert(shows_waiting(&capture->observed));
+		clock_reply(capture, serial, 0, "");
+		wait_busy(capture, false);
+		wait_label(capture, "Too many open apps");
+		wait_legends(capture, "", "", "Close");
+		press(capture, KEY_F14);
+		wait_no_label(capture, "Too many open apps");
+		wait_label(capture, "Tasks");
+		wait_label(capture, "Menu");
+	}
+}
+
 static void catalogue_marquee(struct capture *capture)
 {
 	struct fplinux_ui_session_message visibility = {
@@ -1105,15 +1241,144 @@ static void catalogue_marquee(struct capture *capture)
 	puts("launcher-marquee: one complete pass; idle stays still; new focus restarts; hiding stops");
 }
 
+/* The manager's battery reading in ACTIVE; its ACK means drawn. */
+static void battery_active(struct capture *capture, int percent, bool charging,
+			   bool locked)
+{
+	struct fplinux_ui_session_message active = {
+		.type = FPLINUX_UI_SESSION_ACTIVE,
+		.serial = ++capture->serial,
+		.battery = percent,
+		.charging = charging,
+		.locked = locked,
+		.visible = true,
+		.value = "catalogue",
+		.name = "list",
+		.selected_id = "org.test.app01",
+	};
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	strcpy(active.locale, capture->locale);
+	strcpy(active.input_locale, capture->locale);
+	active.theme = !strcmp(capture->theme, "dark") ?
+			       FPLINUX_UI_SESSION_THEME_DARK :
+			       FPLINUX_UI_SESSION_THEME_LIGHT;
+	assert(fplinux_ui_session_send(capture->session, &active));
+	while (capture->active_ack != active.serial &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(capture->active_ack == active.serial);
+}
+
+/*
+ * Every battery icon state, one frame each: launcher-battery-<state>, in the
+ * catalogue with the status clock; launcher-status-locked adds the lock glyph.
+ */
+static void battery_states(struct capture *capture)
+{
+	static const struct {
+		const char *name;
+		int percent;
+		bool charging;
+	} states[] = {
+		{ "absent", -1, false },
+		{ "low", 5, false },
+		{ "steps-1", 20, false },
+		{ "steps-2", 40, false },
+		{ "steps-3", 60, false },
+		{ "steps-4", 80, false },
+		{ "steps-5", 100, false },
+		{ "charging-low", 5, true },
+		{ "charging-steps-3", 60, true },
+		{ "charging-steps-5", 100, true },
+	};
+	char name[64];
+
+	for (size_t i = 0; i < sizeof(states) / sizeof(*states); ++i) {
+		battery_active(capture, states[i].percent, states[i].charging,
+			       false);
+		assert(snprintf(name, sizeof(name), "launcher-battery-%s",
+				states[i].name) < (int)sizeof(name));
+		save_frame(capture, name);
+	}
+	battery_active(capture, 60, false, true);
+	save_frame(capture, "launcher-status-locked");
+	puts("launcher-battery: every level, low and charging state drawn");
+}
+
+static void wait_no_label(struct capture *capture, const char *text)
+{
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	while (find_label(capture, text) &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(!find_label(capture, text));
+}
+
+/*
+ * Over an application the launcher draws the system bars with the legends
+ * the manager forwards, around the application's surface. Each argument is
+ * "left|centre|right".
+ */
+static void application_bars(struct capture *capture, int count, char **legends)
+{
+	for (int i = 0; i < count; ++i) {
+		struct fplinux_ui_session_message active = {
+			.type = FPLINUX_UI_SESSION_ACTIVE,
+			.serial = ++capture->serial,
+			.battery = -1,
+			.visible = true,
+			.value = "catalogue",
+			.name = "list",
+			.active_id = "org.test.app01",
+			.title = "App 01",
+		};
+		const char *centre = strchr(legends[i], '|');
+		const char *right = centre ? strchr(centre + 1, '|') : NULL;
+		uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+		char name[32];
+
+		assert(right);
+		snprintf(active.left, sizeof(active.left), "%.*s",
+			 (int)(centre - legends[i]), legends[i]);
+		snprintf(active.centre, sizeof(active.centre), "%.*s",
+			 (int)(right - centre - 1), centre + 1);
+		snprintf(active.right, sizeof(active.right), "%s", right + 1);
+		strcpy(active.locale, capture->locale);
+		strcpy(active.input_locale, capture->locale);
+		active.theme = !strcmp(capture->theme, "dark") ?
+				       FPLINUX_UI_SESSION_THEME_DARK :
+				       FPLINUX_UI_SESSION_THEME_LIGHT;
+		assert(fplinux_ui_session_send(capture->session, &active));
+		while (capture->active_ack != active.serial &&
+		       fplinux_ui_frame_now_ms() < deadline)
+			pump(capture);
+		assert(capture->active_ack == active.serial);
+		/* The launcher draws these legends; they are not its own. */
+		if (active.left[0])
+			wait_label(capture, active.left);
+		if (active.centre[0])
+			wait_label(capture, active.centre);
+		if (active.right[0])
+			wait_label(capture, active.right);
+		snprintf(name, sizeof(name), "application-%d", i + 1);
+		save_frame(capture, name);
+	}
+	puts("launcher-application: the bars carry each application's legends");
+}
+
 int main(int argc, char **argv)
 {
 	struct capture capture = { 0 };
 
-	assert(argc == 11 || argc == 13 || argc == 14);
+	assert(argc == 11 || argc >= 13);
 	capture.scenario = argc >= 13 ? argv[11] : "navigation";
 	capture.locale = argc >= 13 ? argv[12] : "en";
 	start(&capture, argv);
-	if (!strcmp(capture.scenario, "home")) {
+	if (!strcmp(capture.scenario, "application")) {
+		application_bars(&capture, argc - 13, argv + 13);
+	} else if (!strcmp(capture.scenario, "home")) {
 		assert(argc == 14);
 		assert(!strcmp(argv[13], "installed") ||
 		       !strcmp(argv[13], "absent"));
@@ -1122,8 +1387,14 @@ int main(int argc, char **argv)
 		save_observation(&capture, "launcher-grid-fit");
 	} else if (!strcmp(capture.scenario, "marquee")) {
 		catalogue_marquee(&capture);
+	} else if (!strcmp(capture.scenario, "battery")) {
+		battery_states(&capture);
 	} else if (!strcmp(capture.scenario, "ring")) {
 		ring_answers(&capture);
+	} else if (!strncmp(capture.scenario, "notice-", 7)) {
+		system_notice(&capture);
+	} else if (!strcmp(capture.scenario, "rows")) {
+		catalogue_rows(&capture);
 	} else {
 		save_frame(&capture, "launcher-list-first");
 		catalogue_navigation(&capture, number(argv[10]));

@@ -7,14 +7,13 @@
 #include <stdint.h>
 
 #include "fplinux-ui-session.h"
+#include "fplinux-activity.h"
 
 #define FPLINUX_LAUNCH_FRAME_MAX_BYTES \
 	(FPLINUX_UI_SESSION_FRAME_MAX_PIXELS * 2U)
 #define FPLINUX_LAUNCH_SPINNER_MAX_SIZE 32
 #define FPLINUX_LAUNCH_SPINNER_PIXELS \
 	(FPLINUX_LAUNCH_SPINNER_MAX_SIZE * FPLINUX_LAUNCH_SPINNER_MAX_SIZE)
-#define FPLINUX_LAUNCH_SPINNER_PHASES 8U
-#define FPLINUX_LAUNCH_SPINNER_MS 80
 
 /* One tightly packed RGB565 image, owned by the shell. */
 struct fplinux_launch_frame {
@@ -50,6 +49,6 @@ bool fplinux_launch_frame_load(struct fplinux_launch_frame *frame,
 /* Tightly packed premultiplied ARGB8888; invalid geometry clears and fails. */
 bool fplinux_launch_spinner_draw(uint32_t pixels[FPLINUX_LAUNCH_SPINNER_PIXELS],
 				 int size, int line_width, unsigned int phase,
-				 uint32_t rgb);
+				 uint32_t rgb, uint32_t track_rgb);
 
 #endif

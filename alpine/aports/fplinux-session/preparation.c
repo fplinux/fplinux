@@ -3,6 +3,7 @@
 #include "preparation.h"
 #include "fplinux-cli.h"
 #include "fplinux-drm-session.h"
+#include "fplinux-status-screen.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -15,8 +16,6 @@
 #include <sys/signalfd.h>
 #include <time.h>
 #include <unistd.h>
-
-#define PREPARATION_ANIMATION_MS 250
 
 static bool parse_count(const char *text, uint64_t *value)
 {
@@ -113,8 +112,7 @@ static bool change_active(struct fplinux_drm_session *display, bool active,
 }
 
 static int display_status(const char *path, int changes, int stop_fd,
-			  struct fplinux_drm_session *display,
-			  const struct fplinux_font *font)
+			  struct fplinux_drm_session *display)
 {
 	struct fplinux_preparation_status status = { 0 };
 	uint64_t next_frame = monotonic_ms();
@@ -143,7 +141,7 @@ static int display_status(const char *path, int changes, int stop_fd,
 		if (animated && now >= next_frame) {
 			dirty = true;
 			++phase;
-			next_frame = now + PREPARATION_ANIMATION_MS;
+			next_frame = now + FPLINUX_STATUS_ACTIVITY_STEP_MS;
 		}
 		if (dirty && display->active) {
 			unsigned int page =
@@ -160,8 +158,11 @@ static int display_status(const char *path, int changes, int stop_fd,
 
 			if (!fplinux_drm_session_wait_present(display))
 				break;
-			fplinux_preparation_render(&surface, font, &status,
-						   phase);
+			if (!fplinux_preparation_render(&surface, &status,
+							phase)) {
+				errno = EINVAL;
+				break;
+			}
 			if (!fplinux_drm_session_present(display, page))
 				break;
 			dirty = false;
@@ -201,7 +202,7 @@ static int display_status(const char *path, int changes, int stop_fd,
 				phase = 0;
 				dirty = true;
 				next_frame = monotonic_ms() +
-					     PREPARATION_ANIMATION_MS;
+					     FPLINUX_STATUS_ACTIVITY_STEP_MS;
 			}
 		}
 		if ((descriptors[0].revents | descriptors[1].revents |
@@ -218,7 +219,6 @@ static int display_status(const char *path, int changes, int stop_fd,
 static int run_display(const char *path)
 {
 	struct fplinux_drm_session display;
-	struct fplinux_font font = { 0 };
 	sigset_t stops;
 	sigset_t previous_mask;
 	char error[256];
@@ -246,22 +246,11 @@ static int run_display(const char *path)
 		goto done;
 	}
 	opened = true;
-	if (!fplinux_font_open_default(&font, display.width, error,
-				       sizeof(error))) {
-		fprintf(stderr, "preparation: %s\n", error);
-		goto done;
-	}
-	if (display.width < 4 * font.width ||
-	    display.height < 10 * font.height) {
-		fprintf(stderr, "preparation: display is too small\n");
-		goto done;
-	}
-	result = display_status(path, changes, stop_fd, &display, &font);
+	result = display_status(path, changes, stop_fd, &display);
 	if (result == 1)
 		fprintf(stderr, "preparation: display failed: %s\n",
 			strerror(errno));
 done:
-	fplinux_font_close(&font);
 	if (opened && !fplinux_drm_session_close(&display)) {
 		fprintf(stderr, "preparation: cannot restore display: %s\n",
 			strerror(errno));

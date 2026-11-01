@@ -19,6 +19,7 @@
 
 static struct fplinux_ui *application;
 static lv_obj_t *canvas_area;
+static lv_obj_t *confirmation_title;
 static struct fplinux_ui_screen *preferences_form;
 static size_t preference_items[3];
 static const char *const preference_labels[] = {
@@ -51,6 +52,28 @@ static struct apidemo_rectangle content_rectangle(lv_obj_t *object)
 		.width = lv_area_get_width(&bounds),
 		.height = lv_area_get_height(&bounds),
 	};
+}
+
+static lv_obj_t *confirmation_label(lv_obj_t *object)
+{
+	if (lv_obj_check_type(object, &lv_label_class) &&
+	    !strncmp(lv_label_get_text(object), "Подтверж", strlen("Подтверж")))
+		return object;
+	for (uint32_t child = 0; child < lv_obj_get_child_count(object);
+	     ++child) {
+		lv_obj_t *label = confirmation_label(
+			lv_obj_get_child(object, (int32_t)child));
+
+		if (label)
+			return label;
+	}
+	return NULL;
+}
+
+static void confirmation_title_deleted(lv_event_t *event)
+{
+	if (lv_event_get_target_obj(event) == confirmation_title)
+		confirmation_title = NULL;
 }
 
 static void collect_canvas(lv_obj_t *object, int parent,
@@ -194,6 +217,41 @@ bool __wrap_fplinux_ui_session_send(
 			.serial = message->serial,
 		};
 
+		if (confirmation_title &&
+		    lv_obj_is_visible(confirmation_title)) {
+			lv_point_t size;
+			lv_anim_t *animation =
+				lv_anim_get(confirmation_title, NULL);
+			const lv_font_t *font = lv_obj_get_style_text_font(
+				confirmation_title, LV_PART_MAIN);
+			const char *text =
+				lv_label_get_text(confirmation_title);
+
+			lv_text_get_size(&size, text, font,
+					 lv_obj_get_style_text_letter_space(
+						 confirmation_title,
+						 LV_PART_MAIN),
+					 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+			observation.confirmation_title.present = true;
+			observation.confirmation_title.bounds =
+				rectangle(confirmation_title);
+			observation.confirmation_title.line_height =
+				lv_font_get_line_height(font);
+			observation.confirmation_title.text_width = size.x;
+			observation.confirmation_title.long_mode =
+				lv_label_get_long_mode(confirmation_title);
+			observation.confirmation_title.animated = animation !=
+								  NULL;
+			if (animation) {
+				observation.confirmation_title.reverse =
+					animation->reverse_play_in_progress;
+				observation.confirmation_title.animation_value =
+					animation->current_value;
+			}
+			snprintf(observation.confirmation_title.text,
+				 sizeof(observation.confirmation_title.text),
+				 "%s", text);
+		}
 		collect(lv_display_get_screen_active(display), &observation,
 			false);
 		collect(lv_display_get_layer_top(display), &observation,
@@ -435,6 +493,15 @@ __wrap_fplinux_ui_alert_new(struct fplinux_ui *ui,
 	struct fplinux_ui_screen *screen =
 		__real_fplinux_ui_alert_new(ui, kind, title, text, timeout_ms);
 
+	if (screen && title && !strcmp(title, "Подтверждение")) {
+		lv_obj_t *root = lv_obj_get_child(fplinux_ui_screen(ui), -1);
+
+		confirmation_title = confirmation_label(root);
+		assert(confirmation_title);
+		lv_obj_add_event_cb(confirmation_title,
+				    confirmation_title_deleted, LV_EVENT_DELETE,
+				    NULL);
+	}
 	if (screen)
 		observe(APIDEMO_ALERT, title, text);
 	return screen;

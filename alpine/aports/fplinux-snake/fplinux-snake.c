@@ -98,8 +98,8 @@ static void load_scores(struct snake_app *app)
 }
 
 /*
- * A square of the cell less 1 px, so that neighbours keep a 1 px gap, and
- * less inset on every side.
+ * The cell less 1 px and inset on every side, centred in the cell:
+ * neighbours keep a 2 px gap and the board's edge cells 1 px to its edge.
  */
 static void draw_cell(struct snake_app *app, lv_layer_t *layer,
 		      const lv_area_t *bounds, unsigned int cell, int inset,
@@ -109,10 +109,12 @@ static void draw_cell(struct snake_app *app, lv_layer_t *layer,
 	lv_area_t area;
 	int size = app->cell;
 
-	area.x1 = bounds->x1 + (int)(cell % app->snake.columns) * size + inset;
-	area.y1 = bounds->y1 + (int)(cell / app->snake.columns) * size + inset;
-	area.x2 = area.x1 + size - 2 - 2 * inset;
-	area.y2 = area.y1 + size - 2 - 2 * inset;
+	area.x1 = bounds->x1 + (int)(cell % app->snake.columns) * size + 1 +
+		  inset;
+	area.y1 = bounds->y1 + (int)(cell / app->snake.columns) * size + 1 +
+		  inset;
+	area.x2 = area.x1 + size - 3 - 2 * inset;
+	area.y2 = area.y1 + size - 3 - 2 * inset;
 	lv_draw_rect_dsc_init(&rectangle);
 	rectangle.bg_color = color;
 	rectangle.bg_opa = LV_OPA_COVER;

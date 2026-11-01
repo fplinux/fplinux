@@ -16,7 +16,7 @@ mkdir -p -- "$directory/source"
 tar -xzf /opt/quality/src/lvgl.tar.gz --strip-components=1 -C "$directory/source"
 install -Dm644 "$directory/source/src/libs/lodepng/lodepng.h" \
 	"$directory/source/include/lvgl/src/libs/lodepng/lodepng.h"
-for patch in shared-abi canvas-cache-drop; do
+for patch in shared-abi canvas-cache-drop label-dots-fit; do
 	patch -s -p1 -d "$directory/source" -i "$aport/$patch.patch"
 done
 cmake -S "$directory/source" -B "$directory/build" -G Ninja \

@@ -121,6 +121,46 @@ def test_native_font_source_link_rejects_mismatched_original_bytes(
         fplinux_ui_fonts.source_path(native_font_sources, source.name, originals)
 
 
+@pytest.mark.parametrize(("profile", "index"), [(None, None), ("128x128", 0)])
+def test_status_fonts_match_lvgl_reader_for_profile_roles(
+    tmp_path: Path,
+    ui_host_inputs: Path,
+    lvgl_library: tuple[Path, Path],
+    profile: str | None,
+    index: int | None,
+) -> None:
+    tokens = json.loads((ROOT / "lib/fplinux/fplinux-ui-profile.json").read_text())
+    font_dir = ui_host_inputs / "fonts"
+    status = tmp_path / "status-fonts.c"
+    status.write_text(fplinux_ui_fonts.status_source(tokens, font_dir, profile))
+    executable = tmp_path / "status-fonts"
+    headers, archive = lvgl_library
+    compile_c(
+        executable,
+        [
+            "-std=c11",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-isystem",
+            str(headers),
+            "-DLV_KCONFIG_IGNORE",
+            "-DLV_LVGL_H_INCLUDE_SYSTEM",
+            f'-DLV_CONF_PATH="{ROOT / "alpine/aports/fplinux-lvgl/lv_conf.h"}"',
+            f"-I{ROOT / 'include/fplinux'}",
+            str(ROOT / "tests/host_tool/gui/fplinux-status-fonts.c"),
+            str(ROOT / "lib/fplinux/fplinux-ui-profile.c"),
+            *(str(path) for path in sorted(font_dir.glob("*.c"))),
+            str(status),
+            str(archive),
+            "-lm",
+        ],
+        name="link status fonts and the real LVGL font reader",
+    )
+    args = [str(executable)] + ([str(index)] if index is not None else [])
+    run_process(args, name="compare status and LVGL glyphs", timeout=30, check=True)
+
+
 @pytest.fixture(scope="module")
 def pixel_font_consumer(
     tmp_path_factory: pytest.TempPathFactory,
@@ -168,6 +208,30 @@ class PixelFontMetrics:
     h_width: int
     stem: int
     string_widths: tuple[int, int, int]
+
+
+@pytest.mark.parametrize(
+    "font_id",
+    [
+        "galmuri9-10",
+        "galmuri11-fauxbold-12",
+        "noto-sans-13",
+        "noto-sans-14",
+        "noto-sans-bold-16",
+        "noto-sans-bold-18",
+    ],
+)
+def test_profile_text_fonts_align_ellipsis_with_period(
+    pixel_font_consumer: Path, font_id: str
+) -> None:
+    result = run_process(
+        [str(pixel_font_consumer), font_id, "baseline"],
+        name=f"read punctuation baselines in {font_id}",
+        timeout=10,
+        check=True,
+    )
+    period, ellipsis = map(int, result.stdout.split())
+    assert ellipsis == period
 
 
 @pytest.mark.parametrize(

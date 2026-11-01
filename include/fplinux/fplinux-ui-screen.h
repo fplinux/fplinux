@@ -79,8 +79,6 @@ struct fplinux_ui_command {
 	bool keep_visible;
 	/* Optional copied legend used when full legends do not fit; Options uses label. */
 	const char *short_label;
-	/* Optional boundary before this Options row; ignored for the first row. */
-	bool separator_before;
 };
 
 /* An implicit List reports OK on a row with this reserved command id. */
@@ -317,6 +315,17 @@ bool fplinux_ui_list_set_emphasis(struct fplinux_ui_screen *list, size_t index,
  */
 bool fplinux_ui_list_set_trailing_icon(struct fplinux_ui_screen *list,
 				       size_t index, const void *src);
+/*
+ * Stored rows share one trailing slot for an icon, value or level bar.
+ * A NULL value clears the slot. A level requires minimum < maximum, a span
+ * no greater than INT32_MAX and a value in range. It gives all rows the
+ * detail pitch and shows its number below the caption, with arrows on the
+ * focused row.
+ */
+bool fplinux_ui_list_set_trailing_value(struct fplinux_ui_screen *list,
+					size_t index, const char *value);
+bool fplinux_ui_list_set_level(struct fplinux_ui_screen *list, size_t index,
+			       int32_t minimum, int32_t maximum, int32_t value);
 
 /*
  * Virtual list, for large data sets: a List whose rows are not stored. The

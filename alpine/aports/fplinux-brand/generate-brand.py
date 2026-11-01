@@ -9,7 +9,7 @@ The fplinux-brand aport runs this generator with svgraster.py beside it:
 
 Sizes come from the logo table of each profile in fplinux-ui-profile.json:
 logo.splash_mark and a "mark N" logo.about give the marks, a "lockup W wide"
-logo.about gives the lockups, logo.boot_mark gives the boot marks. --out
+logo.about gives the lockups, and logo.splash_mark also sizes the boot marks. --out
 receives transparent RGBA PNGs rendered at the exact size, for both theme
 variants (light: Ink body, dark: graphite body):
 
@@ -41,7 +41,7 @@ import math
 import re
 import struct
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -57,8 +57,6 @@ VARIANTS = ("light", "dark")
 # Minimum readable sizes: marks 32 px high and lockups 160 px wide.
 MARK_MIN_PX = 32
 LOCKUP_MIN_PX = 160
-# The boot screen uses the dark logo background before settings are available.
-BOOT_BACKGROUND = "#202D35"
 BOOT_HEADER = "fplinux-boot-mark.h"
 # A run byte holds the palette index in the high nibble, length - 1 in the low.
 RUN_MAX = 16
@@ -179,7 +177,7 @@ def read_sizes(path: Path) -> BrandSizes:
             BootSize(
                 _positive(profile, "width", where),
                 _positive(profile, "height", where),
-                _positive(logo, "boot_mark", f"{where}.logo"),
+                splash_size,
             )
         )
     small = sorted(size for size in marks | {item.size for item in boot} if size < MARK_MIN_PX)
@@ -336,7 +334,7 @@ def boot_header(
     """Return the C header with the palette, the runs and the profile table."""
     lines = [
         # REUSE-IgnoreStart
-        "/* SPDX-License-Identifier: CC-BY-ND-4.0 */",
+        "/* SPDX-License-Identifier: GPL-2.0-only */",
         # REUSE-IgnoreEnd
         "/*",
         " * FPLinux boot mark: the dark brand mark, opaque on the boot background.",
@@ -404,7 +402,6 @@ def generate(
     sizes: BrandSizes,
     out: Path | None,
     boot_out: Path | None,
-    boot_background: Rgb,
 ) -> list[Path]:
     """Render every requested output and return the written paths."""
     svg = {
@@ -445,7 +442,9 @@ def generate(
                 )
                 written.append(path)
     if boot_out is not None:
-        palette = boot_palette(svg["mark-dark"], "fplinux-mark-dark.svg", boot_background)
+        palette = boot_palette(
+            svg["mark-dark"], "fplinux-mark-dark.svg", sizes.backgrounds["dark"]
+        )
         marks = [quantize(rasters["mark-dark", size], palette) for size in boot_sizes]
         boot_out.mkdir(parents=True, exist_ok=True)
         shown = [(*entry.shown, OPAQUE) for entry in palette]
@@ -475,18 +474,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--out", type=Path, help="directory for the mark and lockup PNGs")
     parser.add_argument("--boot-out", type=Path, help="directory for the boot mark bitmaps")
-    parser.add_argument(
-        "--boot-background",
-        default=BOOT_BACKGROUND,
-        help=f"boot screen background, #RRGGBB (default: {BOOT_BACKGROUND}, brand Ink)",
-    )
+    parser.add_argument("--screen", help="select the WIDTHxHEIGHT profile for the boot mark")
     arguments = parser.parse_args(argv)
     if arguments.out is None and arguments.boot_out is None:
         parser.error("give --out, --boot-out or both")
+    if arguments.screen and arguments.boot_out is None:
+        parser.error("--screen requires --boot-out")
     try:
-        background = svgraster.hex_rgb(arguments.boot_background)
         sizes = read_sizes(arguments.profile)
-        generate(arguments.masters, sizes, arguments.out, arguments.boot_out, background)
+        if arguments.screen:
+            selected = tuple(
+                item
+                for item in sizes.boot
+                if f"{item.profile_width}x{item.profile_height}" == arguments.screen
+            )
+            if not selected:
+                parser.error(f"unknown boot screen profile {arguments.screen}")
+            sizes = replace(sizes, boot=selected)
+        generate(arguments.masters, sizes, arguments.out, arguments.boot_out)
     except (BrandError, svgraster.RasterError) as error:
         print(f"generate-brand.py: {error}", file=sys.stderr)
         return 1

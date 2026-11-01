@@ -110,6 +110,7 @@ static const struct fplinux_ui_profile_spec spec = {
 	.width = 240,
 	.height = 320,
 	.header_height = 28,
+	.divider_width = 1,
 	.margin = 4,
 	.spacing = 4,
 	.scrollbar_space = 4,
@@ -138,7 +139,6 @@ static struct {
 	size_t count;
 	int actions[MENU_ITEMS];
 	char texts[MENU_ITEMS][32];
-	bool separators[MENU_ITEMS];
 	struct fplinux_ui_menu_position position;
 } menu;
 
@@ -198,7 +198,6 @@ static struct object_geometry *geometry(const lv_obj_t *object)
 	return (struct object_geometry *)object;
 }
 
-OBJECT(lv_arc_create, lv_obj_t *parent)
 OBJECT(lv_bar_create, lv_obj_t *parent)
 OBJECT(lv_canvas_create, lv_obj_t *parent)
 OBJECT(lv_image_create, lv_obj_t *parent)
@@ -216,11 +215,13 @@ lv_obj_t *lv_obj_get_child(const lv_obj_t *obj, int32_t index)
 	return (lv_obj_t *)&object_storage;
 }
 ZERO(int32_t, lv_obj_get_index, const lv_obj_t *obj)
-NOTHING(lv_arc_set_angles, lv_obj_t *obj, lv_value_precise_t start,
-	lv_value_precise_t end)
-NOTHING(lv_arc_set_bg_angles, lv_obj_t *obj, lv_value_precise_t start,
-	lv_value_precise_t end)
-NOTHING(lv_arc_set_rotation, lv_obj_t *obj, int32_t rotation)
+void fplinux_ui_control_focus(struct fplinux_ui *context, lv_obj_t *frame,
+			      bool focused)
+{
+	(void)context;
+	(void)frame;
+	(void)focused;
+}
 ZERO(lv_result_t, lv_async_call, lv_async_cb_t callback, void *data)
 ZERO(lv_result_t, lv_async_call_cancel, lv_async_cb_t callback, void *data)
 NOTHING(lv_bar_set_range, lv_obj_t *obj, int32_t min, int32_t max)
@@ -279,7 +280,7 @@ void lv_obj_align(lv_obj_t *obj, lv_align_t align, int32_t x, int32_t y)
 	object->y = y;
 	if (align == LV_ALIGN_LEFT_MID || align == LV_ALIGN_RIGHT_MID)
 		object->y += (parent->height - object->height) / 2;
-	if (align == LV_ALIGN_RIGHT_MID)
+	if (align == LV_ALIGN_RIGHT_MID || align == LV_ALIGN_TOP_RIGHT)
 		object->x += parent->width - object->width;
 }
 NOTHING(lv_obj_center, lv_obj_t *obj)
@@ -320,6 +321,10 @@ int32_t lv_obj_get_style_pad_row(const lv_obj_t *obj, lv_part_t part)
 }
 ZERO(int32_t, lv_obj_get_style_text_letter_space, const lv_obj_t *obj,
      lv_part_t part)
+ZERO(int32_t, lv_obj_get_style_text_line_space, const lv_obj_t *obj,
+     lv_part_t part)
+ZERO(int32_t, lv_obj_get_scroll_y, const lv_obj_t *obj)
+ZERO(int32_t, lv_obj_get_scroll_bottom, const lv_obj_t *obj)
 const lv_font_t *lv_obj_get_style_text_font(const lv_obj_t *obj, lv_part_t part)
 {
 	const struct object_geometry *object = geometry(obj);
@@ -386,6 +391,8 @@ NOTHING(lv_obj_set_style_border_side, lv_obj_t *obj, lv_border_side_t value,
 NOTHING(lv_obj_set_style_border_width, lv_obj_t *obj, int32_t value,
 	lv_style_selector_t selector)
 NOTHING(lv_obj_set_style_image_recolor, lv_obj_t *obj, lv_color_t value,
+	lv_style_selector_t selector)
+NOTHING(lv_obj_set_style_image_recolor_opa, lv_obj_t *obj, lv_opa_t value,
 	lv_style_selector_t selector)
 NOTHING(lv_obj_set_style_max_height, lv_obj_t *obj, int32_t value,
 	lv_style_selector_t selector)
@@ -612,6 +619,10 @@ ZERO(bool, fplinux_ui_listview_set_emphasis, struct fplinux_ui_listview *list,
      size_t index, bool emphasis)
 ZERO(bool, fplinux_ui_listview_set_trailing_icon,
      struct fplinux_ui_listview *list, size_t index, const void *source)
+ZERO(bool, fplinux_ui_listview_set_trailing_value,
+     struct fplinux_ui_listview *list, size_t index, const char *value)
+ZERO(bool, fplinux_ui_listview_set_level, struct fplinux_ui_listview *list,
+     size_t index, int32_t minimum, int32_t maximum, int32_t value)
 NOTHING(fplinux_ui_listview_set_inline_detail, struct fplinux_ui_listview *list,
 	bool inline_detail)
 NOTHING(fplinux_ui_listview_set_marked, struct fplinux_ui_listview *list,
@@ -652,6 +663,15 @@ void fplinux_ui_style_scrollbar(struct fplinux_ui *owner, lv_obj_t *object)
 }
 
 void fplinux_ui_scrollbar_layout(lv_obj_t *object)
+{
+}
+
+void fplinux_ui_scrollbar_caps(lv_obj_t *object, bool top, bool bottom)
+{
+}
+
+/* Nor does it scroll: positions stay where LVGL leaves them. */
+void fplinux_ui_scroll_settle(lv_obj_t *object, int32_t from, int32_t step)
 {
 }
 
@@ -864,7 +884,6 @@ bool fplinux_ui_menu_open(struct fplinux_ui *owner,
 	menu.position = (struct fplinux_ui_menu_position){ 0 };
 	for (size_t i = 0; i < count; ++i) {
 		menu.actions[i] = items[i].action;
-		menu.separators[i] = items[i].separator_before;
 		snprintf(menu.texts[i], sizeof(menu.texts[i]), "%s",
 			 items[i].text);
 	}
@@ -1415,7 +1434,8 @@ static void test_header_status_fits_resizes_and_clears(void)
 	CHECK(geometry(content)->y == 28 && geometry(content)->height == 292);
 	CHECK(geometry(title)->x == 4 && geometry(title)->width == 114);
 	CHECK(geometry(status)->x == 122 && geometry(status)->width == 114);
-	CHECK(geometry(status)->height == 12 && geometry(status)->y == 8);
+	/* Its line in the 27 rows above the band's divider, the odd one below. */
+	CHECK(geometry(status)->height == 12 && geometry(status)->y == 7);
 	CHECK(geometry(status)->long_mode == LV_LABEL_LONG_MODE_CLIP);
 	CHECK(geometry(title)->long_mode == LV_LABEL_LONG_MODE_DOTS);
 	CHECK(!geometry(title)->title_scrolling);
@@ -1605,32 +1625,22 @@ static void test_options_keeps_back_last_and_delivers_visible_actions(void)
 {
 	const struct fplinux_ui_command commands[] = {
 		{ .id = 30, .type = FPLINUX_UI_COMMAND_BACK, .priority = -50 },
-		{ .id = 31,
-		  .type = FPLINUX_UI_COMMAND_CANCEL,
-		  .priority = -40,
-		  .separator_before = true },
+		{ .id = 31, .type = FPLINUX_UI_COMMAND_CANCEL, .priority = -40 },
 		{ .id = 32, .type = FPLINUX_UI_COMMAND_EXIT, .priority = -30 },
 		{ .id = 33, .type = FPLINUX_UI_COMMAND_STOP, .priority = -20 },
 		{ .id = 20,
 		  .type = FPLINUX_UI_COMMAND_SCREEN,
 		  .label = "Refresh",
-		  .short_label = "R",
-		  .separator_before = true },
+		  .short_label = "R" },
 		{ .id = 21,
 		  .type = FPLINUX_UI_COMMAND_SCREEN,
 		  .label = "Details" },
-		{ .id = 34,
-		  .type = FPLINUX_UI_COMMAND_HELP,
-		  .priority = 1,
-		  .separator_before = true },
+		{ .id = 34, .type = FPLINUX_UI_COMMAND_HELP, .priority = 1 },
 	};
 	const char *const expected[] = {
 		"Cancel", "Exit", "Stop", "Refresh", "Details", "Help", "Back",
 	};
 	const int ids[] = { 31, 32, 33, 20, 21, 34, 30 };
-	const bool separators[] = {
-		true, false, false, true, false, true, false
-	};
 	struct fplinux_ui_screen *screen =
 		fplinux_ui_text_box_new(&ui, "Name", "abcdef", 32);
 
@@ -1645,10 +1655,8 @@ static void test_options_keeps_back_last_and_delivers_visible_actions(void)
 	     ++choice) {
 		press_options();
 		CHECK(menu.count == sizeof(expected) / sizeof(expected[0]));
-		for (size_t row = 0; row < menu.count; ++row) {
+		for (size_t row = 0; row < menu.count; ++row)
 			CHECK(!strcmp(menu.texts[row], expected[row]));
-			CHECK(menu.separators[row] == separators[row]);
-		}
 		choose(expected[choice]);
 		CHECK(fired.commands == 1 && fired.command_id == ids[choice]);
 		CHECK(!strcmp(fplinux_ui_text_box_get(screen), "abcdef"));

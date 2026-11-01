@@ -1218,8 +1218,11 @@ msgstr "Подготовка…"
 msgid "Press a key. Only Back has a command."
 msgstr "Нажмите клавишу. Команда есть только у «Назад»."
 
-msgid "Change legends updates this preview. Toggle full screen changes the display mode; Back returns."
-msgstr "«Изменить подписи» обновляет образец, «Полный экран» меняет режим экрана. «Назад» вернёт в каталог."
+msgid "Restore legends"
+msgstr "Вернуть подписи"
+
+msgid "Toggle full screen shows this example's own legend bar in place of the system bar, with the same keys. Change legends updates OK's legend; Back leaves full screen, then returns."
+msgstr "«Переключить полный экран» показывает вместо системной панели собственную панель примера с теми же клавишами. «Изменить подписи» меняет подпись OK, «Назад» сначала выходит из полного экрана, затем возвращает в каталог."
 
 msgid "Priorities and ties"
 msgstr "Приоритеты"

@@ -51,30 +51,46 @@ void fplinux_launcher_frame(const struct fplinux_ui_profile_spec *spec,
 int fplinux_launcher_centre(int extent, int size);
 
 /*
- * The drawn battery in status-bar coordinates: a 1 px outline with a
- * cap, right-aligned at width - margin and vertically centred; five bars
- * inside; the "!" of the low state; the charging bolt left of it with
- * gap_small. The bolt is a polyline through bolt_points, relative to
- * bolt.x and bolt.y, bolt_line_width wide.
+ * The top of a status-bar item size pixels high. Every item is centred in
+ * the rows above the bar's divider, an odd remainder below beside it.
+ */
+int fplinux_launcher_status_y(const struct fplinux_ui_profile_spec *spec,
+			      int size);
+
+/* The tallest charging bolt; a taller profile value draws this one. */
+#define FPLINUX_LAUNCHER_BOLT_ROWS_MAX 15
+
+/*
+ * The drawn battery in status-bar coordinates, in whole pixels so that no
+ * edge is blended. The body is a 1 px outline without its corner pixels,
+ * drawn as its top, bottom, left and right edges. Five bars of the
+ * profile's bar size sit 1 px apart and 1 px inside the outline on every
+ * side, so the bar size sets the body's. The body is a status-bar item
+ * (fplinux_launcher_status_y()) and the cap, centred on its right side,
+ * ends at width - margin. The "!" of the low state is centred across the
+ * body and as high as the bars. The charging bolt is gap_small left of the
+ * body and another status-bar item: one rect per row of an odd height, strokes
+ * 1 px wide falling one column per row from its top right corner to its
+ * full-width middle row and from that row's right end to its bottom left
+ * corner.
  */
 struct fplinux_launcher_battery {
 	struct fplinux_launcher_rect body;
-	int outline_width;
-	int outline_radius;
+	struct fplinux_launcher_rect edges[4];
 	struct fplinux_launcher_rect cap;
 	struct fplinux_launcher_rect bars[FPLINUX_LAUNCHER_BATTERY_STEP_COUNT];
 	struct fplinux_launcher_rect low_stem;
 	struct fplinux_launcher_rect low_dot;
 	struct fplinux_launcher_rect bolt;
-	int bolt_points[4][2];
-	int bolt_line_width;
+	struct fplinux_launcher_rect bolt_rows[FPLINUX_LAUNCHER_BOLT_ROWS_MAX];
+	int bolt_row_count;
 };
 
 void fplinux_launcher_battery_layout(const struct fplinux_ui_profile_spec *spec,
 				     int width,
 				     struct fplinux_launcher_battery *battery);
 
-/* The lock glyph's square in the status bar's left slot. */
+/* The lock glyph's square in the status bar's left slot, a status-bar item. */
 struct fplinux_launcher_rect
 fplinux_launcher_status_glyph(const struct fplinux_ui_profile_spec *spec);
 
@@ -203,25 +219,19 @@ void fplinux_launcher_home_layout(const struct fplinux_ui_profile_spec *spec,
 				  int date_height, int hint_height,
 				  struct fplinux_launcher_home *home);
 
+/*
+ * The analog clock's dial: an even square no wider than the text width,
+ * as high as the body allows once the shown date and hint stack below it
+ * and home_gap separates the stack from each bar, as it separates its
+ * parts. 0 when nothing is left.
+ */
+int fplinux_launcher_home_dial(const struct fplinux_ui_profile_spec *spec,
+			       int width, int body_height, int date_height,
+			       int hint_height);
+
 /* Width of a text box centred with margin on both sides. */
 int fplinux_launcher_text_width(const struct fplinux_ui_profile_spec *spec,
 				int width);
-
-/*
- * A notice: width - 2 x alert_margin
- * wide, at most body_height - 2 x alert_margin high, centred in the body.
- */
-struct fplinux_launcher_notice_box {
-	int width;
-	int max_height;
-	int border;
-	int padding;
-	int gap;
-};
-
-void fplinux_launcher_notice_layout(const struct fplinux_ui_profile_spec *spec,
-				    int width, int body_height,
-				    struct fplinux_launcher_notice_box *box);
 
 /* Launch card in body coordinates; its spinner square belongs to the shell. */
 struct fplinux_launcher_launch {

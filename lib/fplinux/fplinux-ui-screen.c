@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: LGPL-2.1-or-later */
 #define _POSIX_C_SOURCE 200809L
 #include "fplinux-ui-screen.h"
+#include "fplinux-activity.h"
+#include "fplinux-ui-activity.h"
 #include "fplinux-language.h"
 #include "fplinux-ui-internal.h"
 #include "fplinux-ui-listview.h"
@@ -38,10 +40,6 @@
  */
 #define WAIT_ALERT_DELAY_MS 500U
 #define WAIT_ALERT_MINIMUM_MS 500U
-/* A busy alert's spinner: a quarter ring stepping round eight times a turn. */
-#define SPINNER_ARC_DEGREES 90
-#define SPINNER_STEP_DEGREES 45
-#define SPINNER_STEP_MS 125
 /* Image sources the runtime decodes: file size and decoded pixels. */
 #define IMAGE_FILE_MAX_BYTES (1024 * 1024)
 #define IMAGE_MAX_PIXELS (1024U * 1024U)
@@ -83,7 +81,6 @@ struct command {
 	/* The decoded options-menu image, or NULL. */
 	lv_draw_buf_t *icon;
 	bool keep_visible;
-	bool separator_before;
 };
 
 /* A list row's or form item's own command; index follows its row. */
@@ -198,6 +195,7 @@ struct fplinux_ui_screen {
 	lv_obj_t *root;
 	lv_obj_t *band;
 	lv_obj_t *band_label;
+	bool title_active;
 	lv_obj_t *header_status;
 	lv_obj_t *content;
 
@@ -226,7 +224,6 @@ struct fplinux_ui_screen {
 	unsigned int timeout_ms;
 	lv_timer_t *timer;
 	lv_obj_t *box;
-	lv_obj_t *box_title;
 	/* The alert's text, hidden while it has none. */
 	lv_obj_t *message;
 	lv_obj_t *message_view;
@@ -238,7 +235,8 @@ struct fplinux_ui_screen {
 	lv_obj_t *indicator_box;
 	lv_obj_t *indicator;
 	lv_timer_t *spin_timer;
-	int32_t spin_angle;
+	unsigned int activity_phase;
+	lv_obj_t *activity_indicator;
 
 	fplinux_ui_canvas_key_cb canvas_key;
 	void *canvas_context;
@@ -409,7 +407,7 @@ spec_of(const struct fplinux_ui_screen *screen)
 	return fplinux_ui_spec(screen->ui);
 }
 
-/* The one scroll indicator: a thumb in focus, no track. */
+/* The one scroll indicator: a thumb in focus over its channel. */
 static void style_scrollbar(lv_obj_t *object, struct fplinux_ui *ui)
 {
 	lv_obj_set_scroll_dir(object, LV_DIR_VER);
@@ -499,8 +497,12 @@ static void size_frame(struct fplinux_ui_screen *screen)
 		}
 		lv_label_set_text_static(screen->header_status, text);
 		lv_obj_set_width(screen->header_status, status_width);
-		lv_obj_align(screen->header_status, LV_ALIGN_RIGHT_MID,
-			     -spec->margin, 0);
+		lv_obj_align(screen->header_status, LV_ALIGN_TOP_RIGHT,
+			     -spec->margin,
+			     fplinux_ui_band_line_y(
+				     spec, lv_obj_get_style_text_font(
+						   screen->header_status,
+						   LV_PART_MAIN)));
 		title_width -= status_width + gap;
 	}
 	lv_obj_set_width(screen->band_label, title_width > 0 ? title_width : 0);
@@ -508,24 +510,36 @@ static void size_frame(struct fplinux_ui_screen *screen)
 	lv_obj_set_size(screen->content, width, height - top);
 }
 
+/* Only the active screen owns the shared title marquee. */
+static void title_active(struct fplinux_ui_screen *screen, bool active)
+{
+	active = active && screen->layer->visible && screen->band_label &&
+		 (screen->title || screen->kind == SCREEN_ALERT) &&
+		 !screen->header_status;
+	if (active == screen->title_active)
+		return;
+	if (active)
+		fplinux_ui_title_scroll(screen->band_label);
+	else
+		fplinux_ui_title_hide(screen->band_label);
+	screen->title_active = active;
+}
+
 /* The title band of fplinux_ui_header(); no band without a title. */
 static void layout_frame(struct fplinux_ui_screen *screen)
 {
+	bool was_active = screen->title_active;
+
 	size_frame(screen);
 	lv_obj_set_hidden(screen->band, !screen->title);
-	if (screen->title) {
+	if (screen->title)
 		lv_label_set_text(screen->band_label, screen->title);
-		/* A hidden screen's title scrolls once it shows. */
-		if (!screen->header_status && !lv_obj_is_hidden(screen->root))
-			fplinux_ui_title_scroll(screen->band_label);
-		else {
-			fplinux_ui_title_hide(screen->band_label);
-			lv_label_set_long_mode(screen->band_label,
-					       LV_LABEL_LONG_MODE_DOTS);
-		}
-	} else if (screen->band_label) {
-		fplinux_ui_title_hide(screen->band_label);
-	}
+	title_active(screen, is_top(screen) && !lv_obj_is_hidden(screen->root));
+	if (was_active && screen->title_active)
+		fplinux_ui_title_scroll(screen->band_label);
+	else if (!screen->title_active && screen->title)
+		lv_label_set_long_mode(screen->band_label,
+				       LV_LABEL_LONG_MODE_DOTS);
 }
 
 /* A modal screen's root, its scrim, ends above the legend bar. */
@@ -537,10 +551,30 @@ static int32_t root_height(const struct fplinux_ui_screen *screen)
 		       screen_height(screen);
 }
 
-static void build_frame(struct fplinux_ui_screen *screen)
+static void build_band(struct fplinux_ui_screen *screen, lv_obj_t *parent)
 {
 	const struct fplinux_ui_theme *theme = fplinux_ui_theme(screen->ui);
 	const struct fplinux_ui_profile_spec *spec = spec_of(screen);
+	int32_t width = fplinux_ui_width(screen->ui);
+
+	screen->band = plain_object(parent);
+	lv_obj_set_size(screen->band, width, spec->header_height);
+	lv_obj_set_style_bg_color(screen->band, theme->surface, 0);
+	lv_obj_set_style_bg_opa(screen->band, LV_OPA_COVER, 0);
+	lv_obj_set_style_border_color(screen->band, theme->border, 0);
+	lv_obj_set_style_border_width(screen->band, spec->divider_width, 0);
+	lv_obj_set_style_border_side(screen->band, LV_BORDER_SIDE_BOTTOM, 0);
+	screen->band_label = lv_label_create(screen->band);
+	fplinux_ui_title_init(screen->band_label, theme->font_large);
+	lv_obj_set_width(screen->band_label, width - 2 * spec->margin);
+	lv_label_set_text(screen->band_label, "");
+	lv_obj_set_pos(screen->band_label, spec->margin,
+		       fplinux_ui_band_line_y(spec, theme->font_large));
+}
+
+static void build_frame(struct fplinux_ui_screen *screen)
+{
+	const struct fplinux_ui_theme *theme = fplinux_ui_theme(screen->ui);
 	int32_t width = fplinux_ui_width(screen->ui);
 
 	screen->root = plain_object(fplinux_ui_screen(screen->ui));
@@ -556,18 +590,7 @@ static void build_frame(struct fplinux_ui_screen *screen)
 	}
 	lv_obj_set_style_bg_color(screen->root, theme->background, 0);
 	lv_obj_set_style_bg_opa(screen->root, LV_OPA_COVER, 0);
-	screen->band = plain_object(screen->root);
-	lv_obj_set_size(screen->band, width, spec->header_height);
-	lv_obj_set_style_bg_color(screen->band, theme->surface, 0);
-	lv_obj_set_style_bg_opa(screen->band, LV_OPA_COVER, 0);
-	lv_obj_set_style_border_color(screen->band, theme->border, 0);
-	lv_obj_set_style_border_width(screen->band, spec->divider_width, 0);
-	lv_obj_set_style_border_side(screen->band, LV_BORDER_SIDE_BOTTOM, 0);
-	screen->band_label = lv_label_create(screen->band);
-	fplinux_ui_title_init(screen->band_label, theme->font_large);
-	lv_obj_set_width(screen->band_label, width - 2 * spec->margin);
-	lv_label_set_text(screen->band_label, "");
-	lv_obj_align(screen->band_label, LV_ALIGN_LEFT_MID, spec->margin, 0);
+	build_band(screen, screen->root);
 	screen->content = plain_object(screen->root);
 	layout_frame(screen);
 }
@@ -780,7 +803,6 @@ static bool copy_command(struct fplinux_ui_screen *screen,
 		.type = from->type,
 		.priority = from->priority,
 		.keep_visible = from->keep_visible,
-		.separator_before = from->separator_before,
 	};
 	if (from->label && !(to->label = strdup(from->label)))
 		return false;
@@ -1030,10 +1052,14 @@ static const enum fplinux_ui_label alert_titles[] = {
 
 static void show_alert_title(struct fplinux_ui_screen *alert)
 {
-	lv_label_set_text(alert->box_title,
+	lv_label_set_text(alert->band_label,
 			  alert->title ?
 				  alert->title :
 				  word(alert, alert_titles[alert->alert_kind]));
+	if (alert->title_active)
+		fplinux_ui_title_scroll(alert->band_label);
+	else
+		fplinux_ui_title_hide(alert->band_label);
 }
 
 /* NULL removes the band; an alert then names its kind. */
@@ -1174,9 +1200,9 @@ bool fplinux_ui_screen_get_content_size(const struct fplinux_ui_screen *screen,
 	if (screen->kind == SCREEN_ALERT) {
 		int32_t inset = 2 * (spec->alert_border + spec->alert_padding);
 
-		fplinux_ui_scrollbar_layout(screen->box);
+		fplinux_ui_scrollbar_layout(screen->message_view);
 		w = alert_box_width(screen->ui) - inset -
-		    (lv_obj_get_style_pad_right(screen->box, 0) -
+		    (lv_obj_get_style_pad_right(screen->message_view, 0) -
 		     spec->alert_padding);
 		h = alert_box_max_height(screen->ui) - inset;
 	} else if (screen->popup_choice) {
@@ -1559,12 +1585,41 @@ static void alert_expired(lv_timer_t *timer)
 	dismiss_alert(alert, NULL);
 }
 
+static const struct fplinux_ui_activity_entry *
+activity_source(const struct fplinux_ui_screen *alert)
+{
+	const struct fplinux_ui_profile_spec *spec = spec_of(alert);
+	size_t i;
+
+	for (i = 0;
+	     i < sizeof(ui_activity_images) / sizeof(ui_activity_images[0]);
+	     i++) {
+		const struct fplinux_ui_activity_entry *entry =
+			&ui_activity_images[i];
+
+		if (entry->size == (unsigned int)spec->spinner_size &&
+		    entry->width == (unsigned int)spec->spinner_width &&
+		    entry->phase == alert->activity_phase)
+			return entry;
+	}
+	return NULL;
+}
+
+static void activity_frame(struct fplinux_ui_screen *alert)
+{
+	const struct fplinux_ui_activity_entry *entry = activity_source(alert);
+
+	if (entry)
+		lv_image_set_src(alert->activity_indicator, entry->image);
+}
+
 static void spin_step(lv_timer_t *timer)
 {
 	struct fplinux_ui_screen *alert = lv_timer_get_user_data(timer);
 
-	alert->spin_angle = (alert->spin_angle + SPINNER_STEP_DEGREES) % 360;
-	lv_arc_set_rotation(alert->indicator, alert->spin_angle);
+	alert->activity_phase =
+		(alert->activity_phase + 1) % FPLINUX_STATUS_ACTIVITY_PHASES;
+	activity_frame(alert);
 }
 
 static void stop_timer(lv_timer_t **timer)
@@ -1591,8 +1646,8 @@ static void run_alert_timer(struct fplinux_ui_screen *alert, bool run)
 	if (!spin)
 		stop_timer(&alert->spin_timer);
 	else if (!alert->spin_timer)
-		alert->spin_timer =
-			lv_timer_create(spin_step, SPINNER_STEP_MS, alert);
+		alert->spin_timer = lv_timer_create(
+			spin_step, FPLINUX_STATUS_ACTIVITY_STEP_MS, alert);
 }
 
 /*
@@ -1751,9 +1806,19 @@ static void show_appearance_focus(struct form_item *item, bool focused)
 	lv_color_t colour = focused ? theme->accent_text : theme->accent;
 
 	if (item->appearance == FPLINUX_UI_APPEARANCE_BUTTON) {
-		lv_obj_set_style_border_color(
-			item->frame,
-			focused ? theme->focus : theme->control_border, 0);
+		fplinux_ui_control_focus(item->form->ui, item->frame, focused);
+		if (item->kind == ITEM_IMAGE)
+			lv_obj_set_style_image_recolor(
+				item->value,
+				focused ? theme->accent_text :
+					  theme->foreground,
+				0);
+		else
+			lv_obj_set_style_text_color(item->value,
+						    focused ?
+							    theme->accent_text :
+							    theme->foreground,
+						    0);
 		return;
 	}
 	lv_obj_set_style_bg_opa(item->frame,
@@ -1784,11 +1849,37 @@ static void form_apply_focus(struct fplinux_ui_screen *form, bool active)
 			fplinux_ui_listview_set_selectable(item->list, focused);
 		else if (actionable(item))
 			show_appearance_focus(item, focused);
-		else if (item->frame && (segmented(item) || item->interactive))
-			lv_obj_set_style_border_color(
-				item->frame,
-				focused ? theme->focus : theme->control_border,
+		else if (item->frame &&
+			 (segmented(item) || item->interactive)) {
+			fplinux_ui_control_focus(form->ui, item->frame,
+						 focused);
+			lv_obj_set_style_text_color(
+				item->value,
+				focused ? theme->accent_text :
+					  (item->kind == ITEM_GAUGE ?
+						   theme->muted :
+						   theme->foreground),
 				0);
+			if (segmented(item)) {
+				lv_obj_set_style_bg_color(item->value,
+							  theme->surface,
+							  LV_PART_SELECTED);
+				lv_obj_set_style_text_color(item->value,
+							    theme->foreground,
+							    LV_PART_SELECTED);
+			} else if (item->kind == ITEM_GAUGE) {
+				lv_obj_set_style_text_color(
+					item->gauge_name,
+					focused ? theme->accent_text :
+						  theme->foreground,
+					0);
+				lv_obj_set_style_bg_color(
+					item->bar,
+					focused ? theme->accent_text :
+						  theme->focus,
+					LV_PART_INDICATOR);
+			}
+		}
 		if (label && focused)
 			marquee = label;
 		else if (label)
@@ -1805,16 +1896,59 @@ static void view_area(lv_obj_t *content, lv_area_t *view)
 	view->y2 -= lv_obj_get_style_pad_bottom(content, LV_PART_MAIN);
 }
 
+/* Finish a partly clipped end line, including the content's edge padding. */
+static void settle_form_text_edge(struct fplinux_ui_screen *form, bool down)
+{
+	struct form_item *item = NULL;
+	lv_obj_t *label;
+	lv_area_t view, text;
+	int32_t line, clipped;
+
+	for (size_t n = 0; n < form->item_count; ++n) {
+		size_t i = down ? form->item_count - 1 - n : n;
+
+		if (!form->items[i]->hidden) {
+			item = form->items[i];
+			break;
+		}
+	}
+	if (!item || item->kind != ITEM_STRING || actionable(item))
+		return;
+	label = down || !item->label ? item->value : item->label;
+	if (!label)
+		return;
+	lv_obj_update_layout(form->content);
+	view_area(form->content, &view);
+	lv_obj_get_coords(label, &text);
+	line = lv_font_get_line_height(lv_obj_get_style_text_font(label, 0));
+	clipped = down ? text.y2 - view.y2 : view.y1 - text.y1;
+	if (line > 0 && clipped > 0 && clipped < line)
+		lv_obj_scroll_to_y(form->content,
+				   down ? lv_obj_get_scroll_y(form->content) +
+						   lv_obj_get_scroll_bottom(
+							   form->content) :
+					  0,
+				   LV_ANIM_OFF);
+}
+
+/* Scroll one normal step, completing a clipped line at either end. */
+static void scroll_form(struct fplinux_ui_screen *form, int32_t dy)
+{
+	lv_obj_scroll_by_bounded(form->content, 0, dy, LV_ANIM_OFF);
+	settle_form_text_edge(form, dy < 0);
+}
+
 /* Scrolls the least that shows area, or its top when it is taller. */
-static void reveal(lv_obj_t *content, const lv_area_t *area)
+static void reveal(struct fplinux_ui_screen *form, const lv_area_t *area)
 {
 	lv_area_t view;
 	int32_t dy;
 
-	view_area(content, &view);
-	dy = fplinux_ui_reveal_scroll(view.y1, view.y2, area->y1, area->y2);
+	view_area(form->content, &view);
+	dy = fplinux_ui_reveal_scroll(view.y1, view.y2, area->y1, area->y2,
+				      spec_of(form)->row_height);
 	if (dy)
-		lv_obj_scroll_by_bounded(content, 0, dy, LV_ANIM_OFF);
+		scroll_form(form, dy);
 }
 
 /* The focused row of an inline choice, or the whole item. */
@@ -1855,7 +1989,7 @@ static void form_focus(struct fplinux_ui_screen *form, size_t index,
 	form_apply_focus(form, is_top(form));
 	lv_obj_update_layout(form->content);
 	item_area(item, &area);
-	reveal(form->content, &area);
+	reveal(form, &area);
 }
 
 /*
@@ -1990,7 +2124,7 @@ static void form_move(struct fplinux_ui_screen *form, bool down)
 			fplinux_ui_listview_select(item->list,
 						   down ? row + 1 : row - 1);
 			item_area(item, &area);
-			reveal(content, &area);
+			reveal(form, &area);
 			return;
 		}
 	}
@@ -2002,10 +2136,8 @@ static void form_move(struct fplinux_ui_screen *form, bool down)
 	/* Read-only content scrolls by a row. */
 	if (item)
 		item_area(item, &area);
-	lv_obj_scroll_by_bounded(content, 0,
-				 down ? -spec_of(form)->row_height :
-					spec_of(form)->row_height,
-				 LV_ANIM_OFF);
+	scroll_form(form, down ? -spec_of(form)->row_height :
+				 spec_of(form)->row_height);
 	if (!item)
 		return;
 	/*
@@ -2054,12 +2186,8 @@ static void restack(struct fplinux_ui_screens *layer)
 	struct fplinux_ui_screen *active = fplinux_ui_screens_active(layer);
 
 	if (layer->transient) {
-		bool showing = lv_obj_is_hidden(layer->transient->root);
-
 		lv_obj_set_hidden(layer->transient->root, false);
-		if (showing && layer->transient->title &&
-		    layer->transient->band_label)
-			fplinux_ui_title_scroll(layer->transient->band_label);
+		title_active(layer->transient, true);
 		set_active(layer->transient, true);
 		shown = layer->transient->popup_choice;
 	}
@@ -2071,16 +2199,8 @@ static void restack(struct fplinux_ui_screens *layer)
 				screen->kind == SCREEN_CANVAS &&
 				fplinux_ui_is_launcher(screen->ui);
 		bool visible = shown || backdrop;
-		bool showing = visible && lv_obj_is_hidden(screen->root);
-
 		lv_obj_set_hidden(screen->root, !visible);
-		/* A long title scrolls once each time its screen shows. */
-		if (showing && screen->title && screen->band_label &&
-		    !screen->header_status)
-			fplinux_ui_title_scroll(screen->band_label);
-		else if ((!visible || screen->header_status) &&
-			 screen->band_label)
-			fplinux_ui_title_hide(screen->band_label);
+		title_active(screen, visible && screen == active);
 		set_active(screen, screen == active);
 		if (screen->kind != SCREEN_ALERT && !screen->popup_choice)
 			shown = false;
@@ -2124,6 +2244,8 @@ static void destroy_screen(struct fplinux_ui_screen *screen)
 	if (!screen->layer->closing)
 		set_active(screen, false);
 	fplinux_ui_cancel_key_repeat(screen->ui, screen);
+	if (screen->band_label)
+		fplinux_ui_title_hide(screen->band_label);
 	stop_timer(&screen->timer);
 	stop_timer(&screen->spin_timer);
 	/* The list views and text fields go with their objects. */
@@ -3388,6 +3510,29 @@ bool fplinux_ui_list_set_trailing_icon(struct fplinux_ui_screen *list,
 	return fplinux_ui_listview_set_trailing_icon(list->list, index, src);
 }
 
+bool fplinux_ui_list_set_trailing_value(struct fplinux_ui_screen *list,
+					size_t index, const char *value)
+{
+	if (!is_stored_list(list) ||
+	    index >= fplinux_ui_listview_count(list->list)) {
+		errno = EINVAL;
+		return false;
+	}
+	return fplinux_ui_listview_set_trailing_value(list->list, index, value);
+}
+
+bool fplinux_ui_list_set_level(struct fplinux_ui_screen *list, size_t index,
+			       int32_t minimum, int32_t maximum, int32_t value)
+{
+	if (!is_stored_list(list) ||
+	    index >= fplinux_ui_listview_count(list->list)) {
+		errno = EINVAL;
+		return false;
+	}
+	return fplinux_ui_listview_set_level(list->list, index, minimum,
+					     maximum, value);
+}
+
 /*
  * OK on a row: an implicit list reports the select command, an exclusive
  * list marks the row and reports it even when it was marked already, so
@@ -3899,10 +4044,18 @@ static void size_popup_choice(struct fplinux_ui_screen *list, size_t count)
 	int32_t title = list->title ? spec->header_height : 0;
 	int32_t inset = 2 * spec->alert_border;
 
-	if (height >= title + inset &&
-	    count <=
-		    (size_t)(height - title - inset) / (size_t)spec->row_height)
-		height = title + inset + (int32_t)count * spec->row_height;
+	if (height >= title + inset) {
+		size_t rows =
+			(size_t)(height - title - inset + spec->divider_width) /
+			spec->row_height;
+
+		if (rows > count)
+			rows = count;
+		if (rows)
+			height = title + inset +
+				 (int32_t)rows * spec->row_height -
+				 spec->divider_width;
+	}
 	lv_obj_set_size(list->box,
 			fplinux_ui_width(list->ui) - 2 * spec->alert_margin,
 			height);
@@ -4499,7 +4652,7 @@ static void keep_focus_visible(struct fplinux_ui_screen *form)
 		return;
 	lv_obj_update_layout(form->content);
 	item_area(form->items[form->focus], &area);
-	reveal(form->content, &area);
+	reveal(form, &area);
 }
 
 /* Items after a change take the indices of their places. */
@@ -4877,6 +5030,8 @@ static bool form_page(struct fplinux_ui_screen *form,
 	}
 	if (!fplinux_ui_scroll_key(form->content, key))
 		return false;
+	if (key->pressed)
+		settle_form_text_edge(form, key->code == KEY_RIGHT);
 	if (item)
 		blur_scrolled_item(form, item, area.y1);
 	return true;
@@ -5018,23 +5173,42 @@ static void progress_size(lv_event_t *event)
 static void layout_alert(struct fplinux_ui_screen *alert)
 {
 	const struct fplinux_ui_profile_spec *spec = spec_of(alert);
-	int32_t available = alert_box_max_height(alert->ui) -
-			    2 * (spec->alert_padding + spec->alert_border);
-	unsigned int fixed = 0;
-	lv_obj_t *parts[] = { alert->box_title, alert->indicator_box,
+	int32_t available =
+		alert_box_max_height(alert->ui) - 2 * spec->alert_border;
+	int32_t line, space;
+	lv_obj_t *parts[] = { alert->band, alert->indicator_box,
 			      alert->progress_text };
 
+	lv_obj_set_width(alert->band, lv_pct(100));
+	lv_obj_set_width(alert->band_label, alert_box_width(alert->ui) -
+						    2 * spec->alert_border -
+						    2 * spec->margin);
 	lv_obj_update_layout(alert->box);
 	for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); ++i) {
 		if (!parts[i] || lv_obj_is_hidden(parts[i]))
 			continue;
 		available -= lv_obj_get_height(parts[i]);
-		++fixed;
 	}
-	if (!lv_obj_is_hidden(alert->message_view))
-		available -= (int32_t)fixed * spec->alert_gap;
-	lv_obj_set_style_max_height(alert->message_view,
-				    available > 0 ? available : 1, 0);
+	/*
+	 * A message that scrolls shows whole lines, at either end and between,
+	 * as fplinux_ui_scroll_key() steps by lines.
+	 */
+	space = lv_obj_get_style_text_line_space(alert->message, 0);
+	line = lv_font_get_line_height(
+		       lv_obj_get_style_text_font(alert->message, 0)) +
+	       space;
+	available -= 2 * spec->alert_padding;
+	if (available > line)
+		available = (available + space) / line * line - space;
+	lv_obj_set_style_max_height(
+		alert->message_view,
+		(available > 0 ? available : 1) + 2 * spec->alert_padding, 0);
+	fplinux_ui_scrollbar_caps(
+		alert->message_view, false,
+		(alert->indicator_box &&
+		 !lv_obj_is_hidden(alert->indicator_box)) ||
+			(alert->progress_text &&
+			 !lv_obj_is_hidden(alert->progress_text)));
 	fplinux_ui_scrollbar_layout(alert->message_view);
 }
 
@@ -5074,23 +5248,20 @@ struct fplinux_ui_screen *fplinux_ui_alert_new(struct fplinux_ui *ui,
 	lv_obj_set_size(alert->box, alert_box_width(ui), LV_SIZE_CONTENT);
 	lv_obj_set_style_max_height(alert->box, alert_box_max_height(ui), 0);
 	lv_obj_set_flex_flow(alert->box, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_style_pad_all(alert->box, spec->alert_padding, 0);
-	lv_obj_set_style_pad_row(alert->box, spec->alert_gap, 0);
 	lv_obj_set_style_bg_color(alert->box, theme->popup, 0);
 	lv_obj_set_style_bg_opa(alert->box, LV_OPA_COVER, 0);
 	lv_obj_set_style_border_color(alert->box, colour, 0);
 	lv_obj_set_style_border_width(alert->box, spec->alert_border, 0);
 	lv_obj_set_scrollable(alert->box, false);
 	lv_obj_center(alert->box);
-	alert->box_title = lv_label_create(alert->box);
-	lv_obj_set_width(alert->box_title, lv_pct(100));
-	lv_label_set_long_mode(alert->box_title, LV_LABEL_LONG_MODE_WRAP);
-	lv_obj_set_style_text_font(alert->box_title, theme->font_large, 0);
+	build_band(alert, alert->box);
+	lv_obj_set_style_bg_color(alert->band, theme->popup, 0);
 	if (kind == FPLINUX_UI_ALERT_WARNING || kind == FPLINUX_UI_ALERT_ERROR)
-		lv_obj_set_style_text_color(alert->box_title, colour, 0);
+		lv_obj_set_style_text_color(alert->band_label, colour, 0);
 	show_alert_title(alert);
 	alert->message_view = plain_object(alert->box);
 	lv_obj_set_size(alert->message_view, lv_pct(100), LV_SIZE_CONTENT);
+	lv_obj_set_style_pad_all(alert->message_view, spec->alert_padding, 0);
 	lv_obj_set_flex_flow(alert->message_view, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_scrollable(alert->message_view, true);
 	style_scrollbar(alert->message_view, ui);
@@ -5101,25 +5272,32 @@ struct fplinux_ui_screen *fplinux_ui_alert_new(struct fplinux_ui *ui,
 	return alert;
 }
 
-static lv_obj_t *make_spinner(lv_obj_t *parent, struct fplinux_ui *ui,
-			      int32_t rotation)
+static lv_obj_t *make_spinner(lv_obj_t *parent, struct fplinux_ui_screen *alert)
 {
+	struct fplinux_ui *ui = alert->ui;
 	const struct fplinux_ui_theme *theme = fplinux_ui_theme(ui);
 	const struct fplinux_ui_profile_spec *spec = fplinux_ui_spec(ui);
-	lv_obj_t *arc = lv_arc_create(parent);
+	const struct fplinux_ui_activity_entry *entry = activity_source(alert);
+	lv_obj_t *box, *track;
 
-	lv_obj_remove_style_all(arc);
-	lv_obj_set_clickable(arc, false);
-	lv_obj_set_size(arc, spec->spinner_size, spec->spinner_size);
-	lv_obj_set_style_arc_width(arc, spec->spinner_width, LV_PART_MAIN);
-	lv_obj_set_style_arc_color(arc, theme->border, LV_PART_MAIN);
-	lv_obj_set_style_arc_width(arc, spec->spinner_width, LV_PART_INDICATOR);
-	lv_obj_set_style_arc_color(arc, theme->focus, LV_PART_INDICATOR);
-	lv_arc_set_bg_angles(arc, 0, 360);
-	lv_arc_set_angles(arc, 0, SPINNER_ARC_DEGREES);
-	lv_arc_set_rotation(arc, rotation);
-	lv_obj_center(arc);
-	return arc;
+	if (!entry) {
+		errno = EINVAL;
+		return NULL;
+	}
+	box = plain_object(parent);
+	lv_obj_set_size(box, spec->spinner_size, spec->spinner_size);
+	lv_obj_center(box);
+	track = lv_image_create(box);
+	lv_image_set_src(track, entry->track);
+	lv_obj_set_style_image_recolor(track, theme->border, 0);
+	lv_obj_set_style_image_recolor_opa(track, LV_OPA_COVER, 0);
+	alert->activity_indicator = lv_image_create(box);
+	lv_image_set_src(alert->activity_indicator, entry->image);
+	lv_obj_set_style_image_recolor(alert->activity_indicator, theme->focus,
+				       0);
+	lv_obj_set_style_image_recolor_opa(alert->activity_indicator,
+					   LV_OPA_COVER, 0);
+	return box;
 }
 
 bool fplinux_ui_alert_set_progress(struct fplinux_ui_screen *alert, int value,
@@ -5135,6 +5313,8 @@ bool fplinux_ui_alert_set_progress(struct fplinux_ui_screen *alert, int value,
 	if (!alert->indicator_box) {
 		alert->indicator_box = plain_object(alert->box);
 		lv_obj_set_width(alert->indicator_box, lv_pct(100));
+		lv_obj_set_style_pad_all(alert->indicator_box,
+					 spec->alert_padding, 0);
 		if (alert->progress_text)
 			lv_obj_move_to_index(
 				alert->indicator_box,
@@ -5142,13 +5322,16 @@ bool fplinux_ui_alert_set_progress(struct fplinux_ui_screen *alert, int value,
 	}
 	if (!alert->indicator || !alert->maximum != !maximum) {
 		lv_obj_clean(alert->indicator_box);
+		alert->activity_indicator = NULL;
 		lv_obj_set_height(alert->indicator_box,
-				  maximum ? spec->bar_height :
-					    spec->spinner_size);
+				  (maximum ? spec->bar_height :
+					     spec->spinner_size) +
+					  2 * spec->alert_padding);
 		alert->indicator =
 			maximum ? make_bar(alert->indicator_box, alert->ui) :
-				  make_spinner(alert->indicator_box, alert->ui,
-					       alert->spin_angle);
+				  make_spinner(alert->indicator_box, alert);
+		if (!alert->indicator)
+			return false;
 		if (maximum)
 			lv_obj_add_event_cb(alert->indicator, progress_size,
 					    LV_EVENT_SIZE_CHANGED, alert);
@@ -5203,6 +5386,8 @@ bool fplinux_ui_alert_set_footer(struct fplinux_ui_screen *alert,
 			return false;
 		}
 		lv_obj_set_width(alert->progress_text, lv_pct(100));
+		lv_obj_set_style_pad_all(alert->progress_text,
+					 spec_of(alert)->alert_padding, 0);
 		lv_label_set_long_mode(alert->progress_text,
 				       LV_LABEL_LONG_MODE_WRAP);
 	}
@@ -5310,8 +5495,6 @@ static void open_options(struct fplinux_ui_screen *screen,
 				.action = (int)visible,
 				.text = command_label(screen, screen->order[i]),
 				.icon = command_icon(screen, candidate),
-				.separator_before =
-					candidate->command->separator_before,
 			};
 			++visible;
 		}
@@ -5735,6 +5918,8 @@ static void resize_screen(struct fplinux_ui_screen *screen)
 		lv_obj_set_style_max_height(screen->box,
 					    alert_box_max_height(ui), 0);
 		layout_alert(screen);
+		if (screen->title_active)
+			fplinux_ui_title_scroll(screen->band_label);
 		return;
 	}
 	if (screen->popup_choice)

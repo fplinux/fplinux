@@ -101,10 +101,29 @@ size_t fplinux_ui_focus_step(size_t focus, size_t count, long rows,
  * The least scroll that brings the span top .. bottom (inclusive, content
  * coordinates on the screen) into the view view_top .. view_bottom, or its
  * top when it is taller: the distance to move the content down (negative:
- * up), 0 when it is in view.
+ * up), 0 when it is in view. A scroll of less than a quarter step goes on
+ * up to a step, as far as the whole span stays in view.
  */
 int32_t fplinux_ui_reveal_scroll(int32_t view_top, int32_t view_bottom,
-				 int32_t top, int32_t bottom);
+				 int32_t top, int32_t bottom, int32_t step);
+
+/*
+ * The vertical scroll position, 0 .. last, of a move from `from` to `to` by
+ * about step pixels: a move that would stop less than a quarter of step
+ * before the edge it heads for goes on to that edge, so that no sliver of
+ * content is left for a tiny last step.
+ */
+int32_t fplinux_ui_settle_scroll(int32_t from, int32_t to, int32_t last,
+				 int32_t step);
+
+/*
+ * A one-line move (negative: towards the start) reaches a grid line at
+ * least one line away, or an edge. A remaining distance shorter than one
+ * line is absorbed into the move. Other moves cover exactly step pixels,
+ * bounded by the edges, without snapping to a grid or edge.
+ */
+int32_t fplinux_ui_line_scroll(int32_t from, int32_t step, int32_t last,
+			       int32_t line);
 
 /* The most pooled rows of a virtual list. */
 #define FPLINUX_UI_VIRTUAL_SLOTS_MAX 16U

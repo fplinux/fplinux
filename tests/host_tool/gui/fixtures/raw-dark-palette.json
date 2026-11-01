@@ -16,5 +16,6 @@
   "danger": "#008284",
   "tile_ring": "#840000",
   "brand": "#008200",
+  "brand_foreground": "#FF8200",
   "scrim": "#000084"
 }

@@ -8,7 +8,7 @@ from tests.c_harness import compile_c
 from tests.process import run_process
 
 
-def test_launch_card_copy_and_spinner_pixels(tmp_path: Path) -> None:
+def test_launch_card_copy_and_spinner_pixels(tmp_path: Path, ui_activity_masks: Path) -> None:
     """Borrowed descriptors retain owned pixels; invalid images clear old storage."""
     aport = ROOT / "alpine/aports/fplinux-session"
     executable = tmp_path / "session-launch-surface"
@@ -25,8 +25,10 @@ def test_launch_card_copy_and_spinner_pixels(tmp_path: Path) -> None:
             str(aport),
             "-I",
             str(ROOT / "include/fplinux"),
+            f"-I{ui_activity_masks}",
             str(Path(__file__).with_name("fplinux-session-launch-surface-test.c")),
             str(aport / "session-launch-surface.c"),
+            str(ROOT / "lib/fplinux/fplinux-activity.c"),
         ],
         name="compile launch-card host component",
     )

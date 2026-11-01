@@ -2,8 +2,6 @@
 #ifndef FPLINUX_PREPARATION_H
 #define FPLINUX_PREPARATION_H
 
-#include "fplinux-font.h"
-
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -38,9 +36,8 @@ bool fplinux_preparation_read(const char *path,
 bool fplinux_preparation_write(const char *path,
 			       const struct fplinux_preparation_status *status);
 bool fplinux_preparation_is_busy(enum fplinux_preparation_stage stage);
-void fplinux_preparation_render(
+bool fplinux_preparation_render(
 	const struct fplinux_preparation_surface *surface,
-	const struct fplinux_font *font,
 	const struct fplinux_preparation_status *status, unsigned int phase);
 
 #endif

@@ -27,6 +27,13 @@ int fplinux_launcher_centre(int extent, int size)
 	return (extent - size) / 2;
 }
 
+int fplinux_launcher_status_y(const struct fplinux_ui_profile_spec *spec,
+			      int size)
+{
+	return fplinux_launcher_centre(
+		spec->status_height - spec->divider_width, size);
+}
+
 void fplinux_launcher_launch_layout(const struct fplinux_ui_profile_spec *spec,
 				    const struct fplinux_launcher_frame *frame,
 				    struct fplinux_launcher_launch *layout)
@@ -61,43 +68,55 @@ void fplinux_launcher_battery_layout(const struct fplinux_ui_profile_spec *spec,
 				     int width,
 				     struct fplinux_launcher_battery *battery)
 {
-	int body_width = spec->battery_width;
-	int body_height = spec->battery_height;
+	int steps = FPLINUX_LAUNCHER_BATTERY_STEP_COUNT;
 	int bar_width = spec->battery_bar_width;
 	int bar_height = spec->battery_bar_height;
-	int steps = FPLINUX_LAUNCHER_BATTERY_STEP_COUNT;
-	/* Bars 1 px apart inside the 1 px outline, centred when room is left. */
-	int outline = 1;
-	int inner = body_width - 2 * outline;
-	int pad = at_least((inner - (steps * bar_width + steps - 1)) / 2, 0);
+	/* The outline and the space between it and the bars, 1 px each. */
+	int inset = 2;
 	int dot = at_least(bar_height / 4, 1);
-	int bolt = spec->bolt_height;
-	/* The bolt is as wide as half its height; its stroke about a fifth. */
-	int middle = (bolt + 1) / 2;
+	int bolt_height = spec->bolt_height < FPLINUX_LAUNCHER_BOLT_ROWS_MAX ?
+				  spec->bolt_height :
+				  FPLINUX_LAUNCHER_BOLT_ROWS_MAX;
+	/* Rows above and below the bolt's middle row; an even height loses one. */
+	int half = at_least(bolt_height - 1, 0) / 2;
 	struct fplinux_launcher_rect *body = &battery->body;
+	struct fplinux_launcher_rect *cap = &battery->cap;
+	struct fplinux_launcher_rect *bolt = &battery->bolt;
 
-	battery->cap.width = spec->battery_cap_width;
-	battery->cap.height = spec->battery_cap_height;
-	battery->cap.x = width - spec->margin - battery->cap.width;
-	body->width = body_width;
-	body->height = body_height;
-	body->x = battery->cap.x - body_width;
-	body->y = fplinux_launcher_centre(spec->status_height, body_height);
-	battery->cap.y = body->y + fplinux_launcher_centre(body_height,
-							   battery->cap.height);
-	battery->outline_width = outline;
-	battery->outline_radius = outline;
+	body->width = steps * (bar_width + 1) - 1 + 2 * inset;
+	body->height = bar_height + 2 * inset;
+	cap->width = spec->battery_cap_width;
+	cap->height = spec->battery_cap_height;
+	cap->x = width - spec->margin - cap->width;
+	body->x = cap->x - body->width;
+	body->y = fplinux_launcher_status_y(spec, body->height);
+	cap->y = body->y + fplinux_launcher_centre(body->height, cap->height);
+	battery->edges[0] = (struct fplinux_launcher_rect){
+		.x = body->x + 1,
+		.y = body->y,
+		.width = body->width - 2,
+		.height = 1,
+	};
+	battery->edges[1] = battery->edges[0];
+	battery->edges[1].y = body->y + body->height - 1;
+	battery->edges[2] = (struct fplinux_launcher_rect){
+		.x = body->x,
+		.y = body->y + 1,
+		.width = 1,
+		.height = body->height - 2,
+	};
+	battery->edges[3] = battery->edges[2];
+	battery->edges[3].x = body->x + body->width - 1;
 	for (int i = 0; i < steps; ++i)
 		battery->bars[i] = (struct fplinux_launcher_rect){
-			.x = body->x + outline + pad + i * (bar_width + 1),
-			.y = body->y +
-			     fplinux_launcher_centre(body_height, bar_height),
+			.x = body->x + inset + i * (bar_width + 1),
+			.y = body->y + inset,
 			.width = bar_width,
 			.height = bar_height,
 		};
 	battery->low_stem = (struct fplinux_launcher_rect){
-		.x = body->x + fplinux_launcher_centre(body_width, bar_width),
-		.y = battery->bars[0].y,
+		.x = body->x + fplinux_launcher_centre(body->width, bar_width),
+		.y = body->y + inset,
 		.width = bar_width,
 		.height = bar_height - dot - 1,
 	};
@@ -107,21 +126,23 @@ void fplinux_launcher_battery_layout(const struct fplinux_ui_profile_spec *spec,
 		.width = bar_width,
 		.height = dot,
 	};
-	battery->bolt = (struct fplinux_launcher_rect){
-		.x = body->x - spec->gap_small - middle,
-		.y = fplinux_launcher_centre(spec->status_height, bolt),
-		.width = middle,
-		.height = bolt,
+	*bolt = (struct fplinux_launcher_rect){
+		.x = body->x - spec->gap_small - (half + 1),
+		.y = fplinux_launcher_status_y(spec, 2 * half + 1),
+		.width = half + 1,
+		.height = 2 * half + 1,
 	};
-	battery->bolt_points[0][0] = middle;
-	battery->bolt_points[0][1] = 1;
-	battery->bolt_points[1][0] = 1;
-	battery->bolt_points[1][1] = middle;
-	battery->bolt_points[2][0] = middle;
-	battery->bolt_points[2][1] = middle;
-	battery->bolt_points[3][0] = 1;
-	battery->bolt_points[3][1] = bolt;
-	battery->bolt_line_width = at_least(bolt / 5, 1);
+	battery->bolt_row_count = bolt->height;
+	for (int row = 0; row < bolt->height; ++row) {
+		int column = row < half ? half - row : 2 * half - row;
+
+		battery->bolt_rows[row] = (struct fplinux_launcher_rect){
+			.x = bolt->x + (row == half ? 0 : column),
+			.y = bolt->y + row,
+			.width = row == half ? bolt->width : 1,
+			.height = 1,
+		};
+	}
 }
 
 struct fplinux_launcher_rect
@@ -131,7 +152,7 @@ fplinux_launcher_status_glyph(const struct fplinux_ui_profile_spec *spec)
 
 	return (struct fplinux_launcher_rect){
 		.x = spec->margin,
-		.y = fplinux_launcher_centre(spec->status_height, size),
+		.y = fplinux_launcher_status_y(spec, size),
 		.width = size,
 		.height = size,
 	};
@@ -359,21 +380,24 @@ void fplinux_launcher_home_layout(const struct fplinux_ui_profile_spec *spec,
 	}
 }
 
+int fplinux_launcher_home_dial(const struct fplinux_ui_profile_spec *spec,
+			       int width, int body_height, int date_height,
+			       int hint_height)
+{
+	int dial = body_height - 2 * spec->home_gap - date_height -
+		   hint_height - (date_height > 0 ? spec->home_gap : 0) -
+		   (hint_height > 0 ? spec->home_gap : 0);
+	int text = fplinux_launcher_text_width(spec, width);
+
+	if (dial > text)
+		dial = text;
+	return at_least(dial / 2 * 2, 0);
+}
+
 int fplinux_launcher_text_width(const struct fplinux_ui_profile_spec *spec,
 				int width)
 {
 	return at_least(width - 2 * spec->margin, 0);
-}
-
-void fplinux_launcher_notice_layout(const struct fplinux_ui_profile_spec *spec,
-				    int width, int body_height,
-				    struct fplinux_launcher_notice_box *box)
-{
-	box->width = width - 2 * spec->alert_margin;
-	box->max_height = body_height - 2 * spec->alert_margin;
-	box->border = spec->alert_border;
-	box->padding = spec->alert_padding;
-	box->gap = spec->alert_gap;
 }
 
 size_t fplinux_launcher_icon_sizes(int sizes[], size_t capacity)

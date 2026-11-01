@@ -70,7 +70,6 @@ bool __wrap_fplinux_ui_menu_open(struct fplinux_ui *ui,
 	for (size_t i = 0; i < count; i++) {
 		assert(strlen(items[i].text) < sizeof(observed.menu_items[i]));
 		strcpy(observed.menu_items[i], items[i].text);
-		observed.menu_separators[i] = items[i].separator_before;
 	}
 	return __real_fplinux_ui_menu_open(ui, origin, title, items, count,
 					   callback, context);

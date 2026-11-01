@@ -103,7 +103,8 @@ def test_landscape_layout_preserves_horizontal_capacity(profile_table: dict[str,
 def test_layout_holds_navigation_bands_and_three_rows(profile_table: dict[str, Any]) -> None:
     for profile in profile_table["profiles"]:
         bands = profile["status_height"] + profile["softkey_height"] + profile["header_height"]
-        assert bands + 3 * profile["row_height"] <= profile["height"]
+        # The last row's 1 px divider lies under the soft-key bar's line.
+        assert bands + 3 * profile["row_height"] <= profile["height"] + 1
         ring = profile["app_icon_size"] + 2 * (
             profile["grid_ring_gap"] + profile["grid_ring_width"] - profile["grid_tile_inset"]
         )
@@ -144,6 +145,37 @@ def test_token_changes_reach_the_compiled_consumer(tmp_path: Path) -> None:
     assert table["themes"][0]["background"] == 0xFFFFFF
     assert table["themes"][1]["foreground"] == 0xFFFFFF
     assert table["scrim_opacities"] == [73, 73]
+
+
+@pytest.mark.parametrize(
+    ("profile", "index"),
+    [("128x128", 0), ("128x160", 1), ("176x220", 2), ("240x320", 3), ("320x240", 4)],
+)
+def test_selected_status_profile_matches_compiled_ui_profile(
+    tmp_path: Path, profile: str, index: int
+) -> None:
+    tokens = json.loads((ROOT / "lib/fplinux/fplinux-ui-profile.json").read_text())
+    header = tmp_path / "fplinux-status-profile-generated.h"
+    header.write_text(fplinux_ui_profile.render_status(tokens, profile))
+    executable = tmp_path / "status-profile"
+    compile_c(
+        executable,
+        [
+            "-std=c99",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            f"-DPROFILE_INDEX={index}",
+            f"-I{tmp_path}",
+            f"-I{ROOT / 'include/fplinux'}",
+            str(ROOT / "tests/host_tool/gui/fplinux-status-profile.c"),
+            str(ROOT / "lib/fplinux/fplinux-ui-profile.c"),
+        ],
+        name="compile selected status profile and UI profile",
+    )
+    run_process(
+        [str(executable)], name="compare status profile and palettes", timeout=10, check=True
+    )
 
 
 @dataclass(frozen=True)

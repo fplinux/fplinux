@@ -153,6 +153,7 @@ struct fplinux_ui_theme {
 	/* Static backdrop behind a modal; dialogs themselves stay opaque. */
 	lv_color_t scrim;
 	lv_opa_t scrim_opacity;
+	lv_color_t brand_foreground; /* brand detail on page background */
 };
 
 /*
@@ -261,11 +262,20 @@ fplinux_ui_metrics(const struct fplinux_ui *ui);
 /*
  * Apply the system scrollbar's colour, width and insets inside a raw
  * LVGL object's border. Set the border and ordinary content padding first.
- * The viewport reserves space on the right only when its content overflows;
+ * The viewport reserves space on the right only when its content overflows
+ * and fills it with the theme's border colour as the indicator's channel;
  * OFF mode reserves none. Reapplying is safe. Scroll direction and visibility
  * belong to the viewport. The object and UI remain owned by the caller.
  */
 void fplinux_ui_style_scrollbar(struct fplinux_ui *ui, lv_obj_t *object);
+/*
+ * Finish a vertical scroll of object that started at scroll position from,
+ * such as lv_obj_scroll_to_view() of a focused child, in steps of about
+ * step pixels: a scroll that stopped less than a quarter step before the
+ * edge it moved towards goes on to that edge, so that the next step is
+ * never a sliver. Never animated.
+ */
+void fplinux_ui_scroll_settle(lv_obj_t *object, int32_t from, int32_t step);
 
 /*
  * A system glyph by name, at the profile's

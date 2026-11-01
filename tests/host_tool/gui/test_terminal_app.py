@@ -174,7 +174,7 @@ def _run_application(
 
 @pytest.mark.parametrize(
     ("width", "height", "columns", "rows"),
-    [(128, 128, 21, 9), (240, 268, 30, 15), (320, 196, 40, 10)],
+    [(128, 126, 21, 8), (240, 268, 30, 15), (320, 199, 40, 10)],
 )
 def test_terminal_default_font_fills_the_titled_canvas(
     terminal_app: Path, width: int, height: int, columns: int, rows: int
@@ -185,9 +185,9 @@ def test_terminal_default_font_fills_the_titled_canvas(
 @pytest.mark.parametrize(
     ("size", "choice", "grid"),
     [
-        ((128, 128), "8x16", (16, 6)),
+        ((128, 126), "8x16", (16, 6)),
         ((240, 268), "6x12", (40, 20)),
-        ((320, 196), "6x12", (53, 14)),
+        ((320, 199), "6x12", (53, 14)),
     ],
 )
 def test_terminal_explicit_font_preference_wins_over_the_profile_default(
@@ -260,7 +260,7 @@ def test_terminal_starts_with_defaults_when_new_preferences_cannot_be_written(
         "128",
         "128",
         "21",
-        "9",
+        "8",
         state_directory=Path("/proc/fplinux-terminal-unavailable-state"),
     )
 

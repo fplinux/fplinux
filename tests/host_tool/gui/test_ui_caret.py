@@ -23,7 +23,9 @@ if TYPE_CHECKING:
 
 @pytest.fixture(scope="module")
 def caret_consumer(
-    tmp_path_factory: pytest.TempPathFactory, lvgl_library: tuple[Path, Path]
+    tmp_path_factory: pytest.TempPathFactory,
+    lvgl_library: tuple[Path, Path],
+    ui_activity_masks: Path,
 ) -> Path:
     """Link the production widgets and editing model with the real renderer."""
     directory = tmp_path_factory.mktemp("ui-caret")
@@ -80,6 +82,7 @@ def caret_consumer(
             "-DLV_LVGL_H_INCLUDE_SYSTEM",
             f'-DLV_CONF_PATH="{ROOT / "alpine/aports/fplinux-lvgl/lv_conf.h"}"',
             f"-I{ROOT / 'include/fplinux'}",
+            f"-I{ui_activity_masks}",
             str(ROOT / "tests/host_tool/gui/fplinux-ui-caret.c"),
             str(ROOT / "lib/fplinux/fplinux-ui-text.c"),
             str(ROOT / "lib/fplinux/fplinux-ui-style.c"),
@@ -135,6 +138,130 @@ def test_native_caret_pixels_and_lifecycle(caret_consumer: Path, scenario: str) 
     assert result.stdout.endswith(f"{scenario}: ok\n")
 
 
+@pytest.mark.parametrize(
+    "screen",
+    [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)],
+    ids=["128x128", "128x160", "176x220", "240x320", "320x240"],
+)
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize("kind", ["alert", "choice"])
+def test_modal_header_and_scrollbar_meet_frame_at_both_ends(
+    caret_consumer: Path, screen: tuple[int, int], theme: str, kind: str
+) -> None:
+    """The divider and frame meet the channel and thumb in both scroll positions."""
+    run_process(
+        [
+            str(caret_consumer),
+            f"modal-edges-{kind}-{theme}",
+            str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
+            *map(str, screen),
+        ],
+        name=f"native {theme} {kind} edges at {screen[0]}x{screen[1]}",
+        timeout=10,
+        check=True,
+    )
+
+
+def test_alert_title_is_single_line_and_tracks_visibility_changes(caret_consumer: Path) -> None:
+    """An overflowing title uses the title runtime at show, resize and deletion."""
+    run_process(
+        [
+            str(caret_consumer),
+            "alert-title-lifecycle",
+            str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
+            "128",
+            "160",
+        ],
+        name="native alert title geometry and lifecycle",
+        timeout=10,
+        check=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "screen",
+    [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)],
+    ids=["128x128", "128x160", "176x220", "240x320", "320x240"],
+)
+def test_alert_activity_pixels_and_timer_follow_visibility_and_progress(
+    caret_consumer: Path, screen: tuple[int, int]
+) -> None:
+    """The busy frame advances, survives progress, and sleeps while hidden or closed."""
+    run_process(
+        [
+            str(caret_consumer),
+            "alert-activity-pixels",
+            str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
+            *map(str, screen),
+        ],
+        name=f"native activity lifecycle at {screen[0]}x{screen[1]}",
+        timeout=10,
+        check=True,
+    )
+
+
+def test_stacked_titles_keep_the_active_screen_as_marquee_owner(caret_consumer: Path) -> None:
+    """Hidden updates and nested screens cannot give the title to the backdrop."""
+    run_process(
+        [
+            str(caret_consumer),
+            "stacked-title-ownership",
+            str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
+            "128",
+            "160",
+        ],
+        name="native title ownership through modal stacking and resize",
+        timeout=10,
+        check=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "screen",
+    [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)],
+    ids=["128x128", "128x160", "176x220", "240x320", "320x240"],
+)
+@pytest.mark.parametrize("kind", ["fit", "overflow"])
+def test_popup_choice_pixels_meet_the_frame_at_both_scroll_ends(
+    caret_consumer: Path, screen: tuple[int, int], kind: str
+) -> None:
+    """The last cell touches its frame; an overflow has no duplicate bottom line."""
+    run_process(
+        [
+            str(caret_consumer),
+            f"choice-edge-{kind}",
+            str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
+            *map(str, screen),
+        ],
+        name=f"native popup choice {kind} edges at {screen[0]}x{screen[1]}",
+        timeout=10,
+        check=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "screen",
+    [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)],
+    ids=["128x128", "128x160", "176x220", "240x320", "320x240"],
+)
+@pytest.mark.parametrize("kind", ["alert", "read-only", "form", "list", "menu"])
+def test_native_scrolling_never_stops_or_steps_a_sliver_from_either_end(
+    caret_consumer: Path, kind: str, screen: tuple[int, int]
+) -> None:
+    """Line and page walks stop at an edge or a quarter step from it; text stays on lines."""
+    run_process(
+        [
+            str(caret_consumer),
+            f"scroll-edges-{kind}",
+            str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
+            *map(str, screen),
+        ],
+        name=f"walk a native {kind} at {screen[0]}x{screen[1]} end to end",
+        timeout=10,
+        check=True,
+    )
+
+
 def test_native_form_pages_keep_focus_in_visible_content(caret_consumer: Path) -> None:
     """Read-only forms page with line overlap; a choice scrolled away loses focus."""
     run_process(
@@ -144,6 +271,73 @@ def test_native_form_pages_keep_focus_in_visible_content(caret_consumer: Path) -
             str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
         ],
         name="page the native form and blur a hidden choice",
+        timeout=10,
+        check=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "screen",
+    [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)],
+    ids=["128x128", "128x160", "176x220", "240x320", "320x240"],
+)
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_native_form_controls_show_focus_and_follow_navigation(
+    caret_consumer: Path, screen: tuple[int, int], theme: str
+) -> None:
+    """Real controls change pixels as Down and Up transfer focus between items."""
+    run_process(
+        [
+            str(caret_consumer),
+            f"form-focus-{theme}",
+            str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
+            *map(str, screen),
+        ],
+        name=f"render {theme} Form control focus at {screen[0]}x{screen[1]}",
+        timeout=10,
+        check=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "screen",
+    [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)],
+    ids=["128x128", "128x160", "176x220", "240x320", "320x240"],
+)
+def test_native_form_reading_keeps_end_lines_whole_and_pages_cover_content(
+    caret_consumer: Path, screen: tuple[int, int]
+) -> None:
+    """Both ends settle on a whole line; pages keep adjacent content in view."""
+    run_process(
+        [
+            str(caret_consumer),
+            "form-reading-edges",
+            str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
+            *map(str, screen),
+        ],
+        name=f"walk Form reading edges at {screen[0]}x{screen[1]}",
+        timeout=10,
+        check=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "screen",
+    [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)],
+    ids=["128x128", "128x160", "176x220", "240x320", "320x240"],
+)
+def test_native_form_reading_covers_images_at_both_edges(
+    caret_consumer: Path, screen: tuple[int, int]
+) -> None:
+    """Both directions expose every image row and the image at the final edge."""
+    run_process(
+        [
+            str(caret_consumer),
+            "form-image-reading-edges",
+            str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
+            *map(str, screen),
+        ],
+        name=f"walk Form image edges at {screen[0]}x{screen[1]}",
         timeout=10,
         check=True,
     )
@@ -169,19 +363,19 @@ def test_native_viewport_releases_scrollbar_space_when_text_fits(
     ("width", "height"),
     [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)],
 )
-def test_native_menu_groups_draw_boundaries_without_changing_rows_or_actions(
+def test_native_menu_rows_end_on_single_dividers_and_focus_wraps_through_actions(
     caret_consumer: Path, width: int, height: int
 ) -> None:
-    """Real menu pixels separate groups while focus wraps through actual actions."""
+    """Real menu pixels show one line under each row but the last; focus wraps."""
     run_process(
         [
             str(caret_consumer),
-            "menu-groups",
+            "menu-dividers",
             str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
             str(width),
             str(height),
         ],
-        name=f"native menu group boundaries and navigation at {width}x{height}",
+        name=f"native menu dividers and navigation at {width}x{height}",
         timeout=10,
         check=True,
     )
@@ -205,10 +399,18 @@ def test_native_menu_restore_reveals_command_after_reordering(caret_consumer: Pa
     ("width", "height"),
     [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)],
 )
-def test_native_list_form_menu_and_read_only_text_share_scrollbar_appearance(
+def test_native_list_form_menu_text_and_alert_share_scrollbar_channel_and_thumb(
     caret_consumer: Path, width: int, height: int
 ) -> None:
-    """Widgets use a two-pixel thumb with one-pixel insets and hide it when content fits."""
+    """Overflowing widgets fill a border-coloured channel around a two-pixel thumb.
+
+    The list, form, menu, read-only text and alert message show the thumb
+    one pixel from the right of a four-pixel channel over the viewport
+    height. At the ends of the scroll the screen's list and form and the
+    menu, whose ends meet lines, take it to the channel's top and bottom;
+    the framed text and the alert message stop it a pixel short. Neither
+    shows once the content fits.
+    """
     run_process(
         [
             str(caret_consumer),
@@ -217,7 +419,7 @@ def test_native_list_form_menu_and_read_only_text_share_scrollbar_appearance(
             str(width),
             str(height),
         ],
-        name=f"native list, form, menu and read-only text scrollbars at {width}x{height}",
+        name=f"native list, form, menu, text and alert scrollbars at {width}x{height}",
         timeout=10,
         check=True,
     )
@@ -399,32 +601,37 @@ class MenuGeometry:
     margin: int
     row_height: int
     header_height: int
+    # The widest label or the title with its insets, one icon size after
+    # it, at least three rows wide.
     plain_width: int
     titled_width: int
     origin_x: tuple[tuple[int, int], ...]
+    # The 18 px line of the owned title font in the rows above the band's
+    # divider, an odd remainder below it.
+    title_top: int
 
 
 @pytest.mark.parametrize(
     "geometry",
     [
         pytest.param(
-            MenuGeometry(128, 128, 4, 20, 20, 44, 68, ((0, 0), (42, 30), (84, 60))),
+            MenuGeometry(128, 128, 4, 24, 25, 72, 84, ((0, 0), (28, 22), (56, 44)), 3),
             id="128x128",
         ),
         pytest.param(
-            MenuGeometry(128, 160, 4, 22, 20, 44, 68, ((0, 0), (42, 30), (84, 60))),
+            MenuGeometry(128, 160, 4, 23, 22, 69, 84, ((0, 0), (29, 22), (59, 44)), 1),
             id="128x160",
         ),
         pytest.param(
-            MenuGeometry(176, 220, 6, 26, 24, 48, 72, ((0, 0), (64, 52), (128, 104))),
+            MenuGeometry(176, 220, 6, 27, 26, 81, 92, ((0, 0), (47, 42), (95, 84)), 3),
             id="176x220",
         ),
         pytest.param(
-            MenuGeometry(240, 320, 8, 36, 28, 52, 76, ((0, 0), (94, 82), (188, 164))),
+            MenuGeometry(240, 320, 8, 33, 28, 99, 100, ((0, 0), (70, 70), (141, 140)), 4),
             id="240x320",
         ),
         pytest.param(
-            MenuGeometry(320, 240, 6, 30, 26, 48, 72, ((0, 0), (136, 124), (272, 248))),
+            MenuGeometry(320, 240, 6, 32, 28, 96, 96, ((0, 0), (112, 112), (224, 224)), 4),
             id="320x240",
         ),
     ],
@@ -452,6 +659,7 @@ def test_native_menu_sizes_to_labels_and_whole_rows_above_its_origin(
             str(geometry.titled_width if titled else geometry.plain_width),
             str(origin),
             str(geometry.origin_x[origin][int(titled)]),
+            str(geometry.title_top),
         ],
         name=(
             f"native compact menu at {geometry.width}x{geometry.height}, "
@@ -463,21 +671,113 @@ def test_native_menu_sizes_to_labels_and_whole_rows_above_its_origin(
 
 
 @pytest.mark.parametrize(
-    ("scenario", "width"),
-    [("single", 22), ("long", 240), ("icons", 84), ("missing-icon", 52)],
+    ("scenario", "width", "height", "expected"),
+    [
+        # One short label: three rows of 24, 23, 27, 33 and 32 px.
+        ("single", 128, 128, 72),
+        ("single", 128, 160, 69),
+        ("single", 176, 220, 81),
+        ("single", 240, 320, 99),
+        ("single", 320, 240, 96),
+        # A label wider than the surface takes its whole width.
+        ("long", 128, 128, 128),
+        ("long", 128, 160, 128),
+        ("long", 176, 220, 176),
+        ("long", 240, 320, 240),
+        ("long", 320, 240, 320),
+        # Thirty letters with insets and one icon size after them: 204, 204
+        # and 212 px exceed the narrow surfaces; 220 px would leave 20 px of
+        # 240, less than its 24 px icon, so it takes the whole width; 216 px
+        # leaves 104 px of 320.
+        ("near-edge", 128, 128, 128),
+        ("near-edge", 128, 160, 128),
+        ("near-edge", 176, 220, 176),
+        ("near-edge", 240, 320, 240),
+        ("near-edge", 320, 240, 216),
+        # "Second" with 8 px insets, a 24 px icon and 8 px gap, then 24 px.
+        ("icons", 240, 320, 108),
+        # Without a decoded image the 76 px window takes the minimum.
+        ("missing-icon", 240, 320, 99),
+    ],
 )
 def test_native_menu_measures_full_text_and_only_decoded_icon_columns(
-    caret_consumer: Path, scenario: str, width: int
+    caret_consumer: Path, scenario: str, width: int, height: int, expected: int
 ) -> None:
-    """A short action stays narrow; translations clamp; missing images add no column."""
+    """Content and one icon size, at least three rows wide, else the whole surface.
+
+    A window that would leave less than one icon size of the surface beside
+    it takes the whole width.
+    """
     run_process(
         [
             str(caret_consumer),
             f"menu-width-{scenario}",
             str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
             str(width),
+            str(height),
+            str(expected),
         ],
-        name=f"native menu width with {scenario}",
+        name=f"native menu width with {scenario} at {width}x{height}",
+        timeout=10,
+        check=True,
+    )
+
+
+@dataclass(frozen=True)
+class LongMenu:
+    """A surface, its literal title band and row pitch, and the expected menus."""
+
+    width: int
+    height: int
+    surface: int
+    header: int
+    row_height: int
+    # Whole rows below the brand edge, and whether a free title band stays
+    # above ("band") or the menu fills the surface ("full"), without and with
+    # a menu title.
+    plain: tuple[int, str]
+    titled: tuple[int, str]
+
+
+@pytest.mark.parametrize(
+    "menu",
+    [
+        # Below the 25 px band and 2 px edge, 70 px (+1 under the bar's line)
+        # hold 2 rows and 45 px with a title 1: both fill the surface below
+        # the edge, 95 px holding 3 rows and 70 px 2.
+        pytest.param(LongMenu(128, 128, 96, 25, 24, (3, "full"), (2, "full")), id="128x128"),
+        # 103 and 81 px: 4 and 3 rows keep the band.
+        pytest.param(LongMenu(128, 160, 126, 22, 23, (4, "band"), (3, "band")), id="128x160"),
+        pytest.param(LongMenu(176, 220, 177, 26, 27, (5, "band"), (4, "band")), id="176x220"),
+        pytest.param(LongMenu(240, 320, 268, 28, 33, (7, "band"), (6, "band")), id="240x320"),
+        pytest.param(LongMenu(320, 240, 199, 28, 32, (5, "band"), (4, "band")), id="320x240"),
+        # 91 and 63 px hold 2 and 1 rows: the whole 120 px less the edge holds
+        # 3 and, under the title, 2.
+        pytest.param(
+            LongMenu(240, 320, 120, 28, 33, (3, "full"), (2, "full")), id="240x320-short"
+        ),
+    ],
+)
+def test_native_long_menu_keeps_the_title_band_or_fills_the_surface_below_its_edge(
+    caret_consumer: Path, menu: LongMenu
+) -> None:
+    """A long menu leaves a title band free when 3 rows remain, else fills the surface."""
+    run_process(
+        [
+            str(caret_consumer),
+            "menu-band",
+            str(ROOT / "tests/host_tool/input/fixtures/input-languages"),
+            str(menu.width),
+            str(menu.height),
+            str(menu.surface),
+            str(menu.header),
+            str(menu.row_height),
+            str(menu.plain[0]),
+            menu.plain[1],
+            str(menu.titled[0]),
+            menu.titled[1],
+        ],
+        name=f"native long menu at {menu.width}x{menu.height} on a {menu.surface} px surface",
         timeout=10,
         check=True,
     )
@@ -503,6 +803,7 @@ def test_native_menu_resize_restores_natural_width_and_reveals_last_row(
 def test_popup_choice_uses_natural_height_up_to_available_surface(
     caret_consumer: Path, scenario: str
 ) -> None:
+    """A popup fits its rows up to the surface; its thumb reaches the channel ends."""
     run_process(
         [
             str(caret_consumer),

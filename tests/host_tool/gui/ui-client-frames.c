@@ -210,6 +210,47 @@ static void application_event(struct fplinux_ui *ui,
 	assert(write(application->control, "a", 1) == 1);
 }
 
+static int32_t legend_width(const char *text)
+{
+	lv_point_t size;
+
+	lv_text_get_size(&size, text, &lv_font_montserrat_14, 0, 0,
+			 LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+	return size.x;
+}
+
+/*
+ * Two legends too long for their shared slots keep the longest start that
+ * fits before three dots; the short centre one stays whole.
+ */
+static void expect_dotted_legends(struct fplinux_ui *ui, lv_obj_t *bar)
+{
+	const char *legends[3] = { "Tasks and windows", "Menu",
+				   "Information panel" };
+
+	assert(fplinux_ui_softkey_bar_set(ui, bar, legends[0], legends[1],
+					  legends[2]));
+	lv_obj_update_layout(bar);
+	assert(!strcmp(lv_label_get_text(lv_obj_get_child(bar, 1)), "Menu"));
+	for (int i = 0; i < 3; i += 2) {
+		lv_obj_t *label = lv_obj_get_child(bar, i);
+		const char *shown = lv_label_get_text(label);
+		size_t kept = strlen(shown) - 3;
+		size_t next = kept;
+		char longer[64];
+
+		assert(strlen(shown) > 3 && !strcmp(shown + kept, "..."));
+		assert(!strncmp(shown, legends[i], kept) &&
+		       shown[kept - 1] != ' ');
+		assert(legend_width(shown) <= lv_obj_get_content_width(label));
+		while (legends[i][next] == ' ')
+			++next;
+		snprintf(longer, sizeof(longer), "%.*s...", (int)next + 1,
+			 legends[i]);
+		assert(legend_width(longer) > lv_obj_get_content_width(label));
+	}
+}
+
 static void create_softkeys(struct fplinux_ui *ui,
 			    struct application *application)
 {
@@ -243,6 +284,14 @@ static void create_softkeys(struct fplinux_ui *ui,
 	assert(labels[0].x1 == 8);
 	assert(abs(labels[1].x1 + labels[1].x2 - 239) <= 1);
 	assert(labels[2].x2 == 231);
+	expect_dotted_legends(ui, application->softkeys);
+	assert(fplinux_ui_softkey_bar_set(ui, application->softkeys, "Tasks",
+					  "Menu", "Back"));
+	lv_obj_update_layout(application->softkeys);
+	for (int i = 0; i < 3; ++i)
+		assert(!strcmp(lv_label_get_text(lv_obj_get_child(
+				       application->softkeys, i)),
+			       legends[i]));
 }
 
 /* A Canvas has no element action: its commands alone name the three keys. */

@@ -27,7 +27,11 @@ enum fplinux_ui_listview_marker {
 typedef void (*fplinux_ui_listview_cb)(struct fplinux_ui_listview *list,
 				       size_t index, void *context);
 
-/* The list fills its parent; deleting the parent deletes the list. */
+/*
+ * The list fills its parent; deleting the parent deletes the list. Its rows
+ * scroll under the line that ends the parent below them: a row whose
+ * divider_width bottom lines lie under that line is wholly visible.
+ */
 struct fplinux_ui_listview *
 fplinux_ui_listview_create(struct fplinux_ui *ui, lv_obj_t *parent,
 			   enum fplinux_ui_listview_marker marker);
@@ -80,9 +84,11 @@ bool fplinux_ui_listview_set_emphasis(struct fplinux_ui_listview *list,
 				      size_t index, bool emphasis);
 bool fplinux_ui_listview_set_trailing_icon(struct fplinux_ui_listview *list,
 					   size_t index, const void *source);
-/* Stored rows only; draws a group boundary without changing row geometry. */
-bool fplinux_ui_listview_set_separator_before(struct fplinux_ui_listview *list,
-					      size_t index, bool separator);
+bool fplinux_ui_listview_set_trailing_value(struct fplinux_ui_listview *list,
+					    size_t index, const char *value);
+bool fplinux_ui_listview_set_level(struct fplinux_ui_listview *list,
+				   size_t index, int32_t minimum,
+				   int32_t maximum, int32_t value);
 size_t fplinux_ui_listview_count(const struct fplinux_ui_listview *list);
 
 /*

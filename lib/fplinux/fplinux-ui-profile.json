@@ -44,14 +44,14 @@
       },
       "status_height": 16,
       "softkey_height": 16,
-      "header_height": 20,
+      "header_height": 25,
       "margin": 4,
       "spacing": 4,
       "gap_small": 2,
       "content_padding": 2,
       "scrollbar_offset": 1,
-      "row_height": 20,
-      "row_height_detail": 32,
+      "row_height": 24,
+      "row_height_detail": 36,
       "row_padding": 4,
       "row_gap": 4,
       "row_icon_size": 16,
@@ -75,7 +75,6 @@
       "legend_margin": 4,
       "legend_gap": 4,
       "battery": {
-        "body": [16, 8],
         "cap": [1, 4],
         "bar": [2, 4],
         "bolt_height": 7
@@ -84,8 +83,7 @@
       "home_hint": "replaces the date while shown",
       "logo": {
         "splash_mark": 48,
-        "about": "mark 32",
-        "boot_mark": 32
+        "about": "mark 32"
       },
       "focus_width": 2,
       "scrollbar_width": 2,
@@ -134,15 +132,15 @@
         }
       },
       "status_height": 16,
-      "softkey_height": 16,
-      "header_height": 20,
+      "softkey_height": 18,
+      "header_height": 22,
       "margin": 4,
       "spacing": 4,
       "gap_small": 2,
       "content_padding": 2,
       "scrollbar_offset": 1,
-      "row_height": 22,
-      "row_height_detail": 32,
+      "row_height": 23,
+      "row_height_detail": 35,
       "row_padding": 4,
       "row_gap": 4,
       "row_icon_size": 16,
@@ -166,7 +164,6 @@
       "legend_margin": 4,
       "legend_gap": 4,
       "battery": {
-        "body": [16, 8],
         "cap": [1, 4],
         "bar": [2, 4],
         "bolt_height": 7
@@ -175,8 +172,7 @@
       "home_hint": "below the date",
       "logo": {
         "splash_mark": 64,
-        "about": "mark 32",
-        "boot_mark": 48
+        "about": "mark 32"
       },
       "focus_width": 2,
       "scrollbar_width": 2,
@@ -224,16 +220,16 @@
           "digits": "tabular"
         }
       },
-      "status_height": 18,
+      "status_height": 19,
       "softkey_height": 24,
-      "header_height": 24,
+      "header_height": 26,
       "margin": 6,
       "spacing": 6,
       "gap_small": 3,
       "content_padding": 4,
       "scrollbar_offset": 1,
-      "row_height": 26,
-      "row_height_detail": 36,
+      "row_height": 27,
+      "row_height_detail": 38,
       "row_padding": 6,
       "row_gap": 6,
       "row_icon_size": 20,
@@ -257,8 +253,7 @@
       "legend_margin": 6,
       "legend_gap": 6,
       "battery": {
-        "body": [21, 10],
-        "cap": [2, 5],
+        "cap": [2, 4],
         "bar": [3, 6],
         "bolt_height": 9
       },
@@ -266,8 +261,7 @@
       "home_hint": "below the date",
       "logo": {
         "splash_mark": 80,
-        "about": "lockup 160 wide",
-        "boot_mark": 64
+        "about": "lockup 160 wide"
       },
       "focus_width": 2,
       "scrollbar_width": 2,
@@ -323,8 +317,8 @@
       "gap_small": 4,
       "content_padding": 6,
       "scrollbar_offset": 1,
-      "row_height": 36,
-      "row_height_detail": 44,
+      "row_height": 33,
+      "row_height_detail": 43,
       "row_padding": 8,
       "row_gap": 8,
       "row_icon_size": 24,
@@ -348,7 +342,6 @@
       "legend_margin": 8,
       "legend_gap": 8,
       "battery": {
-        "body": [23, 12],
         "cap": [2, 6],
         "bar": [3, 8],
         "bolt_height": 11
@@ -357,8 +350,7 @@
       "home_hint": "below the date",
       "logo": {
         "splash_mark": 96,
-        "about": "lockup 200 wide",
-        "boot_mark": 80
+        "about": "lockup 200 wide"
       },
       "focus_width": 2,
       "scrollbar_width": 2,
@@ -406,16 +398,16 @@
           "digits": "tabular"
         }
       },
-      "status_height": 20,
-      "softkey_height": 24,
-      "header_height": 26,
+      "status_height": 19,
+      "softkey_height": 22,
+      "header_height": 28,
       "margin": 6,
       "spacing": 6,
       "gap_small": 3,
       "content_padding": 4,
       "scrollbar_offset": 1,
-      "row_height": 30,
-      "row_height_detail": 40,
+      "row_height": 32,
+      "row_height_detail": 43,
       "row_padding": 6,
       "row_gap": 6,
       "row_icon_size": 24,
@@ -439,7 +431,6 @@
       "legend_margin": 6,
       "legend_gap": 6,
       "battery": {
-        "body": [23, 12],
         "cap": [2, 6],
         "bar": [3, 8],
         "bolt_height": 11
@@ -448,8 +439,7 @@
       "home_hint": "below the date",
       "logo": {
         "splash_mark": 96,
-        "about": "lockup 200 wide",
-        "boot_mark": 80
+        "about": "lockup 200 wide"
       },
       "focus_width": 2,
       "scrollbar_width": 2,
@@ -490,6 +480,7 @@
       "danger": "#B51418",
       "tile_ring": "#FFFFFF",
       "brand": "#EFAA52",
+      "brand_foreground": "#A55D00",
       "scrim": "#000000"
     },
     "dark": {
@@ -510,6 +501,7 @@
       "danger": "#FFB6AD",
       "tile_ring": "#083442",
       "brand": "#EFAA52",
+      "brand_foreground": "#EFAA52",
       "scrim": "#000000"
     }
   },

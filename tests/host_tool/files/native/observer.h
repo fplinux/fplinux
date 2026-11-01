@@ -20,7 +20,6 @@ struct files_observation {
 	char labels[16384];
 	size_t menu_count;
 	char menu_items[32][128];
-	bool menu_separators[32];
 };
 
 #endif

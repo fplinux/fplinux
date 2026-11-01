@@ -5,9 +5,9 @@ pkgrel=0
 pkgdesc="Keypad control for the phone LCD level"
 url="https://github.com/fplinux/fplinux"
 arch="armv7"
-license="GPL-2.0-only"
-depends="fplinux-base fplinux-input fplinux-font-terminus-data"
-makedepends_build="clang22 lld22 pkgconf llvm22"
+license="GPL-2.0-only AND OFL-1.1"
+depends="fplinux-base fplinux-input"
+makedepends_build="clang22 lld22 pkgconf llvm22 python3 py3-fonttools nodejs"
 makedepends_host="musl-dev linux-headers fplinux-libdrm-dev libevdev-dev eudev-dev"
 options="!check"
 source="
@@ -18,8 +18,16 @@ source="
 	fplinux-brightness-client.h
 	fplinux-cli.c
 	fplinux-cli.h
-	fplinux-font.c
-	fplinux-font.h
+	fplinux-status-screen.c
+	fplinux-status-screen.h
+	fplinux-status-font.h
+	fplinux-activity.c
+	fplinux-activity.h
+	fplinux-ui-profile.json
+	fplinux_activity.py
+	fplinux_ui_fonts.py
+	fplinux_ui_profile.py
+	fplinux_status_assets.py
 	fplinux-utf8.c
 	fplinux-utf8.h
 	fplinux-drm-session.c
@@ -46,14 +54,18 @@ build() {
 	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
 	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
 	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+	python3 fplinux_status_assets.py --tokens fplinux-ui-profile.json \
+		--sources /opt/quality/src/ui-fonts --output generated \
+		--lv-font-conv /opt/quality/node-tools/node_modules/.bin/lv_font_conv
 
 	"$CC" $CPPFLAGS $CFLAGS -std=c11 -Wall -Wextra -Werror \
-		-I"$srcdir" $(pkg-config --cflags libdrm libevdev) \
+		-I"$srcdir" -Igenerated $(pkg-config --cflags libdrm libevdev) \
 		"$srcdir/fplinux-brightness-ui.c" \
 		"$srcdir/brightness-ui.c" \
 		"$srcdir/fplinux-brightness-client.c" \
 		"$srcdir/fplinux-cli.c" \
-		"$srcdir/fplinux-font.c" \
+		"$srcdir/fplinux-status-screen.c" "$srcdir/fplinux-activity.c" \
+		generated/fplinux-status-fonts.c \
 		"$srcdir/fplinux-utf8.c" \
 		"$srcdir/fplinux-drm-session.c" \
 		"$srcdir/fplinux-input-session.c" \
@@ -63,20 +75,32 @@ build() {
 }
 
 package() {
+	local notice
 	install -Dm755 "$builddir/fplinux-brightness-ui" \
 		"$pkgdir/usr/bin/fplinux-brightness-ui"
+	for notice in generated/licenses/*.txt; do
+		install -Dm644 "$notice" "$pkgdir/usr/share/licenses/$pkgname/${notice##*/}"
+	done
 }
 
 sha512sums="
-e46a7082e902de1a3491d88f1e7d2c8912f00618e77d658e9b28f1467ea09f2e6db16fc60c360119dda2e77c60132b1c00dadfc1c016eb4ca062189c56b5b8c8  fplinux-brightness-ui.c
-ad1047e492721715888cc8c95a0f3a7a20bbf648bb893250355e69835223e5e4754c6e47f4c5851ef658cf9443108e04d99ea186e2b9ae8760b0d001f25bcfff  brightness-ui.c
-cc78d7448638216d15ac68589e08218785e72d02c2c8d3f7b09bd42eb0bf2266f40125548f746a2992a80ebf5e91b64583a7f3be8fd4322854d556126f9c9855  brightness-ui.h
+f57af6e432255c90633260c4d4ba90afe61e99940def63e0e10685744b270735647176d2e9bb1145d49bb7f02d00df198138084851f825483a2138a1d0330e26  fplinux-brightness-ui.c
+97aa53d6abd1235d766460530ab62fa1a9e9da70cfaa02b6573de62720fce3f81dcd9bb3d6d274dc655e48325f0135b344ec08234a4f6682416cea26eddf6e98  brightness-ui.c
+46fd93addd02349c8d19826a09106bd35d71bdebbac17378a69964cc3690826a40a7c337d27b6b707e7367087e87a815373330e9f9a16da3eafa2566e8be3bcc  brightness-ui.h
 a16c1b2b84831be3da5bbf1d198c827a4bfde8bb435e4ac6d52777ca8472cedc700be5007a4320e6ffcafcf3ff3183a0de4e7068a94576e0016ca9b09c650bcf  fplinux-brightness-client.c
 031e8a9a9fed64c19b947d6d1b7510f2bf0dd76ae7712cd23f8fbf838a28e29eefec2adaa772070f75c930a42bf0e77290825ea88fd545800dbca30bdd61f0ee  fplinux-brightness-client.h
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
-ea1b7d5a48c7c0f6a06693e843620cc87a0553e0a1ea70604d4162bec7b44384e53d6eb946310f58a51fee453e4c3978dfd862cf22370bfd8ff5e87de807bf09  fplinux-font.c
-62ed7c5f099fdbc896254fe700e0722e1f1894ca494f4cec368e77866f9ae59f58b3bef727fffd8cff1d6ad66c6956743a4a052efb394c73b0b47f79f8510be7  fplinux-font.h
+fe477bf128df13810cdd32f783c318e4c8213e1e84d0dbbeca7609f5c6f0d0dea20a83c39a5af403974f4f4866b26797e0d668804e70b95e34b91d6ba41748c8  fplinux-status-screen.c
+4f1f62870dcba23b5145ae6b50e5cb7ce43d069b1143804436e0d9f941943eae671310cef355985c7b191b0aad6f98680fa5129bcf2d94e28d6279b6db7f1392  fplinux-status-screen.h
+cd0f55278617085facbda47cf1a5126cb7a10f80181e588ac1c3a1628ff1c8fb630c341317e19835d2cc7bf8fa45f606efc1245b0f953088cd94ba35c5970135  fplinux-status-font.h
+9bcb9e7d161340b8ebeb50da939643531e2bec33df23c8caebefc67d0fb4c4adc851a5fddb78355359e4f93a8ccfa4676ec17a708d0a949061c55829921105e3  fplinux-activity.c
+b0f12066e37a1949edb38569c4fb3b0b471b4a9b006853ee5e5e1bded630f4aba1b9bc08ad485b1e6d8a461cf2bf0d7522290f5c7d285c9c538eddfcf9044342  fplinux-activity.h
+7152c04039f512aea08a79eb8df574dde12bb7b5df4fdfd7a153d1527a5a7b3064e54a3b9ab34c1a846cfcbd7216a132716a5e2318a62d0c6a4f15fee183f7e0  fplinux-ui-profile.json
+6d00ce1290e06998fd26a1261131cb0e9bdbf352cdd635432a90868153353b327d201e6909ee16ad7102d18943480a3c31a650f48097043979e0cbf7fc202fd2  fplinux_activity.py
+234a53f1d35ad72eaf9e92a3df4359fbf3e40f5d075d6e40ceb59bc8d6ec3bc4227fa7c4e4e427056a658ddc6c22e5fa6dad22c26e8012410e786ea263865d64  fplinux_ui_fonts.py
+2c3434a3e046f9c0743d382d93ea91aa9d502b353b3280c737aa12521ce5e6d50a19e6063b4e7e224d2e1584d142b9dfa0b480b8f2a6943f28cf8c7e41a2e468  fplinux_ui_profile.py
+57e55a0b59e5155324eb0eb64279407135c1947379f012895a5611ef7e033a0200583db360a432eb65692cba5a609cf295fb7a5c49e40866bbaf368d37f94d1b  fplinux_status_assets.py
 0ded6f822b59d68de21ce64d03e892f27e2f190366ff39f154b88a73b0c7c3627c2787ddf37817ad85cc8206a20243b3f3c13b039d3d06955392a6b5a70e1bcd  fplinux-utf8.c
 8143f656608c63e42016da2003174d6fb2ac043daaad07e63e006bf3dc76544e76e820ae52a9c50f5559d58757c44aeded2b1cd4b01b4665938a7e88b4bc1d43  fplinux-utf8.h
 6b253f856c2a6886801ec56fd4f607019b89c5465a9fffd78ea4196cadc90688b452b10e45d4767e2cfddd5d846dad4bba2b8452e0c79426f08a4ed057e0e104  fplinux-drm-session.c
@@ -85,8 +109,8 @@ a71678fa063e52aa2220c2bfd391a2a3cf154c04c1cdb7e078e3942f4f24d8510c1d7bd8d5b57bd9
 2720eb45e6d403009c72ff8025ac28adde8320f4005917afc05e24bd0bcaffb2a90fc23f7213a0c9c9a9af7d7a3f6dcad4f4e44cf6f979a0157bae6c98117fc0  fplinux-input-session.h
 defa0078d5b788c6180813f46b42042fd401555cce70fc7ae40550b7c27b65a04972678b5beb8c65e41dbcfe36ba6b926154d94c2700e345bb8d3d2ba251e4ef  fplinux-input-device.h
 0a6d41b98223953b0b890be3041fba31e7878e6752094ed439b1e1e7e9240b2c7bf175ae671d05485ee25fa9ae74e45ddc63e9592768bd5d19e6e4ae6765a978  fplinux-keypad.h
-9d6993f3be98b5b3f1eb05539c77ee4e8d933e3c8055a2340bdadadbe7e1c869965d966e8b2ae92dd913a65019409daebcf9b0515055c4bb018e623263b1dc9d  fplinux-ui-profile.c
-d06e038c5e26b0d8d0fb6c27a4569df8aed06afb9fdd31481a020b5ac276cbe1f16420d9e86b5b47a8a76afe6cf71cd8fd8fa1c6a55fc5920427099a9b254b40  fplinux-ui-profile.h
+1092996259763c9f1e9a68c4ecc6a8892b9bf79431451d3c377914ca258471742e3eb599fd8d6aefca8129cfa1bc6f261fbd2f4ebcce2a6b738ea2aa18fe5c52  fplinux-ui-profile.c
+ccda1551df03d4f8f552faea4b2a3d6a63df0f7a3b2230b9206f8faef185edab8eb20ff7deb3a7b502fb73e2aaa8fe75fbd8d55aac8c1e5ecb08e81ab9d2a2d3  fplinux-ui-profile.h
 31ed273b79fab4adf8e15a4639721101a9ac369c74415fb6630dedb0ff9fd00a7ca7a0bd6c3a9edb2dd02dc362d3f626b7b3a4dbd211a4addbb8f801bb37296c  fplinux-ui-session.h
 1d6917155297e1c24ce09c34e6629404976e6d9f9e0fccba75f274702bdb4eb757167149b3eff1e56304c23703fb383f56b795ce9b73c64581bc8da9123890d1  fplinux-ui-document.h
 fd31a114afc7ae879ee82b273f1b69858dc871a57e89b04d02cc6051d1eeb795e36c6dc1c4ec13231086d6d1bdab4c0c83657524e87f70c60a02689756af8ffa  fplinux-volumes.h

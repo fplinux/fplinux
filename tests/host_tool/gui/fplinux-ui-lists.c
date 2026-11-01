@@ -64,11 +64,20 @@ lv_draw_buf_t *fplinux_ui_image_decode(const void *src, int width, int height,
 
 static unsigned int failures;
 static uint8_t draw_buffer[240 * 320 * 2];
+/* The rendered screen of the pixel scenario; other scenarios only lay out. */
+static uint16_t frame[240 * 320];
+static int32_t frame_width;
 
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *pixels)
 {
-	(void)area;
-	(void)pixels;
+	int32_t width = lv_area_get_width(area);
+	uint32_t stride = lv_draw_buf_width_to_stride((uint32_t)width,
+						      LV_COLOR_FORMAT_RGB565);
+
+	for (int32_t y = area->y1; frame_width && y <= area->y2; ++y)
+		memcpy(&frame[y * frame_width + area->x1],
+		       pixels + (size_t)(y - area->y1) * stride,
+		       (size_t)width * sizeof(frame[0]));
 	lv_display_flush_ready(display);
 }
 
@@ -92,6 +101,18 @@ static bool contains(lv_area_t outer, lv_area_t inner)
 {
 	return inner.x1 >= outer.x1 && inner.x2 <= outer.x2 &&
 	       inner.y1 >= outer.y1 && inner.y2 <= outer.y2;
+}
+
+/*
+ * The rows a list shows: its object and the 1 px line under it, where the
+ * line that ends the list's parent covers a divider ending there.
+ */
+static lv_area_t list_view(lv_obj_t *object)
+{
+	lv_area_t view = coords(object);
+
+	++view.y2;
+	return view;
 }
 
 static bool empty(lv_area_t area)
@@ -126,8 +147,8 @@ static lv_area_t row_geometry(struct fplinux_ui_listview *list, int height,
 	selected = fplinux_ui_listview_selected_row(list);
 	row = coords(selected);
 	check(lv_obj_get_style_pad_top(object, 0) == 0 &&
-		      lv_obj_get_style_pad_bottom(object, 0) == 0,
-	      "list has no outer vertical padding");
+		      lv_obj_get_style_pad_bottom(object, 0) == -1,
+	      "list view starts at its top and ends 1 px under its bottom");
 	if (fplinux_ui_listview_selected(list) == 0)
 		check(row.y1 == viewport.y1,
 		      "first row starts at the viewport's top edge");
@@ -142,7 +163,73 @@ static lv_area_t row_geometry(struct fplinux_ui_listview *list, int height,
 	return row;
 }
 
-static void scrollbar_geometry(lv_obj_t *object, int inset, bool overflow)
+/* Whether an RGB888 snapshot pixel, stored blue first, is colour. */
+static bool pixel_is(const lv_draw_buf_t *frame, int32_t x, int32_t y,
+		     uint32_t colour)
+{
+	const uint8_t *pixel =
+		lv_draw_buf_goto_xy(frame, (uint32_t)x, (uint32_t)y);
+
+	return pixel[0] == (colour & 0xffU) &&
+	       pixel[1] == (colour >> 8 & 0xffU) &&
+	       pixel[2] == (colour >> 16 & 0xffU);
+}
+
+/* Whether column x is the border colour 0x708090 from top to bottom. */
+static bool border_column(const lv_draw_buf_t *frame, int32_t x, int32_t top,
+			  int32_t bottom)
+{
+	for (int32_t y = top; y <= bottom; ++y)
+		if (!pixel_is(frame, x, y, 0x708090U))
+			return false;
+	return true;
+}
+
+/*
+ * The four columns inside the right border of width border: with overflow,
+ * a channel in the border colour over the whole inner height whose two
+ * middle columns may show the focus thumb instead; without, no channel.
+ */
+static void scrollbar_channel(lv_obj_t *object, int32_t border, bool overflow)
+{
+	lv_draw_buf_t *frame = lv_snapshot_take(object, LV_COLOR_FORMAT_RGB888);
+	int32_t right, bottom;
+	bool thumb = false, lane = true;
+
+	assert(frame);
+	check((int32_t)frame->header.w == lv_obj_get_width(object) &&
+		      (int32_t)frame->header.h == lv_obj_get_height(object),
+	      "the viewport draws nothing outside itself");
+	right = (int32_t)frame->header.w - 1 - border;
+	bottom = (int32_t)frame->header.h - 1 - border;
+	for (int32_t y = border; y <= bottom; ++y)
+		for (int32_t x = right - 2; x < right; ++x) {
+			if (pixel_is(frame, x, y, 0x2468acU))
+				thumb = true;
+			else if (!pixel_is(frame, x, y, 0x708090U))
+				lane = false;
+		}
+	if (overflow) {
+		check(border_column(frame, right - 3, border, bottom) &&
+			      border_column(frame, right, border, bottom) &&
+			      lane,
+		      "overflow fills the channel inside the border");
+		check(thumb, "the thumb lies in the channel");
+		check(!border_column(frame, right - 4, border, bottom),
+		      "the channel is four pixels wide");
+	} else {
+		check(!border_column(frame, right, border, bottom),
+		      "fitting content has no channel");
+	}
+	lv_draw_buf_destroy(frame);
+}
+
+/*
+ * inset: the thumb's distance from the right edge; ends: from the top and
+ * bottom at either end of the scroll, equal to the viewport border width.
+ */
+static void scrollbar_geometry(lv_obj_t *object, int inset, int ends,
+			       bool overflow)
 {
 	lv_area_t horizontal, vertical, viewport;
 
@@ -158,6 +245,7 @@ static void scrollbar_geometry(lv_obj_t *object, int inset, bool overflow)
 	check(lv_obj_get_style_bg_opa(object, LV_PART_SCROLLBAR) ==
 		      LV_OPA_COVER,
 	      "scrollbar remains opaque while idle");
+	scrollbar_channel(object, inset - 1, overflow);
 	if (!overflow || empty(vertical))
 		return;
 	check(contains(viewport, vertical), "thumb stays inside the viewport");
@@ -165,11 +253,11 @@ static void scrollbar_geometry(lv_obj_t *object, int inset, bool overflow)
 	check(viewport.x2 - vertical.x2 == inset,
 	      "thumb has one pixel of space inside the right border");
 	if (lv_obj_get_scroll_y(object) == 0)
-		check(vertical.y1 - viewport.y1 == inset,
-		      "thumb starts one pixel inside the top border");
+		check(vertical.y1 - viewport.y1 == ends,
+		      "thumb starts at the channel's top");
 	if (lv_obj_get_scroll_bottom(object) == 0)
-		check(viewport.y2 - vertical.y2 == inset,
-		      "thumb ends one pixel inside the bottom border");
+		check(viewport.y2 - vertical.y2 == ends,
+		      "thumb ends at the channel's bottom");
 }
 
 static void thumb_geometry(struct fplinux_ui_listview *list, bool overflow)
@@ -178,7 +266,7 @@ static void thumb_geometry(struct fplinux_ui_listview *list, bool overflow)
 	lv_area_t horizontal, vertical;
 	lv_area_t row;
 
-	scrollbar_geometry(object, 1, overflow);
+	scrollbar_geometry(object, 1, 0, overflow);
 	row = coords(fplinux_ui_listview_selected_row(list));
 	lv_obj_get_scrollbar_area(object, &horizontal, &vertical);
 	if (overflow && !empty(vertical))
@@ -202,22 +290,22 @@ static void check_native_viewport(struct fplinux_ui *ui, lv_obj_t *screen,
 	content = lv_obj_create(object);
 	lv_obj_remove_style_all(content);
 	lv_obj_set_size(content, 1, 1);
-	scrollbar_geometry(object, bordered ? 3 : 1, false);
+	scrollbar_geometry(object, bordered ? 3 : 1, bordered ? 2 : 0, false);
 	lv_obj_set_height(content, height * 2);
-	scrollbar_geometry(object, bordered ? 3 : 1, true);
+	scrollbar_geometry(object, bordered ? 3 : 1, bordered ? 2 : 0, true);
 	lv_obj_scroll_to_y(object, height / 2, LV_ANIM_OFF);
-	scrollbar_geometry(object, bordered ? 3 : 1, true);
+	scrollbar_geometry(object, bordered ? 3 : 1, bordered ? 2 : 0, true);
 	lv_obj_scroll_to_y(object,
 			   lv_obj_get_scroll_y(object) +
 				   lv_obj_get_scroll_bottom(object),
 			   LV_ANIM_OFF);
 	check(lv_obj_get_scroll_bottom(object) == 0,
 	      "native viewport reaches the bottom scroll limit");
-	scrollbar_geometry(object, bordered ? 3 : 1, true);
+	scrollbar_geometry(object, bordered ? 3 : 1, bordered ? 2 : 0, true);
 	lv_obj_set_height(content, 1);
 	lv_obj_update_layout(object);
 	lv_obj_readjust_scroll(object, LV_ANIM_OFF);
-	scrollbar_geometry(object, bordered ? 3 : 1, false);
+	scrollbar_geometry(object, bordered ? 3 : 1, bordered ? 2 : 0, false);
 	lv_obj_delete(object);
 }
 
@@ -316,11 +404,7 @@ static void check_final_divider(struct fplinux_ui *ui, lv_obj_t *screen,
 	row = fplinux_ui_listview_selected_row(list);
 	lv_obj_update_layout(row);
 	selected = coords(row);
-	check(lv_obj_get_style_bg_opa(row, 0) == LV_OPA_COVER,
-	      "selected final row has an opaque background");
-	check(lv_color_to_u32(lv_obj_get_style_bg_color(row, 0)) == 0xff204060U,
-	      "selected final row uses the accent background");
-	check(lv_area_get_height(&selected) == (is_virtual ? 32 : 22),
+	check(lv_area_get_height(&selected) == (is_virtual ? 35 : 23),
 	      "selected final row retains its complete pitch");
 	if (is_virtual)
 		fplinux_ui_listview_rows_deleted(list, 1, 39);
@@ -368,7 +452,7 @@ static void check_navigation(struct fplinux_ui *ui, lv_obj_t *screen,
 		      "initial Up is consumed");
 		check(fplinux_ui_listview_selected(list) == 6,
 		      "initial Up wraps from the first row to the last");
-		check(contains(coords(object),
+		check(contains(list_view(object),
 			       coords(fplinux_ui_listview_selected_row(list))),
 		      "wrapped final row is fully visible");
 		fplinux_ui_listview_select(list, 0);
@@ -390,7 +474,7 @@ static void check_navigation(struct fplinux_ui *ui, lv_obj_t *screen,
 		      "held Down is consumed");
 		check(fplinux_ui_listview_selected(list) == 0,
 		      "held Down also wraps from the last row to the first");
-		check(contains(coords(object),
+		check(contains(list_view(object),
 			       coords(fplinux_ui_listview_selected_row(list))),
 		      "wrapped first row is fully visible");
 	}
@@ -439,7 +523,7 @@ static void check_first_detail(struct fplinux_ui *ui, lv_obj_t *screen,
 	lv_obj_update_layout(object);
 	focused = fplinux_ui_listview_selected_row(list);
 	before = coords(focused);
-	check(contains(coords(object), before),
+	check(contains(list_view(object), before),
 	      "selected single-line row starts fully visible");
 	if (!selectable) {
 		fplinux_ui_listview_set_selectable(list, false);
@@ -470,7 +554,7 @@ static void check_first_detail(struct fplinux_ui *ui, lv_obj_t *screen,
 	check(fplinux_ui_listview_selected_row(list) == focused,
 	      "the first detail preserves the selected row identity");
 	if (selectable)
-		check(contains(coords(object), after),
+		check(contains(list_view(object), after),
 		      "the first detail keeps the selected row fully visible");
 	else {
 		check(lv_obj_get_scroll_y(object) == 0,
@@ -723,6 +807,393 @@ static void check_status_row(struct fplinux_ui *ui, lv_obj_t *screen)
 	lv_draw_buf_destroy(icon);
 }
 
+/* The theme's list colours on its page. */
+static void use_palette(struct fplinux_ui *ui, lv_obj_t *screen,
+			const char *theme)
+{
+	const struct fplinux_ui_theme_spec *palette = fplinux_ui_theme_spec(
+		strcmp(theme, "dark") ? FPLINUX_UI_THEME_LIGHT :
+					FPLINUX_UI_THEME_DARK);
+
+	ui->theme.background =
+		lv_color_hex(palette->rgb[FPLINUX_UI_COLOUR_BACKGROUND]);
+	ui->theme.foreground =
+		lv_color_hex(palette->rgb[FPLINUX_UI_COLOUR_FOREGROUND]);
+	ui->theme.accent = lv_color_hex(palette->rgb[FPLINUX_UI_COLOUR_ACCENT]);
+	ui->theme.accent_text =
+		lv_color_hex(palette->rgb[FPLINUX_UI_COLOUR_ACCENT_TEXT]);
+	ui->theme.border = lv_color_hex(palette->rgb[FPLINUX_UI_COLOUR_BORDER]);
+	ui->theme.focus = lv_color_hex(palette->rgb[FPLINUX_UI_COLOUR_FOCUS]);
+	ui->theme.bar = lv_color_hex(palette->rgb[FPLINUX_UI_COLOUR_BAR]);
+	lv_obj_set_style_bg_color(screen, ui->theme.background, 0);
+	lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+}
+
+/* Appends the screen's current frame to output. */
+static void write_frame(lv_obj_t *screen, int width, int height, FILE *output)
+{
+	lv_obj_invalidate(screen);
+	lv_refr_now(NULL);
+	check(fwrite(frame, sizeof(frame[0]), (size_t)(width * height),
+		     output) == (size_t)(width * height),
+	      "rendered frame is written");
+}
+
+static void check_controls(struct fplinux_ui *ui, lv_obj_t *screen, int width,
+			   const char *theme, int expected_pitch)
+{
+	struct fplinux_ui_listview *list;
+	lv_draw_buf_t *icon =
+		lv_draw_buf_create(2, 2, LV_COLOR_FORMAT_A8, LV_STRIDE_AUTO);
+	lv_draw_buf_t *leading;
+	lv_obj_t *row, *column, *caption, *hint, *bar, *toggle, *value;
+	lv_area_t bar_area, row_area, caption_area, value_area;
+	uint16_t track = !strcmp(theme, "dark") ? 0x3a29 : 0xbe39;
+	uint16_t fill = !strcmp(theme, "dark") ? 0xae7b : 0x3b0e;
+	uint16_t selected_ink = !strcmp(theme, "dark") ? 0x09a8 : 0xffff;
+	const int levels[] = { 0, 50, 100 };
+
+	use_palette(ui, screen, theme);
+	ui->theme.font = fplinux_ui_builtin_font(ui->spec->font_body);
+	assert(ui->theme.font && icon);
+	list = fplinux_ui_listview_create(ui, screen,
+					  FPLINUX_UI_LISTVIEW_PLAIN);
+	assert(list);
+	assert(fplinux_ui_listview_add(list, "Volume", NULL) == 0);
+	assert(fplinux_ui_listview_add(list, "Wireless", NULL) == 1);
+	assert(fplinux_ui_listview_set_trailing_icon(list, 1, icon));
+	assert(fplinux_ui_listview_set_level(list, 0, 0, 100, 0));
+	assert(fplinux_ui_listview_set_trailing_value(list, 1, "Connected"));
+	row = lv_obj_get_child(fplinux_ui_listview_object(list), 0);
+	toggle = lv_obj_get_child(fplinux_ui_listview_object(list), 1);
+	column = lv_obj_get_child(row, 0);
+	caption = lv_obj_get_child(column, 0);
+	hint = lv_obj_get_child(column, 1);
+	bar = lv_obj_get_child(row, -1);
+	value = lv_obj_get_child(toggle, -1);
+	assert(lv_obj_check_type(bar, &lv_bar_class));
+	assert(lv_obj_check_type(value, &lv_label_class));
+	assert(!strcmp(lv_label_get_text(hint), "← 0 →"));
+	fplinux_ui_listview_select(list, 1);
+	assert(!strcmp(lv_label_get_text(hint), "0"));
+	lv_obj_update_layout(screen);
+	row_area = coords(row);
+	bar_area = coords(bar);
+	caption_area = coords(caption);
+	value_area = coords(value);
+	assert(lv_area_get_height(&row_area) == expected_pitch);
+	assert(contains(row_area, caption_area) &&
+	       contains(row_area, bar_area));
+	assert(caption_area.x2 < bar_area.x1);
+	assert(contains(coords(toggle), value_area));
+	assert(coords(lv_obj_get_child(lv_obj_get_child(toggle, 0), 0)).x2 <
+	       value_area.x1);
+	assert(abs((coords(lv_obj_get_child(toggle, 0)).y1 +
+		    coords(lv_obj_get_child(toggle, 0)).y2) -
+		   (value_area.y1 + value_area.y2)) <= 1);
+	frame_width = width;
+	for (size_t i = 0; i < sizeof(levels) / sizeof(levels[0]); ++i) {
+		assert(fplinux_ui_listview_set_level(list, 0, 0, 100,
+						     levels[i]));
+		lv_obj_invalidate(screen);
+		lv_refr_now(NULL);
+		for (int x = 0; x < lv_area_get_width(&bar_area); ++x) {
+			uint16_t expected =
+				x < (int)i * lv_area_get_width(&bar_area) / 2 ?
+					fill :
+					track;
+
+			assert(frame[((bar_area.y1 + bar_area.y2) / 2) * width +
+				     bar_area.x1 + x] == expected);
+		}
+	}
+	fplinux_ui_listview_select(list, 0);
+	assert(!strcmp(lv_label_get_text(hint), "← 100 →"));
+	for (size_t i = 0; i < sizeof(levels) / sizeof(levels[0]); ++i) {
+		int middle = (bar_area.y1 + bar_area.y2) / 2;
+		int quarter = bar_area.x1 + lv_area_get_width(&bar_area) / 4;
+		int three_quarters =
+			bar_area.x1 + 3 * lv_area_get_width(&bar_area) / 4;
+
+		assert(fplinux_ui_listview_set_level(list, 0, 0, 100,
+						     levels[i]));
+		lv_obj_invalidate(screen);
+		lv_refr_now(NULL);
+		assert(frame[middle * width + bar_area.x1] == selected_ink);
+		assert(frame[middle * width + bar_area.x2] == selected_ink);
+		assert(frame[bar_area.y1 * width + quarter] == selected_ink);
+		assert(frame[middle * width + quarter] ==
+		       (i ? selected_ink : fill));
+		assert(frame[middle * width + three_quarters] ==
+		       (i == 2 ? selected_ink : fill));
+	}
+	frame_width = 0;
+	assert(!fplinux_ui_listview_set_level(list, 0, 1, 1, 1));
+	assert(!fplinux_ui_listview_set_level(list, 0, 0, 100, 101));
+	assert(!fplinux_ui_listview_set_level(list, 0, INT32_MIN, INT32_MAX,
+					      0));
+	assert(fplinux_ui_listview_set_trailing_icon(list, 0, icon));
+	assert(find_image(row));
+	assert(lv_obj_get_child_count(column) == 1);
+	assert(fplinux_ui_listview_set_trailing_value(list, 0, "On"));
+	assert(!find_image(row));
+	assert(fplinux_ui_listview_set_level(list, 0, 0, 100, 50));
+	assert(lv_obj_check_type(lv_obj_get_child(row, -1), &lv_bar_class));
+	assert(fplinux_ui_listview_set_trailing_value(list, 0, "Off"));
+	assert(lv_obj_get_child_count(column) == 1);
+	assert(fplinux_ui_listview_set_level(list, 0, 0, 100, 50));
+	assert(fplinux_ui_listview_set_trailing_icon(list, 0, NULL));
+	assert(!lv_obj_check_type(lv_obj_get_child(row, -1), &lv_bar_class));
+	assert(lv_obj_get_child_count(column) == 1);
+	leading = lv_draw_buf_create(2, 2, LV_COLOR_FORMAT_A8, LV_STRIDE_AUTO);
+	assert(leading);
+	assert(fplinux_ui_listview_set_icon(list, 0, leading,
+					    FPLINUX_UI_LIST_ICON_IMAGE));
+	assert(find_image(row));
+	assert(fplinux_ui_listview_set_level(list, 0, 0, 100, 50));
+	assert(find_image(row));
+	assert(fplinux_ui_listview_set_trailing_value(list, 0, "On"));
+	assert(find_image(row));
+	lv_obj_clean(screen);
+	lv_draw_buf_destroy(icon);
+}
+
+/*
+ * Marked, unmarked and marked check rows on the theme's page, rendered with
+ * the middle row selected and then the final one: both frames, in order,
+ * are written to path as RGB565.
+ */
+static void render_markers(struct fplinux_ui *ui, lv_obj_t *screen, int width,
+			   int height, const char *theme, const char *path)
+{
+	struct fplinux_ui_listview *list;
+	FILE *output;
+
+	use_palette(ui, screen, theme);
+	list = fplinux_ui_listview_create(ui, screen,
+					  FPLINUX_UI_LISTVIEW_CHECK);
+	assert(list);
+	assert(fplinux_ui_listview_add(list, "One", NULL) == 0);
+	assert(fplinux_ui_listview_add(list, "Two", NULL) == 1);
+	assert(fplinux_ui_listview_add(list, "Three", NULL) == 2);
+	fplinux_ui_listview_set_marked(list, 0, true);
+	fplinux_ui_listview_set_marked(list, 2, true);
+	output = fopen(path, "wb");
+	assert(output);
+	frame_width = width;
+	for (size_t selected = 1; selected <= 2; ++selected) {
+		fplinux_ui_listview_select(list, selected);
+		write_frame(screen, width, height, output);
+	}
+	frame_width = 0;
+	check(fclose(output) == 0, "rendered frames are complete");
+	lv_obj_clean(screen);
+}
+
+static bool bar_line_row(struct fplinux_ui_listview *list, size_t index,
+			 struct fplinux_ui_virtual_row *row, void *context)
+{
+	(void)list;
+	(void)index;
+	(void)context;
+	row->text = "Virtual row";
+	return true;
+}
+
+/* A band across the screen from y in fill, its first line in the border colour. */
+static void add_band(struct fplinux_ui *ui, lv_obj_t *screen, int width,
+		     int32_t y, int32_t height, lv_color_t fill)
+{
+	lv_obj_t *line = lv_obj_create(screen);
+
+	lv_obj_remove_style_all(line);
+	lv_obj_set_pos(line, 0, y);
+	lv_obj_set_size(line, width, height);
+	lv_obj_set_style_bg_color(line, fill, 0);
+	lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
+	lv_obj_set_style_border_color(line, ui->theme.border, 0);
+	lv_obj_set_style_border_width(line, 1, 0);
+	lv_obj_set_style_border_side(line, LV_BORDER_SIDE_TOP, 0);
+}
+
+/*
+ * Ten rows in an area three rows high between a title band's line at the
+ * top and a soft-key bar below, as an application surface and the bars
+ * around it: the bottom row of the first page selected, the bottom row
+ * after one page and the last row, then the first two rows alone, which
+ * fit. The four frames are written to path.
+ */
+static void render_bar_line(struct fplinux_ui *ui, lv_obj_t *screen, int width,
+			    int height, bool is_virtual, const char *theme,
+			    const char *path)
+{
+	int32_t pitch = ui->spec->row_height;
+	int32_t area = 3 * pitch - 1;
+	struct fplinux_ui_listview *list;
+	lv_obj_t *parent;
+	FILE *output;
+
+	use_palette(ui, screen, theme);
+	ui->theme.font = fplinux_ui_builtin_font(ui->spec->font_body);
+	assert(ui->theme.font);
+	add_band(ui, screen, width, 0, 1, ui->theme.border);
+	parent = lv_obj_create(screen);
+	lv_obj_remove_style_all(parent);
+	lv_obj_set_pos(parent, 0, 1);
+	lv_obj_set_size(parent, width, area);
+	add_band(ui, screen, width, 1 + area, height - 1 - area, ui->theme.bar);
+	if (is_virtual) {
+		list = fplinux_ui_listview_create_virtual(
+			ui, parent, FPLINUX_UI_LISTVIEW_PLAIN, 10, bar_line_row,
+			NULL);
+		assert(list);
+		fplinux_ui_listview_set_active(list, true);
+	} else {
+		list = fplinux_ui_listview_create(ui, parent,
+						  FPLINUX_UI_LISTVIEW_PLAIN);
+		assert(list);
+		for (size_t index = 0; index < 10; ++index)
+			assert(fplinux_ui_listview_add(list, "Stored row",
+						       NULL) == index);
+	}
+	output = fopen(path, "wb");
+	assert(output);
+	frame_width = width;
+	key(list, KEY_DOWN);
+	key(list, KEY_DOWN);
+	check(fplinux_ui_listview_selected(list) == 2,
+	      "Down twice selects the first page's bottom row");
+	write_frame(screen, width, height, output);
+	key(list, KEY_RIGHT);
+	check(fplinux_ui_listview_selected(list) == 5,
+	      "Right selects the next page's bottom row");
+	write_frame(screen, width, height, output);
+	key(list, KEY_RIGHT);
+	key(list, KEY_RIGHT);
+	check(fplinux_ui_listview_selected(list) == 9,
+	      "Right pages clamp at the last row");
+	write_frame(screen, width, height, output);
+	if (is_virtual)
+		fplinux_ui_listview_rows_deleted(list, 2, 8);
+	else
+		for (size_t index = 9; index >= 2; --index)
+			check(fplinux_ui_listview_remove(list, index),
+			      "rows beyond the first two are removed");
+	lv_obj_update_layout(screen);
+	write_frame(screen, width, height, output);
+	frame_width = 0;
+	check(fclose(output) == 0, "rendered frames are complete");
+	lv_obj_clean(screen);
+}
+
+static const lv_font_t *role_font(const struct fplinux_ui_profile_spec *spec,
+				  const char *role)
+{
+	const char *id = !strcmp(role, "title")	 ? spec->font_title :
+			 !strcmp(role, "legend") ? spec->font_legend :
+						   spec->font_body;
+
+	return fplinux_ui_builtin_font(id);
+}
+
+static int32_t text_width(const char *text, const lv_font_t *font)
+{
+	lv_point_t size;
+
+	lv_text_get_size(&size, text, font, 0, 0, LV_COORD_MAX,
+			 LV_TEXT_FLAG_NONE);
+	return size.x;
+}
+
+/*
+ * The widths of every shortening candidate: each start of text that ends
+ * before a code point, without trailing spaces, followed by three dots.
+ */
+static void print_candidates(FILE *output, const char *text,
+			     const lv_font_t *font)
+{
+	char candidate[256];
+	size_t length = strlen(text);
+
+	for (size_t end = 0; end < length; ++end) {
+		size_t kept = end;
+
+		if (((unsigned char)text[end] & 0xc0) == 0x80)
+			continue;
+		while (kept && text[kept - 1] == ' ')
+			--kept;
+		assert(kept + 4 <= sizeof(candidate));
+		memcpy(candidate, text, kept);
+		memcpy(candidate + kept, "...", 4);
+		fprintf(output, "%s%d", end ? "," : "\t",
+			(int)text_width(candidate, font));
+	}
+}
+
+/*
+ * One-line labels in LV_LABEL_LONG_MODE_DOTS with the profile's fonts,
+ * black on white, one case of cases (role, left padding, pixels under the
+ * text's natural width, text) per row. Each result line gives the natural
+ * and label widths, the shown text, the text's left edge and row top, the
+ * font's baseline and line height, and the candidate widths.
+ */
+static void render_ellipsis(lv_obj_t *screen, int width, int height,
+			    const struct fplinux_ui_profile_spec *spec,
+			    const char *directory)
+{
+	char path[512], line[512];
+	FILE *cases, *results, *output;
+	int32_t top = 0;
+
+	snprintf(path, sizeof(path), "%s/cases.tsv", directory);
+	cases = fopen(path, "r");
+	snprintf(path, sizeof(path), "%s/results.tsv", directory);
+	results = fopen(path, "w");
+	assert(cases && results);
+	lv_obj_set_style_bg_color(screen, lv_color_white(), 0);
+	lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
+	lv_obj_set_style_text_color(screen, lv_color_black(), 0);
+	while (fgets(line, sizeof(line), cases)) {
+		char *role = strtok(line, "\t");
+		int pad = atoi(strtok(NULL, "\t"));
+		int over = atoi(strtok(NULL, "\t"));
+		char *text = strtok(NULL, "\n");
+		const lv_font_t *font = role_font(spec, role);
+		int32_t natural = text_width(text, font);
+		int32_t box = natural - over;
+		lv_obj_t *label = lv_label_create(screen);
+
+		assert(font);
+		lv_obj_set_style_text_font(label, font, 0);
+		lv_obj_set_style_pad_left(label, pad, 0);
+		lv_obj_set_pos(label, 4, top);
+		lv_obj_set_size(label, box + pad,
+				lv_font_get_line_height(font));
+		lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
+		lv_label_set_text(label, text);
+		lv_obj_update_layout(screen);
+		lv_refr_now(NULL);
+		fprintf(results, "%d\t%d\t%s\t%d\t%d\t%d\t%d", (int)natural,
+			(int)box, lv_label_get_text(label), 4 + pad, (int)top,
+			(int)(lv_font_get_line_height(font) - font->base_line),
+			(int)lv_font_get_line_height(font));
+		print_candidates(results, text, font);
+		fputc('\n', results);
+		top += lv_font_get_line_height(font) + 2;
+		assert(top <= height);
+	}
+	snprintf(path, sizeof(path), "%s/ellipsis.rgb565", directory);
+	output = fopen(path, "wb");
+	assert(output);
+	frame_width = width;
+	write_frame(screen, width, height, output);
+	frame_width = 0;
+	check(fclose(output) == 0, "rendered frame is complete");
+	check(fclose(results) == 0, "results are complete");
+	fclose(cases);
+	lv_obj_clean(screen);
+}
+
 int main(int argc, char **argv)
 {
 	struct fplinux_ui ui = { 0 };
@@ -758,8 +1229,32 @@ int main(int argc, char **argv)
 	ui.theme.accent = lv_color_hex(0x204060);
 	ui.theme.accent_text = lv_color_white();
 	ui.theme.focus = lv_color_hex(0x2468ac);
+	ui.theme.border = lv_color_hex(0x708090);
+	if (!strcmp(argv[1], "markers")) {
+		render_markers(&ui, screen, width, height, argv[4], argv[5]);
+		goto done;
+	}
+	if (!strcmp(argv[1], "ellipsis")) {
+		/* argv[4] is the profile's screen; the frame stays 240x320. */
+		render_ellipsis(
+			screen, width, height,
+			fplinux_ui_profile_spec(fplinux_ui_profile_for_screen(
+				atoi(argv[4]), atoi(strchr(argv[4], 'x') + 1))),
+			argv[5]);
+		goto done;
+	}
+	if (!strncmp(argv[1], "bar-line-", 9)) {
+		render_bar_line(&ui, screen, width, height,
+				!strcmp(argv[1] + 9, "virtual"), argv[4],
+				argv[5]);
+		goto done;
+	}
 	if (!strcmp(argv[1], "status-row")) {
 		check_status_row(&ui, screen);
+		goto done;
+	}
+	if (!strcmp(argv[1], "controls")) {
+		check_controls(&ui, screen, width, argv[4], atoi(argv[5]));
 		goto done;
 	}
 	if (!strncmp(argv[1], "final-divider-", 14)) {
@@ -796,6 +1291,9 @@ int main(int argc, char **argv)
 					!strcmp(argv[1] + 18, "virtual"));
 		goto done;
 	}
+	/* A row and its detail hold lines of the profile's own body font. */
+	ui.theme.font = fplinux_ui_builtin_font(ui.spec->font_body);
+	assert(ui.theme.font);
 	if (is_virtual) {
 		list = fplinux_ui_listview_create_virtual(
 			&ui, screen, FPLINUX_UI_LISTVIEW_PLAIN, 1, virtual_row,
@@ -861,7 +1359,7 @@ int main(int argc, char **argv)
 	check(fplinux_ui_listview_selected(list) == 39,
 	      "Right pages to the final row without wrapping");
 	long_row = row_geometry(list, row_height, padding, true);
-	check(contains(coords(object), long_row),
+	check(contains(list_view(object), long_row),
 	      "keypad scrolling fully reveals the selected final row");
 	check_contents(&ui, long_row, details);
 	check(lv_obj_get_scroll_y(object) > 0,

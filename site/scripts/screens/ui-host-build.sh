@@ -23,6 +23,9 @@ ui_host_prepare_inputs() {
 		--tokens "$ui_host_ui/fplinux-ui-profile.json" \
 		--sources /opt/quality/src/ui-fonts --output "$ui_host_inputs/fonts" \
 		--lv-font-conv /opt/quality/node-tools/node_modules/.bin/lv_font_conv
+	python3 "$ui_host_root/scripts/fplinux_activity.py" \
+		--tokens "$ui_host_ui/fplinux-ui-profile.json" \
+		--output "$ui_host_inputs/fplinux-ui-activity.h" --lvgl
 }
 
 ui_host_prepare() {

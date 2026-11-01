@@ -5,6 +5,7 @@
 #include "fplinux-ui-locale.h"
 #include "fplinux-ui-symbol-picker.h"
 #include "fplinux-ui-text-model.h"
+#include "fplinux-utf8.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -148,8 +149,49 @@ static void area_size_cb(lv_event_t *event)
 	fit_read_only(lv_event_get_user_data(event));
 }
 
+/*
+ * The textarea draws the 1 px caret as a left border in the column before
+ * the character at the caret, the last column of the previous character's
+ * advance; a left padding of the cursor part moves it left by as many
+ * columns. Inside a line the caret keeps that column, between the glyphs.
+ * Where the line ends after a visible glyph, the caret stands exactly 1 px
+ * clear of that glyph's ink, whatever the glyph's own right-side spacing.
+ */
+static int32_t caret_padding(lv_obj_t *area)
+{
+	const unsigned char *at =
+		(const unsigned char *)lv_textarea_get_text(area);
+	const unsigned char *end = at + strlen((const char *)at);
+	uint32_t characters = lv_textarea_get_cursor_pos(area);
+	lv_font_glyph_dsc_t glyph;
+	uint32_t letter = 0;
+	bool has_previous = false;
+
+	for (; at < end && characters; --characters) {
+		if (!fplinux_utf8_next(&at, end, &letter))
+			return 0;
+		has_previous = true;
+	}
+	if ((*at && *at != '\n') || !has_previous || letter == '\n')
+		return 0;
+	if (!lv_font_get_glyph_dsc(
+		    lv_obj_get_style_text_font(lv_textarea_get_label(area), 0),
+		    &glyph, letter, 0) ||
+	    !glyph.box_w)
+		return 0;
+	/* The ink ends adv_w - ofs_x - box_w columns before the next advance. */
+	return (int32_t)glyph.adv_w - glyph.ofs_x - (int32_t)glyph.box_w - 2;
+}
+
 static void render_caret(struct fplinux_ui_text *field)
 {
+	int32_t offset = caret_padding(field->area);
+
+	if (lv_obj_get_style_pad_left(field->area, LV_PART_CURSOR) != offset) {
+		lv_obj_set_style_pad_left(field->area, offset, LV_PART_CURSOR);
+		/* A cursor padding alone does not move the drawn cursor. */
+		lv_obj_send_event(field->area, LV_EVENT_STYLE_CHANGED, NULL);
+	}
 	lv_obj_set_style_border_opa(
 		field->area, field->caret_shown ? LV_OPA_COVER : LV_OPA_TRANSP,
 		LV_PART_CURSOR);
@@ -209,9 +251,16 @@ static void render(struct fplinux_ui_text *field)
 		field->caret_shown = true;
 	}
 	render_caret(field);
-	lv_obj_set_style_border_color(
-		field->frame,
-		model->focused ? theme->focus : theme->control_border, 0);
+	fplinux_ui_control_focus(field->ui, field->frame, model->focused);
+	lv_obj_set_style_text_color(
+		field->status,
+		model->focused ? theme->accent_text : theme->muted, 0);
+	lv_obj_set_style_border_color(field->area,
+				      model->focused ? theme->accent_text :
+						       theme->foreground,
+				      LV_PART_CURSOR);
+	lv_obj_set_style_bg_color(label, theme->surface, LV_PART_SELECTED);
+	lv_obj_set_style_text_color(label, theme->foreground, LV_PART_SELECTED);
 	fplinux_ui_text_model_status(model, status, sizeof(status));
 	if (strcmp(lv_label_get_text(field->status), status))
 		lv_label_set_text(field->status, status);
@@ -440,9 +489,8 @@ static void create_view(struct fplinux_ui_text *field, lv_obj_t *parent)
 	label = lv_textarea_get_label(field->area);
 	lv_obj_add_event_cb(label, read_only_size_cb, LV_EVENT_SIZE_CHANGED,
 			    field);
-	lv_obj_set_style_bg_color(label, theme->accent, LV_PART_SELECTED);
-	lv_obj_set_style_text_color(label, theme->accent_text,
-				    LV_PART_SELECTED);
+	lv_obj_set_style_bg_color(label, theme->surface, LV_PART_SELECTED);
+	lv_obj_set_style_text_color(label, theme->foreground, LV_PART_SELECTED);
 
 	/* The text at rest, in the textarea's place. */
 	if (!multiline) {
@@ -546,14 +594,12 @@ static bool scroll_read_only(struct fplinux_ui_text *field,
 		return false;
 	step = line;
 	if (key->code == KEY_LEFT || key->code == KEY_RIGHT) {
-		int32_t rows = lv_obj_get_content_height(area) / line;
-
-		if (rows > 1)
-			step = (rows - 1) * line;
+		fplinux_ui_scroll_page(area, line, key->code == KEY_RIGHT);
+		return true;
 	}
-	if (key->code == KEY_DOWN || key->code == KEY_RIGHT)
+	if (key->code == KEY_UP)
 		step = -step;
-	lv_obj_scroll_by_bounded(area, 0, step, LV_ANIM_OFF);
+	fplinux_ui_scroll_lines(area, step, line);
 	return true;
 }
 

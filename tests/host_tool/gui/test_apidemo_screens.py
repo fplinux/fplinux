@@ -14,18 +14,21 @@ import shutil
 import struct
 from collections import Counter
 from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
 from tests import ROOT
 from tests.c_harness import c_build_directory
+from tests.host_tool.gui.list_rows import ListArea, frame_pixels, sequence_faults
 from tests.process import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from types import ModuleType
+    from typing import Any
 
 SCREENS = ROOT / "site/scripts/screens"
 CAPTURES = (
@@ -58,11 +61,11 @@ POPUP_CAPTURES = (
     "apidemo-long-options-end",
 )
 CANVAS_GEOMETRY = (
-    ((128, 128), (128, 96), (0, 20, 128, 76), (60, 58, 8, 8)),
-    ((128, 160), (128, 128), (0, 20, 128, 108), (60, 74, 8, 8)),
-    ((176, 220), (176, 178), (0, 24, 176, 154), (88, 101, 10, 10)),
+    ((128, 128), (128, 96), (0, 25, 128, 71), (60, 56, 8, 8)),
+    ((128, 160), (128, 126), (0, 22, 128, 104), (60, 74, 8, 8)),
+    ((176, 220), (176, 177), (0, 26, 176, 151), (88, 96, 10, 10)),
     ((240, 320), (240, 268), (0, 28, 240, 240), (120, 148, 12, 12)),
-    ((320, 240), (320, 196), (0, 26, 320, 170), (154, 105, 12, 12)),
+    ((320, 240), (320, 199), (0, 28, 320, 171), (154, 107, 12, 12)),
 )
 
 
@@ -170,6 +173,88 @@ def run_canvas_scenario(  # noqa: PLR0913, PLR0917 -- each argument owns a nativ
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_actual_russian_confirmation_title_scrolls_once_then_rests_with_dots(
+    apidemo_native: Path, tmp_path: Path, rgb565_png: ModuleType
+) -> None:
+    """A one-line title moves out and back, then stays at rest in the native UI."""
+    run_canvas_scenario(apidemo_native, tmp_path, (128, 160), "ru", "light", "confirmation-title")
+    assert "Russian confirmation title scrolls once and rests with dots" in (
+        tmp_path / "capture.log"
+    ).read_text(encoding="utf-8")
+    for name in ("scroll", "dots"):
+        frame = tmp_path / f"apidemo-confirmation-title-{name}.rgb565"
+        image = frame.with_suffix(".png")
+        assert frame.stat().st_size == 128 * 126 * 2
+        rgb565_png.convert(128, 126, frame, image)
+        if log_root := os.environ.get("FPLINUX_LOG_ROOT"):
+            shutil.copy2(image, Path(log_root) / "apidemo-confirmation-title-128x160-light-ru")
+
+
+def test_actual_whole_surface_scrolls_lines_and_overlapping_pages(
+    apidemo_native: Path, tmp_path: Path
+) -> None:
+    """The reported small-screen scene absorbs line tails and uses bounded pages."""
+    run_canvas_scenario(apidemo_native, tmp_path, (128, 160), "ru", "light", "whole-scroll")
+    log = (tmp_path / "capture.log").read_text(encoding="utf-8")
+    observations = [
+        tuple(map(int, line.split()[1:]))
+        for line in log.splitlines()
+        if line.startswith("whole-scroll ")
+    ]
+    assert [item[0] for item in observations] == [
+        0,
+        14,
+        28,
+        42,
+        56,
+        70,
+        84,
+        102,
+        102,
+        84,
+        70,
+        56,
+        42,
+        28,
+        14,
+        0,
+        0,
+        84,
+        102,
+        18,
+        0,
+    ]
+    assert all(item[1:] == (108, 210, 14) for item in observations)
+
+
+def test_actual_scrolling_text_pages_cover_long_content(
+    apidemo_native: Path, tmp_path: Path
+) -> None:
+    """Both page directions cover a multi-page reader without skipping content."""
+    run_canvas_scenario(apidemo_native, tmp_path, (128, 160), "en", "light", "reader-pages")
+    log = (tmp_path / "capture.log").read_text(encoding="utf-8")
+    observations = [
+        tuple(map(int, line.split()[1:]))
+        for line in log.splitlines()
+        if line.startswith("reader-page ")
+    ]
+    assert len(observations) == 49
+    _, height, content, line = observations[0]
+    assert all(item[1:] == (height, content, line) for item in observations)
+    last = content - height
+    positions = [item[0] for item in observations]
+    assert positions[0] == positions[-1] == 0
+    assert positions[24] == last
+    assert last > 2 * height
+    assert positions[:25] == sorted(positions[:25])
+    assert positions[24:] == sorted(positions[24:], reverse=True)
+    for page in (positions[:25], positions[24:]):
+        moves = [abs(right - left) for left, right in pairwise(page) if left != right]
+        assert len(moves) > 2
+        assert all(height - 2 * line < move <= height - line for move in moves[:-1])
+        assert 0 < moves[-1] <= height - line
+
+
 def pixel_contrast(first: int, second: int) -> float:
     def luminance(pixel: int) -> float:
         channels = ((pixel >> 11) / 31, ((pixel >> 5) & 63) / 63, (pixel & 31) / 31)
@@ -233,61 +318,86 @@ def test_actual_sketch_cursor_frame_contrasts_with_empty_and_painted_cells(  # n
     assert frames["erased"] == frames["empty"]
 
 
-@pytest.mark.parametrize(("screen", "surface", "canvas", "_cursor"), CANVAS_GEOMETRY)
+@pytest.mark.parametrize(("screen", "_surface", "canvas", "_cursor"), CANVAS_GEOMETRY)
 @pytest.mark.parametrize("theme", ["light", "dark"])
 @pytest.mark.parametrize("locale", ["en", "ru"])
-def test_actual_softkey_preview_last_line_is_reachable_above_its_bar(  # noqa: PLR0913, PLR0917 -- independent geometry and native inputs.
+def test_actual_softkey_preview_draws_its_bar_only_in_full_screen_and_back_leaves_it(  # noqa: PLR0913, PLR0917 -- independent geometry and native inputs.
     apidemo_native: Path,
     tmp_path: Path,
     screen: tuple[int, int],
-    surface: tuple[int, int],
+    _surface: tuple[int, int],
     canvas: tuple[int, int, int, int],
     _cursor: tuple[int, int, int, int],
     theme: str,
     locale: str,
 ) -> None:
+    """The system bar alone shows the keys; in full screen the example's bar shows the same.
+
+    The hint's last line stays reachable above whichever bar there is. Back
+    in the integrated screen returns to the results; Back in full screen
+    returns to the integrated screen.
+    """
     run_canvas_scenario(apidemo_native, tmp_path, screen, locale, theme, "softkey-preview")
+    russian = locale == "ru"
     hint_text = (
-        "«Изменить подписи» обновляет образец, «Полный экран» меняет режим экрана. "
-        "«Назад» вернёт в каталог."
-        if locale == "ru"
-        else "Change legends updates this preview. Toggle full screen changes the display "
-        "mode; Back returns."
+        "«Переключить полный экран» показывает вместо системной панели собственную "
+        "панель примера с теми же клавишами. «Изменить подписи» меняет подпись OK, "  # noqa: RUF001 -- Russian text with Latin key names.
+        "«Назад» сначала выходит из полного экрана, затем возвращает в каталог."
+        if russian
+        else "Toggle full screen shows this example's own legend bar in place of the system "
+        "bar, with the same keys. Change legends updates OK's legend; Back leaves full "
+        "screen, then returns."
     )
-    bar_word = "Старт" if locale == "ru" else "Start"
-    end = json.loads((tmp_path / "apidemo-preview-end.json").read_text(encoding="utf-8"))
-    assert tuple(end["canvas"]) == canvas
-    objects = end["canvas_objects"]
-    hint = next(item for item in objects if item["text"] == hint_text)
-    legend = next(item for item in objects if item["text"] == bar_word)
-    bar = objects[legend["parent"]]
-    hint_left, hint_top, hint_width, hint_height = hint["bounds"]
+    full = (0, canvas[1], screen[0], screen[1] - canvas[1])
+
+    def phase(name: str) -> dict[str, Any]:
+        return cast(
+            "dict[str, Any]",
+            json.loads((tmp_path / f"apidemo-preview-{name}.json").read_text(encoding="utf-8")),
+        )
+
+    for name in ("top", "end", "changed", "normal", "back"):
+        frame = phase(name)
+        assert tuple(frame["canvas"]) == canvas, name
+        objects = frame["canvas_objects"]
+        hint = next(item for item in objects if item["text"] == hint_text)
+        # No bar of its own: only the hint's viewport and the hint are shown.
+        assert len(objects) == 2, (name, objects)
+        assert tuple(objects[hint["parent"]]["bounds"]) == canvas, name
+    end = phase("end")
+    hint = next(item for item in end["canvas_objects"] if item["text"] == hint_text)
+    viewport = end["canvas_objects"][hint["parent"]]["content"]
+    assert (
+        max(viewport[1], canvas[1]) <= hint["bounds"][1] + hint["bounds"][3] - hint["line_height"]
+    )
+    assert hint["bounds"][1] + hint["bounds"][3] <= min(
+        viewport[1] + viewport[3], sum(canvas[1::2])
+    )
+
+    # Back in the integrated screen left it for the results.
+    results = phase("results")
+    assert all(item["text"] != hint_text for item in results["canvas_objects"])
+
+    fullscreen = phase("fullscreen")
+    assert tuple(fullscreen["canvas"]) == full
+    objects = fullscreen["canvas_objects"]
+    legends = [item for item in objects if item["parent"] >= 0 and item["text"] != hint_text]
+    bar = objects[legends[0]["parent"]]
     _, bar_top, _, bar_height = bar["bounds"]
-    viewport = objects[hint["parent"]]["content"] if hint["parent"] >= 0 else canvas
-    viewport_top = max(viewport[1], canvas[1])
-    viewport_bottom = min(viewport[1] + viewport[3], bar_top)
-    assert 0 <= hint_left < hint_left + hint_width <= surface[0]
-    assert bar_top + bar_height == canvas[1] + canvas[3]
-    assert viewport_top <= hint_top + hint_height - hint["line_height"]
-    assert hint_top + hint_height <= viewport_bottom, end
-    for phase in ("changed", "fullscreen", "normal"):
-        frame = json.loads(
-            (tmp_path / f"apidemo-preview-{phase}.json").read_text(encoding="utf-8")
-        )
-        assert any(
-            item["text"] == ("Стоп" if locale == "ru" else "Stop")
-            for item in frame["canvas_objects"]
-        )
-        phase_hint = next(item for item in frame["canvas_objects"] if item["text"] == hint_text)
-        phase_viewport = frame["canvas_objects"][phase_hint["parent"]]
-        assert phase_viewport["bounds"] == [
-            frame["canvas"][0],
-            frame["canvas"][1],
-            frame["canvas"][2],
-            frame["canvas"][3] - bar_height,
-        ]
-    normal = json.loads((tmp_path / "apidemo-preview-normal.json").read_text(encoding="utf-8"))
-    assert tuple(normal["canvas"]) == canvas
+    assert bar_top + bar_height == full[1] + full[3]
+    shown = [item["text"] for item in sorted(legends, key=lambda i: i["bounds"][0])]
+    # The mode command, OK (changed once: it now restores) and Back.
+    expected = (
+        ("Переключить полный экран", "Вернуть подписи", "Назад")
+        if russian
+        else ("Toggle full screen", "Restore legends", "Back")
+    )
+    for text, whole in zip(shown, expected, strict=True):
+        assert text == whole or (
+            text.endswith("...") and len(text) > 3 and whole.startswith(text[:-3])
+        ), (text, whole)
+    hint = next(item for item in objects if item["text"] == hint_text)
+    assert objects[hint["parent"]]["bounds"] == [full[0], full[1], full[2], full[3] - bar_height]
 
 
 @pytest.mark.parametrize(("screen", "surface", "canvas", "_cursor"), CANVAS_GEOMETRY)
@@ -309,11 +419,11 @@ def test_actual_canvas_bounds_contain_frames_fields_and_moving_shape(  # noqa: P
     frame = next(item for item in whole["canvas_objects"] if item["border"] == 2)
     assert frame["bounds"] == whole["canvas"]
     padding, playground, cells, field_max = {
-        (128, 128): (3, [4, 42, 106, 42], (6, 2), 68),
-        (128, 160): (3, [4, 42, 106, 74], (6, 4), 100),
-        (176, 220): (4, [6, 51, 152, 112], (7, 5), 142),
+        (128, 128): (3, [4, 47, 106, 42], (6, 2), 63),
+        (128, 160): (3, [4, 44, 106, 74], (6, 4), 96),
+        (176, 220): (4, [6, 53, 152, 112], (7, 5), 139),
         (240, 320): (6, [8, 62, 208, 184], (8, 7), 224),
-        (320, 240): (4, [6, 56, 300, 132], (12, 5), 158),
+        (320, 240): (4, [6, 58, 300, 132], (12, 5), 159),
     }[screen]
     assert frame["padding"] == [padding] * 4
     for phase in ("first", "last"):
@@ -427,10 +537,10 @@ def test_actual_apidemo_preferences_distinguish_memory_file_and_confirmed_save(
     ("screen", "surface", "locale"),
     [
         ((128, 128), (128, 96), "en"),
-        ((128, 160), (128, 128), "en"),
-        ((176, 220), (176, 178), "en"),
+        ((128, 160), (128, 126), "en"),
+        ((176, 220), (176, 177), "en"),
         ((240, 320), (240, 268), "en"),
-        ((320, 240), (320, 196), "en"),
+        ((320, 240), (320, 199), "en"),
         ((240, 320), (240, 268), "ru"),
     ],
 )
@@ -511,11 +621,11 @@ def test_actual_apidemo_search_choices_preferences_and_rendering(  # noqa: PLR09
 @pytest.mark.parametrize(
     ("screen", "surface", "picker", "icon_size", "square_size"),
     [
-        ((128, 128), (128, 96), (1, 0, 126, 96), 16, 46),
-        ((128, 160), (128, 128), (1, 16, 126, 96), 16, 48),
-        ((176, 220), (176, 178), (5, 7, 166, 164), 20, 48),
+        ((128, 128), (128, 96), (1, 0, 126, 96), 16, 41),
+        ((128, 160), (128, 126), (1, 15, 126, 96), 16, 48),
+        ((176, 220), (176, 177), (5, 6, 166, 164), 20, 48),
         ((240, 320), (240, 268), (24, 44, 192, 180), 24, 48),
-        ((320, 240), (320, 196), (20, 33, 280, 130), 24, 48),
+        ((320, 240), (320, 199), (20, 34, 280, 130), 24, 48),
     ],
 )
 @pytest.mark.parametrize("theme", ["light", "dark"])
@@ -635,16 +745,20 @@ class MenuCaptureGeometry:
     surface: tuple[int, int]
     menu_height: int
     title_height: int
+    # Not all five rows fit below the title band: the menu's right edge is
+    # its scroll channel.
+    scrolls: bool = False
 
 
 @pytest.mark.parametrize(
     "geometry",
     [
-        MenuCaptureGeometry((128, 128), (128, 96), 82, 20),
-        MenuCaptureGeometry((128, 160), (128, 128), 112, 20),
-        MenuCaptureGeometry((176, 220), (176, 178), 132, 24),
-        MenuCaptureGeometry((240, 320), (240, 268), 182, 28),
-        MenuCaptureGeometry((320, 240), (320, 196), 152, 26),
+        # Fewer than three rows below the title band: three fill the surface.
+        MenuCaptureGeometry((128, 128), (128, 96), 73, 25, scrolls=True),
+        MenuCaptureGeometry((128, 160), (128, 126), 93, 22, scrolls=True),
+        MenuCaptureGeometry((176, 220), (176, 177), 136, 26),
+        MenuCaptureGeometry((240, 320), (240, 268), 166, 28),
+        MenuCaptureGeometry((320, 240), (320, 199), 161, 28),
     ],
     ids=["128x128", "128x160", "176x220", "240x320", "320x240"],
 )
@@ -690,13 +804,15 @@ def test_actual_apidemo_compact_menu_pixels_preserve_background_and_legends(  # 
         menu_top = height - geometry.menu_height
         line_start = menu_top * width
         line = opened[line_start : (menu_top + 1) * width]
+        popup_colour = 0xE73C if theme == "light" else 0x2945
+        channel_colour = 0xBE39 if theme == "light" else 0x3A29
+        bottom = opened[(height - 1) * width : height * width]
         menu_width = next((index for index, colour in enumerate(line) if colour != 0xED4A), width)
         assert 0 < menu_width <= width
         assert (
             opened[line_start + width : line_start + width + menu_width] == [0xED4A] * menu_width
         )
-        popup_colour = 0xE73C if theme == "light" else 0x2945
-        assert opened[(height - 1) * width + menu_width - 1] == popup_colour
+        assert bottom[menu_width - 1] == (channel_colour if geometry.scrolls else popup_colour)
         static_pixels = min(menu_top, geometry.title_height) * width
         before = frames["before"][:static_pixels]
         covered = opened[:static_pixels]
@@ -709,6 +825,7 @@ def test_actual_apidemo_compact_menu_pixels_preserve_background_and_legends(  # 
             for original, actual in zip(before, covered, strict=True)
             if original == background
         )
+        # The dimmed title band above the menu still shows its title.
         assert any(
             actual != dimmed_background
             for original, actual in zip(before, covered, strict=True)
@@ -724,6 +841,74 @@ def test_actual_apidemo_compact_menu_pixels_preserve_background_and_legends(  # 
                 dirs_exist_ok=True,
                 ignore=shutil.ignore_patterns("session.sock"),
             )
+
+
+@pytest.mark.parametrize(
+    ("screen", "surface", "band", "pitches"),
+    [
+        ((128, 128), (128, 96), 25, (36, 24)),
+        ((128, 160), (128, 126), 22, (35, 23)),
+        ((176, 220), (176, 177), 26, (38, 27)),
+        ((240, 320), (240, 268), 28, (43, 33)),
+        ((320, 240), (320, 199), 28, (43, 32)),
+    ],
+    ids=["128x128", "128x160", "176x220", "240x320", "320x240"],
+)
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_actual_apidemo_lists_show_no_row_sliver_and_scroll_by_meaningful_steps(  # noqa: PLR0913, PLR0917 -- independent geometry and native inputs.
+    apidemo_native: Path,
+    tmp_path: Path,
+    screen: tuple[int, int],
+    surface: tuple[int, int],
+    band: int,
+    pitches: tuple[int, int],
+    theme: str,
+) -> None:
+    """The detail-row catalogue and the virtual inbox keep rows whole or a real part."""
+    result = run_process(
+        [
+            str(apidemo_native / "apidemo-screens"),
+            *map(str, screen),
+            str(apidemo_native / "apidemo"),
+            str(SCREENS / "apidemo-keyboard.xkb"),
+            str(tmp_path / "session.sock"),
+            str(tmp_path),
+            "en",
+            "rows",
+            theme,
+        ],
+        name=f"actual API demo list rows at {screen} ({theme})",
+        env={"FPLINUX_APIDEMO_LANGUAGE_DIR": str(ROOT / "alpine/aports/fplinux-language")},
+        timeout=60,
+    )
+    (tmp_path / "capture.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+    log_root = os.environ.get("FPLINUX_LOG_ROOT")
+    if log_root:
+        shutil.copytree(
+            tmp_path,
+            Path(log_root) / f"apidemo-rows-{screen[0]}x{screen[1]}-{theme}",
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("session.sock"),
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "apidemo-rows: catalogue and virtual inbox focus moved down and back" in result.stdout
+    width, height = surface
+    for (prefix, count), pitch in zip((("catalogue", 8), ("virtual", 12)), pitches, strict=True):
+        area = ListArea(
+            width=width,
+            top=band,
+            bottom=height,
+            pitch=pitch,
+            edge=(0, 2),
+            divider=0xBE39 if theme == "light" else 0x3A29,
+            highlight=0x3B0E if theme == "light" else 0xAE7B,
+        )
+        names = [f"apidemo-rows-{prefix}-down-{row:02}" for row in range(count)]
+        names += [f"apidemo-rows-{prefix}-up-{row:02}" for row in range(count - 2, -1, -1)]
+        frames = {
+            name: frame_pixels((tmp_path / f"{name}.rgb565").read_bytes(), width) for name in names
+        }
+        assert sequence_faults(frames, area) == [], prefix
 
 
 @pytest.mark.parametrize(

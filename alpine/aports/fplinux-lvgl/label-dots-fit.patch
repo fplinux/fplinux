@@ -1,0 +1,132 @@
+Shorten a dotted label to the longest start of its last visible line that
+fits with the dots, measured with the dots themselves and without trailing
+spaces. The dots may now replace the final letters of a short text, and
+the point that finds the line no longer counts the label's padding twice.
+
+--- a/src/widgets/label/lv_label.c
++++ b/src/widgets/label/lv_label.c
+@@ -51,6 +51,8 @@
+ static void update_layout_completed_cb(lv_event_t * e);
+ static void lv_label_revert_dots(lv_obj_t * label);
+ static void lv_label_set_dots(lv_obj_t * label, uint32_t dot_begin);
++static uint32_t get_dot_begin(const char * line, int32_t max_width, const lv_font_t * font,
++                              const lv_text_attributes_t * attributes);
+ 
+ static void set_ofs_x_anim(void * obj, int32_t v);
+ static void set_ofs_y_anim(void * obj, int32_t v);
+@@ -1400,9 +1402,7 @@
+            lv_text_get_encoded_length(label->text) > LV_LABEL_DOT_NUM) { /*Do not turn all characters into dots*/
+             lv_point_t p;
+             int32_t y_overed;
+-            p.x = lv_area_get_width(&txt_coords) -
+-                  (lv_font_get_glyph_width(font, '.', '.') + attributes.letter_space) *
+-                  LV_LABEL_DOT_NUM; /*Shrink with dots*/
++            p.x = 0; /*The start of the last visible line*/
+             p.y = lv_area_get_height(&txt_coords);
+             y_overed = p.y %
+                        (lv_font_get_line_height_internal(font) + attributes.line_space); /*Round down to the last line*/
+@@ -1414,19 +1414,17 @@
+                 p.y -= y_overed;
+                 p.y -= attributes.line_space;
+             }
++            /*lv_label_get_letter_on() takes a point relative to the padding*/
++            p.x += lv_obj_get_style_pad_left_internal(obj, LV_PART_MAIN);
++            p.y += lv_obj_get_style_pad_top_internal(obj, LV_PART_MAIN);
+ 
+             uint32_t letter_id = lv_label_get_letter_on(obj, &p, false);
+-
+-            /*Be sure there is space for the dots*/
+-            size_t txt_len = lv_strlen(label->text);
+-            uint32_t byte_id     = lv_text_encoded_get_byte_id(label->text, letter_id);
+-            while(byte_id + LV_LABEL_DOT_NUM > txt_len) {
+-                lv_text_encoded_prev(label->text, &byte_id);
+-                letter_id--;
+-            }
++            uint32_t line_start = lv_text_encoded_get_byte_id(label->text, letter_id);
++            uint32_t byte_id = get_dot_begin(&label->text[line_start], lv_area_get_width(&txt_coords),
++                                             font, &attributes);
+ 
+             /*Save letters under the dots and replace them with dots*/
+-            lv_label_set_dots(obj, byte_id);
++            if(byte_id != LV_LABEL_DOT_BEGIN_INV) lv_label_set_dots(obj, line_start + byte_id);
+         }
+     }
+     else if(label->long_mode == LV_LABEL_LONG_MODE_CLIP || label->long_mode == LV_LABEL_LONG_MODE_WRAP) {
+@@ -1441,8 +1439,10 @@
+     LV_ASSERT(obj != NULL);
+     lv_label_t * label = (lv_label_t *)obj;
+     if(label->dot_begin != LV_LABEL_DOT_BEGIN_INV && !label->static_txt) {
+-        for(int i = 0; i < LV_LABEL_DOT_NUM + 1 && label->dot[i]; i++) {
++        /*Restore the end of a shorter text too*/
++        for(int i = 0; i < LV_LABEL_DOT_NUM + 1; i++) {
+             label->text[label->dot_begin + i] = label->dot[i];
++            if(label->dot[i] == '\0') break;
+         }
+     }
+     label->dot_begin = LV_LABEL_DOT_BEGIN_INV;
+@@ -1461,16 +1461,60 @@
+             return;
+         }
+ 
++        /*Make room for the dots after the last letters*/
++        if(dot_begin + LV_LABEL_DOT_NUM > lv_strlen(label->text)) {
++            char * text = lv_realloc(label->text, dot_begin + LV_LABEL_DOT_NUM + 1);
++            LV_ASSERT_MALLOC(text);
++            if(text == NULL) {
++                label->dot_begin = LV_LABEL_DOT_BEGIN_INV;
++                return;
++            }
++            label->text = text;
++        }
++
+         /*Save characters*/
+         lv_strncpy(label->dot, &label->text[dot_begin], LV_LABEL_DOT_NUM + 1);
+ 
+-        /*Overwrite up to LV_LABEL_DOT_NUM + 1 characters with dots and null terminator*/
+-        int i = 0;
+-        for(; i < LV_LABEL_DOT_NUM && label->text[dot_begin + i]; i++) {
+-            label->text[dot_begin + i] = '.';
++        /*Overwrite LV_LABEL_DOT_NUM + 1 characters with dots and null terminator*/
++        lv_memset(&label->text[dot_begin], '.', LV_LABEL_DOT_NUM);
++        label->text[dot_begin + LV_LABEL_DOT_NUM] = '\0';
++    }
++}
++
++/**
++ * Get where the dots begin on the last visible line: after the longest part of
++ * the line, without trailing spaces, that fits `max_width` with the dots
++ * @param line          the text from the start of the last visible line
++ * @param max_width     the width of the line
++ * @param font          the font of the text
++ * @param attributes    the letter space and flags of the text
++ * @return              the byte offset in `line`, or LV_LABEL_DOT_BEGIN_INV
++ */
++static uint32_t get_dot_begin(const char * line, int32_t max_width, const lv_font_t * font,
++                              const lv_text_attributes_t * attributes)
++{
++    uint32_t length = 0;
++    while(line[length] != '\0' && line[length] != '\n') length++;
++
++    char * candidate = lv_malloc(length + LV_LABEL_DOT_NUM + 1);
++    LV_ASSERT_MALLOC(candidate);
++    if(candidate == NULL) return LV_LABEL_DOT_BEGIN_INV;
++
++    uint32_t end = length;
++    while(end > 0) {
++        lv_text_encoded_prev(line, &end);
++        uint32_t kept = end;
++        while(kept > 0 && line[kept - 1] == ' ') kept--;
++        lv_memcpy(candidate, line, kept);
++        lv_memset(&candidate[kept], '.', LV_LABEL_DOT_NUM);
++        candidate[kept + LV_LABEL_DOT_NUM] = '\0';
++        if(lv_text_get_width(candidate, kept + LV_LABEL_DOT_NUM, font, attributes) <= max_width) {
++            end = kept;
++            break;
+         }
+-        label->text[dot_begin + i] = '\0';
+     }
++    lv_free(candidate);
++    return end;
+ }
+ 
+ static void set_ofs_x_anim(void * obj, int32_t v)

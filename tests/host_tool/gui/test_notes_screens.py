@@ -44,6 +44,35 @@ def notes_native(tmp_path_factory: pytest.TempPathFactory, ui_host_inputs: Path)
         yield directory
 
 
+# Caret height, its column on the empty first line, and its unchanged columns
+# before the final "c" of "abc" (saved) and of "abdc" (returned).
+CARETS = {
+    (128, 128): (15, 6, {"saved": 18, "returned": 24}),
+    (128, 160): (15, 6, {"saved": 18, "returned": 24}),
+    (176, 220): (16, 8, {"saved": 23, "returned": 31}),
+    (240, 320): (19, 10, {"saved": 27, "returned": 36}),
+    (320, 240): (19, 8, {"saved": 25, "returned": 34}),
+}
+
+
+def caret(
+    pixels: tuple[int, ...], width: int, height: int, ink: int, line: int
+) -> tuple[int, int]:
+    """Find the single column holding exactly one caret-high run of the ink colour."""
+    found = []
+    for x in range(width):
+        run = 0
+        for y in range(height + 1):
+            if y < height and pixels[y * width + x] == ink:
+                run += 1
+                continue
+            if run == line:
+                found.append((x, y - run))
+            run = 0
+    assert len(found) == 1, found
+    return found[0]
+
+
 @pytest.mark.parametrize("screen", [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)])
 @pytest.mark.parametrize("theme", ["light", "dark"])
 @pytest.mark.parametrize("locale", ["en", "ru"])
@@ -82,7 +111,7 @@ def test_actual_notes_save_retains_text_caret_and_editor_then_home_persists(
         "notes-screens: clean has no Save; real typing and menu Save retain editor/cursor; "
         "Home saves; reopen reads saved text\n"
     )
-    bar_heights = {(128, 128): 32, (128, 160): 32, (176, 220): 42, (240, 320): 52, (320, 240): 44}
+    bar_heights = {(128, 128): 32, (128, 160): 34, (176, 220): 43, (240, 320): 52, (320, 240): 41}
     surface_height = height - bar_heights[screen]
     states = ["clean", "dirty", "menu", "saved", "returned", "reopened"]
     frames = [(tmp_path / f"notes-{state}.rgb565").read_bytes() for state in states]
@@ -94,3 +123,21 @@ def test_actual_notes_save_retains_text_caret_and_editor_then_home_persists(
     assert frames[2] != frames[3]
     preferences = tmp_path / "state/fplinux/org.fplinux.notes/preferences"
     assert preferences.read_bytes() == b"note=abdc\n"
+    caret_line, start, inside = CARETS[screen]
+    # The active editor uses the same accent/accent_text pair as a focused Form field.
+    field, ink = (0x3B0E, 0xFFFF) if theme == "light" else (0xAE7B, 0x09A8)
+    for state, frame in zip(states, frames, strict=True):
+        if state == "menu":
+            continue
+        pixels = struct.unpack(f"<{width * surface_height}H", frame)
+        x, top = caret(pixels, width, surface_height, ink, caret_line)
+        if state == "clean":
+            assert x == start
+        elif state in inside:
+            assert x == inside[state], state
+        elif state in {"dirty", "reopened"}:
+            # The line ends after "abc" or "abdc": one free column, then ink.
+            gap = [pixels[(top + row) * width + x - 1] for row in range(caret_line)]
+            last = [pixels[(top + row) * width + x - 2] for row in range(caret_line)]
+            assert set(gap) == {field}, state
+            assert set(last) != {field}, state

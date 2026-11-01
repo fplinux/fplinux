@@ -21,9 +21,13 @@ Use an implicit List for navigation, an exclusive List for one selected value, a
 
 Form images keep their proportions inside the available width, including space for the scroll indicator. Their height leaves room for the complete multiline caption and any link or button frame. The runtime fits them again when the view changes size; the application can release the source after appending the image.
 
+Forms own navigation between interactive fields and the reading of plain content between them. Ordinary paragraphs and logos do not acquire an editing focus. At a text boundary, a navigation press completes the partly hidden end line; applications do not need to correct the scroll position. A focused field has an accent background, with the edited segment or text range distinguished inside it.
+
 For settings-style rows, call `fplinux_ui_list_set_value_details()` on an empty stored List before adding rows, then supply each current value as its detail. The runtime uses a shared right-aligned value column on landscape profiles and a second line on the other profiles. Ordinary descriptive details keep their usual layout. Calling it after adding rows returns `EBUSY`; another screen kind or a virtual List returns `EINVAL`.
 
 Stored rows can emphasize their primary text with `fplinux_ui_list_set_emphasis()` and show a status image at the right with `fplinux_ui_list_set_trailing_icon()`. The latter borrows its image until replaced or the row is deleted; a runtime-owned glyph remains valid until the UI closes. Use these row properties for a time and its status rather than drawing a separate list in the application.
+
+For a right-aligned value, use `fplinux_ui_list_set_trailing_value()`. For an adjustable level, use `fplinux_ui_list_set_level()` with its minimum, maximum and current value; the list shows the number below the caption and arrows on the focused row. The range must be nonempty, its span at most `INT32_MAX`, and the value within it. An icon, value and level share one trailing slot: setting one replaces the previous content, and a null value clears it. These operations apply to stored rows.
 
 Lists can also use a virtual data source when creating every row would waste memory. The runtime passes a full zeroed `fplinux_ui_virtual_row`; the synchronous provider fills its fields. Keep its context alive and notify the list when its data changes. Strings and icons must remain valid after the provider returns, until another row request or application callback; a local array is too short-lived. Providers only supply data: they must not mutate lists, delete objects or close the runtime, and navigation returns `EBUSY` while they run. API Demos includes ordinary and virtual lists, forms and item commands.
 
@@ -44,8 +48,6 @@ Add `struct fplinux_ui_command` values with application-owned IDs, a command typ
 Lower priority numbers choose keys first; equal priorities retain insertion order. A command attached to the focused item wins a tie with a screen command. Inside Options, Back comes last; the other commands keep their priority order. Back appears there when another action occupies its key, such as Clear in a nonempty text field. A screen with Back already on a soft key does not need another Back row. Reusing an ID on the same screen replaces that command. Labels are copied; callback context remains yours.
 
 An optional `short_label` gives a command a compact soft-key legend. The runtime first tries full labels, then the supplied short labels, then the ordinary Options assignment. Options keeps the full label. Both strings are copied; shortening does not change the command ID, priority or `keep_visible` behavior.
-
-Set `separator_before` on the first command of an Options group to draw a boundary above its row. The first menu row has no boundary. Grouping does not add selectable rows, change command priority or alter soft-key assignment.
 
 Use `fplinux_ui_list_set_select_label()` to name the centre action of an IMPLICIT or EXCLUSIVE List. Passing null restores the standard Select label. A MULTIPLE List keeps its Mark or Unmark action. The label does not disable input or change the selection policy; the application must handle any operation already in progress.
 
@@ -80,7 +82,7 @@ An Alert displays over the previous screen and temporarily prevents interaction 
 
 A timed notice closes without calling the command listener. For a busy or progress Alert, cancellation is an ordinary command with the same lifetime rule. Cancelling the Alert does not cancel application work by itself; the listener must stop the operation it owns.
 
-A long message scrolls while the title, progress indicator and footer stay visible. Use `fplinux_ui_alert_set_text()` when the message changes; replacing it starts reading from the top, while setting the same text keeps its position. Update a progress caption separately with `fplinux_ui_alert_set_footer()` to preserve that reading position. A zero maximum in `fplinux_ui_alert_set_progress()` shows a spinner; a positive maximum shows determinate progress. Keep the numerical caption accurate even when a very small nonzero amount needs a minimum visible segment.
+The title occupies one line above a divider. A title that does not fit scrolls once when the Alert becomes active, then rests with three dots. A long message scrolls while the title, progress indicator and footer stay visible. Use `fplinux_ui_alert_set_text()` when the message changes; replacing it starts reading from the top, while setting the same text keeps its position. Update a progress caption separately with `fplinux_ui_alert_set_footer()` to preserve that reading position. A zero maximum in `fplinux_ui_alert_set_progress()` shows a spinner; a positive maximum shows determinate progress. Keep the numerical caption accurate even when a very small nonzero amount needs a minimum visible segment.
 
 Use the common [storage-error and close-decision contract](/fplinux/develop/application-state/) for unsaved data. Do not invent a separate meaning for Retry, Stay or Discard.
 

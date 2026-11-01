@@ -65,6 +65,21 @@ FONT_SOURCES = (
     "lib/fplinux/fplinux-font.c",
     "include/fplinux/fplinux-font.h",
 )
+ACTIVITY_SOURCES = (
+    "lib/fplinux/fplinux-activity.c",
+    "include/fplinux/fplinux-activity.h",
+    "scripts/fplinux_activity.py",
+)
+STATUS_SCREEN_SOURCES = (
+    *ACTIVITY_SOURCES,
+    "lib/fplinux/fplinux-status-screen.c",
+    "include/fplinux/fplinux-status-screen.h",
+    "include/fplinux/fplinux-status-font.h",
+    "lib/fplinux/fplinux-ui-profile.json",
+    "scripts/fplinux_ui_fonts.py",
+    "scripts/fplinux_ui_profile.py",
+    "scripts/fplinux_status_assets.py",
+)
 BRIGHTNESS_CLIENT_SOURCES = (
     "lib/fplinux/fplinux-brightness-client.c",
     "include/fplinux/fplinux-brightness-client.h",
@@ -99,11 +114,11 @@ SHARED_APORT_SOURCES = {
     "fplinux-brand": (
         "alpine/aports/fplinux-icons/svgraster.py",
         "lib/fplinux/fplinux-ui-profile.json",
-        "LICENSES/CC-BY-ND-4.0.txt",
+        "LICENSES/GPL-2.0-only.txt",
     ),
     "fplinux-brightness-ui": (
         *UTF8_SOURCES,
-        *FONT_SOURCES,
+        *STATUS_SCREEN_SOURCES,
         *DRM_SESSION_SOURCES,
         *BRIGHTNESS_CLIENT_SOURCES,
         *INPUT_SESSION_SOURCES,
@@ -192,7 +207,7 @@ SHARED_APORT_SOURCES = {
         *CLOCK_SOURCES,
         *AUDIO_CLIENT_SOURCES,
         *DRM_SESSION_SOURCES,
-        *FONT_SOURCES,
+        *STATUS_SCREEN_SOURCES,
         *CLI_SOURCES,
         *SETTINGS_VALUES_SOURCES,
         *BRIGHTNESS_CLIENT_SOURCES,
@@ -249,6 +264,8 @@ SHARED_APORT_SOURCES = {
     ),
     "fplinux-ui": (
         *UTF8_SOURCES,
+        "include/fplinux/fplinux-activity.h",
+        "scripts/fplinux_activity.py",
         "include/fplinux/fplinux-storage.h",
         *AUDIO_CLIENT_SOURCES,
         *TEXT_INPUT_SOURCES,

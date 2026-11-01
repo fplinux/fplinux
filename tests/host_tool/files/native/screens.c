@@ -1117,7 +1117,7 @@ static void slow_folder(struct capture *capture)
 	puts("files-slow: the busy alert waits, then stays; Back or Cancel keeps the folder");
 }
 
-static void check_directory_menu_groups(const struct capture *capture)
+static void check_directory_menu_actions(const struct capture *capture)
 {
 	static const char *const actions[][2] = {
 		{ "Details", "Сведения" },
@@ -1129,14 +1129,11 @@ static void check_directory_menu_groups(const struct capture *capture)
 		{ "Help", "Справка" },
 		{ "Delete", "Удалить" },
 	};
-	static const bool separators[] = { false, false, true, false,
-					   false, false, true, true };
 
 	assert(capture->observed.menu_count == 8);
 	for (size_t i = 0; i < 8; ++i) {
 		assert(!strcmp(capture->observed.menu_items[i],
 			       word(capture, actions[i][0], actions[i][1])));
-		assert(capture->observed.menu_separators[i] == separators[i]);
 	}
 }
 
@@ -1189,6 +1186,21 @@ int main(int argc, char **argv)
 	assert(capture.observed.count == 24);
 	assert(capture.observed.glyphs > 0);
 	save_frame(&capture, "files-directory");
+	/* Every focused row down to the last entry and back to the first. */
+	for (size_t row = 1; row < 24; ++row) {
+		char name[48];
+
+		move_to(&capture, row);
+		snprintf(name, sizeof(name), "files-rows-down-%02zu", row);
+		save_frame(&capture, name);
+	}
+	for (size_t row = 23; row-- > 0;) {
+		char name[48];
+
+		move_up_to(&capture, row);
+		snprintf(name, sizeof(name), "files-rows-up-%02zu", row);
+		save_frame(&capture, name);
+	}
 	move_to(&capture, 1);
 	first = capture.observed.first_visible;
 	press(&capture, KEY_ENTER);
@@ -1204,7 +1216,7 @@ int main(int argc, char **argv)
 	press(&capture, KEY_ESC);
 	wait_label(&capture, word(&capture, "Details", "Сведения"), true);
 	assert(capture.observed.menu_glyphs > 0);
-	check_directory_menu_groups(&capture);
+	check_directory_menu_actions(&capture);
 	save_frame(&capture, "files-menu");
 	press(&capture, KEY_ESC);
 	option(&capture, word(&capture, "Find in folder", "Найти в папке"));

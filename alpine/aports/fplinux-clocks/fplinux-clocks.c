@@ -101,6 +101,7 @@ struct clock_screen {
 	lv_obj_t *date_label;
 	lv_obj_t *fraction_label;
 	struct fplinux_clock_face face;
+	struct fplinux_clock_digits digits;
 };
 
 struct alarm_draft {
@@ -1047,6 +1048,8 @@ static void digits_refresh(struct clock_app *app, struct clock_screen *view,
 		      fraction_height) /
 		     2;
 	lv_obj_set_pos(view->time_label, 0, digits_top);
+	fplinux_clock_digits_refresh(&view->digits, view->time_label, time,
+				     font, width, theme);
 	lv_obj_set_hidden(view->fraction_label, !fraction[0]);
 	if (fraction[0]) {
 		lv_label_set_text(view->fraction_label, fraction);
@@ -1088,6 +1091,8 @@ static void face_refresh(struct clock_app *app, struct clock_screen *view)
 	lv_obj_set_style_text_font(view->time_label, theme->font, 0);
 	lv_obj_set_size(view->time_label, width, line);
 	lv_obj_set_pos(view->time_label, 0, height - 3 * line);
+	fplinux_clock_digits_refresh(&view->digits, view->time_label, time,
+				     theme->font, width, theme);
 	lv_obj_set_pos(view->date_label, 0, height - 2 * line);
 	radius = (height - 3 * line - 2 * metrics->gap_small) / 2;
 	if (radius > (width - 2 * metrics->margin) / 2)

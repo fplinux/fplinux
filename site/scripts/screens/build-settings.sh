@@ -29,6 +29,10 @@ ui_host_build_application -I"$settings" \
 	-Wl,--wrap=fplinux_ui_open -Wl,--wrap=lv_display_flush_ready \
 	-Wl,--wrap=libintl_bindtextdomain \
 	-Wl,--wrap=fplinux_settings_read_os_name \
+	-Wl,--wrap=fplinux_settings_read_os_field \
+	-Wl,--wrap=fplinux_settings_read_line \
+	-Wl,--wrap=fplinux_settings_read_memory \
+	-Wl,--wrap=fplinux_settings_about_logo -Wl,--wrap=uname \
 	-Wl,--wrap=fplinux_language_load -Wl,--wrap=fplinux_language_list \
 	-o "$work/settings"
 

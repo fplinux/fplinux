@@ -327,13 +327,71 @@ size_t fplinux_ui_virtual_resize(struct fplinux_ui_virtual_window *window,
 }
 
 int32_t fplinux_ui_reveal_scroll(int32_t view_top, int32_t view_bottom,
-				 int32_t top, int32_t bottom)
+				 int32_t top, int32_t bottom, int32_t step)
 {
+	int32_t least = 0;
+	int32_t size;
+	int32_t most;
+
 	if (top < view_top || bottom - top > view_bottom - view_top)
-		return view_top - top;
-	if (bottom > view_bottom)
-		return view_bottom - bottom;
-	return 0;
+		least = view_top - top;
+	else if (bottom > view_bottom)
+		least = view_bottom - bottom;
+	size = least < 0 ? -least : least;
+	if (!least || 4 * size >= step)
+		return least;
+	/* The span's other edge may move up to its side of the view. */
+	most = least < 0 ? top - view_top : view_bottom - bottom;
+	if (most > step)
+		most = step;
+	if (most < size)
+		return least;
+	return least < 0 ? -most : most;
+}
+
+int32_t fplinux_ui_settle_scroll(int32_t from, int32_t to, int32_t last,
+				 int32_t step)
+{
+	if (last < 0)
+		last = 0;
+	if (to < 0)
+		to = 0;
+	if (to > last)
+		to = last;
+	if (to > from && 4 * (last - to) < step)
+		return last;
+	if (to < from && 4 * to < step)
+		return 0;
+	return to;
+}
+
+int32_t fplinux_ui_line_scroll(int32_t from, int32_t step, int32_t last,
+			       int32_t line)
+{
+	int64_t size = step < 0 ? -(int64_t)step : step;
+	int64_t to = (int64_t)from + step;
+
+	if (line < 1)
+		line = 1;
+	if (last < 0)
+		last = 0;
+	if (size == line && to > 0) {
+		if (step > 0)
+			to = (to + line - 1) / line * line;
+		else
+			to = to / line * line;
+	}
+	if (to < 0)
+		to = 0;
+	if (to > last)
+		to = last;
+	if (size == line) {
+		if (to > from && last - to < line)
+			to = last;
+		else if (to < from && to < line)
+			to = 0;
+	}
+	return (int32_t)to;
 }
 
 /* Translations are in the runtime's fplinux-ui catalogues. */

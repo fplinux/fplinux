@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import fcntl
+import json
 import os
 import shutil
 import sys
@@ -12,6 +13,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import fplinux_activity
 import pytest
 
 from tests import ROOT
@@ -20,6 +22,16 @@ from tests.process import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
+
+
+@pytest.fixture(scope="session")
+def ui_activity_masks(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Generate the same declared indicator data for direct linked consumers."""
+    directory = tmp_path_factory.mktemp("ui-activity")
+    tokens = json.loads((ROOT / "lib/fplinux/fplinux-ui-profile.json").read_text())
+    (directory / "fplinux-activity-masks.h").write_text(fplinux_activity.render(tokens))
+    (directory / "fplinux-ui-activity.h").write_text(fplinux_activity.render(tokens, lvgl=True))
+    return directory
 
 
 @contextmanager

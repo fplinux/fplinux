@@ -18,9 +18,16 @@ FILE *__real_fopen(const char *path, const char *mode);
 FILE *__wrap_fopen(const char *path, const char *mode)
 {
 	const char *release = getenv("FPLINUX_TEST_OS_RELEASE");
+	const char *model = getenv("FPLINUX_TEST_DEVICE_TREE_MODEL");
 
 	if (release && !strcmp(path, "/etc/os-release"))
 		return __real_fopen(release, mode);
+	if (!strcmp(path, "/proc/device-tree/model")) {
+		if (model)
+			return __real_fopen(model, mode);
+		errno = ENOENT;
+		return NULL;
+	}
 	return __real_fopen(path, mode);
 }
 
@@ -119,6 +126,14 @@ static size_t row_named(const struct fplinux_ui_screen *screen,
 			return i;
 	assert(!"requested visible row is missing");
 	return 0;
+}
+
+static bool has_row(const struct fplinux_ui_screen *screen, const char *text)
+{
+	for (size_t i = 0; i < screen->count; i++)
+		if (!strcmp(screen->rows[i].text, text))
+			return true;
+	return false;
 }
 
 static void open_row(struct fplinux_ui *ui, const char *text)
@@ -889,6 +904,11 @@ static void test_about(struct fplinux_ui *ui)
 	assert(form->rows[row_named(form, "System")].detail[0]);
 	assert(form->rows[row_named(form, "Kernel")].detail[0]);
 	assert(form->rows[row_named(form, "Free memory")].detail[0]);
+	if (!strcmp(scenario, "about-model"))
+		assert(!strcmp(form->rows[row_named(form, "Model")].detail,
+			       "Example Phone 42"));
+	else
+		assert(!has_row(form, "Model"));
 	for (size_t i = 0; i < form->count; i++)
 		if (!form->rows[i].image)
 			printf("%s: %s\n", form->rows[i].text,
@@ -1235,8 +1255,7 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		test_session_preview_cancel_preserves_retry(ui);
 	else if (session_boundary)
 		test_choice_home_before_request(ui, !strcmp(scenario, "theme"));
-	else if (!strcmp(scenario, "about") ||
-		 !strcmp(scenario, "about-missing-logo"))
+	else if (!strncmp(scenario, "about", 5))
 		test_about(ui);
 	else if (!strncmp(scenario, "date-save-", 10))
 		test_date_save_retains_draft(ui, scenario + 10);
@@ -1829,8 +1848,7 @@ int main(int argc, char **argv)
 	assert(setenv("TZ", "UTC", 1) == 0);
 	tzset();
 	scenario = argv[1];
-	if (!strcmp(scenario, "about") ||
-	    !strcmp(scenario, "about-missing-logo")) {
+	if (!strncmp(scenario, "about", 5)) {
 		assert(argc == 5);
 		selected_profile = atoi(argv[2]);
 		assert(selected_profile >= 0 && selected_profile < 5);

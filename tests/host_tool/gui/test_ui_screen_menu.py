@@ -18,7 +18,9 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 @pytest.fixture(scope="module")
-def screen_menu_consumer(tmp_path_factory: pytest.TempPathFactory) -> Path:
+def screen_menu_consumer(
+    tmp_path_factory: pytest.TempPathFactory, ui_activity_masks: Path
+) -> Path:
     """Link actual command allocation with controlled transport and image resources."""
     executable = tmp_path_factory.mktemp("screen-menu") / "screen-menu"
     run_process(
@@ -30,6 +32,7 @@ def screen_menu_consumer(tmp_path_factory: pytest.TempPathFactory) -> Path:
             "-Werror",
             "-I",
             str(ROOT / "include/fplinux"),
+            f"-I{ui_activity_masks}",
             "-isystem",
             "/opt/quality/include",
             f'-DLV_CONF_PATH="{ROOT / "alpine/aports/fplinux-lvgl/lv_conf.h"}"',

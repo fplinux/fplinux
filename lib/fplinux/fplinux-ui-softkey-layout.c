@@ -2,8 +2,6 @@
 #include "fplinux-ui-softkey-layout.h"
 
 #include <stdbool.h>
-#include <stdio.h>
-#include <string.h>
 
 void fplinux_softkey_layout(int bar_width, int margin, int gap,
 			    const int widths[3],
@@ -55,38 +53,4 @@ void fplinux_softkey_layout(int bar_width, int margin, int gap,
 	boxes[2] =
 		(struct fplinux_softkey_box){ bar_width - margin - allotted[2],
 					      allotted[2] };
-}
-
-/* The start of the code point before end, at least text. */
-static const char *previous_codepoint(const char *text, const char *end)
-{
-	if (end > text)
-		--end;
-	while (end > text && ((unsigned char)*end & 0xc0) == 0x80)
-		--end;
-	return end;
-}
-
-void fplinux_softkey_fit_text(const char *text, int width,
-			      fplinux_softkey_measure_fn measure, void *context,
-			      char *result, size_t capacity)
-{
-	static const char ellipsis[] = "\xe2\x80\xa6";
-	const char *end = text + strlen(text);
-
-	if (!capacity)
-		return;
-	snprintf(result, capacity, "%s", text);
-	if (!text[0] || measure(result, context) <= width)
-		return;
-	while (end > text) {
-		end = previous_codepoint(text, end);
-		while (end > text && end[-1] == ' ')
-			--end;
-		snprintf(result, capacity, "%.*s%s", (int)(end - text), text,
-			 ellipsis);
-		if (measure(result, context) <= width)
-			return;
-	}
-	snprintf(result, capacity, "%s", ellipsis);
 }

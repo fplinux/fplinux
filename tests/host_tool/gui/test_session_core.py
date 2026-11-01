@@ -253,7 +253,7 @@ def test_session_manager_host_behavior(session_core_harness: Path, scenario: str
 
 @pytest.mark.parametrize(
     ("width", "height", "top", "app_height"),
-    [(128, 160, 16, 128), (240, 320, 20, 268), (320, 240, 20, 196)],
+    [(128, 160, 16, 126), (240, 320, 20, 268), (320, 240, 19, 199)],
 )
 def test_session_layout_assigns_profile_surface_box(
     session_core_harness: Path, width: int, height: int, top: int, app_height: int

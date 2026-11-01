@@ -21,6 +21,7 @@
 #include "fplinux-audio-protocol.h"
 #include "fplinux-language.h"
 #include "fplinux-pixman-buffer.h"
+#include "fplinux-status-screen.h"
 #include "fplinux-ui-profile.h"
 #include "fplinux-weston-presentation.h"
 #include "session-core.h"
@@ -90,6 +91,7 @@ struct phone_shell {
 	unsigned int spinner_phase;
 	int spinner_size;
 	int spinner_width;
+	uint32_t spinner_track_rgb;
 	uint32_t spinner_rgb;
 	int launch_width;
 	int launch_height;
@@ -392,7 +394,8 @@ static void show_startup_surface(struct phone_shell *shell,
 		return;
 	}
 	position.c.x += (output->width - size) / 2;
-	position.c.y += (output->height - size) / 2;
+	position.c.y += (int)fplinux_status_mark_top(
+		(unsigned int)output->height, (unsigned int)size);
 	if (!create_launch_surface(shell, &shell->startup_mark, PIXMAN_r5g6b5,
 				   shell->startup_frame.pixels, size, size,
 				   size * 2, position,
@@ -438,14 +441,15 @@ static int animate_launch_spinner(void *context)
 	++shell->spinner_phase;
 	fplinux_launch_spinner_draw(shell->spinner_pixels, shell->spinner_size,
 				    shell->spinner_width, shell->spinner_phase,
-				    shell->spinner_rgb);
+				    shell->spinner_rgb,
+				    shell->spinner_track_rgb);
 	/* Content damage covers only this tiny surface, never the retained card. */
 	pixman_region32_union_rect(&shell->launch_spinner.surface->damage,
 				   &shell->launch_spinner.surface->damage, 0, 0,
 				   shell->spinner_size, shell->spinner_size);
 	weston_view_schedule_repaint(shell->launch_spinner.view);
 	wl_event_source_timer_update(shell->spinner_timer,
-				     FPLINUX_LAUNCH_SPINNER_MS);
+				     FPLINUX_STATUS_ACTIVITY_STEP_MS);
 	return 0;
 }
 
@@ -541,6 +545,8 @@ static void update_launch_surface(struct phone_shell *shell,
 	shell->spinner_width = profile->spinner_width;
 	shell->spinner_rgb =
 		fplinux_ui_theme_spec(theme)->rgb[FPLINUX_UI_COLOUR_FOCUS];
+	shell->spinner_track_rgb =
+		fplinux_ui_theme_spec(theme)->rgb[FPLINUX_UI_COLOUR_BORDER];
 	body_height = output->height - profile->status_height -
 		      profile->softkey_height;
 	position = output->pos;
@@ -550,7 +556,7 @@ static void update_launch_surface(struct phone_shell *shell,
 	if (fplinux_launch_spinner_draw(
 		    shell->spinner_pixels, shell->spinner_size,
 		    shell->spinner_width, shell->spinner_phase,
-		    shell->spinner_rgb) &&
+		    shell->spinner_rgb, shell->spinner_track_rgb) &&
 	    create_launch_surface(shell, &shell->launch_spinner,
 				  PIXMAN_a8r8g8b8, shell->spinner_pixels,
 				  shell->spinner_size, shell->spinner_size,
@@ -559,8 +565,9 @@ static void update_launch_surface(struct phone_shell *shell,
 		shell->spinner_timer = wl_event_loop_add_timer(
 			shell->loop, animate_launch_spinner, shell);
 		if (shell->spinner_timer)
-			wl_event_source_timer_update(shell->spinner_timer,
-						     FPLINUX_LAUNCH_SPINNER_MS);
+			wl_event_source_timer_update(
+				shell->spinner_timer,
+				FPLINUX_STATUS_ACTIVITY_STEP_MS);
 	}
 	shell->launch_visible = shell->launch_card.view ||
 				shell->launch_background ||

@@ -12,6 +12,13 @@ import pytest
 
 from tests import ROOT
 from tests.c_harness import c_build_directory, compile_c
+from tests.host_tool.gui.frame_pixels import (
+    assert_hands_pivot_on_centre,
+    measure_dial,
+    pixel,
+    rgb565,
+)
+from tests.host_tool.gui.list_rows import ListArea, frame_pixels, sequence_faults
 from tests.host_tool.gui.png_capture import png_pixels
 from tests.process import run_process
 
@@ -19,6 +26,86 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 SCREENS = ROOT / "site/scripts/screens"
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_actual_alarm_time_focus_and_editing_are_visible(
+    clocks_native: Path, tmp_path: Path, theme: str
+) -> None:
+    """The selected Time field receives OK and is visibly distinct before editing."""
+    width, height = 320, 240
+    result = run_process(
+        [
+            str(clocks_native / "clocks-screens"),
+            str(width),
+            str(height),
+            str(clocks_native / "clocks"),
+            str(SCREENS / "clocks-keyboard.xkb"),
+            str(tmp_path / "session.sock"),
+            str(tmp_path),
+            "alarm-focus",
+        ],
+        name=f"observe actual alarm focus and OK in {theme}",
+        env={
+            "FPLINUX_CLOCKS_TEST_THEME": theme,
+            "FPLINUX_CLOCKS_LANGUAGE_DIR": str(ROOT / "alpine/aports/fplinux-language"),
+        },
+        timeout=20,
+    )
+    (tmp_path / "capture.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+    log_root = os.environ.get("FPLINUX_LOG_ROOT")
+    if log_root:
+        shutil.copytree(
+            tmp_path,
+            Path(log_root) / f"clocks-alarm-focus-{theme}",
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("session.sock"),
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "alarm-focus: Time receives OK; Repeat receives Down" in result.stdout
+    bounds = next(line for line in result.stdout.splitlines() if line.startswith("time-frame:"))
+    left, top, right, bottom = map(int, bounds.split()[1:])
+    assert 0 <= left < right < width
+    assert 0 <= top < bottom < height
+    frames = {
+        name: frame_pixels((tmp_path / f"alarm-time-{name}.rgb565").read_bytes(), width)
+        for name in ("focused", "unfocused", "editing")
+    }
+    # Ignore the existing two-pixel frame: focus must also be clear inside it.
+    interior = [(x, y) for y in range(top + 3, bottom - 2) for x in range(left + 3, right - 2)]
+    assert interior
+    changed = sum(
+        frames["focused"][y * width + x] != frames["unfocused"][y * width + x] for x, y in interior
+    )
+    assert changed >= len(interior) // 10, (
+        f"only {changed}/{len(interior)} interior pixels changed"
+    )
+
+    def colour_distance(first: int, second: int) -> int:
+        return (
+            abs((first >> 11) - (second >> 11)) * 8
+            + abs(((first >> 5) & 63) - ((second >> 5) & 63)) * 4
+            + abs((first & 31) - (second & 31)) * 8
+        )
+
+    # A selected two-digit segment needs a visible area, not one changed pixel.
+    segment_pixels = sum(
+        colour_distance(frames["editing"][y * width + x], frames["focused"][y * width + x]) >= 192
+        for x, y in interior
+    )
+    assert segment_pixels >= 100, f"only {segment_pixels} high-contrast segment pixels"
+
+
+# Title band, row pitch and status plus soft-key bars of the Clock root:
+# value rows use the detail pitch, landscape the ordinary one with a right
+# value column.
+ROOT_ROWS = {
+    (128, 128): (25, 36, 32),
+    (128, 160): (22, 35, 34),
+    (176, 220): (26, 38, 43),
+    (240, 320): (28, 43, 52),
+    (320, 240): (28, 32, 41),
+}
 CAPTURE_STATES = (
     "clocks-home",
     "clocks-digital",
@@ -393,7 +480,7 @@ def test_actual_clocks_timer_wakes_only_for_visible_work_and_request_timeout(
 
 @pytest.mark.parametrize(
     ("suffix", "surface"),
-    [("-128x160", (128, 128)), ("", (240, 268)), ("-320x240", (320, 196))],
+    [("-128x160", (128, 126)), ("", (240, 268)), ("-320x240", (320, 199))],
 )
 def test_actual_clocks_forms_requests_lifecycle_and_rendering_at_each_profile(
     clocks_screens: tuple[Path, str],
@@ -470,7 +557,7 @@ def test_actual_clocks_forms_requests_lifecycle_and_rendering_at_each_profile(
 def test_actual_clocks_root_values_fit_and_share_a_landscape_column(
     clocks_native: Path, tmp_path: Path, screen: tuple[int, int], locale: str, theme: str
 ) -> None:
-    """Actual glyph rows show controlled current clocks within measured row bounds."""
+    """Actual glyph rows show current clocks in bounds and scroll by whole or real part rows."""
     width, height = screen
     result = run_process(
         [
@@ -505,3 +592,92 @@ def test_actual_clocks_root_values_fit_and_share_a_landscape_column(
         "clocks-root-values: real glyphs and current alarm, timer, stopwatch and offset values "
         "fit; landscape shares a right column"
     )
+    band, pitch, bars = ROOT_ROWS[screen]
+    area = ListArea(
+        width=width,
+        top=band,
+        bottom=height - bars,
+        pitch=pitch,
+        edge=(0, 2),
+        divider=0xBE39 if theme == "light" else 0x3A29,
+        highlight=0x3B0E if theme == "light" else 0xAE7B,
+    )
+    frames = {
+        name: frame_pixels((tmp_path / f"clocks-root-{name}.rgb565").read_bytes(), width)
+        for name in ("alarms", "timer", "stopwatch", "world")
+    }
+    assert sequence_faults(frames, area) == []
+
+
+@pytest.mark.parametrize(
+    "screen",
+    [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)],
+    ids=["128-128", "128-160", "176-220", "240-320", "320-240"],
+)
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_actual_clock_face_hands_pivot_on_the_dial_centre(
+    clocks_native: Path, tmp_path: Path, screen: tuple[int, int], theme: str
+) -> None:
+    """At 00:00:00 the real face's upright hands straddle the ring's centre.
+
+    The 2 px hour and minute hands take the two middle columns and end on the
+    centre row; the 1 px second hand takes the column before the centre.
+    """
+    width, height = screen
+    result = run_process(
+        [
+            str(clocks_native / "clocks-screens"),
+            str(width),
+            str(height),
+            str(clocks_native / "clocks"),
+            str(SCREENS / "clocks-keyboard.xkb"),
+            str(tmp_path / "session.sock"),
+            str(tmp_path),
+            "analog-face",
+        ],
+        name=f"capture the actual Clock face at {width}x{height} in {theme}",
+        env={"FPLINUX_CLOCKS_TEST_THEME": theme},
+        timeout=20,
+    )
+    (tmp_path / "capture.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+    log_root = os.environ.get("FPLINUX_LOG_ROOT")
+    if log_root:
+        shutil.copytree(
+            tmp_path,
+            Path(log_root) / f"clocks-analog-face-{width}x{height}-{theme}",
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("session.sock"),
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    size = next(
+        line.split(": ")[1]
+        for line in result.stdout.splitlines()
+        if line.startswith("clocks-analog:")
+    )
+    frame_width = int(size.split("x")[0])
+    background, ink, second = {
+        "light": ("#F7F7F7", "#181818", "#A55D00"),
+        "dark": ("#101010", "#DEDFDE", "#EFAA52"),
+    }[theme]
+    frame = (tmp_path / "clocks-analog.rgb565").read_bytes()
+    rows = len(frame) // (2 * frame_width)
+    # The content starts at the first background row below the title band.
+    content_top = next(
+        y
+        for y in range(rows)
+        if all(pixel(frame, frame_width, x, y) == rgb565(background) for x in range(frame_width))
+    )
+    dial = measure_dial(frame, frame_width, content_top, rgb565(background), rgb565(second))
+    assert_hands_pivot_on_centre(frame, frame_width, dial, rgb565(ink))
+    digital = (tmp_path / "clocks-digital.rgb565").read_bytes()
+    brand = [
+        (x, y)
+        for y in range(content_top, rows)
+        for x in range(frame_width)
+        if pixel(digital, frame_width, x, y) == rgb565(second)
+    ]
+    assert brand
+    columns = sorted({x for x, _ in brand})
+    assert columns[0] < frame_width // 2 < columns[-1]
+    assert any(columns[index + 1] - columns[index] > 1 for index in range(len(columns) - 1))
+    assert max(y for _, y in brand) - min(y for _, y in brand) < 25

@@ -351,6 +351,22 @@ static void collect_labels(lv_obj_t *object,
 			{ "World clock", "Мировое время" },
 		};
 
+		if (!strcmp(text, ":"))
+			return;
+		if (!strcmp(text, "Time") && observation->time_fields) {
+			lv_obj_t *box = lv_obj_get_parent(object);
+			lv_obj_t *frame = lv_obj_get_child(box, 1);
+			lv_area_t area;
+
+			if (frame) {
+				lv_obj_get_coords(frame, &area);
+				observation->time_frame_left = area.x1;
+				observation->time_frame_top = area.y1;
+				observation->time_frame_right = area.x2;
+				observation->time_frame_bottom = area.y2;
+			}
+		}
+
 		for (size_t index = 0; index < 4; ++index)
 			if (!strcmp(text, roots[index][0]) ||
 			    !strcmp(text, roots[index][1]))

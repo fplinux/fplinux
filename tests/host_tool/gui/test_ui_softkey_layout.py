@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Soft-key geometry and UTF-8 fitting with a controlled text measurer."""
+"""Soft-key geometry from natural legend widths."""
 
 from pathlib import Path
 
@@ -35,12 +35,11 @@ def softkey_layout(tmp_path: Path) -> Path:
     return executable
 
 
-@pytest.mark.parametrize("scenario", ["layout", "fitting"])
-def test_softkey_geometry_and_utf8_output(softkey_layout: Path, scenario: str) -> None:
-    """Legends retain their slots and shortened text ends at code points."""
+def test_softkey_slots_keep_short_legends_and_share_the_rest(softkey_layout: Path) -> None:
+    """Narrow legends keep their widths; long ones share the room left in the bar."""
     run_process(
-        [str(softkey_layout), scenario],
-        name=f"run soft-key {scenario}",
+        [str(softkey_layout), "layout"],
+        name="run soft-key layout",
         timeout=10,
         check=True,
     )

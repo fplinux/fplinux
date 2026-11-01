@@ -169,6 +169,48 @@ def test_settings_about_keeps_runtime_facts_and_back_when_logo_is_missing(
     assert result.stderr.startswith(f"fplinux-settings: {logo}: ")
 
 
+@pytest.mark.parametrize(
+    ("model_bytes", "expected_model"),
+    [
+        (b"Example Phone 42\0", "Example Phone 42"),
+        (None, None),
+        (b"", None),
+    ],
+    ids=["present", "missing", "empty"],
+)
+def test_settings_about_shows_only_a_nonempty_device_tree_model(
+    settings_app: Path,
+    tmp_path: Path,
+    model_bytes: bytes | None,
+    expected_model: str | None,
+) -> None:
+    environment = os.environ.copy()
+    environment.pop("FPLINUX_TEST_DEVICE_TREE_MODEL", None)
+    scenario = "about-model" if expected_model else "about-model-absent"
+    if model_bytes is not None:
+        model_path = tmp_path / "device-tree-model"
+        model_path.write_bytes(model_bytes)
+        environment["FPLINUX_TEST_DEVICE_TREE_MODEL"] = str(model_path)
+    result = run_process(
+        [
+            str(settings_app),
+            scenario,
+            "0",
+            "light",
+            "/usr/share/fplinux/brand/mark-light-32.png",
+        ],
+        name=f"Settings About with {expected_model or 'no device-tree model'}",
+        timeout=10,
+        env=environment,
+        check=True,
+    )
+    facts = dict(line.split(": ", 1) for line in result.stdout.splitlines()[:-1])
+    if expected_model:
+        assert facts["Model"] == expected_model
+    else:
+        assert "Model" not in facts
+
+
 def test_settings_russian_catalogue_translates_about_labels(tmp_path: Path) -> None:
     """The compiled installed catalogue supplies the About page's Russian labels."""
     catalogue = tmp_path / "ru.mo"
@@ -189,6 +231,7 @@ def test_settings_russian_catalogue_translates_about_labels(tmp_path: Path) -> N
     assert russian.gettext("About") == "О системе"  # noqa: RUF001 -- intentional Russian preposition.
     assert russian.gettext("System") == "Система"
     assert russian.gettext("Build") == "Сборка"
+    assert russian.gettext("Model") == "Модель"
     assert russian.gettext("Kernel") == "Ядро"
     assert russian.gettext("Free memory") == "Свободная память"
     assert russian.gettext("%s / %s\N{NO-BREAK SPACE}MiB") == "%s / %s\N{NO-BREAK SPACE}МиБ"

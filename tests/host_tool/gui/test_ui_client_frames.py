@@ -18,7 +18,9 @@ if TYPE_CHECKING:
 
 @pytest.fixture(scope="module")
 def client_frames(
-    tmp_path_factory: pytest.TempPathFactory, lvgl_library: tuple[Path, Path]
+    tmp_path_factory: pytest.TempPathFactory,
+    lvgl_library: tuple[Path, Path],
+    ui_activity_masks: Path,
 ) -> Path:
     """Link the actual UI library and renderer against real Wayland libraries."""
     directory = tmp_path_factory.mktemp("ui-client-frames")
@@ -85,6 +87,7 @@ def client_frames(
             "-DLV_LVGL_H_INCLUDE_SYSTEM",
             f'-DLV_CONF_PATH="{ROOT / "alpine/aports/fplinux-lvgl/lv_conf.h"}"',
             f"-I{ROOT / 'include/fplinux'}",
+            f"-I{ui_activity_masks}",
             f"-I{ROOT / 'site/scripts/screens'}",
             f"-I{directory}",
             str(ROOT / "tests/host_tool/gui/ui-client-frames.c"),

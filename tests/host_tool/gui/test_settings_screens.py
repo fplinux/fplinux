@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -12,12 +13,87 @@ import pytest
 
 from tests import ROOT
 from tests.c_harness import c_build_directory
+from tests.host_tool.gui.list_rows import ListArea, frame_pixels, sequence_faults
 from tests.process import run_process
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
 SCREENS = ROOT / "site/scripts/screens"
+# Title band, value row pitch and status plus soft-key bars of each profile:
+# a value under its label takes the detail pitch, one beside it in landscape
+# the ordinary pitch.
+ROOT_ROWS = {
+    (128, 128): (25, 36, 32),
+    (128, 160): (22, 35, 34),
+    (176, 220): (26, 38, 43),
+    (240, 320): (28, 43, 52),
+    (320, 240): (28, 32, 41),
+}
+
+
+def test_actual_settings_about_never_leaves_the_last_line_partly_hidden(
+    settings_native: Path, tmp_path: Path
+) -> None:
+    """Scroll the real About form through the end on the landscape profile."""
+    source = ROOT / "alpine/aports/fplinux-brand"
+    for name in (
+        "generate-brand.py",
+        "fplinux-mark-light.svg",
+        "fplinux-mark-dark.svg",
+        "fplinux-lockup-light.svg",
+        "fplinux-lockup-dark.svg",
+    ):
+        shutil.copyfile(source / name, tmp_path / name)
+    shutil.copyfile(ROOT / "alpine/aports/fplinux-icons/svgraster.py", tmp_path / "svgraster.py")
+    brand = tmp_path / "brand"
+    run_process(
+        [
+            sys.executable,
+            str(tmp_path / "generate-brand.py"),
+            "--profile",
+            str(ROOT / "lib/fplinux/fplinux-ui-profile.json"),
+            "--out",
+            str(brand),
+        ],
+        name="generate the installed About logo from the real brand masters",
+        env=os.environ | {"NODE_PATH": "/opt/quality/node-tools/node_modules"},
+        timeout=30,
+        check=True,
+    )
+    result = run_process(
+        [
+            str(settings_native / "settings-screens"),
+            str(settings_native / "settings"),
+            str(SCREENS / "keypad.xkb"),
+            str(tmp_path / "session.sock"),
+            str(tmp_path),
+            str(ROOT / "alpine/aports/fplinux-language"),
+            "about-edges",
+        ],
+        name="measure actual Settings About scrolling at 320x240",
+        env={
+            "FPLINUX_SETTINGS_TEST_WIDTH": "320",
+            "FPLINUX_SETTINGS_TEST_HEIGHT": "240",
+            "FPLINUX_SETTINGS_TEST_LOCALE": "en",
+            "FPLINUX_SETTINGS_TEST_THEME": "dark",
+            "FPLINUX_SETTINGS_TEST_SYSTEM_NAME": "FPLinux Alpine system",
+            "FPLINUX_SETTINGS_TEST_ABOUT": "1",
+            "FPLINUX_SETTINGS_TEST_BRAND": str(brand),
+        },
+        timeout=20,
+    )
+    (tmp_path / "capture.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+    log_root = os.environ.get("FPLINUX_LOG_ROOT")
+    if log_root:
+        shutil.copytree(
+            tmp_path,
+            Path(log_root) / "settings-about-edges",
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("session.sock"),
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "settings-about: last text line is whole on every downward step" in result.stdout
 
 
 @pytest.fixture(scope="module")
@@ -128,3 +204,21 @@ def test_actual_settings_root_values_fit_scroll_and_follow_current_replies(
         "settings-root-values: real glyphs and current values fit; landscape shares a right "
         "column; long system name scrolls; replies refresh retained values\n"
     )
+    # Below the title band, value rows at the detail pitch fill the surface
+    # less its status and soft-key bars.
+    band, pitch, bars = ROOT_ROWS[screen]
+    area = ListArea(
+        width=width,
+        top=band,
+        bottom=height - bars,
+        pitch=pitch,
+        edge=(0, 2),
+        divider=0xBE39 if theme == "light" else 0x3A29,
+        highlight=0x3B0E if theme == "light" else 0xAE7B,
+    )
+    names = ("display", "language", "input", "about", "up-input", "up-language", "up-display")
+    frames = {
+        name: frame_pixels((tmp_path / f"settings-root-{name}.rgb565").read_bytes(), width)
+        for name in names
+    }
+    assert sequence_faults(frames, area) == []
