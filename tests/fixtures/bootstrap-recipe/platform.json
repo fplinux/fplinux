@@ -35,12 +35,26 @@
       {
         "source": "bootstrap/fplinux-boot-screen",
         "destination": "fplinux-boot-screen"
-      }
-    ],
-    "linux_copies": [
+      },
       {
-        "source": "lib/fonts/font_sample.c",
-        "destination": "fplinux-boot-screen/font_sample.c"
+        "source": "include/fplinux/fplinux-status-font.h",
+        "destination": "fplinux-status-font.h"
+      },
+      {
+        "source": "lib/fplinux/fplinux-ui-profile.json",
+        "destination": "fplinux-status/fplinux-ui-profile.json"
+      },
+      {
+        "source": "scripts/fplinux_status_assets.py",
+        "destination": "fplinux_status_assets.py"
+      },
+      {
+        "source": "alpine/aports/fplinux-brand/generate-brand.py",
+        "destination": "fplinux-status/generate-brand.py"
+      },
+      {
+        "source": "alpine/aports/fplinux-brand/fplinux-mark-dark.svg",
+        "destination": "fplinux-status/brand/fplinux-mark-dark.svg"
       }
     ]
   }

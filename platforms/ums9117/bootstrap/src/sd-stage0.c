@@ -22,22 +22,6 @@ extern unsigned char __bss_end[];
 void ums9117_uboot_handoff(uint32_t entry, uint32_t handoff)
 	__attribute__((noreturn));
 
-enum sd_stage {
-	SD_STAGE_BOARD_INIT = 0,
-	SD_STAGE_DISPLAY,
-	SD_STAGE_TIMER,
-	SD_STAGE_UBOOT,
-	SD_STAGE_MICROSD,
-	SD_STAGE_VERIFY,
-	SD_STAGE_LINUX,
-	SD_STAGE_COUNT,
-};
-
-static const char *const stage_labels[SD_STAGE_COUNT] = {
-	"BOARD INIT", "DISPLAY", "TIMER", "U-BOOT",
-	"MICROSD",    "VERIFY",	 "LINUX",
-};
-
 enum ums9117_sd_stage0_failure_code {
 	UMS9117_SD_STAGE0_FAILURE_DISPLAY_MEMORY = 3,
 	UMS9117_SD_STAGE0_FAILURE_BOOT_SCREEN,
@@ -49,12 +33,6 @@ enum ums9117_sd_stage0_failure_code {
 	UMS9117_SD_STAGE0_FAILURE_USB_HANDOFF,
 	UMS9117_SD_STAGE0_FAILURE_USB_RX_CLEANUP,
 	UMS9117_SD_STAGE0_FAILURE_USB_TX_CLEANUP,
-};
-
-static const struct fplinux_boot_screen_identity boot_identity = {
-	.brand = "FPLinux",
-	.model = FPLINUX_BOOTSTRAP_DISPLAY_NAME,
-	.mode = "MICROSD BOOT",
 };
 
 static struct fplinux_boot_screen boot_screen;
@@ -131,47 +109,6 @@ static void stage0_fail_without_transport(uint32_t code)
 
 static int stage0_checkpoint(uint32_t code, uint32_t value)
 {
-	char message[32];
-
-	switch (code) {
-	case FPLINUX_STAGE0_CHECKPOINT_UBOOT_READY:
-		(void)fplinux_boot_screen_set_stage(
-			&boot_screen, SD_STAGE_UBOOT, FPLINUX_BOOT_SCREEN_DONE);
-		(void)fplinux_boot_screen_set_stage(&boot_screen,
-						    SD_STAGE_MICROSD,
-						    FPLINUX_BOOT_SCREEN_ACTIVE);
-		(void)fplinux_boot_screen_set_note(&boot_screen,
-						   "KEEP USB CONNECTED");
-		strcpy(message, "READING MICROSD");
-		break;
-	case FPLINUX_STAGE0_CHECKPOINT_FIT_LOADED:
-		(void)fplinux_boot_screen_set_stage(&boot_screen,
-						    SD_STAGE_MICROSD,
-						    FPLINUX_BOOT_SCREEN_DONE);
-		(void)fplinux_boot_screen_set_stage(&boot_screen,
-						    SD_STAGE_VERIFY,
-						    FPLINUX_BOOT_SCREEN_ACTIVE);
-		sprintf(message, "VERIFYING SYSTEM %luK",
-			(unsigned long)(value >> 10));
-		break;
-	case FPLINUX_STAGE0_CHECKPOINT_LINUX_READY:
-		(void)fplinux_boot_screen_set_stage(&boot_screen,
-						    SD_STAGE_VERIFY,
-						    FPLINUX_BOOT_SCREEN_DONE);
-		(void)fplinux_boot_screen_set_stage(&boot_screen,
-						    SD_STAGE_LINUX,
-						    FPLINUX_BOOT_SCREEN_ACTIVE);
-		strcpy(message, "PREPARING LINUX");
-		break;
-	case FPLINUX_STAGE0_CHECKPOINT_USB_PREP:
-		strcpy(message, "PREPARING USB");
-		break;
-	default:
-		strcpy(message, "PREPARING LINUX");
-		break;
-	}
-	(void)fplinux_boot_screen_set_checkpoint(&boot_screen, message,
-						 FPLINUX_BOOT_SCREEN_ACTIVE);
 	fprintf(stderr,
 		"%s_UBOOT_STAGE0 event=checkpoint checkpoint=%lu detail=0x%08lx\n",
 		FPLINUX_BOOTSTRAP_RECORD_PREFIX, (unsigned long)code,
@@ -237,10 +174,6 @@ static void stage0_finalize_and_boot(uint32_t zimage_phys,
 		stage0_fail_without_transport(
 			UMS9117_SD_STAGE0_FAILURE_USB_TX_CLEANUP);
 	ums9117_bootstrap_cleanup_usb_dma_and_disconnect();
-	(void)fplinux_boot_screen_set_stage(&boot_screen, SD_STAGE_LINUX,
-					    FPLINUX_BOOT_SCREEN_DONE);
-	(void)fplinux_boot_screen_set_checkpoint(&boot_screen, "STARTING LINUX",
-						 FPLINUX_BOOT_SCREEN_DONE);
 	ums9117_bootstrap_handoff_to_linux(zimage_phys, dtb_phys);
 }
 
@@ -261,11 +194,10 @@ static size_t uboot_payload_size(void)
 
 void ums9117_sd_stage0_main(const struct ums9117_sd_stage0_board *board)
 {
-	struct fplinux_boot_screen_canvas canvas;
+	struct fplinux_status_canvas canvas;
 	struct ums9117_bootstrap_timer_result timer;
 	uint32_t ram_bytes = ums9117_bootstrap_ram_bytes();
 	size_t uboot_bytes = uboot_payload_size();
-	char note[48];
 	int has_display = board->display_width != 0 ||
 			  board->display_height != 0;
 
@@ -283,31 +215,23 @@ void ums9117_sd_stage0_main(const struct ums9117_sd_stage0_board *board)
 		canvas.width = boot_canvas.width;
 		canvas.height = boot_canvas.height;
 		canvas.context = &boot_canvas;
-		canvas.fill_rect = ums9117_boot_canvas_fill_rect;
+		canvas.fill = ums9117_boot_canvas_fill_rect;
 		canvas.present = ums9117_boot_canvas_present;
 	}
 
 	if (has_display) {
 		sys_start();
 		sys_framebuffer(boot_canvas.pixels);
-		if (fplinux_boot_screen_init(&boot_screen, &canvas,
-					     &boot_identity, stage_labels,
-					     SD_STAGE_COUNT) != 0)
+		if (fplinux_boot_screen_init(&boot_screen, &canvas) != 0)
 			stage0_fail(UMS9117_SD_STAGE0_FAILURE_BOOT_SCREEN, 0U);
 	}
-	(void)fplinux_boot_screen_set_stage(&boot_screen, SD_STAGE_BOARD_INIT,
-					    FPLINUX_BOOT_SCREEN_DONE);
 	if (boot_canvas.width != board->display_width ||
 	    boot_canvas.height != board->display_height)
 		stage0_fail(UMS9117_SD_STAGE0_FAILURE_DISPLAY_SIZE, 0U);
-	(void)fplinux_boot_screen_set_stage(&boot_screen, SD_STAGE_DISPLAY,
-					    FPLINUX_BOOT_SCREEN_DONE);
 
 	ums9117_bootstrap_enable_timer_gates(NULL);
 	if (!ums9117_bootstrap_probe_timer(&timer))
 		stage0_fail(UMS9117_SD_STAGE0_FAILURE_TIMER, 0U);
-	(void)fplinux_boot_screen_set_stage(&boot_screen, SD_STAGE_TIMER,
-					    FPLINUX_BOOT_SCREEN_DONE);
 
 	if (ram_bytes < FPLINUX_BOOT_LAYOUT_RAM_REQUIRED_BYTES ||
 	    !uboot_bytes ||
@@ -317,12 +241,6 @@ void ums9117_sd_stage0_main(const struct ums9117_sd_stage0_board *board)
 			    (uint32_t)uboot_bytes);
 	memcpy((void *)(uintptr_t)FPLINUX_BOOT_LAYOUT_UBOOT_LOAD_PHYS,
 	       uboot_payload_start, uboot_bytes);
-	(void)fplinux_boot_screen_set_stage(&boot_screen, SD_STAGE_UBOOT,
-					    FPLINUX_BOOT_SCREEN_ACTIVE);
-	sprintf(note, "U-BOOT %luK ENTRY %08lx",
-		(unsigned long)(uboot_bytes >> 10),
-		(unsigned long)FPLINUX_UBOOT_ENTRY_PHYS);
-	(void)fplinux_boot_screen_set_note(&boot_screen, note);
 
 	uboot_handoff.magic = FPLINUX_UBOOT_HANDOFF_MAGIC;
 	uboot_handoff.size = sizeof(uboot_handoff);

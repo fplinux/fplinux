@@ -5,17 +5,11 @@
 
 #include <stdint.h>
 
-#include "fplinux-boot-screen/boot-screen.h"
-
 struct ums9117_boot_board {
 	/* A 0x0 display selects a board without a boot screen. */
 	uint32_t display_width;
 	uint32_t display_height;
 };
-
-/* Paint a transient checkpoint line on the boot screen. */
-void ums9117_boot_checkpoint(const char *message,
-			     enum fplinux_boot_screen_status status);
 
 /* Record the failure, paint it on the boot screen, and halt. */
 void ums9117_boot_fail(uint32_t code, const char *message)

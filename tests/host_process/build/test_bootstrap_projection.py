@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Host consumers of generated bootstrap names, font and geometry."""
+"""Host consumers of generated bootstrap names, mode and geometry."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.parametrize(("kind", "mode"), [("linux", "linux"), ("uboot-stage0", "uboot")])
-def test_make_consumer_receives_selected_names_mode_and_font(
+def test_make_consumer_receives_selected_names_and_mode(
     tmp_path: Path, kind: str, mode: str
 ) -> None:
     """A synthetic Make consumer reads the selected settings for either bootstrap kind."""
@@ -28,7 +28,6 @@ def test_make_consumer_receives_selected_names_mode_and_font(
             "map": "obj/selected.map",
             "dtb_destination": "phone.dtb",
         },
-        "display": {"boot_font": "7x14"},
     }
     (tmp_path / "settings.make").write_bytes(bootstrap_settings(target))
     consumer = tmp_path / "consumer.make"
@@ -45,7 +44,6 @@ def test_make_consumer_receives_selected_names_mode_and_font(
         "obj/selected.map",
         "phone.dtb",
         mode,
-        "7x14",
     ]
 
 
@@ -76,6 +74,8 @@ def test_target_main_passes_selected_geometry_to_the_boot_runtime(
             str(tmp_path),
             "-I",
             str(ROOT / "bootstrap"),
+            "-I",
+            str(ROOT / "include/fplinux"),
             str(ROOT / "platforms/ums9117/target-template/bootstrap/main.c"),
             str(stub),
             "-o",

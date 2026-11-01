@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from fplinux_cli import common
+from fplinux_cli.alpine.sources import aport_sources
 from fplinux_cli.build import inputs as inputs_build
 from fplinux_cli.build import sources as sources_build
 from fplinux_cli.build.display import render_bootstrap_display
@@ -70,7 +72,7 @@ def effective_boot_layout(
 
 
 def bootstrap_settings(target_config: dict[str, Any]) -> bytes:
-    """Project output names, boot mode and font into the Make consumer."""
+    """Project output names and boot mode into the Make consumer."""
     bootstrap = target_config["bootstrap"]
     mode = "uboot" if bootstrap["kind"] == "uboot-stage0" else "linux"
     name = bootstrap["image"].removesuffix(".bin")
@@ -81,7 +83,6 @@ def bootstrap_settings(target_config: dict[str, Any]) -> bytes:
         f"override FPLINUX_BOOTSTRAP_MAP := {bootstrap['map']}\n"
         f"override FPLINUX_BOOTSTRAP_MODE := {mode}\n"
         f"override FPLINUX_BOOTSTRAP_DTB := {bootstrap['dtb_destination']}\n"
-        f"override FPLINUX_BOOT_FONT := {target_config['display']['boot_font']}\n"
     ).encode("ascii")
 
 
@@ -166,7 +167,6 @@ def bootstrap_recipe_digest(
     vendor_source = sources_build.source_lock_entry(
         sources, platform_bootstrap["vendor_source_lock"]
     )
-    linux_source = sources_build.source_lock_entry(sources, platform["linux"]["source_lock"])
     vendor_commit = vendor_source.get("commit")
     if not isinstance(vendor_commit, str) or not vendor_commit:
         fail("bootstrap vendor commit must be a non-empty string")
@@ -223,10 +223,14 @@ def bootstrap_recipe_digest(
                 "bootstrap vendor source",
             ),
         },
-        "linux_source": {
-            "version": linux_source["version"],
-            "sha256": sha256_value(linux_source.get("sha256"), "bootstrap Linux font source"),
-        },
+        "ui_font_sources": [
+            {
+                "id": item.id,
+                "algorithm": item.algorithm,
+                "checksum": item.checksum,
+            }
+            for item in aport_sources(common.ROOT, "fplinux-ui")
+        ],
         "generated": generated,
         "implementation": {
             name: sha256_file(path)

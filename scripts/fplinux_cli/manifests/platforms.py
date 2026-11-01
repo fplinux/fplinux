@@ -266,7 +266,6 @@ def _bootstrap(value: object) -> dict[str, Any]:
             "patches",
             "files",
             "shared_copies",
-            "linux_copies",
             "lcd_config_destination",
             "kernel_destination",
             "load_address",
@@ -285,7 +284,6 @@ def _bootstrap(value: object) -> dict[str, Any]:
     path_array(bootstrap.get("patches"), "platform bootstrap patches", allow_empty=True)
     path_array(bootstrap.get("files"), "platform bootstrap files")
     path_steps(bootstrap.get("shared_copies"), "platform bootstrap shared_copies")
-    path_steps(bootstrap.get("linux_copies"), "platform bootstrap linux_copies")
     relative_value(
         bootstrap.get("lcd_config_destination"), "platform bootstrap lcd_config_destination"
     )

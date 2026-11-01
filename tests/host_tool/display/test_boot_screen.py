@@ -1,130 +1,158 @@
 # SPDX-License-Identifier: GPL-2.0-only
-"""Linked host rendering checks for the target-selected bootstrap font."""
+"""The real bootstrap state adapter draws a static or failed frame."""
 
 from __future__ import annotations
 
-from types import MappingProxyType
+import json
+import os
+import struct
+import sys
 from typing import TYPE_CHECKING
 
+import fplinux_ui_profile
 import pytest
 
 from tests import ROOT
 from tests.c_harness import c_build_directory, compile_c
+from tests.host_tool.display.status_resources import generate
 from tests.process import run_process
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
+    from collections.abc import Iterator
     from pathlib import Path
 
-SCREEN = ROOT / "bootstrap/fplinux-boot-screen"
 
-
-class BootScreenFontTests:
-    """The same compiled glyph remains selected when the canvas width changes."""
-
-    @pytest.fixture(scope="class")
-    @classmethod
-    def executables(cls, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Mapping[int, Path]]:
-        """Build both selected-font variants once for this test group."""
-        with c_build_directory(tmp_path_factory, "boot-screen") as temporary:
-            executables = {}
-            for font in (6, 7):
-                executables[font] = temporary / f"boot-screen-{font}"
-                compile_c(
-                    executables[font],
-                    [
-                        "-std=c99",
-                        "-pedantic",
-                        "-Wall",
-                        "-Wextra",
-                        "-Werror",
-                        f"-DFPLINUX_BOOT_FONT={font}",
-                        "-I",
-                        str(SCREEN),
-                        str(ROOT / "tests/host_tool/display/fplinux-boot-screen.c"),
-                        str(SCREEN / "boot-screen.c"),
-                    ],
-                    name="compile selected boot font harness",
-                    check=True,
-                )
-            yield MappingProxyType(executables)
-
-    def test_uninitialized_screen_updates_leave_state_unchanged(
-        self, executables: Mapping[int, Path]
-    ) -> None:
-        """A caller without a display can report boot stages without initializing a canvas."""
-        result = run_process(
-            [str(executables[6]), "--uninitialized"],
-            name="update uninitialized boot screen",
-            timeout=10,
+@pytest.fixture(scope="module", params=["128x128", "128x160", "176x220", "240x320", "320x240"])
+def boot_screen(
+    request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory, ui_host_inputs: Path
+) -> Iterator[tuple[str, Path]]:
+    profile = str(request.param)
+    with c_build_directory(tmp_path_factory, f"boot-screen-{profile}") as directory:
+        fonts = generate(directory, ui_host_inputs, profile)
+        tokens = json.loads((ROOT / "lib/fplinux/fplinux-ui-profile.json").read_text())
+        generated = directory / "generated"
+        generated.mkdir()
+        (generated / "fplinux-status-profile.h").write_text(
+            fplinux_ui_profile.render_status(tokens, profile)
         )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert result.stdout == ""
+        run_process(
+            [
+                sys.executable,
+                str(ROOT / "alpine/aports/fplinux-brand/generate-brand.py"),
+                "--profile",
+                str(ROOT / "lib/fplinux/fplinux-ui-profile.json"),
+                "--boot-out",
+                str(directory),
+                "--screen",
+                profile,
+            ],
+            name=f"generate bootstrap brand for {profile}",
+            timeout=60,
+            env=os.environ
+            | {
+                "PYTHONPATH": str(ROOT / "alpine/aports/fplinux-icons"),
+                "NODE_PATH": "/opt/quality/node-tools/node_modules",
+            },
+            check=True,
+        )
+        executable = directory / "boot-screen"
+        compile_c(
+            executable,
+            [
+                "-std=c99",
+                "-pedantic",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                f"-I{directory}",
+                f"-I{ROOT / 'include/fplinux'}",
+                f"-I{ROOT / 'bootstrap/fplinux-boot-screen'}",
+                str(ROOT / "tests/host_tool/display/fplinux-boot-screen.c"),
+                str(ROOT / "bootstrap/fplinux-boot-screen/boot-screen.c"),
+                str(ROOT / "lib/fplinux/fplinux-status-screen.c"),
+                str(fonts),
+            ],
+            name="compile selected bootstrap status screen",
+        )
+        yield profile, executable
 
-    @pytest.mark.parametrize(
-        ("font", "glyph"),
-        [
-            pytest.param(
-                6, ("#....#", ".#..#.", "..##..", "..##..", ".#..#.", "#....#"), id="font-6"
-            ),
-            pytest.param(
-                7,
-                (
-                    "#.....#",
-                    ".#...#.",
-                    "..#.#..",
-                    "...#...",
-                    "...#...",
-                    "...#...",
-                    "...#...",
-                    "...#...",
-                    "...#...",
-                    "...#...",
-                    "...#...",
-                    "..#.#..",
-                    ".#...#.",
-                    "#.....#",
-                ),
-                id="font-7",
-            ),
-        ],
+
+def test_boot_and_failure_are_visible(boot_screen: tuple[str, Path], tmp_path: Path) -> None:
+    profile, executable = boot_screen
+    width, height = map(int, profile.split("x"))
+    images = []
+    for state in ("boot", "expected", "error", "error2"):
+        output = tmp_path / state
+        run_process(
+            [str(executable), str(width), str(height), state, str(output)],
+            name=f"render bootstrap {state} on {profile}",
+            timeout=10,
+            check=True,
+        )
+        images.append(struct.unpack(f"={width * height}H", output.read_bytes()))
+    boot, expected, error, other_error = images
+    assert boot == expected
+    assert boot != error
+    assert error != other_error
+    assert 0xE71B in boot  # Light centre of the shared boot mark.
+    mark_size = {"128x128": 48, "128x160": 64, "176x220": 80, "240x320": 96, "320x240": 96}[
+        profile
+    ]
+    mark_top = {"128x128": 27, "128x160": 32, "176x220": 48, "240x320": 80, "320x240": 48}[profile]
+    mark_pixels = [(i % width, i // width) for i, pixel in enumerate(boot) if pixel == 0xE71B]
+    assert all(mark_top <= y < mark_top + mark_size for _, y in mark_pixels)
+    assert any(pixel != 0x1082 for pixel in boot[width * (mark_top + mark_size) :])
+    assert all(pixel == 0x1082 for pixel in boot[: width * (mark_top - 1)])
+    assert 0xFDB5 in error  # Dark theme danger, without a full-width error bar.
+    assert (
+        max(error[y * width : (y + 1) * width].count(0xFDB5) for y in range(height)) < width // 2
     )
-    @pytest.mark.parametrize("character", ["\x01", "\x7f"], ids=["x01", "x7f"])
-    def test_selected_font_renders_its_glyph_on_both_canvas_sizes(
-        self, executables: Mapping[int, Path], font: int, glyph: tuple[str, ...], character: str
-    ) -> None:
-        """Synthetic glyph pixels distinguish 6x8 and 7x14 independently of layout."""
-        result = run_process(
-            [str(executables[font])],
-            name="render selected boot glyph",
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "MICROSD NOT FOUND OR UNREADABLE. POWER OFF AND CHECK THE CARD",
+        "FPLINUX.ITB NOT FOUND OR UNREADABLE. REWRITE THE BOOT CARD",
+    ],
+    ids=["card-error", "image-error"],
+)
+def test_boot_instructions_fit_and_remain_visible(
+    boot_screen: tuple[str, Path], tmp_path: Path, message: str
+) -> None:
+    profile, executable = boot_screen
+    width, height = map(int, profile.split("x"))
+    margin = {"128x128": 4, "128x160": 4, "176x220": 6, "240x320": 8, "320x240": 6}[profile]
+
+    def render(detail: str) -> tuple[int, ...]:
+        output = tmp_path / "frame"
+        run_process(
+            [
+                str(executable),
+                str(width),
+                str(height),
+                "error",
+                str(output),
+                detail,
+            ],
+            name=f"render error instruction on {profile}",
             timeout=10,
             check=True,
         )
-        frames = result.stdout.split("canvas ")[1:]
-        assert (len(frames)) == (2)
-        for frame in frames:
-            rectangles = [tuple(map(int, line.split())) for line in frame.splitlines()[1:]]
-            assert rectangles
-            assert all(width == height == 2 for _, _, width, height in rectangles)
-            left = min(x for x, _, _, _ in rectangles)
-            top = min(y for _, y, _, _ in rectangles)
-            pixels = {((x - left) // 2, (y - top) // 2) for x, y, _, _ in rectangles}
-            width = max(x for x, _ in pixels) + 1
-            rendered = tuple(
-                "".join("#" if (x, y) in pixels else "." for x in range(width))
-                for y in range(max(y for _, y in pixels) + 1)
-            )
-            assert (rendered) == (glyph)
-        question = run_process(
-            [str(executables[font]), "?"],
-            name="render ASCII replacement glyph",
-            timeout=10,
-            check=True,
-        ).stdout
-        replaced = run_process(
-            [str(executables[font]), character],
-            name="render character outside printable ASCII",
-            timeout=10,
-            check=True,
-        ).stdout
-        assert (replaced) == (question)
+        return struct.unpack(f"={width * height}H", output.read_bytes())
+
+    # Each successive word must add visible pixels in the instruction area.
+    previous = render("")
+    words = message.split()
+    for count, word in enumerate(words, start=1):
+        current = render(" ".join(words[:count]))
+        added = [
+            (index % width, index // width)
+            for index, (before, after) in enumerate(zip(previous, current, strict=True))
+            if before == 0x1082 and after != 0x1082
+        ]
+        assert added, f"{profile}: {word!r} has no visible pixels"
+        assert all(
+            margin <= x < width - margin and margin <= y < height - margin for x, y in added
+        )
+        previous = current

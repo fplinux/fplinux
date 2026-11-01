@@ -15,33 +15,9 @@
 #include "ums9117-bootstrap/boot-main.h"
 #include "ums9117-bootstrap/bootstrap.h"
 
-#ifndef FPLINUX_BOOTSTRAP_DISPLAY_NAME
-#error "generated bootstrap identity lacks FPLINUX_BOOTSTRAP_DISPLAY_NAME"
-#endif
 #ifndef FPLINUX_BOOTSTRAP_RECORD_PREFIX
 #error "generated bootstrap identity lacks FPLINUX_BOOTSTRAP_RECORD_PREFIX"
 #endif
-
-enum ums9117_boot_stage {
-	UMS9117_BOOT_STAGE_BOARD_INIT = 0,
-	UMS9117_BOOT_STAGE_DISPLAY,
-	UMS9117_BOOT_STAGE_TIMER,
-	UMS9117_BOOT_STAGE_KERNEL,
-	UMS9117_BOOT_STAGE_DEVICE_TREE,
-	UMS9117_BOOT_STAGE_PREPARE_LINUX,
-	UMS9117_BOOT_STAGE_COUNT,
-};
-
-static const char *const boot_stage_labels[UMS9117_BOOT_STAGE_COUNT] = {
-	"BOARD INIT", "DISPLAY",     "TIMER",
-	"KERNEL",     "DEVICE TREE", "PREPARE LINUX",
-};
-
-static const struct fplinux_boot_screen_identity boot_identity = {
-	.brand = "FPLinux",
-	.model = FPLINUX_BOOTSTRAP_DISPLAY_NAME,
-	.mode = "VOLATILE RAM BOOT",
-};
 
 static struct fplinux_boot_screen boot_screen;
 static struct ums9117_boot_canvas boot_canvas;
@@ -49,28 +25,33 @@ static struct ums9117_boot_canvas boot_canvas;
 static uint16_t *const framebuffer =
 	(uint16_t *)(uintptr_t)FPLINUX_BOOT_LAYOUT_FRAMEBUFFER_PHYS;
 
-static void set_stage(uint32_t stage, enum fplinux_boot_screen_status status)
-{
-	(void)fplinux_boot_screen_set_stage(&boot_screen, stage, status);
-}
-
-void ums9117_boot_checkpoint(const char *message,
-			     enum fplinux_boot_screen_status status)
-{
-	(void)fplinux_boot_screen_set_checkpoint(&boot_screen, message, status);
-}
-
 static void record_stage(uint32_t stage, const char *message)
 {
 	fprintf(stderr, "%s_LINUX_BOOTSTRAP event=stage stage=%lu message=%s\n",
 		FPLINUX_BOOTSTRAP_RECORD_PREFIX, (unsigned long)stage, message);
 }
 
+static void show_failure(uint32_t code, const char *message)
+{
+	static const char instruction[] = ". Power off and try again.";
+	char detail[FPLINUX_BOOT_SCREEN_STATUS_BYTES];
+	size_t i = 0, j = 0;
+
+	while (message[i] && i + sizeof(instruction) < sizeof(detail)) {
+		detail[i] = message[i];
+		++i;
+	}
+	while (instruction[j])
+		detail[i++] = instruction[j++];
+	detail[i] = '\0';
+	fplinux_boot_screen_fail(&boot_screen, code, detail);
+}
+
 void ums9117_boot_fail(uint32_t code, const char *message)
 {
 	fprintf(stderr, "%s_LINUX_BOOTSTRAP event=error error=%lu message=%s\n",
 		FPLINUX_BOOTSTRAP_RECORD_PREFIX, (unsigned long)code, message);
-	fplinux_boot_screen_fail(&boot_screen, code, message);
+	show_failure(code, message);
 	for (;;)
 		;
 }
@@ -99,7 +80,7 @@ static int enable_and_probe_sprd_timer(void)
 static __attribute__((noreturn)) void
 ums9117_boot_halt_without_transport(uint32_t code, const char *message)
 {
-	fplinux_boot_screen_fail(&boot_screen, code, message);
+	show_failure(code, message);
 	for (;;)
 		;
 }
@@ -116,15 +97,12 @@ static void prepare_usb_handoff(void)
 }
 
 /*
- * Paint on the display that the bootstrap runtime initialized. Until this runs,
- * every boot-screen update is a no-op, so a board without a display reports
- * its stages only through the host records.
+ * Paint on the display that the bootstrap runtime initialized. A board without
+ * a display reports its stages only through the host records.
  */
-static void start_boot_screen(uint32_t ram_bytes, size_t zimage_bytes,
-			      size_t dtb_bytes)
+static void start_boot_screen(void)
 {
-	struct fplinux_boot_screen_canvas canvas;
-	char note[48];
+	struct fplinux_status_canvas canvas;
 
 	/* Fresh RAM is noise; clear the whole region the LCDC may scan. */
 	memset(framebuffer, 0, FPLINUX_BOOT_LAYOUT_FRAMEBUFFER_BYTES);
@@ -137,23 +115,13 @@ static void start_boot_screen(uint32_t ram_bytes, size_t zimage_bytes,
 	canvas.width = boot_canvas.width;
 	canvas.height = boot_canvas.height;
 	canvas.context = &boot_canvas;
-	canvas.fill_rect = ums9117_boot_canvas_fill_rect;
+	canvas.fill = ums9117_boot_canvas_fill_rect;
 	canvas.present = ums9117_boot_canvas_present;
 
 	sys_start();
 	sys_framebuffer(boot_canvas.pixels);
-	if (fplinux_boot_screen_init(&boot_screen, &canvas, &boot_identity,
-				     boot_stage_labels,
-				     UMS9117_BOOT_STAGE_COUNT) != 0)
+	if (fplinux_boot_screen_init(&boot_screen, &canvas) != 0)
 		ums9117_boot_fail(8, "BOOT SCREEN INIT FAIL");
-
-	set_stage(UMS9117_BOOT_STAGE_BOARD_INIT, FPLINUX_BOOT_SCREEN_DONE);
-	sprintf(note, "RAM %luM KERNEL %luK DTB %luK",
-		(unsigned long)(ram_bytes >> 20),
-		(unsigned long)(zimage_bytes >> 10),
-		(unsigned long)(dtb_bytes >> 10));
-	(void)fplinux_boot_screen_set_note(&boot_screen, note);
-	set_stage(UMS9117_BOOT_STAGE_DISPLAY, FPLINUX_BOOT_SCREEN_ACTIVE);
 }
 
 void ums9117_boot_main(const struct ums9117_boot_board *board)
@@ -177,21 +145,17 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 		(unsigned long)zimage_bytes, (unsigned long)dtb_bytes);
 
 	if (has_display)
-		start_boot_screen(ram_bytes, zimage_bytes, dtb_bytes);
+		start_boot_screen();
 	/* The loader must have initialized exactly the board display, or none. */
 	if (sys_data.display.w1 != board->display_width ||
 	    sys_data.display.h1 != board->display_height)
 		ums9117_boot_fail(1, "BAD DISPLAY SIZE");
-	set_stage(UMS9117_BOOT_STAGE_DISPLAY, FPLINUX_BOOT_SCREEN_DONE);
 	record_stage(1, has_display ? "DISPLAY OK" : "NO DISPLAY");
 
-	set_stage(UMS9117_BOOT_STAGE_TIMER, FPLINUX_BOOT_SCREEN_ACTIVE);
 	if (!enable_and_probe_sprd_timer())
 		ums9117_boot_fail(5, "SPRD TIMER FAIL");
-	set_stage(UMS9117_BOOT_STAGE_TIMER, FPLINUX_BOOT_SCREEN_DONE);
 	record_stage(2, "SPRD TIMER OK");
 
-	set_stage(UMS9117_BOOT_STAGE_KERNEL, FPLINUX_BOOT_SCREEN_ACTIVE);
 	if (ram_bytes < FPLINUX_BOOT_LAYOUT_RAM_REQUIRED_BYTES)
 		ums9117_boot_fail(2, "64MB RAM REQUIRED");
 	if (!zimage_bytes ||
@@ -200,14 +164,12 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 	record_stage(3, "COPY KERNEL");
 	ums9117_bootstrap_copy_zimage(FPLINUX_BOOT_LAYOUT_ZIMAGE_PHYS,
 				      zimage_bytes);
-	set_stage(UMS9117_BOOT_STAGE_KERNEL, FPLINUX_BOOT_SCREEN_DONE);
 
-	set_stage(UMS9117_BOOT_STAGE_DEVICE_TREE, FPLINUX_BOOT_SCREEN_ACTIVE);
 	if (!dtb_bytes || dtb_bytes > FPLINUX_BOOT_LAYOUT_DTB_LIMIT_BYTES)
 		ums9117_boot_fail(4, "BAD DTB SIZE");
 	record_stage(4, "COPY DTB");
 	ums9117_bootstrap_copy_dtb(FPLINUX_BOOT_LAYOUT_DTB_PHYS, dtb_bytes);
-	ums9117_boot_checkpoint("DEVICE DATA", FPLINUX_BOOT_SCREEN_ACTIVE);
+	record_stage(4, "DEVICE DATA");
 	device_data_status = ums9117_boot_session_load_device_data(
 		(unsigned char *)(uintptr_t)
 			FPLINUX_BOOT_LAYOUT_DEVICE_DATA_ARENA_PHYS,
@@ -228,24 +190,21 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 	if (device_data != NULL)
 		ums9117_bootstrap_flush_dcache_range(device_data,
 						     device_data_bytes);
-	ums9117_boot_checkpoint("DEVICE DATA READY", FPLINUX_BOOT_SCREEN_DONE);
-	ums9117_boot_checkpoint("SESSION VERIFY", FPLINUX_BOOT_SCREEN_ACTIVE);
+	record_stage(4, "DEVICE DATA READY");
+	record_stage(4, "SESSION VERIFY");
 	session_status = ums9117_bootstrap_personalize_dtb(
 		FPLINUX_BOOT_LAYOUT_DTB_PHYS, dtb_bytes, session_id);
 	if (session_status != UMS9117_BOOTSTRAP_SESSION_OK)
 		ums9117_boot_fail(
 			9, ums9117_bootstrap_session_error(session_status));
-	ums9117_boot_checkpoint("SESSION READY", FPLINUX_BOOT_SCREEN_DONE);
-	set_stage(UMS9117_BOOT_STAGE_DEVICE_TREE, FPLINUX_BOOT_SCREEN_DONE);
+	record_stage(4, "SESSION READY");
 
-	set_stage(UMS9117_BOOT_STAGE_PREPARE_LINUX, FPLINUX_BOOT_SCREEN_ACTIVE);
 	record_stage(5, "PREPARE LINUX");
 	if (!ums9117_bootstrap_exchange_handoff_ack(session_id))
 		ums9117_boot_halt_without_transport(10, "HANDOFF ACK FAIL");
 
 	prepare_usb_handoff();
 	ums9117_bootstrap_cleanup_usb_dma_and_disconnect();
-	set_stage(UMS9117_BOOT_STAGE_PREPARE_LINUX, FPLINUX_BOOT_SCREEN_DONE);
 	ums9117_bootstrap_handoff_to_linux(FPLINUX_BOOT_LAYOUT_ZIMAGE_PHYS,
 					   FPLINUX_BOOT_LAYOUT_DTB_PHYS);
 }

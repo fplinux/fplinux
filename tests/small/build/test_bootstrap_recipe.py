@@ -6,6 +6,7 @@ from __future__ import annotations
 import io
 import json
 import tarfile
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 from unittest import mock
 
@@ -35,7 +36,12 @@ class BootstrapContext:
         self.write("targets/demo/bootstrap/Makefile", b"all:\n\ttrue\n")
         self.write("targets/demo/bootstrap/main.c", b"int entry(void) { return 1; }\n")
         self.write("bootstrap/fplinux-boot-screen/screen.c", b"int screen;\n")
-        self.write("bootstrap/fplinux-boot-screen/font.h", b"font declarations\n")
+        self.write("include/fplinux/fplinux-status-font.h", b"font declarations\n")
+        self.write("lib/fplinux/fplinux-ui-profile.json", b"profile tokens\n")
+        self.write("scripts/fplinux_status_assets.py", b"asset generator\n")
+        self.write("alpine/aports/fplinux-brand/generate-brand.py", b"brand generator\n")
+        self.write("alpine/aports/fplinux-brand/fplinux-mark-dark.svg", b"mark\n")
+        self.font_source = SimpleNamespace(id="font", algorithm="sha256", checksum="c" * 64)
         self.write("patches/vendor.patch", b"vendor patch\n")
         for relative, _source in inputs_build.bootstrap_implementation_sources():
             self.write(relative, b"builder implementation\n")
@@ -58,7 +64,13 @@ class BootstrapContext:
 
     def digest(self) -> str:
         """Compute the bootstrap recipe against the temporary repository."""
-        with mock.patch.object(common, "ROOT", self.root):
+        with (
+            mock.patch.object(common, "ROOT", self.root),
+            mock.patch(
+                "fplinux_cli.build.bootstrap.recipe.aport_sources",
+                return_value=[self.font_source],
+            ),
+        ):
             return bootstrap_build.bootstrap_recipe_digest(
                 self.sources,
                 "demo",
@@ -92,7 +104,6 @@ class BootstrapRecipeTests:
             "display-name",
             "record-prefix",
             "geometry",
-            "boot-font",
             "image-name",
             "map-name",
             "dtb-name",
@@ -136,9 +147,6 @@ class BootstrapRecipeTests:
             ),
             "geometry": lambda: bootstrap_context.target_config["display"].update(
                 width=128, height=160
-            ),
-            "boot-font": lambda: bootstrap_context.target_config["display"].update(
-                boot_font="7x14"
             ),
             "image-name": lambda: bootstrap_context.target_config["bootstrap"].update(
                 image="changed.bin"
@@ -222,7 +230,7 @@ class BootstrapRecipeTests:
         assert baseline != bootstrap_context.digest()
 
     @pytest.mark.parametrize("source", ["bootstrap", "bootstrap-microsd"])
-    def test_linux_font_source_and_freestanding_header_are_causal(
+    def test_status_font_inputs_are_causal_for_ram_and_sd(
         self, bootstrap_context: BootstrapContext, source: str
     ) -> None:
         """A pinned font or its compile interface invalidates either bootstrap recipe."""
@@ -232,14 +240,38 @@ class BootstrapRecipeTests:
         bootstrap_context.sources["linux"]["url"] = "https://example.invalid/mirror.tar.xz"
         bootstrap_context.write("unrelated-font.c", b"int unrelated_font;\n")
         assert (baseline) == (bootstrap_context.digest())
-        bootstrap_context.sources["linux"]["checksum"] = "d" * 64
-        assert (baseline) != (bootstrap_context.digest())
-        bootstrap_context.sources["linux"]["checksum"] = "c" * 64
+        bootstrap_context.target_config["display"]["boot_font"] = "7x14"
+        assert baseline == bootstrap_context.digest()
+        bootstrap_context.font_source.checksum = "d" * 64
+        assert baseline != bootstrap_context.digest()
+        bootstrap_context.font_source.checksum = "c" * 64
         header = bootstrap_context.write(
-            "bootstrap/fplinux-boot-screen/font.h", b"changed declarations\n"
+            "include/fplinux/fplinux-status-font.h", b"changed declarations\n"
         )
         assert (baseline) != (bootstrap_context.digest())
         header.write_bytes(b"font declarations\n")
+        profile = bootstrap_context.write(
+            "lib/fplinux/fplinux-ui-profile.json", b"changed profile tokens\n"
+        )
+        assert baseline != bootstrap_context.digest()
+        profile.write_bytes(b"profile tokens\n")
+        bootstrap_context.write("scripts/fplinux_status_assets.py", b"changed generator\n")
+        assert baseline != bootstrap_context.digest()
+
+    def test_boot_mark_inputs_change_bootstrap_recipe(
+        self, bootstrap_context: BootstrapContext
+    ) -> None:
+        """The selected mark follows both the generator and its artwork."""
+        baseline = bootstrap_context.digest()
+        generator = bootstrap_context.write(
+            "alpine/aports/fplinux-brand/generate-brand.py", b"changed generator\n"
+        )
+        assert baseline != bootstrap_context.digest()
+        generator.write_bytes(b"brand generator\n")
+        bootstrap_context.write(
+            "alpine/aports/fplinux-brand/fplinux-mark-dark.svg", b"changed mark\n"
+        )
+        assert baseline != bootstrap_context.digest()
 
     @pytest.mark.parametrize(
         ("source", "selected", "expected"),
@@ -275,17 +307,8 @@ class BootstrapRecipeTests:
                 member.size = len(contents)
                 output.addfile(member, io.BytesIO(contents))
         bootstrap_context.sources["vendor"]["checksum"] = common.sha256_file(archive)
-        linux_archive = bootstrap_context.root / "cache/downloads/sources/linux/linux-1.2.3.tar.xz"
-        linux_archive.parent.mkdir(parents=True)
-        with tarfile.open(linux_archive, "w:xz") as output:
-            contents = b"int unchanged_upstream_font;\n"
-            member = tarfile.TarInfo("linux-1.2.3/lib/fonts/font_sample.c")
-            member.size = len(contents)
-            output.addfile(member, io.BytesIO(contents))
-        bootstrap_context.sources["linux"]["checksum"] = common.sha256_file(linux_archive)
         catalog = (BOOTSTRAP_FILES / "sources.lock.toml").read_text(encoding="utf-8")
         catalog = catalog.replace("a" * 64, common.sha256_file(archive))
-        catalog = catalog.replace("c" * 64, common.sha256_file(linux_archive))
         bootstrap_context.write("sources.lock.toml", catalog.encode("utf-8"))
         bootstrap_context.platform["bootstrap"]["patches"] = []
         bootstrap_context.write("targets/demo/bootstrap/lcd_config.h", b"single selected panel\n")
@@ -316,5 +339,5 @@ class BootstrapRecipeTests:
             )
         panel = work / "bootstrap/vendor/runtime/lcd_config.h"
         assert (panel.read_bytes()) == (expected)
-        font = work / "bootstrap/bootstrap/fplinux-boot-screen/font_sample.c"
-        assert (font.read_bytes()) == (b"int unchanged_upstream_font;\n")
+        font = work / "bootstrap/bootstrap/fplinux-status-font.h"
+        assert font.read_bytes() == b"font declarations\n"

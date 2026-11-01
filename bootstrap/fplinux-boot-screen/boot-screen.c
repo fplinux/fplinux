@@ -1,538 +1,114 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "boot-screen.h"
 #include "fplinux-boot-mark.h"
+#include "generated/fplinux-status-profile.h"
 
-#include "font.h"
-
-/*
- * The bootloader cannot read the theme setting, so it always uses the brand
- * dark scheme: the Ink background the generated mark is composited on.
- */
-#define FPLINUX_BOOT_SCREEN_COLOUR_BACKGROUND FPLINUX_BOOT_MARK_BACKGROUND
-#define FPLINUX_BOOT_SCREEN_COLOUR_SURFACE 0x18c3U
-#define FPLINUX_BOOT_SCREEN_COLOUR_PRIMARY 0xf79eU
-#define FPLINUX_BOOT_SCREEN_COLOUR_MUTED 0xbdf7U
-#define FPLINUX_BOOT_SCREEN_COLOUR_RULE 0x4208U
-#define FPLINUX_BOOT_SCREEN_COLOUR_DIM 0x6b4dU
-#define FPLINUX_BOOT_SCREEN_COLOUR_ERROR 0xe30cU
-
-#if FPLINUX_BOOT_FONT == 6
-static const struct font_desc *const active_font = &font_6x8;
-#define FPLINUX_BOOT_SCREEN_FONT_ADVANCE 6U
-#elif FPLINUX_BOOT_FONT == 7
-static const struct font_desc *const active_font = &font_7x14;
-#define FPLINUX_BOOT_SCREEN_FONT_ADVANCE 8U
-#else
-#error "FPLINUX_BOOT_FONT must select 6x8 or 7x14"
-#endif
-
-static int status_valid(enum fplinux_boot_screen_status status)
-{
-	return (unsigned)status <= (unsigned)FPLINUX_BOOT_SCREEN_FAILED;
-}
-
-static int screen_valid(const struct fplinux_boot_screen *screen)
-{
-	return screen != NULL && screen->initialized &&
-	       screen->canvas.width != 0 && screen->canvas.height != 0 &&
-	       screen->canvas.fill_rect != NULL &&
-	       screen->canvas.present != NULL;
-}
-
-static void copy_string(char *destination, size_t capacity, const char *source)
+static void copy_text(char *destination, size_t capacity, const char *source)
 {
 	size_t i = 0;
 
-	if (capacity == 0)
-		return;
-	if (source != NULL)
-		while (i + 1 < capacity && source[i] != '\0') {
+	if (source)
+		while (i + 1U < capacity && source[i]) {
 			destination[i] = source[i];
 			++i;
 		}
-	destination[i] = '\0';
+	if (capacity)
+		destination[i] = '\0';
 }
 
-static size_t string_length(const char *text)
+static void error_heading(char *out, uint32_t code)
 {
-	size_t length = 0;
+	static const char prefix[] = "Boot error ";
+	char digits[10];
+	size_t length = 0, i = 0;
 
-	if (text == NULL)
-		return 0;
-	while (text[length] != '\0')
-		++length;
-	return length;
-}
-
-static void fill_rect(struct fplinux_boot_screen *screen, uint32_t x,
-		      uint32_t y, uint32_t width, uint32_t height,
-		      uint16_t colour)
-{
-	if (width == 0 || height == 0 || x >= screen->canvas.width ||
-	    y >= screen->canvas.height)
-		return;
-	if (width > screen->canvas.width - x)
-		width = screen->canvas.width - x;
-	if (height > screen->canvas.height - y)
-		height = screen->canvas.height - y;
-	if (width == 0 || height == 0)
-		return;
-	screen->canvas.fill_rect(screen->canvas.context, x, y, width, height,
-				 colour);
-}
-
-static void draw_character(struct fplinux_boot_screen *screen, uint32_t x,
-			   uint32_t y, char character, uint32_t scale,
-			   uint16_t colour)
-{
-	const struct font_desc *font = active_font;
-	const uint8_t *rows = font->data;
-	unsigned char code = (unsigned char)character;
-	uint32_t r;
-	uint32_t c;
-
-	if (code < 32 || code > 126)
-		code = '?';
-	rows += (size_t)code * font->height;
-	for (r = 0; r < font->height; ++r)
-		for (c = 0; c < font->width; ++c)
-			if (rows[r] & (0x80U >> c))
-				fill_rect(screen, x + c * scale, y + r * scale,
-					  scale, scale, colour);
-}
-
-static uint32_t draw_text_n(struct fplinux_boot_screen *screen, uint32_t x,
-			    uint32_t y, const char *text, size_t count,
-			    uint32_t scale, uint16_t colour)
-{
-	size_t i;
-
-	for (i = 0; i < count; ++i) {
-		draw_character(screen, x, y, text[i], scale, colour);
-		x += FPLINUX_BOOT_SCREEN_FONT_ADVANCE * scale;
+	while (prefix[i]) {
+		out[i] = prefix[i];
+		++i;
 	}
-	return x;
+	do {
+		digits[length++] = (char)('0' + code % 10U);
+		code /= 10U;
+	} while (code);
+	while (length)
+		out[i++] = digits[--length];
+	out[i] = '\0';
 }
 
-static uint32_t text_width(size_t count, uint32_t scale)
+static int render(struct fplinux_boot_screen *screen)
 {
-	if (count == 0 || scale == 0)
-		return 0;
-	return (uint32_t)count * FPLINUX_BOOT_SCREEN_FONT_ADVANCE * scale -
-	       scale;
-}
+	const struct fplinux_boot_mark *asset = NULL;
+	struct fplinux_status_mark mark = { 0 };
+	struct fplinux_status_resources resources = {
+		.profile = &fplinux_status_profile,
+		.theme = &fplinux_status_themes[1],
+		.body = fplinux_status_font_by_id(
+			fplinux_status_profile.font_body),
+		.title = fplinux_status_font_by_id(
+			fplinux_status_profile.font_title),
+		.legend = fplinux_status_font_by_id(
+			fplinux_status_profile.font_legend),
+	};
+	struct fplinux_status_view view = {
+		.layout = FPLINUX_STATUS_BOOT,
+		.indicator = FPLINUX_STATUS_NONE,
+		.heading = "Starting FPLinux",
+		.detail = "Keep USB connected.",
+	};
+	char heading[22];
 
-static size_t text_capacity(uint32_t left, uint32_t right, uint32_t scale)
-{
-	uint32_t available;
-
-	if (right <= left || scale == 0)
-		return 0;
-	available = right - left;
-	if (available < (uint32_t)active_font->width * scale)
-		return 0;
-	return (available + scale) / (FPLINUX_BOOT_SCREEN_FONT_ADVANCE * scale);
-}
-
-static void draw_text_fit(struct fplinux_boot_screen *screen, uint32_t left,
-			  uint32_t right, uint32_t y, const char *text,
-			  uint32_t scale, uint16_t colour, size_t hard_limit)
-{
-	size_t capacity = text_capacity(left, right, scale);
-	size_t length = string_length(text);
-	size_t prefix;
-	uint32_t x;
-
-	if (text == NULL || capacity == 0)
-		return;
-	if (hard_limit != 0 && capacity > hard_limit)
-		capacity = hard_limit;
-	if (length <= capacity) {
-		draw_text_n(screen, left, y, text, length, scale, colour);
-		return;
-	}
-	if (capacity <= 3) {
-		draw_text_n(screen, left, y, "...", capacity, scale, colour);
-		return;
-	}
-	prefix = capacity - 3;
-	x = draw_text_n(screen, left, y, text, prefix, scale, colour);
-	draw_text_n(screen, x, y, "...", 3, scale, colour);
-}
-
-static void format_error_heading(char heading[14], uint32_t error_code)
-{
-	static const char prefix[] = "BOOT ERROR ";
-	size_t i;
-
-	for (i = 0; i < sizeof(prefix) - 1; ++i)
-		heading[i] = prefix[i];
-	if (error_code <= 99) {
-		heading[11] = (char)('0' + error_code / 10);
-		heading[12] = (char)('0' + error_code % 10);
-	} else {
-		heading[11] = '?';
-		heading[12] = '?';
-	}
-	heading[13] = '\0';
-}
-
-static const char *copy_wrapped_line(char *line, size_t line_capacity,
-				     const char *text, size_t maximum,
-				     int last_line)
-{
-	size_t remaining;
-	size_t length;
-	size_t i;
-
-	if (line_capacity == 0)
-		return text;
-	line[0] = '\0';
-	if (text == NULL)
-		return NULL;
-	while (*text == ' ')
-		++text;
-	remaining = string_length(text);
-	if (maximum >= line_capacity)
-		maximum = line_capacity - 1;
-	if (remaining <= maximum) {
-		copy_string(line, line_capacity, text);
-		return text + remaining;
-	}
-	if (maximum == 0)
-		return text;
-	if (last_line) {
-		if (maximum <= 3) {
-			for (i = 0; i < maximum; ++i)
-				line[i] = '.';
-			line[maximum] = '\0';
-			return text + remaining;
+	if (!screen->initialized)
+		return -1;
+	for (size_t i = 0; i < FPLINUX_BOOT_MARK_COUNT; ++i)
+		if (fplinux_boot_marks[i].size ==
+		    (unsigned int)fplinux_status_profile.splash_mark) {
+			asset = &fplinux_boot_marks[i];
+			break;
 		}
-		for (i = 0; i < maximum - 3; ++i)
-			line[i] = text[i];
-		line[maximum - 3] = '.';
-		line[maximum - 2] = '.';
-		line[maximum - 1] = '.';
-		line[maximum] = '\0';
-		return text + remaining;
+	if (asset) {
+		mark.size = asset->size;
+		mark.runs = asset->runs;
+		mark.run_count = asset->run_count;
+		mark.palette = fplinux_boot_mark_palette;
+		resources.mark = &mark;
 	}
-	length = maximum;
-	while (length > 0 && text[length] != ' ')
-		--length;
-	if (length == 0)
-		length = maximum;
-	for (i = 0; i < length; ++i)
-		line[i] = text[i];
-	line[length] = '\0';
-	text += length;
-	while (*text == ' ')
-		++text;
-	return text;
-}
-
-static void draw_wrapped_detail(struct fplinux_boot_screen *screen,
-				uint32_t left, uint32_t right, uint32_t first_y,
-				uint32_t line_pitch, uint32_t scale)
-{
-	char first[49];
-	char second[49];
-	size_t capacity = text_capacity(left, right, scale);
-	const char *remaining;
-
-	if (capacity == 0)
-		return;
-	remaining = copy_wrapped_line(first, sizeof(first),
-				      screen->error_detail, capacity, 0);
-	copy_wrapped_line(second, sizeof(second), remaining, capacity, 1);
-	draw_text_n(screen, left, first_y, first, string_length(first), scale,
-		    FPLINUX_BOOT_SCREEN_COLOUR_PRIMARY);
-	draw_text_n(screen, left, first_y + line_pitch, second,
-		    string_length(second), scale,
-		    FPLINUX_BOOT_SCREEN_COLOUR_PRIMARY);
-}
-
-static void draw_text_centered(struct fplinux_boot_screen *screen, uint32_t y,
-			       const char *text, uint32_t scale,
-			       uint16_t colour)
-{
-	uint32_t width = text_width(string_length(text), scale);
-	uint32_t margin = screen->canvas.width / 12U;
-
-	if (width + margin * 2 > screen->canvas.width) {
-		draw_text_fit(screen, margin, screen->canvas.width - margin, y,
-			      text, scale, colour, 0);
-		return;
+	if (screen->failed) {
+		error_heading(heading, screen->error_code);
+		view.heading = heading;
+		view.detail = screen->detail;
+		view.error = 1;
 	}
-	(void)draw_text_n(screen, (screen->canvas.width - width) / 2, y, text,
-			  string_length(text), scale, colour);
-}
-
-static uint32_t progress_permille(const struct fplinux_boot_screen *screen)
-{
-	uint32_t total = (uint32_t)screen->stage_count * 2U;
-	uint32_t done = 0;
-	size_t i;
-
-	if (total == 0)
-		return 0;
-	for (i = 0; i < screen->stage_count; ++i) {
-		enum fplinux_boot_screen_status status =
-			screen->stage_status[i];
-
-		if (status == FPLINUX_BOOT_SCREEN_DONE ||
-		    status == FPLINUX_BOOT_SCREEN_FAILED)
-			done += 2;
-		else if (status == FPLINUX_BOOT_SCREEN_ACTIVE)
-			done += 1;
-	}
-	return done * 1000U / total;
-}
-
-static void draw_progress_bar(struct fplinux_boot_screen *screen, uint32_t y,
-			      uint32_t height)
-{
-	uint32_t margin = screen->canvas.width / 8U;
-	uint32_t width = screen->canvas.width - margin * 2;
-	uint32_t fill = width * progress_permille(screen) / 1000U;
-	uint16_t colour = screen->has_error ?
-				  FPLINUX_BOOT_SCREEN_COLOUR_ERROR :
-				  FPLINUX_BOOT_SCREEN_COLOUR_PRIMARY;
-
-	if (screen->has_error)
-		fill = width;
-	fill_rect(screen, margin - 1, y - 1, width + 2, height + 2,
-		  FPLINUX_BOOT_SCREEN_COLOUR_RULE);
-	fill_rect(screen, margin, y, width, height,
-		  FPLINUX_BOOT_SCREEN_COLOUR_SURFACE);
-	if (fill != 0)
-		fill_rect(screen, margin, y, fill, height, colour);
-}
-
-/* The mark of the largest UI profile that fits the screen, else the first. */
-static const struct fplinux_boot_mark *
-boot_mark(const struct fplinux_boot_screen *screen)
-{
-	const struct fplinux_boot_mark *mark = &fplinux_boot_marks[0];
-	size_t i;
-
-	for (i = 1; i < FPLINUX_BOOT_MARK_COUNT; ++i)
-		if (fplinux_boot_marks[i].profile_width <=
-			    screen->canvas.width &&
-		    fplinux_boot_marks[i].profile_height <=
-			    screen->canvas.height)
-			mark = &fplinux_boot_marks[i];
-	return mark;
-}
-
-/* One fill per run; background runs are skipped on the painted screen. */
-static void draw_mark(struct fplinux_boot_screen *screen,
-		      const struct fplinux_boot_mark *mark, uint32_t left,
-		      uint32_t top)
-{
-	uint32_t x = 0;
-	uint32_t y = 0;
-	size_t i;
-
-	for (i = 0; i < mark->run_count; ++i) {
-		uint32_t index = FPLINUX_BOOT_MARK_RUN_INDEX(mark->runs[i]);
-		uint32_t length = FPLINUX_BOOT_MARK_RUN_LENGTH(mark->runs[i]);
-
-		if (index != 0)
-			fill_rect(screen, left + x, top + y, length, 1,
-				  fplinux_boot_mark_palette[index]);
-		x += length;
-		if (x >= mark->size) {
-			x = 0;
-			++y;
-		}
-	}
-}
-
-/*
- * A top-down stack: the mark from h/12, the brand, the model
- * and the mode; the progress bar at 45 % of the height unless the stack
- * reaches it, then half a line below the stack; the status under the bar.
- */
-static void render_adaptive(struct fplinux_boot_screen *screen)
-{
-	const struct fplinux_boot_mark *mark = boot_mark(screen);
-	uint32_t w = screen->canvas.width;
-	uint32_t h = screen->canvas.height;
-	uint32_t brand_scale =
-		text_width(string_length(screen->brand), 2) + w / 6U <= w ? 2 :
-									    1;
-	uint32_t font_height = active_font->height;
-	uint32_t line = font_height + 2U;
-	uint32_t bar_height = h / 24U < 6 ? 6 : h / 24U;
-	uint32_t bar_y = h * 45U / 100U;
-	uint32_t status_y;
-	uint32_t note_y;
-	uint32_t y = h / 12U;
-	const char *status = screen->status_text;
-	uint16_t status_colour = FPLINUX_BOOT_SCREEN_COLOUR_MUTED;
-	char heading[14];
-
-	draw_mark(screen, mark, w > mark->size ? (w - mark->size) / 2U : 0, y);
-	y += mark->size + line / 2;
-	draw_text_centered(screen, y, screen->brand, brand_scale,
-			   FPLINUX_BOOT_SCREEN_COLOUR_PRIMARY);
-	y += font_height * brand_scale + line / 2;
-	draw_text_centered(screen, y, screen->model, 1,
-			   FPLINUX_BOOT_SCREEN_COLOUR_MUTED);
-	y += line;
-	draw_text_centered(screen, y, screen->mode, 1,
-			   FPLINUX_BOOT_SCREEN_COLOUR_DIM);
-	y += line;
-
-	if (bar_y < y + line / 2)
-		bar_y = y + line / 2;
-	if (screen->has_error) {
-		uint32_t block = 2U * line + font_height;
-
-		if (h > block + bar_height + 1U) {
-			uint32_t limit = h - block - bar_height - 1U;
-
-			if (bar_y > limit && limit >= y)
-				bar_y = limit;
-		}
-	}
-	status_y = bar_y + bar_height + h / 24U;
-	draw_progress_bar(screen, bar_y, bar_height);
-
-	if (screen->has_error) {
-		/*
-		 * The heading and two detail lines stay on screen: on the
-		 * smallest screens they move up, but not over the bar frame.
-		 */
-		uint32_t block = 2U * line + font_height;
-
-		if (status_y + block > h)
-			status_y = h > block ? h - block : 0;
-		if (status_y < bar_y + bar_height + 1U)
-			status_y = bar_y + bar_height + 1U;
-		format_error_heading(heading, screen->error_code);
-		draw_text_centered(screen, status_y, heading, 1,
-				   FPLINUX_BOOT_SCREEN_COLOUR_ERROR);
-		draw_wrapped_detail(screen, w / 12U, w - w / 12U,
-				    status_y + line, line, 1);
-		return;
-	}
-
-	if (status[0] == '\0' && screen->current_stage < screen->stage_count)
-		status = screen->stage_labels[screen->current_stage];
-	if (screen->status_state == FPLINUX_BOOT_SCREEN_ACTIVE)
-		status_colour = FPLINUX_BOOT_SCREEN_COLOUR_PRIMARY;
-	else if (screen->status_state == FPLINUX_BOOT_SCREEN_FAILED)
-		status_colour = FPLINUX_BOOT_SCREEN_COLOUR_ERROR;
-	draw_text_centered(screen, status_y, status, 1, status_colour);
-
-	/* The note keeps its place near the bottom unless the status needs it. */
-	note_y = h - h / 12U - 8U;
-	if (note_y < status_y + line)
-		note_y = status_y + line;
-	if (screen->note[0] != '\0')
-		draw_text_centered(screen, note_y, screen->note, 1,
-				   FPLINUX_BOOT_SCREEN_COLOUR_DIM);
-}
-
-void fplinux_boot_screen_render(struct fplinux_boot_screen *screen)
-{
-	if (!screen_valid(screen))
-		return;
-	fill_rect(screen, 0, 0, screen->canvas.width, screen->canvas.height,
-		  FPLINUX_BOOT_SCREEN_COLOUR_BACKGROUND);
-	render_adaptive(screen);
-	screen->canvas.present(screen->canvas.context);
+	return fplinux_status_screen_render(&screen->canvas, &resources, &view);
 }
 
 int fplinux_boot_screen_init(struct fplinux_boot_screen *screen,
-			     const struct fplinux_boot_screen_canvas *canvas,
-			     const struct fplinux_boot_screen_identity *identity,
-			     const char *const *stage_labels,
-			     size_t stage_count)
+			     const struct fplinux_status_canvas *canvas)
 {
-	size_t i;
-
-	if (screen == NULL)
+	if (!screen)
 		return -1;
 	screen->initialized = 0;
-	if (canvas == NULL || canvas->width == 0 || canvas->height == 0 ||
-	    canvas->fill_rect == NULL || canvas->present == NULL ||
-	    stage_count > FPLINUX_BOOT_SCREEN_MAX_STAGES ||
-	    (stage_count != 0 && stage_labels == NULL))
+	if (!canvas || !canvas->width || !canvas->height || !canvas->fill ||
+	    !canvas->present)
 		return -1;
 	screen->canvas = *canvas;
-	copy_string(screen->brand, sizeof(screen->brand),
-		    identity != NULL ? identity->brand : NULL);
-	copy_string(screen->model, sizeof(screen->model),
-		    identity != NULL ? identity->model : NULL);
-	copy_string(screen->mode, sizeof(screen->mode),
-		    identity != NULL ? identity->mode : NULL);
-	for (i = 0; i < FPLINUX_BOOT_SCREEN_MAX_STAGES; ++i) {
-		copy_string(screen->stage_labels[i],
-			    sizeof(screen->stage_labels[i]),
-			    i < stage_count ? stage_labels[i] : NULL);
-		screen->stage_status[i] = FPLINUX_BOOT_SCREEN_PENDING;
-	}
-	copy_string(screen->status_text, sizeof(screen->status_text), NULL);
-	copy_string(screen->error_detail, sizeof(screen->error_detail), NULL);
-	copy_string(screen->note, sizeof(screen->note), NULL);
-	screen->status_state = FPLINUX_BOOT_SCREEN_PENDING;
-	screen->stage_count = stage_count;
-	screen->current_stage = (size_t)-1;
+	screen->detail[0] = '\0';
 	screen->error_code = 0;
-	screen->has_error = 0;
+	screen->failed = 0;
 	screen->initialized = 1;
-	fplinux_boot_screen_render(screen);
-	return 0;
-}
-
-int fplinux_boot_screen_set_stage(struct fplinux_boot_screen *screen,
-				  size_t stage_index,
-				  enum fplinux_boot_screen_status status)
-{
-	if (!screen_valid(screen) || stage_index >= screen->stage_count ||
-	    !status_valid(status) || screen->has_error)
+	if (render(screen)) {
+		screen->initialized = 0;
 		return -1;
-	screen->stage_status[stage_index] = status;
-	if (status != FPLINUX_BOOT_SCREEN_PENDING)
-		screen->current_stage = stage_index;
-	fplinux_boot_screen_render(screen);
+	}
 	return 0;
 }
 
-int fplinux_boot_screen_set_checkpoint(struct fplinux_boot_screen *screen,
-				       const char *text,
-				       enum fplinux_boot_screen_status status)
+void fplinux_boot_screen_fail(struct fplinux_boot_screen *screen, uint32_t code,
+			      const char *detail)
 {
-	if (!screen_valid(screen) || !status_valid(status) || screen->has_error)
-		return -1;
-	copy_string(screen->status_text, sizeof(screen->status_text), text);
-	screen->status_state = status;
-	fplinux_boot_screen_render(screen);
-	return 0;
-}
-
-void fplinux_boot_screen_fail(struct fplinux_boot_screen *screen,
-			      uint32_t error_code, const char *detail)
-{
-	if (!screen_valid(screen))
+	if (!screen || !screen->initialized)
 		return;
-	if (screen->current_stage < screen->stage_count)
-		screen->stage_status[screen->current_stage] =
-			FPLINUX_BOOT_SCREEN_FAILED;
-	copy_string(screen->error_detail, sizeof(screen->error_detail), detail);
-	screen->error_code = error_code;
-	screen->has_error = 1;
-	fplinux_boot_screen_render(screen);
-}
-
-int fplinux_boot_screen_set_note(struct fplinux_boot_screen *screen,
-				 const char *text)
-{
-	if (!screen_valid(screen) || screen->has_error)
-		return -1;
-	copy_string(screen->note, sizeof(screen->note), text);
-	fplinux_boot_screen_render(screen);
-	return 0;
+	screen->error_code = code;
+	copy_text(screen->detail, sizeof(screen->detail), detail);
+	screen->failed = 1;
+	(void)render(screen);
 }

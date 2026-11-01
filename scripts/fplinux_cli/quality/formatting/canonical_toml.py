@@ -151,11 +151,9 @@ _PLATFORM_ORDER = {
         "load_address",
         "payload_limit",
         "shared_copies",
-        "linux_copies",
         "layout",
     ),
     "bootstrap.shared_copies": _COPY_FIELDS,
-    "bootstrap.linux_copies": _COPY_FIELDS,
     "bootstrap.layout": (
         "ram_base",
         "ram_size",
