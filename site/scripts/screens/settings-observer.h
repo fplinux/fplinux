@@ -24,6 +24,8 @@ struct settings_frame_observation {
 	char locale[4];
 	char labels[8192];
 	struct list_value_observation root_values[4];
+	/* The first visible "Bluetooth" row, in the root or its own screen. */
+	struct list_value_observation bluetooth;
 };
 
 #endif

@@ -37,6 +37,33 @@ msgstr "Автоблокировка"
 msgid "About"
 msgstr "О системе"
 
+msgid "Bluetooth"
+msgstr "Bluetooth"
+
+msgid "On"
+msgstr "Вкл."
+
+msgid "Off"
+msgstr "Выкл."
+
+msgid "Turn on"
+msgstr "Включить"
+
+msgid "Turn off"
+msgstr "Выключить"
+
+msgid "Turning Bluetooth on…"
+msgstr "Включение Bluetooth…"
+
+msgid "Turning Bluetooth off…"
+msgstr "Выключение Bluetooth…"
+
+msgid "Cannot turn Bluetooth on. Try again."
+msgstr "Не удалось включить Bluetooth. Повторите."
+
+msgid "Cannot turn Bluetooth off. Try again."
+msgstr "Не удалось выключить Bluetooth. Повторите."
+
 msgid "Brightness"
 msgstr "Яркость"
 

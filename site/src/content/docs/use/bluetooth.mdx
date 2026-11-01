@@ -3,6 +3,8 @@ title: Bluetooth
 description: Pair devices, exchange files, use a Bluetooth Internet connection and send audio to an A2DP sink.
 source:
   - alpine/aports/fplinux-bluetooth
+  - alpine/aports/fplinux-settings
+  - lib/fplinux/fplinux-bluez-adapter.c
 ---
 
 import { Steps } from '@astrojs/starlight/components';
@@ -11,7 +13,7 @@ import Figure from '../../../components/Figure.astro';
 import BluetoothPan from '../../../assets/diagrams/bluetooth-pan.svg';
 import Key from '../../../components/Key.astro';
 
-Pair devices, exchange files, use a Bluetooth Internet connection (PAN) and connect keyboards or mice with `bluetoothctl` and `fplinux-bluetooth` in a shell on the phone. Optional packages add A2DP audio output. Check [support status](/fplinux/phones/#support-status) and your [phone page](/fplinux/phones/) for the supported functions, peers and profiles before using a procedure below.
+Turn Bluetooth on and off in Settings. Pair devices, exchange files, use a Bluetooth Internet connection (PAN) and connect keyboards or mice with `bluetoothctl` and `fplinux-bluetooth` in a shell on the phone. Optional packages add A2DP audio output. Check [support status](/fplinux/phones/#support-status) and your [phone page](/fplinux/phones/) for the supported functions, peers and profiles before using a procedure below.
 
 These procedures apply to supported [UMS9117](/fplinux/platforms/ums9117/) phones. Bluetooth is unsupported on the [SC9820E Xiaomi Qin 1s+](/fplinux/platforms/sc9820e/); preparing optional radio data does not enable it.
 
@@ -24,6 +26,10 @@ Bluetooth starts powered off. Keep the USB connection to your computer while you
 Run `fplinux-bluetooth --help` for the list of commands, and add `--help` after a command, such as `fplinux-bluetooth receive --help`, for its syntax.
 
 ## Turn Bluetooth on and off
+
+In the graphical session, open **Settings → Bluetooth** and press **Turn on** or **Turn off**. The [Quick settings](/fplinux/use/session/#quick-settings) on Home have the same switch. Both show the current state, including a change made with `bluetoothctl`, and are listed only while the Bluetooth controller is available. If the change fails, an error asks you to try again.
+
+In a shell:
 
 ```sh title="Phone"
 bluetoothctl power on

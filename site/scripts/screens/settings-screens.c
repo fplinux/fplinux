@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
+#include "bluez-fake.h"
 #include "settings-observer.h"
 #include "fplinux-ui-profile.h"
 #include "screen-frame.h"
@@ -35,7 +36,12 @@ struct capture {
 	char input_locale[FPLINUX_UI_SESSION_LOCALE_BYTES];
 	const char *directory;
 	const char *session_path;
+	/* The Bluetooth scenario's BlueZ; other scenarios have no bus. */
+	bool bluetooth;
+	struct bluez_fake *bluez;
 };
+
+#define HCI0 "/org/bluez/hci0"
 
 static const char warning[] =
 	"Changing this setting closes other apps. Unsaved changes may be lost.";
@@ -118,6 +124,8 @@ static void read_messages(struct capture *capture)
 static void pump(struct capture *capture)
 {
 	fplinux_ui_frame_pump(&capture->peer);
+	if (capture->bluez)
+		bluez_fake_pump(capture->bluez);
 	read_observations(capture);
 	read_messages(capture);
 }
@@ -326,7 +334,7 @@ static void start(struct capture *capture, char **arguments)
 	capture->application = fork();
 	assert(capture->application >= 0);
 	if (!capture->application) {
-		char descriptor[32], catalogues[512];
+		char descriptor[32], catalogues[512], bus[512];
 		const char *slash = strrchr(arguments[1], '/');
 
 		assert(slash);
@@ -351,6 +359,13 @@ static void start(struct capture *capture, char **arguments)
 			       0);
 		assert(setenv("FPLINUX_SETTINGS_LANGUAGE_DIR", arguments[5],
 			      1) == 0);
+		/* Without the scenario's bus, no system bus is reachable. */
+		if (!capture->bluetooth) {
+			assert(snprintf(bus, sizeof(bus),
+					"unix:path=%s/absent-bus",
+					arguments[4]) < (int)sizeof(bus));
+			assert(setenv("DBUS_SYSTEM_BUS_ADDRESS", bus, 1) == 0);
+		}
 		assert(setenv("LANG", "en_US.UTF-8", 1) == 0);
 		assert(setenv("LC_ALL", "en_US.UTF-8", 1) == 0);
 		assert(unsetenv("LANGUAGE") == 0);
@@ -695,14 +710,131 @@ static void about_reading_edges(struct capture *capture)
 	puts("settings-about: last text line is whole on every downward step");
 }
 
+static bool shows_bluetooth(const struct capture *capture, const char *value)
+{
+	return capture->observed.bluetooth.found &&
+	       !strcmp(capture->observed.bluetooth.value, value);
+}
+
+static void wait_bluetooth(struct capture *capture, const char *value)
+{
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	while (!shows_bluetooth(capture, value) &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	if (!shows_bluetooth(capture, value))
+		fprintf(stderr, "Settings Bluetooth row: [%s], expected [%s]\n",
+			capture->observed.bluetooth.found ?
+				capture->observed.bluetooth.value :
+				"(none)",
+			value);
+	assert(shows_bluetooth(capture, value));
+}
+
+/* The real Settings against a BlueZ fake on the scenario's private bus. */
+static void bluetooth_switch(struct capture *capture)
+{
+	bool landscape = atoi(getenv("FPLINUX_SETTINGS_TEST_WIDTH")) >
+			 atoi(getenv("FPLINUX_SETTINGS_TEST_HEIGHT"));
+	static const char *const root_frames[] = {
+		"display", "bluetooth", "language", "input", "about",
+	};
+	char name[64];
+
+	wait_bluetooth(capture, "Off");
+	for (size_t index = 0; index < 5; ++index) {
+		if (index)
+			press(capture, KEY_DOWN);
+		pump_for(capture, 80);
+		snprintf(name, sizeof(name), "settings-bluetooth-root-%s",
+			 root_frames[index]);
+		save_frame(capture, name);
+	}
+	for (size_t index = 4; index-- > 1;) {
+		press(capture, KEY_UP);
+		pump_for(capture, 80);
+		snprintf(name, sizeof(name), "settings-bluetooth-root-up-%s",
+			 root_frames[index]);
+		save_frame(capture, name);
+	}
+	screen_check_list_value(&capture->observed.bluetooth, landscape);
+	press(capture, KEY_OK);
+	wait_legends(capture, "", "Turn on", "Back");
+	wait_bluetooth(capture, "Off");
+	screen_check_list_value(&capture->observed.bluetooth, landscape);
+	save_frame(capture, "settings-bluetooth-off");
+
+	/* Another client switches it on; the screen follows. */
+	bluez_fake_set_powered(capture->bluez, HCI0, true);
+	wait_bluetooth(capture, "On");
+	wait_legends(capture, "", "Turn off", "Back");
+	save_frame(capture, "settings-bluetooth-on");
+
+	/* A slow change covers the screen with a busy alert. */
+	bluez_fake_answer(capture->bluez, BLUEZ_FAKE_APPLY, 1500);
+	press(capture, KEY_OK);
+	wait_label(capture, "Turning Bluetooth off…");
+	wait_legends(capture, "", "", "");
+	pump_for(capture, 100);
+	save_frame(capture, "settings-bluetooth-busy");
+	wait_legends(capture, "", "Turn on", "Back");
+	wait_bluetooth(capture, "Off");
+	assert(!has_label(capture, "Turning Bluetooth off…"));
+	assert(bluez_fake_requests(capture->bluez) == 1);
+
+	bluez_fake_answer(capture->bluez, BLUEZ_FAKE_FAIL, 0);
+	press(capture, KEY_OK);
+	wait_label(capture, "Cannot turn Bluetooth on. Try again.");
+	wait_legends(capture, "", "", "Close");
+	pump_for(capture, 100);
+	save_frame(capture, "settings-bluetooth-error");
+	press(capture, KEY_F14);
+	wait_legends(capture, "", "Turn on", "Back");
+	wait_bluetooth(capture, "Off");
+	assert(!bluez_fake_powered(capture->bluez, HCI0));
+
+	/* bluetoothd stops: the switch is unavailable and the root row goes. */
+	bluez_fake_stop(capture->bluez);
+	capture->bluez = NULL;
+	wait_bluetooth(capture, "Unavailable");
+	wait_legends(capture, "", "", "Back");
+	save_frame(capture, "settings-bluetooth-unavailable");
+	press(capture, KEY_F14);
+	wait_legends(capture, "", "Open", "Back");
+	pump_for(capture, 100);
+	assert(!capture->observed.bluetooth.found);
+	assert(!has_label(capture, "Bluetooth"));
+
+	/* It starts again with the adapter on: the row returns above the focus. */
+	capture->bluez = bluez_fake_start();
+	bluez_fake_add_adapter(capture->bluez, HCI0, true);
+	pump_for(capture, 200);
+	press(capture, KEY_UP);
+	wait_bluetooth(capture, "On");
+	puts("settings-bluetooth: the switch follows BlueZ, waits for slow changes, reports refusals and goes with bluetoothd");
+}
+
 int main(int argc, char **argv)
 {
 	struct capture capture = { 0 };
 
 	assert(setvbuf(stdout, NULL, _IONBF, 0) == 0);
 	assert(argc == 6 || (argc == 7 && (!strcmp(argv[6], "root-values") ||
+					   !strcmp(argv[6], "bluetooth") ||
 					   !strcmp(argv[6], "about-edges"))));
+	capture.bluetooth = argc == 7 && !strcmp(argv[6], "bluetooth");
+	if (capture.bluetooth) {
+		capture.bluez = bluez_fake_start();
+		bluez_fake_add_adapter(capture.bluez, HCI0, false);
+	}
 	start(&capture, argv);
+	if (capture.bluetooth) {
+		bluetooth_switch(&capture);
+		close_and_reap(&capture);
+		bluez_fake_stop(capture.bluez);
+		return 0;
+	}
 	if (argc == 7) {
 		if (!strcmp(argv[6], "about-edges"))
 			about_reading_edges(&capture);

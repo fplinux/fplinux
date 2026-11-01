@@ -78,6 +78,8 @@ struct audio_service {
 	uint64_t timer_ms;
 	struct fplinux_audio_device device;
 	struct fplinux_audio_streams streams;
+	struct fplinux_audio_mixer_gain master;
+	bool manager_announced;
 	int32_t *mix;
 	int16_t *output;
 	/* Frames at the end of output not yet written to the card. */
@@ -158,6 +160,7 @@ static void drop_manager(struct audio_service *service)
 {
 	close(service->manager);
 	service->manager = -1;
+	service->manager_announced = false;
 	fplinux_audio_streams_manager(&service->streams, false, 0);
 	printf("fplinux-audiod: manager disconnected; streams paused\n");
 }
@@ -204,6 +207,45 @@ static void read_manager(struct audio_service *service)
 			continue;
 		}
 		command[length] = '\0';
+		if (!strncmp(command, FPLINUX_AUDIO_CONTROL_VOLUME " ",
+			     sizeof(FPLINUX_AUDIO_CONTROL_VOLUME))) {
+			unsigned int level;
+			char expected[32], reply[32];
+			ssize_t sent;
+
+			for (level = 0; level <= FPLINUX_AUDIO_VOLUME_MAX;
+			     ++level) {
+				snprintf(expected, sizeof(expected),
+					 FPLINUX_AUDIO_CONTROL_VOLUME " %u",
+					 level);
+				if (!strcmp(command, expected))
+					break;
+			}
+			if (level > FPLINUX_AUDIO_VOLUME_MAX)
+				continue;
+			service->master.target =
+				(int32_t)(level * FPLINUX_AUDIO_MIXER_UNITY /
+					  FPLINUX_AUDIO_VOLUME_MAX);
+			if (!service->manager_announced) {
+				service->master.current =
+					service->master.target;
+				fplinux_audio_streams_manager(&service->streams,
+							      true, now_ms());
+			}
+			snprintf(reply, sizeof(reply),
+				 FPLINUX_AUDIO_CONTROL_VOLUME " %u", level);
+			do {
+				sent = send(service->manager, reply,
+					    strlen(reply),
+					    MSG_DONTWAIT | MSG_NOSIGNAL);
+			} while (sent < 0 && errno == EINTR);
+			if (sent != (ssize_t)strlen(reply)) {
+				drop_manager(service);
+				return;
+			}
+			continue;
+		}
+		service->manager_announced = true;
 		fplinux_audio_streams_command(&service->streams, command);
 	}
 }
@@ -299,6 +341,8 @@ static void fill(struct audio_service *service, uint64_t now)
 		if (fplinux_audio_streams_mix(&service->streams, service->mix,
 					      device->period))
 			service->audible_ms = now;
+		fplinux_audio_mixer_master(service->mix, device->period,
+					   &service->master);
 		fplinux_audio_mixer_output(service->mix, service->output,
 					   device->period);
 		service->pending = device->period;
@@ -545,6 +589,8 @@ int main(int argc, char **argv)
 		.manager = -1,
 		.stream = -1,
 		.timer_ms = NEVER,
+		.master = { .current = FPLINUX_AUDIO_MIXER_UNITY,
+			    .target = FPLINUX_AUDIO_MIXER_UNITY },
 	};
 	enum fplinux_cli_result parsed = fplinux_cli_parse(&cli, argc, argv);
 	int result = 1;

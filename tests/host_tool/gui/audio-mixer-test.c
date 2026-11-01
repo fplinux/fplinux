@@ -501,9 +501,50 @@ static void test_literal_resampling(void)
 	      "literal resampling publishes all four input frames");
 }
 
+static void test_master_volume(void)
+{
+	const int32_t samples[] = { 60000, -60000, 40000, -40000,
+				    20000, -20000, 10000, -10000 };
+	const int16_t unity[] = { 32767, -32768, 32767, -32768,
+				  20000, -20000, 10000, -10000 };
+	const int16_t half[] = { 30000, -30000, 20000, -20000,
+				 10000, -10000, 5000,  -5000 };
+	const int16_t ramp[] = { 32767, -32768, 30000, -30000,
+				 10000, -10000, 2500,  -2500 };
+	const int16_t silence[8] = { 0 };
+	struct fplinux_audio_mixer_gain gain;
+	int32_t mix[8];
+	int16_t output[8];
+
+	gain = (struct fplinux_audio_mixer_gain){ 32768, 32768 };
+	memcpy(mix, samples, sizeof(mix));
+	fplinux_audio_mixer_master(mix, 4, &gain);
+	fplinux_audio_mixer_output(mix, output, 4);
+	check(!memcmp(output, unity, sizeof(output)),
+	      "master unity clips after mixing");
+	gain = (struct fplinux_audio_mixer_gain){ 16384, 16384 };
+	memcpy(mix, samples, sizeof(mix));
+	fplinux_audio_mixer_master(mix, 4, &gain);
+	fplinux_audio_mixer_output(mix, output, 4);
+	check(!memcmp(output, half, sizeof(output)),
+	      "master half scales before clipping");
+	gain = (struct fplinux_audio_mixer_gain){ 32768, 0 };
+	memcpy(mix, samples, sizeof(mix));
+	fplinux_audio_mixer_master(mix, 4, &gain);
+	fplinux_audio_mixer_output(mix, output, 4);
+	check(!memcmp(output, ramp, sizeof(output)) && gain.current == 0,
+	      "master ramps down across a period");
+	memcpy(mix, samples, sizeof(mix));
+	fplinux_audio_mixer_master(mix, 4, &gain);
+	fplinux_audio_mixer_output(mix, output, 4);
+	check(!memcmp(output, silence, sizeof(output)),
+	      "master mute is silent");
+}
+
 int main(void)
 {
 	test_literal_resampling();
+	test_master_volume();
 	test_identity_and_dry();
 	test_mono_to_stereo();
 	test_interpolation(44100, 2);

@@ -497,7 +497,10 @@ def userspace_c_include_flags(source: str) -> list[str]:
         flags.extend(pkg_config_cflags("wayland-server"))
         flags.extend(pkg_config_cflags("xkbcommon"))
         flags.extend(pkg_config_cflags("libinput"))
-    if path.parts[:3] == (*APORT_ROOT, "fplinux-bluetooth"):
+    if (
+        path.parts[:3] == (*APORT_ROOT, "fplinux-bluetooth")
+        or source in registration.BLUEZ_ADAPTER_SOURCES
+    ):
         flags.extend(pkg_config_cflags("dbus-1"))
     if source == "lib/fplinux/fplinux-input-session.c":
         flags.extend(pkg_config_cflags("libevdev"))

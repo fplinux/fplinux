@@ -12,6 +12,7 @@
 
 enum fplinux_session_setting {
 	FPLINUX_SESSION_SETTING_BRIGHTNESS,
+	FPLINUX_SESSION_SETTING_VOLUME,
 	FPLINUX_SESSION_SETTING_SCREEN_OFF,
 	FPLINUX_SESSION_SETTING_AUTO_LOCK,
 	FPLINUX_SESSION_SETTING_LOCALE,
@@ -31,6 +32,8 @@ enum fplinux_session_setting {
 struct fplinux_session_settings {
 	bool has_brightness;
 	unsigned int brightness;
+	bool has_volume;
+	unsigned int volume;
 	unsigned int screen_off_seconds;
 	int auto_lock_seconds;
 	char locale[FPLINUX_UI_SESSION_LOCALE_BYTES];

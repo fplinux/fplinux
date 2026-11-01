@@ -86,6 +86,7 @@ int main(int argc, char **argv)
 	int epoll_fd;
 	int listener;
 	int server;
+	unsigned int level;
 	struct resync_owner initial[] = {
 		{ .owner = "APP 100 1000 org.example.a",
 		  .audible = "AUDIBLE 100 1" },
@@ -124,6 +125,8 @@ int main(int argc, char **argv)
 	assert(audio.fd == -1);
 	assert(fplinux_session_audio_deadline(&audio) == 0);
 	fplinux_session_audio_init(&audio, argv[1], epoll_fd);
+	assert(!fplinux_session_audio_set_volume(&audio, 11, 0));
+	assert(fplinux_session_audio_set_volume(&audio, 3, 0));
 	assert(fplinux_session_audio_app(&audio, 100, 1000, "org.example.a",
 					 0));
 	assert(fplinux_session_audio_app(&audio, 200, 1000, "org.example.b",
@@ -138,6 +141,24 @@ int main(int argc, char **argv)
 	fplinux_session_audio_audible(&audio, 500, true, 0);
 	fplinux_session_audio_dispatch(&audio, 0);
 	server = accept_client(listener);
+	expect(server, "VOLUME 3");
+	expect_none(server);
+	assert(fplinux_session_audio_volume_pending(&audio));
+	assert(!fplinux_session_audio_volume_applied(&audio, &level));
+	assert(fplinux_session_audio_set_volume(&audio, 8, 1));
+	assert(fplinux_session_audio_set_volume(&audio, 4, 1));
+	assert(send(server, "VOLUME 3", 8, 0) == 8);
+	fplinux_session_audio_dispatch(&audio, 1);
+	assert(fplinux_session_audio_volume_applied(&audio, &level) &&
+	       level == 3);
+	assert(fplinux_session_audio_volume_pending(&audio));
+	expect(server, "VOLUME 4");
+	expect_none(server);
+	assert(send(server, "VOLUME 4", 8, 0) == 8);
+	fplinux_session_audio_dispatch(&audio, 2);
+	assert(fplinux_session_audio_volume_applied(&audio, &level) &&
+	       level == 4);
+	assert(!fplinux_session_audio_volume_pending(&audio));
 	expect_resync(server, initial, sizeof(initial) / sizeof(initial[0]));
 	/* Hiding the application must not silence the bounded clock helper. */
 	fplinux_session_audio_audible(&audio, 100, false, 1);
@@ -153,6 +174,7 @@ int main(int argc, char **argv)
 	assert(epoll_wait(epoll_fd, &event, 1, 2000) == 1);
 	fplinux_session_audio_dispatch(&audio, 10);
 	assert(audio.fd == -1);
+	assert(!fplinux_session_audio_volume_applied(&audio, &level));
 	assert(fplinux_session_audio_deadline(&audio) == 110);
 	assert(fplinux_session_audio_clock(&audio, 600, 42, 11));
 	fplinux_session_audio_audible(&audio, 600, true, 11);
@@ -162,6 +184,31 @@ int main(int argc, char **argv)
 	       errno == EAGAIN);
 	fplinux_session_audio_dispatch(&audio, 110);
 	server = accept_client(listener);
+	expect(server, "VOLUME 4");
+	expect_none(server);
+	assert(send(server, "VOLUME 4", 8, 0) == 8);
+	fplinux_session_audio_dispatch(&audio, 111);
+	expect_resync(server, resumed, sizeof(resumed) / sizeof(resumed[0]));
+	assert(fplinux_session_audio_set_volume(&audio, 0, 120));
+	expect(server, "VOLUME 0");
+	assert(fplinux_session_audio_volume_pending(&audio));
+	assert(fplinux_session_audio_deadline(&audio) == 1120);
+	fplinux_session_audio_dispatch(&audio, 1120);
+	assert(audio.fd == -1);
+	assert(!fplinux_session_audio_volume_applied(&audio, &level));
+	close(server);
+	fplinux_session_audio_dispatch(&audio, 1220);
+	server = accept_client(listener);
+	expect(server, "VOLUME 0");
+	assert(send(server, "VOLUME 0", 8, 0) == 8);
+	fplinux_session_audio_dispatch(&audio, 1221);
+	assert(fplinux_session_audio_volume_applied(&audio, &level) &&
+	       level == 0);
+	assert(!fplinux_session_audio_volume_pending(&audio));
+	for (size_t i = 0; i < sizeof(resumed) / sizeof(resumed[0]); ++i) {
+		resumed[i].announced = false;
+		resumed[i].told = false;
+	}
 	expect_resync(server, resumed, sizeof(resumed) / sizeof(resumed[0]));
 	fplinux_session_audio_close(&audio);
 	assert(recv(server, &event, sizeof(event), MSG_DONTWAIT) == 0);

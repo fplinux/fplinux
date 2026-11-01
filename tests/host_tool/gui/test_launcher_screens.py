@@ -27,6 +27,7 @@ from tests.host_tool.gui.frame_pixels import (
     rgb565,
 )
 from tests.host_tool.gui.list_rows import ListArea, frame_pixels, sequence_faults
+from tests.host_tool.gui.private_bus import private_bus
 from tests.process import run_process
 
 if TYPE_CHECKING:
@@ -1002,6 +1003,81 @@ QUICK_SETTINGS_ROWS = {
     (240, 320): ((48, 32), 43),
     (320, 240): ((47, 22), 43),
 }
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+@pytest.mark.parametrize(
+    "screen", list(QUICK_SETTINGS_ROWS), ids=lambda screen: "x".join(map(str, screen))
+)
+def test_actual_quick_settings_follow_manager_and_bluez_with_whole_rows(  # noqa: PLR0913, PLR0917 -- explicit matrix inputs.
+    launcher_native: Path,
+    launcher_catalogue: tuple[Path, Path],
+    ui_icon_resources: Path,
+    tmp_path: Path,
+    screen: tuple[int, int],
+    theme: str,
+) -> None:
+    """Dial on Home opens the real panel; a peer answers as the manager, a fake as BlueZ.
+
+    The fake replaces bluetoothd at its D-Bus boundary on a private bus.
+    """
+    applications, icons = launcher_catalogue
+    width, height = screen
+    with private_bus() as bus:
+        result = run_process(
+            [
+                str(launcher_native / "launcher-screens"),
+                str(width),
+                str(height),
+                str(launcher_native / "launcher"),
+                str(SCREENS / "keypad.xkb"),
+                str(tmp_path / "session.sock"),
+                str(tmp_path),
+                str(applications),
+                str(icons),
+                theme,
+                "1",
+                "quick-settings",
+                "en",
+            ],
+            name=f"actual Quick settings at {width}x{height} ({theme})",
+            env=bus.environment()
+            | {"FPLINUX_NATIVE_GLYPHS": str(ui_icon_resources / "usr/share/fplinux/glyphs")},
+            timeout=60,
+        )
+    (tmp_path / "capture.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+    retain_capture(tmp_path, f"launcher-quick-settings-{width}x{height}-{theme}")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.splitlines()[-1] == (
+        "launcher-quick-settings: inline levels and Bluetooth follow the manager and BlueZ"
+    )
+    bars, pitch = QUICK_SETTINGS_ROWS[screen]
+    area = ListArea(
+        width=width,
+        top=bars[0],
+        bottom=height - bars[1],
+        pitch=pitch,
+        edge=(0, 2),
+        divider=0xBE39 if theme == "light" else 0x3A29,
+        highlight=0x3B0E if theme == "light" else 0xAE7B,
+    )
+    # The level rows give the complete list its detail pitch.
+    frames = {
+        name: frame_pixels((tmp_path / f"quick-{name}.rgb565").read_bytes(), width)
+        for name in ("list", "bluetooth-off", "bluetooth-on")
+    }
+    assert sequence_faults(frames, area) == []
+    states = {
+        (tmp_path / f"quick-{name}.rgb565").read_bytes()
+        for name in (
+            "list",
+            "bluetooth-off",
+            "bluetooth-on",
+            "no-bluetooth",
+            "brightness-unavailable",
+        )
+    }
+    assert len(states) == 5
 
 
 # The soft-key legends of the Settings Bluetooth screens, as left|centre|right.

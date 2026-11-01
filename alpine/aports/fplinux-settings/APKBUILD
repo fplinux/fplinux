@@ -8,7 +8,7 @@ arch="armv7"
 license="GPL-2.0-only"
 depends="fplinux-ui fplinux-brand"
 makedepends_build="clang22 lld22 pkgconf gettext"
-makedepends_host="musl-dev musl-libintl linux-headers fplinux-ui-dev"
+makedepends_host="musl-dev musl-libintl linux-headers fplinux-ui-dev dbus-dev"
 options="!check"
 source="
 	fplinux-settings.c
@@ -27,6 +27,8 @@ source="
 	fplinux-utf8.h
 	fplinux-multitap.c
 	fplinux-multitap.h
+	fplinux-bluez-adapter.c
+	fplinux-bluez-adapter.h
 	ru.po
 "
 builddir="$srcdir"
@@ -35,11 +37,12 @@ build() {
 	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
 	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
-		$(pkg-config --cflags fplinux-ui) \
+		$(pkg-config --cflags fplinux-ui dbus-1) \
 		fplinux-settings.c settings-core.c fplinux-cli.c fplinux-ui-profile.c \
 		fplinux-settings-values.c \
 		fplinux-language.c fplinux-multitap.c fplinux-utf8.c \
-		$(pkg-config --libs fplinux-ui) $LDFLAGS \
+		fplinux-bluez-adapter.c \
+		$(pkg-config --libs fplinux-ui dbus-1) $LDFLAGS \
 		-Wl,--gc-sections -o fplinux-settings
 	# English is the source text; other languages are catalogues.
 	msgfmt --check --output-file=ru.mo ru.po
@@ -55,7 +58,7 @@ package() {
 }
 
 sha512sums="
-b5cccaaf155303cc8c7a7e569bd3d9224908facbfeaf90a5f110d39c6f5870853bc443a5ea7bc09c72be5d82760f27ab72e1c2986563f668627c562a58f41abd  fplinux-settings.c
+2674f54ca751de3d0433d17a15192ea04acb605fba500ef3166d838de51c15968617a8b633671643594f11d79c5c10da7c34a6b2ede40e4030fe11670c3dda91  fplinux-settings.c
 60be1ccccf0215ea13bc64fd442a0498e7db203234ce74f92cec502295e8ac703a089438848b9a1850102836855537f561e9bd8313751574a069eb0ec6dcf31a  fplinux-cli.c
 9677a324ea1cbcca154f472c83eb0660badfa11c2b444116f27080bd839dee2ab9ea6ef3b0c495f6074207559b813c843f284786f8b1e3c89023121b5aacb453  fplinux-cli.h
 4ab7adb7cb7c0813d88b65ccce9dfc23a7e733337d2109a5019254fb4770adbcfd927edff3cb01968049fc15d3f8d1db718cc8a3e466b654e72269dea84ff9f3  settings-core.c
@@ -71,5 +74,7 @@ e3e550c2f07726b0f20d49f30300e88c862b3cac031c29b4a89c282719634fea22a5cc6a491c081d
 8143f656608c63e42016da2003174d6fb2ac043daaad07e63e006bf3dc76544e76e820ae52a9c50f5559d58757c44aeded2b1cd4b01b4665938a7e88b4bc1d43  fplinux-utf8.h
 2063a9c3e501b867b39f97a20200e7213cbc02dd7e856ea7dd1d61703af113cc38e853ac6a7ff007929f93264b1831b9141a542ca11152cf76a3d5ef4fb1ff9c  fplinux-multitap.c
 0cccc5788f6a878ae1d48ae3af22fd0902e63e7fa7b06e7f00fb815aa51bbbaff88ba0b92bba917fd868dfdf8436e6977827231decb416d7cd15115f7ad845d4  fplinux-multitap.h
-1fead3d4cb8fa8d8110aba2302f5f4842398348268d5cd1ee07dc70d934127910e921baaa8cb64bcd45ca62a254643e6b41fe643bc7faf85766eae3ddd88c3e1  ru.po
+bebfd81939d865780075792c85fb3fb6436936e3e09ff458bc1756de3dc44d045a5579de632fa1ca675694fed348840bb39d5e29f0a8c6d8ac9a3305f8b28294  fplinux-bluez-adapter.c
+c6caf1aadbe3a471f6174c3b01bebcf5e6beb4785c7ed0aabb62675ae3a22cd001f3c337616f73424016c9ed74dd0dd8dee32379db21a4e05b774156f0f51c33  fplinux-bluez-adapter.h
+ebd5c35facbf2dc170880184abaa6ad52dfab365dd76bc66251274007472dceaf95f33b2527f990d2820d29d3300f5b1a8e350f8a93f2d86df33f44f5edebdfc  ru.po
 "

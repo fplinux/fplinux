@@ -26,6 +26,8 @@ Hold a D-pad key to continue moving. In lists, <Key>Up</Key> from the first item
 
 A short press and release of <Key>Red</Key> returns to Home and keeps the application open. <Key>Ctrl</Key>+<Key>Esc</Key> does the same on an external keyboard. To close an application, use its **Back** action from its first screen or choose **Close app** in Tasks.
 
+Press <Key>Dial</Key> on Home to open [Quick settings](#quick-settings).
+
 Press <Key>Left soft</Key> on Home to open **Tasks** and return to an application's previous screen, or choose **Close app** and confirm to close it. Unlike opening from the catalog, returning through Tasks keeps the current page, selection and scroll position. An application that needs a save decision returns to the foreground. See [saving and storage errors](#saving-and-storage-errors) before discarding changes.
 
 An external keyboard uses arrows, <Key>Enter</Key> and <Key>Esc</Key> for navigation. <Key>Tab</Key> opens Tasks from Home or switches the catalog view. Available Bluetooth and forwarded USB keyboards depend on the phone's [input support](/fplinux/use/connect/#type-with-your-computers-keyboard).
@@ -56,6 +58,7 @@ An untouched empty note creates no saved document. Clearing a previously saved n
 Open Settings from the catalog:
 
 - **Display** controls brightness from `1` to `10`, screen timeout, auto-lock and the light or dark theme.
+- **Bluetooth** turns the phone's Bluetooth on and off, as described in [Bluetooth](/fplinux/use/bluetooth/#turn-bluetooth-on-and-off). It is listed only while Bluetooth is available.
 - **Time & language** changes the date and time in UTC and the interface language.
 - **Input** selects the keypad input language independently of the interface language.
 - **About** shows the phone model when available, system name, build ID, Alpine and kernel versions, and available memory. Include the build ID when reporting a problem.
@@ -65,6 +68,15 @@ In **Display → Brightness**, use Left and Right to preview a level. **Save** k
 In **Time & language → Date and time**, select Date or Time and press Centre to edit it. Enter digits directly, use Left and Right to select a part, and Up and Down to change it. Times are in UTC. Return to the form and choose **Save** to set the clock. The form stays open until the change is confirmed; a failed attempt keeps your entered values and shows the current clock. Leaving an edited form asks whether to stay or leave without saving. Returning Home keeps the draft.
 
 The available languages come from installed language packages. The standard image includes English and Russian. Changing a theme or interface language closes other graphical applications and reloads Home, so save your work first. The selection marker changes after confirmation; **Applying…** means the change is still pending. See [Clock and alarms](/fplinux/use/power/#clock-and-alarms) for clock synchronization and battery-backed time.
+
+## Quick settings
+
+Press <Key>Dial</Key> on Home to open Quick settings. **Back**, <Key>Dial</Key> or a short press of <Key>Red</Key> returns to Home. Quick settings opens only from Home.
+
+- **Brightness** and **Volume** change with Left and Right. **Save** keeps the new level and **Cancel** restores the previous level. Leaving Quick settings without saving also restores it.
+- **Volume** controls application audio through the FPLinux audio service. Direct ALSA playback and FM radio use their own controls.
+- **Wi-Fi** turns the wireless interface on or off when available. Connecting to a network is a separate step.
+- **Bluetooth** turns Bluetooth on and off as in [Settings](/fplinux/use/bluetooth/#turn-bluetooth-on-and-off). The row is shown only while Bluetooth is available.
 
 ## Keeping data
 

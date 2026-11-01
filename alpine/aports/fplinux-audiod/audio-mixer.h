@@ -104,4 +104,8 @@ uint32_t fplinux_audio_mixer_heard(struct fplinux_audio_mixer_stream *stream,
 void fplinux_audio_mixer_output(const int32_t *mix, int16_t *output,
 				uint32_t frames);
 
+/* Apply a master gain to the complete mix, ramping across one period. */
+void fplinux_audio_mixer_master(int32_t *mix, uint32_t frames,
+				struct fplinux_audio_mixer_gain *gain);
+
 #endif

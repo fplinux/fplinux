@@ -64,6 +64,39 @@
         "24": "outline"
       }
     },
+    "bluetooth": {
+      "source": "tabler",
+      "name": "bluetooth",
+      "stroke_px": 2,
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "volume": {
+      "source": "tabler",
+      "name": "volume",
+      "stroke_px": 2,
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
+    "wifi": {
+      "source": "tabler",
+      "name": "wifi",
+      "stroke_px": 2,
+      "styles": {
+        "12": "outline",
+        "16": "outline",
+        "20": "outline",
+        "24": "outline"
+      }
+    },
     "screen-timeout": {
       "source": "tabler",
       "name": "hourglass",

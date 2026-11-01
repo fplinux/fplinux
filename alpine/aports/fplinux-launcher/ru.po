@@ -175,3 +175,60 @@ msgstr "Ожидание…"
 
 msgid "Action failed. Try again."
 msgstr "Не удалось выполнить действие. Попробуйте ещё раз."
+
+msgid "Quick settings"
+msgstr "Быстрые настройки"
+
+msgid "Brightness"
+msgstr "Яркость"
+
+msgid "Volume"
+msgstr "Громкость"
+
+msgid "Wi-Fi"
+msgstr "Wi-Fi"
+
+msgid "Save"
+msgstr "Сохранить"
+
+msgid "Unavailable"
+msgstr "Недоступно"
+
+msgid "The setting is applied for this session. It was not saved."
+msgstr "Настройка действует в текущем сеансе, но не сохранена."
+
+msgid "The setting is applied. Saving is not confirmed."
+msgstr "Настройка применена. Сохранение не подтверждено."
+
+msgid "The setting was not changed. Try again."
+msgstr "Настройка не изменена. Повторите."
+
+msgid "This setting is unavailable now. Try again later."
+msgstr "Настройка недоступна. Повторите позже."
+
+msgid "Bluetooth"
+msgstr "Bluetooth"
+
+msgid "On"
+msgstr "Вкл."
+
+msgid "Off"
+msgstr "Выкл."
+
+msgid "Turn on"
+msgstr "Включить"
+
+msgid "Turn off"
+msgstr "Выключить"
+
+msgid "Turning on"
+msgstr "Включение"
+
+msgid "Turning off"
+msgstr "Выключение"
+
+msgid "Cannot turn Bluetooth on. Try again."
+msgstr "Не удалось включить Bluetooth. Повторите."
+
+msgid "Cannot turn Bluetooth off. Try again."
+msgstr "Не удалось выключить Bluetooth. Повторите."

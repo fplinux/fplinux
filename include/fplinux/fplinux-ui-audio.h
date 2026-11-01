@@ -11,8 +11,8 @@ struct fplinux_audio_stream;
 
 /*
  * Streams carry interleaved signed 16-bit native-endian mono or stereo
- * frames. The system resamples and mixes them without changing volume or
- * output routes. Applications never open the sound device.
+ * frames. The system resamples and mixes them at the system volume without
+ * changing output routes. Applications never open the sound device.
  *
  * Hiding an application (Home, keyguard, display off or a system notice)
  * pauses its streams with their frames kept; showing it resumes them.

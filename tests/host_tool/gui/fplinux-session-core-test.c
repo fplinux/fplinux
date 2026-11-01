@@ -1,7 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
 #include "session-core.h"
+#include "session-settings.h"
 #include "session-storage.h"
+#include "session-wireless.h"
 #include "settings-session-boundary.h"
 
 #include <errno.h>
@@ -80,6 +82,9 @@ struct fixture {
 	char audio_socket[PATH_MAX];
 	char audio_messages[128][256];
 	size_t audio_message_count;
+	unsigned int audio_volume;
+	bool hold_audio_ack;
+	char held_audio_ack[256];
 	unsigned int teardown_callbacks;
 	bool frame_held;
 	unsigned int visible_frame;
@@ -137,6 +142,98 @@ static void fail(const char *expression, int line)
 		if (!(expression))                   \
 			fail(#expression, __LINE__); \
 	} while (0)
+
+/* The worker boundary is controlled here; session-core remains production code. */
+struct fplinux_session_wireless {
+	int notification[2];
+	struct fplinux_session_wireless_state state;
+	bool pending;
+	bool requested;
+	bool ready;
+	int result;
+};
+
+static struct fplinux_session_wireless *test_wireless;
+static bool hold_wireless_result;
+
+static void wireless_notify(struct fplinux_session_wireless *wireless)
+{
+	CHECK(write(wireless->notification[1], "x", 1) == 1);
+}
+
+struct fplinux_session_wireless *fplinux_session_wireless_create(void)
+{
+	struct fplinux_session_wireless *wireless =
+		calloc(1, sizeof(*wireless));
+
+	CHECK(wireless &&
+	      pipe2(wireless->notification, O_NONBLOCK | O_CLOEXEC) == 0);
+	wireless->state.supported = getenv("FPLINUX_TEST_WIFI") != NULL;
+	wireless->state.known = wireless->state.supported;
+	test_wireless = wireless;
+	wireless_notify(wireless);
+	return wireless;
+}
+
+void fplinux_session_wireless_destroy(struct fplinux_session_wireless *wireless)
+{
+	close(wireless->notification[0]);
+	close(wireless->notification[1]);
+	free(wireless);
+	test_wireless = NULL;
+}
+
+int fplinux_session_wireless_fd(const struct fplinux_session_wireless *wireless)
+{
+	return wireless->notification[0];
+}
+
+void fplinux_session_wireless_dispatch(struct fplinux_session_wireless *wireless)
+{
+	char bytes[32];
+
+	while (read(wireless->notification[0], bytes, sizeof(bytes)) > 0)
+		;
+}
+
+struct fplinux_session_wireless_state
+fplinux_session_wireless_state(struct fplinux_session_wireless *wireless)
+{
+	return wireless->state;
+}
+
+static void finish_test_wireless(int error)
+{
+	CHECK(test_wireless && test_wireless->pending);
+	test_wireless->pending = false;
+	test_wireless->ready = true;
+	test_wireless->result = error;
+	if (!error)
+		test_wireless->state.enabled = test_wireless->requested;
+	wireless_notify(test_wireless);
+}
+
+int fplinux_session_wireless_request(struct fplinux_session_wireless *wireless,
+				     bool enabled)
+{
+	if (wireless->pending || wireless->ready)
+		return EBUSY;
+	wireless->pending = true;
+	wireless->requested = enabled;
+	if (!hold_wireless_result)
+		finish_test_wireless(0);
+	return 0;
+}
+
+bool fplinux_session_wireless_take_result(
+	struct fplinux_session_wireless *wireless, int *error)
+{
+	if (!wireless->ready)
+		return false;
+	wireless->ready = false;
+	*error = wireless->result;
+	return true;
+}
 
 /* These wraps replace the privileged clock boundary, never the session code. */
 int __wrap_clock_settime(clockid_t clock, const struct timespec *value)
@@ -599,6 +696,16 @@ static void observe_audio(struct fixture *fixture)
 		packet[bytes] = '\0';
 		strcpy(fixture->audio_messages[fixture->audio_message_count++],
 		       packet);
+		if (!strncmp(packet, "VOLUME ", 7)) {
+			CHECK(sscanf(packet, "VOLUME %u",
+				     &fixture->audio_volume) == 1);
+			if (fixture->hold_audio_ack)
+				strcpy(fixture->held_audio_ack, packet);
+			else
+				CHECK(send(fixture->audio_control, packet,
+					   strlen(packet), MSG_NOSIGNAL) ==
+				      (ssize_t)strlen(packet));
+		}
 	}
 }
 
@@ -663,10 +770,14 @@ static struct fixture *create_fixture(const char *root, int width, int height,
 			"input.indicator.sentence=Абв\ninput.indicator.lower=абв\n"
 			"input.indicator.upper=АБВ\n");
 	}
-	CHECK(snprintf(settings, sizeof(settings),
-		       "screen_off_seconds=30\nauto_lock_seconds=%s\n"
-		       "locale=%s\ninput_locale=en\ntheme=light\nbrightness=7\n",
-		       media ? "0" : "off", locale) < (int)sizeof(settings));
+	CHECK(snprintf(
+		      settings, sizeof(settings),
+		      "screen_off_seconds=30\nauto_lock_seconds=%s\n"
+		      "locale=%s\ninput_locale=en\ntheme=light\nbrightness=7\n%s",
+		      media ? "0" : "off", locale,
+		      getenv("FPLINUX_TEST_VOLUME_PRESET") ?
+			      "volume=4\n" :
+			      "") < (int)sizeof(settings));
 	write_file(fixture->settings, settings);
 	fixture->listener = listen_at(fixture->peer_socket);
 	CHECK(fcntl(fixture->listener, F_SETFL, O_NONBLOCK) == 0);
@@ -2660,6 +2771,309 @@ static void test_brightness_restore(struct fixture *fixture, bool crash)
 						   settings->pid));
 	}
 	expect_file(fixture->brightness_level, "7\n");
+}
+
+static void set_quick_settings_view(struct fixture *fixture,
+				    struct peer *launcher, bool opened)
+{
+	struct fplinux_ui_session_message select = {
+		.type = FPLINUX_UI_SESSION_SELECT,
+		.value = "quick-settings",
+		.enabled = opened,
+		.selected_id = TEST_APP,
+		.name = "transient-only",
+	};
+
+	issue(fixture, launcher, &select);
+}
+
+static void expect_setting_refused(struct fixture *fixture,
+				   struct peer *launcher, const char *name,
+				   const char *value)
+{
+	setting(fixture, launcher, name, value);
+	struct fplinux_ui_session_message reply =
+		wait_message(fixture, launcher, FPLINUX_UI_SESSION_ERROR, name);
+
+	CHECK(!strcmp(reply.reason, "not-foreground") && !reply.applied);
+}
+
+static const char saved_level_7[] =
+	"screen_off_seconds=30\nauto_lock_seconds=off\n"
+	"locale=en\ninput_locale=en\ntheme=light\nbrightness=7\n";
+
+/* Quick settings over Home previews 3 over the stored level 7. */
+static void preview_in_quick_settings(struct fixture *fixture,
+				      struct peer *launcher)
+{
+	struct fplinux_ui_session_message reply;
+
+	select_launcher_view(fixture, launcher, "home", "grid");
+	set_quick_settings_view(fixture, launcher, true);
+	setting(fixture, launcher, "brightness", "");
+	reply = wait_message(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
+			     "brightness");
+	CHECK(!strcmp(reply.value, "7"));
+	setting(fixture, launcher, "brightness_preview", "3");
+	reply = wait_message(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
+			     "brightness_preview");
+	CHECK(!strcmp(reply.value, "3"));
+	expect_file(fixture->brightness_level, "3\n");
+}
+
+/*
+ * Save keeps the previewed level; every other way out of Quick settings
+ * restores the level from before the preview without saving anything.
+ */
+static void test_quick_settings_preview_ends(struct fixture *fixture,
+					     const char *exit)
+{
+	struct peer *launcher = start_launcher(fixture);
+	const char *stored = saved_level_7;
+
+	if (!strcmp(exit, "lock")) {
+		struct peer *settings =
+			show_app(fixture, launcher, TEST_SETTINGS);
+
+		setting(fixture, settings, "auto_lock_seconds", "0");
+		wait_message(fixture, settings, FPLINUX_UI_SESSION_SETTING,
+			     "auto_lock_seconds");
+		return_home(fixture, launcher);
+		stored = "screen_off_seconds=30\nauto_lock_seconds=0\n"
+			 "locale=en\ninput_locale=en\ntheme=light\n"
+			 "brightness=7\n";
+	}
+	preview_in_quick_settings(fixture, launcher);
+	if (!strcmp(exit, "save")) {
+		setting(fixture, launcher, "brightness", "4");
+		struct fplinux_ui_session_message reply =
+			wait_message(fixture, launcher,
+				     FPLINUX_UI_SESSION_SETTING, "brightness");
+
+		CHECK(!strcmp(reply.value, "4") && reply.applied &&
+		      reply.storage_state == FPLINUX_STORAGE_DURABLE);
+		set_quick_settings_view(fixture, launcher, false);
+		expect_file(fixture->brightness_level, "4\n");
+		expect_file(fixture->settings,
+			    "screen_off_seconds=30\nauto_lock_seconds=off\n"
+			    "locale=en\ninput_locale=en\ntheme=light\n"
+			    "brightness=4\n");
+		return;
+	}
+	if (!strcmp(exit, "close")) {
+		set_quick_settings_view(fixture, launcher, false);
+	} else if (!strcmp(exit, "red")) {
+		clear_messages(fixture, launcher);
+		phone_gesture(fixture, FPLINUX_KEY_POWER);
+		wait_message(fixture, launcher, FPLINUX_UI_SESSION_HOME, NULL);
+		CHECK(!fplinux_session_is_locked(fixture->session));
+	} else if (!strcmp(exit, "crash")) {
+		struct command crash = { .type = COMMAND_CRASH };
+
+		send_command(launcher->fd, &crash);
+		wait_reaped(fixture, launcher->pid);
+	} else if (!strcmp(exit, "lock")) {
+		fixture->now_ms += 30000;
+		pump(fixture, 4);
+		CHECK(fplinux_session_is_locked(fixture->session));
+	} else {
+		CHECK(!strcmp(exit, "launch"));
+		launch_app(fixture, launcher, TEST_APP);
+	}
+	expect_file(fixture->brightness_level, "7\n");
+	expect_file(fixture->settings, stored);
+	if (!strcmp(exit, "red") || !strcmp(exit, "close"))
+		/* The ended view has no authority left to change the level. */
+		expect_setting_refused(fixture, launcher, "brightness_preview",
+				       "2");
+	expect_file(fixture->brightness_level, "7\n");
+}
+
+/* Only the launcher, only for brightness and only over the unlocked Home. */
+static void test_quick_settings_authority(struct fixture *fixture)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct fplinux_ui_session_message ignored;
+
+	select_launcher_view(fixture, launcher, "home", "grid");
+	expect_setting_refused(fixture, launcher, "brightness_preview", "3");
+	expect_setting_refused(fixture, launcher, "brightness", "4");
+	select_launcher_view(fixture, launcher, "catalogue", "grid");
+	set_quick_settings_view(fixture, launcher, true);
+	expect_setting_refused(fixture, launcher, "brightness_preview", "3");
+	set_quick_settings_view(fixture, launcher, false);
+
+	struct peer *app = show_app(fixture, launcher, TEST_APP);
+
+	set_quick_settings_view(fixture, launcher, true);
+	expect_setting_refused(fixture, launcher, "brightness_preview", "3");
+	expect_setting_refused(fixture, launcher, "brightness", "4");
+	expect_file(fixture->brightness_level, "7\n");
+	/* Quick settings gives an ordinary application no authority. */
+	setting(fixture, app, "brightness_preview", "3");
+	wait_reaped(fixture, app->pid);
+	CHECK(!take_message(app, FPLINUX_UI_SESSION_SETTING, NULL, &ignored));
+	expect_file(fixture->brightness_level, "7\n");
+
+	return_home(fixture, launcher);
+	set_quick_settings_view(fixture, launcher, true);
+	setting(fixture, launcher, "theme", "dark");
+	wait_reaped(fixture, launcher->pid);
+	CHECK(!take_message(launcher, FPLINUX_UI_SESSION_SETTING, NULL,
+			    &ignored));
+	expect_file(fixture->settings, saved_level_7);
+	expect_file(fixture->brightness_level, "7\n");
+}
+
+static void acknowledge_audio(struct fixture *fixture)
+{
+	size_t length = strlen(fixture->held_audio_ack);
+
+	CHECK(length && fixture->audio_control >= 0);
+	CHECK(send(fixture->audio_control, fixture->held_audio_ack, length,
+		   MSG_NOSIGNAL) == (ssize_t)length);
+	fixture->held_audio_ack[0] = '\0';
+	fixture->hold_audio_ack = false;
+}
+
+static void test_volume_controls(struct fixture *fixture, const char *scenario)
+{
+	struct fplinux_ui_session_message response;
+	struct peer *launcher = start_launcher(fixture);
+
+	select_launcher_view(fixture, launcher, "home", "grid");
+	expect_setting_refused(fixture, launcher, "volume", "0");
+	set_quick_settings_view(fixture, launcher, true);
+	setting(fixture, launcher, "volume", "");
+	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
+				"volume");
+	if (!strcmp(scenario, "volume-loaded")) {
+		CHECK(!strcmp(response.value, "4"));
+		return;
+	}
+	CHECK(!strcmp(response.value, "10"));
+	fixture->hold_audio_ack = true;
+	setting(fixture, launcher, "volume_preview", "0");
+	CHECK(!strcmp(fixture->held_audio_ack, "VOLUME 0"));
+	CHECK(!take_message(launcher, FPLINUX_UI_SESSION_SETTING,
+			    "volume_preview", &response));
+	if (!strcmp(scenario, "volume-cancel-pending")) {
+		set_quick_settings_view(fixture, launcher, false);
+		acknowledge_audio(fixture);
+		pump(fixture, 30);
+		set_quick_settings_view(fixture, launcher, true);
+		setting(fixture, launcher, "volume", "");
+		response = wait_message(fixture, launcher,
+					FPLINUX_UI_SESSION_SETTING, "volume");
+		CHECK(!strcmp(response.value, "10"));
+		CHECK(!take_message(launcher, FPLINUX_UI_SESSION_SETTING,
+				    "volume_preview", &response));
+		return;
+	}
+	if (!strcmp(scenario, "volume-timeout")) {
+		fixture->now_ms += 1001;
+		pump(fixture, 10);
+		response = wait_message(fixture, launcher,
+					FPLINUX_UI_SESSION_ERROR,
+					"volume_preview");
+		CHECK(!response.applied &&
+		      !strcmp(response.reason, "unavailable"));
+		fixture->hold_audio_ack = false;
+		fixture->now_ms += 200;
+		pump(fixture, 30);
+		setting(fixture, launcher, "volume", "");
+		response = wait_message(fixture, launcher,
+					FPLINUX_UI_SESSION_SETTING, "volume");
+		CHECK(!strcmp(response.value, "10"));
+		return;
+	}
+	acknowledge_audio(fixture);
+	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
+				"volume_preview");
+	CHECK(!strcmp(response.value, "0"));
+	if (!strcmp(scenario, "volume-cancel-repreview")) {
+		fixture->hold_audio_ack = true;
+		setting(fixture, launcher, "volume_preview", "");
+		CHECK(!strcmp(fixture->held_audio_ack, "VOLUME 10"));
+		setting(fixture, launcher, "volume_preview", "5");
+		CHECK(!strcmp(fixture->held_audio_ack, "VOLUME 10"));
+		acknowledge_audio(fixture);
+		response = wait_message(fixture, launcher,
+					FPLINUX_UI_SESSION_SETTING,
+					"volume_preview");
+		CHECK(!strcmp(response.value, "5") &&
+		      fixture->audio_volume == 5);
+		setting(fixture, launcher, "volume_preview", "");
+		response = wait_message(fixture, launcher,
+					FPLINUX_UI_SESSION_SETTING, "volume");
+		CHECK(!strcmp(response.value, "10") &&
+		      fixture->audio_volume == 10);
+		return;
+	}
+	if (!strcmp(scenario, "volume-save-fails"))
+		sync_fails = true;
+	setting(fixture, launcher, "volume", "0");
+	response = wait_message(fixture, launcher,
+				sync_fails ? FPLINUX_UI_SESSION_ERROR :
+					     FPLINUX_UI_SESSION_SETTING,
+				"volume");
+	if (sync_fails) {
+		CHECK(response.applied && !strcmp(response.value, "0") &&
+		      !strcmp(response.reason, "save-failed"));
+		sync_fails = false;
+		return;
+	}
+	CHECK(response.applied && !strcmp(response.value, "0") &&
+	      response.storage_state == FPLINUX_STORAGE_DURABLE);
+	expect_file(fixture->settings,
+		    "screen_off_seconds=30\nauto_lock_seconds=0\n"
+		    "locale=en\ninput_locale=en\ntheme=light\n"
+		    "brightness=7\nvolume=0\n");
+	struct fplinux_session_settings loaded;
+
+	CHECK(fplinux_session_settings_load(&loaded, fixture->languages,
+					    fixture->settings));
+	CHECK(loaded.has_volume && loaded.volume == 0);
+}
+
+static void test_wireless_controls(struct fixture *fixture, bool supported)
+{
+	struct fplinux_ui_session_message response;
+	struct peer *launcher = start_launcher(fixture);
+
+	select_launcher_view(fixture, launcher, "home", "grid");
+	expect_setting_refused(fixture, launcher, "wifi", "1");
+	set_quick_settings_view(fixture, launcher, true);
+	setting(fixture, launcher, "wifi", "");
+	response = wait_message(fixture, launcher,
+				supported ? FPLINUX_UI_SESSION_SETTING :
+					    FPLINUX_UI_SESSION_ERROR,
+				"wifi");
+	if (!supported) {
+		CHECK(!strcmp(response.reason, "unsupported"));
+		return;
+	}
+	CHECK(!strcmp(response.value, "0"));
+	hold_wireless_result = true;
+	setting(fixture, launcher, "wifi", "1");
+	CHECK(!take_message(launcher, FPLINUX_UI_SESSION_SETTING, "wifi",
+			    &response));
+	finish_test_wireless(0);
+	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_SETTING,
+				"wifi");
+	CHECK(!strcmp(response.value, "1"));
+	setting(fixture, launcher, "wifi", "0");
+	finish_test_wireless(EIO);
+	response = wait_message(fixture, launcher, FPLINUX_UI_SESSION_ERROR,
+				"wifi");
+	CHECK(!response.applied && !strcmp(response.value, "0") &&
+	      !strcmp(response.reason, "unavailable"));
+	setting(fixture, launcher, "wifi", "0");
+	set_quick_settings_view(fixture, launcher, false);
+	finish_test_wireless(EIO);
+	pump(fixture, 20);
+	CHECK(!take_message(launcher, FPLINUX_UI_SESSION_ERROR, "wifi",
+			    &response));
 }
 
 static void test_wake_stays_dark_before_presentation(struct fixture *fixture)
@@ -4919,9 +5333,14 @@ int main(int argc, char **argv)
 	CHECK(argc == 3 || argc == 7);
 	if (!strncmp(argv[1], "storage-", 8))
 		CHECK(setenv("FPLINUX_TEST_STORAGE", "1", 1) == 0);
+	if (!strcmp(argv[1], "wifi-controls"))
+		CHECK(setenv("FPLINUX_TEST_WIFI", "1", 1) == 0);
+	if (!strcmp(argv[1], "volume-loaded"))
+		CHECK(setenv("FPLINUX_TEST_VOLUME_PRESET", "1", 1) == 0);
 	CHECK(atexit(cleanup) == 0);
 	bool brightness = !strcmp(argv[1], "brightness-home") ||
 			  !strcmp(argv[1], "brightness-crash") ||
+			  !strncmp(argv[1], "quick-settings-", 15) ||
 			  !strncmp(argv[1], "settings-preview-cancel-", 24) ||
 			  !strncmp(argv[1], "task-view-", 10) ||
 			  !strncmp(argv[1], "wake-", 5);
@@ -4951,9 +5370,16 @@ int main(int argc, char **argv)
 		!strncmp(argv[1], "battery-notice-", 15) ? 80 :
 		!strncmp(argv[1], "battery-", 8)	 ? 3 :
 							   -1,
-		!strncmp(argv[1], "media-", 6));
+		!strncmp(argv[1], "media-", 6) ||
+			!strncmp(argv[1], "volume-", 7));
 
-	if (!strcmp(argv[1], "storage-no-card"))
+	if (!strncmp(argv[1], "volume-", 7))
+		test_volume_controls(fixture, argv[1]);
+	else if (!strcmp(argv[1], "wifi-controls") ||
+		 !strcmp(argv[1], "wifi-unsupported"))
+		test_wireless_controls(fixture,
+				       !strcmp(argv[1], "wifi-controls"));
+	else if (!strcmp(argv[1], "storage-no-card"))
 		test_storage_no_card(fixture);
 	else if (!strcmp(argv[1], "storage-busy-lifecycle"))
 		test_storage_busy_survives_home_and_discards_dead_origin(
@@ -5129,6 +5555,10 @@ int main(int argc, char **argv)
 		test_wake_output_reset(fixture, true);
 	else if (!strcmp(argv[1], "wake-launcher-restart"))
 		test_wake_launcher_restart(fixture);
+	else if (!strcmp(argv[1], "quick-settings-authority"))
+		test_quick_settings_authority(fixture);
+	else if (!strncmp(argv[1], "quick-settings-", 15))
+		test_quick_settings_preview_ends(fixture, argv[1] + 15);
 	else if (brightness)
 		test_brightness_restore(fixture,
 					!strcmp(argv[1], "brightness-crash"));

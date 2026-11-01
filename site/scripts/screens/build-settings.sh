@@ -19,9 +19,12 @@ ui_host_prepare "$root" "$work" "${2-}"
 mkdir -p "$work/locale/ru/LC_MESSAGES"
 msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/org.fplinux.settings.mo" "$settings/ru.po"
 msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/fplinux-ui.mo" "$root/alpine/aports/fplinux-ui/ru.po"
-ui_host_build_application -I"$settings" \
+# pkg-config emits compiler and linker arguments for the pinned libraries.
+# shellcheck disable=SC2046
+ui_host_build_application -I"$settings" $(pkg-config --cflags dbus-1) \
 	"$settings/fplinux-settings.c" "$settings/settings-core.c" \
 	"$ui_host_ui/fplinux-settings-values.c" \
+	"$ui_host_ui/fplinux-bluez-adapter.c" \
 	"$screens_dir/settings-observer.c" \
 	"$screens_dir/list-values-observer.c" \
 	"$screens_dir/native-glyph-resources.c" \
@@ -34,15 +37,17 @@ ui_host_build_application -I"$settings" \
 	-Wl,--wrap=fplinux_settings_read_memory \
 	-Wl,--wrap=fplinux_settings_about_logo -Wl,--wrap=uname \
 	-Wl,--wrap=fplinux_language_load -Wl,--wrap=fplinux_language_list \
-	-o "$work/settings"
+	$(pkg-config --libs dbus-1) -o "$work/settings"
 
 # pkg-config emits compiler and linker arguments for the pinned peer libraries.
 # shellcheck disable=SC2046
 ui_host_compile -I"$root/include/fplinux" -I"$ui_host_inputs" \
-	$(pkg-config --cflags wayland-server xkbcommon json-c) \
+	-I"$root/tests/host_tool/gui" \
+	$(pkg-config --cflags wayland-server xkbcommon json-c dbus-1) \
 	"$screens_dir/settings-screens.c" "$screens_dir/ui-frame-peer.c" \
+	"$root/tests/host_tool/gui/bluez-fake.c" \
 	"$screens_dir/screen-frame.c" "$ui_host_ui/fplinux-ui-session.c" \
 	"$ui_host_ui/fplinux-utf8.c" \
 	"$ui_host_ui/fplinux-ui-profile.c" "$ui_host_inputs/xdg-shell-protocol.c" \
-	$(pkg-config --libs wayland-server xkbcommon json-c) \
+	$(pkg-config --libs wayland-server xkbcommon json-c dbus-1) \
 	-o "$work/settings-screens"

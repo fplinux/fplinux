@@ -37,6 +37,7 @@ fplinux-debug-tools = [
   "zstd-libs-1.5.7-r2.apk",
 ]
 fplinux-input = ["libevdev-1.13.6-r0.apk"]
+fplinux-launcher = ["dbus-libs-1.16.2-r2.apk"]
 fplinux-libweston = [
   "libdisplay-info-0.3.0-r0.apk",
   "libevdev-1.13.6-r0.apk",
@@ -74,6 +75,7 @@ fplinux-mre = [
 ]
 fplinux-ncurses = ["ncurses-terminfo-base-6.6_p20260516-r0.apk"]
 fplinux-session = ["json-c-0.18-r1.apk"]
+fplinux-settings = ["dbus-libs-1.16.2-r2.apk"]
 fplinux-uclient = ["ca-certificates-bundle-20261020-r0.apk"]
 fplinux-ui = ["json-c-0.18-r1.apk"]
 fplinux-wayland = ["libffi-3.5.2-r1.apk"]

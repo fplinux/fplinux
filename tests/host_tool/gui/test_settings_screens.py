@@ -14,6 +14,7 @@ import pytest
 from tests import ROOT
 from tests.c_harness import c_build_directory
 from tests.host_tool.gui.list_rows import ListArea, frame_pixels, sequence_faults
+from tests.host_tool.gui.private_bus import private_bus
 from tests.process import run_process
 
 if TYPE_CHECKING:
@@ -222,3 +223,79 @@ def test_actual_settings_root_values_fit_scroll_and_follow_current_replies(
         for name in names
     }
     assert sequence_faults(frames, area) == []
+
+
+@pytest.mark.parametrize(
+    "screen",
+    [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)],
+    ids=["128-128", "128-160", "176-220", "240-320", "320-240"],
+)
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_actual_settings_bluetooth_switch_follows_bluez_with_whole_rows(
+    settings_native: Path, tmp_path: Path, screen: tuple[int, int], theme: str
+) -> None:
+    """The real switch against a BlueZ fake: live state, a slow and a refused change.
+
+    The fake replaces bluetoothd at its D-Bus boundary on a private bus.
+    """
+    width, height = screen
+    with private_bus() as bus:
+        result = run_process(
+            [
+                str(settings_native / "settings-screens"),
+                str(settings_native / "settings"),
+                str(SCREENS / "keypad.xkb"),
+                str(tmp_path / "session.sock"),
+                str(tmp_path),
+                str(ROOT / "alpine/aports/fplinux-language"),
+                "bluetooth",
+            ],
+            name=f"switch Bluetooth in the actual Settings at {width}x{height} ({theme})",
+            env=bus.environment()
+            | {
+                "FPLINUX_SETTINGS_TEST_WIDTH": str(width),
+                "FPLINUX_SETTINGS_TEST_HEIGHT": str(height),
+                "FPLINUX_SETTINGS_TEST_LOCALE": "en",
+                "FPLINUX_SETTINGS_TEST_THEME": theme,
+            },
+            timeout=30,
+        )
+    (tmp_path / "capture.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+    log_root = os.environ.get("FPLINUX_LOG_ROOT")
+    if log_root:
+        shutil.copytree(
+            tmp_path,
+            Path(log_root) / f"settings-bluetooth-{width}x{height}-{theme}",
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns("session.sock"),
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == (
+        "settings-bluetooth: the switch follows BlueZ, waits for slow changes, reports "
+        "refusals and goes with bluetoothd\n"
+    )
+    band, pitch, bars = ROOT_ROWS[screen]
+    area = ListArea(
+        width=width,
+        top=band,
+        bottom=height - bars,
+        pitch=pitch,
+        edge=(0, 2),
+        divider=0xBE39 if theme == "light" else 0x3A29,
+        highlight=0x3B0E if theme == "light" else 0xAE7B,
+    )
+    names = [
+        *(f"root-{row}" for row in ("display", "bluetooth", "language", "input", "about")),
+        *(f"root-up-{row}" for row in ("input", "language", "bluetooth")),
+    ]
+    frames = {
+        name: frame_pixels((tmp_path / f"settings-bluetooth-{name}.rgb565").read_bytes(), width)
+        for name in names
+    }
+    assert sequence_faults(frames, area) == []
+    # The switch screen's only row has no divider; its states differ.
+    switch = {
+        (tmp_path / f"settings-bluetooth-{name}.rgb565").read_bytes()
+        for name in ("off", "on", "unavailable")
+    }
+    assert len(switch) == 3

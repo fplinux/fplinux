@@ -191,6 +191,23 @@ static int16_t saturate(int64_t value)
 	return (int16_t)value;
 }
 
+void fplinux_audio_mixer_master(int32_t *mix, uint32_t frames,
+				struct fplinux_audio_mixer_gain *gain)
+{
+	int32_t level = gain->current * 32768;
+	int32_t slope = ramp_slope(gain, frames);
+	uint32_t i;
+
+	for (i = 0; i < frames; ++i) {
+		int64_t factor = level >> 15;
+
+		mix[2 * i] = (int32_t)((mix[2 * i] * factor) >> 15);
+		mix[2 * i + 1] = (int32_t)((mix[2 * i + 1] * factor) >> 15);
+		level += slope;
+	}
+	gain->current = gain->target;
+}
+
 void fplinux_audio_mixer_output(const int32_t *mix, int16_t *output,
 				uint32_t frames)
 {

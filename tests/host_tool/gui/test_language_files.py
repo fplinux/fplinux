@@ -94,7 +94,10 @@ def test_contextual_commands_translate_and_keep_plain_english_fallback(tmp_path:
         assert result.stdout == "\n".join(expected_lines) + "\n"
 
 
-@pytest.mark.parametrize("package", ["fplinux-clocks", "fplinux-files", "fplinux-mre"])
+@pytest.mark.parametrize(
+    "package",
+    ["fplinux-clocks", "fplinux-files", "fplinux-launcher", "fplinux-mre", "fplinux-settings"],
+)
 def test_refreshing_application_catalogue_preserves_complete_russian_messages(
     tmp_path: Path, package: str
 ) -> None:

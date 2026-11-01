@@ -144,7 +144,8 @@ struct fplinux_ui_session_clock_presentation {
  * Only the launcher may LAUNCH, SELECT, CANCEL or DISMISS. SELECT reports the
  * selected_id, base view (home/catalogue) and presentation (grid/list).
  * SELECT(value=tasks, enabled) reports whether Tasks covers that base without
- * changing its selection or presentation. ACTIVE returns the base view,
+ * changing its selection or presentation; SELECT(value=quick-settings,
+ * enabled) does the same for Quick settings. ACTIVE returns the base view,
  * including after a launcher restart. LAUNCH may
  * attach one descriptor containing tightly packed RGB565 pixels bounded by
  * FRAME_MAX_WIDTH/HEIGHT/PIXELS. SCM_RIGHTS transfers it outside the JSON object.
@@ -165,8 +166,10 @@ struct fplinux_ui_session_clock_presentation {
  * KEEP_SCREEN_ON applies only while the requesting application is visible.
  *
  * SETTING(name, value) belongs to org.fplinux.settings: empty value queries,
- * otherwise it sets a value. The manager replies with the applied SETTING or
- * ERROR. Reply applied records whether the value already took effect;
+ * otherwise it sets a value. The launcher may also query, preview and save
+ * brightness while it reports Quick settings over the unlocked Home; ending
+ * Quick settings restores an unsaved preview. The manager replies with the
+ * applied SETTING or ERROR. Reply applied records whether the value already took effect;
  * storage_state and storage_error report publication and synchronization
  * separately. An applied ERROR still supplies the current value.
  * input_locale selects the keypad language independently of locale.

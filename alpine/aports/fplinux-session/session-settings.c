@@ -18,6 +18,7 @@
 
 static const char *const setting_names[] = {
 	[FPLINUX_SESSION_SETTING_BRIGHTNESS] = "brightness",
+	[FPLINUX_SESSION_SETTING_VOLUME] = "volume",
 	[FPLINUX_SESSION_SETTING_SCREEN_OFF] = "screen_off_seconds",
 	[FPLINUX_SESSION_SETTING_AUTO_LOCK] = "auto_lock_seconds",
 	[FPLINUX_SESSION_SETTING_LOCALE] = "locale",
@@ -74,6 +75,7 @@ void fplinux_session_settings_defaults(
 
 	memset(settings, 0, sizeof(*settings));
 	settings->brightness = 7;
+	settings->volume = 10;
 	settings->screen_off_seconds = 30;
 	settings->auto_lock_seconds = 5;
 	settings->theme = FPLINUX_UI_SESSION_THEME_LIGHT;
@@ -129,6 +131,12 @@ bool fplinux_session_settings_parse(struct fplinux_session_settings *settings,
 		settings->brightness = number;
 		settings->has_brightness = true;
 		return true;
+	case FPLINUX_SESSION_SETTING_VOLUME:
+		if (!parse_decimal(value, &number) || number > 10)
+			return false;
+		settings->volume = number;
+		settings->has_volume = true;
+		return true;
 	case FPLINUX_SESSION_SETTING_SCREEN_OFF:
 		if (!parse_decimal(value, &number))
 			return false;
@@ -179,6 +187,9 @@ bool fplinux_session_settings_format(
 	switch (setting) {
 	case FPLINUX_SESSION_SETTING_BRIGHTNESS:
 		length = snprintf(value, capacity, "%u", settings->brightness);
+		break;
+	case FPLINUX_SESSION_SETTING_VOLUME:
+		length = snprintf(value, capacity, "%u", settings->volume);
 		break;
 	case FPLINUX_SESSION_SETTING_SCREEN_OFF:
 		length = snprintf(value, capacity, "%u",
@@ -338,6 +349,10 @@ fplinux_session_settings_save(const struct fplinux_session_settings *settings,
 	    (size_t)length < sizeof(text))
 		length += snprintf(text + length, sizeof(text) - length,
 				   "brightness=%u\n", settings->brightness);
+	if (settings->has_volume && length >= 0 &&
+	    (size_t)length < sizeof(text))
+		length += snprintf(text + length, sizeof(text) - length,
+				   "volume=%u\n", settings->volume);
 	if (length < 0 || (size_t)length >= sizeof(text) ||
 	    snprintf(temporary, sizeof(temporary), "%s.XXXXXX", path) >=
 		    (int)sizeof(temporary)) {

@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
 #include "clock-face.h"
+#include "fplinux-bluez-adapter.h"
 #include "fplinux-cli.h"
 #include "fplinux-ui-locale.h"
 #include "fplinux-ui-menu.h"
@@ -13,6 +14,7 @@
 #include "launcher-layout.h"
 #include "launcher-launch.h"
 #include "launcher-power.h"
+#include "launcher-quick-settings.h"
 #include "launcher-tasks.h"
 #include "launcher-text.h"
 
@@ -27,6 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/epoll.h>
 #include <sys/inotify.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -108,8 +111,12 @@ struct launcher {
 	enum fplinux_launcher_notice alert_notice;
 	bool catalogue_dirty;
 	struct fplinux_launcher_tasks tasks;
+	struct fplinux_launcher_quick_settings quick_settings;
 	struct fplinux_launcher_clock ringing;
 	bool reported_tasks;
+	bool reported_quick_settings;
+	/* The BlueZ client for Quick settings; NULL without one. */
+	struct fplinux_bluez_adapter *bluetooth;
 	const struct fplinux_ui_theme *theme;
 	/* The display's profile and the surface regions derived from it. */
 	const struct fplinux_ui_profile_spec *spec;
@@ -147,6 +154,8 @@ struct launcher {
 	char marquee_app[FPLINUX_UI_SESSION_ID_BYTES];
 	char marquee_text[FPLINUX_UI_SESSION_TEXT_BYTES];
 	const char *desktop_dir;
+	/* The catalogue watch and the bus client share one polled descriptor. */
+	int events_fd;
 	int inotify_fd;
 	bool watching;
 	lv_timer_t *reload_timer;
@@ -986,13 +995,15 @@ static void set_status_clock(struct launcher *launcher, const char *text)
 	lv_obj_set_hidden(launcher->status_clock, !width);
 }
 
-/* Tasks covers Home's large clock, so it needs the status clock. */
+/* Tasks and Quick settings cover Home's large clock: the status clock shows. */
 static void update_clock(struct launcher *launcher)
 {
 	enum launcher_screen screen = current_screen(launcher);
 	bool status_clock = screen == SCREEN_APPLICATION ||
 			    screen == SCREEN_CATALOGUE ||
-			    fplinux_launcher_tasks_is_open(&launcher->tasks);
+			    fplinux_launcher_tasks_is_open(&launcher->tasks) ||
+			    fplinux_launcher_quick_settings_is_open(
+				    &launcher->quick_settings);
 	time_t now = time(NULL);
 	bool clock_ready = fplinux_launcher_clock_is_ready(now);
 	char clock_text[16] = "--:--";
@@ -1059,6 +1070,26 @@ static void tasks_view_changed(void *context)
 		return;
 	if (fplinux_ui_send(launcher->ui, &message))
 		launcher->reported_tasks = open;
+}
+
+static void quick_settings_view_changed(void *context)
+{
+	struct launcher *launcher = context;
+	bool open = fplinux_launcher_quick_settings_is_open(
+		&launcher->quick_settings);
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_SELECT,
+		.enabled = open,
+		.value = "quick-settings",
+	};
+
+	update_clock(launcher);
+	schedule_clock(launcher);
+	if (!launcher->session_known ||
+	    open == launcher->reported_quick_settings)
+		return;
+	if (fplinux_ui_send(launcher->ui, &message))
+		launcher->reported_quick_settings = open;
 }
 
 static void schedule_clock(struct launcher *launcher)
@@ -1648,6 +1679,11 @@ static void render(struct launcher *launcher)
 		(screen != SCREEN_HOME && screen != SCREEN_CATALOGUE) ||
 			notice != FPLINUX_LAUNCHER_NOTICE_NONE ||
 			fplinux_launcher_clock_is_ringing(&launcher->ringing));
+	fplinux_launcher_quick_settings_set_blocked(
+		&launcher->quick_settings,
+		screen != SCREEN_HOME ||
+			notice != FPLINUX_LAUNCHER_NOTICE_NONE ||
+			fplinux_launcher_clock_is_ringing(&launcher->ringing));
 	base_ready = hide_stale_notice(launcher);
 	if (base_ready)
 		sync_catalogue(launcher);
@@ -1845,6 +1881,12 @@ static void handle_key(struct launcher *launcher,
 			fplinux_launcher_tasks_open(&launcher->tasks);
 			return;
 		}
+		if (key->source == FPLINUX_UI_KEY_PHONE &&
+		    key->code == KEY_PICKUP_PHONE) {
+			fplinux_launcher_quick_settings_open(
+				&launcher->quick_settings);
+			return;
+		}
 		if (fplinux_ui_is_softkey(key, false)) {
 			for (size_t i = 0; i < launcher->app_count; ++i)
 				if (!strcmp(launcher->apps[i].id,
@@ -2032,6 +2074,7 @@ static void receive_active(struct launcher *launcher,
 static void receive_home(struct launcher *launcher)
 {
 	fplinux_launcher_tasks_close(&launcher->tasks);
+	fplinux_launcher_quick_settings_close(&launcher->quick_settings);
 	/* The manager assumes Home once it has sent HOME. */
 	launcher->reported_view = FPLINUX_LAUNCHER_VIEW_HOME;
 	if (launcher->active) {
@@ -2065,6 +2108,9 @@ static void ui_event(struct fplinux_ui *ui,
 	} else if (fplinux_launcher_clock_receive(&launcher->ringing,
 						  message)) {
 		return;
+	} else if (fplinux_launcher_quick_settings_receive(
+			   &launcher->quick_settings, message)) {
+		return;
 	} else if (fplinux_launcher_tasks_receive(&launcher->tasks, message)) {
 		return;
 	} else if (message->type == FPLINUX_UI_SESSION_ACTIVE) {
@@ -2079,20 +2125,65 @@ static void ui_event(struct fplinux_ui *ui,
 	}
 }
 
-static void catalogue_changed(struct fplinux_ui *ui, int fd, short events,
-			      void *context)
+static void catalogue_changed(struct launcher *launcher)
 {
-	struct launcher *launcher = context;
 	char buffer[4096];
 
-	(void)ui;
-	if (!(events & POLLIN))
-		return;
-	while (read(fd, buffer, sizeof(buffer)) > 0)
+	while (read(launcher->inotify_fd, buffer, sizeof(buffer)) > 0)
 		;
 	/* Coalesce a package's desktop entry and icons into one reload. */
 	lv_timer_reset(launcher->reload_timer);
 	lv_timer_resume(launcher->reload_timer);
+}
+
+enum launcher_event_source {
+	LAUNCHER_EVENT_CATALOGUE,
+	LAUNCHER_EVENT_BLUETOOTH,
+};
+
+static void launcher_events(struct fplinux_ui *ui, int fd, short events,
+			    void *context)
+{
+	struct launcher *launcher = context;
+	struct epoll_event ready[2];
+	int count;
+
+	(void)ui;
+	if (!(events & POLLIN))
+		return;
+	count = epoll_wait(fd, ready, 2, 0);
+	for (int i = 0; i < count; ++i)
+		if (ready[i].data.u32 == LAUNCHER_EVENT_CATALOGUE)
+			catalogue_changed(launcher);
+		else
+			fplinux_bluez_adapter_dispatch(launcher->bluetooth);
+}
+
+static bool watch_events(struct launcher *launcher, int fd,
+			 enum launcher_event_source source)
+{
+	struct epoll_event event = {
+		.events = EPOLLIN,
+		.data.u32 = source,
+	};
+
+	return !epoll_ctl(launcher->events_fd, EPOLL_CTL_ADD, fd, &event);
+}
+
+static void quick_settings_bluetooth_changed(void *context)
+{
+	struct launcher *launcher = context;
+
+	fplinux_launcher_quick_settings_bluetooth_changed(
+		&launcher->quick_settings);
+}
+
+static void quick_settings_bluetooth_finished(bool applied, void *context)
+{
+	struct launcher *launcher = context;
+
+	fplinux_launcher_quick_settings_bluetooth_finished(
+		&launcher->quick_settings, applied);
 }
 
 static void reload_catalogue(lv_timer_t *timer)
@@ -2239,6 +2330,7 @@ int main(int argc, char **argv)
 		.description = "FPLinux keypad home and application catalogue",
 	};
 	struct launcher launcher = {
+		.events_fd = -1,
 		.inotify_fd = -1,
 		.view = FPLINUX_LAUNCHER_VIEW_HOME,
 		.reported_view = FPLINUX_LAUNCHER_VIEW_HOME,
@@ -2300,6 +2392,27 @@ int main(int argc, char **argv)
 		});
 	fplinux_launcher_clock_init(&launcher.ringing, launcher.ui,
 				    clock_view_changed, &launcher);
+	launcher.events_fd = epoll_create1(EPOLL_CLOEXEC);
+	launcher.bluetooth = fplinux_bluez_adapter_open(
+		&(const struct fplinux_bluez_adapter_listener){
+			.changed = quick_settings_bluetooth_changed,
+			.finished = quick_settings_bluetooth_finished,
+			.context = &launcher,
+		});
+	if (launcher.bluetooth &&
+	    (launcher.events_fd < 0 ||
+	     !watch_events(&launcher,
+			   fplinux_bluez_adapter_fd(launcher.bluetooth),
+			   LAUNCHER_EVENT_BLUETOOTH))) {
+		fplinux_bluez_adapter_close(launcher.bluetooth);
+		launcher.bluetooth = NULL;
+	}
+	fplinux_launcher_quick_settings_init(
+		&launcher.quick_settings, launcher.ui, launcher.bluetooth,
+		&(const struct fplinux_launcher_quick_settings_listener){
+			.view_changed = quick_settings_view_changed,
+			.context = &launcher,
+		});
 	/* The profile's presentation until the first ACTIVE names one. */
 	launcher.presentation = launcher.spec->catalogue_list ?
 					FPLINUX_LAUNCHER_VIEW_LIST :
@@ -2310,23 +2423,31 @@ int main(int argc, char **argv)
 		lv_timer_pause(launcher.reload_timer);
 	launcher.inotify_fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
 	/* Watch before the first scan so that no installed file is missed. */
-	if (launcher.reload_timer && launcher.inotify_fd >= 0) {
+	if (launcher.reload_timer && launcher.inotify_fd >= 0 &&
+	    launcher.events_fd >= 0) {
 		bool desktop = watch_directory(launcher.inotify_fd,
 					       launcher.desktop_dir);
 		bool icons = watch_icon_directories(&launcher);
 
-		if (desktop || icons)
-			fplinux_ui_watch_fd(launcher.ui, launcher.inotify_fd,
-					    POLLIN, catalogue_changed,
-					    &launcher);
-		launcher.watching = desktop;
+		launcher.watching = (desktop || icons) &&
+				    watch_events(&launcher, launcher.inotify_fd,
+						 LAUNCHER_EVENT_CATALOGUE) &&
+				    desktop;
 	}
+	if (launcher.events_fd >= 0)
+		fplinux_ui_watch_fd(launcher.ui, launcher.events_fd, POLLIN,
+				    launcher_events, &launcher);
+	if (launcher.bluetooth)
+		fplinux_bluez_adapter_connect(launcher.bluetooth);
 	scan_applications(&launcher);
 	create_view(&launcher);
 	result = fplinux_ui_run(launcher.ui);
 	if (launcher.inotify_fd >= 0)
 		close(launcher.inotify_fd);
 	fplinux_ui_close(launcher.ui);
+	fplinux_bluez_adapter_close(launcher.bluetooth);
+	if (launcher.events_fd >= 0)
+		close(launcher.events_fd);
 	/* Closing the UI deleted every image that borrowed these buffers. */
 	release_icons(&launcher);
 	return result < 0 ? 1 : 0;

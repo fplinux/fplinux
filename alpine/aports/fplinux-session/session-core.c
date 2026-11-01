@@ -37,6 +37,7 @@
 #include "session-storage.h"
 #include "session-vibration.h"
 #include "session-vibrator.h"
+#include "session-wireless.h"
 
 #define FPLINUX_SESSION_PEERS 8
 #define FPLINUX_SESSION_LAUNCHER FPLINUX_DESKTOP_LAUNCHER_ID
@@ -149,6 +150,18 @@ struct document_request {
 	bool detached;
 };
 
+struct setting_request {
+	pid_t pid;
+	uint32_t token;
+	uint32_t serial;
+	unsigned int level;
+	unsigned int restore_level;
+	int audio_fd;
+	bool pending;
+	bool save;
+	bool preview;
+};
+
 enum held_scene {
 	HELD_SCENE_NONE,
 	HELD_SCENE_LAUNCH = 1U << 0,
@@ -219,6 +232,8 @@ struct fplinux_session {
 	bool launcher_list;
 	/* Tasks temporarily covers the remembered launcher view. */
 	bool launcher_tasks_view;
+	/* So does Quick settings, which may preview and save the brightness. */
+	bool launcher_quick_settings_view;
 	bool ready;
 	bool destroying;
 	bool owns_socket;
@@ -261,8 +276,12 @@ struct fplinux_session {
 	enum fplinux_session_battery_alert active_battery_notice;
 	struct fplinux_brightness_client brightness;
 	unsigned int user_level;
-	/* A Settings preview level is shown; restore_level was the level before. */
+	/*
+	 * A preview level is shown; restore_level was the level before. The
+	 * launcher's Quick settings, rather than Settings, owns preview_launcher.
+	 */
 	bool preview_active;
+	bool preview_launcher;
 	unsigned int preview_restore_level;
 	bool brightness_leased;
 	int brightness_shown;
@@ -303,6 +322,13 @@ struct fplinux_session {
 	bool clock_signal_stopping;
 	struct fplinux_session_audio audio;
 	bool has_audio;
+	struct setting_request volume_request;
+	bool volume_preview_active;
+	bool volume_preview_launcher;
+	unsigned int volume_preview_restore;
+	struct fplinux_session_wireless *wireless;
+	bool wireless_initialized;
+	struct setting_request wireless_request;
 	struct fplinux_session_vibration vibration;
 	struct fplinux_session_vibrator vibrator;
 	bool has_vibrator;
@@ -757,6 +783,21 @@ static bool launcher_on_top(const struct fplinux_session *session)
 	       clock_covers_app(session);
 }
 
+/*
+ * Quick settings covers Home in the unlocked launcher. Only while it is shown
+ * may the launcher preview and save the brightness; a launcher preview ends
+ * with it.
+ */
+static bool quick_settings_shown(const struct fplinux_session *session)
+{
+	const struct process *launcher = &session->launcher;
+
+	return session->launcher_quick_settings_view && is_running(launcher) &&
+	       launcher->control_fd >= 0 && session->launcher_home_view &&
+	       !session->power.locked && !app_in_foreground(session) &&
+	       !launch_in_progress(session) && !clock_due(session);
+}
+
 static bool launch_is_shown(const struct fplinux_session *session)
 {
 	return launch_in_progress(session) &&
@@ -882,6 +923,7 @@ static bool start_process(struct fplinux_session *session,
 		session->battery_notice_drawn = false;
 		session->clock_drawn_event = 0;
 		session->launcher_tasks_view = false;
+		session->launcher_quick_settings_view = false;
 		session->launcher_shown = false;
 		session->launcher_named_app = false;
 		session->launcher_wait_serial = 0;
@@ -1585,6 +1627,7 @@ static void return_home(struct fplinux_session *session)
 		fplinux_ui_session_send(session->launcher.control_fd, &message);
 	session->launcher_home_view = true;
 	session->launcher_tasks_view = false;
+	session->launcher_quick_settings_view = false;
 	leave_app(session, true);
 	send_active(session);
 }
@@ -2274,7 +2317,7 @@ static void brightness_setting(struct fplinux_session *session,
 }
 
 /*
- * Ends a Settings brightness preview with the level from before it. Returns
+ * Ends a brightness preview with the level from before it. Returns
  * false when the service is unreachable; the level is then applied when the
  * connection comes back.
  */
@@ -2301,8 +2344,9 @@ static bool end_brightness_preview(struct fplinux_session *session)
 }
 
 /*
- * A level shown while the Settings slider moves; nothing is saved. The first
- * step remembers the level that ending the preview restores.
+ * A level shown while the Settings or Quick settings slider moves; nothing
+ * is saved. The first step remembers the level that ending the preview
+ * restores.
  */
 static void brightness_preview(struct fplinux_session *session,
 			       struct process *process, const char *value)
@@ -2342,10 +2386,233 @@ static void brightness_preview(struct fplinux_session *session,
 		return;
 	}
 	session->preview_active = true;
+	session->preview_launcher = process == &session->launcher;
 	session->user_level = next.brightness;
 	snprintf(current, sizeof(current), "%u", next.brightness);
 	reply(process, FPLINUX_UI_SESSION_SETTING, "brightness_preview",
 	      current, "");
+}
+
+static struct process *setting_requester(struct fplinux_session *session,
+					 const struct setting_request *request)
+{
+	struct process *process = process_for_pid(session, request->pid);
+
+	if (!process || process->policy.token != request->token ||
+	    process->control_fd < 0)
+		return NULL;
+	if (process == &session->launcher)
+		return quick_settings_shown(session) ? process : NULL;
+	return process == session->app && app_in_foreground(session) &&
+			       !launcher_on_top(session) ?
+		       process :
+		       NULL;
+}
+
+static void remember_request(struct setting_request *request,
+			     const struct process *process,
+			     const struct fplinux_ui_session_message *message)
+{
+	request->pid = process->policy.pid;
+	request->token = process->policy.token;
+	request->serial = message->serial;
+	request->pending = true;
+}
+
+static void end_volume_preview(struct fplinux_session *session)
+{
+	if (!session->volume_preview_active)
+		return;
+	session->volume_preview_active = false;
+	if (session->volume_request.pending && session->volume_request.preview)
+		session->volume_request.pending = false;
+	fplinux_session_audio_set_volume(&session->audio,
+					 session->volume_preview_restore,
+					 now_ms(session));
+}
+
+static void volume_setting(struct fplinux_session *session,
+			   struct process *process,
+			   const struct fplinux_ui_session_message *message,
+			   bool preview)
+{
+	struct fplinux_session_settings next = session->settings;
+	struct setting_request *request = &session->volume_request;
+	unsigned int applied;
+	char current[16];
+	bool rollback = preview && !message->value[0] &&
+			session->volume_preview_active;
+
+	if (message->value[0] &&
+	    !fplinux_session_settings_parse(
+		    &next, session->options.languages_dir,
+		    FPLINUX_SESSION_SETTING_VOLUME, message->value)) {
+		reply(process, FPLINUX_UI_SESSION_ERROR, message->name,
+		      message->value, "invalid-value");
+		return;
+	}
+	if (request->pending && request->save && message->value[0]) {
+		reply(process, FPLINUX_UI_SESSION_ERROR, message->name,
+		      message->value, "busy");
+		return;
+	}
+	if (preview && !message->value[0]) {
+		end_volume_preview(session);
+		preview = false;
+	}
+	if (!fplinux_session_audio_volume_applied(&session->audio, &applied)) {
+		reply(process, FPLINUX_UI_SESSION_ERROR, message->name,
+		      message->value, "unavailable");
+		return;
+	}
+	if (!message->value[0] && !rollback) {
+		snprintf(current, sizeof(current), "%u", applied);
+		setting_reply(session, process, "volume", current,
+			      message->serial, false);
+		return;
+	}
+	if (message->value[0] && preview && !session->volume_preview_active) {
+		session->volume_preview_active = true;
+		session->volume_preview_launcher = process ==
+						   &session->launcher;
+		/* A previous preview may still be restoring asynchronously. */
+		session->volume_preview_restore = session->audio.desired_volume;
+	}
+	request->restore_level = session->volume_preview_active ?
+					 session->volume_preview_restore :
+					 applied;
+	request->level = message->value[0] ? next.volume :
+					     session->audio.desired_volume;
+	if (rollback)
+		request->restore_level = request->level;
+	request->save = message->value[0] && !preview;
+	request->preview = preview;
+	request->audio_fd = session->audio.fd;
+	remember_request(request, process, message);
+	if (request->save)
+		session->volume_preview_active = false;
+	fplinux_session_audio_set_volume(&session->audio, request->level,
+					 now_ms(session));
+}
+
+static void finish_volume_request(struct fplinux_session *session)
+{
+	struct setting_request *request = &session->volume_request;
+	struct process *process;
+	unsigned int applied;
+	char current[16];
+	const char *name;
+
+	if (!request->pending)
+		return;
+	process = setting_requester(session, request);
+	name = request->preview ? "volume_preview" : "volume";
+	if (session->audio.fd != request->audio_fd || session->audio.fd < 0) {
+		request->pending = false;
+		if (request->preview)
+			session->volume_preview_active = false;
+		fplinux_session_audio_set_volume(&session->audio,
+						 request->restore_level,
+						 now_ms(session));
+		if (process) {
+			snprintf(current, sizeof(current), "%u",
+				 request->level);
+			reply(process, FPLINUX_UI_SESSION_ERROR, name, current,
+			      "unavailable");
+		}
+		return;
+	}
+	if (fplinux_session_audio_volume_pending(&session->audio) ||
+	    !fplinux_session_audio_volume_applied(&session->audio, &applied))
+		return;
+	request->pending = false;
+	if (request->save) {
+		session->settings.volume = applied;
+		session->settings.has_volume = true;
+		session->settings_retry_delay_ms = 0;
+		save_settings(session);
+	}
+	if (!process)
+		return;
+	snprintf(current, sizeof(current), "%u", applied);
+	setting_reply(session, process, name, current, request->serial,
+		      request->save);
+}
+
+static void wireless_reply(struct process *process,
+			   struct fplinux_session_wireless_state state,
+			   bool initialized, int error, const char *value)
+{
+	if (!initialized || error || state.error || !state.known) {
+		const char *reason = initialized && !state.error &&
+						     !state.supported ?
+					     "unsupported" :
+					     "unavailable";
+
+		reply(process, FPLINUX_UI_SESSION_ERROR, "wifi", value, reason);
+		return;
+	}
+	reply(process, FPLINUX_UI_SESSION_SETTING, "wifi",
+	      state.enabled ? "1" : "0", "");
+}
+
+static void wireless_setting(struct fplinux_session *session,
+			     struct process *process,
+			     const struct fplinux_ui_session_message *message)
+{
+	struct fplinux_session_wireless_state state =
+		fplinux_session_wireless_state(session->wireless);
+	int error;
+
+	if (!message->value[0]) {
+		wireless_reply(process, state, session->wireless_initialized, 0,
+			       "");
+		return;
+	}
+	if (strcmp(message->value, "0") && strcmp(message->value, "1")) {
+		reply(process, FPLINUX_UI_SESSION_ERROR, "wifi", message->value,
+		      "invalid-value");
+		return;
+	}
+	if (!session->wireless_initialized || state.error || !state.known) {
+		wireless_reply(process, state, session->wireless_initialized, 0,
+			       message->value);
+		return;
+	}
+	error = fplinux_session_wireless_request(session->wireless,
+						 !strcmp(message->value, "1"));
+	if (error) {
+		reply(process, FPLINUX_UI_SESSION_ERROR, "wifi", message->value,
+		      error == EBUSY ? "busy" : "unavailable");
+		return;
+	}
+	remember_request(&session->wireless_request, process, message);
+	session->wireless_request.level = !strcmp(message->value, "1");
+}
+
+static void dispatch_wireless(struct fplinux_session *session)
+{
+	struct fplinux_session_wireless_state state;
+	struct process *process;
+	int error;
+
+	fplinux_session_wireless_dispatch(session->wireless);
+	session->wireless_initialized = true;
+	state = fplinux_session_wireless_state(session->wireless);
+	if (fplinux_session_wireless_take_result(session->wireless, &error)) {
+		process = session->wireless_request.pending ?
+				  setting_requester(
+					  session, &session->wireless_request) :
+				  NULL;
+		session->wireless_request.pending = false;
+		if (process)
+			wireless_reply(process, state, true, error,
+				       session->wireless_request.level ? "1" :
+									 "0");
+	} else if (!session->wireless_request.pending &&
+		   quick_settings_shown(session)) {
+		wireless_reply(&session->launcher, state, true, 0, "");
+	}
 }
 
 /* A preview ends when Settings leaves the foreground or its process ends. */
@@ -2353,11 +2620,34 @@ static void settings_gone(struct fplinux_session *session,
 			  const struct process *process)
 {
 	if (!strcmp(process->policy.app_id, FPLINUX_SESSION_SETTINGS) &&
-	    session->preview_active) {
+	    session->preview_active && !session->preview_launcher) {
 		fprintf(stderr,
 			"fplinux-session: restoring brightness after a preview\n");
 		end_brightness_preview(session);
 	}
+	if (!strcmp(process->policy.app_id, FPLINUX_SESSION_SETTINGS) &&
+	    session->volume_preview_active && !session->volume_preview_launcher)
+		end_volume_preview(session);
+}
+
+/*
+ * Leaving Quick settings in any way, its process included, restores the level
+ * from before an unsaved preview.
+ */
+static void quick_settings_gone(struct fplinux_session *session)
+{
+	if (session->preview_active && session->preview_launcher &&
+	    !quick_settings_shown(session)) {
+		fprintf(stderr, "fplinux-session: restoring brightness after "
+				"a Quick settings preview\n");
+		end_brightness_preview(session);
+	}
+	if (session->volume_preview_active &&
+	    session->volume_preview_launcher && !quick_settings_shown(session))
+		end_volume_preview(session);
+	if (!quick_settings_shown(session) &&
+	    session->wireless_request.pid == session->launcher.policy.pid)
+		session->wireless_request.pid = 0;
 }
 
 /*
@@ -2434,6 +2724,14 @@ static void handle_setting(struct fplinux_session *session,
 		brightness_preview(session, process, message->value);
 		return;
 	}
+	if (!strcmp(message->name, "volume_preview")) {
+		volume_setting(session, process, message, true);
+		return;
+	}
+	if (!strcmp(message->name, "wifi")) {
+		wireless_setting(session, process, message);
+		return;
+	}
 	if (setting == FPLINUX_SESSION_SETTING_UNKNOWN) {
 		reply(process, FPLINUX_UI_SESSION_ERROR, message->name,
 		      message->value, "unknown-setting");
@@ -2445,6 +2743,10 @@ static void handle_setting(struct fplinux_session *session,
 	}
 	if (setting == FPLINUX_SESSION_SETTING_BRIGHTNESS) {
 		brightness_setting(session, process, message->value);
+		return;
+	}
+	if (setting == FPLINUX_SESSION_SETTING_VOLUME) {
+		volume_setting(session, process, message, false);
 		return;
 	}
 	if (message->value[0]) {
@@ -2675,6 +2977,11 @@ static bool receive_message(struct fplinux_session *session, struct peer *peer,
 			session->launcher_tasks_view = message->enabled;
 			break;
 		}
+		if (!strcmp(message->value, "quick-settings")) {
+			session->launcher_quick_settings_view =
+				message->enabled;
+			break;
+		}
 		if (message->selected_id[0] &&
 		    !fplinux_desktop_entry_valid_id(message->selected_id))
 			return false;
@@ -2823,6 +3130,22 @@ static bool receive_message(struct fplinux_session *session, struct peer *peer,
 		}
 		break;
 	case FPLINUX_UI_SESSION_SETTING:
+		if (process == &session->launcher) {
+			/* Quick settings owns only these controls. */
+			if (strcmp(message->name, "brightness") &&
+			    strcmp(message->name, "brightness_preview") &&
+			    strcmp(message->name, "volume") &&
+			    strcmp(message->name, "volume_preview") &&
+			    strcmp(message->name, "wifi"))
+				return false;
+			if (quick_settings_shown(session))
+				handle_setting(session, process, message);
+			else
+				reply(process, FPLINUX_UI_SESSION_ERROR,
+				      message->name, message->value,
+				      "not-foreground");
+			break;
+		}
 		if (strcmp(process->policy.app_id, FPLINUX_SESSION_SETTINGS))
 			return false;
 		/* Settings parked on Home has no active settings authority. */
@@ -3470,6 +3793,7 @@ static void advance(struct fplinux_session *session)
 
 	fplinux_session_power_advance(&session->power, time);
 	fplinux_session_audio_dispatch(&session->audio, time);
+	finish_volume_request(session);
 	if (!session->clock_ready) {
 		struct clock_result result = fplinux_session_clock_init(
 			&session->clock, wall_utc(session), time,
@@ -3491,6 +3815,11 @@ static void advance(struct fplinux_session *session)
 		clear_held_scene(session);
 	poll_power(session, time);
 	manage_processes(session, time, &needs_tick);
+	quick_settings_gone(session);
+	if (session->volume_preview_active &&
+	    !session->volume_preview_launcher &&
+	    (!app_in_foreground(session) || launcher_on_top(session)))
+		end_volume_preview(session);
 	settle_held_scene(session);
 	fplinux_session_power_set_keep_screen_on(
 		&session->power, keeps_screen_on(session), time);
@@ -3572,8 +3901,14 @@ void fplinux_session_dispatch(struct fplinux_session *session)
 	uint64_t ticks;
 	unsigned int i;
 
-	epoll_wait(session->epoll_fd, events,
-		   sizeof(events) / sizeof(events[0]), 0);
+	int event_count = epoll_wait(session->epoll_fd, events,
+				     sizeof(events) / sizeof(events[0]), 0);
+
+	for (int event = 0; event < event_count; ++event)
+		if (session->wireless &&
+		    events[event].data.fd ==
+			    fplinux_session_wireless_fd(session->wireless))
+			dispatch_wireless(session);
 	read(session->timer_fd, &ticks, sizeof(ticks));
 	if (read(session->alarm_fd, &ticks, sizeof(ticks)) < 0 &&
 	    errno == ECANCELED)
@@ -3726,6 +4061,14 @@ fplinux_session_create(const struct fplinux_session_options *options)
 				   session->has_audio ? options->audio_socket :
 							NULL,
 				   session->epoll_fd);
+	fplinux_session_audio_set_volume(
+		&session->audio, session->settings.volume, now_ms(session));
+	session->wireless = fplinux_session_wireless_create();
+	if (session->wireless &&
+	    !add_fd(session, fplinux_session_wireless_fd(session->wireless))) {
+		fplinux_session_wireless_destroy(session->wireless);
+		session->wireless = NULL;
+	}
 	if (options->vibrate)
 		session->has_vibrator = true;
 	else if (options->input_dir) {
@@ -3827,6 +4170,12 @@ void fplinux_session_destroy(struct fplinux_session *session)
 	remove_fd(session, session->timer_fd);
 	remove_fd(session, session->listener_fd);
 	remove_fd(session, session->clock_signal_fd);
+	if (session->wireless) {
+		epoll_ctl(session->epoll_fd, EPOLL_CTL_DEL,
+			  fplinux_session_wireless_fd(session->wireless), NULL);
+		fplinux_session_wireless_destroy(session->wireless);
+	}
+	end_volume_preview(session);
 	fplinux_session_audio_close(&session->audio);
 	if (session->storage) {
 		epoll_ctl(session->epoll_fd, EPOLL_CTL_DEL,
@@ -4211,6 +4560,7 @@ bool fplinux_session_key(struct fplinux_session *session, unsigned int code,
 				 !app_in_foreground(session) &&
 				 session->launcher_home_view &&
 				 !session->launcher_tasks_view &&
+				 !session->launcher_quick_settings_view &&
 				 !clock_due(session);
 
 		if (fplinux_session_power_red_key(&session->power, pressed,

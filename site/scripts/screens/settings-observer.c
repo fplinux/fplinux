@@ -207,6 +207,9 @@ static void collect_labels(lv_obj_t *object,
 				screen_observe_list_value(
 					object,
 					&observation->root_values[index]);
+		if (!strcmp(text, "Bluetooth") && !observation->bluetooth.found)
+			screen_observe_list_value(object,
+						  &observation->bluetooth);
 
 		assert(*used + length + 2 < sizeof(observation->labels));
 		memcpy(observation->labels + *used, text, length);

@@ -455,6 +455,49 @@ def test_pause_resume_preserves_every_frame_and_ramps_boundary(audiod: AudioServ
     assert not any(played[resume + 480 + rest :])
 
 
+def test_master_volume_ack_mute_and_reconnect_for_app_and_clock(audiod: AudioService) -> None:
+    def exercise() -> None:
+        control = audiod.manager()
+        control.settimeout(3)
+        control.send(b"VOLUME 0")
+        assert control.recv(256) == b"VOLUME 0"
+        owners = []
+        for clock in (False, True):
+            (client,), pid = audiod.connect()
+            audiod.announce(control, pid, clock=clock)
+            audiod.hello(client)
+            stream, ring = audiod.open_stream(client)
+            owners.append((client, pid, stream, ring))
+            ring.append(0, 4800, level=20000)
+            audiod.send(client, KICK, stream=stream)
+        audiod.wait(
+            lambda: all(ring.field(READ) == 4800 for _, _, _, ring in owners),
+            "mute did not consume both streams",
+        )
+        assert not any(audiod.played_left())
+        control.close()
+        audiod.wait(
+            lambda: all(ring.field(STATE) == PAUSED for _, _, _, ring in owners),
+            "manager loss did not pause streams",
+        )
+        control = audiod.manager()
+        control.settimeout(3)
+        control.send(b"VOLUME 5")
+        assert control.recv(256) == b"VOLUME 5"
+        for index, (client, pid, stream, ring) in enumerate(owners):
+            ring.append(4800, 4800, level=20000)
+            audiod.announce(control, pid, clock=bool(index))
+            audiod.send(client, KICK, stream=stream)
+        audiod.wait(
+            lambda: all(ring.field(READ) == 9600 for _, _, _, ring in owners),
+            "resynced streams did not play",
+        )
+
+    audiod.run(exercise)
+    played = audiod.played_left()
+    assert 10000 <= max(played) <= 20000
+
+
 def test_kick_opens_default_pcm_and_idle_releases_after_three_seconds(
     audiod: AudioService,
 ) -> None:

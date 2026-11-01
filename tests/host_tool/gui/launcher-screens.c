@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
+#include "bluez-fake.h"
 #include "clock-wire.h"
 #include "launcher-observer.h"
 #include "screen-frame.h"
@@ -36,6 +37,7 @@ struct capture {
 	char frame[32];
 	bool ready;
 	bool tasks_open;
+	bool quick_open;
 	bool task_closed;
 	bool has_request;
 	bool has_clock_request;
@@ -51,7 +53,21 @@ struct capture {
 	char left[FPLINUX_UI_SESSION_TEXT_BYTES];
 	char centre[FPLINUX_UI_SESSION_TEXT_BYTES];
 	char right[FPLINUX_UI_SESSION_TEXT_BYTES];
+	/* Quick settings: the controlled BlueZ and the manager's brightness. */
+	struct bluez_fake *bluez;
+	unsigned int brightness;
+	unsigned int volume;
+	bool wifi_supported;
+	bool wifi_on;
+	bool brightness_unavailable;
+	bool hold_volume_save;
+	struct fplinux_ui_session_message held_volume_save;
+	char brightness_request[FPLINUX_UI_SESSION_NAME_BYTES];
+	char brightness_value[FPLINUX_UI_SESSION_TEXT_BYTES];
+	unsigned int brightness_requests;
 };
+
+#define HCI0 "/org/bluez/hci0"
 
 static void wait_request(struct capture *capture,
 			 enum fplinux_ui_session_message_type type,
@@ -86,6 +102,68 @@ static void answer_tasks(struct capture *capture)
 	assert(fplinux_ui_session_send(capture->session, &reply));
 }
 
+/* As the manager: a preview shows a level, Save stores it, "" restores. */
+static void answer_setting(struct capture *capture,
+			   const struct fplinux_ui_session_message *request)
+{
+	struct fplinux_ui_session_message reply = {
+		.type = FPLINUX_UI_SESSION_SETTING,
+		.applied = true,
+		.storage_state = FPLINUX_STORAGE_DURABLE,
+	};
+
+	strcpy(reply.name, request->name);
+	if (!strcmp(request->name, "wifi")) {
+		if (!capture->wifi_supported) {
+			reply.type = FPLINUX_UI_SESSION_ERROR;
+			strcpy(reply.reason, "unsupported");
+		} else {
+			if (request->value[0])
+				capture->wifi_on = !strcmp(request->value, "1");
+			strcpy(reply.value, capture->wifi_on ? "1" : "0");
+		}
+		assert(fplinux_ui_session_send(capture->session, &reply));
+		return;
+	}
+	if (request->value[0] || strstr(request->name, "_preview") ||
+	    !strcmp(request->name, "brightness")) {
+		strcpy(capture->brightness_request, request->name);
+		strcpy(capture->brightness_value, request->value);
+		++capture->brightness_requests;
+	}
+	if (!strcmp(request->name, "brightness") && !request->value[0] &&
+	    capture->brightness_unavailable) {
+		reply.type = FPLINUX_UI_SESSION_ERROR;
+		reply.applied = false;
+		reply.storage_state = FPLINUX_STORAGE_UNPUBLISHED;
+		strcpy(reply.reason, "unavailable");
+	} else if (!strcmp(request->name, "brightness")) {
+		if (request->value[0])
+			capture->brightness =
+				(unsigned int)atoi(request->value);
+		snprintf(reply.value, sizeof(reply.value), "%u",
+			 capture->brightness);
+	} else if (!strcmp(request->name, "volume")) {
+		if (request->value[0])
+			capture->volume = (unsigned int)atoi(request->value);
+		snprintf(reply.value, sizeof(reply.value), "%u",
+			 capture->volume);
+		if (request->value[0] && capture->hold_volume_save) {
+			capture->held_volume_save = reply;
+			return;
+		}
+	} else if (request->value[0]) {
+		strcpy(reply.value, request->value);
+	} else {
+		bool volume = !strcmp(request->name, "volume_preview");
+
+		strcpy(reply.name, volume ? "volume" : "brightness");
+		snprintf(reply.value, sizeof(reply.value), "%u",
+			 volume ? capture->volume : capture->brightness);
+	}
+	assert(fplinux_ui_session_send(capture->session, &reply));
+}
+
 static void read_messages(struct capture *capture)
 {
 	struct fplinux_ui_session_message message;
@@ -106,6 +184,8 @@ static void read_messages(struct capture *capture)
 		case FPLINUX_UI_SESSION_SELECT:
 			if (!strcmp(message.value, "tasks")) {
 				capture->tasks_open = message.enabled;
+			} else if (!strcmp(message.value, "quick-settings")) {
+				capture->quick_open = message.enabled;
 			} else {
 				strcpy(capture->selected, message.selected_id);
 				strcpy(capture->view, message.value);
@@ -130,6 +210,11 @@ static void read_messages(struct capture *capture)
 			assert(!capture->has_request);
 			capture->request = message;
 			capture->has_request = true;
+			break;
+		case FPLINUX_UI_SESSION_SETTING:
+			/* Quick settings asks only while it reports itself. */
+			assert(capture->quick_open);
+			answer_setting(capture, &message);
 			break;
 		case FPLINUX_UI_SESSION_CLOCK:
 			assert(!capture->has_clock_request);
@@ -216,6 +301,8 @@ static void pump(struct capture *capture)
 	ssize_t bytes;
 
 	fplinux_ui_frame_pump(&capture->peer);
+	if (capture->bluez)
+		bluez_fake_pump(capture->bluez);
 	read_messages(capture);
 	while ((bytes = recv(capture->observer, &observation,
 			     sizeof(observation), MSG_DONTWAIT)) > 0) {
@@ -662,7 +749,8 @@ static void start(struct capture *capture, char **arguments)
 	strcpy(active.locale, capture->locale);
 	strcpy(active.input_locale, capture->locale);
 	if (!strcmp(capture->scenario, "home") ||
-	    !strcmp(capture->scenario, "notice-home"))
+	    !strcmp(capture->scenario, "notice-home") ||
+	    !strcmp(capture->scenario, "quick-settings"))
 		strcpy(active.value, "home");
 	else if (!strcmp(capture->scenario, "grid") ||
 		 !strcmp(capture->scenario, "notice-grid") ||
@@ -675,7 +763,7 @@ static void start(struct capture *capture, char **arguments)
 	capture->application = fork();
 	assert(capture->application >= 0);
 	if (!capture->application) {
-		char descriptor[32];
+		char descriptor[32], bus[512];
 
 		close(capture->listener);
 		close(wayland[0]);
@@ -694,6 +782,13 @@ static void start(struct capture *capture, char **arguments)
 		assert(setenv("LC_ALL", "en_US.UTF-8", 1) == 0);
 		assert(setenv("TZ", "UTC0", 1) == 0);
 		assert(unsetenv("LANGUAGE") == 0);
+		/* Only Quick settings has a bus, the scenario's own. */
+		if (strcmp(capture->scenario, "quick-settings")) {
+			assert(snprintf(bus, sizeof(bus),
+					"unix:path=%s/absent-bus",
+					arguments[6]) < (int)sizeof(bus));
+			assert(setenv("DBUS_SYSTEM_BUS_ADDRESS", bus, 1) == 0);
+		}
 		execl(arguments[3], arguments[3], (char *)NULL);
 		_exit(127);
 	}
@@ -1149,7 +1244,7 @@ static void system_notice(struct capture *capture)
 	press(capture, KEY_TAB);
 	press(capture, KEY_PICKUP_PHONE);
 	redraw(capture);
-	assert(!capture->tasks_open);
+	assert(!capture->tasks_open && !capture->quick_open);
 	press(capture, KEY_F14);
 	wait_no_label(capture, "Too many open apps");
 	if (on_home) {
@@ -1306,6 +1401,37 @@ static void battery_states(struct capture *capture)
 	puts("launcher-battery: every level, low and charging state drawn");
 }
 
+static void wait_quick_settings(struct capture *capture, bool open)
+{
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	while (capture->quick_open != open &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	assert(capture->quick_open == open);
+}
+
+static void wait_brightness_request(struct capture *capture, const char *name,
+				    const char *value)
+{
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	while ((strcmp(capture->brightness_request, name) ||
+		strcmp(capture->brightness_value, value)) &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		pump(capture);
+	if (strcmp(capture->brightness_request, name) ||
+	    strcmp(capture->brightness_value, value))
+		fprintf(stderr,
+			"Launcher setting request: %s=\"%s\", expected %s=\"%s\"\n",
+			capture->brightness_request, capture->brightness_value,
+			name, value);
+	assert(!strcmp(capture->brightness_request, name));
+	assert(!strcmp(capture->brightness_value, value));
+	capture->brightness_request[0] = '\0';
+	capture->brightness_value[0] = '\0';
+}
+
 static void wait_no_label(struct capture *capture, const char *text)
 {
 	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
@@ -1314,6 +1440,152 @@ static void wait_no_label(struct capture *capture, const char *text)
 	       fplinux_ui_frame_now_ms() < deadline)
 		pump(capture);
 	assert(!find_label(capture, text));
+}
+
+/* The real Quick settings with a controlled manager and BlueZ. */
+static void quick_settings(struct capture *capture)
+{
+	const struct fplinux_ui_session_message home = {
+		.type = FPLINUX_UI_SESSION_HOME,
+	};
+
+	wait_label(capture, "07:00");
+	press(capture, KEY_PICKUP_PHONE);
+	wait_quick_settings(capture, true);
+	wait_label(capture, "Quick settings");
+	wait_brightness_request(capture, "brightness", "");
+	wait_label(capture, "← 7 →");
+	wait_legends(capture, "", "", "Back");
+	save_frame(capture, "quick-list");
+	press_frame(capture, KEY_DOWN);
+	press_frame(capture, KEY_DOWN);
+	wait_label(capture, "Off");
+	wait_legends(capture, "", "Turn on", "Back");
+	save_frame(capture, "quick-bluetooth-off");
+
+	/* Another client switches it on; the row follows. */
+	bluez_fake_set_powered(capture->bluez, HCI0, true);
+	wait_label(capture, "On");
+	wait_legends(capture, "", "Turn off", "Back");
+	save_frame(capture, "quick-bluetooth-on");
+
+	/* A slow change keeps the panel usable and reports progress in the row. */
+	bluez_fake_answer(capture->bluez, BLUEZ_FAKE_APPLY, 1500);
+	press(capture, KEY_OK);
+	wait_label(capture, "Turning off");
+	wait_legends(capture, "", "", "Back");
+	settle(capture, 100);
+	save_frame(capture, "quick-bluetooth-busy");
+	wait_legends(capture, "", "Turn on", "Back");
+	wait_label(capture, "Off");
+	wait_no_label(capture, "Turning off");
+	assert(!bluez_fake_powered(capture->bluez, HCI0));
+
+	bluez_fake_answer(capture->bluez, BLUEZ_FAKE_FAIL, 0);
+	press(capture, KEY_OK);
+	wait_label(capture, "Cannot turn Bluetooth on. Try again.");
+	wait_legends(capture, "", "", "Close");
+	settle(capture, 100);
+	save_frame(capture, "quick-bluetooth-error");
+	press(capture, KEY_F14);
+	wait_legends(capture, "", "Turn on", "Back");
+	assert(bluez_fake_requests(capture->bluez) == 2);
+
+	/* Brightness stays in the list while previewing, cancelling and saving. */
+	press_frame(capture, KEY_UP);
+	press_frame(capture, KEY_UP);
+	press(capture, KEY_OK);
+	wait_label(capture, "Quick settings");
+	save_frame(capture, "quick-brightness");
+	press(capture, KEY_RIGHT);
+	wait_brightness_request(capture, "brightness_preview", "8");
+	wait_legends(capture, "Save", "", "Cancel");
+	settle(capture, 100);
+	save_frame(capture, "quick-brightness-preview");
+	press(capture, KEY_F14);
+	wait_brightness_request(capture, "brightness_preview", "");
+	wait_legends(capture, "", "", "Back");
+	wait_label(capture, "← 7 →");
+	press(capture, KEY_RIGHT);
+	wait_brightness_request(capture, "brightness_preview", "8");
+	wait_legends(capture, "Save", "", "Cancel");
+	press(capture, KEY_F13);
+	wait_brightness_request(capture, "brightness", "8");
+	wait_label(capture, "← 8 →");
+	/* The preview already had 8; Back confirms the save reply was applied. */
+	wait_legends(capture, "", "", "Back");
+	assert(capture->brightness == 8);
+
+	/* Zero is a value, not a query or rollback. */
+	press_frame(capture, KEY_DOWN);
+	wait_label(capture, "← 1 →");
+	press(capture, KEY_LEFT);
+	wait_brightness_request(capture, "volume_preview", "0");
+	capture->hold_volume_save = true;
+	press(capture, KEY_F13);
+	wait_brightness_request(capture, "volume", "0");
+	wait_legends(capture, "", "", "");
+	press(capture, KEY_F14);
+	settle(capture, 100);
+	assert(!capture->brightness_request[0]);
+	capture->hold_volume_save = false;
+	assert(fplinux_ui_session_send(capture->session,
+				       &capture->held_volume_save));
+	wait_legends(capture, "", "", "Back");
+	assert(capture->volume == 0);
+
+	/* bluetoothd stops and starts again: the row goes and returns. */
+	bluez_fake_stop(capture->bluez);
+	capture->bluez = NULL;
+	wait_no_label(capture, "Bluetooth");
+	wait_legends(capture, "", "", "Back");
+	save_frame(capture, "quick-no-bluetooth");
+	capture->bluez = bluez_fake_start();
+	bluez_fake_add_adapter(capture->bluez, HCI0, true);
+	/* The adapter appears asynchronously and its row can be off-screen. */
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+	while (!find_label(capture, "On") &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		press_frame(capture, KEY_DOWN);
+	wait_label(capture, "On");
+
+	/* Dial closes it; HOME from the manager does as well. */
+	press(capture, KEY_PICKUP_PHONE);
+	wait_quick_settings(capture, false);
+	wait_no_label(capture, "Quick settings");
+	capture->wifi_supported = true;
+	press(capture, KEY_PICKUP_PHONE);
+	wait_quick_settings(capture, true);
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	while (!find_label(capture, "Wi-Fi") &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		press_frame(capture, KEY_DOWN);
+	wait_label(capture, "Wi-Fi");
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	while (!find_label(capture, "← 8 →") &&
+	       fplinux_ui_frame_now_ms() < deadline)
+		press_frame(capture, KEY_UP);
+	wait_label(capture, "← 8 →");
+	press_frame(capture, KEY_DOWN);
+	wait_label(capture, "← 0 →");
+	press_frame(capture, KEY_DOWN);
+	wait_legends(capture, "", "Turn on", "Back");
+	press(capture, KEY_OK);
+	wait_legends(capture, "", "Turn off", "Back");
+	assert(capture->wifi_on);
+	press(capture, KEY_PICKUP_PHONE);
+	wait_quick_settings(capture, false);
+	capture->wifi_supported = false;
+	capture->brightness_unavailable = true;
+	press(capture, KEY_PICKUP_PHONE);
+	wait_quick_settings(capture, true);
+	wait_label(capture, "Unavailable");
+	wait_legends(capture, "", "", "Back");
+	save_frame(capture, "quick-brightness-unavailable");
+	assert(fplinux_ui_session_send(capture->session, &home));
+	wait_quick_settings(capture, false);
+	wait_no_label(capture, "Quick settings");
+	puts("launcher-quick-settings: inline levels and Bluetooth follow the manager and BlueZ");
 }
 
 /*
@@ -1375,8 +1647,16 @@ int main(int argc, char **argv)
 	assert(argc == 11 || argc >= 13);
 	capture.scenario = argc >= 13 ? argv[11] : "navigation";
 	capture.locale = argc >= 13 ? argv[12] : "en";
+	if (!strcmp(capture.scenario, "quick-settings")) {
+		capture.brightness = 7;
+		capture.volume = 1;
+		capture.bluez = bluez_fake_start();
+		bluez_fake_add_adapter(capture.bluez, HCI0, false);
+	}
 	start(&capture, argv);
-	if (!strcmp(capture.scenario, "application")) {
+	if (!strcmp(capture.scenario, "quick-settings")) {
+		quick_settings(&capture);
+	} else if (!strcmp(capture.scenario, "application")) {
 		application_bars(&capture, argc - 13, argv + 13);
 	} else if (!strcmp(capture.scenario, "home")) {
 		assert(argc == 14);
@@ -1402,5 +1682,7 @@ int main(int argc, char **argv)
 		task_overlay(&capture);
 	}
 	close_and_reap(&capture);
+	if (capture.bluez)
+		bluez_fake_stop(capture.bluez);
 	return 0;
 }

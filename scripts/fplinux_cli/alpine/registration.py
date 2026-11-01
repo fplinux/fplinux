@@ -84,6 +84,10 @@ BRIGHTNESS_CLIENT_SOURCES = (
     "lib/fplinux/fplinux-brightness-client.c",
     "include/fplinux/fplinux-brightness-client.h",
 )
+BLUEZ_ADAPTER_SOURCES = (
+    "lib/fplinux/fplinux-bluez-adapter.c",
+    "include/fplinux/fplinux-bluez-adapter.h",
+)
 INPUT_DEVICE_SOURCES = ("include/fplinux/fplinux-input-device.h",)
 KEYPAD_CODE_SOURCES = ("include/fplinux/fplinux-keypad.h",)
 KEYPAD_LIGHT_SOURCES = (
@@ -153,6 +157,7 @@ SHARED_APORT_SOURCES = {
         *UTF8_SOURCES,
         *CLOCK_SOURCES,
         *CLI_SOURCES,
+        *BLUEZ_ADAPTER_SOURCES,
         *DESKTOP_ENTRY_SOURCES,
         *UI_PROFILE_SOURCES,
         "alpine/aports/fplinux-clocks/clock-face.c",
@@ -227,6 +232,7 @@ SHARED_APORT_SOURCES = {
         *UTF8_SOURCES,
         *MULTITAP_SOURCES,
         *CLI_SOURCES,
+        *BLUEZ_ADAPTER_SOURCES,
         *SETTINGS_VALUES_SOURCES,
         *UI_PROFILE_SOURCES,
     ),

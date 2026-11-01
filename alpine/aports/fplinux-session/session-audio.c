@@ -26,6 +26,7 @@ void fplinux_session_audio_init(struct fplinux_session_audio *audio,
 	audio->fd = -1;
 	audio->epoll_fd = epoll_fd;
 	audio->backoff_ms = FPLINUX_SESSION_AUDIO_RETRY_MS;
+	audio->desired_volume = FPLINUX_AUDIO_VOLUME_MAX;
 	if (!socket_path)
 		return;
 	if (strlen(socket_path) >= sizeof(audio->socket_path)) {
@@ -56,6 +57,9 @@ static void disconnect(struct fplinux_session_audio *audio)
 		epoll_ctl(audio->epoll_fd, EPOLL_CTL_DEL, audio->fd, NULL);
 	close(audio->fd);
 	audio->fd = -1;
+	audio->volume_known = false;
+	audio->volume_waiting = false;
+	audio->volume_ready = false;
 	for (i = 0; i < FPLINUX_SESSION_AUDIO_PROCESSES; ++i)
 		audio->processes[i].announced = false;
 }
@@ -86,6 +90,21 @@ static bool send_text(struct fplinux_session_audio *audio, const char *text,
 		return true;
 	lose(audio, sent < 0 ? strerror(errno) : "short send", now_ms);
 	return false;
+}
+
+static bool send_volume(struct fplinux_session_audio *audio, uint64_t now_ms)
+{
+	char text[FPLINUX_AUDIO_CONTROL_BYTES];
+
+	snprintf(text, sizeof(text), FPLINUX_AUDIO_CONTROL_VOLUME " %u",
+		 audio->desired_volume);
+	if (!send_text(audio, text, now_ms))
+		return false;
+	audio->sent_volume = audio->desired_volume;
+	audio->volume_waiting = true;
+	audio->volume_deadline_ms =
+		now_ms + FPLINUX_SESSION_AUDIO_VOLUME_TIMEOUT_MS;
+	return true;
 }
 
 static bool tell(struct fplinux_session_audio *audio,
@@ -161,8 +180,7 @@ static void connect_service(struct fplinux_session_audio *audio,
 	audio->fd = fd;
 	audio->quiet = false;
 	fprintf(stderr, "fplinux-session: audio service connected\n");
-	if (announce_all(audio, now_ms))
-		audio->backoff_ms = FPLINUX_SESSION_AUDIO_RETRY_MS;
+	send_volume(audio, now_ms);
 }
 
 static struct fplinux_session_audio_process *
@@ -214,7 +232,7 @@ bool fplinux_session_audio_app(struct fplinux_session_audio *audio, pid_t pid,
 		.uid = uid,
 	};
 	strcpy(process->app_id, app_id);
-	if (audio->fd >= 0)
+	if (audio->fd >= 0 && audio->volume_ready)
 		announce(audio, process, now_ms);
 	return true;
 }
@@ -241,7 +259,7 @@ bool fplinux_session_audio_clock(struct fplinux_session_audio *audio, pid_t pid,
 		.uid = uid,
 		.clock = true,
 	};
-	if (audio->fd >= 0)
+	if (audio->fd >= 0 && audio->volume_ready)
 		announce(audio, process, now_ms);
 	return true;
 }
@@ -277,10 +295,40 @@ void fplinux_session_audio_audible(struct fplinux_session_audio *audio,
 		tell(audio, process, now_ms);
 }
 
+bool fplinux_session_audio_set_volume(struct fplinux_session_audio *audio,
+				      unsigned int level, uint64_t now_ms)
+{
+	if (level > FPLINUX_AUDIO_VOLUME_MAX)
+		return false;
+	audio->desired_volume = level;
+	if (audio->fd >= 0 && !audio->volume_waiting &&
+	    (!audio->volume_known || audio->applied_volume != level))
+		send_volume(audio, now_ms);
+	return true;
+}
+
+bool fplinux_session_audio_volume_applied(
+	const struct fplinux_session_audio *audio, unsigned int *level)
+{
+	if (!audio->volume_known)
+		return false;
+	if (level)
+		*level = audio->applied_volume;
+	return true;
+}
+
+bool fplinux_session_audio_volume_pending(
+	const struct fplinux_session_audio *audio)
+{
+	return !audio->volume_known || audio->volume_waiting ||
+	       audio->applied_volume != audio->desired_volume;
+}
+
 void fplinux_session_audio_dispatch(struct fplinux_session_audio *audio,
 				    uint64_t now_ms)
 {
 	char packet[FPLINUX_AUDIO_CONTROL_BYTES];
+	char expected[FPLINUX_AUDIO_CONTROL_BYTES];
 	unsigned int count;
 
 	if (!audio->enabled)
@@ -290,13 +338,42 @@ void fplinux_session_audio_dispatch(struct fplinux_session_audio *audio,
 			connect_service(audio, now_ms);
 		return;
 	}
-	/* The control connection carries no replies. */
+	if (audio->volume_waiting && now_ms >= audio->volume_deadline_ms) {
+		lose(audio, "volume acknowledgement timed out", now_ms);
+		return;
+	}
 	for (count = 0; count < FPLINUX_SESSION_AUDIO_READS; ++count) {
-		ssize_t bytes =
-			recv(audio->fd, packet, sizeof(packet), MSG_DONTWAIT);
+		ssize_t bytes = recv(audio->fd, packet, sizeof(packet),
+				     MSG_DONTWAIT | MSG_TRUNC);
 
-		if (bytes > 0 || (bytes < 0 && errno == EINTR))
+		if (bytes < 0 && errno == EINTR)
 			continue;
+		if (bytes > 0) {
+			snprintf(expected, sizeof(expected),
+				 FPLINUX_AUDIO_CONTROL_VOLUME " %u",
+				 audio->sent_volume);
+			if (!audio->volume_waiting ||
+			    bytes != (ssize_t)strlen(expected) ||
+			    memcmp(packet, expected, (size_t)bytes)) {
+				lose(audio, "invalid volume acknowledgement",
+				     now_ms);
+				return;
+			}
+			audio->volume_waiting = false;
+			audio->volume_known = true;
+			audio->applied_volume = audio->sent_volume;
+			if (audio->desired_volume != audio->applied_volume) {
+				if (!send_volume(audio, now_ms))
+					return;
+			} else if (!audio->volume_ready) {
+				audio->volume_ready = true;
+				if (!announce_all(audio, now_ms))
+					return;
+				audio->backoff_ms =
+					FPLINUX_SESSION_AUDIO_RETRY_MS;
+			}
+			continue;
+		}
 		if (bytes < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
 			return;
 		lose(audio, bytes ? strerror(errno) : "closed by the service",
@@ -308,7 +385,11 @@ void fplinux_session_audio_dispatch(struct fplinux_session_audio *audio,
 uint64_t
 fplinux_session_audio_deadline(const struct fplinux_session_audio *audio)
 {
-	return audio->enabled && audio->fd < 0 ? audio->retry_ms : 0;
+	if (!audio->enabled)
+		return 0;
+	if (audio->fd < 0)
+		return audio->retry_ms;
+	return audio->volume_waiting ? audio->volume_deadline_ms : 0;
 }
 
 void fplinux_session_audio_close(struct fplinux_session_audio *audio)

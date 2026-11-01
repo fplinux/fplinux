@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _POSIX_C_SOURCE 200809L
+#include "fplinux-bluez-adapter.h"
 #include "fplinux-language.h"
 #include "settings-session-boundary.h"
 
@@ -1515,6 +1516,27 @@ size_t fplinux_ui_list_append(struct fplinux_ui_screen *list, const char *text,
 	return index;
 }
 
+size_t fplinux_ui_list_insert(struct fplinux_ui_screen *list, size_t index,
+			      const char *text, const char *detail)
+{
+	assert(index <= list->count && list->count < 16);
+	memmove(&list->rows[index + 1], &list->rows[index],
+		(list->count - index) * sizeof(list->rows[0]));
+	memset(&list->rows[index], 0, sizeof(list->rows[index]));
+	++list->count;
+	return fplinux_ui_list_set(list, index, text, detail) ? index :
+								SIZE_MAX;
+}
+
+bool fplinux_ui_list_delete(struct fplinux_ui_screen *list, size_t index)
+{
+	assert(index < list->count);
+	--list->count;
+	memmove(&list->rows[index], &list->rows[index + 1],
+		(list->count - index) * sizeof(list->rows[0]));
+	return true;
+}
+
 bool fplinux_ui_list_set(struct fplinux_ui_screen *list, size_t index,
 			 const char *text, const char *detail)
 {
@@ -1554,6 +1576,106 @@ bool fplinux_ui_list_set_select_label(struct fplinux_ui_screen *list,
 {
 	copy_text(list->select_label, sizeof(list->select_label), label);
 	return true;
+}
+
+/*
+ * No system bus is part of this boundary: Settings has no Bluetooth adapter,
+ * so it neither watches a descriptor nor waits for a change.
+ */
+struct fplinux_bluez_adapter *fplinux_bluez_adapter_open(
+	const struct fplinux_bluez_adapter_listener *listener)
+{
+	(void)listener;
+	errno = ENOENT;
+	return NULL;
+}
+
+void fplinux_bluez_adapter_close(struct fplinux_bluez_adapter *adapter)
+{
+	assert(!adapter);
+}
+
+static void no_adapter(const void *argument)
+{
+	(void)argument;
+	assert(!"Settings used Bluetooth without an adapter");
+	abort();
+}
+
+int fplinux_bluez_adapter_fd(const struct fplinux_bluez_adapter *adapter)
+{
+	no_adapter(adapter);
+	return -1;
+}
+
+void fplinux_bluez_adapter_connect(struct fplinux_bluez_adapter *adapter)
+{
+	no_adapter(adapter);
+}
+
+void fplinux_bluez_adapter_dispatch(struct fplinux_bluez_adapter *adapter)
+{
+	no_adapter(adapter);
+}
+
+bool fplinux_bluez_adapter_present(const struct fplinux_bluez_adapter *adapter)
+{
+	no_adapter(adapter);
+	return false;
+}
+
+bool fplinux_bluez_adapter_powered(const struct fplinux_bluez_adapter *adapter)
+{
+	no_adapter(adapter);
+	return false;
+}
+
+bool fplinux_bluez_adapter_pending(const struct fplinux_bluez_adapter *adapter)
+{
+	no_adapter(adapter);
+	return false;
+}
+
+bool fplinux_bluez_adapter_set_powered(struct fplinux_bluez_adapter *adapter,
+				       bool powered, int timeout_ms)
+{
+	(void)powered;
+	(void)timeout_ms;
+	no_adapter(adapter);
+	return false;
+}
+
+void fplinux_ui_watch_fd(struct fplinux_ui *ui, int fd, short events,
+			 fplinux_ui_fd_cb callback, void *context)
+{
+	(void)fd;
+	(void)events;
+	(void)callback;
+	(void)context;
+	no_adapter(ui);
+}
+
+struct fplinux_ui_screen *fplinux_ui_wait_begin(struct fplinux_ui *ui,
+						const char *title,
+						const char *text,
+						fplinux_ui_wait_cb cancel,
+						void *context)
+{
+	(void)title;
+	(void)text;
+	(void)cancel;
+	(void)context;
+	no_adapter(ui);
+	return NULL;
+}
+
+bool fplinux_ui_wait_end(struct fplinux_ui *ui, fplinux_ui_wait_cb done,
+			 void *context)
+{
+	(void)done;
+	(void)context;
+	no_adapter(ui);
+	return false;
 }
 
 bool fplinux_ui_list_set_value_details(struct fplinux_ui_screen *list)

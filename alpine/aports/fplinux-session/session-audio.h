@@ -17,6 +17,7 @@
  */
 #define FPLINUX_SESSION_AUDIO_RETRY_MS 100U
 #define FPLINUX_SESSION_AUDIO_RETRY_MAX_MS 2000U
+#define FPLINUX_SESSION_AUDIO_VOLUME_TIMEOUT_MS 1000U
 /* The size of sockaddr_un.sun_path. */
 #define FPLINUX_SESSION_AUDIO_PATH_BYTES 108
 
@@ -40,11 +41,11 @@ struct fplinux_session_audio_process {
  *
  * Nothing blocks: the socket is nonblocking, and a send that fails or would
  * block closes the connection instead of dropping the command. The next
- * connection, after the backoff, announces the whole state again: APP and
- * then AUDIBLE for each process. A process that goes while no connection
- * exists is only forgotten, as the service forgets every process when the
- * connection drops. Packets from the service are read and ignored. Each
- * connection, each loss and the first failure after them log one line.
+ * connection, after the backoff, confirms the master volume and announces
+ * the whole state again: APP and then AUDIBLE for each process. A process
+ * that goes while no connection exists is only forgotten, as the service
+ * forgets every process when the connection drops. Each connection, each
+ * loss and the first failure after them log one line.
  *
  * Every call takes the current CLOCK_MONOTONIC time in milliseconds.
  */
@@ -59,6 +60,13 @@ struct fplinux_session_audio {
 	unsigned int backoff_ms;
 	/* A failure was logged since the last connection. */
 	bool quiet;
+	unsigned int desired_volume;
+	unsigned int sent_volume;
+	unsigned int applied_volume;
+	bool volume_waiting;
+	bool volume_known;
+	bool volume_ready;
+	uint64_t volume_deadline_ms;
 	struct fplinux_session_audio_process
 		processes[FPLINUX_SESSION_AUDIO_PROCESSES];
 };
@@ -85,10 +93,19 @@ void fplinux_session_audio_gone(struct fplinux_session_audio *audio, pid_t pid,
 /* Sends AUDIBLE when the announced process's state changes. */
 void fplinux_session_audio_audible(struct fplinux_session_audio *audio,
 				   pid_t pid, bool audible, uint64_t now_ms);
+/* Retains the latest level, 0 through 10, including across reconnects. */
+bool fplinux_session_audio_set_volume(struct fplinux_session_audio *audio,
+				      unsigned int level, uint64_t now_ms);
+/* Acknowledged by the service on this connection, if known. */
+bool fplinux_session_audio_volume_applied(
+	const struct fplinux_session_audio *audio, unsigned int *level);
+/* The desired volume has not yet been acknowledged on this connection. */
+bool fplinux_session_audio_volume_pending(
+	const struct fplinux_session_audio *audio);
 /* Reads what the service sent, notices a hang-up and connects when due. */
 void fplinux_session_audio_dispatch(struct fplinux_session_audio *audio,
 				    uint64_t now_ms);
-/* When dispatch connects again, or 0 while connected or disabled. */
+/* Next reconnect or acknowledgement timeout, or 0 when neither is due. */
 uint64_t
 fplinux_session_audio_deadline(const struct fplinux_session_audio *audio);
 /* Closes the connection, which makes the service forget every process. */

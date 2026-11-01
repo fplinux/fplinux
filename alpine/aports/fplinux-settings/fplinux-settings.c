@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
+#include "fplinux-bluez-adapter.h"
 #include "fplinux-language.h"
 #include "fplinux-multitap.h"
 #include "settings-core.h"
@@ -11,6 +12,7 @@
 #include <fplinux/fplinux-ui-session.h>
 #include <libintl.h>
 #include <errno.h>
+#include <poll.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -22,6 +24,7 @@
 #define APP_ID "org.fplinux.settings"
 #define ARRAY_SIZE(array) (sizeof(array) / sizeof((array)[0]))
 #define LANGUAGE_COUNT_MAX 16
+#define BLUETOOTH_TIMEOUT_MS 10000
 #define _(text) gettext(text)
 /* Marks text for translation where it is stored; _() translates on use. */
 #define N_(text) text
@@ -41,8 +44,10 @@ enum command {
 	COMMAND_CHANGE,
 };
 
+/* In this order; Bluetooth only while BlueZ has its adapter. */
 enum root_row {
 	ROOT_DISPLAY,
+	ROOT_BLUETOOTH,
 	ROOT_TIME_LANGUAGE,
 	ROOT_INPUT,
 	ROOT_ABOUT,
@@ -197,6 +202,19 @@ struct settings_app {
 	 */
 	size_t gauge_item;
 	bool previewing;
+
+	/*
+	 * Bluetooth: the root row while BlueZ has one adapter, and a screen
+	 * with its switch. A busy alert covers the screen while a change is on
+	 * its way; failed is the outcome that the screen presents next.
+	 */
+	struct fplinux_bluez_adapter *bluetooth;
+	struct fplinux_ui_screen *bluetooth_list;
+	struct fplinux_ui_screen *bluetooth_alert;
+	struct fplinux_ui_screen *bluetooth_wait;
+	bool bluetooth_row;
+	bool bluetooth_turning_on;
+	bool bluetooth_failed;
 
 	/* Date and time: an item follows the clock until the user edits it. */
 	size_t date_item;
@@ -1260,6 +1278,198 @@ static void open_about(struct settings_app *app)
 	fplinux_ui_push(app->ui, form);
 }
 
+/* Bluetooth: one switch for the adapter's power, applied by BlueZ. */
+
+static bool bluetooth_present(const struct settings_app *app)
+{
+	return app->bluetooth && fplinux_bluez_adapter_present(app->bluetooth);
+}
+
+static const char *bluetooth_state(const struct settings_app *app)
+{
+	if (!bluetooth_present(app))
+		return _("Unavailable");
+	return fplinux_bluez_adapter_powered(app->bluetooth) ? _("On") :
+							       _("Off");
+}
+
+/* The root list's index of a row, which follows a hidden Bluetooth row. */
+static size_t root_index(const struct settings_app *app, enum root_row row)
+{
+	return row > ROOT_BLUETOOTH && !app->bluetooth_row ? row - 1 : row;
+}
+
+static enum root_row root_row_at(const struct settings_app *app, size_t index)
+{
+	return index >= ROOT_BLUETOOTH && !app->bluetooth_row ? index + 1 :
+								index;
+}
+
+/* The root row comes and goes with the adapter; the focus stays on its row. */
+static void show_root_bluetooth(struct settings_app *app)
+{
+	bool present = bluetooth_present(app);
+	size_t index = root_index(app, ROOT_BLUETOOTH);
+
+	if (!app->root)
+		return;
+	if (present && !app->bluetooth_row) {
+		fplinux_ui_list_insert(app->root, index, _("Bluetooth"), NULL);
+		set_glyph(app, app->root, index, "bluetooth");
+	} else if (!present && app->bluetooth_row) {
+		fplinux_ui_list_delete(app->root, index);
+	}
+	app->bluetooth_row = present;
+	if (present)
+		fplinux_ui_list_set(app->root, index, _("Bluetooth"),
+				    bluetooth_state(app));
+}
+
+static void show_bluetooth(struct settings_app *app)
+{
+	bool usable = bluetooth_present(app) &&
+		      !fplinux_bluez_adapter_pending(app->bluetooth);
+
+	show_root_bluetooth(app);
+	if (!app->bluetooth_list)
+		return;
+	fplinux_ui_list_set(app->bluetooth_list, 0, _("Bluetooth"),
+			    bluetooth_state(app));
+	fplinux_ui_list_set_select_label(
+		app->bluetooth_list,
+		!usable					      ? "" :
+		fplinux_bluez_adapter_powered(app->bluetooth) ? _("Turn off") :
+								_("Turn on"));
+}
+
+static void bluetooth_alert_closed(struct fplinux_ui *ui,
+				   struct fplinux_ui_screen *alert,
+				   int command_id, void *context)
+{
+	struct settings_app *app = context;
+
+	(void)ui;
+	(void)alert;
+	(void)command_id;
+	app->bluetooth_alert = NULL;
+}
+
+static void show_bluetooth_error(struct settings_app *app)
+{
+	const struct fplinux_ui_command close = {
+		.id = COMMAND_CLOSE,
+		.type = FPLINUX_UI_COMMAND_BACK,
+		.label = _("Close"),
+		.icon = fplinux_ui_glyph(app->ui, "back", FPLINUX_UI_GLYPH_ROW),
+	};
+	struct fplinux_ui_screen *alert = fplinux_ui_alert_new(
+		app->ui, FPLINUX_UI_ALERT_ERROR, _("Bluetooth"),
+		app->bluetooth_turning_on ?
+			_("Cannot turn Bluetooth on. Try again.") :
+			_("Cannot turn Bluetooth off. Try again."),
+		0);
+
+	if (!alert)
+		return;
+	fplinux_ui_screen_add_command(alert, &close);
+	fplinux_ui_screen_set_listener(alert, bluetooth_alert_closed, NULL,
+				       app);
+	app->bluetooth_alert = alert;
+	fplinux_ui_push(app->ui, alert);
+}
+
+/* After the busy alert, or at once without one: the outcome. */
+static void bluetooth_answered(struct fplinux_ui *ui, void *context)
+{
+	struct settings_app *app = context;
+	bool failed = app->bluetooth_failed;
+
+	app->bluetooth_wait = NULL;
+	app->bluetooth_failed = false;
+	show_bluetooth(app);
+	if (failed && app->bluetooth_list &&
+	    fplinux_ui_current(ui) == app->bluetooth_list)
+		show_bluetooth_error(app);
+}
+
+static void bluetooth_finished(bool applied, void *context)
+{
+	struct settings_app *app = context;
+
+	app->bluetooth_failed = !applied;
+	if (app->bluetooth_wait &&
+	    fplinux_ui_wait_end(app->ui, bluetooth_answered, app))
+		return;
+	bluetooth_answered(app->ui, app);
+}
+
+static void bluetooth_changed(void *context)
+{
+	show_bluetooth(context);
+}
+
+static void bluetooth_ready(struct fplinux_ui *ui, int fd, short events,
+			    void *context)
+{
+	struct settings_app *app = context;
+
+	(void)ui;
+	(void)fd;
+	if (events & POLLIN)
+		fplinux_bluez_adapter_dispatch(app->bluetooth);
+}
+
+static void toggle_bluetooth(struct settings_app *app)
+{
+	bool on;
+
+	if (!bluetooth_present(app) ||
+	    fplinux_bluez_adapter_pending(app->bluetooth))
+		return;
+	on = !fplinux_bluez_adapter_powered(app->bluetooth);
+	app->bluetooth_turning_on = on;
+	if (!fplinux_bluez_adapter_set_powered(app->bluetooth, on,
+					       BLUETOOTH_TIMEOUT_MS)) {
+		show_bluetooth_error(app);
+		return;
+	}
+	app->bluetooth_wait = fplinux_ui_wait_begin(
+		app->ui, _("Bluetooth"),
+		on ? _("Turning Bluetooth on…") : _("Turning Bluetooth off…"),
+		NULL, app);
+	show_bluetooth(app);
+}
+
+static void bluetooth_command(struct fplinux_ui *ui,
+			      struct fplinux_ui_screen *list, int command_id,
+			      void *context)
+{
+	struct settings_app *app = context;
+
+	(void)ui;
+	(void)list;
+	if (command_id == COMMAND_BACK)
+		close_screen(app, &app->bluetooth_list);
+	else if (command_id == FPLINUX_UI_SELECT_COMMAND)
+		toggle_bluetooth(app);
+}
+
+static void open_bluetooth(struct settings_app *app)
+{
+	struct fplinux_ui_screen *list = new_list(app, _("Bluetooth"),
+						  FPLINUX_UI_LIST_IMPLICIT,
+						  bluetooth_command, NULL);
+
+	if (!list)
+		return;
+	fplinux_ui_list_set_value_details(list);
+	fplinux_ui_list_append(list, _("Bluetooth"), NULL);
+	set_glyph(app, list, 0, "bluetooth");
+	app->bluetooth_list = list;
+	show_bluetooth(app);
+	fplinux_ui_push(app->ui, list);
+}
+
 static void root_command(struct fplinux_ui *ui, struct fplinux_ui_screen *list,
 			 int command_id, void *context)
 {
@@ -1272,7 +1482,10 @@ static void root_command(struct fplinux_ui *ui, struct fplinux_ui_screen *list,
 	}
 	if (command_id != FPLINUX_UI_SELECT_COMMAND)
 		return;
-	switch (fplinux_ui_list_get_focused(list)) {
+	switch (root_row_at(app, fplinux_ui_list_get_focused(list))) {
+	case ROOT_BLUETOOTH:
+		open_bluetooth(app);
+		break;
 	case ROOT_DISPLAY:
 		open_display(app, DISPLAY_BRIGHTNESS);
 		break;
@@ -1294,13 +1507,15 @@ static void show_root(struct settings_app *app)
 
 	if (!app->root)
 		return;
-	fplinux_ui_list_set(app->root, ROOT_DISPLAY, _("Display"),
+	fplinux_ui_list_set(app->root, root_index(app, ROOT_DISPLAY),
+			    _("Display"),
 			    choice_label(&theme_choice, theme_kind(app)));
+	show_root_bluetooth(app);
 	language_name(fplinux_ui_locale(app->ui), value, sizeof(value));
-	fplinux_ui_list_set(app->root, ROOT_TIME_LANGUAGE, _("Time & language"),
-			    value);
+	fplinux_ui_list_set(app->root, root_index(app, ROOT_TIME_LANGUAGE),
+			    _("Time & language"), value);
 	language_name(fplinux_ui_input_locale(app->ui), value, sizeof(value));
-	fplinux_ui_list_set(app->root, ROOT_INPUT, _("Input"),
+	fplinux_ui_list_set(app->root, root_index(app, ROOT_INPUT), _("Input"),
 			    app->input_unavailable ? _("Unavailable") : value);
 }
 
@@ -1314,7 +1529,11 @@ static struct fplinux_ui_screen *create_root(struct settings_app *app)
 	if (!list)
 		return NULL;
 	fplinux_ui_list_set_value_details(list);
+	app->bluetooth_row = bluetooth_present(app);
 	fplinux_ui_list_append(list, _("Display"), NULL);
+	if (app->bluetooth_row)
+		fplinux_ui_list_append(list, _("Bluetooth"),
+				       bluetooth_state(app));
 	fplinux_ui_list_append(list, _("Time & language"), NULL);
 	fplinux_ui_list_append(list, _("Input"), NULL);
 	fplinux_ui_list_append(list, _("About"),
@@ -1323,23 +1542,31 @@ static struct fplinux_ui_screen *create_root(struct settings_app *app)
 							     sizeof(value)) ?
 				       value :
 				       NULL);
-	set_glyph(app, list, ROOT_DISPLAY, "display");
-	set_glyph(app, list, ROOT_TIME_LANGUAGE, "date-time");
-	set_glyph(app, list, ROOT_INPUT, "keyboard");
-	set_glyph(app, list, ROOT_ABOUT, "about");
+	set_glyph(app, list, root_index(app, ROOT_DISPLAY), "display");
+	if (app->bluetooth_row)
+		set_glyph(app, list, root_index(app, ROOT_BLUETOOTH),
+			  "bluetooth");
+	set_glyph(app, list, root_index(app, ROOT_TIME_LANGUAGE), "date-time");
+	set_glyph(app, list, root_index(app, ROOT_INPUT), "keyboard");
+	set_glyph(app, list, root_index(app, ROOT_ABOUT), "about");
 	return list;
 }
 
 static void return_root(struct settings_app *app)
 {
 	struct fplinux_ui_screen **children[] = {
-		&app->choice_list, &app->brightness_form, &app->date_form,
-		&app->about,	   &app->display,	  &app->time_language,
-		&app->input,
+		&app->bluetooth_alert, &app->choice_list, &app->brightness_form,
+		&app->date_form,       &app->about,	  &app->display,
+		&app->time_language,   &app->input,	  &app->bluetooth_list,
 	};
 
 	fplinux_ui_menu_close(app->ui);
 	end_preview(app);
+	/* Leaving ends a Bluetooth wait; BlueZ still answers the request. */
+	if (app->bluetooth_wait &&
+	    fplinux_ui_current(app->ui) == app->bluetooth_wait)
+		fplinux_ui_pop(app->ui);
+	app->bluetooth_wait = NULL;
 	for (size_t index = 0; index < ARRAY_SIZE(children); ++index)
 		if (*children[index])
 			close_screen(app, children[index]);
@@ -1658,8 +1885,12 @@ static void handle_event(struct fplinux_ui *ui,
 				fplinux_ui_form_set_value(app->brightness_form,
 							  app->gauge_item,
 							  (int)app->brightness);
-		} else
+		} else {
 			recover_choice(app);
+			/* The system bus may have started or restarted since. */
+			if (app->bluetooth)
+				fplinux_bluez_adapter_connect(app->bluetooth);
+		}
 		break;
 	case FPLINUX_UI_EVENT_VISIBILITY:
 		/* Hidden: no clock updates. Shown: catch up at once. */
@@ -1713,10 +1944,23 @@ int main(int argc, char **argv)
 	fplinux_ui_set_close_handler(app.ui, prepare_close, &app);
 	app.clock_timer = lv_timer_create(clock_tick, 60000, &app);
 	lv_timer_pause(app.clock_timer);
+	app.bluetooth = fplinux_bluez_adapter_open(
+		&(const struct fplinux_bluez_adapter_listener){
+			.changed = bluetooth_changed,
+			.finished = bluetooth_finished,
+			.context = &app,
+		});
+	if (app.bluetooth) {
+		fplinux_ui_watch_fd(app.ui,
+				    fplinux_bluez_adapter_fd(app.bluetooth),
+				    POLLIN, bluetooth_ready, &app);
+		fplinux_bluez_adapter_connect(app.bluetooth);
+	}
 	root = create_root(&app);
 	if (!root) {
 		lv_timer_delete(app.clock_timer);
 		fplinux_ui_close(app.ui);
+		fplinux_bluez_adapter_close(app.bluetooth);
 		return 1;
 	}
 	fplinux_ui_push(app.ui, root);
@@ -1730,5 +1974,6 @@ int main(int argc, char **argv)
 	result = fplinux_ui_run(app.ui);
 	lv_timer_delete(app.clock_timer);
 	fplinux_ui_close(app.ui);
+	fplinux_bluez_adapter_close(app.bluetooth);
 	return result < 0;
 }

@@ -73,21 +73,26 @@
  *   follows the active clock signal's lifetime independently of application
  *   visibility. With 0 audiod takes no more frames before its next period;
  *   with 1 it resumes them where they stopped.
+ * "VOLUME <0..10>": set the master gain for the mixed output, 10 at unity.
+ *   audiod replies with "VOLUME <level>" after accepting the setting.
  *
  * The manager's socket is nonblocking. It never drops a command: when a send
  * fails or would block, it closes the connection, reconnects with a backoff
- * and sends its whole state again, APP or CLOCK then AUDIBLE per process.
+ * and sends its whole state again, VOLUME first and after its reply APP or
+ * CLOCK then AUDIBLE per process.
  * When the connection drops, audiod forgets every process and pauses every
  * stream; a stream whose process is not announced again, with the same
  * uid and role, within FPLINUX_AUDIO_RESYNC_MS of the next connection ends.
  *
- * audiod ignores unknown commands and sends nothing on this socket.
+ * audiod ignores unknown commands.
  */
 #define FPLINUX_AUDIO_CONTROL_BYTES 256
 #define FPLINUX_AUDIO_CONTROL_APP "APP"
 #define FPLINUX_AUDIO_CONTROL_CLOCK "CLOCK"
 #define FPLINUX_AUDIO_CONTROL_GONE "GONE"
 #define FPLINUX_AUDIO_CONTROL_AUDIBLE "AUDIBLE"
+#define FPLINUX_AUDIO_CONTROL_VOLUME "VOLUME"
+#define FPLINUX_AUDIO_VOLUME_MAX 10U
 #define FPLINUX_AUDIO_RESYNC_MS 1000
 
 /*

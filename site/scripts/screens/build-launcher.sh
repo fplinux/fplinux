@@ -21,10 +21,13 @@ mkdir -p "$work/locale/ru/LC_MESSAGES"
 msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/org.fplinux.launcher.mo" "$launcher/ru.po"
 msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/fplinux-ui.mo" "$root/alpine/aports/fplinux-ui/ru.po"
 
-ui_host_build_application -I"$launcher" -I"$clocks" \
+# pkg-config emits compiler and linker arguments for the pinned libraries.
+# shellcheck disable=SC2046
+ui_host_build_application -I"$launcher" -I"$clocks" $(pkg-config --cflags dbus-1) \
 	"$launcher"/*.c "$clocks/clock-model.c" "$clocks/clock-wire.c" \
 	"$clocks/clock-face.c" \
 	"$ui_host_ui/fplinux-desktop-entry.c" \
+	"$ui_host_ui/fplinux-bluez-adapter.c" \
 	"$root/tests/host_tool/gui/launcher-resources.c" \
 	"$root/tests/host_tool/gui/launcher-observer.c" \
 	-Wl,--wrap=open -Wl,--wrap=inotify_add_watch \
@@ -33,15 +36,16 @@ ui_host_build_application -I"$launcher" -I"$clocks" \
 	-Wl,--wrap=lv_display_flush_ready -Wl,--wrap=libintl_bindtextdomain \
 	-Wl,--wrap=fplinux_language_load -Wl,--wrap=time \
 	-Wl,--wrap=clock_gettime \
-	-o "$work/launcher"
+	$(pkg-config --libs dbus-1) -o "$work/launcher"
 
 # pkg-config emits compiler and linker arguments for the pinned peer libraries.
 # shellcheck disable=SC2046
 ui_host_compile -I"$root/include/fplinux" -I"$ui_host_inputs" -I"$screens_dir" \
-	-I"$clocks" $(pkg-config --cflags wayland-server xkbcommon json-c) \
+	-I"$clocks" $(pkg-config --cflags wayland-server xkbcommon json-c dbus-1) \
 	"$root/tests/host_tool/gui/launcher-screens.c" "$screens_dir/ui-frame-peer.c" \
+	"$root/tests/host_tool/gui/bluez-fake.c" \
 	"$screens_dir/screen-frame.c" "$ui_host_ui/fplinux-ui-session.c" \
 	"$ui_host_ui/fplinux-utf8.c" "$clocks/clock-model.c" "$clocks/clock-wire.c" \
 	"$ui_host_inputs/xdg-shell-protocol.c" \
-	$(pkg-config --libs wayland-server xkbcommon json-c) \
+	$(pkg-config --libs wayland-server xkbcommon json-c dbus-1) \
 	-o "$work/launcher-screens"
