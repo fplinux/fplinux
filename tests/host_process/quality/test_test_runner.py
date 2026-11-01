@@ -10,6 +10,7 @@ import signal
 import sys
 import tempfile
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -42,7 +43,15 @@ class SelectionContext:
         """Execute the production entry point with controlled process boundaries."""
         self.logs = Path(tempfile.mkdtemp(dir=self.root, prefix="logs-"))
         return run_process(
-            [sys.executable, "-m", "fplinux_cli.quality.testing", *arguments],
+            [
+                sys.executable,
+                "-m",
+                "fplinux_cli.quality.testing",
+                *arguments,
+                # Outcome history outlives each run, as the mounted data-root directory does.
+                "--pytest-cache",
+                str(self.root / "pytest-cache"),
+            ],
             name="selected pytest process",
             cwd=self.root,
             env={
@@ -442,6 +451,35 @@ class TestSelectionProcessTests:
         assert selection_context.executed() == (selected if tier_selection else expected)
         assert "intentional selection-fixture failure" in result.stderr
 
+    def test_recorded_failures_select_and_order_following_runs(
+        self, selection_context: SelectionContext
+    ) -> None:
+        """Failures persist between runs; history changes only explicitly requested runs."""
+        prefix = "tests.small.test_selection"
+        names = (prefix + ".PassingCase", prefix + ".FailureCase")
+        in_order = [
+            prefix + ".PassingCase.test_first",
+            prefix + ".PassingCase.test_second",
+            prefix + ".FailureCase.test_first",
+            prefix + ".FailureCase.test_second",
+        ]
+
+        def run(*options: str, failing_fixture: bool) -> list[str]:
+            selection_context.trace.unlink(missing_ok=True)
+            result = selection_context.run(*names, *options, failing_fixture=failing_fixture)
+            assert result.returncode == (1 if failing_fixture else 0), result.stderr
+            return selection_context.executed()
+
+        assert run(failing_fixture=True) == in_order
+        assert run("--last-failed", failing_fixture=True) == [prefix + ".FailureCase.test_first"]
+        assert run("--failed-first", failing_fixture=False) == [
+            prefix + ".FailureCase.test_first",
+            prefix + ".PassingCase.test_first",
+            prefix + ".PassingCase.test_second",
+            prefix + ".FailureCase.test_second",
+        ]
+        assert run("--last-failed", failing_fixture=False) == in_order
+
     def test_failfast_stops_at_the_first_failure(
         self, selection_context: SelectionContext
     ) -> None:
@@ -560,8 +598,9 @@ class MixedRuntimeContext:
     ) -> subprocess.CompletedProcess[str]:
         """Execute the combined controller and both actual pytest process boundaries."""
         self.logs = Path(tempfile.mkdtemp(dir=self.root, prefix="logs-"))
+        worker_arguments = () if "--workers" in arguments else ("--workers", "1")
         return run_process(
-            [sys.executable, str(self.driver), *arguments],
+            [sys.executable, str(self.driver), *arguments, *worker_arguments],
             name="mixed pytest workload",
             cwd=self.root,
             env={
@@ -622,6 +661,44 @@ def mixed_runtime_context(tmp_path: Path) -> MixedRuntimeContext:
 class MixedRuntimeProcessTests:
     """Exercise the controller with real pytest, not dependency preparation or real Kern."""
 
+    def test_explicit_worker_limit_keeps_valid_nodes_when_another_name_is_missing(
+        self, mixed_runtime_context: MixedRuntimeContext
+    ) -> None:
+        """Parallel capacity must not discard valid explicit selectors on a usage error."""
+        _prepare_gui_selection_modules(mixed_runtime_context.root)
+        module = "tests/host_tool/gui/test_language_files.py"
+        result = mixed_runtime_context.run(
+            module + "::PassingCase::test_first", module + "::MissingCase", "--workers", "2"
+        )
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert mixed_runtime_context.executed() == [
+            "container:tests.host_tool.gui.test_language_files.PassingCase.test_first"
+        ]
+
+    def test_host_tool_files_run_concurrently_and_write_complete_junit(
+        self, mixed_runtime_context: MixedRuntimeContext
+    ) -> None:
+        """Independent files meet at a barrier and both appear in the saved report."""
+        root = mixed_runtime_context.root
+        directory = root / "tests/host_tool"
+        directory.mkdir()
+        (directory / "__init__.py").touch()
+        fixture = ROOT / "tests/host_process/quality/fixtures/test-runner/concurrent_cases.py"
+        for name in ("first", "second"):
+            shutil.copyfile(fixture, directory / f"test_{name}.py")
+
+        result = mixed_runtime_context.run("--tier", "host_tool", "--workers", "2")
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (root / "first").read_text() != (root / "second").read_text()
+        [report] = list(mixed_runtime_context.logs.rglob("*junit.xml"))
+        cases = ET.parse(report).findall(".//testcase")  # noqa: S314 -- owned pytest output.
+        assert {case.attrib["classname"] for case in cases} == {
+            "tests.host_tool.test_first",
+            "tests.host_tool.test_second",
+        }
+        assert all(float(case.attrib["time"]) >= 0 for case in cases)
+
     @pytest.mark.parametrize("native", [False, True])
     def test_adjacent_modules_share_one_fixture_lifetime(
         self, mixed_runtime_context: MixedRuntimeContext, *, native: bool
@@ -652,6 +729,102 @@ class MixedRuntimeProcessTests:
             "resource:release",
         ]
         assert mixed_runtime_context.kern_trace.read_text().splitlines() == ["container"]
+
+    def test_adjacent_test_nodes_share_one_fixture_lifetime(
+        self, mixed_runtime_context: MixedRuntimeContext
+    ) -> None:
+        """Distinct classes and methods of several modules prepare shared fixtures once."""
+        _prepare_gui_selection_modules(mixed_runtime_context.root)
+        shutil.copyfile(
+            ROOT / "tests/host_process/quality/fixtures/test-runner/pytest_session_resource.py",
+            mixed_runtime_context.root / "tests/host_tool/gui/conftest.py",
+        )
+
+        result = mixed_runtime_context.run(
+            "tests/host_tool/gui/test_language_files.py::PassingCase",
+            "tests/host_tool/gui/test_desktop_entry.py::FailureCase::test_second",
+            "tests.host_tool.gui.test_language_files.FailureCase.test_first",
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert mixed_runtime_context.executed() == [
+            "resource:prepare",
+            "container:tests.host_tool.gui.test_language_files.PassingCase.test_first",
+            "container:tests.host_tool.gui.test_language_files.PassingCase.test_second",
+            "container:tests.host_tool.gui.test_desktop_entry.FailureCase.test_second",
+            "container:tests.host_tool.gui.test_language_files.FailureCase.test_first",
+            "resource:release",
+        ]
+        assert mixed_runtime_context.kern_trace.read_text().splitlines() == ["container"]
+
+    @pytest.mark.parametrize("nested", [False, True])
+    def test_adjacent_directories_share_launch_unless_nested(
+        self, mixed_runtime_context: MixedRuntimeContext, *, nested: bool
+    ) -> None:
+        """Separate directories share fixtures; a nested repeat runs again in its own session."""
+        root = mixed_runtime_context.root
+        _prepare_gui_selection_modules(root)
+        files = root / "tests/host_tool/files"
+        files.mkdir()
+        (files / "__init__.py").touch()
+        shutil.copyfile(
+            ROOT / "tests/host_process/quality/fixtures/test-runner/selection_cases.py",
+            files / "test_screens.py",
+        )
+        shutil.copyfile(
+            ROOT / "tests/host_process/quality/fixtures/test-runner/pytest_session_resource.py",
+            root / "tests/host_tool/conftest.py",
+        )
+        gui = [
+            f"container:tests.host_tool.gui.{module}.{case}.{method}"
+            for module in ("test_desktop_entry", "test_language_files")
+            for case in ("FailureCase", "PassingCase")
+            for method in ("test_first", "test_second")
+        ]
+        screens = [
+            f"container:tests.host_tool.files.test_screens.{case}.{method}"
+            for case in ("FailureCase", "PassingCase")
+            for method in ("test_first", "test_second")
+        ]
+
+        if nested:
+            result = mixed_runtime_context.run("tests/host_tool/gui", "tests/host_tool")
+            expected = [
+                "resource:prepare",
+                *gui,
+                "resource:release",
+                "resource:prepare",
+                *screens,
+                *gui,
+                "resource:release",
+            ]
+        else:
+            result = mixed_runtime_context.run("tests/host_tool/gui", "tests/host_tool/files")
+            expected = ["resource:prepare", *gui, *screens, "resource:release"]
+
+        assert result.returncode == 0, result.stderr
+        assert mixed_runtime_context.executed() == expected
+        assert mixed_runtime_context.kern_trace.read_text().splitlines() == (
+            ["container", "container"] if nested else ["container"]
+        )
+
+    def test_recorded_failures_persist_across_both_runtimes(
+        self, mixed_runtime_context: MixedRuntimeContext
+    ) -> None:
+        """Host and container sessions keep failures in one history for a later run."""
+        host = "tests.host_process.cache.test_prune_rootfs_ownership"
+        container = "tests.host_process.domain.test_selection"
+
+        first = mixed_runtime_context.run(host, container, failing_fixture=True)
+        assert first.returncode == 1, first.stderr
+        mixed_runtime_context.trace.unlink()
+        rerun = mixed_runtime_context.run(host, container, "--last-failed", failing_fixture=True)
+
+        assert rerun.returncode == 1, rerun.stderr
+        assert mixed_runtime_context.executed() == [
+            f"host:{host}.FailureCase.test_first",
+            f"container:{container}.FailureCase.test_first",
+        ]
 
     def test_container_directory_runs_only_its_tests(
         self, mixed_runtime_context: MixedRuntimeContext

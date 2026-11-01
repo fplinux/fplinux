@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -17,9 +18,10 @@ from unittest import mock
 import pytest
 from fplinux_cli import common
 from fplinux_cli.environment import runtime as environment_runtime
-from fplinux_cli.environment.state import EnvironmentState
+from fplinux_cli.environment.state import EnvironmentState, publish_environment_state
 from fplinux_cli.manifests.source_catalog import ResolvedSource
 from fplinux_cli.quality import checks, host_testing, runtime, testing
+from fplinux_cli.quality import receipts as check_receipts
 from fplinux_cli.quality.receipts import (
     CheckReceiptRecipe,
     check_orchestration_recipe_digest,
@@ -96,7 +98,121 @@ def test_emmc_workload_requires_exact_local_originals_without_downloads(
 
 
 class SelectedTestRunTests:
-    """A test result owns logs, never a full quality-check success receipt."""
+    """Only a complete ordinary test run can satisfy the later check gate."""
+
+    def test_full_success_is_reused_by_check_until_a_source_changes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Share actual receipt publication and lookup across the two entry points."""
+        cache = tmp_path / ".data"
+        fixture = tmp_path / "tests/small/test_example.py"
+        fixture.parent.mkdir(parents=True)
+        fixture.write_text("# original input\n")
+        monkeypatch.setenv("FPLINUX_DATA_DIR", str(cache))
+        monkeypatch.setattr(common, "ROOT", tmp_path)
+        monkeypatch.setattr(workspace_staging, "ROOT", tmp_path)
+        monkeypatch.setattr(output, "ROOT", tmp_path)
+        monkeypatch.setattr(checks, "ROOT", tmp_path)
+        snapshot = workspace.workspace_snapshot([("tests/small/test_example.py", fixture)])
+        monkeypatch.setattr(quality_inputs, "quality_workspace_snapshot", lambda **_: snapshot)
+        monkeypatch.setattr(checks, "quality_workspace_snapshot", lambda **_: snapshot)
+        monkeypatch.setattr(checks, "load_environment_lock", dict)
+        monkeypatch.setattr(checks, "environment_recipe_digest", lambda _: "b" * 64)
+        monkeypatch.setattr(checks, "check_orchestration_recipe_digest", lambda _: "e" * 64)
+        monkeypatch.setattr(check_receipts, "check_orchestration_recipe_digest", lambda: "e" * 64)
+        state = EnvironmentState("b" * 64, "c" * 64, "d" * 64)
+        publish_environment_state(cache, state)
+        environment = ("kern", cache / "environment/rootfs", state)
+        monkeypatch.setattr(environment_runtime, "require_environment", lambda **_: environment)
+        monkeypatch.setattr(checks, "require_environment", lambda **_: environment)
+        with mock.patch.object(runtime, "run_quality_command") as workload:
+            testing.run_tests([], workers=1)
+            assert workload.call_count == 5
+            checks.check(["tests"])
+            assert workload.call_count == 5
+
+            fixture.write_text("# changed input\n")
+            snapshot = workspace.workspace_snapshot([("tests/small/test_example.py", fixture)])
+            checks.check(["tests"])
+            assert workload.call_count == 10
+
+    @pytest.mark.parametrize("mode", ["failed", "tier", "sanitize", "history"])
+    def test_incomplete_or_instrumented_run_does_not_publish_full_success(
+        self, mode: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A partial, failed or instrumented result cannot skip ordinary full tests."""
+        cache = tmp_path / ".data"
+        monkeypatch.setenv("FPLINUX_DATA_DIR", str(cache))
+        monkeypatch.setattr(common, "ROOT", tmp_path)
+        monkeypatch.setattr(output, "ROOT", tmp_path)
+        monkeypatch.setattr(workspace_staging, "ROOT", tmp_path)
+        fixture = tmp_path / "tests/small/test_example.py"
+        fixture.parent.mkdir(parents=True)
+        fixture.write_text("# captured input\n")
+        snapshot = workspace.workspace_snapshot([("tests/small/test_example.py", fixture)])
+        monkeypatch.setattr(quality_inputs, "quality_workspace_snapshot", lambda **_: snapshot)
+        monkeypatch.setattr(check_receipts, "check_orchestration_recipe_digest", lambda: "e" * 64)
+        state = EnvironmentState("b" * 64, "c" * 64, "d" * 64)
+        monkeypatch.setattr(
+            environment_runtime,
+            "require_environment",
+            lambda **_: ("kern", cache / "environment/rootfs", state),
+        )
+        failure = pytest.raises(SystemExit) if mode == "failed" else contextlib.nullcontext()
+        with (
+            mock.patch.object(
+                runtime,
+                "run_quality_command",
+                side_effect=SystemExit(1) if mode == "failed" else None,
+            ),
+            failure,
+        ):
+            testing.run_tests(
+                [],
+                tier="small" if mode in ("tier", "history") else None,
+                sanitize=mode == "sanitize",
+                last_failed=mode == "history",
+                workers=1,
+            )
+        assert not (cache / "check-results/tests/success.json").exists()
+
+    @pytest.mark.parametrize(("cpus", "expected"), [(None, 1), (1, 1), (4, 2), (32, 8)])
+    def test_default_workers_leave_cpu_capacity_and_cap_at_eight(
+        self, cpus: int | None, expected: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Leave a CPU reserve without preventing a sequential run on a small host."""
+        monkeypatch.setattr(os, "process_cpu_count", lambda: cpus)
+        assert testing.resolved_test_workers(None, failfast=False, sanitize=False) == expected
+        assert testing.resolved_test_workers(None, failfast=True, sanitize=False) == 1
+        assert testing.resolved_test_workers(None, failfast=False, sanitize=True) == 1
+
+    def test_parallel_host_tools_receive_memory_and_capture_budget(self, tmp_path: Path) -> None:
+        """Bound nested captures and give native workers enough temporary memory."""
+        module = tmp_path / "workspace/tests/host_tool/test_example.py"
+        module.parent.mkdir(parents=True)
+        module.touch()
+        reporter = output.RunReporter(
+            "test", tmp_path / "logs", str(tmp_path / "logs"), verbose=False
+        )
+        with (
+            mock.patch.object(runtime, "kern_environment", return_value={}),
+            mock.patch.object(output.Stage, "run", autospec=True) as kern_process,
+        ):
+            testing.run_test_workload(
+                reporter,
+                tmp_path / "workspace",
+                kern="kern",
+                rootfs=Path("/environment/rootfs"),
+                names=[],
+                tier="host_tool",
+                cache=tmp_path / ".data",
+                workers=8,
+            )
+        command = kern_process.call_args.args[1]
+        options = command[: command.index("--")]
+        assert options[options.index("--memory") + 1] == "8192m"
+        assert options[options.index("--tmpfs") + 1] == "/tmp:4g"  # noqa: S108
+        assert "FPLINUX_SCREEN_CAPTURE_JOBS=1" in options
 
     @pytest.mark.parametrize(
         ("names", "tier"),
@@ -129,6 +245,7 @@ class SelectedTestRunTests:
                 rootfs=Path("/environment/rootfs"),
                 names=names,
                 tier=tier,
+                cache=tmp_path / ".data",
             )
 
         kern_process.assert_called_once()
@@ -353,6 +470,7 @@ class SelectedTestRunTests:
                 rootfs=Path("/environment/rootfs"),
                 names=[],
                 tier="host_process",
+                cache=tmp_path / ".data",
             )
         assert budgets == [("container", 300.0), ("host", 190.0)]
 

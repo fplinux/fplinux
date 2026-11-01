@@ -714,13 +714,15 @@ class CliCacheLockTests:
         lock.assert_not_called()
         assert not ((dispatch_root / ".data").exists())
 
+    @pytest.mark.parametrize("test_workers", [None, 4])
     def test_check_forwards_the_kernel_worker_limit_without_changing_its_lock(
-        self, dispatch_root: Path
+        self, dispatch_root: Path, test_workers: int | None
     ) -> None:
         """Pass the requested kernel limit through the existing exclusive check boundary."""
-        events, check = run_dispatch(
-            dispatch_root, ["check", "kernel", "--jobs", "2"], "fplinux_cli.quality.checks.check"
-        )
+        arguments = ["check", "kernel", "--jobs", "2"]
+        if test_workers is not None:
+            arguments.extend(["--test-workers", str(test_workers)])
+        events, check = run_dispatch(dispatch_root, arguments, "fplinux_cli.quality.checks.check")
 
         assert (events) == (
             [
@@ -737,6 +739,7 @@ class CliCacheLockTests:
                 verbose=False,
                 no_cache=False,
                 jobs=2,
+                test_workers=test_workers,
             )
         )
 
@@ -777,6 +780,7 @@ class CliCacheLockTests:
             verbose=verbose,
             no_cache=False,
             jobs=jobs,
+            test_workers=None,
         )
 
     def test_profile_is_recorded_in_the_global_cache_lock_owner(self, dispatch_root: Path) -> None:
@@ -1001,6 +1005,7 @@ class CliCacheLockTests:
             verbose=False,
             no_cache=False,
             jobs=1,
+            test_workers=None,
         )
 
     def test_verify_forwards_the_selected_profile(self, dispatch_root: Path) -> None:

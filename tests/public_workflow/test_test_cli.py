@@ -21,7 +21,14 @@ class TestCommandCliTests:
             [str(ROOT / "fplinux"), "test", "--help"], name="test help", timeout=10, cwd=ROOT
         )
         assert (result.returncode) == (0), result.stderr
-        for option in ("--tier", "--verbose", "--failfast"):
+        for option in (
+            "--tier",
+            "--verbose",
+            "--failfast",
+            "--last-failed",
+            "--failed-first",
+            "--workers",
+        ):
             assert (option) in (result.stdout)
         assert ("module, class or method") in (result.stdout)
         assert ("test directory") in (result.stdout)
@@ -43,6 +50,12 @@ class TestCommandCliTests:
             ("/outside/test_private.py",),
             ("tests/small/test_selection.py::--help",),
             ("--collect-only",),
+            ("--last-failed",),
+            ("--tier", "small", "--last-failed", "--failed-first"),
+            ("--workers", "0"),
+            ("--workers", "two"),
+            ("--workers", "2", "--failfast"),
+            ("--workers", "2", "--sanitize"),
         ],
     )
     def test_invalid_or_conflicting_selection_is_a_usage_error(

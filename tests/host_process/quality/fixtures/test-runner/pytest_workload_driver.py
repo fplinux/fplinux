@@ -58,6 +58,9 @@ def main() -> None:
             tier=args.tier,
             verbose=args.verbose,
             failfast=args.failfast,
+            last_failed=args.last_failed,
+            failed_first=args.failed_first,
+            workers=args.workers,
         )
         reporter.finish()
 

@@ -3333,6 +3333,18 @@ purpose = "environment-source"
 arch = "x86_64"
 
 [[input]]
+key = "environment:pytest-xdist"
+source = "pytest_xdist"
+purpose = "environment-source"
+arch = "x86_64"
+
+[[input]]
+key = "environment:execnet"
+source = "execnet"
+purpose = "environment-source"
+arch = "x86_64"
+
+[[input]]
 key = "environment:iniconfig"
 source = "iniconfig"
 purpose = "environment-source"

@@ -47,6 +47,8 @@ On a PC with little memory, check the kernel configurations one at a time:
 
 For `check`, `--jobs` limits simultaneous kernel configurations, not test processes. Its default is three when kernel checks are selected, and one otherwise or with `--verbose`. Explicit values above one require the `kernel` scope and cannot be combined with `--verbose`. For `build`, `--jobs` instead limits parallel compilation.
 
+Use `test --workers N` or `check --test-workers N` to limit parallel native test workers. The default leaves two available CPUs free, up to eight workers. Directory and tier selections of `host_tool` run in parallel; tests in the same file stay together so their module fixtures are reused. Explicit module and node selections retain sequential execution, order and collection-error handling. Other tiers and host namespace tests also run sequentially. `--workers 1` selects sequential execution. Stop-first, sanitizer and outcome-history runs run sequentially; explicit values above one cannot be combined with `--failfast` or `--sanitize`.
+
 An ordinary build or RAM load without source changes does not need the gate.
 
 The graphical session, its applications and shared UI libraries participate in the default source checks and test discovery. Focused graphical-session tests can also be selected explicitly with `./fplinux test`.
@@ -62,17 +64,21 @@ Run pytest workloads by a directory, dotted module, class or test name, a pytest
 ./fplinux test --tier small
 ```
 
-The tiers are `small`, `host_process`, `host_tool`, `artifact` and `public_workflow`. Without a selection, all five run in that order. Node selectors use `path.py::Class::method` or `path.py::test_function`; append `[case-id]` to select a parameterized case, and quote brackets in the shell. `--verbose` shows individual test names and streams output; `--failfast` stops on the first failure or error.
+The tiers are `small`, `host_process`, `host_tool`, `artifact` and `public_workflow`. Without a selection, all five run in that order. Node selectors use `path.py::Class::method` or `path.py::test_function`; append `[case-id]` to select a parameterized case, and quote brackets in the shell. `--verbose` shows individual test names and streams output; `--failfast` stops on the first failure or error. Adjacent selections share one pytest session and its fixtures, except with `--failfast` or when a selection repeats or contains another one; those run separately in the requested order.
+
+Pytest records the last outcome of each test under the managed data root for both `test` and `check`. `--last-failed` runs only the selected tests that failed when they last ran; if none of them has a recorded failure, all of them run. It requires a selection or `--tier`. `--failed-first` runs those failures before the other selected tests. Without these options the record does not change which tests run or their result.
 
 Tests run against a captured source snapshot. Directory selections must exist inside `tests/<tier>/` in that snapshot and use ordinary pytest discovery. Most tests run with read-only sources and no network access in the pinned environment. Source-cache ownership and environment-publication metadata tests run on the host with real subordinate UID/GID mappings and the same locked Python dependencies, including when selected through a directory. They require the namespace support used by `setup`; unavailable mappings fail instead of skipping tests.
 
-A selected run always executes and does not refresh a successful `check` result or replace `./fplinux check`. Exit status is `0` for success, `1` for failures or unresolved names, `2` for invalid arguments and `5` when pytest finds no tests. Ctrl+C returns `130`.
+A selected run always executes. A complete successful `./fplinux test` also satisfies the test portion of a later `check` on the same captured inputs and environment; it does not satisfy the source or kernel checks. Partial selections, `--last-failed` and sanitizer runs do not publish that result. Any changed input makes it a cache miss, and `check --no-cache` forces execution. Exit status is `0` for success, `1` for failures or unresolved names, `2` for invalid arguments and `5` when pytest finds no tests. Ctrl+C returns `130`.
 
 Pytest rejects unknown markers and configuration options. Each run reports skipped and expected-failure cases and the 20 slowest setup, call or teardown durations. Use those measurements before changing fixture lifetimes to optimize test time.
 
+The command logs also contain JUnit XML for every pytest invocation, including every test's outcome and total setup, call and teardown time. When tests run in parallel, the sum of their durations can exceed elapsed time.
+
 Add `--sanitize` to a test selection to instrument native GCC builds, including LVGL, with AddressSanitizer and fatal UndefinedBehaviorSanitizer. Leak checking is disabled (`detect_leaks=0`). The command first checks fatal undefined-behavior reports in the pinned runtime. It retains complete reports with the command logs and treats findings as failures even when pytest expects a child to fail. ARM cross builds, freestanding code, static ABI probes and the MRE engine peer with its real address-space limit remain outside native instrumentation.
 
-Sanitizer workloads use a 3 GiB memory cap, 2 GiB of temporary space, and budgets of 2700 seconds for `host_tool` and 450 seconds for `host_process`. Ordinary tests and `check` keep their existing limits.
+Sanitizer workloads use a 3 GiB memory cap, 2 GiB of temporary space, and budgets of 2700 seconds for `host_tool` and 450 seconds for `host_process`. Parallel native tests scale the memory and temporary-space limits with their worker count; sequential workloads retain their existing limits.
 
 ## Update Alpine package checksums
 

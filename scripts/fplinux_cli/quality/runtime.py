@@ -35,7 +35,9 @@ def run_quality_command(  # noqa: PLR0913 -- runtime, deadline and log ownership
     timeout: float = _QUALITY_COMMAND_TIMEOUT,
     log_name: str | None = None,
     downloads: Path | None = None,
+    pytest_cache: Path | None = None,
     sanitize: bool = False,
+    test_workers: int = 1,
 ) -> None:
     """Keep sources read-only, network disabled and full child logs in the run directory."""
     reporter = stage.reporter
@@ -44,6 +46,8 @@ def run_quality_command(  # noqa: PLR0913 -- runtime, deadline and log ownership
     logs.mkdir(parents=True, exist_ok=True)
     environment = reporter.container_environment(f"/logs/{name}")
     environment["FPLINUX_LOG_DISPLAY_ROOT"] += f"/containers/{name}"
+    if test_workers > 1:
+        environment["FPLINUX_SCREEN_CAPTURE_JOBS"] = "1"
     if sanitize:
         reports = logs / name / "sanitizer"
         reports.mkdir(parents=True, exist_ok=True)
@@ -65,17 +69,18 @@ def run_quality_command(  # noqa: PLR0913 -- runtime, deadline and log ownership
         *environment_arguments(rootfs),
         "--read-only",
         "--memory",
-        f"{3072 if sanitize else _QUALITY_MEMORY_MIB}m",
+        f"{3072 if sanitize else max(_QUALITY_MEMORY_MIB, test_workers * 1024)}m",
         "--uid-range",
         "--network",
         "none",
         # Kern creates private devpts for real PTY component tests with -t.
         "-t",
         "--tmpfs",
-        "/tmp:2g" if sanitize else "/tmp:1g",  # noqa: S108 -- container tmpfs.
+        "/tmp:2g" if sanitize else f"/tmp:{max(1, (test_workers + 1) // 2)}g",  # noqa: S108
         "--volume",
         f"{workspace}:/workspace:ro",
         *(["--volume", f"{downloads}:/cache/downloads:ro"] if downloads is not None else []),
+        *(["--volume", f"{pytest_cache}:/pytest-cache"] if pytest_cache is not None else []),
         "--volume",
         f"{logs}:/logs",
         *log_arguments,

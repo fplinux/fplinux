@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+import fcntl
 import os
+import shutil
 import sys
 import tarfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,13 +19,44 @@ from tests.c_harness import c_build_directory
 from tests.process import run_process
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
+
+
+@contextmanager
+def shared_build_directory(
+    request: pytest.FixtureRequest,
+    tmp_path_factory: pytest.TempPathFactory,
+    name: str,
+    build: Callable[[Path], None],
+) -> Iterator[Path]:
+    """Build once per invocation; workers borrow the controller's temporary tree."""
+    if not hasattr(request.config, "workerinput"):
+        with c_build_directory(tmp_path_factory, name) as directory:
+            build(directory)
+            yield directory
+        return
+
+    root = tmp_path_factory.getbasetemp().parent
+    directory = root / name
+    complete = root / f"{name}.complete"
+    with (root / f"{name}.lock").open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not complete.exists():
+            if directory.exists():
+                shutil.rmtree(directory)
+            directory.mkdir()
+            build(directory)
+            complete.touch()
+    yield directory
 
 
 @pytest.fixture(scope="session")
-def lvgl_library(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[Path, Path]]:
+def lvgl_library(
+    request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory
+) -> Iterator[tuple[Path, Path]]:
     """Build the real library once with the phone configuration and source fixes."""
-    with c_build_directory(tmp_path_factory, "ui-lvgl") as directory:
+
+    def build(directory: Path) -> None:
         run_process(
             [
                 "sh",
@@ -33,16 +67,21 @@ def lvgl_library(tmp_path_factory: pytest.TempPathFactory) -> Iterator[tuple[Pat
             timeout=180,
             check=True,
         )
+
+    with shared_build_directory(request, tmp_path_factory, "ui-lvgl", build) as directory:
         yield directory / "source/include", directory / "build/liblvgl.a"
 
 
 @pytest.fixture(scope="session")
 def ui_host_inputs(
-    tmp_path_factory: pytest.TempPathFactory, lvgl_library: tuple[Path, Path]
+    request: pytest.FixtureRequest,
+    tmp_path_factory: pytest.TempPathFactory,
+    lvgl_library: tuple[Path, Path],
 ) -> Iterator[Path]:
     """Prepare the UI font set and xdg-shell once beside the shared LVGL library."""
     headers, archive = lvgl_library
-    with c_build_directory(tmp_path_factory, "ui-host-inputs") as directory:
+
+    def build(directory: Path) -> None:
         run_process(
             [
                 "sh",
@@ -55,13 +94,18 @@ def ui_host_inputs(
             timeout=180,
             check=True,
         )
+
+    with shared_build_directory(request, tmp_path_factory, "ui-host-inputs", build) as directory:
         yield directory
 
 
 @pytest.fixture(scope="session")
-def ui_icon_resources(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+def ui_icon_resources(
+    request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory
+) -> Iterator[Path]:
     """Generate the installed glyph tree from the pinned production icon inputs."""
-    with c_build_directory(tmp_path_factory, "ui-icon-resources") as directory:
+
+    def build(directory: Path) -> None:
         archives = list(Path("/opt/quality/src/ui-icons").iterdir())
         assert len(archives) == 1
         sources = directory / "sources"
@@ -84,4 +128,8 @@ def ui_icon_resources(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path
             env=os.environ | {"NODE_PATH": "/opt/quality/node-tools/node_modules"},
             check=True,
         )
-        yield installed
+
+    with shared_build_directory(
+        request, tmp_path_factory, "ui-icon-resources", build
+    ) as directory:
+        yield directory / "icons"

@@ -57,6 +57,9 @@ def _host_main(selected_root: Path) -> None:
     args = parser.parse_args()
     if args.command == "format" and not args.paths and not args.changed:
         parser.error("format requires PATH or --changed")
+    # Each tier session without recorded failures would otherwise run completely.
+    if args.command == "test" and args.last_failed and not args.names and args.tier is None:
+        parser.error("test --last-failed requires TEST or --tier")
     if hasattr(args, "profile") and not (args.command == "check" and args.list_scopes):
         args.profile = normalize_profile(args.profile)
     execute_command(args, command_action(args, check_parser), data_directory=selected_root)

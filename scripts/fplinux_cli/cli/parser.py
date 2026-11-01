@@ -261,6 +261,12 @@ def create_parser(
         ),
     )
     check_parser.add_argument(
+        "--test-workers",
+        type=_positive_integer,
+        metavar="N",
+        help="limit parallel host-tool test workers",
+    )
+    check_parser.add_argument(
         "--profile",
         type=_profile_name,
         metavar="NAME",

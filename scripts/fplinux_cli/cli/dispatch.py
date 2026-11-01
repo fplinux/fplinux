@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 from functools import partial
 from typing import TYPE_CHECKING, cast
 
@@ -10,7 +11,6 @@ from fplinux_cli.common import fail
 from fplinux_cli.quality.scopes import CHECK_SCOPES
 
 if TYPE_CHECKING:
-    import argparse
     from collections.abc import Callable
     from pathlib import Path
 
@@ -130,6 +130,8 @@ def command_action(
                 check_parser.error("--profile cannot be combined with --list")
             if args.jobs is not None:
                 check_parser.error("--jobs cannot be combined with --list")
+            if args.test_workers is not None:
+                check_parser.error("--test-workers cannot be combined with --list")
             action = partial(_list_check_scopes, check_parser, args.scopes)
         else:
             jobs = args.jobs
@@ -149,6 +151,7 @@ def command_action(
                 verbose=args.verbose,
                 no_cache=args.no_cache,
                 jobs=jobs,
+                test_workers=args.test_workers,
             )
     elif args.command == "setup":
         if args.host is not None and args.target is None:
@@ -223,6 +226,10 @@ def command_action(
 
         action = partial(run_ci, args)
     elif args.command == "test":
+        if args.workers is not None and args.workers > 1 and (args.failfast or args.sanitize):
+            argparse.ArgumentParser(prog="fplinux test").error(
+                "--workers greater than 1 cannot be combined with --failfast or --sanitize"
+            )
         from fplinux_cli.quality.testing import run_tests  # noqa: PLC0415 -- selected backend.
 
         action = partial(
@@ -232,6 +239,9 @@ def command_action(
             verbose=args.verbose,
             failfast=args.failfast,
             sanitize=args.sanitize,
+            last_failed=args.last_failed,
+            failed_first=args.failed_first,
+            workers=args.workers,
         )
     elif args.command == "format":
         from fplinux_cli.quality.formatting.command import (  # noqa: PLC0415 -- selected backend.

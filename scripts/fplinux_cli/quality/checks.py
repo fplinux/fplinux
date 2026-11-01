@@ -62,6 +62,7 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
     profile: str | None,
     build_type: str,
     jobs: int,
+    test_workers: int | None = None,
 ) -> None:
     """Run cache-missing analyzers and tests against one disposable workspace."""
     container_logs = reporter.root / "containers"
@@ -92,7 +93,15 @@ def _run_missing_checks(  # noqa: PLR0913 -- container boundaries are explicit.
             publish_success_receipt(cache, recipes[scope])
 
     if "tests" in missing:
-        run_test_workload(reporter, workspace, kern=kern, rootfs=rootfs, names=[], cache=cache)
+        run_test_workload(
+            reporter,
+            workspace,
+            kern=kern,
+            rootfs=rootfs,
+            names=[],
+            cache=cache,
+            workers=test_workers,
+        )
         publish_success_receipt(cache, recipes["tests"])
 
     if "kernel" not in missing:
@@ -231,9 +240,14 @@ def check(  # noqa: PLR0913 -- public check options stay explicit.
     profile: str | None = None,
     build_type: str = "release",
     jobs: int = 1,
+    test_workers: int | None = None,
 ) -> None:
     if not isinstance(jobs, int) or isinstance(jobs, bool) or jobs < 1:
         fail("--jobs must be a positive integer")
+    if test_workers is not None and (
+        not isinstance(test_workers, int) or isinstance(test_workers, bool) or test_workers < 1
+    ):
+        fail("--test-workers must be a positive integer")
     profile = normalize_profile(profile)
     selected = resolve_check_scopes(scopes)
     if jobs > 1 and verbose:
@@ -334,6 +348,7 @@ def check(  # noqa: PLR0913 -- public check options stay explicit.
             profile=profile,
             build_type=build_type,
             jobs=jobs,
+            test_workers=test_workers,
         )
     finally:
         discard_staged_quality_workspace_snapshot(snapshot, workspace, selected_data_root=cache)
