@@ -654,7 +654,7 @@ checksum = "5dbe872e94166aaed7ca2edec5a34ef9b13b254381e252cc6d851877b461579903cb
 [aport_libdrm_2_4_134_tar_xz]
 version = "2.4.134"
 name = "libdrm-2.4.134.tar.xz"
-url = "https://dri.freedesktop.org/libdrm/libdrm-2.4.134.tar.xz"
+url = "https://sources.buildroot.net/libdrm/libdrm-2.4.134.tar.xz"
 algorithm = "sha512"
 checksum = "ef2abddea59d1e93c83a48de920431b839ab50d6071ef4da3cf126e7d64ba7b235f2e34e1169d49ad9de2937a0a18acd66bb8d324b067239b1136e0ddbe792a1"
 
