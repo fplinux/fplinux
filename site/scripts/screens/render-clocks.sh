@@ -12,19 +12,26 @@ screens_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 output=$1
 native=${3-}
 work=$(mktemp -d)
-trap 'rm -rf -- "${work:?}"' EXIT
+# shellcheck source=site/scripts/screens/screen-captures.sh
+. "$screens_dir/screen-captures.sh"
+cleanup() {
+	screen_captures_stop
+	rm -rf -- "${work:?}"
+}
+trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# Capture one task: WIDTH HEIGHT [OUTPUT-SUFFIX].
 capture() {
-	width=$1
-	height=$2
-	suffix=$3
+	read -r width height suffix <<EOF
+$1
+EOF
 	frames=$work/$width"x"$height
 	mkdir -- "$frames"
 	"$native/clocks-screens" "$width" "$height" \
 		"$native/clocks" "$screens_dir/clocks-keyboard.xkb" \
-		"$work/session.sock" "$frames"
+		"$frames.sock" "$frames"
 	read -r frame_width frame_height <"$frames/frame-size"
 	for frame in "$frames"/*.rgb565; do
 		state=${frame##*/}
@@ -39,6 +46,9 @@ if [ -z "$native" ]; then
 	native=$work/build
 	sh "$screens_dir/build-clocks.sh" "$native" "${2-}"
 fi
-capture 128 160 -128x160
-capture 240 320 ''
-capture 320 240 -320x240
+cat >"$work/captures" <<EOF
+128 160 -128x160
+240 320
+320 240 -320x240
+EOF
+screen_captures_run capture "$work/captures" "$work/capture-logs"

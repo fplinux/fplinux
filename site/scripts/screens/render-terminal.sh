@@ -15,7 +15,13 @@ ui=$root/lib/fplinux
 output=$1
 prepared_inputs=${2-}
 work=$(mktemp -d)
-trap 'rm -rf -- "${work:?}"' EXIT
+# shellcheck source=site/scripts/screens/screen-captures.sh
+. "$screens_dir/screen-captures.sh"
+cleanup() {
+	screen_captures_stop
+	rm -rf -- "${work:?}"
+}
+trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 # shellcheck source=site/scripts/screens/ui-host-build.sh
@@ -64,26 +70,31 @@ build_application() {
 		-o "$work/terminal-screens"
 }
 
+# Capture one task: WIDTH HEIGHT LOCALE THEME [OUTPUT-SUFFIX].
 capture() {
-	width=$1
-	height=$2
-	suffix=$3
+	read -r width height locale theme suffix <<EOF
+$1
+EOF
+	frames=$work/$width"x"$height-$locale-$theme
+	mkdir -- "$frames"
+	"$work/terminal-screens" "$width" "$height" "$work/terminal" \
+		"$screens_dir/keypad.xkb" "$frames.sock" "$frames" \
+		"$root/alpine/aports/fplinux-base/issue" \
+		"$root/alpine/aports/fplinux-base/hostname" \
+		"$root/alpine/aports/fplinux-language" "$theme" "$locale" "$work/locale"
+	read -r frame_width frame_height <"$frames/frame-size"
+	for frame in "$frames"/*.rgb565; do
+		state=$(basename -- "$frame" .rgb565)
+		python3 "$screens_dir/rgb565-png.py" "$frame_width" "$frame_height" \
+			"$frame" "$output/$state$suffix.png"
+		cp -- "$frames/$state.json" "$output/$state$suffix.json"
+	done
+}
+
+add_profile() {
 	for locale in en ru; do
 		for theme in dark light; do
-			frames=$work/$width"x"$height-$locale-$theme
-			mkdir -- "$frames"
-			"$work/terminal-screens" "$width" "$height" "$work/terminal" \
-				"$screens_dir/keypad.xkb" "$work/session.sock" "$frames" \
-				"$root/alpine/aports/fplinux-base/issue" \
-				"$root/alpine/aports/fplinux-base/hostname" \
-				"$root/alpine/aports/fplinux-language" "$theme" "$locale" "$work/locale"
-			read -r frame_width frame_height <"$frames/frame-size"
-			for frame in "$frames"/*.rgb565; do
-				state=$(basename -- "$frame" .rgb565)
-				python3 "$screens_dir/rgb565-png.py" "$frame_width" "$frame_height" \
-					"$frame" "$output/$state$suffix.png"
-				cp -- "$frames/$state.json" "$output/$state$suffix.json"
-			done
+			echo "$1 $2 $locale $theme $3" >>"$work/captures"
 		done
 	done
 }
@@ -91,8 +102,9 @@ capture() {
 mkdir -p -- "$output"
 build_application
 # Integrated surfaces exclude the manager's status and soft-key bars.
-capture 128 128 -128x128
-capture 128 160 -128x160
-capture 176 220 -176x220
-capture 240 320 ''
-capture 320 240 -320x240
+add_profile 128 128 -128x128
+add_profile 128 160 -128x160
+add_profile 176 220 -176x220
+add_profile 240 320 ''
+add_profile 320 240 -320x240
+screen_captures_run capture "$work/captures" "$work/capture-logs"
