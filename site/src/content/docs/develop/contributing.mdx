@@ -78,7 +78,7 @@ The command logs also contain JUnit XML for every pytest invocation, including e
 
 Add `--sanitize` to a test selection to instrument native GCC builds, including LVGL, with AddressSanitizer and fatal UndefinedBehaviorSanitizer. Leak checking is disabled (`detect_leaks=0`). The command first checks fatal undefined-behavior reports in the pinned runtime. It retains complete reports with the command logs and treats findings as failures even when pytest expects a child to fail. ARM cross builds, freestanding code, static ABI probes and the MRE engine peer with its real address-space limit remain outside native instrumentation.
 
-Sanitizer workloads use a 3 GiB memory cap, 2 GiB of temporary space, and budgets of 2700 seconds for `host_tool` and 450 seconds for `host_process`. Parallel native tests scale the memory and temporary-space limits with their worker count; sequential workloads retain their existing limits.
+Sanitizer workloads use a 3 GiB memory cap, 2 GiB of temporary space, and budgets of 2700 seconds for `host_tool` and 900 seconds for `host_process`. Parallel native tests scale the memory and temporary-space limits with their worker count; sequential workloads retain their existing limits.
 
 ## Update Alpine package checksums
 

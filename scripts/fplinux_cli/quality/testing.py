@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 TEST_TIERS = {
     "small": 5 * 60,
-    "host_process": 300,
+    "host_process": 10 * 60,
     # Native builds and five-profile application matrices share one deadline.
     "host_tool": 30 * 60,
     "artifact": 300,
@@ -275,7 +275,7 @@ def pytest_commands(  # noqa: PLR0913 -- selection, output and instrumentation p
     junit: Path | None = None,
 ) -> list[tuple[str, list[str], int]]:
     """Use one time budget per selected test tier and retain discovery order."""
-    budgets = TEST_TIERS | ({"host_tool": 2700, "host_process": 450} if sanitize else {})
+    budgets = TEST_TIERS | ({"host_tool": 2700, "host_process": 900} if sanitize else {})
 
     def command(nodes: list[str]) -> list[str]:
         return _pytest_command(

@@ -93,5 +93,5 @@ def test_sanitizer_workloads_share_each_selected_tier_budget_once() -> None:
     ]
     [(_label, _command, timeout)] = testing.pytest_commands(names, sanitize=True)
     [(_label, _command, ordinary)] = testing.pytest_commands(names)
-    assert timeout == 3150
-    assert ordinary == 2100
+    assert timeout == 3600
+    assert ordinary == 2400

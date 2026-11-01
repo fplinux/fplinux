@@ -453,6 +453,7 @@ class SelectedTestRunTests:
             budgets.append(("host", timeout))
 
         with (
+            mock.patch.dict(testing.TEST_TIERS, {"host_process": 300}),
             mock.patch.object(
                 host_testing,
                 "host_pytest_environment",
