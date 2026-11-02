@@ -3,3 +3,4 @@ obj-$(CONFIG_SND_UMS9117) += snd-ums9117.o
 snd-ums9117-y := ums9117-pcm.o ums9117-audio-profile.o ums9117-audio.o \
 		 ums9117-sc2720-codec.o ums9117-sc2720-calibration.o \
 		 ums9117-jack.o
+snd-ums9117-$(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR) += ums9117-vibrator.o

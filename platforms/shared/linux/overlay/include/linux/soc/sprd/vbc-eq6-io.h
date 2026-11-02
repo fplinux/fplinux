@@ -8,6 +8,7 @@
 
 #define SPRD_VBC_EQ6_COEFFICIENT_HIGH(n) (0x100 + 8 * (n))
 #define SPRD_VBC_EQ6_COEFFICIENT_LOW(n) (0x104 + 8 * (n))
+#define SPRD_VBC_DAC_ALC_CONTROL(n) (0x4c + 4 * (n))
 
 struct sprd_vbc_eq6_mismatch {
 	unsigned int coefficient;

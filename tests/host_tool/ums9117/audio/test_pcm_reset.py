@@ -23,7 +23,7 @@ EXISTING_COMPAT = FIXTURES / "native-operation-compat/audio"
 
 @pytest.fixture(scope="module")
 def pcm_reset(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
-    """Link the complete PCM driver once for both callback scenarios."""
+    """Link the PCM driver with vibrator disabled for both callback scenarios."""
     with c_build_directory(tmp_path_factory, "pcm-reset") as temporary:
         executable = temporary / "pcm-reset"
         compile_c(

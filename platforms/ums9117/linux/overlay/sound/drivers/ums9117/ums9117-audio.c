@@ -72,7 +72,6 @@
 #define UMS9117_VBC_DAC_PATH 0x40
 #define UMS9117_VBC_DAC_DG_CTRL 0x44
 #define UMS9117_VBC_DAC_HP_CTRL 0x48
-#define UMS9117_VBC_DAC_ALC_CTRL(n) (0x4c + 4 * (n))
 #define UMS9117_VBC_DAC_ST_CTL0 0x78
 #define UMS9117_VBC_DAC_ST_CTL1 0x7c
 #define UMS9117_VBC_ADC_PATH 0x80
@@ -86,8 +85,6 @@
 #define UMS9117_VBC_DAC_LEVEL 0xe4
 #define UMS9117_VBC_ADC_LEVEL 0xec
 #define UMS9117_VBC_FM_MUTE 0xf8
-#define UMS9117_VBC_DAC_EQ6_COEF_H(n) (0x100 + 8 * (n))
-#define UMS9117_VBC_DAC_EQ6_COEF_L(n) (0x104 + 8 * (n))
 #define UMS9117_VBC_TONE_CTRL 0x900
 #define UMS9117_VBC_VT_SIN 0x918
 #define UMS9117_VBC_VT_COS 0x91c
@@ -138,9 +135,6 @@
  * in register order. COEF42 is the output scale S6. Stock writes the 16-bit
  * value to COEF_H and zero to COEF_L.
  */
-#define UMS9117_VBC_DAC_EQ6_SECTION_COEFS 7U
-#define UMS9117_VBC_DAC_EQ6_FILTER_WORDS 6U
-#define UMS9117_VBC_DAC_EQ6_OUTPUT_SCALE 42U
 /* Stock fades S0..S5 in ten 1 ms steps and waits 2 ms after zeroing filters. */
 #define UMS9117_VBC_DAC_EQ6_RAMP_STEPS 10
 #define UMS9117_VBC_DAC_EQ6_RAMP_STEP_US 1000U
@@ -336,7 +330,7 @@ void ums9117_audio_set_vibration(struct ums9117_audio *audio, bool on)
 
 static unsigned int eq6_scale_coef(unsigned int section)
 {
-	return section * UMS9117_VBC_DAC_EQ6_SECTION_COEFS;
+	return section * SPRD_VBC_EQ6_SECTION_COEFFICIENTS;
 }
 
 static unsigned int eq6_filter_coef(unsigned int section, unsigned int word)
@@ -347,8 +341,8 @@ static unsigned int eq6_filter_coef(unsigned int section, unsigned int word)
 static void write_eq6_coef(struct ums9117_audio *audio, unsigned int coef,
 			   s16 value)
 {
-	writel((u16)value, audio->vbc + UMS9117_VBC_DAC_EQ6_COEF_H(coef));
-	writel(0, audio->vbc + UMS9117_VBC_DAC_EQ6_COEF_L(coef));
+	writel((u16)value, audio->vbc + SPRD_VBC_EQ6_COEFFICIENT_HIGH(coef));
+	writel(0, audio->vbc + SPRD_VBC_EQ6_COEFFICIENT_LOW(coef));
 }
 
 static int write_eq6_filters(struct ums9117_audio *audio,
@@ -371,7 +365,7 @@ static void clear_eq6_filters(struct ums9117_audio *audio)
 	unsigned int word;
 
 	for (section = 0; section < UMS9117_AUDIO_EQ_SECTION_COUNT; section++)
-		for (word = 0; word < UMS9117_VBC_DAC_EQ6_FILTER_WORDS; word++)
+		for (word = 0; word < SPRD_VBC_EQ6_FILTER_WORDS; word++)
 			write_eq6_coef(audio, eq6_filter_coef(section, word),
 				       0);
 }
@@ -413,7 +407,7 @@ static void clear_eq6_scales(struct ums9117_audio *audio)
 
 	for (section = 0; section < UMS9117_AUDIO_EQ_SECTION_COUNT; section++)
 		write_eq6_coef(audio, eq6_scale_coef(section), 0);
-	write_eq6_coef(audio, UMS9117_VBC_DAC_EQ6_OUTPUT_SCALE, 0);
+	write_eq6_coef(audio, SPRD_VBC_EQ6_OUTPUT_SCALE, 0);
 }
 
 /*
@@ -462,7 +456,7 @@ static void write_alc(struct ums9117_audio *audio,
 
 	for (i = 0; i < UMS9117_AUDIO_ALC_WORD_COUNT; i++)
 		writel((u16)processing->alc[i],
-		       audio->vbc + UMS9117_VBC_DAC_ALC_CTRL(i));
+		       audio->vbc + SPRD_VBC_DAC_ALC_CONTROL(i));
 	audio->loaded_alc_words = processing;
 }
 
@@ -507,7 +501,7 @@ static int load_eq6(struct ums9117_audio *audio,
 	}
 	write_alc(audio, processing);
 	switch_alc(audio, alc_wanted(audio));
-	write_eq6_coef(audio, UMS9117_VBC_DAC_EQ6_OUTPUT_SCALE,
+	write_eq6_coef(audio, SPRD_VBC_EQ6_OUTPUT_SCALE,
 		       processing->output_scale);
 	if (live)
 		ramp_eq6_scales(audio, sections, true);

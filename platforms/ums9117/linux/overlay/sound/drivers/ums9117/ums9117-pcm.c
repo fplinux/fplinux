@@ -31,6 +31,7 @@
 #include "ums9117-audio-profile.h"
 #include "ums9117-jack.h"
 #include "ums9117-pcm-route.h"
+#include "ums9117-pcm-internal.h"
 
 #define UMS9117_PCM_CHANNELS 2U
 #define UMS9117_PCM_BUFFER_BYTES_MAX (256U * 1024U)
@@ -59,116 +60,14 @@
 #define UMS9117_PCM_THREAD_NAME "ums9117-pcm"
 #define UMS9117_PCM_NAME "UMS9117 Headphones"
 
-#define UMS9117_VIBRATOR_NAME "UMS9117 speaker vibrator"
-#define UMS9117_VIBRATOR_PHYS "fplinux/vibrator0"
-#define UMS9117_VIBRATOR_MAX_ON_MS 5000U
+#if IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR)
 /*
  * Keep the vibration path between the pulses of one pattern so that muting
  * and PA transitions do not repeat for each pulse. One second covers the
  * longest pause inside a Morse pattern with margin.
  */
 #define UMS9117_VIBRATOR_HOLD_MS 1000U
-
-/*
- * A speaker that also vibrates the phone plays the VBC vibrate tone. A
- * vibration session holds the DAC and the PA for the tone and mutes the
- * headphones; music and FM continue only on an enabled, unmuted speaker,
- * which shares the PA with the tone.
- */
-struct ums9117_vibrator {
-	struct work_struct play_work;
-	struct delayed_work stop_work;
-	struct delayed_work hold_work;
-	/* Protects the request and lifecycle flags; play runs atomically. */
-	spinlock_t state_lock;
-	unsigned long stop_deadline;
-	bool requested;
-	bool suspended;
-	bool stopping;
-	bool cutoff_latched;
-	bool off_pending;
-	/* The PCM lifecycle mutex protects the hardware state below. */
-	bool session;
-	bool tone_on;
-};
-
-struct ums9117_pcm_stream {
-	struct snd_pcm_substream *substream;
-	snd_pcm_uframes_t hw_pos;
-	snd_pcm_uframes_t period_frames;
-	unsigned long last_progress;
-	bool running;
-	bool period_pending;
-	bool xrun_pending;
-};
-
-struct ums9117_pcm {
-	struct device *dev;
-	struct snd_card *card;
-	struct snd_pcm *pcm;
-	struct ums9117_audio *digital;
-	struct ums9117_sc2720_codec *codec;
-	struct ums9117_jack *jack;
-	struct task_struct *thread;
-	wait_queue_head_t thread_wait;
-	struct hrtimer timer;
-	/* Serializes the hardware lifecycle; the timer never takes it. */
-	struct mutex lock;
-	unsigned int rate;
-	struct ums9117_audio_profile profile;
-	struct ums9117_vibrator vibrator;
-	unsigned int volume_left;
-	unsigned int volume_right;
-	unsigned int speaker_volume;
-	enum ums9117_sc2720_capture_source capture_source;
-	/* Requested set selects fitted data; board policy selects codec outputs. */
-	unsigned int outputs;
-	/* Fitted EQ6 and ALC switches, each controlling its own block. */
-	bool eq_enabled;
-	bool alc_enabled;
-	bool codec_prepared;
-	bool digital_prepared;
-	bool capture_supported;
-#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
-	bool speaker_from_headphones;
 #endif
-	bool speaker_supported;
-	bool headfree_headphones_only;
-	bool capture_prepared;
-	bool speaker_vibration;
-	bool idle_silence;
-	bool fm_enabled;
-	bool external_fm;
-	bool suspended;
-	bool removing;
-	/*
-	 * Protects the streaming state below. The timer callback takes it from
-	 * hard interrupt context; process context disables interrupts and does
-	 * not sleep or cancel the timer while holding it. Lifecycle code writes
-	 * these fields with the mutex held as well.
-	 */
-	spinlock_t fifo_lock;
-	struct ums9117_pcm_stream playback;
-	struct ums9117_pcm_stream capture;
-	snd_pcm_uframes_t submit_ptr;
-	snd_pcm_uframes_t capture_ptr;
-	u64 submitted_frames;
-	u64 consumed_frames;
-	u64 leading_silence_frames;
-	/*
-	 * The integrated speaker uses DACS, which adds both lanes. Its PCM samples
-	 * are halved with or without the headphones. Headphone-fed speakers retain
-	 * their stereo samples. FM samples
-	 * are not halved.
-	 */
-	bool halve_samples;
-	bool idle_running;
-	bool capture_starting;
-	unsigned int capture_warmup_frames;
-	/* Results the timer leaves for the notification thread. */
-	bool drained_pending;
-	int idle_error;
-};
 
 enum ums9117_pcm_service_result {
 	UMS9117_PCM_SERVICE_IDLE,
@@ -815,13 +714,14 @@ static int ums9117_pcm_apply_vibration_locked(struct ums9117_pcm *audio)
 	return ums9117_pcm_update_idle_locked(audio);
 }
 
+#if IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR)
 static void ums9117_pcm_set_tone_locked(struct ums9117_pcm *audio, bool on)
 {
 	ums9117_audio_set_vibration(audio->digital, on);
 	audio->vibrator.tone_on = on;
 }
 
-static void ums9117_pcm_end_vibration_locked(struct ums9117_pcm *audio)
+void ums9117_pcm_end_vibration_locked(struct ums9117_pcm *audio)
 {
 	struct ums9117_vibrator *vibrator = &audio->vibrator;
 	int ret;
@@ -837,7 +737,7 @@ static void ums9117_pcm_end_vibration_locked(struct ums9117_pcm *audio)
 			ERR_PTR(ret));
 }
 
-static int ums9117_pcm_vibrate_locked(struct ums9117_pcm *audio)
+int ums9117_pcm_vibrate_locked(struct ums9117_pcm *audio)
 {
 	struct ums9117_vibrator *vibrator = &audio->vibrator;
 	int ret;
@@ -865,7 +765,7 @@ static int ums9117_pcm_vibrate_locked(struct ums9117_pcm *audio)
 	return 0;
 }
 
-static void ums9117_pcm_vibrate_off_locked(struct ums9117_pcm *audio)
+void ums9117_pcm_vibrate_off_locked(struct ums9117_pcm *audio)
 {
 	struct ums9117_vibrator *vibrator = &audio->vibrator;
 
@@ -875,6 +775,7 @@ static void ums9117_pcm_vibrate_off_locked(struct ums9117_pcm *audio)
 		mod_delayed_work(system_percpu_wq, &vibrator->hold_work,
 				 msecs_to_jiffies(UMS9117_VIBRATOR_HOLD_MS));
 }
+#endif
 
 /* Reapplies an active session after its route inputs changed. */
 static int ums9117_pcm_update_vibration_locked(struct ums9117_pcm *audio)
@@ -2092,188 +1993,6 @@ static const struct snd_pcm_ops ums9117_pcm_ops = {
 	.pointer = ums9117_pcm_pointer,
 };
 
-static void ums9117_vibrator_play_work(struct work_struct *work)
-{
-	struct ums9117_vibrator *vibrator =
-		container_of(work, struct ums9117_vibrator, play_work);
-	struct ums9117_pcm *audio =
-		container_of(vibrator, struct ums9117_pcm, vibrator);
-	unsigned long flags;
-	bool on;
-	int ret = 0;
-
-	spin_lock_irqsave(&vibrator->state_lock, flags);
-	on = vibrator->requested && !vibrator->suspended && !vibrator->stopping;
-	spin_unlock_irqrestore(&vibrator->state_lock, flags);
-
-	mutex_lock(&audio->lock);
-	if (on)
-		ret = ums9117_pcm_vibrate_locked(audio);
-	if (!on || ret)
-		ums9117_pcm_vibrate_off_locked(audio);
-	mutex_unlock(&audio->lock);
-	if (ret)
-		dev_err_ratelimited(audio->dev, "cannot start vibration: %pe\n",
-				    ERR_PTR(ret));
-	if (on && !ret)
-		return;
-
-	spin_lock_irqsave(&vibrator->state_lock, flags);
-	if (ret)
-		vibrator->requested = false;
-	vibrator->cutoff_latched = false;
-	vibrator->off_pending = false;
-	spin_unlock_irqrestore(&vibrator->state_lock, flags);
-	cancel_delayed_work(&vibrator->stop_work);
-}
-
-/* Ends an activation at its deadline; a new one needs the confirmed stop. */
-static void ums9117_vibrator_stop_work(struct work_struct *work)
-{
-	struct ums9117_vibrator *vibrator = container_of(
-		to_delayed_work(work), struct ums9117_vibrator, stop_work);
-	unsigned long delay = 0;
-	unsigned long flags;
-	bool stop = false;
-
-	spin_lock_irqsave(&vibrator->state_lock, flags);
-	if (vibrator->off_pending) {
-		stop = true;
-	} else if (vibrator->requested) {
-		if (time_before(jiffies, vibrator->stop_deadline)) {
-			delay = vibrator->stop_deadline - jiffies;
-		} else {
-			vibrator->requested = false;
-			vibrator->cutoff_latched = true;
-			vibrator->off_pending = true;
-			stop = true;
-		}
-	}
-	spin_unlock_irqrestore(&vibrator->state_lock, flags);
-	if (delay)
-		mod_delayed_work(system_percpu_wq, &vibrator->stop_work, delay);
-	else if (stop)
-		schedule_work(&vibrator->play_work);
-}
-
-static void ums9117_vibrator_hold_work(struct work_struct *work)
-{
-	struct ums9117_vibrator *vibrator = container_of(
-		to_delayed_work(work), struct ums9117_vibrator, hold_work);
-	struct ums9117_pcm *audio =
-		container_of(vibrator, struct ums9117_pcm, vibrator);
-
-	mutex_lock(&audio->lock);
-	if (!vibrator->tone_on)
-		ums9117_pcm_end_vibration_locked(audio);
-	mutex_unlock(&audio->lock);
-}
-
-/* Called atomically by ff-memless; hardware changes run in play_work. */
-static int ums9117_vibrator_play(struct input_dev *input, void *data,
-				 struct ff_effect *effect)
-{
-	struct ums9117_pcm *audio = input_get_drvdata(input);
-	struct ums9117_vibrator *vibrator = &audio->vibrator;
-	bool on = effect->u.rumble.strong_magnitude ||
-		  effect->u.rumble.weak_magnitude;
-	unsigned long delay = 0;
-	unsigned long flags;
-	bool force_stop = false;
-	int ret = 0;
-
-	spin_lock_irqsave(&vibrator->state_lock, flags);
-	if (vibrator->suspended || vibrator->stopping) {
-		ret = -ESHUTDOWN;
-	} else if (on && (vibrator->cutoff_latched || vibrator->off_pending)) {
-		ret = -EBUSY;
-	} else {
-		if (on) {
-			if (!vibrator->requested)
-				vibrator->stop_deadline =
-					jiffies +
-					msecs_to_jiffies(
-						UMS9117_VIBRATOR_MAX_ON_MS);
-			if (time_before(jiffies, vibrator->stop_deadline)) {
-				delay = vibrator->stop_deadline - jiffies;
-			} else {
-				on = false;
-				vibrator->cutoff_latched = true;
-				force_stop = true;
-				ret = -EBUSY;
-			}
-		}
-		vibrator->requested = on;
-		if (!on)
-			vibrator->off_pending = true;
-	}
-	spin_unlock_irqrestore(&vibrator->state_lock, flags);
-	if (ret && !force_stop)
-		return ret;
-	if (on)
-		mod_delayed_work(system_percpu_wq, &vibrator->stop_work, delay);
-	schedule_work(&vibrator->play_work);
-	return ret;
-}
-
-/* Stops at once without the hold; the caller has blocked new activations. */
-static void ums9117_vibrator_stop(struct ums9117_pcm *audio)
-{
-	struct ums9117_vibrator *vibrator = &audio->vibrator;
-	unsigned long flags;
-
-	spin_lock_irqsave(&vibrator->state_lock, flags);
-	vibrator->requested = false;
-	vibrator->off_pending = true;
-	spin_unlock_irqrestore(&vibrator->state_lock, flags);
-	cancel_delayed_work_sync(&vibrator->stop_work);
-	cancel_work_sync(&vibrator->play_work);
-	cancel_delayed_work_sync(&vibrator->hold_work);
-	mutex_lock(&audio->lock);
-	ums9117_pcm_end_vibration_locked(audio);
-	mutex_unlock(&audio->lock);
-	spin_lock_irqsave(&vibrator->state_lock, flags);
-	vibrator->cutoff_latched = false;
-	vibrator->off_pending = false;
-	spin_unlock_irqrestore(&vibrator->state_lock, flags);
-}
-
-static void ums9117_vibrator_close(struct input_dev *input)
-{
-	ums9117_vibrator_stop(input_get_drvdata(input));
-}
-
-static void ums9117_vibrator_set_lifecycle(struct ums9117_pcm *audio,
-					   bool *flag, bool value)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&audio->vibrator.state_lock, flags);
-	*flag = value;
-	spin_unlock_irqrestore(&audio->vibrator.state_lock, flags);
-}
-
-static int ums9117_vibrator_register(struct ums9117_pcm *audio)
-{
-	struct input_dev *input;
-	int ret;
-
-	input = devm_input_allocate_device(audio->dev);
-	if (!input)
-		return -ENOMEM;
-	input->name = UMS9117_VIBRATOR_NAME;
-	input->phys = UMS9117_VIBRATOR_PHYS;
-	input->id.bustype = BUS_HOST;
-	input->close = ums9117_vibrator_close;
-	input_set_drvdata(input, audio);
-	input_set_capability(input, EV_FF, FF_RUMBLE);
-	/* ff-memless frees its data pointer, so pass none. */
-	ret = input_ff_create_memless(input, NULL, ums9117_vibrator_play);
-	if (ret)
-		return ret;
-	return input_register_device(input);
-}
-
 static void ums9117_pcm_remove(struct platform_device *pdev);
 
 static int ums9117_pcm_probe(struct platform_device *pdev)
@@ -2298,15 +2017,9 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 	audio->alc_enabled = true;
 	mutex_init(&audio->lock);
 	spin_lock_init(&audio->fifo_lock);
-	if (IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR)) {
-		spin_lock_init(&audio->vibrator.state_lock);
-		INIT_WORK(&audio->vibrator.play_work,
-			  ums9117_vibrator_play_work);
-		INIT_DELAYED_WORK(&audio->vibrator.stop_work,
-				  ums9117_vibrator_stop_work);
-		INIT_DELAYED_WORK(&audio->vibrator.hold_work,
-				  ums9117_vibrator_hold_work);
-	}
+#if IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR)
+	ums9117_vibrator_init(audio);
+#endif
 	init_waitqueue_head(&audio->thread_wait);
 	hrtimer_setup(&audio->timer, ums9117_pcm_timer, CLOCK_MONOTONIC,
 		      HRTIMER_MODE_REL);
@@ -2488,8 +2201,8 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 			return snd_card_free_on_error(&pdev->dev, ret);
 		}
 	}
-	if (IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR) &&
-	    audio->speaker_vibration) {
+#if IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR)
+	if (audio->speaker_vibration) {
 		/* Applications find the vibrator even before device data exists. */
 		ret = ums9117_vibrator_register(audio);
 		if (ret) {
@@ -2497,6 +2210,7 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 			return ret;
 		}
 	}
+#endif
 	ums9117_jack_start(audio->jack);
 	dev_dbg(audio->dev, "headphone volume source: %s\n",
 		audio->profile.fitted ? "fitted gain profile" :
@@ -2512,11 +2226,10 @@ static void ums9117_pcm_remove(struct platform_device *pdev)
 
 	/* A jack report during card disconnection is unsafe. */
 	ums9117_jack_stop(audio->jack);
-	if (IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR)) {
-		ums9117_vibrator_set_lifecycle(audio, &audio->vibrator.stopping,
-					       true);
-		ums9117_vibrator_stop(audio);
-	}
+#if IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR)
+	ums9117_vibrator_set_lifecycle(audio, &audio->vibrator.stopping, true);
+	ums9117_vibrator_stop(audio);
+#endif
 	mutex_lock(&audio->lock);
 	audio->removing = true;
 	ums9117_pcm_stop_playback_refill_locked(audio);
@@ -2548,11 +2261,10 @@ static int ums9117_pcm_suspend(struct device *dev)
 	ret = ums9117_jack_suspend(audio->jack);
 	if (ret)
 		return ret;
-	if (IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR)) {
-		ums9117_vibrator_set_lifecycle(
-			audio, &audio->vibrator.suspended, true);
-		ums9117_vibrator_stop(audio);
-	}
+#if IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR)
+	ums9117_vibrator_set_lifecycle(audio, &audio->vibrator.suspended, true);
+	ums9117_vibrator_stop(audio);
+#endif
 	mutex_lock(&audio->lock);
 	audio->suspended = true;
 	mutex_unlock(&audio->lock);
@@ -2577,9 +2289,10 @@ static int ums9117_pcm_resume(struct device *dev)
 		ret = ums9117_pcm_start_idle_locked(audio);
 	mutex_unlock(&audio->lock);
 	/* An interrupted pulse is not resumed; new requests are accepted. */
-	if (IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR))
-		ums9117_vibrator_set_lifecycle(
-			audio, &audio->vibrator.suspended, false);
+#if IS_ENABLED(CONFIG_SND_UMS9117_SPEAKER_VIBRATOR)
+	ums9117_vibrator_set_lifecycle(audio, &audio->vibrator.suspended,
+				       false);
+#endif
 	ums9117_jack_resume(audio->jack);
 	return ret;
 }
