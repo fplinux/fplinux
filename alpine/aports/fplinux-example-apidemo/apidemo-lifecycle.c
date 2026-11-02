@@ -459,7 +459,7 @@ static void timer_ready(struct fplinux_ui *ui, int fd, short events,
 	(void)ui;
 	(void)context;
 	if (events & (POLLERR | POLLHUP | POLLNVAL)) {
-		fplinux_ui_watch_fd(ui, -1, 0, NULL, NULL);
+		fplinux_ui_unwatch_fd(ui, fd);
 		watch_demo.watching = false;
 		return;
 	}
@@ -489,15 +489,15 @@ static void relabel_watch(struct apidemo *app)
 	fplinux_ui_screen_add_command(watch_demo.form, &toggle);
 }
 
-/* One watch per application: a new call replaces it, -1 stops it. */
 static void set_watching(struct apidemo *app, bool watching)
 {
 	if (watching && watch_demo.fd >= 0) {
-		fplinux_ui_watch_fd(app->ui, watch_demo.fd, POLLIN, timer_ready,
-				    app);
-		watch_demo.watching = true;
+		watch_demo.watching = fplinux_ui_watch_fd(
+			app->ui, watch_demo.fd, POLLIN, timer_ready, app);
+		if (!watch_demo.watching)
+			apidemo_error(app, "fplinux_ui_watch_fd");
 	} else {
-		fplinux_ui_watch_fd(app->ui, -1, 0, NULL, NULL);
+		fplinux_ui_unwatch_fd(app->ui, watch_demo.fd);
 		watch_demo.watching = false;
 	}
 }
@@ -557,11 +557,11 @@ static void open_watch(struct apidemo *app, const struct apidemo_entry *entry)
 		_("A timerfd expires every second; fplinux_ui_watch_fd() adds "
 		  "it to the event loop with POLLIN. Unlike LVGL timers, the "
 		  "watch keeps running while the application is hidden."));
-	set_watching(app, true);
-	relabel_watch(app);
 	apidemo_add_back(form);
 	fplinux_ui_screen_set_listener(form, watch_command, NULL, app);
 	fplinux_ui_push(app->ui, form);
+	set_watching(app, true);
+	relabel_watch(app);
 }
 
 /* The window title */

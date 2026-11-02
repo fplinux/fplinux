@@ -27,6 +27,14 @@ ui_host_build_application -pthread -I"$aport" \
 	-Wl,--wrap=lv_display_flush_ready -Wl,--wrap=write -Wl,--wrap=open \
 	-Wl,--wrap=fdopendir -o "$work/files"
 
+ui_host_build_application -pthread \
+	"$peer/picker-app.c" \
+	"$peer/observer.c" "$screens/native-glyph-resources.c" \
+	-Wl,--wrap=fplinux_ui_open -Wl,--wrap=fplinux_ui_menu_open \
+	-Wl,--wrap=fplinux_language_load -Wl,--wrap=libintl_bindtextdomain \
+	-Wl,--wrap=lv_display_flush_ready -Wl,--wrap=write -Wl,--wrap=open \
+	-Wl,--wrap=fdopendir -o "$work/picker-app"
+
 # pkg-config emits compiler and linker arguments for the pinned peer libraries.
 # shellcheck disable=SC2046
 ui_host_compile -I"$root/include/fplinux" -I"$ui_host_inputs" -I"$screens" \

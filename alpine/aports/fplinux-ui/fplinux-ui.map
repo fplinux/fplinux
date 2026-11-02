@@ -4,13 +4,40 @@
  * in the installed headers fplinux-ui.h, fplinux-ui-screen.h,
  * fplinux-ui-text.h, fplinux-ui-menu.h, fplinux-ui-prefs.h,
  * fplinux-ui-locale.h, fplinux-ui-symbol-picker.h, fplinux-ui-audio.h,
- * fplinux-ui-vibration.h and fplinux-ui-frame.h. A new function is added
- * here and in its header. The library and its current consumers are built
+ * fplinux-ui-vibration.h, fplinux-ui-frame.h, fplinux-rgb565.h,
+ * fplinux-files-browse.h, fplinux-ui-file-picker.h, fplinux-ui-recent.h and
+ * fplinux-ui-view-settings.h. A new function is added here and in its header.
+ * The library and its current consumers are built
  * together. Every other symbol, such as the fonts, session
  * protocol functions and xdg-shell interfaces, stays local to the library.
  */
 {
 global:
+	fplinux_rgb565_viewport_init;
+	fplinux_rgb565_transform;
+	fplinux_rgb565_map_point;
+	fplinux_files_child_path;
+	fplinux_files_parent_path;
+	fplinux_files_directory_read;
+	fplinux_files_directory_free;
+	fplinux_files_directory_open;
+	fplinux_files_valid_name;
+	fplinux_files_open_parent;
+	fplinux_ui_file_picker_open;
+	fplinux_ui_file_picker_storage_result;
+	fplinux_ui_file_picker_close;
+	fplinux_ui_recent_cleanup;
+	fplinux_ui_recent_load;
+	fplinux_ui_recent_record;
+	fplinux_ui_recent_remove;
+	fplinux_ui_recent_store;
+	fplinux_ui_view_settings_defaults;
+	fplinux_ui_view_settings_load;
+	fplinux_ui_view_settings_store;
+	fplinux_ui_view_settings_reset;
+	fplinux_ui_view_settings_form_append;
+	fplinux_ui_view_settings_form_read;
+	fplinux_ui_program_prefs_open;
 	fplinux_ui_open_file;
 	fplinux_ui_set_storage_handler;
 	fplinux_ui_storage_request;
@@ -200,6 +227,7 @@ global:
 	fplinux_ui_wait_begin;
 	fplinux_ui_wait_end;
 	fplinux_ui_watch_fd;
+	fplinux_ui_unwatch_fd;
 	fplinux_ui_width;
 local:
 	*;

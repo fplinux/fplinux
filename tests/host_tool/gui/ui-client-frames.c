@@ -15,6 +15,7 @@
 #include "fplinux-ui-symbol-picker.h"
 #include "fplinux-ui-text.h"
 #include "fplinux-ui-vibration.h"
+#include "fplinux-ui-view-settings.h"
 #include "fplinux-ui.h"
 #include "ui-frame-peer.h"
 #include "ui-screen-navigation.h"
@@ -885,6 +886,85 @@ static lv_obj_t *find_label(lv_obj_t *root, const char *prefix)
 	return NULL;
 }
 
+struct view_form_state {
+	size_t focus;
+	enum fplinux_rgb565_scale scale;
+	enum fplinux_rgb565_rotation rotation;
+	bool scale_label, rotation_label, fit_label, zero_label;
+	bool integer_label, rotate_270_label;
+};
+
+struct view_form_application {
+	struct application application;
+	struct fplinux_ui_screen *form;
+	struct fplinux_ui_view_fields fields;
+};
+
+static void view_form_input(struct fplinux_ui *ui, int fd, short events,
+			    void *context)
+{
+	struct view_form_application *application = context;
+	struct fplinux_ui_view_settings settings =
+		fplinux_ui_view_settings_defaults();
+	struct view_form_state state;
+	char command;
+
+	assert(events == POLLIN && read(fd, &command, 1) == 1);
+	if (command == 'I') {
+		application->form = fplinux_ui_form_new(ui, "View settings");
+		assert(application->form);
+		assert(fplinux_ui_view_settings_form_append(
+			application->form, &settings, &application->fields));
+		fplinux_ui_form_set_focus(application->form,
+					  application->fields.scale);
+		assert(fplinux_ui_push(ui, application->form));
+	} else {
+		assert(command == 'Q' && application->form);
+	}
+	assert(fplinux_ui_view_settings_form_read(
+		application->form, &application->fields, &settings));
+	lv_obj_update_layout(fplinux_ui_screen(ui));
+	lv_refr_now(NULL);
+	state = (struct view_form_state){
+		.focus = fplinux_ui_form_get_focus(application->form),
+		.scale = settings.scale,
+		.rotation = settings.rotation,
+		.scale_label = find_label(fplinux_ui_screen(ui), "Scale") !=
+			       NULL,
+		.rotation_label =
+			find_label(fplinux_ui_screen(ui), "Rotation") != NULL,
+		.fit_label = find_label(fplinux_ui_screen(ui), "Fit") != NULL,
+		.zero_label = find_label(fplinux_ui_screen(ui), "0°") != NULL,
+		.integer_label = find_label(fplinux_ui_screen(ui), "Integer") !=
+				 NULL,
+		.rotate_270_label = find_label(fplinux_ui_screen(ui), "270°") !=
+				    NULL,
+	};
+	assert(write(fd, &state, sizeof(state)) == (ssize_t)sizeof(state));
+}
+
+static int run_view_form_application(int control)
+{
+	struct view_form_application application = {
+		.application = { .control = control },
+	};
+	struct fplinux_ui *ui = fplinux_ui_open("org.fplinux.view-form-test",
+						application_event,
+						&application.application);
+	int result;
+
+	assert(ui);
+	application.application.ui = ui;
+	paint(ui, 0xff0000);
+	lv_refr_now(NULL);
+	fplinux_ui_watch_fd(ui, control, POLLIN, view_form_input, &application);
+	application.application.initialized = true;
+	result = fplinux_ui_run(ui);
+	fplinux_ui_close(ui);
+	assert(application.application.closed);
+	return result;
+}
+
 static void marquee_application_input(struct fplinux_ui *ui, int fd,
 				      short events, void *context)
 {
@@ -1033,9 +1113,11 @@ struct runtime_application {
 	int control;
 	int watched[2];
 	int replacement[2];
+	int new_pipe[2];
 	lv_timer_t *timer;
 	bool closed;
 	bool replacement_registered;
+	unsigned int watch_deliveries;
 	unsigned int close_requests;
 	unsigned int documents;
 	unsigned int lifecycle_events;
@@ -1090,6 +1172,79 @@ static void runtime_timer(lv_timer_t *timer)
 	assert(read(application->control, &value, 1) == 1 && value == 'g');
 }
 
+static void multi_watch_second(struct fplinux_ui *ui, int fd, short events,
+			       void *context)
+{
+	struct runtime_application *application = context;
+	char value;
+
+	assert(events == POLLIN);
+	assert(fd == application->replacement[0]);
+	assert(read(fd, &value, 1) == 1);
+	assert(value == (!strcmp(application->scenario, "runtime-multi-both") ?
+				 'b' :
+				 'n'));
+	assert(++application->watch_deliveries == 2);
+	fplinux_ui_quit(ui);
+}
+
+static void multi_watch_first(struct fplinux_ui *ui, int fd, short events,
+			      void *context)
+{
+	struct runtime_application *application = context;
+	char value;
+
+	assert(fd == application->watched[0] && events == POLLIN);
+	assert(read(fd, &value, 1) == 1 && value == 'a');
+	assert(++application->watch_deliveries == 1);
+	fplinux_ui_unwatch_fd(ui, fd);
+	if (!strcmp(application->scenario, "runtime-multi-both"))
+		return;
+	assert(read(application->replacement[0], &value, 1) == 1 &&
+	       value == 'b');
+	if (!strcmp(application->scenario, "runtime-multi-remove")) {
+		fplinux_ui_unwatch_fd(ui, application->replacement[0]);
+	} else {
+		if (!strcmp(application->scenario, "runtime-multi-reuse")) {
+			int old_fd = application->replacement[0];
+
+			fplinux_ui_unwatch_fd(ui, old_fd);
+			assert(close(old_fd) == 0);
+			assert(dup2(application->new_pipe[0], old_fd) ==
+			       old_fd);
+			assert(close(application->new_pipe[0]) == 0);
+			application->new_pipe[0] = old_fd;
+			application->replacement[0] = old_fd;
+		}
+		assert(fplinux_ui_watch_fd(ui, application->replacement[0],
+					   POLLIN, multi_watch_second,
+					   application));
+	}
+	lv_timer_set_period(application->timer, 20);
+	lv_timer_reset(application->timer);
+	lv_timer_resume(application->timer);
+}
+
+static void multi_watch_timer(lv_timer_t *timer)
+{
+	struct runtime_application *application = lv_timer_get_user_data(timer);
+
+	lv_timer_pause(timer);
+	if (!application->watch_deliveries) {
+		assert(write(application->watched[1], "a", 1) == 1);
+		assert(write(application->replacement[1], "b", 1) == 1);
+	} else if (!strcmp(application->scenario, "runtime-multi-remove")) {
+		assert(application->watch_deliveries == 1);
+		fplinux_ui_quit(application->ui);
+	} else {
+		int fd = !strcmp(application->scenario, "runtime-multi-reuse") ?
+				 application->new_pipe[1] :
+				 application->replacement[1];
+
+		assert(write(fd, "n", 1) == 1);
+	}
+}
+
 static void register_replacement(struct runtime_application *application)
 {
 	if (!strcmp(application->scenario, "runtime-watch-reuse")) {
@@ -1100,10 +1255,11 @@ static void register_replacement(struct runtime_application *application)
 		assert(dup2(application->replacement[0], old_fd) == old_fd);
 		assert(close(application->replacement[0]) == 0);
 		application->replacement[0] = old_fd;
-	}
+	} else
+		fplinux_ui_unwatch_fd(application->ui, application->watched[0]);
 	application->replacement_registered = true;
-	fplinux_ui_watch_fd(application->ui, application->replacement[0],
-			    POLLIN, runtime_watch, application);
+	assert(fplinux_ui_watch_fd(application->ui, application->replacement[0],
+				   POLLIN, runtime_watch, application));
 	lv_timer_set_period(application->timer, 20);
 	lv_timer_reset(application->timer);
 	lv_timer_resume(application->timer);
@@ -1191,6 +1347,7 @@ static int run_runtime_application(int control, const char *scenario)
 		.scenario = scenario,
 		.watched = { -1, -1 },
 		.replacement = { -1, -1 },
+		.new_pipe = { -1, -1 },
 	};
 	struct sigaction action = { .sa_handler = borrowed_signal_handler };
 	struct sigaction saved_int, saved_term;
@@ -1215,7 +1372,10 @@ static int run_runtime_application(int control, const char *scenario)
 	}
 	assert(application.ui);
 	paint(application.ui, 0xff0000);
-	application.timer = lv_timer_create(runtime_timer, 1000, &application);
+	application.timer = lv_timer_create(
+		!strncmp(scenario, "runtime-multi-", 14) ? multi_watch_timer :
+							   runtime_timer,
+		1000, &application);
 	assert(application.timer);
 	lv_timer_pause(application.timer);
 	if (!strncmp(scenario, "runtime-close-", 14))
@@ -1228,8 +1388,30 @@ static int run_runtime_application(int control, const char *scenario)
 		assert(pipe2(application.watched, O_CLOEXEC | O_NONBLOCK) == 0);
 		assert(pipe2(application.replacement, O_CLOEXEC | O_NONBLOCK) ==
 		       0);
-		fplinux_ui_watch_fd(application.ui, application.watched[0],
-				    POLLIN, runtime_watch, &application);
+		assert(fplinux_ui_watch_fd(application.ui,
+					   application.watched[0], POLLIN,
+					   runtime_watch, &application));
+	}
+	if (!strncmp(scenario, "runtime-multi-", 14)) {
+		assert(pipe2(application.watched, O_CLOEXEC | O_NONBLOCK) == 0);
+		assert(pipe2(application.replacement, O_CLOEXEC | O_NONBLOCK) ==
+		       0);
+		if (!strcmp(scenario, "runtime-multi-reuse"))
+			assert(pipe2(application.new_pipe,
+				     O_CLOEXEC | O_NONBLOCK) == 0);
+		assert(!fplinux_ui_watch_fd(application.ui, -1, POLLIN,
+					    multi_watch_first, &application));
+		assert(errno == EINVAL);
+		assert(!fplinux_ui_watch_fd(application.ui,
+					    application.watched[0], POLLIN,
+					    NULL, &application));
+		assert(errno == EINVAL);
+		assert(fplinux_ui_watch_fd(application.ui,
+					   application.watched[0], POLLIN,
+					   multi_watch_first, &application));
+		assert(fplinux_ui_watch_fd(application.ui,
+					   application.replacement[0], POLLIN,
+					   multi_watch_second, &application));
 	}
 	result = fplinux_ui_run(application.ui);
 	lv_timer_delete(application.timer);
@@ -1242,12 +1424,16 @@ static int run_runtime_application(int control, const char *scenario)
 			assert(close(application.watched[i]) == 0);
 		if (application.replacement[i] >= 0)
 			assert(close(application.replacement[i]) == 0);
+		if (application.new_pipe[i] >= 0 &&
+		    application.new_pipe[i] != application.replacement[i])
+			assert(close(application.new_pipe[i]) == 0);
 	}
 	if (strstr(scenario, "-invalid")) {
 		assert(result == -1 && application.closed);
 	} else {
 		assert(result == 0);
-		if (strstr(scenario, "-quit") || strstr(scenario, "-watch-"))
+		if (strstr(scenario, "-quit") || strstr(scenario, "-watch-") ||
+		    strstr(scenario, "-multi-"))
 			assert(!application.closed);
 		else
 			assert(application.closed);
@@ -2137,6 +2323,100 @@ static void wait_input(struct fplinux_ui_frame_peer *compositor, int control,
 	fplinux_ui_frame_wait_readable(compositor, control);
 	assert(read(control, &result, 1) == 1);
 	assert(result == expected);
+}
+
+static struct view_form_state
+view_form_command(struct fplinux_ui_frame_peer *compositor, int control,
+		  char command)
+{
+	struct view_form_state state;
+
+	assert(write(control, &command, 1) == 1);
+	fplinux_ui_frame_wait_readable(compositor, control);
+	assert(read(control, &state, sizeof(state)) == (ssize_t)sizeof(state));
+	return state;
+}
+
+static void view_form_key(struct fplinux_ui_frame_peer *compositor,
+			  unsigned int code)
+{
+	fplinux_ui_frame_send_key(&compositor->keyboards[0], code, true);
+	fplinux_ui_frame_send_key(&compositor->keyboards[0], code, false);
+}
+
+static void wait_changed_pixels(struct fplinux_ui_frame_peer *compositor,
+				uint16_t *previous)
+{
+	size_t bytes = (size_t)compositor->width * compositor->height *
+		       sizeof(*previous);
+	uint64_t deadline = fplinux_ui_frame_now_ms() + 3000;
+
+	while (!memcmp(compositor->pixels, previous, bytes)) {
+		assert(fplinux_ui_frame_now_ms() < deadline);
+		fplinux_ui_frame_pump(compositor);
+	}
+	memcpy(previous, compositor->pixels, bytes);
+}
+
+static void check_view_form(struct fplinux_ui_frame_peer *compositor,
+			    int control)
+{
+	struct view_form_state state;
+	size_t bytes = (size_t)compositor->width * compositor->height *
+		       sizeof(*compositor->pixels);
+	uint16_t *previous = malloc(bytes);
+	uint64_t deadline;
+
+	assert(previous);
+	memcpy(previous, compositor->pixels, bytes);
+	state = view_form_command(compositor, control, 'I');
+	assert(state.focus == 0 && state.scale == FPLINUX_RGB565_FIT &&
+	       state.rotation == FPLINUX_RGB565_ROTATE_0);
+	assert(state.scale_label && state.rotation_label && state.fit_label &&
+	       state.zero_label);
+	wait_changed_pixels(compositor, previous);
+	fplinux_ui_frame_focus_keyboard(&compositor->keyboards[0]);
+	view_form_key(compositor, KEY_ENTER);
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	do {
+		assert(fplinux_ui_frame_now_ms() < deadline);
+		state = view_form_command(compositor, control, 'Q');
+	} while (!state.integer_label);
+	wait_changed_pixels(compositor, previous);
+	view_form_key(compositor, KEY_DOWN);
+	view_form_key(compositor, KEY_DOWN);
+	view_form_key(compositor, KEY_ENTER);
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	do {
+		assert(fplinux_ui_frame_now_ms() < deadline);
+		state = view_form_command(compositor, control, 'Q');
+	} while (state.scale != FPLINUX_RGB565_INTEGER);
+	assert(state.rotation == FPLINUX_RGB565_ROTATE_0 && state.focus == 0);
+	wait_changed_pixels(compositor, previous);
+	view_form_key(compositor, KEY_DOWN);
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	do {
+		assert(fplinux_ui_frame_now_ms() < deadline);
+		state = view_form_command(compositor, control, 'Q');
+	} while (state.focus != 1);
+	view_form_key(compositor, KEY_ENTER);
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	do {
+		assert(fplinux_ui_frame_now_ms() < deadline);
+		state = view_form_command(compositor, control, 'Q');
+	} while (!state.rotate_270_label);
+	wait_changed_pixels(compositor, previous);
+	view_form_key(compositor, KEY_DOWN);
+	view_form_key(compositor, KEY_DOWN);
+	view_form_key(compositor, KEY_ENTER);
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	do {
+		assert(fplinux_ui_frame_now_ms() < deadline);
+		state = view_form_command(compositor, control, 'Q');
+	} while (state.rotation != FPLINUX_RGB565_ROTATE_270);
+	assert(state.focus == 1 && state.scale == FPLINUX_RGB565_INTEGER);
+	wait_changed_pixels(compositor, previous);
+	free(previous);
 }
 
 static struct observation
@@ -4116,6 +4396,13 @@ static void check_runtime(struct fplinux_ui_frame_peer *compositor, int session,
 {
 	struct fplinux_ui_session_message request = { .serial = 73 };
 
+	if (!strncmp(scenario, "runtime-multi-", 14)) {
+		request.type = FPLINUX_UI_SESSION_ERROR;
+		strcpy(request.reason, "watch-ready");
+		assert(fplinux_ui_session_send(session, &request));
+		wait_application(compositor, child, 0);
+		return;
+	}
 	if (!strncmp(scenario, "runtime-watch-", 14)) {
 		request.type = FPLINUX_UI_SESSION_ERROR;
 		strcpy(request.reason, "watch-ready");
@@ -4205,7 +4492,8 @@ int main(int argc, char **argv)
 	int listener, session;
 	int audio_listener = -1;
 	pid_t child;
-	bool repeat, media, audio, navigation, waiting, marquee, damage;
+	bool repeat, media, audio, navigation, waiting, marquee, damage,
+		view_form;
 	bool cold_activation;
 
 	assert(argc == 3 || argc == 4);
@@ -4226,9 +4514,10 @@ int main(int argc, char **argv)
 	navigation = !strncmp(argv[1], "stack-", 6) || waiting;
 	marquee = !strncmp(argv[1], "marquee-", 8);
 	damage = !strncmp(argv[1], "damage-", 7);
+	view_form = !strcmp(argv[1], "view-form");
 	cold_activation = !strcmp(argv[1], "activation-cold");
-	assert((repeat || audio || navigation) == (argc == 4));
-	if (repeat || navigation)
+	assert((repeat || audio || navigation || view_form) == (argc == 4));
+	if (repeat || navigation || view_form)
 		check_repeat_keymap(argv[3]);
 	if (audio)
 		audio_listener = fplinux_ui_frame_listen_session(argv[3]);
@@ -4254,6 +4543,8 @@ int main(int argc, char **argv)
 		if (navigation)
 			return fplinux_ui_test_navigation_client(control[1],
 								 argv[1]);
+		if (view_form)
+			return run_view_form_application(control[1]);
 		if (!strncmp(argv[1], "runtime-", 8))
 			return run_runtime_application(control[1], argv[1]);
 		if (marquee)
@@ -4269,14 +4560,16 @@ int main(int argc, char **argv)
 		fplinux_ui_frame_init_xrgb8888(&compositor, wayland[0], 240,
 					       320, NULL);
 	else
-		fplinux_ui_frame_init(&compositor, wayland[0], 240, 320,
-				      repeat || navigation ? argv[3] : NULL);
+		fplinux_ui_frame_init(
+			&compositor, wayland[0], 240, 320,
+			repeat || navigation || view_form ? argv[3] : NULL);
 	if (!strcmp(argv[1], "runtime-early-close")) {
 		protocol_logger = wl_display_add_protocol_logger(
 			compositor.display, close_during_open, &early_close);
 		assert(protocol_logger);
 	}
 	compositor.release_frames = repeat || media || navigation || marquee ||
+				    view_form ||
 				    !strncmp(argv[1], "runtime-", 8) ||
 				    !strcmp(argv[1], "legends") ||
 				    !strcmp(argv[1], "close-decisions") ||
@@ -4294,7 +4587,7 @@ int main(int argc, char **argv)
 	    strcmp(argv[1], "text-decimal-any"))
 		strcpy(config.locale, "ru");
 	if (!strcmp(argv[1], "storage-api") || !strcmp(argv[1], "legends") ||
-	    !strcmp(argv[1], "damage-mode-hold") || navigation)
+	    !strcmp(argv[1], "damage-mode-hold") || navigation || view_form)
 		config.mode = FPLINUX_UI_SESSION_INTEGRATED;
 	strcpy(config.input_locale, "en");
 	config.audio = config.vibration =
@@ -4344,6 +4637,8 @@ int main(int argc, char **argv)
 		else if (navigation)
 			fplinux_ui_test_navigation_check(&compositor, session,
 							 control[0], argv[1]);
+		else if (view_form)
+			check_view_form(&compositor, control[0]);
 		else if (audio)
 			check_media_audio(&compositor, audio_listener,
 					  control[0], &audio_peer,

@@ -171,14 +171,23 @@ enum frame_ack_slot {
 	FRAME_ACK_COUNT,
 };
 
+struct fd_watch {
+	int fd;
+	short events;
+	fplinux_ui_fd_cb callback;
+	void *context;
+	uint64_t generation;
+};
+
 struct fplinux_ui {
 	int session_fd;
 	int width;
 	int height;
-	int watch_fd;
-	short watch_events;
-	fplinux_ui_fd_cb watch_callback;
-	void *watch_context;
+	struct fd_watch *watches;
+	struct pollfd *watch_poll;
+	uint64_t *watch_snapshot;
+	size_t watch_count;
+	size_t watch_capacity;
 	uint64_t watch_generation;
 	fplinux_ui_event_cb callback;
 	void *context;
@@ -2112,7 +2121,6 @@ struct fplinux_ui *fplinux_ui_open(const char *app_id,
 	if (!ui)
 		return NULL;
 	ui->session_fd = -1;
-	ui->watch_fd = -1;
 	ui->callback = callback;
 	ui->context = context;
 	ui->visible = true;
@@ -2267,17 +2275,16 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		request_close(ui);
 	}
 	while (!ui->quit && !ui->failed) {
-		struct pollfd descriptors[4] = {
+		struct pollfd base[3] = {
 			{ .fd = wl_display_get_fd(ui->wayland),
 			  .events = POLLIN },
 			{ .fd = ui->session_fd, .events = POLLIN },
-			{ .fd = ui->watch_fd, .events = ui->watch_events },
 			{ .fd = -1, .events = POLLIN },
 		};
+		struct pollfd *descriptors;
+		size_t watch_count;
 		uint32_t timeout_ms;
-		uint64_t watch_generation;
-		fplinux_ui_fd_cb watch_callback;
-		void *watch_context;
+		short audio_events;
 		int received;
 
 		if (stop_signal) {
@@ -2324,7 +2331,7 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 				ui->failed = true;
 				break;
 			}
-			descriptors[0].events |= POLLOUT;
+			base[0].events |= POLLOUT;
 		} else if (!flush_legends(ui)) {
 			/*
 			 * The session announces a READY application with the
@@ -2348,14 +2355,20 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 				"fplinux-ui: READY sent after first Wayland flush\n");
 		}
 		/* LVGL refresh timers sleep between frames; no fixed busy polling. */
-		descriptors[2].fd = ui->watch_fd;
-		descriptors[2].events = ui->watch_events;
-		watch_generation = ui->watch_generation;
-		watch_callback = ui->watch_callback;
-		watch_context = ui->watch_context;
-		descriptors[3].fd = fplinux_audio_client_fd(ui->audio_client);
+		watch_count = ui->watch_count;
+		base[2].fd = fplinux_audio_client_fd(ui->audio_client);
+		descriptors = watch_count ? ui->watch_poll : base;
+		if (watch_count)
+			memcpy(descriptors, base, sizeof(base));
+		for (size_t i = 0; i < watch_count; ++i) {
+			descriptors[i + 3] = (struct pollfd){
+				.fd = ui->watches[i].fd,
+				.events = ui->watches[i].events,
+			};
+			ui->watch_snapshot[i] = ui->watches[i].generation;
+		}
 		received = poll(
-			descriptors, 4,
+			descriptors, watch_count + 3,
 			timeout_ms == LV_NO_TIMER_READY ? -1 : (int)timeout_ms);
 		if (received < 0) {
 			if (errno == EINTR)
@@ -2368,17 +2381,31 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 			ui->failed = true;
 			break;
 		}
+		audio_events = descriptors[2].revents;
 		if ((descriptors[0].revents & POLLIN) && !read_wayland(ui))
 			ui->failed = true;
 		if (ui->quit || ui->failed)
 			break;
-		if (descriptors[3].revents)
+		if (audio_events)
 			fplinux_audio_client_dispatch(ui->audio_client,
-						      descriptors[3].revents);
-		if (!ui->quit && descriptors[2].revents && watch_callback &&
-		    watch_generation == ui->watch_generation)
-			watch_callback(ui, descriptors[2].fd,
-				       descriptors[2].revents, watch_context);
+						      audio_events);
+		for (size_t i = 0; i < watch_count && !ui->quit; ++i) {
+			int fd = ui->watch_poll[i + 3].fd;
+			short events = ui->watch_poll[i + 3].revents;
+
+			if (!events)
+				continue;
+			for (size_t j = 0; j < ui->watch_count; ++j) {
+				struct fd_watch watch = ui->watches[j];
+
+				if (watch.fd == fd &&
+				    watch.generation == ui->watch_snapshot[i]) {
+					watch.callback(ui, fd, events,
+						       watch.context);
+					break;
+				}
+			}
+		}
 	}
 	if (ui->failed)
 		request_close(ui);
@@ -2451,6 +2478,9 @@ void fplinux_ui_close(struct fplinux_ui *ui)
 		sigaction(SIGTERM, &ui->saved_sigterm, NULL);
 		sigaction(SIGINT, &ui->saved_sigint, NULL);
 	}
+	free(ui->watches);
+	free(ui->watch_poll);
+	free(ui->watch_snapshot);
 	free(ui);
 }
 
@@ -2629,14 +2659,72 @@ const char *fplinux_ui_storage_error(struct fplinux_storage_result result)
 	return dgettext(FPLINUX_UI_TEXT_DOMAIN, message);
 }
 
-void fplinux_ui_watch_fd(struct fplinux_ui *ui, int fd, short events,
+bool fplinux_ui_watch_fd(struct fplinux_ui *ui, int fd, short events,
 			 fplinux_ui_fd_cb callback, void *context)
 {
-	ui->watch_fd = fd;
-	ui->watch_events = events;
-	ui->watch_callback = callback;
-	ui->watch_context = context;
-	++ui->watch_generation;
+	size_t index;
+
+	if (!ui || fd < 0 || !callback) {
+		errno = EINVAL;
+		return false;
+	}
+	for (index = 0; index < ui->watch_count; ++index)
+		if (ui->watches[index].fd == fd)
+			break;
+	if (index == ui->watch_count && index == ui->watch_capacity) {
+		size_t capacity = ui->watch_capacity ? ui->watch_capacity * 2 :
+						       4;
+		struct fd_watch *watches;
+		struct pollfd *poll_fds;
+		uint64_t *snapshot;
+
+		if (capacity < ui->watch_capacity ||
+		    capacity > SIZE_MAX / sizeof(*watches) ||
+		    capacity > SIZE_MAX / sizeof(*snapshot) ||
+		    capacity > SIZE_MAX / sizeof(*poll_fds) - 3) {
+			errno = ENOMEM;
+			return false;
+		}
+		watches = realloc(ui->watches, capacity * sizeof(*watches));
+		if (!watches)
+			return false;
+		ui->watches = watches;
+		poll_fds = realloc(ui->watch_poll,
+				   (capacity + 3) * sizeof(*poll_fds));
+		if (!poll_fds)
+			return false;
+		ui->watch_poll = poll_fds;
+		snapshot = realloc(ui->watch_snapshot,
+				   capacity * sizeof(*snapshot));
+		if (!snapshot)
+			return false;
+		ui->watch_snapshot = snapshot;
+		ui->watch_capacity = capacity;
+	}
+	if (index == ui->watch_count)
+		++ui->watch_count;
+	ui->watches[index] = (struct fd_watch){
+		.fd = fd,
+		.events = events,
+		.callback = callback,
+		.context = context,
+		.generation = ++ui->watch_generation,
+	};
+	return true;
+}
+
+void fplinux_ui_unwatch_fd(struct fplinux_ui *ui, int fd)
+{
+	if (!ui)
+		return;
+	for (size_t i = 0; i < ui->watch_count; ++i) {
+		if (ui->watches[i].fd == fd) {
+			--ui->watch_count;
+			memmove(&ui->watches[i], &ui->watches[i + 1],
+				(ui->watch_count - i) * sizeof(*ui->watches));
+			return;
+		}
+	}
 }
 
 lv_obj_t *fplinux_ui_screen(struct fplinux_ui *ui)

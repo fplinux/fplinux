@@ -6,6 +6,7 @@
 
 #include <fplinux/fplinux-gettext.h>
 #include <fplinux/fplinux-ui.h>
+#include <fplinux/fplinux-ui-file-picker.h>
 #include <fplinux/fplinux-ui-menu.h>
 #include <fplinux/fplinux-ui-screen.h>
 #include <fplinux/fplinux-ui-storage.h>
@@ -37,7 +38,6 @@ enum command {
 	COMMAND_CONFIRM_DELETE,
 	COMMAND_COPY,
 	COMMAND_MOVE,
-	COMMAND_PASTE,
 	COMMAND_SAVE_NAME,
 	COMMAND_CANCEL,
 	COMMAND_SEARCH,
@@ -103,7 +103,7 @@ struct files_folder {
 struct files_app {
 	struct fplinux_ui *ui;
 	struct fplinux_ui_screen *places;
-	struct fplinux_ui_screen *picker_places;
+	struct fplinux_ui_file_picker *file_picker;
 	/* The wait's busy alert, until the end of the wait. */
 	struct fplinux_ui_screen *busy;
 	struct fplinux_ui_screen *name_box;
@@ -121,6 +121,11 @@ struct files_app {
 	struct fplinux_volume_snapshot volumes;
 	/* The rows in the current Places list, including while it is covered. */
 	struct fplinux_volume_snapshot places_volumes;
+	/* Results arriving during a transfer are delivered when its picker resumes. */
+	struct fplinux_volume_result picker_deferred_request;
+	struct fplinux_volume_result picker_deferred_latest;
+	bool picker_has_deferred_request;
+	bool picker_has_deferred_latest;
 	lv_timer_t *places_update;
 	uint32_t storage_request;
 	enum fplinux_volume_operation storage_operation;
@@ -143,6 +148,7 @@ struct files_app {
 	char selected[FPLINUX_FILES_PATH_MAX];
 	char source[FPLINUX_FILES_PATH_MAX];
 	char destination[FPLINUX_FILES_PATH_MAX];
+	char destination_directory[FPLINUX_FILES_PATH_MAX];
 	char destination_name[FPLINUX_FILES_NAME_MAX + 1];
 };
 
@@ -491,14 +497,37 @@ static void free_folders(struct files_folder *folder)
 
 static void cancel_picker(struct files_app *app)
 {
+	if (app->file_picker) {
+		struct fplinux_ui_file_picker *picker = app->file_picker;
+
+		app->file_picker = NULL;
+		fplinux_ui_file_picker_close(picker);
+	}
 	pop_to(app, shown_folder(app->origin));
-	free_folders(app->folder);
 	app->folder = app->origin;
 	app->origin = NULL;
 	app->picker = false;
-	app->picker_places = NULL;
 	app->name_box = NULL;
 	app->source[0] = '\0';
+	app->picker_has_deferred_request = false;
+	app->picker_has_deferred_latest = false;
+}
+
+static void resume_picker_storage(struct files_app *app)
+{
+	if (!app->file_picker)
+		return;
+	if (app->picker_has_deferred_request)
+		fplinux_ui_file_picker_storage_result(
+			app->file_picker, &app->picker_deferred_request);
+	if (app->picker_has_deferred_latest &&
+	    (!app->picker_has_deferred_request ||
+	     app->picker_deferred_latest.request_id !=
+		     app->picker_deferred_request.request_id))
+		fplinux_ui_file_picker_storage_result(
+			app->file_picker, &app->picker_deferred_latest);
+	app->picker_has_deferred_request = false;
+	app->picker_has_deferred_latest = false;
 }
 
 static size_t entry_index(struct files_folder *folder,
@@ -531,7 +560,7 @@ static void focused(struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
 	}
 	folder->command_screen = screen;
 	folder->command_row = row;
-	if (app->picker || index == SIZE_MAX)
+	if (index == SIZE_MAX)
 		return;
 	entry = &folder->directory.entries[index];
 	add_item(app, screen, row, COMMAND_DETAILS,
@@ -608,30 +637,17 @@ static void attach_folder_commands(struct files_folder *folder,
 
 	add_command(app, screen, COMMAND_BACK, FPLINUX_UI_COMMAND_BACK, NULL,
 		    0);
-	if (app->picker) {
-		const struct fplinux_ui_command choose = {
-			.id = COMMAND_PASTE,
-			.type = FPLINUX_UI_COMMAND_SCREEN,
-			.label = app->move ? _("Move here") : _("Copy here"),
-			.short_label = _("Here"),
-			.keep_visible = true,
-		};
-
-		fplinux_ui_screen_add_command(screen, &choose);
-	} else {
-		add_command(app, screen, COMMAND_PLACES,
-			    FPLINUX_UI_COMMAND_SCREEN, _("Places"), 20);
-		add_command(app, screen, COMMAND_REFRESH,
-			    FPLINUX_UI_COMMAND_SCREEN, _("Refresh"), 21);
-		add_command(app, screen, COMMAND_SEARCH,
-			    FPLINUX_UI_COMMAND_SCREEN, _("Find in folder"), 22);
-		if (!folder->read_only && !folder->system)
-			add_command(app, screen, COMMAND_NEW_FOLDER,
-				    FPLINUX_UI_COMMAND_SCREEN, _("New folder"),
-				    23);
-		add_command(app, screen, COMMAND_HELP, FPLINUX_UI_COMMAND_HELP,
-			    NULL, 99);
-	}
+	add_command(app, screen, COMMAND_PLACES, FPLINUX_UI_COMMAND_SCREEN,
+		    _("Places"), 20);
+	add_command(app, screen, COMMAND_REFRESH, FPLINUX_UI_COMMAND_SCREEN,
+		    _("Refresh"), 21);
+	add_command(app, screen, COMMAND_SEARCH, FPLINUX_UI_COMMAND_SCREEN,
+		    _("Find in folder"), 22);
+	if (!folder->read_only && !folder->system)
+		add_command(app, screen, COMMAND_NEW_FOLDER,
+			    FPLINUX_UI_COMMAND_SCREEN, _("New folder"), 23);
+	add_command(app, screen, COMMAND_HELP, FPLINUX_UI_COMMAND_HELP, NULL,
+		    99);
 	fplinux_ui_screen_set_listener(screen, folder_command, NULL, app);
 }
 
@@ -690,11 +706,8 @@ static struct fplinux_ui_screen *build_folder(struct files_folder *folder)
 	if (!folder->rows)
 		return NULL;
 	folder->count = 0;
-	for (size_t i = 0; i < folder->directory.count; i++) {
-		if (!app->picker || folder->directory.entries[i].kind ==
-					    FPLINUX_FILES_KIND_DIRECTORY)
-			folder->rows[folder->count++] = i;
-	}
+	for (size_t i = 0; i < folder->directory.count; i++)
+		folder->rows[folder->count++] = i;
 	display_text(label, title, sizeof(title));
 	if (folder->count) {
 		screen = fplinux_ui_list_new_virtual(app->ui, title,
@@ -705,10 +718,7 @@ static struct fplinux_ui_screen *build_folder(struct files_folder *folder)
 		screen = fplinux_ui_form_new(app->ui, title);
 		if (screen)
 			fplinux_ui_form_append_string(
-				screen, NULL,
-				app->picker ?
-					_("No subfolders. Select this folder with the left key.") :
-					_("This folder is empty."));
+				screen, NULL, _("This folder is empty."));
 	}
 	if (!screen)
 		return NULL;
@@ -1015,6 +1025,8 @@ static void name_command(struct fplinux_ui *ui,
 	if (id == COMMAND_CANCEL) {
 		app->name_box = NULL;
 		fplinux_ui_go_back(ui);
+		if (app->naming == NAMING_DESTINATION)
+			resume_picker_storage(app);
 		return;
 	}
 	if (id != COMMAND_SAVE_NAME)
@@ -1024,7 +1036,10 @@ static void name_command(struct fplinux_ui *ui,
 		show_error(app, EINVAL);
 		return;
 	}
-	if (fplinux_files_child_path(app->folder->path, name, destination,
+	if (fplinux_files_child_path(app->naming == NAMING_DESTINATION ?
+					     app->destination_directory :
+					     app->folder->path,
+				     name, destination,
 				     sizeof(destination)) < 0) {
 		show_error(app, errno);
 		return;
@@ -1418,18 +1433,13 @@ static void job_event(struct fplinux_ui *ui, int fd, short events,
 }
 
 /* The system's own cards can be neither opened nor connected nor ejected. */
-static bool shows_volume(const struct files_app *app,
-			 const struct fplinux_volume *volume)
+static bool shows_volume(const struct fplinux_volume *volume)
 {
-	if (volume->state == FPLINUX_VOLUME_PROTECTED)
-		return false;
-	return !app->picker ||
-	       (volume->state == FPLINUX_VOLUME_MOUNTED && !volume->read_only);
+	return volume->state != FPLINUX_VOLUME_PROTECTED;
 }
 
 static const struct fplinux_volume *
-place_volume(const struct files_app *app,
-	     const struct fplinux_volume_snapshot *snapshot, size_t row)
+place_volume(const struct fplinux_volume_snapshot *snapshot, size_t row)
 {
 	if (!row)
 		return NULL;
@@ -1437,7 +1447,7 @@ place_volume(const struct files_app *app,
 	for (size_t i = 0; i < snapshot->count; i++) {
 		const struct fplinux_volume *volume = &snapshot->volumes[i];
 
-		if (!shows_volume(app, volume))
+		if (!shows_volume(volume))
 			continue;
 		if (!row--)
 			return volume;
@@ -1447,7 +1457,7 @@ place_volume(const struct files_app *app,
 
 static const struct fplinux_volume *volume_at(struct files_app *app, size_t row)
 {
-	return place_volume(app, &app->places_volumes, row);
+	return place_volume(&app->places_volumes, row);
 }
 
 static size_t place_row(struct files_app *app, uint32_t id)
@@ -1520,15 +1530,12 @@ static void places_command(struct fplinux_ui *ui,
 	const struct fplinux_volume *volume = volume_at(app, row);
 
 	if (id == COMMAND_BACK) {
-		if (app->picker)
-			cancel_picker(app);
-		else
-			fplinux_ui_back(ui);
+		fplinux_ui_back(ui);
 	} else if (id == COMMAND_HELP) {
 		show_help(app);
 	} else if (id == COMMAND_REFRESH) {
 		request_storage(app, FPLINUX_VOLUME_REFRESH, 0);
-	} else if (id == COMMAND_SYSTEM && !app->picker) {
+	} else if (id == COMMAND_SYSTEM) {
 		open_folder(app, "/", "/", 0, true, true, NULL, FOLDER_CHILD);
 	} else if ((id == COMMAND_EJECT || id == COMMAND_CONNECT) && volume) {
 		change_volume(app,
@@ -1566,7 +1573,7 @@ static void places_focused(struct fplinux_ui *ui,
 						      COMMAND_CONNECT);
 		fplinux_ui_screen_remove_item_command(screen, i, COMMAND_EJECT);
 	}
-	if (app->picker || !volume)
+	if (!volume)
 		return;
 	/* The row's own OK command replaces Open on a card to connect. */
 	if (volume->state == FPLINUX_VOLUME_AVAILABLE)
@@ -1601,7 +1608,7 @@ static void fill_places(struct files_app *app, struct fplinux_ui_screen *screen)
 	for (size_t i = 0; i < app->volumes.count; i++) {
 		const struct fplinux_volume *volume = &app->volumes.volumes[i];
 
-		if (!shows_volume(app, volume))
+		if (!shows_volume(volume))
 			continue;
 		set_place(app, screen, row++, _("Memory card"),
 			  volume_detail(volume), "card");
@@ -1614,24 +1621,19 @@ static void fill_places(struct files_app *app, struct fplinux_ui_screen *screen)
 static struct fplinux_ui_screen *new_places(struct files_app *app)
 {
 	struct fplinux_ui_screen *screen = fplinux_ui_list_new(
-		app->ui,
-		app->picker ? (app->move ? _("Move to") : _("Copy to")) :
-			      _("Files"),
-		FPLINUX_UI_LIST_IMPLICIT);
+		app->ui, _("Files"), FPLINUX_UI_LIST_IMPLICIT);
 
 	if (!screen)
 		return NULL;
 	fill_places(app, screen);
-	if (!app->picker) {
-		add_command(app, screen, COMMAND_SYSTEM,
-			    FPLINUX_UI_COMMAND_SCREEN, _("System files"), 11);
-		add_command(app, screen, COMMAND_REFRESH,
-			    FPLINUX_UI_COMMAND_SCREEN, _("Refresh"), 10);
-		add_command(app, screen, COMMAND_HELP, FPLINUX_UI_COMMAND_HELP,
-			    NULL, 20);
-	}
-	add_command(app, screen, COMMAND_BACK, FPLINUX_UI_COMMAND_BACK,
-		    app->picker ? _("Cancel") : NULL, 0);
+	add_command(app, screen, COMMAND_SYSTEM, FPLINUX_UI_COMMAND_SCREEN,
+		    _("System files"), 11);
+	add_command(app, screen, COMMAND_REFRESH, FPLINUX_UI_COMMAND_SCREEN,
+		    _("Refresh"), 10);
+	add_command(app, screen, COMMAND_HELP, FPLINUX_UI_COMMAND_HELP, NULL,
+		    20);
+	add_command(app, screen, COMMAND_BACK, FPLINUX_UI_COMMAND_BACK, NULL,
+		    0);
 	fplinux_ui_list_set_select_label(screen, _("Open"));
 	fplinux_ui_screen_set_listener(screen, places_command, NULL, app);
 	fplinux_ui_list_set_focus_listener(screen, places_focused, app);
@@ -1657,7 +1659,6 @@ static void show_places(struct files_app *app)
 	app->folder = NULL;
 	app->origin = NULL;
 	app->name_box = NULL;
-	app->picker_places = NULL;
 	app->picker = false;
 	fplinux_files_job_reset(&app->job);
 	screen = new_places(app);
@@ -1681,7 +1682,7 @@ static bool places_unchanged(struct files_app *app)
 	for (size_t row = 1;; row++) {
 		const struct fplinux_volume *old = volume_at(app, row);
 		const struct fplinux_volume *next =
-			place_volume(app, &app->volumes, row);
+			place_volume(&app->volumes, row);
 
 		if (!old || !next)
 			return old == next;
@@ -1694,8 +1695,7 @@ static bool places_unchanged(struct files_app *app)
 /* Keep the screen and menu; focus follows the volume ID or the old row. */
 static void refresh_places(struct files_app *app)
 {
-	struct fplinux_ui_screen *screen = app->picker ? app->picker_places :
-							 app->places;
+	struct fplinux_ui_screen *screen = app->places;
 	size_t row = fplinux_ui_list_get_focused(screen);
 	const struct fplinux_volume *volume = volume_at(app, row);
 	uint32_t focus = volume ? volume->id : 0;
@@ -1729,9 +1729,7 @@ static void refresh_places(struct files_app *app)
 
 static bool places_current(const struct files_app *app)
 {
-	return !app->folder &&
-	       fplinux_ui_current(app->ui) ==
-		       (app->picker ? app->picker_places : app->places);
+	return !app->folder && fplinux_ui_current(app->ui) == app->places;
 }
 
 static void refresh_places_later(lv_timer_t *timer)
@@ -1759,6 +1757,19 @@ static void storage_result(struct fplinux_ui *ui,
 	struct files_app *app = context;
 
 	(void)ui;
+	if (app->file_picker) {
+		if (app->job.active || app->waiting) {
+			if (result->request_id != app->storage_request) {
+				app->picker_deferred_request = *result;
+				app->picker_has_deferred_request = true;
+			}
+			app->picker_deferred_latest = *result;
+			app->picker_has_deferred_latest = true;
+		} else {
+			fplinux_ui_file_picker_storage_result(app->file_picker,
+							      result);
+		}
+	}
 	if (result->request_id != app->storage_request)
 		return;
 	app->storage_request = 0;
@@ -1788,6 +1799,34 @@ static void storage_result(struct fplinux_ui *ui,
 		refresh_places(app);
 	if (result->error && result->error != EOPNOTSUPP)
 		show_error(app, result->error);
+}
+
+static void picker_result(struct fplinux_ui_file_picker *picker,
+			  enum fplinux_ui_file_picker_status status,
+			  const char *path, int error, void *context)
+{
+	struct files_app *app = context;
+
+	(void)picker;
+	if (status == FPLINUX_UI_FILE_PICKER_CANCELLED) {
+		cancel_picker(app);
+		return;
+	}
+	if (status == FPLINUX_UI_FILE_PICKER_ERROR) {
+		cancel_picker(app);
+		show_error(app, error);
+		return;
+	}
+	snprintf(app->destination_directory, sizeof(app->destination_directory),
+		 "%s", path);
+	if (fplinux_files_child_path(path, app->destination_name,
+				     app->destination,
+				     sizeof(app->destination)) < 0) {
+		show_error(app, errno);
+		return;
+	}
+	start_mutation(app, app->move ? FPLINUX_FILES_MOVE : FPLINUX_FILES_COPY,
+		       app->source, app->destination);
 }
 
 static void folder_command(struct fplinux_ui *ui,
@@ -1834,18 +1873,6 @@ static void folder_command(struct fplinux_ui *ui,
 		show_name(app, NAMING_MKDIR, NULL);
 		return;
 	}
-	if (id == COMMAND_PASTE) {
-		if (fplinux_files_child_path(
-			    folder->path, app->destination_name,
-			    app->destination, sizeof(app->destination)) < 0)
-			show_error(app, errno);
-		else
-			start_mutation(app,
-				       app->move ? FPLINUX_FILES_MOVE :
-						   FPLINUX_FILES_COPY,
-				       app->source, app->destination);
-		return;
-	}
 	row = fplinux_ui_screen_get_command_item(screen);
 	if (row == SIZE_MAX)
 		row = fplinux_ui_list_get_focused(screen);
@@ -1886,7 +1913,17 @@ static void folder_command(struct fplinux_ui *ui,
 		confirm_delete(app, entry->name);
 		break;
 	case COMMAND_COPY:
-	case COMMAND_MOVE:
+	case COMMAND_MOVE: {
+		struct fplinux_ui_file_picker_options options = {
+			.mode = FPLINUX_UI_FILE_PICKER_FOLDER,
+			.home = app->home,
+			.title = id == COMMAND_MOVE ? _("Move to") :
+						      _("Copy to"),
+			.folder_action = id == COMMAND_MOVE ? _("Move here") :
+							      _("Copy here"),
+			.writable = true,
+		};
+
 		app->move = id == COMMAND_MOVE;
 		app->picker = true;
 		snprintf(app->source, sizeof(app->source), "%s", path);
@@ -1894,15 +1931,16 @@ static void folder_command(struct fplinux_ui *ui,
 			 "%s", entry->name);
 		app->origin = folder;
 		app->folder = NULL;
-		app->picker_places = new_places(app);
-		if (app->picker_places)
-			fplinux_ui_push(ui, app->picker_places);
-		else {
+		app->file_picker = fplinux_ui_file_picker_open(
+			ui, &options, picker_result, app);
+		if (!app->file_picker) {
 			app->folder = app->origin;
 			app->origin = NULL;
 			app->picker = false;
+			show_error(app, errno);
 		}
 		break;
+	}
 	default:
 		break;
 	}
@@ -2036,11 +2074,19 @@ int main(int argc, char **argv)
 	}
 	fplinux_ui_set_close_handler(app.ui, prepare_close, &app);
 	fplinux_ui_set_storage_handler(app.ui, storage_result, &app);
-	fplinux_ui_watch_fd(app.ui, app.job.pipe[0], POLLIN, job_event, &app);
+	if (!fplinux_ui_watch_fd(app.ui, app.job.pipe[0], POLLIN, job_event,
+				 &app)) {
+		perror("fplinux-files: watch worker");
+		fplinux_ui_close(app.ui);
+		fplinux_files_job_close(&app.job);
+		return 1;
+	}
 	show_places(&app);
 	request_storage(&app, FPLINUX_VOLUME_REFRESH, 0);
 	result = fplinux_ui_run(app.ui);
-	fplinux_ui_watch_fd(app.ui, -1, 0, NULL, NULL);
+	fplinux_ui_unwatch_fd(app.ui, app.job.pipe[0]);
+	if (app.file_picker)
+		fplinux_ui_file_picker_close(app.file_picker);
 	fplinux_files_job_close(&app.job);
 	if (app.places_update)
 		lv_timer_delete(app.places_update);

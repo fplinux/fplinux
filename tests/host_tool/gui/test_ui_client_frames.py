@@ -58,6 +58,7 @@ def client_frames(
         "fplinux-audio-client.c",
         "fplinux-ui-frame.c",
         "fplinux-ui-prefs.c",
+        "fplinux-ui-view-settings.c",
         "fplinux-ui-session.c",
         "fplinux-ui-text.c",
         "fplinux-ui-text-model.c",
@@ -140,6 +141,23 @@ def test_runtime_navigation_preserves_application_ownership_and_runtime_choices(
     assert result.stdout.endswith(f"stack-{scenario}: ok\n")
 
 
+def test_view_settings_choices_use_real_form_and_keyboard(
+    client_frames: Path, tmp_path: Path
+) -> None:
+    result = run_process(
+        [
+            str(client_frames),
+            "view-form",
+            str(tmp_path / "session.sock"),
+            str(ROOT / "tests/host_tool/gui/repeat-keymap.xkb"),
+        ],
+        name="exercise runtime view choices on a real form",
+        timeout=15,
+        check=True,
+    )
+    assert result.stdout.endswith("view-form: ok\n")
+
+
 @pytest.mark.parametrize("scenario", ["fast", "slow", "cancel", "question", "legends"])
 def test_wait_keeps_origin_and_shows_busy_alert_only_for_long_work(
     client_frames: Path, tmp_path: Path, scenario: str
@@ -174,6 +192,10 @@ def test_wait_keeps_origin_and_shows_busy_alert_only_for_long_work(
         "document-self-reply",
         "watch-replace",
         "watch-reuse",
+        "multi-both",
+        "multi-remove",
+        "multi-update",
+        "multi-reuse",
     ],
 )
 def test_runtime_lifecycle_delivers_only_constructed_active_callbacks(

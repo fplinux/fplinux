@@ -948,7 +948,7 @@ void fplinux_ui_quit(struct fplinux_ui *instance)
 	ui.quit = true;
 }
 
-void fplinux_ui_watch_fd(struct fplinux_ui *instance, int fd, short events,
+bool fplinux_ui_watch_fd(struct fplinux_ui *instance, int fd, short events,
 			 fplinux_ui_fd_cb callback, void *context)
 {
 	assert(instance == &ui);
@@ -956,6 +956,18 @@ void fplinux_ui_watch_fd(struct fplinux_ui *instance, int fd, short events,
 	ui.watched_events = events;
 	ui.fd_callback = callback;
 	ui.fd_context = context;
+	return true;
+}
+
+void fplinux_ui_unwatch_fd(struct fplinux_ui *instance, int fd)
+{
+	assert(instance == &ui);
+	if (fd != ui.watched_fd)
+		return;
+	ui.watched_fd = -1;
+	ui.watched_events = 0;
+	ui.fd_callback = NULL;
+	ui.fd_context = NULL;
 }
 
 int fplinux_ui_width(const struct fplinux_ui *instance)

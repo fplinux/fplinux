@@ -208,9 +208,10 @@ static void add_command(struct fplinux_ui_screen *screen, int id,
 
 static void close_pipe(struct app *app)
 {
-	fplinux_ui_watch_fd(app->ui, -1, 0, NULL, NULL);
-	if (app->output_fd >= 0)
+	if (app->output_fd >= 0) {
+		fplinux_ui_unwatch_fd(app->ui, app->output_fd);
 		close(app->output_fd);
+	}
 	if (app->input_fd >= 0)
 		close(app->input_fd);
 	app->output_fd = app->input_fd = -1;
@@ -1396,7 +1397,7 @@ static void engine_output(struct fplinux_ui *ui, int fd, short events,
 			return;
 		}
 		if (count == 0) {
-			fplinux_ui_watch_fd(app->ui, -1, 0, NULL, NULL);
+			fplinux_ui_unwatch_fd(app->ui, app->output_fd);
 			close(app->output_fd);
 			app->output_fd = -1;
 			if (!app->transport_failure_at)
@@ -1569,9 +1570,9 @@ static void start_engine_document(struct app *app)
 		goto failed;
 	app->saw_end = false;
 	update_tick(app);
-	if (app->child > 0)
-		fplinux_ui_watch_fd(app->ui, app->output_fd, POLLIN,
-				    engine_output, app);
+	if (app->child > 0 && !fplinux_ui_watch_fd(app->ui, app->output_fd,
+						   POLLIN, engine_output, app))
+		goto failed;
 	return;
 failed:
 	if (card >= 0)

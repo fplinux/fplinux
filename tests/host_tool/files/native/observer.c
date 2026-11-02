@@ -8,6 +8,7 @@
 #include <fplinux/fplinux-ui-screen.h>
 #include <assert.h>
 #include <dirent.h>
+#include <errno.h>
 #include <libintl.h>
 #include <stdlib.h>
 #include <string.h>
@@ -98,9 +99,16 @@ DIR *__wrap_fdopendir(int descriptor)
 {
 	const char *directory = getenv("FPLINUX_FILES_SLOW_DIRECTORY");
 	const char *gate = getenv("FPLINUX_FILES_READ_GATE_FD");
+	const char *failed = getenv("FPLINUX_FILES_FAIL_DIRECTORY");
 	struct stat opened, slow;
 	char byte;
 
+	if (failed && fstat(descriptor, &opened) == 0 &&
+	    stat(failed, &slow) == 0 && opened.st_dev == slow.st_dev &&
+	    opened.st_ino == slow.st_ino) {
+		errno = ENOMEM;
+		return NULL;
+	}
 	if (directory && gate && fstat(descriptor, &opened) == 0 &&
 	    stat(directory, &slow) == 0 && opened.st_dev == slow.st_dev &&
 	    opened.st_ino == slow.st_ino)

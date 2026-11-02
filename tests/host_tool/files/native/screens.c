@@ -6,6 +6,7 @@
 #include "ui-frame-peer.h"
 
 #include <assert.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/input-event-codes.h>
@@ -56,6 +57,7 @@ struct capture {
 	uint64_t connect_due_ms;
 	/* Each read of the slow folder waits for one byte from the test. */
 	bool slow_reads;
+	bool fail_reads;
 	int read_gate[2];
 };
 
@@ -376,6 +378,14 @@ static void option(struct capture *capture, const char *text)
 	select_option(capture, text);
 }
 
+static void refresh_places_action(struct capture *capture)
+{
+	if (!strcmp(capture->left, "Refresh"))
+		press(capture, KEY_COMPOSE);
+	else
+		option(capture, "Refresh");
+}
+
 static void save_frame(struct capture *capture, const char *name)
 {
 	char path[1024];
@@ -470,6 +480,12 @@ static void start(struct capture *capture, char **arguments)
 			assert(snprintf(path, sizeof(path), "%s/Files/a-dir",
 					arguments[4]) < (int)sizeof(path));
 			assert(setenv("FPLINUX_FILES_SLOW_DIRECTORY", path,
+				      1) == 0);
+		}
+		if (capture->fail_reads) {
+			assert(snprintf(path, sizeof(path), "%s/Files/a-dir",
+					arguments[4]) < (int)sizeof(path));
+			assert(setenv("FPLINUX_FILES_FAIL_DIRECTORY", path,
 				      1) == 0);
 		}
 		assert(setenv("LANG", "en_US.UTF-8", 1) == 0);
@@ -878,7 +894,7 @@ static void set_card(struct capture *capture)
 	assert(metadata.stx_mask & STATX_MNT_ID);
 	assert(metadata.stx_mnt_id && metadata.stx_mnt_id <= UINT32_MAX);
 	volume->mount_id = (uint32_t)metadata.stx_mnt_id;
-	option(capture, "Refresh");
+	refresh_places_action(capture);
 	wait_conflict_list(capture, "Connected", 2, 0);
 }
 
@@ -1117,6 +1133,127 @@ static void slow_folder(struct capture *capture)
 	puts("files-slow: the busy alert waits, then stays; Back or Cancel keeps the folder");
 }
 
+static void picker_selection(struct capture *capture, bool vxp)
+{
+	press(capture, KEY_ENTER);
+	wait_conflict_list(capture, "My files", 3, 0);
+	assert(has_label(capture, "a-dir"));
+	assert(has_label(capture, "game.JAR"));
+	assert(has_label(capture, "z.vxp"));
+	assert(!has_label(capture, "hidden.txt"));
+	assert(!has_label(capture, "link.jar"));
+	press(capture, KEY_ENTER);
+	wait_label(capture, "This folder is empty.", false);
+	press(capture, KEY_ESC);
+	wait_conflict_list(capture, "My files", 3, 0);
+	move_to(capture, vxp ? 2 : 1);
+	press(capture, KEY_ENTER);
+	wait_label(capture, "Picker closed", false);
+	activate(capture, false, 119);
+	close_and_reap(capture);
+	puts("picker-select: directories and matching regular files; selected path returned");
+}
+
+static void picker_cancel(struct capture *capture, bool slow)
+{
+	if (slow) {
+		press(capture, KEY_ENTER);
+		wait_conflict_list(capture, "My files", 3, 0);
+		press(capture, KEY_ENTER);
+		wait_label(capture, "Reading folder", false);
+		press(capture, KEY_ESC);
+		release_read(capture);
+		wait_reading_gone(capture);
+		wait_conflict_list(capture, "My files", 3, 0);
+		press(capture, KEY_ESC);
+		wait_label(capture, "Files", false);
+	}
+	press(capture, KEY_ESC);
+	wait_label(capture, "Picker closed", false);
+	activate(capture, false, 119);
+	close_and_reap(capture);
+	puts("picker-cancel: cancelled without a selected path");
+}
+
+static void picker_removed_card(struct capture *capture)
+{
+	char path[1024], moved[1024], fd_dir[64], link[512], target[1024];
+	struct dirent *entry;
+	DIR *directory;
+
+	set_card(capture);
+	move_to(capture, 1);
+	press(capture, KEY_ENTER);
+	wait_label(capture, "card-game.jar", false);
+	assert(snprintf(path, sizeof(path), "%s/card", capture->directory) <
+	       (int)sizeof(path));
+	assert(snprintf(moved, sizeof(moved), "%s/card-away",
+			capture->directory) < (int)sizeof(moved));
+	assert(rename(path, moved) == 0);
+	capture->volumes.count = 0;
+	activate(capture, false, 117);
+	wait_label(capture, "The file or storage is no longer available.",
+		   false);
+	press(capture, KEY_ESC);
+	wait_conflict_list(capture, "Files", 1, 0);
+	assert(snprintf(fd_dir, sizeof(fd_dir), "/proc/%ld/fd",
+			(long)capture->application) < (int)sizeof(fd_dir));
+	directory = opendir(fd_dir);
+	assert(directory);
+	while ((entry = readdir(directory))) {
+		ssize_t length;
+
+		if (entry->d_name[0] == '.')
+			continue;
+		assert(snprintf(link, sizeof(link), "%s/%s", fd_dir,
+				entry->d_name) < (int)sizeof(link));
+		length = readlink(link, target, sizeof(target) - 1);
+		if (length < 0)
+			continue;
+		target[length] = '\0';
+		assert(strcmp(target, moved));
+	}
+	closedir(directory);
+	press(capture, KEY_ESC);
+	wait_label(capture, "Picker closed", false);
+	activate(capture, false, 119);
+	close_and_reap(capture);
+	puts("picker-card: removal returns to places and releases the card");
+}
+
+static void picker_connect_and_eject(struct capture *capture)
+{
+	capture->volumes.count = 1;
+	capture->volumes.volumes[0].id = 8;
+	capture->volumes.volumes[0].state = FPLINUX_VOLUME_AVAILABLE;
+	strcpy(capture->volumes.volumes[0].label, "Documents");
+	refresh_places_action(capture);
+	wait_conflict_list(capture, "Select to connect", 2, 0);
+	move_to(capture, 1);
+	press(capture, KEY_ENTER);
+	wait_label(capture, "Connected", false);
+	assert(capture->connect_volume == 8);
+	option(capture, "Safely eject");
+	wait_label(capture, "Select to connect", false);
+	assert(capture->eject_volume == 108);
+	press(capture, KEY_ESC);
+	wait_label(capture, "Picker closed", false);
+	activate(capture, false, 119);
+	close_and_reap(capture);
+	puts("picker-card: connect and eject use the selected volume");
+}
+
+static void picker_error(struct capture *capture)
+{
+	press(capture, KEY_ENTER);
+	wait_conflict_list(capture, "My files", 3, 0);
+	press(capture, KEY_ENTER);
+	wait_label(capture, "Picker closed", false);
+	activate(capture, false, 119);
+	close_and_reap(capture);
+	puts("picker-error: a read allocation failure reports an error");
+}
+
 static void check_directory_menu_actions(const struct capture *capture)
 {
 	static const char *const actions[][2] = {
@@ -1144,12 +1281,28 @@ int main(int argc, char **argv)
 	size_t first;
 
 	assert(argc == 9 || argc == 10);
-	capture.slow_reads = argc == 10 && !strcmp(argv[9], "slow");
+	capture.slow_reads = argc == 10 && (!strcmp(argv[9], "slow") ||
+					    !strcmp(argv[9], "picker-slow"));
+	capture.fail_reads = argc == 10 && !strcmp(argv[9], "picker-error");
 	if (capture.slow_reads)
 		assert(pipe(capture.read_gate) == 0);
 	start(&capture, argv);
 	if (argc == 10) {
-		if (!strcmp(argv[9], "stop"))
+		if (!strcmp(argv[9], "picker-error"))
+			picker_error(&capture);
+		else if (!strcmp(argv[9], "picker-card"))
+			picker_removed_card(&capture);
+		else if (!strcmp(argv[9], "picker-connect"))
+			picker_connect_and_eject(&capture);
+		else if (!strcmp(argv[9], "picker-jar") ||
+			 !strcmp(argv[9], "picker-vxp"))
+			picker_selection(&capture,
+					 !strcmp(argv[9], "picker-vxp"));
+		else if (!strcmp(argv[9], "picker-cancel") ||
+			 !strcmp(argv[9], "picker-slow"))
+			picker_cancel(&capture,
+				      !strcmp(argv[9], "picker-slow"));
+		else if (!strcmp(argv[9], "stop"))
 			stop_and_close(&capture);
 		else if (!strcmp(argv[9], "transitions"))
 			folder_transitions(&capture);

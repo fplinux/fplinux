@@ -105,14 +105,26 @@ static void observer_tick(lv_timer_t *timer)
 	(void)timer;
 }
 
-void __real_fplinux_ui_watch_fd(struct fplinux_ui *ui, int fd, short events,
+bool __real_fplinux_ui_watch_fd(struct fplinux_ui *ui, int fd, short events,
 				fplinux_ui_fd_cb callback, void *context);
 
-void __wrap_fplinux_ui_watch_fd(struct fplinux_ui *ui, int fd, short events,
+bool __wrap_fplinux_ui_watch_fd(struct fplinux_ui *ui, int fd, short events,
 				fplinux_ui_fd_cb callback, void *context)
 {
-	pty_watched = fd >= 0;
-	__real_fplinux_ui_watch_fd(ui, fd, events, callback, context);
+	bool watched =
+		__real_fplinux_ui_watch_fd(ui, fd, events, callback, context);
+
+	if (watched)
+		pty_watched = true;
+	return watched;
+}
+
+void __real_fplinux_ui_unwatch_fd(struct fplinux_ui *ui, int fd);
+
+void __wrap_fplinux_ui_unwatch_fd(struct fplinux_ui *ui, int fd)
+{
+	pty_watched = false;
+	__real_fplinux_ui_unwatch_fd(ui, fd);
 }
 
 void __real_fplinux_terminal_pty_close(struct fplinux_terminal_pty *pty);

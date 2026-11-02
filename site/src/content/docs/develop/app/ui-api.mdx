@@ -7,6 +7,10 @@ source:
   - include/fplinux/fplinux-ui-frame.h
   - include/fplinux/fplinux-ui-audio.h
   - include/fplinux/fplinux-ui-vibration.h
+  - include/fplinux/fplinux-ui-file-picker.h
+  - include/fplinux/fplinux-ui-recent.h
+  - include/fplinux/fplinux-ui-view-settings.h
+  - include/fplinux/fplinux-rgb565.h
 ---
 
 Include the installed headers under `fplinux/` and link with `pkg-config --cflags --libs fplinux-ui`. Use the complete workflow in [Your first application](/fplinux/develop/app/first-app/) before adding custom rendering or media. Headers specify exact argument ranges, return values and error codes; the guides explain how to combine the interfaces.
@@ -21,6 +25,9 @@ Include the installed headers under `fplinux/` and link with `pkg-config --cflag
 | `fplinux-ui-menu.h` | A low-level popup menu for custom content |
 | `fplinux-ui-symbol-picker.h` | Shared centred symbol grid for a custom input consumer |
 | `fplinux-ui-prefs.h`, `fplinux-storage.h` | Preferences and explicit save outcomes |
+| `fplinux-ui-file-picker.h` | File or folder selection through My files and connected storage |
+| `fplinux-ui-recent.h`, `fplinux-ui-view-settings.h` | Recent documents and shared image settings |
+| `fplinux-rgb565.h` | Viewport, scaling, rotation and reverse coordinate mapping |
 | `fplinux-ui-locale.h` | Localized date and number display |
 | `fplinux-ui-frame.h` | Owned RGB565 software frames |
 | `fplinux-ui-audio.h` | Playback streams managed by the system |
@@ -37,9 +44,21 @@ The system, UI library and optional application APKs use the headers and ABI fro
 
 Events are borrowed for the callback. Read their current fields there; do not retain the event pointer. Ignore event types the application does not handle. Theme, metric and glyph pointers belong to the runtime; do not free them or depend on the size of their structures.
 
-Use `fplinux_ui_watch_fd()` for a nonblocking file descriptor that needs attention in the loop. There is one additional watched descriptor; a new watch replaces the old registration. The application owns the descriptor and must unregister it before closing it. Keep callbacks short. Application timers likewise belong to the application unless a helper explicitly documents ownership.
+Use `fplinux_ui_watch_fd()` for nonblocking file descriptors that need attention in the loop. Each descriptor has its own registration; registering the same fd updates that registration. Check the returned boolean for allocation or argument errors. The application owns the descriptor and calls `fplinux_ui_unwatch_fd()` before closing it. Keep callbacks short. Application timers likewise belong to the application unless a helper explicitly documents ownership.
 
 The [lifecycle guide](/fplinux/develop/app/lifecycle/) owns activation, visibility, resize and closing. The [Application state contract](/fplinux/develop/application-state/) owns save results and close decisions; a successful `prefs_set` only changes memory.
+
+## File selection and program preferences
+
+Open `fplinux_ui_file_picker_open()` over the current screen for a file or destination folder. Supply an absolute My files path and, for files, an optional extension filter. The picker copies its options, reads directories asynchronously and uses the existing storage service for connecting and ejecting cards. Forward results from the application's storage handler to `fplinux_ui_file_picker_storage_result()` while it is open.
+
+The callback runs on the UI thread. A selected path is borrowed until it returns; copy it before retaining it. Selection leaves the picker open so the caller can finish a destination operation or report its error. Close it explicitly when finished. Closing invokes no callback. To open a document in another application, pass the selected path to the existing document API; the picker does not choose or launch a handler.
+
+`fplinux_ui_recent` holds up to ten documents without testing whether they are currently accessible. Record a document after accepting it, then store the model in the application's preferences and check the save result. Removing an entry does not remove its file or data. Shared view settings supply scale and rotation fields for a Form. Their setters change memory; callers own persistence and the point at which a running program adopts the values.
+
+For per-program overrides, `fplinux_ui_program_prefs_open()` accepts the runtime's own 64-character lowercase hexadecimal identity key. These preferences are separate from guest save files. The runtime remains responsible for its program identity and guest storage format.
+
+`fplinux_rgb565_viewport_init()` defines a centred image rectangle for fit, original-size or integer scaling with 0°, 90° or 270° rotation. Transform strides are in pixels. `fplinux_rgb565_transform()` writes the visible image and leaves margins and row padding untouched; the caller fills its own background. `fplinux_rgb565_map_point()` reports whether a destination point lies inside the image before returning guest coordinates. These functions do not own frame memory or publish a UI frame.
 
 ## Low-level menus
 

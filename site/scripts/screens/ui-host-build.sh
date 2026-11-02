@@ -59,6 +59,11 @@ ui_host_build_application() {
 		"$ui_host_ui/fplinux-ui.c" "$ui_host_ui/fplinux-ui-session.c" \
 		"$ui_host_ui/fplinux-ui-style.c" \
 		"$ui_host_ui/fplinux-ui-frame.c" \
+		"$ui_host_ui/fplinux-rgb565.c" \
+		"$ui_host_ui/fplinux-files-browse.c" \
+		"$ui_host_ui/fplinux-ui-file-picker.c" \
+		"$ui_host_ui/fplinux-ui-recent.c" \
+		"$ui_host_ui/fplinux-ui-view-settings.c" \
 		"$ui_host_ui/fplinux-audio-client.c" \
 		"$ui_host_ui/fplinux-ui-text.c" "$ui_host_ui/fplinux-ui-text-model.c" \
 		"$ui_host_ui/fplinux-ui-symbol-picker.c" "$ui_host_ui/fplinux-text-input.c" \
@@ -71,7 +76,7 @@ ui_host_build_application() {
 		"$@" \
 		"$ui_host_inputs/xdg-shell-protocol.c" "$ui_host_inputs/fonts"/*.c \
 		"$ui_host_inputs/liblvgl.a" \
-		$(pkg-config --libs wayland-client xkbcommon json-c) -lintl -lm
+		$(pkg-config --libs wayland-client xkbcommon json-c) -lintl -lm -pthread
 }
 
 if [ "${0##*/}" = ui-host-build.sh ]; then

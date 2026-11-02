@@ -1951,9 +1951,15 @@ int main(int argc, char **argv)
 			.context = &app,
 		});
 	if (app.bluetooth) {
-		fplinux_ui_watch_fd(app.ui,
-				    fplinux_bluez_adapter_fd(app.bluetooth),
-				    POLLIN, bluetooth_ready, &app);
+		if (!fplinux_ui_watch_fd(
+			    app.ui, fplinux_bluez_adapter_fd(app.bluetooth),
+			    POLLIN, bluetooth_ready, &app)) {
+			perror("fplinux-settings: watch Bluetooth");
+			lv_timer_delete(app.clock_timer);
+			fplinux_ui_close(app.ui);
+			fplinux_bluez_adapter_close(app.bluetooth);
+			return 1;
+		}
 		fplinux_bluez_adapter_connect(app.bluetooth);
 	}
 	root = create_root(&app);

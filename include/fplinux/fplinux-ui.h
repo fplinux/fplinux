@@ -245,12 +245,16 @@ bool fplinux_ui_document_reply(struct fplinux_ui *ui, uint32_t request_id,
 /* Empty for DURABLE, including an unchanged save. */
 const char *fplinux_ui_storage_error(struct fplinux_storage_result result);
 /*
- * One optional descriptor; fd ownership stays with the caller. A nonnegative
- * fd requires a callback; fd=-1 removes the watch. Replacing a registration
+ * Add or update a nonnegative descriptor on the UI thread. The caller retains
+ * ownership of the fd and must unwatch it before closing it. Updating a watch
  * discards old readiness, including when its descriptor number is reused.
+ * Callbacks may add, update or remove watches. Returns false with EINVAL for
+ * invalid arguments or ENOMEM if the registry cannot grow. Removal of an
+ * absent fd has no effect; closing the UI does not close watched descriptors.
  */
-void fplinux_ui_watch_fd(struct fplinux_ui *ui, int fd, short events,
+bool fplinux_ui_watch_fd(struct fplinux_ui *ui, int fd, short events,
 			 fplinux_ui_fd_cb callback, void *context);
+void fplinux_ui_unwatch_fd(struct fplinux_ui *ui, int fd);
 
 lv_obj_t *fplinux_ui_screen(struct fplinux_ui *ui);
 int fplinux_ui_width(const struct fplinux_ui *ui);

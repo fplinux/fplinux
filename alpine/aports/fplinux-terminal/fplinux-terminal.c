@@ -157,6 +157,12 @@ static void failure_command(struct fplinux_ui *ui,
 	fplinux_ui_quit(ui);
 }
 
+static void unwatch_pty(struct gui_terminal *app)
+{
+	fplinux_ui_unwatch_fd(app->ui, app->pty.fd);
+	fplinux_ui_unwatch_fd(app->ui, app->pty.status_fd);
+}
+
 static void fail(struct gui_terminal *app, const char *text)
 {
 	struct fplinux_ui_screen *alert;
@@ -170,7 +176,7 @@ static void fail(struct gui_terminal *app, const char *text)
 	app->scheduled_ms = 0;
 	close_symbol_picker(app);
 	/* No more shell input or output while the error is being read. */
-	fplinux_ui_watch_fd(app->ui, -1, 0, NULL, NULL);
+	unwatch_pty(app);
 	fplinux_terminal_pty_close(&app->pty);
 	alert = fplinux_ui_alert_new(app->ui, FPLINUX_UI_ALERT_ERROR,
 				     _("Terminal error"), text, 0);
@@ -204,7 +210,7 @@ static void arm_timer(struct gui_terminal *app);
 static void shell_finished(struct gui_terminal *app)
 {
 	app->redraw_ms = 0;
-	fplinux_ui_watch_fd(app->ui, -1, 0, NULL, NULL);
+	unwatch_pty(app);
 	fplinux_terminal_pty_close(&app->pty);
 	if (!fplinux_terminal_session_result(&app->session)) {
 		fplinux_ui_quit(app->ui);
@@ -264,15 +270,20 @@ static void pty_event(struct fplinux_ui *ui, int fd, short events, void *data)
 
 static void update_watch(struct gui_terminal *app)
 {
+	int fd;
+
 	if (app->failed)
 		return;
-	if (app->session.finished) {
-		fplinux_ui_watch_fd(app->ui, -1, 0, NULL, NULL);
+	if (app->session.finished)
 		return;
-	}
-	fplinux_ui_watch_fd(app->ui, fplinux_terminal_session_fd(&app->session),
-			    fplinux_terminal_session_events(&app->session),
-			    pty_event, app);
+	fd = fplinux_terminal_session_fd(&app->session);
+	fplinux_ui_unwatch_fd(app->ui, fd == app->pty.fd ? app->pty.status_fd :
+							   app->pty.fd);
+	if (!fplinux_ui_watch_fd(app->ui, fd,
+				 fplinux_terminal_session_events(&app->session),
+				 pty_event, app))
+		fail(app,
+		     _("The shell connection was lost. Open Terminal again."));
 }
 
 /*
@@ -1119,6 +1130,8 @@ done:
 		lv_timer_delete(app.timer);
 	/* Every exit path closes the master, terminates its job and reaps Bash. */
 	close_symbol_picker(&app);
+	if (app.ui)
+		unwatch_pty(&app);
 	fplinux_terminal_pty_close(&app.pty);
 	fplinux_terminal_destroy(&app.terminal);
 	if (app.ui)

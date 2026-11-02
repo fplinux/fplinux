@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import shutil
 from pathlib import Path
@@ -401,3 +402,58 @@ def test_files_help_returns_before_connecting_to_session(
     assert result.returncode == 0
     assert "Usage: fplinux-files" in result.stdout
     assert result.stderr == ""
+
+
+@pytest.mark.parametrize(
+    ("scenario", "expected"),
+    [
+        ("picker-jar", "selected:Files/game.JAR"),
+        ("picker-vxp", "selected:Files/z.vxp"),
+        ("picker-cancel", "cancelled"),
+        ("picker-slow", "cancelled"),
+        ("picker-card", "cancelled"),
+        ("picker-connect", "cancelled"),
+        ("picker-error", f"error:{errno.ENOMEM}"),
+    ],
+)
+def test_shared_picker_filters_navigates_and_returns_selection_or_cancel(
+    files_native: Path, tmp_path: Path, scenario: str, expected: str
+) -> None:
+    files = tmp_path / "Files"
+    files.mkdir()
+    (files / "a-dir").mkdir()
+    (files / "game.JAR").write_bytes(b"jar")
+    (files / "z.vxp").write_bytes(b"vxp")
+    (files / "hidden.txt").write_bytes(b"not a supported format")
+    (files / "link.jar").symlink_to(files / "game.JAR")
+    card = tmp_path / "card"
+    card.mkdir()
+    (card / "card-game.jar").write_bytes(b"card")
+    result = run_process(
+        [
+            str(files_native / "files-screens"),
+            str(files_native / "picker-app"),
+            str(HERE / "native/keyboard.xkb"),
+            str(tmp_path / "session.sock"),
+            str(tmp_path),
+            "240",
+            "320",
+            "dark",
+            "en",
+            scenario,
+        ],
+        name=f"actual shared picker: {scenario}",
+        env={
+            **os.environ,
+            "FPLINUX_NATIVE_LANGUAGE_DIR": str(ROOT / "alpine/aports/fplinux-language"),
+        },
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    actual = (tmp_path / "result").read_text(encoding="utf-8").strip()
+    if expected.startswith("selected:"):
+        assert actual == f"selected:{tmp_path / expected.removeprefix('selected:')}"
+    else:
+        assert actual == expected
+    if scenario == "picker-card":
+        assert (tmp_path / "card-away/card-game.jar").read_bytes() == b"card"

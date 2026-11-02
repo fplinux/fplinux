@@ -43,6 +43,7 @@ def files_core(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 str(HERE / "core.c"),
                 str(APORT / "files-core.c"),
                 str(APORT / "files-job.c"),
+                str(ROOT / "lib/fplinux/fplinux-files-browse.c"),
                 str(ROOT / "lib/fplinux/fplinux-utf8.c"),
                 "-Wl,--wrap=fsync",
                 "-Wl,--wrap=unlinkat",

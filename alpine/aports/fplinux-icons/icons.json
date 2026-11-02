@@ -693,6 +693,16 @@
       "tile": "terminal",
       "glyph": "terminal-2",
       "install": true
+    },
+    "org.fplinux.phoneme": {
+      "tile": "terminal",
+      "glyph": "coffee",
+      "install": true
+    },
+    "org.fplinux.mre": {
+      "tile": "snake",
+      "glyph": "cpu",
+      "install": true
     }
   }
 }

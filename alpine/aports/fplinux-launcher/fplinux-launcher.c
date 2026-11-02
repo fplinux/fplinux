@@ -2434,14 +2434,19 @@ int main(int argc, char **argv)
 						 LAUNCHER_EVENT_CATALOGUE) &&
 				    desktop;
 	}
-	if (launcher.events_fd >= 0)
-		fplinux_ui_watch_fd(launcher.ui, launcher.events_fd, POLLIN,
-				    launcher_events, &launcher);
+	if (launcher.events_fd >= 0 &&
+	    !fplinux_ui_watch_fd(launcher.ui, launcher.events_fd, POLLIN,
+				 launcher_events, &launcher)) {
+		perror("fplinux-launcher: watch events");
+		result = -1;
+		goto done;
+	}
 	if (launcher.bluetooth)
 		fplinux_bluez_adapter_connect(launcher.bluetooth);
 	scan_applications(&launcher);
 	create_view(&launcher);
 	result = fplinux_ui_run(launcher.ui);
+done:
 	if (launcher.inotify_fd >= 0)
 		close(launcher.inotify_fd);
 	fplinux_ui_close(launcher.ui);

@@ -1645,7 +1645,7 @@ bool fplinux_bluez_adapter_set_powered(struct fplinux_bluez_adapter *adapter,
 	return false;
 }
 
-void fplinux_ui_watch_fd(struct fplinux_ui *ui, int fd, short events,
+bool fplinux_ui_watch_fd(struct fplinux_ui *ui, int fd, short events,
 			 fplinux_ui_fd_cb callback, void *context)
 {
 	(void)fd;
@@ -1653,6 +1653,7 @@ void fplinux_ui_watch_fd(struct fplinux_ui *ui, int fd, short events,
 	(void)callback;
 	(void)context;
 	no_adapter(ui);
+	return false;
 }
 
 struct fplinux_ui_screen *fplinux_ui_wait_begin(struct fplinux_ui *ui,

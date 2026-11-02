@@ -93,3 +93,96 @@ msgstr "Не удалось сохранить изменения"
 
 msgid "Storage input/output error"
 msgstr "Ошибка ввода-вывода хранилища"
+
+msgid "Access denied. Choose another folder."
+msgstr "Нет доступа. Выберите другую папку."
+
+msgid "Connect"
+msgstr "Подключить"
+
+msgid "Connected"
+msgstr "Подключено"
+
+msgid "Connecting…"
+msgstr "Подключение…"
+
+msgid "Eject"
+msgstr "Извлечь"
+
+msgid "Ejecting…"
+msgstr "Извлечение…"
+
+msgid "Files"
+msgstr "Файлы"
+
+msgid "Here"
+msgstr "Сюда"
+
+msgid "Home directory"
+msgstr "Домашняя папка"
+
+msgid "Memory card"
+msgstr "Карта памяти"
+
+msgid "My files"
+msgstr "Мои файлы"
+
+msgid "No subfolders. Select this folder with the left key."
+msgstr "Подпапок нет. Выберите эту папку левой клавишей."
+
+msgid "Not enough memory. Close and try again."
+msgstr "Недостаточно памяти. Закройте и попробуйте снова."
+
+msgid "On the memory card"
+msgstr "На карте памяти"
+
+msgid "Open"
+msgstr "Открыть"
+
+msgid "Please wait…"
+msgstr "Подождите…"
+
+msgid "Read-only"
+msgstr "Только чтение"
+
+msgid "Reading folder"
+msgstr "Чтение папки"
+
+msgid "Refresh"
+msgstr "Обновить"
+
+msgid "Safely eject"
+msgstr "Безопасно извлечь"
+
+msgid "Select to connect"
+msgstr "Выберите для подключения"
+
+msgid "Temporary: lost after reboot"
+msgstr "Временно: до перезагрузки"
+
+msgid "The file name is not valid text."
+msgstr "Недопустимый текст в имени файла."
+
+msgid "The file or storage is no longer available."
+msgstr "Файл или хранилище больше недоступны."
+
+msgid "This folder is empty."
+msgstr "Папка пуста."
+
+msgid "Unsupported format"
+msgstr "Неподдерживаемый формат"
+
+msgid "Scale"
+msgstr "Масштаб"
+
+msgid "Fit"
+msgstr "Вписать"
+
+msgid "Original size"
+msgstr "Исходный размер"
+
+msgid "Integer"
+msgstr "Целый"
+
+msgid "Rotation"
+msgstr "Поворот"

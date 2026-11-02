@@ -11,7 +11,7 @@ The session starts an application from its installed desktop entry. `fplinux_ui_
 
 Create the initial screen promptly. Do not block the UI thread with slow I/O or a long calculation before the first frame. Use short callbacks and the runtime's file-descriptor watch or application-owned timers for continuing work.
 
-`fplinux_ui_watch_fd()` borrows one descriptor and requires a callback for a nonnegative fd; use `fd=-1` to remove it. A replacement registration receives only readiness observed for that registration. Readiness for a previous descriptor or callback is discarded, including when a new descriptor reuses the same number.
+`fplinux_ui_watch_fd()` borrows a nonnegative descriptor and requires a callback. It returns false for invalid arguments or allocation failure. Different descriptors are watched together; registering an existing fd replaces its callback and context. Call `fplinux_ui_unwatch_fd(ui, fd)` before closing that descriptor. Readiness for an old or removed registration is discarded, including when a new descriptor reuses the same number. Closing the UI releases its registrations without closing application-owned descriptors.
 
 ## Activation and visibility
 
