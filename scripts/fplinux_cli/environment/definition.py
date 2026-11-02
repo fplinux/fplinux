@@ -207,6 +207,8 @@ def load_environment_lock(root: Path | None = None) -> dict[str, Any]:
         "weston",
         "mesa-headers",
         "gitleaks",
+        "fpdoom-host",
+        "fpdoom-bootstrap",
     }
     if not isinstance(tools, dict) or set(tools) - names:
         fail(f"environment tool metadata is incomplete: {path}")

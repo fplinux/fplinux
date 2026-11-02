@@ -1,0 +1,21 @@
+--- a/ums9117/usbio.c
++++ b/ums9117/usbio.c
+@@ -98,7 +98,7 @@
+ 	if (!(MEM1(0x20200012) & 1)) return;
+ 
+ 	for (i = 0; i < 8; i++)
+-		buf[i++] = MEM1(0x20200020);
++		buf[i] = MEM1(0x20200020);
+ 
+ 	if (buf[0] & 0x60) {
+ 		MEM1(0x20200012) |= 0x48;
+@@ -194,7 +194,8 @@
+ 
+ 	while (len) {
+ 		if (usb_recv_idx == usb_recv_len)
+-			while (!usb_handler());
++			while (!usb_handler())
++				if (!wait) return 0;
+ 
+ 		i = usb_recv_idx;
+ 		n = usb_recv_len - i;

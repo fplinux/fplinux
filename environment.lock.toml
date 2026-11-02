@@ -158,6 +158,12 @@ input = "environment:mesa-headers"
 [tools.gitleaks]
 input = "environment:gitleaks"
 
+[tools.fpdoom-host]
+input = "environment:fpdoom-host"
+
+[tools.fpdoom-bootstrap]
+input = "environment:fpdoom-bootstrap"
+
 [[input]]
 key = "kern:archive"
 source = "kern"
@@ -233,6 +239,18 @@ arch = "x86_64"
 [[input]]
 key = "environment:gitleaks"
 source = "gitleaks"
+purpose = "environment-source"
+arch = "x86_64"
+
+[[input]]
+key = "environment:fpdoom-host"
+source = "fpdoom_host"
+purpose = "environment-source"
+arch = "x86_64"
+
+[[input]]
+key = "environment:fpdoom-bootstrap"
+source = "fpdoom_bootstrap"
 purpose = "environment-source"
 arch = "x86_64"
 

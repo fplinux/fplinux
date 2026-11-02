@@ -453,6 +453,10 @@ def main() -> None:
         _install_node(tools, args.resources, temporary_root)
         _install_cross_aliases()
         _install_quality_tools(tools, temporary_root)
+        _install_file(tools["fpdoom-host"].archive, Path("/opt/quality/src/fpdoom-host.tar.gz"))
+        _install_file(
+            tools["fpdoom-bootstrap"].archive, Path("/opt/quality/src/fpdoom-bootstrap.tar.gz")
+        )
         _install_gui_headers(tools, temporary_root)
         _install_libtsm(tools["libtsm"], args.resources, temporary_root)
         _install_terminal_font(args.resources, temporary_root, Path("/opt/quality/fonts"))

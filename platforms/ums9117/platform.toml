@@ -385,6 +385,7 @@ patches = [
   "platforms/ums9117/bootstrap/patches/0003-target-display-transport.patch",
   "platforms/ums9117/bootstrap/patches/0004-linux-owned-input-audio.patch",
   "platforms/ums9117/bootstrap/patches/0005-target-owned-early-init.patch",
+  "platforms/ums9117/bootstrap/patches/0006-usb-control-setup.patch",
 ]
 toolchain = "arm-none-eabi"
 lto = 0
