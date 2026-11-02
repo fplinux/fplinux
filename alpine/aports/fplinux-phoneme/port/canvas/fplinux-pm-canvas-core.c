@@ -8,14 +8,48 @@
 #include "fplinux-pm-canvas-core.h"
 
 #include <linux/input-event-codes.h>
+#include <string.h>
 
-/* The headless runner models the 240x320 profile: bars 20 + 32, band 28. */
+/* The headless runner has an explicit virtual Canvas, without UI chrome. */
 enum {
 	HEADLESS_WIDTH = 240,
-	HEADLESS_HEIGHT = 320,
-	HEADLESS_BARS = 20 + 32,
-	HEADLESS_HEADER = 28,
+	HEADLESS_HEIGHT = 240,
+	HEADLESS_FULL_HEIGHT = 320,
 };
+
+static const struct {
+	const char *name;
+	int width, height;
+} presets[] = {
+	{ "native", 0, 0 },	 { "128x128", 128, 128 },
+	{ "128x160", 128, 160 }, { "176x208", 176, 208 },
+	{ "176x220", 176, 220 }, { "240x320", 240, 320 },
+	{ "320x240", 320, 240 },
+};
+
+bool fplinux_pm_canvas_preset(unsigned int index, int *width, int *height)
+{
+	if (!width || !height || index == 0 ||
+	    index >= sizeof(presets) / sizeof(presets[0]))
+		return false;
+	*width = presets[index].width;
+	*height = presets[index].height;
+	return true;
+}
+
+bool fplinux_pm_canvas_preset_parse(const char *value, unsigned int *index)
+{
+	if (!value || !index)
+		return false;
+	for (unsigned int i = 0; i < sizeof(presets) / sizeof(presets[0]);
+	     ++i) {
+		if (!strcmp(value, presets[i].name)) {
+			*index = i;
+			return true;
+		}
+	}
+	return false;
+}
 
 static int phone_key_code(unsigned int code)
 {
@@ -95,10 +129,7 @@ void fplinux_pm_canvas_size(const struct fplinux_pm_canvas_geometry *geometry,
 
 	if (!geometry->runtime) {
 		w = HEADLESS_WIDTH;
-		h = HEADLESS_HEIGHT -
-		    (full ? 0 :
-			    HEADLESS_BARS +
-				     (geometry->titled ? HEADLESS_HEADER : 0));
+		h = full ? HEADLESS_FULL_HEIGHT : HEADLESS_HEIGHT;
 	} else if (geometry->surface_matches) {
 		w = geometry->surface_width;
 		h = geometry->surface_height - band;

@@ -64,8 +64,56 @@ msgstr "Не удалось запустить «%s». Откройте phoneME 
 msgid "Close MIDlet?"
 msgstr "Закрыть мидлет?"
 
-msgid "Record stores are temporary and will be removed when phoneME closes."
-msgstr "Сохранения временные: они будут удалены при закрытии phoneME."
+msgid "Close the running MIDlet?"
+msgstr "Закрыть запущенный мидлет?"
 
-msgid "Open a JAR file from Files."
-msgstr "Откройте JAR-файл через «Файлы»."
+msgid "Cannot save"
+msgstr "Не удалось сохранить"
+
+msgid "Cannot start"
+msgstr "Не удалось запустить"
+
+msgid "Canvas size (next run)"
+msgstr "Размер экрана (следующий запуск)"
+
+msgid "Continue"
+msgstr "Продолжить"
+
+msgid "Home storage: persistent"
+msgstr "Домашнее хранилище: постоянное"
+
+msgid "Home storage: lost after reboot"
+msgstr "Домашнее хранилище: очищается при перезагрузке"
+
+msgid "Native"
+msgstr "Размер устройства"
+
+msgid "Not enough memory."
+msgstr "Недостаточно памяти."
+
+msgid "Open JAR"
+msgstr "Открыть JAR"
+
+msgid "Program settings"
+msgstr "Настройки программы"
+
+msgid "Recent"
+msgstr "Недавние"
+
+msgid "Remove"
+msgstr "Удалить"
+
+msgid "Save"
+msgstr "Сохранить"
+
+msgid "Saving not confirmed"
+msgstr "Сохранение не подтверждено"
+
+msgid "Settings"
+msgstr "Настройки"
+
+msgid "Unavailable"
+msgstr "Недоступно"
+
+msgid "Use defaults"
+msgstr "Использовать общие"

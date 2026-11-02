@@ -7,6 +7,7 @@
 
 #include "fplinux-pm-canvas.h"
 #include "fplinux-pm-vm.h"
+#include "fplinux-pm-app.h"
 
 struct lv_timer {
 	lv_timer_cb_t callback;
@@ -16,7 +17,14 @@ struct lv_timer {
 static lv_timer_t timer;
 static MidpEvent events[8];
 static size_t event_count;
+static enum fplinux_rgb565_rotation rotation;
 int gForegroundDisplayId = 1;
+
+struct fplinux_ui_view_settings fplinux_pm_app_view_settings(void)
+{
+	return (struct fplinux_ui_view_settings){ FPLINUX_RGB565_FIT,
+						  rotation };
+}
 
 struct fplinux_ui *fplinux_pm_canvas_ui(void)
 {
@@ -121,6 +129,18 @@ int main(void)
 		assert(events[i].type == 1 && events[i].action == actions[i]);
 		assert(events[i].character == '2' && events[i].display == 1);
 	}
+	rotation = FPLINUX_RGB565_ROTATE_90;
+	phone.code = KEY_UP;
+	phone.pressed = true;
+	fplinux_pm_canvas_key(NULL, canvas, &phone, NULL);
+	rotation = FPLINUX_RGB565_ROTATE_270;
+	timer.callback(&timer);
+	phone.pressed = false;
+	fplinux_pm_canvas_key(NULL, canvas, &phone, NULL);
+	assert(event_count == 8);
+	assert(events[5].character == -3 && events[5].action == 1);
+	assert(events[6].character == -3 && events[6].action == 3);
+	assert(events[7].character == -3 && events[7].action == 2);
 	fplinux_pm_keys_cleanup();
 	puts("keys: seat cancellation preserves other held input");
 	return 0;

@@ -35,9 +35,13 @@ enum {
  */
 int fplinux_pm_key_code(bool keyboard, unsigned int code, uint32_t unicode);
 
+/* Zero is native; fixed Canvas presets are indexed 1 through 6. */
+bool fplinux_pm_canvas_preset(unsigned int index, int *width, int *height);
+bool fplinux_pm_canvas_preset_parse(const char *value, unsigned int *index);
+
 /* What decides the size of a Canvas's drawing area. */
 struct fplinux_pm_canvas_geometry {
-	/* The runtime is connected; without it the 240x320 profile is used. */
+	/* Without a runtime, use headless 240x240 / 240x320 virtual modes. */
 	bool runtime;
 	/* Canvas.setFullScreenMode() of the Canvas shown or being shown. */
 	bool full_screen;

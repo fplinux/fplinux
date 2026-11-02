@@ -7,6 +7,8 @@
 #include <midpEvents.h>
 #include <fplinux/fplinux-ui-screen.h>
 #include <fplinux/fplinux-ui-session.h>
+#include <fplinux/fplinux-ui-file-picker.h>
+#include <fplinux/fplinux-ui-prefs.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -30,7 +32,10 @@ struct fplinux_ui_screen {
 	bool alert;
 	char title[256];
 	char text[512];
-	char rows[4][128];
+	char rows[16][128];
+	char details[16][128];
+	bool icons[16];
+	size_t choices[8], choice_count;
 	size_t row_count;
 	size_t focused;
 	struct fplinux_ui_command commands[4];
@@ -56,11 +61,45 @@ static lv_timer_t *tick;
 static enum fplinux_pm_vm_state vm_state;
 static unsigned int starts, destroys, hide_events, show_events, replies;
 static unsigned int busy_notifications, quit_requests;
+static bool busy, fail_file_sync, fail_directory_sync;
+static unsigned int resize_notifications;
 static int navigation_error;
 static enum fplinux_ui_close_response close_response;
 static struct fplinux_ui_document_result reply;
 static char running_jar[4096], running_class[256];
 static const char *scenario;
+static fplinux_ui_file_picker_cb picker_callback;
+static void *picker_context;
+static char requested_path[4096];
+static fplinux_ui_storage_cb storage_callback;
+static void *storage_context;
+
+int __real_fsync(int fd);
+
+int __wrap_fsync(int fd)
+{
+	struct stat status;
+
+	assert(fstat(fd, &status) == 0);
+	if ((fail_file_sync && S_ISREG(status.st_mode)) ||
+	    (fail_directory_sync && S_ISDIR(status.st_mode))) {
+		errno = EIO;
+		return -1;
+	}
+	return __real_fsync(fd);
+}
+
+const char *fplinux_ui_storage_error(struct fplinux_storage_result result)
+{
+	assert(result.error == EIO);
+	return "Storage input/output error";
+}
+
+static void resized(void *context)
+{
+	assert(context == &resize_notifications);
+	++resize_notifications;
+}
 
 jint fplinux_pm_test_parameters[5];
 
@@ -78,6 +117,78 @@ static struct fplinux_ui_screen *new_screen(const char *title)
 	snprintf(screen->title, sizeof(screen->title), "%s",
 		 title ? title : "");
 	return screen;
+}
+
+bool fplinux_ui_state_dir(const char *id, char *path, size_t capacity)
+{
+	const char *root = getenv("FPLINUX_PM_TEST_ROOT");
+
+	(void)id;
+	return root && snprintf(path, capacity, "%s", root) < (int)capacity;
+}
+
+struct fplinux_ui_prefs *fplinux_ui_prefs_open(const char *id)
+{
+	char path[4096];
+
+	return fplinux_ui_state_dir(id, path, sizeof(path)) ?
+		       fplinux_ui_prefs_open_directory(path) :
+		       NULL;
+}
+
+void fplinux_ui_set_storage_handler(struct fplinux_ui *ui,
+				    fplinux_ui_storage_cb callback,
+				    void *context)
+{
+	(void)ui;
+	storage_callback = callback;
+	storage_context = context;
+}
+
+uint32_t fplinux_ui_storage_request(struct fplinux_ui *ui,
+				    enum fplinux_volume_operation operation,
+				    uint32_t volume_id)
+{
+	(void)ui;
+	assert(operation == FPLINUX_VOLUME_REFRESH && !volume_id);
+	return scenario && !strncmp(scenario, "storage-", 8) ? 42 : 0;
+}
+
+struct fplinux_ui_file_picker *fplinux_ui_file_picker_open(
+	struct fplinux_ui *ui,
+	const struct fplinux_ui_file_picker_options *options,
+	fplinux_ui_file_picker_cb callback, void *context)
+{
+	(void)ui;
+	assert(options->mode == FPLINUX_UI_FILE_PICKER_FILE);
+	assert(!strcmp(options->extensions[0], "jar"));
+	picker_callback = callback;
+	picker_context = context;
+	return (struct fplinux_ui_file_picker *)&runtime;
+}
+
+void fplinux_ui_file_picker_close(struct fplinux_ui_file_picker *picker)
+{
+	(void)picker;
+}
+
+void fplinux_ui_file_picker_storage_result(
+	struct fplinux_ui_file_picker *picker,
+	const struct fplinux_volume_result *result)
+{
+	(void)picker;
+	(void)result;
+}
+
+uint32_t fplinux_ui_open_file(struct fplinux_ui *ui, const char *path)
+{
+	(void)ui;
+	snprintf(requested_path, sizeof(requested_path), "%s", path);
+	return 77;
+}
+
+void fplinux_pm_canvas_view_changed(void)
+{
 }
 
 struct fplinux_ui *fplinux_ui_open(const char *id, fplinux_ui_event_cb callback,
@@ -129,6 +240,7 @@ bool fplinux_ui_send(struct fplinux_ui *ui,
 	(void)ui;
 	assert(message->type == FPLINUX_UI_SESSION_BUSY);
 	++busy_notifications;
+	busy = message->enabled;
 	return true;
 }
 
@@ -180,6 +292,13 @@ bool fplinux_ui_pop(struct fplinux_ui *ui)
 		return false;
 	free(stack[--depth]);
 	return true;
+}
+
+bool fplinux_ui_pop_to(struct fplinux_ui *ui, struct fplinux_ui_screen *target)
+{
+	while (depth && stack[depth - 1] != target)
+		assert(fplinux_ui_pop(ui));
+	return depth != 0;
 }
 
 void fplinux_ui_go_back(struct fplinux_ui *ui)
@@ -236,9 +355,15 @@ bool fplinux_ui_screen_set_title(struct fplinux_ui_screen *screen,
 
 void fplinux_ui_screen_remove_command(struct fplinux_ui_screen *screen, int id)
 {
-	(void)screen;
-	(void)id;
-	abort();
+	for (size_t i = 0; i < screen->command_count; ++i) {
+		if (screen->commands[i].id == id) {
+			--screen->command_count;
+			memmove(&screen->commands[i], &screen->commands[i + 1],
+				(screen->command_count - i) *
+					sizeof(screen->commands[0]));
+			return;
+		}
+	}
 }
 
 bool fplinux_ui_screen_get_content_size(const struct fplinux_ui_screen *screen,
@@ -287,6 +412,40 @@ size_t fplinux_ui_form_append_image(struct fplinux_ui_screen *form,
 	return 0;
 }
 
+size_t fplinux_ui_form_append_choice(struct fplinux_ui_screen *form,
+				     const char *label,
+				     enum fplinux_ui_choice_kind kind,
+				     const char *const *choices, size_t count)
+{
+	(void)label;
+	(void)kind;
+	(void)choices;
+	(void)count;
+	assert(form->choice_count < 8);
+	return form->choice_count++;
+}
+
+void fplinux_ui_form_set_choice(struct fplinux_ui_screen *form, size_t item,
+				size_t index)
+{
+	assert(item < form->choice_count);
+	form->choices[item] = index;
+}
+
+size_t fplinux_ui_form_get_choice(const struct fplinux_ui_screen *form,
+				  size_t item)
+{
+	assert(item < form->choice_count);
+	return form->choices[item];
+}
+
+bool fplinux_ui_form_delete(struct fplinux_ui_screen *form, size_t item)
+{
+	assert(item < form->choice_count);
+	--form->choice_count;
+	return true;
+}
+
 struct fplinux_ui_screen *
 fplinux_ui_alert_new(struct fplinux_ui *ui, enum fplinux_ui_alert_kind kind,
 		     const char *title, const char *text, unsigned int timeout)
@@ -332,9 +491,11 @@ size_t fplinux_ui_list_append(struct fplinux_ui_screen *list, const char *text,
 {
 	size_t index = list->row_count++;
 
-	(void)detail;
-	assert(index < 4);
-	snprintf(list->rows[index], sizeof(list->rows[index]), "%s", text);
+	assert(index < 16);
+	snprintf(list->rows[index], sizeof(list->rows[index]), "%s",
+		 text ? text : "");
+	snprintf(list->details[index], sizeof(list->details[index]), "%s",
+		 detail ? detail : "");
 	return index;
 }
 
@@ -355,9 +516,12 @@ bool fplinux_ui_list_set_icon(struct fplinux_ui_screen *list, size_t index,
 			      const void *source,
 			      enum fplinux_ui_list_icon_kind kind)
 {
-	(void)list;
-	(void)index;
-	(void)source;
+	const lv_image_dsc_t *image = source;
+
+	assert(index < list->row_count);
+	assert(image->header.w == 1 && image->header.h == 1);
+	assert(image->data_size >= 24 && image->data[0] == 0x89);
+	list->icons[index] = true;
 	assert(kind == FPLINUX_UI_LIST_ICON_IMAGE);
 	return true;
 }
@@ -375,9 +539,15 @@ size_t fplinux_ui_list_insert(struct fplinux_ui_screen *list, size_t index,
 
 bool fplinux_ui_list_delete(struct fplinux_ui_screen *list, size_t index)
 {
-	(void)list;
-	(void)index;
-	abort();
+	assert(index < list->row_count);
+	--list->row_count;
+	memmove(&list->rows[index], &list->rows[index + 1],
+		(list->row_count - index) * sizeof(list->rows[0]));
+	memmove(&list->details[index], &list->details[index + 1],
+		(list->row_count - index) * sizeof(list->details[0]));
+	memmove(&list->icons[index], &list->icons[index + 1],
+		(list->row_count - index) * sizeof(list->icons[0]));
+	return true;
 }
 
 void fplinux_ui_list_delete_all(struct fplinux_ui_screen *list)
@@ -389,11 +559,11 @@ void fplinux_ui_list_delete_all(struct fplinux_ui_screen *list)
 bool fplinux_ui_list_set(struct fplinux_ui_screen *list, size_t index,
 			 const char *text, const char *detail)
 {
-	(void)list;
-	(void)index;
-	(void)text;
-	(void)detail;
-	abort();
+	assert(index < list->row_count);
+	snprintf(list->rows[index], sizeof(list->rows[index]), "%s", text);
+	snprintf(list->details[index], sizeof(list->details[index]), "%s",
+		 detail ? detail : "");
+	return true;
 }
 
 size_t fplinux_ui_list_size(const struct fplinux_ui_screen *list)
@@ -504,6 +674,16 @@ bool fplinux_pm_vm_start(const struct fplinux_pm_vm_config *config)
 	assert(S_ISDIR(directory.st_mode) &&
 	       (directory.st_mode & 0777) == 0700);
 	printf("storage %s\n", config->storage_dir);
+	if (!strcmp(scenario, "recent-remove-last")) {
+		char path[4096];
+		FILE *file;
+
+		assert(snprintf(path, sizeof(path), "%s/record",
+				config->storage_dir) < (int)sizeof(path));
+		file = fopen(path, "w");
+		assert(file && fputs("saved data", file) >= 0);
+		assert(fclose(file) == 0);
+	}
 	++starts;
 	snprintf(running_jar, sizeof(running_jar), "%s", config->jar_path);
 	snprintf(running_class, sizeof(running_class), "%s",
@@ -547,8 +727,7 @@ int fplinux_pm_vm_exit_code(void)
 
 void fplinux_pm_keys_cancel(enum fplinux_ui_key_source source)
 {
-	assert(source == FPLINUX_UI_KEY_KEYBOARD);
-	puts("input cancelled keyboard");
+	(void)source;
 }
 
 static void advance(void)
@@ -597,6 +776,15 @@ static void command(enum fplinux_ui_command_type type)
 			return;
 		}
 	abort();
+}
+
+static bool has_remove(const struct fplinux_ui_screen *screen)
+{
+	for (size_t i = 0; i < screen->command_count; ++i)
+		if (screen->commands[i].label &&
+		    !strcmp(screen->commands[i].label, "Remove"))
+			return true;
+	return false;
 }
 
 static void attach_peer(struct fplinux_ui_screen *screen, int serial)
@@ -668,9 +856,58 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 
 	assert(ui->document && ui->close);
 	if (!scenario || !strcmp(scenario, "startup")) {
-		assert(!strcmp(stack[0]->text, "Open a JAR file from Files."));
-		puts("waiting for Files; no VM started");
+		assert(stack[0]->row_count == 3);
+		assert(!strcmp(stack[0]->rows[0], "Open JAR"));
+		assert(!strcmp(stack[0]->rows[1], "Recent"));
+		assert(!strcmp(stack[0]->rows[2], "Settings"));
+		puts("home offers JAR, recent and settings; no VM started");
 		return 0;
+	}
+	if (!strcmp(scenario, "recent-empty")) {
+		screen = fplinux_ui_current(ui);
+		screen->focused = 1;
+		screen->command(ui, screen, FPLINUX_UI_SELECT_COMMAND,
+				screen->context);
+		screen = fplinux_ui_current(ui);
+		assert(!strcmp(screen->title, "Recent") && !screen->row_count);
+		assert(!has_remove(screen));
+		puts("empty Recent has no Remove action");
+		return 0;
+	}
+	if (!strncmp(scenario, "storage-", 8)) {
+		struct fplinux_volume_result volume = {
+			.request_id = 42,
+			.snapshot.home_persistent =
+				!strcmp(scenario, "storage-persistent"),
+		};
+
+		screen = fplinux_ui_current(ui);
+		assert(!screen->details[0][0]);
+		if (!strcmp(scenario, "storage-picker")) {
+			screen->command(ui, screen, FPLINUX_UI_SELECT_COMMAND,
+					screen->context);
+			assert(!picker_callback);
+		}
+		assert(storage_callback);
+		storage_callback(ui, &volume, storage_context);
+		assert(!strcmp(screen->details[0],
+			       volume.snapshot.home_persistent ?
+				       "Home storage: persistent" :
+				       "Home storage: lost after reboot"));
+		if (!strcmp(scenario, "storage-picker"))
+			assert(picker_callback);
+		puts("home displays reported storage lifetime");
+		return 0;
+	}
+	if (!strcmp(scenario, "picker-single")) {
+		screen = fplinux_ui_current(ui);
+		screen->command(ui, screen, FPLINUX_UI_SELECT_COMMAND,
+				screen->context);
+		assert(picker_callback);
+		picker_callback((struct fplinux_ui_file_picker *)&runtime,
+				FPLINUX_UI_FILE_PICKER_SELECTED, jar, 0,
+				picker_context);
+		assert(!strcmp(requested_path, jar));
 	}
 	result = document(17, jar);
 	if (!strcmp(scenario, "invalid")) {
@@ -698,6 +935,17 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		screen->focused = 1;
 		screen->command(ui, screen, FPLINUX_UI_SELECT_COMMAND,
 				screen->context);
+		if (!strcmp(scenario, "chooser-rms-failure")) {
+			assert(replies == 1 &&
+			       reply.status == FPLINUX_UI_DOCUMENT_ERROR);
+			assert(reply.error == ENOTDIR && !busy && !starts);
+			screen = fplinux_ui_current(ui);
+			assert(screen->alert &&
+			       !strcmp(screen->title, "Cannot start"));
+			assert(!strcmp(screen->text, strerror(ENOTDIR)));
+			puts("RMS failure clears busy and reports error without starting VM");
+			return 0;
+		}
 	}
 	advance();
 	assert(!starts && !replies);
@@ -721,11 +969,126 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 	fplinux_ui_form_append_string(game, NULL, "Score: 42");
 	fplinux_ui_replace(ui, game);
 	game_depth = depth;
+	if (!strcmp(scenario, "save-unpublished"))
+		fail_file_sync = true;
+	else if (!strcmp(scenario, "save-unsynced"))
+		fail_directory_sync = true;
 	fplinux_pm_app_loaded();
 	assert(replies == 1 && reply.request_id == 17 &&
 	       reply.status == FPLINUX_UI_DOCUMENT_ACCEPTED);
+	if (fail_file_sync || fail_directory_sync) {
+		screen = fplinux_ui_current(ui);
+		assert(screen->alert);
+		assert(!strcmp(screen->title, fail_file_sync ?
+						      "Cannot save" :
+						      "Saving not confirmed"));
+		assert(!strcmp(screen->text, "Storage input/output error"));
+		puts(fail_file_sync ?
+			     "unpublished save reports failure" :
+			     "published save reports unconfirmed durability");
+		return 0;
+	}
 	if (!strcmp(scenario, "chooser-start"))
 		assert(!strcmp(running_class, "example.Second"));
+	if (!strncmp(scenario, "settings-save-", 14)) {
+		struct fplinux_ui_event activation = {
+			.type = FPLINUX_UI_EVENT_ACTIVATION,
+			.activation = FPLINUX_UI_ACTIVATION_OPEN,
+		};
+		struct fplinux_ui_view_settings settings;
+		struct fplinux_ui_prefs *disk;
+		bool unpublished =
+			!strcmp(scenario, "settings-save-unpublished");
+		const char *stored;
+
+		runtime.event(ui, &activation, runtime.context);
+		screen = fplinux_ui_current(ui);
+		assert(!strcmp(screen->rows[3], "Settings"));
+		screen->focused = 3;
+		screen->command(ui, screen, FPLINUX_UI_SELECT_COMMAND,
+				screen->context);
+		screen = fplinux_ui_current(ui);
+		assert(!strcmp(screen->title, "Settings"));
+		assert(screen->choice_count == 3);
+		fplinux_ui_form_set_choice(screen, 0, 2);
+		fplinux_ui_form_set_choice(screen, 1, 1);
+		fplinux_ui_form_set_choice(screen, 2, 3);
+		fail_file_sync = unpublished;
+		fail_directory_sync = !unpublished;
+		command(FPLINUX_UI_COMMAND_OK);
+		screen = fplinux_ui_current(ui);
+		assert(screen->alert &&
+		       !strcmp(screen->title, unpublished ?
+						      "Cannot save" :
+						      "Saving not confirmed"));
+		assert(!strcmp(screen->text, "Storage input/output error"));
+		settings = fplinux_pm_app_view_settings();
+		assert(settings.scale == FPLINUX_RGB565_INTEGER &&
+		       settings.rotation == FPLINUX_RGB565_ROTATE_90);
+		assert(fplinux_pm_app_canvas_size() == 0);
+		disk = fplinux_ui_prefs_open_directory(
+			getenv("FPLINUX_PM_TEST_ROOT"));
+		assert(disk);
+		stored = fplinux_ui_prefs_get(disk, "view-settings", NULL);
+		if (unpublished)
+			assert(!stored);
+		else
+			assert(stored &&
+			       !strcmp(stored,
+				       "{\"scale\":\"integer\",\"rotation\":\"90\"}"));
+		fplinux_ui_prefs_close(disk);
+		assert(fplinux_ui_pop(ui));
+		screen = fplinux_ui_current(ui);
+		screen->focused = 3;
+		screen->command(ui, screen, FPLINUX_UI_SELECT_COMMAND,
+				screen->context);
+		screen = fplinux_ui_current(ui);
+		assert(screen->choices[0] == 2 && screen->choices[1] == 1 &&
+		       screen->choices[2] == 3);
+		command(FPLINUX_UI_COMMAND_BACK);
+		fail_file_sync = fail_directory_sync = false;
+		screen = fplinux_ui_current(ui);
+		screen->focused = 2;
+		screen->command(ui, screen, FPLINUX_UI_SELECT_COMMAND,
+				screen->context);
+		screen = fplinux_ui_current(ui);
+		assert(!strcmp(screen->title, "Recent") &&
+		       screen->row_count == 1);
+		command(FPLINUX_UI_COMMAND_SCREEN);
+		assert(!screen->row_count);
+		command(FPLINUX_UI_COMMAND_BACK);
+		screen = fplinux_ui_current(ui);
+		screen->focused = 3;
+		screen->command(ui, screen, FPLINUX_UI_SELECT_COMMAND,
+				screen->context);
+		screen = fplinux_ui_current(ui);
+		assert(screen->choices[0] == 2 && screen->choices[1] == 1 &&
+		       screen->choices[2] == 3);
+		puts("settings remain consistent after save warning and Recent save");
+		return 0;
+	}
+	if (!strcmp(scenario, "recent-remove-last")) {
+		struct fplinux_ui_event activation = {
+			.type = FPLINUX_UI_EVENT_ACTIVATION,
+			.activation = FPLINUX_UI_ACTIVATION_OPEN,
+		};
+
+		runtime.event(ui, &activation, runtime.context);
+		screen = fplinux_ui_current(ui);
+		assert(!strcmp(screen->rows[2], "Recent"));
+		screen->focused = 2;
+		screen->command(ui, screen, FPLINUX_UI_SELECT_COMMAND,
+				screen->context);
+		screen = fplinux_ui_current(ui);
+		assert(!strcmp(screen->title, "Recent") &&
+		       screen->row_count == 1);
+		assert(has_remove(screen));
+		command(FPLINUX_UI_COMMAND_SCREEN);
+		assert(!screen->row_count && !has_remove(screen));
+		assert(starts == 1 && !destroys);
+		puts("removing last Recent entry removes its action");
+		return 0;
+	}
 	if (!strcmp(scenario, "home-resume")) {
 		ui->lifecycle = FPLINUX_UI_BACKGROUND;
 		send_event(FPLINUX_UI_EVENT_LIFECYCLE);
@@ -735,8 +1098,69 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		send_event(FPLINUX_UI_EVENT_LIFECYCLE);
 		assert(!tick->paused && show_events == 1 && starts == 1);
 		puts("Home freezes VM; Resume continues same VM");
+	} else if (!strcmp(scenario, "tile-continue") ||
+		   !strcmp(scenario, "tile-icon") ||
+		   !strcmp(scenario, "tile-resize") ||
+		   !strcmp(scenario, "tile-picker-cancel")) {
+		struct fplinux_ui_event activation = {
+			.type = FPLINUX_UI_EVENT_ACTIVATION,
+			.activation = FPLINUX_UI_ACTIVATION_OPEN,
+		};
+
+		runtime.event(ui, &activation, runtime.context);
+		screen = fplinux_ui_current(ui);
+		assert(!strcmp(screen->rows[0], "Continue"));
+		assert(!strcmp(screen->rows[1], "Open JAR"));
+		if (!strcmp(scenario, "tile-icon"))
+			assert(screen->icons[0]);
+		if (!strcmp(scenario, "tile-resize")) {
+			fplinux_pm_app_set_resize_handler(
+				resized, &resize_notifications);
+			send_event(FPLINUX_UI_EVENT_RESIZE);
+			assert(!resize_notifications);
+		}
+		advance();
+		assert(tick->paused && hide_events == 1);
+		if (!strcmp(scenario, "tile-picker-cancel")) {
+			screen->focused = 1;
+			screen->command(ui, screen, FPLINUX_UI_SELECT_COMMAND,
+					screen->context);
+			assert(picker_callback);
+			picker_callback(
+				(struct fplinux_ui_file_picker *)&runtime,
+				FPLINUX_UI_FILE_PICKER_CANCELLED, NULL, 0,
+				picker_context);
+			assert(!destroys && starts == 1 &&
+			       fplinux_ui_current(ui) == screen);
+			screen->focused = 0;
+		}
+		screen->command(ui, screen, FPLINUX_UI_SELECT_COMMAND,
+				screen->context);
+		assert(fplinux_ui_current(ui) == game);
+		assert(!tick->paused && show_events == 1 && starts == 1);
+		if (!strcmp(scenario, "tile-resize")) {
+			assert(resize_notifications == 1);
+			fplinux_pm_app_set_resize_handler(NULL, NULL);
+			puts("Continue resynchronizes the guest surface after home resize");
+			return 0;
+		}
+		if (!strcmp(scenario, "tile-icon")) {
+			puts("Continue shows the running MIDlet icon");
+			return 0;
+		}
+		puts(!strcmp(scenario, "tile-picker-cancel") ?
+			     "picker cancellation preserves VM; Continue resumes it" :
+			     "tile opens home; Continue resumes same VM");
 	} else if (!strncmp(scenario, "restart-", 8)) {
 		result = document(18, getenv("FPLINUX_PM_TEST_SECOND_JAR"));
+		if (!strncmp(scenario, "restart-missing-class", 21)) {
+			assert(result.status == FPLINUX_UI_DOCUMENT_ERROR &&
+			       result.error == ENOEXEC);
+			assert(starts == 1 && !destroys && !tick->paused &&
+			       fplinux_ui_current(ui) == game);
+			puts("missing MIDlet class preserves current VM");
+			return 0;
+		}
 		if (!strcmp(scenario, "restart-invalid")) {
 			assert(result.status == FPLINUX_UI_DOCUMENT_ERROR);
 			assert(starts == 1 && !destroys &&
@@ -770,6 +1194,8 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		command(FPLINUX_UI_COMMAND_OK);
 		assert(close_response == FPLINUX_UI_CLOSE_READY);
 		puts("one close confirmation; ready for process restart");
+	} else if (!strcmp(scenario, "picker-single")) {
+		puts("picker routes JAR to the document handler; one VM started");
 	} else {
 		puts("first MIDlet screen accepts document; one VM started");
 	}

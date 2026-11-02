@@ -604,6 +604,11 @@ fplinux_pm_jar_read_suite(const char *jar_path, struct fplinux_pm_suite *suite)
 					   &manifest, &size);
 	if (status != FPLINUX_PM_JAR_OK)
 		return status;
+	/* Attributes are exposed as C strings and must not be truncated. */
+	if (memchr(manifest, '\0', size)) {
+		free(manifest);
+		return FPLINUX_PM_JAR_FORMAT;
+	}
 	scratch = malloc(size + 1);
 	if (!scratch) {
 		free(manifest);

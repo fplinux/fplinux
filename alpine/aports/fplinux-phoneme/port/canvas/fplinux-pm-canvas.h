@@ -25,6 +25,7 @@ struct fplinux_ui *fplinux_pm_canvas_ui(void);
 
 /* The Canvas peer whose Canvas is shown, so keys may reach it. */
 bool fplinux_pm_canvas_is_active(const struct fplinux_ui_screen *screen);
+void fplinux_pm_canvas_view_changed(void);
 
 /* fplinux-pm-keys.c */
 

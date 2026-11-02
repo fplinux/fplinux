@@ -7,9 +7,9 @@ pkgdesc="phoneME Feature CLDC-HI VM and MIDP 2.0 for MIDlets"
 url="https://github.com/magicus/phoneME"
 arch="armv7"
 license="GPL-2.0-only"
-depends="fplinux-ui"
+depends="fplinux-ui libcrypto3"
 makedepends_build="clang22 lld22 llvm22 binutils make patch pkgconf python3 gettext"
-makedepends_host="musl-dev musl-libintl linux-headers gcc zlib-dev fplinux-ui-dev"
+makedepends_host="musl-dev musl-libintl linux-headers gcc zlib-dev openssl-dev fplinux-ui-dev"
 options="!check"
 
 # CLDC generators require ILP32; JDK 8 produces their input class files.
@@ -203,6 +203,7 @@ _build_app() {
 		$(pkg-config --cflags fplinux-ui) -I"$startdir/port/app" -I"$srcdir" \
 		"$startdir/port/app/fplinux-pm-app.c" \
 		"$startdir/port/app/fplinux-pm-lifecycle.c" \
+		"$startdir/port/app/fplinux-pm-store.c" \
 		"$srcdir/fplinux-cli.o" \
 		$(cat "$srcdir/vm-objects/objects.txt") \
 		"$cldc/target/product/jvmspi.o" \
@@ -212,7 +213,7 @@ _build_app() {
 		"$cldc/dist/lib/libcldc_vmtest.a" \
 		"$cldc/dist/lib/libcldc_vm.a" \
 		-Wl,--end-group \
-		$(pkg-config --libs fplinux-ui) -lz -lm \
+		$(pkg-config --libs fplinux-ui) -lz -lcrypto -lm \
 		$LDFLAGS -no-pie -o "$srcdir/fplinux-phoneme"
 	msgfmt --check --output-file="$srcdir/ru.mo" "$startdir/port/app/ru.po"
 }

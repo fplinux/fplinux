@@ -186,7 +186,7 @@ final class JarMIDletSuite implements MIDletSuite {
 
     /*
      * RMS uses this prefix as the path of its files, so it names a file in
-     * the per-run storage directory (fplinux_pm_vm_config.storage_dir).
+     * the caller's storage directory (fplinux_pm_vm_config.storage_dir).
      */
     static String filenameBase() {
         return File.getStorageRoot(0) + "suite";

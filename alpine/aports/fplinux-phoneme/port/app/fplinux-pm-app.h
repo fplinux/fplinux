@@ -16,6 +16,7 @@
 #define FPLINUX_PM_APP_H
 
 #include <stdbool.h>
+#include <fplinux/fplinux-ui-view-settings.h>
 
 #define FPLINUX_PM_APP_ID "org.fplinux.phoneme"
 
@@ -23,6 +24,9 @@ struct fplinux_ui;
 
 /* The app's runtime connection; NULL before fplinux_ui_open() succeeds. */
 struct fplinux_ui *fplinux_pm_app_ui(void);
+
+unsigned int fplinux_pm_app_canvas_size(void);
+struct fplinux_ui_view_settings fplinux_pm_app_view_settings(void);
 
 /* A real LF screen or completed Canvas frame ends the launch indicator. */
 void fplinux_pm_app_loaded(void);

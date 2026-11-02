@@ -5,18 +5,23 @@
  * a development tool for the VM, not the phoneME app.
  *
  * usage: fplinux-phoneme-headless [--system-classes PATH] [--heap-kib N]
- *            [--timeout-ms N] [--keys SCRIPT] JAR [MIDLET-CLASS]
+ *            [--timeout-ms N] [--keys SCRIPT] [--storage-dir PATH]
+ *            [--canvas-size SIZE]
+ *            JAR [MIDLET-CLASS]
  * Without MIDLET-CLASS it runs MIDlet-1 of the JAR manifest. --timeout-ms
  * requests destroyApp(true) after that much time, then gives up 300 ms later.
  * --keys presses MIDP key codes on a schedule: comma-separated T:CODE[:HOLD]
  * items press CODE (e.g. -6 or 53 for '5') T ms after the start and release
  * it HOLD ms later (default 100); a hold repeats it from 500 ms on, every
  * 100 ms, as the app's Canvas peers do.
+ * --storage-dir passes PATH to the VM and leaves its contents intact; the
+ * default is a temporary directory that is removed when the process exits.
  * Exit status: the VM exit code; 124 when the MIDlet did not end in time;
  * 2 for invalid arguments, 125 for a start error.
  */
 #define _GNU_SOURCE
 #include "fplinux-pm-vm.h"
+#include "../port/canvas/fplinux-pm-canvas-core.h"
 
 #include <errno.h>
 #include <fplinux-cli.h>
@@ -48,6 +53,12 @@ struct key_event {
 
 static volatile sig_atomic_t stop_signal;
 static bool wakeup_pending;
+static unsigned int canvas_preset;
+
+unsigned int fplinux_pm_app_canvas_size(void)
+{
+	return canvas_preset;
+}
 static struct key_event key_events[KEY_EVENTS_MAX];
 static size_t key_count;
 static size_t key_next;
@@ -254,6 +265,12 @@ int main(int argc, char **argv)
 		{ .name = "keys",
 		  .metavar = "SCRIPT",
 		  .help = "Comma-separated T:CODE[:HOLD] scheduled key presses" },
+		{ .name = "storage-dir",
+		  .metavar = "PATH",
+		  .help = "RecordStore directory to retain after exit" },
+		{ .name = "canvas-size",
+		  .metavar = "SIZE",
+		  .help = "Virtual Canvas: native, 128x128, 128x160, 176x208, 176x220, 240x320 or 320x240" },
 		{ .metavar = "JAR",
 		  .help = "MIDlet suite",
 		  .flags = FPLINUX_CLI_REQUIRED },
@@ -281,9 +298,12 @@ int main(int argc, char **argv)
 		return fplinux_cli_error(&cli, "invalid timeout");
 	if (options[3].value && !parse_keys(options[3].value))
 		return fplinux_cli_error(&cli, "invalid key script");
-	const char *jar_path = options[4].value;
+	if (options[5].value &&
+	    !fplinux_pm_canvas_preset_parse(options[5].value, &canvas_preset))
+		return fplinux_cli_error(&cli, "invalid Canvas size");
+	const char *jar_path = options[6].value;
 	struct fplinux_pm_suite suite = { 0 };
-	const char *midlet_class = options[5].value;
+	const char *midlet_class = options[7].value;
 
 	if (midlet_class == NULL) {
 		enum fplinux_pm_jar_status status =
@@ -301,13 +321,16 @@ int main(int argc, char **argv)
 			midlet_class, suite.midlets[0].name);
 	}
 
-	char storage_dir[] = "/tmp/fplinux-phoneme-headless.XXXXXX";
+	char temporary_storage[] = "/tmp/fplinux-phoneme-headless.XXXXXX";
+	const char *storage_dir = options[4].value;
 
-	if (mkdtemp(storage_dir) == NULL) {
+	if (!storage_dir && mkdtemp(temporary_storage) == NULL) {
 		perror("fplinux-phoneme-headless: mkdtemp");
 		fplinux_pm_suite_cleanup(&suite);
 		return EXIT_USAGE;
 	}
+	if (!storage_dir)
+		storage_dir = temporary_storage;
 	signal(SIGINT, handle_stop_signal);
 	signal(SIGTERM, handle_stop_signal);
 
@@ -336,7 +359,8 @@ int main(int argc, char **argv)
 		"fplinux-phoneme-headless: exit %d after %lld ms, "
 		"max RSS %ld KiB\n",
 		exit_status, monotonic_ms() - started_ms, usage_data.ru_maxrss);
-	nftw(storage_dir, remove_entry, 16, FTW_DEPTH | FTW_PHYS);
+	if (!options[4].value)
+		nftw(temporary_storage, remove_entry, 16, FTW_DEPTH | FTW_PHYS);
 	fplinux_pm_suite_cleanup(&suite);
 	return exit_status;
 }

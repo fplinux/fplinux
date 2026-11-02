@@ -69,6 +69,27 @@ grep -qx 'PM-HELLO start' "${work}/hello.txt" &&
 	grep -qx 'PM-HELLO done' "${work}/hello.txt" ||
 	fail "hello MIDlet output is incomplete (${work}/hello.txt)"
 
+# The same file-backed store must survive a complete VM process exit.
+build_jar rms "${here}/rms.mf"
+rms_storage=$(mktemp -d "${work}/rms-storage.XXXXXX")
+"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+	--storage-dir "${rms_storage}" --timeout-ms 30000 \
+	"${work}/rms.jar" >"${work}/rms-write.txt"
+grep -qx 'PM-RMS write 1 2' "${work}/rms-write.txt" &&
+	! grep -q '^PM-RMS error ' "${work}/rms-write.txt" ||
+	fail "RMS first run differs (${work}/rms-write.txt)"
+"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+	--storage-dir "${rms_storage}" --timeout-ms 30000 \
+	"${work}/rms.jar" >"${work}/rms-read.txt"
+grep -qx 'PM-RMS read 1 2 next 3' "${work}/rms-read.txt" &&
+	! grep -q '^PM-RMS error ' "${work}/rms-read.txt" ||
+	fail "RMS second run differs (${work}/rms-read.txt)"
+"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+	--storage-dir /dev/null/blocked --timeout-ms 30000 \
+	"${work}/rms.jar" fplinux.fixtures.rms.RmsErrorMIDlet >"${work}/rms-error.txt"
+grep -qx 'PM-RMS storage-error' "${work}/rms-error.txt" ||
+	fail "RMS storage error not reported (${work}/rms-error.txt)"
+
 # Canvas port headless: sizes of the modes, sizeChanged after a mode change,
 # game actions, key names and codes, GameCanvas flushes, font metrics.
 build_jar canvas "${here}/canvas.mf"
@@ -77,6 +98,17 @@ build_jar canvas "${here}/canvas.mf"
 grep '^PM-CANVAS ' "${work}/canvas-log.txt" >"${work}/canvas.txt" || true
 cmp -s "${here}/canvas.expected" "${work}/canvas.txt" ||
 	fail "canvas probe output differs (${work}/canvas.txt)"
+
+# Each selected virtual size is stable across fullscreen mode changes.
+for size in 128x128 128x160 176x208 176x220 240x320 320x240; do
+	"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+		--canvas-size "${size}" --timeout-ms 30000 "${work}/canvas.jar" \
+		fplinux.fixtures.canvas.CanvasSizeMIDlet >"${work}/canvas-size-${size}.txt"
+	grep -qx "PM-SIZE shown ${size}" "${work}/canvas-size-${size}.txt" &&
+		grep -qx "PM-SIZE full ${size} changed ${size}" "${work}/canvas-size-${size}.txt" &&
+		grep -qx "PM-SIZE normal ${size} changed ${size}" "${work}/canvas-size-${size}.txt" ||
+		fail "Canvas size ${size} differs (${work}/canvas-size-${size}.txt)"
+done
 
 # Form look and feel headless: the MIDP model of every Form item and TextBox
 # through the real LF classes (no native peers without a runtime).
@@ -114,4 +146,4 @@ if ! cmp -s "${here}/lfscreens.expected" "${work}/lfscreens.txt"; then
 	fail "List and Alert LF check output differs (${work}/lfscreens.txt)"
 fi
 
-echo "phoneME self-test: PASS (vectors on the VM and as a MIDlet, hello MIDlet, canvas probe, Form LF check, List and Alert LF check)"
+echo "phoneME self-test: PASS (vectors, hello, RMS, canvas, Form and List/Alert LF)"

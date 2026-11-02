@@ -28,6 +28,7 @@ def test_input_cancel_releases_only_its_seat_and_preserves_other_repeat(tmp_path
             f"-I{ROOT / 'include'}",
             f"-I{port / 'vm'}",
             f"-I{port / 'port/canvas'}",
+            f"-I{port / 'port/app'}",
             str(harness / "keys-test.c"),
             str(port / "port/canvas/fplinux-pm-keys.c"),
             str(port / "port/canvas/fplinux-pm-canvas-core.c"),

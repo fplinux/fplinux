@@ -1,6 +1,6 @@
 ---
 title: Java and MRE applications
-description: Open Java and MRE programs, adjust the MRE display and find their data.
+description: Open Java and MRE programs, adjust their display and find their saved data.
 source:
   - alpine/aports/fplinux-phoneme
   - alpine/aports/fplinux-mre
@@ -13,25 +13,27 @@ Java and MRE support come as optional packages. Follow [Packages](/fplinux/guide
 | Java MIDlet `.jar` | `fplinux-phoneme.apk` | phoneME |
 | MRE `.vxp` | `fplinux-mre.apk` | MRE |
 
-After installation, open **MRE** from the application menu. Choose **Open** to browse My files or a memory card, or choose a previously opened program from **Recent**. You can also select a VXP directly in [Files](/fplinux/use/files/). A missing file stays in Recent so you can reconnect its card; removing that entry does not delete the program or its saved data. Open Java JARs from Files; phoneME does not add an application-menu tile.
+After installation, open **phoneME** or **MRE** from the application menu. Choose **Open** to browse My files or a memory card, or choose a previously opened program from **Recent**. You can also select a JAR or VXP directly in [Files](/fplinux/use/files/). A missing file stays in Recent so you can reconnect its card; removing that entry does not delete the program or its saved data.
 
 Transfer your program to My files or a connected memory card. For uploads to My files, follow the [ownership step](/fplinux/use/connect/#files-for-graphical-applications) before opening it. Keep any companion files beside the program when it expects them there.
 
 Use the [shared application controls](/fplinux/use/session/#home-and-applications) to return Home, resume a program from Tasks or close it. Closing a program opened from Files returns to its folder. Close programs using a memory card before [safely ejecting it](/fplinux/use/microsd/#remove-the-card-safely).
 
-Choosing the MRE tile again opens its home screen and pauses the current program. Choose **Continue** to return to it. Resuming from Tasks returns directly to the program. Neither action starts a second copy.
+Choosing the runtime's tile again opens its home screen and pauses the current program. Choose **Continue** to return to it. Resuming from Tasks returns directly to the program. Neither action starts a second copy.
 
 ## Display settings
 
-**Settings** on the MRE home screen sets defaults. With a program open, its settings can override those defaults. **Fit** preserves the image's proportions, **Original size** centres it without scaling and clips any part outside the screen, and **Integer** uses whole-number enlargement or reduction. Rotation changes the image and directional controls together.
+**Settings** on the runtime's home screen sets defaults. With a program open, its settings can override those defaults. **Fit** preserves the image's proportions, **Original size** centres it without scaling and clips any part outside the screen, and **Integer** uses whole-number enlargement or reduction. Rotation changes the image and directional controls together.
 
-MRE keeps its existing guest display size and offers a pointer setting for programs that support pointer input.
+phoneME also offers a Canvas size: the phone's available area, 128×128, 128×160, 176×208, 176×220, 240×320 or 320×240. Choose a size that suits the program; its filename does not select one. A Canvas-size change takes effect the next time the Java program starts. Scale and rotation apply to the running image. MRE keeps its existing guest display size and offers a pointer setting for programs that support pointer input.
 
 ## Java programs
 
 Open the JAR itself. When it contains several MIDlets, choose the one to run. Opening another JAR asks to close the current program; cancel to keep it running.
 
-**Java record stores are temporary.** They are removed when phoneME closes, including on a persistent system card. Returning Home keeps the current program and its record stores alive. Do not rely on Java programs to retain saved games or other records after closing them.
+Java record stores remain after closing and reopening phoneME. Programs with the same **MIDlet-Vendor** and **MIDlet-Name** share their records across version updates and moves to another folder. A program missing either field uses its JAR path instead: moving it gives it a separate store. Different suites keep separate records.
+
+Records live in your home directory. During a RAM boot, they survive closing the application but are lost when the phone loses power. A memory card containing the JAR does not make these records persistent. See [Files](/fplinux/use/files/) for the home directory's lifetime.
 
 ## MRE programs
 

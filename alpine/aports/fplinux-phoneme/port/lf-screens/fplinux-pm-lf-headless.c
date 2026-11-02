@@ -21,6 +21,17 @@ __attribute__((weak)) void fplinux_pm_app_loaded(void)
 {
 }
 
+__attribute__((weak)) unsigned int fplinux_pm_app_canvas_size(void)
+{
+	return 0;
+}
+
+__attribute__((weak)) struct fplinux_ui_view_settings
+fplinux_pm_app_view_settings(void)
+{
+	return fplinux_ui_view_settings_defaults();
+}
+
 __attribute__((weak)) bool fplinux_pm_app_set_fullscreen(bool fullscreen)
 {
 	(void)fullscreen;

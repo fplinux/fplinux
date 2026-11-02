@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * phoneME: receive a JAR from Files and run its MIDlet in the in-process VM.
- * Nothing is installed and nothing is kept:
- * record stores live in a /tmp directory that is removed at exit.
+ * phoneME: open a JAR and run its MIDlet in the in-process VM.
  *
  * The app is integrated. Its own screens are the MIDlet chooser
  * of a suite, the suite screen and alerts. Once a MIDlet is chosen, the
@@ -15,6 +13,7 @@
 #include "fplinux-pm-app.h"
 #include "fplinux-cli.h"
 #include "fplinux-pm-lifecycle.h"
+#include "fplinux-pm-store.h"
 #include "../canvas/fplinux-pm-canvas.h"
 #include "../../vm/fplinux-pm-vm.h"
 
@@ -22,8 +21,11 @@
 #include <fcntl.h>
 #include <fplinux/fplinux-ui-screen.h>
 #include <fplinux/fplinux-ui-session.h>
+#include <fplinux/fplinux-ui-file-picker.h>
+#include <fplinux/fplinux-ui-prefs.h>
+#include <fplinux/fplinux-ui-recent.h>
+#include <fplinux/fplinux-ui-view-settings.h>
 #include <fplinux/fplinux-ui.h>
-#include <ftw.h>
 #include <libintl.h>
 #include <limits.h>
 #include <stdio.h>
@@ -33,7 +35,6 @@
 #include <unistd.h>
 
 #define _(text) gettext(text)
-#define STORAGE_TEMPLATE "/tmp/fplinux-phoneme-XXXXXX"
 /* A MIDlet icon is a small PNG; larger ones are not shown. */
 #define ICON_MAX_BYTES (64u * 1024u)
 #define MESSAGE_BYTES 1024
@@ -43,6 +44,9 @@ enum command {
 	COMMAND_CLOSE,
 	COMMAND_CANCEL,
 	COMMAND_CONFIRM_CLOSE,
+	COMMAND_SAVE,
+	COMMAND_REMOVE,
+	COMMAND_RESET,
 };
 
 struct pm_app {
@@ -61,7 +65,24 @@ struct pm_app {
 	char jar_path[PATH_MAX];
 	struct fplinux_pm_suite suite;
 	const struct fplinux_pm_midlet *midlet;
-	char storage[sizeof(STORAGE_TEMPLATE)];
+	char *storage;
+	char state_root[PATH_MAX];
+	char home_path[PATH_MAX];
+	struct fplinux_ui_file_picker *picker;
+	struct fplinux_ui_screen *home, *auxiliary;
+	struct fplinux_ui_prefs *prefs, *program_prefs;
+	struct fplinux_ui_recent recent;
+	struct fplinux_ui_view_settings defaults, settings;
+	struct fplinux_ui_view_fields settings_fields;
+	size_t size_field;
+	unsigned int default_size, program_size, run_size;
+	unsigned int auxiliary_kind;
+	bool program_settings;
+	bool guest_active;
+	bool guest_fullscreen;
+	uint32_t open_request;
+	uint32_t storage_request;
+	bool home_storage_known, home_persistent, picker_requested;
 	fplinux_pm_app_resize_fn resize;
 	void *resize_context;
 };
@@ -72,6 +93,29 @@ static const struct fplinux_ui_command back_command = {
 	.id = COMMAND_BACK,
 	.type = FPLINUX_UI_COMMAND_BACK,
 };
+
+static void show_home(struct pm_app *app);
+static void sync_visibility(struct pm_app *app);
+static void show_alert(struct pm_app *app, const char *title, const char *text);
+
+static bool save_preferences(struct pm_app *app, struct fplinux_ui_prefs *prefs,
+			     bool prepared)
+{
+	struct fplinux_storage_result result = { FPLINUX_STORAGE_UNPUBLISHED,
+						 errno ? errno : EIO };
+
+	if (prepared && prefs)
+		result = fplinux_ui_prefs_save(prefs);
+	if (result.state != FPLINUX_STORAGE_DURABLE) {
+		show_alert(app,
+			   result.state == FPLINUX_STORAGE_PUBLISHED_UNSYNCED ?
+				   _("Saving not confirmed") :
+				   _("Cannot save"),
+			   fplinux_ui_storage_error(result));
+		return false;
+	}
+	return true;
+}
 
 static void document_reply(struct pm_app *app,
 			   enum fplinux_ui_document_status status, int error)
@@ -118,6 +162,21 @@ static void set_busy(struct pm_app *app, const char *title)
 
 void fplinux_pm_app_loaded(void)
 {
+	if (!app.loaded) {
+		char *path = realpath(app.jar_path, NULL);
+
+		if (path) {
+			bool stored =
+				fplinux_ui_recent_record(
+					&app.recent, path,
+					app.suite.name[0] ? app.suite.name :
+							    NULL) &&
+				fplinux_ui_recent_store(&app.recent, app.prefs);
+
+			save_preferences(&app, app.prefs, stored);
+			free(path);
+		}
+	}
 	app.loaded = true;
 	document_reply(&app, FPLINUX_UI_DOCUMENT_ACCEPTED, 0);
 	if (app.ui && fplinux_ui_is_visible(app.ui))
@@ -131,7 +190,20 @@ struct fplinux_ui *fplinux_pm_app_ui(void)
 
 bool fplinux_pm_app_set_fullscreen(bool fullscreen)
 {
-	return app.ui && fplinux_ui_set_fullscreen(app.ui, fullscreen);
+	if (!app.ui || !fplinux_ui_set_fullscreen(app.ui, fullscreen))
+		return false;
+	app.guest_fullscreen = fullscreen;
+	return true;
+}
+
+unsigned int fplinux_pm_app_canvas_size(void)
+{
+	return app.run_size;
+}
+
+struct fplinux_ui_view_settings fplinux_pm_app_view_settings(void)
+{
+	return app.settings;
 }
 
 void fplinux_pm_app_set_resize_handler(fplinux_pm_app_resize_fn handler,
@@ -259,42 +331,6 @@ static unsigned char *read_icon(struct pm_app *app, const char *path,
 
 /* Record stores */
 
-static int remove_entry(const char *path, const struct stat *status, int type,
-			struct FTW *ftw)
-{
-	(void)status;
-	(void)type;
-	(void)ftw;
-	if (remove(path))
-		fprintf(stderr, "fplinux-phoneme: remove %s: %s\n", path,
-			strerror(errno));
-	return 0;
-}
-
-/* The VM's private directory for this run, or NULL without record stores. */
-static const char *create_storage(struct pm_app *app)
-{
-	memcpy(app->storage, STORAGE_TEMPLATE, sizeof(app->storage));
-	if (mkdtemp(app->storage))
-		return app->storage;
-	fprintf(stderr, "fplinux-phoneme: record store folder: %s\n",
-		strerror(errno));
-	app->storage[0] = '\0';
-	return NULL;
-}
-
-/* Only the directory mkdtemp() made, without following links out of it. */
-static void remove_storage(struct pm_app *app)
-{
-	if (!app->storage[0])
-		return;
-	if (nftw(app->storage, remove_entry, 8,
-		 FTW_DEPTH | FTW_PHYS | FTW_MOUNT))
-		fprintf(stderr, "fplinux-phoneme: remove %s: %s\n",
-			app->storage, strerror(errno));
-	app->storage[0] = '\0';
-}
-
 /* The VM */
 
 static void apply(struct pm_app *app, struct fplinux_pm_schedule schedule,
@@ -371,7 +407,7 @@ static void start_vm(struct pm_app *app)
 	struct fplinux_pm_vm_config config = {
 		.jar_path = app->jar_path,
 		.midlet_class = app->midlet->class_name,
-		.storage_dir = create_storage(app),
+		.storage_dir = app->storage,
 		.wakeup = vm_wakeup,
 		.wakeup_context = app,
 	};
@@ -532,6 +568,9 @@ static int start_midlet(struct pm_app *app,
 	app->midlet = midlet;
 	while (fplinux_ui_pop(app->ui))
 		;
+	app->home = NULL;
+	app->auxiliary = NULL;
+	app->guest_active = true;
 	fplinux_ui_replace(app->ui, suite);
 	loading = fplinux_ui_alert_new(app->ui, FPLINUX_UI_ALERT_INFO,
 				       _("Starting"), midlet->name, 0);
@@ -542,6 +581,7 @@ static int start_midlet(struct pm_app *app,
 					       app);
 		fplinux_ui_push(app->ui, loading);
 	}
+	sync_visibility(app);
 	apply(app, fplinux_pm_lifecycle_load(&app->lifecycle), false);
 	return 0;
 }
@@ -562,27 +602,65 @@ static bool class_entry(const char *class_name, char *entry, size_t capacity)
 	return true;
 }
 
-/* Check the class before the VM starts, so a broken suite stays in the GUI. */
-static int choose_midlet(struct pm_app *app, size_t index)
+static int check_midlet_class(const char *jar_path,
+			      const struct fplinux_pm_midlet *midlet)
 {
-	const struct fplinux_pm_midlet *midlet = &app->suite.midlets[index];
 	enum fplinux_pm_jar_status status = FPLINUX_PM_JAR_NO_ENTRY;
 	char entry[PATH_MAX];
 	unsigned char *data = NULL;
 	size_t size = 0;
+	int error;
+
+	if (class_entry(midlet->class_name, entry, sizeof(entry)))
+		status = fplinux_pm_jar_read_entry(jar_path, entry, 0, &data,
+						   &size);
+	error = errno;
+	free(data);
+	if (status == FPLINUX_PM_JAR_OK || status == FPLINUX_PM_JAR_TOO_LARGE)
+		return 0;
+	return status == FPLINUX_PM_JAR_IO	  ? (error ? error : EIO) :
+	       status == FPLINUX_PM_JAR_NO_MEMORY ? ENOMEM :
+						    ENOEXEC;
+}
+
+/* Check the class before the VM starts, so a broken suite stays in the GUI. */
+static int choose_midlet(struct pm_app *app, size_t index)
+{
+	const struct fplinux_pm_midlet *midlet = &app->suite.midlets[index];
+	int error;
 
 	set_busy(app, midlet->name);
-	if (class_entry(midlet->class_name, entry, sizeof(entry)))
-		status = fplinux_pm_jar_read_entry(app->jar_path, entry, 0,
-						   &data, &size);
-	free(data);
-	if (status == FPLINUX_PM_JAR_OK || status == FPLINUX_PM_JAR_TOO_LARGE) {
+	error = check_midlet_class(app->jar_path, midlet);
+	if (!error) {
+		const char *key;
+
+		free(app->storage);
+		app->storage = fplinux_pm_store_open(
+			app->state_root, &app->suite, app->jar_path);
+		if (!app->storage)
+			return errno ? errno : EIO;
+		key = strrchr(app->storage, '/');
+		fplinux_ui_prefs_close(app->program_prefs);
+		app->program_prefs = fplinux_ui_program_prefs_open(
+			FPLINUX_PM_APP_ID, key + 1);
+		app->settings = app->defaults;
+		app->program_size = app->default_size;
+		if (app->program_prefs) {
+			long long size = fplinux_ui_prefs_get_int(
+				app->program_prefs, "canvas-size",
+				app->default_size);
+
+			fplinux_ui_view_settings_load(&app->settings,
+						      app->program_prefs,
+						      &app->defaults);
+			if (size >= 0 && size <= 6)
+				app->program_size = (unsigned int)size;
+		}
+		app->run_size = app->program_size;
 		return start_midlet(app, midlet);
 	}
 	set_busy(app, NULL);
-	return status == FPLINUX_PM_JAR_IO	  ? errno :
-	       status == FPLINUX_PM_JAR_NO_MEMORY ? ENOMEM :
-						    ENOEXEC;
+	return error;
 }
 
 /* A PNG icon from the JAR beside a chooser row; the runtime keeps a copy. */
@@ -611,9 +689,14 @@ static void chooser_command(struct fplinux_ui *ui,
 
 		if (error) {
 			document_reply(app, FPLINUX_UI_DOCUMENT_ERROR, error);
-			show_jar_problem(app, error == ENOMEM ?
-						      FPLINUX_PM_JAR_NO_MEMORY :
-						      FPLINUX_PM_JAR_FORMAT);
+			if (error == ENOEXEC || error == ENOMEM)
+				show_jar_problem(
+					app, error == ENOMEM ?
+						     FPLINUX_PM_JAR_NO_MEMORY :
+						     FPLINUX_PM_JAR_FORMAT);
+			else
+				show_alert(app, _("Cannot start"),
+					   strerror(error));
 		}
 	} else if (command_id == COMMAND_BACK) {
 		/* The runtime deletes the chooser; its rows are copies. */
@@ -698,14 +781,32 @@ open_document(struct fplinux_ui *ui,
 		return result;
 	}
 	if (app->lifecycle.phase != FPLINUX_PM_PHASE_PICKING) {
+		int class_error = 0;
+
+		for (size_t i = 0; i < suite.midlet_count; ++i) {
+			error = check_midlet_class(request->path,
+						   &suite.midlets[i]);
+			if (error) {
+				class_error = error;
+				break;
+			}
+		}
 		fplinux_pm_suite_cleanup(&suite);
 		close(descriptor);
+		if (class_error) {
+			result.error = class_error;
+			return result;
+		}
 		result.status = FPLINUX_UI_DOCUMENT_RESTART_REQUIRED;
 		result.error = 0;
 		return result;
 	}
+	document_reply(app, FPLINUX_UI_DOCUMENT_CANCELLED, 0);
 	while (fplinux_ui_pop(ui))
 		;
+	app->home = NULL;
+	app->auxiliary = NULL;
+	app->picker_requested = false;
 	fplinux_pm_suite_cleanup(&app->suite);
 	if (app->jar_directory >= 0)
 		close(app->jar_directory);
@@ -726,6 +827,352 @@ open_document(struct fplinux_ui *ui,
 	result.status = FPLINUX_UI_DOCUMENT_WAIT;
 	result.error = 0;
 	return result;
+}
+
+enum { AUX_RECENT = 1, AUX_SETTINGS };
+
+static void add_command(struct fplinux_ui_screen *screen, int id,
+			enum fplinux_ui_command_type type, const char *label)
+{
+	const struct fplinux_ui_command command = {
+		.id = id,
+		.type = type,
+		.label = label,
+	};
+
+	fplinux_ui_screen_add_command(screen, &command);
+}
+
+static void open_path(struct pm_app *app, const char *path)
+{
+	if (app->open_request)
+		return;
+	app->open_request = fplinux_ui_open_file(app->ui, path);
+	if (!app->open_request)
+		show_alert(app, _("Open JAR"), strerror(errno));
+}
+
+static void picker_result(struct fplinux_ui_file_picker *picker,
+			  enum fplinux_ui_file_picker_status status,
+			  const char *path, int error, void *context)
+{
+	struct pm_app *app = context;
+	char *selected = path ? strdup(path) : NULL;
+
+	app->picker = NULL;
+	fplinux_ui_file_picker_close(picker);
+	if (status == FPLINUX_UI_FILE_PICKER_SELECTED) {
+		if (selected)
+			open_path(app, selected);
+		else
+			show_alert(app, _("Open JAR"), _("Not enough memory."));
+	} else if (status == FPLINUX_UI_FILE_PICKER_ERROR) {
+		show_alert(app, _("Open JAR"), strerror(error));
+	}
+	free(selected);
+}
+
+static void open_picker(struct pm_app *app)
+{
+	static const char *const extensions[] = { "jar", NULL };
+	const struct fplinux_ui_file_picker_options options = {
+		.mode = FPLINUX_UI_FILE_PICKER_FILE,
+		.home = app->home_path,
+		.title = _("Open JAR"),
+		.extensions = extensions,
+	};
+
+	if (app->storage_request) {
+		app->picker_requested = true;
+		return;
+	}
+	app->picker_requested = false;
+	app->picker = fplinux_ui_file_picker_open(app->ui, &options,
+						  picker_result, app);
+	if (!app->picker)
+		show_alert(app, _("Open JAR"), strerror(errno));
+}
+
+static void storage_result(struct fplinux_ui *ui,
+			   const struct fplinux_volume_result *result,
+			   void *context)
+{
+	struct pm_app *app = context;
+
+	(void)ui;
+	if (app->picker)
+		fplinux_ui_file_picker_storage_result(app->picker, result);
+	if (!result->error) {
+		app->home_storage_known = true;
+		app->home_persistent = result->snapshot.home_persistent;
+		if (app->home) {
+			bool guest = app->lifecycle.phase !=
+					     FPLINUX_PM_PHASE_PICKING &&
+				     app->lifecycle.phase !=
+					     FPLINUX_PM_PHASE_EXITED;
+
+			fplinux_ui_list_set(
+				app->home, guest ? 1 : 0, _("Open JAR"),
+				app->home_persistent ?
+					_("Home storage: persistent") :
+					_("Home storage: lost after reboot"));
+		}
+	}
+	if (result->request_id == app->storage_request &&
+	    app->storage_request) {
+		app->storage_request = 0;
+		if (app->picker_requested && app->home)
+			open_picker(app);
+	}
+}
+
+static void home_command(struct fplinux_ui *ui,
+			 struct fplinux_ui_screen *screen, int command_id,
+			 void *context);
+
+static void show_recent(struct pm_app *app)
+{
+	struct fplinux_ui_screen *screen = fplinux_ui_list_new(
+		app->ui, _("Recent"), FPLINUX_UI_LIST_IMPLICIT);
+
+	if (!screen)
+		return;
+	for (size_t i = 0; i < app->recent.count; ++i) {
+		struct fplinux_ui_recent_entry *entry = &app->recent.items[i];
+		const char *name = strrchr(entry->path, '/');
+
+		fplinux_ui_list_append(screen,
+				       entry->title ? entry->title : name + 1,
+				       access(entry->path, R_OK) == 0 ?
+					       entry->path :
+					       _("Unavailable"));
+	}
+	if (app->recent.count)
+		add_command(screen, COMMAND_REMOVE, FPLINUX_UI_COMMAND_SCREEN,
+			    _("Remove"));
+	fplinux_ui_screen_add_command(screen, &back_command);
+	fplinux_ui_screen_set_listener(screen, home_command, NULL, app);
+	app->auxiliary = screen;
+	app->auxiliary_kind = AUX_RECENT;
+	fplinux_ui_push(app->ui, screen);
+}
+
+static void show_settings(struct pm_app *app, bool program)
+{
+	const char *sizes[] = { _("Native"), "128x128", "128x160", "176x208",
+				"176x220",   "240x320", "320x240" };
+	struct fplinux_ui_view_settings shown = program ? app->settings :
+							  app->defaults;
+	struct fplinux_ui_screen *screen = fplinux_ui_form_new(
+		app->ui, program ? _("Program settings") : _("Settings"));
+
+	if (!screen)
+		return;
+	if (!fplinux_ui_view_settings_form_append(screen, &shown,
+						  &app->settings_fields))
+		return;
+	app->size_field = fplinux_ui_form_append_choice(
+		screen, _("Canvas size (next run)"), FPLINUX_UI_CHOICE_POPUP,
+		sizes, sizeof(sizes) / sizeof(sizes[0]));
+	if (app->size_field == SIZE_MAX)
+		return;
+	fplinux_ui_form_set_choice(screen, app->size_field,
+				   program ? app->program_size :
+					     app->default_size);
+	add_command(screen, COMMAND_SAVE, FPLINUX_UI_COMMAND_OK, _("Save"));
+	if (program)
+		add_command(screen, COMMAND_RESET, FPLINUX_UI_COMMAND_SCREEN,
+			    _("Use defaults"));
+	fplinux_ui_screen_add_command(screen, &back_command);
+	fplinux_ui_screen_set_listener(screen, home_command, NULL, app);
+	app->program_settings = program;
+	app->auxiliary = screen;
+	app->auxiliary_kind = AUX_SETTINGS;
+	fplinux_ui_push(app->ui, screen);
+}
+
+static void leave_home(struct pm_app *app)
+{
+	if (!app->home)
+		return;
+	fplinux_ui_pop_to(app->ui, app->home);
+	fplinux_ui_pop(app->ui);
+	app->home = NULL;
+	app->auxiliary = NULL;
+	app->picker_requested = false;
+	app->guest_active = true;
+	fplinux_ui_set_fullscreen(app->ui, app->guest_fullscreen);
+	if (app->resize)
+		app->resize(app->resize_context);
+	sync_visibility(app);
+}
+
+static void home_command(struct fplinux_ui *ui,
+			 struct fplinux_ui_screen *screen, int command_id,
+			 void *context)
+{
+	struct pm_app *app = context;
+	bool guest = app->lifecycle.phase != FPLINUX_PM_PHASE_PICKING &&
+		     app->lifecycle.phase != FPLINUX_PM_PHASE_EXITED;
+
+	if (screen == app->home) {
+		if (command_id == FPLINUX_UI_SELECT_COMMAND) {
+			size_t row = fplinux_ui_list_get_focused(screen);
+
+			if (guest && row == 0) {
+				leave_home(app);
+				return;
+			}
+			if (guest && row != SIZE_MAX)
+				--row;
+			if (row == 0)
+				open_picker(app);
+			else if (row == 1)
+				show_recent(app);
+			else if (row == 2)
+				show_settings(app, false);
+			else if (row == 3 && guest)
+				show_settings(app, true);
+		} else if (command_id == COMMAND_BACK) {
+			if (guest)
+				leave_home(app);
+			else
+				fplinux_ui_back(ui);
+		}
+		return;
+	}
+	if (screen != app->auxiliary)
+		return;
+	if (app->auxiliary_kind == AUX_RECENT &&
+	    command_id == FPLINUX_UI_SELECT_COMMAND) {
+		size_t row = fplinux_ui_list_get_focused(screen);
+
+		if (row < app->recent.count) {
+			char *path = strdup(app->recent.items[row].path);
+
+			app->auxiliary = NULL;
+			fplinux_ui_pop(ui);
+			if (path) {
+				open_path(app, path);
+				free(path);
+			}
+		}
+	} else if (app->auxiliary_kind == AUX_RECENT &&
+		   command_id == COMMAND_REMOVE) {
+		size_t row = fplinux_ui_list_get_focused(screen);
+
+		if (fplinux_ui_recent_remove(&app->recent, row)) {
+			fplinux_ui_list_delete(screen, row);
+			if (!app->recent.count)
+				fplinux_ui_screen_remove_command(
+					screen, COMMAND_REMOVE);
+			save_preferences(app, app->prefs,
+					 fplinux_ui_recent_store(&app->recent,
+								 app->prefs));
+		}
+	} else if (app->auxiliary_kind == AUX_SETTINGS &&
+		   (command_id == COMMAND_SAVE ||
+		    command_id == COMMAND_RESET)) {
+		struct fplinux_ui_view_settings settings;
+		struct fplinux_ui_prefs *prefs =
+			app->program_settings ? app->program_prefs : app->prefs;
+		size_t size =
+			fplinux_ui_form_get_choice(screen, app->size_field);
+		bool ok = prefs != NULL;
+
+		if (command_id == COMMAND_RESET) {
+			settings = app->defaults;
+			size = app->default_size;
+			ok = ok && fplinux_ui_view_settings_reset(prefs) &&
+			     fplinux_ui_prefs_remove(prefs, "canvas-size");
+		} else {
+			ok = ok && size <= 6 &&
+			     fplinux_ui_view_settings_form_read(
+				     screen, &app->settings_fields,
+				     &settings) &&
+			     fplinux_ui_view_settings_store(&settings, prefs) &&
+			     fplinux_ui_prefs_set_int(prefs, "canvas-size",
+						      (long long)size);
+		}
+		app->auxiliary = NULL;
+		fplinux_ui_pop(ui);
+		if (ok) {
+			fplinux_pm_keys_cancel(FPLINUX_UI_KEY_PHONE);
+			fplinux_pm_keys_cancel(FPLINUX_UI_KEY_KEYBOARD);
+			if (app->program_settings) {
+				app->settings = settings;
+				app->program_size = (unsigned int)size;
+			} else {
+				app->defaults = settings;
+				app->default_size = (unsigned int)size;
+				app->settings = settings;
+				app->program_size = app->default_size;
+				if (app->program_prefs) {
+					long long stored =
+						fplinux_ui_prefs_get_int(
+							app->program_prefs,
+							"canvas-size",
+							app->default_size);
+
+					fplinux_ui_view_settings_load(
+						&app->settings,
+						app->program_prefs,
+						&app->defaults);
+					if (stored >= 0 && stored <= 6)
+						app->program_size =
+							(unsigned int)stored;
+				}
+			}
+			fplinux_pm_canvas_view_changed();
+		}
+		save_preferences(app, prefs, ok);
+	} else if (command_id == COMMAND_BACK || command_id == COMMAND_CANCEL) {
+		app->auxiliary = NULL;
+		fplinux_ui_pop(ui);
+	}
+}
+
+static void show_home(struct pm_app *app)
+{
+	bool guest = app->lifecycle.phase != FPLINUX_PM_PHASE_PICKING &&
+		     app->lifecycle.phase != FPLINUX_PM_PHASE_EXITED;
+	struct fplinux_ui_screen *screen;
+
+	if (app->home)
+		return;
+	screen = fplinux_ui_list_new(app->ui, "phoneME",
+				     FPLINUX_UI_LIST_IMPLICIT);
+	if (!screen)
+		return;
+	if (guest) {
+		fplinux_ui_list_append(screen, _("Continue"), NULL);
+		if (app->midlet)
+			set_midlet_icon(app, screen, 0, app->midlet->icon);
+	}
+	fplinux_ui_list_append(
+		screen, _("Open JAR"),
+		app->home_storage_known ?
+			(app->home_persistent ?
+				 _("Home storage: persistent") :
+				 _("Home storage: lost after reboot")) :
+			NULL);
+	fplinux_ui_list_append(screen, _("Recent"), NULL);
+	fplinux_ui_list_append(screen, _("Settings"), NULL);
+	if (guest)
+		fplinux_ui_list_append(screen, _("Program settings"), NULL);
+	fplinux_ui_screen_add_command(screen, &back_command);
+	fplinux_ui_screen_set_listener(screen, home_command, NULL, app);
+	app->home = screen;
+	fplinux_pm_keys_cancel(FPLINUX_UI_KEY_PHONE);
+	fplinux_pm_keys_cancel(FPLINUX_UI_KEY_KEYBOARD);
+	app->guest_active = false;
+	sync_visibility(app);
+	if (guest)
+		fplinux_ui_set_fullscreen(app->ui, false);
+	fplinux_ui_push(app->ui, screen);
+	if (!app->storage_request && !app->picker)
+		app->storage_request = fplinux_ui_storage_request(
+			app->ui, FPLINUX_VOLUME_REFRESH, 0);
 }
 
 static void close_command(struct fplinux_ui *ui,
@@ -769,10 +1216,9 @@ static enum fplinux_ui_close_response prepare_close(struct fplinux_ui *ui,
 		return FPLINUX_UI_CLOSE_WAIT;
 	if (fplinux_pm_vm_get_state() != FPLINUX_PM_VM_RUNNING)
 		return FPLINUX_UI_CLOSE_READY;
-	alert = fplinux_ui_alert_new(
-		ui, FPLINUX_UI_ALERT_CONFIRMATION, _("Close MIDlet?"),
-		_("Record stores are temporary and will be removed when phoneME closes."),
-		0);
+	alert = fplinux_ui_alert_new(ui, FPLINUX_UI_ALERT_CONFIRMATION,
+				     _("Close MIDlet?"),
+				     _("Close the running MIDlet?"), 0);
 	if (!alert)
 		return FPLINUX_UI_CLOSE_CANCEL;
 	app->close_wait = true;
@@ -787,35 +1233,62 @@ static enum fplinux_ui_close_response prepare_close(struct fplinux_ui *ui,
 
 /* Events */
 
+static void sync_visibility(struct pm_app *app)
+{
+	struct fplinux_pm_visibility visibility =
+		fplinux_pm_lifecycle_visibility(
+			&app->lifecycle,
+			app->guest_active && fplinux_ui_is_visible(app->ui) &&
+				fplinux_ui_lifecycle(app->ui) ==
+					FPLINUX_UI_FOREGROUND,
+			fplinux_ui_now_ms());
+
+	if (visibility.notify_vm)
+		fplinux_pm_vm_set_visible(app->lifecycle.visible);
+	if (!app->close_wait)
+		apply(app, visibility.schedule, false);
+	if (app->lifecycle.visible && app->loaded)
+		set_busy(app, NULL);
+}
+
 static void handle_event(struct fplinux_ui *ui,
 			 const struct fplinux_ui_event *event, void *context)
 {
 	struct pm_app *app = context;
-	struct fplinux_pm_visibility visibility;
-
 	(void)ui;
 	switch (event->type) {
 	case FPLINUX_UI_EVENT_VISIBILITY:
 	case FPLINUX_UI_EVENT_LIFECYCLE:
-		visibility = fplinux_pm_lifecycle_visibility(
-			&app->lifecycle,
-			fplinux_ui_is_visible(ui) &&
-				fplinux_ui_lifecycle(ui) ==
-					FPLINUX_UI_FOREGROUND,
-			fplinux_ui_now_ms());
-		if (visibility.notify_vm)
-			fplinux_pm_vm_set_visible(app->lifecycle.visible);
-		if (!app->close_wait)
-			apply(app, visibility.schedule, false);
-		if (app->lifecycle.visible && app->loaded)
-			set_busy(app, NULL);
+		sync_visibility(app);
 		break;
 	case FPLINUX_UI_EVENT_CLOSE:
 		set_busy(app, NULL);
+		app->picker_requested = false;
+		if (app->picker) {
+			fplinux_ui_file_picker_close(app->picker);
+			app->picker = NULL;
+		}
+		document_reply(app, FPLINUX_UI_DOCUMENT_CANCELLED, 0);
 		close_vm(app);
 		break;
+	case FPLINUX_UI_EVENT_ACTIVATION:
+		if (event->activation == FPLINUX_UI_ACTIVATION_OPEN &&
+		    !app->document_id && !app->open_request)
+			show_home(app);
+		break;
+	case FPLINUX_UI_EVENT_DOCUMENT_RESULT:
+		if (event->document_result.request_id == app->open_request &&
+		    event->document_result.status != FPLINUX_UI_DOCUMENT_WAIT) {
+			app->open_request = 0;
+			if (event->document_result.status ==
+			    FPLINUX_UI_DOCUMENT_ERROR)
+				show_alert(
+					app, _("Open JAR"),
+					strerror(event->document_result.error));
+		}
+		break;
 	case FPLINUX_UI_EVENT_RESIZE:
-		if (app->resize)
+		if (app->guest_active && app->resize)
 			app->resize(app->resize_context);
 		break;
 	case FPLINUX_UI_EVENT_INPUT_CANCEL:
@@ -832,10 +1305,9 @@ int main(int argc, char **argv)
 {
 	struct fplinux_cli cli = {
 		.program = "fplinux-phoneme",
-		.description =
-			"Run a MIDlet JAR opened from Files. Record stores are temporary.",
+		.description = "Run a MIDlet JAR.",
 	};
-	struct fplinux_ui_screen *screen;
+	const char *home;
 	int result;
 
 	result = fplinux_cli_parse(&cli, argc, argv);
@@ -848,29 +1320,45 @@ int main(int argc, char **argv)
 		perror("fplinux-phoneme: open UI");
 		return EXIT_FAILURE;
 	}
-	fplinux_pm_lifecycle_init(&app.lifecycle,
-				  fplinux_ui_is_visible(app.ui) &&
-					  fplinux_ui_lifecycle(app.ui) ==
-						  FPLINUX_UI_FOREGROUND);
+	fplinux_pm_lifecycle_init(&app.lifecycle, false);
 	fplinux_ui_set_document_handler(app.ui, open_document, &app);
 	fplinux_ui_set_close_handler(app.ui, prepare_close, &app);
-	screen = fplinux_ui_form_new(app.ui, "phoneME");
-	if (!screen) {
-		fplinux_ui_close(app.ui);
-		return EXIT_FAILURE;
+	fplinux_ui_set_storage_handler(app.ui, storage_result, &app);
+	app.defaults = fplinux_ui_view_settings_defaults();
+	app.settings = app.defaults;
+	app.prefs = fplinux_ui_prefs_open(FPLINUX_PM_APP_ID);
+	if (app.prefs) {
+		long long size =
+			fplinux_ui_prefs_get_int(app.prefs, "canvas-size", 0);
+
+		fplinux_ui_view_settings_load(&app.defaults, app.prefs,
+					      &app.settings);
+		fplinux_ui_recent_load(&app.recent, app.prefs);
+		if (size >= 0 && size <= 6)
+			app.default_size = (unsigned int)size;
+		app.settings = app.defaults;
 	}
-	fplinux_ui_form_append_string(screen, NULL,
-				      _("Open a JAR file from Files."));
-	fplinux_ui_screen_add_command(screen, &back_command);
-	fplinux_ui_screen_set_listener(screen, leave_command, NULL, &app);
-	fplinux_ui_push(app.ui, screen);
+	home = getenv("HOME");
+	if (!home || home[0] != '/' ||
+	    snprintf(app.home_path, sizeof(app.home_path), "%s/Files", home) >=
+		    (int)sizeof(app.home_path) ||
+	    !fplinux_ui_state_dir(FPLINUX_PM_APP_ID, app.state_root,
+				  sizeof(app.state_root))) {
+		result = -1;
+		goto cleanup;
+	}
+	show_home(&app);
 	result = fplinux_ui_run(app.ui);
+cleanup:
 	if (app.tick)
 		lv_timer_delete(app.tick);
 	app.tick = NULL;
 	fplinux_ui_close(app.ui);
 	app.ui = NULL;
-	remove_storage(&app);
+	free(app.storage);
+	fplinux_ui_prefs_close(app.program_prefs);
+	fplinux_ui_prefs_close(app.prefs);
+	fplinux_ui_recent_cleanup(&app.recent);
 	if (app.jar_directory >= 0)
 		close(app.jar_directory);
 	fplinux_pm_suite_cleanup(&app.suite);

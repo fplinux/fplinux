@@ -41,8 +41,8 @@ struct fplinux_pm_vm_config {
 	/* Java heap size; 0 selects FPLINUX_PM_VM_HEAP_KIB_DEFAULT. */
 	unsigned int heap_kib;
 	/*
-	 * Existing writable directory owned by the caller for this run's RMS
-	 * record stores and other MIDP files; the caller removes it at exit.
+	 * Existing writable directory owned by the caller for this suite's RMS
+	 * record stores and other MIDP files; its lifetime is caller-controlled.
 	 * NULL: record stores cannot be opened (RecordStoreException).
 	 */
 	const char *storage_dir;
@@ -173,7 +173,7 @@ enum fplinux_pm_jar_status {
  * the caller owns *suite and releases it with fplinux_pm_suite_cleanup();
  * on any other result *suite is left empty (safe to clean up). A malformed
  * MIDlet-<n> value (fewer than three fields, empty name or class) ends the
- * list as if the number were missing.
+ * list as if the number were missing. A manifest containing NUL is rejected.
  */
 enum fplinux_pm_jar_status
 fplinux_pm_jar_read_suite(const char *jar_path, struct fplinux_pm_suite *suite);

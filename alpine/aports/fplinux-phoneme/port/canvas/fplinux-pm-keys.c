@@ -20,6 +20,7 @@
 #include "fplinux-pm-canvas-core.h"
 #include "fplinux-pm-canvas.h"
 #include "fplinux-pm-vm.h"
+#include "../app/fplinux-pm-app.h"
 
 /* com.sun.midp.lcdui.EventConstants.REPEATED; midpEvents.h lacks it. */
 #define KEY_REPEATED 3
@@ -159,9 +160,21 @@ static void press(const struct fplinux_ui_screen *screen,
 {
 	struct held_key *held = find_held(keyboard, key->code);
 	int midp = fplinux_pm_key_code(keyboard, key->code, key->unicode);
+	enum fplinux_rgb565_rotation rotation =
+		fplinux_pm_app_view_settings().rotation;
+	static const int clockwise[] = { -3, -4, -2, -1 };
+	static const int counterclockwise[] = { -4, -3, -1, -2 };
 
 	if (!midp || held)
 		return;
+	if (midp <= FPLINUX_PM_KEY_UP && midp >= FPLINUX_PM_KEY_RIGHT) {
+		int index = -midp - 1;
+
+		if (rotation == FPLINUX_RGB565_ROTATE_90)
+			midp = clockwise[index];
+		else if (rotation == FPLINUX_RGB565_ROTATE_270)
+			midp = counterclockwise[index];
+	}
 	for (size_t i = 0; !held && i < HELD_MAX; ++i)
 		if (!keys.held[i].midp)
 			held = &keys.held[i];
@@ -169,6 +182,7 @@ static void press(const struct fplinux_ui_screen *screen,
 		/* More keys held than slots: the oldest slot gives way. */
 		held = &keys.held[keys.held_next];
 		keys.held_next = (keys.held_next + 1) % HELD_MAX;
+		post_key(MIDP_RELEASED, held->midp);
 	}
 	*held = (struct held_key){ keyboard, key->code, midp };
 	post_key(MIDP_PRESSED, midp);

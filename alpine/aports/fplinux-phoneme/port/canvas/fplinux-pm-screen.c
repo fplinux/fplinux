@@ -4,15 +4,12 @@
  *
  * fplinux-phoneme display port: the lcdlf_* interface of
  * highlevelui/lcdlf/include/lcdlf_export.h over a putpixel RGB565 buffer and
- * one STAGED software frame shared by every Canvas peer. LVGL only reads the
- * published frame, including during a system menu redraw inside paint().
- * The buffers hold the whole display; their drawing width and height are
- * those of the shown Canvas. Refreshed rectangles collect as damage and
- * are copied only when paint() is complete, at most once per VM slice and
- * once more by a ready timer after the slice. Partial paints and GameCanvas
- * flushes retain pixels outside their damage, so swapping alone would lose
- * those pixels; copying damage needs no second full-frame synchronization.
- * Nothing is rendered while the app is hidden. Headless needs only putpixel.
+ * one STAGED software frame shared by every Canvas peer. The guest draws
+ * into a logical Canvas buffer; complete refreshes transform that buffer into
+ * the physical frame. LVGL reads only its published image, including during
+ * a system menu redraw inside paint(). Partial paints and GameCanvas flushes
+ * retain the rest of the logical buffer. Nothing is rendered while hidden.
+ * Headless needs only putpixel storage.
  *
  * Canvas.setFullScreenMode() reaches lcdlf_set_fullscreen_mode() through
  * Display, which every Displayable passes when it is shown: the app asks
@@ -23,6 +20,7 @@
  * and call sizeChanged().
  */
 #include <fplinux/fplinux-ui-frame.h>
+#include <fplinux/fplinux-rgb565.h>
 #include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -94,6 +92,7 @@ static struct {
 	bool rendered;
 	/* Canvas.paint() runs: the buffer holds a half-drawn frame. */
 	bool painting;
+	bool resize_deferred;
 	/* Between prepare0 and activate0; a resize then needs a new read. */
 	bool showing;
 	bool resized_while_showing;
@@ -127,11 +126,15 @@ static uint64_t monotonic_us(void)
 
 static void canvas_size(bool full_screen, bool titled, int *width, int *height)
 {
+	unsigned int preset = fplinux_pm_app_canvas_size();
 	struct fplinux_pm_canvas_geometry geometry = {
 		.runtime = port.ui != NULL,
 		.full_screen = full_screen,
 		.titled = titled && !full_screen,
 	};
+
+	if (fplinux_pm_canvas_preset(preset, width, height))
+		return;
 
 	if (port.ui) {
 		const struct fplinux_ui_metrics *metrics =
@@ -148,11 +151,6 @@ static void canvas_size(bool full_screen, bool titled, int *width, int *height)
 		geometry.header_height = metrics->header_height;
 	}
 	fplinux_pm_canvas_size(&geometry, width, height);
-	/* Never larger than the buffer, whatever the runtime reports. */
-	if ((size_t)*width > port.capacity)
-		*width = (int)port.capacity;
-	if (*width > 0 && (size_t)*width * (size_t)*height > port.capacity)
-		*height = (int)(port.capacity / (size_t)*width);
 }
 
 /* The flush timer runs after the current VM slice. */
@@ -169,8 +167,12 @@ static void bind(struct canvas_peer *peer)
 {
 	lv_obj_t *canvas = fplinux_ui_frame_object(port.frame);
 
-	lv_obj_set_size(peer->container, gxj_system_screen_buffer.width,
-			gxj_system_screen_buffer.height);
+	lv_obj_set_size(
+		peer->container, fplinux_ui_width(port.ui),
+		fplinux_ui_height(port.ui) -
+			(port.titled && !port.full_screen ?
+				 fplinux_ui_metrics(port.ui)->header_height :
+				 0));
 	lv_obj_set_parent(canvas, peer->container);
 	lv_obj_set_hidden(canvas, false);
 	fplinux_ui_frame_damage(port.frame, NULL);
@@ -209,16 +211,20 @@ static bool apply_size(bool notify)
 	canvas_size(port.full_screen, port.titled, &width, &height);
 	changed = width != gxj_system_screen_buffer.width ||
 		  height != gxj_system_screen_buffer.height;
-	if (changed && port.frame &&
-	    !fplinux_ui_frame_resize(port.frame, width, height)) {
-		fprintf(stderr, "fplinux-phoneme: resize frame: %s\n",
-			strerror(errno));
-		return false;
+	if ((size_t)width * (size_t)height > port.capacity) {
+		uint16_t *pixels =
+			calloc((size_t)width * (size_t)height, sizeof(*pixels));
+
+		if (!pixels) {
+			fprintf(stderr, "fplinux-phoneme: resize Canvas: %s\n",
+				strerror(errno));
+			return false;
+		}
+		free(port.pixels);
+		port.pixels = pixels;
+		port.capacity = (size_t)width * (size_t)height;
 	}
-	if (port.frame) {
-		port.pixels = fplinux_ui_frame_pixels(port.frame, NULL, NULL);
-		gxj_system_screen_buffer.pixelData = port.pixels;
-	}
+	gxj_system_screen_buffer.pixelData = port.pixels;
 	gxj_system_screen_buffer.width = width;
 	gxj_system_screen_buffer.height = height;
 	if (changed)
@@ -234,13 +240,26 @@ static bool apply_size(bool notify)
 static void surface_resized(void *context)
 {
 	(void)context;
+	if (port.painting) {
+		port.resize_deferred = true;
+		return;
+	}
 	if (apply_size(true)) {
 		/* Display read the size of a Canvas being shown before this. */
 		if (!port.active && port.showing)
 			port.resized_while_showing = true;
 	} else if (port.active) {
 		/* Same drawing area in a new place: show it there. */
+		bind(port.active);
 		fplinux_ui_frame_damage(port.frame, NULL);
+		port.pending = true;
+		schedule_flush();
+	}
+}
+
+void fplinux_pm_canvas_view_changed(void)
+{
+	if (port.active) {
 		port.pending = true;
 		schedule_flush();
 	}
@@ -278,12 +297,40 @@ static void report_stats(uint64_t now_ms)
  */
 static void render(void)
 {
+	struct fplinux_ui_view_settings settings;
+	struct fplinux_rgb565_viewport viewport;
+	uint16_t *destination;
+	uint16_t background;
+	int width, height;
 	uint64_t start;
 	uint64_t spent;
 
 	if (!port.active || !port.pending || port.painting || !port.ui)
 		return;
 	start = monotonic_us();
+	width = fplinux_ui_width(port.ui);
+	height = fplinux_ui_height(port.ui) -
+		 (port.titled && !port.full_screen ?
+			  fplinux_ui_metrics(port.ui)->header_height :
+			  0);
+	if (width <= 0 || height <= 0 ||
+	    !fplinux_ui_frame_resize(port.frame, width, height))
+		return;
+	settings = fplinux_pm_app_view_settings();
+	if (fplinux_rgb565_viewport_init(
+		    &viewport, gxj_system_screen_buffer.width,
+		    gxj_system_screen_buffer.height, width, height,
+		    settings.scale, settings.rotation))
+		return;
+	destination = fplinux_ui_frame_pixels(port.frame, NULL, NULL);
+	background = lv_color_to_u16(fplinux_ui_theme(port.ui)->background);
+	for (size_t i = 0; i < (size_t)width * (size_t)height; ++i)
+		destination[i] = background;
+	if (fplinux_rgb565_transform(&viewport, port.pixels,
+				     (size_t)gxj_system_screen_buffer.width,
+				     destination, (size_t)width))
+		return;
+	fplinux_ui_frame_damage(port.frame, NULL);
 	if (!fplinux_ui_frame_present(port.frame))
 		return;
 	if (port.completed_refresh) {
@@ -316,8 +363,7 @@ static void release_buffers(void)
 {
 	if (port.frame)
 		fplinux_ui_frame_delete(port.frame);
-	else
-		free(port.pixels); /* Headless putpixel storage. */
+	free(port.pixels);
 	port.frame = NULL;
 	port.owner_ui = NULL;
 	port.pixels = NULL;
@@ -445,19 +491,22 @@ int lcdlf_ui_init(void)
 				FPLINUX_UI_FRAME_STAGED);
 			if (port.frame) {
 				port.owner_ui = port.ui;
-				port.pixels = fplinux_ui_frame_pixels(
-					port.frame, NULL, NULL);
 				lv_obj_set_hidden(
 					fplinux_ui_frame_object(port.frame),
 					true);
 			}
-		} else {
-			port.pixels = calloc(capacity, sizeof(*port.pixels));
 		}
-		if (!port.pixels) {
+		port.pixels = calloc(capacity, sizeof(*port.pixels));
+		if (!port.pixels || (port.ui && !port.frame)) {
 			fprintf(stderr,
 				"fplinux-phoneme: cannot create screen frame: %s\n",
 				strerror(errno));
+			if (port.frame)
+				fplinux_ui_frame_delete(port.frame);
+			free(port.pixels);
+			port.pixels = NULL;
+			port.frame = NULL;
+			port.owner_ui = NULL;
 			return -1;
 		}
 		port.capacity = capacity;
@@ -472,6 +521,7 @@ int lcdlf_ui_init(void)
 	port.pending = false;
 	port.rendered = false;
 	port.painting = false;
+	port.resize_deferred = false;
 	port.showing = false;
 	port.resized_while_showing = false;
 	port.stats = (struct frame_stats){
@@ -795,6 +845,10 @@ KNIEXPORT KNI_RETURNTYPE_VOID
 KNIDECL(javax_microedition_lcdui_CanvasLFImpl_painting0)
 {
 	port.painting = KNI_GetParameterAsBoolean(1) == KNI_TRUE;
+	if (!port.painting && port.resize_deferred) {
+		port.resize_deferred = false;
+		surface_resized(NULL);
+	}
 	KNI_ReturnVoid();
 }
 
