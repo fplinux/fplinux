@@ -5015,6 +5015,125 @@ static void test_document_cold_return(struct fixture *fixture)
 	CHECK(fplinux_session_focused_pid(fixture->session) == origin->pid);
 }
 
+enum self_open_result {
+	SELF_ACCEPT,
+	SELF_CANCEL,
+	SELF_ERROR,
+	SELF_RESTART,
+	SELF_RESTART_CANCEL,
+};
+
+static void test_document_self_return(struct fixture *fixture,
+				      enum self_open_result outcome,
+				      bool from_launcher)
+{
+	struct peer *launcher = start_launcher(fixture);
+	struct peer *origin = NULL, *handler;
+	struct fplinux_ui_session_message document, result, active;
+	pid_t handler_pid;
+	uint32_t cancelled_close_serial = 0;
+
+	if (from_launcher) {
+		register_document_handler(fixture, "org.example.handler", "");
+		handler = show_app(fixture, launcher, "org.example.handler");
+	} else {
+		origin = show_app(fixture, launcher, TEST_APP);
+		handler = open_cold_document(fixture, launcher, origin,
+					     &document);
+		answer_document(fixture, handler, document.serial,
+				FPLINUX_UI_DOCUMENT_ACCEPTED, 0);
+		wait_message(fixture, origin,
+			     FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL);
+		active = active_for(fixture, launcher, "org.example.handler");
+		acknowledge(fixture, launcher, &active);
+		clear_messages(fixture, origin);
+	}
+	handler_pid = handler->pid;
+	clear_messages(fixture, handler);
+	clear_messages(fixture, launcher);
+	request_document(fixture, handler, 72);
+	active = active_for(fixture, launcher, "");
+	acknowledge(fixture, launcher, &active);
+	document = wait_message(fixture, handler, FPLINUX_UI_SESSION_DOCUMENT,
+				NULL);
+	if (outcome == SELF_RESTART || outcome == SELF_RESTART_CANCEL) {
+		set_close_decision(fixture, handler, "wait");
+		answer_document(fixture, handler, document.serial,
+				FPLINUX_UI_DOCUMENT_RESTART_REQUIRED, 0);
+		result = wait_message(fixture, handler,
+				      FPLINUX_UI_SESSION_PREPARE_CLOSE, NULL);
+		if (outcome == SELF_RESTART_CANCEL)
+			cancelled_close_serial = result.serial;
+		answer_close(fixture, handler, result.serial,
+			     outcome == SELF_RESTART ? "ready" : "cancel");
+		if (outcome == SELF_RESTART_CANCEL) {
+			result = wait_message(
+				fixture, handler,
+				FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL);
+			CHECK(result.serial == 72 &&
+			      result.document_status ==
+				      FPLINUX_UI_DOCUMENT_CANCELLED);
+			goto opened;
+		}
+		wait_reaped(fixture, handler_pid);
+		handler = wait_peer(fixture, "org.example.handler");
+		CHECK(handler->pid != handler_pid);
+		struct fplinux_ui_session_message config =
+			authenticate(fixture, handler, NULL);
+		document = wait_message(fixture, handler,
+					FPLINUX_UI_SESSION_DOCUMENT, NULL);
+		commit_app(fixture, handler, &config);
+		answer_document(fixture, handler, document.serial,
+				FPLINUX_UI_DOCUMENT_ACCEPTED, 0);
+	} else {
+		enum fplinux_ui_document_status status =
+			outcome == SELF_ACCEPT ? FPLINUX_UI_DOCUMENT_ACCEPTED :
+			outcome == SELF_CANCEL ? FPLINUX_UI_DOCUMENT_CANCELLED :
+						 FPLINUX_UI_DOCUMENT_ERROR;
+		answer_document(fixture, handler, document.serial, status,
+				status == FPLINUX_UI_DOCUMENT_ERROR ? ENOEXEC :
+								      0);
+		result = wait_message(fixture, handler,
+				      FPLINUX_UI_SESSION_DOCUMENT_RESULT, NULL);
+		CHECK(result.serial == 72 && result.document_status == status);
+	}
+opened:
+	active = active_for(fixture, launcher, "org.example.handler");
+	acknowledge(fixture, launcher, &active);
+	if (cancelled_close_serial) {
+		const struct fplinux_session_process *process =
+			fplinux_session_find_process(fixture->session,
+						     handler_pid);
+
+		acknowledge_close(fixture, handler, cancelled_close_serial);
+		CHECK(process && !process->closing && process->shown);
+		CHECK(fplinux_session_focused_pid(fixture->session) ==
+		      handler_pid);
+		set_close_decision(fixture, handler, "ready");
+	}
+	clear_messages(fixture, launcher);
+	if (origin)
+		clear_messages(fixture, origin);
+	send_type(fixture, handler, FPLINUX_UI_SESSION_EXIT);
+	active = active_for(fixture, launcher, "");
+	acknowledge(fixture, launcher, &active);
+	wait_reaped(fixture, handler->pid);
+	if (origin) {
+		result = wait_message(fixture, origin,
+				      FPLINUX_UI_SESSION_ACTIVATION, NULL);
+		CHECK(result.activation ==
+		      FPLINUX_UI_SESSION_ACTIVATION_RESUME);
+		active = active_for(fixture, launcher, TEST_APP);
+		acknowledge(fixture, launcher, &active);
+		CHECK(fplinux_session_focused_pid(fixture->session) ==
+		      origin->pid);
+	} else {
+		pump(fixture, 20);
+		CHECK(fplinux_session_focused_pid(fixture->session) ==
+		      launcher->pid);
+	}
+}
+
 static void test_document_wait_restart(struct fixture *fixture, bool restart)
 {
 	struct peer *launcher = start_launcher(fixture);
@@ -5465,6 +5584,18 @@ int main(int argc, char **argv)
 		test_document_launcher_is_unauthorized(fixture);
 	else if (!strcmp(argv[1], "document-cold-return"))
 		test_document_cold_return(fixture);
+	else if (!strcmp(argv[1], "document-self-return"))
+		test_document_self_return(fixture, SELF_ACCEPT, false);
+	else if (!strcmp(argv[1], "document-self-cancel"))
+		test_document_self_return(fixture, SELF_CANCEL, false);
+	else if (!strcmp(argv[1], "document-self-error"))
+		test_document_self_return(fixture, SELF_ERROR, false);
+	else if (!strcmp(argv[1], "document-self-restart"))
+		test_document_self_return(fixture, SELF_RESTART, false);
+	else if (!strcmp(argv[1], "document-self-restart-cancel"))
+		test_document_self_return(fixture, SELF_RESTART_CANCEL, false);
+	else if (!strcmp(argv[1], "document-self-launcher"))
+		test_document_self_return(fixture, SELF_ACCEPT, true);
 	else if (!strcmp(argv[1], "document-wait-error"))
 		test_document_wait_restart(fixture, false);
 	else if (!strcmp(argv[1], "document-restart-bounded"))

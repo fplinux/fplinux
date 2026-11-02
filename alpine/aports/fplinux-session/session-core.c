@@ -142,12 +142,15 @@ struct document_request {
 	uint32_t serial;
 	uint32_t origin_token;
 	uint32_t handler_token;
+	/* A self-open inherits the caller's previous return target. */
+	uint32_t self_return_origin;
 	char handler_id[FPLINUX_UI_SESSION_ID_BYTES];
 	char path[FPLINUX_UI_SESSION_PATH_BYTES];
 	bool waiting;
 	bool restarted;
 	bool restarting;
 	bool detached;
+	bool self_target;
 };
 
 struct setting_request {
@@ -562,6 +565,10 @@ static void document_result(struct fplinux_session *session,
 	     (session->launch_starting && request->serial &&
 	      request->serial == session->launch_generation)))
 		session->return_token = origin->policy.token;
+	else if (status != FPLINUX_UI_DOCUMENT_ACCEPTED && !origin &&
+		 request->self_target && request->self_return_origin &&
+		 !request->detached)
+		session->return_token = request->self_return_origin;
 	memset(request, 0, sizeof(*request));
 }
 
@@ -1491,6 +1498,8 @@ static void open_document_with(struct fplinux_session *session, const char *id)
 {
 	struct fplinux_desktop_entry entry;
 	struct document_request *request = &session->document;
+	struct process *origin = task_for_token(session, request->origin_token);
+	struct process *handler = task_for_id(session, id);
 	int error = fplinux_ui_session_document_path_error(request->path);
 
 	if (error || !read_entry(session, id, &entry) ||
@@ -1500,9 +1509,13 @@ static void open_document_with(struct fplinux_session *session, const char *id)
 				error ? error : ENOENT);
 		return;
 	}
-	if (!task_for_id(session, id) && !free_task(session)) {
+	if (!handler && !free_task(session)) {
 		document_result(session, FPLINUX_UI_DOCUMENT_ERROR, EUSERS);
 		return;
+	}
+	if (origin && origin == handler) {
+		request->self_target = true;
+		request->self_return_origin = origin->return_origin;
 	}
 	copy_value(request->handler_id, sizeof(request->handler_id), id);
 	if (!begin_launch(session, &entry, FPLINUX_UI_SESSION_ACTIVATION_OPEN,
@@ -1756,8 +1769,10 @@ handler_document_result(struct fplinux_session *session,
 		request->restarting = true;
 		request->waiting = true;
 		/* The existing close callback owns the only ready/cancel/wait decision. */
-		if (owns_launch)
+		if (owns_launch) {
 			finish_launch(session);
+			send_active(session);
+		}
 		prepare_user_close(session, process);
 		return;
 	}
@@ -1767,11 +1782,12 @@ handler_document_result(struct fplinux_session *session,
 		return;
 	}
 	if (message->document_status == FPLINUX_UI_DOCUMENT_ACCEPTED) {
-		process->return_origin =
-			request->detached || request->origin_token ==
-						     process->policy.token ?
-				0 :
-				request->origin_token;
+		if (request->detached)
+			process->return_origin = 0;
+		else if (request->self_target)
+			process->return_origin = request->self_return_origin;
+		else
+			process->return_origin = request->origin_token;
 		if (owns_launch) {
 			session->activation_ready = true;
 			finish_activation(session);
@@ -3288,6 +3304,9 @@ static void reap_process(struct fplinux_session *session,
 	reaped = waitpid(pid, &status, WNOHANG);
 	if (reaped != pid && !(reaped < 0 && errno == ECHILD))
 		return;
+	restart_document =
+		session->document.request_id && session->document.restarting &&
+		session->document.handler_token == process->policy.token;
 	if (session->document.request_id &&
 	    session->document.origin_token == process->policy.token) {
 		bool delivered = document_delivered(session);
@@ -3295,17 +3314,21 @@ static void reap_process(struct fplinux_session *session,
 				   session->document.serial ==
 					   session->launch_generation;
 
-		memset(&session->document, 0, sizeof(session->document));
-		if (owns_launch) {
+		if (restart_document && session->document.self_target) {
+			/* The reply owner exits intentionally; the saved return target
+			 * belongs to the relaunched handler, not to the dead peer. */
+			session->document.origin_token = 0;
+		} else {
+			memset(&session->document, 0,
+			       sizeof(session->document));
+		}
+		if (!restart_document && owns_launch) {
 			if (delivered)
 				finish_launch(session);
 			else
 				fplinux_session_cancel_launch(session);
 		}
 	}
-	restart_document =
-		session->document.request_id && session->document.restarting &&
-		session->document.handler_token == process->policy.token;
 	if (session->document.request_id &&
 	    session->document.handler_token == process->policy.token &&
 	    !restart_document)
