@@ -64,7 +64,7 @@ class FontTests:
                     "-I",
                     str(ROOT / "include/fplinux"),
                     str(ROOT / "tests/host_tool/terminal/fplinux-font.c"),
-                    str(ROOT / "lib/fplinux/fplinux-font.c"),
+                    str(ROOT / "lib/fplinux-shared/fplinux-font.c"),
                     str(ROOT / "lib/fplinux/fplinux-utf8.c"),
                     "-Wl,--wrap=fopen",
                 ],

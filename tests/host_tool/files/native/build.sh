@@ -9,10 +9,10 @@ fi
 
 root=$1
 work=$2
-screens=$root/site/scripts/screens
+screens=$root/tests/host_tool/gui/screens
 peer=$root/tests/host_tool/files/native
 aport=$root/alpine/aports/fplinux-files
-# shellcheck source=site/scripts/screens/ui-host-build.sh
+# shellcheck source=tests/host_tool/gui/screens/ui-host-build.sh
 . "$screens/ui-host-build.sh"
 ui_host_prepare "$root" "$work" "$3"
 

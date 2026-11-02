@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from fplinux_cli.common import ROOT
-from fplinux_cli.quality import source as source_check
+from fplinux_cli.quality import userspace_c as source_check
 
 from tests.process import run_process
 

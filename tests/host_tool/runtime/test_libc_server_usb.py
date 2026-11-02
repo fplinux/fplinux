@@ -50,7 +50,7 @@ def bridge_executable(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path
             [
                 "-std=gnu11",
                 "-DUSE_LIBUSB=1",
-                f"-I{ROOT / 'include/fplinux'}",
+                f"-I{ROOT / 'platforms/ums9117/bootstrap/src'}",
                 str(directory / "libc_server.c"),
                 str(PEER),
             ],

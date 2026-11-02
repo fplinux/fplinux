@@ -33,7 +33,7 @@ TEST_TIERS = {
 
 HOST_TEST_MODULES = (
     "tests/host_process/alpine/test_alpine_source_ownership.py",
-    "tests/host_process/cache/test_dependency_environment.py",
+    "tests/host_process/dependencies/test_dependency_environment.py",
     "tests/host_process/cache/test_prune_rootfs_ownership.py",
 )
 

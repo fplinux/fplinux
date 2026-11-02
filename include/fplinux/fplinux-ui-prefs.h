@@ -3,6 +3,7 @@
 #define FPLINUX_UI_PREFS_H
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "fplinux-storage.h"
 
@@ -14,6 +15,9 @@
  * of at most 65535 bytes and may contain line breaks.
  */
 struct fplinux_ui_prefs;
+
+/* Returns an owned per-application XDG state directory, creating it mode 0700. */
+bool fplinux_ui_state_dir(const char *app_id, char *path, size_t capacity);
 
 /* A missing file opens empty; NULL with errno on an unreadable file. */
 struct fplinux_ui_prefs *fplinux_ui_prefs_open(const char *app_id);

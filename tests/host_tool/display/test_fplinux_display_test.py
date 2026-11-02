@@ -63,7 +63,7 @@ def display_test(tmp_path_factory: pytest.TempPathFactory) -> Iterator[DisplayTe
                 *drm_flags,
                 str(APORT / "fplinux-display-test.c"),
                 str(APORT / "display-test-pattern.c"),
-                str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
                 str(PEERS / "fplinux-display-test-session.c"),
                 "-Wl,--wrap=clock_gettime,--wrap=poll",
             ],

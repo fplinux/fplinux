@@ -56,7 +56,7 @@ class QuakeVtTests:
                         / ("vid_fplinux_gl.c" if request.param == "gpu" else "vid_fplinux.c")
                     ),
                     *(["-DFPLINUX_TEST_QUAKE_GPU"] if request.param == "gpu" else []),
-                    str(ROOT / "lib/fplinux/fplinux-drm-session.c"),
+                    str(ROOT / "lib/fplinux-shared/fplinux-drm-session.c"),
                     (
                         "-Wl,--wrap=drmDropMaster,--wrap=drmSetMaster,--wrap=ioctl,"
                         "--wrap=fplinux_drm_session_open,--wrap=fplinux_drm_session_close"

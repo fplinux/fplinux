@@ -72,7 +72,7 @@ def lvgl_library(
         run_process(
             [
                 "sh",
-                str(ROOT / "scripts/build-ui-lvgl.sh"),
+                str(ROOT / "tests/host_tool/gui/screens/build-ui-lvgl.sh"),
                 str(directory),
             ],
             name="build the shared LVGL font and widget runtime",
@@ -97,7 +97,7 @@ def ui_host_inputs(
         run_process(
             [
                 "sh",
-                str(ROOT / "site/scripts/screens/ui-host-build.sh"),
+                str(ROOT / "tests/host_tool/gui/screens/ui-host-build.sh"),
                 str(directory),
                 str(headers),
                 str(archive),

@@ -9,6 +9,7 @@
 
 #include "fplinux-storage.h"
 #include "fplinux-ui-document.h"
+#include "fplinux-ui-prefs.h"
 
 struct fplinux_ui;
 /* The session protocol of fplinux-ui-session.h, for system components. */
@@ -366,8 +367,6 @@ bool fplinux_ui_is_fullscreen(const struct fplinux_ui *ui);
 const char *fplinux_ui_locale(const struct fplinux_ui *ui);
 /* Preferred language for a new text field; existing fields keep their mode. */
 const char *fplinux_ui_input_locale(const struct fplinux_ui *ui);
-/* Returns an owned per-application XDG state directory, creating it mode 0700. */
-bool fplinux_ui_state_dir(const char *app_id, char *path, size_t capacity);
 /* Phone KEY_F13/F14 only. External function keys never become phone softkeys. */
 bool fplinux_ui_is_softkey(const struct fplinux_ui_key *key, bool left);
 

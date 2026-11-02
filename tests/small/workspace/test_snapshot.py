@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 from typing import TYPE_CHECKING
 from unittest import mock
 
@@ -18,7 +17,6 @@ from fplinux_cli import common
 from fplinux_cli.build.runtime import runtime_source_files
 from fplinux_cli.manifests.linux import discover_linux_targets
 
-from tests import ROOT
 from tests.fixtures import linux_inputs
 from tests.small.workspace.workspace_fixtures import (
     empty_package_graph,
@@ -65,30 +63,6 @@ class WorkspaceSnapshotTests:
                 workspace_inputs.target_build_source_files("nokia-ta1618")
             )
             assert changed.recipe != before.recipe
-
-    @pytest.mark.parametrize("profile", [None, "microsd-uboot"], ids=("ram", "microsd"))
-    def test_staged_source_fetch_imports_and_reuses_verified_bytes_without_checkout(
-        self, profile: str | None, tmp_path: Path
-    ) -> None:
-        """The selected build closure imports and checks cached sources in an isolated process."""
-        snapshot = workspace_capture.workspace_snapshot(
-            workspace_inputs.target_build_source_files("nokia-ta1618", profile)
-        )
-        with workspace_root(tmp_path):
-            staged = workspace_staging.stage_workspace_snapshot(snapshot)
-        cache = tmp_path / "downloads"
-        cache.mkdir()
-        (cache / "source.tar").write_bytes(b"abc")
-        fixture = ROOT / "tests/small/workspace/fixtures/snapshot/staged_source_fetch.py"
-        result = subprocess.run(
-            [sys.executable, "-I", "-B", str(fixture), str(staged), str(cache)],
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
 
     def test_registration_changes_follow_selected_graph_and_materialized_bytes(
         self, tmp_path: Path
@@ -268,7 +242,7 @@ class WorkspaceSnapshotTests:
         platform_patch = write("shared/platform.patch")
         bootstrap_patch = write("patches/bootstrap.patch")
         host_tool = write("tools/loader.c")
-        host_cli_source = write("lib/fplinux/fplinux-cli.c")
+        host_cli_source = write("lib/fplinux-shared/fplinux-cli.c")
         host_cli_header = write("include/fplinux/fplinux-cli.h")
         host_input = write("tools/local-input.h")
         host_patch = write("tools/local.patch")

@@ -150,6 +150,6 @@ class StagedWorkspaceTests:
             assert (staged_digest(command, profile, staged)) == (expected)
             (staged / "unrelated.c").write_bytes(b"int unrelated;\n")
             assert (staged_digest(command, profile, staged)) == (expected)
-            renderer = staged / "lib/fplinux/fplinux-status-screen.c"
+            renderer = staged / "lib/fplinux-shared/fplinux-status-screen.c"
             renderer.write_bytes(renderer.read_bytes() + b"\n/* Changed renderer. */\n")
             assert (staged_digest(command, profile, staged)) != (expected)

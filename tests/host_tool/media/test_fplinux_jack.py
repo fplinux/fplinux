@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 SOURCE = ROOT / "alpine/aports/fplinux-jack/fplinux-jack.c"
-FIXTURE = ROOT / "tests/fixtures/fplinux-jack"
+FIXTURE = ROOT / "tests/host_tool/media/fixtures/fplinux-jack"
 
 
 class FPLinuxJackHostToolTests:
@@ -45,7 +45,7 @@ class FPLinuxJackHostToolTests:
                     "-I",
                     str(ROOT / "include/fplinux"),
                     str(SOURCE),
-                    str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                    str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
                     str(FIXTURE / "boundary.c"),
                 ],
                 name="compile fplinux-jack with ALSA control double",

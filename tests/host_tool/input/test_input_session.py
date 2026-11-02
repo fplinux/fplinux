@@ -39,7 +39,7 @@ class InputSessionTests:
                     "-Werror",
                     f"-I{ROOT / 'tests/host_tool/input/input-session-compat'}",
                     f"-I{ROOT / 'include/fplinux'}",
-                    str(ROOT / "lib/fplinux/fplinux-input-session.c"),
+                    str(ROOT / "lib/fplinux-shared/fplinux-input-session.c"),
                     str(ROOT / "tests/host_tool/input/fplinux-input-session.c"),
                     "-Wl,--wrap=open,--wrap=close,--wrap=ioctl,--wrap=nanosleep",
                 ],

@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from fplinux_cli.environment import install
 
-_FIXTURES = Path(__file__).parents[2] / "fixtures/environment/terminal-font"
+_FIXTURES = Path(__file__).parent / "fixtures/terminal-font"
 
 
 def test_installed_quality_sources_preserve_ui_fonts_licenses_and_uploader(tmp_path: Path) -> None:

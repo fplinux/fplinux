@@ -17,8 +17,8 @@ from fplinux_cli.manifests.source_catalog import ResolvedSource
 from tests import ROOT
 from tests.apk_support import ApkIdentity, signed_apk_tree
 
-INSTALLER = ROOT / "tests/fixtures/busybox/packaging-installer.sh"
-FIXTURES = ROOT / "tests/fixtures/busybox"
+INSTALLER = ROOT / "tests/host_process/rootfs/fixtures/busybox/packaging-installer.sh"
+FIXTURES = ROOT / "tests/host_process/rootfs/fixtures/busybox"
 CORE_PAYLOAD = (FIXTURES / "core-payload.sh").read_bytes()
 EXTRAS_PAYLOAD = (FIXTURES / "extras-payload.sh").read_bytes()
 EXTRAS_CONFIG = (FIXTURES / "extras-udhcpd.conf").read_bytes()

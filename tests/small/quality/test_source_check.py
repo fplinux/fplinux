@@ -10,13 +10,14 @@ from unittest import mock
 
 import pytest
 from fplinux_cli.alpine import registration
+from fplinux_cli.quality import markdown_links, userspace_c
 from fplinux_cli.quality import source as source_check
 from fplinux_cli.quality.formatting.source_formats import classify_source_formats
 from fplinux_cli.workspace import quality_inputs as workspace_module
 
 from tests import ROOT
 
-FIXTURES = ROOT / "tests/fixtures/quality/source-check"
+FIXTURES = ROOT / "tests/small/quality/fixtures/source-check"
 
 
 class SourceInventoryTests:
@@ -49,22 +50,22 @@ class SourceInventoryTests:
             guide.write_text("# Same heading\n\n## Same heading\n")
             spaced.write_text("# Section\n")
             index.write_bytes((FIXTURES / "linked-index.md.fixture").read_bytes())
-            with mock.patch.object(source_check, "ROOT", root):
-                source_check.check_markdown_links([index, guide, spaced])
+            with mock.patch.object(markdown_links, "ROOT", root):
+                markdown_links.check_markdown_links([index, guide, spaced])
 
                 index.write_text("# Index\n\n[missing](absent.md)\n")
                 with pytest.raises(SystemExit, match="link target is missing"):
-                    source_check.check_markdown_links([index, guide, spaced])
+                    markdown_links.check_markdown_links([index, guide, spaced])
 
                 index.write_text("# Index\n\n[missing](guide.md#absent)\n")
                 with pytest.raises(SystemExit, match="link anchor is missing"):
-                    source_check.check_markdown_links([index, guide, spaced])
+                    markdown_links.check_markdown_links([index, guide, spaced])
 
                 linked = root / "linked.md"
                 linked.symlink_to(guide)
                 index.write_text("# Index\n\n[linked](linked.md)\n")
                 with pytest.raises(SystemExit, match="link target is a symlink"):
-                    source_check.check_markdown_links([index, guide, spaced])
+                    markdown_links.check_markdown_links([index, guide, spaced])
 
     def test_quality_workspace_skips_symlinks_outside_source_scope(self) -> None:
         """Keep host workspace staging aligned with scoped source policy."""
@@ -153,13 +154,13 @@ class SourceInventoryTests:
             embedded.write_text("/* fplinux-check: package-embedded */\nint backend;\n")
             files = [standalone, embedded]
             with (
-                mock.patch.object(source_check, "ROOT", root),
-                mock.patch.object(source_check, "discover_targets", return_value=()),
+                mock.patch.object(userspace_c, "ROOT", root),
+                mock.patch.object(userspace_c, "discover_targets", return_value=()),
             ):
-                assert (source_check.userspace_c_sources(files)) == (
+                assert (userspace_c.userspace_c_sources(files)) == (
                     [("alpine/aports/demo-consumer/app.c", False)]
                 )
-                assert (source_check.userspace_c_sources(files, include_embedded=True)) == (
+                assert (userspace_c.userspace_c_sources(files, include_embedded=True)) == (
                     [
                         ("alpine/aports/demo-consumer/app.c", False),
                         ("alpine/aports/demo-consumer/backend.c", False),
@@ -183,10 +184,10 @@ class SourceInventoryTests:
         shared_sources = (
             "lib/fplinux/fplinux-ui-session.c",
             "lib/fplinux/fplinux-ui-profile.c",
-            "lib/fplinux/fplinux-desktop-entry.c",
+            "lib/fplinux-shared/fplinux-desktop-entry.c",
             "lib/fplinux/fplinux-language.c",
-            "lib/fplinux/fplinux-keypad-light.c",
-            "lib/fplinux/fplinux-cli.c",
+            "lib/fplinux-shared/fplinux-keypad-light.c",
+            "lib/fplinux-shared/fplinux-cli.c",
         )
         files = []
         for relative in (*recipes, *package_sources, *shared_sources):
@@ -195,7 +196,8 @@ class SourceInventoryTests:
             path.write_text("# recipe\n" if path.name == "APKBUILD" else "int example;\n")
             files.append(path)
         monkeypatch.setattr(source_check, "ROOT", tmp_path)
-        monkeypatch.setattr(source_check, "discover_targets", lambda: ())
+        monkeypatch.setattr(userspace_c, "ROOT", tmp_path)
+        monkeypatch.setattr(userspace_c, "discover_targets", lambda: ())
         monkeypatch.setattr(registration, "SHARED_APORT_SOURCE_PATHS", frozenset(shared_sources))
 
         assert source_check.alpine_apkbuilds(files) == [
@@ -203,24 +205,24 @@ class SourceInventoryTests:
             "alpine/aports/fplinux-notes/APKBUILD",
             "alpine/aports/demo-app/APKBUILD",
         ]
-        assert source_check.userspace_c_sources(files) == [
+        assert userspace_c.userspace_c_sources(files) == [
             ("alpine/aports/demo-app/app.c", False),
             ("alpine/aports/fplinux-notes/app.c", False),
             ("alpine/aports/fplinux-ui/app.c", False),
-            ("lib/fplinux/fplinux-cli.c", False),
-            ("lib/fplinux/fplinux-desktop-entry.c", False),
-            ("lib/fplinux/fplinux-keypad-light.c", False),
+            ("lib/fplinux-shared/fplinux-cli.c", False),
+            ("lib/fplinux-shared/fplinux-desktop-entry.c", False),
+            ("lib/fplinux-shared/fplinux-keypad-light.c", False),
             ("lib/fplinux/fplinux-language.c", False),
             ("lib/fplinux/fplinux-ui-profile.c", False),
             ("lib/fplinux/fplinux-ui-session.c", False),
         ]
-        assert source_check.project_c_format_sources(files) == [
+        assert userspace_c.project_c_format_sources(files) == [
             "alpine/aports/demo-app/app.c",
             "alpine/aports/fplinux-notes/app.c",
             "alpine/aports/fplinux-ui/app.c",
-            "lib/fplinux/fplinux-cli.c",
-            "lib/fplinux/fplinux-desktop-entry.c",
-            "lib/fplinux/fplinux-keypad-light.c",
+            "lib/fplinux-shared/fplinux-cli.c",
+            "lib/fplinux-shared/fplinux-desktop-entry.c",
+            "lib/fplinux-shared/fplinux-keypad-light.c",
             "lib/fplinux/fplinux-language.c",
             "lib/fplinux/fplinux-ui-profile.c",
             "lib/fplinux/fplinux-ui-session.c",
@@ -254,11 +256,11 @@ class SourceInventoryTests:
             capture_header = capture.with_suffix(".h")
             capture_header.write_text("int capture;\n")
             with (
-                mock.patch.object(source_check, "ROOT", root),
-                mock.patch.object(source_check, "discover_targets", return_value=()),
+                mock.patch.object(userspace_c, "ROOT", root),
+                mock.patch.object(userspace_c, "discover_targets", return_value=()),
             ):
                 assert (
-                    source_check.project_c_format_sources(
+                    userspace_c.project_c_format_sources(
                         [
                             source,
                             header,

@@ -2,8 +2,8 @@
 #ifndef FPLINUX_SESSION_CLOCK_H
 #define FPLINUX_SESSION_CLOCK_H
 
-#include "clock-model.h"
-#include "clock-wire.h"
+#include "fplinux-clock-model.h"
+#include "fplinux-clock-wire.h"
 
 struct fplinux_ui_prefs;
 struct fplinux_ui_session_clock_presentation;

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from fplinux_cli.quality.formatting.canonical_json import normalize_json
 
-FIXTURES = Path(__file__).parents[3] / "fixtures/formatting/json"
+FIXTURES = Path(__file__).parent / "fixtures/json"
 
 
 class CanonicalJsonTests:

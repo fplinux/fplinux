@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from fplinux_cli.environment import install_wheels as wheel_installer
 
-_FIXTURES = Path(__file__).parents[2] / "fixtures/environment/wheel"
+_FIXTURES = Path(__file__).parent / "fixtures/wheel"
 
 
 @pytest.fixture

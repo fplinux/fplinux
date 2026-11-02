@@ -16,6 +16,8 @@ source="
 	launcher-catalogue.h
 	launcher-clock.c
 	launcher-clock.h
+	launcher-icons.c
+	launcher-icons.h
 	launcher-layout.c
 	launcher-layout.h
 	launcher-launch.c
@@ -28,12 +30,12 @@ source="
 	launcher-tasks.h
 	launcher-quick-settings.c
 	launcher-quick-settings.h
-	clock-model.c
-	clock-model.h
+	fplinux-clock-model.c
+	fplinux-clock-model.h
 	clock-face.c
 	clock-face.h
-	clock-wire.c
-	clock-wire.h
+	fplinux-clock-wire.c
+	fplinux-clock-wire.h
 	fplinux-storage.h
 	fplinux-utf8.c
 	fplinux-utf8.h
@@ -60,10 +62,10 @@ build() {
 	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
 		-I"$srcdir" $(pkg-config --cflags fplinux-ui json-c dbus-1) \
-		fplinux-launcher.c launcher-catalogue.c launcher-layout.c \
+		fplinux-launcher.c launcher-catalogue.c launcher-icons.c launcher-layout.c \
 		launcher-power.c launcher-text.c launcher-tasks.c launcher-launch.c launcher-clock.c \
 		launcher-quick-settings.c fplinux-bluez-adapter.c \
-		clock-model.c clock-wire.c clock-face.c fplinux-cli.c fplinux-utf8.c \
+		fplinux-clock-model.c fplinux-clock-wire.c clock-face.c fplinux-cli.c fplinux-utf8.c \
 		fplinux-ui-profile.c fplinux-desktop-entry.c $LDFLAGS \
 		$(pkg-config --libs fplinux-ui json-c dbus-1) -lm -o fplinux-launcher
 	msgfmt --check --output-file=ru.mo ru.po
@@ -83,11 +85,13 @@ package() {
 }
 
 sha512sums="
-eca0a9b9c851b5f23548498651ab9b1941a9415b227b023e8d27ab91623fcfc4d6de2ec26ad4688d756c14027ded07a48d905ff004cb7701504f88ee593f8dce  fplinux-launcher.c
+c9a4ec331be4f3cd9f8e0ad1aa5614d50913b9d8cf22ce1d51c4108452167736e0f298f0d3709dc525ebf30936b711d203f7fc4c368757f6680a226418d66533  fplinux-launcher.c
 2f9561a9301f8aea1252db72490f5e60b03453330c74a86a6876ba3f79501c5d96179bb287a5347505333c5ddc9c9c505da9a5d9b76a1a6f3b52dd74f87e059d  launcher-catalogue.c
 e35a72fabc0ddc423e04d2031bde99ecd86b79f8d010df35a925010cacb7a9006858147aede27dbcf6392ab67aa2f6b87baa9057a6db6b5ceb134e401a68df2c  launcher-catalogue.h
 1464378264386a23c9b58e5efc0daaa7aedc962e6b918ed0fd10a1e477698e95c01fcaed2d96fcdad2e1696672c5c83c9310987a2f8403a9fb37eeedefeab5a6  launcher-clock.c
-ba589e02757af34600f3675cab218d797bf2e347c7d1a0d41c538169b49f197b4375924acb0ad6e90d0173046739723e0b7eb84e287d2af0967fb798c64af43d  launcher-clock.h
+40d061e4a78fedd9c68bcc266d51b30c4589587d327ba51a12f661880d1e1f37ac978ff08893fbf15b4995660f116daa4855628286deae828e4e54e179192124  launcher-clock.h
+2b2c901309c562a19828d23e2697477947eaf1b64bd41a015e049bc4a724a3b28b779fad80d544917e9f8c9aa65e52953069ac5ef5163feaaa936dc6e2ff2636  launcher-icons.c
+7090e4b1c74886b29e977b688242e80a08bc597d96faf2fbbd142f559516d610d56f10b1b2bc6c81c227a574da8ef7cc61e6b664a70da1136bd4c35a4a2a04b7  launcher-icons.h
 06bbcd77066584d57f522f2f0e4ef9b4360a1985918aefdd6ddef4bb1ccc57ff3083b2e33e808aabd7a5cca2792fe575cfb07763c9cf487c958c900191b38466  launcher-layout.c
 7b11caf024d5a71aa1c463189b2201b020056c490a57482b73c9d9482bde7612be9bbba5cfddf0e76f4067387f2b96178f211f57d64a3eded3a3afde9b98e849  launcher-layout.h
 06cf8f2166f584e28c05122881265c9eb0614da398c809bfababd031b09e60be065ca7802ead0edd4edb62e89be41fa37ac8bbe0d6da32006ec01468670eb5f0  launcher-launch.c
@@ -100,12 +104,12 @@ b79b09a2badce2dd91e9bfca79038900f5d43cbf07e7f7728f9dfa76eb91b500cb9ecac1d16eac8b
 8caf05187d14243e96b40e761e9304c34ba08dd2fb5093eaf3f2419a75073215b860d4a5cc809c3e70488f65720e0c2adade1d5763bcf7c2fbeaf2aae3fa85a1  launcher-tasks.h
 2013a5b9fc3b7cb7716444c9bb74bee2284cc4d0e57306e2e6c33f13b3dbf7b5802453bc2382a9451e2eef6271c35f5354b4fb9eade4db614f689d9af1846b0f  launcher-quick-settings.c
 dc6f29a056bc907cf5ef298ad9f37c7713ed34b1af8357b4e10fa5a80900abd981d8ebd7982f172306d02307635ba3cb28ae42058835809710c8a5891e0e7b1e  launcher-quick-settings.h
-c08ea4ebc64c0df062966e80a96710307713f38a88e1b03ef31e0f2676d5f78ee54711a90cf2285282bfa04c41f23484d203a6a7c4b65b1e55f1276c71da74bc  clock-model.c
-31328653c49f42692a6ad2f000664c29305d2e11d45d50d53c9a2725349f895c06b4d4c889e46705228d3e46be7b7138f9b3cfbbeb650a2d31d64a9915bd4634  clock-model.h
+6048a366f918d059ac26f992a8fdbea68c68e39d4f82affc3f49cd30c9675734179bada5f55e2147c4c7fca3dda600751a79f968f194c5fa11ae7d9f2003a8f3  fplinux-clock-model.c
+31328653c49f42692a6ad2f000664c29305d2e11d45d50d53c9a2725349f895c06b4d4c889e46705228d3e46be7b7138f9b3cfbbeb650a2d31d64a9915bd4634  fplinux-clock-model.h
 067e588ea737db5dca2b65467b3f7d18b93ebe34c120c52515aebbfbc8c403af6a0b5fdacdb38609ecb182c7ddb0310f55a9686b00b5be871cbcc420ec54084b  clock-face.c
 738d0eb41d91534be9d784bd86b5f7c1fbb3f7c8ccf275ee903db48cfb0586972db4307776f483d3e9a21940ee121411efda64b472dce34df65be535f39f3445  clock-face.h
-c2f1ffd4a072d7df0333c2dc3f15fd59b4a2bb5f3c293ea4afb23e9585861716e42d6d16f94094a546e12c61ad116d68de89e3c3068a23cdc7fb19ddc973b958  clock-wire.c
-8638f18f1e09429beeafb810e202f0a51f984a8a2920ed38c8c0d9fc2f6a3373e35088d1266b8d01397c00f1c403ba6625ece2506fe26dff38d44ec6dc7769fa  clock-wire.h
+1fa09e779caa36098a972daaf3a5fae450d687c0a1bcb6d8f99dc3417b4a50c4fd3354a63e5bad60bedfe72c448b6e6130a8cbdfd3c820077180ee5e8fb9ccb6  fplinux-clock-wire.c
+0d64a859bd7e3804feefd5a03ae1b40d5fef59e4b2156877c7bee95cc29f42e9f4fa89776cebaea2a153d4408d09cd67f727ce46753922a8be974843ec1cd6d1  fplinux-clock-wire.h
 c2a1a77ae236231200f2b037f320a513380957aaf44396c9b6fa889e1a6d249324e2b270cef183593134d55d5a3fef36ddce2485d6e759512f4888058d52839b  fplinux-storage.h
 0ded6f822b59d68de21ce64d03e892f27e2f190366ff39f154b88a73b0c7c3627c2787ddf37817ad85cc8206a20243b3f3c13b039d3d06955392a6b5a70e1bcd  fplinux-utf8.c
 8143f656608c63e42016da2003174d6fb2ac043daaad07e63e006bf3dc76544e76e820ae52a9c50f5559d58757c44aeded2b1cd4b01b4665938a7e88b4bc1d43  fplinux-utf8.h

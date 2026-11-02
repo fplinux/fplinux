@@ -87,6 +87,9 @@ _MANIFEST_IMPLEMENTATION = frozenset(
 _CHECK_IMPLEMENTATION = _MANIFEST_IMPLEMENTATION | frozenset(
     {
         "scripts/fplinux_cli/quality/source.py",
+        "scripts/fplinux_cli/quality/source_commands.py",
+        "scripts/fplinux_cli/quality/markdown_links.py",
+        "scripts/fplinux_cli/quality/userspace_c.py",
         "scripts/fplinux_cli/__init__.py",
         "scripts/fplinux_cli/common.py",
         "scripts/fplinux_cli/data_paths.py",

@@ -12,7 +12,7 @@ The source is on [GitHub](https://github.com/fplinux/fplinux). Phone, applicatio
 ## Format the files you changed
 
 ```sh title="PC"
-./fplinux format scripts/fplinux_cli/cache/prune/operations.py common/host/fplinux-usb-keyboard.c
+./fplinux format scripts/fplinux_cli/cache/prune/operations.py platforms/ums9117/host/fplinux-usb-keyboard.c
 ```
 
 Pass each file you edited as a path relative to the checkout. The command does not walk directories. It refuses files that have no project formatter instead of guessing one. Tracked and non-ignored untracked sources are accepted. Selected files are formatted together; if any formatter fails, the command leaves them unchanged. The [source-format contract](/fplinux/develop/code-style/formats/) describes ordering, templates and format-specific limits.

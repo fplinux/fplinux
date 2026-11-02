@@ -18,11 +18,39 @@ from fplinux_cli.workspace.capture import WorkspaceFile, WorkspaceSnapshot
 
 from tests import ROOT
 
-FIXTURES = ROOT / "tests/fixtures/quality/check-scope"
+FIXTURES = ROOT / "tests/small/quality/fixtures/check-scope"
 
 
 class CheckScopeTests:
     """Keep scope recipes bound to the inputs checked by their consumers."""
+
+    @pytest.mark.parametrize("scope", ["source", "docs", "c", "shell"])
+    @pytest.mark.parametrize("module", ["markdown_links", "source_commands", "userspace_c"])
+    def test_checker_implementation_change_invalidates_scope_receipt(
+        self, tmp_path: Path, scope: str, module: str
+    ) -> None:
+        """Track checker code while preserving each scope's existing input boundary."""
+        implementation = f"scripts/fplinux_cli/quality/{module}.py"
+        contents = {implementation: b"original\n", "unrelated.bin": b"original\n"}
+
+        def receipt(inputs: dict[str, bytes]) -> CheckReceiptRecipe:
+            snapshot = WorkspaceSnapshot(
+                tuple(WorkspaceFile(path, data, 0o644) for path, data in inputs.items()),
+                "a" * 64,
+            )
+            return check_scope_receipt_recipe(
+                scope,
+                check_scope_closure_digest(scope, snapshot),
+                environment_generation="b" * 64,
+                orchestration_recipe="c" * 64,
+            )
+
+        publish_success_receipt(tmp_path, receipt(contents))
+        assert receipt_matches(tmp_path, receipt(contents))
+        assert not receipt_matches(tmp_path, receipt({**contents, implementation: b"changed\n"}))
+        assert receipt_matches(tmp_path, receipt({**contents, "unrelated.bin": b"changed\n"})) is (
+            scope in {"c", "shell"}
+        )
 
     @pytest.mark.parametrize(
         "changed_path",

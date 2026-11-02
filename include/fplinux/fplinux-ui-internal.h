@@ -121,11 +121,20 @@ FPLINUX_UI_INTERNAL void fplinux_ui_marquee_changed(struct fplinux_ui *ui,
 						    lv_obj_t *second);
 
 /*
- * fplinux-ui-screen.c: fplinux_ui_image_load(), and with alpha true an
+ * fplinux-ui-image.c: fplinux_ui_image_load(), and with alpha true an
  * alpha-only (A8) image of any source, as system glyphs are drawn.
  */
 FPLINUX_UI_INTERNAL lv_draw_buf_t *
 fplinux_ui_image_decode(const void *src, int width, int height, bool alpha);
+
+/* Fit without enlarging; area scaling returns a new buffer owned by the caller. */
+FPLINUX_UI_INTERNAL void
+fplinux_ui_image_fit_size(const lv_image_header_t *header, uint32_t width,
+			  uint32_t height, uint32_t *fit_width,
+			  uint32_t *fit_height);
+FPLINUX_UI_INTERNAL lv_draw_buf_t *
+fplinux_ui_image_area_scale(const lv_draw_buf_t *source, uint32_t width,
+			    uint32_t height);
 
 /*
  * fplinux-ui-text.c: a field with FPLINUX_UI_TEXT_UNEDITABLE shows its text

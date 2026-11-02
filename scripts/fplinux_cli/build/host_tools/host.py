@@ -199,7 +199,11 @@ def build_cc_libusb_tool(recipe: dict[str, Any], output: Path) -> Path:
             "-o",
             str(destination),
             str(inputs_build.require_file(inputs_build.root_source(recipe["source"]))),
-            str(inputs_build.require_file(inputs_build.root_source("lib/fplinux/fplinux-cli.c"))),
+            str(
+                inputs_build.require_file(
+                    inputs_build.root_source("lib/fplinux-shared/fplinux-cli.c")
+                )
+            ),
             *shlex.split(pkg.stdout),
             "-pthread",
         ]
@@ -250,7 +254,7 @@ def _host_tool_recipe(sources: dict[str, Any], recipe: dict[str, Any]) -> str:
     elif recipe["type"] == "cc-libusb":
         for relative in (
             recipe["source"],
-            "lib/fplinux/fplinux-cli.c",
+            "lib/fplinux-shared/fplinux-cli.c",
             "include/fplinux/fplinux-cli.h",
         ):
             local_files[relative] = sha256_file(

@@ -120,7 +120,7 @@ class AlpineSourceOwnershipTests:
         """A build, a package-cache hit and a failed build leave source files reusable."""
         unshare = shutil.which("unshare")
         if unshare is None:
-            pytest.skip("subordinate namespace test requires unshare")
+            pytest.fail("subordinate namespace test requires unshare")
         probe = subprocess.run(
             [unshare, "--map-auto", "--map-root-user", "--", "true"],
             capture_output=True,
@@ -129,7 +129,7 @@ class AlpineSourceOwnershipTests:
             timeout=30,
         )
         if probe.returncode:
-            pytest.skip("subordinate namespace is unavailable: " + probe.stderr.strip())
+            pytest.fail("subordinate namespace is unavailable: " + probe.stderr.strip())
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
             command = [

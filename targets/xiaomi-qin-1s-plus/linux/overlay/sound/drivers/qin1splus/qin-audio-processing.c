@@ -9,7 +9,6 @@
 
 #define QIN_VBC_CLEAR 0x00
 #define QIN_VBC_PROCESSING 0x48
-#define QIN_VBC_ALC(n) (0x4c + 4 * (n))
 #define QIN_VBC_EQ6_ENABLE BIT(9)
 #define QIN_VBC_ALC_ENABLE BIT(11)
 #define QIN_VBC_EQ6_CLEAR BIT(10)
@@ -55,7 +54,7 @@ int qin_audio_processing_prepare(struct device *dev, void __iomem *vbc,
 	for (i = 0; i < QIN_AUDIO_EQ6_WORD_COUNT; i++)
 		state->coefficients[i] = readl(vbc + 0x100 + 4 * i);
 	for (i = 0; i < QIN_AUDIO_ALC_WORD_COUNT; i++)
-		state->alc[i] = readl(vbc + QIN_VBC_ALC(i));
+		state->alc[i] = readl(vbc + SPRD_VBC_DAC_ALC_CONTROL(i));
 	state->active = true;
 	/* The DAC is stopped and both analog outputs are muted by the caller. */
 	mute_scales(vbc);
@@ -74,8 +73,9 @@ int qin_audio_processing_prepare(struct device *dev, void __iomem *vbc,
 	}
 	for (i = 0; i < QIN_AUDIO_ALC_WORD_COUNT; i++) {
 		/* Preserve the signed parameter's complete hardware word. */
-		writel((u32)(s32)profile->alc[i], vbc + QIN_VBC_ALC(i));
-		if ((readl(vbc + QIN_VBC_ALC(i)) & 0xffff) !=
+		writel((u32)(s32)profile->alc[i],
+		       vbc + SPRD_VBC_DAC_ALC_CONTROL(i));
+		if ((readl(vbc + SPRD_VBC_DAC_ALC_CONTROL(i)) & 0xffff) !=
 		    (u16)profile->alc[i])
 			return -EIO;
 	}
@@ -103,7 +103,7 @@ int qin_audio_processing_restore(struct device *dev, void __iomem *vbc,
 	for (i = 0; i < QIN_AUDIO_EQ6_WORD_COUNT; i++)
 		writel(state->coefficients[i], vbc + 0x100 + 4 * i);
 	for (i = 0; i < QIN_AUDIO_ALC_WORD_COUNT; i++)
-		writel(state->alc[i], vbc + QIN_VBC_ALC(i));
+		writel(state->alc[i], vbc + SPRD_VBC_DAC_ALC_CONTROL(i));
 	for (i = 0; i < QIN_AUDIO_EQ6_WORD_COUNT; i++) {
 		if (readl(vbc + 0x100 + 4 * i) != state->coefficients[i]) {
 			dev_err(dev, "cannot restore EQ6 word %u\n", i);
@@ -111,7 +111,7 @@ int qin_audio_processing_restore(struct device *dev, void __iomem *vbc,
 		}
 	}
 	for (i = 0; i < QIN_AUDIO_ALC_WORD_COUNT; i++) {
-		if (readl(vbc + QIN_VBC_ALC(i)) != state->alc[i]) {
+		if (readl(vbc + SPRD_VBC_DAC_ALC_CONTROL(i)) != state->alc[i]) {
 			dev_err(dev, "cannot restore ALC word %u\n", i);
 			return -EIO;
 		}

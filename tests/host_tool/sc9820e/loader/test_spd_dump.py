@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tests import ROOT
+from tests.host_tool.loader.spd_dump_support import build_uploader
 from tests.process import run_process
-from tests.spd_dump_support import build_uploader
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

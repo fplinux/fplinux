@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 from tests import ROOT
 
-UBOOT_FIXTURES = ROOT / "tests/fixtures/uboot-tools"
+UBOOT_FIXTURES = ROOT / "tests/host_process/build/fixtures/uboot-tools"
 
 
 def archive_synthetic_source(root: Path, source: Path) -> Path:

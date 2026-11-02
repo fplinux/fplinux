@@ -69,7 +69,7 @@ def boot_screen(
                 f"-I{ROOT / 'bootstrap/fplinux-boot-screen'}",
                 str(ROOT / "tests/host_tool/display/fplinux-boot-screen.c"),
                 str(ROOT / "bootstrap/fplinux-boot-screen/boot-screen.c"),
-                str(ROOT / "lib/fplinux/fplinux-status-screen.c"),
+                str(ROOT / "lib/fplinux-shared/fplinux-status-screen.c"),
                 str(fonts),
             ],
             name="compile selected bootstrap status screen",

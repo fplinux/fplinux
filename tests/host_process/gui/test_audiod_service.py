@@ -325,7 +325,7 @@ def audiod_executable(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path
                     str(APORT / name)
                     for name in ("audiod.c", "audio-device.c", "audio-mixer.c", "audio-streams.c")
                 ),
-                str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
                 str(FIXTURE / "boundary.c"),
                 "-pthread",
             ],

@@ -2,7 +2,7 @@
 #ifndef FPLINUX_CLOCK_CLIENT_H
 #define FPLINUX_CLOCK_CLIENT_H
 
-#include "clock-wire.h"
+#include "fplinux-clock-wire.h"
 #include <fplinux/fplinux-ui.h>
 #include <fplinux/fplinux-ui-session.h>
 

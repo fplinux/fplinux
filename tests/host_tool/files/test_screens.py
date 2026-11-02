@@ -13,7 +13,7 @@ import pytest
 
 from tests import ROOT
 from tests.c_harness import c_build_directory
-from tests.host_tool.gui.list_rows import ListArea, frame_pixels, sequence_faults
+from tests.host_tool.gui.support.list_rows import ListArea, frame_pixels, sequence_faults
 from tests.process import run_process
 
 if TYPE_CHECKING:

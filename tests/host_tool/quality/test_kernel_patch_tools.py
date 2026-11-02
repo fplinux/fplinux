@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
-FIXTURES = ROOT / "tests/fixtures/quality/host-tool/kernel-patch"
+FIXTURES = ROOT / "tests/host_tool/quality/fixtures/kernel-patch"
 
 
 @pytest.fixture

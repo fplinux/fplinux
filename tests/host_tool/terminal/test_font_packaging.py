@@ -101,7 +101,7 @@ class FontSplitTests:
             result = run_process(
                 [
                     "sh",
-                    str(ROOT / "tests/fixtures/font_split.sh"),
+                    str(ROOT / "tests/host_tool/terminal/fixtures/font_split.sh"),
                     str(stage / "APKBUILD"),
                     cell,
                     str(source),

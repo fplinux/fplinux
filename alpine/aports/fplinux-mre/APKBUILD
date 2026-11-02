@@ -17,12 +17,16 @@ source="
 	@source:aport_libjpeg_turbo_3_2_0_tar_gz@
 	subblock-length.patch
 	fplinux-mre.c
+	mre-selector-files.c
+	mre-selector-files.h
 	runtime-paths.c
 	runtime-paths.h
 	text-codec.c
 	text-codec.h
 	vfs-broker.c
 	vfs-broker.h
+	vfs-path.c
+	vfs-path.h
 	http-broker.c
 	http-broker.h
 	mre-http.h
@@ -61,7 +65,8 @@ build() {
 	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
 		-I"$srcdir/include" -I"$startdir" $(pkg-config --cflags fplinux-ui libcurl) \
-		fplinux-mre.c runtime-paths.c text-codec.c vfs-broker.c http-broker.c fplinux-cli.c \
+		fplinux-mre.c mre-selector-files.c runtime-paths.c text-codec.c \
+		vfs-broker.c vfs-path.c http-broker.c fplinux-cli.c \
 		$(pkg-config --libs fplinux-ui libcurl libcrypto) $LDFLAGS \
 		-o fplinux-mre
 	msgfmt --check --output-file=ru.mo ru.po
@@ -153,13 +158,17 @@ package() {
 
 sha512sums="
 f199f96b30558ca3fa5b5b218d224519c74acf507a967d3ad45a2ac4195d090cb5edfd0d2184ed5f514df935b7accee8a28f71b86e59017ecd26347a0ef796c7  subblock-length.patch
-45cc0565b546b1145df7d91924dfd069d2f78586ad7da9be1cf97af82bce0e53f47b1aa086c8554a60f45dc72ee987637d8e2d61e12e5b6e3c3f069f5f1be297  fplinux-mre.c
+477ed8c6cdb6704af510371ed96c943bfaeb25a0f57784a548bbc4a89601c2de13de6769835cb457a9afa77f15208839fb2e8ec445cb5b5ee5993f83be382483  fplinux-mre.c
+ee950da047d528882b81b8f460904fe147fe8e620f70a33643364776ca8817e3821c52e84df404ead55c687aa0b17d25c95af40df9ab87df52d6da60f695b178  mre-selector-files.c
+9042c52db450e800e18744319186120e9bb6b61b6e7a14dc6bf65ab79fd2bd4cd97d4d2ebb35bf1c116a65eeb2ec1cce079edcaef0cff32477e93a0b583bca0b  mre-selector-files.h
 e99d763df51f4a2511efd4843c112788109b0fca7327315ccab42a33ca2a09d68bed2e66b53be3a75827991c80c6cf611b0e9db9f1f70e5d243644faf20ccee3  runtime-paths.c
 eb8bca600ed03a7d6835284ca0855b8b8270f80ee6c362a5f972321b2c8bf5baa8f134557c9a026a1c6e3d85f965a73acf5dc9c679342c797f29965afe22c002  runtime-paths.h
 8aaf5bca33329d275f83e0dc119089c30fc886382efac18c857006412b57cb25db38d8a9682afce6c5c5adcaad83bc0b8a42cb3bd71e493a1722b254b0184a76  text-codec.c
 9164e5eb748e6b4f2e419514ba97f0ff665a3d24c52fbebbf98847d38618af831bf9073633507dd2dadc52f29472ab5a05d79cda03d91df0153827ea0f6bf510  text-codec.h
-8c274b9f7bc52caf5b1ba83d338af6640c96f217de2a49f4b4e7003cc902946b46b6d97e8be03b11ff6e3eedbf4a7d1918e42536ba441a3bb8980996c45115c0  vfs-broker.c
+98e67998aeec91d76d9564ddc8d2c358de4d69326a92905f03513f86228aa7b507fa849134bf55819ff2bdfd9efc479173c4db16dcbacfaf579747e3507fb11f  vfs-broker.c
 0ab30311abbc542a02635cddaaa5441cb15b7803a80ebf6d67225281cf9de1a0314023896d67aa946198ae9e50a256cb966a23421125745f04bfdbc4296ed820  vfs-broker.h
+fe2a8a56b4575fd28a1c8f7c15a3c9687792f1082670bdc2a960b76cbab48e53d63b20c116876cfb5a6dc7c2f6e3a1c393957da66535ac33a4e01f1eb6097142  vfs-path.c
+2af39f5a04c8a45e991239234ac345c4e27c3e63100325fa33495f8dc3388cba6aee60de17321b133e64b29e0222fc6cc4310e4b728c227072f4deed91928c74  vfs-path.h
 07c06e46ef9a7a245ee86f27ba7c1aa412115caf08f366ce1bf2d6a29a0814bd58a0eba5c313862ab1e52dc11dbdc700a219ebb17a91c49383c598465744e8c6  http-broker.c
 74848dd43cee256504ff0bd0c1b74a6cdd18672fe5ef489c0845f4f09b60240f1b2ca174ad4a9c8238d284d6dc22a24e6ef47b35e2622c573582d88dcf9842cd  http-broker.h
 3bf8fae90d15989ff2602d13665bf91d57540964deaaf5de965e5d4cd4adb1b28a06fef16e2af2a1ac7bc5dc901f84eaa9889a3304f55cd25ced8f9dbe0432e9  mre-http.h

@@ -10,7 +10,7 @@ from fplinux_cli.quality.formatting.canonical_toml import normalize_toml
 
 from tests import ROOT
 
-FIXTURES = ROOT / "tests/fixtures/formatting/toml"
+FIXTURES = ROOT / "tests/small/quality/formatting/fixtures/toml"
 
 
 @pytest.mark.parametrize(
@@ -30,8 +30,8 @@ FIXTURES = ROOT / "tests/fixtures/formatting/toml"
         ("source-lock", "sources.lock.toml"),
         ("boot-lock", "platforms/demo/uboot/u-boot.lock.toml"),
         ("release-manifest", "targets/demo/release/manifest.toml"),
-        ("feature-package", "tests/fixtures/profile-config/default-with-feature-package.toml"),
-        ("missing-microsd", "tests/fixtures/profile-config/target-without-microsd.toml"),
+        ("feature-package", "profiles/default/profile.toml"),
+        ("missing-microsd", "targets/demo/target.toml"),
         ("negative-package-input", "alpine.lock.toml"),
         ("nested-package-list", "targets/demo/target.toml"),
         ("reuse-annotations", "REUSE.toml"),

@@ -11,7 +11,7 @@ def runtime_manifest() -> dict[str, Any]:
     image = "image/ramboot.bin"
     adapter = "platforms/ums9117/host/adapter.py"
     identity_helper = "scripts/fplinux_cli/manifests/identity.py"
-    ssh_helper = "scripts/fplinux_cli/runtime/ssh_transport.py"
+    ssh_helper = "scripts/fplinux_cli/runtime/ssh/transport.py"
     fdl1 = "assets/fdl1.bin"
     loader = "host/loader"
     return {
@@ -66,6 +66,12 @@ def runtime_manifest() -> dict[str, Any]:
             adapter: "b" * 64,
             identity_helper: "1" * 64,
             ssh_helper: "c" * 64,
+            "scripts/fplinux_cli/runtime/ssh/__init__.py": "c" * 64,
+            "scripts/fplinux_cli/runtime/ssh/commands.py": "c" * 64,
+            "scripts/fplinux_cli/runtime/ssh/errors.py": "c" * 64,
+            "scripts/fplinux_cli/runtime/ssh/material.py": "c" * 64,
+            "scripts/fplinux_cli/runtime/ssh/session.py": "c" * 64,
+            "scripts/fplinux_cli/runtime/phone_data.py": "c" * 64,
             "scripts/fplinux_cli/runtime/events.py": "2" * 64,
             "scripts/fplinux_cli/runtime/bundle.py": "3" * 64,
             "scripts/fplinux_cli/runtime/boot.py": "4" * 64,

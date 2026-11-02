@@ -28,7 +28,7 @@ def test_brightness_controls_and_screen(tmp_path: Path, ui_host_inputs: Path) ->
             f"-I{ROOT / 'alpine/aports/fplinux-brightness-ui'}",
             str(ROOT / "tests/host_tool/display/fplinux-brightness-ui.c"),
             str(ROOT / "alpine/aports/fplinux-brightness-ui/brightness-ui.c"),
-            str(ROOT / "lib/fplinux/fplinux-status-screen.c"),
+            str(ROOT / "lib/fplinux-shared/fplinux-status-screen.c"),
             str(ROOT / "lib/fplinux/fplinux-ui-profile.c"),
             str(fonts),
         ],

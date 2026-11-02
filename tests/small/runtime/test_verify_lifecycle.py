@@ -17,12 +17,12 @@ from fplinux_cli.artifacts.bundles import publish_current_bundle
 from fplinux_cli.environment import definition
 from fplinux_cli.workspace.capture import WorkspaceSnapshot
 
-from tests.small.build.command_fixtures import (
+from tests.small.command_fixtures import (
     command_bundle as command_bundle,  # noqa: PLC0414 -- pytest fixture export.
 )
 
 if TYPE_CHECKING:
-    from tests.small.build.command_fixtures import CommandBundleContext
+    from tests.small.command_fixtures import CommandBundleContext
 
 
 class VerifyLifecycleTests:

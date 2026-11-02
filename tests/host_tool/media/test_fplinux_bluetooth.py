@@ -73,7 +73,7 @@ def bluetooth_tools(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Blueto
                     str(CLIENT_SOURCE.with_name("fplinux-bluetooth-opp.c")),
                     str(CLIENT_SOURCE.with_name("fplinux-bluetooth-pan.c")),
                     str(CLIENT_SOURCE.with_name("fplinux-bluetooth-common.c")),
-                    str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                    str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
                 ],
             ),
             (SERVICE_SOURCE, tools.service, "compile FPLinux Bluetooth test service", []),

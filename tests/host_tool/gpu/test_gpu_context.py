@@ -41,7 +41,7 @@ def gpu_context_harness(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pa
                 "/opt/quality/include",
                 f"-I{ROOT / 'include/fplinux'}",
                 str(ROOT / "tests/host_tool/gpu/gpu-context.c"),
-                str(ROOT / "lib/fplinux/fplinux-gpu.c"),
+                str(ROOT / "lib/fplinux-shared/fplinux-gpu.c"),
                 "-Wl,--wrap=dlopen,--wrap=dlsym,--wrap=dlclose,--wrap=dlerror",
                 "-Wl,--wrap=open,--wrap=close,--wrap=fstat,--wrap=stat",
                 "-Wl,--wrap=drmGetNodeTypeFromFd,--wrap=drmGetVersion",

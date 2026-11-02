@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-SOURCE = ROOT / "common/host/fplinux-usb-keyboard.c"
+SOURCE = ROOT / "platforms/ums9117/host/fplinux-usb-keyboard.c"
 SHARED = ROOT / "include/fplinux"
 
 
@@ -54,7 +54,7 @@ class FPLinuxUsbKeyboardCliTests:
                     str(SHARED),
                     str(SOURCE),
                     *libusb_flags,
-                    str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                    str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
                     "-pthread",
                 ],
                 name="compile fplinux-usb-keyboard",

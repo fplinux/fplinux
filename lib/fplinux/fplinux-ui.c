@@ -31,7 +31,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
-#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 #include <wayland-client.h>
@@ -3512,80 +3511,6 @@ bool fplinux_ui_is_softkey(const struct fplinux_ui_key *key, bool left)
 {
 	return key->source == FPLINUX_UI_KEY_PHONE &&
 	       key->code == (left ? KEY_F13 : KEY_F14);
-}
-
-static bool state_directory_path(const char *app_id, char *path,
-				 size_t capacity)
-{
-	const char *root = getenv("XDG_STATE_HOME");
-	const char *home = getenv("HOME");
-	char base[PATH_MAX];
-
-	if (!app_id || !app_id[0] || strchr(app_id, '/') ||
-	    !strcmp(app_id, ".") || !strcmp(app_id, "..")) {
-		errno = EINVAL;
-		return false;
-	}
-	if (root && root[0] == '/') {
-		if (snprintf(base, sizeof(base), "%s", root) >=
-		    (int)sizeof(base)) {
-			errno = ENAMETOOLONG;
-			return false;
-		}
-	} else {
-		if (!home || home[0] != '/') {
-			errno = EINVAL;
-			return false;
-		}
-		if (snprintf(base, sizeof(base), "%s/.local/state", home) >=
-		    (int)sizeof(base)) {
-			errno = ENAMETOOLONG;
-			return false;
-		}
-	}
-	if (snprintf(path, capacity, "%s/fplinux/%s", base, app_id) >=
-	    (int)capacity) {
-		errno = ENAMETOOLONG;
-		return false;
-	}
-	return true;
-}
-
-bool fplinux_ui_state_dir(const char *app_id, char *path, size_t capacity)
-{
-	struct stat status;
-	size_t length;
-
-	if (!state_directory_path(app_id, path, capacity))
-		return false;
-	length = strlen(path);
-	for (size_t i = 1; i <= length; ++i) {
-		char saved = path[i];
-
-		if (saved && saved != '/')
-			continue;
-		path[i] = '\0';
-		if (mkdir(path, 0700) < 0 && errno != EEXIST) {
-			path[i] = saved;
-			return false;
-		}
-		if (stat(path, &status) < 0 || !S_ISDIR(status.st_mode)) {
-			path[i] = saved;
-			errno = ENOTDIR;
-			return false;
-		}
-		path[i] = saved;
-	}
-	return true;
-}
-
-struct fplinux_ui_prefs *fplinux_ui_prefs_open(const char *app_id)
-{
-	char directory[PATH_MAX];
-
-	if (!state_directory_path(app_id, directory, sizeof(directory)))
-		return NULL;
-	return fplinux_ui_prefs_open_directory(directory);
 }
 
 /* A top-layer popup owns its scrim, even when their parent deletes both. */

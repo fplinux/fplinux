@@ -10,7 +10,7 @@ LANGUAGE_SOURCES = (
     "include/fplinux/fplinux-language.h",
 )
 SETTINGS_VALUES_SOURCES = (
-    "lib/fplinux/fplinux-settings-values.c",
+    "lib/fplinux-shared/fplinux-settings-values.c",
     "include/fplinux/fplinux-settings-values.h",
 )
 MULTITAP_SOURCES = (
@@ -32,7 +32,7 @@ UI_SOFTKEY_LAYOUT_SOURCES = (
     "include/fplinux/fplinux-ui-softkey-layout.h",
 )
 DESKTOP_ENTRY_SOURCES = (
-    "lib/fplinux/fplinux-desktop-entry.c",
+    "lib/fplinux-shared/fplinux-desktop-entry.c",
     "include/fplinux/fplinux-desktop-entry.h",
     "include/fplinux/fplinux-ui-session.h",
     "include/fplinux/fplinux-ui-vibration.h",
@@ -40,20 +40,20 @@ DESKTOP_ENTRY_SOURCES = (
     "include/fplinux/fplinux-volumes.h",
 )
 DRM_SESSION_SOURCES = (
-    "lib/fplinux/fplinux-drm-session.c",
+    "lib/fplinux-shared/fplinux-drm-session.c",
     "include/fplinux/fplinux-drm-session.h",
 )
 GPU_SOURCES = (
-    "lib/fplinux/fplinux-gpu.c",
+    "lib/fplinux-shared/fplinux-gpu.c",
     "include/fplinux/fplinux-gpu.h",
 )
 GPU_OUTPUT_SOURCES = (
     *GPU_SOURCES,
-    "lib/fplinux/fplinux-gpu-output.c",
+    "lib/fplinux-shared/fplinux-gpu-output.c",
     "include/fplinux/fplinux-gpu-output.h",
 )
 CLI_SOURCES = (
-    "lib/fplinux/fplinux-cli.c",
+    "lib/fplinux-shared/fplinux-cli.c",
     "include/fplinux/fplinux-cli.h",
 )
 AUDIO_CLIENT_SOURCES = (
@@ -62,17 +62,17 @@ AUDIO_CLIENT_SOURCES = (
     "include/fplinux/fplinux-audio-protocol.h",
 )
 FONT_SOURCES = (
-    "lib/fplinux/fplinux-font.c",
+    "lib/fplinux-shared/fplinux-font.c",
     "include/fplinux/fplinux-font.h",
 )
 ACTIVITY_SOURCES = (
-    "lib/fplinux/fplinux-activity.c",
+    "lib/fplinux-shared/fplinux-activity.c",
     "include/fplinux/fplinux-activity.h",
     "scripts/fplinux_activity.py",
 )
 STATUS_SCREEN_SOURCES = (
     *ACTIVITY_SOURCES,
-    "lib/fplinux/fplinux-status-screen.c",
+    "lib/fplinux-shared/fplinux-status-screen.c",
     "include/fplinux/fplinux-status-screen.h",
     "include/fplinux/fplinux-status-font.h",
     "lib/fplinux/fplinux-ui-profile.json",
@@ -81,28 +81,28 @@ STATUS_SCREEN_SOURCES = (
     "scripts/fplinux_status_assets.py",
 )
 BRIGHTNESS_CLIENT_SOURCES = (
-    "lib/fplinux/fplinux-brightness-client.c",
+    "lib/fplinux-shared/fplinux-brightness-client.c",
     "include/fplinux/fplinux-brightness-client.h",
 )
 BLUEZ_ADAPTER_SOURCES = (
-    "lib/fplinux/fplinux-bluez-adapter.c",
+    "lib/fplinux-shared/fplinux-bluez-adapter.c",
     "include/fplinux/fplinux-bluez-adapter.h",
 )
 INPUT_DEVICE_SOURCES = ("include/fplinux/fplinux-input-device.h",)
 KEYPAD_CODE_SOURCES = ("include/fplinux/fplinux-keypad.h",)
 KEYPAD_LIGHT_SOURCES = (
-    "lib/fplinux/fplinux-keypad-light.c",
+    "lib/fplinux-shared/fplinux-keypad-light.c",
     "include/fplinux/fplinux-keypad-light.h",
 )
 CLOCK_SOURCES = (
     "include/fplinux/fplinux-storage.h",
-    "alpine/aports/fplinux-clocks/clock-model.c",
-    "alpine/aports/fplinux-clocks/clock-model.h",
-    "alpine/aports/fplinux-clocks/clock-wire.c",
-    "alpine/aports/fplinux-clocks/clock-wire.h",
+    "lib/fplinux-shared/fplinux-clock-model.c",
+    "include/fplinux/fplinux-clock-model.h",
+    "lib/fplinux-shared/fplinux-clock-wire.c",
+    "include/fplinux/fplinux-clock-wire.h",
 )
 INPUT_SESSION_SOURCES = (
-    "lib/fplinux/fplinux-input-session.c",
+    "lib/fplinux-shared/fplinux-input-session.c",
     "include/fplinux/fplinux-input-session.h",
 )
 SHARED_APORT_SOURCES = {
@@ -138,7 +138,7 @@ SHARED_APORT_SOURCES = {
     ),
     "fplinux-calculator": CLI_SOURCES,
     "fplinux-charge": CLI_SOURCES,
-    "fplinux-clocks": (*CLI_SOURCES, *UTF8_SOURCES, "include/fplinux/fplinux-storage.h"),
+    "fplinux-clocks": (*CLI_SOURCES, *UTF8_SOURCES, *CLOCK_SOURCES),
     "fplinux-cpuclock": CLI_SOURCES,
     "fplinux-debug-tools": (*DRM_SESSION_SOURCES, *CLI_SOURCES, *GPU_OUTPUT_SOURCES),
     "fplinux-example-apidemo": CLI_SOURCES,
@@ -314,6 +314,7 @@ SHARED_APORT_SOURCES = {
         "include/fplinux/fplinux-ui-menu.h",
         "lib/fplinux/fplinux-ui-prefs.c",
         "include/fplinux/fplinux-ui-prefs.h",
+        "lib/fplinux/fplinux-ui-image.c",
         "lib/fplinux/fplinux-ui-screen.c",
         "include/fplinux/fplinux-ui-screen.h",
         "lib/fplinux/fplinux-ui-screen-model.c",

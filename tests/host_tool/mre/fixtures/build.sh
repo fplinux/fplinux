@@ -4,10 +4,10 @@ set -eu
 
 root=$1
 work=$2
-screens=$root/site/scripts/screens
+screens=$root/tests/host_tool/gui/screens
 fixtures=$root/tests/host_tool/mre/fixtures
 aport=$root/alpine/aports/fplinux-mre
-# shellcheck source=site/scripts/screens/ui-host-build.sh
+# shellcheck source=tests/host_tool/gui/screens/ui-host-build.sh
 . "$screens/ui-host-build.sh"
 ui_host_prepare "$root" "$work" "$3"
 
@@ -17,7 +17,8 @@ msgfmt --check --output-file="$work/locale/ru/LC_MESSAGES/fplinux-ui.mo" "$root/
 
 # shellcheck disable=SC2046
 ui_host_build_application -I"$aport" \
-	"$aport/fplinux-mre.c" "$aport/runtime-paths.c" "$aport/vfs-broker.c" \
+	"$aport/fplinux-mre.c" "$aport/mre-selector-files.c" \
+	"$aport/runtime-paths.c" "$aport/vfs-broker.c" "$aport/vfs-path.c" \
 	"$aport/text-codec.c" "$aport/http-broker.c" "$fixtures/adapter.c" \
 	-Wl,--wrap=execl -Wl,--wrap=fplinux_language_load \
 	-Wl,--wrap=libintl_bindtextdomain \

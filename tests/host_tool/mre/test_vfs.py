@@ -33,6 +33,7 @@ def vfs(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 str(APORT),
                 str(ROOT / "tests/host_tool/mre/vfs.c"),
                 str(APORT / "vfs-broker.c"),
+                str(APORT / "vfs-path.c"),
                 "-Wl,--wrap=fsync",
             ],
             name="compile production MRE broker and synchronization-error harness",

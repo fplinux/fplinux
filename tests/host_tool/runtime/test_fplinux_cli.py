@@ -37,7 +37,7 @@ class FPLinuxCliTests:
                     "-Werror",
                     f"-I{SHARED}",
                     str(ROOT / "tests/host_tool/runtime/fplinux-cli.c"),
-                    str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                    str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
                 ],
                 name="compile shared CLI fixture",
                 check=True,

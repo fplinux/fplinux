@@ -11,6 +11,7 @@
 #include "fplinux-ui.h"
 #include "launcher-catalogue.h"
 #include "launcher-clock.h"
+#include "launcher-icons.h"
 #include "launcher-layout.h"
 #include "launcher-launch.h"
 #include "launcher-power.h"
@@ -20,8 +21,6 @@
 
 #include <dirent.h>
 #include <errno.h>
-#include <fcntl.h>
-#include <inttypes.h>
 #include <libintl.h>
 #include <limits.h>
 #include <linux/input-event-codes.h>
@@ -31,16 +30,11 @@
 #include <string.h>
 #include <sys/epoll.h>
 #include <sys/inotify.h>
-#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
 #define _(text) gettext(text)
 
-#define FPLINUX_LAUNCHER_APP_COUNT 64
-/* Room for the icon sizes of every profile (launcher-layout.h). */
-#define FPLINUX_LAUNCHER_ICON_SIZE_COUNT 8
-#define FPLINUX_LAUNCHER_ICON_FILE_BYTES 32768
 #define FPLINUX_LAUNCHER_RELOAD_DELAY_MS 250
 #define FPLINUX_LAUNCHER_WATCH_EVENTS \
 	(IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO | IN_CLOSE_WRITE)
@@ -63,17 +57,6 @@ struct application {
 	lv_draw_buf_t *tile;
 	lv_draw_buf_t *row_tile;
 };
-
-/* Hashes of icon problems logged by the current and previous catalogue load. */
-struct icon_reports {
-	uint32_t current[2 * FPLINUX_LAUNCHER_APP_COUNT];
-	uint32_t previous[2 * FPLINUX_LAUNCHER_APP_COUNT];
-	size_t current_count;
-	size_t previous_count;
-};
-
-static const uint8_t png_signature[8] = { 0x89, 'P',  'N',  'G',
-					  '\r', '\n', 0x1a, '\n' };
 
 /* What the launcher surface shows, derived from the manager's state. */
 enum launcher_screen {
@@ -122,9 +105,7 @@ struct launcher {
 	const struct fplinux_ui_profile_spec *spec;
 	struct fplinux_launcher_frame frame;
 	struct fplinux_launcher_battery battery_layout;
-	/* Sizes of the icon directories, ascending. */
-	int icon_sizes[FPLINUX_LAUNCHER_ICON_SIZE_COUNT];
-	size_t icon_size_count;
+	struct fplinux_launcher_icons icons;
 	/* The generic app glyph for apps without a tile; may be NULL. */
 	const void *app_glyph;
 	struct application apps[FPLINUX_LAUNCHER_APP_COUNT];
@@ -160,7 +141,6 @@ struct launcher {
 	bool watching;
 	lv_timer_t *reload_timer;
 	lv_timer_t *clock_timer;
-	struct icon_reports icon_reports;
 	bool session_known;
 	bool active;
 	char active_title[FPLINUX_UI_SESSION_TEXT_BYTES];
@@ -353,215 +333,6 @@ static void copy_message_text(char *destination, const char *text)
 	snprintf(destination, FPLINUX_UI_SESSION_TEXT_BYTES, "%s", text);
 }
 
-static void begin_icon_reports(struct icon_reports *reports)
-{
-	memcpy(reports->previous, reports->current, sizeof(reports->current));
-	reports->previous_count = reports->current_count;
-	reports->current_count = 0;
-}
-
-/*
- * Every catalogue load checks the icons again, and the session log lives in
- * RAM. A problem is logged when it was not reported by the previous load.
- */
-static void report_icon_problem(struct icon_reports *reports,
-				const char *app_id, const char *problem)
-{
-	char line[PATH_MAX + 128];
-	uint32_t hash = 2166136261U;
-	size_t capacity = sizeof(reports->current) / sizeof(*reports->current);
-
-	snprintf(line, sizeof(line), "fplinux-launcher: %s: %s\n", app_id,
-		 problem);
-	for (const char *character = line; *character; ++character)
-		hash = (hash ^ (unsigned char)*character) * 16777619U;
-	/* Both icon sizes may meet the same file. */
-	for (size_t i = 0; i < reports->current_count; ++i)
-		if (reports->current[i] == hash)
-			return;
-	if (reports->current_count < capacity)
-		reports->current[reports->current_count++] = hash;
-	for (size_t i = 0; i < reports->previous_count; ++i)
-		if (reports->previous[i] == hash)
-			return;
-	fputs(line, stderr);
-}
-
-static uint32_t read_be32(const uint8_t *bytes)
-{
-	return (uint32_t)bytes[0] << 24 | (uint32_t)bytes[1] << 16 |
-	       (uint32_t)bytes[2] << 8 | bytes[3];
-}
-
-/* Icons follow the trust rule that the session applies to desktop entries. */
-static const char *untrusted_icon_reason(const struct stat *status)
-{
-	if (!S_ISREG(status->st_mode))
-		return "is not a regular file";
-	if (status->st_uid != 0)
-		return "is not owned by root";
-	if (status->st_mode & (S_IWGRP | S_IWOTH))
-		return "is writable by group or others";
-	if (status->st_size > FPLINUX_LAUNCHER_ICON_FILE_BYTES)
-		return "is larger than 32768 bytes";
-	return NULL;
-}
-
-/* NULL with reason; *missing tells that the file does not exist. */
-static uint8_t *read_icon_file(const char *path, size_t *bytes, bool *missing,
-			       char *reason, size_t capacity)
-{
-	struct stat status;
-	const char *untrusted;
-	uint8_t *png;
-	size_t size;
-	size_t done = 0;
-	int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
-
-	*missing = fd < 0 && errno == ENOENT;
-	if (fd < 0) {
-		snprintf(reason, capacity, "%s",
-			 errno == ELOOP ? "is a symbolic link" :
-					  strerror(errno));
-		return NULL;
-	}
-	if (fstat(fd, &status) < 0) {
-		snprintf(reason, capacity, "%s", strerror(errno));
-		close(fd);
-		return NULL;
-	}
-	untrusted = untrusted_icon_reason(&status);
-	if (untrusted) {
-		snprintf(reason, capacity, "%s", untrusted);
-		close(fd);
-		return NULL;
-	}
-	size = (size_t)status.st_size;
-	png = malloc(size ? size : 1);
-	if (!png) {
-		snprintf(reason, capacity, "%s", strerror(ENOMEM));
-		close(fd);
-		return NULL;
-	}
-	while (done < size) {
-		ssize_t count = read(fd, png + done, size - done);
-
-		if (count < 0 && errno == EINTR)
-			continue;
-		if (count <= 0)
-			break;
-		done += (size_t)count;
-	}
-	close(fd);
-	if (done != size) {
-		snprintf(reason, capacity, "changed or failed while reading");
-		free(png);
-		return NULL;
-	}
-	*bytes = size;
-	return png;
-}
-
-/* The PNG header must give the size of the directory the file is in. */
-static bool check_png_header(const uint8_t *png, size_t bytes, int size,
-			     char *reason, size_t capacity)
-{
-	uint32_t width;
-	uint32_t height;
-
-	/* Signature, then IHDR: 13-byte length, type, width and height. */
-	if (bytes < 24 || memcmp(png, png_signature, sizeof(png_signature)) ||
-	    read_be32(png + 8) != 13 || memcmp(png + 12, "IHDR", 4)) {
-		snprintf(reason, capacity, "is not a PNG file");
-		return false;
-	}
-	width = read_be32(png + 16);
-	height = read_be32(png + 20);
-	if (width != (uint32_t)size || height != (uint32_t)size) {
-		snprintf(reason, capacity,
-			 "is %" PRIu32 "x%" PRIu32 ", expected %dx%d", width,
-			 height, size, size);
-		return false;
-	}
-	return true;
-}
-
-/*
- * The runtime decodes the checked PNG bytes once, scaling a larger file down
- * with its area filter, into an ARGB8888 buffer that redraws reuse; LVGL
- * keeps no reference to the PNG bytes.
- */
-static lv_draw_buf_t *decode_icon(const uint8_t *png, size_t bytes,
-				  int file_size, int size)
-{
-	const lv_image_dsc_t source = {
-		.header = {
-			.magic = LV_IMAGE_HEADER_MAGIC,
-			.cf = LV_COLOR_FORMAT_RAW_ALPHA,
-			.w = (uint32_t)file_size,
-			.h = (uint32_t)file_size,
-		},
-		.data_size = (uint32_t)bytes,
-		.data = png,
-	};
-
-	return fplinux_ui_image_load(&source, size, size);
-}
-
-/*
- * The tile for size pixels: the file of exactly that size, else the next
- * larger one that is valid, scaled down. Problems are logged once.
- */
-static lv_draw_buf_t *load_icon(struct launcher *launcher, const char *app_id,
-				const char *name, int size)
-{
-	char path[PATH_MAX];
-	char reason[64];
-	char problem[PATH_MAX + 80];
-	bool found = false;
-
-	for (size_t i = 0; i < launcher->icon_size_count; ++i) {
-		int file_size = launcher->icon_sizes[i];
-		lv_draw_buf_t *icon = NULL;
-		uint8_t *png;
-		size_t bytes;
-		bool missing;
-
-		if (file_size < size ||
-		    snprintf(path, sizeof(path),
-			     "/usr/share/icons/hicolor/%dx%d/apps/%s.png",
-			     file_size, file_size, name) >= (int)sizeof(path))
-			continue;
-		png = read_icon_file(path, &bytes, &missing, reason,
-				     sizeof(reason));
-		if (missing)
-			continue;
-		found = true;
-		if (png && check_png_header(png, bytes, file_size, reason,
-					    sizeof(reason))) {
-			icon = decode_icon(png, bytes, file_size, size);
-			if (!icon)
-				snprintf(
-					reason, sizeof(reason), "%s",
-					errno == EINVAL ?
-						"cannot be decoded or is fully transparent" :
-						strerror(errno));
-		}
-		free(png);
-		if (icon)
-			return icon;
-		snprintf(problem, sizeof(problem), "ignoring icon %s: %s", path,
-			 reason);
-		report_icon_problem(&launcher->icon_reports, app_id, problem);
-	}
-	if (!found) {
-		snprintf(problem, sizeof(problem),
-			 "no icon %s.png of %d pixels or larger", name, size);
-		report_icon_problem(&launcher->icon_reports, app_id, problem);
-	}
-	return NULL;
-}
-
 static void release_icons(struct launcher *launcher)
 {
 	for (size_t i = 0; i < launcher->app_count; ++i) {
@@ -586,13 +357,15 @@ static bool read_application(struct launcher *launcher, const char *filename,
 	strcpy(app->name, entry.name);
 	app->group = entry.group;
 	if (!entry.icon_valid) {
-		report_icon_problem(&launcher->icon_reports, app->id,
-				    "ignoring invalid Icon");
+		fplinux_launcher_icons_report(&launcher->icons, app->id,
+					      "ignoring invalid Icon");
 	} else if (entry.icon[0]) {
-		app->tile = load_icon(launcher, app->id, entry.icon,
-				      launcher->spec->app_icon_size);
-		app->row_tile = load_icon(launcher, app->id, entry.icon,
-					  launcher->spec->row_icon_size);
+		app->tile = fplinux_launcher_icons_load(
+			&launcher->icons, app->id, entry.icon,
+			launcher->spec->app_icon_size);
+		app->row_tile = fplinux_launcher_icons_load(
+			&launcher->icons, app->id, entry.icon,
+			launcher->spec->row_icon_size);
 	}
 	return true;
 }
@@ -690,7 +463,7 @@ static void scan_applications(struct launcher *launcher)
 	if (launcher->body)
 		clear_view(launcher);
 	release_icons(launcher);
-	begin_icon_reports(&launcher->icon_reports);
+	fplinux_launcher_icons_begin(&launcher->icons);
 	launcher->app_count = 0;
 	launcher->selected = 0;
 	launcher->catalogue_dirty = true;
@@ -2210,8 +1983,8 @@ static bool watch_icon_directories(struct launcher *launcher)
 {
 	bool watched = false;
 
-	for (size_t i = 0; i < launcher->icon_size_count; ++i) {
-		int size = launcher->icon_sizes[i];
+	for (size_t i = 0; i < launcher->icons.size_count; ++i) {
+		int size = launcher->icons.sizes[i];
 		char path[PATH_MAX];
 
 		if (size < launcher->spec->row_icon_size)
@@ -2365,10 +2138,7 @@ int main(int argc, char **argv)
 			       fplinux_ui_height(launcher.ui), &launcher.frame);
 	fplinux_launcher_battery_layout(launcher.spec, launcher.frame.width,
 					&launcher.battery_layout);
-	launcher.icon_size_count = fplinux_launcher_icon_sizes(
-		launcher.icon_sizes, FPLINUX_LAUNCHER_ICON_SIZE_COUNT);
-	if (launcher.icon_size_count > FPLINUX_LAUNCHER_ICON_SIZE_COUNT)
-		launcher.icon_size_count = FPLINUX_LAUNCHER_ICON_SIZE_COUNT;
+	fplinux_launcher_icons_init(&launcher.icons);
 	launcher.app_glyph =
 		fplinux_ui_glyph(launcher.ui, "app", FPLINUX_UI_GLYPH_ROW);
 	launcher.canvas = fplinux_ui_canvas_new(launcher.ui, NULL);

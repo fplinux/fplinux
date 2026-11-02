@@ -161,7 +161,7 @@ class GlobalProfileTests:
     ) -> None:
         """Feature-package ownership is rejected at the boot-policy boundary."""
         path = profile_context.root / "profiles/default/profile.toml"
-        shutil.copyfile(PROFILE_FIXTURES / "default-with-feature-package.toml", path)
+        shutil.copyfile(PROFILE_FIXTURES / "feature-package/profile.toml", path)
         with pytest.raises(SystemExit, match="boot maintenance"):
             targets.load_target("first")
 
@@ -170,7 +170,7 @@ class GlobalProfileTests:
         self, profile_context: ProfileContext, profile: str
     ) -> None:
         """A board without a Bluetooth declaration has no firmware input group."""
-        profile_context.write_target_manifest("first", "target-without-bluetooth.toml")
+        profile_context.write_target_manifest("first", "without-bluetooth/target.toml")
         assert (targets.load_target("first", profile)["device_data"]["groups"]) == ({})
 
     @pytest.mark.parametrize(
@@ -252,7 +252,7 @@ class GlobalProfileTests:
         self, profile_context: ProfileContext, table: str, group: str
     ) -> None:
         """Audio and FM inputs cannot omit the size that device-data consumers verify."""
-        profile_context.write_target_manifest("first", "target-without-bluetooth.toml")
+        profile_context.write_target_manifest("first", "without-bluetooth/target.toml")
         path = profile_context.root / "targets/first/target.toml"
         base = path.read_text(encoding="utf-8")
         declaration = (
@@ -293,7 +293,7 @@ class GlobalProfileTests:
         self, profile_context: ProfileContext
     ) -> None:
         """Omitting the microSD tables removes that profile instead of borrowing inputs."""
-        profile_context.write_target_manifest("first", "target-without-microsd.toml")
+        profile_context.write_target_manifest("first", "without-microsd/target.toml")
 
         assert (paths.discover_profiles("first")) == (("default",))
         assert (targets.load_target("first")["bootstrap"]["kind"]) == ("linux")
@@ -338,7 +338,7 @@ class GlobalProfileTests:
         target_root = profile_context.root / "targets" / target
         (target_root / "uboot/slot.c").write_text(f"{target} slot\n")
         (target_root / "uboot/board.patch").write_text(f"{target} integration patch\n")
-        profile_context.write_target_manifest(target, "target-with-uboot-sources.toml")
+        profile_context.write_target_manifest(target, "with-uboot-sources/target.toml")
 
         uboot = targets.load_target(target, "microsd-uboot")["uboot"]
         assert ([(profile_context.root / path).read_text() for path in uboot["patches"]]) == (

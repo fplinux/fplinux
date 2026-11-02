@@ -11,7 +11,7 @@ from fplinux_cli.workspace import build_inputs, quality_inputs, staging
 
 from tests import ROOT
 
-WORKSPACE_FILES = ROOT / "tests/fixtures/workspace"
+WORKSPACE_FILES = ROOT / "tests/small/workspace/fixtures/workspace"
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

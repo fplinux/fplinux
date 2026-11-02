@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: 0BSD */
 #define _GNU_SOURCE
 #include "vfs-broker.h"
+#include "vfs-path.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -14,7 +15,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#define VFS_NAME_BYTES 256
 #define VFS_TEMP_BYTES 64
 #define VFS_TEMP_ATTEMPTS 128
 #define VFS_FIND_ENTRY_LIMIT 4096
@@ -32,14 +32,14 @@ struct vfs_file_handle {
 	bool append;
 	bool failed;
 	int parent_fd;
-	char leaf[VFS_NAME_BYTES];
+	char leaf[MRE_VFS_NAME_BYTES];
 	char staged[VFS_TEMP_BYTES];
 };
 
 struct find_handle {
 	int32_t id;
 	DIR *directory;
-	char pattern[VFS_NAME_BYTES];
+	char pattern[MRE_VFS_NAME_BYTES];
 	unsigned int visited;
 };
 
@@ -97,119 +97,6 @@ static bool bounded_size(const struct mre_vfs *vfs, const struct stat *status)
 		return false;
 	}
 	return true;
-}
-
-static bool ascii_case_equal(const char *first, const char *second);
-
-static bool utf8_valid(const unsigned char *text, size_t bytes)
-{
-	for (size_t i = 0; i < bytes;) {
-		uint32_t scalar = text[i++];
-		unsigned int remaining;
-		uint32_t minimum;
-
-		if (scalar < 0x80)
-			continue;
-		if (scalar >= 0xc2 && scalar <= 0xdf) {
-			remaining = 1;
-			minimum = 0x80;
-			scalar &= 0x1f;
-		} else if (scalar >= 0xe0 && scalar <= 0xef) {
-			remaining = 2;
-			minimum = 0x800;
-			scalar &= 0x0f;
-		} else if (scalar >= 0xf0 && scalar <= 0xf4) {
-			remaining = 3;
-			minimum = 0x10000;
-			scalar &= 7;
-		} else {
-			return false;
-		}
-		if (remaining > bytes - i)
-			return false;
-		while (remaining--) {
-			unsigned char continuation = text[i++];
-
-			if ((continuation & 0xc0) != 0x80)
-				return false;
-			scalar = (scalar << 6) | (continuation & 0x3f);
-		}
-		if (scalar < minimum || scalar > 0x10ffff ||
-		    (scalar >= 0xd800 && scalar <= 0xdfff))
-			return false;
-	}
-	return true;
-}
-
-static bool component_valid(const char *start, size_t bytes, bool pattern)
-{
-	static const char staging_prefix[] = ".mre-vfs-";
-	bool staging_name = bytes >= sizeof(staging_prefix) - 1;
-
-	if (!bytes || bytes >= VFS_NAME_BYTES ||
-	    (bytes == 1 && start[0] == '.') ||
-	    (bytes == 2 && start[0] == '.' && start[1] == '.') ||
-	    start[bytes - 1] == '.' || start[bytes - 1] == ' ')
-		return false;
-	if (!utf8_valid((const unsigned char *)start, bytes))
-		return false;
-	for (size_t i = 0; i < bytes; ++i) {
-		unsigned char value = (unsigned char)start[i];
-
-		if (value < 32 || value == 127 || value == '/' ||
-		    value == '\\' || value == ':' || value == '"' ||
-		    value == '<' || value == '>' || value == '|' ||
-		    (!pattern && (value == '*' || value == '?')))
-			return false;
-		if (i < sizeof(staging_prefix) - 1) {
-			unsigned char folded = value >= 'A' && value <= 'Z' ?
-						       value + ('a' - 'A') :
-						       value;
-
-			if (folded != (unsigned char)staging_prefix[i])
-				staging_name = false;
-		}
-	}
-	/* Broker staging names are never part of the application's namespace. */
-	return !staging_name;
-}
-
-static int normalize_path(const char *path, bool pattern, char *relative)
-{
-	size_t bytes = strnlen(path, MRE_VFS_PATH_BYTES);
-	size_t cursor = 3;
-	size_t output = 0;
-
-	memset(relative, 0, MRE_VFS_PATH_BYTES);
-	if (bytes >= MRE_VFS_PATH_BYTES || bytes < 3 || path[1] != ':' ||
-	    path[2] != '\\' ||
-	    (path[0] != 'E' && path[0] != 'e' && path[0] != 'C' &&
-	     path[0] != 'c')) {
-		errno = EINVAL;
-		return -1;
-	}
-	/* The internal prefix selects a pinned directory, never a host path. */
-	relative[output++] = path[0] == 'C' || path[0] == 'c' ? 'C' : 'E';
-	relative[output++] = '/';
-	while (cursor < bytes) {
-		size_t start = cursor;
-
-		while (cursor < bytes && path[cursor] != '\\')
-			++cursor;
-		if (!component_valid(path + start, cursor - start,
-				     pattern && cursor == bytes)) {
-			errno = EINVAL;
-			return -1;
-		}
-		if (output && relative[output - 1] != '/')
-			relative[output++] = '/';
-		memcpy(relative + output, path + start, cursor - start);
-		output += cursor - start;
-		if (cursor < bytes)
-			++cursor;
-	}
-	relative[output] = '\0';
-	return 0;
 }
 
 static const char *root_relative(const char *relative)
@@ -323,7 +210,7 @@ static int resolve_name(int parent_fd, const char *name, char *actual)
 			error = EOVERFLOW;
 			break;
 		}
-		if (!ascii_case_equal(name, found->d_name))
+		if (!mre_vfs_ascii_case_equal(name, found->d_name))
 			continue;
 		if (matched) {
 			error = EEXIST;
@@ -359,7 +246,7 @@ static int path_parent(struct mre_vfs *vfs, const char *relative, char *leaf)
 	for (;;) {
 		char *separator = strchr(component, '/');
 		int child_fd;
-		char actual[VFS_NAME_BYTES];
+		char actual[MRE_VFS_NAME_BYTES];
 
 		if (!separator) {
 			if (resolve_name(parent_fd, component, leaf) < 0) {
@@ -428,7 +315,7 @@ static int stat_leaf(int parent_fd, const char *leaf, struct stat *status)
 static int path_stat(struct mre_vfs *vfs, const char *relative,
 		     struct stat *status)
 {
-	char leaf[VFS_NAME_BYTES];
+	char leaf[MRE_VFS_NAME_BYTES];
 	int parent_fd;
 	int result;
 	int error;
@@ -445,28 +332,13 @@ static int path_stat(struct mre_vfs *vfs, const char *relative,
 	return result;
 }
 
-static bool ascii_case_equal(const char *first, const char *second)
-{
-	while (*first && *second) {
-		unsigned char a = (unsigned char)*first++;
-		unsigned char b = (unsigned char)*second++;
-
-		if (a >= 'A' && a <= 'Z')
-			a += 'a' - 'A';
-		if (b >= 'A' && b <= 'Z')
-			b += 'a' - 'A';
-		if (a != b)
-			return false;
-	}
-	return !*first && !*second;
-}
-
 static bool executable_name(const char *name)
 {
 	size_t bytes = strlen(name);
 
-	return bytes >= 4 && (ascii_case_equal(name + bytes - 4, ".vxp") ||
-			      ascii_case_equal(name + bytes - 4, ".vsm"));
+	return bytes >= 4 &&
+	       (mre_vfs_ascii_case_equal(name + bytes - 4, ".vxp") ||
+		mre_vfs_ascii_case_equal(name + bytes - 4, ".vsm"));
 }
 
 static int authorize_mutation(struct mre_vfs *vfs, const char *relative)
@@ -669,7 +541,7 @@ static int open_file(struct mre_vfs *vfs, const struct mre_vfs_request *request)
 		errno = EINVAL;
 		return -1;
 	}
-	if (normalize_path(request->path, false, relative) < 0)
+	if (mre_vfs_normalize_path(request->path, false, relative) < 0)
 		return -1;
 	if (is_root(relative)) {
 		errno = EISDIR;
@@ -902,7 +774,7 @@ static int change_attributes(struct mre_vfs *vfs,
 			     const struct mre_vfs_request *request,
 			     const char *relative)
 {
-	char leaf[VFS_NAME_BYTES];
+	char leaf[MRE_VFS_NAME_BYTES];
 	struct stat status;
 	int parent_fd;
 	int fd;
@@ -950,7 +822,7 @@ static int mutate_path(struct mre_vfs *vfs,
 		       const struct mre_vfs_request *request,
 		       const char *relative)
 {
-	char leaf[VFS_NAME_BYTES];
+	char leaf[MRE_VFS_NAME_BYTES];
 	struct stat status;
 	int parent_fd;
 	int result;
@@ -996,7 +868,7 @@ static int copy_or_rename(struct mre_vfs *vfs,
 {
 	char source[MRE_VFS_PATH_BYTES];
 	char destination[MRE_VFS_PATH_BYTES];
-	char source_leaf[VFS_NAME_BYTES];
+	char source_leaf[MRE_VFS_NAME_BYTES];
 	struct stat source_status;
 	struct stat destination_status;
 	struct vfs_file_handle transaction = { .fd = -1, .parent_fd = -1 };
@@ -1006,13 +878,13 @@ static int copy_or_rename(struct mre_vfs *vfs,
 	int error;
 	bool copying = request->operation == MRE_VFS_COPY;
 
-	if (normalize_path(request->path, false, source) < 0)
+	if (mre_vfs_normalize_path(request->path, false, source) < 0)
 		return -1;
 	if (copying && request->mode > 1) {
 		errno = EINVAL;
 		return -1;
 	}
-	if (normalize_path(request->path2, false, destination) < 0)
+	if (mre_vfs_normalize_path(request->path2, false, destination) < 0)
 		return -1;
 	if (is_root(source) || is_root(destination)) {
 		errno = EACCES;
@@ -1095,52 +967,6 @@ cleanup:
 	return result;
 }
 
-static const char *next_character(const char *text)
-{
-	++text;
-	while (((unsigned char)*text & 0xc0) == 0x80)
-		++text;
-	return text;
-}
-
-static unsigned char ascii_fold(unsigned char value)
-{
-	return value >= 'A' && value <= 'Z' ? value + ('a' - 'A') : value;
-}
-
-static bool name_matches(const char *pattern, const char *name)
-{
-	const char *star = NULL;
-	const char *retry = NULL;
-
-	/* DOS *.* includes extensionless files and directories. */
-	if (strcmp(pattern, "*.*") == 0)
-		pattern = "*";
-	while (*name) {
-		if (*pattern == '?') {
-			++pattern;
-			name = next_character(name);
-		} else if (*pattern == *name ||
-			   ascii_fold((unsigned char)*pattern) ==
-				   ascii_fold((unsigned char)*name)) {
-			++pattern;
-			++name;
-		} else if (*pattern == '*') {
-			star = ++pattern;
-			retry = name;
-		} else if (star) {
-			pattern = star;
-			retry = next_character(retry);
-			name = retry;
-		} else {
-			return false;
-		}
-	}
-	while (*pattern == '*')
-		++pattern;
-	return !*pattern;
-}
-
 static int next_entry(struct mre_vfs *vfs, struct find_handle *iterator,
 		      struct mre_vfs_entry *entry)
 {
@@ -1161,14 +987,14 @@ static int next_entry(struct mre_vfs *vfs, struct find_handle *iterator,
 			return -1;
 		}
 		bytes = strlen(found->d_name);
-		if (!component_valid(found->d_name, bytes, false))
+		if (!mre_vfs_component_valid(found->d_name, bytes, false))
 			continue;
 		if (stat_leaf(dirfd(iterator->directory), found->d_name,
 			      &status) < 0)
 			continue;
 		if (same_file(&status, &vfs->state_root))
 			continue;
-		if (!name_matches(iterator->pattern, found->d_name))
+		if (!mre_vfs_name_matches(iterator->pattern, found->d_name))
 			continue;
 		if (S_ISREG(status.st_mode) && !bounded_size(vfs, &status))
 			continue;
@@ -1188,12 +1014,12 @@ static int open_iterator(struct mre_vfs *vfs, const char *path,
 			 struct mre_vfs_entry *entry)
 {
 	char relative[MRE_VFS_PATH_BYTES];
-	char leaf[VFS_NAME_BYTES];
+	char leaf[MRE_VFS_NAME_BYTES];
 	struct find_handle *iterator = NULL;
 	int parent_fd;
 	int32_t id;
 
-	if (normalize_path(path, true, relative) < 0)
+	if (mre_vfs_normalize_path(path, true, relative) < 0)
 		return -1;
 	if (is_root(relative)) {
 		errno = EACCES;
@@ -1259,7 +1085,7 @@ static int close_iterator(struct mre_vfs *vfs, int32_t id)
 int mre_vfs_open_directory(struct mre_vfs *vfs, const char *virtual_path)
 {
 	char relative[MRE_VFS_PATH_BYTES];
-	char leaf[VFS_NAME_BYTES];
+	char leaf[MRE_VFS_NAME_BYTES];
 	int parent_fd;
 	int fd;
 	int error;
@@ -1268,7 +1094,7 @@ int mre_vfs_open_directory(struct mre_vfs *vfs, const char *virtual_path)
 		errno = EACCES;
 		return -1;
 	}
-	if (normalize_path(virtual_path, false, relative) < 0)
+	if (mre_vfs_normalize_path(virtual_path, false, relative) < 0)
 		return -1;
 	if (is_root(relative))
 		return openat(path_root(vfs, relative), ".",
@@ -1289,7 +1115,7 @@ int mre_vfs_open_directory(struct mre_vfs *vfs, const char *virtual_path)
 int mre_vfs_open_readonly(struct mre_vfs *vfs, const char *virtual_path)
 {
 	char relative[MRE_VFS_PATH_BYTES];
-	char leaf[VFS_NAME_BYTES];
+	char leaf[MRE_VFS_NAME_BYTES];
 	int parent_fd;
 	int fd;
 	int error;
@@ -1298,7 +1124,7 @@ int mre_vfs_open_readonly(struct mre_vfs *vfs, const char *virtual_path)
 		errno = EACCES;
 		return -1;
 	}
-	if (normalize_path(virtual_path, false, relative) < 0)
+	if (mre_vfs_normalize_path(virtual_path, false, relative) < 0)
 		return -1;
 	if (is_root(relative)) {
 		errno = EISDIR;
@@ -1506,7 +1332,7 @@ void mre_vfs_dispatch(struct mre_vfs *vfs,
 	case MRE_VFS_MKDIR:
 	case MRE_VFS_RMDIR:
 	case MRE_VFS_DELETE:
-		if (normalize_path(request->path, false, relative) < 0)
+		if (mre_vfs_normalize_path(request->path, false, relative) < 0)
 			break;
 		if (request->operation == MRE_VFS_ATTR) {
 			result = metadata(vfs, relative, &response->entry);

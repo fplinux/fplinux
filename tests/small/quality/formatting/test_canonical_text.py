@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from fplinux_cli.quality.formatting.canonical_text import normalize_text
 
-FIXTURES = Path(__file__).parents[3] / "fixtures/formatting/text"
+FIXTURES = Path(__file__).parent / "fixtures/text"
 
 
 class DtsPropertyOrderTests:

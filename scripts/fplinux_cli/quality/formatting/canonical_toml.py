@@ -322,16 +322,11 @@ def _policy(relative: str) -> Mapping[str, Sequence[str]]:  # noqa: PLR0911
     path = PurePosixPath(relative)
     if relative in _ROOT_ORDERS:
         return _ROOT_ORDERS[relative]
-    if path.name in {"target.toml", "target.toml.in"} or (
-        relative.startswith("tests/fixtures/profile-config/") and path.name.startswith("target-")
-    ):
+    if path.name in {"target.toml", "target.toml.in"}:
         return _TARGET_ORDER
     if path.name == "platform.toml":
         return _PLATFORM_ORDER
-    if (
-        path.name == "profile.toml"
-        or relative == "tests/fixtures/profile-config/default-with-feature-package.toml"
-    ):
+    if path.name == "profile.toml":
         return _PROFILE_ORDER
     if relative.startswith("platforms/") and relative.endswith("/loader/assets.lock.toml"):
         return {

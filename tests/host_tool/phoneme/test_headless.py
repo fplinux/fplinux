@@ -36,7 +36,7 @@ def headless(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 str(PORT / "vm/fplinux-pm-headless.c"),
                 str(PORT / "vm/fplinux-pm-jar.c"),
                 str(PORT / "port/canvas/fplinux-pm-canvas-core.c"),
-                str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
                 "-lz",
             ],
             name="compile phoneME headless CLI with a VM boundary",

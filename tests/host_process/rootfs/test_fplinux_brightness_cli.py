@@ -7,15 +7,15 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tests.fixtures.rootfs.brightness import (
+from tests.host_process.rootfs.brightness_support import (
     brightness as brightness,  # noqa: PLC0414 -- pytest fixture export.
 )
-from tests.fixtures.rootfs.brightness import (
+from tests.host_process.rootfs.brightness_support import (
     brightness_binaries as brightness_binaries,  # noqa: PLC0414 -- pytest fixture export.
 )
 
 if TYPE_CHECKING:
-    from tests.fixtures.rootfs.brightness import BrightnessProcesses
+    from tests.host_process.rootfs.brightness_support import BrightnessProcesses
 
 LEVELS = (0, 1, 2, 4, 7, 11, 16, 23, 32, 44, 63)
 

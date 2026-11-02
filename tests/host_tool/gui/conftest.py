@@ -3,19 +3,17 @@
 
 from __future__ import annotations
 
-import importlib
 from typing import TYPE_CHECKING
 
 import pytest
 
-from tests import ROOT
+import tests.host_tool.gui.support.rgb565_png
 
 if TYPE_CHECKING:
     from types import ModuleType
 
 
 @pytest.fixture
-def rgb565_png(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
-    """Use the existing screenshot converter in the current test process."""
-    monkeypatch.syspath_prepend(str(ROOT / "site/scripts/screens"))
-    return importlib.import_module("rgb565-png")
+def rgb565_png() -> ModuleType:
+    """Use the screenshot converter in the current test process."""
+    return tests.host_tool.gui.support.rgb565_png

@@ -13,11 +13,11 @@
 #include "fplinux-cli.h"
 
 #include "mre-ipc.h"
+#include "mre-selector-files.h"
 #include "text-codec.h"
 #include "http-broker.h"
 #include "runtime-paths.h"
 
-#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -27,7 +27,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
 #include <sys/resource.h>
@@ -43,7 +42,6 @@
 #define MRE_ICON "/usr/share/icons/hicolor/24x24/apps/org.fplinux.mre.png"
 #define PROTOCOL_LIMIT 16384U
 #define SEND_LIMIT 65536U
-#define DIRECTORY_LIMIT 4096U
 #define VFS_REQUEST_LIMIT 1000000U
 #define HTTP_REQUEST_LIMIT 100000U
 #define MRE_KEY_EVENT_DOWN 2
@@ -75,11 +73,6 @@ enum view {
 	VIEW_NATIVE
 };
 
-struct directory_entry {
-	char name[NAME_MAX + 1];
-	bool directory;
-};
-
 struct app {
 	struct fplinux_ui *ui;
 	struct fplinux_ui_screen *screen;
@@ -107,8 +100,7 @@ struct app {
 	struct mre_shared *shared;
 	lv_timer_t *tick;
 	enum view view;
-	struct directory_entry *entries;
-	size_t entry_count;
+	struct mre_selector_entries entries;
 	char filename[NAME_MAX + 1];
 	char selector_folder[MRE_VFS_PATH_BYTES];
 	int selector_type;
@@ -182,13 +174,6 @@ static void update_tick(struct app *app)
 		lv_timer_resume(app->tick);
 		lv_timer_reset(app->tick);
 	}
-}
-
-static void clear_entries(struct app *app)
-{
-	free(app->entries);
-	app->entries = NULL;
-	app->entry_count = 0;
 }
 
 static bool shortcut_key(struct fplinux_ui *ui,
@@ -402,122 +387,17 @@ static void show_wait(struct app *app)
 	replace_screen(app, screen, VIEW_WAIT);
 }
 
-static bool valid_name(const char *name)
-{
-	size_t bytes = strlen(name);
-	if (!bytes || bytes > NAME_MAX || !strcmp(name, ".") ||
-	    !strcmp(name, "..") || strpbrk(name, "\\/:"))
-		return false;
-	for (size_t i = 0; i < bytes; ++i)
-		if ((unsigned char)name[i] < 32U ||
-		    (unsigned char)name[i] == 127U)
-			return false;
-	return mre_utf8_decode((const unsigned char *)name, bytes, NULL,
-			       NAME_MAX + 1U, NULL);
-}
-
-static bool suffix(const char *name, const char *extension)
-{
-	size_t bytes = strlen(name), tail = strlen(extension);
-	return bytes > tail && !strcasecmp(name + bytes - tail, extension);
-}
-
-static bool image_name(const char *name)
-{
-	return suffix(name, ".jpg") || suffix(name, ".jpeg") ||
-	       suffix(name, ".png") || suffix(name, ".bmp") ||
-	       suffix(name, ".gif") || suffix(name, ".abm");
-}
-
-static int entry_compare(const void *a, const void *b)
-{
-	const struct directory_entry *first = a, *second = b;
-	if (first->directory != second->directory)
-		return first->directory ? -1 : 1;
-	return strcasecmp(first->name, second->name);
-}
-
-/* Only plain directory entries become rows; the broker revalidates every
- * selected path before an operation. No filename grants guest authority. */
-static int read_entries(struct app *app, int fd)
-{
-	DIR *folder;
-	struct dirent *entry;
-	int error = 0;
-	clear_entries(app);
-	if (fd < 0)
-		return -1;
-	folder = fdopendir(fd);
-	if (!folder) {
-		close(fd);
-		return -1;
-	}
-	int folder_fd = dirfd(folder);
-	if (folder_fd < 0) {
-		int saved_error = errno;
-		closedir(folder);
-		errno = saved_error;
-		return -1;
-	}
-	for (;;) {
-		errno = 0;
-		entry = readdir(folder);
-		if (!entry) {
-			error = errno;
-			break;
-		}
-		struct stat st;
-		const char *name = entry->d_name;
-		bool directory;
-		if (!valid_name(name) ||
-		    !mre_vfs_entry_visible(app->vfs, folder_fd, name) ||
-		    !strncmp(name, ".mre-vfs-", 9) ||
-		    fstatat(folder_fd, name, &st, AT_SYMLINK_NOFOLLOW) < 0)
-			continue;
-		directory = S_ISDIR(st.st_mode);
-		if (!directory) {
-			if (!S_ISREG(st.st_mode) ||
-			    (app->selector_type == 1 && !image_name(name)) ||
-			    (app->selector_type == 2 && !suffix(name, ".txt")))
-				continue;
-		}
-		if (app->entry_count == DIRECTORY_LIMIT) {
-			error = E2BIG;
-			break;
-		}
-		struct directory_entry *grown = realloc(
-			app->entries, (app->entry_count + 1U) * sizeof(*grown));
-		if (!grown) {
-			error = ENOMEM;
-			break;
-		}
-		app->entries = grown;
-		snprintf(grown[app->entry_count].name, NAME_MAX + 1, "%s",
-			 name);
-		grown[app->entry_count++].directory = directory;
-	}
-	closedir(folder);
-	if (error) {
-		clear_entries(app);
-		errno = error;
-		return -1;
-	}
-	qsort(app->entries, app->entry_count, sizeof(*app->entries),
-	      entry_compare);
-	return 0;
-}
-
 static bool directory_row(struct fplinux_ui *ui,
 			  struct fplinux_ui_screen *screen, size_t index,
 			  struct fplinux_ui_virtual_row *row, void *context)
 {
 	struct app *app = context;
 	(void)screen;
-	if (index >= app->entry_count)
+	if (index >= app->entries.count)
 		return false;
-	row->text = app->entries[index].name;
+	row->text = app->entries.items[index].name;
 	row->icon = fplinux_ui_glyph(
-		ui, app->entries[index].directory ? "folder" : "file",
+		ui, app->entries.items[index].directory ? "folder" : "file",
 		FPLINUX_UI_GLYPH_ROW);
 	return true;
 }
@@ -1259,7 +1139,7 @@ failed:
 static bool resume_native(struct app *app)
 {
 	app->modal = false;
-	clear_entries(app);
+	mre_selector_entries_clear(&app->entries);
 	if (app->native && app->has_frame)
 		return show_native(app);
 	show_wait(app);
@@ -1428,32 +1308,19 @@ static bool show_editor(struct app *app)
 	return true;
 }
 
-static bool append_path(char destination[MRE_VFS_PATH_BYTES],
-			const char *folder, const char *name)
-{
-	size_t bytes = strlen(folder), name_bytes = strlen(name);
-	bool slash = bytes && folder[bytes - 1U] != '\\';
-	if (!valid_name(name) ||
-	    bytes + name_bytes + (slash ? 1U : 0U) >= MRE_VFS_PATH_BYTES)
-		return false;
-	memcpy(destination, folder, bytes);
-	if (slash)
-		destination[bytes++] = '\\';
-	memcpy(destination + bytes, name, name_bytes + 1U);
-	return true;
-}
-
 static void show_selector(struct app *app)
 {
 	struct fplinux_ui_screen *screen;
-	int error = read_entries(
-		app, mre_vfs_open_directory(app->vfs, app->selector_folder));
+	int error = mre_selector_entries_read(
+		&app->entries, app->vfs,
+		mre_vfs_open_directory(app->vfs, app->selector_folder),
+		app->selector_type);
 	fplinux_ui_set_fullscreen(app->ui, false);
 	app->modal = true;
-	if (error == 0 && app->entry_count) {
+	if (error == 0 && app->entries.count) {
 		screen = fplinux_ui_list_new_virtual(
 			app->ui, app->selector_folder, FPLINUX_UI_LIST_IMPLICIT,
-			app->entry_count, directory_row, app);
+			app->entries.count, directory_row, app);
 		if (screen)
 			fplinux_ui_list_set_select_label(screen, _("Select"));
 	} else {
@@ -1483,11 +1350,11 @@ static void show_selector(struct app *app)
 static void select_file(struct app *app, size_t selected)
 {
 	char path[MRE_VFS_PATH_BYTES];
-	if (selected >= app->entry_count ||
-	    !append_path(path, app->selector_folder,
-			 app->entries[selected].name))
+	if (selected >= app->entries.count ||
+	    !mre_selector_append_path(path, app->selector_folder,
+				      app->entries.items[selected].name))
 		return;
-	if (app->entries[selected].directory) {
+	if (app->entries.items[selected].directory) {
 		snprintf(app->selector_folder, sizeof(app->selector_folder),
 			 "%s", path);
 		show_selector(app);
@@ -2648,7 +2515,7 @@ cleanup:
 	fplinux_ui_prefs_close(app.program_prefs);
 	fplinux_ui_prefs_close(app.prefs);
 	fplinux_ui_close(app.ui);
-	clear_entries(&app);
+	mre_selector_entries_clear(&app.entries);
 	free(app.frame_pixels);
 	free(app.display_pixels);
 	return result < 0 ? EXIT_FAILURE : EXIT_SUCCESS;

@@ -33,7 +33,7 @@ def parse_unsigned_executable(tmp_path_factory: pytest.TempPathFactory) -> Itera
                 "-Werror",
                 f"-I{SHARED}",
                 str(HARNESS),
-                str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
             ],
             name="compile unsigned argument parser harness",
             check=True,

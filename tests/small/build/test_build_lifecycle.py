@@ -28,12 +28,12 @@ from fplinux_cli.environment import definition, runtime
 from fplinux_cli.environment.state import EnvironmentState
 from fplinux_cli.manifests import releases, targets
 
-from tests.small.build.command_fixtures import (
+from tests.small.command_fixtures import (
     command_bundle as command_bundle,  # noqa: PLC0414 -- pytest fixture export.
 )
 
 if TYPE_CHECKING:
-    from tests.small.build.command_fixtures import CommandBundleContext
+    from tests.small.command_fixtures import CommandBundleContext
 
 
 class BuildLifecycleTests:

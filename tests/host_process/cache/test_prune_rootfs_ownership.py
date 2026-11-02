@@ -30,13 +30,13 @@ def namespace() -> list[str]:
     """Require the host namespace used by container ownership and managed removal."""
     unshare = shutil.which("unshare")
     if unshare is None:
-        pytest.skip("subordinate namespace test requires unshare")
+        pytest.fail("subordinate namespace test requires unshare")
     command = [unshare, "--map-auto", "--map-root-user", "--"]
     probe = subprocess.run(
         [*command, "true"], capture_output=True, text=True, check=False, timeout=30
     )
     if probe.returncode:
-        pytest.skip("subordinate namespace is unavailable: " + probe.stderr.strip())
+        pytest.fail("subordinate namespace is unavailable: " + probe.stderr.strip())
     return command
 
 

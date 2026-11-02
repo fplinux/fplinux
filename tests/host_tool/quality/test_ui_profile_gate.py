@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from fplinux_cli.quality import source as source_check
+from fplinux_cli.quality import source_commands, userspace_c
 from fplinux_cli.reporting.run import RunReporter
 
 from tests import ROOT
@@ -32,12 +33,13 @@ def test_c_scope_rejects_stale_profile_table_without_rewriting_it(
         shutil.copyfile(ROOT / relative, destination)
 
     monkeypatch.setattr(source_check, "ROOT", tmp_path)
+    monkeypatch.setattr(source_commands, "ROOT", tmp_path)
     monkeypatch.setattr("sys.argv", ["source-check", "c"])
     # Formatting and C analysis have their own checks; keep this fixture focused
     # on the real profile checker and its C scope dispatch.
     monkeypatch.setattr(source_check, "check_canonical_sources", lambda *_args: None)
-    monkeypatch.setattr(source_check, "userspace_c_sources", lambda _files: [])
-    monkeypatch.setattr(source_check, "check_userspace_c", lambda _sources: None)
+    monkeypatch.setattr(userspace_c, "userspace_c_sources", lambda _files: [])
+    monkeypatch.setattr(userspace_c, "check_userspace_c", lambda _sources: None)
     monkeypatch.setattr(RunReporter, "from_environment", lambda *_args: None)
     source_check.main()
 
@@ -54,5 +56,5 @@ def test_c_scope_rejects_stale_profile_table_without_rewriting_it(
     assert "lib/fplinux/fplinux-ui-profile.c is stale" in capfd.readouterr().err
     assert delivered.read_bytes() == original_table
 
-    source_check.run(["python3", "scripts/fplinux_ui_profile.py"])
+    source_commands.run(["python3", "scripts/fplinux_ui_profile.py"])
     source_check.main()

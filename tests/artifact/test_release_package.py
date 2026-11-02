@@ -34,7 +34,7 @@ from fplinux_cli.workspace.capture import WorkspaceSnapshot
 from tests import ROOT
 from tests.bundle_support import file_record
 from tests.process import run_process
-from tests.small.cli.package_docs_fixtures import write_offline_export
+from tests.small.packaging.package_docs_fixtures import write_offline_export
 
 if TYPE_CHECKING:
     from pathlib import Path

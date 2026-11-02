@@ -11,16 +11,16 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tests import ROOT
-from tests.fixtures.rootfs.brightness import (
+from tests.host_process.rootfs.brightness_support import (
     APORT,
     CONFIG,
     INCLUDE,
     LIB,
 )
-from tests.fixtures.rootfs.brightness import (
+from tests.host_process.rootfs.brightness_support import (
     brightness as brightness,  # noqa: PLC0414 -- pytest fixture export.
 )
-from tests.fixtures.rootfs.brightness import (
+from tests.host_process.rootfs.brightness_support import (
     brightness_binaries as brightness_binaries,  # noqa: PLC0414 -- pytest fixture export.
 )
 from tests.process import run_process
@@ -28,7 +28,10 @@ from tests.process import run_process
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from tests.fixtures.rootfs.brightness import BrightnessBinaries, BrightnessProcesses
+    from tests.host_process.rootfs.brightness_support import (
+        BrightnessBinaries,
+        BrightnessProcesses,
+    )
 
 
 @pytest.fixture(scope="class")

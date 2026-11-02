@@ -119,7 +119,7 @@ static struct fplinux_ui_screen *new_screen(const char *title)
 	return screen;
 }
 
-bool fplinux_ui_state_dir(const char *id, char *path, size_t capacity)
+bool __wrap_fplinux_ui_state_dir(const char *id, char *path, size_t capacity)
 {
 	const char *root = getenv("FPLINUX_PM_TEST_ROOT");
 
@@ -127,11 +127,11 @@ bool fplinux_ui_state_dir(const char *id, char *path, size_t capacity)
 	return root && snprintf(path, capacity, "%s", root) < (int)capacity;
 }
 
-struct fplinux_ui_prefs *fplinux_ui_prefs_open(const char *id)
+struct fplinux_ui_prefs *__wrap_fplinux_ui_prefs_open(const char *id)
 {
 	char path[4096];
 
-	return fplinux_ui_state_dir(id, path, sizeof(path)) ?
+	return __wrap_fplinux_ui_state_dir(id, path, sizeof(path)) ?
 		       fplinux_ui_prefs_open_directory(path) :
 		       NULL;
 }

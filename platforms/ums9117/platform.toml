@@ -413,10 +413,6 @@ source = "platforms/ums9117/bootstrap/build/ums9117-linux.ld"
 destination = "ums9117-bootstrap/ums9117-linux.ld"
 
 [[bootstrap.shared_copies]]
-source = "include/fplinux/fplinux-handoff-protocol.h"
-destination = "ums9117-bootstrap/fplinux-handoff-protocol.h"
-
-[[bootstrap.shared_copies]]
 source = "platforms/ums9117/common/ums9117-boot-contract.h"
 destination = "ums9117-common/ums9117-boot-contract.h"
 
@@ -437,7 +433,7 @@ source = "include/fplinux/fplinux-ui-profile.h"
 destination = "fplinux-ui-profile.h"
 
 [[bootstrap.shared_copies]]
-source = "lib/fplinux/fplinux-status-screen.c"
+source = "lib/fplinux-shared/fplinux-status-screen.c"
 destination = "fplinux-status-screen.c"
 
 [[bootstrap.shared_copies]]
@@ -566,13 +562,13 @@ path = "cmd_def.h"
 digest_key = "cmd_def_h_sha256"
 
 [[host.tools.copies]]
-source = "include/fplinux/fplinux-handoff-protocol.h"
+source = "platforms/ums9117/bootstrap/src/fplinux-handoff-protocol.h"
 destination = "fplinux-handoff-protocol.h"
 
 [[host.tools]]
 type = "cc-libusb"
 name = "fplinux-usb-keyboard"
-source = "common/host/fplinux-usb-keyboard.c"
+source = "platforms/ums9117/host/fplinux-usb-keyboard.c"
 self_test = true
 
 # Reads the stock firmware tables for contributor board reports. It
@@ -633,5 +629,5 @@ source = "include/fplinux/fplinux-cli.h"
 destination = "fplinux-cli.h"
 
 [[host.tools.copies]]
-source = "lib/fplinux/fplinux-cli.c"
+source = "lib/fplinux-shared/fplinux-cli.c"
 destination = "fplinux-cli.c"

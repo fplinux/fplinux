@@ -233,14 +233,14 @@ class AlpineRecipesTests:
         [
             pytest.param(
                 "fplinux-brightness-ui",
-                "lib/fplinux/fplinux-status-screen.c",
+                "lib/fplinux-shared/fplinux-status-screen.c",
                 "include/fplinux/fplinux-status-screen.h",
                 "fplinux-showcase",
                 id="status-renderer",
             ),
             pytest.param(
                 "fplinux-showcase",
-                "lib/fplinux/fplinux-font.c",
+                "lib/fplinux-shared/fplinux-font.c",
                 "include/fplinux/fplinux-font.h",
                 "fplinux-brightness-ui",
                 id="psf-reader",

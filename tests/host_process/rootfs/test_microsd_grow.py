@@ -66,7 +66,7 @@ def growth() -> Iterator[GrowthContext]:
         directory = Path(temporary.name)
         for name, fixture in (("growpart", "growpart.sh"), ("resize2fs", "resize2fs.sh")):
             path = directory / name
-            shutil.copyfile(ROOT / "tests/fixtures/rootfs" / fixture, path)
+            shutil.copyfile(ROOT / "tests/host_process/rootfs/fixtures" / fixture, path)
             path.chmod(0o755)
         yield GrowthContext(directory, directory / "calls")
 

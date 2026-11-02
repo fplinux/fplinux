@@ -37,7 +37,7 @@ class FplinuxCpuclockCliTests:
                     "-Werror",
                     f"-I{SHARED_INCLUDE}",
                     str(SOURCE),
-                    str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                    str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
                 ],
                 name="compile CPU clock host CLI",
                 check=True,

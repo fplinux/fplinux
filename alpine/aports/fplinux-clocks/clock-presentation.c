@@ -2,7 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "clock-presentation.h"
 
-#include "clock-model.h"
+#include "fplinux-clock-model.h"
 
 #include <fplinux/fplinux-ui-locale.h>
 #include <libintl.h>

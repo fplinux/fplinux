@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from fplinux_cli.quality.formatting.canonical_yaml import normalize_yaml
 
-FIXTURES = Path(__file__).parents[3] / "fixtures/formatting/yaml"
+FIXTURES = Path(__file__).parent / "fixtures/yaml"
 
 
 class CanonicalYamlTests:

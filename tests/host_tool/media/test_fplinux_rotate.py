@@ -47,8 +47,8 @@ class FplinuxRotateHostToolTests:
                 APORT / "fplinux-rotate.c",
                 APORT / "fplinux-rotate-core.c",
                 APORT / "rotate-rota.c",
-                ROOT / "lib/fplinux/fplinux-drm-session.c",
-                ROOT / "lib/fplinux/fplinux-cli.c",
+                ROOT / "lib/fplinux-shared/fplinux-drm-session.c",
+                ROOT / "lib/fplinux-shared/fplinux-cli.c",
             )
             yield RotationTools(core, executable)
 

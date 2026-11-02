@@ -49,9 +49,9 @@ A phone port is a small, complete description of one exact phone model, called a
 | `platforms/<soc>/` | SoC support shared by its phones: processor and interrupt integration, controller drivers, SoC Devicetree nodes and the fixed RAM-loader flow. |
 | `targets/<phone>/` | One phone: board wiring and memory, panel, keymap, bootstrap inputs, values passed to the loader and device-data declarations. |
 | `alpine/` | Phone userspace: one Alpine package recipe per component, the root-filesystem package policy and OpenRC services. |
-| `common/` | Target-neutral runtime entry points and host tools, such as the USB keyboard client, and the contracts they share. |
+| `common/` | Target-neutral runtime entry points, host tools and shared contracts. |
 
-C libraries shared by host tools and phone packages live in `lib/fplinux/`, with their headers in `include/fplinux/`. Their runtime requirements belong to each component, not to the package that consumes it.
+`lib/fplinux/` owns the UI library and its components. `lib/fplinux-shared/` holds common code compiled directly into its consumers. Shared headers live in `include/fplinux/`. Each component declares its own C dialect and runtime requirements.
 
 The boundaries run both ways:
 
@@ -74,7 +74,7 @@ Keep each phone-userspace component in one conventional aport under `alpine/apor
 
 Select packages in platform and target manifests rather than testing target names in code. `[rootfs].packages` selects packages installed in the phone's root filesystem; `[bundle].packages` selects optional APKs built and published under `apks/`, without installing them in that root filesystem. `alpine.lock.toml` pins the Alpine inputs. Users follow [Optional APK packages](/fplinux/guides/packages/) to install bundle packages; [Packaging](/fplinux/develop/packaging/) covers standalone archives.
 
-Map each consumer of shared C sources explicitly in `scripts/fplinux_cli/alpine/registration.py`; keep one shared implementation in `lib/fplinux/` and its headers in `include/fplinux/`.
+Map each consumer of shared C sources explicitly in `scripts/fplinux_cli/alpine/registration.py`; keep each shared implementation in its component directory and its headers in `include/fplinux/`.
 
 Rebuild an upstream component in its own `fplinux-` aport only when the locked Alpine package's runtime dependencies exceed the RAM filesystem budget. Install only the runtime files its consumer loads and remove the replaced Alpine artifacts from `alpine.lock.toml`.
 

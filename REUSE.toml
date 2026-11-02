@@ -176,6 +176,10 @@ SPDX-License-Identifier = "GPL-2.0-only"
 [[annotations]]
 path = [
   "alpine/aports/fplinux-mre/fplinux-mre.c",
+  "alpine/aports/fplinux-mre/mre-selector-files.c",
+  "alpine/aports/fplinux-mre/mre-selector-files.h",
+  "alpine/aports/fplinux-mre/vfs-path.c",
+  "alpine/aports/fplinux-mre/vfs-path.h",
   "alpine/aports/fplinux-mre/mre-ipc.h",
   "alpine/aports/fplinux-mre/engine/*",
   "alpine/aports/fplinux-mre/ads/*",

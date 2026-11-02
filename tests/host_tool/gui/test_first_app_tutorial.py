@@ -38,7 +38,7 @@ def tutorial(tmp_path_factory: pytest.TempPathFactory, ui_host_inputs: Path) -> 
             if not found or not closing:
                 raise ValueError(f"tutorial is missing its complete {filename} example")
             (directory / filename).write_text(contents + "\n")
-        shutil.copyfile(ROOT / "lib/fplinux/fplinux-cli.c", directory / "fplinux-cli.c")
+        shutil.copyfile(ROOT / "lib/fplinux-shared/fplinux-cli.c", directory / "fplinux-cli.c")
         shutil.copyfile(ROOT / "include/fplinux/fplinux-cli.h", directory / "fplinux-cli.h")
         run_process(
             [

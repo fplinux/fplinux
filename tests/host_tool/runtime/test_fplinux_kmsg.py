@@ -36,7 +36,7 @@ class KernelLogForwarderTests:
                     "-I",
                     str(ROOT / "include/fplinux"),
                     str(ROOT / "alpine/aports/fplinux-base/fplinux-kmsg.c"),
-                    str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                    str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
                     str(ROOT / "tests/host_tool/runtime/fplinux-kmsg-sink.c"),
                     "-Wl,--wrap=open",
                 ],

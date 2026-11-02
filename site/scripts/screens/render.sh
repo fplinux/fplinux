@@ -10,6 +10,7 @@ set -eu
 
 screens_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 root=$(CDPATH='' cd -- "$screens_dir/../../.." && pwd)
+common=$root/tests/host_tool/gui/screens
 aports=$root/alpine/aports
 if [ -n "${FPLINUX_SOURCES:-}" ]; then
 	sources=$FPLINUX_SOURCES
@@ -31,7 +32,7 @@ compile() {
 }
 
 png() {
-	python3 "$screens_dir/rgb565-png.py" "$1" "$2" "$3" "$output/$4"
+	python3 "$root/tests/host_tool/gui/support/rgb565_png.py" "$1" "$2" "$3" "$output/$4"
 }
 
 aport_value() {
@@ -67,11 +68,11 @@ render_brightness() {
 		--tokens "$root/lib/fplinux/fplinux-ui-profile.json" \
 		--sources /opt/quality/src/ui-fonts --output "$work/status" \
 		--lv-font-conv /opt/quality/node-tools/node_modules/.bin/lv_font_conv
-	compile -I"$root/include/fplinux" -I"$brightness" -I"$screens_dir" \
+	compile -I"$root/include/fplinux" -I"$brightness" -I"$screens_dir" -I"$common" \
 		-I"$work/status" \
-		"$screens_dir/brightness-screen.c" "$screens_dir/screen-frame.c" \
-		"$brightness/brightness-ui.c" "$root/lib/fplinux/fplinux-status-screen.c" \
-		"$root/lib/fplinux/fplinux-activity.c" "$work/status/fplinux-status-fonts.c" \
+		"$screens_dir/brightness-screen.c" "$common/screen-frame.c" \
+		"$brightness/brightness-ui.c" "$root/lib/fplinux-shared/fplinux-status-screen.c" \
+		"$root/lib/fplinux-shared/fplinux-activity.c" "$work/status/fplinux-status-fonts.c" \
 		"$root/lib/fplinux/fplinux-ui-profile.c" \
 		-o "$work/brightness-screen"
 	"$work/brightness-screen" 7 \
@@ -84,16 +85,16 @@ render_armada_and_rotation() {
 	rotate=$aports/fplinux-rotate
 	# The pinned libdrm pkg-config output is a list of compiler arguments.
 	# shellcheck disable=SC2046
-	compile -O2 -I"$root/include/fplinux" -I"$showcase" -I"$screens_dir" \
+	compile -O2 -I"$root/include/fplinux" -I"$showcase" -I"$screens_dir" -I"$common" \
 		-isystem /opt/quality/include $(pkg-config --cflags libdrm) \
-		"$screens_dir/armada-screen.c" "$screens_dir/screen-frame.c" \
+		"$screens_dir/armada-screen.c" "$common/screen-frame.c" \
 		"$showcase/armada-scene.c" "$showcase/armada-renderer.c" \
 		"$showcase/armada-geometry.c" "$showcase/armada-overlay.c" \
-		"$showcase/armada-gpu-renderer.c" "$root/lib/fplinux/fplinux-gpu.c" \
-		"$showcase/armada-storyboard.c" "$root/lib/fplinux/fplinux-font.c" \
+		"$showcase/armada-gpu-renderer.c" "$root/lib/fplinux-shared/fplinux-gpu.c" \
+		"$showcase/armada-storyboard.c" "$root/lib/fplinux-shared/fplinux-font.c" \
 		$(pkg-config --libs libdrm) -ldl -o "$work/armada-screen"
-	compile -O2 -I"$rotate" -I"$screens_dir" \
-		"$screens_dir/rotate-screen.c" "$screens_dir/screen-frame.c" \
+	compile -O2 -I"$rotate" -I"$screens_dir" -I"$common" \
+		"$screens_dir/rotate-screen.c" "$common/screen-frame.c" \
 		"$rotate/fplinux-rotate-core.c" -o "$work/rotate-screen"
 	"$work/armada-screen" "$armada_frame" "$work/ter-u16n.psf" \
 		"$work/armada.rgb565"
@@ -111,6 +112,6 @@ render_armada_and_rotation() {
 
 mkdir -p -- "$output"
 build_fonts
-sh "$screens_dir/render-terminal.sh" "$output"
+sh "$root/tests/host_tool/gui/terminal/native/render-terminal.sh" "$output"
 render_brightness
 render_armada_and_rotation

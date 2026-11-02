@@ -25,14 +25,14 @@ from fplinux_cli.device_data.prepare import dump_page_bytes
 from fplinux_cli.runtime import bundle_session, nand_backup
 from fplinux_cli.runtime.data_paths import checkout_runtime_root
 
-from tests.small.build.command_fixtures import (
+from tests.small.command_fixtures import (
     command_bundle as command_bundle,  # noqa: PLC0414 -- pytest fixture export.
 )
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
-    from tests.small.build.command_fixtures import CommandBundleContext
+    from tests.small.command_fixtures import CommandBundleContext
 
 
 def _geometry_report(  # noqa: PLR0913 -- each reported value stays visible at the call site.

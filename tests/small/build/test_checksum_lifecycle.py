@@ -24,7 +24,7 @@ from fplinux_cli.workspace import staging as workspace_staging
 
 from tests import ROOT
 
-APORT_FILES = ROOT / "tests/fixtures/checksum-aport"
+APORT_FILES = ROOT / "tests/small/build/fixtures/checksum-aport"
 
 if TYPE_CHECKING:
     from collections.abc import Callable

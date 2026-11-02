@@ -2,7 +2,7 @@
 #ifndef FPLINUX_LAUNCHER_CLOCK_H
 #define FPLINUX_LAUNCHER_CLOCK_H
 
-#include "clock-wire.h"
+#include "fplinux-clock-wire.h"
 #include "fplinux-ui-session.h"
 
 struct fplinux_ui;

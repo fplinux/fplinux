@@ -3,7 +3,7 @@ title: C
 description: Rules for project-owned C in the kernel, the pre-Linux bootstrap, phone userspace, host tools, embedded adapters and test harnesses.
 ---
 
-This guide applies to project-owned C in `bootstrap/`, `platforms/`, `targets/`, `alpine/`, `common/host/`, `lib/fplinux/`, `include/fplinux/` and the C test harnesses. All of it uses the Linux kernel formatting rules.
+This guide applies to project-owned C in `bootstrap/`, `platforms/`, `targets/`, `alpine/`, `common/host/`, `lib/fplinux/`, `lib/fplinux-shared/`, `include/fplinux/` and the C test harnesses. All of it uses the Linux kernel formatting rules.
 
 The code still runs in different environments. A kernel driver, the pre-Linux bootstrap, a phone program and a host tool have different APIs, error handling and lifetime rules. The layer sections below do not define other visual styles; they explain which language features and interfaces are valid in that runtime.
 
@@ -16,7 +16,7 @@ Downloaded sources keep their own style. A project-owned adapter compiled inside
 | `platforms/*/linux/`, `targets/*/linux/` | Linux kernel | Kernel GNU C, kernel types and subsystem APIs |
 | `bootstrap/`, `platforms/*/bootstrap/`, `targets/*/bootstrap/` | Fixed runtime before Linux | C99 with the facilities supplied by the bootstrap closure |
 | `alpine/aports/` | musl/Linux on the phone | C11 or the GNU dialect selected by the APKBUILD, POSIX and Linux UAPI |
-| `lib/fplinux/`, `include/fplinux/` | Shared host and phone components | The component's declared C dialect and runtime interfaces |
+| `lib/fplinux/`, `lib/fplinux-shared/`, `include/fplinux/` | Shared host and phone components | The component's declared C dialect and runtime interfaces |
 | `common/host/` | Linux x86-64 host | C11, POSIX, Linux UAPI and libusb |
 | Sources marked `fplinux-check: package-embedded` | Package build with generated headers or target ABI | Destination project's dialect and external ABI |
 | C harnesses under `tests/host_tool/` | Host-only harness | The dialect selected by the test that compiles it |

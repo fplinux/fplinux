@@ -23,11 +23,11 @@ class UsbDhcpConfigurationTests:
             binary = root / "bin/busybox"
             binary.parent.mkdir()
             # This fake replaces the external DHCP server; no sockets are opened.
-            shutil.copyfile(ROOT / "tests/fixtures/rootfs/busybox_dhcp.sh", binary)
+            shutil.copyfile(ROOT / "tests/host_process/rootfs/fixtures/busybox_dhcp.sh", binary)
             binary.chmod(0o755)
             applet = root / "usr/sbin/udhcpd"
             applet.parent.mkdir(parents=True)
-            shutil.copyfile(ROOT / "tests/fixtures/rootfs/udhcpd_wrapper.sh", applet)
+            shutil.copyfile(ROOT / "tests/host_process/rootfs/fixtures/udhcpd_wrapper.sh", applet)
             applet.chmod(0o755)
             result = subprocess.run(
                 [

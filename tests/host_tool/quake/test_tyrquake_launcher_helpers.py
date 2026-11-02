@@ -28,7 +28,7 @@ HARNESS = ROOT / "tests/host_tool/quake/fplinux-tyrquake-launcher-helpers.c"
 PROCESS_HARNESS = ROOT / "tests/host_tool/quake/fplinux-tyrquake-launcher-process.c"
 LAUNCHER = ROOT / "alpine/aports/fplinux-tyrquake/fplinux-quake.c"
 SHARED_INCLUDE = ROOT / "include/fplinux"
-EXPECTED_CONTROLS = ROOT / "tests/fixtures/quake/controls.cfg.fixture"
+EXPECTED_CONTROLS = ROOT / "tests/host_tool/quake/fixtures/controls.cfg.fixture"
 RUNTIME_ROOT = Path("/tmp")  # noqa: S108 -- the launcher owns runtime directories here.
 
 
@@ -110,7 +110,7 @@ def quake_helpers(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 str(HARNESS),
                 f"-I{SHARED_INCLUDE}",
                 str(launcher_object),
-                str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
             ],
             name="link TyrQuake resource harness",
         )
@@ -147,7 +147,7 @@ def quake_launcher(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
                 f"-I{SHARED_INCLUDE}",
                 str(PROCESS_HARNESS),
                 str(launcher_object),
-                str(ROOT / "lib/fplinux/fplinux-cli.c"),
+                str(ROOT / "lib/fplinux-shared/fplinux-cli.c"),
                 "-Wl,--wrap=open",
                 "-Wl,--wrap=mkdir",
                 "-Wl,--wrap=fopen",
