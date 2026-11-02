@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from fplinux_cli.runtime import ssh_transport
+from fplinux_cli.runtime.ssh import transport as ssh_transport
 
 
 def main() -> None:

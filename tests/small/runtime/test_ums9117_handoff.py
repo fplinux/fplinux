@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
-from fplinux_cli.runtime import ssh_transport
+from fplinux_cli.runtime.ssh import transport as ssh_transport
 
 from tests.small.runtime.adapter_fixtures import (
     ADAPTER,

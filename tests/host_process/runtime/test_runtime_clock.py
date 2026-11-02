@@ -7,8 +7,10 @@ import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from fplinux_cli.runtime import boot, ssh_transport, workflow
+from fplinux_cli.runtime import boot, workflow
 from fplinux_cli.runtime.bundle import ValidatedBundle
+from fplinux_cli.runtime.ssh import commands as ssh_commands
+from fplinux_cli.runtime.ssh import transport as ssh_transport
 
 from tests import ROOT
 from tests.fixtures.executables import install_python_script
@@ -74,7 +76,7 @@ def test_fresh_boot_reports_clock_result_and_reconnect_preserves_clock_and_comma
         root = tmp_path / "session"
         root.mkdir(mode=0o700)
         connection = (ssh_transport, create_ready_session(root))
-        monkeypatch.setattr(ssh_transport, "_require_tool", lambda _name: str(peer))
+        monkeypatch.setattr(ssh_commands, "require_tool", lambda _name: str(peer))
     else:
         transport = native_process_transport(tmp_path)
         transport.bundle.tools["ssh"] = peer
@@ -84,7 +86,7 @@ def test_fresh_boot_reports_clock_result_and_reconnect_preserves_clock_and_comma
     commands = tmp_path / "commands"
     monkeypatch.setenv("FPLINUX_TEST_CLOCK_RESPONSE", str(response))
     monkeypatch.setenv("FPLINUX_TEST_CLOCK_COMMANDS", str(commands))
-    monkeypatch.setattr("fplinux_cli.runtime.workflow.time.time", lambda: 1788739200.75)
+    monkeypatch.setattr("fplinux_cli.runtime.boot.time.time", lambda: 1788739200.75)
     runtime = {
         "identity": {"target": {"display_name": "Test phone"}},
         "device_data": None,

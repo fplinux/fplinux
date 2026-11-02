@@ -8,18 +8,23 @@ import importlib.util
 import json
 import os
 import re
+import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, NoReturn
 
+from fplinux_cli.artifacts.build_manifest import BUILD_MANIFEST_FIELDS
+from fplinux_cli.common import canonical_json_bytes, sha256_file
+from fplinux_cli.runtime.ssh.errors import fail as ssh_fail
+
 if TYPE_CHECKING:
     from types import ModuleType
 
-    from .windows_host import WindowsBundle
+    from fplinux_cli.runtime.windows.bundle import WindowsBundle
 
 IDENTITY_PATH = "scripts/fplinux_cli/manifests/identity.py"
-SSH_HELPER_PATH = "scripts/fplinux_cli/runtime/ssh_transport.py"
+SSH_HELPER_PATH = "scripts/fplinux_cli/runtime/ssh/transport.py"
 EVENTS_HELPER_PATH = "scripts/fplinux_cli/runtime/events.py"
 REQUIRED_PYTHON = (3, 14)
 
@@ -304,8 +309,12 @@ def load_runtime_manifest(path: Path) -> dict[str, Any]:
         SSH_HELPER_PATH,
         EVENTS_HELPER_PATH,
         *(
+            f"scripts/fplinux_cli/runtime/ssh/{name}.py"
+            for name in ("__init__", "commands", "errors", "material", "session")
+        ),
+        *(
             f"scripts/fplinux_cli/runtime/{name}.py"
-            for name in ("cli", "workflow", "bundle", "boot")
+            for name in ("cli", "workflow", "bundle", "boot", "phone_data")
         ),
     }
     if root["device_data"] is not None:
@@ -462,6 +471,11 @@ def admit_bundle(bundle: Path) -> ValidatedBundle:
     runtime = load_runtime_manifest(bundle / "runtime-manifest.json")
     if not windows_archive and "60-fplinux.rules" not in runtime["sha256"]:
         fail("runtime hashes do not include the phone USB access rules")
+    if windows_archive:
+        for name in ("__init__", "host", "bundle", "session", "transport", "boot"):
+            relative = f"scripts/fplinux_cli/runtime/windows/{name}.py"
+            if relative not in runtime["sha256"]:
+                fail(f"runtime hashes omit a delivered Windows runtime file: {relative}")
     if runtime["emmc"] is not None and runtime["device_data"] is not None:
         for package in ("ext4", "cachetools", "crcmod"):
             for source in (bundle / "scripts" / package).rglob("*"):
@@ -481,13 +495,11 @@ def admit_bundle(bundle: Path) -> ValidatedBundle:
         if actual != expected:
             fail(f"{relative} SHA256 mismatch: expected {expected}, got {actual}")
     runtime = validate_runtime_identity(runtime)
-    from . import ssh_transport  # noqa: PLC0415
-
-    identity = ssh_transport.bundle_identity(bundle, runtime)
-    device_identity = ssh_transport.build_manifest_device_identity(bundle)
+    identity = bundle_identity(bundle, runtime)
+    device_identity = build_manifest_device_identity(bundle)
     windows = None
     if windows_archive:
-        from .windows_host import validate_archive  # noqa: PLC0415
+        from fplinux_cli.runtime.windows.bundle import validate_archive  # noqa: PLC0415
 
         windows = validate_archive(
             bundle,
@@ -533,3 +545,115 @@ def load_adapter(path: Path) -> ModuleType:
     if not callable(getattr(module, "run", None)):
         fail("platform adapter does not expose run(bundle, runtime, session)")
     return module
+
+
+TARGET_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
+SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
+def _regular_file_bytes(path: Path, name: str) -> bytes:
+    try:
+        metadata = path.lstat()
+        data = path.read_bytes()
+    except OSError as error:
+        ssh_fail(f"cannot read {name}: {error}")
+    if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+        ssh_fail(f"{name} is not a regular file: {path}")
+    return data
+
+
+def _file_record(manifest: dict[str, Any], relative: str) -> dict[str, Any]:
+    files = manifest.get("files")
+    record = files.get(relative) if isinstance(files, dict) else None
+    if (
+        not isinstance(record, dict)
+        or set(record) != {"mode", "sha256", "size"}
+        or type(record.get("mode")) is not int
+        or type(record.get("size")) is not int
+        or not isinstance(record.get("sha256"), str)
+        or SHA256.fullmatch(record["sha256"]) is None
+    ):
+        ssh_fail(f"build manifest has no valid record for {relative}")
+    return record
+
+
+def bundle_identity(bundle: Path, runtime: dict[str, Any]) -> dict[str, str]:
+    """Validate the runtime closure and return its bundle generation."""
+    runtime_path = bundle / "runtime-manifest.json"
+    runtime_bytes = _regular_file_bytes(runtime_path, "runtime manifest")
+    target = runtime.get("target")
+    profile = runtime.get("profile")
+    build_type = runtime.get("build_type")
+    image_relative = runtime.get("image")
+    hashes = runtime.get("sha256")
+    if (
+        not isinstance(target, str)
+        or TARGET_NAME.fullmatch(target) is None
+        or (
+            profile is not None
+            and (not isinstance(profile, str) or TARGET_NAME.fullmatch(profile) is None)
+        )
+        or build_type not in ("release", "debug")
+        or not isinstance(image_relative, str)
+        or not isinstance(hashes, dict)
+    ):
+        ssh_fail("runtime manifest does not describe one SSH bundle")
+    image_name = PurePosixPath(image_relative)
+    if (
+        image_name.is_absolute()
+        or ".." in image_name.parts
+        or image_name.as_posix() != image_relative
+    ):
+        ssh_fail("runtime image path is not a normalized bundle-relative path")
+
+    manifest_path = bundle / "build-manifest.json"
+    manifest_bytes = _regular_file_bytes(manifest_path, "build manifest")
+    try:
+        manifest = json.loads(manifest_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        ssh_fail(f"build manifest is invalid: {error}")
+    if (
+        not isinstance(manifest, dict)
+        or set(manifest) != BUILD_MANIFEST_FIELDS
+        or manifest.get("target") != target
+        or manifest.get("profile") != profile
+        or manifest.get("build_type") != build_type
+    ):
+        ssh_fail("build manifest does not match the runtime target, profile or build type")
+    for field in ("release_id", "source_commit", "source_snapshot"):
+        if field not in runtime or manifest[field] != runtime[field]:
+            ssh_fail("build manifest does not match the runtime release identity")
+    generation = manifest.get("generation")
+    if not isinstance(generation, str) or SHA256.fullmatch(generation) is None:
+        ssh_fail("build manifest generation is invalid")
+    payload = {key: value for key, value in manifest.items() if key != "generation"}
+    if hashlib.sha256(canonical_json_bytes(payload)).hexdigest() != generation:
+        ssh_fail("build manifest generation does not match its payload")
+
+    image = bundle / image_relative
+    runtime_record = _file_record(manifest, "runtime-manifest.json")
+    image_record = _file_record(manifest, image_relative)
+    if (
+        runtime_record["sha256"] != hashlib.sha256(runtime_bytes).hexdigest()
+        or runtime_record["size"] != len(runtime_bytes)
+        or image_record["sha256"] != sha256_file(image)
+        or image_record["size"] != image.stat().st_size
+        or hashes.get(image_relative) != image_record["sha256"]
+    ):
+        ssh_fail("runtime closure differs from its immutable build manifest")
+    return {
+        "bundle_generation": generation,
+    }
+
+
+def build_manifest_device_identity(bundle: Path) -> str:
+    """Read the device identity from an already-validated bundle manifest."""
+    data = _regular_file_bytes(bundle / "build-manifest.json", "build manifest")
+    try:
+        manifest = json.loads(data)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        ssh_fail(f"build manifest is invalid: {error}")
+    device_identity = manifest.get("device_identity") if isinstance(manifest, dict) else None
+    if not isinstance(device_identity, str) or SHA256.fullmatch(device_identity) is None:
+        ssh_fail("build manifest device identity is invalid")
+    return device_identity

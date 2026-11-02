@@ -102,7 +102,7 @@ STAGED_BUILD_SOURCES = (
     "scripts/fplinux_cli/reporting/process.py",
     "scripts/fplinux_cli/runtime/__init__.py",
     "scripts/fplinux_cli/runtime/state.py",
-    "scripts/fplinux_cli/runtime/ssh_transport.py",
+    "scripts/fplinux_cli/runtime/ssh/material.py",
     "scripts/fplinux_cli/workspace/__init__.py",
     "scripts/fplinux_cli/workspace/capture.py",
     "scripts/fplinux_cli/workspace/build_inputs.py",

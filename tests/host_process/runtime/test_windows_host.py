@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import secrets
@@ -21,8 +22,13 @@ from typing import TYPE_CHECKING, Any, override
 
 import pytest
 from fplinux_cli.device_data.cpio import create_device_data_initramfs
-from fplinux_cli.runtime import state, windows_host
+from fplinux_cli.runtime import state
 from fplinux_cli.runtime.connection import ConnectionLostError, SessionResumedError
+from fplinux_cli.runtime.windows import boot as windows_boot
+from fplinux_cli.runtime.windows import bundle as windows_bundle
+from fplinux_cli.runtime.windows import host as windows_host
+from fplinux_cli.runtime.windows import session as windows_session
+from fplinux_cli.runtime.windows import transport as windows_transport
 
 from tests import ROOT
 from tests.fdt import binary_tree
@@ -79,7 +85,7 @@ def test_metadata_probes_preserve_binary_stdin_for_remote_command(
         },
         timeout=10,
         check=False,
-        creationflags=windows_host._console_creation_flags(),  # noqa: SLF001
+        creationflags=windows_host.console_creation_flags(),
     )
 
     assert result.returncode == 0, result.stderr.decode(errors="replace")
@@ -820,13 +826,13 @@ def test_ready_connection_reopens_while_an_owned_boot_candidate_is_prepared(
         install_python_script(
             ROOT / "tests/fixtures/ssh_transport/windows_peer.py", bundle.tools[role]
         )
-    transport = windows_host.WindowsTransport(StubWindowsHost({}), bundle)
+    transport = windows_transport.WindowsTransport(StubWindowsHost({}), bundle)
     saved = saved_connection(transport)
     saved["target"] = "demo"
     (Path(saved["directory"]) / "session.json").write_text(json.dumps(saved), encoding="utf-8")
     host = transport.host
     assert isinstance(host, StubWindowsHost)
-    candidate = windows_host._prepare_session(  # noqa: SLF001 -- exercise the ordinary producer.
+    candidate = windows_session.prepare_session(
         host, bundle, session_root=tmp_path / "data/session"
     )
     candidate_directory = Path(candidate["directory"])
@@ -917,8 +923,8 @@ def test_saved_usb_presence_is_independent_of_network_readiness(
         nonlocal now
         now += delay
 
-    monkeypatch.setattr("fplinux_cli.runtime.windows_host.time.monotonic", lambda: now)
-    monkeypatch.setattr("fplinux_cli.runtime.windows_host.time.sleep", advance_clock)
+    monkeypatch.setattr("fplinux_cli.runtime.windows.transport.time.monotonic", lambda: now)
+    monkeypatch.setattr("fplinux_cli.runtime.windows.transport.time.sleep", advance_clock)
 
     current = transport.load_saved_session("test-phone", session_root=tmp_path / "data/session")
     assert current == saved
@@ -1002,7 +1008,7 @@ def test_session_network_avoids_host_routes_and_saved_sessions(
     )
 
     events: list[str] = []
-    session = windows_host._prepare_session(  # noqa: SLF001 -- real session consumer.
+    session = windows_session.prepare_session(
         host, bundle, session_root=archive / "data/session", events=events.append
     )
 
@@ -1038,9 +1044,7 @@ def test_failed_key_generation_discards_only_the_new_session(
     host = StubWindowsHost({"routes": []})
 
     with pytest.raises(SystemExit, match="SSH key generation failed"):
-        windows_host._prepare_session(  # noqa: SLF001 -- real session consumer.
-            host, bundle, session_root=archive / "data/session"
-        )
+        windows_session.prepare_session(host, bundle, session_root=archive / "data/session")
 
     assert previous.read_text() == '{"network": "172.16.0.0/30"}\n'
     assert list((archive / "data/session").iterdir()) == [previous.parent]
@@ -1056,7 +1060,7 @@ def test_resuming_saved_session_discards_only_the_unstarted_windows_boot_candida
         ROOT / "tests/host_process/runtime/fixtures/windows-host/windows_loader_output.py",
         bundle.tools["loader"],
     )
-    transport = windows_host.WindowsTransport(StubWindowsHost({}), bundle)
+    transport = windows_transport.WindowsTransport(StubWindowsHost({}), bundle)
     saved = saved_connection(transport)
     saved["target"] = "demo"
     state_path = Path(saved["directory"]) / "session.json"
@@ -1065,7 +1069,7 @@ def test_resuming_saved_session_discards_only_the_unstarted_windows_boot_candida
     host = transport.host
     assert isinstance(host, StubWindowsHost)
     host.snapshot["devices"] = []
-    monkeypatch.setattr(windows_host, "WindowsHost", lambda: host)
+    monkeypatch.setattr(windows_boot, "WindowsHost", lambda: host)
     pid_file = tmp_path / "loader.pid"
     monkeypatch.setenv("FPLINUX_TEST_PENDING_LOADER_PID", str(pid_file))
     capsule = tmp_path / "device-data.cpio"
@@ -1077,7 +1081,7 @@ def test_resuming_saved_session_discards_only_the_unstarted_windows_boot_candida
             raise SessionResumedError(saved)
 
     with pytest.raises(SessionResumedError) as result:
-        windows_host.boot_archive(
+        windows_boot.boot_archive(
             bundle,
             capsule,
             log=tmp_path / "runtime.log",
@@ -1221,11 +1225,11 @@ def test_windows_loader_processes_receive_private_capsule_and_retain_one_archive
             return {"devices": []}
 
     host = SelectedWindowsHost()
-    monkeypatch.setattr(windows_host, "WindowsHost", lambda: host)
+    monkeypatch.setattr(windows_boot, "WindowsHost", lambda: host)
 
     def prepared_session(
         _host: windows_host.WindowsHost,
-        _bundle: windows_host.WindowsBundle,
+        _bundle: windows_bundle.WindowsBundle,
         *,
         events: object = None,
         session_root: Path,
@@ -1235,17 +1239,17 @@ def test_windows_loader_processes_receive_private_capsule_and_retain_one_archive
         return session
 
     def authenticated(
-        _transport: windows_host.WindowsTransport, selected: dict[str, Any], *, timeout: int
+        _transport: windows_transport.WindowsTransport, selected: dict[str, Any], *, timeout: int
     ) -> None:
         del timeout
         selected["status"] = "ready"
 
-    monkeypatch.setattr(windows_host, "_prepare_session", prepared_session)
-    monkeypatch.setattr(windows_host.WindowsTransport, "authenticate", authenticated)
+    monkeypatch.setattr(windows_boot, "prepare_session", prepared_session)
+    monkeypatch.setattr(windows_transport.WindowsTransport, "authenticate", authenticated)
 
     if loader_status or bridge_status:
         with pytest.raises(SystemExit, match="failed with status 7"):
-            windows_host.boot_archive(
+            windows_boot.boot_archive(
                 admitted_windows(root),
                 capsule,
                 session_root=root / "data/session",
@@ -1271,7 +1275,7 @@ def test_windows_loader_processes_receive_private_capsule_and_retain_one_archive
             assert not bridge_payload.exists()
         return
 
-    _transport, ready = windows_host.boot_archive(
+    _transport, ready = windows_boot.boot_archive(
         admitted_windows(root),
         capsule,
         session_root=root / "data/session",
@@ -1379,7 +1383,7 @@ def test_two_boots_retain_one_ready_session_and_failed_next_boot_preserves_its_k
                 self.bootrom = False
 
     host = ArchiveWindowsHost()
-    monkeypatch.setattr(windows_host, "WindowsHost", lambda: host)
+    monkeypatch.setattr(windows_boot, "WindowsHost", lambda: host)
     capsule = archive / "data/phone/device-data.cpio"
     capsule.parent.mkdir(parents=True)
     capsule.write_bytes(b"controlled capsule")
@@ -1387,7 +1391,7 @@ def test_two_boots_retain_one_ready_session_and_failed_next_boot_preserves_its_k
     unrelated.parent.mkdir(parents=True)
     unrelated.write_text("unrelated user data\n")
 
-    _transport, first = windows_host.boot_archive(
+    _transport, first = windows_boot.boot_archive(
         admitted_windows(archive),
         capsule,
         session_root=archive / "data/session",
@@ -1395,7 +1399,7 @@ def test_two_boots_retain_one_ready_session_and_failed_next_boot_preserves_its_k
         log=archive / "logs/first.log",
     )
     first_directory = Path(first["directory"])
-    _transport, second = windows_host.boot_archive(
+    _transport, second = windows_boot.boot_archive(
         admitted_windows(archive),
         capsule,
         session_root=archive / "data/session",
@@ -1416,7 +1420,7 @@ def test_two_boots_retain_one_ready_session_and_failed_next_boot_preserves_its_k
     monkeypatch.setenv("FPLINUX_TEST_LOADER_STATUS", "7")
 
     with pytest.raises(SystemExit, match="failed with status 7"):
-        windows_host.boot_archive(
+        windows_boot.boot_archive(
             admitted_windows(archive),
             capsule,
             session_root=archive / "data/session",
@@ -1437,7 +1441,7 @@ def test_two_boots_retain_one_ready_session_and_failed_next_boot_preserves_its_k
 class Sc9820eWindowsBoot:
     """Own one admitted RAM archive and its explicitly controlled Windows boundaries."""
 
-    bundle: windows_host.WindowsBundle
+    bundle: windows_bundle.WindowsBundle
     capsule: Path
     trace: Path
     canonical: dict[str, bytes]
@@ -1517,7 +1521,7 @@ def sc9820e_windows_boot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sc9
                 self.bootrom = False
 
     host = ArchiveWindowsHost()
-    monkeypatch.setattr(windows_host, "WindowsHost", lambda: host)
+    monkeypatch.setattr(windows_boot, "WindowsHost", lambda: host)
     capsule = archive / "data/phone/device-data.cpio"
     capsule.parent.mkdir(parents=True)
     capsule.write_bytes(create_device_data_initramfs({}, usb_transport="rndis"))
@@ -1536,7 +1540,7 @@ def test_sc9820e_windows_boot_uploads_the_ordered_ram_chain_and_authenticates(
     root = case.bundle.root
     capsule = case.capsule.read_bytes()
 
-    _transport, session = windows_host.boot_archive(
+    _transport, session = windows_boot.boot_archive(
         case.bundle,
         case.capsule,
         session_root=root / "data/session",
@@ -1671,7 +1675,7 @@ def test_sc9820e_windows_boot_failure_reaps_the_loader_and_removes_session_mater
             raise KeyboardInterrupt
 
     with pytest.raises(error, match=message):
-        windows_host.boot_archive(
+        windows_boot.boot_archive(
             case.bundle,
             case.capsule,
             session_root=root / "data/session",
@@ -1707,6 +1711,34 @@ def test_powershell_discovery_timeout_reaps_the_owned_process(
         host.ps("routes.ps1", timeout=1)
 
     assert not (Path("/proc") / pid_file.read_text()).exists()
+
+
+def test_delivered_windows_host_resolves_packaged_powershell(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Resolve PowerShell from the copied archive rather than the source checkout."""
+    archive = archive_files(tmp_path / "archive")
+    host_path = archive / "scripts/fplinux_cli/runtime/windows/host.py"
+    spec = importlib.util.spec_from_file_location("delivered_windows_host", host_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    arguments_file = tmp_path / "arguments.json"
+    monkeypatch.setenv("FPLINUX_TEST_POWERSHELL_ARGUMENTS", str(arguments_file))
+    monkeypatch.setenv("FPLINUX_TEST_POWERSHELL_RESULT", '{"protected": true}')
+    powershell = tmp_path / "powershell.exe"
+    install_python_script(
+        ROOT / "tests/host_process/runtime/fixtures/windows-host/windows_powershell_boundary.py",
+        powershell,
+    )
+    host = module.WindowsHost.__new__(module.WindowsHost)
+    host.powershell = powershell
+
+    assert host.ps("acl.ps1", timeout=3) == {"protected": True}
+    arguments = json.loads(arguments_file.read_text(encoding="utf-8"))
+    assert arguments[-1] == str(archive / "common/windows/acl.ps1")
 
 
 @pytest.mark.parametrize(

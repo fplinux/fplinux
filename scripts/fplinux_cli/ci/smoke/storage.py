@@ -19,7 +19,7 @@ for selected in sys.argv[2:]:
     with probe.open("a", encoding="ascii") as stream:
         stream.write("reopened\n")
     if os.name == "nt":
-        from fplinux_cli.runtime.windows_host import WindowsHost
+        from fplinux_cli.runtime.windows.host import WindowsHost
 
         host = WindowsHost()
         host.secure_new(probe)

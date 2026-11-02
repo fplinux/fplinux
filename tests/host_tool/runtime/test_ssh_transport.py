@@ -13,8 +13,10 @@ from typing import TYPE_CHECKING, Any
 from unittest import mock
 
 import pytest
-from fplinux_cli.runtime import ssh_transport
-from fplinux_cli.runtime.windows_host import WindowsTransport
+from fplinux_cli.runtime.ssh import commands as ssh_commands
+from fplinux_cli.runtime.ssh import session as ssh_session
+from fplinux_cli.runtime.ssh import transport as ssh_transport
+from fplinux_cli.runtime.windows.transport import WindowsTransport
 
 from tests.host_tool.runtime.openssh_server import OpenSshServer
 from tests.process import process_state, run_process
@@ -117,7 +119,7 @@ def test_openssh_preserves_session_paths_in_direct_arguments(
     root = tmp_path / path_component
     root.mkdir(mode=0o700)
     session = create_ready_session(root)
-    arguments = ssh_transport._ssh_argv(session)  # noqa: SLF001
+    arguments = ssh_commands.ssh_argv(session)
     arguments.insert(1, "-G")
 
     parsed = run_process(
@@ -152,11 +154,11 @@ def test_archive_preparation_uses_its_private_directory_without_xdg_or_sftp(
         "template_sha256": hashlib.sha256(b"\0" * 512).hexdigest(),
     }
     monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
-    monkeypatch.setattr(ssh_transport, "_host_route_networks", lambda _tool: set())
+    monkeypatch.setattr(ssh_session, "_host_route_networks", lambda _tool: set())
     find_tool = shutil.which
     monkeypatch.setattr(shutil, "which", lambda name: None if name == "sftp" else find_tool(name))
 
-    session = ssh_transport.prepare_session(
+    session = ssh_session.prepare_session(
         image,
         descriptor,
         "phone",
@@ -174,7 +176,7 @@ def test_archive_preparation_uses_its_private_directory_without_xdg_or_sftp(
     assert personalized.read_bytes()[1024:1032] == b"FPLSESS\0"
     assert image.read_bytes() == original
 
-    ssh_transport.finish_session(session)
+    ssh_session.finish_session(session)
 
     assert not directory.exists()
     assert image.read_bytes() == original
@@ -186,8 +188,8 @@ class SshTransportOpenSshConfigTests:
     def test_openssh_interprets_generated_private_session_config(self, ssh_runtime: Path) -> None:
         """OpenSSH receives the bound endpoint and disables ambient forwarding state."""
         session = create_ready_session(ssh_runtime)
-        with mock.patch.object(ssh_transport, "SSH_PORT", 2222):
-            ssh_transport._mark_current(session)  # noqa: SLF001
+        with mock.patch.object(ssh_commands, "SSH_PORT", 2222):
+            ssh_session.mark_current(session)
 
             path = ssh_runtime / "current" / "phone.ssh-config"
             metadata = path.lstat()
@@ -345,7 +347,7 @@ class SshTransportOpenSshDirectTests:
             server.host_key_line(alias),
             encoding="ascii",
         )
-        original_options = ssh_transport._ssh_option_values  # noqa: SLF001
+        original_options = ssh_commands._ssh_option_values  # noqa: SLF001
 
         def loopback_options(
             value: dict[str, Any],
@@ -357,15 +359,15 @@ class SshTransportOpenSshDirectTests:
             return [(name, replacements.get(name, option)) for name, option in options]
 
         with (
-            mock.patch.object(ssh_transport, "SSH_PORT", server.port),
-            mock.patch.object(ssh_transport, "_ssh_option_values", side_effect=loopback_options),
+            mock.patch.object(ssh_commands, "SSH_PORT", server.port),
+            mock.patch.object(ssh_commands, "_ssh_option_values", side_effect=loopback_options),
         ):
-            ssh_transport._mark_current(session)  # noqa: SLF001
+            ssh_session.mark_current(session)
         return session, root / "current" / f"{target}.ssh-config"
 
     @staticmethod
     def _loopback_ssh_argv(server: OpenSshServer) -> Callable[..., list[str]]:
-        original_ssh_argv = ssh_transport._ssh_argv  # noqa: SLF001
+        original_ssh_argv = ssh_commands.ssh_argv
 
         def loopback_ssh_argv(
             value: dict[str, Any],
@@ -466,7 +468,7 @@ class SshTransportOpenSshDirectTests:
         with (
             mock.patch.object(
                 ssh_transport,
-                "_ssh_argv",
+                "ssh_argv",
                 side_effect=loopback_ssh_argv,
             ),
         ):
@@ -541,7 +543,7 @@ class SshTransportOpenSshDirectTests:
                 tempfile.TemporaryFile(mode="w+b") as destination,
                 mock.patch.object(
                     ssh_transport,
-                    "_ssh_argv",
+                    "ssh_argv",
                     side_effect=loopback_ssh_argv,
                 ),
             ):

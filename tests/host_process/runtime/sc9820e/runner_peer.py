@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from unittest import mock
 
-from fplinux_cli.runtime import ssh_transport
+from fplinux_cli.runtime.ssh import transport as ssh_transport
 
 from tests import ROOT
 from tests.host_process.runtime.sc9820e.fixtures import load_program, prepare_runtime
@@ -117,7 +117,7 @@ def main() -> None:
         mock.patch.object(adapter, "USB_DEVICES", root / "sysfs", create=False),
         mock.patch.object(adapter, "USB_NODES", root / "nodes", create=False),
         mock.patch.object(ssh_transport, "wait_for_bound_session", endpoint, create=False),
-        mock.patch.object(ssh_transport, "_ssh_argv", ssh_argv, create=False),
+        mock.patch.object(ssh_transport, "ssh_argv", ssh_argv, create=False),
     ):
         adapter.run(
             root,

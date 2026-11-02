@@ -71,7 +71,7 @@ class DeviceDataTools:
     """Prepared native tools and the host's private-directory policy."""
 
     host_tools: Path | None = None
-    protect_private: Callable[[Path], None] | None = None
+    protect_private: Callable[[Path], object] | None = None
     python_modules: Path | None = None
 
 

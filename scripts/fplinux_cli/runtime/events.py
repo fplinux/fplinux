@@ -95,7 +95,7 @@ class RunLog:
     """One private text log and one journal, excluding interactive terminal contents."""
 
     def __init__(
-        self, root: Path, *, protect: Callable[[Path], None], visible: TextIO | None = None
+        self, root: Path, *, protect: Callable[[Path], object], visible: TextIO | None = None
     ) -> None:
         """Create the journal before admitting any bundle content."""
         self.started = datetime.now(UTC)

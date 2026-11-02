@@ -13,10 +13,12 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from fplinux_cli.runtime import boot, ssh_transport, workflow
+from fplinux_cli.runtime import boot, workflow
 from fplinux_cli.runtime.bundle import ValidatedBundle
 from fplinux_cli.runtime.connection import ConnectionLostError, SessionResumedError
 from fplinux_cli.runtime.events import RunLog
+from fplinux_cli.runtime.ssh import session as ssh_session
+from fplinux_cli.runtime.ssh import transport as ssh_transport
 
 from tests.ssh_transport_support import create_ready_session
 
@@ -436,7 +438,7 @@ def test_normal_boot_discards_unloaded_candidate_before_reauthenticating_returni
     monkeypatch.setattr(boot, "host_preflight", lambda: None)
     monkeypatch.setattr(boot, "USB_RULES_FILE", rules)
     monkeypatch.setattr(boot, "load_adapter", lambda _path: WaitingAdapter())
-    monkeypatch.setattr(ssh_transport, "prepare_session", prepare)
+    monkeypatch.setattr(ssh_session, "prepare_session", prepare)
     monkeypatch.setattr(ssh_transport, "usb_present", usb_present)
     monkeypatch.setattr(ssh_transport, "reacquire_bound_session", reacquire)
 

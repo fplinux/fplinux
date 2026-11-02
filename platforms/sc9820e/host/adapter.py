@@ -587,7 +587,8 @@ def run(  # noqa: PLR0913 -- shared runner inputs retain their standalone delive
     on_wait: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Upload once, observe the same USB connection and authenticate the Linux session."""
-    from fplinux_cli.runtime import ssh_transport as transport  # noqa: PLC0415
+    from fplinux_cli.runtime.ssh import session as ssh_session  # noqa: PLC0415
+    from fplinux_cli.runtime.ssh import transport  # noqa: PLC0415
 
     try:
         config = validate_runtime(runtime)
@@ -652,4 +653,4 @@ def run(  # noqa: PLR0913 -- shared runner inputs retain their standalone delive
             print("Private USB-NCM SSH session is ready.", flush=True)
             return ready
     finally:
-        transport.remove_personalized_image(session)
+        ssh_session.remove_personalized_image(session)

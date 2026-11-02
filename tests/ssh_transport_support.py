@@ -7,7 +7,7 @@ import hashlib
 import json
 from typing import TYPE_CHECKING, Any
 
-from fplinux_cli.runtime import ssh_transport
+from fplinux_cli.runtime.ssh import session as ssh_session
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -22,10 +22,10 @@ def create_ready_session(
 ) -> dict[str, Any]:
     """Create one complete private session directory for a transport consumer."""
     usb_serial = hashlib.sha256(session_id).hexdigest()[:32]
-    directory = ssh_transport._session_directory(root, target, usb_serial)  # noqa: SLF001
+    directory = ssh_session._session_directory(root, target, usb_serial)  # noqa: SLF001
     directory.mkdir(parents=True, mode=0o700)
     owner = {
-        "kind": ssh_transport.SESSION_OWNER_KIND,
+        "kind": ssh_session.SESSION_OWNER_KIND,
         "target": target,
         "usb_serial": usb_serial,
     }

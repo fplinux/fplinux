@@ -19,7 +19,8 @@ from unittest import mock
 from fplinux_cli.runtime import boot as runner
 from fplinux_cli.runtime import bundle as bundle_runtime
 from fplinux_cli.runtime import events as loader_events
-from fplinux_cli.runtime import ssh_transport
+from fplinux_cli.runtime.ssh import session as ssh_session
+from fplinux_cli.runtime.ssh import transport as ssh_transport
 
 from tests import ROOT
 from tests.ssh_transport_support import create_ready_session
@@ -130,7 +131,7 @@ def main() -> None:
     with (
         mock.patch.object(runner, "load_adapter", return_value=adapter),
         mock.patch.object(runner, "USB_RULES_FILE", installed_rules),
-        mock.patch.object(ssh_transport, "prepare_session", return_value=session),
+        mock.patch.object(ssh_session, "prepare_session", return_value=session),
         mock.patch.object(ssh_transport, "wait_for_bound_session", side_effect=wait_for_session),
         mock.patch.object(adapter, "usb_device_path", return_value=root / "absent-bootrom"),
         mock.patch.object(adapter, "require_usb_device_access"),

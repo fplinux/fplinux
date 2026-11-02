@@ -149,7 +149,7 @@ def publication_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Publi
     write("common/60-fplinux.rules", b'SUBSYSTEM=="usb"\n')
     write("scripts/fplinux_cli/runtime/events.py", b"# bundled events helper\n")
     write("scripts/fplinux_cli/manifests/identity.py", b"# identity contract\n")
-    write("scripts/fplinux_cli/runtime/ssh_transport.py", b"# bundled SSH helper\n")
+    write("scripts/fplinux_cli/runtime/ssh/transport.py", b"# bundled SSH helper\n")
     write("platforms/demo/host/adapter.py", b"ADAPTER = 'demo'\n")
     write("THIRD_PARTY_NOTICES.md", b"notices\n")
     asset_lock = write("assets.lock.toml", b"[asset]\n")
@@ -468,10 +468,10 @@ class BuilderPublicationTests:
         assert (runtime["identity"]["target"]["display_name"]) == ("Demo Phone")
         assert (runtime["identity"]["platform"]["name"]) == ("demo")
         assert (runtime["transport"]) == ("usb-ncm")
-        helper = published / "scripts/fplinux_cli/runtime/ssh_transport.py"
+        helper = published / "scripts/fplinux_cli/runtime/ssh/transport.py"
         assert (runtime["personalization"]["bytes"]) == (512)
         assert (runtime["assets"]) == ({"pin": "assets/pin.bin"})
-        assert (runtime["sha256"]["scripts/fplinux_cli/runtime/ssh_transport.py"]) == (
+        assert (runtime["sha256"]["scripts/fplinux_cli/runtime/ssh/transport.py"]) == (
             hashlib.sha256(helper.read_bytes()).hexdigest()
         )
         event_source = (

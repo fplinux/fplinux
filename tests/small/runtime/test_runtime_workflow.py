@@ -16,11 +16,12 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from fplinux_cli.cli.logs import read_run
 from fplinux_cli.device_data import prepare as device_data_prepare
-from fplinux_cli.runtime import boot, windows_host, workflow
+from fplinux_cli.runtime import boot, phone_data, workflow
 from fplinux_cli.runtime import bundle as bundle_runtime
 from fplinux_cli.runtime.bundle import ValidatedBundle
 from fplinux_cli.runtime.events import RunLog
 from fplinux_cli.runtime.state import exclusive_lock, private_directory
+from fplinux_cli.runtime.windows import host as windows_host
 
 from tests.fixtures.portable_archive import capsule_files
 from tests.windows_host_support import StubWindowsHost, archive_files
@@ -72,7 +73,7 @@ def test_unknown_nand_identify_reports_feature_bytes_without_reading_raw_pages(
     logs.mkdir()
     log = RunLog(logs, protect=lambda _path: None)
     try:
-        workflow._run_nand(  # noqa: SLF001 -- shared explicit NAND operation boundary.
+        phone_data.run_nand(
             ValidatedBundle(
                 tmp_path,
                 {"target": "phone", "device_data": None, "nand": {"raw_device": "/dev/raw-nand"}},
@@ -166,7 +167,7 @@ def test_manual_nand_backup_preserves_user_display_and_writes_actual_reader_byte
     log = RunLog(logs, protect=lambda _path: None)
     output = tmp_path / "backup.bin"
     try:
-        workflow._run_nand(  # noqa: SLF001 -- shared explicit NAND operation boundary.
+        phone_data.run_nand(
             ValidatedBundle(
                 tmp_path,
                 {
@@ -330,7 +331,7 @@ def test_saved_backup_reconnects_reader_before_extraction_and_preserves_failed_p
     log = RunLog(logs, protect=lambda _path: None)
     try:
         with pytest.raises(OSError, match="controlled extraction unavailable") as failed:
-            workflow._prepare_phone_data(  # noqa: SLF001 -- real saved-reader orchestration.
+            phone_data.prepare_phone_data(
                 admitted,
                 data,
                 log,
@@ -343,7 +344,7 @@ def test_saved_backup_reconnects_reader_before_extraction_and_preserves_failed_p
         assert failed.value is original_error
         assert reader.is_dir()
         assert not (store / "phone").exists()
-        reader_used = workflow._prepare_phone_data(  # noqa: SLF001 -- resume saved reader/source.
+        reader_used = phone_data.prepare_phone_data(
             admitted,
             data,
             log,
@@ -461,6 +462,7 @@ def test_windows_direct_boot_reuses_its_transport_capsule_identity(
         return (phone, {"status": "ready"}) if capsules else None
 
     monkeypatch.setattr(workflow, "os", SimpleNamespace(name="nt", isatty=lambda _fd: False))
+    monkeypatch.setattr(phone_data, "os", SimpleNamespace(name="nt"))
     monkeypatch.setattr(windows_host, "WindowsHost", WindowsAcl)
     monkeypatch.setattr(boot, "run_bundle", start_phone)
     monkeypatch.setattr(boot, "reconnect_live_bundle", live_phone)
@@ -491,11 +493,11 @@ def test_windows_direct_boot_reuses_its_transport_capsule_identity(
         assert not capsule_paths[0].exists()
         expected_identity = hashlib.sha256(capsules[0]).hexdigest()
         assert boot_hashes == [expected_identity]
-        assert workflow.prepared_content_identity(tmp_path, runtime) == expected_identity
+        assert phone_data.prepared_content_identity(tmp_path, runtime) == expected_identity
 
         assert reconnect_hashes == [expected_identity, expected_identity]
         if platform_name == "ums9117":
-            workflow._run_nand(  # noqa: SLF001 -- same identity on the explicit NAND consumer.
+            phone_data.run_nand(
                 admitted,
                 data,
                 log,
@@ -515,9 +517,10 @@ def test_linux_qin_content_identity_does_not_add_a_transport_capsule(
 ) -> None:
     """A direct SC9820E boot remains free of supplemental UMS transport data."""
     monkeypatch.setattr(workflow, "os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr(phone_data, "os", SimpleNamespace(name="posix"))
     runtime = {"device_data": None, "identity": {"platform": {"name": "sc9820e"}}}
 
-    assert workflow.prepared_content_identity(tmp_path, runtime) is None
+    assert phone_data.prepared_content_identity(tmp_path, runtime) is None
 
 
 @pytest.mark.parametrize("host", ["posix", "nt"])

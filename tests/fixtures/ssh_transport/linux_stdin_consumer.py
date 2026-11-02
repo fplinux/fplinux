@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from unittest import mock
 
-from fplinux_cli.runtime import ssh_transport
+from fplinux_cli.runtime.ssh import transport as ssh_transport
 
 from tests.fixtures.executables import install_python_script
 

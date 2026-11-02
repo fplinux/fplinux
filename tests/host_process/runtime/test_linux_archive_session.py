@@ -21,8 +21,9 @@ from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
-from fplinux_cli.runtime import ssh_transport
 from fplinux_cli.runtime.connection import ConnectionLostError
+from fplinux_cli.runtime.ssh import session as ssh_session
+from fplinux_cli.runtime.ssh import transport as ssh_transport
 
 from tests import ROOT
 from tests.fixtures.executables import install_python_script
@@ -54,7 +55,7 @@ def test_archive_ready_reconnect_preserves_current_and_parallel_prepared_session
     """Reauthentication cannot rewrite saved state or erase another run's prepared credentials."""
     session = archive_session
     root = Path(session["runtime_root"])
-    ssh_transport._mark_current(session)  # noqa: SLF001 -- establish a published ready session.
+    ssh_session.mark_current(session)
     current = root / "current/phone.json"
     config = root / "current/phone.ssh-config"
     current_before = current.read_bytes()
@@ -73,7 +74,7 @@ def test_archive_ready_reconnect_preserves_current_and_parallel_prepared_session
     identity = session["session_id"]
     monkeypatch.setattr(
         ssh_transport,
-        "_ssh_argv",
+        "ssh_argv",
         lambda _session, command, **_options: [
             sys.executable,
             "-c",
@@ -84,8 +85,8 @@ def test_archive_ready_reconnect_preserves_current_and_parallel_prepared_session
     )
 
     ready = ssh_transport.reacquire_bound_session(session, expected_device_identity="9" * 64)
-    ssh_transport.finish_session(session)
-    loaded = ssh_transport.load_saved_session("phone", runtime_root=root)
+    ssh_session.finish_session(session)
+    loaded = ssh_session.load_saved_session("phone", runtime_root=root)
 
     assert ready == {**session, "interface": "usb1"}
     assert loaded == session
@@ -116,7 +117,7 @@ def test_archive_incomplete_session_erases_keys_and_ram_copy_without_xdg(
     state = {**session, "status": "prepared"}
     (directory / "session.json").write_text(json.dumps(state), encoding="utf-8")
 
-    ssh_transport.finish_session(session)
+    ssh_session.finish_session(session)
 
     assert not directory.exists()
     assert not image.exists()
@@ -169,7 +170,7 @@ def test_archive_shell_recovers_ssh_failure_independently_of_usb_presence(
         return [Path("/usb/phone")] if usb_status == "present" else []
 
     monkeypatch.setattr(ssh_transport, "_usb_devices", usb_devices)
-    monkeypatch.setattr(ssh_transport, "_ssh_argv", lambda _session: ["completed-ssh-peer"])
+    monkeypatch.setattr(ssh_transport, "ssh_argv", lambda _session: ["completed-ssh-peer"])
     monkeypatch.setattr(os, "isatty", lambda _descriptor: True)
     with mock.patch.object(subprocess, "Popen", return_value=process):
         if disconnected:

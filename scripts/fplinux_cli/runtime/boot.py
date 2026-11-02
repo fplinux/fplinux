@@ -4,17 +4,21 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import signal
 import subprocess
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from . import ssh_transport
+from fplinux_cli.runtime.ssh import session as ssh_session
+from fplinux_cli.runtime.ssh import transport as ssh_transport
+
 from .bundle import adapter_path, fail, host_preflight, load_adapter
 from .connection import SessionResumedError
 
@@ -24,6 +28,7 @@ if TYPE_CHECKING:
     from typing import TextIO
 
     from .bundle import ValidatedBundle
+    from .events import RunLog
 
 USB_RULES_FILE = Path("/etc/udev/rules.d/60-fplinux.rules")
 
@@ -144,7 +149,7 @@ def _run_new_bundle(  # noqa: PLR0913 -- the waiting observer preserves the admi
     host_preflight()
     bundle, runtime = admitted.root, admitted.runtime
     if os.name == "nt":
-        from .windows_host import boot_archive  # noqa: PLC0415
+        from fplinux_cli.runtime.windows.boot import boot_archive  # noqa: PLC0415
 
         if device_data is None:
             fail("This Windows phone requires its RAM data capsule")
@@ -175,14 +180,14 @@ def _run_new_bundle(  # noqa: PLR0913 -- the waiting observer preserves the admi
     for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
         previous_handlers[signum] = signal.signal(signum, stop_session)
     try:
-        session = ssh_transport.prepare_session(
+        session = ssh_session.prepare_session(
             image,
             runtime["personalization"],
             runtime["target"],
             runtime["usb"]["linux_gadget"],
             runtime_root=session_root,
         )
-        ssh_transport.bind_prepared_content(
+        ssh_session.bind_prepared_content(
             session,
             bundle_generation=admitted.generation,
             prepared_data_sha256=prepared_data_sha256,
@@ -209,7 +214,7 @@ def _run_new_bundle(  # noqa: PLR0913 -- the waiting observer preserves the admi
         original_error = sys.exception()
         try:
             if session is not None:
-                ssh_transport.finish_session(session)
+                ssh_session.finish_session(session)
         except OSError, SystemExit:
             if original_error is None:
                 raise
@@ -229,7 +234,8 @@ def saved_bundle_connection(
     host_preflight()
     runtime = admitted.runtime
     if os.name == "nt":
-        from .windows_host import WindowsHost, WindowsTransport  # noqa: PLC0415
+        from fplinux_cli.runtime.windows.host import WindowsHost  # noqa: PLC0415
+        from fplinux_cli.runtime.windows.transport import WindowsTransport  # noqa: PLC0415
 
         if admitted.windows is None:
             fail("This bundle has no admitted Windows host tools")
@@ -237,7 +243,7 @@ def saved_bundle_connection(
         session = transport.load_saved_session(runtime["target"], session_root=session_root)
     else:
         transport = ssh_transport
-        session = ssh_transport.load_saved_session(runtime["target"], runtime_root=session_root)
+        session = ssh_session.load_saved_session(runtime["target"], runtime_root=session_root)
     return (transport, session) if session is not None else None
 
 
@@ -250,7 +256,7 @@ def reconnect_saved_connection(
     """Authenticate the original keys, RAM identity and selected build after a replug."""
     transport, session = connection
     if transport is ssh_transport:
-        ssh_transport.require_prepared_content(
+        ssh_session.require_prepared_content(
             session,
             bundle_generation=admitted.generation,
             prepared_data_sha256=prepared_data_sha256,
@@ -282,3 +288,63 @@ def reconnect_live_bundle(
     return reconnect_saved_connection(
         admitted, connection, prepared_data_sha256=prepared_data_sha256
     )
+
+
+CLOCK_STATUS = re.compile(r"system=(?P<system>[0-9]+) rtc=(?P<rtc>kept|written|failed)")
+
+
+def boot_connection(  # noqa: PLR0913 -- loaded content and owned session/log roots stay explicit.
+    admitted: ValidatedBundle,
+    session_root: Path,
+    log: RunLog,
+    emit: Callable[[str], None],
+    *,
+    capsule: Path | None,
+    prepared_data_sha256: str | None,
+    loader_trace: bool,
+) -> tuple[Any, dict[str, Any]]:
+    resumed = False
+
+    def progress(stage: str) -> None:
+        nonlocal resumed
+        if stage == "session-resumed":
+            resumed = True
+        emit(stage)
+
+    with log.capture() as output:
+        connection = run_bundle(
+            admitted,
+            progress,
+            device_data=capsule,
+            prepared_data_sha256=prepared_data_sha256,
+            output=output,
+            session_root=session_root,
+            loader_trace=loader_trace,
+            log=log.path,
+        )
+    if not resumed:
+        sync_clock(connection, log)
+    return connection
+
+
+def sync_clock(connection: tuple[Any, dict[str, Any]], log: RunLog) -> None:
+    """Set fresh RAM sessions from host UTC and report the phone's clock outcome."""
+    transport, session = connection
+    host_seconds = int(time.time())
+    with log.capture():
+        result = transport.run_remote(
+            session, f"fplinux-clock {host_seconds}", capture_output=True, shared=True
+        )
+    status = CLOCK_STATUS.fullmatch(result.stdout.strip())
+    detail = result.stderr.strip().splitlines()
+    reason = detail[-1] if detail else f"unexpected clock status (exit {result.returncode})"
+    if status is None:
+        log.message(f"fplinux ssh: phone clock was not set: {reason}")
+        return
+    phone_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(status["system"])))
+    if status["rtc"] == "failed":
+        log.message(
+            f"fplinux ssh: phone clock set to {phone_time}, but its RTC was not written: {reason}"
+        )
+        return
+    log.message(f"Phone clock set to {phone_time} (RTC {status['rtc']}).")

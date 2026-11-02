@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 def private_directory(path: Path) -> Path:
     """Protect personal files and connection keys on the selected host."""
     if os.name == "nt":
-        from .windows_host import WindowsHost  # noqa: PLC0415
+        from fplinux_cli.runtime.windows.host import WindowsHost  # noqa: PLC0415
 
         return WindowsHost().runtime_root(path)
     path.mkdir(mode=0o700, parents=True, exist_ok=True)

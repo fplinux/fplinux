@@ -9,7 +9,7 @@ from unittest import mock
 
 import pytest
 from fplinux_cli.build.host_tools.linux_host import _write_launchers, verify_linux_dependencies
-from fplinux_cli.runtime.ssh_transport import _require_tool
+from fplinux_cli.runtime.ssh.commands import require_tool
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -72,7 +72,7 @@ def test_ssh_preflight_finds_bundled_launcher_without_system_openssh(
     _write_launchers(package)
     tools = package / "tools/linux"
     monkeypatch.setenv("PATH", str(tools))
-    assert _require_tool("ssh") == str(tools / "ssh")
+    assert require_tool("ssh") == str(tools / "ssh")
 
 
 def test_ssh_launcher_selects_the_relocated_runtime_with_literal_arguments(tmp_path: Path) -> None:

@@ -15,7 +15,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
-from fplinux_cli.runtime import ssh_transport
+from fplinux_cli.runtime.ssh import session as ssh_session
+from fplinux_cli.runtime.ssh import transport as ssh_transport
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -436,7 +437,7 @@ def run(  # noqa: PLR0913 -- runtime, session, handoff, user data and output are
                     fail("BootROM USB did not disconnect before the retry deadline")
                 time.sleep(0.01)
     finally:
-        ssh_transport.remove_personalized_image(session)
+        ssh_session.remove_personalized_image(session)
     if successful_bootrom_device is None:
         fail("RAM loader completed without a BootROM USB device")
 

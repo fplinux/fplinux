@@ -121,6 +121,7 @@ class LoaderExecutionTests:
                 ),
                 mock.patch.object(ADAPTER.shutil, "which", return_value="/usr/bin/stdbuf"),
                 mock.patch.object(ADAPTER, "ssh_transport", transport_module),
+                mock.patch.object(ADAPTER, "ssh_session", transport_module),
             ):
                 ADAPTER.run(
                     bundle,
@@ -181,6 +182,7 @@ class LoaderExecutionTests:
                 ),
                 mock.patch.object(ADAPTER.shutil, "which", return_value="/usr/bin/stdbuf"),
                 mock.patch.object(ADAPTER, "ssh_transport", transport_module),
+                mock.patch.object(ADAPTER, "ssh_session", transport_module),
             ):
                 ADAPTER.run(
                     bundle,
@@ -211,6 +213,7 @@ class LoaderExecutionTests:
                 mock.patch.object(ADAPTER.subprocess, "Popen") as bridge,
                 mock.patch.object(ADAPTER.shutil, "which", return_value="/usr/bin/stdbuf"),
                 mock.patch.object(ADAPTER, "ssh_transport", transport_module),
+                mock.patch.object(ADAPTER, "ssh_session", transport_module),
                 pytest.raises(SessionResumedError) as resumed,
             ):
                 ADAPTER.run(
@@ -253,6 +256,7 @@ class LoaderExecutionTests:
                 mock.patch.object(ADAPTER.subprocess, "Popen") as popen,
                 mock.patch.object(ADAPTER.shutil, "which", return_value="/usr/bin/stdbuf"),
                 mock.patch.object(ADAPTER, "ssh_transport", transport_module),
+                mock.patch.object(ADAPTER, "ssh_session", transport_module),
                 pytest.raises(SystemExit, match="failed after 3 attempts"),
             ):
                 ADAPTER.run(
@@ -308,6 +312,7 @@ class LoaderExecutionTests:
                 ),
                 mock.patch.object(ADAPTER.shutil, "which", return_value="/usr/bin/stdbuf"),
                 mock.patch.object(ADAPTER, "ssh_transport", transport_module),
+                mock.patch.object(ADAPTER, "ssh_session", transport_module),
             ):
                 ADAPTER.run(
                     bundle,
@@ -337,6 +342,7 @@ class LoaderExecutionTests:
                 mock.patch.object(ADAPTER.subprocess, "Popen") as popen,
                 mock.patch.object(ADAPTER.shutil, "which", return_value="/usr/bin/stdbuf"),
                 mock.patch.object(ADAPTER, "ssh_transport", transport_module),
+                mock.patch.object(ADAPTER, "ssh_session", transport_module),
                 mock.patch.object(ADAPTER.time, "monotonic", clock.monotonic),
                 mock.patch.object(ADAPTER.time, "sleep", clock.sleep),
                 pytest.raises(SystemExit, match="retry deadline"),
@@ -368,6 +374,7 @@ class LoaderExecutionTests:
                 mock.patch.object(ADAPTER.subprocess, "Popen") as popen,
                 mock.patch.object(ADAPTER.shutil, "which", return_value="/usr/bin/stdbuf"),
                 mock.patch.object(ADAPTER, "ssh_transport", transport_module),
+                mock.patch.object(ADAPTER, "ssh_session", transport_module),
                 pytest.raises(SystemExit, match="cancelled"),
             ):
                 ADAPTER.run(

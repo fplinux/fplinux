@@ -170,7 +170,7 @@ class ReleaseArchiveInputs:
             "Run-debug.cmd": b"@echo off\r\nrem built debug launcher\r\n",
             "scripts/fplinux_cli/runtime/events.py": self.event_helper,
             "scripts/fplinux_cli/manifests/identity.py": b"identity helper\n",
-            "scripts/fplinux_cli/runtime/ssh_transport.py": b"ssh helper\n",
+            "scripts/fplinux_cli/runtime/ssh/transport.py": b"ssh helper\n",
             "platforms/demo/host/adapter.py": b"built adapter\n",
             "apks/demo.apk": b"built application\n",
             "assets.lock.toml": b"built asset manifest\n",

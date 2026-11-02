@@ -441,7 +441,7 @@ class RuntimeManifestTests:
     @pytest.mark.parametrize(
         "helper",
         [
-            pytest.param("scripts/fplinux_cli/runtime/ssh_transport.py", id="ssh-transport"),
+            pytest.param("scripts/fplinux_cli/runtime/ssh/transport.py", id="ssh-transport"),
             pytest.param("scripts/fplinux_cli/manifests/identity.py", id="identity"),
         ],
     )

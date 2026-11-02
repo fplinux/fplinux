@@ -8,7 +8,9 @@ import subprocess
 from typing import TYPE_CHECKING, Any, override
 
 import pytest
-from fplinux_cli.runtime import windows_host
+from fplinux_cli.runtime.windows import boot as windows_boot
+from fplinux_cli.runtime.windows import bundle as windows_bundle
+from fplinux_cli.runtime.windows import host as windows_host
 
 from tests.windows_host_support import StubWindowsHost, admitted_windows, archive_files
 
@@ -56,7 +58,7 @@ def ensure_driver(host: DriverHost, root: Path, events: list[str]) -> None:
     bundle = admitted_windows(archive_files(root))
     directory = root / "private-session"
     directory.mkdir()
-    windows_host._setup_bootrom_driver(  # noqa: SLF001 -- selected host component boundary.
+    windows_boot._setup_bootrom_driver(  # noqa: SLF001 -- selected host component boundary.
         host,
         bundle,
         directory,
@@ -105,8 +107,8 @@ def test_installed_driver_cannot_start_next_attempt_before_disconnect(
         nonlocal now
         now += delay
 
-    monkeypatch.setattr("fplinux_cli.runtime.windows_host.time.monotonic", lambda: now)
-    monkeypatch.setattr("fplinux_cli.runtime.windows_host.time.sleep", advance_clock)
+    monkeypatch.setattr("fplinux_cli.runtime.windows.boot.time.monotonic", lambda: now)
+    monkeypatch.setattr("fplinux_cli.runtime.windows.boot.time.sleep", advance_clock)
     events: list[str] = []
     with pytest.raises(SystemExit, match=r"Disconnect the phone after USB driver setup"):
         ensure_driver(host, tmp_path, events)
@@ -265,12 +267,12 @@ def test_native_usb_acquisition_controls_progress_and_driver_setup(
             raise LoaderReachedError
 
     host = BootHost(consent=mode != "declined")
-    monkeypatch.setattr(windows_host, "WindowsHost", lambda: host)
+    monkeypatch.setattr(windows_boot, "WindowsHost", lambda: host)
 
     # Personalization is replaced to isolate boot orchestration from key generation.
     def prepared_session(
         _host: DriverHost,
-        _bundle: windows_host.WindowsBundle,
+        _bundle: windows_bundle.WindowsBundle,
         *,
         events: object = None,
         session_root: Path,
@@ -279,10 +281,10 @@ def test_native_usb_acquisition_controls_progress_and_driver_setup(
         del events, session_root, prepared_data_sha256
         return {"directory": str(directory), "image": str(image)}
 
-    monkeypatch.setattr(windows_host, "_prepare_session", prepared_session)
+    monkeypatch.setattr(windows_boot, "prepare_session", prepared_session)
     if mode in {"ready", "setup"}:
         with pytest.raises(LoaderReachedError):
-            windows_host.boot_archive(
+            windows_boot.boot_archive(
                 admitted_windows(root),
                 capsule,
                 log=root / "logs/runtime.log",
@@ -307,7 +309,7 @@ def test_native_usb_acquisition_controls_progress_and_driver_setup(
             "transfer-failed": "native transfer failed",
         }[mode]
         with pytest.raises(SystemExit, match=error):
-            windows_host.boot_archive(
+            windows_boot.boot_archive(
                 admitted_windows(root),
                 capsule,
                 log=root / "logs/runtime.log",

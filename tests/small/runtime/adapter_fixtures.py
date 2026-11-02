@@ -214,6 +214,7 @@ def run_bridge(  # noqa: PLR0913 -- each keyword replaces one external boundary.
             mock.patch.object(ADAPTER.subprocess, "Popen", popen),
             mock.patch.object(ADAPTER.shutil, "which", return_value="/usr/bin/stdbuf"),
             mock.patch.object(ADAPTER, "ssh_transport", transport_module),
+            mock.patch.object(ADAPTER, "ssh_session", transport_module),
         ]
         with contextlib.ExitStack() as stack:
             stack.enter_context(contextlib.redirect_stdout(output or io.StringIO()))

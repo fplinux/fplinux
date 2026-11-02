@@ -9,7 +9,7 @@ import shutil
 import subprocess
 from typing import TYPE_CHECKING, Any
 
-from fplinux_cli.runtime import boot, emmc_files, workflow
+from fplinux_cli.runtime import boot, emmc_files, phone_data
 from fplinux_cli.runtime.bundle import ValidatedBundle
 from fplinux_cli.runtime.events import RunLog
 
@@ -108,7 +108,7 @@ def test_first_emmc_preparation_reads_once_and_next_launch_reuses_originals(
     logs.mkdir()
     log = RunLog(logs, protect=lambda _path: None)
     try:
-        used_reader = workflow._prepare_phone_data(  # noqa: SLF001 -- actual orchestration boundary.
+        used_reader = phone_data.prepare_phone_data(
             admitted,
             data,
             log,
@@ -130,7 +130,7 @@ def test_first_emmc_preparation_reads_once_and_next_launch_reuses_originals(
         initial_receipt = receipt.read_bytes()
         initial_inode = destination.stat().st_ino
 
-        assert not workflow._prepare_phone_data(  # noqa: SLF001 -- unchanged preparation reuses the publication.
+        assert not phone_data.prepare_phone_data(
             admitted,
             data,
             log,
@@ -152,7 +152,7 @@ def test_first_emmc_preparation_reads_once_and_next_launch_reuses_originals(
         )
         runtime["device_data"]["originals_parser"] = "refreshed_parser.py"
         runtime["device_data"]["preparation_recipe"] = "c" * 64
-        assert not workflow._prepare_phone_data(  # noqa: SLF001 -- changed preparation retains the acquisition.
+        assert not phone_data.prepare_phone_data(
             admitted,
             data,
             log,

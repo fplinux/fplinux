@@ -105,7 +105,7 @@ def _install_external_boundaries(root: Path) -> None:
     ).read_text(encoding="utf-8")
     for relative in (
         "platforms/ums9117/host/adapter.py",
-        "scripts/fplinux_cli/runtime/ssh_transport.py",
+        "scripts/fplinux_cli/runtime/ssh/transport.py",
     ):
         with (root / relative).open("a", encoding="utf-8") as stream:
             stream.write("\n" + discovery)

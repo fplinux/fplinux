@@ -9,7 +9,7 @@ import sys
 from typing import TYPE_CHECKING
 
 import pytest
-from fplinux_cli.runtime import ssh_transport
+from fplinux_cli.runtime.ssh import transport as ssh_transport
 
 from tests import ROOT
 from tests.ssh_transport_support import create_ready_session
@@ -42,7 +42,7 @@ def local_stream(
                 str(tmp_path / "complete"),
             ]
 
-        monkeypatch.setattr(ssh_transport, "_ssh_argv", local_ssh)
+        monkeypatch.setattr(ssh_transport, "ssh_argv", local_ssh)
         ssh_transport.stream_remote(
             session, "binary read", destination, timeout=timeout, progress=progress
         )

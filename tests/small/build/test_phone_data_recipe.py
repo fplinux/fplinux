@@ -120,9 +120,9 @@ def test_acquisition_reuses_backup_after_unrelated_build_and_display_changes(
     before = phone_data_inputs.acquisition()
     phone_data_inputs.config["release_id"] = "another-release"
     phone_data_inputs.config["runtime"] = {"transport": "usb-ncm", "timeout": 60}
-    (phone_data_inputs.root / "scripts/fplinux_cli/runtime/ssh_transport.py").write_bytes(
-        b"def connect():\n    return 'new transport'\n"
-    )
+    transport = phone_data_inputs.root / "scripts/fplinux_cli/runtime/ssh/transport.py"
+    transport.parent.mkdir(parents=True, exist_ok=True)
+    transport.write_bytes(b"def connect():\n    return 'new transport'\n")
     phone_data_inputs.dtb.write_bytes(nand_tree(display=200))
     parser = phone_data_inputs.root / "targets/phone/phone_data.py"
     parser.write_bytes(b"def prepare():\n    return b'updated'\n")
@@ -171,7 +171,9 @@ def test_acquisition_rejects_backup_after_reader_contract_changes(
     assert phone_data_inputs.acquisition() != before
 
 
-@pytest.mark.parametrize("change", ["parser", "audio", "groups", "interpretation", "compatible"])
+@pytest.mark.parametrize(
+    "change", ["parser", "audio", "eq", "groups", "interpretation", "compatible"]
+)
 def test_preparation_changes_without_invalidating_raw_backup(
     phone_data_inputs: PhoneDataInputs, change: str
 ) -> None:
@@ -182,6 +184,10 @@ def test_preparation_changes_without_invalidating_raw_backup(
         (phone_data_inputs.root / "targets/phone/phone_data.py").write_bytes(b"NEW_OUTPUT = 1\n")
     elif change == "audio":
         phone_data_inputs.config["audio_policy"]["speaker_vibration"] = True
+    elif change == "eq":
+        (phone_data_inputs.root / "scripts/fplinux_cli/device_data/audio_eq.py").write_bytes(
+            b"GAIN = 1\n"
+        )
     elif change == "groups":
         groups = copy.deepcopy(phone_data_inputs.config["device_data"]["groups"])
         groups["audio-profile"][0]["destination"] = "new-audio.bin"

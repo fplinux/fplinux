@@ -18,7 +18,8 @@ from typing import TYPE_CHECKING, Any
 from unittest import mock
 
 import pytest
-from fplinux_cli.runtime import ssh_transport
+from fplinux_cli.runtime.ssh import session as ssh_session
+from fplinux_cli.runtime.ssh import transport as ssh_transport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -155,7 +156,7 @@ class SshTransportFakeToolTests:
             mock.patch.object(ssh_transport, "_network_ready", return_value=True),
             mock.patch.object(
                 ssh_transport,
-                "_ssh_argv",
+                "ssh_argv",
                 side_effect=local_ssh,
             ),
         ):
@@ -172,7 +173,7 @@ class SshTransportFakeToolTests:
     ) -> None:
         """Retry deterministic keyscan output before accepting a matching session id."""
         previous = create_ready_session(private_runtime)
-        ssh_transport._mark_current(previous)  # noqa: SLF001 -- retain the prior reconnect record.
+        ssh_session.mark_current(previous)
         state = create_ready_session(private_runtime, status="prepared", session_id=b"n" * 32)
         Path(state["known_hosts"]).unlink()
         tool_directory = private_runtime.parent / "ssh-tools"
@@ -214,17 +215,17 @@ class SshTransportFakeToolTests:
             else:
                 with pytest.raises(SystemExit, match="different kernel identity"):
                     ssh_transport.wait_for_bound_session(state, expected_device_identity="9" * 64)
-                ssh_transport.finish_session(state)
+                ssh_session.finish_session(state)
 
         assert (scan_count.read_text(encoding="ascii")) == ("2\n")
         if kernel_matches:
             assert ready["status"] == "ready"
             assert host_key in Path(state["known_hosts"]).read_text(encoding="ascii")
             assert not Path(previous["private_key"]).exists()
-            assert ssh_transport.load_saved_session("phone", runtime_root=private_runtime) == ready
+            assert ssh_session.load_saved_session("phone", runtime_root=private_runtime) == ready
         else:
             assert (
-                ssh_transport.load_saved_session("phone", runtime_root=private_runtime) == previous
+                ssh_session.load_saved_session("phone", runtime_root=private_runtime) == previous
             )
             assert Path(previous["private_key"]).read_bytes() == b"private\n"
             assert not Path(state["private_key"]).parent.exists()
@@ -286,7 +287,7 @@ class SshTransportUploadTests:
                 return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
             with (
-                mock.patch.object(ssh_transport, "_ssh_argv", side_effect=local_ssh),
+                mock.patch.object(ssh_transport, "ssh_argv", side_effect=local_ssh),
                 mock.patch.object(ssh_transport, "_sftp", side_effect=local_sftp),
                 mock.patch.dict(os.environ, {"FPLINUX_AVAILABLE_BLOCKS": str(available_blocks)}),
                 mock.patch("builtins.print"),

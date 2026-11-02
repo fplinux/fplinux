@@ -380,9 +380,8 @@ def package_target(
         if (
             host == "linux"
             and (
-                relative
-                in {"Run.cmd", "Run-debug.cmd", "scripts/fplinux_cli/runtime/windows_host.py"}
-                or relative.startswith("common/windows/")
+                relative in {"Run.cmd", "Run-debug.cmd"}
+                or relative.startswith(("scripts/fplinux_cli/runtime/windows/", "common/windows/"))
             )
         )
         or (host == "windows" and relative in {"Run.sh", "60-fplinux.rules"})

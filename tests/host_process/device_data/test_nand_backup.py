@@ -18,7 +18,8 @@ from typing import TYPE_CHECKING, Any
 from unittest import mock
 
 import pytest
-from fplinux_cli.runtime import nand_backup, ssh_transport
+from fplinux_cli.runtime import nand_backup
+from fplinux_cli.runtime.ssh import transport as ssh_transport
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

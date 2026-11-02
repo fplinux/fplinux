@@ -132,7 +132,7 @@ def autonomous_runner_archive(portable_archive: PortableArchive) -> AutonomousRu
     discovery = (peer_root / "autonomous_usb_boundary.py").read_text(encoding="utf-8")
     for relative in (
         "platforms/ums9117/host/adapter.py",
-        "scripts/fplinux_cli/runtime/ssh_transport.py",
+        "scripts/fplinux_cli/runtime/ssh/transport.py",
     ):
         with (root / relative).open("a", encoding="utf-8") as stream:
             stream.write("\n" + discovery)

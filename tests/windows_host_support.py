@@ -14,12 +14,9 @@ from unittest import mock
 
 from fplinux_cli.build.runtime import runtime_source_files
 from fplinux_cli.runtime import bundle as bundle_runtime
-from fplinux_cli.runtime import ssh_transport
-from fplinux_cli.runtime.windows_host import (
-    WindowsBundle,
-    WindowsHost,
-    WindowsTransport,
-)
+from fplinux_cli.runtime.windows.bundle import WindowsBundle
+from fplinux_cli.runtime.windows.host import WindowsHost
+from fplinux_cli.runtime.windows.transport import WindowsTransport
 
 from tests import ROOT
 from tests.bundle_support import file_record
@@ -150,7 +147,6 @@ def native_process_transport(directory: Path) -> WindowsTransport:
         },
         {"ssh": tools / "ssh", "keyscan": tools / "keyscan"},
         ModuleType("unused_adapter"),
-        ssh_transport,
         "cd" * 32,
         "12" * 32,
     )

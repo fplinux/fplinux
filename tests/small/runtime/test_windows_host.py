@@ -8,8 +8,11 @@ import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
-from fplinux_cli.runtime import windows_host
-from fplinux_cli.runtime.windows_host import bound_interface, exact_usb_devices
+from fplinux_cli.runtime.windows import boot as windows_boot
+from fplinux_cli.runtime.windows import bundle as windows_bundle
+from fplinux_cli.runtime.windows import host as windows_host
+from fplinux_cli.runtime.windows import transport as windows_transport
+from fplinux_cli.runtime.windows.host import bound_interface, exact_usb_devices
 
 from tests.windows_host_support import (
     StubWindowsHost,
@@ -58,7 +61,7 @@ def test_sc9820e_windows_archive_requires_an_initramfs(tmp_path: Path) -> None:
     del runtime["adapter"]["regions"]["initramfs"]
 
     with pytest.raises(SystemExit, match="Windows archives require a RAM root filesystem"):
-        windows_host.validate_archive(
+        windows_bundle.validate_archive(
             tmp_path, runtime, generation=bundle.generation, device_identity=bundle.device_identity
         )
 
@@ -88,7 +91,7 @@ def test_usb_presence_requires_the_saved_device_root_without_a_network_index(
     tmp_path: Path, usb_id: str, *, present: bool
 ) -> None:
     host = StubWindowsHost({"devices": [{"id": usb_id}]})
-    transport = windows_host.WindowsTransport(host, admitted_windows(archive_files(tmp_path)))
+    transport = windows_transport.WindowsTransport(host, admitted_windows(archive_files(tmp_path)))
 
     assert transport.usb_present(endpoint_session(tmp_path / "session")) is present
 
@@ -180,11 +183,11 @@ def test_host_preparation_progress_precedes_a_windows_discovery_timeout(
         def __init__(self) -> None:
             raise subprocess.TimeoutExpired(["powershell.exe", "-File", "user.ps1"], 20)
 
-    monkeypatch.setattr(windows_host, "WindowsHost", TimingOutWindowsHost)
+    monkeypatch.setattr(windows_boot, "WindowsHost", TimingOutWindowsHost)
     events: list[str] = []
 
     with pytest.raises(subprocess.TimeoutExpired):
-        windows_host.boot_archive(
+        windows_boot.boot_archive(
             admitted_windows(root),
             capsule,
             log=root / "logs/runtime.log",
