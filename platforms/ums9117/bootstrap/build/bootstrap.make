@@ -17,7 +17,15 @@ override FPLINUX_BOOTSTRAP_MEMORY_LD := generated/fplinux-bootstrap-memory.ld
 override FPLINUX_UBOOT_BUILD_HEADER := generated/fplinux-uboot-build.h
 override FPLINUX_BOOTSTRAP_DISPLAY_HEADER := generated/fplinux-bootstrap-display.h
 
+ifeq ($(FPLINUX_BOOTSTRAP_MODE),uboot)
 override FPLINUX_STATUS_SRCS := fplinux-boot-screen/boot-screen fplinux-status-screen generated/fplinux-status-fonts
+else ifeq ($(FPLINUX_BOOTSTRAP_HAS_DISPLAY),1)
+override FPLINUX_STATUS_SRCS := fplinux-boot-screen/boot-screen fplinux-status-screen generated/fplinux-status-fonts
+else ifeq ($(FPLINUX_BOOTSTRAP_HAS_DISPLAY),0)
+override FPLINUX_STATUS_SRCS :=
+else
+$(error FPLinux bootstrap display selection must be 0 or 1)
+endif
 
 override SYS_EXTRA :=
 override SYS_SRCS := asmcode usbio common libc syscomm syscode
@@ -91,8 +99,14 @@ ifneq ($(strip $(APP_SRCS)),main fplinux-boot-screen/boot-screen fplinux-status-
 $(error FPLinux U-Boot stage0 source closure changed: $(APP_SRCS))
 endif
 else
+ifeq ($(FPLINUX_BOOTSTRAP_HAS_DISPLAY),1)
 ifneq ($(strip $(APP_SRCS)),main fplinux-boot-screen/boot-screen fplinux-status-screen generated/fplinux-status-fonts ums9117-bootstrap/boot-main ums9117-bootstrap/boot-common ums9117-bootstrap/boot-session ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff payload)
 $(error FPLinux bootstrap application closure changed: $(APP_SRCS))
+endif
+else
+ifneq ($(strip $(APP_SRCS)),main ums9117-bootstrap/boot-main ums9117-bootstrap/boot-common ums9117-bootstrap/boot-session ums9117-bootstrap/bootstrap ums9117-bootstrap/handoff payload)
+$(error FPLinux bootstrap application closure changed: $(APP_SRCS))
+endif
 endif
 endif
 override FPLINUX_FORBIDDEN_OBJS := $(OBJDIR)/sys/sdio.o $(OBJDIR)/sys/microfat.o
@@ -112,7 +126,7 @@ fplinux-safety-check:
 $(FPLINUX_FORBIDDEN_OBJS):
 	@printf '%s\n' 'FPLinux bootstrap forbids SDIO and microfat objects' >&2; exit 2
 
-$(OBJDIR)/app/ums9117-bootstrap/boot-main.o: $(FPLINUX_BOOTSTRAP_IDENTITY_HEADER) $(FPLINUX_BOOT_LAYOUT_HEADER)
+$(OBJDIR)/app/ums9117-bootstrap/boot-main.o: $(FPLINUX_BOOTSTRAP_IDENTITY_HEADER) $(FPLINUX_BOOT_LAYOUT_HEADER) $(FPLINUX_BOOTSTRAP_DISPLAY_HEADER)
 $(OBJDIR)/app/main.o: $(FPLINUX_BOOTSTRAP_DISPLAY_HEADER)
 $(OBJDIR)/app/ums9117-bootstrap/boot-common.o: $(FPLINUX_BOOT_LAYOUT_HEADER)
 $(OBJDIR)/app/ums9117-bootstrap/sd-stage0.o: $(FPLINUX_BOOTSTRAP_IDENTITY_HEADER) $(FPLINUX_BOOT_LAYOUT_HEADER) $(FPLINUX_UBOOT_BUILD_HEADER)

@@ -136,42 +136,43 @@ def build_bootstrap(  # noqa: PLR0913 -- source selection and payload inputs sta
         shutil.copyfile(zimage, projected_output / target_bootstrap["kernel_destination"])
         shutil.copyfile(dtb, projected_output / target_bootstrap["dtb_destination"])
     display = target_config["display"]
-    screen = f"{display['width']}x{display['height']}"
-    profile = bootstrap / "fplinux-status/fplinux-ui-profile.json"
-    process_build.run(
-        [
-            "python3",
-            str(bootstrap / "fplinux_status_assets.py"),
-            "--tokens",
-            str(profile),
-            "--sources",
-            "/opt/quality/src/ui-fonts",
-            "--output",
-            str(bootstrap / "generated"),
-            "--profile",
-            screen,
-            "--lv-font-conv",
-            "/opt/quality/node-tools/node_modules/.bin/lv_font_conv",
-        ]
-    )
-    process_build.run(
-        [
-            "python3",
-            str(bootstrap / "fplinux-status/generate-brand.py"),
-            "--profile",
-            str(profile),
-            "--masters",
-            str(bootstrap / "fplinux-status/brand"),
-            "--boot-out",
-            str(bootstrap / "generated"),
-            "--screen",
-            screen,
-        ],
-        environment={
-            "NODE_PATH": "/opt/quality/node-tools/node_modules",
-            "PYTHONPATH": str(bootstrap / "fplinux-status/brand"),
-        },
-    )
+    if display["width"]:
+        screen = f"{display['width']}x{display['height']}"
+        profile = bootstrap / "fplinux-status/fplinux-ui-profile.json"
+        process_build.run(
+            [
+                "python3",
+                str(bootstrap / "fplinux_status_assets.py"),
+                "--tokens",
+                str(profile),
+                "--sources",
+                "/opt/quality/src/ui-fonts",
+                "--output",
+                str(bootstrap / "generated"),
+                "--profile",
+                screen,
+                "--lv-font-conv",
+                "/opt/quality/node-tools/node_modules/.bin/lv_font_conv",
+            ]
+        )
+        process_build.run(
+            [
+                "python3",
+                str(bootstrap / "fplinux-status/generate-brand.py"),
+                "--profile",
+                str(profile),
+                "--masters",
+                str(bootstrap / "fplinux-status/brand"),
+                "--boot-out",
+                str(bootstrap / "generated"),
+                "--screen",
+                screen,
+            ],
+            environment={
+                "NODE_PATH": "/opt/quality/node-tools/node_modules",
+                "PYTHONPATH": str(bootstrap / "fplinux-status/brand"),
+            },
+        )
     process_build.run(
         [
             "make",

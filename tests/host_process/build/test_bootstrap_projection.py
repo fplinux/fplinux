@@ -28,6 +28,7 @@ def test_make_consumer_receives_selected_names_and_mode(
             "map": "obj/selected.map",
             "dtb_destination": "phone.dtb",
         },
+        "display": {"width": 240, "height": 320},
     }
     (tmp_path / "settings.make").write_bytes(bootstrap_settings(target))
     consumer = tmp_path / "consumer.make"

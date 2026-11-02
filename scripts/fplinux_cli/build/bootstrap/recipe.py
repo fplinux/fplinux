@@ -76,12 +76,14 @@ def bootstrap_settings(target_config: dict[str, Any]) -> bytes:
     bootstrap = target_config["bootstrap"]
     mode = "uboot" if bootstrap["kind"] == "uboot-stage0" else "linux"
     name = bootstrap["image"].removesuffix(".bin")
+    has_display = int(target_config["display"]["width"] != 0)
     license_tag = "SPDX-License-" + "Identifier"
     return (
         f"# {license_tag}: GPL-2.0-only\n"
         f"override NAME := {name}\n"
         f"override FPLINUX_BOOTSTRAP_MAP := {bootstrap['map']}\n"
         f"override FPLINUX_BOOTSTRAP_MODE := {mode}\n"
+        f"override FPLINUX_BOOTSTRAP_HAS_DISPLAY := {has_display}\n"
         f"override FPLINUX_BOOTSTRAP_DTB := {bootstrap['dtb_destination']}\n"
     ).encode("ascii")
 

@@ -5,8 +5,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "fplinux-boot-screen/boot-screen.h"
 #include "fplinux-handoff-protocol.h"
+#include "generated/fplinux-bootstrap-display.h"
 #include "generated/fplinux-bootstrap-identity.h"
 #include "generated/fplinux-boot-layout.h"
 #include "syscode.h"
@@ -15,15 +15,21 @@
 #include "ums9117-bootstrap/boot-main.h"
 #include "ums9117-bootstrap/bootstrap.h"
 
+#if FPLINUX_BOOTSTRAP_DISPLAY_WIDTH
+#include "fplinux-boot-screen/boot-screen.h"
+#endif
+
 #ifndef FPLINUX_BOOTSTRAP_RECORD_PREFIX
 #error "generated bootstrap identity lacks FPLINUX_BOOTSTRAP_RECORD_PREFIX"
 #endif
 
+#if FPLINUX_BOOTSTRAP_DISPLAY_WIDTH
 static struct fplinux_boot_screen boot_screen;
 static struct ums9117_boot_canvas boot_canvas;
 
 static uint16_t *const framebuffer =
 	(uint16_t *)(uintptr_t)FPLINUX_BOOT_LAYOUT_FRAMEBUFFER_PHYS;
+#endif
 
 static void record_stage(uint32_t stage, const char *message)
 {
@@ -31,6 +37,7 @@ static void record_stage(uint32_t stage, const char *message)
 		FPLINUX_BOOTSTRAP_RECORD_PREFIX, (unsigned long)stage, message);
 }
 
+#if FPLINUX_BOOTSTRAP_DISPLAY_WIDTH
 static void show_failure(uint32_t code, const char *message)
 {
 	static const char instruction[] = ". Power off and try again.";
@@ -46,12 +53,15 @@ static void show_failure(uint32_t code, const char *message)
 	detail[i] = '\0';
 	fplinux_boot_screen_fail(&boot_screen, code, detail);
 }
+#endif
 
 void ums9117_boot_fail(uint32_t code, const char *message)
 {
 	fprintf(stderr, "%s_LINUX_BOOTSTRAP event=error error=%lu message=%s\n",
 		FPLINUX_BOOTSTRAP_RECORD_PREFIX, (unsigned long)code, message);
+#if FPLINUX_BOOTSTRAP_DISPLAY_WIDTH
 	show_failure(code, message);
+#endif
 	for (;;)
 		;
 }
@@ -80,7 +90,12 @@ static int enable_and_probe_sprd_timer(void)
 static __attribute__((noreturn)) void
 ums9117_boot_halt_without_transport(uint32_t code, const char *message)
 {
+#if FPLINUX_BOOTSTRAP_DISPLAY_WIDTH
 	show_failure(code, message);
+#else
+	(void)code;
+	(void)message;
+#endif
 	for (;;)
 		;
 }
@@ -100,6 +115,7 @@ static void prepare_usb_handoff(void)
  * Paint on the display that the bootstrap runtime initialized. A board without
  * a display reports its stages only through the host records.
  */
+#if FPLINUX_BOOTSTRAP_DISPLAY_WIDTH
 static void start_boot_screen(void)
 {
 	struct fplinux_status_canvas canvas;
@@ -123,6 +139,7 @@ static void start_boot_screen(void)
 	if (fplinux_boot_screen_init(&boot_screen, &canvas) != 0)
 		ums9117_boot_fail(8, "BOOT SCREEN INIT FAIL");
 }
+#endif
 
 void ums9117_boot_main(const struct ums9117_boot_board *board)
 {
@@ -144,8 +161,10 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 		FPLINUX_BOOTSTRAP_RECORD_PREFIX, (unsigned long)ram_bytes,
 		(unsigned long)zimage_bytes, (unsigned long)dtb_bytes);
 
+#if FPLINUX_BOOTSTRAP_DISPLAY_WIDTH
 	if (has_display)
 		start_boot_screen();
+#endif
 	/* The loader must have initialized exactly the board display, or none. */
 	if (sys_data.display.w1 != board->display_width ||
 	    sys_data.display.h1 != board->display_height)
