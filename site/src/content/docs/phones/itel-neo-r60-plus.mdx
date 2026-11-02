@@ -1,0 +1,30 @@
+---
+---
+
+import PhoneIdentity from "../../../components/PhoneIdentity.astro";
+import PhoneBoot from "../../../components/PhoneBoot.astro";
+import PhoneChecklist from "../../../components/PhoneChecklist.astro";
+
+<PhoneIdentity />
+
+## Support checklist
+
+Each status applies to this handset and the conditions in its note. See [Support status](/fplinux/phones/#support-status) for the meaning of the labels and [common limitations](/fplinux/phones/#limitations-on-every-phone).
+
+<PhoneChecklist />
+
+## Boot
+
+Use the RAM profile and follow [Run FPLinux](/fplinux/start/run/) for the shared loader steps.
+
+<PhoneBoot />
+
+The configured panel is ST7789H2 at 240×320 over SPI. The keypad has a 5×4 layout. Physical display output, keypad input, brightness, and graphical applications have not been tested on this phone.
+
+## Storage
+
+The read-only raw NAND backup has been verified. FPLinux does not support mounting internal filesystems, writing internal storage, or restoring NAND. There is no microSD system profile; removable-card detection and data-card behavior are unverified.
+
+## Clock and session limits
+
+Setting the RTC has been observed over the authenticated USB shell. Time retention after power loss and alarm wake have not been tested. Audio, Bluetooth, camera, battery telemetry, removable-card hot-swap, and vibration are not enabled for this phone.

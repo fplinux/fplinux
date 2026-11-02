@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-only
+if ARCH_UMS9117
+
+config MACH_ITEL_NEO_R60_PLUS
+	bool "itel Neo R60+"
+	select GPIOLIB
+	select GPIO_PMIC_EIC_SPRD
+	select MFD_SYSCON
+	help
+	  Board support for the UMS9117-based itel Neo R60+.
+	  Includes the 240x320 SPI display and physical matrix keypad.
+	  Linux is loaded into RAM over USB and provides USB network access.
+	  The raw internal NAND device is available for read-only access.
+
+endif

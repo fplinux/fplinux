@@ -20,6 +20,8 @@ SELECTIONS = (
     ("inoi-240-modern-4g", "windows"),
     ("inoi-244-modern-4g", "linux"),
     ("inoi-244-modern-4g", "windows"),
+    ("itel-neo-r60-plus", "linux"),
+    ("itel-neo-r60-plus", "windows"),
     ("maxvi-k15n-4g", "linux"),
     ("maxvi-k15n-4g", "windows"),
     ("nokia-110-4g", "linux"),

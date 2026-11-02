@@ -42,7 +42,7 @@ def test_source_and_final_release_inspection_verify_pairing(
     inspect_archive(assets / f"FPLinux-{RELEASE_ID}-sources.zip")
     assert "kind: corresponding-sources" in capsys.readouterr().out
     inspect_distribution(assets)
-    assert "16 runtimes; corresponding sources and checksums: OK" in capsys.readouterr().out
+    assert "18 runtimes; corresponding sources and checksums: OK" in capsys.readouterr().out
 
 
 def test_release_rejects_changed_runtime_even_after_outer_checksums_are_replaced(
