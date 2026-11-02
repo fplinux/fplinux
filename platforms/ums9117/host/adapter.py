@@ -448,6 +448,8 @@ def run(  # noqa: PLR0913 -- runtime, session, handoff, user data and output are
     ]
     bridge_argv.extend(
         [
+            "--wait",
+            str(config["handoff_wait_seconds"]),
             "--fplinux-handoff",
             session_token,
             "--",
@@ -459,12 +461,13 @@ def run(  # noqa: PLR0913 -- runtime, session, handoff, user data and output are
         bridge_process: subprocess.Popen[Any] | None = None
         try:
             if events is not None:
-                events("linux-start")
+                events("bootstrap-handoff")
             bridge_process = subprocess.Popen(
                 bridge_argv,
                 cwd=payload,
                 stdout=output,
                 stderr=subprocess.STDOUT if output is not None else None,
+                env={**os.environ, "LIBUSB_DEBUG": "4"} if loader_trace else None,
             )
             try:
                 status = bridge_process.wait(timeout=config["handoff_wait_seconds"])
@@ -475,6 +478,8 @@ def run(  # noqa: PLR0913 -- runtime, session, handoff, user data and output are
         finally:
             stop(bridge_process)
 
+    if events is not None:
+        events("linux-start")
     wait_for_bootrom_disconnect(
         successful_bootrom_device,
         config["usb_release_wait_seconds"],

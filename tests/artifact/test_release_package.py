@@ -167,6 +167,7 @@ class ReleaseArchiveInputs:
             "fplinux.py": b"#!/usr/bin/env python3\n",
             "Run.sh": b"#!/bin/sh\n",
             "Run.cmd": b"@echo off\r\n",
+            "Run-debug.cmd": b"@echo off\r\nrem built debug launcher\r\n",
             "scripts/fplinux_cli/runtime/events.py": self.event_helper,
             "scripts/fplinux_cli/manifests/identity.py": b"identity helper\n",
             "scripts/fplinux_cli/runtime/ssh_transport.py": b"ssh helper\n",
@@ -507,7 +508,9 @@ class ReleaseArchiveArtifactTests:
                 "runtime/lib/ld-musl-x86_64.so.1",
             }
             assert "Run.cmd" not in files
+            assert "Run-debug.cmd" not in files
         else:
+            assert files["Run-debug.cmd"] == b"@echo off\r\nrem built debug launcher\r\n"
             assert files["tools/spd_dump.exe"] == b"prepared Windows loader\n"
             assert (
                 files["licenses/windows-driver/libwdi-COPYING.txt"] == b"driver helper license\n"

@@ -3,17 +3,34 @@
 
 from __future__ import annotations
 
+import io
 import json
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
-from fplinux_cli.runtime.events import record_events
+from fplinux_cli.runtime.events import RunLog, record_events
 
 
 class LoaderEventTests:
     """Consumers see complete records while the producer is still running."""
+
+    def test_bootstrap_progress_does_not_report_linux_start(self, tmp_path: Path) -> None:
+        """Keep the Linux-start event behind the successful bootstrap handoff."""
+        visible = io.StringIO()
+        log = RunLog(tmp_path, protect=lambda _path: None, visible=visible)
+        try:
+            log.event("bootstrap-handoff", invitation="Connect the phone.")
+            assert visible.getvalue() == "Connecting to the RAM bootstrap...\n"
+            assert (
+                json.loads((log.directory / "run.json").read_text())["runtime_stage"]
+                == "bootstrap-handoff"
+            )
+            log.event("linux-start", invitation="Connect the phone.")
+            assert visible.getvalue().endswith("Starting Linux...\n")
+        finally:
+            log.close("success")
 
     def test_event_is_flushed_with_exact_selected_identity(self) -> None:
         """A waiting consumer need not wait for the loader to close its file."""

@@ -91,6 +91,7 @@ def archive_inputs(
         "common/runtime.py",
         "common/Run.sh",
         "common/Run.cmd",
+        "common/Run-debug.cmd",
         "include/fplinux/fplinux-cli.h",
         "lib/fplinux/fplinux-cli.c",
     ]

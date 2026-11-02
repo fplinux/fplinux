@@ -167,6 +167,7 @@ class BridgeAcknowledgementTests:
             "device-found",
             "ram-loader-start",
             "ram-loader-complete",
+            "bootstrap-handoff",
             "linux-start",
             "linux-transition",
             "linux-usb",
@@ -183,7 +184,7 @@ class BridgeAcknowledgementTests:
             "device-found",
             "ram-loader-start",
             "ram-loader-complete",
-            "linux-start",
+            "bootstrap-handoff",
         ]
 
     def test_exit_zero_and_bootrom_disconnect_continue_with_the_exact_session_token(self) -> None:
@@ -197,6 +198,8 @@ class BridgeAcknowledgementTests:
                 "-oL",
                 "-eL",
                 str(bundle / "host/libc_server"),
+                "--wait",
+                "60",
                 "--fplinux-handoff",
                 BRIDGE_SESSION_ID,
                 "--",

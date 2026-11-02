@@ -1104,6 +1104,7 @@ def boot_archive(  # noqa: PLR0913 -- native loading inputs have separate owners
     log: Path,
     session_root: Path,
     prepared_data_sha256: str | None = None,
+    loader_trace: bool = False,
     on_wait: Callable[[], None] | None = None,
 ) -> tuple[WindowsTransport, dict[str, Any]]:
     """Boot one selected archive with its external data capsule and return authenticated SSH."""
@@ -1180,11 +1181,13 @@ def boot_archive(  # noqa: PLR0913 -- native loading inputs have separate owners
                 events("waiting-for-device")
             try:
                 host.run_tool(
-                    [loader_arguments[0], "--verbose", "1", *loader_arguments[1:]],
+                    [loader_arguments[0], "--verbose", "1", *loader_arguments[1:]]
+                    if loader_trace
+                    else loader_arguments,
                     timeout=300 + usb["wait_seconds"],
                     cwd=loader_directory,
                     log=log,
-                    environment={"LIBUSB_DEBUG": "4"},
+                    environment={"LIBUSB_DEBUG": "4"} if loader_trace else None,
                     on_usb_ready=usb_ready,
                     on_wait=on_wait,
                 )
@@ -1210,13 +1213,14 @@ def boot_archive(  # noqa: PLR0913 -- native loading inputs have separate owners
                 destination = payload / name
                 shutil.copyfile(source, destination)
                 host.secure_new(destination)
-        print("Waiting for the authenticated Linux connection...", flush=True)
-        if events is not None:
-            events("linux-start")
         if not split_upload:
+            if events is not None:
+                events("bootstrap-handoff")
             host.run_tool(
                 [
                     str(bundle.tools["bridge"]),
+                    "--wait",
+                    str(config["handoff_wait_seconds"]),
                     "--fplinux-handoff",
                     session["session_id"],
                     "--",
@@ -1226,7 +1230,11 @@ def boot_archive(  # noqa: PLR0913 -- native loading inputs have separate owners
                 timeout=config["handoff_wait_seconds"],
                 cwd=payload,
                 log=log,
+                environment={"LIBUSB_DEBUG": "4"} if loader_trace else None,
             )
+        if events is not None:
+            events("linux-start")
+        print("Waiting for the authenticated Linux connection...", flush=True)
         deadline = time.monotonic() + config["usb_release_wait_seconds"]
         while exact_usb_devices(host.ps("devices.ps1"), usb["vendor_id"], usb["product_id"]):
             if time.monotonic() >= deadline:

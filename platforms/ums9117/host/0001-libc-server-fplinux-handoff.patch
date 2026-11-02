@@ -3,7 +3,7 @@
 @@ -14,5 +14,5 @@
  clean:
  	$(RM) $(APPNAME)
-
+ 
 -$(APPNAME): $(APPNAME).c cmd_def.h
 -	$(CC) -s $(CFLAGS) -o $@ $^ $(LIBS)
 +$(APPNAME): $(APPNAME).c cmd_def.h fplinux-handoff-protocol.h
@@ -12,18 +12,93 @@
 +++ b/libc_server.c
 @@ -32,6 +32,9 @@
  #include <unistd.h>
-
+ 
  #include "cmd_def.h"
 +#include "fplinux-handoff-protocol.h"
 +
 +#define CMD_FPLINUX_HANDOFF FPLINUX_HANDOFF_OPCODE
-
+ 
  static void print_mem(FILE *f, const uint8_t *buf, size_t len) {
  	size_t i; int a, j, n;
-@@ -393,6 +396,80 @@
+@@ -92,7 +95,7 @@
+ } usbio_t;
+ 
+ #if USE_LIBUSB
+-static void find_endpoints(libusb_device_handle *dev_handle, int result[4]) {
++static int find_endpoints(libusb_device_handle *dev_handle, int result[4]) {
+ 	int endp_in = -1, endp_out = -1, endp_in_blk = 0, endp_out_blk = 0;
+ 	int i, k, err;
+ 	//struct libusb_device_descriptor desc;
+@@ -103,8 +106,7 @@
+ 	//if (libusb_get_device_descriptor(device, &desc) < 0)
+ 	//	ERR_EXIT("libusb_get_device_descriptor failed");
+ 	err = libusb_get_config_descriptor(device, 0, &config);
+-	if (err < 0)
+-		ERR_EXIT("libusb_get_config_descriptor failed : %s\n", libusb_error_name(err));
++	if (err < 0) return err;
+ 
+ 	for (k = 0; k < config->bNumInterfaces; k++) {
+ 		const struct libusb_interface *interface;
+@@ -136,16 +138,24 @@
+ 			i = interface_desc->bInterfaceNumber;
+ #if LIBUSB_DETACH
+ 			err = libusb_kernel_driver_active(dev_handle, i);
++			if (err == LIBUSB_ERROR_NO_DEVICE) {
++				libusb_free_config_descriptor(config);
++				return err;
++			}
+ 			if (err > 0) {
+ 				DBG_LOG("kernel driver is active, trying to detach\n");
+ 				err = libusb_detach_kernel_driver(dev_handle, i);
+-				if (err < 0)
+-					ERR_EXIT("libusb_detach_kernel_driver failed : %s\n", libusb_error_name(err));
++				if (err < 0) {
++					libusb_free_config_descriptor(config);
++					return err;
++				}
+ 			}
+ #endif
+ 			err = libusb_claim_interface(dev_handle, i);
+-			if (err < 0)
+-				ERR_EXIT("libusb_claim_interface failed : %s\n", libusb_error_name(err));
++			if (err < 0) {
++				libusb_free_config_descriptor(config);
++				return err;
++			}
+ 			break;
+ 		}
+ 	}
+@@ -159,6 +169,7 @@
+ 	result[1] = endp_out;
+ 	result[2] = endp_in_blk;
+ 	result[3] = endp_out_blk;
++	return 0;
+ }
+ #else
+ static void init_serial(int serial) {
+@@ -182,16 +193,13 @@
+ #endif
+ 
+ #if USE_LIBUSB
+-static usbio_t* usbio_init(libusb_device_handle *dev_handle, int flags) {
++static usbio_t* usbio_init(libusb_device_handle *dev_handle, int flags, const int endpoints[4]) {
+ #else
+ static usbio_t* usbio_init(int serial, int flags) {
+ #endif
+ 	uint8_t *p; usbio_t *io;
+ 
+-#if USE_LIBUSB
+-	int endpoints[4];
+-	find_endpoints(dev_handle, endpoints);
+-#else
++#if !USE_LIBUSB
+ 	init_serial(serial);
+ 	// fcntl(serial, F_SETFL, FNDELAY);
+ 	tcflush(serial, TCIOFLUSH);
+@@ -393,6 +401,80 @@
  	return crc & 0xffff;
  }
-
+ 
 +static int handoff_hex_value(int character) {
 +	if (character >= '0' && character <= '9')
 +		return character - '0';
@@ -101,7 +176,19 @@
  static int read_msg(usbio_t *io) {
  	if (usb_recv(io, 3) != 3)
  		ERR_EXIT("response timeout\n");
-@@ -485,11 +562,15 @@
+@@ -409,6 +491,7 @@
+ 
+ 	io->buf[len] = 0;
+ 	printf("!!! %s\n", io->buf);
++	fflush(stdout);
+ 	return len;
+ }
+ 
+@@ -482,14 +565,19 @@
+ int main(int argc, char **argv) {
+ #if USE_LIBUSB
+ 	libusb_device_handle *device;
++	int endpoints[4];
  #else
  	int serial;
  #endif
@@ -111,14 +198,14 @@
  	int wait = 0 * REOPEN_FREQ;
  	const char *tty = "/dev/ttyUSB0";
  	int verbose = 0, is_tty;
-
+ 
 +	if (argc == 2 && !strcmp(argv[1], "--self-test"))
 +		return handoff_self_test();
 +
  #if USE_LIBUSB
  	ret = libusb_init(NULL);
  	if (ret < 0)
-@@ -509,6 +590,12 @@
+@@ -509,6 +597,12 @@
  			if (argc <= 2) ERR_EXIT("bad option\n");
  			verbose = atoi(argv[2]);
  			argc -= 2; argv += 2;
@@ -131,10 +218,42 @@
  		} else if (!strcmp(argv[1], "--")) {
  			argc -= 1; argv += 1;
  			break;
-@@ -812,6 +899,17 @@
+@@ -520,9 +614,19 @@
+ 	for (i = 0; ; i++) {
+ #if USE_LIBUSB
+ 		device = libusb_open_device_with_vid_pid(NULL, 0x1782, 0x4d00);
+-		if (device) break;
+-		if (i >= wait)
+-			ERR_EXIT("libusb_open_device failed\n");
++		if (device) {
++			ret = find_endpoints(device, endpoints);
++			if (!ret) break;
++			libusb_close(device);
++			if (ret != LIBUSB_ERROR_NOT_FOUND && ret != LIBUSB_ERROR_NO_DEVICE)
++				ERR_EXIT("libusb device setup failed: %s\n", libusb_error_name(ret));
++		}
++		if (i >= wait) {
++			if (device)
++				ERR_EXIT("libusb device not ready: %s\n", libusb_error_name(ret));
++			else
++				ERR_EXIT("libusb_open_device failed\n");
++		}
+ #else
+ 		serial = open(tty, O_RDWR | O_NOCTTY | O_SYNC);
+ 		if (serial >= 0) break;
+@@ -534,7 +638,7 @@
+ 	}
+ 
+ #if USE_LIBUSB
+-	io = usbio_init(device, 0);
++	io = usbio_init(device, 0, endpoints);
+ #else
+ 	io = usbio_init(serial, 0);
+ #endif
+@@ -812,6 +916,17 @@
  			}
  			break;
-
+ 
 +		case CMD_FPLINUX_HANDOFF:
 +			if (!handoff_configured)
 +				ERR_EXIT("unexpected FPLinux handoff\n");

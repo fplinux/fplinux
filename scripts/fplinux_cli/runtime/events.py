@@ -151,6 +151,7 @@ class RunLog:
             "device-found": "Phone detected...",
             "ram-loader-start": "Loading the phone into RAM; keep USB connected...",
             "ram-loader-complete": "Phone loaded into RAM.",
+            "bootstrap-handoff": "Connecting to the RAM bootstrap...",
             "linux-start": "Starting Linux...",
             "linux-transition": "Waiting for the phone's USB network and SSH...",
             "ssh-ready": "Secure phone connection is ready.",

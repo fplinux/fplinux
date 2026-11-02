@@ -181,7 +181,7 @@ def runtime_source_files(
     }
     files["fplinux.py"] = source_root / "common/runtime.py"
     files["60-fplinux.rules"] = source_root / "common/60-fplinux.rules"
-    for launcher in ("Run.sh", "Run.cmd"):
+    for launcher in ("Run.sh", "Run.cmd", "Run-debug.cmd"):
         files[launcher] = source_root / "common" / launcher
     adapter = f"platforms/{config['platform']}/host/adapter.py"
     files[adapter] = source_root / adapter

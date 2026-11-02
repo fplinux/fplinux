@@ -251,8 +251,8 @@ def test_native_usb_acquisition_controls_progress_and_driver_setup(
             assert events[-1] == "waiting-for-device"
             assert argv[argv.index("--wait") + 1] == "30"
             assert timeout == 330
-            assert argv[1:3] == ["--verbose", "1"]
-            assert environment == {"LIBUSB_DEBUG": "4"}
+            assert "--verbose" not in argv
+            assert environment is None
             assert on_usb_ready is not None
             if mode not in {"ready", "transfer-failed"} and (
                 self.attempts == 1 or mode == "still-unsupported"

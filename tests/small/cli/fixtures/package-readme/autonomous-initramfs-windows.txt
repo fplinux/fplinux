@@ -82,6 +82,13 @@ physical phone.
 Each launch saves runtime.log and displays its exact path. Include
 that runtime.log when asking for help.
 
+Detailed launch logs
+
+If loading fails, double-click Run-debug.cmd in this folder.
+It starts the same phone image and adds USB details to runtime.log.
+Send that log when asking for help. The window stays open when
+the launcher finishes.
+
 The phone's backup and prepared data are saved on the PC in:
   %LOCALAPPDATA%\FPLinux\phones\demo-phone
 This folder holds the internal-storage backup nand.bin, its

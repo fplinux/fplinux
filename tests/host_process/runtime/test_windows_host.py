@@ -1103,14 +1103,15 @@ def test_resuming_saved_session_discards_only_the_unstarted_windows_boot_candida
     ],
     ids=["bundle", "external", "loader-failure", "bridge-failure"],
 )
-# The case dimensions and owned process resources remain explicit at the test boundary.
-def test_windows_loader_processes_receive_private_capsule_and_retain_one_archive_log(
+@pytest.mark.parametrize("loader_trace", [False, True], ids=["quiet", "usb-trace"])
+def test_windows_loader_processes_receive_private_capsule_and_retain_one_archive_log(  # noqa: PLR0913 -- independent case dimensions and process resources.
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     *,
     loader_status: int,
     bridge_status: int,
     capsule_layout: str,
+    loader_trace: bool,
 ) -> None:
     """Use native-process stand-ins; PnP and SSH remain controlled Windows boundaries."""
     archive = tmp_path / "archive"
@@ -1184,9 +1185,15 @@ def test_windows_loader_processes_receive_private_capsule_and_retain_one_archive
             on_wait: Callable[[], None] | None = None,
         ) -> None:
             """Retain native discovery time without consuming the upload's existing budget."""
+            assert environment == ({"LIBUSB_DEBUG": "4"} if loader_trace else None)
             if Path(argv[0]).name == "spd_dump.exe":
                 assert argv[argv.index("--wait") + 1] == "30"
                 assert timeout == 330
+                assert ("--verbose" in argv) is loader_trace
+            else:
+                assert argv[argv.index("--wait") + 1] == "60"
+                assert events[-1] == "bootstrap-handoff"
+                assert "linux-start" not in events
             super().run_tool(
                 argv,
                 timeout=timeout,
@@ -1244,8 +1251,10 @@ def test_windows_loader_processes_receive_private_capsule_and_retain_one_archive
                 session_root=root / "data/session",
                 events=events.append,
                 log=log,
+                loader_trace=loader_trace,
             )
         invocations = 1 if loader_status else 2
+        assert "linux-start" not in events
         assert log.read_text() == (
             "earlier run diagnostics\nFPLINUX_BOOTROM_READY\n"
             + invocations * "controlled loader output\ncontrolled loader diagnostic\n"
@@ -1268,6 +1277,7 @@ def test_windows_loader_processes_receive_private_capsule_and_retain_one_archive
         session_root=root / "data/session",
         events=events.append,
         log=log,
+        loader_trace=loader_trace,
     )
 
     assert ready["status"] == "ready"
@@ -1577,8 +1587,6 @@ def test_sc9820e_windows_boot_uploads_the_ordered_ram_chain_and_authenticates(
     assert capsule_files(uploads["initramfs.bin"][8:]) == {"etc/fplinux/usb-transport": b"rndis\n"}
     assert observed["argv"] == [
         "--ready-ack",
-        "--verbose",
-        "1",
         "--wait",
         "30",
         "keep_charge",
@@ -1627,6 +1635,7 @@ def test_sc9820e_windows_boot_uploads_the_ordered_ram_chain_and_authenticates(
     assert not (directory / "uploads").exists()
     assert not (directory / "payload").exists()
     assert case.events[-3:] == ["linux-start", "linux-transition", "ssh-ready"]
+    assert "bootstrap-handoff" not in case.events
     assert (root / "logs/run.log").read_text() == (
         "FPLINUX_BOOTROM_READY\nSC9820E RAM uploads acknowledged\n"
     )

@@ -81,6 +81,7 @@ class LoaderHandoffProcessTests:
                 "device-found",
                 "ram-loader-start",
                 "ram-loader-complete",
+                "bootstrap-handoff",
                 "linux-start",
                 "linux-transition",
                 "linux-usb",

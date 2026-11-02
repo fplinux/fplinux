@@ -194,6 +194,7 @@ def test_ready_archive_preserves_manifests_modes_sources_and_omits_personal_data
             f"%LOCALAPPDATA%\\FPLinux\\phones\\{inputs.target}\n".encode() in files["README.txt"]
         )
         assert "Run.cmd" in files
+        assert files["Run-debug.cmd"] == (ROOT / "common/Run-debug.cmd").read_bytes()
         assert "common/windows/driver-consent.ps1" in files
         assert "common/windows/driver-elevate.ps1" in files
         assert "Run.sh" not in files
@@ -214,6 +215,7 @@ def test_ready_archive_preserves_manifests_modes_sources_and_omits_personal_data
         assert f"~/.local/share/fplinux/phones/{inputs.target}\n".encode() in files["README.txt"]
         assert "Run.sh" in files
         assert "Run.cmd" not in files
+        assert "Run-debug.cmd" not in files
         assert modes["Run.sh"] == 0o100755
         assert not any(name.startswith("common/windows/") for name in files)
         assert files["60-fplinux.rules"] == (inputs.bundle / "60-fplinux.rules").read_bytes()

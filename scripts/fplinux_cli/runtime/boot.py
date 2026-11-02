@@ -157,6 +157,7 @@ def _run_new_bundle(  # noqa: PLR0913 -- the waiting observer preserves the admi
             events=emit,
             log=log,
             session_root=session_root,
+            loader_trace=loader_trace,
             on_wait=on_wait,
         )
     image = bundle / runtime["image"]

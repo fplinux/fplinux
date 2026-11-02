@@ -142,6 +142,17 @@ def _readme(config: dict[str, Any], *, target: str, host: str, preparation: bool
                 """).removesuffix("\n"),
         ]
     )
+    if host == "windows":
+        sections.append(
+            dedent("""\
+                Detailed launch logs
+
+                If loading fails, double-click Run-debug.cmd in this folder.
+                It starts the same phone image and adds USB details to runtime.log.
+                Send that log when asking for help. The window stays open when
+                the launcher finishes.
+                """).removesuffix("\n")
+        )
     if preparation and emmc:
         if host == "windows":
             dump_command = 'Run.cmd --from-dump "C:\\path\\to\\phone-user-area.bin"'

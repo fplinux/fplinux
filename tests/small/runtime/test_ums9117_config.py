@@ -177,9 +177,15 @@ class AdapterPreflightTests:
         directories: list[Path] = []
 
         def start_bridge(
-            _argv: list[str], *, cwd: Path, stdout: object = None, stderr: object = None
+            _argv: list[str],
+            *,
+            cwd: Path,
+            stdout: object = None,
+            stderr: object = None,
+            env: dict[str, str] | None = None,
         ) -> BridgeProcess:
             del stdout, stderr
+            assert env is None
             directories.append(cwd)
             served.update({path.name: path.read_bytes() for path in cwd.iterdir()})
             return bridge
@@ -198,6 +204,8 @@ class AdapterPreflightTests:
                 "-oL",
                 "-eL",
                 str(bundle / "host/libc_server"),
+                "--wait",
+                "60",
                 "--fplinux-handoff",
                 BRIDGE_SESSION_ID,
                 "--",
