@@ -18,9 +18,6 @@ msgstr "Недостаточно памяти."
 msgid "Opening…"
 msgstr "Открываю…"
 
-msgid "Open a VXP file from Files."
-msgstr "Откройте файл VXP через «Файлы»."
-
 msgid "The application did not respond."
 msgstr "Приложение не ответило."
 
@@ -84,9 +81,6 @@ msgstr "Закрыть приложение?"
 msgid "The current program will close. Open the new VXP?"
 msgstr "Текущая программа будет закрыта. Открыть новый VXP?"
 
-msgid "Close the current program?"
-msgstr "Закрыть текущую программу?"
-
 msgid "The application closed its input channel."
 msgstr "Приложение закрыло канал ввода."
 
@@ -100,3 +94,54 @@ msgstr "Приложение остановлено (сигнал %d)."
 #, c-format
 msgid "The application ended with an error (code %d)."
 msgstr "Приложение завершилось с ошибкой (код %d)."
+
+msgid "Continue"
+msgstr "Продолжить"
+
+msgid "Open VXP"
+msgstr "Открыть VXP"
+
+msgid "Home storage: persistent"
+msgstr "Домашние файлы сохраняются"
+
+msgid "Home storage: lost after reboot"
+msgstr "Домашние файлы исчезнут после перезагрузки"
+
+msgid "Recent"
+msgstr "Недавние"
+
+msgid "Settings"
+msgstr "Настройки"
+
+msgid "Program settings"
+msgstr "Настройки программы"
+
+msgid "Unsaved"
+msgstr "Не сохранено"
+
+msgid "Saving not confirmed"
+msgstr "Сохранение не подтверждено"
+
+msgid "Cannot save"
+msgstr "Не могу сохранить"
+
+msgid "Unavailable"
+msgstr "Недоступен"
+
+msgid "Remove"
+msgstr "Удалить"
+
+msgid "Off"
+msgstr "Выкл."
+
+msgid "On"
+msgstr "Вкл."
+
+msgid "Pointer mode"
+msgstr "Режим указателя"
+
+msgid "Save"
+msgstr "Сохранить"
+
+msgid "Use defaults"
+msgstr "Общие настройки"

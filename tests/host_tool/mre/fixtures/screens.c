@@ -23,6 +23,8 @@ struct capture {
 	unsigned int results, close_waits, close_cancels, close_ready, homes,
 		exits;
 	unsigned int accepted;
+	unsigned int softkey_messages;
+	char left[128];
 	char centre[128];
 	char right[128];
 	/* The labels of the last presented frame, each between bars. */
@@ -30,6 +32,7 @@ struct capture {
 	char labels[2048];
 	/* Changes of the labels and legend messages while recording. */
 	bool recording;
+	bool home_persistent;
 	unsigned int screens, legends;
 	char first_centre[128];
 	char first_right[128];
@@ -100,12 +103,28 @@ static void pump(struct capture *capture)
 			fplinux_ui_frame_configure(&capture->peer,
 						   capture->width, height,
 						   fullscreen);
+		} else if (message.type == FPLINUX_UI_SESSION_STORAGE_REQUEST) {
+			struct fplinux_ui_session_message reply = {
+				.type = FPLINUX_UI_SESSION_STORAGE_RESULT,
+				.serial = message.serial,
+				.volume_result = {
+					.request_id = message.serial,
+					.snapshot = { .home_persistent =
+							capture->home_persistent },
+				},
+			};
+			assert(message.volume_operation ==
+			       FPLINUX_VOLUME_REFRESH);
+			assert(fplinux_ui_session_send(capture->session,
+						       &reply));
 		} else if (message.type == FPLINUX_UI_SESSION_DOCUMENT_RESULT) {
 			capture->results++;
 			capture->accepted += message.document_status ==
 					     FPLINUX_UI_DOCUMENT_ACCEPTED;
 			capture->result = message;
 		} else if (message.type == FPLINUX_UI_SESSION_SOFTKEYS) {
+			++capture->softkey_messages;
+			strcpy(capture->left, message.left);
 			strcpy(capture->centre, message.centre);
 			strcpy(capture->right, message.right);
 			if (capture->recording && !capture->legends++) {
@@ -199,6 +218,25 @@ static void wait_label(struct capture *capture, const char *text)
 	assert(false);
 }
 
+static void wait_home_frame(struct capture *capture, const char *text,
+			    int height, unsigned int previous_commits)
+{
+	uint64_t until = fplinux_ui_frame_now_ms() + 5000;
+
+	do {
+		pump(capture);
+		if (capture->peer.width == capture->width &&
+		    capture->peer.height == height &&
+		    capture->peer.commits > previous_commits &&
+		    !capture->peer.configure_pending &&
+		    has_label(capture, text))
+			return;
+	} while (fplinux_ui_frame_now_ms() < until);
+	fprintf(stderr, "home frame not presented at %dx%d; labels %s\n",
+		capture->width, height, capture->labels);
+	assert(false);
+}
+
 static void wait_labels(struct capture *capture, const char *labels)
 {
 	uint64_t until = fplinux_ui_frame_now_ms() + 5000;
@@ -265,7 +303,7 @@ static void assert_frame(struct capture *capture, uint16_t expected)
 		capture->peer.pixels + (capture->height / 2) * capture->width;
 	assert(row[left] == expected);
 	if (left)
-		assert(row[left - 1] == 0 && row[0] == 0);
+		assert(row[left - 1] == 0xf7be && row[0] == 0xf7be);
 }
 
 /* The editor keeps its legends from Replace until the new VXP's frame. */
@@ -298,8 +336,11 @@ static void first_guest_ui(struct capture *capture, const char *directory,
 					   capture->right;
 	char editor_centre[sizeof(capture->centre)];
 	char editor_right[sizeof(capture->right)];
+	char previous_left[sizeof(capture->left)];
+	char previous_centre[sizeof(capture->centre)];
+	char previous_right[sizeof(capture->right)];
 	uint64_t until;
-	unsigned int commits;
+	unsigned int commits, softkey_messages;
 	int fd;
 
 	/* Hold both SHM buffers before the peer publishes its first guest UI. */
@@ -316,6 +357,10 @@ static void first_guest_ui(struct capture *capture, const char *directory,
 	       capture->result.document_status == FPLINUX_UI_DOCUMENT_WAIT &&
 	       !capture->accepted);
 	commits = capture->peer.commits;
+	softkey_messages = capture->softkey_messages;
+	strcpy(previous_left, capture->left);
+	strcpy(previous_centre, capture->centre);
+	strcpy(previous_right, capture->right);
 	fd = open(release, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
 	assert(fd >= 0 && close(fd) == 0);
 	if (!strcmp(scenario, "malformed")) {
@@ -328,8 +373,27 @@ static void first_guest_ui(struct capture *capture, const char *directory,
 					    "E:\\" :
 					    "Input expression");
 		pump_for(capture, 100);
+		if (capture->peer.commits != commits ||
+		    capture->softkey_messages != softkey_messages ||
+		    strcmp(capture->left, previous_left) ||
+		    strcmp(capture->centre, previous_centre) ||
+		    strcmp(capture->right, previous_right) ||
+		    capture->result.document_status !=
+			    FPLINUX_UI_DOCUMENT_WAIT ||
+		    capture->accepted)
+			fprintf(stderr,
+				"before guest commit: commits %u/%u, softkeys %u/%u, status %d, accepted %u, legends [%s|%s|%s] expected [%s|%s|%s]\n",
+				capture->peer.commits, commits,
+				capture->softkey_messages, softkey_messages,
+				capture->result.document_status,
+				capture->accepted, capture->left,
+				capture->centre, capture->right, previous_left,
+				previous_centre, previous_right);
 		assert(capture->peer.commits == commits &&
-		       strcmp(actual_label, label) &&
+		       capture->softkey_messages == softkey_messages &&
+		       !strcmp(capture->left, previous_left) &&
+		       !strcmp(capture->centre, previous_centre) &&
+		       !strcmp(capture->right, previous_right) &&
 		       capture->result.document_status ==
 			       FPLINUX_UI_DOCUMENT_WAIT &&
 		       !capture->accepted);
@@ -347,6 +411,8 @@ static void first_guest_ui(struct capture *capture, const char *directory,
 	assert(poll(&descriptor, 1, 3000) == 1);
 	assert(fplinux_ui_session_receive(capture->session, &legends) == 1 &&
 	       legends.type == FPLINUX_UI_SESSION_SOFTKEYS);
+	++capture->softkey_messages;
+	strcpy(capture->left, legends.left);
 	strcpy(capture->centre, legends.centre);
 	strcpy(capture->right, legends.right);
 	assert(!strcmp(actual_label, label));
@@ -589,7 +655,7 @@ static void idle_and_background_completion(struct capture *capture,
 
 int main(int argc, char **argv)
 {
-	struct capture capture = { 0 };
+	struct capture capture = { .home_persistent = true };
 	struct fplinux_ui_session_message config = {
 		.type = FPLINUX_UI_SESSION_CONFIG,
 		.mode = FPLINUX_UI_SESSION_INTEGRATED,
@@ -597,6 +663,8 @@ int main(int argc, char **argv)
 	int wayland[2], status;
 
 	assert(argc == 8 || argc == 9);
+	if (argc == 9 && !strcmp(argv[8], "storage-temporary"))
+		capture.home_persistent = false;
 	capture.width = config.screen_width = atoi(argv[5]);
 	capture.height = config.screen_height = atoi(argv[6]);
 	snprintf(config.locale, sizeof(config.locale), "%s", argv[7]);
@@ -632,7 +700,115 @@ int main(int argc, char **argv)
 	pump_for(&capture, 100);
 	fplinux_ui_frame_focus_keyboard(&capture.peer.keyboards[0]);
 	if (argc == 9) {
-		if (!strcmp(argv[8], "idle-background"))
+		if (!strncmp(argv[8], "storage-", 8)) {
+			wait_label(&capture,
+				   capture.home_persistent ?
+					   "Home storage: persistent" :
+					   "Home storage: lost after reboot");
+		} else if (!strcmp(argv[8], "recent-remove-last")) {
+			wait_centre(&capture, "Select");
+			press(&capture, KEY_DOWN);
+			press(&capture, KEY_ENTER);
+			wait_centre(&capture, "");
+			assert(!capture.left[0] &&
+			       !strcmp(capture.right, "Back"));
+			press(&capture, KEY_COMPOSE);
+			assert(!capture.left[0] &&
+			       !has_label(&capture, "Remove"));
+			press(&capture, KEY_ESC);
+			document(&capture, argv[4], "first.vxp", 1);
+			wait_result(&capture, 1, FPLINUX_UI_DOCUMENT_ACCEPTED);
+			assert_frame(&capture, 0xf800);
+			unsigned int previous_commits = capture.peer.commits;
+			struct fplinux_ui_session_message activation = {
+				.type = FPLINUX_UI_SESSION_ACTIVATION,
+				.activation =
+					FPLINUX_UI_SESSION_ACTIVATION_OPEN,
+				.serial = 6,
+			};
+			assert(fplinux_ui_session_send(capture.session,
+						       &activation));
+			wait_home_frame(&capture, "Continue",
+					capture.height -
+						profile->status_height -
+						profile->softkey_height,
+					previous_commits);
+			press(&capture, KEY_DOWN);
+			press(&capture, KEY_DOWN);
+			press(&capture, KEY_ENTER);
+			wait_label(&capture, "first.vxp");
+			wait_centre(&capture, "Select");
+			if (!strcmp(capture.left, "Options")) {
+				press(&capture, KEY_COMPOSE);
+				wait_label(&capture, "Remove");
+				press(&capture, KEY_ENTER);
+			} else {
+				assert(!strcmp(capture.left, "Remove"));
+				press(&capture, KEY_COMPOSE);
+			}
+			wait_centre(&capture, "");
+			assert(!capture.left[0] &&
+			       !strcmp(capture.right, "Back"));
+			assert(!has_label(&capture, "first.vxp"));
+			press(&capture, KEY_COMPOSE);
+			assert(!capture.left[0] &&
+			       !has_label(&capture, "Remove"));
+		} else if (!strcmp(argv[8], "pointer-home")) {
+			document(&capture, argv[4], "first.vxp", 1);
+			wait_result(&capture, 1, FPLINUX_UI_DOCUMENT_ACCEPTED);
+			press(&capture, KEY_RIGHT);
+			fplinux_ui_frame_send_key(&capture.peer.keyboards[0],
+						  KEY_ENTER, true);
+			pump_for(&capture, 40);
+			struct fplinux_ui_session_message visibility = {
+				.type = FPLINUX_UI_SESSION_VISIBILITY,
+				.visible = false,
+			};
+			assert(fplinux_ui_session_send(capture.session,
+						       &visibility));
+			pump_for(&capture, 40);
+			unsigned int previous_commits = capture.peer.commits;
+			struct fplinux_ui_session_message activation = {
+				.type = FPLINUX_UI_SESSION_ACTIVATION,
+				.activation =
+					FPLINUX_UI_SESSION_ACTIVATION_OPEN,
+				.serial = 6,
+			};
+			assert(fplinux_ui_session_send(capture.session,
+						       &activation));
+			visibility.visible = true;
+			assert(fplinux_ui_session_send(capture.session,
+						       &visibility));
+			wait_home_frame(&capture, "Continue",
+					capture.height -
+						profile->status_height -
+						profile->softkey_height,
+					previous_commits);
+			fplinux_ui_frame_send_key(&capture.peer.keyboards[0],
+						  KEY_ENTER, false);
+			pump_for(&capture, 40);
+			previous_commits = capture.peer.commits;
+			press(&capture, KEY_ENTER);
+			uint64_t until = fplinux_ui_frame_now_ms() + 5000;
+			while ((capture.peer.height != capture.height ||
+				capture.peer.configure_pending ||
+				capture.peer.commits <= previous_commits) &&
+			       fplinux_ui_frame_now_ms() < until)
+				pump(&capture);
+			assert(capture.peer.height == capture.height &&
+			       !capture.peer.configure_pending &&
+			       capture.peer.commits > previous_commits);
+			press(&capture, KEY_ENTER);
+		} else if (!strcmp(argv[8], "rotation")) {
+			document(&capture, argv[4], "first.vxp", 1);
+			wait_result(&capture, 1, FPLINUX_UI_DOCUMENT_ACCEPTED);
+			pump_for(&capture, 60);
+			assert(capture.peer.pixels[(capture.height / 2) *
+							   capture.width +
+						   capture.width / 2] ==
+			       0xf800);
+			press(&capture, KEY_UP);
+		} else if (!strcmp(argv[8], "idle-background"))
 			idle_and_background_completion(&capture, argv[4]);
 		else if (!strcmp(argv[8], "slow"))
 			slow_open(&capture, argv[4]);
@@ -674,6 +850,17 @@ int main(int argc, char **argv)
 	message.serial = 5;
 	assert(fplinux_ui_session_send(capture.session, &message));
 	assert_frame(&capture, 0xf800);
+	unsigned int previous_commits = capture.peer.commits;
+	message.activation = FPLINUX_UI_SESSION_ACTIVATION_OPEN;
+	message.serial = 6;
+	assert(fplinux_ui_session_send(capture.session, &message));
+	wait_home_frame(&capture,
+			!strcmp(argv[7], "ru") ? "Продолжить" : "Continue",
+			capture.height - profile->status_height -
+				profile->softkey_height,
+			previous_commits);
+	press(&capture, KEY_ENTER);
+	assert_frame(&capture, 0xf800);
 	begin_recording(&capture);
 	document(&capture, argv[4], "invalid.vxp", 2);
 	wait_result(&capture, 2, FPLINUX_UI_DOCUMENT_ERROR);
@@ -703,12 +890,11 @@ int main(int argc, char **argv)
 	};
 	strcpy(message.reason, "user");
 	assert(fplinux_ui_session_send(capture.session, &message));
-	decision(&capture, argv[7]);
-	press(&capture, KEY_ESC);
-	assert(capture.close_waits == 1 && capture.close_cancels == 1 &&
-	       !capture.close_ready);
+	pump_for(&capture, 60);
+	assert(capture.close_ready == 1 && !capture.close_waits &&
+	       !capture.close_cancels);
 	assert_frame(&capture, 0x001f);
 	close_application(&capture, argv[3]);
-	puts("mre-ui: first frame; retained Home/Resume; invalid preflight; cancel preserves guest; consent replaces; close cancels");
+	puts("mre-ui: first frame; retained Home/Resume; invalid preflight; cancel preserves guest; consent replaces; close ready");
 	return 0;
 }

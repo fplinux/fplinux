@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from typing import TYPE_CHECKING
 
@@ -88,11 +90,20 @@ def test_actual_mre_first_frame_home_replace_cancel_and_close(
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == (
         "mre-ui: first frame; retained Home/Resume; invalid preflight; "
-        "cancel preserves guest; consent replaces; close cancels\n"
+        "cancel preserves guest; consent replaces; close ready\n"
     )
     records = [line.split() for line in record.read_text().splitlines()]
     started = [(kind, program, pid) for kind, program, pid in records if kind == "S"]
     assert [program for _, program, _ in started] == ["A", "B"]
+    preferences = (tmp_path / "state/fplinux/org.fplinux.mre/preferences").read_text()
+    recent_line = next(
+        line for line in preferences.splitlines() if line.startswith("recent-documents=")
+    )
+    recent = json.loads(recent_line.partition("=")[2].replace("\\\\", "\\"))
+    assert [entry["path"] for entry in recent] == [
+        str(tmp_path / "second.vxp"),
+        str(tmp_path / "first.vxp"),
+    ]
     first_pid = started[0][2]
     assert all(pid == first_pid for kind, program, pid in records if program == "A")
     assert sum(kind == "K" and program == "A" for kind, program, _ in records) == 2
@@ -162,6 +173,162 @@ def test_actual_mre_failure_after_the_first_frame_shows_the_error_after_the_aler
     mre_native: Path, tmp_path: Path
 ) -> None:
     run_first_modal(mre_native, tmp_path, (240, 320), "en", first_ui=("failed-start", "F"))
+
+
+def test_mre_rotated_view_maps_direction_to_guest_key(mre_native: Path, tmp_path: Path) -> None:
+    (tmp_path / "first.vxp").write_bytes(b"A execution-peer fixture")
+    prefs = tmp_path / "state/fplinux/org.fplinux.mre"
+    prefs.mkdir(parents=True, mode=0o700)
+    (prefs / "preferences").write_text('view-settings={"scale":"fit","rotation":"90"}\n')
+    keys = tmp_path / "keys.log"
+    result = run_process(
+        [
+            str(mre_native / "mre-screens"),
+            str(mre_native / "mre"),
+            str(ROOT / "tests/host_tool/files/native/keyboard.xkb"),
+            str(tmp_path / "session.sock"),
+            str(tmp_path),
+            "240",
+            "320",
+            "en",
+            "rotation",
+        ],
+        name="MRE rotated view maps a physical Up press and release",
+        env={
+            **os.environ,
+            "FPLINUX_NATIVE_LANGUAGE_DIR": str(ROOT / "alpine/aports/fplinux-language"),
+            "FPLINUX_UI_LOCALE_DIRECTORY": str(mre_native / "locale"),
+            "FPLINUX_MRE_TEST_ENGINE": str(mre_native / "engine-peer"),
+            "FPLINUX_MRE_ENGINE_RECORD": str(tmp_path / "engine.log"),
+            "FPLINUX_MRE_KEY_RECORD": str(keys),
+            "FPLINUX_MRE_FRAME_RECORD": str(tmp_path / "frames.log"),
+            "XDG_STATE_HOME": str(tmp_path / "state"),
+        },
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert keys.read_text().splitlines() == ["KEY\t2\t-3", "KEY\t1\t-3"]
+
+
+@pytest.mark.parametrize(("rotation", "point"), [(0, (160, 160)), (90, (120, 122))])
+def test_mre_pointer_survives_home_and_releases_held_pen(
+    mre_native: Path, tmp_path: Path, rotation: int, point: tuple[int, int]
+) -> None:
+    (tmp_path / "first.vxp").write_bytes(b"T execution-peer fixture")
+    prefs = tmp_path / "state/fplinux/org.fplinux.mre"
+    prefs.mkdir(parents=True, mode=0o700)
+    (prefs / "preferences").write_text(
+        f'view-settings={{"scale":"fit","rotation":"{rotation}"}}\npointer-mode=1\n'
+    )
+    keys = tmp_path / "keys.log"
+    result = run_process(
+        [
+            str(mre_native / "mre-screens"),
+            str(mre_native / "mre"),
+            str(ROOT / "tests/host_tool/files/native/keyboard.xkb"),
+            str(tmp_path / "session.sock"),
+            str(tmp_path),
+            "128",
+            "128",
+            "en",
+            "pointer-home",
+        ],
+        name=f"MRE pointer survives Home with rotation {rotation}",
+        env={
+            **os.environ,
+            "FPLINUX_NATIVE_LANGUAGE_DIR": str(ROOT / "alpine/aports/fplinux-language"),
+            "FPLINUX_UI_LOCALE_DIRECTORY": str(mre_native / "locale"),
+            "FPLINUX_MRE_TEST_ENGINE": str(mre_native / "engine-peer"),
+            "FPLINUX_MRE_ENGINE_RECORD": str(tmp_path / "engine.log"),
+            "FPLINUX_MRE_KEY_RECORD": str(keys),
+            "FPLINUX_MRE_FRAME_RECORD": str(tmp_path / "frames.log"),
+            "XDG_STATE_HOME": str(tmp_path / "state"),
+        },
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    x, y = point
+    assert keys.read_text().splitlines() == [
+        f"PEN\t1\t{x}\t{y}",
+        f"PEN\t2\t{x}\t{y}",
+        f"PEN\t1\t{x}\t{y}",
+        f"PEN\t2\t{x}\t{y}",
+    ]
+
+
+@pytest.mark.parametrize("lifetime", ["temporary", "persistent"])
+def test_mre_home_reports_home_storage_lifetime(
+    mre_native: Path, tmp_path: Path, lifetime: str
+) -> None:
+    result = run_process(
+        [
+            str(mre_native / "mre-screens"),
+            str(mre_native / "mre"),
+            str(ROOT / "tests/host_tool/files/native/keyboard.xkb"),
+            str(tmp_path / "session.sock"),
+            str(tmp_path),
+            "240",
+            "320",
+            "en",
+            f"storage-{lifetime}",
+        ],
+        name=f"MRE home with {lifetime} home storage",
+        env={
+            **os.environ,
+            "FPLINUX_NATIVE_LANGUAGE_DIR": str(ROOT / "alpine/aports/fplinux-language"),
+            "FPLINUX_UI_LOCALE_DIRECTORY": str(mre_native / "locale"),
+            "FPLINUX_MRE_TEST_ENGINE": str(mre_native / "engine-peer"),
+            "FPLINUX_MRE_FRAME_RECORD": str(tmp_path / "frames.log"),
+            "XDG_STATE_HOME": str(tmp_path / "state"),
+        },
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_mre_recent_remove_only_available_for_existing_entry(
+    mre_native: Path, tmp_path: Path
+) -> None:
+    program = tmp_path / "first.vxp"
+    program.write_bytes(b"A execution-peer fixture")
+    state_root = tmp_path / "state/fplinux/org.fplinux.mre"
+    state_root.mkdir(parents=True, mode=0o700)
+    identity = hashlib.sha256(os.fsencode(program)).hexdigest()
+    guest_data = state_root / "apps" / identity / "save.dat"
+    guest_data.parent.mkdir(parents=True, mode=0o700)
+    guest_data.write_bytes(b"saved game")
+    result = run_process(
+        [
+            str(mre_native / "mre-screens"),
+            str(mre_native / "mre"),
+            str(ROOT / "tests/host_tool/files/native/keyboard.xkb"),
+            str(tmp_path / "session.sock"),
+            str(tmp_path),
+            "240",
+            "320",
+            "en",
+            "recent-remove-last",
+        ],
+        name="MRE Recent hides Remove when empty and after removing its last entry",
+        env={
+            **os.environ,
+            "FPLINUX_NATIVE_LANGUAGE_DIR": str(ROOT / "alpine/aports/fplinux-language"),
+            "FPLINUX_UI_LOCALE_DIRECTORY": str(mre_native / "locale"),
+            "FPLINUX_MRE_TEST_ENGINE": str(mre_native / "engine-peer"),
+            "FPLINUX_MRE_ENGINE_RECORD": str(tmp_path / "engine.log"),
+            "FPLINUX_MRE_FRAME_RECORD": str(tmp_path / "frames.log"),
+            "XDG_STATE_HOME": str(tmp_path / "state"),
+        },
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert program.read_bytes() == b"A execution-peer fixture"
+    assert guest_data.read_bytes() == b"saved game"
+    preferences = (state_root / "preferences").read_text()
+    recent_line = next(
+        line for line in preferences.splitlines() if line.startswith("recent-documents=")
+    )
+    assert json.loads(recent_line.partition("=")[2].replace("\\\\", "\\")) == []
 
 
 def run_first_modal(

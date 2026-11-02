@@ -99,6 +99,8 @@ int main(int argc, char **argv)
 	__atomic_thread_fence(__ATOMIC_RELEASE);
 	puts(program == 'I' || program == 'S' || program == 'X' ?
 		     "FRAME\t1" :
+	     program == 'T' ?
+		     "DISPLAY\t240\t320\nPOINTER_AVAILABLE\t1\nFRAME\t1" :
 		     "DISPLAY\t240\t320\nFRAME\t1");
 	fflush(stdout);
 	/* Fails once its first frame is acknowledged. */
@@ -108,6 +110,13 @@ int main(int argc, char **argv)
 		return 3;
 	}
 	while (fgets(line, sizeof(line), stdin)) {
+		const char *keys = getenv("FPLINUX_MRE_KEY_RECORD");
+		if (keys && (!strncmp(line, "KEY\t", 4) ||
+			     !strncmp(line, "PEN\t", 4))) {
+			FILE *output = fopen(keys, "a");
+			assert(output && fputs(line, output) >= 0 &&
+			       fclose(output) == 0);
+		}
 		if (!strncmp(line, "KEY\t2\t", 6))
 			record('K', program);
 		else if (!strncmp(line, "VISIBILITY\t", 11)) {

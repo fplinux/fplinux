@@ -3,6 +3,11 @@
 #include <fplinux/fplinux-ui.h>
 #include <fplinux/fplinux-ui-screen.h>
 #include <fplinux/fplinux-ui-text.h>
+#include <fplinux/fplinux-ui-file-picker.h>
+#include <fplinux/fplinux-ui-prefs.h>
+#include <fplinux/fplinux-ui-recent.h>
+#include <fplinux/fplinux-ui-storage.h>
+#include <fplinux/fplinux-ui-view-settings.h>
 #include <fplinux/fplinux-keypad.h>
 #include <fplinux/fplinux-multitap.h>
 #include "fplinux-cli.h"
@@ -35,6 +40,7 @@
 #define UI_ID "org.fplinux.mre"
 #define _(text) gettext(text)
 #define ENGINE "/usr/libexec/fplinux/mre-engine"
+#define MRE_ICON "/usr/share/icons/hicolor/24x24/apps/org.fplinux.mre.png"
 #define PROTOCOL_LIMIT 16384U
 #define SEND_LIMIT 65536U
 #define DIRECTORY_LIMIT 4096U
@@ -55,7 +61,10 @@ enum command {
 	CMD_CANCEL,
 	CMD_UP,
 	CMD_CARD,
-	CMD_PRIVATE
+	CMD_PRIVATE,
+	CMD_SAVE,
+	CMD_RESET,
+	CMD_REMOVE
 };
 enum view {
 	VIEW_IDLE,
@@ -75,6 +84,22 @@ struct app {
 	struct fplinux_ui *ui;
 	struct fplinux_ui_screen *screen;
 	struct fplinux_ui_text *field;
+	struct fplinux_ui_screen *home, *auxiliary;
+	struct fplinux_ui_file_picker *picker;
+	struct fplinux_ui_prefs *prefs, *program_prefs;
+	struct fplinux_ui_recent recent;
+	struct fplinux_ui_view_settings defaults, settings;
+	struct fplinux_ui_view_fields settings_fields;
+	size_t pointer_field;
+	char home_path[PATH_MAX];
+	uint32_t open_request;
+	uint32_t storage_request;
+	bool program_settings, prefs_error;
+	bool home_storage_known, home_persistent, picker_requested;
+	bool pointer_default, global_pointer_default;
+	bool starting_guest;
+	int auxiliary_kind;
+	bool ui_visible;
 	lv_obj_t *canvas, *pointer;
 	uint16_t *frame_pixels;
 	uint16_t *display_pixels;
@@ -101,7 +126,7 @@ struct app {
 	int state_root_fd;
 	struct mre_document pending_document;
 	uint32_t document_id;
-	bool replacing, close_pending;
+	bool replacing;
 	struct fplinux_ui_screen *decision;
 	/* From fplinux_ui_wait_begin() until its outcome runs. */
 	bool waiting, wait_ending;
@@ -116,6 +141,8 @@ struct app {
 	bool viewer_visible, pointer_available, pointer_mode;
 	bool pointer_toggle_held, pointer_fire_held, pointer_fire_withheld;
 	unsigned int pointer_arrows_withheld, native_keys_held;
+	unsigned int cancelled_keys;
+	int held_direction[4];
 	int pointer_x, pointer_y;
 };
 
@@ -131,6 +158,11 @@ static void finish_document(struct app *app,
 static void remove_decision(struct app *app);
 static void restore_guest_ui(struct app *app);
 static void guest_ready(struct app *app);
+static void sync_visibility(struct app *app);
+static bool pause_pointer(struct app *app);
+static bool release_pointer(struct app *app);
+static bool cancel_guest_keys(struct app *app);
+static void open_picker(struct app *app);
 static void screen_command(struct fplinux_ui *ui,
 			   struct fplinux_ui_screen *screen, int id,
 			   void *context);
@@ -185,6 +217,8 @@ static void replace_screen(struct app *app, struct fplinux_ui_screen *screen,
 	app->canvas = app->pointer = NULL;
 	app->screen = screen;
 	app->view = view;
+	if (app->home == fplinux_ui_current(app->ui))
+		app->home = NULL;
 	fplinux_ui_screen_set_listener(screen, screen_command, NULL, app);
 	fplinux_ui_screen_set_key_filter(screen, shortcut_key, NULL);
 	if (fplinux_ui_current(app->ui))
@@ -225,6 +259,8 @@ static void reset_pointer(struct app *app)
 	app->pointer_toggle_held = app->pointer_fire_held = false;
 	app->pointer_fire_withheld = false;
 	app->pointer_arrows_withheld = app->native_keys_held = 0;
+	app->cancelled_keys = 0;
+	memset(app->held_direction, 0, sizeof(app->held_direction));
 	app->pointer_x = MRE_FRAME_WIDTH / 2;
 	app->pointer_y = MRE_FRAME_HEIGHT / 2;
 	if (app->pointer)
@@ -343,6 +379,7 @@ static void show_error(struct app *app, const char *message)
 {
 	/* message may point into the shared mapping being released. */
 	snprintf(app->error, sizeof(app->error), "%s", message);
+	app->starting_guest = false;
 	remove_decision(app);
 	finish_document(app, FPLINUX_UI_DOCUMENT_ERROR, EIO);
 	stop_engine(app);
@@ -485,20 +522,235 @@ static bool directory_row(struct fplinux_ui *ui,
 	return true;
 }
 
+static void fill_home(struct app *app, struct fplinux_ui_screen *screen)
+{
+	size_t row;
+	const char *storage =
+		app->home_storage_known ?
+			(app->home_persistent ?
+				 _("Home storage: persistent") :
+				 _("Home storage: lost after reboot")) :
+			NULL;
+
+	fplinux_ui_list_delete_all(screen);
+	if (app->child > 0 || app->picture_retained) {
+		row = fplinux_ui_list_append(screen, _("Continue"), NULL);
+		if (row != SIZE_MAX)
+			fplinux_ui_list_set_icon(screen, row, MRE_ICON,
+						 FPLINUX_UI_LIST_ICON_APP_TILE);
+	}
+	row = fplinux_ui_list_append(screen, _("Open VXP"), storage);
+	if (row != SIZE_MAX)
+		fplinux_ui_list_set_icon(screen, row, MRE_ICON,
+					 FPLINUX_UI_LIST_ICON_APP_TILE);
+	fplinux_ui_list_append(screen, _("Recent"), NULL);
+	fplinux_ui_list_append(screen, _("Settings"), NULL);
+	if (app->child > 0 || app->picture_retained)
+		fplinux_ui_list_append(screen, _("Program settings"), NULL);
+}
+
 static void show_idle(struct app *app)
 {
 	struct fplinux_ui_screen *screen;
 
+	if (app->home)
+		return;
+	if (!cancel_guest_keys(app) || !release_pointer(app))
+		return;
 	fplinux_ui_set_fullscreen(app->ui, false);
-	screen = fplinux_ui_form_new(app->ui, "MRE");
+	screen = fplinux_ui_list_new(app->ui, "MRE", FPLINUX_UI_LIST_IMPLICIT);
 	if (!screen) {
 		fplinux_ui_quit(app->ui);
 		return;
 	}
-	fplinux_ui_form_append_string(screen, NULL,
-				      _("Open a VXP file from Files."));
+	fill_home(app, screen);
+	if (app->prefs_error)
+		fplinux_ui_screen_set_header_status(screen, _("Unsaved"), NULL);
 	add_command(screen, CMD_BACK, FPLINUX_UI_COMMAND_BACK, NULL, 0);
-	replace_screen(app, screen, VIEW_IDLE);
+	fplinux_ui_screen_set_listener(screen, screen_command, NULL, app);
+	fplinux_ui_screen_set_key_filter(screen, shortcut_key, NULL);
+	if (app->screen)
+		fplinux_ui_push(app->ui, screen);
+	else {
+		app->screen = screen;
+		app->view = VIEW_IDLE;
+		fplinux_ui_push(app->ui, screen);
+	}
+	app->home = screen;
+	sync_visibility(app);
+	if (!app->storage_request && !app->picker)
+		app->storage_request = fplinux_ui_storage_request(
+			app->ui, FPLINUX_VOLUME_REFRESH, 0);
+}
+
+static void notice(struct app *app, const char *title, const char *message)
+{
+	struct fplinux_ui_screen *alert = fplinux_ui_alert_new(
+		app->ui, FPLINUX_UI_ALERT_ERROR, title, message, 0);
+
+	if (alert)
+		fplinux_ui_push(app->ui, alert);
+}
+
+static bool save_preferences(struct app *app, struct fplinux_ui_prefs *prefs,
+			     bool prepared)
+{
+	struct fplinux_storage_result result = { FPLINUX_STORAGE_UNPUBLISHED,
+						 errno ? errno : EIO };
+	if (prepared)
+		result = fplinux_ui_prefs_save(prefs);
+	app->prefs_error = result.state != FPLINUX_STORAGE_DURABLE;
+	if (app->prefs_error)
+		notice(app,
+		       result.state == FPLINUX_STORAGE_PUBLISHED_UNSYNCED ?
+			       _("Saving not confirmed") :
+			       _("Cannot save"),
+		       fplinux_ui_storage_error(result));
+	return !app->prefs_error;
+}
+
+static void open_path(struct app *app, const char *path)
+{
+	if (app->open_request)
+		return;
+	app->open_request = fplinux_ui_open_file(app->ui, path);
+	if (!app->open_request)
+		notice(app, _("Open VXP"), strerror(errno));
+}
+
+static void picker_result(struct fplinux_ui_file_picker *picker,
+			  enum fplinux_ui_file_picker_status status,
+			  const char *path, int error, void *context)
+{
+	struct app *app = context;
+	char *selected = path ? strdup(path) : NULL;
+
+	app->picker = NULL;
+	fplinux_ui_file_picker_close(picker);
+	if (status == FPLINUX_UI_FILE_PICKER_SELECTED) {
+		if (selected)
+			open_path(app, selected);
+		else
+			notice(app, _("Open VXP"), _("Not enough memory."));
+	} else if (status == FPLINUX_UI_FILE_PICKER_ERROR) {
+		notice(app, _("Open VXP"), strerror(error));
+	}
+	free(selected);
+}
+
+static void open_picker(struct app *app)
+{
+	static const char *const extensions[] = { "vxp", NULL };
+	const struct fplinux_ui_file_picker_options options = {
+		.mode = FPLINUX_UI_FILE_PICKER_FILE,
+		.home = app->home_path,
+		.title = _("Open VXP"),
+		.extensions = extensions,
+	};
+	if (app->storage_request) {
+		app->picker_requested = true;
+		return;
+	}
+	app->picker_requested = false;
+	app->picker = fplinux_ui_file_picker_open(app->ui, &options,
+						  picker_result, app);
+	if (!app->picker)
+		notice(app, _("Open VXP"), strerror(errno));
+}
+
+static void storage_result(struct fplinux_ui *ui,
+			   const struct fplinux_volume_result *result,
+			   void *context)
+{
+	struct app *app = context;
+	(void)ui;
+	if (app->picker)
+		fplinux_ui_file_picker_storage_result(app->picker, result);
+	if (!result->error) {
+		app->home_storage_known = true;
+		app->home_persistent = result->snapshot.home_persistent;
+		if (app->home) {
+			size_t row =
+				app->child > 0 || app->picture_retained ? 1 : 0;
+			fplinux_ui_list_set(
+				app->home, row, _("Open VXP"),
+				app->home_persistent ?
+					_("Home storage: persistent") :
+					_("Home storage: lost after reboot"));
+		}
+	}
+	if (result->request_id == app->storage_request) {
+		app->storage_request = 0;
+		if (app->picker_requested && app->home && !app->closing)
+			open_picker(app);
+	}
+}
+
+enum { AUX_RECENT = 1, AUX_SETTINGS };
+
+static void show_recent(struct app *app)
+{
+	struct fplinux_ui_screen *screen = fplinux_ui_list_new(
+		app->ui, _("Recent"), FPLINUX_UI_LIST_IMPLICIT);
+
+	if (!screen)
+		return;
+	for (size_t i = 0; i < app->recent.count; ++i) {
+		struct fplinux_ui_recent_entry *entry = &app->recent.items[i];
+		const char *name = strrchr(entry->path, '/');
+		struct stat st;
+		bool available = lstat(entry->path, &st) == 0 &&
+				 S_ISREG(st.st_mode) &&
+				 access(entry->path, R_OK) == 0;
+		size_t row = fplinux_ui_list_append(
+			screen,
+			entry->title ? entry->title :
+				       (name ? name + 1 : entry->path),
+			available ? entry->path : _("Unavailable"));
+		if (row != SIZE_MAX)
+			fplinux_ui_list_set_icon(screen, row, MRE_ICON,
+						 FPLINUX_UI_LIST_ICON_APP_TILE);
+	}
+	if (app->recent.count)
+		add_command(screen, CMD_REMOVE, FPLINUX_UI_COMMAND_SCREEN,
+			    _("Remove"), 0);
+	add_command(screen, CMD_BACK, FPLINUX_UI_COMMAND_BACK, NULL, 0);
+	fplinux_ui_screen_set_listener(screen, screen_command, NULL, app);
+	app->auxiliary = screen;
+	app->auxiliary_kind = AUX_RECENT;
+	fplinux_ui_push(app->ui, screen);
+}
+
+static void show_settings(struct app *app, bool program)
+{
+	struct fplinux_ui_screen *screen = fplinux_ui_form_new(
+		app->ui, program ? _("Program settings") : _("Settings"));
+	const char *choices[] = { _("Off"), _("On") };
+	struct fplinux_ui_view_settings shown = program ? app->settings :
+							  app->defaults;
+
+	if (!screen)
+		return;
+	if (!fplinux_ui_view_settings_form_append(screen, &shown,
+						  &app->settings_fields))
+		return;
+	app->pointer_field = fplinux_ui_form_append_choice(
+		screen, _("Pointer mode"), FPLINUX_UI_CHOICE_POPUP, choices, 2);
+	if (app->pointer_field == SIZE_MAX)
+		return;
+	fplinux_ui_form_set_choice(screen, app->pointer_field,
+				   program ? app->pointer_default :
+					     app->global_pointer_default);
+	add_command(screen, CMD_SAVE, FPLINUX_UI_COMMAND_OK, _("Save"), 0);
+	if (program)
+		add_command(screen, CMD_RESET, FPLINUX_UI_COMMAND_SCREEN,
+			    _("Use defaults"), 0);
+	add_command(screen, CMD_BACK, FPLINUX_UI_COMMAND_BACK, NULL, 0);
+	fplinux_ui_screen_set_listener(screen, screen_command, NULL, app);
+	app->program_settings = program;
+	app->auxiliary = screen;
+	app->auxiliary_kind = AUX_SETTINGS;
+	fplinux_ui_push(app->ui, screen);
 }
 
 static bool flush_outgoing(struct app *app)
@@ -541,6 +793,69 @@ static bool send_line(struct app *app, const char *line)
 	memcpy(app->outgoing + app->outgoing_used, line, length);
 	app->outgoing_used += length;
 	return flush_outgoing(app);
+}
+
+static bool cancel_guest_keys(struct app *app)
+{
+	unsigned int held = app->native_keys_held;
+
+	app->cancelled_keys |= held | app->pointer_arrows_withheld |
+			       (app->pointer_fire_withheld ? 1U << 4 : 0);
+	app->pointer_arrows_withheld = 0;
+	app->pointer_fire_withheld = false;
+	for (int index = 0; index < 5; ++index) {
+		if (held & (1U << index)) {
+			char line[32];
+			int code = index < 4 && app->held_direction[index] ?
+					   app->held_direction[index] :
+					   -index - 1;
+			snprintf(line, sizeof(line), "KEY\t%d\t%d\n",
+				 MRE_KEY_EVENT_UP, code);
+			if (!send_line(app, line)) {
+				show_error(
+					app,
+					_("The application did not respond."));
+				return false;
+			}
+		}
+	}
+	app->native_keys_held = 0;
+	memset(app->held_direction, 0, sizeof(app->held_direction));
+	return true;
+}
+
+static void sync_visibility(struct app *app)
+{
+	bool visible = app->ui_visible && (!app->home || app->starting_guest);
+	char line[32];
+
+	if (!app->native || app->input_fd < 0 || visible == app->viewer_visible)
+		return;
+	app->viewer_visible = visible;
+	snprintf(line, sizeof(line), "VISIBILITY\t%d\n", visible ? 1 : 0);
+	if (!send_line(app, line))
+		show_error(app, _("The application did not respond."));
+}
+
+static void leave_home(struct app *app)
+{
+	if (!app->home)
+		return;
+	app->picker_requested = false;
+	if (app->picker) {
+		fplinux_ui_file_picker_close(app->picker);
+		app->picker = NULL;
+	}
+	if (app->home != app->screen) {
+		fplinux_ui_pop_to(app->ui, app->home);
+		fplinux_ui_pop(app->ui);
+	}
+	app->home = NULL;
+	app->auxiliary = NULL;
+	app->auxiliary_kind = 0;
+	if (app->view == VIEW_NATIVE)
+		fplinux_ui_set_fullscreen(app->ui, true);
+	sync_visibility(app);
 }
 
 static bool parse_number(const char *text, uint32_t *number)
@@ -606,39 +921,48 @@ static bool send_path(struct app *app, const char *command, const char *path)
 	return send_line(app, line);
 }
 
-struct frame_viewport {
-	int x, y, width, height;
-};
-
-static struct frame_viewport frame_viewport(struct app *app)
+static bool frame_viewport(struct app *app,
+			   struct fplinux_rgb565_viewport *viewport)
 {
-	int width = fplinux_ui_width(app->ui);
-	int height = width * MRE_FRAME_HEIGHT / MRE_FRAME_WIDTH;
+	return fplinux_rgb565_viewport_init(
+		       viewport, MRE_FRAME_WIDTH, MRE_FRAME_HEIGHT,
+		       fplinux_ui_width(app->ui), fplinux_ui_height(app->ui),
+		       app->settings.scale, app->settings.rotation) == 0;
+}
 
-	if (height > fplinux_ui_height(app->ui)) {
-		height = fplinux_ui_height(app->ui);
-		width = height * MRE_FRAME_WIDTH / MRE_FRAME_HEIGHT;
+static void pointer_position(struct app *app,
+			     const struct fplinux_rgb565_viewport *viewport,
+			     int *x, int *y)
+{
+	int px = app->pointer_x, py = app->pointer_y;
+	int width = MRE_FRAME_WIDTH, height = MRE_FRAME_HEIGHT;
+
+	if (viewport->rotation == FPLINUX_RGB565_ROTATE_90) {
+		px = MRE_FRAME_HEIGHT - 1 - app->pointer_y;
+		py = app->pointer_x;
+		width = MRE_FRAME_HEIGHT;
+		height = MRE_FRAME_WIDTH;
+	} else if (viewport->rotation == FPLINUX_RGB565_ROTATE_270) {
+		px = app->pointer_y;
+		py = MRE_FRAME_WIDTH - 1 - app->pointer_x;
+		width = MRE_FRAME_HEIGHT;
+		height = MRE_FRAME_WIDTH;
 	}
-	return (struct frame_viewport){
-		(fplinux_ui_width(app->ui) - width) / 2,
-		(fplinux_ui_height(app->ui) - height) / 2,
-		width,
-		height,
-	};
+	*x = viewport->x + px * viewport->width / width;
+	*y = viewport->y + py * viewport->height / height;
 }
 
 static void layout_pointer(struct app *app)
 {
 	if (!app->pointer)
 		return;
-	struct frame_viewport viewport = frame_viewport(app);
-	lv_obj_set_pos(
-		app->pointer,
-		viewport.x + app->pointer_x * viewport.width / MRE_FRAME_WIDTH -
-			POINTER_SIZE_PX / 2,
-		viewport.y +
-			app->pointer_y * viewport.height / MRE_FRAME_HEIGHT -
-			POINTER_SIZE_PX / 2);
+	struct fplinux_rgb565_viewport viewport;
+	int x, y;
+	if (!frame_viewport(app, &viewport))
+		return;
+	pointer_position(app, &viewport, &x, &y);
+	lv_obj_set_pos(app->pointer, x - POINTER_SIZE_PX / 2,
+		       y - POINTER_SIZE_PX / 2);
 	lv_obj_set_hidden(app->pointer,
 			  !app->pointer_available || !app->pointer_mode ||
 				  !fplinux_ui_is_fullscreen(app->ui));
@@ -656,14 +980,19 @@ static bool send_pen(struct app *app, int event)
 	return false;
 }
 
-static bool pause_pointer(struct app *app)
+static bool release_pointer(struct app *app)
 {
-	app->pointer_mode = false;
-	layout_pointer(app);
 	if (!app->pointer_fire_held)
 		return true;
 	app->pointer_fire_held = false;
 	return send_pen(app, MRE_PEN_EVENT_RELEASE);
+}
+
+static bool pause_pointer(struct app *app)
+{
+	app->pointer_mode = false;
+	layout_pointer(app);
+	return release_pointer(app);
 }
 
 static bool pointer_key(struct app *app, const struct fplinux_ui_key *key,
@@ -725,22 +1054,31 @@ static bool pointer_key(struct app *app, const struct fplinux_ui_key *key,
 	/* Without MOVE, keep a held pen's TAP and RELEASE at the same point. */
 	if (app->pointer_fire_held)
 		return true;
-	if (code == -1)
-		app->pointer_y -= POINTER_STEP_PX;
-	else if (code == -2)
-		app->pointer_y += POINTER_STEP_PX;
-	else if (code == -3)
-		app->pointer_x -= POINTER_STEP_PX;
-	else
-		app->pointer_x += POINTER_STEP_PX;
-	if (app->pointer_x < 0)
-		app->pointer_x = 0;
-	if (app->pointer_x >= MRE_FRAME_WIDTH)
-		app->pointer_x = MRE_FRAME_WIDTH - 1;
-	if (app->pointer_y < 0)
-		app->pointer_y = 0;
-	if (app->pointer_y >= MRE_FRAME_HEIGHT)
-		app->pointer_y = MRE_FRAME_HEIGHT - 1;
+	struct fplinux_rgb565_viewport viewport;
+	int x, y;
+	if (!frame_viewport(app, &viewport))
+		return true;
+	pointer_position(app, &viewport, &x, &y);
+	x += code == -3 ? -POINTER_STEP_PX : code == -4 ? POINTER_STEP_PX : 0;
+	y += code == -1 ? -POINTER_STEP_PX : code == -2 ? POINTER_STEP_PX : 0;
+	int left = viewport.x > 0 ? viewport.x : 0;
+	int top = viewport.y > 0 ? viewport.y : 0;
+	int right = viewport.x + viewport.width;
+	int bottom = viewport.y + viewport.height;
+	if (right > viewport.destination_width)
+		right = viewport.destination_width;
+	if (bottom > viewport.destination_height)
+		bottom = viewport.destination_height;
+	if (x < left)
+		x = left;
+	if (x >= right)
+		x = right - 1;
+	if (y < top)
+		y = top;
+	if (y >= bottom)
+		y = bottom - 1;
+	fplinux_rgb565_map_point(&viewport, x, y, &app->pointer_x,
+				 &app->pointer_y);
 	layout_pointer(app);
 	return true;
 }
@@ -750,7 +1088,7 @@ static void native_key(struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
 {
 	struct app *app = context;
 	char line[64];
-	int code = 0;
+	int code = 0, physical_code;
 	(void)ui;
 	(void)screen;
 	if (app->picture_retained) {
@@ -793,14 +1131,43 @@ static void native_key(struct fplinux_ui *ui, struct fplinux_ui_screen *screen,
 	}
 	if (!code)
 		return;
+	physical_code = code;
+	if (code >= -5 && code <= -1) {
+		unsigned int bit = 1U << (-code - 1);
+		if (app->cancelled_keys & bit) {
+			app->cancelled_keys &= ~bit;
+			if (!key->pressed)
+				return;
+		}
+	}
 	if (pointer_key(app, key, code))
 		return;
+	if (code >= -4 && code <= -1) {
+		int index = -code - 1;
+		if (key->pressed && !app->held_direction[index]) {
+			static const int clockwise[] = { -3, -4, -2, -1 };
+			static const int counterclockwise[] = { -4, -3, -1,
+								-2 };
+			if (app->settings.rotation == FPLINUX_RGB565_ROTATE_90)
+				app->held_direction[index] = clockwise[index];
+			else if (app->settings.rotation ==
+				 FPLINUX_RGB565_ROTATE_270)
+				app->held_direction[index] =
+					counterclockwise[index];
+			else
+				app->held_direction[index] = code;
+		}
+		if (app->held_direction[index])
+			code = app->held_direction[index];
+		if (!key->pressed)
+			app->held_direction[index] = 0;
+	}
 	snprintf(line, sizeof(line), "KEY\t%d\t%d\n",
 		 key->pressed ? MRE_KEY_EVENT_DOWN : MRE_KEY_EVENT_UP, code);
 	if (!send_line(app, line))
 		show_error(app, _("The application did not respond."));
-	else if (code <= -1 && code >= -5) {
-		unsigned int bit = 1U << (-code - 1);
+	else if (physical_code <= -1 && physical_code >= -5) {
+		unsigned int bit = 1U << (-physical_code - 1);
 		if (key->pressed)
 			app->native_keys_held |= bit;
 		else
@@ -812,33 +1179,30 @@ static void layout_native(struct app *app)
 {
 	int width = fplinux_ui_width(app->ui);
 	int height = fplinux_ui_height(app->ui);
-	struct frame_viewport viewport = frame_viewport(app);
+	struct fplinux_rgb565_viewport viewport;
 
-	if (!app->canvas || width <= 0 || height <= 0)
+	if (!app->canvas || !app->frame_pixels ||
+	    !frame_viewport(app, &viewport))
 		return;
 	if (width != app->display_width || height != app->display_height) {
 		uint16_t *pixels =
 			realloc(app->display_pixels,
 				(size_t)width * height * sizeof(*pixels));
 		if (!pixels) {
-			show_error(app, _("Not enough memory."));
 			return;
 		}
 		app->display_pixels = pixels;
 		app->display_width = width;
 		app->display_height = height;
 	}
-	memset(app->display_pixels, 0,
-	       (size_t)width * height * sizeof(*app->display_pixels));
-	for (int y = 0; y < viewport.height; ++y)
-		for (int x = 0; x < viewport.width; ++x)
-			app->display_pixels[(viewport.y + y) * width +
-					    viewport.x + x] =
-				app->frame_pixels[(y * MRE_FRAME_HEIGHT /
-						   viewport.height) *
-							  MRE_FRAME_WIDTH +
-						  x * MRE_FRAME_WIDTH /
-							  viewport.width];
+	uint16_t background =
+		lv_color_to_u16(fplinux_ui_theme(app->ui)->background);
+	for (size_t i = 0; i < (size_t)width * height; ++i)
+		app->display_pixels[i] = background;
+	if (fplinux_rgb565_transform(&viewport, app->frame_pixels,
+				     MRE_FRAME_WIDTH, app->display_pixels,
+				     width) < 0)
+		return;
 	lv_canvas_set_buffer(app->canvas, app->display_pixels, width, height,
 			     LV_COLOR_FORMAT_RGB565);
 	lv_obj_invalidate(app->canvas);
@@ -1261,9 +1625,12 @@ static void protocol_line(struct app *app, char *line)
 	if (!strcmp(line, "POINTER_AVAILABLE\t1") ||
 	    !strcmp(line, "POINTER_AVAILABLE\t0")) {
 		bool available = line[18] == '1';
+		bool was_available = app->pointer_available;
 		if (!available && !pause_pointer(app))
 			return;
 		app->pointer_available = available;
+		if (available && !was_available && app->pointer_default)
+			app->pointer_mode = true;
 		layout_pointer(app);
 		return;
 	}
@@ -1273,7 +1640,8 @@ static void protocol_line(struct app *app, char *line)
 		    app->shared->screen_height != MRE_FRAME_HEIGHT)
 			goto malformed;
 		app->native = true;
-		app->viewer_visible = fplinux_ui_is_visible(app->ui);
+		app->viewer_visible = true;
+		sync_visibility(app);
 		if (!app->frame_pixels)
 			app->frame_pixels =
 				calloc(MRE_FRAME_WIDTH * MRE_FRAME_HEIGHT,
@@ -1298,7 +1666,7 @@ static void protocol_line(struct app *app, char *line)
 			goto malformed;
 		if (app->waiting) {
 			guest_ready(app);
-		} else if (!app->modal && !app->decision) {
+		} else if (!app->modal && !app->decision && !app->home) {
 			if (!show_native(app))
 				return;
 			lv_obj_invalidate(app->canvas);
@@ -1308,7 +1676,7 @@ static void protocol_line(struct app *app, char *line)
 	}
 	if (!strcmp(line, "INPUT") && app->shared && !app->modal) {
 		__atomic_thread_fence(__ATOMIC_ACQUIRE);
-		if (app->decision || app->waiting) {
+		if (app->decision || app->waiting || app->home) {
 			app->deferred_modal = VIEW_INPUT;
 			guest_ready(app);
 			return;
@@ -1334,7 +1702,7 @@ static void protocol_line(struct app *app, char *line)
 				 app->shared->selector_folder :
 				 "E:\\");
 		app->selector_type = app->shared->selector_type;
-		if (app->decision || app->waiting) {
+		if (app->decision || app->waiting || app->home) {
 			app->deferred_modal = VIEW_SELECTOR;
 			guest_ready(app);
 		} else {
@@ -1492,6 +1860,22 @@ static void start_engine_document(struct app *app)
 	/* The waiting screen keeps the legends it had while the runtime lived. */
 	bool waiting = app->waiting || begin_wait(app);
 	stop_engine(app);
+	app->starting_guest = true;
+	fplinux_ui_prefs_close(app->program_prefs);
+	app->program_prefs = fplinux_ui_program_prefs_open(
+		UI_ID, app->pending_document.state_key);
+	app->settings = app->defaults;
+	app->pointer_default = app->global_pointer_default;
+	if (!app->program_prefs ||
+	    !fplinux_ui_view_settings_load(&app->settings, app->program_prefs,
+					   &app->defaults))
+		app->prefs_error = true;
+	if (app->program_prefs)
+		app->pointer_default =
+			fplinux_ui_prefs_get_int(app->program_prefs,
+						 "pointer-mode",
+						 app->global_pointer_default) ==
+			1;
 	snprintf(app->filename, sizeof(app->filename), "%s",
 		 app->pending_document.name);
 	if (!waiting || getrlimit(RLIMIT_NOFILE, &limit) < 0)
@@ -1604,6 +1988,12 @@ static void restore_guest_ui(struct app *app)
 {
 	enum view pending = app->deferred_modal;
 
+	if (app->starting_guest) {
+		app->starting_guest = false;
+		leave_home(app);
+	}
+	if (app->home)
+		return;
 	app->deferred_modal = VIEW_IDLE;
 	if (pending == VIEW_INPUT) {
 		if (!show_editor(app))
@@ -1621,9 +2011,29 @@ static void finish_document(struct app *app,
 			    enum fplinux_ui_document_status status, int error)
 {
 	uint32_t id = app->document_id;
+	struct fplinux_storage_result saved = { FPLINUX_STORAGE_DURABLE, 0 };
 
 	if (!id)
 		return;
+	if (status == FPLINUX_UI_DOCUMENT_ACCEPTED && app->prefs) {
+		bool stored = fplinux_ui_recent_record(
+				      &app->recent, app->pending_document.path,
+				      app->pending_document.name) &&
+			      fplinux_ui_recent_store(&app->recent, app->prefs);
+		if (stored) {
+			saved = fplinux_ui_prefs_save(app->prefs);
+			app->prefs_error = saved.state !=
+					   FPLINUX_STORAGE_DURABLE;
+		} else {
+			saved.state = FPLINUX_STORAGE_UNPUBLISHED;
+			saved.error = errno ? errno : EIO;
+			app->prefs_error = true;
+		}
+	} else if (status == FPLINUX_UI_DOCUMENT_ACCEPTED) {
+		saved.state = FPLINUX_STORAGE_UNPUBLISHED;
+		saved.error = EIO;
+		app->prefs_error = true;
+	}
 	app->document_id = 0;
 	app->replacing = false;
 	if (app->validator > 0) {
@@ -1634,6 +2044,12 @@ static void finish_document(struct app *app,
 	}
 	mre_document_release(&app->pending_document);
 	fplinux_ui_document_reply(app->ui, id, status, error);
+	if (saved.state != FPLINUX_STORAGE_DURABLE && !app->closing)
+		notice(app,
+		       saved.state == FPLINUX_STORAGE_PUBLISHED_UNSYNCED ?
+			       _("Saving not confirmed") :
+			       _("Cannot save"),
+		       fplinux_ui_storage_error(saved));
 	update_tick(app);
 }
 
@@ -1656,19 +2072,15 @@ static void guest_ready(struct app *app)
 		end_wait(app, restore_guest_ui);
 }
 
-static bool show_decision(struct app *app, bool replace)
+static bool show_decision(struct app *app)
 {
 	struct fplinux_ui_screen *screen = fplinux_ui_alert_new(
 		app->ui, FPLINUX_UI_ALERT_CONFIRMATION, _("Close application?"),
-		replace ?
-			_("The current program will close. Open the new VXP?") :
-			_("Close the current program?"),
-		0);
+		_("The current program will close. Open the new VXP?"), 0);
 
 	if (!screen)
 		return false;
-	add_command(screen, replace ? CMD_REPLACE : CMD_ACCEPT,
-		    FPLINUX_UI_COMMAND_OK, _("Close"), 0);
+	add_command(screen, CMD_REPLACE, FPLINUX_UI_COMMAND_OK, _("Close"), 0);
 	add_command(screen, CMD_CANCEL, FPLINUX_UI_COMMAND_CANCEL, NULL, 0);
 	fplinux_ui_screen_set_listener(screen, screen_command, NULL, app);
 	app->decision = screen;
@@ -1678,7 +2090,7 @@ static bool show_decision(struct app *app, bool replace)
 
 static void ask_replace(struct app *app)
 {
-	if (!show_decision(app, true))
+	if (!show_decision(app))
 		finish_document(app, FPLINUX_UI_DOCUMENT_ERROR, ENOMEM);
 }
 
@@ -1737,7 +2149,7 @@ document_received(struct fplinux_ui *ui,
 		.error = EBUSY,
 	};
 	(void)ui;
-	if (app->document_id || app->close_pending)
+	if (app->document_id)
 		return result;
 	if (app->state_root_fd < 0) {
 		result.error = EIO;
@@ -1779,20 +2191,9 @@ document_received(struct fplinux_ui *ui,
 static enum fplinux_ui_close_response prepare_close(struct fplinux_ui *ui,
 						    void *context)
 {
-	struct app *app = context;
 	(void)ui;
-
-	/* A new VXP's check and replacement question come first. */
-	if (app->decision || app->validator > 0 || app->replacing)
-		return FPLINUX_UI_CLOSE_CANCEL;
-	if (app->child <= 0)
-		return FPLINUX_UI_CLOSE_READY;
-	app->close_pending = true;
-	if (!show_decision(app, false)) {
-		app->close_pending = false;
-		return FPLINUX_UI_CLOSE_CANCEL;
-	}
-	return FPLINUX_UI_CLOSE_WAIT;
+	(void)context;
+	return FPLINUX_UI_CLOSE_READY;
 }
 
 static void validation_tick(struct app *app)
@@ -1890,14 +2291,16 @@ static void poll_children(struct app *app)
 	if (normal) {
 		if (retain) {
 			app->picture_retained = app->has_frame = true;
-			if (!app->decision && !app->waiting) {
+			if (!app->decision && !app->waiting && !app->home) {
 				show_native(app);
 				accept_document_ui(app);
 			}
 		} else {
-			if (!app->document_id)
+			if (!app->document_id && !app->home)
 				fplinux_ui_back(app->ui);
 		}
+		if (app->home)
+			fill_home(app, app->home);
 	} else {
 		char message[256];
 		if (ended > 0 && WIFSIGNALED(status))
@@ -1928,6 +2331,135 @@ static void screen_command(struct fplinux_ui *ui,
 			   void *context)
 {
 	struct app *app = context;
+	if (screen == app->home) {
+		if (id == FPLINUX_UI_SELECT_COMMAND) {
+			size_t row = fplinux_ui_list_get_focused(screen);
+			bool guest = app->child > 0 || app->picture_retained;
+			if (guest && row == 0) {
+				leave_home(app);
+				restore_guest_ui(app);
+				return;
+			}
+			if (guest && row != SIZE_MAX)
+				--row;
+			if (row != 0)
+				app->picker_requested = false;
+			if (row == 0)
+				open_picker(app);
+			else if (row == 1)
+				show_recent(app);
+			else if (row == 2)
+				show_settings(app, false);
+			else if (row == 3 && guest)
+				show_settings(app, true);
+		} else if (id == CMD_BACK) {
+			app->picker_requested = false;
+			if (app->home == app->screen ||
+			    (app->child <= 0 && !app->picture_retained))
+				fplinux_ui_back(ui);
+			else {
+				leave_home(app);
+				restore_guest_ui(app);
+			}
+		}
+		return;
+	}
+	if (screen == app->auxiliary) {
+		if (app->auxiliary_kind == AUX_RECENT &&
+		    id == FPLINUX_UI_SELECT_COMMAND) {
+			size_t row = fplinux_ui_list_get_focused(screen);
+			if (row < app->recent.count) {
+				char *path =
+					strdup(app->recent.items[row].path);
+				app->auxiliary = NULL;
+				fplinux_ui_pop(ui);
+				if (path) {
+					open_path(app, path);
+					free(path);
+				}
+			}
+		} else if (app->auxiliary_kind == AUX_RECENT &&
+			   id == CMD_REMOVE) {
+			size_t row = fplinux_ui_list_get_focused(screen);
+			if (fplinux_ui_recent_remove(&app->recent, row)) {
+				fplinux_ui_list_delete(screen, row);
+				if (!app->recent.count)
+					fplinux_ui_screen_remove_command(
+						screen, CMD_REMOVE);
+				save_preferences(
+					app, app->prefs,
+					fplinux_ui_recent_store(&app->recent,
+								app->prefs));
+			}
+		} else if (app->auxiliary_kind == AUX_SETTINGS &&
+			   (id == CMD_SAVE || id == CMD_RESET)) {
+			struct fplinux_ui_view_settings settings;
+			struct fplinux_ui_prefs *prefs =
+				app->program_settings ? app->program_prefs :
+							app->prefs;
+			bool pointer = app->program_settings ?
+					       app->pointer_default :
+					       app->global_pointer_default;
+			bool ok = prefs != NULL;
+			if (!ok)
+				errno = EIO;
+			if (id == CMD_RESET) {
+				settings = app->defaults;
+				ok = ok &&
+				     fplinux_ui_view_settings_reset(prefs) &&
+				     fplinux_ui_prefs_remove(prefs,
+							     "pointer-mode");
+				pointer = app->global_pointer_default;
+			} else {
+				ok = ok &&
+				     fplinux_ui_view_settings_form_read(
+					     screen, &app->settings_fields,
+					     &settings);
+				ok = ok && fplinux_ui_view_settings_store(
+						   &settings, prefs);
+				if (ok) {
+					pointer = fplinux_ui_form_get_choice(
+							  screen,
+							  app->pointer_field) ==
+						  1;
+					ok = fplinux_ui_prefs_set_int(
+						prefs, "pointer-mode", pointer);
+				}
+			}
+			if (ok) {
+				app->pointer_default = pointer;
+				if (app->program_settings)
+					app->settings = settings;
+				else {
+					app->defaults = settings;
+					app->global_pointer_default =
+						app->pointer_default;
+					app->settings = settings;
+					if (app->program_prefs) {
+						fplinux_ui_view_settings_load(
+							&app->settings,
+							app->program_prefs,
+							&app->defaults);
+						app->pointer_default =
+							fplinux_ui_prefs_get_int(
+								app->program_prefs,
+								"pointer-mode",
+								app->global_pointer_default) ==
+							1;
+					}
+				}
+				app->pointer_mode = app->pointer_available &&
+						    app->pointer_default;
+			}
+			app->auxiliary = NULL;
+			fplinux_ui_pop(ui);
+			save_preferences(app, prefs, ok);
+		} else if (id == CMD_BACK || id == CMD_CANCEL) {
+			app->auxiliary = NULL;
+			fplinux_ui_pop(ui);
+		}
+		return;
+	}
 	if (app->decision == screen) {
 		app->decision = NULL;
 		if (app->replacing) {
@@ -1937,13 +2469,8 @@ static void screen_command(struct fplinux_ui *ui,
 			else
 				finish_document(
 					app, FPLINUX_UI_DOCUMENT_CANCELLED, 0);
-		} else if (app->close_pending) {
-			app->close_pending = false;
-			fplinux_ui_close_reply(
-				ui, id == CMD_ACCEPT ? FPLINUX_UI_CLOSE_READY :
-						       FPLINUX_UI_CLOSE_CANCEL);
 		}
-		if (!app->document_id && !app->close_pending)
+		if (!app->document_id)
 			restore_guest_ui(app);
 		return;
 	}
@@ -2013,24 +2540,36 @@ static void event(struct fplinux_ui *ui, const struct fplinux_ui_event *event,
 	struct app *app = context;
 	if (event->type == FPLINUX_UI_EVENT_CLOSE) {
 		app->closing = true;
+		app->picker_requested = false;
+		if (app->picker) {
+			fplinux_ui_file_picker_close(app->picker);
+			app->picker = NULL;
+		}
 		finish_document(app, FPLINUX_UI_DOCUMENT_CANCELLED, 0);
 		stop_engine(app);
 		fplinux_ui_quit(ui);
+	} else if (event->type == FPLINUX_UI_EVENT_ACTIVATION &&
+		   event->activation == FPLINUX_UI_ACTIVATION_OPEN &&
+		   !app->document_id && !app->waiting && !app->open_request) {
+		show_idle(app);
+	} else if (event->type == FPLINUX_UI_EVENT_DOCUMENT_RESULT &&
+		   event->document_result.request_id == app->open_request &&
+		   event->document_result.status != FPLINUX_UI_DOCUMENT_WAIT) {
+		app->open_request = 0;
+		if (event->document_result.status == FPLINUX_UI_DOCUMENT_ERROR)
+			notice(app, _("Open VXP"),
+			       strerror(event->document_result.error));
 	} else if (event->type == FPLINUX_UI_EVENT_RESIZE) {
 		layout_native(app);
 		accept_document_ui(app);
 	} else if (event->type == FPLINUX_UI_EVENT_INPUT_CANCEL) {
-		if (app->pointer_fire_held)
-			pause_pointer(app);
-	} else if (event->type == FPLINUX_UI_EVENT_VISIBILITY && app->native &&
-		   app->input_fd >= 0 &&
-		   event->visible != app->viewer_visible) {
-		char line[32];
-		app->viewer_visible = event->visible;
-		snprintf(line, sizeof(line), "VISIBILITY\t%d\n",
-			 event->visible ? 1 : 0);
-		if (!send_line(app, line))
-			show_error(app, _("The application did not respond."));
+		if (cancel_guest_keys(app))
+			release_pointer(app);
+	} else if (event->type == FPLINUX_UI_EVENT_VISIBILITY) {
+		app->ui_visible = event->visible;
+		if (!event->visible)
+			app->picker_requested = false;
+		sync_visibility(app);
 	}
 }
 
@@ -2044,7 +2583,7 @@ int main(int argc, char **argv)
 	};
 	struct fplinux_cli cli = {
 		.program = "fplinux-mre",
-		.description = "Run VXP documents opened from Files.",
+		.description = "Open and run VXP programs.",
 	};
 	int result = fplinux_cli_parse(&cli, argc, argv);
 	char state_path[PATH_MAX];
@@ -2060,6 +2599,32 @@ int main(int argc, char **argv)
 	fplinux_ui_set_title(app.ui, "MRE");
 	fplinux_ui_set_document_handler(app.ui, document_received, &app);
 	fplinux_ui_set_close_handler(app.ui, prepare_close, &app);
+	fplinux_ui_set_storage_handler(app.ui, storage_result, &app);
+	app.ui_visible = fplinux_ui_is_visible(app.ui);
+	app.defaults = fplinux_ui_view_settings_defaults();
+	app.settings = app.defaults;
+	app.prefs = fplinux_ui_prefs_open(UI_ID);
+	if (app.prefs) {
+		if (!fplinux_ui_view_settings_load(&app.defaults, app.prefs,
+						   &app.settings))
+			app.prefs_error = true;
+		if (!fplinux_ui_recent_load(&app.recent, app.prefs))
+			app.prefs_error = true;
+		app.settings = app.defaults;
+		app.global_pointer_default =
+			fplinux_ui_prefs_get_int(app.prefs, "pointer-mode",
+						 0) == 1;
+		app.pointer_default = app.global_pointer_default;
+	} else {
+		app.prefs_error = true;
+	}
+	const char *home = getenv("HOME");
+	if (!home || home[0] != '/' ||
+	    snprintf(app.home_path, sizeof(app.home_path), "%s/Files", home) >=
+		    (int)sizeof(app.home_path)) {
+		result = -1;
+		goto cleanup;
+	}
 	if (fplinux_ui_state_dir(UI_ID, state_path, sizeof(state_path)))
 		app.state_root_fd =
 			open(state_path,
@@ -2079,6 +2644,9 @@ cleanup:
 		lv_timer_delete(app.tick);
 	if (app.state_root_fd >= 0)
 		close(app.state_root_fd);
+	fplinux_ui_recent_cleanup(&app.recent);
+	fplinux_ui_prefs_close(app.program_prefs);
+	fplinux_ui_prefs_close(app.prefs);
 	fplinux_ui_close(app.ui);
 	clear_entries(&app);
 	free(app.frame_pixels);
