@@ -257,8 +257,11 @@ static ssize_t audit_show(struct device *dev, struct device_attribute *attr,
 		"last_error_irq_raw=0x%08x\n",
 		udrm->profile->name,
 		ums9117_drm_uses_spi(udrm) ?
-			(udrm->profile->spi_native_16bit ? "spi1-raw16" :
-							   "spi1-3wire") :
+			(udrm->profile->spi_mode == UMS9117_DRM_SPI_RAW16 ?
+				 "spi1-raw16" :
+			 udrm->profile->spi_mode == UMS9117_DRM_SPI_DUAL_DATA ?
+				 "spi1-dual-data" :
+				 "spi1-3wire") :
 			"lcm-dbi",
 		udrm->state, udrm->in_flight ? 1U : 0U,
 		!udrm->wled_known ? "unknown" :
@@ -315,7 +318,7 @@ int ums9117_drm_probe(struct platform_device *pdev)
 	    !profile->wled_backlight_name)
 		return -EINVAL;
 	if (!(IS_ENABLED(CONFIG_DRM_UMS9117_SPI) &&
-	      profile->transport == UMS9117_DRM_TRANSPORT_SPI1_3WIRE) &&
+	      profile->transport == UMS9117_DRM_TRANSPORT_SPI1) &&
 	    !(IS_ENABLED(CONFIG_DRM_UMS9117_LCM) &&
 	      profile->transport == UMS9117_DRM_TRANSPORT_LCM_DBI))
 		return dev_err_probe(dev, -EINVAL,

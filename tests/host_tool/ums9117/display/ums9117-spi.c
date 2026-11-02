@@ -16,6 +16,8 @@
 struct transmitted_word {
 	u32 value;
 	u32 mode;
+	u32 control;
+	u32 data_control;
 	unsigned int bits;
 	bool data;
 	bool selected;
@@ -41,12 +43,17 @@ static unsigned int failures;
 static struct resource spi_resource = { .start = 0x21000000 };
 
 static const struct ums9117_drm_profile raw16_profile = {
-	.spi_native_16bit = true,
+	.spi_mode = UMS9117_DRM_SPI_RAW16,
 	.spi_init_clock_divider = 1,
 	.spi_frame_clock_divider = 1,
 };
 static const struct ums9117_drm_profile default_profile = {
 	.spi_frame_clock_divider = 3,
+};
+static const struct ums9117_drm_profile dual_data_profile = {
+	.spi_mode = UMS9117_DRM_SPI_DUAL_DATA,
+	.spi_init_clock_divider = 1,
+	.spi_frame_clock_divider = 1,
 };
 
 #define CHECK(condition, message)                                       \
@@ -120,7 +127,9 @@ void writel(u32 value, void *address)
 		word = &peripheral.words[peripheral.word_count++];
 		*word = (struct transmitted_word){
 			.value = value,
-			.mode = peripheral.spi[0x04c / 4] & 0x18,
+			.mode = peripheral.spi[0x04c / 4] & 0x38,
+			.control = peripheral.spi[0x04c / 4],
+			.data_control = peripheral.spi[0x054 / 4],
 			.bits = (peripheral.spi[0x008 / 4] >> 2) & 0x1f,
 			.data = !!(peripheral.spi[0x054 / 4] & 0x8000),
 			.selected = !(peripheral.spi[0x008 / 4] & 0x100),
@@ -333,6 +342,104 @@ static void raw16_timeout(void)
 	      "failed RAMWR must never arm a pixel transfer");
 }
 
+static void dual_data_dcs(void)
+{
+	struct ums9117_drm udrm = initialize(&dual_data_profile);
+	const u8 data[] = { 0x55, 0xaa };
+	int result;
+
+	CHECK(peripheral.spi[0x004 / 4] == 1 &&
+		      peripheral.spi[0x04c / 4] == 0x10,
+	      "dual-data initialization must select mode 2 and divider 1");
+	result = ums9117_drm_spi_post_reset(&udrm);
+	CHECK(result == 0, "post-reset must succeed");
+	result = ums9117_drm_spi_dcs(&udrm, 0x3a, data, sizeof(data));
+	CHECK(result == 0 && peripheral.word_count == 3,
+	      "command and two parameters must complete");
+	check_word(0, 0x3a, false, 0x10);
+	check_word(1, 0x55, true, 0x10);
+	check_word(2, 0xaa, true, 0x10);
+	CHECK(peripheral.words[0].control == 0x10 &&
+		      peripheral.words[0].data_control == 0x0000 &&
+		      peripheral.words[1].data_control == 0x8000,
+	      "DCS must use the single data line and select command or data");
+	CHECK(peripheral.selects == 1 && peripheral.deselects == 0,
+	      "dual-data commands must retain selected CS0");
+	CHECK(peripheral.spi[0x04c / 4] == 0xc010 &&
+		      peripheral.spi[0x054 / 4] == 0xa000 &&
+		      ((peripheral.spi[0x008 / 4] >> 2) & 0x1f) == 8,
+	      "pixel mode must select RGB565, both data lines and 8-bit channel");
+
+	result = ums9117_drm_spi_dcs(&udrm, 0x29, NULL, 0);
+	CHECK(result == 0 && peripheral.word_count == 4,
+	      "command after pixel setup must complete");
+	check_word(3, 0x29, false, 0x10);
+	CHECK(peripheral.words[3].control == 0x10 &&
+		      peripheral.words[3].data_control == 0x2000,
+	      "post-pixel DCS must disable the second line and retain its selector");
+	CHECK(peripheral.spi[0x04c / 4] == 0xc010,
+	      "DCS must restore both pixel data lines");
+}
+
+static void dual_data_frame(void)
+{
+	struct ums9117_drm udrm = initialize(&dual_data_profile);
+	int result = ums9117_drm_spi_post_reset(&udrm);
+
+	CHECK(result == 0, "post-reset must succeed");
+	result = ums9117_drm_spi_begin_frame(&udrm, 76800);
+	CHECK(result == 0 && peripheral.word_count == 1,
+	      "RAMWR must admit the pixel stream");
+	check_word(0, 0x2c, false, 0x10);
+	CHECK(peripheral.words[0].control == 0x90 &&
+		      peripheral.words[0].data_control == 0x0000,
+	      "RAMWR must use one data line and transmit hold");
+	CHECK(peripheral.selects == 1 && peripheral.deselects == 0,
+	      "RAMWR and pixels must retain selected CS0");
+	CHECK(peripheral.spi[0x004 / 4] == 1 &&
+		      peripheral.spi[0x04c / 4] == 0xc090 &&
+		      ((peripheral.spi[0x008 / 4] >> 2) & 0x1f) == 8,
+	      "pixel stream must use mode 2, divider 1 and an 8-bit channel");
+	CHECK(peripheral.spi[0x054 / 4] == 0xa001 &&
+		      peripheral.spi[0x058 / 4] == 0x2c00,
+	      "dual-data frame length must encode exactly 76800 pixels");
+	CHECK(peripheral.armed_count == 2 && peripheral.armed_words[0] == 1 &&
+		      peripheral.armed_words[1] == 76800,
+	      "handoff must arm one RAMWR byte then the full pixel count");
+}
+
+static void dual_data_timeout(void)
+{
+	struct ums9117_drm udrm = initialize(&dual_data_profile);
+	ktime_t started;
+	int result;
+
+	result = ums9117_drm_spi_post_reset(&udrm);
+	CHECK(result == 0, "post-reset must succeed");
+	started = peripheral.now;
+	peripheral.stalled = true;
+	result = ums9117_drm_spi_begin_frame(&udrm, 76800);
+	CHECK(result == -ETIMEDOUT && peripheral.now - started == 250000,
+	      "stalled RAMWR must stop at its bounded deadline");
+	CHECK(peripheral.word_count == 1 && peripheral.armed_count == 1 &&
+		      peripheral.armed_words[0] == 1,
+	      "failed RAMWR must not arm a pixel stream");
+	CHECK(peripheral.selects == 1 && peripheral.deselects == 0,
+	      "timeout must preserve the shared CS0 selection");
+
+	peripheral.stalled = false;
+	result = ums9117_drm_spi_begin_frame(&udrm, 76800);
+	CHECK(result == 0 && peripheral.word_count == 2,
+	      "transport must accept a frame after the stall clears");
+	check_word(1, 0x2c, false, 0x10);
+	CHECK(peripheral.words[1].control == 0x90 &&
+		      peripheral.words[1].data_control == 0x2000,
+	      "retry must restore command mode after failed handoff");
+	CHECK(peripheral.armed_count == 3 && peripheral.armed_words[1] == 1 &&
+		      peripheral.armed_words[2] == 76800,
+	      "recovered handoff must arm RAMWR and the full pixel count");
+}
+
 int main(int argc, char **argv)
 {
 	if (argc != 2)
@@ -347,6 +454,12 @@ int main(int argc, char **argv)
 		default_frame();
 	else if (!strcmp(argv[1], "raw16-timeout"))
 		raw16_timeout();
+	else if (!strcmp(argv[1], "dual-data-dcs"))
+		dual_data_dcs();
+	else if (!strcmp(argv[1], "dual-data-frame"))
+		dual_data_frame();
+	else if (!strcmp(argv[1], "dual-data-timeout"))
+		dual_data_timeout();
 	else
 		return 2;
 	return failures ? 1 : 0;

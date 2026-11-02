@@ -16,8 +16,14 @@
 struct platform_device;
 
 enum ums9117_drm_transport_kind {
-	UMS9117_DRM_TRANSPORT_SPI1_3WIRE,
+	UMS9117_DRM_TRANSPORT_SPI1,
 	UMS9117_DRM_TRANSPORT_LCM_DBI,
+};
+
+enum ums9117_drm_spi_mode {
+	UMS9117_DRM_SPI_9BIT,
+	UMS9117_DRM_SPI_RAW16,
+	UMS9117_DRM_SPI_DUAL_DATA,
 };
 
 /*
@@ -57,8 +63,7 @@ struct ums9117_drm_profile {
 	u16 spi_frame_clock_divider;
 	/* Zero retains the shared initialization divider. */
 	u16 spi_init_clock_divider;
-	/* Raw mode 3 sends 16-bit pixels and releases CS between DCS bytes. */
-	bool spi_native_16bit;
+	enum ums9117_drm_spi_mode spi_mode;
 	/*
 	 * Raw backlight name. Its maximum is derived from equal non-zero board
 	 * WLED current levels.

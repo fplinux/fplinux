@@ -137,7 +137,7 @@ def render_linux_display_files(target: str, display: dict[str, Any]) -> dict[str
         }
     lines = _header(panel)
     transport = (
-        "UMS9117_DRM_TRANSPORT_SPI1_3WIRE"
+        "UMS9117_DRM_TRANSPORT_SPI1"
         if panel["transport"] == "spi"
         else "UMS9117_DRM_TRANSPORT_LCM_DBI"
     )

@@ -48,7 +48,16 @@ def spi_host_component(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Pat
 
 @pytest.mark.parametrize(
     "scenario",
-    ["raw16-dcs", "default-dcs", "raw16-frame", "default-frame", "raw16-timeout"],
+    [
+        "raw16-dcs",
+        "default-dcs",
+        "raw16-frame",
+        "default-frame",
+        "raw16-timeout",
+        "dual-data-dcs",
+        "dual-data-frame",
+        "dual-data-timeout",
+    ],
 )
 def test_spi_command_and_pixel_handoff(spi_host_component: Path, scenario: str) -> None:
     """Check wire bytes, command/data selection, CS ownership and pixel counts."""

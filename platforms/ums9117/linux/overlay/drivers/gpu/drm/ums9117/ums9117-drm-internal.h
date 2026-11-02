@@ -107,7 +107,7 @@ static inline bool ums9117_drm_uses_spi(const struct ums9117_drm *udrm)
 {
 	return IS_ENABLED(CONFIG_DRM_UMS9117_SPI) &&
 	       (!IS_ENABLED(CONFIG_DRM_UMS9117_LCM) ||
-		udrm->profile->transport == UMS9117_DRM_TRANSPORT_SPI1_3WIRE);
+		udrm->profile->transport == UMS9117_DRM_TRANSPORT_SPI1);
 }
 
 static inline bool ums9117_drm_uses_lcm(const struct ums9117_drm *udrm)

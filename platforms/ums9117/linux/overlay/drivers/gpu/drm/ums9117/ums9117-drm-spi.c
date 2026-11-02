@@ -30,9 +30,12 @@
 #define UMS9117_DRM_SPI_TX_END BIT(8)
 #define UMS9117_DRM_SPI_CS0 BIT(8)
 #define UMS9117_DRM_SPI_MODE_3WIRE_9BIT BIT(3)
+#define UMS9117_DRM_SPI_MODE_DUAL_DATA (2U << 3)
 #define UMS9117_DRM_SPI_MODE_RAW_16BIT (3U << 3)
 #define UMS9117_DRM_SPI_TX_HOLD BIT(7)
 #define UMS9117_DRM_SPI_RGB565 BIT(14)
+#define UMS9117_DRM_SPI_DATA_LINE2 BIT(15)
+#define UMS9117_DRM_SPI_CD_DATA2 BIT(13)
 #define UMS9117_DRM_SPI_PIXEL_BITS 17
 #define UMS9117_DRM_SPI_INIT_DIVIDER 3
 #define UMS9117_DRM_SPI_DCS_TIMEOUT_US 250000
@@ -82,16 +85,25 @@ static void ums9117_drm_spi_tx_length(struct ums9117_drm *udrm, u32 words)
 static void ums9117_drm_spi_pixel_mode(struct ums9117_drm *udrm)
 {
 	u32 control = readl(udrm->spi + UMS9117_DRM_SPI_CTL7);
+	u32 data = readl(udrm->spi + UMS9117_DRM_SPI_CTL8) | BIT(15);
 
-	writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL8) | BIT(15),
-	       udrm->spi + UMS9117_DRM_SPI_CTL8);
-	if (udrm->profile->spi_native_16bit) {
+	if (udrm->profile->spi_mode == UMS9117_DRM_SPI_DUAL_DATA)
+		data |= UMS9117_DRM_SPI_CD_DATA2;
+	writel(data, udrm->spi + UMS9117_DRM_SPI_CTL8);
+	switch (udrm->profile->spi_mode) {
+	case UMS9117_DRM_SPI_RAW16:
 		control &= ~UMS9117_DRM_SPI_RGB565;
 		ums9117_drm_spi_channel_length(udrm, 16);
-	} else {
+		break;
+	case UMS9117_DRM_SPI_DUAL_DATA:
+		control |= UMS9117_DRM_SPI_RGB565 | UMS9117_DRM_SPI_DATA_LINE2;
+		ums9117_drm_spi_channel_length(udrm, 8);
+		break;
+	case UMS9117_DRM_SPI_9BIT:
 		control |= UMS9117_DRM_SPI_RGB565;
 		ums9117_drm_spi_channel_length(udrm,
 					       UMS9117_DRM_SPI_PIXEL_BITS);
+		break;
 	}
 	writel(control, udrm->spi + UMS9117_DRM_SPI_CTL7);
 }
@@ -109,11 +121,13 @@ static int ums9117_drm_spi_word(struct ums9117_drm *udrm, u8 value,
 	if (ret)
 		goto out;
 	writel(UMS9117_DRM_SPI_TX_END, udrm->spi + UMS9117_DRM_SPI_INT_CLR);
-	writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL7) &
-		       ~UMS9117_DRM_SPI_RGB565,
-	       udrm->spi + UMS9117_DRM_SPI_CTL7);
+	status = readl(udrm->spi + UMS9117_DRM_SPI_CTL7);
+	status &= ~UMS9117_DRM_SPI_RGB565;
+	if (udrm->profile->spi_mode == UMS9117_DRM_SPI_DUAL_DATA)
+		status &= ~UMS9117_DRM_SPI_DATA_LINE2;
+	writel(status, udrm->spi + UMS9117_DRM_SPI_CTL7);
 	ums9117_drm_spi_channel_length(udrm, 8);
-	if (udrm->profile->spi_native_16bit)
+	if (udrm->profile->spi_mode == UMS9117_DRM_SPI_RAW16)
 		writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL0) & ~0xf00U,
 		       udrm->spi + UMS9117_DRM_SPI_CTL0);
 	if (command)
@@ -136,7 +150,7 @@ static int ums9117_drm_spi_word(struct ums9117_drm *udrm, u8 value,
 	writel(UMS9117_DRM_SPI_TX_END, udrm->spi + UMS9117_DRM_SPI_INT_CLR);
 	ret = ums9117_drm_spi_wait_idle(udrm->spi, deadline);
 out:
-	if (udrm->profile->spi_native_16bit &&
+	if (udrm->profile->spi_mode == UMS9117_DRM_SPI_RAW16 &&
 	    (ret || !command || value != MIPI_DCS_WRITE_MEMORY_START))
 		writel(readl(udrm->spi + UMS9117_DRM_SPI_CTL0) |
 			       UMS9117_DRM_SPI_CS0,
@@ -173,9 +187,23 @@ static int ums9117_drm_spi_init(struct ums9117_drm *udrm,
 
 static int ums9117_drm_spi_enable(struct ums9117_drm *udrm)
 {
+	u32 spi_mode;
 	u32 value;
 	int ret;
 
+	switch (udrm->profile->spi_mode) {
+	case UMS9117_DRM_SPI_9BIT:
+		spi_mode = UMS9117_DRM_SPI_MODE_3WIRE_9BIT;
+		break;
+	case UMS9117_DRM_SPI_RAW16:
+		spi_mode = UMS9117_DRM_SPI_MODE_RAW_16BIT;
+		break;
+	case UMS9117_DRM_SPI_DUAL_DATA:
+		spi_mode = UMS9117_DRM_SPI_MODE_DUAL_DATA;
+		break;
+	default:
+		return -EINVAL;
+	}
 	ret = regmap_write(udrm->aon_apb, UMS9117_AON_SPI1_GATE_SET,
 			   UMS9117_AON_SPI1_GATE);
 	if (ret)
@@ -200,10 +228,7 @@ static int ums9117_drm_spi_enable(struct ums9117_drm *udrm)
 		       udrm->profile->spi_init_clock_divider :
 		       UMS9117_DRM_SPI_INIT_DIVIDER,
 	       udrm->spi + UMS9117_DRM_SPI_CLKD);
-	writel(udrm->profile->spi_native_16bit ?
-		       UMS9117_DRM_SPI_MODE_RAW_16BIT :
-		       UMS9117_DRM_SPI_MODE_3WIRE_9BIT,
-	       udrm->spi + UMS9117_DRM_SPI_CTL7);
+	writel(spi_mode, udrm->spi + UMS9117_DRM_SPI_CTL7);
 	writel(0, udrm->spi + UMS9117_DRM_SPI_CTL8);
 	writel(UMS9117_DRM_SPI_TX_END, udrm->spi + UMS9117_DRM_SPI_INT_CLR);
 	return 0;
