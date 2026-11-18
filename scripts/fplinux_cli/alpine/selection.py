@@ -125,13 +125,10 @@ def selected_packages(
     return _canonical_packages(tuple(owners), root)
 
 
-def _bundle_runtime_closure(
-    packages: Sequence[str], rootfs_packages: Sequence[str], root: Path
-) -> tuple[str, ...]:
-    """Extend optional main APKs with dependencies backed by current local aports."""
+def _local_runtime_closure(packages: Sequence[str], root: Path) -> set[str]:
+    """Follow main-package runtime dependencies backed by current local aports."""
     from .sources import aport_runtime_dependencies  # noqa: PLC0415 -- resolves producers here.
 
-    rootfs = set(rootfs_packages)
     resolved = set(packages)
     pending = list(packages)
     while pending:
@@ -139,13 +136,13 @@ def _bundle_runtime_closure(
         if aport_producer(package) != package:
             continue
         for name in aport_runtime_dependencies(root, package):
-            if name in rootfs or name in resolved:
+            if name in resolved:
                 continue
             aport = root / "alpine/aports" / aport_producer(name) / "APKBUILD"
             if aport.is_file():
                 resolved.add(name)
                 pending.append(name)
-    return _canonical_packages(tuple(resolved), root)
+    return resolved
 
 
 def bundle_packages(
@@ -172,13 +169,14 @@ def bundle_packages(
         if owners.get(package) == "platform":
             del owners[package]
     result = _canonical_packages(tuple(owners), root)
-    overlap = set(result) & set(rootfs_packages)
+    rootfs = _local_runtime_closure(rootfs_packages, root)
+    overlap = set(result) & rootfs
     if overlap:
         fail(
             "packages cannot be both rootfs-selected and bundle-published: "
             + ", ".join(sorted(overlap))
         )
-    return _bundle_runtime_closure(result, rootfs_packages, root)
+    return _canonical_packages(tuple(_local_runtime_closure(result, root) - rootfs), root)
 
 
 def shared_aport_sources(package: str, root: Path = ROOT) -> tuple[Path, ...]:

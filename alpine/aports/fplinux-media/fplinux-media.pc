@@ -1,0 +1,9 @@
+prefix=/usr
+libdir=${prefix}/lib
+includedir=${prefix}/include/fplinux
+
+Name: fplinux-media
+Description: Shared bounded media decoders
+Version: 1
+Libs: -L${libdir} -lfplinux-media
+Cflags: -I${includedir}

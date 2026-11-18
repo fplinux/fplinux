@@ -1,0 +1,42 @@
+---
+title: Music
+description: Play local MP3 and WAV files, choose a folder and keep music playing in the background.
+source:
+  - alpine/aports/fplinux-music
+  - alpine/aports/fplinux-media
+---
+
+Music is included in the system. Open **Music** from the application menu or select an MP3 or WAV file in [Files](/fplinux/use/files/). It plays MP3 and uncompressed PCM WAV files. A memory card is optional: files in **My files** work too.
+
+Choose **Options → Open file** to play one file, or **Open folder** to use the supported files in that folder as a queue. Music does not scan other folders. You can also select a supported file in [Files](/fplinux/use/files/); opening another file replaces the current track in the same Music application.
+
+## Playback controls
+
+| Key or command | Action |
+| --- | --- |
+| OK | Play or pause |
+| Left / Right | Previous or next track |
+| Hold Left / Right | Seek backwards or forwards until release |
+| Up / Down on Now playing | Raise or lower system Media volume |
+| Options → Stop | Stop and release the open file |
+| Options → Queue | Choose a track in the current queue |
+| Options → Repeat | Repeat the queue, repeat the current track, or turn repeat off |
+| Options → Details | View the current file's information |
+
+Previous returns to the start after at least three seconds of playback; before that, it selects the previous track. Manual track selection wraps around the queue. Repeat track applies at the natural end of a track and does not prevent choosing another one.
+
+The screen shows the track, playback state, elapsed time and progress. The header shows the current system Media volume, including changes from side keys. Artist information appears when the screen has room; Details remains available on smaller screens. MP3 duration can remain unknown until the decoder has enough information.
+
+## Background playback
+
+Returning Home, locking the keypad or switching the display off keeps music playing. Another application's playback can pause it; an application that opens without playing sound does not. Alarms interrupt music even when their sound is muted. After an interruption, the system resumes only playback that was paused by policy; music you paused yourself stays paused.
+
+Use Tasks to return to Music. Choosing its application tile also returns to Now playing. A new start restores the saved source and position paused, so it does not unexpectedly play music.
+
+On a phone with headphone detection, unplugging headphones pauses music before switching outputs. Press Play when you want it to continue. Output choices and [Media and Alarm volume](/fplinux/use/audio/#volume) are system settings.
+
+## Files and saved settings
+
+Music saves the source, position and repeat choice. Their lifetime follows the [home directory](/fplinux/use/files/): RAM-boot settings disappear at power-off; a microSD system card preserves them. A saving error does not mean the current playback failed.
+
+An open track can keep its memory card busy. Choose Stop or close Music before [safe removal](/fplinux/use/microsd/#remove-the-card-safely). If a data card disappears, playback stops and the source remains available to select again after reconnecting the card. This does not make a phone support hot swapping, and a card containing the running system is not an ejectable data card.

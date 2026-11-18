@@ -375,6 +375,52 @@ def _install_libtsm(tool: ToolInput, resources: Path, temporary: Path) -> None:
     subprocess.run(["pkg-config", "--modversion", "libtsm"], check=True)
 
 
+def _install_mpg123_headers(tool: ToolInput, temporary: Path) -> None:
+    """Prepare matching decoder headers and the original used by host tests."""
+    source_root = temporary / "mpg123"
+    _extract_archive(tool.archive, source_root)
+    source = source_root / f"mpg123-{tool.identity}"
+    subprocess.run(
+        [
+            "./configure",
+            "--disable-components",
+            "--enable-libmpg123",
+            "--disable-network",
+            "--with-audio=dummy",
+            "--with-cpu=generic",
+        ],
+        cwd=source,
+        check=True,
+    )
+    _install_file(source / "src/include/mpg123.h", Path("/opt/quality/include/mpg123.h"))
+    _install_file(source / "src/include/fmt123.h", Path("/opt/quality/include/fmt123.h"))
+    _install_file(tool.archive, Path("/opt/quality/src/mpg123.tar.bz2"))
+
+
+def _install_tinysoundfont_headers(
+    tool: ToolInput,
+    resources: Path,
+    temporary: Path,
+) -> None:
+    """Prepare the same bounded renderer header used by the target package."""
+    source = temporary / "tinysoundfont"
+    source.mkdir()
+    header = source / "tsf.h"
+    header.write_text(tool.archive.read_text(encoding="utf-8"), encoding="utf-8")
+    subprocess.run(
+        [
+            "patch",
+            "-p1",
+            "--input",
+            resources / "alpine/aports/fplinux-midi/borrowed-s16.patch",
+        ],
+        cwd=source,
+        check=True,
+    )
+    _install_file(header, Path("/opt/quality/include/tsf.h"))
+    _install_file(tool.archive, Path("/opt/quality/src/tsf.h"))
+
+
 def _install_quality_sources(resources: Path, destination: Path) -> None:
     """Install the captured source inputs consumed by offline quality tools."""
     shutil.copytree(resources / "quality/spreadtrum-flash", destination / "spreadtrum-flash")
@@ -459,6 +505,10 @@ def main() -> None:
         )
         _install_gui_headers(tools, temporary_root)
         _install_libtsm(tools["libtsm"], args.resources, temporary_root)
+        _install_mpg123_headers(tools["mpg123"], temporary_root)
+        _install_tinysoundfont_headers(tools["tinysoundfont"], args.resources, temporary_root)
+        for tool, filename in (("soundfont", "soundfont.tar.gz"),):
+            _install_file(tools[tool].archive, Path("/opt/quality/src") / filename)
         _install_terminal_font(args.resources, temporary_root, Path("/opt/quality/fonts"))
     _finish_environment(args.resources, args.recipe, args.generation)
 

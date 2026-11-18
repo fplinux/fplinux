@@ -929,34 +929,7 @@ int32_t MRE_ABI host_process_state(int32_t handle)
 		return 0; /* SDK VM_PMNG_UNLOAD. */
 	return app.exited ? 4 : app.visible ? 1 : 5;
 }
-void MRE_ABI host_volume(int32_t volume)
-{
-	check_guest_api_stack();
-	fprintf(stderr,
-		"AUDIO vm_set_volume(%d); isolated engine has no MIDI device\n",
-		volume);
-}
-int32_t MRE_ABI host_midi_play(uint8_t *data, int32_t bytes, int32_t repeat,
-			       event_fn callback)
-{
-	check_guest_api_stack();
-	if (bytes <= 0 || bytes > (int32_t)FILE_CAP ||
-	    !guest_data(data, (size_t)bytes, PF_R) ||
-	    (callback && !guest_code((uintptr_t)callback)))
-		return -1;
-	fprintf(stderr,
-		"AUDIO vm_midi_play_by_bytes(%d,repeat=%d) -> -1 VM_MIDI_FAILED (no MIDI device)\n",
-		bytes, repeat);
-	return -1; /* SDK VM_MIDI_FAILED, no fabricated handle/callback. */
-}
-void MRE_ABI host_midi_stop(int32_t handle)
-{
-	check_guest_api_stack();
-	if (handle > 0)
-		fail("MIDI stop received an unknown successful device handle");
-	fprintf(stderr, "AUDIO vm_midi_stop(%d); no live MIDI handle\n",
-		handle);
-}
+#include "native-audio.inc"
 #include "native-format.inc"
 int32_t MRE_ABI host_vsprintf(char *out, const char *format, void *args)
 {
@@ -2131,6 +2104,7 @@ void MRE_ABI host_exit(void)
 {
 	check_guest_api_stack();
 	app.exited++;
+	native_audio_cleanup();
 	native_http_cancel_all();
 	fprintf(stderr,
 		"API vm_exit_app() -> exit requested; return to managed host dispatcher\n");
@@ -2492,8 +2466,10 @@ static int receive_viewer_command(char line[WIRE_LINE_BYTES])
 		app.deferred_count * sizeof(app.deferred[0]));
 	return 1;
 }
-static int utility_queue_http_line(const char *line)
+static int utility_queue_service_line(const char *line)
 {
+	if (native_audio_receive(line))
+		return 1;
 	if (strncmp(line, "HTTP_RESPONSE\t", 14))
 		return 0;
 	unsigned id;
@@ -2525,7 +2501,34 @@ static void utility_http_accept(uint32_t id)
 			__atomic_thread_fence(__ATOMIC_ACQUIRE);
 			return;
 		}
-		if (!utility_queue_http_line(line))
+		if (!utility_queue_service_line(line))
+			utility_defer_input(line);
+	}
+	_exit(0);
+}
+static int32_t native_audio_exchange(void)
+{
+	if (!app.shared || native_audio.sequence == INT32_MAX)
+		return -1;
+	uint32_t sequence = ++native_audio.sequence;
+	char outgoing[64], expected[64], line[WIRE_LINE_BYTES];
+
+	native_audio.request.sequence = sequence;
+	app.shared->audio_request = native_audio.request;
+	__atomic_thread_fence(__ATOMIC_RELEASE);
+	int length = snprintf(outgoing, sizeof(outgoing), "AUDIO_REQUEST\t%u\n",
+			      sequence);
+
+	write_protocol(outgoing, (size_t)length);
+	snprintf(expected, sizeof(expected), "AUDIO_REPLY\t%u", sequence);
+	while (receive_viewer_line(line)) {
+		if (!strcmp(line, expected)) {
+			__atomic_thread_fence(__ATOMIC_ACQUIRE);
+			if (app.shared->audio_response.sequence != sequence)
+				fail("audio shared response sequence mismatch");
+			return app.shared->audio_response.result;
+		}
+		if (!utility_queue_service_line(line))
 			utility_defer_input(line);
 	}
 	_exit(0);
@@ -2554,7 +2557,7 @@ static int utility_vfs_exchange(const struct mre_vfs_request *request,
 			*response = app.shared->vfs_response;
 			return 0;
 		}
-		if (!utility_queue_http_line(line))
+		if (!utility_queue_service_line(line))
 			utility_defer_input(line);
 	}
 	_exit(0); /* No callback may continue after its parent broker disappears. */
@@ -2577,7 +2580,7 @@ static int utility_snapshot_exchange(const char *virtual_path)
 		if (!strcmp(line, "SNAPSHOT_ERROR") ||
 		    !strncmp(line, "ERROR\t", 6))
 			return -1;
-		if (!utility_queue_http_line(line))
+		if (!utility_queue_service_line(line))
 			utility_defer_input(line);
 	}
 	_exit(0);
@@ -2606,13 +2609,7 @@ static int publish_frame(void)
 	while (receive_viewer_line(line)) {
 		if (!strcmp(line, expected))
 			return publish_frame();
-		if (!strncmp(line, "HTTP_RESPONSE\t", 14)) {
-			unsigned id;
-			int used;
-			if (sscanf(line + 14, "%u%n", &id, &used) != 1 ||
-			    line[14 + used])
-				fail("invalid HTTP response id while awaiting frame ACK");
-			(void)native_http_receive_response(id);
+		if (utility_queue_service_line(line)) {
 			continue;
 		}
 		if (strncmp(line, "KEY\t", 4) &&
@@ -2658,6 +2655,7 @@ static int receive_interactive_command(char line[WIRE_LINE_BYTES])
 			return receive_viewer_command(line);
 		if (native_http_response_pending())
 			native_http_dispatch_response();
+		native_audio_dispatch();
 		camera_dispatch_due();
 		media_dispatch_due();
 		editor_dispatch_due();
@@ -2674,7 +2672,8 @@ static int receive_interactive_command(char line[WIRE_LINE_BYTES])
 		if (!publish_frame())
 			return 0;
 		if (app.deferred_count || (app.visible && app.paint_pending) ||
-		    (native_http_response_pending()))
+		    native_http_response_pending() ||
+		    native_audio_events_pending())
 			continue;
 		int timeout_ms = -1;
 		uint64_t now = monotonic_ms();
@@ -2734,6 +2733,7 @@ static void cleanup(void)
 {
 	camera_cleanup();
 	media_cleanup();
+	native_audio_cleanup();
 	editor_cleanup();
 	native_http_cancel_all();
 	while (app.canvases)

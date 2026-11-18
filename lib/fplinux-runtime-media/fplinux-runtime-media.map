@@ -1,0 +1,11 @@
+FPLINUX_RUNTIME_MEDIA_1 {
+	global:
+		fplinux_runtime_media_open;
+		fplinux_runtime_media_close;
+		fplinux_runtime_media_create;
+		fplinux_runtime_media_destroy;
+		fplinux_runtime_media_command;
+		fplinux_runtime_media_info;
+		fplinux_runtime_media_set_visible;
+	local: *;
+};

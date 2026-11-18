@@ -3,7 +3,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import os
+import shutil
+import struct
+from dataclasses import dataclass
+from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -11,9 +16,6 @@ from tests import ROOT
 from tests.c_harness import compile_c
 from tests.gettext_support import gettext_link_flags
 from tests.process import run_process
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 @pytest.fixture(scope="module")
@@ -93,6 +95,7 @@ def client_frames(
             f"-I{ROOT / 'tests/host_tool/gui/screens'}",
             f"-I{directory}",
             str(ROOT / "tests/host_tool/gui/ui/ui-client-frames.c"),
+            str(ROOT / "tests/host_tool/gui/ui/ui-form-boundaries.c"),
             str(ROOT / "tests/host_tool/gui/ui/ui-screen-navigation.c"),
             str(ROOT / "tests/host_tool/gui/ui/ui-screen-wait.c"),
             str(ROOT / "tests/host_tool/gui/screens/ui-frame-peer.c"),
@@ -108,6 +111,354 @@ def client_frames(
         name="link the complete UI client and test compositor",
     )
     return executable
+
+
+@dataclass(frozen=True)
+class FormGeometry:
+    """Independent pixel expectations for one rendered Form surface."""
+
+    profile: str
+    width: int
+    height: int
+    title: int
+    row: int
+    margin: int
+    padding: int
+    spacing: int
+    caption_gap: int
+    three_rows: int
+
+
+@pytest.fixture(
+    scope="module",
+    params=[
+        FormGeometry("128x128", 128, 96, 25, 24, 4, 2, 4, 2, 71),
+        FormGeometry("128x160", 128, 126, 22, 23, 4, 2, 4, 2, 68),
+        FormGeometry("176x220", 176, 177, 26, 27, 6, 4, 6, 3, 80),
+        FormGeometry("240x320", 240, 268, 28, 33, 8, 6, 8, 4, 98),
+        FormGeometry("320x240", 320, 199, 28, 32, 6, 4, 6, 3, 95),
+    ],
+    ids=lambda geometry: geometry.profile,
+)
+def form_boundary_frames(
+    client_frames: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    request: pytest.FixtureRequest,
+) -> tuple[FormGeometry, Path]:
+    """Capture actual Form objects and LVGL pixels through the real client transport."""
+    geometry = cast("FormGeometry", request.param)
+    output = tmp_path_factory.mktemp(f"form-boundaries-{geometry.profile}")
+    try:
+        result = run_process(
+            [
+                str(client_frames),
+                f"form-boundaries-{geometry.profile}",
+                str(output / "session.sock"),
+                str(output),
+            ],
+            env={
+                "FPLINUX_TEST_FORM_KEYMAP": str(ROOT / "tests/host_tool/gui/ui/repeat-keymap.xkb")
+            },
+            name=f"render form boundaries at {geometry.profile}",
+            timeout=15,
+        )
+        (output / "capture.log").write_text(result.stdout + result.stderr, encoding="utf-8")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stdout.endswith(f"form-boundaries-{geometry.profile}: ok\n")
+    finally:
+        log_root = os.environ.get("FPLINUX_LOG_ROOT")
+        if log_root:
+            shutil.copytree(
+                output,
+                Path(log_root) / f"form-boundaries-{geometry.profile}",
+                dirs_exist_ok=True,
+                ignore=shutil.ignore_patterns("session.sock"),
+            )
+    return geometry, output
+
+
+def form_column(output: Path, name: str, geometry: FormGeometry) -> list[int]:
+    pixels = (output / f"{name}.rgb565").read_bytes()
+    assert len(pixels) == geometry.width * geometry.height * 2
+    return [
+        struct.unpack_from("<H", pixels, 2 * y * geometry.width)[0] for y in range(geometry.height)
+    ]
+
+
+def form_text_geometry(output: Path, name: str) -> tuple[int, ...]:
+    for line in (output / "geometry.tsv").read_text(encoding="utf-8").splitlines():
+        captured, *coordinates = line.split("\t")
+        if captured == name:
+            return tuple(map(int, coordinates))
+    raise AssertionError(f"missing form observation: {name}")
+
+
+# The captured light palette: accent #396173, border #bdc7ce, background #f7f7f7.
+FORM_ACCENT = 0x3B0E
+FORM_BORDER = 0xBE39
+FORM_BACKGROUND = 0xF7BE
+
+
+def test_form_choice_rows_touch_header_each_other_and_the_bottom_boundary(
+    form_boundary_frames: tuple[FormGeometry, Path],
+) -> None:
+    """Three adjacent rows fit with list geometry; a short terminal row has no divider."""
+    geometry, output = form_boundary_frames
+    first = form_column(output, "three-first", geometry)
+    last = form_column(output, "three-last", geometry)
+    assert first[geometry.title - 1] == FORM_BORDER
+    assert [y for y, colour in enumerate(first) if colour == FORM_ACCENT] == list(
+        range(geometry.title, geometry.title + geometry.row - 1)
+    )
+    assert [y for y in range(geometry.title, geometry.height) if first[y] == FORM_BORDER] == [
+        geometry.title + geometry.row - 1,
+        geometry.title + 2 * geometry.row - 1,
+    ]
+    highlighted = [y for y, colour in enumerate(last) if colour == FORM_ACCENT]
+    assert highlighted == list(
+        range(geometry.title + 2 * geometry.row, geometry.title + geometry.three_rows)
+    )
+    assert highlighted[-1] - geometry.title + 1 == geometry.three_rows
+
+    single = form_column(output, "single", geometry)
+    assert single[geometry.title + geometry.row - 1] == FORM_BACKGROUND
+    assert FORM_BORDER not in single[geometry.title :]
+    bottom = form_column(output, "long-bottom", geometry)
+    assert bottom[geometry.height - geometry.row] == FORM_BORDER
+    assert [y for y, colour in enumerate(bottom) if colour == FORM_ACCENT] == list(
+        range(geometry.height - geometry.row + 1, geometry.height)
+    )
+
+
+def test_form_content_and_choice_caption_keep_their_ordinary_spacing(
+    form_boundary_frames: tuple[FormGeometry, Path],
+) -> None:
+    """Text boundaries keep spacing, and the caption keeps its smaller row gap."""
+    geometry, output = form_boundary_frames
+    mixed = form_column(output, "mixed-first", geometry)
+    _, before_bottom, _, _, _ = form_text_geometry(output, "mixed-first")
+    selected = [y for y, colour in enumerate(mixed) if colour == FORM_ACCENT]
+    assert selected[0] - before_bottom - 1 == geometry.spacing
+    assert mixed[selected[0] + geometry.row - 1] == FORM_BORDER
+
+    bottom = form_column(output, "mixed-bottom", geometry)
+    _, _, after_top, _, _ = form_text_geometry(output, "mixed-bottom")
+    selected = [y for y, colour in enumerate(bottom) if colour == FORM_ACCENT]
+    assert after_top - selected[-1] - 2 == geometry.spacing
+    assert bottom[selected[-1] + 1] == FORM_BACKGROUND
+
+    caption = form_column(output, "caption", geometry)
+    _, _, _, caption_top, caption_bottom = form_text_geometry(output, "caption")
+    selected = [y for y, colour in enumerate(caption) if colour == FORM_ACCENT]
+    assert caption_top == geometry.title + geometry.padding
+    assert selected[0] - caption_bottom - 1 == geometry.caption_gap
+
+    before_top, before_bottom, after_top, _, _ = form_text_geometry(output, "text-only")
+    assert before_top == geometry.title + geometry.padding
+    assert after_top - before_bottom - 1 == geometry.spacing
+
+
+def test_form_item_mutations_have_the_same_pixels_as_the_final_visible_order(
+    form_boundary_frames: tuple[FormGeometry, Path],
+) -> None:
+    """Hide, show, delete, move and reset recalculate both edge and neighbor boundaries."""
+    _, output = form_boundary_frames
+    for changed, direct in (
+        ("hidden-text", "two-direct"),
+        ("hidden-row", "two-direct"),
+        ("shown-row", "three-first"),
+        ("deleted-row", "two-direct"),
+        ("shown-text", "text-between"),
+        ("mixed-moved", "mixed-first"),
+        ("reset-text", "text-only"),
+    ):
+        assert (output / f"{changed}.rgb565").read_bytes() == (
+            output / f"{direct}.rgb565"
+        ).read_bytes(), (changed, direct)
+
+
+@dataclass(frozen=True)
+class FormArea:
+    """Inclusive pixel bounds in the captured client surface."""
+
+    left: int
+    top: int
+    right: int
+    bottom: int
+
+
+@dataclass(frozen=True)
+class FormPropertyObservation:
+    """Geometry and command state recorded together for one displayed form."""
+
+    row: FormArea
+    name: FormArea
+    value: FormArea
+    next_row: FormArea
+    viewport: FormArea
+    focus: int
+    calls: int
+
+
+def form_property_observation(output: Path, name: str) -> FormPropertyObservation:
+    for line in (output / "properties.tsv").read_text(encoding="utf-8").splitlines():
+        captured, *coordinates = line.split("\t")
+        if captured != name:
+            continue
+        values = list(map(int, coordinates))
+        return FormPropertyObservation(
+            FormArea(*values[0:4]),
+            FormArea(*values[4:8]),
+            FormArea(*values[8:12]),
+            FormArea(*values[12:16]),
+            FormArea(*values[16:20]),
+            values[20],
+            values[21],
+        )
+    raise AssertionError(f"missing form property observation: {name}")
+
+
+def test_form_stacked_properties_divide_only_adjacent_visible_properties(
+    form_boundary_frames: tuple[FormGeometry, Path],
+) -> None:
+    """Property groups own their full-width line; paragraphs retain the String contract."""
+    geometry, output = form_boundary_frames
+    observation = form_property_observation(output, "properties")
+    pixels = (output / "properties.rgb565").read_bytes()
+    assert observation.name.left == geometry.margin
+    assert observation.name.top == geometry.title + geometry.padding
+    assert observation.value.top - observation.name.bottom - 1 == geometry.caption_gap
+    row_width = observation.row.right - observation.row.left + 1
+    assert (
+        struct.unpack_from(f"<{row_width}H", pixels, 2 * observation.row.bottom * geometry.width)
+        == (FORM_BORDER,) * row_width
+    )
+    assert observation.next_row.top - observation.row.bottom - 1 == geometry.spacing
+    bottom = form_property_observation(output, "properties-bottom")
+    assert bottom.next_row.bottom < geometry.height
+    assert (
+        form_column(output, "properties-bottom", geometry)[bottom.next_row.bottom] != FORM_BORDER
+    )
+    for name in ("strings", "properties-separated", "property-heading"):
+        assert FORM_BORDER not in form_column(output, name, geometry)[geometry.title :]
+
+    for changed, direct in (
+        ("properties-hidden", "properties"),
+        ("properties-deleted", "properties"),
+        ("properties-empty", "properties"),
+        ("properties-empty-cleared", "properties"),
+        ("properties-empty-filled", "properties-separated"),
+        ("properties-moved-apart", "properties-separated"),
+        ("properties-moved-together", "properties-after-text"),
+    ):
+        assert (output / f"{changed}.rgb565").read_bytes() == (
+            output / f"{direct}.rgb565"
+        ).read_bytes(), (changed, direct)
+
+
+def test_form_value_commands_preserve_geometry_and_follow_item_lifecycle(
+    form_boundary_frames: tuple[FormGeometry, Path],
+) -> None:
+    """A metric becomes an action in place; commands and focus follow hide, move and delete."""
+    geometry, output = form_boundary_frames
+    readonly = form_property_observation(output, "values")
+    action = form_property_observation(output, "values-command")
+    assert readonly.row.bottom - readonly.row.top + 1 == geometry.row
+    assert readonly.name.top == readonly.value.top
+    assert readonly.name.left == geometry.margin
+    assert readonly.value.right == geometry.width - geometry.margin - 1
+    assert readonly.next_row.top == readonly.row.bottom + 1
+    column = form_column(output, "values", geometry)
+    assert column[readonly.row.bottom] == FORM_BORDER
+    assert column[readonly.next_row.bottom] == FORM_BACKGROUND
+    assert readonly.focus > 1
+    assert action.focus == 0
+    assert form_column(output, "values-command", geometry)[action.row.top : action.row.bottom] == [
+        FORM_ACCENT
+    ] * (geometry.row - 1)
+    for name in ("values-command", "values-activated", "values-command-removed"):
+        changed = form_property_observation(output, name)
+        assert (changed.row, changed.name, changed.value, changed.next_row) == (
+            readonly.row,
+            readonly.name,
+            readonly.value,
+            readonly.next_row,
+        )
+    assert form_property_observation(output, "values-activated").calls == 1
+    assert form_property_observation(output, "values-command-removed").focus > 1
+    assert (output / "values.rgb565").read_bytes() == (
+        output / "values-command-removed.rgb565"
+    ).read_bytes()
+    assert form_property_observation(output, "values-action-hidden").focus == 1
+    assert form_property_observation(output, "values-action-moved").focus == 1
+    assert form_property_observation(output, "values-action-deleted").focus == 0
+
+
+def test_form_long_values_wrap_update_and_read_before_focus_moves(
+    form_boundary_frames: tuple[FormGeometry, Path],
+) -> None:
+    """A twenty-line action uses the final viewport width and reveals both reading directions."""
+    geometry, output = form_boundary_frames
+    short = form_property_observation(output, "values-command-restored")
+    wrapped = form_property_observation(output, "values-long-settled")
+    restored = form_property_observation(output, "values-short-update")
+    assert wrapped.focus == 0
+    assert wrapped.value.top - wrapped.name.bottom - 1 == geometry.caption_gap
+    assert wrapped.value.right - wrapped.value.left + 1 == (
+        geometry.width - 4 - 2 * geometry.margin
+    )
+    assert wrapped.value.bottom - wrapped.value.top + 1 == 20 * (
+        wrapped.name.bottom - wrapped.name.top + 1
+    )
+    assert (restored.row, restored.name, restored.value) == (short.row, short.name, short.value)
+
+    first = form_property_observation(output, "values-long-action")
+    step = form_property_observation(output, "values-long-step")
+    page = form_property_observation(output, "values-long-page")
+    next_item = form_property_observation(output, "values-long-next")
+    returned = form_property_observation(output, "values-long-return")
+    top = form_property_observation(output, "values-long-top")
+    assert step.focus == 0
+    assert step.value.bottom < first.value.bottom
+    assert page.focus == 0
+    assert page.value.bottom < step.value.bottom
+    assert next_item.focus == 1
+    assert returned.focus == 0
+    assert returned.name.top < returned.viewport.top
+    assert returned.value.bottom <= returned.viewport.bottom
+    assert top.focus == 0
+    assert top.name.top == first.name.top
+
+    hidden = form_property_observation(output, "values-action-offscreen")
+    assert hidden.row.bottom < hidden.viewport.top
+    assert hidden.focus > 1
+    assert hidden.calls == 0
+    assert form_property_observation(output, "values-offscreen-enter").calls == 0
+
+
+def test_form_value_omits_empty_caption_or_value_without_blank_lines(
+    form_boundary_frames: tuple[FormGeometry, Path],
+) -> None:
+    """NULL and empty strings omit the same half of a wrapped pair."""
+    _, output = form_boundary_frames
+    caption = form_property_observation(output, "value-empty-null")
+    text = form_property_observation(output, "caption-empty-settled")
+    short = form_property_observation(output, "values")
+    empty_area = FormArea(-1, -1, -1, -1)
+    assert caption.value == empty_area
+    assert text.name == empty_area
+    assert caption.name.top - caption.row.top == caption.row.bottom - caption.name.bottom - 1
+    assert text.value.top - text.row.top == text.row.bottom - text.value.bottom - 1
+    assert caption.name.bottom - caption.name.top + 1 == 3 * (
+        short.name.bottom - short.name.top + 1
+    )
+    for empty, null in (
+        ("value-empty-string", "value-empty-null"),
+        ("caption-empty-string", "caption-empty-null"),
+    ):
+        assert (output / f"{empty}.rgb565").read_bytes() == (
+            output / f"{null}.rgb565"
+        ).read_bytes()
 
 
 @pytest.mark.parametrize(
@@ -142,21 +493,21 @@ def test_runtime_navigation_preserves_application_ownership_and_runtime_choices(
     assert result.stdout.endswith(f"stack-{scenario}: ok\n")
 
 
-def test_view_settings_choices_use_real_form_and_keyboard(
+def test_view_settings_lists_reopen_current_choices_and_preserve_parent_focus(
     client_frames: Path, tmp_path: Path
 ) -> None:
     result = run_process(
         [
             str(client_frames),
-            "view-form",
+            "view-settings",
             str(tmp_path / "session.sock"),
             str(ROOT / "tests/host_tool/gui/ui/repeat-keymap.xkb"),
         ],
-        name="exercise runtime view choices on a real form",
+        name="exercise runtime view settings lists and confirmed choices",
         timeout=15,
         check=True,
     )
-    assert result.stdout.endswith("view-form: ok\n")
+    assert result.stdout.endswith("view-settings: ok\n")
 
 
 @pytest.mark.parametrize("scenario", ["fast", "slow", "cancel", "question", "legends"])
@@ -338,17 +689,18 @@ def test_failed_exit_send_closes_client_without_waiting_for_manager(
     assert result.stdout.endswith("disconnect: ok\n")
 
 
-def test_canvas_softkeys_keep_full_bar_alignment_without_redundant_frame(
-    client_frames: Path, tmp_path: Path
+@pytest.mark.parametrize("scenario", ["softkeys", "softkeys-fullscreen"])
+def test_canvas_softkeys_report_actual_visibility_without_redundant_frame(
+    client_frames: Path, tmp_path: Path, scenario: str
 ) -> None:
-    """The launcher-style real LVGL bar centres labels and leaves identical updates quiet."""
+    """Committed Canvas, Form and Alert bars report visibility and keep equal updates quiet."""
     result = run_process(
-        [str(client_frames), "softkeys", str(tmp_path / "session.sock")],
-        name="align Canvas legends and avoid a redundant client SHM frame",
+        [str(client_frames), scenario, str(tmp_path / "session.sock")],
+        name="publish actual local bar visibility after the client SHM frame",
         timeout=10,
         check=True,
     )
-    assert result.stdout.endswith("softkeys: ok\n")
+    assert result.stdout.endswith(f"{scenario}: ok\n")
 
 
 def test_session_receives_only_changed_final_legends_after_the_pass_frame(
@@ -477,6 +829,13 @@ def test_ui_close_releases_every_audio_stream_left_open_by_the_application(
     assert_media_audio_scenario(client_frames, tmp_path, "close")
 
 
+def test_granted_background_audio_keeps_io_without_vibration_or_frames(
+    client_frames: Path, tmp_path: Path
+) -> None:
+    """The real hidden UI can produce PCM without gaining hidden vibration permission."""
+    assert_media_audio_scenario(client_frames, tmp_path, "background")
+
+
 def test_ui_runtime_dispatches_audio_service_hup_before_the_next_application_write(
     client_frames: Path, tmp_path: Path
 ) -> None:
@@ -579,6 +938,19 @@ def test_cold_activation_runs_after_application_init_before_first_commit(
         check=True,
     )
     assert result.stdout.endswith("activation-cold: ok\n")
+
+
+def test_system_levels_cache_applied_snapshot_before_callback_and_first_frame(
+    client_frames: Path, tmp_path: Path
+) -> None:
+    """Ready zero, pending applied, unavailable and unknown remain distinct through the real UI."""
+    result = run_process(
+        [str(client_frames), "system-levels", str(tmp_path / "session.sock")],
+        name="observe applied system levels and correlated Media intents through the UI transport",
+        timeout=10,
+        check=True,
+    )
+    assert result.stdout.endswith("system-levels: ok\n")
 
 
 @pytest.mark.parametrize("scenario", ["document-accepted", "document-wait"])

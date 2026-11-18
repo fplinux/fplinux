@@ -22,22 +22,6 @@ PACKAGE_EMBEDDED_C_MARKER = "fplinux-check: package-embedded"
 APORT_C_SUFFIXES = frozenset({".c"})
 _PACKAGE_CONFIG_TIMEOUT = 30
 _QUALITY_INCLUDE = "/opt/quality/include"
-_LVGL_APORTS = frozenset(
-    {
-        "fplinux-calculator",
-        "fplinux-clocks",
-        "fplinux-example-apidemo",
-        "fplinux-files",
-        "fplinux-launcher",
-        "fplinux-mre",
-        "fplinux-phoneme",
-        "fplinux-settings",
-        "fplinux-snake",
-        "fplinux-notes",
-        "fplinux-terminal",
-        "fplinux-ui",
-    }
-)
 _UI_RUNTIME_SOURCE = "lib/fplinux/fplinux-ui.c"
 _LVGL_RUNTIME_SOURCES = frozenset(
     {
@@ -135,7 +119,15 @@ def userspace_c_include_flags(source: str) -> list[str]:
     path = PurePosixPath(source)
     flags = ["-I", "include"]
     aport = path.parts[2] if path.parts[:2] == APORT_ROOT and len(path.parts) >= 3 else None
-    if aport in _LVGL_APORTS or source in _LVGL_RUNTIME_SOURCES:
+    uses_ui = aport is not None and (
+        aport == "fplinux-ui"
+        or "fplinux-ui" in registration.LOCAL_BUILD_DEPENDENCIES.get(aport, ())
+    )
+    if (
+        uses_ui
+        or source in _LVGL_RUNTIME_SOURCES
+        or path.parts[:2] == ("lib", "fplinux-runtime-media")
+    ):
         flags.extend(
             (
                 "-isystem",
@@ -149,6 +141,12 @@ def userspace_c_include_flags(source: str) -> list[str]:
         flags.extend(pkg_config_cflags("xkbcommon"))
     if source == "lib/fplinux/fplinux-ui-session.c":
         flags.extend(pkg_config_cflags("json-c"))
+    if path.parts[:2] in {
+        ("lib", "fplinux-media"),
+        ("lib", "fplinux-midi"),
+        ("lib", "fplinux-runtime-media"),
+    }:
+        flags.extend(("-I", "include/fplinux", "-isystem", _QUALITY_INCLUDE))
     if source == "alpine/aports/fplinux-session/fplinux-shell.c":
         flags.extend(
             ("-isystem", _QUALITY_INCLUDE, "-isystem", f"{_QUALITY_INCLUDE}/libweston-16")

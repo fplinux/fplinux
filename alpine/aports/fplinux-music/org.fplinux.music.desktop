@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Music
+Name[ru]=Музыка
+Exec=/usr/bin/fplinux-music
+Icon=org.fplinux.music
+Categories=Audio;Music;
+X-FPLinux-FileExtensions=mp3;wav;
+X-FPLinux-Mode=integrated
+X-FPLinux-BackgroundAudio=true

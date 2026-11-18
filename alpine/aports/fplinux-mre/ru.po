@@ -101,20 +101,17 @@ msgstr "Продолжить"
 msgid "Open VXP"
 msgstr "Открыть VXP"
 
-msgid "Home storage: persistent"
-msgstr "Домашние файлы сохраняются"
-
-msgid "Home storage: lost after reboot"
-msgstr "Домашние файлы исчезнут после перезагрузки"
-
 msgid "Recent"
 msgstr "Недавние"
 
 msgid "Settings"
 msgstr "Настройки"
 
-msgid "Program settings"
-msgstr "Настройки программы"
+msgid "This program"
+msgstr "Эта программа"
+
+msgid "All programs"
+msgstr "Все программы"
 
 msgid "Unsaved"
 msgstr "Не сохранено"
@@ -137,11 +134,8 @@ msgstr "Выкл."
 msgid "On"
 msgstr "Вкл."
 
-msgid "Pointer mode"
-msgstr "Режим указателя"
+msgid "Pointer"
+msgstr "Указатель"
 
-msgid "Save"
-msgstr "Сохранить"
-
-msgid "Use defaults"
-msgstr "Общие настройки"
+msgid "Reset"
+msgstr "Сбросить"

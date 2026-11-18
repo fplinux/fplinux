@@ -260,52 +260,7 @@ int32_t MRE_ABI host_midi_play_resource(int32_t resource_id, int32_t repeat,
 		debug_trace(
 			"RESOURCE MIDI provider id=%d -> %p bytes=%d original guest buffer\n",
 			resource_id, data, length);
+		return host_midi_play(data, length, repeat, callback);
 	}
-	fprintf(stderr,
-		"AUDIO vm_midi_play(id=%d,repeat=%d) -> -1 VM_MIDI_FAILED (no MIDI device)\n",
-		resource_id, repeat);
-	return -1;
-}
-int32_t MRE_ABI host_midi_pause(int32_t handle)
-{
-	check_guest_api_stack();
-	debug_trace("AUDIO vm_midi_pause(%d) -> -1 (no live MIDI handle)\n",
-		    handle);
-	return -1;
-}
-int32_t MRE_ABI host_midi_resume(int32_t handle)
-{
-	check_guest_api_stack();
-	debug_trace("AUDIO vm_midi_resume(%d) -> -1 (no live MIDI handle)\n",
-		    handle);
-	return -1;
-}
-void MRE_ABI host_midi_stop_all(void)
-{
-	check_guest_api_stack();
-	debug_trace("AUDIO vm_midi_stop_all(); no live MIDI handles\n");
-}
-typedef void(MRE_ABI *sdk_audio_callback_fn)(int32_t);
-int32_t MRE_ABI host_audio_play_bytes(void *data, uint32_t bytes,
-				      uint8_t format, uint32_t start_time,
-				      uint32_t path,
-				      sdk_audio_callback_fn callback)
-{
-	check_guest_api_stack();
-	if (!bytes || bytes > FILE_CAP || !guest_data(data, bytes, PF_R) ||
-	    (callback && !guest_code((uintptr_t)callback)))
-		return -1;
-	fprintf(stderr,
-		"AUDIO vm_audio_play_bytes(bytes=%u,format=%u,start=%u,path=%u) -> -1 VM_AUDIO_FAILED (no audio device)\n",
-		bytes, format, start_time, path);
-	return -1;
-}
-int32_t MRE_ABI host_audio_stop(sdk_audio_callback_fn callback)
-{
-	check_guest_api_stack();
-	if (callback && !guest_code((uintptr_t)callback))
-		return -1;
-	debug_trace(
-		"AUDIO vm_audio_stop() -> -1 VM_AUDIO_FAILED (no live playback)\n");
 	return -1;
 }

@@ -146,6 +146,15 @@ input = "environment:vale-google"
 [tools.libtsm]
 input = "environment:libtsm"
 
+[tools.mpg123]
+input = "environment:mpg123"
+
+[tools.tinysoundfont]
+input = "environment:tinysoundfont"
+
+[tools.soundfont]
+input = "environment:soundfont"
+
 [tools.lvgl]
 input = "environment:lvgl"
 
@@ -179,6 +188,24 @@ arch = "x86_64"
 [[input]]
 key = "environment:node"
 source = "node"
+purpose = "environment-source"
+arch = "x86_64"
+
+[[input]]
+key = "environment:mpg123"
+source = "aport_mpg123_1_33_7_tar_bz2"
+purpose = "environment-source"
+arch = "x86_64"
+
+[[input]]
+key = "environment:tinysoundfont"
+source = "aport_tinysoundfont_853a0a17_h"
+purpose = "environment-source"
+arch = "x86_64"
+
+[[input]]
+key = "environment:soundfont"
+source = "aport_timgm6mb_1_3_tar_gz"
 purpose = "environment-source"
 arch = "x86_64"
 

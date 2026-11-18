@@ -35,8 +35,8 @@ global:
 	fplinux_ui_view_settings_load;
 	fplinux_ui_view_settings_store;
 	fplinux_ui_view_settings_reset;
-	fplinux_ui_view_settings_form_append;
-	fplinux_ui_view_settings_form_read;
+	fplinux_ui_view_settings_list_new;
+	fplinux_ui_view_settings_choice_new;
 	fplinux_ui_program_prefs_open;
 	fplinux_ui_open_file;
 	fplinux_ui_set_storage_handler;

@@ -72,6 +72,7 @@ class ReleaseArchiveInputs:
                 "host/fplinux-usb-keyboard",
                 "runtime-manifest.json",
                 "apks/demo.apk",
+                "apks/shared-runtime.apk",
                 "assets.lock.toml",
             ],
             "runtime_files": [
@@ -173,6 +174,7 @@ class ReleaseArchiveInputs:
             "scripts/fplinux_cli/runtime/ssh/transport.py": b"ssh helper\n",
             "platforms/demo/host/adapter.py": b"built adapter\n",
             "apks/demo.apk": b"built application\n",
+            "apks/shared-runtime.apk": b"built runtime dependency\n",
             "assets.lock.toml": b"built asset manifest\n",
             **(extra_files or {}),
         }
@@ -432,6 +434,8 @@ class ReleaseArchiveArtifactTests:
         assert files["LICENSE"] == b"project license\n"
         assert files["licenses/musl/COPYRIGHT"] == b"musl notice\n"
         assert files["image/ramboot.bin"] == b"ramboot\n"
+        assert files["apks/demo.apk"] == b"built application\n"
+        assert files["apks/shared-runtime.apk"] == b"built runtime dependency\n"
         assert files["scripts/fplinux_cli/runtime/events.py"] == inputs.event_helper
         assert (
             b"After unmounting data cards and making any system card read-only"
@@ -448,8 +452,7 @@ class ReleaseArchiveArtifactTests:
             & files.keys()
         )
         assert not any(
-            name.startswith(("data/", "logs/", ".cache/", "apks/", "docs/", "sources/"))
-            for name in files
+            name.startswith(("data/", "logs/", ".cache/", "docs/", "sources/")) for name in files
         )
         assert b"PRIVATE PREPARED PHONE DATA" not in b"".join(files.values())
         assert sources["project/source.c"] == b"controlled corresponding source\n"

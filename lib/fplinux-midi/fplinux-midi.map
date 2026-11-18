@@ -1,0 +1,19 @@
+FPLINUX_MIDI_1 {
+	global:
+		fplinux_midi_open_bytes;
+		fplinux_midi_open_tone;
+		fplinux_midi_open_tone_sequence;
+		fplinux_midi_close;
+		fplinux_midi_get_info;
+		fplinux_midi_prefetch;
+		fplinux_midi_unprefetch;
+		fplinux_midi_start;
+		fplinux_midi_pause;
+		fplinux_midi_release_active;
+		fplinux_midi_stop;
+		fplinux_midi_set_gain;
+		fplinux_midi_set_loop_count;
+		fplinux_midi_seek;
+		fplinux_midi_read;
+	local: *;
+};

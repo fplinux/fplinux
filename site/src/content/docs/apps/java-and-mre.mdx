@@ -6,7 +6,7 @@ source:
   - alpine/aports/fplinux-mre
 ---
 
-Java and MRE support come as optional packages. Follow [Packages](/fplinux/guides/packages/) to install the package for your files, together with its required APKs from the same build. MRE also needs `fplinux-font-terminus-8x16.apk` when that font is not already installed on the phone.
+Java and MRE support come as optional packages. Follow [Optional packages](/fplinux/guides/packages/) to install the package for your files, together with its required APKs from the same build. MRE also needs `fplinux-font-terminus-8x16.apk` when that font is not already installed on the phone.
 
 | Files | Package | Application |
 | --- | --- | --- |
@@ -23,9 +23,13 @@ Choosing the runtime's tile again opens its home screen and pauses the current p
 
 ## Display settings
 
-**Settings** on the runtime's home screen sets defaults. With a program open, its settings can override those defaults. **Fit** preserves the image's proportions, **Original size** centres it without scaling and clips any part outside the screen, and **Integer** uses whole-number enlargement or reduction. Rotation changes the image and directional controls together.
+Open **Settings** on the runtime's home screen. With no program running, this opens the defaults for all programs. With a program running, choose **This program** or **All programs**. Each setting opens a list of values; choosing a value applies and saves it immediately, then returns to Settings. **Reset** in This program removes its overrides and uses the current defaults.
 
-phoneME also offers a Canvas size: the phone's available area, 128×128, 128×160, 176×208, 176×220, 240×320 or 320×240. Choose a size that suits the program; its filename does not select one. A Canvas-size change takes effect the next time the Java program starts. Scale and rotation apply to the running image. MRE keeps its existing guest display size and offers a pointer setting for programs that support pointer input.
+**Scale → Fit** preserves the image's proportions, **1:1** centres it without scaling and clips any part outside the screen, and **Integer** uses whole-number enlargement or reduction. **Rotation** changes the image and directional controls together. These settings apply to the running image.
+
+phoneME also offers **Size**: **Auto** uses the phone's available area; the other choices are 128×128, 128×160, 176×208, 176×220, 240×320 and 320×240. Choose a size that suits the program; its filename does not select one. A Size change takes effect the next time the Java program starts. MRE keeps its existing guest display size and offers **Pointer → Off / On** for programs that support pointer input.
+
+If saving fails, the chosen value remains applied and Settings shows **Unsaved** with an error message. Choose the value again to retry saving. A successful save in another settings scope does not clear the failed scope's marker. Settings follow the [home directory's lifetime](/fplinux/use/files/); a successful save during RAM boot does not preserve them after power-off.
 
 ## Java programs
 

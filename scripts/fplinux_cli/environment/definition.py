@@ -43,6 +43,7 @@ ENVIRONMENT_RECIPE_INPUTS = (
     "package-lock.json",
     "environment.lock.toml",
     "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",
+    "alpine/aports/fplinux-midi/borrowed-s16.patch",
     "alpine/aports/fplinux-font-terminus/APKBUILD",
 )
 
@@ -203,6 +204,9 @@ def load_environment_lock(root: Path | None = None) -> dict[str, Any]:
         "typos",
         "vale-google",
         "libtsm",
+        "mpg123",
+        "tinysoundfont",
+        "soundfont",
         "lvgl",
         "weston",
         "mesa-headers",

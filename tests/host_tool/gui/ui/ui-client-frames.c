@@ -5,6 +5,7 @@
 #include "fplinux-ui-audio.h"
 #include "fplinux-ui-fonts.h"
 #include "fplinux-ui-frame.h"
+#include "fplinux-ui-lights.h"
 #include "fplinux-ui-locale.h"
 #include "fplinux-ui-menu.h"
 #include "fplinux-ui-prefs.h"
@@ -12,12 +13,14 @@
 #include "fplinux-ui-screen.h"
 #include "fplinux-ui-session-internal.h"
 #include "fplinux-ui-storage.h"
+#include "fplinux-ui-system.h"
 #include "fplinux-ui-symbol-picker.h"
 #include "fplinux-ui-text.h"
 #include "fplinux-ui-vibration.h"
 #include "fplinux-ui-view-settings.h"
 #include "fplinux-ui.h"
 #include "ui-frame-peer.h"
+#include "ui-form-boundaries.h"
 #include "ui-screen-navigation.h"
 #include "ui-screen-wait.h"
 #include "xdg-shell-server-protocol.h"
@@ -54,6 +57,7 @@ struct application {
 	bool final_cleanup;
 	bool close_menu_on_change;
 	unsigned int menu_choices;
+	unsigned int level_events;
 };
 
 enum observation_type {
@@ -98,7 +102,9 @@ struct repeat_application {
 
 struct media_application {
 	int control;
+	uint32_t light_serial;
 	bool supported;
+	bool background;
 	bool closed;
 	bool root_deleted;
 	struct fplinux_audio_stream *streams[2];
@@ -160,6 +166,42 @@ static void application_event(struct fplinux_ui *ui,
 
 	if (event->type == FPLINUX_UI_EVENT_CLOSE) {
 		application->closed = true;
+		return;
+	}
+	if (event->type == FPLINUX_UI_EVENT_SYSTEM_LEVELS) {
+		struct fplinux_system_level_state state;
+		unsigned int update = application->level_events++;
+
+		assert(application->initialized && !event->session &&
+		       update < 4);
+		assert(fplinux_ui_system_level_get(
+			ui, FPLINUX_SYSTEM_LEVEL_MEDIA, &state));
+		assert(state.minimum == 0 && state.maximum == 10);
+		assert(state.availability ==
+		       (update < 2  ? FPLINUX_SYSTEM_LEVEL_READY :
+			update == 2 ? FPLINUX_SYSTEM_LEVEL_UNAVAILABLE :
+				      FPLINUX_SYSTEM_LEVEL_UNKNOWN));
+		assert(state.value == (update == 0 ? 7U :
+				       update == 1 ? 8U :
+						     0U));
+		assert(state.pending == (update == 0));
+		state.value = 3;
+		assert(fplinux_ui_system_level_get(
+			ui, FPLINUX_SYSTEM_LEVEL_MEDIA, &state));
+		assert(state.value == (update == 0 ? 7U :
+				       update == 1 ? 8U :
+						     0U));
+		assert(fplinux_ui_system_level_get(
+			ui, FPLINUX_SYSTEM_LEVEL_ALARM, &state));
+		assert(state.availability == FPLINUX_SYSTEM_LEVEL_READY &&
+		       state.value == 0 && !state.pending);
+		assert(fplinux_ui_system_level_get(
+			ui, FPLINUX_SYSTEM_LEVEL_BRIGHTNESS, &state));
+		assert(state.minimum == 1 && state.maximum == 10 &&
+		       state.availability == FPLINUX_SYSTEM_LEVEL_READY &&
+		       state.value == 4 && !state.pending);
+		paint(ui, 0x00ff00);
+		assert(write(application->control, "l", 1) == 1);
 		return;
 	}
 	if (event->type == FPLINUX_UI_EVENT_VISIBILITY) {
@@ -618,6 +660,40 @@ static void application_input(struct fplinux_ui *ui, int fd, short events,
 
 	assert(events == POLLIN);
 	assert(read(fd, &command, 1) == 1);
+	if (command >= '1' && command <= '9') {
+		if (command == '1' || command == '2')
+			lv_obj_set_hidden(application->softkeys,
+					  command == '1');
+		else if (command == '3' || command == '4')
+			lv_obj_set_hidden(
+				lv_obj_get_parent(application->softkeys),
+				command == '3');
+		else if (command == '5') {
+			lv_obj_delete(application->softkeys);
+			application->softkeys = NULL;
+		} else if (command == '6' || command == '8') {
+			struct fplinux_ui_screen *screen =
+				command == '6' ?
+					fplinux_ui_form_new(ui,
+							    "Full display") :
+					fplinux_ui_alert_new(
+						ui, FPLINUX_UI_ALERT_INFO,
+						"Help", "Local legends", 0);
+
+			assert(screen && fplinux_ui_push(ui, screen));
+		} else {
+			assert(fplinux_ui_pop(ui));
+		}
+		lv_refr_now(NULL);
+		assert(write(fd, &result, 1) == 1);
+		return;
+	}
+	if (command == 'z') {
+		assert(fplinux_ui_audio_volume_step(ui, 1));
+		assert(fplinux_ui_audio_volume_step(ui, -1));
+		assert(write(fd, "z", 1) == 1);
+		return;
+	}
 	if (command == 'N' || command == 'D' || command == 'C' ||
 	    command == 'P' || command == 'U' || command == 'A' ||
 	    command == 'E') {
@@ -806,6 +882,31 @@ static int run_application(int control, const char *scenario)
 
 	assert(ui);
 	application.ui = ui;
+	if (!strcmp(scenario, "system-levels")) {
+		struct fplinux_system_level_state state = { .value = 42 };
+		struct fplinux_ui_session_message spoof = {
+			.type = FPLINUX_UI_SESSION_SYSTEM_LEVELS,
+		};
+
+		assert(!fplinux_ui_send(ui, &spoof) && errno == EINVAL);
+		assert(!fplinux_ui_system_level_get(
+			       NULL, FPLINUX_SYSTEM_LEVEL_MEDIA, &state) &&
+		       errno == EINVAL);
+		assert(!fplinux_ui_system_level_get(
+			       ui, FPLINUX_SYSTEM_LEVEL_MEDIA, NULL) &&
+		       errno == EINVAL);
+		assert(!fplinux_ui_system_level_get(
+			       ui, (enum fplinux_system_level_kind) - 1,
+			       &state) &&
+		       errno == EINVAL);
+		assert(!fplinux_ui_system_level_get(
+			       ui, FPLINUX_SYSTEM_LEVEL_COUNT, &state) &&
+		       errno == EINVAL);
+		assert(!fplinux_ui_system_level_get(
+			       ui, FPLINUX_SYSTEM_LEVEL_MEDIA, &state) &&
+		       errno == EAGAIN);
+		assert(state.value == 42);
+	}
 	if (!strcmp(scenario, "storage-api"))
 		fplinux_ui_set_storage_handler(ui, application_storage,
 					       &application);
@@ -840,6 +941,8 @@ static int run_application(int control, const char *scenario)
 	application.final_cleanup = true;
 	fplinux_ui_close(ui);
 	assert(application.closed);
+	if (!strcmp(scenario, "system-levels"))
+		assert(application.level_events == 4);
 	if (!strcmp(scenario, "storage-api"))
 		assert(application.storage_callbacks == 1);
 	if (!strcmp(scenario, "close-decisions"))
@@ -886,49 +989,101 @@ static lv_obj_t *find_label(lv_obj_t *root, const char *prefix)
 	return NULL;
 }
 
-struct view_form_state {
+struct view_settings_state {
 	size_t focus;
+	size_t choice_focus;
+	bool choosing, current_marked;
 	enum fplinux_rgb565_scale scale;
 	enum fplinux_rgb565_rotation rotation;
 	bool scale_label, rotation_label, fit_label, zero_label;
 	bool integer_label, rotate_270_label;
 };
 
-struct view_form_application {
+struct view_settings_application {
 	struct application application;
-	struct fplinux_ui_screen *form;
-	struct fplinux_ui_view_fields fields;
+	struct fplinux_ui_screen *list;
+	struct fplinux_ui_screen *choice;
+	struct fplinux_ui_view_settings settings;
+	enum fplinux_ui_view_setting setting;
 };
 
-static void view_form_input(struct fplinux_ui *ui, int fd, short events,
-			    void *context)
+static void view_settings_changed(struct fplinux_ui *ui,
+				  struct fplinux_ui_screen *screen,
+				  size_t index, void *context)
 {
-	struct view_form_application *application = context;
-	struct fplinux_ui_view_settings settings =
-		fplinux_ui_view_settings_defaults();
-	struct view_form_state state;
+	struct view_settings_application *application = context;
+	static const char *const scales[] = { "Fit", "1:1", "Integer" };
+	static const char *const rotations[] = { "0°", "90°", "270°" };
+
+	assert(screen == application->choice && index < 3);
+	if (application->setting == FPLINUX_UI_VIEW_SCALE)
+		application->settings.scale = index;
+	else
+		application->settings.rotation = index;
+	application->choice = NULL;
+	assert(fplinux_ui_pop(ui));
+	assert(fplinux_ui_list_set_trailing_value(
+		application->list, application->setting,
+		application->setting == FPLINUX_UI_VIEW_SCALE ?
+			scales[index] :
+			rotations[index]));
+}
+
+static void view_settings_command(struct fplinux_ui *ui,
+				  struct fplinux_ui_screen *screen, int command,
+				  void *context)
+{
+	struct view_settings_application *application = context;
+
+	assert(screen == application->list &&
+	       command == FPLINUX_UI_SELECT_COMMAND);
+	application->setting = fplinux_ui_list_get_focused(screen);
+	application->choice = fplinux_ui_view_settings_choice_new(
+		ui, application->setting, &application->settings);
+	assert(application->choice);
+	fplinux_ui_screen_set_listener(application->choice, NULL,
+				       view_settings_changed, application);
+	assert(fplinux_ui_push(ui, application->choice));
+}
+
+static void view_settings_input(struct fplinux_ui *ui, int fd, short events,
+				void *context)
+{
+	struct view_settings_application *application = context;
+	struct view_settings_state state;
+	size_t current;
 	char command;
 
 	assert(events == POLLIN && read(fd, &command, 1) == 1);
 	if (command == 'I') {
-		application->form = fplinux_ui_form_new(ui, "View settings");
-		assert(application->form);
-		assert(fplinux_ui_view_settings_form_append(
-			application->form, &settings, &application->fields));
-		fplinux_ui_form_set_focus(application->form,
-					  application->fields.scale);
-		assert(fplinux_ui_push(ui, application->form));
+		application->settings = fplinux_ui_view_settings_defaults();
+		application->list = fplinux_ui_view_settings_list_new(
+			ui, "View settings", &application->settings);
+		assert(application->list);
+		fplinux_ui_screen_set_listener(application->list,
+					       view_settings_command, NULL,
+					       application);
+		assert(fplinux_ui_push(ui, application->list));
 	} else {
-		assert(command == 'Q' && application->form);
+		assert(command == 'Q' && application->list);
 	}
-	assert(fplinux_ui_view_settings_form_read(
-		application->form, &application->fields, &settings));
 	lv_obj_update_layout(fplinux_ui_screen(ui));
 	lv_refr_now(NULL);
-	state = (struct view_form_state){
-		.focus = fplinux_ui_form_get_focus(application->form),
-		.scale = settings.scale,
-		.rotation = settings.rotation,
+	current = application->setting == FPLINUX_UI_VIEW_SCALE ?
+			  application->settings.scale :
+			  application->settings.rotation;
+	state = (struct view_settings_state){
+		.focus = fplinux_ui_list_get_focused(application->list),
+		.choice_focus = application->choice ?
+					fplinux_ui_list_get_focused(
+						application->choice) :
+					SIZE_MAX,
+		.choosing = application->choice != NULL,
+		.current_marked = application->choice &&
+				  fplinux_ui_list_is_selected(
+					  application->choice, current),
+		.scale = application->settings.scale,
+		.rotation = application->settings.rotation,
 		.scale_label = find_label(fplinux_ui_screen(ui), "Scale") !=
 			       NULL,
 		.rotation_label =
@@ -943,21 +1098,22 @@ static void view_form_input(struct fplinux_ui *ui, int fd, short events,
 	assert(write(fd, &state, sizeof(state)) == (ssize_t)sizeof(state));
 }
 
-static int run_view_form_application(int control)
+static int run_view_settings_application(int control)
 {
-	struct view_form_application application = {
+	struct view_settings_application application = {
 		.application = { .control = control },
 	};
-	struct fplinux_ui *ui = fplinux_ui_open("org.fplinux.view-form-test",
-						application_event,
-						&application.application);
+	struct fplinux_ui *ui =
+		fplinux_ui_open("org.fplinux.view-settings-test",
+				application_event, &application.application);
 	int result;
 
 	assert(ui);
 	application.application.ui = ui;
 	paint(ui, 0xff0000);
 	lv_refr_now(NULL);
-	fplinux_ui_watch_fd(ui, control, POLLIN, view_form_input, &application);
+	fplinux_ui_watch_fd(ui, control, POLLIN, view_settings_input,
+			    &application);
 	application.application.initialized = true;
 	result = fplinux_ui_run(ui);
 	fplinux_ui_close(ui);
@@ -1992,6 +2148,12 @@ static int run_repeat_application(int control)
 static void assert_media_guard(struct fplinux_ui *ui, int error)
 {
 	const unsigned int pattern[] = { 0, 200 };
+	const struct fplinux_ui_light_effect effect = {
+		.resources = 3,
+		.display_level = 2,
+	};
+	int light_error = fplinux_ui_light_effects_supported(ui) ? EAGAIN :
+								   ENOTSUP;
 
 	assert(!fplinux_ui_audio_open(ui, 7999, 1) && errno == EINVAL);
 	assert(!fplinux_ui_audio_open(ui, 8000, 3) && errno == EINVAL);
@@ -2000,6 +2162,8 @@ static void assert_media_guard(struct fplinux_ui *ui, int error)
 	assert(!fplinux_ui_audio_open(ui, 8000, 1) && errno == error);
 	assert(!fplinux_ui_vibration_play(ui, pattern, 2, false) &&
 	       errno == error);
+	assert(!fplinux_ui_light_effects_apply(ui, &effect, NULL) &&
+	       errno == light_error);
 }
 
 static void media_application_event(struct fplinux_ui *ui,
@@ -2021,10 +2185,20 @@ static void media_application_event(struct fplinux_ui *ui,
 		       application->supported);
 		assert(fplinux_ui_vibration_supported(ui) ==
 		       application->supported);
-		assert(!fplinux_ui_audio_background_supported(ui));
-		if (!event->visible)
+		assert(fplinux_ui_audio_background_supported(ui) ==
+		       application->background);
+		assert(fplinux_ui_light_effects_supported(ui) ==
+		       (application->supported ? 3U : 0U));
+		if (!event->visible && !application->background)
 			assert_media_guard(
 				ui, application->supported ? EAGAIN : ENOTSUP);
+		if (!event->visible && application->background) {
+			const unsigned int pattern[] = { 0, 200 };
+
+			assert(!fplinux_ui_vibration_play(ui, pattern, 2,
+							  false) &&
+			       errno == EAGAIN);
+		}
 		if (application->frame) {
 			assert(lv_timer_get_paused(application->timer) ==
 			       !event->visible);
@@ -2047,9 +2221,10 @@ static void media_application_event(struct fplinux_ui *ui,
 	} else if (event->type == FPLINUX_UI_EVENT_LIFECYCLE) {
 		if (fplinux_ui_lifecycle(ui) == FPLINUX_UI_CLOSING)
 			return;
-		assert(fplinux_ui_is_visible(ui));
+		assert(fplinux_ui_is_visible(ui) || application->background);
 		if (fplinux_ui_lifecycle(ui) == FPLINUX_UI_BACKGROUND) {
-			assert_media_guard(ui, EAGAIN);
+			if (!application->background)
+				assert_media_guard(ui, EAGAIN);
 			result = 'B';
 		} else {
 			assert(fplinux_ui_lifecycle(ui) ==
@@ -2057,7 +2232,28 @@ static void media_application_event(struct fplinux_ui *ui,
 			result = 'F';
 		}
 	} else if (event->type == FPLINUX_UI_EVENT_SESSION &&
+		   event->session->type == FPLINUX_UI_SESSION_CONFIG) {
+		application->background = event->session->background_audio;
+		assert(fplinux_ui_audio_background_supported(ui) ==
+		       application->background);
+		assert(fplinux_ui_light_effects_supported(ui) ==
+		       event->session->light_effects);
+		result = 'C';
+	} else if (event->type == FPLINUX_UI_EVENT_SESSION &&
+		   event->session->type == FPLINUX_UI_SESSION_LIGHT_EFFECT) {
+		assert(event->session->serial == application->light_serial);
+		assert(!event->session->light_effect.resources);
+		result = 'L';
+	} else if (event->type == FPLINUX_UI_EVENT_SESSION &&
 		   event->session->type == FPLINUX_UI_SESSION_ERROR) {
+		if (!strcmp(event->session->name, "light_effect")) {
+			assert(event->session->serial ==
+			       application->light_serial);
+			assert(!strcmp(event->session->reason, "unavailable"));
+			result = 'E';
+			assert(write(application->control, &result, 1) == 1);
+			return;
+		}
 		assert(!strcmp(event->session->name, "vibration"));
 		assert(!strcmp(event->session->reason, "Input/output error"));
 		result = 'e';
@@ -2108,6 +2304,36 @@ static void media_application_input(struct fplinux_ui *ui, int fd, short events,
 	case 's':
 		assert(fplinux_ui_vibration_stop(ui));
 		break;
+	case 'l': {
+		const struct fplinux_ui_light_effect invalid = { .resources =
+									 1 };
+		const struct fplinux_ui_light_effect effect = {
+			.resources = 3,
+			.display_level = 2,
+		};
+		uint32_t serial = 99;
+
+		assert(!fplinux_ui_light_effects_apply(ui, &invalid, &serial) &&
+		       errno == EINVAL);
+		assert(!serial);
+		assert(fplinux_ui_light_effects_apply(
+			ui, &effect, &application->light_serial));
+		assert(application->light_serial);
+		break;
+	}
+	case 'c':
+		assert(fplinux_ui_light_effects_clear(
+			ui, &application->light_serial));
+		assert(application->light_serial);
+		break;
+	case 'u':
+		assert(!fplinux_ui_audio_volume_step(ui, 0) && errno == EINVAL);
+		assert(fplinux_ui_audio_volume_step(ui, -1));
+		break;
+	case 'r':
+		assert(!fplinux_ui_audio_background_supported(ui));
+		assert_media_guard(ui, EAGAIN);
+		break;
 	case 'x':
 		assert(fplinux_ui_is_visible(ui));
 		assert(fplinux_ui_lifecycle(ui) == FPLINUX_UI_FOREGROUND);
@@ -2140,6 +2366,7 @@ static int run_media_application(int control, const char *scenario)
 	struct media_application application = {
 		.control = control,
 		.supported = strcmp(scenario, "media-unsupported") != 0,
+		.background = !strcmp(scenario, "media-audio-background"),
 	};
 	struct fplinux_ui *ui = fplinux_ui_open("org.fplinux.media-test",
 						media_application_event,
@@ -2150,7 +2377,8 @@ static int run_media_application(int control, const char *scenario)
 	lv_tick_set_cb(paused_tick);
 	assert(fplinux_ui_audio_supported(ui) == application.supported);
 	assert(fplinux_ui_vibration_supported(ui) == application.supported);
-	assert(!fplinux_ui_audio_background_supported(ui));
+	assert(fplinux_ui_audio_background_supported(ui) ==
+	       application.background);
 	assert(!fplinux_ui_audio_open(ui, 7999, 1) && errno == EINVAL);
 	if (!application.supported)
 		assert_media_guard(ui, ENOTSUP);
@@ -2325,11 +2553,11 @@ static void wait_input(struct fplinux_ui_frame_peer *compositor, int control,
 	assert(result == expected);
 }
 
-static struct view_form_state
-view_form_command(struct fplinux_ui_frame_peer *compositor, int control,
-		  char command)
+static struct view_settings_state
+view_settings_request(struct fplinux_ui_frame_peer *compositor, int control,
+		      char command)
 {
-	struct view_form_state state;
+	struct view_settings_state state;
 
 	assert(write(control, &command, 1) == 1);
 	fplinux_ui_frame_wait_readable(compositor, control);
@@ -2337,8 +2565,8 @@ view_form_command(struct fplinux_ui_frame_peer *compositor, int control,
 	return state;
 }
 
-static void view_form_key(struct fplinux_ui_frame_peer *compositor,
-			  unsigned int code)
+static void view_settings_key(struct fplinux_ui_frame_peer *compositor,
+			      unsigned int code)
 {
 	fplinux_ui_frame_send_key(&compositor->keyboards[0], code, true);
 	fplinux_ui_frame_send_key(&compositor->keyboards[0], code, false);
@@ -2358,10 +2586,10 @@ static void wait_changed_pixels(struct fplinux_ui_frame_peer *compositor,
 	memcpy(previous, compositor->pixels, bytes);
 }
 
-static void check_view_form(struct fplinux_ui_frame_peer *compositor,
-			    int control)
+static void check_view_settings(struct fplinux_ui_frame_peer *compositor,
+				int control)
 {
-	struct view_form_state state;
+	struct view_settings_state state;
 	size_t bytes = (size_t)compositor->width * compositor->height *
 		       sizeof(*compositor->pixels);
 	uint16_t *previous = malloc(bytes);
@@ -2369,53 +2597,81 @@ static void check_view_form(struct fplinux_ui_frame_peer *compositor,
 
 	assert(previous);
 	memcpy(previous, compositor->pixels, bytes);
-	state = view_form_command(compositor, control, 'I');
+	state = view_settings_request(compositor, control, 'I');
 	assert(state.focus == 0 && state.scale == FPLINUX_RGB565_FIT &&
 	       state.rotation == FPLINUX_RGB565_ROTATE_0);
 	assert(state.scale_label && state.rotation_label && state.fit_label &&
 	       state.zero_label);
 	wait_changed_pixels(compositor, previous);
 	fplinux_ui_frame_focus_keyboard(&compositor->keyboards[0]);
-	view_form_key(compositor, KEY_ENTER);
+	view_settings_key(compositor, KEY_ENTER);
 	deadline = fplinux_ui_frame_now_ms() + 3000;
 	do {
 		assert(fplinux_ui_frame_now_ms() < deadline);
-		state = view_form_command(compositor, control, 'Q');
+		state = view_settings_request(compositor, control, 'Q');
 	} while (!state.integer_label);
+	assert(state.choosing && state.choice_focus == 0 &&
+	       state.current_marked);
 	wait_changed_pixels(compositor, previous);
-	view_form_key(compositor, KEY_DOWN);
-	view_form_key(compositor, KEY_DOWN);
-	view_form_key(compositor, KEY_ENTER);
+	view_settings_key(compositor, KEY_DOWN);
+	view_settings_key(compositor, KEY_DOWN);
+	view_settings_key(compositor, KEY_ENTER);
 	deadline = fplinux_ui_frame_now_ms() + 3000;
 	do {
 		assert(fplinux_ui_frame_now_ms() < deadline);
-		state = view_form_command(compositor, control, 'Q');
+		state = view_settings_request(compositor, control, 'Q');
 	} while (state.scale != FPLINUX_RGB565_INTEGER);
-	assert(state.rotation == FPLINUX_RGB565_ROTATE_0 && state.focus == 0);
+	assert(!state.choosing && state.rotation == FPLINUX_RGB565_ROTATE_0 &&
+	       state.focus == 0);
 	wait_changed_pixels(compositor, previous);
-	view_form_key(compositor, KEY_DOWN);
+	view_settings_key(compositor, KEY_ENTER);
 	deadline = fplinux_ui_frame_now_ms() + 3000;
 	do {
 		assert(fplinux_ui_frame_now_ms() < deadline);
-		state = view_form_command(compositor, control, 'Q');
+		state = view_settings_request(compositor, control, 'Q');
+	} while (!state.choosing);
+	assert(state.choice_focus == 2 && state.current_marked);
+	wait_changed_pixels(compositor, previous);
+	view_settings_key(compositor, KEY_ENTER);
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	do {
+		assert(fplinux_ui_frame_now_ms() < deadline);
+		state = view_settings_request(compositor, control, 'Q');
+	} while (state.choosing);
+	wait_changed_pixels(compositor, previous);
+	view_settings_key(compositor, KEY_DOWN);
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	do {
+		assert(fplinux_ui_frame_now_ms() < deadline);
+		state = view_settings_request(compositor, control, 'Q');
 	} while (state.focus != 1);
-	view_form_key(compositor, KEY_ENTER);
+	view_settings_key(compositor, KEY_ENTER);
 	deadline = fplinux_ui_frame_now_ms() + 3000;
 	do {
 		assert(fplinux_ui_frame_now_ms() < deadline);
-		state = view_form_command(compositor, control, 'Q');
+		state = view_settings_request(compositor, control, 'Q');
 	} while (!state.rotate_270_label);
+	assert(state.choosing && state.choice_focus == 0 &&
+	       state.current_marked);
 	wait_changed_pixels(compositor, previous);
-	view_form_key(compositor, KEY_DOWN);
-	view_form_key(compositor, KEY_DOWN);
-	view_form_key(compositor, KEY_ENTER);
+	view_settings_key(compositor, KEY_DOWN);
+	view_settings_key(compositor, KEY_DOWN);
+	view_settings_key(compositor, KEY_ENTER);
 	deadline = fplinux_ui_frame_now_ms() + 3000;
 	do {
 		assert(fplinux_ui_frame_now_ms() < deadline);
-		state = view_form_command(compositor, control, 'Q');
+		state = view_settings_request(compositor, control, 'Q');
 	} while (state.rotation != FPLINUX_RGB565_ROTATE_270);
-	assert(state.focus == 1 && state.scale == FPLINUX_RGB565_INTEGER);
+	assert(!state.choosing && state.focus == 1 &&
+	       state.scale == FPLINUX_RGB565_INTEGER);
 	wait_changed_pixels(compositor, previous);
+	view_settings_key(compositor, KEY_ENTER);
+	deadline = fplinux_ui_frame_now_ms() + 3000;
+	do {
+		assert(fplinux_ui_frame_now_ms() < deadline);
+		state = view_settings_request(compositor, control, 'Q');
+	} while (!state.choosing);
+	assert(state.choice_focus == 2 && state.current_marked);
 	free(previous);
 }
 
@@ -3283,15 +3539,26 @@ static void check_softkeys(struct fplinux_ui_frame_peer *compositor,
 
 	assert(write(control, "s", 1) == 1);
 	wait_input(compositor, control, 'a');
-	/* Pushing the Canvas reports its empty commands; its drawn bar sends none. */
+	/* The Canvas reports its empty commands and the bar in its committed frame. */
 	legends =
 		wait_message(compositor, session, FPLINUX_UI_SESSION_SOFTKEYS);
 	assert(!legends.left[0] && !legends.centre[0] && !legends.right[0]);
+	assert(legends.visible);
 	wait_commits(compositor, 2);
 	fplinux_ui_frame_release_buffers(compositor);
 	assert(write(control, "u", 1) == 1);
 	wait_input(compositor, control, 'a');
 	assert_quiet(compositor, session, 2);
+	compositor->release_frames = true;
+	fplinux_ui_frame_release_buffers(compositor);
+	for (char command = '1'; command <= '9'; ++command) {
+		assert(write(control, &command, 1) == 1);
+		wait_input(compositor, control, 'a');
+		legends = wait_message(compositor, session,
+				       FPLINUX_UI_SESSION_SOFTKEYS);
+		assert(legends.visible == (command == '2' || command == '4' ||
+					   command == '6' || command == '8'));
+	}
 }
 
 /*
@@ -3326,6 +3593,7 @@ static void wait_legends_after(struct fplinux_ui_frame_peer *compositor,
 	}
 	assert(fplinux_ui_session_receive(session, &legends) == 1);
 	assert(legends.type == FPLINUX_UI_SESSION_SOFTKEYS);
+	assert(!legends.visible);
 	assert(!strcmp(legends.left, left) && !strcmp(legends.centre, centre) &&
 	       !strcmp(legends.right, right));
 	assert(wl_event_loop_dispatch(compositor->loop, 0) >= 0);
@@ -3783,10 +4051,22 @@ static void check_media_lifecycle(struct fplinux_ui_frame_peer *compositor,
 		.type = FPLINUX_UI_SESSION_ERROR,
 	};
 	unsigned int before = compositor->commits;
+	struct fplinux_ui_session_message light;
 
 	send_visibility(compositor, session, control, false);
 	/* Rejected hidden requests must not reach the manager or renderer. */
 	assert_quiet(compositor, session, before);
+	if (supported) {
+		assert(write(control, "c", 1) == 1);
+		wait_input(compositor, control, 'c');
+		light = wait_message(compositor, session,
+				     FPLINUX_UI_SESSION_LIGHT_EFFECT);
+		assert(light.serial == 1 && !light.light_effect.resources &&
+		       !light.light_effect.display_level &&
+		       !light.light_effect.keypad_on);
+		assert(fplinux_ui_session_send(session, &light));
+		wait_input(compositor, control, 'L');
+	}
 	send_visibility(compositor, session, control, true);
 	wait_commits(compositor, before + 1);
 	if (!supported)
@@ -3799,12 +4079,27 @@ static void check_media_lifecycle(struct fplinux_ui_frame_peer *compositor,
 	lifecycle.lifecycle = FPLINUX_UI_SESSION_FOREGROUND;
 	assert(fplinux_ui_session_send(session, &lifecycle));
 	wait_input(compositor, control, 'F');
+	assert(write(control, "l", 1) == 1);
+	wait_input(compositor, control, 'l');
+	light = wait_message(compositor, session,
+			     FPLINUX_UI_SESSION_LIGHT_EFFECT);
+	assert(light.serial == 2 && light.light_effect.resources == 3 &&
+	       light.light_effect.display_level == 2 &&
+	       !light.light_effect.keypad_on);
+	error.serial = light.serial;
+	strcpy(error.name, "light_effect");
+	strcpy(error.reason, "unavailable");
+	before = compositor->commits;
+	assert(fplinux_ui_session_send(session, &error));
+	wait_input(compositor, control, 'E');
+	assert_quiet(compositor, session, before);
 	assert(write(control, "v", 1) == 1);
 	wait_input(compositor, control, 'v');
 	assert_vibration_packet(compositor, session, false);
 	assert(write(control, "s", 1) == 1);
 	wait_input(compositor, control, 's');
 	assert_vibration_packet(compositor, session, true);
+	error.serial = 0;
 	strcpy(error.name, "vibration");
 	strcpy(error.reason, "Input/output error");
 	assert(fplinux_ui_session_send(session, &error));
@@ -4055,11 +4350,24 @@ static void answer_audio_open(struct fplinux_ui_frame_peer *compositor,
 }
 
 static void check_media_audio(struct fplinux_ui_frame_peer *compositor,
-			      int listener, int control,
-			      struct media_audio_peer *peer, bool hang_up)
+			      int session, int listener, int control,
+			      struct media_audio_peer *peer, bool hang_up,
+			      bool background)
 {
 	uint32_t hello[8];
 	unsigned int count = hang_up ? 1 : 2;
+	unsigned int before = compositor->commits;
+
+	if (background) {
+		struct fplinux_ui_session_message lifecycle = {
+			.type = FPLINUX_UI_SESSION_LIFECYCLE,
+			.lifecycle = FPLINUX_UI_SESSION_BACKGROUND,
+		};
+
+		send_visibility(compositor, session, control, false);
+		assert(fplinux_ui_session_send(session, &lifecycle));
+		wait_input(compositor, control, 'B');
+	}
 
 	assert(write(control, "o", 1) == 1);
 	peer->fd = fplinux_ui_frame_accept_session(compositor, listener);
@@ -4078,6 +4386,26 @@ static void check_media_audio(struct fplinux_ui_frame_peer *compositor,
 		assert(atomic_load(&peer->rings[i]->state) == 0);
 		samples = (const int16_t *)((const char *)peer->rings[i] + 64);
 		assert(!memcmp(samples, expected, sizeof(expected)));
+	}
+	if (background) {
+		struct fplinux_ui_session_message volume;
+		struct fplinux_ui_session_message revoke = {
+			.type = FPLINUX_UI_SESSION_CONFIG,
+			.audio = true,
+			.vibration = true,
+		};
+
+		assert_quiet(compositor, session, before);
+		assert(write(control, "u", 1) == 1);
+		wait_input(compositor, control, 'u');
+		volume = wait_message(compositor, session,
+				      FPLINUX_UI_SESSION_SETTING);
+		assert(!strcmp(volume.name, "media_volume_step"));
+		assert(!strcmp(volume.value, "-1") && volume.serial);
+		assert(fplinux_ui_session_send(session, &revoke));
+		wait_input(compositor, control, 'C');
+		assert(write(control, "r", 1) == 1);
+		wait_input(compositor, control, 'r');
 	}
 	if (hang_up) {
 		assert(close(peer->fd) == 0);
@@ -4476,6 +4804,65 @@ static void check_runtime(struct fplinux_ui_frame_peer *compositor, int session,
 	finish_application(compositor, session, child);
 }
 
+static void send_system_levels(int session, unsigned int update)
+{
+	struct fplinux_ui_session_message message = {
+		.type = FPLINUX_UI_SESSION_SYSTEM_LEVELS,
+		.system_levels.level = {
+			[FPLINUX_SYSTEM_LEVEL_MEDIA] = {
+				.availability = FPLINUX_SYSTEM_LEVEL_READY,
+				.maximum = 10,
+				.value = 7,
+				.pending = true,
+			},
+			[FPLINUX_SYSTEM_LEVEL_ALARM] = {
+				.availability = FPLINUX_SYSTEM_LEVEL_READY,
+				.maximum = 10,
+			},
+			[FPLINUX_SYSTEM_LEVEL_BRIGHTNESS] = {
+				.availability = FPLINUX_SYSTEM_LEVEL_READY,
+				.minimum = 1,
+				.maximum = 10,
+				.value = 4,
+			},
+		},
+	};
+	struct fplinux_system_level_state *media =
+		&message.system_levels.level[FPLINUX_SYSTEM_LEVEL_MEDIA];
+
+	if (update) {
+		media->value = update == 1 ? 8 : 0;
+		media->pending = false;
+		if (update > 1)
+			media->availability =
+				update == 2 ? FPLINUX_SYSTEM_LEVEL_UNAVAILABLE :
+					      FPLINUX_SYSTEM_LEVEL_UNKNOWN;
+	}
+	assert(fplinux_ui_session_send(session, &message));
+}
+
+static void check_system_levels(struct fplinux_ui_frame_peer *compositor,
+				int session, int control)
+{
+	struct fplinux_ui_session_message first, second;
+
+	wait_input(compositor, control, 'l');
+	assert(compositor->commits == 1);
+	for (unsigned int update = 1; update < 4; ++update) {
+		send_system_levels(session, update);
+		wait_input(compositor, control, 'l');
+	}
+	assert(write(control, "z", 1) == 1);
+	first = wait_message(compositor, session, FPLINUX_UI_SESSION_SETTING);
+	second = wait_message(compositor, session, FPLINUX_UI_SESSION_SETTING);
+	assert(first.serial && second.serial && first.serial != second.serial);
+	assert(!strcmp(first.name, "media_volume_step") &&
+	       !strcmp(first.value, "1"));
+	assert(!strcmp(second.name, "media_volume_step") &&
+	       !strcmp(second.value, "-1"));
+	wait_input(compositor, control, 'z');
+}
+
 int main(int argc, char **argv)
 {
 	struct fplinux_ui_frame_peer compositor = { 0 };
@@ -4493,8 +4880,10 @@ int main(int argc, char **argv)
 	int audio_listener = -1;
 	pid_t child;
 	bool repeat, media, audio, navigation, waiting, marquee, damage,
-		view_form;
+		view_settings;
 	bool cold_activation;
+	bool form_boundaries;
+	int surface_height = 320;
 
 	assert(argc == 3 || argc == 4);
 	if (!strcmp(argv[1], "prefs-lazy")) {
@@ -4514,10 +4903,23 @@ int main(int argc, char **argv)
 	navigation = !strncmp(argv[1], "stack-", 6) || waiting;
 	marquee = !strncmp(argv[1], "marquee-", 8);
 	damage = !strncmp(argv[1], "damage-", 7);
-	view_form = !strcmp(argv[1], "view-form");
+	view_settings = !strcmp(argv[1], "view-settings");
+	form_boundaries = !strncmp(argv[1], "form-boundaries-", 16);
+	if (form_boundaries) {
+		const struct fplinux_ui_profile_spec *profile;
+
+		assert(sscanf(argv[1] + 16, "%dx%d", &config.screen_width,
+			      &config.screen_height) == 2);
+		profile = fplinux_ui_profile_spec(fplinux_ui_profile_for_screen(
+			config.screen_width, config.screen_height));
+		assert(profile);
+		surface_height = config.screen_height - profile->status_height -
+				 profile->softkey_height;
+	}
 	cold_activation = !strcmp(argv[1], "activation-cold");
-	assert((repeat || audio || navigation || view_form) == (argc == 4));
-	if (repeat || navigation || view_form)
+	assert((repeat || audio || navigation || view_settings ||
+		form_boundaries) == (argc == 4));
+	if (repeat || navigation || view_settings)
 		check_repeat_keymap(argv[3]);
 	if (audio)
 		audio_listener = fplinux_ui_frame_listen_session(argv[3]);
@@ -4543,8 +4945,11 @@ int main(int argc, char **argv)
 		if (navigation)
 			return fplinux_ui_test_navigation_client(control[1],
 								 argv[1]);
-		if (view_form)
-			return run_view_form_application(control[1]);
+		if (view_settings)
+			return run_view_settings_application(control[1]);
+		if (form_boundaries)
+			return fplinux_ui_test_form_boundaries_client(
+				control[1]);
 		if (!strncmp(argv[1], "runtime-", 8))
 			return run_runtime_application(control[1], argv[1]);
 		if (marquee)
@@ -4561,15 +4966,19 @@ int main(int argc, char **argv)
 					       320, NULL);
 	else
 		fplinux_ui_frame_init(
-			&compositor, wayland[0], 240, 320,
-			repeat || navigation || view_form ? argv[3] : NULL);
+			&compositor, wayland[0], config.screen_width,
+			surface_height,
+			form_boundaries ? getenv("FPLINUX_TEST_FORM_KEYMAP") :
+			repeat || navigation || view_settings ? argv[3] :
+								NULL);
 	if (!strcmp(argv[1], "runtime-early-close")) {
 		protocol_logger = wl_display_add_protocol_logger(
 			compositor.display, close_during_open, &early_close);
 		assert(protocol_logger);
 	}
 	compositor.release_frames = repeat || media || navigation || marquee ||
-				    view_form ||
+				    view_settings || form_boundaries ||
+				    !strcmp(argv[1], "system-levels") ||
 				    !strncmp(argv[1], "runtime-", 8) ||
 				    !strcmp(argv[1], "legends") ||
 				    !strcmp(argv[1], "close-decisions") ||
@@ -4587,12 +4996,21 @@ int main(int argc, char **argv)
 	    strcmp(argv[1], "text-decimal-any"))
 		strcpy(config.locale, "ru");
 	if (!strcmp(argv[1], "storage-api") || !strcmp(argv[1], "legends") ||
-	    !strcmp(argv[1], "damage-mode-hold") || navigation || view_form)
+	    !strcmp(argv[1], "damage-mode-hold") || navigation ||
+	    view_settings || form_boundaries)
 		config.mode = FPLINUX_UI_SESSION_INTEGRATED;
+	if (!strcmp(argv[1], "softkeys-fullscreen"))
+		config.mode = FPLINUX_UI_SESSION_FULLSCREEN;
 	strcpy(config.input_locale, "en");
 	config.audio = config.vibration =
 		media && strcmp(argv[1], "media-unsupported") != 0;
+	config.background_audio = !strcmp(argv[1], "media-audio-background");
+	config.light_effects = config.vibration ? 3 : 0;
+	if (!strcmp(argv[1], "system-levels"))
+		config.audio = true;
 	assert(fplinux_ui_session_send(session, &config));
+	if (!strcmp(argv[1], "system-levels"))
+		send_system_levels(session, 0);
 	if (!strcmp(argv[1], "runtime-early-close")) {
 		wait_application(&compositor, child, 0);
 		assert(early_close.sent && compositor.commits == 0);
@@ -4616,7 +5034,12 @@ int main(int argc, char **argv)
 	}
 	wait_message(&compositor, session, FPLINUX_UI_SESSION_READY);
 	wait_commits(&compositor, 1);
-	assert_colour(&compositor, cold_activation ? 0x07e0 : 0xf800);
+	if (!form_boundaries)
+		assert_colour(&compositor,
+			      cold_activation || !strcmp(argv[1],
+							 "system-levels") ?
+				      0x07e0 :
+				      0xf800);
 	if (!strncmp(argv[1], "runtime-", 8)) {
 		check_runtime(&compositor, session, control[0], child, argv[1]);
 		assert(close(session) == 0);
@@ -4631,18 +5054,25 @@ int main(int argc, char **argv)
 					    FPLINUX_UI_SESSION_ACTIVATION_ACK)
 				       .serial == 91);
 			assert(compositor.commits == 1);
-		} else if (waiting)
+		} else if (!strcmp(argv[1], "system-levels"))
+			check_system_levels(&compositor, session, control[0]);
+		else if (waiting)
 			fplinux_ui_test_wait_check(&compositor, session,
 						   control[0], argv[1]);
 		else if (navigation)
 			fplinux_ui_test_navigation_check(&compositor, session,
 							 control[0], argv[1]);
-		else if (view_form)
-			check_view_form(&compositor, control[0]);
+		else if (view_settings)
+			check_view_settings(&compositor, control[0]);
+		else if (form_boundaries)
+			fplinux_ui_test_form_boundaries_check(
+				&compositor, session, control[0], argv[3]);
 		else if (audio)
-			check_media_audio(&compositor, audio_listener,
+			check_media_audio(&compositor, session, audio_listener,
 					  control[0], &audio_peer,
-					  !strcmp(argv[1], "media-audio-hup"));
+					  !strcmp(argv[1], "media-audio-hup"),
+					  !strcmp(argv[1],
+						  "media-audio-background"));
 		else if (media)
 			check_media_lifecycle(&compositor, session, control[0],
 					      !strcmp(argv[1],
@@ -4661,7 +5091,8 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[1], "exit") ||
 			 !strcmp(argv[1], "metrics"))
 			check_exit(&compositor, session, control[0], child);
-		else if (!strcmp(argv[1], "softkeys"))
+		else if (!strcmp(argv[1], "softkeys") ||
+			 !strcmp(argv[1], "softkeys-fullscreen"))
 			check_softkeys(&compositor, session, control[0]);
 		else if (!strcmp(argv[1], "storage-api"))
 			check_storage_api(&compositor, session, control[0]);

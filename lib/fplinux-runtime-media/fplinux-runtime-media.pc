@@ -1,0 +1,11 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: fplinux-runtime-media
+Description: Bounded playback of guest audio resources
+Version: 1
+Requires: fplinux-ui fplinux-media fplinux-midi
+Libs: -L${libdir} -lfplinux-runtime-media -lpthread
+Cflags: -I${includedir}

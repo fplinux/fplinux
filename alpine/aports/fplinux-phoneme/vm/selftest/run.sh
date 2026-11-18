@@ -146,4 +146,14 @@ if ! cmp -s "${here}/lfscreens.expected" "${work}/lfscreens.txt"; then
 	fail "List and Alert LF check output differs (${work}/lfscreens.txt)"
 fi
 
-echo "phoneME self-test: PASS (vectors, hello, RMS, canvas, Form and List/Alert LF)"
+# The native playback path must fail honestly without a UI audio provider.
+# The same JAR's default AudioMIDlet requires a UI and is run separately.
+build_jar media "${here}/media.mf"
+"${qemu_arm}" -L "${sysroot}" "${headless}" --system-classes "${classes}" \
+	--timeout-ms 30000 "${work}/media.jar" \
+	fplinux.fixtures.media.HeadlessMediaMIDlet >"${work}/media-headless.txt"
+grep -qx 'PM-MEDIA headless failure honest' "${work}/media-headless.txt" &&
+	! grep -q '^PM-MEDIA FAIL ' "${work}/media-headless.txt" ||
+	fail "headless media error state differs (${work}/media-headless.txt)"
+
+echo "phoneME self-test: PASS (vectors, hello, RMS, canvas, Form, List/Alert LF and headless media)"

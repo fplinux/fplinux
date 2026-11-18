@@ -25,6 +25,7 @@
 
 #include "fplinux-pm-midp.h"
 #include "fplinux-pm-network.h"
+#include "../port/media/fplinux-pm-media.h"
 
 #define RUNNER_CLASS "org.fplinux.phoneme.Runner"
 #define EXIT_START_FAILED 1
@@ -80,6 +81,7 @@ static void finish(int exit_code)
 {
 	vm_exit_code = exit_code;
 	vm_state = FPLINUX_PM_VM_EXITED;
+	fplinux_pm_media_cleanup();
 	fplinux_pm_network_cleanup();
 	fplinux_pm_midp_cleanup();
 	release_start_strings();
@@ -132,6 +134,7 @@ bool fplinux_pm_vm_start(const struct fplinux_pm_vm_config *config)
 
 	vm_wakeup = config->wakeup;
 	vm_wakeup_context = config->wakeup_context;
+	fplinux_pm_media_set_wakeup(vm_wakeup, vm_wakeup_context);
 	vm_state = FPLINUX_PM_VM_RUNNING;
 	/* MIDP initialization sets VM system properties. */
 	JVM_Initialize();
@@ -164,6 +167,7 @@ int fplinux_pm_vm_slice(void)
 
 	threads = SNI_GetBlockedThreads(&count);
 	fplinux_pm_network_check_events(threads, count);
+	fplinux_pm_media_check_events(threads, count);
 	jlong delay_ms = JVM_TimeSlice();
 	if (delay_ms <= -2) {
 		int exit_code = JVM_CleanUp();
@@ -195,11 +199,13 @@ void fplinux_pm_vm_request_destroy(void)
 	vm_state = FPLINUX_PM_VM_DESTROYING;
 	destroy_pending = true;
 	fplinux_pm_network_cancel();
+	fplinux_pm_media_cancel();
 	deliver_requests();
 }
 
 void fplinux_pm_vm_set_visible(bool visible)
 {
+	fplinux_pm_media_set_visible(visible);
 	if (vm_state != FPLINUX_PM_VM_RUNNING || visible == vm_visible)
 		return;
 	vm_visible = visible;
@@ -242,6 +248,7 @@ void JVMSPI_CheckEvents(JVMSPI_BlockedThreadInfo *blocked_threads,
 {
 	(void)timeout;
 	fplinux_pm_network_check_events(blocked_threads, blocked_threads_count);
+	fplinux_pm_media_check_events(blocked_threads, blocked_threads_count);
 }
 
 static enum runner_request take_request(void)

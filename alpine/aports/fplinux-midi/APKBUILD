@@ -1,0 +1,65 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-midi
+pkgver=1
+pkgrel=0
+pkgdesc="Shared bounded MIDI and tone renderer for FPLinux applications"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="LGPL-2.1-or-later AND MIT"
+depends="fplinux-soundfont"
+makedepends_build="clang22 lld22 patch"
+makedepends_host="musl-dev"
+subpackages="$pkgname-dev"
+options="!check"
+source="
+	fplinux-midi.c
+	fplinux-midi-smf.c
+	fplinux-midi-tone.c
+	fplinux-midi-synth.c
+	fplinux-midi-internal.h
+	fplinux-midi.h
+	fplinux-midi.pc
+	fplinux-midi.map
+	@source:aport_tinysoundfont_853a0a17_h@
+	borrowed-s16.patch
+"
+builddir="$srcdir"
+
+prepare() {
+	mkdir -p upstream
+	sed 's/\r$//' tsf.h > upstream/tsf.h
+	builddir="$srcdir/upstream"
+	default_prepare
+	builddir="$srcdir"
+}
+
+build() {
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror -fPIC \
+		-isystem upstream -shared \
+		fplinux-midi.c fplinux-midi-smf.c fplinux-midi-tone.c fplinux-midi-synth.c \
+		-pthread -lm $LDFLAGS \
+		-Wl,-soname,libfplinux-midi.so.1 -Wl,--version-script=fplinux-midi.map \
+		-o libfplinux-midi.so.1
+}
+
+package() {
+	install -Dm755 libfplinux-midi.so.1 "$pkgdir/usr/lib/libfplinux-midi.so.1"
+	ln -s libfplinux-midi.so.1 "$pkgdir/usr/lib/libfplinux-midi.so"
+	install -Dm644 fplinux-midi.h "$pkgdir/usr/include/fplinux/fplinux-midi.h"
+	install -Dm644 fplinux-midi.pc "$pkgdir/usr/lib/pkgconfig/fplinux-midi.pc"
+	install -d "$pkgdir/usr/share/licenses/$pkgname"
+	sed -n '/   LICENSE (MIT)/,/^\*\//p' upstream/tsf.h \
+		> "$pkgdir/usr/share/licenses/$pkgname/TinySoundFont.txt"
+}
+
+sha512sums="
+3ce69ba7286be2efe404c13863b3b5fb71937a760f6b0c2502038f82563e641e242d826ed655b64dc66f7c648e44bf48665cb923f967cf5cfc4c7a0b34058a71  fplinux-midi.c
+dc56ce3a3a151f2915127a8aee2bf25e11daf066f3e7f3079f85171e054146780b32cf1cdf17d31dde8203cee17780cca7bbeece068d9a59b864a9e0043e3abd  fplinux-midi-smf.c
+6442f54ba03524f646a8f285857f5ce02558da0736960a070cc3c3b51b6571fd1d435431b274dede4790ddfd93c5548d34e4223d1388d269c1ce7a0f77e51981  fplinux-midi-tone.c
+cad8b4565c93b11be8e61357efdf4567426f25b699423d9d8373f9d5b01b59e6930b0e47eec321076171a73eaac0753539328fe8d66cb2278a00bf7ee6eb7965  fplinux-midi-synth.c
+e3d28c053edec990058a72f6ff1a065c4572a5773ca1f4d85cfc7b222b9a1958315c74a1791f012352fb1deb42b74d6f61c2e20486f9fb5922f9d5e6b82ce29d  fplinux-midi-internal.h
+8b86eaec0d203d5ccfa43b18f01c9f47ea0e8e30b46a4ec469dd71e0a7dba09319162b9f2fef14eaf1df74474e29eab11525c5b8f54c5a923d08f6ff5003c14b  fplinux-midi.h
+ebc6fdb2fc58d9e07ce367ffdf7faa889ad6660a065f728ee1d50282c4d0fda6dee1b51975f8507f80a96863542257ec41bed9222d7f3197724afc164568bc5b  fplinux-midi.pc
+abf4b2090482fa9dd9a31029a7d329819ee93200f4a886f9118f2a9d856a7ddcbecea8e28d2db1659f45dd74b5a8208a9d9b7744e45767d3af43c25b2cf906b1  fplinux-midi.map
+26d7bcaf9543d3829743b4c5b901dc1ca4fe9eabba339d03affca7b914675c6d92e412b93b7fc15a0a2a776519f2cebb687480d7dc65d0c40eefd196cfaa1168  borrowed-s16.patch
+"

@@ -46,7 +46,7 @@ static int dispatch_editor(void)
 			state = 0;
 			break;
 		}
-		if (!utility_queue_http_line(line))
+		if (!utility_queue_service_line(line))
 			utility_defer_input(line);
 	}
 	app.input_text[0] = 0;
@@ -120,7 +120,7 @@ static int dispatch_selector(void)
 			selected = app.input_text;
 			break;
 		}
-		if (!utility_queue_http_line(line))
+		if (!utility_queue_service_line(line))
 			utility_defer_input(line);
 	}
 	selector_fn callback = app.selector_callback;
@@ -146,7 +146,7 @@ static int guest_has_callbacks(void)
 	uint64_t now = monotonic_ms();
 	return camera_timeout_ms(now) >= 0 || media_timeout_ms(now) >= 0 ||
 	       editor_timeout_ms(now) >= 0 || native_http.active_id ||
-	       native_http_response_pending();
+	       native_http_response_pending() || native_audio_pending();
 }
 
 static void dispatch_viewer(void)
@@ -172,7 +172,7 @@ static void dispatch_viewer(void)
 			continue;
 		if (!receive_interactive_command(line))
 			break;
-		if (utility_queue_http_line(line))
+		if (utility_queue_service_line(line))
 			continue;
 		if (!strncmp(line, "KEY\t", 4)) {
 			int event, key, used;

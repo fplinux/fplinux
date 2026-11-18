@@ -147,6 +147,7 @@ class ProbeCliTests:
             "package.json",
             "package-lock.json",
             "alpine/aports/fplinux-libtsm/0001-xterm-function-keys.patch",
+            "alpine/aports/fplinux-midi/borrowed-s16.patch",
             "alpine/aports/fplinux-ui/APKBUILD",
             "alpine/aports/fplinux-font-terminus/APKBUILD",
             "alpine/aports/fplinux-icons/APKBUILD",

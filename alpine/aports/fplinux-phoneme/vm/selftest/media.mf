@@ -1,0 +1,7 @@
+Manifest-Version: 1.0
+MIDlet-Name: Media test
+MIDlet-Version: 1.0
+MIDlet-Vendor: FPLinux
+MIDlet-1: Media test,,fplinux.fixtures.media.AudioMIDlet
+MicroEdition-Configuration: CLDC-1.1
+MicroEdition-Profile: MIDP-2.0

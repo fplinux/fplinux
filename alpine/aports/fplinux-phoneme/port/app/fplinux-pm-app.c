@@ -44,10 +44,11 @@ enum command {
 	COMMAND_CLOSE,
 	COMMAND_CANCEL,
 	COMMAND_CONFIRM_CLOSE,
-	COMMAND_SAVE,
 	COMMAND_REMOVE,
 	COMMAND_RESET,
 };
+
+enum { AUX_RECENT = 1, AUX_SETTINGS };
 
 struct pm_app {
 	struct fplinux_ui *ui;
@@ -70,11 +71,11 @@ struct pm_app {
 	char home_path[PATH_MAX];
 	struct fplinux_ui_file_picker *picker;
 	struct fplinux_ui_screen *home, *auxiliary;
+	struct fplinux_ui_screen *settings_scope, *settings_choice;
 	struct fplinux_ui_prefs *prefs, *program_prefs;
 	struct fplinux_ui_recent recent;
 	struct fplinux_ui_view_settings defaults, settings;
-	struct fplinux_ui_view_fields settings_fields;
-	size_t size_field;
+	size_t setting_row;
 	unsigned int default_size, program_size, run_size;
 	unsigned int auxiliary_kind;
 	bool program_settings;
@@ -82,7 +83,7 @@ struct pm_app {
 	bool guest_fullscreen;
 	uint32_t open_request;
 	uint32_t storage_request;
-	bool home_storage_known, home_persistent, picker_requested;
+	bool picker_requested, prefs_error, program_prefs_error;
 	fplinux_pm_app_resize_fn resize;
 	void *resize_context;
 };
@@ -99,14 +100,35 @@ static void sync_visibility(struct pm_app *app);
 static void show_alert(struct pm_app *app, const char *title, const char *text);
 
 static bool save_preferences(struct pm_app *app, struct fplinux_ui_prefs *prefs,
-			     bool prepared)
+			     bool prepared, bool program)
 {
 	struct fplinux_storage_result result = { FPLINUX_STORAGE_UNPUBLISHED,
 						 errno ? errno : EIO };
+	bool failed;
 
 	if (prepared && prefs)
 		result = fplinux_ui_prefs_save(prefs);
-	if (result.state != FPLINUX_STORAGE_DURABLE) {
+	failed = result.state != FPLINUX_STORAGE_DURABLE;
+	if (program)
+		app->program_prefs_error = failed;
+	else
+		app->prefs_error = failed;
+	if (app->home)
+		fplinux_ui_screen_set_header_status(
+			app->home,
+			app->prefs_error || app->program_prefs_error ?
+				_("Unsaved") :
+				NULL,
+			NULL);
+	if (app->auxiliary && app->auxiliary_kind == AUX_SETTINGS)
+		fplinux_ui_screen_set_header_status(
+			app->auxiliary,
+			(app->program_settings ? app->program_prefs_error :
+						 app->prefs_error) ?
+				_("Unsaved") :
+				NULL,
+			NULL);
+	if (failed) {
 		show_alert(app,
 			   result.state == FPLINUX_STORAGE_PUBLISHED_UNSYNCED ?
 				   _("Saving not confirmed") :
@@ -173,7 +195,7 @@ void fplinux_pm_app_loaded(void)
 							    NULL) &&
 				fplinux_ui_recent_store(&app.recent, app.prefs);
 
-			save_preferences(&app, app.prefs, stored);
+			save_preferences(&app, app.prefs, stored, false);
 			free(path);
 		}
 	}
@@ -533,11 +555,11 @@ create_suite_screen(struct pm_app *app, const struct fplinux_pm_midlet *midlet)
 		fplinux_ui_form_append_image(form, NULL, &image);
 	free(png);
 	if (app->suite.vendor[0])
-		fplinux_ui_form_append_string(form, _("Vendor"),
-					      app->suite.vendor);
+		fplinux_ui_form_append_property(form, _("Vendor"),
+						app->suite.vendor);
 	if (app->suite.version[0])
-		fplinux_ui_form_append_string(form, _("Version"),
-					      app->suite.version);
+		fplinux_ui_form_append_property(form, _("Version"),
+						app->suite.version);
 	fplinux_ui_screen_add_command(form, &back_command);
 	fplinux_ui_screen_set_listener(form, leave_command, NULL, app);
 	return form;
@@ -570,6 +592,7 @@ static int start_midlet(struct pm_app *app,
 		;
 	app->home = NULL;
 	app->auxiliary = NULL;
+	app->settings_scope = app->settings_choice = NULL;
 	app->guest_active = true;
 	fplinux_ui_replace(app->ui, suite);
 	loading = fplinux_ui_alert_new(app->ui, FPLINUX_UI_ALERT_INFO,
@@ -643,6 +666,7 @@ static int choose_midlet(struct pm_app *app, size_t index)
 		fplinux_ui_prefs_close(app->program_prefs);
 		app->program_prefs = fplinux_ui_program_prefs_open(
 			FPLINUX_PM_APP_ID, key + 1);
+		app->program_prefs_error = app->program_prefs == NULL;
 		app->settings = app->defaults;
 		app->program_size = app->default_size;
 		if (app->program_prefs) {
@@ -806,6 +830,7 @@ open_document(struct fplinux_ui *ui,
 		;
 	app->home = NULL;
 	app->auxiliary = NULL;
+	app->settings_scope = app->settings_choice = NULL;
 	app->picker_requested = false;
 	fplinux_pm_suite_cleanup(&app->suite);
 	if (app->jar_directory >= 0)
@@ -829,15 +854,15 @@ open_document(struct fplinux_ui *ui,
 	return result;
 }
 
-enum { AUX_RECENT = 1, AUX_SETTINGS };
-
-static void add_command(struct fplinux_ui_screen *screen, int id,
-			enum fplinux_ui_command_type type, const char *label)
+static void add_command(struct pm_app *app, struct fplinux_ui_screen *screen,
+			int id, enum fplinux_ui_command_type type,
+			const char *label, const char *glyph)
 {
 	const struct fplinux_ui_command command = {
 		.id = id,
 		.type = type,
 		.label = label,
+		.icon = fplinux_ui_glyph(app->ui, glyph, FPLINUX_UI_GLYPH_ROW),
 	};
 
 	fplinux_ui_screen_add_command(screen, &command);
@@ -902,22 +927,6 @@ static void storage_result(struct fplinux_ui *ui,
 	(void)ui;
 	if (app->picker)
 		fplinux_ui_file_picker_storage_result(app->picker, result);
-	if (!result->error) {
-		app->home_storage_known = true;
-		app->home_persistent = result->snapshot.home_persistent;
-		if (app->home) {
-			bool guest = app->lifecycle.phase !=
-					     FPLINUX_PM_PHASE_PICKING &&
-				     app->lifecycle.phase !=
-					     FPLINUX_PM_PHASE_EXITED;
-
-			fplinux_ui_list_set(
-				app->home, guest ? 1 : 0, _("Open JAR"),
-				app->home_persistent ?
-					_("Home storage: persistent") :
-					_("Home storage: lost after reboot"));
-		}
-	}
 	if (result->request_id == app->storage_request &&
 	    app->storage_request) {
 		app->storage_request = 0;
@@ -948,8 +957,8 @@ static void show_recent(struct pm_app *app)
 					       _("Unavailable"));
 	}
 	if (app->recent.count)
-		add_command(screen, COMMAND_REMOVE, FPLINUX_UI_COMMAND_SCREEN,
-			    _("Remove"));
+		add_command(app, screen, COMMAND_REMOVE,
+			    FPLINUX_UI_COMMAND_SCREEN, _("Remove"), "delete");
 	fplinux_ui_screen_add_command(screen, &back_command);
 	fplinux_ui_screen_set_listener(screen, home_command, NULL, app);
 	app->auxiliary = screen;
@@ -957,38 +966,172 @@ static void show_recent(struct pm_app *app)
 	fplinux_ui_push(app->ui, screen);
 }
 
+static const char *size_label(unsigned int size)
+{
+	static const char *const sizes[] = { "128x128", "128x160", "176x208",
+					     "176x220", "240x320", "320x240" };
+
+	return size ? sizes[size - 1] : _("Auto");
+}
+
 static void show_settings(struct pm_app *app, bool program)
 {
-	const char *sizes[] = { _("Native"), "128x128", "128x160", "176x208",
-				"176x220",   "240x320", "320x240" };
 	struct fplinux_ui_view_settings shown = program ? app->settings :
 							  app->defaults;
-	struct fplinux_ui_screen *screen = fplinux_ui_form_new(
-		app->ui, program ? _("Program settings") : _("Settings"));
+	const char *title = program		? _("This program") :
+			    app->settings_scope ? _("All programs") :
+						  _("Settings");
+	struct fplinux_ui_screen *screen =
+		fplinux_ui_view_settings_list_new(app->ui, title, &shown);
+	bool replacing = app->auxiliary && app->auxiliary_kind == AUX_SETTINGS;
+	size_t row;
 
 	if (!screen)
 		return;
-	if (!fplinux_ui_view_settings_form_append(screen, &shown,
-						  &app->settings_fields))
-		return;
-	app->size_field = fplinux_ui_form_append_choice(
-		screen, _("Canvas size (next run)"), FPLINUX_UI_CHOICE_POPUP,
-		sizes, sizeof(sizes) / sizeof(sizes[0]));
-	if (app->size_field == SIZE_MAX)
-		return;
-	fplinux_ui_form_set_choice(screen, app->size_field,
-				   program ? app->program_size :
-					     app->default_size);
-	add_command(screen, COMMAND_SAVE, FPLINUX_UI_COMMAND_OK, _("Save"));
+	row = fplinux_ui_list_append(screen, _("Size"), NULL);
+	fplinux_ui_list_set_icon(screen, row,
+				 fplinux_ui_glyph(app->ui, "display",
+						  FPLINUX_UI_GLYPH_ROW),
+				 FPLINUX_UI_LIST_ICON_IMAGE);
+	fplinux_ui_list_set_trailing_value(
+		screen, row,
+		size_label(program ? app->program_size : app->default_size));
 	if (program)
-		add_command(screen, COMMAND_RESET, FPLINUX_UI_COMMAND_SCREEN,
-			    _("Use defaults"));
+		add_command(app, screen, COMMAND_RESET,
+			    FPLINUX_UI_COMMAND_SCREEN, _("Reset"), "refresh");
 	fplinux_ui_screen_add_command(screen, &back_command);
 	fplinux_ui_screen_set_listener(screen, home_command, NULL, app);
+	if (program ? app->program_prefs_error : app->prefs_error)
+		fplinux_ui_screen_set_header_status(screen, _("Unsaved"), NULL);
+	if (replacing)
+		fplinux_ui_list_set_focused(screen, app->setting_row);
 	app->program_settings = program;
 	app->auxiliary = screen;
 	app->auxiliary_kind = AUX_SETTINGS;
+	if (replacing)
+		fplinux_ui_replace(app->ui, screen);
+	else
+		fplinux_ui_push(app->ui, screen);
+}
+
+static void show_settings_scope(struct pm_app *app)
+{
+	struct fplinux_ui_screen *screen = fplinux_ui_list_new(
+		app->ui, _("Settings"), FPLINUX_UI_LIST_IMPLICIT);
+
+	if (!screen)
+		return;
+	fplinux_ui_list_append(screen, _("This program"), NULL);
+	fplinux_ui_list_append(screen, _("All programs"), NULL);
+	fplinux_ui_screen_add_command(screen, &back_command);
+	fplinux_ui_screen_set_listener(screen, home_command, NULL, app);
+	app->settings_scope = screen;
 	fplinux_ui_push(app->ui, screen);
+}
+
+static void save_settings(struct pm_app *app, bool reset, size_t selected)
+{
+	struct fplinux_ui_view_settings settings =
+		app->program_settings ? app->settings : app->defaults;
+	struct fplinux_ui_prefs *prefs =
+		app->program_settings ? app->program_prefs : app->prefs;
+	unsigned int size = app->program_settings ? app->program_size :
+						    app->default_size;
+	bool ok = prefs != NULL;
+
+	if (!ok)
+		errno = EIO;
+	if (reset) {
+		settings = app->defaults;
+		size = app->default_size;
+		ok = ok && fplinux_ui_view_settings_reset(prefs) &&
+		     fplinux_ui_prefs_remove(prefs, "canvas-size");
+	} else {
+		if (app->setting_row == FPLINUX_UI_VIEW_SCALE)
+			settings.scale = selected;
+		else if (app->setting_row == FPLINUX_UI_VIEW_ROTATION)
+			settings.rotation = selected;
+		else
+			size = selected;
+		ok = ok && fplinux_ui_view_settings_store(&settings, prefs) &&
+		     fplinux_ui_prefs_set_int(prefs, "canvas-size", size);
+	}
+	if (ok) {
+		fplinux_pm_keys_cancel(FPLINUX_UI_KEY_PHONE);
+		fplinux_pm_keys_cancel(FPLINUX_UI_KEY_KEYBOARD);
+		if (app->program_settings) {
+			app->settings = settings;
+			app->program_size = size;
+		} else {
+			app->defaults = settings;
+			app->default_size = size;
+			app->settings = settings;
+			app->program_size = size;
+			if (app->program_prefs) {
+				long long stored = fplinux_ui_prefs_get_int(
+					app->program_prefs, "canvas-size",
+					app->default_size);
+
+				fplinux_ui_view_settings_load(
+					&app->settings, app->program_prefs,
+					&app->defaults);
+				if (stored >= 0 && stored <= 6)
+					app->program_size =
+						(unsigned int)stored;
+			}
+		}
+		fplinux_pm_canvas_view_changed();
+	}
+	show_settings(app, app->program_settings);
+	save_preferences(app, prefs, ok, app->program_settings);
+}
+
+static void settings_changed(struct fplinux_ui *ui,
+			     struct fplinux_ui_screen *list, size_t selected,
+			     void *context)
+{
+	struct pm_app *app = context;
+
+	if (list != app->settings_choice ||
+	    selected >= (app->setting_row == 2 ? 7U : 3U))
+		return;
+	app->settings_choice = NULL;
+	fplinux_ui_pop(ui);
+	save_settings(app, false, selected);
+}
+
+static void open_settings_choice(struct pm_app *app)
+{
+	struct fplinux_ui_view_settings shown =
+		app->program_settings ? app->settings : app->defaults;
+	struct fplinux_ui_screen *list;
+
+	app->setting_row = fplinux_ui_list_get_focused(app->auxiliary);
+	if (app->setting_row < 2)
+		list = fplinux_ui_view_settings_choice_new(
+			app->ui, app->setting_row, &shown);
+	else if (app->setting_row == 2) {
+		unsigned int size = app->program_settings ? app->program_size :
+							    app->default_size;
+
+		list = fplinux_ui_list_new(app->ui, _("Size"),
+					   FPLINUX_UI_LIST_EXCLUSIVE);
+		if (list) {
+			for (unsigned int i = 0; i < 7; ++i)
+				fplinux_ui_list_append(list, size_label(i),
+						       NULL);
+			fplinux_ui_list_set_selected(list, size, true);
+			fplinux_ui_list_set_focused(list, size);
+		}
+	} else
+		return;
+	if (!list)
+		return;
+	fplinux_ui_screen_add_command(list, &back_command);
+	fplinux_ui_screen_set_listener(list, home_command, settings_changed,
+				       app);
+	app->settings_choice = list;
+	fplinux_ui_push(app->ui, list);
 }
 
 static void leave_home(struct pm_app *app)
@@ -999,6 +1142,7 @@ static void leave_home(struct pm_app *app)
 	fplinux_ui_pop(app->ui);
 	app->home = NULL;
 	app->auxiliary = NULL;
+	app->settings_scope = app->settings_choice = NULL;
 	app->picker_requested = false;
 	app->guest_active = true;
 	fplinux_ui_set_fullscreen(app->ui, app->guest_fullscreen);
@@ -1029,15 +1173,34 @@ static void home_command(struct fplinux_ui *ui,
 				open_picker(app);
 			else if (row == 1)
 				show_recent(app);
-			else if (row == 2)
-				show_settings(app, false);
-			else if (row == 3 && guest)
-				show_settings(app, true);
+			else if (row == 2) {
+				if (guest)
+					show_settings_scope(app);
+				else
+					show_settings(app, false);
+			}
 		} else if (command_id == COMMAND_BACK) {
 			if (guest)
 				leave_home(app);
 			else
 				fplinux_ui_back(ui);
+		}
+		return;
+	}
+	if (screen == app->settings_scope) {
+		if (command_id == FPLINUX_UI_SELECT_COMMAND)
+			show_settings(app,
+				      fplinux_ui_list_get_focused(screen) == 0);
+		else if (command_id == COMMAND_BACK) {
+			app->settings_scope = NULL;
+			fplinux_ui_pop(ui);
+		}
+		return;
+	}
+	if (screen == app->settings_choice) {
+		if (command_id == COMMAND_BACK) {
+			app->settings_choice = NULL;
+			fplinux_ui_pop(ui);
 		}
 		return;
 	}
@@ -1068,68 +1231,32 @@ static void home_command(struct fplinux_ui *ui,
 					screen, COMMAND_REMOVE);
 			save_preferences(app, app->prefs,
 					 fplinux_ui_recent_store(&app->recent,
-								 app->prefs));
+								 app->prefs),
+					 false);
 		}
 	} else if (app->auxiliary_kind == AUX_SETTINGS &&
-		   (command_id == COMMAND_SAVE ||
-		    command_id == COMMAND_RESET)) {
-		struct fplinux_ui_view_settings settings;
-		struct fplinux_ui_prefs *prefs =
-			app->program_settings ? app->program_prefs : app->prefs;
-		size_t size =
-			fplinux_ui_form_get_choice(screen, app->size_field);
-		bool ok = prefs != NULL;
-
-		if (command_id == COMMAND_RESET) {
-			settings = app->defaults;
-			size = app->default_size;
-			ok = ok && fplinux_ui_view_settings_reset(prefs) &&
-			     fplinux_ui_prefs_remove(prefs, "canvas-size");
-		} else {
-			ok = ok && size <= 6 &&
-			     fplinux_ui_view_settings_form_read(
-				     screen, &app->settings_fields,
-				     &settings) &&
-			     fplinux_ui_view_settings_store(&settings, prefs) &&
-			     fplinux_ui_prefs_set_int(prefs, "canvas-size",
-						      (long long)size);
-		}
-		app->auxiliary = NULL;
-		fplinux_ui_pop(ui);
-		if (ok) {
-			fplinux_pm_keys_cancel(FPLINUX_UI_KEY_PHONE);
-			fplinux_pm_keys_cancel(FPLINUX_UI_KEY_KEYBOARD);
-			if (app->program_settings) {
-				app->settings = settings;
-				app->program_size = (unsigned int)size;
-			} else {
-				app->defaults = settings;
-				app->default_size = (unsigned int)size;
-				app->settings = settings;
-				app->program_size = app->default_size;
-				if (app->program_prefs) {
-					long long stored =
-						fplinux_ui_prefs_get_int(
-							app->program_prefs,
-							"canvas-size",
-							app->default_size);
-
-					fplinux_ui_view_settings_load(
-						&app->settings,
-						app->program_prefs,
-						&app->defaults);
-					if (stored >= 0 && stored <= 6)
-						app->program_size =
-							(unsigned int)stored;
-				}
-			}
-			fplinux_pm_canvas_view_changed();
-		}
-		save_preferences(app, prefs, ok);
+		   command_id == FPLINUX_UI_SELECT_COMMAND) {
+		open_settings_choice(app);
+	} else if (app->auxiliary_kind == AUX_SETTINGS &&
+		   command_id == COMMAND_RESET && app->program_settings) {
+		save_settings(app, true, 0);
 	} else if (command_id == COMMAND_BACK || command_id == COMMAND_CANCEL) {
 		app->auxiliary = NULL;
 		fplinux_ui_pop(ui);
 	}
+}
+
+static void append_home_row(struct pm_app *app,
+			    struct fplinux_ui_screen *screen, const char *label,
+			    const char *glyph)
+{
+	size_t row = fplinux_ui_list_append(screen, label, NULL);
+
+	if (row != SIZE_MAX)
+		fplinux_ui_list_set_icon(screen, row,
+					 fplinux_ui_glyph(app->ui, glyph,
+							  FPLINUX_UI_GLYPH_ROW),
+					 FPLINUX_UI_LIST_ICON_IMAGE);
 }
 
 static void show_home(struct pm_app *app)
@@ -1145,21 +1272,15 @@ static void show_home(struct pm_app *app)
 	if (!screen)
 		return;
 	if (guest) {
-		fplinux_ui_list_append(screen, _("Continue"), NULL);
+		append_home_row(app, screen, _("Continue"), "play");
 		if (app->midlet)
 			set_midlet_icon(app, screen, 0, app->midlet->icon);
 	}
-	fplinux_ui_list_append(
-		screen, _("Open JAR"),
-		app->home_storage_known ?
-			(app->home_persistent ?
-				 _("Home storage: persistent") :
-				 _("Home storage: lost after reboot")) :
-			NULL);
-	fplinux_ui_list_append(screen, _("Recent"), NULL);
-	fplinux_ui_list_append(screen, _("Settings"), NULL);
-	if (guest)
-		fplinux_ui_list_append(screen, _("Program settings"), NULL);
+	append_home_row(app, screen, _("Open JAR"), "folder");
+	append_home_row(app, screen, _("Recent"), "history");
+	append_home_row(app, screen, _("Settings"), "settings");
+	if (app->prefs_error || app->program_prefs_error)
+		fplinux_ui_screen_set_header_status(screen, _("Unsaved"), NULL);
 	fplinux_ui_screen_add_command(screen, &back_command);
 	fplinux_ui_screen_set_listener(screen, home_command, NULL, app);
 	app->home = screen;

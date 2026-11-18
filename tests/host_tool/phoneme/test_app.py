@@ -165,19 +165,16 @@ def test_removing_last_recent_entry_removes_action_and_preserves_data(
     assert "recent-documents=[]\n" in (tmp_path / "preferences").read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize("scenario", ["storage-persistent", "storage-volatile", "storage-picker"])
-def test_home_reports_storage_lifetime_from_snapshot(
-    phoneme_app: Path, tmp_path: Path, scenario: str
-) -> None:
+def test_picker_waits_for_storage_snapshot(phoneme_app: Path, tmp_path: Path) -> None:
     result = run_process(
         [str(phoneme_app)],
-        name=f"phoneME home storage {scenario}",
+        name="phoneME picker waits for storage snapshot",
         env=os.environ
-        | {"FPLINUX_PM_TEST_SCENARIO": scenario, "FPLINUX_PM_TEST_ROOT": str(tmp_path)},
+        | {"FPLINUX_PM_TEST_SCENARIO": "storage-picker", "FPLINUX_PM_TEST_ROOT": str(tmp_path)},
         timeout=10,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout == "home displays reported storage lifetime\n"
+    assert result.stdout == "picker waits for the storage snapshot\n"
 
 
 @pytest.mark.parametrize(

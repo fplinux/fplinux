@@ -157,14 +157,14 @@ class NewTargetTests:
         assert readme.index("Wait until the launcher") < readme.index(
             "Power the phone off, hold *"
         )
-        assert "python3.14 -I fplinux.py run --reconnect" in readme
+        assert "python3.14 -I fplinux.py console" in readme
         assert "Phone support, controls and limits: docs/porting/checklist/index.html" in prose
         assert "confirm it on this phone before use" in prose
         assert "A configuration file alone does not mean the phone has been tested." in prose
 
     @pytest.mark.usefixtures("target_checkout")
     def test_new_target_release_carries_declared_apks_and_required_runtime_font(self) -> None:
-        """The release adds MRE's guest font while the phone's 6x12 font stays in rootfs."""
+        """Optional apps carry their local libraries while the UI font stays in rootfs."""
         create_target("hammer-horizon-lte")
         config = targets.load_target("hammer-horizon-lte")
         platform = platforms.load_platform(config["platform"])
@@ -180,7 +180,14 @@ class NewTargetTests:
             for relative in release["bundle_files"]
             if relative.startswith("apks/") and relative.endswith(".apk")
         }
-        assert release_apks == declared_apks | {"apks/fplinux-font-terminus-8x16.apk"}
+        assert release_apks == declared_apks | {
+            "apks/fplinux-font-terminus-8x16.apk",
+            "apks/fplinux-media.apk",
+            "apks/fplinux-midi.apk",
+            "apks/fplinux-mpg123.apk",
+            "apks/fplinux-runtime-media.apk",
+            "apks/fplinux-soundfont.apk",
+        }
         assert "fplinux-font-terminus-6x12" in rootfs_packages
         assert "apks/fplinux-font-terminus-6x12.apk" not in release_apks
 

@@ -32,15 +32,17 @@ struct fplinux_ui_screen {
 	bool alert;
 	char title[256];
 	char text[512];
+	char status[128];
 	char rows[16][128];
 	char details[16][128];
 	bool icons[16];
-	size_t choices[8], choice_count;
+	bool selected[16];
 	size_t row_count;
 	size_t focused;
 	struct fplinux_ui_command commands[4];
 	size_t command_count;
 	fplinux_ui_command_cb command;
+	fplinux_ui_change_cb change;
 	void *context;
 	void *data;
 };
@@ -73,6 +75,7 @@ static void *picker_context;
 static char requested_path[4096];
 static fplinux_ui_storage_cb storage_callback;
 static void *storage_context;
+static const int system_glyph;
 
 int __real_fsync(int fd);
 
@@ -353,6 +356,15 @@ bool fplinux_ui_screen_set_title(struct fplinux_ui_screen *screen,
 	return true;
 }
 
+bool fplinux_ui_screen_set_header_status(struct fplinux_ui_screen *screen,
+					 const char *full, const char *compact)
+{
+	(void)compact;
+	snprintf(screen->status, sizeof(screen->status), "%s",
+		 full ? full : "");
+	return true;
+}
+
 void fplinux_ui_screen_remove_command(struct fplinux_ui_screen *screen, int id)
 {
 	for (size_t i = 0; i < screen->command_count; ++i) {
@@ -403,6 +415,12 @@ size_t fplinux_ui_form_append_string(struct fplinux_ui_screen *form,
 	return 0;
 }
 
+size_t fplinux_ui_form_append_property(struct fplinux_ui_screen *form,
+				       const char *label, const char *text)
+{
+	return fplinux_ui_form_append_string(form, label, text);
+}
+
 size_t fplinux_ui_form_append_image(struct fplinux_ui_screen *form,
 				    const char *label, const void *image)
 {
@@ -410,40 +428,6 @@ size_t fplinux_ui_form_append_image(struct fplinux_ui_screen *form,
 	(void)label;
 	(void)image;
 	return 0;
-}
-
-size_t fplinux_ui_form_append_choice(struct fplinux_ui_screen *form,
-				     const char *label,
-				     enum fplinux_ui_choice_kind kind,
-				     const char *const *choices, size_t count)
-{
-	(void)label;
-	(void)kind;
-	(void)choices;
-	(void)count;
-	assert(form->choice_count < 8);
-	return form->choice_count++;
-}
-
-void fplinux_ui_form_set_choice(struct fplinux_ui_screen *form, size_t item,
-				size_t index)
-{
-	assert(item < form->choice_count);
-	form->choices[item] = index;
-}
-
-size_t fplinux_ui_form_get_choice(const struct fplinux_ui_screen *form,
-				  size_t item)
-{
-	assert(item < form->choice_count);
-	return form->choices[item];
-}
-
-bool fplinux_ui_form_delete(struct fplinux_ui_screen *form, size_t item)
-{
-	assert(item < form->choice_count);
-	--form->choice_count;
-	return true;
 }
 
 struct fplinux_ui_screen *
@@ -472,8 +456,8 @@ void fplinux_ui_screen_set_listener(struct fplinux_ui_screen *screen,
 				    fplinux_ui_command_cb callback,
 				    fplinux_ui_change_cb change, void *context)
 {
-	(void)change;
 	screen->command = callback;
+	screen->change = change;
 	screen->context = context;
 }
 
@@ -482,7 +466,8 @@ struct fplinux_ui_screen *fplinux_ui_list_new(struct fplinux_ui *ui,
 					      enum fplinux_ui_list_kind kind)
 {
 	(void)ui;
-	assert(kind == FPLINUX_UI_LIST_IMPLICIT);
+	assert(kind == FPLINUX_UI_LIST_IMPLICIT ||
+	       kind == FPLINUX_UI_LIST_EXCLUSIVE);
 	return new_screen(title);
 }
 
@@ -519,10 +504,29 @@ bool fplinux_ui_list_set_icon(struct fplinux_ui_screen *list, size_t index,
 	const lv_image_dsc_t *image = source;
 
 	assert(index < list->row_count);
-	assert(image->header.w == 1 && image->header.h == 1);
-	assert(image->data_size >= 24 && image->data[0] == 0x89);
+	if (source != &system_glyph) {
+		assert(image->header.w == 1 && image->header.h == 1);
+		assert(image->data_size >= 24 && image->data[0] == 0x89);
+	}
 	list->icons[index] = true;
 	assert(kind == FPLINUX_UI_LIST_ICON_IMAGE);
+	return true;
+}
+
+const void *fplinux_ui_glyph(struct fplinux_ui *ui, const char *name,
+			     enum fplinux_ui_glyph_size size)
+{
+	(void)ui;
+	assert(name && size == FPLINUX_UI_GLYPH_ROW);
+	return &system_glyph;
+}
+
+bool fplinux_ui_list_set_trailing_value(struct fplinux_ui_screen *list,
+					size_t index, const char *value)
+{
+	assert(index < list->row_count);
+	snprintf(list->details[index], sizeof(list->details[index]), "%s",
+		 value);
 	return true;
 }
 
@@ -579,18 +583,15 @@ void fplinux_ui_list_set_focused(struct fplinux_ui_screen *list, size_t index)
 bool fplinux_ui_list_is_selected(const struct fplinux_ui_screen *list,
 				 size_t index)
 {
-	(void)list;
-	(void)index;
-	abort();
+	assert(index < list->row_count);
+	return list->selected[index];
 }
 
 void fplinux_ui_list_set_selected(struct fplinux_ui_screen *list, size_t index,
 				  bool selected)
 {
-	(void)list;
-	(void)index;
-	(void)selected;
-	abort();
+	assert(index < list->row_count);
+	list->selected[index] = selected;
 }
 
 bool fplinux_ui_alert_set_text(struct fplinux_ui_screen *alert,
@@ -795,6 +796,36 @@ static void attach_peer(struct fplinux_ui_screen *screen, int serial)
 	assert(Java_javax_microedition_lcdui_LFNative_attach0());
 }
 
+static void select_row(size_t row)
+{
+	struct fplinux_ui_screen *screen = fplinux_ui_current(&runtime);
+
+	assert(row < screen->row_count);
+	screen->focused = row;
+	screen->command(&runtime, screen, FPLINUX_UI_SELECT_COMMAND,
+			screen->context);
+}
+
+static void choose_setting(size_t row, size_t value)
+{
+	struct fplinux_ui_screen *choice;
+
+	select_row(row);
+	choice = fplinux_ui_current(&runtime);
+	assert(value < choice->row_count);
+	choice->focused = value;
+	assert(choice->change);
+	choice->change(&runtime, choice, value, choice->context);
+}
+
+static void open_global_settings(void)
+{
+	select_row(3);
+	assert(!strcmp(fplinux_ui_current(&runtime)->rows[1], "All programs"));
+	select_row(1);
+	assert(!strcmp(fplinux_ui_current(&runtime)->title, "All programs"));
+}
+
 static bool peer_alive(struct fplinux_ui_screen *screen, int serial)
 {
 	fplinux_pm_test_parameters[0] = (jint)(intptr_t)screen;
@@ -874,29 +905,21 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		puts("empty Recent has no Remove action");
 		return 0;
 	}
-	if (!strncmp(scenario, "storage-", 8)) {
+	if (!strcmp(scenario, "storage-picker")) {
 		struct fplinux_volume_result volume = {
 			.request_id = 42,
-			.snapshot.home_persistent =
-				!strcmp(scenario, "storage-persistent"),
+			.snapshot.home_persistent = true,
 		};
 
 		screen = fplinux_ui_current(ui);
 		assert(!screen->details[0][0]);
-		if (!strcmp(scenario, "storage-picker")) {
-			screen->command(ui, screen, FPLINUX_UI_SELECT_COMMAND,
-					screen->context);
-			assert(!picker_callback);
-		}
+		screen->command(ui, screen, FPLINUX_UI_SELECT_COMMAND,
+				screen->context);
+		assert(!picker_callback);
 		assert(storage_callback);
 		storage_callback(ui, &volume, storage_context);
-		assert(!strcmp(screen->details[0],
-			       volume.snapshot.home_persistent ?
-				       "Home storage: persistent" :
-				       "Home storage: lost after reboot"));
-		if (!strcmp(scenario, "storage-picker"))
-			assert(picker_callback);
-		puts("home displays reported storage lifetime");
+		assert(!screen->details[0][0] && picker_callback);
+		puts("picker waits for the storage snapshot");
 		return 0;
 	}
 	if (!strcmp(scenario, "picker-single")) {
@@ -1002,20 +1025,16 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		const char *stored;
 
 		runtime.event(ui, &activation, runtime.context);
-		screen = fplinux_ui_current(ui);
-		assert(!strcmp(screen->rows[3], "Settings"));
-		screen->focused = 3;
-		screen->command(ui, screen, FPLINUX_UI_SELECT_COMMAND,
-				screen->context);
-		screen = fplinux_ui_current(ui);
-		assert(!strcmp(screen->title, "Settings"));
-		assert(screen->choice_count == 3);
-		fplinux_ui_form_set_choice(screen, 0, 2);
-		fplinux_ui_form_set_choice(screen, 1, 1);
-		fplinux_ui_form_set_choice(screen, 2, 3);
+		open_global_settings();
 		fail_file_sync = unpublished;
 		fail_directory_sync = !unpublished;
-		command(FPLINUX_UI_COMMAND_OK);
+		choose_setting(0, 2);
+		assert(fplinux_ui_current(ui)->alert);
+		assert(fplinux_ui_pop(ui));
+		choose_setting(1, 1);
+		assert(fplinux_ui_current(ui)->alert);
+		assert(fplinux_ui_pop(ui));
+		choose_setting(2, 3);
 		screen = fplinux_ui_current(ui);
 		assert(screen->alert &&
 		       !strcmp(screen->title, unpublished ?
@@ -1039,14 +1058,24 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		fplinux_ui_prefs_close(disk);
 		assert(fplinux_ui_pop(ui));
 		screen = fplinux_ui_current(ui);
-		screen->focused = 3;
-		screen->command(ui, screen, FPLINUX_UI_SELECT_COMMAND,
-				screen->context);
-		screen = fplinux_ui_current(ui);
-		assert(screen->choices[0] == 2 && screen->choices[1] == 1 &&
-		       screen->choices[2] == 3);
-		command(FPLINUX_UI_COMMAND_BACK);
+		assert(!strcmp(screen->status, "Unsaved"));
+		assert(!strcmp(screen->details[0], "Integer") &&
+		       !strcmp(screen->details[1], "90°") &&
+		       !strcmp(screen->details[2], "176x208"));
 		fail_file_sync = fail_directory_sync = false;
+		choose_setting(2, 3);
+		assert(!fplinux_ui_current(ui)->status[0]);
+		disk = fplinux_ui_prefs_open_directory(
+			getenv("FPLINUX_PM_TEST_ROOT"));
+		assert(disk &&
+		       fplinux_ui_prefs_get_int(disk, "canvas-size", 0) == 3);
+		stored = fplinux_ui_prefs_get(disk, "view-settings", NULL);
+		assert(stored &&
+		       !strcmp(stored,
+			       "{\"scale\":\"integer\",\"rotation\":\"90\"}"));
+		fplinux_ui_prefs_close(disk);
+		command(FPLINUX_UI_COMMAND_BACK);
+		command(FPLINUX_UI_COMMAND_BACK);
 		screen = fplinux_ui_current(ui);
 		screen->focused = 2;
 		screen->command(ui, screen, FPLINUX_UI_SELECT_COMMAND,
@@ -1057,13 +1086,11 @@ int fplinux_ui_run(struct fplinux_ui *ui)
 		command(FPLINUX_UI_COMMAND_SCREEN);
 		assert(!screen->row_count);
 		command(FPLINUX_UI_COMMAND_BACK);
+		open_global_settings();
 		screen = fplinux_ui_current(ui);
-		screen->focused = 3;
-		screen->command(ui, screen, FPLINUX_UI_SELECT_COMMAND,
-				screen->context);
-		screen = fplinux_ui_current(ui);
-		assert(screen->choices[0] == 2 && screen->choices[1] == 1 &&
-		       screen->choices[2] == 3);
+		assert(!strcmp(screen->details[0], "Integer") &&
+		       !strcmp(screen->details[1], "90°") &&
+		       !strcmp(screen->details[2], "176x208"));
 		puts("settings remain consistent after save warning and Recent save");
 		return 0;
 	}

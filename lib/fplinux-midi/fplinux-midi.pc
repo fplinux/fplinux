@@ -1,0 +1,10 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: fplinux-midi
+Description: Bounded MIDI and tone rendering
+Version: 1
+Libs: -L${libdir} -lfplinux-midi
+Cflags: -I${includedir}/fplinux

@@ -5,98 +5,80 @@ description: Install and remove optional FPLinux applications on a running phone
 
 import { Tabs, TabItem } from "@astrojs/starlight/components";
 
-Optional applications come as APK files built together with the FPLinux image. Install them into a running phone; you do not need a new load. Each [application page](/fplinux/apps/) names its APK file, its package name and how to start it. Check your phone's [support status](/fplinux/phones/#support-status) before choosing an application.
+Optional applications come as APK files built together with the FPLinux image. Each build and extracted ZIP includes an `apks/` directory with the optional packages and their additional required libraries. Install them manually on the running phone; the launcher does not install them. Check your phone's [application support](/fplinux/phones/#application-support) before choosing a package.
 
 ## How long a package stays
 
 | System | After installing |
 | --- | --- |
-| RAM system (default) | The package is gone when the session ends. |
+| RAM system | The package is lost when the phone powers off. |
 | [microSD system card](/fplinux/guides/microsd-system-card/) | The package stays until you remove it. |
 
-Before cutting power to a system card, shut it down as described in [Power](/fplinux/use/power/).
+A card used only for personal files does not make a RAM installation permanent. Before cutting power to a system card, shut it down as described in [Power](/fplinux/use/power/).
 
 ## Install a package
 
-Copy the APK to the phone, then install it. This example installs ARMADA (`fplinux-showcase.apk`) on a Nokia 3210 4G.
+Copy the application's APK and any required library or font APKs to the phone. Pass them together in one `apk add` command so the phone can resolve the dependencies offline. Use the packages from the same build as the running image; you do not need to search an Alpine mirror for matching libraries.
 
-Applications can also require other packages, such as libraries or fonts. Copy their APKs from the same build and pass them alongside the application in the same `apk add` command; the phone resolves these dependencies without downloading anything. Request all required APKs when someone supplies you with an application.
-
-RAM ZIPs do not include optional APKs. Build the matching source revision on Linux and take the APK from the build's `apks/` directory, or ask the person who supplied your ZIP for that matching APK. Linux system-card exports already include an `apks/` directory. The transfer commands below require a Linux PC; the Windows launcher does not support file transfer.
+The example below installs [TyrQuake](/fplinux/apps/tyrquake/) (`fplinux-tyrquake.apk`) on a Nokia 3210 4G. It needs no additional library APKs on that image; its application guide explains the required game data. General USB file transfer requires Linux; the Windows launcher supports SSH but does not copy files. From Windows, use a supported data card to supply the APKs and run `apk` in the phone's SSH shell.
 
 <Tabs syncKey="source">
 <TabItem label="Source checkout">
 
-The APKs are in the `apks/` folder of the build directory that `./fplinux build` printed after `output:`. Run the commands from the checkout and replace `<output>` with that path:
+The APKs are in the `apks/` folder of the output directory printed by `./fplinux build`. Replace `<output>` with that directory:
 
 ```sh title="PC"
 ./fplinux console nokia-ta1618 --upload \
-  <output>/apks/fplinux-showcase.apk /tmp/fplinux-showcase.apk
+  <output>/apks/fplinux-tyrquake.apk /tmp/fplinux-tyrquake.apk
 ./fplinux console nokia-ta1618 --exec \
-  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-showcase.apk'
+  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-tyrquake.apk'
 ```
 
-Use the target, profile and build type of the running session. For a microSD system card, pass the selected `--profile` to both commands; see [system-card profiles](/fplinux/guides/microsd-system-card/).
+Use the target, profile and build type of the running session. For a system card, pass its `--profile` to both commands; see [system-card profiles](/fplinux/guides/microsd-system-card/).
 
 </TabItem>
 <TabItem label="Linux RAM ZIP">
 
-Run from the extracted archive. Replace the local path with the APK you obtained for this build:
+Run from the extracted archive:
 
 ```sh title="PC"
-sh Run.sh --reconnect --upload \
-  /path/to/fplinux-showcase.apk /tmp/fplinux-showcase.apk
-sh Run.sh --reconnect --exec \
-  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-showcase.apk'
+sh Run.sh console --upload \
+  ./apks/fplinux-tyrquake.apk /tmp/fplinux-tyrquake.apk
+sh Run.sh console --exec \
+  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-tyrquake.apk'
 ```
 
 </TabItem>
 <TabItem label="Linux system-card export">
 
-Run the commands from the extracted archive directory:
+Run from the extracted archive:
 
 ```sh title="PC"
-python3.14 -I fplinux.py run --reconnect --upload \
-  ./apks/fplinux-showcase.apk /tmp/fplinux-showcase.apk
-python3.14 -I fplinux.py run --reconnect --exec \
-  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-showcase.apk'
+python3.14 -I fplinux.py console --upload \
+  ./apks/fplinux-tyrquake.apk /tmp/fplinux-tyrquake.apk
+python3.14 -I fplinux.py console --exec \
+  'apk add --no-network --allow-untrusted --force-non-repository /tmp/fplinux-tyrquake.apk'
 ```
 
 </TabItem>
 </Tabs>
+
+The install command reads only the named local APKs and disables network access. `--allow-untrusted` permits these local files; it does not verify their origin. Use only the matching APKs supplied with your image.
 
 ## Remove a package
 
-Stop the application first. Remove it by its package name, without `.apk`:
+Close the application through **Open applications** first. Remove it by its package name, without `.apk`, in the phone's SSH shell:
 
-<Tabs syncKey="source">
-<TabItem label="Source checkout">
-
-```sh title="PC"
-./fplinux console nokia-ta1618 --exec 'apk del fplinux-showcase'
+```sh title="Phone"
+apk del fplinux-tyrquake
 ```
 
-</TabItem>
-<TabItem label="Linux RAM ZIP">
+The same command can be run from Linux with `./fplinux console nokia-ta1618 --exec 'apk del fplinux-tyrquake'` or `sh Run.sh console --exec 'apk del fplinux-tyrquake'`. Use the target of your connected phone.
 
-```sh title="PC"
-sh Run.sh --reconnect --exec 'apk del fplinux-showcase'
-```
+## Java and MRE
 
-</TabItem>
-<TabItem label="Linux system-card export">
-
-```sh title="PC"
-python3.14 -I fplinux.py run --reconnect --exec 'apk del fplinux-showcase'
-```
-
-</TabItem>
-</Tabs>
+Install `fplinux-phoneme.apk` for `.jar` files and `fplinux-mre.apk` for `.vxp` files. Include the required library APKs from the same `apks/` directory in the install command. MRE also needs `fplinux-font-terminus-8x16.apk` if the font is not installed. After installation, open your files in [Files](/fplinux/use/files/); see [Java and MRE applications](/fplinux/apps/java-and-mre/) for controls and settings.
 
 ## Full curses libraries
 
 `fplinux-ncurses-curses.apk` adds the full curses, menu, form and panel libraries to the RAM system. The microSD system card already includes them.
-
-## Package sources
-
-Install only the APKs supplied for your image. The install command above uses local APK files and disables network access. The phone also has `wget` with a certificate bundle for HTTP and HTTPS downloads; a download over HTTPS does not make an APK trusted.

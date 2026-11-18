@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 #include "mre-http.h"
+#include "mre-audio.h"
 #include "vfs-broker.h"
 
 #define MRE_SHARED_FD 3
@@ -46,6 +47,8 @@ struct mre_shared {
 	uint32_t http_available;
 	struct mre_http_request http_request;
 	struct mre_http_response http_response;
+	struct mre_audio_request audio_request;
+	struct mre_audio_response audio_response;
 	uint32_t camera_bytes;
 	unsigned char camera_data[MRE_CAMERA_BYTES];
 	uint32_t media_bytes;
@@ -63,6 +66,8 @@ struct mre_shared {
  * SNAPSHOT <hex virtual path> / SNAPSHOT_DONE/ERROR supplies a service image.
  * HTTP_REQUEST id / HTTP_ACCEPTED id confirms the copied request before reuse.
  * HTTP_CANCEL id / HTTP_RESPONSE id use mre-http.h.
+ * AUDIO_REQUEST sequence / AUDIO_REPLY sequence exchange copied audio calls.
+ * AUDIO_EVENT handle event queues a guest notification without a guest pointer.
  * VIEW_PICTURE keeps an external viewer's last frame after guest exit.
  * END closes the guest; ERROR <hex message> reports a loader/API failure.
  * GUI and SDK requests work identically for every executable.

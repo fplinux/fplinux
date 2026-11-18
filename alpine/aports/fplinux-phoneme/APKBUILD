@@ -7,9 +7,9 @@ pkgdesc="phoneME Feature CLDC-HI VM and MIDP 2.0 for MIDlets"
 url="https://github.com/magicus/phoneME"
 arch="armv7"
 license="GPL-2.0-only"
-depends="fplinux-ui libcrypto3"
+depends="fplinux-ui fplinux-runtime-media libcrypto3"
 makedepends_build="clang22 lld22 llvm22 binutils make patch pkgconf python3 gettext"
-makedepends_host="musl-dev musl-libintl linux-headers gcc zlib-dev openssl-dev fplinux-ui-dev"
+makedepends_host="musl-dev musl-libintl linux-headers gcc zlib-dev openssl-dev fplinux-ui-dev fplinux-runtime-media-dev"
 options="!check"
 
 # CLDC generators require ILP32; JDK 8 produces their input class files.
@@ -165,7 +165,7 @@ _build_vm() {
 		--extra-source "$startdir/vm/fplinux-pm-vm.c" \
 		--extra-source "$startdir/vm/fplinux-pm-jar.c" \
 		$native_dirs \
-		$(pkg-config --cflags fplinux-ui | sed 's/[^ ][^ ]*/--cflag=&/g') \
+		$(pkg-config --cflags fplinux-ui fplinux-runtime-media | sed 's/[^ ][^ ]*/--cflag=&/g') \
 		--jobs "${JOBS:-1}" \
 		--out "$srcdir/vm-objects"
 	# Main_linux.o of the CLDC build is the standalone launcher; ours is
@@ -189,7 +189,7 @@ _build_vm() {
 		"$cldc/dist/lib/libcldc_vmtest.a" \
 		"$cldc/dist/lib/libcldc_vm.a" \
 		-Wl,--end-group \
-		$(pkg-config --libs fplinux-ui) -lz -lm
+		$(pkg-config --libs fplinux-ui fplinux-runtime-media) -lz -lm
 	if readelf -d "$srcdir/fplinux-phoneme-headless" | grep -q TEXTREL; then
 		die "the VM needs text relocations, which musl cannot load"
 	fi
@@ -200,7 +200,7 @@ _build_app() {
 	local cldc="$srcdir/cldc-build/linux_arm_vfp"
 	# shellcheck disable=SC2046 # pkg-config flags and one object path per line
 	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror \
-		$(pkg-config --cflags fplinux-ui) -I"$startdir/port/app" -I"$srcdir" \
+		$(pkg-config --cflags fplinux-ui fplinux-runtime-media) -I"$startdir/port/app" -I"$srcdir" \
 		"$startdir/port/app/fplinux-pm-app.c" \
 		"$startdir/port/app/fplinux-pm-lifecycle.c" \
 		"$startdir/port/app/fplinux-pm-store.c" \
@@ -213,7 +213,7 @@ _build_app() {
 		"$cldc/dist/lib/libcldc_vmtest.a" \
 		"$cldc/dist/lib/libcldc_vm.a" \
 		-Wl,--end-group \
-		$(pkg-config --libs fplinux-ui) -lz -lcrypto -lm \
+		$(pkg-config --libs fplinux-ui fplinux-runtime-media) -lz -lcrypto -lm \
 		$LDFLAGS -no-pie -o "$srcdir/fplinux-phoneme"
 	msgfmt --check --output-file="$srcdir/ru.mo" "$startdir/port/app/ru.po"
 }

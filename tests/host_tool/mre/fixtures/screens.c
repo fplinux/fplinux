@@ -32,7 +32,6 @@ struct capture {
 	char labels[2048];
 	/* Changes of the labels and legend messages while recording. */
 	bool recording;
-	bool home_persistent;
 	unsigned int screens, legends;
 	char first_centre[128];
 	char first_right[128];
@@ -40,7 +39,7 @@ struct capture {
 
 static void read_frames(struct capture *capture)
 {
-	const char *path = getenv("FPLINUX_MRE_FRAME_RECORD");
+	const char *path = getenv("FPLINUX_APP_FRAME_RECORD");
 	char line[sizeof(capture->labels) - 1];
 	char *newline;
 	long start;
@@ -109,8 +108,7 @@ static void pump(struct capture *capture)
 				.serial = message.serial,
 				.volume_result = {
 					.request_id = message.serial,
-					.snapshot = { .home_persistent =
-							capture->home_persistent },
+					.snapshot = { .home_persistent = true },
 				},
 			};
 			assert(message.volume_operation ==
@@ -655,7 +653,7 @@ static void idle_and_background_completion(struct capture *capture,
 
 int main(int argc, char **argv)
 {
-	struct capture capture = { .home_persistent = true };
+	struct capture capture = { 0 };
 	struct fplinux_ui_session_message config = {
 		.type = FPLINUX_UI_SESSION_CONFIG,
 		.mode = FPLINUX_UI_SESSION_INTEGRATED,
@@ -663,8 +661,6 @@ int main(int argc, char **argv)
 	int wayland[2], status;
 
 	assert(argc == 8 || argc == 9);
-	if (argc == 9 && !strcmp(argv[8], "storage-temporary"))
-		capture.home_persistent = false;
 	capture.width = config.screen_width = atoi(argv[5]);
 	capture.height = config.screen_height = atoi(argv[6]);
 	snprintf(config.locale, sizeof(config.locale), "%s", argv[7]);
@@ -700,12 +696,7 @@ int main(int argc, char **argv)
 	pump_for(&capture, 100);
 	fplinux_ui_frame_focus_keyboard(&capture.peer.keyboards[0]);
 	if (argc == 9) {
-		if (!strncmp(argv[8], "storage-", 8)) {
-			wait_label(&capture,
-				   capture.home_persistent ?
-					   "Home storage: persistent" :
-					   "Home storage: lost after reboot");
-		} else if (!strcmp(argv[8], "recent-remove-last")) {
+		if (!strcmp(argv[8], "recent-remove-last")) {
 			wait_centre(&capture, "Select");
 			press(&capture, KEY_DOWN);
 			press(&capture, KEY_ENTER);

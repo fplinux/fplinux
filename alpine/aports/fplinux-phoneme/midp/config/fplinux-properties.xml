@@ -34,5 +34,10 @@
             Value=""
             Scope="system"
             Comment="No serial ports."/>
+  <property Key="supports.mixing" Value="true" Scope="system"/>
+  <property Key="supports.audio.capture" Value="false" Scope="system"/>
+  <property Key="supports.video.capture" Value="false" Scope="system"/>
+  <property Key="supports.recording" Value="false" Scope="system"/>
+  <property Key="streamable.contents" Value="" Scope="system"/>
 </properties>
 </configuration>

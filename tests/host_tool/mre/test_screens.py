@@ -12,6 +12,12 @@ import pytest
 
 from tests import ROOT
 from tests.c_harness import c_build_directory
+from tests.host_tool.mre.menu_frames import (
+    capture_menu_frames,
+    check_settings_cross_scope,
+    check_settings_roundtrip,
+    check_settings_save_retry,
+)
 from tests.process import run_process
 
 if TYPE_CHECKING:
@@ -21,8 +27,50 @@ if TYPE_CHECKING:
 HERE = ROOT / "tests/host_tool/mre"
 
 
+@pytest.mark.parametrize("screen", [(128, 128), (128, 160), (176, 220), (240, 320), (320, 240)])
+@pytest.mark.parametrize("locale", ["en", "ru"])
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_actual_mre_menu_frames(
+    mre_native: Path, tmp_path: Path, screen: tuple[int, int], locale: str, theme: str
+) -> None:
+    """The execution peer supplies a guest; all menu widgets and pixels are real."""
+    document = tmp_path / "first.vxp"
+    document.write_bytes(b"A execution-peer fixture")
+    capture_menu_frames(
+        mre_native, tmp_path, screen, locale, theme, application="mre", document=document
+    )
+
+
+def test_actual_mre_settings_survive_reopen_and_reset_to_global_values(
+    mre_native: Path, tmp_path: Path
+) -> None:
+    document = tmp_path / "first.vxp"
+    document.write_bytes(b"A execution-peer fixture")
+    check_settings_roundtrip(mre_native, tmp_path, "mre", document)
+
+
+@pytest.mark.parametrize("operation", ["file", "directory"])
+def test_actual_mre_same_choice_retries_failed_save_and_clears_unsaved(
+    mre_native: Path, tmp_path: Path, operation: str
+) -> None:
+    document = tmp_path / "first.vxp"
+    document.write_bytes(b"A execution-peer fixture")
+    check_settings_save_retry(mre_native, tmp_path, "mre", document, operation)
+
+
+@pytest.mark.parametrize("failed_scope", ["program", "global"])
+def test_actual_mre_success_in_other_scope_keeps_failed_scope_unsaved(
+    mre_native: Path, tmp_path: Path, failed_scope: str
+) -> None:
+    document = tmp_path / "first.vxp"
+    document.write_bytes(b"A execution-peer fixture")
+    check_settings_cross_scope(mre_native, tmp_path, "mre", document, failed_scope)
+
+
 @pytest.fixture(scope="module")
-def mre_native(tmp_path_factory: pytest.TempPathFactory, ui_host_inputs: Path) -> Iterator[Path]:
+def mre_native(
+    tmp_path_factory: pytest.TempPathFactory, ui_host_inputs: Path, ui_icon_resources: Path
+) -> Iterator[Path]:
     with c_build_directory(tmp_path_factory, "mre-native") as directory:
         run_process(
             [
@@ -36,6 +84,7 @@ def mre_native(tmp_path_factory: pytest.TempPathFactory, ui_host_inputs: Path) -
             timeout=180,
             check=True,
         )
+        (directory / "icons").symlink_to(ui_icon_resources, target_is_directory=True)
         yield directory
 
 
@@ -82,7 +131,7 @@ def test_actual_mre_first_frame_home_replace_cancel_and_close(
             "FPLINUX_UI_LOCALE_DIRECTORY": str(mre_native / "locale"),
             "FPLINUX_MRE_TEST_ENGINE": str(mre_native / "engine-peer"),
             "FPLINUX_MRE_ENGINE_RECORD": str(record),
-            "FPLINUX_MRE_FRAME_RECORD": str(tmp_path / "frames.log"),
+            "FPLINUX_APP_FRAME_RECORD": str(tmp_path / "frames.log"),
             "XDG_STATE_HOME": str(tmp_path / "state"),
         },
         timeout=30,
@@ -201,7 +250,7 @@ def test_mre_rotated_view_maps_direction_to_guest_key(mre_native: Path, tmp_path
             "FPLINUX_MRE_TEST_ENGINE": str(mre_native / "engine-peer"),
             "FPLINUX_MRE_ENGINE_RECORD": str(tmp_path / "engine.log"),
             "FPLINUX_MRE_KEY_RECORD": str(keys),
-            "FPLINUX_MRE_FRAME_RECORD": str(tmp_path / "frames.log"),
+            "FPLINUX_APP_FRAME_RECORD": str(tmp_path / "frames.log"),
             "XDG_STATE_HOME": str(tmp_path / "state"),
         },
         timeout=30,
@@ -241,7 +290,7 @@ def test_mre_pointer_survives_home_and_releases_held_pen(
             "FPLINUX_MRE_TEST_ENGINE": str(mre_native / "engine-peer"),
             "FPLINUX_MRE_ENGINE_RECORD": str(tmp_path / "engine.log"),
             "FPLINUX_MRE_KEY_RECORD": str(keys),
-            "FPLINUX_MRE_FRAME_RECORD": str(tmp_path / "frames.log"),
+            "FPLINUX_APP_FRAME_RECORD": str(tmp_path / "frames.log"),
             "XDG_STATE_HOME": str(tmp_path / "state"),
         },
         timeout=30,
@@ -254,36 +303,6 @@ def test_mre_pointer_survives_home_and_releases_held_pen(
         f"PEN\t1\t{x}\t{y}",
         f"PEN\t2\t{x}\t{y}",
     ]
-
-
-@pytest.mark.parametrize("lifetime", ["temporary", "persistent"])
-def test_mre_home_reports_home_storage_lifetime(
-    mre_native: Path, tmp_path: Path, lifetime: str
-) -> None:
-    result = run_process(
-        [
-            str(mre_native / "mre-screens"),
-            str(mre_native / "mre"),
-            str(ROOT / "tests/host_tool/files/native/keyboard.xkb"),
-            str(tmp_path / "session.sock"),
-            str(tmp_path),
-            "240",
-            "320",
-            "en",
-            f"storage-{lifetime}",
-        ],
-        name=f"MRE home with {lifetime} home storage",
-        env={
-            **os.environ,
-            "FPLINUX_NATIVE_LANGUAGE_DIR": str(ROOT / "alpine/aports/fplinux-language"),
-            "FPLINUX_UI_LOCALE_DIRECTORY": str(mre_native / "locale"),
-            "FPLINUX_MRE_TEST_ENGINE": str(mre_native / "engine-peer"),
-            "FPLINUX_MRE_FRAME_RECORD": str(tmp_path / "frames.log"),
-            "XDG_STATE_HOME": str(tmp_path / "state"),
-        },
-        timeout=30,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_mre_recent_remove_only_available_for_existing_entry(
@@ -316,7 +335,7 @@ def test_mre_recent_remove_only_available_for_existing_entry(
             "FPLINUX_UI_LOCALE_DIRECTORY": str(mre_native / "locale"),
             "FPLINUX_MRE_TEST_ENGINE": str(mre_native / "engine-peer"),
             "FPLINUX_MRE_ENGINE_RECORD": str(tmp_path / "engine.log"),
-            "FPLINUX_MRE_FRAME_RECORD": str(tmp_path / "frames.log"),
+            "FPLINUX_APP_FRAME_RECORD": str(tmp_path / "frames.log"),
             "XDG_STATE_HOME": str(tmp_path / "state"),
         },
         timeout=30,
@@ -367,7 +386,7 @@ def run_first_modal(
             "FPLINUX_MRE_ENGINE_RELEASE": str(directory / "release"),
             "FPLINUX_MRE_ENGINE_END": str(directory / "end"),
             "FPLINUX_MRE_TICK_RECORD": str(directory / "ticks.log"),
-            "FPLINUX_MRE_FRAME_RECORD": str(directory / "frames.log"),
+            "FPLINUX_APP_FRAME_RECORD": str(directory / "frames.log"),
             "XDG_STATE_HOME": str(directory / "state"),
         },
         timeout=30,

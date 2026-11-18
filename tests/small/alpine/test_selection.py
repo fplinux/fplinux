@@ -306,6 +306,34 @@ class AlpineSelectionTests:
 
         assert actual == expected
 
+    def test_bundle_reuses_transitive_libraries_installed_by_rootfs_applications(
+        self, alpine_source: AlpineSourceContext
+    ) -> None:
+        """Optional applications reuse installed libraries without publishing duplicate APKs."""
+        for name, dependencies in (
+            ("fplinux-package-a", "fplinux-installed-runtime"),
+            ("fplinux-installed-runtime", "fplinux-shared-runtime"),
+            ("fplinux-shared-runtime", ""),
+            ("fplinux-package-b", "fplinux-optional-runtime"),
+            (
+                "fplinux-optional-runtime",
+                "fplinux-installed-runtime fplinux-shared-runtime",
+            ),
+        ):
+            alpine_source.write(
+                f"alpine/aports/{name}/APKBUILD",
+                f'pkgname={name}\ndepends="{dependencies}"\n'.encode(),
+            )
+
+        actual = alpine_selection.bundle_packages(
+            {"bundle": {"packages": ["fplinux-package-b"]}},
+            {"bundle": {"packages": []}},
+            ("fplinux-package-a",),
+            alpine_source.root,
+        )
+
+        assert actual == ("fplinux-optional-runtime", "fplinux-package-b")
+
     def test_bundle_selection_does_not_resolve_unrelated_external_source_pins(
         self, alpine_source: AlpineSourceContext
     ) -> None:

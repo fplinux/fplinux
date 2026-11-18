@@ -1,6 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #define _GNU_SOURCE
-#include "fplinux-language.h"
 #include <fplinux/fplinux-ui.h>
 
 #include <assert.h>
@@ -75,67 +74,6 @@ void __wrap_lv_timer_resume(lv_timer_t *timer)
 	if (timer == child_timer && lv_timer_get_paused(timer))
 		record_tick('R');
 	__real_lv_timer_resume(timer);
-}
-
-/* Visible label texts, the screens that a frame shows to the user. */
-static void collect_labels(lv_obj_t *object, FILE *output)
-{
-	if (!lv_obj_is_visible(object))
-		return;
-	if (lv_obj_check_type(object, &lv_label_class)) {
-		for (const char *text = lv_label_get_text(object); *text;
-		     text++)
-			fputc(*text == '\n' ? ' ' : *text, output);
-		fputc('|', output);
-	}
-	for (uint32_t index = 0; index < lv_obj_get_child_count(object);
-	     index++)
-		collect_labels(lv_obj_get_child(object, (int32_t)index),
-			       output);
-}
-
-void __real_lv_display_flush_ready(lv_display_t *display);
-
-/* One line per presented frame, for the test's transition checks. */
-void __wrap_lv_display_flush_ready(lv_display_t *display)
-{
-	const char *path = getenv("FPLINUX_MRE_FRAME_RECORD");
-
-	if (path && lv_display_flush_is_last(display)) {
-		FILE *output = fopen(path, "a");
-
-		assert(output);
-		collect_labels(lv_display_get_screen_active(display), output);
-		collect_labels(lv_display_get_layer_top(display), output);
-		collect_labels(lv_display_get_layer_sys(display), output);
-		fputc('\n', output);
-		assert(fclose(output) == 0);
-	}
-	__real_lv_display_flush_ready(display);
-}
-
-bool __real_fplinux_language_load(const char *, const char *,
-				  struct fplinux_language *);
-
-bool __wrap_fplinux_language_load(const char *directory, const char *code,
-				  struct fplinux_language *language)
-{
-	const char *languages = getenv("FPLINUX_NATIVE_LANGUAGE_DIR");
-
-	if (languages && directory &&
-	    !strcmp(directory, FPLINUX_LANGUAGE_DIRECTORY))
-		directory = languages;
-	return __real_fplinux_language_load(directory, code, language);
-}
-
-char *__real_libintl_bindtextdomain(const char *domain, const char *directory);
-
-char *__wrap_libintl_bindtextdomain(const char *domain, const char *directory)
-{
-	const char *catalogues = getenv("FPLINUX_UI_LOCALE_DIRECTORY");
-
-	return __real_libintl_bindtextdomain(domain, catalogues ? catalogues :
-								  directory);
 }
 
 /* Replace only the unavailable ARM execution boundary. The application, IPC,

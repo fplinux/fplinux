@@ -1,0 +1,26 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-soundfont
+pkgver=@version:aport_timgm6mb_1_3_tar_gz@
+pkgrel=0
+pkgdesc="Compact General MIDI SoundFont for FPLinux media applications"
+url="https://musescore.org"
+arch="noarch"
+license="GPL-2.0-only"
+options="!check"
+source="
+	@source:aport_timgm6mb_1_3_tar_gz@
+	COPYRIGHT
+	GPL-2.0-only.txt
+"
+builddir="$srcdir/timgm6mb-soundfont_$pkgver"
+
+package() {
+	install -Dm644 TimGM6mb.sf2 "$pkgdir/usr/share/fplinux/soundfonts/TimGM6mb.sf2"
+	install -Dm644 "$srcdir/COPYRIGHT" "$pkgdir/usr/share/licenses/$pkgname/COPYRIGHT"
+	install -Dm644 "$srcdir/GPL-2.0-only.txt" "$pkgdir/usr/share/licenses/$pkgname/GPL-2.0.txt"
+}
+
+sha512sums="
+01d89be33c773b8b7f4f77a577d7eda90d58379fc209d8469a31fbeaee5013e0c0d0b9debdc693b9970ded6c89ac6e076247feac60bc2a4b167aa81e78e67e4a  COPYRIGHT
+260c02ff0a3e04ff0c2a95a936494b6a114a0a22121557059591d44af5fab5644ab8484be61eb33c12a6c9eef2170a108d51e2972adaef942568d94ae0d4ec83  GPL-2.0-only.txt
+"

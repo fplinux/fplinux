@@ -20,6 +20,9 @@ ui_host_build_application -I"$aport" \
 	"$aport/fplinux-mre.c" "$aport/mre-selector-files.c" \
 	"$aport/runtime-paths.c" "$aport/vfs-broker.c" "$aport/vfs-path.c" \
 	"$aport/text-codec.c" "$aport/http-broker.c" "$fixtures/adapter.c" \
+	"$fixtures/audio-boundary.c" \
+	"$fixtures/ui-observer.c" "$screens/native-glyph-resources.c" \
+	-Wl,--wrap=open -Wl,--wrap=fsync \
 	-Wl,--wrap=execl -Wl,--wrap=fplinux_language_load \
 	-Wl,--wrap=libintl_bindtextdomain \
 	-Wl,--wrap=fplinux_ui_open -Wl,--wrap=lv_timer_create \
@@ -36,3 +39,10 @@ ui_host_compile -I"$root/include/fplinux" -I"$ui_host_inputs" -I"$screens" \
 	"$ui_host_ui/fplinux-utf8.c" \
 	"$ui_host_inputs/xdg-shell-protocol.c" \
 	$(pkg-config --libs wayland-server xkbcommon json-c) -o "$work/mre-screens"
+# shellcheck disable=SC2046
+ui_host_compile -I"$root/include/fplinux" -I"$ui_host_inputs" -I"$screens" \
+	$(pkg-config --cflags wayland-server xkbcommon json-c) \
+	"$fixtures/menu-screens.c" "$screens/ui-frame-peer.c" "$screens/screen-frame.c" \
+	"$ui_host_ui/fplinux-ui-session.c" "$ui_host_ui/fplinux-ui-profile.c" \
+	"$ui_host_ui/fplinux-utf8.c" "$ui_host_inputs/xdg-shell-protocol.c" \
+	$(pkg-config --libs wayland-server xkbcommon json-c) -o "$work/menu-screens"

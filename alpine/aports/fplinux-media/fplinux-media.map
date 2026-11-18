@@ -1,0 +1,13 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
+{
+global:
+	fplinux_media_open_fd;
+	fplinux_media_open_bytes;
+	fplinux_media_close;
+	fplinux_media_info;
+	fplinux_media_read;
+	fplinux_media_seek;
+	fplinux_media_set_gain;
+local:
+	*;
+};

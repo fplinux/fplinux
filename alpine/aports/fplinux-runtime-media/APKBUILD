@@ -1,0 +1,50 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-runtime-media
+pkgver=1
+pkgrel=0
+pkgdesc="Bounded guest media playback for FPLinux runtimes"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="LGPL-2.1-or-later"
+depends="fplinux-ui fplinux-media fplinux-midi"
+makedepends_build="clang22 lld22 pkgconf"
+makedepends_host="musl-dev fplinux-ui-dev fplinux-media-dev fplinux-midi-dev"
+subpackages="$pkgname-dev"
+options="!check"
+source="
+	fplinux-runtime-media.c
+	fplinux-runtime-media.h
+	fplinux-runtime-media.pc
+	fplinux-runtime-media.map
+"
+builddir="$srcdir"
+
+build() {
+	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
+	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror -fPIC \
+		$(pkg-config --cflags fplinux-ui fplinux-media fplinux-midi) \
+		-I. -shared fplinux-runtime-media.c \
+		$(pkg-config --libs fplinux-ui fplinux-media fplinux-midi) -pthread \
+		$LDFLAGS -Wl,-soname,libfplinux-runtime-media.so.1 \
+		-Wl,--version-script=fplinux-runtime-media.map \
+		-o libfplinux-runtime-media.so.1
+}
+
+package() {
+	install -Dm755 libfplinux-runtime-media.so.1 \
+		"$pkgdir/usr/lib/libfplinux-runtime-media.so.1"
+	ln -s libfplinux-runtime-media.so.1 "$pkgdir/usr/lib/libfplinux-runtime-media.so"
+	install -Dm644 fplinux-runtime-media.h \
+		"$pkgdir/usr/include/fplinux/fplinux-runtime-media.h"
+	install -Dm644 fplinux-runtime-media.pc \
+		"$pkgdir/usr/lib/pkgconfig/fplinux-runtime-media.pc"
+}
+
+# Public checksum generation owns the final source digests.
+sha512sums="
+47f25549e70ab1b751175302d23dbc2e3792be7df9fa136ff2c0dff7e30c77374d1dfcdecc0276fbf43e039e6ab85344c53412e618c48d302671de3f4b11f202  fplinux-runtime-media.c
+f712a8525dfb0306c6c80998ea8616453c48452fdc2a4321ebebd01968fbf7af7779de33e7560cf7e734c026dc2b42b49dbfe169ab1e5a9b3cf4cbfbe4b5fd9c  fplinux-runtime-media.h
+b74fba1a8c1d239edb0787d4e683b8766257d644ad6e55db3a65a77cfcd9ca456069744b18b61f3a739913090dabceaf9ac37652284942cfe46e13d18133f2e3  fplinux-runtime-media.pc
+245b412cad19e764e8962e8cd4fbafa1aa742a6fdbfd0f691b8045e823114c09c518820e467931356afee87cc6b09cb669ab72663a59bbdf8d497f373789c3d0  fplinux-runtime-media.map
+"

@@ -1,0 +1,48 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-media
+pkgver=1
+pkgrel=0
+pkgdesc="Shared bounded media decoders for FPLinux applications"
+url="https://github.com/fplinux/fplinux"
+arch="armv7"
+license="GPL-2.0-only AND LGPL-2.1-or-later"
+depends="fplinux-mpg123"
+makedepends_build="clang22 lld22 pkgconf"
+makedepends_host="musl-dev fplinux-mpg123-dev"
+subpackages="$pkgname-dev"
+options="!check"
+source="
+	fplinux-media.c
+	fplinux-media.h
+	fplinux-utf8.c
+	fplinux-utf8.h
+	fplinux-media.pc
+	fplinux-media.map
+"
+builddir="$srcdir"
+
+build() {
+	export PKG_CONFIG_SYSROOT_DIR="$CBUILDROOT"
+	export PKG_CONFIG_LIBDIR="$CBUILDROOT/usr/lib/pkgconfig:$CBUILDROOT/usr/share/pkgconfig"
+	"$CC" $CPPFLAGS $CFLAGS -Os -std=c11 -Wall -Wextra -Werror -fPIC \
+		$(pkg-config --cflags libmpg123) -I. -shared fplinux-media.c fplinux-utf8.c \
+		$(pkg-config --libs libmpg123) $LDFLAGS \
+		-Wl,-soname,libfplinux-media.so.1 -Wl,--version-script=fplinux-media.map \
+		-o libfplinux-media.so.1
+}
+
+package() {
+	install -Dm755 libfplinux-media.so.1 "$pkgdir/usr/lib/libfplinux-media.so.1"
+	ln -s libfplinux-media.so.1 "$pkgdir/usr/lib/libfplinux-media.so"
+	install -Dm644 fplinux-media.h "$pkgdir/usr/include/fplinux/fplinux-media.h"
+	install -Dm644 fplinux-media.pc "$pkgdir/usr/lib/pkgconfig/fplinux-media.pc"
+}
+
+sha512sums="
+96fe02a1a83e6f254c2a0d4ddb97c75978fecbef12bdfc08192fa8ced17702df46775e3da9373496990b2030c49c8ce409c0809217c27dd7166700a798bf1c91  fplinux-media.c
+88e1d2422b423fed18f3ffe7a644ce156af45f317fcf0bfc496ef4e4ce8e4907078527f0444d0a157e4f72edb12402020dab4a902e3fd7b87eb2795f394954f6  fplinux-media.h
+0ded6f822b59d68de21ce64d03e892f27e2f190366ff39f154b88a73b0c7c3627c2787ddf37817ad85cc8206a20243b3f3c13b039d3d06955392a6b5a70e1bcd  fplinux-utf8.c
+8143f656608c63e42016da2003174d6fb2ac043daaad07e63e006bf3dc76544e76e820ae52a9c50f5559d58757c44aeded2b1cd4b01b4665938a7e88b4bc1d43  fplinux-utf8.h
+28584086f740e1a0fc00aa5fc0c495fecfd1d8841146b609dbdde5a86ff9ff43da3f6ccd3e6cac641eaec62e3963c52f81950284770d3ce56c4a523c6637bf83  fplinux-media.pc
+303e09fcc939a4a28deeceae8e7162678ea8dfe5f4b3582765d91357aa6bc669c95555b99c40b6ec6ac2453ac874e76893462b2287b6621cdf090ea2fc204e1c  fplinux-media.map
+"

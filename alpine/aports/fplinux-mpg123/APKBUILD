@@ -1,0 +1,56 @@
+# Maintainer: FPLinux contributors <fplinux@example.invalid>
+pkgname=fplinux-mpg123
+pkgver=@version:aport_mpg123_1_33_7_tar_bz2@
+pkgrel=0
+pkgdesc="MP3 decoding library for FPLinux media applications"
+url="https://www.mpg123.de/"
+arch="armv7"
+license="LGPL-2.1-only"
+makedepends_build="llvm22"
+makedepends_host="musl-dev"
+subpackages="$pkgname-dev"
+options="!check"
+source="@source:aport_mpg123_1_33_7_tar_bz2@"
+builddir="$srcdir/mpg123-$pkgver"
+
+build() {
+	export CFLAGS="$CFLAGS -Oz -mfpu=neon-vfpv4"
+	export LDFLAGS="$LDFLAGS -Wl,--icf=safe"
+	export AR=/usr/lib/llvm22/bin/llvm-ar
+	export RANLIB=/usr/lib/llvm22/bin/llvm-ranlib
+	./configure \
+		--build="$CBUILD" \
+		--host="$CHOST" \
+		--prefix=/usr \
+		--libdir=/usr/lib \
+		--disable-static \
+		--enable-shared \
+		--disable-dependency-tracking \
+		--disable-components \
+		--enable-libmpg123 \
+		--disable-modules \
+		--disable-network \
+		--with-network=none \
+		--with-audio=dummy \
+		--with-cpu=neon \
+		--with-optimization=0 \
+		--with-seektable=1000 \
+		--disable-layer1 \
+		--disable-layer2 \
+		--disable-8bit \
+		--disable-32bit \
+		--disable-real \
+		--disable-icy \
+		--disable-equalizer \
+		--disable-moreinfo \
+		--disable-buffer
+	make -j"${JOBS:-1}"
+}
+
+package() {
+	make DESTDIR="$pkgdir" install
+	install -Dm644 COPYING "$pkgdir/usr/share/licenses/$pkgname/COPYING"
+}
+
+sha512sums="
+"

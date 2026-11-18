@@ -728,6 +728,13 @@ url = "https://raw.githubusercontent.com/alpinelinux/aports/dff61c85c6c68e2c5fb8
 algorithm = "sha512"
 checksum = "bc152c2b5eb37a08035f289b21e85d41461914e8b1f3c6a6a87ba0dd0cfeb20c9a5e6d7dab132e345339245a7ae1ffcb741f5bfde76fb8e0c87e4de5e0b1faf0"
 
+[aport_mpg123_1_33_7_tar_bz2]
+version = "1.33.7"
+name = "mpg123-1.33.7.tar.bz2"
+url = "https://www.mpg123.de/download/mpg123-1.33.7.tar.bz2"
+algorithm = "sha512"
+checksum = "694743802bb7be0f4a39bf62e681ae0bfed769cb87dc6c5b6fb5f9245966631efb5c5b9bd58588f7af55ced5d020f97c8a54993e71b5295bc45ebd152473f40e"
+
 [aport_networking_initd]
 version = "dff61c85c6c68e2c5fb8abac65f0dd97d4ad8763"
 name = "networking.initd"
@@ -937,6 +944,20 @@ name = "terminus-font-4.49.1.tar.gz"
 url = "https://downloads.sourceforge.net/project/terminus-font/terminus-font-4.49/terminus-font-4.49.1.tar.gz"
 algorithm = "sha512"
 checksum = "2e3a99960c459a453b5879bebbebeb653f0a22060177bf75c67bbeb7d32cfe1acce9e74a88fdc42e299b6dc402e0708552487abd26e80e985c7d6059b0d445a8"
+
+[aport_timgm6mb_1_3_tar_gz]
+version = "1.3"
+name = "timgm6mb-soundfont_1.3.orig.tar.gz"
+url = "https://deb.debian.org/debian/pool/main/t/timgm6mb-soundfont/timgm6mb-soundfont_1.3.orig.tar.gz"
+algorithm = "sha512"
+checksum = "21efc109f3e046625433dbbac093b5a42d7469a482e3b15e387f5b65b61d49fa29f17e68593a40ceecfd3105fa226d4a9fc07e4b360e9679f38b400762d2b455"
+
+[aport_tinysoundfont_853a0a17_h]
+version = "0.9"
+name = "tsf.h"
+url = "https://raw.githubusercontent.com/schellingb/TinySoundFont/853a0a171759f1ddba0de1442133a75912bbeffa/tsf.h"
+algorithm = "sha512"
+checksum = "c532ae980e316c92e84dc40ed274f1d92c498eab437c583bcd29fb305b1e6772d645695da9b0239b90c40c13449c9e324f97b081bf84ea4055becbe0c3489e73"
 
 [aport_tyrquake_0_71_tar_gz]
 version = "0.71"
