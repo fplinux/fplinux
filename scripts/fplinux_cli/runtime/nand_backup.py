@@ -39,6 +39,7 @@ _GEOMETRY_REPORT_KEYS = frozenset(
         "feature_c0",
     }
 )
+_SPI_FEATURE_KEYS = ("feature_a0", "feature_b0", "feature_c0")
 _GEOMETRY_SIZE_KEYS = (
     "page_main_bytes",
     "oob_bytes",
@@ -117,15 +118,24 @@ def parse_geometry_report(report: str) -> NandGeometry:
         if not separator or key not in _GEOMETRY_REPORT_KEYS or key in values:
             fail(f"invalid NAND geometry report line: {line!r}")
         values[key] = value
-    missing = _GEOMETRY_REPORT_KEYS - set(values)
+    feature_keys = set(_SPI_FEATURE_KEYS)
+    missing = _GEOMETRY_REPORT_KEYS - feature_keys - set(values)
     if missing:
         fail(f"NAND geometry report lacks: {', '.join(sorted(missing))}")
+    features = set(values) & feature_keys
+    if features and features != feature_keys:
+        missing_features = feature_keys - features
+        fail(f"NAND geometry report lacks: {', '.join(sorted(missing_features))}")
     if values["geometry_source"] == "unknown":
+        feature_report = "".join(
+            f" {key}={values[key]}" for key in _SPI_FEATURE_KEYS if key in values
+        )
         fail(
             f"the running kernel does not identify this NAND chip: "
-            f"id_bytes={values['id_bytes']} feature_a0={values['feature_a0']} "
-            f"feature_b0={values['feature_b0']} feature_c0={values['feature_c0']}"
+            f"id_bytes={values['id_bytes']}{feature_report}; raw NAND reads are unavailable"
         )
+    if not features:
+        fail(f"NAND geometry report lacks: {', '.join(_SPI_FEATURE_KEYS)}")
     if values["geometry_source"] not in {"dt", "table"}:
         fail(f"NAND geometry report has an invalid geometry_source: {values['geometry_source']}")
     for key in _GEOMETRY_SIZE_KEYS:

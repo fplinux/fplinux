@@ -10,9 +10,14 @@ from fplinux_cli.device_data.formats import DeviceDataPreparation, PreparedGroup
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from fplinux_cli.device_data.formats import AudioProfileContext
 
-def prepare_from_originals(originals: Mapping[str, bytes]) -> DeviceDataPreparation:
+
+def prepare_from_originals(
+    originals: Mapping[str, bytes], *, audio: AudioProfileContext
+) -> DeviceDataPreparation:
     """Require a complete input set and retain its exact bytes."""
+    del audio
     expected = {
         "wcnmodem-firmware.bin",
         "system-connectivity_configure.ini",

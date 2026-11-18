@@ -43,9 +43,48 @@ description: |
   owned platform state are also restored. Hardware is activated only for
   explicit opens and reads.
 
+  The fplinux,ums9117-nandc-parallel-id compatible provides only fixed RESET
+  and READ ID operations for parallel NAND. It reports the manufacturer and
+  device bytes, with unknown geometry and without SPI feature fields. Array
+  reads are refused. It does not allocate DMA buffers or expose a write path.
+
+allOf:
+  - if:
+      properties:
+        compatible:
+          const: fplinux,ums9117-nandc-parallel-id
+    then:
+      properties:
+        fplinux,nand-id: false
+        sprd,pinconf-values:
+          minItems: 17
+          maxItems: 17
+    else:
+      properties:
+        sprd,pinconf-values:
+          items:
+            - const: 3145728
+            - const: 3145728
+            - const: 3145728
+            - const: 3145728
+            - const: 3145728
+            - const: 3145728
+            - const: 3145728
+            - const: 3145728
+            - const: 3145728
+            - const: 3145728
+            - const: 3145728
+            - const: 3145728
+            - const: 3145728
+            - const: 3145728
+            - const: 3145856
+            - const: 3149824
+
 properties:
   compatible:
-    const: fplinux,ums9117-nandc-ro
+    enum:
+      - fplinux,ums9117-nandc-ro
+      - fplinux,ums9117-nandc-parallel-id
 
   fplinux,nand-id:
     $ref: /schemas/types.yaml#/definitions/uint32
@@ -119,23 +158,8 @@ properties:
 
   sprd,pinconf-values:
     $ref: /schemas/types.yaml#/definitions/uint32-array
-    items:
-      - const: 3145728
-      - const: 3145728
-      - const: 3145728
-      - const: 3145728
-      - const: 3145728
-      - const: 3145728
-      - const: 3145728
-      - const: 3145728
-      - const: 3145728
-      - const: 3145728
-      - const: 3145728
-      - const: 3145728
-      - const: 3145728
-      - const: 3145728
-      - const: 3145856
-      - const: 3149824
+    minItems: 16
+    maxItems: 17
     description: Values written at the paired pinconf offsets.
 
 required:

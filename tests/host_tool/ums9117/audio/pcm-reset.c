@@ -23,6 +23,7 @@ struct ums9117_audio {
 struct ums9117_sc2720_codec {
 	bool playback_prepared;
 	bool capture_prepared;
+	bool headphones_only;
 };
 
 static struct ums9117_audio digital;
@@ -533,7 +534,8 @@ int ums9117_audio_set_dac_processing(
 	return 0;
 }
 
-int ums9117_audio_profile_load(struct device *dev, bool vibration,
+int ums9117_audio_profile_load(struct device *dev, bool headphones_only,
+			       bool vibration,
 			       struct ums9117_audio_profile *profile)
 {
 	memset(profile, 0, sizeof(*profile));
@@ -542,7 +544,15 @@ int ums9117_audio_profile_load(struct device *dev, bool vibration,
 
 struct ums9117_sc2720_codec *ums9117_sc2720_codec_create(struct device *dev)
 {
+	codec.headphones_only =
+		device_property_read_bool(dev, "fplinux,headphones-only");
 	return &codec;
+}
+
+bool ums9117_sc2720_codec_has_speaker(
+	const struct ums9117_sc2720_codec *instance)
+{
+	return !instance->headphones_only;
 }
 
 void ums9117_sc2720_codec_get_volume(struct ums9117_sc2720_codec *instance,

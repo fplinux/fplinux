@@ -25,7 +25,7 @@ static const u8 speaker_gains[9] = { 90, 80, 70, 60, 50, 40, 30, 20, 10 };
 static const u8 combined_gains[9] = { 100, 95, 90, 85, 80, 75, 70, 65, 60 };
 static const s16 alc_words[11] = { -32768, -2, 0, 1, 32767, 5, 6, 7, 8, 9, 10 };
 
-static void make_profile_bytes(u8 bytes[822])
+static void make_processing_bytes(u8 bytes[241], bool alc_enabled)
 {
 	static const u8 processing_header[25] = {
 		0x00, 0x10, 0x00, 0x00, 0x80, 0xfe, 0xff, 0x00, 0x00,
@@ -35,6 +35,26 @@ static void make_profile_bytes(u8 bytes[822])
 	static const u8 unity_section[12] = {
 		0x00, 0x10, 0x00, 0x40, 0, 0, 0, 0, 0, 0, 0, 0,
 	};
+	size_t section;
+
+	memcpy(bytes, processing_header, 25);
+	bytes[2] = alc_enabled;
+	for (section = 0; section < 18; section++)
+		memcpy(bytes + 25 + section * 12, unity_section, 12);
+}
+
+static void make_headphone_profile_bytes(u8 bytes[283])
+{
+	memset(bytes, 0, 283);
+	memcpy(bytes, "FPAUDHP", 8);
+	memcpy(bytes + 8, "fplinux,test-phone", 18);
+	bytes[32] = 2;
+	memcpy(bytes + 33, headphone_gains, 9);
+	make_processing_bytes(bytes + 42, false);
+}
+
+static void make_profile_bytes(u8 bytes[822])
+{
 	static const u8 tone[34] = {
 		0,    0,    0,	  0,	0,    0,    0,	  0,	0,
 		0,    0,    0,	  0,	0,    0,    0x40, 0,	0,
@@ -43,7 +63,6 @@ static void make_profile_bytes(u8 bytes[822])
 	};
 	static const size_t routes[3] = { 65, 306, 547 };
 	size_t route;
-	size_t section;
 
 	memset(bytes, 0, 822);
 	memcpy(bytes, "FPAUDIO", 8);
@@ -55,13 +74,8 @@ static void make_profile_bytes(u8 bytes[822])
 	bytes[53] = 17;
 	bytes[55] = 7;
 	memcpy(bytes + 56, combined_gains, 9);
-	for (route = 0; route < 3; route++) {
-		memcpy(bytes + routes[route], processing_header, 25);
-		bytes[routes[route] + 2] = route != 0;
-		for (section = 0; section < 18; section++)
-			memcpy(bytes + routes[route] + 25 + section * 12,
-			       unity_section, 12);
-	}
+	for (route = 0; route < 3; route++)
+		make_processing_bytes(bytes + routes[route], route != 0);
 	memcpy(bytes + 788, tone, 34);
 }
 
@@ -126,7 +140,50 @@ static int parse(const u8 *bytes, size_t size, bool vibration,
 		 struct ums9117_audio_profile *profile)
 {
 	return ums9117_audio_profile_parse("fplinux,test-phone", bytes, size,
-					   vibration, profile);
+					   false, vibration, profile);
+}
+
+static void test_headphone_only_profile(void)
+{
+	static const size_t invalid_sizes[] = { 0, 42, 282, 284, 788, 822 };
+	static const u8 no_gains[9] = {};
+	struct ums9117_audio_profile profile = {};
+	u8 bytes[822] = {};
+	size_t i;
+
+	make_headphone_profile_bytes(bytes);
+	CHECK(ums9117_audio_profile_parse("fplinux,test-phone", bytes, 283,
+					  true, false, &profile) == 0);
+	CHECK(profile.fitted);
+	CHECK(profile.codec_volume == 1);
+	CHECK(!memcmp(profile.dac_gain, headphone_gains, 9));
+	check_processing(&profile.headphone_processing, false);
+	CHECK(!memcmp(profile.speaker_dac_gain, no_gains, 9));
+	CHECK(!memcmp(profile.combined_dac_gain, no_gains, 9));
+	CHECK(!profile.speaker_processing.output_scale);
+	CHECK(!profile.combined_processing.output_scale);
+	CHECK(!profile.speaker_pa_word);
+	CHECK(!profile.combined_pa_word);
+	for (i = 0; i < sizeof(invalid_sizes) / sizeof(invalid_sizes[0]); i++)
+		CHECK(ums9117_audio_profile_parse("fplinux,test-phone", bytes,
+						  invalid_sizes[i], true, false,
+						  &profile) == -22);
+	CHECK(ums9117_audio_profile_parse("fplinux,test-phone", bytes, 283,
+					  false, false, &profile) == -22);
+	CHECK(ums9117_audio_profile_parse("fplinux,test-phone", bytes, 283,
+					  true, true, &profile) == -22);
+	CHECK(ums9117_audio_profile_parse("fplinux,other-phone", bytes, 283,
+					  true, false, &profile) == -22);
+	memcpy(bytes, "FPAUDIO", 8);
+	CHECK(ums9117_audio_profile_parse("fplinux,test-phone", bytes, 283,
+					  true, false, &profile) == -22);
+	make_headphone_profile_bytes(bytes);
+	bytes[44] = 2;
+	CHECK(ums9117_audio_profile_parse("fplinux,test-phone", bytes, 283,
+					  true, false, &profile) == -22);
+	make_profile_bytes(bytes);
+	CHECK(ums9117_audio_profile_parse("fplinux,test-phone", bytes, 788,
+					  true, false, &profile) == -22);
 }
 
 static void test_decoded_values(void)
@@ -185,7 +242,7 @@ static void test_headphone_fed_speaker_profile(void)
 	bytes[32] = 7;
 	bytes[42] = 0;
 	bytes[53] = 0;
-	CHECK(ums9117_audio_profile_parse("bq,2830l", bytes, 788, false,
+	CHECK(ums9117_audio_profile_parse("bq,2830l", bytes, 788, false, false,
 					  &profile) == 0);
 	CHECK(profile.fitted);
 	CHECK(profile.codec_volume == 6);
@@ -198,6 +255,32 @@ static void test_headphone_fed_speaker_profile(void)
 	check_processing(&profile.headphone_processing, false);
 	check_processing(&profile.speaker_processing, true);
 	check_processing(&profile.combined_processing, true);
+}
+
+static void test_nonmonotonic_gains_preserve_level_order(void)
+{
+	static const u8 packed_gains[9] = { 0x6e, 0x61, 0x52, 0x45, 0x37,
+					    0x2c, 0x1a, 0x25, 0x12 };
+	static const u8 expected_gains[9] = { 110, 97, 82, 69, 55,
+					      44,  26, 37, 18 };
+	static const size_t offsets[3] = { 33, 44, 56 };
+	struct ums9117_audio_profile profile = {};
+	u8 bytes[822];
+	size_t route;
+
+	for (route = 0; route < 3; route++) {
+		make_profile_bytes(bytes);
+		memcpy(bytes + offsets[route], packed_gains, 9);
+		CHECK(parse(bytes, 788, false, &profile) == 0);
+		CHECK(profile.fitted);
+		CHECK(!memcmp(profile.dac_gain,
+			      route == 0 ? expected_gains : headphone_gains,
+			      9));
+		CHECK(!memcmp(profile.speaker_dac_gain,
+			      route == 1 ? expected_gains : speaker_gains, 9));
+		CHECK(!memcmp(profile.combined_dac_gain,
+			      route == 2 ? expected_gains : combined_gains, 9));
+	}
 }
 
 struct invalid_field {
@@ -246,9 +329,9 @@ static void test_identity_and_length(void)
 	for (i = 0; i < sizeof(tone_sizes) / sizeof(tone_sizes[0]); i++)
 		CHECK(parse(bytes, tone_sizes[i], true, &profile) == -22);
 	CHECK(ums9117_audio_profile_parse("fplinux,other-phone", bytes, 788,
-					  false, &profile) == -22);
+					  false, false, &profile) == -22);
 	CHECK(ums9117_audio_profile_parse("123456789012345678901234", bytes,
-					  788, false, &profile) == -22);
+					  788, false, false, &profile) == -22);
 }
 
 static void test_gain_and_processing_safety(void)
@@ -257,8 +340,8 @@ static void test_gain_and_processing_safety(void)
 		{ 32, 1, 0, false },   { 32, 8, 0, false },
 		{ 55, 1, 0, false },   { 55, 8, 0, false },
 		{ 33, 128, 0, false }, { 44, 128, 0, false },
-		{ 56, 128, 0, false }, { 35, 121, 0, false },
-		{ 45, 91, 0, false },  { 57, 101, 0, false },
+		{ 56, 128, 0, false }, { 41, 255, 0, false },
+		{ 52, 255, 0, false }, { 64, 255, 0, false },
 		{ 42, 0, 1, true },    { 53, 0, 1, true },
 	};
 	static const struct invalid_field processing_fields[] = {
@@ -432,25 +515,26 @@ static void test_loader_fallback_and_errors(void)
 		else
 			dev.request_error = -ENOENT;
 		memcpy(&profile, &original, sizeof(profile));
-		CHECK(ums9117_audio_profile_load(&dev, false, &profile) == 0);
+		CHECK(ums9117_audio_profile_load(&dev, false, false,
+						 &profile) == 0);
 		CHECK(!memcmp(&profile, &original, sizeof(profile)));
 		check_firmware_balance(&dev);
 	}
 	prepare_device(&dev);
 	dev.property_error = -EINVAL;
-	CHECK(ums9117_audio_profile_load(&dev, false, &profile) == -22);
+	CHECK(ums9117_audio_profile_load(&dev, false, false, &profile) == -22);
 	check_firmware_balance(&dev);
 	prepare_device(&dev);
 	dev.request_error = -EAGAIN;
-	CHECK(ums9117_audio_profile_load(&dev, false, &profile) == -11);
+	CHECK(ums9117_audio_profile_load(&dev, false, false, &profile) == -11);
 	check_firmware_balance(&dev);
 	prepare_device(&dev);
 	dev.compatible_error = -ENODATA;
-	CHECK(ums9117_audio_profile_load(&dev, false, &profile) == -61);
+	CHECK(ums9117_audio_profile_load(&dev, false, false, &profile) == -61);
 	check_firmware_balance(&dev);
 	prepare_device(&dev);
 	dev.bytes[0] = 'X';
-	CHECK(ums9117_audio_profile_load(&dev, false, &profile) == -22);
+	CHECK(ums9117_audio_profile_load(&dev, false, false, &profile) == -22);
 	check_firmware_balance(&dev);
 }
 
@@ -461,25 +545,38 @@ static void test_loader_copies_decoded_values(void)
 
 	prepare_device(&dev);
 	memset(&profile, 0, sizeof(profile));
-	CHECK(ums9117_audio_profile_load(&dev, false, &profile) == 0);
+	CHECK(ums9117_audio_profile_load(&dev, false, false, &profile) == 0);
 	check_firmware_balance(&dev);
 	CHECK(dev.released > 0);
 	check_decoded_profile(&profile);
 	prepare_device(&dev);
 	dev.firmware.size = 822;
 	memset(&profile, 0, sizeof(profile));
-	CHECK(ums9117_audio_profile_load(&dev, true, &profile) == 0);
+	CHECK(ums9117_audio_profile_load(&dev, false, true, &profile) == 0);
 	check_firmware_balance(&dev);
 	CHECK(dev.released > 0);
 	check_decoded_profile(&profile);
 	if (CONFIG_SND_UMS9117_SPEAKER_VIBRATOR)
 		check_decoded_tone(&profile.vibrate_tone);
+	prepare_device(&dev);
+	make_headphone_profile_bytes(dev.bytes);
+	dev.firmware.size = 283;
+	memset(&profile, 0, sizeof(profile));
+	CHECK(ums9117_audio_profile_load(&dev, true, false, &profile) == 0);
+	check_firmware_balance(&dev);
+	CHECK(dev.released > 0);
+	CHECK(profile.fitted);
+	CHECK(profile.codec_volume == 1);
+	CHECK(!memcmp(profile.dac_gain, headphone_gains, 9));
+	check_processing(&profile.headphone_processing, false);
 }
 
 int main(void)
 {
 	test_decoded_values();
+	test_headphone_only_profile();
 	test_headphone_fed_speaker_profile();
+	test_nonmonotonic_gains_preserve_level_order();
 	test_identity_and_length();
 	test_gain_and_processing_safety();
 	test_tone_capability();

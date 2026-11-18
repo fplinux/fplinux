@@ -23,17 +23,8 @@ enum ums9117_sc2720_capture_source {
 
 /* The PCM owner serializes every operation and quiesces before devm release. */
 struct ums9117_sc2720_codec *ums9117_sc2720_codec_create(struct device *dev);
-/* Headphone-fed speakers require a configured non-sleeping mode-control GPIO. */
-#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
+/* Board policy and headphone-fed mode-control support gate speaker playback. */
 bool ums9117_sc2720_codec_has_speaker(const struct ums9117_sc2720_codec *codec);
-#else
-static inline bool
-ums9117_sc2720_codec_has_speaker(const struct ums9117_sc2720_codec *codec)
-{
-	(void)codec;
-	return true;
-}
-#endif
 /*
  * Power the headset detector that drives the jack insert EIC. Call it before
  * the first prepare: playback and capture then save and restore its supply

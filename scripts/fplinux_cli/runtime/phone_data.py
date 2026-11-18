@@ -74,8 +74,11 @@ def selected_phone_data(
     """Require normal-boot groups and retain any separately imported optional firmware."""
     from fplinux_cli.device_data.inputs import capture_phone_data  # noqa: PLC0415
 
+    required = spec.required_declarations
+    if not required and not destination.exists() and not destination.is_symlink():
+        return {}
     captured = capture_phone_data(spec.groups, destination, require_all=False)
-    missing = set(spec.required_declarations) - captured.keys()
+    missing = set(required) - captured.keys()
     if missing:
         fail(f"Required phone data is absent: {', '.join(sorted(missing))}")
     return captured
@@ -279,8 +282,6 @@ def run_nand(  # noqa: PLR0913 -- the admitted connection, action and selected d
     phone_data: Path | None,
 ) -> None:
     """Use the same saved normal session and content binding for explicit NAND commands."""
-    from .nand_backup import read_geometry_report  # noqa: PLC0415
-
     bundle, runtime = admitted.root, admitted.runtime
     nand = runtime["nand"]
     if not isinstance(nand, dict) or not isinstance(nand.get("raw_device"), str):
@@ -299,9 +300,13 @@ def run_nand(  # noqa: PLR0913 -- the admitted connection, action and selected d
             fail("NAND backup requires an output path")
         _read_backup(connection, runtime, data, log, output=output)
         return
+    from .nand_identify import read_identification_report  # noqa: PLC0415
+
     transport, session = connection
     with log.capture():
-        report = read_geometry_report(transport, session, nand["raw_device"])
+        report = read_identification_report(
+            transport, session, nand["raw_device"], diagnostics=log.record
+        )
     print(report, end="", flush=True)
     log.record(report.rstrip("\n"))
 

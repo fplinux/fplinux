@@ -120,6 +120,16 @@ class PartitionDiscoveryTests:
 class KeypadTests:
     """Turn the stock keymap into the matrix, boot key and EIC9 candidate."""
 
+    def test_volume_codes_are_named_without_assigning_unknown_keys(self) -> None:
+        """Volume codes retain their standard roles; another extra key stays unknown."""
+        report = STOCK_IMAGE.keypad_report(keymap({0: 0x24, 1: 0x25, 2: 0x6A}))
+
+        assert report["matrix"] == [
+            {"row": 0, "column": 0, "code": "0x24", "key": "KEY_VOLUMEUP"},
+            {"row": 1, "column": 0, "code": "0x25", "key": "KEY_VOLUMEDOWN"},
+            {"row": 2, "column": 0, "code": "0x6a", "key": None},
+        ]
+
     def test_matrix_positions_follow_the_column_major_keymap_with_a_hole(self) -> None:
         """Entry column * 8 + row is MATRIX_KEY(row, column); an empty entry is no key."""
         report = STOCK_IMAGE.keypad_report(keymap(SPARSE_KEYMAP))
@@ -128,7 +138,10 @@ class KeypadTests:
         assert ((report["rows"], report["columns"])) == ((3, 2))
         assert (report["boot_key"]) == ({"code": "0x2a", "key": "FPLINUX_KEY_STAR"})
 
-    def test_only_a_single_missing_needed_key_is_the_eic9_candidate(self) -> None:
+    @pytest.mark.parametrize("volume_keys", [{}, {20: 0x24, 21: 0x25}], ids=["absent", "present"])
+    def test_only_a_single_missing_needed_key_is_the_eic9_candidate(
+        self, volume_keys: dict[int, int]
+    ) -> None:
         """One absent key is proposed for EIC9; with two absent keys none is proposed."""
         # Column 0 holds the digits 0-7, columns 1 and 2 the other keys except 8.
         keys_without_8 = {row: 0x30 + row for row in range(8)} | {
@@ -144,8 +157,10 @@ class KeypadTests:
             17: 0x09,
             18: 0x0D,
         }
-        one_missing = STOCK_IMAGE.keypad_report(keymap(keys_without_8))
-        two_missing = STOCK_IMAGE.keypad_report(keymap(keys_without_8 | {18: 0xFFFF}))
+        one_missing = STOCK_IMAGE.keypad_report(keymap(keys_without_8 | volume_keys))
+        two_missing = STOCK_IMAGE.keypad_report(
+            keymap(keys_without_8 | volume_keys | {18: 0xFFFF})
+        )
 
         eight = {"code": "0x38", "key": "FPLINUX_KEY_8"}
         assert (one_missing["eic9_candidate"]) == (eight)

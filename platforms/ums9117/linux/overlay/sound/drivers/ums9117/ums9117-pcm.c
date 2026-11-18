@@ -1003,6 +1003,8 @@ static int ums9117_pcm_set_outputs_locked(struct ums9117_pcm *audio,
 
 	if (audio->removing || audio->suspended)
 		return audio->removing ? -ENODEV : -ESTRPIPE;
+	if (audio->headphones_only && (outputs & UMS9117_SC2720_OUTPUT_SPEAKER))
+		return -EOPNOTSUPP;
 	if (audio->outputs == outputs)
 		return 0;
 	if ((ums9117_pcm_effective_outputs(outputs,
@@ -2034,6 +2036,11 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 		&pdev->dev, "fplinux,microphone-capture");
 	audio->speaker_vibration = device_property_read_bool(
 		&pdev->dev, "fplinux,speaker-vibration");
+	audio->headphones_only = device_property_read_bool(
+		&pdev->dev, "fplinux,headphones-only");
+	if (audio->speaker_vibration && audio->headphones_only)
+		return dev_err_probe(&pdev->dev, -EINVAL,
+				     "headphone-only output cannot vibrate\n");
 	audio->headfree_headphones_only = device_property_read_bool(
 		&pdev->dev, "fplinux,headfree-headphones-only");
 #if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
@@ -2053,7 +2060,8 @@ static int ums9117_pcm_probe(struct platform_device *pdev)
 			&pdev->dev, -EOPNOTSUPP,
 			"headphone-fed speaker support is disabled\n");
 #endif
-	ret = ums9117_audio_profile_load(audio->dev, audio->speaker_vibration,
+	ret = ums9117_audio_profile_load(audio->dev, audio->headphones_only,
+					 audio->speaker_vibration,
 					 &audio->profile);
 	if (ret)
 		return ret;

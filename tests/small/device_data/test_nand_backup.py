@@ -25,6 +25,7 @@ from fplinux_cli.device_data.prepare import dump_page_bytes
 from fplinux_cli.runtime import bundle_session, nand_backup
 from fplinux_cli.runtime.data_paths import checkout_runtime_root
 
+from tests import ROOT
 from tests.small.command_fixtures import (
     command_bundle as command_bundle,  # noqa: PLC0414 -- pytest fixture export.
 )
@@ -89,6 +90,9 @@ UNKNOWN_CHIP = _geometry_report(
     block_count=0,
     raw_bytes=0,
     source="unknown",
+)
+PARALLEL_IDENTIFICATION = (ROOT / "tests/fixtures/nand-geometry/parallel-identify.txt").read_text(
+    encoding="ascii"
 )
 
 
@@ -176,6 +180,30 @@ def nand_destination(tmp_path: Path) -> Iterator[NandDestination]:
 
 class NandBackupTests:
     """Protect the exact raw stream boundary and its local publication result."""
+
+    def test_parallel_identification_without_geometry_refuses_array_reads(
+        self, nand_destination: NandDestination
+    ) -> None:
+        """An ID-only report preserves the ID in its error and never requests a raw stream."""
+        phone = FakePhone(PARALLEL_IDENTIFICATION, b"unreachable array bytes")
+
+        with pytest.raises(SystemExit) as error:
+            nand_destination.backup(phone)
+
+        assert str(error.value) == (
+            "fplinux: the running kernel does not identify this NAND chip: "
+            "id_bytes=98ba; raw NAND reads are unavailable"
+        )
+        assert phone.raw_reads() == []
+        assert not nand_destination.destination.exists()
+        assert not nand_destination.receipt.exists()
+
+    def test_known_spi_geometry_still_requires_its_feature_report(self) -> None:
+        """A complete physical layout cannot bypass the existing SPI feature contract."""
+        report = ONE_PAGE_64_OOB.partition("feature_a0=")[0]
+
+        with pytest.raises(SystemExit, match="lacks: feature_a0, feature_b0, feature_c0"):
+            nand_backup.parse_geometry_report(report)
 
     @pytest.mark.parametrize("complete", [True, False])
     def test_backup_progress_completes_only_after_checked_publication(

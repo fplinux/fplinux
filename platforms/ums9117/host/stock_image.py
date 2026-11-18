@@ -51,11 +51,13 @@ KEY_NAMES = {
     0x09: "FPLINUX_KEY_SOFT_RIGHT",
     0x0D: "FPLINUX_KEY_OK",
     0x23: "FPLINUX_KEY_POUND",
+    0x24: "KEY_VOLUMEUP",
+    0x25: "KEY_VOLUMEDOWN",
     0x2A: "FPLINUX_KEY_STAR",
     **{0x30 + digit: f"FPLINUX_KEY_{digit}" for digit in range(10)},
 }
-# Every phone keypad has all of these keys.
-_NEEDED_KEYS = frozenset(KEY_NAMES)
+# Optional volume keys do not identify a missing EIC9 keypad key.
+_NEEDED_KEYS = frozenset(KEY_NAMES) - {0x24, 0x25}
 _EMPTY_KEY = 0xFFFF
 _KEYMAP_COLUMN_STRIDE = 8
 _KEYMAP_MAX_BYTES = 128
@@ -184,7 +186,7 @@ class StockImage:
 def find_application_image(nand: PhysicalNand) -> StockImage:
     """Locate the stock application image through the phone's own partition table.
 
-    Two agreeing VBM copies at block starts take precedence; without VBM copies,
+    Two agreeing VBM copies at page starts take precedence; without VBM copies,
     one compiled PartI table found anywhere in the main area is used.
     """
     table = discover_partitions(

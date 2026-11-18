@@ -352,9 +352,7 @@ def _checked_pass_mode_sections(eq_set: bytes, set_name: str, sample_rate: int) 
     return sections
 
 
-def _selected_eq_set(
-    mode: bytes, name: str, eq_sets: bytes, protected_eq_sets: bytes
-) -> tuple[bytes, str]:
+def _selected_eq_set(mode: bytes, name: str, eq_sets: bytes) -> tuple[bytes, str, int]:
     """Return the NV440 EQ set that a playback mode selects, and its name.
 
     Bits 14:10 of the mode's first processing-control word select the set that
@@ -370,18 +368,24 @@ def _selected_eq_set(
     eq_set = eq_sets[offset : offset + _EQ_SET_SIZE]
     if eq_set[:_EQ_SET_NAME_SIZE] != set_name.encode().ljust(_EQ_SET_NAME_SIZE, b"\0"):
         raise ValueError(f"audio-profile {name} selects EQ set {index}, which is not {set_name}")
+    return eq_set, set_name, offset
+
+
+def admit_playback_processing(
+    mode: bytes, name: str, eq_sets: bytes, protected_eq_sets: bytes
+) -> None:
+    """Require agreement between the physical copies of the selected EQ set."""
+    eq_set, set_name, offset = _selected_eq_set(mode, name, eq_sets)
     if eq_set != protected_eq_sets[offset : offset + _EQ_SET_SIZE]:
         raise ValueError(
             f"audio-profile {set_name} NV440 differs between DownloadedNV and ProtectNV"
         )
-    return eq_set, set_name
 
 
 def playback_processing_fields(
     mode: bytes,
     name: str,
     eq_sets: bytes,
-    protected_eq_sets: bytes,
     *,
     sample_rates: Sequence[int],
 ) -> bytes:
@@ -399,7 +403,7 @@ def playback_processing_fields(
     if eq_switch & _EQ_SWITCH_MODE_MASK != _EQ_SWITCH_PLAYER_SELECTS_MODE:
         message = f"audio-profile {name} equalizer mode is not selected by the player"
         raise ValueError(message)
-    eq_set, set_name = _selected_eq_set(mode, name, eq_sets, protected_eq_sets)
+    eq_set, set_name, _ = _selected_eq_set(mode, name, eq_sets)
 
     eq_control = struct.unpack_from("<H", eq_set, _EQ_CONTROL_OFFSET)[0]
     if eq_control & _EQ_CONTROL_EIGHT_BANDS:

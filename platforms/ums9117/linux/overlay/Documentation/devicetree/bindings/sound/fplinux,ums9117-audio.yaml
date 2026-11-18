@@ -102,6 +102,13 @@ properties:
       motor. Expose a force-feedback vibrator that plays the fitted vibrate
       tone through the speaker amplifier.
 
+  fplinux,headphones-only:
+    type: boolean
+    description: |
+      Limit playback to the headphone jack. Supplied calibration must use
+      the headphone-only profile. Speaker controls, combined output and
+      speaker-driven vibration are unavailable with this policy.
+
   fplinux,headphone-fed-speaker:
     type: boolean
     description: |

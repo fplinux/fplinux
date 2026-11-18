@@ -140,13 +140,13 @@ def agreeing_vbm() -> tuple[bytes, bytes]:
 
 # Keymap index to stock code: column 0 has rows 0 and 1 and an empty row 2;
 # column 1 has rows 0 to 2, row 2 holding a code without a phone key.
-SPARSE_KEYMAP = {0: 0x2A, 1: 0x31, 8: 0x0D, 9: 0x05, 10: 0x24}
+SPARSE_KEYMAP = {0: 0x2A, 1: 0x31, 8: 0x0D, 9: 0x05, 10: 0x6A}
 SPARSE_MATRIX = [
     {"row": 0, "column": 0, "code": "0x2a", "key": "FPLINUX_KEY_STAR"},
     {"row": 0, "column": 1, "code": "0x0d", "key": "FPLINUX_KEY_OK"},
     {"row": 1, "column": 0, "code": "0x31", "key": "FPLINUX_KEY_1"},
     {"row": 1, "column": 1, "code": "0x05", "key": "FPLINUX_KEY_DOWN"},
-    {"row": 2, "column": 1, "code": "0x24", "key": None},
+    {"row": 2, "column": 1, "code": "0x6a", "key": None},
 ]
 
 

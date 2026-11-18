@@ -1,0 +1,8 @@
+id_bytes=98ba
+chip=unknown
+page_main_bytes=0
+oob_bytes=0
+pages_per_block=0
+block_count=0
+raw_bytes=0
+geometry_source=unknown

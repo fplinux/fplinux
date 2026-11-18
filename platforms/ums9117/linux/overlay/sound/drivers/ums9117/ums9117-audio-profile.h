@@ -30,9 +30,11 @@ struct ums9117_audio_profile {
 };
 
 int ums9117_audio_profile_parse(const char *machine_compatible, const u8 *bytes,
-				size_t size, bool speaker_vibration,
+				size_t size, bool headphones_only,
+				bool speaker_vibration,
 				struct ums9117_audio_profile *profile);
-int ums9117_audio_profile_load(struct device *dev, bool speaker_vibration,
+int ums9117_audio_profile_load(struct device *dev, bool headphones_only,
+			       bool speaker_vibration,
 			       struct ums9117_audio_profile *profile);
 
 #endif

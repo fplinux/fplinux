@@ -159,8 +159,9 @@ def _nand_tree(dtb: Path) -> dict[str, dict[str, str]]:
         path
         for path, properties in nodes.items()
         if "compatible" in properties
-        and "fplinux,ums9117-nandc-ro"
-        in parse_nul_string_list(properties["compatible"], f"{path} compatible")
+        and {"fplinux,ums9117-nandc-ro", "fplinux,ums9117-nandc-parallel-id"}.intersection(
+            parse_nul_string_list(properties["compatible"], f"{path} compatible")
+        )
     ]
     if len(readers) != 1:
         message = "NAND acquisition requires exactly one compiled reader node"

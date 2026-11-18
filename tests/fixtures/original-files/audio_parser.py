@@ -10,9 +10,14 @@ from fplinux_cli.device_data.formats import DeviceDataPreparation, PreparedGroup
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from fplinux_cli.device_data.formats import AudioProfileContext
 
-def prepare_from_originals(originals: Mapping[str, bytes]) -> DeviceDataPreparation:
+
+def prepare_from_originals(
+    originals: Mapping[str, bytes], *, audio: AudioProfileContext
+) -> DeviceDataPreparation:
     """Keep the target transformation separate from the storage workflow under test."""
+    del audio
     if set(originals) != {"audio.conf"}:
         message = "one audio source is required"
         raise ValueError(message)

@@ -77,6 +77,7 @@ struct ums9117_pcm {
 	bool speaker_from_headphones;
 #endif
 	bool speaker_supported;
+	bool headphones_only;
 	bool headfree_headphones_only;
 	bool capture_prepared;
 	bool speaker_vibration;

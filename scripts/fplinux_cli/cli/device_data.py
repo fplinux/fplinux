@@ -144,7 +144,13 @@ def prepare_device_data(  # noqa: PLR0913 -- explicit source, build and loader c
 
     destination = phone_store_directory(target, root=phone_data) / "phone"
     if from_originals is not None:
-        with locked_phone_store(target, root=phone_data), reporter.stage("prepare"):
+        with locked_phone_store(target, root=phone_data) as store, reporter.stage("prepare"):
+            if spec.emmc is None:
+                from fplinux_cli.device_data.original_files import (  # noqa: PLC0415 -- explicit import.
+                    import_original_files,
+                )
+
+                from_originals = import_original_files(target, from_originals, store / "originals")
             prepare_from_originals(
                 spec, from_originals, destination, DeviceDataTools(), replace=True
             )

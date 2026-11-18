@@ -52,6 +52,31 @@ def original_spec() -> DeviceDataSpec:
     )
 
 
+def test_explicit_originals_without_an_acquisition_recipe_are_reusable_and_digest_checked(
+    tmp_path: Path, original_spec: DeviceDataSpec
+) -> None:
+    """A manually retained source has no physical-reader contract but still admits exact bytes."""
+    spec = replace(original_spec, emmc=None)
+    manifest = save_original_files(
+        "example",
+        {"audio.conf": b"source settings"},
+        tmp_path / "originals",
+        acquisition_recipe=None,
+    )
+
+    source = current_original_files(spec, manifest.parent)
+    assert source is not None
+    assert source.files == {"audio.conf": b"source settings"}
+    assert source.acquisition_recipe is None
+    assert "acquisition_recipe" not in json.loads(manifest.read_bytes())
+    assert current_original_files(replace(spec, preparation_recipe="c" * 64), manifest.parent) == (
+        source
+    )
+
+    (manifest.parent / "audio.conf").write_bytes(b"source settingS")
+    assert current_original_files(spec, manifest.parent) is None
+
+
 def test_audio_refresh_preserves_optional_radio_without_claiming_its_source(
     tmp_path: Path, original_spec: DeviceDataSpec
 ) -> None:

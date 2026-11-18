@@ -8,6 +8,7 @@
 #include <linux/device.h>
 #include <linux/err.h>
 #include <linux/kconfig.h>
+#include <linux/property.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 
@@ -15,7 +16,6 @@
 #include <linux/gpio/consumer.h>
 #include <linux/irqflags.h>
 #include <linux/preempt.h>
-#include <linux/property.h>
 #endif
 
 #include "ums9117-sc2720-codec.h"
@@ -389,6 +389,7 @@ struct ums9117_sc2720_codec {
 	/* Requested outputs; enabled playback opens them. */
 	unsigned int outputs;
 	u16 pa_word;
+	bool headphones_only;
 	bool speaker_muted;
 	/* The vibrate tone keeps the PA open and open headphones muted. */
 	bool vibration;
@@ -1194,6 +1195,8 @@ int ums9117_sc2720_codec_set_vibration(struct ums9117_sc2720_codec *codec,
 	int restore_ret;
 	int ret;
 
+	if (vibration && codec->headphones_only)
+		return -EOPNOTSUPP;
 	if (codec->vibration == vibration)
 		return 0;
 	codec->vibration = vibration;
@@ -1517,6 +1520,8 @@ int ums9117_sc2720_codec_set_outputs(struct ums9117_sc2720_codec *codec,
 
 	if (outputs & ~UMS9117_SC2720_OUTPUT_MASK)
 		return -EINVAL;
+	if (codec->headphones_only && (outputs & UMS9117_SC2720_OUTPUT_SPEAKER))
+		return -EOPNOTSUPP;
 	if (codec->enabled && codec->pa_open && codec->pa_word != pa_word) {
 		ret = close_pa(codec);
 		if (ret)
@@ -1539,6 +1544,8 @@ int ums9117_sc2720_codec_prepare(struct ums9117_sc2720_codec *codec,
 
 	if (outputs & ~UMS9117_SC2720_OUTPUT_MASK)
 		return -EINVAL;
+	if (codec->headphones_only && (outputs & UMS9117_SC2720_OUTPUT_SPEAKER))
+		return -EOPNOTSUPP;
 	if (codec->prepared)
 		return ums9117_sc2720_codec_set_outputs(codec, outputs,
 							pa_word);
@@ -1707,12 +1714,16 @@ static void ums9117_sc2720_codec_release(void *data)
 			ERR_PTR(first_error));
 }
 
-#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
 bool ums9117_sc2720_codec_has_speaker(const struct ums9117_sc2720_codec *codec)
 {
+	if (codec->headphones_only)
+		return false;
+#if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
 	return !codec->speaker_enable || codec->speaker_pulse_us;
-}
+#else
+	return true;
 #endif
+}
 
 struct ums9117_sc2720_codec *ums9117_sc2720_codec_create(struct device *dev)
 {
@@ -1723,6 +1734,8 @@ struct ums9117_sc2720_codec *ums9117_sc2720_codec_create(struct device *dev)
 	if (!codec)
 		return ERR_PTR(-ENOMEM);
 	codec->dev = dev;
+	codec->headphones_only =
+		device_property_read_bool(dev, "fplinux,headphones-only");
 #if IS_ENABLED(CONFIG_SND_UMS9117_HEADPHONE_FED_SPEAKER)
 	if (device_property_read_bool(dev, "fplinux,headphone-fed-speaker")) {
 		codec->speaker_enable =

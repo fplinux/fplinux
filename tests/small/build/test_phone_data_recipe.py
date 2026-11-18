@@ -18,7 +18,13 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def nand_tree(*, phandle: int = 1, display: int = 100, resource: int = 0x402E0000) -> bytes:
+def nand_tree(
+    *,
+    phandle: int = 1,
+    display: int = 100,
+    resource: int = 0x402E0000,
+    compatible: bytes = b"fplinux,ums9117-nandc-ro\0",
+) -> bytes:
     """Build independent NAND resources and an unrelated display node."""
     return binary_tree(
         [("#address-cells", struct.pack(">I", 1)), ("#size-cells", struct.pack(">I", 1))],
@@ -30,7 +36,7 @@ def nand_tree(*, phandle: int = 1, display: int = 100, resource: int = 0x402E000
                     (
                         "nand-controller@21a00000",
                         [
-                            ("compatible", b"fplinux,ums9117-nandc-ro\0"),
+                            ("compatible", compatible),
                             ("reg", struct.pack(">II", 0x21A00000, 0x1000)),
                             ("reg-names", b"nandc\0"),
                             ("sprd,aon-apb", struct.pack(">I", phandle)),
@@ -142,7 +148,17 @@ def test_acquisition_reuses_backup_when_unrelated_nodes_renumber_phandles(
 
 
 @pytest.mark.parametrize(
-    "change", ["reader", "geometry", "kernel", "chip", "chip-contract", "resource", "declaration"]
+    "change",
+    [
+        "reader",
+        "geometry",
+        "kernel",
+        "chip",
+        "chip-contract",
+        "resource",
+        "declaration",
+        "interface",
+    ],
 )
 def test_acquisition_rejects_backup_after_reader_contract_changes(
     phone_data_inputs: PhoneDataInputs, change: str
@@ -166,6 +182,10 @@ def test_acquisition_rejects_backup_after_reader_contract_changes(
         path.write_bytes(b"long chip(void);\n")
     elif change == "resource":
         phone_data_inputs.dtb.write_bytes(nand_tree(resource=0x402F0000))
+    elif change == "interface":
+        phone_data_inputs.dtb.write_bytes(
+            nand_tree(compatible=b"fplinux,ums9117-nandc-parallel-id\0")
+        )
     else:
         phone_data_inputs.config["nand"]["raw_page_bytes"] = 2176
     assert phone_data_inputs.acquisition() != before

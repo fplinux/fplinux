@@ -501,7 +501,7 @@ def load_target(
         required = device_data.get("required_groups", list(device_data_groups))
         if (
             not isinstance(required, list)
-            or not required
+            or (not required and source_field != "originals_parser")
             or any(
                 not isinstance(group, str) or group not in device_data_groups for group in required
             )

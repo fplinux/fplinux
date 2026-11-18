@@ -3,7 +3,7 @@ title: Device data
 description: Prepare the phone-specific data that radio connections and phone audio need.
 ---
 
-Some features need data from your phone's original system. FPLinux does not download this data. UMS9117 phones use a read-only NAND backup; Qin reads selected sound files from eMMC. RAM launches prepare required data automatically on first use, both from a checkout and from a [standalone archive](/fplinux/guides/standalone-archive/). Importing Qin's optional radio data is a separate developer procedure.
+Some features need data from your phone's original system. FPLinux does not download this data. UMS9117 device-data preparation uses a read-only NAND backup; Qin reads selected sound files from eMMC. Targets with supported storage readers prepare required data automatically on the first RAM launch, both from a checkout and from a [standalone archive](/fplinux/guides/standalone-archive/). Importing Qin's optional radio data is a separate developer procedure.
 
 ## What needs device data
 
@@ -14,7 +14,7 @@ Some features need data from your phone's original system. FPLinux does not down
 | FM radio | FM receiver settings | FM radio is unavailable |
 | Audio profile | phone-specific audio gains, equalizer, automatic level control, and speaker-driven vibration where supported | UMS9117 headphones use generic volume levels without speaker output; Qin audio is unavailable |
 
-A UMS9117 RAM launch prepares its complete required set from NAND. Qin requires its audio profile; optional radio files can be imported separately and are preserved when audio data is refreshed. Device data does not establish hardware support; check the [support status](/fplinux/phones/#support-status) and phone page for its limits.
+A NAND-based RAM launch prepares its complete required set from the saved backup. Qin requires its audio profile; optional radio files can be imported separately and are preserved when audio data is refreshed. Device data does not establish hardware support; check the [support status](/fplinux/phones/#support-status) and phone page for its limits.
 
 Prepare data from the same physical phone you will run. Do not reuse data from another handset, even of the same model.
 
@@ -35,7 +35,7 @@ Source checkouts and standalone archives use the same personal data store for ea
 | Linux | `$XDG_DATA_HOME/fplinux/phones/<target>`, or `~/.local/share/fplinux/phones/<target>` when `XDG_DATA_HOME` is unset |
 | Windows | `%LOCALAPPDATA%\FPLinux\phones\<target>` |
 
-For UMS9117, the store contains the complete backup `nand.bin` and its receipt `nand.bin.json`. Qin stores its selected original sound files in `originals/`; this is not a full storage backup. Prepared files are in `phone/groups/`, with any preparation reports in `phone/reports/`. Compatible saved inputs and prepared data are reused across archives, source checkouts and new builds. Deleting an extracted archive or pruning a checkout's build cache does not remove this store.
+NAND-based preparation stores the complete backup `nand.bin` and its receipt `nand.bin.json`. Qin stores its selected original sound files in `originals/`; this is not a full storage backup. Prepared files are in `phone/groups/`, with any preparation reports in `phone/reports/`. Compatible saved inputs and prepared data are reused across archives, source checkouts and new builds. Deleting an extracted archive or pruning a checkout's build cache does not remove this store.
 
 Use each store with one physical phone. FPLinux selects it by target name and does not detect a unique handset identifier. For another phone of the same target, add `--phone-data PATH` to select a separate store. `PATH` is the exact store directory; no target subdirectory is added. Use the same selection with `build`, `run`, `console`, `verify`, `nand backup`, `nand identify` and `device-data prepare`, or with `Run.sh` and `Run.cmd` in an archive. For example:
 
@@ -47,7 +47,7 @@ Private connection keys remain separate in the selected [working data directory]
 
 ## Prepare data from the phone
 
-Build the default RAM image, then follow [Run FPLinux](/fplinux/start/run/#load-the-phone) from a checkout or [First run](/fplinux/guides/standalone-archive/#first-run) from an archive. The launcher first checks your saved phone data. When the required inputs are absent or incompatible, it reads the complete NAND on UMS9117 or the selected sound files on Qin. Wait for its safe-disconnect instructions, then start the same command again with the phone powered off. The next RAM boot uses the prepared data without rebuilding the kernel or root filesystem.
+Build the default RAM image, then follow [Run FPLinux](/fplinux/start/run/#load-the-phone) from a checkout or [First run](/fplinux/guides/standalone-archive/#first-run) from an archive. The launcher first checks your saved phone data. When required inputs are absent or incompatible on a target with a supported storage reader, it reads the complete NAND or the selected sound files. Wait for its safe-disconnect instructions, then start the same command again with the phone powered off. The next RAM boot uses the prepared data without rebuilding the kernel or root filesystem.
 
 With compatible saved inputs, the launcher reuses current prepared data or prepares it again from those inputs, then continues the normal boot in the same invocation. Changes to preparation, including parsing, ECC correction or audio policy, require preparation again. Changes to acquisition, its selected files or NAND geometry require another read from the phone. A new archive or build alone does not require another read.
 
@@ -149,6 +149,8 @@ To identify the chip without saving a backup:
 ```sh title="PC"
 ./fplinux nand identify nokia-ta1618
 ```
+
+The identify command records the reader's audit before and after its single identification attempt in `runtime.log`, including a failed device open. An unavailable audit is reported in that log. It does not save a NAND backup.
 
 ## NAND backup reference
 

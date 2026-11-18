@@ -52,6 +52,11 @@ static const u8 ums9117_audio_profile_magic[UMS9117_AUDIO_PROFILE_MAGIC_SIZE] = 
 	'F', 'P', 'A', 'U', 'D', 'I', 'O', '\0'
 };
 
+/* A headphone-only profile has one processing route after the same header. */
+static const u8 headphone_profile_magic[UMS9117_AUDIO_PROFILE_MAGIC_SIZE] = {
+	'F', 'P', 'A', 'U', 'D', 'H', 'P', '\0'
+};
+
 struct ums9117_audio_profile_data {
 	u8 magic[UMS9117_AUDIO_PROFILE_MAGIC_SIZE];
 	u8 compatible[UMS9117_AUDIO_PROFILE_COMPATIBLE_SIZE];
@@ -90,14 +95,13 @@ static int parse_vibrate_tone(const u8 *data,
 	return 0;
 }
 
-/* A larger DG code attenuates more; a louder level never has a larger one. */
+/* Retain the fitted level order; each DAC gain is a seven-bit code. */
 static int parse_dac_gains(const u8 *data, u8 *gains)
 {
 	unsigned int i;
 
 	for (i = 0; i < UMS9117_AUDIO_PROFILE_LEVEL_COUNT; i++) {
-		if (data[i] > UMS9117_AUDIO_PROFILE_DAC_GAIN_MAX ||
-		    (i && data[i - 1] < data[i]))
+		if (data[i] > UMS9117_AUDIO_PROFILE_DAC_GAIN_MAX)
 			return -EINVAL;
 		gains[i] = data[i];
 	}
@@ -158,7 +162,8 @@ static int parse_dac_processing(const u8 *data,
 }
 
 int ums9117_audio_profile_parse(const char *machine_compatible, const u8 *bytes,
-				size_t size, bool speaker_vibration,
+				size_t size, bool headphones_only,
+				bool speaker_vibration,
 				struct ums9117_audio_profile *profile)
 {
 	u8 compatible[UMS9117_AUDIO_PROFILE_COMPATIBLE_SIZE] = {};
@@ -166,21 +171,32 @@ int ums9117_audio_profile_parse(const char *machine_compatible, const u8 *bytes,
 	const u8 *processing;
 	const u8 *combined;
 	const u8 *speaker;
+	const u8 *magic;
 	size_t compatible_length;
 	size_t expected_size;
 	u8 combined_pga;
 	int ret;
 
-	expected_size = sizeof(*data) + UMS9117_AUDIO_PROFILE_SPEAKER_BYTES +
-			UMS9117_AUDIO_PROFILE_COMBINED_BYTES +
-			UMS9117_AUDIO_PROFILE_PROCESSING_BYTES;
-	if (speaker_vibration)
-		expected_size += UMS9117_AUDIO_PROFILE_VIBRATE_TONE_BYTES;
+	if (headphones_only) {
+		if (speaker_vibration)
+			return -EINVAL;
+		magic = headphone_profile_magic;
+		expected_size = sizeof(*data) +
+				UMS9117_AUDIO_PROFILE_ROUTE_PROCESSING_BYTES;
+	} else {
+		magic = ums9117_audio_profile_magic;
+		expected_size = sizeof(*data) +
+				UMS9117_AUDIO_PROFILE_SPEAKER_BYTES +
+				UMS9117_AUDIO_PROFILE_COMBINED_BYTES +
+				UMS9117_AUDIO_PROFILE_PROCESSING_BYTES;
+		if (speaker_vibration)
+			expected_size +=
+				UMS9117_AUDIO_PROFILE_VIBRATE_TONE_BYTES;
+	}
 	if (size != expected_size)
 		return -EINVAL;
 	data = (const struct ums9117_audio_profile_data *)bytes;
-	if (memcmp(data->magic, ums9117_audio_profile_magic,
-		   UMS9117_AUDIO_PROFILE_MAGIC_SIZE))
+	if (memcmp(data->magic, magic, UMS9117_AUDIO_PROFILE_MAGIC_SIZE))
 		return -EINVAL;
 	compatible_length = strlen(machine_compatible);
 	if (compatible_length >= sizeof(compatible))
@@ -194,6 +210,14 @@ int ums9117_audio_profile_parse(const char *machine_compatible, const u8 *bytes,
 	if (ret)
 		return ret;
 	profile->codec_volume = data->headphone_pga - 1U;
+	if (headphones_only) {
+		ret = parse_dac_processing(bytes + sizeof(*data),
+					   &profile->headphone_processing);
+		if (ret)
+			return ret;
+		profile->fitted = true;
+		return 0;
+	}
 
 	speaker = bytes + sizeof(*data);
 	profile->speaker_pa_word = get_unaligned_le16(speaker);
@@ -243,7 +267,8 @@ int ums9117_audio_profile_parse(const char *machine_compatible, const u8 *bytes,
 	return 0;
 }
 
-int ums9117_audio_profile_load(struct device *dev, bool speaker_vibration,
+int ums9117_audio_profile_load(struct device *dev, bool headphones_only,
+			       bool speaker_vibration,
 			       struct ums9117_audio_profile *profile)
 {
 	const struct firmware *firmware;
@@ -270,8 +295,8 @@ int ums9117_audio_profile_load(struct device *dev, bool speaker_vibration,
 				     "cannot read machine compatible\n");
 	}
 	ret = ums9117_audio_profile_parse(machine_compatible, firmware->data,
-					  firmware->size, speaker_vibration,
-					  profile);
+					  firmware->size, headphones_only,
+					  speaker_vibration, profile);
 	release_firmware(firmware);
 	if (ret)
 		return dev_err_probe(dev, ret, "invalid audio profile\n");

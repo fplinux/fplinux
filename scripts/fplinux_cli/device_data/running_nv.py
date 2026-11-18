@@ -5,24 +5,22 @@ from __future__ import annotations
 
 import struct
 from collections import defaultdict
+from typing import TYPE_CHECKING
 
-from fplinux_cli.device_data.formats import (
-    PhysicalNand,
-    nv_checksum,
-)
 from fplinux_cli.device_data.nand_geometry import (
     BLOCK_MAIN_BYTES,
     PAGE_MAIN_BYTES,
     PAGES_PER_BLOCK,
 )
+from fplinux_cli.device_data.nv_volume import NvVolume
+
+if TYPE_CHECKING:
+    from fplinux_cli.device_data.formats import PhysicalNand
 
 _SECTOR_BYTES = 1024
 _SPARE_BYTES = 32
 _SECTORS_PER_PAGE = 2
 _SECTORS_PER_VIRTUAL_BLOCK = (PAGES_PER_BLOCK - 1) * _SECTORS_PER_PAGE
-_VOLUME_HEADER = struct.Struct("<IIHHHHHHBB")
-_INDEX = struct.Struct("<HHIII")
-_RECORD = struct.Struct("<HHHHI")
 
 
 def _gf_powers() -> tuple[int, ...]:
@@ -180,61 +178,16 @@ def read_running_nv_record(
     """Require agreeing current indices and a checksum-valid short record."""
     _require_empty_remapping(nand)
     mapping = _sector_map(nand, extent, virtual_blocks)
-    header = _logical_read(nand, mapping, 0, _VOLUME_HEADER.size)
-    (
-        magic,
-        _header_word,
-        minimum,
-        maximum,
-        sector_count,
-        sector_bytes,
-        record_count,
-        index_bytes,
-        header_copy,
-        index_copy,
-    ) = _VOLUME_HEADER.unpack(header)
+    layout = NvVolume.from_header(_logical_read(nand, mapping, 0, NvVolume.header_bytes))
     if (
-        magic != 0x53544E56
-        or sector_bytes != _SECTOR_BYTES
-        or index_bytes != _INDEX.size
-        or not minimum <= identifier <= maximum
-        or record_count != maximum - minimum + 1
-        or sector_count != virtual_blocks * _SECTORS_PER_VIRTUAL_BLOCK
-        or header_copy != 1
-        or index_copy != 1
+        layout.sector_bytes != _SECTOR_BYTES
+        or layout.sector_count != virtual_blocks * _SECTORS_PER_VIRTUAL_BLOCK
     ):
         message = "unsupported RunningNV index format"
         raise ValueError(message)
-    index_sectors = (record_count * index_bytes + sector_bytes - 1) // sector_bytes
-    primary = 2
-    backup = primary + index_sectors
-    data_start = (backup + index_sectors) * sector_bytes
-    data_end = sector_count * sector_bytes - sector_bytes * 128
-    records: list[bytes] = []
-    for index_start in (primary, backup):
-        address = index_start * sector_bytes + (identifier - minimum) * index_bytes
-        entry = _logical_read(nand, mapping, address, index_bytes)
-        checksum, length, record_address, _flags, _auxiliary = _INDEX.unpack(entry)
-        if checksum != nv_checksum(entry[2:]) or length != size:
-            message = "invalid current RunningNV index entry"
-            raise ValueError(message)
-        if record_address < data_start or record_address + size > data_end:
-            message = "current RunningNV data is outside its record region"
-            raise ValueError(message)
-        record = _logical_read(nand, mapping, record_address, _RECORD.size + size)
-        header_crc, payload_crc, record_id, record_size, state = _RECORD.unpack_from(record)
-        payload = record[_RECORD.size :]
-        if (
-            record_id != identifier
-            or record_size != size
-            or not state & 1
-            or header_crc != nv_checksum(record[4 : _RECORD.size])
-            or payload_crc != nv_checksum(payload)
-        ):
-            message = "invalid selected RunningNV record"
-            raise ValueError(message)
-        records.append(payload)
-    if records[0] != records[1]:
-        message = "current RunningNV indices disagree"
-        raise ValueError(message)
-    return records[0]
+
+    def read(address: int, size: int) -> bytes:
+        return _logical_read(nand, mapping, address, size)
+
+    data_end = layout.sector_count * _SECTOR_BYTES - _SECTOR_BYTES * 128
+    return layout.read_record(read, identifier=identifier, size=size, data_end=data_end)

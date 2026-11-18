@@ -165,7 +165,10 @@ def _load_originals_parser(target: str, path: Path) -> ModuleType:
         path, f"fplinux_{target.replace('-', '_')}_originals", "device-data originals parser"
     )
     if not callable(getattr(module, "prepare_from_originals", None)):
-        fail("device-data originals parser does not expose prepare_from_originals(originals)")
+        fail(
+            "device-data originals parser does not expose "
+            "prepare_from_originals(originals, audio=...)"
+        )
     return module
 
 
@@ -337,7 +340,7 @@ def _extract_original_groups(
         fail(f"target {spec.target} does not declare a named-original parser")
     parser = _load_originals_parser(spec.target, spec.originals_parser)
     try:
-        result = parser.prepare_from_originals(MappingProxyType(originals))
+        result = parser.prepare_from_originals(MappingProxyType(originals), audio=spec.audio)
     except ValueError as error:
         fail(f"device-data preparation failed: {error}")
     if not isinstance(result, DeviceDataPreparation):

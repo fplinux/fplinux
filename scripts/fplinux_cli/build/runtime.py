@@ -52,6 +52,7 @@ _RUNTIME_MODULES = (
     "runtime/windows/transport.py",
     "runtime/windows_tools.py",
     "runtime/nand_backup.py",
+    "runtime/nand_identify.py",
     "runtime/state.py",
 )
 _PREPARATION_MODULES = (
@@ -157,8 +158,10 @@ def preparation_source_files(
         selected.extend(_EMMC_MODULES)
     if {"bluetooth", "fm-radio"} & groups.keys():
         selected.extend(_RADIO_MODULES)
-    if {"bluetooth", "wcn-firmware"} & groups.keys():
-        selected.append("device_data/running_nv.py")
+    if config["platform"] == "ums9117":
+        selected.append("device_data/nv_volume.py")
+        if {"bluetooth", "fm-radio", "wcn-firmware"} & groups.keys():
+            selected.append("device_data/running_nv.py")
     files = {
         f"scripts/fplinux_cli/{name}": root / "scripts/fplinux_cli" / name for name in selected
     }

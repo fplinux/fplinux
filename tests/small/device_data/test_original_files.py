@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -56,8 +57,16 @@ def test_original_preparation_publishes_the_complete_capture_when_source_paths_c
     )
     manifest.write_bytes(expected_manifest)
 
-    def parse(originals: Mapping[str, bytes]) -> DeviceDataPreparation:
+    def parse(
+        originals: Mapping[str, bytes], *, audio: AudioProfileContext
+    ) -> DeviceDataPreparation:
         assert dict(originals) == {"radio-original.bin": b"abc"}
+        assert audio == AudioProfileContext(
+            machine_compatible=b"example,phone",
+            speaker_vibration=False,
+            speaker_from_headphones=False,
+            headfree_headphones_only=False,
+        )
         original.write_bytes(b"different source now")
         manifest.write_bytes(b"not the captured manifest")
         return DeviceDataPreparation(
@@ -112,7 +121,25 @@ def test_original_preparation_publishes_the_complete_capture_when_source_paths_c
     assert not (phone / "source").exists()
     assert not (phone / "originals").exists()
     receipt = json.loads((phone / "receipt.json").read_bytes())
-    assert receipt["source"]["size"] == len(expected_manifest)
+    saved_manifest = target_root / "originals/manifest.json"
+    assert (target_root / "originals/radio-original.bin").read_bytes() == b"abc"
+    saved_source = saved_manifest.read_bytes()
+    assert json.loads(saved_source) == {
+        "target": "example",
+        "directory": ".",
+        "files": [
+            {
+                "name": "radio-original.bin",
+                "size": 3,
+                "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            }
+        ],
+    }
+    assert receipt["source"] == {
+        "kind": "original-files",
+        "size": len(saved_source),
+        "sha256": hashlib.sha256(saved_source).hexdigest(),
+    }
     assert receipt["groups"][0]["originals"] == [
         {
             "source": "radio-original.bin",
@@ -150,7 +177,7 @@ def test_original_preparer_cannot_drop_change_or_misdeclare_admitted_files(
 ) -> None:
     """The common result boundary checks retention and declared outputs before staging."""
     parser = SimpleNamespace(
-        prepare_from_originals=lambda _originals: DeviceDataPreparation(
+        prepare_from_originals=lambda _originals, **_context: DeviceDataPreparation(
             groups={"wcn-firmware": PreparedGroup(originals=originals, prepared=prepared)}
         )
     )

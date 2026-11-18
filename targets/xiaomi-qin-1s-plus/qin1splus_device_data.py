@@ -17,6 +17,8 @@ from fplinux_cli.device_data.formats import DeviceDataPreparation, PreparedGroup
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from fplinux_cli.device_data.formats import AudioProfileContext
+
 _SIZES = {"config": 616, "cali": 3292}
 _NUMBER = re.compile(r"-?(?:0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)\Z")
 _ASSIGNMENT = re.compile(r"([A-Za-z_][A-Za-z_0-9]*)\s*=\s*(.*)\Z")
@@ -396,7 +398,11 @@ def _prepare_audio_from_originals(originals: Mapping[str, bytes]) -> DeviceDataP
     )
 
 
-def prepare_from_originals(originals: Mapping[str, bytes]) -> DeviceDataPreparation:
+def prepare_from_originals(
+    originals: Mapping[str, bytes],
+    *,
+    audio: AudioProfileContext,  # noqa: ARG001 -- shared parser interface.
+) -> DeviceDataPreparation:
     """Prepare one complete admitted Qin radio or audio original set."""
     names = set(originals)
     if names == _ORIGINAL_NAMES:

@@ -84,15 +84,18 @@ def prepared_data_current(
 
 def current_original_files(spec: DeviceDataSpec, directory: Path) -> OriginalFilesSource | None:
     """Reuse selected files only after their acquisition and complete bytes are admitted."""
-    from .emmc import validate_file_selections  # noqa: PLC0415 -- selected eMMC acquisition.
     from .original_files import (  # noqa: PLC0415 -- selected original-file cache.
         read_original_files,
     )
 
-    if spec.emmc is None:
-        fail("original-file acquisition requires the selected eMMC reader")
+    if spec.emmc is None and spec.originals_parser is None:
+        fail("original files require a named-original parser")
     try:
         source = read_original_files(spec.target, directory / "manifest.json")
+        if spec.emmc is None:
+            return source
+        from .emmc import validate_file_selections  # noqa: PLC0415 -- selected eMMC acquisition.
+
         selections = validate_file_selections(spec.emmc["files"])
     except OSError, ValueError, SystemExit:
         return None
@@ -161,10 +164,11 @@ def _prepared_data_matches(
                 or set(group) - {"name", "originals", "prepared", "reports"}
                 or not isinstance(group["name"], str)
                 or group["name"] in saved
+                or group["name"] not in spec.groups
             ):
                 return False
             saved[group["name"]] = group["prepared"]
-        actual = capture_phone_data(spec.required_declarations, destination)
+        actual = capture_phone_data({name: spec.groups[name] for name in saved}, destination)
     except OSError, ValueError, SystemExit:
         return False
     return saved == {

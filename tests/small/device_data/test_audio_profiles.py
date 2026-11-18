@@ -15,8 +15,6 @@ from tests.small.device_data.audio_expected import (
     INOI_VIBRATE_TONE_SECTION,
 )
 from tests.small.device_data.audio_fixtures import (
-    INOI_EQ_SETS,
-    headset_audio_records,
     inoi_audio_records,
     nokia_audio_records,
 )
@@ -32,6 +30,103 @@ def _every_headfree_level(analog: bytes) -> dict[int, bytes]:
 
 class HeadsetGainProfileTests:
     """Protect the compact kernel input and admitted fitted playback gains."""
+
+    def test_headphone_only_profile_contains_only_its_gains_and_processing(self) -> None:
+        """One admitted record set supplies Headset without admitting unused routes."""
+        records, _protected = nokia_audio_records()
+        arm = bytearray(records[426])
+        struct.pack_into("<H", arm, 20, 0x0012)
+        arm[1072:] = bytes(len(arm) - 1072)
+        records[426] = bytes(arm)
+        eq_sets = bytearray(records[440])
+        eq_sets[544:] = b"\xff" * (len(eq_sets) - 544)
+        records[440] = bytes(eq_sets)
+        originals = records.copy()
+
+        result = audio_profile.prepare_headphone_profile(
+            records, prefix="example", machine_compatible=b"example,phone"
+        )
+
+        expected = (
+            b"FPAUDHP\0example,phone"
+            + b"\0" * 11
+            + bytes.fromhex("06 47 42 3d 37 32 2c 26 20 1a")
+            + FITTED_NOKIA_PROCESSING_SECTION[:241]
+        )
+        assert result.prepared == {"example-audio-profile.bin": expected}
+        assert len(expected) == 283
+        assert records == originals
+        assert result.originals == {
+            "example-nv425.bin": originals[425],
+            "example-nv426.bin": originals[426],
+            "example-nv440.bin": originals[440],
+        }
+
+    @pytest.mark.parametrize("route", [0x22, 0x32], ids=["speaker", "combined"])
+    def test_headphone_only_profile_rejects_a_speaker_headset_route(self, route: int) -> None:
+        """The board policy cannot reinterpret a fitted speaker route as headphones."""
+        records, _protected = nokia_audio_records()
+        arm = bytearray(records[426])
+        struct.pack_into("<H", arm, 20, route)
+        records[426] = bytes(arm)
+
+        with pytest.raises(ValueError, match=r"Headset.*headphone-only"):
+            audio_profile.prepare_headphone_profile(
+                records, prefix="example", machine_compatible=b"example,phone"
+            )
+
+    def test_unselected_eq_and_playback_modes_need_not_agree_between_copies(self) -> None:
+        """Two-copy admission compares only the modes and EQ sets used for playback."""
+        downloaded, protected = nokia_audio_records()
+        arm = bytearray(protected[426])
+        arm[2 * 1072 + 70] ^= 1
+        protected[426] = bytes(arm)
+        eq_sets = bytearray(protected[440])
+        eq_sets[14 * 544 + 20] ^= 1
+        protected[440] = bytes(eq_sets)
+
+        result = audio_profile.prepare_headset_gain_profile(
+            downloaded, protected, prefix="example", machine_compatible=b"example,phone"
+        )
+
+        assert result.prepared["example-audio-profile.bin"][65:] == FITTED_NOKIA_PROCESSING_SECTION
+
+    @pytest.mark.parametrize(
+        ("mode_offset", "profile_offset"),
+        [(0, 33), (3 * 1072, 44), (1072, 56)],
+        ids=["headphones", "speaker", "combined"],
+    )
+    def test_bounded_nonmonotonic_route_gains_keep_their_volume_level_order(
+        self, mode_offset: int, profile_offset: int
+    ) -> None:
+        """Preserve all nine fitted levels without sorting or smoothing the curve."""
+        downloaded, protected = nokia_audio_records()
+        for records in (downloaded, protected):
+            arm = bytearray(records[426])
+            for level, gain in enumerate((110, 97, 82, 69, 55, 44, 26, 37, 18)):
+                struct.pack_into("<H", arm, mode_offset + 70 + level * 4, gain)
+            records[426] = bytes(arm)
+        original_downloaded = downloaded.copy()
+        original_protected = protected.copy()
+
+        result = audio_profile.prepare_headset_gain_profile(
+            downloaded,
+            protected,
+            prefix="example",
+            machine_compatible=b"example,phone",
+        )
+
+        profile = result.prepared["example-audio-profile.bin"]
+        assert profile[profile_offset : profile_offset + 9] == bytes.fromhex(
+            "6e 61 52 45 37 2c 1a 25 12"
+        )
+        assert result.originals == {
+            "example-nv425.bin": original_downloaded[425],
+            "example-nv426.bin": original_downloaded[426],
+            "example-nv440.bin": original_downloaded[440],
+        }
+        assert downloaded == original_downloaded
+        assert protected == original_protected
 
     def test_compatible_fills_the_field_with_one_required_terminator(self) -> None:
         """A 23-byte machine compatible remains complete in the compact kernel input."""
@@ -183,11 +278,11 @@ class HeadsetGainProfileTests:
                 3 * 1072 + 70, b"\x80\x00", True, "exceeds 127", id="oversized-digital-gain"
             ),
             pytest.param(
-                3 * 1072 + 74,
-                b"\x39\x00",
+                3 * 1072 + 102,
+                b"\xff\x00",
                 True,
-                "not monotonically",
-                id="increasing-digital-gain",
+                "exceeds 127",
+                id="oversized-final-digital-gain",
             ),
         ],
     )
@@ -234,7 +329,10 @@ class HeadsetGainProfileTests:
                 id="oversized-digital-gain",
             ),
             pytest.param(
-                {1072 + 74: b"\x4f\x00"}, True, "Headfree digital", id="increasing-digital-gain"
+                {1072 + 102: b"\xff\x00"},
+                True,
+                "Headfree digital gain exceeds 127",
+                id="oversized-final-digital-gain",
             ),
             pytest.param(
                 {1072 + 100: b"\x60\x00"},
@@ -290,7 +388,7 @@ class HeadsetGainProfileTests:
             pytest.param(62, b"\x08\x00", "expected 9", id="wrong-level-count"),
             pytest.param(68, b"\x06\x00", "PGA levels 1..9 differ", id="different-pga"),
             pytest.param(70, b"\x80\x00", "exceeds 127", id="oversized-digital-gain"),
-            pytest.param(74, b"\x6d\x00", "not monotonically", id="increasing-digital-gain"),
+            pytest.param(102, b"\xff\x00", "exceeds 127", id="oversized-final-digital-gain"),
         ],
     )
     def test_profile_rejects_unsafe_headset_values(
@@ -313,21 +411,12 @@ class HeadsetGainProfileTests:
 
     def test_profile_rejects_out_of_range_headset_pga(self) -> None:
         """Headset PGA must remain within the supported range even when copies agree."""
-        downloaded, protected = headset_audio_records(
-            (
-                0x006C0008,
-                0x00610008,
-                0x00560008,
-                0x004B0008,
-                0x00410008,
-                0x00370008,
-                0x002D0008,
-                0x00230008,
-                0x001B0008,
-            ),
-            input_gain=0x071D,
-            eq_sets=INOI_EQ_SETS,
-        )
+        downloaded, protected = inoi_audio_records()
+        for records in (downloaded, protected):
+            arm = bytearray(records[426])
+            for level in range(9):
+                struct.pack_into("<H", arm, 68 + 4 * level, 8)
+            records[426] = bytes(arm)
         with pytest.raises(ValueError, match=r"outside supported range 2..7"):
             audio_profile.prepare_headset_gain_profile(
                 downloaded,

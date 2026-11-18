@@ -389,13 +389,13 @@ def validate_device_data(value: object) -> dict[str, Any] | None:
     required = descriptor["required_groups"]
     if (
         not isinstance(required, list)
-        or not required
+        or (not required and descriptor["originals_parser"] is None)
         or any(
             not isinstance(group, str) or group not in descriptor["groups"] for group in required
         )
         or len(set(required)) != len(required)
     ):
-        fail("device data required_groups must be a non-empty list of unique declared groups")
+        fail("device data required_groups must name unique declared groups")
     return descriptor
 
 

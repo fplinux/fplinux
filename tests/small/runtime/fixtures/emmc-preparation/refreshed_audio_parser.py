@@ -10,9 +10,14 @@ from fplinux_cli.device_data.formats import DeviceDataPreparation, PreparedGroup
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from fplinux_cli.device_data.formats import AudioProfileContext
 
-def prepare_from_originals(originals: Mapping[str, bytes]) -> DeviceDataPreparation:
+
+def prepare_from_originals(
+    originals: Mapping[str, bytes], *, audio: AudioProfileContext
+) -> DeviceDataPreparation:
     """Produce visibly different prepared bytes while retaining the same original."""
+    del audio
     return DeviceDataPreparation(
         groups={
             "audio-profile": PreparedGroup(

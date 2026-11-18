@@ -93,7 +93,7 @@ def save_original_files(
     originals: dict[str, bytes],
     destination: Path,
     *,
-    acquisition_recipe: str,
+    acquisition_recipe: str | None,
 ) -> Path:
     """Publish the complete selected source set under the caller's phone-store lock."""
     from fplinux_cli.device_data.prepare import (  # noqa: PLC0415 -- shared atomic directory publication.
@@ -103,7 +103,8 @@ def save_original_files(
         private_directory,
     )
 
-    sha256_value(acquisition_recipe, "originals acquisition_recipe")
+    if acquisition_recipe is not None:
+        sha256_value(acquisition_recipe, "originals acquisition_recipe")
     staging = Path(tempfile.mkdtemp(prefix=f".{destination.name}-", dir=destination.parent))
     try:
         private_directory(staging)
@@ -118,8 +119,9 @@ def save_original_files(
             "target": target,
             "directory": ".",
             "files": records,
-            "acquisition_recipe": acquisition_recipe,
         }
+        if acquisition_recipe is not None:
+            manifest["acquisition_recipe"] = acquisition_recipe
         replace_file_atomically(staging / "manifest.json", canonical_json_bytes(manifest), 0o600)
         read_original_files(target, staging / "manifest.json")
         publish_phone_data(staging, destination, replace=destination.exists())
@@ -127,3 +129,14 @@ def save_original_files(
         if staging.exists():
             shutil.rmtree(staging)
     return destination / "manifest.json"
+
+
+def import_original_files(target: str, manifest: Path, destination: Path) -> Path:
+    """Retain an explicitly selected source set without inventing an acquisition recipe."""
+    source = read_original_files(target, manifest)
+    return save_original_files(
+        target,
+        source.files,
+        destination,
+        acquisition_recipe=source.acquisition_recipe,
+    )

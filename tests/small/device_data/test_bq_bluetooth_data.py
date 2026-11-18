@@ -136,6 +136,17 @@ def test_damaged_current_record_is_not_replaced_by_historical_value() -> None:
         read_current(image)
 
 
+def test_mapped_physical_record_must_fit_in_one_1024_byte_sector() -> None:
+    image = current_record_image()
+    index = bytes.fromhex("05ec0800f21300000000000000000000")
+    for page in (2, 3):
+        start = page * _RAW_PAGE
+        image[start : start + 16] = index
+
+    with pytest.raises(ValueError, match="unsupported RunningNV record extent"):
+        read_current(image)
+
+
 def test_nonempty_lower_remapping_is_rejected_before_logical_selection() -> None:
     image = current_record_image()
     struct.pack_into("<H", image, 3 * _PAGES * _RAW_PAGE + 10, 1)

@@ -207,7 +207,7 @@ def test_launcher_and_store_locks_can_have_independent_lifetimes(
             assert sessions == [{"status": "ready"}]
             captured = inputs.capture_external_device_data("phone", groups)
             assert captured["audio-profile"][0].contents == b"encoded:source settings"
-            assert workflow.run_phone(ROOT, data, logs, reconnect=True) == 1
+            assert workflow.run_phone(ROOT, data, logs) == 1
             assert "Another launcher is already open" in capsys.readouterr().err
             return 0
 
@@ -216,17 +216,16 @@ def test_launcher_and_store_locks_can_have_independent_lifetimes(
         *,
         session_root: Path,
         prepared_data_sha256: str | None,
-        required: bool = False,
     ) -> tuple[Phone, dict[str, Any]]:
         assert selected is admitted
         assert session_root == data / "session"
         assert prepared_data_sha256 is not None
-        assert required
         return Phone(), {"status": "ready"}
 
     monkeypatch.setattr(workflow, "admit_bundle", lambda _bundle: admitted)
     monkeypatch.setattr(workflow, "host_preflight", lambda: None)
+    monkeypatch.setattr("fplinux_cli.runtime.workflow.os.isatty", lambda _fd: True)
     monkeypatch.setattr(boot, "reconnect_live_bundle", connect)
 
-    assert workflow.run_phone(ROOT, data, logs, reconnect=True) == 0
+    assert workflow.run_phone(ROOT, data, logs) == 0
     assert sessions == [{"status": "ready"}]
