@@ -297,6 +297,8 @@ def run_userspace_analysis(output: Path, sources: list[tuple[str, bool]]) -> Non
 def check_userspace_c(sources: list[tuple[str, bool]]) -> None:
     """Select persistent check output when the container provides it."""
     persistent = os.environ.get("FPLINUX_SCAN_BUILD_DIR")
+    if persistent is None and (log_root := os.environ.get("FPLINUX_LOG_ROOT")) is not None:
+        persistent = str(Path(log_root) / "c-analysis")
     if persistent is not None:
         output = Path(persistent)
         if not output.is_absolute():
