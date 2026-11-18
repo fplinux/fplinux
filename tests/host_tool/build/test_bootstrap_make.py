@@ -16,12 +16,12 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.parametrize(
-    ("mode", "width"),
-    [("linux", 0), ("linux", 128), ("uboot", 128)],
-    ids=["ram-headless", "ram-display", "uboot-display"],
+    ("mode", "width", "loader_display"),
+    [("linux", 0, False), ("linux", 128, True), ("uboot", 128, True), ("linux", 240, False)],
+    ids=["ram-headless", "ram-display", "uboot-display", "linux-only-display"],
 )
 def test_bootstrap_make_selects_display_objects_and_blocks_storage_overrides(
-    tmp_path: Path, mode: str, width: int
+    tmp_path: Path, mode: str, width: int, *, loader_display: bool
 ) -> None:
     """Generated settings select the Make closure even against command-line overrides."""
     bootstrap = tmp_path / "bootstrap"
@@ -31,6 +31,7 @@ def test_bootstrap_make_selects_display_objects_and_blocks_storage_overrides(
     vendor.mkdir(parents=True)
     (vendor / "build_t117.make").write_text("")
     config = {
+        "adapter": {"spi_mode": 1} if loader_display else {},
         "display": {"width": width},
         "bootstrap": {
             "kind": "uboot-stage0" if mode == "uboot" else "linux",
@@ -76,8 +77,8 @@ def test_bootstrap_make_selects_display_objects_and_blocks_storage_overrides(
     assert "obj/sys/sdio.o" not in objects
     assert "obj/sys/microfat.o" not in objects
     assert "obj/app/unsafe.o" not in objects
-    assert ("obj/app/fplinux-boot-screen/boot-screen.o" in objects) == bool(width)
-    assert ("obj/app/fplinux-status-screen.o" in objects) == bool(width)
-    assert ("obj/app/generated/fplinux-status-fonts.o" in objects) == bool(width)
+    assert ("obj/app/fplinux-boot-screen/boot-screen.o" in objects) == loader_display
+    assert ("obj/app/fplinux-status-screen.o" in objects) == loader_display
+    assert ("obj/app/generated/fplinux-status-fonts.o" in objects) == loader_display
     stage = "sd-stage0" if mode == "uboot" else "boot-main"
     assert f"obj/app/ums9117-bootstrap/{stage}.o" in objects

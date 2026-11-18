@@ -14,7 +14,7 @@ from fplinux_cli.build.display import render_bootstrap_display
 from fplinux_cli.common import fail
 from fplinux_cli.manifests.source_catalog import acquire_source
 
-from .recipe import generated_bootstrap_files, uboot_build_header
+from .recipe import bootstrap_display, generated_bootstrap_files, uboot_build_header
 from .result import BootstrapBuild
 from .verify import verify_images, verify_sd_stage0_image
 
@@ -135,7 +135,7 @@ def build_bootstrap(  # noqa: PLR0913 -- source selection and payload inputs sta
     else:
         shutil.copyfile(zimage, projected_output / target_bootstrap["kernel_destination"])
         shutil.copyfile(dtb, projected_output / target_bootstrap["dtb_destination"])
-    display = target_config["display"]
+    display = bootstrap_display(target_config)
     if display["width"]:
         screen = f"{display['width']}x{display['height']}"
         profile = bootstrap / "fplinux-status/fplinux-ui-profile.json"

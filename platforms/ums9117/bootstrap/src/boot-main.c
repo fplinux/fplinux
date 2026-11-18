@@ -176,7 +176,7 @@ void ums9117_boot_main(const struct ums9117_boot_board *board)
 	record_stage(2, "SPRD TIMER OK");
 
 	if (ram_bytes < FPLINUX_BOOT_LAYOUT_RAM_REQUIRED_BYTES)
-		ums9117_boot_fail(2, "64MB RAM REQUIRED");
+		ums9117_boot_fail(2, "INSUFFICIENT RAM");
 	if (!zimage_bytes ||
 	    zimage_bytes > FPLINUX_BOOT_LAYOUT_ZIMAGE_LIMIT_BYTES)
 		ums9117_boot_fail(3, "BAD KERNEL SIZE");

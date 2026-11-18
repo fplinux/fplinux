@@ -94,7 +94,7 @@ Find the last milestone or error in the runtime log:
 | `fplinux run: BootROM USB was not detected` | The phone did not start in BootROM mode. | [Try another boot key](#the-loader-does-not-see-the-phone). |
 | `fplinux run: BootROM USB 1782:4d00 repeatedly disconnected before it could be opened` | The phone appeared on USB only briefly. | [Start again](#the-loader-does-not-see-the-phone). |
 | BootROM `BSL_REP_VER`, no `Custom FDL1` line, then `fplinux run: RAM loader failed after 3 attempts` | The RAM loader did not start. | [Set the exec distance](#fdl1-does-not-start). |
-| `Custom FDL1`, then failed attempts or `event=error error=2 message=64MB RAM REQUIRED` | Another SoC variant or memory size. | [Report the phone](#loading-stops-after-fdl1-starts). |
+| `Custom FDL1`, then failed attempts or `event=error error=2 message=INSUFFICIENT RAM` | Another SoC variant or memory size. | [Report the phone](#loading-stops-after-fdl1-starts). |
 | `PREPARE LINUX`, then an error about the bridge, BootROM USB or the SSH session | Linux USB did not come up. | [Check Linux USB](#linux-usb-does-not-appear). |
 | `Secure phone connection is ready.` | Linux runs. | [Identify the NAND chip](#identify-the-nand-chip). |
 
@@ -126,13 +126,13 @@ No value other than `0` and `0x314d` is known to start FDL1.
 
 ### Loading stops after FDL1 starts
 
-FDL1 sets up the 64 MB of LPDDR2 memory used by the supported phones, and FPLinux requires 64 MB of RAM. On a phone with another SoC variant or memory, the attempts fail after the `Custom FDL1` line, or the bootstrap stops with:
+FDL1 must initialize the phone's RAM before loading the payload. The bootstrap uses the memory layout declared for the target and refuses to continue when its RAM probe reports less memory than required. An incompatible SoC variant or memory configuration can stop loading after the `Custom FDL1` line, or produce:
 
 ```text title="Output"
-<TARGET>_LINUX_BOOTSTRAP event=error error=2 message=64MB RAM REQUIRED
+<TARGET>_LINUX_BOOTSTRAP event=error error=2 message=INSUFFICIENT RAM
 ```
 
-FPLinux does not start on such a phone. [Report it](#report-the-phone) with the complete `run` output and photos of the markings on its SoC and flash chip.
+[Report this failure](#report-the-phone) with the complete `run` output and photos of the markings on the SoC and flash chip. Changing the memory layout requires checking the phone's RAM and payload placement.
 
 ### Linux USB does not appear
 

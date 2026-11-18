@@ -7,7 +7,11 @@ import shutil
 from typing import TYPE_CHECKING
 
 import pytest
-from fplinux_cli.build.bootstrap.recipe import bootstrap_display_header, bootstrap_settings
+from fplinux_cli.build.bootstrap.recipe import (
+    bootstrap_display,
+    bootstrap_display_header,
+    bootstrap_settings,
+)
 
 from tests import ROOT
 from tests.process import run_process
@@ -22,6 +26,7 @@ def test_make_consumer_receives_selected_names_and_mode(
 ) -> None:
     """A synthetic Make consumer reads the selected settings for either bootstrap kind."""
     target = {
+        "adapter": {"spi_mode": 1},
         "bootstrap": {
             "kind": kind,
             "image": "selected_stage.bin",
@@ -50,15 +55,30 @@ def test_make_consumer_receives_selected_names_and_mode(
     ]
 
 
-@pytest.mark.parametrize(("width", "height"), [(0, 0), (128, 160), (320, 240)])
+@pytest.mark.parametrize(
+    ("width", "height", "loader_display", "expected"),
+    [
+        (0, 0, False, "0 0\n"),
+        (128, 160, True, "128 160\n"),
+        (320, 240, True, "320 240\n"),
+        (240, 320, False, "0 0\n"),
+    ],
+)
 def test_target_main_passes_selected_geometry_to_the_boot_runtime(
-    tmp_path: Path, width: int, height: int
+    tmp_path: Path, width: int, height: int, *, loader_display: bool, expected: str
 ) -> None:
     """Link the target main to a host runtime stub using the actual bootstrap headers."""
     generated = tmp_path / "generated"
     generated.mkdir()
     (generated / "fplinux-bootstrap-display.h").write_bytes(
-        bootstrap_display_header({"width": width, "height": height})
+        bootstrap_display_header(
+            bootstrap_display(
+                {
+                    "adapter": {"spi_mode": 1} if loader_display else {},
+                    "display": {"width": width, "height": height},
+                }
+            )
+        )
     )
     runtime = tmp_path / "ums9117-bootstrap"
     runtime.mkdir()
@@ -93,4 +113,4 @@ def test_target_main_passes_selected_geometry_to_the_boot_runtime(
     result = run_process(
         [str(executable)], name="observe target board geometry", timeout=5, check=True
     )
-    assert result.stdout == f"{width} {height}\n"
+    assert result.stdout == expected

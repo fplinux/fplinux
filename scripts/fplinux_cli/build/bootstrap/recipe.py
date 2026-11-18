@@ -63,12 +63,21 @@ def generated_bootstrap_identity(target_config: dict[str, Any]) -> bytes:
     return b""
 
 
-def effective_boot_layout(
-    target_config: dict[str, Any], platform: dict[str, Any]
-) -> dict[str, int]:
+def effective_boot_layout(target_config: dict[str, Any]) -> dict[str, int]:
     """Return the one layout selected for this bootstrap build."""
     layout = target_config.get("layout")
-    return layout if isinstance(layout, dict) else platform["bootstrap"]["layout"]
+    selected: dict[str, int] = (
+        layout if isinstance(layout, dict) else target_config["bootstrap"]["layout"]
+    )
+    return selected
+
+
+def bootstrap_display(target_config: dict[str, Any]) -> dict[str, Any]:
+    """Select loader display geometry independently of the Linux panel."""
+    if "spi_mode" in target_config["adapter"]:
+        display: dict[str, Any] = target_config["display"]
+        return display
+    return {"width": 0, "height": 0}
 
 
 def bootstrap_settings(target_config: dict[str, Any]) -> bytes:
@@ -76,7 +85,7 @@ def bootstrap_settings(target_config: dict[str, Any]) -> bytes:
     bootstrap = target_config["bootstrap"]
     mode = "uboot" if bootstrap["kind"] == "uboot-stage0" else "linux"
     name = bootstrap["image"].removesuffix(".bin")
-    has_display = int(target_config["display"]["width"] != 0)
+    has_display = int(bootstrap_display(target_config)["width"] != 0)
     license_tag = "SPDX-License-" + "Identifier"
     return (
         f"# {license_tag}: GPL-2.0-only\n"
@@ -120,12 +129,12 @@ def generated_bootstrap_files(
     target_config: dict[str, Any], platform: dict[str, Any]
 ) -> dict[str, bytes]:
     """Return every transient input generated for one bootstrap build."""
-    layout = effective_boot_layout(target_config, platform)
+    layout = effective_boot_layout(target_config)
     return {
         BOOTSTRAP_IDENTITY_HEADER: generated_bootstrap_identity(target_config),
         "generated/fplinux-bootstrap-settings.make": bootstrap_settings(target_config),
         "generated/fplinux-bootstrap-display.h": bootstrap_display_header(
-            target_config["display"]
+            bootstrap_display(target_config)
         ),
         "generated/fplinux-bootstrap-payload.s": bootstrap_payload(target_config, platform),
         "generated/fplinux-boot-layout.h": profile_layout.boot_layout_header(layout),

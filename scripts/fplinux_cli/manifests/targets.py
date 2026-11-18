@@ -29,7 +29,7 @@ from fplinux_cli.manifests.paths import (
     platform_asset_lock_path,
     target_directory,
 )
-from fplinux_cli.manifests.platforms import load_platform
+from fplinux_cli.manifests.platforms import load_platform, validate_boot_layout
 from fplinux_cli.manifests.profiles import load_profile
 from fplinux_cli.manifests.values import (
     VALUE_NAME,
@@ -87,6 +87,8 @@ def _target_bootstrap(value: object, backend: str, memory: dict[str, Any]) -> di
         fields.add("dtb_destination")
         if isinstance(value, dict) and "lcd_config" in value:
             fields.add("lcd_config")
+        if isinstance(value, dict) and "layout" in value:
+            fields.add("layout")
     bootstrap = exact_table(value, fields, "target bootstrap")
     for key in ("image", "map"):
         relative_value(bootstrap[key], f"target bootstrap {key}")
@@ -97,6 +99,10 @@ def _target_bootstrap(value: object, backend: str, memory: dict[str, Any]) -> di
     if backend == "sc9820e":
         bootstrap["layout"] = _sc_boot_layout(bootstrap["layout"], memory)
     else:
+        if "layout" in bootstrap:
+            bootstrap["layout"] = validate_boot_layout(
+                bootstrap["layout"], "target bootstrap layout"
+            )
         relative_value(bootstrap["dtb_destination"], "target bootstrap dtb_destination")
         bootstrap["lcd_config"] = (
             relative_value(bootstrap["lcd_config"], "target bootstrap lcd_config")
@@ -403,6 +409,11 @@ def load_target(
 
     bootstrap = _target_bootstrap(config.get("bootstrap"), backend, memory)
     adapter = _target_adapter(config.get("adapter"), backend, config["display"])
+    if backend == "ums9117" and "layout" in bootstrap:
+        platform = {
+            **platform,
+            "bootstrap": {**platform["bootstrap"], "layout": bootstrap["layout"]},
+        }
     if (profile or "default") not in declared_boot_profiles(config):
         fail(f"target {target} does not support profile {profile}")
     microsd: dict[str, Any] = {}

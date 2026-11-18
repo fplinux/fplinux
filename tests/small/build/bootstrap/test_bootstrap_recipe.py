@@ -53,6 +53,7 @@ class BootstrapContext:
             (BOOTSTRAP_FILES / "target.json").read_text(encoding="utf-8")
         )
         self.platform = json.loads((BOOTSTRAP_FILES / "platform.json").read_text(encoding="utf-8"))
+        self.target_config["bootstrap"]["layout"] = self.platform["bootstrap"]["layout"].copy()
         self.sources = common.load_toml(BOOTSTRAP_FILES / "sources.lock.toml")
 
     def write(self, relative: str, contents: bytes) -> Path:
@@ -87,6 +88,15 @@ def bootstrap_context(tmp_path: Path) -> BootstrapContext:
 
 class BootstrapRecipeTests:
     """Hash only inputs copied or selected by ``build_bootstrap``."""
+
+    def test_loader_display_selection_changes_the_recipe(
+        self, bootstrap_context: BootstrapContext
+    ) -> None:
+        """Linux may retain its panel while the bootstrap switches to headless mode."""
+        bootstrap_context.target_config["display"].update(width=240, height=320)
+        displayed = bootstrap_context.digest()
+        bootstrap_context.target_config["adapter"] = {}
+        assert bootstrap_context.digest() != displayed
 
     @pytest.mark.parametrize(
         "changed_input",
