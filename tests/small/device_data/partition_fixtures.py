@@ -4,8 +4,12 @@
 from __future__ import annotations
 
 import struct
+from typing import TYPE_CHECKING
 
 from fplinux_cli.device_data import formats as device_data
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 VBM_COPY_OFFSETS = (0x20000, 0x40000)
 
@@ -15,6 +19,8 @@ class FakeNandPartitionReader:
 
     Unwritten bytes read as erased. This fake does not decode physical OOB markers.
     """
+
+    correction_bits = 0
 
     def __init__(
         self,
@@ -47,6 +53,11 @@ class FakeNandPartitionReader:
                     first - fragment_offset : last - fragment_offset
                 ]
         return bytes(output)
+
+    def raw_page_prefixes(self, size: int) -> Iterator[tuple[int, bytes]]:
+        """Expose uncorrected page prefixes from the sparse main-area fixture."""
+        for offset in range(0, self._block_count * 0x20000, 2048):
+            yield offset, self.main_bytes(offset, size)
 
     def partition_bytes(self, extent: tuple[int, int]) -> bytes:
         """Read the complete extent and require clean selected blocks."""

@@ -324,6 +324,34 @@ class PartitionDiscoveryTests:
         with pytest.raises(ValueError, match=f"expected two VBM.*found {len(offsets)}"):
             discover_partitions(reader, required_partitions())
 
+    def test_vbm_copy_is_discovered_after_erased_pages_inside_its_block(self) -> None:
+        """A copy may occupy page48 while the start of that block is erased."""
+        encoded = vbm_table(((0x10000018, 0x100, 5, 7),))
+        reader = FakeNandPartitionReader({0x3C0000: encoded, 0x3F8000: encoded}, block_count=32)
+
+        table = discover_partitions(
+            reader, {0x10000018: device_data.RequiredPartition("CM4", 256)}
+        )
+
+        assert table.kind == "VBM"
+        assert table.extents == {0x10000018: (0x000A0000, 0x00060000)}
+
+    def test_unsupported_vbm_version_cannot_hide_behind_valid_parti(self) -> None:
+        """Finding exact magic still requires the VBM version to be admitted."""
+        encoded = bytearray(vbm_table(((0x10000018, 0x100, 5, 7),)))
+        encoded[8:12] = b"\x03\x01\x00\x00"
+        reader = FakeNandPartitionReader(
+            {
+                0x20000: bytes(encoded),
+                0x58000: bytes(encoded),
+                0x104: parti_table(parti_entries()),
+            },
+            block_count=32,
+        )
+
+        with pytest.raises(ValueError, match="unsupported or damaged VBM header"):
+            discover_partitions(reader, required_partitions())
+
     def test_vbm_disagreement_is_not_hidden_by_valid_parti(self) -> None:
         """A damaged redundant table cannot fall back to a compiled table."""
         reader = FakeNandPartitionReader(

@@ -11,8 +11,10 @@ from typing import TYPE_CHECKING, Protocol
 from .nand_geometry import BLOCK_MAIN_BYTES, PAGE_MAIN_BYTES, PAGES_PER_BLOCK, PHYSICAL_PAGE_COUNT
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Iterator, Mapping
 
+VBM_HEADER_PREFIX = b"VBM_BOOT\x02\x01\x00\x00"
+VBM_MAGIC = VBM_HEADER_PREFIX[:8]
 _VBM_MAX_PARTITIONS = 100
 _VBM_HEADER_BYTES = 0x18
 _VBM_ENTRY = struct.Struct("<IHHH")
@@ -36,6 +38,15 @@ class NandPartitionReader(Protocol):
     @property
     def block_count(self) -> int:
         """Return the physical NAND capacity in erase blocks."""
+        ...
+
+    @property
+    def correction_bits(self) -> int:
+        """Return the declared decoder's maximum correctable bits per codeword."""
+        ...
+
+    def raw_page_prefixes(self, size: int) -> Iterator[tuple[int, bytes]]:
+        """Yield main offsets and uncorrected prefixes for candidate discovery only."""
         ...
 
     def main_bytes(self, offset: int, size: int) -> bytes:
@@ -82,6 +93,7 @@ class PhysicalNand:
     main_decoder: Callable[[bytes, int, int, int], bytes] | None = field(
         default=None, repr=False, compare=False
     )
+    correction_bits: int = 0
 
     @property
     def block_count(self) -> int:
@@ -95,6 +107,7 @@ class PhysicalNand:
         *,
         page_bytes: int,
         main_decoder: Callable[[bytes, int, int, int], bytes] | None = None,
+        correction_bits: int = 0,
     ) -> PhysicalNand:
         """Require a complete physical backup before interpreting target partitions."""
         expected_size = PHYSICAL_PAGE_COUNT * page_bytes
@@ -104,7 +117,13 @@ class PhysicalNand:
                 f"({PAGE_MAIN_BYTES} main + {page_bytes - PAGE_MAIN_BYTES} OOB bytes per page), "
                 f"got {len(raw)} bytes"
             )
-        return cls(raw, page_bytes, main_decoder)
+        return cls(raw, page_bytes, main_decoder, correction_bits)
+
+    def raw_page_prefixes(self, size: int) -> Iterator[tuple[int, bytes]]:
+        """Inspect prefixes without decoding unrelated sectors or admitting blocks."""
+        for page in range(len(self.raw) // self.page_bytes):
+            position = page * self.page_bytes
+            yield page * PAGE_MAIN_BYTES, self.raw[position : position + size]
 
     def main_bytes(self, offset: int, size: int) -> bytes:
         """Read main-area bytes without including the intervening physical OOB."""
@@ -151,7 +170,7 @@ def _read_vbm_copy(
     header = nand.partition_bytes((offset, _VBM_HEADER_BYTES))
     if len(header) != _VBM_HEADER_BYTES:
         raise ValueError(f"truncated VBM header at {offset:#x}")
-    if header[:8] != b"VBM_BOOT" or struct.unpack_from("<I", header, 8)[0] != 0x102:
+    if not header.startswith(VBM_HEADER_PREFIX):
         raise ValueError(f"unsupported or damaged VBM header at {offset:#x}")
 
     count = struct.unpack_from("<H", header, 0x16)[0]

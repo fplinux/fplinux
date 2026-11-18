@@ -99,7 +99,9 @@ def phone_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PhoneData:
     monkeypatch.setattr(
         PhysicalNand,
         "from_dump",
-        lambda raw, *, page_bytes, main_decoder: PhysicalNand(raw, page_bytes, main_decoder),
+        lambda raw, *, page_bytes, main_decoder, correction_bits: PhysicalNand(
+            raw, page_bytes, main_decoder, correction_bits
+        ),
     )
 
     def parse(_nand: PhysicalNand, *, audio: AudioProfileContext) -> DeviceDataPreparation:

@@ -173,15 +173,18 @@ def _nand_main_decoder(
     path: Path,
     *,
     host_tools: Path,
-) -> Callable[[bytes, int, int, int], bytes]:
+) -> tuple[Callable[[bytes, int, int, int], bytes], int]:
     """Bind the selected platform ECC module to the prepared native tool."""
     provider = _load_source_module(path, "fplinux_selected_nand_ecc", "NAND ECC module")
     if not callable(getattr(provider, "decode_main", None)):
         fail("NAND ECC module does not expose decode_main")
+    correction_bits = getattr(provider, "CORRECTION_BITS", None)
+    if not isinstance(correction_bits, int) or correction_bits <= 0:
+        fail("NAND ECC module does not expose a positive CORRECTION_BITS bound")
     decode: Callable[[bytes, int, int, int], bytes] = functools.partial(
         provider.decode_main, host_tools=host_tools
     )
-    return decode
+    return decode, correction_bits
 
 
 def read_physical_nand(spec: DeviceDataSpec, backup: Path, tools: DeviceDataTools) -> PhysicalNand:
@@ -189,12 +192,17 @@ def read_physical_nand(spec: DeviceDataSpec, backup: Path, tools: DeviceDataTool
     raw = _read_dump(backup)
     page_bytes = dump_page_bytes(spec.target, spec.nand, read_backup_geometry(backup, raw))
     main_decoder = None
+    correction_bits = 0
     if spec.nand is not None and "ecc_format" in spec.nand:
         if spec.ecc_module is None or tools.host_tools is None:
             fail("device-data extraction requires the declared NAND ECC module and host tool")
-        main_decoder = _nand_main_decoder(spec.ecc_module, host_tools=tools.host_tools)
+        main_decoder, correction_bits = _nand_main_decoder(
+            spec.ecc_module, host_tools=tools.host_tools
+        )
     try:
-        return PhysicalNand.from_dump(raw, page_bytes=page_bytes, main_decoder=main_decoder)
+        return PhysicalNand.from_dump(
+            raw, page_bytes=page_bytes, main_decoder=main_decoder, correction_bits=correction_bits
+        )
     except ValueError as error:
         fail(f"device-data extraction failed: {error}")
 

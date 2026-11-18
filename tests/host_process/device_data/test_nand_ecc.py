@@ -8,13 +8,15 @@ not BCH correctness or hardware behavior.
 from __future__ import annotations
 
 import importlib.util
+import struct
 import sys
 from functools import partial
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import pytest
-from fplinux_cli.device_data.formats import PhysicalNand
+from fplinux_cli.device_data.formats import PhysicalNand, RequiredPartition
+from fplinux_cli.device_data.partitions import discover_partitions
 
 from tests import ROOT
 from tests.fixtures.executables import install_python_script
@@ -79,7 +81,43 @@ def _raw_page(first: bytes, second: bytes, first_parity: bytes, second_parity: b
 
 
 def _nand(raw: bytes, module: ModuleType, tools: Path) -> PhysicalNand:
-    return PhysicalNand(raw, 2176, partial(module.decode_main, host_tools=tools))
+    return PhysicalNand(
+        raw, 2176, partial(module.decode_main, host_tools=tools), module.CORRECTION_BITS
+    )
+
+
+def test_vbm_discovery_corrects_page_headers_without_decoding_unrelated_sectors(
+    ecc_module: ModuleType, correction_process: Path
+) -> None:
+    """A 12-bit damaged prefix remains discoverable without probing every NAND sector."""
+    table = (
+        b"VBM_BOOT\x02\x01\x00\x00"
+        + bytes(10)
+        + b"\x01\x00"
+        + struct.pack("<IHHH", 0x10000018, 0x100, 3, 4)
+    )
+    corrected = table + b"." * (1024 - len(table))
+    damaged = bytearray(corrected)
+    damaged[0] ^= 0xFF
+    damaged[1] ^= 0x0F
+    parity = b"1" * 21
+    raw_page = _raw_page(bytes(damaged), b"!" * 1024, parity, bytes(21))
+    raw = bytearray(b"\xff" * (6 * 64 * 2176))
+    for page in (48, 112):
+        raw[page * 2176 : (page + 1) * 2176] = raw_page
+    _child_response(
+        correction_process,
+        records=bytes(damaged) + parity,
+        corrected=corrected,
+    )
+
+    table_result = discover_partitions(
+        _nand(bytes(raw), ecc_module, correction_process),
+        {0x10000018: RequiredPartition("CM4", 0x100)},
+    )
+
+    assert table_result.kind == "VBM"
+    assert table_result.extents == {0x10000018: (0x60000, 0x40000)}
 
 
 def test_sector_crossing_uses_only_main_and_parity_and_returns_the_exact_slice(

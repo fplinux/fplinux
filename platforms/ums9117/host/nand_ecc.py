@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
+CORRECTION_BITS = 12
 _SECTOR_BYTES = 1024
 _PAGE_MAIN_BYTES = 2048
 _RAW_PAGE_BYTES = 2176

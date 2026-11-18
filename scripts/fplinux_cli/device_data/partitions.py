@@ -8,7 +8,7 @@ import struct
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .formats import redundant_vbm_partitions
+from .formats import VBM_HEADER_PREFIX, VBM_MAGIC, redundant_vbm_partitions
 from .nand_geometry import BLOCK_MAIN_BYTES
 
 if TYPE_CHECKING:
@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 
     from .formats import NandPartitionReader, RequiredPartition
 
-_VBM_MAGIC = b"VBM_BOOT"
 _PARTI_MAX_PARTITIONS = 100
 _PARTI_ENTRY = struct.Struct("<4I")
 _PARTI_REMAINDER = 0xFFFFFFFF
@@ -39,14 +38,19 @@ def discover_partitions(
 ) -> PartitionTable:
     """Use two agreeing VBM copies, or one consistent compiled PartI table.
 
-    VBM copies must start at physical block boundaries. Without those copies,
+    VBM copies must start at physical page boundaries. Without those copies,
     a compiled PartI table may occur at any word-aligned main-area position.
     Tables describe direct physical extents; no replacement mapping is inferred.
     """
     copies = []
-    for block in range(nand.block_count):
-        offset = block * BLOCK_MAIN_BYTES
-        if nand.main_bytes(offset, len(_VBM_MAGIC)) == _VBM_MAGIC:
+    expected = int.from_bytes(VBM_HEADER_PREFIX, "little")
+    for offset, raw_prefix in nand.raw_page_prefixes(len(VBM_HEADER_PREFIX)):
+        differences = (int.from_bytes(raw_prefix, "little") ^ expected).bit_count()
+        # Correctable headers pass this necessary filter. Exact magic also
+        # admits unsupported versions for the normal structural rejection.
+        if not raw_prefix.startswith(VBM_MAGIC) and differences > nand.correction_bits:
+            continue
+        if nand.main_bytes(offset, len(VBM_MAGIC)) == VBM_MAGIC:
             copies.append(offset)
     if copies:
         if len(copies) != 2:
