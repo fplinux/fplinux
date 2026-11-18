@@ -423,6 +423,20 @@ def test_konrow_compiled_peripherals_enable_card_headphones_and_battery(tmp_path
     assert light["fplinux,current-code"] == bytes.fromhex("0000000d")
 
 
+def test_uniwa_compiled_keymap_exposes_the_additional_volume_column(tmp_path: Path) -> None:
+    """The compiled map assigns volume roles and preserves an unnamed key."""
+    dtb = _compile_target_dtb(tmp_path, "uniwa-v1000-4g")
+    path = "/soc/keypad@40250000"
+    keymap = exact_path_properties(dtb, (path,))[path]["linux,keymap"]
+    column = {}
+    for offset in range(0, len(keymap), 4):
+        entry = int.from_bytes(keymap[offset : offset + 4], "big")
+        position = entry >> 16
+        if position & 0xFF == 4:
+            column[position] = entry & 0xFFFF
+    assert column == {0x0004: 114, 0x0104: 240, 0x0204: 115, 0x0304: 115, 0x0404: 114}
+
+
 def test_nokia110_compiled_microsd_tree_preserves_the_boot_display_reservation(
     nokia110_microsd_dtb: Path,
 ) -> None:
