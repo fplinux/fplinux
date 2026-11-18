@@ -11,5 +11,7 @@ config MACH_ITEL_NEO_R60_PLUS
 	  Includes the 240x320 SPI display and physical matrix keypad.
 	  Linux is loaded into RAM over USB and provides USB network access.
 	  The raw internal NAND device is available for read-only access.
+	  Audio, Bluetooth, FM, battery telemetry, keypad backlight and a
+	  microSD card inserted before startup are configured for this board.
 
 endif

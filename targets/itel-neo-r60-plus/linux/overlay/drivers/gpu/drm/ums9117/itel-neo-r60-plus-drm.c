@@ -18,16 +18,17 @@ static const struct ums9117_drm_profile itel_neo_r60_plus_drm_profile = {
 	.wake_finish_count = ARRAY_SIZE(fplinux_panel_wake_finish),
 	.width = FPLINUX_PANEL_WIDTH,
 	.height = FPLINUX_PANEL_HEIGHT,
-	.reset_phase_ms = 10,
-	.wake_reset_phase_ms = 10,
+	.reset_phase_ms = 16,
+	.wake_reset_phase_ms = 16,
 	.display_off_ms = 10,
 	.sleep_in_ms = 120,
 	.spi_frame_clock_divider = 1,
 	.spi_init_clock_divider = 1,
 	.spi_mode = UMS9117_DRM_SPI_DUAL_DATA,
 	.wled_backlight_name = "itel-neo-r60-plus-backlight",
-	.lcdc_ctrl_set = BIT(2),
-	.lcdc_ctrl_clear = BIT(1) | (7U << 5),
+	.wled_duty = 0xffff,
+	.lcdc_ctrl_set = BIT(2) | (7U << 5),
+	.lcdc_ctrl_clear = BIT(1) | BIT(4),
 };
 
 static const struct of_device_id itel_neo_r60_plus_drm_of_match[] = {
@@ -49,5 +50,5 @@ static struct platform_driver itel_neo_r60_plus_drm_driver = {
 };
 module_platform_driver(itel_neo_r60_plus_drm_driver);
 
-MODULE_DESCRIPTION("itel Neo R60+ ST7789H2 panel profile");
+MODULE_DESCRIPTION("itel Neo R60+ SPI panel profile");
 MODULE_LICENSE("GPL");

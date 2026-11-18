@@ -62,9 +62,27 @@ dtb_destination = "itel_neo_r60_plus.dtb"
 record_prefix = "ITEL_NEO_R60_PLUS"
 
 [adapter]
-spi_mode = 2
-backlight_channels = "rgbw"
-backlight_level = 45
 exec_distance = 0
 session_name = "itel-neo-r60-plus-linux"
 boot_instructions = "Power the phone off, hold the left soft key and call key together, then connect USB while keeping both keys pressed."
+
+[device_data]
+parser = "itel_device_data.py"
+
+[bluetooth]
+firmware = [
+  { source = "itel-neo-r60-plus-cm4.bin", destination = "ums9117/itel-neo-r60-plus-cm4.bin" },
+  { source = "itel-neo-r60-plus-bt-config.bin", destination = "ums9117/itel-neo-r60-plus-bt-config.bin", size = 8 },
+  { source = "itel-neo-r60-plus-bt-sprd.bin", destination = "ums9117/itel-neo-r60-plus-bt-sprd.bin", size = 176 },
+  { source = "itel-neo-r60-plus-bt-rf-config.bin", destination = "ums9117/itel-neo-r60-plus-bt-rf-config.bin", size = 252 },
+]
+
+[audio_profile]
+firmware = [
+  { source = "itel-neo-r60-plus-audio-profile.bin", destination = "fplinux/itel-neo-r60-plus-audio-profile.bin", size = 788 },
+]
+
+[fm_radio]
+firmware = [
+  { source = "itel-neo-r60-plus-fm-config.bin", destination = "fplinux/itel-neo-r60-plus-fm-config.bin", size = 128 },
+]

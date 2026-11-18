@@ -7,7 +7,9 @@
 #include <dt-bindings/leds/common.h>
 #include "ums9117.dtsi"
 #include "ums9117-sc2720.dtsi"
+#include "ums9117-bluetooth.dtsi"
 #include "fplinux-itel-neo-r60-plus-identity.dtsi"
+#include "fplinux-itel-neo-r60-plus-audio-policy.dtsi"
 #include "ums9117-nand-readonly.dtsi"
 #include "fplinux-itel-neo-r60-plus-panel-addresses.h"
 
@@ -62,6 +64,43 @@
 
 &codec_dma {
 	size = <0x00400000>;
+};
+
+&audio {
+	firmware-name = "fplinux/itel-neo-r60-plus-audio-profile.bin";
+	hp-det-gpios = <&sc2720_eic 12 GPIO_ACTIVE_HIGH>;
+	pinctrl-0 = <&audio_mux_pins &audio_pad_pins>;
+	pinctrl-names = "audio";
+	fplinux,card-longname = "itel Neo R60+ audio";
+
+	status = "okay";
+};
+
+&audio_mux {
+	audio_mux_pins: audio-pins {
+		pinctrl-single,pins = <
+			0x00 0 0x08 0 0x0c 0
+			0x14 0 0x18 0 0x1c 0
+		>;
+	};
+};
+
+&audio_pads {
+	audio_pad_pins: audio-pins {
+		pinctrl-single,pins = <
+			0x00 0x0008e001 0x08 0x0008e001
+			0x0c 0x0008e001 0x14 0x0008e000
+			0x18 0x0008e000 0x1c 0x0008e001
+		>;
+	};
+};
+
+&bluetooth {
+	firmware-name = "ums9117/itel-neo-r60-plus-cm4.bin",
+			"ums9117/itel-neo-r60-plus-bt-config.bin",
+			"ums9117/itel-neo-r60-plus-bt-sprd.bin",
+			"ums9117/itel-neo-r60-plus-bt-rf-config.bin";
+	fplinux,fm-config-name = "fplinux/itel-neo-r60-plus-fm-config.bin";
 };
 
 &keypad_mux {
@@ -119,13 +158,40 @@
 	status = "okay";
 };
 
-/* The fuel gauge and keypad light need board calibration values. */
 &sc2720_fgu {
-	status = "disabled";
+	fplinux,current-calibration = <10 20>;
 };
 
 &sc2720_kpled {
-	status = "disabled";
+	fplinux,current-code = <10>;
+};
+
+&sc2720_vibrator {
+	sprd,voltage-code = <1>;
+
+	status = "okay";
+};
+
+&sdio0_mmc {
+	non-removable;
+
+	status = "okay";
+};
+
+&thm1 {
+	status = "okay";
+};
+
+&ap_dma {
+	status = "okay";
+};
+
+&rota {
+	status = "okay";
+};
+
+&jpeg {
+	status = "okay";
 };
 
 &usb {

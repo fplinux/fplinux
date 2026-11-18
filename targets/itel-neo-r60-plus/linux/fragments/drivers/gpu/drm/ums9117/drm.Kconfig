@@ -6,7 +6,7 @@ config DRM_ITEL_NEO_R60_PLUS
 	select DRM_UMS9117_SPI
 	select DRM_UMS9117_WAKE_REINIT
 	help
-	  Drive the ST7789H2 panel through SPI1 and the LCDC.
+	  Drive the itel Neo R60+ panel through SPI1 and the LCDC.
 	  Support atomic RGB565 and NV16 modesetting.
 	  Blanking turns off the display light.
 	  Waking resets the panel and replays its initialization commands.

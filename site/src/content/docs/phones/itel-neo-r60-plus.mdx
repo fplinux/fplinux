@@ -19,12 +19,20 @@ Use the RAM profile and follow [Run FPLinux](/fplinux/start/run/) for the shared
 
 <PhoneBoot />
 
-The configured panel is ST7789H2 at 240×320 over SPI. The keypad has a 5×4 layout. Physical display output, keypad input, brightness, and graphical applications have not been tested on this phone.
+The 240×320 SPI display shows the graphical interface. The keypad has a 5×4 layout; its full keymap, brightness adjustment and display sleep/wake have not been tested. The USB loader leaves the display alone; screen output starts in Linux.
 
 ## Storage
 
-The read-only raw NAND backup has been verified. FPLinux does not support mounting internal filesystems, writing internal storage, or restoring NAND. There is no microSD system profile; removable-card detection and data-card behavior are unverified.
+The first-run flow has been verified on Windows. The launcher read a fresh raw NAND backup, prepared the phone data and reached the graphical interface on the next launch. The backup supplies this phone's audio profile, Bluetooth firmware and FM settings. See [Phone data](/fplinux/guides/device-data/) for saved backups and preparation.
+
+A microSD data card inserted before startup mounted and appeared in Files. Card writes are untested. Keep the card installed while the phone is powered and [unmount it before shutdown](/fplinux/use/power/#unmount-data-cards). Hot-swap and a microSD system-root profile are unsupported.
+
+## Audio and peripherals
+
+The handset played an alarm, vibrated and lit its keypad during testing. Headphone playback, jack detection, Bluetooth and FM are configured and await testing on this handset. The phone's saved settings supply its playback gains and radio data.
+
+Microphone capture and the camera are not configured. Hardware JPEG, image rotation and internal temperature reporting are configured but have not been tested.
 
 ## Clock and session limits
 
-Setting the RTC has been observed over the authenticated USB shell. Time retention after power loss and alarm wake have not been tested. Audio, Bluetooth, camera, battery telemetry, removable-card hot-swap, and vibration are not enabled for this phone.
+Setting the RTC has been observed over the authenticated USB shell. Time retention after power loss, alarm wake and system suspend have not been tested.

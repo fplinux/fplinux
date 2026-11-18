@@ -9,19 +9,19 @@
   },
   "local-console": {
     "status": "untested",
-    "note": "Physical display and keypad operation have not been tested on this phone."
+    "note": "The graphical interface is visible on the phone. The local terminal and full keypad map have not been tested."
   },
   "lcd-backlight": {
-    "stock": "unknown",
-    "hardware": "unknown",
-    "status": "untested",
-    "note": "The configured panel is ST7789H2 at 240×320. Physical display and backlight behavior have not been tested on this phone."
+    "stock": "available",
+    "hardware": "present",
+    "status": "partial",
+    "note": "The 240×320 display shows the graphical interface. Brightness changes, blanking and wake have not been tested."
   },
   "keypad-backlight": {
-    "stock": "unknown",
-    "hardware": "unknown",
-    "status": "unsupported",
-    "note": "Keypad backlight control is not provided in this image."
+    "stock": "available",
+    "hardware": "present",
+    "status": "partial",
+    "note": "The keypad lit during use. On and off transitions were not checked separately."
   },
   "usb-networking": {
     "hardware": "present",
@@ -49,19 +49,19 @@
     "note": "CPU frequency selection has not been tested on this phone."
   },
   "ap-dmaengine": {
-    "hardware": "unknown",
+    "hardware": "present",
     "status": "untested",
     "note": "DMA behavior has not been tested on this phone."
   },
   "image-rotation-engine": {
-    "hardware": "unknown",
-    "status": "unsupported",
-    "note": "Hardware image rotation is not provided in this image."
+    "hardware": "present",
+    "status": "untested",
+    "note": "The rotation engine is configured; hardware output has not been tested on this phone."
   },
   "jpeg-engine": {
-    "hardware": "unknown",
-    "status": "unsupported",
-    "note": "Hardware JPEG acceleration is not provided in this image."
+    "hardware": "present",
+    "status": "untested",
+    "note": "JPEG decode, encode and scaling are configured; hardware output has not been tested on this phone."
   },
   "native-image-output": {
     "hardware": "unknown",
@@ -74,7 +74,7 @@
   },
   "jpeg-codec-and-scaling": {
     "status": "untested",
-    "note": "The CPU JPEG tool has not been tested on this phone; hardware acceleration is not provided in this image."
+    "note": "CPU and hardware JPEG tools are available; their output has not been tested on this phone."
   },
   "native-image-presentation": {
     "status": "untested",
@@ -86,10 +86,10 @@
     "note": "FPLinux does not provide USB host mode on this phone."
   },
   "removable-storage": {
-    "stock": "unknown",
-    "hardware": "unknown",
-    "status": "unsupported",
-    "note": "Removable-card access is not provided in this image."
+    "stock": "available",
+    "hardware": "present",
+    "status": "partial",
+    "note": "A card inserted before startup mounted and its files appeared in Files. Card writes are untested."
   },
   "microsd-hot-swap": {
     "stock": "unknown",
@@ -111,16 +111,16 @@
     "note": "A read-only raw NAND backup is verified. Internal filesystems, writes and restore are unsupported."
   },
   "headphone-audio": {
-    "stock": "unknown",
-    "hardware": "unknown",
-    "status": "unsupported",
-    "note": "Audio output is not enabled for this phone."
+    "stock": "available",
+    "hardware": "present",
+    "status": "untested",
+    "note": "Stereo headphone playback uses this phone's prepared audio profile. Playback has not been tested."
   },
   "speaker-audio": {
-    "stock": "unknown",
-    "hardware": "unknown",
-    "status": "unsupported",
-    "note": "Audio output is not enabled for this phone."
+    "stock": "available",
+    "hardware": "present",
+    "status": "partial",
+    "note": "An alarm was audible during testing. Media playback and the volume range remain untested."
   },
   "phone-microphone": {
     "stock": "unknown",
@@ -129,10 +129,10 @@
     "note": "Audio input is not enabled for this phone."
   },
   "fm-radio": {
-    "stock": "unknown",
-    "hardware": "unknown",
-    "status": "unsupported",
-    "note": "FM radio is not enabled for this phone."
+    "stock": "available",
+    "hardware": "present",
+    "status": "untested",
+    "note": "The CM4 radio and this phone's FM settings are configured; tuning and playback have not been tested."
   },
   "modem-and-mobile-service": {
     "stock": "unknown",
@@ -141,10 +141,10 @@
     "note": "FPLinux does not provide cellular service."
   },
   "bluetooth": {
-    "stock": "unknown",
-    "hardware": "unknown",
-    "status": "unsupported",
-    "note": "Bluetooth is not enabled for this phone."
+    "stock": "available",
+    "hardware": "present",
+    "status": "untested",
+    "note": "The CM4 controller uses this phone's prepared firmware and radio settings. Controller startup and connections have not been tested."
   },
   "wi-fi": {
     "stock": "unknown",
@@ -165,14 +165,14 @@
     "note": "Charger status has not been tested on this phone."
   },
   "battery-telemetry": {
-    "hardware": "unknown",
-    "status": "unsupported",
-    "note": "Battery telemetry is not enabled for this phone."
+    "hardware": "present",
+    "status": "untested",
+    "note": "Voltage, current and a relative charge counter are configured. Measurements and the estimated battery bar have not been tested."
   },
   "soc-temperature": {
-    "hardware": "unknown",
-    "status": "unsupported",
-    "note": "SoC temperature reporting is not provided in this image."
+    "hardware": "present",
+    "status": "untested",
+    "note": "The internal SoC sensor is configured; temperature reporting has not been tested."
   },
   "auxiliary-adc": {
     "hardware": "unknown",
@@ -190,10 +190,10 @@
     "note": "Additional battery functions are not enabled for this phone."
   },
   "vibration": {
-    "stock": "unknown",
-    "hardware": "unknown",
-    "status": "unsupported",
-    "note": "Vibration is not enabled for this phone."
+    "stock": "available",
+    "hardware": "present",
+    "status": "verified",
+    "note": "The phone vibrated during an alarm test."
   },
   "indicator-leds": {
     "stock": "unknown",
@@ -238,40 +238,40 @@
     "note": "Wired-headset microphone input is not enabled for this phone."
   },
   "automatic-audio-routing": {
-    "stock": "unknown",
-    "status": "unsupported",
-    "note": "Automatic audio routing is not enabled for this phone."
+    "stock": "available",
+    "status": "untested",
+    "note": "Jack detection and automatic playback routing are configured; insertion and removal have not been tested."
   },
   "bluetooth-pairing": {
-    "stock": "unknown",
-    "status": "unsupported",
-    "note": "Bluetooth pairing is not enabled for this phone."
+    "stock": "available",
+    "status": "untested",
+    "note": "Pairing is configured through BlueZ and Settings; connections have not been tested."
   },
   "bluetooth-file-transfer": {
-    "stock": "unknown",
-    "status": "unsupported",
-    "note": "Bluetooth file transfer is not enabled for this phone."
+    "stock": "available",
+    "status": "untested",
+    "note": "Bluetooth file transfer is configured; sending and receiving have not been tested."
   },
   "bluetooth-pan-internet": {
-    "status": "unsupported",
-    "note": "Bluetooth networking is not enabled for this phone."
+    "status": "untested",
+    "note": "Bluetooth PAN networking is configured; connectivity has not been tested."
   },
   "bluetooth-a2dp-linux-pc": {
-    "status": "unsupported",
-    "note": "Bluetooth audio is not enabled for this phone."
+    "status": "untested",
+    "note": "The optional BlueALSA package provides Bluetooth audio; playback has not been tested."
   },
   "bluetooth-a2dp-headsets": {
     "stock": "unknown",
-    "status": "unsupported",
-    "note": "Bluetooth audio is not enabled for this phone."
+    "status": "untested",
+    "note": "The optional BlueALSA package provides Bluetooth audio; headset playback has not been tested."
   },
   "bluetooth-keyboard": {
-    "status": "unsupported",
-    "note": "Bluetooth input is not enabled for this phone."
+    "status": "untested",
+    "note": "Bluetooth input support is configured; a keyboard connection has not been tested."
   },
   "bluetooth-mouse": {
-    "status": "unsupported",
-    "note": "Bluetooth input is not enabled for this phone."
+    "status": "untested",
+    "note": "Bluetooth input support is configured; a mouse connection has not been tested."
   },
   "mobile-calls": {
     "stock": "unknown",
